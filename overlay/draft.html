@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<!--
+  NE Broadcast Suite champion/hero DRAFT board (LoL etc.).
+  Driven by full_state.draft:
+    { visible, title, game, teamStart:'a'|'b', ops:[{name,action:'ban'|'pick',by:'a'|'b'}], turn:{team,action} }
+  Team a = blue side (left), team b = red side (right).
+-->
+<head>
+  <meta charset="UTF-8">
+  <title>NE Broadcast Suite — Draft</title>
+  <link rel="stylesheet" href="scene.css" />
+  <style>
+    body { display:flex; align-items:center; justify-content:center; }
+    #draft-stage { opacity:0; transition:opacity .35s ease; width:1920px; display:flex; flex-direction:column; align-items:center; }
+    #draft-stage.show { opacity:1; }
+    .d-head { text-align:center; margin-top:54px; }
+    .d-title { font-family:'Rajdhani', var(--main-font); font-weight:700; font-size:3.4em; color:#fff; letter-spacing:.05em; }
+    .d-sub { font-family:'Rajdhani', var(--main-font); font-weight:600; font-size:1.3em; color:var(--accent); letter-spacing:.3em; margin-top:4px; }
+    .d-cols { display:flex; gap:90px; margin-top:48px; align-items:flex-start; }
+    .d-col { width:560px; }
+    .d-team { display:flex; align-items:center; gap:14px; font-family:'Rajdhani', var(--main-font); font-weight:700; font-size:2.2em; color:#fff; text-transform:uppercase; padding:10px 16px; border-radius:6px; }
+    .d-col.red .d-team { flex-direction:row-reverse; text-align:right; }
+    .d-bar { width:8px; height:42px; border-radius:3px; }
+    .d-bans { display:flex; gap:10px; margin:16px 0 22px; }
+    .d-col.red .d-bans { flex-direction:row-reverse; }
+    .d-ban { width:64px; height:64px; border-radius:6px; background:var(--scene-bg); border:1px solid rgba(255,255,255,.12);
+      display:flex; align-items:center; justify-content:center; font-family:var(--main-font); font-weight:700; font-size:.72em;
+      color:#cfd4dc; text-align:center; padding:4px; overflow:hidden; position:relative; }
+    .d-ban.filled { filter:grayscale(.4); }
+    .d-ban.filled::after { content:''; position:absolute; left:8px; right:8px; top:50%; height:3px; background:#ff5a5a; transform:rotate(-18deg); }
+    .d-picks { display:flex; flex-direction:column; gap:12px; }
+    .d-pick { height:78px; border-radius:8px; background:var(--scene-bg); border-left:6px solid #2a2f3a; display:flex; align-items:center;
+      padding:0 20px; font-family:'Rajdhani', var(--main-font); font-weight:700; font-size:1.9em; color:#fff; box-shadow:0 6px 20px rgba(0,0,0,.4); }
+    .d-col.red .d-pick { border-left:none; border-right:6px solid #2a2f3a; justify-content:flex-end; text-align:right; }
+    .d-pick .n { opacity:.4; font-size:.7em; margin-right:12px; color:#8b909a; }
+    .d-col.red .d-pick .n { margin-right:0; margin-left:12px; order:2; }
+    .d-pick.empty { color:#4a4f5a; }
+    .active { animation:dpulse 1.1s ease-in-out infinite; }
+    @keyframes dpulse { 0%,100% { box-shadow:0 0 0 0 rgba(255,255,255,0); } 50% { box-shadow:0 0 0 3px rgba(255,255,255,.7); } }
+  </style>
+</head>
+<body>
+  <div id="draft-stage">
+    <div class="d-head"><div class="d-title" id="d-title">DRAFT</div><div class="d-sub" id="d-sub"></div></div>
+    <div class="d-cols">
+      <div class="d-col blue" id="col-a"></div>
+      <div class="d-col red"  id="col-b"></div>
+    </div>
+  </div>
+
+  <script src="scene-base.js"></script>
+  <script>
+    const stage = document.getElementById('draft-stage');
+    let _sig = '';
+
+    function buildCol(side, data, d) {
+      const t = SceneBase.teamSide(data, side === 'a' ? 'blue' : 'orange');
+      const ops = (d.ops || []).filter(o => o.by === side);
+      const bans = ops.filter(o => o.action === 'ban').map(o => o.name);
+      const picks = ops.filter(o => o.action === 'pick').map(o => o.name);
+      // Is this side currently acting, and on which action?
+      const turn = d.turn && d.turn.team === side ? d.turn.action : '';
+
+      const col = document.createElement('div');
+      // header
+      const head = document.createElement('div'); head.className = 'd-team';
+      const bar = document.createElement('div'); bar.className = 'd-bar'; bar.style.background = t.color;
+      const nm = document.createElement('span'); nm.textContent = t.name;
+      head.appendChild(bar); head.appendChild(nm); col.appendChild(head);
+
+      // bans (5 slots)
+      const banRow = document.createElement('div'); banRow.className = 'd-bans';
+      for (let i = 0; i < 5; i++) {
+        const b = document.createElement('div'); b.className = 'd-ban' + (bans[i] ? ' filled' : '');
+        if (bans[i]) b.textContent = bans[i];
+        if (turn === 'ban' && i === bans.length) b.classList.add('active');
+        banRow.appendChild(b);
+      }
+      col.appendChild(banRow);
+
+      // picks (5 slots)
+      const pickWrap = document.createElement('div'); pickWrap.className = 'd-picks';
+      for (let i = 0; i < 5; i++) {
+        const p = document.createElement('div'); p.className = 'd-pick' + (picks[i] ? '' : ' empty');
+        p.style.borderColor = picks[i] ? t.color : '';
+        const num = document.createElement('span'); num.className = 'n'; num.textContent = (i + 1);
+        const nameEl = document.createElement('span'); nameEl.textContent = picks[i] || '—';
+        p.appendChild(num); p.appendChild(nameEl);
+        if (turn === 'pick' && i === picks.length) p.classList.add('active');
+        pickWrap.appendChild(p);
+      }
+      col.appendChild(pickWrap);
+      return col;
+    }
+
+    function render(data) {
+      const d = data.draft || {};
+      stage.classList.toggle('show', !!d.visible);
+      if (!d.visible) return;
+      const sig = JSON.stringify({ ops: d.ops, turn: d.turn, t: d.title, c: [data.teams?.blue?.color, data.teams?.orange?.color] });
+      if (sig === _sig) return;
+      _sig = sig;
+
+      document.getElementById('d-title').textContent = (d.title || 'CHAMPION DRAFT').toUpperCase();
+      const blue = SceneBase.teamSide(data, 'blue'), orange = SceneBase.teamSide(data, 'orange');
+      document.getElementById('d-sub').textContent = `${blue.name}  ·  ${orange.name}`;
+      const a = document.getElementById('col-a'), b = document.getElementById('col-b');
+      a.replaceWith(Object.assign(buildCol('a', data, d), { id: 'col-a', className: 'd-col blue' }));
+      b.replaceWith(Object.assign(buildCol('b', data, d), { id: 'col-b', className: 'd-col red' }));
+    }
+    SceneBase.connect(render);
+
+    if (location.protocol === 'file:') {
+      render({ teams: { blue: { name: 'FROST', color: '#3b82f6' }, orange: { name: 'EMBER', color: '#f97316' } },
+        draft: { visible: true, title: 'Grand Final — Draft', teamStart: 'a',
+          turn: { team: 'b', action: 'pick' },
+          ops: [
+            { name: 'Aatrox', action: 'ban', by: 'a' }, { name: 'Ahri', action: 'ban', by: 'b' },
+            { name: 'Lee Sin', action: 'pick', by: 'a' }, { name: 'Jinx', action: 'pick', by: 'b' }
+          ] } });
+    }
+  </script>
+</body>
+</html>

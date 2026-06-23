@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=1920">
+  <title>NE Broadcast Suite — Countdown / Starting Soon</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/animate.css/4.1.1/animate.min.css" />
+  <link rel="stylesheet" href="scene.css" />
+  <style>
+    /* Ported from EsportsDashBoard countdown.html — now driven by full_state.breakScreen
+       (endsAt epoch target) instead of a socket.io push. */
+    body {
+      display: flex; flex-direction: column;
+      justify-content: center; align-items: center;
+      text-transform: none;
+    }
+    #stage { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 20px; }
+    #break-title {
+      font-family: 'Rajdhani', var(--main-font); font-weight: 700;
+      font-size: 3.4rem; letter-spacing: 0.06em; text-transform: uppercase;
+      color: #fff; text-shadow: 0 2px 18px rgba(0,0,0,.6);
+    }
+    #break-msg { font-family: 'Rajdhani', var(--main-font); font-weight: 600; font-size: 1.6rem; color: #cfd4dc; }
+    #timer {
+      font-family: 'Rajdhani', var(--main-font); font-weight: 700; color: #fff;
+      font-size: 9rem; display: flex; gap: 0.2ch; align-items: center; justify-content: center;
+      transition: color 0.3s ease, opacity 1s ease;
+    }
+    #timer.warning-state  { color: #ff9800; }
+    #timer.critical-state { color: var(--accent-2); }
+    #timer.movie-style { font-size: 16rem; text-shadow: 0 0 24px rgba(255,255,255,0.5); }
+    #timer.fade-out { opacity: 0; }
+    .digit-container { position: relative; width: 1ch; height: 1em; overflow: hidden; display: inline-flex; align-items: center; justify-content: center; }
+    .digit { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; line-height: 1; }
+    .movie-digit { display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; line-height: 1; }
+    .final-message {
+      font-size: 5rem; font-weight: 700; text-align: center; color: var(--accent);
+      animation: fadeIn 1s ease-in; line-height: 1; text-transform: uppercase;
+    }
+    @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+  </style>
+</head>
+<body>
+  <div id="stage" class="scene-fade">
+    <div id="break-title"></div>
+    <div id="timer" class="hidden"></div>
+    <div id="break-msg"></div>
+  </div>
+
+  <script src="scene-base.js"></script>
+  <script>
+    const MOVIE_THRESHOLD = 5;      // movie-style big single digit at/below this many seconds
+    const WARNING_AT = 60, CRITICAL_AT = 10;
+    const FADEOUT_DURATION = 1000;
+
+    const timerEl = document.getElementById('timer');
+    const titleEl = document.getElementById('break-title');
+    const msgEl   = document.getElementById('break-msg');
+    const stageEl = document.getElementById('stage');
+
+    let previousSeconds = null;
+    let fadeOutTimer = null;
+    let finalMessage = "WE'RE LIVE!";
+
+    function formatTimeToArray(seconds) {
+      const m = String(Math.floor(seconds / 60)).padStart(2, '0');
+      const s = String(seconds % 60).padStart(2, '0');
+      return (m + ':' + s).split('');
+    }
+    function resetTimerClasses() {
+      timerEl.classList.remove('warning-state', 'critical-state', 'movie-style',
+        'animate__animated', 'animate__zoomIn', 'animate__fadeOut');
+    }
+    function createInitialTimer(arr) {
+      timerEl.innerHTML = '';
+      arr.forEach((ch) => {
+        const c = document.createElement('div'); c.className = 'digit-container';
+        const d = document.createElement('div'); d.className = 'digit'; d.textContent = ch;
+        c.appendChild(d); timerEl.appendChild(c);
+      });
+    }
+    function showMovieCountdown(seconds) {
+      if (previousSeconds === seconds) return;
+      timerEl.innerHTML = ''; resetTimerClasses();
+      timerEl.classList.add('movie-style'); timerEl.offsetHeight; // reflow
+      timerEl.classList.add('animate__animated', 'animate__zoomIn', 'animate__fadeOut', 'animate__faster');
+      timerEl.innerHTML = `<div class="movie-digit">${seconds}</div>`;
+      previousSeconds = seconds;
+      setTimeout(() => timerEl.classList.remove('animate__animated', 'animate__zoomIn', 'animate__fadeOut'), 600);
+    }
+    function animateDigitChanges(arr) {
+      arr.forEach((ch, i) => {
+        const c = timerEl.children[i]; if (!c) return;
+        const cur = c.querySelector('.digit');
+        if (!cur || cur.textContent === ch) return;
+        if (c.dataset.animating === 'true') return;
+        c.querySelectorAll('.digit').forEach((d) => { if (d !== cur) c.removeChild(d); });
+        c.dataset.animating = 'true';
+        const nd = document.createElement('div');
+        nd.className = 'digit animate__animated animate__fadeInUp animate__faster';
+        nd.textContent = ch;
+        cur.classList.add('animate__animated', 'animate__fadeOutDown', 'animate__faster');
+        c.appendChild(nd);
+        setTimeout(() => { if (c.contains(cur)) c.removeChild(cur); c.dataset.animating = 'false'; }, 500);
+      });
+    }
+    function applyColorState(seconds) {
+      timerEl.classList.toggle('critical-state', seconds <= CRITICAL_AT);
+      timerEl.classList.toggle('warning-state', seconds > CRITICAL_AT && seconds <= WARNING_AT);
+    }
+    function showFinalMessage() {
+      if (fadeOutTimer) { clearTimeout(fadeOutTimer); fadeOutTimer = null; }
+      resetTimerClasses();
+      timerEl.classList.remove('hidden', 'fade-out');
+      previousSeconds = null;
+      timerEl.innerHTML = `<div class="final-message">${finalMessage}</div>`;
+    }
+    function updateTimer(seconds) {
+      if (timerEl.classList.contains('hidden')) timerEl.classList.remove('hidden');
+      if (seconds <= 0) { showFinalMessage(); return; }
+      resetTimerClasses();
+      if (seconds <= MOVIE_THRESHOLD) { showMovieCountdown(seconds); return; }
+      applyColorState(seconds);
+      const arr = formatTimeToArray(seconds);
+      const recreate = timerEl.children.length !== arr.length ||
+        timerEl.querySelector('.final-message') || timerEl.querySelector('.movie-digit');
+      if (recreate) { createInitialTimer(arr); previousSeconds = seconds; return; }
+      animateDigitChanges(arr);
+    }
+
+    // ── State ─────────────────────────────────────────────────────────────
+    let endsAt = null;        // epoch ms target (null = no live countdown)
+    let hasTimer = false;
+    let frozen = null;        // static seconds (paused producer timer); overrides endsAt
+
+    function render(b) {
+      b = b || {};
+      stageEl.classList.toggle('show', !!b.visible);
+      titleEl.textContent = (b.title || 'STARTING SOON');
+      titleEl.classList.toggle('hidden', !b.title && !b.visible);
+      msgEl.textContent = b.message || '';
+      finalMessage = b.finalMessage || "WE'RE LIVE!";
+      frozen = (b.frozenSeconds != null) ? Math.max(0, Math.round(b.frozenSeconds)) : null;
+      endsAt = b.endsAt || null;
+      hasTimer = frozen != null || !!endsAt;
+      if (frozen != null) updateTimer(frozen);                       // show the paused value immediately
+      else if (!hasTimer) { timerEl.classList.add('hidden'); timerEl.innerHTML = ''; }
+    }
+
+    // Local 1s tick — derive remaining seconds from endsAt so all browser sources stay in sync.
+    setInterval(() => {
+      if (frozen != null) { updateTimer(frozen); return; }           // paused: hold the value
+      if (!hasTimer) return;
+      const remaining = Math.max(0, Math.round((endsAt - Date.now()) / 1000));
+      updateTimer(remaining);
+    }, 250);
+
+    SceneBase.connect((data) => render(data.breakScreen));
+
+    // DEMO when opened directly without a WS feed
+    if (location.protocol === 'file:') {
+      render({ visible: true, title: 'STARTING SOON', message: 'Grab a snack — we go live shortly', endsAt: Date.now() + 8000, finalMessage: "WE'RE LIVE!" });
+    }
+  </script>
+</body>
+</html>

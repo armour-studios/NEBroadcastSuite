@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1920">
+<title>NE Broadcast Suite — Rocket League</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<!-- SCOREBOARD (Top Center) ALWAYS ON TOP -->
+<div id="scoreboard" class="scoreboard">
+  <img class="scoreboard-bg" src="/assets/scoreboard.png" alt="">
+  
+  <!-- Event name -->
+  <div id="event-text" class="event-text">ROCKET LEAGUE TOURNAMENT</div>
+
+  <!-- Logos -->
+  <img id="logo-blue" class="team-logo logo-blue" src="/assets/rl.png" alt="">
+  <img id="logo-orange" class="team-logo logo-orange" src="/assets/rl.png" alt="">
+
+  <!-- Names -->
+  <div id="name-blue" class="team-name name-blue">BLUE TEAM</div>
+  <div id="name-orange" class="team-name name-orange">ORANGE TEAM</div>
+
+  <!-- Scores -->
+  <div id="score-blue" class="score score-blue">0</div>
+  <div id="score-orange" class="score score-orange">0</div>
+
+  <!-- Time & Series -->
+  <div id="timer" class="timer">5:00</div>
+  <div id="game-info" class="game-info">GAME 0 | BEST OF 5</div>
+  
+  <!-- Scoreboard specific info (Hidden by default) -->
+  <div class="sb-only-info">
+    <div id="game-info-1" class="game-info-sb">GAME 0</div>
+    <div id="game-info-2" class="game-info-sb">BEST OF 5</div>
+  </div>
+  
+  <!-- Series Dots -->
+  <div id="series-dots-blue" class="series-dots dots-blue"></div>
+  <div id="series-dots-orange" class="series-dots dots-orange"></div>
+</div>
+
+<!-- ═══════════════════════════════════════════ HUD VIEW ═══ -->
+<div id="view-hud" class="view active">
+
+  <!-- PLAYERS (Top Left & Top Right) -->
+  <div id="players-blue" class="players-container players-left"></div>
+  <div id="players-orange" class="players-container players-right"></div>
+
+  <!-- BOTTOM LEFT (Active Player Stats) -->
+  <div id="active-player-bot" class="active-player-bot hidden">
+    <img id="active-player-bg" class="active-player-bg" src="/assets/player-blue-bot.png" alt="">
+    <div id="bot-boost-bar" class="bot-boost-bar"></div>
+    
+    <div id="bot-player-name" class="bot-player-name">PLAYER NAME</div>
+    
+    <!-- Stats mapping over baked-in labels -->
+    <div class="bot-stats-container">
+      <div id="bot-stat-score" class="bot-stat">0</div>
+      <div id="bot-stat-goals" class="bot-stat">0</div>
+      <div id="bot-stat-shots" class="bot-stat">0</div>
+      <div id="bot-stat-assists" class="bot-stat">0</div>
+      <div id="bot-stat-saves" class="bot-stat">0</div>
+    </div>
+  </div>
+
+  <!-- BOTTOM RIGHT (Boost Circle) -->
+  <div id="boost-wrap" class="boost-wrap hidden">
+    <img class="boost-base" src="/assets/boost.png" alt="">
+    <div class="boost-canvas-wrap">
+      <canvas id="boost-canvas" width="229" height="229"></canvas>
+    </div>
+    <img class="boost-tags" src="/assets/boost-tags.png" alt="">
+    <div id="boost-value" class="boost-value">0</div>
+  </div>
+
+  <!-- PLAYER SPOTLIGHT (featured-player lower-third) -->
+  <div id="spotlight" class="spotlight hidden">
+    <div class="spotlight-head">
+      <span id="spotlight-name" class="spotlight-name">PLAYER</span>
+      <span id="spotlight-team" class="spotlight-team"></span>
+    </div>
+    <div class="spotlight-stats">
+      <div class="spotlight-stat"><span id="spot-goals" class="spot-val">0</span><span class="spot-lbl">GOALS</span></div>
+      <div class="spotlight-stat"><span id="spot-assists" class="spot-val">0</span><span class="spot-lbl">ASSISTS</span></div>
+      <div class="spotlight-stat"><span id="spot-saves" class="spot-val">0</span><span class="spot-lbl">SAVES</span></div>
+      <div class="spotlight-stat"><span id="spot-shots" class="spot-val">0</span><span class="spot-lbl">SHOTS</span></div>
+      <div class="spotlight-stat"><span id="spot-score" class="spot-val">0</span><span class="spot-lbl">SCORE</span></div>
+    </div>
+  </div>
+
+  <!-- TICKER (scrolling lower-third, bottom edge) -->
+  <div id="ticker" class="ticker hidden">
+    <div id="ticker-track" class="ticker-track"></div>
+  </div>
+
+  <!-- BANNER COMPONENT -->
+  <div id="sponsor-banner" class="sponsor-banner hidden">
+    <img class="sponsor-banner-bg" src="/assets/banner.png" alt="">
+    <div id="sponsor-banner-images" class="sponsor-banner-images"></div>
+  </div>
+
+</div><!-- /view-hud -->
+
+<!-- ══════════════════════════════════════════ GOAL VIEW ═══ -->
+<div id="view-goal" class="view">
+  <!-- Goal banner -->
+  <div id="goal-banner" class="goal-banner">
+    <img id="goal-banner-img" class="goal-banner-img" src="/assets/goal-blue.png" alt="">
+    <div class="goal-inner">
+      <div class="goal-speed-wrap">
+        <span id="goal-speed" class="goal-speed">0</span>
+        <span id="goal-speed-label" class="goal-speed-label">KMH</span>
+      </div>
+      <div class="goal-scorer-wrap">
+        <span id="goal-scorer" class="goal-scorer">PLAYER</span>
+        <span class="goal-label">GOAL</span>
+      </div>
+      <div class="goal-assist-wrap">
+        <span id="goal-assister" class="goal-assister"></span>
+        <span id="goal-assist-label" class="goal-assist-label">ASSIST</span>
+      </div>
+    </div>
+  </div>
+</div><!-- /view-goal -->
+
+<!-- ═══════════════════════════════════════ SCOREBOARD VIEW ═══ -->
+<!-- (Keeping the old scoreboard view structure as it works unless user specified otherwise, but they only mentioned HUD redesign) -->
+<div id="view-scoreboard" class="view">
+  <div class="sb-bg">
+    <!-- Stats table -->
+    <div class="sb-table">
+      <div id="sb-players-blue" class="sb-players sb-players-blue"></div>
+      <div class="sb-stat-labels">
+        <div class="sb-stat-group">
+          <div class="sb-stat-label">SCORE</div>
+          <div class="sb-comp-bar">
+            <div id="bar-score-blue" class="bar-fill-blue"></div>
+            <div id="bar-score-orange" class="bar-fill-orange"></div>
+            <div id="sep-score" class="sb-stat-bar-sep"></div>
+          </div>
+        </div>
+        <div class="sb-stat-group">
+          <div class="sb-stat-label">GOALS</div>
+          <div class="sb-comp-bar">
+            <div id="bar-goals-blue" class="bar-fill-blue"></div>
+            <div id="bar-goals-orange" class="bar-fill-orange"></div>
+            <div id="sep-goals" class="sb-stat-bar-sep"></div>
+          </div>
+        </div>
+        <div class="sb-stat-group">
+          <div class="sb-stat-label">ASSISTS</div>
+          <div class="sb-comp-bar">
+            <div id="bar-assists-blue" class="bar-fill-blue"></div>
+            <div id="bar-assists-orange" class="bar-fill-orange"></div>
+            <div id="sep-assists" class="sb-stat-bar-sep"></div>
+          </div>
+        </div>
+        <div class="sb-stat-group">
+          <div class="sb-stat-label">SHOTS</div>
+          <div class="sb-comp-bar">
+            <div id="bar-shots-blue" class="bar-fill-blue"></div>
+            <div id="bar-shots-orange" class="bar-fill-orange"></div>
+            <div id="sep-shots" class="sb-stat-bar-sep"></div>
+          </div>
+        </div>
+        <div class="sb-stat-group">
+          <div class="sb-stat-label">SAVES</div>
+          <div class="sb-comp-bar">
+            <div id="bar-saves-blue" class="bar-fill-blue"></div>
+            <div id="bar-saves-orange" class="bar-fill-orange"></div>
+            <div id="sep-saves" class="sb-stat-bar-sep"></div>
+          </div>
+        </div>
+        <div class="sb-stat-group">
+          <div class="sb-stat-label">DEMOS</div>
+          <div class="sb-comp-bar">
+            <div id="bar-demos-blue" class="bar-fill-blue"></div>
+            <div id="bar-demos-orange" class="bar-fill-orange"></div>
+            <div id="sep-demos" class="sb-stat-bar-sep"></div>
+          </div>
+        </div>
+      </div>
+      <div id="sb-players-orange" class="sb-players sb-players-orange"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Casters now live on their own browser source: /casters.html (see Production tab) -->
+
+<!-- ═══════════════════════════ BREAK / STARTING SOON SCENE (independent layer) ═══ -->
+<div id="view-break" class="view-break hidden">
+  <div class="break-inner">
+    <div id="break-title" class="break-title">STARTING SOON</div>
+    <div id="break-countdown" class="break-countdown hidden">00:00</div>
+    <div id="break-message" class="break-message"></div>
+    <div id="break-upnext" class="break-upnext hidden">
+      <span class="break-upnext-label">UP NEXT</span>
+      <span id="break-upnext-match" class="break-upnext-match"></span>
+    </div>
+  </div>
+</div>
+
+<!-- Sellable sponsor rail (driven by the active client brand kit) -->
+<div id="sponsor-rail" class="sponsor-rail hidden">
+  <span id="sponsor-rail-label" class="sr-label">PARTNERS</span>
+  <div id="sponsor-rail-slot" class="sr-slot"></div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

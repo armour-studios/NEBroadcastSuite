@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<!--
+  NE Broadcast Suite solid-fill stinger — ported from EsportsDashBoard transitionbgg.html.
+  Same wipe as transition.html but the lead panel is a solid dark fill behind the
+  logo (good when the brand logo already carries colour). Brand-recoloured trailing wipe.
+    ?team=blue|orange   → team logo    ?logo=<url> → custom logo
+-->
+<head>
+  <meta charset="UTF-8">
+  <title>NE Broadcast Suite — Transition (solid)</title>
+  <link rel="stylesheet" href="scene.css" />
+  <style>
+    /* Lead panel is a neutral dark fill here (vs the accent fill in transition.html). */
+    div.stingerlogo { background-color: var(--scene-bg); }
+  </style>
+</head>
+<body>
+  <div class="altcolor"></div>
+  <div class="stingerlogo">
+    <span class="logo" id="stinger-logo"></span>
+  </div>
+
+  <script src="scene-base.js"></script>
+  <script>
+    const logoEl = document.getElementById('stinger-logo');
+    const teamParam = SceneBase.qp('team');
+    const logoParam = SceneBase.qp('logo');
+    SceneBase.connect((data) => {
+      const url = logoParam
+        || ((teamParam === 'blue' || teamParam === 'orange') ? SceneBase.teamSide(data, teamParam).logo : SceneBase.brandLogo(data));
+      logoEl.style.backgroundImage = url ? `url('${url}')` : 'none';
+    });
+
+    // Preview: replay stinger every ~7.5 s (2.5 s animation + 5 s pause).
+    if (SceneBase.preview) {
+      var _restart = function() {
+        document.querySelectorAll('div.stingerlogo, div.altcolor, div.stingerlogo span.logo').forEach(function(el) {
+          el.style.animation = 'none'; void el.offsetWidth; el.style.animation = '';
+        });
+      };
+      setTimeout(function _tick() { _restart(); setTimeout(_tick, 7500); }, 7500);
+    }
+  </script>
+</body>
+</html>

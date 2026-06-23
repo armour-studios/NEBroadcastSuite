@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<!--
+  NE Broadcast Suite "REPLAY" wipe — ported from EsportsDashBoard replay.html.
+  Slides a logo + REPLAY plate in from the left. Use as a momentary scene over a
+  replay clip, or trigger alongside OBS replay-buffer.
+    ?team=blue|orange  → team logo instead of brand logo
+    ?showlogo=false    → hide the logo, plate only
+    ?label=HIGHLIGHT   → change the plate text (default "REPLAY")
+-->
+<head>
+  <meta charset="UTF-8">
+  <title>NE Broadcast Suite — Replay</title>
+  <link rel="stylesheet" href="scene.css" />
+  <style>
+    body { text-transform: none; }
+    @keyframes replay-leftmove {
+      from { transform: translate(50%, 0); clip-path: polygon(0% 0%, 0% 0%, 0% 100%, 0% 100%); }
+      to   { transform: translate(0%, 0); clip-path: polygon(0% 0%, 100% 0%, 100% 100%, 0% 100%); }
+    }
+    div.replaytext {
+      position: absolute; top: 185px; left: 28px;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      text-align: center; font-size: 3em;
+    }
+    div.replaytext > div {
+      background-color: var(--scene-bg);
+      border: solid; border-width: 0 0 0 7px; border-color: var(--accent);
+      font-family: 'Rajdhani', var(--main-font); font-weight: bold; padding: 5px;
+      text-transform: uppercase; color: #fff;
+      animation: replay-leftmove 1s backwards 0.2s; animation-timing-function: cubic-bezier(0, 0, 0, 1);
+    }
+    .replaytext div.logo {
+      width: 205px; height: 145px; box-sizing: border-box;
+      background-size: 60% auto; background-repeat: no-repeat; background-position: center;
+      background-origin: content-box; background-color: transparent !important;
+      border-left: transparent !important; padding: 10px;
+    }
+    div.replaytext span { margin: 20px; position: relative; top: 1px; }
+  </style>
+</head>
+<body>
+  <div class="replaytext">
+    <div class="logo" id="replay-logo"></div>
+    <div><span id="replay-label">REPLAY</span></div>
+  </div>
+
+  <script src="scene-base.js"></script>
+  <script>
+    const logoEl = document.getElementById('replay-logo');
+    const labelEl = document.getElementById('replay-label');
+    const teamParam = SceneBase.qp('team');
+    const showLogo = SceneBase.qp('showlogo') !== 'false';
+    if (SceneBase.qp('label')) labelEl.textContent = SceneBase.qp('label');
+    logoEl.style.display = showLogo ? 'block' : 'none';
+
+    SceneBase.connect((data) => {
+      if (!showLogo) return;
+      const url = (teamParam === 'blue' || teamParam === 'orange')
+        ? SceneBase.teamSide(data, teamParam).logo : SceneBase.brandLogo(data);
+      logoEl.style.backgroundImage = url ? `url('${url}')` : 'none';
+    });
+  </script>
+</body>
+</html>

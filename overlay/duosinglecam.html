@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<!--
+  NE Broadcast Suite DUO single-cam scene — ported from EsportsDashBoard duosinglecam.html.
+  Two casters share ONE wide camera hole, with both name plates beneath it, plus the
+  team scorebar across the top and the brand footer below.
+
+  Driven by full_state (over the WS bridge on :3001 via scene-base.js):
+    data.casters = { visible, list:[{ id, name, handle, camUrl }] }
+      - caster[0].camUrl is embedded as the single shared cam iframe (vdo.ninja etc.);
+        blank when no URL so a webcam composited behind in OBS shows through.
+      - caster[0] / caster[1] each render a .staff plate (name + social handle).
+    SceneBase.teamSide(data,'blue'|'orange') -> { name, logo, color, score, series }
+    data.eventName            -> footer tagline
+    SceneBase.brandLogo(data) -> footer (tournament) logo
+
+  PERFORMANCE: the cam iframe is rebuilt only when the caster list changes (signature),
+  so the stream doesn't reconnect on every unrelated full_state tick; text updates freely.
+  The whole stage fades via `.show` from data.casters.visible.
+-->
+<head>
+  <meta charset="UTF-8">
+  <title>NE Broadcast Suite — Duo Single-Cam</title>
+  <link rel="stylesheet" href="scene.css" />
+  <style>
+    /* Sizing only — colours/animations come from scene.css (Brand Kit driven). */
+    #duo-stage { opacity: 0; transition: opacity 0.35s ease; }
+    #duo-stage.show { opacity: 1; }
+
+    /* One large shared camera hole, centred in the stage wrapper. */
+    .camerabox { border-width: 0 6px; }
+    .camerahole {
+      width: 1100px; height: 620px;
+      background-color: #0c0e11;
+    }
+
+    /* Two name plates side by side beneath the cam. */
+    .plates {
+      display: flex; flex-direction: row; align-items: stretch; justify-content: center;
+      width: 1100px; margin-top: 16px; gap: 16px;
+    }
+    .plates .staff {
+      flex: 1 1 0; min-width: 0; height: 86px; gap: 0.4ch;
+      border-style: solid; border-width: 0 0 6px 0; border-color: var(--accent);
+      animation: staffanimate 0.5s backwards 0.8s;
+    }
+    .plates .staff.s2 { animation-delay: 0.95s; }
+    .plates .staffname { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .plates .socials { white-space: nowrap; }
+
+    .footer { display: flex; }
+  </style>
+</head>
+<body>
+  <div id="duo-stage">
+
+    <!-- Top scorebar (blue vs orange) -->
+    <div class="scoreboardwrapper">
+      <div class="scoreboard">
+        <div class="team team1">
+          <img class="teamlogo" id="logo-blue" alt="" />
+          <span class="teamname" id="name-blue"></span>
+          <div class="scorebox" id="score-blue-box"><span class="teamscore" id="score-blue"></span></div>
+        </div>
+        <div class="vs"><span>VS</span></div>
+        <div class="team team2">
+          <div class="scorebox" id="score-orange-box"><span class="teamscore" id="score-orange"></span></div>
+          <span class="teamname" id="name-orange"></span>
+          <img class="teamlogo" id="logo-orange" alt="" />
+        </div>
+      </div>
+    </div>
+
+    <!-- Shared wide cam + two name plates -->
+    <div class="wrapper">
+      <div style="display:flex; flex-direction:column; align-items:center;">
+        <div class="camerabox">
+          <div class="camerahole" id="camerahole"></div>
+        </div>
+        <div class="plates">
+          <div class="staff s1" id="plate1">
+            <span class="staffname"></span>
+            <span class="socials"></span>
+          </div>
+          <div class="staff s2" id="plate2">
+            <span class="staffname"></span>
+            <span class="socials"></span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Footer: brand logo + centred event tagline + channel -->
+    <div class="footer">
+      <div class="tournament" id="footer-logo"></div>
+      <div class="tagline"><div><span class="tertiary" id="footer-tagline"></span></div></div>
+      <div class="channel"></div>
+    </div>
+  </div>
+
+  <script src="scene-base.js"></script>
+  <script>
+    const stage   = document.getElementById('duo-stage');
+    const hole    = document.getElementById('camerahole');
+    const plate1  = document.getElementById('plate1');
+    const plate2  = document.getElementById('plate2');
+    let _camSig = '';
+
+    // Map a free-text handle/platform into a FontAwesome-brand social class (scene.css).
+    const PLATFORMS = ['twitter','twitch','youtube','bluesky','facebook','instagram','x-twitter','tiktok','discord','tumblr','meta'];
+    function socialClass(c) {
+      const p = (c.platform || '').toString().toLowerCase().replace(/\s+/g, '');
+      if (PLATFORMS.includes(p)) return p;
+      const h = (c.handle || '').toLowerCase();
+      const hit = PLATFORMS.find(x => h.includes(x.replace('-', '')));
+      return hit || 'socials';
+    }
+
+    function fillPlate(plate, c) {
+      const nameEl = plate.querySelector('.staffname');
+      const socEl  = plate.querySelector('.socials');
+      if (!c || !(c.name || c.handle)) { plate.style.display = 'none'; return; }
+      plate.style.display = 'flex';
+      nameEl.textContent = (c.name || '').toUpperCase();
+      const handle = (c.handle || '').trim();
+      if (handle) {
+        socEl.className = 'socials ' + socialClass(c);
+        socEl.textContent = handle.startsWith('@') ? handle : '@' + handle;
+        socEl.style.display = '';
+      } else {
+        socEl.style.display = 'none';
+      }
+    }
+
+    // Team name with non-descriptive words un-bolded (ported from the EsportsDashBoard formatter).
+    function formatTeamName(name) {
+      const words = ['gaming','team','e-?sports','house','academy','uni(versity)?','state','tech','and','the','of','eu'];
+      const re = new RegExp('\\b(' + words.map(w => '(' + w + ')').join('|') + ')\\b', 'gi');
+      return '<b>' + (name || '').replace(re, '</b>$1<b>').replace(/&/gi, '</b>&<b>') + '</b>';
+    }
+
+    function setTeam(side, t) {
+      document.getElementById('name-' + side).innerHTML = formatTeamName(t.name);
+      document.getElementById('score-' + side).textContent = t.score || 0;
+      const logo = document.getElementById('logo-' + side);
+      if (t.logo) { logo.src = t.logo; logo.style.display = ''; }
+      else { logo.removeAttribute('src'); logo.style.display = 'none'; }
+      document.querySelector('.team' + (side === 'blue' ? '1' : '2')).style.borderColor = t.color;
+    }
+
+    function render(data) {
+      const casters = data.casters || {};
+      const list = Array.isArray(casters.list)
+        ? casters.list.filter(c => c && (c.name || c.handle || c.camUrl))
+        : [];
+
+      stage.classList.toggle('show', SceneBase.casterStageVisible(casters));
+
+      // ── Scorebar ──
+      const blue = SceneBase.teamSide(data, 'blue');
+      const orange = SceneBase.teamSide(data, 'orange');
+      setTeam('blue', blue);
+      setTeam('orange', orange);
+      const hideScores = (blue.score || 0) === 0 && (orange.score || 0) === 0;
+      document.getElementById('score-blue-box').style.display = hideScores ? 'none' : 'flex';
+      document.getElementById('score-orange-box').style.display = hideScores ? 'none' : 'flex';
+
+      // ── Name plates (text updates every tick — cheap) ──
+      fillPlate(plate1, list[0]);
+      fillPlate(plate2, list[1]);
+
+      // ── Footer ──
+      const logo = SceneBase.brandLogo(data);
+      document.getElementById('footer-logo').style.backgroundImage = logo ? `url('${logo}')` : 'none';
+      document.getElementById('footer-tagline').textContent = (data.eventName || '').toUpperCase();
+
+      // ── Shared cam iframe — rebuild ONLY when the caster list changes ──
+      const sig = JSON.stringify(list.map(c => c.camUrl || ''));
+      if (sig === _camSig) return;
+      _camSig = sig;
+
+      hole.innerHTML = '';
+      const camUrl = (list[0] && list[0].camUrl || '').trim();
+      if (camUrl) {
+        const iframe = document.createElement('iframe');
+        iframe.src = camUrl;
+        iframe.frameBorder = '0';
+        iframe.allow = 'autoplay; encrypted-media';
+        iframe.referrerPolicy = 'no-referrer';
+        iframe.style.background = 'transparent';
+        hole.appendChild(iframe);
+      }
+    }
+
+    SceneBase.connect(render);
+
+    // ── DEMO fallback when opened directly from disk ──
+    if (location.protocol === 'file:') {
+      render({
+        teams: {
+          blue:   { name: 'Frost Esports', color: '#3b82f6', score: 2 },
+          orange: { name: 'Ember Gaming',  color: '#f97316', score: 1 }
+        },
+        eventName: 'Summer Showdown — Grand Final',
+        casters: { visible: true, list: [
+          { id: 'c1', name: 'Alex Rivers', handle: 'alexcasts', platform: 'twitch', camUrl: '' },
+          { id: 'c2', name: 'Sam Vale',    handle: 'samvale',   platform: 'twitter', camUrl: '' }
+        ] }
+      });
+    }
+  </script>
+</body>
+</html>

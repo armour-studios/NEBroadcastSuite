@@ -1,0 +1,218 @@
+/* ─── scene.css — shared styles for the ported broadcast scenes ─────────────
+ *
+ * Ported from the EsportsDashBoard "DEFAULT HTML" pack (caster cams, stingers,
+ * winner, veto, intro). The original hard-coded a lime accent (#8cba11) and
+ * loaded local Rajdhani/FontAwesome TTFs; here the accent is driven by the
+ * active Brand Kit via --accent / --accent-2 (see scene-base.js) and fonts come
+ * from CDNs so the scenes are drop-in OBS browser sources.
+ */
+
+@import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;600;700&display=swap');
+@import url('https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/brands.min.css');
+
+:root {
+  --main-font: 'Bourgeois', 'Rajdhani', sans-serif;
+  --accent: #055fdb;     /* primary brand accent (recoloured per Brand Kit) */
+  --accent-2: #e97139;   /* secondary brand accent */
+  --scene-bg: #16181c;   /* panel fill */
+  --scene-fg: #ffffff;   /* panel text */
+}
+[data-theme="midnight"] { --accent: #4aa3ff; --accent-2: #7c5cff; }
+[data-theme="neon"]     { --accent: #00e5a0; --accent-2: #ff2e88; }
+
+body {
+  width: 1920px;
+  height: 1080px;
+  margin: 0 auto;
+  overflow: hidden;
+  background-color: rgba(0, 0, 0, 0);
+  font-family: 'Rajdhani', var(--main-font);
+  font-weight: bold;
+  text-transform: uppercase;
+  -webkit-animation-timing-function: cubic-bezier(0, 0, 0, 1);
+}
+
+/* ─── ANIMATIONS ──────────────────────────────────────────────────────── */
+@keyframes staffanimate {
+  0%   { clip-path: polygon(0% -100%, 0 -100%, 0% 200%, 0% 200%); transform: translateX(50%); }
+  100% { clip-path: polygon(0% -100%, 100% -100%, 100% 200%, 0% 200%); transform: translateX(0%); }
+}
+@keyframes curtainanimate-r {
+  0%   { clip-path: polygon(0% -100%, 100% -100%, 100% 200%, 0% 200%); }
+  100% { clip-path: polygon(100% -100%, 100% -100%, 100% 200%, 100% 200%); }
+}
+@keyframes curtainanimate-l {
+  0%   { clip-path: polygon(0% -100%, 100% -100%, 100% 200%, 0% 200%); }
+  100% { clip-path: polygon(0% -100%, 0 -100%, 0% 200%, 0% 200%); }
+}
+@keyframes slideright { 0% { transform: translateX(-100%); } 100% { transform: translateX(0); } }
+@keyframes slideleft  { 0% { transform: translateX(100%); }  100% { transform: translateX(0); } }
+@keyframes teamslideright {
+  0%   { clip-path: polygon(100% 0%, 100% 0%, 100% 100%, 100% 100%); transform: translateX(-100%); }
+  100% { clip-path: polygon(0% 0%, 100% 0%, 100% 100%, 0% 100%); transform: translateX(0); }
+}
+@keyframes teamslideleft {
+  0%   { clip-path: polygon(0% 0%, 0% 0%, 0% 100%, 0% 100%); transform: translateX(100%); }
+  100% { clip-path: polygon(0% 0%, 100% 0%, 100% 100%, 0% 100%); transform: translateX(0); }
+}
+@keyframes tagline {
+  0%   { clip-path: polygon(0% -100%, 0 -100%, 0% 200%, 0% 200%); transform: translateX(50%); }
+  100% { clip-path: polygon(0% -100%, 100% -100%, 100% 200%, 0% 200%); transform: translateX(0%); }
+}
+@keyframes stingerwipe {
+  0%   { clip-path: polygon(0 0, 100% 0%, 100% 100%, 0% 100%); transform: translateX(0) skewX(-15deg); }
+  100% { clip-path: polygon(0% 0, 50% 0, 50% 100%, 0% 100%); transform: translateX(-50%) skewX(-15deg); }
+}
+@keyframes slideease {
+  0%   { transform: translateX(1000px) skewX(15deg); }
+  50%  { transform: translateX(20px) skewX(15deg); }
+  100% { transform: translateX(0px) skewX(15deg); }
+}
+
+/* ─── Scoreboard band (caster / map scenes) ───────────────────────────── */
+.team {
+  flex: 1 1 0;
+  height: 100px;
+  background-color: var(--scene-bg);
+  color: var(--scene-fg);
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  border-style: solid;
+  border-color: var(--accent);
+}
+.team1 { border-width: 0 0 0 6px; animation: teamslideleft 0.5s 1s backwards; }
+.team2 { border-width: 0 6px 0 0; animation: teamslideright 0.5s 1s backwards; }
+.teamname {
+  flex: 5 1 0;
+  font-weight: normal;
+  font-size: 2.8em;
+  padding: 0 10px;
+  position: relative;
+  line-height: 0.9;
+}
+.teamname b { font-weight: 700; }
+.teamscore { font-weight: bold; font-size: clamp(2em, 8vw, 4em); }
+.scorebox {
+  display: flex; justify-content: center; align-items: center;
+  height: 100px; width: 100%; max-width: 100px; padding: 0 15px;
+}
+.scoreboardwrapper {
+  position: absolute; left: 0; top: 40px;
+  display: flex; align-items: center; justify-content: center; text-align: center;
+  width: 1920px; height: 100px;
+}
+.scoreboard {
+  display: flex; align-items: center; justify-content: center; text-align: center;
+  width: 1620px; height: 100px;
+}
+.scoreboard .vs {
+  flex: 0 0 0; background-color: var(--accent); color: var(--scene-bg);
+  height: 100px; min-width: 150px; max-width: 150px;
+  display: flex; align-items: center; justify-content: center;
+}
+.scoreboard .vs span { font-weight: bold; font-size: 5em; }
+
+.wrapper {
+  position: absolute; left: 0; top: 100px;
+  display: flex; align-items: center; justify-content: center; text-align: center;
+  width: 1920px; height: 880px;
+}
+
+img.teamlogo { height: 80px; width: 80px; max-height: 80px; max-width: 80px; margin: 10px; object-fit: contain; }
+
+/* ─── Footer (tournament / channel logos + tagline) ───────────────────── */
+.footer {
+  position: fixed; left: 0; top: 950px; width: 1870px;
+  display: flex; flex-direction: row; align-items: center; justify-content: space-between;
+  padding: 25px;
+}
+.tournament { flex: 1 1 0; height: 80px; background-position: left;  background-size: contain; background-repeat: no-repeat; animation: slideright 1s 1s backwards; }
+.channel    { flex: 1 1 0; height: 80px; background-position: right; background-size: contain; background-repeat: no-repeat; animation: slideleft 1s 1s backwards; }
+div.tagline { text-align: center; min-width: 375px; animation: tagline .5s 2s backwards; }
+span.tertiary {
+  font-size: 1.8em; font-weight: bold; text-align: center;
+  padding: 3px 15px 2px; border: solid; border-width: 0 6px;
+  border-color: var(--accent); background-color: #ffffff; color: var(--scene-bg);
+  display: block;
+}
+
+/* ─── Camera scenes ───────────────────────────────────────────────────── */
+.staffiso, .curtain { background-color: var(--accent); }
+.curtain { flex: 1 1 0; height: 100%; }
+.curtainl { animation: curtainanimate-l 0.5s forwards 10s; }
+.curtainr { animation: curtainanimate-r 0.5s forwards 10s; }
+.camerabox {
+  display: flex; flex-direction: column;
+  border: solid; border-width: 0 6px; border-color: var(--accent); margin: 20px;
+}
+.camerahole { display: flex; flex-direction: row; overflow: hidden; }
+.camerahole iframe { width: 100%; height: 100%; border: 0; }
+.staffiso { overflow: hidden; }
+.staff {
+  display: flex; flex-direction: row; align-items: center; justify-content: center; text-align: center;
+  background-color: var(--scene-bg); color: var(--scene-fg);
+  animation: staffanimate 0.5s backwards 10s;
+}
+.staffname { font-weight: bold; font-size: 2.5em; position: relative; }
+
+/* Social handle icon prefixes (FontAwesome brands) */
+.socials, .twitter, .twitch, .youtube, .bluesky, .facebook, .instagram, .x-twitter, .tiktok, .discord, .tumblr, .meta {
+  font-family: 'Rajdhani'; font-weight: normal; text-transform: none; font-size: 2em; position: relative;
+  color: var(--accent);
+}
+.socials:before, .twitter:before, .twitch:before, .youtube:before, .bluesky:before, .facebook:before,
+.instagram:before, .x-twitter:before, .tiktok:before, .discord:before, .tumblr:before, .meta:before {
+  font-family: 'Font Awesome 6 Brands'; font-weight: 400; margin-right: 0.3ch;
+}
+.socials:before, .twitter:before { content: "\f099"; }
+.twitch:before    { content: "\f1e8"; }
+.youtube:before   { content: "\f167"; }
+.bluesky:before   { content: "\e671"; }
+.facebook:before  { content: "\f39e"; }
+.instagram:before { content: "\f16d"; }
+.x-twitter:before { content: "\e61b"; }
+.tiktok:before    { content: "\e07b"; }
+.discord:before   { content: "\f392"; }
+.tumblr:before    { content: "\f173"; }
+.meta:before      { content: "\e49b"; }
+
+/* ─── Stinger / transition wipe ───────────────────────────────────────── */
+div.stingerlogo {
+  position: absolute; top: 0; left: -150px; width: 2220px; height: 1080px;
+  vertical-align: middle; background-color: var(--accent);
+  animation: stingerwipe 0.3s forwards 1s; transform: skewX(-15deg);
+}
+div.stingerlogo span.logo {
+  width: 1120px; height: 680px; position: absolute; top: 200px; left: 550px;
+  background-position: center; background-size: contain; background-repeat: no-repeat;
+  animation: slideease 1s forwards; transform: skewX(15deg);
+  -webkit-animation-timing-function: cubic-bezier(0, 0, 0, 1);
+}
+div.altcolor {
+  position: absolute; top: 0; left: -150px; width: 2220px; height: 1080px;
+  vertical-align: middle; background-color: var(--accent-2);
+  animation: stingerwipe 0.35s forwards 1.05s; transform: skewX(-15deg);
+}
+
+/* The whole scene fades in/out with a `.show` toggle for soft on-air control. */
+.scene-fade { opacity: 0; transition: opacity 0.35s ease; }
+.scene-fade.show { opacity: 1; }
+.hidden { display: none !important; }
+
+/* ─── Preview mode (?preview=1) ────────────────────────────────────────────
+   Stinger preview-looping is JS-driven (5 s pause between plays) — see each
+   transition/winner file. Camera holes get a placeholder so producers can see
+   where each cam goes. */
+.preview .camerahole {
+  position: relative;
+  background: repeating-linear-gradient(45deg, #1a1d24, #1a1d24 18px, #22262f 18px, #22262f 36px);
+}
+.preview .camerahole::after {
+  content: "CAM"; position: absolute; inset: 0; z-index: 0;
+  display: flex; align-items: center; justify-content: center;
+  color: #5a6068; font-family: 'Rajdhani', sans-serif; font-weight: 700; font-size: 2.4em; letter-spacing: 0.25em;
+}
+.preview .camerahole iframe { position: relative; z-index: 1; }

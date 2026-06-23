@@ -1,0 +1,364 @@
+═══════════════════════════════════════════════════════════════════════════════
+  TWITCH INTEGRATION ARCHITECTURE
+  How Predictions, Wheel, and Mini-Games Flow Through JotaOverlay
+═══════════════════════════════════════════════════════════════════════════════
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                        TWITCH API (EventSub Webhooks)                         │
+│  - channel.prediction.begin/progress/end                                      │
+│  - channel.follow                                                              │
+│  - channel.subscribe                                                           │
+│  - channel.channel_points.custom_reward_redemption                             │
+│  - channel.chat.message (or use TMI.js)                                       │
+└────────────────────┬────────────────────────────────────────────────────────┘
+                     │
+                     │ POST /api/twitch/webhooks/*
+                     ▼
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                  backend/integrations/twitch-webhooks.js                       │
+│  ┌────────────────┬──────────────────┬──────────────┬──────────────────┐   │
+│  │ Predictions    │ Wheel Entries    │ Chat Messages│ Rewards/Points   │   │
+│  │ Handler        │ Handler          │ Handler      │ Handler          │   │
+│  └────────┬───────┴────────┬─────────┴──────┬───────┴────────┬────────┘   │
+└───────────┼────────────────┼────────────────┼────────────────┼─────────────┘
+            │                │                │                │
+            ▼                ▼                ▼                ▼
+    ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐
+    │twitch-       │  │twitch-       │  │twitch-       │  │twitch-       │
+    │predictions.js│  │wheel.js      │  │chat-games.js │  │chat-games.js │
+    │              │  │              │  │              │  │(points award)│
+    │ State:       │  │ State:       │  │ State:       │  │              │
+    │ - current    │  │ - current    │  │ - current    │  │ Updates:     │
+    │ - history    │  │ - prizes     │  │ - questions  │  │ minigame.pts │
+    │ - settings   │  │ - history    │  │ - history    │  │              │
+    └──────┬───────┘  └──────┬───────┘  └──────┬───────┘  └──────────────┘
+           │                 │                 │
+           └─────────────────┴─────────────────┘
+                             │
+                             ▼ (all update)
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                              server.js STATE                                   │
+│  state.twitch = {                                                              │
+│    predictions: { current, history, settings },                                │
+│    wheel: { current, prizes, history, settings },                              │
+│    minigame: { current, games, history, settings },                            │
+│    chat: { recentMessages, activeParticipants }                                │
+│  }                                                                              │
+│                                                                                 │
+│  [ATOMICALLY SAVED TO: twitch-data.json]                                       │
+└──────────────────────────────────────┬──────────────────────────────────────┘
+                                       │
+                  ┌────────────────────┴────────────────────┐
+                  │                                         │
+                  │ broadcast('full_state', state)        │
+                  │ on every change                        │
+                  │                                         │
+              (WebSocket :3001)
+                  │
+    ┌─────────────┴──────────────┬────────────────────┐
+    │                            │                    │
+    ▼                            ▼                    ▼
+┌─────────────────┐    ┌─────────────────┐  ┌──────────────────┐
+│ Control Panel   │    │  Overlay Scenes │  │  External Clients│
+│ (Electron)      │    │  (Browser)      │  │  (Optional)      │
+│                 │    │                 │  │                  │
+│ ┌─────────────┐ │    │ ┌─────────────┐ │  │ ┌──────────────┐│
+│ │Twitch Tab:  │ │    │ │twitch-      │ │  │ │Mobile Phone  ││
+│ │- Predictions│ │    │ │alerts.html  │ │  │ │(via web UI)  ││
+│ │- Wheel      │ │    │ │             │ │  │ │              ││
+│ │- Mini-Games │ │    │ │Shows:       │ │  │ │Can control:  ││
+│ │             │ │    │ │- Pred feed  │ │  │ │- Spin wheel  ││
+│ │ [Spin Now]  │ │    │ │- Activity   │ │  │ │- Create game ││
+│ │ [Create Pred]│ │    │ │             │ │  │ │              ││
+│ └─────────────┘ │    │ └─────────────┘ │  │ └──────────────┘│
+│                 │    │                 │  │                  │
+│ ┌─────────────┐ │    │ ┌─────────────┐ │  └──────────────────┘
+│ │Wheel        │ │    │ │twitch-      │ │
+│ │Designer:    │ │    │ │wheel.html   │ │
+│ │- Prizes x6  │ │    │ │             │ │
+│ │- Weights    │ │    │ │Shows:       │ │
+│ │- Colors     │ │    │ │- Spinning   │ │
+│ └─────────────┘ │    │ │  animation  │ │
+│                 │    │ │- Prize name │ │
+│ ┌─────────────┐ │    │ │- Winner     │ │
+│ │Game         │ │    │ │  display    │ │
+│ │Settings:    │ │    │ │             │ │
+│ │- Duration   │ │    │ └─────────────┘ │
+│ │- Type       │ │    │                 │
+│ │- Points     │ │    │ ┌─────────────┐ │
+│ └─────────────┘ │    │ │twitch-      │ │
+│                 │    │ │minigame.html│ │
+│ Producer        │    │ │             │ │
+│ Control Inputs  │    │ │Shows:       │ │
+└────────┬────────┘    │ │- Question   │ │
+         │             │ │- Options    │ │
+         │ sends msgs: │ │- Timer      │ │
+         │             │ │- Leaderboard
+         │ - spin      │ │- Results    │ │
+         │ - predict   │ │             │ │
+         │ - game-end  │ │Viewer       │ │
+         │             │ │Chat Inputs  │ │
+         └────────────→│ └─────────────┘ │
+           via WS      │                 │
+                       │  OBS Browser    │
+                       │  Sources        │
+                       └─────────────────┘
+
+
+═══════════════════════════════════════════════════════════════════════════════
+  MESSAGE FLOW EXAMPLES
+═══════════════════════════════════════════════════════════════════════════════
+
+┌─ EXAMPLE 1: PREDICTIONS WORKFLOW ────────────────────────────────────────────┐
+│                                                                                 │
+│ 1. Producer opens control panel → Twitch tab                                   │
+│                                                                                 │
+│ 2. Producer clicks [Create Prediction]                                         │
+│    └─ modal opens: title, outcomes, duration                                   │
+│                                                                                 │
+│ 3. Producer fills:                                                              │
+│    ├─ Title: "Who scores first?"                                               │
+│    ├─ Outcome 1: "Blue Team" #055FDB                                           │
+│    ├─ Outcome 2: "Orange Team" #FF7F50                                         │
+│    └─ Duration: 300s                                                           │
+│                                                                                 │
+│ 4. Producer clicks [Create]                                                    │
+│    └─ send('prediction-create', { title, outcomes, duration })                 │
+│       ▼ (via WebSocket to server)                                              │
+│                                                                                 │
+│ 5. Server receives message                                                     │
+│    └─ twitch-client.js calls Twitch EventSub API                               │
+│    └─ Creates prediction on Twitch channel                                     │
+│    └─ Updates state.twitch.predictions.current                                 │
+│    └─ broadcast('full_state', state) to all connected clients                  │
+│       ▼                                                                         │
+│                                                                                 │
+│ 6. Control Panel re-renders                                                    │
+│    ├─ Shows "Blue Team (45%) vs Orange Team (55%)"                             │
+│    └─ Displays live vote counts updating from Twitch                           │
+│                                                                                 │
+│ 7. Overlay (twitch-alerts.html) re-renders                                     │
+│    ├─ Shows prediction on bottom-right corner                                  │
+│    ├─ Animates vote changes                                                    │
+│    └─ Displays on stream for viewers                                           │
+│                                                                                 │
+│ 8. Viewers on Twitch vote via channel points                                   │
+│    └─ Twitch emits channel.prediction.progress webhook                         │
+│    └─ Server receives webhook                                                  │
+│    └─ Updates state.twitch.predictions.current.outcomes votes                  │
+│    └─ broadcast('full_state') again                                            │
+│    └─ Overlays update with new vote %                                          │
+│                                                                                 │
+│ 9. Prediction locked at 4:45 (Twitch automatically)                            │
+│    └─ channel.prediction.lock webhook arrives                                  │
+│    └─ Server updates state.twitch.predictions.current.state = 'locked'         │
+│    └─ Control panel shows "LOCKED" badge                                       │
+│    └─ No more votes accepted                                                   │
+│                                                                                 │
+│ 10. Score happens! Blue Team scores                                            │
+│     └─ Producer clicks [Resolve: Blue Team]                                    │
+│     └─ Server calls Twitch API to resolve prediction                           │
+│     └─ Twitch emits channel.prediction.end webhook                             │
+│     └─ Viewers get channel points for correct prediction                       │
+│     └─ Control panel shows results                                             │
+│     └─ Overlay shows "Blue Team WINS!" with animation                          │
+│                                                                                 │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+
+┌─ EXAMPLE 2: WHEEL SPIN ──────────────────────────────────────────────────────┐
+│                                                                                 │
+│ 1. Producer sets up wheel (control panel → Twitch → Wheel Designer)            │
+│    ├─ Prize 1: Sub Gift (weight 1, color red) [20% chance]                     │
+│    ├─ Prize 2: $25 Amazon (weight 0.5, color green) [10% chance]               │
+│    ├─ Prize 3: Game Copy (weight 2, color blue) [40% chance]                   │
+│    ├─ Prize 4: 500 points (weight 1, color yellow) [20% chance]                │
+│    └─ Prize 5: Emote Set (weight 1, color purple) [10% chance]                 │
+│                                                                                 │
+│ 2. Viewers follow/sub → added to participant pool                              │
+│    └─ Follow webhook → state.twitch.wheel.participants.push(viewer)            │
+│                                                                                 │
+│ 3. Producer clicks [SPIN NOW]                                                  │
+│    └─ twitch-wheel.js → deterministically selects winner                       │
+│       ├─ Uses weighted random: "Prize 3: Game Copy" selected                   │
+│       └─ Selects random participant: @DapperPlay                               │
+│    └─ broadcast('wheel-spin-start', { duration: 8000, targetPrizeId })         │
+│       ▼                                                                         │
+│                                                                                 │
+│ 4. Overlay (twitch-wheel.html) receives start message                          │
+│    └─ Animation begins immediately (smooth rotation)                           │
+│    └─ Spins 8+ full rotations over 8 seconds                                   │
+│    └─ Decelerates smoothly toward target prize                                 │
+│    └─ Pointer (at top) indicates prize selection                               │
+│       ▼ (8000ms later)                                                         │
+│                                                                                 │
+│ 5. Animation completes, wheel stops on "Game Copy"                             │
+│    └─ overlay receives: broadcast('wheel-spin-end', {                          │
+│       ├─ targetPrizeId: 'prize-3',                                             │
+│       ├─ winner: { userId, displayName: '@DapperPlay' }                        │
+│       └─ })                                                                     │
+│                                                                                 │
+│ 6. Overlay shows result                                                        │
+│    ├─ Wheel locked in place                                                    │
+│    ├─ "🎉 @DapperPlay won: Game Copy!"                                         │
+│    ├─ Confetti animation                                                       │
+│    └─ Sound effect (success tone)                                              │
+│                                                                                 │
+│ 7. Server awards prize                                                         │
+│    └─ If Prize 3 has points value (500):                                       │
+│       └─ twitch-client.js → award 500 channel points to @DapperPlay            │
+│       └─ state.twitch.wheel.current.winner = DapperPlay                        │
+│       └─ Push to history                                                       │
+│                                                                                 │
+│ 8. Control panel updates                                                       │
+│    └─ Shows "Last Winner: @DapperPlay (Prize: Game Copy)"                      │
+│    └─ Wheel resets to idle                                                     │
+│                                                                                 │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+
+┌─ EXAMPLE 3: CHAT MINI-GAME (AUTO-START ON BRB) ──────────────────────────────┐
+│                                                                                 │
+│ 1. Match ends, OBS switches scene to "Countdown" (BRB screen)                  │
+│                                                                                 │
+│ 2. Control panel (or server) detects scene change                              │
+│    └─ state.activeScene === 'countdown'                                        │
+│    └─ state.twitch.minigame.settings.enabled === true                          │
+│    └─ Calls: startGame(state.twitch.minigame.settings.breakScreenGameType)      │
+│       └─ gameType = 'trivia' (from control panel settings)                     │
+│                                                                                 │
+│ 3. twitch-chat-games.js starts trivia game                                     │
+│    └─ Selects random question:                                                 │
+│       ├─ Question: "What does 'OP' stand for in esports?"                      │
+│       ├─ Answer A: Overpowered                                                 │
+│       ├─ Answer B: Operator                                                    │
+│       ├─ Answer C: Original Player                                             │
+│       └─ Answer D: Online Protocol                                             │
+│    └─ state.twitch.minigame.current = { gameId, question, answers, ... }       │
+│    └─ broadcast('minigame-start', { gameId, question, answers, duration: 30s }) │
+│       ▼                                                                         │
+│                                                                                 │
+│ 4. Overlay (twitch-minigame.html) shows question                               │
+│    ├─ Large question text                                                      │
+│    ├─ 4 answer buttons: [A] [B] [C] [D]                                         │
+│    ├─ 30 second countdown timer                                                │
+│    └─ "Type !a, !b, !c, or !d in chat"                                         │
+│                                                                                 │
+│ 5. Chat participants answer (example chat messages)                            │
+│    ├─ @Viewer1: !a                                                             │
+│    ├─ @Viewer2: !a                                                             │
+│    ├─ @Viewer3: !b                                                             │
+│    ├─ @Viewer4: !a                                                             │
+│    ├─ @CoolGuy: !d                                                             │
+│    └─ @Another: !a                                                             │
+│                                                                                 │
+│ 6. Server parses chat messages (tmi.js listener)                               │
+│    └─ if message matches /^!([a-d])$/i:                                        │
+│       └─ state.twitch.minigame.current.participants.push({                     │
+│          ├─ userId: userstate['user-id'],                                      │
+│          ├─ displayName: userstate.display_name,                               │
+│          ├─ answer: 'A'                                                        │
+│          └─ })                                                                 │
+│                                                                                 │
+│ 7. Overlay updates live vote counts (only 5 participants shown initially)      │
+│    ├─ Answer A: 4 votes ████                                                   │
+│    ├─ Answer B: 1 vote  █                                                      │
+│    ├─ Answer C: 0 votes                                                        │
+│    └─ Answer D: 1 vote  █                                                      │
+│                                                                                 │
+│ 8. Timer counts down: 3... 2... 1... 0!                                        │
+│    └─ endGame() called                                                         │
+│    └─ Correct answer is 'A' (Overpowered)                                      │
+│    └─ Filter winners: participants where answer === 'A'                        │
+│       └─ @Viewer1, @Viewer2, @Viewer4 ✓ CORRECT                                │
+│       └─ @Viewer3, @CoolGuy, @Another ✗ WRONG                                  │
+│                                                                                 │
+│ 9. Overlay shows results with animation                                        │
+│    ├─ Correct answer highlighted in green: [A] Overpowered ✓                   │
+│    ├─ Other answers fade to gray                                               │
+│    ├─ "3 players got it right!"                                                │
+│    ├─ "Winners: @Viewer1, @Viewer2, @Viewer4"                                  │
+│    └─ "+500 Channel Points!"                                                   │
+│                                                                                 │
+│ 10. Server awards points                                                       │
+│     └─ Winners loop: awardChannelPoints(userId, 500)                           │
+│     └─ Twitch updates user's channel point balance                             │
+│                                                                                 │
+│ 11. Leaderboard updates (session tracking)                                     │
+│     ├─ @Viewer1: 1000 pts                                                      │
+│     ├─ @Viewer2: 1000 pts (also got previous game right)                       │
+│     ├─ @Viewer4: 500 pts                                                       │
+│     └─ Displayed on overlay (optional)                                         │
+│                                                                                 │
+│ 12. Game ends, scene still on countdown (next BRB)                             │
+│     └─ After 5min idle, auto-start next game                                   │
+│     └─ OR producer manually [Create Game] from control panel                   │
+│                                                                                 │
+│ 13. When stream goes back live                                                 │
+│     └─ Producer switches to "Main HUD" scene                                   │
+│     └─ Auto-end any active game                                                │
+│     └─ Minigame stops accepting answers                                        │
+│                                                                                 │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+
+═══════════════════════════════════════════════════════════════════════════════
+  KEY INTEGRATION POINTS WITH EXISTING SYSTEMS
+═══════════════════════════════════════════════════════════════════════════════
+
+┌─ STATE MANAGEMENT ──────────────────────────────────────────────────────────┐
+│                                                                                │
+│ Existing: state.game, state.teams, state.view                                 │
+│ New:      state.twitch (isolated section)                                     │
+│                                                                                │
+│ Same broadcast pattern:                                                        │
+│  Any change to state.twitch.* → saveAppState() → broadcast('full_state')      │
+│                                                                                │
+└────────────────────────────────────────────────────────────────────────────┘
+
+┌─ WEBSOCKET HUB ────────────────────────────────────────────────────────────┐
+│                                                                                │
+│ Existing:  ws.on('message') → parse msg.type → handle message type            │
+│ Twitch:    'prediction-create', 'wheel-spin', 'minigame-create'               │
+│                                                                                │
+│ Same pattern: case 'prediction-create': { /* handle */ }                      │
+│                                                                                │
+└────────────────────────────────────────────────────────────────────────────┘
+
+┌─ SCENE ROUTING ────────────────────────────────────────────────────────────┐
+│                                                                                │
+│ Existing:  /index.html (RL HUD), /csgo.html (CS2), /countdown.html            │
+│ Twitch:    /twitch-wheel.html, /twitch-minigame.html, /twitch-alerts.html     │
+│                                                                                │
+│ Same pattern: app.use(express.static(...)) serves all from /overlay           │
+│                                                                                │
+└────────────────────────────────────────────────────────────────────────────┘
+
+┌─ AUTO-SCENE DETECTION ─────────────────────────────────────────────────────┐
+│                                                                                │
+│ Existing:  OBS watches activeScene via obs-client.js                          │
+│ Twitch:    On activeScene === 'countdown':                                    │
+│            └─ Auto-start minigame (if enabled)                                │
+│                                                                                │
+└────────────────────────────────────────────────────────────────────────────┘
+
+┌─ CONTROL PANEL ARCHITECTURE ──────────────────────────────────────────────┐
+│                                                                                │
+│ Existing: 8 tabs (Dashboard, Events, Production, Director, Scenes, Teams,     │
+│           Cameras, Brands, Settings)                                          │
+│ Twitch:   +1 tab (Twitch) with sub-sections for Predictions, Wheel, Games     │
+│                                                                                │
+│ Same pattern: el('tab-name').addEventListener('click', ...)                  │
+│                                                                                │
+└────────────────────────────────────────────────────────────────────────────┘
+
+┌─ EVENT SYSTEM ─────────────────────────────────────────────────────────────┐
+│                                                                                │
+│ Existing: RL event adapter → director scores events → auto-camera             │
+│ Twitch:   Chat message/prediction event → control panel shows activity        │
+│                                                                                │
+│ Can be extended: Twitch chat sentiment → director storyline boost             │
+│                                                                                │
+└────────────────────────────────────────────────────────────────────────────┘
+
+═══════════════════════════════════════════════════════════════════════════════

@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>NE Broadcast Suite — Sponsor Banner</title>
+<!--
+  SPONSOR BANNER overlay — add as a browser source in OBS at any size / position.
+  Decoupled from the game overlays: drop in as many of these as you like and place freely.
+  Renders a wide rectangular banner: logo on the left + optional per-image text on the right,
+  rotating through the banner images. Text is set per image in the control panel (e.g.
+  USE CODE *NAMELESS* FOR 5% OFF) — wrap a word in *asterisks* for italic emphasis, use line
+  breaks for multiple lines.
+
+  Source (which banner this shows):
+    ?src=auto      — (default) active brand's banner, else the Main Banner; respects Visibility.
+    ?src=main      — always the software-wide Main Banner.
+    ?src=brand     — the ACTIVE brand's banner (follows the selected brand).
+    ?brand=<id>    — PIN one specific brand's banner regardless of the active brand.
+    For ?src=brand / ?brand=<id> it shows whenever it has images — toggle in OBS to hide.
+
+  Look:
+    ?style=card    — (default) rectangular dark-glass banner, brand-coloured stroke + accent.
+    ?style=plain   — bare full-bleed rotating image (for pre-designed banner graphics, no text).
+    ?slant=right   — which side is angled: right (default) | left | box (straight rectangle).
+                     Defaults to the brand kit's saved "Banner edge" setting when not given.
+    ?angle=0       — alias for ?slant=box (straight rectangle).
+    ?ar=1100:250   — banner aspect ratio (default 1100:250 ≈ 4.4:1); keeps it rectangular even
+                     when the OBS source is sized square. ?fill=1 to fill the source instead.
+    ?bg=1 / ?fit=  — plain style only (dark backing / object-fit contain|cover|fill).
+-->
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{width:100%;height:100%;overflow:hidden;background:transparent;
+  font-family:'Rajdhani','Barlow Condensed','Montserrat',system-ui,sans-serif;}
+/* Centre the banner in the source so it always reads as a wide rectangle, regardless of how
+   the OBS browser source is sized. ?fill=1 makes it fill the source instead. */
+body{display:flex;align-items:center;justify-content:center}
+
+/* ── Card: wide rectangular banner — brand stroke, dark glass, logo + per-image text ── */
+#card{
+  position:relative;width:100%;max-width:100%;max-height:100%;
+  aspect-ratio:var(--ar, 1100 / 250);
+  opacity:0;transition:opacity .5s;
+  background:linear-gradient(120deg, var(--brand,#8b5cf6) 0%, var(--accent,#ff4655) 120%);
+  border-radius:6px;
+  filter:drop-shadow(0 10px 26px rgba(0,0,0,.5));
+  clip-path:polygon(0 0, 100% 0, calc(100% - 26px) 100%, 0 100%);
+}
+#card.fill{aspect-ratio:auto;width:100%;height:100%}
+#card.show{opacity:1}
+/* Slant side: default = right edge angled. left = mirror; box = straight rectangle. */
+#card.slant-left{clip-path:polygon(0 0, 100% 0, 100% 100%, 26px 100%)}
+#card.slant-box, #card.no-angle{clip-path:none}
+#card .inner{
+  position:absolute;left:3px;top:3px;right:3px;bottom:3px;overflow:hidden;border-radius:4px;
+  background:linear-gradient(180deg, rgba(22,25,33,.985), rgba(11,13,19,.99));
+  clip-path:polygon(0 0, 100% 0, calc(100% - 23px) 100%, 0 100%);
+  display:flex;align-items:stretch;
+}
+/* Optional persistent header (e.g. SPONSORS) on the left; rotating slides fill the rest. */
+#card .bhead{position:relative;z-index:1;display:none;align-items:center;flex:0 0 auto;padding:0 16px 0 24px}
+#card .bhead.show{display:flex}
+#card .bhead span{
+  font-weight:900;text-transform:uppercase;letter-spacing:.1em;line-height:1;white-space:nowrap;
+  color:var(--accent,#ff4655);text-shadow:0 2px 8px rgba(0,0,0,.5);
+  border-right:2px solid var(--accent,#ff4655);padding-right:18px;
+}
+#card .stage{position:relative;z-index:1;flex:1;min-width:0}
+#card.slant-left .inner{clip-path:polygon(0 0, 100% 0, 100% 100%, 23px 100%)}
+#card.slant-box .inner, #card.no-angle .inner{clip-path:none}
+/* faint diagonal texture + brand wash, like the reference banners */
+#card .inner::before{
+  content:'';position:absolute;inset:0;pointer-events:none;
+  background:
+    repeating-linear-gradient(125deg, rgba(255,255,255,.018) 0 2px, transparent 2px 26px),
+    radial-gradient(130% 160% at 0% 0%, var(--brand-glow, rgba(139,92,246,.16)) 0%, transparent 55%);
+}
+.slide{
+  position:absolute;inset:0;display:flex;align-items:center;gap:22px;
+  padding:10px 36px 10px 26px;
+  opacity:0;transform:translateX(18px);transition:opacity .5s ease, transform .5s ease;
+}
+.slide.in{opacity:1;transform:none}
+.slide.no-text{justify-content:center;padding:10px 42px}
+.slide .logo-wrap{flex:0 0 24%;height:74%;display:flex;align-items:center;justify-content:flex-start}
+.slide.no-text .logo-wrap{flex:0 1 auto;height:82%;justify-content:center}
+.slide .logo{max-height:100%;max-width:100%;object-fit:contain;filter:drop-shadow(0 2px 9px rgba(0,0,0,.6))}
+.slide .text{
+  flex:1;min-width:0;height:80%;display:flex;flex-direction:column;justify-content:center;
+  color:#fff;font-weight:800;text-transform:uppercase;line-height:1.04;letter-spacing:.005em;
+  text-shadow:0 2px 9px rgba(0,0,0,.55);overflow:hidden;
+}
+.slide.no-text .text{display:none}
+.slide .text .ln{display:block;white-space:nowrap}
+.slide .text i{font-style:italic;color:var(--accent,#ff4655);font-weight:900}
+
+/* ── Plain: bare full-bleed rotating image (pre-made banner graphics) ── */
+#plain{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;opacity:0;transition:opacity .5s}
+#plain.show{opacity:1}
+#plain.bg{background:rgba(7,9,15,.88);border-radius:10px;border:1px solid rgba(255,255,255,.10)}
+#plain img{display:block;width:100%;height:100%;object-fit:contain;transition:opacity .4s}
+#plain img.fit-cover{object-fit:cover}
+#plain img.fit-fill{object-fit:fill}
+#plain img.fade{opacity:0}
+</style>
+</head>
+<body>
+<div id="card">
+  <div class="inner">
+    <div class="bhead" id="bhead"><span id="bhead-text"></span></div>
+    <div class="stage">
+      <div class="slide" id="slide-a"><div class="logo-wrap"><img class="logo" alt=""></div><div class="text"></div></div>
+      <div class="slide" id="slide-b"><div class="logo-wrap"><img class="logo" alt=""></div><div class="text"></div></div>
+    </div>
+  </div>
+</div>
+<div id="plain"><img id="plain-img" src="" alt=""></div>
+
+<script src="scene-base.js"></script>
+<script>
+const params  = new URLSearchParams(location.search);
+const style   = (params.get('style') || 'card').toLowerCase();   // card | plain
+const showBg  = params.get('bg') === '1';
+const fitMode = params.get('fit') || 'contain';
+const srcMode = params.get('src') || 'auto';                     // auto | main | brand
+const pinBrand = params.get('brand') || '';
+
+function findKit(state, id) { return (state.brandKits || []).find(function (k) { return k.id === id; }); }
+function zipSlides(images, captions) {
+  images = Array.isArray(images) ? images : [];
+  captions = Array.isArray(captions) ? captions : [];
+  return images.filter(Boolean).map(function (src, i) { return { src: src, text: captions[i] || '' }; });
+}
+// A brand kit's slides = its banner images (+ captions) then its sponsors tagged "banner".
+function combineKitBanner(kit) {
+  if (!kit) return { slides: [], interval: 10 };
+  const slides = zipSlides(kit.bannerImages, kit.bannerCaptions);
+  const sponsorSlides = (Array.isArray(kit.sponsors) ? kit.sponsors : [])
+    .filter(function (s) { return s && s.logo && s.placements && s.placements.banner; })
+    .map(function (s) { return { src: s.logo, text: '' }; });
+  return { slides: slides.concat(sponsorSlides), interval: Number(kit.bannerInterval) > 0 ? Number(kit.bannerInterval) : 10 };
+}
+function mainBannerData(state) {
+  const mb = state.mainBanner || state.banner || {};
+  return { slides: zipSlides(mb.images, mb.captions), interval: mb.interval || 10, visible: !!mb.visible };
+}
+
+function resolveBanner(state) {
+  if (pinBrand) { const b = combineKitBanner(findKit(state, pinBrand)); return { slides: b.slides, interval: b.interval, visible: b.slides.length > 0 }; }
+  if (srcMode === 'brand') { const b = combineKitBanner(findKit(state, state.activeBrandKitId)); return { slides: b.slides, interval: b.interval, visible: b.slides.length > 0 }; }
+  if (srcMode === 'main') { const m = mainBannerData(state); return { slides: m.slides, interval: m.interval, visible: m.visible && m.slides.length > 0 }; }
+  // auto: the active brand's banner if it has content, else the Main Banner — gated by Visibility.
+  const main = mainBannerData(state);
+  const kit = combineKitBanner(findKit(state, state.activeBrandKitId));
+  const slides = kit.slides.length ? kit.slides : main.slides;
+  return { slides: slides, interval: kit.slides.length ? kit.interval : main.interval, visible: main.visible && slides.length > 0 };
+}
+
+// Brand colours for the stroke / accent / glow.
+function hexToRgb(hex) {
+  hex = String(hex || '').replace('#', '');
+  if (hex.length === 3) hex = hex.split('').map(function (c) { return c + c; }).join('');
+  if (hex.length !== 6) return null;
+  const n = parseInt(hex, 16);
+  return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 };
+}
+// The brand kit driving this banner's colours + slant (null for the Main Banner).
+function currentKit(state) {
+  if (pinBrand) return findKit(state, pinBrand);
+  if (srcMode === 'brand' || srcMode === 'auto') return findKit(state, state.activeBrandKitId);
+  return null;
+}
+function brandColors(state) {
+  const b = currentKit(state) || {};
+  return { color: b.color || '#8b5cf6', accent: b.accent || b.color || '#ff4655' };
+}
+// Slant side: ?slant= overrides; else the kit's saved bannerSlant (brand sources) or the Main
+// Banner's slant (main source); else right. (?angle=0 = box.)
+const paramSlant = params.get('slant');
+function effectiveSlant(state) {
+  if (paramSlant) return paramSlant;
+  const kit = currentKit(state);
+  if (kit) return kit.bannerSlant || 'right';
+  const mb = state.mainBanner || state.banner || {};
+  return mb.slant || 'right';
+}
+function applySlant(state) {
+  const s = effectiveSlant(state);
+  card.classList.toggle('slant-left', s === 'left');
+  card.classList.toggle('slant-box', s === 'box');
+}
+// Optional header text (e.g. SPONSORS) — kit's bannerHeader for brand sources, the Main Banner's
+// header for the main source.
+function effectiveHeader(state) {
+  const kit = currentKit(state);
+  if (kit) return (kit.bannerHeader || '').trim();
+  const mb = state.mainBanner || state.banner || {};
+  return (mb.header || '').trim();
+}
+function applyHeader(state) {
+  const hdr = effectiveHeader(state);
+  if (hdr) {
+    bheadText.textContent = hdr;
+    bhead.classList.add('show');
+    const h = inner.clientHeight || 0;
+    if (h) bheadText.style.fontSize = Math.max(11, Math.round(h * 0.34)) + 'px';
+  } else {
+    bhead.classList.remove('show');
+  }
+}
+
+const card    = document.getElementById('card');
+const inner   = card.querySelector('.inner');
+const bhead   = document.getElementById('bhead');
+const bheadText = document.getElementById('bhead-text');
+const slideA  = document.getElementById('slide-a');
+const slideB  = document.getElementById('slide-b');
+const plain   = document.getElementById('plain');
+const plainImg = document.getElementById('plain-img');
+
+if (params.get('angle') === '0') card.classList.add('no-angle');
+// Aspect ratio of the rectangle (default 1100:250). ?ar=1100:250 or ?ar=4.4 to customise; ?fill=1 to fill the source.
+if (params.get('fill') === '1') card.classList.add('fill');
+else if (params.get('ar')) card.style.setProperty('--ar', params.get('ar').replace(':', ' / '));
+if (style === 'plain') {
+  card.style.display = 'none';
+  if (showBg) plain.classList.add('bg');
+  if (fitMode === 'cover') plainImg.classList.add('fit-cover');
+  else if (fitMode === 'fill') plainImg.classList.add('fit-fill');
+} else {
+  plain.style.display = 'none';
+}
+
+function esc(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+// Shrink the text to fit its box (lines are nowrap; multi-line shrinks on height).
+function fitText(box) {
+  let size = Math.max(12, Math.floor(box.clientHeight));
+  box.style.fontSize = size + 'px';
+  let guard = 0;
+  while ((box.scrollWidth > box.clientWidth + 1 || box.scrollHeight > box.clientHeight + 1) && size > 10 && guard++ < 80) {
+    size -= 2; box.style.fontSize = size + 'px';
+  }
+}
+function buildSlide(slideEl, slide) {
+  const img = slideEl.querySelector('.logo');
+  const txt = slideEl.querySelector('.text');
+  img.src = slide.src || '';
+  const hasText = !!(slide.text && slide.text.trim());
+  slideEl.classList.toggle('no-text', !hasText);
+  if (hasText) {
+    txt.innerHTML = String(slide.text).split(/\r?\n/).map(function (ln) {
+      return '<span class="ln">' + esc(ln).replace(/\*([^*]+)\*/g, '<i>$1</i>') + '</span>';
+    }).join('');
+    fitText(txt);
+  } else { txt.innerHTML = ''; }
+}
+
+let _slides = [], _idx = 0, _timer = null, _lastKey = '', _curSlide = slideA;
+
+function showCardSlide(i) {
+  if (!_slides.length) return;
+  _idx = ((i % _slides.length) + _slides.length) % _slides.length;
+  const next = (_curSlide === slideA) ? slideB : slideA;
+  buildSlide(next, _slides[_idx]);
+  _curSlide.classList.remove('in');
+  void next.offsetWidth;
+  next.classList.add('in');
+  _curSlide = next;
+}
+
+function renderCard(state, resolved) {
+  applySlant(state);
+  applyHeader(state);
+  const c = brandColors(state);
+  const brgb = hexToRgb(c.color)  || { r: 139, g: 92, b: 246 };
+  card.style.setProperty('--brand', c.color);
+  card.style.setProperty('--accent', c.accent);
+  card.style.setProperty('--brand-glow', 'rgba(' + brgb.r + ',' + brgb.g + ',' + brgb.b + ',0.16)');
+
+  const slides = resolved.slides;
+  if (!resolved.visible || !slides.length) {
+    card.classList.remove('show');
+    clearInterval(_timer); _timer = null; _slides = []; _lastKey = '';
+    return;
+  }
+  card.classList.add('show');
+  const key = slides.map(function (s) { return s.src + '' + s.text; }).join('|');
+  if (key !== _lastKey) {
+    _lastKey = key; _slides = slides; _idx = 0;
+    slideA.classList.remove('in'); slideB.classList.remove('in'); _curSlide = slideB;
+    showCardSlide(0);
+    clearInterval(_timer); _timer = null;
+  }
+  const interval = Math.max(3, resolved.interval || 10) * 1000;
+  if (!_timer && _slides.length > 1) _timer = setInterval(function () { showCardSlide(_idx + 1); }, interval);
+}
+
+function renderPlain(resolved) {
+  const images = resolved.slides.map(function (s) { return s.src; });
+  if (!resolved.visible || !images.length) {
+    plain.classList.remove('show');
+    clearInterval(_timer); _timer = null; _slides = []; _lastKey = '';
+    return;
+  }
+  plain.classList.add('show');
+  const key = images.join('|');
+  if (key !== _lastKey) { _lastKey = key; _slides = images; _idx = 0; clearInterval(_timer); _timer = null; plainImg.src = images[0]; }
+  const interval = Math.max(3, resolved.interval || 10) * 1000;
+  if (!_timer && _slides.length > 1) {
+    _timer = setInterval(function () {
+      _idx = (_idx + 1) % _slides.length;
+      plainImg.classList.add('fade');
+      setTimeout(function () { plainImg.src = _slides[_idx]; plainImg.classList.remove('fade'); }, 420);
+    }, interval);
+  }
+}
+
+function render(state) {
+  const resolved = resolveBanner(state);
+  if (style === 'plain') renderPlain(resolved);
+  else renderCard(state, resolved);
+}
+
+// Re-fit text when the source is resized in OBS.
+window.addEventListener('resize', function () {
+  const box = _curSlide && _curSlide.querySelector('.text');
+  if (box && _curSlide.classList.contains('in') && !_curSlide.classList.contains('no-text')) fitText(box);
+  if (bhead.classList.contains('show')) { const h = inner.clientHeight || 0; if (h) bheadText.style.fontSize = Math.max(11, Math.round(h * 0.34)) + 'px'; }
+});
+
+SceneBase.connect(render);
+</script>
+</body>
+</html>

@@ -1,0 +1,10 @@
+{
+  "id": "default",
+  "name": "Default Theme",
+  "version": "1.0.0",
+  "supports": {
+    "facecams": true,
+    "statsScreen": true,
+    "sceneTransitions": true
+  }
+}

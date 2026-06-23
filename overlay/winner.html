@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<!--
+  NE Broadcast Suite post-match WINNER screen — ported from EsportsDashBoard winner_page.html.
+  Driven by full_state.winner:
+    { visible, side:'blue'|'orange', name, logo, color, subtitle }
+  If `side` is set the team's name/logo/colour are resolved from full_state.teams;
+  otherwise name/logo/color are used directly. Toggle on-air from the control panel.
+-->
+<head>
+  <meta charset="UTF-8">
+  <title>NE Broadcast Suite — Winner</title>
+  <link rel="stylesheet" href="scene.css" />
+  <style>
+    body { text-transform: none; }
+    #winner-stage { opacity: 0; transition: opacity 0.4s ease; }
+    #winner-stage.show { opacity: 1; }
+
+    .winner-logo {
+      position: absolute; width: 460px; height: 460px;
+      left: calc(50% - 230px); top: calc(50% - 280px);
+      background-size: contain; background-repeat: no-repeat; background-position: center;
+      filter: drop-shadow(0 8px 40px rgba(0,0,0,.55));
+      animation: winner-rise 1s 0.2s backwards cubic-bezier(0, 0, 0, 1);
+    }
+    @keyframes winner-rise { 0% { opacity: 0; transform: translateY(80px) scale(.9); } 100% { opacity: 1; transform: translateY(0) scale(1); } }
+
+    .winner-text {
+      position: absolute; bottom: 120px; width: 100%;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      text-align: center;
+    }
+    .winner-text .name {
+      font-family: 'Rajdhani', var(--main-font); font-weight: 700; font-size: 5.2em;
+      text-transform: uppercase; color: #fff; letter-spacing: 0.02em;
+      border-bottom: 8px solid var(--accent); padding: 0 30px 12px;
+      animation: winner-slide 1s 0.6s backwards cubic-bezier(0, 0, 0, 1);
+    }
+    .winner-text .sub {
+      margin-top: 22px; font-family: 'Rajdhani', var(--main-font); font-weight: 600;
+      font-size: 1.8em; color: #cfd4dc; text-transform: uppercase; letter-spacing: 0.18em;
+      animation: winner-slide 1s 0.9s backwards cubic-bezier(0, 0, 0, 1);
+    }
+    @keyframes winner-slide { 0% { opacity: 0; transform: translateX(60px); } 100% { opacity: 1; transform: translateX(0); } }
+  </style>
+</head>
+<body>
+  <div class="altcolor"></div>
+  <div id="winner-stage">
+    <div class="winner-logo" id="winner-logo"></div>
+    <div class="winner-text">
+      <div class="name" id="winner-name">WINNER</div>
+      <div class="sub" id="winner-sub"></div>
+    </div>
+  </div>
+
+  <script src="scene-base.js"></script>
+  <script>
+    const stage = document.getElementById('winner-stage');
+    const logoEl = document.getElementById('winner-logo');
+    const nameEl = document.getElementById('winner-name');
+    const subEl  = document.getElementById('winner-sub');
+
+    function resolve(w, data) {
+      let name = w.name, logo = w.logo, color = w.color;
+      if (w.side === 'blue' || w.side === 'orange') {
+        const t = SceneBase.teamSide(data, w.side);
+        name = name || t.name;
+        logo = logo || t.logo;
+        color = color || t.color;
+      }
+      return { name: name || 'WINNER', logo: logo || null, color: color || null, subtitle: w.subtitle || '' };
+    }
+    function render(data) {
+      const w = data.winner || {};
+      stage.classList.toggle('show', !!w.visible);
+      if (!w.visible) return;
+      const r = resolve(w, data);
+      if (r.color) document.documentElement.style.setProperty('--accent', r.color);
+      nameEl.textContent = (r.name + ' WINS!').toUpperCase();
+      subEl.textContent = r.subtitle;
+      subEl.style.display = r.subtitle ? '' : 'none';
+      logoEl.style.backgroundImage = r.logo ? `url('${r.logo}')` : 'none';
+      logoEl.style.display = r.logo ? 'block' : 'none';
+    }
+    SceneBase.connect(render);
+
+    // Preview: replay the full reveal sequence every ~7 s (2 s animation + 5 s pause).
+    if (SceneBase.preview) {
+      var _restart = function() {
+        document.querySelectorAll('div.altcolor, .winner-logo, .winner-text .name, .winner-text .sub').forEach(function(el) {
+          el.style.animation = 'none'; void el.offsetWidth; el.style.animation = '';
+        });
+      };
+      setTimeout(function _tick() { _restart(); setTimeout(_tick, 7000); }, 7000);
+    }
+  </script>
+</body>
+</html>

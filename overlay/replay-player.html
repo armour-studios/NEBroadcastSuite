@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>NE Broadcast Suite — Replay / Montage Player</title>
+<!--
+  REPLAY-TO-SCREEN browser source.
+  Add ONE browser source pointing here (http://localhost:3000/replay-player.html)
+  with audio enabled ("Control audio via OBS" off, or routed as you like). The
+  REPLAYS page in the control panel pushes clip/montage video URLs here:
+    replay_play  { url, name, loop, trimIn, trimOut, transition, transitionLogo }
+                                      → plays the trimmed range fullscreen with sound,
+                                        easing between clips (cut / fade / logo).
+    replay_stop  {}                    → clears the source (transparent)
+  The player reports playback back to the panel so producers see time remaining
+  and the page can return to the prior scene when a replay ends:
+    replay_progress { bus, currentTime, duration, remaining }   (relative to the trim range)
+    replay_ended    { bus }
+  Current selection is also carried in full_state.replay so a fresh load resumes
+  whatever is live.
+-->
+<style>
+  html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: transparent; }
+  #stage { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: #000; }
+  #stage.idle { background: transparent; }
+  video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #000;
+    opacity: 0; transition: opacity .26s ease; }
+  video.show { opacity: 1; }
+  #logo { position: absolute; max-width: 42%; max-height: 42%; object-fit: contain; opacity: 0;
+    transition: opacity .26s ease; pointer-events: none; filter: drop-shadow(0 6px 26px rgba(0,0,0,.6)); }
+  #logo.show { opacity: 1; }
+  #label { position: absolute; left: 28px; bottom: 24px; font-family: 'Rajdhani', system-ui, sans-serif;
+    color: #fff; font-size: 22px; letter-spacing: .06em; text-transform: uppercase; text-shadow: 0 2px 8px rgba(0,0,0,.8);
+    opacity: 0; transition: opacity .3s; pointer-events: none; }
+  #label.show { opacity: .92; }
+</style>
+</head>
+<body>
+  <div id="stage" class="idle">
+    <video id="vid" playsinline></video>
+    <img id="logo" alt="">
+    <div id="label"></div>
+  </div>
+
+  <script>
+    const WS = 'ws://' + (location.hostname || 'localhost') + ':3001';
+    // Which bus this source plays: ?bus=program (default, live to air) or ?bus=preview (staging monitor).
+    const BUS = new URLSearchParams(location.search).get('bus') === 'preview' ? 'preview' : 'program';
+    const stage = document.getElementById('stage');
+    const vid = document.getElementById('vid');
+    const logo = document.getElementById('logo');
+    const label = document.getElementById('label');
+    let ws = null;
+    let currentUrl = null;
+    let transToken = 0;       // cancels a stale transition if a new play() interrupts it
+    // Active trim range + loop for the clip on screen (the player respects the producer's edit).
+    let curIn = 0;
+    let curOut = null;        // null → play to the natural end of the file
+    let curLoop = false;
+    let endedFired = false;
+
+    function sendWS(obj) { try { if (ws && ws.readyState === 1) ws.send(JSON.stringify(obj)); } catch (e) {} }
+    function wait(ms) { return new Promise((r) => setTimeout(r, ms)); }
+    function waitReady() {
+      return new Promise((res) => {
+        let done = false; const f = () => { if (done) return; done = true; res(); };
+        if (curIn > 0) {
+          // resolve once we've landed on the in-point (avoids flashing frame 0)
+          if (vid.readyState >= 2 && Math.abs(vid.currentTime - curIn) < 0.15) return f();
+          vid.addEventListener('seeked', f, { once: true });
+          setTimeout(f, 1500);
+        } else {
+          if (vid.readyState >= 2) return f();
+          vid.addEventListener('loadeddata', f, { once: true });
+          setTimeout(f, 1500);
+        }
+      });
+    }
+
+    // Jump to the in-point once the file knows its dimensions/duration.
+    vid.addEventListener('loadedmetadata', () => {
+      if (curIn > 0 && vid.currentTime < curIn - 0.05) { try { vid.currentTime = curIn; } catch (e) {} }
+    });
+
+    function swapAndPlay(url, keepHidden) {
+      currentUrl = url;
+      stage.classList.remove('idle');
+      vid.loop = false;          // looping is handled manually so it respects the trim range
+      vid.src = url;
+      vid.muted = false; vid.volume = 1;
+      // Filename caption intentionally hidden on the program output.
+      label.textContent = ''; label.classList.remove('show');
+      const p = vid.play();
+      if (p && p.catch) p.catch(() => { /* autoplay blocked; OBS allows it */ });
+      if (!keepHidden) {
+        if (curIn > 0) {
+          // Hold black until we land on the in-point, so frame 0 never flashes.
+          let shown = false; const reveal = () => { if (shown) return; shown = true; requestAnimationFrame(() => vid.classList.add('show')); };
+          vid.addEventListener('seeked', reveal, { once: true });
+          setTimeout(reveal, 600);
+        } else {
+          requestAnimationFrame(() => vid.classList.add('show'));
+        }
+      }
+    }
+
+    async function play(url, name, loop, transition, logoUrl, trimIn, trimOut) {
+      if (!url) { stop(); return; }
+      curIn = (typeof trimIn === 'number' && trimIn > 0) ? trimIn : 0;
+      curOut = (typeof trimOut === 'number' && trimOut > curIn) ? trimOut : null;
+      curLoop = !!loop;
+      endedFired = false;
+      const sameUrl = url === currentUrl;
+      const wasLive = !stage.classList.contains('idle');
+      transition = transition || 'cut';
+
+      if (sameUrl && wasLive) {   // already up — just make sure it's rolling
+        vid.muted = false; vid.volume = 1;
+        const p = vid.play(); if (p && p.catch) p.catch(() => {});
+        return;
+      }
+
+      // First time on air, or a hard cut → swap straight in (with a quick fade-up).
+      if (!wasLive || transition === 'cut') { swapAndPlay(url); return; }
+
+      // Easing between clips: dip the outgoing clip out, optionally flash a logo, swap, ease in.
+      const tok = ++transToken;
+      vid.classList.remove('show');
+      if (transition === 'logo' && logoUrl) { logo.src = logoUrl; logo.classList.add('show'); }
+      await wait(270);
+      if (tok !== transToken) return;            // a newer play() took over
+      swapAndPlay(url, true);                     // load next, held at opacity 0
+      await waitReady();
+      if (tok !== transToken) return;
+      if (transition === 'logo') { await wait(220); logo.classList.remove('show'); }
+      vid.classList.add('show');
+    }
+
+    function stop() {
+      transToken++;
+      currentUrl = null;
+      curIn = 0; curOut = null; curLoop = false; endedFired = false;
+      vid.pause();
+      vid.removeAttribute('src');
+      vid.load();
+      vid.classList.remove('show');
+      logo.classList.remove('show');
+      stage.classList.add('idle');
+      label.classList.remove('show');
+    }
+
+    function reachEnd() {
+      if (endedFired) return;
+      endedFired = true;
+      vid.pause();
+      label.classList.remove('show');
+      sendWS({ type: 'replay_ended', data: { bus: BUS } });
+    }
+
+    // Enforce the out-point + report playback (time-remaining relative to the trim range).
+    let lastSent = 0;
+    vid.addEventListener('timeupdate', () => {
+      if (curOut != null && vid.currentTime >= curOut - 0.02) {
+        if (curLoop) { try { vid.currentTime = curIn; } catch (e) {} }
+        else { reachEnd(); return; }
+      }
+      const t = Date.now();
+      if (t - lastSent < 400) return;
+      lastSent = t;
+      const outAt = (curOut != null ? curOut : (vid.duration || 0));
+      const cur = Math.max(0, (vid.currentTime || 0) - curIn);
+      const span = Math.max(0, outAt - curIn);
+      sendWS({ type: 'replay_progress', data: { bus: BUS, currentTime: cur, duration: span, remaining: Math.max(0, outAt - (vid.currentTime || 0)) } });
+    });
+
+    // Natural end of file (used when there's no explicit out-point).
+    vid.addEventListener('ended', () => {
+      if (curLoop) { endedFired = false; try { vid.currentTime = curIn; } catch (e) {} const p = vid.play(); if (p && p.catch) p.catch(() => {}); }
+      else reachEnd();
+    });
+
+    function handle(m) {
+      if (m.type === 'replay_play') { const d = m.data || {}; if ((d.bus || 'program') === BUS) play(d.url, d.name, d.loop, d.transition, d.transitionLogo, d.trimIn, d.trimOut); }
+      else if (m.type === 'replay_stop') { const d = m.data || {}; if ((d.bus || 'program') === BUS) stop(); }
+      else if (m.type === 'full_state') {
+        const r = m.data && m.data.replay && m.data.replay[BUS];
+        if (r && r.playing && r.url) play(r.url, r.name, r.loop, r.transition, '', r.trimIn, r.trimOut);
+        else stop();
+      }
+    }
+
+    function connect() {
+      ws = new WebSocket(WS);
+      ws.onopen = () => ws.send(JSON.stringify({ type: 'request_state' }));
+      ws.onmessage = ({ data }) => { let m; try { m = JSON.parse(data); } catch { return; } handle(m); };
+      ws.onclose = () => setTimeout(connect, 3000);
+      ws.onerror = () => { try { ws.close(); } catch {} };
+    }
+    connect();
+  </script>
+</body>
+</html>

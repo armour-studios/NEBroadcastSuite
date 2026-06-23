@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<!--
+  NE Broadcast Suite team line-up / player intro — ported & generalised from EsportsDashBoard heroes1/heroes2.
+  Driven by full_state.intro: { visible, side:'blue'|'orange', title, style }
+  Renders the chosen team (full_state.teams[side]) — logo + name header and a card per
+  roster player (name + handle). Player photos render when a roster entry has `photo`/`image`;
+  otherwise a clean name-plate card is shown (our RL/CS2 rosters carry no hero art).
+  ?side=blue|orange overrides the configured side (handy for two pre-built OBS sources).
+-->
+<head>
+  <meta charset="UTF-8">
+  <title>NE Broadcast Suite — Line-up</title>
+  <link rel="stylesheet" href="scene.css" />
+  <style>
+    body { text-transform: none; }
+    #intro-stage { opacity: 0; transition: opacity 0.35s ease; }
+    #intro-stage.show { opacity: 1; }
+
+    @keyframes herowipe   { 0% { clip-path: polygon(0 0, 0 0, 0 100%, 0 100%); } 100% { clip-path: polygon(0 0, 100% 0, 100% 100%, 0 100%); } }
+    @keyframes topmove    { 0% { top: -160px; } 100% { top: 40px; } }
+
+    .top {
+      position: absolute; top: 40px; left: 230px; width: 1460px; height: 132px;
+      border-style: solid; border-width: 0 0 0 7px; border-color: var(--team-color, var(--accent));
+      background: var(--scene-bg); color: #fff; display: flex; align-items: center;
+      animation: topmove 1.2s 0.5s backwards;
+    }
+    .top .logo { width: 132px; height: 112px; margin: 0 24px 0 30px; background-position: center; background-size: contain; background-repeat: no-repeat; flex: 0 0 auto; }
+    .top .teamname { font-family: 'Rajdhani', var(--main-font); font-weight: 700; text-transform: uppercase; font-size: 4.4em; line-height: 0.9; }
+    .top .subtitle { position: absolute; right: 30px; bottom: 14px; font-family: 'Rajdhani', var(--main-font); font-weight: 600; font-size: 1.5em; color: var(--accent); letter-spacing: 0.2em; text-transform: uppercase; }
+
+    .players-grid { position: absolute; top: 260px; left: 0; right: 0; display: flex; flex-wrap: wrap; justify-content: center; gap: 50px; padding: 0 60px; }
+    .player-card { width: 453px; display: flex; flex-direction: column; animation: herowipe 1s backwards; }
+    .hero-image { width: 453px; height: 300px; background: linear-gradient(160deg, #20242b, #0d0f12); overflow: hidden; position: relative; }
+    .hero-image img { width: 100%; height: 100%; object-fit: cover; object-position: top; }
+    .hero-image .placeholder { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-family: 'Rajdhani', var(--main-font); font-weight: 700; font-size: 7em; color: var(--team-color, var(--accent)); opacity: 0.85; }
+    .player-info {
+      height: 88px; background: #fff; color: var(--scene-bg); position: relative;
+      border-style: solid; border-width: 0 0 0 7px; border-color: var(--team-color, var(--accent));
+      display: flex; align-items: center; padding: 0 18px;
+    }
+    .player-info .battletag { font-family: 'Rajdhani', var(--main-font); font-weight: 700; text-transform: uppercase; font-size: 2.4em; }
+    .player-info .handle { position: absolute; right: 18px; bottom: 16px; font-family: 'Rajdhani', var(--main-font); font-weight: 600; font-size: 1.5em; color: #5a6068; text-transform: none; }
+  </style>
+</head>
+<body>
+  <div id="intro-stage">
+    <div class="top">
+      <span class="logo" id="intro-logo"></span>
+      <span class="teamname" id="intro-team"></span>
+      <span class="subtitle" id="intro-sub"></span>
+    </div>
+    <div class="players-grid" id="intro-grid"></div>
+  </div>
+
+  <script src="scene-base.js"></script>
+  <script>
+    const stage  = document.getElementById('intro-stage');
+    const logoEl = document.getElementById('intro-logo');
+    const teamEl = document.getElementById('intro-team');
+    const subEl  = document.getElementById('intro-sub');
+    const grid   = document.getElementById('intro-grid');
+    const sideOverride = SceneBase.qp('side');
+    let _sig = '';
+
+    function initials(name) { return (name || '?').trim().slice(0, 2).toUpperCase(); }
+
+    function render(data) {
+      const intro = data.intro || {};
+      stage.classList.toggle('show', !!intro.visible);
+      if (!intro.visible) return;
+
+      const side = (sideOverride === 'blue' || sideOverride === 'orange') ? sideOverride : (intro.side || 'blue');
+      const team = SceneBase.teamSide(data, side);
+
+      const sig = JSON.stringify({ side, title: intro.title, name: team.name, logo: team.logo, color: team.color, players: team.players });
+      if (sig === _sig) return;
+      _sig = sig;
+
+      document.documentElement.style.setProperty('--team-color', team.color);
+      teamEl.textContent = team.name;
+      subEl.textContent = intro.title || 'STARTING LINE-UP';
+      logoEl.style.backgroundImage = team.logo ? `url('${team.logo}')` : 'none';
+
+      grid.innerHTML = '';
+      const players = team.players.length ? team.players : [{ name: 'TBD' }];
+      const per = players.length <= 3 ? players.length : (players.length <= 8 ? 4 : 5);
+      grid.style.maxWidth = (per * 453 + (per - 1) * 50 + 120) + 'px';
+      grid.style.marginInline = 'auto';
+
+      players.forEach((p, i) => {
+        const photo = p.photo || p.image || null;
+        const handle = p.handle || (p.platformId ? '@' + p.platformId : '') || p.role || '';
+        const card = document.createElement('div');
+        card.className = 'player-card';
+        card.style.animationDelay = (0.9 + i * 0.18) + 's';
+        card.innerHTML = `
+          <div class="hero-image">${photo ? `<img src="${photo}" alt="">` : `<div class="placeholder">${initials(p.name)}</div>`}</div>
+          <div class="player-info">
+            <span class="battletag">${(p.name || 'Player ' + (i + 1))}</span>
+            ${handle ? `<span class="handle">${handle}</span>` : ''}
+          </div>`;
+        grid.appendChild(card);
+      });
+    }
+    SceneBase.connect(render);
+
+    if (location.protocol === 'file:') {
+      render({ teams: { blue: { name: 'Frost Esports', color: '#3b82f6', logo: null,
+        players: [{ name: 'Aqua', platformId: 'aqua' }, { name: 'Nova', platformId: 'nova' }, { name: 'Rhythm', platformId: 'rhythm' }] } },
+        intro: { visible: true, side: 'blue', title: 'Starting Line-up' } });
+    }
+  </script>
+</body>
+</html>

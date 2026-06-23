@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Twitch Alerts</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: transparent;
+      font-family: 'Inter', sans-serif;
+      color: white;
+      overflow: hidden;
+      width: 100%;
+      height: 100%;
+    }
+
+    #prediction-container {
+      position: absolute;
+      bottom: 20px;
+      right: 20px;
+      width: 420px;
+      background: rgba(0, 0, 0, 0.92);
+      border: 2px solid #055FDB;
+      border-radius: 8px;
+      padding: 16px;
+      display: none;
+      animation: slideIn 0.4s ease-out;
+      box-shadow: 0 8px 32px rgba(5, 95, 219, 0.3);
+    }
+
+    @keyframes slideIn {
+      from { transform: translateX(450px); opacity: 0; }
+      to { transform: translateX(0); opacity: 1; }
+    }
+
+    @keyframes pulse {
+      0% { opacity: 1; }
+      50% { opacity: 0.7; }
+      100% { opacity: 1; }
+    }
+
+    .prediction-title {
+      font-weight: 700;
+      font-size: 14px;
+      margin-bottom: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: #60A5FA;
+    }
+
+    .prediction-state {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: #9CA3AF;
+      margin-bottom: 8px;
+    }
+
+    .outcomes {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .outcome {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 6px;
+      font-size: 13px;
+      transition: all 0.2s;
+    }
+
+    .outcome:hover {
+      background: rgba(255, 255, 255, 0.08);
+      border-color: rgba(255, 255, 255, 0.2);
+    }
+
+    .outcome-bar {
+      flex: 1;
+      height: 22px;
+      background: rgba(255, 255, 255, 0.08);
+      border-radius: 4px;
+      overflow: hidden;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      position: relative;
+    }
+
+    .outcome-fill {
+      height: 100%;
+      background: linear-gradient(90deg, #4ECDC4, #45B7B1);
+      transition: width 0.3s ease;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 10px;
+      font-weight: 700;
+      color: white;
+      min-width: 30px;
+    }
+
+    .outcome-text {
+      width: 100px;
+      font-weight: 600;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .vote-count {
+      min-width: 45px;
+      text-align: right;
+      color: #FFE66D;
+      font-weight: 700;
+      font-size: 12px;
+    }
+
+    .prediction-footer {
+      font-size: 10px;
+      color: #9CA3AF;
+      margin-top: 10px;
+      text-align: center;
+      border-top: 1px solid rgba(255, 255, 255, 0.1);
+      padding-top: 8px;
+    }
+
+    .status-badge {
+      display: inline-block;
+      padding: 2px 8px;
+      background: rgba(76, 205, 196, 0.2);
+      border: 1px solid #4ECDC4;
+      border-radius: 12px;
+      font-size: 10px;
+      font-weight: 700;
+      color: #4ECDC4;
+      text-transform: uppercase;
+    }
+
+    .status-badge.locked {
+      background: rgba(245, 101, 101, 0.2);
+      border-color: #F56565;
+      color: #F56565;
+    }
+  </style>
+</head>
+<body>
+
+<div id="prediction-container">
+  <div>
+    <div class="prediction-title" id="pred-title">Prediction</div>
+    <div class="prediction-state">
+      <span class="status-badge" id="pred-status-badge">ACTIVE</span>
+    </div>
+  </div>
+  <div class="outcomes" id="pred-outcomes"></div>
+  <div class="prediction-footer">
+    <span id="pred-timer">Voting ends in ~3 min</span>
+  </div>
+</div>
+
+<script src="scene-base.js"></script>
+<script>
+  let currentPrediction = null;
+  let timerInterval = null;
+
+  function formatCountdown(endsAt) {
+    if (!endsAt) return '—';
+    const now = Date.now();
+    const diff = new Date(endsAt).getTime() - now;
+    if (diff <= 0) return 'Ended';
+    const minutes = Math.floor(diff / 60000);
+    const seconds = Math.floor((diff % 60000) / 1000);
+    return `${minutes}m ${seconds}s`;
+  }
+
+  function updatePredictionDisplay(pred) {
+    if (!pred) return;
+
+    const title = document.getElementById('pred-title');
+    const outcomes = document.getElementById('pred-outcomes');
+    const statusBadge = document.getElementById('pred-status-badge');
+    const timerEl = document.getElementById('pred-timer');
+
+    if (title) title.textContent = pred.title;
+
+    // Update status badge
+    if (statusBadge) {
+      statusBadge.textContent = pred.state?.toUpperCase() || 'ACTIVE';
+      statusBadge.classList.toggle('locked', pred.state === 'locked');
+    }
+
+    // Calculate total votes
+    const totalVotes = pred.outcomes.reduce((sum, o) => sum + (o.votes || 0), 0);
+
+    // Update outcomes
+    if (outcomes) {
+      outcomes.innerHTML = pred.outcomes.map(outcome => {
+        const percentage = totalVotes > 0 ? ((outcome.votes || 0) / totalVotes * 100).toFixed(0) : 0;
+        return `
+          <div class="outcome">
+            <div class="outcome-text">${outcome.title}</div>
+            <div class="outcome-bar">
+              <div class="outcome-fill" style="width: ${percentage}%">
+                ${percentage > 10 ? percentage + '%' : ''}
+              </div>
+            </div>
+            <div class="vote-count">${outcome.votes || 0}</div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    // Update timer
+    if (timerEl) {
+      timerEl.textContent = `Voting ends in ${formatCountdown(pred.endsAt)}`;
+    }
+  }
+
+  SceneBase.connect(state => {
+    if (!state.twitch?.predictions?.current) {
+      document.getElementById('prediction-container').style.display = 'none';
+      currentPrediction = null;
+      if (timerInterval) clearInterval(timerInterval);
+      return;
+    }
+
+    const pred = state.twitch.predictions.current;
+
+    if (!currentPrediction || currentPrediction.id !== pred.id) {
+      // New prediction
+      currentPrediction = pred;
+      document.getElementById('prediction-container').style.display = 'block';
+      updatePredictionDisplay(pred);
+
+      // Update timer every second
+      if (timerInterval) clearInterval(timerInterval);
+      timerInterval = setInterval(() => {
+        const timerEl = document.getElementById('pred-timer');
+        if (timerEl) {
+          timerEl.textContent = `Voting ends in ${formatCountdown(pred.endsAt)}`;
+        }
+      }, 1000);
+    } else {
+      // Update existing prediction
+      updatePredictionDisplay(pred);
+    }
+  });
+</script>
+
+</body>
+</html>

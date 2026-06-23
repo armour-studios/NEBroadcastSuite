@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Director Preview — Producer Only</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    width: 100%; height: 100%; overflow: hidden;
+    background: transparent;
+    font-family: 'Segoe UI', system-ui, sans-serif;
+  }
+  /* Producer-only bug — bottom-left, never add to program feed */
+  .director-bug {
+    position: fixed; left: 24px; bottom: 24px; z-index: 9999;
+    min-width: 320px; max-width: 480px;
+    background: rgba(8, 10, 16, 0.92);
+    border: 1px solid rgba(5, 95, 219, 0.55);
+    border-left: 4px solid #055fdb;
+    border-radius: 10px;
+    padding: 14px 16px;
+    color: #e8eaf0;
+    box-shadow: 0 12px 40px rgba(0,0,0,.55);
+    backdrop-filter: blur(8px);
+    transition: opacity .25s;
+  }
+  .director-bug.hidden { opacity: 0; pointer-events: none; }
+  .director-bug.off { border-left-color: #4a4d57; opacity: .5; }
+  .dp-label {
+    font-size: 10px; font-weight: 800; letter-spacing: .14em;
+    color: #055fdb; text-transform: uppercase; margin-bottom: 6px;
+  }
+  .dp-target { font-size: 22px; font-weight: 800; color: #fff; line-height: 1.2; }
+  .dp-reason { font-size: 13px; color: #b8c0cc; margin-top: 4px; }
+  .dp-meta {
+    display: flex; gap: 12px; margin-top: 10px; font-size: 11px;
+    color: #6b7280; text-transform: uppercase; letter-spacing: .06em;
+  }
+  .dp-conf {
+    margin-left: auto; font-weight: 800; color: #4ade80;
+    font-size: 14px;
+  }
+  .dp-alts { margin-top: 10px; border-top: 1px solid rgba(255,255,255,.08); padding-top: 8px; }
+  .dp-alt {
+    font-size: 11px; color: #9ca3af; padding: 3px 0;
+    display: flex; justify-content: space-between;
+  }
+  .dp-watermark {
+    position: fixed; top: 8px; right: 12px; font-size: 9px;
+    color: rgba(255,255,255,.25); letter-spacing: .1em; text-transform: uppercase;
+  }
+</style>
+</head>
+<body>
+<div class="dp-watermark">Producer · Director Preview</div>
+<div id="director-bug" class="director-bug hidden">
+  <div class="dp-label">Auto-Director</div>
+  <div class="dp-target" id="dp-target">—</div>
+  <div class="dp-reason" id="dp-reason"></div>
+  <div class="dp-meta">
+    <span id="dp-type"></span>
+    <span id="dp-time"></span>
+    <span class="dp-conf" id="dp-conf"></span>
+  </div>
+  <div class="dp-alts" id="dp-alts"></div>
+</div>
+<script>
+(function () {
+  const params = new URLSearchParams(location.search);
+  if (params.get('director') !== '1' && params.get('director') !== 'true') {
+    document.body.innerHTML = '<div style="color:#666;padding:20px;font-size:12px;">Add ?director=1 — producer preview only, not for broadcast.</div>';
+    return;
+  }
+
+  const bug = document.getElementById('director-bug');
+  const WS_URL = 'ws://localhost:3001';
+
+  function render(d) {
+    if (!d || !d.enabled) {
+      bug.classList.remove('hidden');
+      bug.classList.add('off');
+      document.getElementById('dp-target').textContent = 'Director off';
+      document.getElementById('dp-reason').textContent = '';
+      document.getElementById('dp-type').textContent = '';
+      document.getElementById('dp-time').textContent = '';
+      document.getElementById('dp-conf').textContent = '';
+      document.getElementById('dp-alts').innerHTML = '';
+      return;
+    }
+    bug.classList.remove('hidden', 'off');
+    const p = d.primary;
+    if (!p) {
+      document.getElementById('dp-target').textContent = 'Analyzing…';
+      document.getElementById('dp-reason').textContent = 'Waiting for moment';
+      return;
+    }
+    document.getElementById('dp-target').textContent = p.name || '?';
+    document.getElementById('dp-reason').textContent = p.reason || '';
+    document.getElementById('dp-type').textContent = p.type || '';
+    document.getElementById('dp-time').textContent = p.gameTime || '';
+    document.getElementById('dp-conf').textContent = (d.confidence || p.confidence || 0) + '%';
+    const alts = (d.alternates || []).slice(0, 3);
+    document.getElementById('dp-alts').innerHTML = alts.map(a =>
+      `<div class="dp-alt"><span>${a.name}</span><span>${a.confidence || 0}%</span></div>`
+    ).join('');
+  }
+
+  let ws;
+  function connect() {
+    ws = new WebSocket(WS_URL);
+    ws.onopen = () => ws.send(JSON.stringify({ type: 'request_state' }));
+    ws.onmessage = ({ data }) => {
+      let msg;
+      try { msg = JSON.parse(data); } catch { return; }
+      if (msg.type === 'full_state' && msg.data?.director) render(msg.data.director);
+      if (msg.type === 'director_update') render(msg.data);
+    };
+    ws.onclose = () => setTimeout(connect, 3000);
+    ws.onerror = () => { try { ws.close(); } catch {} };
+  }
+  connect();
+})();
+</script>
+</body>
+</html>

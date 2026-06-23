@@ -1,0 +1,2036 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1920">
+<title>NE Broadcast Suite — Valorant</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@600;700&family=Montserrat:wght@500;700;800&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --main-font:  'Rajdhani', 'Montserrat', sans-serif;
+    --accent:     #ff4655;
+    --accent-2:   #23c08a;
+    --atk-color:  #71edc0;   /* driven by blue team colour */
+    --def-color:  #eb535d;   /* driven by orange team colour */
+    --dark:       #101824;
+    --dark-trans: rgba(16, 24, 36, 0.58);
+    --atk-trans:  rgba(57, 123, 99, 0.71);
+    --def-trans:  rgba(145, 50, 56, 0.68);
+  }
+  [data-theme="midnight"] { --accent: #4aa3ff; --accent-2: #7c5cff; }
+  [data-theme="neon"]     { --accent: #00e5a0; --accent-2: #ff2e88; }
+
+  html, body {
+    width: 1920px; height: 1080px; overflow: hidden;
+    background: transparent;
+    font-family: var(--main-font);
+    -webkit-font-smoothing: antialiased;
+    color: #fff;
+  }
+  .hidden { display: none !important; }
+
+  /* ═══════════════════════════════════════════════════════════════════════
+     TOP SCOREHEAD — centered CS-style panel with spike mechanics
+  ══════════════════════════════════════════════════════════════════════════ */
+  .cs-head {
+    position: absolute; top: 0; left: 50%; transform: translateX(-50%);
+    display: flex; flex-direction: column; align-items: center; z-index: 10;
+    animation: headIn 0.5s cubic-bezier(.2,.7,.3,1) backwards;
+  }
+  @keyframes headIn { from { opacity: 0; transform: translateX(-50%) translateY(-18px); } }
+
+  .scorebar {
+    position: relative;
+    background: linear-gradient(180deg, rgba(20,23,31,0.96), rgba(11,13,19,0.96));
+    border: 1px solid rgba(255,255,255,0.12); border-top: none; border-radius: 0 0 14px 14px;
+    overflow: hidden; box-shadow: 0 12px 34px rgba(0,0,0,0.55);
+  }
+
+  /* Animated light that travels around the border */
+  .head-beam { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 40; pointer-events: none; overflow: visible; }
+  .head-beam path { fill: none; vector-effect: non-scaling-stroke; }
+  .head-beam .hb-base { stroke: rgba(255,255,255,0.10); stroke-width: 1.5; }
+  .head-beam .hb-beam {
+    stroke: #fff; stroke-width: 2; stroke-linecap: round;
+    stroke-dasharray: 13 87; filter: drop-shadow(0 0 4px rgba(255,255,255,0.85));
+    animation: headBeam 9s linear infinite;
+  }
+  @keyframes headBeam {
+    0%   { stroke-dashoffset: 0;   opacity: 1; }
+    58%  { stroke-dashoffset: -87; opacity: 1; }
+    64%  { stroke-dashoffset: -87; opacity: 0; }
+    100% { stroke-dashoffset: -87; opacity: 0; }
+  }
+
+  /* Event title bar */
+  .event-title {
+    position: relative; box-sizing: border-box; width: 960px;
+    text-align: center; padding: 5px 48px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    background: rgba(0,0,0,0.5);
+    font-size: 13px; font-weight: 700; letter-spacing: 3px; color: #d7dae0; text-transform: uppercase;
+  }
+  .event-title::after {
+    content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 1.5px;
+    background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.92) 50%, transparent 100%);
+  }
+
+  /* Topbar row */
+  .topbar { display: flex; align-items: stretch; height: 76px; position: relative; }
+  .team { display: flex; align-items: center; gap: 13px; padding: 0 20px; width: 360px; position: relative; overflow: hidden; }
+  .team.t-def { justify-content: flex-end; }
+
+  /* 4px team-colour accent on the bottom of each team panel */
+  .team::after { content: ''; position: absolute; bottom: 4px; left: 0; right: 0; height: 4px; opacity: 1; transition: opacity 0.35s ease; }
+  .team.t-atk::after { background: var(--atk-color,#71edc0); }
+  .team.t-def::after { background: var(--def-color,#eb535d); }
+  .team.fused::after { opacity: 0; }
+
+  /* Spike countdown fuse: replaces team-colour accent while spike is live */
+  .team .fuse { position: absolute; bottom: 4px; height: 4px; width: 0; display: none; z-index: 2;
+    background: linear-gradient(90deg, #ff5a2c, #ff1414); box-shadow: 0 0 12px rgba(255,40,30,0.9); }
+  .team.t-atk .fuse { right: 0; left: auto; }
+  .team.t-def .fuse { left: 0; right: auto; }
+  .team .fuse.danger { animation: barflash 0.4s steps(2) infinite; }
+  .team .fuse.defuse { background: linear-gradient(90deg, #2cff8a, #14d96e); box-shadow: 0 0 12px rgba(40,230,120,0.9); animation: none; }
+  .team.t-atk .fuse.defuse { left: 0; right: auto; }
+  .team.t-def .fuse.defuse { right: 0; left: auto; }
+  @keyframes barflash { 50% { opacity: 0.5; } }
+
+  .tlogo { width: 46px; height: 46px; object-fit: contain; flex-shrink: 0; filter: drop-shadow(0 2px 6px rgba(0,0,0,0.5)); }
+  .team-mid { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; gap: 4px; }
+  .team.t-def .team-mid { align-items: flex-end; }
+  .team .nm { display: block; font-weight: 700; font-size: 22px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+  .team.t-def .nm { text-align: right; }
+
+  /* Series dots */
+  .cs-series { display: flex; gap: 4px; }
+  .team.t-def .cs-series { flex-direction: row-reverse; }
+  .sb-dot { width: 9px; height: 9px; border-radius: 50%; background: rgba(255,255,255,0.16); transition: background 0.2s; }
+  .sb-dot.won-atk { background: var(--atk-color,#71edc0); box-shadow: 0 0 6px var(--atk-color,#71edc0); }
+  .sb-dot.won-def { background: var(--def-color,#eb535d); box-shadow: 0 0 6px var(--def-color,#eb535d); }
+
+  /* Score numbers */
+  .team .sc { font-weight: 700; font-size: 40px; font-variant-numeric: tabular-nums; min-width: 46px; text-align: center; }
+  .team.t-atk .sc { color: var(--atk-color,#71edc0); text-shadow: 0 0 20px rgba(113,237,192,0.45); }
+  .team.t-def .sc { color: var(--def-color,#eb535d); text-shadow: 0 0 20px rgba(235,83,93,0.45); }
+  .sc.bump { animation: numBump 0.5s ease-out; }
+  @keyframes numBump { 0% { transform: scale(1); } 35% { transform: scale(1.12); } 100% { transform: scale(1); } }
+
+  /* Center panel */
+  .mid { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+    padding: 0 20px; background: rgba(0,0,0,0.3); width: 240px; flex: 0 0 240px; overflow: hidden; }
+  .mid.planted-glow .cs-map, .mid.defusing-glow .cs-map { display: none; }
+  /* Large countdown number during spike events */
+  .timer { font-weight: 900; font-size: 34px; font-variant-numeric: tabular-nums; color: #e8ecf2; line-height: 1; letter-spacing: 1px; }
+  .timer.bomb { font-size: 40px; color: #ff4133; text-shadow: 0 0 18px rgba(255,65,51,0.85); animation: pulse 0.8s ease-in-out infinite; letter-spacing: 0; }
+  .timer.bomb.def { color: #4ad991; text-shadow: 0 0 16px rgba(74,217,145,0.8); animation: none; }
+  @keyframes pulse { 50% { opacity: 0.55; } }
+  /* center panel buy-phase state: swap timer for series label */
+  .mid-series {
+    font-size: 13px; font-weight: 700; letter-spacing: 2.5px; color: #e8ecf2;
+    white-space: nowrap; text-align: center; line-height: 1;
+    opacity: 0; max-height: 0; overflow: hidden;
+    transition: opacity 0.35s ease, max-height 0.35s ease;
+  }
+  .mid.buying { background: transparent; }
+  .mid .timer              { transition: opacity 0.35s ease, max-height 0.35s ease; }
+  /* Buy-phase full-width centered overlay — sits inside .topbar (position:relative) */
+  .buy-cover {
+    position: absolute; inset: 0; z-index: 8; pointer-events: none;
+    display: flex; align-items: center; justify-content: center;
+    opacity: 0; transition: opacity 0.35s ease;
+  }
+  .buy-cover.active { opacity: 1; }
+  .buy-cover-text { font-size: 18px; font-weight: 700; letter-spacing: 4px; color: #e8ecf2; white-space: nowrap; }
+
+  /* Pulsing spike logo — replaces the timer text when spike is planted */
+  .spike-planted-logo { width: 46px; height: 46px; object-fit: contain; }
+  @keyframes spikePulse {
+    0%, 100% { transform: scale(1);    filter: drop-shadow(0 0 6px rgba(255,65,51,0.55)); }
+    50%       { transform: scale(1.18); filter: drop-shadow(0 0 22px rgba(255,65,51,1)) drop-shadow(0 0 44px rgba(255,80,40,0.5)); }
+  }
+  @keyframes spikeDefusePulse {
+    0%, 100% { filter: drop-shadow(0 0 6px rgba(74,217,145,0.5)); }
+    50%       { filter: drop-shadow(0 0 20px rgba(74,217,145,1)); }
+  }
+  .spike-planted-logo.planted  { animation: spikePulse 1.4s ease-in-out infinite; }
+  .spike-planted-logo.defusing { animation: spikeDefusePulse 1.8s ease-in-out infinite; }
+  .mid.planted-glow { background: rgba(120,16,12,0.55); box-shadow: inset 0 0 26px rgba(255,50,40,0.5); animation: midPulse 1s ease-in-out infinite; }
+  .mid.defusing-glow { background: rgba(10,60,38,0.5); box-shadow: inset 0 0 24px rgba(60,220,130,0.4); animation: none; }
+  @keyframes midPulse { 0%,100% { box-shadow: inset 0 0 22px rgba(255,50,40,0.4); } 50% { box-shadow: inset 0 0 34px rgba(255,60,50,0.75); } }
+  .cs-map { font-size: 12px; font-weight: 700; letter-spacing: 2px; color: #cdd2da; text-transform: uppercase;
+    white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+  .cs-map:empty { display: none; }
+  .cs-map .bo { color: #8b909a; }
+  .roundlbl { font-size: 10px; letter-spacing: 2.5px; color: #8b909a; white-space: nowrap; }
+  .roundlbl.planted { font-size: 11px; font-weight: 800; letter-spacing: 2px; color: #ff4133;
+    text-shadow: 0 0 10px rgba(255,65,51,0.8); animation: pulse 0.8s ease-in-out infinite; }
+  .roundlbl.defusing { font-size: 11px; font-weight: 800; letter-spacing: 2px; color: #4ad991; }
+  .roundlbl.ot { color: #ffd34d; font-weight: 800; letter-spacing: 2px; }
+
+  /* Full-screen spike result flash (position:fixed so overflow:hidden can't clip it) */
+  .bomb-flash { position: fixed; inset: 0; display: none; align-items: center; justify-content: center;
+    pointer-events: none; z-index: 200; }
+  .bomb-flash.show { display: flex; }
+  .bomb-flash .bf-label { font-weight: 900; white-space: nowrap; position: relative; z-index: 2; letter-spacing: 5px; }
+  /* Detonation: radial fireball + text pop */
+  .bomb-flash.explode {
+    background: radial-gradient(ellipse 80% 60% at 50% 50%, rgba(255,200,80,0.92) 0%, rgba(255,100,20,0.65) 35%, rgba(160,20,5,0.25) 65%, transparent 80%);
+    animation: bfExplodeIn 1.9s ease-out forwards;
+  }
+  .bomb-flash.explode .bf-label { font-size: 44px; color: #fff;
+    text-shadow: 0 0 32px rgba(255,160,40,1), 0 0 60px rgba(255,100,20,0.7), 0 3px 8px rgba(0,0,0,0.9);
+    animation: bfPop 1.9s ease-out forwards; }
+  /* Defused: green sweep */
+  .bomb-flash.defused {
+    background: linear-gradient(90deg, transparent 0%, rgba(13,74,46,0.75) 50%, transparent 100%);
+    animation: bfFade 2.4s ease-out forwards;
+  }
+  .bomb-flash.defused .bf-label { font-size: 38px; color: #5af0a8;
+    text-shadow: 0 0 22px rgba(74,217,145,0.95), 0 2px 6px rgba(0,0,0,0.8);
+    animation: bfSlide 2.4s ease-out forwards; }
+  /* Scorebar shake on detonation */
+  .scorebar.shake { animation: bfShake 0.5s ease-in-out; }
+  @keyframes bfExplodeIn { 0%{opacity:0;} 6%{opacity:1;} 70%{opacity:1;} 100%{opacity:0;} }
+  @keyframes bfPop   { 0%{transform:scale(0.6);opacity:0;} 12%{transform:scale(1.06);opacity:1;} 75%{opacity:1;} 100%{transform:scale(1.02);opacity:0;} }
+  @keyframes bfShake { 0%,100%{transform:translateX(0);} 18%{transform:translateX(-7px);} 38%{transform:translateX(7px);} 58%{transform:translateX(-4px);} 78%{transform:translateX(4px);} }
+  @keyframes bfFade  { 0%,72%{opacity:1;} 100%{opacity:0;} }
+  @keyframes bfSlide { 0%{transform:translateX(-28px);opacity:0;} 14%{transform:translateX(0);opacity:1;} 72%{opacity:1;} 100%{opacity:0;} }
+
+  /* Corner red pulse on spike plant */
+  #corner-pulse { position: fixed; inset: 0; pointer-events: none; opacity: 0; z-index: 50;
+    background:
+      radial-gradient(circle at 0% 0%,    rgba(255,28,28,0.55),rgba(255,28,28,0) 22%),
+      radial-gradient(circle at 100% 0%,  rgba(255,28,28,0.55),rgba(255,28,28,0) 22%),
+      radial-gradient(circle at 0% 100%,  rgba(255,28,28,0.55),rgba(255,28,28,0) 22%),
+      radial-gradient(circle at 100% 100%,rgba(255,28,28,0.55),rgba(255,28,28,0) 22%); }
+  #corner-pulse.show { animation: cornerPulse 1.05s ease-in-out 4; }
+  @keyframes cornerPulse { 0%,100%{opacity:0;} 50%{opacity:1;} }
+
+  /* Round history dots */
+  .round-dots { position: absolute; top: 108px; left: 50%; display: flex; gap: 3px;
+    padding: 7px 14px 6px; background: rgba(13,15,21,0.96); border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 12px; box-shadow: 0 8px 22px rgba(0,0,0,0.5);
+    transform: translateX(-50%) translateY(-14px); opacity: 0; pointer-events: none;
+    transition: transform 0.3s cubic-bezier(.2,.7,.3,1), opacity 0.3s ease; }
+  .round-dots.show { transform: translateX(-50%) translateY(0); opacity: 1; }
+  .round-dots:empty { display: none; }
+  .rg-round { display: flex; flex-direction: column; align-items: center; gap: 3px; width: 24px; }
+  .rg-num { font-size: 9px; font-weight: 700; color: #767c87; line-height: 1; }
+  .rg-icon { height: 15px; display: flex; align-items: center; justify-content: center; }
+  .rg-icon img { width: 15px; height: 15px; filter: drop-shadow(0 1px 1px rgba(0,0,0,0.6)); }
+  .rg-bar { width: 20px; height: 4px; border-radius: 2px; }
+  .rg-bar.ATK { background: var(--atk-color,#71edc0); }
+  .rg-bar.DEF { background: var(--def-color,#eb535d); }
+
+  /* ═══════════════════════════════════════════════════════════════════════
+     PLAYER COLUMNS — bottom-left (ATK) and bottom-right (DEF)
+  ══════════════════════════════════════════════════════════════════════════ */
+  .player-col {
+    position: absolute;
+    bottom: 50px;
+    width: 305px;
+    display: flex; flex-direction: column; gap: 8px;
+    transition: opacity 0.35s ease;
+  }
+  .player-col.col-atk { left: 20px; }
+  .player-col.col-def { right: 20px; }
+  .player-col.buy-hidden { opacity: 0; pointer-events: none; }
+
+  /* ── Individual player card ─────────────────────────────────────── */
+  .pcard {
+    position: relative;
+    display: flex; flex-direction: column;
+    border-radius: 4px; overflow: visible;
+    background: rgba(8,11,20,0.94);
+    transition: opacity 0.4s ease;
+  }
+  .col-atk .pcard { background: linear-gradient(to right, rgba(8,11,20,0.92) 45%, rgba(8,11,20,0.43)); }
+  .col-def .pcard { background: linear-gradient(to left,  rgba(8,11,20,0.92) 45%, rgba(8,11,20,0.43)); }
+  .pcard.dead { filter: grayscale(0.85); opacity: 0.5; }
+  .col-atk .pcard.dead { mask-image: linear-gradient(to right, black, transparent 85%); -webkit-mask-image: linear-gradient(to right, black, transparent 85%); }
+  .col-def .pcard.dead { mask-image: linear-gradient(to left, black, transparent 85%);  -webkit-mask-image: linear-gradient(to left, black, transparent 85%);  }
+
+  /* ── Spectated player ──────────────────────────────────────────────── */
+  @keyframes specScan {
+    0%   { top: -3px; opacity: 0; }
+    8%   { opacity: 0.85; }
+    88%  { opacity: 0.55; }
+    100% { top: calc(100% + 3px); opacity: 0; }
+  }
+  @keyframes specRecDot {
+    0%, 100% { opacity: 1; }
+    50%       { opacity: 0.12; }
+  }
+  .pcard.spectated { z-index: 2; }
+  .col-atk .pcard.spectated {
+    outline: 1.5px solid color-mix(in srgb, var(--atk-color) 65%, white);
+    box-shadow: 0 0 18px color-mix(in srgb, var(--atk-color) 55%, transparent),
+                0 0 38px color-mix(in srgb, var(--atk-color) 22%, transparent);
+  }
+  .col-def .pcard.spectated {
+    outline: 1.5px solid color-mix(in srgb, var(--def-color) 65%, white);
+    box-shadow: 0 0 18px color-mix(in srgb, var(--def-color) 55%, transparent),
+                0 0 38px color-mix(in srgb, var(--def-color) 22%, transparent);
+  }
+  .pcard-spec {
+    position: absolute; inset: 0; z-index: 9;
+    pointer-events: none; overflow: hidden; border-radius: inherit;
+    opacity: 0; transition: opacity 0.3s ease;
+  }
+  .pcard.spectated > .pcard-spec { opacity: 1; }
+  /* Sweeping scan line */
+  .pcard-spec::before {
+    content: ''; position: absolute; left: 0; right: 0; top: -3px; height: 2px;
+    background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.8) 30%, rgba(255,255,255,0.8) 70%, transparent 100%);
+    animation: specScan 2.2s linear infinite;
+  }
+  /* REC badge */
+  .pcard-spec::after {
+    content: '● REC';
+    position: absolute; top: 4px; right: 7px;
+    font-size: 7.5px; font-weight: 800; letter-spacing: 1.5px; color: #ff4040;
+    animation: specRecDot 1s ease-in-out infinite;
+  }
+
+  /* Spike carrier badge */
+  .spike-carrier {
+    position: absolute;
+    width: 22px; height: 22px; border-radius: 50%;
+    background: #fff; display: none;
+    align-items: center; justify-content: center;
+    top: 12px; z-index: 5;
+  }
+  .spike-carrier.show { display: flex; }
+  .col-atk .spike-carrier { left: -11px; }
+  .col-def .spike-carrier { right: -11px; }
+  .spike-carrier img { height: 55%; filter: invert(); }
+
+  /* ── BAR 1: Agent portrait | Name + HP bar | Shield badge + HP number ── */
+  .pbar1 {
+    display: flex; align-items: center; gap: 9px;
+    padding: 7px 10px;
+    background: rgba(10,14,24,0.95);
+    flex-shrink: 0; min-height: 62px; border-radius: 4px 4px 0 0; overflow: hidden;
+    position: relative;
+  }
+  .col-atk .pbar1 { border-left: 3px solid var(--atk-color); }
+  .col-def .pbar1 { flex-direction: row-reverse; border-right: 3px solid var(--def-color); }
+
+  /* Team logo ghost + gradient wash — from center toward agent */
+  .pbar1-team-bg {
+    position: absolute; inset: 0; z-index: 0; pointer-events: none;
+    background-size: auto 300%; background-repeat: no-repeat;
+    opacity: 0.07; transition: opacity 0.4s ease;
+  }
+  .col-atk .pbar1-team-bg { background-position: right -4px center; }
+  .col-def .pbar1-team-bg { background-position: left -4px center; }
+  .phase-buying .pbar1-team-bg { opacity: 0.03; transition: opacity 0.4s ease; }
+  .pbar1::before {
+    content: ''; position: absolute; inset: 0; z-index: 0; pointer-events: none;
+  }
+  .col-atk .pbar1::before {
+    background: linear-gradient(to left, transparent 35%, color-mix(in srgb, var(--atk-color) 55%, transparent) 100%);
+  }
+  .col-def .pbar1::before {
+    background: linear-gradient(to right, transparent 35%, color-mix(in srgb, var(--def-color) 55%, transparent) 100%);
+  }
+  /* Flex content must sit above the bg layers */
+  .pbar1-agent, .pbar1-mid, .pbar1-right { position: relative; z-index: 1; }
+
+  .pbar1-agent {
+    width: 50px; height: 50px; border-radius: 4px;
+    object-fit: cover; flex-shrink: 0;
+  }
+  .col-def .pbar1-agent { transform: scaleX(-1); }
+
+  .pbar1-mid { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .pbar1-name {
+    font-size: 15px; font-weight: 800; color: #fff;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    line-height: 1; letter-spacing: 0.3px; text-align: left;
+  }
+  .col-def .pbar1-name { text-align: right; }
+  .pcard-hpbar { height: 6px; overflow: visible; flex-shrink: 0; position: relative; }
+  .col-atk .pcard-hpbar { padding-left: 63px; padding-right: 94px; }
+  .col-def .pcard-hpbar { padding-right: 63px; padding-left: 94px; }
+  .pcard-hpbar-fill { height: 100%; transition: width 0.35s ease; overflow: hidden; }
+  .col-atk .pcard-hpbar-fill { background: var(--atk-color); }
+  .col-def .pcard-hpbar-fill { background: var(--def-color); margin-left: auto; }
+
+  .pbar1-right { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+  .col-def .pbar1-right { flex-direction: row-reverse; }
+
+  .pbar1-shield { position: relative; display: flex; align-items: center; justify-content: center; flex-shrink: 0; width: 28px; height: 34px; }
+  .pbar1-sh-img { width: 100%; height: 100%; object-fit: contain; display: block; }
+  .pbar1-sh-img.none  { visibility: hidden; }
+  .pbar1-sh-img.heavy { filter: brightness(0) invert(1); }
+  .pbar1-sh-val {
+    position: absolute; font-size: 14px; font-weight: 400; line-height: 1;
+    font-family: 'Rajdhani', sans-serif; color: #fff;
+    text-shadow: -1px -1px 0 rgba(0,0,0,0.85), 1px -1px 0 rgba(0,0,0,0.85),
+                 -1px  1px 0 rgba(0,0,0,0.85),  1px  1px 0 rgba(0,0,0,0.85);
+    text-align: center; top: 47%; left: 50%; transform: translate(-50%, -50%);
+    pointer-events: none;
+  }
+  .pbar1-sh-val.no-sh { display: none; }
+
+  .pbar1-hp {
+    font-size: 24px; font-weight: 900; color: #fff; line-height: 1;
+    font-variant-numeric: tabular-nums; width: 52px; flex: 0 0 52px;
+    text-align: right; transition: color 0.3s ease;
+  }
+  .col-def .pbar1-hp { text-align: left; }
+
+  /* ── BAR 2: Ult | C/Q/E abilities | Weapon | Credits ─────────────── */
+  .pbar2 {
+    display: flex; align-items: center; gap: 6px;
+    padding: 0 10px; height: 38px;
+    background: rgba(6,9,15,0.92); flex-shrink: 0; border-radius: 0 0 4px 4px; overflow: hidden;
+  }
+
+  .pbar2-abilities { display: flex; gap: 3px; align-items: center; flex-shrink: 0; }
+  .pbar2-abi { width: 20px; height: 20px; object-fit: contain; opacity: 0.28; transition: opacity 0.2s; }
+  .pbar2-abi.ready { opacity: 1; }
+
+  .pbar2-weap-wrap { flex: 1; display: flex; align-items: center; justify-content: center; min-width: 0; overflow: hidden; }
+  .pbar2-weap { max-height: 18px; max-width: 108px; object-fit: contain; flex-shrink: 0; opacity: 0.85; transform: scaleX(-1); }
+  .col-atk .pbar2 { padding-left: 58px; }
+  .col-def .pbar2 { flex-direction: row-reverse; padding-right: 58px; }
+  .col-def .pbar2-weap { transform: none; }
+
+  .pbar2-cred { display: flex; align-items: center; gap: 2px; font-size: 13px; font-weight: 700; color: #ffffff; white-space: nowrap; flex-shrink: 0; }
+  .pbar2-cred img { height: 9px; }
+
+  /* Ult circle — sidebar: absolute on hp-bar divider; buy phase: relative in-flow */
+  .col-atk .ult-display { --uc: var(--atk-color); left: 8px; }
+  .col-def .ult-display { --uc: var(--def-color); right: 8px; }
+  .ult-display {
+    position: absolute; top: 50%; transform: translateY(-25%);
+    width: 42px; height: 42px; border-radius: 50%; z-index: 4;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(8,12,22,0.97);
+    box-shadow: 0 0 0 3px rgba(10,14,24,1), 0 0 0 5px rgba(255,255,255,0.07);
+    transition: background 0.3s;
+  }
+  .ult-display::after {
+    content: ''; position: absolute; inset: 0; border-radius: 50%;
+    background: conic-gradient(rgba(255,255,255,0.38) var(--ult-pct,0%), rgba(255,255,255,0.08) var(--ult-pct,0%));
+    -webkit-mask: radial-gradient(farthest-side, transparent 72%, black 73%);
+    mask: radial-gradient(farthest-side, transparent 72%, black 73%);
+    transition: background 0.4s ease;
+  }
+  .ult-display.ult-ready { animation: ultTeamPulse 1.5s ease-in-out infinite; }
+  .ult-display.ult-ready::after { background: conic-gradient(var(--uc, rgba(255,255,255,0.6)) 100%, transparent 0); }
+  .ult-icon-sm { width: 22px; height: 22px; object-fit: contain; opacity: 0.25; position: relative; z-index: 1; transition: opacity 0.3s ease; flex-shrink: 0; }
+  .ult-display.ult-ready .ult-icon-sm { opacity: 0.92; filter: drop-shadow(0 0 4px var(--uc, rgba(255,255,255,0.6))); }
+  .ult-pips { display: none; }
+  .ult-pip  { display: none; }
+
+  /* ═══════════════════════════════════════════════════════════════════════
+     ROUND WIN PANEL — centred, animated in then slides down
+  ══════════════════════════════════════════════════════════════════════════ */
+  /* Round win panel — expands from center, collapses back to center */
+  .rwp-wrapper {
+    position: fixed;
+    left: 50%; top: 50%;
+    transform: translate(-50%, -50%);
+    width: 960px; height: 180px;
+    pointer-events: none; z-index: 100;
+    clip-path: inset(0 50%);
+    animation: rwpExpand 5.5s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  }
+  @keyframes rwpExpand {
+    0%   { clip-path: inset(0 50%); }
+    10%  { clip-path: inset(0 0%); }
+    80%  { clip-path: inset(0 0%); }
+    94%  { clip-path: inset(0 50%); }
+    100% { clip-path: inset(0 50%); }
+  }
+  .rwp-bar {
+    position: absolute; inset: 0;
+    background: rgba(12,15,22,0.97);
+    border-top: 3px solid transparent;
+    border-bottom: 3px solid transparent;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .rwp-bar.atk { border-color: var(--atk-color); box-shadow: 0 0 50px rgba(0,0,0,0.85), inset 0 0 80px rgba(57,123,99,0.12); }
+  .rwp-bar.def { border-color: var(--def-color); box-shadow: 0 0 50px rgba(0,0,0,0.85), inset 0 0 80px rgba(145,50,56,0.12); }
+  .rwp-edge {
+    position: absolute; top: 0; bottom: 0; width: 8px;
+  }
+  .rwp-edge.left  { left: 0; }
+  .rwp-edge.right { right: 0; }
+  .rwp-bar.atk .rwp-edge { background: var(--atk-color); }
+  .rwp-bar.def .rwp-edge { background: var(--def-color); }
+  .rwp-inner {
+    display: flex; align-items: center; justify-content: center; gap: 28px;
+    opacity: 0; animation: rwpShowContent 5.5s forwards;
+  }
+  @keyframes rwpShowContent {
+    0%   { opacity: 0; }
+    13%  { opacity: 1; }
+    76%  { opacity: 1; }
+    88%  { opacity: 0; }
+    100% { opacity: 0; }
+  }
+  .rwp-logo { height: 86px; object-fit: contain; }
+  .rwp-text { display: flex; flex-direction: column; align-items: center; gap: 3px; }
+  .rwp-label { font-size: 52px; font-weight: 900; letter-spacing: 6px; line-height: 1; }
+  .rwp-bar.atk .rwp-label { color: var(--atk-color); }
+  .rwp-bar.def .rwp-label { color: var(--def-color); }
+  .rwp-roundnum { font-size: 12px; font-weight: 700; letter-spacing: 4px; color: #8b909a; }
+
+  /* ── Alive count popup ──────────────────────────────────────────────── */
+  .val-alive {
+    position: absolute; top: 120px; left: 50%;
+    transform: translateX(-50%) translateY(-8px);
+    display: flex; align-items: center; gap: 16px;
+    padding: 8px 26px;
+    background: linear-gradient(180deg, rgba(10,13,22,0.96), rgba(5,7,14,0.96));
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 14px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.65), 0 1px 0 rgba(255,255,255,0.06) inset;
+    z-index: 10; pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.22s ease, transform 0.22s ease;
+  }
+  .val-alive.show {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+  .val-alive-num {
+    font-size: 38px; font-weight: 900; line-height: 1;
+    font-variant-numeric: tabular-nums; min-width: 28px; text-align: center;
+  }
+  .val-alive-atk {
+    color: var(--atk-color);
+    text-shadow: 0 0 18px color-mix(in srgb, var(--atk-color) 55%, transparent);
+  }
+  .val-alive-def {
+    color: var(--def-color);
+    text-shadow: 0 0 18px color-mix(in srgb, var(--def-color) 55%, transparent);
+  }
+  .val-alive-vs { font-size: 11px; font-weight: 700; letter-spacing: 4px; color: #40495c; }
+  @keyframes aliveBump {
+    0%   { transform: scale(1); }
+    30%  { transform: scale(1.22); }
+    100% { transform: scale(1); }
+  }
+  .val-alive-num.bump { animation: aliveBump 0.4s cubic-bezier(0.22,1,0.36,1); }
+
+  /* ═══════════════════════════════════════════════════════════════════════
+     BUY PHASE LOWER THIRD — full-width 1920px slide-up panel
+  ══════════════════════════════════════════════════════════════════════════ */
+  .buy-lt {
+    position: absolute; bottom: 0; left: 50%;
+    width: 1920px; z-index: 25; pointer-events: none;
+    transform: translateX(-50%) translateY(100%);
+    transition: transform 0.55s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .buy-lt.show { transform: translateX(-50%) translateY(0); }
+
+
+  /* ── Buy phase header: two team panels flanking round number ── */
+  .blt-header {
+    display: flex; align-items: stretch;
+    max-width: 1560px; margin: 0 auto;
+    height: 80px;
+    background: rgba(5,7,14,0.99);
+    border-top: 1px solid rgba(255,255,255,0.12);
+  }
+  .blt-th-team {
+    flex: 1; display: flex; align-items: center; gap: 18px;
+    padding: 0 28px; overflow: hidden; position: relative;
+  }
+  .blt-th-team.blt-atk-side {
+    background: linear-gradient(to right, color-mix(in srgb, var(--atk-color) 12%, rgba(5,7,14,0.95)) 0%, transparent 55%);
+    border-right: 1px solid rgba(255,255,255,0.07);
+  }
+  .blt-th-team.blt-def-side {
+    background: linear-gradient(to left, color-mix(in srgb, var(--def-color) 12%, rgba(5,7,14,0.95)) 0%, transparent 55%);
+    border-left: 1px solid rgba(255,255,255,0.07);
+  }
+  /* Large ghost label — pushed to outer edge, clipped by overflow:hidden on the panel */
+  .blt-th-team::before {
+    position: absolute; top: 50%; transform: translateY(-50%);
+    font-size: 100px; font-weight: 900; letter-spacing: 10px; text-transform: uppercase;
+    opacity: 0.035; color: #fff; pointer-events: none; white-space: nowrap; user-select: none;
+  }
+  .blt-th-team.blt-atk-side::before { content: 'ATTACK';  left: 16px; }
+  .blt-th-team.blt-def-side::before { content: 'DEFENSE'; right: 16px; }
+
+  .blt-th-logo { width: 54px; height: 54px; object-fit: contain; flex-shrink: 0; }
+  .blt-th-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 0; }
+  .blt-th-info-r { text-align: right; }
+  .blt-th-tname {
+    font-size: 26px; font-weight: 900; color: #ffffff; letter-spacing: 0.3px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .blt-th-score {
+    font-size: 54px; font-weight: 900; line-height: 1; flex-shrink: 0;
+    font-variant-numeric: tabular-nums;
+  }
+  .blt-atk-side .blt-th-score { color: var(--atk-color); }
+  .blt-def-side .blt-th-score { color: var(--def-color); }
+  .blt-th-center {
+    flex: 0 0 130px; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 2px;
+    background: rgba(0,0,0,0.45);
+    border-left: 1px solid rgba(255,255,255,0.08);
+    border-right: 1px solid rgba(255,255,255,0.08);
+  }
+  .blt-th-rlabel { font-size: 9px; font-weight: 700; letter-spacing: 3.5px; color: #4a5268; text-transform: uppercase; }
+  .blt-th-rnum   { font-size: 36px; font-weight: 900; color: #c8ccd8; font-variant-numeric: tabular-nums; line-height: 1; }
+
+  /* ── Round history strip ────────────────────────────── */
+  .blt-rounds-bar {
+    display: flex; align-items: center; justify-content: center; padding: 0 24px; gap: 4px;
+    height: 46px;
+    max-width: 1560px; margin: 0 auto;
+    background: rgba(4,5,11,0.99);
+    border-top: 1px solid rgba(255,255,255,0.06);
+  }
+  .blt-rslot { flex: 0 0 42px; display: flex; flex-direction: column; align-items: center; gap: 3px; }
+  .blt-rnum  { font-size: 7px; font-weight: 700; letter-spacing: 0.3px; color: #3a4560; }
+  .blt-rind  {
+    width: 36px; height: 28px; border-radius: 4px;
+    background: rgba(255,255,255,0.06);
+    display: flex; align-items: center; justify-content: center; overflow: hidden;
+  }
+  .blt-rind img { width: 20px; height: 20px; object-fit: contain; }
+  .blt-rslot.won-atk .blt-rnum { color: var(--atk-color); }
+  .blt-rslot.won-def .blt-rnum { color: var(--def-color); }
+  .blt-rslot.won-atk .blt-rind { background: color-mix(in srgb, var(--atk-color) 20%, rgba(4,5,11,0.9)); }
+  .blt-rslot.won-def .blt-rind { background: color-mix(in srgb, var(--def-color) 20%, rgba(4,5,11,0.9)); }
+  .blt-rslot.ot      .blt-rind { background: rgba(255,211,77,0.12); border: 1px solid rgba(255,211,77,0.35); }
+  .blt-rslot.cur     .blt-rind { outline: 1.5px solid rgba(255,255,255,0.5); }
+
+  /* ── Buy phase board — full-width paired rows ─────────────────────── */
+  @keyframes ultTeamPulse {
+    0%, 100% { background: rgba(8,12,22,0.92); box-shadow: 0 0 0 0 var(--uc, rgba(255,255,255,0.2)); }
+    50%       { background: color-mix(in srgb, var(--uc, #fff) 22%, rgba(8,12,22,0.92)); box-shadow: 0 0 9px 2px color-mix(in srgb, var(--uc, #fff) 45%, transparent); }
+  }
+
+  .blt-board {
+    display: flex; flex-direction: column;
+    max-width: 1560px; margin: 0 auto;
+    position: relative;
+    background: rgba(7,9,15,0.98);
+    border-top: 1px solid rgba(255,255,255,0.06);
+    border-radius: 0 0 4px 4px;
+  }
+
+  /* One row = ATK player (left half) + DEF player (right half) */
+  .blt-pair-row { display: flex; height: 46px; }
+  .blt-pair-row:nth-child(odd)  { background: rgba(255,255,255,0.0); }
+  .blt-pair-row:nth-child(even) { background: rgba(255,255,255,0.025); }
+  .blt-pair-row + .blt-pair-row { border-top: 1px solid rgba(255,255,255,0.05); }
+
+  /* Each cell = 50% width */
+  .blt-cell { flex: 1; display: flex; align-items: stretch; overflow: hidden; min-width: 0; }
+  .blt-cell.blt-atk { --uc: var(--atk-color); flex-direction: row;         border-right: 1px solid rgba(255,255,255,0.08); }
+  .blt-cell.blt-def { --uc: var(--def-color); flex-direction: row-reverse; }
+
+  /* ── MONEY (outermost) ──────────────────────────────────── */
+  /* Money: spent | [icon] credits  — horizontal, side by side */
+  .bc-money {
+    display: flex; flex-direction: row; align-items: center; justify-content: flex-end; gap: 6px;
+    flex: 0 0 118px; padding: 0 10px;
+    background: rgba(4,6,12,0.55);
+    border-left: 3px solid color-mix(in srgb, var(--uc) 55%, transparent);
+  }
+  .blt-cell.blt-def .bc-money { flex-direction: row-reverse; border-left: none; border-right: 3px solid color-mix(in srgb, var(--uc) 55%, transparent); }
+  .bc-spent { font-size: 11px; font-weight: 700; color: #f5efc0; font-variant-numeric: tabular-nums; white-space: nowrap; opacity: 0.75; }
+  .bc-cred  { font-size: 12px; font-weight: 800; color: #ffffff; font-variant-numeric: tabular-nums; display: flex; align-items: center; gap: 3px; white-space: nowrap; }
+  .bc-cred img { height: 10px; opacity: 0.7; flex-shrink: 0; }
+
+  /* ── ABILITIES (C / Q / E) ───────────────────────────────── */
+  .bc-abi { display: flex; align-items: center; gap: 3px; flex: 0 0 75px; padding: 0 8px; border-left: 1px solid rgba(255,255,255,0.07); }
+  .blt-cell.blt-def .bc-abi { border-left: none; border-right: 1px solid rgba(255,255,255,0.07); }
+  .bc-abi-ic { width: 17px; height: 17px; object-fit: contain; opacity: 0.25; transition: opacity 0.2s; }
+  .bc-abi-ic.ready { opacity: 1; }
+
+  /* ── GEAR: Shield · Weapon · Ult ────────────────────────── */
+  /* Fixed width so agent portrait stays in the same column regardless of weapon length */
+  .bc-gear {
+    display: flex; align-items: center; gap: 8px; flex: 0 0 168px;
+    padding: 0 12px;
+    border-left: 1px solid rgba(255,255,255,0.07);
+    background: rgba(4,6,12,0.35);
+  }
+  .blt-cell.blt-def .bc-gear { flex-direction: row-reverse; border-left: none; border-right: 1px solid rgba(255,255,255,0.07); }
+
+  .bc-sh { width: 14px; height: 17px; flex-shrink: 0; object-fit: contain; display: block; }
+  .bc-sh.none  { visibility: hidden; }
+  .bc-sh.light { }
+  .bc-sh.heavy { filter: brightness(0) invert(1); }
+
+  /* Fixed weapon container — always 96px wide so rows stay aligned across all gun sizes */
+  .bc-weap-img { flex: 0 0 96px; width: 96px; height: 20px; object-fit: contain; opacity: 0.92; transform: scaleX(-1); }
+  .blt-cell.blt-def .bc-weap-img { transform: none; }
+
+  /* Ult circle — team-color pulse when ready */
+  .bc-ult-circle {
+    position: relative; width: 26px; height: 26px; border-radius: 50%; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(8,12,22,0.92); transition: background 0.3s;
+  }
+  .bc-ult-circle::after {
+    content: ''; position: absolute; inset: 0; border-radius: 50%;
+    background: conic-gradient(rgba(255,255,255,0.35) var(--ult-pct,0%), rgba(255,255,255,0.07) var(--ult-pct,0%));
+    -webkit-mask: radial-gradient(farthest-side, transparent 73%, black 74%);
+    mask: radial-gradient(farthest-side, transparent 73%, black 74%);
+    transition: background 0.4s;
+  }
+  .bc-ult-circle.rdy { animation: ultTeamPulse 1.5s ease-in-out infinite; }
+  .bc-ult-circle.rdy::after { background: conic-gradient(var(--uc) 100%, transparent 0); }
+  .bc-ult-ic { width: 13px; height: 13px; object-fit: contain; opacity: 0.25; position: relative; z-index: 1; transition: opacity 0.3s; }
+  .bc-ult-circle.rdy .bc-ult-ic { opacity: 0.9; filter: drop-shadow(0 0 3px var(--uc)); }
+
+  /* ── PLAYER: [agent] [name] [spacer] [kda] ──────────────── */
+  /* ATK: agent on left, KDA floats right to screen center     */
+  /* DEF (row-reverse): same DOM, KDA floats left to center    */
+  .bc-player {
+    flex: 1; min-width: 0; display: flex; align-items: center; gap: 9px;
+    padding: 0 14px;
+    border-left: 1px solid rgba(255,255,255,0.07);
+    background: linear-gradient(to right, transparent 20%, color-mix(in srgb, var(--uc) 22%, transparent));
+  }
+  .blt-cell.blt-def .bc-player {
+    border-left: none; border-right: 1px solid rgba(255,255,255,0.07);
+    background: linear-gradient(to left, transparent 20%, color-mix(in srgb, var(--uc) 22%, transparent));
+  }
+
+  /* Single team logo spanning all rows — positioned in the player-section column */
+  .blt-board { isolation: isolate; }
+  .blt-logo-atk, .blt-logo-def {
+    position: absolute; top: 0; bottom: 0; z-index: -1;
+    background-size: 65%; background-repeat: no-repeat; background-position: center;
+    opacity: 0.11; pointer-events: none;
+  }
+  /* ATK logo: from end of gear section to board center */
+  .blt-logo-atk { left: 361px; right: 50%; }
+  /* DEF logo: from board center to end of gear section (mirrored) */
+  .blt-logo-def { left: 50%; right: 361px; }
+
+  .bc-agent { width: 40px; height: 40px; border-radius: 3px; object-fit: cover; object-position: top center; flex-shrink: 0; }
+  .blt-cell.blt-def .bc-agent { transform: scaleX(-1); }
+
+  /* name: fills all remaining width between agent and KDA column */
+  .bc-pname { flex: 1; min-width: 0; font-size: 15px; font-weight: 800; color: #f0f2f8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; letter-spacing: 0.3px; text-align: left; }
+  .blt-cell.blt-def .bc-pname { text-align: right; }
+
+  /* KDA: fixed-width column so every row's KDA sits at the same x */
+  .bc-kda { flex: 0 0 68px; font-size: 15px; font-weight: 700; color: #ffffff; font-variant-numeric: tabular-nums; white-space: nowrap; text-align: right; }
+  .blt-cell.blt-def .bc-kda { text-align: left; }
+  .bc-kda .k { font-weight: 700; }
+  .bc-kda .d { }
+
+  /* Sponsor rail — bottom-right corner */
+  .val-sponsors {
+    position: absolute; right: 40px; bottom: 34px;
+    display: flex; flex-direction: column; align-items: flex-end; gap: 4px;
+    padding: 7px 12px; border-radius: 9px;
+    background: linear-gradient(180deg, rgba(20,23,31,0.9), rgba(11,13,19,0.9));
+    border: 1px solid rgba(255,255,255,0.1); box-shadow: 0 8px 22px rgba(0,0,0,0.5);
+  }
+  .val-sponsors.hidden { display: none !important; }
+  .sp-label { font-size: 9px; font-weight: 700; letter-spacing: 2px; color: #8b909a; text-transform: uppercase; }
+  .sp-slot { display: flex; align-items: center; justify-content: center; min-width: 96px; height: 26px; }
+  .sp-logo { max-height: 26px; max-width: 150px; object-fit: contain; animation: spFade 0.9s ease; }
+  .sp-name { font-size: 17px; font-weight: 800; letter-spacing: 1px; color: #e8ebf0; animation: spFade 0.9s ease; }
+  @keyframes spFade { from { opacity: 0; } to { opacity: 1; } }
+
+  /* ═══════════════════════════════════════════════════════════════════════
+     BOTTOM ACCENT BAR — esports lower-third bookend to the top scorebar
+  ══════════════════════════════════════════════════════════════════════════ */
+  .val-bottom-bar {
+    position: absolute; bottom: 0; left: 0;
+    width: 1920px; height: 40px;
+    z-index: 50; pointer-events: none;
+    animation: bottomBarIn 0.6s cubic-bezier(0.22,1,0.36,1) both 0.2s;
+  }
+  @keyframes bottomBarIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  .vbb-svg {
+    position: absolute; inset: 0; width: 1920px; height: 40px;
+    overflow: visible;
+  }
+  /* Center hexagon panel — 492px wide matches SVG polygon (714→1206) */
+  .vbb-center {
+    position: absolute; left: 50%; top: 0; transform: translateX(-50%);
+    width: 492px; height: 40px;
+    clip-path: polygon(16px 0, calc(100% - 16px) 0, 100% 50%, calc(100% - 16px) 100%, 16px 100%, 0 50%);
+    background: rgba(11,16,26,0.96);
+    display: flex; align-items: center; justify-content: center; gap: 14px;
+    z-index: 2;
+  }
+  .vbb-round {
+    font-size: 11px; font-weight: 700; letter-spacing: 3px;
+    color: rgba(255,255,255,0.78); white-space: nowrap;
+  }
+  .vbb-round.ot { color: #ffd34d; }
+  .vbb-sep {
+    width: 4px; height: 4px; border-radius: 50%;
+    background: rgba(255,255,255,0.25); flex-shrink: 0;
+  }
+  .vbb-series {
+    font-size: 9px; font-weight: 600; letter-spacing: 2.5px;
+    color: rgba(255,255,255,0.38); white-space: nowrap;
+  }
+
+  /* Offline / status */
+  #val-offline {
+    position: absolute; bottom: 60px; left: 50%; transform: translateX(-50%);
+    padding: 10px 28px; border-radius: 10px; font-size: 14px; font-weight: 700; letter-spacing: 2px;
+    background: rgba(10,12,18,0.92); border: 1px solid rgba(255,65,51,0.5); color: #ff6b6b;
+    white-space: nowrap;
+  }
+
+  /* ═══════════════════════════════════════════════════════════════════════
+     DEVELOPER TOOLBAR
+     Hidden inside OBS by default. Add ?dev=1 to the browser source URL to
+     show the toolbar and auto-load demo data inside OBS for testing/demo use.
+     e.g.  http://localhost:3000/valorant.html?dev=1
+  ══════════════════════════════════════════════════════════════════════════ */
+  #dev-panel {
+    display: none; position: fixed; left: 14px; bottom: 14px; z-index: 9999;
+    font-family: system-ui, sans-serif; background: rgba(14,16,22,0.97);
+    color: #e7eaf0; border: 1px solid rgba(255,255,255,0.16); border-radius: 12px;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.6); width: 240px; overflow: hidden;
+  }
+  #dev-panel.open { display: block; }
+  #dev-panel .dh {
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    padding: 9px 12px; background: rgba(255,255,255,0.06); cursor: default;
+  }
+  #dev-panel .dh b { font-size: 11px; letter-spacing: 1.5px; color: #aab0bd; text-transform: uppercase; }
+  #dev-panel .dh button { background: none; border: none; color: #aab0bd; font-size: 14px; cursor: pointer; padding: 2px 4px; }
+  #dev-panel .db { padding: 10px; display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  #dev-panel .db .section-lbl { grid-column: 1/-1; font-size: 9px; letter-spacing: 1.5px; color: #6a7280; text-transform: uppercase; margin-top: 4px; }
+  #dev-panel .db button {
+    font: 600 11px/1.2 system-ui; letter-spacing: .3px; color: #f0f2f6;
+    background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.13);
+    border-radius: 7px; padding: 8px 6px; cursor: pointer; transition: background .12s;
+  }
+  #dev-panel .db button:hover { background: rgba(255,255,255,0.18); }
+  #dev-panel .db button.wide { grid-column: 1/-1; }
+  #dev-panel .db button.danger { border-color: rgba(255,100,60,0.45); color: #ffb09a; }
+  #dev-panel .db button.good  { border-color: rgba(60,220,140,0.45); color: #9aefc0; }
+  #dev-panel .db button.reset { color: #8a9099; }
+  #dev-fab {
+    display: none; position: fixed; left: 14px; bottom: 14px; z-index: 9999;
+    font: 700 11px/1 system-ui; letter-spacing: 1px; color: #cfd4dd;
+    background: rgba(14,16,22,0.92); border: 1px solid rgba(255,255,255,0.16);
+    border-radius: 999px; padding: 8px 14px; cursor: pointer;
+  }
+
+  .preview-badge {
+    position: absolute; bottom: 570px; left: 50%; transform: translateX(-50%);
+    background: rgba(0,0,0,0.75); color: #fff; border: 1px solid var(--accent-2);
+    font-size: 14px; font-weight: 700; letter-spacing: 2px; padding: 6px 16px;
+    border-radius: 999px; pointer-events: none;
+  }
+</style>
+</head>
+<body>
+
+<!-- ── CENTERED SCOREHEAD (CS:GO-style port) ────────────────────────────── -->
+<div class="cs-head" id="val-head">
+  <div class="scorebar">
+    <!-- Event title (hidden when empty) -->
+    <div class="event-title hidden" id="val-event-name"></div>
+    <div class="topbar">
+
+      <!-- ATK team (left) -->
+      <div class="team t-atk">
+        <img id="atk-logo" class="tlogo" alt="">
+        <div class="team-mid">
+          <span class="nm" id="atk-name">ATK</span>
+          <div class="cs-series" id="maps-atk"></div>
+        </div>
+        <span class="sc" id="atk-score">0</span>
+        <div class="fuse" id="fuse-atk"></div>
+      </div>
+
+      <!-- Center: map · spike logo or round label -->
+      <div class="mid" id="cs-mid">
+        <span class="timer" id="val-timer">0:00</span>
+        <img id="spike-planted-logo" class="spike-planted-logo" style="display:none" src="" alt="spike">
+        <span class="mid-series" id="val-mid-series"></span>
+        <span class="roundlbl" id="sb-phase">WARMUP</span>
+      </div>
+
+      <!-- DEF team (right) -->
+      <div class="team t-def">
+        <span class="sc" id="def-score">0</span>
+        <div class="team-mid">
+          <span class="nm" id="def-name">DEF</span>
+          <div class="cs-series" id="maps-def"></div>
+        </div>
+        <img id="def-logo" class="tlogo" alt="">
+        <div class="fuse" id="fuse-def"></div>
+      </div>
+
+      <!-- Buy-phase full-width centered banner (position:absolute over topbar) -->
+      <div class="buy-cover" id="buy-cover"><span class="buy-cover-text" id="buy-cover-text"></span></div>
+
+    </div>
+    <!-- Spike result flash banner -->
+    <div id="bomb-flash" class="bomb-flash"></div>
+    <!-- Animated border beam -->
+    <svg class="head-beam" viewBox="0 0 1000 100" preserveAspectRatio="none" aria-hidden="true">
+      <path class="hb-base" d="M 2 2 L 2 86 Q 2 99 15 99 L 985 99 Q 998 99 998 86 L 998 2" pathLength="100"></path>
+      <path class="hb-beam" d="M 2 2 L 2 86 Q 2 99 15 99 L 985 99 Q 998 99 998 86 L 998 2" pathLength="100"></path>
+    </svg>
+  </div>
+  <!-- Round history graph (toggled via control panel) -->
+  <div id="round-dots" class="round-dots"></div>
+</div>
+
+<!-- Sponsors block (bottom-right corner) -->
+<div class="val-sponsors hidden" id="val-sponsors">
+  <span class="sp-label" id="sp-label">PARTNERS</span>
+  <div class="sp-slot" id="sp-slot"></div>
+</div>
+
+<!-- Corner pulse on spike plant -->
+<div id="corner-pulse"></div>
+
+<!-- ── Bottom accent bar ──────────────────────────────────────────────── -->
+<div class="val-bottom-bar" id="val-bottom-bar" style="display:none">
+  <!-- SVG wing lines + team color fills -->
+  <svg class="vbb-svg" viewBox="0 0 1920 40" aria-hidden="true">
+    <defs>
+      <linearGradient id="vbbAtkGrad" x1="0" y1="0" x2="1" y2="0">
+        <stop offset="0%" stop-color="var(--atk-color,#71edc0)" stop-opacity="0"/>
+        <stop offset="100%" stop-color="var(--atk-color,#71edc0)" stop-opacity="0.28"/>
+      </linearGradient>
+      <linearGradient id="vbbDefGrad" x1="1" y1="0" x2="0" y2="0">
+        <stop offset="0%" stop-color="var(--def-color,#eb535d)" stop-opacity="0"/>
+        <stop offset="100%" stop-color="var(--def-color,#eb535d)" stop-opacity="0.28"/>
+      </linearGradient>
+    </defs>
+    <!-- Left team color fill (screen edge → panel) -->
+    <polygon points="0,0 714,0 730,20 714,40 0,40" fill="url(#vbbAtkGrad)"/>
+    <!-- Right team color fill (panel → screen edge) -->
+    <polygon points="1206,0 1920,0 1920,40 1206,40 1190,20" fill="url(#vbbDefGrad)"/>
+    <!-- Left accent line (bottom edge of left wing) -->
+    <line x1="0" y1="39.5" x2="714" y2="39.5" stroke="var(--atk-color,#71edc0)" stroke-width="1.2" stroke-opacity="0.45"/>
+    <line x1="714" y1="39.5" x2="730" y2="20" stroke="var(--atk-color,#71edc0)" stroke-width="1.2" stroke-opacity="0.45"/>
+    <!-- Right accent line -->
+    <line x1="1206" y1="39.5" x2="1190" y2="20" stroke="var(--def-color,#eb535d)" stroke-width="1.2" stroke-opacity="0.45"/>
+    <line x1="1206" y1="39.5" x2="1920" y2="39.5" stroke="var(--def-color,#eb535d)" stroke-width="1.2" stroke-opacity="0.45"/>
+    <!-- Top edge thin lines -->
+    <line x1="0" y1="0.5" x2="730" y2="0.5" stroke="rgba(255,255,255,0.09)" stroke-width="1"/>
+    <line x1="1190" y1="0.5" x2="1920" y2="0.5" stroke="rgba(255,255,255,0.09)" stroke-width="1"/>
+    <!-- Panel outline (hex) -->
+    <polygon points="730,0 1190,0 1206,20 1190,40 730,40 714,20"
+             fill="none" stroke="rgba(255,255,255,0.12)" stroke-width="1.5"/>
+  </svg>
+  <!-- Center info panel -->
+  <div class="vbb-center">
+    <span class="vbb-round" id="vbb-round">WARMUP</span>
+    <div class="vbb-sep" id="vbb-sep"></div>
+    <span class="vbb-series" id="vbb-series"></span>
+  </div>
+</div>
+
+<!-- ── Attacker player column (left/bottom) ──────────────────────────── -->
+<div class="player-col col-atk" id="players-atk"></div>
+
+<!-- ── Defender player column (right/bottom) ─────────────────────────── -->
+<div class="player-col col-def" id="players-def"></div>
+
+
+<!-- ── Buy phase lower third ──────────────────────────────────────────── -->
+<div id="buy-lt" class="buy-lt"></div>
+
+<!-- ── Alive count popup ─────────────────────────────────────────────── -->
+<div id="val-alive" class="val-alive">
+  <span class="val-alive-num val-alive-atk" id="val-alive-atk">5</span>
+  <span class="val-alive-vs">VS</span>
+  <span class="val-alive-num val-alive-def" id="val-alive-def">5</span>
+</div>
+
+<!-- ── Offline notice ────────────────────────────────────────────────── -->
+<div id="val-offline" class="hidden">VALORANT NOT DETECTED — waiting…</div>
+
+<div id="preview-badge" class="preview-badge hidden">PREVIEW MODE</div>
+
+<!-- ── Dev panel ─────────────────────────────────────────────────────── -->
+<div id="dev-panel">
+  <div class="dh">
+    <b>VAL Dev Tools</b>
+    <span id="dev-obs-badge" style="font-size:9px;letter-spacing:1px;color:#ffd34d;display:none">● OBS MODE</span>
+    <button id="dev-collapse" title="Collapse">−</button>
+  </div>
+  <div class="db">
+    <span class="section-lbl">Demo data</span>
+    <button data-dev="load-demo" class="wide good">▶ Load demo data</button>
+
+    <span class="section-lbl">Spike</span>
+    <button data-dev="plant"    class="wide danger">🔴 Plant Spike</button>
+    <button data-dev="defusing" class="good">✂ Start Defuse</button>
+    <button data-dev="defuse"   class="good">✅ Defused</button>
+    <button data-dev="detonate" class="danger">💥 Detonate</button>
+
+    <span class="section-lbl">Rounds</span>
+    <button data-dev="buy-phase" class="wide">🛒 Buy Phase</button>
+    <button data-dev="win-atk">ATK Wins</button>
+    <button data-dev="win-def">DEF Wins</button>
+    <button data-dev="halftime" class="wide">⚡ Halftime (flip sides)</button>
+    <button data-dev="ot-round" class="wide">OT Round +1</button>
+
+    <span class="section-lbl">Players</span>
+    <button data-dev="kill-atk">Kill ATK P1</button>
+    <button data-dev="kill-def">Kill DEF P1</button>
+    <button data-dev="revive-all" class="wide good">♻ Revive All</button>
+    <button data-dev="spec-cycle" class="wide">👁 Cycle Spec Player</button>
+
+    <span class="section-lbl">Reset</span>
+    <button data-dev="live"  class="wide reset">↺ Back to live data</button>
+    <button data-dev="reset" class="wide reset">↺ Reload demo</button>
+  </div>
+</div>
+<button id="dev-fab" style="display:none">VAL DEV ▲</button>
+
+<script>
+'use strict';
+
+// ── CDN base for GitHub repo assets ───────────────────────────────────────
+const CDN = 'https://cdn.jsdelivr.net/gh/Ailyrr/hel-valorant-overlay-server@master/overlays/visual_assets';
+const VAL_LOGO_FALLBACK = 'data:image/svg+xml,' + encodeURIComponent(
+  '<svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg"><path fill="white" d="M28.8002 15.4128V5.75643C28.8002 5.60749 28.6082 5.54543 28.5058 5.65714L17.6313 18.8384C17.5418 18.9377 17.6186 19.0991 17.7593 19.0991H25.6146C25.832 19.0991 26.024 18.9998 26.1519 18.8384L28.6337 15.8348C28.7361 15.7231 28.8002 15.5741 28.8002 15.4128ZM3.36651 15.8472L11.5288 25.7517C11.6567 25.913 11.8614 26 12.0789 26H19.9342C20.0749 26 20.1517 25.8511 20.0621 25.7517L3.49445 5.66955C3.3921 5.55784 3.2002 5.6199 3.2002 5.76884V15.4252C3.21299 15.5741 3.26416 15.7231 3.36651 15.8472Z"/></svg>'
+);
+
+function agentIconUrl(agent)    { return `/assets/valorant/agents/${agent}/${agent}_icon.webp`; }
+function abilityIconUrl(agent, slot) { return `/assets/valorant/agents/${agent}/ability_${slot}.webp`; }
+function weaponIconUrl(weapon)  { return `/assets/valorant/game_icons/${weapon}.webp`; }
+function spikeCdnUrl(red)       { return `${CDN}/${red ? 'spike_red' : 'spike_white'}.png`; }
+function spikeCarrierIconUrl()  { return `${CDN}/game_icons/spike.webp`; }
+function creditsIconUrl()       { return `${CDN}/game_icons/credits.webp`; }
+function diamondIconUrl()       { return `${CDN}/diamond-solid.svg`; }
+function ultBorderUrl()         { return `${CDN}/ultimage-charged-border.svg`; }
+
+// Fallback: try CDN after local miss
+function withCdnFallback(img, localSrc, cdnPath, svgFallback) {
+  if (img._cdnSrc === localSrc) return; // already attempted this key — don't retry
+  img._cdnSrc = localSrc; // NOT cleared on error — prevents retry loop when local asset is missing
+  img.src = localSrc;
+  img.onerror = () => {
+    img.onerror = null;
+    if (img.src.includes('cdn.jsdelivr.net')) {
+      if (svgFallback) img.src = svgFallback;
+      return;
+    }
+    img.src = `${CDN}/${cdnPath}`;
+    img.onerror = () => { if (svgFallback) img.src = svgFallback; img.onerror = null; };
+  };
+}
+
+function svgLetter(letter, color) {
+  return 'data:image/svg+xml;utf8,' + encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="54" height="54"><rect width="54" height="54" rx="4" fill="${color}"/><text x="27" y="36" font-size="22" fill="#fff" text-anchor="middle" font-family="Arial,sans-serif" font-weight="bold">${String(letter).toUpperCase().slice(0,2)}</text></svg>`
+  );
+}
+
+const AGENT_COLORS = {
+  brimstone:'#d45c2a',viper:'#3d9e4a',omen:'#5a4a8c',killjoy:'#e6c225',
+  cypher:'#7c8c9a',sova:'#2a5fa0',sage:'#3aafbb',phoenix:'#e07030',
+  jett:'#7eaccc',reyna:'#8040b0',raze:'#d04a20',breach:'#b05a1a',
+  skye:'#4a8a45',yoru:'#2a3acc',astra:'#6040b0',kayo:'#5070a0',
+  chamber:'#c09050',neon:'#3060e0',fade:'#4a3060',harbor:'#2060a0',
+  gekko:'#50901a',deadlock:'#5a7080',iso:'#405870',clove:'#805060',
+  vyse:'#4a6088',tejo:'#a06028',waylay:'#3080a0',
+};
+
+function el(id) { return document.getElementById(id); }
+function setText(id, v) { const e = el(id); if (e) e.textContent = v ?? ''; }
+function setNum(id, v) {
+  const e = el(id); if (!e) return;
+  if (e.textContent !== String(v ?? 0)) {
+    e.textContent = v ?? 0;
+    e.classList.remove('bump'); void e.offsetWidth; e.classList.add('bump');
+  }
+}
+
+// ── Side logic ────────────────────────────────────────────────────────────
+// ORDER = attackers first half (rounds 1-12)
+function atkSideForRound(round) {
+  if (round <= 12) return 'order';
+  if (round <= 24) return 'chaos';
+  return Math.floor((round - 25) / 2) % 2 === 0 ? 'order' : 'chaos';
+}
+function roundLabel(round, phase) {
+  if (!round || phase === 'warmup') return 'WARMUP';
+  if (round > 24) return `OT · R${round}`;
+  return `ROUND ${round}`;
+}
+
+// ── State ─────────────────────────────────────────────────────────────────
+let appTeams     = { blue: {}, orange: {} };
+let appSeries    = { blue: 0, orange: 0 };
+let bestOf       = 1;
+let brand        = null;
+let appEventName = '';
+let valState  = null;
+let spTimer   = null;
+// Dev simulation
+let devState  = null;
+
+// ── Spike countdown state ─────────────────────────────────────────────────
+let prevSpikeState = '';
+let spikeInterval  = null;
+let spikePlantedAt = null;
+let spikeSecsLeft  = null;
+let defuseInterval = null;
+let defuseStartedAt = null;
+const SPIKE_DURATION  = 45;
+const DEFUSE_DURATION = 7;
+
+function startSpikeCountdown() {
+  if (spikeInterval) return;
+  spikePlantedAt = Date.now();
+  spikeSecsLeft  = SPIKE_DURATION;
+  // Set fuse bars to full immediately (before first interval tick)
+  const fuseA0 = el('fuse-atk'), fuseD0 = el('fuse-def');
+  if (fuseA0) { fuseA0.style.display = 'block'; fuseA0.style.width = '100%'; }
+  if (fuseD0) { fuseD0.style.display = 'block'; fuseD0.style.width = '100%'; }
+  const tim0 = el('val-timer'); if (tim0) tim0.textContent = SPIKE_DURATION + 's';
+  spikeInterval = setInterval(() => {
+    const elapsed = (Date.now() - spikePlantedAt) / 1000;
+    spikeSecsLeft  = Math.max(0, SPIKE_DURATION - elapsed);
+    const pct    = (spikeSecsLeft / SPIKE_DURATION) * 100;
+    const danger = spikeSecsLeft < 5;
+    const fuseA  = el('fuse-atk'), fuseD = el('fuse-def');
+    if (fuseA) { fuseA.style.width = pct + '%'; fuseA.classList.toggle('danger', danger); }
+    if (fuseD) { fuseD.style.width = pct + '%'; fuseD.classList.toggle('danger', danger); }
+    const tim = el('val-timer');
+    if (tim)  tim.textContent = Math.ceil(spikeSecsLeft) + 's';
+    if (spikeSecsLeft <= 0) { clearInterval(spikeInterval); spikeInterval = null; }
+  }, 100);
+}
+
+function startDefuseProgress() {
+  if (defuseInterval) return;
+  defuseStartedAt = Date.now();
+  defuseInterval = setInterval(() => {
+    const elapsed = (Date.now() - defuseStartedAt) / 1000;
+    const pct = Math.min(100, (elapsed / DEFUSE_DURATION) * 100);
+    const rem = Math.max(0, DEFUSE_DURATION - elapsed);
+    const fuseA = el('fuse-atk'), fuseD = el('fuse-def');
+    if (fuseA) { fuseA.className = 'fuse defuse'; fuseA.style.display = 'block'; fuseA.style.width = pct + '%'; }
+    if (fuseD) { fuseD.className = 'fuse defuse'; fuseD.style.display = 'block'; fuseD.style.width = pct + '%'; }
+    const tim = el('val-timer');
+    if (tim) tim.textContent = Math.ceil(rem) + 's';
+    if (rem <= 0) { clearInterval(defuseInterval); defuseInterval = null; }
+  }, 100);
+}
+
+function clearSpikeCountdown() {
+  if (spikeInterval) { clearInterval(spikeInterval); spikeInterval = null; }
+  spikePlantedAt = null; spikeSecsLeft = null;
+  const fuseA = el('fuse-atk'), fuseD = el('fuse-def');
+  if (fuseA) { fuseA.style.width = '0'; fuseA.className = 'fuse'; }
+  if (fuseD) { fuseD.style.width = '0'; fuseD.className = 'fuse'; }
+  const tim = el('val-timer'); if (tim) tim.textContent = '--';
+}
+
+function clearDefuseProgress() {
+  if (defuseInterval) { clearInterval(defuseInterval); defuseInterval = null; }
+  defuseStartedAt = null;
+}
+
+function showBombFlash(type, label) {
+  const flash = el('bomb-flash');
+  if (!flash) return;
+  flash.className = 'bomb-flash show ' + type;
+  flash.innerHTML = `<span class="bf-label">${label}</span>`;
+  if (type === 'explode') {
+    const bar = document.querySelector('.scorebar');
+    if (bar) { bar.classList.add('shake'); setTimeout(() => bar.classList.remove('shake'), 500); }
+  }
+  const dur = type === 'explode' ? 2000 : 2600;
+  setTimeout(() => { flash.className = 'bomb-flash'; flash.innerHTML = ''; }, dur);
+}
+
+// ── Series win dots (circular in CS-style panel) ──────────────────────────
+function renderSeriesDots(containerId, total, won, wonCls) {
+  const c = el(containerId); if (!c) return;
+  const key = `${total}:${won}:${wonCls}`;
+  if (c._dotsKey === key) return;
+  c._dotsKey = key;
+  c.innerHTML = '';
+  for (let i = 0; i < total; i++) {
+    const d = document.createElement('div');
+    d.className = 'sb-dot' + (i < won ? ` ${wonCls}` : '');
+    c.appendChild(d);
+  }
+}
+
+// ── Team blocks (scorebar) ─────────────────────────────────────────────────
+function renderTeamBlocks(v) {
+  const round = (v && v.round && v.round.number) || 1;
+  const atkSide = atkSideForRound(round);
+
+  const atkTeam = atkSide === 'order' ? appTeams.blue   : appTeams.orange;
+  const defTeam = atkSide === 'order' ? appTeams.orange : appTeams.blue;
+  const atkSer  = atkSide === 'order' ? appSeries.blue  : appSeries.orange;
+  const defSer  = atkSide === 'order' ? appSeries.orange: appSeries.blue;
+
+  // Logos
+  const atkLogo = el('atk-logo'), defLogo = el('def-logo');
+  const atkFb = VAL_LOGO_FALLBACK;
+  const defFb = VAL_LOGO_FALLBACK;
+  const atkLogoSrc = atkTeam.logo || atkFb;
+  const defLogoSrc = defTeam.logo || defFb;
+  if (atkLogo && atkLogo._cdnSrc !== atkLogoSrc) { atkLogo._cdnSrc = atkLogoSrc; atkLogo.src = atkLogoSrc; atkLogo.onerror = () => { atkLogo.src = atkFb; atkLogo.onerror = null; }; }
+  if (defLogo && defLogo._cdnSrc !== defLogoSrc) { defLogo._cdnSrc = defLogoSrc; defLogo.src = defLogoSrc; defLogo.onerror = () => { defLogo.src = defFb; defLogo.onerror = null; }; }
+
+  const atkName = (atkTeam.name || 'ATK').toUpperCase();
+  const defName = (defTeam.name || 'DEF').toUpperCase();
+  setText('atk-name', atkName);
+  setText('def-name', defName);
+  // Scale both names to the same size based on whichever is longer
+  const maxLen = Math.max(atkName.length, defName.length);
+  const nmPx = maxLen <= 10 ? 22 : maxLen <= 13 ? 19 : maxLen <= 17 ? 16 : 14;
+  document.querySelectorAll('.team .nm').forEach(n => n.style.fontSize = nmPx + 'px');
+
+  // Scores from valorant state
+  const atkScore = v ? (atkSide === 'order' ? (v.order && v.order.score) || 0 : (v.chaos && v.chaos.score) || 0) : 0;
+  const defScore = v ? (atkSide === 'order' ? (v.chaos && v.chaos.score) || 0 : (v.order && v.order.score) || 0) : 0;
+  setNum('atk-score', atkScore);
+  setNum('def-score', defScore);
+
+  // Team colours → CSS vars (guard: setProperty triggers full style recalc, only write on change)
+  const atkC = atkTeam.color || '#71edc0';
+  const defC = defTeam.color || '#eb535d';
+  const root = document.documentElement;
+  if (root.style.getPropertyValue('--atk-color') !== atkC) { root.style.setProperty('--atk-color', atkC); root.style.setProperty('--atk-trans', hexAlpha(atkC, 0.45)); }
+  if (root.style.getPropertyValue('--def-color') !== defC) { root.style.setProperty('--def-color', defC); root.style.setProperty('--def-trans', hexAlpha(defC, 0.45)); }
+
+  // Series dots (Game X of Y) inside panel below each team name
+  const winsNeeded = Math.ceil(bestOf / 2);
+  renderSeriesDots('maps-atk', winsNeeded, atkSer, 'won-atk');
+  renderSeriesDots('maps-def', winsNeeded, defSer, 'won-def');
+
+  const phase = (v && v.round && v.round.phase) || 'warmup';
+  const roundNum = (v && v.round && v.round.number) || 0;
+  const isPlanted  = !!(v && v.spikeState === 'planted');
+  const isDefusing = !!(v && v.spikeState === 'defusing');
+  const spikeActive = isPlanted || isDefusing;
+
+  // Mid panel glow state
+  const midEl = el('cs-mid');
+  if (midEl) {
+    midEl.classList.toggle('planted-glow',  isPlanted && !isDefusing);
+    midEl.classList.toggle('defusing-glow', isDefusing);
+  }
+
+  // Round timer — compute elapsed seconds since round start
+  const _gameTime  = (v && v.round && v.round.gameTime)  || 0;
+  const _startTime = (v && v.round && v.round.startTime) || 0;
+  const _elapsed   = (_startTime > 0 && _gameTime > _startTime) ? (_gameTime - _startTime) : -1;
+  const _phase     = (v && v.round && v.round.phase) || '';
+  // Valorant: ~30 s buy phase then 100 s play (130 s total per round)
+  // Also accept round.phase='shopping' as explicit buy-phase signal (dev mode / server fallback)
+  const isBuying   = !spikeActive && (_phase === 'shopping' || (_elapsed >= 0 && _elapsed < 30));
+  const isPlaying  = !spikeActive && !isBuying && _elapsed >= 30;
+
+  const timerEl    = el('val-timer');
+  const buyCover   = el('buy-cover');
+  const buyCoverTx = el('buy-cover-text');
+
+  document.body.classList.toggle('phase-buying', isBuying);
+
+  if (spikeActive) {
+    if (timerEl) { timerEl.style.display = 'none'; }
+    if (midEl) midEl.classList.remove('buying');
+  } else if (isBuying) {
+    const buyLeft = Math.max(0, 30 - Math.floor(_elapsed >= 0 ? _elapsed : 0));
+    const bss = buyLeft.toString().padStart(2, '0');
+    if (timerEl) { timerEl.style.display = ''; timerEl.className = 'timer'; timerEl.textContent = `0:${bss}`; }
+    if (midEl) midEl.classList.add('buying');
+  } else if (isPlaying) {
+    const remaining = Math.max(0, 130 - _elapsed);
+    const mm = Math.floor(remaining / 60);
+    const ss = Math.floor(remaining % 60).toString().padStart(2, '0');
+    if (timerEl) { timerEl.style.display = ''; timerEl.className = 'timer'; timerEl.textContent = `${mm}:${ss}`; }
+    if (midEl) midEl.classList.remove('buying');
+  } else {
+    // warmup / no data
+    if (timerEl) { timerEl.style.display = 'none'; }
+    if (midEl) midEl.classList.remove('buying');
+  }
+
+  // Top scorebar buy-cover: not used for series text (lives at bottom now)
+  if (buyCover) buyCover.classList.remove('active');
+
+  const spikeLogo = el('spike-planted-logo');
+  if (spikeLogo) {
+    if (spikeActive) {
+      spikeLogo.style.display = '';
+      if (!spikeLogo.getAttribute('src')) {
+        spikeLogo.src = spikeCdnUrl(true);
+        spikeLogo.onerror = () => { spikeLogo.onerror = null; spikeLogo.src = '../assets/valorant/spike_red.png'; };
+      }
+      spikeLogo.className = 'spike-planted-logo ' + (isDefusing ? 'defusing' : 'planted');
+    } else {
+      spikeLogo.style.display = 'none';
+      spikeLogo.className = 'spike-planted-logo';
+    }
+  }
+
+  // Fuse bars on each team panel
+  const fuseA = el('fuse-atk'), fuseD = el('fuse-def');
+  if (fuseA) fuseA.style.display = spikeActive ? 'block' : 'none';
+  if (fuseD) fuseD.style.display = spikeActive ? 'block' : 'none';
+
+  // Team accent — hide colour line, show fuse instead
+  const atkPanel = document.querySelector('.team.t-atk');
+  const defPanel = document.querySelector('.team.t-def');
+  if (atkPanel) atkPanel.classList.toggle('fused', spikeActive);
+  if (defPanel) defPanel.classList.toggle('fused', spikeActive);
+
+  // Round label / phase text
+  const phaseEl = el('sb-phase');
+  if (phaseEl) {
+    if (!roundNum || _startTime === 0) {
+      phaseEl.textContent = 'WARMUP';
+      phaseEl.className = 'roundlbl';
+    } else if (roundNum > 24) {
+      phaseEl.textContent = `OT · ROUND ${roundNum}`;
+      phaseEl.className = 'roundlbl ot';
+    } else {
+      phaseEl.textContent = `ROUND ${roundNum}`;
+      phaseEl.className = 'roundlbl' + (isDefusing ? ' defusing' : isPlanted ? ' planted' : '');
+    }
+  }
+
+  // Spike countdown state machine
+  const curSpikeState = v ? (v.spikeState || '') : '';
+  const wasActive = prevSpikeState === 'planted' || prevSpikeState === 'defusing';
+
+  if (prevSpikeState !== 'planted' && isPlanted) {
+    // Spike just planted
+    startSpikeCountdown();
+    const cp = el('corner-pulse');
+    if (cp) { cp.classList.remove('show'); void cp.offsetWidth; cp.classList.add('show'); }
+  } else if (prevSpikeState === 'planted' && isDefusing) {
+    // Defuse started — stop spike drain, start defuse grow
+    clearSpikeCountdown();
+    startDefuseProgress();
+  } else if (wasActive && !spikeActive) {
+    // Spike resolved (detonated or defused)
+    clearSpikeCountdown();
+    clearDefuseProgress();
+  }
+
+  // Flash banners — trigger on any transition INTO these final states
+  if (curSpikeState === 'detonated' && prevSpikeState !== 'detonated') {
+    showBombFlash('explode', 'DETONATED');
+  } else if (curSpikeState === 'defused' && prevSpikeState !== 'defused') {
+    showBombFlash('defused', 'SPIKE DEFUSED');
+  }
+
+  prevSpikeState = curSpikeState;
+}
+
+function hexAlpha(hex, a) {
+  const r = parseInt(hex.slice(1,3),16), g = parseInt(hex.slice(3,5),16), b = parseInt(hex.slice(5,7),16);
+  return isNaN(r) ? `rgba(100,100,100,${a})` : `rgba(${r},${g},${b},${a})`;
+}
+
+// ── Player card builder ────────────────────────────────────────────────────
+const rowReg = new Map(); // player name → card element
+
+function buildCard(p, side, teamLogo) {
+  const wrap = document.createElement('div');
+  wrap.className = 'pcard' + (p.alive ? '' : ' dead');
+  wrap.dataset.pname = p.name;
+
+  // Spike carrier badge
+  const spBadge = document.createElement('div');
+  spBadge.className = 'spike-carrier' + (p.hasSpike ? ' show' : '');
+  const spImg = document.createElement('img'); spImg.alt = 'spike';
+  spImg.src = spikeCarrierIconUrl();
+  spBadge.appendChild(spImg);
+  wrap.appendChild(spBadge);
+
+  // ── BAR 1: Agent portrait | Name + HP subbar | Shield badge + HP number ──
+  const bar1 = document.createElement('div'); bar1.className = 'pbar1';
+  if (teamLogo) {
+    const bgDiv = document.createElement('div'); bgDiv.className = 'pbar1-team-bg';
+    bgDiv.style.backgroundImage = `url('${teamLogo}')`;
+    bar1.appendChild(bgDiv);
+  }
+
+  const agImg = document.createElement('img'); agImg.className = 'pbar1-agent';
+  agImg.alt = p.agentName || p.agent || '';
+  withCdnFallback(agImg, agentIconUrl(p.agent), `agent_icons/${p.agent}/${p.agent}_icon.webp`,
+    svgLetter((p.agentName || p.agent || '?').slice(0,2), AGENT_COLORS[p.agent] || '#3a4050'));
+  bar1.appendChild(agImg);
+
+  const mid = document.createElement('div'); mid.className = 'pbar1-mid';
+  const nameEl = document.createElement('div'); nameEl.className = 'pbar1-name'; nameEl.textContent = p.name;
+  const hp = p.alive ? Math.max(0, p.health || 0) : 0;
+  const hpTint = hp > 60 ? '' : hp > 30 ? '#f5a623' : '#e74c3c';
+  mid.append(nameEl);
+  bar1.appendChild(mid);
+
+  const right = document.createElement('div'); right.className = 'pbar1-right';
+  const shWrap = document.createElement('div'); shWrap.className = 'pbar1-shield';
+  const shIco = document.createElement('img'); shIco.className = 'pbar1-sh-img'; shIco.src = '../assets/weapons/shield.png'; shIco.alt = '';
+  const armor = p.armor || 0;
+  shIco.classList.add(armor === 2 ? 'heavy' : armor === 1 ? 'light' : 'none');
+  const shVal = document.createElement('span');
+  shVal.className = 'pbar1-sh-val ' + (armor === 2 ? 'heavy' : armor === 1 ? 'light' : 'no-sh');
+  shVal.textContent = armor === 2 ? '50' : armor === 1 ? '25' : '';
+  shWrap.append(shIco, shVal);
+  const hpNum = document.createElement('div'); hpNum.className = 'pbar1-hp';
+  hpNum.textContent = hp;
+  right.append(shWrap, hpNum);
+  bar1.appendChild(right);
+  wrap.appendChild(bar1);
+
+  // Ult circle anchored to the hp-bar divider, straddling bar1 and bar2
+  const ultGained = p.ultPointsGained || 0;
+  const ultNeeded = p.ultPointsNeeded || 0;
+  const ultReady  = ultNeeded > 0 && ultGained >= ultNeeded;
+  const ultPct    = ultNeeded > 0 ? Math.round((ultGained / ultNeeded) * 100) : 0;
+  const ultDisp = document.createElement('div');
+  ultDisp.className = 'ult-display' + (ultReady ? ' ult-ready' : '');
+  ultDisp.style.setProperty('--ult-pct', ultPct + '%');
+  const ultIc = document.createElement('img'); ultIc.className = 'ult-icon-sm';
+  withCdnFallback(ultIc, abilityIconUrl(p.agent, 'x'), `agent_icons/${p.agent}/ability_x.webp`, null);
+  ultDisp.appendChild(ultIc);
+
+  const hpSep = document.createElement('div'); hpSep.className = 'pcard-hpbar';
+  const hpFill = document.createElement('div'); hpFill.className = 'pcard-hpbar-fill';
+  hpFill.style.width = hp + '%';
+  hpSep.append(hpFill, ultDisp);
+  wrap.appendChild(hpSep);
+
+  // ── BAR 2: C/Q/E abilities | Weapon | Credits ─────────────────────────
+  const bar2 = document.createElement('div'); bar2.className = 'pbar2';
+
+  if (p.alive) {
+    const aRow = document.createElement('div'); aRow.className = 'pbar2-abilities';
+    ['c','q','e'].forEach(slot => {
+      const aImg = document.createElement('img'); aImg.className = 'pbar2-abi';
+      withCdnFallback(aImg, abilityIconUrl(p.agent, slot), `agent_icons/${p.agent}/ability_${slot}.webp`, null);
+      if (!!p[`${slot}_util`]) aImg.classList.add('ready');
+      aRow.appendChild(aImg);
+    });
+    bar2.appendChild(aRow);
+  }
+
+  const wWrap = document.createElement('div'); wWrap.className = 'pbar2-weap-wrap';
+  const wImg = document.createElement('img'); wImg.className = 'pbar2-weap'; wImg.alt = p.weapon || '';
+  wImg.style.display = p.weapon ? '' : 'none';
+  if (p.weapon) withCdnFallback(wImg, `/assets/valorant/game_icons/${p.weapon}.webp`, `game_icons/${p.weapon}.webp`, null);
+  wWrap.appendChild(wImg);
+  bar2.appendChild(wWrap);
+
+  if (p.credits != null) {
+    const credDiv = document.createElement('div'); credDiv.className = 'pbar2-cred';
+    const cIcon = document.createElement('img'); cIcon.alt = '¢'; cIcon.src = creditsIconUrl();
+    const cVal  = document.createElement('span'); cVal.className = 'pbar2-cred-val';
+    cVal.textContent = (p.credits || 0).toLocaleString();
+    credDiv.append(cIcon, cVal);
+    bar2.appendChild(credDiv);
+  }
+
+  wrap.appendChild(bar2);
+
+  const specOverlay = document.createElement('div');
+  specOverlay.className = 'pcard-spec';
+  wrap.appendChild(specOverlay);
+
+  return wrap;
+}
+
+// Update an existing card in-place (fast path)
+function updateCard(card, p) {
+  card.classList.toggle('dead', !p.alive);
+  card.classList.toggle('spectated', !!p.observed);
+  card.querySelector('.spike-carrier')?.classList.toggle('show', !!p.hasSpike);
+
+  const hp = p.alive ? Math.max(0, p.health || 0) : 0;
+  const hpTint = hp > 60 ? '' : hp > 30 ? '#f5a623' : '#e74c3c';
+
+  const hpFill = card.querySelector('.pcard-hpbar-fill');
+  if (hpFill) { hpFill.style.width = hp + '%'; hpFill.style.background = ''; }
+
+  const hpNum = card.querySelector('.pbar1-hp');
+  if (hpNum) { hpNum.textContent = hp; hpNum.style.color = ''; }
+
+  const shIco = card.querySelector('.pbar1-sh-img');
+  const shVal = card.querySelector('.pbar1-sh-val');
+  const shArmor = p.armor || 0;
+  if (shIco) { shIco.classList.remove('none','light','heavy'); shIco.classList.add(shArmor === 2 ? 'heavy' : shArmor === 1 ? 'light' : 'none'); }
+  if (shVal) {
+    shVal.classList.remove('no-sh','light','heavy');
+    shVal.classList.add(shArmor === 2 ? 'heavy' : shArmor === 1 ? 'light' : 'no-sh');
+    shVal.textContent = shArmor === 2 ? '50' : shArmor === 1 ? '25' : '';
+  }
+
+  card.querySelectorAll('.pbar2-abi').forEach((img, i) => {
+    const slot = ['c','q','e'][i];
+    if (slot) img.classList.toggle('ready', !!p[`${slot}_util`]);
+  });
+
+  const wImg = card.querySelector('.pbar2-weap');
+  if (wImg) {
+    const wDisp = p.weapon ? '' : 'none';
+    if (wImg.style.display !== wDisp) wImg.style.display = wDisp;
+    if (p.weapon) withCdnFallback(wImg, `/assets/valorant/game_icons/${p.weapon}.webp`, `game_icons/${p.weapon}.webp`, null);
+  }
+  const wWrap = card.querySelector('.pbar2-weap-wrap');
+  if (wWrap) { const d = p.weapon ? '' : 'none'; if (wWrap.style.display !== d) wWrap.style.display = d; }
+
+  const credVal = card.querySelector('.pbar2-cred-val');
+  if (credVal) credVal.textContent = (p.credits || 0).toLocaleString();
+
+  const ultDisp = card.querySelector('.ult-display');
+  if (ultDisp) {
+    const gained = p.ultPointsGained || 0;
+    const needed = p.ultPointsNeeded || 0;
+    const ready  = needed > 0 && gained >= needed;
+    const pct = needed > 0 ? Math.round((gained / needed) * 100) : 0;
+    ultDisp.classList.toggle('ult-ready', ready);
+    ultDisp.style.setProperty('--ult-pct', pct + '%');
+  }
+}
+
+function syncColumn(containerId, players, side, teamLogo) {
+  const container = el(containerId); if (!container) return;
+  const byKills = (a,b) => (b.kills||0)-(a.kills||0)||(a.deaths||0)-(b.deaths||0);
+  const sorted = [...players].sort(byKills);
+
+  sorted.forEach((p, i) => {
+    let card = rowReg.get(p.name);
+    if (!card) {
+      card = buildCard(p, side, teamLogo);
+      container.appendChild(card);
+      rowReg.set(p.name, card);
+    } else {
+      updateCard(card, p);
+    }
+    if (container.children[i] !== card) container.insertBefore(card, container.children[i] || null);
+  });
+}
+
+// ── Alive count popup ──────────────────────────────────────────────────────
+let _prevTotalAlive = null;
+let _aliveHideTimer = null;
+
+function bumpEl(id) {
+  const e = el(id); if (!e) return;
+  e.classList.remove('bump'); void e.offsetWidth; e.classList.add('bump');
+}
+
+function renderAlivePopup(atkPlayers, defPlayers, isBuy) {
+  const box = el('val-alive'); if (!box) return;
+  if (isBuy) {
+    box.classList.remove('show');
+    clearTimeout(_aliveHideTimer); _aliveHideTimer = null;
+    _prevTotalAlive = null; return;
+  }
+  const atkAlive = atkPlayers.filter(p => p.alive).length;
+  const defAlive = defPlayers.filter(p => p.alive).length;
+  const total = atkAlive + defAlive;
+  const atkEl = el('val-alive-atk'), defEl = el('val-alive-def');
+  if (atkEl) atkEl.textContent = atkAlive;
+  if (defEl) defEl.textContent = defAlive;
+  const hasPlayers = atkPlayers.length + defPlayers.length > 0;
+  if (hasPlayers && _prevTotalAlive !== null && total < _prevTotalAlive) {
+    box.classList.add('show');
+    bumpEl('val-alive-atk'); bumpEl('val-alive-def');
+    clearTimeout(_aliveHideTimer);
+    _aliveHideTimer = setTimeout(() => box.classList.remove('show'), 2500);
+  }
+  _prevTotalAlive = hasPlayers ? total : null;
+}
+
+// ── Round win panel ────────────────────────────────────────────────────────
+let rwpActive = null;
+function showRoundWin(winSide, teamLogo, roundNum) {
+  if (rwpActive) { rwpActive.remove(); rwpActive = null; }
+  const wrapper = document.createElement('div');
+  wrapper.className = 'rwp-wrapper';
+  wrapper.innerHTML = `
+    <div class="rwp-bar ${winSide}">
+      <div class="rwp-edge left"></div>
+      <div class="rwp-inner">
+        ${teamLogo ? `<img class="rwp-logo" src="${teamLogo}" alt="">` : ''}
+        <div class="rwp-text">
+          <span class="rwp-label">ROUND WIN</span>
+          <span class="rwp-roundnum">ROUND ${roundNum - 1}</span>
+        </div>
+      </div>
+      <div class="rwp-edge right"></div>
+    </div>`;
+  document.body.appendChild(wrapper);
+  rwpActive = wrapper;
+  setTimeout(() => { if (rwpActive === wrapper) { wrapper.remove(); rwpActive = null; } }, 5700);
+}
+
+// ── Buy phase lower third ──────────────────────────────────────────────────
+function renderBuyLt(v, atkPlayers, defPlayers, atkTeam, defTeam) {
+  const lt = el('buy-lt');
+  if (!lt) return;
+
+  const hist     = v.roundHistory || [];
+  const round    = (v.round && v.round.number) || 1;
+  const atkSide  = atkSideForRound(round);
+  const atkScore = atkSide === 'order' ? (v.order && v.order.score || 0) : (v.chaos && v.chaos.score || 0);
+  const defScore = atkSide === 'order' ? (v.chaos && v.chaos.score || 0) : (v.order && v.order.score || 0);
+
+  // CDN-fallback helper for inline img tags
+  function cdnImg(cls, localSrc, cdnPath, extra) {
+    return `<img class="${cls}" src="${localSrc}" onerror="this.onerror=null;this.src='${CDN}/${cdnPath}'" ${extra||''}>`;
+  }
+
+  // Logos needed in slot rendering — compute before slots
+  const atkLogo = (atkTeam && atkTeam.logo) || VAL_LOGO_FALLBACK;
+  const defLogo = (defTeam && defTeam.logo) || VAL_LOGO_FALLBACK;
+
+  // Round history — starts at 12 slots, grows one-by-one after round 12,
+  // then slides as a fixed-size window once it exceeds MAX_VISIBLE.
+  const MAX_VISIBLE = 14;
+  const displayCount = round <= MAX_VISIBLE ? Math.max(12, round) : MAX_VISIBLE;
+  const startRound  = Math.max(1, round - displayCount + 1);
+  const slots = Array.from({length: displayCount}, (_, i) => {
+    const r = startRound + i;
+    const h = hist.find(hr => hr.round === r);
+    const atkWon = h && ((h.winner === 'ORDER' && atkSide === 'order') || (h.winner === 'CHAOS' && atkSide === 'chaos'));
+    const defWon = h && !atkWon;
+    const cls = !h ? '' : (r > 24 ? 'ot' : (atkWon ? 'won-atk' : 'won-def'));
+    const winLogo = atkWon ? atkLogo : defWon ? defLogo : '';
+    const logoHtml = winLogo ? `<img src="${winLogo}" onerror="this.onerror=null;this.src='${VAL_LOGO_FALLBACK}'" alt="">` : '';
+    return `<div class="blt-rslot ${cls}${r === round ? ' cur' : ''}">
+      <div class="blt-rind">${logoHtml}</div>
+      <span class="blt-rnum">${r}</span>
+    </div>`;
+  }).join('');
+
+  // Player cell — used for both ATK (row) and DEF (row-reverse) sides
+  function prowCell(p, side, team) {
+    const ultG   = p.ultPointsGained || 0;
+    const ultN   = p.ultPointsNeeded || 0;
+    const ultRdy = ultN > 0 && ultG >= ultN;
+    const ultPct = ultN > 0 ? Math.round((ultG / ultN) * 100) : 0;
+    const shCls  = p.armor === 2 ? 'heavy' : p.armor === 1 ? 'light' : 'none';
+    const agent  = p.agent || 'sova';
+    const spent  = p.spentCredits ? `-${p.spentCredits.toLocaleString()}` : '';
+    return `<div class="blt-cell blt-${side}">
+      <div class="bc-money">
+        ${spent ? `<span class="bc-spent">${spent}</span>` : ''}
+        <span class="bc-cred"><img src="${creditsIconUrl()}" alt=""> ${(p.credits||0).toLocaleString()}</span>
+      </div>
+      <div class="bc-abi">
+        ${['c','q','e'].map(slot => cdnImg(
+          `bc-abi-ic${p[slot+'_util'] ? ' ready' : ''}`,
+          abilityIconUrl(agent, slot),
+          `agent_icons/${agent}/ability_${slot}.webp`
+        )).join('')}
+      </div>
+      <div class="bc-gear">
+        <img class="bc-sh ${shCls}" src="../assets/weapons/shield.png" alt="">
+        ${p.weapon ? cdnImg('bc-weap-img', weaponIconUrl(p.weapon), `game_icons/${p.weapon}.webp`, `alt="${p.weapon}"`) : ''}
+        <div class="bc-ult-circle${ultRdy ? ' rdy' : ''}" style="--ult-pct:${ultPct}%">
+          ${cdnImg('bc-ult-ic', abilityIconUrl(agent,'x'), `agent_icons/${agent}/ability_x.webp`)}
+        </div>
+      </div>
+      <div class="bc-player">
+        ${side === 'atk' ? `
+          ${cdnImg('bc-agent', agentIconUrl(agent), `agent_icons/${agent}/${agent}_icon.webp`)}
+          <span class="bc-pname">${p.name}</span>
+          <span class="bc-kda"><span class="k">${p.kills||0}</span>/<span class="d">${p.deaths||0}</span>/${p.assists||0}</span>
+        ` : `
+          <span class="bc-kda"><span class="k">${p.kills||0}</span>/<span class="d">${p.deaths||0}</span>/${p.assists||0}</span>
+          <span class="bc-pname">${p.name}</span>
+          ${cdnImg('bc-agent', agentIconUrl(agent), `agent_icons/${agent}/${agent}_icon.webp`)}
+        `}
+      </div>
+    </div>`;
+  }
+
+  const atkSorted = atkPlayers.slice().sort((a,b) => (b.kills||0)-(a.kills||0));
+  const defSorted = defPlayers.slice().sort((a,b) => (b.kills||0)-(a.kills||0));
+  const maxRows = Math.max(atkSorted.length, defSorted.length, 1);
+  const rows = Array.from({length: maxRows}, (_, i) => {
+    const a = atkSorted[i];
+    const d = defSorted[i];
+    return `<div class="blt-pair-row">
+      ${a ? prowCell(a, 'atk', atkTeam) : '<div class="blt-cell blt-atk"></div>'}
+      ${d ? prowCell(d, 'def', defTeam) : '<div class="blt-cell blt-def"></div>'}
+    </div>`;
+  }).join('');
+
+  lt.innerHTML = `
+    <div class="blt-header">
+      <div class="blt-th-team blt-atk-side">
+        <img class="blt-th-logo" src="${atkLogo}" onerror="this.onerror=null;this.src='${VAL_LOGO_FALLBACK}'" alt="">
+        <div class="blt-th-info">
+          <span class="blt-th-tname">${(atkTeam && atkTeam.name) || 'ATTACK'}</span>
+        </div>
+        <span class="blt-th-score">${atkScore}</span>
+      </div>
+      <div class="blt-th-center">
+        <span class="blt-th-rlabel">ROUND</span>
+        <span class="blt-th-rnum">${String(round).padStart(2,'0')}</span>
+      </div>
+      <div class="blt-th-team blt-def-side">
+        <span class="blt-th-score">${defScore}</span>
+        <div class="blt-th-info blt-th-info-r">
+          <span class="blt-th-tname">${(defTeam && defTeam.name) || 'DEFENSE'}</span>
+        </div>
+        <img class="blt-th-logo" src="${defLogo}" onerror="this.onerror=null;this.src='${VAL_LOGO_FALLBACK}'" alt="">
+      </div>
+    </div>
+    <div class="blt-rounds-bar">${slots}</div>
+    <div class="blt-board">
+      <div class="blt-logo-atk" style="background-image:url('${atkLogo}')"></div>
+      <div class="blt-logo-def" style="background-image:url('${defLogo}')"></div>
+      ${rows}
+    </div>`;
+}
+
+// ── Sponsor rail ───────────────────────────────────────────────────────────
+function renderSponsors(b) {
+  const rail = el('val-sponsors');
+  if (!b || !b.sponsors || !b.sponsors.length) { if (rail) rail.classList.add('hidden'); return; }
+  if (rail) rail.classList.remove('hidden');
+  setText('sp-label', (b.sponsorLabel || 'PARTNERS').toUpperCase());
+  if (spTimer) clearInterval(spTimer);
+  let i = 0;
+  const show = () => {
+    const sp = b.sponsors[i % b.sponsors.length];
+    const slot = el('sp-slot'); if (!slot) return;
+    slot.innerHTML = '';
+    if (sp && sp.logo) { const img = document.createElement('img'); img.className = 'sp-logo'; img.src = sp.logo; slot.appendChild(img); }
+    else if (sp && sp.name) { const span = document.createElement('span'); span.className = 'sp-name'; span.textContent = sp.name; slot.appendChild(span); }
+    i++;
+  };
+  show();
+  if (b.sponsors.length > 1) spTimer = setInterval(show, Math.max(3, b.sponsorInterval || 6) * 1000);
+}
+
+// ── Main render ────────────────────────────────────────────────────────────
+let prevRoundTotal = 0;
+function render(v) {
+  const offline = el('val-offline');
+  if (!v || !v.connected) { if (offline) offline.classList.remove('hidden'); renderTeamBlocks(null); return; }
+  if (offline) offline.classList.add('hidden');
+
+  // Event title (show/hide based on content)
+  const evEl = el('val-event-name');
+  if (evEl) { evEl.textContent = appEventName; evEl.classList.toggle('hidden', !appEventName); }
+
+  // Bottom bar: round label + series
+  const totalMaps  = (appSeries.blue || 0) + (appSeries.orange || 0) + 1;
+  const metaSeries = bestOf > 1 ? `GAME ${totalMaps} OF ${bestOf}` : '';
+  const roundNum   = (v.round && v.round.number) || 0;
+  const roundPhase = (v.round && v.round.phase) || 'warmup';
+  const vbbRoundEl = el('vbb-round');
+  const vbbSerEl   = el('vbb-series');
+  const vbbSepEl   = el('vbb-sep');
+  if (vbbRoundEl) {
+    vbbRoundEl.textContent = roundLabel(roundNum, roundPhase);
+    vbbRoundEl.className = 'vbb-round' + (roundNum > 24 ? ' ot' : '');
+  }
+  if (vbbSerEl)   vbbSerEl.textContent    = metaSeries;
+  if (vbbSepEl)   vbbSepEl.style.display  = metaSeries ? '' : 'none';
+
+  renderTeamBlocks(v);
+
+  const round = (v.round && v.round.number) || 1;
+  const atkSide = atkSideForRound(round);
+
+  // Annotate each player with observed flag (server stores v.observed as the player object)
+  const _observedName = v.observed && v.observed.name;
+  const allPlayers = (v.players || []).map(p =>
+    _observedName && p.name === _observedName ? { ...p, observed: true } : p
+  );
+  const orderPlayers = allPlayers.filter(p => p.team === 'ORDER');
+  const chaosPlayers = allPlayers.filter(p => p.team === 'CHAOS');
+  const atkPlayers = atkSide === 'order' ? orderPlayers : chaosPlayers;
+  const defPlayers = atkSide === 'order' ? chaosPlayers : orderPlayers;
+
+  const _atkTeam = atkSide === 'order' ? appTeams.blue : appTeams.orange;
+  const _defTeam = atkSide === 'order' ? appTeams.orange : appTeams.blue;
+  syncColumn('players-atk', atkPlayers, 'atk', _atkTeam.logo || null);
+  syncColumn('players-def', defPlayers, 'def', _defTeam.logo || null);
+
+  // Cleanup stale rows
+  const names = new Set(allPlayers.map(p => p.name));
+  for (const [n, rowEl] of rowReg) {
+    if (!names.has(n)) { rowEl.remove(); rowReg.delete(n); }
+  }
+
+  // Buy phase lower third
+  const isBuy = roundPhase === 'shopping';
+  renderAlivePopup(atkPlayers, defPlayers, isBuy);
+  const atkCol = el('players-atk');
+  const defCol = el('players-def');
+  const buyLt  = el('buy-lt');
+  if (atkCol) atkCol.classList.toggle('buy-hidden', isBuy);
+  if (defCol) defCol.classList.toggle('buy-hidden', isBuy);
+  if (buyLt) {
+    if (isBuy) {
+      // Only rebuild innerHTML when buy phase first opens — not on every timer tick
+      if (!buyLt.classList.contains('show')) {
+        const atkTeam = atkSide === 'order' ? appTeams.blue : appTeams.orange;
+        const defTeam = atkSide === 'order' ? appTeams.orange : appTeams.blue;
+        renderBuyLt(v, atkPlayers, defPlayers, atkTeam, defTeam);
+      }
+      buyLt.classList.add('show');
+    } else {
+      buyLt.classList.remove('show');
+    }
+  }
+
+  // Round win panel trigger
+  const newTotal = (v.order && v.order.score || 0) + (v.chaos && v.chaos.score || 0);
+  if (newTotal > prevRoundTotal && prevRoundTotal > 0) {
+    const prevO = v.order && v.order.score || 0;
+    const prevC = v.chaos && v.chaos.score || 0;
+    // Infer who just won (the total went up)
+    const hist = v.roundHistory || [];
+    const lastWin = hist.length > 0 ? hist[hist.length - 1].winner : '';
+    if (lastWin) {
+      const winnerIsAtk = (lastWin === 'ORDER' && atkSide === 'order') || (lastWin === 'CHAOS' && atkSide === 'chaos');
+      const winTeam = winnerIsAtk ? (atkSide === 'order' ? appTeams.blue : appTeams.orange)
+                                  : (atkSide === 'order' ? appTeams.orange : appTeams.blue);
+      showRoundWin(winnerIsAtk ? 'atk' : 'def', winTeam && winTeam.logo, round);
+    }
+  }
+  prevRoundTotal = newTotal;
+}
+
+function applyBrand(data) {
+  const root = document.documentElement;
+  root.dataset.theme = data.theme || 'default';
+  if (data.fontFamily) root.style.setProperty('--main-font', `'${data.fontFamily}', sans-serif`);
+  const b = data.brand;
+  if (b) {
+    if (b.color)  root.style.setProperty('--accent', b.color);
+    if (b.accent) root.style.setProperty('--accent-2', b.accent);
+    if (b.font)   root.style.setProperty('--main-font', `'${b.font}', sans-serif`);
+  }
+}
+
+// ── WebSocket ──────────────────────────────────────────────────────────────
+function connect() {
+  const sock = new WebSocket('ws://localhost:3001');
+  sock.onopen  = () => sock.send(JSON.stringify({ type: 'request_state' }));
+  sock.onmessage = ({ data }) => {
+    let msg; try { msg = JSON.parse(data); } catch { return; }
+    if (msg.type === 'full_state') {
+      const d = msg.data;
+      applyBrand(d);
+      appTeams     = { blue: (d.teams && d.teams.blue) || {}, orange: (d.teams && d.teams.orange) || {} };
+      appSeries    = d.series || { blue: 0, orange: 0 };
+      bestOf       = d.bestOf || 1;
+      brand        = d.brand || null;
+      appEventName = d.eventName || appEventName;
+      valState  = d.valorant || null;
+      if (!devState) render(valState);
+      renderSponsors(brand);
+    } else if (msg.type === 'valorant_update') {
+      valState = msg.data;
+      if (!devState) render(valState);
+    }
+  };
+  sock.onclose = () => setTimeout(connect, 3000);
+  sock.onerror = () => { try { sock.close(); } catch {} };
+}
+
+// ── Demo data ──────────────────────────────────────────────────────────────
+function makeDemoState(overrides) {
+  return Object.assign({
+    connected: true, spikeState: '',
+    map: { name: '', displayName: 'Ascent' },
+    round: { number: 8, phase: 'live' },
+    order: { score: 5 }, chaos: { score: 2 },
+    roundHistory: [
+      { round:1, winner:'ORDER' }, { round:2, winner:'CHAOS' },
+      { round:3, winner:'ORDER' }, { round:4, winner:'ORDER' },
+      { round:5, winner:'ORDER' }, { round:6, winner:'CHAOS' },
+      { round:7, winner:'ORDER' },
+    ],
+    players: [
+      { name:'TenZ',    agent:'jett',      agentName:'Jett',      team:'ORDER', health:100,maxHealth:150,armor:2, alive:true, kills:8,deaths:2,assists:1,  hasSpike:false, credits:3900, spentCredits:3900, ultPointsNeeded:7,ultPointsGained:3, c_util:true,q_util:false,e_util:true,  weapon:'vandal' },
+      { name:'Johnqt',  agent:'chamber',   agentName:'Chamber',   team:'ORDER', health:85, maxHealth:125,armor:1, alive:true, kills:5,deaths:3,assists:2,  hasSpike:false, credits:2400, spentCredits:1400, ultPointsNeeded:8,ultPointsGained:8, c_util:true,q_util:true, e_util:true,  weapon:'operator' },
+      { name:'Zellsis', agent:'viper',     agentName:'Viper',     team:'ORDER', health:60, maxHealth:100,armor:0, alive:true, kills:3,deaths:4,assists:5,  hasSpike:true,  credits:1200, spentCredits:2900, ultPointsNeeded:8,ultPointsGained:5, c_util:false,q_util:true,e_util:true,  weapon:'phantom' },
+      { name:'Sacy',    agent:'skye',      agentName:'Skye',      team:'ORDER', health:28, maxHealth:125,armor:1, alive:true, kills:2,deaths:2,assists:7,  hasSpike:false, credits:800,  spentCredits:900,  ultPointsNeeded:6,ultPointsGained:2, c_util:true, q_util:false,e_util:false, weapon:'ghost' },
+      { name:'Pancada', agent:'brimstone', agentName:'Brimstone', team:'ORDER', health:0,  maxHealth:100,armor:0, alive:false,kills:1,deaths:5,assists:3,  hasSpike:false, credits:900,  spentCredits:0,    ultPointsNeeded:5,ultPointsGained:0, c_util:false,q_util:false,e_util:false,weapon:'classic' },
+      { name:'Nats',    agent:'omen',      agentName:'Omen',      team:'CHAOS', health:100,maxHealth:150,armor:2, alive:true, kills:6,deaths:1,assists:2,  hasSpike:false, credits:4000, spentCredits:3900, ultPointsNeeded:7,ultPointsGained:7, c_util:true, q_util:true, e_util:true,  weapon:'vandal' },
+      { name:'Aspas',   agent:'raze',      agentName:'Raze',      team:'CHAOS', health:74, maxHealth:125,armor:1, alive:true, kills:7,deaths:4,assists:0,  hasSpike:false, credits:2000, spentCredits:1200, ultPointsNeeded:6,ultPointsGained:4, c_util:true, q_util:false,e_util:true,  weapon:'sheriff' },
+      { name:'saadhak', agent:'astra',     agentName:'Astra',     team:'CHAOS', health:55, maxHealth:100,armor:0, alive:true, kills:2,deaths:3,assists:6,  hasSpike:false, credits:600,  spentCredits:2900, ultPointsNeeded:10,ultPointsGained:6,c_util:false,q_util:true, e_util:false, weapon:'phantom' },
+      { name:'Less',    agent:'fade',      agentName:'Fade',      team:'CHAOS', health:45, maxHealth:125,armor:1, alive:true, kills:3,deaths:3,assists:4,  hasSpike:false, credits:1500, spentCredits:2000, ultPointsNeeded:8,ultPointsGained:3, c_util:true, q_util:true, e_util:false, weapon:'spectre' },
+      { name:'Heat',    agent:'phoenix',   agentName:'Phoenix',   team:'CHAOS', health:0,  maxHealth:100,armor:0, alive:false,kills:2,deaths:5,assists:1,  hasSpike:false, credits:900,  spentCredits:0,    ultPointsNeeded:6,ultPointsGained:0, c_util:false,q_util:false,e_util:false,weapon:'classic' },
+    ]
+  }, overrides);
+}
+
+// ── Developer toolbar ──────────────────────────────────────────────────────
+let lastRealValState = null;
+let _devTimerInterval = null;
+
+function _devStartTimer() {
+  clearInterval(_devTimerInterval);
+  _devTimerInterval = setInterval(() => {
+    if (!devState) { clearInterval(_devTimerInterval); return; }
+    devState.round.gameTime = (devState.round.gameTime || 0) + 1;
+    render(devState);
+  }, 1000);
+}
+function _devStopTimer() { clearInterval(_devTimerInterval); _devTimerInterval = null; }
+
+function _devSetPlaying(roundGameTime) {
+  devState.round.phase = 'live';
+  devState.round.startTime = roundGameTime || 1000;
+  devState.round.gameTime  = (roundGameTime || 1000) + 45;
+  _devStartTimer();
+}
+function _devSetBuying(roundGameTime) {
+  devState.round.phase = 'shopping';
+  devState.round.startTime = roundGameTime || 2000;
+  devState.round.gameTime  = (roundGameTime || 2000) + 5;
+  _devStartTimer(); // keep ticking so buy-phase countdown updates
+}
+
+function devAction(action) {
+  if (action === 'live') {
+    _devStopTimer();
+    devState = null; prevRoundTotal = 0;
+    render(lastRealValState || valState);
+    return;
+  }
+  if (action === 'reset' || action === 'load-demo') {
+    _devStopTimer();
+    devState = makeDemoState();
+    _devSetPlaying(1000);
+    render(devState);
+    return;
+  }
+  if (!devState) { devState = JSON.parse(JSON.stringify(makeDemoState())); _devSetPlaying(1000); }
+
+  const _curGameTime = devState.round.gameTime || 1000;
+  if (action === 'plant') {
+    _devStopTimer();
+    devState.spikeState = 'planted';
+    devState.round.phase = 'bomb';
+  } else if (action === 'defusing') {
+    devState.spikeState = 'defusing';
+    devState.round.phase = 'bomb';
+  } else if (action === 'defuse') {
+    devState.spikeState = 'defused';
+    devState.round.phase = 'live';
+    setTimeout(() => { if (devState) { devState.spikeState = ''; _devSetBuying(_curGameTime + 20); render(devState); } }, 2500);
+  } else if (action === 'detonate') {
+    devState.spikeState = 'detonated';
+    devState.round.phase = 'live';
+    setTimeout(() => { if (devState) { devState.spikeState = ''; _devSetBuying(_curGameTime + 20); render(devState); } }, 1500);
+  } else if (action === 'win-atk') {
+    const atkSide = atkSideForRound(devState.round.number || 1);
+    if (atkSide === 'order') devState.order.score++;
+    else devState.chaos.score++;
+    devState.roundHistory.push({ round: devState.round.number, winner: atkSide === 'order' ? 'ORDER' : 'CHAOS' });
+    devState.round.number = (devState.round.number || 1) + 1;
+    devState.spikeState = '';
+    devState.players.forEach(p => { p.alive = true; p.health = 100; });
+    _devSetBuying(_curGameTime + 5);
+  } else if (action === 'win-def') {
+    const atkSide = atkSideForRound(devState.round.number || 1);
+    const defSide = atkSide === 'order' ? 'chaos' : 'order';
+    if (defSide === 'order') devState.order.score++;
+    else devState.chaos.score++;
+    devState.roundHistory.push({ round: devState.round.number, winner: defSide === 'order' ? 'ORDER' : 'CHAOS' });
+    devState.round.number = (devState.round.number || 1) + 1;
+    devState.spikeState = '';
+    devState.players.forEach(p => { p.alive = true; p.health = 100; });
+    _devSetBuying(_curGameTime + 5);
+  } else if (action === 'buy-phase') {
+    devState.spikeState = '';
+    if (devState.round.phase === 'shopping') _devSetPlaying(_curGameTime + 25);
+    else _devSetBuying(_curGameTime + 5);
+  } else if (action === 'halftime') {
+    devState.round.number = 13;
+    devState.spikeState = '';
+    _devSetBuying(_curGameTime + 5);
+  } else if (action === 'ot-round') {
+    devState.round.number = Math.max(25, devState.round.number + 1);
+    _devSetBuying(_curGameTime + 5);
+  } else if (action === 'kill-atk') {
+    const atkSide = atkSideForRound(devState.round.number || 1);
+    const team = atkSide === 'order' ? 'ORDER' : 'CHAOS';
+    const p = devState.players.find(pl => pl.team === team && pl.alive);
+    if (p) { p.alive = false; p.health = 0; }
+  } else if (action === 'kill-def') {
+    const atkSide = atkSideForRound(devState.round.number || 1);
+    const team = atkSide === 'order' ? 'CHAOS' : 'ORDER';
+    const p = devState.players.find(pl => pl.team === team && pl.alive);
+    if (p) { p.alive = false; p.health = 0; }
+  } else if (action === 'revive-all') {
+    devState.players.forEach(p => { p.alive = true; p.health = 100; });
+  } else if (action === 'spec-cycle') {
+    const alive = devState.players.filter(p => p.alive);
+    const curIdx = alive.findIndex(p => p.observed);
+    devState.players.forEach(p => { p.observed = false; });
+    const next = alive[(curIdx + 1) % alive.length];
+    if (next) next.observed = true;
+  }
+  render(devState);
+}
+
+(function initDevPanel() {
+  const devMode = new URLSearchParams(location.search).get('dev') === '1';
+  if (window.obsstudio && !devMode) return; // hide inside OBS unless ?dev=1
+  const panel = el('dev-panel'), fab = el('dev-fab');
+  if (!panel || !fab) return;
+  panel.classList.add('open');
+  panel.querySelectorAll('[data-dev]').forEach(btn =>
+    btn.addEventListener('click', () => devAction(btn.getAttribute('data-dev')))
+  );
+  el('dev-collapse').addEventListener('click', () => { panel.classList.remove('open'); fab.style.display = 'block'; });
+  fab.addEventListener('click', () => { fab.style.display = 'none'; panel.classList.add('open'); });
+  if (window.obsstudio && devMode) {
+    const badge = el('dev-obs-badge');
+    if (badge) badge.style.display = 'inline';
+  }
+  if (devMode && !devState) {
+    if (!appEventName) appEventName = 'VCT MASTERS — GRAND FINAL';
+    devState = makeDemoState();
+    _devSetPlaying(1000);
+    render(devState);
+  }
+})();
+
+// ── Preview mode (?preview=1) ──────────────────────────────────────────────
+(function initPreview() {
+  if (new URLSearchParams(location.search).get('preview') !== '1') return;
+  document.documentElement.classList.add('preview');
+  el('preview-badge')?.classList.remove('hidden');
+  appTeams     = { blue: { name:'SENTINELS', logo:'', color:'#71edc0' }, orange: { name:'TEAM LIQUID', logo:'', color:'#eb535d' } };
+  appSeries    = { blue: 1, orange: 0 };
+  bestOf       = 3;
+  appEventName = appEventName || 'JOTA INVITATIONAL — GRAND FINAL';
+  devState = makeDemoState();
+  render(devState);
+})();
+
+render(null);
+connect();
+</script>
+</body>
+</html>

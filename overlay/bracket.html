@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1920">
+<title>NE Broadcast Suite — Bracket</title>
+<link rel="stylesheet" href="bracket.css">
+</head>
+<body>
+
+<!-- Standalone bracket scene — add as its own OBS browser source / scene.
+     Driven by the same WS bridge (:3001), fed by Start.gg. -->
+<div id="bracket-stage" class="bracket-stage">
+  <div id="bracket-title" class="bracket-title"></div>
+  <div id="bracket-body" class="bracket-body"></div>
+  <div id="bracket-empty" class="bracket-empty">No bracket loaded — load an event from the Production tab.</div>
+</div>
+
+<script src="bracket.js"></script>
+</body>
+</html>

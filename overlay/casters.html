@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1920">
+<title>NE Broadcast Suite — Casters</title>
+<link rel="stylesheet" href="casters.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+</head>
+<body>
+
+<!-- Standalone caster scene — add as its own OBS browser source / scene.
+     Driven by the same WS bridge (:3001) as the main overlay. -->
+<div id="caster-stage" class="caster-stage">
+  <div id="caster-list" class="caster-list"></div>
+</div>
+
+<script src="scene-base.js"></script>
+<script src="casters.js"></script>
+</body>
+</html>

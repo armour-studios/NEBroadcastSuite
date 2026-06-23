@@ -1,0 +1,150 @@
+/* ─── Standalone caster scene ───────────────────────────────────────────────
+   Its own OBS browser source. Full 1920x1080 canvas, not layered onto the
+   in-game HUD. Webcams are embedded via vdo.ninja iframes (same pipeline as
+   the player Facecams), with a name/handle plate under each cam. */
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --main-font: 'Bourgeois', sans-serif;
+  --accent: #055fdb;
+  --accent-2: #e97139;
+}
+[data-theme="midnight"] { --accent: #4aa3ff; --accent-2: #7c5cff; }
+[data-theme="neon"]     { --accent: #00e5a0; --accent-2: #ff2e88; }
+
+html, body {
+  width: 1920px;
+  height: 1080px;
+  overflow: hidden;
+  background: transparent;
+  font-family: var(--main-font);
+  -webkit-font-smoothing: antialiased;
+}
+
+.hidden { display: none !important; }
+
+/* Transparent stage — the cam areas are blank "camera holes". Composite your
+   real webcams (or a background) in OBS BEHIND this browser source so they show
+   through the holes. Fades on/off with the "Show Caster Scene" toggle. */
+.caster-stage {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 80px 70px;
+  background: transparent;
+  opacity: 0;
+  transform: scale(1.015);
+  transition: opacity 0.55s ease, transform 0.55s ease;
+}
+.caster-stage.show {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.caster-list {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 40px 44px;
+  width: 100%;
+  max-height: 100%;
+}
+
+.caster-cam {
+  display: flex;
+  flex-direction: column;
+  max-width: 100%;
+  position: relative;
+}
+
+.caster-slot-badge {
+  position: absolute;
+  top: -10px;
+  left: 14px;
+  z-index: 2;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #c4c9d4;
+  background: rgba(17,19,24,0.92);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 999px;
+  padding: 4px 10px;
+}
+
+/* Blank camera hole — transparent so an OBS webcam source shows through.
+   The thin frame just marks where to align the cam. */
+.caster-cam-frame {
+  position: relative;
+  width: 100%;
+  background: transparent;
+  border: 2px solid rgba(255,255,255,0.18);
+  border-bottom: none;
+  border-radius: 16px 16px 0 0;
+  overflow: hidden;
+  box-shadow: 0 22px 60px rgba(0,0,0,0.35);
+}
+/* Optional embedded webcam (vdo.ninja) — only present when a URL is set */
+.caster-cam-iframe {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: none;
+}
+
+.caster-plate {
+  background: linear-gradient(180deg, rgba(17,19,24,0.98) 0%, rgba(10,11,15,0.98) 100%);
+  border-top: 4px solid var(--accent);
+  border-radius: 0 0 16px 16px;
+  padding: 16px 18px 18px;
+  text-align: center;
+  box-shadow: 0 22px 60px rgba(0,0,0,0.6);
+}
+.caster-name {
+  font-family: var(--main-font);
+  font-weight: 700;
+  font-size: 40px;
+  line-height: 1.05;
+  color: #ffffff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.caster-handle {
+  font-family: var(--main-font);
+  font-weight: 500;
+  font-size: 21px;
+  color: #9aa3b8;
+  margin-top: 5px;
+  white-space: nowrap;
+}
+.caster-handle::before {
+  font-family: 'Font Awesome 6 Brands';
+  font-weight: 400;
+  margin-right: 8px;
+}
+.caster-handle.twitch::before { content: "\f1e8"; color: #9146ff; }
+.caster-handle.youtube::before { content: "\f167"; color: #ff0033; }
+.caster-handle.x-twitter::before { content: "\e61b"; color: #e8eaf0; }
+.caster-handle.instagram::before { content: "\f16d"; color: #e1306c; }
+.caster-handle.tiktok::before { content: "\e07b"; color: #25f4ee; }
+.caster-handle.discord::before { content: "\f392"; color: #5865f2; }
+.caster-handle.facebook::before { content: "\f09a"; color: #1877f2; }
+.caster-handle.kick::before {
+  content: "K";
+  font-family: var(--main-font);
+  font-weight: 900;
+  color: #53fc18;
+}
+.caster-handle.link::before {
+  content: "\f0c1";
+  font-family: 'Font Awesome 6 Free';
+  font-weight: 900;
+  color: #9aa3b8;
+}

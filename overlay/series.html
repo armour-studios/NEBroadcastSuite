@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>NE Broadcast Suite — Series Scoreboard</title>
+<!--
+  SERIES SCOREBOARD overlay (browser source, 1920×1080).
+  Renders the Series editor data from the control panel: division, the two teams
+  with their series (map-win) score, "MAP X OF Y", and a per-map result strip.
+  Reads full_state.match { format, division, maps:[{name,scoreA,scoreB,played}] }
+  plus teams.blue / teams.orange for names, logos and colours.
+-->
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&display=swap');
+  html,body{margin:0;width:100%;height:100%;overflow:hidden;background:transparent;font-family:'Rajdhani',system-ui,sans-serif;}
+  #wrap{position:absolute;left:50%;bottom:64px;transform:translateX(-50%);opacity:0;transition:opacity .35s;}
+  #wrap.show{opacity:1;}
+  .card{background:rgba(13,11,20,.92);border:1px solid rgba(255,255,255,.08);border-radius:14px;
+    box-shadow:0 16px 40px rgba(0,0,0,.5);overflow:hidden;min-width:680px;}
+  .division{font-size:13px;letter-spacing:.18em;text-transform:uppercase;text-align:center;color:#cbb9e6;
+    padding:8px 0 6px;font-weight:700;}
+  .division:empty{display:none;}
+  .top{display:flex;align-items:stretch;}
+  .team{display:flex;align-items:center;gap:14px;padding:14px 22px;flex:1;}
+  .team.b{flex-direction:row-reverse;text-align:right;}
+  .logo{width:50px;height:50px;object-fit:contain;}
+  .logo.ph{visibility:hidden;}
+  .tname{font-size:24px;font-weight:700;color:#fff;letter-spacing:.02em;white-space:nowrap;max-width:260px;overflow:hidden;text-overflow:ellipsis;}
+  .center{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:10px 26px;min-width:150px;}
+  .score{font-size:40px;font-weight:700;color:#fff;letter-spacing:.06em;line-height:1;}
+  .score b{display:inline-block;min-width:42px;text-align:center;}
+  .score .sep{opacity:.4;margin:0 6px;}
+  .mapcount{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:#9a8fb0;margin-top:6px;}
+  .strip{display:flex;gap:0;border-top:1px solid rgba(255,255,255,.08);}
+  .pip{flex:1;text-align:center;padding:8px 10px;font-size:13px;color:#8b8198;border-left:1px solid rgba(255,255,255,.06);}
+  .pip:first-child{border-left:none;}
+  .pip .mn{display:block;font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:#6c6379;margin-bottom:2px;}
+  .pip .ms{font-weight:700;color:#d8d2e8;}
+  .pip.played{background:rgba(255,255,255,.04);}
+  .pip.played .ms{color:#fff;}
+  .accent{height:4px;display:flex;}
+  .accent span{flex:1;}
+</style>
+</head>
+<body>
+  <div id="wrap">
+    <div class="card">
+      <div class="division" id="division"></div>
+      <div class="top">
+        <div class="team a"><img class="logo" id="logo-a" alt=""><span class="tname" id="name-a">Team A</span></div>
+        <div class="center">
+          <div class="score"><b id="sw-a">0</b><span class="sep">–</span><b id="sw-b">0</b></div>
+          <div class="mapcount" id="mapcount"></div>
+        </div>
+        <div class="team b"><img class="logo" id="logo-b" alt=""><span class="tname" id="name-b">Team B</span></div>
+      </div>
+      <div class="strip" id="strip"></div>
+      <div class="accent"><span id="acc-a"></span><span id="acc-b"></span></div>
+    </div>
+  </div>
+
+  <script>
+    const WS = 'ws://' + (location.hostname || 'localhost') + ':3001';
+    const $ = (id) => document.getElementById(id);
+    const FORMAT_MAPS = { bo1: 1, bo3: 3, bo5: 5, bo7: 7 };
+
+    function setLogo(img, url) {
+      if (url) { img.src = url; img.classList.remove('ph'); }
+      else { img.removeAttribute('src'); img.classList.add('ph'); }
+    }
+
+    function render(data) {
+      const m = data.match || { maps: [] };
+      const teams = data.teams || {};
+      const a = teams.blue || {}, b = teams.orange || {};
+      const maps = Array.isArray(m.maps) ? m.maps : [];
+      const total = maps.length || FORMAT_MAPS[m.format] || 0;
+
+      $('division').textContent = m.division || '';
+      $('name-a').textContent = a.name || 'Team A';
+      $('name-b').textContent = b.name || 'Team B';
+      setLogo($('logo-a'), a.logo); setLogo($('logo-b'), b.logo);
+      $('acc-a').style.background = a.color || '#055fdb';
+      $('acc-b').style.background = b.color || '#e97139';
+
+      // Series (map-win) score from played maps.
+      let wa = 0, wb = 0, playedCount = 0;
+      maps.forEach((mp) => { if (mp.played) { playedCount++; if (mp.scoreA > mp.scoreB) wa++; else if (mp.scoreB > mp.scoreA) wb++; } });
+      $('sw-a').textContent = wa; $('sw-b').textContent = wb;
+      const current = Math.min(playedCount + 1, total || playedCount + 1);
+      $('mapcount').textContent = total ? `Map ${current} of ${total}` : '';
+
+      // Per-map strip.
+      const strip = $('strip');
+      strip.innerHTML = maps.map((mp, i) => `<div class="pip${mp.played ? ' played' : ''}">
+        <span class="mn">${mp.name ? String(mp.name).slice(0, 12) : 'M' + (i + 1)}</span>
+        <span class="ms">${mp.played ? (mp.scoreA + ' - ' + mp.scoreB) : '—'}</span></div>`).join('');
+      strip.style.display = maps.length ? 'flex' : 'none';
+
+      // Show when there's a series with maps configured.
+      $('wrap').classList.toggle('show', total > 0);
+    }
+
+    function connect() {
+      const ws = new WebSocket(WS);
+      ws.onopen = () => ws.send(JSON.stringify({ type: 'request_state' }));
+      ws.onmessage = ({ data }) => { let m; try { m = JSON.parse(data); } catch { return; } if (m.type === 'full_state') render(m.data); };
+      ws.onclose = () => setTimeout(connect, 3000);
+      ws.onerror = () => { try { ws.close(); } catch {} };
+    }
+    connect();
+  </script>
+</body>
+</html>

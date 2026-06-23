@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<!--
+  NE Broadcast Suite map veto / map-set board — ported & generalised from EsportsDashBoard mapscreen.html.
+  Driven by full_state.veto:
+    { visible, title, maps: [{ name, mode, image, action:'ban'|'pick'|'decider', by:'a'|'b', winner:'a'|'b', score:{a,b} }] }
+  Team a = full_state.teams.blue, team b = full_state.teams.orange (name + colour).
+  Cards build dynamically (1–7 maps). Bans dim + strike; picks carry a team-tinted chip;
+  completed maps show the score and tint to the winner.
+-->
+<head>
+  <meta charset="UTF-8">
+  <title>NE Broadcast Suite — Map Veto</title>
+  <link rel="stylesheet" href="scene.css" />
+  <style>
+    body { display: flex; flex-direction: column; align-items: center; justify-content: center; }
+    #veto-stage { opacity: 0; transition: opacity 0.35s ease; width: 1920px; }
+    #veto-stage.show { opacity: 1; }
+
+    .veto-head {
+      text-align: center; margin-top: 70px;
+      animation: veto-drop 0.6s backwards cubic-bezier(0,0,0,1);
+    }
+    .veto-title { font-family: 'Rajdhani', var(--main-font); font-weight: 700; font-size: 4em; color: #fff; letter-spacing: 0.04em; }
+    .veto-sub   { font-family: 'Rajdhani', var(--main-font); font-weight: 600; font-size: 1.4em; color: var(--accent); letter-spacing: 0.3em; margin-top: 6px; }
+    @keyframes veto-drop { 0% { opacity: 0; transform: translateY(-40px); } 100% { opacity: 1; transform: translateY(0); } }
+
+    .veto-row { display: flex; gap: 26px; justify-content: center; align-items: stretch; margin-top: 70px; padding: 0 60px; }
+
+    .map-card {
+      position: relative; width: 300px; height: 620px; border-radius: 6px; overflow: hidden;
+      background: var(--scene-bg); border-bottom: 7px solid var(--accent);
+      box-shadow: 0 10px 40px rgba(0,0,0,.5);
+      animation: card-rise 0.6s backwards cubic-bezier(0,0,0,1);
+    }
+    @keyframes card-rise { 0% { opacity: 0; transform: translateY(60px); } 100% { opacity: 1; transform: translateY(0); } }
+    .map-card .img { position: absolute; inset: 0; background-size: cover; background-position: center; }
+    .map-card .shade { position: absolute; inset: 0; background: linear-gradient(180deg, rgba(0,0,0,.55) 0%, rgba(0,0,0,.05) 30%, rgba(0,0,0,.15) 60%, rgba(0,0,0,.85) 100%); }
+    .map-card .mode { position: absolute; top: 18px; left: 0; right: 0; text-align: center; font-family: 'Rajdhani', var(--main-font); font-weight: 600; font-size: 1.3em; color: #dfe4ea; letter-spacing: 0.18em; }
+    .map-card .name { position: absolute; bottom: 96px; left: 0; right: 0; text-align: center; font-family: 'Rajdhani', var(--main-font); font-weight: 700; font-size: 2.3em; color: #fff; text-transform: uppercase; }
+    .map-card .chip {
+      position: absolute; bottom: 26px; left: 50%; transform: translateX(-50%);
+      padding: 8px 22px; border-radius: 3px; font-family: 'Rajdhani', var(--main-font); font-weight: 700;
+      font-size: 1.25em; letter-spacing: 0.12em; color: #fff; text-transform: uppercase; white-space: nowrap;
+    }
+    .map-card .score { position: absolute; bottom: 24px; left: 0; right: 0; text-align: center; font-family: 'Rajdhani', var(--main-font); font-weight: 700; font-size: 2.4em; color: #fff; -webkit-text-stroke: 2px rgba(0,0,0,.6); paint-order: stroke fill; }
+    .map-card .score b { color: #fff; }
+
+    .map-card.ban .img  { filter: grayscale(100%) brightness(0.45); }
+    .map-card.ban { border-bottom-color: #555; }
+    .map-card.ban .name { color: #9aa0a8; text-decoration: line-through; text-decoration-thickness: 4px; }
+    .map-card.decider .chip { background: var(--accent); }
+
+    .footer { display: flex; }
+  </style>
+</head>
+<body>
+  <div id="veto-stage">
+    <div class="veto-head">
+      <div class="veto-title" id="veto-title">MAP VETO</div>
+      <div class="veto-sub" id="veto-sub"></div>
+    </div>
+    <div class="veto-row" id="veto-row"></div>
+    <div class="footer">
+      <div class="tournament" id="veto-tournament"></div>
+      <div class="tagline"><div><span class="tertiary" id="veto-tagline"></span></div></div>
+      <div class="channel" id="veto-channel"></div>
+    </div>
+  </div>
+
+  <script src="scene-base.js"></script>
+  <script>
+    const stage = document.getElementById('veto-stage');
+    const titleEl = document.getElementById('veto-title');
+    const subEl   = document.getElementById('veto-sub');
+    const rowEl   = document.getElementById('veto-row');
+    let _sig = '';
+
+    function teamFor(by, data) {
+      if (by === 'a') return SceneBase.teamSide(data, 'blue');
+      if (by === 'b') return SceneBase.teamSide(data, 'orange');
+      return null;
+    }
+    function chipText(m, data) {
+      if (m.action === 'decider') return 'DECIDER';
+      const t = teamFor(m.by, data);
+      const who = t ? t.name : '';
+      if (m.action === 'ban')  return who ? `${who} BAN` : 'BAN';
+      if (m.action === 'pick') return who ? `${who} PICK` : 'PICK';
+      return '';
+    }
+
+    function render(data) {
+      const v = data.veto || {};
+      stage.classList.toggle('show', !!v.visible);
+      if (!v.visible) return;
+
+      titleEl.textContent = (v.title || 'MAP VETO').toUpperCase();
+      const maps = Array.isArray(v.maps) ? v.maps : [];
+
+      // Rebuild only when the data changes (avoid restarting card animations each tick).
+      const sig = JSON.stringify({ maps, t: v.title, b: data.teams?.blue?.color, o: data.teams?.orange?.color });
+      if (sig === _sig) return;
+      _sig = sig;
+
+      const blue = SceneBase.teamSide(data, 'blue');
+      const orange = SceneBase.teamSide(data, 'orange');
+      subEl.textContent = `${blue.name}  ·  ${orange.name}`;
+
+      // Scale card width to fit the row.
+      const n = Math.max(1, maps.length);
+      const w = Math.min(300, Math.floor((1920 - 120 - (n - 1) * 26) / n));
+
+      rowEl.innerHTML = '';
+      maps.forEach((m, i) => {
+        const card = document.createElement('div');
+        card.className = 'map-card' + (m.action ? ' ' + m.action : '');
+        card.style.width = w + 'px';
+        card.style.animationDelay = (0.4 + i * 0.12) + 's';
+
+        const t = teamFor(m.by, data);
+        const completed = (m.winner === 'a' || m.winner === 'b') || (m.score && (m.score.a || m.score.b));
+
+        const img = document.createElement('div'); img.className = 'img';
+        if (m.image) img.style.backgroundImage = `url('${m.image}')`; else img.style.background = '#0c0e11';
+        const shade = document.createElement('div'); shade.className = 'shade';
+        const mode = document.createElement('div'); mode.className = 'mode'; mode.textContent = (m.mode || '').toUpperCase();
+        const name = document.createElement('div'); name.className = 'name'; name.textContent = (m.name || 'TBA').toUpperCase();
+
+        card.appendChild(img); card.appendChild(shade); card.appendChild(mode); card.appendChild(name);
+
+        if (m.action === 'pick' && t) card.style.borderBottomColor = t.color;
+        if (m.winner === 'a') card.style.borderBottomColor = blue.color;
+        if (m.winner === 'b') card.style.borderBottomColor = orange.color;
+
+        if (completed) {
+          const sc = document.createElement('div'); sc.className = 'score';
+          const a = (m.score && m.score.a) || 0, b = (m.score && m.score.b) || 0;
+          sc.innerHTML = m.winner === 'a' ? `<b>${a}</b> – ${b}` : m.winner === 'b' ? `${a} – <b>${b}</b>` : `${a} – ${b}`;
+          card.appendChild(sc);
+        } else {
+          const chip = document.createElement('div'); chip.className = 'chip';
+          chip.textContent = chipText(m, data);
+          if (m.action === 'pick' && t) chip.style.background = t.color;
+          else if (m.action === 'ban') chip.style.background = '#444';
+          if (!chip.textContent) chip.style.display = 'none';
+          card.appendChild(chip);
+        }
+        rowEl.appendChild(card);
+      });
+    }
+    SceneBase.connect(render);
+
+    if (location.protocol === 'file:') {
+      render({ teams: { blue: { name: 'FROST', color: '#3b82f6' }, orange: { name: 'EMBER', color: '#f97316' } },
+        veto: { visible: true, title: 'Grand Final — Map Veto', maps: [
+          { name: 'Mirage',   mode: 'CS2', action: 'ban',  by: 'a' },
+          { name: 'Inferno',  mode: 'CS2', action: 'ban',  by: 'b' },
+          { name: 'Nuke',     mode: 'CS2', action: 'pick', by: 'a', winner: 'a', score: { a: 13, b: 9 } },
+          { name: 'Ancient',  mode: 'CS2', action: 'pick', by: 'b' },
+          { name: 'Anubis',   mode: 'CS2', action: 'decider' }
+        ] } });
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,786 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Twitch Prediction Overlay</title>
+  <style>
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      background: transparent;
+      font-family: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
+      overflow: hidden;
+      width: 1920px;
+      height: 1080px;
+      position: relative;
+    }
+
+    /* ── Positioning anchor ───────────────────────────────────────────────── */
+    #pred-anchor {
+      position: absolute;
+      width: 880px;
+      pointer-events: none;
+      /* Shared transition — enter (spring) */
+      transition: transform 0.60s cubic-bezier(0.34, 1.48, 0.64, 1),
+                  opacity   0.45s ease;
+    }
+    #pred-anchor.hiding {
+      transition: transform 0.32s ease, opacity 0.28s ease;
+    }
+
+    /* Default = bottom-center */
+    #pred-anchor.pos-bottom {
+      bottom: 28px;
+      left: 50%;
+      transform: translateX(-50%) translateY(24px);
+      opacity: 0;
+    }
+    #pred-anchor.pos-bottom.visible {
+      transform: translateX(-50%) translateY(0);
+      opacity: 1;
+    }
+    #pred-anchor.pos-bottom.hiding {
+      transform: translateX(-50%) translateY(16px);
+      opacity: 0;
+    }
+
+    #pred-anchor.pos-top {
+      top: 28px;
+      left: 50%;
+      transform: translateX(-50%) translateY(-24px);
+      opacity: 0;
+    }
+    #pred-anchor.pos-top.visible {
+      transform: translateX(-50%) translateY(0);
+      opacity: 1;
+    }
+    #pred-anchor.pos-top.hiding {
+      transform: translateX(-50%) translateY(-16px);
+      opacity: 0;
+    }
+
+    #pred-anchor.pos-left {
+      bottom: 28px;
+      left: 28px;
+      transform: translateY(24px);
+      opacity: 0;
+      width: 520px;
+    }
+    #pred-anchor.pos-left.visible  { transform: translateY(0); opacity: 1; }
+    #pred-anchor.pos-left.hiding   { transform: translateY(16px); opacity: 0; }
+
+    #pred-anchor.pos-right {
+      bottom: 28px;
+      right: 28px;
+      transform: translateY(24px);
+      opacity: 0;
+      width: 520px;
+    }
+    #pred-anchor.pos-right.visible  { transform: translateY(0); opacity: 1; }
+    #pred-anchor.pos-right.hiding   { transform: translateY(16px); opacity: 0; }
+
+    /* ── Card ────────────────────────────────────────────────────────────── */
+    .pred-card {
+      background: linear-gradient(160deg, rgba(13,11,20,0.97) 0%, rgba(18,14,30,0.97) 100%);
+      border: 1px solid rgba(145, 70, 255, 0.35);
+      border-radius: 18px;
+      overflow: hidden;
+      box-shadow:
+        0 0 0 1px rgba(145,70,255,0.07),
+        0 24px 70px rgba(0,0,0,0.85),
+        inset 0 1px 0 rgba(255,255,255,0.06);
+      position: relative;
+    }
+
+    /* ── Header strip ────────────────────────────────────────────────────── */
+    .pred-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 11px 20px;
+      border-bottom: 1px solid rgba(145,70,255,0.14);
+      background: rgba(145,70,255,0.07);
+    }
+
+    .pred-badge {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      font-size: 10.5px;
+      font-weight: 800;
+      letter-spacing: 0.09em;
+      text-transform: uppercase;
+      color: #9146ff;
+      flex-shrink: 0;
+    }
+
+    .pred-dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: #9146ff;
+      box-shadow: 0 0 8px #9146ff;
+      animation: dot-pulse 1.8s ease-in-out infinite;
+    }
+    @keyframes dot-pulse {
+      0%,100% { opacity: 1;    box-shadow: 0 0 6px  #9146ff; }
+      50%      { opacity: 0.5;  box-shadow: 0 0 18px #9146ff; }
+    }
+
+    .pred-title-text {
+      flex: 1;
+      font-size: 13.5px;
+      font-weight: 700;
+      color: rgba(255,255,255,0.88);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    .pred-header-right {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-shrink: 0;
+    }
+
+    .pred-pill {
+      font-size: 9.5px;
+      font-weight: 800;
+      letter-spacing: 0.07em;
+      text-transform: uppercase;
+      padding: 3px 9px;
+      border-radius: 20px;
+    }
+    .pred-pill.open     { background: rgba(145,70,255,0.18); color: #9146ff; border: 1px solid rgba(145,70,255,0.30); }
+    .pred-pill.locked   { background: rgba(251,191,36,0.14); color: #fbbf24; border: 1px solid rgba(251,191,36,0.28); }
+    .pred-pill.resolved { background: rgba(74,222,128,0.14); color: #4ade80; border: 1px solid rgba(74,222,128,0.28); }
+
+    .pred-countdown {
+      font-size: 14px;
+      font-weight: 800;
+      color: rgba(255,255,255,0.45);
+      font-variant-numeric: tabular-nums;
+      min-width: 42px;
+      text-align: right;
+    }
+    .pred-countdown.urgent { color: #f87171; animation: ct-pulse 0.75s ease-in-out infinite; }
+    @keyframes ct-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+    /* ── Matchup body ────────────────────────────────────────────────────── */
+    .pred-body {
+      display: grid;
+      grid-template-columns: 1fr 48px 1fr;
+      min-height: 108px;
+    }
+
+    /* ── Team panel ──────────────────────────────────────────────────────── */
+    .pred-team {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding: 16px 20px;
+      position: relative;
+      overflow: hidden;
+    }
+    .pred-team.side-blue   { flex-direction: row; }
+    .pred-team.side-orange { flex-direction: row-reverse; }
+
+    /* Colour wash */
+    .pred-team::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.6s;
+    }
+    /* team-colour wash — overridden by #team-colors dynamic style */
+    .pred-team.side-blue::before   { background: linear-gradient(90deg,  rgba(96,165,250,0.14) 0%, transparent 75%); }
+    .pred-team.side-orange::before { background: linear-gradient(270deg, rgba(251,146,60,0.14) 0%, transparent 75%); }
+    .pred-team.has-votes::before { opacity: 1; }
+    .pred-team.winner.side-blue::before   { background: linear-gradient(90deg,  rgba(74,222,128,0.18) 0%, transparent 75%); opacity: 1; }
+    .pred-team.winner.side-orange::before { background: linear-gradient(270deg, rgba(74,222,128,0.18) 0%, transparent 75%); opacity: 1; }
+
+    /* Logo */
+    .team-logo-wrap { flex-shrink: 0; }
+    .team-logo {
+      width: 72px; height: 72px;
+      object-fit: contain;
+      filter: drop-shadow(0 2px 10px rgba(0,0,0,0.55));
+      display: block;
+    }
+    .team-logo-ph {
+      width: 72px; height: 72px;
+      border-radius: 50%;
+      background: rgba(255,255,255,0.05);
+      border: 2px solid rgba(255,255,255,0.08);
+    }
+
+    /* Text group */
+    .team-info { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+    .pred-team.side-orange .team-info { align-items: flex-end; }
+
+    .team-name {
+      font-size: 19px;
+      font-weight: 900;
+      color: #fff;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .team-pct {
+      font-size: 32px;
+      font-weight: 900;
+      letter-spacing: -0.04em;
+      font-variant-numeric: tabular-nums;
+      line-height: 1;
+      transition: color 0.55s;
+    }
+    /* pct colours — overridden by #team-colors dynamic style */
+    .pred-team.side-blue   .team-pct { color: #60a5fa; }
+    .pred-team.side-orange .team-pct { color: #fb923c; }
+    .pred-team.winner      .team-pct { color: #4ade80; }  /* winner always green */
+
+    .team-pts {
+      font-size: 11px;
+      font-weight: 600;
+      color: rgba(255,255,255,0.30);
+      font-variant-numeric: tabular-nums;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .team-winner-tag {
+      display: none;
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: 0.07em;
+      text-transform: uppercase;
+      color: #4ade80;
+    }
+    .pred-team.winner .team-winner-tag { display: block; }
+
+    /* ── VS column ───────────────────────────────────────────────────────── */
+    .pred-vs {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+    }
+    .pred-vs::before {
+      content: '';
+      position: absolute;
+      top: 14px; bottom: 14px; left: 50%;
+      width: 1px;
+      background: rgba(145,70,255,0.18);
+    }
+    .vs-text {
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: rgba(145,70,255,0.45);
+      background: rgba(13,11,20,0.97);
+      padding: 0 4px;
+      position: relative;
+      z-index: 1;
+    }
+
+    /* ── Vote split bar ──────────────────────────────────────────────────── */
+    .pred-bar {
+      height: 7px;
+      display: flex;
+      overflow: hidden;
+    }
+    .bar-blue {
+      /* background overridden by #team-colors dynamic style */
+      background: #3b82f6;
+      transition: width 1.1s cubic-bezier(0.4,0,0.2,1);
+    }
+    .bar-orange {
+      /* background overridden by #team-colors dynamic style */
+      background: #f97316;
+      flex: 1;
+    }
+
+    /* ── Footer ──────────────────────────────────────────────────────────── */
+    .pred-footer {
+      padding: 6px 20px;
+      border-top: 1px solid rgba(255,255,255,0.04);
+      display: flex;
+      justify-content: center;
+    }
+    .pred-footer-text {
+      font-size: 11px;
+      font-weight: 600;
+      color: rgba(255,255,255,0.22);
+      font-variant-numeric: tabular-nums;
+    }
+
+    /* ── Winner splash ───────────────────────────────────────────────────── */
+    #winner-splash {
+      position: absolute;
+      inset: 0;
+      background: rgba(10,8,18,0.96);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 22px;
+      padding: 0 40px;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.40s ease;
+    }
+    #winner-splash.visible { opacity: 1; }
+
+    .splash-logo-img {
+      width: 76px; height: 76px;
+      object-fit: contain;
+      filter: drop-shadow(0 0 18px rgba(74,222,128,0.55));
+      animation: logo-pop 0.55s cubic-bezier(0.34,1.56,0.64,1) both;
+    }
+    @keyframes logo-pop { from { transform: scale(0) rotate(-10deg); } to { transform: scale(1) rotate(0deg); } }
+
+    .splash-content { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+    .splash-trophy  { font-size: 32px; animation: trophy-in 0.5s cubic-bezier(0.34,1.56,0.64,1) 0.25s both; }
+    @keyframes trophy-in { from { transform: scale(0); } to { transform: scale(1); } }
+    .splash-label   { font-size: 11px; font-weight: 800; letter-spacing: 0.10em; text-transform: uppercase; color: #4ade80; }
+    .splash-name    { font-size: 28px; font-weight: 900; color: #fff; text-align: center; max-width: 360px; line-height: 1.1; text-transform: uppercase; letter-spacing: 0.06em; }
+  </style>
+<style id="team-colors">/* populated by setTeamColors() */</style>
+</head>
+<body>
+
+<div id="pred-anchor" class="pos-bottom" style="display:none">
+  <div class="pred-card">
+
+    <!-- winner splash (above everything when resolved) -->
+    <div id="winner-splash">
+      <img id="splash-logo" class="splash-logo-img" src="" alt="" style="display:none;">
+      <div class="splash-content">
+        <span class="splash-trophy">🏆</span>
+        <span class="splash-label">Winner</span>
+        <span class="splash-name" id="splash-name"></span>
+      </div>
+    </div>
+
+    <!-- header -->
+    <div class="pred-header">
+      <div class="pred-badge">
+        <span class="pred-dot" id="pred-dot"></span>
+        <span id="pred-badge-text">Prediction</span>
+      </div>
+      <div class="pred-title-text" id="pred-title"></div>
+      <div class="pred-header-right">
+        <span class="pred-pill open" id="pred-pill">Voting Open</span>
+        <span class="pred-countdown" id="pred-countdown"></span>
+      </div>
+    </div>
+
+    <!-- team matchup -->
+    <div class="pred-body">
+
+      <div class="pred-team side-blue" id="team-blue">
+        <div class="team-logo-wrap" id="logo-blue">
+          <div class="team-logo-ph"></div>
+        </div>
+        <div class="team-info">
+          <div class="team-winner-tag">🏆 Winner</div>
+          <div class="team-name" id="name-blue">—</div>
+          <div class="team-pct"  id="pct-blue">—</div>
+          <div class="team-pts"  id="pts-blue"></div>
+        </div>
+      </div>
+
+      <div class="pred-vs">
+        <span class="vs-text">VS</span>
+      </div>
+
+      <div class="pred-team side-orange" id="team-orange">
+        <div class="team-logo-wrap" id="logo-orange">
+          <div class="team-logo-ph"></div>
+        </div>
+        <div class="team-info">
+          <div class="team-winner-tag">🏆 Winner</div>
+          <div class="team-name" id="name-orange">—</div>
+          <div class="team-pct"  id="pct-orange">—</div>
+          <div class="team-pts"  id="pts-orange"></div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- vote split bar -->
+    <div class="pred-bar">
+      <div class="bar-blue"   id="bar-blue"   style="width:50%;"></div>
+      <div class="bar-orange" id="bar-orange"></div>
+    </div>
+
+    <!-- footer -->
+    <div class="pred-footer">
+      <span class="pred-footer-text" id="pred-footer">Awaiting votes…</span>
+    </div>
+
+  </div><!-- /pred-card -->
+</div><!-- /pred-anchor -->
+
+<script>
+  // ── Params ──────────────────────────────────────────────────────────────────
+  const params   = new URLSearchParams(location.search);
+  const posStr   = (params.get('pos') || params.get('position') || 'bottom').toLowerCase();
+  // URL ?loop=N overrides the state setting; use it when you need per-source control.
+  // When absent, the overlay reads overlayLoop from state.twitch.predictions.settings.
+  const _urlLoop  = params.has('loop') ? parseInt(params.get('loop'), 10) : null;
+  const LOOP_HIDE = 8000;
+
+  // Dynamic: re-read each time scheduleLoopHide() is called so a settings change takes effect on the next cycle.
+  function getLoopShow(state) {
+    if (_urlLoop !== null) return _urlLoop > 0 ? _urlLoop * 1000 : 0;
+    const secs = state?.twitch?.predictions?.settings?.overlayLoop ?? 30;
+    return secs > 0 ? secs * 1000 : 0;
+  }
+
+  const anchor = document.getElementById('pred-anchor');
+  anchor.className = 'pos-' + posStr;
+
+  let activePredId    = null;
+  let lastState       = null;  // latest prediction object from server
+  let lastFullState   = null;  // latest full state from server (for logos)
+  let countdownTimer  = null;
+  let hideTimer       = null;
+  let splashTimer     = null;
+  let loopShowTimer   = null;
+  let loopHideTimer   = null;
+  let isVisible       = false;
+  let isResolved      = false;
+
+  // ── WebSocket ───────────────────────────────────────────────────────────────
+  function connect() {
+    const ws = new WebSocket('ws://localhost:3001');
+    ws.onopen    = () => ws.send(JSON.stringify({ type: 'request_state' }));
+    ws.onmessage = ({ data }) => {
+      try {
+        const msg = JSON.parse(data);
+        if (msg.type === 'full_state') applyState(msg.data);
+      } catch (_) {}
+    };
+    ws.onclose = () => setTimeout(connect, 3000);
+  }
+
+  function applyState(state) {
+    lastFullState = state;
+    let pred = state?.twitch?.predictions?.current;
+    // Discard stale active predictions (server restart left one in state)
+    if (pred && pred.state !== 'RESOLVED' && pred.state !== 'LOCKED') {
+      if (pred.endsAt && new Date(pred.endsAt) < new Date()) pred = null;
+    }
+    if (pred) {
+      lastState = pred;
+      showOrUpdatePrediction(pred, state);
+    } else if (activePredId) {
+      // Prediction was cleared server-side (after 18s window)
+      clearAllTimers();
+      activePredId = null;
+      lastState    = null;
+      isResolved   = false;
+      doHide();
+    }
+  }
+
+  // ── Show / Update ────────────────────────────────────────────────────────────
+  function showOrUpdatePrediction(pred, state) {
+    const nowResolved = pred.state === 'RESOLVED';
+    const wasResolved = isResolved;
+    isResolved = nowResolved;
+
+    // New prediction (different id) → full reset
+    if (pred.id !== activePredId) {
+      clearAllTimers();
+      activePredId = pred.id;
+      document.getElementById('winner-splash').classList.remove('visible');
+      renderCard(pred, state);
+      doShow();
+      if (getLoopShow(lastFullState) > 0 && !nowResolved) scheduleLoopHide();
+      if (nowResolved) handleResolved(pred, state);
+      return;
+    }
+
+    // Same prediction — just update numbers/state
+    renderCard(pred, state);
+
+    // Resolved just arrived (transition from active → resolved)
+    if (nowResolved && !wasResolved) {
+      clearLoopTimers();
+      if (!isVisible) doShow();   // make sure it's visible before showing splash
+      handleResolved(pred, state);
+    }
+  }
+
+  // Convert any CSS colour to r,g,b components via a hidden canvas pixel read.
+  // Falls back to the passed default if parsing fails.
+  const _canvas = document.createElement('canvas');
+  _canvas.width = _canvas.height = 1;
+  const _ctx = _canvas.getContext('2d');
+  function colorToRgb(color, fallback) {
+    try {
+      _ctx.clearRect(0, 0, 1, 1);
+      _ctx.fillStyle = fallback;
+      _ctx.fillStyle = color;          // if invalid, browser ignores it
+      _ctx.fillRect(0, 0, 1, 1);
+      const [r, g, b] = _ctx.getImageData(0, 0, 1, 1).data;
+      return { r, g, b, css: `rgb(${r},${g},${b})` };
+    } catch (_) { return null; }
+  }
+
+  function setTeamColors(state) {
+    const bc = state?.teams?.blue?.color;
+    const oc = state?.teams?.orange?.color;
+    const blue   = colorToRgb(bc, '#3b82f6') || { r: 59,  g: 130, b: 246, css: '#3b82f6' };
+    const orange = colorToRgb(oc, '#f97316') || { r: 249, g: 115, b: 22,  css: '#f97316' };
+    const bl = `${blue.r},${blue.g},${blue.b}`;
+    const or = `${orange.r},${orange.g},${orange.b}`;
+    document.getElementById('team-colors').textContent = `
+      .pred-team.side-blue   .team-pct { color: ${blue.css}; }
+      .pred-team.side-orange .team-pct { color: ${orange.css}; }
+      .pred-team.side-blue::before   { background: linear-gradient(90deg,  rgba(${bl},0.18) 0%, transparent 75%); }
+      .pred-team.side-orange::before { background: linear-gradient(270deg, rgba(${or},0.18) 0%, transparent 75%); }
+      .bar-blue   { background: linear-gradient(90deg, rgba(${bl},0.85), rgba(${bl},1)); }
+      .bar-orange { background: linear-gradient(90deg, rgba(${or},0.85), rgba(${or},1)); }
+    `;
+  }
+
+  function renderCard(pred, state) {
+    setTeamColors(state);
+    const resolved = pred.state === 'RESOLVED';
+    const locked   = pred.state === 'LOCKED';
+
+    // Badge / pill
+    const dot   = document.getElementById('pred-dot');
+    const badge = document.getElementById('pred-badge-text');
+    const pill  = document.getElementById('pred-pill');
+    if (resolved) {
+      dot.style.cssText  = 'background:#4ade80;box-shadow:0 0 8px #4ade80;animation:none;';
+      badge.textContent  = 'Result';
+      pill.className     = 'pred-pill resolved';
+      pill.textContent   = 'Resolved';
+    } else if (locked) {
+      dot.style.cssText  = 'background:#fbbf24;box-shadow:0 0 8px #fbbf24;animation:none;';
+      badge.textContent  = 'Votes Locked';
+      pill.className     = 'pred-pill locked';
+      pill.textContent   = 'Votes Locked';
+    } else {
+      dot.style.cssText  = '';
+      badge.textContent  = 'Prediction';
+      pill.className     = 'pred-pill open';
+      pill.textContent   = 'Voting Open';
+    }
+
+    document.getElementById('pred-title').textContent = pred.title || '';
+
+    const outcomes = pred.outcomes || [];
+    const o0 = outcomes[0] || {};
+    const o1 = outcomes[1] || {};
+    const total = (o0.votes || 0) + (o1.votes || 0);
+    const pct0  = total > 0 ? Math.round((o0.votes || 0) / total * 100) : 50;
+    const pct1  = 100 - pct0;
+
+    renderTeam('blue',   o0, pct0, state, pred.winningOutcomeId);
+    renderTeam('orange', o1, pct1, state, pred.winningOutcomeId);
+
+    document.getElementById('bar-blue').style.width = pct0 + '%';
+
+    const predictors = outcomes.reduce((s, o) => s + (o.users || 0), 0);
+    document.getElementById('pred-footer').textContent =
+      total > 0
+        ? `${fmt(total)} pts · ${predictors || '—'} predictors`
+        : 'Awaiting votes…';
+
+    startCountdown(pred.endsAt, resolved || locked);
+  }
+
+  function renderTeam(side, outcome, pct, state, winningId) {
+    document.getElementById('name-' + side).textContent = outcome.title || '—';
+    document.getElementById('pct-'  + side).textContent = pct + '%';
+    document.getElementById('pts-'  + side).textContent = outcome.votes
+      ? fmt(outcome.votes) + ' pts'
+      : '';
+
+    const teamEl = document.getElementById('team-' + side);
+    const isWinner = winningId && outcome.id === winningId;
+    teamEl.classList.toggle('winner',    !!isWinner);
+    teamEl.classList.toggle('has-votes', (outcome.votes || 0) > 0);
+
+    const logo = findLogo(outcome.title, state);
+    const wrap = document.getElementById('logo-' + side);
+    wrap.innerHTML = '';
+    if (logo) {
+      const img = document.createElement('img');
+      img.className = 'team-logo';
+      img.src = logo;
+      img.alt = '';
+      img.onerror = () => { wrap.innerHTML = '<div class="team-logo-ph"></div>'; };
+      wrap.appendChild(img);
+    } else {
+      wrap.innerHTML = '<div class="team-logo-ph"></div>';
+    }
+  }
+
+  function findLogo(outcomeName, state) {
+    if (!outcomeName || !state?.teams) return null;
+    const n = outcomeName.toLowerCase().trim();
+    for (const side of ['blue', 'orange']) {
+      const t = state.teams[side];
+      if (!t?.name) continue;
+      const tn = t.name.toLowerCase().trim();
+      if (tn === n || tn.includes(n) || n.includes(tn)) return t.logo || null;
+    }
+    return null;
+  }
+
+  // ── Winner flow ──────────────────────────────────────────────────────────────
+  function handleResolved(pred, state) {
+    const outcomes = pred.outcomes || [];
+    const o0 = outcomes[0] || {};
+    const o1 = outcomes[1] || {};
+    if (pred.winningOutcomeId) {
+      const winO    = outcomes.find(o => o.id === pred.winningOutcomeId);
+      const winSide = winO?.id === o0.id ? 'blue' : 'orange';
+      // Show splash after card is visible
+      splashTimer = setTimeout(() => showSplash(winO?.title || '', winSide, state), 1600);
+    }
+    // Auto-hide the card after 16s (server clears at 18s)
+    hideTimer = setTimeout(() => {
+      doHide();
+      activePredId = null;
+      lastState    = null;
+      isResolved   = false;
+    }, 16000);
+  }
+
+  // ── Visibility ───────────────────────────────────────────────────────────────
+  function doShow() {
+    if (isVisible) return;
+    isVisible = true;
+    anchor.style.display = '';          // unhide from display:none
+    anchor.classList.remove('hiding');
+    void anchor.offsetHeight;           // force reflow so the transition has a "from" state
+    anchor.classList.add('visible');
+  }
+
+  let _hideDisplayTimer = null;
+  function doHide() {
+    if (!isVisible && anchor.style.display === 'none') return;
+    isVisible = false;
+    anchor.classList.add('hiding');
+    anchor.classList.remove('visible');
+    document.getElementById('winner-splash').classList.remove('visible');
+    if (countdownTimer) { clearInterval(countdownTimer); countdownTimer = null; }
+    // After exit transition (320ms) fully remove from layout
+    clearTimeout(_hideDisplayTimer);
+    _hideDisplayTimer = setTimeout(() => {
+      if (!isVisible) anchor.style.display = 'none';
+    }, 380);
+  }
+
+  // ── Loop cycling (when loop > 0 and prediction is active, not resolved) ──────
+  function scheduleLoopHide() {
+    clearLoopTimers();
+    loopShowTimer = setTimeout(() => {
+      if (isResolved) return;  // don't cycle while showing winner
+      doHide();
+      loopHideTimer = setTimeout(() => {
+        if (activePredId && lastState && !isResolved) {
+          renderCard(lastState, lastFullState || {});
+          doShow();
+          scheduleLoopHide();  // queue next cycle
+        }
+      }, LOOP_HIDE);
+    }, getLoopShow(lastFullState));
+  }
+
+  function clearLoopTimers() {
+    if (loopShowTimer) { clearTimeout(loopShowTimer); loopShowTimer = null; }
+    if (loopHideTimer) { clearTimeout(loopHideTimer); loopHideTimer = null; }
+  }
+
+  function clearAllTimers() {
+    clearLoopTimers();
+    if (hideTimer)      { clearTimeout(hideTimer);        hideTimer      = null; }
+    if (splashTimer)    { clearTimeout(splashTimer);      splashTimer    = null; }
+    if (countdownTimer) { clearInterval(countdownTimer);  countdownTimer = null; }
+  }
+
+  // ── Countdown ────────────────────────────────────────────────────────────────
+  function startCountdown(endsAt, frozen) {
+    if (countdownTimer) { clearInterval(countdownTimer); countdownTimer = null; }
+    const el = document.getElementById('pred-countdown');
+    if (!endsAt || frozen) { el.textContent = ''; el.className = 'pred-countdown'; return; }
+
+    const tick = () => {
+      const rem = Math.max(0, new Date(endsAt) - Date.now());
+      const m   = Math.floor(rem / 60000);
+      const s   = Math.floor((rem % 60000) / 1000);
+      el.textContent = rem > 0 ? `${m}:${s.toString().padStart(2, '0')}` : 'Ended';
+      el.className   = 'pred-countdown' + (rem < 30000 && rem > 0 ? ' urgent' : '');
+      if (rem === 0) { clearInterval(countdownTimer); countdownTimer = null; }
+    };
+    tick();
+    countdownTimer = setInterval(tick, 1000);
+  }
+
+  // ── Winner splash ────────────────────────────────────────────────────────────
+  function showSplash(name, side, state) {
+    const splash = document.getElementById('winner-splash');
+    const img    = document.getElementById('splash-logo');
+    const nameEl = document.getElementById('splash-name');
+    nameEl.textContent = name;
+    const logo = state?.teams?.[side]?.logo;
+    if (logo) { img.src = logo; img.style.display = ''; }
+    else       { img.style.display = 'none'; }
+    splash.classList.add('visible');
+  }
+
+  // ── Helpers ──────────────────────────────────────────────────────────────────
+  function fmt(n) {
+    n = Number(n) || 0;
+    if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M';
+    if (n >= 1e3) return (n / 1e3).toFixed(1) + 'K';
+    return n.toLocaleString();
+  }
+
+  // ── Preview mode (?preview=1) ─────────────────────────────────────────────
+  if (params.get('preview') === '1') {
+    const ends = new Date(Date.now() + 4 * 60 * 1000).toISOString();
+    const mockState = {
+      twitch: {
+        predictions: {
+          current: {
+            id: 'preview',
+            title: 'Who will win Game 1?',
+            state: 'ACTIVE',
+            endsAt: ends,
+            outcomes: [
+              { id: 'o1', title: 'Team Blue',   votes: 3200, users: 42 },
+              { id: 'o2', title: 'Team Orange',  votes: 1800, users: 27 }
+            ],
+            winningOutcomeId: null
+          }
+        }
+      },
+      teams: {
+        blue:   { name: 'Team Blue',   logo: null, color: '#3b82f6' },
+        orange: { name: 'Team Orange', logo: null, color: '#f97316' }
+      }
+    };
+    applyState(mockState);
+  } else {
+    connect();
+  }
+</script>
+</body>
+</html>

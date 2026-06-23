@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<!--
+  NE Broadcast Suite stinger transition — ported from EsportsDashBoard transition.html.
+  Use as an OBS *stinger* transition source, or a momentary scene.
+
+  Query params:
+    ?team=blue | orange   → use that team's logo instead of the brand logo
+    ?logo=<url>           → use a custom logo URL
+  Colours come from the active Brand Kit (--accent wipe, --accent-2 trailing wipe).
+-->
+<head>
+  <meta charset="UTF-8">
+  <title>NE Broadcast Suite — Transition</title>
+  <link rel="stylesheet" href="scene.css" />
+</head>
+<body>
+  <div class="altcolor"></div>
+  <div class="stingerlogo">
+    <span class="logo" id="stinger-logo"></span>
+  </div>
+
+  <script src="scene-base.js"></script>
+  <script>
+    const logoEl = document.getElementById('stinger-logo');
+    const teamParam = SceneBase.qp('team');     // 'blue' | 'orange'
+    const logoParam = SceneBase.qp('logo');      // explicit URL
+
+    function pickLogo(data) {
+      if (logoParam) return logoParam;
+      if (teamParam === 'blue' || teamParam === 'orange') {
+        return SceneBase.teamSide(data, teamParam).logo;
+      }
+      return SceneBase.brandLogo(data);
+    }
+    function render(data) {
+      const url = pickLogo(data);
+      logoEl.style.backgroundImage = url ? `url('${url}')` : 'none';
+    }
+    SceneBase.connect(render);
+
+    // Preview: replay stinger every ~7.5 s (2.5 s animation + 5 s pause).
+    if (SceneBase.preview) {
+      var _restart = function() {
+        document.querySelectorAll('div.stingerlogo, div.altcolor, div.stingerlogo span.logo').forEach(function(el) {
+          el.style.animation = 'none'; void el.offsetWidth; el.style.animation = '';
+        });
+      };
+      setTimeout(function _tick() { _restart(); setTimeout(_tick, 7500); }, 7500);
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="en">
+<!--
+  NE Broadcast Suite "Analyst Special" desk scene — ported from EsportsDashBoard
+  analystspecial.html, now driven by full_state over the WS bridge (:3001)
+  instead of polling localhost:8080/getValue + jQuery.
+
+  Layout (matches the source intent):
+    • a team scorebar on top (blue vs orange),
+    • a LEFT column with TWO stacked smaller analyst cams (each name plate + handle),
+    • a RIGHT column with ONE large featured analyst/host cam (name plate + handle),
+    • a footer: brand logo (tournament) + centered tagline (eventName) + channel slot.
+
+  We treat data.casters.list as the analysts. The first two fill the left column,
+  the third is the featured (right) cam. Blank holes render when a slot has no caster.
+
+  Data (full_state):
+    • data.casters = { visible, list:[{ id, name, handle, camUrl }] } — first 3 used
+    • SceneBase.teamSide(data,'blue'|'orange') -> { name, logo, color, score, series }
+    • data.eventName -> tagline text
+    • SceneBase.brandLogo(data) -> footer (tournament) logo
+
+  Performance: cam iframes are rebuilt only when the caster list changes (JSON
+  signature), so vdo.ninja streams don't reconnect on every unrelated full_state
+  tick. Plate text + scorebar update every tick. The stage fades via `.show`
+  from data.casters.visible.
+-->
+<head>
+  <meta charset="UTF-8">
+  <title>NE Broadcast Suite — Analyst Special</title>
+  <link rel="stylesheet" href="scene.css" />
+  <style>
+    /* Layout-specific sizing only; shared look comes from scene.css. */
+    #analyst-stage { opacity: 0; transition: opacity 0.35s ease; }
+    #analyst-stage.show { opacity: 1; }
+
+    /* Two columns: a stacked pair on the left, one featured cam on the right. */
+    .columns {
+      display: flex; flex-direction: row;
+      align-items: center; justify-content: center; text-align: center;
+      width: 1920px; height: 100%;
+    }
+    .column {
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center; text-align: center;
+    }
+
+    /* Smaller stacked cams on the left. */
+    .leftcolumn .camerahole { width: 480px; height: 270px; background-color: #000; }
+    .leftcolumn .staff      { font-size: 0.85em; padding: 6px 16px; }
+
+    /* One big featured cam on the right. */
+    .rightcolumn .camerahole { width: 1136px; height: 639px; background-color: #000; }
+
+    .staffiso  { width: 100%; }
+    .staff     { width: 100%; box-sizing: border-box; padding: 8px 16px; gap: 6px; flex-wrap: wrap; }
+    .staffname { line-height: 1; }
+  </style>
+</head>
+<body>
+  <div id="analyst-stage" class="scene-fade">
+
+    <!-- Top scorebar -->
+    <div class="scoreboardwrapper">
+      <div class="scoreboard">
+        <div class="team team1">
+          <img class="teamlogo teamlogo1" alt="" />
+          <span class="teamname teamname1"></span>
+          <div class="scorebox scorebox1"><span class="teamscore teamscore1"></span></div>
+        </div>
+        <div class="vs"><span>VS</span></div>
+        <div class="team team2">
+          <div class="scorebox scorebox2"><span class="teamscore teamscore2"></span></div>
+          <span class="teamname teamname2"></span>
+          <img class="teamlogo teamlogo2" alt="" />
+        </div>
+      </div>
+    </div>
+
+    <!-- Analyst desk: stacked left pair + featured right cam -->
+    <div class="wrapper">
+      <div class="columns">
+        <div class="leftcolumn column" id="analyst-left"></div>
+        <div class="rightcolumn column" id="analyst-right"></div>
+      </div>
+    </div>
+
+    <!-- Footer: tournament logo + tagline + channel -->
+    <div class="footer">
+      <div class="tournament" id="analyst-tournament"></div>
+      <div class="tagline"><div><span class="tertiary" id="analyst-tagline"></span></div></div>
+      <div class="channel" id="analyst-channel"></div>
+    </div>
+
+  </div>
+
+  <script src="scene-base.js"></script>
+  <script>
+    const stage   = document.getElementById('analyst-stage');
+    const leftEl  = document.getElementById('analyst-left');
+    const rightEl = document.getElementById('analyst-right');
+    const tournEl = document.getElementById('analyst-tournament');
+    const taglineEl = document.getElementById('analyst-tagline');
+
+    const logo1 = document.querySelector('.teamlogo1');
+    const logo2 = document.querySelector('.teamlogo2');
+    const name1 = document.querySelector('.teamname1');
+    const name2 = document.querySelector('.teamname2');
+    const score1 = document.querySelector('.teamscore1');
+    const score2 = document.querySelector('.teamscore2');
+    const box1 = document.querySelector('.scorebox1');
+    const box2 = document.querySelector('.scorebox2');
+
+    let _casterSig = '';
+
+    // De-emphasise common org words (matches the source's bold/un-bold treatment).
+    const UNBOLD = ['gaming','team','e-?sports','house','academy','uni(versity)?','state','tech','and','the','of','eu'];
+    const UNBOLD_RE = new RegExp('\\b(' + UNBOLD.map(w => '(' + w + ')').join('|') + ')\\b', 'gi');
+    function formatTeamName(name) {
+      return '<b>' + (name || '')
+        .replace(UNBOLD_RE, '</b>$1<b>')
+        .replace(/&/gi, '</b>&<b>') + '</b>';
+    }
+
+    function setLogo(img, url) {
+      if (url) { img.src = url; img.style.display = ''; }
+      else { img.removeAttribute('src'); img.style.display = 'none'; }
+    }
+
+    // Build one analyst cam box (camera hole + name plate). Transparent iframe if
+    // a cam URL is set, else a blank hole (so a webcam composited behind in OBS
+    // shows through). Always returns a box so empty slots keep the layout.
+    function buildCamBox(c) {
+      c = c || {};
+      const box = document.createElement('div');
+      box.className = 'camerabox';
+
+      const hole = document.createElement('div');
+      hole.className = 'camerahole';
+      const camUrl = (c.camUrl || '').trim();
+      if (camUrl) {
+        const iframe = document.createElement('iframe');
+        iframe.src = camUrl;
+        iframe.setAttribute('frameBorder', '0');
+        iframe.allow = 'autoplay; encrypted-media';
+        iframe.referrerPolicy = 'no-referrer';
+        iframe.style.width = '100%';
+        iframe.style.height = '100%';
+        hole.appendChild(iframe);
+      }
+      box.appendChild(hole);
+
+      const iso = document.createElement('div');
+      iso.className = 'staffiso';
+      const staff = document.createElement('div');
+      staff.className = 'staff';
+
+      const nm = document.createElement('span');
+      nm.className = 'staffname';
+      nm.textContent = (c.name || '').toUpperCase();
+      staff.appendChild(nm);
+
+      if (c.handle) {
+        const soc = document.createElement('span');
+        soc.className = 'socials';
+        soc.textContent = c.handle.startsWith('@') ? c.handle : '@' + c.handle;
+        staff.appendChild(soc);
+      }
+
+      iso.appendChild(staff);
+      box.appendChild(iso);
+      return box;
+    }
+
+    // Rebuild the cam boxes only when the caster list actually changes, so
+    // iframes (vdo.ninja streams) don't reconnect each tick.
+    function renderCasters(casters) {
+      const all = (casters && Array.isArray(casters.list)) ? casters.list : [];
+      const items = all.slice(0, 3);  // first three analysts: [left-top, left-bottom, featured]
+
+      const sig = JSON.stringify(items.map(c => ({
+        id: c && c.id, name: c && c.name, handle: c && c.handle, camUrl: c && c.camUrl
+      })));
+      if (sig === _casterSig) return;
+      _casterSig = sig;
+
+      leftEl.innerHTML = '';
+      rightEl.innerHTML = '';
+
+      // Left column: up to two stacked analyst cams.
+      [items[0], items[1]].forEach(c => {
+        if (c) leftEl.appendChild(buildCamBox(c));
+      });
+
+      // Right column: the featured (third) analyst/host cam.
+      if (items[2]) rightEl.appendChild(buildCamBox(items[2]));
+    }
+
+    function render(data) {
+      const casters = data.casters || {};
+      const items = (Array.isArray(casters.list) ? casters.list : []).slice(0, 3);
+
+      // Fade the whole stage from the visibility toggle.
+      stage.classList.toggle('show', SceneBase.casterStageVisible(casters));
+
+      renderCasters(casters);
+
+      // Scorebar (every tick — cheap text/attr updates).
+      const blue = SceneBase.teamSide(data, 'blue');
+      const orange = SceneBase.teamSide(data, 'orange');
+
+      setLogo(logo1, blue.logo);
+      setLogo(logo2, orange.logo);
+      name1.innerHTML = formatTeamName(blue.name);
+      name2.innerHTML = formatTeamName(orange.name);
+      score1.textContent = blue.score || 0;
+      score2.textContent = orange.score || 0;
+      if (blue.color)   document.querySelector('.team1').style.borderColor = blue.color;
+      if (orange.color) document.querySelector('.team2').style.borderColor = orange.color;
+
+      // Hide scoreboxes when both scores are 0.
+      const showScores = (blue.score || 0) !== 0 || (orange.score || 0) !== 0;
+      box1.style.display = showScores ? 'flex' : 'none';
+      box2.style.display = showScores ? 'flex' : 'none';
+
+      // Footer: brand logo (tournament) + eventName tagline.
+      const brandLogo = SceneBase.brandLogo(data);
+      tournEl.style.backgroundImage = brandLogo ? `url("${brandLogo}")` : '';
+      taglineEl.textContent = data.eventName || '';
+    }
+
+    SceneBase.connect(render);
+
+    // Demo fallback when opened directly from disk (file://).
+    if (location.protocol === 'file:') {
+      render({
+        eventName: 'Summer Showdown — Analyst Desk',
+        teams: {
+          blue:   { name: 'Frost Gaming', color: '#3b82f6' },
+          orange: { name: 'Team Ember',   color: '#f97316' }
+        },
+        game: { blueScore: 2, orangeScore: 1 },
+        casters: {
+          visible: true,
+          list: [
+            { id: 'a1', name: 'Alex Rivera',  handle: '@alexcasts' },
+            { id: 'a2', name: 'Sam Okoye',    handle: '@samok' },
+            { id: 'a3', name: 'Jordan Blake', handle: '@jblakehost' }
+          ]
+        }
+      });
+    }
+  </script>
+</body>
+</html>

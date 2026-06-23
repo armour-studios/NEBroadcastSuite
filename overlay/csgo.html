@@ -1,0 +1,2000 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1920">
+<title>NE Broadcast Suite — CS2 / CS:GO</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --main-font: 'Bourgeois', sans-serif;
+    --accent: #055fdb; --accent-2: #e97139;
+    --ct: #6aa8e6; --t: #e0b35a;
+    --panel-1: rgba(20,23,31,0.96); --panel-2: rgba(11,13,19,0.96);
+    --hp: #7ed957;
+  }
+  [data-theme="midnight"] { --accent: #4aa3ff; --accent-2: #7c5cff; }
+  [data-theme="neon"]     { --accent: #00e5a0; --accent-2: #ff2e88; }
+  html, body {
+    width: 1920px; height: 1080px; overflow: hidden; background: transparent;
+    font-family: var(--main-font); -webkit-font-smoothing: antialiased; color: #fff;
+  }
+  .hidden { display: none !important; }
+
+  /* ── Unified head: event title + scoreboard + round graph as one system ── */
+  .cs-head { position: absolute; top: 0; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center;
+    animation: headIn 0.5s cubic-bezier(.2,.7,.3,1) backwards; }
+  @keyframes headIn { from { opacity: 0; transform: translateX(-50%) translateY(-18px); } }
+  /* Score / count pop on change */
+  .sc.bump, .av-num.bump { animation: numBump 0.5s ease-out; }
+  @keyframes numBump { 0% { transform: scale(1); } 35% { transform: scale(1.12); } 100% { transform: scale(1); } }
+  .scorebar {
+    position: relative;
+    background: linear-gradient(180deg, var(--panel-1), var(--panel-2));
+    border: 1px solid rgba(255,255,255,0.12); border-top: none; border-radius: 0 0 14px 14px;
+    overflow: hidden; box-shadow: 0 12px 34px rgba(0,0,0,0.55);
+  }
+  /* Animated light that travels around the header border: top-left → around → top-right, pause, repeat */
+  .head-beam { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 40; pointer-events: none; overflow: visible; }
+  .head-beam path { fill: none; vector-effect: non-scaling-stroke; }
+  .head-beam .hb-base { stroke: rgba(255,255,255,0.10); stroke-width: 1.5; }
+  .head-beam .hb-beam { stroke: #fff; stroke-width: 2; stroke-linecap: round;
+    stroke-dasharray: 13 87; filter: drop-shadow(0 0 4px rgba(255,255,255,0.85));
+    animation: headBeam 9s linear infinite; }
+  @keyframes headBeam {
+    0%   { stroke-dashoffset: 0;   opacity: 1; }   /* start: top-left */
+    58%  { stroke-dashoffset: -87; opacity: 1; }   /* arrived: top-right */
+    64%  { stroke-dashoffset: -87; opacity: 0; }   /* fade out */
+    100% { stroke-dashoffset: -87; opacity: 0; }   /* hold (pause) before repeating */
+  }
+  .event-title {
+    position: relative; box-sizing: border-box; width: 960px;   /* = full scorebar width, never resizes */
+    text-align: center; padding: 5px 48px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    background: rgba(0,0,0,0.5);
+    font-size: 13px; font-weight: 700; letter-spacing: 3px; color: #d7dae0; text-transform: uppercase;
+  }
+  /* Divider under the header: bright white in the middle, fading out toward each edge */
+  .event-title::after { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 1.5px;
+    background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.92) 50%, transparent 100%); }
+  .topbar { display: flex; align-items: stretch; height: 76px; }
+  .team { display: flex; align-items: center; gap: 13px; padding: 0 20px; width: 360px; position: relative; overflow: hidden; }
+  .team.t-t { justify-content: flex-end; }
+  .team::after { content: ''; position: absolute; bottom: 4px; left: 0; right: 0; height: 4px; opacity: 1; transition: opacity 0.35s ease; }
+  .team.t-ct::after { background: var(--ct); } .team.t-t::after { background: var(--t); }
+  /* Bomb countdown "fuse": the team underline becomes the timer. While active the
+     team-colour accent is hidden so only the fuse shows behind it. */
+  .team.fused::after { opacity: 0; }
+  .team .fuse { position: absolute; bottom: 4px; height: 4px; width: 0; display: none; z-index: 2;
+    background: linear-gradient(90deg, #ff5a2c, #ff1414); box-shadow: 0 0 12px rgba(255,40,30,0.9); }
+  .team.t-ct .fuse { right: 0; left: auto; }   /* PLANTED (red): inner anchor → drains toward centre */
+  .team.t-t  .fuse { left: 0; right: auto; }
+  .team .fuse.danger { animation: barflash 0.4s steps(2) infinite; }
+  /* DEFUSING (green): outer anchor → grows toward centre as the defuse completes */
+  .team .fuse.defuse { background: linear-gradient(90deg, #2cff8a, #14d96e); box-shadow: 0 0 12px rgba(40,230,120,0.9); animation: none; }
+  .team.t-ct .fuse.defuse { left: 0; right: auto; }
+  .team.t-t  .fuse.defuse { right: 0; left: auto; }
+  .tlogo { width: 46px; height: 46px; object-fit: contain; flex-shrink: 0; filter: drop-shadow(0 2px 6px rgba(0,0,0,0.5)); }
+  .team-mid { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; gap: 4px; }
+  .team.t-t .team-mid { align-items: flex-end; }
+  .team .nm { font-weight: 700; font-size: 22px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+  .team.t-t .nm { text-align: right; }
+  /* Series — maps won this Bo-N (one dot per map needed to win the series) */
+  .cs-series { display: flex; gap: 4px; }
+  .cs-series .sdot { width: 9px; height: 9px; border-radius: 50%; background: rgba(255,255,255,0.16); transition: background 0.2s; }
+  .cs-series.ct .sdot.won { background: var(--ct); box-shadow: 0 0 6px rgba(106,168,230,0.7); }
+  .cs-series.t  .sdot.won { background: var(--t);  box-shadow: 0 0 6px rgba(224,179,90,0.7); }
+  .team .sc { font-weight: 700; font-size: 40px; font-variant-numeric: tabular-nums; min-width: 46px; text-align: center; }
+  .team.t-ct .sc { color: var(--ct); text-shadow: 0 0 20px rgba(106,168,230,0.45); }
+  .team.t-t .sc  { color: var(--t);  text-shadow: 0 0 20px rgba(224,179,90,0.45); }
+  /* Fixed width so the header NEVER resizes as the centre content changes (clock ↔ bomb ↔ defuse) */
+  .mid { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 0 20px; background: rgba(0,0,0,0.3); width: 240px; flex: 0 0 240px; overflow: hidden; }
+  /* Bomb: C4 icon + big seconds sit side-by-side so the centre block stays short */
+  .bombrow { display: flex; align-items: center; justify-content: center; gap: 10px; }
+  /* While a bomb is down the map/best-of line is hidden so it can't crowd the event title */
+  .mid.planted-glow .cs-map, .mid.defusing-glow .cs-map { display: none; }
+  .timer { font-weight: 700; font-size: 27px; font-variant-numeric: tabular-nums; }
+  .timer.bomb { color: #ff4133; font-size: 30px; text-shadow: 0 0 14px rgba(255,65,51,0.7); animation: pulse 1s ease-in-out infinite; }
+  /* Defuse: green countdown number, steady (no red urgency pulse) */
+  .timer.bomb.def { color: #4ad991; text-shadow: 0 0 14px rgba(74,217,145,0.6); animation: none; }
+  @keyframes pulse { 50% { opacity: 0.55; } }
+  /* Planted: the centre block glows + pulses red so the bomb state is unmistakable */
+  .mid.planted-glow { background: rgba(120,16,12,0.55); box-shadow: inset 0 0 26px rgba(255,50,40,0.5); animation: midPulse 1s ease-in-out infinite; }
+  .mid.defusing-glow { background: rgba(10,60,38,0.5); box-shadow: inset 0 0 24px rgba(60,220,130,0.4); }
+  @keyframes midPulse { 0%,100% { box-shadow: inset 0 0 22px rgba(255,50,40,0.4); } 50% { box-shadow: inset 0 0 34px rgba(255,60,50,0.75); } }
+  .cs-map { font-size: 12px; font-weight: 700; letter-spacing: 2px; color: #cdd2da; text-transform: uppercase; margin-bottom: 4px; white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+  .cs-map:empty { display: none; }
+  .cs-map .bo { color: #8b909a; }
+  .roundlbl { font-size: 12px; letter-spacing: 2px; color: #8b909a; margin-top: 3px; white-space: nowrap; }
+  .roundlbl.planted { font-size: 14px; font-weight: 900; letter-spacing: 2.5px; color: #ff4133;
+    text-shadow: 0 0 12px rgba(255,65,51,0.8); animation: pulse 0.7s ease-in-out infinite; }
+  .roundlbl.defusing { font-size: 13px; font-weight: 800; letter-spacing: 2px; color: #4ad991; animation: pulse 1s ease-in-out infinite; }
+  .roundlbl.ot { color: #ffd34d; font-weight: 800; letter-spacing: 2px; }   /* OVERTIME text */
+
+  /* ── Bomb-planted visual: pulsing C4 + draining red bar (no numbers) ── */
+  .bombvis { display: none; flex-direction: column; align-items: center; gap: 5px; height: 38px; justify-content: center; }
+  .bombvis.show { display: flex; }
+  .bomb-ic { width: 24px; height: 24px; color: #ff4133; filter: drop-shadow(0 0 7px rgba(255,65,51,0.75)); animation: bombpulse 1s ease-in-out infinite; }
+  .bombvis.danger .bomb-ic { animation-duration: 0.38s; }
+  @keyframes bombpulse { 0%,100% { transform: scale(1); } 50% { transform: scale(1.18); opacity: 0.65; } }
+  /* Planted: the central timer bar is replaced by the team-underline fuses;
+     with the bar gone, show a larger C4 icon */
+  .bombvis.nobar .bomb-bar { display: none; }
+  .bombvis.nobar { height: 44px; }
+  .bombvis.nobar .bomb-ic { width: 38px; height: 38px; }
+  /* Two icons share the slot: C4 while planted, wire-cutters while defusing */
+  .ic-defuse { display: none; }
+  .bombvis.defusing .ic-bomb { display: none; }
+  .bombvis.defusing .ic-defuse { display: block; }
+  .bomb-bar { position: relative; width: 138px; height: 9px; border-radius: 5px; background: rgba(255,255,255,0.12);
+    border: 1px solid rgba(255,80,70,0.35); box-shadow: 0 0 10px rgba(255,65,51,0.3) inset; overflow: hidden; }
+  .bomb-bar-fill { height: 100%; width: 100%; border-radius: 5px;
+    background: linear-gradient(90deg, #ff6a3d, #ff2020);
+    box-shadow: 0 0 12px rgba(255,65,51,0.85); transition: width 0.25s linear; }
+  .bombvis.danger .bomb-bar-fill { background: linear-gradient(90deg, #ff3b3b, #ff0000); animation: barflash 0.38s steps(2) infinite; }
+  @keyframes barflash { 50% { opacity: 0.5; } }
+  /* Defuse progress: neutral GREY loading fill growing over the (hidden) red bar */
+  .bomb-defuse-fill { position: absolute; left: 0; top: 0; height: 100%; width: 0;
+    background: linear-gradient(90deg, #9aa0ab, #d6dae1);
+    box-shadow: 0 0 8px rgba(210,215,225,0.55); transition: width 0.2s linear; display: none; }
+  .bombvis.defusing .bomb-defuse-fill { display: block; }
+  /* Defuse in progress: hide the red drain, show a grey loading bar + grey cutters */
+  .bombvis.defusing .bomb-bar-fill { display: none; }
+  .bombvis.defusing .bomb-ic { color: #d6dae1; filter: drop-shadow(0 0 6px rgba(210,215,225,0.6)); animation: none; }
+  .bombvis.defusing .bomb-bar { border-color: rgba(210,215,225,0.4); box-shadow: 0 0 10px rgba(210,215,225,0.25) inset; }
+
+  /* ── Bomb result flash: explosion / defuse banner across the scorebar ── */
+  .bomb-flash { position: absolute; inset: 0; display: none; align-items: center; justify-content: center;
+    pointer-events: none; overflow: hidden; z-index: 30; }
+  .bomb-flash.show { display: flex; }
+  /* While the flash plays, fade the underlying scoreboard so the banner stands alone */
+  .topbar, .event-title { transition: opacity 0.2s ease; }
+  .scorebar.flashing .topbar,
+  .scorebar.flashing .event-title { opacity: 0.1; }
+  .bomb-flash .bf-label { position: relative; z-index: 2; font-weight: 900; white-space: nowrap; }
+  /* Explosion */
+  .bomb-flash.explode { animation: bfShake 0.5s ease-in-out; }
+  .bomb-flash.explode::before { content: ''; position: absolute; left: 50%; top: 50%; width: 120%; padding-bottom: 120%;
+    transform: translate(-50%,-50%) scale(0.2); border-radius: 50%;
+    background: radial-gradient(circle, rgba(255,228,140,0.98) 0%, rgba(255,140,40,0.92) 28%, rgba(196,46,12,0.55) 55%, rgba(0,0,0,0) 74%);
+    animation: bfBlast 1.5s ease-out forwards; }
+  .bomb-flash.explode .bf-label { font-size: 26px; letter-spacing: 4px; color: #fff;
+    text-shadow: 0 0 18px rgba(255,130,40,0.95), 0 2px 5px rgba(0,0,0,0.85); animation: bfPop 1.5s ease-out forwards; }
+  /* Defused */
+  .bomb-flash.defused { background: linear-gradient(90deg, rgba(10,42,28,0) 0%, rgba(13,74,46,0.92) 50%, rgba(10,42,28,0) 100%);
+    animation: bfFade 2s ease-out forwards; }
+  .bomb-flash.defused .bf-label { font-size: 24px; letter-spacing: 5px; color: #5af0a8;
+    text-shadow: 0 0 16px rgba(74,217,145,0.9), 0 2px 4px rgba(0,0,0,0.7); animation: bfSlide 2s ease-out forwards; }
+  @keyframes bfBlast { 0% { transform: translate(-50%,-50%) scale(0.15); opacity: 0; } 12% { opacity: 1; } 100% { transform: translate(-50%,-50%) scale(1.7); opacity: 0; } }
+  @keyframes bfPop { 0% { transform: scale(0.5); opacity: 0; } 16% { transform: scale(1.14); opacity: 1; } 78% { opacity: 1; } 100% { transform: scale(1.05); opacity: 0; } }
+  @keyframes bfShake { 0%,100%{transform:translateX(0);} 18%{transform:translateX(-6px);} 38%{transform:translateX(6px);} 58%{transform:translateX(-4px);} 78%{transform:translateX(4px);} }
+  @keyframes bfFade { 0%,80% { opacity: 1; } 100% { opacity: 0; } }
+  @keyframes bfSlide { 0% { transform: translateX(-22px); opacity: 0; } 16% { transform: translateX(0); opacity: 1; } 80% { opacity: 1; } 100% { opacity: 0; } }
+
+  /* ── Corner red pulse on bomb plant (a few seconds) ── */
+  #corner-pulse { position: fixed; inset: 0; pointer-events: none; opacity: 0; z-index: 50;
+    background:
+      radial-gradient(circle at 0% 0%,    rgba(255,28,28,0.55), rgba(255,28,28,0) 22%),
+      radial-gradient(circle at 100% 0%,  rgba(255,28,28,0.55), rgba(255,28,28,0) 22%),
+      radial-gradient(circle at 0% 100%,  rgba(255,28,28,0.55), rgba(255,28,28,0) 22%),
+      radial-gradient(circle at 100% 100%,rgba(255,28,28,0.55), rgba(255,28,28,0) 22%); }
+  #corner-pulse.show { animation: cornerPulse 1.05s ease-in-out 4; }
+  @keyframes cornerPulse { 0%,100% { opacity: 0; } 50% { opacity: 1; } }
+
+  /* ── Round history — separate overlay, slides in/out when toggled ── */
+  .round-dots { position: absolute; top: 108px; left: 50%; display: flex; gap: 3px;
+    padding: 7px 14px 6px; background: rgba(13,15,21,0.96); border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 12px; box-shadow: 0 8px 22px rgba(0,0,0,0.5);
+    transform: translateX(-50%) translateY(-14px); opacity: 0; pointer-events: none;
+    transition: transform 0.3s cubic-bezier(.2,.7,.3,1), opacity 0.3s ease; }
+  .round-dots.show { transform: translateX(-50%) translateY(0); opacity: 1; }
+  .round-dots:empty { display: none; }
+  /* Round graph: number + method icon + team-colored bar, per round */
+  .rg-round { display: flex; flex-direction: column; align-items: center; gap: 3px; width: 24px; }
+  .rg-num { font-size: 9px; font-weight: 700; color: #767c87; line-height: 1; }
+  .rg-icon { height: 15px; display: flex; align-items: center; justify-content: center; }
+  .rg-icon img { width: 15px; height: 15px; filter: drop-shadow(0 1px 1px rgba(0,0,0,0.6)); }
+  .rg-bar { width: 20px; height: 4px; border-radius: 2px; }
+  .rg-bar.CT { background: var(--ct); } .rg-bar.T { background: var(--t); }
+
+  /* ── Player columns — flush to each screen edge, lowered, under the bigger radar ── */
+  .col { position: absolute; top: 400px; width: 410px; }
+  .col-ct { left: 0; } .col-t { right: 0; }
+  .players { display: flex; flex-direction: column; gap: 6px; }
+
+  /* Team header card: logo + name + total cash, with a utility tally row beneath */
+  .ehead { margin-bottom: 6px; border-radius: 8px; overflow: hidden;
+    background: linear-gradient(180deg, rgba(22,25,33,0.97), rgba(11,13,19,0.97));
+    border: 1px solid rgba(255,255,255,0.08); box-shadow: 0 4px 14px rgba(0,0,0,0.38); }
+  .col-ct .ehead { border-left: 3px solid var(--ct); }
+  .col-t  .ehead { border-right: 3px solid var(--t); }
+  .econ { display: flex; align-items: center; gap: 9px; height: 36px; padding: 0 12px; }
+  .col-t .econ { flex-direction: row-reverse; }
+  .econ-logo { width: 24px; height: 24px; object-fit: contain; flex-shrink: 0; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.6)); }
+  .econ-logo[src=""], .econ-logo:not([src]) { display: none; }
+  .econ-team { flex: 1; min-width: 0; font-size: 15px; font-weight: 800; letter-spacing: 1px; text-transform: uppercase;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .econ-ct .econ-team { color: var(--ct); } .econ-t .econ-team { color: var(--t); text-align: right; }
+  .econ-val { font-size: 15px; font-weight: 800; font-variant-numeric: tabular-nums; color: #6ee7a0; flex-shrink: 0; }
+  /* Utility tally row: one icon + count per grenade type the team is holding (sized for caster legibility) */
+  .eutil { display: flex; align-items: center; justify-content: center; gap: 18px; height: 34px; padding: 0 13px;
+    border-top: 1px solid rgba(255,255,255,0.06); background: rgba(255,255,255,0.025); }
+  .col-t .eutil { flex-direction: row-reverse; }
+  .eutil:empty { display: none; }
+  .eu-item { display: flex; align-items: center; gap: 6px; }
+  .eu-item .wimg img { width: 24px; height: 24px; object-fit: contain; opacity: 0.97; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.5)); }
+  .eu-ct { font-size: 17px; font-weight: 800; color: #e6e9ee; font-variant-numeric: tabular-nums; }
+
+  /* Column header — mirrors the row cell widths/padding so labels sit over their columns */
+  .phead { display: flex; align-items: center; height: 20px; margin-bottom: 6px; overflow: hidden;
+    background: linear-gradient(180deg, rgba(20,23,31,0.94), rgba(11,13,19,0.94));
+    border: 1px solid rgba(255,255,255,0.07); border-radius: 6px;
+    font-size: 9px; font-weight: 700; letter-spacing: 0.5px; color: #8b909a; text-transform: uppercase; white-space: nowrap; }
+  .col-ct .phead { border-left: 3px solid var(--ct); }
+  .col-t  .phead { border-right: 3px solid var(--t); }
+  .ph-hp { width: 52px; text-align: center; flex-shrink: 0; }     /* = .hpbox */
+  .ph-body { flex: 1; display: flex; align-items: center; gap: 9px; padding: 0 11px; }  /* = .pbody */
+  .ph-name { flex: 1; }
+  .ph-kad { width: 50px; text-align: center; flex-shrink: 0; }    /* = .pkad */
+  .ph-wpn { width: 68px; text-align: center; flex-shrink: 0; }    /* = .pwpn */
+  .col-t .phead { flex-direction: row-reverse; }
+  .col-t .ph-body { flex-direction: row-reverse; }
+  .col-t .ph-name { text-align: right; }
+
+  /* Player rows — persistent across ticks; only HP/death transition (no entrance anim → seamless) */
+  .prow { position: relative; display: flex; align-items: stretch; height: 58px; border-radius: 8px; overflow: hidden;
+    background: linear-gradient(180deg, var(--panel-1), var(--panel-2)); border: 1px solid rgba(255,255,255,0.07);
+    box-shadow: 0 3px 10px rgba(0,0,0,0.35);
+    transition: height 0.3s ease, opacity 0.3s ease, filter 0.3s ease, transform 0.18s ease, box-shadow 0.18s ease; }
+  .players.ct .prow { border-left: 3px solid var(--ct); }
+  .players.t  .prow { border-right: 3px solid var(--t); }
+  .players.t .prow { flex-direction: row-reverse; }
+  /* Dead: shorter + NARROWER card pinned to the outer edge, big skull, no loadout/money */
+  .prow.dead { height: 36px; width: 72%; opacity: 0.5; filter: grayscale(1); }
+  .players.ct .prow.dead { align-self: flex-start; }
+  .players.t  .prow.dead { align-self: flex-end; }
+  .prow.dead .pmoney, .prow.dead .pstatus, .prow.dead .pwpn, .prow.dead .hpbar { display: none; }
+  .prow.dead .pname { font-size: 15px; }
+  .prow.dead .pkad { font-size: 12px; }
+  .prow.dead .hpbox { font-size: 26px; background: transparent; color: #9aa0aa; }
+  .prow.just-died { animation: died 0.6s ease; }
+  @keyframes died { 0% { background: rgba(255,60,40,0.55); } 100% { background: linear-gradient(180deg, var(--panel-1), var(--panel-2)); } }
+  /* Observed player highlight: lift + team-color ring */
+  .prow.active { transform: scale(1.03); z-index: 2; }
+  .players.ct .prow.active { border-color: var(--ct); box-shadow: 0 0 0 1px var(--ct), 0 6px 18px rgba(0,0,0,0.5), 0 0 16px rgba(106,168,230,0.4); }
+  .players.t  .prow.active { border-color: var(--t);  box-shadow: 0 0 0 1px var(--t),  0 6px 18px rgba(0,0,0,0.5), 0 0 16px rgba(224,179,90,0.4); }
+
+  /* HP box (inner edge — toward screen centre on both columns). Neutral grey on both sides. */
+  .hpbox { width: 52px; flex-shrink: 0; display: flex; align-items: center; justify-content: center;
+    font-size: 23px; font-weight: 700; font-variant-numeric: tabular-nums;
+    background: linear-gradient(180deg, rgba(255,255,255,0.10), rgba(255,255,255,0.03)); }
+
+  /* HP drain bar along the row's bottom edge */
+  .hpbar { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: rgba(255,255,255,0.07); }
+  .hpfill { height: 100%; width: 100%; transition: width 0.3s ease, background 0.3s ease; }
+  .players.ct .hpfill { background: var(--ct); } .players.t .hpfill { background: var(--t); }
+  /* Low-health warning: recolour the bar + HP number */
+  .prow.hp-low  .hpfill { background: #f0c14b !important; }
+  .prow.hp-crit .hpfill { background: #ff5a5a !important; }
+  .prow.hp-low  .hpbox { color: #f6cf63; }
+  .prow.hp-crit .hpbox { color: #ff6b6b; }
+
+  /* Body — two dense lines: (1) name + status, (2) K/D + money; loadout + HP to the side */
+  .pbody { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; padding: 0 11px; }
+  .players.t .pbody { flex-direction: row-reverse; }
+  .pinfo { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; gap: 2px; }
+  .pline1 { display: flex; align-items: center; gap: 7px; min-width: 0; }
+  .players.t .pline1 { flex-direction: row-reverse; }
+  .players.t .pinfo { align-items: flex-end; }
+  .pname { font-weight: 700; font-size: 17px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  .psub { display: flex; align-items: center; gap: 13px; }
+  .players.t .psub { flex-direction: row-reverse; }
+  .pkad { display: flex; align-items: center; gap: 3px; font-weight: 600; font-size: 14px; color: #c4c9d2; font-variant-numeric: tabular-nums; }
+  .pkad .kad-ic { display: block; }
+  .pmoney { font-weight: 600; font-size: 14px; color: #6ee7a0; }
+  /* Loadout: weapon + grenades + kit/bomb in one horizontal row, sits next to HP */
+  .pwpn { display: flex; flex-direction: row; align-items: center; gap: 4px; flex-shrink: 0; }
+  .players.t .pwpn { flex-direction: row-reverse; }
+  .pwpn .putil { gap: 4px; }
+
+  /* Bomb carrier — highlighted C4 badge next to the name */
+  .pbomb { display: inline-flex; align-items: center; }
+  .pbomb:empty { display: none; }
+  .pbomb .uimg { filter: drop-shadow(0 0 5px rgba(255,180,60,0.95)); }
+  /* Live status FX (flashed / on fire) */
+  .pstatus { display: flex; align-items: center; gap: 4px; }
+  .pstatus:empty { display: none; }
+  .fx { width: 15px; height: 15px; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; }
+  .fx.flash { background: rgba(245,245,255,0.92); color: #222; box-shadow: 0 0 9px rgba(255,255,255,0.85); animation: fxblink 0.5s steps(2) infinite; }
+  .fx.fire  { background: rgba(224,90,30,0.92); color: #fff; box-shadow: 0 0 9px rgba(255,120,40,0.8); animation: fxblink 0.45s steps(2) infinite; }
+  .fx.smoke { background: rgba(140,148,160,0.95); color: #fff; box-shadow: 0 0 9px rgba(170,176,188,0.7); animation: fxsmoke 1.6s ease-in-out infinite; }
+  @keyframes fxblink { 50% { opacity: 0.45; } }
+  @keyframes fxsmoke { 0%,100% { transform: scale(1); opacity: 0.95; } 50% { transform: scale(1.18); opacity: 0.6; } }
+
+  /* ── Status condition: smooth animated tint BEHIND the card + an icon left of the HP box ── */
+  /* Animations are intentionally slow + low-contrast (no strobe/steps) to avoid seizure risk. */
+  .prow > .pfx { position: absolute; top: 0; bottom: 0; left: -14px; right: -14px; z-index: 0;
+    pointer-events: none; opacity: 0; transition: opacity 0.5s ease; }
+  .prow > .pbody, .prow > .hpbox { position: relative; z-index: 1; }
+  .prow > .hpbar { z-index: 1; }
+  /* keep text crisp over any tint */
+  .pbody, .hpbox { text-shadow: 0 1px 2px rgba(0,0,0,0.55); }
+  /* Blind = a white sheen that fades in/out over the (still-visible) dark card — not a whiteout.
+     The gradient fades to transparent at the edges so the black card always shows behind it. */
+  .pfx.flash { background: radial-gradient(circle at 50% 50%, rgba(255,255,255,0.9) 0%, rgba(255,255,255,0.32) 48%, rgba(255,255,255,0) 82%); animation: pfxFlash 1.7s ease-out infinite; }
+  .pfx.fire  { background: linear-gradient(0deg, rgba(255,68,12,0.6) 0%, rgba(255,150,45,0.26) 62%, transparent 100%); animation: pfxFire 1.6s ease-in-out infinite; }
+  .pfx.smoke { background: rgba(120,126,140,0.85); animation: pfxSmoke 3.4s ease-in-out infinite; }
+  @keyframes pfxFlash { 0% { opacity: 0.2; } 16% { opacity: 0.5; } 100% { opacity: 0.2; } }
+  @keyframes pfxFire  { 0%,100% { opacity: 0.5; } 50% { opacity: 0.66; } }
+  @keyframes pfxSmoke { 0%,100% { opacity: 0.16; transform: translateX(-2%); } 50% { opacity: 0.42; transform: translateX(2%); } }
+
+  /* Condition icon — slides in just left of the HP box, no flashing */
+  .prow > .pcond { position: relative; z-index: 1; display: flex; align-items: center; justify-content: center;
+    width: 0; overflow: hidden; opacity: 0; flex-shrink: 0;
+    transition: width 0.35s ease, opacity 0.35s ease; }
+  .prow > .pcond:not(:empty) { width: 24px; opacity: 1; }
+  .pcond svg { width: 17px; height: 17px; }
+  .pcond.flash { color: #ffffff; filter: drop-shadow(0 0 6px rgba(255,255,255,0.9)); animation: condPulse 1.8s ease-in-out infinite; }
+  .pcond.fire  { color: #ff8636; filter: drop-shadow(0 0 6px rgba(255,120,40,0.9)); animation: condPulse 1.6s ease-in-out infinite; }
+  .pcond.smoke { color: #cfd4dd; filter: drop-shadow(0 0 5px rgba(180,186,196,0.7)); animation: condPulse 3.4s ease-in-out infinite; }
+  @keyframes condPulse { 0%,100% { opacity: 0.7; } 50% { opacity: 1; } }
+
+  .wimg { display: inline-flex; align-items: center; }
+  .wimg img { display: block; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.6)); }
+
+  /* Utility icons (defuse kit / bomb) */
+  .putil { display: flex; align-items: center; gap: 5px; }
+  .players.t .putil { flex-direction: row-reverse; }
+  .uimg { display: block; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.5)); }
+
+  /* ── Radar: floats in the top-left empty space — transparent, only the map shape shows ── */
+  .cs-radar { position: absolute; top: 14px; left: 72px; width: 360px; height: 360px; background: transparent;
+    animation: radarIn 0.45s ease backwards; }
+  /* Fallback canvas if the map PNG is missing — never blank */
+  .cs-radar.no-map { background: radial-gradient(circle at 50% 42%, rgba(26,31,41,0.94), rgba(9,11,16,0.94));
+    border: 1px solid rgba(255,255,255,0.12); border-radius: 12px; box-shadow: 0 14px 36px rgba(0,0,0,0.55); }
+  @keyframes radarIn { from { opacity: 0; transform: translateY(-10px); } }
+  /* The world layer is scaled/translated to frame the action; point markers counter-scale (--rk). */
+  .radar-world { position: absolute; inset: 0; transform-origin: 0 0; will-change: transform;
+    transition: transform 0.22s ease-out; }
+  .radar-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain;
+    opacity: 0.95; filter: drop-shadow(0 3px 10px rgba(0,0,0,0.8)); }
+  .radar-img.hidden { display: none; }
+  .radar-sites, .radar-fx, .radar-dots { position: absolute; inset: 0; pointer-events: none; }
+  .rdot { position: absolute; width: 15px; height: 15px; margin: -7.5px 0 0 -7.5px; border-radius: 50%;
+    border: 1.5px solid rgba(0,0,0,0.55); box-shadow: 0 1px 3px rgba(0,0,0,0.7);
+    transform: scale(var(--rk, 1)); transform-origin: center;
+    transition: left 0.25s linear, top 0.25s linear, transform 0.22s ease-out, opacity 0.2s ease, filter 0.2s ease; }
+  .rdot.ct { background: var(--ct); } .rdot.t { background: var(--t); }
+  .rdot.me { width: 19px; height: 19px; margin: -9.5px 0 0 -9.5px; box-shadow: 0 0 0 2px #fff, 0 1px 4px rgba(0,0,0,0.8); z-index: 3; animation: rdotMe 1.4s ease-in-out infinite; }
+  @keyframes rdotMe { 0%,100% { box-shadow: 0 0 0 2px #fff, 0 1px 4px rgba(0,0,0,0.8); } 50% { box-shadow: 0 0 0 3px #fff, 0 0 10px rgba(255,255,255,0.85); } }
+  .rdot.smoked { opacity: 0.4; filter: grayscale(0.75); }   /* hidden in smoke */
+  /* Bomb carrier — gold ring */
+  .rdot.carry { box-shadow: 0 0 0 2px #ffce47, 0 0 9px rgba(255,200,60,0.95); z-index: 3; }
+  /* Low HP — red ring */
+  .rdot.low { box-shadow: 0 0 0 2px #ff5a5a, 0 0 7px rgba(255,70,70,0.85); }
+  /* Dead — faded X at the death spot, no circle/arrow */
+  .rdot.dead { background: transparent !important; border: none; box-shadow: none; opacity: 0.5; animation: none; z-index: 1; }
+  .rdot.dead .rdot-nose { display: none !important; }
+  .rdot.dead::after { content: '✕'; position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%);
+    font-size: 13px; font-weight: 900; line-height: 1; }
+  .rdot.dead.ct::after { color: var(--ct); } .rdot.dead.t::after { color: var(--t); }
+  /* Facing arrow (view direction), rotated inline per the forward vector */
+  .rdot-nose { position: absolute; left: 50%; top: 50%; width: 0; height: 0;
+    border-left: 4px solid transparent; border-right: 4px solid transparent; border-bottom: 6px solid #fff; }
+  .rdot.ct .rdot-nose { border-bottom-color: var(--ct); }
+  .rdot.t  .rdot-nose { border-bottom-color: var(--t); }
+  /* Player number (spectate key) centered on the dot, for caster reference */
+  .rdot-num { position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%);
+    font-size: 9px; font-weight: 800; color: #fff; line-height: 1; text-shadow: 0 1px 2px rgba(0,0,0,0.95); }
+  .rdot.dead .rdot-num { display: none; }
+  .rbomb { position: absolute; width: 16px; height: 16px; margin: -8px 0 0 -8px; border-radius: 3px; background: #ff3b2f; color: #fff;
+    font-size: 8px; font-weight: 700; display: flex; align-items: center; justify-content: center;
+    transform: scale(var(--rk, 1)); transform-origin: center;
+    box-shadow: 0 0 8px rgba(255,60,40,0.9); z-index: 4; transition: left 0.25s linear, top 0.25s linear, transform 0.22s ease-out; }
+  /* A / B bombsite labels */
+  .rsite { position: absolute; width: 20px; height: 20px; margin: -10px 0 0 -10px; border-radius: 5px;
+    display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 800; color: #fff;
+    transform: scale(var(--rk, 1)); transform-origin: center; transition: transform 0.22s ease-out;
+    background: rgba(0,0,0,0.42); border: 1.5px solid rgba(255,255,255,0.7); text-shadow: 0 1px 2px rgba(0,0,0,0.9); }
+  /* Grenade / smoke / molotov markers */
+  .gren { position: absolute; transition: left 0.2s linear, top 0.2s linear; }
+  .gren.smoke { width: 34px; height: 34px; margin: -17px 0 0 -17px; border-radius: 50%;
+    background: radial-gradient(circle, rgba(225,228,234,0.6), rgba(180,186,196,0.28) 70%, transparent);
+    border: 1px solid rgba(255,255,255,0.35); }
+  .gren.inferno, .gren.firebomb { width: 26px; height: 26px; margin: -13px 0 0 -13px; border-radius: 50%;
+    background: radial-gradient(circle, rgba(255,140,40,0.85), rgba(220,70,20,0.4) 70%, transparent);
+    box-shadow: 0 0 10px rgba(255,110,30,0.7); animation: fxblink 0.5s steps(2) infinite; }
+  .gren.frag { width: 9px; height: 9px; margin: -4.5px 0 0 -4.5px; border-radius: 50%; background: #cfd6df; border: 1px solid rgba(0,0,0,0.5); }
+  .gren.flashbang { width: 9px; height: 9px; margin: -4.5px 0 0 -4.5px; border-radius: 50%; background: #fff7c2; box-shadow: 0 0 7px rgba(255,247,160,0.9); }
+  .gren.decoy { width: 9px; height: 9px; margin: -4.5px 0 0 -4.5px; border-radius: 50%; background: #4aa3b0; border: 1px solid rgba(0,0,0,0.5); }
+
+  /* ── Kill feed (top-right): Killer [weapon][HS] Victim, slides in, auto-expires ── */
+  .cs-killfeed { position: absolute; top: 120px; right: 28px; display: flex; flex-direction: column;
+    align-items: flex-end; gap: 6px; pointer-events: none; z-index: 6; }
+  .kf-row { display: flex; align-items: center; gap: 9px; padding: 4px 11px; border-radius: 7px;
+    background: linear-gradient(180deg, rgba(16,18,25,0.92), rgba(9,11,16,0.92)); border: 1px solid rgba(255,255,255,0.08);
+    box-shadow: 0 3px 11px rgba(0,0,0,0.5); font-weight: 800; font-size: 14px; white-space: nowrap;
+    animation: kfIn 0.34s ease; }
+  .kf-row.leaving { animation: kfOut 0.4s ease forwards; }
+  @keyframes kfIn  { from { opacity: 0; transform: translateX(18px); } }
+  @keyframes kfOut { to   { opacity: 0; transform: translateX(18px); } }
+  .kf-killer.ct, .kf-victim.ct { color: var(--ct); }
+  .kf-killer.t,  .kf-victim.t  { color: var(--t); }
+  .kf-wpn { display: inline-flex; align-items: center; }
+  .kf-wpn img { height: 18px; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.7)); }
+  .kf-wpn.kf-skull { color: #c4c9d2; }
+  .kf-hs { width: 12px; height: 12px; border-radius: 50%; border: 2px solid #ff5a5a; position: relative; flex-shrink: 0; }
+  .kf-hs::after { content: ''; position: absolute; left: 50%; top: 50%; width: 3px; height: 3px; border-radius: 50%;
+    background: #ff5a5a; transform: translate(-50%,-50%); }
+
+  /* ── Buy / freeze phase board — Valorant-style fixed-column layout, slides up in freezetime ── */
+  .cs-buy { position: fixed; left: 50%; bottom: 0; transform: translateX(-50%) translateY(118%);
+    width: 1320px; z-index: 9; pointer-events: none; transition: transform 0.42s cubic-bezier(.2,.7,.3,1);
+    border-radius: 10px 10px 0 0; overflow: hidden; box-shadow: 0 -6px 44px rgba(0,0,0,0.6); }
+  .cs-buy.show { transform: translateX(-50%) translateY(0); }
+  /* Header: team | ROUND | team */
+  .cb-header { display: flex; align-items: stretch; background: linear-gradient(180deg, rgba(16,18,25,0.98), rgba(11,13,19,0.98)); }
+  .cb-team { flex: 1; display: flex; align-items: center; gap: 13px; padding: 9px 20px; min-width: 0; }
+  .cb-team.t { flex-direction: row-reverse; }
+  .cb-logo { width: 38px; height: 38px; object-fit: contain; flex-shrink: 0; }
+  .cb-logo[src=""], .cb-logo:not([src]) { display: none; }
+  /* Fallback CS2 logo renders white (it's a dark silhouette); only applied to the fallback. */
+  img.cs-fallback { filter: brightness(0) invert(1) drop-shadow(0 1px 2px rgba(0,0,0,0.45)); }
+  /* Mirror the fallback on the team-2 (right / T) side so both logos face centre. */
+  .team.t-t .tlogo.cs-fallback,
+  .econ-t .econ-logo.cs-fallback,
+  .cb-team.t .cb-logo.cs-fallback { transform: scaleX(-1); }
+  .cb-tname { flex: 1; min-width: 0; font-size: 22px; font-weight: 900; letter-spacing: 0.5px; text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .cb-team.ct .cb-tname { color: var(--ct); } .cb-team.t .cb-tname { color: var(--t); text-align: right; }
+  .cb-score { font-size: 46px; font-weight: 900; line-height: 1; font-variant-numeric: tabular-nums; flex-shrink: 0; }
+  .cb-team.ct .cb-score { color: var(--ct); } .cb-team.t .cb-score { color: var(--t); }
+  .cb-mid { flex: 0 0 124px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px;
+    background: rgba(0,0,0,0.45); border-left: 1px solid rgba(255,255,255,0.08); border-right: 1px solid rgba(255,255,255,0.08); }
+  .cb-mid .r { font-size: 9px; font-weight: 700; letter-spacing: 3px; color: #4a5268; }
+  .cb-mid .rn { font-size: 30px; font-weight: 900; color: #c8ccd8; line-height: 1; font-variant-numeric: tabular-nums; }
+  .cb-mid .bz { font-size: 10px; font-weight: 800; letter-spacing: 2px; color: #ffd34d; }
+  /* Round history strip — per round: a team-tinted icon tile (win method) + round number */
+  .cb-rounds { display: flex; justify-content: center; align-items: flex-start; gap: 3px; padding: 7px 0 8px;
+    background: rgba(4,5,11,0.96); border-top: 1px solid rgba(255,255,255,0.06); }
+  .cb-rslot { display: flex; flex-direction: column; align-items: center; gap: 3px; width: 22px; }
+  .cb-rico { width: 20px; height: 20px; border-radius: 4px; display: flex; align-items: center; justify-content: center;
+    background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.06); }
+  .cb-rico img { width: 13px; height: 13px; object-fit: contain; filter: brightness(0) invert(1); opacity: 0.92; }
+  .cb-rslot.ct .cb-rico { background: color-mix(in srgb, var(--ct) 30%, rgba(4,5,11,0.9)); border-color: color-mix(in srgb, var(--ct) 45%, transparent); }
+  .cb-rslot.t  .cb-rico { background: color-mix(in srgb, var(--t) 30%, rgba(4,5,11,0.9)); border-color: color-mix(in srgb, var(--t) 45%, transparent); }
+  .cb-rnum { font-size: 8px; font-weight: 800; color: #5a6072; line-height: 1; font-variant-numeric: tabular-nums; }
+  .cb-rslot.ct .cb-rnum { color: color-mix(in srgb, var(--ct) 75%, #fff); }
+  .cb-rslot.t  .cb-rnum { color: color-mix(in srgb, var(--t) 75%, #fff); }
+  .cb-rgap { width: 12px; align-self: center; height: 20px; border-left: 1px solid rgba(255,255,255,0.12); }
+  /* Board: one row = CT cell (left) + T cell (right), each split into fixed columns */
+  .cb-board { background: rgba(7,9,15,0.98); border-top: 1px solid rgba(255,255,255,0.06); }
+  .cb-row { display: flex; height: 48px; }
+  .cb-row:nth-child(even) { background: rgba(255,255,255,0.022); }
+  .cb-row + .cb-row { border-top: 1px solid rgba(255,255,255,0.05); }
+  .cb-cell { flex: 1; display: flex; align-items: stretch; min-width: 0; overflow: hidden; }
+  .cb-cell.ct { flex-direction: row; border-right: 1px solid rgba(255,255,255,0.08); }
+  .cb-cell.t  { flex-direction: row-reverse; }
+  /* money (outermost) */
+  .cb-money { flex: 0 0 112px; display: flex; flex-direction: column; justify-content: center; padding: 0 13px; background: rgba(4,6,12,0.5); }
+  .cb-cell.ct .cb-money { align-items: flex-end; border-left: 3px solid var(--ct); }
+  .cb-cell.t  .cb-money { align-items: flex-start; border-right: 3px solid var(--t); }
+  .cb-cash { font-size: 17px; font-weight: 800; color: #fff; font-variant-numeric: tabular-nums; line-height: 1.15; }
+  .cb-equip { font-size: 10px; font-weight: 700; color: #6ee7a0; }
+  /* util (grenades + kit + bomb) — fixed width so columns align */
+  .cb-util { flex: 0 0 104px; display: flex; align-items: center; gap: 5px; padding: 0 11px; border-left: 1px solid rgba(255,255,255,0.07); }
+  .cb-cell.t .cb-util { flex-direction: row-reverse; border-left: none; border-right: 1px solid rgba(255,255,255,0.07); }
+  .cb-util img { width: 19px; height: 19px; object-fit: contain; filter: drop-shadow(0 1px 1px rgba(0,0,0,0.6)); }
+  /* gear (armor + weapon in a fixed container) */
+  .cb-gear { flex: 0 0 150px; display: flex; align-items: center; gap: 10px; padding: 0 13px;
+    border-left: 1px solid rgba(255,255,255,0.07); background: rgba(4,6,12,0.32); }
+  .cb-cell.t .cb-gear { flex-direction: row-reverse; border-left: none; border-right: 1px solid rgba(255,255,255,0.07); }
+  .cb-armor { width: 16px; height: 18px; object-fit: contain; flex-shrink: 0; }
+  .cb-weap { flex: 0 0 104px; width: 104px; height: 22px; object-fit: contain; opacity: 0.95; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.6)); }
+  .cb-cell.ct .cb-weap { transform: scaleX(-1); }   /* point inward toward centre */
+  /* player (name + K/D/A) */
+  .cb-player { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; padding: 0 16px; border-left: 1px solid rgba(255,255,255,0.07); }
+  .cb-cell.t .cb-player { flex-direction: row-reverse; border-left: none; border-right: 1px solid rgba(255,255,255,0.07); }
+  .cb-cell.ct .cb-player { background: linear-gradient(to right, transparent 30%, color-mix(in srgb, var(--ct) 18%, transparent)); }
+  .cb-cell.t  .cb-player { background: linear-gradient(to left,  transparent 30%, color-mix(in srgb, var(--t)  18%, transparent)); }
+  .cb-name { font-size: 16px; font-weight: 800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  .cb-name.dead { opacity: 0.45; text-decoration: line-through; }
+  .cb-kda { font-size: 13px; font-weight: 700; color: #c4c9d2; font-variant-numeric: tabular-nums; flex-shrink: 0; }
+  .cb-cell.ct .cb-kda { margin-left: auto; } .cb-cell.t .cb-kda { margin-right: auto; }
+  .cb-kda .k { color: #fff; } .cb-kda .d { color: #9aa0aa; }
+  /* Hide the live side columns + bottom focus while the buy board is up */
+  body.buying .col,
+  body.buying .focus { opacity: 0; pointer-events: none; transition: opacity 0.3s ease; }
+
+  /* ── Live alive-player count — transient "X VS X", pops on a death ── */
+  .cs-alive { position: absolute; top: 156px; left: 50%; transform: translateX(-50%);
+    display: flex; align-items: center; gap: 14px; padding: 5px 18px;
+    background: linear-gradient(180deg, rgba(20,23,31,0.93), rgba(11,13,19,0.93)); border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 11px; box-shadow: 0 8px 22px rgba(0,0,0,0.5); }
+  .av-num { font-size: 28px; font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1; min-width: 22px; text-align: center; }
+  .av-num-ct { color: var(--ct); text-shadow: 0 0 16px rgba(106,168,230,0.5); }
+  .av-num-t  { color: var(--t);  text-shadow: 0 0 16px rgba(224,179,90,0.5); }
+  .av-vs { font-size: 13px; font-weight: 700; letter-spacing: 3px; color: #6b7079; }
+
+  /* ── Bottom observed-player bar — thin, two lines (name·HP·armor / KAD·money·loadout) ── */
+  .focus { position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%);
+    display: grid; grid-template-columns: minmax(120px, auto) auto 1fr; align-items: center;
+    column-gap: 22px; row-gap: 2px; padding: 7px 18px 9px; min-width: 380px;
+    background: linear-gradient(180deg, var(--panel-1), var(--panel-2)); border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 10px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.6); }
+  .focus.ct-side { box-shadow: inset 5px 0 0 var(--ct), 0 10px 30px rgba(0,0,0,0.6); }
+  .focus.t-side  { box-shadow: inset -5px 0 0 var(--t), 0 10px 30px rgba(0,0,0,0.6); }
+  .focus .who { grid-row: 1; grid-column: 1; font-size: 18px; font-weight: 800; white-space: nowrap;
+    overflow: hidden; text-overflow: ellipsis; max-width: 200px; }
+  .fcell { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+  .fcell .lbl { font-size: 8px; letter-spacing: 1px; color: #7d828c; text-transform: uppercase; }
+  .fcell .lbl:empty { display: none; }
+  .fcell .val { font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums; color: #f1f3f6; }
+  .fhp .val { color: var(--hp); transition: color 0.3s ease; }
+  .fhp.hp-low .val { color: #f6cf63; } .fhp.hp-crit .val { color: #ff6b6b; }
+  .farmor .val { display: flex; align-items: center; gap: 4px; }
+  .armor-ic-wrap { display: inline-flex; align-items: center; }
+  .farmor-ic { display: block; width: 16px; height: 16px; object-fit: contain; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.5)); }
+  .fmoney .val { color: #6ee7a0; }
+  /* K/D with icons: [kill]{kills} +{assists} [skull]{deaths} */
+  .fkad .val { display: flex; align-items: center; gap: 4px; }
+  /* Kill + death icons share one uniform 16×16 box (contain-fit) so they match each other */
+  .kad-ic { display: block; width: 16px; height: 16px; object-fit: contain; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.5)); }
+  .kad-as { font-size: 11px; color: #8b909a; font-weight: 600; }
+  .kad-skull { display: inline-flex; align-items: center; color: #c4c9d2; margin-left: 6px; }
+  .kad-skull svg { display: block; width: 16px; height: 16px; }
+  .floadout .val { display: flex; align-items: center; }
+  .fload { display: flex; align-items: center; gap: 6px; }
+  .fload .putil { gap: 5px; }
+  /* All loadout utility icons (grenades / kit / bomb) sit in the same 16×16 box */
+  .fload .uimg { width: 16px; height: 16px; object-fit: contain; }
+  .fload .wimg img, .fload .uimg { filter: drop-shadow(0 1px 2px rgba(0,0,0,0.6)); }
+  .fammo { color: #aeb4bf; font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  /* HP drain bar along the bottom — depletes + reddens with the observed player's HP */
+  .focus-hpbar { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: rgba(255,255,255,0.08); }
+  .focus-hpfill { height: 100%; width: 100%; transition: width 0.3s ease, background 0.3s ease; }
+  .focus.ct-side .focus-hpfill { background: var(--ct); }
+  .focus.t-side  .focus-hpfill { background: var(--t); }
+  .focus-hpfill.low  { background: #f0c14b !important; }
+  .focus-hpfill.crit { background: #ff5a5a !important; }
+
+  .preview-badge { position: absolute; bottom: 130px; left: 50%; transform: translateX(-50%);
+    background: rgba(0,0,0,0.7); color: #fff; border: 1px solid var(--accent-2); font-size: 15px; font-weight: 700; letter-spacing: 2px; padding: 6px 16px; border-radius: 999px; }
+
+  /* ── Dev event tester — only shown outside OBS (window.obsstudio absent) ── */
+  #dev-panel { display: none; position: fixed; left: 14px; bottom: 14px; z-index: 9999;
+    font-family: system-ui, sans-serif; background: rgba(14,16,22,0.96); color: #e7eaf0;
+    border: 1px solid rgba(255,255,255,0.16); border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.6);
+    width: 212px; overflow: hidden; }
+  #dev-panel.open { display: block; }
+  #dev-panel .dh { display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    padding: 8px 11px; background: rgba(255,255,255,0.06); cursor: default; }
+  #dev-panel .dh b { font-size: 11px; letter-spacing: 1.5px; color: #aab0bd; }
+  #dev-panel .dh button { background: none; border: none; color: #aab0bd; font-size: 14px; cursor: pointer; line-height: 1; padding: 2px 4px; }
+  #dev-panel .db { padding: 10px; display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
+  #dev-panel .db button { font: 600 11px/1.2 system-ui, sans-serif; letter-spacing: .4px; color: #f0f2f6;
+    background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.14); border-radius: 7px;
+    padding: 8px 6px; cursor: pointer; transition: background .12s; }
+  #dev-panel .db button:hover { background: rgba(255,255,255,0.18); }
+  #dev-panel .db button.wide { grid-column: 1 / -1; }
+  #dev-panel .db button.boom { border-color: rgba(255,120,40,0.5); color: #ffcaa0; }
+  #dev-panel .db button.cut  { border-color: rgba(120,200,160,0.45); color: #b6ecd0; }
+  #dev-panel .db button.reset { background: rgba(255,255,255,0.04); color: #aab0bd; }
+  /* Re-open tab when collapsed */
+  #dev-fab { display: none; position: fixed; left: 14px; bottom: 14px; z-index: 9999;
+    font: 700 11px/1 system-ui, sans-serif; letter-spacing: 1px; color: #cfd4dd;
+    background: rgba(14,16,22,0.92); border: 1px solid rgba(255,255,255,0.16); border-radius: 999px;
+    padding: 8px 13px; cursor: pointer; }
+
+  /* ── Broadcast callouts ── */
+  /* Transient announce (multi-kill / round result) */
+  .cs-announce { position: absolute; top: 224px; left: 50%; transform: translateX(-50%);
+    padding: 8px 22px; border-radius: 10px; white-space: nowrap; font-weight: 800; letter-spacing: 1px; font-size: 18px;
+    background: linear-gradient(180deg, rgba(20,23,31,0.96), rgba(11,13,19,0.96)); border: 1px solid rgba(255,255,255,0.14);
+    box-shadow: 0 10px 30px rgba(0,0,0,0.6); }
+  .cs-announce.pop { animation: announcePop 0.5s ease-out; }
+  @keyframes announcePop { from { opacity: 0; transform: translateX(-50%) scale(0.96); } }
+  .an-name.ct, .an-win.ct { color: var(--ct); } .an-name.t, .an-win.t { color: var(--t); }
+  .an-tag { color: #ff7043; margin-left: 8px; }
+  .an-sep { color: #6b7079; margin: 0 8px; } .an-method { color: #c4c9d2; }
+  /* Persistent 1vX clutch callout */
+  .cs-clutch { position: absolute; bottom: 110px; left: 50%; transform: translateX(-50%);
+    display: flex; align-items: center; gap: 11px; padding: 5px 16px; border-radius: 999px;
+    background: rgba(10,12,18,0.92); border: 1px solid rgba(255,210,80,0.6); box-shadow: 0 0 16px rgba(255,200,60,0.35);
+    font-weight: 800; letter-spacing: 1px; animation: pulse 1.2s ease-in-out infinite; }
+  .cl-tag { color: #ffd34d; font-size: 12px; letter-spacing: 2px; }
+  .cl-name { font-size: 15px; } .cl-name.ct { color: var(--ct); } .cl-name.t { color: var(--t); }
+  .cl-vs { color: #fff; font-size: 14px; font-variant-numeric: tabular-nums; }
+  /* Halftime / timeout / warmup */
+  .cs-phase { position: absolute; top: 300px; left: 50%; transform: translateX(-50%);
+    padding: 11px 38px; border-radius: 12px; font-size: 32px; font-weight: 800; letter-spacing: 6px; color: #fff;
+    background: rgba(10,12,18,0.9); border: 1px solid rgba(255,255,255,0.18); box-shadow: 0 12px 36px rgba(0,0,0,0.6); }
+
+  /* Sponsor rail — bottom-right corner bug, rotates through the brand's partners */
+  /* partner rail sits ABOVE the sponsor banner in the bottom-right */
+  .cs-sponsors { position: absolute; right: 40px; bottom: 128px; display: flex; flex-direction: column; align-items: flex-end; gap: 4px;
+    padding: 7px 12px; border-radius: 9px; background: linear-gradient(180deg, rgba(20,23,31,0.9), rgba(11,13,19,0.9));
+    border: 1px solid rgba(255,255,255,0.1); box-shadow: 0 8px 22px rgba(0,0,0,0.5); }
+  .sp-label { font-size: 9px; font-weight: 700; letter-spacing: 2px; color: #8b909a; text-transform: uppercase; }
+  .sp-slot { display: flex; align-items: center; justify-content: center; min-width: 96px; height: 26px; }
+  .sp-slot .sp-logo { max-height: 26px; max-width: 150px; object-fit: contain; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.6)); animation: spFade 0.9s ease; }
+  .sp-slot .sp-name { font-size: 17px; font-weight: 800; letter-spacing: 1px; color: #e8ebf0; animation: spFade 0.9s ease; }
+  /* Subtle cross-fade only (no pop) — runs only when the sponsor actually changes */
+  @keyframes spFade { from { opacity: 0; } to { opacity: 1; } }
+
+  /* ── Sponsor banner (bottom-right) — producer-controlled rotating images (state.banner) ── */
+  .cs-banner { position: absolute; right: 40px; bottom: 30px; width: 380px; height: 86px; border-radius: 10px; overflow: hidden;
+    background: linear-gradient(180deg, rgba(20,23,31,0.95), rgba(11,13,19,0.95)); border: 1px solid rgba(255,255,255,0.1);
+    box-shadow: 0 8px 24px rgba(0,0,0,0.55); opacity: 0; transform: translateY(10px);
+    transition: opacity 0.4s ease, transform 0.4s ease; pointer-events: none; }
+  .cs-banner.show { opacity: 1; transform: translateY(0); }
+  .cs-banner .cbn-label { position: absolute; top: 5px; left: 13px; font-size: 8px; font-weight: 700; letter-spacing: 2px; color: #7d828c; text-transform: uppercase; }
+  .cs-banner .cbn-imgs { position: absolute; left: 14px; right: 14px; top: 18px; bottom: 10px; }
+  .cs-banner .cbn-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; opacity: 0; transition: opacity 0.6s ease; }
+  .cs-banner .cbn-img.active { opacity: 1; }
+</style>
+</head>
+<body>
+
+<div class="cs-head">
+  <div class="scorebar">
+    <div id="cs-event" class="event-title hidden"></div>
+    <div class="topbar">
+      <div class="team t-ct">
+        <img id="ct-logo" class="tlogo" alt="">
+        <div class="team-mid">
+          <span class="nm" id="ct-name">TEAM A</span>
+          <div class="cs-series ct" id="series-ct"></div>
+        </div>
+        <span class="sc" id="ct-score">0</span>
+        <div class="fuse" id="fuse-ct"></div>
+      </div>
+      <div class="mid" id="cs-mid">
+        <span class="cs-map" id="cs-map"></span>
+        <div class="bombrow">
+        <div class="bombvis" id="cs-bombvis">
+          <!-- Authentic CS2 C4 icon — shown while the bomb is planted -->
+          <svg class="bomb-ic ic-bomb" viewBox="0 0 32 32" aria-hidden="true"><path fill="currentColor" fill-rule="evenodd" clip-rule="evenodd" d="M18.304 7.498l-.101-3.303v-.284c0-.287.026-.849-.083-1.034-.109-.184-.454-.478-.835-.383a.741.741 0 00-.55.566l-.017.983c-.057.264-.033.622-.033.901v.317c-.037.173.025.423-.017.616-.038.173.024.424-.017.618-.06.275-.036.697-.034 1.001h1.687zm-7.207-.718c.115.221.304.462.367.718h1.902c-.039-.115-.125-.206-.184-.301-.126-.203-.245-.405-.367-.601-.355-.564-.684-1.144-1.034-1.701-.211-.334-.343-.695-.884-.7-.052.036-.127.032-.184.066-.147.087-.332.219-.401.384-.158.38.074.732.218.968.225.37.366.783.567 1.167zm12.677-2.585c-.146.114-.327.163-.434.316-.176.254-.303.523-.467.784-.259.409-.543.824-.801 1.234l-.45.717c-.049.077-.066.161-.134.217v.034c.647.002 1.396-.053 1.835.149.177-.363.377-.728.584-1.067.119-.195.181-.404.301-.6.146-.241.347-.521.433-.802.173-.555-.375-.995-.867-.982zm2.853 7.607c.592-.367 1.198-.708 1.785-1.067.248-.153.524-.258.75-.435.273-.213.293-.813.084-1.101-.134-.185-.408-.204-.734-.2-.043.032-.097.025-.149.05-.144.064-.301.155-.45.233-.488.254-.994.483-1.485.751-.283.154-.587.296-.884.45-.111.058-.22.152-.351.184v1.985c.183-.051.336-.191.484-.284.315-.196.64-.374.95-.566zm-3.386 11.026c.262-.394.2-1.128.2-1.785v-9.241c0-.824.093-1.753-.367-2.118-.48-.383-1.046-.301-1.885-.301H2.123l-.334.099c-.283.123-.547.415-.668.701-.145.344-.065 1.299-.065 1.785v10.358c.079.325.281.613.517.784.424.308.901.25 1.617.25h18.083c.994.001 1.556.086 1.968-.532zM8.444 18.157c-.132.213-.282.446-.417.666-.139.231-.238.583-.417.768v.034h1.234v-1.619c.05-.228.052-.48.051-.75h-.05c-.136.283-.233.631-.401.901z"/></svg>
+          <!-- Wire-cutters / defuse tool — shown while defusing -->
+          <svg class="bomb-ic ic-defuse" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="12" cy="13.2" r="1.5" fill="currentColor" stroke="none"/>
+            <path d="M11 11.8 4.4 5.2"/>
+            <path d="M13 11.8 19.6 5.2"/>
+            <path d="M11.2 14.5 7 21"/>
+            <path d="M12.8 14.5 17 21"/>
+          </svg>
+          <div class="bomb-bar">
+            <div class="bomb-bar-fill" id="bomb-bar-fill"></div>
+            <div class="bomb-defuse-fill" id="bomb-defuse-fill"></div>
+          </div>
+        </div>
+        <span class="timer" id="cs-timer">--</span>
+        </div>
+        <span class="roundlbl" id="cs-round">WARMUP</span>
+      </div>
+      <div class="team t-t">
+        <span class="sc" id="t-score">0</span>
+        <div class="team-mid">
+          <span class="nm" id="t-name">TEAM B</span>
+          <div class="cs-series t" id="series-t"></div>
+        </div>
+        <img id="t-logo" class="tlogo" alt="">
+        <div class="fuse" id="fuse-t"></div>
+      </div>
+    </div>
+    <!-- Bomb result flash: explosion / "BOMB DEFUSED", auto-clears after ~2s -->
+    <div id="bomb-flash" class="bomb-flash"></div>
+    <!-- Light that travels around the border (left → bottom → right), pauses, repeats -->
+    <svg class="head-beam" viewBox="0 0 1000 100" preserveAspectRatio="none" aria-hidden="true">
+      <path class="hb-base" d="M 2 2 L 2 86 Q 2 99 15 99 L 985 99 Q 998 99 998 86 L 998 2" pathLength="100"></path>
+      <path class="hb-beam" d="M 2 2 L 2 86 Q 2 99 15 99 L 985 99 Q 998 99 998 86 L 998 2" pathLength="100"></path>
+    </svg>
+  </div>
+</div>
+
+<!-- Round history — separate overlay, toggled show/hide from the control panel (animated) -->
+<div id="round-dots" class="round-dots"></div>
+
+<!-- Kill feed (top-right): inferred from GSI counter diffs -->
+<div id="cs-killfeed" class="cs-killfeed"></div>
+
+<!-- Buy / freeze phase board: full-width loadout+economy lower-third during freezetime -->
+<div id="cs-buy" class="cs-buy"></div>
+
+<!-- Live alive-player count: pops up briefly on a death -->
+<div id="cs-alive" class="cs-alive hidden">
+  <span class="av-num av-num-ct" id="alive-ct">5</span>
+  <span class="av-vs">VS</span>
+  <span class="av-num av-num-t" id="alive-t">5</span>
+</div>
+
+<!-- Radar: map overview + live player/bomb positions (needs observer GSI) -->
+<div id="cs-radar" class="cs-radar hidden">
+  <!-- radar-world holds the map + all markers and is zoomed/panned as one to follow the action -->
+  <div id="radar-world" class="radar-world">
+    <img id="radar-img" class="radar-img" alt="">
+    <div id="radar-sites" class="radar-sites"></div>
+    <div id="radar-fx" class="radar-fx"></div>
+    <div id="radar-dots" class="radar-dots"></div>
+  </div>
+</div>
+
+<div class="col col-ct">
+  <div class="ehead ehead-ct" id="ehead-ct">
+    <div class="econ econ-ct">
+      <img class="econ-logo" id="econ-logo-ct" alt="">
+      <span class="econ-team" id="econ-team-ct">TEAM</span>
+      <span class="econ-val" id="econ-val-ct">$0</span>
+    </div>
+    <div class="eutil eutil-ct" id="eutil-ct"></div>
+  </div>
+  <div id="players-ct" class="players ct"></div>
+</div>
+<div class="col col-t">
+  <div class="ehead ehead-t" id="ehead-t">
+    <div class="econ econ-t">
+      <img class="econ-logo" id="econ-logo-t" alt="">
+      <span class="econ-team" id="econ-team-t">TEAM</span>
+      <span class="econ-val" id="econ-val-t">$0</span>
+    </div>
+    <div class="eutil eutil-t" id="eutil-t"></div>
+  </div>
+  <div id="players-t" class="players t"></div>
+</div>
+
+<div id="focus" class="focus hidden"></div>
+
+<!-- Transient + conditional broadcast callouts -->
+<div id="cs-announce" class="cs-announce hidden"></div>
+<div id="cs-clutch" class="cs-clutch hidden"></div>
+<div id="cs-phase" class="cs-phase hidden"></div>
+
+<!-- Sellable sponsor rail (driven by the active client brand kit) -->
+<div id="cs-sponsors" class="cs-sponsors hidden">
+  <span class="sp-label" id="sp-label">PARTNERS</span>
+  <div class="sp-slot" id="sp-slot"></div>
+</div>
+
+<!-- Sponsor banner (bottom-right) — producer-controlled, rotating images from full_state.banner -->
+<div id="cs-banner" class="cs-banner">
+  <span class="cbn-label">SPONSORED BY</span>
+  <div class="cbn-imgs" id="cs-banner-imgs"></div>
+</div>
+
+<div id="preview-badge" class="preview-badge">● PREVIEW — waiting for CS2 (GSI)</div>
+
+<!-- Full-screen corner red pulse, fired briefly when the bomb is planted -->
+<div id="corner-pulse"></div>
+
+<!-- Dev event tester (browser only — hidden inside OBS browser sources) -->
+<div id="dev-panel">
+  <div class="dh"><b>DEV · EVENT TESTER</b><button id="dev-collapse" title="Collapse">▾</button></div>
+  <div class="db">
+    <button data-dev="plant" class="wide boom">💣 Plant → drain → DETONATE</button>
+    <button data-dev="defuse" class="wide cut">✂ Defuse → grey load → DEFUSED</button>
+    <button data-dev="explode" class="boom">Explosion flash</button>
+    <button data-dev="defused" class="cut">Defuse flash</button>
+    <button data-dev="flash">Blind players</button>
+    <button data-dev="fire">Fire players</button>
+    <button data-dev="smoke">Smoke players</button>
+    <button data-dev="status-off" class="reset">Clear status</button>
+    <button data-dev="buy" class="wide">🛒 Buy / Freeze phase</button>
+    <button data-dev="banner" class="wide">📢 Toggle sponsor banner</button>
+    <button data-dev="reset" class="wide reset">Reset to live</button>
+  </div>
+</div>
+<button id="dev-fab" title="Open dev tester">DEV ▸</button>
+
+<script>
+function el(id){ return document.getElementById(id); }
+
+/* Distinct weapon silhouettes by category (clean inline SVG, no external assets) */
+const WEAPON_ICONS = {
+  rifle:   '<rect x="2" y="9" width="42" height="4" rx="1"/><rect x="44" y="10" width="13" height="2"/><path d="M19 13l-3 8h6l1-8z"/><path d="M31 13l-1 6h4l1-6z"/><rect x="2" y="8" width="6" height="6" rx="1"/>',
+  sniper:  '<rect x="2" y="10" width="58" height="3" rx="1"/><rect x="24" y="5" width="15" height="4" rx="1"/><path d="M21 13l-1 6h4l1-6z"/><rect x="2" y="9" width="6" height="5" rx="1"/>',
+  smg:     '<rect x="8" y="8" width="28" height="5" rx="1"/><rect x="36" y="9" width="11" height="3"/><rect x="18" y="13" width="4" height="8" rx="1"/><path d="M29 13l-1 6h4l1-6z"/>',
+  pistol:  '<rect x="14" y="6" width="26" height="5" rx="1"/><rect x="40" y="7" width="4" height="3"/><path d="M18 11l-3 9h6l2-9z"/>',
+  shotgun: '<rect x="2" y="8" width="50" height="4" rx="1"/><rect x="14" y="12" width="13" height="3" rx="1"/><rect x="52" y="7" width="9" height="6" rx="1"/>',
+  lmg:     '<rect x="8" y="7" width="34" height="6" rx="1"/><rect x="42" y="9" width="17" height="2"/><rect x="16" y="13" width="17" height="9" rx="1"/>',
+  knife:   '<path d="M4 17L42 4l4 5L12 19z"/><rect x="40" y="6" width="12" height="4" rx="2"/>',
+  taser:   '<rect x="14" y="7" width="20" height="5" rx="1"/><path d="M18 12l-3 8h6l2-8z"/><rect x="34" y="6" width="11" height="1.5"/><rect x="34" y="11" width="11" height="1.5"/>',
+  grenade: '<circle cx="32" cy="14" r="7"/><rect x="29" y="3" width="6" height="6" rx="1"/>',
+  c4:      '<rect x="16" y="6" width="30" height="13" rx="2"/><rect x="22" y="9" width="18" height="7" rx="1" fill="rgba(0,0,0,0.4)"/>'
+};
+
+function weaponCategory(n){
+  n = (n || '').toUpperCase();
+  if (!n) return null;
+  if (/AWP|SSG|SCOUT|G3SG|SCAR20/.test(n)) return 'sniper';
+  if (/AK47|M4A1|M4A4|GALIL|FAMAS|AUG|SG55|SG556|SG553/.test(n)) return 'rifle';
+  if (/MAC10|MP9|MP7|MP5|UMP|P90|BIZON|^PP/.test(n)) return 'smg';
+  if (/NOVA|XM1014|SAWED|MAG7/.test(n)) return 'shotgun';
+  if (/M249|NEGEV/.test(n)) return 'lmg';
+  if (/KNIFE|BAYONET|KARAMBIT|DAGGER|KARA/.test(n)) return 'knife';
+  if (/ZEUS|TASER/.test(n)) return 'taser';
+  if (/HEGREN|FLASH|SMOKE|MOLOTOV|INC|DECOY|GRENADE/.test(n)) return 'grenade';
+  if (/C4/.test(n)) return 'c4';
+  if (/DEAGLE|GLOCK|USP|HKP2000|P2000|P250|FIVESEVEN|TEC9|CZ75|ELITE|DUAL|REVOLVER|R8/.test(n)) return 'pistol';
+  return 'rifle';
+}
+
+function weaponIconSpan(name, cls){
+  const cat = weaponCategory(name);
+  const inner = WEAPON_ICONS[cat] || WEAPON_ICONS.rifle;
+  const s = document.createElement('span');
+  s.className = cls || 'wicon';
+  s.innerHTML = '<svg viewBox="0 0 64 24" width="30" height="12" fill="currentColor">' + inner + '</svg>';
+  return s;
+}
+
+// Real weapon artwork (bundled SVGs); falls back to the silhouette if missing.
+function weaponImg(weapon, h, cls){
+  const span = document.createElement('span');
+  span.className = 'wimg' + (cls ? ' ' + cls : '');
+  if (!weapon) return span;
+  const img = document.createElement('img');
+  img.src = '/assets/weapons/' + weapon + '.svg';
+  img.alt = '';
+  img.style.height = (h || 16) + 'px';
+  // Square-box icons (grenades) get a fixed width + contain so they're all the same size,
+  // regardless of each SVG's own aspect ratio / padding.
+  if (cls && cls.indexOf('nade') !== -1) { img.style.width = (h || 16) + 'px'; img.style.objectFit = 'contain'; }
+  img.addEventListener('error', () => { span.innerHTML = ''; span.appendChild(weaponIconSpan(weapon, 'wicon')); });
+  span.appendChild(img);
+  return span;
+}
+
+// Utility icon (defuse kit, C4, armor…) from the bundled CS icon set
+function utilImg(name, h, cls){
+  const img = document.createElement('img');
+  img.className = 'uimg ' + (cls || '');
+  img.src = '/assets/csgo/' + name + '.svg';
+  img.alt = '';
+  img.style.height = (h || 14) + 'px';
+  return img;
+}
+
+// Status-effect pips (blinded / on fire / smoked)
+const FX_ICONS = {
+  flash: '<svg viewBox="0 0 24 24" width="11" height="11" fill="currentColor"><path d="M12 1l2.2 6.3L20.8 5l-4 5.6 6.2 1.4-6.2 1.4 4 5.6-6.6-2.3L12 23l-2.2-6.3L3.2 19l4-5.6L1 12l6.2-1.4-4-5.6 6.6 2.3z"/></svg>',
+  fire:  '<svg viewBox="0 0 24 24" width="11" height="11" fill="currentColor"><path d="M13 2c1 5-3 6-3 9 0 1 1 2 2 2s2-1 2-3c2 2 3 4 3 6a6 6 0 11-12 0c0-4 3-6 5-9 1-1.5 2-3 1-5z"/></svg>',
+  smoke: '<svg viewBox="0 0 24 24" width="11" height="11" fill="currentColor"><path d="M6 19a4 4 0 01-1-7.9A5 5 0 0115 9.5a3.5 3.5 0 011.5 6.7V19z" opacity="0.95"/><circle cx="8" cy="13" r="2.2"/><circle cx="13" cy="12" r="2.6"/><circle cx="16" cy="14" r="1.8"/></svg>'
+};
+const FX_TITLE = { flash: 'Blinded', fire: 'On fire', smoke: 'In smoke' };
+function fxIcon(kind){
+  const s = document.createElement('span'); s.className = 'fx ' + kind;
+  s.title = FX_TITLE[kind] || '';
+  s.innerHTML = FX_ICONS[kind] || '';
+  return s;
+}
+
+// Series win dots under each team name — one per map needed to win the Bo-N (control-panel driven).
+function renderSeries(){
+  const need = Math.max(1, Math.floor(bestOf / 2) + 1);
+  [['ct', 'blue'], ['t', 'orange']].forEach(([key, side]) => {
+    const wrap = el('series-' + key); if (!wrap) return;
+    const won = Math.min(need, series[side] || 0);
+    const sig = need + '-' + won;
+    if (wrap.dataset.sig === sig) return;   // only rebuild on change
+    wrap.dataset.sig = sig;
+    wrap.innerHTML = '';
+    // CT fills inside→out (from the name edge); T mirrors it, filling outside→in (from the screen edge).
+    for (let i = 0; i < need; i++){
+      const filled = key === 't' ? (i >= need - won) : (i < won);
+      const d = document.createElement('span'); d.className = 'sdot' + (filled ? ' won' : ''); wrap.appendChild(d);
+    }
+  });
+}
+
+// Overtime label: OT1 → OVERTIME, OT2 → DOUBLE OVERTIME, …
+const OT_NAMES = ['', 'OVERTIME', 'DOUBLE OVERTIME', 'TRIPLE OVERTIME', 'QUADRUPLE OVERTIME', 'QUINTUPLE OVERTIME'];
+function otLabel(n){ return n <= 0 ? '' : (OT_NAMES[n] || (n + 'X OVERTIME')); }
+
+// Grenade categories tracked in the team utility tally (molotov + incgrenade = one "fire" group).
+const NADE_CATS = [
+  { key: 'he',    icon: 'hegrenade',    names: ['hegrenade', 'HE'] },
+  { key: 'flash', icon: 'flashbang',    names: ['flashbang', 'FB'] },
+  { key: 'smoke', icon: 'smokegrenade', names: ['smokegrenade', 'SM'] },
+  { key: 'fire',  icon: 'molotov',      names: ['molotov', 'incgrenade', 'MO', 'INC'] },
+  { key: 'decoy', icon: 'decoy',        names: ['decoy', 'DC'] }
+];
+function teamNadeCounts(side){
+  const counts = {}; NADE_CATS.forEach(c => counts[c.key] = 0);
+  side.forEach(p => (p.nades || []).forEach(n => {
+    const cat = NADE_CATS.find(c => c.names.includes(n));
+    if (cat) counts[cat.key]++;
+  }));
+  return counts;
+}
+
+// Team header: logo + name + total team cash, plus a utility tally (grenades held by the team).
+function renderEcon(players){
+  const list = players || [];
+  [['ct', 'CT', 'blue'], ['t', 'T', 'orange']].forEach(([key, team, side2]) => {
+    const side = list.filter(p => p.team === team);
+    const head = el('ehead-' + key);
+    if (!side.length){ head.style.display = 'none'; return; }
+    head.style.display = '';
+
+    const money = side.reduce((s, p) => s + (p.money || 0), 0);
+    el('econ-val-' + key).textContent = '$' + money.toLocaleString();   // total team cash
+    el('econ-team-' + key).textContent = (appTeams[side2] && appTeams[side2].name) || team;
+
+    // Team logo (from the active brand/teams; falls back to the CS2 logo)
+    const logo = el('econ-logo-' + key);
+    const realLogo = appTeams[side2] && appTeams[side2].logo;
+    const url = realLogo || CS_LOGO_FALLBACK;
+    if (logo.getAttribute('src') !== url) logo.src = url;
+    logo.style.display = '';
+    logo.classList.toggle('cs-fallback', !realLogo);
+
+    // Utility tally — one icon + count per grenade type held; rebuilt only when the totals change.
+    const util = el('eutil-' + key);
+    const counts = teamNadeCounts(side);
+    const sig = NADE_CATS.map(c => counts[c.key]).join(',');
+    if (util.dataset.sig !== sig){
+      util.dataset.sig = sig;
+      util.innerHTML = '';
+      NADE_CATS.forEach(c => {
+        if (!counts[c.key]) return;             // only show types the team is holding
+        const item = document.createElement('div'); item.className = 'eu-item';
+        item.appendChild(weaponImg(nadeSvg(c.icon), 24, 'nade'));
+        const n = document.createElement('span'); n.className = 'eu-ct'; n.textContent = '×' + counts[c.key];
+        item.appendChild(n);
+        util.appendChild(item);
+      });
+    }
+  });
+}
+
+function fmtClock(sec){
+  if (sec === null || sec === undefined || isNaN(sec)) return '--';
+  sec = Math.max(0, Math.floor(sec));
+  const m = Math.floor(sec/60), s = sec%60;
+  return m + ':' + String(s).padStart(2,'0');
+}
+
+// Friendly map names; falls back to stripping the de_/cs_ prefix.
+const MAP_NAMES = {
+  de_dust2:'DUST II', de_mirage:'MIRAGE', de_inferno:'INFERNO', de_nuke:'NUKE',
+  de_overpass:'OVERPASS', de_vertigo:'VERTIGO', de_ancient:'ANCIENT', de_anubis:'ANUBIS',
+  de_train:'TRAIN', de_cache:'CACHE', de_cbble:'COBBLESTONE', cs_office:'OFFICE', cs_italy:'ITALY'
+};
+function mapLabel(n){
+  if (!n) return '';
+  return MAP_NAMES[n] || n.replace(/^(de|cs)_/, '').replace(/_/g, ' ').toUpperCase();
+}
+
+let appTeams = { blue: { name: 'TEAM A', logo: null }, orange: { name: 'TEAM B', logo: null } };
+const CS_LOGO_FALLBACK = '/assets/games/cs2.svg';   // shown when a team has no logo set
+let eventName = '';
+let bestOf = 5;   // series format (Bo-N), set from the control panel via full_state
+let series = { blue: 1, orange: 2 };   // maps won in the series (control-panel driven, like RL); demo values until full_state
+let showHistory = false;   // round-history overlay visibility (control-panel toggle)
+let builtinRadar = true;   // true = our built-in auto-zoom radar (default), false = external (boltobserv)
+
+// Active client brand kit (from full_state.brand). DEMO value previews the sponsor rail.
+const DEMO_BRAND = { name: 'NAMELESS ESPORTS', logo: null, color: null, accent: null, font: null,
+  sponsorLabel: 'PARTNERS', sponsorInterval: 4,
+  sponsors: [{ name: 'RED BULL' }, { name: 'LOGITECH G' }, { name: 'HYPERX' }] };
+let brand = DEMO_BRAND;
+let sponsorIdx = 0;
+let sponsorTimer = null;
+let lastSponsorSig = '';       // currently-shown sponsor → rebuild only when it changes (no flicker)
+let lastSponsorListSig = '';   // the sponsor set → restart rotation only when the list changes
+
+// Pop a number element when its value changes.
+let prevScore = {};
+let prevAliveN = {};
+function bump(id){ const e = el(id); if (!e) return; e.classList.remove('bump'); void e.offsetWidth; e.classList.add('bump'); }
+
+const DEFUSE_TIME = 10;   // seconds without a kit (5s with kit, detected via bomb.player → hasKit)
+let defuseStart = null;   // ms timestamp when the current defuse began
+function nowMs(){ return Date.now(); }
+
+// Bomb result flash (explosion / "BOMB DEFUSED") across the top overlay, fired on state change.
+let prevBombState = '';
+let bombFlashTimer = null;
+let bombFlashActive = false;   // keep team-colour bars hidden until the banner finishes
+function clearFused(){ document.querySelectorAll('.team.fused').forEach(t => t.classList.remove('fused')); }
+function triggerBombFlash(kind){
+  const f = el('bomb-flash'); if (!f) return;
+  const sb = f.parentElement;   // .scorebar — fade its content while the banner plays
+  if (bombFlashTimer) { clearTimeout(bombFlashTimer); bombFlashTimer = null; }
+  bombFlashActive = true;
+  f.className = 'bomb-flash';   // reset any prior run
+  f.innerHTML = '<span class="bf-label">' + (kind === 'explode' ? 'BOMB DETONATED' : 'BOMB DEFUSED') + '</span>';
+  void f.offsetWidth;          // force reflow so the CSS animation restarts
+  f.classList.add('show', kind);
+  if (sb) sb.classList.add('flashing');
+  bombFlashTimer = setTimeout(() => {
+    f.classList.remove('show', 'explode', 'defused'); f.innerHTML = '';
+    if (sb) sb.classList.remove('flashing');
+    bombFlashActive = false;
+    clearFused();   // fade the team-colour underlines back in now the animation is done
+  }, kind === 'explode' ? 1700 : 2000);
+}
+// Corner red pulse, fired briefly on plant.
+let cornerTimer = null;
+function triggerCornerPulse(){
+  const c = el('corner-pulse'); if (!c) return;
+  if (cornerTimer) { clearTimeout(cornerTimer); cornerTimer = null; }
+  c.classList.remove('show'); void c.offsetWidth; c.classList.add('show');
+  cornerTimer = setTimeout(() => { c.classList.remove('show'); }, 4300);
+}
+function stopCornerPulse(){
+  if (cornerTimer) { clearTimeout(cornerTimer); cornerTimer = null; }
+  const c = el('corner-pulse'); if (c) c.classList.remove('show');
+}
+// Ease-out so the fuse moves fast at first and crawls in the final moments (anticipation).
+function easeOutCubic(x){ x = Math.max(0, Math.min(1, x)); return 1 - Math.pow(1 - x, 3); }
+// Team-underline fuses toward centre. mode 'planted' = red drains, 'defuse' = green grows,
+// 'off' hides them. While active the team-colour accent is hidden (.fused).
+function setFuse(width, mode, danger){
+  [el('fuse-ct'), el('fuse-t')].forEach(f => {
+    if (!f) return;
+    const team = f.parentElement;
+    if (mode === 'off' || width <= 0) {
+      f.style.display = 'none'; f.style.width = '0%'; f.classList.remove('danger', 'defuse');
+      // Keep the team colour hidden while the detonate/defuse banner plays; the flash
+      // timeout restores it. Otherwise (round ended without a result) restore immediately.
+      if (team && !bombFlashActive) team.classList.remove('fused');
+      return;
+    }
+    f.style.display = 'block'; f.style.width = width + '%';
+    f.classList.toggle('defuse', mode === 'defuse');
+    f.classList.toggle('danger', !!danger && mode !== 'defuse');
+    if (team) team.classList.add('fused');
+  });
+}
+function handleBombResult(stateNow){
+  if (stateNow === prevBombState) return;
+  if (stateNow === 'exploded') triggerBombFlash('explode');
+  else if (stateNow === 'defused') triggerBombFlash('defused');
+  else if (stateNow === 'planted') triggerCornerPulse();
+  prevBombState = stateNow;
+}
+
+const DEMO = {
+  connected: false,
+  map: { name: 'de_mirage', phase: 'live' },
+  ct: { score: 16 }, t: { score: 15 },
+  round: { number: 31, phase: 'live', bomb: 'planted' },
+  phaseEndsIn: 95, bomb: { state: 'planted', countdown: 27, pos: { x:-200, y:-700 } }, phase: 'live',
+  grenades: [
+    { type:'smoke',   x:-650, y:-350 },
+    { type:'smoke',   x:300,  y:-900 },
+    { type:'inferno', x:150,  y:-1450 },
+    { type:'flashbang', x:-1100, y:-650 },
+    { type:'frag',    x:-300, y:-1050 }
+  ],
+  roundHistory: [
+    {round:1,winner:'T',method:'bomb'},{round:2,winner:'CT',method:'elimination'},{round:3,winner:'CT',method:'defuse'},
+    {round:4,winner:'T',method:'time'},{round:5,winner:'CT',method:'elimination'},{round:6,winner:'CT',method:'bomb'},
+    {round:7,winner:'T',method:'elimination'},{round:8,winner:'CT',method:'elimination'},{round:9,winner:'T',method:'time'},
+    {round:10,winner:'CT',method:'defuse'},{round:11,winner:'T',method:'elimination'},{round:12,winner:'T',method:'bomb'}
+  ],
+  observed: { steamid:'p5', name:'Player 5', team:'CT', health:84, armor:50, helmet:true, money:1650, kills:17, assists:1, deaths:7, alive:true, weapon:'m4a1_silencer', clip:15, reserve:90, nades:['smokegrenade','flashbang'], hasKit:false, hasBomb:false },
+  players: [
+    { steamid:'p1', name:'Player 1', team:'CT', health:100, money:4500, equip:4700, kills:14, assists:3, deaths:8, alive:true,  weapon:'ak47',          nades:['hegrenade','smokegrenade'], hasKit:true,  hasBomb:false, pos:{x:-1200,y:-200}, fwd:{x:1,y:0} },
+    { steamid:'p2', name:'Player 2', team:'CT', health:72,  money:1200, equip:4200, kills:11, assists:5, deaths:9, alive:true,  weapon:'m4a1',          nades:['flashbang'],      hasKit:false, hasBomb:false, flashed:210, pos:{x:-900,y:100}, fwd:{x:0.6,y:-0.8} },
+    { steamid:'p3', name:'Player 3', team:'CT', health:0,   money:800,  equip:0,    kills:8,  assists:2, deaths:11, alive:false, weapon:'',             nades:[],          hasKit:false, hasBomb:false },
+    { steamid:'p4', name:'Player 4', team:'CT', health:35,  money:300,  equip:4100, kills:6,  assists:7, deaths:10, alive:true,  weapon:'deagle',       nades:[],          hasKit:true,  hasBomb:false, smoked:200, pos:{x:-1500,y:-600}, fwd:{x:0,y:1} },
+    { steamid:'p5', name:'Player 5', team:'CT', health:84,  money:1650, equip:4750, kills:17, assists:1, deaths:7, alive:true,  weapon:'m4a1_silencer', nades:['smokegrenade','flashbang'], hasKit:false, hasBomb:false, pos:{x:-700,y:-400}, fwd:{x:0.7,y:0.7} },
+    { steamid:'p6', name:'Player 6', team:'T', health:100, money:3200, equip:2800, kills:13, assists:4, deaths:9, alive:true,  weapon:'ak47',           nades:['molotov'],      hasKit:false, hasBomb:true,  pos:{x:200,y:-1500}, fwd:{x:-1,y:0} },
+    { steamid:'p7', name:'Player 7', team:'T', health:88,  money:900,  equip:2200, kills:9,  assists:6, deaths:10, alive:true,  weapon:'galilar',        nades:['hegrenade'],      hasKit:false, hasBomb:false, burning:190, pos:{x:-100,y:-1200}, fwd:{x:-0.7,y:0.7} },
+    { steamid:'p8', name:'Player 8', team:'T', health:0,   money:450,  equip:0,    kills:7,  assists:3, deaths:12, alive:false, weapon:'',              nades:[],          hasKit:false, hasBomb:false },
+    { steamid:'p9', name:'Player 9', team:'T', health:54,  money:2100, equip:2900, kills:15, assists:2, deaths:8, alive:true,  weapon:'awp',            nades:['smokegrenade'],      hasKit:false, hasBomb:false, pos:{x:400,y:-1000}, fwd:{x:0,y:-1} },
+    { steamid:'p10', name:'Player 10', team:'T', health:100, money:6000, equip:2400, kills:10, assists:5, deaths:9, alive:true,  weapon:'m4a1',           nades:['hegrenade','flashbang'], hasKit:false, hasBomb:false, pos:{x:-300,y:-1700}, fwd:{x:0.9,y:-0.3} }
+  ]
+};
+DEMO.players.forEach((p, i) => { if (p.slot == null) p.slot = i; });   // demo spectate slots → radar numbers
+DEMO.killfeed = [   // preview the kill feed (live feed comes from the server)
+  { killer:'Player 9', killerTeam:'T',  victim:'Player 3', victimTeam:'CT', weapon:'awp',   hs:false, ts: 1 },
+  { killer:'Player 1', killerTeam:'CT', victim:'Player 8', victimTeam:'T',  weapon:'ak47',  hs:true,  ts: 2 },
+  { killer:'Player 5', killerTeam:'CT', victim:'Player 6', victimTeam:'T',  weapon:'m4a1',  hs:false, ts: 3 }
+];
+
+// Shrink a team name's font until it fits its panel (no mid-name cut-off)
+function fitName(elx, text){
+  elx.textContent = (text || '').toUpperCase();
+  let size = 30;
+  elx.style.fontSize = size + 'px';
+  let guard = 0;
+  while (elx.scrollWidth > elx.clientWidth && size > 14 && guard++ < 40){
+    size -= 1;
+    elx.style.fontSize = size + 'px';
+  }
+}
+
+function setTeamPanel(side, team, score){
+  fitName(el(side + '-name'), team.name || (side === 'ct' ? 'TEAM A' : 'TEAM B'));
+  el(side + '-score').textContent = score;
+  const logo = el(side + '-logo');
+  logo.src = team.logo || CS_LOGO_FALLBACK; logo.style.display = '';
+  logo.classList.toggle('cs-fallback', !team.logo);
+}
+
+// ── Player rows are kept alive across ticks (keyed by steamid) and updated in
+//    place, so HP drains and deaths animate via CSS transitions. ──
+const rowReg = new Map(); // steamid -> { el, side, wasAlive, refs }
+
+function createRow(){
+  const el = document.createElement('div'); el.className = 'prow';
+  const body = document.createElement('div'); body.className = 'pbody';
+  const info = document.createElement('div'); info.className = 'pinfo';
+  // Line 1: name + bomb-carrier badge + live-status pips
+  const l1 = document.createElement('div'); l1.className = 'pline1';
+  const name = document.createElement('div'); name.className = 'pname';
+  const bomb = document.createElement('div'); bomb.className = 'pbomb';
+  const status = document.createElement('div'); status.className = 'pstatus';
+  l1.appendChild(name); l1.appendChild(bomb); l1.appendChild(status);
+  // Line 2: K/D (kill icon + skull icon) + money — icons built once, numbers update each tick
+  const sub = document.createElement('div'); sub.className = 'psub';
+  const kad = document.createElement('div'); kad.className = 'pkad';
+  const kadK = document.createElement('span');
+  const kadSkull = document.createElement('span'); kadSkull.className = 'kad-skull'; kadSkull.innerHTML = DEATH_SVG;
+  const kadD = document.createElement('span');
+  kad.appendChild(utilImg('elimination', 16, 'kad-ic')); kad.appendChild(kadK);
+  kad.appendChild(kadSkull); kad.appendChild(kadD);
+  const money = document.createElement('div'); money.className = 'pmoney';
+  sub.appendChild(kad); sub.appendChild(money);
+  info.appendChild(l1); info.appendChild(sub);
+  const wpn = document.createElement('div'); wpn.className = 'pwpn';   // loadout
+  body.appendChild(info); body.appendChild(wpn);
+  const hpbox = document.createElement('div'); hpbox.className = 'hpbox';
+  const hpbar = document.createElement('div'); hpbar.className = 'hpbar';
+  const hpfill = document.createElement('div'); hpfill.className = 'hpfill'; hpbar.appendChild(hpfill);
+  // Status-effect layer (flashed / on fire / smoked) — animated tint BEHIND the card content.
+  const fx = document.createElement('div'); fx.className = 'pfx';
+  // Condition icon — sits just left of the HP box while the player is affected.
+  const cond = document.createElement('div'); cond.className = 'pcond';
+  // fx first → behind; body/HP carry z-index so the text stays crisp over the tint.
+  el.appendChild(fx); el.appendChild(body); el.appendChild(cond); el.appendChild(hpbox); el.appendChild(hpbar);
+  return { el, side: '', wasAlive: true, refs: { hpbox, name, money, status, kadK, kadD, wpn, hpfill, bomb, fx, cond } };
+}
+
+function updateRow(entry, p, activeId, number){
+  const { el, refs } = entry;
+  const dead = !p.alive;
+  el.classList.toggle('dead', dead);
+  el.classList.toggle('active', !!activeId && p.steamid === activeId && !dead);
+  if (entry.wasAlive && dead) { el.classList.remove('just-died'); void el.offsetWidth; el.classList.add('just-died'); }
+  if (!dead) el.classList.remove('just-died');
+  entry.wasAlive = p.alive;
+
+  refs.hpbox.textContent = dead ? '☠' : p.health;
+  refs.name.textContent = p.name;
+  refs.money.textContent = '$' + p.money;
+  refs.kadK.textContent = p.kills;
+  refs.kadD.textContent = p.deaths;
+  const hp = Math.max(0, Math.min(100, p.health || 0));
+  refs.hpfill.style.width = (dead ? 0 : hp) + '%';
+  // HP-by-health colouring (warn when low) — applied to bar + number.
+  const hpClass = dead ? '' : hp <= 20 ? 'hp-crit' : hp <= 50 ? 'hp-low' : 'hp-ok';
+  el.classList.remove('hp-ok', 'hp-low', 'hp-crit');
+  if (hpClass) el.classList.add(hpClass);
+
+  // Status FX — a smooth animated tint behind the card + a condition icon left of the HP box
+  // (flashed → fire → smoke priority). Only re-set when it changes (no per-tick churn).
+  const fxState = dead ? '' : (p.flashed || 0) > 120 ? 'flash'
+    : (p.burning || 0) > 0 ? 'fire'
+    : (p.smoked || 0) > 80 ? 'smoke' : '';
+  if (entry.lastFxSig !== fxState){
+    entry.lastFxSig = fxState;
+    refs.fx.className = 'pfx' + (fxState ? ' ' + fxState : '');
+    refs.cond.className = 'pcond' + (fxState ? ' ' + fxState : '');
+    refs.cond.innerHTML = fxState ? FX_ICONS[fxState] : '';
+  }
+
+  // Bomb-carrier badge next to the name (guarded so it doesn't re-create the <img> each tick).
+  const bombSig = (!dead && p.hasBomb) ? '1' : '0';
+  if (entry.lastBombSig !== bombSig){
+    entry.lastBombSig = bombSig;
+    refs.bomb.innerHTML = '';
+    if (bombSig === '1') refs.bomb.appendChild(utilImg('bomb_c4', 18, 'bomb'));
+  }
+
+  // Weapon + full loadout (grenade/kit images, bigger) — only rebuild when it changes.
+  const wpnSig = dead ? 'x' : `${p.weapon}|${(p.nades||[]).join(',')}|${p.hasKit?1:0}`;
+  if (entry.lastWpnSig !== wpnSig){
+    entry.lastWpnSig = wpnSig;
+    refs.wpn.innerHTML = '';
+    if (!dead && p.weapon) refs.wpn.appendChild(weaponImg(p.weapon, 27));
+    if (!dead){
+      const util = document.createElement('div'); util.className = 'putil';
+      (p.nades || []).forEach(n => util.appendChild(weaponImg(nadeSvg(n), 20, 'nade')));
+      if (p.hasKit) util.appendChild(utilImg('shield', 20, 'kit'));
+      if (util.childNodes.length) refs.wpn.appendChild(util);
+    }
+  }
+}
+
+// Normalise a grenade name to its SVG filename — handles both raw GSI names and
+// legacy short-codes (so it works whether or not the server has been restarted).
+const NADE_SVG = {
+  hegrenade:'hegrenade', flashbang:'flashbang', smokegrenade:'smokegrenade',
+  molotov:'molotov', incgrenade:'incgrenade', decoy:'decoy', healthshot:'healthshot',
+  HE:'hegrenade', FB:'flashbang', SM:'smokegrenade', MO:'molotov', INC:'incgrenade', DC:'decoy'
+};
+function nadeSvg(n){ return NADE_SVG[n] || NADE_SVG[(n || '').toUpperCase()] || n; }
+
+// Build a loadout icon row: grenades + defuse kit + bomb, as real images.
+function loadoutIcons(p, h){
+  const util = document.createElement('div'); util.className = 'putil';
+  (p.nades || []).forEach(n => util.appendChild(weaponImg(nadeSvg(n), h, 'nade')));
+  if (p.hasKit)  util.appendChild(utilImg('shield', h, 'kit'));
+  if (p.hasBomb) util.appendChild(utilImg('bomb_c4', h, 'bomb'));
+  return util;
+}
+
+function syncColumn(container, players, side, activeId){
+  players.forEach((p, i) => {
+    let entry = rowReg.get(p.steamid);
+    if (!entry || entry.side !== side){          // new player, or switched sides at half
+      if (entry) entry.el.remove();
+      entry = createRow(); entry.side = side; rowReg.set(p.steamid, entry);
+    }
+    updateRow(entry, p, activeId);
+  });
+  // Reorder ONLY when the order actually changed — re-appending every tick restarts
+  // the row entrance animation in OBS/CEF (looks like flashing).
+  const inOrder = container.children.length === players.length &&
+    players.every((p, i) => container.children[i] === rowReg.get(p.steamid).el);
+  if (!inOrder) players.forEach(p => container.appendChild(rowReg.get(p.steamid).el));
+}
+
+const ROUND_METHOD_ICON = { bomb: 'bomb_c4', defuse: 'shield', elimination: 'elimination', time: 'timer' };
+let prevDotsSig = null;
+
+function renderRoundDots(history){
+  // Only rebuild when the history changes (rebuilding icons every tick = flicker).
+  const sig = (history || []).map(r => r.round + r.winner + r.method).join('|');
+  if (sig === prevDotsSig) return;
+  prevDotsSig = sig;
+  const wrap = el('round-dots'); wrap.innerHTML = '';
+  // Per round: number on top, win-method icon, team-colored bar (who won).
+  (history || []).slice(-30).forEach(r => {
+    const col = document.createElement('div');
+    col.className = 'rg-round';
+    col.title = `Round ${r.round}: ${r.winner} — ${r.method}`;
+
+    const num = document.createElement('div');
+    num.className = 'rg-num';
+    num.textContent = r.round;
+
+    const ic = document.createElement('div');
+    ic.className = 'rg-icon';
+    const iconName = ROUND_METHOD_ICON[r.method];
+    if (iconName) {
+      const img = document.createElement('img');
+      img.src = '/assets/csgo/' + iconName + '.svg';
+      img.alt = r.method;
+      ic.appendChild(img);
+    }
+
+    const bar = document.createElement('div');
+    bar.className = 'rg-bar ' + (r.winner === 'CT' ? 'CT' : 'T');
+
+    col.appendChild(num);
+    col.appendChild(ic);
+    col.appendChild(bar);
+    wrap.appendChild(col);
+  });
+}
+
+// Skull glyph for the "deaths" stat icon.
+const DEATH_SVG = '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M12 2C7.6 2 4 5.4 4 9.6c0 2.4 1.2 4.6 3 6V18a1 1 0 001 1h1.3v-1.8h1.4V19h2.6v-1.8h1.4V19H16a1 1 0 001-1v-2.4c1.8-1.4 3-3.6 3-6C20 5.4 16.4 2 12 2zM8.7 12.6a1.9 1.9 0 110-3.8 1.9 1.9 0 010 3.8zm6.6 0a1.9 1.9 0 110-3.8 1.9 1.9 0 010 3.8z"/></svg>';
+
+// The bottom bar is built ONCE and updated in place (no per-tick <img> churn = no flicker).
+let focusRefs = null;
+function buildFocus(){
+  const f = el('focus'); f.innerHTML = '';
+  const mk = (label, cls) => {
+    const c = document.createElement('div'); c.className = 'fcell ' + cls;
+    const l = document.createElement('div'); l.className = 'lbl'; l.textContent = label;
+    const v = document.createElement('div'); v.className = 'val';
+    c.appendChild(l); c.appendChild(v); return { cell: c, val: v };
+  };
+  const who = document.createElement('div'); who.className = 'who';
+  const hp = mk('HP', 'fhp'); const hpNum = document.createElement('span'); hp.val.appendChild(hpNum);
+  const armor = mk('ARMOR', 'farmor');
+  const armorIc = document.createElement('span'); armorIc.className = 'armor-ic-wrap';
+  const armorNum = document.createElement('span'); armor.val.appendChild(armorIc); armor.val.appendChild(armorNum);
+  const kad = mk('', 'fkad');
+  const killIc = utilImg('elimination', 16, 'kad-ic'); const killN = document.createElement('span');
+  const asN = document.createElement('span'); asN.className = 'kad-as';
+  const skull = document.createElement('span'); skull.className = 'kad-skull'; skull.innerHTML = DEATH_SVG;
+  const deathN = document.createElement('span');
+  kad.val.appendChild(killIc); kad.val.appendChild(killN); kad.val.appendChild(asN);
+  kad.val.appendChild(skull); kad.val.appendChild(deathN);
+  const money = mk('MONEY', 'fmoney'); const moneyN = document.createElement('span'); money.val.appendChild(moneyN);
+  const load = mk('LOADOUT', 'floadout');
+  const fload = document.createElement('div'); fload.className = 'fload'; load.val.appendChild(fload);
+  f.appendChild(who); f.appendChild(hp.cell); f.appendChild(armor.cell);
+  f.appendChild(kad.cell); f.appendChild(money.cell); f.appendChild(load.cell);
+  const bar = document.createElement('div'); bar.className = 'focus-hpbar';
+  const fill = document.createElement('div'); fill.className = 'focus-hpfill'; bar.appendChild(fill); f.appendChild(bar);
+  focusRefs = { who, hpCell: hp.cell, hpNum, armorIc, armorNum, killN, asN, deathN, moneyN,
+    fload, fill, ammoEl: null, lastArmor: '', lastLoad: '' };
+}
+
+// Two-line bar:  row1 = NAME · HP · ARMOR,  row2 = [kill]K · [skull]D · MONEY · loadout
+function renderFocus(o){
+  const f = el('focus');
+  if (!o || !o.name) { f.classList.add('hidden'); return; }
+  if (!focusRefs) buildFocus();
+  const r = focusRefs;
+  f.classList.remove('hidden');
+  f.classList.toggle('ct-side', o.team === 'CT');
+  f.classList.toggle('t-side', o.team !== 'CT');
+
+  r.who.textContent = o.name;
+  r.hpNum.textContent = o.alive ? o.health : '☠';
+  r.hpCell.classList.remove('hp-low', 'hp-crit');
+  if (o.alive && o.health <= 20) r.hpCell.classList.add('hp-crit');
+  else if (o.alive && o.health <= 50) r.hpCell.classList.add('hp-low');
+
+  const armorSig = o.helmet ? 'h' : 'a';
+  if (r.lastArmor !== armorSig){ r.lastArmor = armorSig; r.armorIc.innerHTML = ''; r.armorIc.appendChild(utilImg(o.helmet ? 'armor_helmet' : 'armor', 16, 'farmor-ic')); }
+  r.armorNum.textContent = o.armor;
+
+  r.killN.textContent = o.kills;
+  r.asN.textContent = o.assists ? '+' + o.assists : '';
+  r.deathN.textContent = o.deaths;
+  r.moneyN.textContent = '$' + o.money;
+
+  // Loadout: rebuild weapon/grenade images only when they change; ammo text updates each tick.
+  const loadSig = `${o.weapon}|${(o.nades||[]).join(',')}|${o.hasKit?1:0}|${o.hasBomb?1:0}`;
+  if (r.lastLoad !== loadSig){
+    r.lastLoad = loadSig;
+    r.fload.innerHTML = '';
+    if (o.weapon) r.fload.appendChild(weaponImg(o.weapon, 24));
+    const ammo = document.createElement('span'); ammo.className = 'fammo'; r.fload.appendChild(ammo); r.ammoEl = ammo;
+    const util = loadoutIcons(o, 16);
+    if (util.childNodes.length) r.fload.appendChild(util);
+  }
+  if (r.ammoEl) r.ammoEl.textContent = (o.clip !== null && o.clip !== undefined) ? `${o.clip}/${o.reserve ?? 0}` : '';
+
+  r.fill.className = 'focus-hpfill' + (o.alive ? (o.health <= 20 ? ' crit' : o.health <= 50 ? ' low' : '') : '');
+  r.fill.style.width = (o.alive ? Math.max(0, Math.min(100, o.health)) : 0) + '%';
+}
+
+const BOMB_TIME = 40; // CS2 C4 detonation time (seconds) — drives the drain bar
+
+// ── Radar: world→image calibration per map (radar PNG is 1024×1024).
+//    Exact CS2 overview pos_x / pos_y / scale, from the .txt files that ship
+//    with the radar images (github.com/2mlml/cs2-radar-images). ──
+const RADAR_CAL = {
+  de_dust2:    { x: -2476, y: 3239, scale: 4.4 },
+  de_mirage:   { x: -3230, y: 1713, scale: 5.0 },
+  de_inferno:  { x: -2087, y: 3870, scale: 4.9 },
+  de_nuke:     { x: -3453, y: 2887, scale: 7.0 },
+  de_overpass: { x: -4831, y: 1781, scale: 5.2 },
+  de_vertigo:  { x: -3168, y: 1762, scale: 4.0 },
+  de_ancient:  { x: -2953, y: 2164, scale: 5.0 },
+  de_anubis:   { x: -2796, y: 3328, scale: 5.22 },
+  de_train:    { x: -2308, y: 2078, scale: 4.082077 }
+};
+
+// Bombsite label positions in radar-image space (left%, top%). Read off the radar
+// PNGs — approximate; nudge per map if a letter sits off its site.
+const SITE_POS = {
+  de_dust2:    { A: { l: 80, t: 16 }, B: { l: 18, t: 13 } },
+  de_mirage:   { A: { l: 23, t: 28 }, B: { l: 52, t: 77 } },
+  de_inferno:  { A: { l: 48, t: 22 }, B: { l: 82, t: 67 } },
+  de_nuke:     { A: { l: 58, t: 50 }, B: { l: 55, t: 62 } },
+  de_overpass: { A: { l: 42, t: 20 }, B: { l: 36, t: 52 } },
+  de_vertigo:  { A: { l: 21, t: 25 }, B: { l: 70, t: 59 } },
+  de_ancient:  { A: { l: 28, t: 27 }, B: { l: 75, t: 42 } },
+  de_anubis:   { A: { l: 76, t: 26 }, B: { l: 33, t: 49 } },
+  de_train:    { A: { l: 50, t: 40 }, B: { l: 52, t: 78 } }
+};
+
+function imgCoord(pos, cal){            // world → radar image space (0..1024)
+  return { x: (pos.x - cal.x) / cal.scale, y: (cal.y - pos.y) / cal.scale };
+}
+function worldToPct(pos, cal){          // marker position as % of the FULL map (world layer does the zoom)
+  const c = imgCoord(pos, cal);
+  return { left: c.x / 1024 * 100, top: c.y / 1024 * 100 };
+}
+
+// Auto zoom/pan ("follow the action"): eased viewport over the 1024² radar image.
+let radarVP = { x0: 0, y0: 0, size: 1024 };
+function radarViewportTarget(players, bomb, cal){
+  // Auto-zoom disabled — always show the whole map (no pan/zoom to the action).
+  return { x0: 0, y0: 0, size: 1024 };
+}
+
+const dotReg = new Map(); // steamid (or '__bomb__') -> dot element
+
+function renderRadar(cs){
+  const box = el('cs-radar');
+  // Built-in radar off → boltobserv (or another external radar source) owns the top-left.
+  if (!builtinRadar){ box.classList.add('hidden'); return; }
+  const all = cs.players || [];
+  const cal = RADAR_CAL[cs.map && cs.map.name];
+  // Show the map whenever we know which map it is. Player dots need observer/spectator
+  // GSI (positions) — but the map + A/B labels render regardless so it's never blank.
+  if (!cal){ box.classList.add('hidden'); return; }
+  box.classList.remove('hidden');
+
+  if (box.dataset.map !== cs.map.name){     // swap the map image + A/B labels only when the map changes
+    box.dataset.map = cs.map.name;
+    const img = el('radar-img');
+    img.classList.remove('hidden');
+    img.onerror = () => { img.classList.add('hidden'); box.classList.add('no-map'); };
+    img.onload  = () => { img.classList.remove('hidden'); box.classList.remove('no-map'); };
+    img.src = '/assets/csgo/maps/' + cs.map.name + '.png';
+
+    const sites = el('radar-sites'); sites.innerHTML = '';
+    const sp = SITE_POS[cs.map.name];
+    if (sp) ['A', 'B'].forEach(k => {
+      if (!sp[k]) return;
+      const s = document.createElement('div'); s.className = 'rsite'; s.textContent = k;
+      s.style.left = sp[k].l + '%'; s.style.top = sp[k].t + '%';
+      sites.appendChild(s);
+    });
+  }
+
+  // Auto zoom/pan: ease the stored viewport toward the live action and drive the world layer.
+  const target = radarViewportTarget(all, cs.bomb, cal);
+  radarVP.x0 += (target.x0 - radarVP.x0) * 0.16;
+  radarVP.y0 += (target.y0 - radarVP.y0) * 0.16;
+  radarVP.size += (target.size - radarVP.size) * 0.16;
+  const world = el('radar-world');
+  const k = 1024 / radarVP.size;
+  world.style.transform = `scale(${k.toFixed(4)}) translate(${(-radarVP.x0 / 1024 * 100).toFixed(3)}%, ${(-radarVP.y0 / 1024 * 100).toFixed(3)}%)`;
+  world.style.setProperty('--rk', (radarVP.size / 1024).toFixed(4));   // counter-scale point markers
+
+  // Grenades / smokes / molotovs — transient, rebuilt each tick (scale with the world).
+  const fx = el('radar-fx'); fx.innerHTML = '';
+  (cs.grenades || []).forEach(g => {
+    if (!g || g.x == null) return;
+    const c = worldToPct({ x: g.x, y: g.y }, cal);
+    const d = document.createElement('div'); d.className = 'gren ' + (g.type || '');
+    d.style.left = c.left + '%'; d.style.top = c.top + '%';
+    fx.appendChild(d);
+  });
+
+  const layer = el('radar-dots');
+  const activeId = (cs.observed && cs.observed.steamid) || '';
+  const seen = new Set();
+
+  // Show every player we have a position for: alive = team dot + facing; dead = faded X.
+  all.filter(p => p.pos).forEach(p => {
+    seen.add(p.steamid);
+    let d = dotReg.get(p.steamid);
+    if (!d){                                  // dot = colored circle + facing "nose" + number
+      d = document.createElement('div');
+      const nose = document.createElement('div'); nose.className = 'rdot-nose';
+      const num = document.createElement('span'); num.className = 'rdot-num';
+      d.appendChild(nose); d.appendChild(num);
+      dotReg.set(p.steamid, d); layer.appendChild(d);
+    }
+    // Spectate-key number (observer_slot 0→"1" … 9→"0"); blank when unknown or dead.
+    const num = d.lastChild;
+    num.textContent = (p.alive && p.slot != null && p.slot < 99) ? String((p.slot + 1) % 10) : '';
+    const low = p.alive && (p.health || 0) <= 30;
+    d.className = 'rdot ' + (p.team === 'CT' ? 'ct' : 't')
+      + (p.alive && p.steamid === activeId ? ' me' : '')
+      + (p.alive && (p.smoked || 0) > 80 ? ' smoked' : '')   // dim players hidden in smoke
+      + (!p.alive ? ' dead' : '')
+      + (p.alive && p.hasBomb ? ' carry' : '')               // bomb carrier ring
+      + (low ? ' low' : '');                                  // low-HP ring
+    const c = worldToPct(p.pos, cal);
+    d.style.left = c.left + '%'; d.style.top = c.top + '%';
+    // Facing arrow from the view/forward vector (world→screen has Y flipped). Hidden when dead.
+    const nose = d.firstChild;
+    if (p.alive && p.fwd && (p.fwd.x || p.fwd.y)){
+      const deg = Math.atan2(p.fwd.x, p.fwd.y) * 180 / Math.PI;
+      nose.style.transform = `translate(-50%, -50%) rotate(${deg}deg) translateY(-11px)`;
+      nose.style.display = '';
+    } else { nose.style.display = 'none'; }
+  });
+
+  if (cs.bomb && cs.bomb.pos){
+    let b = dotReg.get('__bomb__');
+    if (!b){ b = document.createElement('div'); dotReg.set('__bomb__', b); layer.appendChild(b); }
+    b.className = 'rbomb'; b.textContent = 'C4';
+    const c = worldToPct(cs.bomb.pos, cal);
+    b.style.left = c.left + '%'; b.style.top = c.top + '%';
+    seen.add('__bomb__');
+  }
+
+  for (const [sid, dEl] of dotReg){ if (!seen.has(sid)){ dEl.remove(); dotReg.delete(sid); } }
+}
+
+// ── Kill feed — rows added/removed in place; the server feeds + expires the list. ──
+const kfReg = new Map();   // event key -> row element
+function kfKey(k){ return k.ts + '|' + (k.killer || '') + '|' + (k.victim || ''); }
+function buildKillRow(k){
+  const row = document.createElement('div'); row.className = 'kf-row';
+  if (k.killer){
+    const ks = document.createElement('span'); ks.className = 'kf-killer ' + (k.killerTeam === 'CT' ? 'ct' : 't');
+    ks.textContent = k.killer; row.appendChild(ks);
+  }
+  const wpn = document.createElement('span'); wpn.className = 'kf-wpn';
+  if (k.killer && k.weapon){ wpn.appendChild(weaponImg(k.weapon, 18)); }
+  else { wpn.classList.add('kf-skull'); wpn.innerHTML = DEATH_SVG; }   // world / suicide
+  row.appendChild(wpn);
+  if (k.hs){ const hs = document.createElement('span'); hs.className = 'kf-hs'; row.appendChild(hs); }
+  const vs = document.createElement('span'); vs.className = 'kf-victim ' + (k.victimTeam === 'CT' ? 'ct' : 't');
+  vs.textContent = k.victim || ''; row.appendChild(vs);
+  return row;
+}
+function renderKillfeed(feed){
+  const box = el('cs-killfeed'); const list = feed || [];
+  const seen = new Set();
+  list.forEach(k => {
+    const key = kfKey(k); seen.add(key);
+    if (kfReg.has(key)) return;
+    const row = buildKillRow(k); kfReg.set(key, row);
+    box.insertBefore(row, box.firstChild);   // newest on top
+  });
+  for (const [key, row] of kfReg){
+    if (seen.has(key)) continue;
+    kfReg.delete(key);
+    if (!row.classList.contains('leaving')){ row.classList.add('leaving'); setTimeout(() => row.remove(), 400); }
+  }
+}
+
+// ── Buy / freeze phase board — both teams' economy + loadout, shown during freezetime ──
+let _buySig = '';
+function buyCell(p){
+  const side = p.team === 'CT' ? 'ct' : 't';
+  const dead = !p.alive;
+  const money = '$' + (p.money || 0).toLocaleString();
+  const equip = p.equip ? ('≈$' + (p.equip || 0).toLocaleString()) : '';
+  // util column: grenades + kit + bomb
+  let util = '';
+  if (!dead) (p.nades || []).forEach(n => { util += `<img src="/assets/weapons/${nadeSvg(n)}.svg" alt="">`; });
+  if (!dead && p.hasKit)  util += `<img src="/assets/csgo/shield.svg" alt="">`;
+  if (!dead && p.hasBomb) util += `<img src="/assets/csgo/bomb_c4.svg" alt="">`;
+  // gear column: armor + weapon (weapon sits in a fixed-width slot for row alignment)
+  const armor = (!dead && (p.helmet || (p.armor || 0) > 0))
+    ? `<img class="cb-armor" src="/assets/csgo/${p.helmet ? 'armor_helmet' : 'armor'}.svg" alt="">` : '';
+  const weap = (!dead && p.weapon) ? `<img class="cb-weap" src="/assets/weapons/${p.weapon}.svg" alt="">` : '<span class="cb-weap"></span>';
+  const kda = `<span class="k">${p.kills||0}</span>/<span class="d">${p.deaths||0}</span>/${p.assists||0}`;
+  return `<div class="cb-cell ${side}">
+    <div class="cb-money"><span class="cb-cash">${money}</span><span class="cb-equip">${equip}</span></div>
+    <div class="cb-util">${util}</div>
+    <div class="cb-gear">${armor}${weap}</div>
+    <div class="cb-player"><span class="cb-name${dead ? ' dead' : ''}">${p.name || ''}</span><span class="cb-kda">${kda}</span></div>
+  </div>`;
+}
+function renderBuyPhase(cs){
+  const box = el('cs-buy'); if (!box) return;
+  const all = cs.players || [];
+  const ct = all.filter(p => p.team === 'CT');
+  const t  = all.filter(p => p.team === 'T');
+  // Rebuild only when buy-relevant data changes (players keep buying through freezetime).
+  const sig = JSON.stringify(all.map(p => [p.steamid, p.money, p.equip, p.weapon, p.hasKit, p.hasBomb, p.helmet, p.armor, (p.nades||[]).join(','), p.kills, p.deaths, p.assists, p.alive])
+    .concat([cs.ct.score, cs.t.score, cs.round.number, appTeams.blue.name, appTeams.orange.name]));
+  if (sig === _buySig) return;
+  _buySig = sig;
+
+  const ctLogo = appTeams.blue.logo || CS_LOGO_FALLBACK, tLogo = appTeams.orange.logo || CS_LOGO_FALLBACK;
+  const ctLogoCls = appTeams.blue.logo ? '' : ' cs-fallback', tLogoCls = appTeams.orange.logo ? '' : ' cs-fallback';
+  const rn = cs.round.number || 1;
+  const bz = cs.phaseEndsIn != null ? ('BUY ' + fmtClock(cs.phaseEndsIn)) : 'BUY PHASE';
+
+  // Round-history strip: team-tinted win-method icon + round number, with a halftime split.
+  const hist = (cs.roundHistory || []);
+  const rounds = hist.map(h => {
+    const side = h.winner === 'CT' ? 'ct' : 't';
+    const icon = ROUND_METHOD_ICON[h.method] || 'elimination';
+    const gap = h.round === 13 ? '<div class="cb-rgap"></div>' : '';   // divider before the second half
+    return `${gap}<div class="cb-rslot ${side}"><div class="cb-rico"><img src="/assets/csgo/${icon}.svg" alt=""></div><span class="cb-rnum">${h.round}</span></div>`;
+  }).join('');
+
+  const rows = Array.from({ length: Math.max(ct.length, t.length, 1) }, (_, i) => {
+    const a = ct[i], b = t[i];
+    return `<div class="cb-row">${a ? buyCell(a) : '<div class="cb-cell ct"></div>'}${b ? buyCell(b) : '<div class="cb-cell t"></div>'}</div>`;
+  }).join('');
+
+  box.innerHTML = `
+    <div class="cb-header">
+      <div class="cb-team ct">
+        <img class="cb-logo${ctLogoCls}" src="${ctLogo}" alt=""><span class="cb-tname">${appTeams.blue.name || 'CT'}</span><span class="cb-score">${cs.ct.score}</span>
+      </div>
+      <div class="cb-mid"><div class="r">ROUND</div><div class="rn">${String(rn).padStart(2,'0')}</div><div class="bz">${bz}</div></div>
+      <div class="cb-team t">
+        <img class="cb-logo${tLogoCls}" src="${tLogo}" alt=""><span class="cb-tname">${appTeams.orange.name || 'T'}</span><span class="cb-score">${cs.t.score}</span>
+      </div>
+    </div>
+    <div class="cb-rounds">${rounds}</div>
+    <div class="cb-board">${rows}</div>`;
+}
+
+// Live "X VS X" — flashes up for ~2.5s whenever a player dies, then hides. No bars.
+let prevTotalAlive = null;
+let aliveHideTimer = null;
+function renderAlive(players){
+  const list = players || [];
+  const box = el('cs-alive');
+  const ctAlive = list.filter(p => p.team === 'CT' && p.alive).length;
+  const tAlive  = list.filter(p => p.team === 'T'  && p.alive).length;
+  el('alive-ct').textContent = ctAlive;
+  el('alive-t').textContent  = tAlive;
+  const total = ctAlive + tAlive;
+  if (prevTotalAlive !== null && list.length && total < prevTotalAlive){   // a death happened
+    box.classList.remove('hidden');
+    bump('alive-ct'); bump('alive-t');
+    if (aliveHideTimer) clearTimeout(aliveHideTimer);
+    aliveHideTimer = setTimeout(() => box.classList.add('hidden'), 2500);
+  }
+  prevTotalAlive = list.length ? total : null;
+}
+
+// ── Broadcast callouts: round result + phase only (multi-kill/clutch removed — not reliable) ──
+const METHOD_WORD = { elimination: 'ELIMINATION', bomb: 'BOMB', defuse: 'DEFUSE', time: 'TIME' };
+let prevHistLen = -1;
+let announceTimer = null;
+
+function showAnnounce(html, ms){
+  const a = el('cs-announce');
+  a.innerHTML = html;
+  a.classList.remove('hidden', 'pop'); void a.offsetWidth; a.classList.add('pop');
+  if (announceTimer) clearTimeout(announceTimer);
+  announceTimer = setTimeout(() => a.classList.add('hidden'), ms);
+}
+
+function renderCallouts(cs, live){
+  el('cs-clutch').classList.add('hidden');   // clutch callout retired
+  if (!live){ el('cs-phase').classList.add('hidden'); return; }
+
+  // Round result — fire when a new round-win entry appears (from round_wins — accurate).
+  const hist = cs.roundHistory || [];
+  const roundEnd = (prevHistLen >= 0 && hist.length > prevHistLen) ? hist[hist.length - 1] : null;
+  prevHistLen = hist.length;
+  if (roundEnd){
+    const w = roundEnd.winner === 'CT' ? 'ct' : 't';
+    const m = METHOD_WORD[roundEnd.method] || '';
+    showAnnounce(`<span class="an-win ${w}">${roundEnd.winner} WIN</span>` +
+      (m ? `<span class="an-sep">·</span><span class="an-method">${m}</span>` : ''), 4200);
+  }
+
+  // Phase banner (halftime / timeout only). Warmup shows under the timer (round label), not centre-screen.
+  const ph = cs.phase || '';
+  const ptext = ph === 'intermission' ? 'HALFTIME'
+    : ph.indexOf('timeout') === 0 ? 'TACTICAL TIMEOUT'
+    : '';
+  const pe = el('cs-phase');
+  if (ptext){ pe.textContent = ptext; pe.classList.remove('hidden'); }
+  else pe.classList.add('hidden');
+}
+
+// Sponsor rail — rotates through the brand's partners (sellable inventory).
+function renderSponsors(){
+  const rail = el('cs-sponsors');
+  const sp = (brand && (brand.railSponsors || brand.sponsors)) || [];
+  if (!sp.length){ rail.classList.add('hidden'); lastSponsorSig = ''; return; }
+  rail.classList.remove('hidden');
+  el('sp-label').textContent = (brand.sponsorLabel || 'PARTNERS');
+  if (sponsorIdx >= sp.length) sponsorIdx = 0;
+  const s = sp[sponsorIdx] || {};
+  // Only touch the DOM (and replay the fade) when the shown sponsor changes — kills the per-update flicker.
+  const sig = (brand.sponsorLabel || 'PARTNERS') + '|' + (s.logo || s.name || '');
+  if (sig === lastSponsorSig) return;
+  lastSponsorSig = sig;
+  const slot = el('sp-slot'); slot.innerHTML = '';
+  if (s.logo){ const img = document.createElement('img'); img.className = 'sp-logo'; img.src = s.logo; img.alt = s.name || ''; slot.appendChild(img); }
+  else { const t = document.createElement('span'); t.className = 'sp-name'; t.textContent = s.name || ''; slot.appendChild(t); }
+}
+
+function startSponsorRotation(){
+  if (sponsorTimer){ clearInterval(sponsorTimer); sponsorTimer = null; }
+  const sp = (brand && (brand.railSponsors || brand.sponsors)) || [];
+  if (sp.length > 1){
+    const ms = Math.max(2, brand.sponsorInterval || 6) * 1000;
+    sponsorTimer = setInterval(() => { sponsorIdx = (sponsorIdx + 1) % sp.length; renderSponsors(); }, ms);
+  }
+}
+
+// Sponsor banner (bottom-right) — producer-controlled rotating images from full_state.banner.
+let bannerTimer = null, bannerIdx = 0, lastBannerSig = '';
+function renderBanner(b){
+  const box = el('cs-banner'); if (!box) return;
+  const imgs = (b && b.visible && Array.isArray(b.images)) ? b.images.filter(Boolean) : [];
+  box.classList.toggle('show', imgs.length > 0);
+  const sig = imgs.join('|') + '#' + ((b && b.interval) || 10);
+  if (sig === lastBannerSig) return;           // unchanged → keep the running rotation (no flicker)
+  lastBannerSig = sig;
+  if (bannerTimer) { clearInterval(bannerTimer); bannerTimer = null; }
+  const wrap = el('cs-banner-imgs'); wrap.innerHTML = '';
+  if (!imgs.length) return;
+  const els = imgs.map((src, i) => { const im = document.createElement('img'); im.className = 'cbn-img' + (i === 0 ? ' active' : ''); im.src = src; wrap.appendChild(im); return im; });
+  bannerIdx = 0;
+  if (els.length > 1){
+    const ms = Math.max(3, (b.interval || 10)) * 1000;
+    bannerTimer = setInterval(() => { els[bannerIdx].classList.remove('active'); bannerIdx = (bannerIdx + 1) % els.length; els[bannerIdx].classList.add('active'); }, ms);
+  }
+}
+
+// Apply the brand kit: recolor accents, swap font, drive the sponsor rail.
+function applyBrand(){
+  const root = document.documentElement;
+  if (brand){
+    if (brand.color)  root.style.setProperty('--accent', brand.color);
+    if (brand.accent) root.style.setProperty('--accent-2', brand.accent);
+    if (brand.font)   root.style.setProperty('--main-font', `'${brand.font}', sans-serif`);
+  }
+  // Only restart the rotation when the sponsor SET changes; otherwise a repeated brand apply
+  // (e.g. every full_state) would keep resetting the timer and re-trigger the animation.
+  const sp = (brand && (brand.railSponsors || brand.sponsors)) || [];
+  const listSig = (brand && brand.sponsorLabel || '') + '#' + sp.map(x => x.logo || x.name || '').join('|');
+  if (listSig !== lastSponsorListSig){
+    lastSponsorListSig = listSig;
+    sponsorIdx = 0;
+    renderSponsors();
+    startSponsorRotation();
+  } else {
+    renderSponsors();   // guarded → no-op unless the shown sponsor changed
+  }
+}
+
+function render(cs){
+  const live = !!(cs && cs.connected);
+  cs = live ? cs : DEMO;
+  el('preview-badge').classList.toggle('hidden', live);
+
+  // Event title bar
+  const evBar = el('cs-event');
+  evBar.textContent = eventName;
+  evBar.classList.toggle('hidden', !eventName);
+
+  const mapTxt = mapLabel(cs.map && cs.map.name);
+  el('cs-map').innerHTML = (mapTxt || '') +
+    (bestOf ? `${mapTxt ? '  ·  ' : ''}<span class="bo">BEST OF ${bestOf}</span>` : '');
+  renderSeries();
+
+  setTeamPanel('ct', appTeams.blue, cs.ct.score);
+  setTeamPanel('t',  appTeams.orange, cs.t.score);
+  if (prevScore.ct !== undefined && prevScore.ct !== cs.ct.score) bump('ct-score');
+  if (prevScore.t  !== undefined && prevScore.t  !== cs.t.score)  bump('t-score');
+  prevScore.ct = cs.ct.score; prevScore.t = cs.t.score;
+
+  // Overtime: CS2 is MR12 (first to 13); 12–12 → OT, each OT is MR3 (+4 to win, tie at +3 → next OT).
+  const REG_WIN = 12;
+  const inOT = cs.ct.score >= REG_WIN && cs.t.score >= REG_WIN;
+  const otNum = inOT ? Math.floor((Math.min(cs.ct.score, cs.t.score) - REG_WIN) / 3) + 1 : 0;
+  const otName = otLabel(otNum);
+
+  const bombState = (cs.bomb && cs.bomb.state) || '';
+  handleBombResult(bombState);   // fire explosion / defuse banner on state transition
+  const defusing = bombState === 'defusing';
+  const bombActive = bombState === 'planted' || defusing;
+  const timerEl = el('cs-timer');
+  const bombvis = el('cs-bombvis');
+  const roundEl = el('cs-round');
+  const midEl = el('cs-mid');
+  if (bombActive) {
+    bombvis.classList.add('show');
+    const remain = Number(cs.bomb.countdown);
+    const danger = !defusing && !isNaN(remain) && remain <= 10;
+    timerEl.classList.remove('hidden');
+    timerEl.classList.add('bomb');
+    // No central bar in either state — the countdown lives in the big number + team fuses.
+    bombvis.classList.add('nobar');
+    bombvis.classList.toggle('danger', danger);
+    bombvis.classList.toggle('defusing', defusing);
+    midEl.classList.toggle('planted-glow', !defusing);
+    midEl.classList.toggle('defusing-glow', defusing);
+    roundEl.classList.remove('ot');
+    if (defusing) {
+      // Defuse mirrors the plant layout: cutters icon + big GREEN number = defuse time left.
+      stopCornerPulse();                     // no red pulse during a defuse
+      if (defuseStart === null) defuseStart = nowMs();
+      const defuser = (cs.players || []).find(p => p.steamid === (cs.bomb && cs.bomb.player));
+      const dur = (defuser && defuser.hasKit) ? 5 : DEFUSE_TIME;
+      const elapsed = (nowMs() - defuseStart) / 1000;
+      const defLeft = Math.max(0, dur - elapsed);
+      // Eased: grows quickly, then slows toward completion
+      const fuseW = easeOutCubic(elapsed / dur) * 100;
+      setFuse(fuseW, 'defuse', false);       // green bars grow toward centre as defuse completes
+      timerEl.classList.add('def');
+      timerEl.textContent = defLeft.toFixed(1);
+      roundEl.textContent = 'DEFUSING';
+      roundEl.classList.add('defusing'); roundEl.classList.remove('planted');
+    } else {
+      defuseStart = null;
+      // Eased: drains fast early, then crawls in the last seconds before detonation
+      const elapsedFrac = isNaN(remain) ? 0 : (BOMB_TIME - remain) / BOMB_TIME;
+      const fuseW = (1 - easeOutCubic(elapsedFrac)) * 100;
+      setFuse(fuseW, 'planted', danger);     // red bars drain toward centre (time to explosion)
+      timerEl.classList.remove('def');
+      timerEl.textContent = isNaN(remain) ? '--' : Math.max(0, remain).toFixed(1);
+      roundEl.textContent = 'BOMB PLANTED';
+      roundEl.classList.add('planted'); roundEl.classList.remove('defusing');
+    }
+  } else {
+    timerEl.classList.remove('hidden', 'bomb', 'def');
+    bombvis.classList.remove('show', 'danger', 'defusing', 'nobar');
+    midEl.classList.remove('planted-glow', 'defusing-glow');
+    timerEl.textContent = fmtClock(cs.phaseEndsIn);
+    defuseStart = null;
+    el('bomb-defuse-fill').style.width = '0%';
+    setFuse(0, 'off');   // hide the team fuses when no bomb is down
+    const phase = (cs.round.phase || cs.phase || '').toUpperCase();
+    roundEl.textContent = inOT ? otName
+      : (cs.round.number ? `ROUND ${cs.round.number}${phase ? ' · ' + phase : ''}` : (phase || 'WARMUP'));
+    roundEl.classList.remove('planted', 'defusing');
+    roundEl.classList.toggle('ot', inOT);
+  }
+
+  renderRoundDots(cs.roundHistory);
+  el('round-dots').classList.toggle('show', showHistory && (cs.roundHistory || []).length > 0);
+  renderAlive(cs.players);
+  renderKillfeed(cs.killfeed);
+  renderEcon(cs.players);
+
+  const activeId = (cs.observed && cs.observed.steamid) || '';
+  // Order each column by scoreboard standing (score, then kills, then fewest deaths).
+  const byLeaderboard = (a, b) =>
+    (b.score || 0) - (a.score || 0) || (b.kills || 0) - (a.kills || 0) || (a.deaths || 0) - (b.deaths || 0);
+  const ct = (cs.players || []).filter(p => p.team === 'CT').sort(byLeaderboard);
+  const t  = (cs.players || []).filter(p => p.team === 'T').sort(byLeaderboard);
+  syncColumn(el('players-ct'), ct, 'ct', activeId);
+  syncColumn(el('players-t'),  t,  't',  activeId);
+  // Drop rows for players who left the server / match.
+  const present = new Set([...ct, ...t].map(p => p.steamid));
+  for (const [sid, entry] of rowReg) { if (!present.has(sid)) { entry.el.remove(); rowReg.delete(sid); } }
+
+  renderRadar(cs);
+  renderFocus(cs.observed);
+  renderCallouts(cs, live);
+
+  // Buy / freeze phase: slide up the economy+loadout board, hide the live side columns.
+  const isBuy = ((cs.round.phase || cs.phase || '') === 'freezetime');
+  const buyEl = el('cs-buy');
+  if (isBuy) { renderBuyPhase(cs); buyEl.classList.add('show'); document.body.classList.add('buying'); }
+  else { buyEl.classList.remove('show'); document.body.classList.remove('buying'); }
+}
+
+function connect(){
+  const sock = new WebSocket('ws://localhost:3001');
+  sock.onopen = () => sock.send(JSON.stringify({ type: 'request_state' }));
+  sock.onmessage = ({ data }) => {
+    let msg; try { msg = JSON.parse(data); } catch { return; }
+    if (msg.type === 'full_state') {
+      const d = msg.data;
+      document.documentElement.dataset.theme = d.theme || 'default';
+      if (d.fontFamily) document.documentElement.style.setProperty('--main-font', `'${d.fontFamily}', sans-serif`);
+      eventName = (d.eventName || '').trim();
+      if (d.bestOf) bestOf = d.bestOf;
+      if (d.series) series = d.series;
+      const teams = d.teams || {};
+      appTeams = {
+        blue:   { name: (teams.blue && teams.blue.name) || 'TEAM A',   logo: (teams.blue && teams.blue.logo) || null },
+        orange: { name: (teams.orange && teams.orange.name) || 'TEAM B', logo: (teams.orange && teams.orange.logo) || null }
+      };
+      // Team colors drive the CT (left/blue) and T (right/orange) sides of the HUD
+      const ctC = (teams.blue && teams.blue.color) || '#6aa8e6';
+      const tC  = (teams.orange && teams.orange.color) || '#e0b35a';
+      document.documentElement.style.setProperty('--ct', ctC);
+      document.documentElement.style.setProperty('--t', tC);
+      brand = d.brand || null;   // null when no client kit is active → rail hides
+      applyBrand();
+      renderBanner(d.banner);    // bottom-right sponsor banner (producer-controlled)
+      showHistory = !!(d.csgo && d.csgo.showHistory);
+      builtinRadar = !!(d.csgo && d.csgo.builtinRadar);
+      lastRealCs = d.csgo;
+      if (!devState) render(d.csgo);   // don't let live data overwrite a running dev sim
+    } else if (msg.type === 'csgo_update') {
+      showHistory = !!(msg.data && msg.data.showHistory);
+      builtinRadar = !!(msg.data && msg.data.builtinRadar);
+      lastRealCs = msg.data;
+      if (!devState) render(msg.data);
+    }
+  };
+  sock.onclose = () => setTimeout(connect, 3000);
+}
+
+// ── Dev event tester (browser only; hidden inside OBS) ──────────────────────
+let lastRealCs = null;     // last state from the live feed, for "Reset to live"
+let devState = null;       // active simulation state (blocks live render while set)
+let devTimer = null;
+function devStop(){ if (devTimer){ clearInterval(devTimer); devTimer = null; } }
+function devBase(){ const s = JSON.parse(JSON.stringify(DEMO)); s.connected = true; return s; }
+function devReset(){
+  devStop(); devState = null; prevBombState = ''; defuseStart = null;
+  render(lastRealCs);   // back to the live feed (or DEMO preview if not connected)
+}
+// Plant the bomb, drain the timer, then detonate — exercises the real render path.
+function devPlant(){
+  devStop(); prevBombState = 'carried'; defuseStart = null;   // ≠ 'planted' so the plant pulse fires
+  const s = devBase(); s.round = Object.assign({}, s.round, { bomb: 'planted' });
+  let t = 40; s.bomb = { state: 'planted', countdown: t, pos: s.bomb && s.bomb.pos, player: '' };
+  devState = s; render(s);
+  devTimer = setInterval(() => {
+    t -= 0.1;
+    if (t <= 0){
+      s.bomb = { state: 'exploded', countdown: 0, pos: null, player: '' };
+      render(s); devStop();
+      setTimeout(() => { if (devState === s) devReset(); }, 1900);
+      return;
+    }
+    s.bomb.countdown = t; render(s);
+  }, 100);
+}
+// Begin a defuse: grey loading bar fills, then the bomb is defused.
+function devDefuse(){
+  devStop(); prevBombState = 'planted'; defuseStart = null;
+  const s = devBase(); s.round = Object.assign({}, s.round, { bomb: 'planted' });
+  s.bomb = { state: 'defusing', countdown: 12, pos: s.bomb && s.bomb.pos, player: '' };
+  devState = s; render(s);
+  devTimer = setInterval(() => {
+    if (defuseStart && (nowMs() - defuseStart) >= DEFUSE_TIME * 1000){
+      s.bomb = { state: 'defused', countdown: 0, pos: null, player: '' };
+      render(s); devStop();
+      setTimeout(() => { if (devState === s) devReset(); }, 2100);
+      return;
+    }
+    s.bomb.countdown = Math.max(0, s.bomb.countdown - 0.1); render(s);
+  }, 100);
+}
+// Preview a status condition: ramp a player's intensity value then DECAY it to 0, exactly like
+// the live GSI value does in-game — so the effect lasts only "while affected", then clears.
+function devStatus(kind){
+  devStop();
+  const s = devBase();
+  const key = kind === 'flash' ? 'flashed' : kind === 'fire' ? 'burning' : kind === 'smoke' ? 'smoked' : null;
+  (s.players || []).forEach(p => { p.flashed = 0; p.burning = 0; p.smoked = 0; });
+  devState = s;
+  if (!key){ render(s); return; }                       // 'status-off' → just clear
+  let v = 255;
+  const setAll = () => (s.players || []).forEach(p => { if (p.alive) p[key] = v; });
+  setAll(); render(s);
+  const stepMs = 100, decay = 255 / (3500 / stepMs);    // ~3.5s full decay (a few seconds affected)
+  devTimer = setInterval(() => {
+    v -= decay;
+    if (v <= 0){ (s.players || []).forEach(p => { p[key] = 0; }); render(s); devStop(); return; }
+    setAll(); render(s);
+  }, stepMs);
+}
+// Simulate freezetime so the buy board shows with the demo loadouts/economy.
+function devBuy(){
+  devStop();
+  const s = devBase();
+  s.round = Object.assign({}, s.round, { phase: 'freezetime', bomb: '' });
+  s.bomb = { state: '', countdown: null, pos: null, player: '' };
+  s.phase = 'freezetime'; s.phaseEndsIn = 15;
+  devState = s; render(s);
+}
+// Preview the bottom-right sponsor banner with placeholder logos.
+let _devBannerOn = false;
+function devBanner(){
+  _devBannerOn = !_devBannerOn;
+  renderBanner(_devBannerOn
+    ? { visible: true, interval: 3, images: ['/assets/games/valorant.svg', '/assets/rl.png'] }
+    : { visible: false, images: [] });
+}
+function devAction(a){
+  if (a === 'banner') return devBanner();
+  if (a === 'buy') return devBuy();
+  if (a === 'plant') devPlant();
+  else if (a === 'defuse') devDefuse();
+  else if (a === 'explode') triggerBombFlash('explode');   // just the banner
+  else if (a === 'defused') triggerBombFlash('defused');
+  else if (a === 'flash' || a === 'fire' || a === 'smoke') devStatus(a);
+  else if (a === 'status-off') devStatus('');
+  else if (a === 'reset') devReset();
+}
+(function initDevPanel(){
+  // OBS browser sources expose window.obsstudio — keep the tester out of the broadcast.
+  if (window.obsstudio) return;
+  const panel = el('dev-panel'), fab = el('dev-fab');
+  if (!panel || !fab) return;
+  panel.classList.add('open');
+  panel.querySelectorAll('[data-dev]').forEach(b =>
+    b.addEventListener('click', () => devAction(b.getAttribute('data-dev'))));
+  el('dev-collapse').addEventListener('click', () => { panel.classList.remove('open'); fab.style.display = 'block'; });
+  fab.addEventListener('click', () => { fab.style.display = 'none'; panel.classList.add('open'); });
+})();
+
+render(null);
+applyBrand();   // preview the demo brand's sponsor rail until live state arrives
+connect();
+</script>
+</body>
+</html>

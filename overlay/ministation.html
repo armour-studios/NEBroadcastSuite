@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Station Mini-HUD</title>
+<!--
+  Per-stream-station mini matchup HUD. Add as an OBS browser source with
+  ?stream=<station name>; it follows your start.gg stream queue and shows
+  whichever match is live on THAT station (team names + score + round).
+  e.g. http://localhost:3000/ministation.html?stream=Main%20Stream
+-->
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@600;700&display=swap');
+  html, body { margin: 0; width: 1920px; height: 1080px; overflow: hidden; background: transparent;
+    font-family: 'Rajdhani', system-ui, sans-serif; }
+  #bar { position: absolute; top: 28px; left: 50%; transform: translateX(-50%);
+    display: flex; align-items: stretch; height: 64px; border-radius: 12px; overflow: hidden;
+    box-shadow: 0 8px 30px rgba(0,0,0,.45); opacity: 0; transition: opacity .35s ease; }
+  #bar.show { opacity: 1; }
+  .team { display: flex; align-items: center; padding: 0 22px; min-width: 230px; background: #14101f;
+    font-weight: 700; font-size: 27px; color: #fff; letter-spacing: .01em; }
+  .team.a { justify-content: flex-end; border-left: 6px solid var(--ca, #2b6fe3); }
+  .team.b { justify-content: flex-start; border-left: 6px solid var(--cb, #e3692b); }
+  .mid { display: flex; flex-direction: column; align-items: center; justify-content: center;
+    background: #0c0a14; padding: 0 18px; min-width: 120px; }
+  .score { font-size: 30px; font-weight: 700; color: #fff; letter-spacing: .08em; }
+  .round { font-size: 12px; font-weight: 600; color: #9a93ad; text-transform: uppercase; letter-spacing: .12em; }
+  .station { position: absolute; top: -20px; left: 50%; transform: translateX(-50%);
+    font-size: 12px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: #8b5cf6; }
+</style>
+</head>
+<body>
+  <div id="bar">
+    <div class="station" id="station"></div>
+    <div class="team a" id="ta">TBD</div>
+    <div class="mid"><div class="score" id="score">0–0</div><div class="round" id="round"></div></div>
+    <div class="team b" id="tb">TBD</div>
+  </div>
+
+  <script>
+    const params = new URLSearchParams(location.search);
+    const STREAM = (params.get('stream') || '').trim();
+    const WS = 'ws://' + (location.hostname || 'localhost') + ':3001';
+    const $ = (id) => document.getElementById(id);
+    $('station').textContent = STREAM || 'STATION';
+
+    function pick(queue) {
+      const onIt = (queue || []).filter((q) => !STREAM || q.stream === STREAM);
+      return onIt.find((q) => q.live) || onIt[0] || null;
+    }
+    let cur = '';
+    function render(data) {
+      const set = pick(data && data.startgg && data.startgg.queue);
+      const bar = $('bar');
+      if (!set) { bar.classList.remove('show'); cur = ''; return; }
+      const sig = JSON.stringify([set.teamA, set.teamB, set.scoreA, set.scoreB, set.round]);
+      if (sig !== cur) {
+        cur = sig;
+        $('ta').textContent = set.teamA || 'TBD';
+        $('tb').textContent = set.teamB || 'TBD';
+        $('score').textContent = (set.scoreA != null ? set.scoreA : 0) + '–' + (set.scoreB != null ? set.scoreB : 0);
+        $('round').textContent = set.round || '';
+      }
+      bar.classList.add('show');
+    }
+
+    function connect() {
+      const ws = new WebSocket(WS);
+      ws.onopen = () => ws.send(JSON.stringify({ type: 'request_state' }));
+      ws.onmessage = ({ data }) => { let m; try { m = JSON.parse(data); } catch { return; } if (m.type === 'full_state') render(m.data); };
+      ws.onclose = () => setTimeout(connect, 3000);
+      ws.onerror = () => { try { ws.close(); } catch {} };
+    }
+    connect();
+  </script>
+</body>
+</html>

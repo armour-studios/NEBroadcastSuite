@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>NE Broadcast Suite — Live HUD (follows active game)</title>
+<!--
+  UNIFIED OVERLAY FUNNEL.
+  Add ONE browser source pointing here (http://localhost:3000/live.html) and it
+  automatically shows the in-game HUD for whichever game is selected in the
+  control panel — RL → "/", CS2 → "/csgo.html", etc. Switch games and OBS keeps
+  this source loaded while the HUD inside swaps. The native per-game URLs still
+  work on their own if you'd rather point sources at them directly.
+
+  ?type=hud (default) follows games[activeGame].overlay.
+  ?type=<path> can pin a fixed scene if ever needed.
+-->
+<style>
+  html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: transparent; }
+  /* the inner HUD is authored at 1920x1080; we scale it to fit whatever size the OBS source is */
+  #frame { position: absolute; top: 0; left: 0; width: 1920px; height: 1080px; border: 0; background: transparent;
+    transform-origin: top left; }
+  #idle { position: absolute; inset: 0; display: none; align-items: center; justify-content: center;
+    font-family: 'Rajdhani', system-ui, sans-serif; color: #6b7280; font-size: 28px; letter-spacing: .12em; text-transform: uppercase; }
+</style>
+</head>
+<body>
+  <iframe id="frame" allowtransparency="true" allow="autoplay; encrypted-media"></iframe>
+  <div id="idle">No HUD for this game — pick a scene</div>
+
+  <script>
+    const WS = 'ws://' + (location.hostname || 'localhost') + ':3001';
+    const BASE = (location.origin && location.origin.startsWith('http')) ? location.origin : 'http://localhost:3000';
+    const frame = document.getElementById('frame');
+    const idle = document.getElementById('idle');
+    let current = null;
+
+    // Scale the 1920x1080 inner HUD to fit the actual OBS source size (letterboxed, centered).
+    function fit() {
+      const s = Math.min(window.innerWidth / 1920, window.innerHeight / 1080) || 1;
+      frame.style.transform = 'scale(' + s + ')';
+      frame.style.left = Math.round((window.innerWidth  - 1920 * s) / 2) + 'px';
+      frame.style.top  = Math.round((window.innerHeight - 1080 * s) / 2) + 'px';
+    }
+    window.addEventListener('resize', fit);
+    fit();
+
+    function show(path) {
+      // path = the active game's overlay route (e.g. '/', '/csgo.html', or '' for none)
+      if (path === current) return;
+      current = path;
+      if (path) {
+        idle.style.display = 'none';
+        frame.style.display = 'block';
+        // cache-bust: OBS/CEF caches the iframe URL, so a refresh of THIS source can otherwise
+        // re-load a stale overlay (missing newer components). A unique query forces a fresh fetch.
+        frame.src = BASE + path + (path.indexOf('?') >= 0 ? '&' : '?') + 'v=' + Date.now();
+      } else {
+        frame.style.display = 'none';
+        frame.removeAttribute('src');
+        idle.style.display = 'flex';
+      }
+    }
+
+    function onState(data) {
+      if (!data) return;
+      const g = data.games && data.activeGame ? data.games[data.activeGame] : null;
+      // Honor the SELECTED layout (Classic vs React, etc.) the producer picked.
+      // Server resolves it into activeOverlay / overlayLayout.path; games[*].overlay
+      // is only the per-game default. '' means the game has no dedicated HUD yet.
+      let path = data.activeOverlay;
+      // Fall through each source — use != null so empty string '' also triggers the next check.
+      if (path == null || path === '') path = data.overlayLayout && data.overlayLayout.path;
+      if (path == null || path === '') path = g && g.overlay;
+      if (path == null) path = '/';
+      show(path);
+    }
+
+    function connect() {
+      const ws = new WebSocket(WS);
+      ws.onopen = () => ws.send(JSON.stringify({ type: 'request_state' }));
+      ws.onmessage = ({ data }) => { let m; try { m = JSON.parse(data); } catch { return; } if (m.type === 'full_state') onState(m.data); };
+      ws.onclose = () => setTimeout(connect, 3000);
+      ws.onerror = () => { try { ws.close(); } catch {} };
+    }
+    connect();
+  </script>
+</body>
+</html>
