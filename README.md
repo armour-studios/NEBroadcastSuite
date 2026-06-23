@@ -2,6 +2,9 @@
 
 **Professional esports broadcast overlay suite for Windows** — built by [Armour Studios](https://github.com/armour-studios).
 
+[![License: CC BY-NC-ND 4.0](https://img.shields.io/badge/License-CC%20BY--NC--ND%204.0-lightgrey.svg)](https://creativecommons.org/licenses/by-nc-nd/4.0/)
+[![Latest Release](https://img.shields.io/github/v/release/armour-studios/NEBroadcastSuite)](https://github.com/armour-studios/NEBroadcastSuite/releases/latest)
+
 Runs as a local Electron app. Add browser sources in OBS and get a fully featured production overlay system for live events and online broadcasts.
 
 ---
@@ -11,6 +14,23 @@ Runs as a local Electron app. Add browser sources in OBS and get a fully feature
 **[Latest Release →](https://github.com/armour-studios/NEBroadcastSuite/releases/latest)**
 
 Run the installer, launch the app from your desktop shortcut, then add the overlay URLs as browser sources in OBS.
+
+---
+
+## Screenshots
+
+<p align="center">
+  <img src="screenshots/overlay1.png" width="49%" />
+  <img src="screenshots/overlay2.png" width="49%" />
+</p>
+<p align="center">
+  <img src="screenshots/overlay3.png" width="49%" />
+  <img src="screenshots/overlay1b.png" width="49%" />
+</p>
+<p align="center">
+  <img src="screenshots/control-panel1.png" width="49%" />
+  <img src="screenshots/control-panel2.png" width="49%" />
+</p>
 
 ---
 
@@ -111,4 +131,4 @@ npm run release        # builds and publishes to GitHub Releases
 
 ## License
 
-© 2026 Armour Studios. All rights reserved.
+© 2026 Armour Studios. Licensed under [CC BY-NC-ND 4.0](https://creativecommons.org/licenses/by-nc-nd/4.0/) — you may share this with attribution, but may not modify it or use it commercially.
