@@ -1895,7 +1895,7 @@ function applyDiscordState(discord) {
   const logoutSep = el('ddd-sep-logout');
   const logoutBtn = el('ddd-logout');
 
-  if (loginBtn) loginBtn.style.display  = loggedIn ? 'none' : '';
+  if (loginBtn) loginBtn.style.display  = 'none';   // Discord login hidden for now — top-bar Settings button replaces it
   if (avatarBtn) avatarBtn.style.display = loggedIn ? '' : 'none';
 
   if (loggedIn) {
