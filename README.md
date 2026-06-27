@@ -5,7 +5,7 @@
 [![License: CC BY-NC-ND 4.0](https://img.shields.io/badge/License-CC%20BY--NC--ND%204.0-lightgrey.svg)](https://creativecommons.org/licenses/by-nc-nd/4.0/)
 [![Latest Release](https://img.shields.io/github/v/release/armour-studios/NEBroadcastSuite)](https://github.com/armour-studios/NEBroadcastSuite/releases/latest)
 
-Runs as a local Electron app. Add browser sources in OBS and get a fully featured production overlay system for live events and online broadcasts.
+A local Electron control room for live esports production. Run the app, add a handful of browser sources in OBS, and you get a complete overlay system — live HUDs, brackets, replays, sponsor branding, talent cameras, and an AI director — all driven from one producer cockpit.
 
 ---
 
@@ -13,24 +13,36 @@ Runs as a local Electron app. Add browser sources in OBS and get a fully feature
 
 **[Latest Release →](https://github.com/armour-studios/NEBroadcastSuite/releases/latest)**
 
-Run the installer, launch the app from your desktop shortcut, then add the overlay URLs as browser sources in OBS.
+Run the installer, launch from your desktop shortcut, then add the overlay URLs as browser sources in OBS (or let the app generate a full OBS scene collection for you). No account required to start.
 
 ---
 
 ## Screenshots
 
-<p align="center">
-  <img src="screenshots/overlay1.png" width="49%" />
-  <img src="screenshots/overlay2.png" width="49%" />
-</p>
-<p align="center">
-  <img src="screenshots/overlay3.png" width="49%" />
-  <img src="screenshots/overlay1b.png" width="49%" />
-</p>
-<p align="center">
-  <img src="screenshots/control-panel1.png" width="49%" />
-  <img src="screenshots/control-panel2.png" width="49%" />
-</p>
+### Producer dashboard
+Load an event, run your stream deck, watch the live preview, and switch OBS scenes — all from one screen.
+
+<p align="center"><img src="screenshots/dashboard.png" width="90%" /></p>
+
+<table>
+  <tr>
+    <td width="50%"><img src="screenshots/overlays.png" /><br/><sub><b>Overlay library</b> — every browser-source URL in one place. Search 50+ scenes across games, preview, copy into OBS, or edit the HTML.</sub></td>
+    <td width="50%"><img src="screenshots/production-graphics.png" /><br/><sub><b>Brackets & graphics</b> — pull a start.gg tournament and push a live bracket overlay (single/double elim, round-robin, swiss).</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="screenshots/events.png" /><br/><sub><b>Esports & tournaments</b> — search any start.gg event or load the ones you admin; manage leagues, your events, and seeding.</sub></td>
+    <td width="50%"><img src="screenshots/talent.png" /><br/><sub><b>Team & crew library</b> — saved teams with logos and rosters, import/export, plus a crew tab for casters and on-air talent.</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="screenshots/editor.png" /><br/><sub><b>Replay & video editor</b> — trim OBS replay-buffer clips, build playlists, push to air, or encode montages.</sub></td>
+    <td width="50%"><img src="screenshots/brand-profiles.png" /><br/><sub><b>Brand & sponsor kits</b> — per-game overlay themes, team colors/logos, and sellable sponsor slots that recolor every overlay at once.</sub></td>
+  </tr>
+</table>
+
+### Multi-monitor pop-outs
+Detach the match panel, talent/VDO director control, and more into separate windows for a real production setup.
+
+<p align="center"><img src="screenshots/popout-tabs.png" width="90%" /></p>
 
 ---
 
@@ -39,24 +51,32 @@ Run the installer, launch the app from your desktop shortcut, then add the overl
 | Game | Data Source | HUD |
 |------|------------|-----|
 | Rocket League | Official Stats API (TCP port 49123) | Live scoreboard, boost, goal replays |
-| CS2 | GSI (Game State Integration) | Minimap radar, scoreboard, round HUD |
-| Valorant, Overwatch 2, Apex, and more | Manual / team config | Score, series, team branding |
+| CS2 | GSI (Game State Integration) | Auto-zoom minimap radar, scoreboard, round/economy HUD |
+| Valorant | Manual / live polling | Round scorebar, agents, spike, economy |
+| Overwatch 2 | Manual / team config | Hero line-up, objective + score HUD |
+| Marvel Rivals | Manual / team config | Hero roster + objective scorebar |
+| Apex, and more | Manual / team config | Score, series, team branding |
+
+A unified **auto-game HUD** follows whichever game is active, so you can run a multi-title event from one layout.
 
 ---
 
 ## Features
 
-- **Live overlays** — scoreboard, player HUD, boost meters, kill feed, minimap radar
-- **Control panel** — producer cockpit for managing teams, scores, series, and branding live
-- **OBS integration** — auto-generates a full scene collection with all overlays wired up
-- **Map veto** — guided pick/ban system with per-game pool and format support
-- **Replay system** — OBS replay buffer integration with clip editor, playlists, and montage export
-- **AI Production Director** — detects key moments and auto-switches OBS scenes
-- **Brand kits** — team logos, sponsor banners, color palettes, per-kit overlay themes
-- **Twitch integration** — live viewer count, ad break management, chat, EventSub
-- **start.gg integration** — pull tournament brackets, team rosters, and event data
-- **In-app bug reporter** — sends reports with screenshots directly to our Discord
-- **Auto-update** — notifies you and installs updates from GitHub Releases automatically
+- **Producer dashboard** — one cockpit for teams, scores, series, branding, timers, and OBS scene switching
+- **Live overlays** — scoreboards, player HUDs, boost meters, kill feeds, CS2 minimap radar, lower-thirds, tickers
+- **OBS integration** — auto-generates a full scene collection with every overlay wired up; obs-websocket control
+- **start.gg integration** — pull brackets, rosters, seeding, and live scores; admin your own tournaments and leagues
+- **Brackets** — live bracket overlay supporting single/double elimination, round-robin, and swiss
+- **Map veto** — guided pick/ban with per-game pools and formats
+- **Replays & montages** — OBS replay-buffer capture, 3-pane clip editor, playlists, and background montage encoding
+- **AI Production Director (Neural AI)** — detects key moments and auto-switches OBS scenes, with auto-clipping and an instant "AI Shield" pause
+- **Brand & sponsor kits** — per-game overlay themes, team palettes, and sellable sponsor placements (rail, banner, replay, scoreboard…)
+- **Talent & VDO rooms** — per-team private VDO.ninja rooms and per-gamertag feeds for remote casters and players
+- **Spotlight & Teams-to-Watch** — broadcast showcase cards driven by start.gg placements and live stats
+- **Twitch integration** — viewer count, ad-break management, chat, predictions, polls, EventSub
+- **Multi-monitor pop-outs** — detach panels into separate windows for a multi-display gallery setup
+- **Auto-update** — checks GitHub Releases and installs updates from inside the app
 
 ---
 
@@ -71,7 +91,7 @@ After launching the app, add these as **Browser Sources** in OBS (1920×1080):
 | Map veto screen | `http://localhost:3000/mapscreen.html` |
 | Bracket | `http://localhost:3000/bracket.html` |
 
-Or use **Settings → OBS → Install Scene Collection** in the control panel to generate a complete OBS scene collection automatically.
+Every overlay's URL is listed under **Assets → Overlays** with one-click copy/preview. Or use the control panel to **install a complete OBS scene collection** automatically — desk cams, breaks, replays, and HUDs all pre-wired.
 
 ---
 
@@ -96,6 +116,8 @@ Add a GSI config file to enable game state data:
 2. Paste the contents from `cs2-spectator.cfg` in this repo
 3. Restart CS2
 
+The minimap defaults to a built-in auto-zoom radar — no extra tools needed.
+
 ---
 
 ## Development
@@ -104,26 +126,18 @@ Add a GSI config file to enable game state data:
 git clone https://github.com/armour-studios/NEBroadcastSuite.git
 cd NEBroadcastSuite
 npm install
-cp .env.example .env.local   # fill in your credentials
+cp .env.example .env.local   # optional — for local Twitch/Discord app credentials
 npm run dev
 ```
 
 **Requirements:** Node.js 18+, Windows 10/11
 
-### Environment Variables
-
-See `.env.example` for all available variables. Key ones:
-
-| Variable | Purpose |
-|----------|---------|
-| `BUG_REPORT_WEBHOOK` | Discord webhook for in-app bug reports |
-| `TWITCH_CLIENT_ID` | Twitch app client ID |
-| `TWITCH_CLIENT_SECRET` | Twitch app client secret |
+End-user builds ship **no secrets** — Discord/Twitch sign-in runs through the hosted backend, so the installer only carries public client IDs. `.env.local` is only needed for local development of the auth flows.
 
 ### Build
 
 ```bash
-npm run build          # builds installer to dist/
+npm run build          # builds the installer to dist/
 npm run release        # builds and publishes to GitHub Releases
 ```
 
