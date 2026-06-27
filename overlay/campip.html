@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<!--
+  campip.html — caster cam(s) "picture-in-picture" over live gameplay. Transparent;
+  drops 1–2 framed caster cams in a corner with name plates. No desk/scorebar (the HUD
+  carries that). Shares duorow.html's design language; driven by full_state on WS :3001.
+
+  ?pos=br|bl|tr|tl   corner (default br — bottom-right)
+  ?cams=off          frames-only (composite each cam as its own OBS source over the holes)
+  Casters: slots 1 & 2.
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <link rel="stylesheet" href="/fonts.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+  <style>
+    :root {
+      --duo-surface: #1a1d24; --duo-surface2: #20242e; --duo-border: #2e3340;
+      --duo-accent: #e83a8b; --duo-accent2: #8b5cf6; --duo-muted: #8b93a8;
+      --pip-w: 360px; --pip-plate-h: 44px; --pip-margin: 40px;
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { width: 1920px; height: 1080px; overflow: hidden; background: transparent;
+      font-family: 'Inter', system-ui, sans-serif; color: #e8eaf0; -webkit-font-smoothing: antialiased; }
+
+    .pip { position: fixed; display: flex; flex-direction: column; gap: 14px; z-index: 5; }
+    /* Corner positions */
+    .pip.pos-br { right: var(--pip-margin); bottom: var(--pip-margin); align-items: flex-end; }
+    .pip.pos-bl { left: var(--pip-margin); bottom: var(--pip-margin); align-items: flex-start; }
+    .pip.pos-tr { right: var(--pip-margin); top: var(--pip-margin); align-items: flex-end; }
+    .pip.pos-tl { left: var(--pip-margin); top: var(--pip-margin); align-items: flex-start; }
+
+    .pip-cam { width: var(--pip-w); border-radius: 12px; overflow: hidden; border: 1px solid var(--duo-border);
+      background: var(--duo-surface); box-shadow: 0 18px 44px rgba(0,0,0,.55); display: flex; flex-direction: column;
+      opacity: 0; }
+    .pip-cam::before { content: ''; display: block; height: 3px; flex: 0 0 auto; background: linear-gradient(90deg, var(--duo-accent), var(--duo-accent2)); }
+    .pip-hole { position: relative; width: 100%; aspect-ratio: 16 / 9; background: #0d0f14; overflow: hidden; }
+    .pip-hole iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+    .pip-plate { display: flex; align-items: center; justify-content: center; gap: 11px; height: var(--pip-plate-h); flex: 0 0 var(--pip-plate-h);
+      padding: 0 16px; background: linear-gradient(180deg, var(--duo-surface2), var(--duo-surface)); border-top: 1px solid var(--duo-border); }
+    .pip-name { font-size: 18px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .pip-handle { font-size: 13px; font-weight: 600; color: #9aa3b8; }
+    .pip-handle::before { font-family: 'Font Awesome 6 Brands'; font-weight: 400; margin-right: 6px; }
+    .pip-handle.twitch::before { content: "\f1e8"; color: #9146ff; } .pip-handle.youtube::before { content: "\f167"; color: #ff0033; }
+    .pip-handle.x-twitter::before { content: "\e61b"; color: #e8eaf0; } .pip-handle.instagram::before { content: "\f16d"; color: #e1306c; }
+    .pip-handle.tiktok::before { content: "\e07b"; color: #25f4ee; } .pip-handle.discord::before { content: "\f392"; color: #5865f2; }
+    .pip-handle.facebook::before { content: "\f09a"; color: #1877f2; }
+    .pip-handle.kick::before { content: "K"; font-family: 'Inter', sans-serif; font-weight: 900; color: #53fc18; }
+    .pip-handle.link::before { content: "\f0c1"; font-family: 'Font Awesome 6 Free'; font-weight: 900; color: var(--duo-muted); }
+
+    /* Slide-in from the nearest edge */
+    .pip.show.pos-br .pip-cam, .pip.show.pos-tr .pip-cam { animation: inR .6s cubic-bezier(.16,.84,.24,1) forwards; }
+    .pip.show.pos-bl .pip-cam, .pip.show.pos-tl .pip-cam { animation: inL .6s cubic-bezier(.16,.84,.24,1) forwards; }
+    .pip-cam:nth-child(2) { animation-delay: .12s !important; }
+    @keyframes inR { from { opacity: 0; transform: translateX(60px) scale(.96); } to { opacity: 1; transform: none; } }
+    @keyframes inL { from { opacity: 0; transform: translateX(-60px) scale(.96); } to { opacity: 1; transform: none; } }
+
+    .preview .pip-hole { background: repeating-linear-gradient(45deg, #181b22, #181b22 16px, #20242e 16px, #20242e 32px); }
+    .preview .pip-hole::after { content: 'CAM'; position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 24px; font-weight: 800; letter-spacing: .3em; color: #4a5162; }
+    .preview .pip-hole iframe { position: relative; z-index: 1; }
+  </style>
+</head>
+<body>
+  <div id="pip" class="pip pos-br"></div>
+
+  <script src="scene-base.js"></script>
+  <script>
+    function el(id) { return document.getElementById(id); }
+    const qp = new URLSearchParams(location.search);
+    const POS = (['br', 'bl', 'tr', 'tl'].includes((qp.get('pos') || '').toLowerCase())) ? qp.get('pos').toLowerCase() : 'br';
+    const NO_CAMS = qp.get('cams') === 'off';
+    const MAX = Math.max(1, Math.min(3, parseInt(qp.get('count') || '2', 10) || 2));
+    el('pip').className = 'pip pos-' + POS;
+    let _sig = '';
+
+    function applyBrandTheme(data) {
+      const root = document.documentElement;
+      const color = SceneBase.brandColor(data), accent2 = SceneBase.brandAccent(data);
+      if (color) root.style.setProperty('--duo-accent', color);
+      if (accent2) root.style.setProperty('--duo-accent2', accent2);
+      if (data.fontFamily) root.style.fontFamily = `'${data.fontFamily}', 'Inter', system-ui, sans-serif`;
+    }
+
+    function render(data) {
+      data = data || {};
+      applyBrandTheme(data);
+      const casters = data.casters || {};
+      const pip = el('pip');
+      const show = SceneBase.casterStageVisible(casters);
+      pip.classList.toggle('show', show);
+
+      // Active casters (have a name or a cam), capped.
+      const list = (Array.isArray(casters.list) ? casters.list : [])
+        .filter(c => c && (c.name || c.camUrl))
+        .sort((a, b) => (Number(a.slot) || 9) - (Number(b.slot) || 9))
+        .slice(0, MAX);
+
+      const sig = JSON.stringify(list.map(c => ({ n: c.name, h: c.handle, s: c.social, u: NO_CAMS ? '' : c.camUrl })));
+      if (sig === _sig) return;
+      _sig = sig;
+
+      pip.innerHTML = '';
+      list.forEach(c => {
+        const handle = SceneBase.formatCasterHandle(c), social = (c.social || 'none').toString().toLowerCase();
+        const socHtml = (handle && social !== 'none') ? `<span class="pip-handle ${SceneBase.socialPlatformClass(social)}">${handle.replace(/</g, '&lt;')}</span>` : '';
+        const card = document.createElement('div');
+        card.className = 'pip-cam';
+        card.innerHTML = `<div class="pip-hole"></div><div class="pip-plate"><span class="pip-name">${(c.name || '—').toString().replace(/</g, '&lt;')}</span>${socHtml}</div>`;
+        const camUrl = (!NO_CAMS && (c.camUrl || '').trim()) || '';
+        if (camUrl) {
+          const iframe = document.createElement('iframe');
+          iframe.src = camUrl;
+          iframe.setAttribute('allow', 'autoplay; encrypted-media; microphone; camera; fullscreen');
+          iframe.referrerPolicy = 'no-referrer';
+          card.querySelector('.pip-hole').appendChild(iframe);
+        }
+        pip.appendChild(card);
+      });
+    }
+
+    if (location.protocol === 'file:') {
+      document.documentElement.classList.add('preview');
+      render({
+        casters: { visible: true, list: [
+          { id: 'c1', name: 'Jordan Reyes', handle: 'jreyescasts', slot: 1, social: 'x' },
+          { id: 'c2', name: 'Mia Tanaka', handle: 'miaplays', slot: 2, social: 'twitch' } ] },
+        brand: { color: '#7c3aed', accent: '#22d3ee' }
+      });
+    } else {
+      SceneBase.connect(render);
+    }
+  </script>
+</body>
+</html>

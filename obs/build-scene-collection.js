@@ -1,17 +1,25 @@
 /**
- * NE Broadcast Suite — OBS Scene Collection Generator v2
+ * NE Broadcast Suite — OBS Scene Collection Generator v3
  *
- * BGG-style layout: three cam-framing scenes (=> Host Cam / => Caster 1 Cam / => Caster 2 Cam)
- * are created as self-contained "utility" scenes and auto-embedded in all caster desk layouts:
- *   DuoCam Row     — Caster 1 left, Caster 2 right
- *   TrioCam Row    — Caster 1 | Caster 2 | Host (three equal slots)
- *   Analyst Desk   — Caster 1 & 2 small (left column), Host large (right)
- *   Duo SingleCam  — Caster 1 fills screen
+ * Generates the downloadable OBS scene collection that mirrors the suite's overlay set:
+ *   • Pre-game / break — Away, Countdown, Map Veto, Draft, Matchup, Team Intros,
+ *     Upcoming, Standings, Bracket
+ *   • Live — In Game (Game Capture + per-game HUD stack: RL / CS2 / Valorant / Overwatch /
+ *     Marvel Rivals), In Game — Cam PIP, In Game — Talent Bar, Replay
+ *   • Desk / casters — SingleCam, DuoCam Row, TrioCam Row, Quad Desk, Analyst Desk,
+ *     Duo SingleCam, Spotlight Desk, Interview, Post-Game (Winner)
+ *   • Utility — => Host/Caster 1/2/4 Cam framing scenes (one VDO.ninja feed each)
+ *   • Draggable add-ons (sources only) — Sponsor Banner, Listen-In Captions, Interviewee Cam
  *
- * Replacing an NDI source: swap the VDO.ninja URL directly inside the => Cam scene;
- * every layout that embeds it updates instantly — no re-cropping needed.
+ * CAMERA MODEL (the "holes" in the desk overlays):
+ *   combined  (DEFAULT) — each desk overlay embeds the caster cams itself from the
+ *     control-panel cam URLs. Pixel-perfect, no per-scene setup, one audio fader.
+ *   separated — desk overlays run frames-only (?cams=off) and the => Cam scenes are
+ *     framed in behind each hole for a per-caster OBS audio fader.
  *
- * CLI:  node obs/build-scene-collection.js [--host-url=URL] [--caster1-url=URL] [--caster2-url=URL]
+ * CLI:  node obs/build-scene-collection.js [--audio-mode=combined|separated]
+ *                 [--host-url=URL] [--caster1-url=URL] [--caster2-url=URL] [--caster4-url=URL]
+ *                 [--bg-path=FILE] [--stinger=FILE]
  * API:  const { generateSceneCollection } = require('./obs/build-scene-collection')
  */
 
@@ -105,7 +113,7 @@ function itemList() {
     pos     = { x: 0.0, y: 0.0 },
     scale   = { x: 1.0, y: 1.0 },
     bounds  = { x: 0.0, y: 0.0 },
-    boundsType  = 0,          // 0=none 1=stretch 2=scale-outer 3=scale-inner
+    boundsType  = 0,          // OBS enum: 0=none 1=stretch 2=scale-inner(fit) 3=scale-outer(cover/fill)
     crop        = [0, 0, 0, 0], // [left, top, right, bottom]
     colorPreset = 0,
     showMs = 0, hideMs = 0,
@@ -156,14 +164,19 @@ function makeScene(name, items, {
 }
 
 // ─── Main generator ───────────────────────────────────────────────────────────
+// Camera workflow (always "separated"):
+//   Each desk overlay runs with ?cams=off — cam holes are fully transparent.
+//   The => Caster N Cam utility scenes sit behind the overlay in OBS at the exact
+//   pixel coordinates of each hole. By default each => Cam scene contains a
+//   castercam.html?slot=N browser source that auto-updates when caster assignments
+//   change in the control panel. Users can swap the browser source for any OBS
+//   source (Discord webcam, window capture, NDI, etc.) without rebuilding the collection.
 function generateSceneCollection({
   name           = COLLECTION_NAME,
-  hostCamUrl     = '',    // VDO.ninja view URL for the Host / Analyst
-  caster1CamUrl  = '',    // VDO.ninja view URL for Caster 1
-  caster2CamUrl  = '',    // VDO.ninja view URL for Caster 2
   stingerPath    = '',    // local .webm stinger path (optional)
   backgroundPath = '',    // local looping background video path (optional)
 } = {}) {
+  const co = '?cams=off';   // overlays always run frames-only; cams come from OBS utility scenes
 
   // ── Shared media / capture sources ─────────────────────────────────────────
   const bgLoop      = makeMediaLoop('Background Loop', backgroundPath);
@@ -172,34 +185,62 @@ function generateSceneCollection({
     'Rocket League (64-bit, DX11, Cooked):LaunchUnrealUWindowsClient:RocketLeague.exe'
   );
 
-  // ── Camera browser sources (raw VDO.ninja feeds) ──────────────────────────
-  // These live ONLY inside the => Cam framing scenes.
-  // To swap a caster's feed: change the URL in the framing scene; all layouts update.
-  const vdoHost    = makeBrowser('[VDO] Host',     hostCamUrl    || 'https://vdo.ninja/?view=HOST_STREAM_ID');
-  const vdoCaster1 = makeBrowser('[VDO] Caster 1', caster1CamUrl || 'https://vdo.ninja/?view=CASTER1_STREAM_ID');
-  const vdoCaster2 = makeBrowser('[VDO] Caster 2', caster2CamUrl || 'https://vdo.ninja/?view=CASTER2_STREAM_ID');
+  // ── Camera browser sources (stable per-slot caster feeds) ─────────────────
+  // These live ONLY inside the => Cam framing scenes. Each is a PERMANENT browser source
+  // pointed at castercam.html?slot=N — the page resolves whichever caster is currently
+  // assigned to that desk slot over WS and renders their live VDO.ninja view. The OBS URL
+  // never changes, so swapping rooms / custom view links / re-assigning casters just works
+  // with NO need to regenerate or reinstall the collection. (Slot map: 1=C1 2=C2 3=Host 4=C4.)
+  const vdoHost    = makeBrowser('[CAM] Host (slot 3)',     '/castercam.html?slot=3');
+  const vdoCaster1 = makeBrowser('[CAM] Caster 1 (slot 1)', '/castercam.html?slot=1');
+  const vdoCaster2 = makeBrowser('[CAM] Caster 2 (slot 2)', '/castercam.html?slot=2');
+  const vdoCaster4 = makeBrowser('[CAM] Caster 4 (slot 4)', '/castercam.html?slot=4');
 
-  // ── HTML overlay browser sources ──────────────────────────────────────────
-  const gfxRlHud      = makeBrowser('[GFX] RL Overlay',    '/rl-hud.html');
-  const gfxCs2Hud     = makeBrowser('[GFX] CS2 Overlay',   '/csgo.html');
-  const gfxDuoRow     = makeBrowser('[GFX] Duo Row',        '/duorow.html');
-  const gfxTrioRow    = makeBrowser('[GFX] Trio Row',       '/triorow.html');
-  const gfxDuoSingle  = makeBrowser('[GFX] Duo SingleCam',  '/duosinglecam.html');
-  const gfxAnalyst    = makeBrowser('[GFX] Analyst Desk',   '/analystspecial.html');
-  const gfxAway       = makeBrowser('[GFX] Away Screen',    '/awayfull.html',          { restart: true, shutdown: true });
+  // ── Game HUD overlay sources (transparent, sit over Game Capture) ──────────
+  const gfxRlHud   = makeBrowser('[GFX] RL HUD',            '/rl-hud.html');
+  const gfxCs2Hud  = makeBrowser('[GFX] CS2 HUD',           '/csgo.html');
+  const gfxValHud  = makeBrowser('[GFX] Valorant HUD',      '/valorant.html');
+  const gfxOwHud   = makeBrowser('[GFX] Overwatch HUD',     '/overwatch.html');
+  const gfxMrHud   = makeBrowser('[GFX] Marvel Rivals HUD', '/marvel-rivals.html');
+
+  // ── Caster / desk overlay sources (the holes carry cams) ───────────────────
+  // `co` adds ?cams=off ONLY in separated mode so the overlay leaves its holes clear.
+  const gfxSingle    = makeBrowser('[GFX] SingleCam',      '/singlecam.html' + co);
+  const gfxDuoRow    = makeBrowser('[GFX] Duo Row',        '/duorow.html' + co);
+  const gfxTrioRow   = makeBrowser('[GFX] Trio Row',       '/triorow.html' + co);
+  const gfxDuoSingle = makeBrowser('[GFX] Duo SingleCam',  '/duosinglecam.html' + co);
+  const gfxAnalyst   = makeBrowser('[GFX] Analyst Desk',   '/analystspecial.html' + co);
+  const gfxQuad      = makeBrowser('[GFX] Quad Desk',      '/quaddesk.html' + co);
+  const gfxSpotlight = makeBrowser('[GFX] Spotlight Desk', '/spotlightdesk.html' + co);
+  const gfxInterview = makeBrowser('[GFX] Interview',      '/interview.html' + co);
+  // Cams embedded always (responsive / multi-cam layouts — combined cams regardless of mode):
+  const gfxMatchup   = makeBrowser('[GFX] Matchup',        '/matchup.html');
+  const gfxCampip    = makeBrowser('[GFX] Cam PIP',        '/campip.html');
+  const gfxTalentbar = makeBrowser('[GFX] Talent Bar',     '/talentbar.html');
+
+  // ── Full-screen graphic sources ────────────────────────────────────────────
+  const gfxAway       = makeBrowser('[GFX] Away Screen',    '/countdown.html',         { restart: true, shutdown: true });
   const gfxCountdown  = makeBrowser('[GFX] Countdown',      '/countdown.html',         { restart: true, shutdown: true });
   const gfxWinner     = makeBrowser('[GFX] Winner',         '/winner.html',            { restart: true, shutdown: true });
   const gfxTeam1      = makeBrowser('[GFX] Team 1 Intro',   '/intro.html?side=blue',   { restart: true, shutdown: true });
   const gfxTeam2      = makeBrowser('[GFX] Team 2 Intro',   '/intro.html?side=orange', { restart: true, shutdown: true });
   const gfxMapVeto    = makeBrowser('[GFX] Map Veto',        '/mapscreen.html',         { restart: true, shutdown: true });
+  const gfxDraft      = makeBrowser('[GFX] Draft',           '/draft.html');
   const gfxBracket    = makeBrowser('[GFX] Bracket',         '/bracket.html');
+  const gfxUpcoming   = makeBrowser('[GFX] Upcoming',        '/upcoming.html');
+  const gfxStandings  = makeBrowser('[GFX] Standings',       '/standings.html');
   const gfxReplay     = makeBrowser('[GFX] Replay',          '/replay.html',            { restart: true, shutdown: true });
   const gfxTransition = makeBrowser('[GFX] Transition',      '/transitionbgg.html',     { restart: true, shutdown: true });
 
-  // ── Cam framing scenes (=> Host Cam / => Caster 1 Cam / => Caster 2 Cam) ─
-  // Pattern matches BGG Overlay's "=> Caster N NDI Framing" scenes.
-  // Each is a full-canvas scene containing ONE camera feed (VDO.ninja browser source).
-  // Embedded into caster desk layouts with specific crop + scale per slot.
+  // ── Draggable add-on overlays (no dedicated scene; drop onto any scene) ─────
+  const gfxSponsor  = makeBrowser('[GFX] Sponsor Banner',   '/sponsor-banner.html');
+  const gfxListenIn = makeBrowser('[GFX] Listen-In Captions', '/listen-in.html');
+  const gfxIntCam   = makeBrowser('[GFX] Interviewee Cam',  '/int-cam.html');
+
+  // ── Cam framing scenes (=> Host Cam / => Caster 1 Cam / …) ─────────────────
+  // Each is a full-canvas scene containing ONE camera feed (VDO.ninja browser source),
+  // embedded into desk layouts with per-slot crop + scale. Always shipped so a producer
+  // can hand-place a cam anywhere; used automatically by the desks in separated mode.
   function camScene(sceneName, vdoSrc) {
     const il = itemList();
     il.add(vdoSrc.name, vdoSrc.uuid, { locked: false, ...FULL_INNER });
@@ -209,149 +250,155 @@ function generateSceneCollection({
   const sceneHostCam    = camScene('=> Host Cam',     vdoHost);
   const sceneCaster1Cam = camScene('=> Caster 1 Cam', vdoCaster1);
   const sceneCaster2Cam = camScene('=> Caster 2 Cam', vdoCaster2);
+  const sceneCaster4Cam = camScene('=> Caster 4 Cam', vdoCaster4);
 
-  // ── In Game ────────────────────────────────────────────────────────────────
-  // Game capture bottom, RL overlay on top; CS2 overlay hidden (toggle per game).
-  {
-    const il = itemList();
-    il.add(gameCapture.name, gameCapture.uuid, { locked: false, ...FULL });
-    il.add(gfxRlHud.name,    gfxRlHud.uuid,   { locked: false, ...FULL });
-    il.add(gfxCs2Hud.name,   gfxCs2Hud.uuid,  { locked: false, visible: false, ...FULL, showMs: 300, hideMs: 300 });
-    var sceneInGame = makeScene('In Game', il.get(), { transitionMs: 500 });
-  }
-
-  // ── DuoCam Row ─────────────────────────────────────────────────────────────
-  // Two casters side-by-side in a lower-third frame.
-  // Crop [320,180,320,180] extracts the 1280×720 centre of the 1920×1080 cam scene.
-  const DUO_CROP = [320, 180, 320, 180];
-  {
-    const il = itemList();
-    il.add(bgLoop.name,           bgLoop.uuid,            { ...FULL,        colorPreset: 5 });
-    il.add(sceneCaster1Cam.name,  sceneCaster1Cam.uuid,   {
-      pos: { x: 86, y: 276 }, scale: { x: 0.6625, y: 0.6625 }, bounds: { x: 1, y: 1 },
-      crop: DUO_CROP, colorPreset: 4,
-    });
-    il.add(sceneCaster2Cam.name,  sceneCaster2Cam.uuid,   {
-      pos: { x: 986, y: 276 }, scale: { x: 0.6625, y: 0.6625 }, bounds: { x: 1, y: 1 },
-      crop: DUO_CROP, colorPreset: 4,
-    });
-    il.add(gfxDuoRow.name,        gfxDuoRow.uuid,         { ...FULL,        colorPreset: 7 });
-    il.add(gfxTransition.name,    gfxTransition.uuid,     { ...FULL_STRETCH,colorPreset: 6 });
-    var sceneDuoCam = makeScene('DuoCam Row', il.get(), { transitionMs: 300 });
-  }
-
-  // ── TrioCam Row ────────────────────────────────────────────────────────────
-  // Three equal-width slots: Caster 1 | Caster 2 | Host.
-  // Crop [480,180,480,180] extracts the 960×720 centre of each cam scene.
-  const TRIO_CROP = [480, 180, 480, 180];
-  {
-    const il = itemList();
-    il.add(bgLoop.name,          bgLoop.uuid,           { ...FULL,        colorPreset: 5 });
-    il.add(sceneCaster1Cam.name, sceneCaster1Cam.uuid,  {
-      pos: { x: 98,   y: 312 }, scale: { x: 0.5625, y: 0.5625 }, bounds: { x: 1, y: 1 },
-      crop: TRIO_CROP, colorPreset: 4,
-    });
-    il.add(sceneCaster2Cam.name, sceneCaster2Cam.uuid,  {
-      pos: { x: 690,  y: 312 }, scale: { x: 0.5625, y: 0.5625 }, bounds: { x: 1, y: 1 },
-      crop: TRIO_CROP, colorPreset: 4,
-    });
-    il.add(sceneHostCam.name,    sceneHostCam.uuid,     {
-      pos: { x: 1282, y: 312 }, scale: { x: 0.5625, y: 0.5625 }, bounds: { x: 1, y: 1 },
-      crop: TRIO_CROP, colorPreset: 4,
-    });
-    il.add(gfxTrioRow.name,      gfxTrioRow.uuid,       { ...FULL,        colorPreset: 7 });
-    il.add(gfxTransition.name,   gfxTransition.uuid,    { ...FULL, visible: false, colorPreset: 6 });
-    var sceneTrioCam = makeScene('TrioCam Row', il.get(), { transitionMs: 300 });
-  }
-
-  // ── Analyst Desk ───────────────────────────────────────────────────────────
-  // Host large (right), Caster 1 top-left small, Caster 2 bottom-left small.
-  const ANALYST_CROP = [320, 180, 320, 180];
-  {
-    const il = itemList();
-    il.add(bgLoop.name,          bgLoop.uuid,           { ...FULL,        colorPreset: 5 });
-    il.add(sceneCaster1Cam.name, sceneCaster1Cam.uuid,  {
-      pos: { x: 125, y: 194 }, scale: { x: 0.375, y: 0.375 }, bounds: { x: 1, y: 1 },
-      crop: ANALYST_CROP, colorPreset: 4,
-    });
-    il.add(sceneCaster2Cam.name, sceneCaster2Cam.uuid,  {
-      pos: { x: 125, y: 559 }, scale: { x: 0.375, y: 0.375 }, bounds: { x: 1, y: 1 },
-      crop: ANALYST_CROP, colorPreset: 4,
-    });
-    il.add(sceneHostCam.name,    sceneHostCam.uuid,     {
-      pos: { x: 659, y: 195 }, scale: { x: 0.8875, y: 0.8875 }, bounds: { x: 1, y: 1 },
-      crop: ANALYST_CROP, colorPreset: 4,
-    });
-    il.add(gfxAnalyst.name,      gfxAnalyst.uuid,       { ...FULL,        colorPreset: 7 });
-    il.add(gfxTransition.name,   gfxTransition.uuid,    { ...FULL, visible: false, colorPreset: 6 });
-    var sceneAnalyst = makeScene('Analyst Desk', il.get(), { transitionMs: 300 });
-  }
-
-  // ── Duo SingleCam ──────────────────────────────────────────────────────────
-  // Caster 1 fills screen at 1.5× zoom (centre-cropped to face).
-  {
-    const il = itemList();
-    il.add(bgLoop.name,           bgLoop.uuid,           { ...FULL,         colorPreset: 5 });
-    il.add(sceneCaster1Cam.name,  sceneCaster1Cam.uuid,  {
-      pos: { x: 0, y: 0 }, scale: { x: 1.5, y: 1.5 }, bounds: { x: 1, y: 1 },
-      crop: [320, 180, 320, 180], colorPreset: 4,
-    });
-    il.add(gfxDuoSingle.name,     gfxDuoSingle.uuid,    { ...FULL,         colorPreset: 7 });
-    il.add(gfxTransition.name,    gfxTransition.uuid,   { ...FULL_STRETCH, visible: false, colorPreset: 6 });
-    var sceneDuoSingle = makeScene('Duo SingleCam', il.get(), { transitionMs: 300 });
-  }
-
-  // ── Simple full-screen overlay scenes ─────────────────────────────────────
+  // ── Generic helpers ─────────────────────────────────────────────────────────
+  // Full-screen graphic over the looping background.
   function simpleScene(sceneName, gfxSrc, transMs, multiview = true) {
     const il = itemList();
-    il.add(bgLoop.name,   bgLoop.uuid,   { ...FULL,         colorPreset: 5 });
-    il.add(gfxSrc.name,   gfxSrc.uuid,  { ...FULL_STRETCH, colorPreset: 7 });
+    il.add(bgLoop.name,  bgLoop.uuid,  { ...FULL,         colorPreset: 5 });
+    il.add(gfxSrc.name,  gfxSrc.uuid,  { ...FULL_STRETCH, colorPreset: 7 });
     return makeScene(sceneName, il.get(), { transitionMs: transMs, showInMultiview: multiview });
   }
 
-  const sceneAway      = simpleScene('Away / Standby',     gfxAway,      500);
-  const sceneCountdown = simpleScene('Break (Countdown)',   gfxCountdown, 300);
-  const sceneWinner    = simpleScene('Post-Game (Winner)',  gfxWinner,    500);
-  const sceneTeam1     = simpleScene('Team 1 Intro',        gfxTeam1,     500, false);
-  const sceneTeam2     = simpleScene('Team 2 Intro',        gfxTeam2,     500, false);
-  const sceneMapVeto   = simpleScene('Map Veto',             gfxMapVeto,   500);
-  const sceneBracket   = simpleScene('Bracket',              gfxBracket,   300);
-  const sceneReplay    = simpleScene('Replay',               gfxReplay,    500, false);
+  // Caster desk: background → cam utility scenes (behind holes) → overlay graphic → transition.
+  // The overlay HTML runs with ?cams=off so its cam holes are transparent; the utility scenes
+  // show through. Users can swap the browser source in any => Cam scene for Discord, NDI, etc.
+  function deskScene(sceneName, gfxSrc, addCams) {
+    const il = itemList();
+    il.add(bgLoop.name, bgLoop.uuid, { ...FULL, colorPreset: 5 });
+    if (addCams) addCams(il);
+    il.add(gfxSrc.name, gfxSrc.uuid, { ...FULL, colorPreset: 7 });
+    il.add(gfxTransition.name, gfxTransition.uuid, { ...FULL_STRETCH, visible: false, colorPreset: 6 });
+    return makeScene(sceneName, il.get(), { transitionMs: 300 });
+  }
 
-  // Divider — blank separator in the OBS scene list
-  const sceneDivider = makeScene('____________________', [], { showInMultiview: false });
+  // Gameplay scene: Game Capture on the bottom, a stack of game HUDs (only `active` shown),
+  // plus optional extra overlay layers (PIP cams / talent bar) on top.
+  function gameScene(sceneName, activeHud, extras = []) {
+    const huds = [gfxRlHud, gfxCs2Hud, gfxValHud, gfxOwHud, gfxMrHud];
+    const il = itemList();
+    il.add(gameCapture.name, gameCapture.uuid, { locked: false, ...FULL });
+    huds.forEach(h => il.add(h.name, h.uuid, { locked: false, visible: h === activeHud, ...FULL, showMs: 300, hideMs: 300 }));
+    extras.forEach(x => il.add(x.name, x.uuid, { ...FULL, colorPreset: 7 }));
+    return makeScene(sceneName, il.get(), { transitionMs: 500 });
+  }
+
+  // ── Gameplay scenes ──────────────────────────────────────────────────────
+  const sceneInGame   = gameScene('In Game', gfxRlHud);                    // un-hide your game's HUD
+  const scenePipCams  = gameScene('In Game — Cam PIP', gfxRlHud, [gfxCampip]);
+  const sceneTalent   = gameScene('In Game — Talent Bar', gfxRlHud, [gfxTalentbar]);
+  const sceneReplay   = simpleScene('Replay', gfxReplay, 500, false);
+
+  // ── Caster / desk scenes ─────────────────────────────────────────────────
+  // Separated-mode hole geometry. Each cam scene (a full 16:9 source) is COVER-framed into the
+  // exact transparent hole the overlay renders, so it fills the hole and any overflow is hidden
+  // behind the opaque desk graphic on top. The rectangles below were measured from the live
+  // overlays at 1920×1080 (?cams=off) — see _measure-holes.js / scene-base.js ?guide=1.
+  //   bounds_type 3 = OBS SCALE_OUTER (cover/fill, crop overflow). pos = hole top-left, bounds = hole size.
+  const frame = (x, y, w, h) => ({ pos: { x, y }, scale: { x: 1, y: 1 }, bounds: { x: w, y: h }, boundsType: 3, colorPreset: 4 });
+
+  const sceneSingle = deskScene('SingleCam', gfxSingle, il => {
+    il.add(sceneCaster1Cam.name, sceneCaster1Cam.uuid, frame(371, 238, 1178, 673));
+  });
+  const sceneDuoCam = deskScene('DuoCam Row', gfxDuoRow, il => {
+    il.add(sceneCaster1Cam.name, sceneCaster1Cam.uuid, frame(24,  248, 928, 522));
+    il.add(sceneCaster2Cam.name, sceneCaster2Cam.uuid, frame(968, 248, 928, 522));
+  });
+  const sceneTrioCam = deskScene('TrioCam Row', gfxTrioRow, il => {
+    il.add(sceneCaster1Cam.name, sceneCaster1Cam.uuid, frame(25,   160, 611, 843));
+    il.add(sceneCaster2Cam.name, sceneCaster2Cam.uuid, frame(654,  160, 611, 843));
+    il.add(sceneHostCam.name,    sceneHostCam.uuid,    frame(1284, 160, 611, 843));
+  });
+  const sceneQuad = deskScene('Quad Desk', gfxQuad, il => {
+    il.add(sceneCaster1Cam.name, sceneCaster1Cam.uuid, frame(278, 130, 673, 371));
+    il.add(sceneCaster2Cam.name, sceneCaster2Cam.uuid, frame(969, 130, 673, 371));
+    il.add(sceneHostCam.name,    sceneHostCam.uuid,    frame(278, 568, 673, 371));
+    il.add(sceneCaster4Cam.name, sceneCaster4Cam.uuid, frame(969, 568, 673, 371));
+  });
+  const sceneAnalyst = deskScene('Analyst Desk', gfxAnalyst, il => {
+    il.add(sceneCaster1Cam.name, sceneCaster1Cam.uuid, frame(25,  20,  598, 437));
+    il.add(sceneCaster2Cam.name, sceneCaster2Cam.uuid, frame(25,  528, 598, 437));
+    il.add(sceneHostCam.name,    sceneHostCam.uuid,    frame(641, 174, 1254, 705));
+  });
+  const sceneDuoSingle = deskScene('Duo SingleCam', gfxDuoSingle, il => {
+    il.add(sceneCaster1Cam.name, sceneCaster1Cam.uuid, frame(361, 232, 1198, 684));
+  });
+  const sceneSpotlight = deskScene('Spotlight Desk', gfxSpotlight, il => {
+    il.add(sceneCaster1Cam.name, sceneCaster1Cam.uuid, frame(31, 331, 718, 414));
+  });
+  const sceneInterview = deskScene('Interview', gfxInterview, il => {
+    il.add(sceneCaster1Cam.name, sceneCaster1Cam.uuid, frame(29,  268, 917, 526));
+    il.add(sceneCaster2Cam.name, sceneCaster2Cam.uuid, frame(974, 268, 917, 526));
+  });
+  // Matchup embeds its own (small, responsive) caster strip — combined cams regardless of mode.
+  const sceneMatchup = deskScene('Matchup', gfxMatchup, null);
+
+  // ── Pre-game / break / standalone graphic scenes ──────────────────────────
+  const sceneAway      = simpleScene('Away / Standby',     gfxAway,      500);
+  const sceneCountdown = simpleScene('Break (Countdown)',  gfxCountdown, 300);
+  const sceneMapVeto   = simpleScene('Map Veto',           gfxMapVeto,   500);
+  const sceneDraft     = simpleScene('Draft',              gfxDraft,     300);
+  const sceneTeam1     = simpleScene('Team 1 Intro',       gfxTeam1,     500, false);
+  const sceneTeam2     = simpleScene('Team 2 Intro',       gfxTeam2,     500, false);
+  const sceneUpcoming  = simpleScene('Upcoming',           gfxUpcoming,  300);
+  const sceneStandings = simpleScene('Standings',          gfxStandings, 300);
+  const sceneBracket   = simpleScene('Bracket',            gfxBracket,   300);
+  const sceneWinner    = simpleScene('Post-Game (Winner)', gfxWinner,    500);
+
+  // Dividers — blank separators in the OBS scene list
+  const dividerLive  = makeScene('───  LIVE  ───',    [], { showInMultiview: false });
+  const dividerDesk  = makeScene('───  DESK  ───',    [], { showInMultiview: false });
+  const dividerUtil  = makeScene('───  UTILITY  ───', [], { showInMultiview: false });
 
   // ── Scene order ────────────────────────────────────────────────────────────
-  // Production scenes first, utility cam-framing scenes at the bottom (BGG convention).
   const allScenes = [
-    sceneInGame,
-    sceneReplay,
-    sceneCountdown,
-    sceneWinner,
-    sceneDuoCam,
-    sceneTrioCam,
-    sceneAnalyst,
-    sceneDuoSingle,
+    // Pre-game / break
     sceneAway,
+    sceneCountdown,
+    sceneMapVeto,
+    sceneDraft,
+    sceneMatchup,
     sceneTeam1,
     sceneTeam2,
-    sceneMapVeto,
+    sceneUpcoming,
+    sceneStandings,
     sceneBracket,
-    sceneDivider,
-    // ── utility ──
+    // Live
+    dividerLive,
+    sceneInGame,
+    scenePipCams,
+    sceneTalent,
+    sceneReplay,
+    // Desk / casters
+    dividerDesk,
+    sceneSingle,
+    sceneDuoCam,
+    sceneTrioCam,
+    sceneQuad,
+    sceneAnalyst,
+    sceneDuoSingle,
+    sceneSpotlight,
+    sceneInterview,
+    sceneWinner,
+    // Utility — cam framing scenes
+    dividerUtil,
     sceneHostCam,
     sceneCaster1Cam,
     sceneCaster2Cam,
+    sceneCaster4Cam,
   ];
 
   // ── All non-scene sources ─────────────────────────────────────────────────
   const sharedSources = [
     bgLoop, gameCapture,
-    vdoHost, vdoCaster1, vdoCaster2,
-    gfxRlHud, gfxCs2Hud,
-    gfxDuoRow, gfxTrioRow, gfxDuoSingle, gfxAnalyst,
+    vdoHost, vdoCaster1, vdoCaster2, vdoCaster4,
+    gfxRlHud, gfxCs2Hud, gfxValHud, gfxOwHud, gfxMrHud,
+    gfxSingle, gfxDuoRow, gfxTrioRow, gfxDuoSingle, gfxAnalyst, gfxQuad, gfxSpotlight, gfxInterview,
+    gfxMatchup, gfxCampip, gfxTalentbar,
     gfxAway, gfxCountdown, gfxWinner, gfxTeam1, gfxTeam2,
-    gfxMapVeto, gfxBracket, gfxReplay, gfxTransition,
+    gfxMapVeto, gfxDraft, gfxBracket, gfxUpcoming, gfxStandings, gfxReplay, gfxTransition,
+    gfxSponsor, gfxListenIn, gfxIntCam,
   ];
 
   // ── Audio capture stubs ───────────────────────────────────────────────────
@@ -402,10 +449,8 @@ if (require.main === module) {
   );
 
   const collection = generateSceneCollection({
-    hostCamUrl:    args['host-url']    || '',
-    caster1CamUrl: args['caster1-url'] || '',
-    caster2CamUrl: args['caster2-url'] || '',
-    backgroundPath: args['bg-path']    || '',
+    backgroundPath: args['bg-path'] || '',
+    stingerPath:    args['stinger'] || '',
   });
 
   const outPath = path.join(__dirname, 'NE-Broadcast-Suite.json');
@@ -413,11 +458,9 @@ if (require.main === module) {
   console.log(`Wrote ${outPath} — ${collection.scene_order.length} scenes, ${collection.sources.length} sources.`);
   console.log('Import in OBS: Scene Collection → Import → select the .json file.');
   console.log('');
-  console.log('Cam scenes to update after import:');
-  console.log('  => Host Cam     → set [VDO] Host URL to your Host VDO.ninja view link');
-  console.log('  => Caster 1 Cam → set [VDO] Caster 1 URL');
-  console.log('  => Caster 2 Cam → set [VDO] Caster 2 URL');
-  console.log('(Or pass --host-url=, --caster1-url=, --caster2-url= to pre-populate.)');
+  console.log('Each desk scene has the => Caster N Cam utility scenes placed behind the overlay holes.');
+  console.log('By default each cam scene shows the caster assigned in the control panel (castercam.html?slot=N).');
+  console.log('To use Discord/NDI/webcam instead: open the => Caster N Cam scene in OBS and swap the source.');
 }
 
 module.exports = { generateSceneCollection };

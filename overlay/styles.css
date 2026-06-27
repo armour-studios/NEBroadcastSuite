@@ -53,20 +53,26 @@ html, body {
   object-fit: contain;
 }
 
-/* Event text: fits in the top black bar of scoreboard */
+/* Event pill: matches the duorow event bar — sits in the top strip of the scoreboard */
 .event-text {
   position: absolute;
-  top: -1px;
+  top: 3px;
   left: 50%;
   transform: translateX(-50%);
+  display: inline-block;
+  padding: 3px 16px;
+  border-radius: 6px;
   font-family: var(--main-font);
-  font-size: 18px;
-  font-weight: 600;
-  color: #c4c4c4;
+  font-size: 12px;
+  font-weight: 800;
+  color: #fff;
   white-space: nowrap;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.12em;
+  background: linear-gradient(135deg, #e83a8b, #8b5cf6);
+  box-shadow: 0 3px 8px rgba(0,0,0,.45);
 }
+.event-text:empty { display: none; }
 
 /* Logos (Inside the scoreboard) perfectly fitting the hexagon */
 .team-logo {
@@ -216,9 +222,7 @@ img.logo-on-dark {
 }
 
 .scoreboard.view-scoreboard .event-text {
-   font-size: 24px; 
-   color: #bdbdbd; 
-   top: -25px; 
+  top: -25px;
 }
 
 .scoreboard.view-scoreboard .timer,
@@ -696,6 +700,8 @@ img.logo-on-dark {
   letter-spacing: 3px;
   color: #fff;
   background: var(--accent-2);
+  position: relative;   /* sit ABOVE the scrolling track so the text is clipped at the LIVE box */
+  z-index: 2;
 }
 .ticker-track {
   display: inline-flex;
@@ -703,6 +709,8 @@ img.logo-on-dark {
   will-change: transform;
   animation: ticker-scroll linear infinite;
   padding-left: 40px;
+  position: relative;
+  z-index: 1;
 }
 .ticker-segment {
   font-family: var(--main-font);

@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<!--
+  spotlightdesk.html — player spotlight desk: an analyst caster cam beside a featured
+  player card with live stats (goals/assists/saves/shots/score). Featured player comes
+  from data.spotlight.playerName (or data.spectatedPlayer), matched in data.players.
+  Shares duorow.html's design language; driven by full_state.
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <link rel="stylesheet" href="/fonts.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+  <style>
+    :root {
+      --duo-surface: #1a1d24; --duo-surface2: #20242e; --duo-border: #2e3340;
+      --duo-accent: #e83a8b; --duo-accent2: #8b5cf6; --duo-muted: #8b93a8;
+      --team-a: #055fdb; --team-b: #e97139; --pad-x: 30px; --feat: var(--duo-accent);
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { width: 1920px; height: 1080px; overflow: hidden; font-family: 'Inter', system-ui, sans-serif; color: #e8eaf0; -webkit-font-smoothing: antialiased; }
+    /* No baked background — the Scenes page sets fill colour + opacity per graphic. */
+    body { background: transparent; }
+    .sp-stage { position: absolute; inset: 0; display: flex; flex-direction: column; padding: 34px var(--pad-x) 20px; opacity: 0; transition: opacity .4s ease; }
+    .sp-stage.show { opacity: 1; }
+
+    .sp-header { flex: 0 0 auto; text-align: center; margin-bottom: 24px; }
+    .sp-eyebrow { font-family: 'Rajdhani','Inter',sans-serif; font-weight: 700; font-size: 18px; letter-spacing: .42em; text-transform: uppercase; color: var(--feat); }
+    .sp-title { font-family: 'Rajdhani','Inter',sans-serif; font-weight: 700; font-size: 42px; text-transform: uppercase; color: #fff; line-height: 1; }
+    .sp-title.is-empty { display: none; }
+
+    /* Optional team scorebar (?scorebar=1) */
+    .sp-scorebar { display: none; }
+    .sp-stage.has-scorebar .sp-scorebar { display: flex; align-self: center; width: min(1200px, 100%); flex: 0 0 92px; height: 92px; margin-bottom: 18px; position: relative; align-items: stretch;
+      background: linear-gradient(180deg, rgba(24,27,34,.98), rgba(10,12,16,.99)); border: 1px solid rgba(255,255,255,.07); border-radius: 12px; overflow: hidden; box-shadow: 0 12px 30px rgba(0,0,0,.5); }
+    .sp-scorebar .match-team { flex: 1 1 0; min-width: 0; position: relative; display: flex; align-items: center; gap: 8px; }
+    .sp-scorebar .match-team--a { padding: 0 8px 0 16px; } .sp-scorebar .match-team--b { padding: 0 16px 0 8px; }
+    .sp-scorebar .match-team::after { content: ''; position: absolute; bottom: 0; left: 0; right: 0; height: 3px; }
+    .sp-scorebar .match-team--a::after { background: linear-gradient(90deg, var(--team-a), transparent 70%); } .sp-scorebar .match-team--b::after { background: linear-gradient(270deg, var(--team-b), transparent 70%); }
+    .sp-scorebar .match-logo { width: 56px; height: 56px; object-fit: contain; flex: 0 0 56px; filter: drop-shadow(0 2px 6px rgba(0,0,0,.5)); }
+    .sp-scorebar .match-logo.logo-on-dark { filter: brightness(0) invert(1) drop-shadow(0 2px 6px rgba(0,0,0,.5)); }
+    .sp-scorebar .match-name { flex: 1 1 0; min-width: 0; font-size: 23px; font-weight: 800; letter-spacing: .03em; text-transform: uppercase; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #fff; }
+    .sp-scorebar .match-team--b .match-name { text-align: right; }
+    .sp-scorebar .match-score { flex: 0 0 auto; font-size: 42px; font-weight: 900; font-variant-numeric: tabular-nums; min-width: 24px; text-align: center; }
+    .sp-scorebar .match-team--a .match-score { color: var(--team-a); } .sp-scorebar .match-team--b .match-score { color: var(--team-b); }
+    .sp-scorebar .match-center { flex: 0 0 100px; display: flex; align-items: center; justify-content: center; background: rgba(6,8,12,.97); border-left: 1px solid rgba(255,255,255,.1); border-right: 1px solid rgba(255,255,255,.1); font-family: 'Rajdhani','Inter',sans-serif; font-weight: 900; font-size: 30px; color: #fff; }
+
+    .sp-body { flex: 1 1 0; min-height: 0; display: flex; align-items: center; justify-content: center; gap: 28px; }
+
+    /* Analyst cam(s) — 1 or 2 (?casters=N) */
+    .sp-casters { flex: 0 0 720px; max-width: 46%; align-self: stretch; display: flex; flex-direction: column; gap: 14px; justify-content: center; min-height: 0; }
+    .sp-cam-card { display: flex; flex-direction: column; border-radius: 14px; overflow: hidden; border: 1px solid var(--duo-border); background: var(--duo-surface); box-shadow: 0 18px 50px rgba(0,0,0,.55); opacity: 0; min-height: 0; }
+    .sp-casters[data-count="1"] .sp-cam-card { flex: 0 0 auto; }
+    .sp-casters[data-count="1"] .sp-cam-hole { aspect-ratio: 16 / 9; }
+    .sp-casters[data-count="2"] .sp-cam-card { flex: 1 1 0; }
+    .sp-casters[data-count="2"] .sp-cam-hole { flex: 1 1 auto; }
+    .sp-stage.show .sp-cam-card:nth-child(1) { animation: inL .7s cubic-bezier(.16,.84,.24,1) .12s forwards; }
+    .sp-stage.show .sp-cam-card:nth-child(2) { animation: inL .7s cubic-bezier(.16,.84,.24,1) .2s forwards; }
+    .sp-cam-card::before { content: ''; display: block; height: 3px; flex: 0 0 auto; background: linear-gradient(90deg, transparent, var(--duo-accent) 30%, var(--duo-accent2) 70%, transparent); }
+    .sp-cam-hole { position: relative; width: 100%; min-height: 0; background: #0d0f14; overflow: hidden; }
+    .sp-cam-hole iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+    /* ?cams=off framing: transparent holes so per-caster OBS sources show through. */
+    .sp-stage.frames-only .sp-cam-hole { background: transparent; }
+    .sp-stage.frames-only .sp-cam-card { background: transparent; box-shadow: none; }
+    .sp-cam-plate { display: flex; align-items: center; justify-content: center; gap: 12px; height: 54px; flex: 0 0 54px; padding: 0 18px; background: linear-gradient(180deg, var(--duo-surface2), var(--duo-surface)); border-top: 1px solid var(--duo-border); }
+    .sp-cam-name { font-size: 21px; font-weight: 800; text-transform: uppercase; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .sp-cam-tag { font-size: 14px; font-weight: 600; color: #9aa3b8; }
+
+    /* Interviewee live cam (right position) */
+    .sp-int { flex: 1 1 0; min-width: 0; align-self: stretch; display: flex; flex-direction: column; justify-content: center; opacity: 0; }
+    .sp-int .sp-cam-card-shell { display: flex; flex-direction: column; border-radius: 14px; overflow: hidden; border: 1px solid var(--duo-border); background: var(--duo-surface); box-shadow: 0 18px 50px rgba(0,0,0,.55); }
+    .sp-stage.show .sp-int { animation: inR .7s cubic-bezier(.16,.84,.24,1) .22s forwards; }
+    .sp-int .sp-cam-hole { border-radius: 14px 14px 0 0; border: 1px solid var(--duo-border); border-bottom: 0; box-shadow: 0 18px 50px rgba(0,0,0,.55); }
+    .sp-int .sp-cam-hole::before { content: ''; position: absolute; left: 0; right: 0; top: 0; height: 3px; z-index: 2; background: linear-gradient(90deg, transparent, var(--feat) 30%, var(--duo-accent2) 70%, transparent); }
+    .sp-int .sp-cam-hole { aspect-ratio: 16 / 9; }
+    .sp-int .sp-cam-plate { border-radius: 0 0 14px 14px; border: 1px solid var(--duo-border); border-top: 1px solid var(--duo-border); }
+    /* Featured player card */
+    .sp-card { flex: 1 1 0; min-width: 0; align-self: stretch; display: flex; flex-direction: column; justify-content: center; gap: 22px;
+      border-radius: 14px; border: 1px solid var(--duo-border); background: linear-gradient(180deg, rgba(26,29,36,.92), rgba(14,16,22,.94)); padding: 30px 34px; position: relative; overflow: hidden; opacity: 0; }
+    .sp-stage.show .sp-card { animation: inR .7s cubic-bezier(.16,.84,.24,1) .22s forwards; }
+    .sp-card::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 6px; background: linear-gradient(180deg, var(--feat), transparent); }
+    .sp-phead { display: flex; align-items: center; gap: 18px; }
+    .sp-plogo { width: 78px; height: 78px; object-fit: contain; flex: 0 0 auto; filter: drop-shadow(0 4px 12px rgba(0,0,0,.5)); }
+    .sp-plogo.logo-on-dark { filter: brightness(0) invert(1) drop-shadow(0 4px 12px rgba(0,0,0,.5)); }
+    .sp-pnames { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+    .sp-pname { font-family: 'Rajdhani','Inter',sans-serif; font-weight: 700; font-size: 56px; line-height: .95; text-transform: uppercase; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .sp-pteam { font-size: 18px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--feat); }
+    .sp-stats { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; }
+    .sp-stat { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 16px 8px; border-radius: 10px; background: rgba(255,255,255,.04); border: 1px solid var(--duo-border); }
+    .sp-stat .v { font-family: 'Rajdhani','Inter',sans-serif; font-weight: 900; font-size: 46px; line-height: 1; color: #fff; font-variant-numeric: tabular-nums; }
+    .sp-stat .k { font-size: 12px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; color: var(--duo-muted); }
+    .sp-empty { color: var(--duo-muted); font-size: 22px; text-align: center; padding: 40px; }
+    .sp-empty.hidden { display: none; }
+    .sp-card.no-player .sp-phead, .sp-card.no-player .sp-stats { display: none; }
+
+    @keyframes inL { from { opacity: 0; transform: translateX(-46px) scale(.97); } to { opacity: 1; transform: none; } }
+    @keyframes inR { from { opacity: 0; transform: translateX(46px) scale(.97); } to { opacity: 1; transform: none; } }
+
+    .zone-footer { flex: 0 0 auto; display: flex; align-items: center; justify-content: center; margin-top: 16px; }
+    .deck-strip { max-width: 900px; padding: 8px 28px; text-align: center; position: relative; background: linear-gradient(90deg, transparent, rgba(14,16,22,.92) 12%, rgba(14,16,22,.92) 88%, transparent); border-top: 1px solid rgba(255,255,255,.06); border-bottom: 1px solid rgba(255,255,255,.06); }
+    .deck-strip::before, .deck-strip::after { content: ''; position: absolute; top: 50%; width: 48px; height: 1px; background: linear-gradient(90deg, transparent, var(--duo-accent)); opacity: .5; }
+    .deck-strip::before { left: 12px; } .deck-strip::after { right: 12px; transform: scaleX(-1); }
+    .deck-strip-text { font-size: 12px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: #c8ced8; white-space: nowrap; }
+    .deck-strip.is-empty { display: none; }
+
+    .preview .sp-cam-hole { background: repeating-linear-gradient(45deg, #181b22, #181b22 16px, #20242e 16px, #20242e 32px); }
+    .preview .sp-cam-hole::after { content: 'ANALYST'; position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 22px; font-weight: 800; letter-spacing: .25em; color: #4a5162; }
+  </style>
+</head>
+<body>
+  <div id="stage" class="sp-stage">
+    <div class="sp-header">
+      <div class="sp-eyebrow">Player Spotlight</div>
+      <div class="sp-title is-empty" id="title"></div>
+    </div>
+    <header class="sp-scorebar" id="scorebar">
+      <div class="match-team match-team--a"><img id="teamlogo1" class="match-logo" alt=""><span id="teamname1" class="match-name">BLUE</span><span id="teamscore1" class="match-score">0</span></div>
+      <div class="match-center">VS</div>
+      <div class="match-team match-team--b"><span id="teamscore2" class="match-score">0</span><span id="teamname2" class="match-name">ORANGE</span><img id="teamlogo2" class="match-logo" alt=""></div>
+    </header>
+    <div class="sp-body">
+      <div class="sp-casters" id="caster-col" data-count="1"></div>
+      <!-- Interviewee live cam (right position) — shown when an interviewee is set in Match Control -->
+      <div class="sp-int" id="int" style="display:none">
+        <div class="sp-cam-hole" id="int-hole"></div>
+        <div class="sp-cam-plate"><span class="sp-cam-name" id="int-name">—</span><span class="sp-cam-tag" id="int-team" style="display:none"></span></div>
+      </div>
+      <div class="sp-card" id="card">
+        <div class="sp-phead">
+          <img id="plogo" class="sp-plogo" alt="">
+          <div class="sp-pnames"><div id="pname" class="sp-pname">—</div><div id="pteam" class="sp-pteam"></div></div>
+        </div>
+        <div class="sp-stats" id="stats"></div>
+        <div class="sp-empty hidden" id="empty">No player selected — pick a Player Spotlight on the Dashboard.</div>
+      </div>
+    </div>
+    <div class="zone-footer"><div class="deck-strip is-empty" id="deck-strip"><span id="tagline" class="deck-strip-text">Live</span></div></div>
+  </div>
+
+  <script src="scene-base.js"></script>
+  <script>
+    function el(id) { return document.getElementById(id); }
+    const QP = new URLSearchParams(location.search);
+    const NO_CAMS = QP.get('cams') === 'off';
+    if (NO_CAMS) document.getElementById('stage')?.classList.add('frames-only');
+    const QTITLE = QP.get('title');   // ?title=Custom (overrides event name; ?title=off hides)
+    const SHOW_SCOREBAR = ['1', 'true', 'on', 'yes'].includes((QP.get('scorebar') || '').toLowerCase());
+    if (SHOW_SCOREBAR) document.getElementById('stage')?.classList.add('has-scorebar');
+    // ?casters=1|2 forces the count; otherwise auto-detect from the live caster data (1 or 2).
+    const FORCED_COUNT = QP.has('casters') ? Math.max(1, Math.min(2, parseInt(QP.get('casters'), 10) || 1)) : null;
+    let CAST_COUNT = FORCED_COUNT || 1;
+    const STATS = [['goals', 'Goals'], ['assists', 'Assists'], ['saves', 'Saves'], ['shots', 'Shots'], ['score', 'Score']];
+    let _lastCamUrl = [];
+
+    function casterCount(casters) {
+      if (FORCED_COUNT) return FORCED_COUNT;
+      const slots = SceneBase.castersBySlots(casters, 2);
+      const have = slots.filter(c => c && (c.name || '').toString().trim()).length;
+      return Math.max(1, Math.min(2, have));
+    }
+    function buildCasters() {
+      const col = el('caster-col'); col.setAttribute('data-count', CAST_COUNT); col.innerHTML = '';
+      _lastCamUrl = new Array(CAST_COUNT).fill(null);
+      for (let i = 1; i <= CAST_COUNT; i++) {
+        const card = document.createElement('div'); card.className = 'sp-cam-card';
+        card.innerHTML = `<div id="hole${i}" class="sp-cam-hole"></div><div class="sp-cam-plate"><span id="castname${i}" class="sp-cam-name">—</span><span id="casttag${i}" class="sp-cam-tag" style="display:none"></span></div>`;
+        col.appendChild(card);
+      }
+    }
+    function resolveTitle(data) {
+      if (QTITLE != null) { const t = QTITLE.trim(); return /^(off|none|hide|0)$/i.test(t) ? '' : t; }
+      return (data.eventName || '').toString().trim();
+    }
+    function renderScorebar(data) {
+      if (!SHOW_SCOREBAR) return;
+      [['1', 'blue', 'a'], ['2', 'orange', 'b']].forEach(([idx, side, ab]) => {
+        const t = SceneBase.teamSide(data, side);
+        SceneBase.applyTeamLogo(el('teamlogo' + idx), t.customLogo, t.logo);
+        el('teamname' + idx).textContent = (t.name || (ab === 'b' ? 'ORANGE' : 'BLUE')).toUpperCase();
+        el('teamscore' + idx).textContent = t.series != null ? t.series : 0;
+        document.documentElement.style.setProperty(ab === 'b' ? '--team-b' : '--team-a', t.color || (ab === 'b' ? '#e97139' : '#055fdb'));
+      });
+    }
+
+    function applyBrandTheme(data) {
+      const root = document.documentElement;
+      const color = SceneBase.brandColor(data), accent2 = SceneBase.brandAccent(data);
+      if (color) root.style.setProperty('--duo-accent', color);
+      if (accent2) root.style.setProperty('--duo-accent2', accent2);
+      if (data.fontFamily) root.style.fontFamily = `'${data.fontFamily}', 'Inter', system-ui, sans-serif`;
+    }
+    function findPlayer(data, name) {
+      if (!name) return null;
+      const key = name.toString().trim().toLowerCase();
+      const list = Array.isArray(data.players) ? data.players : [];
+      return list.find(p => p && (p.name || '').toString().trim().toLowerCase() === key) || null;
+    }
+    function renderCasters(casters) {
+      const want = casterCount(casters);
+      if (want !== CAST_COUNT) { CAST_COUNT = want; buildCasters(); }
+      const slots = SceneBase.castersBySlots(casters, CAST_COUNT);
+      for (let i = 0; i < CAST_COUNT; i++) {
+        const c = slots[i] || {};
+        const nameEl = el('castname' + (i + 1)), tagEl = el('casttag' + (i + 1));
+        if (nameEl) nameEl.textContent = (c.name || '—').toString();
+        const handle = SceneBase.formatCasterHandle(c), social = (c.social || 'none').toString().toLowerCase();
+        if (tagEl) { if (handle && social !== 'none') { tagEl.textContent = handle; tagEl.style.display = ''; } else tagEl.style.display = 'none'; }
+        if (NO_CAMS) continue;
+        const camUrl = ((c.camUrl) || '').trim();
+        if (camUrl === _lastCamUrl[i]) continue;
+        _lastCamUrl[i] = camUrl;
+        const hole = el('hole' + (i + 1)); if (!hole) continue;
+        hole.querySelectorAll('iframe').forEach(f => f.remove());
+        if (camUrl) { const f = document.createElement('iframe'); f.src = camUrl; f.setAttribute('allow', 'autoplay; encrypted-media; microphone; camera; fullscreen'); f.referrerPolicy = 'no-referrer'; hole.appendChild(f); }
+      }
+    }
+    // Interviewee live cam (right position). Returns true when an interviewee is active so the
+    // spotlight stats card stays hidden. Source = the player's solo feed from the production/desk room.
+    let _intCamUrl = null;
+    function renderInterviewee(data) {
+      const iv = (data.casters || {}).interviewee;
+      const intEl = el('int'), cardEl = el('card');
+      if (iv && iv.camUrl) {
+        intEl.style.display = ''; cardEl.style.display = 'none';
+        el('int-name').textContent = (iv.name || '—').toString().toUpperCase();
+        const teamEl = el('int-team');
+        if (iv.teamName) { teamEl.textContent = iv.teamName.toString().toUpperCase(); teamEl.style.display = ''; } else teamEl.style.display = 'none';
+        if (iv.color) document.documentElement.style.setProperty('--feat', iv.color);
+        const camUrl = NO_CAMS ? '' : (iv.camUrl || '').trim();
+        if (camUrl !== _intCamUrl) {
+          _intCamUrl = camUrl;
+          const hole = el('int-hole'); hole.querySelectorAll('iframe').forEach(f => f.remove());
+          if (camUrl) { const f = document.createElement('iframe'); f.src = camUrl; f.setAttribute('allow', 'autoplay; encrypted-media; microphone; camera; fullscreen'); f.referrerPolicy = 'no-referrer'; hole.appendChild(f); }
+        }
+        return true;
+      }
+      if (intEl.style.display !== 'none') {
+        intEl.style.display = 'none'; _intCamUrl = null;
+        const hole = el('int-hole'); if (hole) hole.querySelectorAll('iframe').forEach(f => f.remove());
+      }
+      cardEl.style.display = '';
+      return false;
+    }
+    function render(data) {
+      data = data || {};
+      applyBrandTheme(data);
+      const casters = data.casters || {};
+      el('stage').classList.toggle('show', SceneBase.casterStageVisible(casters));
+      renderCasters(casters);
+      renderScorebar(data);
+
+      const ttl = resolveTitle(data);
+      el('title').textContent = ttl.toUpperCase(); el('title').classList.toggle('is-empty', !ttl);
+
+      // Interviewee live cam takes the right position when set; otherwise show the spotlight stats.
+      const ivActive = renderInterviewee(data);
+      if (!ivActive) {
+        const spot = data.spotlight || {};
+        const name = (spot.playerName || data.spectatedPlayer || '').toString().trim();
+        const p = findPlayer(data, name);
+        const card = el('card'), empty = el('empty');
+        if (!p && !name) { card.classList.add('no-player'); empty.classList.remove('hidden'); }
+        else {
+          card.classList.remove('no-player'); empty.classList.add('hidden');
+          el('pname').textContent = (name || (p && p.name) || '—').toUpperCase();
+          // Team context: player.team 0=blue,1=orange (RL); colour the card accent + logo.
+          const teamIdx = p && (p.team === 1 || p.team === 'orange') ? 'orange' : (p && (p.team === 0 || p.team === 'blue') ? 'blue' : null);
+          const t = teamIdx ? SceneBase.teamSide(data, teamIdx) : null;
+          if (t) {
+            document.documentElement.style.setProperty('--feat', t.color || 'var(--duo-accent)');
+            el('pteam').textContent = (t.name || '').toUpperCase();
+            SceneBase.applyTeamLogo(el('plogo'), t.customLogo, t.logo); el('plogo').style.display = '';
+          } else { el('pteam').textContent = ''; el('plogo').style.display = 'none'; el('plogo').removeAttribute('src'); }
+          const stats = el('stats'); stats.innerHTML = '';
+          STATS.forEach(([k, label]) => {
+            const v = p && p[k] != null ? p[k] : 0;
+            const tile = document.createElement('div'); tile.className = 'sp-stat';
+            tile.innerHTML = `<span class="v">${v}</span><span class="k">${label}</span>`;
+            stats.appendChild(tile);
+          });
+        }
+      }
+
+      const tag = ((casters.lowerThird) || '').toString().trim();
+      const strip = el('deck-strip'), tagEl = el('tagline');
+      if (tag) { tagEl.textContent = tag; strip.classList.remove('is-empty'); } else { tagEl.textContent = ''; strip.classList.add('is-empty'); }
+    }
+    buildCasters();
+    if (location.protocol === 'file:') {
+      document.documentElement.classList.add('preview');
+      render({
+        casters: { visible: true, lowerThird: 'Player of the Series', list: [{ id: 'c1', name: 'Mia Tanaka', handle: 'miaplays', slot: 1, social: 'twitch' }] },
+        teams: { blue: { name: 'Velocity Gaming', color: '#3b82f6' }, orange: { name: 'Team Apex', color: '#f97316' } },
+        spotlight: { visible: true, playerName: 'Aqua' },
+        players: [{ name: 'Aqua', team: 0, goals: 3, assists: 1, saves: 2, shots: 5, score: 612 }],
+        eventName: 'Summer Showdown 2026', brand: { color: '#7c3aed', accent: '#22d3ee' }
+      });
+      el('stage').classList.add('show');
+    } else { SceneBase.connect(render); }
+  </script>
+</body>
+</html>

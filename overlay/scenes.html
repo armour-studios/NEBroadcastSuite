@@ -1,9 +1,9 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>NE Broadcast Suite — Scene Sources</title>
+  <title>NE Broadcast Suite â€” Scene Sources</title>
   <style>
     :root { --bg:#0d0f13; --panel:#15181e; --panel2:#1c2027; --border:#2a2f38; --fg:#e8ebf0; --muted:#8a93a2; --accent:#4aa3ff; --on:#22c55e; --warn:#fbbf24; }
     * { box-sizing: border-box; }
@@ -61,15 +61,15 @@
 </head>
 <body>
   <header>
-    <h1>NE Broadcast Suite — Scene Sources</h1>
-    <div class="conn"><span class="dot" id="conn-dot"></span><span id="conn-text">connecting…</span></div>
+    <h1>NE Broadcast Suite â€” Scene Sources</h1>
+    <div class="conn"><span class="dot" id="conn-dot"></span><span id="conn-text">connectingâ€¦</span></div>
     <div class="baseurl">
       <label for="base-input">Base URL</label>
       <input id="base-input" value="http://localhost:3000">
     </div>
   </header>
   <main>
-    <p class="hint">Add any of these as a <strong>Browser Source</strong> in OBS at <code>1920×1080</code>. <strong>Edit HTML</strong> opens a code editor — save creates a local override; <strong>Revert</strong> restores the shipped original. Customized scenes show a gold badge. <span id="onair-summary"></span></p>
+    <p class="hint">Add any of these as a <strong>Browser Source</strong> in OBS at <code>1920Ã—1080</code>. <strong>Edit HTML</strong> opens a code editor â€” save creates a local override; <strong>Revert</strong> restores the shipped original. Customized scenes show a gold badge. <span id="onair-summary"></span></p>
     <div id="groups"></div>
   </main>
 
@@ -102,28 +102,39 @@
         { name: 'Main Overlay (RL)', path: '/', desc: 'Scoreboard, goal replays, post-match stats, sponsor banner, ticker, spotlight.', live: 'always', editPath: '/index.html' },
         { name: 'RL HUD (Modern)', path: '/rl-hud.html', desc: 'Modern Rocket League HUD layout.', live: 'always' },
         { name: 'Live HUD (auto-game)', path: '/live.html', desc: 'Unified HUD that automatically follows whichever game is currently active.', live: 'always' },
-        { name: 'CS2 / CS:GO HUD', path: '/csgo.html', desc: 'GSI-driven CS2 overlay — scorebar, players, radar, bomb, economy.', live: 'always' },
+        { name: 'CS2 / CS:GO HUD', path: '/csgo.html', desc: 'GSI-driven CS2 overlay - scorebar, players, radar, bomb, economy.', live: 'always' },
+        { name: 'Valorant HUD', path: '/valorant.html', desc: 'Round scorebar, agents, spike and economy.', live: 'always' },
+        { name: 'Overwatch 2 HUD', path: '/overwatch.html', desc: 'Hero line-up, objective and score HUD.', live: 'always' },
+        { name: 'Marvel Rivals HUD', path: '/marvel-rivals.html', desc: 'Hero roster and objective scorebar.', live: 'always' },
         { name: 'Series Scoreboard', path: '/series.html', desc: 'Standalone series / match scoreboard banner.', live: null },
         { name: 'Mini Station', path: '/ministation.html', desc: 'Compact mini-HUD for secondary broadcast stations or split-screen.', live: null },
-        { name: 'Director Preview', path: '/director-preview.html', desc: 'Producer-only director bug — add ?director=1 to activate.', live: null },
+        { name: 'Director Preview', path: '/director-preview.html', desc: 'Producer-only director bug â€” add ?director=1 to activate.', live: null },
       ]},
       { group: 'Casters & Desk', items: [
-        { name: 'Casters (grid)', path: '/casters.html', desc: 'Up to 4 commentators — auto-sized cam holes + name plates.', live: 'casters.visible' },
+        { name: 'Casters (grid)', path: '/casters.html', desc: 'Up to 4 commentators â€” auto-sized cam holes + name plates.', live: 'casters.visible' },
         { name: 'Duo Row', path: '/duorow.html', desc: '2 caster cams in a row + team scorebar + footer.', live: 'casters.visible' },
         { name: 'Trio Row', path: '/triorow.html', desc: '3 caster cams in a row + scorebar + footer.', live: 'casters.visible' },
+        { name: 'Single Cam', path: '/singlecam.html', desc: 'Solo caster — one big cam + scorebar, sponsor under the cam.', live: 'casters.visible' },
         { name: 'Duo (single cam)', path: '/duosinglecam.html', desc: '2 casters sharing one wide camera.', live: 'casters.visible' },
-        { name: 'Trio Cam', path: '/triocam.html', desc: '3 cams, cam-focused layout.', live: 'casters.visible' },
-        { name: 'Away / Full', path: '/awayfull.html', desc: 'Full standby desk — scorebar, cams, big event title.', live: 'casters.visible' },
         { name: 'Analyst Desk', path: '/analystspecial.html', desc: 'Featured host + analyst cams.', live: 'casters.visible' },
+        { name: 'Cam Over Game (PiP)', path: '/campip.html', desc: 'Caster cam(s) in a corner over gameplay. ?pos=br|bl|tr|tl.', live: 'casters.visible' },
+        { name: 'Talent Bar (lower third)', path: '/talentbar.html', desc: 'Slim bottom strip of caster cams + names over gameplay/replay.', live: 'casters.visible' },
+        { name: 'Interview / Head-to-head', path: '/interview.html', desc: 'Two big cams side by side with a VS medallion.', live: 'casters.visible' },
+        { name: 'Quad Desk (2x2)', path: '/quaddesk.html', desc: 'Four-person panel — 2x2 framed cams + scorebar.', live: 'casters.visible' },
+        { name: 'Matchup Desk (pre-game)', path: '/matchup.html', desc: 'Both rosters side by side + casters.', live: 'casters.visible' },
+        { name: 'Player Spotlight Desk', path: '/spotlightdesk.html', desc: 'Analyst cam + featured player card with live stats.', live: 'casters.visible' },
+        { name: 'Vertical (9:16)', path: '/vertical.html', desc: 'Vertical co-stream — set the OBS source to 1080x1920.', live: 'casters.visible' },
+        { name: 'Listen In', path: '/listen-in.html', desc: "One player's live mic + captions on stream (VDO talent).", live: 'listenIn.active' },
       ]},
       { group: 'Pre / Post / Breaks', items: [
+        { name: 'Trigger Graphics (all-in-one)', path: '/triggers.html', desc: 'ONE source for every triggered graphic (countdown, winner, intro, veto, draft, bracket, upcoming, standings). Add to any scene; qrail Triggers/Overlays pop the right one over it.', live: null },
         { name: 'Countdown / Starting Soon', path: '/countdown.html', desc: 'Break standby timer with movie-countdown finish.', live: 'breakScreen.visible' },
-        { name: 'Winner / Post-match', path: '/winner.html', desc: 'Champion screen — team logo, name, subtitle.', live: 'winner.visible' },
+        { name: 'Winner / Post-match', path: '/winner.html', desc: 'Champion screen â€” team logo, name, subtitle.', live: 'winner.visible' },
         { name: 'Team Line-up / Intro', path: '/intro.html', desc: 'Animated roster cards. Add ?side=blue or ?side=orange.', live: 'intro.visible' },
         { name: 'Draft Screen', path: '/draft.html', desc: 'Animated pick/ban draft overlay for character or agent selection.', live: null },
       ]},
       { group: 'Bracket & Veto', items: [
-        { name: 'Bracket', path: '/bracket.html', desc: 'Live bracket — elim columns or standings table.', live: 'bracket.visible' },
+        { name: 'Bracket', path: '/bracket.html', desc: 'Live bracket â€” elim columns or standings table.', live: 'bracket.visible' },
         { name: 'Map Veto / Map Board', path: '/mapscreen.html', desc: 'Pick/ban board for CS2/Valorant-style series.', live: 'veto.visible' },
       ]},
       { group: 'Replays', items: [
@@ -131,13 +142,18 @@
       ]},
       { group: 'Twitch Interactions', items: [
         { name: 'Twitch Alerts', path: '/twitch-alerts.html', desc: 'Follower, subscriber and donation alerts overlay.', live: null },
+        { name: 'Predictions', path: '/twitch-predictions.html', desc: 'Channel-point prediction tracker with hide timer.', live: null },
         { name: 'Giveaway Wheel', path: '/twitch-wheel.html', desc: 'On-screen spin wheel for Twitch chat giveaways.', live: null },
         { name: 'Mini-Games', path: '/twitch-minigames.html', desc: 'Interactive Twitch chat mini-games overlay.', live: null },
       ]},
       { group: 'Stingers & Transitions', items: [
         { name: 'Transition (accent wipe)', path: '/transition.html', desc: 'Brand wipe with centre logo. ?team=blue|orange for a team logo.', live: null },
-        { name: 'Transition (solid)', path: '/transitionbgg.html', desc: 'Solid-fill wipe variant — dark panel behind the logo.', live: null },
+        { name: 'Transition (solid)', path: '/transitionbgg.html', desc: 'Solid-fill wipe variant - dark panel behind the logo.', live: null },
         { name: 'Replay Wipe', path: '/replay.html', desc: '"REPLAY" plate slide-in. ?label=, ?team=.', live: null },
+      ]},
+      { group: 'Sponsors & Branding', items: [
+        { name: 'Sponsor Banner (Main)', path: '/sponsor-banner.html?src=main', desc: 'Rotating sponsor strip driven by the Main banner.', live: 'banner.visible' },
+        { name: 'Sponsor Banner (Active brand)', path: '/sponsor-banner.html?src=brand', desc: 'Sponsor strip driven by the active client brand kit.', live: 'banner.visible' },
       ]},
     ];
 
@@ -241,7 +257,7 @@
         }
       });
       const sum = document.getElementById('onair-summary');
-      sum.textContent = liveCount ? `· ${liveCount} scene${liveCount > 1 ? 's' : ''} on air now.` : '';
+      sum.textContent = liveCount ? `Â· ${liveCount} scene${liveCount > 1 ? 's' : ''} on air now.` : '';
     }
 
     let editorRel = '';
@@ -249,7 +265,7 @@
       editorRel = (filePath || '/').replace(/^\//, '') || 'index.html';
       document.getElementById('editor-title').textContent = title || 'Edit scene';
       document.getElementById('editor-path').textContent = filePath;
-      document.getElementById('editor-status').textContent = 'Loading…';
+      document.getElementById('editor-status').textContent = 'Loadingâ€¦';
       document.getElementById('editor-backdrop').classList.add('open');
       try {
         const r = await fetch(baseUrl() + '/api/overlay/source?path=' + encodeURIComponent(filePath.startsWith('/') ? filePath : '/' + filePath));
@@ -260,7 +276,7 @@
         badge.textContent = j.isOverride ? 'Custom override' : 'Original';
         badge.className = 'editor-badge' + (j.isOverride ? '' : ' original');
         document.getElementById('editor-revert').disabled = !j.isOverride;
-        document.getElementById('editor-status').textContent = j.isOverride ? 'Editing your saved override' : 'Editing original — Save creates an override';
+        document.getElementById('editor-status').textContent = j.isOverride ? 'Editing your saved override' : 'Editing original â€” Save creates an override';
       } catch (e) {
         document.getElementById('editor-status').textContent = 'Error: ' + e.message;
       }
@@ -277,7 +293,7 @@
     });
     document.getElementById('editor-save').addEventListener('click', async () => {
       const content = document.getElementById('editor-code').value;
-      document.getElementById('editor-status').textContent = 'Saving…';
+      document.getElementById('editor-status').textContent = 'Savingâ€¦';
       try {
         const r = await fetch(baseUrl() + '/api/overlay/save', {
           method: 'POST',
@@ -286,7 +302,7 @@
         });
         const j = await r.json();
         if (!j.ok) throw new Error(j.message || 'Save failed');
-        document.getElementById('editor-status').textContent = 'Saved — refresh OBS browser source to see changes';
+        document.getElementById('editor-status').textContent = 'Saved â€” refresh OBS browser source to see changes';
         document.getElementById('editor-badge').textContent = 'Custom override';
         document.getElementById('editor-badge').className = 'editor-badge';
         document.getElementById('editor-revert').disabled = false;
@@ -297,7 +313,7 @@
     });
     document.getElementById('editor-revert').addEventListener('click', async () => {
       if (!confirm('Revert to the original shipped HTML? Your override will be deleted.')) return;
-      document.getElementById('editor-status').textContent = 'Reverting…';
+      document.getElementById('editor-status').textContent = 'Revertingâ€¦';
       try {
         const r = await fetch(baseUrl() + '/api/overlay/revert', {
           method: 'POST',
@@ -326,7 +342,7 @@
         let msg; try { msg = JSON.parse(data); } catch { return; }
         if (msg.type === 'full_state') { lastState = msg.data || {}; refreshBadges(); }
       };
-      ws.onclose = () => { setConn(false); setTimeout(connect, 3000); };
+      ws.onclose = () => { setConn(false); setTimeout(connect, 800); };
       ws.onerror = () => { try { ws.close(); } catch {} };
     }
     function setConn(ok) {
@@ -341,7 +357,7 @@
     connect();
 
     // Lazy-load previews and inject zoom after load.
-    // Injecting zoom on the iframe's own <body> works for ALL pages — same-origin, no CSS fight.
+    // Injecting zoom on the iframe's own <body> works for ALL pages â€” same-origin, no CSS fight.
     (function() {
       function injectZoom(fr, pw) {
         try {

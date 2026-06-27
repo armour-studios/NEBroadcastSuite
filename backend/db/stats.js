@@ -7,6 +7,7 @@
  */
 const fs   = require('fs');
 const path = require('path');
+const sqlite = require('./sqlite-store');   // SQLite mirror (cloud-ready schema). Safe no-op if sql.js is unavailable.
 
 let dataDir  = null;
 let dbFile   = null;
@@ -18,9 +19,10 @@ const DB = {
   games:           [],  // { id, match_id, game_number, game_type, duration_sec, score_a, score_b, winner, map, overtime, started_at, ended_at }
   rl_player_stats: [],  // { id, game_id, player_name, team, goals, assists, saves, shots, demos, score }
   cs2_rounds:      [],  // { id, game_id, round_number, winner, win_condition, bomb_planted, bomb_defused }
-  cs2_player_stats:[]   // { id, game_id, steam_id, player_name, team, kills, deaths, assists, hs_kills, mvps, score }
+  cs2_player_stats:[],  // { id, game_id, steam_id, player_name, team, kills, deaths, assists, hs_kills, mvps, score }
+  val_player_stats:[]   // { id, game_id, player_name, team, agent, kills, deaths, assists }
 };
-let _seq = { matches: 0, games: 0, rl: 0, cs2r: 0, cs2p: 0 };
+let _seq = { matches: 0, games: 0, rl: 0, cs2r: 0, cs2p: 0, val: 0 };
 
 // ─── Lifecycle ────────────────────────────────────────────────────────────────
 
@@ -29,6 +31,11 @@ function init(dir) {
   dbFile  = path.join(dir, 'stats.json');
   _load();
   console.log('[Stats] Store ready:', dbFile);
+  // Mirror into SQLite (cloud-ready schema) alongside the JSON store — async, fire-and-forget.
+  // Pass a SNAPSHOT of the just-loaded data so the one-time migration imports only pre-existing
+  // records (live writes during the brief async init are handled by the dual-write, not re-migrated).
+  // The JSON store stays the source of truth for now.
+  try { sqlite.init(dir, JSON.parse(JSON.stringify(DB))); } catch (e) { /* mirror is best-effort */ }
 }
 
 function close() {
@@ -104,6 +111,7 @@ function startMatch({ gameType, teamA, teamB, logoA, logoB, bestOf, startggSetId
   };
   DB.matches.push(record);
   _queueSave();
+  sqlite.store.recordMatch(record);
   return record.id;
 }
 
@@ -115,6 +123,7 @@ function endMatch(matchId, { scoreA, scoreB, winner } = {}) {
   m.winner   = winner || null;
   m.ended_at = Date.now();
   _queueSave();
+  sqlite.store.recordMatch(m);
 }
 
 // ─── Game ────────────────────────────────────────────────────────────────────
@@ -136,6 +145,7 @@ function startGame({ matchId, gameNumber, gameType, map }) {
   };
   DB.games.push(record);
   _queueSave();
+  sqlite.store.recordGame(record);
   return record.id;
 }
 
@@ -150,6 +160,7 @@ function endGame(gameId, { scoreA, scoreB, winner, durationSec, overtime, map } 
   if (map) g.map = map;
   g.ended_at    = Date.now();
   _queueSave();
+  sqlite.store.recordGame(g);
 }
 
 // ─── RL Player Stats ─────────────────────────────────────────────────────────
@@ -169,6 +180,8 @@ function saveRlPlayerStats(gameId, players) {
       demos:       p.demos   || 0,
       score:       p.score   || 0
     });
+    sqlite.store.recordPlayerStats({ game_id: gameId, game_type: 'rl', team: p.team || '', name: p.name || '' },
+      { goals: p.goals || 0, assists: p.assists || 0, saves: p.saves || 0, shots: p.shots || 0, demos: p.demos || 0, score: p.score || 0 });
   }
   _queueSave();
 }
@@ -185,6 +198,7 @@ function logCs2Round(gameId, { roundNumber, winner, winCondition, bombPlanted, b
     bomb_planted:  bombPlanted  ? 1 : 0,
     bomb_defused:  bombDefused  ? 1 : 0
   });
+  sqlite.store.recordCs2Round({ game_id: gameId, round_number: roundNumber || 0, winner: winner || null, win_condition: winCondition || null, bomb_planted: bombPlanted, bomb_defused: bombDefused });
   _queueSave();
 }
 
@@ -204,13 +218,45 @@ function saveCs2PlayerStats(gameId, players) {
       mvps:        p.mvps      || 0,
       score:       p.score     || 0
     });
+    sqlite.store.recordPlayerStats({ game_id: gameId, game_type: 'csgo', team: p.team || '', name: p.name || '' },
+      { steam_id: p.steamId || null, kills: p.kills || 0, deaths: p.deaths || 0, assists: p.assists || 0, hs_kills: p.hsKills || 0, mvps: p.mvps || 0, score: p.score || 0 });
+  }
+  _queueSave();
+}
+
+// ─── Valorant Player Stats ───────────────────────────────────────────────────
+
+function saveValorantPlayerStats(gameId, players) {
+  if (!Array.isArray(players)) return;
+  for (const p of players) {
+    DB.val_player_stats.push({
+      id:          _nextId('val'),
+      game_id:     gameId,
+      player_name: p.name  || '',
+      team:        p.team  || '',
+      agent:       p.agent || '',
+      kills:       p.kills   || 0,
+      deaths:      p.deaths  || 0,
+      assists:     p.assists || 0
+    });
+    sqlite.store.recordPlayerStats({ game_id: gameId, game_type: 'valorant', team: p.team || '', name: p.name || '' },
+      { agent: p.agent || '', kills: p.kills || 0, deaths: p.deaths || 0, assists: p.assists || 0 });
   }
   _queueSave();
 }
 
 // ─── Read / Stats API ────────────────────────────────────────────────────────
 
+// Read source: the SQLite mirror (rebuilt into the legacy shape) when it's up, else the
+// in-memory store — which is always maintained, so this can never read stale/empty.
+function _source() {
+  if (process.env.STATS_FORCE_DB) return DB;   // debug/parity hook
+  if (sqlite.available) { const snap = sqlite.store.snapshot(); if (snap) return snap; }
+  return DB;
+}
+
 function getRecentMatches(limit = 20) {
+  const DB = _source();
   const sorted = [...DB.matches].sort((a, b) => (b.started_at || 0) - (a.started_at || 0));
   return sorted.slice(0, limit).map(m => ({
     ...m,
@@ -219,6 +265,7 @@ function getRecentMatches(limit = 20) {
 }
 
 function getMatchDetail(matchId) {
+  const DB = _source();
   const match = DB.matches.find(m => m.id === matchId);
   if (!match) return null;
 
@@ -238,6 +285,10 @@ function getMatchDetail(matchId) {
         game.rounds = DB.cs2_rounds
           .filter(r => r.game_id === g.id)
           .sort((a, b) => a.round_number - b.round_number);
+      } else if (g.game_type === 'valorant') {
+        game.players = (DB.val_player_stats || [])
+          .filter(p => p.game_id === g.id)
+          .sort((a, b) => b.kills - a.kills);
       }
       return game;
     });
@@ -246,6 +297,7 @@ function getMatchDetail(matchId) {
 }
 
 function getPlayerHistory(playerName, limit = 50) {
+  const DB = _source();
   const needle = playerName.toLowerCase();
   return DB.rl_player_stats
     .filter(r => r.player_name.toLowerCase().includes(needle))
@@ -265,6 +317,7 @@ function getPlayerHistory(playerName, limit = 50) {
 }
 
 function getAggregateStats() {
+  const DB = _source();
   const endedMatches = DB.matches.filter(m => m.ended_at);
   const endedGames   = DB.games.filter(g => g.ended_at);
   const durations    = endedGames.map(g => g.duration_sec).filter(Boolean);
@@ -293,6 +346,7 @@ function getAggregateStats() {
 
 // Per-player aggregates across every recorded game, split by game type.
 function getLeaders(limit = 25) {
+  const DB = _source();
   const rl = {};
   DB.rl_player_stats.forEach((p) => {
     const k = p.player_name || '?';
@@ -307,15 +361,25 @@ function getLeaders(limit = 25) {
     a.games++; a.kills += p.kills || 0; a.deaths += p.deaths || 0; a.assists += p.assists || 0;
     a.hs += p.hs_kills || 0; a.mvps += p.mvps || 0; a.score += p.score || 0;
   });
+  const val = {};
+  (DB.val_player_stats || []).forEach((p) => {
+    const k = p.player_name || '?';
+    const a = val[k] || (val[k] = { player: k, games: 0, kills: 0, deaths: 0, assists: 0, agent: p.agent || '' });
+    a.games++; a.kills += p.kills || 0; a.deaths += p.deaths || 0; a.assists += p.assists || 0;
+    if (p.agent) a.agent = p.agent;
+  });
   const rlList = Object.values(rl).map((a) => ({ ...a, gpg: a.games ? +(a.goals / a.games).toFixed(2) : 0 }))
     .sort((x, y) => y.goals - x.goals).slice(0, limit);
   const cs2List = Object.values(cs2).map((a) => ({ ...a, kd: a.deaths ? +(a.kills / a.deaths).toFixed(2) : a.kills }))
     .sort((x, y) => y.kills - x.kills).slice(0, limit);
-  return { rl: rlList, cs2: cs2List };
+  const valList = Object.values(val).map((a) => ({ ...a, kd: a.deaths ? +(a.kills / a.deaths).toFixed(2) : a.kills }))
+    .sort((x, y) => y.kills - x.kills).slice(0, limit);
+  return { rl: rlList, cs2: cs2List, val: valList };
 }
 
 // Win/loss records per team, from ended matches.
 function getTeamRecords() {
+  const DB = _source();
   const rec = {};
   const bump = (name, win) => {
     if (!name) return;
@@ -333,6 +397,7 @@ function getTeamRecords() {
 
 // Head-to-head record + match list between two team names.
 function getHeadToHead(teamA, teamB) {
+  const DB = _source();
   const a = (teamA || '').toLowerCase(), b = (teamB || '').toLowerCase();
   if (!a || !b) return { a: teamA, b: teamB, aWins: 0, bWins: 0, matches: [] };
   let aWins = 0, bWins = 0;
@@ -349,12 +414,122 @@ function getHeadToHead(teamA, teamB) {
   return { a: teamA, b: teamB, aWins, bWins, matches };
 }
 
+// ─── Cross-game player profile ───────────────────────────────────────────────
+
+// The payoff of the unified store: one name resolves to a single profile that
+// spans every title the player has appeared in (RL, CS2, Valorant). Returns
+// per-title aggregates (with win/loss, since team is normalized to a/b at the
+// stat-write hooks), the teams/agents they've used, and a merged game timeline.
+function getPlayerProfile(playerName, timelineLimit = 40) {
+  const DB = _source();
+  const needle = (playerName || '').toLowerCase().trim();
+  if (!needle) return null;
+
+  const gameById  = new Map(DB.games.map(g => [g.id, g]));
+  const matchById = new Map(DB.matches.map(m => [m.id, m]));
+  const teamsUsed = new Map();   // teamName → appearances
+  const timeline  = [];
+  let canonicalName = null;
+
+  // Resolve a stat row's match/game context + win/loss (side is a/b; winner is a/b).
+  const ctx = (row) => {
+    const g = gameById.get(row.game_id) || {};
+    const m = matchById.get(g.match_id) || {};
+    const side = (row.team === 'a' || row.team === 'b') ? row.team : null;
+    const teamName = side ? (side === 'a' ? m.team_a : m.team_b) : null;
+    if (teamName) teamsUsed.set(teamName, (teamsUsed.get(teamName) || 0) + 1);
+    const won = (side && g.winner) ? (g.winner === side) : null;
+    return { g, m, side, teamName, won };
+  };
+  const tally = (agg, won) => { agg.games++; if (won === true) agg.wins++; else if (won === false) agg.losses++; };
+  const matchRow = (r) => { const n = (r.player_name || ''); if (n.toLowerCase() === needle) { if (!canonicalName) canonicalName = n; return true; } return false; };
+
+  // ── Rocket League ──
+  const rl = { games: 0, wins: 0, losses: 0, goals: 0, assists: 0, saves: 0, shots: 0, demos: 0, score: 0 };
+  DB.rl_player_stats.filter(matchRow).forEach((r) => {
+    const { g, m, won } = ctx(r);
+    tally(rl, won);
+    rl.goals += r.goals || 0; rl.assists += r.assists || 0; rl.saves += r.saves || 0;
+    rl.shots += r.shots || 0; rl.demos += r.demos || 0; rl.score += r.score || 0;
+    timeline.push({ game_at: g.started_at || 0, game_type: 'rl', map: g.map || null, team_a: m.team_a, team_b: m.team_b, tournament: m.tournament || null, won,
+      line: { goals: r.goals || 0, assists: r.assists || 0, saves: r.saves || 0, shots: r.shots || 0, demos: r.demos || 0, score: r.score || 0 } });
+  });
+
+  // ── CS2 ──
+  const cs2 = { games: 0, wins: 0, losses: 0, kills: 0, deaths: 0, assists: 0, hs: 0, mvps: 0, score: 0 };
+  DB.cs2_player_stats.filter(matchRow).forEach((r) => {
+    const { g, m, won } = ctx(r);
+    tally(cs2, won);
+    cs2.kills += r.kills || 0; cs2.deaths += r.deaths || 0; cs2.assists += r.assists || 0;
+    cs2.hs += r.hs_kills || 0; cs2.mvps += r.mvps || 0; cs2.score += r.score || 0;
+    timeline.push({ game_at: g.started_at || 0, game_type: 'cs2', map: g.map || null, team_a: m.team_a, team_b: m.team_b, tournament: m.tournament || null, won,
+      line: { kills: r.kills || 0, deaths: r.deaths || 0, assists: r.assists || 0, hs: r.hs_kills || 0, mvps: r.mvps || 0 } });
+  });
+
+  // ── Valorant ──
+  const valAgents = {};
+  const val = { games: 0, wins: 0, losses: 0, kills: 0, deaths: 0, assists: 0 };
+  (DB.val_player_stats || []).filter(matchRow).forEach((r) => {
+    const { g, m, won } = ctx(r);
+    tally(val, won);
+    val.kills += r.kills || 0; val.deaths += r.deaths || 0; val.assists += r.assists || 0;
+    if (r.agent) valAgents[r.agent] = (valAgents[r.agent] || 0) + 1;
+    timeline.push({ game_at: g.started_at || 0, game_type: 'valorant', map: g.map || null, team_a: m.team_a, team_b: m.team_b, tournament: m.tournament || null, won,
+      line: { agent: r.agent || '', kills: r.kills || 0, deaths: r.deaths || 0, assists: r.assists || 0 } });
+  });
+
+  if (canonicalName === null) return null;   // player never appeared in any title
+
+  const pct = (w, total) => (total ? Math.round((w / total) * 100) : 0);
+  const titles = {};
+  if (rl.games)  titles.rl  = { ...rl,  gpg: rl.games ? +(rl.goals / rl.games).toFixed(2) : 0, winPct: pct(rl.wins, rl.wins + rl.losses) };
+  if (cs2.games) titles.cs2 = { ...cs2, kd: cs2.deaths ? +(cs2.kills / cs2.deaths).toFixed(2) : cs2.kills, hsPct: cs2.kills ? Math.round((cs2.hs / cs2.kills) * 100) : 0, winPct: pct(cs2.wins, cs2.wins + cs2.losses) };
+  if (val.games) {
+    const agentList = Object.entries(valAgents).sort((a, b) => b[1] - a[1]).map(([agent, games]) => ({ agent, games }));
+    titles.valorant = { ...val, kd: val.deaths ? +(val.kills / val.deaths).toFixed(2) : val.kills, winPct: pct(val.wins, val.wins + val.losses), agents: agentList, topAgent: agentList[0]?.agent || '' };
+  }
+
+  timeline.sort((a, b) => (b.game_at || 0) - (a.game_at || 0));
+  const totalGames  = rl.games + cs2.games + val.games;
+  const totalWins   = rl.wins + cs2.wins + val.wins;
+  const totalLosses = rl.losses + cs2.losses + val.losses;
+
+  return {
+    player: canonicalName,
+    gamesPlayed: Object.keys(titles),
+    totals: { games: totalGames, wins: totalWins, losses: totalLosses, winPct: pct(totalWins, totalWins + totalLosses) },
+    teams: Array.from(teamsUsed.entries()).sort((a, b) => b[1] - a[1]).map(([team, games]) => ({ team, games })),
+    titles,
+    timeline: timeline.slice(0, timelineLimit)
+  };
+}
+
+// Distinct player names across every title — drives the profile picker/typeahead.
+function listPlayers() {
+  const DB = _source();
+  const names = new Map();   // lowercased → { name, titles:Set }
+  const add = (n, t) => {
+    if (!n) return;
+    const k = n.toLowerCase();
+    const e = names.get(k) || (names.set(k, { name: n, titles: new Set() }), names.get(k));
+    e.titles.add(t);
+  };
+  DB.rl_player_stats.forEach(r => add(r.player_name, 'rl'));
+  DB.cs2_player_stats.forEach(r => add(r.player_name, 'cs2'));
+  (DB.val_player_stats || []).forEach(r => add(r.player_name, 'valorant'));
+  return Array.from(names.values())
+    .map(e => ({ player: e.name, titles: Array.from(e.titles) }))
+    .sort((a, b) => a.player.localeCompare(b.player));
+}
+
 module.exports = {
   init, close,
   startMatch, endMatch,
   startGame, endGame,
   saveRlPlayerStats,
   logCs2Round, saveCs2PlayerStats,
+  saveValorantPlayerStats,
   getRecentMatches, getMatchDetail, getPlayerHistory, getAggregateStats,
-  getLeaders, getTeamRecords, getHeadToHead
+  getLeaders, getTeamRecords, getHeadToHead,
+  getPlayerProfile, listPlayers
 };

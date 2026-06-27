@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>NE Broadcast Suite — Ticker</title>
+<link rel="stylesheet" href="fonts.css">
+<style>
+  :root { --accent: #055fdb; --accent-2: #ff4655; --main-font: 'Rajdhani', 'Montserrat', system-ui, sans-serif; }
+  html, body { margin: 0; width: 1920px; height: 1080px; overflow: hidden; background: transparent; font-family: var(--main-font); }
+  /* Standalone copy of the main overlay's ticker (lower-third). Add as its own OBS source, or it's
+     the per-tab preview in Production → Graphics → Overlays → Ticker. */
+  .ticker { position: absolute; left: 0; right: 0; bottom: 0; height: 46px; z-index: 25; display: flex; align-items: center; overflow: hidden;
+    background: linear-gradient(90deg, rgba(5,95,219,.95) 0%, rgba(9,17,28,.95) 18%, rgba(9,17,28,.95) 100%); border-top: 2px solid rgba(255,255,255,.12); }
+  .ticker.hidden { display: none; }
+  .ticker::before { content: 'LIVE'; flex-shrink: 0; align-self: stretch; display: flex; align-items: center; padding: 0 18px;
+    font-weight: 700; font-size: 18px; letter-spacing: 3px; color: #fff; background: var(--accent-2);
+    position: relative; z-index: 2; }   /* sit ABOVE the scrolling track so the text is clipped at the LIVE box */
+  .ticker-track { display: inline-flex; white-space: nowrap; will-change: transform; animation: ticker-scroll linear infinite; padding-left: 40px;
+    position: relative; z-index: 1; }
+  .ticker-segment { font-weight: 600; font-size: 24px; color: #fff; padding-right: 40px; }
+  @keyframes ticker-scroll { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+  /* ?embed=1 (the in-builder preview only): centre + enlarge the bar so it's clearly visible when
+     the whole 1920×1080 frame is scaled down — the LIVE look on air is unchanged. */
+  .tk-embed .ticker { bottom: auto; top: 50%; transform: translateY(-50%); height: 132px; }
+  .tk-embed .ticker::before { font-size: 46px; padding: 0 40px; }
+  .tk-embed .ticker-segment { font-size: 60px; padding-right: 80px; }
+  .tk-embed .ticker-track { padding-left: 80px; }
+</style>
+</head>
+<body>
+  <div id="ticker" class="ticker hidden"><div id="ticker-track" class="ticker-track"></div></div>
+<script src="scene-base.js"></script>
+<script>
+(function () {
+  function el(id) { return document.getElementById(id); }
+  var EMBED = SceneBase.qp('embed') === '1';   // ?embed=1 → force-show the live ticker (config preview)
+  if (EMBED) document.documentElement.classList.add('tk-embed');
+  var _sig = '';
+  function render(data) {
+    var t = (data && data.ticker) || {};
+    var bar = el('ticker'), track = el('ticker-track');
+    var srcArr = (t.source === 'startgg') ? (t.feed || []) : (t.messages || []);
+    var messages = (Array.isArray(srcArr) ? srcArr : []).filter(Boolean);
+    if ((SceneBase.preview || EMBED) && !messages.length) messages = (t.source === 'startgg')
+      ? ['LIVE   Sentinels  2-1  Cloud9', 'FINAL   G2  3-0  NRG']
+      : ['Powered by ACME Energy', 'Follow @yourbrand on X', 'Next match starts at 8PM ET'];
+    var visible = (EMBED || SceneBase.preview || !!t.visible) && messages.length > 0;
+    bar.classList.toggle('hidden', !visible);
+    if (!visible) { _sig = ''; return; }
+    document.documentElement.style.setProperty('--accent-2', SceneBase.brandAccent(data));
+    var speed = (t.speed > 0) ? t.speed : 40;
+    var sig = JSON.stringify({ messages: messages, speed: speed });
+    if (sig === _sig) return;
+    _sig = sig;
+    var joined = messages.join('   •   ');
+    track.innerHTML = '';
+    for (var i = 0; i < 2; i++) { var s = document.createElement('span'); s.className = 'ticker-segment'; s.textContent = joined; track.appendChild(s); }
+    track.style.animationDuration = speed + 's';
+  }
+  SceneBase.connect(render);
+})();
+</script>
+</body>
+</html>

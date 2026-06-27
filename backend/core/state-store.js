@@ -8,7 +8,7 @@ const TeamSchema = z.object({
 const StateSchema = z.object({
   schemaVersion: z.literal(1).default(1),
   view: z.enum(['hud', 'goal', 'scoreboard']).default('hud'),
-  eventName: z.string().default('ROCKET LEAGUE TOURNAMENT'),
+  eventName: z.string().default(''),
   bestOf: z.number().int().min(1).max(9).default(5),
   teams: z.object({
     blue: TeamSchema,

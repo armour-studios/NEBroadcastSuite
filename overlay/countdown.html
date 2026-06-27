@@ -25,9 +25,13 @@
       font-family: 'Rajdhani', var(--main-font); font-weight: 700; color: #fff;
       font-size: 9rem; display: flex; gap: 0.2ch; align-items: center; justify-content: center;
       transition: color 0.3s ease, opacity 1s ease;
+      /* Equal-width digits so the clock doesn't shift as numbers change (1 vs 8 etc). */
+      font-variant-numeric: tabular-nums; font-feature-settings: "tnum" 1;
     }
-    #timer.warning-state  { color: #ff9800; }
-    #timer.critical-state { color: var(--accent-2); }
+    /* Countdown urgency ramp: WHITE (default) → YELLOW (≤60s) → RED (final ≤10s).
+       Fixed colours on purpose — the timer shouldn't take the brand accent here. */
+    #timer.warning-state  { color: #ffd23f; }   /* ≤ 60s — yellow */
+    #timer.critical-state { color: #ff3b30; }    /* ≤ 10s — red */
     #timer.movie-style { font-size: 16rem; text-shadow: 0 0 24px rgba(255,255,255,0.5); }
     #timer.fade-out { opacity: 0; }
     .digit-container { position: relative; width: 1ch; height: 1em; overflow: hidden; display: inline-flex; align-items: center; justify-content: center; }
@@ -38,6 +42,8 @@
       animation: fadeIn 1s ease-in; line-height: 1; text-transform: uppercase;
     }
     @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+    /* ?timer=1 — grab JUST the countdown digits as their own OBS source (no title/message). */
+    body.timer-only #break-title, body.timer-only #break-msg { display: none; }
   </style>
 </head>
 <body>
@@ -49,7 +55,13 @@
 
   <script src="scene-base.js"></script>
   <script>
-    const MOVIE_THRESHOLD = 5;      // movie-style big single digit at/below this many seconds
+    // ?timer=1 → show only the countdown digits (for grabbing the timer as its own source).
+    if (new URLSearchParams(location.search).get('timer') === '1') document.body.classList.add('timer-only');
+
+    // Big single-digit "movie" countdown for the final seconds is now opt-in (?movie=1).
+    // By default the final seconds stay in the same M:SS format as the rest (… 0:05, 0:04 …).
+    const MOVIE_MODE = new URLSearchParams(location.search).get('movie') === '1';
+    const MOVIE_THRESHOLD = MOVIE_MODE ? 5 : 0;   // 0 = never switch — keep M:SS all the way down
     const WARNING_AT = 60, CRITICAL_AT = 10;
     const FADEOUT_DURATION = 1000;
 
@@ -133,11 +145,15 @@
     let hasTimer = false;
     let frozen = null;        // static seconds (paused producer timer); overrides endsAt
 
+    const EMBED = SceneBase.qp('embed') === '1';   // ?embed=1 → force-show the live break (config preview)
     function render(b) {
       b = b || {};
-      stageEl.classList.toggle('show', !!b.visible);
-      titleEl.textContent = (b.title || 'STARTING SOON');
-      titleEl.classList.toggle('hidden', !b.title && !b.visible);
+      stageEl.classList.toggle('show', !!b.visible || EMBED);
+      // An explicit blank title means "no top text" — only fall back to STARTING SOON when
+      // the producer never set a title at all (undefined/null), not when they cleared it.
+      const titleText = (b.title != null) ? b.title : 'STARTING SOON';
+      titleEl.textContent = titleText;
+      titleEl.classList.toggle('hidden', !titleText);
       msgEl.textContent = b.message || '';
       finalMessage = b.finalMessage || "WE'RE LIVE!";
       frozen = (b.frozenSeconds != null) ? Math.max(0, Math.round(b.frozenSeconds)) : null;

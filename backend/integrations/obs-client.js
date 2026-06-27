@@ -6,7 +6,18 @@ const { OBSWebSocket } = require('obs-websocket-js');
  *
  * onStatus({ connected, lastError }) is called whenever the link state changes.
  */
-function createObsClient({ onStatus, onSceneChange, onSceneListChange, onMediaEnded } = {}) {
+function createObsClient({
+  onStatus,
+  onSceneChange,
+  onSceneListChange,
+  onMediaEnded,
+  onMediaStarted,
+  onStreamStateChanged,
+  onRecordStateChanged,
+  onReplayBufferSaved,
+  onInputMuteChanged,
+  onSourceVisibilityChanged,
+} = {}) {
   const obs = new OBSWebSocket();
 
   let connected = false;
@@ -31,6 +42,38 @@ function createObsClient({ onStatus, onSceneChange, onSceneListChange, onMediaEn
 
   // A media source finished playing (e.g. the commercial video) — used for auto-return.
   obs.on('MediaInputPlaybackEnded', (d) => { if (onMediaEnded) onMediaEnded(d && d.inputName); });
+
+  // A media source started playing — useful for flow triggers.
+  obs.on('MediaInputPlaybackStarted', (d) => { if (onMediaStarted) onMediaStarted(d && d.inputName); });
+
+  obs.on('StreamStateChanged', (d) => {
+    if (onStreamStateChanged) onStreamStateChanged({ active: !!d.outputActive, state: d.outputState || '' });
+  });
+  obs.on('RecordStateChanged', (d) => {
+    if (onRecordStateChanged) onRecordStateChanged({ active: !!d.outputActive, state: d.outputState || '' });
+  });
+  obs.on('ReplayBufferSaved', (d) => {
+    if (onReplayBufferSaved) onReplayBufferSaved({ path: (d && d.savedReplayPath) || '' });
+  });
+
+  // Audio input mute state changed — covers any input in the mixer.
+  obs.on('InputMuteStateChanged', (d) => {
+    if (onInputMuteChanged) onInputMuteChanged({ inputName: (d && d.inputName) || '', muted: !!(d && d.inputMuted) });
+  });
+
+  // Scene item (source) visibility toggled — resolve sceneItemId → sourceName via WS call.
+  obs.on('SceneItemEnableStateChanged', async (d) => {
+    if (!onSourceVisibilityChanged || !d) return;
+    let sourceName = '';
+    try {
+      const r = await call('GetSceneItemList', { sceneName: d.sceneName });
+      if (r && r.sceneItems) {
+        const item = r.sceneItems.find((i) => i.sceneItemId === d.sceneItemId);
+        if (item) sourceName = item.sourceName || '';
+      }
+    } catch (_) {}
+    onSourceVisibilityChanged({ sceneName: d.sceneName || '', sourceName, enabled: !!d.sceneItemEnabled });
+  });
 
   // Keep the producer's scene list in sync with OBS automatically: whenever scenes
   // are added/removed/renamed or the whole scene collection is swapped, re-fetch and
@@ -166,6 +209,43 @@ function createObsClient({ onStatus, onSceneChange, onSceneListChange, onMediaEn
     }
   }
 
+  // Returns list of all audio/video inputs known to OBS.
+  async function getInputList() {
+    const r = await call('GetInputList');
+    if (!r || !r.inputs) return [];
+    return r.inputs.map((i) => ({ name: i.inputName, kind: i.inputKind || '' }));
+  }
+
+  // Returns all scene items (sources) within a given scene.
+  async function getSceneItemList(sceneName) {
+    const r = await call('GetSceneItemList', { sceneName });
+    return (r && r.sceneItems) ? r.sceneItems : [];
+  }
+
+  // Mute or unmute a named audio input.
+  async function setInputMute(inputName, muted) {
+    return call('SetInputMute', { inputName, inputMuted: muted });
+  }
+
+  // Set the volume of a named audio input in dB (-100 to +26).
+  async function setInputVolume(inputName, volumeDb) {
+    return call('SetInputVolume', { inputName, inputVolumeDb: volumeDb });
+  }
+
+  // Show or hide a named source within a scene.
+  async function setSceneItemEnabled(sceneName, sourceName, enabled) {
+    const items = await getSceneItemList(sceneName);
+    const item = items.find((i) => i.sourceName === sourceName);
+    if (!item) return false;
+    await call('SetSceneItemEnabled', { sceneName, sceneItemId: item.sceneItemId, sceneItemEnabled: enabled });
+    return true;
+  }
+
+  // Enable or disable a named filter on a source.
+  async function setSourceFilterEnabled(sourceName, filterName, enabled) {
+    return call('SetSourceFilterEnabled', { sourceName, filterName, filterEnabled: enabled });
+  }
+
   // Replay buffer (instant replay / save highlight clip)
   async function saveReplayBuffer() {
     const r = await call('SaveReplayBuffer');
@@ -203,6 +283,13 @@ function createObsClient({ onStatus, onSceneChange, onSceneListChange, onMediaEn
     disconnect,
     getScenes,
     switchScene,
+    call,
+    getInputList,
+    getSceneItemList,
+    setInputMute,
+    setInputVolume,
+    setSceneItemEnabled,
+    setSourceFilterEnabled,
     saveReplayBuffer,
     saveReplayBufferAndGetPath,
     startReplayBuffer,
@@ -210,7 +297,7 @@ function createObsClient({ onStatus, onSceneChange, onSceneListChange, onMediaEn
     isReplayBufferActive,
     isConnected: () => connected,
     getCurrentScene: () => currentScene,
-    getLastError: () => lastError
+    getLastError: () => lastError,
   };
 }
 

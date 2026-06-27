@@ -1,0 +1,454 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Twitch Poll Overlay</title>
+  <style>
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      background: transparent;
+      font-family: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
+      overflow: hidden;
+      width: 1920px;
+      height: 1080px;
+      position: relative;
+    }
+
+    #poll-anchor {
+      position: absolute;
+      width: 520px;
+      pointer-events: none;
+      transition: transform 0.60s cubic-bezier(0.34, 1.48, 0.64, 1),
+                  opacity   0.45s ease;
+    }
+    #poll-anchor.hiding {
+      transition: transform 0.32s ease, opacity 0.28s ease;
+    }
+
+    #poll-anchor.pos-bottom {
+      bottom: 28px; left: 50%;
+      transform: translateX(-50%) translateY(24px); opacity: 0;
+    }
+    #poll-anchor.pos-bottom.visible  { transform: translateX(-50%) translateY(0); opacity: 1; }
+    #poll-anchor.pos-bottom.hiding   { transform: translateX(-50%) translateY(16px); opacity: 0; }
+
+    #poll-anchor.pos-top {
+      top: 28px; left: 50%;
+      transform: translateX(-50%) translateY(-24px); opacity: 0;
+    }
+    #poll-anchor.pos-top.visible  { transform: translateX(-50%) translateY(0); opacity: 1; }
+    #poll-anchor.pos-top.hiding   { transform: translateX(-50%) translateY(-16px); opacity: 0; }
+
+    #poll-anchor.pos-left {
+      bottom: 28px; left: 28px;
+      transform: translateY(24px); opacity: 0;
+    }
+    #poll-anchor.pos-left.visible  { transform: translateY(0); opacity: 1; }
+    #poll-anchor.pos-left.hiding   { transform: translateY(16px); opacity: 0; }
+
+    #poll-anchor.pos-right {
+      bottom: 28px; right: 28px;
+      transform: translateY(24px); opacity: 0;
+    }
+    #poll-anchor.pos-right.visible  { transform: translateY(0); opacity: 1; }
+    #poll-anchor.pos-right.hiding   { transform: translateY(16px); opacity: 0; }
+
+    .poll-card {
+      background: linear-gradient(160deg, rgba(13,11,20,0.97) 0%, rgba(18,14,30,0.97) 100%);
+      border: 1px solid rgba(145,70,255,0.35);
+      border-radius: 18px;
+      overflow: hidden;
+      box-shadow:
+        0 0 0 1px rgba(145,70,255,0.07),
+        0 24px 70px rgba(0,0,0,0.85),
+        inset 0 1px 0 rgba(255,255,255,0.06);
+    }
+
+    .poll-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 11px 18px;
+      border-bottom: 1px solid rgba(145,70,255,0.14);
+      background: rgba(145,70,255,0.07);
+    }
+
+    .poll-badge {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      font-size: 10.5px;
+      font-weight: 800;
+      letter-spacing: 0.09em;
+      text-transform: uppercase;
+      color: #9146ff;
+      flex-shrink: 0;
+    }
+
+    .poll-dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: #9146ff;
+      box-shadow: 0 0 8px #9146ff;
+      animation: dot-pulse 1.8s ease-in-out infinite;
+      flex-shrink: 0;
+    }
+    .poll-dot.ended { background: #4ade80; box-shadow: 0 0 8px #4ade80; animation: none; }
+    @keyframes dot-pulse {
+      0%,100% { opacity: 1;   box-shadow: 0 0 6px  #9146ff; }
+      50%      { opacity: 0.5; box-shadow: 0 0 18px #9146ff; }
+    }
+
+    .poll-title-text {
+      flex: 1;
+      font-size: 13px;
+      font-weight: 700;
+      color: rgba(255,255,255,0.88);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    .poll-pill {
+      font-size: 9.5px;
+      font-weight: 800;
+      letter-spacing: 0.07em;
+      text-transform: uppercase;
+      padding: 3px 9px;
+      border-radius: 20px;
+      flex-shrink: 0;
+    }
+    .poll-pill.open     { background: rgba(145,70,255,0.18); color: #9146ff; border: 1px solid rgba(145,70,255,0.30); }
+    .poll-pill.ended    { background: rgba(74,222,128,0.14); color: #4ade80; border: 1px solid rgba(74,222,128,0.28); }
+
+    .poll-countdown {
+      font-size: 13px;
+      font-weight: 800;
+      color: rgba(255,255,255,0.45);
+      font-variant-numeric: tabular-nums;
+      flex-shrink: 0;
+    }
+    .poll-countdown.urgent { color: #f87171; animation: ct-pulse 0.75s ease-in-out infinite; }
+    @keyframes ct-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+    .poll-choices {
+      padding: 14px 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .poll-choice {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+
+    .choice-row {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 8px;
+    }
+
+    .choice-label {
+      font-size: 13px;
+      font-weight: 700;
+      color: rgba(255,255,255,0.88);
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .choice-pct {
+      font-size: 13px;
+      font-weight: 800;
+      font-variant-numeric: tabular-nums;
+      color: #9146ff;
+      flex-shrink: 0;
+    }
+    .choice-votes {
+      font-size: 11px;
+      font-weight: 600;
+      color: rgba(255,255,255,0.30);
+      font-variant-numeric: tabular-nums;
+      flex-shrink: 0;
+    }
+
+    .choice-bar-track {
+      height: 6px;
+      background: rgba(255,255,255,0.07);
+      border-radius: 3px;
+      overflow: hidden;
+    }
+    .choice-bar-fill {
+      height: 100%;
+      background: linear-gradient(90deg, rgba(145,70,255,0.7), rgba(145,70,255,1));
+      border-radius: 3px;
+      transition: width 0.9s cubic-bezier(0.4,0,0.2,1);
+      min-width: 4px;
+    }
+
+    .poll-footer {
+      padding: 6px 18px 10px;
+      display: flex;
+      justify-content: center;
+      border-top: 1px solid rgba(255,255,255,0.04);
+    }
+    .poll-footer-text {
+      font-size: 11px;
+      font-weight: 600;
+      color: rgba(255,255,255,0.22);
+      font-variant-numeric: tabular-nums;
+    }
+  </style>
+</head>
+<body>
+
+<div id="poll-anchor" class="pos-bottom" style="display:none">
+  <div class="poll-card">
+    <div class="poll-header">
+      <div class="poll-badge">
+        <span class="poll-dot" id="poll-dot"></span>
+        <span id="poll-badge-label">Poll</span>
+      </div>
+      <div class="poll-title-text" id="poll-title"></div>
+      <span class="poll-pill open" id="poll-pill">Voting Open</span>
+      <span class="poll-countdown" id="poll-countdown"></span>
+    </div>
+    <div class="poll-choices" id="poll-choices"></div>
+    <div class="poll-footer">
+      <span class="poll-footer-text" id="poll-footer">Awaiting votes…</span>
+    </div>
+  </div>
+</div>
+
+<script>
+  const params  = new URLSearchParams(location.search);
+  const posStr  = (params.get('pos') || 'bottom').toLowerCase();
+  const _urlLoop = params.has('loop') ? parseInt(params.get('loop'), 10) : 30;
+  const _urlHide = params.has('hide') ? parseInt(params.get('hide'), 10) : 8;
+
+  const anchor = document.getElementById('poll-anchor');
+  anchor.className = 'pos-' + posStr;
+
+  let activePollId   = null;
+  let isVisible      = false;
+  let countdownTimer = null;
+  let hideTimer      = null;
+  let loopShowTimer  = null;
+  let loopHideTimer  = null;
+  let lastPoll       = null;
+
+  // ── WebSocket ────────────────────────────────────────────────────────────────
+  function connect() {
+    const ws = new WebSocket('ws://localhost:3001');
+    ws.onopen    = () => ws.send(JSON.stringify({ type: 'request_state' }));
+    ws.onmessage = ({ data }) => {
+      try {
+        const msg = JSON.parse(data);
+        if (msg.type === 'full_state') applyState(msg.data);
+        else if (msg.type === 'twitch_poll_update') showOrUpdate(msg.data);
+        else if (msg.type === 'twitch_poll_end')    handleEnd(msg.data);
+      } catch (_) {}
+    };
+    ws.onclose = () => setTimeout(connect, 800);
+  }
+
+  function applyState(state) {
+    const poll = state?.twitch?.poll?.current;
+    if (poll) {
+      lastPoll = poll;
+      showOrUpdate(poll);
+    } else if (activePollId) {
+      clearAllTimers();
+      activePollId = null;
+      lastPoll = null;
+      doHide();
+    }
+  }
+
+  // ── Show / Update ────────────────────────────────────────────────────────────
+  function showOrUpdate(poll) {
+    lastPoll = poll;
+    const ended = poll.status !== 'ACTIVE';
+
+    if (poll.id !== activePollId) {
+      clearAllTimers();
+      activePollId = poll.id;
+      renderCard(poll);
+      doShow();
+      if (!ended && _urlLoop > 0) scheduleLoopHide();
+    } else {
+      renderCard(poll);
+    }
+
+    if (ended && isVisible) {
+      clearLoopTimers();
+    }
+  }
+
+  function handleEnd(poll) {
+    lastPoll = poll;
+    if (poll.id === activePollId || !activePollId) {
+      activePollId = poll.id;
+      renderCard(poll);
+      if (!isVisible) doShow();
+      clearLoopTimers();
+      hideTimer = setTimeout(() => {
+        doHide();
+        activePollId = null;
+        lastPoll = null;
+      }, 16000);
+    }
+  }
+
+  // ── Render ──────────────────────────────────────────────────────────────────
+  function renderCard(poll) {
+    const ended = poll.status !== 'ACTIVE';
+    const dot   = document.getElementById('poll-dot');
+    const pill  = document.getElementById('poll-pill');
+    const badge = document.getElementById('poll-badge-label');
+
+    if (ended) {
+      dot.classList.add('ended');
+      pill.className = 'poll-pill ended';
+      pill.textContent = 'Poll Ended';
+      badge.textContent = 'Results';
+    } else {
+      dot.classList.remove('ended');
+      pill.className = 'poll-pill open';
+      pill.textContent = 'Voting Open';
+      badge.textContent = 'Poll';
+    }
+
+    document.getElementById('poll-title').textContent = poll.title || '';
+
+    const total   = poll.total || poll.choices.reduce((s, c) => s + (c.votes || 0), 0);
+    const choices = document.getElementById('poll-choices');
+    choices.innerHTML = '';
+    (poll.choices || []).forEach(c => {
+      const pct = total > 0 ? Math.round((c.votes || 0) / total * 100) : 0;
+      const div = document.createElement('div');
+      div.className = 'poll-choice';
+      div.innerHTML = `
+        <div class="choice-row">
+          <span class="choice-label">${esc(c.title)}</span>
+          <span class="choice-pct">${pct}%</span>
+          <span class="choice-votes">${fmt(c.votes || 0)}</span>
+        </div>
+        <div class="choice-bar-track">
+          <div class="choice-bar-fill" style="width:${pct}%"></div>
+        </div>`;
+      choices.appendChild(div);
+    });
+
+    document.getElementById('poll-footer').textContent =
+      total > 0 ? `${fmt(total)} total votes` : 'Awaiting votes…';
+
+    startCountdown(poll.endsAt, ended);
+  }
+
+  // ── Countdown ───────────────────────────────────────────────────────────────
+  function startCountdown(endsAt, frozen) {
+    if (countdownTimer) { clearInterval(countdownTimer); countdownTimer = null; }
+    const el = document.getElementById('poll-countdown');
+    if (!endsAt || frozen) { el.textContent = ''; el.className = 'poll-countdown'; return; }
+    const tick = () => {
+      const rem = Math.max(0, new Date(endsAt) - Date.now());
+      const m   = Math.floor(rem / 60000);
+      const s   = Math.floor((rem % 60000) / 1000);
+      el.textContent = rem > 0 ? `${m}:${s.toString().padStart(2, '0')}` : '';
+      el.className   = 'poll-countdown' + (rem < 30000 && rem > 0 ? ' urgent' : '');
+      if (rem === 0) { clearInterval(countdownTimer); countdownTimer = null; }
+    };
+    tick();
+    countdownTimer = setInterval(tick, 1000);
+  }
+
+  // ── Visibility ──────────────────────────────────────────────────────────────
+  function doShow() {
+    if (isVisible) return;
+    isVisible = true;
+    anchor.style.display = '';
+    anchor.classList.remove('hiding');
+    void anchor.offsetHeight;
+    anchor.classList.add('visible');
+  }
+
+  let _hideDisplayTimer = null;
+  function doHide() {
+    if (!isVisible && anchor.style.display === 'none') return;
+    isVisible = false;
+    anchor.classList.add('hiding');
+    anchor.classList.remove('visible');
+    if (countdownTimer) { clearInterval(countdownTimer); countdownTimer = null; }
+    clearTimeout(_hideDisplayTimer);
+    _hideDisplayTimer = setTimeout(() => {
+      if (!isVisible) anchor.style.display = 'none';
+    }, 380);
+  }
+
+  // ── Loop cycling ────────────────────────────────────────────────────────────
+  function scheduleLoopHide() {
+    clearLoopTimers();
+    loopShowTimer = setTimeout(() => {
+      doHide();
+      loopHideTimer = setTimeout(() => {
+        if (activePollId && lastPoll && lastPoll.status === 'ACTIVE') {
+          renderCard(lastPoll);
+          doShow();
+          scheduleLoopHide();
+        }
+      }, _urlHide * 1000);
+    }, _urlLoop * 1000);
+  }
+
+  function clearLoopTimers() {
+    if (loopShowTimer) { clearTimeout(loopShowTimer); loopShowTimer = null; }
+    if (loopHideTimer) { clearTimeout(loopHideTimer); loopHideTimer = null; }
+  }
+
+  function clearAllTimers() {
+    clearLoopTimers();
+    if (hideTimer)      { clearTimeout(hideTimer);       hideTimer      = null; }
+    if (countdownTimer) { clearInterval(countdownTimer); countdownTimer = null; }
+  }
+
+  // ── Helpers ─────────────────────────────────────────────────────────────────
+  function fmt(n) {
+    n = Number(n) || 0;
+    if (n >= 1e6) return (n/1e6).toFixed(1) + 'M';
+    if (n >= 1e3) return (n/1e3).toFixed(1) + 'K';
+    return n.toLocaleString();
+  }
+  function esc(s) {
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+
+  // ── Preview mode ─────────────────────────────────────────────────────────────
+  if (params.get('preview') === '1') {
+    const ends = new Date(Date.now() + 90 * 1000).toISOString();
+    applyState({
+      twitch: { poll: { current: {
+        id: 'preview', title: 'What map should we play next?',
+        choices: [
+          { id: 'c1', title: 'Dust II',    votes: 1420 },
+          { id: 'c2', title: 'Mirage',     votes: 980  },
+          { id: 'c3', title: 'Inferno',    votes: 650  },
+          { id: 'c4', title: 'Nuke',       votes: 310  }
+        ],
+        total: 3360, status: 'ACTIVE', startedAt: new Date().toISOString(), endsAt: ends
+      }}}
+    });
+  } else {
+    connect();
+  }
+</script>
+</body>
+</html>

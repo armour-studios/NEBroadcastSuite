@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<!--
+  talentbar.html — slim "talent bar" lower third. A bottom strip of caster cams + names
+  (gameplay/replay fills the rest of the screen). Transparent above the bar. Shares
+  duorow.html's design language; driven by full_state on WS :3001.
+
+  ?cams=off   frames-only (composite each cam as its own OBS source over the holes)
+  Casters: up to 4 (by slot).
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <link rel="stylesheet" href="/fonts.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+  <style>
+    :root {
+      --duo-surface: #1a1d24; --duo-surface2: #20242e; --duo-border: #2e3340;
+      --duo-accent: #e83a8b; --duo-accent2: #8b5cf6; --duo-muted: #8b93a8;
+      --bar-h: 150px;
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { width: 1920px; height: 1080px; overflow: hidden; background: transparent;
+      font-family: 'Inter', system-ui, sans-serif; color: #e8eaf0; -webkit-font-smoothing: antialiased; }
+
+    .tb { position: fixed; left: 0; right: 0; bottom: 0; height: var(--bar-h);
+      display: flex; align-items: center; gap: 22px; padding: 0 34px;
+      background: linear-gradient(180deg, transparent, rgba(8,10,14,.55) 22%, rgba(8,10,14,.94) 60%);
+      transform: translateY(110%); transition: transform .5s cubic-bezier(.16,.84,.24,1); }
+    .tb.show { transform: translateY(0); }
+    .tb::before { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 4px;
+      background: linear-gradient(90deg, var(--duo-accent), var(--duo-accent2), var(--duo-accent)); opacity: .9; }
+
+    .tb-accent { width: 6px; align-self: stretch; margin: 26px 0; border-radius: 3px;
+      background: linear-gradient(180deg, var(--duo-accent), var(--duo-accent2)); box-shadow: 0 0 18px var(--duo-accent); flex: 0 0 auto; }
+
+    .tb-talents { display: flex; align-items: center; gap: 16px; flex: 1 1 auto; min-width: 0; overflow: hidden; }
+    .tb-talent { display: flex; align-items: center; gap: 14px; flex: 0 0 auto; padding: 8px 16px 8px 8px;
+      background: linear-gradient(180deg, rgba(32,36,46,.85), rgba(20,23,30,.85)); border: 1px solid var(--duo-border); border-radius: 12px;
+      opacity: 0; }
+    .tb.show .tb-talent { animation: tIn .55s cubic-bezier(.16,.84,.24,1) forwards; }
+    .tb.show .tb-talent:nth-child(2) { animation-delay: .08s; }
+    .tb.show .tb-talent:nth-child(3) { animation-delay: .16s; }
+    .tb.show .tb-talent:nth-child(4) { animation-delay: .24s; }
+    @keyframes tIn { from { opacity: 0; transform: translateY(18px); } to { opacity: 1; transform: none; } }
+
+    .tb-cam { position: relative; width: 178px; height: 100px; border-radius: 8px; overflow: hidden; background: #0d0f14;
+      border: 1px solid var(--duo-border); flex: 0 0 auto; }
+    .tb-cam::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px; z-index: 2; background: linear-gradient(90deg, var(--duo-accent), var(--duo-accent2)); }
+    .tb-cam iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+    .tb-text { display: flex; flex-direction: column; gap: 4px; min-width: 0; padding-right: 6px; }
+    .tb-name { font-size: 23px; font-weight: 800; letter-spacing: .03em; text-transform: uppercase; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .tb-handle { font-size: 15px; font-weight: 600; color: #9aa3b8; white-space: nowrap; }
+    .tb-handle::before { font-family: 'Font Awesome 6 Brands'; font-weight: 400; margin-right: 6px; }
+    .tb-handle.twitch::before { content: "\f1e8"; color: #9146ff; } .tb-handle.youtube::before { content: "\f167"; color: #ff0033; }
+    .tb-handle.x-twitter::before { content: "\e61b"; color: #e8eaf0; } .tb-handle.instagram::before { content: "\f16d"; color: #e1306c; }
+    .tb-handle.tiktok::before { content: "\e07b"; color: #25f4ee; } .tb-handle.discord::before { content: "\f392"; color: #5865f2; }
+    .tb-handle.facebook::before { content: "\f09a"; color: #1877f2; }
+    .tb-handle.kick::before { content: "K"; font-family: 'Inter', sans-serif; font-weight: 900; color: #53fc18; }
+    .tb-handle.link::before { content: "\f0c1"; font-family: 'Font Awesome 6 Free'; font-weight: 900; color: var(--duo-muted); }
+
+    .tb-right { display: flex; flex-direction: column; align-items: flex-end; gap: 3px; flex: 0 0 auto; max-width: 460px; }
+    .tb-right.is-empty { display: none; }
+    .tb-evt-label { font-size: 11px; font-weight: 800; letter-spacing: .18em; text-transform: uppercase; color: var(--duo-muted); }
+    .tb-evt { font-family: 'Rajdhani', 'Inter', sans-serif; font-size: 30px; font-weight: 700; letter-spacing: .02em; text-transform: uppercase; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 460px; }
+
+    .preview .tb-cam { background: repeating-linear-gradient(45deg, #181b22, #181b22 14px, #20242e 14px, #20242e 28px); }
+    .preview .tb-cam::after { content: 'CAM'; position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 16px; font-weight: 800; letter-spacing: .25em; color: #4a5162; }
+    .preview .tb-cam iframe { position: relative; z-index: 1; }
+  </style>
+</head>
+<body>
+  <div id="tb" class="tb">
+    <div class="tb-accent"></div>
+    <div class="tb-talents" id="talents"></div>
+    <div class="tb-right is-empty" id="tb-right">
+      <span class="tb-evt-label" id="tb-evt-label">Casting</span>
+      <span class="tb-evt" id="tb-evt"></span>
+    </div>
+  </div>
+
+  <script src="scene-base.js"></script>
+  <script>
+    function el(id) { return document.getElementById(id); }
+    const NO_CAMS = new URLSearchParams(location.search).get('cams') === 'off';
+    let _sig = '';
+
+    function applyBrandTheme(data) {
+      const root = document.documentElement;
+      const color = SceneBase.brandColor(data), accent2 = SceneBase.brandAccent(data);
+      if (color) root.style.setProperty('--duo-accent', color);
+      if (accent2) root.style.setProperty('--duo-accent2', accent2);
+      if (data.fontFamily) root.style.fontFamily = `'${data.fontFamily}', 'Inter', system-ui, sans-serif`;
+    }
+
+    function render(data) {
+      data = data || {};
+      applyBrandTheme(data);
+      const casters = data.casters || {};
+      el('tb').classList.toggle('show', SceneBase.casterStageVisible(casters));
+
+      // Right side: lower-third tagline (if set) else event name.
+      const tag = ((casters.lowerThird) || '').toString().trim();
+      const evt = (data.eventName || '').toString().trim();
+      const rightText = tag || evt;
+      el('tb-evt').textContent = rightText.toUpperCase();
+      el('tb-evt-label').textContent = tag ? 'Now' : 'Casting';
+      el('tb-right').classList.toggle('is-empty', !rightText);
+
+      const list = (Array.isArray(casters.list) ? casters.list : [])
+        .filter(c => c && (c.name || c.camUrl))
+        .sort((a, b) => (Number(a.slot) || 9) - (Number(b.slot) || 9))
+        .slice(0, 4);
+
+      const sig = JSON.stringify(list.map(c => ({ n: c.name, h: c.handle, s: c.social, u: NO_CAMS ? '' : c.camUrl })));
+      if (sig === _sig) return;
+      _sig = sig;
+
+      const wrap = el('talents');
+      wrap.innerHTML = '';
+      list.forEach(c => {
+        const handle = SceneBase.formatCasterHandle(c), social = (c.social || 'none').toString().toLowerCase();
+        const socHtml = (handle && social !== 'none') ? `<span class="tb-handle ${SceneBase.socialPlatformClass(social)}">${handle.replace(/</g, '&lt;')}</span>` : '';
+        const item = document.createElement('div');
+        item.className = 'tb-talent';
+        item.innerHTML = `<div class="tb-cam"></div><div class="tb-text"><span class="tb-name">${(c.name || '—').toString().replace(/</g, '&lt;')}</span>${socHtml}</div>`;
+        const camUrl = (!NO_CAMS && (c.camUrl || '').trim()) || '';
+        if (camUrl) {
+          const iframe = document.createElement('iframe');
+          iframe.src = camUrl;
+          iframe.setAttribute('allow', 'autoplay; encrypted-media; microphone; camera; fullscreen');
+          iframe.referrerPolicy = 'no-referrer';
+          item.querySelector('.tb-cam').appendChild(iframe);
+        }
+        wrap.appendChild(item);
+      });
+    }
+
+    if (location.protocol === 'file:') {
+      document.documentElement.classList.add('preview');
+      render({
+        casters: { visible: true, lowerThird: 'Summer Showdown — Grand Final', list: [
+          { id: 'c1', name: 'Jordan Reyes', handle: 'jreyescasts', slot: 1, social: 'x' },
+          { id: 'c2', name: 'Mia Tanaka', handle: 'miaplays', slot: 2, social: 'twitch' },
+          { id: 'c3', name: 'Sam Okoye', handle: 'samok', slot: 3, social: 'youtube' } ] },
+        eventName: 'Summer Showdown 2026', brand: { color: '#7c3aed', accent: '#22d3ee' }
+      });
+    } else {
+      SceneBase.connect(render);
+    }
+  </script>
+</body>
+</html>

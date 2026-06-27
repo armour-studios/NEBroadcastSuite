@@ -1,224 +1,261 @@
 <!DOCTYPE html>
-<html lang="en">
 <!--
-  NE Broadcast Suite three-caster "desk" scene — ported from EsportsDashBoard triorow.html,
-  now driven by full_state over the WS bridge (:3001) instead of polling
-  localhost:8080/getfullJson + jQuery.
-
-  Layout (matches the source intent):
-    • a team scorebar on top (blue vs orange),
-    • THREE camera holes in a row, each with a name plate + social handle,
-    • a footer with the brand logo (tournament), a centered tagline (eventName) and a channel slot.
-
-  Data (full_state):
-    • data.casters = { visible, list:[{ id, name, handle, camUrl }] } — first 3 used
-    • SceneBase.teamSide(data,'blue'|'orange') -> { name, logo, color, score, series }
-    • data.eventName -> tagline text
-    • SceneBase.brandLogo(data) -> footer (tournament) logo
-
-  Performance: cam iframes are rebuilt only when the caster list changes (JSON signature),
-  so the streams don't reconnect on every unrelated full_state tick. Plate text + scorebar
-  update every tick. The whole stage fades via `.show` from data.casters.visible.
+  triorow.html — 3-caster desk scene (NE Broadcast Suite style).
+  Shares duorow.html's design language; driven by full_state on WS :3001 via SceneBase.connect().
 -->
+<html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <title>NE Broadcast Suite — Trio Row</title>
-  <link rel="stylesheet" href="scene.css" />
+  <meta charset="utf-8" />
+  <link rel="stylesheet" href="/fonts.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
   <style>
-    /* Layout-specific sizing only; shared look comes from scene.css. */
-    #trio-stage { opacity: 0; transition: opacity 0.35s ease; }
-    #trio-stage.show { opacity: 1; }
-
-    /* Three cams across the 1920px stage: 3 × 580 holes + margins fit comfortably. */
-    .toprow {
-      display: flex; flex-direction: row;
-      align-items: center; justify-content: center; text-align: center;
-      width: 1920px; height: 100%;
+    :root {
+      --duo-bg: #111318; --duo-surface: #1a1d24; --duo-surface2: #20242e; --duo-border: #2e3340;
+      --duo-accent: #e83a8b; --duo-accent2: #8b5cf6; --duo-text: #e8eaf0; --duo-muted: #8b93a8;
+      --team-a: #055fdb; --team-b: #e97139;
+      --stage-w: 1920px; --stage-h: 1080px; --pad-x: 24px; --hud-h: 128px; --cam-gap: 16px; --cam-plate-h: 54px;
     }
-    .camerahole { width: 580px; height: 326px; background-color: #000; }
-    .staffiso   { width: 100%; }
-    .staff      { width: 100%; box-sizing: border-box; padding: 8px 16px; gap: 6px; flex-wrap: wrap; }
-    .staffname  { line-height: 1; }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { width: var(--stage-w); height: var(--stage-h); overflow: hidden; background: transparent;
+      font-family: 'Inter', system-ui, sans-serif; color: var(--duo-text); -webkit-font-smoothing: antialiased; }
+
+    .duo-stage { display: flex; flex-direction: column; width: var(--stage-w); height: var(--stage-h);
+      padding: 16px var(--pad-x) 16px; opacity: 0; transition: opacity .35s ease; }
+    .duo-stage.show { opacity: 1; }
+    .zone-hud { flex: 0 0 auto; display: flex; align-items: center; justify-content: center; }
+    .zone-cams { flex: 1 1 0; min-height: 0; display: flex; align-items: center; justify-content: center; padding: 14px 0; }
+    .zone-footer { flex: 0 0 auto; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; }
+
+    /* ── Entry animations ── */
+    .duo-stage:not(.show) .match-hud, .duo-stage:not(.show) .cam-card, .duo-stage:not(.show) .presented-by, .duo-stage:not(.show) .deck-strip { opacity: 0; }
+    .duo-stage.show .match-hud { animation: hudEnter .7s cubic-bezier(.16,.84,.24,1) .06s forwards; }
+    .duo-stage.show .cam-card:nth-child(1) { animation: camUp .7s cubic-bezier(.16,.84,.24,1) .14s forwards; }
+    .duo-stage.show .cam-card:nth-child(2) { animation: camUp .7s cubic-bezier(.16,.84,.24,1) .22s forwards; }
+    .duo-stage.show .cam-card:nth-child(3) { animation: camUp .7s cubic-bezier(.16,.84,.24,1) .30s forwards; }
+    .duo-stage.show .deck-strip { animation: stripUp .6s cubic-bezier(.16,.84,.24,1) .4s forwards; }
+    @keyframes hudEnter { from { opacity: 0; transform: translateY(-30px) scale(.94); } to { opacity: 1; transform: none; } }
+    @keyframes camUp { from { opacity: 0; transform: translateY(34px) scale(.97); } to { opacity: 1; transform: none; } }
+    @keyframes stripUp { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+
+    /* ── Esports score HUD ── */
+    .match-hud { position: relative; display: flex; align-items: stretch; width: min(1500px, 100%); height: var(--hud-h);
+      background: linear-gradient(180deg, rgba(24,27,34,.98), rgba(10,12,16,.99));
+      border-bottom: 1px solid rgba(255,255,255,.07); box-shadow: 0 12px 32px rgba(0,0,0,.55); }
+    .match-hud::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 1px;
+      background: linear-gradient(90deg, transparent 4%, rgba(255,255,255,.35) 50%, transparent 96%); z-index: 3; }
+    .match-team { flex: 1 1 0; min-width: 0; position: relative; display: flex; align-items: center; gap: 8px; }
+    .match-team--a { padding: 0 10px 0 16px; }
+    .match-team--b { padding: 0 16px 0 8px; }
+    .match-team--a::before, .match-team--b::before { content: ''; position: absolute; top: 0; bottom: 0; width: 45%; pointer-events: none; }
+    .match-team--a::before { left: 0; background: linear-gradient(90deg, color-mix(in srgb, var(--team-a) 22%, transparent), transparent); }
+    .match-team--b::before { right: 0; width: 38%; background: linear-gradient(270deg, color-mix(in srgb, var(--team-b) 18%, transparent), transparent); }
+    .match-team::after { content: ''; position: absolute; bottom: 0; left: 0; right: 0; height: 3px; }
+    .match-team--a::after { background: linear-gradient(90deg, var(--team-a), transparent 70%); box-shadow: 0 0 14px color-mix(in srgb, var(--team-a) 50%, transparent); }
+    .match-team--b::after { background: linear-gradient(270deg, var(--team-b), transparent 70%); box-shadow: 0 0 14px color-mix(in srgb, var(--team-b) 50%, transparent); }
+    .match-logo { width: 78px; height: 78px; object-fit: contain; flex: 0 0 78px; position: relative; z-index: 1; filter: drop-shadow(0 2px 6px rgba(0,0,0,.5)); }
+    .match-logo.logo-on-dark { filter: brightness(0) invert(1) drop-shadow(0 2px 6px rgba(0,0,0,.5)); }
+    .match-name { flex: 1 1 0; min-width: 0; position: relative; z-index: 1; font-size: 30px; font-weight: 800; letter-spacing: .04em;
+      text-transform: uppercase; line-height: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #fff; }
+    .match-team--a .match-name { text-shadow: 0 0 18px color-mix(in srgb, var(--team-a) 45%, transparent); }
+    .match-team--b .match-name { text-align: right; text-shadow: 0 0 18px color-mix(in srgb, var(--team-b) 45%, transparent); }
+    .match-score { flex: 0 0 auto; position: relative; z-index: 1; font-size: 58px; font-weight: 900; font-variant-numeric: tabular-nums; line-height: 1; min-width: 28px; text-align: center; }
+    .match-team--a .match-score { color: var(--team-a); text-shadow: 0 0 22px color-mix(in srgb, var(--team-a) 60%, transparent); }
+    .match-team--b .match-score { color: var(--team-b); text-shadow: 0 0 22px color-mix(in srgb, var(--team-b) 60%, transparent); }
+    .match-center { flex: 0 0 140px; display: flex; align-items: center; justify-content: center; position: relative; z-index: 2;
+      background: rgba(6,8,12,.97); border-left: 1px solid rgba(255,255,255,.1); border-right: 1px solid rgba(255,255,255,.1); }
+    .match-vs { font-size: 50px; font-weight: 900; letter-spacing: .08em; line-height: 1; color: #fff; text-shadow: 0 1px 4px rgba(0,0,0,.85); }
+
+    /* ── Caster cams (3 across) ── */
+    .duo-cams { display: flex; align-items: stretch; justify-content: center; gap: var(--cam-gap); width: 100%; height: 100%; }
+    .cam-card { flex: 1 1 0; min-width: 0; max-width: calc((var(--stage-w) - 2 * var(--pad-x) - 2 * var(--cam-gap)) / 3);
+      display: flex; flex-direction: column; border-radius: 12px; overflow: hidden; border: 1px solid var(--duo-border);
+      background: var(--duo-surface); box-shadow: 0 14px 40px rgba(0,0,0,.45); }
+    .cam-card::before { content: ''; display: block; height: 3px; flex: 0 0 auto;
+      background: linear-gradient(90deg, transparent, var(--duo-accent) 30%, var(--duo-accent2) 70%, transparent); }
+    .cam-hole { position: relative; width: 100%; aspect-ratio: 16 / 9; flex: 1 1 auto; background: #0d0f14; overflow: hidden; }
+    .cam-hole iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+    /* ?cams=off framing: transparent holes so per-caster OBS sources show through. */
+    .duo-stage.frames-only .cam-hole { background: transparent; }
+    .duo-stage.frames-only .cam-card { background: transparent; box-shadow: none; }
+    .cam-plate { display: flex; align-items: center; justify-content: center; gap: 12px; height: var(--cam-plate-h); flex: 0 0 var(--cam-plate-h);
+      padding: 0 18px; background: linear-gradient(180deg, var(--duo-surface2), var(--duo-surface)); border-top: 1px solid var(--duo-border); }
+    .cam-name { font-size: 20px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .cam-handle { font-size: 15px; font-weight: 600; color: #9aa3b8; }
+    .cam-handle::before { font-family: 'Font Awesome 6 Brands'; font-weight: 400; margin-right: 6px; }
+    .cam-handle.twitch::before { content: "\f1e8"; color: #9146ff; }
+    .cam-handle.youtube::before { content: "\f167"; color: #ff0033; }
+    .cam-handle.x-twitter::before { content: "\e61b"; color: #e8eaf0; }
+    .cam-handle.instagram::before { content: "\f16d"; color: #e1306c; }
+    .cam-handle.tiktok::before { content: "\e07b"; color: #25f4ee; }
+    .cam-handle.discord::before { content: "\f392"; color: #5865f2; }
+    .cam-handle.facebook::before { content: "\f09a"; color: #1877f2; }
+    .cam-handle.kick::before { content: "K"; font-family: 'Inter', sans-serif; font-weight: 900; color: #53fc18; }
+    .cam-handle.link::before { content: "\f0c1"; font-family: 'Font Awesome 6 Free'; font-weight: 900; color: var(--duo-muted); }
+
+    /* ── Footer ── */
+    .presented-by { display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 200px; max-width: 360px;
+      padding: 8px 20px; background: linear-gradient(180deg, rgba(20,23,30,.96), rgba(10,12,16,.98));
+      border: 1px solid rgba(255,255,255,.08); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.4), inset 0 1px 0 rgba(255,255,255,.06); }
+    .presented-by.is-empty { display: none; }
+    .pb-label { font-size: 9px; font-weight: 800; letter-spacing: .2em; text-transform: uppercase; color: var(--duo-muted); }
+    .pb-logo { height: 34px; max-width: 220px; object-fit: contain; filter: drop-shadow(0 2px 6px rgba(0,0,0,.35)); }
+    .deck-strip { width: 100%; max-width: min(900px, calc(var(--stage-w) - 2 * var(--pad-x))); padding: 9px 28px; text-align: center; position: relative;
+      background: linear-gradient(90deg, transparent, rgba(14,16,22,.92) 12%, rgba(14,16,22,.92) 88%, transparent);
+      border-top: 1px solid rgba(255,255,255,.06); border-bottom: 1px solid rgba(255,255,255,.06); }
+    .deck-strip::before, .deck-strip::after { content: ''; position: absolute; top: 50%; width: 48px; height: 1px; background: linear-gradient(90deg, transparent, var(--duo-accent)); opacity: .5; }
+    .deck-strip::before { left: 12px; } .deck-strip::after { right: 12px; transform: scaleX(-1); }
+    .deck-strip-text { font-size: 12px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: #c8ced8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .deck-strip.is-empty { display: none; }
+
+    /* Preview cam placeholders */
+    .preview .cam-hole { background: repeating-linear-gradient(45deg, #181b22, #181b22 16px, #20242e 16px, #20242e 32px); }
+    .preview .cam-hole::after { content: 'CAM'; position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 26px; font-weight: 800; letter-spacing: .3em; color: #4a5162; }
+    .preview .cam-hole iframe { position: relative; z-index: 1; }
   </style>
 </head>
 <body>
-  <div id="trio-stage" class="scene-fade">
+  <div id="stage" class="duo-stage">
+    <div class="zone-hud">
+      <header class="match-hud">
+        <div class="match-team match-team--a">
+          <img id="teamlogo1" class="match-logo" alt="">
+          <span id="teamname1" class="match-name">BLUE</span>
+          <span id="teamscore1" class="match-score">0</span>
+        </div>
+        <div class="match-center"><span class="match-vs">VS</span></div>
+        <div class="match-team match-team--b">
+          <span id="teamscore2" class="match-score">0</span>
+          <span id="teamname2" class="match-name">ORANGE</span>
+          <img id="teamlogo2" class="match-logo" alt="">
+        </div>
+      </header>
+    </div>
 
-    <!-- Top scorebar -->
-    <div class="scoreboardwrapper">
-      <div class="scoreboard">
-        <div class="team team1">
-          <img class="teamlogo teamlogo1" alt="" />
-          <span class="teamname teamname1"></span>
-          <div class="scorebox scorebox1"><span class="teamscore teamscore1"></span></div>
-        </div>
-        <div class="vs"><span>VS</span></div>
-        <div class="team team2">
-          <div class="scorebox scorebox2"><span class="teamscore teamscore2"></span></div>
-          <span class="teamname teamname2"></span>
-          <img class="teamlogo teamlogo2" alt="" />
-        </div>
+    <div class="zone-cams"><main class="duo-cams" id="cams"></main></div>
+
+    <div class="zone-footer">
+      <div class="presented-by is-empty" id="presented-by">
+        <span class="pb-label" id="pb-label">PRESENTED BY</span>
+        <img id="pb-logo" class="pb-logo" alt="" style="display:none">
       </div>
+      <div class="deck-strip is-empty" id="deck-strip"><span id="tagline" class="deck-strip-text">Live</span></div>
     </div>
-
-    <!-- Three camera holes in a row -->
-    <div class="wrapper">
-      <div class="toprow" id="trio-row"></div>
-    </div>
-
-    <!-- Footer: tournament logo + tagline + channel -->
-    <div class="footer">
-      <div class="tournament" id="trio-tournament"></div>
-      <div class="tagline"><div><span class="tertiary" id="trio-tagline"></span></div></div>
-      <div class="channel" id="trio-channel"></div>
-    </div>
-
   </div>
 
   <script src="scene-base.js"></script>
   <script>
-    const stage   = document.getElementById('trio-stage');
-    const rowEl   = document.getElementById('trio-row');
-    const tournEl = document.getElementById('trio-tournament');
-    const taglineEl = document.getElementById('trio-tagline');
+    function el(id) { return document.getElementById(id); }
+    const CAM_COUNT = 3;
+    const NO_CAMS = new URLSearchParams(location.search).get('cams') === 'off';
+    if (NO_CAMS) document.getElementById('stage')?.classList.add('frames-only');
+    let _lastCamUrl = new Array(CAM_COUNT).fill(null);
 
-    const logo1 = document.querySelector('.teamlogo1');
-    const logo2 = document.querySelector('.teamlogo2');
-    const name1 = document.querySelector('.teamname1');
-    const name2 = document.querySelector('.teamname2');
-    const score1 = document.querySelector('.teamscore1');
-    const score2 = document.querySelector('.teamscore2');
-    const box1 = document.querySelector('.scorebox1');
-    const box2 = document.querySelector('.scorebox2');
-
-    let _casterSig = '';
-
-    // De-emphasise common org words (matches the source's bold/un-bold treatment).
-    const UNBOLD = ['gaming','team','e-?sports','house','academy','uni(versity)?','state','tech','and','the','of','eu'];
-    const UNBOLD_RE = new RegExp('\\b(' + UNBOLD.map(w => '(' + w + ')').join('|') + ')\\b', 'gi');
-    function formatTeamName(name) {
-      return '<b>' + (name || '')
-        .replace(UNBOLD_RE, '</b>$1<b>')
-        .replace(/&/gi, '</b>&<b>') + '</b>';
+    function applyBrandTheme(data) {
+      const root = document.documentElement;
+      const color = SceneBase.brandColor(data), accent2 = SceneBase.brandAccent(data);
+      if (color) root.style.setProperty('--duo-accent', color);
+      if (accent2) root.style.setProperty('--duo-accent2', accent2);
+      if (data.fontFamily) root.style.fontFamily = `'${data.fontFamily}', 'Inter', system-ui, sans-serif`;
     }
 
-    function setLogo(img, url) {
-      if (url) { img.src = url; img.style.display = ''; }
-      else { img.removeAttribute('src'); img.style.display = 'none'; }
+    function buildCams() {
+      const cams = el('cams');
+      cams.innerHTML = '';
+      for (let i = 1; i <= CAM_COUNT; i++) {
+        const card = document.createElement('div');
+        card.className = 'cam-card';
+        card.innerHTML = `<div id="hole${i}" class="cam-hole"></div>
+          <div class="cam-plate"><span id="staffname${i}" class="cam-name">—</span><span id="socials${i}" class="cam-handle" style="display:none"></span></div>`;
+        cams.appendChild(card);
+      }
     }
 
-    // Rebuild the three cam boxes only when the caster list actually changes,
-    // so iframes (vdo.ninja streams) don't reconnect each tick.
     function renderCasters(casters) {
-      const all = (casters && Array.isArray(casters.list)) ? casters.list : [];
-      const items = all.slice(0, 3);  // first three casters only
-
-      const sig = JSON.stringify(items.map(c => ({
-        id: c && c.id, name: c && c.name, handle: c && c.handle, camUrl: c && c.camUrl
-      })));
-      if (sig === _casterSig) return;
-      _casterSig = sig;
-
-      rowEl.innerHTML = '';
-      items.forEach(c => {
-        c = c || {};
-        const box = document.createElement('div');
-        box.className = 'camerabox';
-
-        // Camera hole — transparent iframe if a cam URL is set, else a blank hole
-        // (so a webcam composited behind in OBS shows through).
-        const hole = document.createElement('div');
-        hole.className = 'camerahole';
-        const camUrl = (c.camUrl || '').trim();
+      if (NO_CAMS) return;
+      const slots = SceneBase.castersBySlots(casters, CAM_COUNT);
+      for (let i = 0; i < CAM_COUNT; i++) {
+        const camUrl = ((slots[i] && slots[i].camUrl) || '').trim();
+        if (camUrl === _lastCamUrl[i]) continue;
+        _lastCamUrl[i] = camUrl;
+        const hole = el('hole' + (i + 1));
+        if (!hole) continue;
+        hole.querySelectorAll('iframe').forEach(f => f.remove());
         if (camUrl) {
           const iframe = document.createElement('iframe');
           iframe.src = camUrl;
-          iframe.setAttribute('frameBorder', '0');
-          iframe.allow = 'autoplay; encrypted-media';
+          iframe.setAttribute('allow', 'autoplay; encrypted-media; microphone; camera; fullscreen');
           iframe.referrerPolicy = 'no-referrer';
-          iframe.style.width = '100%';
-          iframe.style.height = '100%';
           hole.appendChild(iframe);
         }
-        box.appendChild(hole);
+      }
+    }
 
-        // Name plate + social handle.
-        const iso = document.createElement('div');
-        iso.className = 'staffiso';
-        const staff = document.createElement('div');
-        staff.className = 'staff';
+    function renderCasterText(casters) {
+      const slots = SceneBase.castersBySlots(casters, CAM_COUNT);
+      for (let i = 0; i < CAM_COUNT; i++) {
+        const c = slots[i] || {};
+        const nameEl = el('staffname' + (i + 1)), socEl = el('socials' + (i + 1));
+        if (!nameEl || !socEl) continue;
+        nameEl.textContent = (c.name || '—').toString();
+        const handle = SceneBase.formatCasterHandle(c), social = (c.social || 'none').toString().toLowerCase();
+        if (handle && social !== 'none') {
+          socEl.className = 'cam-handle ' + SceneBase.socialPlatformClass(social);
+          socEl.textContent = handle; socEl.style.display = '';
+        } else { socEl.style.display = 'none'; }
+      }
+    }
 
-        const nm = document.createElement('span');
-        nm.className = 'staffname';
-        nm.textContent = (c.name || '').toUpperCase();
-        staff.appendChild(nm);
+    function renderTeam(idx, t, side) {
+      SceneBase.applyTeamLogo(el('teamlogo' + idx), t.customLogo, t.logo);
+      el('teamname' + idx).textContent = (t.name || (side === 'b' ? 'ORANGE' : 'BLUE')).toUpperCase();
+      el('teamscore' + idx).textContent = t.series != null ? t.series : 0;
+      document.documentElement.style.setProperty(side === 'b' ? '--team-b' : '--team-a', t.color || (side === 'b' ? '#e97139' : '#055fdb'));
+    }
 
-        if (c.handle) {
-          const soc = document.createElement('span');
-          soc.className = 'socials';
-          soc.textContent = c.handle.startsWith('@') ? c.handle : '@' + c.handle;
-          staff.appendChild(soc);
-        }
+    function renderPresentedBy(data) {
+      const slot = data.scoreboardAd || {}, wrap = el('presented-by'), label = el('pb-label'), logo = el('pb-logo');
+      const labelText = (slot.label || 'PRESENTED BY').toString().trim();
+      label.textContent = labelText;
+      if (slot.logo) { logo.src = slot.logo; logo.style.display = ''; wrap.classList.remove('is-empty'); }
+      else if (labelText) { logo.style.display = 'none'; logo.removeAttribute('src'); wrap.classList.remove('is-empty'); }
+      else wrap.classList.add('is-empty');
+    }
 
-        iso.appendChild(staff);
-        box.appendChild(iso);
-        rowEl.appendChild(box);
-      });
+    function renderDeckStrip(data) {
+      const tag = ((data.casters && data.casters.lowerThird) || '').toString().trim();
+      const strip = el('deck-strip'), tagEl = el('tagline');
+      if (tag) { tagEl.textContent = tag; strip.classList.remove('is-empty'); }
+      else { tagEl.textContent = ''; strip.classList.add('is-empty'); }
     }
 
     function render(data) {
+      data = data || {};
+      applyBrandTheme(data);
       const casters = data.casters || {};
-      const items = (Array.isArray(casters.list) ? casters.list : []).slice(0, 3);
-
-      // Fade the whole stage from the visibility toggle.
-      stage.classList.toggle('show', SceneBase.casterStageVisible(casters));
-
+      el('stage').classList.toggle('show', SceneBase.casterStageVisible(casters));
       renderCasters(casters);
-
-      // Scorebar (every tick — cheap text/attr updates).
-      const blue = SceneBase.teamSide(data, 'blue');
-      const orange = SceneBase.teamSide(data, 'orange');
-
-      setLogo(logo1, blue.logo);
-      setLogo(logo2, orange.logo);
-      name1.innerHTML = formatTeamName(blue.name);
-      name2.innerHTML = formatTeamName(orange.name);
-      score1.textContent = blue.score || 0;
-      score2.textContent = orange.score || 0;
-      if (blue.color)   document.querySelector('.team1').style.borderColor = blue.color;
-      if (orange.color) document.querySelector('.team2').style.borderColor = orange.color;
-
-      // Hide scoreboxes when both scores are 0.
-      const showScores = (blue.score || 0) !== 0 || (orange.score || 0) !== 0;
-      box1.style.display = showScores ? 'flex' : 'none';
-      box2.style.display = showScores ? 'flex' : 'none';
-
-      // Footer: brand logo (tournament) + eventName tagline + channel (brand logo too).
-      const brandLogo = SceneBase.brandLogo(data);
-      tournEl.style.backgroundImage = brandLogo ? `url("${brandLogo}")` : '';
-      taglineEl.textContent = data.eventName || '';
+      renderCasterText(casters);
+      renderTeam(1, SceneBase.teamSide(data, 'blue'), 'a');
+      renderTeam(2, SceneBase.teamSide(data, 'orange'), 'b');
+      renderPresentedBy(data);
+      renderDeckStrip(data);
     }
 
-    SceneBase.connect(render);
-
-    // Demo fallback when opened directly from disk (file://).
+    buildCams();
     if (location.protocol === 'file:') {
+      document.documentElement.classList.add('preview');
       render({
-        eventName: 'Summer Showdown — Grand Final',
-        teams: {
-          blue:   { name: 'Frost Gaming', color: '#3b82f6' },
-          orange: { name: 'Team Ember',   color: '#f97316' }
-        },
-        game: { blueScore: 2, orangeScore: 1 },
-        casters: {
-          visible: true,
-          list: [
-            { id: 'c1', name: 'Alex Rivera',  handle: '@alexcasts' },
-            { id: 'c2', name: 'Sam Okoye',     handle: '@samok' },
-            { id: 'c3', name: 'Jordan Blake',  handle: '@jblakehost' }
-          ]
-        }
+        casters: { visible: true, lowerThird: 'Summer Showdown 2026 — Grand Final', list: [
+          { id: 'c1', name: 'Jordan Reyes', handle: 'jreyescasts', slot: 1, social: 'x' },
+          { id: 'c2', name: 'Mia Tanaka', handle: 'miaplays', slot: 2, social: 'twitch' },
+          { id: 'c3', name: 'Sam Okoye', handle: 'samok', slot: 3, social: 'youtube' } ] },
+        teams: { blue: { name: 'Velocity Gaming', color: '#3b82f6' }, orange: { name: 'Team Apex Esports', color: '#f97316' } },
+        series: { blue: 1, orange: 0 }, bestOf: 5,
+        scoreboardAd: { label: 'PRESENTED BY', logo: 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="160" height="40"><rect width="160" height="40" rx="4" fill="#1a1d24"/><text x="80" y="27" font-size="18" fill="#e8eaf0" text-anchor="middle" font-family="Arial" font-weight="bold">SPONSOR</text></svg>') }
       });
+      el('stage').classList.add('show');
+    } else {
+      SceneBase.connect(render);
     }
   </script>
 </body>

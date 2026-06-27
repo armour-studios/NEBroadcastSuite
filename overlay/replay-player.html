@@ -1,17 +1,17 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>NE Broadcast Suite — Replay / Montage Player</title>
+<title>NE Broadcast Suite â€” Replay / Montage Player</title>
 <!--
   REPLAY-TO-SCREEN browser source.
   Add ONE browser source pointing here (http://localhost:3000/replay-player.html)
   with audio enabled ("Control audio via OBS" off, or routed as you like). The
   REPLAYS page in the control panel pushes clip/montage video URLs here:
     replay_play  { url, name, loop, trimIn, trimOut, transition, transitionLogo }
-                                      → plays the trimmed range fullscreen with sound,
+                                      â†’ plays the trimmed range fullscreen with sound,
                                         easing between clips (cut / fade / logo).
-    replay_stop  {}                    → clears the source (transparent)
+    replay_stop  {}                    â†’ clears the source (transparent)
   The player reports playback back to the panel so producers see time remaining
   and the page can return to the prior scene when a replay ends:
     replay_progress { bus, currentTime, duration, remaining }   (relative to the trim range)
@@ -29,6 +29,8 @@
   #logo { position: absolute; max-width: 42%; max-height: 42%; object-fit: contain; opacity: 0;
     transition: opacity .26s ease; pointer-events: none; filter: drop-shadow(0 6px 26px rgba(0,0,0,.6)); }
   #logo.show { opacity: 1; }
+  /* Stinger transition video — covers the screen while the clip swaps underneath. */
+  #stinger { object-fit: cover; z-index: 5; transition: opacity .1s ease; }
   #label { position: absolute; left: 28px; bottom: 24px; font-family: 'Rajdhani', system-ui, sans-serif;
     color: #fff; font-size: 22px; letter-spacing: .06em; text-transform: uppercase; text-shadow: 0 2px 8px rgba(0,0,0,.8);
     opacity: 0; transition: opacity .3s; pointer-events: none; }
@@ -38,6 +40,7 @@
 <body>
   <div id="stage" class="idle">
     <video id="vid" playsinline></video>
+    <video id="stinger" playsinline></video>
     <img id="logo" alt="">
     <div id="label"></div>
   </div>
@@ -48,6 +51,7 @@
     const BUS = new URLSearchParams(location.search).get('bus') === 'preview' ? 'preview' : 'program';
     const stage = document.getElementById('stage');
     const vid = document.getElementById('vid');
+    const stinger = document.getElementById('stinger');
     const logo = document.getElementById('logo');
     const label = document.getElementById('label');
     let ws = null;
@@ -55,7 +59,7 @@
     let transToken = 0;       // cancels a stale transition if a new play() interrupts it
     // Active trim range + loop for the clip on screen (the player respects the producer's edit).
     let curIn = 0;
-    let curOut = null;        // null → play to the natural end of the file
+    let curOut = null;        // null â†’ play to the natural end of the file
     let curLoop = false;
     let endedFired = false;
 
@@ -104,7 +108,7 @@
       }
     }
 
-    async function play(url, name, loop, transition, logoUrl, trimIn, trimOut) {
+    async function play(url, name, loop, transition, logoUrl, trimIn, trimOut, stingerUrl) {
       if (!url) { stop(); return; }
       curIn = (typeof trimIn === 'number' && trimIn > 0) ? trimIn : 0;
       curOut = (typeof trimOut === 'number' && trimOut > curIn) ? trimOut : null;
@@ -114,14 +118,41 @@
       const wasLive = !stage.classList.contains('idle');
       transition = transition || 'cut';
 
-      if (sameUrl && wasLive) {   // already up — just make sure it's rolling
+      if (sameUrl && wasLive) {   // already up â€” just make sure it's rolling
         vid.muted = false; vid.volume = 1;
         const p = vid.play(); if (p && p.catch) p.catch(() => {});
         return;
       }
 
-      // First time on air, or a hard cut → swap straight in (with a quick fade-up).
-      if (!wasLive || transition === 'cut') { swapAndPlay(url); return; }
+      // Hard cut â†’ swap straight in (with a quick fade-up).
+      if (transition === 'cut') { swapAndPlay(url); return; }
+
+      // Stinger: play a short video over the top and swap the clip underneath at its midpoint.
+      // It needs no outgoing clip, so it also works as an intro on the very first clip.
+      if (transition === 'stinger' && stingerUrl) {
+        const tok = ++transToken;
+        let swapped = false;
+        const doSwap = () => { if (!swapped && tok === transToken) { swapped = true; swapAndPlay(url); } };
+        const onTime = () => { if (stinger.duration && stinger.currentTime >= stinger.duration * 0.5) doSwap(); };
+        const cleanup = () => {
+          stinger.removeEventListener('timeupdate', onTime);
+          stinger.removeEventListener('ended', cleanup);
+          if (tok !== transToken) return;
+          doSwap();
+          stinger.classList.remove('show');
+          setTimeout(() => { try { stinger.pause(); stinger.removeAttribute('src'); stinger.load(); } catch (e) {} }, 300);
+        };
+        stinger.onerror = () => { if (tok === transToken) { doSwap(); stinger.classList.remove('show'); } };
+        stinger.addEventListener('timeupdate', onTime);
+        stinger.addEventListener('ended', cleanup);
+        stinger.src = stingerUrl; stinger.currentTime = 0;
+        stinger.classList.add('show');
+        const sp = stinger.play(); if (sp && sp.catch) sp.catch(() => { doSwap(); stinger.classList.remove('show'); });
+        return;
+      }
+
+      // Fade / logo need an outgoing clip to ease from; on the very first clip just swap in.
+      if (!wasLive) { swapAndPlay(url); return; }
 
       // Easing between clips: dip the outgoing clip out, optionally flash a logo, swap, ease in.
       const tok = ++transToken;
@@ -179,10 +210,16 @@
       else reachEnd();
     });
 
+    // The server strips the heavy replay blob (base64 logos/thumbnails) from most broadcasts and
+    // only re-sends it on change — backfill from the last full payload so a light broadcast that
+    // omits `replay` doesn't get read as "stop".
+    let _replayCache = null;
     function handle(m) {
-      if (m.type === 'replay_play') { const d = m.data || {}; if ((d.bus || 'program') === BUS) play(d.url, d.name, d.loop, d.transition, d.transitionLogo, d.trimIn, d.trimOut); }
+      if (m.type === 'replay_play') { const d = m.data || {}; if ((d.bus || 'program') === BUS) play(d.url, d.name, d.loop, d.transition, d.transitionLogo, d.trimIn, d.trimOut, d.stinger); }
       else if (m.type === 'replay_stop') { const d = m.data || {}; if ((d.bus || 'program') === BUS) stop(); }
       else if (m.type === 'full_state') {
+        if (m.data && m.data.replay !== undefined) _replayCache = m.data.replay;
+        else if (m.data) m.data.replay = _replayCache;
         const r = m.data && m.data.replay && m.data.replay[BUS];
         if (r && r.playing && r.url) play(r.url, r.name, r.loop, r.transition, '', r.trimIn, r.trimOut);
         else stop();
@@ -193,7 +230,7 @@
       ws = new WebSocket(WS);
       ws.onopen = () => ws.send(JSON.stringify({ type: 'request_state' }));
       ws.onmessage = ({ data }) => { let m; try { m = JSON.parse(data); } catch { return; } handle(m); };
-      ws.onclose = () => setTimeout(connect, 3000);
+      ws.onclose = () => setTimeout(connect, 800);
       ws.onerror = () => { try { ws.close(); } catch {} };
     }
     connect();

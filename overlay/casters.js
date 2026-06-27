@@ -1,4 +1,4 @@
-/* ─── Standalone caster scene — connects to the WS bridge on :3001 ────────── */
+﻿/* â”€â”€â”€ Standalone caster scene â€” connects to the WS bridge on :3001 â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 const WS_URL = 'ws://localhost:3001';
 
@@ -115,7 +115,7 @@ function connect() {
     if (msg.type === 'full_state') applyFullState(msg.data);
   };
 
-  ws.onclose = () => setTimeout(connect, 3000);
+  ws.onclose = () => setTimeout(connect, 800);
 }
 
 connect();

@@ -54,8 +54,13 @@ function createMontageEncoder({ clipsDir, onProgress }) {
       const proc = spawn(ffmpegPath, args, { windowsHide: true, detached: false });
 
       if (process.platform === 'win32' && proc.pid) {
+        // Lower ffmpeg's priority (BELOW_NORMAL) so encodes don't starve the live overlay.
+        // `wmic` was REMOVED in recent Windows 11 builds — a missing binary emits an async
+        // 'error' event, NOT a sync throw, so the try/catch alone does nothing: without the
+        // .on('error') handler below the error becomes an uncaughtException and crashes the app.
         try {
-          spawn('wmic', ['process', 'where', `processid=${proc.pid}`, 'CALL', 'setpriority', '16384'], { windowsHide: true });
+          const pr = spawn('wmic', ['process', 'where', `processid=${proc.pid}`, 'CALL', 'setpriority', '16384'], { windowsHide: true });
+          pr.on('error', () => { /* wmic unavailable — priority tweak is optional, ignore */ });
         } catch (e) { /* ignore */ }
       }
 

@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1920">
+<title>NE Broadcast Suite — Upcoming Matches</title>
+<link rel="stylesheet" href="fonts.css">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --accent:   #055fdb;
+  --accent-2: #e97139;
+  --ink:      #f3f5fa;
+  --muted:    #9aa3b4;
+  --panel-1:  rgba(255,255,255,0.055);
+  --panel-2:  rgba(255,255,255,0.02);
+  --hair:     rgba(255,255,255,0.10);
+  --disp:     'Rajdhani', sans-serif;
+  --body:     'Inter', sans-serif;
+}
+
+html, body { width: 1920px; height: 1080px; overflow: hidden; background: transparent; font-family: var(--body); -webkit-font-smoothing: antialiased; color: var(--ink); }
+
+/* ── Stage ── */
+.up-stage { position: absolute; inset: 0; padding: 70px 90px 66px; display: flex; flex-direction: column;
+  opacity: 0; transform: scale(1.015); transition: opacity .5s ease, transform .5s ease; }
+.up-stage.show { opacity: 1; transform: scale(1); }
+
+.up-bg { position: absolute; inset: 0; z-index: -2;
+  background:
+    radial-gradient(120% 80% at 50% -10%, rgba(80,130,255,0.20) 0%, transparent 52%),
+    radial-gradient(90% 70% at 100% 110%, rgba(233,113,57,0.12) 0%, transparent 55%),
+    linear-gradient(180deg, #0b0d12 0%, #0e1118 60%, #0b0d12 100%); }
+.up-bg::after { content: ''; position: absolute; inset: 0;
+  background-image: linear-gradient(var(--hair) 1px, transparent 1px), linear-gradient(90deg, var(--hair) 1px, transparent 1px);
+  background-size: 64px 64px; opacity: .045;
+  -webkit-mask-image: radial-gradient(80% 60% at 50% 30%, #000 0%, transparent 75%);
+  mask-image: radial-gradient(80% 60% at 50% 30%, #000 0%, transparent 75%); }
+
+/* ── Header ── */
+.up-header { display: flex; align-items: center; gap: 22px; margin-bottom: 40px; }
+.up-bar { width: 7px; align-self: stretch; min-height: 64px; border-radius: 4px;
+  background: linear-gradient(180deg, var(--accent), var(--accent-2)); box-shadow: 0 0 22px var(--accent); }
+.up-head-text { display: flex; flex-direction: column; gap: 6px; }
+.up-eyebrow { font-family: var(--disp); font-weight: 700; font-size: 17px; letter-spacing: .42em; text-transform: uppercase; color: var(--accent); }
+.up-title { font-family: var(--disp); font-weight: 700; font-size: 58px; line-height: .96; letter-spacing: .02em; text-transform: uppercase; color: #fff; }
+.up-head-right { margin-left: auto; display: flex; align-items: center; gap: 14px; }
+.up-count { font-family: var(--disp); font-weight: 700; font-size: 20px; letter-spacing: .12em; color: var(--muted); text-transform: uppercase; }
+.up-source { display: inline-flex; align-items: center; gap: 9px; font-family: var(--disp); font-weight: 700; font-size: 15px;
+  letter-spacing: .18em; text-transform: uppercase; color: #cfd6e4; background: var(--panel-1); border: 1px solid var(--hair);
+  border-radius: 999px; padding: 9px 18px; }
+.up-source .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 10px var(--accent); }
+
+/* ── Grid ── */
+.up-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; align-content: start; }
+
+/* ── Card ── */
+.up-card { position: relative; border-radius: 16px; overflow: hidden; border: 1px solid var(--hair);
+  background: linear-gradient(150deg, var(--panel-1) 0%, var(--panel-2) 100%);
+  box-shadow: 0 18px 44px rgba(0,0,0,.42);
+  opacity: 0; transform: translateY(22px); transition: opacity .45s ease, transform .45s cubic-bezier(.2,.8,.2,1); }
+.up-card.visible { opacity: 1; transform: translateY(0); }
+.up-card::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: var(--accent); opacity: .55; }
+.up-card.on-stream::before { background: #22e07a; opacity: 1; box-shadow: 0 0 18px rgba(34,224,122,.6); }
+.up-card.live::before { background: #ff3b46; opacity: 1; box-shadow: 0 0 18px rgba(255,59,70,.6); }
+
+/* card head */
+.up-chead { display: flex; align-items: center; gap: 12px; padding: 13px 22px; border-bottom: 1px solid var(--hair);
+  background: linear-gradient(90deg, rgba(255,255,255,.05), transparent 70%); }
+.up-round { font-family: var(--disp); font-weight: 700; font-size: 17px; letter-spacing: .14em; text-transform: uppercase; color: #c4ccdb; flex: 1;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.up-stream-name { font-family: var(--body); font-weight: 600; font-size: 13px; letter-spacing: .04em; color: var(--muted); white-space: nowrap; }
+.up-mark { display: inline-flex; align-items: center; gap: 7px; font-family: var(--disp); font-weight: 800; font-size: 13px;
+  letter-spacing: .14em; border-radius: 999px; padding: 5px 13px; white-space: nowrap; }
+.up-mark .pdot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; animation: pulse 1.5s ease-in-out infinite; }
+.up-mark.stream { color: #04210f; background: #22e07a; }
+.up-mark.live { color: #fff; background: #ff3b46; box-shadow: 0 0 16px rgba(255,59,70,.5); }
+@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
+
+/* matchup */
+.up-body { display: flex; align-items: center; padding: 20px 24px; gap: 10px; }
+.up-team { display: flex; align-items: center; gap: 16px; flex: 1; min-width: 0; }
+.up-team.right { flex-direction: row-reverse; text-align: right; }
+.up-logo-wrap { width: 64px; height: 64px; border-radius: 14px; flex: 0 0 auto; display: grid; place-items: center;
+  background: rgba(255,255,255,.05); border: 1px solid var(--hair); box-shadow: inset 0 0 18px rgba(0,0,0,.3); }
+.up-logo { width: 50px; height: 50px; object-fit: contain; filter: drop-shadow(0 2px 6px rgba(0,0,0,.5)); }
+.up-logo.logo-on-dark { filter: invert(1) drop-shadow(0 2px 6px rgba(0,0,0,.5)); }
+.up-name { font-family: var(--disp); font-weight: 700; font-size: 30px; line-height: 1.02; color: #eef1f7; letter-spacing: .01em;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+
+/* center */
+.up-center { flex: 0 0 auto; display: flex; flex-direction: column; align-items: center; justify-content: center; min-width: 78px; }
+.up-vs { font-family: var(--disp); font-weight: 800; font-size: 18px; letter-spacing: .14em; color: #5b6478;
+  border: 1.5px solid var(--hair); border-radius: 999px; width: 50px; height: 50px; display: grid; place-items: center; }
+.up-score { font-family: var(--disp); font-weight: 800; font-size: 30px; letter-spacing: .04em; color: #fff;
+  background: rgba(255,255,255,.06); border: 1px solid var(--hair); border-radius: 10px; padding: 3px 14px; font-variant-numeric: tabular-nums; }
+
+/* foot */
+.up-foot { padding: 0 24px 14px; font-family: var(--body); font-weight: 600; font-size: 13px; letter-spacing: .06em; text-transform: uppercase; color: #5b6478; }
+
+/* empty */
+.up-empty { margin: auto; font-family: var(--disp); font-weight: 600; font-size: 30px; letter-spacing: .08em; color: rgba(255,255,255,.22); text-transform: uppercase; }
+</style>
+</head>
+<body>
+
+<div id="up-stage" class="up-stage">
+  <div class="up-bg"></div>
+  <div class="up-header">
+    <div class="up-bar"></div>
+    <div class="up-head-text">
+      <div class="up-eyebrow">On Deck</div>
+      <div class="up-title" id="up-title">UPCOMING MATCHES</div>
+    </div>
+    <div class="up-head-right">
+      <span class="up-count" id="up-count"></span>
+      <span class="up-source" id="up-source"><span class="dot"></span><span id="up-source-text">start.gg</span></span>
+    </div>
+  </div>
+  <div class="up-grid" id="up-grid"></div>
+  <div class="up-empty" id="up-empty" style="display:none;">No upcoming matches</div>
+</div>
+
+<script src="scene-base.js"></script>
+<script>
+(function () {
+  function el(id) { return document.getElementById(id); }
+
+  function svgFallback(letter, color) {
+    return 'data:image/svg+xml;utf8,' + encodeURIComponent(
+      `<svg xmlns="http://www.w3.org/2000/svg" width="160" height="160"><rect width="160" height="160" rx="30" fill="${color}"/><text x="80" y="112" font-size="92" fill="#fff" text-anchor="middle" font-family="Arial,sans-serif" font-weight="bold">${letter}</text></svg>`);
+  }
+
+  function teamEl(name, logoSrc, right) {
+    const wrap = document.createElement('div');
+    wrap.className = 'up-team' + (right ? ' right' : '');
+    const lw = document.createElement('div'); lw.className = 'up-logo-wrap';
+    const src = logoSrc || svgFallback((name || '?')[0].toUpperCase(), '#39415a');
+    const img = document.createElement('img');
+    img.className = 'up-logo' + (SceneBase.isDefaultGameLogo(src) ? ' logo-on-dark' : '');
+    img.src = src; img.alt = ''; img.onerror = function () { this.style.visibility = 'hidden'; };
+    lw.appendChild(img);
+    const nm = document.createElement('div'); nm.className = 'up-name'; nm.textContent = name || 'TBD';
+    wrap.appendChild(lw); wrap.appendChild(nm);
+    return wrap;
+  }
+
+  function buildCard(m, idx) {
+    const card = document.createElement('div');
+    card.className = 'up-card' + (m.live ? ' live' : (m.stream ? ' on-stream' : ''));
+
+    const head = document.createElement('div'); head.className = 'up-chead';
+    const round = document.createElement('span'); round.className = 'up-round'; round.textContent = m.round || 'Match';
+    head.appendChild(round);
+    if (m.live) {
+      const mk = document.createElement('span'); mk.className = 'up-mark live'; mk.innerHTML = '<span class="pdot"></span>LIVE'; head.appendChild(mk);
+    } else if (m.stream) {
+      const mk = document.createElement('span'); mk.className = 'up-mark stream'; mk.innerHTML = '<span class="pdot"></span>ON STREAM'; head.appendChild(mk);
+    }
+    if (m.stream) { const s = document.createElement('span'); s.className = 'up-stream-name'; s.textContent = m.stream; head.appendChild(s); }
+    card.appendChild(head);
+
+    const body = document.createElement('div'); body.className = 'up-body';
+    body.appendChild(teamEl(m.teamA, m.logoA, false));
+
+    const center = document.createElement('div'); center.className = 'up-center';
+    if (m.live && (m.scoreA != null || m.scoreB != null)) {
+      const sc = document.createElement('div'); sc.className = 'up-score'; sc.textContent = (m.scoreA == null ? 0 : m.scoreA) + ' – ' + (m.scoreB == null ? 0 : m.scoreB);
+      center.appendChild(sc);
+    } else {
+      const vs = document.createElement('div'); vs.className = 'up-vs'; vs.textContent = 'VS'; center.appendChild(vs);
+    }
+    body.appendChild(center);
+    body.appendChild(teamEl(m.teamB, m.logoB, true));
+    card.appendChild(body);
+
+    if (m.scheduledTime) { const f = document.createElement('div'); f.className = 'up-foot'; f.textContent = m.scheduledTime; card.appendChild(f); }
+
+    setTimeout(() => card.classList.add('visible'), 70 + idx * 90);
+    return card;
+  }
+
+  function logoFor(name, fallback, maps) {
+    const k = (name || '').toLowerCase();
+    return fallback || maps.saved[k] || maps.sgg[k] || '';
+  }
+
+  function buildMatches(queue, manual, maps) {
+    // start.gg queue: live (state 2) first, then upcoming (state 1).
+    const auto = (queue || []).filter((m) => {
+      const s = typeof m.state === 'number' ? m.state : (m.status === 'upcoming' ? 1 : (m.status === 'done' ? 3 : 2));
+      return s === 1 || s === 2;
+    }).map((m) => ({
+      setId: m.setId, round: m.round || 'Match',
+      teamA: m.teamA || 'TBD', teamB: m.teamB || 'TBD',
+      logoA: logoFor(m.teamA, m.logoA, maps), logoB: logoFor(m.teamB, m.logoB, maps),
+      stream: m.stream || '', live: m.state === 2 || m.live === true,
+      scoreA: m.scoreA, scoreB: m.scoreB, scheduledTime: ''
+    }));
+
+    const overrideMap = {}; const appends = [];
+    (manual || []).forEach((m) => { if (m.setId) overrideMap[m.setId] = m; else appends.push({
+      round: m.round || 'Match', teamA: m.teamA || 'TBD', teamB: m.teamB || 'TBD',
+      logoA: logoFor(m.teamA, m.teamALogo, maps), logoB: logoFor(m.teamB, m.teamBLogo, maps),
+      stream: m.stream || '', live: false, scoreA: null, scoreB: null, scheduledTime: m.scheduledTime || ''
+    }); });
+
+    const merged = auto.map((m) => overrideMap[m.setId] ? Object.assign({}, m, overrideMap[m.setId]) : m);
+    merged.sort((a, b) => (b.live ? 1 : 0) - (a.live ? 1 : 0));
+    return merged.concat(appends).slice(0, 6);
+  }
+
+  function render(data) {
+    const stage = el('up-stage'), grid = el('up-grid'), empty = el('up-empty');
+    if (!stage || !grid) return;
+    // In preview, the live full_state (pushed right after the demo) has no queue/upcoming
+    // — keep showing the sample instead of letting it blank the scene.
+    if (SceneBase.preview && !((data.startgg && data.startgg.queue || []).length) && !((data.upcoming && data.upcoming.matches || []).length)) {
+      const demo = SceneBase.demoState();
+      data = Object.assign({}, data, { upcoming: demo.upcoming, startgg: Object.assign({}, data.startgg, demo.startgg) });
+    }
+    const up = data.upcoming || {};
+    stage.classList.toggle('show', SceneBase.preview || !!up.visible);
+    if (!SceneBase.preview && !up.visible) return;
+
+    document.documentElement.style.setProperty('--accent', SceneBase.brandColor(data));
+    document.documentElement.style.setProperty('--accent-2', SceneBase.brandAccent(data));
+    el('up-title').textContent = (up.title || 'UPCOMING MATCHES').toUpperCase();
+
+    const maps = { saved: {}, sgg: (data.startgg && data.startgg.logoMap) || {} };
+    (data.savedTeams || []).forEach((t) => { if (t && t.name && t.logo) maps.saved[t.name.toLowerCase()] = t.logo; });
+
+    const matches = buildMatches((data.startgg || {}).queue, up.matches, maps);
+    const hasStartgg = ((data.startgg || {}).queue || []).length > 0;
+    el('up-source-text').textContent = hasStartgg ? 'start.gg' : 'manual';
+    el('up-source').style.display = matches.length ? '' : 'none';
+    el('up-count').textContent = matches.length ? (matches.length + (matches.length === 1 ? ' match' : ' matches')) : '';
+
+    grid.innerHTML = '';
+    empty.style.display = matches.length ? 'none' : 'block';
+    matches.forEach((m, i) => grid.appendChild(buildCard(m, i)));
+  }
+
+  SceneBase.connect(render);
+})();
+</script>
+</body>
+</html>

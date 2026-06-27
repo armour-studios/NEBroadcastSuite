@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Interviewee Feed</title>
+  <style>
+    /* Dynamic single-source feed: full-frame, transparent. Drop this ONE OBS browser source over
+       the Player Spotlight Desk's right cam hole (when running spotlightdesk.html?cams=off). It
+       auto-follows whoever is set as the interviewee in Match Control, and OBS controls its audio. */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { width: 100%; height: 100%; overflow: hidden; background: transparent; }
+    #feed { position: fixed; inset: 0; }
+    #feed iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+    /* Preview placeholder so you can position the source in OBS before anyone is live. */
+    .preview #feed::after { content: 'INTERVIEWEE FEED'; position: absolute; inset: 0; display: flex;
+      align-items: center; justify-content: center; font: 800 22px/1 system-ui, sans-serif;
+      letter-spacing: .25em; color: #4a5162; background: repeating-linear-gradient(45deg, #181b22, #181b22 16px, #20242e 16px, #20242e 32px); }
+  </style>
+</head>
+<body>
+  <div id="feed"></div>
+  <script src="scene-base.js"></script>
+  <script>
+    function el(id) { return document.getElementById(id); }
+    let _camUrl = null;
+    function render(data) {
+      data = data || {};
+      const iv = (data.casters || {}).interviewee;
+      const camUrl = (iv && iv.camUrl ? iv.camUrl : '').trim();
+      if (camUrl === _camUrl) return;          // no change → don't reload the iframe
+      _camUrl = camUrl;
+      const feed = el('feed');
+      feed.querySelectorAll('iframe').forEach((f) => f.remove());
+      if (camUrl) {
+        const f = document.createElement('iframe');
+        f.src = camUrl;
+        f.setAttribute('allow', 'autoplay; encrypted-media; microphone; camera; fullscreen');
+        f.referrerPolicy = 'no-referrer';
+        feed.appendChild(f);
+      }
+    }
+    if (location.protocol === 'file:') {
+      document.documentElement.classList.add('preview');
+    } else {
+      SceneBase.connect(render);
+    }
+  </script>
+</body>
+</html>

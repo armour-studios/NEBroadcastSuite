@@ -71,10 +71,11 @@
       }
       return { name: name || 'WINNER', logo: logo || null, color: color || null, subtitle: w.subtitle || '' };
     }
+    const EMBED = SceneBase.qp('embed') === '1';   // ?embed=1 → force-show the live state (config preview)
     function render(data) {
       const w = data.winner || {};
-      stage.classList.toggle('show', !!w.visible);
-      if (!w.visible) return;
+      stage.classList.toggle('show', !!w.visible || EMBED);
+      if (!w.visible && !EMBED) return;
       const r = resolve(w, data);
       if (r.color) document.documentElement.style.setProperty('--accent', r.color);
       nameEl.textContent = (r.name + ' WINS!').toUpperCase();

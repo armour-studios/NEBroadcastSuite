@@ -379,7 +379,8 @@ function renderTicker(ticker) {
   const track = el('ticker-track');
   if (!bar || !track) return;
 
-  const messages = (ticker && Array.isArray(ticker.messages)) ? ticker.messages.filter(Boolean) : [];
+  const _src = (ticker && ticker.source === 'startgg') ? (ticker.feed || []) : ((ticker && ticker.messages) || []);
+  const messages = (Array.isArray(_src) ? _src : []).filter(Boolean);
   const visible = !!(ticker && ticker.visible) && messages.length > 0;
 
   bar.classList.toggle('hidden', !visible);
@@ -679,7 +680,7 @@ function connect() {
     }
   };
 
-  ws.onclose = () => setTimeout(connect, 3000);
+  ws.onclose = () => setTimeout(connect, 800);
 }
 
 connect();

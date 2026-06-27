@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1920">
+<title>NE Broadcast Suite — Trigger Graphics (all-in-one)</title>
+<!--
+  ONE browser source for every triggered/staged graphic.
+
+  Add this single source (1920×1080) to any OBS scene — Casters, Gameplay, Break,
+  anywhere — and the qrail "Triggers" + "Overlays" buttons will pop the right graphic
+  over that scene. Each child overlay already connects to the WS bridge and shows/hides
+  itself based on its own `state.<x>.visible`, so this page just stacks them as
+  transparent layers; only the active one(s) paint, everything else is see-through.
+
+  No need to add countdown / winner / intro / bracket / etc. as separate sources anymore.
+-->
+<style>
+  html, body { margin: 0; width: 1920px; height: 1080px; overflow: hidden; background: transparent; }
+  .tg-layer {
+    position: absolute; inset: 0; width: 1920px; height: 1080px;
+    border: 0; margin: 0; padding: 0; background: transparent;
+    pointer-events: none;   /* never intercept clicks (matters in preview, harmless in OBS) */
+  }
+</style>
+</head>
+<body>
+  <!-- Layer order = stacking order (later = on top). Full-screen takeovers go on top
+       so they cover lower graphics if two are ever live at once. -->
+  <iframe class="tg-layer" data-src="upcoming.html"   title="Upcoming Matches"></iframe>
+  <iframe class="tg-layer" data-src="standings.html"  title="Standings"></iframe>
+  <iframe class="tg-layer" data-src="bracket.html"    title="Bracket"></iframe>
+  <iframe class="tg-layer" data-src="draft.html"      title="Draft"></iframe>
+  <iframe class="tg-layer" data-src="mapscreen.html"  title="Map Veto"></iframe>
+  <iframe class="tg-layer" data-src="intro.html"      title="Team Line-up"></iframe>
+  <iframe class="tg-layer" data-src="winner.html"     title="Winner"></iframe>
+  <iframe class="tg-layer" data-src="countdown.html"  title="Countdown / Starting Soon"></iframe>
+
+  <script>
+    // Propagate ?preview=1 / ?thumb=1 to every child so the scene launcher's preview
+    // and thumbnail show the graphics (live OBS use loads them with no params).
+    (function () {
+      var qp = new URLSearchParams(location.search);
+      var pass = [];
+      if (qp.get('preview') === '1' || qp.get('preview') === 'true') pass.push('preview=1');
+      if (qp.get('thumb') === '1') pass.push('thumb=1');
+      var suffix = pass.length ? ('?' + pass.join('&')) : '';
+      document.querySelectorAll('iframe.tg-layer').forEach(function (f) {
+        f.src = f.getAttribute('data-src') + suffix;
+      });
+    })();
+  </script>
+</body>
+</html>

@@ -1,64 +1,88 @@
 <!DOCTYPE html>
 <html lang="en">
 <!--
-  NE Broadcast Suite "REPLAY" wipe — ported from EsportsDashBoard replay.html.
-  Slides a logo + REPLAY plate in from the left. Use as a momentary scene over a
-  replay clip, or trigger alongside OBS replay-buffer.
-    ?team=blue|orange  → team logo instead of brand logo
-    ?showlogo=false    → hide the logo, plate only
-    ?label=HIGHLIGHT   → change the plate text (default "REPLAY")
+  NE Broadcast Suite — Replay tag overlay.
+  Persistent top-left corner bug: red pulse dot + REPLAY label + optional sponsor logo.
+  Links to the Replay sponsor slot in your broadcast profile (brand.replay.label / brand.replay.logo).
+
+    ?label=TEXT     → override label (falls back to brand.replay.label, then "REPLAY")
+    ?showlogo=false → hide sponsor logo
+    ?team=blue|orange → team logo instead of sponsor logo
+    ?color=rrggbb   → accent colour hex (no #), default white
 -->
 <head>
   <meta charset="UTF-8">
+  <meta name="viewport" content="width=1920">
   <title>NE Broadcast Suite — Replay</title>
-  <link rel="stylesheet" href="scene.css" />
+  <link rel="stylesheet" href="scene.css">
   <style>
-    body { text-transform: none; }
-    @keyframes replay-leftmove {
-      from { transform: translate(50%, 0); clip-path: polygon(0% 0%, 0% 0%, 0% 100%, 0% 100%); }
-      to   { transform: translate(0%, 0); clip-path: polygon(0% 0%, 100% 0%, 100% 100%, 0% 100%); }
+    :root {
+      --replay-color: #ffffff;
+      --hair: rgba(255,255,255,.08);
     }
-    div.replaytext {
-      position: absolute; top: 185px; left: 28px;
-      display: flex; flex-direction: column; align-items: center; justify-content: center;
-      text-align: center; font-size: 3em;
+    html, body {
+      width: 1920px; height: 1080px; overflow: hidden;
+      background: transparent; position: relative;
     }
-    div.replaytext > div {
-      background-color: var(--scene-bg);
-      border: solid; border-width: 0 0 0 7px; border-color: var(--accent);
-      font-family: 'Rajdhani', var(--main-font); font-weight: bold; padding: 5px;
-      text-transform: uppercase; color: #fff;
-      animation: replay-leftmove 1s backwards 0.2s; animation-timing-function: cubic-bezier(0, 0, 0, 1);
+
+    .replay-tag {
+      position: absolute; top: 28px; left: 40px; z-index: 55;
+      display: flex; align-items: center; gap: 11px;
+      padding: 8px 15px;
+      background: rgba(8,11,18,.82); backdrop-filter: blur(8px);
+      border: 1px solid var(--hair);
+      border-left: 3px solid var(--replay-color, #fff);
+      border-radius: 9px; box-shadow: 0 8px 24px rgba(0,0,0,.45);
+      animation: rtIn .35s ease;
     }
-    .replaytext div.logo {
-      width: 205px; height: 145px; box-sizing: border-box;
-      background-size: 60% auto; background-repeat: no-repeat; background-position: center;
-      background-origin: content-box; background-color: transparent !important;
-      border-left: transparent !important; padding: 10px;
+    .rt-dot {
+      width: 11px; height: 11px; border-radius: 50%;
+      background: #ff3b3b; box-shadow: 0 0 10px #ff3b3b;
+      animation: rtPulse 1.1s ease-in-out infinite; flex: none;
     }
-    div.replaytext span { margin: 20px; position: relative; top: 1px; }
+    @keyframes rtPulse { 50% { opacity: .3; } }
+    .rt-label {
+      font-size: 13px; font-weight: 800; letter-spacing: .22em;
+      text-transform: uppercase; color: #fff; white-space: nowrap;
+    }
+    .rt-logo { max-height: 26px; max-width: 120px; object-fit: contain; }
+    @keyframes rtIn {
+      from { opacity: 0; transform: translateX(-10px); }
+      to   { opacity: 1; transform: translateX(0); }
+    }
   </style>
 </head>
 <body>
-  <div class="replaytext">
-    <div class="logo" id="replay-logo"></div>
-    <div><span id="replay-label">REPLAY</span></div>
+
+  <div class="replay-tag">
+    <span class="rt-dot"></span>
+    <span id="rt-label" class="rt-label">REPLAY</span>
+    <img id="rt-logo" class="rt-logo" style="display:none" alt="">
   </div>
 
   <script src="scene-base.js"></script>
   <script>
-    const logoEl = document.getElementById('replay-logo');
-    const labelEl = document.getElementById('replay-label');
+    const showLogo  = SceneBase.qp('showlogo') !== 'false';
     const teamParam = SceneBase.qp('team');
-    const showLogo = SceneBase.qp('showlogo') !== 'false';
-    if (SceneBase.qp('label')) labelEl.textContent = SceneBase.qp('label');
-    logoEl.style.display = showLogo ? 'block' : 'none';
+    const colorParam = SceneBase.qp('color');
+    if (colorParam) {
+      document.documentElement.style.setProperty('--replay-color', '#' + colorParam);
+    }
 
     SceneBase.connect((data) => {
-      if (!showLogo) return;
-      const url = (teamParam === 'blue' || teamParam === 'orange')
-        ? SceneBase.teamSide(data, teamParam).logo : SceneBase.brandLogo(data);
-      logoEl.style.backgroundImage = url ? `url('${url}')` : 'none';
+      const replay = (data && data.replay) || {};
+      const labelOverride = SceneBase.qp('label');
+      const label = labelOverride || (replay.label || 'REPLAY');
+      document.getElementById('rt-label').textContent = label;
+
+      if (showLogo) {
+        const logo = (teamParam === 'blue' || teamParam === 'orange')
+          ? ((SceneBase.teamSide(data, teamParam) || {}).logo || null)
+          : (replay.logo || null);
+        const im = document.getElementById('rt-logo');
+        if (logo) { im.src = logo; im.style.display = 'block'; }
+        else im.style.display = 'none';
+      }
     });
   </script>
 </body>

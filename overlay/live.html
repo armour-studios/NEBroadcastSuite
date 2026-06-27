@@ -1,13 +1,13 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>NE Broadcast Suite — Live HUD (follows active game)</title>
+<title>NE Broadcast Suite â€” Live HUD (follows active game)</title>
 <!--
   UNIFIED OVERLAY FUNNEL.
   Add ONE browser source pointing here (http://localhost:3000/live.html) and it
   automatically shows the in-game HUD for whichever game is selected in the
-  control panel — RL → "/", CS2 → "/csgo.html", etc. Switch games and OBS keeps
+  control panel â€” RL â†’ "/", CS2 â†’ "/csgo.html", etc. Switch games and OBS keeps
   this source loaded while the HUD inside swaps. The native per-game URLs still
   work on their own if you'd rather point sources at them directly.
 
@@ -25,7 +25,7 @@
 </head>
 <body>
   <iframe id="frame" allowtransparency="true" allow="autoplay; encrypted-media"></iframe>
-  <div id="idle">No HUD for this game — pick a scene</div>
+  <div id="idle">No HUD for this game â€” pick a scene</div>
 
   <script>
     const WS = 'ws://' + (location.hostname || 'localhost') + ':3001';
@@ -68,7 +68,7 @@
       // Server resolves it into activeOverlay / overlayLayout.path; games[*].overlay
       // is only the per-game default. '' means the game has no dedicated HUD yet.
       let path = data.activeOverlay;
-      // Fall through each source — use != null so empty string '' also triggers the next check.
+      // Fall through each source â€” use != null so empty string '' also triggers the next check.
       if (path == null || path === '') path = data.overlayLayout && data.overlayLayout.path;
       if (path == null || path === '') path = g && g.overlay;
       if (path == null) path = '/';
@@ -79,7 +79,7 @@
       const ws = new WebSocket(WS);
       ws.onopen = () => ws.send(JSON.stringify({ type: 'request_state' }));
       ws.onmessage = ({ data }) => { let m; try { m = JSON.parse(data); } catch { return; } if (m.type === 'full_state') onState(m.data); };
-      ws.onclose = () => setTimeout(connect, 3000);
+      ws.onclose = () => setTimeout(connect, 800);
       ws.onerror = () => { try { ws.close(); } catch {} };
     }
     connect();

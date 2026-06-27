@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<!--
+  interview.html — head-to-head / interview: two big caster cams side by side with a
+  centre VS medallion and large name plates. People-focused (no team scorebar).
+  Casters slots 1 & 2. Shares duorow.html's design language; driven by full_state.
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <link rel="stylesheet" href="/fonts.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+  <style>
+    :root {
+      --duo-surface: #1a1d24; --duo-surface2: #20242e; --duo-border: #2e3340;
+      --duo-accent: #e83a8b; --duo-accent2: #8b5cf6; --duo-muted: #8b93a8;
+      --pad-x: 28px; --cam-plate-h: 64px;
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { width: 1920px; height: 1080px; overflow: hidden; background: transparent;
+      font-family: 'Inter', system-ui, sans-serif; color: #e8eaf0; -webkit-font-smoothing: antialiased; }
+    .iv-stage { position: absolute; inset: 0; display: flex; flex-direction: column; padding: 30px var(--pad-x) 18px; opacity: 0; transition: opacity .4s ease; }
+    .iv-stage.show { opacity: 1; }
+    /* No baked background — the Scenes page sets fill colour + opacity per graphic. */
+    .iv-bg { position: absolute; inset: 0; z-index: -1; background: transparent; }
+
+    .iv-header { flex: 0 0 auto; display: flex; align-items: center; justify-content: center; gap: 16px; margin-bottom: 22px; }
+    .iv-eyebrow { font-family: 'Rajdhani','Inter',sans-serif; font-weight: 700; font-size: 18px; letter-spacing: .4em; text-transform: uppercase; color: var(--duo-accent); }
+    .iv-title { font-family: 'Rajdhani','Inter',sans-serif; font-weight: 700; font-size: 40px; letter-spacing: .02em; text-transform: uppercase; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 1400px; }
+    .iv-title.is-empty, .iv-eyebrow.is-empty { display: none; }
+
+    /* Optional team scorebar (?scorebar=1) */
+    .iv-scorebar { display: none; }
+    .iv-stage.has-scorebar .iv-scorebar { display: flex; flex: 0 0 96px; height: 96px; margin-bottom: 18px; position: relative; align-items: stretch; width: min(1300px, 100%); align-self: center;
+      background: linear-gradient(180deg, rgba(24,27,34,.98), rgba(10,12,16,.99)); border: 1px solid rgba(255,255,255,.07); border-radius: 12px; overflow: hidden; box-shadow: 0 12px 30px rgba(0,0,0,.5); }
+    .iv-scorebar .match-team { flex: 1 1 0; min-width: 0; position: relative; display: flex; align-items: center; gap: 8px; }
+    .iv-scorebar .match-team--a { padding: 0 8px 0 16px; } .iv-scorebar .match-team--b { padding: 0 16px 0 8px; }
+    .iv-scorebar .match-team::after { content: ''; position: absolute; bottom: 0; left: 0; right: 0; height: 3px; }
+    .iv-scorebar .match-team--a::after { background: linear-gradient(90deg, var(--team-a), transparent 70%); } .iv-scorebar .match-team--b::after { background: linear-gradient(270deg, var(--team-b), transparent 70%); }
+    .iv-scorebar .match-logo { width: 60px; height: 60px; object-fit: contain; flex: 0 0 60px; filter: drop-shadow(0 2px 6px rgba(0,0,0,.5)); }
+    .iv-scorebar .match-logo.logo-on-dark { filter: brightness(0) invert(1) drop-shadow(0 2px 6px rgba(0,0,0,.5)); }
+    .iv-scorebar .match-name { flex: 1 1 0; min-width: 0; font-size: 24px; font-weight: 800; letter-spacing: .03em; text-transform: uppercase; line-height: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #fff; }
+    .iv-scorebar .match-team--b .match-name { text-align: right; }
+    .iv-scorebar .match-score { flex: 0 0 auto; font-size: 44px; font-weight: 900; font-variant-numeric: tabular-nums; min-width: 24px; text-align: center; }
+    .iv-scorebar .match-team--a .match-score { color: var(--team-a); } .iv-scorebar .match-team--b .match-score { color: var(--team-b); }
+    .iv-scorebar .match-center { flex: 0 0 104px; display: flex; align-items: center; justify-content: center; background: rgba(6,8,12,.97); border-left: 1px solid rgba(255,255,255,.1); border-right: 1px solid rgba(255,255,255,.1); font-family: 'Rajdhani','Inter',sans-serif; font-weight: 900; font-size: 32px; color: #fff; }
+    :root { --team-a: #055fdb; --team-b: #e97139; }
+
+    .iv-body { flex: 1 1 0; min-height: 0; display: flex; align-items: center; justify-content: center; gap: 26px; position: relative; }
+    .cam-card { flex: 1 1 0; min-width: 0; max-width: 920px; display: flex; flex-direction: column; border-radius: 14px; overflow: hidden;
+      border: 1px solid var(--duo-border); background: var(--duo-surface); box-shadow: 0 18px 50px rgba(0,0,0,.55); opacity: 0; }
+    .iv-stage.show .cam-card:nth-child(1) { animation: inL .7s cubic-bezier(.16,.84,.24,1) .1s forwards; }
+    .iv-stage.show .cam-card:nth-child(3) { animation: inR .7s cubic-bezier(.16,.84,.24,1) .2s forwards; }
+    @keyframes inL { from { opacity: 0; transform: translateX(-50px) scale(.97); } to { opacity: 1; transform: none; } }
+    @keyframes inR { from { opacity: 0; transform: translateX(50px) scale(.97); } to { opacity: 1; transform: none; } }
+    .cam-card::before { content: ''; display: block; height: 4px; flex: 0 0 auto; }
+    .cam-card:nth-child(1)::before { background: linear-gradient(90deg, var(--duo-accent), transparent); }
+    .cam-card:nth-child(3)::before { background: linear-gradient(270deg, var(--duo-accent2), transparent); }
+    .cam-hole { position: relative; width: 100%; aspect-ratio: 16 / 9; background: #0d0f14; overflow: hidden; }
+    .cam-hole iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+    /* ?cams=off framing: transparent holes so per-caster OBS sources show through. */
+    .iv-stage.frames-only .cam-hole { background: transparent; }
+    .iv-stage.frames-only .cam-card { background: transparent; box-shadow: none; }
+    .cam-plate { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; min-height: var(--cam-plate-h); flex: 0 0 auto;
+      padding: 8px 18px; background: linear-gradient(180deg, var(--duo-surface2), var(--duo-surface)); border-top: 1px solid var(--duo-border); }
+    .cam-name { font-size: 30px; font-weight: 800; letter-spacing: .03em; text-transform: uppercase; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+    .cam-handle { font-size: 16px; font-weight: 600; color: #9aa3b8; }
+    .cam-handle::before { font-family: 'Font Awesome 6 Brands'; font-weight: 400; margin-right: 6px; }
+    .cam-handle.twitch::before { content: "\f1e8"; color: #9146ff; } .cam-handle.youtube::before { content: "\f167"; color: #ff0033; }
+    .cam-handle.x-twitter::before { content: "\e61b"; color: #e8eaf0; } .cam-handle.instagram::before { content: "\f16d"; color: #e1306c; }
+    .cam-handle.tiktok::before { content: "\e07b"; color: #25f4ee; } .cam-handle.discord::before { content: "\f392"; color: #5865f2; }
+    .cam-handle.facebook::before { content: "\f09a"; color: #1877f2; }
+    .cam-handle.kick::before { content: "K"; font-family: 'Inter', sans-serif; font-weight: 900; color: #53fc18; }
+    .cam-handle.link::before { content: "\f0c1"; font-family: 'Font Awesome 6 Free'; font-weight: 900; color: var(--duo-muted); }
+
+    .iv-vs { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 4; width: 96px; height: 96px; border-radius: 50%;
+      display: flex; align-items: center; justify-content: center; font-family: 'Rajdhani','Inter',sans-serif; font-weight: 900; font-size: 40px; color: #fff;
+      background: radial-gradient(circle at 50% 35%, var(--duo-surface2), #0b0d12); border: 2px solid var(--duo-accent);
+      box-shadow: 0 0 0 6px rgba(8,10,14,.85), 0 12px 30px rgba(0,0,0,.6); }
+    .iv-stage.show .iv-vs { animation: pop .6s cubic-bezier(.16,.84,.24,1) .34s backwards; }
+    @keyframes pop { from { opacity: 0; transform: translate(-50%, -50%) scale(.5); } to { opacity: 1; transform: translate(-50%, -50%) scale(1); } }
+
+    .zone-footer { flex: 0 0 auto; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; margin-top: 16px; }
+    .presented-by { display: inline-flex; align-items: center; gap: 14px; padding: 7px 22px; background: linear-gradient(180deg, rgba(20,23,30,.96), rgba(10,12,16,.98)); border: 1px solid rgba(255,255,255,.08); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.4); }
+    .presented-by.is-empty { display: none; }
+    .pb-label { font-size: 9px; font-weight: 800; letter-spacing: .2em; text-transform: uppercase; color: var(--duo-muted); white-space: nowrap; }
+    .pb-logo { height: 28px; max-width: 200px; object-fit: contain; }
+    .deck-strip { max-width: 900px; padding: 8px 28px; text-align: center; position: relative; background: linear-gradient(90deg, transparent, rgba(14,16,22,.92) 12%, rgba(14,16,22,.92) 88%, transparent); border-top: 1px solid rgba(255,255,255,.06); border-bottom: 1px solid rgba(255,255,255,.06); }
+    .deck-strip::before, .deck-strip::after { content: ''; position: absolute; top: 50%; width: 48px; height: 1px; background: linear-gradient(90deg, transparent, var(--duo-accent)); opacity: .5; }
+    .deck-strip::before { left: 12px; } .deck-strip::after { right: 12px; transform: scaleX(-1); }
+    .deck-strip-text { font-size: 12px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: #c8ced8; white-space: nowrap; }
+    .deck-strip.is-empty { display: none; }
+
+    .preview .cam-hole { background: repeating-linear-gradient(45deg, #181b22, #181b22 16px, #20242e 16px, #20242e 32px); }
+    .preview .cam-hole::after { content: 'CAM'; position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 28px; font-weight: 800; letter-spacing: .3em; color: #4a5162; }
+    .preview .cam-hole iframe { position: relative; z-index: 1; }
+  </style>
+</head>
+<body>
+  <div id="stage" class="iv-stage">
+    <div class="iv-bg"></div>
+    <header class="iv-scorebar" id="scorebar">
+      <div class="match-team match-team--a"><img id="teamlogo1" class="match-logo" alt=""><span id="teamname1" class="match-name">BLUE</span><span id="teamscore1" class="match-score">0</span></div>
+      <div class="match-center">VS</div>
+      <div class="match-team match-team--b"><span id="teamscore2" class="match-score">0</span><span id="teamname2" class="match-name">ORANGE</span><img id="teamlogo2" class="match-logo" alt=""></div>
+    </header>
+    <div class="iv-header">
+      <span class="iv-eyebrow" id="eyebrow">Interview</span>
+      <span class="iv-title" id="title"></span>
+    </div>
+    <div class="iv-body">
+      <div class="cam-card"><div id="hole1" class="cam-hole"></div><div class="cam-plate"><span id="staffname1" class="cam-name">—</span><span id="socials1" class="cam-handle" style="display:none"></span></div></div>
+      <div class="iv-vs">VS</div>
+      <div class="cam-card"><div id="hole2" class="cam-hole"></div><div class="cam-plate"><span id="staffname2" class="cam-name">—</span><span id="socials2" class="cam-handle" style="display:none"></span></div></div>
+    </div>
+    <div class="zone-footer">
+      <div class="presented-by is-empty" id="presented-by"><span class="pb-label" id="pb-label">PRESENTED BY</span><img id="pb-logo" class="pb-logo" alt="" style="display:none"></div>
+      <div class="deck-strip is-empty" id="deck-strip"><span id="tagline" class="deck-strip-text">Live</span></div>
+    </div>
+  </div>
+
+  <script src="scene-base.js"></script>
+  <script>
+    function el(id) { return document.getElementById(id); }
+    const QP = new URLSearchParams(location.search);
+    const NO_CAMS = QP.get('cams') === 'off';
+    if (NO_CAMS) document.getElementById('stage')?.classList.add('frames-only');
+    // ?title=Custom Title  (overrides the event name; ?title=off hides it)
+    const QTITLE = QP.get('title');
+    // ?scorebar=1  shows the team scorebar at the top
+    const SHOW_SCOREBAR = ['1', 'true', 'on', 'yes'].includes((QP.get('scorebar') || '').toLowerCase());
+    if (SHOW_SCOREBAR) document.getElementById('stage')?.classList.add('has-scorebar');
+    let _lastCamUrl = [null, null];
+
+    function resolveTitle(data) {
+      if (QTITLE != null) { const t = QTITLE.trim(); return /^(off|none|hide|0)$/i.test(t) ? '' : t; }
+      return (data.eventName || '').toString().trim();
+    }
+    function renderScorebar(data) {
+      if (!SHOW_SCOREBAR) return;
+      [['1', 'blue', 'a'], ['2', 'orange', 'b']].forEach(([idx, side, ab]) => {
+        const t = SceneBase.teamSide(data, side);
+        SceneBase.applyTeamLogo(el('teamlogo' + idx), t.customLogo, t.logo);
+        el('teamname' + idx).textContent = (t.name || (ab === 'b' ? 'ORANGE' : 'BLUE')).toUpperCase();
+        el('teamscore' + idx).textContent = t.series != null ? t.series : 0;
+        document.documentElement.style.setProperty(ab === 'b' ? '--team-b' : '--team-a', t.color || (ab === 'b' ? '#e97139' : '#055fdb'));
+      });
+    }
+
+    function applyBrandTheme(data) {
+      const root = document.documentElement;
+      const color = SceneBase.brandColor(data), accent2 = SceneBase.brandAccent(data);
+      if (color) root.style.setProperty('--duo-accent', color);
+      if (accent2) root.style.setProperty('--duo-accent2', accent2);
+      if (data.fontFamily) root.style.fontFamily = `'${data.fontFamily}', 'Inter', system-ui, sans-serif`;
+    }
+    function renderCasters(casters) {
+      if (NO_CAMS) return;
+      const slots = SceneBase.castersBySlots(casters, 2);
+      for (let i = 0; i < 2; i++) {
+        const camUrl = ((slots[i] && slots[i].camUrl) || '').trim();
+        if (camUrl === _lastCamUrl[i]) continue;
+        _lastCamUrl[i] = camUrl;
+        const hole = el('hole' + (i + 1));
+        hole.querySelectorAll('iframe').forEach(f => f.remove());
+        if (camUrl) {
+          const iframe = document.createElement('iframe');
+          iframe.src = camUrl; iframe.setAttribute('allow', 'autoplay; encrypted-media; microphone; camera; fullscreen'); iframe.referrerPolicy = 'no-referrer';
+          hole.appendChild(iframe);
+        }
+      }
+    }
+    function renderCasterText(casters) {
+      const slots = SceneBase.castersBySlots(casters, 2);
+      for (let i = 0; i < 2; i++) {
+        const c = slots[i] || {};
+        el('staffname' + (i + 1)).textContent = (c.name || '—').toString();
+        const socEl = el('socials' + (i + 1));
+        const handle = SceneBase.formatCasterHandle(c), social = (c.social || 'none').toString().toLowerCase();
+        if (handle && social !== 'none') { socEl.className = 'cam-handle ' + SceneBase.socialPlatformClass(social); socEl.textContent = handle; socEl.style.display = ''; }
+        else socEl.style.display = 'none';
+      }
+    }
+    function renderPresentedBy(data) {
+      const slot = data.scoreboardAd || {}, wrap = el('presented-by'), label = el('pb-label'), logo = el('pb-logo');
+      const labelText = (slot.label || 'PRESENTED BY').toString().trim();
+      label.textContent = labelText;
+      if (slot.logo) { logo.src = slot.logo; logo.style.display = ''; wrap.classList.remove('is-empty'); }
+      else if (labelText) { logo.style.display = 'none'; logo.removeAttribute('src'); wrap.classList.remove('is-empty'); }
+      else wrap.classList.add('is-empty');
+    }
+    function renderDeckStrip(data) {
+      const tag = ((data.casters && data.casters.lowerThird) || '').toString().trim();
+      const strip = el('deck-strip'), tagEl = el('tagline');
+      if (tag) { tagEl.textContent = tag; strip.classList.remove('is-empty'); } else { tagEl.textContent = ''; strip.classList.add('is-empty'); }
+    }
+    function render(data) {
+      data = data || {};
+      applyBrandTheme(data);
+      const casters = data.casters || {};
+      el('stage').classList.toggle('show', SceneBase.casterStageVisible(casters));
+      renderCasters(casters); renderCasterText(casters);
+      renderScorebar(data);
+      const ttl = resolveTitle(data);
+      el('title').textContent = ttl.toUpperCase();
+      el('title').classList.toggle('is-empty', !ttl);
+      renderPresentedBy(data); renderDeckStrip(data);
+    }
+    if (location.protocol === 'file:') {
+      document.documentElement.classList.add('preview');
+      render({ casters: { visible: true, lowerThird: 'Post-match interview', list: [
+        { id: 'c1', name: 'Aqua', handle: 'aquaplays', slot: 1, social: 'twitch' },
+        { id: 'c2', name: 'Blaze', handle: 'blazegg', slot: 2, social: 'x' } ] },
+        eventName: 'Summer Showdown 2026', brand: { color: '#7c3aed', accent: '#22d3ee' },
+        scoreboardAd: { label: 'PRESENTED BY', logo: 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="150" height="36"><rect width="150" height="36" rx="4" fill="#1a1d24"/><text x="75" y="24" font-size="16" fill="#e8eaf0" text-anchor="middle" font-family="Arial" font-weight="bold">SPONSOR</text></svg>') } });
+      el('stage').classList.add('show');
+    } else { SceneBase.connect(render); }
+  </script>
+</body>
+</html>

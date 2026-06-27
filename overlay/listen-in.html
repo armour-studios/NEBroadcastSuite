@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=1920">
+  <title>NE Broadcast Suite — Listen In</title>
+  <link rel="stylesheet" href="scene.css" />
+  <style>
+    /* LISTEN IN — one player's live mic + captions on stream. The VDO.Ninja view iframe
+       plays the audio AND renders the transcription itself (captions guaranteed); we style
+       VDO's caption element via &base64css (server-built URL) so it matches this card. */
+    /* Centred in the source so it scales + expands from the MIDDLE — place it anywhere by
+       moving/scaling the browser source in OBS. Hidden until a listen-in is active. */
+    #stage {
+      position: absolute; left: 50%; top: 50%; width: 440px;
+      opacity: 0; transform: translate(-50%, -50%) scale(.82); transform-origin: center center;
+      transition: opacity .3s ease, transform .45s cubic-bezier(.16, 1, .3, 1);
+    }
+    #stage.show { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+    .li-card {
+      position: relative;
+      background: linear-gradient(180deg, rgba(20,21,26,.96), rgba(12,13,17,.96));
+      border: 1px solid rgba(255,255,255,.08);
+      border-left: 5px solid var(--li-accent, var(--accent));
+      border-radius: 14px; padding: 14px 18px;
+      box-shadow: 0 18px 50px rgba(0,0,0,.5);
+      backdrop-filter: blur(6px);
+    }
+    .li-head { display: flex; align-items: center; gap: 11px; margin-bottom: 8px; }
+    .li-logo { width: 38px; height: 38px; object-fit: contain; flex-shrink: 0;
+      filter: drop-shadow(0 2px 6px rgba(0,0,0,.5)); }
+    .li-logo[hidden] { display: none; }
+    .li-name {
+      font-family: 'Rajdhani', var(--main-font); font-weight: 700; font-size: 1.35rem;
+      text-transform: uppercase; letter-spacing: .02em; color: #fff; line-height: 1;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0;
+    }
+    /* LISTEN IN label sits next to the animated audio bars */
+    .li-live { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; flex-shrink: 0; }
+    .li-label {
+      font-family: 'Rajdhani', var(--main-font); font-weight: 700; font-size: .92rem;
+      letter-spacing: .14em; text-transform: uppercase; color: var(--li-accent, var(--accent));
+    }
+    .li-eq { display: inline-flex; gap: 3px; align-items: flex-end; height: 20px; }
+    .li-eq span { width: 4px; background: var(--li-accent, var(--accent)); border-radius: 2px; animation: liEq 1s infinite ease-in-out; }
+    .li-eq span:nth-child(1){ animation-delay: 0s; }
+    .li-eq span:nth-child(2){ animation-delay: .2s; }
+    .li-eq span:nth-child(3){ animation-delay: .4s; }
+    .li-eq span:nth-child(4){ animation-delay: .15s; }
+    @keyframes liEq { 0%,100% { height: 5px; } 50% { height: 20px; } }
+    /* The caption strip starts collapsed (height 0) and expands into transcription. The iframe
+       inside stays mounted even when collapsed, so audio keeps playing. */
+    .li-cc-wrap { overflow: hidden; height: 0; transition: height .45s cubic-bezier(.16, 1, .3, 1); }
+    .li-cc-frame { display: block; width: 100%; height: 80px; border: 0; background: transparent; }
+
+    /* ?align=right — mirror everything: card on the right, accent on the right,
+       logo + team name + LISTEN IN animation flipped. */
+    #stage.align-right { left: auto; right: 60px; }
+    #stage.align-right .li-card { border-left: 0; border-right: 5px solid var(--li-accent, var(--accent)); }
+    #stage.align-right .li-head { flex-direction: row-reverse; }
+    #stage.align-right .li-live { margin-left: 0; margin-right: auto; flex-direction: row-reverse; }
+
+    /* ?captions=off — compact, no-transcription badge: logo + TEAM NAME, with the LISTEN IN
+       animation BELOW. The audio iframe stays mounted (audio still plays) but is hidden 1px. */
+    #stage.compact { width: fit-content; max-width: 440px; }
+    #stage.compact .li-head { flex-wrap: wrap; row-gap: 8px; margin-bottom: 0; }
+    #stage.compact .li-live { margin-left: 0; flex-basis: 100%; }
+    #stage.compact.align-right .li-live { justify-content: flex-end; }
+    /* compact never expands — the collapsed wrap (height 0) keeps the audio iframe alive, hidden */
+  </style>
+</head>
+<body>
+  <div id="stage" class="scene-fade">
+    <div class="li-card" id="li-card">
+      <div class="li-head">
+        <img class="li-logo" id="li-logo" alt="" hidden>
+        <span class="li-name" id="li-name">TEAM</span>
+        <span class="li-live">
+          <span class="li-eq"><span></span><span></span><span></span><span></span></span>
+          <span class="li-label">Listen In</span>
+        </span>
+      </div>
+      <div class="li-cc-wrap" id="li-cc-wrap">
+        <iframe id="li-frame" class="li-cc-frame" allow="autoplay; encrypted-media" scrolling="no"></iframe>
+      </div>
+    </div>
+  </div>
+
+  <script src="scene-base.js"></script>
+  <script>
+    const stage  = document.getElementById('stage');
+    const frame  = document.getElementById('li-frame');
+    const card   = document.getElementById('li-card');
+    const nameEl = document.getElementById('li-name');
+    const logoEl = document.getElementById('li-logo');
+    const _qp = new URLSearchParams(location.search);
+    // ?align=left (default) | right — flips the whole card to the other side of the screen.
+    if ((_qp.get('align') || 'left').toLowerCase() === 'right') stage.classList.add('align-right');
+
+    // ?captions=off (or ?compact=1) — no-transcription mode: compact card (logo + team name +
+    // LISTEN IN animation below), no caption strip. Audio still plays.
+    const COMPACT = (_qp.get('captions') || '').toLowerCase() === 'off' || _qp.get('compact') === '1';
+    if (COMPACT) stage.classList.add('compact');
+
+    // ?ccsize=NN — caption font size in px (default 36).
+    const CC_SIZE = Math.max(12, Math.min(120, parseInt(_qp.get('ccsize') || '36', 10)));
+    const FRAME_H = Math.round(CC_SIZE * 1.25 * 2 + 14);   // two lines + a little padding
+    const wrap = document.getElementById('li-cc-wrap');
+    frame.style.height = FRAME_H + 'px';
+
+    function captionCss(px) {
+      return "html,body{height:100%!important}body{background:rgba(0,0,0,0)!important;margin:0!important;overflow:hidden!important}video{display:none!important}"
+        + "#overlayMsgs{position:fixed!important;inset:0!important;display:flex!important;flex-direction:column!important;justify-content:flex-start!important;align-items:flex-start!important;overflow:hidden!important;padding:0!important;margin:0!important;box-sizing:border-box!important}"
+        + "#overlayMsgs,#overlayMsgs *{font-family:Rajdhani,'Segoe UI',sans-serif!important;font-weight:700!important;font-size:" + px + "px!important;line-height:1.25!important;color:#e9ecf3!important;text-align:left!important;text-transform:uppercase!important;white-space:normal!important;word-break:break-word!important;overflow-wrap:anywhere!important;background:transparent!important;text-shadow:0 2px 6px rgba(0,0,0,.75)!important}";
+    }
+    // Swap the server-built &base64css for one carrying our chosen caption size.
+    function withCaptionSize(url) {
+      if (!url || url === 'about:blank') return url;
+      const b64 = encodeURIComponent(btoa(captionCss(CC_SIZE)));
+      if (/[?&]base64css=/.test(url)) return url.replace(/([?&]base64css=)[^&#]*/, '$1' + b64);
+      const h = url.indexOf('#'); const main = h >= 0 ? url.slice(0, h) : url; const frag = h >= 0 ? url.slice(h) : '';
+      return main + (main.includes('?') ? '&' : '?') + 'base64css=' + b64 + frag;
+    }
+
+    let currentUrl = '';
+    function mountFeed(url) {
+      const finalUrl = withCaptionSize(url);
+      if (finalUrl === currentUrl) return;
+      currentUrl = finalUrl;
+      frame.src = finalUrl || 'about:blank';   // VDO plays audio + renders the captions
+    }
+
+    // ── Walkie-talkie cue (synthesized) — squelch burst + beep on entry ────────
+    let _audio = null;
+    function playWalkie() {
+      try {
+        _audio = _audio || new (window.AudioContext || window.webkitAudioContext)();
+        const ctx = _audio; if (ctx.state === 'suspended') ctx.resume();
+        const t = ctx.currentTime, dur = 0.16;
+        // squelch: short band-passed noise burst
+        const buf = ctx.createBuffer(1, Math.max(1, Math.floor(ctx.sampleRate * dur)), ctx.sampleRate);
+        const d = buf.getChannelData(0);
+        for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * 0.6;
+        const noise = ctx.createBufferSource(); noise.buffer = buf;
+        const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 1700; bp.Q.value = 0.9;
+        const ng = ctx.createGain();
+        ng.gain.setValueAtTime(0.0001, t); ng.gain.exponentialRampToValueAtTime(0.5, t + 0.012); ng.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+        noise.connect(bp).connect(ng).connect(ctx.destination); noise.start(t); noise.stop(t + dur);
+        // beep: short square tone right after
+        const osc = ctx.createOscillator(); osc.type = 'square'; osc.frequency.value = 1245;
+        const og = ctx.createGain();
+        og.gain.setValueAtTime(0.0001, t + dur); og.gain.exponentialRampToValueAtTime(0.28, t + dur + 0.012); og.gain.exponentialRampToValueAtTime(0.0001, t + dur + 0.13);
+        osc.connect(og).connect(ctx.destination); osc.start(t + dur); osc.stop(t + dur + 0.14);
+      } catch (e) {}
+    }
+
+    function expand()   { wrap.style.height = FRAME_H + 'px'; card.classList.add('expanded'); }
+    function collapse() { wrap.style.height = '0'; card.classList.remove('expanded'); }
+    function setHeader(li, state) {
+      const team = (state && state.teams && li.side && state.teams[li.side]) || null;
+      nameEl.textContent = (li.name || (team && team.name) || 'TEAM').toUpperCase();
+      if (team && team.logo) { logoEl.src = team.logo; logoEl.hidden = false; logoEl.onerror = () => { logoEl.hidden = true; }; }
+      else { logoEl.hidden = true; logoEl.removeAttribute('src'); }
+      if (team && team.color) card.style.setProperty('--li-accent', team.color);
+      else card.style.removeProperty('--li-accent');
+    }
+
+    // Detection: VDO posts caption/transcript data to the parent — any such message means
+    // transcription is live, so we expand the strip ONLY then. (VDO renders the text in-iframe.)
+    function isCaptionMsg(d) {
+      if (!d || typeof d !== 'object') return false;
+      if (d.transcript != null || d.closedCaption != null || d.caption != null || d.cc != null) return true;
+      return typeof d.action === 'string' && /caption|transcri/i.test(d.action);
+    }
+    let _captionMode = false;   // captions allowed: source not ?captions=off AND producer toggle on
+    window.addEventListener('message', (e) => {
+      if (frame && e.source && e.source !== frame.contentWindow) return;
+      if (_activeUrl && _captionMode && isCaptionMsg(e.data)) expand();
+    });
+
+    let _activeUrl = null, _startTimer = null;
+    function render(li, state) {
+      li = li || {};
+      // Captions gated by ?captions=off (per source) AND the Talent Rooms "Show transcription" toggle.
+      const showCaps = !state || state.vdo == null || state.vdo.listenCaptions !== false;
+      _captionMode = !COMPACT && showCaps;
+      stage.classList.toggle('compact', !_captionMode);   // compact layout (animation below) when captions off
+      if (!_captionMode) collapse();
+
+      const on = !!li.active && !!li.url;
+      const url = on ? li.url : null;
+      if (url === _activeUrl) { if (on) setHeader(li, state); return; }
+      _activeUrl = url;
+      clearTimeout(_startTimer);
+      if (!on) {                       // off-air → animate out + stop audio
+        stage.classList.remove('show');
+        collapse();
+        mountFeed('about:blank');
+        return;
+      }
+      setHeader(li, state);
+      collapse();                      // start as the badge — expands only once transcription is detected
+      stage.classList.add('show');     // scale-in from the centre
+      playWalkie();
+      _startTimer = setTimeout(() => { mountFeed(url); }, 750);   // audio + captions begin AFTER the cue
+    }
+
+    SceneBase.connect((data) => render(data.listenIn, data));
+
+    // Demo when opened directly (file://) — shows the badge; expands when a real caption arrives.
+    if (location.protocol === 'file:') {
+      render({ active: true, name: 'TenZ', side: 'blue', url: 'about:blank' },
+             { teams: { blue: { name: 'Team Alpha', logo: null, color: '#3b82f6' } } });
+    }
+  </script>
+</body>
+</html>

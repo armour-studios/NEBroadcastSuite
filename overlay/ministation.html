@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -10,7 +10,7 @@
   e.g. http://localhost:3000/ministation.html?stream=Main%20Stream
 -->
 <style>
-  @import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@600;700&display=swap');
+  @import url('/fonts.css');
   html, body { margin: 0; width: 1920px; height: 1080px; overflow: hidden; background: transparent;
     font-family: 'Rajdhani', system-ui, sans-serif; }
   #bar { position: absolute; top: 28px; left: 50%; transform: translateX(-50%);
@@ -33,7 +33,7 @@
   <div id="bar">
     <div class="station" id="station"></div>
     <div class="team a" id="ta">TBD</div>
-    <div class="mid"><div class="score" id="score">0–0</div><div class="round" id="round"></div></div>
+    <div class="mid"><div class="score" id="score">0â€“0</div><div class="round" id="round"></div></div>
     <div class="team b" id="tb">TBD</div>
   </div>
 
@@ -58,7 +58,7 @@
         cur = sig;
         $('ta').textContent = set.teamA || 'TBD';
         $('tb').textContent = set.teamB || 'TBD';
-        $('score').textContent = (set.scoreA != null ? set.scoreA : 0) + '–' + (set.scoreB != null ? set.scoreB : 0);
+        $('score').textContent = (set.scoreA != null ? set.scoreA : 0) + 'â€“' + (set.scoreB != null ? set.scoreB : 0);
         $('round').textContent = set.round || '';
       }
       bar.classList.add('show');
@@ -68,7 +68,7 @@
       const ws = new WebSocket(WS);
       ws.onopen = () => ws.send(JSON.stringify({ type: 'request_state' }));
       ws.onmessage = ({ data }) => { let m; try { m = JSON.parse(data); } catch { return; } if (m.type === 'full_state') render(m.data); };
-      ws.onclose = () => setTimeout(connect, 3000);
+      ws.onclose = () => setTimeout(connect, 800);
       ws.onerror = () => { try { ws.close(); } catch {} };
     }
     connect();

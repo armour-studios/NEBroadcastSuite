@@ -8,7 +8,7 @@
   Decoupled from the game overlays: drop in as many of these as you like and place freely.
   Renders a wide rectangular banner: logo on the left + optional per-image text on the right,
   rotating through the banner images. Text is set per image in the control panel (e.g.
-  USE CODE *NAMELESS* FOR 5% OFF) — wrap a word in *asterisks* for italic emphasis, use line
+  USE CODE *PROMO* FOR 5% OFF) — wrap a word in *asterisks* for italic emphasis, use line
   breaks for multiple lines.
 
   Source (which banner this shows):
@@ -126,19 +126,28 @@ const srcMode = params.get('src') || 'auto';                     // auto | main 
 const pinBrand = params.get('brand') || '';
 
 function findKit(state, id) { return (state.brandKits || []).find(function (k) { return k.id === id; }); }
+// A profile's sponsor/banner config lives in named packages; resolve the one currently live
+// (falls back to a legacy kit's top-level fields).
+function activePkg(kit) {
+  if (!kit) return {};
+  const pkgs = Array.isArray(kit.packages) ? kit.packages.filter(Boolean) : [];
+  if (pkgs.length) return pkgs.find(function (p) { return p.id === kit.activePackageId; }) || pkgs[0];
+  return kit;
+}
 function zipSlides(images, captions) {
   images = Array.isArray(images) ? images : [];
   captions = Array.isArray(captions) ? captions : [];
   return images.filter(Boolean).map(function (src, i) { return { src: src, text: captions[i] || '' }; });
 }
-// A brand kit's slides = its banner images (+ captions) then its sponsors tagged "banner".
+// A brand kit's slides = its active package's banner images (+ captions) then its sponsors tagged "banner".
 function combineKitBanner(kit) {
   if (!kit) return { slides: [], interval: 10 };
-  const slides = zipSlides(kit.bannerImages, kit.bannerCaptions);
-  const sponsorSlides = (Array.isArray(kit.sponsors) ? kit.sponsors : [])
+  const pkg = activePkg(kit);
+  const slides = zipSlides(pkg.bannerImages, pkg.bannerCaptions);
+  const sponsorSlides = (Array.isArray(pkg.sponsors) ? pkg.sponsors : [])
     .filter(function (s) { return s && s.logo && s.placements && s.placements.banner; })
     .map(function (s) { return { src: s.logo, text: '' }; });
-  return { slides: slides.concat(sponsorSlides), interval: Number(kit.bannerInterval) > 0 ? Number(kit.bannerInterval) : 10 };
+  return { slides: slides.concat(sponsorSlides), interval: Number(pkg.bannerInterval) > 0 ? Number(pkg.bannerInterval) : 10 };
 }
 function mainBannerData(state) {
   const mb = state.mainBanner || state.banner || {};
@@ -180,7 +189,7 @@ const paramSlant = params.get('slant');
 function effectiveSlant(state) {
   if (paramSlant) return paramSlant;
   const kit = currentKit(state);
-  if (kit) return kit.bannerSlant || 'right';
+  if (kit) return activePkg(kit).bannerSlant || 'right';
   const mb = state.mainBanner || state.banner || {};
   return mb.slant || 'right';
 }
@@ -193,7 +202,7 @@ function applySlant(state) {
 // header for the main source.
 function effectiveHeader(state) {
   const kit = currentKit(state);
-  if (kit) return (kit.bannerHeader || '').trim();
+  if (kit) return (activePkg(kit).bannerHeader || '').trim();
   const mb = state.mainBanner || state.banner || {};
   return (mb.header || '').trim();
 }

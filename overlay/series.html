@@ -1,17 +1,17 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>NE Broadcast Suite — Series Scoreboard</title>
+<title>NE Broadcast Suite â€” Series Scoreboard</title>
 <!--
-  SERIES SCOREBOARD overlay (browser source, 1920×1080).
+  SERIES SCOREBOARD overlay (browser source, 1920Ã—1080).
   Renders the Series editor data from the control panel: division, the two teams
   with their series (map-win) score, "MAP X OF Y", and a per-map result strip.
   Reads full_state.match { format, division, maps:[{name,scoreA,scoreB,played}] }
   plus teams.blue / teams.orange for names, logos and colours.
 -->
 <style>
-  @import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&display=swap');
+  @import url('/fonts.css');
   html,body{margin:0;width:100%;height:100%;overflow:hidden;background:transparent;font-family:'Rajdhani',system-ui,sans-serif;}
   #wrap{position:absolute;left:50%;bottom:64px;transform:translateX(-50%);opacity:0;transition:opacity .35s;}
   #wrap.show{opacity:1;}
@@ -49,7 +49,7 @@
       <div class="top">
         <div class="team a"><img class="logo" id="logo-a" alt=""><span class="tname" id="name-a">Team A</span></div>
         <div class="center">
-          <div class="score"><b id="sw-a">0</b><span class="sep">–</span><b id="sw-b">0</b></div>
+          <div class="score"><b id="sw-a">0</b><span class="sep">â€“</span><b id="sw-b">0</b></div>
           <div class="mapcount" id="mapcount"></div>
         </div>
         <div class="team b"><img class="logo" id="logo-b" alt=""><span class="tname" id="name-b">Team B</span></div>
@@ -94,7 +94,7 @@
       const strip = $('strip');
       strip.innerHTML = maps.map((mp, i) => `<div class="pip${mp.played ? ' played' : ''}">
         <span class="mn">${mp.name ? String(mp.name).slice(0, 12) : 'M' + (i + 1)}</span>
-        <span class="ms">${mp.played ? (mp.scoreA + ' - ' + mp.scoreB) : '—'}</span></div>`).join('');
+        <span class="ms">${mp.played ? (mp.scoreA + ' - ' + mp.scoreB) : 'â€”'}</span></div>`).join('');
       strip.style.display = maps.length ? 'flex' : 'none';
 
       // Show when there's a series with maps configured.
@@ -105,7 +105,7 @@
       const ws = new WebSocket(WS);
       ws.onopen = () => ws.send(JSON.stringify({ type: 'request_state' }));
       ws.onmessage = ({ data }) => { let m; try { m = JSON.parse(data); } catch { return; } if (m.type === 'full_state') render(m.data); };
-      ws.onclose = () => setTimeout(connect, 3000);
+      ws.onclose = () => setTimeout(connect, 800);
       ws.onerror = () => { try { ws.close(); } catch {} };
     }
     connect();

@@ -66,10 +66,11 @@
 
     function initials(name) { return (name || '?').trim().slice(0, 2).toUpperCase(); }
 
+    const EMBED = SceneBase.qp('embed') === '1';   // ?embed=1 → force-show the live state (config preview)
     function render(data) {
       const intro = data.intro || {};
-      stage.classList.toggle('show', !!intro.visible);
-      if (!intro.visible) return;
+      stage.classList.toggle('show', !!intro.visible || EMBED);
+      if (!intro.visible && !EMBED) return;
 
       const side = (sideOverride === 'blue' || sideOverride === 'orange') ? sideOverride : (intro.side || 'blue');
       const team = SceneBase.teamSide(data, side);

@@ -1,0 +1,945 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1920">
+<title>NE Broadcast Suite — Marvel Rivals Scoreboard</title>
+<style>
+:root {
+  --text:    #f0f2ff;
+  --muted:   rgba(200,210,255,.45);
+  --surface2:#0e0b1e;
+  --good:    #4adf88;
+  --bad:     #f56565;
+  --role-vanguard:   linear-gradient(160deg,#0a2440,#1a4070);
+  --role-duelist:    linear-gradient(160deg,#3d0d0d,#6b1818);
+  --role-strategist: linear-gradient(160deg,#1a0d3d,#2d1a5e);
+  --main-font:'Rajdhani','Barlow Condensed','Segoe UI',sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{width:1920px;height:1080px;overflow:hidden;background:transparent;
+  font-family:var(--main-font);color:var(--text)}
+
+#mr-board{
+  position:absolute;top:0;left:0;right:0;height:0;overflow:visible;
+  transition:opacity .4s;
+}
+#mr-board.hidden{opacity:0;pointer-events:none}
+
+/* ── Team panels ─────────────────────────────────────────────────── */
+.mr-panel{
+  position:absolute;top:0;
+  width:572px;height:64px;
+  background:rgba(8,5,18,.93);
+  display:flex;flex-direction:row;align-items:center;
+  padding:0 10px;gap:8px;
+  overflow:hidden;
+}
+.mr-panel.left {left:0}
+.mr-panel.right{right:0;flex-direction:row-reverse}
+
+.mr-accent{position:absolute;top:0;bottom:0;width:2px}
+.mr-panel.left  .mr-accent{right:0}
+.mr-panel.right .mr-accent{left:0}
+
+/* ── Ban portraits column — full-height, portrait cards ─────────── */
+.mr-bans-col{
+  display:flex;flex-direction:row;align-items:stretch;
+  align-self:stretch;gap:1px;flex-shrink:0;padding:5px 0;
+  margin-right:6px;
+}
+.mr-panel.right .mr-bans-col{margin-right:0;margin-left:6px;}
+/* slant columns inward toward the center of the scoreboard */
+#mr-panel-a .mr-bans-col{transform:skewX(7deg);transform-origin:bottom center;}
+#mr-panel-b .mr-bans-col{transform:skewX(-7deg);transform-origin:bottom center;}
+/* counter-skew images so faces stay upright inside the slanted box */
+#mr-panel-a .mr-ban-img,#mr-panel-a .mr-ban-role-icon{transform:skewX(-7deg);}
+#mr-panel-b .mr-ban-img,#mr-panel-b .mr-ban-role-icon{transform:skewX(7deg);}
+
+/* ── Team identity column (name + series dots) ───────────────────── */
+.mr-team-col{
+  display:flex;flex-direction:column;justify-content:center;
+  gap:4px;flex:1;min-width:0;
+}
+
+/* map history cards in center pill */
+.mr-hist-cards{display:flex;flex-direction:row;align-items:center;gap:7px;}
+.mr-hist-card{display:flex;flex-direction:row;align-items:center;gap:4px;flex-shrink:0}
+.mr-hist-logo{width:20px;height:20px;object-fit:contain;flex-shrink:0}
+.mr-hist-label{font-size:10px;font-weight:900;letter-spacing:.5px;flex-shrink:0}
+.mr-hist-label.win {color:#4adf88}
+.mr-hist-label.loss{color:#f56565}
+.mr-hist-label.pick{color:rgba(77,196,255,.9)}
+.mr-hist-label.dcr {color:rgba(255,220,80,.9)}
+.mr-hist-current-dot{
+  width:9px;height:9px;border-radius:50%;
+  background:transparent;border:1.5px solid rgba(226,54,54,.85);
+  animation:mr-pulse 1.8s ease-in-out infinite;
+}
+@keyframes mr-pulse{
+  0%,100%{box-shadow:0 0 0 0 rgba(226,54,54,.4)}
+  50%     {box-shadow:0 0 0 3px rgba(226,54,54,.1)}
+}
+.mr-hist-future-num{font-size:11px;font-weight:600;color:rgba(255,255,255,.22)}
+.mr-hist-divider{width:1px;height:16px;background:rgba(255,255,255,.1);flex-shrink:0}
+
+/* map mode text badges — neutral, no colour per-mode */
+.mr-mode-badge{
+  font-size:7px;font-weight:900;text-transform:uppercase;letter-spacing:.8px;
+  padding:1px 4px;border-radius:2px;flex-shrink:0;line-height:14px;
+  color:rgba(255,255,255,.55);
+}
+
+/* ban portrait — full height via align-self:stretch from parent .mr-bans-col */
+.mr-ban-portrait{
+  width:26px;border-radius:2px;
+  background:var(--surface2);border:1px solid rgba(255,255,255,.15);
+  overflow:hidden;position:relative;flex-shrink:0;
+  transition:border-color .3s;
+}
+/* object-position 50% 25% — shows face area rather than the top of the head */
+.mr-ban-img{width:100%;height:100%;object-fit:cover;object-position:50% 25%;display:block}
+.mr-ban-role-icon{position:absolute;inset:0;display:flex;align-items:center;justify-content:center}
+
+/* series win dots — inside .mr-team-col, right-aligned for left panel */
+.mr-map-history{display:flex;flex-direction:row;align-items:center;gap:4px;flex-shrink:0}
+.mr-team-col .mr-map-history{justify-content:flex-end}
+.mr-panel.right .mr-team-col .mr-map-history{justify-content:flex-start}
+
+/* ── Identity ─────────────────────────────────────────────────────── */
+.mr-team-name{
+  font-size:22px;font-weight:800;text-transform:uppercase;letter-spacing:.3px;
+  line-height:1;color:var(--text);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  min-width:0;text-align:right;
+}
+.mr-panel.right .mr-team-name{text-align:left}
+
+.mr-logo-wrap{
+  width:44px;height:44px;
+  display:flex;align-items:center;justify-content:center;
+  overflow:hidden;flex-shrink:0;
+}
+.mr-logo-wrap img{width:44px;height:44px;object-fit:contain}
+
+.mr-panel-sep{flex-shrink:0;width:1px;height:28px;background:rgba(255,255,255,.15)}
+
+.mr-score{
+  font-size:40px;font-weight:900;line-height:1;letter-spacing:-1px;
+  color:#fff;flex-shrink:0;min-width:28px;text-align:center;
+}
+.mr-map-dot{
+  width:14px;height:14px;border-radius:50%;
+  background:transparent;
+  border:1.5px solid color-mix(in srgb,var(--team-color,rgba(255,255,255,.35)) 55%,transparent);
+  transition:background .3s,border-color .3s;
+}
+.mr-map-dot.win{
+  background:var(--team-color,#e23636);
+  border-color:var(--team-color,#e23636);
+}
+
+/* ── Center pill ──────────────────────────────────────────────────── */
+#mr-center-group{
+  position:absolute;top:0;
+  left:50%;transform:translateX(-50%);
+  display:grid;
+  background:rgba(8,5,18,.94);
+  clip-path:polygon(0 0,100% 0,calc(100% - 14px) 100%,14px 100%);
+  height:34px;
+  overflow:hidden;
+  filter:drop-shadow(0 4px 14px rgba(0,0,0,.65));
+}
+#mr-center-default,#mr-center-history{
+  grid-row:1;grid-column:1;
+  display:flex;align-items:center;justify-content:center;
+  padding:0 32px;gap:0;
+  white-space:nowrap;
+  transition:opacity .4s cubic-bezier(.4,0,.2,1),transform .4s cubic-bezier(.4,0,.2,1);
+}
+#mr-center-history{opacity:0;transform:translateY(110%);gap:6px;}
+#mr-center-group.show-history #mr-center-default{opacity:0;transform:translateY(-110%);}
+#mr-center-group.show-history #mr-center-history{opacity:1;transform:translateY(0);}
+
+#mr-map-box{display:flex;align-items:center;gap:7px;}
+.mr-map-label{
+  font-size:13px;font-weight:800;text-transform:uppercase;
+  letter-spacing:2px;color:#fff;line-height:1;
+}
+.mr-map-of{
+  font-size:18px;font-weight:900;text-transform:uppercase;
+  letter-spacing:.5px;color:#fff;line-height:1;
+}
+
+/* GEP live indicator — pulses green when Overwolf GEP is connected */
+.mr-gep-dot{
+  width:6px;height:6px;border-radius:50%;
+  background:rgba(255,255,255,.18);flex-shrink:0;
+  margin-left:9px;
+  transition:background .5s,box-shadow .5s;
+}
+.mr-gep-dot.live{
+  background:#4adf88;
+  box-shadow:0 0 5px rgba(74,223,136,.55);
+  animation:mr-gep-pulse 2.5s ease-in-out infinite;
+}
+@keyframes mr-gep-pulse{0%,100%{opacity:1}50%{opacity:.55}}
+
+#mr-sponsor-box{
+  display:none;align-items:center;gap:10px;
+  padding-left:14px;margin-left:14px;
+  border-left:1px solid rgba(255,255,255,.18);
+  height:20px;
+}
+#mr-sponsor-box.visible{display:flex}
+.mr-sp-label{
+  font-size:9px;font-weight:800;text-transform:uppercase;
+  letter-spacing:1.5px;color:#fff;opacity:.75;
+}
+.mr-sp-logo{max-height:20px;max-width:80px;object-fit:contain}
+
+/* ── GEP Hero Roster Bar ─────────────────────────────────────────── */
+#mr-roster-bar{
+  position:absolute;top:64px;left:0;right:0;
+  display:none;flex-direction:row;
+  pointer-events:none;
+}
+.mr-roster-team{
+  display:flex;flex-direction:row;
+  width:572px;
+  background:rgba(8,5,18,.85);
+  border-top:1px solid rgba(255,255,255,.06);
+}
+.mr-hero-slot{
+  flex:1;display:flex;flex-direction:column;align-items:center;
+  padding:5px 1px 4px;position:relative;
+  border-right:1px solid rgba(255,255,255,.05);
+  min-width:0;
+}
+.mr-hero-slot:last-child{border-right:none}
+.mr-hero-slot.dead{opacity:.3}
+.mr-hero-portrait-wrap{position:relative;width:42px;height:50px;flex-shrink:0}
+.mr-hero-portrait{
+  width:42px;height:50px;object-fit:cover;object-position:center top;
+  border-radius:3px;background:rgba(255,255,255,.06);display:block;
+}
+.mr-dead-x{
+  position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+  opacity:0;transition:opacity .25s;
+}
+.mr-hero-slot.dead .mr-dead-x{opacity:1}
+.mr-ult-track{
+  width:42px;height:4px;background:rgba(255,255,255,.1);
+  border-radius:2px;margin-top:3px;flex-shrink:0;overflow:hidden;
+}
+.mr-ult-fill{
+  height:100%;border-radius:2px;
+  background:linear-gradient(90deg,rgba(155,60,255,.75),rgba(210,105,255,.9));
+  transition:width .5s cubic-bezier(.4,0,.2,1);
+}
+.mr-ult-fill.full{
+  background:linear-gradient(90deg,#9e20ff,#d870ff);
+  box-shadow:0 0 6px rgba(175,70,255,.7);
+  animation:mr-ult-glow 1.6s ease-in-out infinite;
+}
+@keyframes mr-ult-glow{0%,100%{opacity:1}50%{opacity:.6}}
+.mr-slot-name{
+  font-size:7px;font-weight:700;text-transform:uppercase;letter-spacing:.3px;
+  color:rgba(255,255,255,.55);margin-top:2px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  max-width:42px;text-align:center;flex-shrink:0;line-height:1.3;
+}
+.mr-slot-kda{
+  font-size:7px;font-weight:600;
+  color:rgba(255,255,255,.3);text-align:center;flex-shrink:0;line-height:1.3;
+}
+.mr-slot-role-pip{
+  width:3px;height:3px;border-radius:50%;flex-shrink:0;margin-top:1px;
+}
+.mr-slot-role-pip.vanguard  {background:rgba(77,196,255,.85)}
+.mr-slot-role-pip.duelist   {background:rgba(255,80,80,.85)}
+.mr-slot-role-pip.strategist{background:rgba(74,223,136,.85)}
+
+/* empty ban placeholder */
+.mr-ban-portrait.empty{
+  background:rgba(255,255,255,.03);
+  border-color:rgba(255,255,255,.07);
+}
+/* roster bar hidden — in-game HUD lives below the scoreboard */
+#mr-roster-bar{display:none!important}
+
+/* ── Map win reveal — floating overlay card ──────────────────────── */
+#mr-win-reveal{
+  position:absolute;top:50%;left:50%;
+  transform:translate(-50%,-50%);
+  z-index:200;pointer-events:none;
+  opacity:0;visibility:hidden;
+}
+#mr-win-reveal.active{
+  visibility:visible;
+  animation:mr-reveal-float 4.8s ease-in-out forwards;
+}
+@keyframes mr-reveal-float{
+  0%  {opacity:0;transform:translate(-50%,calc(-50% + 28px))}
+  14% {opacity:1;transform:translate(-50%,-50%)}
+  82% {opacity:1;transform:translate(-50%,-50%)}
+  100%{opacity:0;transform:translate(-50%,calc(-50% - 18px))}
+}
+.mr-win-card{
+  background:rgba(6,3,22,.93);
+  border:1px solid rgba(255,255,255,.1);
+  border-top:2px solid var(--win-color,rgba(255,255,255,.25));
+  border-radius:12px;padding:28px 56px;
+  display:flex;flex-direction:column;align-items:center;gap:14px;
+  min-width:540px;
+  box-shadow:0 24px 80px rgba(0,0,0,.7),0 0 0 1px rgba(255,255,255,.04),
+             0 0 60px var(--win-color,rgba(100,100,255,.08));
+}
+.mr-win-logo{
+  width:88px;height:88px;object-fit:contain;
+  filter:drop-shadow(0 0 22px var(--win-color,rgba(255,255,255,.4)));
+}
+.mr-win-name{
+  font-family:var(--main-font);
+  font-size:56px;font-weight:900;text-transform:uppercase;
+  letter-spacing:4px;color:#fff;line-height:1;
+  text-shadow:0 0 28px var(--win-color,rgba(255,255,255,.4));
+}
+.mr-win-sub{
+  font-family:var(--main-font);
+  font-size:15px;font-weight:700;text-transform:uppercase;
+  letter-spacing:9px;color:rgba(255,255,255,.5);
+  margin-top:-8px;
+}
+.mr-win-score{
+  font-family:var(--main-font);
+  font-size:22px;font-weight:800;letter-spacing:4px;
+  color:rgba(255,255,255,.28);margin-top:2px;
+}
+
+/* ── Dev toolbar ─────────────────────────────────────────────────── */
+#mr-dev-bar{
+  display:none;position:fixed;bottom:20px;left:20px;
+  background:rgba(6,3,14,.97);border:1px solid rgba(255,255,255,.2);
+  border-radius:8px;padding:6px 14px;gap:8px;align-items:center;
+  font-family:var(--main-font);z-index:9999;white-space:nowrap;
+}
+#mr-dev-bar.on{display:flex}
+.mr-dv-lbl{font-size:9px;font-weight:800;text-transform:uppercase;
+  letter-spacing:1.2px;color:rgba(255,255,255,.3);padding-right:4px;
+  border-right:1px solid rgba(255,255,255,.1);}
+.mr-dv-btn{
+  background:rgba(255,255,255,.09);border:1px solid rgba(255,255,255,.16);
+  color:rgba(255,255,255,.75);padding:3px 9px;border-radius:4px;cursor:pointer;
+  font-size:10px;font-weight:700;font-family:inherit;transition:background .12s;
+}
+.mr-dv-btn:hover{background:rgba(255,255,255,.18)}
+.mr-dv-btn.on{background:rgba(74,223,136,.18);border-color:rgba(74,223,136,.5);color:#4adf88}
+.mr-dv-scn{font-size:9px;color:rgba(255,255,255,.28);font-weight:600;
+  letter-spacing:.5px;padding-left:4px;border-left:1px solid rgba(255,255,255,.1);}
+</style>
+</head>
+<body>
+<div id="mr-board" class="hidden">
+
+  <!-- LEFT: Team A — [bans] [name + dots] [logo] [|] [score] -->
+  <div class="mr-panel left" id="mr-panel-a">
+    <div class="mr-accent" id="mr-accent-a"></div>
+    <div class="mr-bans-col">
+      <div class="mr-ban-portrait empty" id="mr-ban-portrait-a0" style="display:none">
+        <img class="mr-ban-img" id="mr-ban-img-a0" src="" alt="" style="display:none">
+        <span class="mr-ban-role-icon" id="mr-ban-icon-a0"></span>
+      </div>
+      <div class="mr-ban-portrait empty" id="mr-ban-portrait-a1" style="display:none">
+        <img class="mr-ban-img" id="mr-ban-img-a1" src="" alt="" style="display:none">
+        <span class="mr-ban-role-icon" id="mr-ban-icon-a1"></span>
+      </div>
+      <div class="mr-ban-portrait empty" id="mr-ban-portrait-a2" style="display:none">
+        <img class="mr-ban-img" id="mr-ban-img-a2" src="" alt="" style="display:none">
+        <span class="mr-ban-role-icon" id="mr-ban-icon-a2"></span>
+      </div>
+      <div class="mr-ban-portrait empty" id="mr-ban-portrait-a3" style="display:none">
+        <img class="mr-ban-img" id="mr-ban-img-a3" src="" alt="" style="display:none">
+        <span class="mr-ban-role-icon" id="mr-ban-icon-a3"></span>
+      </div>
+      <div class="mr-ban-portrait empty" id="mr-ban-portrait-a4" style="display:none">
+        <img class="mr-ban-img" id="mr-ban-img-a4" src="" alt="" style="display:none">
+        <span class="mr-ban-role-icon" id="mr-ban-icon-a4"></span>
+      </div>
+      <div class="mr-ban-portrait empty" id="mr-ban-portrait-a5" style="display:none">
+        <img class="mr-ban-img" id="mr-ban-img-a5" src="" alt="" style="display:none">
+        <span class="mr-ban-role-icon" id="mr-ban-icon-a5"></span>
+      </div>
+    </div>
+    <div class="mr-team-col">
+      <div class="mr-team-name" id="mr-name-a">TEAM A</div>
+      <div class="mr-map-history" id="mr-history-a"></div>
+    </div>
+    <div class="mr-logo-wrap"><img id="mr-logo-a" src="" alt="" onerror="this.src='/assets/games/rivals.png'"></div>
+    <div class="mr-panel-sep"></div>
+    <div class="mr-score" id="mr-score-a">0</div>
+  </div>
+
+  <!-- CENTER pill — rotates between game counter and map history -->
+  <div id="mr-center-group">
+    <div id="mr-center-default">
+      <div id="mr-map-box">
+        <span class="mr-map-label">Game</span>
+        <span class="mr-map-of" id="mr-map-of">1 of 5</span>
+      </div>
+      <div class="mr-gep-dot" id="mr-gep-dot" title="Overwolf GEP live"></div>
+      <div id="mr-sponsor-box">
+        <span class="mr-sp-label">Presented by</span>
+      </div>
+    </div>
+    <div id="mr-center-history">
+      <div class="mr-hist-cards" id="mr-hist-cards"></div>
+    </div>
+  </div>
+
+  <!-- RIGHT: Team B — [score] [|] [logo] [name + dots] [bans] (row-reverse) -->
+  <div class="mr-panel right" id="mr-panel-b">
+    <div class="mr-accent" id="mr-accent-b"></div>
+    <div class="mr-bans-col">
+      <div class="mr-ban-portrait empty" id="mr-ban-portrait-b0" style="display:none">
+        <img class="mr-ban-img" id="mr-ban-img-b0" src="" alt="" style="display:none">
+        <span class="mr-ban-role-icon" id="mr-ban-icon-b0"></span>
+      </div>
+      <div class="mr-ban-portrait empty" id="mr-ban-portrait-b1" style="display:none">
+        <img class="mr-ban-img" id="mr-ban-img-b1" src="" alt="" style="display:none">
+        <span class="mr-ban-role-icon" id="mr-ban-icon-b1"></span>
+      </div>
+      <div class="mr-ban-portrait empty" id="mr-ban-portrait-b2" style="display:none">
+        <img class="mr-ban-img" id="mr-ban-img-b2" src="" alt="" style="display:none">
+        <span class="mr-ban-role-icon" id="mr-ban-icon-b2"></span>
+      </div>
+      <div class="mr-ban-portrait empty" id="mr-ban-portrait-b3" style="display:none">
+        <img class="mr-ban-img" id="mr-ban-img-b3" src="" alt="" style="display:none">
+        <span class="mr-ban-role-icon" id="mr-ban-icon-b3"></span>
+      </div>
+      <div class="mr-ban-portrait empty" id="mr-ban-portrait-b4" style="display:none">
+        <img class="mr-ban-img" id="mr-ban-img-b4" src="" alt="" style="display:none">
+        <span class="mr-ban-role-icon" id="mr-ban-icon-b4"></span>
+      </div>
+      <div class="mr-ban-portrait empty" id="mr-ban-portrait-b5" style="display:none">
+        <img class="mr-ban-img" id="mr-ban-img-b5" src="" alt="" style="display:none">
+        <span class="mr-ban-role-icon" id="mr-ban-icon-b5"></span>
+      </div>
+    </div>
+    <div class="mr-team-col">
+      <div class="mr-team-name" id="mr-name-b">TEAM B</div>
+      <div class="mr-map-history" id="mr-history-b"></div>
+    </div>
+    <div class="mr-logo-wrap"><img id="mr-logo-b" src="" alt="" onerror="this.src='/assets/games/rivals.png'"></div>
+    <div class="mr-panel-sep"></div>
+    <div class="mr-score" id="mr-score-b">0</div>
+  </div>
+
+</div>
+
+<!-- GEP live hero roster bar — auto-shows when gepData.roster is populated -->
+<div id="mr-roster-bar">
+  <div class="mr-roster-team" id="mr-roster-a"></div>
+  <div style="flex:1"></div>
+  <div class="mr-roster-team" id="mr-roster-b"></div>
+</div>
+
+<!-- Map win reveal — floating overlay card, auto-triggered on map winner -->
+<div id="mr-win-reveal">
+  <div class="mr-win-card">
+    <img class="mr-win-logo" id="mr-win-logo" src="" alt="">
+    <div class="mr-win-name" id="mr-win-name">TEAM NAME</div>
+    <div class="mr-win-sub">WINS THE MAP</div>
+    <div class="mr-win-score" id="mr-win-score">0 — 0</div>
+  </div>
+</div>
+
+<!-- Dev toolbar — only visible when ?dev=1 is in the URL -->
+<div id="mr-dev-bar">
+  <span class="mr-dv-lbl">Dev</span>
+  <button class="mr-dv-btn" id="mr-dv-toggle" onclick="mrDevToggle()">Load Mock</button>
+  <button class="mr-dv-btn" onclick="mrDevRndUlts()">Rnd Ults</button>
+  <button class="mr-dv-btn" onclick="mrDevKillHalf()">Kill Half</button>
+  <button class="mr-dv-btn" onclick="mrDevNextScn()">Next Scn</button>
+  <button class="mr-dv-btn" onclick="mrDevReset()">Reset</button>
+  <button class="mr-dv-btn" onclick="mrDevWin('a')">Win A</button>
+  <button class="mr-dv-btn" onclick="mrDevWin('b')">Win B</button>
+  <span class="mr-dv-scn" id="mr-dv-scn-lbl">—</span>
+</div>
+
+<script src="scene-base.js"></script>
+<script>
+// Hero → role mapping
+const MR_HERO_ROLES = {
+  'captain-america':'vanguard','doctor-strange':'vanguard','emma-frost':'vanguard',
+  'groot':'vanguard','hulk':'vanguard','magneto':'vanguard','mister-fantastic':'vanguard',
+  'peni-parker':'vanguard','thor':'vanguard','venom':'vanguard',
+  'black-panther':'duelist','black-widow':'duelist','hawkeye':'duelist',
+  'hela':'duelist','human-torch':'duelist','iron-fist':'duelist','iron-man':'duelist',
+  'magik':'duelist','moon-knight':'duelist','namor':'duelist','psylocke':'duelist',
+  'scarlet-witch':'duelist','spider-man':'duelist','squirrel-girl':'duelist',
+  'star-lord':'duelist','storm':'duelist','the-punisher':'duelist',
+  'winter-soldier':'duelist','wolverine':'duelist',
+  'adam-warlock':'strategist','cloak-dagger':'strategist','invisible-woman':'strategist',
+  'jeff-the-land-shark':'strategist','loki':'strategist','luna-snow':'strategist',
+  'mantis':'strategist','rocket-raccoon':'strategist'
+};
+
+const MR_ROLE_SVG = {
+  vanguard:   '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="rgba(255,255,255,.6)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L4 6v5c0 5.5 3.5 10.3 8 11.5 4.5-1.2 8-6 8-11.5V6z"/></svg>',
+  duelist:    '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="rgba(255,255,255,.6)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><line x1="12" y1="2" x2="12" y2="6"/><line x1="12" y1="18" x2="12" y2="22"/><line x1="2" y1="12" x2="6" y2="12"/><line x1="18" y1="12" x2="22" y2="12"/></svg>',
+  strategist: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="rgba(255,255,255,.6)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78L12 21.23l7.78-7.78a5.5 5.5 0 0 0 0-7.78z"/></svg>'
+};
+
+function mrHeroSlug(n){
+  return (n||'').toLowerCase()
+    .replace(/[&]/g,'').replace(/[.'']/g,'').replace(/:\s*/g,'-')
+    .replace(/\s+/g,'-').replace(/-+/g,'-').replace(/^-|-$/g,'');
+}
+// Alternate rivalskins CDN slugs for heroes whose canonical names differ
+const MR_CDN_SLUG = {
+  'the-punisher':'punisher',
+  'cloak-dagger':'cloak-and-dagger',
+  'jeff-the-land-shark':'jeff-the-land-shark'
+};
+function mrHeroRole(n){ return MR_HERO_ROLES[mrHeroSlug(n)] || null; }
+function mrHeroImgUrl(n){ const s=mrHeroSlug(n); return s ? `/assets/heroes/marvel-rivals/${s}.png` : ''; }
+function mrHeroCdnUrl(n){
+  const s=mrHeroSlug(n); if(!s) return '';
+  const cs=MR_CDN_SLUG[s]||s;
+  return `https://rivalskins.com/wp-content/uploads/marvel-assets/ui/heroes/avatar/${cs}_avatar.png`;
+}
+function mrShowIcon(id){ const e=document.getElementById(id); if(e) e.style.opacity='.55'; }
+
+function mrApplyBan(pId, imgId, iconId, name){
+  const p=document.getElementById(pId), img=document.getElementById(imgId), icon=document.getElementById(iconId);
+  if(!p) return;
+  if(!name){
+    p.style.display='none';
+    if(img){img.src='';img.style.display='none';}
+    if(icon){icon.innerHTML='';icon.style.opacity='';}
+    return;
+  }
+  p.style.display='';
+  p.classList.remove('empty');
+  const role=mrHeroRole(name);
+  if(icon){icon.innerHTML=MR_ROLE_SVG[role]||'';icon.style.opacity='0';}
+  if(img){
+    img.style.display='block';
+    img.onerror=function(){
+      const cdn=mrHeroCdnUrl(name);
+      if(cdn && this.src!==cdn){
+        this.src=cdn;
+      } else {
+        this.style.display='none';
+        mrShowIcon(iconId);
+      }
+    };
+    img.src=mrHeroImgUrl(name);
+  }
+}
+
+function mrGetBanArr(bansByMap, idx, side, count){
+  const n=count||6;
+  const entry=(Array.isArray(bansByMap)?bansByMap[idx]:null)||{};
+  const v=entry[side];
+  if(Array.isArray(v)) return Array.from({length:n},function(_,i){return v[i]&&v[i].hero||'';});
+  return Array(n).fill('');
+}
+
+function mrApplyTeamBans(team, bansByMap, idx, banCount){
+  const count=Math.max(1,Math.min(3,banCount||3));
+  const names=mrGetBanArr(bansByMap, idx, team, 6);
+  for(var s=0; s<6; s++){
+    const p=document.getElementById('mr-ban-portrait-'+team+s);
+    if(!p) continue;
+    if(s>=count){
+      p.style.display='none';
+    } else {
+      p.style.display='';
+      mrApplyBan('mr-ban-portrait-'+team+s,'mr-ban-img-'+team+s,'mr-ban-icon-'+team+s,names[s]);
+    }
+  }
+}
+
+function mrBuildHistory(id, wins, target){
+  const w=document.getElementById(id); if(!w) return;
+  w.innerHTML='';
+  for(var i=0; i<target; i++){
+    const d=document.createElement('div');
+    d.className='mr-map-dot'+(i<wins?' win':'');
+    w.appendChild(d);
+  }
+}
+
+const MR_MODE_LABEL={convergence:'CONV',domination:'DOM',convoy:'CVY'};
+const MR_MODE_ICON={
+  convergence:'/assets/game-modes/marvel-rivals/capture.png',
+  domination: '/assets/game-modes/marvel-rivals/conquest.png',
+  convoy:     '/assets/game-modes/marvel-rivals/teamfight.png'
+};
+
+function mrBuildHistoryBar(containerId, hist, tA, tB, fallbackMode, showLabels){
+  const w=document.getElementById(containerId); if(!w) return;
+  w.innerHTML='';
+  const MR_FB='/assets/games/rivals.png';
+  hist.forEach(function(m,i){
+    if(i>0){ const sep=document.createElement('div'); sep.className='mr-hist-divider'; w.appendChild(sep); }
+    const card=document.createElement('div'); card.className='mr-hist-card';
+
+    const mode=m.mode||(m.current?fallbackMode:null)||null;
+    if(mode && MR_MODE_ICON[mode]){
+      const mi=document.createElement('img');
+      mi.src=MR_MODE_ICON[mode];mi.alt='';
+      mi.style.cssText='width:13px;height:13px;object-fit:contain;opacity:.7;flex-shrink:0';
+      mi.onerror=function(){this.remove();};
+      card.appendChild(mi);
+    }
+
+    if(m.winner){
+      const winTeam=m.winner==='a'?tA:tB;
+      if(winTeam&&winTeam.logo){
+        const img=document.createElement('img'); img.className='mr-hist-logo';
+        img.src=winTeam.logo; img.alt='';
+        img.onerror=function(){this.src=MR_FB;};
+        card.appendChild(img);
+      }
+      if(showLabels){
+        const lbl=document.createElement('span');
+        lbl.className='mr-hist-label win'; lbl.textContent='WIN';
+        card.appendChild(lbl);
+      }
+    } else if(m.current){
+      const dot=document.createElement('div'); dot.className='mr-hist-current-dot'; card.appendChild(dot);
+    } else if(m.by){
+      const pickTeam=m.by==='a'?tA:tB;
+      if(pickTeam&&pickTeam.logo){
+        const img=document.createElement('img'); img.className='mr-hist-logo';
+        img.src=pickTeam.logo; img.alt='';
+        img.onerror=function(){this.style.display='none';};
+        card.appendChild(img);
+      }
+      if(showLabels){
+        const isDecider=m.action==='decider';
+        const lbl=document.createElement('span');
+        lbl.className='mr-hist-label '+(isDecider?'dcr':'pick');
+        lbl.textContent=isDecider?'DCR':'PICK';
+        card.appendChild(lbl);
+      }
+    } else {
+      const num=document.createElement('span'); num.className='mr-hist-future-num'; num.textContent=i+1; card.appendChild(num);
+    }
+    w.appendChild(card);
+  });
+}
+
+function mrRenderSponsors(brand){
+  const box=document.getElementById('mr-sponsor-box'); if(!box) return;
+  const sponsors=(brand&&brand.railSponsors)||(brand&&brand.sponsors)||[];
+  const logos=sponsors.filter(function(s){return s&&s.logo;});
+  box.innerHTML='<span class="mr-sp-label">Presented by</span>';
+  if(!logos.length){ box.classList.remove('visible'); return; }
+  box.classList.add('visible');
+  logos.slice(0,3).forEach(function(s){
+    const sep=document.createElement('div'); sep.className='mr-sp-sep'; box.appendChild(sep);
+    const img=document.createElement('img'); img.className='mr-sp-logo';
+    img.src=s.logo; img.alt=s.name||'';
+    img.onerror=function(){this.previousSibling&&this.previousSibling.remove();this.remove();};
+    box.appendChild(img);
+  });
+}
+
+const PREVIEW=new URLSearchParams(location.search).get('preview')==='1';
+const DEV_MODE=new URLSearchParams(location.search).get('dev')==='1';
+
+function setText(id,v){const e=document.getElementById(id);if(e)e.textContent=v;}
+
+// ── GEP Roster Bar ────────────────────────────────────────────────────────────
+function mrBuildSlot(p){
+  const slot=document.createElement('div');
+  const heroName=p?p.character_name||'':'';
+  const role=mrHeroRole(heroName);
+  const ult=p?Math.min(100,Math.max(0,Number(p.ult_charge)||0)):0;
+  const alive=!p||p.is_alive!==false;
+  slot.className='mr-hero-slot'+(alive?'':' dead');
+
+  // portrait
+  const wrap=document.createElement('div');
+  wrap.className='mr-hero-portrait-wrap';
+  const img=document.createElement('img');
+  img.className='mr-hero-portrait';
+  if(heroName){
+    img.onerror=function(){
+      const cdn=mrHeroCdnUrl(heroName);
+      if(cdn&&this.src!==cdn){this.src=cdn;}
+      else{this.src='';this.style.background='rgba(255,255,255,.07)';}
+    };
+    img.src=mrHeroImgUrl(heroName);
+  }
+  wrap.appendChild(img);
+  const dx=document.createElement('div');
+  dx.className='mr-dead-x';
+  dx.innerHTML='<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="rgba(255,80,80,.75)" stroke-width="2.5" stroke-linecap="round"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>';
+  wrap.appendChild(dx);
+  slot.appendChild(wrap);
+
+  // ult charge bar
+  const track=document.createElement('div');
+  track.className='mr-ult-track';
+  const fill=document.createElement('div');
+  fill.className='mr-ult-fill'+(ult>=100?' full':'');
+  fill.style.width=ult+'%';
+  track.appendChild(fill);
+  slot.appendChild(track);
+
+  // hero short name
+  const nm=document.createElement('div');
+  nm.className='mr-slot-name';
+  nm.textContent=heroName?heroName.split(' ')[0].toUpperCase():'—';
+  slot.appendChild(nm);
+
+  // KDA — only when we have a real player
+  if(p&&(p.kills||p.deaths||p.assists)){
+    const kda=document.createElement('div');
+    kda.className='mr-slot-kda';
+    kda.textContent=(p.kills||0)+'/'+(p.deaths||0)+'/'+(p.assists||0);
+    slot.appendChild(kda);
+  }
+
+  // role colour pip
+  if(role){
+    const pip=document.createElement('div');
+    pip.className='mr-slot-role-pip '+role;
+    slot.appendChild(pip);
+  }
+  return slot;
+}
+
+function mrRenderRoster(roster,tA,tB){
+  const bar=document.getElementById('mr-roster-bar');
+  if(!bar) return;
+  if(!Array.isArray(roster)||!roster.length){bar.style.display='none';return;}
+  bar.style.display='flex';
+
+  const teamA=roster.filter(function(p){return String(p.team)==='0';}).slice(0,6);
+  const teamB=roster.filter(function(p){return String(p.team)==='1';}).slice(0,6);
+  while(teamA.length<6)teamA.push(null);
+  while(teamB.length<6)teamB.push(null);
+
+  const cA=document.getElementById('mr-roster-a');
+  const cB=document.getElementById('mr-roster-b');
+  if(cA){cA.innerHTML='';teamA.forEach(function(p){cA.appendChild(mrBuildSlot(p));});}
+  if(cB){cB.innerHTML='';teamB.forEach(function(p){cB.appendChild(mrBuildSlot(p));});}
+}
+
+// ── Dev toolbar mock data ─────────────────────────────────────────────────────
+var MR_DEV_SCENARIOS=[
+  {label:'Early Game',roster:[
+    {name:'Player1',character_name:'Magneto',       team:0,kills:2, deaths:1,assists:4, ult_charge:35, is_alive:true},
+    {name:'Player2',character_name:'Doctor Strange',team:0,kills:1, deaths:0,assists:5, ult_charge:22, is_alive:true},
+    {name:'Player3',character_name:'Iron Man',      team:0,kills:4, deaths:2,assists:2, ult_charge:58, is_alive:true},
+    {name:'Player4',character_name:'Storm',         team:0,kills:2, deaths:1,assists:3, ult_charge:41, is_alive:true},
+    {name:'Player5',character_name:'Loki',          team:0,kills:0, deaths:0,assists:6, ult_charge:16, is_alive:true},
+    {name:'Player6',character_name:'Mantis',        team:0,kills:0, deaths:1,assists:7, ult_charge:28, is_alive:true},
+    {name:'Player7',character_name:'Thor',          team:1,kills:2, deaths:3,assists:2, ult_charge:33, is_alive:true},
+    {name:'Player8',character_name:'Venom',         team:1,kills:3, deaths:1,assists:1, ult_charge:47, is_alive:true},
+    {name:'Player9',character_name:'Black Panther', team:1,kills:5, deaths:1,assists:2, ult_charge:72, is_alive:true},
+    {name:'Player10',character_name:'Hawkeye',      team:1,kills:3, deaths:2,assists:1, ult_charge:60, is_alive:true},
+    {name:'Player11',character_name:'Luna Snow',    team:1,kills:0, deaths:0,assists:8, ult_charge:11, is_alive:true},
+    {name:'Player12',character_name:'Adam Warlock', team:1,kills:1, deaths:0,assists:5, ult_charge:37, is_alive:true}
+  ]},
+  {label:'Ults Ready',roster:[
+    {name:'Player1',character_name:'Magneto',       team:0,kills:9, deaths:3,assists:10,ult_charge:100,is_alive:true},
+    {name:'Player2',character_name:'Doctor Strange',team:0,kills:5, deaths:2,assists:13,ult_charge:100,is_alive:true},
+    {name:'Player3',character_name:'Iron Man',      team:0,kills:13,deaths:5,assists:3, ult_charge:82, is_alive:true},
+    {name:'Player4',character_name:'Storm',         team:0,kills:9, deaths:4,assists:7, ult_charge:57, is_alive:false},
+    {name:'Player5',character_name:'Loki',          team:0,kills:2, deaths:1,assists:16,ult_charge:100,is_alive:true},
+    {name:'Player6',character_name:'Mantis',        team:0,kills:1, deaths:2,assists:20,ult_charge:94, is_alive:true},
+    {name:'Player7',character_name:'Thor',          team:1,kills:7, deaths:6,assists:5, ult_charge:88, is_alive:true},
+    {name:'Player8',character_name:'Venom',         team:1,kills:8, deaths:4,assists:3, ult_charge:100,is_alive:true},
+    {name:'Player9',character_name:'Black Panther', team:1,kills:12,deaths:3,assists:4, ult_charge:49, is_alive:false},
+    {name:'Player10',character_name:'Hawkeye',      team:1,kills:11,deaths:4,assists:3, ult_charge:100,is_alive:true},
+    {name:'Player11',character_name:'Luna Snow',    team:1,kills:1, deaths:1,assists:25,ult_charge:68, is_alive:true},
+    {name:'Player12',character_name:'Adam Warlock', team:1,kills:4, deaths:2,assists:15,ult_charge:100,is_alive:true}
+  ]},
+  {label:'Late Game',roster:[
+    {name:'Player1',character_name:'Magneto',       team:0,kills:16,deaths:5, assists:15,ult_charge:48, is_alive:true},
+    {name:'Player2',character_name:'Doctor Strange',team:0,kills:9, deaths:4, assists:21,ult_charge:100,is_alive:false},
+    {name:'Player3',character_name:'Iron Man',      team:0,kills:23,deaths:8, assists:5, ult_charge:0,  is_alive:true},
+    {name:'Player4',character_name:'Storm',         team:0,kills:18,deaths:7, assists:10,ult_charge:31, is_alive:false},
+    {name:'Player5',character_name:'Loki',          team:0,kills:4, deaths:3, assists:30,ult_charge:73, is_alive:true},
+    {name:'Player6',character_name:'Mantis',        team:0,kills:2, deaths:5, assists:34,ult_charge:87, is_alive:true},
+    {name:'Player7',character_name:'Thor',          team:1,kills:14,deaths:9, assists:9, ult_charge:100,is_alive:true},
+    {name:'Player8',character_name:'Venom',         team:1,kills:19,deaths:6, assists:5, ult_charge:58, is_alive:false},
+    {name:'Player9',character_name:'Black Panther', team:1,kills:21,deaths:5, assists:6, ult_charge:22, is_alive:true},
+    {name:'Player10',character_name:'Hawkeye',      team:1,kills:20,deaths:7, assists:4, ult_charge:100,is_alive:false},
+    {name:'Player11',character_name:'Luna Snow',    team:1,kills:3, deaths:3, assists:37,ult_charge:100,is_alive:true},
+    {name:'Player12',character_name:'Adam Warlock', team:1,kills:8, deaths:4, assists:22,ult_charge:78, is_alive:true}
+  ]}
+];
+var _mrDevActive=false,_mrDevScnIdx=0,_mrDevRoster=null,_mrDevLastState=null;
+
+function mrDevToggle(){
+  _mrDevActive=!_mrDevActive;
+  var btn=document.getElementById('mr-dv-toggle');
+  if(btn)btn.className='mr-dv-btn'+(_mrDevActive?' on':'');
+  _mrDevRoster=_mrDevActive?JSON.parse(JSON.stringify(MR_DEV_SCENARIOS[_mrDevScnIdx].roster)):null;
+  mrDevUpdateLbl();
+  if(_mrDevLastState)render(_mrDevLastState);
+}
+function mrDevRndUlts(){
+  if(!_mrDevActive)mrDevToggle();
+  (_mrDevRoster||[]).forEach(function(p){p.ult_charge=Math.floor(Math.random()*101);});
+  if(_mrDevLastState)render(_mrDevLastState);
+}
+function mrDevKillHalf(){
+  if(!_mrDevActive)mrDevToggle();
+  (_mrDevRoster||[]).forEach(function(p,i){p.is_alive=(i%2===0);});
+  if(_mrDevLastState)render(_mrDevLastState);
+}
+function mrDevNextScn(){
+  _mrDevScnIdx=(_mrDevScnIdx+1)%MR_DEV_SCENARIOS.length;
+  if(_mrDevActive)_mrDevRoster=JSON.parse(JSON.stringify(MR_DEV_SCENARIOS[_mrDevScnIdx].roster));
+  mrDevUpdateLbl();
+  if(_mrDevLastState)render(_mrDevLastState);
+}
+function mrDevReset(){
+  _mrDevActive=false;_mrDevRoster=null;
+  var btn=document.getElementById('mr-dv-toggle');
+  if(btn)btn.className='mr-dv-btn';
+  mrDevUpdateLbl();
+  if(_mrDevLastState)render(_mrDevLastState);
+}
+function mrDevUpdateLbl(){
+  var lbl=document.getElementById('mr-dv-scn-lbl');
+  if(lbl)lbl.textContent=_mrDevActive?MR_DEV_SCENARIOS[_mrDevScnIdx].label:'—';
+}
+
+function render(state){
+  const mr=state.mrMatch||{}, veto=state.veto||{}, teams=state.teams||{}, brand=state.brand||{};
+  const board=document.getElementById('mr-board'); if(!board) return;
+  const visible=!!mr.visible||PREVIEW;
+  board.classList.toggle('hidden',!visible);
+  if(!visible) return;
+
+  const tA=teams.blue||{}, tB=teams.orange||{};
+  const MR_FB='/assets/games/rivals.png';
+
+  setText('mr-name-a',(tA.name||'TEAM A').toUpperCase());
+  setText('mr-name-b',(tB.name||'TEAM B').toUpperCase());
+  const la=document.getElementById('mr-logo-a'); if(la) la.src=tA.logo||MR_FB;
+  const lb=document.getElementById('mr-logo-b'); if(lb) lb.src=tB.logo||MR_FB;
+
+  const accA=document.getElementById('mr-accent-a'); if(accA) accA.style.background=tA.color||'#4361ee';
+  const accB=document.getElementById('mr-accent-b'); if(accB) accB.style.background=tB.color||'#e03131';
+  const pA=document.getElementById('mr-panel-a'), pB=document.getElementById('mr-panel-b');
+  if(pA) pA.style.setProperty('--team-color',tA.color||'#4361ee');
+  if(pB) pB.style.setProperty('--team-color',tB.color||'#e03131');
+
+  const vetoMaps=Array.isArray(veto.maps)?veto.maps:[];
+  const bestOf=state.bestOf||5;
+  const total=Math.ceil(bestOf/2)*2-1;
+  const gameNum=((state.game&&state.game.number)||1);
+  const curIdx=Math.max(0,gameNum-1);
+
+  const series=state.series||{};
+  setText('mr-score-a',String(series.blue||0));
+  setText('mr-score-b',String(series.orange||0));
+
+  const displayGame=Math.min(Math.max(1,gameNum),bestOf);
+  setText('mr-map-of',displayGame+' of '+bestOf);
+
+  mrRenderSponsors(brand);
+
+  const mapWinners=Array.isArray(mr.mapWinners)?mr.mapWinners:[];
+  const mapModes=Array.isArray(mr.mapModes)?mr.mapModes:[];
+  const hist=[];
+  for(var i=0;i<total;i++){
+    const m=vetoMaps[i]||{};
+    const winner=mapWinners[i]||m.winner||null;
+    hist.push({name:m.name||'',mode:mapModes[i]||m.mode||null,winner:winner,by:m.by||null,action:m.action||'',current:!winner&&i===curIdx});
+  }
+  const winsNeeded=Math.ceil(bestOf/2);
+  mrBuildHistory('mr-history-a',series.blue||0,winsNeeded);
+  mrBuildHistory('mr-history-b',series.orange||0,winsNeeded);
+  mrBuildHistoryBar('mr-hist-cards',hist,tA,tB,mr.gameMode||'convergence',mr.showMapLabels!==false);
+
+  setText('mr-event-name',(state.eventName||'TOURNAMENT').toUpperCase());
+  setText('mr-event-format',bestOf?'BO'+bestOf:(mr.format||'BO5'));
+
+  // Bans — max 3 per team
+  const bans=Array.isArray(mr.bansByMap)?mr.bansByMap:[];
+  const banCount=Math.max(1,Math.min(3,mr.banCount||3));
+  mrApplyTeamBans('a',bans,0,banCount);
+  mrApplyTeamBans('b',bans,0,banCount);
+
+  // GEP live indicator
+  const gep=mr.gepData||{};
+  const gepAlive=gep.gepConnected&&gep.lastSeen&&(Date.now()-gep.lastSeen<45000);
+  const gepDot=document.getElementById('mr-gep-dot');
+  if(gepDot) gepDot.classList.toggle('live',!!gepAlive);
+
+  // Win reveal — auto-fires when a new map winner is recorded
+  const curWinner=mapWinners[curIdx]||null;
+  if(curWinner && curWinner!==_mrLastWinners[curIdx]){
+    const winTeam=curWinner==='a'?tA:tB;
+    mrTriggerWinReveal(winTeam,curWinner,series.blue||0,series.orange||0);
+  }
+  _mrLastWinners[curIdx]=curWinner;
+
+  _mrDevLastState=state;
+}
+
+// ── Win reveal ────────────────────────────────────────────────────────────────
+var _mrLastWinners={};
+var _mrRevealTimeout=null;
+
+function mrTriggerWinReveal(team,side,scoreA,scoreB){
+  const rev=document.getElementById('mr-win-reveal'); if(!rev) return;
+  const logo=document.getElementById('mr-win-logo');
+  const name=document.getElementById('mr-win-name');
+  const score=document.getElementById('mr-win-score');
+  const MR_FB='/assets/games/rivals.png';
+  if(logo){
+    logo.src=(team&&team.logo)||MR_FB;
+    logo.onerror=function(){this.src=MR_FB;this.onerror=null;};
+  }
+  if(name) name.textContent=((team&&team.name)||'TEAM '+(side||'').toUpperCase()).toUpperCase();
+  if(score) score.textContent=(scoreA||0)+' — '+(scoreB||0);
+  rev.style.setProperty('--win-color',(team&&team.color)||(side==='a'?'rgba(67,97,238,.5)':'rgba(224,49,49,.5)'));
+  rev.classList.remove('active');
+  void rev.offsetWidth;
+  rev.classList.add('active');
+  if(_mrRevealTimeout) clearTimeout(_mrRevealTimeout);
+  _mrRevealTimeout=setTimeout(function(){rev.classList.remove('active');},4800);
+}
+
+function mrDevWin(side){
+  if(!_mrDevLastState) return;
+  const teams=_mrDevLastState.teams||{};
+  const tA=teams.blue||{name:'TEAM A'},tB=teams.orange||{name:'TEAM B'};
+  const series=_mrDevLastState.series||{};
+  mrTriggerWinReveal(side==='a'?tA:tB,side,series.blue||0,series.orange||0);
+}
+
+SceneBase.connect(render);
+
+// Activate dev toolbar if ?dev=1
+if(DEV_MODE){var _db=document.getElementById('mr-dev-bar');if(_db)_db.classList.add('on');}
+
+// Rotate center pill between game counter and map history every 5s
+(function(){
+  var _t=null;
+  function start(){
+    if(_t) return;
+    _t=setInterval(function(){
+      const g=document.getElementById('mr-center-group');
+      if(g) g.classList.toggle('show-history');
+    },5000);
+  }
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',start);
+  else start();
+})();
+</script>
+</body>
+</html>

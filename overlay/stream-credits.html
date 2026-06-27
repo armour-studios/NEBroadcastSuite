@@ -1,0 +1,540 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Stream Credits</title>
+  <link rel="stylesheet" href="fonts.css">
+  <style>
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      background: #0d0d14;
+      font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
+      color: #fff;
+      overflow: hidden;
+      width: 1920px;
+      height: 1080px;
+      position: relative;
+    }
+
+    /* ── Background gradient ───────────────────────────── */
+    .bg-layer {
+      position: absolute;
+      inset: 0;
+      background:
+        radial-gradient(ellipse 60% 50% at 50% 100%, rgba(108,45,199,0.25) 0%, transparent 70%),
+        radial-gradient(ellipse 80% 40% at 20% 0%, rgba(30,80,180,0.12) 0%, transparent 60%);
+      pointer-events: none;
+    }
+
+    /* ── Header ────────────────────────────────────────── */
+    .header {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 140px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      background: linear-gradient(180deg, rgba(0,0,0,0.7) 0%, transparent 100%);
+      z-index: 10;
+    }
+
+    .header-eyebrow {
+      font-size: 14px;
+      font-weight: 600;
+      letter-spacing: 4px;
+      text-transform: uppercase;
+      color: #9b6dff;
+      opacity: 0.85;
+    }
+
+    .header-title {
+      font-size: 52px;
+      font-weight: 800;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      background: linear-gradient(135deg, #fff 30%, #b89eff 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .header-sub {
+      font-size: 15px;
+      color: rgba(255,255,255,0.4);
+      letter-spacing: 1px;
+    }
+
+    /* ── Scroll viewport ───────────────────────────────── */
+    .scroll-viewport {
+      position: absolute;
+      top: 140px;
+      bottom: 80px;
+      left: 0;
+      right: 0;
+      overflow: hidden;
+    }
+
+    .scroll-viewport::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 60px;
+      background: linear-gradient(180deg, #0d0d14 0%, transparent 100%);
+      z-index: 5;
+      pointer-events: none;
+    }
+
+    .scroll-viewport::after {
+      content: '';
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      height: 80px;
+      background: linear-gradient(0deg, #0d0d14 0%, transparent 100%);
+      z-index: 5;
+      pointer-events: none;
+    }
+
+    .scroll-track {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      padding: 30px 0 100px;
+      will-change: transform;
+      transition: none;
+    }
+
+    /* ── Section ───────────────────────────────────────── */
+    .credit-section {
+      padding: 24px 160px;
+      margin-bottom: 10px;
+    }
+
+    .section-label {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      margin-bottom: 20px;
+    }
+
+    .section-label .icon {
+      font-size: 22px;
+      width: 44px;
+      height: 44px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 10px;
+      flex-shrink: 0;
+    }
+
+    .section-label .title {
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 4px;
+      text-transform: uppercase;
+      color: rgba(255,255,255,0.5);
+    }
+
+    .section-label .count {
+      margin-left: auto;
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 2px;
+      color: rgba(255,255,255,0.25);
+    }
+
+    .section-divider {
+      height: 1px;
+      background: rgba(255,255,255,0.06);
+      margin-bottom: 20px;
+    }
+
+    /* ── Name grid ─────────────────────────────────────── */
+    .name-grid {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px 14px;
+    }
+
+    .name-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      padding: 6px 16px;
+      border-radius: 6px;
+      font-size: 17px;
+      font-weight: 600;
+      letter-spacing: 0.3px;
+      border: 1px solid transparent;
+      opacity: 0;
+      transform: translateY(8px);
+      animation: chipIn 0.4s ease forwards;
+    }
+
+    @keyframes chipIn {
+      to { opacity: 1; transform: none; }
+    }
+
+    .name-chip .chip-extra {
+      font-size: 12px;
+      font-weight: 500;
+      opacity: 0.6;
+      margin-left: 2px;
+    }
+
+    /* Type colours */
+    .chip-follow    { background: rgba(34,197,94,0.12);  border-color: rgba(34,197,94,0.25);  color: #6ee7b7; }
+    .chip-sub       { background: rgba(139,92,246,0.14); border-color: rgba(139,92,246,0.3);  color: #c4b5fd; }
+    .chip-resub     { background: rgba(109,40,217,0.14); border-color: rgba(109,40,217,0.3);  color: #a78bfa; }
+    .chip-gift_sub  { background: rgba(236,72,153,0.12); border-color: rgba(236,72,153,0.25); color: #f9a8d4; }
+    .chip-bits      { background: rgba(234,179,8,0.12);  border-color: rgba(234,179,8,0.25);  color: #fde68a; }
+    .chip-raid      { background: rgba(239,68,68,0.12);  border-color: rgba(239,68,68,0.25);  color: #fca5a5; }
+    .chip-channel_points { background: rgba(59,130,246,0.12); border-color: rgba(59,130,246,0.25); color: #93c5fd; }
+    .chip-hype_train { background: rgba(249,115,22,0.14); border-color: rgba(249,115,22,0.3); color: #fdba74; }
+
+    /* ── Footer ────────────────────────────────────────── */
+    .footer {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      height: 80px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      background: linear-gradient(0deg, rgba(0,0,0,0.6) 0%, transparent 100%);
+      z-index: 10;
+    }
+
+    .footer-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: rgba(255,255,255,0.15);
+    }
+
+    .footer-text {
+      font-size: 13px;
+      color: rgba(255,255,255,0.2);
+      letter-spacing: 2px;
+      text-transform: uppercase;
+    }
+
+    /* ── Empty state ───────────────────────────────────── */
+    .empty-state {
+      position: absolute;
+      inset: 140px 0 80px 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 14px;
+      opacity: 0.35;
+    }
+
+    .empty-state .empty-icon { font-size: 48px; }
+    .empty-state .empty-label { font-size: 18px; letter-spacing: 2px; text-transform: uppercase; color: rgba(255,255,255,0.5); }
+  </style>
+</head>
+<body>
+  <div class="bg-layer"></div>
+
+  <div class="header">
+    <div class="header-eyebrow">Thank You</div>
+    <div class="header-title" id="header-title">Stream Credits</div>
+    <div class="header-sub" id="header-sub">Loading activity…</div>
+  </div>
+
+  <div class="scroll-viewport" id="scroll-viewport">
+    <div class="scroll-track" id="scroll-track">
+      <!-- sections injected here -->
+    </div>
+  </div>
+
+  <div class="empty-state" id="empty-state" style="display:none;">
+    <div class="empty-icon">📋</div>
+    <div class="empty-label">No stream activity yet</div>
+  </div>
+
+  <div class="footer">
+    <div class="footer-dot"></div>
+    <div class="footer-text" id="footer-text">NE Broadcast Suite</div>
+    <div class="footer-dot"></div>
+  </div>
+
+<script>
+/* ────────────────────────────────────────────────────────────────
+   Stream Credits Overlay
+   Params: ?speed=N (px/s, default 40) | ?pause=N (ms at top, default 2000)
+           ?preview=1 | ?loop=1 (auto-restart scroll)
+   ──────────────────────────────────────────────────────────────── */
+
+const params    = new URLSearchParams(location.search);
+const SCROLL_SPEED = Math.max(5, Math.min(300, Number(params.get('speed') || 40)));  // px/s
+const PAUSE_MS  = Math.max(0, Number(params.get('pause') || 2000));
+const LOOP      = params.has('loop');
+const PREVIEW   = params.has('preview');
+
+const WS_PORT   = 3001;
+const API_BASE  = `http://localhost:3000`;
+
+const track     = document.getElementById('scroll-track');
+const viewport  = document.getElementById('scroll-viewport');
+const emptyEl   = document.getElementById('empty-state');
+const headerSub = document.getElementById('header-sub');
+const footerTxt = document.getElementById('footer-text');
+
+/* ── Section config ─────────────────────────────────────────── */
+const SECTIONS = [
+  { key: 'raid',          icon: '⚔️',  label: 'Raiders',            color: '#fca5a5' },
+  { key: 'hype_train',    icon: '🚂',  label: 'Hype Train',         color: '#fdba74' },
+  { key: 'sub',           icon: '⭐',  label: 'New Subscribers',    color: '#c4b5fd' },
+  { key: 'resub',         icon: '♻️',  label: 'Resubscribers',      color: '#a78bfa' },
+  { key: 'gift_sub',      icon: '🎁',  label: 'Gift Subscribers',   color: '#f9a8d4' },
+  { key: 'bits',          icon: '💎',  label: 'Bit Supporters',     color: '#fde68a' },
+  { key: 'follow',        icon: '❤️',  label: 'New Followers',      color: '#6ee7b7' },
+  { key: 'channel_points',icon: '🔵',  label: 'Channel Points',     color: '#93c5fd' },
+];
+
+/* ── Activity log ───────────────────────────────────────────── */
+let activityLog = [];
+
+function groupLog(log) {
+  const groups = {};
+  for (const e of log) {
+    if (!groups[e.type]) groups[e.type] = [];
+    groups[e.type].push(e);
+  }
+  return groups;
+}
+
+function chipLabel(entry) {
+  switch (entry.type) {
+    case 'follow':         return entry.username;
+    case 'sub':            return entry.username;
+    case 'resub':          return `${entry.username}<span class="chip-extra">×${entry.months || 1}</span>`;
+    case 'gift_sub':       return `${entry.username} <span class="chip-extra">from ${entry.gifter || 'Anon'}</span>`;
+    case 'bits':           return `${entry.username} <span class="chip-extra">${entry.amount}</span>`;
+    case 'raid':           return `${entry.from} <span class="chip-extra">${entry.viewers} viewers</span>`;
+    case 'channel_points': return `${entry.username} <span class="chip-extra">${(entry.reward || '').substring(0,18)}</span>`;
+    case 'hype_train':     return `Level ${entry.level}`;
+    default:               return entry.username || '?';
+  }
+}
+
+function renderCredits() {
+  const groups = groupLog(activityLog);
+  const totalEvents = activityLog.length;
+
+  track.innerHTML = '';
+
+  if (totalEvents === 0) {
+    emptyEl.style.display = 'flex';
+    headerSub.textContent = 'No activity recorded';
+    return;
+  }
+
+  emptyEl.style.display = 'none';
+
+  let countParts = [];
+  const sectionOrder = SECTIONS.filter(s => groups[s.key] && groups[s.key].length > 0);
+
+  for (const sec of sectionOrder) {
+    const entries = groups[sec.key];
+    if (!entries || !entries.length) continue;
+
+    const section = document.createElement('div');
+    section.className = 'credit-section';
+
+    // Section header
+    const labelRow = document.createElement('div');
+    labelRow.className = 'section-label';
+
+    const iconEl = document.createElement('div');
+    iconEl.className = 'icon';
+    iconEl.style.background = sec.color.replace(')', ',0.15)').replace('rgb', 'rgba');
+    iconEl.textContent = sec.icon;
+
+    const titleEl = document.createElement('div');
+    titleEl.className = 'title';
+    titleEl.textContent = sec.label;
+
+    const countEl = document.createElement('div');
+    countEl.className = 'count';
+    countEl.textContent = `${entries.length}`;
+
+    labelRow.appendChild(iconEl);
+    labelRow.appendChild(titleEl);
+    labelRow.appendChild(countEl);
+
+    const divider = document.createElement('div');
+    divider.className = 'section-divider';
+
+    const grid = document.createElement('div');
+    grid.className = 'name-grid';
+
+    entries.forEach((entry, i) => {
+      const chip = document.createElement('div');
+      chip.className = `name-chip chip-${entry.type}`;
+      chip.innerHTML = chipLabel(entry);
+      chip.style.animationDelay = `${i * 0.03}s`;
+      grid.appendChild(chip);
+    });
+
+    section.appendChild(labelRow);
+    section.appendChild(divider);
+    section.appendChild(grid);
+    track.appendChild(section);
+
+    countParts.push(`${entries.length} ${sec.label.toLowerCase()}`);
+  }
+
+  headerSub.textContent = countParts.slice(0, 3).join(' · ') + (countParts.length > 3 ? ` + ${countParts.length - 3} more` : '');
+  footerTxt.textContent = `${totalEvents} moments shared tonight`;
+
+  // Reset scroll
+  _scrollY = 0;
+  _scrollDir = 1;
+  _pauseUntil = Date.now() + PAUSE_MS;
+  track.style.transform = 'translateY(0)';
+}
+
+/* ── Scroll animation ───────────────────────────────────────── */
+let _scrollY    = 0;
+let _scrollDir  = 1;
+let _pauseUntil = 0;
+let _lastTs     = null;
+
+function _viewportH() { return viewport.clientHeight || 860; }
+function _trackH()    { return track.scrollHeight || 860; }
+
+function animFrame(ts) {
+  if (_lastTs === null) _lastTs = ts;
+  const dt = Math.min(ts - _lastTs, 100) / 1000;
+  _lastTs = ts;
+
+  const maxScroll = Math.max(0, _trackH() - _viewportH());
+
+  if (maxScroll > 0 && Date.now() >= _pauseUntil) {
+    _scrollY += SCROLL_SPEED * dt * _scrollDir;
+
+    if (_scrollY >= maxScroll) {
+      _scrollY = maxScroll;
+      if (LOOP) {
+        _scrollDir = -1;
+        _pauseUntil = Date.now() + PAUSE_MS;
+      } else {
+        _pauseUntil = Date.now() + 999999; // hold at bottom
+      }
+    }
+
+    if (_scrollDir === -1 && _scrollY <= 0) {
+      _scrollY = 0;
+      _scrollDir = 1;
+      _pauseUntil = Date.now() + PAUSE_MS;
+    }
+
+    track.style.transform = `translateY(-${_scrollY}px)`;
+  }
+
+  requestAnimationFrame(animFrame);
+}
+
+/* ── Load activity log ──────────────────────────────────────── */
+async function loadLog() {
+  try {
+    const r = await fetch(`${API_BASE}/api/twitch/activity-log`);
+    const d = await r.json();
+    activityLog = d.log || [];
+
+    if (PREVIEW && activityLog.length === 0) {
+      activityLog = _previewData();
+    }
+
+    renderCredits();
+  } catch (e) {
+    console.error('[credits] fetch failed', e);
+    if (PREVIEW) {
+      activityLog = _previewData();
+      renderCredits();
+    }
+  }
+}
+
+/* ── WebSocket ──────────────────────────────────────────────── */
+function connectWS() {
+  const ws = new WebSocket(`ws://localhost:${WS_PORT}`);
+
+  ws.addEventListener('message', e => {
+    try {
+      const msg = JSON.parse(e.data);
+
+      if (msg.type === 'twitch_activity') {
+        activityLog.push({ ...msg.data, timestamp: msg.data.timestamp || Date.now() });
+        renderCredits();
+      }
+
+      if (msg.type === 'twitch_activity_log_cleared') {
+        activityLog = [];
+        renderCredits();
+      }
+
+      if (msg.type === 'full_state' && msg.data) {
+        // Update stream title if available
+        const title = msg.data.twitch?.channelInfo?.title || msg.data.event?.title;
+        if (title) {
+          document.getElementById('header-title').textContent = title;
+        }
+      }
+    } catch { /* ignore */ }
+  });
+
+  ws.addEventListener('close', () => setTimeout(connectWS, 3000));
+}
+
+/* ── Preview data ───────────────────────────────────────────── */
+function _previewData() {
+  const now = Date.now();
+  return [
+    { type: 'raid',      from: 'StreamerXYZ', viewers: 142, timestamp: now - 3600000 },
+    { type: 'raid',      from: 'ProGamerTV',  viewers: 67,  timestamp: now - 3000000 },
+    { type: 'hype_train',level: 3, timestamp: now - 2800000 },
+    { type: 'sub',       username: 'xXDarkBlade', tier: '1000', timestamp: now - 3500000 },
+    { type: 'sub',       username: 'StarFighter99', tier: '1000', timestamp: now - 3000000 },
+    { type: 'sub',       username: 'NightOwl42',  tier: '2000', timestamp: now - 2500000 },
+    { type: 'resub',     username: 'LoyalFan2020', months: 14, tier: '1000', timestamp: now - 2000000 },
+    { type: 'resub',     username: 'OGViewer',     months: 36, tier: '1000', timestamp: now - 1800000 },
+    { type: 'gift_sub',  username: 'LuckyOne',   gifter: 'GenerousDude', tier: '1000', timestamp: now - 2200000 },
+    { type: 'gift_sub',  username: 'NewJoiner',  gifter: 'GenerousDude', tier: '1000', timestamp: now - 2200000 },
+    { type: 'bits',      username: 'CheerLeader', amount: 500, timestamp: now - 1500000 },
+    { type: 'bits',      username: 'AnonBitter',  amount: 100, timestamp: now - 1400000 },
+    { type: 'bits',      username: 'BigSpender',  amount: 1000,timestamp: now - 1200000 },
+    { type: 'follow',    username: 'NewFollow_1', timestamp: now - 3600000 },
+    { type: 'follow',    username: 'NewFollow_2', timestamp: now - 3400000 },
+    { type: 'follow',    username: 'NewFollow_3', timestamp: now - 3200000 },
+    { type: 'follow',    username: 'NewFollow_4', timestamp: now - 3100000 },
+    { type: 'follow',    username: 'NewFollow_5', timestamp: now - 2900000 },
+    { type: 'follow',    username: 'NewFollow_6', timestamp: now - 2700000 },
+    { type: 'channel_points', username: 'PointsUser', reward: 'Hydrate!', timestamp: now - 1700000 },
+    { type: 'channel_points', username: 'AnotherFan', reward: 'Let\'s GO',  timestamp: now - 1600000 },
+  ];
+}
+
+/* ── Boot ───────────────────────────────────────────────────── */
+loadLog();
+connectWS();
+requestAnimationFrame(animFrame);
+</script>
+</body>
+</html>

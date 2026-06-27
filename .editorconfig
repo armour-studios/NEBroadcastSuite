@@ -1,0 +1,6 @@
+root = true
+
+# Force UTF-8 for every file so editors/formatters never re-save source as a Windows
+# codepage (which double-encodes characters like — · ★ into mojibake "Â—" "Â·").
+[*]
+charset = utf-8

@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
@@ -15,12 +15,12 @@
       position: relative;
     }
 
-    /* ── Positioning anchor ───────────────────────────────────────────────── */
+    /* â”€â”€ Positioning anchor â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
     #pred-anchor {
       position: absolute;
       width: 880px;
       pointer-events: none;
-      /* Shared transition — enter (spring) */
+      /* Shared transition â€” enter (spring) */
       transition: transform 0.60s cubic-bezier(0.34, 1.48, 0.64, 1),
                   opacity   0.45s ease;
     }
@@ -79,7 +79,7 @@
     #pred-anchor.pos-right.visible  { transform: translateY(0); opacity: 1; }
     #pred-anchor.pos-right.hiding   { transform: translateY(16px); opacity: 0; }
 
-    /* ── Card ────────────────────────────────────────────────────────────── */
+    /* â”€â”€ Card â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
     .pred-card {
       background: linear-gradient(160deg, rgba(13,11,20,0.97) 0%, rgba(18,14,30,0.97) 100%);
       border: 1px solid rgba(145, 70, 255, 0.35);
@@ -92,7 +92,7 @@
       position: relative;
     }
 
-    /* ── Header strip ────────────────────────────────────────────────────── */
+    /* â”€â”€ Header strip â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
     .pred-header {
       display: flex;
       align-items: center;
@@ -168,14 +168,14 @@
     .pred-countdown.urgent { color: #f87171; animation: ct-pulse 0.75s ease-in-out infinite; }
     @keyframes ct-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
 
-    /* ── Matchup body ────────────────────────────────────────────────────── */
+    /* â”€â”€ Matchup body â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
     .pred-body {
       display: grid;
       grid-template-columns: 1fr 48px 1fr;
       min-height: 108px;
     }
 
-    /* ── Team panel ──────────────────────────────────────────────────────── */
+    /* â”€â”€ Team panel â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
     .pred-team {
       display: flex;
       align-items: center;
@@ -196,7 +196,7 @@
       opacity: 0;
       transition: opacity 0.6s;
     }
-    /* team-colour wash — overridden by #team-colors dynamic style */
+    /* team-colour wash â€” overridden by #team-colors dynamic style */
     .pred-team.side-blue::before   { background: linear-gradient(90deg,  rgba(96,165,250,0.14) 0%, transparent 75%); }
     .pred-team.side-orange::before { background: linear-gradient(270deg, rgba(251,146,60,0.14) 0%, transparent 75%); }
     .pred-team.has-votes::before { opacity: 1; }
@@ -241,7 +241,7 @@
       line-height: 1;
       transition: color 0.55s;
     }
-    /* pct colours — overridden by #team-colors dynamic style */
+    /* pct colours â€” overridden by #team-colors dynamic style */
     .pred-team.side-blue   .team-pct { color: #60a5fa; }
     .pred-team.side-orange .team-pct { color: #fb923c; }
     .pred-team.winner      .team-pct { color: #4ade80; }  /* winner always green */
@@ -265,7 +265,7 @@
     }
     .pred-team.winner .team-winner-tag { display: block; }
 
-    /* ── VS column ───────────────────────────────────────────────────────── */
+    /* â”€â”€ VS column â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
     .pred-vs {
       display: flex;
       align-items: center;
@@ -291,7 +291,7 @@
       z-index: 1;
     }
 
-    /* ── Vote split bar ──────────────────────────────────────────────────── */
+    /* â”€â”€ Vote split bar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
     .pred-bar {
       height: 7px;
       display: flex;
@@ -308,7 +308,7 @@
       flex: 1;
     }
 
-    /* ── Footer ──────────────────────────────────────────────────────────── */
+    /* â”€â”€ Footer â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
     .pred-footer {
       padding: 6px 20px;
       border-top: 1px solid rgba(255,255,255,0.04);
@@ -322,35 +322,54 @@
       font-variant-numeric: tabular-nums;
     }
 
-    /* ── Winner splash ───────────────────────────────────────────────────── */
-    #winner-splash {
-      position: absolute;
-      inset: 0;
-      background: rgba(10,8,18,0.96);
-      display: flex;
+    /* â”€â”€ Resolved winner body â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+    #resolved-body {
+      display: none;
       align-items: center;
       justify-content: center;
       gap: 22px;
-      padding: 0 40px;
-      opacity: 0;
-      pointer-events: none;
-      transition: opacity 0.40s ease;
+      padding: 18px 28px;
+      min-height: 108px;
+      animation: resolveIn 0.55s cubic-bezier(0.34, 1.56, 0.64, 1) both;
     }
-    #winner-splash.visible { opacity: 1; }
+    @keyframes resolveIn {
+      from { opacity: 0; transform: translateY(12px) scale(0.95); }
+      to   { opacity: 1; transform: translateY(0)    scale(1); }
+    }
 
-    .splash-logo-img {
-      width: 76px; height: 76px;
+    .resolved-logo {
+      width: 80px; height: 80px;
       object-fit: contain;
-      filter: drop-shadow(0 0 18px rgba(74,222,128,0.55));
-      animation: logo-pop 0.55s cubic-bezier(0.34,1.56,0.64,1) both;
+      filter: drop-shadow(0 0 20px rgba(74,222,128,0.55));
+      flex-shrink: 0;
     }
-    @keyframes logo-pop { from { transform: scale(0) rotate(-10deg); } to { transform: scale(1) rotate(0deg); } }
-
-    .splash-content { display: flex; flex-direction: column; align-items: center; gap: 6px; }
-    .splash-trophy  { font-size: 32px; animation: trophy-in 0.5s cubic-bezier(0.34,1.56,0.64,1) 0.25s both; }
-    @keyframes trophy-in { from { transform: scale(0); } to { transform: scale(1); } }
-    .splash-label   { font-size: 11px; font-weight: 800; letter-spacing: 0.10em; text-transform: uppercase; color: #4ade80; }
-    .splash-name    { font-size: 28px; font-weight: 900; color: #fff; text-align: center; max-width: 360px; line-height: 1.1; text-transform: uppercase; letter-spacing: 0.06em; }
+    .resolved-logo-ph {
+      width: 80px; height: 80px;
+      border-radius: 50%;
+      background: rgba(255,255,255,0.05);
+      border: 2px solid rgba(74,222,128,0.25);
+      flex-shrink: 0;
+    }
+    .resolved-info {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .resolved-label {
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: 0.10em;
+      text-transform: uppercase;
+      color: #4ade80;
+    }
+    .resolved-name {
+      font-size: 30px;
+      font-weight: 900;
+      color: #fff;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      line-height: 1;
+    }
   </style>
 <style id="team-colors">/* populated by setTeamColors() */</style>
 </head>
@@ -358,16 +377,6 @@
 
 <div id="pred-anchor" class="pos-bottom" style="display:none">
   <div class="pred-card">
-
-    <!-- winner splash (above everything when resolved) -->
-    <div id="winner-splash">
-      <img id="splash-logo" class="splash-logo-img" src="" alt="" style="display:none;">
-      <div class="splash-content">
-        <span class="splash-trophy">🏆</span>
-        <span class="splash-label">Winner</span>
-        <span class="splash-name" id="splash-name"></span>
-      </div>
-    </div>
 
     <!-- header -->
     <div class="pred-header">
@@ -382,6 +391,16 @@
       </div>
     </div>
 
+    <!-- resolved winner (shown instead of pred-body when resolved) -->
+    <div id="resolved-body">
+      <img id="resolved-logo" class="resolved-logo" src="" alt="" style="display:none;">
+      <div class="resolved-logo-ph" id="resolved-logo-ph"></div>
+      <div class="resolved-info">
+        <span class="resolved-label">Winner</span>
+        <span class="resolved-name" id="resolved-winner-name"></span>
+      </div>
+    </div>
+
     <!-- team matchup -->
     <div class="pred-body">
 
@@ -390,9 +409,9 @@
           <div class="team-logo-ph"></div>
         </div>
         <div class="team-info">
-          <div class="team-winner-tag">🏆 Winner</div>
-          <div class="team-name" id="name-blue">—</div>
-          <div class="team-pct"  id="pct-blue">—</div>
+          <div class="team-winner-tag">ðŸ† Winner</div>
+          <div class="team-name" id="name-blue">â€”</div>
+          <div class="team-pct"  id="pct-blue">â€”</div>
           <div class="team-pts"  id="pts-blue"></div>
         </div>
       </div>
@@ -406,9 +425,9 @@
           <div class="team-logo-ph"></div>
         </div>
         <div class="team-info">
-          <div class="team-winner-tag">🏆 Winner</div>
-          <div class="team-name" id="name-orange">—</div>
-          <div class="team-pct"  id="pct-orange">—</div>
+          <div class="team-winner-tag">ðŸ† Winner</div>
+          <div class="team-name" id="name-orange">â€”</div>
+          <div class="team-pct"  id="pct-orange">â€”</div>
           <div class="team-pts"  id="pts-orange"></div>
         </div>
       </div>
@@ -423,26 +442,32 @@
 
     <!-- footer -->
     <div class="pred-footer">
-      <span class="pred-footer-text" id="pred-footer">Awaiting votes…</span>
+      <span class="pred-footer-text" id="pred-footer">Awaiting votesâ€¦</span>
     </div>
 
   </div><!-- /pred-card -->
 </div><!-- /pred-anchor -->
 
 <script>
-  // ── Params ──────────────────────────────────────────────────────────────────
+  // â”€â”€ Params â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const params   = new URLSearchParams(location.search);
   const posStr   = (params.get('pos') || params.get('position') || 'bottom').toLowerCase();
   // URL ?loop=N overrides the state setting; use it when you need per-source control.
   // When absent, the overlay reads overlayLoop from state.twitch.predictions.settings.
   const _urlLoop  = params.has('loop') ? parseInt(params.get('loop'), 10) : null;
-  const LOOP_HIDE = 8000;
+  // ?hide=N overrides the per-cycle hide duration; otherwise read overlayHide from state.
+  const _urlHide  = params.has('hide') ? parseInt(params.get('hide'), 10) : null;
 
   // Dynamic: re-read each time scheduleLoopHide() is called so a settings change takes effect on the next cycle.
   function getLoopShow(state) {
     if (_urlLoop !== null) return _urlLoop > 0 ? _urlLoop * 1000 : 0;
     const secs = state?.twitch?.predictions?.settings?.overlayLoop ?? 30;
     return secs > 0 ? secs * 1000 : 0;
+  }
+  function getLoopHide(state) {
+    if (_urlHide !== null) return _urlHide > 0 ? _urlHide * 1000 : 8000;
+    const secs = state?.twitch?.predictions?.settings?.overlayHide ?? 8;
+    return secs > 0 ? secs * 1000 : 8000;
   }
 
   const anchor = document.getElementById('pred-anchor');
@@ -458,8 +483,9 @@
   let loopHideTimer   = null;
   let isVisible       = false;
   let isResolved      = false;
+  let forcedHidden    = false;  // producer force-hide (overlayHidden) â€” show/hide during a game
 
-  // ── WebSocket ───────────────────────────────────────────────────────────────
+  // â”€â”€ WebSocket â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   function connect() {
     const ws = new WebSocket('ws://localhost:3001');
     ws.onopen    = () => ws.send(JSON.stringify({ type: 'request_state' }));
@@ -469,11 +495,23 @@
         if (msg.type === 'full_state') applyState(msg.data);
       } catch (_) {}
     };
-    ws.onclose = () => setTimeout(connect, 3000);
+    ws.onclose = () => setTimeout(connect, 800);
   }
 
   function applyState(state) {
     lastFullState = state;
+    // Game integration: hide the card on stream without ending the prediction.
+    //   â€¢ overlayHidden  â†’ producer force-hide (manual show/hide)
+    //   â€¢ hideInReplay   â†’ auto-hide while a Rocket League goal replay is playing
+    const ps = state?.twitch?.predictions?.settings || {};
+    const replayActive = !!state?.inReplay || state?.view === 'goal';
+    if (ps.overlayHidden || (ps.hideInReplay && replayActive)) {
+      forcedHidden = true;
+      clearAllTimers();
+      if (isVisible) doHide();
+      return;
+    }
+    if (forcedHidden) { forcedHidden = false; activePredId = null; }  // condition cleared â†’ force a fresh re-show
     let pred = state?.twitch?.predictions?.current;
     // Discard stale active predictions (server restart left one in state)
     if (pred && pred.state !== 'RESOLVED' && pred.state !== 'LOCKED') {
@@ -492,17 +530,20 @@
     }
   }
 
-  // ── Show / Update ────────────────────────────────────────────────────────────
+  // â”€â”€ Show / Update â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   function showOrUpdatePrediction(pred, state) {
     const nowResolved = pred.state === 'RESOLVED';
     const wasResolved = isResolved;
     isResolved = nowResolved;
 
-    // New prediction (different id) → full reset
+    // New prediction (different id) â†’ full reset
     if (pred.id !== activePredId) {
       clearAllTimers();
       activePredId = pred.id;
-      document.getElementById('winner-splash').classList.remove('visible');
+      const _rb = document.getElementById('resolved-body');
+      if (_rb) _rb.style.display = 'none';
+      const _pb = document.querySelector('.pred-body');
+      if (_pb) _pb.style.display = '';
       renderCard(pred, state);
       doShow();
       if (getLoopShow(lastFullState) > 0 && !nowResolved) scheduleLoopHide();
@@ -510,10 +551,10 @@
       return;
     }
 
-    // Same prediction — just update numbers/state
+    // Same prediction â€” just update numbers/state
     renderCard(pred, state);
 
-    // Resolved just arrived (transition from active → resolved)
+    // Resolved just arrived (transition from active â†’ resolved)
     if (nowResolved && !wasResolved) {
       clearLoopTimers();
       if (!isVisible) doShow();   // make sure it's visible before showing splash
@@ -597,14 +638,14 @@
     const predictors = outcomes.reduce((s, o) => s + (o.users || 0), 0);
     document.getElementById('pred-footer').textContent =
       total > 0
-        ? `${fmt(total)} pts · ${predictors || '—'} predictors`
-        : 'Awaiting votes…';
+        ? `${fmt(total)} pts Â· ${predictors || 'â€”'} predictors`
+        : 'Awaiting votesâ€¦';
 
     startCountdown(pred.endsAt, resolved || locked);
   }
 
   function renderTeam(side, outcome, pct, state, winningId) {
-    document.getElementById('name-' + side).textContent = outcome.title || '—';
+    document.getElementById('name-' + side).textContent = outcome.title || 'â€”';
     document.getElementById('pct-'  + side).textContent = pct + '%';
     document.getElementById('pts-'  + side).textContent = outcome.votes
       ? fmt(outcome.votes) + ' pts'
@@ -642,7 +683,7 @@
     return null;
   }
 
-  // ── Winner flow ──────────────────────────────────────────────────────────────
+  // â”€â”€ Winner flow â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   function handleResolved(pred, state) {
     const outcomes = pred.outcomes || [];
     const o0 = outcomes[0] || {};
@@ -650,8 +691,7 @@
     if (pred.winningOutcomeId) {
       const winO    = outcomes.find(o => o.id === pred.winningOutcomeId);
       const winSide = winO?.id === o0.id ? 'blue' : 'orange';
-      // Show splash after card is visible
-      splashTimer = setTimeout(() => showSplash(winO?.title || '', winSide, state), 1600);
+      splashTimer = setTimeout(() => showResolvedBody(winO?.title || '', winSide, state), 400);
     }
     // Auto-hide the card after 16s (server clears at 18s)
     hideTimer = setTimeout(() => {
@@ -662,7 +702,7 @@
     }, 16000);
   }
 
-  // ── Visibility ───────────────────────────────────────────────────────────────
+  // â”€â”€ Visibility â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   function doShow() {
     if (isVisible) return;
     isVisible = true;
@@ -678,7 +718,11 @@
     isVisible = false;
     anchor.classList.add('hiding');
     anchor.classList.remove('visible');
-    document.getElementById('winner-splash').classList.remove('visible');
+    // reset resolved state
+    const rb = document.getElementById('resolved-body');
+    if (rb) rb.style.display = 'none';
+    const pb = document.querySelector('.pred-body');
+    if (pb) pb.style.display = '';
     if (countdownTimer) { clearInterval(countdownTimer); countdownTimer = null; }
     // After exit transition (320ms) fully remove from layout
     clearTimeout(_hideDisplayTimer);
@@ -687,7 +731,7 @@
     }, 380);
   }
 
-  // ── Loop cycling (when loop > 0 and prediction is active, not resolved) ──────
+  // â”€â”€ Loop cycling (when loop > 0 and prediction is active, not resolved) â”€â”€â”€â”€â”€â”€
   function scheduleLoopHide() {
     clearLoopTimers();
     loopShowTimer = setTimeout(() => {
@@ -699,7 +743,7 @@
           doShow();
           scheduleLoopHide();  // queue next cycle
         }
-      }, LOOP_HIDE);
+      }, getLoopHide(lastFullState));
     }, getLoopShow(lastFullState));
   }
 
@@ -715,7 +759,7 @@
     if (countdownTimer) { clearInterval(countdownTimer);  countdownTimer = null; }
   }
 
-  // ── Countdown ────────────────────────────────────────────────────────────────
+  // â”€â”€ Countdown â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   function startCountdown(endsAt, frozen) {
     if (countdownTimer) { clearInterval(countdownTimer); countdownTimer = null; }
     const el = document.getElementById('pred-countdown');
@@ -733,19 +777,36 @@
     countdownTimer = setInterval(tick, 1000);
   }
 
-  // ── Winner splash ────────────────────────────────────────────────────────────
-  function showSplash(name, side, state) {
-    const splash = document.getElementById('winner-splash');
-    const img    = document.getElementById('splash-logo');
-    const nameEl = document.getElementById('splash-name');
-    nameEl.textContent = name;
+  // â”€â”€ Winner splash â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  function showResolvedBody(name, side, state) {
+    const pb = document.querySelector('.pred-body');
+    if (pb) pb.style.display = 'none';
+
+    const rb = document.getElementById('resolved-body');
+    if (!rb) return;
+
+    // Force animation replay
+    rb.style.display = 'none';
+    void rb.offsetHeight;
+    rb.style.display = 'flex';
+
+    const nameEl = document.getElementById('resolved-winner-name');
+    if (nameEl) nameEl.textContent = name;
+
+    const img = document.getElementById('resolved-logo');
+    const ph  = document.getElementById('resolved-logo-ph');
     const logo = state?.teams?.[side]?.logo;
-    if (logo) { img.src = logo; img.style.display = ''; }
-    else       { img.style.display = 'none'; }
-    splash.classList.add('visible');
+    if (logo && img) {
+      img.src = logo;
+      img.style.display = '';
+      if (ph) ph.style.display = 'none';
+    } else {
+      if (img) img.style.display = 'none';
+      if (ph)  ph.style.display = '';
+    }
   }
 
-  // ── Helpers ──────────────────────────────────────────────────────────────────
+  // â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   function fmt(n) {
     n = Number(n) || 0;
     if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M';
@@ -753,7 +814,7 @@
     return n.toLocaleString();
   }
 
-  // ── Preview mode (?preview=1) ─────────────────────────────────────────────
+  // â”€â”€ Preview mode (?preview=1) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   if (params.get('preview') === '1') {
     const ends = new Date(Date.now() + 4 * 60 * 1000).toISOString();
     const mockState = {

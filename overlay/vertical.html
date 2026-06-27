@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<!--
+  vertical.html — 9:16 (1080x1920) layout for vertical co-streams. Top scorebar, a
+  transparent 16:9 gameplay window (composite gameplay behind), caster cam(s) below,
+  and a sponsor / lower-third footer. Shares duorow.html's design language.
+  Set the OBS browser source to 1080 x 1920. ?cams=off for frames-only.
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <link rel="stylesheet" href="/fonts.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+  <style>
+    :root {
+      --duo-surface: #1a1d24; --duo-surface2: #20242e; --duo-border: #2e3340;
+      --duo-accent: #e83a8b; --duo-accent2: #8b5cf6; --duo-muted: #8b93a8;
+      --team-a: #055fdb; --team-b: #e97139; --pad: 22px;
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { width: 1080px; height: 1920px; overflow: hidden; background: transparent; font-family: 'Inter', system-ui, sans-serif; color: #e8eaf0; -webkit-font-smoothing: antialiased; }
+    .v-stage { position: absolute; inset: 0; display: flex; flex-direction: column; padding: var(--pad); gap: 18px; opacity: 0; transition: opacity .4s ease; }
+    .v-stage.show { opacity: 1; }
+
+    /* Top scorebar */
+    .match-hud { position: relative; display: flex; align-items: stretch; flex: 0 0 132px; height: 132px; border-radius: 14px; overflow: hidden;
+      background: linear-gradient(180deg, rgba(24,27,34,.98), rgba(10,12,16,.99)); border: 1px solid rgba(255,255,255,.07); box-shadow: 0 12px 32px rgba(0,0,0,.55); }
+    .match-hud::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 1px; background: linear-gradient(90deg, transparent 4%, rgba(255,255,255,.35) 50%, transparent 96%); z-index: 3; }
+    .match-team { flex: 1 1 0; min-width: 0; position: relative; display: flex; align-items: center; gap: 8px; }
+    .match-team--a { padding: 0 8px 0 16px; } .match-team--b { padding: 0 16px 0 8px; }
+    .match-team::after { content: ''; position: absolute; bottom: 0; left: 0; right: 0; height: 3px; }
+    .match-team--a::after { background: linear-gradient(90deg, var(--team-a), transparent 70%); } .match-team--b::after { background: linear-gradient(270deg, var(--team-b), transparent 70%); }
+    .match-logo { width: 72px; height: 72px; object-fit: contain; flex: 0 0 72px; filter: drop-shadow(0 2px 6px rgba(0,0,0,.5)); }
+    .match-logo.logo-on-dark { filter: brightness(0) invert(1) drop-shadow(0 2px 6px rgba(0,0,0,.5)); }
+    .match-name { flex: 1 1 0; min-width: 0; font-size: 28px; font-weight: 800; letter-spacing: .03em; text-transform: uppercase; line-height: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #fff; }
+    .match-team--b .match-name { text-align: right; }
+    .match-score { flex: 0 0 auto; font-size: 50px; font-weight: 900; font-variant-numeric: tabular-nums; min-width: 28px; text-align: center; }
+    .match-team--a .match-score { color: var(--team-a); } .match-team--b .match-score { color: var(--team-b); }
+    .match-center { flex: 0 0 120px; display: flex; align-items: center; justify-content: center; background: rgba(6,8,12,.97); border-left: 1px solid rgba(255,255,255,.1); border-right: 1px solid rgba(255,255,255,.1); }
+    .match-vs { font-size: 42px; font-weight: 900; letter-spacing: .08em; color: #fff; }
+
+    /* Gameplay window (transparent — composite gameplay behind this source) */
+    .v-game { flex: 0 0 auto; width: 100%; aspect-ratio: 16 / 9; border-radius: 14px; border: 2px solid var(--duo-border); position: relative; overflow: hidden;
+      box-shadow: 0 0 0 1px rgba(0,0,0,.4), inset 0 0 60px rgba(0,0,0,.25); }
+    .v-game::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px; background: linear-gradient(90deg, var(--duo-accent), var(--duo-accent2)); z-index: 2; }
+    .v-game .ph { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; font-family: 'Rajdhani','Inter',sans-serif; font-weight: 700; font-size: 28px; letter-spacing: .2em; color: #3a4150; }
+    .preview .v-game { background: repeating-linear-gradient(45deg, #14161c, #14161c 22px, #1a1d24 22px, #1a1d24 44px); }
+    .preview .v-game .ph { display: flex; }
+
+    /* Caster row */
+    .v-cams { flex: 1 1 0; min-height: 0; display: flex; align-items: stretch; justify-content: center; gap: 16px; }
+    .cam-card { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; border-radius: 14px; overflow: hidden; border: 1px solid var(--duo-border); background: var(--duo-surface); box-shadow: 0 14px 40px rgba(0,0,0,.5); }
+    .cam-card::before { content: ''; display: block; height: 3px; flex: 0 0 auto; background: linear-gradient(90deg, transparent, var(--duo-accent) 30%, var(--duo-accent2) 70%, transparent); }
+    .cam-hole { position: relative; width: 100%; flex: 1 1 auto; min-height: 0; background: #0d0f14; overflow: hidden; }
+    .cam-hole iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+    /* ?cams=off framing: transparent holes so per-caster OBS sources show through (1080×1920). */
+    .v-stage.frames-only .cam-hole { background: transparent; }
+    .cam-plate { display: flex; align-items: center; justify-content: center; gap: 12px; height: 58px; flex: 0 0 58px; padding: 0 16px; background: linear-gradient(180deg, var(--duo-surface2), var(--duo-surface)); border-top: 1px solid var(--duo-border); }
+    .cam-name { font-size: 24px; font-weight: 800; letter-spacing: .03em; text-transform: uppercase; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .cam-handle { font-size: 16px; font-weight: 600; color: #9aa3b8; }
+    .cam-handle::before { font-family: 'Font Awesome 6 Brands'; font-weight: 400; margin-right: 6px; }
+    .cam-handle.twitch::before { content: "\f1e8"; color: #9146ff; } .cam-handle.youtube::before { content: "\f167"; color: #ff0033; }
+    .cam-handle.x-twitter::before { content: "\e61b"; color: #e8eaf0; } .cam-handle.instagram::before { content: "\f16d"; color: #e1306c; }
+    .cam-handle.tiktok::before { content: "\e07b"; color: #25f4ee; } .cam-handle.discord::before { content: "\f392"; color: #5865f2; }
+    .cam-handle.facebook::before { content: "\f09a"; color: #1877f2; }
+    .cam-handle.kick::before { content: "K"; font-family: 'Inter', sans-serif; font-weight: 900; color: #53fc18; }
+    .cam-handle.link::before { content: "\f0c1"; font-family: 'Font Awesome 6 Free'; font-weight: 900; color: var(--duo-muted); }
+
+    /* Footer */
+    .v-footer { flex: 0 0 auto; display: flex; flex-direction: column; align-items: center; gap: 10px; }
+    .presented-by { display: inline-flex; align-items: center; gap: 14px; padding: 9px 26px; background: linear-gradient(180deg, rgba(20,23,30,.96), rgba(10,12,16,.98)); border: 1px solid rgba(255,255,255,.08); border-radius: 9px; box-shadow: 0 8px 24px rgba(0,0,0,.4); }
+    .presented-by.is-empty { display: none; }
+    .pb-label { font-size: 11px; font-weight: 800; letter-spacing: .2em; text-transform: uppercase; color: var(--duo-muted); white-space: nowrap; }
+    .pb-logo { height: 34px; max-width: 280px; object-fit: contain; }
+    .deck-strip { width: 100%; padding: 11px 28px; text-align: center; position: relative; background: linear-gradient(90deg, transparent, rgba(14,16,22,.92) 10%, rgba(14,16,22,.92) 90%, transparent); border-top: 1px solid rgba(255,255,255,.06); border-bottom: 1px solid rgba(255,255,255,.06); }
+    .deck-strip-text { font-size: 15px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: #c8ced8; white-space: nowrap; }
+    .deck-strip.is-empty { display: none; }
+
+    .preview .cam-hole { background: repeating-linear-gradient(45deg, #181b22, #181b22 16px, #20242e 16px, #20242e 32px); }
+    .preview .cam-hole::after { content: 'CAM'; position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 24px; font-weight: 800; letter-spacing: .3em; color: #4a5162; }
+    .preview .cam-hole iframe { position: relative; z-index: 1; }
+  </style>
+</head>
+<body>
+  <div id="stage" class="v-stage">
+    <header class="match-hud">
+      <div class="match-team match-team--a"><img id="teamlogo1" class="match-logo" alt=""><span id="teamname1" class="match-name">BLUE</span><span id="teamscore1" class="match-score">0</span></div>
+      <div class="match-center"><span class="match-vs">VS</span></div>
+      <div class="match-team match-team--b"><span id="teamscore2" class="match-score">0</span><span id="teamname2" class="match-name">ORANGE</span><img id="teamlogo2" class="match-logo" alt=""></div>
+    </header>
+
+    <div class="v-game"><div class="ph">GAMEPLAY</div></div>
+
+    <div class="v-cams" id="cams"></div>
+
+    <div class="v-footer">
+      <div class="presented-by is-empty" id="presented-by"><span class="pb-label" id="pb-label">PRESENTED BY</span><img id="pb-logo" class="pb-logo" alt="" style="display:none"></div>
+      <div class="deck-strip is-empty" id="deck-strip"><span id="tagline" class="deck-strip-text">Live</span></div>
+    </div>
+  </div>
+
+  <script src="scene-base.js"></script>
+  <script>
+    function el(id) { return document.getElementById(id); }
+    const CAM_COUNT = Math.max(1, Math.min(2, parseInt(new URLSearchParams(location.search).get('count') || '2', 10) || 2));
+    const NO_CAMS = new URLSearchParams(location.search).get('cams') === 'off';
+    if (NO_CAMS) document.getElementById('stage')?.classList.add('frames-only');
+    let _lastCamUrl = new Array(CAM_COUNT).fill(null);
+
+    function applyBrandTheme(data) {
+      const root = document.documentElement;
+      const color = SceneBase.brandColor(data), accent2 = SceneBase.brandAccent(data);
+      if (color) root.style.setProperty('--duo-accent', color);
+      if (accent2) root.style.setProperty('--duo-accent2', accent2);
+      if (data.fontFamily) root.style.fontFamily = `'${data.fontFamily}', 'Inter', system-ui, sans-serif`;
+    }
+    function buildCams() {
+      const cams = el('cams'); cams.innerHTML = '';
+      for (let i = 1; i <= CAM_COUNT; i++) {
+        const card = document.createElement('div'); card.className = 'cam-card';
+        card.innerHTML = `<div id="hole${i}" class="cam-hole"></div><div class="cam-plate"><span id="staffname${i}" class="cam-name">—</span><span id="socials${i}" class="cam-handle" style="display:none"></span></div>`;
+        cams.appendChild(card);
+      }
+    }
+    function renderCasters(casters) {
+      if (NO_CAMS) return;
+      const slots = SceneBase.castersBySlots(casters, CAM_COUNT);
+      for (let i = 0; i < CAM_COUNT; i++) {
+        const camUrl = ((slots[i] && slots[i].camUrl) || '').trim();
+        if (camUrl === _lastCamUrl[i]) continue;
+        _lastCamUrl[i] = camUrl;
+        const hole = el('hole' + (i + 1)); if (!hole) continue;
+        hole.querySelectorAll('iframe').forEach(f => f.remove());
+        if (camUrl) { const f = document.createElement('iframe'); f.src = camUrl; f.setAttribute('allow', 'autoplay; encrypted-media; microphone; camera; fullscreen'); f.referrerPolicy = 'no-referrer'; hole.appendChild(f); }
+      }
+    }
+    function renderCasterText(casters) {
+      const slots = SceneBase.castersBySlots(casters, CAM_COUNT);
+      for (let i = 0; i < CAM_COUNT; i++) {
+        const c = slots[i] || {};
+        const nameEl = el('staffname' + (i + 1)), socEl = el('socials' + (i + 1));
+        if (!nameEl || !socEl) continue;
+        nameEl.textContent = (c.name || '—').toString();
+        const handle = SceneBase.formatCasterHandle(c), social = (c.social || 'none').toString().toLowerCase();
+        if (handle && social !== 'none') { socEl.className = 'cam-handle ' + SceneBase.socialPlatformClass(social); socEl.textContent = handle; socEl.style.display = ''; } else socEl.style.display = 'none';
+      }
+    }
+    function renderTeam(idx, t, side) {
+      SceneBase.applyTeamLogo(el('teamlogo' + idx), t.customLogo, t.logo);
+      el('teamname' + idx).textContent = (t.name || (side === 'b' ? 'ORANGE' : 'BLUE')).toUpperCase();
+      el('teamscore' + idx).textContent = t.series != null ? t.series : 0;
+      document.documentElement.style.setProperty(side === 'b' ? '--team-b' : '--team-a', t.color || (side === 'b' ? '#e97139' : '#055fdb'));
+    }
+    function renderPresentedBy(data) {
+      const slot = data.scoreboardAd || {}, wrap = el('presented-by'), label = el('pb-label'), logo = el('pb-logo');
+      const labelText = (slot.label || 'PRESENTED BY').toString().trim(); label.textContent = labelText;
+      if (slot.logo) { logo.src = slot.logo; logo.style.display = ''; wrap.classList.remove('is-empty'); }
+      else if (labelText) { logo.style.display = 'none'; logo.removeAttribute('src'); wrap.classList.remove('is-empty'); } else wrap.classList.add('is-empty');
+    }
+    function renderDeckStrip(data) {
+      const tag = ((data.casters && data.casters.lowerThird) || '').toString().trim();
+      const strip = el('deck-strip'), tagEl = el('tagline');
+      if (tag) { tagEl.textContent = tag; strip.classList.remove('is-empty'); } else { tagEl.textContent = ''; strip.classList.add('is-empty'); }
+    }
+    function render(data) {
+      data = data || {};
+      applyBrandTheme(data);
+      const casters = data.casters || {};
+      el('stage').classList.toggle('show', SceneBase.casterStageVisible(casters));
+      renderCasters(casters); renderCasterText(casters);
+      renderTeam(1, SceneBase.teamSide(data, 'blue'), 'a');
+      renderTeam(2, SceneBase.teamSide(data, 'orange'), 'b');
+      renderPresentedBy(data); renderDeckStrip(data);
+    }
+    buildCams();
+    if (location.protocol === 'file:') {
+      document.documentElement.classList.add('preview');
+      render({ casters: { visible: true, lowerThird: 'Summer Showdown 2026', list: [
+        { id: 'c1', name: 'Jordan', handle: 'jreyescasts', slot: 1, social: 'x' },
+        { id: 'c2', name: 'Mia', handle: 'miaplays', slot: 2, social: 'twitch' } ] },
+        teams: { blue: { name: 'Velocity', color: '#3b82f6' }, orange: { name: 'Apex', color: '#f97316' } },
+        series: { blue: 1, orange: 0 },
+        scoreboardAd: { label: 'PRESENTED BY', logo: 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="180" height="44"><rect width="180" height="44" rx="4" fill="#1a1d24"/><text x="90" y="29" font-size="20" fill="#e8eaf0" text-anchor="middle" font-family="Arial" font-weight="bold">SPONSOR</text></svg>') } });
+      el('stage').classList.add('show');
+    } else { SceneBase.connect(render); }
+  </script>
+</body>
+</html>

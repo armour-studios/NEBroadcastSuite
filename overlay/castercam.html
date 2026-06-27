@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Caster Cam Feed</title>
+  <!--
+    Stable per-slot caster feed for OBS "separated" mode.
+
+    OBS points ONE permanent browser source at  http://localhost:3000/castercam.html?slot=N
+    (N = 1..4). This page subscribes to the WS bridge, resolves whichever caster is currently
+    assigned to desk slot N, and renders that caster's live VDO.ninja view full-bleed. The OBS
+    URL never changes — swap rooms, use a custom view link, or re-assign casters and the feed
+    follows automatically, with no need to regenerate / reinstall the scene collection.
+
+    Slot map (matches the => Cam framing scenes):  1=Caster 1  2=Caster 2  3=Host  4=Caster 4
+  -->
+  <style>
+    html, body { margin: 0; width: 1920px; height: 1080px; overflow: hidden; background: transparent; }
+    #frame { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; display: none; background: transparent; }
+    /* Fallback when no caster is assigned to this slot: brand logo centred on screen. */
+    #idle {
+      position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+      background: transparent; user-select: none;
+    }
+    #idle.hide { display: none; }
+    #brandlogo { max-width: 46%; max-height: 46%; object-fit: contain; filter: drop-shadow(0 6px 28px rgba(0,0,0,.45)); display: none; }
+    #idletext {
+      font: 800 30px ui-monospace, 'Cascadia Code', monospace; letter-spacing: .12em; color: #2c333f;
+    }
+    #idle.has-logo #idletext { display: none; }
+  </style>
+</head>
+<body>
+  <iframe id="frame" allow="autoplay; encrypted-media; microphone; camera; fullscreen" referrerpolicy="no-referrer"></iframe>
+  <div id="idle">
+    <img id="brandlogo" alt="" />
+    <span id="idletext">CASTER&nbsp;<span id="slotn">1</span>&nbsp;— NO FEED</span>
+  </div>
+
+  <script src="scene-base.js"></script>
+  <script>
+    (function () {
+      const q = new URLSearchParams(location.search);
+      // slot 1..4 (Host = slot 3). Accept ?slot= or ?host for the host feed.
+      let SLOT = parseInt(q.get('slot'), 10);
+      if (q.has('host')) SLOT = 3;
+      if (!SLOT || SLOT < 1) SLOT = 1;
+      SLOT = Math.max(1, Math.min(4, SLOT));
+      document.getElementById('slotn').textContent = SLOT === 3 ? 'HOST' : SLOT;
+
+      const DEBUG = q.get('debug') === '1';
+      const frame = document.getElementById('frame');
+      const idle = document.getElementById('idle');
+      const brandlogo = document.getElementById('brandlogo');
+      let lastUrl = null, lastLogo = null, gotState = false;
+
+      let dbg;
+      if (DEBUG) {
+        dbg = document.createElement('pre');
+        dbg.style.cssText = 'position:absolute;left:0;top:0;z-index:99999;margin:0;max-width:100%;padding:10px 14px;'
+          + 'font:13px/1.5 ui-monospace,monospace;color:#9be7ff;background:rgba(0,0,0,.82);white-space:pre-wrap;';
+        dbg.textContent = 'castercam slot ' + SLOT + ' — connecting to WS…';
+        document.body.appendChild(dbg);
+        setTimeout(() => { if (!gotState) dbg.textContent = 'castercam slot ' + SLOT + ' — NO WS STATE after 3s (is the app running on :3001?)'; }, 3000);
+      }
+
+      function applyLogo(logo) {
+        if (logo === lastLogo) return;
+        lastLogo = logo;
+        if (logo) { brandlogo.src = logo; brandlogo.style.display = 'block'; idle.classList.add('has-logo'); }
+        else { brandlogo.removeAttribute('src'); brandlogo.style.display = 'none'; idle.classList.remove('has-logo'); }
+      }
+
+      function apply(url) {
+        if (url === lastUrl) return;      // don't reload the iframe (drops the VDO connection) unless it changed
+        lastUrl = url;
+        if (url) {
+          frame.src = url;
+          frame.style.display = 'block';
+          idle.classList.add('hide');
+        } else {
+          frame.removeAttribute('src');
+          frame.style.display = 'none';
+          idle.classList.remove('hide');     // show brand-logo fallback
+        }
+      }
+
+      SceneBase.connect(function (data) {
+        gotState = true;
+        applyLogo(SceneBase.brandLogo(data));
+        const casters = data && data.casters;
+        const caster = SceneBase.casterBySlot(casters, SLOT);
+        const url = ((caster && caster.camUrl) || '').toString().trim();
+        apply(url);
+        if (DEBUG) {
+          const list = (casters && Array.isArray(casters.list)) ? casters.list : [];
+          dbg.textContent = JSON.stringify({
+            slot: SLOT,
+            'casters.list count': list.length,
+            'slots present': list.map(c => c && c.slot),
+            'matched caster': caster ? { name: caster.name, slot: caster.slot, hasCamUrl: !!(caster.camUrl) } : null,
+            camUrl: url || '(empty)'
+          }, null, 2);
+          console.log('[castercam] slot', SLOT, 'list:', list, 'matched:', caster, 'url:', url);
+        }
+      });
+    })();
+  </script>
+</body>
+</html>

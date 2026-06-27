@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1920">
+<title>NE Broadcast Suite — Standings</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --accent:     #055fdb;
+  --accent-2:   #e97139;
+  --main-font:  'Bourgeois', sans-serif;
+  --stage-w:    1920px;
+  --stage-h:    1080px;
+}
+
+html, body {
+  width: var(--stage-w);
+  height: var(--stage-h);
+  overflow: hidden;
+  background: transparent;
+  font-family: var(--main-font);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── Stage ── */
+.st-stage {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 64px 120px;
+  background:
+    radial-gradient(ellipse 100% 65% at 50% 20%, rgba(5,95,219,0.13) 0%, rgba(0,0,0,0) 55%),
+    linear-gradient(180deg, rgba(10,12,17,0.97) 0%, rgba(14,16,23,0.97) 100%);
+  opacity: 0;
+  transform: scale(1.02);
+  transition: opacity 0.5s ease, transform 0.5s ease;
+}
+.st-stage.show {
+  opacity: 1;
+  transform: scale(1);
+}
+
+/* ── Title ── */
+.st-header {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  width: 100%;
+  max-width: 1200px;
+  margin-bottom: 36px;
+}
+.st-accent-bar {
+  width: 6px;
+  height: 52px;
+  border-radius: 3px;
+  background: var(--accent);
+  flex-shrink: 0;
+}
+.st-title {
+  font-size: 46px;
+  font-weight: 800;
+  letter-spacing: 4px;
+  text-transform: uppercase;
+  color: #ffffff;
+  text-shadow: 0 4px 24px rgba(5,95,219,0.35);
+}
+
+/* ── Table ── */
+.st-table {
+  width: 100%;
+  max-width: 1200px;
+  border-radius: 14px;
+  overflow: hidden;
+  box-shadow: 0 20px 56px rgba(0,0,0,0.55);
+  border: 1px solid rgba(255,255,255,0.07);
+}
+
+.st-row {
+  display: grid;
+  grid-template-columns: 80px 64px 1fr 90px 90px 90px;
+  align-items: center;
+  height: 72px;
+  padding: 0 28px;
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+  opacity: 0;
+  transform: translateX(-12px);
+  transition: opacity 0.35s ease, transform 0.35s ease;
+}
+.st-row.visible {
+  opacity: 1;
+  transform: translateX(0);
+}
+
+.st-row:last-child { border-bottom: none; }
+
+.st-head {
+  background: rgba(5,95,219,0.16);
+  height: 52px;
+  opacity: 1 !important;
+  transform: none !important;
+}
+
+.st-row:not(.st-head):nth-child(even) {
+  background: rgba(18,21,30,0.95);
+}
+.st-row:not(.st-head):nth-child(odd) {
+  background: rgba(13,15,22,0.95);
+}
+
+/* Top 3 highlight */
+.st-row.rank-1 { background: linear-gradient(90deg, rgba(5,95,219,0.22) 0%, rgba(13,15,22,0.95) 70%) !important; border-left: 4px solid var(--accent); padding-left: 24px; }
+.st-row.rank-2 { background: linear-gradient(90deg, rgba(5,95,219,0.11) 0%, rgba(13,15,22,0.95) 60%) !important; }
+.st-row.rank-3 { background: linear-gradient(90deg, rgba(5,95,219,0.06) 0%, rgba(13,15,22,0.95) 50%) !important; }
+
+/* Columns */
+.st-col-rank {
+  font-size: 28px;
+  font-weight: 800;
+  color: var(--accent-2);
+  text-align: center;
+}
+.st-head .st-col-rank { font-size: 14px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; color: #6a7080; }
+
+.st-col-logo {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.st-team-logo {
+  width: 44px;
+  height: 44px;
+  object-fit: contain;
+  filter: drop-shadow(0 2px 5px rgba(0,0,0,0.5));
+}
+.st-team-logo.logo-on-dark { filter: invert(1) drop-shadow(0 2px 5px rgba(0,0,0,0.5)); }
+
+.st-col-name {
+  font-size: 28px;
+  font-weight: 700;
+  color: #e2e5ed;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  letter-spacing: 0.5px;
+  padding-left: 4px;
+}
+.st-head .st-col-name { font-size: 14px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; color: #6a7080; padding-left: 4px; }
+
+.st-col-stat {
+  font-size: 28px;
+  font-weight: 700;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  color: #9aa0ad;
+}
+.st-col-stat.wins  { color: #6ee7a0; }
+.st-col-stat.losses { color: #f08a8a; }
+.st-col-stat.pts   { color: #f5e07a; }
+.st-head .st-col-stat { font-size: 14px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; color: #6a7080; }
+
+/* ── Empty ── */
+.st-empty {
+  font-size: 28px;
+  font-weight: 500;
+  color: rgba(255,255,255,0.2);
+  text-align: center;
+}
+</style>
+</head>
+<body>
+
+<div id="st-stage" class="st-stage">
+  <div class="st-header">
+    <div class="st-accent-bar" id="st-accent"></div>
+    <div class="st-title" id="st-title">STANDINGS</div>
+  </div>
+  <div class="st-table" id="st-table"></div>
+  <div class="st-empty" id="st-empty" style="display:none;">No standings data — load an event or build a bracket.</div>
+</div>
+
+<script src="scene-base.js"></script>
+<script>
+(function () {
+  function el(id) { return document.getElementById(id); }
+
+  function svgFallback(letter, color) {
+    return 'data:image/svg+xml;utf8,' + encodeURIComponent(
+      `<svg xmlns="http://www.w3.org/2000/svg" width="160" height="160"><rect width="160" height="160" rx="22" fill="${color}"/><text x="80" y="108" font-size="86" fill="#fff" text-anchor="middle" font-family="Arial,sans-serif" font-weight="bold">${letter}</text></svg>`);
+  }
+
+  function logoMap(savedTeams) {
+    const map = {};
+    (savedTeams || []).forEach(t => { if (t && t.name && t.logo) map[t.name.toLowerCase()] = t.logo; });
+    return map;
+  }
+
+  function buildHead(hasPoints) {
+    const row = document.createElement('div');
+    row.className = 'st-row st-head';
+    row.innerHTML = `
+      <div class="st-col-rank">#</div>
+      <div class="st-col-logo"></div>
+      <div class="st-col-name">Team</div>
+      <div class="st-col-stat">W</div>
+      <div class="st-col-stat">L</div>
+      <div class="st-col-stat">${hasPoints ? 'PTS' : ''}</div>
+    `;
+    return row;
+  }
+
+  function buildDataRow(entry, logos, idx, hasPoints) {
+    const rank = Number(entry.placement) || (idx + 1);
+    const logo = entry.logo || logos[(entry.name || '').toLowerCase()] || svgFallback((entry.name || '?')[0].toUpperCase(), '#2a3050');
+    const isDefaultLogo = SceneBase.isDefaultGameLogo(logo);
+
+    const row = document.createElement('div');
+    const rankClass = rank <= 3 ? ` rank-${rank}` : '';
+    row.className = `st-row${rankClass}`;
+
+    const imgTag = `<img class="st-team-logo${isDefaultLogo ? ' logo-on-dark' : ''}" src="${logo}" alt="">`;
+
+    row.innerHTML = `
+      <div class="st-col-rank">${rank}</div>
+      <div class="st-col-logo">${imgTag}</div>
+      <div class="st-col-name">${entry.name || 'TBD'}</div>
+      <div class="st-col-stat wins">${entry.wins ?? '—'}</div>
+      <div class="st-col-stat losses">${entry.losses ?? '—'}</div>
+      <div class="st-col-stat pts">${hasPoints ? (entry.points ?? '—') : ''}</div>
+    `;
+
+    setTimeout(() => row.classList.add('visible'), 80 + idx * 55);
+    return row;
+  }
+
+  function render(data) {
+    const stage  = el('st-stage');
+    const table  = el('st-table');
+    const empty  = el('st-empty');
+    const accent = el('st-accent');
+    if (!stage || !table) return;
+
+    const stState   = data.standings || {};
+    const bracket   = data.bracket || {};
+    const visible   = !!stState.visible;
+
+    stage.classList.toggle('show', visible);
+    if (!visible) return;
+
+    // Brand accent
+    if (accent) accent.style.background = SceneBase.brandColor(data);
+
+    // Title
+    const titleEl = el('st-title');
+    const title = (stState.title || bracket.title || 'STANDINGS').toUpperCase();
+    if (titleEl) titleEl.textContent = title;
+
+    // Resolve rows: manual override > bracket.standings
+    const rows = (stState.rows && stState.rows.length > 0) ? stState.rows : (bracket.standings || []);
+    const logos = logoMap(data.savedTeams);
+
+    table.innerHTML = '';
+    if (rows.length === 0) {
+      table.style.display = 'none';
+      empty.style.display = '';
+      return;
+    }
+
+    table.style.display = '';
+    empty.style.display = 'none';
+
+    const hasPoints = rows.some(r => r.points != null);
+    table.appendChild(buildHead(hasPoints));
+    rows.forEach((r, i) => table.appendChild(buildDataRow(r, logos, i, hasPoints)));
+  }
+
+  SceneBase.connect(render);
+})();
+</script>
+</body>
+</html>

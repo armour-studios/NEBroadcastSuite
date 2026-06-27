@@ -21,7 +21,7 @@ function createStartGgClient(apiToken) {
           {
             headers: {
               Authorization: `Bearer ${apiToken}`,
-              'User-Agent': 'NE-Broadcast-Suite/1.0 (+https://namelessesports.gg)',
+              'User-Agent': 'NE-Broadcast-Suite/1.0',
               Accept: 'application/json',
               'Content-Type': 'application/json'
             },

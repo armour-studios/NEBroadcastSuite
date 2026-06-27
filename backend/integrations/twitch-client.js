@@ -101,6 +101,20 @@ class TwitchClient {
     }
   }
 
+  async lockPrediction(broadcasterId, predictionId) {
+    try {
+      const res = await axios.patch(
+        `${TWITCH_API_BASE}/predictions`,
+        { broadcaster_id: broadcasterId, id: predictionId, status: 'LOCKED' },
+        { headers: this.headers }
+      );
+      return res.data.data?.[0] || null;
+    } catch (err) {
+      console.error('[Twitch] lockPrediction error:', err.message);
+      return null;
+    }
+  }
+
   async cancelPrediction(broadcasterId, predictionId) {
     try {
       const res = await axios.patch(
@@ -218,6 +232,17 @@ class TwitchClient {
     return res.data;
   }
 
+  async getChatSettings(broadcasterId, moderatorId) {
+    const res = await axios.get(
+      `${TWITCH_API_BASE}/chat/settings`,
+      {
+        params: { broadcaster_id: broadcasterId, moderator_id: moderatorId },
+        headers: this.headers
+      }
+    );
+    return res.data.data?.[0] || res.data;
+  }
+
   async updateChatSettings(broadcasterId, moderatorId, settings = {}) {
     const body = {};
     if (typeof settings.slow_mode === 'boolean')           body.slow_mode = settings.slow_mode;
@@ -291,6 +316,20 @@ class TwitchClient {
       headers: this.headers
     });
     return res.data.data?.[0] || null;
+  }
+
+  async createStreamMarker(broadcasterId, description) {
+    try {
+      const res = await axios.post(
+        `${TWITCH_API_BASE}/streams/markers`,
+        { user_id: broadcasterId, description: description || 'BroadcastStudio' },
+        { headers: this.headers }
+      );
+      return res.data.data?.[0] || null;
+    } catch (err) {
+      console.error('[Twitch] createStreamMarker error:', err.message);
+      return null;
+    }
   }
 
   async createPoll(broadcasterId, title, choices, durationSeconds) {

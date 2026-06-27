@@ -2,393 +2,779 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Twitch Mini-Games</title>
+  <title>Twitch Games</title>
   <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
     body {
       background: transparent;
-      font-family: 'Inter', sans-serif;
-      color: white;
+      font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
+      color: #fff;
       overflow: hidden;
-      width: 100%;
-      height: 100%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
+      width: 1920px;
+      height: 1080px;
     }
 
-    .game-container {
-      width: 100%;
-      max-width: 900px;
-      padding: 40px;
-      background: linear-gradient(135deg, rgba(5, 95, 219, 0.15), rgba(78, 205, 196, 0.15));
-      border: 2px solid rgba(78, 205, 196, 0.4);
-      border-radius: 16px;
-      backdrop-filter: blur(10px);
+    /* ─────────────────────────────────────────────────────────────────────── */
+    /* BOTTOM BAR  (trivia / vote / predict / number_guess / fastest / score) */
+    /* ─────────────────────────────────────────────────────────────────────── */
+    #bar-anchor {
+      position: absolute;
+      bottom: 36px; left: 50%;
+      transform: translateX(-50%);
+      width: 860px;
+      pointer-events: none;
+    }
+
+    .results-card {
       display: none;
-      animation: slideUp 0.6s cubic-bezier(0.34, 1.56, 0.64, 1);
-    }
-
-    @keyframes slideUp {
-      from { transform: translateY(100px); opacity: 0; }
-      to { transform: translateY(0); opacity: 1; }
-    }
-
-    .game-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 24px;
-      padding-bottom: 12px;
-      border-bottom: 2px solid rgba(255, 255, 255, 0.1);
-    }
-
-    .game-title {
-      font-size: 28px;
-      font-weight: 700;
-      letter-spacing: 0.05em;
-    }
-
-    .game-timer {
-      font-size: 18px;
-      font-weight: 700;
-      color: #FFE66D;
-      background: rgba(255, 230, 109, 0.1);
-      padding: 8px 16px;
-      border-radius: 6px;
-      border: 1px solid #FFE66D;
-    }
-
-    .game-question {
-      font-size: 20px;
-      font-weight: 600;
-      margin-bottom: 20px;
-      text-align: center;
-    }
-
-    /* TRIVIA */
-    .trivia-options {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 12px;
-    }
-
-    .option {
-      padding: 16px;
-      background: rgba(255, 255, 255, 0.08);
-      border: 2px solid rgba(255, 255, 255, 0.2);
-      border-radius: 8px;
-      font-size: 14px;
-      font-weight: 600;
-      text-align: center;
-      cursor: pointer;
-      transition: all 0.2s;
-    }
-
-    .option:hover {
-      background: rgba(255, 255, 255, 0.12);
-      border-color: rgba(78, 205, 196, 0.6);
-    }
-
-    /* PREDICTION / VOTE */
-    .vote-options {
-      display: flex;
       flex-direction: column;
-      gap: 12px;
-    }
-
-    .vote-option {
-      display: flex;
       align-items: center;
-      gap: 12px;
-      padding: 12px;
-      background: rgba(255, 255, 255, 0.06);
-      border: 1px solid rgba(255, 255, 255, 0.15);
-      border-radius: 6px;
-      cursor: pointer;
-      transition: all 0.2s;
+      gap: 10px;
+      padding: 28px 36px;
+      background: linear-gradient(160deg, rgba(13,11,20,.97), rgba(18,14,30,.97));
+      border: 1px solid rgba(78,205,196,.45);
+      border-radius: 18px;
+      box-shadow: 0 0 0 1px rgba(78,205,196,.07), 0 24px 70px rgba(0,0,0,.85);
+      animation: fadeUp .5s cubic-bezier(.34,1.48,.64,1);
     }
+    .results-badge {
+      font-size: 10px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase;
+      color: #4ecdc4; border: 1px solid rgba(78,205,196,.4); padding: 3px 10px; border-radius: 20px;
+    }
+    .results-winner  { font-size: 30px; font-weight: 800; text-align: center; }
+    .results-sub     { font-size: 14px; color: rgba(255,255,255,.55); text-align: center; }
+    .results-answer  { font-size: 17px; color: #ffe66d; font-weight: 700; text-align: center; display: none; }
 
-    .vote-option:hover {
-      background: rgba(255, 255, 255, 0.1);
-      border-color: rgba(78, 205, 196, 0.5);
+    .game-card {
+      display: none;
+      background: linear-gradient(160deg, rgba(13,11,20,.97), rgba(18,14,30,.97));
+      border: 1px solid rgba(78,205,196,.28);
+      border-radius: 18px; overflow: hidden;
+      box-shadow: 0 0 0 1px rgba(78,205,196,.06), 0 24px 70px rgba(0,0,0,.85);
+      animation: fadeUp .5s cubic-bezier(.34,1.48,.64,1);
     }
+    .game-header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 11px 18px; border-bottom: 1px solid rgba(255,255,255,.07);
+      background: rgba(78,205,196,.06); gap: 10px;
+    }
+    .game-badge { font-size: 10px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase;
+      color: #4ecdc4; display: flex; align-items: center; gap: 7px; flex-shrink: 0; }
+    .game-live-dot {
+      width: 8px; height: 8px; border-radius: 50%; background: #4ecdc4;
+      box-shadow: 0 0 8px #4ecdc4; animation: pulse 1.6s ease-in-out infinite;
+    }
+    @keyframes pulse { 0%,100%{opacity:1;box-shadow:0 0 6px #4ecdc4} 50%{opacity:.4;box-shadow:0 0 18px #4ecdc4} }
+    .game-question { flex:1; font-size:14px; font-weight:700; color:rgba(255,255,255,.9); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .game-timer    { font-size:13px; font-weight:800; font-variant-numeric:tabular-nums; color:#ffe66d; flex-shrink:0; }
+    .game-timer.urgent { color:#f87171; animation: ct-pulse .75s ease-in-out infinite; }
+    @keyframes ct-pulse { 0%,100%{opacity:1} 50%{opacity:.35} }
+    .game-body   { padding: 14px 18px; }
+    .game-footer {
+      display:flex; justify-content:space-between; align-items:center;
+      padding: 8px 18px; border-top: 1px solid rgba(255,255,255,.05);
+    }
+    .game-stat-pair { font-size:11px; color:rgba(255,255,255,.30); }
+    .game-stat-pair b { color:rgba(255,255,255,.65); font-variant-numeric:tabular-nums; }
 
-    .vote-bar-bg {
-      flex: 1;
-      height: 24px;
-      background: rgba(255, 255, 255, 0.08);
-      border-radius: 4px;
-      overflow: hidden;
-      position: relative;
-    }
+    /* Trivia */
+    .trivia-grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+    .trivia-opt  { display:flex; align-items:center; gap:10px; padding:12px 14px;
+      background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.12); border-radius:10px; }
+    .trivia-key  { width:26px; height:26px; border-radius:6px;
+      background:rgba(78,205,196,.14); border:1px solid rgba(78,205,196,.3);
+      display:flex; align-items:center; justify-content:center;
+      font-size:12px; font-weight:800; color:#4ecdc4; flex-shrink:0; }
+    .trivia-text { font-size:13px; font-weight:600; color:rgba(255,255,255,.85); }
 
-    .vote-bar-fill {
-      height: 100%;
-      background: linear-gradient(90deg, #4ECDC4, #45B7B1);
-      width: 0%;
-      transition: width 0.3s ease;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 11px;
-      font-weight: 700;
-      min-width: 30px;
-    }
+    /* Vote bars */
+    .vote-list { display:flex; flex-direction:column; gap:9px; }
+    .vote-row  { display:flex; flex-direction:column; gap:5px; }
+    .vote-row-head { display:flex; align-items:baseline; justify-content:space-between; gap:6px; }
+    .vote-label { font-size:13px; font-weight:700; color:rgba(255,255,255,.88); }
+    .vote-pct   { font-size:13px; font-weight:800; color:#4ecdc4; font-variant-numeric:tabular-nums; }
+    .vote-count-lbl { font-size:11px; color:rgba(255,255,255,.30); font-variant-numeric:tabular-nums; }
+    .vote-bar-track { height:6px; background:rgba(255,255,255,.07); border-radius:3px; overflow:hidden; }
+    .vote-bar-fill  { height:100%; border-radius:3px;
+      background:linear-gradient(90deg,rgba(78,205,196,.65),#4ecdc4);
+      transition:width .7s cubic-bezier(.4,0,.2,1); min-width:4px; }
 
-    .vote-count {
-      min-width: 50px;
-      text-align: right;
-      font-size: 12px;
-      font-weight: 700;
-      color: #FFE66D;
-    }
+    /* Center display (number guess, fastest, score) */
+    .center-display    { text-align:center; padding:10px 0; }
+    .center-instruction{ font-size:13px; color:#ffe66d; font-weight:700; margin-bottom:10px; }
+    .center-count      { font-size:28px; font-weight:800; color:#4ecdc4; }
 
-    /* SPIN */
-    .spin-prompt {
-      text-align: center;
-      font-size: 16px;
-      margin-bottom: 20px;
-      color: #FFE66D;
-    }
-
-    .spin-counter {
-      text-align: center;
-      font-size: 24px;
-      font-weight: 700;
-      color: #4ECDC4;
-    }
+    /* Fastest finger */
+    .ff-keyword-label { font-size:11px; color:rgba(255,255,255,.45); text-transform:uppercase; letter-spacing:.1em; text-align:center; margin-bottom:8px; }
+    .ff-keyword { font-size:34px; font-weight:900; color:#ffe66d; text-align:center; letter-spacing:.06em; text-shadow:0 0 24px rgba(255,230,109,.4); }
 
     /* Instructions */
-    .game-instructions {
-      margin-top: 20px;
-      padding: 12px 16px;
-      background: rgba(255, 230, 109, 0.1);
-      border-left: 3px solid #FFE66D;
-      border-radius: 4px;
-      font-size: 12px;
-      color: #FFE66D;
-      font-weight: 600;
+    .game-instructions { margin-top:10px; padding:8px 12px;
+      background:rgba(255,230,109,.07); border-left:3px solid rgba(255,230,109,.6);
+      border-radius:4px; font-size:11px; font-weight:600; color:#ffe66d; }
+
+    @keyframes fadeUp {
+      from { transform:translateY(20px); opacity:0; }
+      to   { transform:translateY(0);    opacity:1; }
     }
 
-    .game-stats {
-      margin-top: 16px;
+    /* ─────────────────────────────────────────────────────────────────────── */
+    /* SPINNING WHEEL  (center screen)                                        */
+    /* ─────────────────────────────────────────────────────────────────────── */
+    #wheel-overlay {
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      flex-direction: row;
+      gap: 60px;
+    }
+
+    .wheel-left {
       display: flex;
-      justify-content: space-around;
-      padding-top: 12px;
-      border-top: 1px solid rgba(255, 255, 255, 0.1);
-      font-size: 12px;
-      color: var(--muted);
+      flex-direction: column;
+      align-items: center;
+      gap: 0;
     }
 
-    .stat {
-      text-align: center;
+    /* Pointer triangle above wheel */
+    .wheel-pointer {
+      width: 0; height: 0;
+      border-left: 18px solid transparent;
+      border-right: 18px solid transparent;
+      border-top: 30px solid #ffe66d;
+      filter: drop-shadow(0 0 12px rgba(255,230,109,.8));
+      margin-bottom: -2px;
+      position: relative; z-index: 2;
+      flex-shrink: 0;
     }
 
-    .stat-value {
-      font-size: 16px;
+    #wheel-canvas {
+      display: block;
+      border-radius: 50%;
+      box-shadow: 0 0 0 4px rgba(78,205,196,.3), 0 0 60px rgba(0,0,0,.8), 0 0 120px rgba(78,205,196,.15);
+    }
+
+    /* Bet chip counter below wheel */
+    .wheel-count-pill {
+      margin-top: 18px;
+      background: rgba(13,11,20,.9);
+      border: 1px solid rgba(78,205,196,.3);
+      border-radius: 30px;
+      padding: 6px 20px;
+      font-size: 14px;
       font-weight: 700;
-      color: #4ECDC4;
+      color: rgba(255,255,255,.65);
+    }
+    .wheel-count-pill b { color: #4ecdc4; font-variant-numeric: tabular-nums; }
+
+    /* Right panel: giveaway info + winner */
+    .wheel-right {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 16px;
+      max-width: 380px;
     }
 
-    .stat-label {
-      font-size: 10px;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
+    .wheel-badge {
+      display: flex; align-items: center; gap: 9px;
+      font-size: 11px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase;
+      color: #4ecdc4;
     }
+    .wheel-live-dot {
+      width: 10px; height: 10px; border-radius: 50%;
+      background: #4ecdc4; box-shadow: 0 0 10px #4ecdc4;
+      animation: pulse 1.6s ease-in-out infinite;
+    }
+
+    .wheel-title {
+      font-size: 26px;
+      font-weight: 900;
+      line-height: 1.15;
+      color: #fff;
+      letter-spacing: .01em;
+    }
+
+    .wheel-instruction {
+      font-size: 15px;
+      color: #ffe66d;
+      font-weight: 700;
+      padding: 10px 16px;
+      background: rgba(255,230,109,.08);
+      border-left: 3px solid rgba(255,230,109,.6);
+      border-radius: 6px;
+      line-height: 1.5;
+    }
+
+    /* Recent entries ticker */
+    .wheel-entries-list {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+      max-height: 240px;
+      overflow: hidden;
+      width: 100%;
+    }
+    .wheel-entry-chip {
+      font-size: 13px;
+      font-weight: 600;
+      color: rgba(255,255,255,.7);
+      background: rgba(255,255,255,.05);
+      border: 1px solid rgba(255,255,255,.08);
+      border-radius: 6px;
+      padding: 5px 12px;
+      animation: entrySlide .3s ease;
+    }
+    @keyframes entrySlide {
+      from { transform: translateX(-12px); opacity: 0; }
+      to   { transform: translateX(0);     opacity: 1; }
+    }
+
+    /* Winner reveal */
+    .wheel-winner-reveal {
+      display: none;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 8px;
+      padding: 20px 24px;
+      background: linear-gradient(135deg, rgba(78,205,196,.12), rgba(255,230,109,.06));
+      border: 1px solid rgba(78,205,196,.4);
+      border-radius: 14px;
+      animation: fadeUp .5s cubic-bezier(.34,1.48,.64,1);
+    }
+    .winner-label {
+      font-size: 11px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase;
+      color: #4ecdc4;
+    }
+    .winner-name {
+      font-size: 34px; font-weight: 900; color: #fff; line-height: 1;
+      text-shadow: 0 0 30px rgba(78,205,196,.5);
+    }
+    .winner-sub { font-size: 14px; color: rgba(255,255,255,.5); }
   </style>
 </head>
 <body>
 
-<div class="game-container" id="game-container">
-  <div class="game-header">
-    <div class="game-title" id="game-title">Trivia</div>
-    <div class="game-timer" id="game-timer">30s</div>
+<!-- ── Bottom-bar overlay (all games except spin) ─────────────────────────── -->
+<div id="bar-anchor">
+  <div class="results-card" id="results-card">
+    <div class="results-badge" id="results-badge">Results</div>
+    <div class="results-answer" id="results-answer"></div>
+    <div class="results-winner" id="results-winner"></div>
+    <div class="results-sub" id="results-sub"></div>
   </div>
 
-  <div class="game-question" id="game-question">Question goes here?</div>
-
-  <!-- Trivia Layout -->
-  <div id="trivia-layout" style="display: none;">
-    <div class="trivia-options" id="trivia-options"></div>
-  </div>
-
-  <!-- Prediction/Vote Layout -->
-  <div id="vote-layout" style="display: none;">
-    <div class="vote-options" id="vote-options"></div>
-  </div>
-
-  <!-- Spin Layout -->
-  <div id="spin-layout" style="display: none;">
-    <div class="spin-prompt">Type anything in chat to enter!</div>
-    <div class="spin-counter" id="spin-counter">0 entries</div>
-  </div>
-
-  <div class="game-instructions" id="game-instructions"></div>
-
-  <div class="game-stats">
-    <div class="stat">
-      <div class="stat-value" id="participants-count">0</div>
-      <div class="stat-label">Participating</div>
+  <div class="game-card" id="game-card">
+    <div class="game-header">
+      <div class="game-badge">
+        <span class="game-live-dot"></span>
+        <span id="game-type-label">Game</span>
+      </div>
+      <div class="game-question" id="game-question"></div>
+      <div class="game-timer" id="game-timer">—</div>
     </div>
-    <div class="stat">
-      <div class="stat-value" id="time-remaining">30</div>
-      <div class="stat-label">Seconds Left</div>
+    <div class="game-body">
+      <!-- Trivia -->
+      <div id="layout-trivia" style="display:none;">
+        <div class="trivia-grid" id="trivia-opts"></div>
+        <div class="game-instructions">💬 Type A · B · C · D in chat</div>
+      </div>
+      <!-- Prediction / Vote -->
+      <div id="layout-vote" style="display:none;">
+        <div class="vote-list" id="vote-opts"></div>
+        <div class="game-instructions" id="vote-instruction">💬 Type !vote 1 · 2 · 3 in chat</div>
+      </div>
+      <!-- Number Guess -->
+      <div id="layout-number-guess" style="display:none;">
+        <div class="center-display">
+          <div class="center-instruction">Type <strong>!guess [number]</strong> in chat</div>
+          <div class="center-count" id="guess-count">0 guesses</div>
+        </div>
+      </div>
+      <!-- Fastest Finger -->
+      <div id="layout-fastest" style="display:none;">
+        <div class="ff-keyword-label">First to type this wins:</div>
+        <div class="ff-keyword" id="ff-keyword"></div>
+        <div class="center-display" style="margin-top:12px;">
+          <div class="center-count" id="ff-attempts">0 tried</div>
+        </div>
+      </div>
+      <!-- Score Prediction -->
+      <div id="layout-score" style="display:none;">
+        <div class="center-display">
+          <div class="center-instruction">Type <strong>!score [A]-[B]</strong> in chat</div>
+          <div class="center-count" id="score-count">0 predictions</div>
+        </div>
+      </div>
+    </div>
+    <div class="game-footer">
+      <span class="game-stat-pair">Participating: <b id="participants-count">0</b></span>
+      <span class="game-stat-pair">Time left: <b id="time-remaining">—</b>s</span>
+    </div>
+  </div>
+</div>
+
+<!-- ── Spinning Wheel overlay (spin game only) ────────────────────────────── -->
+<div id="wheel-overlay">
+  <div class="wheel-left">
+    <div class="wheel-pointer"></div>
+    <canvas id="wheel-canvas" width="520" height="520"></canvas>
+    <div class="wheel-count-pill">
+      <b id="wheel-count">0</b> in the draw
+    </div>
+  </div>
+  <div class="wheel-right">
+    <div class="wheel-badge">
+      <span class="wheel-live-dot" id="wheel-dot"></span>
+      <span id="wheel-badge-label">Giveaway Open</span>
+    </div>
+    <div class="wheel-title" id="wheel-title">Raffle</div>
+    <div class="wheel-instruction" id="wheel-instruction">
+      💬 Type anything in chat to enter!
+    </div>
+    <div class="wheel-entries-list" id="wheel-entries-list"></div>
+    <div class="wheel-winner-reveal" id="wheel-winner-reveal">
+      <div class="winner-label">🎯 Winner!</div>
+      <div class="winner-name" id="wheel-winner-name"></div>
+      <div class="winner-sub" id="wheel-winner-sub"></div>
     </div>
   </div>
 </div>
 
 <script src="scene-base.js"></script>
 <script>
-  let currentGame = null;
-  let timerInterval = null;
-  let secondsRemaining = 0;
-
-  function updateTimer() {
-    if (!currentGame) return;
-    const now = Date.now();
-    const endTime = new Date(currentGame.endsAt).getTime();
-    const remaining = Math.max(0, Math.ceil((endTime - now) / 1000));
-    secondsRemaining = remaining;
-
-    const timerEl = document.getElementById('game-timer');
-    const remainingEl = document.getElementById('time-remaining');
-    if (timerEl) timerEl.textContent = remaining + 's';
-    if (remainingEl) remainingEl.textContent = remaining;
-
-    if (remaining === 0) {
-      clearInterval(timerInterval);
-    }
+  // ── Helpers ────────────────────────────────────────────────────────────────
+  function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+  function typeName(t) {
+    return { trivia:'Trivia', prediction:'Prediction', vote:'Vote', spin:'Raffle',
+             number_guess:'Number Guess', fastest_finger:'Fastest Finger',
+             score_prediction:'Score Prediction' }[t] || t;
   }
+  function el(id) { return document.getElementById(id); }
 
-  function renderTrivia(game) {
-    const container = document.getElementById('trivia-layout');
-    const options = document.getElementById('trivia-options');
+  // ── State ──────────────────────────────────────────────────────────────────
+  let currentGame  = null;
+  let timerTick    = null;
 
-    container.style.display = 'block';
-    document.getElementById('vote-layout').style.display = 'none';
-    document.getElementById('spin-layout').style.display = 'none';
-
-    options.innerHTML = game.answers.map((answer, idx) => `
-      <div class="option">
-        <strong>${String.fromCharCode(65 + idx)}.</strong> ${answer}
-      </div>
-    `).join('');
-
-    document.getElementById('game-instructions').textContent =
-      `💬 Type your answer in chat! Example: "A", "B", "C", or "D"`;
+  // ── Bar game timer ─────────────────────────────────────────────────────────
+  function startTimer(game) {
+    stopTimer();
+    const timerEl = el('game-timer'), remEl = el('time-remaining');
+    const tick = () => {
+      const rem = Math.max(0, Math.ceil((new Date(game.endsAt) - Date.now()) / 1000));
+      if (timerEl) { timerEl.textContent = rem + 's'; timerEl.className = 'game-timer' + (rem <= 10 && rem > 0 ? ' urgent' : ''); }
+      if (remEl)   remEl.textContent = rem;
+      if (rem === 0) stopTimer();
+    };
+    tick();
+    timerTick = setInterval(tick, 500);
   }
+  function stopTimer() { if (timerTick) { clearInterval(timerTick); timerTick = null; } }
 
-  function renderVote(game) {
-    const container = document.getElementById('vote-layout');
-    const options = document.getElementById('vote-options');
+  // ═══════════════════════════════════════════════════════════════════════════
+  // SPINNING WHEEL
+  // ═══════════════════════════════════════════════════════════════════════════
+  const WHEEL_COLORS = [
+    '#FF6B6B','#4ECDC4','#FFE66D','#95E1D3','#F38181',
+    '#A8E6CF','#FF8B94','#7BC8A4','#C3A6FF','#FFD3A5',
+    '#FD7272','#54A0FF','#5F27CD','#00D2D3','#FF9F43'
+  ];
 
-    container.style.display = 'block';
-    document.getElementById('trivia-layout').style.display = 'none';
-    document.getElementById('spin-layout').style.display = 'none';
+  const canvas = el('wheel-canvas');
+  const ctx    = canvas && canvas.getContext('2d');
+  const CX     = 260, CY = 260, R = 248;
 
-    const totalVotes = game.options.reduce((sum, o) => sum + (o.votes || 0), 0);
+  let wheelRot       = 0;          // current rotation (radians)
+  let wheelRaf       = null;       // requestAnimationFrame handle
+  let wheelIdle      = false;      // idle spin running?
+  let wheelSpinning  = false;      // victory spin running?
+  let wheelEntries   = [];         // snapshot of entries for drawing
+  let wheelWinner    = null;       // winner entry object
+  let _prevEntryLen  = 0;          // for detecting new entries
 
-    options.innerHTML = game.options.map((opt, idx) => {
-      const percentage = totalVotes > 0 ? Math.round((opt.votes / totalVotes) * 100) : 0;
-      return `
-        <div class="vote-option">
-          <div style="width: 30px; font-weight: 700; color: #FFE66D;">${idx + 1}.</div>
-          <div style="flex: 1; min-width: 0;">
-            <div style="font-size: 13px; margin-bottom: 4px;">${opt.title}</div>
-            <div class="vote-bar-bg">
-              <div class="vote-bar-fill" style="width: ${percentage}%">
-                ${percentage > 5 ? percentage + '%' : ''}
-              </div>
-            </div>
-          </div>
-          <div class="vote-count">${opt.votes || 0}</div>
-        </div>
-      `;
-    }).join('');
+  function drawWheel(entries, rotation) {
+    if (!ctx) return;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    const n = entries.length;
 
-    const prefix = game.type === 'vote' ? 'vote' : 'predict';
-    document.getElementById('game-instructions').textContent =
-      `💬 Type "!${prefix} 1", "!${prefix} 2", etc. in chat to vote!`;
-  }
-
-  function renderSpin(game) {
-    const container = document.getElementById('spin-layout');
-    const counter = document.getElementById('spin-counter');
-
-    container.style.display = 'block';
-    document.getElementById('trivia-layout').style.display = 'none';
-    document.getElementById('vote-layout').style.display = 'none';
-
-    if (counter) {
-      counter.textContent = (game.entries?.length || 0) + ' ' +
-        (game.entries?.length === 1 ? 'entry' : 'entries');
-    }
-
-    document.getElementById('game-instructions').textContent =
-      `💬 Type anything in chat to enter the spin!`;
-  }
-
-  function renderGame(game) {
-    if (!game) return;
-
-    const titleEl = document.getElementById('game-title');
-    const questionEl = document.getElementById('game-question');
-    const participantsEl = document.getElementById('participants-count');
-
-    if (titleEl) titleEl.textContent = game.type.toUpperCase();
-    if (questionEl) questionEl.textContent = game.question || game.type;
-    if (participantsEl) participantsEl.textContent =
-      (game.responses && Object.keys(game.responses).length) ||
-      (game.entries && game.entries.length) ||
-      (game.options && game.options.reduce((s, o) => s + (o.votes || 0), 0)) ||
-      0;
-
-    if (game.type === 'trivia') {
-      renderTrivia(game);
-    } else if (game.type === 'prediction' || game.type === 'vote') {
-      renderVote(game);
-    } else if (game.type === 'spin') {
-      renderSpin(game);
-    }
-  }
-
-  SceneBase.connect(state => {
-    const game = state.twitch?.minigame?.current;
-    const container = document.getElementById('game-container');
-
-    if (!game || game.state !== 'active') {
-      container.style.display = 'none';
-      if (timerInterval) clearInterval(timerInterval);
-      currentGame = null;
+    if (n === 0) {
+      ctx.beginPath();
+      ctx.arc(CX, CY, R, 0, 2 * Math.PI);
+      ctx.fillStyle = 'rgba(255,255,255,0.06)';
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(78,205,196,0.3)';
+      ctx.lineWidth = 3;
+      ctx.stroke();
+      ctx.fillStyle = 'rgba(255,255,255,0.2)';
+      ctx.font = 'bold 16px Inter, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('Waiting for entries…', CX, CY);
       return;
     }
 
+    const slice = (2 * Math.PI) / n;
+
+    for (let i = 0; i < n; i++) {
+      const start = rotation + i * slice;
+      const end   = start + slice;
+
+      ctx.beginPath();
+      ctx.moveTo(CX, CY);
+      ctx.arc(CX, CY, R, start, end);
+      ctx.closePath();
+      ctx.fillStyle = WHEEL_COLORS[i % WHEEL_COLORS.length];
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(0,0,0,0.35)';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+
+      // Name text
+      const mid = start + slice / 2;
+      const maxFontSize = Math.min(18, Math.max(8, 200 / n));
+      ctx.save();
+      ctx.translate(CX, CY);
+      ctx.rotate(mid);
+      ctx.textAlign = 'right';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = n > 40 ? 'rgba(0,0,0,0.7)' : '#000';
+      ctx.font = `bold ${maxFontSize}px Inter, sans-serif`;
+      const name = entries[i].username || '';
+      const maxChars = Math.max(4, Math.floor(600 / n));
+      const label = name.length > maxChars ? name.slice(0, maxChars) + '…' : name;
+      ctx.fillText(label, R - 8, 0);
+      ctx.restore();
+    }
+
+    // Center hub
+    ctx.beginPath();
+    ctx.arc(CX, CY, 28, 0, 2 * Math.PI);
+    ctx.fillStyle = '#0d0b14';
+    ctx.fill();
+    ctx.strokeStyle = '#4ecdc4';
+    ctx.lineWidth = 3;
+    ctx.stroke();
+  }
+
+  // Idle: slow clockwise rotation
+  function startIdleSpin() {
+    if (wheelIdle || wheelSpinning) return;
+    wheelIdle = true;
+    const tick = () => {
+      if (!wheelIdle) return;
+      wheelRot += 0.006;
+      drawWheel(wheelEntries, wheelRot);
+      wheelRaf = requestAnimationFrame(tick);
+    };
+    wheelRaf = requestAnimationFrame(tick);
+  }
+
+  function stopIdleSpin() {
+    wheelIdle = false;
+    if (wheelRaf) { cancelAnimationFrame(wheelRaf); wheelRaf = null; }
+  }
+
+  // Victory spin: spin fast then decelerate, landing on winner
+  function doVictorySpin(entries, winnerIdx) {
+    stopIdleSpin();
+    wheelSpinning = true;
+
+    const n = entries.length;
+    const slice = (2 * Math.PI) / n;
+
+    // We want the winner's segment center to be at the top (-π/2)
+    const winnerCenter = winnerIdx * slice + slice / 2;
+    const targetBase   = -Math.PI / 2 - winnerCenter;
+    // Normalize to [0, 2π)
+    const targetNorm   = ((targetBase % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+    // Forward delta from current rotation
+    const currentNorm  = ((wheelRot % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+    const delta        = ((targetNorm - currentNorm) + 2 * Math.PI) % (2 * Math.PI);
+    // Add full spin rotations for drama (10 extra rotations)
+    const target       = wheelRot + delta + 10 * 2 * Math.PI;
+
+    const startRot     = wheelRot;
+    const duration     = 5500; // ms
+    const startTime    = performance.now();
+
+    const tick = (now) => {
+      const elapsed = now - startTime;
+      const t       = Math.min(elapsed / duration, 1);
+      // Ease out quint
+      const eased   = 1 - Math.pow(1 - t, 5);
+      wheelRot      = startRot + (target - startRot) * eased;
+      drawWheel(entries, wheelRot);
+      if (t < 1) {
+        wheelRaf = requestAnimationFrame(tick);
+      } else {
+        wheelSpinning = false;
+        revealWheelWinner(entries[winnerIdx], entries.length);
+      }
+    };
+    wheelRaf = requestAnimationFrame(tick);
+  }
+
+  function revealWheelWinner(winner, total) {
+    const badge = el('wheel-badge-label');
+    const dot   = el('wheel-dot');
+    const inst  = el('wheel-instruction');
+    const reveal = el('wheel-winner-reveal');
+    const wnEl  = el('wheel-winner-name');
+    const wsEl  = el('wheel-winner-sub');
+
+    if (badge)  badge.textContent = 'Giveaway Ended';
+    if (dot)    { dot.style.background = '#4ade80'; dot.style.boxShadow = '0 0 10px #4ade80'; dot.style.animation = 'none'; }
+    if (inst)   inst.style.display = 'none';
+    if (wnEl)   wnEl.textContent = '@' + (winner?.username || '?');
+    if (wsEl)   wsEl.textContent = `Chosen from ${total} entr${total !== 1 ? 'ies' : 'y'}`;
+    if (reveal) reveal.style.display = 'flex';
+  }
+
+  // Update wheel right-panel entries ticker (last N entries)
+  let _shownEntries = new Set();
+  function updateWheelEntries(entries) {
+    const list = el('wheel-entries-list');
+    if (!list) return;
+    const newOnes = entries.filter(e => !_shownEntries.has(e.userId));
+    newOnes.forEach(e => _shownEntries.add(e.userId));
+    if (newOnes.length === 0) return;
+    newOnes.forEach(e => {
+      const chip = document.createElement('div');
+      chip.className = 'wheel-entry-chip';
+      chip.textContent = '@' + e.username + ' entered!';
+      list.insertBefore(chip, list.firstChild);
+    });
+    // Keep max 8 visible
+    while (list.children.length > 8) list.removeChild(list.lastChild);
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // BAR GAME RENDERING
+  // ═══════════════════════════════════════════════════════════════════════════
+  const barLayouts = ['trivia','vote','number-guess','fastest','score'];
+
+  function hideBarLayouts() {
+    barLayouts.forEach(l => { const d = el('layout-' + l); if (d) d.style.display = 'none'; });
+  }
+
+  function renderBarGame(game) {
+    hideBarLayouts();
+    const typeEl = el('game-type-label'), qEl = el('game-question');
+    if (typeEl) typeEl.textContent = typeName(game.type);
+    if (qEl)    qEl.textContent    = game.question || '';
+
+    if (game.type === 'trivia') {
+      el('layout-trivia').style.display = '';
+      const opts = el('trivia-opts');
+      if (opts) opts.innerHTML = (game.answers||[]).map((a,i) =>
+        `<div class="trivia-opt"><div class="trivia-key">${String.fromCharCode(65+i)}</div><div class="trivia-text">${esc(a)}</div></div>`
+      ).join('');
+    } else if (game.type === 'prediction' || game.type === 'vote') {
+      el('layout-vote').style.display = '';
+      updateVoteBars(game);
+      const ins = el('vote-instruction');
+      if (ins) ins.textContent = `💬 Type !${game.type === 'prediction' ? 'predict' : 'vote'} 1 · 2 · … in chat`;
+    } else if (game.type === 'number_guess') {
+      el('layout-number-guess').style.display = '';
+      updateCt('guess-count', Object.keys(game.guesses||{}).length, 'guess','es','');
+    } else if (game.type === 'fastest_finger') {
+      el('layout-fastest').style.display = '';
+      const kw = el('ff-keyword'); if (kw) kw.textContent = game.keywordDisplay || game.keyword || '';
+      updateCt('ff-attempts', game.attempts||0, 'tried','','');
+    } else if (game.type === 'score_prediction') {
+      el('layout-score').style.display = '';
+      updateCt('score-count', Object.keys(game.guesses||{}).length, 'prediction','s','');
+    }
+    updateBarParticipants(game);
+  }
+
+  function updateVoteBars(game) {
+    const opts = el('vote-opts'); if (!opts) return;
+    const total = (game.options||[]).reduce((s,o) => s+(o.votes||0), 0);
+    opts.innerHTML = (game.options||[]).map(o => {
+      const pct = total > 0 ? Math.round((o.votes||0)/total*100) : 0;
+      return `<div class="vote-row">
+        <div class="vote-row-head">
+          <span class="vote-label">${esc(o.title)}</span>
+          <span class="vote-pct">${pct}%</span>
+          <span class="vote-count-lbl">${o.votes||0}</span>
+        </div>
+        <div class="vote-bar-track"><div class="vote-bar-fill" style="width:${pct>0?Math.max(pct,1):0}%"></div></div>
+      </div>`;
+    }).join('');
+  }
+
+  function updateCt(id, n, base, plural, singular) {
+    const d = el(id); if (d) d.textContent = n + ' ' + base + (n !== 1 ? plural : singular);
+  }
+  function updateBarParticipants(game) {
+    const d = el('participants-count'); if (!d) return;
+    d.textContent = (game.responses && Object.keys(game.responses).length) ||
+      (game.entries && game.entries.length) ||
+      (game.guesses && Object.keys(game.guesses).length) ||
+      (game.options && game.options.reduce((s,o) => s+(o.votes||0), 0)) ||
+      (game.attempts||0) || 0;
+  }
+
+  function showBarResults(game) {
+    stopTimer();
+    el('game-card').style.display    = 'none';
+    const card   = el('results-card');
+    const badge  = el('results-badge');
+    const answer = el('results-answer');
+    const winner = el('results-winner');
+    const sub    = el('results-sub');
+    if (!card) return;
+    card.style.display = 'flex';
+    if (badge) badge.textContent = typeName(game.type).toUpperCase() + ' RESULTS';
+    if (answer) answer.style.display = 'none';
+
+    if (game.type === 'trivia') {
+      const correct = game.answers?.[game.correctAnswerIndex] || '?';
+      const ws = game.winners || [];
+      if (answer) { answer.style.display=''; answer.textContent = '✅ ' + correct; }
+      if (winner) winner.textContent = ws.length ? `🏆 ${ws[0].username}${ws.length>1?' + '+(ws.length-1)+' more':''}` : 'Nobody got it!';
+      if (sub)    sub.textContent = `${ws.length} correct`;
+    } else if (game.type === 'prediction' || game.type === 'vote') {
+      const w = game.winner;
+      if (winner) winner.textContent = w ? `🏆 ${esc(w.title)}` : 'No winner';
+      if (sub)    sub.textContent    = w ? `${w.votes||0} votes` : '';
+    } else if (game.type === 'number_guess') {
+      const w = game.winner;
+      if (answer) { answer.style.display=''; answer.textContent = `🎯 Target: ${game.targetNumber}`; }
+      if (winner) winner.textContent = w ? `🏆 @${w.username} (guessed ${w.guess})` : 'No guesses!';
+      if (sub)    sub.textContent    = w ? (w.diff === 0 ? 'Exact match!' : `Off by ${w.diff}`) : '';
+    } else if (game.type === 'fastest_finger') {
+      const w = game.winner;
+      if (answer) { answer.style.display=''; answer.textContent = `"${game.keywordDisplay||game.keyword}"`; }
+      if (winner) winner.textContent = w ? `⚡ @${w.username} was first!` : 'Nobody typed it!';
+      if (sub)    sub.textContent    = `${game.attempts||0} attempt${game.attempts!==1?'s':''}`;
+    } else if (game.type === 'score_prediction') {
+      const score = game.actualScore ? `${game.actualScore[0]}–${game.actualScore[1]}` : '?–?';
+      const w = game.winner;
+      if (answer) { answer.style.display=''; answer.textContent = `Final: ${score}`; }
+      if (winner) winner.textContent = w ? `🏆 @${w.username} (${w.raw})` : 'No predictions!';
+      if (sub)    sub.textContent    = w && w.diff===0 ? 'Exact! 🎯' : (w ? `Off by ${w.diff}` : '');
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // STATE SUBSCRIPTION
+  // ═══════════════════════════════════════════════════════════════════════════
+  SceneBase.connect(state => {
+    const game      = state?.twitch?.minigame?.current;
+    const barCard   = el('game-card');
+    const barResult = el('results-card');
+    const wheelOv   = el('wheel-overlay');
+    const isSpin    = game?.type === 'spin';
+
+    // ── No game ──────────────────────────────────────────────────────────────
+    if (!game) {
+      barCard.style.display   = 'none';
+      barResult.style.display = 'none';
+      wheelOv.style.display   = 'none';
+      stopTimer(); stopIdleSpin();
+      currentGame = null;
+      _shownEntries = new Set();
+      return;
+    }
+
+    // ── Spin game ─────────────────────────────────────────────────────────────
+    if (isSpin) {
+      barCard.style.display   = 'none';
+      barResult.style.display = 'none';
+
+      if (game.state === 'active') {
+        wheelOv.style.display = 'flex';
+        const entries = game.entries || [];
+        wheelEntries  = entries;
+
+        // Update count
+        const wc = el('wheel-count'); if (wc) wc.textContent = entries.length;
+
+        // Title from question (may be the prize or just "Raffle")
+        const wt = el('wheel-title'); if (wt) wt.textContent = game.question || 'Raffle';
+
+        // New entries → update ticker
+        if (entries.length !== _prevEntryLen) {
+          _prevEntryLen = entries.length;
+          updateWheelEntries(entries);
+        }
+
+        if (!currentGame || currentGame.id !== game.id) {
+          currentGame = game;
+          _shownEntries = new Set();
+          wheelRot = 0;
+          stopIdleSpin();
+          // Reset right panel
+          const badge = el('wheel-badge-label'); if (badge) badge.textContent = 'Giveaway Open';
+          const dot = el('wheel-dot'); if (dot) { dot.style.background=''; dot.style.boxShadow=''; dot.style.animation=''; }
+          const inst = el('wheel-instruction'); if (inst) inst.style.display = '';
+          const rev = el('wheel-winner-reveal'); if (rev) rev.style.display = 'none';
+          const list = el('wheel-entries-list'); if (list) list.innerHTML = '';
+          drawWheel(entries, wheelRot);
+          startIdleSpin();
+        }
+
+      } else if (game.state === 'finished' && game.winner) {
+        wheelOv.style.display = 'flex';
+        if (!wheelSpinning && (!currentGame || currentGame.id !== game.id || !el('wheel-winner-reveal')?.style.display || el('wheel-winner-reveal').style.display === 'none')) {
+          currentGame = game;
+          wheelEntries = game.entries || [];
+          stopIdleSpin();
+          const winnerIdx = wheelEntries.findIndex(e => e.userId === game.winner.userId);
+          if (winnerIdx >= 0 && wheelEntries.length > 0) {
+            doVictorySpin(wheelEntries, winnerIdx);
+          } else {
+            // Fallback: no match — just reveal
+            drawWheel(wheelEntries, wheelRot);
+            revealWheelWinner(game.winner, wheelEntries.length);
+          }
+        }
+      } else {
+        wheelOv.style.display = 'none';
+        stopIdleSpin();
+      }
+      return;
+    }
+
+    // ── All other game types ──────────────────────────────────────────────────
+    wheelOv.style.display = 'none';
+    stopIdleSpin();
+
+    if (game.state === 'finished') {
+      if (!currentGame || currentGame.id !== game.id || barCard.style.display !== 'none') {
+        currentGame = game;
+        showBarResults(game);
+      }
+      return;
+    }
+
+    if (game.state !== 'active') {
+      barCard.style.display   = 'none';
+      barResult.style.display = 'none';
+      stopTimer(); currentGame = null;
+      return;
+    }
+
+    barResult.style.display = 'none';
+
     if (!currentGame || currentGame.id !== game.id) {
       currentGame = game;
-      renderGame(game);
-      container.style.display = 'block';
-
-      if (timerInterval) clearInterval(timerInterval);
-      timerInterval = setInterval(updateTimer, 100);
-      updateTimer();
+      renderBarGame(game);
+      barCard.style.display = '';
+      startTimer(game);
     } else {
-      // Update existing game
-      const participantsEl = document.getElementById('participants-count');
-      if (participantsEl) participantsEl.textContent =
-        (game.responses && Object.keys(game.responses).length) ||
-        (game.entries && game.entries.length) ||
-        (game.options && game.options.reduce((s, o) => s + (o.votes || 0), 0)) ||
-        0;
-
-      // Update vote options if needed
-      if (game.type === 'prediction' || game.type === 'vote') {
-        renderVote(game);
-      }
+      updateBarParticipants(game);
+      if (game.type === 'prediction' || game.type === 'vote') updateVoteBars(game);
+      if (game.type === 'number_guess') updateCt('guess-count', Object.keys(game.guesses||{}).length, 'guess','es','');
+      if (game.type === 'fastest_finger') updateCt('ff-attempts', game.attempts||0, 'tried','','');
+      if (game.type === 'score_prediction') updateCt('score-count', Object.keys(game.guesses||{}).length, 'prediction','s','');
     }
   });
 </script>
-
 </body>
 </html>

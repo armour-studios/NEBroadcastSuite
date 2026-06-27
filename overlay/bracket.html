@@ -4,18 +4,395 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=1920">
 <title>NE Broadcast Suite — Bracket</title>
-<link rel="stylesheet" href="bracket.css">
+<link rel="stylesheet" href="fonts.css">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --accent:   #055fdb;
+  --accent-2: #e97139;
+  --ink:      #eef1f7;
+  --muted:    #98a2b6;
+  --panel-1:  rgba(255,255,255,0.05);
+  --panel-2:  rgba(255,255,255,0.015);
+  --hair:     rgba(255,255,255,0.09);
+  --line:     rgba(255,255,255,0.18);
+  --disp:     'Rajdhani', sans-serif;
+  --body:     'Inter', sans-serif;
+}
+
+html, body { width: 1920px; height: 1080px; overflow: hidden; background: transparent; font-family: var(--body); color: var(--ink); -webkit-font-smoothing: antialiased; }
+
+.bk-stage { position: absolute; inset: 0; display: flex; flex-direction: column; padding: 44px 80px 40px;
+  opacity: 0; transform: scale(1.012); transition: opacity .55s ease, transform .55s ease; }
+.bk-stage.show { opacity: 1; transform: scale(1); }
+
+.bk-bg { position: absolute; inset: 0; z-index: -2;
+  background:
+    radial-gradient(120% 75% at 50% -8%, rgba(80,130,255,0.20) 0%, transparent 50%),
+    radial-gradient(80% 60% at 100% 108%, rgba(233,113,57,0.12) 0%, transparent 55%),
+    linear-gradient(180deg, #0b0d12 0%, #0e1118 55%, #0b0d12 100%); }
+.bk-bg::after { content: ''; position: absolute; inset: 0;
+  background-image: linear-gradient(var(--hair) 1px, transparent 1px), linear-gradient(90deg, var(--hair) 1px, transparent 1px);
+  background-size: 70px 70px; opacity: .04;
+  -webkit-mask-image: radial-gradient(85% 65% at 50% 32%, #000 0%, transparent 78%);
+  mask-image: radial-gradient(85% 65% at 50% 32%, #000 0%, transparent 78%); }
+
+/* ── Header ── */
+.bk-header { display: flex; align-items: center; gap: 22px; margin-bottom: 22px; flex: 0 0 auto; }
+.bk-bar { width: 7px; align-self: stretch; min-height: 62px; border-radius: 4px;
+  background: linear-gradient(180deg, var(--accent), var(--accent-2)); box-shadow: 0 0 22px var(--accent); }
+.bk-head-text { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.bk-eyebrow { font-family: var(--disp); font-weight: 700; font-size: 16px; letter-spacing: .42em; text-transform: uppercase; color: var(--accent); }
+.bk-title { font-family: var(--disp); font-weight: 700; font-size: 54px; line-height: .95; letter-spacing: .02em; text-transform: uppercase; color: #fff;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 1100px; }
+.bk-head-right { margin-left: auto; display: flex; align-items: center; gap: 12px; }
+.bk-format { font-family: var(--disp); font-weight: 800; font-size: 15px; letter-spacing: .16em; text-transform: uppercase; color: #04121f;
+  background: linear-gradient(135deg, var(--accent), var(--accent-2)); border-radius: 999px; padding: 9px 18px; white-space: nowrap;
+  box-shadow: 0 6px 18px rgba(0,0,0,.35); }
+.bk-phases { display: flex; gap: 8px; }
+.bk-phase { font-family: var(--disp); font-weight: 700; font-size: 14px; letter-spacing: .08em; text-transform: uppercase;
+  padding: 8px 16px; border-radius: 999px; color: var(--muted); background: var(--panel-1); border: 1px solid var(--hair); }
+.bk-phase.active { color: #fff; background: var(--accent); border-color: transparent; box-shadow: 0 4px 14px rgba(0,0,0,.35); }
+
+/* ── Body / scale ── */
+/* The bracket is laid out to a fixed 1760-wide design canvas (the safe area) so
+   the round columns spread edge-to-edge and FILL the frame instead of floating in
+   the middle; fit() then only shrinks it if a huge bracket is taller than the canvas. */
+.bk-body { flex: 1 1 auto; display: flex; align-items: center; justify-content: center; min-height: 0; }
+.bk-scale { transform-origin: center center; display: flex; flex-direction: column; align-items: stretch; gap: 26px; width: 1760px; }
+
+/* ── Section (Winners / Losers) ── */
+.bk-section { display: flex; flex-direction: column; align-items: center; width: 100%; }
+.bk-section-label { font-family: var(--disp); font-weight: 700; font-size: 22px; letter-spacing: .26em; text-transform: uppercase;
+  color: #cfd6e4; margin-bottom: 14px; display: inline-flex; align-items: center; gap: 14px; }
+.bk-section-label::before, .bk-section-label::after { content: ''; width: 46px; height: 2px; background: linear-gradient(90deg, transparent, var(--line)); }
+.bk-section-label::after { background: linear-gradient(90deg, var(--line), transparent); }
+
+/* Fixed, uniform match cards; columns spread across the full canvas width. */
+.bk-rounds { position: relative; display: flex; align-items: stretch; justify-content: space-evenly; gap: 48px; width: 100%; }
+.bk-connectors { position: absolute; inset: 0; pointer-events: none; z-index: 0; overflow: visible; }
+.bk-connectors path { fill: none; stroke: var(--line); stroke-width: 2; stroke-linejoin: round; }
+
+/* ── Round column (fixed width) ── */
+.bk-round { position: relative; z-index: 1; display: flex; flex-direction: column; width: 340px; flex: 0 0 340px; }
+.bk-round-name { font-family: var(--disp); font-weight: 700; font-size: 19px; letter-spacing: .14em; text-transform: uppercase;
+  color: var(--accent-2); text-align: center; margin-bottom: 16px; height: 22px; }
+.bk-round.is-final .bk-round-name { color: #ffd66b; }
+.bk-matches { display: flex; flex-direction: column; justify-content: space-around; gap: 22px; flex: 1; min-height: 0; }
+
+/* ── Match (fixed size) ── */
+.bk-match { position: relative; width: 340px; border-radius: 12px; border: 1px solid var(--hair);
+  background: linear-gradient(180deg, rgba(22,25,33,.96), rgba(13,15,21,.96)); box-shadow: 0 12px 30px rgba(0,0,0,.45); }
+.bk-match.is-final { border-color: rgba(255,214,107,.5); box-shadow: 0 0 0 1px rgba(255,214,107,.22), 0 14px 34px rgba(0,0,0,.5); }
+.bk-match.live { border-color: var(--accent); }
+.bk-match.live::after { content: 'LIVE'; position: absolute; top: -10px; right: 10px; font-family: var(--disp); font-weight: 800;
+  font-size: 11px; letter-spacing: .12em; color: #fff; background: #ff3b46; border-radius: 999px; padding: 2px 9px; box-shadow: 0 0 14px rgba(255,59,70,.55); }
+
+.bk-slot { display: flex; align-items: center; gap: 13px; padding: 0 16px; height: 62px; }
+.bk-slot + .bk-slot { border-top: 1px solid var(--hair); }
+.bk-slot:first-child { border-radius: 12px 12px 0 0; }
+.bk-slot:last-child { border-radius: 0 0 12px 12px; }
+.bk-logo { width: 34px; height: 34px; object-fit: contain; flex: 0 0 auto; filter: drop-shadow(0 1px 3px rgba(0,0,0,.5)); }
+.bk-logo.logo-on-dark { filter: invert(1) drop-shadow(0 1px 3px rgba(0,0,0,.5)); }
+.bk-logo-ph { width: 34px; height: 34px; border-radius: 8px; flex: 0 0 auto; background: rgba(255,255,255,.06); border: 1px solid var(--hair); }
+.bk-name { font-family: var(--disp); font-weight: 600; font-size: 25px; color: #cfd4de; letter-spacing: .01em;
+  flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bk-score { font-family: var(--disp); font-weight: 800; font-size: 25px; color: #7e8597; min-width: 32px; text-align: center;
+  font-variant-numeric: tabular-nums; }
+.bk-slot.winner { background: linear-gradient(90deg, rgba(255,255,255,.09), transparent 85%); box-shadow: inset 4px 0 0 var(--accent); }
+.bk-slot.winner .bk-name { color: #fff; font-weight: 700; }
+.bk-slot.winner .bk-score { color: #fff; }
+.bk-slot.loser .bk-name { color: #767d8c; }
+.bk-slot.loser .bk-logo { opacity: .55; }
+
+/* ── Standings (round-robin / swiss) ── */
+.bk-standings { align-self: center; width: 1100px; max-width: 100%; border-radius: 16px; overflow: hidden; border: 1px solid var(--hair);
+  background: linear-gradient(180deg, rgba(22,25,33,.96), rgba(13,15,21,.96)); box-shadow: 0 18px 44px rgba(0,0,0,.5); }
+.bk-st-row { display: grid; grid-template-columns: 100px 1fr 100px 100px 150px; align-items: center; height: 68px; padding: 0 32px; }
+.bk-st-row + .bk-st-row { border-top: 1px solid var(--hair); }
+.bk-st-head { background: rgba(255,255,255,.06); height: 52px; }
+.bk-st-head > div { font-family: var(--disp); font-weight: 700; font-size: 15px; letter-spacing: .16em; text-transform: uppercase; color: #aeb6c4; }
+.bk-st-rank { font-family: var(--disp); font-weight: 800; font-size: 24px; color: var(--muted); text-align: center; }
+.bk-st-row.r1 .bk-st-rank { color: #ffd66b; } .bk-st-row.r2 .bk-st-rank { color: #cdd6e4; } .bk-st-row.r3 .bk-st-rank { color: #e0944a; }
+.bk-st-team { display: flex; align-items: center; gap: 14px; min-width: 0; }
+.bk-st-logo { width: 34px; height: 34px; object-fit: contain; flex: 0 0 auto; }
+.bk-st-logo.logo-on-dark { filter: invert(1); }
+.bk-st-name { font-family: var(--disp); font-weight: 700; font-size: 24px; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bk-st-rec { font-family: var(--disp); font-weight: 800; font-size: 24px; text-align: center; font-variant-numeric: tabular-nums; }
+.bk-st-w { color: #5fe39a; } .bk-st-l { color: #f08a8a; }
+.bk-st-bar { height: 9px; border-radius: 999px; background: rgba(255,255,255,.08); overflow: hidden; }
+.bk-st-bar > span { display: block; height: 100%; border-radius: 999px; background: linear-gradient(90deg, var(--accent), var(--accent-2)); }
+
+/* ── Empty ── */
+.bk-empty { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  font-family: var(--disp); font-weight: 600; font-size: 30px; letter-spacing: .06em; color: rgba(255,255,255,.24); text-transform: uppercase; }
+.hidden { display: none !important; }
+</style>
 </head>
 <body>
 
-<!-- Standalone bracket scene — add as its own OBS browser source / scene.
-     Driven by the same WS bridge (:3001), fed by Start.gg. -->
-<div id="bracket-stage" class="bracket-stage">
-  <div id="bracket-title" class="bracket-title"></div>
-  <div id="bracket-body" class="bracket-body"></div>
-  <div id="bracket-empty" class="bracket-empty">No bracket loaded — load an event from the Production tab.</div>
+<div id="bk-stage" class="bk-stage">
+  <div class="bk-bg"></div>
+  <header class="bk-header">
+    <div class="bk-bar"></div>
+    <div class="bk-head-text">
+      <div class="bk-eyebrow">Tournament Bracket</div>
+      <div class="bk-title" id="bk-title"></div>
+    </div>
+    <div class="bk-head-right">
+      <div class="bk-phases" id="bk-phases"></div>
+      <div class="bk-format" id="bk-format" style="display:none;"></div>
+    </div>
+  </header>
+  <main class="bk-body"><div class="bk-scale" id="bk-scale"></div></main>
+  <div class="bk-empty" id="bk-empty">No bracket loaded — load an event from the dashboard.</div>
 </div>
 
-<script src="bracket.js"></script>
+<script src="scene-base.js"></script>
+<script>
+(function () {
+  const SVGNS = 'http://www.w3.org/2000/svg';
+  function el(id) { return document.getElementById(id); }
+  let logoByName = {};
+  let _sig = '';
+
+  function logoFor(name) { return (name && logoByName[name.toLowerCase()]) || null; }
+  function isDark(src) { try { return SceneBase.isDefaultGameLogo(src); } catch (e) { return false; } }
+
+  function fmtType(t) {
+    return ({ SINGLE_ELIMINATION: 'Single Elimination', DOUBLE_ELIMINATION: 'Double Elimination',
+      ROUND_ROBIN: 'Round Robin', SWISS: 'Swiss' })[t] || (t ? t.replace(/_/g, ' ') : '');
+  }
+
+  function buildSlot(slot) {
+    const s = slot || { name: 'TBD', score: null, winner: false };
+    const known = s.name && s.name !== 'TBD';
+    const row = document.createElement('div');
+    row.className = 'bk-slot' + (s.winner ? ' winner' : (known ? ' loser' : ''));
+    const logo = known ? logoFor(s.name) : null;
+    if (logo) {
+      const img = document.createElement('img');
+      img.className = 'bk-logo' + (isDark(logo) ? ' logo-on-dark' : '');
+      img.src = logo; img.onerror = function () { this.outerHTML = '<span class="bk-logo-ph"></span>'; };
+      row.appendChild(img);
+    } else {
+      const ph = document.createElement('span'); ph.className = 'bk-logo-ph'; row.appendChild(ph);
+    }
+    const name = document.createElement('div'); name.className = 'bk-name'; name.textContent = s.name || 'TBD';
+    const score = document.createElement('div'); score.className = 'bk-score';
+    score.textContent = (s.score === null || s.score === undefined) ? '–' : s.score;
+    row.appendChild(name); row.appendChild(score);
+    return row;
+  }
+
+  function buildMatch(set, isFinal) {
+    const m = document.createElement('div');
+    const a = set.a || {}, b = set.b || {};
+    const known = (a.name && a.name !== 'TBD') && (b.name && b.name !== 'TBD');
+    const decided = a.winner || b.winner;
+    const inPlay = known && !decided && (((a.score || 0) + (b.score || 0)) > 0);
+    m.className = 'bk-match' + (isFinal ? ' is-final' : '') + (inPlay ? ' live' : '');
+    m.appendChild(buildSlot(a));
+    m.appendChild(buildSlot(b));
+    return m;
+  }
+
+  function buildColumn(round, isFinal) {
+    const col = document.createElement('div');
+    col.className = 'bk-round' + (isFinal ? ' is-final' : '');
+    const name = document.createElement('div'); name.className = 'bk-round-name'; name.textContent = round.name || '';
+    col.appendChild(name);
+    const matches = document.createElement('div'); matches.className = 'bk-matches';
+    (round.sets || []).forEach((set) => matches.appendChild(buildMatch(set, isFinal)));
+    col.appendChild(matches);
+    return col;
+  }
+
+  // Section = label + a horizontal band of round columns + an SVG connector layer.
+  function buildSection(label, rounds, finalsStart) {
+    const section = document.createElement('div');
+    section.className = 'bk-section';
+    if (label) { const l = document.createElement('div'); l.className = 'bk-section-label'; l.textContent = label; section.appendChild(l); }
+    const band = document.createElement('div'); band.className = 'bk-rounds';
+    const svg = document.createElementNS(SVGNS, 'svg'); svg.setAttribute('class', 'bk-connectors'); band.appendChild(svg);
+    rounds.forEach((r, i) => band.appendChild(buildColumn(r, finalsStart != null && i >= finalsStart)));
+    section.appendChild(band);
+    return section;
+  }
+
+  // Elbow connectors between adjacent round columns of one .bk-rounds band.
+  function drawConnectors(band) {
+    const svg = band.querySelector('.bk-connectors'); if (!svg) return;
+    while (svg.firstChild) svg.removeChild(svg.firstChild);
+    const base = band.getBoundingClientRect();
+    if (!base.width) return;
+    svg.setAttribute('width', base.width); svg.setAttribute('height', base.height);
+    svg.setAttribute('viewBox', '0 0 ' + base.width + ' ' + base.height);
+    const cols = Array.prototype.slice.call(band.querySelectorAll('.bk-round'));
+    for (let c = 1; c < cols.length; c++) {
+      const parents = Array.prototype.slice.call(cols[c - 1].querySelectorAll('.bk-match'));
+      const children = Array.prototype.slice.call(cols[c].querySelectorAll('.bk-match'));
+      if (!parents.length || !children.length) continue;
+      children.forEach((child, j) => {
+        const cr = child.getBoundingClientRect();
+        const cx = cr.left - base.left, cy = cr.top - base.top + cr.height / 2;
+        let feeders;
+        if (parents.length >= children.length * 2 - 1) feeders = [parents[2 * j], parents[2 * j + 1]];
+        else if (parents.length === children.length) feeders = [parents[j]];
+        else feeders = [parents[Math.min(parents.length - 1, Math.round(j * parents.length / children.length))]];
+        feeders.filter(Boolean).forEach((p) => {
+          const pr = p.getBoundingClientRect();
+          const px = pr.right - base.left, py = pr.top - base.top + pr.height / 2;
+          const midX = px + (cx - px) / 2;
+          const path = document.createElementNS(SVGNS, 'path');
+          path.setAttribute('d', 'M ' + px + ' ' + py + ' H ' + midX + ' V ' + cy + ' H ' + cx);
+          svg.appendChild(path);
+        });
+      });
+    }
+  }
+
+  function buildStandings(standings) {
+    const wrap = document.createElement('div'); wrap.className = 'bk-standings';
+    const head = document.createElement('div'); head.className = 'bk-st-row bk-st-head';
+    head.innerHTML = '<div class="bk-st-rank">#</div><div>Team</div><div style="text-align:center">W</div><div style="text-align:center">L</div><div style="text-align:center">Win %</div>';
+    wrap.appendChild(head);
+    standings.forEach((s, i) => {
+      const total = (s.wins || 0) + (s.losses || 0);
+      const pct = total ? Math.round((s.wins / total) * 100) : 0;
+      const row = document.createElement('div'); row.className = 'bk-st-row' + (i < 3 ? ' r' + (i + 1) : '');
+      const rank = document.createElement('div'); rank.className = 'bk-st-rank'; rank.textContent = s.placement;
+      const team = document.createElement('div'); team.className = 'bk-st-team';
+      const logo = logoFor(s.name);
+      if (logo) { const img = document.createElement('img'); img.className = 'bk-st-logo' + (isDark(logo) ? ' logo-on-dark' : ''); img.src = logo; img.onerror = function () { this.style.display = 'none'; }; team.appendChild(img); }
+      const nm = document.createElement('div'); nm.className = 'bk-st-name'; nm.textContent = s.name; team.appendChild(nm);
+      const w = document.createElement('div'); w.className = 'bk-st-rec bk-st-w'; w.textContent = s.wins;
+      const l = document.createElement('div'); l.className = 'bk-st-rec bk-st-l'; l.textContent = s.losses;
+      const bar = document.createElement('div'); bar.className = 'bk-st-bar'; bar.innerHTML = '<span style="width:' + pct + '%"></span>';
+      row.appendChild(rank); row.appendChild(team); row.appendChild(w); row.appendChild(l); row.appendChild(bar);
+      wrap.appendChild(row);
+    });
+    return wrap;
+  }
+
+  // Scale the fixed-size bracket to FILL the 16:9 canvas: never overflow, but
+  // upscale small brackets (cap 1.5×) so an 8-team and a 32-team event both frame
+  // consistently instead of floating tiny in the middle.
+  var MAX_FIT = 1.5;
+  function fit() {
+    const scaleEl = el('bk-scale'); const body = scaleEl.parentElement;
+    scaleEl.style.transform = 'scale(1)';
+    const cw = body.clientWidth, ch = body.clientHeight;
+    const sw = scaleEl.scrollWidth, sh = scaleEl.scrollHeight;
+    if (!sw || !sh) return;
+    const s = Math.min(MAX_FIT, cw / sw, ch / sh);
+    scaleEl.style.transform = 'scale(' + s + ')';
+  }
+
+  // ?show=1 — always render the live bracket (ignore the on-air visible flag, no demo fallback).
+  // Used by the control-panel "Live bracket preview" so producers see the real loaded bracket off-air.
+  const FORCE_SHOW = new URLSearchParams(location.search).get('show') === '1';
+
+  // View mode is driven by control-panel state (state.bracket.view / .rounds) so one OBS source
+  // updates live as the producer clicks Full / Upper / Lower / Finals stretch. A URL param
+  // (?part=winners|losers|both, ?rounds=N) still overrides per-source if you want a fixed scene.
+  const _BQ = new URLSearchParams(location.search);
+  const URL_PART = _BQ.get('part');       // null unless overridden per source
+  const URL_ROUNDS = _BQ.get('rounds');   // null unless overridden per source
+  function render(data) {
+    const b = data.bracket || {};
+    const stage = el('bk-stage'), scaleEl = el('bk-scale'), emptyEl = el('bk-empty');
+    stage.classList.toggle('show', SceneBase.preview || FORCE_SHOW || !!b.visible);
+
+    // Effective view: URL override > state-driven view.
+    const view = (URL_PART || b.view || 'both').toLowerCase();
+    const SHOW_W = view !== 'losers' && view !== 'lower';
+    const SHOW_L = view !== 'winners' && view !== 'upper';
+    let ROUNDS_N = 0;
+    if (URL_ROUNDS != null) ROUNDS_N = Math.max(0, parseInt(URL_ROUNDS, 10) || 0);
+    else if (view === 'finals') ROUNDS_N = Math.max(1, parseInt(b.rounds, 10) || 4);   // finals stretch
+    const _lastN = (arr) => (ROUNDS_N > 0 && arr.length > ROUNDS_N) ? arr.slice(arr.length - ROUNDS_N) : arr;
+
+    const winners = b.winners || [], losers = b.losers || [], finals = b.finals || [], standings = b.standings || [];
+    const phases = b.phases || [];
+    const isElim = winners.length || losers.length || finals.length;
+    const hasData = isElim || standings.length;
+
+    const sig = JSON.stringify({ t: b.title, ty: b.type, w: winners, l: losers, f: finals, s: standings,
+      ph: phases.map((p) => p.id + p.name), ap: b.activePhaseId, lg: logoByName, vw: view, rn: ROUNDS_N });
+    if (sig === _sig) return;
+    _sig = sig;
+
+    document.documentElement.style.setProperty('--accent', SceneBase.brandColor(data));
+    document.documentElement.style.setProperty('--accent-2', SceneBase.brandAccent(data));
+
+    el('bk-title').textContent = (b.title || '').toUpperCase();
+    const fmt = el('bk-format'); const ft = fmtType(b.type);
+    fmt.textContent = ft; fmt.style.display = (ft && hasData) ? '' : 'none';
+    emptyEl.classList.toggle('hidden', !!hasData);
+
+    const ph = el('bk-phases'); ph.innerHTML = '';
+    if (phases.length > 1) phases.forEach((p) => {
+      const t = document.createElement('div'); t.className = 'bk-phase' + (p.id === b.activePhaseId ? ' active' : '');
+      t.textContent = p.name || 'Phase'; ph.appendChild(t);
+    });
+
+    scaleEl.innerHTML = '';
+    if (isElim) {
+      const isDouble = losers.length > 0;
+      let rendered = false;
+      if (SHOW_W) {
+        // winners (+ grand finals) — trim to last N columns if requested (finalsStart shifts with the cut).
+        let winnerCols = winners.concat(finals);
+        let wFinalsStart = winners.length;
+        if (ROUNDS_N > 0 && winnerCols.length > ROUNDS_N) {
+          const cut = winnerCols.length - ROUNDS_N;
+          winnerCols = winnerCols.slice(cut);
+          wFinalsStart = Math.max(0, winners.length - cut);
+        }
+        if (winnerCols.length) { scaleEl.appendChild(buildSection(isDouble ? 'Winners Bracket' : '', winnerCols, wFinalsStart)); rendered = true; }
+      }
+      if (SHOW_L && isDouble) {
+        const loserCols = _lastN(losers);
+        if (loserCols.length) { scaleEl.appendChild(buildSection('Losers Bracket', loserCols)); rendered = true; }
+      }
+      emptyEl.classList.toggle('hidden', rendered);   // e.g. ?part=losers on a single-elim → show empty
+    } else if (standings.length) {
+      scaleEl.appendChild(buildStandings(standings));
+    }
+
+    // Connectors are computed in the wrapper's UNSCALED coordinate space, then fit()
+    // scales the whole wrapper (SVG included) to the canvas — so draw at scale 1 first.
+    requestAnimationFrame(() => {
+      scaleEl.style.transform = 'scale(1)';
+      scaleEl.querySelectorAll('.bk-rounds').forEach(drawConnectors);
+      fit();
+    });
+  }
+
+  function applyState(data) {
+    let d = data;
+    // In preview, the live full_state (which arrives right after the demo) has no
+    // bracket — keep showing the sample instead of letting it blank the scene.
+    if (SceneBase.preview) {
+      const lb = data.bracket || {};
+      const has = (lb.winners || []).length || (lb.losers || []).length || (lb.finals || []).length || (lb.standings || []).length;
+      if (!has) {
+        const demo = SceneBase.demoState();
+        d = Object.assign({}, data, { bracket: demo.bracket,
+          startgg: Object.assign({}, data.startgg, { logoMap: (demo.startgg && demo.startgg.logoMap) || {} }) });
+      }
+    }
+    logoByName = {};
+    const sgg = (d.startgg && d.startgg.logoMap) || {};
+    Object.keys(sgg).forEach((k) => { if (sgg[k]) logoByName[k] = sgg[k]; });
+    (d.savedTeams || []).forEach((t) => { if (t && t.name && t.logo) logoByName[t.name.toLowerCase()] = t.logo; });
+    render(d);
+  }
+
+  SceneBase.connect(applyState);
+})();
+</script>
 </body>
 </html>

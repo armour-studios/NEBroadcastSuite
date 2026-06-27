@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -50,14 +50,16 @@ img{display:block;}
 }
 @keyframes headIn{from{opacity:0;transform:translateX(-50%) translateY(-18px);}}
 
-/* animated white light that travels around the header border (ported from csgo.html) */
-.head-beam{position:absolute;inset:0;width:100%;height:100%;z-index:40;pointer-events:none;overflow:visible;}
-.head-beam path{fill:none;vector-effect:non-scaling-stroke;}
-.head-beam .hb-base{stroke:rgba(255,255,255,.10);stroke-width:1.5;}
-.head-beam .hb-beam{stroke:#fff;stroke-width:2;stroke-linecap:round;
+/* animated white light that traces the SILHOUETTE of the whole top cluster (event title +
+   scorebar + GAME tab). The path is computed at runtime from the live element sizes — see
+   drawHeaderOutline(). Top-level SVG so it isn't clipped by the scorebar. */
+#header-outline{position:absolute;top:0;left:0;width:1920px;height:210px;z-index:42;pointer-events:none;overflow:visible;}
+#header-outline path{fill:none;vector-effect:non-scaling-stroke;}
+#header-outline .hb-base{stroke:rgba(255,255,255,.10);stroke-width:1.5;}
+#header-outline .hb-beam{stroke:#fff;stroke-width:2;stroke-linecap:round;
   stroke-dasharray:15 85;filter:drop-shadow(0 0 5px rgba(255,255,255,.9));
   animation:headBeam 6.5s linear infinite;}
-@keyframes headBeam{ to{stroke-dashoffset:-100;} }   /* continuous lap around the WHOLE header outline */
+@keyframes headBeam{ to{stroke-dashoffset:-100;} }   /* continuous lap around the WHOLE silhouette */
 
 /* slanted event banner — seats ON TOP of the bar, angled top corners over the feed */
 .event-name{
@@ -87,7 +89,7 @@ img{display:block;}
 /* name + series pips stacked, fills the space between logo/chip and score */
 .team-meta{display:flex;flex-direction:column;justify-content:center;flex:1;min-width:0;gap:5px;}
 .team.orange .team-meta{align-items:flex-end;}
-.team-name{font-weight:700;font-size:22px;white-space:nowrap;line-height:1.04;
+.team-name{font-weight:700;font-size:22px;white-space:nowrap;line-height:1.04;text-transform:uppercase;
   max-width:100%;overflow:hidden;text-overflow:ellipsis;}
 .team.blue .team-name{transform-origin:left center;}
 .team.orange .team-name{text-align:right;transform-origin:right center;}
@@ -192,6 +194,12 @@ img{display:block;}
 .pc-card.spectated{transform:scale(1.04);
   box-shadow:inset 0 0 0 2px var(--pc-spec,#fff),inset 0 0 20px -5px var(--pc-glow,transparent);
   filter:drop-shadow(0 0 8px var(--pc-glow,transparent));}
+/* traveling-light SILHOUETTE around the spectated card is an SVG beam (#spec-outline), traced in JS */
+#spec-outline{position:absolute;top:0;left:0;width:1920px;height:1080px;z-index:46;pointer-events:none;overflow:visible;}
+#spec-outline path{fill:none;vector-effect:non-scaling-stroke;}
+#spec-outline .hb-base{stroke:var(--spec-color,#2f8dff);opacity:.32;stroke-width:2;}
+#spec-outline .hb-beam{stroke:#fff;stroke-width:2.5;stroke-linecap:round;stroke-dasharray:13 87;
+  filter:drop-shadow(0 0 6px var(--spec-color,#2f8dff));animation:headBeam 3s linear infinite;}
 .pc-card.demolished{opacity:.62;filter:grayscale(.7);}   /* dimmed + desaturated while the player is out */
 
 /* body — line1: name, line2: stat icons */
@@ -313,33 +321,43 @@ img{display:block;}
 .boost-val{font-size:42px;font-weight:900;line-height:1;font-variant-numeric:tabular-nums;text-shadow:0 0 18px var(--spec-color);}
 .boost-lbl{font-size:8px;letter-spacing:.3em;color:var(--muted);margin-top:3px;padding-left:.3em;}
 
-/* ─── REPLAY LOWER THIRD (bottom-right): scorer + boost + assist, shown in the replay ─── */
+/* ─── REPLAY LOWER THIRD (bottom-centre): clean goal card — team identity + scorer + assist,
+       with SHOT SPEED and LAST MAN BACK stats ─── */
 .br.r-hide{transform:translateY(150%)!important;opacity:0!important;}   /* statcard yields to it */
-.replay-lt{position:absolute;left:50%;bottom:40px;z-index:60;min-width:360px;max-width:470px;overflow:hidden;
-  border-radius:12px;background:linear-gradient(180deg,rgba(15,19,30,.96),rgba(8,11,18,.985));
-  box-shadow:0 16px 42px rgba(0,0,0,.55);
-  transform:translate(-50%,34px) scale(.98);opacity:0;
+.replay-lt{position:absolute;left:50%;bottom:12px;z-index:60;display:flex;align-items:stretch;
+  min-width:420px;max-width:600px;overflow:hidden;border-radius:14px;
+  background:linear-gradient(180deg,rgba(17,21,32,.97),rgba(9,12,19,.99));
+  box-shadow:0 18px 46px rgba(0,0,0,.6),inset 0 0 0 1px rgba(255,255,255,.05);
+  transform:translate(-50%,30px) scale(.98);opacity:0;
   transition:transform .45s cubic-bezier(.2,.85,.25,1),opacity .4s;}
 .replay-lt.show{transform:translate(-50%,0) scale(1);opacity:1;}
-.rlt-head{display:flex;align-items:center;gap:10px;height:26px;padding:0 15px;
-  background:var(--rlt-color,#2f8dff);box-shadow:inset 0 -2px 7px rgba(0,0,0,.25);}
-.rlt-tag{font-size:11px;font-weight:900;letter-spacing:.22em;color:#fff;text-transform:uppercase;text-shadow:0 1px 2px rgba(0,0,0,.35);}
-.rlt-team{margin-left:auto;font-size:11px;font-weight:700;letter-spacing:.12em;color:rgba(255,255,255,.92);text-transform:uppercase;
-  max-width:62%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-.rlt-body{display:flex;align-items:center;gap:14px;padding:8px 16px 9px;}
-.rlt-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px;}
-.rlt-scorer{font-size:21px;font-weight:900;line-height:1;text-transform:uppercase;color:#fff;
+/* left identity block: team-colour edge + logo + names */
+.rlt-identity{position:relative;flex:1;min-width:0;display:flex;align-items:center;gap:14px;padding:13px 20px 13px 22px;}
+.rlt-identity::before{content:'';position:absolute;left:0;top:0;bottom:0;width:5px;
+  background:var(--rlt-color,#2f8dff);box-shadow:0 0 16px var(--rlt-color,#2f8dff);}
+.rlt-logo{width:48px;height:48px;flex:none;object-fit:contain;filter:drop-shadow(0 3px 9px rgba(0,0,0,.6));}
+.rlt-logo.hidden{display:none;}
+.rlt-id-text{display:flex;flex-direction:column;gap:3px;min-width:0;}
+.rlt-team{font-size:10px;font-weight:800;letter-spacing:.2em;text-transform:uppercase;color:var(--rlt-color,#2f8dff);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.rlt-scorer{font-size:23px;font-weight:900;line-height:1.02;text-transform:uppercase;color:#fff;
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-shadow:0 1px 3px rgba(0,0,0,.4);}
-.rlt-assist{display:flex;align-items:center;gap:6px;font-size:10.5px;font-weight:700;letter-spacing:.1em;color:var(--muted);text-transform:uppercase;}
-.rlt-mic{width:14px;height:14px;flex:none;color:var(--rlt-color,#2f8dff);}   /* masked RL assist icon */
-/* speed + boost stats, each with its own icon */
-.rlt-stats{flex:none;display:flex;align-items:center;gap:15px;padding-left:14px;border-left:1px solid rgba(255,255,255,.1);}
-.rlt-stat{display:flex;align-items:center;gap:8px;}
-.rlt-ic{width:20px;height:20px;flex:none;color:var(--rlt-color,#2f8dff);filter:drop-shadow(0 0 7px var(--rlt-color,#2f8dff));}
-.rlt-ic svg{width:100%;height:100%;display:block;}
-.rlt-stat-txt{display:flex;flex-direction:column;line-height:1;}
-.rlt-stat-val{font-size:19px;font-weight:900;color:#fff;font-variant-numeric:tabular-nums;}
-.rlt-stat-lbl{font-size:7px;font-weight:700;letter-spacing:.2em;color:var(--muted);margin-top:2px;}
+.rlt-assist{display:flex;align-items:center;gap:6px;font-size:10px;font-weight:700;letter-spacing:.08em;
+  color:var(--muted);text-transform:uppercase;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.rlt-assist.hidden{display:none;}
+.rlt-assist-lbl{opacity:.65;}
+.rlt-assist b{color:#dfe3ea;font-weight:800;}
+.rlt-mic{width:13px;height:13px;flex:none;color:var(--rlt-color,#2f8dff);}   /* masked RL assist icon */
+/* right stats block: SHOT SPEED + LAST MAN BACK on a darker panel */
+.rlt-stats{flex:none;display:flex;align-items:stretch;background:rgba(0,0,0,.3);}
+.rlt-stat{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;padding:0 18px;min-width:86px;position:relative;}
+.rlt-stat.hidden{display:none;}
+.rlt-stat+.rlt-stat::before{content:'';position:absolute;left:0;top:24%;bottom:24%;width:1px;background:rgba(255,255,255,.1);}
+.rlt-stat-val{display:flex;align-items:baseline;gap:3px;font-size:25px;font-weight:900;color:#fff;font-variant-numeric:tabular-nums;line-height:1;}
+.rlt-unit{font-size:10px;font-weight:800;color:var(--muted);letter-spacing:.04em;}
+.rlt-stat-name{font-size:15px;font-weight:900;text-transform:uppercase;letter-spacing:.01em;color:#fff;
+  max-width:140px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.rlt-stat-lbl{font-size:7.5px;font-weight:800;letter-spacing:.18em;color:var(--muted);text-transform:uppercase;white-space:nowrap;}
 
 /* ─── REPLAY CAMS: a cam + stat card per player, on the SIDEBAR edges (blue left,
    orange right), stacked in the SAME order as the normal-play sidebar ─── */
@@ -387,7 +405,8 @@ img{display:block;}
 .brazil-score span{color:#ffdf00;margin:0 .06em;}
 .brazil-word{margin-top:6px;font-size:29px;font-weight:900;letter-spacing:.36em;padding-left:.36em;color:#ffdf00;text-shadow:0 2px 8px rgba(0,0,0,.4);}
 /* sponsor logo under the flag (from the replay slot / brand kit) */
-.brazil-sponsor{max-height:58px;max-width:320px;object-fit:contain;opacity:0;filter:drop-shadow(0 4px 14px rgba(0,0,0,.55));}
+.brazil-sponsor{max-height:64px;max-width:340px;object-fit:contain;opacity:0;filter:drop-shadow(0 4px 14px rgba(0,0,0,.55));}
+.brazil-sponsor.hidden{display:none;}   /* no logo configured → don't render a broken/empty image */
 .brazil.play .brazil-sponsor{animation:brazilSpon 2.8s ease;}
 @keyframes brazilSpon{0%,24%{opacity:0;}36%{opacity:1;}66%{opacity:1;}80%,100%{opacity:0;}}
 
@@ -445,8 +464,11 @@ img{display:block;}
 /* ───── REPLAY TRANSITION — dark panel swipes IN (sponsor visible), holds, swipes OUT ──── */
 .replay-wipe{position:absolute;top:0;bottom:0;left:-16%;right:-16%;z-index:80;pointer-events:none;overflow:hidden;
   --rp-dur:2.6s;display:flex;align-items:center;justify-content:center;
-  background:linear-gradient(120deg,rgba(7,10,16,.975) 0%,rgba(14,19,30,.985) 55%,rgba(7,10,16,.975) 100%);
-  transform:translateX(-130%) skewX(-8deg);}
+  /* soft team-colour glow over a dark panel — depth without the per-frame cost of a striped texture */
+  background:
+    radial-gradient(140% 140% at 30% 50%,color-mix(in srgb,var(--replay-color,#fff) 17%,transparent) 0%,transparent 60%),
+    linear-gradient(120deg,rgba(8,11,18,.965) 0%,rgba(14,20,32,.98) 55%,rgba(8,11,18,.965) 100%);
+  transform:translateX(-130%) skewX(-8deg);will-change:transform;backface-visibility:hidden;}
 .replay-wipe.logo-only{--rp-dur:1.6s;}   /* the after-replay outro is quicker */
 .replay-wipe.play{animation:replaySwipe var(--rp-dur) cubic-bezier(.66,0,.2,1);}
 @keyframes replaySwipe{0%{transform:translateX(-130%) skewX(-8deg);}18%{transform:translateX(0) skewX(-8deg);}
@@ -463,7 +485,7 @@ img{display:block;}
 .replay-chevrons i{width:0;height:0;border-style:solid;border-width:11px 0 11px 18px;
   border-color:transparent transparent transparent var(--replay-color,#fff);}
 .replay-text{position:relative;font-size:200px;font-weight:900;font-style:italic;letter-spacing:.1em;
-  white-space:nowrap;text-transform:uppercase;line-height:1;
+  white-space:nowrap;text-transform:uppercase;line-height:1;padding:0 .14em;overflow:visible;
   background:linear-gradient(100deg,#fff 40%,var(--replay-color,#fff));-webkit-background-clip:text;background-clip:text;color:transparent;
   opacity:0;}
 .replay-text::after{content:'';position:absolute;left:6%;right:6%;bottom:-16px;height:5px;border-radius:3px;
@@ -503,55 +525,65 @@ img{display:block;}
 /* optional uploaded scene background (with a legibility scrim) */
 .sb-bg{position:absolute;inset:0;z-index:0;background-size:cover;background-position:center;}
 .sb-bg::after{content:'';position:absolute;inset:0;background:linear-gradient(180deg,rgba(4,6,10,.74),rgba(4,6,10,.9));}
-.sb-stage{position:relative;z-index:1;width:1180px;max-width:94vw;display:flex;flex-direction:column;align-items:center;gap:26px;
+.sb-stage{position:relative;z-index:1;width:1480px;max-width:96vw;display:flex;flex-direction:column;align-items:center;gap:30px;
   transition:opacity .55s ease, transform .55s cubic-bezier(.2,.8,.25,1);}
 .sb.intro .sb-stage{opacity:0;transform:translateY(26px);}
 
-/* broadcaster / brand-kit logo at the top of the scoreboard */
-.sb-toplogo{max-height:118px;max-width:460px;object-fit:contain;filter:drop-shadow(0 4px 16px rgba(0,0,0,.55));}
+/* broadcaster / brand-kit logo — centred at the top of the scoreboard, above the event title */
+.sb-toplogo{max-height:104px;max-width:380px;object-fit:contain;filter:drop-shadow(0 4px 16px rgba(0,0,0,.55));}
 /* headline: event + team logos/names + final score (winner in gold) */
-.sb-event{font-size:13px;letter-spacing:.42em;color:var(--muted);text-transform:uppercase;}
-.sb-result{display:flex;align-items:center;justify-content:center;gap:44px;}
-.sb-hteam{display:flex;align-items:center;gap:20px;width:380px;transition:opacity .4s;}
+.sb-event{font-size:15px;letter-spacing:.42em;color:var(--muted);text-transform:uppercase;}
+.sb-result{display:flex;align-items:center;justify-content:center;gap:56px;}
+.sb-hteam{display:flex;align-items:center;gap:22px;width:500px;transition:opacity .4s;}
 .sb-hteam.left{justify-content:flex-end;}
 .sb-hteam.right{justify-content:flex-start;}
 .sb-hteam.lose{opacity:.46;}
-.sb-hlogo{width:76px;height:76px;flex:none;object-fit:contain;filter:drop-shadow(0 4px 14px rgba(0,0,0,.6));}
-.sb-hname{font-size:32px;font-weight:800;text-transform:uppercase;white-space:nowrap;
-  min-width:0;overflow:hidden;text-overflow:ellipsis;}   /* long names truncate within the 380px team block */
+.sb-hlogo{width:100px;height:100px;flex:none;object-fit:contain;filter:drop-shadow(0 4px 14px rgba(0,0,0,.6));}
+.sb-hname{font-size:44px;font-weight:800;text-transform:uppercase;white-space:nowrap;line-height:1.02;
+  min-width:0;overflow:hidden;text-overflow:ellipsis;}   /* shrink-to-fit via fitName(); ellipsis is a last-resort backstop */
 .sb-hteam.left .sb-hname{text-align:right;}
 .sb-hteam.win .sb-hname{color:var(--gold);}
-.sb-scoreline{display:flex;flex-direction:column;align-items:center;gap:7px;flex:none;}
-.sb-scores{display:flex;align-items:center;gap:24px;}
-.sb-num{font-size:84px;font-weight:900;font-variant-numeric:tabular-nums;line-height:.9;color:#eef2fb;}
+.sb-scoreline{display:flex;flex-direction:column;align-items:center;gap:8px;flex:none;}
+.sb-scores{display:flex;align-items:center;gap:28px;}
+.sb-num{font-size:108px;font-weight:900;font-variant-numeric:tabular-nums;line-height:.9;color:#eef2fb;}
 .sb-num.win{color:var(--gold);text-shadow:0 0 38px rgba(255,206,77,.4);}
 .sb-dash{font-size:13px;letter-spacing:.3em;color:var(--muted);}
 .sb-series{font-size:11px;letter-spacing:.24em;color:var(--muted);text-transform:uppercase;}
 
-/* stats board — single clean table grouped by team */
-.sb-board{width:100%;background:rgba(255,255,255,.02);border:1px solid var(--hair);
-  border-radius:16px;overflow:hidden;box-shadow:0 30px 80px rgba(0,0,0,.55);}
-.sb-grid{display:grid;grid-template-columns:1fr repeat(6,64px);align-items:center;}
-.sb-colheads{padding:0 26px;height:42px;background:rgba(0,0,0,.32);border-bottom:1px solid var(--hair);}
-.sb-colheads span{font-size:10px;letter-spacing:.14em;color:var(--muted);text-transform:uppercase;text-align:center;}
-.sb-colheads span:first-child{text-align:left;}
-.sb-teamrow{display:flex;align-items:center;gap:13px;padding:11px 26px;position:relative;
-  background:rgba(255,255,255,.04);border-top:1px solid var(--hair);border-bottom:1px solid var(--hair);}
-.sb-teamrow:not(:first-child){margin-top:18px;}   /* space between the two teams */
-.sb-teamrow.win::before{content:'';position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--gold);}
-.sb-trlogo{width:30px;height:30px;object-fit:contain;}
-.sb-trname{font-size:17px;font-weight:800;text-transform:uppercase;letter-spacing:.02em;}
-.sb-win-chip{margin-left:auto;font-size:10px;font-weight:800;letter-spacing:.16em;text-transform:uppercase;
+/* stats board — each team is its OWN mini-table (header + player rows), with a small gap between. */
+.sb-board{width:100%;}
+#sb-body{display:flex;flex-direction:column;gap:16px;}   /* small space between the two team tables */
+.sb-grid{display:grid;grid-template-columns:1fr repeat(6,82px);align-items:center;}
+/* one team = one card; its logo FLOATS just outside the card to the LEFT, vertically centred on it.
+   overflow VISIBLE lets the logo escape; the card bg respects the radius and the header carries the
+   rounded top corners. */
+.sb-teamsec{position:relative;background:rgba(255,255,255,.02);border:1px solid var(--hair);
+  border-radius:14px;overflow:visible;box-shadow:0 22px 56px rgba(0,0,0,.5);}
+.sb-teamsec.win{border-color:rgba(255,206,77,.45);}
+.sb-seclogo{position:absolute;right:100%;top:50%;transform:translateY(-50%);margin-right:24px;
+  width:96px;height:96px;object-fit:contain;filter:drop-shadow(0 6px 18px rgba(0,0,0,.65));}
+.sb-secrows{min-width:0;}
+/* team header row: TEAM NAME in the first column (where "Player" used to be) + stat-column labels */
+.sb-teamhead{padding:0 30px;height:52px;background:rgba(0,0,0,.34);border-bottom:1px solid var(--hair);
+  border-radius:14px 14px 0 0;position:relative;}
+.sb-teamhead::before{content:'';position:absolute;left:0;top:0;bottom:0;width:4px;border-radius:14px 0 0 0;background:var(--row-accent,#5a6478);}
+.sb-teamsec.win .sb-teamhead::before{background:var(--gold);}
+.sb-th-name{display:flex;align-items:center;gap:10px;min-width:0;text-align:left;
+  font-size:19px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:#fff;}
+.sb-th-name span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.sb-teamsec.win .sb-th-name{color:var(--gold);}
+.sb-th-stat{font-size:12px;letter-spacing:.14em;color:var(--muted);text-transform:uppercase;text-align:center;}
+.sb-win-chip{flex:none;font-size:11px;font-weight:800;letter-spacing:.16em;text-transform:uppercase;
   color:#1a1205;background:var(--gold);padding:3px 11px;border-radius:5px;}
-.sb-prow{padding:0 26px;height:46px;border-bottom:1px solid rgba(255,255,255,.05);}
+.sb-prow{padding:0 30px;height:54px;border-bottom:1px solid rgba(255,255,255,.05);}
 .sb-prow:last-child{border-bottom:none;}
 /* name cell: fixed crown gutter so MVP crown sits left WITHOUT shifting the name */
-.sb-pname{position:relative;padding-left:26px;min-width:0;display:flex;align-items:center;
-  font-size:16px;font-weight:600;text-transform:uppercase;color:#dfe5f2;}
+.sb-pname{position:relative;padding-left:30px;min-width:0;display:flex;align-items:center;
+  font-size:19px;font-weight:600;text-transform:uppercase;color:#dfe5f2;}
 .sb-pname span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .sb-prow.mvp .sb-pname{color:var(--gold);font-weight:800;}
-.sb-mvp-ic{position:absolute;left:1px;top:50%;transform:translateY(-50%);width:18px;height:18px;color:var(--gold);}
-.sb-cell{font-size:15px;font-weight:700;font-variant-numeric:tabular-nums;text-align:center;color:#cfd6e6;}
+.sb-mvp-ic{position:absolute;left:1px;top:50%;transform:translateY(-50%);width:21px;height:21px;color:var(--gold);}
+.sb-cell{font-size:18px;font-weight:700;font-variant-numeric:tabular-nums;text-align:center;color:#cfd6e6;}
 .sb-cell.score{font-weight:900;color:#fff;}
 .sb-prow.mvp .sb-cell.score{color:var(--gold);}
 
@@ -690,14 +722,19 @@ img{display:block;}
       <img id="logo-orange" class="team-logo" src="/assets/rl.png" alt="">
     </div>
   </div>
-  <!-- animated white border light (ported from csgo.html) -->
-  <svg class="head-beam" viewBox="0 0 1000 100" preserveAspectRatio="none" aria-hidden="true">
-    <path class="hb-base" d="M 2 2 L 2 86 Q 2 99 15 99 L 985 99 Q 998 99 998 86 L 998 2 Z" pathLength="100"></path>
-    <path class="hb-beam" d="M 2 2 L 2 86 Q 2 99 15 99 L 985 99 Q 998 99 998 86 L 998 2 Z" pathLength="100"></path>
-  </svg>
   <!-- OVERTIME swipe — a red wall sweeps across the scorebar (over the team names), holds OVERTIME, sweeps off -->
   <div id="ot-swipe" class="ot-swipe hidden"><span id="ot-swipe-text" class="ot-swipe-text">OVERTIME</span></div>
 </div>
+<!-- animated light tracing the silhouette of the whole top cluster (event title + scorebar + GAME tab); path built in JS -->
+<svg id="header-outline" viewBox="0 0 1920 210" preserveAspectRatio="none" aria-hidden="true">
+  <path class="hb-base" pathLength="100"></path>
+  <path class="hb-beam" pathLength="100"></path>
+</svg>
+<!-- animated light tracing the SPECTATED player's sidebar card; path tracks the live card in JS -->
+<svg id="spec-outline" viewBox="0 0 1920 1080" preserveAspectRatio="none" aria-hidden="true">
+  <path class="hb-base" pathLength="100"></path>
+  <path class="hb-beam" pathLength="100"></path>
+</svg>
 <!-- slanted event banner — seats on top of the bar -->
 <div id="event-name" class="event-name">ROCKET LEAGUE TOURNAMENT</div>
 <!-- GAME n of X sub-tab (hangs below center) — REPLACED by the red OVERTIME card during overtime -->
@@ -743,26 +780,24 @@ img{display:block;}
 
 <!-- REPLAY LOWER THIRD — scorer + boost + assist, shown while the goal replays -->
 <div id="replay-lt" class="replay-lt hidden">
-  <div class="rlt-head">
-    <span class="rlt-tag">GOAL</span>
-    <span id="rlt-team" class="rlt-team">TEAM</span>
-  </div>
-  <div class="rlt-body">
-    <div class="rlt-main">
+  <div class="rlt-identity">
+    <img id="rlt-logo" class="rlt-logo hidden" alt="">
+    <div class="rlt-id-text">
+      <span id="rlt-team" class="rlt-team">TEAM</span>
       <span id="rlt-scorer" class="rlt-scorer">PLAYER</span>
       <span id="rlt-assist" class="rlt-assist hidden">
-        <span class="rlt-mic rlic-assist"></span><span id="rlt-assist-name">—</span>
+        <span class="rlt-mic rlic-assist"></span><span class="rlt-assist-lbl">ASSIST</span><b id="rlt-assist-name">—</b>
       </span>
     </div>
-    <div class="rlt-stats">
-      <div id="rlt-speed-wrap" class="rlt-stat">
-        <span class="rlt-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 18.5a9 9 0 1 1 17 0"/><path d="M12 13.4l4.6-3.9"/></svg></span>
-        <div class="rlt-stat-txt"><span id="rlt-speed" class="rlt-stat-val">0</span><span class="rlt-stat-lbl">KM/H</span></div>
-      </div>
-      <div id="rlt-boost-wrap" class="rlt-stat">
-        <span class="rlt-ic"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M13 2 4 14h6l-1 8 9-12h-6z"/></svg></span>
-        <div class="rlt-stat-txt"><span id="rlt-boost" class="rlt-stat-val">0</span><span class="rlt-stat-lbl">BOOST</span></div>
-      </div>
+  </div>
+  <div class="rlt-stats">
+    <div id="rlt-speed-wrap" class="rlt-stat">
+      <span class="rlt-stat-val"><span id="rlt-speed">0</span><span class="rlt-unit">KM/H</span></span>
+      <span class="rlt-stat-lbl">SHOT SPEED</span>
+    </div>
+    <div id="rlt-goals-wrap" class="rlt-stat">
+      <span class="rlt-stat-val"><span id="rlt-goals">0</span></span>
+      <span class="rlt-stat-lbl">GOALS</span>
     </div>
   </div>
 </div>
@@ -771,11 +806,11 @@ img{display:block;}
 <div id="brazil" class="brazil hidden">
   <div class="brazil-diamond">
     <div class="brazil-circle">
-      <div class="brazil-score">7<span>×</span>1</div>
+      <div class="brazil-score">7<span>&times;</span>1</div>
       <div class="brazil-word">BRAZIL</div>
     </div>
   </div>
-  <img id="brazil-sponsor" class="brazil-sponsor" src="" alt="">
+  <img id="brazil-sponsor" class="brazil-sponsor hidden" alt="">
 </div>
 
 <!-- REPLAY TRANSITION — full-screen, plays once when the goal replay starts -->
@@ -822,6 +857,7 @@ img{display:block;}
   </div>
 
   <div class="sb-stage">
+    <!-- broadcaster / brand logo — centred at the very top, above the event title -->
     <img id="sb-toplogo" class="sb-toplogo hidden" src="" alt="">
     <div id="sb-event" class="sb-event">ROCKET LEAGUE</div>
     <div class="sb-result">
@@ -843,9 +879,6 @@ img{display:block;}
       </div>
     </div>
     <div class="sb-board">
-      <div class="sb-grid sb-colheads">
-        <span>Player</span><span>Score</span><span>Goals</span><span>Assists</span><span>Saves</span><span>Shots</span><span>Demos</span>
-      </div>
       <div id="sb-body"></div>
     </div>
     <div id="sb-sponsor" class="sb-sponsor empty">
@@ -879,12 +912,9 @@ img{display:block;}
   </div>
 </div>
 
-<!-- BREAK / STARTING SOON scene -->
-<div id="break" class="scene hidden">
-  <div id="break-title" class="break-title">STARTING SOON</div>
-  <div id="break-count" class="break-count hidden">00:00</div>
-  <div id="break-msg" class="break-msg"></div>
-</div>
+<!-- BREAK / STARTING SOON is its own standalone OBS source now (countdown.html),
+     so it is NOT embedded here — keeps the RL HUD from being taken over by the
+     countdown and matches every other game overlay. -->
 
 <!-- WINNER scene (standalone, control-panel driven) -->
 <div id="winner" class="scene hidden">
@@ -908,7 +938,7 @@ img{display:block;}
 
 <div id="cam-pool"></div>
 
-<!-- DEV TOOLBAR — hidden; press ` (backtick) to toggle, or add ?dev to the URL -->
+<!-- DEV TOOLBAR — shown in a normal browser, auto-hidden inside OBS; ` (backtick) toggles, ?dev forces on -->
 <div id="devbar" class="devbar">
   <span class="dev-title">DEV · test triggers · press ` to hide</span>
   <button data-dev="load">Demo data</button>
@@ -1051,6 +1081,7 @@ function renderPlayers(players, spectated){
   sync('players-blue', blue, 'blue', spectated);
   sync('players-orange', orange, 'orange', spectated);
   updateReplayCams(players);   // mirror live boost/stats onto the replay grid while it's up
+  if(spectated!==_soLastSpec){ _soLastSpec=spectated; scheduleSpecOutline(); }   // spectated player changed → move the outline
 }
 function sync(cid, list, side, spec){
   const c=el(cid); if(!c) return;
@@ -1452,22 +1483,26 @@ function showReplayLowerThird(){
   const lt=el('replay-lt'); if(!lt) return;
   lt.style.setProperty('--rlt-color', color);
   const teams=currentState.teams||{};
+  // team identity: name + logo (scoring team → brand logo → RL mark)
   setText('rlt-team', (side===0 ? teams.blue?.name : teams.orange?.name) || (side===0?'BLUE':'ORANGE'));
+  const lg=el('rlt-logo');
+  if(lg){ const tlogo=(side===0 ? teams.blue?.logo : teams.orange?.logo) || (currentState.brand&&currentState.brand.logo) || '/assets/rl.png';
+          lg.src=tlogo; lg.classList.remove('hidden'); }
   setText('rlt-scorer', String(goal.scorer).toUpperCase());
-  // speed: how fast the ball went in (km/h, from the goal event)
-  const speed = goal.speed!=null ? Math.round(goal.speed) : null;
-  const sw=el('rlt-speed-wrap');
-  if(speed!=null && speed>0){ setText('rlt-speed', speed); sw.classList.remove('hidden'); } else sw.classList.add('hidden');
-  // boost: the scorer's value is frozen at the goal while the replay plays, so read it live
-  const sp=(currentState.players||[]).find(p=>p.name===goal.scorer);
-  const boost = sp && sp.boost!=null ? Math.round(sp.boost) : null;
-  const bw=el('rlt-boost-wrap');
-  if(boost!=null){ setText('rlt-boost', boost); bw.classList.remove('hidden'); } else bw.classList.add('hidden');
+  // who assisted
   const a=el('rlt-assist');
   if(goal.assisterName){ setText('rlt-assist-name', String(goal.assisterName).toUpperCase()); a.classList.remove('hidden'); }
   else a.classList.add('hidden');
-  // NON-DESTRUCTIVE: the lower third sits at bottom-centre and NEVER hides the
-  // sidebars / boost / statcard — the live HUD stays up the whole time.
+  // shot speed (km/h, from the goal event)
+  const speed = goal.speed!=null ? Math.round(goal.speed) : null;
+  const sw=el('rlt-speed-wrap');
+  if(speed!=null && speed>0){ setText('rlt-speed', speed); sw.classList.remove('hidden'); } else sw.classList.add('hidden');
+  // scorer's goals this game (brace / hat-trick) — explicit value if given, else the live player tally
+  const sp=(currentState.players||[]).find(p=>p.name===goal.scorer);
+  const gls = goal.scorerGoals!=null ? goal.scorerGoals : (sp && sp.goals!=null ? sp.goals : 1);
+  setText('rlt-goals', gls);
+  const gw=el('rlt-goals-wrap'); if(gw) gw.classList.remove('hidden');
+  // NON-DESTRUCTIVE: the lower third sits at bottom-centre and NEVER hides the live HUD.
   // Shows for the whole replay; hidden at replay END by endGoalCycle (or the 15s safety).
   lt.classList.remove('hidden'); void lt.offsetWidth; lt.classList.add('show');
 }
@@ -1523,28 +1558,8 @@ function renderSpotlight(sp, players){
   setText('spot-score', p?(p.score??0):0);
 }
 
-let breakTick=null;
 function pad2(n){ return String(n).padStart(2,'0'); }
-function fmtCountdown(ms){ let s=Math.max(0,Math.floor(ms/1000)); const h=Math.floor(s/3600); s-=h*3600; const m=Math.floor(s/60); s-=m*60; return h>0?h+':'+pad2(m)+':'+pad2(s):pad2(m)+':'+pad2(s); }
-function renderBreak(brk){
-  const scene=el('break'); if(!scene) return;
-  brk=brk||{};
-  const visible=!!brk.visible;
-  scene.classList.toggle('show', visible);
-  scene.classList.toggle('hidden', !visible);
-  if(!visible){ if(breakTick){ clearInterval(breakTick); breakTick=null; } return; }
-  setText('break-title', (brk.title||'STARTING SOON').toUpperCase());
-  setText('break-msg', brk.message||'');
-  const tickCount=()=>{
-    const cd=el('break-count'); if(!cd) return;
-    if(!brk.endsAt){ cd.classList.add('hidden'); return; }
-    const rem=brk.endsAt-Date.now();
-    if(rem<=0){ cd.classList.add('hidden'); setText('break-title', (brk.finalMessage||"WE'RE LIVE!").toUpperCase()); }
-    else { cd.classList.remove('hidden'); cd.textContent=fmtCountdown(rem); }
-  };
-  tickCount();
-  if(!breakTick) breakTick=setInterval(tickCount, 250);
-}
+// Break / "starting soon" countdown moved to its own page (countdown.html).
 
 function renderWinner(w, teams){
   const scene=el('winner'); if(!scene) return;
@@ -1587,6 +1602,7 @@ function renderIntro(intro, teams, players){
 
 /* ── end-of-match scorecard (clean, grouped by team, gold winner/MVP) ──────── */
 const SB_STATS=['score','goals','assists','saves','shots','demos'];
+const SB_LABELS=['Score','Goals','Assists','Saves','Shots','Demos'];   // column headers per team table
 const CROWN='<svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 8l4 4 5-7 5 7 4-4-1.5 11h-15z"/></svg>';
 function renderScoreboard(playerCache, state, series){
   state=state||{}; const teams=state.teams||{}; const game=state.game||{};
@@ -1606,7 +1622,7 @@ function renderScoreboard(playerCache, state, series){
   if(tl){ if(topLogo){ tl.src=topLogo; tl.classList.remove('hidden'); } else tl.classList.add('hidden'); }
   // headline
   setText('sb-event', state.eventName || '');
-  setText('sb-name-a', nameA); setText('sb-name-b', nameB);
+  fitName('sb-name-a', nameA, 44, 22); fitName('sb-name-b', nameB, 44, 22);   // shrink-to-fit so names don't cut off
   setImg('sb-logo-a', logoA, '/assets/rl.png'); setImg('sb-logo-b', logoB, '/assets/rl.png');
   setText('sb-num-a', bs); setText('sb-num-b', os);
   setText('sb-series', `Series ${ser.blue ?? 0} – ${ser.orange ?? 0}`);
@@ -1615,20 +1631,31 @@ function renderScoreboard(playerCache, state, series){
   el('sb-hteam-b').classList.toggle('win', bWon); el('sb-hteam-b').classList.toggle('lose', aWon);
 
   // winner intro content — shrink-to-fit so very long names stay on screen
-  fitName('wi-name', aWon ? nameA : bWon ? nameB : nameA, 84, 30);
+  const winnerName = aWon ? nameA : bWon ? nameB : nameA;
+  fitName('wi-name', winnerName, 84, 30);
   setImg('wi-logo', aWon ? logoA : bWon ? logoB : logoA, '/assets/rl.png');
+  // the scoreboard is rendered while still display:none, so fitName can't measure yet — re-fit the
+  // names on the next frame once showView() has made it visible.
+  const _raf=(typeof window!=='undefined' && window.requestAnimationFrame) ? window.requestAnimationFrame : (f=>setTimeout(f,32));
+  _raf(function(){ fitName('sb-name-a', nameA, 44, 22); fitName('sb-name-b', nameB, 44, 22); fitName('wi-name', winnerName, 84, 30); });
 
   // stats board grouped by team
   const body=el('sb-body'); if(body){ body.innerHTML='';
-    group(nameA, logoA, A, aWon); group(nameB, logoB, B, bWon);
+    group(nameA, logoA, A, aWon, 'var(--blue)'); group(nameB, logoB, B, bWon, 'var(--orange)');
   }
-  function group(name, logo, list, won){
-    const head=document.createElement('div'); head.className='sb-teamrow'+(won?' win':'');
-    const lg=document.createElement('img'); lg.className='sb-trlogo'; lg.src=logo;
-    const nm=document.createElement('span'); nm.className='sb-trname'; nm.textContent=name;
-    head.appendChild(lg); head.appendChild(nm);
-    if(won){ const chip=document.createElement('span'); chip.className='sb-win-chip'; chip.textContent='Winner'; head.appendChild(chip); }
-    body.appendChild(head);
+  function group(name, logo, list, won, accent){
+    const sec=document.createElement('div'); sec.className='sb-teamsec'+(won?' win':'');
+    if(accent) sec.style.setProperty('--row-accent', accent);
+    const lg=document.createElement('img'); lg.className='sb-seclogo'; lg.src=logo||'/assets/rl.png';
+    const rows=document.createElement('div'); rows.className='sb-secrows';
+    // team header ROW: team name in the first column (replaces "Player") + the stat-column labels
+    const head=document.createElement('div'); head.className='sb-grid sb-teamhead';
+    const nameCell=document.createElement('div'); nameCell.className='sb-th-name';
+    const nm=document.createElement('span'); nm.textContent=name; nameCell.appendChild(nm);
+    if(won){ const chip=document.createElement('span'); chip.className='sb-win-chip'; chip.textContent='Winner'; nameCell.appendChild(chip); }
+    head.appendChild(nameCell);
+    SB_LABELS.forEach(lbl=>{ const c=document.createElement('div'); c.className='sb-th-stat'; c.textContent=lbl; head.appendChild(c); });
+    rows.appendChild(head);
     list.forEach(p=>{
       const row=document.createElement('div'); row.className='sb-grid sb-prow'+(p.name===mvp?' mvp':'');
       const nameCell=document.createElement('div'); nameCell.className='sb-pname';
@@ -1636,8 +1663,10 @@ function renderScoreboard(playerCache, state, series){
       const ns=document.createElement('span'); ns.textContent=p.name; nameCell.appendChild(ns);
       row.appendChild(nameCell);
       SB_STATS.forEach(s=>{ const v=document.createElement('div'); v.className='sb-cell'+(s==='score'?' score':''); v.textContent=p[s]||0; row.appendChild(v); });
-      body.appendChild(row);
+      rows.appendChild(row);
     });
+    sec.appendChild(lg); sec.appendChild(rows);
+    body.appendChild(sec);
   }
 
   // sponsor slot + uploaded scene background
@@ -1693,10 +1722,19 @@ function showView(name){
     if(el('sb')) el('sb').classList.remove('intro');
   }
   activeView=name;
+  scheduleSpecOutline();   // clear the spectated outline during the replay, redraw it on return to the HUD
 }
 
 /* ── apply state ──────────────────────────────────────────────────────────── */
 function applyFullState(data){
+  // Light broadcasts omit the heavy library blobs (brand kit / banners) — they're only re-sent when
+  // they actually change (see server _flushFullState). Carry them forward so a plain state update
+  // doesn't wipe the brand logo (which the scorecard, replay LT and statcard all read from here).
+  if(currentState){
+    if(data.brand==null && currentState.brand) data.brand=currentState.brand;
+    if(data.banner==null && currentState.banner) data.banner=currentState.banner;
+    if(data.mainBanner==null && currentState.mainBanner) data.mainBanner=currentState.mainBanner;
+  }
   currentState=data;
   if(data.fontFamily) document.documentElement.style.setProperty('--main-font', `'${data.fontFamily}', sans-serif`);
   if(data.brand){
@@ -1729,12 +1767,106 @@ function applyFullState(data){
   // broadcast lower-thirds / scenes (driven by control-panel state)
   renderTicker(data.ticker);
   renderSpotlight(data.spotlight, players);
-  renderBreak(data.breakScreen);
+  // Countdown/"starting soon" lives on its own page (countdown.html), not in the HUD.
   renderWinner(data.winner, teams);
   renderIntro(data.intro, teams, players);
 
+  // reload/reconnect into a post-game scoreboard: a full_state only toggles the view, it never calls
+  // renderScoreboard — so without this the board shows the blank "TEAM A / TEAM B" default. Re-render
+  // it from the frozen snapshot (preferred) or the live cache. Only when the live flow ISN'T already
+  // driving the board (activeView!=='scoreboard'): during the normal end-of-match flow the view_change
+  // handler renders + plays the WINNER intro, and a follow-up full_state must not re-render over it
+  // (that flashed the board before the winner and clobbered the brand logo).
+  if((data.view||'hud')==='scoreboard' && activeView!=='scoreboard'){
+    const sbd=data.scoreboard;
+    if(sbd && sbd.players && sbd.players.length){
+      const pc={}; sbd.players.forEach(p=>{ if(p&&p.name) pc[p.name]=p; });
+      renderScoreboard(pc, Object.assign({}, data, {game:Object.assign({}, data.game||{}, {blueScore:sbd.blueScore, orangeScore:sbd.orangeScore})}), sbd.series||data.series);
+    } else if(data.playerCache && Object.keys(data.playerCache).length){
+      renderScoreboard(data.playerCache, data, data.series);
+    }
+  }
+
   showView(data.view||'hud');
+  scheduleHeaderOutline();   // team/event-name widths may have changed → re-trace the silhouette
+  scheduleSpecOutline();     // roster/spectated may have changed → re-trace the spectated outline
 }
+
+/* ── animated header outline: traces the silhouette of event title + scorebar + GAME tab ──── */
+let _hoRaf=0;
+function scheduleHeaderOutline(){
+  if(_hoRaf) return;
+  const raf=(typeof window!=='undefined' && window.requestAnimationFrame) ? window.requestAnimationFrame : function(f){return setTimeout(f,16);};
+  _hoRaf=raf(function(){ _hoRaf=0; try{ drawHeaderOutline(); }catch(e){} });
+}
+function drawHeaderOutline(){
+  const svg=el('header-outline'); if(!svg) return;
+  const base=svg.querySelector('.hb-base'), beam=svg.querySelector('.hb-beam'), sb=el('scorebar');
+  if(!base||!beam||!sb) return;
+  const vis=(n)=> !!(n && n.offsetWidth>0 && !(n.classList && n.classList.contains('hidden')));
+  const f=(n)=> (Math.round(n*10)/10);
+  const CX=960, SL=34;                                   // stage centre x; event-banner slant inset
+  const sw=sb.offsetWidth, sh=sb.offsetHeight, sTop=sb.offsetTop||18;
+  const sLeft=CX-sw/2, sRight=CX+sw/2, sBot=sTop+sh, r=Math.min(14, sw/2, sh/2);
+  let d='M '+f(sLeft)+' '+f(sTop);
+  // bump UP and around the event-title banner (slanted), if it's showing
+  const ev=el('event-name');
+  if(vis(ev) && (ev.textContent||'').trim()!==''){
+    const ew=ev.offsetWidth, eh=ev.offsetHeight||28, eL=CX-ew/2, eR=CX+ew/2, eTL=eL+SL, eTR=eR-SL;
+    const k=Math.max(0,Math.min(1, sTop/eh));
+    const Lx=Math.max(sLeft, eTL-SL*k), Rx=Math.min(sRight, eTR+SL*k);
+    d+=' L '+f(Lx)+' '+f(sTop)+' L '+f(eTL)+' 0 L '+f(eTR)+' 0 L '+f(Rx)+' '+f(sTop);
+  }
+  d+=' L '+f(sRight)+' '+f(sTop)
+   + ' L '+f(sRight)+' '+f(sBot-r)+' Q '+f(sRight)+' '+f(sBot)+' '+f(sRight-r)+' '+f(sBot);
+  // dip DOWN and around the GAME tab (or the OT card if OT is showing)
+  const gs=el('game-sub'), ots=el('ot-subbar'), g=vis(gs)?gs:(vis(ots)?ots:null);
+  if(g){
+    const gw=g.offsetWidth, gh=g.offsetHeight, gL=CX-gw/2, gR=CX+gw/2, gB=sBot+gh, gr=Math.min(7, gw/2);
+    d+=' L '+f(gR)+' '+f(sBot)
+     + ' L '+f(gR)+' '+f(gB-gr)+' Q '+f(gR)+' '+f(gB)+' '+f(gR-gr)+' '+f(gB)
+     + ' L '+f(gL+gr)+' '+f(gB)+' Q '+f(gL)+' '+f(gB)+' '+f(gL)+' '+f(gB-gr)
+     + ' L '+f(gL)+' '+f(sBot);
+  }
+  d+=' L '+f(sLeft+r)+' '+f(sBot)+' Q '+f(sLeft)+' '+f(sBot)+' '+f(sLeft)+' '+f(sBot-r)+' Z';
+  base.setAttribute('d', d); beam.setAttribute('d', d);
+}
+if(typeof window!=='undefined') window.addEventListener('load', scheduleHeaderOutline);
+
+/* ── animated traveling-light outline around the SPECTATED player's sidebar card ──── */
+let _soRaf=0, _soT=0, _soLastSpec=null;
+function scheduleSpecOutline(){
+  const raf=(typeof window!=='undefined' && window.requestAnimationFrame) ? window.requestAnimationFrame : function(fn){return setTimeout(fn,16);};
+  if(!_soRaf) _soRaf=raf(function(){ _soRaf=0; try{ drawSpecOutline(); }catch(e){} });
+  clearTimeout(_soT); _soT=setTimeout(function(){ try{ drawSpecOutline(); }catch(e){} }, 240);  // redraw after the spectated card's scale-in settles
+}
+function drawSpecOutline(){
+  const svg=el('spec-outline'); if(!svg) return;
+  const base=svg.querySelector('.hb-base'), beam=svg.querySelector('.hb-beam');
+  if(!base||!beam) return;
+  const clear=function(){ base.removeAttribute('d'); beam.removeAttribute('d'); };
+  if(activeView==='goal'){ clear(); return; }            // HUD (and sidebars) hidden during the replay
+  const card=document.querySelector('.pc-card.spectated');
+  if(!card || !card.offsetWidth){ clear(); return; }
+  const r=card.getBoundingClientRect(), sr=svg.getBoundingClientRect();
+  if(!r || r.width<2 || !sr.width || !sr.height){ clear(); return; }
+  // Map the card's VIEWPORT rect into the SVG's own 1920×1080 user space. Doing it relative to the
+  // SVG's measured box (not raw viewport px) keeps the outline aligned no matter what size the overlay
+  // is actually rendered at — preview windows, the /live.html iframe, or OBS source scaling.
+  const kx=1920/sr.width, ky=1080/sr.height;
+  const x=(r.left-sr.left)*kx, y=(r.top-sr.top)*ky, w=r.width*kx, h=r.height*ky;
+  if(x+w<0 || x>1920){ clear(); return; }                              // off-screen / slid out
+  const ch=18*(card.offsetWidth ? (w/card.offsetWidth) : 1);            // the card's 18px chamfer, scaled to the (1.04×) spectated size
+  const isRight=!!(card.closest('.col.right')||card.closest('.rc-team.right'));
+  const f=function(n){ return Math.round(n*10)/10; };
+  let d;
+  if(isRight)   // chamfer at the bottom-LEFT
+    d='M '+f(x)+' '+f(y)+' L '+f(x+w)+' '+f(y)+' L '+f(x+w)+' '+f(y+h)+' L '+f(x+ch)+' '+f(y+h)+' L '+f(x)+' '+f(y+h-ch)+' Z';
+  else          // chamfer at the bottom-RIGHT
+    d='M '+f(x)+' '+f(y)+' L '+f(x+w)+' '+f(y)+' L '+f(x+w)+' '+f(y+h-ch)+' L '+f(x+w-ch)+' '+f(y+h)+' L '+f(x)+' '+f(y+h)+' Z';
+  base.setAttribute('d', d); beam.setAttribute('d', d);
+}
+if(typeof window!=='undefined') window.addEventListener('load', scheduleSpecOutline);
 
 let prevBlue=null, prevOrange=null;
 function applyGame(game, bestOf, fmt){
@@ -1765,8 +1897,9 @@ function applyGame(game, bestOf, fmt){
   el('ot-badge').classList.add('hidden');
   el('game-sub').classList.toggle('hidden', isOT);        // GAME n OF X gives way to the OVERTIME card in OT
   el('ot-subbar').classList.toggle('hidden', !isOT);      // …which takes its spot
-  if(isOT && !otShown){ triggerOvertimeSwipe(); otShown=true; }  // once per OT period, just before the OT kickoff
-  if(!isOT) otShown=false;
+  if(isOT && !otShown){ triggerOvertimeSwipe(); otShown=true; scheduleHeaderOutline(); }  // once per OT period, just before the OT kickoff
+  else if(!isOT && otShown){ otShown=false; scheduleHeaderOutline(); }   // OT ended → bottom tab swapped back
+  else if(!isOT) otShown=false;
 }
 
 /* ── 7×1 BRAZIL easter egg: fires once when the scoreline reaches 7-1 either way ── */
@@ -1874,7 +2007,7 @@ function connect(){
   const ws=new WebSocket(WS_URL);
   ws.onopen=()=>ws.send(JSON.stringify({type:'request_state'}));
   ws.onmessage=({data})=>{ let msg; try{ msg=JSON.parse(data); }catch{ return; } dispatch(msg); };
-  ws.onclose=()=>setTimeout(connect,3000);
+  ws.onclose=()=>setTimeout(connect,800);
 }
 drawBoost(0, BLUE);
 connect();
@@ -1884,9 +2017,10 @@ connect();
    with ?dev in the URL. Buttons synthesize the same messages the server sends,
    so you can preview goal/replay/overtime/scorecard without RL or the server. */
 const DEV = {
-  eventName:'NAMELESS PREMIER $100 TOURNAMENT', bestOf:7,
-  teams:{ blue:{name:'NAMELESS ESPORTS',logo:'/assets/rl.png',color:'#2f8dff'},
-          orange:{name:'ROCKET RUSH',logo:'/assets/rl.png',color:'#c026d3'} },
+  eventName:'PRO CHAMPIONSHIP SERIES', bestOf:7,
+  brand:{ logo:'/assets/rl.png', color:'#2f8dff' },   // broadcaster/org logo shown atop the scoreboard
+  teams:{ blue:{name:'TEAM ALPHA',logo:'/assets/rl.png',color:'#2f8dff'},
+          orange:{name:'TEAM OMEGA',logo:'/assets/rl.png',color:'#c026d3'} },
   game:{ blueScore:1, orangeScore:1, number:4, isOT:false },
   series:{ blue:2, orange:1 },
   spectated:'PONCHO',
@@ -1920,16 +2054,17 @@ const DEV_ACTIONS = {
             goalCycleActive=false; lastSwipeAt=0; brazilShown=false;
             dispatch({type:'goal_scored',data:{team:0}});                             // …fires the Brazil swipe
             devStateUpdate(); },
-  'goal-blue'(){ DEV._goal={team:0,scorer:'PONCHO',speed:104,assisterName:'WHEELS'};
+  'goal-blue'(){ DEV._goal={team:0,scorer:'PONCHO',speed:104,assisterName:'WHEELS',scorerGoals:2};
                  dispatch({type:'goal_scored',data:{team:0}});      // true goal moment → swipe NOW
                  DEV.game.blueScore++; devStateUpdate(); },          // score updates later (deduped)
-  'goal-orange'(){ DEV._goal={team:1,scorer:'RISE',speed:96,assisterName:'NOVA'};
+  'goal-orange'(){ DEV._goal={team:1,scorer:'RISE',speed:96,assisterName:'NOVA',scorerGoals:1};
                  dispatch({type:'goal_scored',data:{team:1}});
                  DEV.game.orangeScore++; devStateUpdate(); },
-  replay(){ // preview the full cycle: goal swipe (REPLAY+sponsor) → replay → logo-only outro
-            goalCycleActive=false; lastSwipeAt=0; goalEvent((DEV._goal&&DEV._goal.team)||0);
+  replay(){ // preview the full cycle: goal swipe (REPLAY+sponsor) → replay (scorer card) → logo outro
+            if(!DEV._goal) DEV._goal={team:0,scorer:'PONCHO',speed:104,assisterName:'WHEELS',scorerGoals:2};
+            goalCycleActive=false; lastSwipeAt=0; goalEvent(DEV._goal.team||0);
             clearTimeout(DEV._rt); DEV._rt=setTimeout(()=>{
-              dispatch({type:'view_change',data:{view:'goal',goal:DEV._goal||{team:0}}});
+              dispatch({type:'view_change',data:{view:'goal',goal:DEV._goal}});
               setTimeout(()=>dispatch({type:'view_change',data:{view:'hud'}}),5000);   // replay end → outro
             }, 3500); },
   'ot-on'(){ DEV.game.isOT=true;  devStateUpdate(); },
@@ -1939,7 +2074,7 @@ const DEV_ACTIONS = {
   scorecard(){ const pc={}; DEV.players.forEach(p=>pc[p.name]=p);
                dispatch({type:'view_change',data:{view:'scoreboard',playerCache:pc,series:DEV.series}}); },
   hud(){ unlockScoreboard(); dispatch({type:'view_change',data:{view:'hud'}}); },
-  ticker(){ DEV.ticker=devTog(DEV.ticker,{messages:['NAMELESS PREMIER — $100 TOURNAMENT','FOLLOW @TROPHI.AI','UP NEXT — GRAND FINAL · BO7'],speed:24}); devSync(); },
+  ticker(){ DEV.ticker=devTog(DEV.ticker,{messages:['PRO CHAMPIONSHIP SERIES','FOLLOW @YOURBRAND','UP NEXT — GRAND FINAL · BO7'],speed:24}); devSync(); },
   spotlight(){ DEV.spotlight=devTog(DEV.spotlight,{playerName:DEV.spectated}); devSync(); },
   break(){ DEV.breakScreen=devTog(DEV.breakScreen,{title:'STARTING SOON',message:'GRAND FINAL — BO7',endsAt:Date.now()+5*60000,finalMessage:"WE'RE LIVE!"}); devSync(); },
   winner(){ DEV.winner=devTog(DEV.winner,{side:'blue',subtitle:'GRAND CHAMPIONS'}); devSync(); },
@@ -1951,7 +2086,13 @@ function devTog(cur, props){ return Object.assign({visible:!(cur&&cur.visible)},
   const bar=el('devbar'); if(!bar) return;
   bar.addEventListener('click', e=>{ const b=e.target.closest('button[data-dev]'); if(b && DEV_ACTIONS[b.dataset.dev]) DEV_ACTIONS[b.dataset.dev](); });
   window.addEventListener('keydown', e=>{ if(e.key==='`'||e.key==='~'){ bar.classList.toggle('show'); } });
-  if(/[?&]dev\b/.test(location.search)) bar.classList.add('show');
+  // Show by default in a normal browser, but NEVER inside an OBS browser source. OBS injects
+  // window.obsstudio into the page (and the parent frame, since live.html embeds this same-origin).
+  // ?dev forces it on anywhere; the ` (backtick) key still toggles it.
+  const inOBS=(()=>{ try{ if(window.obsstudio) return true; }catch(e){}
+                     try{ if(window.parent && window.parent!==window && window.parent.obsstudio) return true; }catch(e){}
+                     return false; })();
+  if(!inOBS || /[?&]dev\b/.test(location.search)) bar.classList.add('show');
 })();
 </script>
 </body>

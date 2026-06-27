@@ -1,6 +1,6 @@
 // ─── App Store Integration Navigation ────────────────────────────────────────
 
-const INTEGRATIONS = ['obs', 'games', 'startgg', 'twitch', 'twitchgames'];
+const INTEGRATIONS = ['obs', 'vdo', 'games', 'startgg', 'twitch', 'twitchgames'];
 let currentIntegration = null;
 
 function _integStoreElements() {

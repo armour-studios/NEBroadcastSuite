@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NE Broadcast Suite — Team Spotlight</title>
+<link rel="stylesheet" href="fonts.css">
+<style>
+  :root { --accent: #b14bff; --accent-2: #4bc3ff; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 1920px; height: 1080px; overflow: hidden; background: transparent;
+    font-family: 'Montserrat', 'Inter', Arial, sans-serif; color: #fff; }
+
+  .ts-stage { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    opacity: 0; transition: opacity .45s ease; padding: 60px 80px; }
+  .ts-stage.show { opacity: 1; }
+  .ts-stage::before { content: ''; position: absolute; inset: 0;
+    background: radial-gradient(90% 70% at 50% 30%, rgba(177,75,255,.20), transparent 62%),
+      linear-gradient(180deg, rgba(8,10,16,.88), rgba(8,10,16,.95)); z-index: -1; }
+
+  .ts-eyebrow { font-size: 24px; font-weight: 800; letter-spacing: .34em; text-transform: uppercase; color: var(--accent); margin-bottom: 18px; }
+
+  .ts-card { width: 100%; max-width: 1480px; background: linear-gradient(180deg, rgba(255,255,255,.05), rgba(255,255,255,.015));
+    border: 1px solid rgba(255,255,255,.10); border-radius: 30px; padding: 46px 56px; display: flex; flex-direction: column; align-items: center;
+    transform: translateY(26px); opacity: 0; transition: opacity .5s ease, transform .5s ease; }
+  .ts-card.in { transform: none; opacity: 1; }
+
+  .ts-top { display: flex; align-items: center; gap: 40px; width: 100%; }
+  .ts-logo-wrap { flex: 0 0 200px; width: 200px; height: 200px; display: flex; align-items: center; justify-content: center; }
+  .ts-logo { max-width: 100%; max-height: 100%; object-fit: contain; filter: drop-shadow(0 8px 24px rgba(0,0,0,.55)); }
+  .ts-logo.logo-on-dark { width: 100%; height: 100%; transform: scale(1.1); filter: drop-shadow(0 8px 24px rgba(0,0,0,.55)) brightness(0) invert(1); }
+  .ts-id { flex: 1; min-width: 0; }
+  .ts-name { font-size: 72px; font-weight: 900; line-height: .96; letter-spacing: -.01em; text-transform: uppercase; text-shadow: 0 4px 22px rgba(0,0,0,.55);
+    overflow-wrap: anywhere; word-break: break-word; }
+  .ts-name.long { font-size: 52px; }   /* set in JS for long team names so they don't dominate / bleed */
+  .ts-stats { display: flex; gap: 16px; margin-top: 22px; flex-wrap: wrap; }
+  .ts-stat { background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.10); border-radius: 16px; padding: 12px 24px; min-width: 130px; text-align: center; }
+  .ts-stat .v { font-size: 40px; font-weight: 900; line-height: 1; color: #fff; }
+  .ts-stat .v.accent { color: var(--accent); }
+  .ts-stat .k { font-size: 16px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; color: #aeb6c6; margin-top: 6px; }
+
+  .ts-divider { width: 100%; height: 1px; background: rgba(255,255,255,.10); margin: 34px 0; }
+
+  /* Form + next match */
+  .ts-form { display: flex; gap: 34px; width: 100%; }
+  .ts-col { flex: 1; min-width: 0; }
+  .ts-col-h { font-size: 18px; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; color: #aeb6c6; margin-bottom: 14px; }
+  .ts-result { display: flex; align-items: center; gap: 14px; padding: 9px 0; font-size: 25px; }
+  .ts-wl { flex: 0 0 38px; height: 38px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-weight: 900; font-size: 20px; }
+  .ts-wl.w { background: rgba(52,211,153,.18); color: #34d399; } .ts-wl.l { background: rgba(248,113,113,.16); color: #f87171; }
+  .ts-result .opp { flex: 1; min-width: 0; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ts-result .sc { font-weight: 800; color: #cbd5e1; font-variant-numeric: tabular-nums; }
+  .ts-next { font-size: 30px; font-weight: 800; overflow-wrap: anywhere; }
+  .ts-next .round { font-size: 18px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: #aeb6c6; display: block; margin-bottom: 6px; }
+  .ts-next .vs { color: var(--accent); }
+  .ts-next .live { display: inline-block; margin-left: 12px; font-size: 16px; font-weight: 900; letter-spacing: .1em; background: #ef4444; color: #fff; padding: 3px 10px; border-radius: 6px; vertical-align: middle; }
+  .ts-muted { font-size: 24px; color: #6b7480; font-style: italic; }
+
+  /* Players */
+  .ts-players { display: flex; gap: 18px; width: 100%; margin-top: 34px; }
+  .ts-player { flex: 1; background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.09); border-radius: 16px; padding: 18px 20px; text-align: center; }
+  .ts-player.onair { border-color: rgba(239,68,68,.5); box-shadow: inset 0 0 0 1px rgba(239,68,68,.25); }
+  .ts-ptag { font-size: 30px; font-weight: 900; letter-spacing: .03em; text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ts-pstat { font-size: 23px; font-weight: 700; color: var(--accent-2); margin-top: 8px; }
+  .ts-pstat.seed { color: #cbd5e1; }
+  .ts-pstat .lbl { font-size: 13px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: #828b9b; display: block; }
+
+  .ts-foot { margin-top: 36px; min-height: 56px; display: flex; align-items: center; justify-content: center; }
+  .ts-foot img { height: 54px; width: auto; max-width: 280px; object-fit: contain; filter: drop-shadow(0 2px 8px rgba(0,0,0,.5)); }
+</style>
+</head>
+<body>
+  <div class="ts-stage" id="ts-stage">
+    <div class="ts-eyebrow" id="ts-eyebrow">TEAM SPOTLIGHT</div>
+    <div class="ts-card" id="ts-card">
+      <div class="ts-top">
+        <div class="ts-logo-wrap" id="ts-logo-wrap"></div>
+        <div class="ts-id">
+          <div class="ts-name" id="ts-name">TEAM</div>
+          <div class="ts-stats" id="ts-stats"></div>
+        </div>
+      </div>
+      <div class="ts-divider"></div>
+      <div class="ts-form">
+        <div class="ts-col"><div class="ts-col-h">Recent form</div><div id="ts-recent"></div></div>
+        <div class="ts-col"><div class="ts-col-h">Next match</div><div id="ts-next"></div></div>
+      </div>
+      <div class="ts-players" id="ts-players"></div>
+    </div>
+    <div class="ts-foot" id="ts-foot"></div>
+  </div>
+
+<script src="scene-base.js"></script>
+<script>
+(function () {
+  function el(id) { return document.getElementById(id); }
+  var esc = function (s) { return (s || '').toString(); };
+  function ordinal(n) { if (!n) return ''; var s = ['th', 'st', 'nd', 'rd'], v = n % 100; return n + (s[(v - 20) % 10] || s[v] || s[0]); }
+
+  function gameLogoOf(data) {
+    var g = data && data.games && data.activeGame && data.games[data.activeGame];
+    return (g && g.logo) ? ('/assets/' + g.logo) : '/assets/rl.png';
+  }
+  function teamLogo(data, name) {
+    var k = (name || '').toLowerCase();
+    var saved = {}; (data.savedTeams || []).forEach(function (t) { if (t && t.name && t.logo) saved[t.name.toLowerCase()] = t.logo; });
+    return saved[k] || ((data.startgg && data.startgg.logoMap) || {})[k] || gameLogoOf(data);
+  }
+
+  // Live GSI stats for the spotlight team when it's the on-air team (matched by name to blue/orange).
+  function liveStats(data, teamName) {
+    var teams = data.teams || {}, side = null;
+    if (teams.blue && (teams.blue.name || '').toLowerCase() === (teamName || '').toLowerCase()) side = 'blue';
+    else if (teams.orange && (teams.orange.name || '').toLowerCase() === (teamName || '').toLowerCase()) side = 'orange';
+    if (!side) return null;
+    var game = data.activeGame || '', byName = {}, fmt = null;
+    function add(arr) { (arr || []).forEach(function (p) { if (p && p.name) byName[p.name.toLowerCase()] = p; }); }
+    if (/rocket|\brl\b/.test(game)) { add(data.players); fmt = function (p) { return (p.goals || 0) + 'G · ' + (p.assists || 0) + 'A · ' + (p.saves || 0) + 'SV'; }; }
+    else if (/csgo|cs2|counter/.test(game)) { add((data.csgo || {}).players); fmt = function (p) { return (p.kills || 0) + ' / ' + (p.deaths || 0) + ' / ' + (p.assists || 0); }; }
+    else if (/valorant/.test(game)) { add((data.valorant || {}).players); fmt = function (p) { return (p.kills || 0) + ' / ' + (p.deaths || 0) + ' / ' + (p.assists || 0); }; }
+    else return null;
+    if (!Object.keys(byName).length) return null;
+    var lbl = /csgo|cs2|counter|valorant/.test(game) ? 'K / D / A' : 'LIVE';
+    return { onAir: true, label: lbl, stat: function (n) { var p = byName[(n || '').toLowerCase()]; return p ? fmt(p) : null; } };
+  }
+
+  function render(data) {
+    var ts = data.teamSpotlight || {};
+    if (SceneBase.preview && !ts.name) {
+      ts = { visible: true, name: 'REIGN ESPORTS', sg: { seed: 2, placement: null, record: { w: 4, l: 1 },
+        recent: [ { opponent: 'S.P.K', score: '3 - 1', won: true }, { opponent: 'RENTS DUE', score: '3 - 0', won: true }, { opponent: 'NXT', score: '2 - 3', won: false } ],
+        next: { round: 'Winners Final', opponent: 'S.P.K', live: false } },
+        players: [ { gamerTag: 'KILLERRL', seedRank: 'GC II' }, { gamerTag: 'MOON', seedRank: 'GC I' }, { gamerTag: 'BARRETT', seedRank: 'SSL' } ] };
+    }
+    // ?embed=1 → in-builder WYSIWYG: always render the live state, ignoring the on-air toggle.
+    var EMBED = SceneBase.qp('embed') === '1';
+    var stage = el('ts-stage');
+    stage.classList.toggle('show', SceneBase.preview || !!ts.visible || EMBED);
+    if (!SceneBase.preview && !ts.visible && !EMBED) return;
+
+    document.documentElement.style.setProperty('--accent', SceneBase.brandColor(data));
+    document.documentElement.style.setProperty('--accent-2', SceneBase.brandAccent(data));
+
+    var nmEl = el('ts-name'); nmEl.textContent = (ts.name || 'TEAM').toUpperCase(); nmEl.classList.toggle('long', (ts.name || '').length > 16);
+    var lw = el('ts-logo-wrap'); lw.innerHTML = '';
+    var src = teamLogo(data, ts.name), gl = gameLogoOf(data);
+    var img = document.createElement('img'); img.className = 'ts-logo' + ((!src || src === gl || SceneBase.isDefaultGameLogo(src)) ? ' logo-on-dark' : '');
+    img.src = src; img.onerror = function () { this.src = gl; this.className = 'ts-logo logo-on-dark'; }; lw.appendChild(img);
+
+    var sg = ts.sg || {};
+    var stats = [];
+    if (sg.seed) stats.push({ v: '#' + sg.seed, k: 'Seed', accent: true });
+    if (sg.placement) stats.push({ v: ordinal(sg.placement), k: 'Placement', accent: true });
+    if (sg.record && (sg.record.w || sg.record.l)) stats.push({ v: sg.record.w + '–' + sg.record.l, k: 'Record' });
+    el('ts-stats').innerHTML = stats.map(function (s) { return '<div class="ts-stat"><div class="v' + (s.accent ? ' accent' : '') + '">' + esc(s.v) + '</div><div class="k">' + esc(s.k) + '</div></div>'; }).join('');
+
+    // Recent form
+    var rc = el('ts-recent'); rc.innerHTML = '';
+    var recent = (sg.recent || []);
+    if (recent.length) recent.forEach(function (r) {
+      var d = document.createElement('div'); d.className = 'ts-result';
+      d.innerHTML = '<span class="ts-wl ' + (r.won ? 'w' : 'l') + '">' + (r.won ? 'W' : 'L') + '</span>'
+        + '<span class="opp">' + esc(r.opponent || 'TBD') + '</span>'
+        + (r.score ? '<span class="sc">' + esc((r.score || '').replace(/.*?(\d+\s*[-–]\s*\d+).*/, '$1') || r.score) + '</span>' : '');
+      rc.appendChild(d);
+    });
+    else rc.innerHTML = '<div class="ts-muted">No completed matches yet.</div>';
+
+    // Next match
+    var nx = el('ts-next');
+    if (sg.next) nx.innerHTML = '<div class="ts-next"><span class="round">' + esc(sg.next.round || 'Upcoming') + '</span>vs <span class="vs">' + esc(sg.next.opponent || 'TBD') + '</span>' + (sg.next.live ? '<span class="live">● LIVE</span>' : '') + '</div>';
+    else nx.innerHTML = '<div class="ts-muted">No upcoming match scheduled.</div>';
+
+    // Players — seeding rank by default; live GSI stats when this team is on-air
+    var live = liveStats(data, ts.name);
+    var pw = el('ts-players'); pw.innerHTML = '';
+    (ts.players || []).slice(0, 5).forEach(function (p) {
+      var statLive = live ? live.stat(p.gamerTag) : null;
+      var card = document.createElement('div'); card.className = 'ts-player' + (statLive ? ' onair' : '');
+      var body = statLive
+        ? '<div class="ts-pstat"><span class="lbl">' + esc(live.label) + '</span>' + esc(statLive) + '</div>'
+        : (p.seedRank ? '<div class="ts-pstat seed"><span class="lbl">Seed rank</span>' + esc(p.seedRank) + '</div>' : '');
+      card.innerHTML = '<div class="ts-ptag">' + esc((p.gamerTag || '').toUpperCase()) + '</div>' + body;
+      pw.appendChild(card);
+    });
+
+    var brand = SceneBase.brandLogo(data);
+    el('ts-foot').innerHTML = brand ? '<img src="' + esc(brand) + '" alt="">' : '';
+
+    requestAnimationFrame(function () { el('ts-card').classList.add('in'); });
+  }
+
+  SceneBase.connect(render);
+})();
+</script>
+</body>
+</html>

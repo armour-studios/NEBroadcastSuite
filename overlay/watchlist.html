@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NE Broadcast Suite — Teams to Watch</title>
+<link rel="stylesheet" href="fonts.css">
+<style>
+  :root { --accent: #b14bff; --accent-2: #4bc3ff; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 1920px; height: 1080px; overflow: hidden; background: transparent;
+    font-family: 'Montserrat', 'Inter', Arial, sans-serif; color: #fff; }
+
+  .wl-stage { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center;
+    opacity: 0; transition: opacity .45s ease; padding: 54px 70px 0; }
+  .wl-stage.show { opacity: 1; }
+  .wl-stage::before { content: ''; position: absolute; inset: 0;
+    background:
+      radial-gradient(120% 70% at 50% 0%, rgba(177,75,255,.18), transparent 60%),
+      linear-gradient(180deg, rgba(8,10,16,.86) 0%, rgba(8,10,16,.93) 100%);
+    z-index: -1; }
+
+  /* Header — logo stacked ABOVE the title */
+  .wl-head { display: flex; flex-direction: column; align-items: center; gap: 14px; margin-bottom: 40px; }
+  .wl-head-logo { height: 132px; width: auto; max-width: 420px; object-fit: contain;
+    filter: drop-shadow(0 6px 20px rgba(0,0,0,.55)); }
+  .wl-title { font-size: 64px; font-weight: 900; letter-spacing: .02em; text-transform: uppercase;
+    text-align: center; line-height: 1; text-shadow: 0 4px 24px rgba(0,0,0,.55); }
+  .wl-title .hl { color: var(--accent); }
+  .wl-sub { font-size: 27px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: #aeb6c6;
+    text-align: center; margin-top: 6px; text-shadow: 0 2px 10px rgba(0,0,0,.5); }
+
+  /* Team columns — bigger */
+  .wl-grid { display: flex; justify-content: center; align-items: stretch; gap: 46px; flex-wrap: wrap;
+    width: 100%; max-width: 1780px; flex: 1; align-content: center; }
+  .wl-card { flex: 0 1 420px; max-width: 480px; display: flex; flex-direction: column; align-items: center; text-align: center;
+    background: linear-gradient(180deg, rgba(255,255,255,.055), rgba(255,255,255,.015));
+    border: 1px solid rgba(255,255,255,.10); border-radius: 26px; padding: 40px 30px 36px;
+    opacity: 0; transform: translateY(28px); transition: opacity .5s ease, transform .5s ease; }
+  .wl-card.in { opacity: 1; transform: none; }
+  /* Podium emphasis — #1 centred, raised and gold; #2 silver, #3 bronze */
+  .wl-grid.podium { align-items: center; }
+  .wl-card { position: relative; }
+  .wl-pos-badge { position: absolute; top: -26px; left: 50%; transform: translateX(-50%);
+    min-width: 52px; height: 52px; padding: 0 12px; border-radius: 26px; display: flex; align-items: center; justify-content: center;
+    font-size: 28px; font-weight: 900; box-shadow: 0 6px 18px rgba(0,0,0,.5);
+    background: linear-gradient(160deg, #2b3344, #1a2030); color: #fff; border: 1px solid rgba(255,255,255,.16); }
+  .wl-card.podium-1 { border-color: rgba(255,205,70,.7); box-shadow: 0 0 0 1px rgba(255,205,70,.35), 0 18px 50px rgba(255,180,30,.22);
+    background: linear-gradient(180deg, rgba(255,205,70,.14), rgba(255,255,255,.02)); }
+  .wl-card.podium-1.in { transform: translateY(-30px) scale(1.06); }
+  .wl-card.podium-1 .wl-pos-badge { background: linear-gradient(160deg, #ffe08a, #f5b62b); color: #1a1205; border-color: transparent; }
+  .wl-card.podium-2 .wl-pos-badge { background: linear-gradient(160deg, #e9eef5, #b9c2d0); color: #1a1205; border-color: transparent; }
+  .wl-card.podium-3 .wl-pos-badge { background: linear-gradient(160deg, #f0b483, #cd7f44); color: #2a1606; border-color: transparent; }
+
+  .wl-logo-wrap { width: 210px; height: 210px; display: flex; align-items: center; justify-content: center; margin-bottom: 24px; }
+  .wl-logo { max-width: 100%; max-height: 100%; object-fit: contain; filter: drop-shadow(0 7px 20px rgba(0,0,0,.55)); }
+  /* Default game logos render at their small natural size — scale them up to fill the slot. */
+  .wl-logo.logo-on-dark { width: 100%; height: 100%; max-width: none; max-height: none; transform: scale(1.12);
+    object-fit: contain; filter: drop-shadow(0 7px 20px rgba(0,0,0,.55)) brightness(0) invert(1); }
+
+  .wl-name { font-size: 42px; font-weight: 900; letter-spacing: .02em; text-transform: uppercase; line-height: 1.04;
+    margin-bottom: 16px; text-shadow: 0 3px 12px rgba(0,0,0,.5); }
+
+  .wl-fields { display: flex; flex-direction: column; gap: 5px; margin-bottom: 16px; }
+  .wl-field { font-size: 29px; font-weight: 700; letter-spacing: .01em; text-transform: uppercase; }
+  .wl-field .fl { color: #aeb6c6; }
+  .wl-field .fv { color: #fff; font-weight: 800; }
+
+  .wl-divider { width: 76px; height: 3px; border-radius: 3px; margin: 6px 0 16px;
+    background: linear-gradient(90deg, var(--accent), var(--accent-2)); opacity: .9; }
+
+  .wl-players { display: flex; flex-direction: column; gap: 9px; }
+  .wl-player { font-size: 31px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: #f4f6fb;
+    text-shadow: 0 2px 8px rgba(0,0,0,.45); }
+
+  .wl-empty { font-size: 30px; color: #aeb6c6; }
+
+  /* Sponsor banner — bottom strip */
+  .wl-sponsors { width: 100%; min-height: 118px; margin-top: 30px; display: flex; align-items: center; justify-content: center; gap: 40px;
+    padding: 16px 60px; background: linear-gradient(180deg, rgba(255,255,255,.02), rgba(0,0,0,.32));
+    border-top: 1px solid rgba(255,255,255,.10); }
+  .wl-sponsors.empty { background: none; border-top: none; }
+  .wl-sponsors-label { font-size: 20px; font-weight: 800; letter-spacing: .18em; text-transform: uppercase; color: #aeb6c6;
+    writing-mode: horizontal-tb; flex: 0 0 auto; }
+  .wl-sponsors-logos { display: flex; align-items: center; justify-content: center; gap: 48px; flex-wrap: wrap; }
+  .wl-sponsors-logos img { height: 66px; width: auto; max-width: 280px; object-fit: contain; filter: drop-shadow(0 2px 8px rgba(0,0,0,.5)); }
+  .wl-brandfoot { height: 60px; width: auto; max-width: 300px; object-fit: contain; filter: drop-shadow(0 2px 8px rgba(0,0,0,.5)); }
+
+  /* Scale down for 4–6 teams so they stay on a single podium row */
+  .wl-grid.cols-4, .wl-grid.cols-5, .wl-grid.cols-6 { flex-wrap: nowrap; gap: 26px; }
+  .wl-grid.cols-4 .wl-card { flex: 1 1 0; max-width: 400px; padding: 30px 22px 28px; }
+  .wl-grid.cols-5 .wl-card { flex: 1 1 0; max-width: 340px; padding: 26px 18px 24px; }
+  .wl-grid.cols-6 .wl-card { flex: 1 1 0; max-width: 290px; padding: 24px 14px 22px; }
+  .wl-grid.cols-4 .wl-name { font-size: 34px; } .wl-grid.cols-5 .wl-name { font-size: 30px; } .wl-grid.cols-6 .wl-name { font-size: 26px; }
+  .wl-grid.cols-4 .wl-logo-wrap, .wl-grid.cols-5 .wl-logo-wrap { width: 150px; height: 150px; }
+  .wl-grid.cols-6 .wl-logo-wrap { width: 124px; height: 124px; }
+  .wl-grid.cols-4 .wl-field, .wl-grid.cols-5 .wl-field, .wl-grid.cols-6 .wl-field { font-size: 22px; }
+  .wl-grid.cols-4 .wl-player, .wl-grid.cols-5 .wl-player { font-size: 25px; } .wl-grid.cols-6 .wl-player { font-size: 22px; }
+  .wl-grid.cols-5 .wl-name, .wl-grid.cols-6 .wl-name { overflow-wrap: anywhere; }
+</style>
+</head>
+<body>
+  <div class="wl-stage" id="wl-stage">
+    <div class="wl-head">
+      <img class="wl-head-logo" id="wl-head-logo" alt="" style="display:none;">
+      <div class="wl-title" id="wl-title">TEAMS TO WATCH</div>
+      <div class="wl-sub" id="wl-sub" style="display:none;"></div>
+    </div>
+    <div class="wl-grid" id="wl-grid"></div>
+    <div class="wl-empty" id="wl-empty" style="display:none;">Mark teams on an event to feature them here.</div>
+    <div class="wl-sponsors empty" id="wl-sponsors"></div>
+  </div>
+
+<script src="scene-base.js"></script>
+<script>
+(function () {
+  function el(id) { return document.getElementById(id); }
+  var esc = function (s) { return (s || '').toString(); };
+  var _wlSig = '';   // last-rendered signature — skip rebuilds when nothing visible changed
+
+  function gameLogoOf(data) {
+    var g = data && data.games && data.activeGame && data.games[data.activeGame];
+    return (g && g.logo) ? ('/assets/' + g.logo) : '/assets/rl.png';
+  }
+  function logoMaps(data) {
+    var maps = { saved: {}, sgg: (data.startgg && data.startgg.logoMap) || {} };
+    (data.savedTeams || []).forEach(function (t) { if (t && t.name && t.logo) maps.saved[t.name.toLowerCase()] = t.logo; });
+    return maps;
+  }
+  // Resolve a team's logo; fall back to the active game's default logo (never a blank tile).
+  function logoFor(name, maps, gameLogo) {
+    var k = (name || '').toLowerCase();
+    return maps.saved[k] || maps.sgg[k] || gameLogo;
+  }
+
+  function teamCard(t, fields, maps, gameLogo, idx) {
+    var card = document.createElement('div'); card.className = 'wl-card' + (t.pos >= 1 && t.pos <= 3 ? ' podium-' + t.pos : '');
+    if (t.pos) { var bd = document.createElement('div'); bd.className = 'wl-pos-badge'; bd.textContent = t.pos; card.appendChild(bd); }
+    var lw = document.createElement('div'); lw.className = 'wl-logo-wrap';
+    var src = logoFor(t.name, maps, gameLogo);
+    var isDefault = !src || src === gameLogo || SceneBase.isDefaultGameLogo(src);
+    var img = document.createElement('img');
+    img.className = 'wl-logo' + (isDefault ? ' logo-on-dark' : '');
+    img.src = src; img.alt = '';
+    img.onerror = function () { this.src = gameLogo; this.className = 'wl-logo logo-on-dark'; };
+    lw.appendChild(img);
+    card.appendChild(lw);
+
+    var nm = document.createElement('div'); nm.className = 'wl-name'; nm.textContent = (t.name || 'TBD').toUpperCase(); card.appendChild(nm);
+
+    var vals = t.values || {};
+    var shownFields = (fields || []).filter(function (f) { return (vals[f.id] || '').toString().trim(); });
+    if (shownFields.length) {
+      var fw = document.createElement('div'); fw.className = 'wl-fields';
+      shownFields.forEach(function (f) {
+        var row = document.createElement('div'); row.className = 'wl-field';
+        row.innerHTML = '<span class="fl">' + esc(f.label).toUpperCase() + ': </span><span class="fv">' + esc(vals[f.id]).toUpperCase() + '</span>';
+        fw.appendChild(row);
+      });
+      card.appendChild(fw);
+    }
+
+    var players = (t.players || []).filter(Boolean);
+    if (players.length) {
+      var dv = document.createElement('div'); dv.className = 'wl-divider'; card.appendChild(dv);
+      var pw = document.createElement('div'); pw.className = 'wl-players';
+      players.forEach(function (p) { var d = document.createElement('div'); d.className = 'wl-player'; d.textContent = (p || '').toUpperCase(); pw.appendChild(d); });
+      card.appendChild(pw);
+    }
+    setTimeout(function () { card.classList.add('in'); }, 80 + idx * 110);
+    return card;
+  }
+
+  // Arrange teams for the podium: #1 centre, #2 left, #3 right, #4 far-left, … then unranked.
+  function podiumOrder(teams) {
+    var ranked = teams.filter(function (t) { return t.pos > 0; }).sort(function (a, b) { return a.pos - b.pos; });
+    var rest = teams.filter(function (t) { return !t.pos; });
+    if (!ranked.length) return teams;
+    var left = [], right = [], center = null;
+    ranked.forEach(function (t, i) { if (i === 0) center = t; else if (i % 2 === 1) left.unshift(t); else right.push(t); });
+    return left.concat([center], right, rest);
+  }
+  // Colour the part after a colon (e.g. "TEAMS TO WATCH: WEEK 3" → "WEEK 3" accented).
+  function colorTitle(t) {
+    var i = t.indexOf(':');
+    if (i < 0) return esc(t);
+    return esc(t.slice(0, i + 1)) + ' <span class="hl">' + esc(t.slice(i + 1).trim()) + '</span>';
+  }
+
+  function renderSponsors(data) {
+    var bar = el('wl-sponsors'); bar.innerHTML = '';
+    var banner = data.banner || {};
+    var images = (banner.images || []).filter(Boolean).slice(0, 8);
+    if (images.length) {
+      bar.classList.remove('empty');
+      var label = (banner.header || '').trim();
+      if (label) { var lab = document.createElement('div'); lab.className = 'wl-sponsors-label'; lab.textContent = label; bar.appendChild(lab); }
+      var row = document.createElement('div'); row.className = 'wl-sponsors-logos';
+      images.forEach(function (src) { var im = document.createElement('img'); im.src = src; im.alt = ''; im.onerror = function () { this.style.display = 'none'; }; row.appendChild(im); });
+      bar.appendChild(row);
+      return;
+    }
+    // Fallback: the brand logo, centered.
+    var brand = SceneBase.brandLogo(data);
+    if (brand) { bar.classList.remove('empty'); var b = document.createElement('img'); b.className = 'wl-brandfoot'; b.src = brand; b.alt = ''; b.onerror = function () { this.style.display = 'none'; }; bar.appendChild(b); }
+    else bar.classList.add('empty');
+  }
+
+  function render(data) {
+    var w = data.watchlist || {};
+    if (SceneBase.preview && (!w.teams || !w.teams.length)) {
+      w = { visible: true, title: 'TOP 3 TEAMS', subtitle: 'Rocket Rush — Week 3', logo: '',
+        fields: [{ id: 'rank', label: 'CURRENT RANK' }],
+        teams: [
+          { name: 'S.P.K', players: ['SOKU', 'KURE', 'POKE'], values: { rank: '1st' }, pos: 1 },
+          { name: 'REIGN ESPORTS', players: ['KILLERRL', 'MOON', 'BARRETT'], values: { rank: '2nd' }, pos: 2 },
+          { name: 'RENTS DUE', players: ['ARIS', 'IMPOH', 'HEPSKID'], values: { rank: '3rd' }, pos: 3 }
+        ] };
+    }
+    // ?embed=1 → in-builder WYSIWYG: always render the live state, ignoring the on-air toggle.
+    var EMBED = SceneBase.qp('embed') === '1';
+    var stage = el('wl-stage');
+    stage.classList.toggle('show', SceneBase.preview || !!w.visible || EMBED);
+    if (!SceneBase.preview && !w.visible && !EMBED) return;
+
+    // Only rebuild (and re-run the entry animation) when something that affects the card actually
+    // changed — NOT on every full_state broadcast (that caused the random re-load/flicker).
+    var sig = JSON.stringify({
+      t: w.title, s: w.subtitle, l: (w.logo || '').length, f: w.fields, tm: w.teams,
+      ac: SceneBase.brandColor(data), a2: SceneBase.brandAccent(data),
+      bn: (data.banner && data.banner.images || []).map(function (x) { return (x || '').length; }).join(','),
+      g: data.activeGame,
+      sv: (data.savedTeams || []).map(function (x) { return (x && x.name || '') + ':' + ((x && x.logo || '').length); }).join('|')
+    });
+    if (sig === _wlSig && el('wl-grid').children.length) return;
+    _wlSig = sig;
+
+    document.documentElement.style.setProperty('--accent', SceneBase.brandColor(data));
+    document.documentElement.style.setProperty('--accent-2', SceneBase.brandAccent(data));
+
+    // Header: logo (event/custom) ABOVE the title, event-name subtitle UNDER it
+    var hl = el('wl-head-logo');
+    if (w.logo) { hl.src = w.logo; hl.style.display = ''; } else hl.style.display = 'none';
+    el('wl-title').innerHTML = colorTitle((w.title || 'TEAMS TO WATCH').toUpperCase());
+    var sub = el('wl-sub'); var subText = (w.subtitle || '').trim();
+    if (subText) { sub.textContent = subText; sub.style.display = ''; } else sub.style.display = 'none';
+
+    var maps = logoMaps(data), gameLogo = gameLogoOf(data);
+    var teams = podiumOrder((w.teams || []).slice(0, 12));
+    var hasPodium = teams.some(function (t) { return t.pos > 0; });
+    var grid = el('wl-grid'); grid.innerHTML = '';
+    grid.className = 'wl-grid cols-' + Math.min(6, Math.max(3, teams.length)) + (hasPodium ? ' podium' : '');
+    el('wl-empty').style.display = teams.length ? 'none' : 'block';
+    teams.forEach(function (t, i) { grid.appendChild(teamCard(t, w.fields || [], maps, gameLogo, i)); });
+
+    renderSponsors(data);
+  }
+
+  SceneBase.connect(render);
+})();
+</script>
+</body>
+</html>

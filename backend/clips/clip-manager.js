@@ -108,7 +108,15 @@ function createClipManager({ dataDir, getObsClient, onUpdate, onCapture }) {
       duration: meta.duration || null,
       inMontage: false,
       trimIn: 0,
-      trimOut: null
+      trimOut: null,
+      // ── AI training metadata (Phase 1): align the clip to the game event that spawned it ──
+      eventTargetId: meta.eventTargetId || null,   // stable player/entity id (not just a name)
+      gameEventTime: meta.feedTs || null,          // wall-clock ms of the triggering event
+      gameClock: meta.gameClock || null,           // in-game clock at the event ("OT 2:45", seconds…)
+      scoreAtEvent: meta.scoreAtEvent || null,     // { a, b }
+      tags: [],                                    // producer labels (editor) — training labels
+      markers: [],                                 // [{ videoTime, label }] timeline cue-points
+      note: ''                                     // promoted producer note
     };
     library.unshift(clip);
     if (library.length > 500) library.length = 500;
@@ -249,6 +257,15 @@ function createClipManager({ dataDir, getObsClient, onUpdate, onCapture }) {
     if ('map' in patch) clip.map = String(patch.map || '');
     if ('trimIn' in patch) clip.trimIn = Math.max(0, Number(patch.trimIn) || 0);
     if ('trimOut' in patch) clip.trimOut = patch.trimOut != null ? Number(patch.trimOut) : null;
+    // AI training metadata
+    if ('tags' in patch && Array.isArray(patch.tags)) {
+      clip.tags = patch.tags.map((t) => String(t).trim().toLowerCase()).filter(Boolean).slice(0, 24);
+    }
+    if ('markers' in patch && Array.isArray(patch.markers)) {
+      clip.markers = patch.markers.filter((m) => m && typeof m.videoTime === 'number')
+        .map((m) => ({ videoTime: m.videoTime, label: String(m.label || '').slice(0, 60) })).slice(0, 50);
+    }
+    if ('note' in patch) clip.note = String(patch.note || '');
     save();
     return true;
   }
@@ -261,11 +278,33 @@ function createClipManager({ dataDir, getObsClient, onUpdate, onCapture }) {
       clipIds: clips.map((c) => c.id),
       template: template || 'highlights',
       createdAt: Date.now(),
-      status: 'draft'
+      status: 'draft',
+      programScene: '',                          // OBS scene this playlist plays in (live playout)
+      transition: { type: 'cut', stinger: '' }   // between-clip transition: cut|fade|dip|logo|stinger
     };
     montages.unshift(montage);
     save();
     return montage;
+  }
+
+  // Set the live-playout settings on a playlist (OBS scene to play in + between-clip transition).
+  function setMontageSettings(montageId, opts) {
+    const m = montages.find((x) => x.id === montageId);
+    if (!m || !opts || typeof opts !== 'object') return false;
+    if (typeof opts.programScene === 'string') m.programScene = opts.programScene.slice(0, 200);
+    if (typeof opts.kind === 'string') m.kind = ['replay', 'ad', ''].includes(opts.kind) ? opts.kind : '';
+    if (typeof opts.loop === 'boolean') m.loop = opts.loop;
+    if (typeof opts.returnEnabled === 'boolean') m.returnEnabled = opts.returnEnabled;
+    if (opts.transition && typeof opts.transition === 'object') {
+      const t = opts.transition;
+      const cur = m.transition || {};
+      m.transition = {
+        type: ['cut', 'fade', 'dip', 'logo', 'stinger'].includes(t.type) ? t.type : 'cut',
+        stinger: typeof t.stinger === 'string' ? t.stinger.slice(0, 2000) : (cur.stinger || '')
+      };
+    }
+    save();
+    return true;
   }
 
   function reorderMontage(montageId, clipIds) {
@@ -349,6 +388,7 @@ function createClipManager({ dataDir, getObsClient, onUpdate, onCapture }) {
     removeClip,
     updateClip,
     createMontage,
+    setMontageSettings,
     reorderMontage,
     renameMontage,
     deleteMontage,

@@ -32,20 +32,22 @@ class PredictionManager {
     throw new Error('Failed to create prediction on Twitch API');
   }
 
-  async resolvePrediction(outcomeId) {
-    if (!this.currentPrediction) {
+  async resolvePrediction(outcomeId, predictionId = null) {
+    const pid = predictionId || this.currentPrediction?.id;
+    if (!pid) {
       throw new Error('No active prediction to resolve');
     }
 
-    console.log(`[Twitch] Resolving prediction with outcome: ${outcomeId}`);
+    console.log(`[Twitch] Resolving prediction ${pid} with outcome: ${outcomeId}`);
     const result = await this.client.resolvePrediction(
       this.broadcasterId,
-      this.currentPrediction.id,
+      pid,
       outcomeId
     );
 
     if (result) {
       this.currentPrediction = null;
+      this.cooldownUntil = 0; // allow immediate re-creation for the next game
       console.log('[Twitch] Prediction resolved');
       return result;
     }
@@ -53,9 +55,17 @@ class PredictionManager {
     throw new Error('Failed to resolve prediction on Twitch API');
   }
 
-  async cancelPrediction() {
-    if (!this.currentPrediction) throw new Error('No active prediction to cancel');
-    const result = await this.client.cancelPrediction(this.broadcasterId, this.currentPrediction.id);
+  async lockPrediction(predictionId = null) {
+    const pid = predictionId || this.currentPrediction?.id;
+    if (!pid) throw new Error('No active prediction to lock');
+    const result = await this.client.lockPrediction(this.broadcasterId, pid);
+    return result;
+  }
+
+  async cancelPrediction(predictionId = null) {
+    const pid = predictionId || this.currentPrediction?.id;
+    if (!pid) throw new Error('No active prediction to cancel');
+    const result = await this.client.cancelPrediction(this.broadcasterId, pid);
     if (result) {
       this.currentPrediction = null;
       this.cooldownUntil = 0; // cancel doesn't start the cooldown

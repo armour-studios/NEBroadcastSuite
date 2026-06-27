@@ -1,8 +1,8 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Director Preview — Producer Only</title>
+<title>Director Preview â€” Producer Only</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body {
@@ -10,7 +10,7 @@
     background: transparent;
     font-family: 'Segoe UI', system-ui, sans-serif;
   }
-  /* Producer-only bug — bottom-left, never add to program feed */
+  /* Producer-only bug â€” bottom-left, never add to program feed */
   .director-bug {
     position: fixed; left: 24px; bottom: 24px; z-index: 9999;
     min-width: 320px; max-width: 480px;
@@ -52,10 +52,10 @@
 </style>
 </head>
 <body>
-<div class="dp-watermark">Producer · Director Preview</div>
+<div class="dp-watermark">Producer Â· Director Preview</div>
 <div id="director-bug" class="director-bug hidden">
   <div class="dp-label">Auto-Director</div>
-  <div class="dp-target" id="dp-target">—</div>
+  <div class="dp-target" id="dp-target">â€”</div>
   <div class="dp-reason" id="dp-reason"></div>
   <div class="dp-meta">
     <span id="dp-type"></span>
@@ -68,7 +68,7 @@
 (function () {
   const params = new URLSearchParams(location.search);
   if (params.get('director') !== '1' && params.get('director') !== 'true') {
-    document.body.innerHTML = '<div style="color:#666;padding:20px;font-size:12px;">Add ?director=1 — producer preview only, not for broadcast.</div>';
+    document.body.innerHTML = '<div style="color:#666;padding:20px;font-size:12px;">Add ?director=1 â€” producer preview only, not for broadcast.</div>';
     return;
   }
 
@@ -90,7 +90,7 @@
     bug.classList.remove('hidden', 'off');
     const p = d.primary;
     if (!p) {
-      document.getElementById('dp-target').textContent = 'Analyzing…';
+      document.getElementById('dp-target').textContent = 'Analyzingâ€¦';
       document.getElementById('dp-reason').textContent = 'Waiting for moment';
       return;
     }
@@ -115,7 +115,7 @@
       if (msg.type === 'full_state' && msg.data?.director) render(msg.data.director);
       if (msg.type === 'director_update') render(msg.data);
     };
-    ws.onclose = () => setTimeout(connect, 3000);
+    ws.onclose = () => setTimeout(connect, 800);
     ws.onerror = () => { try { ws.close(); } catch {} };
   }
   connect();

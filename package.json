@@ -8,9 +8,9 @@
     "dev": "electron .",
     "start": "electron .",
     "dev:watch": "nodemon --watch server.js --watch backend --exec \"electron .\"",
-    "build": "electron-builder --win nsis",
-    "build:portable": "electron-builder --win portable",
-    "release": "electron-builder --win nsis --publish always"
+    "build": "node scripts/gen-prod-env.js && electron-builder --win nsis",
+    "build:portable": "node scripts/gen-prod-env.js && electron-builder --win portable",
+    "release": "node scripts/gen-prod-env.js && electron-builder --win nsis --publish always"
   },
   "dependencies": {
     "@electron/remote": "^2.1.3",
@@ -24,6 +24,8 @@
     "graphql-request": "^7.4.0",
     "obs-websocket-js": "^5.0.8",
     "pino": "^10.3.1",
+    "qrcode": "^1.5.4",
+    "sql.js": "^1.14.1",
     "ws": "^8.16.0",
     "zod": "^4.4.3"
   },
@@ -71,14 +73,13 @@
       "main.js",
       "server.js",
       "app-store-nav.js",
-      ".env.local",
+      ".env.production",
       "backend/**/*",
       "obs/**/*",
       "overlay/**/*",
       "control-panel/**/*",
       "assets/**/*",
-      "themes/**/*",
-      "data/**/*"
+      "themes/**/*"
     ]
   }
 }

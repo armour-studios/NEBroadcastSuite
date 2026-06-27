@@ -29,10 +29,11 @@ function sendKey(key) {
   }
   const escaped = key.replace(/[+^%~(){}[\]]/g, '{$&}');
   const ps = `Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait('${escaped}')`;
-  spawn('powershell', ['-NoProfile', '-NonInteractive', '-Command', ps], {
+  const child = spawn('powershell', ['-NoProfile', '-NonInteractive', '-Command', ps], {
     windowsHide: true,
     stdio: 'ignore'
   });
+  child.on('error', () => { /* powershell unavailable — auto-switch keypress is best-effort, never crash */ });
   return true;
 }
 
