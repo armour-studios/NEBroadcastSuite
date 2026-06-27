@@ -78,10 +78,10 @@ const MAP_POOLS = {
   // Rocket League — arenas are cosmetic (no real competitive veto); included so the app can
   // show/select an arena on the board if a tournament chooses to.
   'rocket-league': [
-    { id: 'dfh-stadium', name: 'DFH Stadium', image: '' },     { id: 'mannfield', name: 'Mannfield', image: '' },
-    { id: 'champions-field', name: 'Champions Field', image: '' }, { id: 'neo-tokyo', name: 'Neo Tokyo', image: '' },
-    { id: 'beckwith-park', name: 'Beckwith Park', image: '' },  { id: 'urban-central', name: 'Urban Central', image: '' },
-    { id: 'utopia-coliseum', name: 'Utopia Coliseum', image: '' }, { id: 'salty-shores', name: 'Salty Shores', image: '' }
+    { id: 'dfh-stadium', name: 'DFH Stadium', image: '/assets/rocket-league/maps/dfh-stadium.jpg' },     { id: 'mannfield', name: 'Mannfield', image: '/assets/rocket-league/maps/mannfield.jpg' },
+    { id: 'champions-field', name: 'Champions Field', image: '/assets/rocket-league/maps/champions-field.jpg' }, { id: 'neo-tokyo', name: 'Neo Tokyo', image: '/assets/rocket-league/maps/neo-tokyo.jpg' },
+    { id: 'beckwith-park', name: 'Beckwith Park', image: '/assets/rocket-league/maps/beckwith-park.jpg' },  { id: 'urban-central', name: 'Urban Central', image: '/assets/rocket-league/maps/urban-central.jpg' },
+    { id: 'utopia-coliseum', name: 'Utopia Coliseum', image: '/assets/rocket-league/maps/utopia-coliseum.jpg' }, { id: 'salty-shores', name: 'Salty Shores', image: '/assets/rocket-league/maps/salty-shores.jpg' }
   ]
 };
 
