@@ -61,7 +61,7 @@ function showView(name) {
   }
 
   if (sbImg) {
-    sbImg.src = (name === 'scoreboard') ? '/assets/podium-scoreboard2.png' : '/assets/scoreboard.png';
+    sbImg.src = (name === 'scoreboard') ? '/assets/rl/podium-scoreboard2.png' : '/assets/rl/scoreboard.png';
   }
 
   if (name === 'goal') {
@@ -139,9 +139,9 @@ function renderPlayerPanels(players, spectated) {
       const bg = document.createElement('img');
       bg.className = 'player-bg';
       if (isSpectated) {
-        bg.src = side === 'blue' ? '/assets/player-blue.png' : '/assets/player-orange.png';
+        bg.src = side === 'blue' ? '/assets/rl/player-blue.png' : '/assets/rl/player-orange.png';
       } else {
-        bg.src = '/assets/player.png';
+        bg.src = '/assets/rl/player.png';
       }
       row.appendChild(bg);
 
@@ -245,7 +245,7 @@ function renderActivePlayer(players, spectated, facecams) {
 
   // Bottom left background
   const bgImg = el('active-player-bg');
-  if (bgImg) bgImg.src = p.team === 0 ? '/assets/player-blue-bot.png' : '/assets/player-orange-bot.png';
+  if (bgImg) bgImg.src = p.team === 0 ? '/assets/rl/player-blue-bot.png' : '/assets/rl/player-orange-bot.png';
 
   // Bottom left bar
   const botBar = el('bot-boost-bar');
@@ -549,7 +549,7 @@ function applyStateUpdate(gameData, players, spectated, facecams) {
 
 function applyGoalView(goal) {
   if (!goal) return;
-  setImg('goal-banner-img', goal.team === 0 ? '/assets/goal-blue-2.png' : '/assets/goal-orange-2.png');
+  setImg('goal-banner-img', goal.team === 0 ? '/assets/rl/goal-blue-2.png' : '/assets/rl/goal-orange-2.png');
   setText('goal-scorer', (goal.scorer || '').toUpperCase());
   setText('goal-speed', goal.speed || 0);
 
@@ -609,7 +609,7 @@ function renderScoreboard(playerCache, data) {
       if(p.name === mvpName) {
         n.classList.add('mvp-player');
         const m = document.createElement('img');
-        m.src = '/assets/mvp.png';
+        m.src = '/assets/rl/mvp.png';
         m.className = 'mvp-icon';
         n.appendChild(m);
       }
