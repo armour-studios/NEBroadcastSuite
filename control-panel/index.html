@@ -89,7 +89,7 @@
         <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></svg>
         <b id="tb-viewers-n">—</b>
       </span>
-      <span class="tb-stat" id="tb-adtimer" title="Twitch ad break countdown" style="opacity:0.6;">AD <b id="tb-adtimer-n">—</b></span>
+      <span class="tb-stat tb-adstat" id="tb-adtimer" title="Twitch pre-roll free time / ad break" style="opacity:0.6;"><b id="tb-adtimer-n">—</b><span class="tb-adstat-lbl" id="tb-adtimer-lbl">AD</span></span>
     </div>
     <div class="topbar-right">
       <span class="stat-pill stat-program" id="ck-chip-program" title="The live OBS program scene — what viewers actually see">PROGRAM: —</span>
@@ -307,12 +307,29 @@
 
 <!-- ══════════════════════════════════════ TAB: MAIN (LIVE COCKPIT) ═══ -->
 <div id="tab-principal-content" class="tab-content active">
-  <div class="page-head"><h1>Dashboard</h1><p>Your live match cockpit — pick the game, set the two teams and series, and control what's on the overlay right now.</p></div>
+  <div class="page-head"><h1>Dashboard</h1><p>Your live match cockpit — pick the game, set the two teams and series, and control what's on the overlay right now.</p><button class="btn btn-ghost btn-sm" id="dash-customize-btn" title="Customise dashboard layout">Customize</button></div>
 
-  <!-- On-Air scene control removed from the Dashboard — it now lives on the rail (Quick Actions) and the bottom bar. -->
+  <!-- Dashboard customise toolbar (visible in edit mode) -->
+  <div id="dash-customize-bar" class="dash-customize-bar" style="display:none;">
+    <div class="dcb-inner">
+      <span class="dcb-label">Columns</span>
+      <div class="dcb-cols">
+        <button class="dcb-col-btn" data-cols="1" title="Single column"><svg viewBox="0 0 20 20" width="16" height="16" fill="currentColor"><rect x="3" y="3" width="14" height="14" rx="2"/></svg></button>
+        <button class="dcb-col-btn" data-cols="2" title="Two columns"><svg viewBox="0 0 20 20" width="16" height="16" fill="currentColor"><rect x="2" y="3" width="6" height="14" rx="2"/><rect x="12" y="3" width="6" height="14" rx="2"/></svg></button>
+        <button class="dcb-col-btn" data-cols="3" title="Three columns"><svg viewBox="0 0 20 20" width="16" height="16" fill="currentColor"><rect x="1" y="3" width="4" height="14" rx="1.5"/><rect x="8" y="3" width="4" height="14" rx="1.5"/><rect x="15" y="3" width="4" height="14" rx="1.5"/></svg></button>
+      </div>
+      <div class="dcb-sep"></div>
+      <button class="btn btn-ghost btn-xs" id="dcb-add-panel">+ Add Panel</button>
+      <button class="btn btn-primary btn-sm" id="dcb-done">Done</button>
+    </div>
+    <div id="dcb-catalog" class="dcb-catalog" style="display:none;"></div>
+  </div>
+
+  <!-- Dashboard widget grid -->
+  <div id="dash-grid" class="dash-grid">
 
   <!-- ══ EVENT — first thing a producer configures ═══════════════════════════ -->
-  <section class="section dash-event">
+  <section class="section dash-event" data-dash-id="event">
     <div class="ev-hdr">
       <h3 class="section-title" style="margin-bottom:0;">Event</h3>
       <span id="ev-token-badge" class="ev-token-badge" style="display:none;"><svg class="svg-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg> No start.gg token — add one in Settings</span>
@@ -385,7 +402,7 @@
   </section>
 
   <!-- Production Deck mirror + Live Preview — Dashboard unified panel -->
-  <section class="section dash-graphics">
+  <section class="section dash-graphics" data-dash-id="deck">
     <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px;">
       <h3 class="section-title" style="margin:0;">Deck</h3>
       <div style="display:flex; gap:6px; align-items:center;">
@@ -412,7 +429,7 @@
   <!-- Graphics + Go-Live triggers moved to the right Quick-Actions rail (available on every tab). -->
 
   <!-- Map Veto editor (build + activate from the Dashboard) -->
-  <section class="section dash-veto">
+  <section class="section dash-veto" data-dash-id="veto" data-dash-auto="true">
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
       <h3 class="section-title" style="margin-bottom:0;">Map Veto</h3>
       <a href="http://localhost:3000/mapscreen.html?preview=1" target="_blank" class="btn btn-secondary btn-sm">Preview ↗</a>
@@ -489,7 +506,7 @@
   </section>
 
   <!-- Champion / hero draft (LoL etc.) -->
-  <section class="section dash-draft">
+  <section class="section dash-draft" data-dash-id="draft" data-dash-auto="true">
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
       <h3 class="section-title" style="margin-bottom:0;">Champion Draft</h3>
       <a href="http://localhost:3000/draft.html?preview=1" target="_blank" class="btn btn-secondary btn-sm">Preview ↗</a>
@@ -546,7 +563,7 @@
 
 
   <!-- On-Air Talent — unified players + casters/guests/observers (mirrors the right-rail Talent tab) -->
-  <section class="section dash-talent">
+  <section class="section dash-talent" data-dash-id="talent">
     <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; margin-bottom:6px;">
       <h3 class="section-title" style="margin:0;">On-Air Talent</h3>
       <span class="qrail-sub" id="dash-talent-listen"></span>
@@ -560,7 +577,7 @@
   </section>
 
   <!-- Caster Desk — restored full for complete management of casters, sponsors, layouts (your work) -->
-  <section class="section dash-caster-desk">
+  <section class="section dash-caster-desk" data-dash-id="casters">
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; flex-wrap:wrap; gap:10px;">
       <h3 class="section-title" style="margin-bottom:0;">Caster Desk</h3>
       <div style="display:flex; align-items:center; gap:10px;">
@@ -607,7 +624,7 @@
   </section>
 
   <!-- Ad Slots & Desk Footer — tabbed panel -->
-  <section class="section adslot-section">
+  <section class="section adslot-section" data-dash-id="adslots">
     <h3 class="section-title" style="margin-bottom:14px;">Ad Slots &amp; Desk Footer</h3>
     <div class="adslot-tabs">
       <button class="adslot-tab active" data-panel="adslot-ot">Overtime</button>
@@ -756,7 +773,7 @@
   </section>
 
   <!-- Match — Teams (single instance, relocates into the Teams tab when that page is open) -->
-  <section class="section dash-teams" id="match-teams-section">
+  <section class="section dash-teams" id="match-teams-section" data-dash-id="teams">
     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; gap: 12px; flex-wrap: wrap;">
       <span class="section-title" style="margin:0;">Match — Teams</span>
       <div style="display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
@@ -856,7 +873,7 @@
   </section>
 
   <!-- Series — format / division / per-map results (feeds the HUDs) -->
-  <section class="section dash-series">
+  <section class="section dash-series" data-dash-id="series">
     <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:12px;">
       <h3 class="section-title" style="margin-bottom:0;">Series</h3>
       <div style="display:flex; align-items:center; gap:14px;">
@@ -888,7 +905,7 @@
   </section>
 
   <!-- Overwatch 2 settings (only shown when active game is overwatch) -->
-  <section class="section dash-ow-bans" id="section-ow-bans" style="display:none">
+  <section class="section dash-ow-bans" id="section-ow-bans" data-dash-auto="true" style="display:none">
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
       <h3 class="section-title" style="margin-bottom:0;">Overwatch 2</h3>
       <a href="http://localhost:3000/overwatch.html?preview=1" target="_blank" class="btn btn-secondary btn-sm">Preview ↗</a>
@@ -1123,7 +1140,7 @@
   <!-- Overlay View (Show Scoreboard / Return to HUD) removed from the Dashboard — available on the Quick-Actions rail. -->
 
   <!-- Marvel Rivals settings (only shown when active game is marvel-rivals) -->
-  <section class="section dash-mr-bans" id="section-mr-bans" style="display:none">
+  <section class="section dash-mr-bans" id="section-mr-bans" data-dash-auto="true" style="display:none">
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
       <h3 class="section-title" style="margin-bottom:0;">Marvel Rivals</h3>
       <div style="display:flex;gap:8px;align-items:center;">
@@ -1359,7 +1376,7 @@
   <!-- Overlay View (Show Scoreboard / Return to HUD) removed from the Dashboard — available on the Quick-Actions rail. -->
 
   <!-- ───────────── DIRECTOR CONTROL CENTER (dashboard) ───────────── -->
-  <section class="section dash-dcc" id="cf-director-center">
+  <section class="section dash-dcc" id="cf-director-center" data-dash-id="director">
     <div class="dcc-wrap">
 
       <!-- Tab bar -->
@@ -1536,6 +1553,41 @@
       </div><!-- /dcc-database-view -->
     </div><!-- /dcc-wrap -->
   </section><!-- /cf-director-center -->
+
+  <!-- ══ MINI PANEL: Stream Queue ══════════════════════════════════════════ -->
+  <section class="section" id="dash-mini-queue" data-dash-id="queue" style="display:none;">
+    <h3 class="section-title" style="margin-bottom:12px;">Stream Queue</h3>
+    <div id="dash-mini-queue-content" class="dash-mini-content">
+      <p class="dash-mini-empty">No matches queued. Configure stream queue in the Event panel or start.gg Integrations.</p>
+    </div>
+  </section>
+
+  <!-- ══ MINI PANEL: Twitch Live ═══════════════════════════════════════════ -->
+  <section class="section" id="dash-mini-twitch" data-dash-id="twitch" style="display:none;">
+    <h3 class="section-title" style="margin-bottom:12px;">Twitch Live</h3>
+    <div class="dash-mini-twitch-grid" id="dash-mini-twitch-content">
+      <div class="dmtw-stat"><span class="dmtw-val" id="dmtw-viewers">—</span><span class="dmtw-lbl">Viewers</span></div>
+      <div class="dmtw-stat"><span class="dmtw-val" id="dmtw-followers">—</span><span class="dmtw-lbl">Followers</span></div>
+      <div class="dmtw-stat"><span class="dmtw-val" id="dmtw-status-val">Offline</span><span class="dmtw-lbl">Status</span></div>
+      <div class="dmtw-stat"><span class="dmtw-val dmtw-small" id="dmtw-game-val">—</span><span class="dmtw-lbl">Category</span></div>
+    </div>
+  </section>
+
+  <!-- ══ MINI PANEL: OBS Status ════════════════════════════════════════════ -->
+  <section class="section" id="dash-mini-obs" data-dash-id="obs" style="display:none;">
+    <h3 class="section-title" style="margin-bottom:12px;">OBS Status</h3>
+    <div class="dash-mini-content">
+      <div class="dmobs-row"><span class="dmobs-label">Scene</span><span id="dmobs-scene" class="dmobs-val">—</span></div>
+      <div class="dmobs-pills">
+        <span class="dmobs-pill" id="dmobs-stream">Stream Off</span>
+        <span class="dmobs-pill" id="dmobs-record">Record Off</span>
+        <span class="dmobs-pill" id="dmobs-replay">Buffer Off</span>
+      </div>
+      <div id="dmobs-scenes-list" class="dmobs-scenes"></div>
+    </div>
+  </section>
+
+  </div><!-- /dash-grid -->
 
 </div><!-- /tab-principal-content -->
 

@@ -9126,12 +9126,26 @@ el('btn-teams-export')?.addEventListener('click', () => {
 });
 
 // Teams page — pull rosters straight from a start.gg event into the library.
-el('btn-teams-startgg-pull')?.addEventListener('click', () => {
-  const slug = (el('teams-startgg-slug')?.value || '').trim();
+function teamsStartggImport(slug) {
   const st = el('teams-startgg-status');
-  if (!slug) { if (st) { st.textContent = 'Paste a start.gg event URL or slug first.'; st.style.color = '#f56565'; } return; }
+  if (!slug) { if (st) { st.textContent = 'Paste a start.gg event or tournament URL first.'; st.style.color = '#f56565'; } return; }
   send('import_startgg_teams', { eventSlug: slug });
   if (st) { st.textContent = 'Importing teams from start.gg…'; st.style.color = 'var(--muted)'; }
+}
+el('btn-teams-startgg-pull')?.addEventListener('click', () => {
+  teamsStartggImport((el('teams-startgg-slug')?.value || '').trim());
+});
+el('btn-teams-use-current-event')?.addEventListener('click', () => {
+  const sgg = (currentState && currentState.startgg) || {};
+  const url = sgg.eventSlug
+    ? 'https://www.start.gg/' + sgg.eventSlug
+    : sgg.tournamentSlug
+      ? 'https://www.start.gg/tournament/' + sgg.tournamentSlug
+      : '';
+  const inp = el('teams-startgg-slug');
+  if (!url) { const st = el('teams-startgg-status'); if (st) { st.textContent = 'No start.gg event connected yet — configure one in Settings.'; st.style.color = '#f56565'; } return; }
+  if (inp) inp.value = url;
+  teamsStartggImport(url);
 });
 
 // ── Events sub-nav (start.gg | Leagues) ───────────────────────────────────
@@ -10815,12 +10829,13 @@ function renderQuickToolbar(data) {
     _qtSceneSig = sig;
     wrap.innerHTML = '';
     const hintEl = (txt) => { const h = document.createElement('span'); h.className = 'qt-hint'; h.textContent = txt; wrap.appendChild(h); };
-    const sceneBtn = (sn, label, key) => {
+    const sceneBtn = (sn, label, key, pinned) => {
       const b = document.createElement('button');
       b.className = 'qt-scene-btn';
       b.innerHTML = (key != null ? `<kbd class="qt-key">${key}</kbd>` : '') + label;
       b.title = `Cut to "${sn}"` + (key != null ? `  ·  hotkey ${key}` : '');
       b.dataset.scene = sn;
+      if (pinned) { b.draggable = true; b.dataset.pinScene = sn; }
       b.addEventListener('click', () => send('obs_switch_scene', { sceneName: sn }));
       wrap.appendChild(b);
     };
@@ -10841,14 +10856,14 @@ function renderQuickToolbar(data) {
     if (obs.enabled && connected) {
       SCENE_CONTROL_MOMENTS.forEach((m) => {
         const sn = scenes[m.key]; if (!sn || shown.has('s:' + sn)) return;
-        shown.add('s:' + sn); sceneBtn(sn, m.label, ++n);
+        shown.add('s:' + sn); sceneBtn(sn, m.label, ++n, false);
       });
     }
     // Pinned actions (scenes + overlays + triggers).
     pins.forEach((p) => {
       if (p.t === 'scene') {
         if (!obs.enabled || !connected || shown.has('s:' + p.k)) return;
-        shown.add('s:' + p.k); sceneBtn(p.k, p.k, ++n);
+        shown.add('s:' + p.k); sceneBtn(p.k, p.k, ++n, true);
       } else {
         const info = bbActionInfo(p); if (!info || shown.has(p.t + ':' + p.k)) return;
         shown.add(p.t + ':' + p.k); actionBtn(p, info);
@@ -10863,7 +10878,52 @@ function renderQuickToolbar(data) {
       b.classList.toggle('live', !!live && b.dataset.scene === live);
     });
   }
+  // Clip button status dot: green = replay buffer + twitch both active; orange = one; red = neither.
+  (function updateClipBtnDot() {
+    const btn = el('btn-bb-clip'); if (!btn) return;
+    const bufActive = !!(data.obs && data.obs.replayBufferActive);
+    const twitchOn = !!(data.twitch && data.twitch.connected);
+    const cls = bufActive && twitchOn ? 'green' : bufActive || twitchOn ? 'orange' : 'red';
+    let dot = btn.querySelector('.bb-clip-dot');
+    if (!dot) { dot = document.createElement('span'); dot.className = 'bb-clip-dot'; btn.insertBefore(dot, btn.firstChild); }
+    dot.dataset.status = cls;
+  })();
 }
+(function wireBbSceneDrag() {
+  const wrap = el('qt-obs-scenes'); if (!wrap) return;
+  let dragSrc = null;
+  wrap.addEventListener('dragstart', (e) => {
+    const btn = e.target.closest('[data-pin-scene]'); if (!btn) return;
+    dragSrc = btn.dataset.pinScene;
+    e.dataTransfer.effectAllowed = 'move';
+    btn.classList.add('qt-drag-src');
+  });
+  wrap.addEventListener('dragover', (e) => {
+    if (!dragSrc) return;
+    const btn = e.target.closest('[data-pin-scene]'); if (!btn || btn.dataset.pinScene === dragSrc) return;
+    e.preventDefault(); e.dataTransfer.dropEffect = 'move';
+    wrap.querySelectorAll('.qt-drag-over').forEach((b) => b.classList.remove('qt-drag-over'));
+    btn.classList.add('qt-drag-over');
+  });
+  wrap.addEventListener('dragleave', (e) => {
+    const btn = e.target.closest('[data-pin-scene]'); if (btn) btn.classList.remove('qt-drag-over');
+  });
+  wrap.addEventListener('drop', (e) => {
+    if (!dragSrc) return;
+    const target = e.target.closest('[data-pin-scene]');
+    if (!target || target.dataset.pinScene === dragSrc) { dragSrc = null; return; }
+    e.preventDefault();
+    const pins = bbPinned();
+    const srcIdx = pins.findIndex((p) => p.t === 'scene' && p.k === dragSrc);
+    const tgtIdx = pins.findIndex((p) => p.t === 'scene' && p.k === target.dataset.pinScene);
+    if (srcIdx >= 0 && tgtIdx >= 0) { const [item] = pins.splice(srcIdx, 1); pins.splice(tgtIdx, 0, item); bbSetPinned(pins); _qtSceneSig = ''; }
+    dragSrc = null;
+  });
+  wrap.addEventListener('dragend', () => {
+    dragSrc = null;
+    wrap.querySelectorAll('.qt-drag-src, .qt-drag-over').forEach((b) => b.classList.remove('qt-drag-src', 'qt-drag-over'));
+  });
+})();
 el('qt-view-scoreboard')?.addEventListener('click', () => send('force_scoreboard'));
 el('qt-view-hud')?.addEventListener('click', () => send('force_hud'));
 el('qt-autoswitch')?.addEventListener('change', function () {
@@ -20533,19 +20593,13 @@ function connect() {
       const ab = msg.data || {};
       if (currentState) { if (!currentState.twitch) currentState.twitch = {}; currentState.twitch.adBreak = { active: true, duration: ab.duration, startedAt: ab.startedAt, endsAt: ab.endsAt, isAutomatic: ab.isAutomatic }; }
       renderProdAdBreak();
-      // update topbar ad timer to show LIVE instead of next-ad countdown
-      const adLabelEl = el('tb-adtimer-n');
-      if (adLabelEl) adLabelEl.textContent = 'LIVE';
-      const adTimerEl = el('tb-adtimer');
-      if (adTimerEl) { adTimerEl.style.opacity = '1'; adTimerEl.style.color = '#ef4444'; }
+      // top-bar chip shows the live ad break
+      _adState.adBreak = true; renderAdChip();
       addActivityItem('ad_break', 'Ad Break', `${ab.duration || '?'}s ${ab.isAutomatic ? '(automatic)' : '(manual)'}`, svgIcon('film'));
     } else if (msg.type === 'twitch_ad_break_end') {
       if (currentState && currentState.twitch) currentState.twitch.adBreak = { active: false, duration: 0, startedAt: null, endsAt: null, isAutomatic: false };
       renderProdAdBreak();
-      const adTimerEl = el('tb-adtimer');
-      if (adTimerEl) { adTimerEl.style.color = ''; adTimerEl.style.opacity = '0.6'; }
-      const adLabelEl = el('tb-adtimer-n');
-      if (adLabelEl) adLabelEl.textContent = '—';
+      _adState.adBreak = false; renderAdChip();
     } else if (msg.type === 'twitch_activity') {
       if (renderProdCredits._log) renderProdCredits._log.push(msg.data);
       renderProdCredits();
@@ -21901,6 +21955,25 @@ function stopStreamStatePolling() {
   if (adTimerEl) adTimerEl.style.opacity = '0.6';
 }
 
+// Top-bar Twitch ad chip — priority: live ad break > pre-roll free time > next-ad countdown.
+// Driven off stored deadlines so a 1s ticker keeps the countdown smooth between 30s polls.
+const _adState = { adBreak: false, prerollUntil: 0, nextAdAt: 0 };
+function _adFmt(s) { const m = Math.floor(s / 60); return m + ':' + (s % 60).toString().padStart(2, '0'); }
+function renderAdChip() {
+  const chip = el('tb-adtimer'), n = el('tb-adtimer-n'), lbl = el('tb-adtimer-lbl');
+  if (!chip || !n) return;
+  const now = Date.now();
+  chip.classList.remove('preroll-off', 'ad-live'); chip.style.color = '';
+  if (_adState.adBreak) { n.textContent = 'LIVE'; if (lbl) lbl.textContent = 'Ad Break'; chip.classList.add('ad-live'); chip.style.opacity = '1'; return; }
+  const prerollRem = Math.ceil((_adState.prerollUntil - now) / 1000);
+  if (prerollRem > 0) { n.textContent = _adFmt(prerollRem); if (lbl) lbl.textContent = 'Pre-roll Off'; chip.classList.add('preroll-off'); chip.style.opacity = '1'; return; }
+  const adRem = Math.ceil((_adState.nextAdAt - now) / 1000);
+  if (adRem > 0) { n.textContent = _adFmt(adRem); if (lbl) lbl.textContent = 'Ad in'; chip.style.opacity = '1'; return; }
+  if (_adState.prerollUntil || _adState.nextAdAt) { n.textContent = '—'; if (lbl) lbl.textContent = 'Pre-roll On'; chip.style.opacity = '0.85'; }
+  else { n.textContent = '—'; if (lbl) lbl.textContent = 'AD'; chip.style.opacity = '0.6'; }
+}
+setInterval(renderAdChip, 1000);
+
 // Real-time Twitch stream state (viewer count + next-ad timer in the top bar).
 // Driven from the main ws.onmessage chain (a separate top-level listener bound to a
 // dangling `socket` var used to crash init here and never survived a reconnect).
@@ -21915,18 +21988,10 @@ function onTwitchStreamState(msg) {
     viewersEl.style.opacity = d.stream.isLive ? '1' : '0.6';
   }
 
-  const adTimerEl = el('tb-adtimer');
-  const adTimerNEl = el('tb-adtimer-n');
-  if (adTimerEl && adTimerNEl && d.ads && d.ads.nextAdAt) {
-    const countdown = Math.ceil((new Date(d.ads.nextAdAt).getTime() - Date.now()) / 1000);
-    if (countdown > 0) {
-      const mins = Math.floor(countdown / 60);
-      const secs = countdown % 60;
-      adTimerNEl.textContent = `${mins}:${secs.toString().padStart(2, '0')}`;
-      adTimerEl.style.opacity = '1';
-    } else {
-      adTimerEl.style.opacity = '0.6';
-    }
+  if (d.ads) {
+    _adState.prerollUntil = Number(d.ads.prerollFreeUntil) || 0;
+    _adState.nextAdAt = d.ads.nextAdAt ? new Date(d.ads.nextAdAt).getTime() : 0;
+    renderAdChip();
   }
 }
 

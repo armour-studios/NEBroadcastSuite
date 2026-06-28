@@ -363,7 +363,8 @@ let state = {
       casters: '',
       bracket: ''
     },
-    commercialAutoReturn: true   // auto-cut back to program when the commercial video ends
+    commercialAutoReturn: true,  // auto-cut back to program when the commercial video ends
+    replayBufferActive: false    // live status from OBS ReplayBufferStateChanged
   },
   // Runtime (not persisted): are we currently in a commercial, and where to return.
   commercial: { active: false, returnScene: '' },
@@ -4544,7 +4545,7 @@ function setupObsClient() {
     onStatus: ({ connected, lastError }) => {
       state.obs.connected = connected;
       state.obs.lastError = lastError || null;
-      if (!connected) state.obs.currentScene = '';
+      if (!connected) { state.obs.currentScene = ''; state.obs.replayBufferActive = false; }
       broadcastFullState();
     },
     // The OBS program scene = the authoritative "what's on air" signal.
@@ -4588,6 +4589,10 @@ function setupObsClient() {
     },
     onReplayBufferSaved: ({ path }) => {
       flowBus.emit('obs_replay_saved', { path });
+    },
+    onReplayBufferStateChanged: ({ active }) => {
+      state.obs.replayBufferActive = active;
+      broadcastFullState();
     }
   });
 }
@@ -4631,10 +4636,12 @@ async function _doConnectObs() {
     await obsClient.connect({ url: state.obs.url, password: obsPassword });
     state.obs.availableScenes = await obsClient.getScenes();
     state.obs.lastError = null;
+    try {
+      state.obs.replayBufferActive = await obsClient.isReplayBufferActive();
+    } catch (e) { state.obs.replayBufferActive = false; }
     if (state.clips?.autoCapture) {
       try {
-        const active = await obsClient.isReplayBufferActive();
-        if (!active) await obsClient.startReplayBuffer();
+        if (!state.obs.replayBufferActive) await obsClient.startReplayBuffer();
       } catch (e) { /* replay buffer optional until producer enables it in OBS */ }
     }
     broadcastFullState();
@@ -11939,6 +11946,8 @@ class TwitchStreamStateManager {
       nextAdAt: null,
       lastAdAt: null,
       adDuration: 120, // 2 minutes default
+      prerollFreeTime: 0,   // seconds of pre-roll free time remaining (from Twitch)
+      prerollFreeUntil: 0,  // absolute ms when pre-roll free time runs out (0 = none)
       scheduleWindow: 30 * 60 * 1000 // 30 minute window
     };
     this.pollInterval = null;
@@ -12013,6 +12022,10 @@ class TwitchStreamStateManager {
             const lastAd = adRes.data.data[0];
             this.adSchedule.lastAdAt = new Date(lastAd.timestamp);
             this.adSchedule.adDuration = lastAd.duration;
+            // Pre-roll free time: how long new viewers won't see a pre-roll ad (earned by ad breaks).
+            const pf = Number(lastAd.preroll_free_time) || 0;
+            this.adSchedule.prerollFreeTime = pf;
+            this.adSchedule.prerollFreeUntil = pf > 0 ? Date.now() + pf * 1000 : 0;
 
             // Calculate next ad time (roughly 8 minutes after last ad for mid-roll)
             const nextAdTime = new Date(this.adSchedule.lastAdAt.getTime() + 8 * 60 * 1000);
