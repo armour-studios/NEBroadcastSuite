@@ -1,0 +1,867 @@
+[
+ {
+  "id": "Aatrox",
+  "name": "Aatrox",
+  "image": "/assets/lol/Aatrox.jpg"
+ },
+ {
+  "id": "Ahri",
+  "name": "Ahri",
+  "image": "/assets/lol/Ahri.jpg"
+ },
+ {
+  "id": "Akali",
+  "name": "Akali",
+  "image": "/assets/lol/Akali.jpg"
+ },
+ {
+  "id": "Akshan",
+  "name": "Akshan",
+  "image": "/assets/lol/Akshan.jpg"
+ },
+ {
+  "id": "Alistar",
+  "name": "Alistar",
+  "image": "/assets/lol/Alistar.jpg"
+ },
+ {
+  "id": "Ambessa",
+  "name": "Ambessa",
+  "image": "/assets/lol/Ambessa.jpg"
+ },
+ {
+  "id": "Amumu",
+  "name": "Amumu",
+  "image": "/assets/lol/Amumu.jpg"
+ },
+ {
+  "id": "Anivia",
+  "name": "Anivia",
+  "image": "/assets/lol/Anivia.jpg"
+ },
+ {
+  "id": "Annie",
+  "name": "Annie",
+  "image": "/assets/lol/Annie.jpg"
+ },
+ {
+  "id": "Aphelios",
+  "name": "Aphelios",
+  "image": "/assets/lol/Aphelios.jpg"
+ },
+ {
+  "id": "Ashe",
+  "name": "Ashe",
+  "image": "/assets/lol/Ashe.jpg"
+ },
+ {
+  "id": "AurelionSol",
+  "name": "Aurelion Sol",
+  "image": "/assets/lol/AurelionSol.jpg"
+ },
+ {
+  "id": "Aurora",
+  "name": "Aurora",
+  "image": "/assets/lol/Aurora.jpg"
+ },
+ {
+  "id": "Azir",
+  "name": "Azir",
+  "image": "/assets/lol/Azir.jpg"
+ },
+ {
+  "id": "Bard",
+  "name": "Bard",
+  "image": "/assets/lol/Bard.jpg"
+ },
+ {
+  "id": "Belveth",
+  "name": "Bel'Veth",
+  "image": "/assets/lol/Belveth.jpg"
+ },
+ {
+  "id": "Blitzcrank",
+  "name": "Blitzcrank",
+  "image": "/assets/lol/Blitzcrank.jpg"
+ },
+ {
+  "id": "Brand",
+  "name": "Brand",
+  "image": "/assets/lol/Brand.jpg"
+ },
+ {
+  "id": "Braum",
+  "name": "Braum",
+  "image": "/assets/lol/Braum.jpg"
+ },
+ {
+  "id": "Briar",
+  "name": "Briar",
+  "image": "/assets/lol/Briar.jpg"
+ },
+ {
+  "id": "Caitlyn",
+  "name": "Caitlyn",
+  "image": "/assets/lol/Caitlyn.jpg"
+ },
+ {
+  "id": "Camille",
+  "name": "Camille",
+  "image": "/assets/lol/Camille.jpg"
+ },
+ {
+  "id": "Cassiopeia",
+  "name": "Cassiopeia",
+  "image": "/assets/lol/Cassiopeia.jpg"
+ },
+ {
+  "id": "Chogath",
+  "name": "Cho'Gath",
+  "image": "/assets/lol/Chogath.jpg"
+ },
+ {
+  "id": "Corki",
+  "name": "Corki",
+  "image": "/assets/lol/Corki.jpg"
+ },
+ {
+  "id": "Darius",
+  "name": "Darius",
+  "image": "/assets/lol/Darius.jpg"
+ },
+ {
+  "id": "Diana",
+  "name": "Diana",
+  "image": "/assets/lol/Diana.jpg"
+ },
+ {
+  "id": "DrMundo",
+  "name": "Dr. Mundo",
+  "image": "/assets/lol/DrMundo.jpg"
+ },
+ {
+  "id": "Draven",
+  "name": "Draven",
+  "image": "/assets/lol/Draven.jpg"
+ },
+ {
+  "id": "Ekko",
+  "name": "Ekko",
+  "image": "/assets/lol/Ekko.jpg"
+ },
+ {
+  "id": "Elise",
+  "name": "Elise",
+  "image": "/assets/lol/Elise.jpg"
+ },
+ {
+  "id": "Evelynn",
+  "name": "Evelynn",
+  "image": "/assets/lol/Evelynn.jpg"
+ },
+ {
+  "id": "Ezreal",
+  "name": "Ezreal",
+  "image": "/assets/lol/Ezreal.jpg"
+ },
+ {
+  "id": "Fiddlesticks",
+  "name": "Fiddlesticks",
+  "image": "/assets/lol/Fiddlesticks.jpg"
+ },
+ {
+  "id": "Fiora",
+  "name": "Fiora",
+  "image": "/assets/lol/Fiora.jpg"
+ },
+ {
+  "id": "Fizz",
+  "name": "Fizz",
+  "image": "/assets/lol/Fizz.jpg"
+ },
+ {
+  "id": "Galio",
+  "name": "Galio",
+  "image": "/assets/lol/Galio.jpg"
+ },
+ {
+  "id": "Gangplank",
+  "name": "Gangplank",
+  "image": "/assets/lol/Gangplank.jpg"
+ },
+ {
+  "id": "Garen",
+  "name": "Garen",
+  "image": "/assets/lol/Garen.jpg"
+ },
+ {
+  "id": "Gnar",
+  "name": "Gnar",
+  "image": "/assets/lol/Gnar.jpg"
+ },
+ {
+  "id": "Gragas",
+  "name": "Gragas",
+  "image": "/assets/lol/Gragas.jpg"
+ },
+ {
+  "id": "Graves",
+  "name": "Graves",
+  "image": "/assets/lol/Graves.jpg"
+ },
+ {
+  "id": "Gwen",
+  "name": "Gwen",
+  "image": "/assets/lol/Gwen.jpg"
+ },
+ {
+  "id": "Hecarim",
+  "name": "Hecarim",
+  "image": "/assets/lol/Hecarim.jpg"
+ },
+ {
+  "id": "Heimerdinger",
+  "name": "Heimerdinger",
+  "image": "/assets/lol/Heimerdinger.jpg"
+ },
+ {
+  "id": "Hwei",
+  "name": "Hwei",
+  "image": "/assets/lol/Hwei.jpg"
+ },
+ {
+  "id": "Illaoi",
+  "name": "Illaoi",
+  "image": "/assets/lol/Illaoi.jpg"
+ },
+ {
+  "id": "Irelia",
+  "name": "Irelia",
+  "image": "/assets/lol/Irelia.jpg"
+ },
+ {
+  "id": "Ivern",
+  "name": "Ivern",
+  "image": "/assets/lol/Ivern.jpg"
+ },
+ {
+  "id": "Janna",
+  "name": "Janna",
+  "image": "/assets/lol/Janna.jpg"
+ },
+ {
+  "id": "JarvanIV",
+  "name": "Jarvan IV",
+  "image": "/assets/lol/JarvanIV.jpg"
+ },
+ {
+  "id": "Jax",
+  "name": "Jax",
+  "image": "/assets/lol/Jax.jpg"
+ },
+ {
+  "id": "Jayce",
+  "name": "Jayce",
+  "image": "/assets/lol/Jayce.jpg"
+ },
+ {
+  "id": "Jhin",
+  "name": "Jhin",
+  "image": "/assets/lol/Jhin.jpg"
+ },
+ {
+  "id": "Jinx",
+  "name": "Jinx",
+  "image": "/assets/lol/Jinx.jpg"
+ },
+ {
+  "id": "KSante",
+  "name": "K'Sante",
+  "image": "/assets/lol/KSante.jpg"
+ },
+ {
+  "id": "Kaisa",
+  "name": "Kai'Sa",
+  "image": "/assets/lol/Kaisa.jpg"
+ },
+ {
+  "id": "Kalista",
+  "name": "Kalista",
+  "image": "/assets/lol/Kalista.jpg"
+ },
+ {
+  "id": "Karma",
+  "name": "Karma",
+  "image": "/assets/lol/Karma.jpg"
+ },
+ {
+  "id": "Karthus",
+  "name": "Karthus",
+  "image": "/assets/lol/Karthus.jpg"
+ },
+ {
+  "id": "Kassadin",
+  "name": "Kassadin",
+  "image": "/assets/lol/Kassadin.jpg"
+ },
+ {
+  "id": "Katarina",
+  "name": "Katarina",
+  "image": "/assets/lol/Katarina.jpg"
+ },
+ {
+  "id": "Kayle",
+  "name": "Kayle",
+  "image": "/assets/lol/Kayle.jpg"
+ },
+ {
+  "id": "Kayn",
+  "name": "Kayn",
+  "image": "/assets/lol/Kayn.jpg"
+ },
+ {
+  "id": "Kennen",
+  "name": "Kennen",
+  "image": "/assets/lol/Kennen.jpg"
+ },
+ {
+  "id": "Khazix",
+  "name": "Kha'Zix",
+  "image": "/assets/lol/Khazix.jpg"
+ },
+ {
+  "id": "Kindred",
+  "name": "Kindred",
+  "image": "/assets/lol/Kindred.jpg"
+ },
+ {
+  "id": "Kled",
+  "name": "Kled",
+  "image": "/assets/lol/Kled.jpg"
+ },
+ {
+  "id": "KogMaw",
+  "name": "Kog'Maw",
+  "image": "/assets/lol/KogMaw.jpg"
+ },
+ {
+  "id": "Leblanc",
+  "name": "LeBlanc",
+  "image": "/assets/lol/Leblanc.jpg"
+ },
+ {
+  "id": "LeeSin",
+  "name": "Lee Sin",
+  "image": "/assets/lol/LeeSin.jpg"
+ },
+ {
+  "id": "Leona",
+  "name": "Leona",
+  "image": "/assets/lol/Leona.jpg"
+ },
+ {
+  "id": "Lillia",
+  "name": "Lillia",
+  "image": "/assets/lol/Lillia.jpg"
+ },
+ {
+  "id": "Lissandra",
+  "name": "Lissandra",
+  "image": "/assets/lol/Lissandra.jpg"
+ },
+ {
+  "id": "Locke",
+  "name": "Locke",
+  "image": "/assets/lol/Locke.jpg"
+ },
+ {
+  "id": "Lucian",
+  "name": "Lucian",
+  "image": "/assets/lol/Lucian.jpg"
+ },
+ {
+  "id": "Lulu",
+  "name": "Lulu",
+  "image": "/assets/lol/Lulu.jpg"
+ },
+ {
+  "id": "Lux",
+  "name": "Lux",
+  "image": "/assets/lol/Lux.jpg"
+ },
+ {
+  "id": "Malphite",
+  "name": "Malphite",
+  "image": "/assets/lol/Malphite.jpg"
+ },
+ {
+  "id": "Malzahar",
+  "name": "Malzahar",
+  "image": "/assets/lol/Malzahar.jpg"
+ },
+ {
+  "id": "Maokai",
+  "name": "Maokai",
+  "image": "/assets/lol/Maokai.jpg"
+ },
+ {
+  "id": "MasterYi",
+  "name": "Master Yi",
+  "image": "/assets/lol/MasterYi.jpg"
+ },
+ {
+  "id": "Mel",
+  "name": "Mel",
+  "image": "/assets/lol/Mel.jpg"
+ },
+ {
+  "id": "Milio",
+  "name": "Milio",
+  "image": "/assets/lol/Milio.jpg"
+ },
+ {
+  "id": "MissFortune",
+  "name": "Miss Fortune",
+  "image": "/assets/lol/MissFortune.jpg"
+ },
+ {
+  "id": "Mordekaiser",
+  "name": "Mordekaiser",
+  "image": "/assets/lol/Mordekaiser.jpg"
+ },
+ {
+  "id": "Morgana",
+  "name": "Morgana",
+  "image": "/assets/lol/Morgana.jpg"
+ },
+ {
+  "id": "Naafiri",
+  "name": "Naafiri",
+  "image": "/assets/lol/Naafiri.jpg"
+ },
+ {
+  "id": "Nami",
+  "name": "Nami",
+  "image": "/assets/lol/Nami.jpg"
+ },
+ {
+  "id": "Nasus",
+  "name": "Nasus",
+  "image": "/assets/lol/Nasus.jpg"
+ },
+ {
+  "id": "Nautilus",
+  "name": "Nautilus",
+  "image": "/assets/lol/Nautilus.jpg"
+ },
+ {
+  "id": "Neeko",
+  "name": "Neeko",
+  "image": "/assets/lol/Neeko.jpg"
+ },
+ {
+  "id": "Nidalee",
+  "name": "Nidalee",
+  "image": "/assets/lol/Nidalee.jpg"
+ },
+ {
+  "id": "Nilah",
+  "name": "Nilah",
+  "image": "/assets/lol/Nilah.jpg"
+ },
+ {
+  "id": "Nocturne",
+  "name": "Nocturne",
+  "image": "/assets/lol/Nocturne.jpg"
+ },
+ {
+  "id": "Nunu",
+  "name": "Nunu & Willump",
+  "image": "/assets/lol/Nunu.jpg"
+ },
+ {
+  "id": "Olaf",
+  "name": "Olaf",
+  "image": "/assets/lol/Olaf.jpg"
+ },
+ {
+  "id": "Orianna",
+  "name": "Orianna",
+  "image": "/assets/lol/Orianna.jpg"
+ },
+ {
+  "id": "Ornn",
+  "name": "Ornn",
+  "image": "/assets/lol/Ornn.jpg"
+ },
+ {
+  "id": "Pantheon",
+  "name": "Pantheon",
+  "image": "/assets/lol/Pantheon.jpg"
+ },
+ {
+  "id": "Poppy",
+  "name": "Poppy",
+  "image": "/assets/lol/Poppy.jpg"
+ },
+ {
+  "id": "Pyke",
+  "name": "Pyke",
+  "image": "/assets/lol/Pyke.jpg"
+ },
+ {
+  "id": "Qiyana",
+  "name": "Qiyana",
+  "image": "/assets/lol/Qiyana.jpg"
+ },
+ {
+  "id": "Quinn",
+  "name": "Quinn",
+  "image": "/assets/lol/Quinn.jpg"
+ },
+ {
+  "id": "Rakan",
+  "name": "Rakan",
+  "image": "/assets/lol/Rakan.jpg"
+ },
+ {
+  "id": "Rammus",
+  "name": "Rammus",
+  "image": "/assets/lol/Rammus.jpg"
+ },
+ {
+  "id": "RekSai",
+  "name": "Rek'Sai",
+  "image": "/assets/lol/RekSai.jpg"
+ },
+ {
+  "id": "Rell",
+  "name": "Rell",
+  "image": "/assets/lol/Rell.jpg"
+ },
+ {
+  "id": "Renata",
+  "name": "Renata Glasc",
+  "image": "/assets/lol/Renata.jpg"
+ },
+ {
+  "id": "Renekton",
+  "name": "Renekton",
+  "image": "/assets/lol/Renekton.jpg"
+ },
+ {
+  "id": "Rengar",
+  "name": "Rengar",
+  "image": "/assets/lol/Rengar.jpg"
+ },
+ {
+  "id": "Riven",
+  "name": "Riven",
+  "image": "/assets/lol/Riven.jpg"
+ },
+ {
+  "id": "Rumble",
+  "name": "Rumble",
+  "image": "/assets/lol/Rumble.jpg"
+ },
+ {
+  "id": "Ryze",
+  "name": "Ryze",
+  "image": "/assets/lol/Ryze.jpg"
+ },
+ {
+  "id": "Samira",
+  "name": "Samira",
+  "image": "/assets/lol/Samira.jpg"
+ },
+ {
+  "id": "Sejuani",
+  "name": "Sejuani",
+  "image": "/assets/lol/Sejuani.jpg"
+ },
+ {
+  "id": "Senna",
+  "name": "Senna",
+  "image": "/assets/lol/Senna.jpg"
+ },
+ {
+  "id": "Seraphine",
+  "name": "Seraphine",
+  "image": "/assets/lol/Seraphine.jpg"
+ },
+ {
+  "id": "Sett",
+  "name": "Sett",
+  "image": "/assets/lol/Sett.jpg"
+ },
+ {
+  "id": "Shaco",
+  "name": "Shaco",
+  "image": "/assets/lol/Shaco.jpg"
+ },
+ {
+  "id": "Shen",
+  "name": "Shen",
+  "image": "/assets/lol/Shen.jpg"
+ },
+ {
+  "id": "Shyvana",
+  "name": "Shyvana",
+  "image": "/assets/lol/Shyvana.jpg"
+ },
+ {
+  "id": "Singed",
+  "name": "Singed",
+  "image": "/assets/lol/Singed.jpg"
+ },
+ {
+  "id": "Sion",
+  "name": "Sion",
+  "image": "/assets/lol/Sion.jpg"
+ },
+ {
+  "id": "Sivir",
+  "name": "Sivir",
+  "image": "/assets/lol/Sivir.jpg"
+ },
+ {
+  "id": "Skarner",
+  "name": "Skarner",
+  "image": "/assets/lol/Skarner.jpg"
+ },
+ {
+  "id": "Smolder",
+  "name": "Smolder",
+  "image": "/assets/lol/Smolder.jpg"
+ },
+ {
+  "id": "Sona",
+  "name": "Sona",
+  "image": "/assets/lol/Sona.jpg"
+ },
+ {
+  "id": "Soraka",
+  "name": "Soraka",
+  "image": "/assets/lol/Soraka.jpg"
+ },
+ {
+  "id": "Swain",
+  "name": "Swain",
+  "image": "/assets/lol/Swain.jpg"
+ },
+ {
+  "id": "Sylas",
+  "name": "Sylas",
+  "image": "/assets/lol/Sylas.jpg"
+ },
+ {
+  "id": "Syndra",
+  "name": "Syndra",
+  "image": "/assets/lol/Syndra.jpg"
+ },
+ {
+  "id": "TahmKench",
+  "name": "Tahm Kench",
+  "image": "/assets/lol/TahmKench.jpg"
+ },
+ {
+  "id": "Taliyah",
+  "name": "Taliyah",
+  "image": "/assets/lol/Taliyah.jpg"
+ },
+ {
+  "id": "Talon",
+  "name": "Talon",
+  "image": "/assets/lol/Talon.jpg"
+ },
+ {
+  "id": "Taric",
+  "name": "Taric",
+  "image": "/assets/lol/Taric.jpg"
+ },
+ {
+  "id": "Teemo",
+  "name": "Teemo",
+  "image": "/assets/lol/Teemo.jpg"
+ },
+ {
+  "id": "Thresh",
+  "name": "Thresh",
+  "image": "/assets/lol/Thresh.jpg"
+ },
+ {
+  "id": "Tristana",
+  "name": "Tristana",
+  "image": "/assets/lol/Tristana.jpg"
+ },
+ {
+  "id": "Trundle",
+  "name": "Trundle",
+  "image": "/assets/lol/Trundle.jpg"
+ },
+ {
+  "id": "Tryndamere",
+  "name": "Tryndamere",
+  "image": "/assets/lol/Tryndamere.jpg"
+ },
+ {
+  "id": "TwistedFate",
+  "name": "Twisted Fate",
+  "image": "/assets/lol/TwistedFate.jpg"
+ },
+ {
+  "id": "Twitch",
+  "name": "Twitch",
+  "image": "/assets/lol/Twitch.jpg"
+ },
+ {
+  "id": "Udyr",
+  "name": "Udyr",
+  "image": "/assets/lol/Udyr.jpg"
+ },
+ {
+  "id": "Urgot",
+  "name": "Urgot",
+  "image": "/assets/lol/Urgot.jpg"
+ },
+ {
+  "id": "Varus",
+  "name": "Varus",
+  "image": "/assets/lol/Varus.jpg"
+ },
+ {
+  "id": "Vayne",
+  "name": "Vayne",
+  "image": "/assets/lol/Vayne.jpg"
+ },
+ {
+  "id": "Veigar",
+  "name": "Veigar",
+  "image": "/assets/lol/Veigar.jpg"
+ },
+ {
+  "id": "Velkoz",
+  "name": "Vel'Koz",
+  "image": "/assets/lol/Velkoz.jpg"
+ },
+ {
+  "id": "Vex",
+  "name": "Vex",
+  "image": "/assets/lol/Vex.jpg"
+ },
+ {
+  "id": "Vi",
+  "name": "Vi",
+  "image": "/assets/lol/Vi.jpg"
+ },
+ {
+  "id": "Viego",
+  "name": "Viego",
+  "image": "/assets/lol/Viego.jpg"
+ },
+ {
+  "id": "Viktor",
+  "name": "Viktor",
+  "image": "/assets/lol/Viktor.jpg"
+ },
+ {
+  "id": "Vladimir",
+  "name": "Vladimir",
+  "image": "/assets/lol/Vladimir.jpg"
+ },
+ {
+  "id": "Volibear",
+  "name": "Volibear",
+  "image": "/assets/lol/Volibear.jpg"
+ },
+ {
+  "id": "Warwick",
+  "name": "Warwick",
+  "image": "/assets/lol/Warwick.jpg"
+ },
+ {
+  "id": "MonkeyKing",
+  "name": "Wukong",
+  "image": "/assets/lol/MonkeyKing.jpg"
+ },
+ {
+  "id": "Xayah",
+  "name": "Xayah",
+  "image": "/assets/lol/Xayah.jpg"
+ },
+ {
+  "id": "Xerath",
+  "name": "Xerath",
+  "image": "/assets/lol/Xerath.jpg"
+ },
+ {
+  "id": "XinZhao",
+  "name": "Xin Zhao",
+  "image": "/assets/lol/XinZhao.jpg"
+ },
+ {
+  "id": "Yasuo",
+  "name": "Yasuo",
+  "image": "/assets/lol/Yasuo.jpg"
+ },
+ {
+  "id": "Yone",
+  "name": "Yone",
+  "image": "/assets/lol/Yone.jpg"
+ },
+ {
+  "id": "Yorick",
+  "name": "Yorick",
+  "image": "/assets/lol/Yorick.jpg"
+ },
+ {
+  "id": "Yunara",
+  "name": "Yunara",
+  "image": "/assets/lol/Yunara.jpg"
+ },
+ {
+  "id": "Yuumi",
+  "name": "Yuumi",
+  "image": "/assets/lol/Yuumi.jpg"
+ },
+ {
+  "id": "Zaahen",
+  "name": "Zaahen",
+  "image": "/assets/lol/Zaahen.jpg"
+ },
+ {
+  "id": "Zac",
+  "name": "Zac",
+  "image": "/assets/lol/Zac.jpg"
+ },
+ {
+  "id": "Zed",
+  "name": "Zed",
+  "image": "/assets/lol/Zed.jpg"
+ },
+ {
+  "id": "Zeri",
+  "name": "Zeri",
+  "image": "/assets/lol/Zeri.jpg"
+ },
+ {
+  "id": "Ziggs",
+  "name": "Ziggs",
+  "image": "/assets/lol/Ziggs.jpg"
+ },
+ {
+  "id": "Zilean",
+  "name": "Zilean",
+  "image": "/assets/lol/Zilean.jpg"
+ },
+ {
+  "id": "Zoe",
+  "name": "Zoe",
+  "image": "/assets/lol/Zoe.jpg"
+ },
+ {
+  "id": "Zyra",
+  "name": "Zyra",
+  "image": "/assets/lol/Zyra.jpg"
+ }
+]

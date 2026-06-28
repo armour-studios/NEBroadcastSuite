@@ -1,48 +1,95 @@
 <!DOCTYPE html>
 <html lang="en">
 <!--
-  NE Broadcast Suite champion/hero DRAFT board (LoL etc.).
+  NE Broadcast Suite — champion/hero PICK & BAN board (multi-game: LoL / Overwatch / Marvel Rivals…).
   Driven by full_state.draft:
-    { visible, title, game, teamStart:'a'|'b', ops:[{name,action:'ban'|'pick',by:'a'|'b'}], turn:{team,action} }
-  Team a = blue side (left), team b = red side (right).
+    { visible, title, game, teamStart:'a'|'b',
+      sequence:[{action:'ban'|'pick', by:'a'|'b'}],   // planned order — drives slot counts
+      ops:[{name, action:'ban'|'pick', by:'a'|'b', image}],  // what's been locked in (image = portrait URL)
+      turn:{team,action}, complete }
+  Team a = blue side (left), team b = red side (right). Slot counts adapt to the game's format.
 -->
 <head>
   <meta charset="UTF-8">
-  <title>NE Broadcast Suite — Draft</title>
+  <title>NE Broadcast Suite — Pick &amp; Ban</title>
   <link rel="stylesheet" href="scene.css" />
   <style>
+    :root { --blue:#2f8dff; --red:#f0444e; }
     body { display:flex; align-items:center; justify-content:center; }
-    #draft-stage { opacity:0; transition:opacity .35s ease; width:1920px; display:flex; flex-direction:column; align-items:center; }
+    #draft-stage { opacity:0; transition:opacity .35s ease; width:1920px; height:1080px; position:relative;
+      display:flex; flex-direction:column; align-items:center; font-family:'Rajdhani', var(--main-font); }
     #draft-stage.show { opacity:1; }
-    .d-head { text-align:center; margin-top:54px; }
-    .d-title { font-family:'Rajdhani', var(--main-font); font-weight:700; font-size:3.4em; color:#fff; letter-spacing:.05em; }
-    .d-sub { font-family:'Rajdhani', var(--main-font); font-weight:600; font-size:1.3em; color:var(--accent); letter-spacing:.3em; margin-top:4px; }
-    .d-cols { display:flex; gap:90px; margin-top:48px; align-items:flex-start; }
+
+    /* Header */
+    .d-head { text-align:center; margin-top:48px; }
+    .d-title { font-weight:700; font-size:3.2em; color:#fff; letter-spacing:.04em; line-height:1; text-shadow:0 2px 18px rgba(0,0,0,.6); }
+    .d-sub { font-weight:600; font-size:1.15em; color:var(--accent); letter-spacing:.42em; margin-top:8px; text-transform:uppercase; }
+
+    /* Phase / turn banner + timer */
+    .d-phase { display:flex; align-items:center; justify-content:center; gap:18px; margin-top:18px; height:54px; }
+    .d-phase-pill { display:flex; align-items:center; gap:12px; padding:8px 22px; border-radius:999px;
+      background:rgba(12,16,24,.72); border:1px solid rgba(255,255,255,.14); }
+    .d-phase-dot { width:13px; height:13px; border-radius:50%; box-shadow:0 0 14px currentColor; }
+    .d-phase-txt { font-weight:700; font-size:1.35em; color:#fff; letter-spacing:.12em; text-transform:uppercase; }
+    .d-timer { min-width:74px; text-align:center; font-weight:700; font-size:1.5em; color:#fff;
+      padding:6px 14px; border-radius:10px; background:rgba(12,16,24,.72); border:1px solid rgba(255,255,255,.14);
+      font-variant-numeric:tabular-nums; }
+    .d-timer.low { color:#ff5a5a; border-color:rgba(255,90,90,.5); }
+
+    /* Columns */
+    .d-cols { display:flex; gap:64px; margin-top:34px; align-items:flex-start; }
     .d-col { width:560px; }
-    .d-team { display:flex; align-items:center; gap:14px; font-family:'Rajdhani', var(--main-font); font-weight:700; font-size:2.2em; color:#fff; text-transform:uppercase; padding:10px 16px; border-radius:6px; }
+    .d-team { display:flex; align-items:center; gap:14px; padding:10px 4px 14px; }
     .d-col.red .d-team { flex-direction:row-reverse; text-align:right; }
-    .d-bar { width:8px; height:42px; border-radius:3px; }
-    .d-bans { display:flex; gap:10px; margin:16px 0 22px; }
+    .d-bar { width:9px; align-self:stretch; min-height:46px; border-radius:4px; }
+    .d-team-name { font-weight:700; font-size:2.2em; color:#fff; text-transform:uppercase; letter-spacing:.02em; line-height:1; flex:1; }
+    .d-score { font-weight:700; font-size:2.4em; color:#fff; min-width:46px; text-align:center;
+      background:rgba(255,255,255,.08); border-radius:8px; padding:2px 14px; }
+
+    /* Bans row */
+    .d-bans-label { font-size:.82em; font-weight:600; letter-spacing:.28em; color:#7b818c; text-transform:uppercase; margin:6px 2px; }
+    .d-col.red .d-bans-label { text-align:right; }
+    .d-bans { display:flex; gap:10px; margin:0 0 22px; }
     .d-col.red .d-bans { flex-direction:row-reverse; }
-    .d-ban { width:64px; height:64px; border-radius:6px; background:var(--scene-bg); border:1px solid rgba(255,255,255,.12);
-      display:flex; align-items:center; justify-content:center; font-family:var(--main-font); font-weight:700; font-size:.72em;
-      color:#cfd4dc; text-align:center; padding:4px; overflow:hidden; position:relative; }
-    .d-ban.filled { filter:grayscale(.4); }
-    .d-ban.filled::after { content:''; position:absolute; left:8px; right:8px; top:50%; height:3px; background:#ff5a5a; transform:rotate(-18deg); }
+    .d-ban { width:74px; height:74px; border-radius:8px; background:var(--scene-bg,#171b22);
+      border:1px solid rgba(255,255,255,.10); overflow:hidden; position:relative; flex-shrink:0; }
+    .d-ban img { width:100%; height:100%; object-fit:cover; filter:grayscale(1) brightness(.55); }
+    .d-ban::after { content:''; position:absolute; left:9px; right:9px; top:50%; height:4px; background:#ff4d57;
+      transform:rotate(-22deg) translateY(-50%); opacity:0; box-shadow:0 0 8px rgba(255,77,87,.8); }
+    .d-ban.filled::after { opacity:1; }
+    .d-ban.empty-slot { background:rgba(255,255,255,.03); }
+
+    /* Picks */
     .d-picks { display:flex; flex-direction:column; gap:12px; }
-    .d-pick { height:78px; border-radius:8px; background:var(--scene-bg); border-left:6px solid #2a2f3a; display:flex; align-items:center;
-      padding:0 20px; font-family:'Rajdhani', var(--main-font); font-weight:700; font-size:1.9em; color:#fff; box-shadow:0 6px 20px rgba(0,0,0,.4); }
-    .d-col.red .d-pick { border-left:none; border-right:6px solid #2a2f3a; justify-content:flex-end; text-align:right; }
-    .d-pick .n { opacity:.4; font-size:.7em; margin-right:12px; color:#8b909a; }
-    .d-col.red .d-pick .n { margin-right:0; margin-left:12px; order:2; }
-    .d-pick.empty { color:#4a4f5a; }
-    .active { animation:dpulse 1.1s ease-in-out infinite; }
-    @keyframes dpulse { 0%,100% { box-shadow:0 0 0 0 rgba(255,255,255,0); } 50% { box-shadow:0 0 0 3px rgba(255,255,255,.7); } }
+    .d-pick { height:96px; border-radius:10px; overflow:hidden; position:relative; display:flex; align-items:center;
+      background:linear-gradient(90deg, rgba(20,24,32,.96), rgba(20,24,32,.75)); border:1px solid rgba(255,255,255,.08);
+      box-shadow:0 8px 26px rgba(0,0,0,.45); }
+    .d-col.red .d-pick { flex-direction:row-reverse; background:linear-gradient(270deg, rgba(20,24,32,.96), rgba(20,24,32,.75)); }
+    .d-pick-accent { width:7px; align-self:stretch; flex-shrink:0; background:#2a2f3a; }
+    .d-pick-portrait { width:150px; height:96px; flex-shrink:0; overflow:hidden; position:relative; }
+    .d-pick-portrait img { width:100%; height:100%; object-fit:cover; object-position:center 22%;
+      -webkit-mask-image:linear-gradient(90deg, #000 60%, transparent); mask-image:linear-gradient(90deg, #000 60%, transparent); }
+    .d-col.red .d-pick-portrait img { -webkit-mask-image:linear-gradient(270deg, #000 60%, transparent); mask-image:linear-gradient(270deg, #000 60%, transparent); }
+    .d-pick-body { flex:1; padding:0 20px; min-width:0; }
+    .d-col.red .d-pick-body { text-align:right; }
+    .d-pick-name { font-weight:700; font-size:1.95em; color:#fff; line-height:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .d-pick-num { font-size:.78em; font-weight:600; letter-spacing:.2em; color:#6b7480; text-transform:uppercase; }
+    .d-pick.empty { background:rgba(255,255,255,.025); }
+    .d-pick.empty .d-pick-name { color:#454b56; }
+    .d-pick.empty .d-pick-portrait { display:none; }
+
+    /* Active slot pulse (whose turn it is) */
+    .active { animation:dpulse 1.15s ease-in-out infinite; }
+    @keyframes dpulse { 0%,100% { box-shadow:0 0 0 0 rgba(255,255,255,0); } 50% { box-shadow:0 0 0 3px rgba(255,255,255,.85); } }
   </style>
 </head>
 <body>
   <div id="draft-stage">
-    <div class="d-head"><div class="d-title" id="d-title">DRAFT</div><div class="d-sub" id="d-sub"></div></div>
+    <div class="d-head"><div class="d-title" id="d-title">PICK &amp; BAN</div><div class="d-sub" id="d-sub"></div></div>
+    <div class="d-phase">
+      <div class="d-phase-pill" id="d-phase-pill"><span class="d-phase-dot" id="d-phase-dot"></span><span class="d-phase-txt" id="d-phase-txt">—</span></div>
+      <div class="d-timer" id="d-timer">0:30</div>
+    </div>
     <div class="d-cols">
       <div class="d-col blue" id="col-a"></div>
       <div class="d-col red"  id="col-b"></div>
@@ -51,75 +98,148 @@
 
   <script src="scene-base.js"></script>
   <script>
+  (function () {
     const stage = document.getElementById('draft-stage');
-    let _sig = '';
+    const EMBED = SceneBase.qp('embed') === '1';
+    const PER_PICK_SECONDS = 30;
+    let _sig = '', _turnKey = '', _deadline = 0, _timerGame = false, _lastDraft = null;
+
+    function countsFor(seq, side) {
+      const s = (seq || []).filter((x) => x.by === side);
+      return { bans: s.filter((x) => x.action === 'ban').length, picks: s.filter((x) => x.action === 'pick').length };
+    }
 
     function buildCol(side, data, d) {
       const t = SceneBase.teamSide(data, side === 'a' ? 'blue' : 'orange');
-      const ops = (d.ops || []).filter(o => o.by === side);
-      const bans = ops.filter(o => o.action === 'ban').map(o => o.name);
-      const picks = ops.filter(o => o.action === 'pick').map(o => o.name);
-      // Is this side currently acting, and on which action?
+      const ops = (d.ops || []).filter((o) => o.by === side);
+      const bans = ops.filter((o) => o.action === 'ban');
+      const picks = ops.filter((o) => o.action === 'pick');
+      const n = countsFor(d.sequence, side);
       const turn = d.turn && d.turn.team === side ? d.turn.action : '';
 
       const col = document.createElement('div');
-      // header
+      col.className = 'd-col ' + (side === 'a' ? 'blue' : 'red');
+
+      // Header: bar + name + score
       const head = document.createElement('div'); head.className = 'd-team';
       const bar = document.createElement('div'); bar.className = 'd-bar'; bar.style.background = t.color;
-      const nm = document.createElement('span'); nm.textContent = t.name;
-      head.appendChild(bar); head.appendChild(nm); col.appendChild(head);
+      const nm = document.createElement('div'); nm.className = 'd-team-name'; nm.textContent = t.name || (side === 'a' ? 'BLUE' : 'RED');
+      head.appendChild(bar); head.appendChild(nm);
+      const sc = side === 'a' ? data?.match?.score?.a : data?.match?.score?.b;
+      if (typeof sc === 'number') { const s = document.createElement('div'); s.className = 'd-score'; s.textContent = sc; head.appendChild(s); }
+      col.appendChild(head);
 
-      // bans (5 slots)
-      const banRow = document.createElement('div'); banRow.className = 'd-bans';
-      for (let i = 0; i < 5; i++) {
-        const b = document.createElement('div'); b.className = 'd-ban' + (bans[i] ? ' filled' : '');
-        if (bans[i]) b.textContent = bans[i];
-        if (turn === 'ban' && i === bans.length) b.classList.add('active');
-        banRow.appendChild(b);
+      // Bans
+      if (n.bans > 0) {
+        const lbl = document.createElement('div'); lbl.className = 'd-bans-label'; lbl.textContent = 'Bans';
+        col.appendChild(lbl);
+        const row = document.createElement('div'); row.className = 'd-bans';
+        for (let i = 0; i < n.bans; i++) {
+          const b = document.createElement('div'); b.className = 'd-ban';
+          const op = bans[i];
+          if (op) { b.classList.add('filled'); if (op.image) { const im = document.createElement('img'); im.src = op.image; im.alt = op.name; b.appendChild(im); } else { b.textContent = op.name; } }
+          else { b.classList.add('empty-slot'); if (turn === 'ban' && i === bans.length) b.classList.add('active'); }
+          row.appendChild(b);
+        }
+        col.appendChild(row);
       }
-      col.appendChild(banRow);
 
-      // picks (5 slots)
-      const pickWrap = document.createElement('div'); pickWrap.className = 'd-picks';
-      for (let i = 0; i < 5; i++) {
-        const p = document.createElement('div'); p.className = 'd-pick' + (picks[i] ? '' : ' empty');
-        p.style.borderColor = picks[i] ? t.color : '';
-        const num = document.createElement('span'); num.className = 'n'; num.textContent = (i + 1);
-        const nameEl = document.createElement('span'); nameEl.textContent = picks[i] || '—';
-        p.appendChild(num); p.appendChild(nameEl);
-        if (turn === 'pick' && i === picks.length) p.classList.add('active');
-        pickWrap.appendChild(p);
+      // Picks
+      if (n.picks > 0) {
+        const wrap = document.createElement('div'); wrap.className = 'd-picks';
+        for (let i = 0; i < n.picks; i++) {
+          const op = picks[i];
+          const p = document.createElement('div'); p.className = 'd-pick' + (op ? '' : ' empty');
+          const accent = document.createElement('div'); accent.className = 'd-pick-accent'; accent.style.background = op ? t.color : '';
+          const portrait = document.createElement('div'); portrait.className = 'd-pick-portrait';
+          if (op && op.image) { const im = document.createElement('img'); im.src = op.image; im.alt = op.name; portrait.appendChild(im); }
+          const body = document.createElement('div'); body.className = 'd-pick-body';
+          const num = document.createElement('div'); num.className = 'd-pick-num'; num.textContent = 'Pick ' + (i + 1);
+          const name = document.createElement('div'); name.className = 'd-pick-name'; name.textContent = op ? op.name : '—';
+          body.appendChild(num); body.appendChild(name);
+          // order: accent | portrait | body  (red column reverses via CSS)
+          p.appendChild(accent); p.appendChild(portrait); p.appendChild(body);
+          if (!op && turn === 'pick' && i === picks.length) p.classList.add('active');
+          wrap.appendChild(p);
+        }
+        col.appendChild(wrap);
       }
-      col.appendChild(pickWrap);
       return col;
+    }
+
+    function setPhase(d, data) {
+      const pill = document.getElementById('d-phase-pill');
+      const dot = document.getElementById('d-phase-dot');
+      const txt = document.getElementById('d-phase-txt');
+      if (d.complete) { pill.style.display = ''; dot.style.background = '#46d17a'; dot.style.color = '#46d17a'; txt.textContent = 'Draft Complete'; return; }
+      if (!d.turn) { pill.style.display = 'none'; return; }
+      pill.style.display = '';
+      const t = SceneBase.teamSide(data, d.turn.team === 'a' ? 'blue' : 'orange');
+      dot.style.background = t.color; dot.style.color = t.color;
+      txt.textContent = (t.name || (d.turn.team === 'a' ? 'Blue' : 'Red')) + ' — ' + (d.turn.action === 'ban' ? 'Banning' : 'Picking');
+    }
+
+    function tickTimer(d) {
+      const el = document.getElementById('d-timer');
+      if (!_timerGame || !d || !d.turn || d.complete) { el.style.display = 'none'; return; }
+      el.style.display = '';
+      let rem = Math.max(0, Math.round((_deadline - Date.now()) / 1000));
+      const m = Math.floor(rem / 60), s = rem % 60;
+      el.textContent = m + ':' + (s < 10 ? '0' : '') + s;
+      el.classList.toggle('low', rem <= 10);
     }
 
     function render(data) {
       const d = data.draft || {};
-      stage.classList.toggle('show', !!d.visible);
-      if (!d.visible) return;
-      const sig = JSON.stringify({ ops: d.ops, turn: d.turn, t: d.title, c: [data.teams?.blue?.color, data.teams?.orange?.color] });
-      if (sig === _sig) return;
+      _lastDraft = d;
+      const show = !!d.visible || EMBED || SceneBase.preview;
+      stage.classList.toggle('show', show);
+      if (!show) { _sig = ''; return; }
+
+      // Timer: reset the countdown whenever the turn advances.
+      const turnKey = (d.ops ? d.ops.length : 0) + ':' + (d.turn ? d.turn.team + d.turn.action : 'none');
+      _timerGame = !!(d.turn && !d.complete);
+      if (turnKey !== _turnKey) { _turnKey = turnKey; _deadline = Date.now() + PER_PICK_SECONDS * 1000; }
+
+      const sig = JSON.stringify({ ops: d.ops, turn: d.turn, t: d.title, seq: d.sequence,
+        c: [data.teams?.blue?.color, data.teams?.orange?.color, data.teams?.blue?.name, data.teams?.orange?.name],
+        sc: data?.match?.score });
+      if (sig === _sig) { tickTimer(d); return; }
       _sig = sig;
 
+      document.documentElement.style.setProperty('--accent', SceneBase.brandAccent(data));
       document.getElementById('d-title').textContent = (d.title || 'CHAMPION DRAFT').toUpperCase();
       const blue = SceneBase.teamSide(data, 'blue'), orange = SceneBase.teamSide(data, 'orange');
-      document.getElementById('d-sub').textContent = `${blue.name}  ·  ${orange.name}`;
-      const a = document.getElementById('col-a'), b = document.getElementById('col-b');
-      a.replaceWith(Object.assign(buildCol('a', data, d), { id: 'col-a', className: 'd-col blue' }));
-      b.replaceWith(Object.assign(buildCol('b', data, d), { id: 'col-b', className: 'd-col red' }));
+      document.getElementById('d-sub').textContent = (blue.name || 'BLUE') + '  ·  ' + (orange.name || 'RED');
+      setPhase(d, data);
+      tickTimer(d);
+      const cols = document.querySelector('.d-cols');
+      const newA = buildCol('a', data, d); newA.id = 'col-a';
+      const newB = buildCol('b', data, d); newB.id = 'col-b';
+      cols.replaceChildren(newA, newB);
     }
-    SceneBase.connect(render);
 
-    if (location.protocol === 'file:') {
+    SceneBase.connect(render);
+    setInterval(() => { if (_lastDraft) tickTimer(_lastDraft); }, 1000);
+
+    if (EMBED || location.protocol === 'file:') {
       render({ teams: { blue: { name: 'FROST', color: '#3b82f6' }, orange: { name: 'EMBER', color: '#f97316' } },
-        draft: { visible: true, title: 'Grand Final — Draft', teamStart: 'a',
+        match: { score: { a: 1, b: 0 } },
+        draft: { visible: true, title: 'Grand Final — Draft', game: 'league', teamStart: 'a', complete: false,
           turn: { team: 'b', action: 'pick' },
+          sequence: [
+            { action: 'ban', by: 'a' }, { action: 'ban', by: 'b' }, { action: 'ban', by: 'a' }, { action: 'ban', by: 'b' }, { action: 'ban', by: 'a' }, { action: 'ban', by: 'b' },
+            { action: 'pick', by: 'a' }, { action: 'pick', by: 'b' }, { action: 'pick', by: 'b' }, { action: 'pick', by: 'a' }, { action: 'pick', by: 'a' }, { action: 'pick', by: 'b' }
+          ],
           ops: [
-            { name: 'Aatrox', action: 'ban', by: 'a' }, { name: 'Ahri', action: 'ban', by: 'b' },
-            { name: 'Lee Sin', action: 'pick', by: 'a' }, { name: 'Jinx', action: 'pick', by: 'b' }
+            { name: 'Aatrox', action: 'ban', by: 'a', image: '/assets/lol/Aatrox.jpg' },
+            { name: 'Ahri', action: 'ban', by: 'b', image: '/assets/lol/Ahri.jpg' },
+            { name: 'Jax', action: 'ban', by: 'a', image: '/assets/lol/Jax.jpg' },
+            { name: 'Lee Sin', action: 'pick', by: 'a', image: '/assets/lol/LeeSin.jpg' },
+            { name: 'Jinx', action: 'pick', by: 'b', image: '/assets/lol/Jinx.jpg' }
           ] } });
     }
+  })();
   </script>
 </body>
 </html>

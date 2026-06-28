@@ -125,12 +125,12 @@ const GAMES = {
   'valorant':      { id: 'valorant',      name: 'Valorant',      overlay: '',           format: 'team5', teamLabels: { a: 'Attackers', b: 'Defenders' },   rosterSize: 5, logo: 'games/valorant.svg',      features: ['vetoes', 'agents', 'director'],     themes: [] },
   'league':        { id: 'league',        name: 'League of Legends', overlay: '',       format: 'team5', teamLabels: { a: 'Blue', b: 'Red' },              rosterSize: 5, logo: 'games/lol.svg',           features: ['draft', 'director'],                themes: [] },
   'dota2':         { id: 'dota2',         name: 'Dota 2',        overlay: '',           format: 'team5', teamLabels: { a: 'Radiant', b: 'Dire' },          rosterSize: 5, logo: 'games/dota2.svg',         features: ['draft'],                themes: [] },
-  'overwatch':     { id: 'overwatch',     name: 'Overwatch 2',   overlay: '/overwatch.html', format: 'team5', teamLabels: { a: 'Defenders', b: 'Attackers' }, rosterSize: 5, logo: 'games/overwatch2.png',    features: ['heroes', 'vetoes'],     themes: [] },
+  'overwatch':     { id: 'overwatch',     name: 'Overwatch 2',   overlay: '/overwatch.html', format: 'team5', teamLabels: { a: 'Defenders', b: 'Attackers' }, rosterSize: 5, logo: 'games/overwatch2.png',    features: ['heroes', 'vetoes', 'draft'], themes: [] },
   'rainbow6':      { id: 'rainbow6',      name: 'Rainbow Six Siege', overlay: '',       format: 'team5', teamLabels: { a: 'Attack', b: 'Defense' },        rosterSize: 5, logo: 'games/rainbow6.svg',      features: ['vetoes', 'operators'],  themes: [] },
   'cod':           { id: 'cod',           name: 'Call of Duty',  overlay: '',           format: 'team4', teamLabels: { a: 'Team A', b: 'Team B' },         rosterSize: 4, logo: 'games/cod.png',           features: ['vetoes'],               themes: [] },
   'apex':          { id: 'apex',          name: 'Apex Legends',  overlay: '',           format: 'ffa',   teamLabels: { a: 'Team A', b: 'Team B' },         rosterSize: 3, logo: 'games/apex.svg',          features: ['battle-royale', 'legends'], themes: [] },
   'fortnite':      { id: 'fortnite',      name: 'Fortnite',      overlay: '',           format: 'ffa',   teamLabels: { a: 'Team A', b: 'Team B' },         rosterSize: 4, logo: 'games/fortnite.png',      features: ['battle-royale'],        themes: [] },
-  'marvel-rivals': { id: 'marvel-rivals', name: 'Marvel Rivals', overlay: '/marvel-rivals.html', format: 'team6', teamLabels: { a: 'Team A', b: 'Team B' }, rosterSize: 6, logo: 'games/rivals.png',        features: ['heroes'],               themes: [] },
+  'marvel-rivals': { id: 'marvel-rivals', name: 'Marvel Rivals', overlay: '/marvel-rivals.html', format: 'team6', teamLabels: { a: 'Team A', b: 'Team B' }, rosterSize: 6, logo: 'games/rivals.png',        features: ['heroes', 'draft'],       themes: [] },
   'smash':         { id: 'smash',         name: 'Super Smash Bros.', overlay: '',       format: '1v1',   teamLabels: { a: 'Player 1', b: 'Player 2' },     rosterSize: 1, logo: 'games/ssb.png',           features: ['bracket', 'stocks'],    themes: [] },
   'eafc':          { id: 'eafc',          name: 'EA Sports FC',  overlay: '',           format: '1v1',   teamLabels: { a: 'Home', b: 'Away' },             rosterSize: 1, logo: 'games/eafc.svg',          features: [],                       themes: [] },
   'mobile-legends':{ id: 'mobile-legends',name: 'Mobile Legends', overlay: '',          format: 'team5', teamLabels: { a: 'Blue', b: 'Red' },              rosterSize: 5, logo: 'games/mobilelegends.svg', features: ['draft'],                themes: [] },
@@ -1885,7 +1885,7 @@ function libraryData() {
 }
 // Static config that never changes after startup → sent on connect only.
 function staticData() {
-  return { draftChampions: draftData.CHAMPIONS };   // League typeahead list (~20KB)
+  return { draftRosters: draftData.ROSTERS };   // per-game champion/hero rosters (id/name/portrait)
 }
 // Cheap signature (no base64 stringify — only lengths/counts) to detect library changes between
 // broadcasts. Captures team name/colour/logo/roster and brand name/colours/logo/sponsors/banners.
@@ -1995,9 +1995,11 @@ async function syncStartGgSet(setId) {
   }
 
   // Auto-apply saved logos/players when the entrant matches a team in the library;
-  // fall back to the start.gg team logo (saved teams take priority — never clobber a custom one).
+  // fall back to the start.gg team logo. Always reset first so a stale logo from the
+  // previous push never silently blocks the lookup for the new team.
   [['blue', blueEntrant], ['orange', orangeEntrant]].forEach(([side, ent]) => {
     const tn = (state.teams[side].name || '').toUpperCase();
+    state.teams[side].logo = '';
     const saved = savedTeams.find((t) => (t.name || '').toUpperCase() === tn);
     if (saved) {
       if (saved.logo) state.teams[side].logo = saved.logo;
@@ -3045,9 +3047,22 @@ function mergeEntrantsIntoLibrary(entrants) {
 // Teams-only import (for the Teams page "Pull from start.gg") — no bracket touch.
 async function importStartggTeams(rawSlug) {
   if (!startggApiToken) throw new Error('Missing Start.gg API token (set it in Settings)');
-  const slug = parseEventSlug(rawSlug);
-  if (!slug) throw new Error('Missing event slug or URL');
+  const { tournamentSlug, eventSlug: parsedSlug } = parseStartggInput(rawSlug);
   const client = createStartGgClient(startggApiToken);
+  let slug = parsedSlug;
+
+  if (!slug && tournamentSlug) {
+    // Tournament-only URL — auto-pick the event with the most entrants.
+    const res = await client.request(`
+      query TEvents($slug: String!) {
+        tournament(slug: $slug) { events { slug numEntrants } }
+      }`, { slug: 'tournament/' + tournamentSlug });
+    const events = (res?.tournament?.events || []).sort((a, b) => (b.numEntrants || 0) - (a.numEntrants || 0));
+    if (!events.length) throw new Error('No events found in that tournament');
+    slug = events[0].slug;
+  }
+
+  if (!slug) throw new Error('Paste a start.gg event or tournament URL');
   const entrants = await fetchAllEntrants(client, slug);
   const r = mergeEntrantsIntoLibrary(entrants);
   saveTeams();
@@ -4120,7 +4135,7 @@ function draftAction(name) {
   const champ = (name || '').toString().slice(0, 40).trim();
   if (!champ) return;
   const step = d.sequence[d.ops.length];
-  d.ops.push({ name: champ, action: step.action, by: step.by });
+  d.ops.push({ name: champ, action: step.action, by: step.by, image: draftData.imageFor(d.game, champ) });
   rebuildDraftTurn();
 }
 function draftUndo() { const d = state.draft; if (d && d.ops && d.ops.length) { d.ops.pop(); rebuildDraftTurn(); } }

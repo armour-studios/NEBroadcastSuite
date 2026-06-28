@@ -2963,7 +2963,7 @@ function applyState(data) {
   // UI always sees a complete state. Mutating `data` in place also feeds the render functions
   // that run after applyState() in the message handler.
   if (data && currentState) {
-    for (const k of ['savedTeams', 'brandKits', 'draftChampions', 'brand', 'banner', 'mainBanner', 'playouts', 'bracket', 'replay', 'crew']) {
+    for (const k of ['savedTeams', 'brandKits', 'draftRosters', 'brand', 'banner', 'mainBanner', 'playouts', 'bracket', 'replay', 'crew']) {
       if (data[k] === undefined && currentState[k] !== undefined) data[k] = currentState[k];
     }
   }
@@ -7659,7 +7659,7 @@ function renderDraftManager(data) {
   if (dl && dl.dataset.game !== selGame) {
     dl.dataset.game = selGame;
     dl.innerHTML = '';
-    ((data.draftChampions && data.draftChampions[selGame]) || []).forEach(n => { const o = document.createElement('option'); o.value = n; dl.appendChild(o); });
+    ((data.draftRosters && data.draftRosters[selGame]) || []).forEach(c => { const o = document.createElement('option'); o.value = c.name; dl.appendChild(o); });
   }
 
   const d = data.draft || {};
@@ -7695,13 +7695,45 @@ function renderDraftManager(data) {
           }
           return html + '</div>';
         };
+        const banCount = (d.sequence || []).filter(s => s.by === side && s.action === 'ban').length;
+        const pickCount = (d.sequence || []).filter(s => s.by === side && s.action === 'pick').length;
         col.innerHTML = `<h4 style="color:${sideColor(side)}">${sideName(side)}</h4>`
-          + rows('Bans', bans, 5, 'b', 'ban') + '<div style="height:8px"></div>' + rows('Picks', picks, 5, '', 'pick');
+          + (banCount ? rows('Bans', bans, banCount, 'b', 'ban') : '')
+          + (banCount && pickCount ? '<div style="height:8px"></div>' : '')
+          + (pickCount ? rows('Picks', picks, pickCount, '', 'pick') : '');
         board.appendChild(col);
       });
     }
   }
+  renderDraftGrid(data, selGame, d, active);
 }
+
+// Visual clickable hero/champion grid for the draft (click a portrait to lock it on the current turn).
+function renderDraftGrid(data, selGame, d, active) {
+  const grid = el('draft-grid'); if (!grid) return;
+  const roster = (data.draftRosters && data.draftRosters[selGame]) || [];
+  const search = el('draft-search');
+  if (grid.dataset.game !== selGame) {
+    grid.dataset.game = selGame;
+    grid.innerHTML = '';
+    roster.forEach((c) => {
+      const cell = document.createElement('div');
+      cell.className = 'dm-hero'; cell.dataset.name = c.name.toLowerCase(); cell.title = c.name;
+      cell.innerHTML = (c.image ? `<img src="${c.image}" alt="" loading="lazy">` : '') + `<div class="dm-hero-nm">${c.name}</div>`;
+      cell.addEventListener('click', () => { if (!cell.classList.contains('used') && !grid.classList.contains('disabled')) send('draft_action', { name: c.name }); });
+      grid.appendChild(cell);
+    });
+    if (search) search.value = '';
+  }
+  if (search) search.style.display = roster.length ? '' : 'none';
+  const used = new Set((d.ops || []).map((o) => (o.name || '').toLowerCase()));
+  grid.querySelectorAll('.dm-hero').forEach((cell) => cell.classList.toggle('used', used.has(cell.dataset.name)));
+  grid.classList.toggle('disabled', !(active && d.turn));
+}
+el('draft-search')?.addEventListener('input', function () {
+  const q = this.value.trim().toLowerCase();
+  document.querySelectorAll('#draft-grid .dm-hero').forEach((cell) => { cell.style.display = (!q || cell.dataset.name.includes(q)) ? '' : 'none'; });
+});
 
 // ── Overwatch 2 hero ban manager ────────────────────────────────────────────
 const OW_HEROES_BY_ROLE = {

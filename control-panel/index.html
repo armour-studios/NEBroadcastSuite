@@ -509,6 +509,14 @@
       .dm-rows .b { color:#ff8a8a; } .dm-rows .slot-active { color:#ffd34d; font-weight:800; }
       .dm-rows .empty { color:#5a5f6a; }
       .dm-actions { display:flex; gap:8px; flex-wrap:wrap; }
+      .dm-search { width:100%; padding:8px 10px; border-radius:6px; background:#14161d; color:#e7eaf0; border:1px solid rgba(255,255,255,.18); font-size:13px; margin-bottom:8px; }
+      .dm-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(62px,1fr)); gap:6px; max-height:300px; overflow-y:auto; padding:2px; margin-bottom:12px; }
+      .dm-grid.disabled { opacity:.45; pointer-events:none; }
+      .dm-hero { cursor:pointer; border-radius:6px; overflow:hidden; background:#14161d; border:1px solid rgba(255,255,255,.08); transition:transform .08s, border-color .12s; }
+      .dm-hero:hover { border-color:var(--accent,#ec4899); transform:translateY(-1px); }
+      .dm-hero img { width:100%; aspect-ratio:1/1; object-fit:cover; display:block; }
+      .dm-hero .dm-hero-nm { font-size:9px; text-align:center; padding:2px 1px; color:#aeb4bf; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+      .dm-hero.used { opacity:.28; pointer-events:none; filter:grayscale(1); }
     </style>
     <div class="draft-mgr">
       <div class="dm-config">
@@ -524,6 +532,8 @@
         <datalist id="draft-champs"></datalist>
         <button class="btn btn-primary btn-sm" id="btn-draft-submit">Lock</button>
       </div>
+      <input id="draft-search" class="dm-search" placeholder="Search heroes…" autocomplete="off">
+      <div class="dm-grid" id="draft-grid"></div>
       <div class="dm-board" id="draft-board"></div>
       <div class="dm-actions">
         <button class="btn btn-secondary btn-sm" id="btn-draft-undo">Undo</button>
@@ -2109,10 +2119,14 @@
       <div id="import-tab-startgg" class="tl-modal-body" style="display:none; overflow-y:auto; max-height:65vh;">
 
         <!-- Quick URL import -->
-        <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; padding-bottom:16px; border-bottom:1px solid var(--border); margin-bottom:16px;">
-          <input type="text" id="teams-startgg-slug" class="input-text" style="flex:1; min-width:220px;"
-                 placeholder="https://start.gg/tournament/.../event/...  or  tournament/slug/event/slug">
-          <button class="btn btn-blue" id="btn-teams-startgg-pull">Import Teams</button>
+        <div style="padding-bottom:16px; border-bottom:1px solid var(--border); margin-bottom:16px;">
+          <p style="font-size:12px; color:var(--muted); margin:0 0 10px;">Paste any start.gg tournament or event URL — all teams are imported into your library automatically.</p>
+          <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:8px;">
+            <input type="text" id="teams-startgg-slug" class="input-text" style="flex:1; min-width:220px;"
+                   placeholder="https://www.start.gg/tournament/my-tournament">
+            <button class="btn btn-blue" id="btn-teams-startgg-pull">Import Teams</button>
+          </div>
+          <button class="btn btn-ghost btn-xs" id="btn-teams-use-current-event" style="font-size:11px; color:var(--muted);">Use connected event</button>
         </div>
         <div id="teams-startgg-status" class="director-status-line" style="margin-bottom:12px;"></div>
 
@@ -2155,21 +2169,6 @@
           <div id="startgg-tournament-search-results"></div>
         </section>
 
-        <!-- Manual import by slug -->
-        <section>
-          <h3 class="section-title">Import by Slug</h3>
-          <p style="font-size:11px; color:var(--muted); margin-bottom:12px;">From start.gg URLs like: <code style="background:var(--surface2); padding:2px 6px; border-radius:3px;">start.gg/tournament/SLUG/events/SLUG</code></p>
-          <div class="field-row">
-            <label class="field-label" for="startgg-tournament-slug">Tournament Slug</label>
-            <input type="text" id="startgg-tournament-slug" class="input-text" placeholder="e.g., rlcs-2026">
-          </div>
-          <div class="field-row">
-            <label class="field-label" for="startgg-event-slug">Event Slug</label>
-            <input type="text" id="startgg-event-slug" class="input-text" placeholder="e.g., 3v3-main-event">
-          </div>
-          <button class="btn btn-primary" id="btn-import-tournament-roster">Import Tournament</button>
-          <div id="startgg-import-status" style="margin-top:8px; font-size:12px; color:var(--muted);"></div>
-        </section>
 
       </div>
     </div>
