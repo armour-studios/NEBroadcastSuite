@@ -29,6 +29,10 @@ function buildScript(cfg) {
   const gap = Math.max(50, Number(cfg.gapMs) || 250);
   const focusDelay = Math.max(0, Number(cfg.focusDelayMs) || 500);
 
+  // Only steal focus when Rocket League ISN'T already the foreground window — and never
+  // ShowWindow(SW_RESTORE), which forces a fullscreen re-acquire and freezes the game for
+  // a beat. When the observer already has RL focused (the common case, incl. the in-game
+  // F9 hotkey) this block is a no-op, so there's no hitch at all.
   const focusBlock = cfg.focusWindow ? `
 $proc = Get-Process -Name 'RocketLeague' -ErrorAction SilentlyContinue | Select-Object -First 1
 if ($proc -and $proc.MainWindowHandle -ne 0) {
@@ -37,12 +41,13 @@ using System;
 using System.Runtime.InteropServices;
 public class RLFocus {
   [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
-  [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
 }
 "@
-  [RLFocus]::ShowWindow($proc.MainWindowHandle, 9) | Out-Null
-  [RLFocus]::SetForegroundWindow($proc.MainWindowHandle) | Out-Null
-  Start-Sleep -Milliseconds ${focusDelay}
+  if ([RLFocus]::GetForegroundWindow() -ne $proc.MainWindowHandle) {
+    [RLFocus]::SetForegroundWindow($proc.MainWindowHandle) | Out-Null
+    Start-Sleep -Milliseconds ${focusDelay}
+  }
 }
 ` : '';
 

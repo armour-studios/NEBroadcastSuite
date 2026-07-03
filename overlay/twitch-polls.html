@@ -258,6 +258,7 @@
       } catch (_) {}
     };
     ws.onclose = () => setTimeout(connect, 800);
+    ws.onerror = () => { try { ws.close(); } catch {} };
   }
 
   function applyState(state) {

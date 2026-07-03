@@ -1311,7 +1311,7 @@
       "id": "browser_source",
       "versioned_id": "browser_source",
       "settings": {
-        "url": "http://localhost:3000/upcoming.html",
+        "url": "http://localhost:3000/schedule.html",
         "width": 1920,
         "height": 1080,
         "restart_when_active": false,

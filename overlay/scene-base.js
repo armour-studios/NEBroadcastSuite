@@ -158,14 +158,17 @@
   function applyBrand(data) {
     const root = document.documentElement;
     root.dataset.theme = data.theme || 'default';
-    if (data.fontFamily) {
-      root.style.setProperty('--main-font', `'${data.fontFamily}', sans-serif`);
-    }
+    // Brand kit colours first, then Settings font wins for typography.
     const brand = data.brand;
     if (brand) {
       if (brand.color)  root.style.setProperty('--accent', brand.color);
       if (brand.accent) root.style.setProperty('--accent-2', brand.accent);
       if (brand.font)   root.style.setProperty('--main-font', `'${brand.font}', sans-serif`);
+    }
+    // Settings "Overlay Font" always wins — applied last so it can't be silently
+    // overridden by a brand kit that has a stale or unwanted font set.
+    if (data.fontFamily) {
+      root.style.setProperty('--main-font', `'${data.fontFamily}', sans-serif`);
     }
   }
 
@@ -174,7 +177,7 @@
     return v || fallback;
   }
 
-  const STANDALONE_CASTER_RE = /\/(casters|duorow|triorow|duosinglecam|singlecam|analystspecial|campip|talentbar|interview|quaddesk|matchup|spotlightdesk|vertical)\.html$/i;
+  const STANDALONE_CASTER_RE = /\/(casters|duorow|triorow|duosinglecam|singlecam|analystspecial|campip|talentbar|interview|quaddesk|spotlightdesk|vertical)\.html$/i;
   const standaloneCasterScene = STANDALONE_CASTER_RE.test(global.location.pathname);
 
   const SceneBase = {
@@ -283,10 +286,14 @@
       // broadcasts and only re-sends them when they change — backfill from the last full payload
       // so every render still has them.
       const _cache = {};
-      const BACKFILL_KEYS = ['brand', 'banner', 'mainBanner', 'brandKits', 'bracket', 'replay'];
+      const BACKFILL_KEYS = ['brand', 'banner', 'mainBanner', 'brandKits', 'bracket', 'replay', 'playerProfiles', 'savedTeams'];
       const open = () => {
         ws = new WebSocket(WS_URL);
-        ws.onopen = () => ws.send(JSON.stringify({ type: 'request_state' }));
+        ws.onopen = () => {
+          // Identify as a live overlay browser source (feeds the pre-flight "overlays reachable" check).
+          try { ws.send(JSON.stringify({ type: 'register', role: 'overlay', page: global.location.pathname })); } catch (e) {}
+          ws.send(JSON.stringify({ type: 'request_state' }));
+        };
         ws.onmessage = ({ data }) => {
           let msg;
           try { msg = JSON.parse(data); } catch { return; }
@@ -297,6 +304,14 @@
             for (const k of BACKFILL_KEYS) {
               if (k in msg.data) _cache[k] = msg.data[k];
               else if (k in _cache) msg.data[k] = _cache[k];
+            }
+            // In preview mode force every visibility flag on so the scene always renders.
+            if (PREVIEW) {
+              const d = msg.data;
+              const forceVisible = (obj) => obj && typeof obj === 'object' ? { ...obj, visible: true } : obj;
+              ['breakScreen', 'winner', 'intro', 'veto', 'casters', 'ticker', 'owMatch', 'upcoming', 'spotlight', 'watchlist', 'draft'].forEach((k) => {
+                if (d[k]) d[k] = forceVisible(d[k]);
+              });
             }
             applyBrand(msg.data);
             try { onState(msg.data); } catch (e) { console.error('[scene] render error', e); }

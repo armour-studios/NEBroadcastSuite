@@ -5,56 +5,135 @@
 <title>NE Broadcast Suite — Ticker</title>
 <link rel="stylesheet" href="fonts.css">
 <style>
-  :root { --accent: #055fdb; --accent-2: #ff4655; --main-font: 'Rajdhani', 'Montserrat', system-ui, sans-serif; }
+  :root { --brand: #055fdb; --live: #22e06a; --main-font: 'Rajdhani', 'Montserrat', system-ui, sans-serif; }
   html, body { margin: 0; width: 1920px; height: 1080px; overflow: hidden; background: transparent; font-family: var(--main-font); }
-  /* Standalone copy of the main overlay's ticker (lower-third). Add as its own OBS source, or it's
-     the per-tab preview in Production → Graphics → Overlays → Ticker. */
-  .ticker { position: absolute; left: 0; right: 0; bottom: 0; height: 46px; z-index: 25; display: flex; align-items: center; overflow: hidden;
-    background: linear-gradient(90deg, rgba(5,95,219,.95) 0%, rgba(9,17,28,.95) 18%, rgba(9,17,28,.95) 100%); border-top: 2px solid rgba(255,255,255,.12); }
+  /* Live-scores / sponsor ticker. Brand-themed (accent = the active brand colour); the LIVE
+     indicators stay green. Add as its own OBS source, or it's the Ticker preview in the panel. */
+  .ticker { position: absolute; left: 0; right: 0; bottom: 0; height: 52px; z-index: 25; display: flex; align-items: stretch; overflow: hidden;
+    background: linear-gradient(90deg, rgba(9,17,28,.97) 0%, rgba(9,17,28,.93) 100%); border-top: 3px solid var(--brand); }
   .ticker.hidden { display: none; }
-  .ticker::before { content: 'LIVE'; flex-shrink: 0; align-self: stretch; display: flex; align-items: center; padding: 0 18px;
-    font-weight: 700; font-size: 18px; letter-spacing: 3px; color: #fff; background: var(--accent-2);
-    position: relative; z-index: 2; }   /* sit ABOVE the scrolling track so the text is clipped at the LIVE box */
-  .ticker-track { display: inline-flex; white-space: nowrap; will-change: transform; animation: ticker-scroll linear infinite; padding-left: 40px;
-    position: relative; z-index: 1; }
-  .ticker-segment { font-weight: 600; font-size: 24px; color: #fff; padding-right: 40px; }
+  /* LIVE badge (start.gg) — pulsing green circle + LIVE, pinned left, above the track */
+  .ticker-live { flex-shrink: 0; display: none; align-items: center; gap: 11px; padding: 0 22px; position: relative; z-index: 2;
+    background: var(--live); color: #04130a; font-weight: 800; font-size: 21px; letter-spacing: 3px; }
+  .ticker.startgg .ticker-live { display: flex; }
+  .tk-dot { width: 13px; height: 13px; border-radius: 50%; background: #04130a; animation: tk-pulse 1.2s ease-out infinite; }
+  @keyframes tk-pulse { 0% { box-shadow: 0 0 0 0 rgba(4,19,10,.55); } 70% { box-shadow: 0 0 0 10px rgba(4,19,10,0); } 100% { box-shadow: 0 0 0 0 rgba(4,19,10,0); } }
+  /* Sponsor logo — fixed on the left, next to LIVE */
+  .ticker-sponsor { flex-shrink: 0; align-self: center; height: 34px; margin: 0 18px; object-fit: contain; display: none; position: relative; z-index: 2; }
+  .ticker.has-sponsor .ticker-sponsor { display: block; }
+  .ticker-track { display: inline-flex; align-items: center; white-space: nowrap; animation: ticker-scroll linear infinite;
+    padding-left: 28px; position: relative; z-index: 1; }
   @keyframes ticker-scroll { from { transform: translateX(0); } to { transform: translateX(-50%); } }
-  /* ?embed=1 (the in-builder preview only): centre + enlarge the bar so it's clearly visible when
-     the whole 1920×1080 frame is scaled down — the LIVE look on air is unchanged. */
-  .tk-embed .ticker { bottom: auto; top: 50%; transform: translateY(-50%); height: 132px; }
-  .tk-embed .ticker::before { font-size: 46px; padding: 0 40px; }
+  /* Match scoreline: [LIVE|FINAL] [logoA] TEAM A  s - s  TEAM B [logoB] */
+  .tk-match { display: inline-flex; align-items: center; gap: 12px; }
+  .tk-stat { display: inline-flex; align-items: center; gap: 7px; font-weight: 800; font-size: 14px; letter-spacing: 2px; border-radius: 4px; padding: 3px 9px; }
+  .tk-live { color: #04130a; background: var(--live); }
+  .tk-live .tk-stat-dot { width: 8px; height: 8px; border-radius: 50%; background: #04130a; animation: tk-pulse2 1.2s ease-out infinite; }
+  @keyframes tk-pulse2 { 0% { box-shadow: 0 0 0 0 rgba(4,19,10,.5); } 70% { box-shadow: 0 0 0 6px rgba(4,19,10,0); } 100% { box-shadow: 0 0 0 0 rgba(4,19,10,0); } }
+  .tk-final { color: #9aa3b0; border: 1px solid rgba(255,255,255,.22); }
+  .tk-logo { height: 32px; width: 32px; object-fit: contain; }
+  .tk-team { font-weight: 700; font-size: 23px; color: #fff; text-transform: uppercase; letter-spacing: .02em; }
+  .tk-score { font-weight: 800; font-size: 23px; color: var(--brand); text-transform: uppercase; padding: 0 4px; font-variant-numeric: tabular-nums; }
+  .tk-sep { color: rgba(255,255,255,.25); font-size: 22px; padding: 0 28px; }
+  /* Manual-message segment — all caps too */
+  .ticker-segment { font-weight: 600; font-size: 24px; color: #fff; text-transform: uppercase; letter-spacing: .02em; padding-right: 40px; }
+  /* ?embed=1 (in-builder preview): centre + enlarge */
+  .tk-embed .ticker { bottom: auto; top: 50%; transform: translateY(-50%); height: 140px; }
+  .tk-embed .ticker-live { font-size: 48px; padding: 0 46px; gap: 22px; }
+  .tk-embed .tk-dot { width: 30px; height: 30px; }
+  .tk-embed .ticker-sponsor { height: 92px; margin: 0 32px; }
+  .tk-embed .tk-stat { font-size: 34px; padding: 6px 18px; gap: 14px; }
+  .tk-embed .tk-live .tk-stat-dot { width: 18px; height: 18px; }
+  .tk-embed .tk-logo { height: 82px; width: 82px; }
+  .tk-embed .tk-team, .tk-embed .tk-score { font-size: 60px; }
+  .tk-embed .tk-sep { font-size: 54px; padding: 0 58px; }
   .tk-embed .ticker-segment { font-size: 60px; padding-right: 80px; }
-  .tk-embed .ticker-track { padding-left: 80px; }
+  .tk-embed .ticker-track { padding-left: 56px; }
 </style>
 </head>
 <body>
-  <div id="ticker" class="ticker hidden"><div id="ticker-track" class="ticker-track"></div></div>
+  <div id="ticker" class="ticker hidden">
+    <img class="ticker-sponsor" id="ticker-sponsor" alt="">
+    <div id="ticker-track" class="ticker-track"></div>
+  </div>
 <script src="scene-base.js"></script>
 <script>
 (function () {
   function el(id) { return document.getElementById(id); }
-  var EMBED = SceneBase.qp('embed') === '1';   // ?embed=1 → force-show the live ticker (config preview)
+  var EMBED = SceneBase.qp('embed') === '1';
   if (EMBED) document.documentElement.classList.add('tk-embed');
   var _sig = '';
+
+  var DEMO_MATCHES = [
+    { status: 'live', teamA: 'Sentinels', teamB: 'Cloud9', scoreA: 2, scoreB: 1, logoA: '', logoB: '' },
+    { status: 'done', teamA: 'G2', teamB: 'NRG', scoreA: 3, scoreB: 0, logoA: '', logoB: '' }
+  ];
+  var DEMO_MSGS = ['Powered by ACME Energy', 'Follow @yourbrand on X', 'Next match starts at 8PM ET'];
+
+  function fmtScore(m) {
+    var a = (typeof m.scoreA === 'number') ? m.scoreA : 0;
+    var b = (typeof m.scoreB === 'number') ? m.scoreB : 0;
+    return a + ' - ' + b;
+  }
+  function statusTag(m) {
+    var s = document.createElement('span');
+    if (m.status === 'live') {
+      s.className = 'tk-stat tk-live';
+      var d = document.createElement('span'); d.className = 'tk-stat-dot'; s.appendChild(d);
+      s.appendChild(document.createTextNode('LIVE'));
+    } else {
+      s.className = 'tk-stat tk-final'; s.textContent = 'FINAL';
+    }
+    return s;
+  }
+  function buildMatch(m) {
+    var seg = document.createElement('span'); seg.className = 'tk-match';
+    seg.appendChild(statusTag(m));
+    if (m.logoA) { var la = document.createElement('img'); la.className = 'tk-logo'; la.src = m.logoA; la.onerror = function () { this.remove(); }; seg.appendChild(la); }
+    var ta = document.createElement('span'); ta.className = 'tk-team'; ta.textContent = m.teamA; seg.appendChild(ta);
+    var sc = document.createElement('span'); sc.className = 'tk-score'; sc.textContent = fmtScore(m); seg.appendChild(sc);
+    var tb = document.createElement('span'); tb.className = 'tk-team'; tb.textContent = m.teamB; seg.appendChild(tb);
+    if (m.logoB) { var lb = document.createElement('img'); lb.className = 'tk-logo'; lb.src = m.logoB; lb.onerror = function () { this.remove(); }; seg.appendChild(lb); }
+    return seg;
+  }
+
   function render(data) {
     var t = (data && data.ticker) || {};
     var bar = el('ticker'), track = el('ticker-track');
-    var srcArr = (t.source === 'startgg') ? (t.feed || []) : (t.messages || []);
-    var messages = (Array.isArray(srcArr) ? srcArr : []).filter(Boolean);
-    if ((SceneBase.preview || EMBED) && !messages.length) messages = (t.source === 'startgg')
-      ? ['LIVE   Sentinels  2-1  Cloud9', 'FINAL   G2  3-0  NRG']
-      : ['Powered by ACME Energy', 'Follow @yourbrand on X', 'Next match starts at 8PM ET'];
-    var visible = (EMBED || SceneBase.preview || !!t.visible) && messages.length > 0;
+    var isStartgg = t.source === 'startgg';
+    var matches = isStartgg ? ((data && data.startgg && data.startgg.matchFeed) || []).filter(function (m) { return m && (m.status === 'live' || m.status === 'done'); }) : [];
+    var messages = isStartgg ? [] : ((t.messages || []).filter(Boolean));
+    if (SceneBase.preview || EMBED) {
+      if (isStartgg && !matches.length) matches = DEMO_MATCHES;
+      if (!isStartgg && !messages.length) messages = DEMO_MSGS;
+    }
+    var sponsor = (data && data.brand && data.brand.spots && data.brand.spots.ticker) || t.sponsor || '';
+    var count = isStartgg ? matches.length : messages.length;
+    var visible = (EMBED || SceneBase.preview || (!!t.visible && (count > 0 || !!sponsor)));
+
     bar.classList.toggle('hidden', !visible);
+    bar.classList.toggle('startgg', isStartgg);
+    bar.classList.toggle('has-sponsor', !!sponsor);
+    document.documentElement.style.setProperty('--brand', SceneBase.brandAccent(data));
+    var sp = el('ticker-sponsor'); if (sp && sponsor) sp.src = sponsor;
     if (!visible) { _sig = ''; return; }
-    document.documentElement.style.setProperty('--accent-2', SceneBase.brandAccent(data));
+
     var speed = (t.speed > 0) ? t.speed : 40;
-    var sig = JSON.stringify({ messages: messages, speed: speed });
+    var sig = JSON.stringify({ s: isStartgg, m: matches, x: messages, sp: sponsor, speed: speed });
     if (sig === _sig) return;
     _sig = sig;
-    var joined = messages.join('   •   ');
+
     track.innerHTML = '';
-    for (var i = 0; i < 2; i++) { var s = document.createElement('span'); s.className = 'ticker-segment'; s.textContent = joined; track.appendChild(s); }
+    for (var copy = 0; copy < 2; copy++) {
+      if (isStartgg) {
+        matches.forEach(function (m) {
+          track.appendChild(buildMatch(m));
+          var sep = document.createElement('span'); sep.className = 'tk-sep'; sep.textContent = '•'; track.appendChild(sep);
+        });
+      } else {
+        var span = document.createElement('span'); span.className = 'ticker-segment'; span.textContent = messages.join('   •   ') + '   •   '; track.appendChild(span);
+      }
+    }
     track.style.animationDuration = speed + 's';
   }
   SceneBase.connect(render);

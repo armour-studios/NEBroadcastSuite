@@ -2,16 +2,16 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>NE Broadcast Suite â€” Replay / Montage Player</title>
+<title>NE Broadcast Suite — Replay / Montage Player</title>
 <!--
   REPLAY-TO-SCREEN browser source.
   Add ONE browser source pointing here (http://localhost:3000/replay-player.html)
   with audio enabled ("Control audio via OBS" off, or routed as you like). The
   REPLAYS page in the control panel pushes clip/montage video URLs here:
     replay_play  { url, name, loop, trimIn, trimOut, transition, transitionLogo }
-                                      â†’ plays the trimmed range fullscreen with sound,
+                                      → plays the trimmed range fullscreen with sound,
                                         easing between clips (cut / fade / logo).
-    replay_stop  {}                    â†’ clears the source (transparent)
+    replay_stop  {}                    → clears the source (transparent)
   The player reports playback back to the panel so producers see time remaining
   and the page can return to the prior scene when a replay ends:
     replay_progress { bus, currentTime, duration, remaining }   (relative to the trim range)
@@ -59,7 +59,7 @@
     let transToken = 0;       // cancels a stale transition if a new play() interrupts it
     // Active trim range + loop for the clip on screen (the player respects the producer's edit).
     let curIn = 0;
-    let curOut = null;        // null â†’ play to the natural end of the file
+    let curOut = null;        // null → play to the natural end of the file
     let curLoop = false;
     let endedFired = false;
 
@@ -118,13 +118,13 @@
       const wasLive = !stage.classList.contains('idle');
       transition = transition || 'cut';
 
-      if (sameUrl && wasLive) {   // already up â€” just make sure it's rolling
+      if (sameUrl && wasLive) {   // already up — just make sure it's rolling
         vid.muted = false; vid.volume = 1;
         const p = vid.play(); if (p && p.catch) p.catch(() => {});
         return;
       }
 
-      // Hard cut â†’ swap straight in (with a quick fade-up).
+      // Hard cut → swap straight in (with a quick fade-up).
       if (transition === 'cut') { swapAndPlay(url); return; }
 
       // Stinger: play a short video over the top and swap the clip underneath at its midpoint.

@@ -280,12 +280,12 @@
       <!-- Trivia -->
       <div id="layout-trivia" style="display:none;">
         <div class="trivia-grid" id="trivia-opts"></div>
-        <div class="game-instructions">💬 Type A · B · C · D in chat</div>
+        <div class="game-instructions">Type A · B · C · D in chat</div>
       </div>
       <!-- Prediction / Vote -->
       <div id="layout-vote" style="display:none;">
         <div class="vote-list" id="vote-opts"></div>
-        <div class="game-instructions" id="vote-instruction">💬 Type !vote 1 · 2 · 3 in chat</div>
+        <div class="game-instructions" id="vote-instruction">Type !vote 1 · 2 · 3 in chat</div>
       </div>
       <!-- Number Guess -->
       <div id="layout-number-guess" style="display:none;">
@@ -333,11 +333,11 @@
     </div>
     <div class="wheel-title" id="wheel-title">Raffle</div>
     <div class="wheel-instruction" id="wheel-instruction">
-      💬 Type anything in chat to enter!
+      Type anything in chat to enter!
     </div>
     <div class="wheel-entries-list" id="wheel-entries-list"></div>
     <div class="wheel-winner-reveal" id="wheel-winner-reveal">
-      <div class="winner-label">🎯 Winner!</div>
+      <div class="winner-label">Winner!</div>
       <div class="winner-name" id="wheel-winner-name"></div>
       <div class="winner-sub" id="wheel-winner-sub"></div>
     </div>
@@ -576,7 +576,7 @@
       el('layout-vote').style.display = '';
       updateVoteBars(game);
       const ins = el('vote-instruction');
-      if (ins) ins.textContent = `💬 Type !${game.type === 'prediction' ? 'predict' : 'vote'} 1 · 2 · … in chat`;
+      if (ins) ins.textContent = `Type !${game.type === 'prediction' ? 'predict' : 'vote'} 1 · 2 · … in chat`;
     } else if (game.type === 'number_guess') {
       el('layout-number-guess').style.display = '';
       updateCt('guess-count', Object.keys(game.guesses||{}).length, 'guess','es','');
@@ -635,29 +635,29 @@
     if (game.type === 'trivia') {
       const correct = game.answers?.[game.correctAnswerIndex] || '?';
       const ws = game.winners || [];
-      if (answer) { answer.style.display=''; answer.textContent = '✅ ' + correct; }
-      if (winner) winner.textContent = ws.length ? `🏆 ${ws[0].username}${ws.length>1?' + '+(ws.length-1)+' more':''}` : 'Nobody got it!';
+      if (answer) { answer.style.display=''; answer.textContent = '' + correct; }
+      if (winner) winner.textContent = ws.length ? `${ws[0].username}${ws.length>1?' + '+(ws.length-1)+' more':''}` : 'Nobody got it!';
       if (sub)    sub.textContent = `${ws.length} correct`;
     } else if (game.type === 'prediction' || game.type === 'vote') {
       const w = game.winner;
-      if (winner) winner.textContent = w ? `🏆 ${esc(w.title)}` : 'No winner';
+      if (winner) winner.textContent = w ? `${esc(w.title)}` : 'No winner';
       if (sub)    sub.textContent    = w ? `${w.votes||0} votes` : '';
     } else if (game.type === 'number_guess') {
       const w = game.winner;
-      if (answer) { answer.style.display=''; answer.textContent = `🎯 Target: ${game.targetNumber}`; }
-      if (winner) winner.textContent = w ? `🏆 @${w.username} (guessed ${w.guess})` : 'No guesses!';
+      if (answer) { answer.style.display=''; answer.textContent = `Target: ${game.targetNumber}`; }
+      if (winner) winner.textContent = w ? `@${w.username} (guessed ${w.guess})` : 'No guesses!';
       if (sub)    sub.textContent    = w ? (w.diff === 0 ? 'Exact match!' : `Off by ${w.diff}`) : '';
     } else if (game.type === 'fastest_finger') {
       const w = game.winner;
       if (answer) { answer.style.display=''; answer.textContent = `"${game.keywordDisplay||game.keyword}"`; }
-      if (winner) winner.textContent = w ? `⚡ @${w.username} was first!` : 'Nobody typed it!';
+      if (winner) winner.textContent = w ? `@${w.username} was first!` : 'Nobody typed it!';
       if (sub)    sub.textContent    = `${game.attempts||0} attempt${game.attempts!==1?'s':''}`;
     } else if (game.type === 'score_prediction') {
       const score = game.actualScore ? `${game.actualScore[0]}–${game.actualScore[1]}` : '?–?';
       const w = game.winner;
       if (answer) { answer.style.display=''; answer.textContent = `Final: ${score}`; }
-      if (winner) winner.textContent = w ? `🏆 @${w.username} (${w.raw})` : 'No predictions!';
-      if (sub)    sub.textContent    = w && w.diff===0 ? 'Exact! 🎯' : (w ? `Off by ${w.diff}` : '');
+      if (winner) winner.textContent = w ? `@${w.username} (${w.raw})` : 'No predictions!';
+      if (sub)    sub.textContent    = w && w.diff===0 ? 'Exact!' : (w ? `Off by ${w.diff}` : '');
     }
   }
 

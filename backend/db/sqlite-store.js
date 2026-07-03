@@ -143,6 +143,18 @@ const Store = {
 
   // Rebuild the legacy in-memory DB shape from SQLite, so the existing stats readers can run
   // against SQLite with identical output (no reader rewrite, no parity drift). null until ready.
+  clearAll() {
+    ['player_stats', 'cs2_rounds', 'games', 'matches'].forEach((t) => run('DELETE FROM ' + t));
+  },
+  deleteMatch(id) {
+    run('DELETE FROM player_stats WHERE game_id IN (SELECT id FROM games WHERE match_id = ?)', [id]);
+    run('DELETE FROM cs2_rounds WHERE game_id IN (SELECT id FROM games WHERE match_id = ?)', [id]);
+    run('DELETE FROM games WHERE match_id = ?', [id]);
+    run('DELETE FROM matches WHERE id = ?', [id]);
+  },
+  deletePlayerStatsByName(name) {
+    run('DELETE FROM player_stats WHERE lower(name) = lower(?)', [name]);
+  },
   snapshot() {
     if (!ready) return null;
     try {

@@ -767,8 +767,15 @@
       // Dashboard manual override wins; else the brand's desk-tagged sponsors (legacy → all sponsors).
       const override = (deskFooter && Array.isArray(deskFooter.logos) && deskFooter.logos.length)
         ? deskFooter.logos.map(l => ({ logo: l, name: '' })) : null;
-      const deskList = override || (brand && (brand.deskSponsors || brand.sponsors)) || [];
-      const sponsors = Array.isArray(deskList) ? deskList.filter(s => s && s.logo) : [];
+      // Prefer desk-tagged sponsors; only fall back to ALL sponsors for legacy kits with no
+      // placement tagging anywhere — otherwise the desk footer repeats rail/banner logos.
+      const anyTagged = brand && ((brand.deskSponsors || []).length || (brand.railSponsors || []).length || (brand.bannerSponsors || []).length);
+      const deskList = override
+        || (brand && ((brand.deskSponsors || []).length ? brand.deskSponsors : (anyTagged ? [] : (brand.sponsors || []))))
+        || [];
+      // De-dupe by logo URL so the same sponsor can never render twice in the footer.
+      const _seen = new Set();
+      const sponsors = (Array.isArray(deskList) ? deskList : []).filter(s => s && s.logo && !_seen.has(s.logo) && (_seen.add(s.logo), true));
       const left = el('sponsors-left');
       const right = el('sponsors-right');
       left.innerHTML = '';

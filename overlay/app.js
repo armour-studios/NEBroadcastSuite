@@ -374,32 +374,62 @@ function renderSpotlight(players, spotlight) {
 // ── Ticker (scrolling sponsor / announcement lower-third) ───────────────────
 let _lastTickerSig = '';
 
-function renderTicker(ticker) {
+function renderTicker(data) {
+  const ticker = (data && data.ticker) || {};
   const bar   = el('ticker');
   const track = el('ticker-track');
   if (!bar || !track) return;
 
-  const _src = (ticker && ticker.source === 'startgg') ? (ticker.feed || []) : ((ticker && ticker.messages) || []);
-  const messages = (Array.isArray(_src) ? _src : []).filter(Boolean);
-  const visible = !!(ticker && ticker.visible) && messages.length > 0;
+  const isStartgg = ticker.source === 'startgg';
+  const matches = isStartgg
+    ? ((data && data.startgg && data.startgg.matchFeed) || []).filter((m) => m && (m.status === 'live' || m.status === 'done'))
+    : [];
+  const messages = isStartgg ? [] : (Array.isArray(ticker.messages) ? ticker.messages : []).filter(Boolean);
+  const sponsor = (data && data.brand && data.brand.spots && data.brand.spots.ticker) || ticker.sponsor || '';
+  const count = isStartgg ? matches.length : messages.length;
+  const visible = !!ticker.visible && (count > 0 || !!sponsor);
 
   bar.classList.toggle('hidden', !visible);
+  bar.classList.toggle('startgg', isStartgg);
+  bar.classList.toggle('has-sponsor', !!sponsor);
+  document.documentElement.style.setProperty('--brand', (data && data.brand && data.brand.color) || '#055fdb');
+  const sp = el('ticker-sponsor'); if (sp && sponsor) sp.src = sponsor;
   if (!visible) return;
 
   // Rebuild only when content/speed changes so the scroll animation isn't reset
   const speed = (ticker.speed > 0) ? ticker.speed : 40;
-  const sig = JSON.stringify({ messages, speed });
+  const sig = JSON.stringify({ s: isStartgg, m: matches, x: messages, sp: sponsor, speed });
   if (sig === _lastTickerSig) return;
   _lastTickerSig = sig;
 
-  // Two copies of the joined messages give a seamless looping marquee
-  const joined = messages.join('   •   ');
+  const fmtScore = (m) => `${(typeof m.scoreA === 'number') ? m.scoreA : 0} - ${(typeof m.scoreB === 'number') ? m.scoreB : 0}`;
+  const statusTag = (m) => {
+    const s = document.createElement('span');
+    if (m.status === 'live') { s.className = 'tk-stat tk-live'; const d = document.createElement('span'); d.className = 'tk-stat-dot'; s.appendChild(d); s.appendChild(document.createTextNode('LIVE')); }
+    else { s.className = 'tk-stat tk-final'; s.textContent = 'FINAL'; }
+    return s;
+  };
+  const buildMatch = (m) => {
+    const seg = document.createElement('span'); seg.className = 'tk-match';
+    seg.appendChild(statusTag(m));
+    if (m.logoA) { const la = document.createElement('img'); la.className = 'tk-logo'; la.src = m.logoA; la.onerror = function () { this.remove(); }; seg.appendChild(la); }
+    const ta = document.createElement('span'); ta.className = 'tk-team'; ta.textContent = m.teamA; seg.appendChild(ta);
+    const sc = document.createElement('span'); sc.className = 'tk-score'; sc.textContent = fmtScore(m); seg.appendChild(sc);
+    const tb = document.createElement('span'); tb.className = 'tk-team'; tb.textContent = m.teamB; seg.appendChild(tb);
+    if (m.logoB) { const lb = document.createElement('img'); lb.className = 'tk-logo'; lb.src = m.logoB; lb.onerror = function () { this.remove(); }; seg.appendChild(lb); }
+    return seg;
+  };
+
   track.innerHTML = '';
-  for (let i = 0; i < 2; i++) {
-    const span = document.createElement('span');
-    span.className = 'ticker-segment';
-    span.textContent = joined;
-    track.appendChild(span);
+  for (let copy = 0; copy < 2; copy++) {
+    if (isStartgg) {
+      matches.forEach((m) => {
+        track.appendChild(buildMatch(m));
+        const sep = document.createElement('span'); sep.className = 'tk-sep'; sep.textContent = '•'; track.appendChild(sep);
+      });
+    } else {
+      const span = document.createElement('span'); span.className = 'ticker-segment'; span.textContent = messages.join('   •   ') + '   •   '; track.appendChild(span);
+    }
   }
   track.style.animationDuration = `${speed}s`;
 }
@@ -440,9 +470,6 @@ function applyFullState(data) {
 
   setText('event-text', data.eventName);
 
-  if (data.fontFamily) {
-    document.documentElement.style.setProperty('--main-font', `'${data.fontFamily}', sans-serif`);
-  }
   document.documentElement.dataset.theme = data.theme || 'default';
 
   // Active client brand kit: recolor accents + drive the sponsor rail.
@@ -450,6 +477,10 @@ function applyFullState(data) {
     if (data.brand.color)  document.documentElement.style.setProperty('--accent', data.brand.color);
     if (data.brand.accent) document.documentElement.style.setProperty('--accent-2', data.brand.accent);
     if (data.brand.font)   document.documentElement.style.setProperty('--main-font', `'${data.brand.font}', sans-serif`);
+  }
+  // Settings "Overlay Font" always wins over brand kit font — applied last.
+  if (data.fontFamily) {
+    document.documentElement.style.setProperty('--main-font', `'${data.fontFamily}', sans-serif`);
   }
   renderSponsorRail(data.brand);
 
@@ -462,9 +493,11 @@ function applyFullState(data) {
   const game = data.game || {};
   setText('score-blue', game.blueScore ?? 0);
   setText('score-orange', game.orangeScore ?? 0);
-  setText('game-info', `GAME ${game.number ?? 0} | BEST OF ${data.bestOf || 5}`);
-  setText('game-info-1', `GAME ${game.number ?? 0}`);
-  setText('game-info-2', `BEST OF ${data.bestOf || 5}`);
+  // A custom Match Label (from Match — Teams) overrides the automatic "GAME x | BEST OF x" text.
+  const gameLabel = (data.gameLabel || '').toString().trim();
+  setText('game-info', gameLabel ? gameLabel.toUpperCase() : `GAME ${game.number ?? 0} | BEST OF ${data.bestOf || 5}`);
+  setText('game-info-1', gameLabel ? gameLabel.toUpperCase() : `GAME ${game.number ?? 0}`);
+  setText('game-info-2', gameLabel ? '' : `BEST OF ${data.bestOf || 5}`);
   const timerEl = el('timer');
   if (timerEl) {
     timerEl.textContent = (game.isOT ? '+' : '') + (data.formattedTime || '5:00');
@@ -524,7 +557,7 @@ function applyFullState(data) {
   }
 
   renderBreak(data.breakScreen);
-  renderTicker(data.ticker);
+  renderTicker(data);
   renderSpotlight(data.players, data.spotlight);
 
   showView(data.view || 'hud');
@@ -644,7 +677,11 @@ function renderScoreboard(playerCache, data) {
 function connect() {
   ws = new WebSocket(WS_URL);
 
-  ws.onopen = () => ws.send(JSON.stringify({ type: 'request_state' }));
+  ws.onopen = () => {
+    // Identify as a live overlay browser source (feeds the pre-flight "overlays reachable" check).
+    try { ws.send(JSON.stringify({ type: 'register', role: 'overlay', page: location.pathname })); } catch (e) {}
+    ws.send(JSON.stringify({ type: 'request_state' }));
+  };
 
   ws.onmessage = ({ data }) => {
     let msg;
@@ -669,18 +706,20 @@ function connect() {
         showView(msg.data.view || 'hud');
         break;
 
-      case 'game_reset':
-        el('players-blue').innerHTML = '';
-        el('players-orange').innerHTML = '';
+      case 'game_reset': {
+        const _pb = el('players-blue');   if (_pb) _pb.innerHTML = '';
+        const _po = el('players-orange'); if (_po) _po.innerHTML = '';
         // Remove stale facecam containers so they're rebuilt fresh for the new match
         document.querySelectorAll('.player-facecam-container').forEach(c => c.remove());
-        if(el('active-player-bot')) el('active-player-bot').classList.add('hidden');
-        if(el('boost-wrap')) el('boost-wrap').classList.add('hidden');
+        if (el('active-player-bot')) el('active-player-bot').classList.add('hidden');
+        if (el('boost-wrap')) el('boost-wrap').classList.add('hidden');
         break;
+      }
     }
   };
 
   ws.onclose = () => setTimeout(connect, 800);
+  ws.onerror = () => { try { ws.close(); } catch {} };
 }
 
 connect();

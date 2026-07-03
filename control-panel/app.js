@@ -165,12 +165,17 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     // Scene previews are live overlays — only run them while Assets ▸ Overlays is open.
     if (tab === 'media' && _assetsTab === 'overlays') { if (typeof loadScenePreviews === 'function') loadScenePreviews(); }
     else if (typeof unloadScenePreviews === 'function') unloadScenePreviews();
-    // The single Match — Teams card lives on the Dashboard; lend it to the Production page
-    // (its slot sits at the top of Production) while that page is open. Move it, don't clone IDs.
+    // The single Match — Teams card is a Dashboard widget (data-dash-id="teams") that lives in the
+    // customizable #dash-grid; lend it to the Production page while that page is open, then return it
+    // to the grid (NOT the page root) so it stays draggable/reorderable in the customize system.
     const mt = el('match-teams-section');
     if (mt) {
       if (tab === 'produccion') el('teams-match-slot')?.appendChild(mt);
-      else if (mt.parentElement && mt.parentElement.id !== 'tab-principal-content') el('tab-principal-content')?.appendChild(mt);
+      else if (mt.parentElement && mt.parentElement.id !== 'dash-grid') {
+        const g = el('dash-grid');
+        if (g) { g.appendChild(mt); if (typeof applyDashLayout === 'function') applyDashLayout(); }
+        else el('tab-principal-content')?.appendChild(mt);
+      }
     }
   });
 });
@@ -227,7 +232,7 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     if (monitorView)  monitorView.style.display  = isMonitor ? '' : 'none';
     if (databaseView) databaseView.style.display = isMonitor ? 'none' : '';
     if (isMonitor) {
-      if (typeof cfLoadTalent === 'function') cfLoadTalent();
+      if (typeof cfTalentAutoOpen === 'function') cfTalentAutoOpen();
     } else {
       dbPanes.forEach((p) => {
         const show = p.dataset.role === r;
@@ -241,8 +246,31 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
 
   tabs.forEach((t) => t.addEventListener('click', () => switchRole(t.dataset.dcrole)));
 
-  // Start on Monitor tab
-  switchRole('monitor');
+  // Start on Monitor tab. Deferred to a macrotask: this IIFE runs synchronously near the TOP of
+  // app.js (well before later `let`/`const` declarations — e.g. VDO_API — are reached), and
+  // switchRole('monitor') cascades into cfTalentAutoOpen(), which references those. Calling it
+  // synchronously here throws "Cannot access before initialization" and — because it's an uncaught
+  // top-level exception — HALTS the rest of app.js from executing at all (nothing past this point
+  // in the file ever runs: no WS/state wiring, no nav, nothing). setTimeout(...,0) waits until the
+  // whole script has finished running once, so every module-level variable is initialized by then.
+  setTimeout(() => switchRole('monitor'), 0);
+
+  // Keep the whole panel auto-refreshing so player/crew connection statuses stay current without a
+  // manual reload. Skips when the panel is hidden, or the user is mid-edit inside it.
+  setInterval(() => {
+    if (!dcc.offsetParent) return;
+    const ae = document.activeElement;
+    if (ae && dcc.contains(ae) && /^(INPUT|SELECT|TEXTAREA)$/.test(ae.tagName)) return;
+    try {
+      if (role === 'monitor') {
+        if (typeof cfTalentAutoOpen === 'function') cfTalentAutoOpen();  // refresh + keep monitoring alive
+      } else {
+        loadDbRole(role);
+      }
+      updateMonDot();
+      if (typeof cfUpdateConnStatus === 'function') cfUpdateConnStatus();
+    } catch (_) {}
+  }, 8000);
 
   window._dccSetRole = switchRole;
   window._dccSetMode = (db) => switchRole(db ? 'players' : 'monitor'); // legacy compat
@@ -285,7 +313,7 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     const notes = el('crew-f-notes'); if (notes) notes.value = '';
     const g = el('crew-f-group'); if (g) g.value = 'casters';
     const s = el('crew-f-social'); if (s) s.value = 'none';
-    const dc = el('crew-f-default-cam'); if (dc) dc.value = '';
+    const dc = el('crew-f-default-cam'); if (dc) dc.innerHTML = dccCamOptionsHtml('', '— None —');
     const titleEl = el('crew-edit-dlg-title'); if (titleEl) titleEl.textContent = 'Add Crew Member';
     if (saveBtn) saveBtn.textContent = 'Save';
   }
@@ -299,7 +327,7 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     const notes = el('crew-f-notes'); if (notes) notes.value = d.notes || '';
     const g = el('crew-f-group'); if (g) g.value = d.group || 'casters';
     const s = el('crew-f-social'); if (s) s.value = d.social || 'none';
-    const dc = el('crew-f-default-cam'); if (dc) dc.value = d.defaultCam || '';
+    const dc = el('crew-f-default-cam'); if (dc) dc.innerHTML = dccCamOptionsHtml(d.defaultCam || '', '— None —');
     const titleEl = el('crew-edit-dlg-title');
     if (titleEl) titleEl.textContent = d.id ? 'Edit ' + (d.name || 'Crew Member') : 'Add Crew Member';
     if (saveBtn) saveBtn.textContent = d.id ? 'Update' : 'Save';
@@ -326,11 +354,17 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     const payload = { name, handle, role, group, social, socialHandle, defaultCam, country, paypal, notes };
     if (editId) payload.id = editId;
     send(editId ? 'update_crew_member' : 'add_crew_member', payload);
-    // If opened from Hosts grid, also sync the library entry's kind and profile fields
+    // Mirror into the DCC director library so the member shows in the Host staging tab. When opened
+    // from the Hosts grid we update that exact entry; on a brand-new add we create one (the server
+    // dedupes by name/handle, so this never makes a duplicate).
+    const groupToKind = { casters: 'caster', observers: 'observer', hosts: 'host', guests: 'host' };
+    const kind = groupToKind[group] || 'caster';
     if (_fromLibId) {
-      const groupToKind = { casters: 'caster', observers: 'observer', hosts: 'host', guests: 'host' };
-      send('save_caster_to_library', { id: _fromLibId, kind: groupToKind[group] || 'caster', name, handle, role, country, notes });
+      send('save_caster_to_library', { id: _fromLibId, kind, name, handle, role, country, notes });
       setTimeout(() => { if (typeof renderDccHostsGrid === 'function') renderDccHostsGrid(); }, 350);
+    } else if (!editId) {
+      send('save_caster_to_library', { kind, name, handle, role, country, notes, camSlot: defaultCam });
+      setTimeout(() => { if (typeof renderDccAll === 'function') renderDccAll(); if (typeof renderDccHostsGrid === 'function') renderDccHostsGrid(); }, 350);
     }
     if (dlg) dlg.close();
     setTimeout(renderCrewList, 300);
@@ -438,6 +472,13 @@ function _camSelectHtml(current, attrs) {
   const opts = _CAM_SLOTS.map((v) => `<option value="${v}"${v === (current||'') ? ' selected' : ''}>${tlEsc(_CAM_LABELS[v] || v || '-- No cam --')}</option>`).join('');
   return `<select class="dcc-cam-select" ${attrs}>${opts}</select>`;
 }
+// Single source of truth for the camera slots — shared by the DCC cam dropdowns AND the
+// Add-Crew "Default Cam" field so they're always the same list (a crew member's defaultCam IS
+// their DCC/show-roster cam slot → OBS source). Keep in sync with the per-show camera setup.
+const DCC_CAM_OPTIONS = ['', 'CAM1', 'CAM2', 'CAM3', 'CAM4', 'CAM5', 'CAM6'];
+function dccCamOptionsHtml(current, emptyLabel) {
+  return DCC_CAM_OPTIONS.map((v) => `<option value="${v}"${v === (current || '') ? ' selected' : ''}>${v ? 'CAM ' + v.slice(3) : (emptyLabel || '— No cam —')}</option>`).join('');
+}
 // groupKey → CF group name + library kind for filtering
 const _DCC_SECTION_META = {
   casters:   { label: 'CASTERS',   color: '#e83a8b', cfGroup: 'casters',   kind: 'caster'   },
@@ -494,7 +535,8 @@ function renderDccHostsPane() {
     if (m.kind === 'caster') {
       const lineupEnt = lineup.find((e) => e.libraryId === m.libraryId);
       const curSlot   = lineupEnt ? (lineupEnt.slot || 0) : 0;
-      const slotOpts  = [['0','Off air'],['1','CASTER 1'],['2','CASTER 2'],['3','CASTER 3'],['4','CASTER 4']]
+      const slotLabels = (currentState.casters && currentState.casters.slotLabels) || {};
+      const slotOpts  = [['0','Off air'],['1',slotLabels[1]||'Caster 1'],['2',slotLabels[2]||'Caster 2'],['3',slotLabels[3]||'Caster 3'],['4',slotLabels[4]||'Caster 4']]
         .map(([v, lbl]) => `<option value="${v}"${Number(v) === curSlot ? ' selected' : ''}>${lbl}</option>`).join('');
       slotSelHtml = `<select class="dcc-cam-select dcc-overlay-slot" title="Overlay slot" style="max-width:92px;">${slotOpts}</select>`;
     }
@@ -566,8 +608,7 @@ function renderDccTeamSection(side) {
     const isConn  = !!(vp.streamId && connected.has(vp.streamId));
     const joinUrl = vp.joinUrl || '';
     const obsUrl  = vp.obsUrl  || '';
-    const camSlotSel = `<select class="dcc-cam-select" title="Overlay cam slot" data-pcam-side="${tlEsc(side)}" data-pcam-id="${tlEsc(String(p.id))}" style="max-width:96px;">` +
-      ['', 'CAM1', 'CAM2', 'CAM3', 'CAM4', 'CAM5'].map((v) => `<option value="${v}"${v === (p.camSlot || '') ? ' selected' : ''}>${v ? 'CAM ' + v.slice(3) : 'Off air'}</option>`).join('') + `</select>`;
+    const camSlotSel = `<select class="dcc-cam-select" title="Overlay cam slot" data-pcam-side="${tlEsc(side)}" data-pcam-id="${tlEsc(String(p.id))}" style="max-width:96px;">${dccCamOptionsHtml(p.camSlot, 'Off air')}</select>`;
     return `<div class="talent-row mc-player dcc-lib-row" data-pside="${tlEsc(side)}" data-pid="${tlEsc(String(p.id))}">
       <div class="mc-p-line">
         <span class="mc-stats">
@@ -668,11 +709,13 @@ function renderDccLobbyPane() {
   }
   roster.innerHTML = members.map((m) => {
     const name   = tlEsc(m.name || m.handle || 'Unknown');
-    const stream = m.streamId || '';
+    // Group membership is keyed by the library entry id + its `kind` (caster/observer), so emit the
+    // library id here — NOT the VDO streamId — and the target kind directly.
+    const libId  = m.libraryId || m.id || '';
     return `<div class="mc-player talent-row" style="display:flex;align-items:center;gap:8px;padding:6px 10px;">
       <span style="flex:1;font-size:12px;font-weight:600;">${name}</span>
-      <button class="btn btn-ghost btn-xs" data-assign-lobby="${stream}" data-assign-group="casters">→ Casters</button>
-      <button class="btn btn-ghost btn-xs" data-assign-lobby="${stream}" data-assign-group="observers">→ Obs</button>
+      <button class="btn btn-ghost btn-xs" data-assign-lobby="${libId}" data-assign-group="caster">→ Casters</button>
+      <button class="btn btn-ghost btn-xs" data-assign-lobby="${libId}" data-assign-group="observer">→ Obs</button>
     </div>`;
   }).join('');
 }
@@ -890,6 +933,8 @@ function renderDccHostsGrid() {
     const entry  = libId ? lib.find((e) => e.id === libId) : null;
     el('crew-dlg-title').textContent = entry ? 'Edit ' + (entry.name || 'Crew Member') : 'Add Crew Member';
     el('cdlg-name').value    = entry ? (entry.name    || '') : '';
+    el('cdlg-handle').value  = entry ? (entry.handle  || '') : '';
+    el('cdlg-social').value  = entry ? (entry.social  || 'none') : 'none';
     el('cdlg-role').value    = entry ? (entry.role    || '') : '';
     el('cdlg-kind').value    = entry ? (entry.kind    || 'caster') : 'caster';
     el('cdlg-country').value = entry ? (entry.country || '') : '';
@@ -922,7 +967,8 @@ function renderDccHostsGrid() {
       const newSlot = parseInt((el('cdlg-slot') && el('cdlg-slot').value) || '0', 10) || 0;
       const payload = {
         name,
-        handle:  (function(){ var e = ((currentState.casters && currentState.casters.library) || []).find(function(x){ return x.id === _crewDlgEditId; }); return e ? (e.handle || '') : ''; })(),
+        handle:  el('cdlg-handle').value.trim(),
+        social:  el('cdlg-social').value || 'none',
         role:    el('cdlg-role').value.trim(),
         kind:    el('cdlg-kind').value || 'caster',
         slot:    newSlot,
@@ -1063,6 +1109,23 @@ function renderDccHostsGrid() {
     });
   }
 
+  // ── Slot label renaming ──────────────────────────────────────────────────
+  const slotLabelsBar = el('dcc-slot-labels');
+  if (slotLabelsBar) {
+    slotLabelsBar.addEventListener('change', (e) => {
+      const inp = e.target.closest('[data-slot-label]');
+      if (!inp) return;
+      const slot = parseInt(inp.dataset.slotLabel, 10);
+      if (slot >= 1 && slot <= 4) {
+        send('set_slot_label', { slot, label: inp.value.trim() });
+        renderDccHostsPane();
+      }
+    });
+    slotLabelsBar.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') e.target.blur();
+    });
+  }
+
   // ── Players pane: team rosters ───────────────────────────────────────────
   ['blue', 'orange'].forEach((side) => {
     const regenBtn   = el(`dcc-regen-team-${side}`);
@@ -1074,7 +1137,7 @@ function renderDccHostsGrid() {
         const copy = e.target.closest('[data-copy-url]');
         const pgen = e.target.closest('[data-pgen-side]');
         if (copy) { const u = copy.dataset.copyUrl; if (u) navigator.clipboard?.writeText(u).catch(() => {}); }
-        if (pgen) { send('generate_player_vdo', { side: pgen.dataset.pgenSide, playerId: pgen.dataset.pgenId }); setTimeout(refreshSide, 700); }
+        if (pgen) { send('generate_team_vdo', { side: pgen.dataset.pgenSide }); setTimeout(refreshSide, 700); }
       });
       roster.addEventListener('change', (e) => {
         const cam = e.target.closest('[data-pcam-side]');
@@ -1213,11 +1276,11 @@ function renderDccHostsGrid() {
     lobbyRoster.addEventListener('click', (e) => {
       const assignBtn = e.target.closest('[data-assign-lobby]');
       if (!assignBtn) return;
-      const streamId    = assignBtn.dataset.assignLobby;
-      const targetGroup = assignBtn.dataset.assignGroup;
-      if (streamId && targetGroup) {
-        send('move_lobby_guest', { streamId, targetGroup });
-        showToast(`Moving to ${targetGroup}…`, '#22c55e');
+      const libraryId = assignBtn.dataset.assignLobby;   // library entry id (not the VDO stream slug)
+      const kind      = assignBtn.dataset.assignGroup;    // 'caster' | 'observer'
+      if (libraryId && kind) {
+        send('save_caster_to_library', { id: libraryId, kind });
+        showToast(`Moving to ${kind === 'observer' ? 'observers' : 'casters'}…`, '#22c55e');
         setTimeout(() => {
           if (typeof cfLoadGroups === 'function') cfLoadGroups().then(() => renderDccLobbyPane()).catch(() => renderDccLobbyPane());
           else renderDccLobbyPane();
@@ -1370,7 +1433,7 @@ function renderDccHostsGrid() {
       const sv = document.getElementById('tl-detect-save');
       if (sv) sv.addEventListener('click', () => document.getElementById('btn-save-all-sgg-teams')?.click());
     } else {
-      detect.innerHTML = '<div class="tl-detect-empty">No active start.gg event detected — paste an event link or search below.</div>';
+      detect.innerHTML = '<div class="tl-detect-empty">No active event detected — paste an event link or search below.</div>';
       detect.style.display = '';
     }
   }
@@ -1418,135 +1481,785 @@ function renderDccHostsGrid() {
   subnav.appendChild(btn);
 })();
 
-// Build the Overlays sub-tab's tabbed config panel (Break · Winner · Line-up · Ticker) with a
-// per-tab preview, and remove the Caster-cam / Stinger sections (those live on the Assets page now).
-function buildOverlaysConfig(pane) {
-  if (!pane) return;
-  // Search WITHIN `pane` (it may be detached when this runs, so getElementById won't find these).
-  const sectOf = (id) => { const e = pane.querySelector('#' + id); return e ? e.closest('section.section') : null; };
-  [sectOf('caster-layout-links'), sectOf('stinger-links')].forEach((sec) => { if (sec) sec.remove(); });
-  const DEF = [
-    ['break',  'Break',   'select-break-preset',  '/countdown.html?embed=1', '/countdown.html'],
-    ['winner', 'Winner',  'select-winner-side',   '/winner.html?embed=1',    '/winner.html'],
-    ['intro',  'Line-up', 'select-intro-side',    '/intro.html?embed=1',     '/intro.html'],
-    ['ticker', 'Ticker',  'check-ticker-visible', '/ticker.html?embed=1',    '/ticker.html'],
-  ];
-  const found = DEF.map((d) => [d[0], d[1], sectOf(d[2]), d[3], d[4]]).filter((d) => d[2]);
-  if (!found.length) return;
-  const base = 'http://localhost:3000';
-  // Drop the inline "Browser sources / scenes" URL boxes — one Copy button now sits by the preview.
-  found.forEach(([, , sec]) => { Array.from(sec.children).forEach((c) => { if (c.tagName === 'DIV' && c.querySelector('a.overlay-link')) c.remove(); }); });
-  const box = document.createElement('div'); box.className = 'gfx-cfg';
-  const nav = document.createElement('div'); nav.className = 'ev-subnav gfx-cfg-nav';
-  nav.innerHTML = found.map(([k, l], i) => '<button type="button" class="ev-subnav-btn' + (i === 0 ? ' active' : '') + '" data-cfg="' + k + '">' + l + '</button>').join('');
-  const bodyEl = document.createElement('div'); bodyEl.className = 'gfx-cfg-body';
-  const panes = document.createElement('div'); panes.className = 'gfx-cfg-panes';
-  found.forEach(([, , sec]) => { sec.classList.add('gfx-cfg-sec'); panes.appendChild(sec); });
-  const pv = document.createElement('div'); pv.className = 'gfx-cfg-pv';
-  pv.innerHTML = '<div class="sp-preview-head"><span class="seed-bar-lbl">Preview</span><button type="button" class="btn btn-ghost btn-sm" id="gfx-cfg-copy" title="Copy this overlay browser-source URL">Copy URL</button></div><div class="sp-preview-frame"><div class="sp-frame-scale"><iframe id="gfx-cfg-frame" scrolling="no" tabindex="-1"></iframe></div></div>';
-  bodyEl.appendChild(panes); bodyEl.appendChild(pv);
-  box.appendChild(nav); box.appendChild(bodyEl);
-  pane.appendChild(box);
-  const frame = pv.querySelector('#gfx-cfg-frame');
-  let activeCopy = base + found[0][4];
-  window._gfxCfgShow = function (which) {
-    nav.querySelectorAll('.ev-subnav-btn').forEach((b) => b.classList.toggle('active', b.dataset.cfg === which));
-    found.forEach(([k, , sec, url, copy]) => {
-      sec.style.display = (k === which) ? '' : 'none';
-      if (k === which) { activeCopy = base + copy; if (frame && frame.src.indexOf(base + url) < 0) frame.src = base + url; }
-    });
-  };
-  nav.querySelectorAll('.ev-subnav-btn').forEach((b) => b.addEventListener('click', () => window._gfxCfgShow(b.dataset.cfg)));
-  const copyBtn = pv.querySelector('#gfx-cfg-copy');
-  if (copyBtn) copyBtn.addEventListener('click', (e) => { if (typeof copyText === 'function') copyText(activeCopy, e.currentTarget); else if (navigator.clipboard) navigator.clipboard.writeText(activeCopy); });
-  window._gfxCfgShow(found[0][0]);
-}
-
-// Build the Brackets sub-tab's tabbed config panel (Bracket · Upcoming · Standings · Manual)
-// with a sticky right-side preview, mirroring the Overlays tab structure.
-function buildBracketsConfig(pane) {
-  if (!pane) return;
-  const base = 'http://localhost:3000';
-  const sectOf = (id) => { const e = pane.querySelector('#' + id); return e ? e.closest('section.section') : null; };
-  const DEF = [
-    ['bracket',   'Bracket',   'input-bracket-slug',    '/bracket.html?show=1&thumb=1', '/bracket.html'],
-    ['upcoming',  'Upcoming',  'input-upcoming-title',  '/upcoming.html',               '/upcoming.html'],
-    ['standings', 'Standings', 'input-standings-title', '/standings.html',              '/standings.html'],
-    ['manual',    'Manual',    'bb-phases',             '/bracket.html?show=1&thumb=1', '/bracket.html'],
-  ];
-  const found = DEF.map((d) => [d[0], d[1], sectOf(d[2]), d[3], d[4]]).filter((d) => d[2]);
-  if (!found.length) return;
-  // Remove the inline bracket preview — replaced by the sticky right-pane preview
-  const inlinePrev = pane.querySelector('#bracket-live-preview');
-  if (inlinePrev) inlinePrev.remove();
-  // Remove inline URL boxes — the Copy URL button in the preview panel replaces them
-  found.forEach(([, , sec]) => {
-    Array.from(sec.children).forEach((c) => { if (c.tagName === 'DIV' && c.querySelector('a.overlay-link')) c.remove(); });
-  });
-  const box = document.createElement('div'); box.className = 'gfx-cfg';
-  const nav = document.createElement('div'); nav.className = 'ev-subnav gfx-cfg-nav';
-  nav.innerHTML = found.map(([k, l], i) => `<button type="button" class="ev-subnav-btn${i === 0 ? ' active' : ''}" data-bkcfg="${k}">${l}</button>`).join('');
-  const bodyEl = document.createElement('div'); bodyEl.className = 'gfx-cfg-body';
-  const panesCont = document.createElement('div'); panesCont.className = 'gfx-cfg-panes';
-  found.forEach(([, , sec]) => { sec.classList.add('gfx-cfg-sec'); panesCont.appendChild(sec); });
-  const pv = document.createElement('div'); pv.className = 'gfx-cfg-pv';
-  pv.innerHTML = '<div class="sp-preview-head"><span class="seed-bar-lbl">Preview</span><button type="button" class="btn btn-ghost btn-sm" id="bk-cfg-copy" title="Copy this overlay browser-source URL">Copy URL</button></div><div class="sp-preview-frame"><div class="sp-frame-scale"><iframe id="bk-cfg-frame" scrolling="no" tabindex="-1"></iframe></div></div>';
-  bodyEl.appendChild(panesCont); bodyEl.appendChild(pv);
-  box.appendChild(nav); box.appendChild(bodyEl);
-  pane.appendChild(box);
-  const frame = pv.querySelector('#bk-cfg-frame');
-  let activeCopy = base + found[0][4];
-  window._bkCfgShow = function (which) {
-    nav.querySelectorAll('.ev-subnav-btn').forEach((b) => b.classList.toggle('active', b.dataset.bkcfg === which));
-    found.forEach(([k, , sec, url, copy]) => {
-      sec.style.display = (k === which) ? '' : 'none';
-      if (k === which) { activeCopy = base + copy; if (frame && frame.src.indexOf(base + url) < 0) frame.src = base + url; }
-    });
-  };
-  nav.querySelectorAll('.ev-subnav-btn').forEach((b) => b.addEventListener('click', () => window._bkCfgShow(b.dataset.bkcfg)));
-  const copyBtn = pv.querySelector('#bk-cfg-copy');
-  if (copyBtn) copyBtn.addEventListener('click', (e) => { if (typeof copyText === 'function') copyText(activeCopy, e.currentTarget); else if (navigator.clipboard) navigator.clipboard.writeText(activeCopy); });
-  window._bkCfgShow(found[0][0]);
-}
-
-// ── Graphics hub: turn Production → Graphics into a multi-tab panel (Overlays · Spotlight ·
-// Brackets) by relocating the Spotlight studio + Brackets builder here. DOM nodes are MOVED (IDs
-// unchanged → every handler keeps working). Runs after the Production rebuild + bracket relocation.
-// Render hooks are wrapped in try/catch + reference only hoisted functions (TDZ-safe at init).
+// ── Graphics hub (Production → Graphics) ─────────────────────────────────────
 (function buildGraphicsHub() {
   const gtab = document.getElementById('prod-graphics-tab');
   if (!gtab) return;
-  const spotlight = document.getElementById('ev-spotlight-panel');
-  const brackets = document.getElementById('ev-brackets-panel');
-  // Existing graphics content (overlay board + per-overlay config) becomes the "Overlays" pane.
-  const overlays = document.createElement('div'); overlays.className = 'gfx-pane'; overlays.id = 'gfx-pane-overlays';
-  while (gtab.firstChild) overlays.appendChild(gtab.firstChild);
-  try { buildOverlaysConfig(overlays); } catch (_) {}
-  try { buildBracketsConfig(brackets); } catch (_) {}
-  const wrap = (node) => { const d = document.createElement('div'); d.className = 'gfx-pane'; if (node) { node.style.display = ''; d.appendChild(node); } return d; };
-  const TABS = [['overlays', 'Overlays', overlays], ['spotlight', 'Spotlight', wrap(spotlight)], ['brackets', 'Brackets', wrap(brackets)]];
-  const nav = document.createElement('div'); nav.id = 'gfx-subnav'; nav.className = 'ev-subnav';
-  nav.innerHTML = TABS.map(([k, l], i) => `<button type="button" class="ev-subnav-btn${i === 0 ? ' active' : ''}" data-gfx="${k}">${l}</button>`).join('');
-  gtab.appendChild(nav);
-  TABS.forEach(([, , pane]) => gtab.appendChild(pane));
-  window._gfxShow = function (which) {
-    nav.querySelectorAll('.ev-subnav-btn').forEach((b) => b.classList.toggle('active', b.dataset.gfx === which));
-    TABS.forEach(([k, , pane]) => { pane.style.display = (k === which) ? '' : 'none'; });
-    try {
-      if (which === 'overlays' && window.ONAIR_SCENES && typeof renderGraphicsBoard === 'function') renderGraphicsBoard();
-      if (which === 'spotlight' && typeof renderSpotlight === 'function') { renderSpotlight(); if (typeof spSetMode === 'function') spSetMode(typeof _spMode !== 'undefined' ? _spMode : 'watch'); }
-      if (typeof fitLivePreviews === 'function') setTimeout(fitLivePreviews, 40);
-    } catch (_) {}
-    try { localStorage.setItem('gfx_active_tab', which); } catch (_) {}
+  const nav = document.getElementById('gfx-scene-nav');
+  if (!nav) return;
+
+  // Per-scene metadata for the unified top bar.
+  const SCENE_META = {
+    break:     { name: 'Break / Starting Soon', link: 'countdown.html',       hasClear: true,  hasQueue: true,  hasPush: true  },
+    winner:    { name: 'Winner / Post-match',   link: 'winner.html',          hasClear: true,  hasQueue: true,  hasPush: true  },
+    intro:     { name: 'Team Line-up / Intro',  link: 'intro.html',           hasClear: true,  hasQueue: true,  hasPush: true  },
+    ticker:    { name: 'Ticker',                link: 'ticker.html',          hasClear: true,  hasQueue: false, hasPush: true,  pushLabel: 'Apply', pushId: 'btn-ticker-apply' },
+    series:    { name: 'Series Score',          link: 'series.html',          hasClear: true,  hasQueue: false, hasPush: true  },
+    matchup:   { name: 'Pre-Match Lineup',      link: 'matchup.html',         hasClear: true,  hasQueue: false, hasPush: true  },
+    veto:      { name: 'Map Veto',              link: 'mapscreen.html',       hasClear: true,  hasQueue: true,  hasPush: true,  clearId: 'btn-hide-veto-gfx', pushId: 'btn-show-veto-gfx' },
+    draft:     { name: 'Champion Draft',        link: 'draft.html',           hasClear: true,  hasQueue: false, hasPush: true  },
+    spotlight: { name: 'Spotlight',             link: 'watchlist.html',       hasClear: true,  hasQueue: false, hasPush: true  },
+    standings: { name: 'Standings',             link: 'standings.html',       hasClear: true,  hasQueue: false, hasPush: true,  pushId: 'btn-gfx-standings-push', clearId: 'btn-gfx-standings-clear' },
+    schedule:  { name: 'Upcoming Matches',      link: 'schedule.html',        hasClear: true,  hasQueue: false, hasPush: true,  pushId: 'btn-gfx-schedule-push', clearId: 'btn-gfx-schedule-clear' },
+    bracket:   { name: 'Bracket',               link: 'bracket.html',         hasClear: true,  hasQueue: false, hasPush: true  },
   };
-  nav.querySelectorAll('.ev-subnav-btn').forEach((b) => b.addEventListener('click', () => window._gfxShow(b.dataset.gfx)));
-  // The Spotlight / Brackets sub-tabs now live here — drop their ESPORTS sub-nav buttons.
+
+  let currentKey = 'break';
+
+  // Footer status message (fades after 2.5s).
+  function gfxFootStatus(msg, ok) {
+    const st = el('gfx-foot-status'); if (!st) return;
+    st.textContent = msg; st.style.color = ok ? '#4ade80' : 'var(--muted)';
+    clearTimeout(gfxFootStatus._t); gfxFootStatus._t = setTimeout(() => { if (st) st.textContent = ''; }, 2500);
+  }
+
+  // Update the top bar + panel footer to reflect the active scene.
+  function refreshTopBar(key) {
+    const meta = SCENE_META[key] || { name: key, link: '' };
+    const base = window.SCENE_BASE_URL || 'http://localhost:3000';
+    const nameEl = el('gfx-active-name'), linkEl = el('gfx-active-link'), sceneLink = el('gfx-active-scene-link');
+    if (nameEl) nameEl.textContent = meta.name || key;
+    if (linkEl) { linkEl.href = base + '/gfx.html'; linkEl.textContent = 'gfx.html ↗'; }
+    if (sceneLink) {
+      if (meta.link) { sceneLink.href = base + '/' + meta.link; sceneLink.textContent = meta.link; sceneLink.style.display = ''; }
+      else sceneLink.style.display = 'none';
+    }
+    // Footer buttons
+    const footPush = el('gfx-foot-push'), footQueue = el('gfx-foot-queue'), footHide = el('gfx-foot-hide');
+    if (footPush) { footPush.style.display = meta.hasPush ? '' : 'none'; footPush.textContent = meta.pushLabel || 'Push to Live'; }
+    if (footQueue) footQueue.style.display = meta.hasQueue ? '' : 'none';
+    if (footHide) footHide.style.display = meta.hasClear ? '' : 'none';
+    // Live dot on sidenav + LIVE badge in top bar
+    const liveScene = currentState && currentState.gfxActive;
+    document.querySelectorAll('.gfx-sidenav-btn[data-gfxscene]').forEach((b) => b.classList.toggle('gfx-nav-live', b.dataset.gfxscene === liveScene));
+    const badge = el('gfx-live-badge'); if (badge) badge.style.display = liveScene ? '' : 'none';
+  }
+
+  // Clear ALL GFX scenes (one-click clear everything).
+  function clearAllGfxScenes() {
+    Object.entries(SCENE_META).forEach(([k, meta]) => {
+      if (meta.hasClear) el(meta.clearId || ('btn-hide-' + k))?.click();
+    });
+    send('set_gfx_active', { scene: null });
+    refreshTopBar(currentKey);
+  }
+
+  // Push a scene, auto-clearing the previously live GFX scene first.
+  function doPush(key) {
+    const meta = SCENE_META[key] || {};
+    const prev = currentState && currentState.gfxActive;
+    if (prev && prev !== key && SCENE_META[prev]) {
+      const pm = SCENE_META[prev]; el(pm.clearId || ('btn-hide-' + prev))?.click();
+    }
+    el(meta.pushId || ('btn-show-' + key))?.click();
+    send('set_gfx_active', { scene: key });
+    gfxFootStatus((meta.name || key) + ' pushed live.', true);
+    setTimeout(() => refreshTopBar(key), 50);
+  }
+
+  // Top bar: "Clear All" clears every GFX overlay.
+  document.getElementById('gfx-top-clear')?.addEventListener('click', () => { clearAllGfxScenes(); gfxFootStatus('All scenes cleared.', false); });
+  // Hidden delegation targets kept for rundown and external callers.
+  document.getElementById('gfx-top-queue')?.addEventListener('click', () => el('btn-queue-' + currentKey)?.click());
+  document.getElementById('gfx-top-push')?.addEventListener('click', () => doPush(currentKey));
+
+  // Panel footer buttons.
+  el('gfx-foot-push')?.addEventListener('click', () => doPush(currentKey));
+  el('gfx-foot-queue')?.addEventListener('click', () => el('gfx-top-queue')?.click());
+  el('gfx-foot-hide')?.addEventListener('click', () => {
+    const meta = SCENE_META[currentKey] || {};
+    el(meta.clearId || ('btn-hide-' + currentKey))?.click();
+    const live = currentState && currentState.gfxActive;
+    if (live === currentKey) send('set_gfx_active', { scene: null });
+    gfxFootStatus('Hidden.', false);
+    setTimeout(() => refreshTopBar(currentKey), 50);
+  });
+
+  // Dynamic preview scaling — scales to fit the 220px height strip, centers horizontally.
+  function fitScenePreviews() {
+    let anyMissed = false;
+    document.querySelectorAll('.gfx-scene-card .live-pv').forEach(function(wrap) {
+      const iframe = wrap.querySelector('iframe');
+      if (!iframe) return;
+      const w = wrap.offsetWidth, h = wrap.offsetHeight || wrap.clientHeight;
+      if (!w) { anyMissed = true; return; }
+      const scale = h ? Math.min(w / 1920, h / 1080) : (w / 1920);
+      iframe.style.left = Math.max(0, (w - 1920 * scale) / 2) + 'px';
+      iframe.style.transform = 'scale(' + scale + ')';
+    });
+    if (anyMissed) setTimeout(fitScenePreviews, 120);
+  }
+
+  // Tab switching.
+  const ALIAS = { scenes: 'break', lower: 'spotlight', manual: 'bracket', upcoming: 'schedule', brackets: 'bracket' };
+  function show(which) {
+    const btns = Array.from(nav.querySelectorAll('.gfx-sidenav-btn[data-gfxscene]'));
+    const keys = btns.map((b) => b.dataset.gfxscene);
+    const key = keys.includes(which) ? which : (ALIAS[which] && keys.includes(ALIAS[which]) ? ALIAS[which] : keys[0]);
+    currentKey = key;
+    btns.forEach((b) => b.classList.toggle('active', b.dataset.gfxscene === key));
+    gtab.querySelectorAll('.gfx-scene-panel').forEach((p) => { p.style.display = (p.dataset.gfxpanel === key) ? '' : 'none'; });
+    refreshTopBar(key);
+    if (key === 'spotlight') {
+      try {
+        if (typeof renderSpotlight === 'function') renderSpotlight();
+        const spMode = typeof _spMode !== 'undefined' ? _spMode : 'watch';
+        if (typeof spSetMode === 'function') spSetMode(spMode);
+        syncSpotlightPreview(spMode);
+        if (typeof fitLivePreviews === 'function') setTimeout(fitLivePreviews, 40);
+      } catch (_) {}
+    }
+    requestAnimationFrame(() => requestAnimationFrame(fitScenePreviews));
+    try { localStorage.setItem('gfx_active_grp', key); } catch (_) {}
+  }
+  nav.querySelectorAll('.gfx-sidenav-btn[data-gfxscene]').forEach((b) => b.addEventListener('click', () => show(b.dataset.gfxscene)));
+  window._gfxCfgShow = (which) => show(which);
+  window._gfxSceneMeta = SCENE_META;  // expose for on-air board auto-clear
+  window._gfxDoPush = doPush;         // expose for external callers (hotkeys, rundown)
+
+  // Inject Spotlight panel into the right-column body of the split layout.
+  const spotlightPanel = document.getElementById('ev-spotlight-panel');
+  const spotlightHost  = document.getElementById('gfx-spotlight-body');
+  if (spotlightPanel && spotlightHost) {
+    spotlightPanel.style.display = '';
+    spotlightHost.appendChild(spotlightPanel);
+    const btn = document.getElementById('gfx-tab-spotlight');
+    if (btn) btn.style.display = '';
+  }
+
+  // Sync the left-panel preview iframe to the active spotlight mode (watch vs solo).
+  function syncSpotlightPreview(mode) {
+    const pv = document.getElementById('gfx-pv-spotlight');
+    if (!pv) return;
+    const base = window.SCENE_BASE_URL || 'http://localhost:3000';
+    pv.src = base + (mode === 'solo' ? '/team-spotlight.html' : '/watchlist.html') + '?preview=1';
+  }
+
+  // When the user clicks Teams to Watch / Team Spotlight, update the main preview too.
+  document.querySelectorAll('#sp-modes .sp-mode-btn').forEach((btn) => {
+    btn.addEventListener('click', () => syncSpotlightPreview(btn.dataset.spmode));
+  });
+
+  // Refined Bracket panel: pull ONLY the start.gg bracket editor + phase builder INTO the scene
+  // body (so they live inside the preview/controls split + scroll, not clipped below it). The old
+  // Upcoming/Standings sections are NOT injected — those graphics now have their own refined scenes.
+  const bracketsPanel = document.getElementById('ev-brackets-panel');
+  const bracketBody   = document.getElementById('gfx-bracket-body');
+  if (bracketsPanel && bracketBody) {
+    const sectIn = (id) => { const e = bracketsPanel.querySelector('#' + id); return e ? e.closest('section.section') : null; };
+    ['input-bracket-slug', 'bb-phases'].forEach((id) => {
+      const sec = sectIn(id); if (sec) { sec.classList.add('gfx-injected'); bracketBody.appendChild(sec); }
+    });
+    // The injected start.gg editor is the complete one (Load Event + view chips + match picker), so
+    // hide the static quick-import duplicate. The bracket builder runs FULL WIDTH (CSS drops the left
+    // preview column for this scene), so the injected inline `bracket-live-preview` stays on as the
+    // bracket's own full-width, collapsible preview.
+    const hideById = (id) => { const e = document.getElementById(id); if (e) e.style.display = 'none'; };
+    hideById('gfx-bkt-static');        // static source tabs + quick import (superseded)
+    const btn = document.getElementById('gfx-tab-bracket');
+    if (btn) btn.style.display = '';
+  }
+
+  // Remove Spotlight and Bracket from Events sub-nav (surfaced here instead).
   document.querySelectorAll('#ev-subnav .ev-subnav-btn[data-evtab="spotlight"], #ev-subnav .ev-subnav-btn[data-evtab="brackets"]').forEach((b) => b.remove());
-  const saved = (() => { try { return localStorage.getItem('gfx_active_tab'); } catch (_) { return null; } })();
-  const initial = ['overlays', 'spotlight', 'brackets'].includes(saved) ? saved : 'overlays';
-  window._gfxShow(initial);   // toggle panes now (render hooks are TDZ-guarded)
-  // Re-run after the module finishes loading so eager renders that touch later-declared state run cleanly.
-  setTimeout(() => { try { window._gfxShow(initial); } catch (_) {} }, 0);
+
+  // Queue buttons (hidden delegation targets wired here).
+  const QUEUE_LABELS = { break: 'Break / Starting Soon', winner: 'Winner Screen', intro: 'Team Line-up', veto: 'Map Veto' };
+  ['break', 'winner', 'intro', 'veto'].forEach((scene) => {
+    const btn = document.getElementById('btn-queue-' + scene);
+    if (!btn) return;
+    btn.addEventListener('click', () => {
+      const rdType  = document.getElementById('rd-add-type');
+      const rdLabel = document.getElementById('rd-add-label');
+      const rdAdd   = document.getElementById('rd-add-btn');
+      if (rdType && rdAdd) {
+        const typeVal = Array.from(rdType.options).find((o) => o.value === scene || o.value === 'graphic' || o.value === 'gfx');
+        if (typeVal) rdType.value = typeVal.value;
+        if (rdLabel) rdLabel.value = QUEUE_LABELS[scene] || scene;
+        rdAdd.click();
+      }
+      if (typeof _pdShow === 'function') _pdShow('rundown');
+    });
+  });
+
+  // Veto push live / clear (hidden delegation targets wired here).
+  el('btn-show-veto-gfx')?.addEventListener('click', () => send('set_veto', { visible: true }));
+  el('btn-hide-veto-gfx')?.addEventListener('click', () => send('set_veto', { visible: false }));
+
+  // Ticker — hide (push uses the existing btn-ticker-apply).
+  el('btn-hide-ticker')?.addEventListener('click', () => send('set_ticker', { visible: false }));
+
+  // Draft — show/hide the champion draft overlay.
+  el('btn-show-draft')?.addEventListener('click', () => send('draft_visible', { visible: true }));
+  el('btn-hide-draft')?.addEventListener('click', () => send('draft_visible', { visible: false }));
+
+  // Spotlight — route push to the active mode (Teams to Watch vs Team Spotlight).
+  el('btn-show-spotlight')?.addEventListener('click', () => {
+    const mode = (typeof _spMode !== 'undefined' ? _spMode : 'watch');
+    if (mode === 'solo') send('set_team_spotlight', { visible: true });
+    else send('set_watchlist', { visible: true });
+  });
+  el('btn-hide-spotlight')?.addEventListener('click', () => {
+    send('set_watchlist', { visible: false });
+    send('set_team_spotlight', { visible: false });
+  });
+
+  // Schedule — clear (push uses the existing btn-gfx-schedule-push).
+  el('btn-gfx-schedule-clear')?.addEventListener('click', () => send('set_upcoming', { visible: false }));
+
+  // Bracket — show/hide the bracket overlay.
+  el('btn-show-bracket')?.addEventListener('click', () => send('set_bracket_settings', { visible: true }));
+  el('btn-hide-bracket')?.addEventListener('click', () => send('set_bracket_settings', { visible: false }));
+
+  // Real-time preview: debounced auto-push on field change.
+  function debounce(fn, ms) { let t; return function() { clearTimeout(t); t = setTimeout(fn, ms); }; }
+
+  const doBreakPreview = debounce(() => {
+    if (typeof send !== 'function' || typeof getBreakTitle !== 'function') return;
+    send('set_break', { title: getBreakTitle(), message: (el('input-break-message')?.value || '').trim() });
+  }, 350);
+  ['select-break-preset', 'input-break-title', 'input-break-message'].forEach((id) => {
+    el(id)?.addEventListener('input', doBreakPreview);
+    el(id)?.addEventListener('change', doBreakPreview);
+  });
+
+  const doWinnerPreview = debounce(() => {
+    if (typeof send !== 'function') return;
+    const sel = el('select-winner-side')?.value || 'blue';
+    const subtitle = (el('input-winner-subtitle')?.value || '').trim();
+    const payload = sel === '__custom__'
+      ? { side: '', name: (el('input-winner-name')?.value || '').trim(), subtitle }
+      : { side: sel, name: '', subtitle };
+    send('set_winner', payload);
+  }, 350);
+  ['select-winner-side', 'input-winner-name', 'input-winner-subtitle'].forEach((id) => {
+    el(id)?.addEventListener('input', doWinnerPreview);
+    el(id)?.addEventListener('change', doWinnerPreview);
+  });
+
+  const doIntroPreview = debounce(() => {
+    if (typeof send !== 'function') return;
+    send('set_intro', { side: el('select-intro-side')?.value || 'blue', title: (el('input-intro-title')?.value || '').trim(), showFooter: el('check-intro-footer') ? !!el('check-intro-footer').checked : true });
+  }, 350);
+  ['select-intro-side', 'input-intro-title'].forEach((id) => {
+    el(id)?.addEventListener('input', doIntroPreview);
+    el(id)?.addEventListener('change', doIntroPreview);
+  });
+  el('check-intro-footer')?.addEventListener('change', doIntroPreview);
+
+  // ── Series panel: format pills, stage field, map grid ───────────────────
+  document.querySelectorAll('#gfx-ser-format .gfx-pill').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const bo = parseInt(btn.dataset.bo, 10);
+      const maps = ((currentState && currentState.match) || {}).maps || [];
+      while (maps.length < bo) maps.push({ name: '', scoreA: 0, scoreB: 0, played: false });
+      maps.length = bo;
+      send('set_best_of', { value: bo });
+      send('set_match', { maps });
+    });
+  });
+  el('gfx-ser-division')?.addEventListener('change', function () { send('set_match', { division: this.value.trim() }); });
+  el('gfx-ser-division')?.addEventListener('keydown', function (e) { if (e.key === 'Enter') this.blur(); });
+  el('gfx-ser-reset')?.addEventListener('click', () => { if (confirm('Reset series to 0-0?')) send('reset_series', {}); });
+
+  function gfxCollectSeriesMaps() {
+    return [...(el('gfx-ser-maps') || { querySelectorAll: () => [] }).querySelectorAll('.gfx-ser-map-row')].map((row) => ({
+      name: row.querySelector('.gfx-ser-map-name')?.value || '',
+      scoreA: parseInt(row.querySelector('.gfx-ser-map-sa')?.value) || 0,
+      scoreB: parseInt(row.querySelector('.gfx-ser-map-sb')?.value) || 0,
+      played: !!row.querySelector('.gfx-ser-map-pl')?.checked
+    }));
+  }
+
+  function gfxRenderSeriesMaps(maps, teams) {
+    const wrap = el('gfx-ser-maps'); if (!wrap) return;
+    const blueN = (teams && teams.blue && teams.blue.name) || 'A';
+    const orgN  = (teams && teams.orange && teams.orange.name) || 'B';
+    const colA = el('gfx-ser-col-a'), colB = el('gfx-ser-col-b');
+    if (colA) colA.textContent = blueN.length > 8 ? blueN.slice(0, 8) + '…' : blueN;
+    if (colB) colB.textContent = orgN.length > 8 ? orgN.slice(0, 8) + '…' : orgN;
+    const existing = [...wrap.querySelectorAll('.gfx-ser-map-row')];
+    maps.forEach((map, i) => {
+      if (existing[i]) {
+        const row = existing[i];
+        const nm = row.querySelector('.gfx-ser-map-name');
+        const sa = row.querySelector('.gfx-ser-map-sa');
+        const sb = row.querySelector('.gfx-ser-map-sb');
+        const pl = row.querySelector('.gfx-ser-map-pl');
+        if (nm && document.activeElement !== nm) nm.value = map.name || '';
+        if (sa && document.activeElement !== sa) sa.value = map.scoreA || 0;
+        if (sb && document.activeElement !== sb) sb.value = map.scoreB || 0;
+        if (pl) pl.checked = !!map.played;
+      } else {
+        const row = document.createElement('div');
+        row.className = 'gfx-ser-map-row';
+        row.innerHTML = `<span class="gfx-ser-map-num">${i + 1}</span><input class="input-text gfx-ser-map-name" value="${map.name || ''}" placeholder="Map name"><input type="number" class="input-text gfx-ser-map-sa" value="${map.scoreA || 0}" min="0"><span class="gfx-ser-map-sep">:</span><input type="number" class="input-text gfx-ser-map-sb" value="${map.scoreB || 0}" min="0"><label class="gfx-ser-map-done"><input type="checkbox" class="gfx-ser-map-pl" ${map.played ? 'checked' : ''}><span>Done</span></label>`;
+        row.addEventListener('change', () => send('set_match', { maps: gfxCollectSeriesMaps() }));
+        row.querySelector('.gfx-ser-map-name').addEventListener('keydown', (e) => { if (e.key === 'Enter') e.target.blur(); });
+        wrap.appendChild(row);
+      }
+    });
+    while (wrap.children.length > maps.length) wrap.removeChild(wrap.lastChild);
+  }
+
+  // ── Matchup team pickers ─────────────────────────────────────────────────
+  el('gfx-mu-apply')?.addEventListener('click', () => {
+    const saved2 = (currentState && currentState.savedTeams) || [];
+    const bv = el('gfx-mu-blue')?.value, ov = el('gfx-mu-orange')?.value;
+    const bt = saved2[parseInt(bv, 10)], ot = saved2[parseInt(ov, 10)];
+    if (bt) send('set_team', { side: 'blue',   name: bt.name, logo: bt.logo || null });
+    if (ot) send('set_team', { side: 'orange', name: ot.name, logo: ot.logo || null });
+    const st = el('gfx-mu-status');
+    if (st) { st.textContent = 'Teams updated.'; setTimeout(() => { st.textContent = ''; }, 2000); }
+  });
+  el('gfx-mu-swap')?.addEventListener('click', () => send('swap_teams', {}));
+
+  // ── Standings panel ──────────────────────────────────────────────────────
+  function gfxStdSrc(src) {
+    el('gfx-std-league-wrap').style.display  = src === 'league' ? '' : 'none';
+    el('gfx-std-sg-wrap').style.display      = src === 'startgg' ? '' : 'none';
+    el('gfx-std-manual-wrap').style.display  = src === 'manual' ? '' : 'none';
+    document.querySelectorAll('#gfx-std-src .gfx-src-tab').forEach((b) => b.classList.toggle('is-on', b.dataset.stdsrc === src));
+  }
+  document.querySelectorAll('#gfx-std-src .gfx-src-tab').forEach((b) => b.addEventListener('click', () => gfxStdSrc(b.dataset.stdsrc)));
+
+  function gfxStdStatus(msg, err) {
+    const s = el('gfx-std-status'); if (!s) return;
+    s.textContent = msg; s.style.color = err ? 'var(--red, #ef4444)' : 'var(--muted)';
+    setTimeout(() => { s.textContent = ''; }, 3000);
+  }
+
+  function gfxRefreshStandingsPreview() {
+    const prev = el('gfx-std-league-preview'); if (!prev) return;
+    const lid = el('gfx-std-league')?.value;
+    const lg = lid && currentState && (currentState.leagues || []).find((l) => l.id === lid);
+    if (!lg) { prev.innerHTML = '<p class="sps-empty">Select a league to preview.</p>'; return; }
+    const byId = {}; (lg.standings || []).forEach((s) => { byId[s.teamId] = s; });
+    const teamsById = {}; (lg.teams || []).forEach(t => { teamsById[t.id] = t; });
+    // Use stored standings order (respects manual drag); fall back to pts sort
+    const ordered = (lg.standings && lg.standings.length)
+      ? lg.standings.map(s => teamsById[s.teamId]).filter(Boolean)
+      : (lg.teams || []).slice().sort((a, b) => ((byId[b.id] || {}).pts || 0) - ((byId[a.id] || {}).pts || 0));
+    prev.innerHTML = ordered.slice(0, 8).map((tm, i) => {
+      const s = byId[tm.id] || {};
+      return `<div class="gfx-std-row"><span class="gfx-std-rank">${i + 1}</span><span class="gfx-std-team">${lgResolveTeam(tm).name || '—'}</span><span class="gfx-std-rec">${s.w || 0}–${s.l || 0}</span><span class="gfx-std-pts">${s.pts || 0}</span></div>`;
+    }).join('');
+  }
+  el('gfx-std-league')?.addEventListener('change', gfxRefreshStandingsPreview);
+
+  // start.gg seeding source — build rows from eventTeams seeding order
+  function gfxRefreshSgStandingsPreview() {
+    const prev = el('gfx-std-sg-preview'); if (!prev) return;
+    const sg = (currentState && currentState.startgg) || {};
+    const teams = sg.eventTeams || [];
+    if (!teams.length) { prev.innerHTML = '<p class="sps-empty">No start.gg event loaded. Connect an event in the Events tab.</p>'; return; }
+    prev.innerHTML = teams.slice(0, 8).map((tm, i) =>
+      `<div class="gfx-std-row"><span class="gfx-std-rank">${i + 1}</span><span class="gfx-std-team">${tm.name || '—'}</span></div>`
+    ).join('');
+  }
+
+  el('btn-gfx-standings-push')?.addEventListener('click', () => {
+    const title = (el('gfx-std-title')?.value || '').trim();
+    const src = document.querySelector('#gfx-std-src .gfx-src-tab.is-on')?.dataset.stdsrc || 'league';
+    if (src === 'league') {
+      const lid = el('gfx-std-league')?.value;
+      const lg = lid && currentState && (currentState.leagues || []).find((l) => l.id === lid);
+      if (!lg) { gfxStdStatus('Select a league first.', true); return; }
+      const byId = {}; (lg.standings || []).forEach((s) => { byId[s.teamId] = s; });
+      const teamsById = {}; (lg.teams || []).forEach(t => { teamsById[t.id] = t; });
+      const ordered = (lg.standings && lg.standings.length)
+        ? lg.standings.map(s => teamsById[s.teamId]).filter(Boolean)
+        : (lg.teams || []).slice().sort((a, b) => ((byId[b.id] || {}).pts || 0) - ((byId[a.id] || {}).pts || 0));
+      const rows = ordered.map((tm, i) => { const s = byId[tm.id] || {}; const r = lgResolveTeam(tm); return { placement: i + 1, name: r.name || 'Team', logo: r.logo || null, wins: s.w || 0, losses: s.l || 0, points: s.pts || 0 }; });
+      send('set_standings', { visible: true, title, rows });
+      gfxStdStatus('Pushed live from league.', false);
+    } else if (src === 'startgg') {
+      const teams = ((currentState && currentState.startgg) || {}).eventTeams || [];
+      if (!teams.length) { gfxStdStatus('No start.gg event loaded.', true); return; }
+      const rows = teams.map((tm, i) => ({ placement: i + 1, name: tm.name || 'Team', logo: tm.logo || null, wins: 0, losses: 0, points: 0 }));
+      send('set_standings', { visible: true, title, rows });
+      gfxStdStatus('Pushed live from start.gg seeding.', false);
+    } else {
+      send('set_standings', { visible: true, title });
+      gfxStdStatus('Pushed live.', false);
+    }
+  });
+  el('btn-gfx-standings-clear')?.addEventListener('click', () => {
+    send('set_standings', { visible: false });
+    gfxStdStatus('Standings hidden.', false);
+  });
+  el('gfx-std-add')?.addEventListener('click', () => {
+    const list = el('gfx-std-rows-list'); if (!list) return;
+    const idx = list.querySelectorAll('.gfx-std-edit-row').length;
+    const row = document.createElement('div'); row.className = 'gfx-std-edit-row';
+    row.innerHTML = `<span class="gfx-std-rank-lbl">#${idx + 1}</span><input class="input-text" placeholder="Team name" style="flex:1;min-width:0;"><input class="input-text" placeholder="W" style="width:38px;text-align:center;"><input class="input-text" placeholder="L" style="width:38px;text-align:center;"><input class="input-text" placeholder="Pts" style="width:46px;text-align:center;"><button class="btn btn-ghost btn-xs gfx-std-rm">×</button>`;
+    row.querySelector('.gfx-std-rm').addEventListener('click', () => { row.remove(); });
+    list.appendChild(row);
+    el('gfx-std-empty').style.display = 'none';
+  });
+  el('gfx-std-clear-rows')?.addEventListener('click', () => {
+    const list = el('gfx-std-rows-list'); if (list) list.innerHTML = '';
+    el('gfx-std-empty').style.display = '';
+  });
+  el('gfx-std-save')?.addEventListener('click', () => {
+    const title = (el('gfx-std-title')?.value || '').trim();
+    const rows = [...(el('gfx-std-rows-list') || { querySelectorAll: () => [] }).querySelectorAll('.gfx-std-edit-row')].map((r, i) => {
+      const inputs = r.querySelectorAll('input');
+      return { placement: i + 1, name: inputs[0]?.value.trim() || '', wins: parseInt(inputs[1]?.value) || 0, losses: parseInt(inputs[2]?.value) || 0, points: parseInt(inputs[3]?.value) || 0 };
+    });
+    send('set_standings', { title, rows });
+    gfxStdStatus('Saved.', false);
+  });
+
+  // ── Schedule panel ───────────────────────────────────────────────────────
+  // Collect the editable rows (manual-typed + pulled-from-start.gg/league). Each row
+  // carries round/teams/date/time/stream; a setId (from start.gg) lets the overlay
+  // dedupe against the live queue. The overlay also auto-merges the live start.gg queue.
+  // Format native date/time picker values (ISO YYYY-MM-DD / 24h HH:MM) into the friendly strings
+  // the overlay shows; anything that isn't in that exact shape passes through unchanged.
+  function schFmtDate(v) {
+    const s = (v || '').trim(); const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+    if (!m) return s;
+    const dt = new Date(+m[1], +m[2] - 1, +m[3]);
+    return dt.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+  }
+  function schFmtTime(v) {
+    const s = (v || '').trim(); const m = /^(\d{1,2}):(\d{2})/.exec(s);
+    if (!m) return s;
+    let h = +m[1]; const ap = h >= 12 ? 'PM' : 'AM'; h = h % 12 || 12;
+    return h + ':' + m[2] + ' ' + ap;
+  }
+  function gfxBuildScheduleMatches() {
+    const out = [];
+    document.querySelectorAll('#gfx-sch-manual-list .gfx-sch-manual-row').forEach((r) => {
+      const v = (s) => (r.querySelector(s)?.value || '').trim();
+      const a = v('.sch-f-a'), b = v('.sch-f-b');
+      if (!a && !b) return;
+      const m = { round: v('.sch-f-round'), teamA: a, teamB: b, date: schFmtDate(v('.sch-f-date')), time: schFmtTime(v('.sch-f-time')),
+        stream: !!r.querySelector('.sch-f-stream')?.checked };
+      if (r.dataset.setid) m.setId = r.dataset.setid;
+      // Scores/week/game-by-game come from pulled sources (league/start.gg) and ride along in the
+      // row's dataset so the board layout can render them; manual rows just leave them unset.
+      if (r.dataset.scorea !== undefined && r.dataset.scorea !== '') m.scoreA = Number(r.dataset.scorea);
+      if (r.dataset.scoreb !== undefined && r.dataset.scoreb !== '') m.scoreB = Number(r.dataset.scoreb);
+      if (r.dataset.week) m.week = r.dataset.week;
+      if (r.dataset.games) { try { m.games = JSON.parse(r.dataset.games); } catch (_) {} }
+      out.push(m);
+    });
+    return out.slice(0, 12);
+  }
+  // Add an editable schedule row, optionally pre-filled (from start.gg / league / blank).
+  function gfxAddScheduleRow(m) {
+    const list = el('gfx-sch-manual-list'); if (!list) return;
+    m = m || {};
+    const q = (s) => (s || '').toString().replace(/"/g, '&quot;');
+    const row = document.createElement('div'); row.className = 'gfx-sch-manual-row';
+    if (m.setId) row.dataset.setid = m.setId;
+    if (m.scoreA != null) row.dataset.scorea = m.scoreA;
+    if (m.scoreB != null) row.dataset.scoreb = m.scoreB;
+    if (m.week) row.dataset.week = m.week;
+    if (Array.isArray(m.games) && m.games.length) row.dataset.games = JSON.stringify(m.games);
+    row.innerHTML =
+      `<input class="input-text sch-f-round" placeholder="Round" style="width:84px;" value="${q(m.round)}">`
+      + `<input class="input-text sch-f-a" placeholder="Team A" list="saved-teams-datalist" autocomplete="off" value="${q(m.teamA)}">`
+      + `<span class="gfx-sch-vs">vs</span>`
+      + `<input class="input-text sch-f-b" placeholder="Team B" list="saved-teams-datalist" autocomplete="off" value="${q(m.teamB)}">`
+      + `<input class="input-text sch-f-date" type="date" title="Date" style="width:140px;" value="${q(m.date)}">`
+      + `<input class="input-text sch-f-time" type="time" title="Time" style="width:110px;" value="${q(m.time)}">`
+      + `<label class="qt-toggle" style="margin:0;" title="Mark as the streamed match"><span>Stream</span><span class="switch"><input type="checkbox" class="sch-f-stream" ${m.stream ? 'checked' : ''}><span class="slider"></span></span></label>`
+      + `<button class="btn btn-ghost btn-xs gfx-sch-rm">×</button>`;
+    row.querySelector('.gfx-sch-rm').addEventListener('click', () => { row.remove(); const e = el('gfx-sch-manual-empty'); if (e) e.style.display = list.children.length ? 'none' : ''; });
+    list.appendChild(row);
+    const e = el('gfx-sch-manual-empty'); if (e) e.style.display = 'none';
+  }
+
+  function gfxRenderScheduleQueue(state) {
+    const sg = (state && state.startgg) || {};
+    const queue = sg.queue || [];
+    const connected = !!sg.connected;
+    // Keep the league-source dropdown in sync with the in-app leagues.
+    const lgSel = el('gfx-sch-league');
+    if (lgSel) {
+      const leagues = (state && state.leagues) || [];
+      const sig = leagues.map((l) => l.id + ':' + (l.name || '')).join('|');
+      if (lgSel.dataset.sig !== sig && document.activeElement !== lgSel) {
+        lgSel.dataset.sig = sig;
+        const prev = lgSel.value;
+        lgSel.innerHTML = '<option value="">League…</option>' + leagues.map((l) => `<option value="${l.id}">${(l.name || 'League').replace(/</g, '&lt;')}</option>`).join('');
+        if (prev) lgSel.value = prev;
+      }
+    }
+    // Reflect saved layout/eyebrow/title (skip fields the producer is editing).
+    const up = (state && state.upcoming) || {};
+    const lay = up.layout === 'board' ? 'board' : 'cards';
+    const laySel = el('gfx-sch-layout'); if (laySel && document.activeElement !== laySel) laySel.value = lay;
+    const pv = el('gfx-pv-schedule');
+    if (pv && pv.dataset.lay !== lay) { pv.dataset.lay = lay; pv.src = (window.SCENE_BASE_URL || 'http://localhost:3000') + '/schedule.html?preview=1&layout=' + lay; }
+    const eyeIn = el('gfx-sch-eyebrow'); if (eyeIn && document.activeElement !== eyeIn && !eyeIn.value) eyeIn.value = up.eyebrow || '';
+    const ttlIn = el('gfx-sch-title'); if (ttlIn && document.activeElement !== ttlIn && !ttlIn.value) ttlIn.value = up.title && up.title !== 'UPCOMING MATCHES' ? up.title : '';
+    if (typeof gfxFillScheduleWeeks === 'function' && document.activeElement !== el('gfx-sch-week')) gfxFillScheduleWeeks();
+    const conn = el('gfx-sch-conn');
+    if (conn) conn.textContent = connected ? (queue.length ? `${queue.length} in queue` : 'Connected — no queue') : 'start.gg not connected';
+    const liveSlot = el('gfx-sch-live-slot');
+    const nextList = el('gfx-sch-next-list');
+    const noQueue = el('gfx-sch-no-queue');
+    if (!liveSlot || !nextList) return;
+    const live = queue.find((q) => q.live);
+    const next = queue.filter((q) => !q.live).slice(0, 3);
+    if (!connected || !queue.length) {
+      liveSlot.textContent = 'No stream match queued.';
+      liveSlot.className = 'gfx-sch-live';
+      nextList.innerHTML = '';
+      if (noQueue) noQueue.style.display = connected ? 'none' : '';
+      return;
+    }
+    if (noQueue) noQueue.style.display = 'none';
+    if (live) {
+      liveSlot.className = 'gfx-sch-live gfx-sch-live--on';
+      liveSlot.innerHTML = `<span class="gfx-sch-round">${live.round || ''}</span><span class="gfx-sch-teams">${live.teamA || '?'} <span class="gfx-sch-vs">vs</span> ${live.teamB || '?'}</span>`;
+    } else {
+      liveSlot.className = 'gfx-sch-live';
+      liveSlot.textContent = 'No match currently on stream.';
+    }
+    nextList.innerHTML = next.map((q) =>
+      `<div class="gfx-sch-next-row"><span class="gfx-sch-round">${q.round || ''}</span><span class="gfx-sch-teams">${q.teamA || '?'} <span class="gfx-sch-vs">vs</span> ${q.teamB || '?'}</span></div>`
+    ).join('') || '<p class="sps-empty" style="margin:0;">No upcoming matches in queue.</p>';
+  }
+
+  el('btn-gfx-schedule-push')?.addEventListener('click', () => {
+    const title = (el('gfx-sch-title')?.value || 'UPCOMING MATCHES').trim();
+    const eyebrow = (el('gfx-sch-eyebrow')?.value || 'On Deck').trim();
+    const layout = el('gfx-sch-layout')?.value === 'board' ? 'board' : 'cards';
+    const matches = gfxBuildScheduleMatches();
+    send('set_upcoming', { visible: true, title, eyebrow, layout, matches });
+    const st = el('gfx-sch-status');
+    if (st) { st.textContent = `Pushed ${matches.length} match${matches.length !== 1 ? 'es' : ''} live.`; setTimeout(() => { st.textContent = ''; }, 2500); }
+  });
+  // Persist layout/eyebrow immediately so the live overlay reflects a toggle even before Push.
+  el('gfx-sch-layout')?.addEventListener('change', (e) => {
+    const lay = e.target.value === 'board' ? 'board' : 'cards';
+    send('set_upcoming', { layout: lay });
+    // Reflect the layout in the in-panel preview iframe (preview honors ?layout=).
+    const pv = el('gfx-pv-schedule');
+    if (pv) { const base = (window.SCENE_BASE_URL || 'http://localhost:3000'); pv.src = base + '/schedule.html?preview=1&layout=' + lay; }
+  });
+  el('gfx-sch-eyebrow')?.addEventListener('change', (e) => send('set_upcoming', { eyebrow: (e.target.value || '').trim() }));
+  // Populate the week dropdown from the chosen league's schedule.
+  function gfxFillScheduleWeeks() {
+    const wSel = el('gfx-sch-week'); if (!wSel) return;
+    const lg = (currentState.leagues || []).find((l) => String(l.id) === String(el('gfx-sch-league')?.value || ''));
+    const weeks = [...new Set((lg?.schedule || []).map((m) => String(m.week || '')).filter(Boolean))]
+      .sort((a, b) => (parseInt(a, 10) || 0) - (parseInt(b, 10) || 0));
+    const prev = wSel.value;
+    wSel.innerHTML = '<option value="">All weeks</option>' + weeks.map((w) => `<option value="${w}">Week ${w}</option>`).join('');
+    if (weeks.includes(prev)) wSel.value = prev;
+  }
+  el('gfx-sch-league')?.addEventListener('change', gfxFillScheduleWeeks);
+
+  el('gfx-sch-add')?.addEventListener('click', () => gfxAddScheduleRow());
+  // Pull from the current start.gg queue (live + next) into editable rows.
+  el('gfx-sch-pull-startgg')?.addEventListener('click', () => {
+    const sg = (currentState && currentState.startgg) || {};
+    const queue = (sg.queue || []);
+    const rows = [...queue.filter((q) => q.live), ...queue.filter((q) => !q.live).slice(0, 5)];
+    if (!rows.length) { const st = el('gfx-sch-status'); if (st) st.textContent = 'No start.gg queue — connect & load an event in Settings.'; return; }
+    rows.forEach((q) => gfxAddScheduleRow({ setId: String(q.setId || ''), round: q.round || '', teamA: q.teamA || '', teamB: q.teamB || '', stream: !!q.live }));
+  });
+  // Pull matches from the selected in-app league (optionally a single week). Carries scores so the
+  // board layout can show results; picking a week auto-switches to the board + titles it "WEEK N".
+  el('gfx-sch-pull-league')?.addEventListener('click', () => {
+    const id = el('gfx-sch-league')?.value || '';
+    const lg = (currentState.leagues || []).find((l) => String(l.id) === String(id));
+    const st = el('gfx-sch-status');
+    if (!lg) { if (st) st.textContent = 'Pick a league first.'; return; }
+    const week = (el('gfx-sch-week')?.value || '').trim();
+    let sched = (lg.schedule || []);
+    if (week) sched = sched.filter((m) => String(m.week || '') === week);
+    else sched = sched.filter((m) => !m.result || m.result.scoreA == null);   // no week → just the unplayed ones
+    sched = sched.slice(0, 12);
+    if (!sched.length) { if (st) st.textContent = week ? `No matches in week ${week}.` : 'No upcoming matches in that league.'; return; }
+    const lgTeamName = (id) => { const tm = (lg.teams || []).find(t => t.id === id); return tm ? lgResolveTeam(tm).name : (id || ''); };
+    sched.forEach((m) => gfxAddScheduleRow({
+      round: m.week ? ('Week ' + m.week) : (lg.name || ''),
+      teamA: lgTeamName(m.teamA), teamB: lgTeamName(m.teamB),
+      date: m.date || '', time: m.time || '', week: m.week || '',
+      scoreA: m.result && m.result.scoreA != null ? m.result.scoreA : null,
+      scoreB: m.result && m.result.scoreB != null ? m.result.scoreB : null
+    }));
+    // A week pull is a "weekly board" by nature — flip the layout + heading to match.
+    if (week) {
+      const lay = el('gfx-sch-layout'); if (lay) lay.value = 'board';
+      const ttl = el('gfx-sch-title'); if (ttl) ttl.value = 'WEEK ' + week;
+    }
+    if (st) { st.textContent = `Added ${sched.length} match${sched.length !== 1 ? 'es' : ''}${week ? ' from week ' + week : ''}.`; setTimeout(() => { st.textContent = ''; }, 2500); }
+  });
+
+  // Expose refresh hooks called from applyState
+  window._gfxRefreshSeriesControls = function (state) {
+    const bestOf = state.bestOf || 5;
+    document.querySelectorAll('#gfx-ser-format .gfx-pill').forEach((b) => b.classList.toggle('is-on', parseInt(b.dataset.bo, 10) === bestOf));
+    const divEl = el('gfx-ser-division');
+    if (divEl && document.activeElement !== divEl) divEl.value = (state.match && state.match.division) || '';
+    gfxRenderSeriesMaps((state.match && state.match.maps) || [], state.teams);
+    // Summary: use server-authoritative series wins (auto-tracked for RL/OW/CS2)
+    const bv = el('gfx-ser-score-blue'), ov = el('gfx-ser-score-org');
+    if (bv) bv.textContent = (state.series && state.series.blue) || 0;
+    if (ov) ov.textContent = (state.series && state.series.orange) || 0;
+    const bn = el('gfx-ser-name-blue'), on2 = el('gfx-ser-name-org');
+    if (bn) bn.textContent = (state.teams && state.teams.blue && state.teams.blue.name) || 'Team A';
+    if (on2) on2.textContent = (state.teams && state.teams.orange && state.teams.orange.name) || 'Team B';
+  };
+
+  window._gfxRefreshMatchupPickers = function (state) {
+    const teams = (state && state.savedTeams) || [];
+    const curBlue = ((state.teams && state.teams.blue && state.teams.blue.name) || '').toLowerCase();
+    const curOrg  = ((state.teams && state.teams.orange && state.teams.orange.name) || '').toLowerCase();
+    [['gfx-mu-blue', curBlue], ['gfx-mu-orange', curOrg]].forEach(([id, curName]) => {
+      const sel = el(id); if (!sel) return;
+      const prev = sel.value;
+      sel.innerHTML = '<option value="">Select team…</option>';
+      teams.forEach((t, i) => {
+        const opt = document.createElement('option');
+        opt.value = i; opt.textContent = t.name || '(unnamed)';
+        if ((t.name || '').toLowerCase() === curName) opt.selected = true;
+        sel.appendChild(opt);
+      });
+      if (!sel.value && prev) sel.value = prev;
+    });
+  };
+
+  window._gfxRefreshStandingsLeagues = function (state) {
+    const sel = el('gfx-std-league'); if (!sel) return;
+    const prev = sel.value;
+    const leagues = (state && state.leagues) || [];
+    sel.innerHTML = '<option value="">Select league…</option>';
+    leagues.forEach((lg) => {
+      const opt = document.createElement('option');
+      opt.value = lg.id; opt.textContent = lg.name || lg.id;
+      if (lg.id === prev) opt.selected = true;
+      sel.appendChild(opt);
+    });
+    gfxRefreshStandingsPreview();
+    gfxRefreshSgStandingsPreview();
+  };
+
+  window._gfxRefreshScheduleQueue = gfxRenderScheduleQueue;
+
+  window.addEventListener('resize', fitScenePreviews);
+
+  // ── GFX Bracket panel ──────────────────────────────────────────────────────
+  (function () {
+    const tabSg = el('gfx-bkt-tab-sg'), tabCustom = el('gfx-bkt-tab-custom');
+    const wrapSg = el('gfx-bkt-sg-wrap'), wrapCustom = el('gfx-bkt-custom-wrap');
+
+    function bktSetSrc(src) {
+      if (tabSg) tabSg.classList.toggle('is-on', src === 'sg');
+      if (tabCustom) tabCustom.classList.toggle('is-on', src === 'custom');
+      if (wrapSg) wrapSg.style.display = src === 'sg' ? '' : 'none';
+      if (wrapCustom) wrapCustom.style.display = src === 'custom' ? '' : 'none';
+    }
+    tabSg?.addEventListener('click', () => bktSetSrc('sg'));
+    tabCustom?.addEventListener('click', () => bktSetSrc('custom'));
+
+    // Start.gg import — syncs slug to the ESPORTS bracket machinery and triggers fetch.
+    el('gfx-bkt-fetch')?.addEventListener('click', () => {
+      const slug = (el('gfx-bkt-slug')?.value || '').trim();
+      const statusEl = el('gfx-bkt-sg-status');
+      if (!slug) { if (statusEl) statusEl.textContent = 'Enter an event URL or slug first.'; return; }
+      const target = el('input-bracket-slug');
+      if (target) target.value = slug;
+      el('btn-bracket-fetch')?.click();
+      if (statusEl) statusEl.textContent = 'Importing…';
+      const srcEl = el('bracket-status');
+      if (srcEl) {
+        const obs = new MutationObserver(() => {
+          if (statusEl && srcEl.textContent) statusEl.textContent = srcEl.textContent;
+        });
+        obs.observe(srcEl, { childList: true, characterData: true, subtree: true });
+        setTimeout(() => obs.disconnect(), 15000);
+      }
+    });
+
+    // Custom bracket popup.
+    const popup = el('gfx-bkt-popup');
+    function bktPopClose() { if (popup) popup.style.display = 'none'; }
+
+    el('gfx-bkt-build')?.addEventListener('click', () => {
+      if (!popup) return;
+      popup.style.display = 'flex';
+      bktPopRenderTeams();
+    });
+    el('gfx-bkt-pop-close')?.addEventListener('click', bktPopClose);
+    el('gfx-bkt-pop-cancel')?.addEventListener('click', bktPopClose);
+    popup?.addEventListener('click', (e) => { if (e.target === popup) bktPopClose(); });
+    el('bkt-pop-size')?.addEventListener('change', bktPopRenderTeams);
+
+    function bktPopRenderTeams() {
+      const n = parseInt(el('bkt-pop-size')?.value) || 8;
+      const wrap = el('bkt-pop-teams'); if (!wrap) return;
+      const existing = [...wrap.querySelectorAll('input')].map((i) => i.value);
+      wrap.innerHTML = '';
+      const grid = document.createElement('div');
+      grid.className = 'bkt-pop-team-grid';
+      for (let i = 0; i < n; i++) {
+        const row = document.createElement('div');
+        row.className = 'bkt-pop-team-row';
+        const num = document.createElement('span');
+        num.className = 'bkt-pop-team-num'; num.textContent = i + 1;
+        const inp = document.createElement('input');
+        inp.type = 'text'; inp.className = 'input-text bkt-pop-team-inp';
+        inp.placeholder = 'Team ' + (i + 1); inp.value = existing[i] || '';
+        row.appendChild(num); row.appendChild(inp);
+        grid.appendChild(row);
+      }
+      wrap.appendChild(grid);
+    }
+
+    el('gfx-bkt-pop-save')?.addEventListener('click', () => {
+      const title = (el('bkt-pop-title')?.value || 'Bracket').trim();
+      const type  = el('bkt-pop-type')?.value  || 'single';
+      const teams = [...(el('bkt-pop-teams')?.querySelectorAll('.bkt-pop-team-inp') || [])].map((i) => i.value.trim());
+      send('set_bracket_phases', buildBktPayload(title, type, teams));
+      const s = el('bkt-pop-status');
+      if (s) s.textContent = 'Saved. Use Push Live in the top bar to show the bracket.';
+      setTimeout(bktPopClose, 1800);
+    });
+
+    function buildBktPayload(title, type, teams) {
+      const TYPE_MAP = { single: 'SINGLE_ELIMINATION', double: 'DOUBLE_ELIMINATION', roundrobin: 'ROUND_ROBIN' };
+      const id = 'manual-gfx';
+      let phase;
+      if (type === 'roundrobin') {
+        const n = teams.length;
+        const schedule = [];
+        for (let r = 0; r < n - 1; r++) {
+          const sets = [];
+          for (let i = 0; i < Math.floor(n / 2); i++) {
+            sets.push({ a: { name: teams[i] || '', score: 0, winner: false }, b: { name: teams[n - 1 - i] || '', score: 0, winner: false } });
+          }
+          schedule.push({ name: 'Round ' + (r + 1), sets });
+        }
+        phase = { id, name: 'Phase 1', type: TYPE_MAP[type], winners: [], losers: [], finals: [], standings: [], schedule, roster: teams.map((t) => t || '') };
+      } else {
+        const rounds = [];
+        let slot = [...teams];
+        let rn = 1;
+        while (slot.length > 1) {
+          const sets = slot.reduce((acc, _, i) => (i % 2 === 0 ? [...acc, { a: { name: slot[i] || '', score: 0, winner: false }, b: { name: slot[i + 1] || '', score: 0, winner: false } }] : acc), []);
+          const label = slot.length === 2 ? 'Grand Final' : slot.length === 4 ? 'Semifinal' : 'Round ' + rn;
+          rounds.push({ name: label, sets });
+          slot = sets.map(() => '');
+          rn++;
+        }
+        phase = { id, name: 'Phase 1', type: TYPE_MAP[type], winners: rounds, losers: [], finals: [], standings: [], schedule: [], roster: [] };
+      }
+      return { phases: [phase], activePhaseId: id, title, teams: [] };
+    }
+  })();
+
+  const saved = (() => { try { return localStorage.getItem('gfx_active_grp'); } catch (_) { return null; } })();
+  show(saved || 'break');
+  setTimeout(fitScenePreviews, 120);
 })();
 
 
@@ -1564,8 +2277,8 @@ function buildBracketsConfig(pane) {
   if (goliveTab) { const dot = document.getElementById('qrail-golive-dot'); if (dot && graphicsTab) graphicsTab.appendChild(dot); goliveTab.remove(); }
   if (graphicsTab) { const lbl = graphicsTab.querySelector('.qrail-tab-label'); if (lbl) lbl.textContent = 'Graphics'; graphicsTab.title = 'Graphics — overlays & triggers'; }
 
-  // 2) Checklist removed — the Rundown tab replaces the old run-of-show steps. Drop it entirely.
-  const checklist = panel('checklist'); if (checklist) checklist.remove();
+  // 2) Checklist tab removed from right-rail — Run-of-Show now lives in Settings.
+  const checklistPanel = panel('checklist'); if (checklistPanel) checklistPanel.remove();
   const checklistTab = qtab('checklist'); if (checklistTab) checklistTab.remove();
 
   // 3) Stream (workflow) → Twitch, as a 4th sub-tab. The Stream button gets its handler from the
@@ -1587,9 +2300,24 @@ function toggleSidebar() {
   const btn = el('sidebar-collapse'); if (btn) btn.textContent = collapsed ? '›' : '‹';
 }
 el('sidebar-collapse')?.addEventListener('click', toggleSidebar);
+
+// ── Mobile off-canvas nav drawer ─────────────────────────────────────────────
+// Below 900px the sidebar slides over the content (with a backdrop) instead of
+// taking a fixed column. The hamburger / brand icon open it; tapping a nav item,
+// the backdrop, or Escape closes it; growing the viewport resets it.
+function isMobileNav() { return window.matchMedia('(max-width: 900px)').matches; }
+function setMobileNav(open) { document.body.classList.toggle('nav-open', !!open); }
+function toggleMobileNav() { setMobileNav(!document.body.classList.contains('nav-open')); }
+el('nav-hamburger')?.addEventListener('click', () => { isMobileNav() ? toggleMobileNav() : toggleSidebar(); });
+el('nav-backdrop')?.addEventListener('click', () => setMobileNav(false));
 el('brand-icon-btn')?.addEventListener('click', () => {
+  if (isMobileNav()) { toggleMobileNav(); return; }
   if (el('app-shell').classList.contains('collapsed')) toggleSidebar();
 });
+document.querySelectorAll('.sidebar-nav .nav-item, .sidebar-foot .sidebar-link').forEach((b) =>
+  b.addEventListener('click', () => { if (isMobileNav()) setMobileNav(false); }));
+window.addEventListener('resize', () => { if (!isMobileNav()) setMobileNav(false); });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && document.body.classList.contains('nav-open')) setMobileNav(false); });
 
 // ── Popout system ─────────────────────────────────────────────────────────────
 const PAGE_LABELS = {
@@ -1744,13 +2472,12 @@ if (_popoutPage === 'triggers') {
   });
 }
 
-// Right-rail width is user-resizable (drag the inner edge) and persisted.
+// ── Right quick-actions rail: icon-only tabs, click-to-toggle panel, popout ──
 const QRAIL_W_KEY = 'ne_qrail_w';
-const QRAIL_W_MIN = 190, QRAIL_W_MAX = 680, QRAIL_W_DEFAULT = 366;
-const QRAIL_MINI_KEY = 'ne_qrail_mini';
-const QRAIL_MINI_DELTA = 118;   // label-width difference between full (170px) and icon-only (52px) tabs
+const QRAIL_W_MIN = 190, QRAIL_W_MAX = 680, QRAIL_W_DEFAULT = 320;
 function qrailExpandedW() {
   const v = parseInt(localStorage.getItem(QRAIL_W_KEY) || '', 10);
+  // Old saved values were 366+ (included 170px label column); clamp to new range.
   return (v >= QRAIL_W_MIN && v <= QRAIL_W_MAX) ? v : QRAIL_W_DEFAULT;
 }
 function setQrailExpandedW(px, persist) {
@@ -1759,12 +2486,52 @@ function setQrailExpandedW(px, persist) {
   if (persist) { try { localStorage.setItem(QRAIL_W_KEY, String(w)); } catch {} }
   return w;
 }
-el('qrail-collapse')?.addEventListener('click', () => {
+
+// Collapse panel (keep icon strip visible).
+function qrailCollapse() {
   const shell = el('app-shell');
-  const collapsed = shell.classList.toggle('qrail-collapsed');
-  document.documentElement.style.setProperty('--qrail-w', collapsed ? '52px' : (qrailExpandedW() + 'px'));
-  const btn = el('qrail-collapse'); if (btn) btn.textContent = collapsed ? '‹' : '›';
+  shell.classList.add('qrail-collapsed');
+  document.documentElement.style.setProperty('--qrail-w', '52px');
+  // Clear active tab highlight — no panel is open.
+  document.querySelectorAll('#qrail-tabs .qrail-tab').forEach((b) => b.classList.remove('active'));
+}
+// Open (or switch to) a panel.
+function qrailExpand(tab) {
+  const shell = el('app-shell');
+  shell.classList.remove('qrail-collapsed');
+  setQrailExpandedW(qrailExpandedW(), false);
+}
+
+const QRAIL_TAB_TITLES = {
+  quick: 'Quick Actions', ros: 'Run of Show', startgg: 'Start.gg', graphics: 'Overlays',
+  golive: 'Trigger Graphics', flows: 'Flows', talent: 'Talent',
+  ai: 'NEURAL AI', notes: 'Producer Notes', checklist: 'Run-of-Show',
+  workflow: 'Stream', twitch: 'Twitch'
+};
+function qrailShowTab(tab) {
+  document.querySelectorAll('#qrail-tabs .qrail-tab').forEach((b) => b.classList.toggle('active', b.dataset.qtab === tab));
+  document.querySelectorAll('.qrail-body .qrail-panel').forEach((p) => p.classList.toggle('active', p.dataset.qpanel === tab));
+  const title = el('qrail-paneltitle'); if (title) title.textContent = QRAIL_TAB_TITLES[tab] || '';
+  qrailExpand(tab);
+}
+
+// Tab clicks: clicking the already-active tab collapses; clicking another switches.
+document.querySelectorAll('#qrail-tabs .qrail-tab').forEach((b) => {
+  if (!b.dataset.qtab) return;   // skip spacer/popout buttons
+  b.addEventListener('click', () => {
+    const shell = el('app-shell');
+    const collapsed = shell.classList.contains('qrail-collapsed');
+    if (!collapsed && b.classList.contains('active')) {
+      qrailCollapse();   // toggle off
+    } else {
+      qrailShowTab(b.dataset.qtab);
+    }
+  });
 });
+
+// Collapse button in panel header closes the panel.
+el('qrail-collapse')?.addEventListener('click', qrailCollapse);
+
 // Drag-to-resize the rail from its inner edge.
 (function initQrailResize() {
   const handle = el('qrail-resize'); if (!handle) return;
@@ -1772,7 +2539,7 @@ el('qrail-collapse')?.addEventListener('click', () => {
   const onMove = (e) => {
     if (!dragging) return;
     const swapped = document.body.classList.contains('sides-swapped');
-    const delta = swapped ? (e.clientX - startX) : (startX - e.clientX);   // drag inward = wider
+    const delta = swapped ? (e.clientX - startX) : (startX - e.clientX);
     setQrailExpandedW(startW + delta, false);
   };
   const onUp = () => {
@@ -1783,7 +2550,7 @@ el('qrail-collapse')?.addEventListener('click', () => {
     window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp);
   };
   handle.addEventListener('mousedown', (e) => {
-    if (el('app-shell')?.classList.contains('qrail-collapsed')) return;   // expand first
+    if (el('app-shell')?.classList.contains('qrail-collapsed')) return;
     dragging = true; startX = e.clientX;
     startW = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--qrail-w'), 10) || qrailExpandedW();
     document.body.style.cursor = 'col-resize'; document.body.style.userSelect = 'none';
@@ -1791,39 +2558,71 @@ el('qrail-collapse')?.addEventListener('click', () => {
     e.preventDefault();
   });
 })();
-// Icons-only toggle for the quick-actions tabs (labels hide, tab column shrinks, rail narrows).
-function setQrailMini(on, shiftWidth) {
-  const shell = el('app-shell'); if (!shell) return;
-  const was = shell.classList.contains('qrail-mini');
-  shell.classList.toggle('qrail-mini', on);
-  try { localStorage.setItem(QRAIL_MINI_KEY, on ? '1' : '0'); } catch {}
-  // Narrow/widen the whole rail by the label width so minimizing actually frees screen space.
-  if (shiftWidth && was !== on && !shell.classList.contains('qrail-collapsed')) {
-    const cur = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--qrail-w'), 10) || qrailExpandedW();
-    setQrailExpandedW(cur + (on ? -QRAIL_MINI_DELTA : QRAIL_MINI_DELTA), true);
-  }
-}
-el('qrail-iconly')?.addEventListener('click', () => setQrailMini(!el('app-shell')?.classList.contains('qrail-mini'), true));
-// Restore the saved icons-only preference on load.
-try { if (localStorage.getItem(QRAIL_MINI_KEY) === '1') el('app-shell')?.classList.add('qrail-mini'); } catch {}
-// Apply the saved rail width on load (when the rail is expanded).
+
+// Apply saved rail width on load.
 if (!el('app-shell')?.classList.contains('qrail-collapsed')) setQrailExpandedW(qrailExpandedW(), false);
 
-// ── Right-rail tabs (Quick / Overlays / Trigger / Notes / Checklist / Workflow) ──
-const QRAIL_TAB_TITLES = { quick: 'Quick Actions', graphics: 'Overlays', golive: 'Trigger Graphics', notes: 'Producer Notes', checklist: 'Run-of-Show', workflow: 'Production Workflow', ai: 'AI Director' };
-function qrailShowTab(tab) {
-  document.querySelectorAll('#qrail-tabs .qrail-tab').forEach((b) => b.classList.toggle('active', b.dataset.qtab === tab));
-  document.querySelectorAll('.qrail-body .qrail-panel').forEach((p) => p.classList.toggle('active', p.dataset.qpanel === tab));
-  const title = el('qrail-paneltitle'); if (title) title.textContent = QRAIL_TAB_TITLES[tab] || '';
-  // Expand the rail if collapsed when a tab is picked.
+// ── Popout: open the qrail in a separate window, hide it from the main app ──
+const QRAIL_POPPED_KEY = 'ne_qrail_popped';
+let _qrailPopup = null;
+let _qrailPollInterval = null;
+
+function qrailSetPopped(popped) {
   const shell = el('app-shell');
-  if (shell && shell.classList.contains('qrail-collapsed')) {
-    shell.classList.remove('qrail-collapsed');
-    document.documentElement.style.setProperty('--qrail-w', qrailExpandedW() + 'px');
-    const cb = el('qrail-collapse'); if (cb) cb.textContent = '›';
-  }
+  const strip = el('qrail-popout-strip');
+  if (shell) shell.classList.toggle('qrail-popped', popped);
+  if (strip) strip.style.display = popped ? '' : 'none';
 }
-document.querySelectorAll('#qrail-tabs .qrail-tab').forEach((b) => b.addEventListener('click', () => qrailShowTab(b.dataset.qtab)));
+
+function qrailPopout() {
+  if (_qrailPopup && !_qrailPopup.closed) { _qrailPopup.focus(); return; }
+  const w = screen.width >= 1400 ? 400 : 360, h = Math.min(screen.height - 80, 900);
+  const left = screen.width - w - 20, top = 40;
+  _qrailPopup = window.open(
+    'index.html?page=qrail-popout',
+    'ne-qrail-popout',
+    `width=${w},height=${h},left=${left},top=${top},resizable=yes,scrollbars=no`
+  );
+  if (!_qrailPopup) return;   // blocked by browser
+  qrailSetPopped(true);
+  try { localStorage.setItem(QRAIL_POPPED_KEY, '1'); } catch {}
+  // Poll until the popup closes, then restore the rail.
+  _qrailPollInterval = setInterval(() => {
+    if (_qrailPopup && _qrailPopup.closed) {
+      clearInterval(_qrailPollInterval);
+      _qrailPopup = null;
+      qrailSetPopped(false);
+      try { localStorage.removeItem(QRAIL_POPPED_KEY); } catch {}
+    }
+  }, 800);
+}
+
+function qrailReclaim() {
+  if (_qrailPopup && !_qrailPopup.closed) _qrailPopup.close();
+  clearInterval(_qrailPollInterval);
+  _qrailPopup = null;
+  qrailSetPopped(false);
+  try { localStorage.removeItem(QRAIL_POPPED_KEY); } catch {}
+}
+
+el('qrail-popout-btn')?.addEventListener('click', qrailPopout);
+el('qrail-reclaim')?.addEventListener('click', qrailReclaim);
+
+// Popout window mode: hide everything else, make qrail full-screen.
+const _qrailPopoutMode = new URLSearchParams(window.location.search).get('page') === 'qrail-popout';
+if (_qrailPopoutMode) {
+  document.body.classList.add('popout-qrail');
+  // Show return button, hide popout button.
+  const retBtn = el('qrail-return'); if (retBtn) retBtn.style.display = '';
+  const popBtn = el('qrail-popout-btn'); if (popBtn) popBtn.style.display = 'none';
+  // Make sure first tab is open.
+  requestAnimationFrame(() => {
+    const firstTab = document.querySelector('#qrail-tabs .qrail-tab[data-qtab]');
+    if (firstTab) firstTab.click();
+  });
+}
+// Return button (inside popout window) closes the popup.
+el('qrail-return')?.addEventListener('click', () => window.close());
 
 // Header Settings gear → open the Settings tab (its sidebar nav item is hidden).
 el('btn-header-settings')?.addEventListener('click', () => document.getElementById('tab-ajustes')?.click());
@@ -2963,7 +3762,7 @@ function applyState(data) {
   // UI always sees a complete state. Mutating `data` in place also feeds the render functions
   // that run after applyState() in the message handler.
   if (data && currentState) {
-    for (const k of ['savedTeams', 'brandKits', 'draftRosters', 'brand', 'banner', 'mainBanner', 'playouts', 'bracket', 'replay', 'crew']) {
+    for (const k of ['savedTeams', 'playerProfiles', 'brandKits', 'draftRosters', 'brand', 'banner', 'mainBanner', 'playouts', 'bracket', 'replay', 'crew']) {
       if (data[k] === undefined && currentState[k] !== undefined) data[k] = currentState[k];
     }
   }
@@ -2988,6 +3787,17 @@ function applyState(data) {
   if (typeof cfMaybeRefreshTalent === 'function') _ap('cfMaybeRefreshTalent', () => cfMaybeRefreshTalent(data));
   // Crew page — re-render when crew list changes
   if (data.crew && typeof renderCrewList === 'function' && el('talent-panel-crew') && el('talent-panel-crew').style.display !== 'none') _ap('renderCrewList', () => renderCrewList());
+  // Sync slot label inputs whenever casters state arrives
+  if (data.casters && data.casters.slotLabels) {
+    const sl = data.casters.slotLabels;
+    [1, 2, 3, 4].forEach((i) => {
+      const inp = el(`dcc-slot-lbl-${i}`);
+      if (inp && document.activeElement !== inp) inp.value = sl[i] || `Caster ${i}`;
+      // also keep cdlg-slot options current
+      const opt = document.querySelector(`#cdlg-slot [data-slot-opt="${i}"]`);
+      if (opt) opt.textContent = sl[i] || `Caster ${i}`;
+    });
+  }
   // DCC database sections — re-render when visible (any non-monitor tab is open)
   if ((data.showRoster || data.crew || data.teams || data.casters) && typeof renderDccAll === 'function' && el('dcc-database-view') && el('dcc-database-view').style.display !== 'none') {
     _ap('renderDccAll', () => renderDccAll());
@@ -3035,6 +3845,8 @@ function applyState(data) {
   if (rpPrev) { rpPrev.src = rp.logo || ''; rpPrev.style.display = rp.logo ? 'block' : 'none'; }
   const rpOutroPrev = el('preview-replay-outro');
   if (rpOutroPrev) { rpOutroPrev.src = rp.outroLogo || ''; rpOutroPrev.style.display = rp.outroLogo ? 'block' : 'none'; }
+  const rpSkinPrev = el('preview-replay-skin');
+  if (rpSkinPrev) { rpSkinPrev.src = rp.skin || ''; rpSkinPrev.style.display = rp.skin ? 'block' : 'none'; }
 
   // Scoreboard ad slot
   const sbad = data.scoreboardAd || {};
@@ -3062,6 +3874,10 @@ function applyState(data) {
   renderMatchPlayers('orange', teams.orange && teams.orange.players);
   if (typeof syncTeamsAlign === 'function') syncTeamsAlign();
   renderSeriesPanel(data.match, teams);
+  if (typeof window._gfxRefreshSeriesControls === 'function') window._gfxRefreshSeriesControls(data);
+  if (typeof window._gfxRefreshMatchupPickers === 'function') window._gfxRefreshMatchupPickers(data);
+  if (typeof window._gfxRefreshStandingsLeagues === 'function') window._gfxRefreshStandingsLeagues(data);
+  if (typeof window._gfxRefreshScheduleQueue === 'function') window._gfxRefreshScheduleQueue(data);
   updateFacecamTeamHeaders(teams, data);
   if (typeof applyCommercialState === 'function') applyCommercialState(data);
   if (typeof lgHydrate === 'function') lgHydrate(data.leagues);
@@ -3108,12 +3924,45 @@ function applyState(data) {
   // start.gg event teams (transient)
   renderStartggTeams(data.startgg?.eventTeams || [], data.startgg?.selectedEvent || null);
 
-  // reflect selected event in dash label (if present on reload)
-  const dl = el('dash-selected-sgg-event');
-  const se = data.startgg && data.startgg.selectedEvent;
-  if (dl && se && (se.name || se.tournamentName)) {
-    dl.textContent = `✓ Selected: ${se.name || se.tournamentName}`;
+  // Unified active event card
+  const ae = data.activeEvent;
+  const activeCard = el('dash-active-event');
+  if (activeCard) {
+    if (ae && ae.platform && ae.name) {
+      const nameEl = el('ev-active-name');
+      const metaEl = el('ev-active-meta');
+      const badge = el('ev-active-plat-badge');
+      if (nameEl) nameEl.textContent = ae.name;
+      if (metaEl) metaEl.textContent = [ae.gameName, ae.numEntrants ? `${ae.numEntrants} teams` : '', ae.format].filter(Boolean).join(' · ');
+      if (badge) { badge.textContent = ae.platform === 'startgg' ? 'start.gg' : ae.platform === 'challonge' ? 'Challonge' : ae.platform === 'nxgen' ? 'NXGEN' : ae.platform; badge.dataset.plat = ae.platform; }
+      activeCard.style.display = 'flex';
+      // Sync platform tab to active event's platform (without triggering a panel switch if already correct)
+      if (ae.platform !== _evActivePlatform) {
+        const tab = document.querySelector(`.ev-plat-tab[data-plat="${ae.platform}"]`);
+        if (tab) tab.click();
+      }
+    } else {
+      activeCard.style.display = 'none';
+    }
   }
+  // Challonge dashboard queue visibility
+  const chalQBlock  = el('ev-challonge-queue-block');
+  const nxgenQBlock = el('ev-nxgen-queue-block');
+  const sggQBlock   = el('ev-queue-block');
+  const isChalActive  = ae && ae.platform === 'challonge';
+  const isNxgenActive = ae && ae.platform === 'nxgen';
+  if (chalQBlock)  chalQBlock.style.display  = isChalActive ? '' : 'none';
+  if (nxgenQBlock) nxgenQBlock.style.display = isNxgenActive ? '' : 'none';
+  if (sggQBlock)   sggQBlock.style.display   = (isChalActive || isNxgenActive) ? 'none' : '';
+  if (isChalActive)  renderDashChallongeQueue(data.challonge?.queue || [], data.challonge?.queueFetchedAt);
+  if (isNxgenActive) renderDashNxgenQueue(data.nxgen?.queue || [], data.nxgen?.queueFetchedAt);
+  // Auto-follow toggles
+  const chalAF  = el('challonge-autofollow');
+  if (chalAF) chalAF.checked = !!data.challonge?.autoFollow;
+  const nxgenAF = el('nxgen-autofollow');
+  if (nxgenAF) nxgenAF.checked = !!data.nxgen?.autoFollow;
+  // token badge
+  updateEvTokenBadge();
 
   syncFacecamRows(data.players || [], data.facecams || [], true);
   renderSavedFacecams(data.facecams || []);
@@ -3140,7 +3989,7 @@ function applyState(data) {
     const fontSelect = el('select-font');
     if (fontSelect && document.activeElement !== fontSelect) {
       let exists = false;
-      for(let i = 0; i < fontSelect.options.length; i++) {
+      for (let i = 0; i < fontSelect.options.length; i++) {
         if (fontSelect.options[i].value === data.fontFamily) { exists = true; break; }
       }
       if (!exists) {
@@ -3150,8 +3999,10 @@ function applyState(data) {
         fontSelect.appendChild(opt);
       }
       fontSelect.value = data.fontFamily;
+      applyFontPreview(data.fontFamily);
     }
   }
+  syncSettingsFromState();
 
   // Main Banner (global fallback — uses data.mainBanner, not the kit-aware data.banner)
   const mainBanner = data.mainBanner || data.banner;
@@ -3240,6 +4091,7 @@ function applyState(data) {
   renderAdSponsorPickers(data);
   applyCsgoState(data);
   applyValorantState(data);
+  applyLolState(data);
 
   // OBS settings
   applyObsState(data);
@@ -3334,6 +4186,11 @@ function applyState(data) {
   }
 
   renderStreamQueue(data);
+
+  // Challonge settings
+  if (typeof renderChallongeSettings === 'function') renderChallongeSettings(data);
+  // NXGEN settings
+  if (typeof renderNxgenSettings === 'function') renderNxgenSettings(data);
 }
 
 function getStartggPayload() {
@@ -3614,7 +4471,11 @@ function renderMatchPlayers(side, players) {
   const gameCfg = (currentState.games && currentState.games[gameId]) || null;
   const heroFeatures = ['heroes', 'agents', 'operators', 'legends', 'draft'];
   const usesHeroes = !!(gameCfg && (gameCfg.features || []).some(f => heroFeatures.includes(f)));
-  const sig = JSON.stringify(players.map(p => [p.id, p.name, p.assignedCamera || '', p.hero || '', p.role || '', p.country || '', p.info || ''])) + '|' + camKey + '|' + usesHeroes + '|' + currentState.activeGame;
+  const _profiles = currentState.playerProfiles || {};
+  const sig = JSON.stringify(players.map(p => {
+    const r = _profiles[(p.name || '').trim().toLowerCase()] || {};
+    return [p.id, p.name, p.assignedCamera || '', p.hero || '', p.role || '', p.country || '', p.info || '', p.startgg || '', p.sixmans || '', r.startggSlug || '', (r.sixmans && r.sixmans.name) || ''];
+  })) + '|' + camKey + '|' + usesHeroes + '|' + currentState.activeGame;
   if (wrap.dataset.sig === sig) return;
   if (wrap.contains(document.activeElement)) return;   // don't clobber a field being edited
   wrap.dataset.sig = sig;
@@ -3645,6 +4506,12 @@ function renderMatchPlayers(side, players) {
     del.addEventListener('click', () => { if (p.id) send('delete_player', { side, playerId: p.id }); });
 
     mainRow.appendChild(inp);
+    const chipsHtml = playerProfileChips(p);
+    if (chipsHtml) {
+      const tmp = document.createElement('span');
+      tmp.innerHTML = chipsHtml;
+      mainRow.appendChild(tmp.firstChild);
+    }
     mainRow.appendChild(del);
     card.appendChild(mainRow);
 
@@ -3741,6 +4608,8 @@ function renderSeriesPanel(match, teams) {
   const mapCount = (match.maps && match.maps.length) || FORMAT_MAPS[match.format] || 5;
   if (numEl && editing !== numEl) numEl.value = mapCount;
   if (divEl && editing !== divEl) divEl.value = match.division || '';
+  const visEl = el('check-series-visible');
+  if (visEl) visEl.checked = match.seriesVisible !== false;
 
   _seriesMaps = match.maps || [];
   const aLabel = (teams.blue && teams.blue.name) || 'Team A';
@@ -3803,6 +4672,7 @@ el('num-series-maps')?.addEventListener('change', function () {
 });
 el('input-series-division')?.addEventListener('change', function () { send('set_match', { division: this.value.trim() }); });
 el('input-series-division')?.addEventListener('keydown', function (e) { if (e.key === 'Enter') this.blur(); });
+el('check-series-visible')?.addEventListener('change', function () { send('set_match', { seriesVisible: this.checked }); });
 
 // ── Media library ─────────────────────────────────────────────────────────
 const MD_API = 'http://localhost:3000/api/media';
@@ -4733,35 +5603,97 @@ el('btn-sort-teams-abc')?.addEventListener('click', () => {
   send('update_teams_order', { teams: sorted });
 });
 
-// Teams CSV import (file input inside the Import modal)
-// Format: name,color,player1,player2,player3,…
+// Teams CSV import with COLUMN MAPPING — any layout works: pick which columns are the
+// team name, logo URL, colour and players (a delimited column, or "remaining columns").
 (function wireTeamsCsvTalent() {
   const inp = el('teams-csv');
   if (!inp) return;
+  let _rows = [];
+  const DELIM = /\s*[,;|/]\s*/;
+  const guess = (headers, re) => { for (let i = 0; i < headers.length; i++) { if (re.test((headers[i] || '').toLowerCase())) return i; } return -1; };
+  const opts = (headers, none) => (none != null ? `<option value="-1">${none}</option>` : '') +
+    headers.map((h, i) => `<option value="${i}">${(h || ('Column ' + (i + 1))).toString().replace(/</g, '&lt;')}</option>`).join('');
+  function headerRow() {
+    const useHeader = el('map-header')?.checked !== false;
+    return (useHeader && _rows.length) ? _rows[0] : (_rows[0] || []).map((_, i) => 'Column ' + (i + 1));
+  }
+  function dataRows() { return (el('map-header')?.checked !== false) ? _rows.slice(1) : _rows.slice(); }
+  function buildMapping() {
+    const headers = headerRow();
+    const team = el('map-team'), logo = el('map-logo'), color = el('map-color'), players = el('map-players');
+    if (!team) return;
+    team.innerHTML = opts(headers); logo.innerHTML = opts(headers, '— none —');
+    color.innerHTML = opts(headers, '— none —'); players.innerHTML = opts(headers, 'Remaining columns');
+    team.value = Math.max(0, guess(headers, /team|org|squad|entrant|clan|^name$/));
+    logo.value = guess(headers, /logo|image|icon|badge|crest/);
+    color.value = guess(headers, /colou?r|hex/);
+    players.value = guess(headers, /players|roster|members|lineup|line-up/);
+    updatePreview();
+  }
+  function updatePreview() {
+    const ti = +(el('map-team')?.value || 0);
+    const n = dataRows().filter((r) => (r[ti] || '').trim()).length;
+    const p = el('teams-csv-preview'); if (p) p.textContent = n ? `${n} team${n !== 1 ? 's' : ''} detected` : 'No team rows detected';
+  }
   inp.addEventListener('change', () => {
     const file = inp.files[0]; if (!file) return;
     const reader = new FileReader();
     reader.onload = (evt) => {
-      const lines = (evt.target.result || '').split('\n').map((l) => l.trim()).filter(Boolean);
-      let count = 0;
-      lines.forEach((line) => {
-        if (line.startsWith('#') || /^name[,;]/i.test(line)) return;
-        const cols = line.split(',').map((c) => c.trim().replace(/^["']|["']$/g, ''));
-        if (!cols[0]) return;
-        const name    = cols[0];
-        const color   = /^#[0-9a-f]{3,6}$/i.test(cols[1] || '') ? cols[1] : '#3b82f6';
-        const players = cols.slice(2).filter(Boolean).map((n) => ({ id: Date.now() + Math.random(), name: n, platform: '', platformId: '', camSlot: '' }));
-        send('save_team', { oldName: '', name, color, logo: '', players });
-        count++;
-      });
+      _rows = (typeof csvParse === 'function' ? csvParse(evt.target.result || '') : []).filter((r) => r.some((c) => (c || '').toString().trim()));
       inp.value = '';
       const st = el('teams-csv-status');
-      if (st) { st.textContent = `✓ Imported ${count} team${count !== 1 ? 's' : ''}`; st.style.color = '#22c55e'; }
-      showToast(`Imported ${count} team${count !== 1 ? 's' : ''}`, '#22c55e');
+      if (!_rows.length) { if (st) { st.textContent = 'Empty or unreadable CSV.'; st.style.color = '#f56565'; } return; }
+      if (st) st.textContent = '';
+      const map = el('teams-csv-map'); if (map) map.style.display = '';
+      buildMapping();
     };
     reader.readAsText(file);
   });
+  el('map-header')?.addEventListener('change', buildMapping);
+  el('map-team')?.addEventListener('change', updatePreview);
+  el('teams-csv-import')?.addEventListener('click', () => {
+    if (!_rows.length) return;
+    const ti = +el('map-team').value, li = +el('map-logo').value, ci = +el('map-color').value, pi = +el('map-players').value;
+    let count = 0;
+    dataRows().forEach((r) => {
+      const name = (r[ti] || '').trim(); if (!name) return;
+      const logo = li >= 0 ? (r[li] || '').trim() : '';
+      const color = (ci >= 0 && /^#[0-9a-f]{3,8}$/i.test((r[ci] || '').trim())) ? (r[ci] || '').trim() : '';
+      let names;
+      if (pi >= 0) names = (r[pi] || '').split(DELIM).map((s) => s.trim()).filter(Boolean);
+      else names = r.filter((c, idx) => idx !== ti && idx !== li && idx !== ci && (c || '').trim()).map((c) => c.trim());
+      const players = names.map((nm) => ({ id: Date.now() + Math.random(), name: nm, role: '', country: '' }));
+      send('save_team', { oldName: '', name, color, logo, players });
+      count++;
+    });
+    const map = el('teams-csv-map'); if (map) map.style.display = 'none';
+    const st = el('teams-csv-status'); if (st) { st.textContent = `✓ Imported ${count} team${count !== 1 ? 's' : ''}`; st.style.color = '#22c55e'; }
+    showToast(`Imported ${count} team${count !== 1 ? 's' : ''}`, '#22c55e');
+  });
 })();
+
+// Teams JSON import — restores logos + full player info from an app Export.
+el('teams-json')?.addEventListener('change', function () {
+  const file = this.files[0]; if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    let data; try { data = JSON.parse(e.target.result); } catch { const st = el('teams-json-status'); if (st) { st.textContent = 'Invalid JSON file.'; st.style.color = '#f56565'; } return; }
+    const teams = Array.isArray(data) ? data : (data.teams || []);
+    let count = 0;
+    teams.forEach((t) => {
+      if (!t || !t.name) return;
+      const players = (t.players || []).map((p) => (typeof p === 'string'
+        ? { id: Date.now() + Math.random(), name: p }
+        : { id: p.id || (Date.now() + Math.random()), name: p.name || p.gamerTag || '', role: p.role || '', country: p.country || '', startgg: p.startgg || '', sixmans: p.sixmans || '' })).filter((p) => p.name);
+      send('save_team', { oldName: '', name: t.name, color: t.color || '', logo: t.logo || '', favorite: !!t.favorite, players });
+      count++;
+    });
+    this.value = '';
+    const st = el('teams-json-status'); if (st) { st.textContent = `✓ Imported ${count} team${count !== 1 ? 's' : ''} (with logos)`; st.style.color = '#22c55e'; }
+    showToast(`Imported ${count} team${count !== 1 ? 's' : ''}`, '#22c55e');
+  };
+  reader.readAsText(file);
+});
 
 // Teams page sub-tabs: Match (live card + scorecard) vs All Teams (saved library + start.gg).
 function teamsShowTab(tab) {
@@ -4867,7 +5799,10 @@ function tmRenderPlayers() {
     role.addEventListener('input', () => { p.role = role.value; });
     const del = document.createElement('button'); del.className = 'tp-del'; del.textContent = '×'; del.title = 'Remove';
     del.addEventListener('click', () => { tmModel.players = tmModel.players.filter((x) => x !== p); tmRenderPlayers(); });
-    row.appendChild(nm); row.appendChild(role); row.appendChild(del);
+    row.appendChild(nm); row.appendChild(role);
+    const chips = playerProfileChips(p);
+    if (chips) { const c = document.createElement('span'); c.innerHTML = chips; row.appendChild(c.firstChild); }
+    row.appendChild(del);
     wrap.appendChild(row);
   });
 }
@@ -5153,6 +6088,16 @@ el('btn-replay-outro-clear')?.addEventListener('click', function() {
   const f = el('input-replay-outro'); if (f) f.value = '';
   send('set_replay', { outroLogo: null });
 });
+el('input-replay-skin')?.addEventListener('change', async function() {
+  const file = this.files && this.files[0];
+  if (!file) return;
+  const b64 = await fileToBase64(file);
+  send('set_replay', { skin: b64 });
+});
+el('btn-replay-skin-clear')?.addEventListener('click', function() {
+  const f = el('input-replay-skin'); if (f) f.value = '';
+  send('set_replay', { skin: null });
+});
 
 // ── Scoreboard ad slot (sponsor logo on the end-of-match scorecard) ───────
 el('input-sbad-label')?.addEventListener('input', function() {
@@ -5355,14 +6300,6 @@ el('btn-quick-save-orange')?.addEventListener('click', () => {
 function scorecardHTML(sfx) {
   const bo = [1, 3, 5, 7].map((v) => `<label class="bo-opt"><input type="radio" name="bestof-${sfx}" value="${v}">${v}</label>`).join('');
   return `
-  <div class="sc-header">
-    <p class="sc-header-label">Match Label</p>
-    <input type="text" id="input-game-label-${sfx}" class="input-text sc-label-input" placeholder="Auto — BEST OF X · GAME X">
-    <div class="sc-header-btns">
-      <button class="btn btn-ghost btn-sm" data-sc="label-auto" type="button">Auto-fill</button>
-      <button class="btn btn-ghost btn-sm" data-sc="label-upcoming" type="button">Upcoming Match</button>
-    </div>
-  </div>
   <div class="sc-teams-score">
     <div class="sc-side-col">
       <span class="sc-team-name" id="series-label-blue-${sfx}">A</span>
@@ -5418,16 +6355,107 @@ function wireScorecard(containerId, sfx) {
       if (inp) inp.value = '';
       send('set_game_label', { text: '' });
     }
+    else if (kind === 'round-startgg') {
+      send('use_startgg_round');   // server fills roundLabel from the active start.gg set
+    }
+    else if (kind === 'round-clear') {
+      const inp = c.querySelector(`#input-round-label-${sfx}`);
+      if (inp) inp.value = '';
+      send('set_round_label', { text: '' });
+    }
   });
   c.addEventListener('change', (e) => {
     if (e.target.name === `bestof-${sfx}` && e.target.checked) send('set_best_of', { value: parseInt(e.target.value, 10) });
   });
   c.addEventListener('input', (e) => {
     if (e.target.id === `input-game-label-${sfx}`) send('set_game_label', { text: e.target.value });
+    if (e.target.id === `input-round-label-${sfx}`) send('set_round_label', { text: e.target.value });
   });
 }
 wireScorecard('scorecard-dash', 'dash');
 wireScorecard('scorecard-teams', 'teams');
+
+// Wire the Match-Teams settings panel (collapsible from the gear button in the panel header).
+// Handles Match Label and Round/Stage inputs that live outside scorecard-dash.
+;(function wireMtSettingsPanel() {
+  const btn = el('btn-match-settings');
+  const panel = el('match-settings-panel');
+  if (!btn || !panel) return;
+  btn.addEventListener('click', () => {
+    const open = panel.style.display !== 'none';
+    panel.style.display = open ? 'none' : 'grid';
+    btn.classList.toggle('active', !open);
+  });
+  panel.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-msp]'); if (!b) return;
+    const kind = b.dataset.msp;
+    if (kind === 'label-auto') {
+      const inp = el('input-game-label-dash'); if (inp) inp.value = '';
+      send('set_game_label', { text: '' });
+    } else if (kind === 'label-upcoming') {
+      const inp = el('input-game-label-dash'); if (inp) inp.value = 'UPCOMING MATCH';
+      send('set_game_label', { text: 'UPCOMING MATCH' });
+    } else if (kind === 'round-startgg') {
+      send('use_startgg_round');
+    } else if (kind === 'round-clear') {
+      const inp = el('input-round-label-dash'); if (inp) inp.value = '';
+      send('set_round_label', { text: '' });
+    }
+  });
+  panel.addEventListener('input', (e) => {
+    if (e.target.id === 'input-game-label-dash') send('set_game_label', { text: e.target.value });
+    if (e.target.id === 'input-round-label-dash') send('set_round_label', { text: e.target.value });
+  });
+  panel.addEventListener('change', (e) => {
+    if (e.target.id === 'chk-team-record') send('set_team_record_settings', { enabled: e.target.checked });
+    if (e.target.id === 'sel-team-record-metric') send('set_team_record_settings', { metric: e.target.value });
+    if (e.target.id === 'sel-team-record-league') send('set_team_record_settings', { leagueId: e.target.value });
+  });
+  el('btn-pull-league')?.addEventListener('click', () => pullLeagueStandings('input-league-slug', 'league-pull-status'));
+})();
+
+// Shared start.gg League standings pull — used by both the Dashboard match gear popover and the
+// Rocket League section in Integrations (mirrored controls, suffixed -int).
+async function pullLeagueStandings(slugId, statusId) {
+  const slug = (el(slugId)?.value || '').trim();
+  const status = el(statusId);
+  if (!slug) { if (status) status.textContent = 'Enter a start.gg league URL or slug first.'; return; }
+  if (status) status.textContent = 'Pulling standings…';
+  try {
+    const r = await fetch('http://localhost:3000/api/startgg/league-standings', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ slug })
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'Failed');
+    if (status) status.textContent = `Pulled ${d.count} teams${d.name ? ' from ' + d.name : ''}.`;
+  } catch (err) {
+    if (status) status.textContent = 'Error: ' + err.message;
+  }
+}
+
+// Team Record source (Tournament / In-app stats / Manual) — segmented control in the gear popover.
+document.querySelectorAll('#tr-source-seg .seg-btn').forEach((b) => {
+  b.addEventListener('click', () => send('set_team_record_settings', { source: b.dataset.src }));
+});
+// Per-team record inputs (W-L + optional points) in the Match — Teams team boxes.
+// Source-aware: Manual writes to state.teamRecord.manual; In-app writes back to the linked league.
+['blue', 'orange'].forEach((side) => {
+  const push = () => {
+    const w = el('tr-w-' + side)?.value, l = el('tr-l-' + side)?.value, pts = el('tr-pts-' + side)?.value;
+    const tr = currentState.teamRecord || {};
+    const source = tr.source || 'stats';
+    if (source === 'stats' && tr.leagueId) {
+      const teamName = (currentState.teams && currentState.teams[side] && currentState.teams[side].name) || '';
+      if (!teamName) return;
+      send('set_league_team_record', { leagueId: tr.leagueId, teamName, w, l, pts });
+    } else {
+      send('set_team_record_manual', { side, w, l, pts });
+    }
+  };
+  ['tr-w-', 'tr-l-', 'tr-pts-'].forEach((p) => el(p + side)?.addEventListener('change', push));
+});
+// Auto team names from the live game (match saved library → logos/colours).
+el('chk-auto-teams-game')?.addEventListener('change', (e) => send('set_auto_teams_from_game', { enabled: e.target.checked }));
 
 function syncSeriesDeskUI(data) {
   const g = (data.games && data.games[data.activeGame]) || null;
@@ -5446,6 +6474,52 @@ function syncSeriesDeskUI(data) {
     document.querySelectorAll(`input[name="bestof-${sfx}"]`).forEach((r) => { if (document.activeElement !== r) r.checked = parseInt(r.value, 10) === bo; });
     const glEl = el(`input-game-label-${sfx}`);
     if (glEl && document.activeElement !== glEl) glEl.value = data.gameLabel || '';
+    const rlEl = el(`input-round-label-${sfx}`);
+    if (rlEl && document.activeElement !== rlEl) rlEl.value = data.roundLabel || '';
+  });
+  const atg = el('chk-auto-teams-game'); if (atg && document.activeElement !== atg) atg.checked = !!data.autoTeamsFromGame;
+  const tr = data.teamRecord || {};
+  const ls = data.leagueStandings || {};
+  const trSource = tr.source || 'stats';
+  const chk = el('chk-team-record'); if (chk && document.activeElement !== chk) chk.checked = !!tr.enabled;
+  const selM = el('sel-team-record-metric'); if (selM && document.activeElement !== selM) selM.value = tr.metric || 'season';
+  document.querySelectorAll('#tr-source-seg .seg-btn').forEach((b) => b.classList.toggle('active', b.dataset.src === trSource));
+  const slugIn = el('input-league-slug');
+  if (slugIn && document.activeElement !== slugIn && !slugIn.value) slugIn.value = ls.slug || '';
+  const status = el('league-pull-status');
+  if (status && !status.textContent) {
+    if (ls.lastError) status.textContent = 'Error: ' + ls.lastError;
+    else if (Array.isArray(ls.teams) && ls.teams.length) status.textContent = `${ls.teams.length} teams loaded${ls.name ? ' from ' + ls.name : ''}.`;
+  }
+  // Source-dependent sections: in-app league box for In-app, start.gg box for Tournament, hint for Manual.
+  const statsBox = el('tr-stats-box'); if (statsBox) statsBox.style.display = trSource === 'stats' ? '' : 'none';
+  const sggBox = el('tr-startgg-box'); if (sggBox) sggBox.style.display = trSource === 'startgg' ? '' : 'none';
+  const manHint = el('tr-manual-hint'); if (manHint) manHint.style.display = trSource === 'manual' ? '' : 'none';
+  const statsHint = el('tr-stats-hint'); if (statsHint) statsHint.style.display = (trSource === 'stats' && tr.leagueId) ? '' : 'none';
+  // In-app league dropdown — keep options in sync with the leagues, reflect the chosen id.
+  const lgSel = el('sel-team-record-league');
+  if (lgSel) {
+    const leagues = data.leagues || [];
+    const sig = leagues.map((l) => l.id + ':' + (l.name || '')).join('|');
+    if (lgSel.dataset.sig !== sig && document.activeElement !== lgSel) {
+      lgSel.dataset.sig = sig;
+      lgSel.innerHTML = '<option value="">Auto (best match)</option>' + leagues.map((l) => `<option value="${l.id}">${(l.name || 'League').replace(/</g, '&lt;')}</option>`).join('');
+    }
+    if (document.activeElement !== lgSel) lgSel.value = tr.leagueId || '';
+  }
+  // Per-team record rows — shown when Team Record is on AND (Manual, or In-app with a linked league).
+  // Manual prefills from state.teamRecord.manual; In-app prefills from the resolved league record.
+  const manual = tr.manual || {};
+  const tRec = data.teamRecords || {};
+  const editable = tr.enabled && (trSource === 'manual' || (trSource === 'stats' && tr.leagueId));
+  ['blue', 'orange'].forEach((side) => {
+    const row = el('team-record-row-' + side);
+    if (row) row.style.display = editable ? '' : 'none';
+    const src = (trSource === 'stats' && tr.leagueId)
+      ? (side === 'blue' ? (tRec.rawBlue || {}) : (tRec.rawOrange || {}))
+      : (manual[side] || {});
+    const setv = (id, v) => { const e = el(id); if (e && document.activeElement !== e) e.value = (v == null ? '' : v); };
+    setv('tr-w-' + side, src.w); setv('tr-l-' + side, src.l); setv('tr-pts-' + side, src.pts);
   });
 }
 
@@ -5613,6 +6687,21 @@ function teRenderPlayers() {
     const del = document.createElement('button'); del.className = 'btn btn-ghost btn-sm te-del'; del.textContent = '✕'; del.title = 'Remove player';
     del.addEventListener('click', () => { teModel.players = teModel.players.filter((x) => x !== p); teRenderPlayers(); });
     row.append(name, role, country, del);
+    // Editable start.gg + 6mans links (stored on the player, with open-↗ buttons).
+    const links = document.createElement('div'); links.className = 'te-plinks';
+    links.innerHTML =
+      `<label class="te-plink-field"><span><img src="../assets/images/start.png" alt="start.gg" class="te-plink-logo"></span>`
+      + `<input class="input-text te-plink te-plink-sgg" placeholder="profile link or slug" value="${tlEsc(p.startgg || '')}">`
+      + `<a class="te-plink-open${p.startgg ? '' : ' is-off'}" target="_blank" title="Open start.gg">↗</a></label>`
+      + `<label class="te-plink-field"><span><img src="../assets/images/sixmanlogo.webp" alt="6mans" class="te-plink-logo"></span>`
+      + `<input class="input-text te-plink te-plink-six" placeholder="rl6mans username or link" value="${tlEsc(p.sixmans || '')}">`
+      + `<a class="te-plink-open${p.sixmans ? '' : ' is-off'}" target="_blank" title="Open 6mans">↗</a></label>`;
+    const sgg = links.querySelector('.te-plink-sgg'), sggA = links.querySelectorAll('.te-plink-open')[0];
+    const six = links.querySelector('.te-plink-six'), sixA = links.querySelectorAll('.te-plink-open')[1];
+    const syncSgg = () => { p.startgg = sgg.value.trim(); sggA.href = teStartggLink(p.startgg); sggA.classList.toggle('is-off', !p.startgg); };
+    const syncSix = () => { p.sixmans = six.value.trim(); sixA.href = teSixmansLink(p.sixmans); sixA.classList.toggle('is-off', !p.sixmans); };
+    sgg.addEventListener('input', syncSgg); six.addEventListener('input', syncSix); syncSgg(); syncSix();
+    row.append(links);
     wrap.appendChild(row);
   });
 }
@@ -5650,7 +6739,13 @@ function teLoad(team) {
     logo: team.logo || null,
     color: team.color || '#055fdb',
     favorite: !!team.favorite,
-    players: (team.players || []).map((p) => ({ id: p.id || teUid(), name: p.name || '', role: p.role || '', country: p.country || '' }))
+    players: (team.players || []).map((p) => {
+      // Prefill empty links from the auto-linked registry (start.gg slug / 6mans name).
+      const reg = (currentState.playerProfiles || {})[(p.name || '').trim().toLowerCase()] || {};
+      const startgg = p.startgg || (reg.startggSlug ? 'https://www.start.gg/' + String(reg.startggSlug).replace(/^\/+/, '') : '');
+      const sixmans = p.sixmans || ((reg.sixmans && reg.sixmans.name) ? reg.sixmans.name : '');
+      return { id: p.id || teUid(), name: p.name || '', role: p.role || '', country: p.country || '', startgg, sixmans };
+    })
   };
   teStatus('');
   teRender();
@@ -5691,7 +6786,7 @@ el('te-save')?.addEventListener('click', () => {
     logo: teModel.logo || null,
     color: teModel.color || null,
     favorite: teModel.favorite || false,
-    players: teModel.players.map((p) => ({ id: p.id, name: (p.name || '').trim(), role: (p.role || '').trim(), country: (p.country || '').toLowerCase() })).filter((p) => p.name)
+    players: teModel.players.map((p) => ({ id: p.id, name: (p.name || '').trim(), role: (p.role || '').trim(), country: (p.country || '').toLowerCase(), startgg: (p.startgg || '').trim(), sixmans: (p.sixmans || '').trim() })).filter((p) => p.name)
   });
   teModel.oldName = name;
   if (el('te-title')) el('te-title').textContent = 'Edit Team';
@@ -5825,6 +6920,7 @@ function renderTeamPlayers(side, players = []) {
       <div class="player-info">
         <span class="player-platform-icon">${deviceSvg}</span>
         <span class="player-name">${p.name}</span>
+        ${playerProfileChips(p)}
         ${cameraFacecam ? `<span class="player-camera-badge">${camSvg} ${cameraFacecam.nickname || cameraFacecam.name}</span>` : ''}
       </div>
       <div class="player-actions">
@@ -5843,52 +6939,115 @@ function renderTeamPlayers(side, players = []) {
 }
 
 // ── Font settings ─────────────────────────────────────────────────────────
+function applyFontPreview(family) {
+  const box = el('font-preview-box');
+  if (box) box.style.fontFamily = `'${family}', sans-serif`;
+}
+
 async function loadSystemFonts() {
   const select = el('select-font');
   if (!select) return;
 
-  try {
-    const availableFonts = await window.queryLocalFonts();
-    const fonts = [...new Set(availableFonts.map(f => f.family))].sort();
-    
-    // Clear and populate
+  // Brand fonts pinned at top, then curated broadcast fonts, then system fonts sorted.
+  const BRAND = ['Industry'];
+  const CURATED = ['Bourgeois', 'Rajdhani', 'Barlow Condensed', 'Oswald', 'Bebas Neue', 'Inter', 'Anton', 'Exo 2', 'Teko', 'Saira Condensed', 'Saira', 'Arial', 'Impact', 'Verdana', 'Georgia', 'Trebuchet MS'];
+  const LABELS = { 'Industry': 'Industry (brand)', 'Bourgeois': 'Bourgeois' };
+
+  function fontLabel(f) { return LABELS[f] || f; }
+
+  function buildOptions(list) {
     select.innerHTML = '';
-    fonts.forEach(f => {
+    list.forEach(f => {
       const opt = document.createElement('option');
       opt.value = f;
-      opt.textContent = f;
+      opt.textContent = fontLabel(f);
       select.appendChild(opt);
     });
-    
-    // Check if Bourgeois exists, we add it explicitly if needed (handled below or just selected)
-    if (currentState.fontFamily) {
-      // If it doesn't exist in the list, add it
-      let exists = fonts.includes(currentState.fontFamily);
-      if (!exists) {
-        const opt = document.createElement('option');
-        opt.value = currentState.fontFamily;
-        opt.textContent = currentState.fontFamily;
-        select.prepend(opt);
-      }
-      select.value = currentState.fontFamily;
-    }
-  } catch (err) {
-    console.warn('System fonts API not available or permission denied.', err);
-    // Add default fallback options if API fails
-    if (select.options.length <= 1) {
-      select.innerHTML = '<option value="Bourgeois">Bourgeois</option><option value="Arial">Arial</option><option value="Impact">Impact</option><option value="Verdana">Verdana</option>';
-      if (currentState.fontFamily) select.value = currentState.fontFamily;
-    }
   }
+
+  try {
+    const availableFonts = await window.queryLocalFonts();
+    const systemFonts = [...new Set(availableFonts.map(f => f.family))].sort();
+    // Brand first, then other curated (excluding brand dups), then remaining system fonts.
+    const combined = [
+      ...BRAND,
+      ...CURATED.filter(f => !BRAND.includes(f)),
+      ...systemFonts.filter(f => !BRAND.includes(f) && !CURATED.includes(f))
+    ];
+    buildOptions(combined);
+    const cur = currentState.fontFamily;
+    if (cur && !combined.includes(cur)) {
+      const opt = document.createElement('option');
+      opt.value = cur; opt.textContent = fontLabel(cur);
+      select.prepend(opt);
+    }
+    if (cur) select.value = cur;
+  } catch {
+    buildOptions([...BRAND, ...CURATED]);
+    if (currentState.fontFamily) select.value = currentState.fontFamily;
+  }
+  applyFontPreview(select.value);
 }
 
 el('tab-ajustes')?.addEventListener('click', async () => {
   await loadSystemFonts();
+  syncSettingsFromState();
 });
 
 el('select-font')?.addEventListener('change', function() {
   send('set_font_family', { fontFamily: this.value });
+  applyFontPreview(this.value);
 });
+
+// ── Overlay Appearance: theme + accent ────────────────────────────────────
+el('select-theme')?.addEventListener('change', function () {
+  send('set_theme', { theme: this.value });
+});
+
+function settingsAccentSync() {
+  const hex = el('settings-accent-hex'), pick = el('settings-accent');
+  if (!hex || !pick) return;
+  hex.value = pick.value;
+}
+el('settings-accent')?.addEventListener('input', function () {
+  const hexEl = el('settings-accent-hex'); if (hexEl) hexEl.value = this.value;
+});
+el('settings-accent')?.addEventListener('change', function () {
+  send('set_global_accent', { color: this.value });
+});
+el('settings-accent-hex')?.addEventListener('change', function () {
+  const v = this.value.trim();
+  if (/^#[0-9a-fA-F]{6}$/.test(v)) {
+    const pick = el('settings-accent'); if (pick) pick.value = v;
+    send('set_global_accent', { color: v });
+  }
+});
+
+// ── Broadcast Defaults ────────────────────────────────────────────────────
+el('settings-default-bo')?.addEventListener('change', function () {
+  send('set_default_bo', { bestOf: Number(this.value) });
+});
+el('settings-clock-24h')?.addEventListener('change', function () {
+  send('set_clock_format', { clock24h: this.checked });
+});
+el('settings-show-series')?.addEventListener('change', function () {
+  send('set_show_series', { show: this.checked });
+});
+
+function syncSettingsFromState() {
+  const th = el('select-theme');
+  if (th && currentState.theme && document.activeElement !== th) th.value = currentState.theme;
+  const bo = el('settings-default-bo');
+  if (bo && currentState.defaultBestOf && document.activeElement !== bo) bo.value = String(currentState.defaultBestOf);
+  const cl = el('settings-clock-24h');
+  if (cl && currentState.clock24h !== undefined) cl.checked = !!currentState.clock24h;
+  const ss = el('settings-show-series');
+  if (ss && currentState.showSeries !== undefined) ss.checked = currentState.showSeries !== false;
+  const acPick = el('settings-accent'); const acHex = el('settings-accent-hex');
+  const acColor = (currentState.brand && currentState.brand.color) || '#055fdb';
+  if (acPick && document.activeElement !== acPick) { acPick.value = acColor; }
+  if (acHex && document.activeElement !== acHex) { acHex.value = acColor; }
+}
 
 el('cf-facecams-enabled')?.addEventListener('change', function () {
   send('set_facecams_enabled', { enabled: this.checked });
@@ -6022,6 +7181,313 @@ el('btn-startgg-sync')?.addEventListener('click', () => {
   send('set_startgg_settings', getStartggPayload());
   send('startgg_sync_set', { setId: el('input-startgg-setid')?.value.trim() || '' });
 });
+
+// ── Challonge integration ─────────────────────────────────────────────────
+
+function getChallongePayload() {
+  return {
+    enabled: !!(el('check-challonge-enabled')?.checked),
+    tournamentSlug: (el('input-challonge-slug')?.value || '').trim(),
+    apiKey: (el('input-challonge-key')?.value || '').trim()
+  };
+}
+
+el('btn-challonge-save')?.addEventListener('click', () => {
+  send('set_challonge_settings', getChallongePayload());
+});
+
+el('btn-challonge-test')?.addEventListener('click', () => {
+  send('set_challonge_settings', getChallongePayload());
+  send('challonge_test_connection');
+  const r = el('challonge-result'); if (r) { r.style.color = 'var(--muted)'; r.textContent = 'Testing connection…'; }
+});
+
+el('btn-challonge-load')?.addEventListener('click', () => {
+  const slug = (el('input-challonge-slug')?.value || '').trim();
+  if (!slug) { const r = el('challonge-result'); if (r) { r.style.color = '#f87171'; r.textContent = 'Enter a tournament slug first.'; } return; }
+  send('set_challonge_settings', getChallongePayload());
+  send('load_challonge_tournament', { slug });
+});
+
+el('btn-challonge-refresh')?.addEventListener('click', () => {
+  send('challonge_refresh');
+  const r = el('challonge-result'); if (r) { r.style.color = 'var(--muted)'; r.textContent = 'Refreshing…'; }
+});
+
+el('btn-challonge-change-key')?.addEventListener('click', () => {
+  const inp = el('input-challonge-key');
+  const btn = el('btn-challonge-change-key');
+  if (!inp) return;
+  inp.readOnly = false; inp.value = ''; inp.placeholder = 'Paste your new Challonge API key';
+  inp.style.opacity = ''; inp.style.cursor = '';
+  if (btn) btn.style.display = 'none';
+  inp.focus();
+});
+
+el('btn-challonge-import-teams')?.addEventListener('click', () => {
+  send('import_challonge_teams', { slug: (el('input-challonge-slug')?.value || '').trim() });
+  const r = el('challonge-result'); if (r) { r.style.color = 'var(--muted)'; r.textContent = 'Importing teams…'; }
+});
+
+function renderChallongeSettings(data) {
+  const c = data.challonge || {};
+  const enabledCb = el('check-challonge-enabled');
+  const slugInp   = el('input-challonge-slug');
+  const keyInp    = el('input-challonge-key');
+  const badge     = el('challonge-conn-badge');
+  const changeBtn = el('btn-challonge-change-key');
+  const refreshBtn = el('btn-challonge-refresh');
+  const infoWrap  = el('challonge-tournament-info');
+
+  if (enabledCb && document.activeElement !== enabledCb) enabledCb.checked = !!c.enabled;
+  if (slugInp && document.activeElement !== slugInp) slugInp.value = c.tournamentSlug || '';
+
+  if (keyInp && c.hasKey && !keyInp.value) {
+    keyInp.readOnly = true; keyInp.value = ''; keyInp.placeholder = '••••••••••••••••••••';
+    keyInp.style.opacity = '0.5'; keyInp.style.cursor = 'default';
+    if (changeBtn) changeBtn.style.display = '';
+  }
+  if (badge) badge.style.display = c.connected ? '' : 'none';
+  if (refreshBtn) refreshBtn.style.display = c.selectedTournament ? '' : 'none';
+
+  // Tournament info panel
+  if (c.selectedTournament && infoWrap) {
+    infoWrap.style.display = '';
+    const t = c.selectedTournament;
+    const nameEl = el('challonge-t-name'); if (nameEl) nameEl.textContent = t.name || '';
+    const metaEl = el('challonge-t-meta');
+    if (metaEl) metaEl.textContent = [t.type, t.gameName, t.state ? t.state.charAt(0).toUpperCase() + t.state.slice(1) : ''].filter(Boolean).join(' · ');
+    const linkEl = el('challonge-t-link'); if (linkEl && t.url) { linkEl.href = t.url; }
+    const labelEl = el('challonge-teams-label');
+    if (labelEl) labelEl.textContent = `Participants (${(c.eventTeams || []).length})`;
+    renderChallongeTeams(c.eventTeams || []);
+    renderChallongeQueue(c.queue || []);
+  } else if (infoWrap) {
+    infoWrap.style.display = 'none';
+  }
+
+  const resultEl = el('challonge-result');
+  if (resultEl && c.lastError && !resultEl._userMsg) {
+    resultEl.style.color = '#f87171'; resultEl.textContent = c.lastError;
+  }
+}
+
+function renderChallongeTeams(teams) {
+  const list = el('challonge-teams-list'); if (!list) return;
+  if (!teams.length) { list.innerHTML = '<p class="sps-empty">No participants loaded.</p>'; return; }
+  list.innerHTML = teams.map((t) =>
+    `<div style="display:flex; align-items:center; gap:8px; padding:4px 6px; border-radius:6px; background:rgba(255,255,255,.03);">
+      ${t.logo ? `<img src="${t.logo}" style="width:20px; height:20px; object-fit:contain; border-radius:3px;">` : '<span style="width:20px; height:20px; background:rgba(255,255,255,.08); border-radius:3px; display:inline-block;"></span>'}
+      <span style="flex:1; font-size:12px;">${t.name.replace(/</g,'&lt;')}</span>
+      ${t.seed ? `<span style="font-size:10px; color:var(--muted);">#${t.seed}</span>` : ''}
+    </div>`
+  ).join('');
+}
+
+function renderChallongeQueue(queue) {
+  const list = el('challonge-queue-list');
+  const empty = el('challonge-queue-empty');
+  if (!list) return;
+  const open = queue.filter((m) => ['open', 'pending'].includes(m.state));
+  if (empty) empty.style.display = open.length ? 'none' : '';
+  list.innerHTML = open.map((m) =>
+    `<div class="challonge-queue-row" style="display:flex; align-items:center; gap:8px; padding:5px 8px; border-radius:6px; background:rgba(255,255,255,.04); border:1px solid ${m.live ? 'rgba(236,72,153,.3)' : 'var(--border)'};">
+      ${m.live ? '<span style="font-size:10px; font-weight:700; color:#ec4899; flex-shrink:0;">LIVE</span>' : `<span style="font-size:10px; color:var(--muted); flex-shrink:0;">${m.identifier || 'M'}</span>`}
+      <span style="flex:1; font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${(m.teamA || 'TBD').replace(/</g,'&lt;')} <span style="color:var(--muted);">vs</span> ${(m.teamB || 'TBD').replace(/</g,'&lt;')}</span>
+      <button class="btn btn-ghost btn-xs challonge-sync-btn" data-match-id="${m.matchId}" data-team-a="${(m.teamA||'').replace(/"/g,'&quot;')}" data-team-b="${(m.teamB||'').replace(/"/g,'&quot;')}" data-logo-a="${(m.logoA||'').replace(/"/g,'&quot;')}" data-logo-b="${(m.logoB||'').replace(/"/g,'&quot;')}" title="Set as current match (Blue vs Orange)">Set Live</button>
+    </div>`
+  ).join('');
+  list.querySelectorAll('.challonge-sync-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const a = btn.dataset.teamA, b = btn.dataset.teamB;
+      const la = btn.dataset.logoA || null, lb = btn.dataset.logoB || null;
+      send('set_team', { side: 'blue',   name: a, ...(la ? { logo: la } : {}) });
+      send('set_team', { side: 'orange', name: b, ...(lb ? { logo: lb } : {}) });
+    });
+  });
+}
+
+// Handle challonge-result WS messages
+window._handleChallongeResult = function(data) {
+  // Update integrations panel result element
+  const r = el('challonge-result');
+  if (r) {
+    r._userMsg = true;
+    r.style.color = data.ok ? '#86efac' : '#f87171';
+    r.textContent = data.message || '';
+    setTimeout(() => { r._userMsg = false; }, 5000);
+  }
+  // Update dashboard load status when loading from dashboard
+  const status = el('ev-load-status');
+  if (status && _evActivePlatform === 'challonge') {
+    status.style.color = data.ok ? '#86efac' : '#f87171';
+    status.textContent = data.message || '';
+    setTimeout(() => { status.style.color = ''; status.textContent = 'Imports teams, bracket & match queue.'; }, 4000);
+  }
+};
+
+// ── NXGEN ────────────────────────────────────────────────────────────────────
+
+function getNxgenPayload() {
+  return {
+    enabled: !!(el('check-nxgen-enabled')?.checked),
+    eventSlug: (el('input-nxgen-slug')?.value || '').trim(),
+    apiKey: (el('input-nxgen-key')?.value || '').trim()
+  };
+}
+
+el('btn-nxgen-save')?.addEventListener('click', () => {
+  send('set_nxgen_settings', getNxgenPayload());
+});
+
+el('btn-nxgen-test')?.addEventListener('click', () => {
+  send('set_nxgen_settings', getNxgenPayload());
+  send('nxgen_test_connection');
+  const r = el('nxgen-result'); if (r) { r.style.color = 'var(--muted)'; r.textContent = 'Testing connection…'; }
+});
+
+el('btn-nxgen-load')?.addEventListener('click', () => {
+  const slug = (el('input-nxgen-slug')?.value || '').trim();
+  if (!slug) { const r = el('nxgen-result'); if (r) { r.style.color = '#f87171'; r.textContent = 'Enter an event slug first.'; } return; }
+  send('set_nxgen_settings', getNxgenPayload());
+  send('load_nxgen_event', { slug });
+});
+
+el('btn-nxgen-refresh')?.addEventListener('click', () => {
+  send('nxgen_refresh');
+  const r = el('nxgen-result'); if (r) { r.style.color = 'var(--muted)'; r.textContent = 'Refreshing…'; }
+});
+
+el('btn-nxgen-change-key')?.addEventListener('click', () => {
+  const inp = el('input-nxgen-key');
+  const btn = el('btn-nxgen-change-key');
+  if (!inp) return;
+  inp.readOnly = false; inp.value = ''; inp.placeholder = 'Paste your new NXGEN API key (nxk_…)';
+  inp.style.opacity = ''; inp.style.cursor = '';
+  if (btn) btn.style.display = 'none';
+  inp.focus();
+});
+
+el('btn-nxgen-import-teams')?.addEventListener('click', () => {
+  send('nxgen_import_teams');
+  const r = el('nxgen-result'); if (r) { r.style.color = 'var(--muted)'; r.textContent = 'Importing teams…'; }
+});
+
+function renderNxgenSettings(data) {
+  const nx = data.nxgen || {};
+  const enabledCb  = el('check-nxgen-enabled');
+  const slugInp    = el('input-nxgen-slug');
+  const keyInp     = el('input-nxgen-key');
+  const badge      = el('nxgen-conn-badge');
+  const changeBtn  = el('btn-nxgen-change-key');
+  const refreshBtn = el('btn-nxgen-refresh');
+  const infoWrap   = el('nxgen-event-info');
+
+  if (enabledCb && document.activeElement !== enabledCb) enabledCb.checked = !!nx.enabled;
+  if (slugInp && document.activeElement !== slugInp) slugInp.value = nx.eventSlug || '';
+
+  if (keyInp && nx.hasKey && !keyInp.value) {
+    keyInp.readOnly = true; keyInp.value = ''; keyInp.placeholder = '••••••••••••••••••••';
+    keyInp.style.opacity = '0.5'; keyInp.style.cursor = 'default';
+    if (changeBtn) changeBtn.style.display = '';
+  }
+  if (badge) badge.style.display = nx.connected ? '' : 'none';
+  if (refreshBtn) refreshBtn.style.display = nx.selectedEvent ? '' : 'none';
+
+  if (nx.selectedEvent && infoWrap) {
+    infoWrap.style.display = '';
+    const ev = nx.selectedEvent;
+    const nameEl = el('nxgen-ev-name'); if (nameEl) nameEl.textContent = ev.name || '';
+    const metaEl = el('nxgen-ev-meta');
+    if (metaEl) metaEl.textContent = [ev.activity, ev.format, ev.status ? ev.status.charAt(0).toUpperCase() + ev.status.slice(1) : ''].filter(Boolean).join(' · ');
+    const linkEl = el('nxgen-ev-link'); if (linkEl && ev.url) { linkEl.href = ev.url; }
+    const labelEl = el('nxgen-teams-label');
+    if (labelEl) labelEl.textContent = `Participants (${(nx.eventTeams || []).length})`;
+    renderNxgenTeams(nx.eventTeams || []);
+    renderNxgenQueueInSettings(nx.queue || []);
+  } else if (infoWrap) {
+    infoWrap.style.display = 'none';
+  }
+
+  const resultEl = el('nxgen-result');
+  if (resultEl && nx.lastError && !resultEl._userMsg) {
+    resultEl.style.color = '#f87171'; resultEl.textContent = nx.lastError;
+  }
+}
+
+function renderNxgenTeams(teams) {
+  const list = el('nxgen-teams-list'); if (!list) return;
+  if (!teams.length) { list.innerHTML = '<p class="sps-empty">No participants loaded.</p>'; return; }
+  list.innerHTML = teams.map((t) =>
+    `<div style="display:flex; align-items:center; gap:8px; padding:4px 6px; border-radius:6px; background:rgba(255,255,255,.03);">
+      ${t.logo ? `<img src="${t.logo}" style="width:20px; height:20px; object-fit:contain; border-radius:3px;">` : '<span style="width:20px; height:20px; background:rgba(255,255,255,.08); border-radius:3px; display:inline-block;"></span>'}
+      <span style="flex:1; font-size:12px;">${escapeHtml(t.name || '')}</span>
+    </div>`
+  ).join('');
+}
+
+function renderNxgenQueueInSettings(queue) {
+  const list  = el('nxgen-queue-list');
+  const empty = el('nxgen-queue-empty');
+  if (!list) return;
+  const open = (queue || []).filter(m => m.status !== 'completed');
+  if (empty) empty.style.display = open.length ? 'none' : '';
+  list.innerHTML = open.map((m) =>
+    `<div style="display:flex; align-items:center; gap:8px; padding:5px 8px; border-radius:6px; background:rgba(255,255,255,.04); border:1px solid ${m.live ? 'rgba(236,72,153,.3)' : 'var(--border)'};">
+      ${m.live ? '<span style="font-size:10px; font-weight:700; color:#ec4899; flex-shrink:0;">LIVE</span>' : `<span style="font-size:10px; color:var(--muted); flex-shrink:0;">R${m.round || '?'}</span>`}
+      <span style="flex:1; font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(m.teamA || 'TBD')} <span style="color:var(--muted);">vs</span> ${escapeHtml(m.teamB || 'TBD')}</span>
+      <button class="btn btn-ghost btn-xs nxgen-set-live-btn" data-team-a="${(m.teamA||'').replace(/"/g,'&quot;')}" data-team-b="${(m.teamB||'').replace(/"/g,'&quot;')}" data-logo-a="${(m.logoA||'').replace(/"/g,'&quot;')}" data-logo-b="${(m.logoB||'').replace(/"/g,'&quot;')}" title="Set as current match">Set Live</button>
+    </div>`
+  ).join('');
+  list.querySelectorAll('.nxgen-set-live-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      send('set_team', { side: 'blue',   name: btn.dataset.teamA, ...(btn.dataset.logoA ? { logo: btn.dataset.logoA } : {}) });
+      send('set_team', { side: 'orange', name: btn.dataset.teamB, ...(btn.dataset.logoB ? { logo: btn.dataset.logoB } : {}) });
+    });
+  });
+}
+
+window._handleNxgenResult = function(data) {
+  const r = el('nxgen-result');
+  if (r) {
+    r._userMsg = true;
+    r.style.color = data.ok ? '#86efac' : '#f87171';
+    r.textContent = data.message || '';
+    setTimeout(() => { r._userMsg = false; }, 5000);
+  }
+  const status = el('ev-load-status');
+  if (status && _evActivePlatform === 'nxgen') {
+    status.style.color = data.ok ? '#86efac' : '#f87171';
+    status.textContent = data.message || '';
+    setTimeout(() => { status.style.color = ''; status.textContent = 'Imports teams, bracket & match queue.'; }, 4000);
+  }
+};
+
+function renderDashNxgenQueue(queue, fetchedAt) {
+  const container = el('dash-nxgen-queue');
+  const status    = el('dash-nxgen-queue-status');
+  if (!container) return;
+  const open = (queue || []).filter(m => m.status !== 'completed');
+  if (!open.length) {
+    container.innerHTML = '<div style="font-size:12px; color:var(--muted); padding:4px 0;">No open matches.</div>';
+  } else {
+    container.innerHTML = '';
+    open.slice(0, 6).forEach(m => {
+      const row = document.createElement('div');
+      row.style.cssText = `display:flex; align-items:center; gap:8px; padding:4px 6px; border-radius:5px; background:rgba(255,255,255,.04); margin-bottom:4px; border:1px solid ${m.live ? 'rgba(236,72,153,.3)' : 'var(--border)'};`;
+      row.innerHTML = `
+        ${m.live ? '<span style="font-size:9px; font-weight:700; color:#ec4899; flex-shrink:0;">LIVE</span>' : `<span style="font-size:9px; color:var(--muted); flex-shrink:0;">R${m.round || '?'}</span>`}
+        <span style="flex:1; font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(m.teamA || 'TBD')} <span style="color:var(--muted);">vs</span> ${escapeHtml(m.teamB || 'TBD')}</span>
+        <button class="btn btn-ghost btn-xs nxgen-dash-set-live" style="flex-shrink:0;">Set Live</button>`;
+      row.querySelector('.nxgen-dash-set-live').addEventListener('click', () => {
+        send('set_team', { side: 'blue',   name: m.teamA || '', ...(m.logoA ? { logo: m.logoA } : {}) });
+        send('set_team', { side: 'orange', name: m.teamB || '', ...(m.logoB ? { logo: m.logoB } : {}) });
+      });
+      container.appendChild(row);
+    });
+  }
+  if (status && fetchedAt) status.textContent = `Updated ${new Date(fetchedAt).toLocaleTimeString()}`;
+}
 
 // ── Facecams: mode selector & grid logic ─────────────────────────────────
 let facecamMode = 3; // default 3v3
@@ -6871,7 +8337,7 @@ function wireSggEventPicker() {
         resultsDiv.style.display = 'block';
         return;
       }
-      resultsDiv.innerHTML = '<div class="ev-dropdown-msg">Loading your tournaments…</div>';
+      resultsDiv.innerHTML = '<div class="ev-dropdown-msg">Loading your start.gg tournaments…</div>';
       resultsDiv.style.display = 'block';
       const token = (el('input-startgg-token')?.value.trim()) || currentState.startgg?.apiToken || '';
       try {
@@ -6965,26 +8431,23 @@ function wireSggEventPicker() {
          || (el('sgg-tournament')?.value || '').trim()
          || (el('startgg-event-slug')?.value || '').trim()
          || (currentState.startgg?.eventSlug || currentState.startgg?.tournamentSlug || '').trim());
-    if (!input) { showToast('Paste a start.gg link, or pick a tournament from the search.', '#f59e0b'); return; }
+    if (!input) { showToast('Paste a tournament link, or pick a tournament from the search.', '#f59e0b'); return; }
     loadStartggEvent(input);
   });
-
-  const clearDash = el('btn-clear-sgg-teams-dash');
-  if (clearDash) clearDash.addEventListener('click', () => clearStartggTeams());
 
   // Teams tab bulk actions
   const saveAll = el('btn-save-all-sgg-teams');
   if (saveAll) saveAll.addEventListener('click', () => {
     const teams = currentState.startgg?.eventTeams || [];
     if (!teams.length) { showToast('No event teams to save.', '#f59e0b'); return; }
-    appConfirm(`Save all ${teams.length} start.gg teams into Saved Teams?`, 'Save All', false).then(ok => { if (!ok) return; send('save_startgg_teams_bulk', { names: teams.map(t => t.name) }); });
+    appConfirm(`Save all ${teams.length} event teams into Saved Teams?`, 'Save All', false).then(ok => { if (!ok) return; send('save_startgg_teams_bulk', { names: teams.map(t => t.name) }); });
   });
 
   const massDel = el('btn-mass-delete-sgg-teams');
   if (massDel) massDel.addEventListener('click', () => {
     const teams = currentState.startgg?.eventTeams || [];
     if (!teams.length) return;
-    appConfirm(`Delete all ${teams.length} start.gg event teams? (Saved teams are unaffected)`, 'Delete All').then(ok => { if (!ok) return; send('mass_delete_startgg_teams', {}); });
+    appConfirm(`Delete all ${teams.length} event teams? (Saved teams are unaffected)`, 'Delete All').then(ok => { if (!ok) return; send('mass_delete_startgg_teams', {}); });
   });
 }
 
@@ -7010,8 +8473,8 @@ function renderEvDropdownResults(tournaments, filterQuery) {
 
   if (!filtered.length) {
     container.innerHTML = filterQuery
-      ? `<div class="ev-dropdown-msg">No match for "<strong>${filterQuery}</strong>" — press Enter to search all of start.gg</div>`
-      : '<div class="ev-dropdown-msg">No admin tournaments found. Press Enter to search start.gg.</div>';
+      ? `<div class="ev-dropdown-msg">No match for "<strong>${filterQuery}</strong>" — press Enter to search all tournaments</div>`
+      : '<div class="ev-dropdown-msg">No admin tournaments found. Press Enter to search.</div>';
     return;
   }
 
@@ -7147,6 +8610,333 @@ async function searchTournamentsInto(query, container) {
 
 // Wire once
 wireSggEventPicker();
+
+// ── Tournament platform picker (platform tabs + Challonge + unified Load/Clear) ──────────────
+let _evActivePlatform = 'startgg';
+let _evChallongeSlug = '';
+let _evChalMyTourneys = null;
+let _evChalSearchTimer = null;
+let _evNxgenSlug = '';
+let _evNxgenSearchTimer = null;
+
+function updateEvTokenBadge() {
+  const badge = el('ev-token-badge');
+  if (!badge) return;
+  if (_evActivePlatform === 'startgg') {
+    badge.style.display = currentState.startgg?.hasToken ? 'none' : '';
+  } else if (_evActivePlatform === 'challonge') {
+    badge.style.display = currentState.challonge?.hasKey ? 'none' : '';
+  } else if (_evActivePlatform === 'nxgen') {
+    badge.style.display = currentState.nxgen?.hasKey ? 'none' : '';
+  }
+}
+
+// Platform tab switching
+document.querySelectorAll('.ev-plat-tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    _evActivePlatform = tab.dataset.plat;
+    document.querySelectorAll('.ev-plat-tab').forEach(t => t.classList.toggle('ev-plat-tab--active', t === tab));
+    const sggPanel   = el('ev-plat-panel-startgg');
+    const chalPanel  = el('ev-plat-panel-challonge');
+    const nxgenPanel = el('ev-plat-panel-nxgen');
+    if (sggPanel)   sggPanel.style.display   = _evActivePlatform === 'startgg'   ? '' : 'none';
+    if (chalPanel)  chalPanel.style.display  = _evActivePlatform === 'challonge' ? '' : 'none';
+    if (nxgenPanel) nxgenPanel.style.display = _evActivePlatform === 'nxgen'     ? '' : 'none';
+    updateEvTokenBadge();
+  });
+});
+
+// Unified Load Event button
+el('btn-load-event-dash')?.addEventListener('click', () => {
+  const status = el('ev-load-status');
+  if (_evActivePlatform === 'startgg') {
+    const typed = (el('sgg-event-search')?.value || '').trim();
+    const input = looksLikeStartggLink(typed)
+      ? typed
+      : (_evSelectedSlug || (el('sgg-tournament')?.value || '').trim()
+         || (currentState.startgg?.eventSlug || currentState.startgg?.tournamentSlug || '').trim());
+    if (!input) { showToast('Paste a tournament link, or pick a tournament from the search.', '#f59e0b'); return; }
+    loadStartggEvent(input);
+  } else if (_evActivePlatform === 'challonge') {
+    if (!_evChallongeSlug) { showToast('Pick a Challonge tournament from the search first.', '#f59e0b'); return; }
+    if (status) status.textContent = 'Loading…';
+    send('load_challonge_tournament', { slug: _evChallongeSlug });
+  } else if (_evActivePlatform === 'nxgen') {
+    const slug = (_evNxgenSlug || (el('ev-nxgen-search')?.value || '').trim() || (currentState.nxgen?.eventSlug || '').trim());
+    if (!slug) { showToast('Enter an event slug or search for a NXGEN event.', '#f59e0b'); return; }
+    if (status) status.textContent = 'Loading…';
+    send('load_nxgen_event', { slug });
+  }
+});
+
+// Unified Clear button
+el('btn-clear-event-dash')?.addEventListener('click', () => {
+  send('clear_active_event', {});
+  clearStartggTeams();
+  _evChallongeSlug = '';
+  const chalSearch = el('ev-challonge-search');
+  if (chalSearch) { chalSearch.value = ''; }
+  if (el('ev-challonge-clear')) el('ev-challonge-clear').style.display = 'none';
+  if (el('ev-challonge-results')) el('ev-challonge-results').style.display = 'none';
+  _evNxgenSlug = '';
+  const nxgenSearch = el('ev-nxgen-search');
+  if (nxgenSearch) { nxgenSearch.value = ''; }
+  if (el('ev-nxgen-clear')) el('ev-nxgen-clear').style.display = 'none';
+  if (el('ev-nxgen-results')) el('ev-nxgen-results').style.display = 'none';
+  if (el('dash-active-event')) el('dash-active-event').style.display = 'none';
+  const status = el('ev-load-status');
+  if (status) status.textContent = 'Imports teams, bracket & match queue.';
+});
+
+// Clear active event card button
+el('ev-active-clear')?.addEventListener('click', () => {
+  send('clear_active_event', {});
+  if (el('dash-active-event')) el('dash-active-event').style.display = 'none';
+});
+
+// Challonge auto-follow toggle (dashboard)
+el('challonge-autofollow')?.addEventListener('change', (e) => {
+  send('set_challonge_auto_follow', { enabled: e.target.checked });
+});
+
+el('nxgen-autofollow')?.addEventListener('change', (e) => {
+  send('set_nxgen_auto_follow', { enabled: e.target.checked });
+});
+
+// Challonge search wiring
+(function wireChallongeEventPicker() {
+  const searchInput = el('ev-challonge-search');
+  const resultsDiv = el('ev-challonge-results');
+  const clearBtn = el('ev-challonge-clear');
+  if (!searchInput || !resultsDiv) return;
+
+  async function loadChalTournaments() {
+    resultsDiv.innerHTML = '<div class="ev-dropdown-msg">Loading your Challonge tournaments…</div>';
+    resultsDiv.style.display = 'block';
+    try {
+      const resp = await fetch('http://localhost:3000/api/challonge/my-tournaments', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+      const data = await resp.json();
+      _evChalMyTourneys = resp.ok ? (data.tournaments || []) : [];
+      renderChalDropdown(_evChalMyTourneys, '');
+    } catch (e) {
+      _evChalMyTourneys = [];
+      resultsDiv.innerHTML = `<div class="ev-dropdown-msg" style="color:#ef4444;">Error: ${e.message}</div>`;
+    }
+  }
+
+  searchInput.addEventListener('focus', () => {
+    if (!currentState.challonge?.hasKey) {
+      resultsDiv.innerHTML = '<div class="ev-dropdown-msg" style="color:#f59e0b;">Add a Challonge API key in Integrations first.</div>';
+      resultsDiv.style.display = 'block';
+      return;
+    }
+    if (_evChalMyTourneys !== null) {
+      renderChalDropdown(_evChalMyTourneys, searchInput.value.trim().toLowerCase());
+      resultsDiv.style.display = 'block';
+      return;
+    }
+    loadChalTournaments();
+  });
+
+  searchInput.addEventListener('input', () => {
+    const q = searchInput.value.trim();
+    if (clearBtn) clearBtn.style.display = q ? 'block' : 'none';
+    clearTimeout(_evChalSearchTimer);
+    _evChalSearchTimer = setTimeout(() => {
+      if (_evChalMyTourneys !== null) renderChalDropdown(_evChalMyTourneys, q.toLowerCase());
+    }, 60);
+  });
+
+  if (clearBtn) clearBtn.addEventListener('click', () => {
+    searchInput.value = '';
+    clearBtn.style.display = 'none';
+    _evChallongeSlug = '';
+    if (_evChalMyTourneys !== null) renderChalDropdown(_evChalMyTourneys, '');
+    searchInput.focus();
+  });
+
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('#ev-challonge-search-wrap') && !e.target.closest('#ev-challonge-results')) {
+      resultsDiv.style.display = 'none';
+    }
+  }, true);
+})();
+
+function renderChalDropdown(tournaments, filterQuery) {
+  const container = el('ev-challonge-results');
+  if (!container) return;
+  const filtered = filterQuery
+    ? tournaments.filter(t => (t.name || '').toLowerCase().includes(filterQuery) || (t.slug || '').toLowerCase().includes(filterQuery))
+    : tournaments;
+  if (!filtered.length) {
+    container.innerHTML = filterQuery
+      ? `<div class="ev-dropdown-msg">No match for "<strong>${escapeHtml(filterQuery)}</strong>"</div>`
+      : '<div class="ev-dropdown-msg">No Challonge tournaments found.</div>';
+    container.style.display = 'block';
+    return;
+  }
+  container.innerHTML = '';
+  if (!filterQuery) {
+    const hdr = document.createElement('div');
+    hdr.className = 'ev-dropdown-section-hdr';
+    hdr.textContent = 'My Challonge Tournaments';
+    container.appendChild(hdr);
+  }
+  filtered.forEach(t => {
+    const row = document.createElement('div');
+    row.className = 'ev-dropdown-row';
+    const stateColors = { underway: '#10b981', pending: '#f59e0b', ended: '#6b7280' };
+    const stateColor = stateColors[t.state] || '#6b7280';
+    row.innerHTML = `
+      <div class="ev-dropdown-logo-ph"><svg viewBox="0 0 20 20" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="10" cy="10" r="8"/><path d="M10 6v4l3 2" stroke-linecap="round"/></svg></div>
+      <div class="ev-dropdown-info">
+        <div class="ev-dropdown-name">${escapeHtml(t.name || t.slug || '')}</div>
+        <div class="ev-dropdown-meta">${[t.type, t.gameName, t.participantsCount ? `${t.participantsCount} teams` : ''].filter(Boolean).map(escapeHtml).join(' · ')}</div>
+      </div>
+      <span class="ev-dropdown-badge" style="background:rgba(0,0,0,.2); color:${stateColor}; text-transform:capitalize;">${escapeHtml(t.state || '')}</span>`;
+    row.addEventListener('click', () => {
+      el('ev-challonge-search').value = t.name || t.slug;
+      if (el('ev-challonge-clear')) el('ev-challonge-clear').style.display = 'block';
+      container.style.display = 'none';
+      _evChallongeSlug = t.slug || '';
+      const status = el('ev-load-status');
+      if (status) status.textContent = `"${t.name || t.slug}" selected — click Load Event`;
+    });
+    container.appendChild(row);
+  });
+  container.style.display = 'block';
+}
+
+// NXGEN event search wiring
+(function wireNxgenEventPicker() {
+  const searchInput = el('ev-nxgen-search');
+  const resultsDiv  = el('ev-nxgen-results');
+  const clearBtn    = el('ev-nxgen-clear');
+  if (!searchInput || !resultsDiv) return;
+
+  async function fetchNxgenEvents(query) {
+    resultsDiv.innerHTML = '<div class="ev-dropdown-msg">Searching NXGEN events…</div>';
+    resultsDiv.style.display = 'block';
+    try {
+      const resp = await fetch('http://localhost:3000/api/nxgen/events', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ limit: 30, includePast: true })
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error || 'Request failed');
+      renderNxgenDropdown(data.events || [], query.toLowerCase());
+    } catch (e) {
+      resultsDiv.innerHTML = `<div class="ev-dropdown-msg" style="color:#ef4444;">Error: ${escapeHtml(e.message)}</div>`;
+    }
+  }
+
+  searchInput.addEventListener('focus', () => {
+    if (!currentState.nxgen?.hasKey) {
+      resultsDiv.innerHTML = '<div class="ev-dropdown-msg" style="color:#f59e0b;">Add a NXGEN API key in Integrations first.</div>';
+      resultsDiv.style.display = 'block';
+      return;
+    }
+    fetchNxgenEvents(searchInput.value.trim());
+    resultsDiv.style.display = 'block';
+  });
+
+  searchInput.addEventListener('input', () => {
+    const q = searchInput.value.trim();
+    if (clearBtn) clearBtn.style.display = q ? 'block' : 'none';
+    clearTimeout(_evNxgenSearchTimer);
+    _evNxgenSearchTimer = setTimeout(() => fetchNxgenEvents(q), 250);
+  });
+
+  if (clearBtn) clearBtn.addEventListener('click', () => {
+    searchInput.value = '';
+    clearBtn.style.display = 'none';
+    _evNxgenSlug = '';
+    resultsDiv.style.display = 'none';
+    searchInput.focus();
+  });
+
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('#ev-nxgen-search-wrap') && !e.target.closest('#ev-nxgen-results')) {
+      resultsDiv.style.display = 'none';
+    }
+  }, true);
+})();
+
+function renderNxgenDropdown(events, filterQuery) {
+  const container = el('ev-nxgen-results');
+  if (!container) return;
+  const filtered = filterQuery
+    ? events.filter(ev => (ev.name || '').toLowerCase().includes(filterQuery) || (ev.slug || '').toLowerCase().includes(filterQuery) || (ev.activity || '').toLowerCase().includes(filterQuery))
+    : events;
+  if (!filtered.length) {
+    container.innerHTML = filterQuery
+      ? `<div class="ev-dropdown-msg">No match for "<strong>${escapeHtml(filterQuery)}</strong>"</div>`
+      : '<div class="ev-dropdown-msg">No NXGEN events found.</div>';
+    container.style.display = 'block';
+    return;
+  }
+  container.innerHTML = '';
+  if (!filterQuery) {
+    const hdr = document.createElement('div');
+    hdr.className = 'ev-dropdown-section-hdr';
+    hdr.textContent = 'NXGEN Events';
+    container.appendChild(hdr);
+  }
+  const statusColors = { active: '#10b981', upcoming: '#f59e0b', completed: '#6b7280' };
+  filtered.forEach(ev => {
+    const row = document.createElement('div');
+    row.className = 'ev-dropdown-row';
+    const sc = statusColors[ev.status] || '#6b7280';
+    const logoHtml = ev.coverImage
+      ? `<img class="ev-dropdown-logo" src="${ev.coverImage}" alt="" onerror="this.style.display='none'">`
+      : `<div class="ev-dropdown-logo-ph"><svg viewBox="0 0 20 20" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 5l7 5-7 5V5z"/></svg></div>`;
+    row.innerHTML = `${logoHtml}
+      <div class="ev-dropdown-info">
+        <div class="ev-dropdown-name">${escapeHtml(ev.name || ev.slug || '')}</div>
+        <div class="ev-dropdown-meta">${[ev.activity, ev.eventDate, ev.participantCount ? `${ev.participantCount} participants` : ''].filter(Boolean).map(escapeHtml).join(' · ')}</div>
+      </div>
+      <span class="ev-dropdown-badge" style="background:rgba(0,0,0,.2); color:${sc}; text-transform:capitalize;">${escapeHtml(ev.status || '')}</span>`;
+    row.addEventListener('click', () => {
+      searchInput.value = ev.name || ev.slug;
+      if (clearBtn) clearBtn.style.display = 'block';
+      container.style.display = 'none';
+      _evNxgenSlug = ev.slug || '';
+      const status = el('ev-load-status');
+      if (status) status.textContent = `"${ev.name || ev.slug}" selected — click Load Event`;
+    });
+    container.appendChild(row);
+  });
+  container.style.display = 'block';
+}
+
+function renderDashChallongeQueue(queue, fetchedAt) {
+  const container = el('dash-challonge-queue');
+  const status = el('dash-challonge-queue-status');
+  if (!container) return;
+  const open = (queue || []).filter(m => ['open', 'pending'].includes(m.state));
+  if (!open.length) {
+    container.innerHTML = '<div style="font-size:12px; color:var(--muted); padding:4px 0;">No open matches.</div>';
+  } else {
+    container.innerHTML = '';
+    open.slice(0, 6).forEach(m => {
+      const row = document.createElement('div');
+      row.style.cssText = `display:flex; align-items:center; gap:8px; padding:4px 6px; border-radius:5px; background:rgba(255,255,255,.04); margin-bottom:4px; border:1px solid ${m.live ? 'rgba(236,72,153,.3)' : 'var(--border)'};`;
+      row.innerHTML = `
+        ${m.live ? '<span style="font-size:9px; font-weight:700; color:#ec4899; flex-shrink:0;">LIVE</span>' : `<span style="font-size:9px; color:var(--muted); flex-shrink:0;">${escapeHtml(m.identifier || 'M')}</span>`}
+        <span style="flex:1; font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(m.teamA || 'TBD')} <span style="color:var(--muted);">vs</span> ${escapeHtml(m.teamB || 'TBD')}</span>
+        <button class="btn btn-ghost btn-xs chal-dash-set-live" style="flex-shrink:0;">Set Live</button>`;
+      row.querySelector('.chal-dash-set-live').addEventListener('click', () => {
+        send('set_team', { side: 'blue',   name: m.teamA || '', ...(m.logoA ? { logo: m.logoA } : {}) });
+        send('set_team', { side: 'orange', name: m.teamB || '', ...(m.logoB ? { logo: m.logoB } : {}) });
+      });
+      container.appendChild(row);
+    });
+  }
+  if (status && fetchedAt) {
+    status.textContent = `Updated ${new Date(fetchedAt).toLocaleTimeString()}`;
+  }
+}
 
 // ── Production: Casters ─────────────────────────────────────────────────────
 const CASTER_SOCIAL_OPTIONS = [
@@ -7618,8 +9408,9 @@ function renderVetoManager(data) {
   }
 }
 
-// ── Guided champion draft manager ───────────────────────────────────────────
+// ── Guided champion/hero Pick & Ban draft manager ────────────────────────────
 let _draftGameInit = false;
+
 function submitDraftPick() {
   const inp = el('draft-input'); if (!inp) return;
   const name = (inp.value || '').trim(); if (!name) return;
@@ -7635,91 +9426,161 @@ el('btn-draft-reset')?.addEventListener('click', () => send('draft_reset', {}));
 el('btn-draft-show')?.addEventListener('click', () => send('draft_visible', { visible: true }));
 el('btn-draft-hide')?.addEventListener('click', () => send('draft_visible', { visible: false }));
 el('draft-game')?.addEventListener('change', () => renderDraftManager(currentState));
+el('draft-auto')?.addEventListener('change', function () { send('lol_draft_auto', { enabled: this.checked }); });
+// LoL champ-select automation status (off | no-client | connected | idle | drafting | error).
+function draftAutoStatusText(status, detail) {
+  const map = { off: '', 'no-client': '⚠ League client not detected', connected: 'Client connected', idle: 'Connected — waiting for champ select…', drafting: '● Drafting live', error: '⚠ Connection error' };
+  const base = (map[status] != null) ? map[status] : (status || '');
+  return base ? (detail ? base + ' · ' + detail : base) : '';
+}
+el('draft-search')?.addEventListener('input', function () {
+  const q = this.value.trim().toLowerCase();
+  document.querySelectorAll('#draft-grid .dm-hero').forEach((cell) => { cell.style.display = (!q || cell.dataset.name.includes(q)) ? '' : 'none'; });
+});
 
 function renderDraftManager(data) {
   const sel = el('draft-game'); if (!sel) return;
   const dGames = data.draftGames || [];
   const games = data.games || {};
+
+  // Populate game dropdown once
   if (!_draftGameInit && dGames.length) {
     sel.innerHTML = '';
     dGames.forEach(g => { const o = document.createElement('option'); o.value = g; o.textContent = (games[g] && games[g].name) || g; sel.appendChild(o); });
-    if (dGames.includes(data.activeGame)) sel.value = data.activeGame;
     _draftGameInit = true;
-  }
-  const selGame = sel.value || dGames[0] || '';
-  const blue = (data.teams?.blue?.name) || 'Blue';
-  const orange = (data.teams?.orange?.name) || 'Orange';
-  const sideName = (s) => s === 'b' ? orange : blue;
-  const sideColor = (s) => s === 'b' ? (data.teams?.orange?.color || '#e97139') : (data.teams?.blue?.color || '#055fdb');
-  const startSel = el('draft-start');
-  if (startSel) { startSel.options[0].textContent = 'Blue side: ' + blue; startSel.options[1].textContent = 'Blue side: ' + orange; }
-
-  // Typeahead champion list for the selected game.
-  const dl = el('draft-champs');
-  if (dl && dl.dataset.game !== selGame) {
-    dl.dataset.game = selGame;
-    dl.innerHTML = '';
-    ((data.draftRosters && data.draftRosters[selGame]) || []).forEach(c => { const o = document.createElement('option'); o.value = c.name; dl.appendChild(o); });
   }
 
   const d = data.draft || {};
-  const turnEl = el('draft-turn'); const board = el('draft-board'); const inp = el('draft-input');
-  const active = Array.isArray(d.sequence) && d.sequence.length;
+  const draftActive = Array.isArray(d.sequence) && d.sequence.length > 0;
 
-  if (turnEl) {
-    if (!active) turnEl.textContent = 'Choose a game, then Start Draft.';
-    else if (d.turn && d.turn.team) {
-      const a = d.turn.action; const n = (d.ops || []).filter(o => o.by === d.turn.team && o.action === a).length + 1;
-      turnEl.innerHTML = `<b style="color:${sideColor(d.turn.team)}">${sideName(d.turn.team)}</b> to <span class="${a}">${a.toUpperCase()}</span> (${a} ${n})`;
-    } else turnEl.innerHTML = `<span class="done">Draft complete</span>`;
+  // Auto-follow active game when no draft is running
+  if (!draftActive && dGames.includes(data.activeGame)) sel.value = data.activeGame;
+
+  const selGame = sel.value || dGames[0] || '';
+
+  // LoL champ-select automation toggle — only shown for League.
+  const isLeague = selGame === 'league';
+  const autoWrap = el('draft-auto-wrap'), autoChk = el('draft-auto'), autoStat = el('draft-auto-status');
+  const auto = d.auto || {};
+  if (autoWrap) autoWrap.style.display = isLeague ? '' : 'none';
+  if (autoStat) autoStat.style.display = isLeague ? '' : 'none';
+  if (autoChk && document.activeElement !== autoChk) autoChk.checked = !!auto.enabled;
+  if (autoStat) autoStat.textContent = isLeague && auto.enabled ? draftAutoStatusText(auto.status, auto.statusDetail) : '';
+
+  const blueColor   = (data.teams?.blue?.color)   || '#2f8dff';
+  const orangeColor = (data.teams?.orange?.color)  || '#f0444e';
+  const blueTeam    = (data.teams?.blue?.name)     || 'Blue';
+  const orangeTeam  = (data.teams?.orange?.name)   || 'Orange';
+  const sideColor   = (s) => s === 'b' ? orangeColor : blueColor;
+  const sideName    = (s) => s === 'b' ? orangeTeam  : blueTeam;
+
+  // Column headers
+  const colAName = el('dm-col-a-name'); const colBName = el('dm-col-b-name');
+  if (colAName) { colAName.textContent = blueTeam;   colAName.style.color = blueColor; }
+  if (colBName) { colBName.textContent = orangeTeam; colBName.style.color = orangeColor; }
+
+  // Side select labels
+  const startSel = el('draft-start');
+  if (startSel && startSel.options.length >= 2) {
+    startSel.options[0].textContent = blueTeam   + ' goes first';
+    startSel.options[1].textContent = orangeTeam + ' goes first';
   }
-  if (inp) inp.disabled = !active || !d.turn;
 
+  // Typeahead datalist
+  const dl = el('draft-champs');
+  if (dl && dl.dataset.game !== selGame) {
+    dl.dataset.game = selGame; dl.innerHTML = '';
+    ((data.draftRosters && data.draftRosters[selGame]) || []).forEach(c => { const o = document.createElement('option'); o.value = c.name; dl.appendChild(o); });
+  }
+
+  // Turn banner
+  const turnDot = el('draft-turn-dot'); const turnLbl = el('draft-turn');
+  if (turnLbl) {
+    if (!draftActive) {
+      turnLbl.textContent = 'Choose a game and click Start Draft.';
+      if (turnDot) turnDot.style.background = '#555';
+    } else if (d.turn && d.turn.team) {
+      const a = d.turn.action;
+      const n = (d.ops || []).filter(o => o.by === d.turn.team && o.action === a).length + 1;
+      const c = sideColor(d.turn.team);
+      if (turnDot) turnDot.style.background = c;
+      turnLbl.innerHTML = `<b style="color:${c}">${sideName(d.turn.team)}</b> to <span class="act-${a}">${a.toUpperCase()}</span> (${a} ${n})`;
+    } else {
+      if (turnDot) turnDot.style.background = '#ffd34d';
+      turnLbl.innerHTML = '<span class="act-done">Draft complete!</span>';
+    }
+  }
+
+  const inp = el('draft-input');
+  if (inp) inp.disabled = !draftActive || !d.turn;
+
+  // Active column highlight
+  const colA = el('dm-col-a'); const colB = el('dm-col-b');
+  if (colA) colA.classList.toggle('active-col', !!(draftActive && d.turn && d.turn.team === 'a'));
+  if (colB) colB.classList.toggle('active-col', !!(draftActive && d.turn && d.turn.team === 'b'));
+
+  // Board slots — rebuild when sequence/ops/turn/game changes
+  const board = el('draft-board');
   if (board) {
-    const sig = JSON.stringify({ ops: d.ops, turn: d.turn });
+    const sig = JSON.stringify({ seq: (d.sequence || []).map(s => s.by + s.action), ops: d.ops, turn: d.turn, game: selGame });
     if (board.dataset.sig !== sig) {
       board.dataset.sig = sig;
-      board.innerHTML = '';
       ['a', 'b'].forEach(side => {
-        const ops = (d.ops || []).filter(o => o.by === side);
-        const bans = ops.filter(o => o.action === 'ban').map(o => o.name);
-        const picks = ops.filter(o => o.action === 'pick').map(o => o.name);
-        const turnAct = d.turn && d.turn.team === side ? d.turn.action : '';
-        const col = document.createElement('div'); col.className = 'dm-side' + (side === 'b' ? ' red' : '');
-        const rows = (label, arr, count, cls, act) => {
-          let html = `<div style="color:${sideColor(side)}; font-weight:800; font-size:11px; letter-spacing:1px;">${label}</div><div class="dm-rows">`;
-          for (let i = 0; i < count; i++) {
-            const isActive = turnAct === act && i === arr.length;
-            const txt = arr[i] || (isActive ? '▸ …' : '—');
-            html += `<div class="${arr[i] ? cls : 'empty'}${isActive ? ' slot-active' : ''}">${txt}</div>`;
-          }
-          return html + '</div>';
-        };
-        const banCount = (d.sequence || []).filter(s => s.by === side && s.action === 'ban').length;
-        const pickCount = (d.sequence || []).filter(s => s.by === side && s.action === 'pick').length;
-        col.innerHTML = `<h4 style="color:${sideColor(side)}">${sideName(side)}</h4>`
-          + (banCount ? rows('Bans', bans, banCount, 'b', 'ban') : '')
-          + (banCount && pickCount ? '<div style="height:8px"></div>' : '')
-          + (pickCount ? rows('Picks', picks, pickCount, '', 'pick') : '');
-        board.appendChild(col);
+        const bansEl  = el('dm-bans-'  + side);
+        const picksEl = el('dm-picks-' + side);
+        if (!bansEl || !picksEl) return;
+        const color     = sideColor(side);
+        const banOps    = (d.ops || []).filter(o => o.by === side && o.action === 'ban');
+        const pickOps   = (d.ops || []).filter(o => o.by === side && o.action === 'pick');
+        const banTotal  = (d.sequence || []).filter(s => s.by === side && s.action === 'ban').length;
+        const pickTotal = (d.sequence || []).filter(s => s.by === side && s.action === 'pick').length;
+        const turnHere  = draftActive && d.turn && d.turn.team === side;
+
+        // Ban row (thumbnail squares with greyscale + red tint when filled)
+        bansEl.innerHTML = '';
+        for (let i = 0; i < banTotal; i++) {
+          const op = banOps[i];
+          const isActive = turnHere && d.turn.action === 'ban' && i === banOps.length;
+          const slot = document.createElement('div');
+          slot.className = 'dm-ban-slot' + (op ? ' filled' : '') + (isActive ? ' slot-active' : '');
+          slot.title = op ? op.name : '';
+          if (op && op.image) { const img = document.createElement('img'); img.src = 'http://localhost:3000' + op.image; img.alt = op.name; slot.appendChild(img); }
+          bansEl.appendChild(slot);
+        }
+
+        // Pick column (portrait rows with team colour accent)
+        picksEl.innerHTML = '';
+        for (let i = 0; i < pickTotal; i++) {
+          const op = pickOps[i];
+          const isActive = turnHere && d.turn.action === 'pick' && i === pickOps.length;
+          const slot = document.createElement('div');
+          slot.className = 'dm-pick-slot' + (op ? '' : ' empty') + (isActive ? ' slot-active' : '');
+          const accent = document.createElement('div'); accent.className = 'dm-pick-accent'; accent.style.background = op ? color : 'transparent';
+          slot.appendChild(accent);
+          if (op && op.image) { const img = document.createElement('img'); img.src = 'http://localhost:3000' + op.image; img.alt = op.name || ''; slot.appendChild(img); }
+          const nm = document.createElement('div'); nm.className = 'dp-name'; nm.textContent = op ? op.name : (isActive ? 'selecting…' : '');
+          slot.appendChild(nm);
+          picksEl.appendChild(slot);
+        }
       });
     }
   }
-  renderDraftGrid(data, selGame, d, active);
+
+  renderDraftGrid(data, selGame, d, draftActive);
 }
 
-// Visual clickable hero/champion grid for the draft (click a portrait to lock it on the current turn).
 function renderDraftGrid(data, selGame, d, active) {
   const grid = el('draft-grid'); if (!grid) return;
   const roster = (data.draftRosters && data.draftRosters[selGame]) || [];
   const search = el('draft-search');
   if (grid.dataset.game !== selGame) {
-    grid.dataset.game = selGame;
-    grid.innerHTML = '';
+    grid.dataset.game = selGame; grid.innerHTML = '';
     roster.forEach((c) => {
       const cell = document.createElement('div');
-      cell.className = 'dm-hero'; cell.dataset.name = c.name.toLowerCase(); cell.title = c.name;
-      cell.innerHTML = (c.image ? `<img src="${c.image}" alt="" loading="lazy">` : '') + `<div class="dm-hero-nm">${c.name}</div>`;
+      cell.className = 'dm-hero' + (c.image ? '' : ' no-img');
+      cell.dataset.name = c.name.toLowerCase(); cell.title = c.name;
+      if (c.image) { const img = document.createElement('img'); img.src = 'http://localhost:3000' + c.image; img.alt = ''; img.loading = 'lazy'; cell.appendChild(img); }
+      const nm = document.createElement('div'); nm.className = 'dm-hero-nm'; nm.textContent = c.name; cell.appendChild(nm);
       cell.addEventListener('click', () => { if (!cell.classList.contains('used') && !grid.classList.contains('disabled')) send('draft_action', { name: c.name }); });
       grid.appendChild(cell);
     });
@@ -7730,10 +9591,6 @@ function renderDraftGrid(data, selGame, d, active) {
   grid.querySelectorAll('.dm-hero').forEach((cell) => cell.classList.toggle('used', used.has(cell.dataset.name)));
   grid.classList.toggle('disabled', !(active && d.turn));
 }
-el('draft-search')?.addEventListener('input', function () {
-  const q = this.value.trim().toLowerCase();
-  document.querySelectorAll('#draft-grid .dm-hero').forEach((cell) => { cell.style.display = (!q || cell.dataset.name.includes(q)) ? '' : 'none'; });
-});
 
 // ── Overwatch 2 hero ban manager ────────────────────────────────────────────
 const OW_HEROES_BY_ROLE = {
@@ -8307,6 +10164,11 @@ const ICON_SVG = {
   external: '<path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>',
   grip: '<circle cx="9" cy="6" r="1"/><circle cx="9" cy="12" r="1"/><circle cx="9" cy="18" r="1"/><circle cx="15" cy="6" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="15" cy="18" r="1"/>',
   camera: '<path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/><circle cx="12" cy="13" r="3"/>',
+  x:        '<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
+  calendar: '<rect width="18" height="18" x="3" y="4" rx="2"/><line x1="16" x2="16" y1="2" y2="6"/><line x1="8" x2="8" y1="2" y2="6"/><line x1="3" x2="21" y1="10" y2="10"/>',
+  layout:   '<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M3 9h18"/><path d="M9 21V9"/>',
+  monitor:  '<rect width="20" height="14" x="2" y="3" rx="2"/><path d="M8 21h8"/><path d="M12 17v4"/>',
+  list:     '<line x1="8" x2="21" y1="6" y2="6"/><line x1="8" x2="21" y1="12" y2="12"/><line x1="8" x2="21" y1="18" y2="18"/><line x1="3" x2="3.01" y1="6" y2="6"/><line x1="3" x2="3.01" y1="12" y2="12"/><line x1="3" x2="3.01" y1="18" y2="18"/>',
 };
 function svgIcon(key, cls) {
   return `<svg class="svg-ico${cls ? ' ' + cls : ''}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICON_SVG[key] || ''}</svg>`;
@@ -8355,7 +10217,7 @@ const SCENE_SOURCES = [
   { group: 'Bracket & Veto', icon: 'trophy', items: [
     { name: 'Bracket', path: '/bracket.html', live: 'bracket.visible', desc: 'Live bracket — elim columns or standings table.' },
     { name: 'Standings', path: '/standings.html', live: 'standings.visible', desc: 'Dedicated standings leaderboard (auto from bracket or manual).' },
-    { name: 'Upcoming Matches', path: '/upcoming.html', live: 'upcoming.visible', desc: 'Next matches from start.gg stream queue or manual entry.' },
+    { name: 'Upcoming Matches', path: '/schedule.html', live: 'upcoming.visible', desc: 'Next matches from start.gg stream queue or manual entry.' },
     { name: 'Map Veto', path: '/mapscreen.html', live: 'veto.visible', desc: 'Pick/ban board for CS2 / Valorant-style series.' },
   ]},
   { group: 'Replays', icon: 'film', items: [
@@ -9087,8 +10949,9 @@ function evActivateEvent(d, e) {
       b.style.borderBottomColor = active ? 'var(--cp-accent)' : 'transparent';
       b.style.color = active ? 'var(--text)' : 'var(--muted)';
     });
-    const csvPane = el('import-tab-csv'), sggPane = el('import-tab-startgg');
+    const csvPane = el('import-tab-csv'), sggPane = el('import-tab-startgg'), jsonPane = el('import-tab-json');
     if (csvPane) csvPane.style.display = tab === 'csv' ? '' : 'none';
+    if (jsonPane) jsonPane.style.display = tab === 'json' ? '' : 'none';
     if (sggPane) sggPane.style.display = tab === 'startgg' ? '' : 'none';
   }
 
@@ -9108,21 +10971,23 @@ function evActivateEvent(d, e) {
   });
 })();
 
-// ── Export Teams as CSV ────────────────────────────────────────────────────
+// ── Export Teams as JSON (full backup — includes logos + player info) ───────
+// CSV can't carry images, so the export is JSON: team name/colour/logo(base64) +
+// each player's name/role/country/start.gg/6mans. Re-import via the Backup (JSON) tab.
 el('btn-teams-export')?.addEventListener('click', () => {
   const teams = (currentState && currentState.savedTeams) || [];
   if (!teams.length) { showToast('No saved teams to export.', '#f59e0b'); return; }
-  const rows = [['name', 'color', 'players...']];
-  teams.forEach((t) => {
-    const players = (t.players || []).map((p) => p.name || '').filter(Boolean);
-    rows.push([t.name || '', t.color || '', ...players]);
-  });
-  const csv = rows.map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\r\n');
-  const blob = new Blob([csv], { type: 'text/csv' });
+  const out = teams.map((t) => ({
+    name: t.name || '', color: t.color || '', logo: t.logo || null, favorite: !!t.favorite,
+    players: (t.players || []).map((p) => ({ name: p.name || '', role: p.role || '', country: p.country || '', startgg: p.startgg || '', sixmans: p.sixmans || '' }))
+  }));
+  const payload = { app: 'NE Broadcast Suite', kind: 'teams-library', version: 1, exportedAt: new Date().toISOString(), teams: out };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
-  const a = document.createElement('a'); a.href = url; a.download = 'teams.csv'; a.click();
+  const a = document.createElement('a'); a.href = url; a.download = 'teams-library.json'; a.click();
   URL.revokeObjectURL(url);
-  showToast(`Exported ${teams.length} team${teams.length !== 1 ? 's' : ''}`, '#22c55e');
+  const withLogos = teams.filter((t) => t.logo).length;
+  showToast(`Exported ${teams.length} team${teams.length !== 1 ? 's' : ''}${withLogos ? ` (${withLogos} with logos)` : ''}`, '#22c55e');
 });
 
 // Teams page — pull rosters straight from a start.gg event into the library.
@@ -9209,23 +11074,712 @@ function renderMyEvents() {
       + `<div class="me-sub">${esc(sub)}</div><div class="me-meta">${evSyncBadge(ev)}</div></div>`;
     const acts = document.createElement('div'); acts.className = 'me-acts';
     const mk = (cls, label, fn, title) => { const b = document.createElement('button'); b.className = cls; b.innerHTML = label; if (title) b.title = title; b.addEventListener('click', fn); return b; };
+    // Core actions (always visible)
     acts.appendChild(mk('btn btn-primary btn-sm', isLive ? 'Reload' : 'Set live', () => {
       send('activate_startgg_event', { eventSlug: ev.eventSlug, tournamentSlug: ev.tournamentSlug });
     }, 'Make this the broadcast event — imports teams + bracket + queue'));
     acts.appendChild(mk('btn btn-secondary btn-sm', 'Seeding', () => openSeedingStudio(ev), 'Open the seeding studio for this event'));
     acts.appendChild(mk('btn btn-secondary btn-sm', 'Pre-load teams', () => send('import_startgg_teams', { eventSlug: ev.eventSlug }), 'Import this event\'s entrants into your team library'));
-    const refr = mk('btn btn-ghost btn-sm', '↻', () => { refr.disabled = true; refr.textContent = '…'; send('refresh_my_event', { id: ev.id }); setTimeout(() => { refr.disabled = false; refr.innerHTML = '↻'; }, 2500); }, 'Refresh this event from start.gg now');
+    const refr = mk('btn btn-ghost btn-sm', '↻', () => { refr.disabled = true; refr.textContent = '…'; send('refresh_my_event', { id: ev.id }); setTimeout(() => { refr.disabled = false; refr.innerHTML = '↻'; }, 2500); }, 'Refresh this event from the platform now');
     acts.appendChild(refr);
-    acts.appendChild(mk('btn btn-ghost btn-sm', 'start.gg ↗', () => window.open('https://www.start.gg/' + ev.eventSlug, '_blank', 'noopener'), 'Open on start.gg'));
+    acts.appendChild(mk('btn btn-ghost btn-sm', 'View event ↗', () => window.open('https://www.start.gg/' + ev.eventSlug, '_blank', 'noopener'), 'Open on platform'));
+
+    // Platform-linking sub-row — hidden until the gear (settings) button reveals it.
+    const linkRow = document.createElement('div'); linkRow.className = 'me-linking';
+    const isSynced = !!(ev.challongeSync && ev.challongeSync.slug);
+    linkRow.style.display = isSynced ? 'flex' : 'none';   // auto-open when already linked
+    const gear = mk('btn btn-ghost btn-sm me-gear', '⚙ Link platform', () => {
+      const show = linkRow.style.display === 'none';
+      linkRow.style.display = show ? 'flex' : 'none';
+      gear.classList.toggle('is-on', show);
+    }, 'Link / sync this event to another platform (Challonge)');
+    gear.classList.toggle('is-on', isSynced);
+    acts.appendChild(gear);
+
     const del = mk('btn btn-ghost btn-sm me-del', '✕', () => {
       if (del.dataset.armed) { send('remove_my_event', { id: ev.id }); return; }
       del.dataset.armed = '1'; del.textContent = 'Remove?'; setTimeout(() => { del.removeAttribute('data-armed'); del.textContent = '✕'; }, 2600);
     }, 'Remove from My Events');
     acts.appendChild(del);
+
+    // Linking actions live in the sub-row: the full push/sync workflow + link-existing + unlink.
+    linkRow.appendChild(mk('btn btn-blue btn-sm', 'Push / Sync to Challonge', () => openEvSyncModal(ev),
+      'Full workflow: download start.gg data, map players via CSV, create/select a Challonge event, push seeding, keep scores synced live'));
+    linkRow.appendChild(mk('btn btn-ghost btn-sm', 'Link existing', () => openChalLinkModal(ev), 'Link an existing Challonge tournament for real-time score sync'));
+    if (isSynced) {
+      const linkBadge = document.createElement('span');
+      linkBadge.style.cssText = 'font-size:10px;padding:2px 7px;border-radius:3px;background:rgba(16,185,129,.15);color:#86efac;white-space:nowrap;cursor:default;align-self:center;';
+      const errMark = ev.challongeSync.lastError ? ' !' : (ev.challongeSync.enabled ? '' : ' (paused)');
+      linkBadge.textContent = `Synced: ${ev.challongeSync.slug}${errMark}`;
+      if (ev.challongeSync.lastError) linkBadge.title = ev.challongeSync.lastError;
+      linkRow.appendChild(linkBadge);
+      const unlink = mk('btn btn-ghost btn-sm', 'Unlink', () => {
+        if (unlink.dataset.armed) { send('unlink_event_challonge', { eventId: ev.id }); return; }
+        unlink.dataset.armed = '1'; unlink.textContent = 'Confirm?'; setTimeout(() => { delete unlink.dataset.armed; unlink.textContent = 'Unlink'; }, 2400);
+      }, 'Remove the real-time Challonge sync link for this event');
+      linkRow.appendChild(unlink);
+    }
+
     card.appendChild(acts);
+    card.appendChild(linkRow);
     list.appendChild(card);
   });
 }
+// ── Cross-Platform Event Sync Modal ───────────────────────────────────────────
+
+let _evSyncEvent = null;             // My Event being synced
+let _evSyncMappings = {};            // name.toLowerCase() → challongeUsername from CSV upload
+let _evSyncParticipants = [];        // resolved participant list (shown in preview)
+let _evSyncChalTournaments = null;   // cached Challonge tournament list for the existing picker
+let _evSyncChalSearchTimer = null;
+let _evSyncLinkedSlug = '';          // slug selected from the existing-tournament picker
+
+function openEvSyncModal(ev) {
+  _evSyncEvent = ev;
+  _evSyncMappings = {};
+  _evSyncChalTournaments = null; // force fresh tournament list on open
+  _evSyncLinkedSlug = (ev.challongeSync && ev.challongeSync.slug) || '';
+
+  // Resolve participants from seeding studio data or roster
+  _evSyncParticipants = resolveEvSyncParticipants(ev);
+
+  // Pre-fill fields from event data
+  const nameInp = el('ev-sync-t-name');
+  const slugInp = el('ev-sync-t-slug');
+  const gameInp = el('ev-sync-t-game');
+  const titleEl = el('ev-sync-modal-title');
+
+  if (titleEl) titleEl.textContent = `Push "${ev.name || 'Event'}" to Platform`;
+  if (nameInp) nameInp.value = ev.name || '';
+  if (slugInp) {
+    const autoSlug = (ev.name || 'event').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 55);
+    slugInp.value = autoSlug;
+    evSyncUpdateSlugPreview(autoSlug);
+  }
+  if (gameInp) gameInp.value = ev.game || '';
+
+  // Source info bar
+  const srcEl = el('ev-sync-source-info');
+  if (srcEl) {
+    const n = _evSyncParticipants.length;
+    const seeded = _evSyncParticipants.filter(p => p.seed).length;
+    srcEl.innerHTML = `<strong style="color:var(--fg);">${escapeHtml(ev.name || '')}</strong>&nbsp;·&nbsp;start.gg&nbsp;·&nbsp;${n} participant${n !== 1 ? 's' : ''}${seeded ? `&nbsp;·&nbsp;${seeded} seeded` : ''}`;
+  }
+
+  // Select mode: switch to "existing" if this event already has a Challonge link
+  if (_evSyncLinkedSlug) {
+    const modeExisting = el('ev-sync-mode-existing');
+    if (modeExisting) { modeExisting.checked = true; evSyncToggleMode('existing'); }
+    // Pre-fill picker with the existing link
+    const chalSearch = el('ev-sync-chal-search');
+    if (chalSearch) chalSearch.value = _evSyncLinkedSlug;
+    const chalClear = el('ev-sync-chal-clear');
+    if (chalClear) chalClear.style.display = 'block';
+    const selDiv = el('ev-sync-chal-selected');
+    if (selDiv) {
+      const sync = ev.challongeSync || {};
+      const lastSync = sync.lastSyncAt ? ` · Last sync: ${new Date(sync.lastSyncAt).toLocaleTimeString()}` : '';
+      const errPart = sync.lastError ? ` · Error: ${escapeHtml(sync.lastError)}` : '';
+      selDiv.innerHTML = `Linked: <strong style="color:var(--fg);">challonge.com/${escapeHtml(_evSyncLinkedSlug)}</strong>${lastSync}${errPart}`;
+      selDiv.style.display = '';
+    }
+    const autoSync = el('ev-sync-autosync');
+    if (autoSync) autoSync.checked = !!(ev.challongeSync && ev.challongeSync.enabled);
+  } else {
+    const modeCreate = el('ev-sync-mode-create');
+    if (modeCreate) { modeCreate.checked = true; evSyncToggleMode('create'); }
+    const chalSearch = el('ev-sync-chal-search');
+    if (chalSearch) chalSearch.value = '';
+    const selDiv = el('ev-sync-chal-selected');
+    if (selDiv) selDiv.style.display = 'none';
+    const chalClear = el('ev-sync-chal-clear');
+    if (chalClear) chalClear.style.display = 'none';
+  }
+
+  // Clear CSV status + log
+  const csvSt = el('ev-sync-csv-status'); if (csvSt) csvSt.textContent = '';
+  const logEl = el('ev-sync-log'); if (logEl) logEl.textContent = '';
+
+  evSyncRenderPreview();
+  el('ev-sync-modal').removeAttribute('hidden');
+}
+
+function resolveEvSyncParticipants(ev) {
+  // Try seeding studio data first (has seedNum)
+  const seedEntrants = ev.seeding && Array.isArray(ev.seeding.entrants) ? ev.seeding.entrants : [];
+  if (seedEntrants.length > 0) {
+    return seedEntrants
+      .slice()
+      .sort((a, b) => (a.seedNum || 9999) - (b.seedNum || 9999))
+      .map((e, i) => ({
+        name: e.name || '',
+        seed: e.seedNum || (i + 1),
+        players: (e.players || []).map(p => p.gamerTag).filter(Boolean)
+      }));
+  }
+  // Fall back to roster
+  const roster = Array.isArray(ev.roster) ? ev.roster : [];
+  if (roster.length > 0) {
+    return roster.map((t, i) => ({
+      name: t.name || t.teamName || '',
+      seed: i + 1,
+      players: Array.isArray(t.players) ? t.players.map(p => p.gamerTag || p.name).filter(Boolean) : []
+    }));
+  }
+  return [];
+}
+
+function evSyncToggleMode(mode) {
+  const createFields   = el('ev-sync-create-fields');
+  const existingFields = el('ev-sync-existing-fields');
+  if (createFields)   createFields.style.display   = mode === 'create'   ? '' : 'none';
+  if (existingFields) existingFields.style.display  = mode === 'existing' ? '' : 'none';
+}
+
+function evSyncUpdateSlugPreview(raw) {
+  const clean = (raw || '').toLowerCase().replace(/[^a-z0-9_]/g, '_').replace(/__+/g, '_').replace(/^_|_$/g, '').slice(0, 60);
+  const prev = el('ev-sync-slug-preview'); if (prev) prev.textContent = clean || '…';
+}
+
+function evSyncRenderPreview() {
+  const label = el('ev-sync-preview-label');
+  const container = el('ev-sync-preview');
+  if (!container) return;
+  const list = _evSyncParticipants;
+  if (label) label.textContent = `Participants (${list.length})`;
+  if (!list.length) {
+    container.innerHTML = '<div style="font-size:12px; color:var(--muted); padding:6px;">No participants found — open Seeding or Pre-load Teams first to populate the list.</div>';
+    return;
+  }
+  container.innerHTML = list.map((p, i) => {
+    const mapped = _evSyncMappings[(p.name || '').toLowerCase()];
+    const sub = p.players.length ? `<span style="color:var(--muted);">${p.players.slice(0,3).map(escapeHtml).join(', ')}${p.players.length>3?'…':''}</span>` : '';
+    const userBadge = mapped ? `<span style="font-size:10px; padding:1px 6px; border-radius:3px; background:rgba(74,222,128,.15); color:#86efac; flex-shrink:0;">@${escapeHtml(mapped)}</span>` : '';
+    return `<div style="display:flex; align-items:center; gap:8px; padding:3px 6px; border-radius:4px; background:rgba(255,255,255,.025);">
+      <span style="font-size:10px; color:var(--muted); width:22px; text-align:right; flex-shrink:0;">${p.seed}</span>
+      <span style="flex:1; font-size:12px; font-weight:600;">${escapeHtml(p.name)}</span>
+      ${sub}
+      ${userBadge}
+    </div>`;
+  }).join('');
+}
+
+// CSV parsing for username mapping
+function parseEvSyncCsv(text) {
+  const lines = text.trim().split(/\r?\n/);
+  if (!lines.length) return {};
+  // Detect header
+  const header = lines[0].split(',').map(h => h.trim().toLowerCase().replace(/[^a-z0-9_]/g, ''));
+  const nameIdx = header.findIndex(h => ['name','team','teamname','player','gamertag'].includes(h));
+  const userIdx = header.findIndex(h => ['challonge_username','challongeusername','username','challonge'].includes(h));
+  const map = {};
+  const start = (nameIdx >= 0 && userIdx >= 0) ? 1 : 0; // skip header if detected
+  for (let i = start; i < lines.length; i++) {
+    const cols = lines[i].split(',').map(c => c.trim().replace(/^"|"$/g, ''));
+    if (!cols.length || !cols[0]) continue;
+    const ni = nameIdx >= 0 ? nameIdx : 0;
+    const ui = userIdx >= 0 ? userIdx : 1;
+    const name = (cols[ni] || '').trim();
+    const username = (cols[ui] || '').trim();
+    if (name && username) map[name.toLowerCase()] = username;
+  }
+  return map;
+}
+
+async function evSyncPush() {
+  const logEl   = el('ev-sync-log');
+  const pushBtn = el('ev-sync-push-btn');
+  const setLog  = (msg, ok) => { if (logEl) { logEl.textContent = msg; logEl.style.color = ok === false ? '#f87171' : ok === true ? '#86efac' : 'var(--muted)'; } };
+
+  const mode = document.querySelector('input[name="ev-sync-mode"]:checked')?.value || 'create';
+  const startBracket = !!el('ev-sync-start-bracket')?.checked;
+
+  if (!_evSyncParticipants.length) { setLog('No participants to push.', false); return; }
+  if (!currentState.challonge?.hasKey) { setLog('Add your Challonge API key in Settings → Integrations first.', false); return; }
+
+  if (pushBtn) { pushBtn.disabled = true; pushBtn.textContent = 'Pushing…'; }
+
+  try {
+    let slug;
+
+    if (mode === 'create') {
+      const name = (el('ev-sync-t-name')?.value || '').trim();
+      const rawSlug = (el('ev-sync-t-slug')?.value || '').trim();
+      const type = el('ev-sync-t-type')?.value || 'single elimination';
+      const gameName = (el('ev-sync-t-game')?.value || '').trim();
+      const isPrivate = !!el('ev-sync-t-private')?.checked;
+      if (!name) throw new Error('Enter a tournament name.');
+      if (!rawSlug) throw new Error('Enter a URL slug.');
+
+      setLog('Creating tournament…', null);
+      const cr = await fetch('http://localhost:3000/api/challonge/create-tournament', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, slug: rawSlug, tournamentType: type, gameName, private: isPrivate })
+      }).then(r => r.json());
+      if (!cr.ok) throw new Error(cr.error || 'Failed to create tournament');
+      slug = cr.slug;
+      setLog(`Tournament created: challonge.com/${slug}`, null);
+    } else {
+      // Use slug from the picker (preferred) or whatever is typed in the search input
+      slug = _evSyncLinkedSlug || (el('ev-sync-chal-search')?.value || '').trim().replace(/^https?:\/\/[^/]*challonge\.com\//,'').replace(/\/$/, '');
+      if (!slug) throw new Error('Select a tournament from the list first.');
+    }
+
+    const clearExisting = mode === 'existing' && !!el('ev-sync-clear-existing')?.checked;
+
+    // Build participant payload with mappings
+    const participants = _evSyncParticipants.map(p => ({
+      name: p.name,
+      seed: p.seed,
+      challongeUsername: _evSyncMappings[(p.name || '').toLowerCase()] || null
+    }));
+
+    setLog(`Syncing ${participants.length} participants…`, null);
+    // eventSlug lets the server override each seed with start.gg's TRUE bracket seed (initialSeedNum)
+    // instead of trusting locally-cached roster/seeding-studio order, which can drift from what
+    // actually produced the real bracket's bye placement.
+    const sr = await fetch('http://localhost:3000/api/challonge/sync-participants', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tournamentSlug: slug, participants, clearExisting, eventSlug: _evSyncEvent && _evSyncEvent.eventSlug })
+    }).then(r => r.json());
+    // The route reports the real reason in .message (a summary) and .errors (per-chunk detail) —
+    // it never sets .error, so checking only sr.error silently discarded the actual cause.
+    const syncErrText = sr.message || (Array.isArray(sr.errors) && sr.errors.join('; ')) || sr.error || '';
+    // Re-pushing to a tournament that already has its bracket started fails to (re-)add
+    // participants — expected, not fatal. But the EXISTING bracket may have been seeded wrong
+    // (e.g. from before this fix), producing a different shape than start.gg's real bracket, which
+    // would silently block every result from matching. So actively REPAIR it: reset, re-apply the
+    // true seed to every participant, and regenerate — rather than just skipping past the problem.
+    const alreadySetUp = /no longer be added|already been taken|already exist/i.test(syncErrText);
+    if (!sr.ok && !sr.added && !alreadySetUp) throw new Error(syncErrText || 'Sync failed (no detail returned)');
+
+    if (alreadySetUp && _evSyncEvent && _evSyncEvent.eventSlug) {
+      setLog('Bracket already started — repairing seeds & regenerating to match start.gg…', null);
+      const rb = await fetch('http://localhost:3000/api/challonge/rebuild-bracket', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tournamentSlug: slug, eventSlug: _evSyncEvent.eventSlug })
+      }).then(r => r.json());
+      if (!rb.ok) throw new Error(rb.error || 'Failed to rebuild bracket');
+      setLog(rb.message || 'Bracket rebuilt.', null);
+    } else if (startBracket) {
+      setLog('Generating bracket…', null);
+      const br = await fetch('http://localhost:3000/api/challonge/start-bracket', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tournamentSlug: slug })
+      }).then(r => r.json());
+      // "Already started" is likewise non-fatal here (e.g. an existing tournament whose bracket
+      // was generated outside this app) — fall through to the results backfill either way.
+      if (!br.ok && !/already.*start|state/i.test(br.error || '')) throw new Error(br.error || 'Failed to start bracket');
+    }
+
+    // Backfill any COMPLETED start.gg results onto the Challonge bracket. For a finished PAST
+    // event this fills in the entire bracket in one shot; for a future/current event with nothing
+    // played yet it's a harmless no-op (results then flow live via the auto-sync link below).
+    let resultsPushed = 0;
+    if (_evSyncEvent && _evSyncEvent.eventSlug) {
+      setLog('Pulling match results from start.gg…', null);
+      try {
+        const pr = await fetch('http://localhost:3000/api/challonge/push-results', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ tournamentSlug: slug, eventSlug: _evSyncEvent.eventSlug })
+        }).then(r => r.json());
+        if (pr.ok) resultsPushed = pr.pushed || 0;
+      } catch (e) { /* non-fatal — participants/bracket are already pushed */ }
+    }
+
+    // Link for live auto-sync. A freshly CREATED tournament is always linked (you built it to run it
+    // live); for an EXISTING tournament, link only when the "keep synced" box is ticked.
+    const autoSync = (mode === 'create') || (mode === 'existing' && !!el('ev-sync-autosync')?.checked);
+    if (autoSync && _evSyncEvent && slug) {
+      send('link_event_challonge', { eventId: _evSyncEvent.id, challongeSlug: slug, enabled: true });
+    }
+
+    const viewUrl = `https://challonge.com/${slug}`;
+    const autoMsg = autoSync ? ' · Auto-sync enabled.' : '';
+    const resMsg = resultsPushed ? ` · ${resultsPushed} result(s) filled in.` : '';
+    setLog(`Done! ${sr.message || ''}${resMsg}${autoMsg}`, true);
+    if (pushBtn) { pushBtn.textContent = 'View on Challonge ↗'; pushBtn.onclick = () => window.open(viewUrl, '_blank', 'noopener'); pushBtn.disabled = false; }
+  } catch (e) {
+    setLog(e.message, false);
+    if (pushBtn) { pushBtn.disabled = false; pushBtn.textContent = 'Push to Challonge'; }
+  }
+}
+
+// ── Challonge Link Modal — lightweight "just search, pick & link" ─────────────
+
+let _chalLinkEvent = null;
+let _chalLinkSlug = '';
+let _chalLinkTournaments = null;
+let _chalLinkSearchTimer = null;
+
+function openChalLinkModal(ev) {
+  _chalLinkEvent = ev;
+  _chalLinkSlug = (ev.challongeSync && ev.challongeSync.slug) || '';
+  _chalLinkTournaments = null;
+
+  const titleEl = el('ev-chal-link-title');
+  if (titleEl) titleEl.textContent = `Link Challonge: ${ev.name || 'Event'}`;
+
+  const curDiv = el('ev-chal-link-current');
+  if (curDiv) {
+    if (_chalLinkSlug) { curDiv.textContent = `Currently linked: challonge.com/${_chalLinkSlug}`; curDiv.style.display = ''; }
+    else curDiv.style.display = 'none';
+  }
+
+  const srch = el('ev-chal-link-search');
+  if (srch) srch.value = '';
+  const clr = el('ev-chal-link-clear');
+  if (clr) clr.style.display = 'none';
+  const res = el('ev-chal-link-results');
+  if (res) res.style.display = 'none';
+  const sel = el('ev-chal-link-selected');
+  if (sel) sel.style.display = 'none';
+  const logEl = el('ev-chal-link-log');
+  if (logEl) logEl.textContent = '';
+  const btn = el('ev-chal-link-btn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Link tournament'; }
+  const commInp = el('ev-chal-link-community');
+  if (commInp && !commInp.value) commInp.value = localStorage.getItem('ne_challonge_community') || '';
+
+  el('ev-chal-link-modal').removeAttribute('hidden');
+  setTimeout(() => el('ev-chal-link-search')?.focus(), 80);
+}
+
+function renderChalLinkDropdown(tournaments, filterQuery) {
+  const container = el('ev-chal-link-results');
+  if (!container) return;
+  const filtered = filterQuery
+    ? tournaments.filter(t => (t.name || '').toLowerCase().includes(filterQuery) || (t.slug || '').toLowerCase().includes(filterQuery))
+    : tournaments;
+  if (!filtered.length) {
+    container.innerHTML = filterQuery
+      ? `<div class="ev-dropdown-msg">No match for "${escapeHtml(filterQuery)}"</div>`
+      : '<div class="ev-dropdown-msg">No Challonge tournaments found.</div>';
+    container.style.display = 'block';
+    return;
+  }
+  container.innerHTML = '';
+  filtered.forEach(t => {
+    const row = document.createElement('div');
+    row.className = 'ev-dropdown-row';
+    row.innerHTML = _chalTournamentRowHtml(t);
+    row.addEventListener('click', () => {
+      const si = el('ev-chal-link-search');
+      if (si) si.value = t.name || t.slug;
+      const cb = el('ev-chal-link-clear');
+      if (cb) cb.style.display = 'block';
+      container.style.display = 'none';
+      _chalLinkSlug = t.slug || '';
+      const selDiv = el('ev-chal-link-selected');
+      if (selDiv) {
+        const pCount = t.participantsCount ? ` · ${t.participantsCount} participants` : '';
+        const stLabel = t.state ? ` · ${t.state}` : '';
+        selDiv.innerHTML = `<strong style="color:var(--fg);">challonge.com/${escapeHtml(_chalLinkSlug)}</strong>${pCount}${stLabel}`;
+        selDiv.style.display = '';
+      }
+      const btn = el('ev-chal-link-btn');
+      if (btn) btn.disabled = false;
+    });
+    container.appendChild(row);
+  });
+  container.style.display = 'block';
+}
+
+(function wireChalLinkModal() {
+  ['ev-chal-link-close', 'ev-chal-link-cancel'].forEach(id => {
+    el(id)?.addEventListener('click', () => el('ev-chal-link-modal').setAttribute('hidden', ''));
+  });
+  el('ev-chal-link-modal')?.addEventListener('click', e => {
+    if (e.target === el('ev-chal-link-modal')) el('ev-chal-link-modal').setAttribute('hidden', '');
+  });
+
+  const searchInput = el('ev-chal-link-search');
+  const resultsDiv  = el('ev-chal-link-results');
+  const clearBtn    = el('ev-chal-link-clear');
+  if (!searchInput || !resultsDiv) return;
+
+  async function loadLinkTournaments() {
+    resultsDiv.innerHTML = '<div class="ev-dropdown-msg">Loading your Challonge tournaments…</div>';
+    resultsDiv.style.display = 'block';
+    try {
+      const community = (el('ev-chal-link-community')?.value || '').trim();
+      if (community) localStorage.setItem('ne_challonge_community', community);
+      const subdomains = community ? [community] : [];
+      const resp = await fetch('http://localhost:3000/api/challonge/my-tournaments', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ subdomains }) });
+      const data = await resp.json();
+      _chalLinkTournaments = resp.ok ? (data.tournaments || []) : [];
+      renderChalLinkDropdown(_chalLinkTournaments, '');
+      if (data.subdomainErrors?.length) {
+        const errEl = el('ev-chal-link-results');
+        if (errEl) errEl.insertAdjacentHTML('beforeend', data.subdomainErrors.map(e => `<div class="ev-dropdown-msg" style="color:#f59e0b;">Community "${escapeHtml(e.subdomain)}": ${escapeHtml(e.error)}</div>`).join(''));
+      }
+    } catch (e) {
+      _chalLinkTournaments = [];
+      resultsDiv.innerHTML = `<div class="ev-dropdown-msg" style="color:#ef4444;">Error: ${escapeHtml(e.message)}</div>`;
+    }
+  }
+
+  // Restore saved community from localStorage
+  const savedComm = localStorage.getItem('ne_challonge_community') || '';
+  if (savedComm) { const ci = el('ev-chal-link-community'); if (ci) ci.value = savedComm; }
+
+  el('ev-chal-link-community-reload')?.addEventListener('click', () => {
+    _chalLinkTournaments = null;
+    loadLinkTournaments();
+  });
+
+  searchInput.addEventListener('focus', () => {
+    if (!currentState.challonge?.hasKey) {
+      resultsDiv.innerHTML = '<div class="ev-dropdown-msg" style="color:#f59e0b;">Add a Challonge API key in Integrations first.</div>';
+      resultsDiv.style.display = 'block';
+      return;
+    }
+    if (_chalLinkTournaments !== null) {
+      renderChalLinkDropdown(_chalLinkTournaments, searchInput.value.trim().toLowerCase());
+      resultsDiv.style.display = 'block';
+      return;
+    }
+    loadLinkTournaments();
+  });
+
+  searchInput.addEventListener('input', () => {
+    const q = searchInput.value.trim();
+    if (clearBtn) clearBtn.style.display = q ? 'block' : 'none';
+    clearTimeout(_chalLinkSearchTimer);
+    _chalLinkSearchTimer = setTimeout(() => {
+      if (_chalLinkTournaments !== null) renderChalLinkDropdown(_chalLinkTournaments, q.toLowerCase());
+    }, 60);
+  });
+
+  if (clearBtn) clearBtn.addEventListener('click', () => {
+    searchInput.value = '';
+    clearBtn.style.display = 'none';
+    _chalLinkSlug = '';
+    const selDiv = el('ev-chal-link-selected');
+    if (selDiv) selDiv.style.display = 'none';
+    const btn = el('ev-chal-link-btn');
+    if (btn) btn.disabled = true;
+    if (_chalLinkTournaments !== null) renderChalLinkDropdown(_chalLinkTournaments, '');
+    searchInput.focus();
+  });
+
+  document.addEventListener('click', e => {
+    if (!e.target.closest('#ev-chal-link-wrap') && !e.target.closest('#ev-chal-link-results')) {
+      resultsDiv.style.display = 'none';
+    }
+  }, true);
+
+  el('ev-chal-link-btn')?.addEventListener('click', () => {
+    const btn   = el('ev-chal-link-btn');
+    const logEl = el('ev-chal-link-log');
+    const setLog = (msg, ok) => { if (logEl) { logEl.textContent = msg; logEl.style.color = ok === false ? '#f87171' : ok ? '#86efac' : 'var(--muted)'; } };
+    if (!_chalLinkSlug || !_chalLinkEvent) { setLog('Select a tournament first.', false); return; }
+    if (btn) { btn.disabled = true; btn.textContent = 'Linking…'; }
+    setLog('Building participant map…', null);
+    // Use a one-shot listener so we know when this specific link-result comes back
+    const onMsg = (e2) => {
+      try {
+        const m = JSON.parse(e2.data);
+        if (m.type !== 'link-result') return;
+        ws.removeEventListener('message', onMsg);
+        if (m.data.ok && !m.data.loading) {
+          setLog(m.data.message || 'Linked!', true);
+          const curDiv = el('ev-chal-link-current');
+          if (curDiv) { curDiv.textContent = `Linked: challonge.com/${_chalLinkSlug}`; curDiv.style.display = ''; }
+          if (btn) { btn.textContent = 'Linked'; }
+          setTimeout(() => el('ev-chal-link-modal').setAttribute('hidden', ''), 1200);
+        } else if (!m.data.ok) {
+          setLog(m.data.message || 'Failed.', false);
+          if (btn) { btn.disabled = false; btn.textContent = 'Link tournament'; }
+        }
+      } catch {}
+    };
+    ws.addEventListener('message', onMsg);
+    send('link_event_challonge', { eventId: _chalLinkEvent.id, challongeSlug: _chalLinkSlug, enabled: true });
+  });
+})();
+
+function _chalTournamentRowHtml(t) {
+  const stateColors = { underway: '#10b981', pending: '#f59e0b', ended: '#9ca3af' };
+  const stateBg     = { underway: 'rgba(16,185,129,0.15)', pending: 'rgba(245,158,11,0.15)', ended: 'rgba(107,114,128,0.2)' };
+  const sc  = stateColors[t.state] || '#9ca3af';
+  const sbg = stateBg[t.state]    || 'rgba(107,114,128,0.2)';
+  const meta = [
+    t.type ? t.type.replace(/_/g, ' ') : '',
+    t.gameName || '',
+    t.participantsCount ? `${t.participantsCount} teams` : '',
+    t.subdomain ? `${t.subdomain}/…` : '',
+  ].filter(Boolean).map(escapeHtml).join(' · ');
+  // Letter avatar: first alphanumeric character, skip symbols like [$
+  const letter = (((t.name || t.slug || '').match(/[A-Za-z0-9]/) || ['?'])[0]).toUpperCase();
+  let hash = 0;
+  for (let i = 0; i < (t.name || '').length; i++) hash = ((hash << 5) - hash + (t.name || '').charCodeAt(i)) | 0;
+  const hue = Math.abs(hash) % 360;
+  const avBg  = `hsl(${hue},45%,22%)`;
+  const avClr = `hsl(${hue},70%,72%)`;
+  const avatarHtml = `<div class="ev-dropdown-logo-ph" style="background:${avBg};color:${avClr};font-size:15px;font-weight:700;">${escapeHtml(letter)}</div>`;
+  const logoHtml = t.logo
+    ? `<img class="ev-dropdown-logo" src="${escapeHtml(t.logo)}" alt="" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">${avatarHtml.replace('style="', 'style="display:none;')}`
+    : avatarHtml;
+  return `${logoHtml}<div class="ev-dropdown-info"><div class="ev-dropdown-name">${escapeHtml(t.name || t.slug || '')}</div><div class="ev-dropdown-meta">${meta}</div></div><span class="ev-dropdown-badge" style="background:${sbg};color:${sc};text-transform:capitalize;">${escapeHtml(t.state || '')}</span>`;
+}
+
+function renderEvSyncChalDropdown(tournaments, filterQuery) {
+  const container = el('ev-sync-chal-results');
+  if (!container) return;
+  const filtered = filterQuery
+    ? tournaments.filter(t => (t.name || '').toLowerCase().includes(filterQuery) || (t.slug || '').toLowerCase().includes(filterQuery))
+    : tournaments;
+  if (!filtered.length) {
+    container.innerHTML = filterQuery
+      ? `<div class="ev-dropdown-msg">No match for "${escapeHtml(filterQuery)}"</div>`
+      : '<div class="ev-dropdown-msg">No Challonge tournaments found.</div>';
+    container.style.display = 'block';
+    return;
+  }
+  container.innerHTML = '';
+  filtered.forEach(t => {
+    const row = document.createElement('div');
+    row.className = 'ev-dropdown-row';
+    row.innerHTML = _chalTournamentRowHtml(t);
+    row.addEventListener('click', () => {
+      const srch = el('ev-sync-chal-search');
+      if (srch) srch.value = t.name || t.slug;
+      const clr = el('ev-sync-chal-clear');
+      if (clr) clr.style.display = 'block';
+      container.style.display = 'none';
+      _evSyncLinkedSlug = t.slug || '';
+      const selDiv = el('ev-sync-chal-selected');
+      if (selDiv) {
+        const pCount = t.participantsCount ? ` · ${t.participantsCount} participants` : '';
+        selDiv.innerHTML = `Selected: <strong style="color:var(--fg);">challonge.com/${escapeHtml(_evSyncLinkedSlug)}</strong>${pCount}`;
+        selDiv.style.display = '';
+      }
+    });
+    container.appendChild(row);
+  });
+  container.style.display = 'block';
+}
+
+// Wire up modal events (runs once on load)
+(function wireEvSyncModal() {
+  // Close buttons
+  ['ev-sync-modal-close', 'ev-sync-modal-close2'].forEach(id => {
+    el(id)?.addEventListener('click', () => el('ev-sync-modal').setAttribute('hidden', ''));
+  });
+  // Click outside to close
+  el('ev-sync-modal')?.addEventListener('click', (e) => {
+    if (e.target === el('ev-sync-modal')) el('ev-sync-modal').setAttribute('hidden', '');
+  });
+
+  // Mode toggle
+  document.querySelectorAll('input[name="ev-sync-mode"]').forEach(r => {
+    r.addEventListener('change', () => evSyncToggleMode(r.value));
+  });
+
+  // Slug live preview
+  el('ev-sync-t-slug')?.addEventListener('input', () => evSyncUpdateSlugPreview(el('ev-sync-t-slug').value));
+
+  // CSV upload
+  el('ev-sync-csv-btn')?.addEventListener('click', () => el('ev-sync-csv-file')?.click());
+  el('ev-sync-csv-file')?.addEventListener('change', (e) => {
+    const file = e.target.files?.[0]; if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev2) => {
+      _evSyncMappings = parseEvSyncCsv(ev2.target.result || '');
+      const n = Object.keys(_evSyncMappings).length;
+      const st = el('ev-sync-csv-status');
+      if (st) { st.textContent = n ? `${n} mapping${n !== 1 ? 's' : ''} loaded from CSV.` : 'No valid mappings found — check your CSV has name and challonge_username columns.'; st.style.color = n ? '#86efac' : '#f59e0b'; }
+      evSyncRenderPreview();
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  });
+
+  // Push button
+  el('ev-sync-push-btn')?.addEventListener('click', evSyncPush);
+
+  // Existing-tournament picker
+  (function wireEvSyncChalPicker() {
+    const searchInput = el('ev-sync-chal-search');
+    const resultsDiv  = el('ev-sync-chal-results');
+    const clearBtn    = el('ev-sync-chal-clear');
+    if (!searchInput || !resultsDiv) return;
+
+    async function loadEvSyncTournaments() {
+      resultsDiv.innerHTML = '<div class="ev-dropdown-msg">Loading your Challonge tournaments…</div>';
+      resultsDiv.style.display = 'block';
+      try {
+        const community = (el('ev-sync-chal-community')?.value || '').trim();
+        if (community) localStorage.setItem('ne_challonge_community', community);
+        const subdomains = community ? [community] : [];
+        const resp = await fetch('http://localhost:3000/api/challonge/my-tournaments', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ subdomains }) });
+        const data = await resp.json();
+        _evSyncChalTournaments = resp.ok ? (data.tournaments || []) : [];
+        renderEvSyncChalDropdown(_evSyncChalTournaments, '');
+        if (data.subdomainErrors?.length) {
+          const errEl = el('ev-sync-chal-results');
+          if (errEl) errEl.insertAdjacentHTML('beforeend', data.subdomainErrors.map(e => `<div class="ev-dropdown-msg" style="color:#f59e0b;">Community "${escapeHtml(e.subdomain)}": ${escapeHtml(e.error)}</div>`).join(''));
+        }
+      } catch (e) {
+        _evSyncChalTournaments = [];
+        resultsDiv.innerHTML = `<div class="ev-dropdown-msg" style="color:#ef4444;">Error loading tournaments: ${escapeHtml(e.message)}</div>`;
+      }
+    }
+
+    // Restore saved community
+    const savedCommSync = localStorage.getItem('ne_challonge_community') || '';
+    if (savedCommSync) { const ci = el('ev-sync-chal-community'); if (ci) ci.value = savedCommSync; }
+
+    el('ev-sync-chal-community-reload')?.addEventListener('click', () => {
+      _evSyncChalTournaments = null;
+      loadEvSyncTournaments();
+    });
+
+    searchInput.addEventListener('focus', () => {
+      if (!currentState.challonge?.hasKey) {
+        resultsDiv.innerHTML = '<div class="ev-dropdown-msg" style="color:#f59e0b;">Add a Challonge API key in Integrations first.</div>';
+        resultsDiv.style.display = 'block';
+        return;
+      }
+      if (_evSyncChalTournaments !== null) {
+        renderEvSyncChalDropdown(_evSyncChalTournaments, searchInput.value.trim().toLowerCase());
+        resultsDiv.style.display = 'block';
+        return;
+      }
+      loadEvSyncTournaments();
+    });
+
+    searchInput.addEventListener('input', () => {
+      const q = searchInput.value.trim();
+      if (clearBtn) clearBtn.style.display = q ? 'block' : 'none';
+      clearTimeout(_evSyncChalSearchTimer);
+      _evSyncChalSearchTimer = setTimeout(() => {
+        if (_evSyncChalTournaments !== null) renderEvSyncChalDropdown(_evSyncChalTournaments, q.toLowerCase());
+      }, 60);
+    });
+
+    if (clearBtn) clearBtn.addEventListener('click', () => {
+      searchInput.value = '';
+      clearBtn.style.display = 'none';
+      _evSyncLinkedSlug = '';
+      const selDiv = el('ev-sync-chal-selected');
+      if (selDiv) selDiv.style.display = 'none';
+      if (_evSyncChalTournaments !== null) renderEvSyncChalDropdown(_evSyncChalTournaments, '');
+      searchInput.focus();
+    });
+
+    document.addEventListener('click', (e) => {
+      if (!e.target.closest('#ev-sync-chal-search-wrap') && !e.target.closest('#ev-sync-chal-results')) {
+        resultsDiv.style.display = 'none';
+      }
+    }, true);
+  })();
+})();
+
 // ── Seeding studio ───────────────────────────────────────────────────────────
 // Funneled through My Events. Pull entrants + current seeds from start.gg (events you admin) OR
 // import a CSV (outside TOs). Drag to reorder, sort, save onto the event, copy/export the list.
@@ -9240,7 +11794,8 @@ let _seedSortKey = 'rank';      // current order: rank | league | seed | name
 
 // Rank systems per title. kind 'num' = free number (MMR/Premier/Elo); 'tier' = named tiers + division.
 const SEED_RANK_MODES = {
-  'rl-6mans': { label: 'Rocket League · 6mans Tiers (S/A/B/C/D)', kind: 'tier', nodiv: true, ph: 'e.g. A or S+', tiers: ['D', 'D+', 'C', 'C+', 'B', 'B+', 'A', 'A+', 'S', 'S+'] },
+  // rl6mans ladder, worst→best (index = seed value, so higher index = better rank).
+  'rl-6mans': { label: 'Rocket League · 6mans Ranks (S>X>A>B+>B>C>D>E>H)', kind: 'tier', nodiv: true, ph: 'e.g. A, B+, H', tiers: ['H', 'E', 'D', 'C', 'B', 'B+', 'A', 'X', 'S'] },
   'rl-mmr':   { label: 'Rocket League · 6mans MMR',               kind: 'num',  ph: 'MMR e.g. 1450' },
   'rl-tier':  { label: 'Rocket League · Ranked (standard)',        kind: 'tier', ph: 'e.g. Diamond II', tiers: ['Bronze', 'Silver', 'Gold', 'Platinum', 'Diamond', 'Champion', 'Grand Champion', 'Supersonic Legend'] },
   'val':      { label: 'Valorant · Rank',           kind: 'tier', ph: 'e.g. Immortal 2', tiers: ['Iron', 'Bronze', 'Silver', 'Gold', 'Platinum', 'Diamond', 'Ascendant', 'Immortal', 'Radiant'] },
@@ -9352,9 +11907,27 @@ function seedApplyLeague() {
   _seedLeagueId = el('seed-league')?.value || '';
   const league = (currentState.leagues || []).find((l) => l.id === _seedLeagueId) || null;
   _seedRows.forEach((r) => { r.leaguePts = league ? leaguePointsByName(league, r.name) : null; });
-  const sortBtn = el('seed-sort-league'); if (sortBtn) sortBtn.style.display = league ? '' : 'none';
-  if (league) { seedSort('league'); const n = _seedRows.filter((r) => r.leaguePts != null).length; seedStatus(`${n} returning team(s) matched in "${league.name}".`); }
-  else seedRender();
+
+  const sortBtn   = el('seed-sort-league');
+  const summaryEl = el('seed-league-summary');
+  if (sortBtn) sortBtn.style.display = league ? '' : 'none';
+
+  if (league) {
+    const returning = _seedRows.filter((r) => r.leaguePts != null);
+    const newCount  = _seedRows.length - returning.length;
+    const topThree  = [...returning].sort((a, b) => (b.leaguePts || 0) - (a.leaguePts || 0)).slice(0, 3);
+    if (summaryEl) {
+      summaryEl.style.display = '';
+      summaryEl.innerHTML =
+        `<strong style="color:var(--text);">${returning.length}</strong> returning &nbsp;·&nbsp; <strong style="color:var(--text);">${newCount}</strong> new<br>` +
+        topThree.map((r) => `${tlEsc(r.name)} <span style="opacity:.6">${r.leaguePts} pts</span>`).join('<br>');
+    }
+    seedSort('league');
+    seedStatus(`${returning.length} returning from "${league.name}" seeded by points — ${newCount} new team(s) follow by rank.`, 'ok');
+  } else {
+    if (summaryEl) summaryEl.style.display = 'none';
+    seedRender();
+  }
 }
 
 function seedStatus(msg, kind) {
@@ -9440,8 +12013,10 @@ function openSeedingStudio(ev) {
 function seedFromRoster(roster) {
   _seedRows = (roster || []).map((e) => ({
     entrantId: e.entrantId || '', name: e.name || '', seedNum: e.seedNum || null,
-    players: (e.players || []).map((p) => ({ gamerTag: p.gamerTag || '', rank: '', rankValue: null })),
-    leaguePts: null,
+    players: (e.players || []).map((p) => ({ gamerTag: p.gamerTag || '', rank: '', rankValue: null,
+      epic: p.epic || '', alts: p.alts || [],
+      startggSlug: p.startggSlug || null, startggPlayerId: p.startggPlayerId || null })),
+    leaguePts: null, perfScore: null,
   }));
   if (_seedLeagueId) seedApplyLeague(); else seedRender();
 }
@@ -9454,7 +12029,10 @@ function seedMergeRoster(roster) {
     const key = e.entrantId || ('n:' + (e.name || '').toLowerCase());
     if (have.has(key)) return;
     _seedRows.push({ entrantId: e.entrantId || '', name: e.name || '', seedNum: e.seedNum || null,
-      players: (e.players || []).map((p) => ({ gamerTag: p.gamerTag || '', rank: '', rankValue: null })), leaguePts: null });
+      players: (e.players || []).map((p) => ({ gamerTag: p.gamerTag || '', rank: '', rankValue: null,
+        epic: p.epic || '', alts: p.alts || [],
+        startggSlug: p.startggSlug || null, startggPlayerId: p.startggPlayerId || null })),
+      leaguePts: null, perfScore: null });
     added++;
   });
   seedStatus(added ? `Loaded saved seeding + ${added} newly-registered team(s).` : 'Loaded your saved seeding.');
@@ -9477,9 +12055,11 @@ async function seedLoadStartgg() {
       const old = prev[e.entrantId];
       const players = (e.players || []).map((p) => {
         const op = old && (old.players || []).find((x) => x.gamerTag === p.gamerTag);
-        return { gamerTag: p.gamerTag, rank: op ? op.rank : '', rankValue: null };
+        return { gamerTag: p.gamerTag, rank: op ? op.rank : '', rankValue: null,
+          epic: p.epic || '', alts: p.alts || [],
+          startggSlug: p.startggSlug || null, startggPlayerId: p.startggPlayerId || null };
       });
-      return { entrantId: e.entrantId, name: e.name, seedNum: e.seedNum || null, players, leaguePts: null };
+      return { entrantId: e.entrantId, name: e.name, seedNum: e.seedNum || null, players, leaguePts: null, perfScore: null };
     });
     const totalPlayers = _seedRows.reduce((s, r2) => s + (r2.players || []).length, 0);
     seedRecomputeValues();
@@ -9498,13 +12078,44 @@ function seedOrderLabel() {
   const o = el('seed-orderby'); if (o) o.textContent = '— ordered by ' + lbl;
   document.querySelectorAll('.seed-sortbtn').forEach((b) => b.classList.toggle('is-on', b.dataset.sort === _seedSortKey));
 }
+// Build a profile URL from a stored value that may be a full URL OR a slug/username.
+function teStartggLink(v) { v = (v || '').trim(); return /^https?:\/\//i.test(v) ? v : 'https://www.start.gg/' + v.replace(/^\/+/, ''); }
+function teSixmansLink(v) { v = (v || '').trim(); return /^https?:\/\//i.test(v) ? v : 'https://www.rl6mans.com/profile/' + encodeURIComponent(v.toLowerCase()); }
+
+// Profile-link chips for a player (start.gg + 6mans). Accepts a gamertag string OR a
+// player object. Prefers links STORED on the player; falls back to the auto-linked
+// registry (state.playerProfiles, keyed by gamertag). Shown across seeding/team/match.
+function playerProfileChips(p) {
+  let tag = '', storedSgg = '', storedSix = '';
+  if (typeof p === 'string') tag = p;
+  else if (p) { tag = p.gamerTag || p.name || ''; storedSgg = p.startgg || ''; storedSix = p.sixmans || ''; }
+  const reg = (tag && currentState.playerProfiles) ? currentState.playerProfiles[tag.trim().toLowerCase()] : null;
+  const chips = [];
+  const sggUrl = storedSgg ? teStartggLink(storedSgg)
+    : (reg && reg.startggSlug ? 'https://www.start.gg/' + String(reg.startggSlug).replace(/^\/+/, '') : '');
+  if (sggUrl) chips.push(`<a class="pp-chip pp-sgg" href="${sggUrl}" target="_blank" title="start.gg profile"><img src="../assets/images/start.png" alt="start.gg"></a>`);
+  let sixUrl = '', sixTitle = '6mans profile';
+  if (storedSix) { sixUrl = teSixmansLink(storedSix); }
+  else if (reg && reg.sixmans && reg.sixmans.name) {
+    const s = reg.sixmans;
+    sixUrl = 'https://www.rl6mans.com/profile/' + encodeURIComponent(String(s.name).toLowerCase());
+    const meta = [s.rank, s.elo ? s.elo + ' ELO' : '', s.region].filter(Boolean).join(' · ');
+    if (meta) sixTitle = '6mans · ' + meta;
+  }
+  if (sixUrl) chips.push(`<a class="pp-chip pp-6m" href="${sixUrl}" target="_blank" title="${tlEsc(sixTitle)}"><img src="../assets/images/sixmanlogo.webp" alt="6mans"></a>`);
+  if (reg && reg.twitch) chips.push(`<a class="pp-chip pp-twitch" href="https://twitch.tv/${encodeURIComponent(reg.twitch)}" target="_blank" title="Twitch: ${tlEsc(reg.twitch)}"><svg viewBox="0 0 24 24" width="12" height="12"><path fill="currentColor" d="M11.571 4.714h1.715v5.143H11.57zm4.715 0H18v5.143h-1.714zM6 0L1.714 4.286v15.428h5.143V24l4.286-4.286h3.428L22.286 12V0zm14.571 11.143l-3.428 3.428h-3.429l-3 3v-3H6.857V1.714h13.714z"/></svg></a>`);
+  if (reg && reg.twitter) chips.push(`<a class="pp-chip pp-twitter" href="https://x.com/${encodeURIComponent(reg.twitter)}" target="_blank" title="X/Twitter: ${tlEsc(reg.twitter)}"><svg viewBox="0 0 24 24" width="12" height="12"><path fill="currentColor" d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-4.714-6.231-5.401 6.231H2.74l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg></a>`);
+  if (reg && reg.countryCode) chips.push(`<span class="pp-chip pp-flag" title="${tlEsc(reg.country || reg.countryCode.toUpperCase())}"><img src="https://flagcdn.com/16x12/${reg.countryCode.toLowerCase()}.png" alt="${tlEsc(reg.countryCode.toUpperCase())}" width="16" height="12"></span>`);
+  return chips.length ? `<span class="pp-chips">${chips.join('')}</span>` : '';
+}
+
 function seedRender() {
   const list = el('seed-list'); if (!list) return;
   seedRenumber();
   seedOrderLabel();
   seedUpdateHeader();
   list.innerHTML = '';
-  if (!_seedRows.length) { list.innerHTML = '<div class="seed-empty">No teams yet — Pull from start.gg or Import a CSV.</div>'; return; }
+  if (!_seedRows.length) { list.innerHTML = '<div class="seed-empty">No teams yet — Pull from Platform or Import a CSV.</div>'; return; }
   const esc = (s) => (s || '').toString().replace(/&/g, '&amp;').replace(/</g, '&lt;');
   const mode = seedMode();
   // Typeahead datalist of tier names for tier-based games.
@@ -9525,12 +12136,15 @@ function seedRender() {
     const tvBadge = disp != null
       ? `<span class="seed-tv" title="Team seed value · ${esc(seedAggLabel())}">${esc(String(disp))}</span>`
       : `<span class="seed-tv seed-tv-empty" title="Add player ranks to compute">—</span>`;
+    const perfBadge = row.perfScore != null
+      ? `<span class="seed-perf-badge" title="start.gg tournament performance score (${row.perfScore}% — weighted recent placements)">${row.perfScore}%</span>`
+      : '';
     const head = `<div class="seed-team-head"><span class="seed-grip" title="Drag to reorder">⠿</span><span class="seed-num">${i + 1}</span>`
-      + `<div class="seed-team-name">${esc(row.name) || '(unnamed)'}</div>${lpts}${tvBadge}</div>`;
+      + `<div class="seed-team-name">${esc(row.name) || '(unnamed)'}</div>${lpts}${tvBadge}${perfBadge}</div>`;
     const players = (row.players || []).length
-      ? (row.players || []).map((p, pi) => `<div class="seed-player"><span class="seed-ptag">${esc(p.gamerTag) || '(player)'}</span>`
+      ? (row.players || []).map((p, pi) => `<div class="seed-player"><span class="seed-ptag">${esc(p.gamerTag) || '(player)'}</span>${playerProfileChips(p.gamerTag)}`
           + `<input class="input-text seed-prank" data-pi="${pi}" value="${esc(p.rank)}" placeholder="${esc(mode.ph || 'rank')}"${listId ? ` list="${listId}"` : ''} title="Player rank — sets this team's seed value"></div>`).join('')
-      : '<div class="seed-noplayers">No players listed — Pull from start.gg or add a player column to your CSV.</div>';
+      : '<div class="seed-noplayers">No players listed — Pull from Platform or add a player column to your CSV.</div>';
     card.innerHTML = head + `<div class="seed-players-wrap">${players}</div>`;
     card.querySelectorAll('.seed-prank').forEach((inp) => {
       inp.draggable = false;
@@ -9574,6 +12188,90 @@ function seedSort(key) {
   seedRender();
   if (key !== 'league') seedStatus(`Ordered by ${({ rank: 'team rank', seed: 'start.gg seed', name: 'name' }[key] || key)}. Drag to fine-tune, then Save.`);
 }
+// Sort within each rank tier by tournament performance score (higher % = better placement history).
+// Teams with the same 6mans tier but better start.gg results get seeded higher within that tier.
+function seedSortByPerfScore() {
+  const rv = (r) => { const v = seedTeamValue(r); return v == null ? -Infinity : v; };
+  _seedRows.sort((a, b) => {
+    const av = rv(a), bv = rv(b);
+    if (av !== bv) return bv - av;                         // different tiers: keep tier order
+    return (b.perfScore || 0) - (a.perfScore || 0);        // same tier: better perf score first
+  });
+  _seedSortKey = 'perf';
+  seedRender();
+  seedStatus('Sorted within rank tier by start.gg performance score. Drag to fine-tune, then Save.');
+}
+
+// Score teams from the local stats DB (Rocket Rush win/loss history). Instant, no API call.
+async function seedFetchLocalScores() {
+  const btn = el('seed-local-btn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Loading...'; }
+  seedStatus('Loading Rocket Rush event history...');
+  try {
+    const res = await fetch('http://localhost:3000/api/seeding/local-scores', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ teams: _seedRows.map((r) => r.name) }),
+    });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error || 'Request failed');
+    let scored = 0;
+    _seedRows.forEach((row) => {
+      const s = data.scores[row.name];
+      row.perfScore = s != null ? s : null;
+      if (s != null) scored++;
+    });
+    seedStatus(`Local history loaded: ${scored}/${_seedRows.length} teams scored from ${data.totalMatches || '?'} imported sets. Click "Sort in Tier" to apply.`, 'ok');
+    seedRender();
+  } catch (err) {
+    seedStatus(`Local score failed: ${err.message}`, 'err');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Local'; }
+  }
+}
+
+// Score teams by fetching each player's recent start.gg placements (all events, weighted by recency).
+async function seedFetchPerformanceScores() {
+  const btn = el('seed-score-btn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Fetching...'; }
+  seedStatus('Fetching start.gg tournament history...');
+
+  const allSlugs = [...new Set(
+    _seedRows.flatMap((r) => (r.players || []).map((p) => p.startggSlug).filter(Boolean))
+  )];
+
+  if (!allSlugs.length) {
+    seedStatus('No start.gg player profiles found. Pull entrants from start.gg first (Data → Pull).', 'err');
+    if (btn) { btn.disabled = false; btn.textContent = 'start.gg'; }
+    return;
+  }
+
+  try {
+    const res = await fetch('http://localhost:3000/api/startgg/player-standings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ slugs: allSlugs }),
+    });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error || 'Request failed');
+
+    _seedRows.forEach((row) => {
+      const ps = (row.players || [])
+        .map((p) => (p.startggSlug && data.scores[p.startggSlug] != null) ? data.scores[p.startggSlug] : null)
+        .filter((s) => s !== null);
+      row.perfScore = ps.length ? Math.round(ps.reduce((a, b) => a + b, 0) / ps.length * 10) / 10 : null;
+    });
+
+    const scored = _seedRows.filter((r) => r.perfScore != null).length;
+    seedStatus(`start.gg scores loaded for ${scored}/${_seedRows.length} teams (${allSlugs.length} players). Click "Sort in Tier" to apply.`, 'ok');
+    seedRender();
+  } catch (err) {
+    seedStatus(`Score fetch failed: ${err.message}`, 'err');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'start.gg'; }
+  }
+}
+
 function seedCopyList() {
   const text = _seedRows.map((r, i) => `${i + 1}. ${r.name}`).join('\n');
   if (navigator.clipboard) navigator.clipboard.writeText(text);
@@ -9966,6 +12664,9 @@ el('seed-back')?.addEventListener('click', () => { seedShowStudio(false); render
 })();
 el('seed-load-startgg')?.addEventListener('click', seedLoadStartgg);
 el('seed-league')?.addEventListener('change', seedApplyLeague);
+el('seed-local-btn')?.addEventListener('click', seedFetchLocalScores);
+el('seed-score-btn')?.addEventListener('click', seedFetchPerformanceScores);
+el('seed-sort-perf')?.addEventListener('click', seedSortByPerfScore);
 // Sort buttons share a handler via data-sort; the active one is highlighted by seedOrderLabel().
 document.querySelectorAll('.seed-sortbtn').forEach((b) => b.addEventListener('click', () => seedSort(b.dataset.sort)));
 // Rank system + team-rank aggregation re-derive values and re-apply the current order.
@@ -9989,6 +12690,477 @@ el('seed-csv-file')?.addEventListener('change', function () {
   reader.onload = () => seedImportCsv(reader.result || '');
   reader.readAsText(f);
   this.value = '';
+});
+
+// ── 6mans rank verification ───────────────────────────────────────────────
+// State for the verify modal: pending changes the user can accept/reject.
+let _verifyPending = [];   // [{ player, currentRank, webRank, webElo, match, confidence }]
+let _verifyTab = 'corrected';
+let _verifyExpectedRegion = '';   // event region, for the same-name-different-region guard
+
+// Show the rank EXACTLY as rl6mans.com does (H, S, A, B+, C, D, E…) — only un-normalise
+// the BPLUS slug back to "B+". (An earlier H→S+ translation was wrong: the site labels
+// the rank literally, e.g. "Rank H" at 1070 ELO.)
+function rl6mansRankLabel(slug) {
+  if (!slug) return '';
+  return String(slug).toUpperCase().replace('BPLUS', 'B+');
+}
+
+// Find a player object in _seedRows by gamertag (case-insensitive)
+function findSeedPlayerByTag(gamerTag) {
+  const t = (gamerTag || '').toLowerCase();
+  for (const row of _seedRows) {
+    for (const p of (row.players || [])) {
+      if ((p.gamerTag || '').toLowerCase() === t) return p;
+    }
+  }
+  return null;
+}
+
+async function seedVerify6mans() {
+  const btn = el('seed-verify-6mans');
+  const region = el('seed-6mans-region')?.value || 'NA';
+
+  // Send each player as { name: gamertag, alts: [Epic, …connected accounts] } so the
+  // backend matches on the strong Epic identity first, then the gamertag/variants.
+  const allPlayers = _seedRows
+    .flatMap((r) => (r.players || []).map((p) => ({ name: p.gamerTag, alts: [p.epic, ...(p.alts || [])].filter(Boolean) })))
+    .filter((x) => x.name);
+  if (!allPlayers.length) { seedStatus('No players to verify — pull start.gg roster first.', 'err'); return; }
+  const withEpic = allPlayers.filter((p) => p.alts.length).length;
+
+  // Pre-fill from the player registry for anyone already verified — skip the network for them.
+  const registryProfiles = currentState.playerProfiles || {};
+  const preKnown = [];
+  const needLookup = [];
+  for (const p of allPlayers) {
+    const reg = registryProfiles[(p.name || '').trim().toLowerCase()];
+    if (reg && reg.sixmans && reg.sixmans.name && reg.sixmans.rank) {
+      const s = reg.sixmans;
+      preKnown.push({ input: p.name, match: { name: s.name, rank: s.rank, elo: s.elo || 0, region: s.region || '', platform: '' }, confidence: 'exact', distance: 0, candidates: [], totalIndexed: 0, source: 'registry' });
+    } else {
+      needLookup.push(p);
+    }
+  }
+
+  if (btn) { btn.disabled = true; btn.textContent = needLookup.length ? 'Looking up…' : 'Loading…'; }
+
+  // Look up in batches so we can show live progress and avoid one long hanging
+  // request. Each batch does direct profile lookups only (fast); the slow
+  // leaderboard index is never built here.
+  const BATCH = 12;
+  const total = needLookup.length;
+  const results = [...preKnown];
+  let failed = 0;
+  try {
+    for (let i = 0; i < total; i += BATCH) {
+      const chunk = needLookup.slice(i, i + BATCH);
+      const soFar = preKnown.length + Math.min(i + BATCH, total);
+      seedStatus(`Looking up ranks — ${soFar} / ${allPlayers.length}${withEpic ? ` (${withEpic} via Epic)` : ''}…`, '');
+      if (btn) btn.textContent = `${soFar}/${allPlayers.length}…`;
+      try {
+        const res = await fetch('http://localhost:3000/api/rl6mans/lookup', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ names: chunk, region, profilesOnly: true }),
+        });
+        const data = await res.json();
+        if (!data.ok) throw new Error(data.error || 'Lookup failed');
+        results.push(...data.results);
+      } catch (e) {
+        failed += chunk.length;
+        chunk.forEach((p) => results.push({ input: p.name, match: null, confidence: 'none', candidates: [] }));
+      }
+    }
+    const matched = results.filter((r) => r.confidence === 'exact').length;
+    const cached = preKnown.length ? ` (${preKnown.length} from registry)` : '';
+    seedStatus(`Looked up ${allPlayers.length} players — ${matched} matched${cached}${failed ? `, ${failed} errored` : ''}.`, failed ? 'err' : 'ok');
+    openVerifyModal(results, region);
+  } catch (err) {
+    seedStatus(`6mans lookup failed: ${err.message}`, 'err');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Verify ranks'; }
+  }
+}
+
+function openVerifyModal(results, expectedRegion) {
+  _verifyPending = [];
+  const totalIndexed = results[0]?.totalIndexed || 0;
+  // 'ALL' (international) → no single expected region, so don't flag region mismatches.
+  const expReg = (!expectedRegion || expectedRegion === 'ALL') ? '' : expectedRegion.toUpperCase();
+  _verifyExpectedRegion = expReg;
+
+  results.forEach((r) => {
+    if (r.confidence === 'none') return;
+    const player = findSeedPlayerByTag(r.input);
+    if (!player) return;
+    const webRank = rl6mansRankLabel(r.match.rank);
+    const webRegion = (r.match.region || '').toUpperCase();
+    // Same-name-different-player guard: a matched profile whose region isn't the
+    // event's expected region is likely a different account → needs review.
+    const regionMismatch = !!(expReg && webRegion && webRegion !== expReg);
+    const csv = (player.rank || '').trim().toUpperCase();
+    _verifyPending.push({
+      player,
+      inputName: r.input,
+      matchName: r.match.name,
+      currentRank: player.rank || '',
+      webRank,
+      webElo: r.match.elo || 0,
+      webRegion,
+      webPlatform: (r.match.platform || '').toUpperCase(),
+      regionMismatch,
+      confidence: r.confidence,
+      distance: r.distance,
+      accepted: false,
+      category: (csv === 'NA' || csv === 'N/A' || !csv) ? 'found'
+              : (webRank && csv !== webRank) ? 'corrected'
+              : 'confirmed',
+    });
+  });
+
+  // Not-found: store with candidates for manual matching
+  const notFoundEntries = results
+    .filter((r) => r.confidence === 'none')
+    .map((r) => ({ inputName: r.input, candidates: r.candidates || [], player: findSeedPlayerByTag(r.input) }))
+    .filter((e) => e.player);
+
+  // Pre-accept "found"/"corrected" entries — but NOT region mismatches, which the
+  // producer must consciously confirm (likely a same-name different-region account).
+  _verifyPending.forEach((p) => { if (p.category !== 'confirmed' && !p.regionMismatch) p.accepted = true; });
+
+  renderVerifyModal(notFoundEntries, totalIndexed);
+  el('seed-verify-modal')?.removeAttribute('hidden');
+  // Auto-open the most actionable tab
+  const firstNonEmpty = _verifyPending.some((p) => p.category === 'corrected') ? 'corrected'
+                      : _verifyPending.some((p) => p.category === 'found') ? 'found'
+                      : notFoundEntries.length ? 'notfound' : 'confirmed';
+  svSwitchTab(firstNonEmpty);
+}
+
+function svSwitchTab(tab) {
+  _verifyTab = tab;
+  el('seed-verify-modal')?.querySelectorAll('.sv-tab-btn').forEach((b) => {
+    const active = b.dataset.svtab === tab;
+    b.classList.toggle('active', active);
+    b.style.borderBottomColor = active ? 'var(--cp-accent)' : 'transparent';
+    b.style.color = active ? 'var(--text)' : 'var(--muted)';
+  });
+  renderVerifyBody();
+}
+
+function renderVerifyModal(notFoundEntries, totalIndexed) {
+  const corrected = _verifyPending.filter((p) => p.category === 'corrected');
+  const found     = _verifyPending.filter((p) => p.category === 'found');
+  const confirmed = _verifyPending.filter((p) => p.category === 'confirmed');
+
+  const summary = el('seed-verify-summary');
+  if (summary) summary.textContent =
+    `${corrected.length} rank${corrected.length !== 1 ? 's' : ''} differ · ` +
+    `${found.length} N/A filled · ` +
+    `${confirmed.length} confirmed · ` +
+    `${notFoundEntries.length} name mismatch — pick manually` +
+    (totalIndexed ? ` (${totalIndexed} players indexed)` : '');
+
+  el('seed-verify-modal').__notFoundEntries = notFoundEntries;
+  renderVerifyBody();
+}
+
+// Populate a <datalist> of all rl6mans usernames for the region so the manual
+// "exact name" input autocompletes — the producer can find the right account fast.
+let _rl6mansNames = { region: null, names: [] };
+async function ensureRl6mansNames(region) {
+  region = (region || 'NA').toUpperCase();
+  let dl = document.getElementById('sv-rl6mans-names');
+  if (!dl) { dl = document.createElement('datalist'); dl.id = 'sv-rl6mans-names'; document.body.appendChild(dl); }
+  // 'ALL' would scrape every region (~30-60s) just for autocomplete — skip it;
+  // the manual exact-name lookup (direct profile) works without the datalist.
+  if (region === 'ALL') return;
+  if (_rl6mansNames.region === region && _rl6mansNames.names.length) return;
+  try {
+    const res = await fetch('http://localhost:3000/api/rl6mans/names?region=' + encodeURIComponent(region));
+    const data = await res.json();
+    if (data.ok && Array.isArray(data.names)) {
+      _rl6mansNames = { region, names: data.names };
+      dl.innerHTML = data.names.slice(0, 3000).map((n) => `<option value="${tlEsc(n)}"></option>`).join('');
+    }
+  } catch (e) { /* autocomplete is best-effort */ }
+}
+
+function renderVerifyBody() {
+  const body = el('seed-verify-body'); if (!body) return;
+  const notFoundEntries = el('seed-verify-modal')?.__notFoundEntries || [];
+
+  if (_verifyTab === 'notfound') {
+    ensureRl6mansNames(el('seed-6mans-region')?.value || _verifyExpectedRegion || 'NA');
+    if (!notFoundEntries.length) {
+      body.innerHTML = `<p style="padding:20px; text-align:center; color:var(--muted); font-size:12px;">All players matched automatically.</p>`;
+      return;
+    }
+    // Show each unmatched player with top-3 candidates they can manually select
+    const scanned = notFoundEntries.some((e) => (e.candidates || []).length);
+    body.innerHTML = `<div style="display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; padding:10px 16px; border-bottom:1px solid var(--border);">
+      <span style="font-size:11px; color:var(--muted);">These didn't match a profile directly. Scan the site to find the closest accounts, or enter the exact name.</span>
+      <button class="btn btn-secondary btn-xs" id="sv-scan-remaining" title="Search rl6mans leaderboards for the closest match to each remaining player (builds a one-time index — international scans all regions and can take ~30-60s)">${scanned ? 'Re-scan site' : 'Scan site for remaining'}</button>
+    </div>
+    <div id="sv-scan-status" style="font-size:11px; color:var(--muted); padding:0 16px;"></div>` + notFoundEntries.map((e, ei) => {
+      const cands = (e.candidates || []).slice(0, 3);
+      const candidateHtml = cands.length
+        ? cands.map((c, ci) => {
+            const rankLabel = rl6mansRankLabel(c.rank);
+            return `<button class="btn btn-ghost btn-xs sv-pick-cand" data-ei="${ei}" data-ci="${ci}"
+              style="font-size:11px;" title="Use ${tlEsc(c.name)} (${tlEsc(rankLabel)}) for ${tlEsc(e.inputName)}">
+              ${tlEsc(c.name)} · ${tlEsc(rankLabel)}${c.elo ? ' · ' + c.elo + ' ELO' : ''}
+            </button>`;
+          }).join('')
+        : `<span style="color:var(--muted); font-size:11px;">No candidates</span>`;
+      return `<div style="padding:10px 16px; border-bottom:1px solid var(--border);">
+        <div style="font-size:12px; font-weight:600; margin-bottom:6px;">${tlEsc(e.inputName)}
+          <a href="https://www.rl6mans.com/profile/${encodeURIComponent((e.inputName || '').toLowerCase())}" target="_blank" class="overlay-link" style="font-size:10px; font-weight:500;" title="Open this name's rl6mans profile">open profile &#8599;</a>
+        </div>
+        <div style="display:flex; gap:6px; flex-wrap:wrap; align-items:center; margin-bottom:6px;">
+          <span style="font-size:10px; color:var(--muted); white-space:nowrap;">Closest on rl6mans:</span>
+          ${candidateHtml}
+        </div>
+        <div style="display:flex; gap:6px; align-items:center;">
+          <span style="font-size:10px; color:var(--muted); white-space:nowrap;">Exact rl6mans name:</span>
+          <input type="text" class="input-text sv-manual-name" list="sv-rl6mans-names" data-ei="${ei}" placeholder="search rl6mans username" style="font-size:11px; padding:4px 8px; width:180px;" value="${tlEsc(e.inputName)}">
+          <button class="btn btn-secondary btn-xs sv-manual-lookup" data-ei="${ei}" style="font-size:11px;">Look up</button>
+          <span class="sv-manual-result" data-ei="${ei}" style="font-size:10px; color:var(--muted);"></span>
+        </div>
+      </div>`;
+    }).join('');
+
+    // Opt-in site scan: build the rl6mans leaderboard index and surface the closest
+    // candidates for the remaining players (the slow part — explicit, not automatic).
+    body.querySelector('#sv-scan-remaining')?.addEventListener('click', async () => {
+      const scanBtn = el('sv-scan-remaining'), status = el('sv-scan-status');
+      const region = el('seed-6mans-region')?.value || 'NA';
+      const names = notFoundEntries.map((e) => e.inputName).filter(Boolean);
+      if (!names.length) return;
+      scanBtn.disabled = true; scanBtn.textContent = 'Scanning…';
+      if (status) status.textContent = region === 'ALL'
+        ? 'Scanning all regions — first time builds a one-time index (~30-60s)…'
+        : `Scanning the ${region} leaderboard…`;
+      try {
+        const res = await fetch('http://localhost:3000/api/rl6mans/lookup', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ names: names.map((n) => ({ name: n, alts: [] })), region, profilesOnly: false }),
+        });
+        const data = await res.json();
+        if (!data.ok) throw new Error(data.error || 'Scan failed');
+        const byInput = {};
+        data.results.forEach((r) => { byInput[(r.input || '').toLowerCase()] = r; });
+        let withCands = 0;
+        notFoundEntries.forEach((e) => {
+          const r = byInput[(e.inputName || '').toLowerCase()];
+          if (r && r.candidates) { e.candidates = r.candidates; if (r.candidates.length) withCands++; }
+        });
+        renderVerifyBody();
+        const st = el('sv-scan-status');
+        if (st) st.textContent = `Found suggestions for ${withCands} / ${names.length} remaining players — pick or enter the exact name.`;
+      } catch (err) {
+        if (status) status.textContent = 'Scan failed: ' + err.message;
+        scanBtn.disabled = false; scanBtn.textContent = 'Scan site for remaining';
+      }
+    });
+
+    // Manual exact-name lookup → hits the rl6mans profile directly for exact ELO.
+    body.querySelectorAll('.sv-manual-lookup').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const ei = Number(btn.dataset.ei);
+        const entry = notFoundEntries[ei];
+        const inp = body.querySelector(`.sv-manual-name[data-ei="${ei}"]`);
+        const out = body.querySelector(`.sv-manual-result[data-ei="${ei}"]`);
+        const name = (inp?.value || '').trim();
+        if (!entry || !name) return;
+        btn.disabled = true; if (out) out.textContent = 'looking up…';
+        try {
+          const res = await fetch('http://localhost:3000/api/rl6mans/profile', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name })
+          });
+          const data = await res.json();
+          if (!data.ok || !data.profile || !data.profile.found) { if (out) out.textContent = 'not found on rl6mans'; btn.disabled = false; return; }
+          const prof = data.profile;
+          const webRank = rl6mansRankLabel(prof.rank);
+          const csv = (entry.player.rank || '').trim().toUpperCase();
+          const webRegion = (prof.region || '').toUpperCase();
+          const regionMismatch = !!(_verifyExpectedRegion && webRegion && webRegion !== _verifyExpectedRegion);
+          _verifyPending.push({
+            player: entry.player, inputName: entry.inputName, matchName: name,
+            currentRank: entry.player.rank || '', webRank, webElo: prof.elo || 0,
+            webRegion, webPlatform: (prof.platform || '').toUpperCase(), regionMismatch,
+            confidence: 'manual', distance: 0, accepted: !regionMismatch,
+            category: (csv === 'NA' || csv === 'N/A' || !csv) ? 'found' : 'corrected'
+          });
+          el('seed-verify-modal').__notFoundEntries = notFoundEntries.filter((_, i) => i !== ei);
+          renderVerifyBody();
+          updateAcceptCount();
+        } catch (err) { if (out) out.textContent = 'lookup failed'; btn.disabled = false; }
+      });
+    });
+
+    // Wire "pick candidate" buttons
+    body.querySelectorAll('.sv-pick-cand').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const ei = Number(btn.dataset.ei), ci = Number(btn.dataset.ci);
+        const entry = notFoundEntries[ei];
+        const cand  = (entry?.candidates || [])[ci];
+        if (!entry || !cand) return;
+        const webRank = rl6mansRankLabel(cand.rank);
+        const csv = (entry.player.rank || '').trim().toUpperCase();
+        const webRegion = (cand.region || '').toUpperCase();
+        const regionMismatch = !!(_verifyExpectedRegion && webRegion && webRegion !== _verifyExpectedRegion);
+        // Add to pending as a manual match
+        _verifyPending.push({
+          player: entry.player,
+          inputName: entry.inputName,
+          matchName: cand.name,
+          currentRank: entry.player.rank || '',
+          webRank,
+          webElo: cand.elo || 0,
+          webRegion,
+          webPlatform: (cand.platform || '').toUpperCase(),
+          regionMismatch,
+          confidence: 'manual',
+          distance: cand._distance || 0,
+          accepted: !regionMismatch,
+          category: (csv === 'NA' || csv === 'N/A' || !csv) ? 'found' : 'corrected',
+        });
+        // Remove from not-found
+        el('seed-verify-modal').__notFoundEntries = notFoundEntries.filter((_, i) => i !== ei);
+        renderVerifyBody();
+        updateAcceptCount();
+      });
+    });
+    return;
+  }
+
+  const rows = _verifyPending.filter((p) => p.category === _verifyTab);
+
+  if (!rows.length) {
+    body.innerHTML = `<p style="padding:20px; text-align:center; color:var(--muted); font-size:12px;">No entries in this category.</p>`;
+    return;
+  }
+
+  body.innerHTML = `<table style="width:100%; border-collapse:collapse; font-size:12px;">
+    <thead><tr style="border-bottom:1px solid var(--border);">
+      <th style="padding:8px 16px; text-align:left; color:var(--muted); font-weight:600;">Player</th>
+      <th style="padding:8px 8px; text-align:left; color:var(--muted); font-weight:600;">CSV Rank</th>
+      <th style="padding:8px 8px; text-align:left; color:var(--muted); font-weight:600;">6mans Rank</th>
+      ${_verifyTab !== 'confirmed' ? '<th style="padding:8px 16px; text-align:center; color:var(--muted); font-weight:600;">Accept</th>' : ''}
+    </tr></thead>
+    <tbody>${rows.map((p, i) => {
+      const matchLabel = (p.confidence === 'fuzzy' || p.confidence === 'manual')
+        ? ` <span style="color:var(--muted); font-size:10px;">(${p.confidence} → ${tlEsc(p.matchName)})</span>` : '';
+      const eloLabel = p.webElo ? ` <span style="color:var(--muted);">${p.webElo} ELO</span>` : '';
+      // Region/platform line — red ⚠ when the matched profile's region isn't the event's.
+      const locLabel = (p.webRegion || p.webPlatform)
+        ? (p.regionMismatch
+            ? ` <span style="color:#f56565; font-weight:700;" title="Matched profile is ${tlEsc(p.webRegion)} but the event region differs — possibly a different player with the same name. Confirm before accepting.">&#9888; ${tlEsc(p.webRegion)}${p.webPlatform ? ' · ' + tlEsc(p.webPlatform) : ''}</span>`
+            : ` <span style="color:var(--muted); font-size:10px;">${tlEsc(p.webRegion)}${p.webPlatform ? ' · ' + tlEsc(p.webPlatform) : ''}</span>`)
+        : '';
+      const csvCell = p.category === 'found'
+        ? `<span style="color:#f56565;">N/A</span>`
+        : `<span>${tlEsc(p.currentRank)}</span>`;
+      const profileLink = p.matchName
+        ? ` <a href="https://www.rl6mans.com/profile/${encodeURIComponent(p.matchName)}" target="_blank" class="overlay-link" title="Open ${tlEsc(p.matchName)} on rl6mans.com to confirm" style="font-size:10px;">${tlEsc(p.matchName)} &#8599;</a>` : '';
+      const webCell = `<span style="color:#9ae6b4; font-weight:700;">${tlEsc(p.webRank)}</span>${eloLabel}${locLabel}${profileLink}`;
+      const acceptCell = _verifyTab !== 'confirmed'
+        ? `<td style="padding:8px 16px; text-align:center;">
+             <input type="checkbox" class="sv-accept-chk" data-vi="${i}" ${p.accepted ? 'checked' : ''}>
+           </td>` : '';
+      return `<tr style="border-bottom:1px solid var(--border); ${p.regionMismatch ? 'background:rgba(245,101,101,.06);' : ''}" data-vi="${i}">
+        <td style="padding:8px 16px;">${tlEsc(p.inputName)}${matchLabel}</td>
+        <td style="padding:8px 8px;">${csvCell}</td>
+        <td style="padding:8px 8px;">${webCell}</td>
+        ${acceptCell}
+      </tr>`;
+    }).join('')}</tbody>
+  </table>`;
+
+  // Wire checkboxes
+  body.querySelectorAll('.sv-accept-chk').forEach((chk) => {
+    chk.addEventListener('change', () => {
+      const vi = Number(chk.dataset.vi);
+      const items = _verifyPending.filter((p) => p.category === _verifyTab);
+      if (items[vi]) items[vi].accepted = chk.checked;
+      updateAcceptCount();
+    });
+  });
+
+  updateAcceptCount();
+}
+
+function updateAcceptCount() {
+  const n = _verifyPending.filter((p) => p.accepted).length;
+  const s = el('seed-verify-accept-count');
+  if (s) s.textContent = n ? `${n} change${n !== 1 ? 's' : ''} selected` : '';
+}
+
+function applyVerifyChanges() {
+  const accepted = _verifyPending.filter((p) => p.accepted && (p.webRank || p.webElo));
+  if (!accepted.length) { seedStatus('No changes selected.', ''); return; }
+
+  // Exact ELO is the most accurate seed metric. If EVERY accepted player resolved
+  // to a real ELO, seed by ELO (numeric MMR mode) for precise within-tier ordering;
+  // otherwise fall back to applying the tier label under the current mode (no
+  // mixing of ELO and tier scales). Tier + ELO are both stored on the player.
+  const allHaveElo = accepted.every((p) => p.webElo > 0);
+  let applied = 0;
+
+  accepted.forEach((p) => {
+    p.player.elo = p.webElo || null;
+    p.player.tier = p.webRank || '';
+    if (allHaveElo) {
+      p.player.rank = String(p.webElo);              // numeric ELO drives the value
+      p.player.rankValue = p.webElo;
+    } else {
+      p.player.rank = p.webRank;
+      p.player.rankValue = seedRankValue(p.webRank, _seedMode);
+    }
+    applied++;
+  });
+
+  if (allHaveElo && _seedMode !== 'rl-mmr') {
+    _seedMode = 'rl-mmr';                              // exact 6mans ELO
+    const sel = el('seed-rankmode'); if (sel) sel.value = 'rl-mmr';
+    _seedAgg = 'avg';                                 // team average is standard for 6mans seeding
+    const ag = el('seed-aggmethod'); if (ag) ag.value = 'avg';
+  }
+
+  // Persist the matched 6mans profiles into the registry (auto-links them everywhere).
+  const profiles = accepted.filter((p) => p.matchName).map((p) => ({
+    gamerTag: p.player.gamerTag,
+    startggSlug: p.player.startggSlug || undefined,
+    sixmans: { name: p.matchName, elo: p.webElo || null, rank: p.webRank || '', region: p.webRegion || '', platform: p.webPlatform || '' }
+  })).filter((p) => p.gamerTag);
+  if (profiles.length) {
+    send('save_player_profiles', { profiles });
+    // optimistic local update so the chips render immediately (before the broadcast returns)
+    if (!currentState.playerProfiles) currentState.playerProfiles = {};
+    profiles.forEach((p) => {
+      const k = p.gamerTag.toLowerCase();
+      const cur = currentState.playerProfiles[k] || {};
+      currentState.playerProfiles[k] = { ...cur, gamerTag: p.gamerTag, startggSlug: p.startggSlug || cur.startggSlug, sixmans: p.sixmans };
+    });
+  }
+
+  seedRecomputeValues();
+  seedSort('rank');
+  el('seed-verify-modal')?.setAttribute('hidden', '');
+  seedStatus(`Applied ${applied} ${allHaveElo ? 'exact ELO rank' : 'rank'}${applied !== 1 ? 's' : ''} from rl6mans.com${allHaveElo ? ' — seeding by ELO' : ''}.`, 'ok');
+}
+
+// Wire verify modal controls
+el('seed-verify-6mans')?.addEventListener('click', seedVerify6mans);
+el('seed-verify-close-btn')?.addEventListener('click', () => el('seed-verify-modal')?.setAttribute('hidden', ''));
+el('seed-verify-apply')?.addEventListener('click', applyVerifyChanges);
+el('seed-verify-accept-all')?.addEventListener('click', () => {
+  _verifyPending.filter((p) => p.category !== 'confirmed').forEach((p) => { p.accepted = true; });
+  renderVerifyBody();
+});
+el('seed-verify-modal')?.querySelectorAll('.sv-tab-btn').forEach((b) => {
+  b.addEventListener('click', () => svSwitchTab(b.dataset.svtab));
 });
 
 // ── Spotlight / "Teams to Watch" overlay builder ─────────────────────────────
@@ -10096,9 +13268,10 @@ function wlLeagueFill() {
   if (!leagueId || !fieldId) { evStatus('Pick a league and a target field first.', 'err'); return; }
   const league = (currentState.leagues || []).find((l) => l.id === leagueId); if (!league) return;
   const byId = {}; (league.standings || []).forEach((s) => { byId[s.teamId] = s; });
-  const ranked = (league.standings || []).slice().sort((a, b) => (b.pts || 0) - (a.pts || 0));
-  const rankOf = {}; ranked.forEach((s, i) => { rankOf[s.teamId] = i + 1; });
-  const teamByName = {}; (league.teams || []).forEach((t) => { teamByName[(t.name || '').trim().toLowerCase()] = t; });
+  // Use stored standings order for rank (respects manual drag)
+  const rankOf = {}; (league.standings || []).forEach((s, i) => { rankOf[s.teamId] = i + 1; });
+  // Key league teams by resolved name (teamName field, not name)
+  const teamByName = {}; (league.teams || []).forEach((t) => { teamByName[(lgResolveTeam(t).name || t.teamName || '').trim().toLowerCase()] = t; });
   let n = 0;
   const teams = wlCollectTeams().map((t) => {
     const lt = teamByName[(t.name || '').trim().toLowerCase()];
@@ -10122,6 +13295,8 @@ el('wl-field-new')?.addEventListener('keydown', (e) => { if (e.key === 'Enter') 
 el('wl-league-fill')?.addEventListener('click', wlLeagueFill);
 el('wl-golive')?.addEventListener('click', () => wlSend({ visible: !wlState().visible }));
 el('wl-logo-clear')?.addEventListener('click', () => wlSend({ logo: '' }));
+el('wl-logo-preview')?.addEventListener('click', () => el('wl-logo-file')?.click());
+el('wl-logo-empty')?.addEventListener('click', () => el('wl-logo-file')?.click());
 el('wl-logo-file')?.addEventListener('change', async function () {
   const f = this.files && this.files[0]; this.value = ''; if (!f) return;
   try { const b64 = await fileToBase64(f, 400); wlSend({ logo: b64 }); } catch (e) { evStatus('Could not load logo.', 'err'); }
@@ -10370,6 +13545,7 @@ let lgLeagues = [];
 let lgActiveId = null;
 let _lgSaveTimer = null;
 let _lgSig = '';
+let _lgActiveTab = 'overview';
 const lgUid = (p) => (p || 'id') + Math.random().toString(36).slice(2, 9);
 
 function lgActive() { return lgLeagues.find((l) => l.id === lgActiveId) || null; }
@@ -10396,15 +13572,32 @@ function lgGameOptions(sel) {
 function lgNewPlayer() { return { id: lgUid('pl'), name: '', role: '', salary: 0, stats: '' }; }
 function lgNewTeam() { return { id: lgUid('tm'), name: '', logo: null, players: [] }; }
 function lgNewLeague() {
-  return { id: lgUid('lg'), name: 'New League', game: currentState.activeGame || '', type: 'team', season: '', salaryCap: 0, teams: [], freeAgents: [], standings: [], schedule: [] };
+  return { id: lgUid('lg'), name: 'New League', game: currentState.activeGame || '', type: 'team', season: '', salaryCap: 0, starterCount: 3, logo: null, abbr: '', status: 'active', teams: [], freeAgents: [], standings: [], schedule: [], scoring: { win: 3, loss: 0, draw: 1, otw: 2 }, playoffN: 4, tiebreak: 'gd', startggSource: '' };
 }
 
 function lgRenderList() {
   const wrap = el('lg-list'); if (!wrap) return;
+  const STATUS_LABELS = { active: 'Active', playoffs: 'Playoffs', offseason: 'Off-season', complete: 'Complete' };
   wrap.innerHTML = lgLeagues.length
-    ? lgLeagues.map((l) => `<button class="lg-list-item${l.id === lgActiveId ? ' active' : ''}" data-id="${l.id}">
-        <span class="lg-list-name">${(l.name || 'League').replace(/</g, '&lt;')}</span>
-        <span class="lg-list-sub">${l.type} · ${(l.teams || []).length} teams</span></button>`).join('')
+    ? lgLeagues.map((l) => {
+        const esc = (s) => (s || '').replace(/</g, '&lt;');
+        const phText = l.abbr
+          ? l.abbr.slice(0, 4)
+          : (l.name || '').split(/\s+/).map((w) => w[0] || '').join('').slice(0, 4).toUpperCase() || '?';
+        const logoHtml = l.logo
+          ? `<img class="lg-list-logo" src="${l.logo}" alt="">`
+          : `<div class="lg-list-logo-ph">${esc(phText)}</div>`;
+        const status = l.status || 'active';
+        return `<button class="lg-list-item${l.id === lgActiveId ? ' active' : ''}" data-id="${l.id}">
+          ${logoHtml}
+          <div class="lg-list-info">
+            <span class="lg-list-name">${esc(l.name || 'League')}</span>
+            <span class="lg-list-sub">
+              <span class="lg-list-status" data-s="${status}"></span>
+              ${esc(STATUS_LABELS[status] || status)} · ${(l.teams || []).length} teams
+            </span>
+          </div></button>`;
+      }).join('')
     : '<div class="lg-empty" style="padding:14px;">No leagues yet.</div>';
   wrap.querySelectorAll('.lg-list-item').forEach((b) => b.addEventListener('click', () => { lgActiveId = b.dataset.id; lgRender(); }));
 }
@@ -10423,7 +13616,7 @@ function lgAddTeamByName(name) {
   if ((lg.teams || []).some((t) => (t.teamName || t.name) === name)) { lgStatus('That team is already in this league.', false); return false; }
   lg.teams = lg.teams || [];
   lg.teams.push({ id: lgUid('tm'), teamName: name });   // reference, not a copy
-  lgRenderTeams(); lgRenderStandings(); lgSave();
+  lgRenderTeams(); lgRenderStandingsTab(); lgSave();
   lgStatus(name + ' added.', true);
   return true;
 }
@@ -10440,39 +13633,64 @@ function lgRenderTeams() {
   const wrap = el('lg-teams'); const lg = lgActive(); if (!wrap || !lg) return;
   lgRenderMatchup();
   const isSalary = lg.type === 'salary';
+  const cap = lg.salaryCap || 0;
+  const starterCount = lg.starterCount || 3;
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   wrap.innerHTML = (lg.teams || []).map((tm) => {
     const r = lgResolveTeam(tm);
+    let starterUsed = 0, starterIdx = 0;
     const players = (r.players || []).map((p) => {
       const pid = p.id || p.name || '';
       const sal = (tm.salaries && tm.salaries[pid] != null) ? tm.salaries[pid] : (p.salary || 0);
+      const isStarter = starterIdx < starterCount; starterIdx++;
+      if (isSalary && isStarter) starterUsed += Number(sal) || 0;
+      const role = esc(p.role);
       return `<div class="lg-player">
         <span class="lg-pl-name">${esc(p.name) || '—'}</span>
-        <span class="lg-pl-role">${esc(p.role)}</span>
-        ${isSalary ? `<input type="number" class="input-text lg-pl-salary" data-tid="${tm.id}" data-pid="${esc(pid)}" value="${Number(sal) || 0}" placeholder="Salary" style="width:100px;">` : ''}
+        ${role ? `<span class="lg-pl-role">${role}</span>` : ''}
+        ${!isStarter && isSalary ? '<span class="lg-pl-role" style="color:var(--muted);font-style:italic;">Sub</span>' : ''}
+        ${isSalary ? `<input type="number" class="input-text lg-pl-salary" data-tid="${esc(tm.id)}" data-pid="${esc(pid)}" value="${Number(sal) || 0}" placeholder="Rating" style="width:82px;" title="${isStarter ? 'Counts toward cap' : 'Sub — excluded from cap'}">` : ''}
       </div>`;
     }).join('') || '<div class="lg-empty" style="padding:4px 0;">No players in the library for this team.</div>';
+    const pct = cap > 0 ? Math.min((starterUsed / cap) * 100, 110) : 0;
+    const over = cap > 0 && starterUsed > cap;
+    const capBar = isSalary && cap > 0 ? `<div class="lg2-cap-bar-wrap">
+      <div class="lg2-cap-label"><span>Rating used (starters)</span><span>${starterUsed} / ${cap}${over ? ' ⚠ over' : ''}</span></div>
+      <div class="lg2-cap-bar"><div class="lg2-cap-bar-fill${over ? ' over' : ''}" style="width:${Math.min(pct,100)}%"></div></div>
+    </div>` : '';
     return `<div class="lg-team" data-tid="${tm.id}">
       <div class="lg-team-head">
         <img class="lg-team-logo${r.logo ? '' : ' game-logo-white'}" src="${r.logo || gameLogo()}" alt="" onerror="this.onerror=null;this.src='../assets/rl.png';">
         <span class="lg-team-name">${esc(r.name)}</span>
-        ${r.linked ? '' : '<span class="lg-unlinked" title="Not in the team library — re-add it from the picker above (or create it on the Teams page)">unlinked</span>'}
-        <button class="btn btn-ghost btn-xs lg-team-live" data-tid="${tm.id}" data-side="blue" title="Push to Blue">→ Blue</button>
-        <button class="btn btn-ghost btn-xs lg-team-live" data-tid="${tm.id}" data-side="orange" title="Push to Orange">→ Orange</button>
+        ${r.linked ? '' : '<span class="lg-unlinked" title="Not in the team library">unlinked</span>'}
+        <button class="btn btn-ghost btn-xs lg-team-live" data-tid="${tm.id}" data-side="blue">→ Blue</button>
+        <button class="btn btn-ghost btn-xs lg-team-live" data-tid="${tm.id}" data-side="orange">→ Orange</button>
         <button class="lg-del lg-team-del" data-tid="${tm.id}" title="Remove from league">×</button>
+      </div>
+      ${capBar}
+      <div class="lg2-team-meta">
+        <input type="text" class="input-text lg2-abbr-team-inp lg2-team-abbr" data-tid="${tm.id}" value="${esc(tm.abbr || '')}" placeholder="Abbr" title="Team abbreviation (e.g. BDG)">
+        <input type="text" class="input-text lg2-owner-inp lg2-team-owner" data-tid="${tm.id}" value="${esc(tm.franchiseOwner || '')}" placeholder="Franchise owner">
       </div>
       <div class="lg-players">${players}</div>
     </div>`;
   }).join('') || '<div class="lg-empty">No teams yet — add from your team library above.</div>';
 
-  // League-specific salary (kept per league, keyed by player id) — roster identity stays central.
   wrap.querySelectorAll('.lg-pl-salary').forEach((inp) => inp.addEventListener('change', () => {
     const tm = lg.teams.find((t) => t.id === inp.dataset.tid); if (!tm) return;
     tm.salaries = tm.salaries || {};
     tm.salaries[inp.dataset.pid] = Number(inp.value) || 0;
-    lgSave(); lgRenderStandings();
+    lgSave(); lgRenderTeams();
   }));
-  wrap.querySelectorAll('.lg-team-del').forEach((b) => b.addEventListener('click', () => { lg.teams = lg.teams.filter((t) => t.id !== b.dataset.tid); lgRenderTeams(); lgRenderStandings(); lgSave(); }));
+  wrap.querySelectorAll('.lg2-team-abbr').forEach((inp) => inp.addEventListener('change', () => {
+    const tm = lg.teams.find((t) => t.id === inp.dataset.tid); if (!tm) return;
+    tm.abbr = inp.value.toUpperCase().trim().slice(0, 6); lgSave();
+  }));
+  wrap.querySelectorAll('.lg2-team-owner').forEach((inp) => inp.addEventListener('change', () => {
+    const tm = lg.teams.find((t) => t.id === inp.dataset.tid); if (!tm) return;
+    tm.franchiseOwner = inp.value.trim(); lgSave();
+  }));
+  wrap.querySelectorAll('.lg-team-del').forEach((b) => b.addEventListener('click', () => { lg.teams = lg.teams.filter((t) => t.id !== b.dataset.tid); lgRenderTeams(); lgRenderStandingsTab(); lgSave(); }));
   wrap.querySelectorAll('.lg-team-live').forEach((b) => b.addEventListener('click', () => {
     const tm = lg.teams.find((t) => t.id === b.dataset.tid); if (!tm) return;
     const r = lgResolveTeam(tm);
@@ -10496,71 +13714,555 @@ function lgRenderFreeAgents() {
   bind('.lg-fa-name', 'name'); bind('.lg-fa-role', 'role'); bind('.lg-fa-salary', 'salary', true); bind('.lg-fa-stats', 'stats');
   wrap.querySelectorAll('.lg-fa-del').forEach((b) => b.addEventListener('click', () => { lg.freeAgents = lg.freeAgents.filter((p) => p.id !== b.dataset.pid); lgRenderFreeAgents(); lgSave(); }));
 }
-function lgRenderStandings() {
+// ── enhanced standings (W/L/T/GF/GA/PTS) ─────────────────────────────────
+function lgRenderStandingsTab() {
   const wrap = el('lg-standings'); const lg = lgActive(); if (!wrap || !lg) return;
-  // Standings rows mirror the team list; W/L are editable and persisted in standings[].
-  const byId = {}; (lg.standings || []).forEach((s) => { byId[s.teamId] = s; });
-  wrap.innerHTML = (lg.teams || []).length ? '<div class="lg-st-row lg-st-head"><span>Team</span><span>W</span><span>L</span><span>Pts</span></div>'
-    + lg.teams.map((tm) => { const s = byId[tm.id] || { w: 0, l: 0, pts: 0 }; return `<div class="lg-st-row" data-tid="${tm.id}">
-      <span class="lg-st-name">${(lgResolveTeam(tm).name || 'Team').replace(/</g, '&lt;')}</span>
-      <input type="number" class="input-text lg-st-w" data-tid="${tm.id}" value="${s.w || 0}" min="0">
-      <input type="number" class="input-text lg-st-l" data-tid="${tm.id}" value="${s.l || 0}" min="0">
-      <input type="number" class="input-text lg-st-pts" data-tid="${tm.id}" value="${s.pts || 0}">
-    </div>`; }).join('') : '<div class="lg-empty">Add teams to track standings.</div>';
-  const upd = (cls, key) => wrap.querySelectorAll(cls).forEach((inp) => inp.addEventListener('change', () => {
-    let s = (lg.standings || []).find((x) => x.teamId === inp.dataset.tid);
-    if (!s) { s = { teamId: inp.dataset.tid, w: 0, l: 0, pts: 0 }; lg.standings = lg.standings || []; lg.standings.push(s); }
-    s[key] = Number(inp.value) || 0; lgSave();
-  }));
-  upd('.lg-st-w', 'w'); upd('.lg-st-l', 'l'); upd('.lg-st-pts', 'pts');
-  // Salary-cap usage readout.
+  const playoffN = lg.playoffN || 4;
+  const esc = (s) => String(s == null ? '' : s).replace(/</g, '&lt;');
+
+  // Cap display
   const capEl = el('lg-cap-used');
   if (capEl) {
     if (lg.type === 'salary' && lg.salaryCap) {
       const used = (lg.teams || []).reduce((sum, tm) => {
         const r = lgResolveTeam(tm);
-        return sum + (r.players || []).reduce((a, p) => {
-          const pid = p.id || p.name || '';
-          const sal = (tm.salaries && tm.salaries[pid] != null) ? tm.salaries[pid] : (p.salary || 0);
-          return a + (Number(sal) || 0);
-        }, 0);
+        return sum + (r.players || []).reduce((a, p) => { const pid = p.id || p.name || ''; const sal = (tm.salaries && tm.salaries[pid] != null) ? tm.salaries[pid] : (p.salary || 0); return a + (Number(sal) || 0); }, 0);
       }, 0);
-      capEl.textContent = `Cap used: ${used.toLocaleString()} / ${Number(lg.salaryCap).toLocaleString()}`;
+      capEl.textContent = `Cap: ${used.toLocaleString()} / ${Number(lg.salaryCap).toLocaleString()}`;
       capEl.style.color = used > lg.salaryCap ? '#f56565' : 'var(--muted)';
     } else capEl.textContent = '';
   }
+
+  // Build rows in standings array order (preserves manual drag order / computed sort)
+  const teamsMap = {}; (lg.teams || []).forEach(tm => { teamsMap[tm.id] = tm; });
+  const byId = {}; (lg.standings || []).forEach(s => { byId[s.teamId] = s; });
+  const ranked = (lg.standings || []).filter(s => teamsMap[s.teamId]);
+  const rankedIds = new Set(ranked.map(s => s.teamId));
+  const unranked = (lg.teams || []).filter(tm => !rankedIds.has(tm.id));
+  const rows = [
+    ...ranked.map(s => { const tm = teamsMap[s.teamId]; return { teamId: tm.id, teamName: lgResolveTeam(tm).name, w: s.w || 0, l: s.l || 0, t: s.t || 0, gf: s.gf || 0, ga: s.ga || 0, pts: s.pts || 0, form: s.form || [], streak: s.streak || '' }; }),
+    ...unranked.map(tm => ({ teamId: tm.id, teamName: lgResolveTeam(tm).name, w: 0, l: 0, t: 0, gf: 0, ga: 0, pts: 0, form: [], streak: '' }))
+  ];
+
+  if (!rows.length) { wrap.innerHTML = '<div class="lg-empty">Add teams to track standings.</div>'; return; }
+  const formDots = (form) => form.map(f => `<span class="lg2-fd lg2-fd-${f.toLowerCase()}">${f}</span>`).join('');
+  wrap.innerHTML = `<table class="lg2-st-table">
+    <thead><tr><th class="lg2-drag-th"></th><th>#</th><th>Team</th><th>W</th><th>L</th><th>T</th><th>GF</th><th>GA</th><th>GD</th><th>Pts</th><th>Form</th><th>Str</th></tr></thead>
+    <tbody>${rows.map((r, i) => `<tr data-tid="${r.teamId}" draggable="true">
+      <td class="lg2-drag-cell"><span class="lg2-drag-handle" title="Drag to reorder"></span></td>
+      <td class="lg2-pos">${i < playoffN ? '<span class="lg2-playoff-dot" title="Playoff spot"></span>' : ''}${i + 1}</td>
+      <td>${esc(r.teamName)}</td>
+      <td><input type="number" class="input-text lg2-st-inp" data-tid="${r.teamId}" data-key="w" value="${r.w}" min="0"></td>
+      <td><input type="number" class="input-text lg2-st-inp" data-tid="${r.teamId}" data-key="l" value="${r.l}" min="0"></td>
+      <td><input type="number" class="input-text lg2-st-inp" data-tid="${r.teamId}" data-key="t" value="${r.t}" min="0"></td>
+      <td><input type="number" class="input-text lg2-st-inp" data-tid="${r.teamId}" data-key="gf" value="${r.gf}" min="0"></td>
+      <td><input type="number" class="input-text lg2-st-inp" data-tid="${r.teamId}" data-key="ga" value="${r.ga}" min="0"></td>
+      <td>${r.gf - r.ga >= 0 ? '+' : ''}${r.gf - r.ga}</td>
+      <td><input type="number" class="input-text lg2-st-inp" data-tid="${r.teamId}" data-key="pts" value="${r.pts}"></td>
+      <td class="lg2-form-cell">${formDots(r.form)}</td>
+      <td class="lg2-streak">${esc(r.streak)}</td>
+    </tr>`).join('')}</tbody></table>`;
+
+  // Drag-to-reorder rows
+  let dragTid = null;
+  wrap.querySelectorAll('tbody tr[data-tid]').forEach(row => {
+    row.addEventListener('dragstart', e => {
+      dragTid = row.dataset.tid; row.classList.add('lg2-dragging');
+      e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', dragTid);
+    });
+    row.addEventListener('dragend', () => {
+      dragTid = null; wrap.querySelectorAll('tr').forEach(r => r.classList.remove('lg2-dragging', 'lg2-drag-over'));
+    });
+    row.addEventListener('dragover', e => { e.preventDefault(); if (row.dataset.tid !== dragTid) row.classList.add('lg2-drag-over'); });
+    row.addEventListener('dragleave', () => row.classList.remove('lg2-drag-over'));
+    row.addEventListener('drop', e => {
+      e.preventDefault(); row.classList.remove('lg2-drag-over');
+      if (!dragTid || dragTid === row.dataset.tid) return;
+      // Ensure all teams are in lg.standings before reorder
+      const all = [...rows.map(r => r.teamId)];
+      lg.standings = lg.standings || [];
+      all.forEach(tid => { if (!lg.standings.find(s => s.teamId === tid)) lg.standings.push({ teamId: tid, w: 0, l: 0, t: 0, gf: 0, ga: 0, pts: 0 }); });
+      const from = lg.standings.findIndex(s => s.teamId === dragTid);
+      const to   = lg.standings.findIndex(s => s.teamId === row.dataset.tid);
+      if (from === -1 || to === -1) return;
+      const [item] = lg.standings.splice(from, 1);
+      lg.standings.splice(to, 0, item);
+      lgRenderStandingsTab(); lgSave();
+    });
+  });
+
+  wrap.querySelectorAll('.lg2-st-inp').forEach((inp) => inp.addEventListener('change', () => {
+    let s = (lg.standings || []).find((x) => x.teamId === inp.dataset.tid);
+    if (!s) { s = { teamId: inp.dataset.tid, w: 0, l: 0, t: 0, gf: 0, ga: 0, pts: 0 }; lg.standings = lg.standings || []; lg.standings.push(s); }
+    s[inp.dataset.key] = Number(inp.value) || 0;
+    lgSave();
+  }));
 }
+
+function lgComputeStandingsFromSchedule() {
+  const lg = lgActive(); if (!lg) return;
+  const sc = lg.scoring || {};
+  const ptsWin = sc.win ?? 3, ptsLoss = sc.loss ?? 0, ptsDraw = sc.draw ?? 1;
+  const map = {};
+  (lg.teams || []).forEach((tm) => { map[tm.id] = { teamId: tm.id, w: 0, l: 0, t: 0, gf: 0, ga: 0, pts: 0, form: [], h2h: {} }; });
+  for (const m of (lg.schedule || [])) {
+    const r = m.result; if (!r || r.scoreA == null || r.scoreB == null) continue;
+    const a = map[m.teamA], b = map[m.teamB]; if (!a || !b) continue;
+    const sa = Number(r.scoreA) || 0, sb = Number(r.scoreB) || 0;
+    a.gf += sa; a.ga += sb; b.gf += sb; b.ga += sa;
+    if (sa > sb) {
+      a.w++; a.pts += ptsWin; a.form.push('W'); a.h2h[m.teamB] = (a.h2h[m.teamB] || 0) + 1;
+      b.l++; b.pts += ptsLoss; b.form.push('L');
+    } else if (sb > sa) {
+      b.w++; b.pts += ptsWin; b.form.push('W'); b.h2h[m.teamA] = (b.h2h[m.teamA] || 0) + 1;
+      a.l++; a.pts += ptsLoss; a.form.push('L');
+    } else {
+      a.t++; a.pts += ptsDraw; a.form.push('D');
+      b.t++; b.pts += ptsDraw; b.form.push('D');
+    }
+  }
+  const tb = lg.tiebreak || 'gd';
+  const calcStreak = (form) => {
+    if (!form.length) return '';
+    const last = form[form.length - 1]; let n = 0;
+    for (let i = form.length - 1; i >= 0 && form[i] === last; i--) n++;
+    return last + n;
+  };
+  lg.standings = Object.values(map).map((s) => ({
+    teamId: s.teamId, w: s.w, l: s.l, t: s.t, gf: s.gf, ga: s.ga, pts: s.pts,
+    form: s.form.slice(-5), streak: calcStreak(s.form), h2h: s.h2h
+  }));
+  lg.standings.sort((a, b) => {
+    if (b.pts !== a.pts) return b.pts - a.pts;
+    if (tb === 'h2h') {
+      const ah = (a.h2h && a.h2h[b.teamId]) || 0, bh = (b.h2h && b.h2h[a.teamId]) || 0;
+      if (ah !== bh) return bh - ah;
+    }
+    const gdDiff = ((b.gf - b.ga) - (a.gf - a.ga));
+    if (gdDiff !== 0) return gdDiff;
+    return b.gf - a.gf;
+  });
+  lgRenderStandingsTab(); lgSave();
+  lgStatus('Standings recalculated from schedule.', true);
+}
+
+// ── schedule tab ──────────────────────────────────────────────────────────
+function lgPopulateScheduleSelects() {
+  const lg = lgActive(); if (!lg) return;
+  const opts = (curId) => '<option value="">— Team —</option>' + (lg.teams || []).map((tm) => {
+    const n = lgResolveTeam(tm).name;
+    return `<option value="${tm.id}"${tm.id === curId ? ' selected' : ''}>${n.replace(/</g, '&lt;')}</option>`;
+  }).join('');
+  const sa = el('lg-sch-a'), sb = el('lg-sch-b');
+  if (sa) sa.innerHTML = opts(sa.value); if (sb) sb.innerHTML = opts(sb.value);
+}
+function lgRenderScheduleTab() {
+  const lg = lgActive(); const wrap = el('lg2-schedule'); if (!wrap || !lg) return;
+  lgPopulateScheduleSelects();
+  const esc = (s) => String(s == null ? '' : s).replace(/</g, '&lt;');
+  const schedule = lg.schedule || [];
+  if (!schedule.length) { wrap.innerHTML = '<div class="lg-empty">No matches yet. Add one above or generate a round-robin.</div>'; return; }
+  const byWeek = {};
+  for (const m of schedule) { const w = m.week || ''; (byWeek[w] = byWeek[w] || []).push(m); }
+  const teamName = (id, fallback) => { const tm = (lg.teams || []).find((t) => t.id === id); return tm ? lgResolveTeam(tm).name : (fallback || '?'); };
+  wrap.innerHTML = Object.entries(byWeek).map(([week, matches]) => `
+    <div class="lg2-schedule-week">
+      ${week ? `<div class="lg2-week-label">Week ${esc(week)}</div>` : ''}
+      ${matches.map((m) => {
+        const r = m.result || {};
+        const hasResult = r.scoreA != null && r.scoreB != null;
+        const winner = hasResult ? (Number(r.scoreA) > Number(r.scoreB) ? 'A' : Number(r.scoreB) > Number(r.scoreA) ? 'B' : 'draw') : null;
+        const aName = teamName(m.teamA, m.sggTeamA), bName = teamName(m.teamB, m.sggTeamB);
+        const dtStr = [m.date, m.time].filter(Boolean).map(esc).join(' · ');
+        return `<div class="lg2-match-item" data-mid="${m.id}">
+          <div class="lg2-match-row">
+            <div class="lg2-match-teams">
+              <span${winner === 'A' ? ' style="font-weight:900"' : winner === 'B' ? ' style="color:var(--muted)"' : ''}>${esc(aName)}</span>
+              <span style="color:var(--muted);margin:0 6px;">vs</span>
+              <span${winner === 'B' ? ' style="font-weight:900"' : winner === 'A' ? ' style="color:var(--muted)"' : ''}>${esc(bName)}</span>
+            </div>
+            <span class="lg2-match-fmt">${esc(m.format || 'BO3')}</span>
+            ${dtStr ? `<span class="lg2-match-date">${dtStr}</span>` : ''}
+            <div class="lg2-match-score">
+              <input type="number" class="input-text lg2-score-a" data-mid="${m.id}" value="${r.scoreA ?? ''}" placeholder="—" min="0">
+              <span style="color:var(--muted);font-weight:700;">:</span>
+              <input type="number" class="input-text lg2-score-b" data-mid="${m.id}" value="${r.scoreB ?? ''}" placeholder="—" min="0">
+            </div>
+            <button class="btn btn-ghost btn-xs lg2-match-live" data-mid="${m.id}">Go Live</button>
+            <button class="lg-del lg2-match-del" data-mid="${m.id}" title="Remove">×</button>
+          </div>
+          <div class="lg2-match-extra">
+            <input type="text" class="input-text lg2-match-notes-inp" data-mid="${m.id}" value="${esc(m.notes || '')}" placeholder="Notes…">
+            <input type="url" class="input-text lg2-match-vod-inp" data-mid="${m.id}" value="${esc(m.vod || '')}" placeholder="VOD link…">
+          </div>
+        </div>`;
+      }).join('')}
+    </div>`).join('');
+  const saveScore = (mid) => {
+    const m = (lg.schedule || []).find((x) => x.id === mid); if (!m) return;
+    const ia = wrap.querySelector(`.lg2-score-a[data-mid="${mid}"]`);
+    const ib = wrap.querySelector(`.lg2-score-b[data-mid="${mid}"]`);
+    m.result = m.result || {};
+    m.result.scoreA = ia && ia.value !== '' ? Number(ia.value) : null;
+    m.result.scoreB = ib && ib.value !== '' ? Number(ib.value) : null;
+    lgSave(); lgRenderScheduleTab();
+  };
+  wrap.querySelectorAll('.lg2-score-a, .lg2-score-b').forEach((inp) => inp.addEventListener('change', () => saveScore(inp.dataset.mid)));
+  wrap.querySelectorAll('.lg2-match-del').forEach((b) => b.addEventListener('click', () => { lg.schedule = (lg.schedule || []).filter((m) => m.id !== b.dataset.mid); lgRenderScheduleTab(); lgSave(); }));
+  wrap.querySelectorAll('.lg2-match-live').forEach((b) => b.addEventListener('click', () => {
+    const m = (lg.schedule || []).find((x) => x.id === b.dataset.mid); if (!m) return;
+    const ta = (lg.teams || []).find((t) => t.id === m.teamA), tb = (lg.teams || []).find((t) => t.id === m.teamB);
+    if (!ta || !tb) { lgStatus('Add both teams to the Roster tab first.', false); return; }
+    const ra = lgResolveTeam(ta), rb = lgResolveTeam(tb);
+    send('set_team', { side: 'blue',   name: ra.name, logo: ra.logo || null, players: ra.players.map((p) => ({ name: p.name, role: p.role })) });
+    send('set_team', { side: 'orange', name: rb.name, logo: rb.logo || null, players: rb.players.map((p) => ({ name: p.name, role: p.role })) });
+    send('reset_series'); lgStatus(`${ra.name} vs ${rb.name} pushed live.`, true);
+  }));
+  wrap.querySelectorAll('.lg2-match-notes-inp').forEach(inp => inp.addEventListener('change', () => {
+    const m = (lg.schedule || []).find(x => x.id === inp.dataset.mid); if (!m) return;
+    m.notes = inp.value.trim(); lgSave();
+  }));
+  wrap.querySelectorAll('.lg2-match-vod-inp').forEach(inp => inp.addEventListener('change', () => {
+    const m = (lg.schedule || []).find(x => x.id === inp.dataset.mid); if (!m) return;
+    m.vod = inp.value.trim(); lgSave();
+  }));
+}
+function lgAddMatch() {
+  const lg = lgActive(); if (!lg) return;
+  const a = el('lg-sch-a')?.value, b = el('lg-sch-b')?.value;
+  if (!a || !b) { lgStatus('Pick both teams.', false); return; }
+  if (a === b) { lgStatus('Pick two different teams.', false); return; }
+  const fmt = el('lg-sch-fmt')?.value || 'BO3';
+  const week = el('lg-sch-week')?.value.trim() || '';
+  const date = el('lg-sch-date')?.value || '';
+  const time = el('lg-sch-time')?.value || '';
+  lg.schedule = lg.schedule || [];
+  lg.schedule.push({ id: lgUid('m'), teamA: a, teamB: b, format: fmt, week, date, time, result: { scoreA: null, scoreB: null } });
+  lgRenderScheduleTab(); lgSave();
+}
+// Circle-method round-robin: returns array of rounds, each round = array of [teamA, teamB] pairs.
+function _rrRounds(teams) {
+  const t = teams.length % 2 === 0 ? [...teams] : [...teams, null];
+  const half = t.length / 2, rounds = [];
+  let circle = t.slice(1);
+  for (let r = 0; r < t.length - 1; r++) {
+    const round = [];
+    if (t[0] !== null && circle[0] !== null) round.push([t[0], circle[0]]);
+    for (let i = 1; i < half; i++) {
+      const a = circle[i], b = circle[circle.length - i];
+      if (a !== null && b !== null) round.push([a, b]);
+    }
+    rounds.push(round);
+    circle = [circle[circle.length - 1], ...circle.slice(0, circle.length - 1)];
+  }
+  return rounds;
+}
+function _nextWeekNum(lg) {
+  const weeks = (lg.schedule || []).map(m => parseInt(m.week, 10)).filter(n => !isNaN(n));
+  return weeks.length ? Math.max(...weeks) + 1 : 1;
+}
+
+function lgGenerateRoundRobin() {
+  const lg = lgActive(); if (!lg) return;
+  const teams = lg.teams || [];
+  if (teams.length < 2) { lgStatus('Need at least 2 teams for a round-robin.', false); return; }
+  const fmt = el('lg-sch-fmt')?.value || 'BO3';
+  const rounds = _rrRounds(teams);
+  const startWeek = _nextWeekNum(lg);
+  const existing = new Set((lg.schedule || []).map(m => [m.teamA, m.teamB].sort().join('|')));
+  let added = 0;
+  rounds.forEach((round, ri) => {
+    const week = String(startWeek + ri);
+    round.forEach(([ta, tb]) => {
+      const key = [ta.id, tb.id].sort().join('|');
+      if (!existing.has(key)) {
+        lg.schedule = lg.schedule || [];
+        lg.schedule.push({ id: lgUid('m'), teamA: ta.id, teamB: tb.id, format: fmt, week, date: '', result: { scoreA: null, scoreB: null } });
+        existing.add(key); added++;
+      }
+    });
+  });
+  if (!added) { lgStatus('All round-robin matchups already exist.', false); return; }
+  lgRenderScheduleTab(); lgSave();
+  lgStatus(`Generated ${added} matchup${added !== 1 ? 's' : ''} across ${rounds.length} weeks.`, true);
+}
+
+function lgGenerateDoubleRoundRobin() {
+  const lg = lgActive(); if (!lg) return;
+  const teams = lg.teams || [];
+  if (teams.length < 2) { lgStatus('Need at least 2 teams.', false); return; }
+  const fmt = el('lg-sch-fmt')?.value || 'BO3';
+  const rounds = _rrRounds(teams);
+  const startWeek = _nextWeekNum(lg);
+  const existing = new Set((lg.schedule || []).map(m => `${m.teamA}|${m.teamB}`));
+  let added = 0;
+  rounds.forEach((round, ri) => {
+    const week = String(startWeek + ri);
+    round.forEach(([ta, tb]) => {
+      if (!existing.has(`${ta.id}|${tb.id}`)) {
+        lg.schedule = lg.schedule || [];
+        lg.schedule.push({ id: lgUid('m'), teamA: ta.id, teamB: tb.id, format: fmt, week, date: '', result: { scoreA: null, scoreB: null } });
+        existing.add(`${ta.id}|${tb.id}`); added++;
+      }
+    });
+  });
+  rounds.forEach((round, ri) => {
+    const week = String(startWeek + rounds.length + ri);
+    round.forEach(([ta, tb]) => {
+      if (!existing.has(`${tb.id}|${ta.id}`)) {
+        lg.schedule = lg.schedule || [];
+        lg.schedule.push({ id: lgUid('m'), teamA: tb.id, teamB: ta.id, format: fmt, week, date: '', result: { scoreA: null, scoreB: null } });
+        existing.add(`${tb.id}|${ta.id}`); added++;
+      }
+    });
+  });
+  if (!added) { lgStatus('All double round-robin matchups already exist.', false); return; }
+  lgRenderScheduleTab(); lgSave();
+  lgStatus(`Generated ${added} matchups (DRR, ${rounds.length * 2} weeks).`, true);
+}
+
+// ── settings tab ──────────────────────────────────────────────────────────
+function lgRenderSggSource(lg) {
+  const sel = el('lg-sgg-selected');
+  if (!sel || !lg) return;
+  const esc = (s) => String(s == null ? '' : s).replace(/</g, '&lt;');
+  if (lg.startggSource) {
+    const name = lg.sggLeagueName || lg.startggSource;
+    sel.innerHTML = `<span class="lg-sgg-chip">${esc(name)} <button class="lg-sgg-chip-del" title="Remove source">×</button></span>`;
+    sel.querySelector('.lg-sgg-chip-del')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      lg.startggSource = ''; lg.sggLeagueName = ''; lg.sggSyncedAt = null; lgSave();
+      lgRenderSggSource(lg);
+    });
+  } else {
+    sel.innerHTML = '';
+  }
+  const syncTs = el('lg-sgg-sync-ts');
+  if (syncTs) syncTs.textContent = lg.sggSyncedAt ? 'Last synced: ' + new Date(lg.sggSyncedAt).toLocaleString() : '';
+}
+
+function lgRenderSettingsTab() {
+  const lg = lgActive(); if (!lg) return;
+  const typeEl = el('lg-type'); if (typeEl) typeEl.value = lg.type || 'team';
+  const gameEl = el('lg-game'); if (gameEl) { lgGameOptions(gameEl); gameEl.value = lg.game || ''; }
+  const seasonEl = el('lg-season'); if (seasonEl && document.activeElement !== seasonEl) seasonEl.value = lg.season || '';
+  const isSalary = lg.type === 'salary';
+  document.querySelectorAll('.lg-salary-field').forEach((el2) => { el2.style.display = isSalary ? '' : 'none'; });
+  const capEl = el('lg-cap'); if (capEl && document.activeElement !== capEl) capEl.value = lg.salaryCap || 0;
+  const scEl = el('lg-starter-count'); if (scEl && document.activeElement !== scEl) scEl.value = lg.starterCount || 3;
+  lgRenderSggSource(lg);
+  const sc = lg.scoring || {};
+  const setV = (id, v) => { const e = el(id); if (e && document.activeElement !== e) e.value = v; };
+  setV('lg-pts-win', sc.win ?? 3); setV('lg-pts-loss', sc.loss ?? 0); setV('lg-pts-draw', sc.draw ?? 1); setV('lg-pts-otw', sc.otw ?? 2);
+  setV('lg-playoff-n', lg.playoffN || 4);
+  const tbEl = el('lg-tiebreak'); if (tbEl) tbEl.value = lg.tiebreak || 'gd';
+}
+
+// ── overview tab ──────────────────────────────────────────────────────────
+function lgRenderRecentResults() {
+  const wrap = el('lg2-recent'); const lg = lgActive(); if (!wrap || !lg) return;
+  const done = (lg.schedule || []).filter((m) => m.result && m.result.scoreA != null && m.result.scoreB != null);
+  if (!done.length) { wrap.innerHTML = '<div class="lg-empty">No results yet.</div>'; return; }
+  const teamName = (id) => { const tm = (lg.teams || []).find((t) => t.id === id); return tm ? lgResolveTeam(tm).name : '?'; };
+  wrap.innerHTML = done.slice(-5).reverse().map((m) => {
+    const sa = Number(m.result.scoreA), sb = Number(m.result.scoreB);
+    const an = (teamName(m.teamA) || '').replace(/</g, '&lt;'), bn = (teamName(m.teamB) || '').replace(/</g, '&lt;');
+    return `<div class="lg2-result-row">
+      <span class="lg2-result-teams">${an} vs ${bn}</span>
+      <span class="lg2-result-score">${sa} – ${sb}</span>
+      ${m.week ? `<span class="lg2-result-week">Wk ${m.week}</span>` : ''}
+    </div>`;
+  }).join('');
+}
+function lgRenderNextMatches() {
+  const wrap = el('lg2-next'); const lg = lgActive(); if (!wrap || !lg) return;
+  const esc = (s) => String(s == null ? '' : s).replace(/</g, '&lt;');
+  const teamName = (id) => { const tm = (lg.teams || []).find((t) => t.id === id); return tm ? lgResolveTeam(tm).name : null; };
+  const upcoming = (lg.schedule || [])
+    .filter((m) => !m.result || (m.result.scoreA == null && m.result.scoreB == null))
+    .slice(0, 4);
+  if (!upcoming.length) { wrap.innerHTML = '<div class="lg-empty" style="font-size:12px;">No upcoming matches.</div>'; return; }
+  wrap.innerHTML = upcoming.map((m) => {
+    const an = esc(teamName(m.teamA) || m.sggTeamA || '?'), bn = esc(teamName(m.teamB) || m.sggTeamB || '?');
+    const dt = [m.date, m.time].filter(Boolean).join(' · ');
+    return `<div class="lg2-next-row">
+      <span class="lg2-next-teams">${an} <span style="opacity:.5">vs</span> ${bn}</span>
+      ${m.format ? `<span class="lg2-match-fmt">${esc(m.format)}</span>` : ''}
+      ${m.week ? `<span class="lg2-result-week">Wk ${esc(m.week)}</span>` : ''}
+      ${dt ? `<span class="lg2-next-date">${esc(dt)}</span>` : ''}
+      <button class="btn btn-ghost btn-xs lg2-next-live" data-mid="${esc(m.id)}">Go Live</button>
+    </div>`;
+  }).join('');
+  wrap.querySelectorAll('.lg2-next-live').forEach((b) => b.addEventListener('click', () => {
+    const m = (lg.schedule || []).find((x) => x.id === b.dataset.mid); if (!m) return;
+    const ta = (lg.teams || []).find((t) => t.id === m.teamA), tb = (lg.teams || []).find((t) => t.id === m.teamB);
+    if (!ta || !tb) { lgStatus('Add both teams to the Roster tab first.', false); return; }
+    const ra = lgResolveTeam(ta), rb = lgResolveTeam(tb);
+    send('set_team', { side: 'blue',   name: ra.name, logo: ra.logo || null, players: (ra.players || []).map((p) => ({ name: p.name, role: p.role })) });
+    send('set_team', { side: 'orange', name: rb.name, logo: rb.logo || null, players: (rb.players || []).map((p) => ({ name: p.name, role: p.role })) });
+    send('reset_series'); lgStatus(`${ra.name} vs ${rb.name} pushed live.`, true);
+  }));
+}
+function lgRenderOverview() {
+  const lg = lgActive(); if (!lg) return;
+  const schedule = lg.schedule || [];
+  const played = schedule.filter((m) => m.result && m.result.scoreA != null).length;
+  if (el('lg2-stat-teams')) el('lg2-stat-teams').textContent = (lg.teams || []).length;
+  if (el('lg2-stat-played')) el('lg2-stat-played').textContent = played;
+  if (el('lg2-stat-remaining')) el('lg2-stat-remaining').textContent = schedule.length - played;
+  const byId = {}; (lg.standings || []).forEach((s) => { byId[s.teamId] = s; });
+  let leader = null, topPts = -1;
+  for (const tm of (lg.teams || [])) { const pts = (byId[tm.id] || {}).pts || 0; if (pts > topPts) { topPts = pts; leader = lgResolveTeam(tm).name; } }
+  if (el('lg2-stat-leader')) el('lg2-stat-leader').textContent = ((lg.standings || []).length && leader) ? leader : '—';
+  lgRenderMatchup(); lgRenderRecentResults(); lgRenderNextMatches();
+}
+
+// ── tab switching ──────────────────────────────────────────────────────────
+function lgSwitchTab(name) {
+  _lgActiveTab = name;
+  document.querySelectorAll('#lg2-tabs .lg2-tab').forEach((b) => b.classList.toggle('active', b.dataset.tab === name));
+  ['overview', 'roster', 'standings', 'schedule', 'settings'].forEach((t) => {
+    const p = el('lg2-panel-' + t); if (p) p.style.display = t === name ? '' : 'none';
+  });
+  if (name === 'overview') lgRenderOverview();
+  else if (name === 'roster') { lgRenderTeams(); lgRenderFreeAgents(); }
+  else if (name === 'standings') lgRenderStandingsTab();
+  else if (name === 'schedule') lgRenderScheduleTab();
+  else if (name === 'settings') lgRenderSettingsTab();
+}
+
+// ── banner ─────────────────────────────────────────────────────────────────
+function lgUpdateBanner() {
+  const lg = lgActive(); if (!lg) return;
+  // Name
+  const nameEl = el('lg-name'); if (nameEl && document.activeElement !== nameEl) nameEl.value = lg.name || '';
+  // Abbreviation
+  const abbrEl = el('lg-abbr'); if (abbrEl && document.activeElement !== abbrEl) abbrEl.value = lg.abbr || '';
+  // Status
+  const statusEl = el('lg-league-status'); if (statusEl) statusEl.value = lg.status || 'active';
+  // Logo
+  const imgEl = el('lg2-logo-img'), phEl = el('lg2-logo-ph');
+  if (imgEl && phEl) {
+    if (lg.logo) { imgEl.src = lg.logo; imgEl.style.display = ''; phEl.style.display = 'none'; }
+    else { imgEl.style.display = 'none'; phEl.style.display = ''; const ph = el('lg2-logo-abbr-ph'); if (ph) ph.textContent = lg.abbr || (lg.name || 'LOGO').slice(0, 4).toUpperCase(); }
+  }
+  // Chips
+  const chips = el('lg2-banner-chips'); if (!chips) return;
+  const game = lg.game && currentState.games && currentState.games[lg.game] ? currentState.games[lg.game].name : (lg.game || '');
+  const type = { team: 'Team League', freeagent: 'Free Agent Pool', salary: 'Rating Cap' }[lg.type] || lg.type || '';
+  const STATUS_LABELS = { active: 'Active', playoffs: 'Playoffs', offseason: 'Off-season', complete: 'Complete' };
+  const status = lg.status || 'active';
+  chips.innerHTML = [
+    game && `<span class="lg2-chip">${game.replace(/</g, '&lt;')}</span>`,
+    lg.season && `<span class="lg2-chip">${lg.season.replace(/</g, '&lt;')}</span>`,
+    type && `<span class="lg2-chip">${type}</span>`,
+    `<span class="lg2-chip">${(lg.teams || []).length} teams</span>`,
+    `<span class="lg2-status-chip" data-s="${status}">${STATUS_LABELS[status] || status}</span>`,
+  ].filter(Boolean).join('');
+}
+
 function lgRender() {
   lgRenderList();
   const lg = lgActive();
   const empty = el('lg-empty'), detail = el('lg-detail');
   if (!lg) { if (empty) empty.style.display = ''; if (detail) detail.style.display = 'none'; return; }
   if (empty) empty.style.display = 'none'; if (detail) detail.style.display = '';
-  const nameEl = el('lg-name'); if (nameEl && document.activeElement !== nameEl) nameEl.value = lg.name || '';
-  const typeEl = el('lg-type'); if (typeEl) typeEl.value = lg.type || 'team';
-  const gameEl = el('lg-game'); if (gameEl) { lgGameOptions(gameEl); gameEl.value = lg.game || ''; }
-  const seasonEl = el('lg-season'); if (seasonEl && document.activeElement !== seasonEl) seasonEl.value = lg.season || '';
-  const capWrap = document.querySelector('.lg-salary-field'); if (capWrap) capWrap.style.display = lg.type === 'salary' ? '' : 'none';
-  const capEl = el('lg-cap'); if (capEl && document.activeElement !== capEl) capEl.value = lg.salaryCap || 0;
-  lgRenderTeams(); lgRenderFreeAgents(); lgRenderStandings();
+  lgUpdateBanner();
+  lgSwitchTab(_lgActiveTab);
 }
 
-el('lg-new')?.addEventListener('click', () => { const l = lgNewLeague(); lgLeagues.push(l); lgActiveId = l.id; lgRender(); lgSave(); });
+el('lg-new')?.addEventListener('click', () => { const l = lgNewLeague(); lgLeagues.push(l); lgActiveId = l.id; _lgActiveTab = 'overview'; lgRender(); lgSave(); });
 // Import a league from a start.gg event (server fetches entrants → builds a team league).
 el('lg-startgg-import')?.addEventListener('click', () => {
   const input = (el('lg-startgg-slug')?.value || '').trim();
   if (!input) { showToast('Paste a start.gg event URL or slug first.', '#f59e0b'); return; }
   if (!currentState.startgg?.hasToken) { showToast('Add your Start.gg API token in Settings → Integrations first.', '#f59e0b'); return; }
   send('create_league_from_startgg', { input });
-  const st = el('lg-status'); if (st) { st.textContent = 'Importing league from start.gg (teams + rosters)…'; st.style.color = 'var(--muted)'; }
+  lgStatus('Importing league from start.gg (teams + rosters)…');
 });
 el('lg-delete')?.addEventListener('click', () => { const lg = lgActive(); if (!lg) return; appConfirm('Delete this league?', 'Delete').then(ok => { if (!ok) return; lgLeagues = lgLeagues.filter((l) => l.id !== lg.id); lgActiveId = null; lgRender(); lgSave(); }); });
-el('lg-name')?.addEventListener('input', function () { const lg = lgActive(); if (lg) { lg.name = this.value; lgRenderList(); lgSave(); } });
-el('lg-type')?.addEventListener('change', function () { const lg = lgActive(); if (lg) { lg.type = this.value; lgRender(); lgSave(); } });
-el('lg-game')?.addEventListener('change', function () { const lg = lgActive(); if (lg) { lg.game = this.value; lgSave(); } });
-el('lg-season')?.addEventListener('change', function () { const lg = lgActive(); if (lg) { lg.season = this.value.trim(); lgSave(); } });
-el('lg-cap')?.addEventListener('change', function () { const lg = lgActive(); if (lg) { lg.salaryCap = Number(this.value) || 0; lgRenderStandings(); lgSave(); } });
+el('lg-name')?.addEventListener('input', function () { const lg = lgActive(); if (lg) { lg.name = this.value; lgRenderList(); lgSave(); lgUpdateBanner(); } });
+el('lg-type')?.addEventListener('change', function () { const lg = lgActive(); if (lg) { lg.type = this.value; document.querySelectorAll('.lg-salary-field').forEach((e) => { e.style.display = this.value === 'salary' ? '' : 'none'; }); lgRenderTeams(); lgRenderList(); lgSave(); lgUpdateBanner(); } });
+el('lg-game')?.addEventListener('change', function () { const lg = lgActive(); if (lg) { lg.game = this.value; lgSave(); lgUpdateBanner(); } });
+el('lg-season')?.addEventListener('change', function () { const lg = lgActive(); if (lg) { lg.season = this.value.trim(); lgSave(); lgUpdateBanner(); } });
+el('lg-cap')?.addEventListener('change', function () { const lg = lgActive(); if (lg) { lg.salaryCap = Number(this.value) || 0; lgRenderTeams(); lgRenderStandingsTab(); lgSave(); } });
+el('lg-starter-count')?.addEventListener('change', function () { const lg = lgActive(); if (lg) { lg.starterCount = Number(this.value) || 3; lgRenderTeams(); lgSave(); } });
+// Start.gg league source typeahead
+(function () {
+  const inp = el('lg-sgg-search'), dd = el('lg-sgg-dd');
+  if (!inp || !dd) return;
+  const esc = (s) => String(s == null ? '' : s).replace(/</g, '&lt;');
+  let _timer = null;
+  inp.addEventListener('input', function () {
+    clearTimeout(_timer);
+    const v = this.value.trim();
+    if (!v || v.length < 2) { dd.style.display = 'none'; return; }
+    if (v.includes('start.gg') || (v.includes('/') && !v.includes(' '))) {
+      dd.style.display = 'none';
+      const lg = lgActive(); if (!lg) return;
+      lg.startggSource = v; lgSave(); lgRenderSggSource(lg); inp.value = '';
+      return;
+    }
+    _timer = setTimeout(() => {
+      if (!currentState.startgg?.hasToken) {
+        dd.innerHTML = '<div class="team-dd-item team-dd-empty">Set up Start.gg API token first.</div>';
+        dd.style.display = 'block'; return;
+      }
+      fetch('http://localhost:3000/api/startgg/search-leagues', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: v }) })
+        .then(r => r.json()).then(data => {
+          const results = data.results || [];
+          if (!results.length) { dd.innerHTML = '<div class="team-dd-item team-dd-empty">No leagues found.</div>'; dd.style.display = 'block'; return; }
+          dd.innerHTML = results.map(l => `<div class="team-dd-item" data-slug="${esc(l.slug)}" data-name="${esc(l.name)}">${esc(l.name)} <span style="opacity:.5;font-size:11px;">${esc(l.slug)}</span></div>`).join('');
+          dd.style.display = 'block';
+          dd.querySelectorAll('.team-dd-item[data-slug]').forEach(item => {
+            item.addEventListener('mousedown', (e) => {
+              e.preventDefault();
+              const lg = lgActive(); if (!lg) return;
+              lg.startggSource = item.dataset.slug;
+              lg.sggLeagueName = item.dataset.name;
+              lgSave(); lgRenderSggSource(lg);
+              inp.value = ''; dd.style.display = 'none';
+            });
+          });
+        }).catch(() => { dd.style.display = 'none'; });
+    }, 350);
+  });
+  inp.addEventListener('blur', () => { setTimeout(() => { dd.style.display = 'none'; }, 200); });
+})();
+
+el('lg-sgg-sync')?.addEventListener('click', () => {
+  const lg = lgActive(); if (!lg) return;
+  if (!lg.startggSource) { showToast('Set a start.gg league source first.', '#f59e0b'); return; }
+  if (!currentState.startgg?.hasToken) { showToast('Set up your Start.gg API token in Settings first.', '#f59e0b'); return; }
+  lgStatus('Syncing matches from start.gg…');
+  fetch('http://localhost:3000/api/startgg/league-sync', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ leagueId: lg.id }) })
+    .then(r => r.json()).then(data => {
+      if (data.error) { lgStatus('Sync failed: ' + data.error, false); return; }
+      lgStatus(`Synced "${data.leagueName}": ${data.imported} new matches, ${data.skipped} already present.`, true);
+    }).catch(err => lgStatus('Sync error: ' + err.message, false));
+});
+
+el('lg-abbr')?.addEventListener('input', function () { const lg = lgActive(); if (lg) { lg.abbr = this.value.toUpperCase().slice(0, 8); lgRenderList(); lgSave(); const ph = el('lg2-logo-abbr-ph'); if (ph && !lg.logo) ph.textContent = lg.abbr || (lg.name || 'LOGO').slice(0,4).toUpperCase(); } });
+el('lg-league-status')?.addEventListener('change', function () { const lg = lgActive(); if (lg) { lg.status = this.value; lgRenderList(); lgSave(); lgUpdateBanner(); } });
+el('lg2-logo-wrap')?.addEventListener('click', () => el('lg2-logo-file')?.click());
+el('lg2-logo-file')?.addEventListener('change', function () {
+  const file = this.files[0]; if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (ev) => { const lg = lgActive(); if (!lg) return; lg.logo = ev.target.result; lgUpdateBanner(); lgRenderList(); lgSave(); };
+  reader.readAsDataURL(file); this.value = '';
+});
+el('lg-pts-win')?.addEventListener('change', function () { const lg = lgActive(); if (lg) { lg.scoring = lg.scoring || {}; lg.scoring.win = Number(this.value) || 0; lgSave(); } });
+el('lg-pts-loss')?.addEventListener('change', function () { const lg = lgActive(); if (lg) { lg.scoring = lg.scoring || {}; lg.scoring.loss = Number(this.value) || 0; lgSave(); } });
+el('lg-pts-draw')?.addEventListener('change', function () { const lg = lgActive(); if (lg) { lg.scoring = lg.scoring || {}; lg.scoring.draw = Number(this.value) || 0; lgSave(); } });
+el('lg-pts-otw')?.addEventListener('change', function () { const lg = lgActive(); if (lg) { lg.scoring = lg.scoring || {}; lg.scoring.otw = Number(this.value) || 0; lgSave(); } });
+el('lg-playoff-n')?.addEventListener('change', function () { const lg = lgActive(); if (lg) { lg.playoffN = Number(this.value) || 4; lgSave(); } });
+el('lg-tiebreak')?.addEventListener('change', function () { const lg = lgActive(); if (lg) { lg.tiebreak = this.value; lgSave(); } });
 el('lg-manage-teams')?.addEventListener('click', () => { if (typeof switchTab === 'function') switchTab('equipos'); });
+el('lg-recalc')?.addEventListener('click', lgComputeStandingsFromSchedule);
+el('lg-add-match')?.addEventListener('click', lgAddMatch);
+el('lg-gen-rr')?.addEventListener('click', lgGenerateRoundRobin);
+el('lg-gen-drr')?.addEventListener('click', lgGenerateDoubleRoundRobin);
+el('lg2-tabs')?.addEventListener('click', (e) => { const tab = e.target.closest('.lg2-tab'); if (tab) lgSwitchTab(tab.dataset.tab); });
 
 // Logo + name search typeahead for adding teams from the central library (reuses the .team-dd look).
 function setupLeagueTeamSearch() {
@@ -10629,11 +14331,19 @@ el('lg-add-fa')?.addEventListener('click', () => { const lg = lgActive(); if (lg
 el('lg-push-standings')?.addEventListener('click', () => {
   const lg = lgActive(); if (!lg) return;
   const byId = {}; (lg.standings || []).forEach((s) => { byId[s.teamId] = s; });
-  const rows = (lg.teams || []).map((tm) => { const s = byId[tm.id] || { w: 0, l: 0 }; return { name: tm.name || 'Team', wins: s.w || 0, losses: s.l || 0 }; })
-    .sort((a, b) => (b.wins - b.losses) - (a.wins - a.losses) || b.wins - a.wins)
-    .map((r, i) => ({ placement: i + 1, name: r.name, wins: r.wins, losses: r.losses }));
-  send('set_manual_bracket', { type: 'ROUND_ROBIN', title: lg.name || 'Standings', standings: rows, visible: true });
-  lgStatus('Standings pushed to the bracket overlay.', true);
+  const teamsById = {}; (lg.teams || []).forEach(t => { teamsById[t.id] = t; });
+  // Use the stored standings order (which the tab preserves via drag); fall back to pts sort
+  const ordered = (lg.standings && lg.standings.length)
+    ? lg.standings.map(s => teamsById[s.teamId]).filter(Boolean)
+    : (lg.teams || []).slice().sort((a, b) => ((byId[b.id] || {}).pts || 0) - ((byId[a.id] || {}).pts || 0));
+  const rows = ordered.map((tm, i) => {
+    const s = byId[tm.id] || {};
+    const r = lgResolveTeam(tm);
+    return { placement: i + 1, name: r.name || tm.teamName || 'Team', logo: r.logo || null, wins: s.w || 0, losses: s.l || 0, points: s.pts || 0 };
+  });
+  const title = [lg.name, lg.season].filter(Boolean).join(' — ');
+  send('set_standings', { visible: true, title: title || 'Standings', rows });
+  lgStatus('Standings pushed to the standings overlay.', true);
 });
 
 function evSetMode(label) { const m = el('ev-mode'); if (m) m.textContent = label || ''; }
@@ -10679,7 +14389,7 @@ el('ev-copy-summary')?.addEventListener('click', () => {
   const txt = el('ev-sponsor-text')?.textContent || '';
   if (navigator.clipboard) navigator.clipboard.writeText(txt).then(() => evStatus('Summary copied.', 'ok')).catch(() => {});
 });
-document.querySelectorAll('.js-goto-settings').forEach((b) => b.addEventListener('click', () => document.querySelector('.tab-btn[data-tab="ajustes"]')?.click()));
+document.querySelectorAll('.js-goto-settings').forEach((b) => b.addEventListener('click', () => document.querySelector('.tab-btn[data-tab="integrations"]')?.click()));
 
 // ── Cockpit status strip ────────────────────────────────────────────────────
 function chip(id, label, ok) {
@@ -10775,6 +14485,9 @@ function renderCockpitStatus(data) {
     });
   }
   // PROGRAM = the live OBS program scene (what viewers actually see). Honest when OBS is down.
+  if (typeof window._obsPreviewUpdateScene === 'function') {
+    window._obsPreviewUpdateScene(obs.connected ? (obs.currentScene || '') : '');
+  }
   const prog = el('ck-chip-program');
   if (prog) {
     let label, ok = false;
@@ -10793,6 +14506,96 @@ function renderCockpitStatus(data) {
     rlConn.textContent = data.rlConnected ? 'RL API: connected' : 'RL API: disconnected';
     rlConn.className = 'prod-chip' + (data.rlConnected ? ' ok' : ' bad');
   }
+
+  renderPreflight(data);
+}
+
+// ── Pre-flight "Go Live" checklist ──────────────────────────────────────────
+// Aggregates the same live status the cockpit chips use, plus overlay-source presence and
+// caster setup, into an actionable go/no-go panel. status: 'pass' | 'warn' | 'fail'.
+// `block:true` items are hard blockers (graphics won't reach air); others are recommendations.
+function preflightChecks(data) {
+  const feats = activeGameFeatures(data);
+  const obs = data.obs || {};
+  const tw = data.twitch || currentState.twitch || {};
+  const sg = data.startgg || {};
+  const sgOn = sg.enabled || sg.queueEnabled;
+  const overlays = data.overlays || { count: 0 };
+  const casters = data.casters || {};
+  const casterCount = ((casters.lineup && casters.lineup.length) || 0) || ((casters.list && casters.list.length) || 0);
+  const checks = [];
+
+  // Hard blockers — without these, overlay graphics never reach the stream.
+  checks.push(obs.connected
+    ? { key: 'obs', label: 'OBS connected', status: 'pass', detail: 'WebSocket linked', block: true }
+    : { key: 'obs', label: 'OBS connected', status: 'fail', detail: obs.enabled ? 'connecting… check OBS WebSocket' : 'not connected — enable in Settings', block: true, goto: 'settings' });
+
+  checks.push((obs.connected && obs.currentScene)
+    ? { key: 'program', label: 'Program scene live', status: 'pass', detail: obs.currentScene, block: true }
+    : { key: 'program', label: 'Program scene live', status: obs.connected ? 'warn' : 'fail', detail: obs.connected ? 'no scene selected in OBS' : 'unknown until OBS connects', block: true });
+
+  checks.push(overlays.count > 0
+    ? { key: 'overlays', label: 'Overlay sources live', status: 'pass', detail: overlays.count + ' connected', block: true }
+    : { key: 'overlays', label: 'Overlay sources live', status: 'fail', detail: 'no overlay browser sources detected — graphics won’t show', block: true });
+
+  // Recommendations — strongly advised but won't stop you going live.
+  checks.push(data.eventName
+    ? { key: 'event', label: 'Event title set', status: 'pass', detail: data.eventName }
+    : { key: 'event', label: 'Event title set', status: 'warn', detail: 'no event name — overlays show blank title' });
+
+  if (feats.includes('stats-api')) checks.push(data.rlConnected
+    ? { key: 'rl', label: 'RL Stats API', status: 'pass', detail: 'connected' }
+    : { key: 'rl', label: 'RL Stats API', status: 'warn', detail: 'not receiving game data' });
+  if (feats.includes('gsi')) checks.push((data.csgo && data.csgo.connected)
+    ? { key: 'cs2', label: 'CS2 GSI', status: 'pass', detail: 'connected' }
+    : { key: 'cs2', label: 'CS2 GSI', status: 'warn', detail: 'no game-state feed' });
+
+  checks.push(tw.connected
+    ? { key: 'twitch', label: 'Twitch connected', status: 'pass', detail: (tw.displayName || tw.username || 'linked') + (tw.adsEnabled === false ? ' · ads off' : '') }
+    : { key: 'twitch', label: 'Twitch connected', status: 'warn', detail: 'not linked — predictions/ads unavailable', goto: 'settings' });
+
+  if (sgOn) checks.push(sg.connected
+    ? { key: 'startgg', label: 'start.gg synced', status: 'pass', detail: 'connected' }
+    : { key: 'startgg', label: 'start.gg synced', status: sg.hasToken ? 'warn' : 'fail', detail: sg.hasToken ? 'syncing…' : 'no API token set', goto: 'settings' });
+
+  checks.push(casterCount > 0
+    ? { key: 'casters', label: 'Casters on cam', status: 'pass', detail: casterCount + ' assigned' }
+    : { key: 'casters', label: 'Casters on cam', status: 'warn', detail: 'no talent assigned to this show' });
+
+  checks.push(data.activeBrandKitId
+    ? { key: 'brand', label: 'Brand kit selected', status: 'pass', detail: (data.brand && data.brand.name) || 'active' }
+    : { key: 'brand', label: 'Brand kit selected', status: 'warn', detail: 'using default look — pick a kit in Profiles' });
+
+  return checks;
+}
+
+function renderPreflight(data) {
+  const area = el('golive-area'); if (!area) return;
+  const checks = preflightChecks(data);
+  const blockers = checks.filter((c) => c.block && c.status === 'fail');
+  const warns = checks.filter((c) => c.status !== 'pass' && !(c.block && c.status === 'fail'));
+
+  let cls, sumCls, sumTx;
+  if (blockers.length) { cls = 'is-block'; sumCls = 'is-block'; sumTx = blockers.length + ' blocker' + (blockers.length > 1 ? 's' : ''); }
+  else if (warns.length) { cls = 'is-warn'; sumCls = 'is-warn'; sumTx = warns.length + ' note' + (warns.length > 1 ? 's' : ''); }
+  else { cls = 'is-ready'; sumCls = 'is-ready'; sumTx = 'All clear'; }
+  area.classList.remove('is-block', 'is-warn', 'is-ready');
+  area.classList.add(cls);
+  const sumEl = el('golive-sum'); if (sumEl) { sumEl.textContent = sumTx; sumEl.className = 'golive-head-sum ' + sumCls; }
+
+  const list = el('golive-list'); if (!list) return;
+  list.innerHTML = '';
+  checks.forEach((c) => {
+    const icCls = c.status === 'pass' ? 'pass' : c.status === 'warn' ? 'warn' : 'fail';
+    const icTx = c.status === 'pass' ? '✓' : c.status === 'warn' ? '!' : '✕';
+    const row = document.createElement('div');
+    row.className = 'golive-row ' + c.status + (c.goto ? ' is-clickable' : '');
+    row.innerHTML = '<span class="golive-ic ' + icCls + '">' + icTx + '</span>'
+      + '<span class="golive-tx"><span class="golive-tx-lbl">' + escapeHtml(c.label) + '</span>'
+      + '<span class="golive-tx-st">' + escapeHtml(c.detail || '') + '</span></span>';
+    if (c.goto === 'settings') row.addEventListener('click', () => { const b = el('btn-header-settings'); if (b) b.click(); });
+    list.appendChild(row);
+  });
 }
 
 // Populate the cockpit spotlight player list (mirrors the Production spotlight select).
@@ -10808,6 +14611,338 @@ function populateCockpitSpotlight(data) {
   sel.innerHTML = '<option value="">— Select player —</option>' +
     players.map((n) => `<option value="${n}">${n}</option>`).join('');
   if (players.includes(cur)) sel.value = cur;
+}
+
+// ══════════════════════════════════ CUSTOMISABLE DASHBOARD ══════════════════════════════════════════
+const DASH_CFG_KEY = 'ne_dash_v2';
+
+// Widget registry — panels the user can show/hide and reorder on the Dashboard.
+// auto-only panels (data-dash-auto) are not in this list; their visibility is managed by game logic.
+const DASH_WIDGETS = [
+  { id: 'event',    title: 'Event',          icon: 'calendar',   desc: 'Tournament name, start.gg event and status',       sel: '[data-dash-id="event"]',    defaultOn: true,  span: 'full' },
+  { id: 'deck',     title: 'Deck',           icon: 'layout',     desc: 'Scene switcher, preview and hotkey buttons',       sel: '[data-dash-id="deck"]',     defaultOn: true,  span: 'full' },
+  { id: 'teams',    title: 'Teams',          icon: 'users',      desc: 'Team names, rosters, scores and side swap',       sel: '[data-dash-id="teams"]',    defaultOn: true,  span: 'full' },
+  { id: 'adslots',  title: 'Ad Slots',       icon: 'film',       desc: 'Sponsor ad slots and commercial break controls',  sel: '[data-dash-id="adslots"]',  defaultOn: true,  span: 'full' },
+  { id: 'director', title: 'Director',       icon: 'zap',        desc: 'AI director controls and clip queue manager',     sel: '[data-dash-id="director"]', defaultOn: true,  span: 'full' },
+  { id: 'series',   title: 'Series',         icon: 'trophy',     desc: 'Best-of series scoreboard and match history',     sel: '[data-dash-id="series"]',   defaultOn: false, span: '1'    },
+  { id: 'talent',   title: 'Talent',         icon: 'mic',        desc: 'On-air talent, camera feeds and VDO rooms',      sel: '[data-dash-id="talent"]',   defaultOn: false, span: '1'    },
+  { id: 'casters',  title: 'Caster Desk',    icon: 'headphones', desc: 'Caster names, social handles and desk layout',   sel: '[data-dash-id="casters"]',  defaultOn: false, span: '1'    },
+  { id: 'veto',     title: 'Map Veto',       icon: 'flag',       desc: 'Guided map pick and ban board',                  sel: '[data-dash-id="veto"]',     defaultOn: false, span: 'full' },
+  { id: 'draft',    title: 'Champion Draft', icon: 'sparkles',   desc: 'Hero and champion pick & ban draft board',       sel: '[data-dash-id="draft"]',    defaultOn: false, span: 'full' },
+  { id: 'queue',    title: 'Stream Queue',   icon: 'list',       desc: 'Upcoming matches auto-loaded from the bracket',  sel: '#dash-mini-queue',          defaultOn: false, span: '1'    },
+  { id: 'twitch',   title: 'Twitch Live',    icon: 'chat',       desc: 'Live viewer count and stream status',            sel: '#dash-mini-twitch',         defaultOn: false, span: '1'    },
+  { id: 'obs',      title: 'OBS Status',     icon: 'monitor',    desc: 'Active OBS scene and recording status',          sel: '#dash-mini-obs',            defaultOn: false, span: '1'    },
+];
+
+function getDashCfg() {
+  try {
+    const c = JSON.parse(localStorage.getItem(DASH_CFG_KEY));
+    if (!c || !Array.isArray(c.panels)) return null;
+    return c;
+  } catch { return null; }
+}
+function setDashCfg(cfg) { try { localStorage.setItem(DASH_CFG_KEY, JSON.stringify(cfg)); } catch {} }
+function defaultDashCfg() {
+  return {
+    cols: 1,
+    panels: DASH_WIDGETS.map((w) => ({ id: w.id, on: w.defaultOn, span: w.span }))
+  };
+}
+function getDashPanel(id) { return DASH_WIDGETS.find((w) => w.id === id); }
+
+// Apply config: set order, display, span, and column count on every widget section.
+function applyDashLayout() {
+  const grid = el('dash-grid'); if (!grid) return;
+  const cfg = getDashCfg() || defaultDashCfg();
+
+  // Grid column count
+  grid.dataset.cols = cfg.cols || 1;
+
+  // Auto-conditional panels (veto, draft, ow, mr) keep their own display rules; skip them.
+  // User-managed panels: apply order + display + span from config.
+  const panels = cfg.panels || DASH_WIDGETS.map((w) => ({ id: w.id, on: w.defaultOn, span: w.span }));
+  panels.forEach((p, i) => {
+    const w = getDashPanel(p.id); if (!w) return;
+    const section = grid.querySelector(w.sel);
+    if (!section) return;
+    section.style.order = i;
+    section.style.display = p.on ? '' : 'none';
+    section.dataset.dashSpan = p.span || w.span || '1';
+  });
+
+  // Keep column picker buttons in sync
+  document.querySelectorAll('.dcb-col-btn').forEach((b) => {
+    b.classList.toggle('active', String(b.dataset.cols) === String(cfg.cols || 1));
+  });
+}
+
+// ── Customize mode ──────────────────────────────────────────────────────────
+let _dashEditing = false;
+
+function setDashEditing(on) {
+  _dashEditing = on;
+  const grid = el('dash-grid');
+  const controls = document.querySelector('.dcb-controls');
+  const btn = el('dash-customize-btn');
+  if (!grid) return;
+  grid.classList.toggle('dash-editing', on);
+  if (controls) controls.style.display = on ? '' : 'none';
+  if (btn) btn.classList.toggle('active', on);
+  if (on) {
+    addDashHandles();
+    wireDashGridDrag();
+    renderDashCatalog();
+  } else {
+    removeDashHandles();
+  }
+}
+
+// Width-button SVGs for the 3-state panel width selector.
+const _DASH_W_SVG = {
+  '1':    '<svg viewBox="0 0 20 14" width="18" height="12" fill="currentColor"><rect x="3" y="1" width="14" height="12" rx="2"/></svg>',
+  '2':    '<svg viewBox="0 0 20 14" width="18" height="12" fill="currentColor"><rect x="1" y="1" width="7" height="12" rx="2"/><rect x="12" y="1" width="7" height="12" rx="2"/></svg>',
+  'full': '<svg viewBox="0 0 20 14" width="18" height="12" fill="currentColor"><rect x="1" y="1" width="18" height="12" rx="2"/></svg>',
+};
+const _DASH_W_TITLES = { '1': '1 column', '2': '2 columns', 'full': 'Full width' };
+
+// Inject drag-handle bars into each user-managed panel.
+function addDashHandles() {
+  const grid = el('dash-grid'); if (!grid) return;
+  const cfg = getDashCfg() || defaultDashCfg();
+  const cols = cfg.cols || 1;
+
+  DASH_WIDGETS.forEach((w) => {
+    const section = grid.querySelector(w.sel); if (!section) return;
+    if (section.dataset.dashAuto) return;
+    if (section.querySelector('.dash-handle')) return;
+    const p = cfg.panels.find((x) => x.id === w.id) || { span: w.span };
+    const curSpan = p.span || w.span || '1';
+
+    const widthBtnsHtml = cols > 1
+      ? `<div class="dash-handle-widths">${['1','2','full'].map((s) =>
+          `<button class="dash-handle-w${curSpan === s ? ' active' : ''}" data-span="${s}" title="${_DASH_W_TITLES[s]}">${_DASH_W_SVG[s]}</button>`
+        ).join('')}</div>`
+      : '';
+
+    const handle = document.createElement('div');
+    handle.className = 'dash-handle';
+    handle.draggable = true;
+    handle.dataset.dashHandle = w.id;
+    handle.innerHTML =
+      `<span class="dash-handle-grip">${svgIcon('grip')}</span>`
+      + `<span class="dash-handle-title">${w.title}</span>`
+      + widthBtnsHtml
+      + `<button class="dash-handle-hide" title="Hide panel">${svgIcon('x')}</button>`;
+
+    handle.querySelectorAll('.dash-handle-w').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const c = getDashCfg() || defaultDashCfg();
+        const pp = c.panels.find((x) => x.id === w.id);
+        if (pp) pp.span = btn.dataset.span;
+        setDashCfg(c);
+        applyDashLayout();
+        removeDashHandles();
+        addDashHandles();
+      });
+    });
+
+    handle.querySelector('.dash-handle-hide')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const c = getDashCfg() || defaultDashCfg();
+      const pp = c.panels.find((x) => x.id === w.id);
+      if (pp) pp.on = false;
+      setDashCfg(c);
+      applyDashLayout();
+      removeDashHandles();
+      addDashHandles();
+      renderDashCatalog();
+    });
+
+    section.insertBefore(handle, section.firstChild);
+  });
+}
+
+function removeDashHandles() {
+  document.querySelectorAll('.dash-handle').forEach((h) => h.remove());
+}
+
+// Catalog: card grid showing all panels so users can toggle visibility.
+function renderDashCatalog() {
+  const cat = el('dcb-catalog'); if (!cat) return;
+  const cfg = getDashCfg() || defaultDashCfg();
+  cat.innerHTML = '<div class="dcb-catalog-hdr">Panels</div>';
+
+  DASH_WIDGETS.forEach((w) => {
+    const p = cfg.panels.find((x) => x.id === w.id);
+    const on = p ? p.on : w.defaultOn;
+
+    const card = document.createElement('button');
+    card.className = 'dcb-card' + (on ? ' on' : '');
+    card.title = on ? 'Click to hide this panel' : 'Click to show this panel';
+    card.innerHTML =
+      `<div class="dcb-card-top">`
+      + `<span class="dcb-card-icon">${svgIcon(w.icon || 'grip')}</span>`
+      + `<span class="dcb-card-badge">${on ? 'Visible' : 'Hidden'}</span>`
+      + `</div>`
+      + `<div class="dcb-card-name">${w.title}</div>`
+      + `<div class="dcb-card-desc">${w.desc || ''}</div>`;
+
+    card.addEventListener('click', () => {
+      const c = getDashCfg() || defaultDashCfg();
+      let pp = c.panels.find((x) => x.id === w.id);
+      if (!pp) { pp = { id: w.id, on: !on, span: w.span }; c.panels.push(pp); }
+      else pp.on = !pp.on;
+      setDashCfg(c);
+      applyDashLayout();
+      removeDashHandles();
+      addDashHandles();
+      renderDashCatalog();
+    });
+
+    cat.appendChild(card);
+  });
+}
+
+// Drag-to-reorder panels in edit mode.
+// Shows a blue insertion line (top or bottom of target) based on cursor position.
+let _dashDragId = null;
+
+function _dashClearDragCls(grid) {
+  grid.querySelectorAll('.dash-dragging, .dash-insert-top, .dash-insert-bot').forEach((x) => {
+    x.classList.remove('dash-dragging', 'dash-insert-top', 'dash-insert-bot');
+  });
+}
+
+function wireDashGridDrag() {
+  const grid = el('dash-grid'); if (!grid || grid._dragWired) return;
+  grid._dragWired = true;
+
+  grid.addEventListener('dragstart', (e) => {
+    const handle = e.target.closest('[data-dash-handle]'); if (!handle) return;
+    _dashDragId = handle.dataset.dashHandle;
+    handle.closest('[data-dash-id]')?.classList.add('dash-dragging');
+    e.dataTransfer.effectAllowed = 'move';
+  });
+
+  grid.addEventListener('dragover', (e) => {
+    if (!_dashDragId) return;
+    const target = e.target.closest('[data-dash-id]');
+    if (!target || target.dataset.dashId === _dashDragId) return;
+    e.preventDefault(); e.dataTransfer.dropEffect = 'move';
+    // Clear old indicators, then set new one based on cursor half
+    grid.querySelectorAll('.dash-insert-top, .dash-insert-bot').forEach((x) => {
+      x.classList.remove('dash-insert-top', 'dash-insert-bot');
+    });
+    const rect = target.getBoundingClientRect();
+    target.classList.add(e.clientY < rect.top + rect.height / 2 ? 'dash-insert-top' : 'dash-insert-bot');
+  });
+
+  grid.addEventListener('dragleave', (e) => {
+    // Only clear when leaving the grid entirely
+    if (!e.relatedTarget || !grid.contains(e.relatedTarget)) {
+      grid.querySelectorAll('.dash-insert-top, .dash-insert-bot').forEach((x) => {
+        x.classList.remove('dash-insert-top', 'dash-insert-bot');
+      });
+    }
+  });
+
+  grid.addEventListener('drop', (e) => {
+    if (!_dashDragId) return;
+    const target = e.target.closest('[data-dash-id]');
+    if (!target || target.dataset.dashId === _dashDragId) { _dashDragId = null; _dashClearDragCls(grid); return; }
+    e.preventDefault();
+    const insertBefore = target.classList.contains('dash-insert-top');
+    const cfg = getDashCfg() || defaultDashCfg();
+    const srcIdx = cfg.panels.findIndex((p) => p.id === _dashDragId);
+    let tgtIdx = cfg.panels.findIndex((p) => p.id === target.dataset.dashId);
+    if (srcIdx >= 0 && tgtIdx >= 0 && srcIdx !== tgtIdx) {
+      const [item] = cfg.panels.splice(srcIdx, 1);
+      tgtIdx = cfg.panels.findIndex((p) => p.id === target.dataset.dashId);
+      cfg.panels.splice(insertBefore ? tgtIdx : tgtIdx + 1, 0, item);
+      setDashCfg(cfg);
+      applyDashLayout();
+      removeDashHandles();
+      addDashHandles();
+    }
+    _dashDragId = null;
+    _dashClearDragCls(grid);
+  });
+
+  grid.addEventListener('dragend', () => {
+    _dashDragId = null;
+    _dashClearDragCls(grid);
+  });
+}
+
+// Wiring — runs once on page load
+(function wireDashCustomize() {
+  el('dash-customize-btn')?.addEventListener('click', (e) => { e.stopPropagation(); setDashEditing(!_dashEditing); });
+  el('dcb-done')?.addEventListener('click', () => setDashEditing(false));
+
+  // Column picker — re-render handles and catalog since width options change with col count
+  document.querySelectorAll('.dcb-col-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const cfg = getDashCfg() || defaultDashCfg();
+      cfg.cols = Number(btn.dataset.cols) || 1;
+      setDashCfg(cfg);
+      applyDashLayout();
+      removeDashHandles();
+      addDashHandles();
+      renderDashCatalog();
+    });
+  });
+
+  // Apply initial layout from saved config
+  applyDashLayout();
+})();
+
+// ── Mini panels: render from live state ─────────────────────────────────────
+function renderDashMiniPanels(data) {
+  // Stream Queue mini
+  const queueEl = el('dash-mini-queue-content');
+  if (queueEl && el('dash-mini-queue')?.style.display !== 'none') {
+    const queue = (data.startgg && data.startgg.queue) || [];
+    if (!queue.length) {
+      queueEl.innerHTML = '<p class="dash-mini-empty">No matches in stream queue.</p>';
+    } else {
+      queueEl.innerHTML = queue.slice(0, 6).map((m) => {
+        const live = m.live ? '<span class="dash-mini-queue-live">LIVE</span>' : '';
+        return `<div class="dash-mini-queue-item">${live}<span class="dash-mini-queue-vs">${dEsc(m.teamA||'TBD')} vs ${dEsc(m.teamB||'TBD')}</span><span class="dash-mini-queue-round">${dEsc(m.round||'')}</span></div>`;
+      }).join('');
+    }
+  }
+
+  // Twitch Live mini
+  if (el('dash-mini-twitch')?.style.display !== 'none') {
+    const tw = data.twitch || {};
+    const viewers = el('dmtw-viewers'); if (viewers) viewers.textContent = tw.viewerCount != null ? Number(tw.viewerCount).toLocaleString() : '—';
+    const follows = el('dmtw-followers'); if (follows) follows.textContent = tw.followerCount != null ? Number(tw.followerCount).toLocaleString() : '—';
+    const status = el('dmtw-status-val');
+    if (status) { status.textContent = tw.isLive ? 'Live' : tw.connected ? 'Connected' : 'Offline'; status.style.color = tw.isLive ? '#22c55e' : ''; }
+    const game = el('dmtw-game-val'); if (game) game.textContent = tw.gameName || tw.channelGame || '—';
+  }
+
+  // OBS Status mini
+  if (el('dash-mini-obs')?.style.display !== 'none') {
+    const obs = data.obs || {};
+    const sceneEl = el('dmobs-scene'); if (sceneEl) sceneEl.textContent = obs.currentScene || (obs.connected ? 'Unknown' : 'Disconnected');
+    const streamPill = el('dmobs-stream');
+    if (streamPill) { streamPill.textContent = obs.streaming ? 'Streaming' : 'Stream Off'; streamPill.classList.toggle('on', !!obs.streaming); }
+    const recPill = el('dmobs-record');
+    if (recPill) { recPill.textContent = obs.recording ? 'Recording' : 'Record Off'; recPill.classList.toggle('on', !!obs.recording); }
+    const bufPill = el('dmobs-replay');
+    if (bufPill) { bufPill.textContent = obs.replayBufferActive ? 'Buffer On' : 'Buffer Off'; bufPill.classList.toggle('on', !!obs.replayBufferActive); }
+    const scenesList = el('dmobs-scenes-list');
+    if (scenesList) {
+      const scenes = obs.availableScenes || [];
+      const current = obs.currentScene || '';
+      scenesList.innerHTML = scenes.slice(0, 10).map((s) => `<button class="dmobs-scene-btn${s === current ? ' on' : ''}" data-scene="${dEsc(s)}">${dEsc(s)}</button>`).join('');
+      scenesList.querySelectorAll('.dmobs-scene-btn').forEach((b) => {
+        b.addEventListener('click', () => send('obs_switch_scene', { sceneName: b.dataset.scene }));
+      });
+    }
+  }
 }
 
 // ── Global quick-action toolbar (fixed bottom bar) ──────────────────────────
@@ -11115,6 +15250,7 @@ el('ptimer-open')?.addEventListener('click', () => {
 // Popover window actions: pop out into a separate (timer-sized) window + copy the overlay link.
 el('ptp-popout')?.addEventListener('click', () => openPopout('timer'));
 el('dcc-popout-btn')?.addEventListener('click', () => openPopout('dcc'));
+el('dcc-refresh-btn')?.addEventListener('click', (e) => { if (typeof cfTalentRefresh === 'function') cfTalentRefresh(e.currentTarget); });
 el('ptp-copy')?.addEventListener('click', (e) => {
   const url = (typeof SCENE_BASE_URL !== 'undefined' ? SCENE_BASE_URL : 'http://localhost:3000') + '/countdown.html';
   if (typeof copyText === 'function') copyText(url, e.currentTarget);
@@ -11205,7 +15341,7 @@ function applyCommercialState(data) {
   btn.textContent = on ? 'End Commercial' : 'Run Commercial';
 }
 
-// ── Reminders / run-of-show checklist (local, persisted in localStorage) ────
+// ── Run-of-Show checklist (Settings page, persisted in localStorage) ─────────
 const REM_KEY = 'ne_reminders';
 function loadReminders() { try { return JSON.parse(localStorage.getItem(REM_KEY) || '[]'); } catch { return []; } }
 function saveReminders(list) { try { localStorage.setItem(REM_KEY, JSON.stringify(list)); } catch {} }
@@ -11213,15 +15349,15 @@ function renderReminders() {
   const wrap = el('reminders-list'); if (!wrap) return;
   const list = loadReminders();
   wrap.innerHTML = '';
-  if (!list.length) { wrap.innerHTML = '<div class="reminders-empty">No reminders yet — add your run-of-show steps.</div>'; return; }
+  if (!list.length) { wrap.innerHTML = '<div class="reminders-empty">No steps yet — add your run-of-show checklist above.</div>'; return; }
   list.forEach((r, i) => {
     const row = document.createElement('div');
     row.className = 'reminder-item' + (r.done ? ' done' : '');
-    row.innerHTML = '<input type="checkbox"><span></span><button title="Remove">✕</button>';
+    row.innerHTML = '<input type="checkbox"><span class="rem-text"></span><button class="rem-del" title="Remove">✕</button>';
     row.querySelector('input').checked = !!r.done;
-    row.querySelector('span').textContent = r.text;
+    row.querySelector('.rem-text').textContent = r.text;
     row.querySelector('input').addEventListener('change', function () { const l = loadReminders(); l[i].done = this.checked; saveReminders(l); renderReminders(); });
-    row.querySelector('button').addEventListener('click', () => { const l = loadReminders(); l.splice(i, 1); saveReminders(l); renderReminders(); });
+    row.querySelector('.rem-del').addEventListener('click', () => { const l = loadReminders(); l.splice(i, 1); saveReminders(l); renderReminders(); });
     wrap.appendChild(row);
   });
 }
@@ -11230,15 +15366,39 @@ function addReminder() {
   const text = inp.value.trim(); if (!text) return;
   const l = loadReminders(); l.push({ text, done: false }); saveReminders(l); inp.value = ''; renderReminders();
 }
-el('btn-reminders')?.addEventListener('click', () => {
-  const pop = el('reminders-pop'); if (!pop) return;
-  pop.style.display = pop.style.display === 'none' ? 'block' : 'none';
-  if (pop.style.display === 'block') renderReminders();
-});
-el('reminders-close')?.addEventListener('click', () => { const p = el('reminders-pop'); if (p) p.style.display = 'none'; });
 el('reminders-add-btn')?.addEventListener('click', addReminder);
 el('reminders-input')?.addEventListener('keydown', (e) => { if (e.key === 'Enter') addReminder(); });
-// Checklist now lives in a rail tab (always present) — render the saved list on startup.
+el('ros-reset-all')?.addEventListener('click', () => { const l = loadReminders().map((r) => ({ ...r, done: false })); saveReminders(l); renderReminders(); });
+el('ros-clear-all')?.addEventListener('click', () => { if (!loadReminders().length || confirm('Clear all run-of-show steps?')) { saveReminders([]); renderReminders(); } });
+
+el('ros-export')?.addEventListener('click', () => {
+  const list = loadReminders();
+  const payload = JSON.stringify({ name: 'Run-of-Show', version: 1, steps: list.map(r => ({ text: r.text })) }, null, 2);
+  const a = document.createElement('a');
+  a.href = 'data:application/json;charset=utf-8,' + encodeURIComponent(payload);
+  a.download = 'run-of-show.json';
+  a.click();
+});
+
+el('ros-import-file')?.addEventListener('change', function () {
+  const file = this.files && this.files[0]; if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (ev) => {
+    try {
+      const data = JSON.parse(ev.target.result);
+      const steps = Array.isArray(data.steps) ? data.steps : (Array.isArray(data) ? data : null);
+      if (!steps) { alert('Unrecognised format — expected { steps: [...] }.'); return; }
+      const list = steps.map(s => ({ text: (typeof s === 'string' ? s : s.text || '').trim(), done: false })).filter(s => s.text);
+      if (!list.length) { alert('No steps found in file.'); return; }
+      const existing = loadReminders();
+      if (existing.length && !confirm(`Replace ${existing.length} existing step(s) with ${list.length} imported step(s)?`)) return;
+      saveReminders(list); renderReminders();
+    } catch { alert('Could not read file — make sure it is a valid Run-of-Show JSON.'); }
+  };
+  reader.readAsText(file);
+  this.value = '';
+});
+
 renderReminders();
 
 // ── Preview dock — renders overlay scenes directly (no OBS WebSocket needed) ─
@@ -11530,7 +15690,7 @@ async function cfLoadTalent() {
     cfFilterTalent();             // re-apply any active search filter
     // Auto-start the (media-free) director presence so connection status updates the moment a
     // player joins — no need to manually open the Director Control Center.
-    if (!_directorOn && cfDirectorConsoles().length) { cfStartDirectorConsoles(); renderQtalent(); }
+    if (!_directorOn) { cfStartDirectorConsoles(); renderQtalent(); }
     else if (typeof cfSyncDirectorConsoles === 'function') cfSyncDirectorConsoles();   // add any new rooms
   } catch (e) { wrap.innerHTML = `<p style="color:#f56565;">Error: ${tlEsc(e.message)}</p>`; }
 }
@@ -14221,6 +18381,7 @@ el('select-ticker-source')?.addEventListener('change', function() {
   send('set_ticker', { source: this.value });
 });
 
+
 function applyTickerState(data) {
   const ticker = data.ticker || {};
   const cb = el('check-ticker-visible');
@@ -14926,7 +19087,7 @@ let brandPackages = [];
 let editingPackageId = null;
 let editingActivePackageId = null;
 function newBrandPackage(name) {
-  return { id: 'p' + Math.random().toString(36).slice(2, 9), name: name || 'Package', sponsorLabel: 'PARTNERS', sponsorInterval: 6, sponsors: [], bannerImages: [], bannerCaptions: [], bannerSlant: 'right', bannerHeader: '', bannerInterval: 10 };
+  return { id: 'p' + Math.random().toString(36).slice(2, 9), name: name || 'Package', sponsorLabel: 'PARTNERS', sponsorInterval: 6, sponsorMode: 'cycle', sponsors: [], bannerImages: [], bannerCaptions: [], bannerSlant: 'right', bannerHeader: '', bannerInterval: 10 };
 }
 // Copy the live editor fields back into the package being edited (call before switching/saving).
 function flushEditorToPackage() {
@@ -14934,6 +19095,7 @@ function flushEditorToPackage() {
   if (!pkg) return;
   pkg.sponsorLabel = (el('input-brand-sponsor-label').value || 'PARTNERS').trim();
   pkg.sponsorInterval = Number(el('input-brand-interval').value) || 6;
+  pkg.sponsorMode = el('select-brand-sponsor-mode')?.value === 'static' ? 'static' : 'cycle';
   pkg.sponsors = brandSponsors;
   pkg.bannerImages = brandBannerImages;
   pkg.bannerCaptions = brandBannerCaptions;
@@ -14949,6 +19111,7 @@ function loadPackageIntoEditor(pkg) {
   brandBannerCaptions = Array.isArray(pkg.bannerCaptions) ? [...pkg.bannerCaptions] : [];
   el('input-brand-sponsor-label').value = pkg.sponsorLabel || '';
   el('input-brand-interval').value = pkg.sponsorInterval || 6;
+  if (el('select-brand-sponsor-mode')) el('select-brand-sponsor-mode').value = pkg.sponsorMode === 'static' ? 'static' : 'cycle';
   el('input-brand-banner-interval').value = pkg.bannerInterval || 10;
   if (el('select-brand-banner-slant')) el('select-brand-banner-slant').value = pkg.bannerSlant || 'right';
   if (el('input-brand-banner-header')) el('input-brand-banner-header').value = pkg.bannerHeader || '';
@@ -15044,6 +19207,7 @@ function resetBrandForm() {
 
 // Spots a sponsor logo can be assigned to (checkmarks in the brand editor).
 const SPONSOR_SPOTS_UI = [
+  { key: 'title',       label: 'Title',       multi: false },
   { key: 'rail',        label: 'Rail',        multi: true },
   { key: 'desk',        label: 'Caster Desk', multi: true },
   { key: 'banner',      label: 'Banner',      multi: true },
@@ -15051,9 +19215,10 @@ const SPONSOR_SPOTS_UI = [
   { key: 'replayGoal',  label: 'Replay',      multi: false },
   { key: 'replayOutro', label: 'Replay Outro',multi: false },
   { key: 'scoreboard',  label: 'Scoreboard',  multi: false },
+  { key: 'ticker',      label: 'Ticker',      multi: false },
 ];
 function defaultPlacements() {
-  return { rail: true, desk: false, banner: false, overtime: false, replayGoal: false, replayOutro: false, scoreboard: false };
+  return { title: false, rail: true, desk: false, banner: false, overtime: false, replayGoal: false, replayOutro: false, scoreboard: false, ticker: false };
 }
 function ensurePlacements(s) {
   if (!s.placements || typeof s.placements !== 'object') s.placements = defaultPlacements();
@@ -15279,12 +19444,13 @@ function loadBrandIntoForm(k) {
   pendingBrandLogo = k.logo || null;
   // Server sends kit.packages; fall back to wrapping legacy top-level sponsor/banner fields.
   let src = Array.isArray(k.packages) && k.packages.length ? k.packages
-    : [{ id: k.activePackageId, name: 'Main', sponsorLabel: k.sponsorLabel, sponsorInterval: k.sponsorInterval, sponsors: k.sponsors, bannerImages: k.bannerImages, bannerCaptions: k.bannerCaptions, bannerSlant: k.bannerSlant, bannerHeader: k.bannerHeader, bannerInterval: k.bannerInterval }];
+    : [{ id: k.activePackageId, name: 'Main', sponsorLabel: k.sponsorLabel, sponsorInterval: k.sponsorInterval, sponsorMode: k.sponsorMode, sponsors: k.sponsors, bannerImages: k.bannerImages, bannerCaptions: k.bannerCaptions, bannerSlant: k.bannerSlant, bannerHeader: k.bannerHeader, bannerInterval: k.bannerInterval }];
   brandPackages = src.map((p) => ({
     id: p.id || ('p' + Math.random().toString(36).slice(2, 9)),
     name: p.name || 'Main',
     sponsorLabel: p.sponsorLabel || 'PARTNERS',
     sponsorInterval: p.sponsorInterval || 6,
+    sponsorMode: p.sponsorMode === 'static' ? 'static' : 'cycle',
     sponsors: (p.sponsors || []).map((s) => ({ ...s, placements: { ...(s.placements || {}) } })),
     bannerImages: Array.isArray(p.bannerImages) ? [...p.bannerImages] : [],
     bannerCaptions: Array.isArray(p.bannerCaptions) ? [...p.bannerCaptions] : [],
@@ -15493,6 +19659,17 @@ el('btn-rl-ui-hide-now')?.addEventListener('click', () => {
   const st = el('rl-ui-hide-status');
   if (st) st.textContent = 'Sending to Rocket League…';
 });
+// Copy the DefaultStatsAPI.ini contents to the clipboard for the RL Stats API setup.
+el('btn-rl-copy-ini')?.addEventListener('click', async () => {
+  const txt = (el('rl-ini-text')?.textContent || '').trim();
+  const btn = el('btn-rl-copy-ini');
+  try {
+    await navigator.clipboard.writeText(txt + '\n');
+    if (btn) { const o = btn.textContent; btn.textContent = 'Copied ✓'; setTimeout(() => { btn.textContent = o; }, 1600); }
+  } catch (e) {
+    if (typeof showToast === 'function') showToast('Copy failed — select the text manually', '#c53030', 3000);
+  }
+});
 
 function applyValorantState(data) {
   const val = data.valorant || {};
@@ -15503,6 +19680,57 @@ function applyValorantState(data) {
     conn.className = 'prod-chip' + (connected ? ' ok' : '');
   }
 }
+
+function applyLolState(data) {
+  const lol = data.lol || {};
+  const conn = el('lol-conn');
+  if (conn) {
+    const connected = !!lol.connected;
+    conn.textContent = connected ? 'League: connected' : 'League: waiting';
+    conn.className = 'prod-chip' + (connected ? ' ok' : '');
+  }
+  // reflect the saved teamfight-transition mode on the segmented control
+  const mode = lol.hudMode || 'auto';
+  document.querySelectorAll('#lol-hud-mode .seg-btn').forEach(b => b.classList.toggle('active', b.dataset.mode === mode));
+
+  // OCR gold override — toggle, region inputs, status
+  const ocr = lol.ocr || {};
+  const enEl = el('lol-ocr-enable');
+  if (enEl && document.activeElement !== enEl) enEl.checked = !!ocr.enabled;
+  const r = ocr.regions || {};
+  const setReg = (id, v) => { const e = el(id); if (e && document.activeElement !== e && v != null) e.value = v; };
+  if (r.blue) { setReg('lol-ocr-bx', r.blue.x); setReg('lol-ocr-by', r.blue.y); setReg('lol-ocr-bw', r.blue.w); setReg('lol-ocr-bh', r.blue.h); }
+  if (r.red)  { setReg('lol-ocr-rx', r.red.x);  setReg('lol-ocr-ry', r.red.y);  setReg('lol-ocr-rw', r.red.w);  setReg('lol-ocr-rh', r.red.h); }
+  lolOcrStatus(ocr.status || 'off', ocr.statusDetail || '', ocr.lastBlue, ocr.lastRed, ocr.available);
+}
+
+function lolOcrStatus(status, detail, lastBlue, lastRed) {
+  const chip = el('lol-ocr-status');
+  if (chip) {
+    const map = { off: 'OCR: off', starting: 'OCR: starting…', reading: 'OCR: reading', error: 'OCR: error', unavailable: 'OCR: unavailable' };
+    chip.textContent = map[status] || ('OCR: ' + status);
+    chip.className = 'prod-chip' + (status === 'reading' ? ' ok' : (status === 'error' || status === 'unavailable' ? ' warn' : ''));
+    if ((status === 'unavailable' || status === 'error') && detail) chip.title = detail;
+  }
+  const read = el('lol-ocr-read');
+  if (read) {
+    if (lastBlue != null || lastRed != null) read.textContent = 'blue ' + (lastBlue == null ? '—' : lastBlue) + '  /  red ' + (lastRed == null ? '—' : lastRed);
+    else if (detail) read.textContent = detail;
+  }
+}
+
+function sendLolOcrConfig() {
+  const num = (id) => { const v = Number(el(id)?.value); return isNaN(v) ? undefined : v; };
+  send('lol_ocr_config', {
+    enabled: !!el('lol-ocr-enable')?.checked,
+    regions: {
+      blue: { x: num('lol-ocr-bx'), y: num('lol-ocr-by'), w: num('lol-ocr-bw'), h: num('lol-ocr-bh') },
+      red:  { x: num('lol-ocr-rx'), y: num('lol-ocr-ry'), w: num('lol-ocr-rw'), h: num('lol-ocr-rh') }
+    }
+  });
+}
+el('lol-ocr-enable')?.addEventListener('change', sendLolOcrConfig);
+el('lol-ocr-apply')?.addEventListener('click', sendLolOcrConfig);
 
 function applyCsgoState(data) {
   const cs = data.csgo || {};
@@ -15716,7 +19944,6 @@ function applyObsState(data) {
 
   populateObsSceneSelects(obs.availableScenes || [], obs.scenes || {}, (obs.kickoff && obs.kickoff.scene) || '');
   if (typeof syncReplayProgramScene === 'function') syncReplayProgramScene(obs);
-  if (typeof checkPlaylistAutoTrigger === 'function') checkPlaylistAutoTrigger();   // OBS scene → auto-play bound playlist
 
   // Status bar pill
   const obsStatusEl = el('obs-status');
@@ -16743,20 +20970,12 @@ el('rp-stinger-file')?.addEventListener('change', async function () {
     else if (sn) sn.textContent = 'Upload failed';
   } catch (e) { if (sn) sn.textContent = 'Upload failed'; }
 });
-// Auto-start a playlist when OBS switches to its bound scene (the "play on scene transition").
-let _lastAutoScene = null;
-function checkPlaylistAutoTrigger() {
-  const cur = (currentState.obs && currentState.obs.currentScene) || '';
-  const first = _lastAutoScene === null;
-  if (cur === _lastAutoScene) return;
-  _lastAutoScene = cur;
-  if (first || !cur || _plLiveActive) return;   // skip initial sync / nothing live / already playing
-  const m = (currentState.clips?.montages || []).find((x) => (x.programScene || '') === cur && (x.clipIds || []).length);
-  if (!m) return;
-  const selEdit = el('select-montage-edit'); if (selEdit) selEdit.value = m.id;
-  if (typeof showToast === 'function') showToast(`Auto-playing "${m.name}" on scene ${cur}`, '#22c55e');
-  pushPlaylistLive();
-}
+// Playlists (commercials / custom) must NEVER auto-play — they only roll on an explicit producer
+// Play. A playlist's programScene is purely the scene it CUTS TO when the producer hits Play; it is
+// NOT a trigger. (Previously this auto-fired a bound playlist whenever OBS switched to its scene,
+// which force-cut OBS + started an ad + countdown without any producer action.) Do NOT re-add a
+// scene → playlist auto-trigger. Kept as a documented no-op in case anything still references it.
+function checkPlaylistAutoTrigger() { /* intentionally does nothing — no scene-triggered auto-play */ }
 
 // ── Playout playlists UI (commercials / intros / outros) ──────────────────
 let _playoutDraft = null;
@@ -16874,6 +21093,10 @@ el('rp-ad-interval')?.addEventListener('change', function () { _adSched.interval
 setInterval(() => {
   const next = el('rp-ad-next');
   if (!_adSched.enabled || !_adSched.playoutId) { if (next) next.textContent = ''; return; }
+  // Honour the global ads kill-switch: a scheduled commercial break is still a commercial, so it
+  // must never auto-fire while ads are turned off (state.twitch.adsEnabled / tb-ad-enabled).
+  const adsOn = (typeof adsAreEnabled !== 'function') || adsAreEnabled();
+  if (!adsOn) { if (next) next.textContent = 'Ads off — auto-break paused'; _adLastFire = Date.now(); return; }
   const intervalMs = Math.max(1, _adSched.intervalMin || 15) * 60000;
   if (!_adLastFire) _adLastFire = Date.now();
   const remaining = intervalMs - (Date.now() - _adLastFire);
@@ -16918,7 +21141,7 @@ const HK_ACTIONS = [
   { id: 'cut-all',         label: 'Hide all overlays',             run: () => el('btn-cut-all')?.click() },
   { id: 'replay-save',     label: 'Save replay buffer',            run: () => send('obs_save_replay') },
   { id: 'replay-take',     label: 'Replay: Take preview → program', run: () => { if (typeof takeToProgram === 'function') takeToProgram(); } },
-  { id: 'replay-clear',    label: 'Replay: Clear program',         run: () => el('rp-screen-clear')?.click() },
+  { id: 'replay-clear',    label: 'Replay: Clear program',         run: () => { if (typeof rpClearProgram === 'function') rpClearProgram(); } },
   { id: 'commercial',      label: 'Toggle commercial break',       run: () => send('obs_toggle_commercial') },
   { id: 'clip',            label: 'Twitch clip',                   run: () => el('btn-bb-clip')?.click() },
   { id: 'timer-toggle',    label: 'Producer timer start/pause',    run: () => { if (typeof toggleTimer === 'function') toggleTimer(); } },
@@ -17035,7 +21258,7 @@ function deckFire(b) {
   else if (b.type === 'countdown') { send('set_break', { visible: true, seconds: Math.max(1, b.hold || 60), title: b.label || 'STARTING SOON' }); }
 }
 
-const DECK_ICONS = { scene: '🎬', trigger: '✦', view: '▣', playout: '▶', flow: '⚡', countdown: '⏱' };
+const DECK_ICONS = { scene: '\u25A6', trigger: '✦', view: '▣', playout: '▶', flow: '⚡', countdown: '⏱' };
 function deckTargetLabel(b) {
   if (b.type === 'scene') return b.target || '(no scene)';
   if (b.type === 'trigger') { const m = (typeof BB_TRIGGER_LABELS !== 'undefined' && BB_TRIGGER_LABELS[b.target]) || b.target; return m; }
@@ -17273,12 +21496,25 @@ function renderGraphicsBoard() {
   });
 }
 const GFX_KEY2TRIG = { break: 'breakScreen', winner: 'winner', intro: 'intro', veto: 'veto', spotlight: 'spotlight' };
+// GFX scenes that are mutually exclusive (showing one should auto-hide the previous).
+const GFX_EXCLUSIVE_KEYS = new Set(Object.keys(typeof SCENE_META !== 'undefined' ? {} : {})); // populated after SCENE_META is defined inside buildGraphicsHub
 el('prod-graphics-board')?.addEventListener('click', (e) => {
   const btn = e.target.closest('.gfx-toggle'); if (!btn) return;
   const key = btn.closest('.gfx-card')?.dataset.key;
   const s = (window.ONAIR_SCENES || []).find((x) => x.key === key); if (!s) return;
   const on = !!gfxPathVal(currentState, s.path);
-  // break/winner/intro/veto/spotlight need their options to show — reuse the Go-Live trigger payloads.
+  if (!on) {
+    // Turning a GFX scene ON — auto-clear the previously live GFX scene if different.
+    const liveScene = currentState && currentState.gfxActive;
+    if (liveScene && liveScene !== key) {
+      const sm = (typeof window._gfxSceneMeta !== 'undefined') ? window._gfxSceneMeta : {};
+      const pm = sm[liveScene]; if (pm) el(pm.clearId || ('btn-hide-' + liveScene))?.click();
+    }
+    send('set_gfx_active', { scene: key });
+  } else {
+    const liveScene = currentState && currentState.gfxActive;
+    if (liveScene === key) send('set_gfx_active', { scene: null });
+  }
   const trig = (typeof GOLIVE_TRIGGERS !== 'undefined' ? GOLIVE_TRIGGERS : []).find((t) => t.state === GFX_KEY2TRIG[key]);
   if (trig) send(trig.msg, on ? { visible: false } : trig.show());
   else send(s.msg, { visible: !on });
@@ -18257,11 +22493,20 @@ function renderProdAdBreak() {
   if (!banner) return;
 
   if (ab && ab.active) {
+    // Keep top-bar chip in sync (e.g. after page reconnect when no live event fires)
+    if (typeof _adState !== 'undefined' && !_adState.adBreak) {
+      _adState.adBreak = true;
+      _adState.adBreakEndsAt = ab.endsAt ? new Date(ab.endsAt).getTime() : 0;
+      renderAdChip();
+    }
     banner.style.display = 'flex';
     const msg = el('prod-adbreak-msg');
     if (msg) msg.textContent = ab.isAutomatic ? 'Automatic ad break running' : 'Manual ad break running';
     startAdBreakCountdown(ab.endsAt);
   } else {
+    if (typeof _adState !== 'undefined' && _adState.adBreak) {
+      _adState.adBreak = false; _adState.adBreakEndsAt = 0; renderAdChip();
+    }
     banner.style.display = 'none';
     clearAdBreakCountdown();
   }
@@ -18474,11 +22719,13 @@ function qtalentToggleMute(row) {
 // Refresh the rail's talent data + connection/camera statuses.
 function cfTalentRefresh(btn) {
   if (btn) { btn.disabled = true; btn.classList.add('spinning'); }
+  const done = () => { if (btn) { btn.disabled = false; btn.classList.remove('spinning'); } };
   fetch(`${VDO_API}/api/vdo/links`).then((r) => r.json()).then((d) => {
     _cfDirectorData = d;
     if (_directorOn && typeof cfPollGuests === 'function') cfPollGuests();
     renderQtalent();
-  }).catch(() => { renderQtalent(); });
+    done();
+  }).catch(() => { renderQtalent(); done(); });
 }
 
 // Re-pull /api/vdo/links and re-render every mounted talent surface (rail, Match Control,
@@ -18585,11 +22832,10 @@ function renderTalentList(list) {
 
   // Monitoring bar — connection status only exists while the Director is monitoring rooms.
   const bar = document.createElement('div'); bar.className = 'qtalent-mon';
-  const refreshBtn = `<button type="button" class="cf-ico-btn qt-mon-refresh" title="Refresh talent + statuses">${svgIcon('refresh')}</button>`;
   if (_directorOn) {
-    bar.innerHTML = `<span class="qt-mon-dot live"></span><span class="qt-mon-txt">Monitoring · ${sections.reduce((n, s) => n + connOf(s.rows), 0)}/${total} connected</span>${refreshBtn}`;
+    bar.innerHTML = `<span class="qt-mon-dot live"></span><span class="qt-mon-txt">Monitoring · ${sections.reduce((n, s) => n + connOf(s.rows), 0)}/${total} connected</span>`;
   } else {
-    bar.innerHTML = `<span class="qt-mon-dot"></span><span class="qt-mon-txt">Status monitoring is off</span>${refreshBtn}<button type="button" class="btn btn-primary btn-xs qt-mon-start">Start</button>`;
+    bar.innerHTML = `<span class="qt-mon-dot"></span><span class="qt-mon-txt">Monitoring off</span>`;
   }
   list.appendChild(bar);
 
@@ -18609,7 +22855,9 @@ function renderTalentList(list) {
     const listenOn = li.active && li.scope === 'room' && li.side === s.side;
     const listenBtn = s.side ? `<button class="cf-ico-btn qt-hdr-listen${listenOn ? ' is-on' : ''}" data-side="${poEsc(s.side)}" title="${listenOn ? 'Stop listen-in' : 'Listen in to room'}">${svgIcon('headphones')}</button>` : '';
     const intvBtn = s.side ? `<button class="cf-ico-btn qt-hdr-interview" data-side="${poEsc(s.side)}" title="Move the whole team to Interview / Desk">${svgIcon('mic')}</button>` : '';
-    hdr.innerHTML = `<span class="qt-hdr-bar"></span><span class="qt-hdr-lbl">${poEsc(s.label)}</span><span class="qt-hdr-count">${cnt}</span>${listenBtn}${intvBtn}<span class="qt-hdr-drop">drop to move</span>`;
+    const inviteUrl = s.side ? ((d.teams && d.teams[s.side] && d.teams[s.side].roomJoinUrl) || '') : '';
+    const inviteBtn = inviteUrl ? `<button class="cf-ico-btn qt-hdr-invite" data-url="${poEsc(inviteUrl)}" title="Copy VDO room invite link">${svgIcon('link')}</button>` : '';
+    hdr.innerHTML = `<span class="qt-hdr-bar"></span><span class="qt-hdr-lbl">${poEsc(s.label)}</span><span class="qt-hdr-count">${cnt}</span>${listenBtn}${intvBtn}${inviteBtn}<span class="qt-hdr-drop">drop to move</span>`;
     list.appendChild(hdr);
     s.rows.forEach((r) => {
       const row = qtalentRow(r); row.style.setProperty('--qc', s.color); list.appendChild(row);
@@ -18653,6 +22901,249 @@ el('qros-start')?.addEventListener('click', () => { rdStart(); renderQros(); });
 el('qros-next')?.addEventListener('click', () => { rdNext(); renderQros(); });
 el('qros-stop')?.addEventListener('click', () => { rdStop(); renderQros(); });
 document.querySelectorAll('.js-goto-ros, .js-goto-flows').forEach((a) => a.addEventListener('click', (e) => { e.preventDefault(); document.querySelector('.tab-btn[data-tab="produccion"]')?.click(); }));
+document.querySelectorAll('.js-goto-dashboard').forEach((a) => a.addEventListener('click', (e) => { e.preventDefault(); document.querySelector('.tab-btn[data-tab="principal"]')?.click(); }));
+
+// ── Qrail panel: start.gg stream queue ──────────────────────────────────────
+let _qsggSig = '';
+let _qsggDemoQueue = null;
+let _qsggPrevSetMap = {};          // setId → { state, live } — for activity tracking
+let _qsggActivity = [];            // [{ts, icon, text, cls}] — live activity log
+
+function _qsggTrackChanges(queue) {
+  const now = Date.now();
+  let dirty = false;
+  const hasPrev = Object.keys(_qsggPrevSetMap).length > 0;
+
+  queue.forEach((q) => {
+    const id = String(q.setId);
+    const prev = _qsggPrevSetMap[id];
+    if (!prev) {
+      if (hasPrev) {
+        _qsggActivity.unshift({ ts: now, icon: '+', text: (q.teamA||'TBD') + ' vs ' + (q.teamB||'TBD') + ' added to queue', cls: 'new' });
+        dirty = true;
+      }
+    } else {
+      if (q.live && q.state !== 3 && !prev.live) {
+        const txt = (q.teamA||'TBD') + ' vs ' + (q.teamB||'TBD') + ' — now LIVE' + (q.round ? ' (' + q.round + ')' : '');
+        _qsggActivity.unshift({ ts: now, icon: '▶', text: txt, cls: 'live' });
+        if (typeof addNotification === 'function') addNotification(txt, '#22c55e', { title: 'Start.gg Live', level: 'success' });
+        dirty = true;
+      }
+      if (q.state === 3 && prev.state !== 3) {
+        const sa = q.scoreA, sb = q.scoreB;
+        const hasScore = sa != null && sb != null;
+        const winner = hasScore ? (sa > sb ? q.teamA : q.teamB) : null;
+        const scoreStr = hasScore ? Math.max(sa,sb) + '–' + Math.min(sa,sb) : '';
+        const txt = (winner || (q.teamA||'TBD')) + (scoreStr ? ' wins ' + scoreStr : ' — match complete') + ' vs ' + (q.teamB||'TBD');
+        _qsggActivity.unshift({ ts: now, icon: '✓', text: txt, cls: 'done' });
+        if (typeof addNotification === 'function') addNotification(txt, '#4ade80', { title: 'Match Complete', level: 'success' });
+        dirty = true;
+      }
+    }
+    _qsggPrevSetMap[id] = { state: q.state, live: !!q.live };
+  });
+
+  if (dirty) _qsggActivity = _qsggActivity.slice(0, 25);
+  return dirty;
+}
+
+function _qsggRelTime(ts) {
+  const s = Math.floor((Date.now() - ts) / 1000);
+  if (s < 60) return 'just now';
+  if (s < 3600) return Math.floor(s / 60) + 'm ago';
+  return Math.floor(s / 3600) + 'h ago';
+}
+
+function _renderQsggActivity() {
+  const wrap = el('qsgg-activity');
+  const header = el('qsgg-activity-header');
+  if (!wrap) return;
+  if (!_qsggActivity.length) { wrap.innerHTML = ''; if (header) header.style.display = 'none'; return; }
+  if (header) header.style.display = 'flex';
+  wrap.innerHTML = _qsggActivity.map((a) =>
+    '<div class="qsgg-act-row qsgg-act-' + a.cls + '">' +
+      '<span class="qsgg-act-ico">' + a.icon + '</span>' +
+      '<span class="qsgg-act-txt">' + escapeHtml(a.text) + '</span>' +
+      '<span class="qsgg-act-time">' + _qsggRelTime(a.ts) + '</span>' +
+    '</div>'
+  ).join('');
+}
+
+function _qsggFlagMatch(item) {
+  const note = prompt('Flag note for this match (e.g. "Score dispute", "Team not here"):\n' + (item.teamA||'TBD') + ' vs ' + (item.teamB||'TBD'));
+  if (!note || !note.trim()) return;
+  const txt = (item.teamA||'TBD') + ' vs ' + (item.teamB||'TBD') + ': ' + note.trim();
+  if (typeof addNotification === 'function') addNotification(txt, '#f59e0b', { title: 'Producer Flag', level: 'warning' });
+  _qsggActivity.unshift({ ts: Date.now(), icon: '!', text: txt, cls: 'flag' });
+  _qsggActivity = _qsggActivity.slice(0, 25);
+  _renderQsggActivity();
+}
+
+el('qsgg-clear-activity')?.addEventListener('click', () => { _qsggActivity = []; _renderQsggActivity(); });
+
+function _qsggFormatRound(match, index, total) {
+  const win = Math.ceil((match.best_of || 5) / 2);
+  const sa = match.score_a || 0, sb = match.score_b || 0;
+  if (sa >= win || sb >= win) {
+    if (total <= 2) return index === 0 ? 'Grand Finals' : 'Losers Finals';
+    if (index === 0) return 'Grand Finals';
+    if (index === 1) return 'Losers Finals';
+    if (index === 2) return 'Winners Finals';
+    return 'Top ' + (total - index + 1);
+  }
+  return 'Bracket Match';
+}
+
+async function qsggLoadDemo() {
+  const btn = el('qsgg-demo-btn');
+  const clr = el('qsgg-clear-btn');
+  if (btn) { btn.textContent = 'Loading…'; btn.disabled = true; }
+  try {
+    const res = await fetch('http://localhost:3000/api/stats/matches?limit=60');
+    if (!res.ok) throw new Error(res.statusText);
+    const json = await res.json();
+    const matches = json.matches || json;
+    if (!Array.isArray(matches) || !matches.length) { if (btn) { btn.textContent = 'No data'; btn.disabled = false; } return; }
+
+    // Group by tournament, take the most populous one
+    const byTournament = {};
+    matches.forEach((m) => { const t = m.tournament || 'Unknown'; (byTournament[t] = byTournament[t] || []).push(m); });
+    const topTournament = Object.entries(byTournament).sort((a, b) => b[1].length - a[1].length)[0];
+    const tournamentName = topTournament[0];
+    const sets = topTournament[1].sort((a, b) => (b.started_at || 0) - (a.started_at || 0)).slice(0, 12);
+
+    // Map to queue items — first is "LIVE", next few are "NEXT", rest are "DONE"
+    _qsggDemoQueue = sets.map((m, i) => ({
+      setId: m.startgg_set_id || String(m.id),
+      stream: 'Stream 1',
+      round: _qsggFormatRound(m, i, sets.length),
+      state: i === 0 ? 2 : i < 4 ? 1 : 3,
+      teamA: m.team_a || 'Team A',
+      teamB: m.team_b || 'Team B',
+      logoA: m.logo_a || null,
+      logoB: m.logo_b || null,
+      scoreA: (i >= 4) ? (m.score_a || 0) : null,
+      scoreB: (i >= 4) ? (m.score_b || 0) : null,
+      live: i === 0,
+      _tournamentName: tournamentName,
+    }));
+
+    if (btn) { btn.textContent = 'Preview'; btn.disabled = false; }
+    if (clr) clr.style.display = '';
+    _qsggSig = '';   // force redraw
+    renderQrailStartgg(currentState);
+  } catch (err) {
+    console.error('[qsgg demo]', err);
+    if (btn) { btn.textContent = 'Error'; btn.disabled = false; setTimeout(() => { if (btn) btn.textContent = 'Preview'; }, 2000); }
+  }
+}
+
+function qsggClearDemo() {
+  _qsggDemoQueue = null;
+  _qsggSig = '';
+  const clr = el('qsgg-clear-btn');
+  if (clr) clr.style.display = 'none';
+  renderQrailStartgg(currentState);
+}
+
+el('qsgg-demo-btn')?.addEventListener('click', qsggLoadDemo);
+el('qsgg-clear-btn')?.addEventListener('click', qsggClearDemo);
+
+function renderQrailStartgg(data) {
+  const list = el('qsgg-list'); if (!list) return;
+  const sgg = data.startgg || {};
+  const isDemo = !!_qsggDemoQueue;
+  const queue = isDemo ? _qsggDemoQueue : (sgg.queue || []);
+  const event = isDemo ? { name: (_qsggDemoQueue[0] && _qsggDemoQueue[0]._tournamentName) || 'Demo', tournamentSlug: null } : (sgg.selectedEvent || {});
+  const queueEnabled = isDemo ? true : !!sgg.queueEnabled;
+  const lastPushed = isDemo ? null : sgg.lastPushedSetId;
+  const evName = event.name || event.slug || '';
+  const adminUrl = (!isDemo && event.tournamentSlug)
+    ? 'https://www.start.gg/admin/tournament/' + event.tournamentSlug + '/stream-queue'
+    : null;
+
+  // Track activity changes (always runs, before sig check)
+  if (!isDemo) _qsggTrackChanges(queue);
+  _renderQsggActivity();
+
+  const sig = JSON.stringify([queue.map((q) => [q.setId, q.state, q.live, q.scoreA, q.scoreB, q.teamA, q.teamB, q.round, q.logoA, q.logoB]), queueEnabled, lastPushed, evName]);
+  if (sig === _qsggSig) return;
+  _qsggSig = sig;
+
+  const evNameEl = el('qsgg-event-name');
+  if (evNameEl) evNameEl.textContent = evName || 'No event loaded';
+
+  const pollEl = el('qsgg-poll-status');
+  if (pollEl) {
+    pollEl.textContent = isDemo ? 'Preview' : queueEnabled ? 'Live' : 'Queue off';
+    pollEl.className = 'qsgg-poll-status ' + (isDemo ? 'preview' : queueEnabled ? 'enabled' : 'disabled');
+  }
+
+  const badgeEl = el('qsgg-queue-badge');
+  if (badgeEl) badgeEl.textContent = queue.length ? queue.length + ' set' + (queue.length > 1 ? 's' : '') : '';
+
+  const dot = el('qrail-sgg-dot');
+  const liveSet = queue.find((q) => q.live && q.state !== 3);
+  if (dot) {
+    const hasActivity = !!(evName || queue.length);
+    dot.style.display = hasActivity ? '' : 'none';
+    dot.className = 'qrail-tab-dot' + (hasActivity ? ' on' : '') + (liveSet ? ' is-live' : '');
+  }
+
+  if (!queue.length) {
+    list.innerHTML = evName
+      ? '<div class="qsgg-empty">' + (queueEnabled ? 'Waiting for matches to be queued…' : 'Enable queue polling on the Dashboard to track live sets.') + '</div>'
+      : '<div class="qsgg-empty">No event loaded.<br><span class="qsgg-goto-dash" style="color:var(--cp-accent);cursor:pointer;text-decoration:underline;">Load one in Dashboard ↗</span></div>';
+    list.querySelector('.qsgg-goto-dash')?.addEventListener('click', () => { document.querySelector('.tab-btn[data-tab="principal"]')?.click(); });
+    return;
+  }
+
+  list.innerHTML = '';
+  queue.forEach((item) => {
+    const isLive = item.live && item.state !== 3;
+    const isDone = item.state === 3;
+    const badge = isLive ? 'LIVE' : isDone ? 'DONE' : 'NEXT';
+    const badgeCls = isLive ? 'live' : isDone ? 'done' : 'next';
+    const hasScore = item.scoreA != null && item.scoreB != null;
+    const scoreText = hasScore ? (item.scoreA + ' – ' + item.scoreB) : 'vs';
+    const isPushed = lastPushed && String(lastPushed) === String(item.setId);
+    const logoA = item.logoA ? '<img class="qsgg-logo" src="' + escapeHtml(item.logoA) + '" alt="" loading="lazy">' : '<span class="qsgg-logo-ph"></span>';
+    const logoB = item.logoB ? '<img class="qsgg-logo" src="' + escapeHtml(item.logoB) + '" alt="" loading="lazy">' : '<span class="qsgg-logo-ph"></span>';
+    const extLinkHtml = adminUrl
+      ? '<a class="qsgg-ext-link" href="' + escapeHtml(adminUrl) + '" target="_blank" title="View on start.gg">&#8599;</a>'
+      : '';
+
+    const row = document.createElement('div');
+    row.className = 'qsgg-row' + (isLive ? ' is-live' : '') + (isDone ? ' is-done' : '');
+    row.innerHTML = [
+      '<div class="qsgg-top">',
+        '<span class="qsgg-badge ' + badgeCls + '">' + badge + '</span>',
+        '<span class="qsgg-round">' + escapeHtml(item.round || '') + '</span>',
+        '<span class="qsgg-row-actions">',
+          '<button class="btn btn-ghost btn-xs qsgg-flag-btn" title="Flag this match">!</button>',
+          extLinkHtml,
+          '<button class="btn btn-ghost btn-xs qsgg-push-btn' + (isPushed ? ' pushed' : '') + '">' + (isPushed ? 'On-air' : 'Push') + '</button>',
+        '</span>',
+      '</div>',
+      '<div class="qsgg-teams">',
+        '<span class="qsgg-team">' + logoA + '<span class="qsgg-tname">' + escapeHtml(item.teamA || 'TBD') + '</span></span>',
+        '<span class="qsgg-sep">' + escapeHtml(scoreText) + '</span>',
+        '<span class="qsgg-team qsgg-team-b"><span class="qsgg-tname">' + escapeHtml(item.teamB || 'TBD') + '</span>' + logoB + '</span>',
+      '</div>',
+    ].join('');
+
+    row.querySelector('.qsgg-flag-btn').addEventListener('click', () => _qsggFlagMatch(item));
+    if (isDemo) {
+      row.querySelector('.qsgg-push-btn').disabled = true;
+    } else {
+      row.querySelector('.qsgg-push-btn').addEventListener('click', () => {
+        send('startgg_push_set', { setId: item.setId });
+      });
+    }
+    list.appendChild(row);
+  });
+}
+
 // ── Talent list interactions — bound once per host (qrail rail + Dashboard panel) ──
 let _qtDragRow = null;
 function qtDropTarget(e) {
@@ -18710,6 +23201,13 @@ function wireTalentList(list) {
         cfMoveTeam(side, 'interview');
         if (typeof showToast === 'function') showToast(`Moving ${side === 'blue' ? 'Blue' : 'Orange'} team to Interview / Desk…`, '#22c55e');
       }
+      return;
+    }
+    // Team header link = copy the general VDO room invite URL to clipboard.
+    const hdrInvite = e.target.closest('.qt-hdr-invite');
+    if (hdrInvite) {
+      const url = hdrInvite.dataset.url;
+      if (url && typeof tlCopy === 'function') tlCopy(url, hdrInvite);
       return;
     }
     // Mic = mute / unmute their mic (their audio into the room).
@@ -19328,12 +23826,15 @@ el('rp-buffer-toggle')?.addEventListener('click', () => send('obs_toggle_replay_
 el('rp-buffer-save')?.addEventListener('click', () => send('obs_save_replay'));
 el('rp-to-program')?.addEventListener('click', () => sendToScreen('program'));
 el('rp-to-preview')?.addEventListener('click', () => sendToScreen('preview'));
-el('rp-screen-clear')?.addEventListener('click', () => {
+// Clear the program output. The visible "Clear" button was removed from the Video
+// Editor, but the action stays available via the hotkey/Stream-Deck command.
+function rpClearProgram() {
   _plLiveActive = false;
   send('replay_stop', { bus: 'program' });
   endReplayProgram(true);   // manual clear — just reset, don't auto-switch scenes
   const st = el('rp-screen-status'); if (st) { st.textContent = 'Program cleared.'; st.style.color = 'var(--muted)'; }
-});
+}
+el('rp-screen-clear')?.addEventListener('click', rpClearProgram);
 el('rp-screen-open')?.addEventListener('click', () => window.open('http://localhost:3000/replay-player.html', '_blank', 'noopener'));
 function takeToProgram() {
   // Nothing cued? Tell the producer instead of taking black to air.
@@ -20376,6 +24877,8 @@ function connect() {
 
   ws.onopen = () => {
     setStatus(true);
+    // Identify as the control panel so it isn't counted as a live overlay browser source.
+    try { ws.send(JSON.stringify({ type: 'register', role: 'control' })); } catch (e) {}
     send('request_state');
     // Heartbeat: prove the RECEIVE direction is alive. A half-open socket can still send
     // (so overlays/commands appear to work) while broadcasts silently stop arriving — which
@@ -20403,8 +24906,10 @@ function connect() {
       _r('applyState',         () => applyState(msg.data));
       _r('applyRlSpectatorUi', () => applyRlSpectatorUi(msg.data));
       _r('applyScenesCockpit', () => applyScenesCockpit(msg.data));
-      _r('renderQuickToolbar', () => renderQuickToolbar(msg.data));
-      _r('renderQrailScenes',  () => renderQrailScenes(msg.data));
+      _r('renderQuickToolbar',   () => renderQuickToolbar(msg.data));
+      _r('renderDashMiniPanels', () => renderDashMiniPanels(msg.data));
+      _r('renderQrailScenes',    () => renderQrailScenes(msg.data));
+      _r('renderQrailStartgg',  () => renderQrailStartgg(msg.data));
       _r('renderGoLive',       () => renderGoLive(msg.data));
       _r('renderUpNext',       () => renderUpNext(msg.data));
       _r('renderPlayerCams',   () => renderPlayerCams(msg.data));
@@ -20444,6 +24949,30 @@ function connect() {
         }
       }
       stopReplayCountdown();
+    } else if (msg.type === 'adproof_update') {
+      _adProofReport = msg.data;
+      const panel = el('stats-panel-sponsors');
+      if (panel && panel.style.display !== 'none' && el('tab-stats-content')?.classList.contains('active')) renderAdProof(msg.data);
+    } else if (msg.type === 'lol_draft_status') {
+      const s = el('draft-auto-status');
+      if (s && el('draft-game')?.value === 'league') { const d = msg.data || {}; s.textContent = d.status === 'off' ? '' : draftAutoStatusText(d.status, d.detail); }
+    } else if (msg.type === 'lol_update') {
+      applyLolState({ lol: msg.data });    // keep the League connection chip live at the poll rate
+    } else if (msg.type === 'lol_ocr_status') {
+      lolOcrStatus(msg.status, msg.detail, msg.lastBlue, msg.lastRed);
+    } else if (msg.type === 'startgg_import') {
+      onStartggImport(msg.data || {});
+    } else if (msg.type === 'analytics_update') {
+      _anLive = msg.data;
+      if (el('tab-stats-content')?.classList.contains('active')) {
+        const bp = el('stats-panel-broadcasts'), op = el('stats-panel-overview');
+        if (bp && bp.style.display !== 'none') renderLiveCard(msg.data);
+        else if (op && op.style.display !== 'none') {
+          const banner = el('an-live-banner');
+          if (banner) banner.innerHTML = (msg.data && msg.data.active)
+            ? `<div class="an-livebar"><span class="app-live-dot"></span> Recording <b>${escapeHtml(msg.data.label || '')}</b> · ${anDur(msg.data.durationSec)} · ${anNum(msg.data.viewers)} viewers (peak ${anNum(msg.data.peakViewers)})</div>` : '';
+        }
+      }
     } else if (msg.type === 'clip_prompt') {
       showClipPrompt(msg.data);
     } else if (msg.type === 'encode_progress') {
@@ -20477,6 +25006,14 @@ function connect() {
         const r = el(id);
         if (r) { r.textContent = msg.data.message || ''; r.style.color = msg.data.ok ? '#9ae6b4' : '#f56565'; }
       });
+    } else if (msg.type === 'challonge-result') {
+      if (typeof window._handleChallongeResult === 'function') window._handleChallongeResult(msg.data);
+    } else if (msg.type === 'nxgen-result') {
+      if (typeof window._handleNxgenResult === 'function') window._handleNxgenResult(msg.data);
+    } else if (msg.type === 'link-result') {
+      const d = msg.data || {};
+      const logEl = el('ev-sync-log');
+      if (logEl) { logEl.textContent = d.message || ''; logEl.style.color = d.ok ? (d.linked ? '#86efac' : 'var(--muted)') : '#f87171'; }
     } else if (msg.type === 'obs-screenshot') {
       applyObsScreenshot(msg.data);
     } else if (msg.type === 'obs-result') {
@@ -20593,18 +25130,25 @@ function connect() {
       const ab = msg.data || {};
       if (currentState) { if (!currentState.twitch) currentState.twitch = {}; currentState.twitch.adBreak = { active: true, duration: ab.duration, startedAt: ab.startedAt, endsAt: ab.endsAt, isAutomatic: ab.isAutomatic }; }
       renderProdAdBreak();
-      // top-bar chip shows the live ad break
-      _adState.adBreak = true; renderAdChip();
+      // top-bar chip shows the live ad break with countdown
+      _adState.adBreak = true; _adState.adBreakEndsAt = ab.endsAt ? new Date(ab.endsAt).getTime() : 0; renderAdChip();
       addActivityItem('ad_break', 'Ad Break', `${ab.duration || '?'}s ${ab.isAutomatic ? '(automatic)' : '(manual)'}`, svgIcon('film'));
     } else if (msg.type === 'twitch_ad_break_end') {
       if (currentState && currentState.twitch) currentState.twitch.adBreak = { active: false, duration: 0, startedAt: null, endsAt: null, isAutomatic: false };
       renderProdAdBreak();
-      _adState.adBreak = false; renderAdChip();
+      _adState.adBreak = false; _adState.adBreakEndsAt = 0; renderAdChip();
     } else if (msg.type === 'twitch_activity') {
       if (renderProdCredits._log) renderProdCredits._log.push(msg.data);
       renderProdCredits();
     } else if (msg.type === 'twitch_activity_log_cleared') {
       renderProdCredits([]);
+    } else if (msg.type === 'social_connected') {
+      _loadSocialConnections();
+      showToast((msg.platform === 'youtube' ? 'YouTube' : 'Twitter / X') + ' connected', 'success');
+    } else if (msg.type === 'social_published') {
+      const plat = (msg.data?.platforms || []).join(' + ') || 'social';
+      showToast('Published to ' + plat, 'success');
+      _loadSocialSchedule();
     }
   };
 
@@ -20622,6 +25166,24 @@ function connect() {
 // optional helper (there is no global switchTab — calling it unguarded threw here).
 el('tab-integrations')?.addEventListener('click', () => {
   if (typeof switchTab === 'function') switchTab('integrations');
+});
+
+// Game-data sub-section switching (CS2 / Valorant / League / Rocket League).
+document.querySelectorAll('.game-tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const g = btn.dataset.game;
+    document.querySelectorAll('.game-tab-btn').forEach(b => b.classList.toggle('active', b === btn));
+    document.querySelectorAll('.game-section').forEach(s => s.classList.toggle('active', s.id === 'games-section-' + g));
+  });
+});
+
+// League in-game HUD — teamfight transition mode (full | auto | minimal).
+document.querySelectorAll('#lol-hud-mode .seg-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const mode = btn.dataset.mode;
+    document.querySelectorAll('#lol-hud-mode .seg-btn').forEach(b => b.classList.toggle('active', b === btn));
+    send('lol_hud_mode', { mode });
+  });
 });
 
 // Integration sub-tab switching
@@ -21444,18 +26006,29 @@ async function loadStatsMatches(reset) {
       const div = document.createElement('div');
       div.style = 'background:rgba(255,255,255,.05);border-radius:8px;padding:12px 16px;margin-bottom:8px;cursor:pointer;display:flex;justify-content:space-between;align-items:center;gap:12px;';
       div.innerHTML = `
-        <div>
+        <div style="min-width:0;">
           <div style="font-weight:600;color:#e0e0e0;font-size:13px;">${m.team_a || '—'} vs ${m.team_b || '—'}</div>
           <div style="font-size:11px;color:var(--muted,#888);margin-top:2px;">${m.game_type?.toUpperCase()} · Bo${m.best_of} · ${fmtDate(m.started_at)}</div>
         </div>
-        <div style="text-align:right;flex-shrink:0;">
-          <div style="font-size:18px;font-weight:700;color:#e0e0e0;">${m.score_a ?? '?'} – ${m.score_b ?? '?'}</div>
-          <div style="font-size:11px;color:var(--muted,#888);">${m.game_count} game${m.game_count !== 1 ? 's' : ''}</div>
+        <div style="display:flex;align-items:center;gap:12px;flex-shrink:0;">
+          <div style="text-align:right;">
+            <div style="font-size:18px;font-weight:700;color:#e0e0e0;">${m.score_a ?? '?'} – ${m.score_b ?? '?'}</div>
+            <div style="font-size:11px;color:var(--muted,#888);">${m.game_count} game${m.game_count !== 1 ? 's' : ''}</div>
+          </div>
+          <button class="stats-del-match" data-mid="${m.id}" title="Delete this match">✕</button>
         </div>`;
-      div.addEventListener('click', () => openStatsDetail(m.id));
+      div.addEventListener('click', (e) => { if (e.target.closest('.stats-del-match')) return; openStatsDetail(m.id); });
+      div.querySelector('.stats-del-match')?.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        if (!confirm('Delete this match from the stats database? It affects team & player aggregates.')) return;
+        try { await fetch('http://localhost:3000/api/stats/match/' + m.id, { method: 'DELETE' }); } catch (_) {}
+        _anDash = null; _anDashSig = '';
+        loadStatsMatches(true); if (typeof loadStatsAggregate === 'function') loadStatsAggregate();
+      });
       listEl.appendChild(div);
     });
 
+    if (!window._statsClearWired) { window._statsClearWired = true; el('stats-clear-matches')?.addEventListener('click', async () => { if (!confirm('Clear the ENTIRE match history (all matches, games and player stats)? This cannot be undone.')) return; try { await fetch('http://localhost:3000/api/stats/matches', { method: 'DELETE' }); } catch (_) {} _anDash = null; _anDashSig = ''; loadStatsMatches(true); if (typeof loadStatsAggregate === 'function') loadStatsAggregate(); }); }
     const moreBtn = el('stats-load-more');
     if (moreBtn) moreBtn.style.display = hasMore ? '' : 'none';
     _statsOffset += matches.length;
@@ -21577,31 +26150,1009 @@ let _statsTab = 'overview';
 function statsShowTab(tab) {
   _statsTab = tab;
   document.querySelectorAll('#stats-subnav .ev-subnav-btn').forEach((b) => b.classList.toggle('active', b.dataset.stab === tab));
-  ['overview', 'players', 'profile', 'teams', 'h2h'].forEach((t) => { const p = el('stats-panel-' + t); if (p) p.style.display = t === tab ? '' : 'none'; });
-  if (tab === 'players') loadStatsLeaders();
-  else if (tab === 'profile') loadStatsPlayerList();
+  ['overview', 'broadcasts', 'audience', 'event', 'players', 'teams', 'sponsors', 'reports'].forEach((t) => { const p = el('stats-panel-' + t); if (p) p.style.display = t === tab ? '' : 'none'; });
+  if (tab === 'overview') { loadAnalyticsOverview(); loadStatsAggregate(); loadStatsMatches(true); }
+  else if (tab === 'broadcasts') loadBroadcasts();
+  else if (tab === 'audience') loadAudience();
+  else if (tab === 'event') loadEventAnalytics();
+  else if (tab === 'players') { loadStatsLeaders(); loadStatsPlayerList(); }
   else if (tab === 'teams') loadStatsTeams();
+  else if (tab === 'sponsors') loadAdProof();
+  else if (tab === 'reports') loadReports();
 }
+
+// ════════════════ Analytics dashboard (Overview / Broadcasts / Audience / Event) ════════════════
+const ANALYTICS_API = 'http://localhost:3000/api/analytics';
+let _anLive = null, _anBound = false;
+let _anEvent = '', _anEventWired = false;   // Overview 'sort by event' filter
+function anDur(sec) { sec = Math.max(0, Math.round(sec || 0)); const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60; return h ? `${h}h ${m}m` : (m ? `${m}m ${s}s` : `${s}s`); }
+function anMmss(sec) { sec = Math.max(0, Math.round(sec || 0)); const m = Math.floor(sec / 60); return m + ':' + String(sec % 60).padStart(2, '0'); }
+function anNum(n) { n = n || 0; return (typeof n === 'number' && n >= 1000) ? n.toLocaleString() : String(n); }
+function anWhen(ts) { try { return ts ? new Date(ts).toLocaleString() : ''; } catch (e) { return ''; } }
+function anKpis(tiles) { return '<div class="an-kpi">' + tiles.map((t) => `<div class="an-tile"><div class="an-tile-v">${escapeHtml(String(t.v))}</div><div class="an-tile-l">${escapeHtml(t.l)}</div></div>`).join('') + '</div>'; }
+function anKpiInner(tiles) { return tiles.map((t) => `<div class="an-tile"><div class="an-tile-v">${escapeHtml(String(t.v))}</div><div class="an-tile-l">${escapeHtml(t.l)}</div></div>`).join(''); }
+function anSparkline(samples, color) {
+  samples = (samples || []).filter((s) => s && typeof s.v === 'number');
+  if (samples.length < 2) return `<div class="an-chart-empty">Not enough viewer data captured yet${samples.length ? ` (last ${samples[0].v})` : ''}.</div>`;
+  const W = 600, H = 120, P = 4, n = samples.length;
+  const vs = samples.map((s) => s.v), max = Math.max(1, ...vs), min = Math.min(...vs), span = Math.max(1, max - min);
+  const x = (i) => P + (i / (n - 1)) * (W - 2 * P), y = (v) => H - P - ((v - min) / span) * (H - 2 * P);
+  const line = samples.map((s, i) => (i ? 'L' : 'M') + x(i).toFixed(1) + ' ' + y(s.v).toFixed(1)).join(' ');
+  const area = `M${x(0).toFixed(1)} ${H - P} ` + samples.map((s, i) => 'L' + x(i).toFixed(1) + ' ' + y(s.v).toFixed(1)).join(' ') + ` L${x(n - 1).toFixed(1)} ${H - P} Z`;
+  return `<div class="an-spark-wrap"><svg class="an-spark" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none"><path d="${area}" fill="${color}" opacity="0.13"/><path d="${line}" fill="none" stroke="${color}" stroke-width="2" vector-effect="non-scaling-stroke"/></svg><div class="an-spark-ax"><span>peak ${anNum(max)}</span><span>low ${anNum(min)}</span></div></div>`;
+}
+function anBars(items, color) {
+  items = items || [];
+  if (!items.length) return '<p class="section-desc" style="margin:0;">No data.</p>';
+  const max = Math.max(1, ...items.map((i) => i.value || 0));
+  return '<div class="an-bars">' + items.map((i) => `<div class="an-bar-row"><span class="an-bar-lbl" title="${escapeHtml(i.label)}">${escapeHtml(i.label)}</span><span class="an-bar-track"><span class="an-bar-fill" style="width:${Math.round((i.value || 0) / max * 100)}%;${color ? 'background:' + color : ''}"></span></span><span class="an-bar-val">${escapeHtml(i.sub != null ? String(i.sub) : String(i.value || 0))}</span></div>`).join('') + '</div>';
+}
+// Vertical column chart (value labels + axis labels). items: [{label, value, sub?}]
+function anColumns(items, color) {
+  items = (items || []).filter((i) => i);
+  if (!items.length) return '<div class="an-chart-empty">No data captured yet.</div>';
+  const max = Math.max(1, ...items.map((i) => i.value || 0));
+  return '<div class="an-cols">' + items.map((i) => `<div class="an-col" title="${escapeHtml(i.label)}: ${escapeHtml(String(i.sub != null ? i.sub : (i.value || 0)))}"><span class="an-col-v">${escapeHtml(String(i.value || 0))}</span><span class="an-col-bar" style="height:${Math.max(2, Math.round((i.value || 0) / max * 100))}%;${color ? 'background:' + color : ''}"></span><span class="an-col-l">${escapeHtml(i.label)}</span></div>`).join('') + '</div>';
+}
+// Donut chart from segments [{label, value, color}].
+function anDonut(segs, centerLabel) {
+  segs = (segs || []).filter((s) => (s.value || 0) > 0);
+  const total = segs.reduce((a, s) => a + (s.value || 0), 0);
+  if (!total) return '<div class="an-chart-empty">No data captured yet.</div>';
+  const R = 52, C = 2 * Math.PI * R; let off = 0;
+  const arcs = segs.map((s) => { const dash = (s.value / total) * C; const el = `<circle r="${R}" cx="64" cy="64" fill="none" stroke="${s.color}" stroke-width="20" stroke-dasharray="${dash.toFixed(2)} ${(C - dash).toFixed(2)}" stroke-dashoffset="${(-off).toFixed(2)}" transform="rotate(-90 64 64)"/>`; off += dash; return el; }).join('');
+  const legend = segs.map((s) => `<span class="an-leg"><i style="background:${s.color}"></i>${escapeHtml(s.label)} <b>${anNum(s.value)}</b></span>`).join('');
+  return `<div class="an-donut"><svg viewBox="0 0 128 128" width="120" height="120">${arcs}<circle r="31" cx="64" cy="64" fill="var(--surface2,#1a1d24)"/><text x="64" y="60" text-anchor="middle" class="an-donut-c">${anNum(total)}</text><text x="64" y="77" text-anchor="middle" class="an-donut-s">${escapeHtml(centerLabel || 'total')}</text></svg><div class="an-legend">${legend}</div></div>`;
+}
+// Progress ring for a single percentage.
+function anRing(pct, label, color) {
+  pct = Math.max(0, Math.min(100, Math.round(pct || 0))); const R = 48, C = 2 * Math.PI * R, dash = pct / 100 * C; color = color || '#22c3e6';
+  return `<div class="an-ring"><svg viewBox="0 0 120 120" width="116" height="116"><circle r="${R}" cx="60" cy="60" fill="none" stroke="rgba(255,255,255,.08)" stroke-width="12"/><circle r="${R}" cx="60" cy="60" fill="none" stroke="${color}" stroke-width="12" stroke-linecap="round" stroke-dasharray="${dash.toFixed(1)} ${(C - dash).toFixed(1)}" transform="rotate(-90 60 60)"/><text x="60" y="57" text-anchor="middle" class="an-ring-v">${pct}%</text><text x="60" y="77" text-anchor="middle" class="an-ring-l">${escapeHtml(label || '')}</text></svg></div>`;
+}
+const AN_COLORS = ['#22c3e6', '#ec4899', '#f5b14a', '#22e06a', '#a78bfa', '#60a5fa', '#fb7185', '#34d399'];
+
+// Multi-series timeline line chart. points:[{date,...}], series:[{key,color,label}]
+function anLineChart(points, series) {
+  points = points || []; series = series || [];
+  if (points.length < 2) return '<div class="an-chart-empty">Not enough data in this range to chart.</div>';
+  const W = 720, H = 170, PX = 6, PY = 12, n = points.length;
+  let max = 1; points.forEach((p) => series.forEach((s) => { if ((p[s.key] || 0) > max) max = p[s.key] || 0; }));
+  const x = (i) => PX + (i / (n - 1)) * (W - 2 * PX), y = (v) => H - PY - (v / max) * (H - 2 * PY);
+  const paths = series.map((s, si) => {
+    const line = points.map((p, i) => (i ? 'L' : 'M') + x(i).toFixed(1) + ' ' + y(p[s.key] || 0).toFixed(1)).join(' ');
+    const area = si === 0 ? `<path d="M${x(0).toFixed(1)} ${H - PY} ${points.map((p, i) => 'L' + x(i).toFixed(1) + ' ' + y(p[s.key] || 0).toFixed(1)).join(' ')} L${x(n - 1).toFixed(1)} ${H - PY} Z" fill="${s.color}" opacity="0.10"/>` : '';
+    return area + `<path d="${line}" fill="none" stroke="${s.color}" stroke-width="2" vector-effect="non-scaling-stroke"/>`;
+  }).join('');
+  const legend = series.map((s) => `<span class="an-leg"><i style="background:${s.color}"></i>${escapeHtml(s.label)}</span>`).join('');
+  const idx = [0, Math.floor(n / 2), n - 1]; const xlabels = idx.map((i) => `<span>${escapeHtml((points[i].date || '').slice(5))}</span>`).join('');
+  return `<div class="an-line-wrap"><div class="an-line-head"><span class="an-line-max">peak ${anNum(max)}</span><div class="an-legend-row">${legend}</div></div><svg class="an-line" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">${paths}</svg><div class="an-line-ax">${xlabels}</div></div>`;
+}
+
+// Sortable table. Click a header to sort. columns:[{key,label,num?,fmt?}]. Re-renders into mountId.
+const _anSort = {}, _anSortTables = {};
+function anSortableHTML(id, columns, rows) {
+  const st = _anSort[id];
+  const sorted = rows.slice().sort((a, b) => { const v = a[st.key], w = b[st.key]; const c = (typeof v === 'number' && typeof w === 'number') ? (v - w) : String(v == null ? '' : v).localeCompare(String(w == null ? '' : w)); return st.dir * c; });
+  const head = columns.map((c) => `<th data-sk="${c.key}" class="an-th${c.num ? ' st-num' : ''}${st.key === c.key ? ' sorted ' + (st.dir < 0 ? 'desc' : 'asc') : ''}">${escapeHtml(c.label)}</th>`).join('');
+  const body = sorted.map((r) => '<tr>' + columns.map((c) => `<td${c.num ? ' class="st-num"' : (c.key === columns[0].key ? ' class="st-name"' : '')}>${c.fmt ? c.fmt(r[c.key], r) : escapeHtml(String(r[c.key] == null ? '' : r[c.key]))}</td>`).join('') + '</tr>').join('')
+    || `<tr><td colspan="${columns.length}" class="stats-empty">No data in this range.</td></tr>`;
+  return `<table class="stats-table an-sortable" data-tid="${id}"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
+}
+function anRenderSortable(id) { const t = _anSortTables[id]; if (!t) return; const m = el(t.mountId); if (m) m.innerHTML = anSortableHTML(id, t.columns, t.rows); }
+function anSortable(mountId, id, columns, rows, defaultKey, defaultDir) {
+  _anSortTables[id] = { columns, rows, mountId };
+  if (!_anSort[id]) _anSort[id] = { key: defaultKey || columns[0].key, dir: defaultDir || -1 };
+  anRenderSortable(id);
+}
+document.addEventListener('click', (e) => {
+  const th = e.target.closest && e.target.closest('.an-sortable .an-th'); if (!th) return;
+  const id = th.closest('.an-sortable').dataset.tid; const sk = th.dataset.sk; const st = _anSort[id]; if (!st) return;
+  if (st.key === sk) st.dir *= -1; else { st.key = sk; st.dir = -1; }
+  anRenderSortable(id);
+});
+
+// ── Global analytics filter (date range / game / tournament) ────────────────
+let _anFilter = { from: 0, to: 0, game: '', tournament: '' };
+let _anRangePreset = 'all';
+let _anFilterOpts = null;
+let _anDash = null, _anDashSig = '';
+let _anRefreshTimer = null;
+
+function anFilterSig() { return [_anFilter.from, _anFilter.to, _anFilter.game, _anFilter.tournament].join('|'); }
+async function ensureDashboard(force) {
+  const sig = anFilterSig();
+  if (!force && _anDash && _anDashSig === sig) return _anDash;
+  const qs = new URLSearchParams();
+  if (_anFilter.from) qs.set('from', _anFilter.from); if (_anFilter.to) qs.set('to', _anFilter.to);
+  if (_anFilter.game) qs.set('game', _anFilter.game); if (_anFilter.tournament) qs.set('tournament', _anFilter.tournament);
+  try { const r = await (await fetch('http://localhost:3000/api/stats/dashboard?' + qs.toString())).json(); _anDash = r.data || null; _anDashSig = sig; }
+  catch (e) { _anDash = null; }
+  return _anDash;
+}
+async function loadAnalyticsFilters() {
+  try { _anFilterOpts = await (await fetch('http://localhost:3000/api/stats/filters')).json(); } catch (e) { _anFilterOpts = null; }
+  const gsel = el('an-fb-game'), tsel = el('an-fb-tourn');
+  const GAME_LABEL = { rl: 'Rocket League', cs2: 'CS2', valorant: 'Valorant' };
+  if (gsel && _anFilterOpts) {
+    gsel.innerHTML = '<option value="">All games</option>' + (_anFilterOpts.games || []).map((g) => `<option value="${g.id}">${GAME_LABEL[g.id] || g.id} (${g.count})</option>`).join('');
+    gsel.value = _anFilter.game;
+  }
+  if (tsel && _anFilterOpts) {
+    tsel.innerHTML = '<option value="">All tournaments</option>' + (_anFilterOpts.tournaments || []).map((t) => `<option value="${escapeHtml(t.name)}">${escapeHtml(t.name.length > 46 ? t.name.slice(0, 46) + '…' : t.name)} (${t.count})</option>`).join('');
+    tsel.value = _anFilter.tournament;
+  }
+}
+function anApplyRangePreset(preset) {
+  _anRangePreset = preset;
+  document.querySelectorAll('#an-fb-range button').forEach((b) => b.classList.toggle('active', b.dataset.range === preset));
+  el('an-fb-custom').style.display = preset === 'custom' ? 'inline-flex' : 'none';
+  if (preset === 'all') { _anFilter.from = 0; _anFilter.to = 0; }
+  else if (preset === 'custom') {
+    const f = el('an-fb-from').value, t = el('an-fb-to').value;
+    _anFilter.from = f ? new Date(f + 'T00:00:00').getTime() : 0;
+    _anFilter.to = t ? new Date(t + 'T23:59:59').getTime() : 0;
+  } else { _anFilter.to = 0; _anFilter.from = Date.now() - Number(preset) * 86400000; }
+}
+function anUpdateFilterMeta() {
+  const m = el('an-fb-meta'); if (!m) return;
+  const parts = [];
+  if (_anRangePreset === 'all') parts.push('All time'); else if (_anRangePreset === 'custom') parts.push('Custom range'); else parts.push('Last ' + _anRangePreset + ' days');
+  if (_anFilter.game) parts.push(({ rl: 'Rocket League', cs2: 'CS2', valorant: 'Valorant' })[_anFilter.game] || _anFilter.game);
+  if (_anDash) parts.push(anNum(_anDash.totals.matches) + ' matches · ' + anNum(_anDash.totals.teams) + ' teams');
+  m.textContent = parts.join(' · ');
+}
+async function anOnFilterChange() {
+  _anDash = null; _anDashSig = '';
+  await refreshActiveAnalyticsTab(true);
+  anUpdateFilterMeta();
+}
+function refreshActiveAnalyticsTab(force) {
+  const t = _statsTab;
+  if (t === 'overview') return loadAnalyticsOverview();
+  if (t === 'event') return loadEventAnalytics();
+  if (t === 'teams') return loadStatsTeams();
+  if (t === 'players') return loadStatsLeaders();
+  if (t === 'broadcasts') return loadBroadcasts();
+  if (t === 'audience') return loadAudience();
+  if (t === 'sponsors') return loadAdProof();
+  if (t === 'reports') return loadReports();
+}
+
+function anSessionsTable(rows) {
+  if (!rows || !rows.length) return '<p class="section-desc" style="margin:0;">No broadcasts recorded yet. Start a session (or go live on Twitch) and it shows up here.</p>';
+  return '<table class="stats-table an-table"><thead><tr><th>Broadcast</th><th>When</th><th>Length</th><th>Peak</th><th>Avg</th><th>Ads</th><th>Clips</th></tr></thead><tbody>'
+    + rows.map((s) => `<tr class="an-row" data-an-sess="${s.id}"><td class="st-name">${escapeHtml(s.label || 'Broadcast')}${s.active ? ' <span class="an-rec-tag">LIVE</span>' : ''}</td><td>${escapeHtml(anWhen(s.endedAt || s.startedAt))}</td><td>${anDur(s.durationSec)}</td><td class="st-hi">${anNum(s.peakViewers)}</td><td>${anNum(s.avgViewers)}</td><td>${anNum(s.ads)}</td><td>${anNum(s.clips)}</td></tr>`).join('')
+    + '</tbody></table>';
+}
+
+// ── Analytics dashboard: scannable category cards + a composite Production Score ──
+function anDMetric(l, v, sub) { return `<div class="an-dm"><div class="an-dm-v">${escapeHtml(String(v))}</div><div class="an-dm-l">${escapeHtml(l)}</div>${sub ? `<div class="an-dm-s">${escapeHtml(sub)}</div>` : ''}</div>`; }
+function anDCard(title, accent, metrics) {
+  return `<div class="an-dcard" style="--dc:${accent};"><div class="an-dcard-hd"><span class="an-dcard-dot"></span>${escapeHtml(title)}</div><div class="an-dcard-grid">${metrics.map((m) => anDMetric(m.l, m.v, m.s)).join('')}</div></div>`;
+}
+function anScoreBar(label, pct) {
+  const p = pct == null ? null : Math.max(0, Math.min(100, Math.round(pct)));
+  return `<div class="an-sb"><span class="an-sb-l">${escapeHtml(label)}</span><span class="an-sb-track"><span class="an-sb-fill" style="width:${p == null ? 0 : p}%;"></span></span><span class="an-sb-v">${p == null ? '—' : p + '%'}</span></div>`;
+}
+// ── Business figures (manual entry, localStorage) — feeds the Business card ──
+function anBusiness() { try { return JSON.parse(localStorage.getItem('ne_business_v1')) || {}; } catch (e) { return {}; } }
+function anSaveBusiness(b) { try { localStorage.setItem('ne_business_v1', JSON.stringify(b || {})); } catch (e) {} }
+let _bizWired = false;
+function wireBusinessForm() {
+  const b = anBusiness();
+  ['sponsorship', 'entry', 'prize', 'production'].forEach((k) => { const inp = el('biz-' + k); if (inp && document.activeElement !== inp) inp.value = (b[k] != null) ? b[k] : ''; });
+  if (_bizWired) return; _bizWired = true;
+  el('biz-save')?.addEventListener('click', () => {
+    const nb = {}; ['sponsorship', 'entry', 'prize', 'production'].forEach((k) => { const v = parseFloat(el('biz-' + k)?.value); if (!isNaN(v)) nb[k] = v; });
+    anSaveBusiness(nb); if (typeof showToast === 'function') showToast('Business figures saved', '#22c55e'); renderAnalyticsDashboard();
+  });
+  el('biz-clear')?.addEventListener('click', () => {
+    if (!confirm('Clear the saved business figures?')) return;
+    anSaveBusiness({}); ['sponsorship', 'entry', 'prize', 'production'].forEach((k) => { const inp = el('biz-' + k); if (inp) inp.value = ''; }); renderAnalyticsDashboard();
+  });
+}
+
+// ── Audience retention: area chart + join/leave heat strip + drop-off / gain callouts ──
+function anClock(samples, i) { return anMmss(Math.round(((samples[i].t || 0) - (samples[0].t || 0)) / 1000)); }
+function anRetention(samples) {
+  samples = (samples || []).filter((p) => p && typeof p.v === 'number');
+  if (samples.length < 2) return '<p class="section-desc" style="margin:0;">Not enough viewer samples yet — retention builds as a broadcast records.</p>';
+  const vals = samples.map((p) => p.v);
+  const peak = Math.max(1, ...vals);
+  const first = vals[0] || 0, last = vals[vals.length - 1] || 0;
+  let maxDrop = 0, dropAt = -1, maxGain = 0, gainAt = -1;
+  for (let i = 1; i < vals.length; i++) { const d = vals[i] - vals[i - 1]; if (d < maxDrop) { maxDrop = d; dropAt = i; } if (d > maxGain) { maxGain = d; gainAt = i; } }
+  const W = 680, H = 120, pad = 4;
+  const X = (i) => (pad + (i / (samples.length - 1)) * (W - 2 * pad)).toFixed(1);
+  const Y = (v) => (H - pad - (v / peak) * (H - 2 * pad)).toFixed(1);
+  const line = vals.map((v, i) => (i ? 'L' : 'M') + X(i) + ',' + Y(v)).join(' ');
+  const area = 'M' + X(0) + ',' + (H - pad) + ' ' + vals.map((v, i) => 'L' + X(i) + ',' + Y(v)).join(' ') + ' L' + X(vals.length - 1) + ',' + (H - pad) + ' Z';
+  const mk = (i, c) => i < 0 ? '' : `<circle cx="${X(i)}" cy="${Y(vals[i])}" r="3.6" fill="${c}" stroke="#0b0d12" stroke-width="1"/>`;
+  const strip = vals.slice(1).map((v, i) => { const d = v - vals[i]; const a = Math.min(1, Math.abs(d) / (peak * 0.15) + 0.12); const c = d > 0 ? `rgba(34,224,106,${a})` : (d < 0 ? `rgba(245,101,101,${a})` : 'rgba(255,255,255,.04)'); return `<span style="flex:1;background:${c};"></span>`; }).join('');
+  const retPct = first ? Math.round((last / first) * 100) : 0;
+  return `<div class="an-ret">
+    <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" class="an-ret-svg"><defs><linearGradient id="anretg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#22c3e6" stop-opacity=".34"/><stop offset="1" stop-color="#22c3e6" stop-opacity="0"/></linearGradient></defs>
+      <path d="${area}" fill="url(#anretg)"/><path d="${line}" fill="none" stroke="#22c3e6" stroke-width="2" vector-effect="non-scaling-stroke"/>${mk(dropAt, '#f56565')}${mk(gainAt, '#22e06a')}</svg>
+    <div class="an-ret-heat" title="Green = viewers joining, red = leaving">${strip}</div>
+    ${anKpis([
+      { l: 'Start / end', v: anNum(first) + ' / ' + anNum(last) }, { l: 'Retention', v: retPct + '%' },
+      { l: 'Biggest drop', v: maxDrop ? (anNum(maxDrop) + ' @ ' + anClock(samples, dropAt)) : '-' },
+      { l: 'Biggest gain', v: maxGain ? ('+' + anNum(maxGain) + ' @ ' + anClock(samples, gainAt)) : '-' }
+    ])}
+  </div>`;
+}
+
+function wireEventFilter(ov) {
+  const sel = el('an-event-filter'); if (!sel) return;
+  const events = (ov && ov.events) || [];
+  const sig = events.join('|');
+  if (sel.dataset.sig !== sig) {
+    sel.dataset.sig = sig;
+    sel.innerHTML = '<option value="">All events</option>' + events.map((e) => `<option value="${escapeHtml(e)}">${escapeHtml(e.length > 42 ? e.slice(0, 42) + '…' : e)}</option>`).join('');
+  }
+  if (sel.value !== _anEvent) sel.value = _anEvent;
+  if (_anEventWired) return; _anEventWired = true;
+  sel.addEventListener('change', () => { _anEvent = sel.value; loadAnalyticsOverview(); });
+}
+async function renderAnalyticsDashboard() {
+  const wrap = el('an-dashboard'); if (!wrap) return;
+  let ov = null, ap = null, dash = null;
+  try { ov = await (await fetch(ANALYTICS_API + '/overview' + (_anEvent ? '?event=' + encodeURIComponent(_anEvent) : ''))).json(); } catch (e) {}
+  try { ap = await (await fetch(ADPROOF_API)).json(); } catch (e) {}
+  try { dash = await ensureDashboard(); } catch (e) {}
+  const ot = (ov && ov.totals) || {}, t = (dash && dash.totals) || {}, mp = ((dash && dash.pacing) || {}).matches || {};
+  const spons = (ap && ap.sponsors) || [];
+  const spSec = spons.reduce((a, x) => a + (x.seconds || 0), 0);
+  const spVS = spons.reduce((a, x) => a + (x.viewerSeconds || 0), 0);
+  const D = '—';
+  const biz = anBusiness();
+  const bizRev = (Number(biz.sponsorship) || 0) + (Number(biz.entry) || 0);
+  const bizCpv = (Number(biz.production) && ot.peakViewers) ? ('$' + (Number(biz.production) / ot.peakViewers).toFixed(2)) : D;
+
+  // Composite Production Score — averages ONLY the factors we can measure today.
+  const perShowDisc = ot.broadcasts ? (ot.disconnects || 0) / ot.broadcasts : 0;
+  const health = (ot.avgDropPct != null)
+    ? Math.max(0, Math.round(100 - (ot.avgDropPct * 10) - Math.min(20, perShowDisc * 15) - (ot.avgCpu > 88 ? 10 : 0)))
+    : (ot.broadcasts ? Math.max(0, Math.round(100 - Math.min(100, perShowDisc * 30))) : null);
+  const engage = (ot.peakViewers && ot.avgPeakViewers) ? Math.round(100 * Math.min(1, ot.avgPeakViewers / ot.peakViewers)) : null;
+  const tourn = (dash && t.tournaments) ? Math.min(100, 55 + Math.min(45, (t.matches || 0) * 2)) : null;
+  const effic = ot.broadcasts ? Math.min(100, 65 + Math.min(35, (ot.clips || 0) * 3)) : null;
+  const sponsor = spSec > 0 ? 100 : null;
+  const factors = [['Broadcast Health', health], ['Viewer Engagement', engage], ['Tournament Ops', tourn], ['Production Efficiency', effic], ['Sponsor Delivery', sponsor]];
+  const avail = factors.filter((x) => x[1] != null);
+  const score = avail.length ? Math.round(avail.reduce((a, x) => a + x[1], 0) / avail.length) : null;
+
+  const cards = [
+    anDCard('Audience', '#22c3e6', [
+      { l: 'Peak CCV', v: anNum(ot.peakViewers || 0) }, { l: 'Avg CCV', v: anNum(ot.avgPeakViewers || 0) },
+      { l: 'Air time', v: anDur(ot.airSeconds || 0) }, { l: 'New viewers', v: D, s: 'Phase 1' }
+    ]),
+    anDCard('Tournament', '#a78bfa', [
+      { l: 'Teams', v: anNum(t.teams || 0) }, { l: 'Matches', v: anNum(t.matches || 0) },
+      { l: 'Games', v: anNum(t.games || 0) }, { l: 'Avg match', v: mp.count ? anMmss(mp.avg) : D }
+    ]),
+    anDCard('Broadcast', '#34d399', [
+      { l: 'Broadcasts', v: anNum(ot.broadcasts || 0) }, { l: 'Live time', v: anDur(ot.airSeconds || 0) },
+      { l: 'Disconnects', v: anNum(ot.disconnects || 0) }, { l: 'Replays', v: anNum(ot.replays || 0) }
+    ]),
+    anDCard('Stream Health', '#f43f5e', [
+      { l: 'Dropped frames', v: ot.avgDropPct != null ? ot.avgDropPct + '%' : D, s: ot.avgDropPct == null ? 'relaunch to capture' : '' },
+      { l: 'Bitrate', v: ot.avgBitrate ? anNum(ot.avgBitrate) + ' kbps' : D },
+      { l: 'CPU', v: ot.avgCpu != null ? ot.avgCpu + '%' : D }, { l: 'Disconnects', v: anNum(ot.disconnects || 0) }
+    ]),
+    anDCard('Sponsors', '#ec4899', [
+      { l: 'Airtime', v: anMmss(spSec) }, { l: 'Est. impressions', v: anNum(spVS) },
+      { l: 'Sponsors', v: anNum(spons.length) }, { l: 'Clicks', v: D, s: 'no source' }
+    ]),
+    anDCard('Graphics', '#f0a83a', [
+      { l: 'Ads run', v: anNum(ot.ads || 0) }, { l: 'Ad time', v: anMmss(ot.adSeconds || 0) },
+      { l: 'Sponsor exposure', v: anMmss(spSec) }, { l: 'Lower thirds', v: D, s: 'Phase 1' }
+    ]),
+    anDCard('Production', '#f472b6', [
+      { l: 'Scene changes', v: anNum(ot.sceneSwitches || 0) }, { l: 'Auto-switches', v: anNum(ot.autoSwitches || 0) },
+      { l: 'Ad breaks', v: anNum(ot.ads || 0) }, { l: 'Manual overrides', v: D, s: 'Phase 1' }
+    ]),
+    anDCard('Social', '#818cf8', [
+      { l: 'Clips created', v: anNum(ot.clips || 0) }, { l: 'Clip views', v: D, s: 'Phase 4' },
+      { l: 'Shorts', v: D }, { l: 'CTR', v: D }
+    ]),
+    anDCard('Business', '#94a3b8', [
+      { l: 'Revenue', v: bizRev ? '$' + anNum(bizRev) : D, s: bizRev ? '' : 'enter below' }, { l: 'Cost / viewer', v: bizCpv },
+      { l: 'Prize pool', v: Number(biz.prize) ? '$' + anNum(Number(biz.prize)) : D }, { l: 'Production', v: Number(biz.production) ? '$' + anNum(Number(biz.production)) : D }
+    ])
+  ];
+
+  wrap.innerHTML = `<div class="an-score">
+      <div class="an-score-ring" style="--ang:${(score || 0) * 3.6}deg; --sc:${score == null ? '#7c5cff' : (score >= 85 ? '#22e06a' : (score >= 60 ? '#f5b14a' : '#f56565'))};"><div class="an-score-num">${score == null ? '—' : score}</div><div class="an-score-max">/ 100</div></div>
+      <div class="an-score-side">
+        <div class="an-score-title">Production Score</div>
+        <div class="an-score-bars">${factors.map((x) => anScoreBar(x[0], x[1])).join('')}</div>
+        <div class="an-score-note">Composite of the factors captured today; blank factors fill in as later phases add stream health, retention and sponsor-delivery data.</div>
+      </div>
+    </div>
+    <div class="an-dgrid">${cards.join('')}</div>`;
+}
+
+async function loadAnalyticsOverview() {
+  renderAnalyticsDashboard();
+  wireBusinessForm();
+  const dash = await ensureDashboard();
+  let ov = null; try { ov = await (await fetch(ANALYTICS_API + '/overview' + (_anEvent ? '?event=' + encodeURIComponent(_anEvent) : ''))).json(); } catch (e) {}
+  wireEventFilter(ov);
+  const t = (dash && dash.totals) || {}, ot = (ov && ov.totals) || {};
+  const kpi = el('an-kpi');
+  if (kpi) kpi.innerHTML = anKpiInner([
+    { l: 'Matches', v: anNum(t.matches) }, { l: 'Games', v: anNum(t.games) }, { l: 'Teams', v: anNum(t.teams) }, { l: 'Tournaments', v: anNum(t.tournaments) },
+    { l: 'Broadcasts', v: anNum(ot.broadcasts) }, { l: 'Air time', v: anDur(ot.airSeconds) }, { l: 'Peak viewers', v: anNum(ot.peakViewers) }, { l: 'Clips', v: anNum(ot.clips) }
+  ]);
+  const banner = el('an-live-banner');
+  if (banner) {
+    const live = ov && ov.live;
+    if (live && live.active) {
+      // Try to pull YouTube live viewers to show combined count
+      let ytViewers = 0;
+      try {
+        const yr = await fetch('http://localhost:3000/api/youtube/stats');
+        if (yr.ok) { const yd = await yr.json(); ytViewers = (yd.data && yd.data.live && yd.data.live.isLive) ? (yd.data.live.viewers || 0) : 0; }
+      } catch (_) {}
+      const total = (live.viewers || 0) + ytViewers;
+      const platforms = [
+        live.viewers ? `<span class="aud-live-chip aud-live-tw">${anNum(live.viewers)} Twitch</span>` : '',
+        ytViewers    ? `<span class="aud-live-chip aud-live-yt">${anNum(ytViewers)} YouTube</span>` : '',
+      ].filter(Boolean).join('');
+      banner.innerHTML = `<div class="an-livebar">
+        <span class="app-live-dot"></span> <b>${escapeHtml(live.label || 'Recording')}</b>
+        <span class="an-live-sub">${anDur(live.durationSec)} · peak ${anNum(live.peakViewers)}</span>
+        <span class="an-livebar-viewers">${anNum(total)} viewers ${platforms}</span>
+      </div>`;
+    } else {
+      banner.innerHTML = '';
+    }
+  }
+  const charts = el('an-charts');
+  if (charts) {
+    const tl = (dash && dash.timeline) || [];
+    const teamsTop = ((dash && dash.teams) || []).slice(0, 8).map((x) => ({ label: x.team.length > 16 ? x.team.slice(0, 16) + '…' : x.team, value: x.wins, sub: x.wins + '-' + x.losses }));
+    const mix = anDonut([
+      { label: 'Matches', value: t.matches || 0, color: AN_COLORS[0] }, { label: 'Games', value: t.games || 0, color: AN_COLORS[3] },
+      { label: 'Clips', value: ot.clips || 0, color: AN_COLORS[1] }, { label: 'Ads', value: ot.ads || 0, color: AN_COLORS[2] }
+    ], 'items');
+    charts.innerHTML = `<h4 class="stats-sub" style="margin-top:0;">Match activity over time</h4>${anLineChart(tl, [{ key: 'matches', color: '#22c3e6', label: 'Matches' }, { key: 'games', color: '#a78bfa', label: 'Games' }])}
+      <div class="an-2col" style="margin-top:14px;">
+        <div><h4 class="stats-sub">Most wins (top teams)</h4>${anBars(teamsTop, '#22e06a')}</div>
+        <div><h4 class="stats-sub">Content produced</h4>${mix}</div>
+      </div>`;
+  }
+  const recent = el('an-recent');
+  if (recent) {
+    recent.innerHTML = anSessionsTable((ov && ov.recent) || []);
+    recent.querySelectorAll('[data-an-sess]').forEach((r) => r.addEventListener('click', () => { statsShowTab('broadcasts'); setTimeout(() => openBroadcastDetail(r.dataset.anSess), 60); }));
+  }
+  anUpdateFilterMeta();
+}
+
+async function loadBroadcasts() {
+  let ov = null; try { ov = await (await fetch(ANALYTICS_API + '/overview')).json(); } catch (e) {}
+  _anLive = ov && ov.live;
+  renderLiveCard(_anLive);
+  const auto = el('an-auto'); if (auto) auto.checked = !(ov && ov.auto === false);
+  const sess = el('an-sessions');
+  if (sess) {
+    const rows = (ov && ov.recent) || [];
+    sess.innerHTML = (rows.length ? `<div style="display:flex;justify-content:flex-end;margin-bottom:6px;"><button class="btn btn-danger btn-sm" id="an-clear-all">Clear all broadcasts</button></div>` : '') + anSessionsTable(rows);
+    sess.querySelectorAll('[data-an-sess]').forEach((r) => r.addEventListener('click', () => openBroadcastDetail(r.dataset.anSess)));
+    el('an-clear-all')?.addEventListener('click', async () => { if (!confirm('Delete ALL broadcast sessions? This cannot be undone.')) return; try { await fetch(ANALYTICS_API + '/sessions', { method: 'DELETE' }); } catch (e) {} loadBroadcasts(); });
+  }
+  bindBroadcastControls();
+}
+function bindBroadcastControls() {
+  if (_anBound) return; _anBound = true;
+  el('an-start')?.addEventListener('click', async () => { const label = (el('an-label')?.value || '').trim(); try { await fetch(ANALYTICS_API + '/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ label }) }); } catch (e) {} loadBroadcasts(); });
+  el('an-stop')?.addEventListener('click', async () => { try { await fetch(ANALYTICS_API + '/stop', { method: 'POST' }); } catch (e) {} loadBroadcasts(); });
+  el('an-auto')?.addEventListener('change', async (e) => { try { await fetch(ANALYTICS_API + '/auto', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ on: e.target.checked }) }); } catch (er) {} });
+}
+function renderLiveCard(live) {
+  const card = el('an-live-card'); const start = el('an-start'), stop = el('an-stop');
+  const active = !!(live && live.active);
+  if (start) start.style.display = active ? 'none' : '';
+  if (stop) stop.style.display = active ? '' : 'none';
+  if (!card) return;
+  if (!active) { card.innerHTML = '<p class="section-desc" style="margin:0;">No session recording. Start one to capture this show — or it auto-starts when Twitch reports you live.</p>'; return; }
+  const viewers = (live.viewers != null) ? live.viewers : (live.viewerSamples && live.viewerSamples.length ? live.viewerSamples[live.viewerSamples.length - 1].v : 0);
+  const disc = Array.isArray(live.disconnects) ? live.disconnects.length : (live.disconnects || 0);
+  const spark = (live.viewerSamples && live.viewerSamples.length > 1) ? `<div style="margin-top:12px;">${anSparkline(live.viewerSamples, '#22c3e6')}</div>` : '';
+  card.innerHTML = `<div class="an-live-head"><span class="app-live-dot"></span><b>${escapeHtml(live.label || '')}</b><span class="an-live-sub">${anDur(live.durationSec)} elapsed${live.game ? ' · ' + escapeHtml(live.game) : ''}</span></div>`
+    + anKpis([
+      { l: 'Viewers now', v: anNum(viewers) }, { l: 'Peak', v: anNum(live.peakViewers) }, { l: 'Avg', v: anNum(live.avgViewers) }, { l: 'Scene switches', v: anNum(live.sceneSwitches) },
+      { l: 'Ads', v: anNum(live.ads && live.ads.count) }, { l: 'Clips', v: anNum(live.clips) }, { l: 'Games done', v: anNum(live.gamesCompleted) }, { l: 'Disconnects', v: anNum(disc) }
+    ]) + spark;
+}
+async function openBroadcastDetail(id) {
+  const wrap = el('an-detail'); if (!wrap) return;
+  wrap.style.display = ''; wrap.innerHTML = '<section class="section"><p class="section-desc">Loading report…</p></section>';
+  let d = null; try { d = await (await fetch(ANALYTICS_API + '/session/' + id)).json(); } catch (e) {}
+  const s = d && d.session;
+  if (!s) { wrap.innerHTML = '<section class="section"><p style="color:#f56565;">Could not load that report.</p></section>'; return; }
+  try { wrap.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch (e) {}
+  const sceneItems = Object.keys(s.sceneTime || {}).map((k) => ({ label: k, value: s.sceneTime[k], sub: anMmss(s.sceneTime[k]) })).sort((a, b) => b.value - a.value).slice(0, 12);
+  const segItems = Object.keys(s.segments || {}).map((k) => { const g = s.segments[k] || {}; return { label: k, value: g.avgViewers || 0, sub: anMmss(g.seconds || 0) + ' \u00b7 ' + anNum(g.avgViewers || 0) + ' CCV' }; }).sort((a, b) => b.value - a.value);
+  const e = s.engagement || {}, disc = s.disconnects || [];
+  wrap.innerHTML = `<section class="section">
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">
+      <div><h3 class="section-title" style="margin:0;">${escapeHtml(s.label || 'Broadcast')}${s.active ? ' <span class="an-rec-tag">LIVE</span>' : ''}</h3>
+        <p class="section-desc" style="margin:4px 0 0;">${escapeHtml(anWhen(s.startedAt))} · ${anDur(s.durationSec)}${s.game ? ' · ' + escapeHtml(s.game) : ''}</p></div>
+      <div style="display:flex;gap:6px;">
+        <button class="btn btn-secondary btn-sm" id="an-exp">Export CSV</button>
+        ${s.active ? '' : '<button class="btn btn-danger btn-sm" id="an-del">Delete</button>'}
+        <button class="btn btn-ghost btn-sm" id="an-close">Close</button>
+      </div>
+    </div>
+    <div style="margin-top:12px;">${anKpis([
+      { l: 'Peak viewers', v: anNum(s.peakViewers) }, { l: 'Avg viewers', v: anNum(s.avgViewers) }, { l: 'Live time', v: anDur(s.liveSeconds) },
+      { l: 'Ads', v: anNum((s.ads && s.ads.count) || 0) + ' · ' + anMmss((s.ads && s.ads.totalSec) || 0) },
+      { l: 'Clips', v: anNum(s.clips) }, { l: 'Replays', v: anNum(s.replaysSaved) }, { l: 'Matches', v: anNum(s.matchesCompleted) }, { l: 'Disconnects', v: anNum(disc.length) }
+    ])}</div>
+    <h4 class="stats-sub" style="margin-top:18px;">Audience retention</h4>${anRetention(s.viewerSamples)}
+    <div class="an-2col">
+      <div><h4 class="stats-sub">Time on scene</h4>${sceneItems.length ? anBars(sceneItems) : '<p class="section-desc" style="margin:0;">No scene data — connect OBS to capture this.</p>'}</div>
+      <div><h4 class="stats-sub">Engagement</h4>${anBars([
+        { label: 'Predictions', value: e.predictionsCreated || 0 }, { label: 'Polls', value: e.pollsCreated || 0 }, { label: 'Wheel spins', value: e.wheelSpins || 0 }, { label: 'Mini-games', value: e.minigames || 0 },
+        { label: 'Follows', value: e.follows || 0 }, { label: 'Subs', value: e.subs || 0 }, { label: 'Bits', value: e.bits || 0 }, { label: 'Raids', value: e.raids || 0 }
+      ])}</div>
+    </div>
+    <h4 class="stats-sub" style="margin-top:16px;">Segments \u2014 average viewers</h4>${segItems.length ? anBars(segItems) : '<p class="section-desc" style="margin:0;">No segment data yet \u2014 segments are captured live while a broadcast records.</p>'}
+    ${s.health ? `<h4 class="stats-sub" style="margin-top:16px;">Stream health</h4>${anKpis([
+      { l: 'Avg drop', v: s.health.avgDropPct + '%' }, { l: 'Peak drop', v: s.health.maxDropPct + '%' },
+      { l: 'Avg bitrate', v: anNum(s.health.avgBitrate) + ' kbps' }, { l: 'Avg CPU', v: s.health.avgCpu + '%' },
+      { l: 'Avg FPS', v: s.health.avgFps }, { l: 'Peak congestion', v: s.health.maxCongestion }
+    ])}` : ''}
+    ${disc.length ? `<h4 class="stats-sub" style="margin-top:16px;">Technical log</h4><div class="an-disc">${disc.map((x) => `<div class="an-disc-row"><span>${escapeHtml(x.what || 'disconnect')}</span><span>${escapeHtml(new Date(x.t).toLocaleTimeString())}</span></div>`).join('')}</div>` : ''}
+  </section>`;
+  el('an-exp')?.addEventListener('click', () => anFetchDownload(ANALYTICS_API + '/export?session=' + encodeURIComponent(id), 'broadcast.csv'));
+  el('an-close')?.addEventListener('click', () => { wrap.style.display = 'none'; wrap.innerHTML = ''; });
+  el('an-del')?.addEventListener('click', async () => { if (!confirm('Delete this broadcast report?')) return; try { await fetch(ANALYTICS_API + '/session/' + id, { method: 'DELETE' }); } catch (er) {} wrap.style.display = 'none'; wrap.innerHTML = ''; loadBroadcasts(); });
+}
+
+// YouTube channel stats — subscribers, video views, recent uploads, live viewers.
+async function loadYouTubeStats(refresh) {
+  const wrap = el('aud-youtube'); if (!wrap) return;
+  if (!wrap.innerHTML) wrap.innerHTML = '<p class="section-desc" style="margin:0;">Loading YouTube stats…</p>';
+  let r = null;
+  try { r = await (await fetch('http://localhost:3000/api/youtube/stats' + (refresh ? '?refresh=1' : ''))).json(); } catch (e) {}
+  if (!r || !r.ok) {
+    const msg = (r && r.message) || 'Could not reach YouTube.';
+    const btn = (r && r.needsConnect) ? ' <button class="btn btn-secondary btn-sm" onclick="document.querySelector(\'.tab-btn[data-tab=ajustes]\')?.click()">Connect YouTube</button>' : '';
+    wrap.innerHTML = `<div class="an-chart-empty">${escapeHtml(msg)}${btn}</div>`;
+    return;
+  }
+  const d = r.data || {};
+  const ch = d.channel || {}, live = d.live || {}, videos = d.videos || [];
+
+  const liveChip = live.isLive
+    ? `<span class="aud-live-chip aud-live-yt"><span class="app-live-dot"></span>${anNum(live.viewers)} live</span>`
+    : '';
+
+  const kpis = anKpis([
+    { l: 'Subscribers',  v: anNum(ch.subscribers) },
+    { l: 'Total views',  v: anNum(ch.totalViews)  },
+    { l: 'Videos',       v: anNum(ch.videoCount)  },
+    { l: 'Live viewers', v: live.isLive ? anNum(live.viewers) : 'Offline' },
+  ]);
+
+  const vidRows = videos.slice(0, 10).map((v) =>
+    `<div class="an-disc-row">
+      <span><a class="aud-yt-link" href="${escapeHtml(v.url)}" target="_blank" title="${escapeHtml(v.title)}">${escapeHtml((v.title || '').slice(0, 52))}</a></span>
+      <span>${anNum(v.views)} views</span>
+    </div>`
+  ).join('') || '<p class="section-desc" style="margin:0;">No recent videos found.</p>';
+
+  const viewCols = videos.slice(0, 10).reverse().map((v) => ({
+    label: (v.publishedAt || '').slice(5, 10),
+    value: v.views,
+    sub: anNum(v.views) + ' views',
+  }));
+
+  wrap.innerHTML = liveChip + kpis
+    + `<div class="an-2col" style="margin-top:12px;">
+        <div><h4 class="stats-sub" style="margin-top:0;">Recent video views</h4>${viewCols.length ? anColumns(viewCols, '#ff0000') : '<div class="an-chart-empty">No videos.</div>'}</div>
+        <div><h4 class="stats-sub" style="margin-top:0;">Recent uploads</h4><div class="an-disc">${vidRows}</div></div>
+      </div>`;
+}
+
+// Twitch channel stats (followers/subs/bits/VODs/clips) pulled from the Twitch API.
+async function loadTwitchChannelStats(refresh) {
+  const wrap = el('aud-twitch'); if (!wrap) return;
+  if (!wrap.innerHTML) wrap.innerHTML = '<p class="section-desc" style="margin:0;">Loading Twitch stats…</p>';
+  let r = null;
+  try { r = await (await fetch('http://localhost:3000/api/twitch/stats' + (refresh ? '?refresh=1' : ''))).json(); } catch (e) {}
+  if (!r || !r.ok) {
+    wrap.innerHTML = `<div class="an-chart-empty">${escapeHtml((r && r.message) || 'Could not reach Twitch.')}${(r && r.needsReconnect) ? ' <button class="btn btn-secondary btn-sm" onclick="document.querySelector(\'.tab-btn[data-tab=ajustes]\')?.click()">Open Settings</button>' : ''}</div>`;
+    return;
+  }
+  const d = r.data || {};
+  if (d.needsReconnect) { wrap.innerHTML = '<div class="an-chart-empty">Your Twitch token has expired — reconnect Twitch in Settings to pull channel stats.</div>'; return; }
+  const f = d.followers || {}, s = d.subscriptions || {}, b = d.bits || {}, vods = (d.pastBroadcasts && d.pastBroadcasts.items) || [], clips = (d.topClips && d.topClips.items) || [];
+  const kpis = anKpis([
+    { l: 'Followers', v: f.ok ? anNum(f.total) : '—' },
+    { l: 'Subscribers', v: s.ok ? anNum(s.total) : '—' },
+    { l: 'Sub points', v: s.ok ? anNum(s.points) : '—' },
+    { l: 'Bits (all-time)', v: b.ok ? anNum(b.total) : '—' },
+    { l: 'Past broadcasts', v: anNum(vods.length) },
+    { l: 'Live now', v: (d.stream && d.stream.isLive) ? anNum(d.stream.viewers) : 'Offline' }
+  ]);
+  const vodCols = vods.slice(0, 12).reverse().map((v) => ({ label: (v.createdAt || '').slice(5, 10), value: v.viewCount, sub: anNum(v.viewCount) + ' views' }));
+  const clipRows = clips.slice(0, 10).map((c) => `<div class="an-disc-row"><span><b>${escapeHtml((c.title || '').slice(0, 48))}</b>${c.creator ? ' · ' + escapeHtml(c.creator) : ''}</span><span>${anNum(c.viewCount)} views</span></div>`).join('') || '<p class="section-desc" style="margin:0;">No clips found.</p>';
+  const scopeNote = (!f.ok || !s.ok) ? `<p class="section-desc" style="margin-top:6px;font-size:11px;">${!f.ok ? 'Followers' : ''}${(!f.ok && !s.ok) ? ' & ' : ''}${!s.ok ? 'Subscribers' : ''} unavailable — reconnect Twitch to grant the needed scopes.</p>` : '';
+  wrap.innerHTML = kpis + scopeNote + `<div class="an-2col" style="margin-top:12px;">
+      <div><h4 class="stats-sub" style="margin-top:0;">Past broadcast views (VODs)</h4>${vodCols.length ? anColumns(vodCols, '#9147ff') : '<div class="an-chart-empty">No past broadcasts found.</div>'}</div>
+      <div><h4 class="stats-sub" style="margin-top:0;">Top clips by views</h4><div class="an-disc">${clipRows}</div></div>
+    </div>`;
+}
+
+async function loadAudience() {
+  // Load platform panels in parallel, then engagement data
+  [loadTwitchChannelStats(), loadYouTubeStats()];
+  let d = null; try { d = (await (await fetch(ANALYTICS_API + '/engagement')).json()).data; } catch (e) {}
+
+  // Platforms bar — combined live viewers across connected platforms
+  const platBar = el('aud-platforms-bar');
+  if (platBar && d) {
+    const twLive = d.stream && d.stream.isLive;
+    const chips = [];
+    if (twLive) chips.push(`<span class="aud-live-chip aud-live-tw"><span class="app-live-dot"></span><b>${anNum(d.stream.viewers)}</b> on Twitch</span>`);
+    platBar.innerHTML = chips.length
+      ? `<div class="aud-platforms-header">Live now: ${chips.join('')}</div>`
+      : '';
+  }
+
+  const kpi = el('aud-kpi'), body = el('aud-body');
+  if (!d) { if (kpi) kpi.innerHTML = ''; if (body) body.innerHTML = '<p class="section-desc">No engagement data yet.</p>'; return; }
+  const a = d.activity || {}, p = d.predictions || {}, po = d.polls || {}, wh = d.wheel || {}, mg = d.minigames || {};
+  if (kpi) kpi.innerHTML = anKpiInner([
+    { l: 'Twitch viewers', v: (d.stream && d.stream.isLive) ? anNum(d.stream.viewers) : 'Offline' },
+    { l: 'Predictions', v: anNum(p.total) }, { l: 'Pts wagered', v: anNum(p.totalPoints) }, { l: 'Polls', v: anNum(po.total) },
+    { l: 'Wheel spins', v: anNum(wh.spins) }, { l: 'Mini-games', v: anNum(mg.total) },
+    { l: 'Follows', v: anNum(a.follow) }, { l: 'Subs', v: anNum(a.subscribe) }, { l: 'Raids', v: anNum(a.raid) }, { l: 'Bits', v: anNum(a.bitsAmount) }
+  ]);
+  if (body) {
+    const predRows = (p.recent || []).map((x) => `<tr><td class="st-name">${escapeHtml(x.title || '')}</td><td>${escapeHtml(x.state || '')}</td><td class="st-hi">${anNum(x.points)}</td><td>${anNum(x.voters)}</td></tr>`).join('') || '<tr><td colspan="4" class="stats-empty">No predictions run yet.</td></tr>';
+    const acts = (d.recentActivity || []).slice(0, 24).map((x) => {
+      const tag = x.type === 'bits' ? `${anNum(x.amount)} bits` : x.type === 'raid' ? `raid · ${anNum(x.viewers)}` : x.type === 'subscribe' ? `sub${x.tier ? ' T' + x.tier : ''}` : 'follow';
+      return `<div class="an-disc-row"><span><b>${escapeHtml(x.username || 'someone')}</b> · ${escapeHtml(tag)}</span><span>${escapeHtml(x.timestamp ? new Date(x.timestamp).toLocaleTimeString() : '')}</span></div>`;
+    }).join('') || '<p class="section-desc" style="margin:0;">No channel activity captured.</p>';
+    const activityMix = anDonut([
+      { label: 'Follows', value: a.follow || 0, color: AN_COLORS[0] },
+      { label: 'Subs', value: a.subscribe || 0, color: AN_COLORS[1] },
+      { label: 'Raids', value: a.raid || 0, color: AN_COLORS[2] },
+      { label: 'Bits cheers', value: a.bits || 0, color: AN_COLORS[3] }
+    ], 'events');
+    const segCols = anColumns([
+      { label: 'Predict', value: p.total || 0 }, { label: 'Polls', value: po.total || 0 },
+      { label: 'Wheel', value: wh.spins || 0 }, { label: 'Mini', value: mg.total || 0 }
+    ], '#a78bfa');
+    body.innerHTML = `<div class="an-2col">
+        <div><h4 class="stats-sub" style="margin-top:0;">Channel activity mix</h4>${activityMix}</div>
+        <div><h4 class="stats-sub" style="margin-top:0;">Interactive segments run</h4>${segCols}</div>
+      </div>
+      <div class="an-2col" style="margin-top:6px;">
+        <div><h4 class="stats-sub">Recent predictions</h4><table class="stats-table"><thead><tr><th>Title</th><th>Result</th><th>Pts</th><th>Voters</th></tr></thead><tbody>${predRows}</tbody></table>
+          <h4 class="stats-sub" style="margin-top:16px;">Wheel entries by method</h4>${anBars(Object.keys(wh.byMethod || {}).map((k) => ({ label: k, value: wh.byMethod[k] })))}</div>
+        <div><h4 class="stats-sub">Channel activity</h4><div class="an-disc">${acts}</div></div>
+      </div>`;
+  }
+}
+
+// Trigger the historical start.gg importer; progress arrives over WS ('startgg_import').
+async function startggImportGo() {
+  const btn = el('sgi-go'), status = el('sgi-status');
+  const nameQuery = (el('sgi-name')?.value || 'Rocket Rush').trim();
+  if (btn) btn.disabled = true;
+  if (status) { status.textContent = 'Starting import…'; status.style.color = ''; }
+  try {
+    const r = await (await fetch('http://localhost:3000/api/stats/import-startgg', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ nameQuery }) })).json();
+    if (!r.ok) { if (status) { status.textContent = r.message || 'Could not start.'; status.style.color = '#f56565'; } if (btn) btn.disabled = false; }
+  } catch (e) { if (status) { status.textContent = 'Request failed: ' + e.message; status.style.color = '#f56565'; } if (btn) btn.disabled = false; }
+}
+function onStartggImport(p) {
+  const status = el('sgi-status'), btn = el('sgi-go');
+  if (status) {
+    const s = p.summary;
+    status.textContent = (p.message || '') + (s ? ` — ${s.imported} imported, ${s.skipped} skipped` : '');
+    status.style.color = p.error ? '#f56565' : (p.done ? '#9ae6b4' : '');
+  }
+  if (p.done) {
+    if (btn) btn.disabled = false;
+    _anDash = null; _anDashSig = '';
+    // Refresh the dashboards with the freshly imported data.
+    if (el('stats-panel-event') && el('stats-panel-event').style.display !== 'none') loadEventAnalytics();
+    if (typeof loadAnalyticsOverview === 'function') loadAnalyticsOverview();
+  }
+}
+
+// ── start.gg find-and-add: search any tournament → pick an event → import its sets ──
+async function sgiSearch() {
+  const q = (el('sgi-search')?.value || '').trim();
+  const res = el('sgi-results'), evs = el('sgi-events');
+  if (evs) evs.innerHTML = '';
+  if (!q || q.length < 2) { if (res) res.innerHTML = '<p class="section-desc" style="margin:8px 0 0;">Type at least 2 characters.</p>'; return; }
+  if (res) res.innerHTML = '<p class="section-desc" style="margin:8px 0 0;">Searching start.gg…</p>';
+  try {
+    const r = await (await fetch('http://localhost:3000/api/startgg/search-tournaments', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query: q }) })).json();
+    if (r.error) { if (res) res.innerHTML = `<p class="section-desc" style="color:#f56565;margin:8px 0 0;">${escapeHtml(r.error)}</p>`; return; }
+    const list = r.tournaments || [];
+    if (!list.length) { if (res) res.innerHTML = '<p class="section-desc" style="margin:8px 0 0;">No tournaments found.</p>'; return; }
+    res.innerHTML = list.map((t) => `<button class="sgi-tourn" data-slug="${escapeHtml(t.slug)}" data-name="${escapeHtml(t.name)}">${t.image ? `<img src="${escapeHtml(t.image)}" alt="">` : '<span class="sgi-tourn-ph"></span>'}<span class="sgi-tourn-b"><span class="sgi-tourn-n">${escapeHtml(t.name)}</span><span class="sgi-tourn-m">${t.eventCount || 0} events · ${anNum(t.numAttendees || 0)} entrants${t.startAt ? ' · ' + new Date(t.startAt * 1000).toLocaleDateString() : ''}</span></span></button>`).join('');
+    res.querySelectorAll('.sgi-tourn').forEach((b) => b.addEventListener('click', () => sgiLoadEvents(b.dataset.slug, b.dataset.name)));
+  } catch (e) { if (res) res.innerHTML = `<p class="section-desc" style="color:#f56565;margin:8px 0 0;">Search failed: ${escapeHtml(e.message)}</p>`; }
+}
+async function sgiLoadEvents(slug, tname) {
+  const evs = el('sgi-events');
+  if (evs) evs.innerHTML = '<p class="section-desc" style="margin:8px 0 0;">Loading events…</p>';
+  try {
+    const r = await (await fetch('http://localhost:3000/api/startgg/tournament-events', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tournamentSlug: slug }) })).json();
+    const list = r.events || [];
+    if (!list.length) { if (evs) evs.innerHTML = '<p class="section-desc" style="margin:8px 0 0;">No events on that tournament.</p>'; return; }
+    evs.innerHTML = `<div class="sgi-events-hd">${escapeHtml(tname)} — pick an event to import:</div>` + list.map((e) => {
+      const g = ((e.videogame && e.videogame.name) || '').toLowerCase();
+      const gt = g.includes('rocket') ? 'rl' : ((g.includes('counter') || g.includes('cs:')) ? 'cs2' : (g.includes('valorant') ? 'valorant' : 'rl'));
+      return `<button class="sgi-event" data-eid="${escapeHtml(String(e.id))}" data-name="${escapeHtml(tname + ' — ' + e.name)}" data-gt="${gt}"><span class="sgi-event-n">${escapeHtml(e.name)}</span><span class="sgi-event-m">${escapeHtml((e.videogame && e.videogame.name) || '')}${e.numEntrants ? ' · ' + anNum(e.numEntrants) + ' entrants' : ''}</span><span class="sgi-event-add">+ Add</span></button>`;
+    }).join('');
+    evs.querySelectorAll('.sgi-event').forEach((b) => b.addEventListener('click', () => sgiImportEvent(b.dataset.eid, b.dataset.name, b.dataset.gt)));
+  } catch (e) { if (evs) evs.innerHTML = `<p class="section-desc" style="color:#f56565;margin:8px 0 0;">Failed to load events: ${escapeHtml(e.message)}</p>`; }
+}
+async function sgiImportEvent(eventId, tournamentName, gameType) {
+  const status = el('sgi-status');
+  if (status) { status.textContent = 'Starting import…'; status.style.color = ''; }
+  try {
+    const r = await (await fetch('http://localhost:3000/api/stats/import-startgg-event', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ eventId, tournamentName, gameType }) })).json();
+    if (!r.ok && status) { status.textContent = r.message || 'Could not start.'; status.style.color = '#f56565'; }
+  } catch (e) { if (status) { status.textContent = 'Request failed: ' + e.message; status.style.color = '#f56565'; } }
+}
+el('sgi-search-go')?.addEventListener('click', sgiSearch);
+el('sgi-search')?.addEventListener('keydown', (e) => { if (e.key === 'Enter') sgiSearch(); });
+
+async function loadEventAnalytics() {
+  const dash = await ensureDashboard();
+  let live = null; try { live = (await (await fetch(ANALYTICS_API + '/event')).json()).data; } catch (e) {}
+  const kpi = el('ev-an-kpi'), body = el('ev-an-body');
+  const b = (live && live.bracket) || {}, q = (live && live.queue) || {}, ev = (live && live.event) || {};
+  const pc = (dash && dash.pacing) || {}, mp = (pc.matches || {}), gp = (pc.games || {});
+  if (kpi) kpi.innerHTML = anKpiInner([
+    { l: 'Live bracket', v: (b.pct || 0) + '%' }, { l: 'Sets on stream', v: anNum(b.completed) + ' / ' + anNum(b.total || (q.done + q.live + q.upcoming) || 0) },
+    { l: 'Matches (filtered)', v: anNum((dash && dash.totals.matches) || 0) }, { l: 'Tournaments', v: anNum((dash && dash.totals.tournaments) || 0) },
+    { l: 'Avg match', v: mp.count ? anMmss(mp.avg) : '—' }, { l: 'Median match', v: mp.count ? anMmss(mp.median) : '—' }, { l: 'Avg game', v: gp.count ? anMmss(gp.avg) : '—' }, { l: 'Longest match', v: mp.count ? anMmss(mp.max) : '—' }
+  ]);
+  if (body) {
+    const histo = (pc.histogram || []).map((h) => ({ label: h.label, value: h.count }));
+    const queueDonut = anDonut([
+      { label: 'Completed', value: q.done || 0, color: AN_COLORS[3] }, { label: 'On now', value: q.live || 0, color: AN_COLORS[1] }, { label: 'Upcoming', value: q.upcoming || 0, color: AN_COLORS[2] }
+    ], 'sets');
+    const hero = `<div class="an-hero">
+      <div class="an-hero-c"><h4 class="stats-sub" style="margin-top:0;text-align:center;">Live bracket</h4>${anRing(b.pct || 0, 'complete', '#22e06a')}</div>
+      <div class="an-hero-c"><h4 class="stats-sub" style="margin-top:0;text-align:center;">Stream queue (now)</h4>${queueDonut}</div>
+      <div class="an-hero-c" style="flex:2;min-width:280px;"><h4 class="stats-sub" style="margin-top:0;">Match length distribution${mp.count ? ' (median ' + anMmss(mp.median) + ')' : ''}</h4>${histo.length ? anColumns(histo, '#f5b14a') : '<div class="an-chart-empty">No completed matches in range.</div>'}</div>
+    </div>`;
+    const maps = ((dash && dash.mapStats) || []).slice(0, 12).map((m) => ({ label: m.map + (m.game_type && m.game_type !== 'rl' ? ' · ' + m.game_type : ''), value: m.played, sub: m.played + ' (A ' + m.aWins + ' / B ' + m.bWins + ')' }));
+    body.innerHTML = hero
+      + `<h4 class="stats-sub">Tournament breakdown <span class="section-desc" style="font-weight:600;">(click a column to sort)</span></h4><div id="ev-tourn-table"></div>`
+      + `<div class="an-2col" style="margin-top:16px;"><div><h4 class="stats-sub">Map / arena split</h4>${maps.length ? anBars(maps) : '<p class="section-desc" style="margin:0;">No map-level results in range.</p>'}</div>
+        <div><h4 class="stats-sub">Scheduling guide</h4><p class="section-desc">${mp.count ? `Plan ~${anMmss(mp.median)} per match (avg ${anMmss(mp.avg)}, range ${anMmss(mp.min)}–${anMmss(mp.max)}). A ${anNum(q.upcoming || 0)}-set queue ≈ ${anMmss((q.upcoming || 0) * (mp.median || 0))} of play.` : 'Not enough completed matches in range to estimate pacing.'}</p></div></div>`;
+    const rows = ((dash && dash.perTournament) || []).map((t) => ({ tournament: t.tournament, matches: t.matches, games: t.games, teams: t.teams, lastAt: t.lastAt }));
+    anSortable('ev-tourn-table', 'ev-tourn', [
+      { key: 'tournament', label: 'Tournament', fmt: (v) => escapeHtml(v.length > 50 ? v.slice(0, 50) + '…' : v) },
+      { key: 'matches', label: 'Matches', num: true }, { key: 'games', label: 'Games', num: true }, { key: 'teams', label: 'Teams', num: true },
+      { key: 'lastAt', label: 'Last played', num: true, fmt: (v) => escapeHtml(anWhen(v)) }
+    ], rows, 'lastAt', -1);
+  }
+}
+
+// ── Reports & exports ───────────────────────────────────────────────────────
+function anDownload(name, content, mime) {
+  try {
+    const blob = new Blob([content], { type: mime || 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob); const a = document.createElement('a');
+    a.href = url; a.download = name; document.body.appendChild(a); a.click();
+    setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 120);
+  } catch (e) {}
+}
+function csvCell(v) { const s = String(v == null ? '' : v); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; }
+function toCSV(headers, rows) { return [headers.map(csvCell).join(',')].concat(rows.map((r) => r.map(csvCell).join(','))).join('\r\n'); }
+// Download a server-generated file (CSV/JSON) without a pop-up window — fetch it and save the blob.
+async function anFetchDownload(url, fallbackName, mime) {
+  try {
+    const res = await fetch(url); const text = await res.text();
+    const cd = res.headers.get('Content-Disposition') || ''; const m = cd.match(/filename="?([^";]+)"?/);
+    anDownload((m && m[1]) || fallbackName, text, mime || 'text/csv;charset=utf-8');
+  } catch (e) { try { window.open(url, '_blank'); } catch (_) {} }
+}
+function reportContext() {
+  const parts = [];
+  parts.push(_anRangePreset === 'all' ? 'All time' : _anRangePreset === 'custom' ? 'Custom range' : 'Last ' + _anRangePreset + ' days');
+  parts.push(_anFilter.game ? (({ rl: 'Rocket League', cs2: 'CS2', valorant: 'Valorant' })[_anFilter.game] || _anFilter.game) : 'All games');
+  parts.push(_anFilter.tournament || 'All tournaments');
+  return parts.join(' · ');
+}
+function repSlug() {
+  const t = _anFilter.tournament ? _anFilter.tournament.replace(/[^a-z0-9]+/gi, '-').slice(0, 40)
+    : (_anRangePreset === 'all' ? 'all-time' : _anRangePreset === 'custom' ? 'custom' : _anRangePreset + 'd');
+  return ('ne-report-' + t).replace(/-+/g, '-').replace(/-$/, '');
+}
+function repTeamsCSV(d) { return toCSV(['Team', 'Played', 'Wins', 'Losses', 'Win %'], (d.teams || []).map((x) => [x.team, x.matches, x.wins, x.losses, x.winPct])); }
+function repTournamentsCSV(d) { return toCSV(['Tournament', 'Matches', 'Games', 'Teams', 'First played', 'Last played'], (d.perTournament || []).map((t) => [t.tournament, t.matches, t.games, t.teams, anWhen(t.firstAt), anWhen(t.lastAt)])); }
+function repTimelineCSV(d) { return toCSV(['Date', 'Matches', 'Games'], (d.timeline || []).map((p) => [p.date, p.matches, p.games])); }
+function repMapsCSV(d) { return toCSV(['Map', 'Game', 'Played', 'A wins', 'B wins'], (d.mapStats || []).map((m) => [m.map, m.game_type, m.played, m.aWins, m.bWins])); }
+function repPacingCSV(d) {
+  const p = d.pacing || {}, m = p.matches || {}, g = p.games || {};
+  let csv = toCSV(['Scope', 'Count', 'Avg', 'Median', 'Min', 'Max'], [['Match', m.count, anMmss(m.avg), anMmss(m.median), anMmss(m.min), anMmss(m.max)], ['Game', g.count, anMmss(g.avg), anMmss(g.median), anMmss(g.min), anMmss(g.max)]]);
+  csv += '\r\n\r\n' + toCSV(['Match length bucket', 'Count'], (p.histogram || []).map((h) => [h.label, h.count]));
+  return csv;
+}
+function repPlayersCSV(d) {
+  const L = d.leaders || { rl: [], cs2: [], val: [] }; const rows = [];
+  (L.rl || []).forEach((p) => rows.push(['Rocket League', p.player, p.games, p.goals, p.assists, p.saves, p.shots, p.gpg, p.score, '', '', '']));
+  (L.cs2 || []).forEach((p) => rows.push(['CS2', p.player, p.games, '', '', '', '', '', p.score, p.kills, p.deaths, p.kd]));
+  (L.val || []).forEach((p) => rows.push(['Valorant', p.player, p.games, '', '', '', '', '', '', p.kills, p.deaths, p.kd]));
+  return toCSV(['Game', 'Player', 'GP', 'Goals', 'Assists', 'Saves', 'Shots', 'G/Game', 'Score', 'Kills', 'Deaths', 'K/D'], rows);
+}
+
+async function loadReports() {
+  const dash = await ensureDashboard();
+  const ctxEl = el('rep-context'); if (ctxEl) ctxEl.textContent = reportContext();
+  // The recap is built on demand by openPrintableRecap() (Print / Save as PDF) — no inline preview.
+  if (!window._repWired) {
+    window._repWired = true;
+    el('rep-print')?.addEventListener('click', () => openPrintableRecap(_anDash));
+    el('rep-refresh')?.addEventListener('click', () => { _anDash = null; _anDashSig = ''; loadReports(); });
+  }
+  const t = (dash && dash.totals) || {};
+  const cards = [
+    { title: 'Team standings', desc: anNum(t.teams) + ' teams · win/loss records', actions: [['CSV', () => anDownload(repSlug() + '-teams.csv', repTeamsCSV(dash))], ['JSON', () => anDownload(repSlug() + '-teams.json', JSON.stringify(dash.teams || [], null, 2), 'application/json')]] },
+    { title: 'Player leaderboards', desc: 'Per-player stats from streamed matches (RL / CS2 / Valorant)', actions: [['CSV', () => anDownload(repSlug() + '-players.csv', repPlayersCSV(dash))], ['JSON', () => anDownload(repSlug() + '-players.json', JSON.stringify(dash.leaders || {}, null, 2), 'application/json')]] },
+    { title: 'Tournament breakdown', desc: anNum(t.tournaments) + ' tournaments · matches / games / teams', actions: [['CSV', () => anDownload(repSlug() + '-tournaments.csv', repTournamentsCSV(dash))]] },
+    { title: 'Match pacing', desc: 'Durations + length distribution — for scheduling', actions: [['CSV', () => anDownload(repSlug() + '-pacing.csv', repPacingCSV(dash))]] },
+    { title: 'Daily activity', desc: 'Matches & games played per day', actions: [['CSV', () => anDownload(repSlug() + '-activity.csv', repTimelineCSV(dash))]] },
+    { title: 'Map / arena split', desc: 'Plays + win split per map', actions: [['CSV', () => anDownload(repSlug() + '-maps.csv', repMapsCSV(dash))]] },
+    { title: 'Sponsor proof-of-play', desc: 'Per-broadcast on-screen sponsor exposure (export per report)', actions: [['Open Sponsors →', () => statsShowTab('sponsors')]] },
+    { title: 'Broadcast reports', desc: 'Per-show viewer / scene / ad / engagement CSVs', actions: [['Open Broadcasts →', () => statsShowTab('broadcasts')]] }
+  ];
+  const wrap = el('rep-cards'); if (!wrap) return;
+  wrap.innerHTML = cards.map((c, i) => `<div class="rep-card${c.primary ? ' rep-primary' : ''}"><div class="rep-card-t">${escapeHtml(c.title)}</div><div class="rep-card-d">${escapeHtml(c.desc)}</div><div class="rep-card-a">${c.actions.map((a, j) => `<button class="btn ${(c.primary && j === 0) ? 'btn-primary' : 'btn-secondary'} btn-sm" data-rc="${i}" data-ra="${j}">${escapeHtml(a[0])}</button>`).join('')}</div></div>`).join('');
+  wrap.querySelectorAll('[data-rc]').forEach((b) => b.addEventListener('click', () => { const c = cards[+b.dataset.rc]; const a = c && c.actions[+b.dataset.ra]; if (a) a[1](); }));
+}
+
+const REPORT_PRINT_CSS = `*{box-sizing:border-box;} body{font-family:Arial,Helvetica,sans-serif;color:#141414;margin:26px;background:#fff;}
+h1{font-size:22px;margin:0;} h2{font-size:14px;margin:22px 0 8px;border-bottom:2px solid #eee;padding-bottom:4px;text-transform:uppercase;letter-spacing:.04em;color:#333;}
+.rep-head{display:flex;align-items:center;gap:14px;border-bottom:3px solid #141414;padding-bottom:12px;margin-bottom:16px;}
+.rep-head img{height:42px;} .rep-sub{color:#666;font-size:12px;margin-top:4px;}
+.an-kpi{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;}
+.an-tile{border:1px solid #ddd;border-radius:8px;padding:10px 12px;background:#fafafa;}
+.an-tile-v{font-size:19px;font-weight:800;color:#111;} .an-tile-l{font-size:10px;text-transform:uppercase;color:#777;font-weight:700;margin-top:3px;letter-spacing:.04em;}
+.cols2{display:grid;grid-template-columns:1fr 1fr;gap:20px;}
+.an-line-wrap,.an-spark-wrap{border:1px solid #ddd;border-radius:8px;padding:8px 10px;background:#fff;}
+.an-line{width:100%;height:150px;display:block;} .an-line-head{display:flex;justify-content:space-between;font-size:11px;color:#666;margin-bottom:4px;}
+.an-legend-row{display:flex;gap:12px;} .an-leg{display:inline-flex;align-items:center;gap:5px;font-size:11px;} .an-leg i{width:10px;height:10px;border-radius:2px;}
+.an-line-ax{display:flex;justify-content:space-between;font-size:10px;color:#888;margin-top:3px;}
+.an-bars{display:flex;flex-direction:column;gap:5px;} .an-bar-row{display:grid;grid-template-columns:130px 1fr auto;align-items:center;gap:8px;}
+.an-bar-lbl{font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;} .an-bar-track{height:9px;background:#eee;border-radius:5px;overflow:hidden;} .an-bar-fill{display:block;height:100%;background:#2a7;} .an-bar-val{font-size:10px;color:#555;white-space:nowrap;}
+.an-cols{display:flex;align-items:flex-end;gap:5px;height:130px;border:1px solid #ddd;border-radius:8px;padding:6px;background:#fff;} .an-col{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;gap:2px;} .an-col-bar{width:70%;max-width:30px;background:#f5b14a;border-radius:3px 3px 0 0;min-height:2px;} .an-col-v{font-size:9px;} .an-col-l{font-size:8px;color:#888;}
+.an-chart-empty{border:1px dashed #ccc;border-radius:8px;padding:18px;text-align:center;color:#888;font-size:12px;}
+table{width:100%;border-collapse:collapse;font-size:12px;margin-top:6px;} th,td{text-align:left;padding:4px 8px;border-bottom:1px solid #eee;} th{background:#f3f3f3;font-size:10px;text-transform:uppercase;color:#555;}
+.rep-foot{margin-top:20px;color:#888;font-size:11px;border-top:1px solid #eee;padding-top:8px;}
+@media print{ body{margin:0;} h2{break-after:avoid;} .an-line-wrap,.an-cols,table,.cols2{break-inside:avoid;} }`;
+
+function buildRecapHtml(dash) {
+  dash = dash || _anDash || {};
+  const t = dash.totals || {}, pc = dash.pacing || {}, mp = pc.matches || {};
+  const tl = dash.timeline || [];
+  const span = tl.length ? (tl[0].date + ' → ' + tl[tl.length - 1].date) : '—';
+  const teamsTop = (dash.teams || []).slice(0, 10).map((x) => ({ label: x.team.length > 22 ? x.team.slice(0, 22) + '…' : x.team, value: x.wins, sub: x.wins + '-' + x.losses + ' · ' + x.winPct + '%' }));
+  const histo = (pc.histogram || []).map((h) => ({ label: h.label, value: h.count }));
+  const rl = (dash.leaders && dash.leaders.rl) || [];
+  const playerRows = rl.slice(0, 15).map((p, i) => `<tr><td>${i + 1}</td><td>${escapeHtml(p.player)}</td><td>${p.games}</td><td>${p.goals}</td><td>${p.assists}</td><td>${p.saves}</td><td>${p.shots}</td><td>${p.gpg}</td></tr>`).join('') || '<tr><td colspan="8">No player stats in range.</td></tr>';
+  const tourRows = (dash.perTournament || []).slice(0, 20).map((x) => `<tr><td>${escapeHtml(x.tournament)}</td><td>${x.matches}</td><td>${x.games}</td><td>${x.teams}</td><td>${escapeHtml(anWhen(x.lastAt))}</td></tr>`).join('') || '<tr><td colspan="5">No tournaments in range.</td></tr>';
+  const brand = (typeof currentState !== 'undefined' && currentState.brand) || {};
+  const logo = brand.logo ? `<img src="${brand.logo}" alt="">` : '';
+  const title = (brand.name || 'NE Broadcast Suite') + ' — Production Report';
+  const kpis = anKpiInner([
+    { l: 'Matches', v: anNum(t.matches) }, { l: 'Games', v: anNum(t.games) }, { l: 'Teams', v: anNum(t.teams) }, { l: 'Tournaments', v: anNum(t.tournaments) },
+    { l: 'Avg match', v: mp.count ? anMmss(mp.avg) : '—' }, { l: 'Median match', v: mp.count ? anMmss(mp.median) : '—' }, { l: 'Longest match', v: mp.count ? anMmss(mp.max) : '—' }, { l: 'Players tracked', v: anNum(rl.length) }
+  ]);
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title><style>${REPORT_PRINT_CSS}</style></head><body>
+    <div class="rep-head">${logo}<div><h1>${escapeHtml(title)}</h1><div class="rep-sub">${escapeHtml(reportContext())} · ${escapeHtml(span)} · generated ${escapeHtml(new Date().toLocaleString())}</div></div></div>
+    <div class="an-kpi">${kpis}</div>
+    <h2>Activity over time</h2>${anLineChart(tl, [{ key: 'matches', color: '#1e88c7', label: 'Matches' }, { key: 'games', color: '#7c4dff', label: 'Games' }])}
+    <div class="cols2" style="margin-top:14px;">
+      <div><h2>Top teams (by wins)</h2>${anBars(teamsTop, '#2a9d5b')}</div>
+      <div><h2>Match length distribution</h2>${histo.length ? anColumns(histo, '#f0a83a') : '<div class="an-chart-empty">No completed matches in range.</div>'}</div>
+    </div>
+    <h2>Top players</h2><table><thead><tr><th>#</th><th>Player</th><th>GP</th><th>Goals</th><th>Assists</th><th>Saves</th><th>Shots</th><th>G/Game</th></tr></thead><tbody>${playerRows}</tbody></table>
+    <h2>Tournaments</h2><table><thead><tr><th>Tournament</th><th>Matches</th><th>Games</th><th>Teams</th><th>Last played</th></tr></thead><tbody>${tourRows}</tbody></table>
+    <div class="rep-foot">Generated by NE Broadcast Suite · ${escapeHtml(reportContext())}. Match results from start.gg; player stats from live-streamed series.</div>
+  </body></html>`;
+  return html;
+}
+// Render the same recap into the on-page A4 preview iframe.
+function renderRecapPreview(dash) {
+  const frame = el('rep-preview-frame'); if (!frame) return;
+  try {
+    const doc = frame.contentWindow.document; doc.open(); doc.write(buildRecapHtml(dash)); doc.close();
+    setTimeout(() => { try { const h = (doc.body && doc.body.scrollHeight) || 0; if (h) frame.style.height = (h + 24) + 'px'; } catch (e) {} }, 150);
+  } catch (e) {}
+}
+function openPrintableRecap(dash) {
+  const html = buildRecapHtml(dash);
+  // Electron can't reliably print a renderer iframe ("this app doesn't support print preview") and
+  // its native dialog has no preview pane, so route to the main process in 'pdf' mode: render the
+  // report offscreen → PDF → Save dialog → open the saved PDF. No intermediate webpage or dialog.
+  if (window.electronAPI && typeof window.electronAPI.printReport === 'function') {
+    if (typeof showToast === 'function') showToast('Generating report PDF…', '#22c55e', 4000);
+    window.electronAPI.printReport(html, 'pdf').then((res) => {
+      if (res && res.saved && typeof showToast === 'function') showToast('Saved & opened PDF', '#22c55e', 4000);
+      else if (res && res.ok === false && !res.canceled && typeof showToast === 'function') showToast('Could not save PDF' + (res.error ? ': ' + res.error : ''), '#c53030', 6000);
+    }).catch((e) => { if (typeof showToast === 'function') showToast('PDF failed: ' + (e && e.message), '#c53030', 5000); });
+    return;
+  }
+  // Browser fallback: print via a hidden iframe.
+  let frame = document.getElementById('rep-print-frame');
+  if (frame) frame.remove();
+  frame = document.createElement('iframe');
+  frame.id = 'rep-print-frame';
+  frame.setAttribute('aria-hidden', 'true');
+  frame.style.cssText = 'position:fixed;left:-10000px;top:0;width:900px;height:1200px;border:0;';
+  document.body.appendChild(frame);
+  const doPrint = () => { try { frame.contentWindow.focus(); frame.contentWindow.print(); } catch (e) {} };
+  frame.onload = () => setTimeout(doPrint, 250);   // give images/fonts a beat to paint
+  const doc = frame.contentWindow.document;
+  doc.open(); doc.write(html); doc.close();
+  if (typeof showToast === 'function') showToast('Opening print dialog…', '#22c55e');
+}
+
 function statTable(cols, rows, rowFn) {
   return `<table class="stats-table"><thead><tr>${cols.map((c) => `<th>${c}</th>`).join('')}</tr></thead>`
     + `<tbody>${rows.map(rowFn).join('') || `<tr><td colspan="${cols.length}" class="stats-empty">No data yet — broadcast some games first.</td></tr>`}</tbody></table>`;
 }
+
+// ── Sponsor proof-of-play ───────────────────────────────────────────────────
+const ADPROOF_API = 'http://localhost:3000/api/adproof';
+const ADPROOF_SPOTS = ['rail', 'desk', 'overtime', 'replayGoal', 'replayOutro', 'scoreboard', 'banner', 'ticker'];
+const ADPROOF_SPOT_LABEL = { rail: 'Rail', desk: 'Desk', overtime: 'OT', replayGoal: 'Replay', replayOutro: 'Outro', scoreboard: 'Score', banner: 'Banner', ticker: 'Ticker' };
+let _adProofReport = null;
+function adProofMmss(s) { s = Math.max(0, Math.round(s || 0)); const m = Math.floor(s / 60); return m + ':' + String(s % 60).padStart(2, '0'); }
+function adProofPlacementStr(byPlacement) {
+  const parts = ADPROOF_SPOTS.filter((k) => byPlacement && byPlacement[k]).map((k) => ADPROOF_SPOT_LABEL[k] + ' ' + adProofMmss(byPlacement[k]));
+  return parts.join(' · ') || '—';
+}
+async function loadAdProof() {
+  try { _adProofReport = await (await fetch(ADPROOF_API)).json(); }
+  catch (e) { _adProofReport = null; }
+  renderAdProof(_adProofReport);
+}
+function renderAdProof(rep) {
+  rep = rep || { active: false, sponsors: [], sessions: [], durationSec: 0 };
+  const startBtn = el('app-start'), stopBtn = el('app-stop'), live = el('app-live'), liveTx = el('app-live-tx');
+  if (startBtn) startBtn.style.display = rep.active ? 'none' : '';
+  if (stopBtn) stopBtn.style.display = rep.active ? '' : 'none';
+  if (live) live.style.display = rep.active ? 'inline-flex' : 'none';
+  if (liveTx && rep.active) liveTx.textContent = 'Recording · ' + adProofMmss(rep.durationSec) + (rep.label ? ' · ' + rep.label : '');
+
+  // Live / current session table
+  const cur = el('app-current');
+  if (cur) {
+    const sponsors = rep.sponsors || [];
+    if (!rep.active && !sponsors.length) {
+      cur.innerHTML = '<p class="section-desc" style="margin:0;">No active session. Start one when you go live to begin logging sponsor exposure.</p>';
+    } else {
+      const rows = sponsors.map((s) => `<tr>
+        <td class="st-name">${escapeHtml(s.name || '(unnamed)')}</td>
+        <td class="st-hi">${adProofMmss(s.seconds)}</td>
+        <td>${s.impressions || 0}</td>
+        <td class="st-hi" title="Estimated impressions = concurrent viewers x on-screen seconds">${anNum(s.viewerSeconds || 0)}</td>
+        <td>${anNum(s.avgViewers || 0)}</td>
+        <td>${anNum(s.peakViewers || 0)}</td>
+        <td class="app-place">${escapeHtml(adProofPlacementStr(s.byPlacement))}</td></tr>`).join('')
+        || `<tr><td colspan="7" class="stats-empty">No sponsor exposure logged yet${rep.active ? ' — make sure a brand kit with sponsors is active.' : '.'}</td></tr>`;
+      const head = `<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:8px;">
+          <span class="app-cur-lbl">${rep.active ? 'Current session' : 'Last session (unsaved)'} · ${adProofMmss(rep.durationSec)}${rep.label ? ' · ' + escapeHtml(rep.label) : ''}</span>
+          <span style="display:flex;gap:6px;">
+            <button class="btn btn-secondary btn-sm" id="app-exp-csv">Export CSV</button>
+            <button class="btn btn-secondary btn-sm" id="app-exp-json">Export JSON</button>
+          </span></div>`;
+      cur.innerHTML = head + `<table class="stats-table"><thead><tr><th>Sponsor</th><th>On screen</th><th>Spots</th><th>Est. impressions</th><th>Avg CCV</th><th>Peak</th><th>Placements</th></tr></thead><tbody>${rows}</tbody></table>`
+        + `<p class="section-desc" style="margin-top:6px;font-size:11px;">Estimated exposure inferred from live overlay state. "On screen" de-duplicates time across placements; "Spots" = distinct appearances. "Est. impressions" = viewer-seconds (concurrent Twitch+YouTube viewers x seconds on screen).</p>`;
+      el('app-exp-csv')?.addEventListener('click', () => adProofExport('current', 'csv'));
+      el('app-exp-json')?.addEventListener('click', () => adProofExport('current', 'json'));
+    }
+  }
+
+  // Saved sessions
+  const sess = el('app-sessions');
+  if (sess) {
+    const list = rep.sessions || [];
+    if (!list.length) { sess.innerHTML = '<p class="section-desc" style="margin:0;">No saved reports yet.</p>'; }
+    else {
+      sess.innerHTML = `<div style="display:flex;justify-content:flex-end;margin-bottom:6px;"><button class="btn btn-danger btn-sm" id="app-clear-all">Clear all reports</button></div>` + list.map((s) => {
+        const when = s.endedAt ? new Date(s.endedAt).toLocaleString() : '';
+        return `<div class="app-sess">
+          <div class="app-sess-main"><span class="app-sess-lbl">${escapeHtml(s.label || 'Broadcast')}</span>
+            <span class="app-sess-meta">${adProofMmss(s.durationSec)} · ${s.sponsorCount || 0} sponsors · ${escapeHtml(when)}</span></div>
+          <div class="app-sess-act">
+            <button class="btn btn-secondary btn-sm" data-app-csv="${s.id}">CSV</button>
+            <button class="btn btn-secondary btn-sm" data-app-json="${s.id}">JSON</button>
+            <button class="btn btn-danger btn-sm" data-app-del="${s.id}">Delete</button>
+          </div></div>`;
+      }).join('');
+      sess.querySelectorAll('[data-app-csv]').forEach((b) => b.addEventListener('click', () => adProofExport(b.dataset.appCsv, 'csv')));
+      sess.querySelectorAll('[data-app-json]').forEach((b) => b.addEventListener('click', () => adProofExport(b.dataset.appJson, 'json')));
+      sess.querySelectorAll('[data-app-del]').forEach((b) => b.addEventListener('click', async () => {
+        if (!confirm('Delete this saved report?')) return;
+        try { const r = await (await fetch(ADPROOF_API + '/session/' + b.dataset.appDel, { method: 'DELETE' })).json(); _adProofReport = r.report; renderAdProof(r.report); } catch (e) {}
+      }));
+      el('app-clear-all')?.addEventListener('click', async () => {
+        if (!confirm('Delete ALL saved sponsor reports? This cannot be undone.')) return;
+        try { const r = await (await fetch(ADPROOF_API + '/sessions', { method: 'DELETE' })).json(); _adProofReport = r.report; renderAdProof(r.report); } catch (e) {}
+      });
+    }
+  }
+}
+function adProofExport(session, format) {
+  anFetchDownload(ADPROOF_API + '/export?session=' + encodeURIComponent(session) + '&format=' + format, 'proof-of-play.' + format, format === 'json' ? 'application/json' : 'text/csv;charset=utf-8');
+}
+async function adProofStartSession() {
+  const label = (el('app-label')?.value || '').trim();
+  try { const r = await (await fetch(ADPROOF_API + '/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ label }) })).json(); _adProofReport = r.report; renderAdProof(r.report); } catch (e) {}
+}
+async function adProofStopSession() {
+  try { const r = await (await fetch(ADPROOF_API + '/stop', { method: 'POST' })).json(); _adProofReport = r.report; renderAdProof(r.report); } catch (e) {}
+}
+el('app-start')?.addEventListener('click', adProofStartSession);
+el('app-stop')?.addEventListener('click', adProofStopSession);
+function _delPlayerCol(v, r) { return '<button class="stats-del-row" data-del-player="' + escapeHtml(r.player) + '" title="Delete this player from the leaderboards">✕</button>'; }
+document.addEventListener('click', async (e) => {
+  const dt = e.target.closest && e.target.closest('[data-del-team]');
+  if (dt) { const name = dt.dataset.delTeam; if (!confirm('Delete "' + name + '" — remove every match this team appears in? (affects both teams in those matches)')) return; try { await fetch('http://localhost:3000/api/stats/team/' + encodeURIComponent(name), { method: 'DELETE' }); } catch (_) {} _anDash = null; _anDashSig = ''; if (typeof loadStatsTeams === 'function') loadStatsTeams(); return; }
+  const dp = e.target.closest && e.target.closest('[data-del-player]');
+  if (dp) { const name = dp.dataset.delPlayer; if (!confirm('Delete player "' + name + '" from the leaderboards?')) return; try { await fetch('http://localhost:3000/api/stats/player/' + encodeURIComponent(name), { method: 'DELETE' }); } catch (_) {} _anDash = null; _anDashSig = ''; if (typeof loadStatsLeaders === 'function') loadStatsLeaders(); return; }
+  const tc = e.target.closest && e.target.closest('#teams-clear-all');
+  if (tc) { if (!confirm('Clear ALL match history? Wipes every team & player record for fresh reporting.')) return; try { await fetch('http://localhost:3000/api/stats/matches', { method: 'DELETE' }); } catch (_) {} _anDash = null; _anDashSig = ''; if (typeof loadStatsTeams === 'function') loadStatsTeams(); return; }
+});
 async function loadStatsLeaders() {
   const wrap = el('stats-leaders'); if (!wrap) return;
-  wrap.innerHTML = '<p class="section-desc">Loading…</p>';
-  try {
-    const d = await (await fetch(`${STATS_API}/leaders`)).json();
-    const esc = (s) => String(s || '').replace(/</g, '&lt;');
-    const rl = statTable(['#', 'Player', 'G', 'A', 'Sv', 'Sh', 'Score', 'GP'], d.rl || [],
-      (p, i) => `<tr><td>${i + 1}</td><td class="st-name">${esc(p.player)}</td><td class="st-hi">${p.goals}</td><td>${p.assists}</td><td>${p.saves}</td><td>${p.shots}</td><td>${p.score}</td><td>${p.games}</td></tr>`);
-    const cs2 = statTable(['#', 'Player', 'K', 'D', 'A', 'HS', 'MVP', 'Score', 'GP'], d.cs2 || [],
-      (p, i) => `<tr><td>${i + 1}</td><td class="st-name">${esc(p.player)}</td><td class="st-hi">${p.kills}</td><td>${p.deaths}</td><td>${p.assists}</td><td>${p.hs}</td><td>${p.mvps}</td><td>${p.score}</td><td>${p.games}</td></tr>`);
-    const val = statTable(['#', 'Player', 'Agent', 'K', 'D', 'A', 'K/D', 'GP'], d.val || [],
-      (p, i) => `<tr><td>${i + 1}</td><td class="st-name">${esc(p.player)}</td><td>${esc(p.agent)}</td><td class="st-hi">${p.kills}</td><td>${p.deaths}</td><td>${p.assists}</td><td>${p.kd}</td><td>${p.games}</td></tr>`);
-    let html = `<h4 class="stats-sub">Rocket League — by goals</h4>${rl}<h4 class="stats-sub" style="margin-top:18px;">CS2 — by kills</h4>${cs2}`;
-    if ((d.val || []).length) html += `<h4 class="stats-sub" style="margin-top:18px;">Valorant — by kills</h4>${val}`;
-    wrap.innerHTML = html;
-  } catch (e) { wrap.innerHTML = `<p style="color:#f56565;">Error: ${e.message}</p>`; }
+  if (!window._pdbClearWired) { window._pdbClearWired = true; el('stats-clear-playerdb')?.addEventListener('click', async () => { if (!confirm('Clear the ENTIRE player database? This wipes saved rank/profile links for fresh reporting.')) return; try { await fetch('http://localhost:3000/api/playerdb', { method: 'DELETE' }); if (typeof showToast === 'function') showToast('Player database cleared', '#22c55e'); } catch (e) {} loadStatsLeaders(); }); }
+  const dash = await ensureDashboard();
+  const L = (dash && dash.leaders) || { rl: [], cs2: [], val: [] };
+  let html = '', gh = '';
+  const _pClip = (n) => { n = n || '—'; return n.length > 16 ? n.slice(0, 16) + '…' : n; };
+  if (L.rl.length) {
+    const top = L.rl.slice().sort((a, b) => (b.goals || 0) - (a.goals || 0)).slice(0, 8).map((p) => ({ label: _pClip(p.player), value: p.goals || 0, sub: (p.goals || 0) + 'G · ' + (p.assists || 0) + 'A · ' + (p.saves || 0) + 'S' }));
+    gh += '<h4 class="stats-sub" style="margin-top:0;">Top scorers — Rocket League</h4>' + anBars(top, '#22c3e6');
+    html += '<h4 class="stats-sub" style="margin-top:18px;">RL leaderboard <span class="section-desc" style="font-weight:600;">(click a column to sort)</span></h4><div id="ld-rl"></div>';
+  }
+  if (L.cs2.length) {
+    const top = L.cs2.slice().sort((a, b) => (b.kills || 0) - (a.kills || 0)).slice(0, 8).map((p) => ({ label: _pClip(p.player), value: p.kills || 0, sub: (p.kills || 0) + 'K · ' + (p.kd || 0) + ' K/D' }));
+    gh += '<h4 class="stats-sub" style="margin-top:18px;">Top fraggers — CS2</h4>' + anBars(top, '#f5b14a');
+    html += '<h4 class="stats-sub" style="margin-top:12px;">CS2 leaderboard</h4><div id="ld-cs2"></div>';
+  }
+  if (L.val.length) {
+    const top = L.val.slice().sort((a, b) => (b.kills || 0) - (a.kills || 0)).slice(0, 8).map((p) => ({ label: _pClip(p.player), value: p.kills || 0, sub: (p.kills || 0) + 'K · ' + (p.kd || 0) + ' K/D' }));
+    gh += '<h4 class="stats-sub" style="margin-top:18px;">Top fraggers — Valorant</h4>' + anBars(top, '#f472b6');
+    html += '<h4 class="stats-sub" style="margin-top:12px;">Valorant leaderboard</h4><div id="ld-val"></div>';
+  }
+  if (!html) html = '<p class="section-desc">No player stats in this range. Player lines come from live game integrations — start.gg history (most of your matches) has results but no per-player stats.</p>';
+  const _pk = el('stats-players-kpi'); if (_pk) _pk.innerHTML = anKpiInner([{ l: 'RL players', v: anNum(L.rl.length) }, { l: 'CS2 players', v: anNum(L.cs2.length) }, { l: 'Valorant', v: anNum(L.val.length) }, { l: 'Top scorer', v: L.rl.length ? _pClip(L.rl.slice().sort((a, b) => (b.goals || 0) - (a.goals || 0))[0].player) : '—' }]);
+  const _pg = el('stats-players-graphs'); if (_pg) _pg.innerHTML = gh || '<p class="section-desc" style="margin:0;">No player stats in this range yet.</p>';
+  wrap.innerHTML = html;
+  if (L.rl.length) anSortable('ld-rl', 'ld-rl-t', [
+    { key: 'player', label: 'Player' }, { key: 'games', label: 'GP', num: true }, { key: 'goals', label: 'Goals', num: true }, { key: 'assists', label: 'Assists', num: true },
+    { key: 'saves', label: 'Saves', num: true }, { key: 'shots', label: 'Shots', num: true }, { key: 'gpg', label: 'G/Game', num: true }, { key: 'score', label: 'Score', num: true }, { key: '_del', label: '', fmt: _delPlayerCol }
+  ], L.rl, 'goals', -1);
+  if (L.cs2.length) anSortable('ld-cs2', 'ld-cs2-t', [
+    { key: 'player', label: 'Player' }, { key: 'games', label: 'GP', num: true }, { key: 'kills', label: 'K', num: true }, { key: 'deaths', label: 'D', num: true },
+    { key: 'assists', label: 'A', num: true }, { key: 'kd', label: 'K/D', num: true }, { key: 'hs', label: 'HS', num: true }, { key: 'mvps', label: 'MVP', num: true }, { key: '_del', label: '', fmt: _delPlayerCol }
+  ], L.cs2, 'kills', -1);
+  if (L.val.length) anSortable('ld-val', 'ld-val-t', [
+    { key: 'player', label: 'Player' }, { key: 'agent', label: 'Agent' }, { key: 'games', label: 'GP', num: true }, { key: 'kills', label: 'K', num: true },
+    { key: 'deaths', label: 'D', num: true }, { key: 'assists', label: 'A', num: true }, { key: 'kd', label: 'K/D', num: true }, { key: '_del', label: '', fmt: _delPlayerCol }
+  ], L.val, 'kills', -1);
 }
 // ── Cross-game player profile ──
 let _statsPlayerListLoaded = false;
@@ -21660,14 +27211,27 @@ function profCard(title, winPct, wins, losses, rows) {
   </div>`;
 }
 async function loadStatsTeams() {
-  const wrap = el('stats-teams'); if (!wrap) return;
-  wrap.innerHTML = '<p class="section-desc">Loading…</p>';
-  try {
-    const d = await (await fetch(`${STATS_API}/teams`)).json();
-    const esc = (s) => String(s || '').replace(/</g, '&lt;');
-    wrap.innerHTML = statTable(['#', 'Team', 'W', 'L', 'Matches', 'Win %'], d.teams || [],
-      (t, i) => `<tr><td>${i + 1}</td><td class="st-name">${esc(t.team)}</td><td class="st-hi">${t.wins}</td><td>${t.losses}</td><td>${t.matches}</td><td>${t.winPct}%</td></tr>`);
-  } catch (e) { wrap.innerHTML = `<p style="color:#f56565;">Error: ${e.message}</p>`; }
+  const dash = await ensureDashboard();
+  const teams = (dash && dash.teams) || [];
+  const kpi = el('stats-teams-kpi'), g = el('stats-teams-graphs');
+  if (kpi) {
+    const played = teams.filter((x) => x.matches > 0);
+    const avgWin = played.length ? Math.round(played.reduce((a, x) => a + (x.winPct || 0), 0) / played.length) : 0;
+    const most = teams.slice().sort((a, b) => (b.wins || 0) - (a.wins || 0))[0];
+    kpi.innerHTML = anKpiInner([
+      { l: 'Teams', v: anNum(teams.length) }, { l: 'With a record', v: anNum(played.length) },
+      { l: 'Avg win rate', v: avgWin + '%' }, { l: 'Most wins', v: most ? ((most.team.length > 14 ? most.team.slice(0, 14) + '…' : most.team) + ' · ' + most.wins) : '—' }
+    ]);
+  }
+  if (g) {
+    const winBars = teams.filter((x) => x.matches >= 3).slice(0, 12).map((x) => ({ label: x.team.length > 18 ? x.team.slice(0, 18) + '…' : x.team, value: x.winPct, sub: x.winPct + '% (' + x.wins + '-' + x.losses + ')' }));
+    const wonBars = teams.slice().sort((a, b) => (b.wins || 0) - (a.wins || 0)).slice(0, 12).map((x) => ({ label: x.team.length > 18 ? x.team.slice(0, 18) + '…' : x.team, value: x.wins, sub: x.wins + '-' + x.losses }));
+    g.innerHTML = `<div class="an-2col"><div><h4 class="stats-sub" style="margin-top:0;">Win rate (min 3 matches)</h4>${winBars.length ? anBars(winBars, '#22e06a') : '<p class="section-desc" style="margin:0;">No teams with 3+ matches.</p>'}</div><div><h4 class="stats-sub" style="margin-top:0;">Most wins</h4>${wonBars.length ? anBars(wonBars, '#22c3e6') : '<p class="section-desc" style="margin:0;">No teams yet.</p>'}</div></div>`;
+  }
+  if (el('stats-teams')) anSortable('stats-teams', 'teams-tbl', [
+    { key: 'team', label: 'Team' }, { key: 'matches', label: 'Played', num: true }, { key: 'wins', label: 'W', num: true }, { key: 'losses', label: 'L', num: true }, { key: 'winPct', label: 'Win %', num: true, fmt: (v) => v + '%' },
+    { key: '_del', label: '', fmt: (v, r) => `<button class="stats-del-row" data-del-team="${escapeHtml(r.team)}" title="Delete this team's matches">✕</button>` }
+  ], teams, 'wins', -1);
 }
 async function loadStatsH2H() {
   const a = (el('stats-h2h-a')?.value || '').trim(), b = (el('stats-h2h-b')?.value || '').trim();
@@ -21685,17 +27249,35 @@ async function loadStatsH2H() {
   } catch (e) { wrap.innerHTML = `<p style="color:#f56565;">Error: ${e.message}</p>`; }
 }
 document.querySelectorAll('#stats-subnav .ev-subnav-btn').forEach((b) => b.addEventListener('click', () => statsShowTab(b.dataset.stab)));
+document.querySelectorAll('#teams-subnav .ev-subnav-btn').forEach((b) => b.addEventListener('click', () => { document.querySelectorAll('#teams-subnav .ev-subnav-btn').forEach((x) => x.classList.toggle('active', x === b)); const w = b.dataset.tsub, gp = el('teams-sub-graphs'), dp = el('teams-sub-data'); if (gp) gp.style.display = w === 'graphs' ? '' : 'none'; if (dp) dp.style.display = w === 'data' ? '' : 'none'; }));
+document.querySelectorAll('#players-subnav .ev-subnav-btn').forEach((b) => b.addEventListener('click', () => { document.querySelectorAll('#players-subnav .ev-subnav-btn').forEach((x) => x.classList.toggle('active', x === b)); const w = b.dataset.psub, gp = el('players-sub-graphs'), dp = el('players-sub-data'); if (gp) gp.style.display = w === 'graphs' ? '' : 'none'; if (dp) dp.style.display = w === 'data' ? '' : 'none'; }));
+el('sgi-go')?.addEventListener('click', startggImportGo);
+// Global filter bar
+document.querySelectorAll('#an-fb-range button').forEach((b) => b.addEventListener('click', () => { anApplyRangePreset(b.dataset.range); if (b.dataset.range !== 'custom') anOnFilterChange(); }));
+el('an-fb-from')?.addEventListener('change', () => { anApplyRangePreset('custom'); anOnFilterChange(); });
+el('an-fb-to')?.addEventListener('change', () => { anApplyRangePreset('custom'); anOnFilterChange(); });
+el('an-fb-game')?.addEventListener('change', (e) => { _anFilter.game = e.target.value; anOnFilterChange(); });
+el('an-fb-tourn')?.addEventListener('change', (e) => { _anFilter.tournament = e.target.value; anOnFilterChange(); });
+// Real-time auto-refresh while the Analytics page is open (self-gates on active tab).
+function anStartAutoRefresh() {
+  if (_anRefreshTimer) return;
+  _anRefreshTimer = setInterval(() => {
+    if (el('tab-stats-content')?.classList.contains('active')) { _anDash = null; _anDashSig = ''; refreshActiveAnalyticsTab(true); }
+  }, 30000);
+}
+el('tws-refresh')?.addEventListener('click', () => loadTwitchChannelStats(true));
+el('yt-refresh')?.addEventListener('click',  () => loadYouTubeStats(true));
 el('stats-h2h-go')?.addEventListener('click', loadStatsH2H);
 el('stats-profile-go')?.addEventListener('click', loadStatsProfile);
 el('stats-profile-name')?.addEventListener('keydown', (e) => { if (e.key === 'Enter') loadStatsProfile(); });
 
-// Load stats when the tab is opened
+// Load stats when the tab is opened — restore the last sub-tab (sanitised after the revamp).
 el('tab-stats')?.addEventListener('click', () => {
-  loadStatsAggregate();
-  loadStatsMatches(true);
-  if (_statsTab === 'players') loadStatsLeaders();
-  else if (_statsTab === 'profile') loadStatsPlayerList();
-  else if (_statsTab === 'teams') loadStatsTeams();
+  const valid = ['overview', 'broadcasts', 'audience', 'event', 'players', 'teams', 'sponsors'];
+  if (!valid.includes(_statsTab)) _statsTab = 'overview';
+  loadAnalyticsFilters();
+  statsShowTab(_statsTab);
+  anStartAutoRefresh();
 });
 
 // ─── EventSub Real-Time Events ──────────────────────────────────────────────
@@ -21904,7 +27486,7 @@ function startStreamStatePolling() {
   if (streamPollInterval) return;
 
   const pollStreamState = async () => {
-    if (!state.twitch?.connected) return;
+    if (!currentState.twitch?.connected) return;
 
     try {
       // Fetch stream state
@@ -21955,16 +27537,91 @@ function stopStreamStatePolling() {
   if (adTimerEl) adTimerEl.style.opacity = '0.6';
 }
 
+// Top-bar viewer count — click the chip to hide/show it (privacy), persisted.
+let _viewersHidden = false, _viewerCount = 0;
+try { _viewersHidden = localStorage.getItem('ne_hide_viewers') === '1'; } catch (e) {}
+function renderViewers() {
+  const n = el('tb-viewers-n'); if (!n) return;
+  n.textContent = _viewersHidden ? '•••' : (_viewerCount || 0).toLocaleString();
+}
+el('tb-viewers')?.addEventListener('click', () => {
+  _viewersHidden = !_viewersHidden;
+  try { localStorage.setItem('ne_hide_viewers', _viewersHidden ? '1' : '0'); } catch (e) {}
+  renderViewers();
+});
+renderViewers();
+
+// Top-bar ad-controls dropdown — play a Twitch commercial / snooze the next ad.
+function closeAdMenu() { const m = el('tb-ad-menu'); if (m) m.style.display = 'none'; }
+el('tb-adtimer')?.addEventListener('click', (e) => {
+  e.stopPropagation();
+  const m = el('tb-ad-menu'); if (m) m.style.display = (m.style.display === 'none' || !m.style.display) ? 'flex' : 'none';
+});
+document.addEventListener('click', (e) => {
+  const m = el('tb-ad-menu');
+  if (m && m.style.display === 'flex' && !el('tb-ad-area')?.contains(e.target)) m.style.display = 'none';
+});
+// Pre-flight "Go Live" checklist is hover-driven (CSS) — the checkmark icon next to the
+// connection bars; no click toggle needed.
+async function _adPost(url, body, okMsg, color) {
+  closeAdMenu();
+  try {
+    const opts = { method: 'POST' };
+    if (body) { opts.headers = { 'Content-Type': 'application/json' }; opts.body = JSON.stringify(body); }
+    const r = await fetch('http://localhost:3000' + url, opts);
+    const j = await r.json().catch(() => ({}));
+    if (r.ok && j.success) showToast(okMsg, color, 4000);
+    else showToast('Twitch: ' + (j.error || 'request failed'), '#c53030', 5000);
+  } catch (err) { showToast('Twitch request failed: ' + err.message, '#c53030', 5000); }
+}
+let _adLocalTimer = null;
+el('tb-ad-play')?.addEventListener('click', () => {
+  if (!adsAreEnabled()) { showToast('Ads are turned off', '#c53030', 3000); closeAdMenu(); return; }
+  const sel = el('tb-ad-length'); const length = parseInt(sel?.value) || 30;
+  const label = (sel && sel.selectedOptions[0]) ? sel.selectedOptions[0].textContent : (length + 's');
+  // Start a client-side countdown immediately so the chip updates without waiting for EventSub.
+  // The EventSub twitch_ad_break handler will overwrite _adState with the accurate endsAt if it fires.
+  _adState.adBreak = true;
+  _adState.adBreakEndsAt = Date.now() + length * 1000;
+  renderAdChip();
+  if (_adLocalTimer) clearTimeout(_adLocalTimer);
+  _adLocalTimer = setTimeout(() => { _adLocalTimer = null; if (_adState.adBreak && Date.now() >= _adState.adBreakEndsAt - 2000) { _adState.adBreak = false; _adState.adBreakEndsAt = 0; renderAdChip(); } }, (length + 5) * 1000);
+  _adPost('/api/twitch/ad/run', { length }, `Running a ${label} Twitch ad break`, '#9147ff');
+});
+el('tb-ad-snooze')?.addEventListener('click', () => {
+  _adPost('/api/twitch/ad/snooze', null, 'Snoozed the next Twitch ad', '#4ade80');
+});
+
+// Ads on/off — server-backed gate (state.twitch.adsEnabled). When off, runCommercial is blocked
+// server-side, the Play button is disabled, and the chip shows "OFF". Synced from broadcast state.
+// During the 1.2s debounce window after a toggle we read the checkbox directly so the chip
+// responds instantly without waiting for the server round-trip.
+function adsAreEnabled() {
+  if (Date.now() - _adsToggleAt <= 1200) { const cbx = el('tb-ad-enabled'); if (cbx) return cbx.checked; }
+  return !(currentState && currentState.twitch && currentState.twitch.adsEnabled === false);
+}
+let _adsToggleAt = 0;
+el('tb-ad-enabled')?.addEventListener('change', function () {
+  _adsToggleAt = Date.now();
+  fetch('http://localhost:3000/api/twitch/ad/enabled', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: this.checked }) })
+    .then((r) => r.json()).then((j) => { if (!j || !j.success) showToast('Ads toggle failed: ' + ((j && j.error) || 'error'), '#c53030', 4000); }).catch(() => {});
+  renderAdChip();
+});
+
 // Top-bar Twitch ad chip — priority: live ad break > pre-roll free time > next-ad countdown.
 // Driven off stored deadlines so a 1s ticker keeps the countdown smooth between 30s polls.
-const _adState = { adBreak: false, prerollUntil: 0, nextAdAt: 0 };
+const _adState = { adBreak: false, adBreakEndsAt: 0, prerollUntil: 0, nextAdAt: 0 };
 function _adFmt(s) { const m = Math.floor(s / 60); return m + ':' + (s % 60).toString().padStart(2, '0'); }
 function renderAdChip() {
+  const on = adsAreEnabled();
+  const cbx = el('tb-ad-enabled'); if (cbx && Date.now() - _adsToggleAt > 1200) cbx.checked = on;
+  const playBtn = el('tb-ad-play'); if (playBtn) { playBtn.disabled = !on; playBtn.style.opacity = on ? '' : '.5'; playBtn.style.cursor = on ? '' : 'not-allowed'; }
   const chip = el('tb-adtimer'), n = el('tb-adtimer-n'), lbl = el('tb-adtimer-lbl');
   if (!chip || !n) return;
   const now = Date.now();
   chip.classList.remove('preroll-off', 'ad-live'); chip.style.color = '';
-  if (_adState.adBreak) { n.textContent = 'LIVE'; if (lbl) lbl.textContent = 'Ad Break'; chip.classList.add('ad-live'); chip.style.opacity = '1'; return; }
+  if (!on) { n.textContent = 'OFF'; if (lbl) lbl.textContent = 'Ads'; chip.style.opacity = '0.5'; return; }
+  if (_adState.adBreak) { const rem = _adState.adBreakEndsAt ? Math.max(0, Math.ceil((_adState.adBreakEndsAt - now) / 1000)) : 0; n.textContent = rem > 0 ? _adFmt(rem) : 'LIVE'; if (lbl) lbl.textContent = 'Ad Break'; chip.classList.add('ad-live'); chip.style.opacity = '1'; return; }
   const prerollRem = Math.ceil((_adState.prerollUntil - now) / 1000);
   if (prerollRem > 0) { n.textContent = _adFmt(prerollRem); if (lbl) lbl.textContent = 'Pre-roll Off'; chip.classList.add('preroll-off'); chip.style.opacity = '1'; return; }
   const adRem = Math.ceil((_adState.nextAdAt - now) / 1000);
@@ -21984,7 +27641,8 @@ function onTwitchStreamState(msg) {
   const viewersEl = el('tb-viewers');
   const viewersNEl = el('tb-viewers-n');
   if (viewersEl && viewersNEl && d.stream) {
-    viewersNEl.textContent = (d.stream.viewerCount || 0).toLocaleString();
+    _viewerCount = d.stream.viewerCount || 0;
+    renderViewers();
     viewersEl.style.opacity = d.stream.isLive ? '1' : '0.6';
   }
 
@@ -22170,4 +27828,757 @@ el('btn-chat-send')?.addEventListener('click', async () => {
   });
 })();
 
+// ════════════════════════════════════════════════════════════════ SOCIAL TAB ══
+
+// ── State ─────────────────────────────────────────────────────────────────────
+let _socialClip        = null;
+let _socialSchedule    = [];
+let _calYear = null, _calMonth = null;
+let _allTwitchClips    = [];   // cached for client-side sort
+
+// ── Main sub-tab switching ─────────────────────────────────────────────────────
+document.querySelectorAll('.social-sub-tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.social-sub-tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.social-sub-panel').forEach(p => p.classList.remove('active'));
+    btn.classList.add('active');
+    const panel = el('social-panel-' + btn.dataset.stab);
+    if (panel) panel.classList.add('active');
+    if (btn.dataset.stab === 'calendar') _renderSocialCalendar();
+  });
+});
+
+// ── Clip source tab switching (Twitch / Local) ─────────────────────────────────
+document.querySelectorAll('.clip-src-tab').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.clip-src-tab').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.clip-src-panel').forEach(p => p.classList.remove('active'));
+    btn.classList.add('active');
+    const panel = el('clip-src-' + btn.dataset.csrc);
+    if (panel) panel.classList.add('active');
+  });
+});
+
+// ── Sort control ──────────────────────────────────────────────────────────────
+el('social-clip-sort')?.addEventListener('change', () => _renderTwitchClipCards(_allTwitchClips));
+
+el('tab-social')?.addEventListener('click', () => {
+  _loadSocialConnections();
+  _loadSocialSchedule();
+  _loadTwitchClips();
+  _loadLocalClips();
+});
+
+// ── Description / caption templates ───────────────────────────────────────────
+const _TMPL_YT = 'ne_social_yt_template';
+const _TMPL_TW = 'ne_social_tw_template';
+function _getSocialTemplate(key) { return localStorage.getItem(key) || ''; }
+function _setSocialTemplate(key, val) { localStorage.setItem(key, val); showToast('Template saved'); }
+
+el('btn-yt-save-template')?.addEventListener('click', () => {
+  _setSocialTemplate(_TMPL_YT, el('social-yt-desc')?.value || '');
+});
+el('btn-tw-save-template')?.addEventListener('click', () => {
+  _setSocialTemplate(_TMPL_TW, el('social-tw-caption')?.value || '');
+});
+
+// ── Platform connections ───────────────────────────────────────────────────────
+async function _loadSocialConnections() {
+  try {
+    const r = await fetch('http://localhost:3000/api/social/connections');
+    const data = await r.json();
+    _renderSocialConnections(data);
+  } catch {}
+}
+
+function _renderSocialConnections(data) {
+  const hint = el('social-setup-hint');
+  if (hint) hint.style.display = 'none'; // credentials bundled in production build
+  _renderConnCard('yt', 'youtube', data.youtube);
+  _renderConnCard('tw', 'twitter', data.twitter);
+  _setConnBadge('social-yt-badge', data.youtube);
+  _setConnBadge('social-tw-badge', data.twitter);
+}
+
+function _setConnBadge(id, info) {
+  const badge = el(id);
+  if (!badge) return;
+  if (info?.connected) {
+    badge.textContent = 'Connected'; badge.style.background = 'rgba(72,187,120,.15)'; badge.style.color = '#48bb78';
+  } else {
+    badge.textContent = info?.configured ? 'Not connected' : 'Not configured';
+    badge.style.background = 'rgba(255,255,255,.08)'; badge.style.color = 'var(--muted)';
+  }
+}
+
+function _renderConnCard(prefix, platform, info) {
+  const pill   = el('social-conn-' + (prefix === 'yt' ? 'youtube' : 'twitter'));
+  const status = el('social-' + prefix + '-status');
+  const action = el('social-' + prefix + '-action');
+  if (!status || !action) return;
+  if (pill) pill.classList.toggle('connected', !!info?.connected);
+  if (info?.connected) {
+    status.textContent = 'Connected'; status.style.color = '#48bb78';
+    action.innerHTML = `<button class="btn btn-ghost btn-xs" onclick="_disconnectSocial('${platform}')">Disconnect</button>`;
+  } else if (info?.configured) {
+    status.textContent = 'Not connected'; status.style.color = 'var(--warn,#f59e0b)';
+    action.innerHTML = `<button class="btn btn-primary btn-xs" onclick="_connectSocial('${platform}')">Connect</button>`;
+  } else {
+    status.textContent = 'Not configured'; status.style.color = 'var(--muted)';
+    action.innerHTML = '<span style="font-size:10px;color:var(--muted);">Add keys to .env.local</span>';
+  }
+}
+
+async function _connectSocial(platform) {
+  try {
+    const r = await fetch('http://localhost:3000/api/social/auth/' + platform);
+    const { url, error } = await r.json();
+    if (error) return showToast(error, 'error');
+    // Try Electron shell first, fall back to popup
+    try { window.require('electron').shell.openExternal(url); }
+    catch { window.open(url, '_blank', 'width=560,height=660,noopener'); }
+  } catch (e) { showToast('Could not start auth: ' + e.message, 'error'); }
+}
+
+async function _disconnectSocial(platform) {
+  try {
+    await fetch('http://localhost:3000/api/social/disconnect/' + platform, { method: 'POST' });
+    showToast(platform + ' disconnected');
+    _loadSocialConnections();
+  } catch { showToast('Failed to disconnect', 'error'); }
+}
+
+// ── Twitch Clips ──────────────────────────────────────────────────────────────
+el('btn-load-twitch-clips')?.addEventListener('click', () => _loadTwitchClips());
+
+function _renderTwitchClipCards(clips) {
+  const grid = el('social-twitch-clips-grid');
+  const countEl = el('social-twitch-clip-count');
+  if (!grid) return;
+  const sort = el('social-clip-sort')?.value || 'recent';
+  const sorted = [...clips].sort((a, b) =>
+    sort === 'views'
+      ? (b.view_count || 0) - (a.view_count || 0)
+      : new Date(b.created_at || 0) - new Date(a.created_at || 0)
+  );
+  if (countEl) countEl.textContent = sorted.length ? sorted.length + ' clips' : '';
+  grid.innerHTML = '';
+  sorted.forEach(clip => {
+    const views   = clip.view_count ? clip.view_count.toLocaleString() + ' views' : '';
+    const date    = clip.created_at ? new Date(clip.created_at).toLocaleDateString() : '';
+    const clipper = clip.creator_name || '';
+    const card = document.createElement('div');
+    card.className = 'social-clip-card';
+    card.innerHTML = `
+      <img class="social-clip-thumb" src="${clip.thumbnail_url || ''}" alt="" loading="lazy">
+      <div class="social-clip-card-body">
+        <div class="social-clip-title" title="${(clip.title||'').replace(/"/g,'&quot;')}">${clip.title || 'Untitled'}</div>
+        <div class="social-clip-meta"><span>${views}</span><span>${date}</span></div>
+        ${clipper ? '<div class="social-clip-creator">by ' + clipper + '</div>' : ''}
+        <button class="btn btn-primary btn-xs" style="width:100%;">Select</button>
+        <button class="btn btn-ghost btn-xs" style="width:100%;margin-top:4px;" data-dl>Download</button>
+      </div>`;
+    card.querySelector('.btn-primary').addEventListener('click', e => {
+      e.stopPropagation();
+      _selectClip({ type: 'twitch', title: clip.title, thumbnailUrl: clip.thumbnail_url, clipVideoUrl: clip._videoUrl, clipUrl: clip.url, duration: clip.duration, viewCount: clip.view_count });
+    });
+    card.querySelector('[data-dl]').addEventListener('click', async e => {
+      e.stopPropagation();
+      const dlBtn = e.currentTarget;
+      dlBtn.disabled = true;
+      dlBtn.textContent = 'Downloading…';
+      try {
+        const r = await fetch('http://localhost:3000/api/social/clip/download', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ clipUrl: clip.url, thumbnailUrl: clip.thumbnail_url, title: clip.title })
+        });
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.error || 'Download failed');
+        showToast('Clip saved to Local library', 'success');
+        dlBtn.textContent = 'Saved';
+        dlBtn.style.color = '#48bb78';
+        _loadLocalClips();
+      } catch (err) {
+        showToast('Download failed: ' + err.message, 'error');
+        dlBtn.textContent = 'Download';
+        dlBtn.disabled = false;
+      }
+    });
+    grid.appendChild(card);
+  });
+  if (!sorted.length) grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:32px;color:var(--muted);font-size:13px;">No clips found. Make sure Twitch is connected.</div>';
+}
+
+// Fetch all Twitch clips (all creators) — auto-paginate until exhausted, then render.
+let _twitchClipsLoading = false;
+async function _loadTwitchClips() {
+  if (_twitchClipsLoading) return;
+  _twitchClipsLoading = true;
+  const grid = el('social-twitch-clips-grid');
+  const countEl = el('social-twitch-clip-count');
+  if (!grid) { _twitchClipsLoading = false; return; }
+  grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:32px;color:var(--muted);font-size:13px;">Loading…</div>';
+  if (countEl) countEl.textContent = '';
+
+  const collected = [];
+  let cursor = null;
+  let errorMsg = null;
+
+  try {
+    while (true) {
+      const url = 'http://localhost:3000/api/twitch/clips' + (cursor ? '?cursor=' + encodeURIComponent(cursor) : '');
+      const { clips, cursor: next, error } = await fetch(url).then(r => r.json());
+      if (error && !clips?.length) { errorMsg = error; break; }
+      collected.push(...(clips || []));
+      cursor = next || null;
+      if (!cursor) break;
+    }
+  } catch (e) {
+    errorMsg = e.message;
+  }
+
+  _allTwitchClips = collected;
+  _twitchClipsLoading = false;
+
+  if (errorMsg && !collected.length) {
+    grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:32px;color:var(--muted);font-size:13px;">' + errorMsg + '</div>';
+    return;
+  }
+  _renderTwitchClipCards(collected);
+}
+
+// ── Local Clips ───────────────────────────────────────────────────────────────
+el('btn-load-local-clips')?.addEventListener('click', _loadLocalClips);
+
+async function _loadLocalClips() {
+  const list = el('social-local-clips-list');
+  if (!list) return;
+  try {
+    const r = await fetch('http://localhost:3000/api/clips');
+    const data = await r.json();
+    const clips = data.clips || data.library || [];
+    if (!clips.length) { list.innerHTML = '<div style="color:var(--muted);font-size:13px;padding:8px 0;">No clips in local library yet.</div>'; return; }
+    list.innerHTML = '';
+    clips.slice(0, 30).forEach(clip => {
+      const row = document.createElement('div');
+      row.className = 'social-local-row';
+      row.innerHTML = `
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;opacity:.4"><rect x="2" y="2" width="20" height="20" rx="2"/><polygon points="10 8 16 12 10 16 10 8" fill="currentColor" stroke="none"/></svg>
+        <span class="social-local-title">${clip.title || clip.filename || 'Clip'}</span>
+        <button class="btn btn-primary btn-xs">Schedule</button>`;
+      row.querySelector('button').addEventListener('click', () => _selectClip({ type: 'local', title: clip.title || clip.filename, clipPath: clip.path || clip.filePath, thumbnailUrl: null }));
+      list.appendChild(row);
+    });
+  } catch { if (list) list.innerHTML = '<div style="color:var(--muted);font-size:13px;padding:8px 0;">Could not load local clips.</div>'; }
+}
+
+// ── Composer ──────────────────────────────────────────────────────────────────
+function _selectClip(clip) {
+  _socialClip = clip;
+  document.querySelectorAll('.social-sub-tab-btn').forEach(b => b.classList.toggle('active', b.dataset.stab === 'composer'));
+  document.querySelectorAll('.social-sub-panel').forEach(p => p.classList.toggle('active', p.id === 'social-panel-composer'));
+  el('social-no-clip').style.display = 'none';
+  const preview = el('social-clip-preview');
+  if (preview) preview.style.display = '';
+  const titleEl = el('social-clip-preview-title');
+  if (titleEl) titleEl.textContent = clip.title || 'Untitled';
+  const metaEl = el('social-clip-preview-meta');
+  if (metaEl) metaEl.textContent = clip.type === 'twitch' ? 'Twitch Clip' + (clip.viewCount ? ' · ' + clip.viewCount.toLocaleString() + ' views' : '') : 'Local Clip';
+  const img = el('social-clip-thumb-img');
+  if (img) { img.src = clip.thumbnailUrl || ''; img.style.display = clip.thumbnailUrl ? '' : 'none'; }
+
+  // Wire up video editor for local clips
+  const videoWrap = el('social-clip-video-wrap');
+  const video = el('social-clip-video');
+  if (clip.type === 'local' && clip.clipPath && videoWrap && video) {
+    video.src = 'http://localhost:3000/api/clips/file?path=' + encodeURIComponent(clip.clipPath);
+    videoWrap.style.display = '';
+    video.onloadedmetadata = () => {
+      const dur = video.duration || 0;
+      const inSlider  = el('social-trim-in');
+      const outSlider = el('social-trim-out');
+      if (inSlider)  { inSlider.max  = dur; inSlider.value  = 0;   inSlider.step  = Math.max(0.1, dur / 1000); }
+      if (outSlider) { outSlider.max = dur; outSlider.value = dur; outSlider.step = Math.max(0.1, dur / 1000); }
+      _socialClip.trimIn  = 0;
+      _socialClip.trimOut = null;
+      _updateTrimDisplay();
+    };
+  } else {
+    if (videoWrap) videoWrap.style.display = 'none';
+    if (video) { video.src = ''; video.onloadedmetadata = null; }
+    if (_socialClip) { _socialClip.trimIn = 0; _socialClip.trimOut = null; }
+  }
+
+  const ytTitle = el('social-yt-title');
+  if (ytTitle) ytTitle.value = clip.title || '';
+  const ytDesc = el('social-yt-desc');
+  if (ytDesc) ytDesc.value = _getSocialTemplate(_TMPL_YT);
+  const twCaption = el('social-tw-caption');
+  if (twCaption) {
+    twCaption.value = _getSocialTemplate(_TMPL_TW);
+    const ct = el('social-tw-charcount'); if (ct) ct.textContent = twCaption.value.length + '/280';
+  }
+  const brandText = el('social-branding-text');
+  if (brandText && !brandText.value) brandText.value = clip.title || '';
+  _updateSocialSubmitBtn();
+}
+
+function _updateTrimDisplay() {
+  const video  = el('social-clip-video');
+  const inEl   = el('social-trim-in');
+  const outEl  = el('social-trim-out');
+  const dispEl = el('social-trim-display');
+  if (!inEl || !outEl) return;
+  const inVal  = parseFloat(inEl.value) || 0;
+  const outVal = parseFloat(outEl.value) || (video?.duration || 0);
+  const dur    = Math.max(0, outVal - inVal);
+  const fmt    = s => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+  if (dispEl) dispEl.textContent = `${fmt(inVal)} – ${fmt(outVal)} (${dur.toFixed(1)}s)`;
+  if (_socialClip) {
+    _socialClip.trimIn  = inVal;
+    const vidDur = video?.duration || 0;
+    _socialClip.trimOut = (vidDur > 0 && outVal < vidDur - 0.5) ? outVal : null;
+  }
+}
+
+el('social-trim-in')?.addEventListener('input', function () {
+  const outVal = parseFloat(el('social-trim-out')?.value || 100);
+  if (parseFloat(this.value) >= outVal - 0.2) this.value = Math.max(0, outVal - 0.2);
+  const video = el('social-clip-video');
+  if (video) video.currentTime = parseFloat(this.value);
+  _updateTrimDisplay();
+});
+
+el('social-trim-out')?.addEventListener('input', function () {
+  const inVal = parseFloat(el('social-trim-in')?.value || 0);
+  if (parseFloat(this.value) <= inVal + 0.2) this.value = inVal + 0.2;
+  const video = el('social-clip-video');
+  if (video) video.currentTime = parseFloat(this.value);
+  _updateTrimDisplay();
+});
+
+// ── Branding template selector ────────────────────────────────────────────────
+document.querySelectorAll('.branding-tmpl').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.branding-tmpl').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    const isNone = btn.dataset.tmpl === 'none';
+    const opts = el('social-branding-opts');
+    if (opts) opts.style.display = isNone ? 'none' : '';
+    const summary = el('social-branding-summary');
+    if (summary) summary.textContent = isNone ? 'No intro / outro' : btn.textContent + ' template';
+  });
+});
+
+function clearSocialClip() {
+  _socialClip = null;
+  const video = el('social-clip-video');
+  if (video) { video.src = ''; video.onloadedmetadata = null; }
+  const videoWrap = el('social-clip-video-wrap');
+  if (videoWrap) videoWrap.style.display = 'none';
+  el('social-no-clip').style.display = '';
+  const p = el('social-clip-preview'); if (p) p.style.display = 'none';
+  _updateSocialSubmitBtn();
+}
+
+['youtube', 'twitter'].forEach(p => {
+  const cbId   = p === 'youtube' ? 'social-enable-youtube' : 'social-enable-twitter';
+  const bodyId = p === 'youtube' ? 'social-yt-body' : 'social-tw-body';
+  el(cbId)?.addEventListener('change', function() {
+    el(bodyId)?.classList.toggle('open', this.checked);
+    _updateSocialSubmitBtn();
+  });
+});
+
+el('social-tw-caption')?.addEventListener('input', function() {
+  const ct = el('social-tw-charcount'); if (ct) ct.textContent = this.value.length + '/280';
+});
+
+document.querySelectorAll('input[name="social-when"]').forEach(r => {
+  r.addEventListener('change', function() {
+    const picker = el('social-dt-picker'); if (picker) picker.style.display = this.value === 'schedule' ? '' : 'none';
+    _updateSocialSubmitBtn();
+  });
+});
+
+(function() {
+  const dt = el('social-schedule-dt'); if (!dt) return;
+  const d = new Date(Date.now() + 5 * 60000);
+  dt.min = d.toISOString().slice(0, 16); dt.value = d.toISOString().slice(0, 16);
+})();
+
+function _updateSocialSubmitBtn() {
+  const btn = el('btn-social-submit'); if (!btn) return;
+  const ytOn = el('social-enable-youtube')?.checked;
+  const twOn = el('social-enable-twitter')?.checked;
+  const plats = [ytOn && 'YouTube', twOn && 'Twitter'].filter(Boolean);
+  const when  = document.querySelector('input[name="social-when"]:checked')?.value;
+  if (!_socialClip)    { btn.textContent = 'Select a clip first';           btn.disabled = true;  return; }
+  if (!plats.length)   { btn.textContent = 'Select at least one platform';  btn.disabled = true;  return; }
+  btn.disabled = false;
+  btn.textContent = (when === 'schedule' ? 'Schedule to ' : 'Post Now to ') + plats.join(' + ');
+}
+
+el('btn-social-submit')?.addEventListener('click', async () => {
+  if (!_socialClip) return showToast('No clip selected', 'error');
+  const platforms = [];
+  if (el('social-enable-youtube')?.checked) platforms.push('youtube');
+  if (el('social-enable-twitter')?.checked) platforms.push('twitter');
+  if (!platforms.length) return showToast('Select at least one platform', 'error');
+  const when = document.querySelector('input[name="social-when"]:checked')?.value;
+  const dtVal = el('social-schedule-dt')?.value;
+  const scheduledAt = when === 'schedule' && dtVal ? new Date(dtVal).getTime() : null;
+  if (when === 'schedule' && !scheduledAt) return showToast('Pick a date and time', 'error');
+  const brandingTmpl = document.querySelector('.branding-tmpl.active')?.dataset.tmpl || 'none';
+  const hasBranding = brandingTmpl !== 'none';
+  const post = {
+    clipType: _socialClip.type, clipVideoUrl: _socialClip.clipVideoUrl || null, clipPath: _socialClip.clipPath || null,
+    thumbnailUrl: _socialClip.thumbnailUrl || null, clipUrl: _socialClip.clipUrl || null,
+    title: el('social-yt-title')?.value || _socialClip.title || 'Clip',
+    ytVisibility: el('social-yt-visibility')?.value || 'public',
+    isShort: !!el('social-yt-shorts')?.checked,
+    captions: { youtube: el('social-yt-desc')?.value || '', twitter: el('social-tw-caption')?.value || '' },
+    trimIn:  _socialClip.trimIn  || 0,
+    trimOut: _socialClip.trimOut || null,
+    intro: hasBranding ? {
+      template:  brandingTmpl,
+      text:      el('social-branding-text')?.value     || el('social-yt-title')?.value || '',
+      color:     el('social-branding-color')?.value    || '#7c3aed',
+      duration:  parseFloat(el('social-branding-duration')?.value || '2'),
+      outro:     !!el('social-branding-outro')?.checked,
+      vertical:  !!el('social-branding-vertical')?.checked,
+    } : null,
+    platforms, scheduledAt
+  };
+  const btn = el('btn-social-submit');
+  const status = el('social-submit-status');
+  btn.disabled = true;
+  if (status) status.textContent = when === 'now' ? 'Publishing...' : 'Saving...';
+  try {
+    const endpoint = when === 'now' ? '/api/social/publish-now' : '/api/social/schedule';
+    const r = await fetch('http://localhost:3000' + endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(post) });
+    const data = await r.json();
+    if (data.error) throw new Error(data.error);
+    if (when === 'now') {
+      const lines = Object.entries(data.platforms || {}).map(([p, r]) => r.url ? p + ': ' + r.url : p + ': ' + (r.error || 'failed'));
+      showToast('Published!');
+      if (status) status.textContent = lines.join('\n') || 'Done';
+    } else {
+      const hasYT = platforms.includes('youtube');
+      const hasTW = platforms.includes('twitter');
+      const note = hasYT ? (hasTW ? 'Video uploading to YouTube now (will go live at scheduled time). Twitter will post at ' : 'Video uploading to YouTube now, goes live at ') + new Date(scheduledAt).toLocaleString() : 'Scheduled for ' + new Date(scheduledAt).toLocaleString();
+      showToast('Scheduled!');
+      if (status) status.textContent = note;
+      _loadSocialSchedule();
+    }
+  } catch (e) {
+    showToast('Error: ' + e.message, 'error');
+    if (status) status.textContent = 'Error: ' + e.message;
+  } finally { btn.disabled = false; _updateSocialSubmitBtn(); }
+});
+
+// ── Calendar ──────────────────────────────────────────────────────────────────
+async function _loadSocialSchedule() {
+  try {
+    const r = await fetch('http://localhost:3000/api/social/schedule');
+    _socialSchedule = (await r.json()).schedule || [];
+    _renderSocialCalendar();
+    _renderScheduledList();
+  } catch {}
+}
+
+function _renderSocialCalendar() {
+  const now = new Date();
+  if (_calYear === null) { _calYear = now.getFullYear(); _calMonth = now.getMonth(); }
+  const label = el('social-cal-month');
+  if (label) label.textContent = new Date(_calYear, _calMonth, 1).toLocaleString('default', { month: 'long', year: 'numeric' });
+  const grid = el('social-cal-grid'); if (!grid) return;
+  const firstDay    = new Date(_calYear, _calMonth, 1).getDay();
+  const daysInMonth = new Date(_calYear, _calMonth + 1, 0).getDate();
+  const today = new Date();
+  const byDay = {};
+  _socialSchedule.filter(p => p.status === 'scheduled' && p.scheduledAt).forEach(p => {
+    const d = new Date(p.scheduledAt);
+    if (d.getFullYear() !== _calYear || d.getMonth() !== _calMonth) return;
+    const day = d.getDate(); if (!byDay[day]) byDay[day] = []; byDay[day].push(p);
+  });
+  let html = ['S','M','T','W','T','F','S'].map(d => `<div class="cal-hdr">${d}</div>`).join('');
+  for (let i = 0; i < firstDay; i++) html += '<div class="cal-cell empty"></div>';
+  for (let day = 1; day <= daysInMonth; day++) {
+    const isToday = today.getFullYear() === _calYear && today.getMonth() === _calMonth && today.getDate() === day;
+    const posts = byDay[day] || [];
+    const chips = posts.slice(0, 2).map(p => {
+      const cls = p.platforms?.includes('youtube') && p.platforms?.includes('twitter') ? 'both' : p.platforms?.includes('youtube') ? 'yt' : 'tw';
+      const lbl = cls === 'both' ? 'YT+X' : cls === 'yt' ? 'YT' : 'X';
+      return `<div class="cal-post-chip ${cls}" title="${(p.title||'').substring(0,40)}">${lbl}</div>`;
+    }).join('');
+    const more = posts.length > 2 ? `<div style="font-size:9px;color:var(--muted);">+${posts.length-2}</div>` : '';
+    html += `<div class="cal-cell${isToday ? ' today' : ''}"><div class="cal-day-num">${day}</div>${chips}${more}</div>`;
+  }
+  grid.innerHTML = html;
+}
+
+el('btn-cal-prev')?.addEventListener('click', () => { if (_calMonth-- === 0) { _calMonth = 11; _calYear--; } _renderSocialCalendar(); });
+el('btn-cal-next')?.addEventListener('click', () => { if (++_calMonth > 11) { _calMonth = 0; _calYear++; } _renderSocialCalendar(); });
+
+function _renderScheduledList() {
+  const list = el('social-sched-list'); if (!list) return;
+  const upcoming = _socialSchedule.filter(p => p.status === 'scheduled' && p.scheduledAt && p.scheduledAt > Date.now()).sort((a, b) => a.scheduledAt - b.scheduledAt).slice(0, 20);
+  const past     = _socialSchedule.filter(p => p.status === 'published').sort((a, b) => (b.publishedAt||0) - (a.publishedAt||0)).slice(0, 5);
+  if (!upcoming.length && !past.length) { list.innerHTML = '<div style="color:var(--muted);font-size:13px;">No posts scheduled.</div>'; return; }
+  list.innerHTML = '';
+  upcoming.forEach(post => {
+    const plats = (post.platforms||[]).map(p => p === 'youtube' ? 'YouTube' : 'Twitter').join(' + ');
+    const row = document.createElement('div'); row.className = 'sched-row';
+    row.innerHTML = `<div style="flex:1;min-width:0;"><div class="sched-title">${post.title||'Untitled'}</div><div class="sched-meta">${plats} · ${new Date(post.scheduledAt).toLocaleString()}</div></div><button class="btn btn-ghost btn-xs" onclick="_cancelSocialPost('${post.id}')">Cancel</button>`;
+    list.appendChild(row);
+  });
+  if (past.length) {
+    const div = document.createElement('div'); div.style.cssText = 'font-size:11px;color:var(--muted);letter-spacing:1px;text-transform:uppercase;margin:12px 0 6px;'; div.textContent = 'Recently Published'; list.appendChild(div);
+    past.forEach(post => {
+      const plats = (post.platforms||[]).map(p => p === 'youtube' ? 'YouTube' : 'Twitter').join(' + ');
+      const row = document.createElement('div'); row.className = 'sched-row';
+      row.innerHTML = `<div style="flex:1;min-width:0;"><div class="sched-title" style="opacity:.6;">${post.title||'Untitled'}</div><div class="sched-meta">${plats}${post.publishedAt ? ' · ' + new Date(post.publishedAt).toLocaleString() : ''}</div></div><span style="font-size:10px;color:#48bb78;font-weight:700;">Published</span>`;
+      list.appendChild(row);
+    });
+  }
+}
+
+async function _cancelSocialPost(id) {
+  try { await fetch('http://localhost:3000/api/social/schedule/' + id, { method: 'DELETE' }); showToast('Post cancelled'); _loadSocialSchedule(); }
+  catch { showToast('Failed to cancel', 'error'); }
+}
+
+// ── OBS Program Preview panel ──────────────────────────────────────────────
+(function () {
+  function _initObsPreview() {
+    const panel    = document.getElementById('obs-preview-panel');
+    const btn      = document.getElementById('btn-obs-preview');
+    const img      = document.getElementById('obs-prev-img');
+    const video    = document.getElementById('obs-prev-video');
+    const msg      = document.getElementById('obs-prev-msg');
+    const fpsBtn   = document.getElementById('obs-prev-fps');
+    const sceneEl  = document.getElementById('obs-prev-scene');
+    const pauseBtn = document.getElementById('obs-prev-pause');
+    const closeBtn = document.getElementById('obs-prev-close');
+    const dragHdr  = document.getElementById('obs-prev-drag');
+    const modeCam  = document.getElementById('obs-prev-mode-cam');
+    const modeScr  = document.getElementById('obs-prev-mode-scr');
+    if (!panel || !btn) return;
+
+    // ── State ──
+    let active  = false;
+    let mode    = 'cam';          // 'cam' | 'scr'
+    let paused  = false;
+    let pending = false;
+    let timer   = null;
+    let frameTs = 0;
+    let frameCount = 0;
+    let fpsTimer   = null;
+    let camStream  = null;
+    let blobUrl    = '';
+
+    // Screenshot fps options (ms between frames): 20fps/10fps/5fps/2fps
+    const FPS_OPTS = [50, 100, 200, 500];
+    const FPS_LBLS = ['20 fps', '10 fps', '5 fps', '2 fps'];
+    let fpsIdx = 1; // default 10fps
+
+    // ── Helpers ──
+    function setMsg(text) {
+      msg.textContent = text;
+      msg.classList.toggle('hidden', !text);
+    }
+
+    function setMode(m) {
+      mode = m;
+      modeCam.classList.toggle('active', m === 'cam');
+      modeScr.classList.toggle('active', m === 'scr');
+      fpsBtn.style.display  = m === 'scr' ? '' : 'none';
+      pauseBtn.style.display = m === 'scr' ? '' : 'none';
+      img.style.display   = m === 'scr' ? '' : 'none';
+      video.style.display = m === 'cam' ? '' : 'none';
+      localStorage.setItem('ne_obs_prev_mode', m);
+    }
+
+    // ── Screenshot mode ──
+    async function scrNext() {
+      if (!active || paused || pending || mode !== 'scr') return;
+      pending = true;
+      try {
+        const res = await fetch('http://localhost:3000/api/obs/screenshot?t=' + Date.now());
+        if (res.ok) {
+          const blob = await res.blob();
+          const url  = URL.createObjectURL(blob);
+          img.src = url;
+          if (blobUrl) URL.revokeObjectURL(blobUrl);
+          blobUrl = url;
+          frameCount++;
+          frameTs = Date.now();
+          setMsg('');
+        } else {
+          const body = await res.json().catch(() => ({}));
+          setMsg(body.error || ('Error ' + res.status));
+        }
+      } catch (e) {
+        setMsg('Server unreachable');
+      } finally {
+        pending = false;
+        if (active && !paused && mode === 'scr') timer = setTimeout(scrNext, FPS_OPTS[fpsIdx]);
+      }
+    }
+
+    // ── Camera mode ──
+    async function startCam() {
+      setMsg('Looking for OBS Virtual Camera...');
+      try {
+        // First enumerate to see if labels are available
+        let devices = await navigator.mediaDevices.enumerateDevices();
+        let obsDevice = devices.find(d => d.kind === 'videoinput' && /obs/i.test(d.label));
+
+        // If no labels yet, request temporary access to unlock them
+        if (!obsDevice && devices.some(d => d.kind === 'videoinput' && !d.label)) {
+          const tmp = await navigator.mediaDevices.getUserMedia({ video: true }).catch(() => null);
+          if (tmp) tmp.getTracks().forEach(t => t.stop());
+          devices = await navigator.mediaDevices.enumerateDevices();
+          obsDevice = devices.find(d => d.kind === 'videoinput' && /obs/i.test(d.label));
+        }
+
+        if (!obsDevice) {
+          setMsg('OBS Virtual Camera not found.\nEnable it in OBS → Tools → Start Virtual Camera, then switch back to CAM mode.');
+          return;
+        }
+
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { deviceId: { exact: obsDevice.deviceId }, width: 1920, height: 1080 },
+          audio: false,
+        });
+        camStream = stream;
+        video.srcObject = stream;
+        video.play().catch(() => {});
+        setMsg('');
+      } catch (e) {
+        setMsg('Camera error: ' + (e.message || e));
+      }
+    }
+
+    function stopCam() {
+      if (camStream) { camStream.getTracks().forEach(t => t.stop()); camStream = null; }
+      video.srcObject = null;
+    }
+
+    // ── FPS meter (screenshot mode only) ──
+    function startFpsMeter() {
+      fpsTimer = setInterval(() => {
+        if (!active || mode !== 'scr') return;
+        if (paused) { return; }
+        const age = Date.now() - frameTs;
+        const fps = age > 3000 ? 0 : frameCount;
+        fpsBtn.textContent = fps + ' fps';
+        frameCount = 0;
+      }, 1000);
+    }
+
+    // ── Open / close ──
+    function open() {
+      active = true;
+      panel.style.display = '';
+      btn.classList.add('active');
+      fpsBtn.textContent = FPS_LBLS[fpsIdx];
+      frameCount = 0; frameTs = Date.now();
+      if (mode === 'cam') {
+        startCam();
+      } else {
+        setMsg('Connecting...');
+        scrNext();
+        startFpsMeter();
+      }
+    }
+
+    function close() {
+      active = false;
+      clearTimeout(timer); clearInterval(fpsTimer);
+      stopCam();
+      panel.style.display = 'none';
+      btn.classList.remove('active');
+      img.src = '';
+      if (blobUrl) { URL.revokeObjectURL(blobUrl); blobUrl = ''; }
+      setMsg('Connect OBS to enable preview');
+    }
+
+    function switchMode(m) {
+      if (m === mode) return;
+      // Stop whichever is running
+      if (mode === 'cam') stopCam();
+      if (mode === 'scr') { clearTimeout(timer); clearInterval(fpsTimer); paused = false; }
+      setMode(m);
+      if (active) {
+        frameCount = 0; frameTs = Date.now();
+        if (m === 'cam') {
+          startCam();
+        } else {
+          setMsg('Connecting...');
+          scrNext();
+          startFpsMeter();
+        }
+      }
+    }
+
+    function togglePause() {
+      if (!active || mode !== 'scr') return;
+      paused = !paused;
+      panel.classList.toggle('paused', paused);
+      pauseBtn.innerHTML = paused ? '&#9654;' : '&#9646;&#9646;';
+      if (!paused) { frameCount = 0; frameTs = Date.now(); scrNext(); }
+    }
+
+    // ── Wire controls ──
+    btn.addEventListener('click', () => { if (active) close(); else open(); });
+    closeBtn.addEventListener('click', close);
+    pauseBtn.addEventListener('click', togglePause);
+    modeCam.addEventListener('click', () => switchMode('cam'));
+    modeScr.addEventListener('click', () => switchMode('scr'));
+
+    // FPS button cycles through fps options (screenshot mode only)
+    fpsBtn.addEventListener('click', () => {
+      fpsIdx = (fpsIdx + 1) % FPS_OPTS.length;
+      fpsBtn.textContent = FPS_LBLS[fpsIdx];
+      localStorage.setItem('ne_obs_prev_fps', fpsIdx);
+    });
+
+    // ── Restore saved prefs ──
+    const savedMode = localStorage.getItem('ne_obs_prev_mode') || 'cam';
+    const savedFps  = parseInt(localStorage.getItem('ne_obs_prev_fps')) || 1;
+    fpsIdx = Math.min(savedFps, FPS_OPTS.length - 1);
+    fpsBtn.textContent = FPS_LBLS[fpsIdx];
+    setMode(savedMode);
+
+    // ── Draggable ──
+    dragHdr.addEventListener('mousedown', (e) => {
+      if (e.target.closest('.obs-prev-btn, .obs-prev-modetab, .obs-prev-modetabs')) return;
+      const rect = panel.getBoundingClientRect();
+      const ox = e.clientX - rect.left, oy = e.clientY - rect.top;
+      function onMove(ev) {
+        let x = ev.clientX - ox, y = ev.clientY - oy;
+        x = Math.max(0, Math.min(window.innerWidth  - panel.offsetWidth,  x));
+        y = Math.max(0, Math.min(window.innerHeight - panel.offsetHeight, y));
+        panel.style.right = 'auto'; panel.style.bottom = 'auto';
+        panel.style.left = x + 'px'; panel.style.top = y + 'px';
+      }
+      function onUp() { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); }
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+    });
+
+    // ── Scene label (updated from full_state) ──
+    window._obsPreviewUpdateScene = (sceneName) => {
+      if (sceneEl) sceneEl.textContent = sceneName || '';
+    };
+  } // end _initObsPreview
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', _initObsPreview);
+  } else {
+    _initObsPreview();
+  }
+})();
 

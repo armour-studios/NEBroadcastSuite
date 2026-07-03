@@ -1,8 +1,14 @@
-/* ─── Reset & base ──────────────────────────────────────────────────────── */
+/* ─── Brand / custom fonts ───────────────────────────────────────────────── */
+/* Drop Industry .woff2/.otf files into assets/fonts/ and these activate automatically. */
+@font-face { font-family: 'Industry'; font-weight: 400; font-style: normal; src: local('Industry'), url('/assets/fonts/industry-400.woff2') format('woff2'), url('/assets/fonts/industry-400.otf') format('opentype'); font-display: swap; }
+@font-face { font-family: 'Industry'; font-weight: 700; font-style: normal; src: local('Industry Bold'), url('/assets/fonts/industry-700.woff2') format('woff2'), url('/assets/fonts/industry-700.otf') format('opentype'); font-display: swap; }
+@font-face { font-family: 'Industry'; font-weight: 900; font-style: normal; src: local('Industry Black'), url('/assets/fonts/industry-900.woff2') format('woff2'), url('/assets/fonts/industry-900.otf') format('opentype'); font-display: swap; }
+
+/* ─── Reset & base ───────────────────────────────────────────────────────── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 :root {
-  --main-font: 'Bourgeois', sans-serif;
+  --main-font: 'Industry', 'Bourgeois', sans-serif;
   /* Themeable accents (overlay "design"). Team blue/orange stay fixed for gameplay. */
   --accent: #055fdb;
   --accent-2: #e97139;
@@ -686,23 +692,31 @@ img.logo-on-dark {
   background: linear-gradient(90deg, rgba(5,95,219,0.95) 0%, rgba(9,17,28,0.95) 18%, rgba(9,17,28,0.95) 100%);
   border-top: 2px solid rgba(255,255,255,0.12);
 }
-/* "LIVE" style flag on the left edge */
-.ticker::before {
-  content: 'LIVE';
-  flex-shrink: 0;
-  align-self: stretch;
-  display: flex;
-  align-items: center;
-  padding: 0 18px;
-  font-family: var(--main-font);
-  font-weight: 700;
-  font-size: 18px;
-  letter-spacing: 3px;
-  color: #fff;
-  background: var(--accent-2);
-  position: relative;   /* sit ABOVE the scrolling track so the text is clipped at the LIVE box */
-  z-index: 2;
+/* LIVE badge — pulsing green circle + LIVE, left edge (shown only for the start.gg source) */
+.ticker-live {
+  flex-shrink: 0; align-self: stretch; display: none; align-items: center; gap: 10px; padding: 0 18px;
+  font-family: var(--main-font); font-weight: 800; font-size: 18px; letter-spacing: 3px; color: #04130a;
+  background: #22e06a; position: relative; z-index: 2;
 }
+.ticker.startgg .ticker-live { display: flex; }
+.tk-dot { width: 12px; height: 12px; border-radius: 50%; background: #04130a; animation: tk-pulse 1.2s ease-out infinite; }
+@keyframes tk-pulse { 0% { box-shadow: 0 0 0 0 rgba(4,19,10,.55); } 70% { box-shadow: 0 0 0 9px rgba(4,19,10,0); } 100% { box-shadow: 0 0 0 0 rgba(4,19,10,0); } }
+.tk-match { display: inline-flex; align-items: center; gap: 11px; }
+.tk-logo { height: 30px; width: 30px; object-fit: contain; }
+.tk-team { font-family: var(--main-font); font-weight: 700; font-size: 22px; color: #fff; text-transform: uppercase; letter-spacing: .02em; }
+.tk-score { font-family: var(--main-font); font-weight: 800; font-size: 22px; color: #22e06a; text-transform: uppercase; padding: 0 4px; font-variant-numeric: tabular-nums; }
+.tk-final { font-family: var(--main-font); font-weight: 800; font-size: 12px; color: #9aa3b0; letter-spacing: 2px; border: 1px solid rgba(255,255,255,.22); border-radius: 4px; padding: 2px 6px; }
+.tk-sep { color: rgba(255,255,255,.22); font-size: 21px; padding: 0 26px; }
+/* per-match LIVE/FINAL tags + sponsor + brand-themed accents (mirrors ticker.html) */
+.tk-stat { display: inline-flex; align-items: center; gap: 7px; font-family: var(--main-font); font-weight: 800; font-size: 13px; letter-spacing: 2px; border-radius: 4px; padding: 3px 8px; }
+.tk-live { color: #04130a; background: #22e06a; }
+.tk-live .tk-stat-dot { width: 8px; height: 8px; border-radius: 50%; background: #04130a; animation: tk-pulse2 1.2s ease-out infinite; }
+@keyframes tk-pulse2 { 0% { box-shadow: 0 0 0 0 rgba(4,19,10,.5); } 70% { box-shadow: 0 0 0 6px rgba(4,19,10,0); } 100% { box-shadow: 0 0 0 0 rgba(4,19,10,0); } }
+.ticker-sponsor { flex-shrink: 0; align-self: center; height: 30px; margin: 0 16px; object-fit: contain; display: none; position: relative; z-index: 2; }
+.ticker.has-sponsor .ticker-sponsor { display: block; }
+.ticker { border-top-color: var(--brand, #055fdb); }
+.ticker .tk-score { color: var(--brand, #055fdb); }
+.ticker-segment { text-transform: uppercase; letter-spacing: .02em; }
 .ticker-track {
   display: inline-flex;
   white-space: nowrap;

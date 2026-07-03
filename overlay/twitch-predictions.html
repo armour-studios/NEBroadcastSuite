@@ -15,12 +15,12 @@
       position: relative;
     }
 
-    /* â”€â”€ Positioning anchor â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+    /* ── Positioning anchor ───────────────────────────────────────────────── */
     #pred-anchor {
       position: absolute;
       width: 880px;
       pointer-events: none;
-      /* Shared transition â€” enter (spring) */
+      /* Shared transition — enter (spring) */
       transition: transform 0.60s cubic-bezier(0.34, 1.48, 0.64, 1),
                   opacity   0.45s ease;
     }
@@ -79,7 +79,7 @@
     #pred-anchor.pos-right.visible  { transform: translateY(0); opacity: 1; }
     #pred-anchor.pos-right.hiding   { transform: translateY(16px); opacity: 0; }
 
-    /* â”€â”€ Card â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+    /* ── Card ────────────────────────────────────────────────────────────── */
     .pred-card {
       background: linear-gradient(160deg, rgba(13,11,20,0.97) 0%, rgba(18,14,30,0.97) 100%);
       border: 1px solid rgba(145, 70, 255, 0.35);
@@ -92,7 +92,7 @@
       position: relative;
     }
 
-    /* â”€â”€ Header strip â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+    /* ── Header strip ────────────────────────────────────────────────────── */
     .pred-header {
       display: flex;
       align-items: center;
@@ -168,14 +168,14 @@
     .pred-countdown.urgent { color: #f87171; animation: ct-pulse 0.75s ease-in-out infinite; }
     @keyframes ct-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
 
-    /* â”€â”€ Matchup body â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+    /* ── Matchup body ────────────────────────────────────────────────────── */
     .pred-body {
       display: grid;
       grid-template-columns: 1fr 48px 1fr;
       min-height: 108px;
     }
 
-    /* â”€â”€ Team panel â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+    /* ── Team panel ──────────────────────────────────────────────────────── */
     .pred-team {
       display: flex;
       align-items: center;
@@ -196,7 +196,7 @@
       opacity: 0;
       transition: opacity 0.6s;
     }
-    /* team-colour wash â€” overridden by #team-colors dynamic style */
+    /* team-colour wash — overridden by #team-colors dynamic style */
     .pred-team.side-blue::before   { background: linear-gradient(90deg,  rgba(96,165,250,0.14) 0%, transparent 75%); }
     .pred-team.side-orange::before { background: linear-gradient(270deg, rgba(251,146,60,0.14) 0%, transparent 75%); }
     .pred-team.has-votes::before { opacity: 1; }
@@ -241,7 +241,7 @@
       line-height: 1;
       transition: color 0.55s;
     }
-    /* pct colours â€” overridden by #team-colors dynamic style */
+    /* pct colours — overridden by #team-colors dynamic style */
     .pred-team.side-blue   .team-pct { color: #60a5fa; }
     .pred-team.side-orange .team-pct { color: #fb923c; }
     .pred-team.winner      .team-pct { color: #4ade80; }  /* winner always green */
@@ -265,7 +265,7 @@
     }
     .pred-team.winner .team-winner-tag { display: block; }
 
-    /* â”€â”€ VS column â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+    /* ── VS column ───────────────────────────────────────────────────────── */
     .pred-vs {
       display: flex;
       align-items: center;
@@ -291,7 +291,7 @@
       z-index: 1;
     }
 
-    /* â”€â”€ Vote split bar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+    /* ── Vote split bar ──────────────────────────────────────────────────── */
     .pred-bar {
       height: 7px;
       display: flex;
@@ -308,7 +308,7 @@
       flex: 1;
     }
 
-    /* â”€â”€ Footer â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+    /* ── Footer ──────────────────────────────────────────────────────────── */
     .pred-footer {
       padding: 6px 20px;
       border-top: 1px solid rgba(255,255,255,0.04);
@@ -322,7 +322,7 @@
       font-variant-numeric: tabular-nums;
     }
 
-    /* â”€â”€ Resolved winner body â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+    /* ── Resolved winner body ────────────────────────────────────────────── */
     #resolved-body {
       display: none;
       align-items: center;
@@ -409,9 +409,9 @@
           <div class="team-logo-ph"></div>
         </div>
         <div class="team-info">
-          <div class="team-winner-tag">ðŸ† Winner</div>
-          <div class="team-name" id="name-blue">â€”</div>
-          <div class="team-pct"  id="pct-blue">â€”</div>
+          <div class="team-winner-tag">Winner</div>
+          <div class="team-name" id="name-blue">—</div>
+          <div class="team-pct"  id="pct-blue">—</div>
           <div class="team-pts"  id="pts-blue"></div>
         </div>
       </div>
@@ -425,9 +425,9 @@
           <div class="team-logo-ph"></div>
         </div>
         <div class="team-info">
-          <div class="team-winner-tag">ðŸ† Winner</div>
-          <div class="team-name" id="name-orange">â€”</div>
-          <div class="team-pct"  id="pct-orange">â€”</div>
+          <div class="team-winner-tag">Winner</div>
+          <div class="team-name" id="name-orange">—</div>
+          <div class="team-pct"  id="pct-orange">—</div>
           <div class="team-pts"  id="pts-orange"></div>
         </div>
       </div>
@@ -442,14 +442,14 @@
 
     <!-- footer -->
     <div class="pred-footer">
-      <span class="pred-footer-text" id="pred-footer">Awaiting votesâ€¦</span>
+      <span class="pred-footer-text" id="pred-footer">Awaiting votes…</span>
     </div>
 
   </div><!-- /pred-card -->
 </div><!-- /pred-anchor -->
 
 <script>
-  // â”€â”€ Params â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Params ──────────────────────────────────────────────────────────────────
   const params   = new URLSearchParams(location.search);
   const posStr   = (params.get('pos') || params.get('position') || 'bottom').toLowerCase();
   // URL ?loop=N overrides the state setting; use it when you need per-source control.
@@ -483,9 +483,9 @@
   let loopHideTimer   = null;
   let isVisible       = false;
   let isResolved      = false;
-  let forcedHidden    = false;  // producer force-hide (overlayHidden) â€” show/hide during a game
+  let forcedHidden    = false;  // producer force-hide (overlayHidden) — show/hide during a game
 
-  // â”€â”€ WebSocket â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── WebSocket ───────────────────────────────────────────────────────────────
   function connect() {
     const ws = new WebSocket('ws://localhost:3001');
     ws.onopen    = () => ws.send(JSON.stringify({ type: 'request_state' }));
@@ -496,13 +496,14 @@
       } catch (_) {}
     };
     ws.onclose = () => setTimeout(connect, 800);
+    ws.onerror = () => { try { ws.close(); } catch {} };
   }
 
   function applyState(state) {
     lastFullState = state;
     // Game integration: hide the card on stream without ending the prediction.
-    //   â€¢ overlayHidden  â†’ producer force-hide (manual show/hide)
-    //   â€¢ hideInReplay   â†’ auto-hide while a Rocket League goal replay is playing
+    //   • overlayHidden  → producer force-hide (manual show/hide)
+    //   • hideInReplay   → auto-hide while a Rocket League goal replay is playing
     const ps = state?.twitch?.predictions?.settings || {};
     const replayActive = !!state?.inReplay || state?.view === 'goal';
     if (ps.overlayHidden || (ps.hideInReplay && replayActive)) {
@@ -511,7 +512,7 @@
       if (isVisible) doHide();
       return;
     }
-    if (forcedHidden) { forcedHidden = false; activePredId = null; }  // condition cleared â†’ force a fresh re-show
+    if (forcedHidden) { forcedHidden = false; activePredId = null; }  // condition cleared → force a fresh re-show
     let pred = state?.twitch?.predictions?.current;
     // Discard stale active predictions (server restart left one in state)
     if (pred && pred.state !== 'RESOLVED' && pred.state !== 'LOCKED') {
@@ -530,13 +531,13 @@
     }
   }
 
-  // â”€â”€ Show / Update â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Show / Update ────────────────────────────────────────────────────────────
   function showOrUpdatePrediction(pred, state) {
     const nowResolved = pred.state === 'RESOLVED';
     const wasResolved = isResolved;
     isResolved = nowResolved;
 
-    // New prediction (different id) â†’ full reset
+    // New prediction (different id) → full reset
     if (pred.id !== activePredId) {
       clearAllTimers();
       activePredId = pred.id;
@@ -551,10 +552,10 @@
       return;
     }
 
-    // Same prediction â€” just update numbers/state
+    // Same prediction — just update numbers/state
     renderCard(pred, state);
 
-    // Resolved just arrived (transition from active â†’ resolved)
+    // Resolved just arrived (transition from active → resolved)
     if (nowResolved && !wasResolved) {
       clearLoopTimers();
       if (!isVisible) doShow();   // make sure it's visible before showing splash
@@ -638,14 +639,14 @@
     const predictors = outcomes.reduce((s, o) => s + (o.users || 0), 0);
     document.getElementById('pred-footer').textContent =
       total > 0
-        ? `${fmt(total)} pts Â· ${predictors || 'â€”'} predictors`
-        : 'Awaiting votesâ€¦';
+        ? `${fmt(total)} pts · ${predictors || '—'} predictors`
+        : 'Awaiting votes…';
 
     startCountdown(pred.endsAt, resolved || locked);
   }
 
   function renderTeam(side, outcome, pct, state, winningId) {
-    document.getElementById('name-' + side).textContent = outcome.title || 'â€”';
+    document.getElementById('name-' + side).textContent = outcome.title || '—';
     document.getElementById('pct-'  + side).textContent = pct + '%';
     document.getElementById('pts-'  + side).textContent = outcome.votes
       ? fmt(outcome.votes) + ' pts'
@@ -683,7 +684,7 @@
     return null;
   }
 
-  // â”€â”€ Winner flow â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Winner flow ──────────────────────────────────────────────────────────────
   function handleResolved(pred, state) {
     const outcomes = pred.outcomes || [];
     const o0 = outcomes[0] || {};
@@ -702,7 +703,7 @@
     }, 16000);
   }
 
-  // â”€â”€ Visibility â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Visibility ───────────────────────────────────────────────────────────────
   function doShow() {
     if (isVisible) return;
     isVisible = true;
@@ -731,7 +732,7 @@
     }, 380);
   }
 
-  // â”€â”€ Loop cycling (when loop > 0 and prediction is active, not resolved) â”€â”€â”€â”€â”€â”€
+  // ── Loop cycling (when loop > 0 and prediction is active, not resolved) ──────
   function scheduleLoopHide() {
     clearLoopTimers();
     loopShowTimer = setTimeout(() => {
@@ -759,7 +760,7 @@
     if (countdownTimer) { clearInterval(countdownTimer);  countdownTimer = null; }
   }
 
-  // â”€â”€ Countdown â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Countdown ────────────────────────────────────────────────────────────────
   function startCountdown(endsAt, frozen) {
     if (countdownTimer) { clearInterval(countdownTimer); countdownTimer = null; }
     const el = document.getElementById('pred-countdown');
@@ -777,7 +778,7 @@
     countdownTimer = setInterval(tick, 1000);
   }
 
-  // â”€â”€ Winner splash â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Winner splash ────────────────────────────────────────────────────────────
   function showResolvedBody(name, side, state) {
     const pb = document.querySelector('.pred-body');
     if (pb) pb.style.display = 'none';
@@ -806,7 +807,7 @@
     }
   }
 
-  // â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Helpers ──────────────────────────────────────────────────────────────────
   function fmt(n) {
     n = Number(n) || 0;
     if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M';
@@ -814,7 +815,7 @@
     return n.toLocaleString();
   }
 
-  // â”€â”€ Preview mode (?preview=1) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Preview mode (?preview=1) ─────────────────────────────────────────────
   if (params.get('preview') === '1') {
     const ends = new Date(Date.now() + 4 * 60 * 1000).toISOString();
     const mockState = {

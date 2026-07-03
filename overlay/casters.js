@@ -1,4 +1,4 @@
-﻿/* â”€â”€â”€ Standalone caster scene â€” connects to the WS bridge on :3001 â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+﻿/* ─── Standalone caster scene — connects to the WS bridge on :3001 ────────── */
 
 const WS_URL = 'ws://localhost:3001';
 
@@ -27,8 +27,7 @@ function renderCasters(casters) {
   if (!stage || !listEl) return;
 
   const items = orderedCasters(casters);
-  const standalone = /\/casters\.html$/i.test(location.pathname);
-  const visible = standalone || (!!(casters && casters.visible) && items.length > 0);
+  const visible = !!(casters && casters.visible) && items.length > 0;
 
   stage.classList.toggle('show', visible);
 
@@ -47,9 +46,10 @@ function renderCasters(casters) {
 
     const slot = Number(c.slot);
     if (slot >= 1 && slot <= 4) {
+      const slotLabels = (casters && casters.slotLabels) || {};
       const badge = document.createElement('div');
       badge.className = 'caster-slot-badge';
-      badge.textContent = `Caster ${slot}`;
+      badge.textContent = slotLabels[slot] || `Caster ${slot}`;
       box.appendChild(badge);
     }
 
@@ -116,6 +116,7 @@ function connect() {
   };
 
   ws.onclose = () => setTimeout(connect, 800);
+  ws.onerror = () => { try { ws.close(); } catch {} };
 }
 
 connect();

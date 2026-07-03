@@ -420,34 +420,37 @@ function _viewportH() { return viewport.clientHeight || 860; }
 function _trackH()    { return track.scrollHeight || 860; }
 
 function animFrame(ts) {
-  if (_lastTs === null) _lastTs = ts;
-  const dt = Math.min(ts - _lastTs, 100) / 1000;
-  _lastTs = ts;
+  try {
+    if (_lastTs === null) _lastTs = ts;
+    const dt = Math.min(ts - _lastTs, 100) / 1000;
+    _lastTs = ts;
 
-  const maxScroll = Math.max(0, _trackH() - _viewportH());
+    const maxScroll = Math.max(0, _trackH() - _viewportH());
 
-  if (maxScroll > 0 && Date.now() >= _pauseUntil) {
-    _scrollY += SCROLL_SPEED * dt * _scrollDir;
+    if (maxScroll > 0 && Date.now() >= _pauseUntil) {
+      _scrollY += SCROLL_SPEED * dt * _scrollDir;
 
-    if (_scrollY >= maxScroll) {
-      _scrollY = maxScroll;
-      if (LOOP) {
-        _scrollDir = -1;
-        _pauseUntil = Date.now() + PAUSE_MS;
-      } else {
-        _pauseUntil = Date.now() + 999999; // hold at bottom
+      if (_scrollY >= maxScroll) {
+        _scrollY = maxScroll;
+        if (LOOP) {
+          _scrollDir = -1;
+          _pauseUntil = Date.now() + PAUSE_MS;
+        } else {
+          _pauseUntil = Date.now() + 999999; // hold at bottom
+        }
       }
-    }
 
-    if (_scrollDir === -1 && _scrollY <= 0) {
-      _scrollY = 0;
-      _scrollDir = 1;
-      _pauseUntil = Date.now() + PAUSE_MS;
-    }
+      if (_scrollDir === -1 && _scrollY <= 0) {
+        _scrollY = 0;
+        _scrollDir = 1;
+        _pauseUntil = Date.now() + PAUSE_MS;
+      }
 
-    track.style.transform = `translateY(-${_scrollY}px)`;
+      if (track) track.style.transform = `translateY(-${_scrollY}px)`;
+    }
+  } catch (e) {
+    console.error('[credits] animFrame error', e);
   }
-
   requestAnimationFrame(animFrame);
 }
 
@@ -501,6 +504,7 @@ function connectWS() {
   });
 
   ws.addEventListener('close', () => setTimeout(connectWS, 3000));
+  ws.onerror = () => { try { ws.close(); } catch {} };
 }
 
 /* ── Preview data ───────────────────────────────────────────── */

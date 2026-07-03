@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=1920">
+  <title>NE Broadcast Suite — Graphics</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 1920px; height: 1080px; overflow: hidden; background: transparent; }
+    .gfx-layer {
+      position: absolute;
+      inset: 0;
+      width: 1920px;
+      height: 1080px;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.25s ease;
+    }
+    .gfx-layer.active {
+      opacity: 1;
+    }
+    .gfx-layer iframe {
+      width: 1920px;
+      height: 1080px;
+      border: none;
+      background: transparent;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Each graphic is a pre-loaded iframe. They all stay connected to WS and handle
+       their own visibility/animations internally. gfx.html just switches which layer
+       is shown based on state.gfxActive, avoiding any reload flash. -->
+
+  <div class="gfx-layer" id="layer-break">
+    <iframe src="countdown.html" title="Break / Starting Soon"></iframe>
+  </div>
+
+  <div class="gfx-layer" id="layer-winner">
+    <iframe src="winner.html" title="Winner Screen"></iframe>
+  </div>
+
+  <div class="gfx-layer" id="layer-intro">
+    <iframe src="intro.html" title="Team Line-up Intro"></iframe>
+  </div>
+
+  <div class="gfx-layer" id="layer-ticker">
+    <iframe src="ticker.html" title="Ticker"></iframe>
+  </div>
+
+  <div class="gfx-layer" id="layer-series">
+    <iframe src="series.html" title="Series Scoreboard"></iframe>
+  </div>
+
+  <div class="gfx-layer" id="layer-matchup">
+    <iframe src="matchup.html" title="Pre-Match Lineup"></iframe>
+  </div>
+
+  <div class="gfx-layer" id="layer-veto">
+    <iframe src="mapscreen.html" title="Map Veto"></iframe>
+  </div>
+
+  <div class="gfx-layer" id="layer-draft">
+    <iframe src="draft.html" title="Champion Draft"></iframe>
+  </div>
+
+  <div class="gfx-layer" id="layer-spotlight">
+    <iframe src="watchlist.html" title="Spotlight / Teams to Watch"></iframe>
+  </div>
+
+  <div class="gfx-layer" id="layer-standings">
+    <iframe src="standings.html" title="Standings"></iframe>
+  </div>
+
+  <div class="gfx-layer" id="layer-schedule">
+    <iframe src="schedule.html" title="Upcoming Matches"></iframe>
+  </div>
+
+  <div class="gfx-layer" id="layer-bracket">
+    <iframe src="bracket.html" title="Bracket"></iframe>
+  </div>
+
+  <script>
+    const LAYER_MAP = {
+      break:     'layer-break',
+      winner:    'layer-winner',
+      intro:     'layer-intro',
+      ticker:    'layer-ticker',
+      series:    'layer-series',
+      matchup:   'layer-matchup',
+      veto:      'layer-veto',
+      draft:     'layer-draft',
+      spotlight: 'layer-spotlight',
+      standings: 'layer-standings',
+      schedule:  'layer-schedule',
+      bracket:   'layer-bracket',
+    };
+
+    let currentScene = null;
+
+    function applyScene(scene) {
+      if (scene === currentScene) return;
+      currentScene = scene;
+      const activeLayerId = scene ? LAYER_MAP[scene] : null;
+      document.querySelectorAll('.gfx-layer').forEach((layer) => {
+        layer.classList.toggle('active', layer.id === activeLayerId);
+      });
+    }
+
+    function connect() {
+      const host = location.hostname || 'localhost';
+      const ws = new WebSocket('ws://' + host + ':3001');
+
+      ws.onopen = () => ws.send(JSON.stringify({ type: 'request_state', role: 'overlay' }));
+
+      ws.onmessage = (e) => {
+        try {
+          const msg = JSON.parse(e.data);
+          const data = msg && msg.data;
+          // Only react when the payload actually carries gfxActive. Partial `state_update`
+          // messages (game/players/facecams during live play) omit it — treating a missing
+          // key as "clear" made the active layer strobe on/off. full_state always includes it.
+          if ((msg.type === 'full_state' || msg.type === 'state_update') && data && 'gfxActive' in data) {
+            applyScene(data.gfxActive || null);
+          }
+        } catch (_) {}
+      };
+
+      ws.onclose = () => setTimeout(connect, 3000);
+      ws.onerror = () => ws.close();
+    }
+
+    connect();
+  </script>
+</body>
+</html>

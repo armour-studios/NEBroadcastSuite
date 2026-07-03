@@ -1,0 +1,502 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1920">
+<title>NE Broadcast Suite — League of Legends HUD</title>
+<link rel="stylesheet" href="/fonts.css">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --main-font: 'Rajdhani', 'Montserrat', sans-serif;
+    --blue:   #1ea0e6;   /* ORDER / blue side — driven by blue team colour */
+    --red:    #e8485c;   /* CHAOS / red side  — driven by orange team colour */
+    --panel:  rgba(8, 14, 22, 0.86);
+    --panel-2:rgba(10, 17, 28, 0.94);
+    --gold:   #f0c060;
+    --line:   rgba(255,255,255,0.12);
+    --txt:    #eef3f8;
+    --dim:    #9fb0c2;
+  }
+  html, body {
+    width: 1920px; height: 1080px; overflow: hidden;
+    background: transparent;
+    font-family: var(--main-font);
+    -webkit-font-smoothing: antialiased;
+    color: var(--txt);
+  }
+  .hidden { display: none !important; }
+  img { display: block; }
+
+  /* ════════════════════════════ TOP MATCH BAR ════════════════════════════
+     Logos on the OUTSIDE → team block (name/objectives/gold) → centre score
+     cluster (kills | clock | kills) → team block → logo. Full team names.    */
+  #topbar {
+    position: absolute; top: 0; left: 50%; transform: translateX(-50%);
+    display: flex; align-items: stretch; z-index: 30; height: 86px;
+    filter: drop-shadow(0 6px 14px rgba(0,0,0,.45));
+    transition: transform .45s cubic-bezier(.4,1.2,.5,1), opacity .35s ease;
+  }
+  .tb-logo-wrap { display: flex; align-items: center; justify-content: center; width: 88px;
+    background: var(--panel-2); }
+  .tb-logo-wrap.left  { border-bottom: 3px solid var(--blue); border-radius: 0 0 0 8px; }
+  .tb-logo-wrap.right { border-bottom: 3px solid var(--red);  border-radius: 0 0 8px 0; }
+  .tb-logo { width: 60px; height: 60px; object-fit: contain; filter: drop-shadow(0 2px 5px rgba(0,0,0,.65)); }
+
+  .tb-team {
+    display: flex; flex-direction: column; justify-content: center; gap: 4px;
+    padding: 0 16px; min-width: 250px; max-width: 320px; background: var(--panel-2);
+  }
+  .tb-team.left  { border-bottom: 3px solid var(--blue); align-items: flex-start; }
+  .tb-team.right { border-bottom: 3px solid var(--red);  align-items: flex-end; }
+  .tb-name { font-size: 22px; font-weight: 800; letter-spacing: .4px; line-height: 1; text-transform: uppercase;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 290px; }
+  .tb-row2 { display: flex; align-items: center; gap: 12px; }
+  .tb-team.right .tb-row2 { flex-direction: row-reverse; }
+  .tb-objrow { display: flex; gap: 9px; align-items: center; font-size: 13px; color: var(--dim); font-weight: 600; }
+  .tb-team.right .tb-objrow { flex-direction: row-reverse; }
+  .tb-obj { display: flex; align-items: center; gap: 3px; }
+  .tb-obj svg { width: 15px; height: 15px; }
+  .tb-gold { font-size: 15px; color: var(--gold); font-weight: 800; font-variant-numeric: tabular-nums; }
+  .tb-gold .est { color: var(--dim); font-weight: 600; font-size: 10px; margin-left: 2px; vertical-align: 1px; }
+  .tb-gold .ocr { color: var(--blue); font-weight: 700; font-size: 10px; margin-left: 2px; vertical-align: 1px; }
+  .tb-drakes { display: flex; gap: 4px; margin-top: 2px; min-height: 16px; }
+  .tb-team.right .tb-drakes { flex-direction: row-reverse; }
+  .drake-pip { width: 18px; height: 18px; border-radius: 50%; background: rgba(0,0,0,.35);
+    display:flex; align-items:center; justify-content:center; border: 1px solid var(--line); }
+  .drake-pip svg { width: 12px; height: 12px; }
+  .soul-badge { font-size: 10px; font-weight: 800; text-transform: uppercase; padding: 2px 6px; border-radius: 4px;
+    color: #1a1206; display:flex; align-items:center; gap:2px; }
+
+  /* centre score cluster */
+  .tb-center {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    background: var(--panel); padding: 0 14px; min-width: 230px; border-bottom: 3px solid var(--gold);
+  }
+  .tb-scoreline { display: flex; align-items: center; gap: 16px; }
+  .tb-kills { font-size: 44px; font-weight: 800; line-height: .9; min-width: 52px; text-align: center;
+    font-variant-numeric: tabular-nums; }
+  .tb-kills.blue { color: #fff; text-shadow: 0 0 14px color-mix(in srgb, var(--blue) 55%, transparent); }
+  .tb-kills.red  { color: #fff; text-shadow: 0 0 14px color-mix(in srgb, var(--red) 55%, transparent); }
+  .tb-clock { font-size: 22px; font-weight: 800; font-variant-numeric: tabular-nums; letter-spacing: 1px; color: var(--gold); }
+  .gd-wrap { width: 200px; margin-top: 4px; }
+  .gd-bar { position: relative; height: 6px; border-radius: 3px; background: rgba(255,255,255,.14); overflow: hidden; }
+  .gd-fill { position: absolute; top: 0; bottom: 0; transition: all .6s ease; }
+  .gd-label { font-size: 12px; font-weight: 700; text-align: center; margin-top: 3px; color: var(--gold); }
+  .gd-label .est { color: var(--dim); font-weight: 600; font-size: 10px; }
+
+  /* ════════════════════════ OBJECTIVES MAP PANEL ═════════════════════════ */
+  #mappanel {
+    position: absolute; top: 104px; left: 14px; z-index: 25;
+    width: 188px; background: var(--panel); border: 1px solid var(--line);
+    border-radius: 8px; padding: 10px; transition: opacity .35s ease, transform .35s ease;
+  }
+  #mappanel h4 { font-size: 11px; letter-spacing: 1.5px; color: var(--dim); text-transform: uppercase; margin-bottom: 8px; font-weight: 700; }
+  .obj-line { display: flex; align-items: center; justify-content: space-between; padding: 5px 0; border-top: 1px solid var(--line); font-size: 13px; }
+  .obj-line:first-of-type { border-top: 0; }
+  .obj-name { display:flex; align-items:center; gap: 6px; color: var(--dim); font-weight: 600; }
+  .obj-name svg { width: 16px; height: 16px; }
+  .obj-counts { display:flex; gap: 10px; font-weight: 800; font-variant-numeric: tabular-nums; }
+  .obj-counts .b { color: var(--blue); } .obj-counts .r { color: var(--red); }
+  .soul-line { margin-top: 8px; font-size: 12px; text-align:center; color: var(--gold); font-weight: 700; min-height: 16px; }
+
+  /* ═══════════════════════ BOTTOM PLAYER LOADOUT BAR ═════════════════════ */
+  #playerbar {
+    position: absolute; bottom: 0; left: 50%; transform: translateX(-50%);
+    display: flex; align-items: flex-end; gap: 0; z-index: 30;
+    transition: transform .45s cubic-bezier(.4,1.2,.5,1), opacity .35s ease;
+  }
+  .pb-side { display: flex; }
+  .pb-side.red { flex-direction: row-reverse; }
+  .pcard { width: 178px; background: var(--panel-2); padding: 8px 8px 9px; border-top: 3px solid transparent; position: relative; }
+  .pb-side.blue .pcard { border-top-color: var(--blue); border-right: 1px solid rgba(0,0,0,.4); }
+  .pb-side.red  .pcard { border-top-color: var(--red);  border-left: 1px solid rgba(0,0,0,.4); }
+  .pb-side.blue .pcard:first-child { border-radius: 8px 0 0 0; }
+  .pb-side.red  .pcard:first-child { border-radius: 0 8px 0 0; }
+  .pcard.dead { filter: grayscale(.85) brightness(.7); }
+  .pc-top { display: flex; align-items: center; gap: 7px; }
+  .pb-side.red .pc-top { flex-direction: row-reverse; }
+  .pc-portrait { position: relative; width: 42px; height: 42px; border-radius: 6px; overflow: hidden; flex: 0 0 auto;
+    background: #0a1018; border: 1px solid var(--line); }
+  .pc-portrait img { width: 100%; height: 100%; object-fit: cover; }
+  .pc-lvl { position: absolute; bottom: -2px; right: -2px; background: #0a1018; border: 1px solid var(--gold);
+    color: var(--gold); font-size: 10px; font-weight: 800; padding: 0 3px; border-radius: 4px; line-height: 14px; }
+  .pc-respawn { position: absolute; inset: 0; display:flex; align-items:center; justify-content:center;
+    background: rgba(6,10,16,.72); color: #fff; font-size: 16px; font-weight: 800; }
+  .pc-meta { flex: 1 1 auto; min-width: 0; }
+  .pb-side.red .pc-meta { text-align: right; }
+  .pc-name { font-size: 13px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pc-champ { font-size: 11px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pc-kda { font-size: 12px; font-weight: 700; margin-top: 2px; font-variant-numeric: tabular-nums; }
+  .pc-kda .sep { color: var(--dim); font-weight: 600; margin: 0 1px; }
+  .pc-sub { display: flex; gap: 8px; font-size: 11px; color: var(--dim); margin-top: 1px; }
+  .pb-side.red .pc-sub { justify-content: flex-end; }
+  .pc-sub .g { color: var(--gold); font-weight: 700; }
+  .pc-row { display: flex; gap: 3px; margin-top: 7px; align-items: center; }
+  .pb-side.red .pc-row { flex-direction: row-reverse; }
+  .pc-spells { display: flex; flex-direction: column; gap: 3px; }
+  .spell { width: 17px; height: 17px; border-radius: 3px; background: #0a1018; border: 1px solid var(--line); overflow: hidden; }
+  .spell img { width: 100%; height: 100%; }
+  .pc-items { display: grid; grid-template-columns: repeat(4, 1fr); gap: 3px; flex: 1; }
+  .pb-side.red .pc-items { direction: rtl; }
+  .item { width: 23px; height: 23px; border-radius: 4px; background: #0a1018; border: 1px solid var(--line); overflow: hidden; }
+  .item img { width: 100%; height: 100%; }
+  .item.empty { opacity: .35; }
+
+  /* ════════════════════════ TEAMFIGHT / MINIMAL MODE ═════════════════════ */
+  body.minimal #playerbar { transform: translateX(-50%) translateY(110%); opacity: 0; pointer-events: none; }
+  body.minimal #mappanel  { opacity: 0; transform: translateX(-12px); }
+  body.minimal #topbar    { transform: translateX(-50%) scale(.84); }
+  body.minimal .tb-team   { min-width: 150px; max-width: 200px; }
+  body.minimal .tb-objrow, body.minimal .tb-drakes { display: none; }
+  .mode-tag { position: absolute; top: 92px; left: 50%; transform: translateX(-50%); z-index: 40;
+    font-size: 10px; letter-spacing: 2px; color: var(--dim); text-transform: uppercase; opacity: 0; transition: opacity .3s; }
+  body.minimal .mode-tag { opacity: .8; }
+
+  #offline { position: absolute; bottom: 8px; left: 8px; font-size: 11px; color: var(--dim); z-index: 50; opacity: .5; }
+
+  /* ════════════════════════════ DEV TOOLBAR ══════════════════════════════ */
+  #dev-fab { position: absolute; right: 14px; bottom: 14px; z-index: 200; width: 42px; height: 42px;
+    border-radius: 50%; background: #161f2e; color: #fff; border: 1px solid var(--line); cursor: pointer;
+    font-size: 18px; display: none; }
+  #dev-panel { position: absolute; right: 12px; bottom: 12px; z-index: 200; width: 280px;
+    background: rgba(12,18,28,.96); border: 1px solid var(--line); border-radius: 10px; padding: 12px;
+    display: none; box-shadow: 0 12px 40px rgba(0,0,0,.5); }
+  #dev-panel.open { display: block; }
+  #dev-panel h5 { font-size: 12px; letter-spacing: 1px; text-transform: uppercase; color: var(--dim); margin-bottom: 8px;
+    display:flex; justify-content:space-between; align-items:center; }
+  #dev-panel h5 button { background: none; border: 0; color: var(--dim); cursor: pointer; font-size: 14px; }
+  .dev-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; }
+  .dev-grid.three { grid-template-columns: 1fr 1fr 1fr; }
+  .dev-grid button { font-family: inherit; font-size: 11px; font-weight: 700; padding: 6px 4px; border-radius: 6px;
+    border: 1px solid var(--line); color: #dfe7f0; cursor: pointer; background: #1b2435; }
+  .dev-grid button:hover { background: #243047; }
+  .dev-grid button.blue { border-color: color-mix(in srgb, var(--blue) 60%, transparent); }
+  .dev-grid button.red  { border-color: color-mix(in srgb, var(--red) 60%, transparent); }
+  .dev-sec { margin-top: 9px; font-size: 10px; letter-spacing: 1px; text-transform: uppercase; color: var(--dim); margin-bottom: 4px; }
+  .dev-mode-state { font-size: 11px; color: var(--gold); margin-top: 8px; text-align:center; }
+</style>
+</head>
+<body>
+  <!-- TOP MATCH BAR -->
+  <div id="topbar">
+    <div class="tb-logo-wrap left"><img class="tb-logo" id="bl-logo" alt=""></div>
+    <div class="tb-team left">
+      <span class="tb-name" id="bl-name">BLUE TEAM</span>
+      <div class="tb-row2"><div class="tb-objrow" id="bl-obj"></div><span class="tb-gold" id="bl-gold">0</span></div>
+      <div class="tb-drakes" id="bl-drakes"></div>
+    </div>
+    <div class="tb-center">
+      <div class="tb-scoreline">
+        <span class="tb-kills blue" id="bl-kills">0</span>
+        <span class="tb-clock" id="clock">00:00</span>
+        <span class="tb-kills red" id="rd-kills">0</span>
+      </div>
+      <div class="gd-wrap">
+        <div class="gd-bar"><div class="gd-fill" id="gd-fill"></div></div>
+        <div class="gd-label" id="gd-label">EVEN</div>
+      </div>
+    </div>
+    <div class="tb-team right">
+      <span class="tb-name" id="rd-name">RED TEAM</span>
+      <div class="tb-row2"><div class="tb-objrow" id="rd-obj"></div><span class="tb-gold" id="rd-gold">0</span></div>
+      <div class="tb-drakes" id="rd-drakes"></div>
+    </div>
+    <div class="tb-logo-wrap right"><img class="tb-logo" id="rd-logo" alt=""></div>
+  </div>
+  <div class="mode-tag">Teamfight View</div>
+
+  <!-- OBJECTIVES MAP PANEL -->
+  <div id="mappanel">
+    <h4>Objectives</h4>
+    <div class="obj-line"><span class="obj-name">Turrets</span><span class="obj-counts"><span class="b" id="ob-tb">0</span><span class="r" id="ob-tr">0</span></span></div>
+    <div class="obj-line"><span class="obj-name">Dragons</span><span class="obj-counts"><span class="b" id="ob-db">0</span><span class="r" id="ob-dr">0</span></span></div>
+    <div class="obj-line"><span class="obj-name">Barons</span><span class="obj-counts"><span class="b" id="ob-bb">0</span><span class="r" id="ob-br">0</span></span></div>
+    <div class="obj-line"><span class="obj-name">Heralds / Grubs</span><span class="obj-counts"><span class="b" id="ob-hb">0</span><span class="r" id="ob-hr">0</span></span></div>
+    <div class="soul-line" id="ob-soul"></div>
+  </div>
+
+  <!-- BOTTOM PLAYER LOADOUT BAR -->
+  <div id="playerbar">
+    <div class="pb-side blue" id="pb-blue"></div>
+    <div class="pb-side red"  id="pb-red"></div>
+  </div>
+
+  <div id="offline" class="hidden">LoL HUD — waiting for spectator data on :2999</div>
+
+  <!-- DEV TOOLBAR (?dev=1, hidden inside OBS unless forced) -->
+  <button id="dev-fab" title="Dev tools">&#9881;</button>
+  <div id="dev-panel">
+    <h5>LoL HUD — Dev <button id="dev-collapse" title="Hide">&times;</button></h5>
+    <div class="dev-grid">
+      <button data-dev="demo">Load demo</button>
+      <button data-dev="clock">Play / Pause clock</button>
+    </div>
+    <div class="dev-sec">Kills</div>
+    <div class="dev-grid"><button class="blue" data-dev="kill-blue">Blue +Kill</button><button class="red" data-dev="kill-red">Red +Kill</button></div>
+    <div class="dev-sec">Gold (est)</div>
+    <div class="dev-grid"><button class="blue" data-dev="gold-blue">Blue +1k</button><button class="red" data-dev="gold-red">Red +1k</button></div>
+    <div class="dev-sec">Objectives</div>
+    <div class="dev-grid three">
+      <button class="blue" data-dev="tower-blue">B Tower</button>
+      <button class="blue" data-dev="drake-blue">B Drake</button>
+      <button class="blue" data-dev="baron-blue">B Baron</button>
+      <button class="red" data-dev="tower-red">R Tower</button>
+      <button class="red" data-dev="drake-red">R Drake</button>
+      <button class="red" data-dev="baron-red">R Baron</button>
+    </div>
+    <div class="dev-sec">Players / view</div>
+    <div class="dev-grid three">
+      <button data-dev="teamfight">Teamfight</button>
+      <button data-dev="kill-player">Kill 1</button>
+      <button data-dev="revive">Revive</button>
+      <button data-dev="mode-full">Full</button>
+      <button data-dev="mode-auto">Auto</button>
+      <button data-dev="mode-minimal">Minimal</button>
+    </div>
+    <div class="dev-sec">Gold source</div>
+    <div class="dev-grid"><button data-dev="src-est">Estimate</button><button data-dev="src-ocr">OCR (live)</button></div>
+    <div class="dev-mode-state" id="dev-mode-state"></div>
+  </div>
+
+<script>
+// ── Data Dragon (item / summoner-spell icons) ────────────────────────────────
+let DDVER = '15.13.1';
+fetch('https://ddragon.leagueoflegends.com/api/versions.json')
+  .then(r => r.json()).then(v => { if (Array.isArray(v) && v[0]) DDVER = v[0]; }).catch(()=>{});
+const itemIcon  = (id) => `https://ddragon.leagueoflegends.com/cdn/${DDVER}/img/item/${id}.png`;
+const SUMMONER_KEY = {
+  'Flash':'SummonerFlash','Teleport':'SummonerTeleport','Ignite':'SummonerDot','Heal':'SummonerHeal',
+  'Barrier':'SummonerBarrier','Exhaust':'SummonerExhaust','Ghost':'SummonerHaste','Cleanse':'SummonerBoost',
+  'Smite':'SummonerSmite','Clarity':'SummonerMana','Mark':'SummonerSnowball','Dash':'SummonerSnowball'
+};
+const spellIcon = (n) => { const k = SUMMONER_KEY[n]; return k ? `https://ddragon.leagueoflegends.com/cdn/${DDVER}/img/spell/${k}.png` : ''; };
+
+const DRAKE = {
+  Fire:{c:'#e0533a',t:'Infernal'}, Water:{c:'#3aa0e0',t:'Ocean'}, Earth:{c:'#9c6b3a',t:'Mountain'},
+  Air:{c:'#cfe0ee',t:'Cloud'}, Hextech:{c:'#3ad6d6',t:'Hextech'}, Chemtech:{c:'#8fd44a',t:'Chemtech'},
+  Elder:{c:'#b07adf',t:'Elder'}, Unknown:{c:'#9fb0c2',t:'Dragon'}
+};
+const drakeSvg = (c) => `<svg viewBox="0 0 24 24" fill="${c}"><path d="M3 7l5 2 4-4 4 4 5-2-3 7-6 8-6-8z"/></svg>`;
+const towerSvg = () => `<svg viewBox="0 0 24 24" fill="#cdd7e2"><path d="M7 3h10l-1 4h2l-2 3 1 11H9l1-11-2-3h2z"/></svg>`;
+const baronSvg = () => `<svg viewBox="0 0 24 24" fill="#a878d8"><path d="M12 2c4 0 7 3 7 7 0 5-7 13-7 13S5 14 5 9c0-4 3-7 7-7zm0 4a3 3 0 100 6 3 3 0 000-6z"/></svg>`;
+const heraldSvg= () => `<svg viewBox="0 0 24 24" fill="#6fd0c8"><path d="M12 2l8 5v6c0 5-4 8-8 9-4-1-8-4-8-9V7z"/></svg>`;
+
+const $ = (id) => document.getElementById(id);
+function fmtClock(sec){ sec=Math.max(0,Math.floor(sec||0)); const m=Math.floor(sec/60),s=sec%60; return (m<10?'0':'')+m+':'+(s<10?'0':'')+s; }
+function fmtGold(g){ g=g||0; return g>=1000?(g/1000).toFixed(1)+'k':String(Math.round(g)); }
+function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+let appTeams = { blue: {}, orange: {} };
+let lolState = null;
+let hudModePref = 'auto';
+
+function render(l) {
+  if (!l) return;
+  const blue = l.blue || {}, red = l.red || {};
+  const blueTeam = appTeams.blue || {}, redTeam = appTeams.orange || {};
+  const ocr = (l.ocr && l.ocr.source === 'ocr');
+
+  $('bl-name').textContent = blueTeam.name || 'BLUE TEAM';
+  $('rd-name').textContent = redTeam.name || 'RED TEAM';
+  $('bl-logo').style.display = blueTeam.logo ? 'block' : 'none';
+  $('rd-logo').style.display = redTeam.logo ? 'block' : 'none';
+  if (blueTeam.logo) $('bl-logo').src = blueTeam.logo;
+  if (redTeam.logo)  $('rd-logo').src = redTeam.logo;
+
+  $('bl-kills').textContent = blue.kills || 0;
+  $('rd-kills').textContent = red.kills || 0;
+  const tag = ocr ? '<span class="ocr">OCR</span>' : '<span class="est">est</span>';
+  $('bl-gold').innerHTML = fmtGold(blue.gold) + 'g' + tag;
+  $('rd-gold').innerHTML = fmtGold(red.gold) + 'g' + tag;
+
+  $('clock').textContent = fmtClock(l.gameTime);
+  const diff = l.goldDiff || 0, fill = $('gd-fill'), lead = Math.min(1, Math.abs(diff)/8000);
+  const estTag = ocr ? '' : ' <span class="est">est</span>';
+  if (Math.abs(diff) < 150) {
+    fill.style.left='49%'; fill.style.right='49%'; fill.style.background='rgba(255,255,255,.4)';
+    $('gd-label').innerHTML = 'EVEN' + estTag; $('gd-label').style.color='var(--gold)';
+  } else if (diff > 0) {
+    fill.style.left=(50-lead*50)+'%'; fill.style.right='50%'; fill.style.background='var(--blue)';
+    $('gd-label').innerHTML = '+'+fmtGold(diff)+estTag; $('gd-label').style.color='var(--blue)';
+  } else {
+    fill.style.right=(50-lead*50)+'%'; fill.style.left='50%'; fill.style.background='var(--red)';
+    $('gd-label').innerHTML = '+'+fmtGold(-diff)+estTag; $('gd-label').style.color='var(--red)';
+  }
+
+  $('bl-obj').innerHTML = objRow(blue);
+  $('rd-obj').innerHTML = objRow(red);
+  $('bl-drakes').innerHTML = drakeRow(blue);
+  $('rd-drakes').innerHTML = drakeRow(red);
+
+  $('ob-tb').textContent = blue.towers||0; $('ob-tr').textContent = red.towers||0;
+  $('ob-db').textContent = (blue.dragons||[]).length; $('ob-dr').textContent = (red.dragons||[]).length;
+  $('ob-bb').textContent = blue.barons||0; $('ob-br').textContent = red.barons||0;
+  $('ob-hb').textContent = (blue.heralds||0)+(blue.grubs||0); $('ob-hr').textContent = (red.heralds||0)+(red.grubs||0);
+  const soul = blue.dragonSoul || red.dragonSoul;
+  $('ob-soul').textContent = soul ? ((DRAKE[soul]||DRAKE.Unknown).t.toUpperCase()+' SOUL — '+(blue.dragonSoul?(blueTeam.name||'BLUE'):(redTeam.name||'RED'))) : '';
+
+  const players = l.players || [];
+  $('pb-blue').innerHTML = players.filter(p=>p.team==='ORDER').map(p=>pcard(p,'blue')).join('');
+  $('pb-red').innerHTML  = players.filter(p=>p.team==='CHAOS').map(p=>pcard(p,'red')).join('');
+
+  applyHudMode(l);
+}
+
+function objRow(t){
+  return [
+    `<span class="tb-obj">${towerSvg()}${t.towers||0}</span>`,
+    `<span class="tb-obj">${drakeSvg('#e0a050')}${(t.dragons||[]).length}</span>`,
+    `<span class="tb-obj">${baronSvg()}${t.barons||0}</span>`,
+    `<span class="tb-obj">${heraldSvg()}${(t.heralds||0)+(t.grubs||0)}</span>`
+  ].join('');
+}
+function drakeRow(t){
+  const pips = (t.dragons||[]).map(d=>{ const i=DRAKE[d]||DRAKE.Unknown; return `<div class="drake-pip" title="${i.t}">${drakeSvg(i.c)}</div>`; });
+  if (t.dragonSoul){ const i=DRAKE[t.dragonSoul]||DRAKE.Unknown; pips.push(`<div class="soul-badge" style="background:${i.c}">${drakeSvg('#1a1206')}SOUL</div>`); }
+  return pips.join('');
+}
+function pcard(p){
+  const items=p.items||[]; const slots=[];
+  for(let i=0;i<7;i++){ const it=items[i]; slots.push(it&&it.id?`<div class="item"><img src="${itemIcon(it.id)}" alt="" onerror="this.style.display='none'"></div>`:'<div class="item empty"></div>'); }
+  const spells=(p.spells||[]).map(s=>{ const ic=spellIcon(s); return `<div class="spell">${ic?`<img src="${ic}" alt="" onerror="this.style.display='none'">`:''}</div>`; }).join('');
+  const portrait=p.portrait?`<img src="${p.portrait}" alt="" onerror="this.style.display='none'">`:'';
+  const respawn=(p.dead&&p.respawn>0)?`<span class="pc-respawn">${p.respawn}</span>`:'';
+  return `<div class="pcard ${p.dead?'dead':''}">
+      <div class="pc-top">
+        <div class="pc-portrait">${portrait}<span class="pc-lvl">${p.level||1}</span>${respawn}</div>
+        <div class="pc-meta">
+          <div class="pc-name">${esc(p.name)}</div>
+          <div class="pc-champ">${esc(p.champion)}</div>
+          <div class="pc-kda">${p.kills}<span class="sep">/</span>${p.deaths}<span class="sep">/</span>${p.assists}</div>
+          <div class="pc-sub"><span>${p.cs||0} CS</span><span class="g">${fmtGold(p.gold)}g</span></div>
+        </div>
+      </div>
+      <div class="pc-row"><div class="pc-spells">${spells}</div><div class="pc-items">${slots.join('')}</div></div>
+    </div>`;
+}
+
+let _minimalUntil = 0;
+function applyHudMode(l){
+  let minimal=false;
+  if (hudModePref==='minimal') minimal=true;
+  else if (hudModePref==='full') minimal=false;
+  else {
+    const now=l.gameTime||0;
+    const recent=(l.events||[]).filter(e=>(e.name==='ChampionKill'||e.name==='Multikill'||e.name==='Ace')&&now-e.time<=12);
+    if (recent.length>=3) _minimalUntil=now+7;
+    minimal = now < _minimalUntil;
+  }
+  document.body.classList.toggle('minimal', minimal);
+}
+
+function applyBrand(d){
+  const root=document.documentElement; root.dataset.theme=d.theme||'default';
+  if (d.fontFamily) root.style.setProperty('--main-font', `'${d.fontFamily}', sans-serif`);
+  const bt=(d.teams&&d.teams.blue)||{}, ot=(d.teams&&d.teams.orange)||{};
+  if (bt.color) root.style.setProperty('--blue', bt.color);
+  if (ot.color) root.style.setProperty('--red', ot.color);
+  const b=d.brand; if (b&&b.font) root.style.setProperty('--main-font', `'${b.font}', sans-serif`);
+}
+
+// ── WebSocket ────────────────────────────────────────────────────────────────
+function connect(){
+  const sock=new WebSocket('ws://localhost:3001');
+  sock.onopen=()=>sock.send(JSON.stringify({type:'request_state'}));
+  sock.onmessage=({data})=>{
+    let msg; try{ msg=JSON.parse(data); }catch{ return; }
+    if (msg.type==='full_state'){
+      const d=msg.data; applyBrand(d);
+      appTeams={ blue:(d.teams&&d.teams.blue)||{}, orange:(d.teams&&d.teams.orange)||{} };
+      if (d.lol&&typeof d.lol.hudMode==='string') hudModePref=d.lol.hudMode;
+      lolState=d.lol||null;
+      $('offline').classList.toggle('hidden', !!(lolState&&lolState.connected));
+      if (lolState&&!devState) render(lolState);
+    } else if (msg.type==='lol_update'){
+      lolState=msg.data;
+      if (lolState&&typeof lolState.hudMode==='string') hudModePref=lolState.hudMode;
+      $('offline').classList.toggle('hidden', !!(lolState&&lolState.connected));
+      if (!devState) render(lolState);
+    } else if (msg.type==='lol_hud_mode'){
+      hudModePref=msg.mode||'auto'; if (lolState&&!devState) render(lolState);
+    }
+  };
+  sock.onclose=()=>setTimeout(connect,800);
+  sock.onerror=()=>{ try{ sock.close(); }catch{} };
+}
+
+// ── Demo + Dev toolbar ───────────────────────────────────────────────────────
+let devState=null, _devTimer=null;
+function makeDemo(){
+  const mk=(name,champ,team,k,d,a,cs,lvl,gold,items,dead)=>({
+    name,champion:champ,portrait:'/assets/heroes/league/'+champ.toLowerCase()+'.png',team,
+    kills:k,deaths:d,assists:a,cs,level:lvl,gold,dead:!!dead,respawn:dead?12:0,
+    spells:['Flash',team==='ORDER'?'Teleport':'Ignite'],items:items.map(id=>({id,price:3000}))
+  });
+  return {
+    connected:true, gameTime:1284, goldDiff:3200, ocr:{source:'est'},
+    blue:{kills:14,gold:41200,towers:5,dragons:['Fire','Fire'],barons:1,heralds:1,grubs:3,dragonSoul:''},
+    red:{kills:9,gold:38000,towers:3,dragons:['Water'],barons:0,heralds:0,grubs:3,dragonSoul:''},
+    events:[],
+    players:[
+      mk('Zeus','Aatrox','ORDER',3,1,5,231,15,12400,[6630,3047,3071,6610,0,0,3340]),
+      mk('Oner','Viego','ORDER',5,2,7,182,15,11800,[3142,3158,6694,0,0,0,3340]),
+      mk('Faker','Azir','ORDER',2,1,9,248,16,13100,[6655,3020,3089,0,0,0,3340]),
+      mk('Gumayusi','Jinx','ORDER',4,2,4,266,15,12900,[3031,3094,3046,0,0,0,3363]),
+      mk('Keria','Lulu','ORDER',0,3,14,38,12,7200,[3853,3158,0,0,0,0,3340],true),
+      mk('Kiin','Gnar','CHAOS',2,3,3,205,14,10100,[3068,3047,0,0,0,0,3340]),
+      mk('Canyon','Kindred','CHAOS',3,4,4,178,14,10600,[6672,3111,0,0,0,0,3340]),
+      mk('Chovy','Akali','CHAOS',4,2,2,222,15,12200,[3152,3020,3157,0,0,0,3340]),
+      mk('Peyz','Ezreal','CHAOS',0,2,4,239,14,11200,[3508,3020,0,0,0,0,3363]),
+      mk('Lehends','Renata','CHAOS',0,3,6,42,11,6800,[3869,3158,0,0,0,0,3340],true)
+    ]
+  };
+}
+function devModeLabel(){ $('dev-mode-state').textContent='View: '+hudModePref+'  ·  Gold: '+((devState&&devState.ocr&&devState.ocr.source)||'est'); }
+function devAction(a){
+  if (a==='demo'){ if(!appTeams.blue.name){appTeams={blue:{name:'T1',color:'#1ea0e6'},orange:{name:'Gen.G',color:'#e8485c'}};} devState=makeDemo(); $('offline').classList.add('hidden'); }
+  if (!devState) devState=makeDemo();
+  const d=devState;
+  switch(a){
+    case 'clock': if(_devTimer){clearInterval(_devTimer);_devTimer=null;} else {_devTimer=setInterval(()=>{d.gameTime++;render(d);},1000);} break;
+    case 'kill-blue': d.blue.kills++; d.events.push({name:'ChampionKill',time:d.gameTime}); break;
+    case 'kill-red':  d.red.kills++;  d.events.push({name:'ChampionKill',time:d.gameTime}); break;
+    case 'gold-blue': d.blue.gold+=1000; d.goldDiff=d.blue.gold-d.red.gold; break;
+    case 'gold-red':  d.red.gold+=1000;  d.goldDiff=d.blue.gold-d.red.gold; break;
+    case 'tower-blue': d.blue.towers++; break;
+    case 'tower-red':  d.red.towers++; break;
+    case 'drake-blue': d.blue.dragons.push(['Fire','Water','Earth','Air'][d.blue.dragons.length%4]); break;
+    case 'drake-red':  d.red.dragons.push(['Water','Fire','Air','Earth'][d.red.dragons.length%4]); break;
+    case 'baron-blue': d.blue.barons++; break;
+    case 'baron-red':  d.red.barons++; break;
+    case 'teamfight': for(let i=0;i<3;i++) d.events.push({name:'ChampionKill',time:d.gameTime}); d.blue.kills+=2; d.red.kills+=1; (d.players.filter(p=>!p.dead).slice(0,3)).forEach(p=>{p.dead=true;p.respawn=14;}); break;
+    case 'kill-player': { const p=d.players.find(p=>!p.dead); if(p){p.dead=true;p.respawn=14;p.deaths++;} break; }
+    case 'revive': d.players.forEach(p=>{p.dead=false;p.respawn=0;}); break;
+    case 'mode-full': hudModePref='full'; break;
+    case 'mode-auto': hudModePref='auto'; _minimalUntil=0; break;
+    case 'mode-minimal': hudModePref='minimal'; break;
+    case 'src-est': d.ocr={source:'est'}; break;
+    case 'src-ocr': d.ocr={source:'ocr'}; break;
+  }
+  render(d); devModeLabel();
+}
+(function initDev(){
+  const devMode=new URLSearchParams(location.search).get('dev')==='1';
+  if (window.obsstudio && !devMode) return;
+  const panel=$('dev-panel'), fab=$('dev-fab');
+  panel.classList.add('open');
+  panel.querySelectorAll('[data-dev]').forEach(b=>b.addEventListener('click',()=>devAction(b.getAttribute('data-dev'))));
+  $('dev-collapse').addEventListener('click',()=>{ panel.classList.remove('open'); fab.style.display='block'; });
+  fab.addEventListener('click',()=>{ fab.style.display='none'; panel.classList.add('open'); });
+  if (devMode){ devAction('demo'); devModeLabel(); }
+})();
+
+if (new URLSearchParams(location.search).get('demo')==='1'){
+  fetch('https://ddragon.leagueoflegends.com/api/versions.json').then(r=>r.json()).then(v=>{if(v[0])DDVER=v[0];}).catch(()=>{}).finally(()=>{ devState=makeDemo(); if(!appTeams.blue.name) appTeams={blue:{name:'T1',color:'#1ea0e6'},orange:{name:'Gen.G',color:'#e8485c'}}; render(devState); $('offline').classList.add('hidden'); });
+} else {
+  $('offline').classList.remove('hidden');
+  connect();
+}
+</script>
+</body>
+</html>

@@ -1,116 +1,345 @@
 <!DOCTYPE html>
 <html lang="en">
 <!--
-  NE Broadcast Suite team line-up / player intro — ported & generalised from EsportsDashBoard heroes1/heroes2.
-  Driven by full_state.intro: { visible, side:'blue'|'orange', title, style }
-  Renders the chosen team (full_state.teams[side]) — logo + name header and a card per
-  roster player (name + handle). Player photos render when a roster entry has `photo`/`image`;
-  otherwise a clean name-plate card is shown (our RL/CS2 rosters carry no hero art).
-  ?side=blue|orange overrides the configured side (handy for two pre-built OBS sources).
+  intro.html — team line-up / starting roster card (duorow design language).
+  Driven by full_state.intro { visible, side:'blue'|'orange', title, style }.
+  Each player card resolves a photo in this order:
+    1. player.photo / player.image
+    2. start.gg profile image (from playerProfiles[gamertag].image, auto-pulled)
+    3. the team logo (as a placeholder)
+    4. the player's initials
+  Shows the player's position/role (Starter/Sub/Alternate/Captain…) and stats
+  (6mans rank + ELO from playerProfiles, country flag) under each name.
+  ?side=blue|orange overrides the configured side. No baked background — the Scenes
+  page sets fill colour + opacity per graphic.
 -->
 <head>
   <meta charset="UTF-8">
   <title>NE Broadcast Suite — Line-up</title>
-  <link rel="stylesheet" href="scene.css" />
+  <link rel="stylesheet" href="/fonts.css">
   <style>
-    body { text-transform: none; }
-    #intro-stage { opacity: 0; transition: opacity 0.35s ease; }
-    #intro-stage.show { opacity: 1; }
-
-    @keyframes herowipe   { 0% { clip-path: polygon(0 0, 0 0, 0 100%, 0 100%); } 100% { clip-path: polygon(0 0, 100% 0, 100% 100%, 0 100%); } }
-    @keyframes topmove    { 0% { top: -160px; } 100% { top: 40px; } }
-
-    .top {
-      position: absolute; top: 40px; left: 230px; width: 1460px; height: 132px;
-      border-style: solid; border-width: 0 0 0 7px; border-color: var(--team-color, var(--accent));
-      background: var(--scene-bg); color: #fff; display: flex; align-items: center;
-      animation: topmove 1.2s 0.5s backwards;
+    :root {
+      --duo-surface: #1a1d24; --duo-surface2: #20242e; --duo-border: #2e3340;
+      --duo-accent: #e83a8b; --duo-accent2: #8b5cf6; --duo-text: #e8eaf0; --duo-muted: #8b93a8;
+      --team-color: #055fdb;
     }
-    .top .logo { width: 132px; height: 112px; margin: 0 24px 0 30px; background-position: center; background-size: contain; background-repeat: no-repeat; flex: 0 0 auto; }
-    .top .teamname { font-family: 'Rajdhani', var(--main-font); font-weight: 700; text-transform: uppercase; font-size: 4.4em; line-height: 0.9; }
-    .top .subtitle { position: absolute; right: 30px; bottom: 14px; font-family: 'Rajdhani', var(--main-font); font-weight: 600; font-size: 1.5em; color: var(--accent); letter-spacing: 0.2em; text-transform: uppercase; }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { width: 1920px; height: 1080px; overflow: hidden; background: transparent;
+      font-family: 'Inter', system-ui, sans-serif; color: var(--duo-text); -webkit-font-smoothing: antialiased; }
 
-    .players-grid { position: absolute; top: 260px; left: 0; right: 0; display: flex; flex-wrap: wrap; justify-content: center; gap: 50px; padding: 0 60px; }
-    .player-card { width: 453px; display: flex; flex-direction: column; animation: herowipe 1s backwards; }
-    .hero-image { width: 453px; height: 300px; background: linear-gradient(160deg, #20242b, #0d0f12); overflow: hidden; position: relative; }
-    .hero-image img { width: 100%; height: 100%; object-fit: cover; object-position: top; }
-    .hero-image .placeholder { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-family: 'Rajdhani', var(--main-font); font-weight: 700; font-size: 7em; color: var(--team-color, var(--accent)); opacity: 0.85; }
-    .player-info {
-      height: 88px; background: #fff; color: var(--scene-bg); position: relative;
-      border-style: solid; border-width: 0 0 0 7px; border-color: var(--team-color, var(--accent));
-      display: flex; align-items: center; padding: 0 18px;
-    }
-    .player-info .battletag { font-family: 'Rajdhani', var(--main-font); font-weight: 700; text-transform: uppercase; font-size: 2.4em; }
-    .player-info .handle { position: absolute; right: 18px; bottom: 16px; font-family: 'Rajdhani', var(--main-font); font-weight: 600; font-size: 1.5em; color: #5a6068; text-transform: none; }
+    #stage { position: absolute; inset: 0; display: flex; flex-direction: column; padding: 46px 60px 40px;
+      opacity: 0; transition: opacity .4s ease; }
+    #stage.show { opacity: 1; }
+
+    /* ── Header ─────────────────────────────────────────────────────────── */
+    .li-head { flex: 0 0 auto; display: flex; align-items: center; gap: 22px; height: 132px;
+      padding: 0 28px; position: relative; margin-bottom: 38px;
+      background: linear-gradient(100deg, color-mix(in srgb, var(--team-color) 26%, rgba(16,18,24,.96)) 0%, rgba(12,14,20,.97) 60%);
+      border: 1px solid var(--duo-border); border-radius: 14px; overflow: hidden;
+      box-shadow: 0 16px 40px rgba(0,0,0,.5); }
+    .li-head::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 7px;
+      background: var(--team-color); box-shadow: 0 0 26px color-mix(in srgb, var(--team-color) 70%, transparent); }
+    .li-head::after { content: ''; position: absolute; left: 0; right: 0; top: 0; height: 1px;
+      background: linear-gradient(90deg, transparent, rgba(255,255,255,.3) 50%, transparent); }
+    .li-logo { width: 96px; height: 96px; object-fit: contain; flex: 0 0 auto;
+      filter: drop-shadow(0 4px 12px rgba(0,0,0,.55)); }
+    .li-logo.on-dark { filter: brightness(0) invert(1) drop-shadow(0 4px 12px rgba(0,0,0,.55)); }
+    .li-head-text { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+    .li-team { font-family: 'Rajdhani','Inter',sans-serif; font-weight: 700; font-size: 56px; line-height: .92;
+      text-transform: uppercase; color: #fff; letter-spacing: .01em;
+      text-shadow: 0 0 26px color-mix(in srgb, var(--team-color) 45%, transparent); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .li-sub { font-family: 'Rajdhani','Inter',sans-serif; font-weight: 600; font-size: 20px; letter-spacing: .26em;
+      text-transform: uppercase; color: var(--team-color); }
+    .li-head-spacer { flex: 1 1 auto; }
+    .li-count { font-family: 'Rajdhani','Inter',sans-serif; font-weight: 700; font-size: 22px; letter-spacing: .12em;
+      text-transform: uppercase; color: var(--duo-muted); white-space: nowrap; }
+    .li-count b { color: #fff; font-size: 30px; }
+
+    /* ── Player grid ────────────────────────────────────────────────────── */
+    .li-grid { flex: 1 1 0; min-height: 0; display: flex; flex-wrap: wrap; align-content: center;
+      justify-content: center; gap: 26px; }
+    .li-card { display: flex; flex-direction: column; border-radius: 13px; overflow: hidden;
+      border: 1px solid var(--duo-border); background: var(--duo-surface);
+      box-shadow: 0 18px 44px rgba(0,0,0,.5); opacity: 0; }
+    /* `both` fill: hidden during the stagger delay (backwards) AND stays visible after
+       the animation ends (forwards) — otherwise the card reverts to opacity:0 and vanishes. */
+    #stage.show .li-card { animation: cardIn .7s cubic-bezier(.16,.84,.24,1) both; }
+    @keyframes cardIn { from { opacity: 0; transform: translateY(34px) scale(.96); } to { opacity: 1; transform: none; } }
+
+    .li-photo { position: relative; width: 100%; aspect-ratio: 4 / 3; flex: 0 0 auto; overflow: hidden;
+      background: radial-gradient(circle at 50% 30%, var(--duo-surface2), #0c0e13); }
+    .li-photo::before { content: ''; position: absolute; left: 0; right: 0; top: 0; height: 3px; z-index: 3;
+      background: linear-gradient(90deg, var(--team-color), color-mix(in srgb, var(--team-color) 30%, transparent));
+      box-shadow: 0 0 16px color-mix(in srgb, var(--team-color) 55%, transparent); }
+    .li-photo img.face { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: top center; }
+    .li-photo .logo-ph { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; }
+    .li-photo .logo-ph img { width: 58%; height: 58%; object-fit: contain; opacity: .42;
+      filter: drop-shadow(0 6px 18px rgba(0,0,0,.5)); }
+    .li-photo .logo-ph.on-dark img { filter: brightness(0) invert(1) drop-shadow(0 6px 18px rgba(0,0,0,.5)); opacity: .3; }
+    .li-photo .initials { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+      font-family: 'Rajdhani','Inter',sans-serif; font-weight: 700; font-size: 110px; line-height: 1;
+      color: var(--team-color); opacity: .85; }
+    .li-photo::after { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 46%;
+      background: linear-gradient(180deg, transparent, rgba(8,10,14,.92)); pointer-events: none; }
+    .li-pos { position: absolute; top: 12px; right: 12px; z-index: 4; font-size: 12px; font-weight: 800;
+      letter-spacing: .14em; text-transform: uppercase; padding: 4px 10px; border-radius: 5px; color: #fff;
+      background: var(--team-color); box-shadow: 0 4px 12px rgba(0,0,0,.45); }
+    .li-pos.is-cap { background: linear-gradient(135deg, var(--duo-accent), var(--duo-accent2)); }
+    .li-pos.is-sub { background: rgba(20,23,30,.92); border: 1px solid var(--duo-border); color: #f0b860; }
+    .li-pos.is-alt { background: rgba(20,23,30,.92); border: 1px solid var(--duo-border); color: var(--duo-muted); }
+
+    .li-plate { flex: 0 0 auto; position: relative; padding: 14px 18px 16px;
+      background: linear-gradient(180deg, var(--duo-surface2), var(--duo-surface));
+      border-top: 1px solid var(--duo-border); }
+    .li-plate::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: var(--team-color); }
+    .li-name { font-family: 'Rajdhani','Inter',sans-serif; font-weight: 700; font-size: 32px; line-height: 1;
+      text-transform: uppercase; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .li-stats { display: flex; align-items: center; gap: 10px; margin-top: 9px; min-height: 22px; }
+    .li-stat { display: inline-flex; align-items: center; gap: 5px; font-size: 13px; font-weight: 700;
+      letter-spacing: .04em; color: #d6dbe6; }
+    .li-stat .lbl { font-size: 9px; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; color: var(--duo-muted); }
+    .li-rank { display: inline-flex; align-items: center; justify-content: center; min-width: 26px; height: 24px;
+      padding: 0 7px; border-radius: 5px; font-size: 14px; font-weight: 800; color: #fff;
+      background: linear-gradient(135deg, var(--team-color), color-mix(in srgb, var(--team-color) 55%, #000)); }
+    .li-elo { font-variant-numeric: tabular-nums; color: #fff; }
+    .li-flag { font-size: 18px; line-height: 1; display: inline-flex; align-items: center; gap: 5px; }
+    .li-cc { font-size: 12px; font-weight: 700; letter-spacing: .02em; color: #d6dbe6; text-transform: none; }
+    .li-handle { font-size: 13px; font-weight: 600; color: var(--duo-muted); margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .li-stats.is-empty { display: none; }
+
+    /* Team stats in the header */
+    .li-teamstats { display: flex; align-items: stretch; gap: 0; }
+    .li-tstat { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; padding: 0 20px; line-height: 1; }
+    .li-tstat + .li-tstat { border-left: 1px solid var(--duo-border); }
+    .li-tstat .v { font-family: 'Rajdhani','Inter',sans-serif; font-weight: 700; font-size: 34px; color: #fff; font-variant-numeric: tabular-nums; }
+    .li-tstat .v small { font-size: 16px; color: var(--duo-muted); font-weight: 700; }
+    .li-tstat .k { font-size: 10px; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; color: var(--duo-muted); }
+
+    /* Footer — brand "presented by" + sponsor logos */
+    .li-foot { flex: 0 0 auto; display: flex; align-items: center; justify-content: center; gap: 30px; min-height: 64px; margin-top: 26px; opacity: 0; }
+    #stage.show .li-foot { animation: footIn .6s cubic-bezier(.16,.84,.24,1) .5s both; }
+    @keyframes footIn { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: none; } }
+    .li-foot.is-empty { display: none; }
+    .li-presented { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 8px 22px;
+      background: linear-gradient(180deg, rgba(20,23,30,.96), rgba(10,12,16,.98)); border: 1px solid var(--duo-border); border-radius: 9px;
+      box-shadow: 0 8px 24px rgba(0,0,0,.4); }
+    .li-presented.is-empty { display: none; }
+    .li-pb-label { font-size: 9px; font-weight: 800; letter-spacing: .2em; text-transform: uppercase; color: var(--duo-muted); }
+    .li-pb-logo { height: 34px; max-width: 220px; object-fit: contain; filter: drop-shadow(0 2px 6px rgba(0,0,0,.35)); }
+    .li-sponsors { display: flex; align-items: center; gap: 22px; flex-wrap: wrap; justify-content: center; }
+    .li-sponsors.is-empty { display: none; }
+    .li-sponsor { height: 42px; max-width: 150px; object-fit: contain; opacity: .92; filter: drop-shadow(0 2px 6px rgba(0,0,0,.3)); }
   </style>
 </head>
 <body>
-  <div id="intro-stage">
-    <div class="top">
-      <span class="logo" id="intro-logo"></span>
-      <span class="teamname" id="intro-team"></span>
-      <span class="subtitle" id="intro-sub"></span>
+  <div id="stage">
+    <div class="li-head">
+      <img class="li-logo" id="li-logo" alt="">
+      <div class="li-head-text">
+        <div class="li-team" id="li-team">TEAM</div>
+        <div class="li-sub" id="li-sub">STARTING LINE-UP</div>
+      </div>
+      <div class="li-head-spacer"></div>
+      <div class="li-teamstats" id="li-teamstats"></div>
     </div>
-    <div class="players-grid" id="intro-grid"></div>
+    <div class="li-grid" id="li-grid"></div>
+    <div class="li-foot is-empty" id="li-foot">
+      <div class="li-presented is-empty" id="li-presented">
+        <span class="li-pb-label" id="li-pb-label">PRESENTED BY</span>
+        <img class="li-pb-logo" id="li-pb-logo" alt="" style="display:none">
+      </div>
+      <div class="li-sponsors is-empty" id="li-sponsors"></div>
+    </div>
   </div>
 
   <script src="scene-base.js"></script>
   <script>
-    const stage  = document.getElementById('intro-stage');
-    const logoEl = document.getElementById('intro-logo');
-    const teamEl = document.getElementById('intro-team');
-    const subEl  = document.getElementById('intro-sub');
-    const grid   = document.getElementById('intro-grid');
+    const el = (id) => document.getElementById(id);
+    const stage = el('stage'), grid = el('li-grid');
     const sideOverride = SceneBase.qp('side');
+    const EMBED = SceneBase.qp('embed') === '1';
     let _sig = '';
 
-    function initials(name) { return (name || '?').trim().slice(0, 2).toUpperCase(); }
+    function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c])); }
+    function initials(name) { const w = (name || '?').trim().split(/\s+/); return ((w[0]||'?')[0] + (w[1] ? w[1][0] : '')).toUpperCase(); }
+    function flagEmoji(cc) { cc = (cc || '').toUpperCase(); if (!/^[A-Z]{2}$/.test(cc)) return ''; return String.fromCodePoint(...[...cc].map((c) => 0x1F1E6 + c.charCodeAt(0) - 65)); }
+    // Common esports countries — enough to label a flag with its name instead of leaving it bare.
+    const COUNTRY_NAMES = { US:'USA', CA:'Canada', GB:'UK', IE:'Ireland', AU:'Australia', NZ:'New Zealand',
+      DE:'Germany', FR:'France', SE:'Sweden', NO:'Norway', DK:'Denmark', FI:'Finland', IS:'Iceland',
+      NL:'Netherlands', BE:'Belgium', CH:'Switzerland', AT:'Austria', ES:'Spain', PT:'Portugal', IT:'Italy',
+      GR:'Greece', PL:'Poland', CZ:'Czechia', HU:'Hungary', RO:'Romania', UA:'Ukraine', RU:'Russia', TR:'Turkey',
+      IL:'Israel', ZA:'South Africa', NG:'Nigeria', BR:'Brazil', MX:'Mexico', AR:'Argentina', CL:'Chile',
+      CO:'Colombia', PE:'Peru', VE:'Venezuela', EC:'Ecuador', JP:'Japan', KR:'South Korea', CN:'China',
+      TW:'Taiwan', HK:'Hong Kong', SG:'Singapore', ID:'Indonesia', MY:'Malaysia', PH:'Philippines',
+      TH:'Thailand', VN:'Vietnam', IN:'India', PK:'Pakistan' };
+    function countryName(cc) { return COUNTRY_NAMES[(cc || '').toUpperCase()] || ''; }
+    // The team's country badge for the header — only shown when every player who HAS a country
+    // shares the same one, so a mixed-region roster doesn't get a misleading single flag.
+    function teamCountry(players, data) {
+      const ccs = players.map((p) => { const pr = profileFor(data, p); return pr && pr.countryCode; }).filter(Boolean);
+      if (!ccs.length) return '';
+      const uniq = [...new Set(ccs.map((c) => c.toUpperCase()))];
+      return uniq.length === 1 ? uniq[0] : '';
+    }
+    function profileFor(data, p) {
+      const tag = (p.gamerTag || p.name || '').trim().toLowerCase();
+      return (tag && data.playerProfiles && data.playerProfiles[tag]) || null;
+    }
+    // Role text → position class + display label.
+    function posClass(role) {
+      const r = (role || '').toLowerCase();
+      if (/cap|\(c\)|captain/.test(r)) return 'is-cap';
+      if (/\bsub\b|substitute|6th|reserve/.test(r)) return 'is-sub';
+      if (/\balt\b|alternate|standin|stand-in/.test(r)) return 'is-alt';
+      return '';
+    }
 
-    const EMBED = SceneBase.qp('embed') === '1';   // ?embed=1 → force-show the live state (config preview)
     function render(data) {
+      data = data || {};
       const intro = data.intro || {};
-      stage.classList.toggle('show', !!intro.visible || EMBED);
-      if (!intro.visible && !EMBED) return;
+      const root = document.documentElement;
+      const color = SceneBase.brandColor(data), accent2 = SceneBase.brandAccent(data);
+      if (color) root.style.setProperty('--duo-accent', color);
+      if (accent2) root.style.setProperty('--duo-accent2', accent2);
+      if (data.fontFamily) root.style.fontFamily = `'${data.fontFamily}', 'Inter', system-ui, sans-serif`;
+
+      const visible = !!intro.visible || EMBED;
+      stage.classList.toggle('show', visible);
+      if (!visible) return;
 
       const side = (sideOverride === 'blue' || sideOverride === 'orange') ? sideOverride : (intro.side || 'blue');
       const team = SceneBase.teamSide(data, side);
 
-      const sig = JSON.stringify({ side, title: intro.title, name: team.name, logo: team.logo, color: team.color, players: team.players });
+      const brand = data.brand || {};
+      // Prefer desk-tagged sponsors; fall back to ALL sponsors only for legacy kits with no
+      // placement tags at all, and de-dupe by logo so none render twice.
+      const _anyTagged = (brand.deskSponsors || []).length || (brand.railSponsors || []).length || (brand.bannerSponsors || []).length;
+      const _rawSpons = (brand.deskSponsors || []).length ? brand.deskSponsors : (_anyTagged ? [] : (brand.sponsors || []));
+      const _seenSp = new Set();
+      const spons = (Array.isArray(_rawSpons) ? _rawSpons : []).filter((s) => s && s.logo && !_seenSp.has(s.logo) && (_seenSp.add(s.logo), true));
+      const sig = JSON.stringify({ side, title: intro.title, name: team.name, logo: team.logo, color: team.color,
+        players: team.players, pp: data.playerProfiles ? Object.keys(data.playerProfiles).length : 0,
+        ad: (data.scoreboardAd || {}).logo || '', sp: spons.map((s) => s && s.logo).join(','), foot: intro.showFooter !== false,
+        tr: (data.teamRecords || {}).enabled ? (data.teamRecords[side] || '') : '' });
       if (sig === _sig) return;
       _sig = sig;
 
-      document.documentElement.style.setProperty('--team-color', team.color);
-      teamEl.textContent = team.name;
-      subEl.textContent = intro.title || 'STARTING LINE-UP';
-      logoEl.style.backgroundImage = team.logo ? `url('${team.logo}')` : 'none';
+      root.style.setProperty('--team-color', team.color);
+      el('li-team').textContent = (team.name || 'TEAM').toUpperCase();
+      el('li-sub').textContent = (intro.title || 'STARTING LINE-UP').toUpperCase();
+      const logo = el('li-logo');
+      SceneBase.applyTeamLogo(logo, team.customLogo, team.logo);
+      logo.classList.toggle('on-dark', !!team.logoOnDark);
 
+      const players = (team.players && team.players.length) ? team.players : [{ name: 'TBD' }];
+
+      // Team stats auto-derived from start.gg-linked profiles: average 6mans ELO + roster size +
+      // season record (when the producer has Team Record enabled) + a country badge when the whole
+      // roster shares one nationality.
+      const elos = players.map((p) => { const pr = profileFor(data, p); return pr && pr.sixmans && pr.sixmans.elo; }).filter((e) => e > 0);
+      const avgElo = elos.length ? Math.round(elos.reduce((a, b) => a + b, 0) / elos.length) : null;
+      const tr = data.teamRecords || {};
+      const record = tr.enabled ? (tr[side] || '') : '';
+      const cc = teamCountry(players, data);
+      const ts = [];
+      if (cc) ts.push(`<div class="li-tstat"><span class="v" style="font-size:30px;">${flagEmoji(cc)}</span><span class="k">${esc(countryName(cc) || cc)}</span></div>`);
+      if (record) ts.push(`<div class="li-tstat"><span class="v">${esc(record)}</span><span class="k">Record</span></div>`);
+      if (avgElo) ts.push(`<div class="li-tstat"><span class="v">${avgElo}</span><span class="k">Avg ELO</span></div>`);
+      ts.push(`<div class="li-tstat"><span class="v">${players.length}</span><span class="k">${players.length === 1 ? 'Player' : 'Players'}</span></div>`);
+      el('li-teamstats').innerHTML = ts.join('');
+
+      // Skippable: producers who ALSO place the standalone [GFX] Sponsor Banner add-on source on
+      // this OBS scene should turn this off (Scenes → Intro → "Presented-by footer") to avoid
+      // showing the same sponsor logo twice — once from each source.
+      if (intro.showFooter === false) el('li-foot').style.display = 'none';
+      else { el('li-foot').style.display = ''; renderFooter(data, brand, spons); }
+
+      // Card width adapts to roster size so 1–6 players stay centred and large.
+      const n = players.length;
+      const cardW = n <= 3 ? 360 : n === 4 ? 340 : n <= 6 ? 300 : 260;
       grid.innerHTML = '';
-      const players = team.players.length ? team.players : [{ name: 'TBD' }];
-      const per = players.length <= 3 ? players.length : (players.length <= 8 ? 4 : 5);
-      grid.style.maxWidth = (per * 453 + (per - 1) * 50 + 120) + 'px';
-      grid.style.marginInline = 'auto';
 
       players.forEach((p, i) => {
-        const photo = p.photo || p.image || null;
-        const handle = p.handle || (p.platformId ? '@' + p.platformId : '') || p.role || '';
+        const prof = profileFor(data, p) || {};
+        const photo = p.photo || p.image || prof.image || '';
+        const role = (p.role || '').toString().trim();
+        const six = prof.sixmans || null;
+        const cc = prof.countryCode || '';
+
+        // Photo: explicit/start.gg photo → team logo placeholder → initials.
+        let photoHtml;
+        if (photo) photoHtml = `<img class="face" src="${esc(photo)}" alt="" onerror="this.remove()">`;
+        else if (team.logo) photoHtml = `<div class="logo-ph ${team.logoOnDark ? 'on-dark' : ''}"><img src="${esc(team.logo)}" alt=""></div>`;
+        else photoHtml = `<div class="initials">${esc(initials(p.name || p.gamerTag))}</div>`;
+
+        const posHtml = role ? `<span class="li-pos ${posClass(role)}">${esc(role)}</span>` : '';
+
+        // start.gg handle (gamertag) under the name when it differs from the display name.
+        const name = (p.name || p.gamerTag || ('Player ' + (i + 1))).toString();
+        const tag = (p.gamerTag || '').toString().trim();
+        const handle = (tag && tag.toLowerCase() !== name.trim().toLowerCase()) ? '@' + tag : '';
+
+        // Stats line: 6mans rank+ELO, country flag + name.
+        const stats = [];
+        if (six && six.rank) stats.push(`<span class="li-stat"><span class="li-rank">${esc(six.rank)}</span>${six.elo ? `<span class="li-elo">${six.elo}</span><span class="lbl">ELO</span>` : ''}</span>`);
+        else if (six && six.elo) stats.push(`<span class="li-stat"><span class="li-elo">${six.elo}</span><span class="lbl">ELO</span></span>`);
+        if (cc) stats.push(`<span class="li-stat li-flag">${flagEmoji(cc)}<span class="li-cc">${esc(countryName(cc) || cc)}</span></span>`);
+
         const card = document.createElement('div');
-        card.className = 'player-card';
-        card.style.animationDelay = (0.9 + i * 0.18) + 's';
+        card.className = 'li-card';
+        card.style.width = cardW + 'px';
+        card.style.animationDelay = (0.12 + i * 0.1) + 's';
         card.innerHTML = `
-          <div class="hero-image">${photo ? `<img src="${photo}" alt="">` : `<div class="placeholder">${initials(p.name)}</div>`}</div>
-          <div class="player-info">
-            <span class="battletag">${(p.name || 'Player ' + (i + 1))}</span>
-            ${handle ? `<span class="handle">${handle}</span>` : ''}
+          <div class="li-photo">${photoHtml}${posHtml}</div>
+          <div class="li-plate">
+            <div class="li-name">${esc(name)}</div>
+            ${handle ? `<div class="li-handle">${esc(handle)}</div>` : ''}
+            <div class="li-stats ${stats.length ? '' : 'is-empty'}">${stats.join('')}</div>
           </div>`;
         grid.appendChild(card);
       });
     }
+
+    // Footer: brand "presented by" (scoreboardAd) + sponsor logos (brand desk/sponsors).
+    function renderFooter(data, brand, spons) {
+      const slot = data.scoreboardAd || {};
+      const pres = el('li-presented'), pbLogo = el('li-pb-logo'), pbLabel = el('li-pb-label');
+      pbLabel.textContent = (slot.label || 'PRESENTED BY').toString().trim();
+      if (slot.logo) { pbLogo.src = slot.logo; pbLogo.style.display = ''; pres.classList.remove('is-empty'); }
+      else { pbLogo.style.display = 'none'; pbLogo.removeAttribute('src'); pres.classList.add('is-empty'); }
+      const sponsors = (spons || []).filter((s) => s && s.logo);
+      const sp = el('li-sponsors');
+      sp.innerHTML = sponsors.map((s) => `<img class="li-sponsor" src="${esc(s.logo)}" alt="${esc(s.name || '')}">`).join('');
+      sp.classList.toggle('is-empty', !sponsors.length);
+      el('li-foot').classList.toggle('is-empty', pres.classList.contains('is-empty') && !sponsors.length);
+    }
+
     SceneBase.connect(render);
 
     if (location.protocol === 'file:') {
-      render({ teams: { blue: { name: 'Frost Esports', color: '#3b82f6', logo: null,
-        players: [{ name: 'Aqua', platformId: 'aqua' }, { name: 'Nova', platformId: 'nova' }, { name: 'Rhythm', platformId: 'rhythm' }] } },
-        intro: { visible: true, side: 'blue', title: 'Starting Line-up' } });
+      document.documentElement.classList.add('preview');
+      render({
+        teams: { blue: { name: 'Frost Esports', color: '#3b82f6', logo: null, players: [
+          { name: 'Aqua', gamerTag: 'Aqua', role: 'Captain' },
+          { name: 'Nova', gamerTag: 'Nova', role: 'Starter' },
+          { name: 'Rhythm', gamerTag: 'Rhythm', role: 'Starter' },
+          { name: 'Echo', gamerTag: 'Echo', role: 'Sub' }
+        ] } },
+        playerProfiles: {
+          aqua: { gamerTag: 'AquaRL', sixmans: { rank: 'S', elo: 3120 }, countryCode: 'us' },
+          nova: { sixmans: { rank: 'A', elo: 2655 }, countryCode: 'ca' },
+          rhythm: { sixmans: { rank: 'B+', elo: 2210 }, countryCode: 'gb' },
+          echo: { sixmans: { rank: 'C', elo: 1740 }, countryCode: 'de' }
+        },
+        brand: { sponsors: [
+          { name: 'Acme', logo: 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="130" height="46"><text x="8" y="33" font-size="26" fill="#fff" font-family="Arial" font-weight="bold">ACME</text></svg>') },
+          { name: 'Nova', logo: 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="130" height="46"><text x="8" y="33" font-size="26" fill="#fff" font-family="Arial" font-weight="bold">NOVA</text></svg>') }
+        ] },
+        scoreboardAd: { label: 'PRESENTED BY', logo: 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="180" height="40"><rect width="180" height="40" rx="5" fill="#1a1d24"/><text x="90" y="27" font-size="17" fill="#e8eaf0" text-anchor="middle" font-family="Arial" font-weight="bold">SPONSOR</text></svg>') },
+        teamRecords: { enabled: true, blue: '14-3' },
+        intro: { visible: true, side: 'blue', title: 'Starting Line-up', showFooter: true }
+      });
+      stage.classList.add('show');
     }
   </script>
 </body>

@@ -88,6 +88,23 @@ class TwitchClient {
     return res.data.data?.[0] || null;
   }
 
+  async getClips(broadcasterId, { cursor, first = 100 } = {}) {
+    try {
+      const params = { broadcaster_id: broadcasterId, first: Math.min(Number(first) || 100, 100) };
+      if (cursor) params.after = cursor;
+      const res = await axios.get(`${TWITCH_API_BASE}/clips`, { params, headers: this.headers });
+      const clips = (res.data.data || []).map(clip => ({
+        ...clip,
+        // Derive MP4 download URL from thumbnail URL
+        _videoUrl: (clip.thumbnail_url || '').replace(/-preview-\d+x\d+\.jpg$/, '.mp4')
+      }));
+      return { clips, cursor: res.data.pagination?.cursor || null };
+    } catch (err) {
+      console.error('[Twitch] getClips error:', err.message);
+      return { clips: [], cursor: null };
+    }
+  }
+
   async getPrediction(broadcasterId, predictionId) {
     try {
       const res = await axios.get(`${TWITCH_API_BASE}/predictions`, {
@@ -134,23 +151,12 @@ class TwitchClient {
     this.headers['Authorization'] = `Bearer ${newAccessToken}`;
   }
 
-  async giveChannelPoints(broadcasterId, userId, amount) {
-    try {
-      const res = await axios.post(
-        `${TWITCH_API_BASE}/channel_points/custom_rewards/redemptions`,
-        {
-          broadcaster_id: broadcasterId,
-          user_id: userId,
-          reward_id: 'builtin-points',
-          amount
-        },
-        { headers: this.headers }
-      );
-      return true;
-    } catch (err) {
-      console.error('[Twitch] giveChannelPoints error:', err.message);
-      return false;
-    }
+  async giveChannelPoints(_broadcasterId, _userId, _amount) {
+    // Twitch API does not support granting channel points programmatically.
+    // The /channel_points/custom_rewards/redemptions endpoint only fulfills/cancels
+    // existing user-initiated redemptions — it cannot create arbitrary point grants.
+    console.warn('[Twitch] giveChannelPoints: not supported by Twitch API — no-op');
+    return false;
   }
 
   async updateChannel(broadcasterId, { title, gameId } = {}) {
@@ -291,6 +297,16 @@ class TwitchClient {
         params: { broadcaster_id: broadcasterId },
         headers: this.headers
       }
+    );
+    return res.data.data?.[0] || res.data;
+  }
+
+  // Run a Twitch ad break (commercial). length in seconds: 30/60/90/120/150/180.
+  async runCommercial(broadcasterId, length = 30) {
+    const res = await axios.post(
+      `${TWITCH_API_BASE}/channels/commercial`,
+      { broadcaster_id: broadcasterId, length: Number(length) || 30 },
+      { headers: this.headers }
     );
     return res.data.data?.[0] || res.data;
   }

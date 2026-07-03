@@ -183,12 +183,30 @@ function updateTrayEncode(progress) {
   }
 }
 
+function createSplashWindow() {
+  const splash = new BrowserWindow({
+    width: 400,
+    height: 240,
+    frame: false,
+    show: false,
+    resizable: false,
+    center: true,
+    backgroundColor: '#0b0c0f',
+    skipTaskbar: true,
+    webPreferences: { nodeIntegration: false, contextIsolation: true }
+  });
+  splash.loadFile(path.join(__dirname, 'splash.html'));
+  splash.once('ready-to-show', () => splash.show());
+  return splash;
+}
+
 function createControlPanel() {
   controlPanel = new BrowserWindow({
     width: 760,
     height: 820,
     minWidth: 680,
     minHeight: 600,
+    show: false,   // paint fully before showing to eliminate white-flash
     title: 'NE | Broadcast Suite',
     icon: path.join(__dirname, 'assets', 'icon.png'),
     backgroundColor: '#0b0c0f',
@@ -204,6 +222,20 @@ function createControlPanel() {
   });
   controlPanel.loadFile(path.join(__dirname, 'control-panel', 'index.html'));
   controlPanel.setMenuBarVisibility(false);
+
+  // F12 / Ctrl+Shift+I → toggle DevTools on the control panel
+  controlPanel.webContents.on('before-input-event', (event, input) => {
+    if (input.type !== 'keyDown') return;
+    const devToolsKey = input.key === 'F12' ||
+      (input.key === 'I' && input.control && input.shift);
+    if (devToolsKey) {
+      if (controlPanel.webContents.isDevToolsOpened()) {
+        controlPanel.webContents.closeDevTools();
+      } else {
+        controlPanel.webContents.openDevTools({ mode: 'detach' });
+      }
+    }
+  });
 
   controlPanel.on('focus', () => {
     controlPanel.webContents.focus();
@@ -312,6 +344,45 @@ function setupPopoutHandler() {
     _popoutWindows[page] = win;
     win.on('closed', () => { delete _popoutWindows[page]; });
   });
+
+  // Print a report (HTML string). Electron has NO Chromium print-preview UI — webContents.print()
+  // only shows the classic OS print dialog (no preview pane). To give the real print preview (live
+  // PDF pane + "Save as PDF" destination), open the report in the user's DEFAULT BROWSER and
+  // auto-trigger its print preview. `mode: 'pdf'` instead saves a PDF straight to a chosen path.
+  ipcMain.handle('print-report', async (_event, html, mode) => {
+    if (!html || typeof html !== 'string') return { ok: false, error: 'no-html' };
+    const { dialog, shell } = require('electron');
+    try {
+      if (mode === 'pdf') {
+        // Direct Save-as-PDF (no browser): render offscreen → printToPDF → Save dialog.
+        const win = new BrowserWindow({ show: false, webPreferences: { contextIsolation: true, nodeIntegration: false } });
+        const tmp = path.join(os.tmpdir(), 'ne-report-' + Date.now() + '.html');
+        try {
+          fs.writeFileSync(tmp, html, 'utf8');
+          await win.loadFile(tmp);
+          await new Promise((r) => setTimeout(r, 300));
+          const pdf = await win.webContents.printToPDF({ printBackground: true, pageSize: 'A4' });
+          const res = await dialog.showSaveDialog(controlPanel || win, { title: 'Save report as PDF', defaultPath: 'ne-report.pdf', filters: [{ name: 'PDF', extensions: ['pdf'] }] });
+          if (res.canceled || !res.filePath) return { ok: false, canceled: true };
+          fs.writeFileSync(res.filePath, pdf);
+          shell.openPath(res.filePath).catch(() => {});
+          return { ok: true, saved: res.filePath };
+        } finally {
+          try { win.destroy(); } catch (_) {}
+          try { fs.unlinkSync(tmp); } catch (_) {}
+        }
+      }
+      // Default: open in the browser with auto print preview.
+      const withPrint = html.replace('</body>', '<script>window.addEventListener("load",function(){setTimeout(function(){try{window.print();}catch(e){}},400);});</script></body>');
+      const tmp = path.join(os.tmpdir(), 'ne-report-' + Date.now() + '.html');
+      fs.writeFileSync(tmp, withPrint, 'utf8');
+      const err = await shell.openPath(tmp);   // opens .html in the default browser
+      if (err) return { ok: false, error: err };
+      return { ok: true, opened: true };
+    } catch (e) {
+      return { ok: false, error: e.message };
+    }
+  });
 }
 
 // Main setup - only run when app is available
@@ -372,10 +443,34 @@ function setupApp() {
 
   app.on('ready', () => {
     console.log('[APP] App ready event fired');
-    try {
-      setupUserDataFolder();
+    setupUserDataFolder();
 
-      // Load server
+    // Show splash immediately, then load the main panel hidden in the background.
+    const splash = createSplashWindow();
+    createControlPanel();
+    setupPopoutHandler();
+    createTray();
+
+    // Transition from splash to main panel. Both conditions must be met:
+    //   1. The main panel has finished its first paint (ready-to-show)
+    //   2. At least 5 seconds have elapsed so the splash animation plays fully
+    let _panelReady = false;
+    let _timerDone  = false;
+    const showMain = () => {
+      if (!_panelReady || !_timerDone) return;
+      try { if (!splash.isDestroyed()) splash.close(); } catch (_) {}
+      if (controlPanel && !controlPanel.isDestroyed()) {
+        controlPanel.show();
+        controlPanel.focus();
+      }
+    };
+    controlPanel.once('ready-to-show', () => { _panelReady = true; showMain(); });
+    setTimeout(() => { _timerDone = true; showMain(); }, 5000);
+    // Hard safety: give up and show the panel after 15s regardless.
+    setTimeout(() => { _timerDone = true; _panelReady = true; showMain(); }, 15000);
+
+    try {
+      // Load server AFTER the window exists so startup I/O doesn't block the splash paint.
       server = require('./server');
       server.start(__dirname);
     } catch (e) {
@@ -398,9 +493,6 @@ function setupApp() {
       server.setRlSpectatorUiHotkeyChangeCallback(syncRlHideNativeUiHotkey);
     }
     syncRlHideNativeUiHotkey();
-    createControlPanel();
-    setupPopoutHandler();
-    createTray();
     setupAutoUpdate();
   });
 

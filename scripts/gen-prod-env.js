@@ -20,7 +20,14 @@ const outPath = path.join(root, '.env.production');
 // Public, ship-safe values only. Everything else (TWITCH_CLIENT_SECRET,
 // DISCORD_CLIENT_SECRET, BUG_REPORT_WEBHOOK, BROADCAST_API_KEY, *_WEBHOOK_SECRET,
 // AZURE_*) is a secret and is intentionally dropped.
-const PUBLIC_KEYS = ['DISCORD_CLIENT_ID', 'TWITCH_CLIENT_ID', 'BROADCAST_REMOTE_URL'];
+const PUBLIC_KEYS = [
+  'DISCORD_CLIENT_ID', 'TWITCH_CLIENT_ID', 'BROADCAST_REMOTE_URL',
+  // Social publishing — safe to distribute:
+  //   Google Desktop OAuth "client_secret" is documented as NOT actually secret.
+  //   Twitter uses PKCE with no client_secret for public native app clients.
+  'GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET',
+  'TWITTER_CLIENT_ID',
+];
 
 function parseEnv(text) {
   const out = {};
@@ -61,8 +68,9 @@ for (const key of PUBLIC_KEYS) {
   else missing.push(key);
 }
 
-// BROADCAST_REMOTE_URL has a hardcoded default in server.js, so it's fine if absent here.
-const hardMissing = missing.filter((k) => k !== 'BROADCAST_REMOTE_URL');
+// These keys have hardcoded fallbacks or are optional features — absence is a warning only.
+const OPTIONAL_KEYS = new Set(['BROADCAST_REMOTE_URL', 'GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET', 'TWITTER_CLIENT_ID']);
+const hardMissing = missing.filter((k) => !OPTIONAL_KEYS.has(k));
 if (hardMissing.length) {
   console.error('[gen-prod-env] Missing required public keys in .env.local: ' + hardMissing.join(', '));
   console.error('               Discord/Twitch login will not work in the build without them.');

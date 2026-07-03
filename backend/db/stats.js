@@ -92,7 +92,22 @@ function _nextId(table) {
 
 // ─── Match ───────────────────────────────────────────────────────────────────
 
-function startMatch({ gameType, teamA, teamB, logoA, logoB, bestOf, startggSetId, tournament }) {
+function startMatch({ gameType, teamA, teamB, logoA, logoB, bestOf, startggSetId, tournament, startedAt }) {
+  // If this match is tied to a start.gg set we've already recorded (e.g. the official result was
+  // imported, or it was streamed before), REUSE that row instead of creating a duplicate — so the
+  // live games + player stats land on the same record as the official result ("one clean record").
+  // Drop any placeholder games (no player stats) from a prior import so the live games replace them.
+  if (startggSetId) {
+    const existing = DB.matches.find((m) => m.startgg_set_id && String(m.startgg_set_id) === String(startggSetId));
+    if (existing) {
+      const psGameIds = new Set([].concat(DB.rl_player_stats, DB.cs2_player_stats, DB.val_player_stats || []).map((p) => p.game_id));
+      DB.games = DB.games.filter((g) => g.match_id !== existing.id || psGameIds.has(g.id));
+      if (tournament && !existing.tournament) existing.tournament = tournament;
+      _queueSave();
+      sqlite.store.recordMatch(existing);
+      return existing.id;
+    }
+  }
   const record = {
     id: _nextId('matches'),
     game_type:      gameType  || 'rl',
@@ -106,7 +121,7 @@ function startMatch({ gameType, teamA, teamB, logoA, logoB, bestOf, startggSetId
     winner:         null,
     startgg_set_id: startggSetId || null,
     tournament:     tournament   || null,
-    started_at:     Date.now(),
+    started_at:     startedAt || Date.now(),   // startedAt lets historical imports keep real dates
     ended_at:       null
   };
   DB.matches.push(record);
@@ -115,20 +130,25 @@ function startMatch({ gameType, teamA, teamB, logoA, logoB, bestOf, startggSetId
   return record.id;
 }
 
-function endMatch(matchId, { scoreA, scoreB, winner } = {}) {
+function endMatch(matchId, { scoreA, scoreB, winner, endedAt } = {}) {
   const m = DB.matches.find(r => r.id === matchId);
   if (!m) return;
-  m.score_a  = scoreA ?? m.score_a;
-  m.score_b  = scoreB ?? m.score_b;
-  m.winner   = winner || null;
-  m.ended_at = Date.now();
+  // A start.gg-linked row already carries the authoritative final result — don't let a live
+  // capture overwrite it (live series score can lag the official set). Only fill if missing.
+  const official = m.startgg_set_id && m.winner;
+  if (!official) {
+    m.score_a = scoreA ?? m.score_a;
+    m.score_b = scoreB ?? m.score_b;
+    m.winner  = winner || m.winner || null;
+  }
+  m.ended_at = endedAt || m.ended_at || Date.now();
   _queueSave();
   sqlite.store.recordMatch(m);
 }
 
 // ─── Game ────────────────────────────────────────────────────────────────────
 
-function startGame({ matchId, gameNumber, gameType, map }) {
+function startGame({ matchId, gameNumber, gameType, map, startedAt }) {
   const record = {
     id:           _nextId('games'),
     match_id:     matchId,
@@ -140,7 +160,7 @@ function startGame({ matchId, gameNumber, gameType, map }) {
     winner:       null,
     map:          map  || null,
     overtime:     0,
-    started_at:   Date.now(),
+    started_at:   startedAt || Date.now(),
     ended_at:     null
   };
   DB.games.push(record);
@@ -149,7 +169,7 @@ function startGame({ matchId, gameNumber, gameType, map }) {
   return record.id;
 }
 
-function endGame(gameId, { scoreA, scoreB, winner, durationSec, overtime, map } = {}) {
+function endGame(gameId, { scoreA, scoreB, winner, durationSec, overtime, map, endedAt } = {}) {
   const g = DB.games.find(r => r.id === gameId);
   if (!g) return;
   g.score_a     = scoreA      ?? g.score_a;
@@ -158,7 +178,7 @@ function endGame(gameId, { scoreA, scoreB, winner, durationSec, overtime, map } 
   g.duration_sec = durationSec || null;
   g.overtime    = overtime ? 1 : 0;
   if (map) g.map = map;
-  g.ended_at    = Date.now();
+  g.ended_at    = endedAt || Date.now();
   _queueSave();
   sqlite.store.recordGame(g);
 }
@@ -299,17 +319,19 @@ function getMatchDetail(matchId) {
 function getPlayerHistory(playerName, limit = 50) {
   const DB = _source();
   const needle = playerName.toLowerCase();
+  const gameById = new Map(DB.games.map(g => [g.id, g]));
+  const matchById = new Map(DB.matches.map(m => [m.id, m]));
   return DB.rl_player_stats
     .filter(r => r.player_name.toLowerCase().includes(needle))
     .sort((a, b) => {
-      const ga = DB.games.find(g => g.id === a.game_id);
-      const gb = DB.games.find(g => g.id === b.game_id);
+      const ga = gameById.get(a.game_id);
+      const gb = gameById.get(b.game_id);
       return (gb?.started_at || 0) - (ga?.started_at || 0);
     })
     .slice(0, limit)
     .map(r => {
-      const g = DB.games.find(g => g.id === r.game_id) || {};
-      const m = DB.matches.find(m => m.id === g.match_id) || {};
+      const g = gameById.get(r.game_id) || {};
+      const m = matchById.get(g.match_id) || {};
       return { ...r, game_number: g.game_number, game_type: g.game_type,
                game_at: g.started_at, team_a: m.team_a, team_b: m.team_b,
                match_score_a: m.score_a, match_score_b: m.score_b };
@@ -522,6 +544,209 @@ function listPlayers() {
     .sort((a, b) => a.player.localeCompare(b.player));
 }
 
+// ─── Tournament-organizer analytics ──────────────────────────────────────────
+
+// Per-map plays + win split, by game type. Drives "most played / map win rates".
+function getMapStats() {
+  const DB = _source();
+  const byKey = {};
+  DB.games.filter((g) => g.ended_at && g.map).forEach((g) => {
+    const key = (g.game_type || '?') + '|' + g.map;
+    const m = byKey[key] || (byKey[key] = { map: g.map, game_type: g.game_type || '?', played: 0, aWins: 0, bWins: 0, draws: 0, overtime: 0 });
+    m.played++;
+    if (g.winner === 'a') m.aWins++;
+    else if (g.winner === 'b') m.bWins++;
+    else m.draws++;
+    if (g.overtime) m.overtime++;
+  });
+  return Object.values(byKey).sort((x, y) => y.played - x.played);
+}
+
+// Match + game duration distribution — for schedule planning / "match pacing".
+function getPacing(limit = 200) {
+  const DB = _source();
+  // Prefer an explicit duration_sec; fall back to ended_at - started_at so pacing works
+  // even before duration_sec is populated by the game integrations.
+  const gameDur = (g) => g.duration_sec > 0 ? g.duration_sec : (g.ended_at && g.started_at ? Math.round((g.ended_at - g.started_at) / 1000) : 0);
+  const games = DB.games.filter((g) => g.ended_at && gameDur(g) > 0);
+  const matches = DB.matches.filter((m) => m.ended_at && m.started_at);
+  const gDur = games.map(gameDur);
+  const mDur = matches.map((m) => Math.round((m.ended_at - m.started_at) / 1000)).filter((s) => s > 0);
+  const stat = (arr) => {
+    if (!arr.length) return { count: 0, avg: 0, min: 0, max: 0, median: 0 };
+    const s = arr.slice().sort((a, b) => a - b);
+    const sum = s.reduce((a, b) => a + b, 0);
+    return { count: s.length, avg: Math.round(sum / s.length), min: s[0], max: s[s.length - 1], median: s[Math.floor(s.length / 2)] };
+  };
+  const byGame = {};
+  ['rl', 'cs2', 'valorant'].forEach((gt) => {
+    const d = games.filter((g) => g.game_type === gt).map(gameDur);
+    if (d.length) byGame[gt] = stat(d);
+  });
+  return { games: stat(gDur), matches: stat(mDur), byGame, recentGameDurations: gDur.slice(-limit) };
+}
+
+// ─── Filterable dashboard (the analytics single source of truth) ─────────────
+// Distinct tournaments / games / date bounds — populates the global filter bar.
+function getFilterOptions() {
+  const DB = _source();
+  const tournaments = {}; const games = {}; let min = Infinity, max = 0;
+  DB.matches.forEach((m) => {
+    if (!m.ended_at) return;
+    if (m.tournament) tournaments[m.tournament] = (tournaments[m.tournament] || 0) + 1;
+    if (m.game_type) games[m.game_type] = (games[m.game_type] || 0) + 1;
+    if (m.started_at) { if (m.started_at < min) min = m.started_at; if (m.started_at > max) max = m.started_at; }
+  });
+  return {
+    tournaments: Object.entries(tournaments).map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count),
+    games: Object.entries(games).map(([id, count]) => ({ id, count })).sort((a, b) => b.count - a.count),
+    minDate: isFinite(min) ? min : null, maxDate: max || null
+  };
+}
+
+function _stat(arr) {
+  if (!arr.length) return { count: 0, avg: 0, min: 0, max: 0, median: 0, total: 0 };
+  const s = arr.slice().sort((a, b) => a - b); const total = s.reduce((a, b) => a + b, 0);
+  return { count: s.length, avg: Math.round(total / s.length), min: s[0], max: s[s.length - 1], median: s[Math.floor(s.length / 2)], total };
+}
+function _histogram(values, bins) {
+  if (!values.length) return [];
+  const min = Math.min(...values), max = Math.max(...values);
+  if (max === min) return [{ label: Math.round(min / 60) + 'm', count: values.length }];
+  const w = (max - min) / bins;
+  const b = Array.from({ length: bins }, (_, i) => ({ lo: min + i * w, hi: min + (i + 1) * w, count: 0 }));
+  values.forEach((v) => { let i = Math.floor((v - min) / w); if (i >= bins) i = bins - 1; if (i < 0) i = 0; b[i].count++; });
+  return b.map((x) => ({ label: Math.round(x.lo / 60) + '–' + Math.round(x.hi / 60) + 'm', count: x.count }));
+}
+
+// One filtered pass → every aggregate the dashboard needs. filters: { from, to, game, tournament }.
+function getDashboard({ from, to, game, tournament } = {}) {
+  const DB = _source();
+  const lo = from ? Number(from) : 0, hi = to ? Number(to) : Infinity;
+  const gf = (game && game !== 'all') ? game : null;
+  const tf = (tournament && tournament !== 'all') ? tournament : null;
+  const mAll = new Map(DB.matches.map((m) => [m.id, m]));
+  const matchIn = (m) => m.ended_at && m.started_at >= lo && m.started_at <= hi && (!gf || m.game_type === gf) && (!tf || m.tournament === tf);
+  const matches = DB.matches.filter(matchIn);
+  const mById = new Map(matches.map((m) => [m.id, m]));
+  // Games are filtered on their OWN date/type (+ parent tournament) and only require the GAME to be
+  // ended — so player stats from live broadcasts whose match was never formally closed still count.
+  const gameIn = (g) => {
+    if (!g.ended_at) return false;
+    const pm = mAll.get(g.match_id);
+    const date = g.started_at || (pm && pm.started_at) || 0;
+    if (date < lo || date > hi) return false;
+    if (gf && g.game_type !== gf) return false;
+    if (tf && (!pm || pm.tournament !== tf)) return false;
+    return true;
+  };
+  const games = DB.games.filter(gameIn);
+  const gIds = new Set(games.map((g) => g.id));
+  const gameDur = (g) => g.duration_sec > 0 ? g.duration_sec : (g.ended_at && g.started_at ? Math.round((g.ended_at - g.started_at) / 1000) : 0);
+
+  // Timeline: matches + games per day (sorted).
+  const byDay = {};
+  const bucket = (k) => byDay[k] || (byDay[k] = { date: k, matches: 0, games: 0 });
+  matches.forEach((m) => { bucket(new Date(m.started_at).toISOString().slice(0, 10)).matches++; });
+  games.forEach((g) => { const d = g.started_at || (mAll.get(g.match_id) || {}).started_at; if (d) bucket(new Date(d).toISOString().slice(0, 10)).games++; });
+  const timeline = Object.values(byDay).sort((a, b) => a.date.localeCompare(b.date));
+
+  // Team records.
+  const rec = {};
+  const bump = (name, win) => { if (!name) return; const r = rec[name] || (rec[name] = { team: name, wins: 0, losses: 0, matches: 0 }); r.matches++; if (win) r.wins++; else r.losses++; };
+  matches.filter((m) => m.winner).forEach((m) => { const aWon = m.winner === 'a'; bump(m.team_a, aWon); bump(m.team_b, !aWon); });
+  const teams = Object.values(rec).map((r) => ({ ...r, winPct: r.matches ? Math.round((r.wins / r.matches) * 100) : 0 })).sort((a, b) => b.wins - a.wins || b.winPct - a.winPct);
+
+  // Player leaders (only player rows whose game is in range).
+  const rl = {}, cs2 = {}, val = {};
+  DB.rl_player_stats.forEach((p) => { if (!gIds.has(p.game_id)) return; const k = p.player_name || '?'; const a = rl[k] || (rl[k] = { player: k, games: 0, goals: 0, assists: 0, saves: 0, shots: 0, demos: 0, score: 0 }); a.games++; a.goals += p.goals || 0; a.assists += p.assists || 0; a.saves += p.saves || 0; a.shots += p.shots || 0; a.demos += p.demos || 0; a.score += p.score || 0; });
+  DB.cs2_player_stats.forEach((p) => { if (!gIds.has(p.game_id)) return; const k = p.player_name || '?'; const a = cs2[k] || (cs2[k] = { player: k, games: 0, kills: 0, deaths: 0, assists: 0, hs: 0, mvps: 0, score: 0 }); a.games++; a.kills += p.kills || 0; a.deaths += p.deaths || 0; a.assists += p.assists || 0; a.hs += p.hs_kills || 0; a.mvps += p.mvps || 0; a.score += p.score || 0; });
+  (DB.val_player_stats || []).forEach((p) => { if (!gIds.has(p.game_id)) return; const k = p.player_name || '?'; const a = val[k] || (val[k] = { player: k, games: 0, kills: 0, deaths: 0, assists: 0, agent: p.agent || '' }); a.games++; a.kills += p.kills || 0; a.deaths += p.deaths || 0; a.assists += p.assists || 0; if (p.agent) a.agent = p.agent; });
+  const leaders = {
+    rl: Object.values(rl).map((a) => ({ ...a, gpg: a.games ? +(a.goals / a.games).toFixed(2) : 0 })).sort((x, y) => y.goals - x.goals).slice(0, 100),
+    cs2: Object.values(cs2).map((a) => ({ ...a, kd: a.deaths ? +(a.kills / a.deaths).toFixed(2) : a.kills })).sort((x, y) => y.kills - x.kills).slice(0, 100),
+    val: Object.values(val).map((a) => ({ ...a, kd: a.deaths ? +(a.kills / a.deaths).toFixed(2) : a.kills })).sort((x, y) => y.kills - x.kills).slice(0, 100)
+  };
+
+  // Map stats.
+  const maps = {};
+  games.filter((g) => g.map).forEach((g) => { const key = (g.game_type || '?') + '|' + g.map; const m = maps[key] || (maps[key] = { map: g.map, game_type: g.game_type || '?', played: 0, aWins: 0, bWins: 0, overtime: 0 }); m.played++; if (g.winner === 'a') m.aWins++; else if (g.winner === 'b') m.bWins++; if (g.overtime) m.overtime++; });
+  const mapStats = Object.values(maps).sort((a, b) => b.played - a.played);
+
+  // Pacing.
+  const mDur = matches.map((m) => Math.round((m.ended_at - m.started_at) / 1000)).filter((s) => s > 0);
+  const gDur = games.map(gameDur).filter((s) => s > 0);
+  const pacing = { matches: _stat(mDur), games: _stat(gDur), histogram: _histogram(mDur, 8) };
+
+  // Per-tournament breakdown.
+  const tour = {};
+  matches.forEach((m) => { const t = m.tournament || '(none)'; const e = tour[t] || (tour[t] = { tournament: t, game: m.game_type, matches: 0, games: 0, teams: new Set(), firstAt: m.started_at, lastAt: m.started_at }); e.matches++; if (m.team_a) e.teams.add(m.team_a); if (m.team_b) e.teams.add(m.team_b); if (m.started_at < e.firstAt) e.firstAt = m.started_at; if (m.started_at > e.lastAt) e.lastAt = m.started_at; });
+  games.forEach((g) => { const m = mAll.get(g.match_id); const t = (m && m.tournament) || '(none)'; if (tour[t]) tour[t].games++; });
+  const perTournament = Object.values(tour).map((e) => ({ tournament: e.tournament, game: e.game, matches: e.matches, games: e.games, teams: e.teams.size, firstAt: e.firstAt, lastAt: e.lastAt })).sort((a, b) => b.lastAt - a.lastAt);
+
+  return {
+    totals: { matches: matches.length, games: games.length, teams: teams.length, players: leaders.rl.length + leaders.cs2.length + leaders.val.length, tournaments: perTournament.length },
+    timeline, teams, leaders, mapStats, pacing, perTournament
+  };
+}
+
+// All start.gg set IDs already recorded — lets the start.gg importer skip duplicates.
+function getStartggSetIds() {
+  const DB = _source();
+  return DB.matches.filter((m) => m.startgg_set_id).map((m) => String(m.startgg_set_id));
+}
+
+// Tournaments seen in recorded matches (with completion + date range).
+function getTournaments() {
+  const DB = _source();
+  const t = {};
+  DB.matches.filter((m) => m.tournament).forEach((m) => {
+    const e = t[m.tournament] || (t[m.tournament] = { tournament: m.tournament, matches: 0, completed: 0, firstAt: m.started_at, lastAt: m.started_at });
+    e.matches++;
+    if (m.ended_at) e.completed++;
+    if (m.started_at && m.started_at < e.firstAt) e.firstAt = m.started_at;
+    if (m.started_at && m.started_at > e.lastAt) e.lastAt = m.started_at;
+  });
+  return Object.values(t).sort((a, b) => (b.lastAt || 0) - (a.lastAt || 0));
+}
+
+// Delete one match + its cascade (games + all player stats for those games).
+function deleteMatch(id) {
+  id = Number(id);
+  const before = DB.matches.length;
+  const gameIds = new Set(DB.games.filter((g) => g.match_id === id).map((g) => g.id));
+  DB.matches = DB.matches.filter((m) => m.id !== id);
+  DB.games = DB.games.filter((g) => g.match_id !== id);
+  DB.rl_player_stats = DB.rl_player_stats.filter((r) => !gameIds.has(r.game_id));
+  DB.cs2_rounds = DB.cs2_rounds.filter((r) => !gameIds.has(r.game_id));
+  DB.cs2_player_stats = DB.cs2_player_stats.filter((r) => !gameIds.has(r.game_id));
+  DB.val_player_stats = DB.val_player_stats.filter((r) => !gameIds.has(r.game_id));
+  if (DB.matches.length !== before) { try { sqlite.store.deleteMatch(id); } catch (e) {} _queueSave(); return true; }
+  return false;
+}
+// Wipe ALL match/game/player-stat history (fresh reporting).
+function clearAllMatches() {
+  ['matches', 'games', 'rl_player_stats', 'cs2_rounds', 'cs2_player_stats', 'val_player_stats'].forEach((k) => { DB[k].length = 0; });
+  _seq = { matches: 0, games: 0, rl: 0, cs2r: 0, cs2p: 0, val: 0 };
+  try { sqlite.store.clearAll(); } catch (e) {}
+  _queueSave();
+  return true;
+}
+
+// Delete every match a team appears in (team-level clear) — cascades via deleteMatch.
+function deleteMatchesByTeam(name) {
+  const nm = String(name || '').toLowerCase(); if (!nm) return 0;
+  const ids = DB.matches.filter((m) => (m.team_a || '').toLowerCase() === nm || (m.team_b || '').toLowerCase() === nm).map((m) => m.id);
+  let n = 0; ids.forEach((id) => { if (deleteMatch(id)) n++; }); return n;
+}
+// Remove one player from the leaderboards (their per-game stat rows across all titles).
+function deletePlayerStats(name) {
+  const nm = String(name || '').toLowerCase(); if (!nm) return 0;
+  let n = 0;
+  ['rl_player_stats', 'cs2_player_stats', 'val_player_stats'].forEach((k) => { const before = DB[k].length; DB[k] = DB[k].filter((r) => (r.player_name || '').toLowerCase() !== nm); n += before - DB[k].length; });
+  if (n) { try { sqlite.store.deletePlayerStatsByName(name); } catch (e) {} _queueSave(); } return n;
+}
+
 module.exports = {
   init, close,
   startMatch, endMatch,
@@ -531,5 +756,8 @@ module.exports = {
   saveValorantPlayerStats,
   getRecentMatches, getMatchDetail, getPlayerHistory, getAggregateStats,
   getLeaders, getTeamRecords, getHeadToHead,
-  getPlayerProfile, listPlayers
+  getPlayerProfile, listPlayers,
+  getMapStats, getPacing, getTournaments, getStartggSetIds,
+  getDashboard, getFilterOptions,
+  deleteMatch, clearAllMatches, deleteMatchesByTeam, deletePlayerStats
 };

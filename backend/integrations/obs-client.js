@@ -15,6 +15,7 @@ function createObsClient({
   onStreamStateChanged,
   onRecordStateChanged,
   onReplayBufferSaved,
+  onReplayBufferStateChanged,
   onInputMuteChanged,
   onSourceVisibilityChanged,
 } = {}) {
@@ -54,6 +55,9 @@ function createObsClient({
   });
   obs.on('ReplayBufferSaved', (d) => {
     if (onReplayBufferSaved) onReplayBufferSaved({ path: (d && d.savedReplayPath) || '' });
+  });
+  obs.on('ReplayBufferStateChanged', (d) => {
+    if (onReplayBufferStateChanged) onReplayBufferStateChanged({ active: !!(d && d.outputActive) });
   });
 
   // Audio input mute state changed — covers any input in the mixer.

@@ -200,6 +200,7 @@ function generateSceneCollection({
   const gfxRlHud   = makeBrowser('[GFX] RL HUD',            '/rl-hud.html');
   const gfxCs2Hud  = makeBrowser('[GFX] CS2 HUD',           '/csgo.html');
   const gfxValHud  = makeBrowser('[GFX] Valorant HUD',      '/valorant.html');
+  const gfxLolHud  = makeBrowser('[GFX] LoL HUD',           '/lol-hud.html');
   const gfxOwHud   = makeBrowser('[GFX] Overwatch HUD',     '/overwatch.html');
   const gfxMrHud   = makeBrowser('[GFX] Marvel Rivals HUD', '/marvel-rivals.html');
 
@@ -227,12 +228,13 @@ function generateSceneCollection({
   const gfxMapVeto    = makeBrowser('[GFX] Map Veto',        '/mapscreen.html',         { restart: true, shutdown: true });
   const gfxDraft      = makeBrowser('[GFX] Draft',           '/draft.html');
   const gfxBracket    = makeBrowser('[GFX] Bracket',         '/bracket.html');
-  const gfxUpcoming   = makeBrowser('[GFX] Upcoming',        '/upcoming.html');
+  const gfxUpcoming   = makeBrowser('[GFX] Upcoming',        '/schedule.html');
   const gfxStandings  = makeBrowser('[GFX] Standings',       '/standings.html');
   const gfxReplay     = makeBrowser('[GFX] Replay',          '/replay.html',            { restart: true, shutdown: true });
   const gfxTransition = makeBrowser('[GFX] Transition',      '/transitionbgg.html',     { restart: true, shutdown: true });
 
   // ── Draggable add-on overlays (no dedicated scene; drop onto any scene) ─────
+  const gfxTicker   = makeBrowser('[GFX] Ticker',           '/ticker.html');
   const gfxSponsor  = makeBrowser('[GFX] Sponsor Banner',   '/sponsor-banner.html');
   const gfxListenIn = makeBrowser('[GFX] Listen-In Captions', '/listen-in.html');
   const gfxIntCam   = makeBrowser('[GFX] Interviewee Cam',  '/int-cam.html');
@@ -276,7 +278,7 @@ function generateSceneCollection({
   // Gameplay scene: Game Capture on the bottom, a stack of game HUDs (only `active` shown),
   // plus optional extra overlay layers (PIP cams / talent bar) on top.
   function gameScene(sceneName, activeHud, extras = []) {
-    const huds = [gfxRlHud, gfxCs2Hud, gfxValHud, gfxOwHud, gfxMrHud];
+    const huds = [gfxRlHud, gfxCs2Hud, gfxValHud, gfxLolHud, gfxOwHud, gfxMrHud];
     const il = itemList();
     il.add(gameCapture.name, gameCapture.uuid, { locked: false, ...FULL });
     huds.forEach(h => il.add(h.name, h.uuid, { locked: false, visible: h === activeHud, ...FULL, showMs: 300, hideMs: 300 }));
@@ -305,27 +307,33 @@ function generateSceneCollection({
     il.add(sceneCaster1Cam.name, sceneCaster1Cam.uuid, frame(24,  248, 928, 522));
     il.add(sceneCaster2Cam.name, sceneCaster2Cam.uuid, frame(968, 248, 928, 522));
   });
+  // Hole geometry: inner cam-hole dimensions after the 16:9 layout fix (aspect-ratio 16:9, flex:0 0 auto).
+  // All positions are inner cam-hole rect (border + ::before already stripped) at 1920×1080.
   const sceneTrioCam = deskScene('TrioCam Row', gfxTrioRow, il => {
-    il.add(sceneCaster1Cam.name, sceneCaster1Cam.uuid, frame(25,   160, 611, 843));
-    il.add(sceneCaster2Cam.name, sceneCaster2Cam.uuid, frame(654,  160, 611, 843));
-    il.add(sceneHostCam.name,    sceneHostCam.uuid,    frame(1284, 160, 611, 843));
+    // 3 cards × 613px outer (611px inner), hud 128px, stage-pad 16/24, cams centered → y≈406
+    il.add(sceneCaster1Cam.name, sceneCaster1Cam.uuid, frame(25,   406, 611, 344));
+    il.add(sceneCaster2Cam.name, sceneCaster2Cam.uuid, frame(654,  406, 611, 344));
+    il.add(sceneHostCam.name,    sceneHostCam.uuid,    frame(1283, 406, 611, 344));
   });
   const sceneQuad = deskScene('Quad Desk', gfxQuad, il => {
-    il.add(sceneCaster1Cam.name, sceneCaster1Cam.uuid, frame(278, 130, 673, 371));
-    il.add(sceneCaster2Cam.name, sceneCaster2Cam.uuid, frame(969, 130, 673, 371));
-    il.add(sceneHostCam.name,    sceneHostCam.uuid,    frame(278, 568, 673, 371));
-    il.add(sceneCaster4Cam.name, sceneCaster4Cam.uuid, frame(969, 568, 673, 371));
+    // 2×2 grid in 1366px, hud 100px, stage-pad 14/24; rows centered → y≈157 / y≈603
+    il.add(sceneCaster1Cam.name, sceneCaster1Cam.uuid, frame(278, 157, 673, 379));
+    il.add(sceneCaster2Cam.name, sceneCaster2Cam.uuid, frame(969, 157, 673, 379));
+    il.add(sceneHostCam.name,    sceneHostCam.uuid,    frame(278, 603, 673, 379));
+    il.add(sceneCaster4Cam.name, sceneCaster4Cam.uuid, frame(969, 603, 673, 379));
   });
   const sceneAnalyst = deskScene('Analyst Desk', gfxAnalyst, il => {
-    il.add(sceneCaster1Cam.name, sceneCaster1Cam.uuid, frame(25,  20,  598, 437));
-    il.add(sceneCaster2Cam.name, sceneCaster2Cam.uuid, frame(25,  528, 598, 437));
-    il.add(sceneHostCam.name,    sceneHostCam.uuid,    frame(641, 174, 1254, 705));
+    // Left col: 2 stacked cams (600px wide, 336px tall holes). Right: big host cam (1254×705).
+    il.add(sceneCaster1Cam.name, sceneCaster1Cam.uuid, frame(25,  20,  598, 336));
+    il.add(sceneCaster2Cam.name, sceneCaster2Cam.uuid, frame(25,  547, 598, 336));
+    il.add(sceneHostCam.name,    sceneHostCam.uuid,    frame(641, 217, 1254, 705));
   });
   const sceneDuoSingle = deskScene('Duo SingleCam', gfxDuoSingle, il => {
     il.add(sceneCaster1Cam.name, sceneCaster1Cam.uuid, frame(361, 232, 1198, 684));
   });
   const sceneSpotlight = deskScene('Spotlight Desk', gfxSpotlight, il => {
-    il.add(sceneCaster1Cam.name, sceneCaster1Cam.uuid, frame(31, 331, 718, 414));
+    // sp-casters 720px wide, single cam 718×404 (16:9), centered in body below header
+    il.add(sceneCaster1Cam.name, sceneCaster1Cam.uuid, frame(31, 330, 718, 404));
   });
   const sceneInterview = deskScene('Interview', gfxInterview, il => {
     il.add(sceneCaster1Cam.name, sceneCaster1Cam.uuid, frame(29,  268, 917, 526));
@@ -393,12 +401,12 @@ function generateSceneCollection({
   const sharedSources = [
     bgLoop, gameCapture,
     vdoHost, vdoCaster1, vdoCaster2, vdoCaster4,
-    gfxRlHud, gfxCs2Hud, gfxValHud, gfxOwHud, gfxMrHud,
+    gfxRlHud, gfxCs2Hud, gfxValHud, gfxLolHud, gfxOwHud, gfxMrHud,
     gfxSingle, gfxDuoRow, gfxTrioRow, gfxDuoSingle, gfxAnalyst, gfxQuad, gfxSpotlight, gfxInterview,
     gfxMatchup, gfxCampip, gfxTalentbar,
     gfxAway, gfxCountdown, gfxWinner, gfxTeam1, gfxTeam2,
     gfxMapVeto, gfxDraft, gfxBracket, gfxUpcoming, gfxStandings, gfxReplay, gfxTransition,
-    gfxSponsor, gfxListenIn, gfxIntCam,
+    gfxTicker, gfxSponsor, gfxListenIn, gfxIntCam,
   ];
 
   // ── Audio capture stubs ───────────────────────────────────────────────────

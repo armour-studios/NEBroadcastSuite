@@ -25,7 +25,7 @@
     .duo-stage.show { opacity: 1; }
 
     .an-body { flex: 1 1 0; min-height: 0; display: flex; align-items: stretch; gap: var(--cam-gap); }
-    .an-left { flex: 0 0 var(--left-w); display: flex; flex-direction: column; gap: var(--cam-gap); min-height: 0; }
+    .an-left { flex: 0 0 var(--left-w); display: flex; flex-direction: column; gap: var(--cam-gap); min-height: 0; justify-content: center; }
     .an-right { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 12px; align-items: stretch; justify-content: center; }
     .zone-footer { flex: 0 0 auto; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding-top: 12px; }
 
@@ -72,8 +72,7 @@
     .an-left .cam-card { flex: 1 1 0; }
     .cam-card.big { flex: 0 0 auto; }
     .cam-card::before { content: ''; display: block; height: 3px; flex: 0 0 auto; background: linear-gradient(90deg, transparent, var(--duo-accent) 30%, var(--duo-accent2) 70%, transparent); }
-    .cam-hole { position: relative; width: 100%; flex: 1 1 auto; min-height: 0; background: #0d0f14; overflow: hidden; }
-    .cam-card.big .cam-hole { aspect-ratio: 16 / 9; flex: 0 0 auto; }
+    .cam-hole { position: relative; width: 100%; aspect-ratio: 16 / 9; flex: 0 0 auto; background: #0d0f14; overflow: hidden; }
     .cam-hole iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
     /* ?cams=off framing: transparent holes so per-caster OBS sources show through. */
     .duo-stage.frames-only .cam-hole { background: transparent; }

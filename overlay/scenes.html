@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>NE Broadcast Suite â€” Scene Sources</title>
+  <title>NE Broadcast Suite — Scene Sources</title>
   <style>
     :root { --bg:#0d0f13; --panel:#15181e; --panel2:#1c2027; --border:#2a2f38; --fg:#e8ebf0; --muted:#8a93a2; --accent:#4aa3ff; --on:#22c55e; --warn:#fbbf24; }
     * { box-sizing: border-box; }
@@ -61,15 +61,15 @@
 </head>
 <body>
   <header>
-    <h1>NE Broadcast Suite â€” Scene Sources</h1>
-    <div class="conn"><span class="dot" id="conn-dot"></span><span id="conn-text">connectingâ€¦</span></div>
+    <h1>NE Broadcast Suite — Scene Sources</h1>
+    <div class="conn"><span class="dot" id="conn-dot"></span><span id="conn-text">connecting…</span></div>
     <div class="baseurl">
       <label for="base-input">Base URL</label>
       <input id="base-input" value="http://localhost:3000">
     </div>
   </header>
   <main>
-    <p class="hint">Add any of these as a <strong>Browser Source</strong> in OBS at <code>1920Ã—1080</code>. <strong>Edit HTML</strong> opens a code editor â€” save creates a local override; <strong>Revert</strong> restores the shipped original. Customized scenes show a gold badge. <span id="onair-summary"></span></p>
+    <p class="hint">Add any of these as a <strong>Browser Source</strong> in OBS at <code>1920×1080</code>. <strong>Edit HTML</strong> opens a code editor — save creates a local override; <strong>Revert</strong> restores the shipped original. Customized scenes show a gold badge. <span id="onair-summary"></span></p>
     <div id="groups"></div>
   </main>
 
@@ -108,10 +108,10 @@
         { name: 'Marvel Rivals HUD', path: '/marvel-rivals.html', desc: 'Hero roster and objective scorebar.', live: 'always' },
         { name: 'Series Scoreboard', path: '/series.html', desc: 'Standalone series / match scoreboard banner.', live: null },
         { name: 'Mini Station', path: '/ministation.html', desc: 'Compact mini-HUD for secondary broadcast stations or split-screen.', live: null },
-        { name: 'Director Preview', path: '/director-preview.html', desc: 'Producer-only director bug â€” add ?director=1 to activate.', live: null },
+        { name: 'Director Preview', path: '/director-preview.html', desc: 'Producer-only director bug — add ?director=1 to activate.', live: null },
       ]},
       { group: 'Casters & Desk', items: [
-        { name: 'Casters (grid)', path: '/casters.html', desc: 'Up to 4 commentators â€” auto-sized cam holes + name plates.', live: 'casters.visible' },
+        { name: 'Casters (grid)', path: '/casters.html', desc: 'Up to 4 commentators — auto-sized cam holes + name plates.', live: 'casters.visible' },
         { name: 'Duo Row', path: '/duorow.html', desc: '2 caster cams in a row + team scorebar + footer.', live: 'casters.visible' },
         { name: 'Trio Row', path: '/triorow.html', desc: '3 caster cams in a row + scorebar + footer.', live: 'casters.visible' },
         { name: 'Single Cam', path: '/singlecam.html', desc: 'Solo caster — one big cam + scorebar, sponsor under the cam.', live: 'casters.visible' },
@@ -129,12 +129,12 @@
       { group: 'Pre / Post / Breaks', items: [
         { name: 'Trigger Graphics (all-in-one)', path: '/triggers.html', desc: 'ONE source for every triggered graphic (countdown, winner, intro, veto, draft, bracket, upcoming, standings). Add to any scene; qrail Triggers/Overlays pop the right one over it.', live: null },
         { name: 'Countdown / Starting Soon', path: '/countdown.html', desc: 'Break standby timer with movie-countdown finish.', live: 'breakScreen.visible' },
-        { name: 'Winner / Post-match', path: '/winner.html', desc: 'Champion screen â€” team logo, name, subtitle.', live: 'winner.visible' },
+        { name: 'Winner / Post-match', path: '/winner.html', desc: 'Champion screen — team logo, name, subtitle.', live: 'winner.visible' },
         { name: 'Team Line-up / Intro', path: '/intro.html', desc: 'Animated roster cards. Add ?side=blue or ?side=orange.', live: 'intro.visible' },
         { name: 'Draft Screen', path: '/draft.html', desc: 'Animated pick/ban draft overlay for character or agent selection.', live: null },
       ]},
       { group: 'Bracket & Veto', items: [
-        { name: 'Bracket', path: '/bracket.html', desc: 'Live bracket â€” elim columns or standings table.', live: 'bracket.visible' },
+        { name: 'Bracket', path: '/bracket.html', desc: 'Live bracket — elim columns or standings table.', live: 'bracket.visible' },
         { name: 'Map Veto / Map Board', path: '/mapscreen.html', desc: 'Pick/ban board for CS2/Valorant-style series.', live: 'veto.visible' },
       ]},
       { group: 'Replays', items: [
@@ -257,7 +257,7 @@
         }
       });
       const sum = document.getElementById('onair-summary');
-      sum.textContent = liveCount ? `Â· ${liveCount} scene${liveCount > 1 ? 's' : ''} on air now.` : '';
+      sum.textContent = liveCount ? `· ${liveCount} scene${liveCount > 1 ? 's' : ''} on air now.` : '';
     }
 
     let editorRel = '';
@@ -265,7 +265,7 @@
       editorRel = (filePath || '/').replace(/^\//, '') || 'index.html';
       document.getElementById('editor-title').textContent = title || 'Edit scene';
       document.getElementById('editor-path').textContent = filePath;
-      document.getElementById('editor-status').textContent = 'Loadingâ€¦';
+      document.getElementById('editor-status').textContent = 'Loading…';
       document.getElementById('editor-backdrop').classList.add('open');
       try {
         const r = await fetch(baseUrl() + '/api/overlay/source?path=' + encodeURIComponent(filePath.startsWith('/') ? filePath : '/' + filePath));
@@ -276,7 +276,7 @@
         badge.textContent = j.isOverride ? 'Custom override' : 'Original';
         badge.className = 'editor-badge' + (j.isOverride ? '' : ' original');
         document.getElementById('editor-revert').disabled = !j.isOverride;
-        document.getElementById('editor-status').textContent = j.isOverride ? 'Editing your saved override' : 'Editing original â€” Save creates an override';
+        document.getElementById('editor-status').textContent = j.isOverride ? 'Editing your saved override' : 'Editing original — Save creates an override';
       } catch (e) {
         document.getElementById('editor-status').textContent = 'Error: ' + e.message;
       }
@@ -293,7 +293,7 @@
     });
     document.getElementById('editor-save').addEventListener('click', async () => {
       const content = document.getElementById('editor-code').value;
-      document.getElementById('editor-status').textContent = 'Savingâ€¦';
+      document.getElementById('editor-status').textContent = 'Saving…';
       try {
         const r = await fetch(baseUrl() + '/api/overlay/save', {
           method: 'POST',
@@ -302,7 +302,7 @@
         });
         const j = await r.json();
         if (!j.ok) throw new Error(j.message || 'Save failed');
-        document.getElementById('editor-status').textContent = 'Saved â€” refresh OBS browser source to see changes';
+        document.getElementById('editor-status').textContent = 'Saved — refresh OBS browser source to see changes';
         document.getElementById('editor-badge').textContent = 'Custom override';
         document.getElementById('editor-badge').className = 'editor-badge';
         document.getElementById('editor-revert').disabled = false;
@@ -313,7 +313,7 @@
     });
     document.getElementById('editor-revert').addEventListener('click', async () => {
       if (!confirm('Revert to the original shipped HTML? Your override will be deleted.')) return;
-      document.getElementById('editor-status').textContent = 'Revertingâ€¦';
+      document.getElementById('editor-status').textContent = 'Reverting…';
       try {
         const r = await fetch(baseUrl() + '/api/overlay/revert', {
           method: 'POST',
@@ -357,7 +357,7 @@
     connect();
 
     // Lazy-load previews and inject zoom after load.
-    // Injecting zoom on the iframe's own <body> works for ALL pages â€” same-origin, no CSS fight.
+    // Injecting zoom on the iframe's own <body> works for ALL pages — same-origin, no CSS fight.
     (function() {
       function injectZoom(fr, pw) {
         try {

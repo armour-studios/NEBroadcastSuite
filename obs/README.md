@@ -54,7 +54,7 @@ Scenes are grouped with `─── LIVE ───` / `─── DESK ───` 
 | Matchup | `/matchup.html` _(embeds a caster strip)_ |
 | Team 1 Intro | `/intro.html?side=blue` |
 | Team 2 Intro | `/intro.html?side=orange` |
-| Upcoming | `/upcoming.html` |
+| Upcoming | `/schedule.html` |
 | Standings | `/standings.html` |
 | Bracket | `/bracket.html` |
 

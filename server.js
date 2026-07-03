@@ -14,6 +14,8 @@ const { dialog, app: _electronApp } = require('electron');
 const { EventEmitter } = require('events');
 const IS_DEV = () => _electronApp && !_electronApp.isPackaged;
 const { createStartGgClient } = require('./backend/integrations/startgg-client');
+const { createChallongeClient } = require('./backend/integrations/challonge-client');
+const { getNxgenEvents, getNxgenEventLive, getNxgenLeaderboard } = require('./backend/nxgen');
 const { createDirectorEngine } = require('./backend/director');
 const cloud = require('./backend/cloud/cloud-client');   // Nameless cloud (dormant until BROADCAST_REMOTE_URL set)
 const { createClipSystem } = require('./backend/clips');
@@ -23,7 +25,15 @@ const rlSpectatorUi = require('./backend/integrations/rl-spectator-ui');
 const { createOverlayEditor } = require('./backend/scenes/overlay-editor');
 const vetoData = require('./backend/veto');
 const draftData = require('./backend/draft');
+const lolChampSelect = require('./backend/lol-champselect');
+const lolLive = require('./backend/lol-live');
+const lolOcr = require('./backend/lol-ocr');
 const stats = require('./backend/db/stats');
+const analytics = require('./backend/analytics');
+const startggImport = require('./backend/startgg-import');
+const twitchStats = require('./backend/twitch-stats');
+const rl6mans   = require('./backend/rl6mans');
+const playerDb   = require('./backend/player-db');
 
 const { generateSceneCollection } = require('./obs/build-scene-collection');
 
@@ -40,6 +50,7 @@ let obsPassword = '';
 // Twitch integration
 const { registerTwitchWebhooks } = require('./backend/integrations/twitch-webhooks');
 const { TwitchClient } = require('./backend/integrations/twitch-client');
+const { SocialPublisher } = require('./backend/social-publisher');
 const { PredictionManager } = require('./backend/integrations/twitch-predictions');
 const { WheelManager } = require('./backend/integrations/twitch-wheel');
 const { MiniGameManager } = require('./backend/integrations/twitch-minigames');
@@ -47,6 +58,7 @@ const { ChatParser } = require('./backend/integrations/twitch-chat-parser');
 let twitchDataFile = '';
 let discordDataFile = '';
 let twitchClient = null;
+let socialPublisher = null;
 let predictionManager = null;
 let wheelManager = null;
 let _predPollTimer = null;
@@ -82,6 +94,11 @@ let facecamsFile;
 let presetsFile;
 let brandsFile;
 let startggApiToken = '';
+let challongeApiKey = '';
+let nxgenApiKey = '';
+let _startggImportRunning = false;   // guards the historical start.gg importer
+let _twitchStatsCache = null;        // { at, data } — short cache for GET /api/twitch/stats
+let _twitchTokenInvalid = false;     // true once Twitch returns 401 → stop retry storms until reconnect
 
 let appVersion = '0.0.0';
 try {
@@ -113,6 +130,9 @@ const OVERLAY_LAYOUTS = {
   ],
   'valorant': [
     { id: 'valorant-hud', name: 'Valorant HUD', path: '/valorant.html' }
+  ],
+  'league': [
+    { id: 'lol-hud', name: 'LoL In-Game HUD', path: '/lol-hud.html' }
   ]
 };
 const GENERIC_OVERLAY_LAYOUTS = [
@@ -123,7 +143,7 @@ const GAMES = {
   'rocket-league': { id: 'rocket-league', name: 'Rocket League', overlay: '/',          format: 'duo',   teamLabels: { a: 'Blue', b: 'Orange' },           rosterSize: 3, logo: 'games/rocketleague.svg',  features: ['boost', 'stats-api', 'director'],   themes: [] },
   'csgo':          { id: 'csgo',          name: 'CS2 / CS:GO',   overlay: '/csgo.html', format: 'team5', teamLabels: { a: 'CT', b: 'T' },                  rosterSize: 5, logo: 'games/cs2.svg',           features: ['gsi', 'radar', 'vetoes', 'director'], themes: [] },
   'valorant':      { id: 'valorant',      name: 'Valorant',      overlay: '',           format: 'team5', teamLabels: { a: 'Attackers', b: 'Defenders' },   rosterSize: 5, logo: 'games/valorant.svg',      features: ['vetoes', 'agents', 'director'],     themes: [] },
-  'league':        { id: 'league',        name: 'League of Legends', overlay: '',       format: 'team5', teamLabels: { a: 'Blue', b: 'Red' },              rosterSize: 5, logo: 'games/lol.svg',           features: ['draft', 'director'],                themes: [] },
+  'league':        { id: 'league',        name: 'League of Legends', overlay: '/lol-hud.html', format: 'team5', teamLabels: { a: 'Blue', b: 'Red' },         rosterSize: 5, logo: 'games/lol.svg',           features: ['draft', 'live-data', 'director'],    themes: [] },
   'dota2':         { id: 'dota2',         name: 'Dota 2',        overlay: '',           format: 'team5', teamLabels: { a: 'Radiant', b: 'Dire' },          rosterSize: 5, logo: 'games/dota2.svg',         features: ['draft'],                themes: [] },
   'overwatch':     { id: 'overwatch',     name: 'Overwatch 2',   overlay: '/overwatch.html', format: 'team5', teamLabels: { a: 'Defenders', b: 'Attackers' }, rosterSize: 5, logo: 'games/overwatch2.png',    features: ['heroes', 'vetoes', 'draft'], themes: [] },
   'rainbow6':      { id: 'rainbow6',      name: 'Rainbow Six Siege', overlay: '',       format: 'team5', teamLabels: { a: 'Attack', b: 'Defense' },        rosterSize: 5, logo: 'games/rainbow6.svg',      features: ['vetoes', 'operators'],  themes: [] },
@@ -144,7 +164,8 @@ Object.keys(GAMES).forEach((id) => {
 const THEME_ALIASES = {
   'rocket-league': { default: 'classic', midnight: 'classic', neon: 'classic' },
   'csgo': { default: 'cs2-hud', midnight: 'cs2-hud', neon: 'cs2-hud' },
-  'valorant': { default: 'valorant-hud', midnight: 'valorant-hud', neon: 'valorant-hud' }
+  'valorant': { default: 'valorant-hud', midnight: 'valorant-hud', neon: 'valorant-hud' },
+  'league': { default: 'lol-hud', midnight: 'lol-hud', neon: 'lol-hud' }
 };
 
 // Returns built-in + user-added custom overlay layouts for a game.
@@ -192,7 +213,11 @@ let state = {
   themesByGame: { 'rocket-league': 'classic', 'csgo': 'cs2-hud' },
   eventName: '',   // fresh installs start with no preset title — the producer sets their own
   gameLabel: '',   // custom "GAME x | BEST OF x" override (e.g. "UPCOMING MATCH"); '' = auto
-  fontFamily: 'Bourgeois',
+  roundLabel: '',  // optional bracket round/stage shown on the overlay (e.g. "WINNERS FINALS"); '' = hidden
+  fontFamily: 'Industry',
+  clock24h: false,
+  showSeries: true,
+  defaultBestOf: 3,
   facecamsEnabled: true,
   replayCams: true,         // show all player cams + cards during replays (RL React HUD)
   activeBrandKitId: null,   // selected client brand kit (recolors overlays + drives sponsor rail)
@@ -202,7 +227,7 @@ let state = {
   // computed at broadcast time, so toggling never overwrites a team's own colour.
   colorMode: 'team',        // 'team' | 'brand' | 'default'
   banner: { visible: false, images: [], captions: [], interval: 10, slant: 'right', header: '' },
-  casters: { visible: true, list: [], lowerThird: '', library: [], vdo: { room: '', password: '' }, guestsVdo: { room: '', password: '' }, observersVdo: { room: '', password: '' }, rooms: [], lineup: [], activeLayout: '', interview: { room: '', password: '' }, apiKey: '', interviewee: null, deskRoomId: '' },   // list = on-air slots; library = saved casters/guests/observers (by kind); vdo/guestsVdo/observersVdo = the three shared group rooms; rooms = named VDO rooms; lineup = this-show active assignments; apiKey = director IFrame-API key; interviewee = spotlight-desk right cam; deskRoomId = which named room is the interview/desk room
+  casters: { visible: true, list: [], lowerThird: '', library: [], vdo: { room: '', password: '' }, guestsVdo: { room: '', password: '' }, observersVdo: { room: '', password: '' }, rooms: [], lineup: [], activeLayout: '', interview: { room: '', password: '' }, apiKey: '', interviewee: null, deskRoomId: '', slotLabels: { 1: 'Caster 1', 2: 'Caster 2', 3: 'Caster 3', 4: 'Caster 4' } },   // list = on-air slots; library = saved casters/guests/observers (by kind); vdo/guestsVdo/observersVdo = the three shared group rooms; rooms = named VDO rooms; lineup = this-show active assignments; apiKey = director IFrame-API key; interviewee = spotlight-desk right cam; deskRoomId = which named room is the interview/desk room
   // VDO.Ninja talent workflow. Global config (server-side, replaces the old localStorage settings);
   // per-team rooms/passwords live on teams.x.vdo, per-player IDs on the player objects.
   vdo: {
@@ -229,7 +254,11 @@ let state = {
   // Playout playlists — sequences of clips and/or media files (commercials/intros/outros) that can
   // be pushed live through the replay program bus with auto-return. See save_playout.
   playouts: [],
-  ticker: { visible: false, messages: [], speed: 40, source: 'manual', feed: [] },   // scrolling lower-third; speed = loop seconds
+  ticker: { visible: false, messages: [], speed: 40, source: 'manual', feed: [], sponsor: '' },   // scrolling lower-third; speed = loop seconds
+  // Sponsor proof-of-play: archived per-broadcast impression reports (estimated on-screen seconds
+  // per sponsor logo, by placement). The live session is tracked in-memory (adProof); completed
+  // sessions land here and persist. Tiny — names + counts only, no logos.
+  adProofSessions: [],
   spotlight: { visible: false, playerName: '' },          // featured-player lower-third (live stats)
   // Post-match WINNER screen (game-agnostic). side resolves a team from `teams`; or set name/logo/color directly.
   winner: { visible: false, side: '', name: '', logo: null, color: '', subtitle: '' },
@@ -246,14 +275,18 @@ let state = {
   // Keyed by gameId → [{ id, name, path }]
   customOverlayLayouts: {},
   // Champion/hero draft board (LoL etc.). sequence/ops drive the live pick-ban.
-  draft: { visible: false, title: '', game: '', teamStart: 'a', sequence: [], ops: [], turn: null, complete: false },
+  draft: { visible: false, title: '', game: '', teamStart: 'a', sequence: [], ops: [], turn: null, complete: false,
+    // LoL champ-select automation — fills the board live from the League Client (LCU).
+    auto: { enabled: false, status: 'off', statusDetail: '', lockfilePath: '' } },
   // Team-lineup / player-intro card scene. side = which team to feature ('blue'|'orange'); style = card variant.
-  intro: { visible: false, side: 'blue', title: '', style: 1 },
+  intro: { visible: false, side: 'blue', title: '', style: 1, showFooter: true },
   // Overtime ad slot — sellable sponsor slot shown on the overlay during OT.
   overtime: { label: 'OVERTIME', logo: null, bg: '#e0202a', color: '#ffffff' },
   // Replay ad slot. logo = sponsor on the goal swipe; outroLogo = logo on the after-replay swipe
   // (e.g. tournament-organizer logo); colorMode: 'team' | 'mono' (B&W).
-  replay: { label: 'REPLAY', logo: null, outroLogo: null, colorMode: 'team' },
+  // skin = a full-frame TRANSPARENT PNG shown over the whole replay (a branded frame/border to
+  // "skin" replays); null = none.
+  replay: { label: 'REPLAY', logo: null, outroLogo: null, colorMode: 'team', skin: null },
   // Scoreboard ad slot — sponsor logo + uploadable scene background on the scorecard.
   scoreboardAd: { label: 'PRESENTED BY', logo: null, background: null },
   // Desk footer logos — manual Dashboard override. When non-empty these replace the active
@@ -292,6 +325,28 @@ let state = {
     observed: null,   // activePlayer from the API (spectated player)
     roundHistory: [], // [{ round, winner: 'ORDER'|'CHAOS' }]
   },
+  lol: {                                                   // League Live Client Data API (port 2999, spectator)
+    connected: false,
+    lastUpdate: 0,
+    gameTime: 0,
+    mapNumber: 1,
+    gameMode: '',
+    // ORDER = blue side, CHAOS = red side. gold is ESTIMATED net worth (see backend/lol-live.js).
+    blue: { kills: 0, gold: 0, towers: 0, inhibs: 0, dragons: [], barons: 0, heralds: 0, grubs: 0, dragonSoul: '', firstBlood: false },
+    red:  { kills: 0, gold: 0, towers: 0, inhibs: 0, dragons: [], barons: 0, heralds: 0, grubs: 0, dragonSoul: '', firstBlood: false },
+    goldDiff: 0,      // blue.gold - red.gold (+ = blue ahead)
+    players: [],      // [{ name, champion, team, position, level, dead, respawn, kills, deaths, assists, cs, vision, items, itemValue, spells, gold }]
+    events: [],       // recent notable events for the kill feed/ticker
+    hudMode: 'auto',  // 'full' | 'minimal' | 'auto' — producer control for the teamfight transition
+    // Optional OCR override for REAL team gold (estimate is the default). Producer
+    // calibrates the two capture regions over the spectator scoreboard gold numbers.
+    ocr: {
+      enabled: false, available: false, status: 'off', statusDetail: '',
+      source: 'est',          // 'est' | 'ocr' — which feed is currently driving team gold
+      lastBlue: null, lastRed: null,   // last raw OCR'd values (for calibration feedback)
+      regions: { blue: { x: 800, y: 16, w: 78, h: 26 }, red: { x: 1042, y: 16, w: 78, h: 26 } }  // 1080p defaults
+    },
+  },
   bestOf: 5,
   teams: {
     blue:   { name: 'BLUE TEAM',   logo: null, color: '#055fdb', players: [] },
@@ -301,7 +356,7 @@ let state = {
   series:  { blue: 0, orange: 0 },
   // Series/match editor: format + division + per-map results (feeds the HUDs).
   // maps: [{ name, scoreA, scoreB, played }]
-  match:   { format: '', division: '', maps: [] },
+  match:   { format: '', division: '', maps: [], seriesVisible: true },
   // Manually-managed leagues (NOT start.gg). Each league:
   // { id, name, game, type:'team'|'freeagent'|'salary', season, salaryCap,
   //   teams:[{id,name,logo,players:[{id,name,role,salary,stats}]}],
@@ -311,6 +366,11 @@ let state = {
   // { id, tournamentSlug, eventSlug, name, tournamentName, game, numEntrants, startAt, addedAt,
   //   seeding: { entrants:[{entrantId,name,seedNum,players:[{gamerTag,rankField,rankValue}]}], fieldMap:{} } }
   myEvents: [],
+  // Per-player profile registry keyed by lowercased gamertag. Auto-linked: start.gg
+  // (slug/playerId) on every roster pull, 6mans (rl6mans name/elo/rank/region) on rank
+  // verify. Read by the seeding page, team editor and Match-Teams panel to show links.
+  //   { <gamertag>: { gamerTag, startggSlug, startggPlayerId, sixmans:{name,elo,rank,region,platform}, updatedAt } }
+  playerProfiles: {},
   game:    { blueScore: 0, orangeScore: 0, time: 300, isOT: false, number: 1 },
   gameTeams: { blue: '', orange: '' },
   players: [],          // active players (from last UpdateState)
@@ -342,6 +402,44 @@ let state = {
     eventTeams: [],        // [{ name, logo, players: [{id,name,platform,platformId,assignedCamera}], startggId }]
     logoMap: {},           // lowercased entrant name -> logo URL (so queue/upcoming/bracket can show logos)
     pendingEvents: []      // [{ slug, name, numEntrants }] when a tournament has >1 event (panel shows a picker)
+  },
+  challonge: {
+    enabled: false,
+    tournamentSlug: '',    // e.g. "my-tournament" or "subdomain-tournament"
+    connected: false,
+    lastError: null,
+    lastSyncAt: null,
+    selectedTournament: null, // { id, slug, name, url, type, state, participantsCount, gameName }
+    eventTeams: [],        // [{ name, logo, seed, challongeId, finalRank }]
+    logoMap: {},
+    queue: [],             // [{ matchId, round, identifier, state, teamA, teamB, logoA, logoB, scoreA, scoreB, live }]
+    matchFeed: [],
+    queueFetchedAt: null,
+    autoFollow: false,
+    lastAutoFollowMatchId: null
+  },
+  nxgen: {
+    enabled: false,
+    eventSlug: '',         // nxgen.pro event slug
+    connected: false,
+    lastError: null,
+    selectedEvent: null,   // { name, slug, activity, format, status, url }
+    eventTeams: [],        // [{ name, logo, nxgenId }]
+    logoMap: {},           // name.toLowerCase() → logo URL
+    queue: [],             // [{ matchId, round, teamA, teamB, logoA, logoB, scoreA, scoreB, status, live }]
+    queueFetchedAt: null,
+    autoFollow: false,
+    lastAutoFollowMatchId: null
+  },
+  activeEvent: {
+    platform: null,      // 'startgg' | 'challonge' | 'nxgen' | null
+    slug: '',
+    name: '',
+    gameName: '',
+    numEntrants: 0,
+    format: '',
+    url: '',
+    loadedAt: null
   },
   obs: {
     enabled: false,
@@ -392,13 +490,44 @@ let state = {
   upcoming: {
     visible: false,
     title: 'UPCOMING MATCHES',
-    matches: []   // manual entries/overrides: [{id,round,teamA,teamB,teamALogo,teamBLogo,scheduledTime,stream,note}]
+    eyebrow: 'On Deck',    // small label above the title (board layout uses title as e.g. "WEEK 11")
+    layout: 'cards',       // 'cards' = duorow card row | 'board' = weekly matchup board (team-colored bars)
+    matches: []   // manual entries/overrides: [{id,round,teamA,teamB,teamALogo,teamBLogo,date,time,stream,scoreA,scoreB,week,note}]
   },
   standings: {
     visible: false,
     title: '',    // '' = inherit bracket.title; auto-populated from bracket.standings if rows is empty
     rows: []      // manual override: [{placement,name,logo,wins,losses,points}]
   },
+  // Season / league record shown under each team name on the top scorebar overlay.
+  // Source priority: per-team manual league standings (W/L/PTS) for season + points +
+  // placement; live start.gg event standings for "this week" W/L. Resolved per-broadcast
+  // in buildLiveState() into a tiny teamRecords:{blue,orange} blob — see resolveTeamRecords().
+  //   metric: 'season' | 'week' | 'pts' | 'place' | 'record-pts'
+  //   source: 'stats' (in-app leagues) | 'startgg' (tournament platform) | 'manual' (per-team below)
+  //   manual: per-side W/L (+ optional pts/place) the producer sets in each team box
+  teamRecord: {
+    enabled: false, metric: 'season', source: 'stats', leagueId: '',   // leagueId = chosen in-app league for the 'stats' source ('' = auto-pick)
+    manual: { blue: { w: 0, l: 0, pts: null, place: null }, orange: { w: 0, l: 0, pts: null, place: null } }
+  },
+  // When on, team names reported by the live game (CS2 GSI / RL Stats API) are matched to the
+  // saved-teams library and applied to Blue/Orange (name + logo + colour). Generic names ignored.
+  autoTeamsFromGame: false,
+  // Season-long standings pulled from a start.gg LEAGUE (e.g. "3v3 Rocket Rush x Trophi.ai
+  // Season 2") — DISTINCT from in-app manual leagues and from per-tournament standings. A
+  // start.gg League aggregates many tournaments into one season with league points; we read
+  // Standing.totalPoints + placement per entrant. This is the authoritative source for the
+  // overlay's season points/placement (teamRecord); W/L still comes from in-app leagues.
+  leagueStandings: {
+    slug: '',          // start.gg league slug or full URL (normalized on fetch)
+    name: '',          // resolved league name
+    fetchedAt: null,
+    lastError: null,
+    teams: []          // [{ name, place, points }] (sorted by placement)
+  },
+  // Which production graphic is currently showing in the unified gfx.html overlay.
+  // null = nothing showing. Values match SCENE_META keys: 'break','winner','intro','ticker', etc.
+  gfxActive: null,
   // "Teams to Watch" spotlight graphic — a small set of teams the producer marks on an event,
   // each with custom fields (CURRENT RANK / POINTS / …). Team logos are resolved by name in the
   // overlay (savedTeams / start.gg logo map) so this stays tiny in the broadcast.
@@ -464,6 +593,7 @@ let state = {
   },
   twitch: {
     connected: false,
+    adsEnabled: true,   // producer gate for running Twitch ads (persisted, enforced in /ad/run)
     channelId: '',
     userId: '',
     displayName: '',
@@ -770,7 +900,8 @@ function saveTwitchData(sync = false) {
       wheel:          state.twitch.wheel,
       minigame:       state.twitch.minigame,
       chatSettings:   state.twitch.chatSettings,
-      automations:    state.twitch.automations
+      automations:    state.twitch.automations,
+      adsEnabled:     state.twitch.adsEnabled !== false
     };
     safeWriteJson(twitchDataFile, data, sync);
   } catch (err) {
@@ -851,6 +982,7 @@ function loadTwitchData() {
       if (data.minigame)      Object.assign(state.twitch.minigame,      data.minigame);
       if (data.chatSettings)  Object.assign(state.twitch.chatSettings,  data.chatSettings);
       if (data.automations)   Object.assign(state.twitch.automations,   data.automations);
+      if (typeof data.adsEnabled === 'boolean') state.twitch.adsEnabled = data.adsEnabled;
       console.log('[Twitch] Data loaded', data.displayName ? `(connected as ${data.displayName})` : '');
     }
   } catch (err) {
@@ -896,12 +1028,12 @@ function loadDiscordUser() {
 
 // Where a sponsor logo can be displayed. Each brand sponsor carries a `placements`
 // map of these flags, set with checkmarks in the brand editor.
-const SPONSOR_SPOTS = ['rail', 'desk', 'overtime', 'replayGoal', 'replayOutro', 'scoreboard', 'banner'];
+const SPONSOR_SPOTS = ['title', 'rail', 'desk', 'overtime', 'replayGoal', 'replayOutro', 'scoreboard', 'banner', 'ticker'];
 function sanitizePlacements(p) {
   // No placements (legacy sponsor saved before this feature) → show on rail + caster desk,
   // matching the old "every sponsor shows on the rail/desk" behaviour.
   if (!p || typeof p !== 'object') {
-    return { rail: true, desk: true, overtime: false, replayGoal: false, replayOutro: false, scoreboard: false, banner: false };
+    return { title: false, rail: true, desk: true, overtime: false, replayGoal: false, replayOutro: false, scoreboard: false, banner: false, ticker: false };
   }
   const o = {};
   SPONSOR_SPOTS.forEach((k) => { o[k] = !!p[k]; });
@@ -915,7 +1047,7 @@ function sanitizePlacements(p) {
 // level — they're wrapped into a single "Main" package on load so every read path resolves
 // through activePackage().
 function brandId() { return Math.random().toString(36).slice(2, 11); }
-const PACKAGE_FIELDS = ['sponsorLabel', 'sponsorInterval', 'sponsors', 'bannerImages', 'bannerCaptions', 'bannerSlant', 'bannerHeader', 'bannerInterval'];
+const PACKAGE_FIELDS = ['sponsorLabel', 'sponsorInterval', 'sponsorMode', 'sponsors', 'bannerImages', 'bannerCaptions', 'bannerSlant', 'bannerHeader', 'bannerInterval'];
 
 function sanitizePackage(p, fallbackName) {
   p = p || {};
@@ -924,6 +1056,7 @@ function sanitizePackage(p, fallbackName) {
     name: (p.name || fallbackName || 'Main').toString().slice(0, 40),
     sponsorLabel: (p.sponsorLabel || 'PARTNERS').toString(),
     sponsorInterval: Number(p.sponsorInterval) > 0 ? Number(p.sponsorInterval) : 6,
+    sponsorMode: p.sponsorMode === 'static' ? 'static' : 'cycle',   // rail: cycle one at a time, or show all at once
     sponsors: Array.isArray(p.sponsors) ? p.sponsors.map((s) => ({
       id: s.id || brandId(), name: (s.name || '').toString(), logo: s.logo || null,
       tier: s.tier || 'partner', placements: sanitizePlacements(s.placements)
@@ -987,6 +1120,7 @@ function activeBrand() {
     font: kit.font || null,
     sponsorLabel: pkg.sponsorLabel || 'PARTNERS',
     sponsorInterval: Number(pkg.sponsorInterval) > 0 ? Number(pkg.sponsorInterval) : 6,
+    sponsorMode: pkg.sponsorMode === 'static' ? 'static' : 'cycle',
     bannerImages: Array.isArray(pkg.bannerImages) ? pkg.bannerImages : [],
     bannerInterval: Number(pkg.bannerInterval) > 0 ? Number(pkg.bannerInterval) : 10,
     sponsors,                                  // all (for the editor + back-compat consumers)
@@ -994,15 +1128,183 @@ function activeBrand() {
     deskSponsors: tagged('desk'),              // caster-desk footer logos
     bannerSponsors: tagged('banner'),          // sponsor-banner rotation
     spots: {                                   // single-logo ad slots → first tagged sponsor's logo
+      title: (tagged('title')[0] || {}).logo || null,   // prominent always-on title-sponsor bug
       overtime: (tagged('overtime')[0] || {}).logo || null,
       replayGoal: (tagged('replayGoal')[0] || {}).logo || null,
       replayOutro: (tagged('replayOutro')[0] || {}).logo || null,
-      scoreboard: (tagged('scoreboard')[0] || {}).logo || null
+      scoreboard: (tagged('scoreboard')[0] || {}).logo || null,
+      ticker: (tagged('ticker')[0] || {}).logo || null
     },
     // Package metadata for the editor + Dashboard quick-switch (names only — no base64).
     packages: (Array.isArray(kit.packages) ? kit.packages : []).map((p) => ({ id: p.id, name: p.name })),
     activePackageId: kit.activePackageId || null,
   };
+}
+
+// ── Sponsor proof-of-play (impression tracking) ──────────────────────────────
+// While a session is active, sample once a second and credit every on-air sponsor logo by
+// placement, producing a defensible "estimated on-screen seconds per sponsor" report — a
+// sellable proof-of-play deliverable. Exposure is inferred from the overlay STATE the server
+// already knows (which placements are visible), so it's an estimate, labelled as such.
+const adProof = {
+  active: false, startedAt: 0, label: '', ticks: 0,
+  sponsors: {}   // id -> { id, name, seconds, byPlacement:{spot:sec}, impressions, _onPrev }
+};
+let _adProofTimer = null;
+
+// Current combined concurrent viewers (Twitch + YouTube when available) — used for sponsor
+// viewer-seconds and the recorder's viewer samples.
+function currentViewers() {
+  let v = 0;
+  try { if (typeof streamStateManager !== 'undefined' && streamStateManager && streamStateManager.streamState.isLive) v += streamStateManager.streamState.viewerCount || 0; } catch (e) {}
+  try { if (state.youtube && (state.youtube.live || state.youtube.isLive)) v += state.youtube.viewers || state.youtube.concurrentViewers || 0; } catch (e) {}
+  return v;
+}
+
+// ── OBS stream-health poll: dropped frames / bitrate / fps / cpu / congestion (~5s) ──
+let _obsHealthPrev = { bytes: 0, at: 0 };
+async function pollObsHealth() {
+  if (!obsClient || !obsClient.isConnected()) { if (state.obs) state.obs.health = null; _obsHealthPrev = { bytes: 0, at: 0 }; return; }
+  try {
+    const stats = await obsClient.call('GetStats');
+    if (!stats) return;
+    let ss = null; try { ss = await obsClient.call('GetStreamStatus'); } catch (e) {}
+    const outTot = (ss && ss.outputTotalFrames) || 0, outSkip = (ss && ss.outputSkippedFrames) || 0;
+    const rndTot = stats.renderTotalFrames || 0, rndSkip = stats.renderSkippedFrames || 0;
+    let bitrateKbps = 0;
+    if (ss && ss.outputActive) {
+      const nowMs = Date.now(), bytes = ss.outputBytes || 0;
+      if (_obsHealthPrev.at && bytes >= _obsHealthPrev.bytes) { const dt = (nowMs - _obsHealthPrev.at) / 1000; if (dt > 0) bitrateKbps = Math.round(((bytes - _obsHealthPrev.bytes) * 8) / dt / 1000); }
+      _obsHealthPrev = { bytes, at: nowMs };
+    } else { _obsHealthPrev = { bytes: 0, at: 0 }; }
+    const health = {
+      cpu: +(stats.cpuUsage || 0).toFixed(1), fps: Math.round(stats.activeFps || 0),
+      renderLagMs: +(stats.averageFrameRenderTime || 0).toFixed(2),
+      renderDropPct: rndTot ? +((rndSkip / rndTot) * 100).toFixed(2) : 0,
+      outputDropPct: outTot ? +((outSkip / outTot) * 100).toFixed(2) : 0,
+      congestion: ss ? +(ss.outputCongestion || 0).toFixed(2) : 0,
+      bitrateKbps, streaming: !!(ss && ss.outputActive), reconnecting: !!(ss && ss.outputReconnecting), at: Date.now()
+    };
+    if (state.obs) state.obs.health = health;
+    try { analytics.recordHealth(health); } catch (e) {}
+  } catch (e) {}
+}
+setInterval(pollObsHealth, 5000);
+
+// Which sponsor logos are on-air this second, given the live state. Returns [{ sponsor, placement }].
+function adProofOnAir(brand, elapsed) {
+  const out = [];
+  const live = !(state.breakScreen && state.breakScreen.visible);   // the main overlay is composited
+  // Rail bug: 'static' shows ALL sponsors at once; 'cycle' rotates through them one at a time.
+  const rail = brand.railSponsors || [];
+  if (live && rail.length) {
+    if (brand.sponsorMode === 'static') {
+      rail.forEach((s) => out.push({ sponsor: s, placement: 'rail' }));
+    } else {
+      const interval = Number(brand.sponsorInterval) > 0 ? Number(brand.sponsorInterval) : 6;
+      const idx = Math.floor((elapsed - 1) / interval) % rail.length;
+      if (rail[idx]) out.push({ sponsor: rail[idx], placement: 'rail' });
+    }
+  }
+  // Desk + banner show every tagged sponsor at once while their surface is up.
+  if (state.casters && state.casters.visible) (brand.deskSponsors || []).forEach((s) => out.push({ sponsor: s, placement: 'desk' }));
+  if (state.banner && state.banner.visible) (brand.bannerSponsors || []).forEach((s) => out.push({ sponsor: s, placement: 'banner' }));
+  // Single-logo ad slots — on-air when their moment/scene is live.
+  const cond = {
+    overtime:   !!(state.game && state.game.isOT),
+    scoreboard: state.view === 'scoreboard',
+    replayGoal: state.view === 'goal',
+    ticker:     live   // the ticker bar persists on the live overlay
+  };
+  ['overtime', 'scoreboard', 'replayGoal', 'ticker'].forEach((spot) => {
+    if (!cond[spot]) return;
+    const sp = (brand.sponsors || []).find((s) => s.logo && s.placements && s.placements[spot]);
+    if (sp) out.push({ sponsor: sp, placement: spot });
+  });
+  return out;
+}
+
+function adProofTick() {
+  if (!adProof.active) return;
+  const brand = activeBrand();
+  adProof.ticks++;
+  const v = currentViewers();
+  const onAir = brand ? adProofOnAir(brand, adProof.ticks) : [];
+  const creditedNow = new Set();
+  onAir.forEach(({ sponsor, placement }) => {
+    if (!sponsor || !sponsor.id) return;
+    const rec = adProof.sponsors[sponsor.id] ||
+      (adProof.sponsors[sponsor.id] = { id: sponsor.id, name: sponsor.name || '', seconds: 0, byPlacement: {}, impressions: 0, viewerSeconds: 0, peakViewers: 0, _onPrev: false });
+    if (sponsor.name) rec.name = sponsor.name;
+    rec.byPlacement[placement] = (rec.byPlacement[placement] || 0) + 1;   // placement-seconds
+    if (!creditedNow.has(sponsor.id)) { rec.seconds++; rec.viewerSeconds += v; if (v > rec.peakViewers) rec.peakViewers = v; creditedNow.add(sponsor.id); }   // on-air seconds + viewer-seconds (de-duped)
+  });
+  // impressions = number of distinct on-air appearances (off→on transitions)
+  Object.values(adProof.sponsors).forEach((rec) => {
+    const nowOn = creditedNow.has(rec.id);
+    if (nowOn && !rec._onPrev) rec.impressions++;
+    rec._onPrev = nowOn;
+  });
+  if (adProof.ticks % 2 === 0) broadcast(bridgeClients, { type: 'adproof_update', data: adProofReport() });
+}
+
+function adProofReport() {
+  const sponsors = Object.values(adProof.sponsors).map((r) => ({
+    id: r.id, name: r.name, seconds: r.seconds, impressions: r.impressions, byPlacement: { ...r.byPlacement },
+    viewerSeconds: r.viewerSeconds || 0, peakViewers: r.peakViewers || 0, avgViewers: r.seconds ? Math.round((r.viewerSeconds || 0) / r.seconds) : 0
+  })).sort((a, b) => b.seconds - a.seconds);
+  return {
+    active: adProof.active, startedAt: adProof.startedAt, label: adProof.label,
+    durationSec: adProof.ticks, sponsors,
+    sessions: (state.adProofSessions || []).map((s) => ({
+      id: s.id, label: s.label, startedAt: s.startedAt, endedAt: s.endedAt,
+      durationSec: s.durationSec, sponsorCount: (s.sponsors || []).length
+    }))
+  };
+}
+
+function adProofStart(label) {
+  adProof.active = true;
+  adProof.startedAt = Date.now();
+  adProof.label = ((label || '').toString().slice(0, 80)) || (state.eventName || 'Broadcast');
+  adProof.ticks = 0;
+  adProof.sponsors = {};
+  if (_adProofTimer) clearInterval(_adProofTimer);
+  _adProofTimer = setInterval(adProofTick, 1000);
+  broadcast(bridgeClients, { type: 'adproof_update', data: adProofReport() });
+}
+
+function adProofStop() {
+  if (!adProof.active) return null;
+  adProof.active = false;
+  if (_adProofTimer) { clearInterval(_adProofTimer); _adProofTimer = null; }
+  const session = {
+    id: Math.random().toString(36).slice(2, 11),
+    label: adProof.label, startedAt: adProof.startedAt, endedAt: Date.now(), durationSec: adProof.ticks,
+    sponsors: Object.values(adProof.sponsors).map((r) => ({
+      name: r.name, seconds: r.seconds, impressions: r.impressions, byPlacement: { ...r.byPlacement },
+      viewerSeconds: r.viewerSeconds || 0, peakViewers: r.peakViewers || 0, avgViewers: r.seconds ? Math.round((r.viewerSeconds || 0) / r.seconds) : 0
+    })).sort((a, b) => b.seconds - a.seconds)
+  };
+  if (!Array.isArray(state.adProofSessions)) state.adProofSessions = [];
+  state.adProofSessions.unshift(session);
+  if (state.adProofSessions.length > 50) state.adProofSessions.length = 50;   // cap history
+  saveAppState();
+  broadcast(bridgeClients, { type: 'adproof_update', data: adProofReport() });
+  return session;
+}
+
+// Build a CSV report for one session (or the live tracker).
+function adProofCsv(sess) {
+  const spots = SPONSOR_SPOTS;
+  const mmss = (s) => { const m = Math.floor(s / 60), x = s % 60; return m + ':' + String(x).padStart(2, '0'); };
+  const cell = (v) => { const s = String(v == null ? '' : v); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
+  const head = ['Sponsor', 'Total seconds', 'Total (mm:ss)', 'Impressions', ...spots.map((s) => s + ' sec')];
+  const lines = [head.join(',')];
+  (sess.sponsors || []).forEach((s) => {
+    lines.push([cell(s.name), s.seconds, mmss(s.seconds), s.impressions, ...spots.map((sp) => (s.byPlacement && s.byPlacement[sp]) || 0)].join(','));
+  });
+  return lines.join('\r\n');
 }
 
 // Push the active brand's single-logo spot assignments into the live ad-slot state so the
@@ -1087,6 +1389,9 @@ function capturePreset() {
     theme: state.themesByGame[state.activeGame] || 'default',
     eventName: state.eventName,
     gameLabel: state.gameLabel,
+    roundLabel: state.roundLabel,
+    teamRecord: state.teamRecord,
+    leagueStandings: state.leagueStandings,
     fontFamily: state.fontFamily,
     bestOf: state.bestOf,
     facecamsEnabled: state.facecamsEnabled,
@@ -1104,6 +1409,9 @@ function applyPreset(cfg) {
   }
   if (typeof cfg.eventName === 'string') state.eventName = cfg.eventName;
   if (typeof cfg.gameLabel === 'string') state.gameLabel = cfg.gameLabel;
+  if (typeof cfg.roundLabel === 'string') state.roundLabel = cfg.roundLabel;
+  if (cfg.teamRecord && typeof cfg.teamRecord === 'object') state.teamRecord = { ...state.teamRecord, ...cfg.teamRecord };
+  if (cfg.leagueStandings && typeof cfg.leagueStandings === 'object') state.leagueStandings = { ...state.leagueStandings, ...cfg.leagueStandings };
   if (typeof cfg.fontFamily === 'string') state.fontFamily = cfg.fontFamily;
   if (cfg.bestOf) state.bestOf = cfg.bestOf;
   if (typeof cfg.facecamsEnabled === 'boolean') state.facecamsEnabled = cfg.facecamsEnabled;
@@ -1137,7 +1445,16 @@ function loadState() {
       // title must NOT snap back to the factory default on reload).
       if (typeof saved.eventName === 'string') state.eventName = saved.eventName;
       if (typeof saved.gameLabel === 'string') state.gameLabel = saved.gameLabel;
+      if (typeof saved.roundLabel === 'string') state.roundLabel = saved.roundLabel;
+      if (saved.teamRecord && typeof saved.teamRecord === 'object') state.teamRecord = { ...state.teamRecord, ...saved.teamRecord };
+      if (typeof saved.autoTeamsFromGame === 'boolean') state.autoTeamsFromGame = saved.autoTeamsFromGame;
+      if (saved.leagueStandings && typeof saved.leagueStandings === 'object') state.leagueStandings = { ...state.leagueStandings, ...saved.leagueStandings };
       if (saved.fontFamily) state.fontFamily = saved.fontFamily;
+      // One-time migration: if saved font is still the old generic default, promote to brand font.
+      if (state.fontFamily === 'Bourgeois') state.fontFamily = 'Industry';
+      if (typeof saved.clock24h === 'boolean') state.clock24h = saved.clock24h;
+      if (typeof saved.showSeries === 'boolean') state.showSeries = saved.showSeries;
+      if (typeof saved.defaultBestOf === 'number') state.defaultBestOf = saved.defaultBestOf;
       if (saved.facecamsEnabled !== undefined) state.facecamsEnabled = saved.facecamsEnabled;
       if (saved.replayCams !== undefined) state.replayCams = saved.replayCams;
       if (saved.banner) state.banner = saved.banner;
@@ -1154,7 +1471,12 @@ function loadState() {
           interview: (saved.casters.interview && saved.casters.interview.room) ? saved.casters.interview : { room: '', password: '' },
           apiKey: typeof saved.casters.apiKey === 'string' ? saved.casters.apiKey : '',
           interviewee: (saved.casters.interviewee && typeof saved.casters.interviewee === 'object') ? saved.casters.interviewee : null,
-          deskRoomId: typeof saved.casters.deskRoomId === 'string' ? saved.casters.deskRoomId : ''
+          deskRoomId: typeof saved.casters.deskRoomId === 'string' ? saved.casters.deskRoomId : '',
+          slotLabels: (function() {
+            const sl = saved.casters.slotLabels;
+            if (!sl || typeof sl !== 'object') return { 1: 'Caster 1', 2: 'Caster 2', 3: 'Caster 3', 4: 'Caster 4' };
+            return { 1: String(sl[1] || 'Caster 1').slice(0, 30), 2: String(sl[2] || 'Caster 2').slice(0, 30), 3: String(sl[3] || 'Caster 3').slice(0, 30), 4: String(sl[4] || 'Caster 4').slice(0, 30) };
+          })()
         };
       }
       if (saved.ticker && typeof saved.ticker === 'object') {
@@ -1163,6 +1485,7 @@ function loadState() {
           messages: Array.isArray(saved.ticker.messages) ? saved.ticker.messages : [],
           speed: Number(saved.ticker.speed) > 0 ? Number(saved.ticker.speed) : 40,
           source: saved.ticker.source === 'startgg' ? 'startgg' : 'manual',
+          sponsor: typeof saved.ticker.sponsor === 'string' ? saved.ticker.sponsor : '',
           feed: []
         };
       }
@@ -1179,7 +1502,8 @@ function loadState() {
           label: typeof saved.replay.label === 'string' ? saved.replay.label : 'REPLAY',
           logo: saved.replay.logo || null,
           outroLogo: saved.replay.outroLogo || null,
-          colorMode: saved.replay.colorMode === 'mono' ? 'mono' : 'team'
+          colorMode: ['mono', 'brand'].includes(saved.replay.colorMode) ? saved.replay.colorMode : 'team',
+          skin: saved.replay.skin || null
         };
       }
       if (saved.scoreboardAd && typeof saved.scoreboardAd === 'object') {
@@ -1232,7 +1556,8 @@ function loadState() {
           visible: false,
           side: (saved.intro.side === 'orange' || saved.intro.side === 'blue') ? saved.intro.side : 'blue',
           title: saved.intro.title || '',
-          style: [1, 2].includes(Number(saved.intro.style)) ? Number(saved.intro.style) : 1
+          style: [1, 2].includes(Number(saved.intro.style)) ? Number(saved.intro.style) : 1,
+          showFooter: saved.intro.showFooter !== false   // default true — off if using the standalone Sponsor Banner add-on
         };
       }
       if (saved.owMatch && typeof saved.owMatch === 'object') {
@@ -1274,7 +1599,8 @@ function loadState() {
         state.match = {
           format: saved.match.format || '',
           division: saved.match.division || '',
-          maps: Array.isArray(saved.match.maps) ? saved.match.maps : []
+          maps: Array.isArray(saved.match.maps) ? saved.match.maps : [],
+          seriesVisible: typeof saved.match.seriesVisible === 'boolean' ? saved.match.seriesVisible : true
         };
       }
       if (Array.isArray(saved.leagues)) state.leagues = saved.leagues;
@@ -1304,6 +1630,37 @@ function loadState() {
       }
       if (typeof saved.startggApiToken === 'string') {
         startggApiToken = saved.startggApiToken;
+      }
+      if (saved.challonge && typeof saved.challonge === 'object') {
+        state.challonge = {
+          ...state.challonge,
+          enabled: !!saved.challonge.enabled,
+          tournamentSlug: saved.challonge.tournamentSlug || '',
+          selectedTournament: saved.challonge.selectedTournament || null,
+          logoMap: (saved.challonge.logoMap && typeof saved.challonge.logoMap === 'object') ? saved.challonge.logoMap : {},
+          autoFollow: !!saved.challonge.autoFollow,
+          connected: false, lastError: null, queue: [], matchFeed: [], queueFetchedAt: null, eventTeams: [], lastAutoFollowMatchId: null
+        };
+      }
+      if (typeof saved.challongeApiKey === 'string') {
+        challongeApiKey = saved.challongeApiKey;
+      }
+      if (saved.nxgen && typeof saved.nxgen === 'object') {
+        state.nxgen = {
+          ...state.nxgen,
+          enabled: !!saved.nxgen.enabled,
+          eventSlug: saved.nxgen.eventSlug || '',
+          selectedEvent: saved.nxgen.selectedEvent || null,
+          logoMap: (saved.nxgen.logoMap && typeof saved.nxgen.logoMap === 'object') ? saved.nxgen.logoMap : {},
+          autoFollow: !!saved.nxgen.autoFollow,
+          connected: false, lastError: null, queue: [], eventTeams: [], queueFetchedAt: null, lastAutoFollowMatchId: null
+        };
+      }
+      if (typeof saved.nxgenApiKey === 'string') {
+        nxgenApiKey = saved.nxgenApiKey;
+      }
+      if (saved.activeEvent && typeof saved.activeEvent === 'object') {
+        state.activeEvent = { ...state.activeEvent, ...saved.activeEvent };
       }
       if (saved.obs && typeof saved.obs === 'object') {
         state.obs = {
@@ -1398,6 +1755,29 @@ function loadState() {
       if (Array.isArray(saved.flows)) {
         state.flows = saved.flows;
       }
+      if (Array.isArray(saved.adProofSessions)) {
+        state.adProofSessions = saved.adProofSessions;
+      }
+      if (saved.playerProfiles && typeof saved.playerProfiles === 'object') {
+        state.playerProfiles = saved.playerProfiles;
+      }
+      if (saved.draftAuto && typeof saved.draftAuto === 'object') {
+        if (!state.draft.auto) state.draft.auto = { enabled: false, status: 'off', statusDetail: '', lockfilePath: '' };
+        state.draft.auto.enabled = !!saved.draftAuto.enabled;
+        state.draft.auto.lockfilePath = (saved.draftAuto.lockfilePath || '').toString();
+      }
+      if (saved.lolHudMode && ['full', 'minimal', 'auto'].includes(saved.lolHudMode)) {
+        state.lol.hudMode = saved.lolHudMode;
+      }
+      if (saved.lolOcr && typeof saved.lolOcr === 'object') {
+        state.lol.ocr.enabled = !!saved.lolOcr.enabled;
+        if (saved.lolOcr.regions) ['blue', 'red'].forEach((s) => {
+          if (saved.lolOcr.regions[s]) ['x', 'y', 'w', 'h'].forEach((k) => {
+            const v = Number(saved.lolOcr.regions[s][k]);
+            if (!isNaN(v)) state.lol.ocr.regions[s][k] = Math.max(0, Math.round(v));
+          });
+        });
+      }
     }
   } catch (e) { console.error('Error loading state:', e); }
 }
@@ -1412,12 +1792,21 @@ function _saveAppStateNow(sync = false) {
       colorMode: state.colorMode,
       eventName: state.eventName,
       gameLabel: state.gameLabel,
+      roundLabel: state.roundLabel,
+      teamRecord: state.teamRecord,
+      autoTeamsFromGame: state.autoTeamsFromGame,
+      leagueStandings: state.leagueStandings,
       fontFamily: state.fontFamily,
       facecamsEnabled: state.facecamsEnabled,
       banner: state.banner,
       casters: state.casters,
       playouts: state.playouts,
       ticker: state.ticker,
+      draftAuto: { enabled: !!(state.draft && state.draft.auto && state.draft.auto.enabled), lockfilePath: (state.draft && state.draft.auto && state.draft.auto.lockfilePath) || '' },
+      lolHudMode: (state.lol && state.lol.hudMode) || 'auto',
+      lolOcr: { enabled: !!(state.lol && state.lol.ocr && state.lol.ocr.enabled), regions: (state.lol && state.lol.ocr && state.lol.ocr.regions) || undefined },
+      adProofSessions: state.adProofSessions || [],
+      playerProfiles: state.playerProfiles || {},
       overtime: state.overtime,
       replay: state.replay,
       scoreboardAd: state.scoreboardAd,
@@ -1431,7 +1820,7 @@ function _saveAppStateNow(sync = false) {
       // Persist content for the momentary production graphics; visibility is reset on restart.
       winner: { side: state.winner.side, name: state.winner.name, logo: state.winner.logo, color: state.winner.color, subtitle: state.winner.subtitle },
       veto: { title: state.veto.title, maps: state.veto.maps },
-      intro: { side: state.intro.side, title: state.intro.title, style: state.intro.style },
+      intro: { side: state.intro.side, title: state.intro.title, style: state.intro.style, showFooter: state.intro.showFooter },
       owMatch: { visible: !!state.owMatch.visible, format: state.owMatch.format, currentMapIdx: state.owMatch.currentMapIdx, bansByMap: state.owMatch.bansByMap, attackSide: state.owMatch.attackSide || null, showAttack: !!state.owMatch.showAttack, gameMode: state.owMatch.gameMode || 'escort', showMapLabels: state.owMatch.showMapLabels !== false, mapWinners: Array.isArray(state.owMatch.mapWinners) ? state.owMatch.mapWinners : [], mapModes: Array.isArray(state.owMatch.mapModes) ? state.owMatch.mapModes : [] },
       mrMatch: (function(){ const m=state.mrMatch||{}; return { visible: m.visible !== false, format: m.format || 'BO5', bansByMap: m.bansByMap || [], gameMode: m.gameMode || 'convergence', showMapLabels: m.showMapLabels !== false, mapWinners: Array.isArray(m.mapWinners)?m.mapWinners:[], mapModes: Array.isArray(m.mapModes)?m.mapModes:[], gepData: m.gepData||null }; })(),
       customOverlayLayouts: state.customOverlayLayouts || {},
@@ -1444,6 +1833,11 @@ function _saveAppStateNow(sync = false) {
       game: { number: state.game.number },
       startgg: state.startgg,
       startggApiToken,
+      challonge: { enabled: state.challonge.enabled, tournamentSlug: state.challonge.tournamentSlug, selectedTournament: state.challonge.selectedTournament, logoMap: state.challonge.logoMap, autoFollow: state.challonge.autoFollow },
+      challongeApiKey,
+      nxgen: { enabled: state.nxgen.enabled, eventSlug: state.nxgen.eventSlug, selectedEvent: state.nxgen.selectedEvent, logoMap: state.nxgen.logoMap, autoFollow: state.nxgen.autoFollow },
+      nxgenApiKey,
+      activeEvent: state.activeEvent,
       obs: {
         enabled: state.obs.enabled,
         url: state.obs.url,
@@ -1778,6 +2172,12 @@ function buildRoomListenInUrl(team) {
   const css = encodeURIComponent(Buffer.from(LISTEN_IN_CAPTION_CSS, 'utf8').toString('base64'));
   return `${vdoBase()}/?room=${vdo.room}&scene=0&cleanoutput&autostart&novideo&cc&base64css=${css}#p=${vdo.password}`;
 }
+// General room join link — anyone can enter the team's private VDO room without claiming a named slot.
+function buildRoomJoinUrl(team) {
+  const vdo = ensureTeamVdo(team);
+  const extra = state.vdo?.pushParams ? '&' + String(state.vdo.pushParams).replace(/^&+/, '') : '';
+  return `${vdoBase()}/?room=${vdo.room}${extra}#p=${vdo.password}`;
+}
 // Caster join link — pushes as <streamId> into the shared caster room with transcription.
 function buildCasterJoinUrl(caster) {
   const vdo = state.casters?.vdo;
@@ -1813,8 +2213,124 @@ function formatTime(seconds) {
 // The live, frequently-changing payload sent on EVERY broadcast. Deliberately excludes the
 // big control-panel-only libraries (savedTeams, brandKits) and the static champion list —
 // those are sent separately so live broadcasts stay tiny and fluid during production.
+// Live overlay browser sources connected to the WS bridge, by page — drives the pre-flight
+// "overlays reachable" check (0 ⇒ no graphics will reach the stream). Cheap: a Set walk.
+function overlayClientInfo() {
+  let count = 0; const pages = {};
+  for (const ws of bridgeClients) {
+    if (ws._role === 'overlay') { count++; const p = ws._page || 'overlay'; pages[p] = (pages[p] || 0) + 1; }
+  }
+  return { count, pages };
+}
+let _lastOverlayCount = -1;
+function maybeBroadcastOverlayCount() {
+  const n = overlayClientInfo().count;
+  if (n === _lastOverlayCount) return;       // only push when the count actually changes (avoid reconnect churn)
+  _lastOverlayCount = n;
+  broadcast(bridgeClients, { type: 'full_state', data: buildLiveState() });
+}
+
+// Resolve the season/league record for one team name. Season W/L + points + placement
+// come from the manually-managed league standings (state.leagues); "this week" W/L comes
+// from the live start.gg event standings (state.bracket.standings). Returns null when the
+// team isn't found in any league AND has no start.gg standing — overlay then shows nothing.
+// source: 'stats' (in-app leagues) | 'startgg' (tournament platform league + live event).
+function resolveOneTeamRecord(name, source) {
+  const key = String(name == null ? '' : name).trim().toLowerCase();
+  if (!key) return null;
+  const out = { seasonW: null, seasonL: null, pts: null, place: null, weekW: null, weekL: null };
+  const src = source || 'stats';
+
+  // In-app manual league standings → season W/L, points, placement. Prefer a league for the
+  // active game; fall back to the first league that contains a team with this name.
+  if (src === 'stats') {
+    const leagues = Array.isArray(state.leagues) ? state.leagues : [];
+    const chosenId = (state.teamRecord && state.teamRecord.leagueId) || '';
+    // Use the producer-selected league when set; otherwise auto-pick (active game first).
+    const ordered = chosenId
+      ? leagues.filter((l) => String(l.id) === String(chosenId))
+      : leagues.slice().sort((a, b) => (b.game === state.activeGame ? 1 : 0) - (a.game === state.activeGame ? 1 : 0));
+    for (const lg of ordered) {
+      // League teams may be references ({id, teamName}) or copies ({id, name}) — match either.
+      const team = (lg.teams || []).find((t) => String(t.teamName || t.name || '').trim().toLowerCase() === key);
+      if (!team) continue;
+      const st = (lg.standings || []).find((s) => s.teamId === team.id);
+      if (st) {
+        out.seasonW = st.w || 0;
+        out.seasonL = st.l || 0;
+        out.pts = st.pts || 0;
+        const ranked = (lg.standings || []).slice().sort((a, b) =>
+          (b.pts || 0) - (a.pts || 0) || ((b.w || 0) - (b.l || 0)) - ((a.w || 0) - (a.l || 0)));
+        const idx = ranked.findIndex((s) => s.teamId === team.id);
+        if (idx >= 0) out.place = idx + 1;
+      } else { out.seasonW = 0; out.seasonL = 0; out.pts = 0; }
+      break;
+    }
+  }
+
+  // Tournament platform (start.gg): LEAGUE standings → season points + placement, and the
+  // live start.gg event standings → "this week" W/L (computed from played sets).
+  if (src === 'startgg') {
+    const lt = ((state.leagueStandings && state.leagueStandings.teams) || [])
+      .find((t) => String(t.name || '').trim().toLowerCase() === key);
+    if (lt) { if (lt.points != null) out.pts = lt.points; if (lt.place != null) out.place = lt.place; }
+    const wk = (state.bracket && Array.isArray(state.bracket.standings) ? state.bracket.standings : [])
+      .find((s) => String(s.name || '').trim().toLowerCase() === key);
+    if (wk) { out.weekW = wk.wins || 0; out.weekL = wk.losses || 0; out.seasonW = out.seasonW ?? (wk.wins || 0); out.seasonL = out.seasonL ?? (wk.losses || 0); }
+  }
+
+  const hasAny = ['seasonW', 'pts', 'place', 'weekW'].some((k) => out[k] != null);
+  return hasAny ? out : null;
+}
+
+// Format a resolved record into the single line the overlay shows, per the chosen metric.
+function formatTeamRecord(rec, metric) {
+  if (!rec) return '';
+  const dot = ' ' + String.fromCharCode(0xB7) + ' ';
+  const season = (rec.seasonW != null) ? `${rec.seasonW}-${rec.seasonL}` : '';
+  const week = (rec.weekW != null) ? `${rec.weekW}-${rec.weekL}` : '';
+  const pts = (rec.pts != null) ? `${rec.pts} PTS` : '';
+  const place = (rec.place != null) ? `#${rec.place}` : '';
+  switch (metric) {
+    case 'week':  return week;
+    case 'pts':   return pts;
+    case 'place': return place;
+    case 'record-pts': return [season, pts].filter(Boolean).join(dot);
+    case 'season':
+    default:      return season;
+  }
+}
+
+// Tiny per-broadcast blob of the resolved records for the two live teams (no logos/blobs).
+function resolveTeamRecords() {
+  const tr = state.teamRecord || {};
+  const source = tr.source || 'stats';
+  if (!tr.enabled) return { enabled: false, source, metric: tr.metric || 'season', leagueId: tr.leagueId || '', blue: '', orange: '', rawBlue: {}, rawOrange: {} };
+  const metric = tr.metric || 'season';
+  const numOrNull = (v) => (v == null || v === '' || isNaN(v)) ? null : Number(v);
+  const recFor = (side, name) => {
+    if (source === 'manual') {
+      const m = (tr.manual && tr.manual[side]) || {};
+      const w = numOrNull(m.w), l = numOrNull(m.l);
+      return { seasonW: w, seasonL: l, weekW: w, weekL: l, pts: numOrNull(m.pts), place: numOrNull(m.place) };
+    }
+    return resolveOneTeamRecord(name, source) || {};
+  };
+  const fmt = (rec) => (['seasonW', 'pts', 'place'].some((k) => rec[k] != null)) ? formatTeamRecord(rec, metric) : '';
+  const raw = (rec) => ({ w: rec.seasonW ?? null, l: rec.seasonL ?? null, pts: rec.pts ?? null, place: rec.place ?? null });
+  const bRec = recFor('blue', state.teams.blue && state.teams.blue.name);
+  const oRec = recFor('orange', state.teams.orange && state.teams.orange.name);
+  return {
+    enabled: true, source, metric, leagueId: tr.leagueId || '',
+    blue: fmt(bRec), orange: fmt(oRec),
+    rawBlue: raw(bRec), rawOrange: raw(oRec)   // per-side numbers so the team boxes can prefill/edit
+  };
+}
+
 function buildLiveState() {
   const publicStartgg = { ...state.startgg, hasToken: !!startggApiToken };
+  const publicChallonge = { ...state.challonge, hasKey: !!challongeApiKey };
+  const publicNxgen = { ...state.nxgen, hasKey: !!nxgenApiKey };
   const publicObs = { ...state.obs, hasPassword: !!obsPassword };
   const publicDiscord = {
     connected: state.discord.connected,
@@ -1829,18 +2345,23 @@ function buildLiveState() {
   const eff = effectiveTeamColors();
   return {
     ...state,
-    // Heavy, rarely-changing blobs (base64 logos/thumbnails) are stripped from the light
-    // broadcast and re-sent only on change via libraryData(); client + overlays backfill them.
-    // (bracket ≈ 0.9MB embedded team logos, replay ≈ 0.4MB frame thumbnails.) Leaving them in
-    // ...state would put >1MB on EVERY broadcast and freeze the panel — the regression this fixes.
+    // Heavy / rarely-changing data stripped from the live broadcast and re-sent only on change
+    // via libraryData() (gated by librarySig). Clients backfill from the last library snapshot.
+    // bracket ≈ 0.9MB embedded team logos, replay ≈ 0.4MB frame thumbnails.
+    // playerProfiles is in libraryData() (gated by playerProfilesVer) — excluding here avoids
+    // resending every registered player's profile on every goal/scene change.
     bracket: undefined,
     replay: undefined,
+    playerProfiles: undefined,
     teams: {
       blue:   { ...state.teams.blue,   color: eff.blue,   ownColor: state.teams.blue.color },
       orange: { ...state.teams.orange, color: eff.orange, ownColor: state.teams.orange.color }
     },
     colorMode: state.colorMode || 'team',
     startgg: publicStartgg,
+    challonge: publicChallonge,
+    nxgen: publicNxgen,
+    activeEvent: state.activeEvent,
     obs: publicObs,
     discord: publicDiscord,
     games: (function() {
@@ -1862,8 +2383,10 @@ function buildLiveState() {
     presets: savedPresets.map((p) => ({ id: p.id, name: p.name, game: p.game })),
     facecams: savedFacecams,
     formattedTime: formatTime(state.game.time),
+    teamRecords: resolveTeamRecords(),   // resolved season/league record line per side (tiny)
     flows: state.flows || [],
-    showRoster: state.showRoster || []
+    showRoster: state.showRoster || [],
+    overlays: overlayClientInfo()   // live overlay browser-source count for the pre-flight checklist
   };
 }
 
@@ -1872,9 +2395,43 @@ function buildLiveState() {
 //   brand / banner / mainBanner: derived from the active brand kit (base64 sponsor + banner
 //     images, ~1MB) and read by overlays too — both sides backfill these when a light broadcast
 //     omits them. This keeps live broadcasts at a few hundred bytes instead of ~2.6MB.
+// Merge profile data for one player into the registry (ignores empty fields).
+let playerProfilesVer = 0;
+function upsertPlayerProfile(gamerTag, patch) {
+  const key = (gamerTag || '').trim().toLowerCase();
+  if (!key || !patch) return;
+  if (!state.playerProfiles) state.playerProfiles = {};
+  const cur = state.playerProfiles[key] || { gamerTag };
+  const next = { ...cur, gamerTag: cur.gamerTag || gamerTag };
+  if (patch.startggSlug) next.startggSlug = String(patch.startggSlug).slice(0, 160);
+  if (patch.startggPlayerId) next.startggPlayerId = String(patch.startggPlayerId).slice(0, 40);
+  if (patch.twitch) next.twitch = String(patch.twitch).slice(0, 80);
+  if (patch.twitter) next.twitter = String(patch.twitter).slice(0, 80);
+  if (patch.country) next.country = String(patch.country).slice(0, 80);
+  if (patch.countryCode) next.countryCode = String(patch.countryCode).slice(0, 4).toLowerCase();
+  if (patch.image) next.image = String(patch.image).slice(0, 400);   // start.gg profile image URL
+  if (patch.sixmans) {
+    const s = patch.sixmans;
+    next.sixmans = {
+      ...(cur.sixmans || {}),
+      name: String(s.name || (cur.sixmans && cur.sixmans.name) || '').slice(0, 80),
+      elo: (s.elo != null && !isNaN(s.elo)) ? Number(s.elo) : (cur.sixmans && cur.sixmans.elo) || null,
+      rank: String(s.rank || (cur.sixmans && cur.sixmans.rank) || '').slice(0, 10),
+      region: String(s.region || (cur.sixmans && cur.sixmans.region) || '').slice(0, 6),
+      platform: String(s.platform || (cur.sixmans && cur.sixmans.platform) || '').slice(0, 10),
+    };
+  }
+  next.updatedAt = Date.now();
+  state.playerProfiles[key] = next;
+  playerProfilesVer++;
+  // Write-through to the persistent player DB so data survives state resets
+  playerDb.upsert(gamerTag, { displayName: next.gamerTag, startggSlug: next.startggSlug || null, startggId: next.startggPlayerId || null, sixmans: next.sixmans || null, twitch: next.twitch || null, twitter: next.twitter || null, country: next.country || null, countryCode: next.countryCode || null, image: next.image || null });
+}
+
 function libraryData() {
   return {
     savedTeams,
+    playerProfiles: state.playerProfiles || {},   // per-player start.gg + 6mans links
     brandKits: savedBrandKits,
     brand: activeBrand(),
     banner: bannerForBroadcast(),
@@ -1906,7 +2463,8 @@ function librarySig() {
   // collapse any long string to its length so we never stringify the base64 (this runs per-broadcast).
   const lite = (o) => { try { return JSON.stringify(o, (k, v) => (typeof v === 'string' && v.length > 200) ? ('len' + v.length) : v) || ''; } catch { return ''; } };
   const extra = '|ab:' + (state.activeBrandKitId || '') + '|bv:' + (state.banner.visible ? 1 : 0) + '|bi:' + bn
-    + '|brk:' + lite(state.bracket) + '|rpl:' + lite(state.replay) + '|crew:' + (state.crew || []).length;
+    + '|brk:' + lite(state.bracket) + '|rpl:' + lite(state.replay) + '|crew:' + (state.crew || []).length
+    + '|pp:' + playerProfilesVer;
   return savedTeams.length + '#' + t + '||' + savedBrandKits.length + '#' + b + extra;
 }
 
@@ -1924,6 +2482,127 @@ function extractEntrantPlayers(name) {
     .filter(Boolean)
     .slice(0, 4);
 }
+
+// Normalize a pasted start.gg league reference into the bare slug the API wants.
+// Accepts a full URL (https://www.start.gg/league/<slug>) or a "league/<slug>" / "<slug>" form.
+function normalizeLeagueSlug(raw) {
+  let s = String(raw || '').trim();
+  if (!s) return '';
+  const m = s.match(/start\.gg\/league\/([^/?#]+)/i);
+  if (m) return m[1];
+  s = s.replace(/^https?:\/\/[^/]+\//i, '');   // strip any host
+  s = s.replace(/^league\//i, '');             // strip a leading league/
+  return s.split(/[/?#]/)[0];
+}
+
+// Fetch season standings (placement + league points) for a start.gg LEAGUE. Tries the bare
+// slug first, then the "league/<slug>" form (start.gg accepts the latter for some leagues).
+async function fetchLeagueStandings(rawSlug) {
+  if (!startggApiToken) throw new Error('Missing Start.gg API token');
+  const slug = normalizeLeagueSlug(rawSlug);
+  if (!slug) throw new Error('Missing league slug');
+  const client = createStartGgClient(startggApiToken);
+  const query = `query LeagueStandings($slug:String!){
+    league(slug:$slug){ id name
+      standings(query:{page:1,perPage:200}){ nodes{ placement totalPoints entrant{ id name } } } } }`;
+  let league = null;
+  for (const candidate of [slug, 'league/' + slug]) {
+    const res = await client.request(query, { slug: candidate });
+    if (res && res.league) { league = res.league; break; }
+  }
+  if (!league) throw new Error('League not found (check the slug/URL)');
+  const teams = ((league.standings && league.standings.nodes) || [])
+    .filter((n) => n && n.entrant && n.entrant.name)
+    .map((n) => ({ name: n.entrant.name, place: n.placement || null, points: (typeof n.totalPoints === 'number') ? n.totalPoints : null }))
+    .sort((a, b) => (a.place || 9999) - (b.place || 9999));
+  return { name: league.name || '', teams };
+}
+
+// ── start.gg league search + sync helpers ─────────────────────────────────
+
+async function searchStartggLeagues(name) {
+  if (!startggApiToken) throw new Error('Missing Start.gg API token');
+  const client = createStartGgClient(startggApiToken);
+  const data = await client.request(
+    `query SearchLeagues($name:String){leagues(query:{filter:{name:$name},perPage:10}){nodes{id name slug}}}`,
+    { name }
+  );
+  return ((data && data.leagues && data.leagues.nodes) || []).filter(Boolean);
+}
+
+// Lightweight league info: name + tournament list (no sets).
+async function fetchLeagueInfo(rawSlug) {
+  if (!startggApiToken) throw new Error('Missing Start.gg API token');
+  const slug = normalizeLeagueSlug(rawSlug);
+  if (!slug) throw new Error('Missing league slug');
+  const client = createStartGgClient(startggApiToken);
+  const query = `query LeagueInfo($slug:String!){
+    league(slug:$slug){
+      id name slug
+      tournaments(query:{perPage:50,sortBy:"startAt asc"}){
+        nodes{id name slug startAt numAttendees}
+      }
+    }
+  }`;
+  let league = null;
+  for (const candidate of [slug, 'league/' + slug]) {
+    try {
+      const data = await client.request(query, { slug: candidate });
+      if (data && data.league) { league = data.league; break; }
+    } catch (_) {}
+  }
+  if (!league) throw new Error('League not found (check the slug/URL)');
+  return {
+    id: league.id,
+    name: league.name || '',
+    slug,
+    tournaments: ((league.tournaments && league.tournaments.nodes) || []).filter(Boolean)
+  };
+}
+
+// Fetch completed sets for a single tournament, used during league sync.
+async function fetchTournamentSets(tournamentSlug) {
+  if (!startggApiToken) throw new Error('Missing Start.gg API token');
+  const client = createStartGgClient(startggApiToken);
+  const data = await client.request(
+    `query TournamentSets($slug:String!){
+      tournament(slug:$slug){
+        id name startAt
+        events{
+          id name
+          sets(filters:{state:3},perPage:100){
+            nodes{id displayScore winnerId fullRoundText slots{entrant{id name}}}
+          }
+        }
+      }
+    }`,
+    { slug: tournamentSlug }
+  );
+  const t = data && data.tournament;
+  if (!t) throw new Error('Tournament not found: ' + tournamentSlug);
+  return { id: t.id, name: t.name || '', startAt: t.startAt || null, events: (t.events || []).filter(Boolean) };
+}
+
+// Server-side standings recalc — mirrors client-side lgComputeStandingsFromSchedule.
+function lgRecalcServer(lg) {
+  const sc = lg.scoring || {};
+  const ptWin = sc.win ?? 3, ptLoss = sc.loss ?? 0, ptDraw = sc.draw ?? 1;
+  const map = {};
+  (lg.teams || []).forEach(tm => { map[tm.id] = { teamId: tm.id, w: 0, l: 0, t: 0, gf: 0, ga: 0, pts: 0 }; });
+  for (const m of (lg.schedule || [])) {
+    const r = m.result; if (!r || r.scoreA == null || r.scoreB == null) continue;
+    const a = map[m.teamA], b = map[m.teamB]; if (!a || !b) continue;
+    const sa = Number(r.scoreA) || 0, sb = Number(r.scoreB) || 0;
+    a.gf += sa; a.ga += sb; b.gf += sb; b.ga += sa;
+    if (sa > sb) { a.w++; a.pts += ptWin; b.l++; b.pts += ptLoss; }
+    else if (sb > sa) { b.w++; b.pts += ptWin; a.l++; a.pts += ptLoss; }
+    else { a.t++; a.pts += ptDraw; b.t++; b.pts += ptDraw; }
+  }
+  lg.standings = Object.values(map);
+}
+
+let _srvLgUidC = Date.now();
+function srvLgUid(prefix) { return prefix + '-' + (++_srvLgUidC).toString(36); }
 
 async function testStartGgConnection() {
   if (!startggApiToken) {
@@ -1994,6 +2673,11 @@ async function syncStartGgSet(setId) {
   if (orangeEntrant) {
     state.teams.orange.name = (orangeEntrant.name || 'ORANGE TEAM').toUpperCase();
   }
+
+  // Auto-update the overlay round/stage label from this set's bracket round (e.g. "Winners Finals"),
+  // so it tracks the teams whenever a set is pushed onto the overlay (auto-follow or manual). Only
+  // overwrite when the set actually carries a round, so a set without one doesn't blank a manual label.
+  if (set.fullRoundText) state.roundLabel = String(set.fullRoundText).toUpperCase();
 
   // Auto-apply saved logos/players when the entrant matches a team in the library;
   // fall back to the start.gg team logo. Always reset first so a stale logo from the
@@ -2100,7 +2784,10 @@ function mapStartggSetToFeedItem(set, extra) {
     scoreA: typeof scoreA === 'number' && scoreA >= 0 ? scoreA : (typeof set.scoreA === 'number' ? set.scoreA : null),
     scoreB: typeof scoreB === 'number' && scoreB >= 0 ? scoreB : (typeof set.scoreB === 'number' ? set.scoreB : null),
     status,
-    stream: (extra?.stream || set.stream || '').toString()
+    stream: (extra?.stream || set.stream || '').toString(),
+    // Logo URLs (from the start.gg name->logo map — kept tiny, no base64 in the broadcast).
+    logoA: state.startgg.logoMap[(set.teamA || slots[0]?.entrant?.name || '').toString().trim().toLowerCase()] || '',
+    logoB: state.startgg.logoMap[(set.teamB || slots[1]?.entrant?.name || '').toString().trim().toLowerCase()] || ''
   };
 }
 
@@ -2112,6 +2799,23 @@ function formatTickerFeed(feed) {
     const b = (typeof m.scoreB === 'number') ? m.scoreB : 0;
     return status + '   ' + m.teamA + '  ' + a + '-' + b + '  ' + m.teamB;
   });
+}
+// The start.gg set currently being streamed (manual selection or auto-follow), resolved to its
+// id + real team names + tournament. Used to link live RL player stats to the official set record
+// so a streamed series becomes one row (official result + player stats) instead of two.
+function currentStreamedSetLink() {
+  const sg = state.startgg || {};
+  const setId = sg.setId || sg.lastPushedSetId || null;
+  if (!setId) return null;
+  const item = (sg.queue || []).find((x) => String(x.setId) === String(setId))
+            || (sg.matchFeed || []).find((x) => String(x.setId) === String(setId));
+  const real = (s) => (s && s !== 'TBD' && s !== 'Unknown') ? s : null;
+  return {
+    setId: String(setId),
+    teamA: item ? real(item.teamA) : null,
+    teamB: item ? real(item.teamB) : null,
+    tournament: (sg.selectedEvent && (sg.selectedEvent.tournamentName || sg.selectedEvent.name)) || null
+  };
 }
 function buildStartggMatchFeed(queue, recentSets, excludeSetId) {
   const items = [];
@@ -2186,14 +2890,28 @@ async function fetchStreamQueue(tournamentSlug) {
   const res = await client.request(query, { slug: `tournament/${slug}` });
   const sq = res?.tournament?.streamQueue || [];
 
+  // Double-elim play order: Losers Finals must happen before Grand Finals.
+  // start.gg sometimes returns Grand Finals first in the stream queue even when
+  // Losers Finals hasn't been played, so we enforce the correct sequence here.
+  const _deRoundKey = (r) => {
+    const t = (r || '').toLowerCase();
+    if (/grand\s*(final|finals)/.test(t)) return 2;
+    if (/losers?\s*(final|finals)/.test(t) && !/semi/.test(t)) return 1;
+    return 0;
+  };
+
   const streams = [];
   const queue = [];
   sq.forEach((q) => {
     const streamName = q?.stream?.streamName || 'Stream';
     if (!streams.includes(streamName)) streams.push(streamName);
+    const sets = q?.sets || [];
     // Capture any team logos start.gg returns directly on the queue entrants.
-    indexEntrantLogos((q?.sets || []).flatMap((set) => (set.slots || []).map((s) => s?.entrant).filter(Boolean)));
-    (q?.sets || []).forEach((set, idx) => {
+    indexEntrantLogos(sets.flatMap((set) => (set.slots || []).map((s) => s?.entrant).filter(Boolean)));
+    // Sort within this stream's queue: Losers Finals before Grand Finals;
+    // everything else stays in start.gg's original order (stable sort).
+    const sorted = sets.slice().sort((a, b) => _deRoundKey(a.fullRoundText) - _deRoundKey(b.fullRoundText));
+    sorted.forEach((set, idx) => {
       const ents = (set.slots || []).map((s) => s?.entrant).filter(Boolean);
       const scoreA = set.slots?.[0]?.standing?.stats?.score?.value;
       const scoreB = set.slots?.[1]?.standing?.stats?.score?.value;
@@ -2301,7 +3019,508 @@ function setStartggAutoFollow(enabled) {
   broadcastFullState();
 }
 
-// ─── My Events live-refresh ──────────────────────────────────────────────────
+// ─── Challonge integration ───────────────────────────────────────────────────
+
+function challongePartMap(participants) {
+  const map = {};
+  participants.forEach((p) => {
+    const d = p.participant;
+    map[d.id] = {
+      name: d.display_name || d.name || `Participant ${d.id}`,
+      logo: d.attached_participatable_portrait_url || null,
+      seed: d.seed || 0,
+      challongeId: d.id,
+      finalRank: d.final_rank || null
+    };
+  });
+  return map;
+}
+
+function challongeBracketType(type) {
+  if (!type) return 'SINGLE_ELIMINATION';
+  const t = type.toLowerCase();
+  if (t.includes('double')) return 'DOUBLE_ELIMINATION';
+  if (t.includes('round robin')) return 'ROUND_ROBIN';
+  if (t.includes('swiss')) return 'SWISS';
+  return 'SINGLE_ELIMINATION';
+}
+
+function buildChalongeBracket(tournament, participants, matches) {
+  const partMap = challongePartMap(participants);
+  const getName = (id) => (id ? (partMap[id]?.name || `#${id}`) : 'TBD');
+  const type = challongeBracketType(tournament.tournament_type);
+
+  function parseScore(match) {
+    const csv = match.scores_csv || '';
+    const parts = csv.split('-').map((s) => parseInt(s) || 0);
+    return { aScore: parts[0] || 0, bScore: parts[1] || 0 };
+  }
+
+  if (type === 'ROUND_ROBIN' || type === 'SWISS') {
+    const roundMap = {};
+    matches.forEach((m) => {
+      const d = m.match;
+      const r = Math.abs(d.round);
+      if (!roundMap[r]) roundMap[r] = [];
+      const { aScore, bScore } = parseScore(d);
+      roundMap[r].push({ a: { name: getName(d.player1_id), score: aScore, winner: d.winner_id === d.player1_id }, b: { name: getName(d.player2_id), score: bScore, winner: d.winner_id === d.player2_id } });
+    });
+    const schedule = Object.keys(roundMap).map(Number).sort((a, b) => a - b).map((r) => ({ name: 'Round ' + r, sets: roundMap[r] }));
+    const roster = Object.values(partMap).sort((a, b) => (a.seed || 99) - (b.seed || 99)).map((p) => p.name);
+    return { type, winners: [], losers: [], finals: [], standings: [], schedule, roster };
+  }
+
+  // Elimination: positive round = winners side, negative = losers side.
+  const winnersMap = {}, losersMap = {};
+  let maxWR = -Infinity;
+  matches.forEach((m) => {
+    const d = m.match;
+    const r = d.round;
+    const { aScore, bScore } = parseScore(d);
+    const set = { a: { name: getName(d.player1_id), score: aScore, winner: d.winner_id === d.player1_id }, b: { name: getName(d.player2_id), score: bScore, winner: d.winner_id === d.player2_id } };
+    if (r >= 0) { if (!winnersMap[r]) winnersMap[r] = []; winnersMap[r].push(set); if (r > maxWR) maxWR = r; }
+    else { if (!losersMap[r]) losersMap[r] = []; losersMap[r].push(set); }
+  });
+
+  let finals = [];
+  if (type === 'DOUBLE_ELIMINATION' && maxWR > 0 && winnersMap[maxWR]) {
+    finals = [{ name: 'Grand Final', sets: winnersMap[maxWR] }];
+    delete winnersMap[maxWR];
+  }
+
+  const wKeys = Object.keys(winnersMap).map(Number).sort((a, b) => a - b);
+  const totalW = wKeys.length;
+  const winners = wKeys.map((r, idx) => {
+    let name;
+    if (type === 'DOUBLE_ELIMINATION') {
+      name = idx === totalW - 1 ? "Winners Final" : idx === totalW - 2 ? "Winners Semifinal" : "Winners Round " + r;
+    } else {
+      name = idx === totalW - 1 ? "Grand Final" : idx === totalW - 2 ? "Semifinal" : "Round " + r;
+    }
+    return { name, sets: winnersMap[r] };
+  });
+
+  const lKeys = Object.keys(losersMap).map(Number).sort((a, b) => b - a);
+  const losers = lKeys.map((r) => ({ name: 'Losers Round ' + Math.abs(r), sets: losersMap[r] }));
+
+  return { type, winners, losers, finals, standings: [], schedule: [], roster: [] };
+}
+
+function buildChallongeQueue(partMap, matches) {
+  return matches
+    .filter((m) => ['open', 'pending'].includes(m.match.state))
+    .sort((a, b) => (a.match.suggested_play_order || 0) - (b.match.suggested_play_order || 0))
+    .map((m) => {
+      const d = m.match;
+      const csv = (d.scores_csv || '').split('-').map((s) => parseInt(s) || 0);
+      return {
+        matchId: d.id, round: d.round, identifier: d.identifier,
+        state: d.state, live: d.state === 'open',
+        teamA: partMap[d.player1_id]?.name || 'TBD',
+        teamB: partMap[d.player2_id]?.name || 'TBD',
+        logoA: partMap[d.player1_id]?.logo || null,
+        logoB: partMap[d.player2_id]?.logo || null,
+        scoreA: csv[0] || 0, scoreB: csv[1] || 0,
+        player1ChallongeId: d.player1_id,
+        player2ChallongeId: d.player2_id
+      };
+    });
+}
+
+async function fetchChallongeTournamentData(slug) {
+  const client = createChallongeClient(challongeApiKey);
+  const [tData, pData, mData] = await Promise.all([
+    client.get(`/tournaments/${slug}.json`),
+    client.get(`/tournaments/${slug}/participants.json`),
+    client.get(`/tournaments/${slug}/matches.json`)
+  ]);
+  return { tournament: tData.tournament, participants: pData, matches: mData };
+}
+
+async function loadChalongeTournament(slug) {
+  const { tournament, participants, matches } = await fetchChallongeTournamentData(slug);
+  const partMap = challongePartMap(participants);
+
+  // Auto-import participants into the saved team library
+  Object.values(partMap).forEach(p => {
+    if (!savedTeams.find(t => t.name.toLowerCase() === p.name.toLowerCase())) {
+      savedTeams.push({ name: p.name, logo: p.logo || null, players: [] });
+    }
+  });
+  saveTeams();
+
+  const eventTeams = Object.values(partMap).sort((a, b) => (a.seed || 99) - (b.seed || 99)).map((p) => ({
+    name: p.name, logo: p.logo, seed: p.seed, challongeId: p.challongeId, finalRank: p.finalRank
+  }));
+  const logoMap = {};
+  eventTeams.forEach((t) => { if (t.logo) logoMap[t.name.toLowerCase()] = t.logo; });
+
+  state.challonge.eventTeams = eventTeams;
+  state.challonge.logoMap = logoMap;
+  state.challonge.selectedTournament = {
+    id: tournament.id, slug: tournament.url, name: tournament.name,
+    url: tournament.full_challonge_url, type: tournament.tournament_type,
+    state: tournament.state, participantsCount: tournament.participants_count,
+    gameName: tournament.game_name || ''
+  };
+  state.challonge.tournamentSlug = slug;
+  state.challonge.connected = true;
+  state.challonge.lastError = null;
+  state.challonge.lastSyncAt = new Date().toISOString();
+  state.challonge.queue = buildChallongeQueue(partMap, matches);
+  state.activeEvent = {
+    platform: 'challonge',
+    slug,
+    name: tournament.name,
+    gameName: tournament.game_name || '',
+    numEntrants: participants.length,
+    format: tournament.tournament_type || '',
+    url: tournament.full_challonge_url || `https://challonge.com/${slug}`,
+    loadedAt: new Date().toISOString()
+  };
+  state.challonge.queueFetchedAt = Date.now();
+
+  // Apply bracket to state.bracket
+  const bd = buildChalongeBracket(tournament, participants, matches);
+  const teams = eventTeams.filter((t) => t.logo).map((t) => ({ name: t.name, logo: t.logo }));
+  state.bracket.phases = [{ id: 'challonge-main', name: tournament.name || 'Bracket', type: bd.type, winners: bd.winners, losers: bd.losers, finals: bd.finals, standings: bd.standings, schedule: bd.schedule, roster: bd.roster }];
+  state.bracket.activePhaseId = 'challonge-main';
+  state.bracket.title = tournament.name || 'Bracket';
+  state.bracket.teams = teams;
+  state.bracket.matches = [];
+  state.bracket.eventSlug = 'challonge:' + slug;
+  state.bracket.lastFetchAt = Date.now();
+  syncActiveBracketPhase();
+  broadcastFullState();
+  return { name: tournament.name, teamsCount: eventTeams.length, matchesCount: matches.length };
+}
+
+async function refreshChallongeLive() {
+  const slug = (state.challonge.tournamentSlug || '').trim();
+  if (!slug || !challongeApiKey) return;
+  try {
+    const { tournament, participants, matches } = await fetchChallongeTournamentData(slug);
+    const partMap = challongePartMap(participants);
+    state.challonge.queue = buildChallongeQueue(partMap, matches);
+    state.challonge.queueFetchedAt = Date.now();
+    state.challonge.connected = true;
+    state.challonge.lastError = null;
+    // Auto-follow: push teams to scoreboard when a match goes live
+    if (state.challonge.autoFollow) {
+      const live = state.challonge.queue.find(m => m.live);
+      if (live && live.matchId !== state.challonge.lastAutoFollowMatchId) {
+        state.challonge.lastAutoFollowMatchId = live.matchId;
+        if (live.teamA && live.teamA !== 'TBD') {
+          state.teams.blue = { ...state.teams.blue, name: live.teamA, logo: live.logoA || state.challonge.logoMap[(live.teamA || '').toLowerCase()] || null };
+          state.teams.orange = { ...state.teams.orange, name: live.teamB || '', logo: live.logoB || state.challonge.logoMap[(live.teamB || '').toLowerCase()] || null };
+          saveAppState();
+        }
+      }
+    }
+    // Refresh bracket scores
+    const bd = buildChalongeBracket(tournament, participants, matches);
+    const existingPhase = state.bracket.phases.find((p) => p.id === 'challonge-main');
+    if (existingPhase) {
+      existingPhase.winners = bd.winners;
+      existingPhase.losers = bd.losers;
+      existingPhase.finals = bd.finals;
+      state.bracket.lastFetchAt = Date.now();
+      syncActiveBracketPhase();
+    }
+    broadcastFullState();
+  } catch (e) {
+    state.challonge.connected = false;
+    state.challonge.lastError = e.message;
+    broadcastFullState();
+    throw e;
+  }
+}
+
+let _challongePollTimer = null;
+function setChallongePolling(enabled) {
+  if (_challongePollTimer) { clearInterval(_challongePollTimer); _challongePollTimer = null; }
+  if (enabled && challongeApiKey && (state.challonge.tournamentSlug || '').trim()) {
+    refreshChallongeLive();
+    _challongePollTimer = setInterval(refreshChallongeLive, 30000);
+  }
+}
+
+// ─── Challonge real-time match sync ──────────────────────────────────────────
+
+async function buildChallongeParticipantMap(slug) {
+  const client = createChallongeClient(challongeApiKey);
+  const pData = await client.get(`/tournaments/${slug}/participants.json`);
+  const map = {};
+  (pData || []).forEach(p => {
+    const d = p.participant || p;
+    [d.name, d.display_name].filter(Boolean).forEach(n => {
+      map[n.toLowerCase()] = { id: d.id, name: n };
+    });
+  });
+  return map;
+}
+
+async function syncLinkedChallongeTournament(ev) {
+  const link = ev.challongeSync;
+  if (!link || !link.enabled || !link.slug || !challongeApiKey) return;
+  try {
+    const client = createChallongeClient(challongeApiKey);
+    if (!link.participantMap || Object.keys(link.participantMap).length === 0) {
+      link.participantMap = await buildChallongeParticipantMap(link.slug);
+    }
+    const pm = link.participantMap;
+    if (!link.pushedMatches) link.pushedMatches = {};
+
+    // Gather completed bracket matches from all phases
+    const completedMatches = [];
+    (state.bracket.phases || []).forEach(phase => {
+      ['winners', 'losers', 'finals'].forEach(side => {
+        (phase[side] || []).forEach(round => {
+          (round || []).forEach(match => {
+            const { a, b } = match || {};
+            if (!a || !b || (!a.winner && !b.winner)) return;
+            if (!a.name || !b.name || a.name === 'TBD' || b.name === 'TBD') return;
+            completedMatches.push({ a, b });
+          });
+        });
+      });
+    });
+    if (!completedMatches.length) return;
+
+    const mData = await client.get(`/tournaments/${link.slug}/matches.json`);
+    const openMatches = (mData || []).filter(m => (m.match || m).state === 'open');
+    if (!openMatches.length) return;
+
+    let pushed = 0;
+    for (const { a, b } of completedMatches) {
+      const key = [a.name, b.name].sort().join('|||');
+      if (link.pushedMatches[key]) continue;
+      const pA = pm[a.name.toLowerCase()];
+      const pB = pm[b.name.toLowerCase()];
+      if (!pA || !pB) continue;
+      const cMatch = openMatches.find(m => {
+        const d = m.match || m;
+        return (d.player1_id === pA.id && d.player2_id === pB.id) ||
+               (d.player1_id === pB.id && d.player2_id === pA.id);
+      });
+      if (!cMatch) continue;
+      const d = cMatch.match || cMatch;
+      const winnerId = a.winner ? pA.id : pB.id;
+      const isAp1 = d.player1_id === pA.id;
+      const sA = a.score != null ? a.score : 0;
+      const sB = b.score != null ? b.score : 0;
+      const scoresCSV = isAp1 ? `${sA}-${sB}` : `${sB}-${sA}`;
+      try {
+        await client.put(`/tournaments/${link.slug}/matches/${d.id}.json`, {
+          match: { winner_id: winnerId, scores_csv: scoresCSV }
+        });
+        link.pushedMatches[key] = true;
+        pushed++;
+      } catch (err) {
+        console.error(`[challonge-sync] Match ${a.name} vs ${b.name}:`, err.message);
+      }
+    }
+    if (pushed > 0) {
+      link.lastSyncAt = new Date().toISOString();
+      link.lastError = null;
+      saveAppState();
+      broadcastFullState();
+      console.log(`[challonge-sync] Pushed ${pushed} result(s) to ${link.slug}`);
+    }
+  } catch (e) {
+    if (ev.challongeSync) { ev.challongeSync.lastError = e.message; broadcastFullState(); }
+    console.error('[challonge-sync]', e.message);
+  }
+}
+
+async function syncAllLinkedChallongeTournaments() {
+  if (!challongeApiKey) return;
+  for (const ev of (Array.isArray(state.myEvents) ? state.myEvents : [])) {
+    if (ev.challongeSync && ev.challongeSync.enabled && ev.challongeSync.slug) {
+      await syncLinkedChallongeTournament(ev).catch(() => {});
+    }
+  }
+}
+
+// ─── NXGEN integration ────────────────────────────────────────────────────────
+
+function buildNxgenQueue(participants, matches) {
+  const pm = {};
+  participants.forEach(p => { pm[p.id] = p; });
+  return (matches || [])
+    .filter(m => m.status !== 'completed')
+    .map(m => {
+      const p1 = pm[m.participant1] || {};
+      const p2 = pm[m.participant2] || {};
+      return {
+        matchId: m._id,
+        round: m.round,
+        matchNumber: m.matchNumber,
+        teamA: p1.name || 'TBD',
+        teamB: p2.name || 'TBD',
+        logoA: p1.logoUrl || null,
+        logoB: p2.logoUrl || null,
+        scoreA: m.scores ? (m.scores.participant1 ?? null) : null,
+        scoreB: m.scores ? (m.scores.participant2 ?? null) : null,
+        status: m.status,
+        live: m.status === 'in-progress',
+        winnerId: m.winnerId || null
+      };
+    });
+}
+
+function buildNxgenBracketData(eventFormat, participants, matches) {
+  const pm = {};
+  participants.forEach(p => { pm[p.id] = p; });
+
+  const byRound = {};
+  (matches || []).forEach(m => {
+    if (!byRound[m.round]) byRound[m.round] = [];
+    byRound[m.round].push(m);
+  });
+
+  const winners = Object.keys(byRound)
+    .map(Number).sort((a, b) => a - b)
+    .map(r => byRound[r].sort((a, b) => (a.matchNumber || 0) - (b.matchNumber || 0)).map(m => {
+      const p1 = pm[m.participant1] || {};
+      const p2 = pm[m.participant2] || {};
+      return {
+        id: m._id,
+        teamA: p1.name || 'TBD',
+        teamB: p2.name || 'TBD',
+        logoA: p1.logoUrl || null,
+        logoB: p2.logoUrl || null,
+        scoreA: m.scores ? (m.scores.participant1 ?? null) : null,
+        scoreB: m.scores ? (m.scores.participant2 ?? null) : null,
+        winner: m.winnerId ? (m.winnerId === m.participant1 ? 'teamA' : 'teamB') : null,
+        state: m.status
+      };
+    }));
+
+  const standings = participants
+    .filter(p => p.finalRank)
+    .sort((a, b) => (a.finalRank || 99) - (b.finalRank || 99))
+    .map(p => ({ placement: p.finalRank, name: p.name, logo: p.logoUrl || null }));
+
+  const roster = participants.map(p => ({ seed: p.seed || 0, name: p.name, logo: p.logoUrl || null }));
+
+  return {
+    type: (eventFormat || '').includes('double') ? 'double' : 'single',
+    winners,
+    losers: [],
+    finals: [],
+    standings,
+    schedule: [],
+    roster
+  };
+}
+
+async function loadNxgenEvent(slug) {
+  const { event, participants, matches } = await getNxgenEventLive(nxgenApiKey, slug);
+
+  const logoMap = {};
+  participants.forEach(p => { if (p.name && p.logoUrl) logoMap[p.name.toLowerCase()] = p.logoUrl; });
+
+  const eventTeams = participants.map(p => ({ name: p.name, logo: p.logoUrl || null, nxgenId: p.id }));
+  const queue = buildNxgenQueue(participants, matches);
+  const bd = buildNxgenBracketData(event.format || event.bracketFormat, participants, matches);
+
+  state.nxgen.eventSlug = slug;
+  state.nxgen.selectedEvent = {
+    name: event.name,
+    slug: event.slug,
+    activity: event.activity || '',
+    format: event.format || event.bracketFormat || '',
+    status: event.status || '',
+    url: event.streamUrl || `https://www.nxgen.pro/events/${slug}`
+  };
+  state.nxgen.eventTeams = eventTeams;
+  state.nxgen.logoMap = logoMap;
+  state.nxgen.queue = queue;
+  state.nxgen.queueFetchedAt = Date.now();
+  state.nxgen.connected = true;
+  state.nxgen.lastError = null;
+
+  state.activeEvent = {
+    platform: 'nxgen',
+    slug,
+    name: event.name,
+    gameName: event.activity || '',
+    numEntrants: participants.length,
+    format: event.format || event.bracketFormat || '',
+    url: event.streamUrl || `https://www.nxgen.pro/events/${slug}`,
+    loadedAt: new Date().toISOString()
+  };
+
+  const phase = {
+    id: 'nxgen-main',
+    name: event.name,
+    type: bd.type,
+    winners: bd.winners,
+    losers: bd.losers,
+    finals: bd.finals,
+    standings: bd.standings,
+    schedule: bd.schedule,
+    roster: bd.roster
+  };
+  const existingIdx = state.bracket.phases.findIndex(p => p.id === 'nxgen-main');
+  if (existingIdx >= 0) {
+    state.bracket.phases[existingIdx] = phase;
+  } else {
+    state.bracket.phases.push(phase);
+  }
+  state.bracket.activePhaseId = 'nxgen-main';
+  state.bracket.eventSlug = 'nxgen:' + slug;
+
+  return { name: event.name, teamsCount: participants.length, matchesCount: matches.length };
+}
+
+async function refreshNxgenLive() {
+  const slug = (state.nxgen.eventSlug || '').trim();
+  if (!slug || !nxgenApiKey) return;
+  try {
+    const { event, participants, matches } = await getNxgenEventLive(nxgenApiKey, slug);
+    state.nxgen.queue = buildNxgenQueue(participants, matches);
+    state.nxgen.queueFetchedAt = Date.now();
+    state.nxgen.connected = true;
+    state.nxgen.lastError = null;
+
+    if (state.nxgen.autoFollow) {
+      const live = state.nxgen.queue.find(m => m.live);
+      if (live && live.matchId !== state.nxgen.lastAutoFollowMatchId) {
+        state.nxgen.lastAutoFollowMatchId = live.matchId;
+        if (live.teamA && live.teamA !== 'TBD') {
+          state.teams.blue   = { ...state.teams.blue,   name: live.teamA, logo: live.logoA || state.nxgen.logoMap[(live.teamA || '').toLowerCase()] || null };
+          state.teams.orange = { ...state.teams.orange, name: live.teamB || '', logo: live.logoB || state.nxgen.logoMap[(live.teamB || '').toLowerCase()] || null };
+          saveAppState();
+        }
+      }
+    }
+
+    const bd = buildNxgenBracketData(event.format || event.bracketFormat, participants, matches);
+    const existingPhase = state.bracket.phases.find(p => p.id === 'nxgen-main');
+    if (existingPhase) {
+      Object.assign(existingPhase, { winners: bd.winners, losers: bd.losers, standings: bd.standings });
+    }
+
+    broadcastFullState();
+  } catch (e) {
+    state.nxgen.connected = false;
+    state.nxgen.lastError = e.message;
+    broadcastFullState();
+  }
+}
+
+let _nxgenPollTimer = null;
+function setNxgenPolling(enabled) {
+  if (_nxgenPollTimer) { clearInterval(_nxgenPollTimer); _nxgenPollTimer = null; }
+  if (enabled && nxgenApiKey && (state.nxgen.eventSlug || '').trim()) {
+    refreshNxgenLive();
+    _nxgenPollTimer = setInterval(refreshNxgenLive, 30000);
+  }
+}
+
+// ─── My Events live-refresh ───────────────────────────────────────────────────
 // Keep every saved My Event current: poll start.gg for its entrants (team names + player
 // gamertags + current seed) so the seeding studio and the event page always reflect the latest
 // registration. Stored as a lightweight `ev.roster`; rank/MMR is NOT on start.gg (it's entered in
@@ -2315,7 +3534,7 @@ async function refreshMyEvent(ev) {
     const entrants = data.entrants || [];
     ev.roster = entrants.map((e) => ({
       entrantId: e.entrantId, name: e.name, seedNum: e.seedNum || null,
-      players: (e.players || []).map((p) => ({ gamerTag: p.gamerTag })).filter((p) => p.gamerTag)
+      players: (e.players || []).map((p) => ({ gamerTag: p.gamerTag, epic: p.epic || '', alts: p.alts || [] })).filter((p) => p.gamerTag)
     }));
     ev.numEntrants = entrants.length;
     if (data.eventName && !ev.name) ev.name = data.eventName;
@@ -2392,6 +3611,26 @@ function logoForTeamName(name) {
   const saved = savedTeams.find((t) => (t.name || '').trim().toLowerCase() === key);
   if (saved && saved.logo) return saved.logo;
   return state.startgg.logoMap[key] || null;
+}
+
+// Auto team names from the live game: when enabled, apply a game-reported team name to a
+// side, matching the saved-teams library to pull the correct logo/colour. Generic in-game
+// names (CT/T/Blue/Orange/etc.) are ignored. Returns true if anything changed.
+const GENERIC_TEAM_RE = /^(counter-?terrorists?|terrorists?|team\s*(ct|t)|ct|t|blue(\s*team)?|orange(\s*team)?|red(\s*team)?|home|away|team\s*[ab12]|dire|radiant|spectator|unknown)$/i;
+function applyGameTeamName(side, rawName) {
+  if (!state.autoTeamsFromGame) return false;
+  const name = String(rawName == null ? '' : rawName).trim();
+  if (!name || GENERIC_TEAM_RE.test(name)) return false;
+  const t = state.teams[side];
+  if (!t) return false;
+  const key = name.toLowerCase();
+  const saved = savedTeams.find((s) => String(s.name || '').trim().toLowerCase() === key);
+  const nm = saved ? saved.name : name;
+  let changed = false;
+  if (t.name !== nm) { t.name = nm; changed = true; }
+  if (saved && saved.logo && t.logo !== saved.logo) { t.logo = saved.logo; changed = true; }
+  if (saved && saved.color && t.color !== saved.color) { t.color = saved.color; changed = true; }
+  return changed;
 }
 
 // Turn a flat list of Start.gg sets into a structured, type-aware bracket.
@@ -2543,28 +3782,65 @@ async function fetchAllSets(client, slug, perPage = 50, maxPages = 16) {
   return { event, sets: all };
 }
 
-// Pull every page of an event's entrants (teams + their players).
-async function fetchAllEntrants(client, slug, perPage = 50, maxPages = 16) {
+// True bracket seed per entrant, straight from start.gg (`initialSeedNum` — the seed that actually
+// produced the real bracket's bye placement). Locally-cached roster/seeding-studio order is NOT a
+// reliable substitute: it can drift from what start.gg really used (manual reseeds, edits after the
+// seeding studio snapshot, etc.), which silently produces a DIFFERENT bye/bracket shape when used to
+// seed a mirrored bracket elsewhere (e.g. Challonge). Returns { name.toLowerCase() -> seedNum }.
+async function fetchEntrantTrueSeeds(eventSlug) {
+  if (!startggApiToken) throw new Error('start.gg API token required (set it in Settings)');
+  const client = createStartGgClient(startggApiToken);
   const query = `
+    query TrueSeeds($slug: String!, $perPage: Int!, $page: Int!) {
+      event(slug: $slug) {
+        entrants(query: { perPage: $perPage, page: $page }) {
+          pageInfo { totalPages }
+          nodes { id name initialSeedNum }
+        }
+      }
+    }`;
+  let page = 1, totalPages = 1;
+  const map = {};
+  do {
+    const res = await client.request(query, { slug: eventSlug, perPage: 75, page });
+    const ev = res && res.event;
+    if (!ev) throw new Error('Event not found — check the slug/URL and your token');
+    ((ev.entrants && ev.entrants.nodes) || []).forEach((n) => {
+      if (n.name && n.initialSeedNum != null) map[n.name.toLowerCase()] = n.initialSeedNum;
+    });
+    totalPages = (ev.entrants && ev.entrants.pageInfo && ev.entrants.pageInfo.totalPages) || 1;
+    page++;
+  } while (page <= totalPages && page <= 16);
+  return map;
+}
+
+// Pull every page of an event's entrants (teams + their players).
+// Tries to include social handles and country; falls back silently if the API rejects those fields.
+async function fetchAllEntrants(client, slug, perPage = 50, maxPages = 16) {
+  const buildQuery = (withExt) => `
     query EventEntrants($slug: String!, $perPage: Int!, $page: Int!) {
       event(slug: $slug) {
         entrants(query: { perPage: $perPage, page: $page }) {
           pageInfo { totalPages }
           nodes {
-            id
-            name
-            participants { id gamerTag }
+            id name
+            participants { id gamerTag player { id user { slug name images { url type }${withExt ? ' authorizations { type externalUsername } location { country }' : ''} } } }
             team { images { url type } }
           }
         }
       }
     }
   `;
-  let page = 1;
-  let totalPages = 1;
+  let page = 1, totalPages = 1, withExt = true;
   const all = [];
   do {
-    const res = await client.request(query, { slug, perPage, page });
+    let res;
+    try {
+      res = await client.request(buildQuery(withExt), { slug, perPage, page });
+    } catch (e) {
+      if (withExt) { withExt = false; res = await client.request(buildQuery(false), { slug, perPage, page }); }
+      else throw e;
+    }
     const ev = res && res.event;
     if (!ev) break;
     all.push(...((ev.entrants && ev.entrants.nodes) || []));
@@ -2580,21 +3856,30 @@ async function fetchEventSeeding(apiToken, eventSlugRaw) {
   const slug = parseEventSlug(eventSlugRaw);
   if (!slug || !/\/event\//i.test(slug)) throw new Error('Paste a specific start.gg EVENT URL (…/event/…).');
   const client = createStartGgClient(apiToken);
-  const query = `
+  // Connected accounts (Epic etc.) are a far stronger match key for 6mans rank
+  // lookup than the event gamertag. Query them, but fall back gracefully if start.gg
+  // rejects/omits the `authorizations` field so the seeding pull never breaks.
+  const buildQuery = (withAuth) => `
     query EventSeeding($slug: String!, $perPage: Int!, $page: Int!) {
       event(slug: $slug) {
         id name images { type url }
         tournament { images { type url } }
         entrants(query: { perPage: $perPage, page: $page }) {
           pageInfo { totalPages }
-          nodes { id name initialSeedNum participants { gamerTag user { name } } }
+          nodes { id name initialSeedNum participants { gamerTag player { id user { slug name images { url type } ${withAuth ? 'authorizations { type externalUsername }' : ''} } } } }
         }
       }
     }`;
-  let page = 1, totalPages = 1, evName = '', evImage = '';
+  let page = 1, totalPages = 1, evName = '', evImage = '', withAuth = true;
   const all = [];
   do {
-    const res = await client.request(query, { slug, perPage: 75, page });
+    let res;
+    try {
+      res = await client.request(buildQuery(withAuth), { slug, perPage: 75, page });
+    } catch (e) {
+      if (withAuth) { withAuth = false; res = await client.request(buildQuery(false), { slug, perPage: 75, page }); }
+      else throw e;
+    }
     const ev = res && res.event;
     if (!ev) break;
     evName = ev.name || evName;
@@ -2606,13 +3891,43 @@ async function fetchEventSeeding(apiToken, eventSlugRaw) {
       entrantId: String(n.id),
       name: n.name || '',
       seedNum: n.initialSeedNum || null,
-      players: (n.participants || []).map((p) => ({ gamerTag: p.gamerTag || (p.user && p.user.name) || '' })).filter((p) => p.gamerTag)
+      players: (n.participants || []).map((p) => {
+        const u = (p.player && p.player.user) || {};
+        const auths = u.authorizations || [];
+        const epic = (auths.find((a) => a && (a.type === 'EPIC' || a.type === 'EPICGAMES')) || {}).externalUsername || '';
+        // All connected-account usernames are candidate identities (Epic first, then Steam/Xbox/etc.).
+        const alts = [epic, ...auths.map((a) => a && a.externalUsername)].filter(Boolean);
+        const gamerTag = p.gamerTag || u.name || '';
+        const startggPlayerId = p.player && p.player.id ? String(p.player.id) : null;
+        const image = ((u.images || []).find((i) => /profile/i.test(i.type || '')) || (u.images || [])[0] || {}).url || '';
+        // Auto-link the start.gg profile into the registry for every entrant we see.
+        if (gamerTag && u.slug) upsertPlayerProfile(gamerTag, { startggSlug: u.slug, startggPlayerId, image });
+        return { gamerTag, epic, alts: [...new Set(alts)], startggSlug: u.slug || null, startggPlayerId, image };
+      }).filter((p) => p.gamerTag)
     }));
     totalPages = (ev.entrants && ev.entrants.pageInfo && ev.entrants.pageInfo.totalPages) || 1;
     page++;
   } while (page <= totalPages && page <= 16);
   all.sort((a, b) => (a.seedNum || 99999) - (b.seedNum || 99999));
   return { eventName: evName, eventSlug: slug, image: evImage, entrants: all };
+}
+
+// Weighted normalized placement score across recent standings (0–100).
+// Higher = better. Recent events count more (6-month exponential decay).
+function computeSggPerformanceScore(standings) {
+  const nowSec = Math.floor(Date.now() / 1000);
+  let wSum = 0, wTotal = 0;
+  for (const s of (standings || [])) {
+    const n = s.entrant?.event?.numEntrants;
+    const t = s.entrant?.event?.startAt;
+    if (!n || n < 4 || !t || !s.placement) continue;
+    const daysSince = (nowSec - t) / 86400;
+    const weight = Math.exp(-daysSince / 180);
+    const norm = 1 - (s.placement - 1) / Math.max(n - 1, 1); // 1.0 = 1st, 0.0 = last
+    wSum   += weight * norm;
+    wTotal += weight;
+  }
+  return wTotal > 0 ? Math.round((wSum / wTotal) * 1000) / 10 : null; // 0.0–100.0
 }
 
 // ─── Single-team spotlight: deep-dive on one entrant (placement / seed / record / sets) ───
@@ -2935,13 +4250,19 @@ function mapEntrantsToTeams(entrants) {
     const name = (ent.name || '').trim();
     if (!name) return null;
     const players = (ent.participants || [])
-      .map((p) => ({
-        id: Math.random().toString(36).slice(2, 11),
-        name: (p.gamerTag || '').trim(),
-        platform: 'steam',
-        platformId: '',
-        assignedCamera: null
-      }))
+      .map((p) => {
+        const tag = (p.gamerTag || '').trim();
+        const u = (p.player && p.player.user) || {};
+        const auths = u.authorizations || [];
+        const twitch = (auths.find((a) => a && a.type === 'TWITCH') || {}).externalUsername || null;
+        const twitter = (auths.find((a) => a && (a.type === 'TWITTER' || a.type === 'TWITTER_V2')) || {}).externalUsername || null;
+        const country = (u.location && u.location.country) || null;
+        const countryCode = _countryCode(country);
+        const image = ((u.images || []).find((i) => /profile/i.test(i.type || '')) || (u.images || [])[0] || {}).url || null;
+        // Auto-link the start.gg profile into the registry on team import.
+        if (tag && u.slug) upsertPlayerProfile(tag, { startggSlug: u.slug, startggPlayerId: p.player && p.player.id ? String(p.player.id) : null, twitch, twitter, country, countryCode, image });
+        return { id: Math.random().toString(36).slice(2, 11), name: tag, platform: 'steam', platformId: '', assignedCamera: null };
+      })
       .filter((p) => p.name);
     const logo = pickEntrantLogo(ent);
     return {
@@ -3004,9 +4325,35 @@ async function fetchBracket(rawSlug) {
   applyBracketResult(slug, event, sets);
   saveAppState();
   broadcastFullState();
+  syncAllLinkedChallongeTournaments().catch(() => {});
 
   const rounds = state.bracket.winners.length + state.bracket.losers.length + state.bracket.finals.length;
   return { title: event.name || '', type: state.bracket.type, rounds, sets: sets.length };
+}
+
+// ISO 3166-1 alpha-2 lookup for the most common esports countries.
+const _COUNTRY_CODES = {
+  'united states': 'us', 'usa': 'us', 'canada': 'ca', 'united kingdom': 'gb', 'uk': 'gb',
+  'england': 'gb', 'scotland': 'gb', 'wales': 'gb', 'northern ireland': 'gb',
+  'australia': 'au', 'new zealand': 'nz', 'germany': 'de', 'france': 'fr',
+  'sweden': 'se', 'norway': 'no', 'denmark': 'dk', 'finland': 'fi', 'iceland': 'is',
+  'netherlands': 'nl', 'belgium': 'be', 'switzerland': 'ch', 'austria': 'at',
+  'spain': 'es', 'portugal': 'pt', 'italy': 'it', 'greece': 'gr',
+  'poland': 'pl', 'czechia': 'cz', 'czech republic': 'cz', 'hungary': 'hu',
+  'romania': 'ro', 'ukraine': 'ua', 'russia': 'ru', 'turkey': 'tr',
+  'israel': 'il', 'south africa': 'za', 'nigeria': 'ng',
+  'brazil': 'br', 'mexico': 'mx', 'argentina': 'ar', 'chile': 'cl',
+  'colombia': 'co', 'peru': 'pe', 'venezuela': 've', 'ecuador': 'ec',
+  'japan': 'jp', 'south korea': 'kr', 'korea': 'kr', 'china': 'cn',
+  'taiwan': 'tw', 'hong kong': 'hk', 'singapore': 'sg', 'indonesia': 'id',
+  'malaysia': 'my', 'philippines': 'ph', 'thailand': 'th', 'vietnam': 'vn',
+  'india': 'in', 'pakistan': 'pk',
+};
+function _countryCode(name) {
+  if (!name) return null;
+  const s = name.trim().toLowerCase();
+  if (/^[a-z]{2}$/.test(s)) return s;
+  return _COUNTRY_CODES[s] || null;
 }
 
 // Merge a list of Start.gg entrants into the saved team library (update by name,
@@ -3017,13 +4364,19 @@ function mergeEntrantsIntoLibrary(entrants) {
     const name = (ent.name || '').trim();
     if (!name) return;
     const players = (ent.participants || [])
-      .map((p) => ({
-        id: Math.random().toString(36).slice(2, 11),
-        name: (p.gamerTag || '').trim(),
-        platform: 'steam',
-        platformId: '',
-        assignedCamera: null
-      }))
+      .map((p) => {
+        const tag = (p.gamerTag || '').trim();
+        const u = (p.player && p.player.user) || {};
+        const auths = u.authorizations || [];
+        const twitch = (auths.find((a) => a && a.type === 'TWITCH') || {}).externalUsername || null;
+        const twitter = (auths.find((a) => a && (a.type === 'TWITTER' || a.type === 'TWITTER_V2')) || {}).externalUsername || null;
+        const country = (u.location && u.location.country) || null;
+        const countryCode = _countryCode(country);
+        const image = ((u.images || []).find((i) => /profile/i.test(i.type || '')) || (u.images || [])[0] || {}).url || null;
+        // Auto-link the start.gg profile into the registry on team import.
+        if (tag && u.slug) upsertPlayerProfile(tag, { startggSlug: u.slug, startggPlayerId: p.player && p.player.id ? String(p.player.id) : null, twitch, twitter, country, countryCode, image });
+        return { id: Math.random().toString(36).slice(2, 11), name: tag, platform: 'steam', platformId: '', assignedCamera: null };
+      })
       .filter((p) => p.name);
     playersTotal += players.length;
 
@@ -3166,6 +4519,16 @@ async function activateStartggEvent(tournamentSlug, eventSlug, meta) {
     tournamentName: (meta && meta.tournamentName) || loaded.tournamentName || ''
   };
   state.startgg.pendingEvents = [];
+  state.activeEvent = {
+    platform: 'startgg',
+    slug: evSlug,
+    name: state.startgg.selectedEvent.name || state.startgg.selectedEvent.tournamentName || '',
+    gameName: '',
+    numEntrants: (state.startgg.eventTeams || []).length,
+    format: '',
+    url: `https://www.start.gg/${evSlug}`,
+    loadedAt: new Date().toISOString()
+  };
 
   // Auto-fill the event name from the start.gg tournament name if the producer hasn't set one.
   if (!state.eventName) {
@@ -3313,6 +4676,7 @@ function markCsgoActivity() {
   state.csgo.lastUpdate = Date.now();
   if (csgoStaleTimer) clearTimeout(csgoStaleTimer);
   csgoStaleTimer = setTimeout(() => {
+    if (state.csgo.connected) try { analytics.event('disconnect', { what: 'CS2 GSI' }); } catch (e) {}
     state.csgo.connected = false;
     broadcastCsgo();
   }, 15000);
@@ -3475,6 +4839,7 @@ function _valorantStats(v) {
       winner: o > c ? 'a' : c > o ? 'b' : null,
       map: mapName
     });
+    try { analytics.event('game_complete'); } catch (e) {}
     const players = (v.players || []).map(p => ({
       name: p.name,
       team: p.team === 'CHAOS' ? 'b' : 'a',   // ORDER=a, CHAOS=b (fixed team identities)
@@ -3500,6 +4865,7 @@ function startValorantPolling() {
       handleValorantData(data);
     } catch {
       if (state.valorant.connected) {
+        try { analytics.event('disconnect', { what: 'Valorant' }); } catch (e) {}
         state.valorant.connected = false;
         broadcastValorant();
       }
@@ -3509,6 +4875,85 @@ function startValorantPolling() {
 function stopValorantPolling() {
   if (_valPollTimer) { clearInterval(_valPollTimer); _valPollTimer = null; }
   if (state.valorant.connected) { state.valorant.connected = false; broadcastValorant(); }
+}
+
+// ── League of Legends Live Client Data (port 2999, spectator) ────────────────
+// Drives the automated in-game LoL HUD. Polls /liveclientdata/allgamedata once a
+// second when League is the active game (the scoreboard changes far slower than a
+// shooter, so 1s is plenty and keeps broadcast churn low). See backend/lol-live.js.
+function broadcastLol() {
+  broadcast(bridgeClients, { type: 'lol_update', data: state.lol });
+}
+
+// Last fresh OCR read of team gold; overrides the estimate while recent.
+let _lolOcrGold = null;   // { blue, red, ts }
+
+function handleLolData(data) {
+  const norm = lolLive.normalizeGameData(data);
+  const wasConnected = state.lol.connected;
+  Object.assign(state.lol, norm, { lastUpdate: Date.now() });  // preserves ocr / hudMode (not in norm)
+  // Real gold from OCR overrides the estimate when enabled and fresh (<8s old).
+  const o = state.lol.ocr;
+  if (o.enabled && _lolOcrGold && (Date.now() - _lolOcrGold.ts) < 8000 && _lolOcrGold.blue != null && _lolOcrGold.red != null) {
+    state.lol.blue.gold = _lolOcrGold.blue;
+    state.lol.red.gold  = _lolOcrGold.red;
+    state.lol.goldDiff  = _lolOcrGold.blue - _lolOcrGold.red;
+    o.source = 'ocr';
+  } else {
+    o.source = 'est';
+  }
+  if (!wasConnected) { try { analytics.event('connect', { what: 'League' }); } catch (e) {} }
+  broadcastLol();
+}
+
+// ── League gold OCR (optional override of the estimate) ──────────────────────
+let _lolOcrStop = null;
+function startLolOcr() {
+  if (_lolOcrStop) return;
+  state.lol.ocr.available = lolOcr.tessAvailable();
+  _lolOcrStop = lolOcr.startOcr({
+    intervalMs: 2000,
+    getRegions: () => state.lol.ocr.regions,
+    onResult: (res) => {
+      state.lol.ocr.lastBlue = res.blue;
+      state.lol.ocr.lastRed = res.red;
+      if (res.blue != null && res.red != null) _lolOcrGold = { blue: res.blue, red: res.red, ts: Date.now() };
+    },
+    onStatus: (status, detail) => {
+      state.lol.ocr.status = status;
+      state.lol.ocr.statusDetail = detail;
+      broadcast(bridgeClients, { type: 'lol_ocr_status', status, detail, lastBlue: state.lol.ocr.lastBlue, lastRed: state.lol.ocr.lastRed });
+    }
+  });
+}
+function stopLolOcr() {
+  if (_lolOcrStop) { _lolOcrStop(); _lolOcrStop = null; }
+  _lolOcrGold = null;
+  state.lol.ocr.status = 'off';
+  state.lol.ocr.source = 'est';
+}
+
+let _lolPollTimer = null;
+function startLolPolling() {
+  if (_lolPollTimer) return;
+  if (state.lol.ocr.enabled) startLolOcr();
+  _lolPollTimer = setInterval(async () => {
+    try {
+      const data = await lolLive.fetchAllGameData();
+      handleLolData(data);
+    } catch {
+      if (state.lol.connected) {
+        try { analytics.event('disconnect', { what: 'League' }); } catch (e) {}
+        state.lol.connected = false;
+        broadcastLol();
+      }
+    }
+  }, 1000);
+}
+function stopLolPolling() {
+  if (_lolPollTimer) { clearInterval(_lolPollTimer); _lolPollTimer = null; }
+  stopLolOcr();
+  if (state.lol.connected) { state.lol.connected = false; broadcastLol(); }
 }
 
 function mergeDirectorRuntime(out) {
@@ -3602,6 +5047,10 @@ function buildTelemetryContext() {
     score = { a: state.valorant.order?.score ?? null, b: state.valorant.chaos?.score ?? null };
     clock = { phase: state.valorant.round?.phase || null, round: state.valorant.round?.number ?? null };
     spectated = state.valorant.observed?.name || null;
+  } else if (g === 'league' && state.lol) {
+    score = { a: state.lol.blue?.kills ?? null, b: state.lol.red?.kills ?? null };
+    clock = { seconds: state.lol.gameTime ?? null, goldDiff: state.lol.goldDiff ?? null };
+    spectated = state.lol.observed?.name || null;
   } else {
     score = { a: state.game?.blueScore ?? null, b: state.game?.orangeScore ?? null };
     clock = { seconds: state.game?.time ?? null, isOT: !!state.game?.isOT };
@@ -3687,6 +5136,7 @@ function syncClipsState() {
 async function triggerClipCapture(meta) {
   if (!clipSystem) return null;
   const clip = await clipSystem.onHighlightEvent(meta);
+  if (clip) try { analytics.event('clip'); } catch (e) {}
   syncClipsState();
   broadcastClipsUpdate();
   return clip;
@@ -3743,6 +5193,22 @@ function onDirectorEvents(gameId, events) {
 // GSI has no per-kill event, so we infer kills by diffing cumulative counters:
 // a player whose `deaths` ticked up died; a player whose `roundKills` ticked up
 // got the frag (weapon = their active weapon; headshot if `roundHs` ticked up).
+// Firing detection: GSI has no "shooting" flag, so we infer it — a player's active-weapon
+// ammo clip dropping (same weapon, no reload) means they just fired. Set per tick; the
+// overlay latches the effect for a short window so sustained fire reads as a steady pulse.
+let prevFire = {};               // steamid -> { clip, weapon }
+function detectFiring(players) {
+  const cur = {};
+  (players || []).forEach((p) => {
+    const prev = prevFire[p.steamid];
+    const clip = (typeof p.clip === 'number') ? p.clip : null;
+    p.firing = !!(prev && p.alive && clip !== null && typeof prev.clip === 'number'
+      && p.weapon === prev.weapon && clip < prev.clip && (prev.clip - clip) <= 40);
+    cur[p.steamid] = { clip, weapon: p.weapon };
+  });
+  prevFire = cur;
+}
+
 let killPrev = null;             // steamid -> { deaths, roundKills, roundHs }
 const KILL_TTL = 7000;           // ms a kill stays on the feed
 const KILL_MAX = 6;              // most rows kept
@@ -3811,6 +5277,8 @@ function handleGsi(payload) {
   });
   state.csgo.ct = { ...sideInfo(ctInfo), name: ctInfo.name || 'COUNTER-TERRORISTS' };
   state.csgo.t  = { ...sideInfo(tInfo),  name: tInfo.name  || 'TERRORISTS' };
+  // Auto team names → match saved library for logos/colours (CT=Blue side, T=Orange side).
+  if (state.autoTeamsFromGame) { applyGameTeamName('blue', ctInfo.name); applyGameTeamName('orange', tInfo.name); }
   state.csgo.round = {
     number: (typeof map.round === 'number') ? map.round + 1 : (state.csgo.round.number || 0),
     phase: round.phase || map.phase || '',
@@ -3853,11 +5321,14 @@ function handleGsi(payload) {
       pos: parseVec(p.position),      // world {x,y} for the radar (observer GSI only)
       fwd: parseVec(p.forward),       // view/forward {x,y} → facing arrow on the radar
       weapon: wp.weapon,
+      clip: wp.clip,                  // active-weapon ammo → firing detection (clip drop)
       nades: wp.nades,
       hasKit: !!st.defusekit,
-      hasBomb: wp.hasBomb
+      hasBomb: wp.hasBomb,
+      firing: false                   // set by detectFiring() below
     };
   }).sort((a, b) => a.slot - b.slot);
+  detectFiring(players);
   if (players.length) state.csgo.players = players;
 
   if (players.length) updateKillfeed(players);
@@ -3971,6 +5442,7 @@ function handleGsi(payload) {
           winner: ctScore > tScore ? 'a' : tScore > ctScore ? 'b' : null,
           map: state.csgo.map?.name || ''
         });
+        try { analytics.event('game_complete'); } catch (e) {}
         (state.csgo.roundHistory || []).forEach(r => {
           stats.logCs2Round(statsCs2GameId, {
             roundNumber: r.round,
@@ -4141,6 +5613,46 @@ function draftAction(name) {
 }
 function draftUndo() { const d = state.draft; if (d && d.ops && d.ops.length) { d.ops.pop(); rebuildDraftTurn(); } }
 function draftReset() { const d = state.draft; if (d) { d.ops = []; rebuildDraftTurn(); } }
+
+// ── LoL champ-select automation: poll the League Client and mirror the live draft ──────────
+let _lolDraftStop = null;
+function _draftSig() { const d = state.draft || {}; return (d.game || '') + '#' + (d.ops || []).map((o) => o.name).join('|'); }
+function syncDraftFromLcu(norm) {
+  if (!norm) return;                                  // no champ select active → leave the board as-is
+  const done = norm.done || [];
+  let d = state.draft;
+  // Ensure a LoL draft is initialised (don't clobber an in-progress one of the right shape).
+  if (!d || d.game !== 'league' || !Array.isArray(d.sequence) || !d.sequence.length) {
+    draftStart({ game: 'league', teamStart: (d && d.teamStart) || 'a', title: (d && d.title) || '' });
+    d = state.draft;
+  }
+  if (done.length < d.ops.length) draftReset();       // champ select restarted → rebuild
+  for (let i = d.ops.length; i < done.length && i < d.sequence.length; i++) draftAction(done[i].name);
+}
+function startLolDraftAuto() {
+  if (_lolDraftStop) return;
+  _lolDraftStop = lolChampSelect.startPoller({
+    getLockfilePath: () => (state.draft && state.draft.auto && state.draft.auto.lockfilePath) || '',
+    onUpdate: (norm) => {
+      try {
+        const before = _draftSig();
+        syncDraftFromLcu(norm);
+        if (_draftSig() !== before) { saveAppState(); broadcastFullState(); }
+      } catch (e) {}
+    },
+    onStatus: (status, detail) => {
+      if (!state.draft.auto) state.draft.auto = {};
+      state.draft.auto.status = status; state.draft.auto.statusDetail = detail;
+      broadcast(bridgeClients, { type: 'lol_draft_status', data: { status, detail } });
+    }
+  });
+  console.log('[LoL Draft] Auto champ-select polling started');
+}
+function stopLolDraftAuto() {
+  if (_lolDraftStop) { try { _lolDraftStop(); } catch (e) {} _lolDraftStop = null; }
+  if (state.draft && state.draft.auto) { state.draft.auto.status = 'off'; state.draft.auto.statusDetail = ''; }
+  broadcast(bridgeClients, { type: 'lol_draft_status', data: { status: 'off', detail: '' } });
+}
 
 // Clean-observer config — hides the native CS2 HUD so only our overlay shows.
 // All commands here are either harmless client render toggles (cl_drawhud / crosshair)
@@ -4350,7 +5862,7 @@ async function _executeFlowAction(action, ctx) {
         try { await obsClient.call('SaveReplayBuffer'); } catch(e){}
       break;
     case 'overlay_ticker':
-      state.ticker = { ...state.ticker, text: p.text || '', visible: true };
+      state.ticker = { ...state.ticker, messages: [p.text || ''].filter(Boolean), visible: true };
       broadcastFullState();
       break;
     case 'overlay_ticker_hide':
@@ -4358,7 +5870,7 @@ async function _executeFlowAction(action, ctx) {
       broadcastFullState();
       break;
     case 'overlay_lower_third': {
-      state.ticker = { ...state.ticker, text: p.text || '', visible: true };
+      state.ticker = { ...state.ticker, messages: [p.text || ''].filter(Boolean), visible: true };
       broadcastFullState();
       const dur = Number(p.duration) || 0;
       if (dur > 0) {
@@ -4386,6 +5898,10 @@ async function _executeFlowAction(action, ctx) {
       break;
     case 'overlay_winner':
       state.winner = { ...state.winner, visible: true, side: p.side || 'blue', name: p.name || '' };
+      broadcastFullState();
+      break;
+    case 'overlay_winner_hide':
+      state.winner = { ...state.winner, visible: false };
       broadcastFullState();
       break;
     case 'overlay_reload':
@@ -4543,9 +6059,11 @@ function setupObsClient() {
   if (!createObsClient || obsClient) return;
   obsClient = createObsClient({
     onStatus: ({ connected, lastError }) => {
+      const wasConnected = state.obs.connected;
       state.obs.connected = connected;
       state.obs.lastError = lastError || null;
       if (!connected) { state.obs.currentScene = ''; state.obs.replayBufferActive = false; }
+      if (wasConnected && !connected) try { analytics.event('disconnect', { what: 'OBS' }); } catch (e) {}
       broadcastFullState();
     },
     // The OBS program scene = the authoritative "what's on air" signal.
@@ -4553,6 +6071,7 @@ function setupObsClient() {
       const prev = state.obs.currentScene || '';
       state.obs.currentScene = sceneName || '';
       if (telemetry && (sceneName || '') !== prev) telemetry.sceneChange({ scene: sceneName || '', prevScene: prev, source: 'unknown' });
+      if ((sceneName || '') !== prev) try { analytics.event('scene_change', { scene: sceneName || '' }); } catch (e) {}
       flowBus.emit('obs_scene_changed', { scene: sceneName || '' });
       broadcastFullState();
     },
@@ -4588,6 +6107,7 @@ function setupObsClient() {
       broadcastFullState();
     },
     onReplayBufferSaved: ({ path }) => {
+      try { analytics.event('replay_saved'); } catch (e) {}
       flowBus.emit('obs_replay_saved', { path });
     },
     onReplayBufferStateChanged: ({ active }) => {
@@ -4797,6 +6317,7 @@ function connectToRL() {
       console.log('[RL] Disconnected from Stats API');
     }
     if (state.rlConnected) {
+      try { analytics.event('disconnect', { what: 'RL API' }); } catch (e) {}
       state.rlConnected = false;
       broadcast(bridgeClients, { type: 'rl_status', data: { connected: false } });
     }
@@ -4928,19 +6449,15 @@ function handleRLEvent(msg) {
 // which is too late for broadcast graphics. The OVERTIME animation should land the moment OT is
 // actually triggered: regulation expired (clock at 0:00), score tied, and the ball settling to the
 // ground. We detect that here and push isOT to the overlays early.
-const OT_BALL_GROUND_Z = 140;    // ball radius ≈ 93uu; z ≤ 140 ≈ on / about to touch the floor
-const OT_SETTLE_MS     = 1000;   // if ball height isn't exposed, wait this long past 0:00 (lets a buzzer-beater untie)
-let otSettleTimer = null;
+const OT_BALL_GROUND_Z = 140;    // ball radius ≈ 93uu; z ≤ 140 ≈ on / about to touch the floor (SOS/BakkesMod variants only)
 function resetOvertimeTrigger() {
   state.otTriggered = false;
-  if (otSettleTimer) { clearTimeout(otSettleTimer); otSettleTimer = null; }
 }
 function fireOvertime() {
   if (state.otTriggered) return;
   state.otTriggered = true;
   state.game.isOT = true;
   flowBus.emit('rl_overtime', {});
-  if (otSettleTimer) { clearTimeout(otSettleTimer); otSettleTimer = null; }
   broadcast(bridgeClients, {
     type: 'state_update',
     data: {
@@ -5004,21 +6521,15 @@ function maybeTriggerOvertime() {
   if (state.otTriggered) return;
   const tied    = (state.game.blueScore ?? 0) === (state.game.orangeScore ?? 0);
   const regOver = (state.game.time ?? 999) <= 0;
-  if (!regOver || !tied) {                             // outside the OT-pending window → drop any pending settle
-    if (otSettleTimer) { clearTimeout(otSettleTimer); otSettleTimer = null; }
-    return;
-  }
-  // ball on the ground (when its height is exposed) → OT has just been triggered, fire now
-  const z = state.rlBall && typeof state.rlBall.z === 'number' ? state.rlBall.z : null;
-  if (z !== null && z <= OT_BALL_GROUND_Z) { fireOvertime(); return; }
-  // otherwise wait a short beat so a goal off the last airborne touch can untie the score first
-  if (!otSettleTimer) {
-    otSettleTimer = setTimeout(() => {
-      otSettleTimer = null;
-      const stillTied = (state.game.blueScore ?? 0) === (state.game.orangeScore ?? 0);
-      if (stillTied && (state.game.time ?? 999) <= 0 && state.view !== 'scoreboard') fireOvertime();
-    }, OT_SETTLE_MS);
-  }
+  if (!regOver || !tied) return;                       // outside the OT-pending window
+  // Regulation expired with the score tied → OT is PENDING but NOT yet confirmed. Fire ONLY once the
+  // ball actually TOUCHES THE GROUND (its height, exposed only by SOS/BakkesMod variants). We must
+  // NOT fire on a timer: after 0:00 the ball can stay airborne for several seconds and a last-second
+  // buzzer-beater unties the score → NO overtime. When ball height isn't exposed (the official Stats
+  // API doesn't provide it), we wait for a reliable OT signal instead — RL's own bOvertime flag or the
+  // OT-kickoff countdown (handleCountdownBegin), both of which only occur once OT has actually started.
+  const z = (state.rlBall && typeof state.rlBall.z === 'number') ? state.rlBall.z : null;
+  if (z !== null && z <= OT_BALL_GROUND_Z) fireOvertime();
 }
 
 function handleClock(data) {
@@ -5080,10 +6591,12 @@ function handleUpdateState(data) {
       if ((t.TeamNum === 0 || t.teamNum === 0)) {
         state.game.blueScore   = t.Score ?? t.score ?? 0;
         state.gameTeams.blue   = t.Name || t.name || 'BLUE';
+        if (state.autoTeamsFromGame) applyGameTeamName('blue', t.Name || t.name);
       }
       if ((t.TeamNum === 1 || t.teamNum === 1)) {
         state.game.orangeScore = t.Score ?? t.score ?? 0;
         state.gameTeams.orange = t.Name || t.name || 'ORANGE';
+        if (state.autoTeamsFromGame) applyGameTeamName('orange', t.Name || t.name);
       }
     });
   } else {
@@ -5237,6 +6750,7 @@ function handleGoalScored(data) {
 
   // Tell overlays the instant the ball hits the net (BEFORE the replay starts), so
   // goal-triggered animations fire at the goal, not when the replay kicks in.
+  try { analytics.event('goal'); } catch (e) {}
   broadcast(bridgeClients, { type: 'goal_scored', data: { team: state.currentGoal.team, goal: state.currentGoal } });
   flowBus.emit('rl_goal', { team: state.currentGoal.team, scorer: state.currentGoal.scorer });
 
@@ -5294,6 +6808,7 @@ function handleMatchEnded(data) {
       winner,
       overtime: state.game.isOT
     });
+    try { analytics.event('game_complete'); } catch (e) {}
     const rlPlayers = Object.values(state.playerCache).map(p => ({
       ...p, team: p.team === 'blue' ? 'a' : 'b'
     }));
@@ -5464,6 +6979,8 @@ function _logActivity(entry) {
   state.twitch.activityLog.push({ ...entry, timestamp: Date.now() });
   // Keep last 500 entries; don't broadcast full state (perf)
   if (state.twitch.activityLog.length > 500) state.twitch.activityLog.splice(0, state.twitch.activityLog.length - 500);
+  // Feed the broadcast-analytics recorder (follow/subscribe/raid/bits counters).
+  try { analytics.event(entry && entry.type, entry); } catch (e) {}
   broadcast(bridgeClients, { type: 'twitch_activity', data: entry });
 }
 
@@ -5641,17 +7158,20 @@ function handleMatchCreated(data) {
   // KICKOFF (handleCountdownBegin), or the first live clock tick as a fallback. See awaitingKickoff.
   scheduleRlHideNativeUi(state.game.number);
 
-  // Stats: lazy-create a match record the first time a game starts in a series
+  // Stats: lazy-create a match record the first time a game starts in a series.
+  // Link to the start.gg set being streamed (manual setId OR the auto-followed one) so the live
+  // player stats land on the same record as the official result — see stats.startMatch reuse.
   if (!statsCurrentMatchId) {
+    const link = currentStreamedSetLink();
     statsCurrentMatchId = stats.startMatch({
       gameType: 'rl',
-      teamA: state.teams.blue.name,
-      teamB: state.teams.orange.name,
+      teamA: (link && link.teamA) || state.teams.blue.name,
+      teamB: (link && link.teamB) || state.teams.orange.name,
       logoA: state.teams.blue.logo,
       logoB: state.teams.orange.logo,
       bestOf: state.bestOf,
-      startggSetId: state.startgg?.setId || null,
-      tournament: state.startgg?.selectedEvent?.tournamentName || null
+      startggSetId: (link && link.setId) || null,
+      tournament: (link && link.tournament) || state.startgg?.selectedEvent?.tournamentName || null
     });
   }
   statsCurrentGameId = stats.startGame({
@@ -5699,6 +7219,8 @@ function startBridgeServer() {
   bridgeWss.on('connection', (ws) => {
     bridgeClients.add(ws);
     ws.isAlive = true;
+    ws._role = 'unknown';   // set via a 'register' message: 'overlay' (browser source) | 'control' (panel)
+    ws._page = '';          // overlay page path (e.g. /ticker.html) — drives the pre-flight "overlays reachable" check
     ws.on('pong', () => { ws.isAlive = true; });
     // Send full state immediately on connect
     ws.send(JSON.stringify(getFullState()));
@@ -5711,8 +7233,8 @@ function startBridgeServer() {
       } catch (e) { /* ignore */ }
     });
 
-    ws.on('close', () => bridgeClients.delete(ws));
-    ws.on('error', () => bridgeClients.delete(ws));
+    ws.on('close', () => { const was = ws._role; bridgeClients.delete(ws); if (was === 'overlay') maybeBroadcastOverlayCount(); });
+    ws.on('error', () => { const was = ws._role; bridgeClients.delete(ws); if (was === 'overlay') maybeBroadcastOverlayCount(); });
   });
 
   // Heartbeat: ping every client; drop any that didn't pong since last round. This evicts
@@ -5756,6 +7278,88 @@ function handleControlMessage(msg, ws) {
       broadcastFullState();
       break;
 
+    case 'set_round_label':
+      state.roundLabel = (typeof msg.data.text === 'string') ? msg.data.text : '';
+      saveAppState();
+      broadcastFullState();
+      break;
+
+    case 'set_team_record_settings': {
+      const d = msg.data || {};
+      if (typeof d.enabled === 'boolean') state.teamRecord.enabled = d.enabled;
+      if (typeof d.metric === 'string') {
+        const allowed = ['season', 'week', 'pts', 'place', 'record-pts'];
+        if (allowed.includes(d.metric)) state.teamRecord.metric = d.metric;
+      }
+      if (typeof d.source === 'string' && ['stats', 'startgg', 'manual'].includes(d.source)) state.teamRecord.source = d.source;
+      if ('leagueId' in d) state.teamRecord.leagueId = (d.leagueId == null ? '' : String(d.leagueId));
+      saveAppState();
+      broadcastFullState();
+      break;
+    }
+
+    // Per-team manual record (W-L, optional pts/place) edited in the team boxes.
+    case 'set_team_record_manual': {
+      const d = msg.data || {};
+      const side = d.side === 'orange' ? 'orange' : (d.side === 'blue' ? 'blue' : null);
+      if (!side) break;
+      if (!state.teamRecord.manual) state.teamRecord.manual = { blue: {}, orange: {} };
+      const m = state.teamRecord.manual[side] || {};
+      ['w', 'l', 'pts', 'place'].forEach((k) => {
+        if (k in d) { const v = d[k]; m[k] = (v === '' || v == null) ? (k === 'w' || k === 'l' ? 0 : null) : Math.max(0, parseInt(v, 10) || 0); }
+      });
+      state.teamRecord.manual[side] = m;
+      saveAppState();
+      broadcastFullState();
+      break;
+    }
+
+    // Edit a team's standing directly in an in-app league (from the Match — Teams box when
+    // Team Record source = In-app). Writes back to the league standings so it updates there too.
+    case 'set_league_team_record': {
+      const d = msg.data || {};
+      const lg = (state.leagues || []).find((l) => String(l.id) === String(d.leagueId));
+      if (!lg) break;
+      const key = String(d.teamName || '').trim().toLowerCase();
+      const team = (lg.teams || []).find((t) => String(t.teamName || t.name || '').trim().toLowerCase() === key);
+      if (!team) break;
+      if (!Array.isArray(lg.standings)) lg.standings = [];
+      let st = lg.standings.find((s) => s.teamId === team.id);
+      if (!st) { st = { teamId: team.id, w: 0, l: 0, pts: 0 }; lg.standings.push(st); }
+      ['w', 'l', 'pts'].forEach((k) => { if (k in d && d[k] !== '' && d[k] != null) st[k] = Math.max(0, parseInt(d[k], 10) || 0); });
+      saveAppState();
+      broadcastFullState();
+      break;
+    }
+
+    // Toggle: match live-game team names to the saved-teams library (apply logo/colour).
+    case 'set_auto_teams_from_game': {
+      state.autoTeamsFromGame = !!(msg.data && msg.data.enabled);
+      saveAppState();
+      broadcastFullState();
+      break;
+    }
+
+    case 'use_startgg_round': {
+      // Pull the bracket round (e.g. "Winners Finals") from the active start.gg set, falling back to
+      // whichever set is currently live in the queue/match feed.
+      const sg = state.startgg || {};
+      const id = sg.setId || sg.lastPushedSetId || '';
+      let round = '';
+      if (id) {
+        const m = (sg.queue || []).find(x => x.setId === id) || (sg.matchFeed || []).find(x => x.setId === id);
+        if (m && m.round) round = m.round;
+      }
+      if (!round) {
+        const live = (sg.queue || []).find(x => x.live) || (sg.matchFeed || []).find(x => x.live || x.status === 'in-progress');
+        if (live && live.round) round = live.round;
+      }
+      state.roundLabel = (round || '').toString().toUpperCase();
+      saveAppState();
+      broadcastFullState();
+      break;
+    }
+
     // Overtime ad slot (sellable sponsor slot shown during OT). Partial updates merge.
     case 'set_overtime': {
       const o = msg.data || {};
@@ -5779,7 +7383,8 @@ function handleControlMessage(msg, ws) {
         label: typeof o.label === 'string' ? o.label : (cur.label ?? 'REPLAY'),
         logo: ('logo' in o) ? (o.logo || null) : (cur.logo ?? null),
         outroLogo: ('outroLogo' in o) ? (o.outroLogo || null) : (cur.outroLogo ?? null),
-        colorMode: (o.colorMode === 'mono' || o.colorMode === 'team') ? o.colorMode : (cur.colorMode || 'team')
+        colorMode: ['mono', 'team', 'brand'].includes(o.colorMode) ? o.colorMode : (cur.colorMode || 'team'),
+        skin: ('skin' in o) ? (o.skin || null) : (cur.skin ?? null)
       };
       saveAppState();
       broadcastFullState();
@@ -6277,6 +7882,54 @@ function handleControlMessage(msg, ws) {
     case 'draft_undo':    { draftUndo();  saveAppState(); broadcastFullState(); break; }
     case 'draft_reset':   { draftReset(); saveAppState(); broadcastFullState(); break; }
     case 'draft_visible': { if (state.draft) state.draft.visible = !!(msg.data && msg.data.visible); saveAppState(); broadcastFullState(); break; }
+    // Toggle LoL champ-select automation (reads the live draft from the League Client).
+    case 'lol_draft_auto': {
+      if (!state.draft) break;
+      if (!state.draft.auto) state.draft.auto = { enabled: false, status: 'off', statusDetail: '', lockfilePath: '' };
+      const d = msg.data || {};
+      if (typeof d.lockfilePath === 'string') state.draft.auto.lockfilePath = d.lockfilePath.slice(0, 300);
+      if (typeof d.enabled === 'boolean') {
+        state.draft.auto.enabled = d.enabled;
+        if (d.enabled) startLolDraftAuto(); else stopLolDraftAuto();
+      }
+      saveAppState(); broadcastFullState();
+      break;
+    }
+
+    // Teamfight-transition control for the in-game LoL HUD: full | minimal | auto.
+    case 'lol_hud_mode': {
+      const m = msg.data && msg.data.mode;
+      if (['full', 'minimal', 'auto'].includes(m)) {
+        state.lol.hudMode = m;
+        broadcast(bridgeClients, { type: 'lol_hud_mode', mode: m });
+        broadcastLol();
+        saveAppState();
+      }
+      break;
+    }
+
+    // Optional OCR gold override — enable + calibrate the two capture regions.
+    case 'lol_ocr_config': {
+      const d = msg.data || {};
+      const o = state.lol.ocr;
+      if (typeof d.enabled === 'boolean') o.enabled = d.enabled;
+      if (d.regions) {
+        ['blue', 'red'].forEach((s) => {
+          if (d.regions[s]) ['x', 'y', 'w', 'h'].forEach((k) => {
+            const v = Number(d.regions[s][k]);
+            if (!isNaN(v)) o.regions[s][k] = Math.max(0, Math.round(v));
+          });
+        });
+      }
+      o.available = lolOcr.tessAvailable();
+      // (Re)start or stop OCR to match — only meaningful while spectating League.
+      stopLolOcr();
+      if (o.enabled && state.activeGame === 'league' && _lolPollTimer) startLolOcr();
+      else if (!o.enabled) o.status = 'off';
+      saveAppState();
+      broadcastFullState();
+      break;
+    }
 
     // ── Team-lineup / player-intro card scene ────────────────────────────
     case 'set_intro': {
@@ -6286,7 +7939,8 @@ function handleControlMessage(msg, ws) {
         visible: ('visible' in i) ? !!i.visible : !!cur.visible,
         side: (i.side === 'orange' || i.side === 'blue') ? i.side : (cur.side ?? 'blue'),
         title: typeof i.title === 'string' ? i.title : (cur.title ?? ''),
-        style: [1, 2].includes(Number(i.style)) ? Number(i.style) : (cur.style ?? 1)
+        style: [1, 2].includes(Number(i.style)) ? Number(i.style) : (cur.style ?? 1),
+        showFooter: ('showFooter' in i) ? !!i.showFooter : (cur.showFooter ?? true)
       };
       saveAppState();
       broadcastFullState();
@@ -6295,6 +7949,38 @@ function handleControlMessage(msg, ws) {
 
     case 'set_font_family':
       state.fontFamily = msg.data.fontFamily || 'Bourgeois';
+      saveAppState();
+      broadcastFullState();
+      break;
+
+    case 'set_theme':
+      if (typeof msg.data.theme === 'string') state.themesByGame[state.activeGame] = msg.data.theme;
+      saveAppState();
+      broadcastFullState();
+      break;
+
+    case 'set_global_accent':
+      if (typeof msg.data.color === 'string') {
+        if (!state.brand) state.brand = {};
+        state.brand.color = msg.data.color;
+      }
+      saveAppState();
+      broadcastFullState();
+      break;
+
+    case 'set_default_bo':
+      if (typeof msg.data.bestOf === 'number') state.defaultBestOf = msg.data.bestOf;
+      saveAppState();
+      break;
+
+    case 'set_clock_format':
+      state.clock24h = !!msg.data.clock24h;
+      saveAppState();
+      broadcastFullState();
+      break;
+
+    case 'set_show_series':
+      state.showSeries = msg.data.show !== false;
       saveAppState();
       broadcastFullState();
       break;
@@ -6651,9 +8337,11 @@ function handleControlMessage(msg, ws) {
         // Stop data connections for the previous game
         if (prev === 'rocket-league' && g !== 'rocket-league') disconnectRL();
         if (prev === 'valorant' && g !== 'valorant') stopValorantPolling();
+        if (prev === 'league' && g !== 'league') stopLolPolling();
         // Start data connections for the new game
         if (g === 'rocket-league' && prev !== 'rocket-league') connectToRL();
         if (g === 'valorant') startValorantPolling();
+        if (g === 'league') startLolPolling();
         if (g === 'marvel-rivals') {
           if (!state.mrMatch) state.mrMatch = { visible: true, format: 'BO5', bansByMap: [], gameMode: 'convergence', showMapLabels: true, mapWinners: [], mapModes: [], gepData: null };
           state.mrMatch.visible = true;
@@ -6844,15 +8532,6 @@ function handleControlMessage(msg, ws) {
     }
 
     // Legacy: old clients sent a brand-colours on/off toggle → map it onto colorMode.
-    case 'set_use_brand_colors': {
-      const on = !!msg.data?.enabled;
-      state.colorMode = on ? 'brand' : 'team';
-      state.useBrandColors = on;
-      saveAppState();
-      broadcastFullState();
-      break;
-    }
-
     case 'delete_brand_kit': {
       savedBrandKits = savedBrandKits.filter((b) => b.id !== msg.data?.id);
       if (state.activeBrandKitId === msg.data?.id) { state.activeBrandKitId = null; saveAppState(); }
@@ -6875,6 +8554,7 @@ function handleControlMessage(msg, ws) {
       const p = msg.data || {};
       if (typeof p.visible === 'boolean') state.ticker.visible = p.visible;
       if (typeof p.source === 'string') state.ticker.source = (p.source === 'startgg') ? 'startgg' : 'manual';
+      if (typeof p.sponsor === 'string') state.ticker.sponsor = p.sponsor.slice(0, 400000);   // small logo (downscaled client-side)
       if (Array.isArray(p.messages)) {
         state.ticker.messages = p.messages
           .map((m) => (m || '').toString().trim())
@@ -6887,38 +8567,6 @@ function handleControlMessage(msg, ws) {
       broadcastFullState();
       break;
     }
-
-    // ── Break / "Starting Soon" countdown scene ──────────────────────────
-    case 'show_break': {
-      const minutes = Number(msg.data?.durationMinutes);
-      state.breakScreen.visible = true;
-      if (typeof msg.data?.title === 'string') state.breakScreen.title = msg.data.title.slice(0, 60);
-      if (typeof msg.data?.message === 'string') state.breakScreen.message = msg.data.message.slice(0, 120);
-      state.breakScreen.endsAt = (minutes > 0)
-        ? Date.now() + Math.round(minutes * 60 * 1000)
-        : null;
-      saveAppState();
-      broadcastFullState();
-      obsSwitch('break');
-      break;
-    }
-
-    case 'update_break': {
-      if (typeof msg.data?.title === 'string') state.breakScreen.title = msg.data.title.slice(0, 60);
-      if (typeof msg.data?.message === 'string') state.breakScreen.message = msg.data.message.slice(0, 120);
-      saveAppState();
-      broadcastFullState();
-      break;
-    }
-
-    case 'hide_break':
-      state.breakScreen.visible = false;
-      state.breakScreen.endsAt = null;
-      clearBreakAutoSwitch();
-      saveAppState();
-      broadcastFullState();
-      obsSwitch('inGame');
-      break;
 
     // ── Playout playlists (commercials / intros / outros) ────────────────────
     // Sequences of clip refs and/or media-file paths pushed live through the replay program bus.
@@ -7034,13 +8682,6 @@ function handleControlMessage(msg, ws) {
       }
       break;
 
-    case 'set_series':
-      if (typeof msg.data.blue === 'number') state.series.blue   = Math.max(0, msg.data.blue);
-      if (typeof msg.data.orange === 'number') state.series.orange = Math.max(0, msg.data.orange);
-      saveAppState();
-      broadcastFullState();
-      break;
-
     // Leagues are control-panel-authoritative: the editor pushes the whole list.
     case 'set_leagues': {
       if (Array.isArray(msg.data && msg.data.leagues)) state.leagues = msg.data.leagues;
@@ -7138,6 +8779,21 @@ function handleControlMessage(msg, ws) {
       break;
     }
     // Persist a saved seeding draft onto a My Events entry.
+    // Save discovered player profiles (6mans matches from rank verify) into the registry.
+    case 'save_player_profiles': {
+      const arr = Array.isArray(msg.data && msg.data.profiles) ? msg.data.profiles : [];
+      arr.slice(0, 600).forEach((p) => {
+        if (!p || !p.gamerTag) return;
+        const patch = {};
+        if (p.startggSlug) patch.startggSlug = p.startggSlug;
+        if (p.sixmans && (p.sixmans.name || p.sixmans.elo != null)) patch.sixmans = p.sixmans;
+        if (patch.startggSlug || patch.sixmans) upsertPlayerProfile(p.gamerTag, patch);
+      });
+      saveAppState();
+      broadcastFullState();
+      break;
+    }
+
     case 'set_event_seeding': {
       const id = (msg.data && msg.data.id) || '';
       const ev = Array.isArray(state.myEvents) ? state.myEvents.find((e) => e.id === id) : null;
@@ -7168,6 +8824,7 @@ function handleControlMessage(msg, ws) {
         const bo = { bo1: 1, bo3: 3, bo5: 5, bo7: 7 }[p.format];
         if (bo) state.bestOf = bo;   // keep the legacy best-of in sync with the format
       }
+      if (typeof p.seriesVisible === 'boolean') state.match.seriesVisible = p.seriesVisible;
       if (typeof p.division === 'string') state.match.division = p.division;
       if (Array.isArray(p.maps)) {
         state.match.maps = p.maps.slice(0, 9).map((m) => ({
@@ -7206,6 +8863,7 @@ function handleControlMessage(msg, ws) {
           winner: state.series.blue > state.series.orange ? 'a'
                 : state.series.orange > state.series.blue ? 'b' : null
         });
+        try { analytics.event('match_complete'); } catch (e) {}
       }
       statsCurrentMatchId = null;
       statsCurrentGameId  = null;
@@ -7283,6 +8941,8 @@ function handleControlMessage(msg, ws) {
             platform: p.platform || '',
             platformId: p.platformId || '',
             camSlot: p.camSlot || p.assignedCamera || '',
+            startgg: p.startgg || '',     // carry profile links to the live team
+            sixmans: p.sixmans || '',
           }));
         }
         saveAppState();
@@ -7640,6 +9300,19 @@ function handleControlMessage(msg, ws) {
       broadcastFullState();
       break;
     }
+    case 'set_slot_label': {
+      const slot = parseInt(msg.data?.slot);
+      const label = String(msg.data?.label || '').trim().slice(0, 30);
+      if (slot >= 1 && slot <= 4) {
+        if (!state.casters.slotLabels || typeof state.casters.slotLabels !== 'object') {
+          state.casters.slotLabels = { 1: 'Caster 1', 2: 'Caster 2', 3: 'Caster 3', 4: 'Caster 4' };
+        }
+        state.casters.slotLabels[slot] = label || `Caster ${slot}`;
+        saveAppState();
+        broadcastFullState();
+      }
+      break;
+    }
     // Interviewee → Player Spotlight Desk right cam. Stores the player's production-room solo feed
     // so spotlightdesk.html shows their live camera + audio in the right (featured) position.
     case 'set_interviewee': {
@@ -7980,7 +9653,17 @@ function handleControlMessage(msg, ws) {
     case 'request_state':
       ws.send(JSON.stringify(getFullState()));
       break;
-    
+
+    // Client self-identifies its role so the pre-flight checklist can count live overlay
+    // browser sources. 'overlay' = an OBS/browser overlay source; 'control' = the panel.
+    case 'register': {
+      const was = ws._role;
+      ws._role = (msg.role === 'overlay' || msg.role === 'control') ? msg.role : 'unknown';
+      ws._page = (typeof msg.page === 'string') ? msg.page.slice(0, 120) : '';
+      if (ws._role === 'overlay' || was === 'overlay') maybeBroadcastOverlayCount();
+      break;
+    }
+
     case 'swap_teams': {
       // Swap names/logos
       const tempTeams = { ...state.teams.blue };
@@ -7999,12 +9682,16 @@ function handleControlMessage(msg, ws) {
 
     case 'reset_all': {
       state.eventName = '';
-      state.fontFamily = 'Bourgeois';
+      state.fontFamily = 'Industry';
       state.banner = { visible: false, images: [], captions: [], interval: 10, slant: 'right', header: '' };
-      state.casters = { visible: true, list: [], lowerThird: '', library: [], vdo: { room: '', password: '' }, rooms: [], lineup: [], activeLayout: '' };
+      state.casters = { visible: true, list: [], lowerThird: '', library: [], vdo: { room: '', password: '' }, rooms: [], lineup: [], activeLayout: '', slotLabels: { 1: 'Caster 1', 2: 'Caster 2', 3: 'Caster 3', 4: 'Caster 4' } };
       state.breakScreen = { visible: false, title: 'STARTING SOON', message: '', endsAt: null };
-      state.ticker = { visible: false, messages: [], speed: 40 };
+      state.ticker = { visible: false, messages: [], speed: 40, source: 'manual', sponsor: '' };
       state.spotlight = { visible: false, playerName: '' };
+      state.winner = { visible: false, side: '', name: '', logo: null, color: '', subtitle: '' };
+      state.intro  = { visible: false, side: 'blue', title: '', style: 1, showFooter: true };
+      state.veto   = { visible: false, title: state.veto.title || '', maps: [] };
+      state.draft  = { ...state.draft, visible: false, ops: [], turn: null, complete: false };
       state.bestOf = 5;
       state.teams = {
         blue:   { name: 'BLUE TEAM',   logo: null, color: '#055fdb' },
@@ -8019,7 +9706,6 @@ function handleControlMessage(msg, ws) {
       state.players = [];
 
       saveAppState();
-      broadcastFullState();
       broadcastFullState();
       break;
     }
@@ -8163,6 +9849,262 @@ function handleControlMessage(msg, ws) {
         setStartggQueuePolling(true);
       }
       ws.send(JSON.stringify({ type: 'startgg-result', data: { ok: true, message: state.startgg.autoFollow ? 'Auto-follow ON — pushing the live set automatically.' : 'Auto-follow off.' } }));
+      break;
+    }
+
+    // ── Challonge ───────────────────────────────────────────────────────────
+
+    case 'set_challonge_settings': {
+      const p = msg.data || {};
+      state.challonge.enabled = !!p.enabled;
+      state.challonge.tournamentSlug = (p.tournamentSlug || '').trim();
+      if (typeof p.apiKey === 'string' && p.apiKey.trim()) challongeApiKey = p.apiKey.trim();
+      saveAppState();
+      broadcastFullState();
+      if (state.challonge.enabled && challongeApiKey && state.challonge.tournamentSlug) {
+        setChallongePolling(true);
+      }
+      break;
+    }
+
+    case 'set_challonge_auto_follow': {
+      state.challonge.autoFollow = !!msg.data?.enabled;
+      saveAppState();
+      broadcastFullState();
+      break;
+    }
+
+    case 'clear_active_event': {
+      state.activeEvent = { platform: null, slug: '', name: '', gameName: '', numEntrants: 0, format: '', url: '', loadedAt: null };
+      saveAppState();
+      broadcastFullState();
+      break;
+    }
+
+    case 'challonge_test_connection': {
+      (async () => {
+        try {
+          const client = createChallongeClient(challongeApiKey);
+          await client.get('/tournaments.json', { state: 'all', per_page: 1 });
+          state.challonge.connected = true;
+          state.challonge.lastError = null;
+          broadcastFullState();
+          ws.send(JSON.stringify({ type: 'challonge-result', data: { ok: true, message: 'Connected to Challonge successfully.' } }));
+        } catch (e) {
+          state.challonge.connected = false;
+          state.challonge.lastError = e.message;
+          broadcastFullState();
+          ws.send(JSON.stringify({ type: 'challonge-result', data: { ok: false, message: e.message } }));
+        }
+      })();
+      break;
+    }
+
+    case 'load_challonge_tournament': {
+      const slug = (msg.data?.slug || state.challonge.tournamentSlug || '').trim();
+      if (!slug) { ws.send(JSON.stringify({ type: 'challonge-result', data: { ok: false, message: 'No tournament slug provided.' } })); break; }
+      if (!challongeApiKey) { ws.send(JSON.stringify({ type: 'challonge-result', data: { ok: false, message: 'Challonge API key not configured.' } })); break; }
+      (async () => {
+        try {
+          ws.send(JSON.stringify({ type: 'challonge-result', data: { ok: true, message: 'Loading tournament…', loading: true } }));
+          const result = await loadChalongeTournament(slug);
+          saveAppState();
+          setChallongePolling(true);
+          ws.send(JSON.stringify({ type: 'challonge-result', data: { ok: true, message: `Loaded "${result.name}" — ${result.teamsCount} teams, ${result.matchesCount} matches.`, loaded: true } }));
+        } catch (e) {
+          state.challonge.connected = false;
+          state.challonge.lastError = e.message;
+          broadcastFullState();
+          ws.send(JSON.stringify({ type: 'challonge-result', data: { ok: false, message: e.message } }));
+        }
+      })();
+      break;
+    }
+
+    case 'challonge_refresh': {
+      (async () => {
+        try {
+          await refreshChallongeLive();
+          ws.send(JSON.stringify({ type: 'challonge-result', data: { ok: true, message: 'Bracket refreshed.' } }));
+        } catch (e) {
+          ws.send(JSON.stringify({ type: 'challonge-result', data: { ok: false, message: e.message } }));
+        }
+      })();
+      break;
+    }
+
+    case 'challonge_push_match': {
+      const { matchId, scoreA, scoreB, winnerId } = msg.data || {};
+      if (!matchId) { ws.send(JSON.stringify({ type: 'challonge-result', data: { ok: false, message: 'matchId required.' } })); break; }
+      if (!challongeApiKey) { ws.send(JSON.stringify({ type: 'challonge-result', data: { ok: false, message: 'Challonge API key not configured.' } })); break; }
+      const slug = state.challonge.tournamentSlug;
+      if (!slug) { ws.send(JSON.stringify({ type: 'challonge-result', data: { ok: false, message: 'No tournament loaded.' } })); break; }
+      (async () => {
+        try {
+          const client = createChallongeClient(challongeApiKey);
+          const body = { match: { scores_csv: `${scoreA || 0}-${scoreB || 0}` } };
+          if (winnerId) body.match.winner_id = winnerId;
+          await client.put(`/tournaments/${slug}/matches/${matchId}.json`, body);
+          await refreshChallongeLive();
+          ws.send(JSON.stringify({ type: 'challonge-result', data: { ok: true, message: `Match ${matchId} updated.` } }));
+        } catch (e) {
+          ws.send(JSON.stringify({ type: 'challonge-result', data: { ok: false, message: e.message } }));
+        }
+      })();
+      break;
+    }
+
+    case 'import_challonge_teams': {
+      const slug = (msg.data?.slug || state.challonge.tournamentSlug || '').trim();
+      if (!slug || !challongeApiKey) { ws.send(JSON.stringify({ type: 'challonge-result', data: { ok: false, message: 'API key and tournament slug required.' } })); break; }
+      (async () => {
+        try {
+          const client = createChallongeClient(challongeApiKey);
+          const pData = await client.get(`/tournaments/${slug}/participants.json`);
+          const partMap = challongePartMap(pData);
+          let added = 0;
+          Object.values(partMap).forEach((p) => {
+            const existing = savedTeams.find((t) => t.name.toLowerCase() === p.name.toLowerCase());
+            if (!existing) { savedTeams.push({ name: p.name, logo: p.logo || null, players: [] }); added++; }
+          });
+          saveTeams();
+          broadcastFullState();
+          ws.send(JSON.stringify({ type: 'challonge-result', data: { ok: true, message: `Imported ${added} new teams (${pData.length} total participants).` } }));
+        } catch (e) {
+          ws.send(JSON.stringify({ type: 'challonge-result', data: { ok: false, message: e.message } }));
+        }
+      })();
+      break;
+    }
+
+    case 'link_event_challonge': {
+      const { eventId, challongeSlug, enabled = true } = msg.data || {};
+      const evLink = (Array.isArray(state.myEvents) ? state.myEvents : []).find(e => e.id === eventId);
+      if (!evLink) { ws.send(JSON.stringify({ type: 'link-result', data: { ok: false, message: 'Event not found.' } })); break; }
+      if (!challongeApiKey) { ws.send(JSON.stringify({ type: 'link-result', data: { ok: false, message: 'Add Challonge API key in Settings first.' } })); break; }
+      const lSlug = (challongeSlug || '').trim();
+      if (!lSlug) { ws.send(JSON.stringify({ type: 'link-result', data: { ok: false, message: 'No tournament slug provided.' } })); break; }
+      (async () => {
+        try {
+          ws.send(JSON.stringify({ type: 'link-result', data: { ok: true, message: 'Building participant map…', loading: true } }));
+          const participantMap = await buildChallongeParticipantMap(lSlug);
+          const count = Object.keys(participantMap).length;
+          const prevPushed = (evLink.challongeSync && evLink.challongeSync.slug === lSlug) ? evLink.challongeSync.pushedMatches || {} : {};
+          evLink.challongeSync = { slug: lSlug, enabled: !!enabled, participantMap, pushedMatches: prevPushed, lastSyncAt: null, lastError: null };
+          saveAppState();
+          broadcastFullState();
+          syncLinkedChallongeTournament(evLink).catch(() => {});
+          ws.send(JSON.stringify({ type: 'link-result', data: { ok: true, message: `Linked to challonge.com/${lSlug} — ${count} participants mapped.`, linked: true } }));
+        } catch (e) {
+          ws.send(JSON.stringify({ type: 'link-result', data: { ok: false, message: e.message } }));
+        }
+      })();
+      break;
+    }
+
+    case 'unlink_event_challonge': {
+      const { eventId: ulEvId } = msg.data || {};
+      const evUnlink = (Array.isArray(state.myEvents) ? state.myEvents : []).find(e => e.id === ulEvId);
+      if (evUnlink) { delete evUnlink.challongeSync; saveAppState(); broadcastFullState(); }
+      ws.send(JSON.stringify({ type: 'link-result', data: { ok: true, message: 'Auto-sync unlinked.', unlinked: true } }));
+      break;
+    }
+
+    case 'toggle_challonge_sync': {
+      const { eventId: tsEvId, enabled: tsEnabled } = msg.data || {};
+      const evToggle = (Array.isArray(state.myEvents) ? state.myEvents : []).find(e => e.id === tsEvId);
+      if (evToggle && evToggle.challongeSync) { evToggle.challongeSync.enabled = !!tsEnabled; saveAppState(); broadcastFullState(); }
+      break;
+    }
+
+    // ── NXGEN ────────────────────────────────────────────────────────────
+    case 'set_nxgen_settings': {
+      const p = msg.data || {};
+      state.nxgen.enabled = !!p.enabled;
+      state.nxgen.eventSlug = (p.eventSlug || '').trim();
+      if (typeof p.apiKey === 'string' && p.apiKey.trim()) nxgenApiKey = p.apiKey.trim();
+      saveAppState();
+      broadcastFullState();
+      if (state.nxgen.enabled && nxgenApiKey && state.nxgen.eventSlug) setNxgenPolling(true);
+      break;
+    }
+
+    case 'set_nxgen_auto_follow': {
+      state.nxgen.autoFollow = !!msg.data?.enabled;
+      saveAppState();
+      broadcastFullState();
+      break;
+    }
+
+    case 'nxgen_test_connection': {
+      (async () => {
+        try {
+          await getNxgenEvents(nxgenApiKey, { limit: 1 });
+          state.nxgen.connected = true;
+          state.nxgen.lastError = null;
+          broadcastFullState();
+          ws.send(JSON.stringify({ type: 'nxgen-result', data: { ok: true, message: 'Connected to NXGEN successfully.' } }));
+        } catch (e) {
+          state.nxgen.connected = false;
+          state.nxgen.lastError = e.message;
+          broadcastFullState();
+          ws.send(JSON.stringify({ type: 'nxgen-result', data: { ok: false, message: e.message } }));
+        }
+      })();
+      break;
+    }
+
+    case 'load_nxgen_event': {
+      const slug = (msg.data?.slug || state.nxgen.eventSlug || '').trim();
+      if (!slug) { ws.send(JSON.stringify({ type: 'nxgen-result', data: { ok: false, message: 'No event slug provided.' } })); break; }
+      if (!nxgenApiKey) { ws.send(JSON.stringify({ type: 'nxgen-result', data: { ok: false, message: 'NXGEN API key not configured — add it in Settings → Integrations.' } })); break; }
+      (async () => {
+        try {
+          ws.send(JSON.stringify({ type: 'nxgen-result', data: { ok: true, message: 'Loading event…', loading: true } }));
+          const result = await loadNxgenEvent(slug);
+          saveAppState();
+          broadcastFullState();
+          setNxgenPolling(state.nxgen.enabled);
+          ws.send(JSON.stringify({ type: 'nxgen-result', data: { ok: true, message: `Loaded "${result.name}" — ${result.teamsCount} participants, ${result.matchesCount} matches.`, loaded: true } }));
+        } catch (e) {
+          state.nxgen.connected = false;
+          state.nxgen.lastError = e.message;
+          broadcastFullState();
+          ws.send(JSON.stringify({ type: 'nxgen-result', data: { ok: false, message: e.message } }));
+        }
+      })();
+      break;
+    }
+
+    case 'nxgen_refresh': {
+      (async () => {
+        try {
+          await refreshNxgenLive();
+          ws.send(JSON.stringify({ type: 'nxgen-result', data: { ok: true, message: 'Event refreshed.' } }));
+        } catch (e) {
+          ws.send(JSON.stringify({ type: 'nxgen-result', data: { ok: false, message: e.message } }));
+        }
+      })();
+      break;
+    }
+
+    case 'nxgen_import_teams': {
+      (async () => {
+        try {
+          const teams = state.nxgen.eventTeams || [];
+          if (!teams.length) throw new Error('No participants loaded — load an event first.');
+          let added = 0;
+          teams.forEach(t => {
+            const existing = savedTeams.find(s => s.name.toLowerCase() === (t.name || '').toLowerCase());
+            if (!existing) { savedTeams.push({ name: t.name, logo: t.logo || null, players: [] }); added++; }
+          });
+          saveTeams();
+          broadcastFullState();
+          ws.send(JSON.stringify({ type: 'nxgen-result', data: { ok: true, message: `${added} new team${added !== 1 ? 's' : ''} added to library.` } }));
+        } catch (e) {
+          ws.send(JSON.stringify({ type: 'nxgen-result', data: { ok: false, message: e.message } }));
+        }
+      })();
       break;
     }
 
@@ -8409,6 +10351,8 @@ function handleControlMessage(msg, ws) {
       const p = msg.data || {};
       if (typeof p.visible === 'boolean') state.upcoming.visible = p.visible;
       if (typeof p.title === 'string') state.upcoming.title = p.title;
+      if (typeof p.eyebrow === 'string') state.upcoming.eyebrow = p.eyebrow;
+      if (p.layout === 'cards' || p.layout === 'board') state.upcoming.layout = p.layout;
       if (Array.isArray(p.matches)) state.upcoming.matches = p.matches;
       saveAppState();
       broadcastFullState();
@@ -8422,6 +10366,14 @@ function handleControlMessage(msg, ws) {
       if (typeof p.title === 'string') state.standings.title = p.title;
       if (Array.isArray(p.rows)) state.standings.rows = p.rows;
       saveAppState();
+      broadcastFullState();
+      break;
+    }
+
+    // ── Unified graphics overlay (gfx.html) active scene ─────────────────
+    case 'set_gfx_active': {
+      const scene = (msg.data && msg.data.scene) || null;
+      state.gfxActive = scene && typeof scene === 'string' ? scene : null;
       broadcastFullState();
       break;
     }
@@ -9219,7 +11171,7 @@ function startHttpServer(baseDir) {
   // List every overlay HTML on disk so the Scenes page auto-discovers new scenes
   // (no need to hand-maintain a list). Internal pages are excluded.
   app.get('/api/overlays', async (req, res) => {
-    const EXCLUDE = new Set(['scenes.html', 'index.html']);  // launcher + overlay index
+    const EXCLUDE = new Set(['scenes.html', 'index.html', 'upcoming.html']);  // launcher + overlay index + upcoming→schedule redirect stub
     try {
       const files = (await require('fs').promises.readdir(overlayDir))
         .filter((f) => /\.html$/i.test(f) && !EXCLUDE.has(f.toLowerCase()))
@@ -9258,6 +11210,42 @@ function startHttpServer(baseDir) {
     if (!obsClient || !obsClient.isConnected()) return res.json({ inputs: [] });
     const inputs = await obsClient.getInputList().catch(() => []);
     res.json({ inputs });
+  });
+
+  // Screenshot the current OBS program output — used by the in-app preview panel.
+  // Tries GetVideoMixFrame (OBS WS 5.3+ / OBS 30+) first; falls back to
+  // GetSourceScreenshot on the current program scene for older versions.
+  app.get('/api/obs/screenshot', async (req, res) => {
+    if (!obsClient || !obsClient.isConnected()) {
+      return res.status(503).json({ error: 'OBS not connected' });
+    }
+    const w = Math.min(Math.max(parseInt(req.query.w) || 960, 160), 1920);
+    const h = Math.round(w * 9 / 16);
+    const imgOpts = { imageFormat: 'jpg', imageWidth: w, imageHeight: h, imageCompressionQuality: 72 };
+
+    // Primary: GetVideoMixFrame — directly captures what viewers see (OBS WS ≥5.3)
+    let r = await obsClient.call('GetVideoMixFrame', {
+      videoMixType: 'OBS_WEBSOCKET_VIDEO_MIX_TYPE_PROGRAM',
+      ...imgOpts,
+    });
+
+    // Fallback: GetSourceScreenshot on the current program scene (any OBS WS v5)
+    if (!r || !r.imageData) {
+      const scene = obsClient.getCurrentScene();
+      if (scene) {
+        r = await obsClient.call('GetSourceScreenshot', { sourceName: scene, ...imgOpts });
+      }
+    }
+
+    if (!r || !r.imageData) {
+      const err = obsClient.getLastError() || 'Screenshot unavailable';
+      console.warn('[OBS Preview] Screenshot failed:', err);
+      return res.status(503).json({ error: err });
+    }
+    const buf = Buffer.from(r.imageData.replace(/^data:[^;]+;base64,/, ''), 'base64');
+    res.set('Content-Type', 'image/jpeg');
+    res.set('Cache-Control', 'no-store');
+    res.end(buf);
   });
 
   // GET  → download as file (manual import fallback).
@@ -9379,6 +11367,174 @@ function startHttpServer(baseDir) {
     } catch (e) { res.status(500).json({ ok: false, message: e.message }); }
   });
 
+  // ── Filtered analytics dashboard (single source of truth) ──────────────────
+  app.get('/api/stats/filters', (req, res) => {
+    try { res.json({ ok: true, ...stats.getFilterOptions() }); }
+    catch (e) { res.status(500).json({ ok: false, message: e.message }); }
+  });
+  app.get('/api/stats/dashboard', (req, res) => {
+    try {
+      const f = { from: req.query.from ? Number(req.query.from) : 0, to: req.query.to ? Number(req.query.to) : 0,
+        game: req.query.game || '', tournament: req.query.tournament || '' };
+      res.json({ ok: true, filters: f, data: stats.getDashboard(f) });
+    } catch (e) { res.status(500).json({ ok: false, message: e.message }); }
+  });
+
+  // ── Analytics: broadcast sessions (producer show reports) ──────────────────
+  app.get('/api/analytics/overview', (req, res) => res.json({ ok: true, ...analytics.overview(req.query.event), auto: analytics.getAuto() }));
+  app.get('/api/analytics/live', (req, res) => res.json({ ok: true, live: analytics.getLive() }));
+  app.get('/api/analytics/sessions', (req, res) => res.json({ ok: true, sessions: analytics.getSessions() }));
+  app.get('/api/analytics/session/:id', (req, res) => {
+    const s = analytics.getSession(req.params.id);
+    if (!s) return res.status(404).json({ ok: false, message: 'not found' });
+    res.json({ ok: true, session: s });
+  });
+  app.post('/api/analytics/start', (req, res) => res.json({ ok: true, live: analytics.startSession(req.body && req.body.label) }));
+  app.post('/api/analytics/stop', (req, res) => res.json({ ok: true, session: analytics.stopSession() }));
+  app.post('/api/analytics/auto', (req, res) => { analytics.setAuto(!(req.body && req.body.on === false)); res.json({ ok: true, auto: analytics.getAuto() }); });
+  app.delete('/api/analytics/session/:id', (req, res) => { analytics.deleteSession(req.params.id); res.json({ ok: true, sessions: analytics.getSessions() }); });
+  // Clear ALL broadcast sessions (fresh reporting).
+  app.delete('/api/analytics/sessions', (req, res) => { try { analytics.clearAllSessions(); } catch (e) {} res.json({ ok: true, sessions: analytics.getSessions() }); });
+  app.delete('/api/stats/match/:id', (req, res) => { const ok = stats.deleteMatch(req.params.id); res.json({ ok }); });
+  app.delete('/api/stats/matches', (req, res) => { stats.clearAllMatches(); res.json({ ok: true }); });
+  app.delete('/api/stats/team/:name', (req, res) => { const n = stats.deleteMatchesByTeam(decodeURIComponent(req.params.name)); res.json({ ok: true, removed: n }); });
+  app.delete('/api/stats/player/:name', (req, res) => { const n = stats.deletePlayerStats(decodeURIComponent(req.params.name)); res.json({ ok: true, removed: n }); });
+  app.get('/api/analytics/export', (req, res) => {
+    const out = analytics.exportCsv((req.query.session || '').toString());
+    if (!out) return res.status(404).json({ ok: false, message: 'not found' });
+    res.setHeader('Content-Disposition', `attachment; filename="${out.name}.csv"`);
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.send(out.csv);
+  });
+
+  // ── Twitch channel stats (followers / subs / past broadcasts / clips) ───────
+  app.get('/api/twitch/stats', async (req, res) => {
+    const token = state.twitch && state.twitch.apiToken;
+    const userId = state.twitch && state.twitch.channelId;
+    if (!token || !userId) return res.status(400).json({ ok: false, needsReconnect: true, message: 'Twitch not connected — reconnect in Settings to pull channel stats.' });
+    if (!req.query.refresh && _twitchStatsCache && (Date.now() - _twitchStatsCache.at < 60000)) {
+      return res.json({ ok: true, data: _twitchStatsCache.data, cached: true });
+    }
+    try {
+      const data = await twitchStats.fetchTwitchStats({ clientId: process.env.TWITCH_CLIENT_ID, accessToken: token, userId });
+      _twitchStatsCache = { at: Date.now(), data };
+      res.json({ ok: true, data });
+    } catch (e) { res.status(500).json({ ok: false, message: e.message }); }
+  });
+
+  // YouTube channel stats — subscriber count, video views, recent uploads, live viewer count
+  app.get('/api/youtube/stats', async (req, res) => {
+    if (!socialPublisher) return res.status(503).json({ ok: false, message: 'Social publisher not initialised.' });
+    if (!socialPublisher.getConnections().youtube.connected) return res.status(400).json({ ok: false, needsConnect: true, message: 'YouTube not connected — connect via Settings → Social.' });
+    try {
+      const data = await socialPublisher.getYouTubeStats();
+      if (!data) return res.status(400).json({ ok: false, needsConnect: true, message: 'YouTube not connected.' });
+      res.json({ ok: true, data });
+    } catch (e) {
+      console.error('[youtube/stats]', e.message);
+      res.status(500).json({ ok: false, message: e.message });
+    }
+  });
+
+  // ── Import historical results from the producer's own start.gg tournaments ──
+  // Runs in the background; progress + final summary are pushed over WS ('startgg_import').
+  app.post('/api/stats/import-startgg', (req, res) => {
+    if (!startggApiToken) return res.status(400).json({ ok: false, message: 'Connect start.gg in Settings first.' });
+    if (_startggImportRunning) return res.status(409).json({ ok: false, message: 'An import is already running.' });
+    const nameQuery = (req.body && req.body.nameQuery || 'rocket rush').toString().slice(0, 80);
+    const gameQuery = (req.body && req.body.gameQuery || 'rocket league').toString().slice(0, 80);
+    _startggImportRunning = true;
+    const client = createStartGgClient(startggApiToken);
+    const onProgress = (p) => broadcast(bridgeClients, { type: 'startgg_import', data: p });
+    res.json({ ok: true, started: true });
+    startggImport.importFromStartgg({ client, stats, nameQuery, gameQuery, onProgress })
+      .then((summary) => { broadcast(bridgeClients, { type: 'startgg_import', data: { message: 'Import complete.', summary, done: true } }); })
+      .catch((err) => { broadcast(bridgeClients, { type: 'startgg_import', data: { message: 'Import failed: ' + err.message, error: true, done: true } }); })
+      .finally(() => { _startggImportRunning = false; });
+  });
+
+  // Import ONE searched start.gg event (find-and-add) into the stats DB.
+  app.post('/api/stats/import-startgg-event', (req, res) => {
+    if (!startggApiToken) return res.status(400).json({ ok: false, message: 'Connect start.gg in Settings first.' });
+    if (_startggImportRunning) return res.status(409).json({ ok: false, message: 'An import is already running.' });
+    const eventId = req.body && req.body.eventId;
+    if (!eventId) return res.status(400).json({ ok: false, message: 'eventId required' });
+    const tournamentName = (req.body.tournamentName || '').toString().slice(0, 120);
+    const gameType = (req.body.gameType || 'rl').toString();
+    _startggImportRunning = true;
+    const client = createStartGgClient(startggApiToken);
+    const onProgress = (p) => broadcast(bridgeClients, { type: 'startgg_import', data: p });
+    res.json({ ok: true, started: true });
+    startggImport.importEventById({ client, stats, eventId, tournamentName, gameType, onProgress })
+      .then((summary) => { broadcast(bridgeClients, { type: 'startgg_import', data: { message: 'Import complete.', summary, done: true } }); })
+      .catch((err) => { broadcast(bridgeClients, { type: 'startgg_import', data: { message: 'Import failed: ' + err.message, error: true, done: true } }); })
+      .finally(() => { _startggImportRunning = false; });
+  });
+
+  // ── Analytics: event / tournament (computed live from start.gg + bracket + stats) ──
+  app.get('/api/analytics/event', (req, res) => {
+    try {
+      const sg = state.startgg || {}, br = state.bracket || {};
+      let total = 0, done = 0;
+      const countRounds = (rounds) => (rounds || []).forEach((r) => (r.sets || []).forEach((s) => {
+        total++; if ((s.a && s.a.winner) || (s.b && s.b.winner)) done++;
+      }));
+      countRounds(br.winners); countRounds(br.losers); countRounds(br.finals);
+      const feed = sg.matchFeed || [], queue = sg.queue || [];
+      const liveCount = feed.filter((m) => m.status === 'live' || m.state === 2).length;
+      const doneCount = feed.filter((m) => m.status === 'done' || m.state === 3).length;
+      const upcomingCount = (queue.filter((m) => m.state === 1 || m.status === 'upcoming').length) || Math.max(0, (queue.length - liveCount));
+      const sel = sg.selectedEvent || {};
+      res.json({ ok: true, data: {
+        event: { name: sel.name || state.eventName || '', tournament: sel.tournamentName || '', game: state.activeGame || '',
+          entrants: (sg.eventTeams || []).length || 0 },
+        bracket: { type: br.type || '', total, completed: done, pct: total ? Math.round(done / total * 100) : 0,
+          phases: (br.phases || []).map((p) => ({ id: p.id, name: p.name, type: p.type })) },
+        queue: { live: liveCount, done: doneCount, upcoming: upcomingCount, streams: sg.streams || [], following: sg.streamName || '' },
+        pacing: stats.getPacing(), maps: stats.getMapStats(), tournaments: stats.getTournaments()
+      } });
+    } catch (e) { res.status(500).json({ ok: false, message: e.message }); }
+  });
+
+  // ── Analytics: audience engagement (computed live from Twitch state) ───────
+  app.get('/api/analytics/engagement', (req, res) => {
+    try {
+      const tw = state.twitch || {};
+      const ph = (tw.predictions && tw.predictions.history) || [];
+      const cur = tw.predictions && tw.predictions.current;
+      const allPreds = cur ? [cur, ...ph] : ph.slice();
+      const sumOut = (p, f) => (p.outcomes || []).reduce((a, o) => a + (o[f] || 0), 0);
+      const predictions = {
+        total: allPreds.length,
+        resolved: allPreds.filter((p) => p.state === 'RESOLVED').length,
+        cancelled: allPreds.filter((p) => p.state === 'CANCELLED').length,
+        totalPoints: allPreds.reduce((a, p) => a + sumOut(p, 'votes'), 0),
+        totalVoters: allPreds.reduce((a, p) => a + sumOut(p, 'users'), 0),
+        recent: allPreds.slice(0, 10).map((p) => ({ title: p.title, state: p.state, points: sumOut(p, 'votes'), voters: sumOut(p, 'users'), createdAt: p.createdAt }))
+      };
+      const polls = (tw.poll && tw.poll.history) || [];
+      const pollStats = { total: polls.length, totalVotes: polls.reduce((a, p) => a + (p.total || 0), 0),
+        recent: polls.slice(0, 10).map((p) => ({ title: p.title, total: p.total, endedAt: p.endedAt })) };
+      const wheel = tw.wheel || {}, wHist = wheel.history || [];
+      const wheelStats = { spins: wHist.length, participants: (wheel.participants || []).length, byMethod: {} };
+      (wheel.participants || []).forEach((p) => { wheelStats.byMethod[p.method] = (wheelStats.byMethod[p.method] || 0) + 1; });
+      const mini = tw.minigame || {}, mHist = mini.history || [];
+      const miniStats = { total: mHist.length, byType: {} };
+      mHist.forEach((g) => { miniStats.byType[g.type] = (miniStats.byType[g.type] || 0) + 1; });
+      const log = tw.activityLog || [];
+      const act = { follow: 0, subscribe: 0, raid: 0, bits: 0, raidViewers: 0, bitsAmount: 0 };
+      log.forEach((e) => {
+        if (e.type === 'follow') act.follow++;
+        else if (e.type === 'subscribe') act.subscribe++;
+        else if (e.type === 'raid') { act.raid++; act.raidViewers += e.viewers || 0; }
+        else if (e.type === 'bits') { act.bits++; act.bitsAmount += e.amount || 0; }
+      });
+      let stream = { isLive: false, viewers: 0, title: '', game: '' };
+      try { if (typeof streamStateManager !== 'undefined' && streamStateManager) stream = { isLive: streamStateManager.streamState.isLive, viewers: streamStateManager.streamState.viewerCount, title: streamStateManager.streamState.title, game: streamStateManager.streamState.game }; } catch (e) {}
+      res.json({ ok: true, data: { stream, predictions, polls: pollStats, wheel: wheelStats, minigames: miniStats, activity: act, recentActivity: log.slice(-40).reverse() } });
+    } catch (e) { res.status(500).json({ ok: false, message: e.message }); }
+  });
+
   // ── VDO.Ninja talent links + local QR ────────────────────────────────────
   // Generate a QR locally (never sends the join URL — which carries the room password —
   // to any third-party service). <img src="/api/vdo/qr?text=<encoded join url>">
@@ -9419,7 +11575,7 @@ function startHttpServer(baseDir) {
           interviewViewUrl: buildPlayerInterviewViewUrl(p)
         }));
         return { name: team.name, color: team.color, room: team.vdo.room, players,
-          roomListenUrl: buildRoomListenInUrl(team), directorUrl: buildDirectorUrl(team.vdo) };
+          roomListenUrl: buildRoomListenInUrl(team), roomJoinUrl: buildRoomJoinUrl(team), directorUrl: buildDirectorUrl(team.vdo) };
       };
       // All saved teams — only include per-player links if the team already has a VDO room
       // (don't auto-provision here; explicit "generate" action does that).
@@ -9813,6 +11969,13 @@ function startHttpServer(baseDir) {
     }
   });
 
+  // GET /api/clips — return the local clip library for the Social page
+  app.get('/api/clips', (req, res) => {
+    if (!clipSystem) return res.json({ library: [], clips: [] });
+    const { library } = clipSystem.getState();
+    res.json({ library: library || [], clips: library || [] });
+  });
+
   // The control panel runs from a file:// origin (Electron loadFile), so allow it to
   // read these localhost-only API responses cross-origin.
   app.use((req, res, next) => {
@@ -10011,6 +12174,141 @@ function startHttpServer(baseDir) {
     }
   });
 
+  // Pull season standings (placement + league points) from a start.gg LEAGUE and store them
+  // so the overlay team-record feature can show authoritative season points/placement.
+  app.post('/api/startgg/league-standings', async (req, res) => {
+    const slug = (req.body && req.body.slug) || state.leagueStandings.slug || '';
+    if (!slug) return res.status(400).json({ error: 'League slug or URL required' });
+    try {
+      const { name, teams } = await fetchLeagueStandings(slug);
+      state.leagueStandings = {
+        slug: normalizeLeagueSlug(slug), name, teams,
+        fetchedAt: Date.now(), lastError: null
+      };
+      saveAppState();
+      broadcastFullState();
+      res.json({ ok: true, name, count: teams.length, teams });
+    } catch (err) {
+      state.leagueStandings.lastError = err.message;
+      state.leagueStandings.slug = normalizeLeagueSlug(slug);
+      saveAppState();
+      broadcastFullState();
+      res.status(502).json({ error: err.message });
+    }
+  });
+
+  // Search start.gg leagues by name
+  app.post('/api/startgg/search-leagues', async (req, res) => {
+    const { name } = req.body || {};
+    if (!name || name.length < 2) return res.status(400).json({ error: 'Search name too short' });
+    try {
+      const results = await searchStartggLeagues(name);
+      res.json({ results });
+    } catch (err) {
+      res.status(502).json({ error: err.message });
+    }
+  });
+
+  // Get league info (name + tournament list) without syncing
+  app.post('/api/startgg/league-info', async (req, res) => {
+    const { slug } = req.body || {};
+    if (!slug) return res.status(400).json({ error: 'Slug required' });
+    try {
+      res.json(await fetchLeagueInfo(slug));
+    } catch (err) {
+      res.status(502).json({ error: err.message });
+    }
+  });
+
+  // Sync completed sets from a start.gg league into an in-app league's schedule
+  app.post('/api/startgg/league-sync', async (req, res) => {
+    const { leagueId, slug } = req.body || {};
+    const lg = (state.leagues || []).find(l => l.id === leagueId);
+    if (!lg) return res.status(404).json({ error: 'League not found in app' });
+    const rawSlug = slug || lg.startggSource;
+    if (!rawSlug) return res.status(400).json({ error: 'No start.gg source set for this league' });
+
+    try {
+      const leagueInfo = await fetchLeagueInfo(rawSlug);
+
+      // Build team name index for fuzzy matching against in-app roster
+      const inAppTeams = (lg.teams || []).map(ref => ({
+        id: ref.id,
+        name: (ref.teamName || ref.name || '').trim()
+      }));
+      function fuzzyMatch(entrantName) {
+        if (!entrantName || !inAppTeams.length) return null;
+        const norm = s => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+        const needle = norm(entrantName);
+        let hit = inAppTeams.find(t => norm(t.name) === needle);
+        if (!hit) hit = inAppTeams.find(t => { const tn = norm(t.name); return tn && (tn.includes(needle) || needle.includes(tn)); });
+        return hit ? hit.id : null;
+      }
+
+      const existingSggIds = new Set((lg.schedule || []).map(m => m.sggSetId).filter(Boolean));
+      let imported = 0, skipped = 0;
+
+      for (const tournament of leagueInfo.tournaments) {
+        if (!tournament.slug) continue;
+        let tData;
+        try { tData = await fetchTournamentSets(tournament.slug); } catch (e) {
+          console.warn('[league-sync] tournament skipped:', tournament.slug, e.message);
+          continue;
+        }
+        const weekMatch = (tData.name || '').match(/\b(\d+)\b/);
+        const week = weekMatch ? weekMatch[1] : '';
+        const date = tData.startAt ? new Date(tData.startAt * 1000).toISOString().slice(0, 10) : '';
+
+        for (const event of (tData.events || [])) {
+          const sets = (event.sets && event.sets.nodes) || [];
+          for (const set of sets) {
+            if (!set) continue;
+            if (existingSggIds.has(String(set.id))) { skipped++; continue; }
+            const slots = set.slots || [];
+            if (slots.length < 2) continue;
+            const entA = slots[0] && slots[0].entrant;
+            const entB = slots[1] && slots[1].entrant;
+            if (!entA || !entB) continue;
+
+            // Parse score from displayScore e.g. "TEAM A 2 - TEAM B 1"
+            let scoreA = null, scoreB = null;
+            const ds = String(set.displayScore || '');
+            const sm = ds.match(/(\d+)\s*-\s*(\d+)/);
+            if (sm) { scoreA = Number(sm[1]); scoreB = Number(sm[2]); }
+
+            lg.schedule = lg.schedule || [];
+            lg.schedule.push({
+              id: srvLgUid('m'),
+              sggSetId: String(set.id),
+              teamA: fuzzyMatch(entA.name),
+              teamB: fuzzyMatch(entB.name),
+              sggTeamA: entA.name,
+              sggTeamB: entB.name,
+              format: 'BO3',
+              week,
+              date,
+              result: { scoreA, scoreB }
+            });
+            existingSggIds.add(String(set.id));
+            imported++;
+          }
+        }
+      }
+
+      lg.startggSource = normalizeLeagueSlug(rawSlug);
+      lg.sggSyncedAt = Date.now();
+      lg.sggLeagueName = leagueInfo.name;
+
+      if (imported > 0) lgRecalcServer(lg);
+      saveAppState();
+      broadcastFullState();
+      res.json({ ok: true, imported, skipped, leagueName: leagueInfo.name, tournaments: leagueInfo.tournaments.length });
+    } catch (err) {
+      console.error('[league-sync]', err.message);
+      res.status(502).json({ error: err.message });
+    }
+  });
+
   app.post('/api/startgg/search-tournaments', async (req, res) => {
     const { query } = req.body;
     const apiToken = req.body.apiToken || startggApiToken;   // fall back to the saved token
@@ -10155,6 +12453,150 @@ function startHttpServer(baseDir) {
     }
   });
 
+  // Fetch recent tournament standings for a list of start.gg user slugs, compute a
+  // weighted performance score per player (0-100). Used by the seeding studio.
+  app.post('/api/startgg/player-standings', async (req, res) => {
+    const token = (req.body?.apiToken) || startggApiToken;
+    const slugs = Array.isArray(req.body?.slugs) ? req.body.slugs.filter(Boolean).slice(0, 200) : [];
+    if (!token) return res.status(400).json({ error: 'Start.gg API token required' });
+    if (!slugs.length) return res.json({ ok: true, scores: {} });
+
+    const client = createStartGgClient(token);
+    const BATCH = 8;
+    const scores = {};
+
+    for (let i = 0; i < slugs.length; i += BATCH) {
+      const batch = slugs.slice(i, i + BATCH);
+      const fields = batch.map((slug, j) =>
+        `p${j}: user(slug: ${JSON.stringify(slug)}) { player { recentStandings(limit: 10) { placement entrant { event { numEntrants startAt } } } } }`
+      ).join('\n');
+      try {
+        const data = await client.request(`query { ${fields} }`);
+        batch.forEach((slug, j) => {
+          const standings = (data[`p${j}`]?.player?.recentStandings) || [];
+          scores[slug] = computeSggPerformanceScore(standings);
+        });
+      } catch (err) {
+        console.error('[player-standings] batch error:', err.message);
+      }
+      if (i + BATCH < slugs.length) await new Promise((r) => setTimeout(r, 700));
+    }
+
+    res.json({ ok: true, scores });
+  });
+
+  // Local history score — uses the already-imported Rocket Rush set records in the stats DB.
+  // Returns a win-rate-based score (0–100) per team name. Instant, no API calls.
+  app.post('/api/seeding/local-scores', (req, res) => {
+    const teams = Array.isArray(req.body?.teams) ? req.body.teams.filter(Boolean) : [];
+    if (!teams.length) return res.json({ ok: true, scores: {} });
+    const normName = (s) => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    const records = stats.getTeamRecords();
+    const byNorm = new Map(records.map((r) => [normName(r.team), r]));
+    const scores = {};
+    teams.forEach((name) => {
+      const r = byNorm.get(normName(name));
+      if (!r || r.matches < 2) { scores[name] = null; return; }
+      // Win rate, regressed toward 50% when sample is small (< 10 matches)
+      const conf = Math.min(r.matches / 10, 1);
+      scores[name] = Math.round((r.winPct * conf + 50 * (1 - conf)) * 10) / 10;
+    });
+    res.json({ ok: true, scores, totalMatches: records.reduce((s, r) => s + r.matches, 0) });
+  });
+
+  // ── rl6mans.com rank verification ───────────────────────────────────────
+  // Look up a list of gamertags against the rl6mans leaderboards for a region.
+  // Scrapes on first call, then serves from a 24 h in-memory cache.
+  app.post('/api/rl6mans/lookup', async (req, res) => {
+    const names  = Array.isArray(req.body?.names) ? req.body.names.filter(Boolean).slice(0, 300) : [];
+    const region = (req.body?.region || 'NA').toUpperCase().trim();
+    if (!names.length) return res.status(400).json({ error: 'names array required' });
+    if (region !== 'ALL' && !rl6mans.REGION_LIST.includes(region)) return res.status(400).json({ error: `Unknown region: ${region}` });
+    try {
+      const results = await rl6mans.lookupPlayers(names, region, { profilesOnly: req.body?.profilesOnly !== false });
+      res.json({ ok: true, region, results });
+      // Persist updated profile cache so next session re-verification is instant
+      if (dataDir) fs.writeFile(path.join(dataDir, 'rl6mans-cache.json'), JSON.stringify(rl6mans.dumpProfileCache()), () => {});
+    } catch (err) {
+      console.error('[rl6mans/lookup]', err.message);
+      res.status(500).json({ error: err.message || 'Lookup failed' });
+    }
+  });
+
+  // ── Player database ───────────────────────────────────────────────────────
+  // Persistent cross-event registry keyed by gamertag. Never cleared on state reset.
+
+  app.get('/api/playerdb', (req, res) => {
+    const { q, rank, region, limit } = req.query;
+    res.json({ ok: true, players: playerDb.search({ q, rank, region, limit: limit ? Number(limit) : 200 }), total: playerDb.count() });
+  });
+
+  app.get('/api/playerdb/:gamertag', (req, res) => {
+    const rec = playerDb.get(req.params.gamertag);
+    if (!rec) return res.status(404).json({ error: 'Not found' });
+    res.json({ ok: true, player: rec });
+  });
+
+  app.post('/api/playerdb', (req, res) => {
+    const records = Array.isArray(req.body) ? req.body : [req.body];
+    const updated = [];
+    for (const r of records) {
+      if (!r || !r.gamertag) continue;
+      const rec = playerDb.upsert(r.gamertag, r);
+      if (rec) {
+        updated.push(rec);
+        upsertPlayerProfile(r.gamertag, { startggSlug: r.startggSlug, startggPlayerId: r.startggId, sixmans: r.sixmans });
+      }
+    }
+    if (updated.length) { saveAppState(); broadcastFullState(); }
+    res.json({ ok: true, updated: updated.length });
+  });
+
+  app.delete('/api/playerdb/:gamertag', (req, res) => {
+    const removed = playerDb.remove(req.params.gamertag);
+    res.json({ ok: true, removed });
+  });
+  // Clear the ENTIRE player database (also wipes the in-state profile map).
+  app.delete('/api/playerdb', (req, res) => {
+    const n = playerDb.clearAll();
+    state.playerProfiles = {}; state.playerProfilesVer = (state.playerProfilesVer || 0) + 1;
+    try { saveAppState(); } catch (e) {}
+    res.json({ ok: true, removed: n });
+  });
+
+  app.post('/api/rl6mans/invalidate', (req, res) => {
+    const region = req.body?.region ? req.body.region.toUpperCase() : null;
+    rl6mans.invalidateCache(region);
+    res.json({ ok: true });
+  });
+
+  // All known rl6mans usernames for a region — feeds the manual-match autocomplete
+  // so a producer can quickly find the right account when a name didn't auto-match.
+  app.get('/api/rl6mans/names', async (req, res) => {
+    const region = (req.query?.region || 'NA').toString().toUpperCase().trim();
+    if (region !== 'ALL' && !rl6mans.REGION_LIST.includes(region)) return res.status(400).json({ error: `Unknown region: ${region}` });
+    try {
+      const idx = await rl6mans.buildIndex(region);
+      res.json({ ok: true, region, names: idx.allPlayers.map((p) => p.name) });
+    } catch (err) {
+      res.status(500).json({ error: err.message || 'Failed to load names' });
+    }
+  });
+
+  // Single direct profile lookup by exact rl6mans name (for manual correction of
+  // a name that didn't auto-match) → exact ELO + tier + region + platform.
+  app.post('/api/rl6mans/profile', async (req, res) => {
+    const name = (req.body?.name || '').toString().trim();
+    if (!name) return res.status(400).json({ error: 'name required' });
+    try {
+      const prof = await rl6mans.fetchProfile(name);
+      res.json({ ok: true, name, profile: prof });
+    } catch (err) {
+      console.error('[rl6mans/profile]', err.message);
+      res.status(500).json({ error: err.message || 'Profile lookup failed' });
+    }
+  });
+
   // Push a new seed order back to start.gg (TO/admin token required).
   app.post('/api/startgg/push-seeding', async (req, res) => {
     const token = (req.body && req.body.apiToken) || startggApiToken;
@@ -10199,6 +12641,344 @@ function startHttpServer(baseDir) {
       res.json({ ok: true, teamsLoaded: teams.teams || 0, playersLoaded: teams.players || 0 });
     } catch (err) {
       res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ── Challonge API routes ──────────────────────────────────────────────────
+
+  app.post('/api/challonge/test-token', async (req, res) => {
+    const key = (req.body?.apiKey || challongeApiKey || '').trim();
+    if (!key) return res.status(400).json({ error: 'API key required' });
+    try {
+      const client = createChallongeClient(key);
+      await client.get('/tournaments.json', { state: 'all', per_page: 1 });
+      res.json({ ok: true, message: 'API key is valid.' });
+    } catch (e) {
+      res.status(401).json({ ok: false, error: e.message });
+    }
+  });
+
+  app.post('/api/challonge/my-tournaments', async (req, res) => {
+    const key = (req.body?.apiKey || challongeApiKey || '').trim();
+    const extraSubdomains = Array.isArray(req.body?.subdomains)
+      ? req.body.subdomains.filter(s => s && typeof s === 'string').map(s => s.trim().toLowerCase())
+      : [];
+    if (!key) return res.status(400).json({ error: 'API key required' });
+    try {
+      const client = createChallongeClient(key);
+      const subdomainErrors = [];
+      async function fetchGroup(subdomain) {
+        const p = subdomain ? { subdomain } : {};
+        try {
+          const [pending, inProgress, ended] = await Promise.all([
+            client.get('/tournaments.json', { state: 'pending',  ...p }),
+            client.get('/tournaments.json', { state: 'underway', ...p }),
+            client.get('/tournaments.json', { state: 'ended',    ...p })
+          ]);
+          return [...(inProgress || []), ...(pending || []), ...((ended || []).slice(0, 15))];
+        } catch (e) {
+          if (subdomain) subdomainErrors.push({ subdomain, error: e.message });
+          return [];
+        }
+      }
+      const groups = await Promise.all([fetchGroup(''), ...extraSubdomains.map(s => fetchGroup(s))]);
+      const seen = new Set();
+      const all = groups.flat().filter(t => {
+        const id = t?.tournament?.id;
+        if (!id || seen.has(id)) return false;
+        seen.add(id); return true;
+      });
+      const tournaments = all.map((t) => {
+        const d = t.tournament;
+        const sub = (d.subdomain || '').toLowerCase();
+        const rawUrl = d.url || '';
+        const apiSlug = sub ? `${sub}-${rawUrl}` : rawUrl;
+        return { id: d.id, slug: apiSlug, name: d.name, url: d.full_challonge_url, type: d.tournament_type, state: d.state, participantsCount: d.participants_count, gameName: d.game_name || '', startedAt: d.started_at, logo: d.live_image_url || '', subdomain: sub };
+      });
+      res.json({ tournaments, subdomainErrors: subdomainErrors.length ? subdomainErrors : undefined });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post('/api/challonge/tournament-detail', async (req, res) => {
+    const key = (req.body?.apiKey || challongeApiKey || '').trim();
+    const slug = (req.body?.slug || '').trim();
+    if (!key) return res.status(400).json({ error: 'API key required' });
+    if (!slug) return res.status(400).json({ error: 'Tournament slug required' });
+    try {
+      const client = createChallongeClient(key);
+      const [tData, pData, mData] = await Promise.all([
+        client.get(`/tournaments/${slug}.json`),
+        client.get(`/tournaments/${slug}/participants.json`),
+        client.get(`/tournaments/${slug}/matches.json`)
+      ]);
+      const t = tData.tournament;
+      const partMap = challongePartMap(pData);
+      const participants = Object.values(partMap).sort((a, b) => (a.seed || 99) - (b.seed || 99));
+      const openMatches = mData.filter((m) => ['open', 'pending'].includes(m.match.state)).length;
+      res.json({ tournament: { id: t.id, slug: t.url, name: t.name, url: t.full_challonge_url, type: t.tournament_type, state: t.state, participantsCount: t.participants_count, gameName: t.game_name || '' }, participants, openMatches, totalMatches: mData.length });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // ── Challonge cross-platform push routes ─────────────────────────────────
+
+  // Create a new Challonge tournament
+  app.post('/api/challonge/create-tournament', async (req, res) => {
+    const key = (req.body?.apiKey || challongeApiKey || '').trim();
+    if (!key) return res.status(400).json({ ok: false, error: 'Challonge API key required' });
+    const { name, slug, tournamentType = 'single elimination', gameName = '', private: isPrivate = false } = req.body || {};
+    if (!name || !name.trim()) return res.status(400).json({ ok: false, error: 'Tournament name required' });
+    if (!slug || !slug.trim()) return res.status(400).json({ ok: false, error: 'Tournament URL/slug required' });
+    try {
+      const client = createChallongeClient(key);
+      const data = await client.post('/tournaments.json', {
+        tournament: {
+          name: name.trim(),
+          url: slug.trim().toLowerCase().replace(/[^a-z0-9_]/g, '_').replace(/__+/g, '_').slice(0, 60),
+          tournament_type: tournamentType,
+          game_name: gameName || '',
+          open_signup: false,
+          private: !!isPrivate
+        }
+      });
+      const t = data.tournament;
+      res.json({ ok: true, slug: t.url, name: t.name, url: t.full_challonge_url, id: t.id });
+    } catch (e) {
+      res.status(400).json({ ok: false, error: e.message });
+    }
+  });
+
+  // Bulk-add participants to a Challonge tournament (with optional seeding + username mapping)
+  app.post('/api/challonge/sync-participants', async (req, res) => {
+    const key = (req.body?.apiKey || challongeApiKey || '').trim();
+    if (!key) return res.status(400).json({ ok: false, error: 'Challonge API key required' });
+    const { tournamentSlug, participants, clearExisting = false, eventSlug } = req.body || {};
+    if (!tournamentSlug) return res.status(400).json({ ok: false, error: 'Tournament slug required' });
+    if (!Array.isArray(participants) || participants.length === 0) return res.status(400).json({ ok: false, error: 'No participants provided' });
+    try {
+      const client = createChallongeClient(key);
+      const slug = tournamentSlug.trim();
+
+      // Prefer start.gg's REAL bracket seed over whatever the caller supplied — locally-cached
+      // roster/seeding-studio order can drift from the seed that actually produced the real
+      // bracket's bye placement, which would seed a mirrored Challonge bracket with a DIFFERENT
+      // shape (wrong pairings throughout, not just cosmetically wrong seed numbers).
+      let trueSeeds = null;
+      if (eventSlug) { try { trueSeeds = await fetchEntrantTrueSeeds(eventSlug); } catch (e) { console.warn('[Challonge sync] true-seed fetch failed (falling back to supplied seeds):', e.message); } }
+
+      // Optionally clear existing participants (only works if bracket not started)
+      if (clearExisting) {
+        try {
+          const existing = await client.get(`/tournaments/${slug}/participants.json`);
+          if (Array.isArray(existing) && existing.length > 0) {
+            await client.del(`/tournaments/${slug}/participants/clear.json`);
+          }
+        } catch (clearErr) {
+          // Non-fatal: if clear fails (e.g. bracket started), we proceed and add new ones
+          console.warn('[Challonge sync] Clear participants failed (ignored):', clearErr.message);
+        }
+      }
+
+      // Build participant payload — process in chunks of 100
+      const CHUNK = 100;
+      let added = 0;
+      const errors = [];
+      for (let i = 0; i < participants.length; i += CHUNK) {
+        const chunk = participants.slice(i, i + CHUNK).map((p, idx) => {
+          const entry = { name: (p.name || '').slice(0, 64) };
+          const trueSeed = trueSeeds && trueSeeds[(p.name || '').toLowerCase()];
+          const seed = trueSeed != null ? trueSeed : p.seed;
+          if (seed) entry.seed = seed;
+          if (p.challongeUsername) entry.challonge_username = p.challongeUsername;
+          if (p.misc) entry.misc = String(p.misc).slice(0, 255);
+          return entry;
+        });
+        try {
+          await client.post(`/tournaments/${slug}/participants/bulk_add.json`, { participants: chunk });
+          added += chunk.length;
+        } catch (chunkErr) {
+          errors.push(chunkErr.message);
+        }
+      }
+
+      const msg = errors.length
+        ? `Added ${added} of ${participants.length} participants. Errors: ${errors.join('; ')}`
+        : `${added} participant${added !== 1 ? 's' : ''} added to "${slug}".`;
+      res.json({ ok: errors.length === 0, added, total: participants.length, message: msg, errors });
+    } catch (e) {
+      res.status(400).json({ ok: false, error: e.message });
+    }
+  });
+
+  // Start (generate bracket for) a Challonge tournament
+  app.post('/api/challonge/start-bracket', async (req, res) => {
+    const key = (req.body?.apiKey || challongeApiKey || '').trim();
+    if (!key) return res.status(400).json({ ok: false, error: 'Challonge API key required' });
+    const { tournamentSlug } = req.body || {};
+    if (!tournamentSlug) return res.status(400).json({ ok: false, error: 'Tournament slug required' });
+    try {
+      const client = createChallongeClient(key);
+      await client.post(`/tournaments/${tournamentSlug.trim()}/start.json`, {});
+      res.json({ ok: true, message: 'Bracket generated successfully.' });
+    } catch (e) {
+      res.status(400).json({ ok: false, error: e.message });
+    }
+  });
+
+  // Repair an already-started Challonge bracket whose shape doesn't match start.gg's real one —
+  // this happens when it was originally seeded with stale/wrong numbers (see fetchEntrantTrueSeeds).
+  // Resets the tournament (clears recorded results, unlocks participant edits — does NOT remove
+  // participants), re-applies each participant's TRUE start.gg seed, then regenerates the bracket.
+  // After this, /api/challonge/push-results can actually find matching pairings to fill in.
+  app.post('/api/challonge/rebuild-bracket', async (req, res) => {
+    if (!challongeApiKey) return res.status(400).json({ ok: false, error: 'Challonge API key required' });
+    const { tournamentSlug, eventSlug } = req.body || {};
+    if (!tournamentSlug) return res.status(400).json({ ok: false, error: 'Challonge tournament slug required' });
+    if (!eventSlug) return res.status(400).json({ ok: false, error: 'start.gg event slug required' });
+    const slug = tournamentSlug.trim();
+    try {
+      const trueSeeds = await fetchEntrantTrueSeeds(eventSlug);
+      const client = createChallongeClient(challongeApiKey);
+
+      const tData = await client.get(`/tournaments/${slug}.json`);
+      if (tData.tournament.state !== 'pending') {
+        await client.post(`/tournaments/${slug}/reset.json`, {});
+      }
+
+      const participants = await client.get(`/tournaments/${slug}/participants.json`);
+      let reseeded = 0, missed = 0;
+      for (const p of (participants || [])) {
+        const d = p.participant || p;
+        const trueSeed = trueSeeds[(d.name || d.display_name || '').toLowerCase()];
+        if (trueSeed == null) { missed++; continue; }
+        if (d.seed === trueSeed) continue;   // already correct, skip the write
+        try {
+          await client.put(`/tournaments/${slug}/participants/${d.id}.json`, { participant: { seed: trueSeed } });
+          reseeded++;
+        } catch (e) {
+          console.error('[challonge rebuild-bracket] reseed failed for', d.name, e.message);
+        }
+      }
+
+      await client.post(`/tournaments/${slug}/start.json`, {});
+      res.json({ ok: true, reseeded, missed, total: (participants || []).length, message: `Reseeded ${reseeded} participant(s) with their true start.gg seed and regenerated the bracket.` });
+    } catch (e) {
+      res.status(400).json({ ok: false, error: e.message });
+    }
+  });
+
+  // Backfill every COMPLETED start.gg result onto a Challonge bracket, in one call. Works for a
+  // fully-played PAST event (fills in the whole bracket at once) and for a partially-played
+  // current one (fills in what's done so far — live results then keep flowing via the existing
+  // link_event_challonge auto-sync). Independent of state.bracket, so it doesn't matter whether
+  // this event is the one currently loaded live — it fetches the event's own sets fresh.
+  app.post('/api/challonge/push-results', async (req, res) => {
+    if (!challongeApiKey) return res.status(400).json({ ok: false, error: 'Challonge API key required' });
+    const { tournamentSlug, eventSlug } = req.body || {};
+    if (!tournamentSlug) return res.status(400).json({ ok: false, error: 'Challonge tournament slug required' });
+    if (!eventSlug) return res.status(400).json({ ok: false, error: 'start.gg event slug required' });
+    if (!startggApiToken) return res.status(400).json({ ok: false, error: 'start.gg API token required (set it in Settings)' });
+    const slug = tournamentSlug.trim();
+    try {
+      const sgClient = createStartGgClient(startggApiToken);
+      const { sets } = await fetchAllSets(sgClient, eventSlug);
+
+      // Every decided 1v1 set with two named entrants — this is the full result history.
+      const completed = [];
+      (sets || []).forEach((s) => {
+        if (!s || !s.winnerId) return;
+        const slots = s.slots || [];
+        if (slots.length !== 2) return;
+        const [s0, s1] = slots;
+        const nameA = s0.entrant && s0.entrant.name, nameB = s1.entrant && s1.entrant.name;
+        if (!nameA || !nameB) return;
+        const scoreOf = (slot) => { const v = slot.standing && slot.standing.stats && slot.standing.stats.score && slot.standing.stats.score.value; return (v == null) ? null : Number(v); };
+        let scoreA = scoreOf(s0), scoreB = scoreOf(s1);
+        const winnerIsA = s.winnerId === s0.entrant.id;
+        if (scoreA == null || scoreB == null) { scoreA = winnerIsA ? 1 : 0; scoreB = winnerIsA ? 0 : 1; }   // DQ/no-score sets
+        completed.push({ nameA, nameB, scoreA, scoreB, winnerIsA });
+      });
+      if (!completed.length) return res.json({ ok: true, pushed: 0, total: 0, message: 'No completed matches yet on start.gg for this event.' });
+
+      const pm = await buildChallongeParticipantMap(slug);
+      const cClient = createChallongeClient(challongeApiKey);
+
+      // Challonge only opens round 2 once round 1's results are recorded, so cascade: push
+      // whatever is open, re-check, repeat until a full pass makes no further progress.
+      const pushedKeys = new Set();
+      let pushed = 0, guard = 0, progressed = true;
+      while (progressed && guard < 40) {
+        guard++;
+        progressed = false;
+        const mData = await cClient.get(`/tournaments/${slug}/matches.json`);
+        const openMatches = (mData || []).filter((m) => (m.match || m).state === 'open');
+        if (!openMatches.length) break;
+        for (const cm of completed) {
+          const key2 = [cm.nameA, cm.nameB].map((n) => n.toLowerCase()).sort().join('|||');
+          if (pushedKeys.has(key2)) continue;
+          const pA = pm[cm.nameA.toLowerCase()], pB = pm[cm.nameB.toLowerCase()];
+          if (!pA || !pB) continue;
+          const match = openMatches.find((m) => {
+            const d = m.match || m;
+            return (d.player1_id === pA.id && d.player2_id === pB.id) || (d.player1_id === pB.id && d.player2_id === pA.id);
+          });
+          if (!match) continue;
+          const d = match.match || match;
+          const isAp1 = d.player1_id === pA.id;
+          const winnerId = cm.winnerIsA ? pA.id : pB.id;
+          const scoresCSV = isAp1 ? `${cm.scoreA}-${cm.scoreB}` : `${cm.scoreB}-${cm.scoreA}`;
+          try {
+            await cClient.put(`/tournaments/${slug}/matches/${d.id}.json`, { match: { winner_id: winnerId, scores_csv: scoresCSV } });
+            pushedKeys.add(key2); pushed++; progressed = true;
+          } catch (e) {
+            console.error('[challonge push-results] failed:', cm.nameA, 'vs', cm.nameB, e.message);
+          }
+        }
+      }
+      res.json({ ok: true, pushed, total: completed.length, message: `Pushed ${pushed} of ${completed.length} completed result(s) to Challonge.` });
+    } catch (e) {
+      res.status(400).json({ ok: false, error: e.message });
+    }
+  });
+
+  // ── NXGEN API routes ──────────────────────────────────────────────────────
+
+  app.post('/api/nxgen/events', async (req, res) => {
+    const key = (req.body?.apiKey || nxgenApiKey || '').trim();
+    if (!key) return res.status(400).json({ ok: false, error: 'API key required' });
+    try {
+      const { limit = 30, status, includePast = false } = req.body || {};
+      const data = await getNxgenEvents(key, { limit, status, includePast });
+      res.json({ ok: true, events: data.events || [] });
+    } catch (e) {
+      res.status(400).json({ ok: false, error: e.message });
+    }
+  });
+
+  app.post('/api/nxgen/event-live', async (req, res) => {
+    const key = (req.body?.apiKey || nxgenApiKey || '').trim();
+    if (!key) return res.status(400).json({ ok: false, error: 'API key required' });
+    const slug = (req.body?.slug || '').trim();
+    if (!slug) return res.status(400).json({ ok: false, error: 'slug required' });
+    try {
+      const data = await getNxgenEventLive(key, slug);
+      res.json({ ok: true, ...data });
+    } catch (e) {
+      res.status(400).json({ ok: false, error: e.message });
+    }
+  });
+
+  app.post('/api/nxgen/leaderboard', async (req, res) => {
+    const key = (req.body?.apiKey || nxgenApiKey || '').trim();
+    if (!key) return res.status(400).json({ ok: false, error: 'API key required' });
+    try {
+      const data = await getNxgenLeaderboard(key);
+      res.json({ ok: true, teams: data.teams || [], players: data.players || [] });
+    } catch (e) {
+      res.status(400).json({ ok: false, error: e.message });
     }
   });
 
@@ -10298,6 +13078,8 @@ function startHttpServer(baseDir) {
     state.twitch.channelId = user.id;
     state.twitch.profilePicture = user.profile_image_url || '';
     state.twitch.connected = true;
+    _twitchTokenInvalid = false;   // fresh token → re-enable EventSub/IRC/poll retries
+    _twitchStatsCache = null;
     twitchClient = new TwitchClient(TWITCH_CLIENT_ID, null, accessToken);
     predictionManager = new PredictionManager(twitchClient, user.id);
     wheelManager = new WheelManager(state);
@@ -10696,6 +13478,7 @@ function startHttpServer(baseDir) {
 
       // Update state with new prediction
       state.twitch.predictions.current = normalizePrediction(result, durationSeconds, outcomes);
+      try { analytics.event('prediction_create'); } catch (e) {}
 
       broadcast(bridgeClients, { type: 'full_state', data: buildLiveState() });
       saveTwitchData();
@@ -10736,6 +13519,7 @@ function startHttpServer(baseDir) {
         ? normalizePrediction(result, 0)
         : { ...prior, state: 'RESOLVED', winningOutcomeId: outcomeId };
       state.twitch.predictions.current = resolved;
+      try { analytics.event('prediction_resolve'); } catch (e) {}
 
       broadcast(bridgeClients, { type: 'full_state', data: buildLiveState() });
       saveTwitchData();
@@ -10802,6 +13586,7 @@ function startHttpServer(baseDir) {
 
     try {
       const result = wheelManager.spin(4000);
+      try { analytics.event('wheel_spin'); } catch (e) {}
 
       // Broadcast spin state
       broadcast(bridgeClients, { type: 'full_state', data: state });
@@ -10888,6 +13673,8 @@ function startHttpServer(baseDir) {
       } else {
         return res.status(400).json({ error: 'Unknown game type' });
       }
+
+      try { analytics.event('minigame'); } catch (e) {}
 
       // Auto-finalize game after duration
       const gameId = game.id;
@@ -11240,6 +14027,89 @@ function startHttpServer(baseDir) {
     }
   });
 
+  // POST /api/twitch/ad/run — run a Twitch ad break (commercial) of the given length (seconds)
+  app.post('/api/twitch/ad/run', async (req, res) => {
+    if (!twitchClient || !state.twitch.connected) return res.status(400).json({ error: 'Twitch not connected' });
+    if (state.twitch.adsEnabled === false) return res.status(409).json({ error: 'Ads are turned off' });
+    const length = [30, 60, 90, 120, 150, 180].includes(Number(req.body && req.body.length)) ? Number(req.body.length) : 30;
+    try {
+      console.log('[Twitch] Running', length + 's commercial');
+      const result = await twitchClient.runCommercial(state.twitch.channelId, length);
+      res.json({ success: true, ad: result });
+    } catch (e) {
+      console.error('[Twitch] runCommercial error:', e.message);
+      res.status(500).json({ error: e.response?.data?.message || e.message });
+    }
+  });
+
+  // POST /api/twitch/ad/enabled — producer toggle: enable/disable running Twitch ads
+  app.post('/api/twitch/ad/enabled', (req, res) => {
+    const enabled = !(req.body && req.body.enabled === false);
+    state.twitch.adsEnabled = enabled;
+    saveTwitchData();
+    broadcastFullState();
+    console.log('[Twitch] Ads', enabled ? 'enabled' : 'disabled', 'by producer');
+    res.json({ success: true, adsEnabled: enabled });
+  });
+
+  // ── Sponsor proof-of-play (impression reports) ─────────────────────────────
+  app.get('/api/adproof', (req, res) => res.json(adProofReport()));
+
+  app.post('/api/adproof/start', (req, res) => {
+    adProofStart(req.body && req.body.label);
+    res.json({ success: true, report: adProofReport() });
+  });
+
+  app.post('/api/adproof/stop', (req, res) => {
+    const session = adProofStop();
+    res.json({ success: true, session, report: adProofReport() });
+  });
+
+  app.post('/api/adproof/reset', (req, res) => {
+    adProof.active = false;
+    if (_adProofTimer) { clearInterval(_adProofTimer); _adProofTimer = null; }
+    adProof.ticks = 0; adProof.sponsors = {}; adProof.startedAt = 0; adProof.label = '';
+    broadcast(bridgeClients, { type: 'adproof_update', data: adProofReport() });
+    res.json({ success: true, report: adProofReport() });
+  });
+
+  app.delete('/api/adproof/session/:id', (req, res) => {
+    const before = (state.adProofSessions || []).length;
+    state.adProofSessions = (state.adProofSessions || []).filter((s) => s.id !== req.params.id);
+    if (state.adProofSessions.length !== before) saveAppState();
+    broadcast(bridgeClients, { type: 'adproof_update', data: adProofReport() });
+    res.json({ success: true, report: adProofReport() });
+  });
+  // Clear ALL saved sponsor sessions (fresh reporting).
+  app.delete('/api/adproof/sessions', (req, res) => {
+    state.adProofSessions = [];
+    try { saveAppState(); } catch (e) {}
+    broadcast(bridgeClients, { type: 'adproof_update', data: adProofReport() });
+    res.json({ success: true, report: adProofReport() });
+  });
+
+  // Download one session (or the live tracker) as CSV or JSON.
+  app.get('/api/adproof/export', (req, res) => {
+    const which = (req.query.session || 'current').toString();
+    let sess;
+    if (which === 'current' || which === '') {
+      sess = { label: adProof.label || (state.eventName || 'Broadcast'), startedAt: adProof.startedAt, endedAt: Date.now(), durationSec: adProof.ticks,
+        sponsors: Object.values(adProof.sponsors).map((r) => ({ name: r.name, seconds: r.seconds, impressions: r.impressions, byPlacement: { ...r.byPlacement } })).sort((a, b) => b.seconds - a.seconds) };
+    } else {
+      sess = (state.adProofSessions || []).find((s) => s.id === which);
+      if (!sess) return res.status(404).json({ error: 'Session not found' });
+    }
+    const safe = (sess.label || 'proof-of-play').toString().replace(/[^a-z0-9_-]+/gi, '-').slice(0, 50) || 'proof-of-play';
+    if ((req.query.format || 'csv').toString() === 'json') {
+      res.setHeader('Content-Disposition', `attachment; filename="${safe}.json"`);
+      res.setHeader('Content-Type', 'application/json');
+      return res.send(JSON.stringify(sess, null, 2));
+    }
+    res.setHeader('Content-Disposition', `attachment; filename="${safe}.csv"`);
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.send(adProofCsv(sess));
+  });
+
   // GET /api/twitch/stream — get live stream info (title, game, viewers)
   app.get('/api/twitch/stream', async (req, res) => {
     if (!twitchClient || !state.twitch.connected) return res.status(400).json({ error: 'Twitch not connected' });
@@ -11262,6 +14132,7 @@ function startHttpServer(baseDir) {
     try {
       console.log('[Twitch] Creating poll:', title);
       const poll = await twitchClient.createPoll(state.twitch.channelId, title, choices, duration || 60);
+      try { analytics.event('poll_create'); } catch (e) {}
       res.json({ success: true, poll });
     } catch (e) {
       console.error('[Twitch] createPoll error:', e.message);
@@ -11315,6 +14186,38 @@ module.exports.start = function(baseDir) {
 
   fs.mkdirSync(dataDir, { recursive: true });
   stats.init(dataDir);
+  analytics.init({ dataDir, getState: () => state, broadcast, bridgeClients });
+  playerDb.init(dataDir);
+
+  // Restore rl6mans profile cache from previous session so re-verification is instant
+  try {
+    const raw = JSON.parse(fs.readFileSync(path.join(dataDir, 'rl6mans-cache.json'), 'utf8'));
+    rl6mans.loadPersistedCache(raw);
+  } catch (_) {}
+
+  // Seed state.playerProfiles from the persistent player DB — playerDb survives event resets
+  // while state.json doesn't. Merge: state.json wins on conflicts (it's the current session).
+  {
+    const dbMap = playerDb.toProfilesMap();
+    if (!state.playerProfiles) state.playerProfiles = {};
+    for (const [key, rec] of Object.entries(dbMap)) {
+      const existing = state.playerProfiles[key];
+      if (!existing || (rec.updatedAt && (!existing.updatedAt || rec.updatedAt > existing.updatedAt))) {
+        state.playerProfiles[key] = { ...rec, ...existing };
+      }
+    }
+  }
+
+  // Social publisher — init with userData so tokens persist across restarts
+  socialPublisher = new SocialPublisher(userData, {
+    GOOGLE_CLIENT_ID:     process.env.GOOGLE_CLIENT_ID,
+    GOOGLE_CLIENT_SECRET: process.env.GOOGLE_CLIENT_SECRET,
+    TWITTER_CLIENT_ID:    process.env.TWITTER_CLIENT_ID,
+    TWITTER_CLIENT_SECRET: process.env.TWITTER_CLIENT_SECRET
+  });
+  socialPublisher.startScheduler(post => {
+    broadcast(bridgeClients, { type: 'social_published', data: post });
+  });
   loadTeams();
   loadState();
   resetRlGameTrack();
@@ -11324,6 +14227,8 @@ module.exports.start = function(baseDir) {
   loadTwitchData();
   loadDiscordUser();
   initFlowEngine();
+  // Resume LoL champ-select automation if it was left on.
+  if (state.draft && state.draft.auto && state.draft.auto.enabled) { try { startLolDraftAuto(); } catch (e) {} }
   // Nameless cloud client — dormant unless BROADCAST_REMOTE_URL is configured.
   try { cloud.init({ baseUrl: BROADCAST_REMOTE_URL, dataDir, appVersion }); } catch (e) { console.warn('[Cloud] init skipped:', e.message); }
 
@@ -11353,6 +14258,7 @@ module.exports.start = function(baseDir) {
   startBridgeServer();
   connectToRL();
   if (state.activeGame === 'valorant') startValorantPolling();
+  if (state.activeGame === 'league') startLolPolling();
   startResourceWatchdog();
 
   // Connect to OBS if it was enabled previously
@@ -11414,6 +14320,7 @@ module.exports.start = function(baseDir) {
       });
       if (result.ok) {
         state.director.lastAutoSwitch = { at: Date.now(), target: result.target, key: result.key };
+        try { analytics.event('auto_switch'); } catch (e) {}
         broadcastDirectorUpdate();
       }
     },
@@ -11668,6 +14575,11 @@ class EventSubService {
     } catch (err) {
       const status = err.response?.status;
       const twitchMsg = err.response?.data?.message || '';
+      if (status === 401) {
+        // Dead token — stop trying the remaining subscriptions (subscribeToAll breaks on this).
+        this._authFailed = true;
+        return null;
+      }
       if (status === 409) {
         // Duplicate subscription — already active from a previous session that hasn't
         // been fully cleaned up yet. Not an error; events will still arrive.
@@ -11743,12 +14655,15 @@ class EventSubService {
       { type: 'channel.ad_break.begin', version: '1', condition: { broadcaster_user_id: channelId } }
     ];
 
+    this._authFailed = false;
     const results = [];
     for (const s of specs) {
+      if (this._authFailed) break;   // token rejected — stop hammering Twitch with the rest
       const sub = await this.subscribe(s.type, s.version, s.condition);
       results.push({ eventType: s.type, success: !!sub });
       await new Promise(r => setTimeout(r, 150)); // Rate limit spacing
     }
+    if (this._authFailed) { markTwitchTokenInvalid('EventSub token rejected (401)'); return results; }
     const ok = results.filter(r => r.success).length;
     console.log('[EventSub] Subscribed to ' + ok + '/' + results.length + ' event types');
     return results;
@@ -11896,9 +14811,10 @@ class EventSubService {
 
       case 'channel.ad_break.begin': {
         const duration = data.duration_seconds || 0;
-        const startedAt = data.timestamp || new Date().toISOString();
+        const startedAt = data.started_at || new Date().toISOString();
         const endsAt = new Date(new Date(startedAt).getTime() + duration * 1000).toISOString();
         state.twitch.adBreak = { active: true, duration, startedAt, endsAt, isAutomatic: !!data.is_automatic };
+        try { analytics.event('ad', { sec: duration }); } catch (e) {}
         broadcast(bridgeClients, { type: 'twitch_ad_break', data: { duration, isAutomatic: data.is_automatic, endsAt } });
         broadcast(bridgeClients, { type: 'full_state', data: buildLiveState() });
         flowBus.emit('twitch_ad_break', { duration, isAutomatic: !!data.is_automatic });
@@ -11928,6 +14844,21 @@ class EventSubService {
       rateLimitReset: this.rateLimitResetTime
     };
   }
+}
+
+// Centralised handling of an expired/invalid Twitch token. The token is implicit-grant with no
+// refresh, so once it 401s every transport (EventSub WS, IRC, stream poll) would retry forever and
+// flood the console + hammer Twitch. Halt them all once and surface a reconnect prompt instead.
+function markTwitchTokenInvalid(reason) {
+  if (_twitchTokenInvalid) return;
+  _twitchTokenInvalid = true;
+  console.warn('[Twitch] OAuth token invalid/expired — halting EventSub/IRC/stream-poll. Reconnect Twitch in Settings to resume. (' + (reason || 'auth failure') + ')');
+  state.twitch.connected = false;
+  try { eventSubService.stop(); } catch (e) {}
+  try { chatManager.disconnect(); } catch (e) {}
+  try { streamStateManager.stopPolling(); } catch (e) {}
+  try { broadcast(bridgeClients, { type: 'twitch_auth_invalid', data: { needsReconnect: true } }); } catch (e) {}
+  try { broadcast(bridgeClients, { type: 'full_state', data: buildLiveState() }); } catch (e) {}
 }
 
 const eventSubService = new EventSubService();
@@ -12019,22 +14950,23 @@ class TwitchStreamStateManager {
           });
 
           if (adRes.data.data && adRes.data.data.length > 0) {
-            const lastAd = adRes.data.data[0];
-            this.adSchedule.lastAdAt = new Date(lastAd.timestamp);
-            this.adSchedule.adDuration = lastAd.duration;
+            const ad = adRes.data.data[0];
+            this.adSchedule.lastAdAt  = ad.last_ad_at  ? new Date(ad.last_ad_at)  : null;
+            this.adSchedule.adDuration = ad.duration || 30;
             // Pre-roll free time: how long new viewers won't see a pre-roll ad (earned by ad breaks).
-            const pf = Number(lastAd.preroll_free_time) || 0;
-            this.adSchedule.prerollFreeTime = pf;
+            const pf = Number(ad.preroll_free_time) || 0;
+            this.adSchedule.prerollFreeTime  = pf;
             this.adSchedule.prerollFreeUntil = pf > 0 ? Date.now() + pf * 1000 : 0;
-
-            // Calculate next ad time (roughly 8 minutes after last ad for mid-roll)
-            const nextAdTime = new Date(this.adSchedule.lastAdAt.getTime() + 8 * 60 * 1000);
-            this.adSchedule.nextAdAt = nextAdTime;
+            // Use Twitch's authoritative next-ad timestamp when available.
+            this.adSchedule.nextAdAt = ad.next_ad_at ? new Date(ad.next_ad_at) : null;
           }
         } catch (e) {
           // Ad schedule endpoint may not be available for all tokens
           console.log('[Ads] Schedule unavailable:', e.response?.status);
         }
+
+        // Feed the broadcast-analytics recorder: viewer sample + auto start/stop on live transitions.
+        try { analytics.recordStreamPoll(this.streamState.isLive, currentViewers()); } catch (e) {}
 
         // Broadcast state update
         broadcast(bridgeClients, {
@@ -12046,6 +14978,7 @@ class TwitchStreamStateManager {
         });
 
       } catch (err) {
+        if (err.response && err.response.status === 401) { markTwitchTokenInvalid('stream poll 401'); return; }
         console.error('[Stream Poll]', err.message);
       }
     };
@@ -12102,6 +15035,7 @@ class TwitchChatManager {
 
   async connect(channelName, oauthToken) {
     if (this.isConnected) return;
+    this._stopped = false;            // a fresh connect re-enables reconnects
     this.channelName  = channelName.toLowerCase();
     this._oauthToken  = oauthToken;   // keep for reconnect
     const tls = require('tls');
@@ -12147,7 +15081,7 @@ class TwitchChatManager {
   }
 
   _scheduleReconnect() {
-    if (this._reconnectTimer) return;
+    if (this._reconnectTimer || this._stopped || _twitchTokenInvalid) return;   // don't loop on a dead token
     const delay = 8000;
     console.log(`[IRC] Reconnecting in ${delay / 1000}s…`);
     this._reconnectTimer = setTimeout(() => {
@@ -12197,6 +15131,7 @@ class TwitchChatManager {
         this.isConnected = false;
         state.twitch.chatConnected = false;
         broadcast(bridgeClients, { type: 'twitch_chat_disconnected' });
+        markTwitchTokenInvalid('IRC login failed');   // bad token → halt, don't reconnect-loop
         this.ircSocket?.destroy();
         continue;
       }
@@ -12384,8 +15319,10 @@ class TwitchChatManager {
   }
 
   disconnect() {
+    this._stopped = true;
+    if (this._reconnectTimer) { clearTimeout(this._reconnectTimer); this._reconnectTimer = null; }
     if (this.ircSocket) {
-      this.send(`PART #${this.channelName}`);
+      try { this.send(`PART #${this.channelName}`); } catch (e) {}
       this.ircSocket.destroy();
       this.ircSocket = null;
     }
@@ -12493,6 +15430,190 @@ app.post('/api/twitch/activity-log/clear', (req, res) => {
   broadcast(bridgeClients, { type: 'twitch_activity_log_cleared' });
   res.json({ ok: true });
 });
+
+// ─── Twitch Clips API ──────────────────────────────────────────────────────────
+// GET /api/twitch/clips
+app.get('/api/twitch/clips', async (req, res) => {
+  if (!state.twitch || !state.twitch.channelId || !twitchClient) {
+    return res.status(400).json({ error: 'Twitch not connected', clips: [], cursor: null });
+  }
+  try {
+    const result = await twitchClient.getClips(state.twitch.channelId, {
+      cursor: req.query.cursor,
+      first:  req.query.first || 20
+    });
+    res.json(result);
+  } catch (e) {
+    res.status(500).json({ error: e.message, clips: [], cursor: null });
+  }
+});
+
+// ─── Social Publishing API ─────────────────────────────────────────────────────
+const _socialGuard = (req, res) => {
+  if (!socialPublisher) { res.status(503).json({ error: 'Social publisher not initialized yet' }); return false; }
+  return true;
+};
+
+// GET /api/social/connections — which platforms are connected/configured
+app.get('/api/social/connections', (req, res) => {
+  if (!_socialGuard(req, res)) return;
+  res.json(socialPublisher.getConnections());
+});
+
+// GET /api/social/auth/youtube — start YouTube OAuth
+app.get('/api/social/auth/youtube', (req, res) => {
+  if (!_socialGuard(req, res)) return;
+  try { res.json({ url: socialPublisher.getYouTubeAuthUrl() }); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+// GET /api/social/callback/youtube — YouTube OAuth callback
+app.get('/api/social/callback/youtube', async (req, res) => {
+  const { code, error } = req.query;
+  if (error) return res.send(_oauthDonePage('YouTube', false, error));
+  if (!code) return res.status(400).send('<h2>Missing code</h2>');
+  try {
+    await socialPublisher.handleYouTubeCallback(code);
+    broadcast(bridgeClients, { type: 'social_connected', platform: 'youtube' });
+    res.send(_oauthDonePage('YouTube', true));
+  } catch (e) {
+    res.send(_oauthDonePage('YouTube', false, e.message));
+  }
+});
+
+// GET /api/social/auth/twitter — start Twitter/X OAuth
+app.get('/api/social/auth/twitter', (req, res) => {
+  if (!_socialGuard(req, res)) return;
+  try {
+    const { url, state: twState } = socialPublisher.getTwitterAuthUrl();
+    res.json({ url });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+// GET /api/social/callback/twitter — Twitter OAuth callback
+app.get('/api/social/callback/twitter', async (req, res) => {
+  const { code, state: twState, error } = req.query;
+  if (error) return res.send(_oauthDonePage('Twitter / X', false, error));
+  if (!code) return res.status(400).send('<h2>Missing code</h2>');
+  try {
+    await socialPublisher.handleTwitterCallback(code, twState);
+    broadcast(bridgeClients, { type: 'social_connected', platform: 'twitter' });
+    res.send(_oauthDonePage('Twitter / X', true));
+  } catch (e) {
+    res.send(_oauthDonePage('Twitter / X', false, e.message));
+  }
+});
+
+// POST /api/social/disconnect/:platform
+app.post('/api/social/disconnect/:platform', (req, res) => {
+  if (!_socialGuard(req, res)) return;
+  socialPublisher.disconnect(req.params.platform);
+  res.json({ ok: true });
+});
+
+// POST /api/social/clip/download — download a Twitch clip to the local library
+app.post('/api/social/clip/download', async (req, res) => {
+  if (!_socialGuard(req, res)) return;
+  const { clipUrl, thumbnailUrl, title } = req.body || {};
+  if (!clipUrl) return res.status(400).json({ error: 'clipUrl required' });
+  try {
+    const tmp = await socialPublisher.downloadTwitchClip(
+      thumbnailUrl, clipUrl,
+      state.twitch?.apiToken, TWITCH_CLIENT_ID
+    );
+    let clip = null;
+    if (clipSystem) {
+      clip = await clipSystem.manager.importReplayFile(tmp, { label: title || 'Twitch Clip', type: 'twitch-clip' });
+      try { fs.unlinkSync(tmp); } catch {}
+      state.clips = clipSystem.getState();
+      broadcastClipsUpdate();
+    }
+    res.json({ ok: true, clip });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /api/social/schedule — list all scheduled posts
+app.get('/api/social/schedule', (req, res) => {
+  if (!_socialGuard(req, res)) return;
+  res.json({ schedule: socialPublisher.getSchedule() });
+});
+
+// POST /api/social/schedule — add a scheduled post
+// YouTube: upload immediately with publishAt so YouTube handles the publish time natively.
+// Twitter: pre-upload media now so posting later is just a fast tweet call.
+app.post('/api/social/schedule', async (req, res) => {
+  if (!_socialGuard(req, res)) return;
+  try {
+    const body = req.body;
+    const post = socialPublisher.addPost(body);
+    res.json({ ok: true, post });
+    // Background work after responding — no need to block the client
+    const platforms = post.platforms || [];
+    if (platforms.includes('youtube') && post.scheduledAt) {
+      // Upload to YouTube now with the future publishAt; YouTube handles the reveal
+      try {
+        const results = await socialPublisher.publish({ ...post, platforms: ['youtube'] });
+        const entry = socialPublisher.getSchedule().find(p => p.id === post.id);
+        if (entry) {
+          entry.youtubeUploaded = true;
+          entry.publishResults  = { platforms: results.platforms };
+        }
+        socialPublisher._save(socialPublisher.schedulePath, socialPublisher.schedule);
+        console.log('[Social] YouTube pre-upload done for scheduled post', post.id);
+      } catch (e) {
+        console.error('[Social] YouTube pre-upload failed:', e.message);
+      }
+    }
+    if (platforms.includes('twitter') && post.scheduledAt) {
+      try {
+        const mediaId = await socialPublisher.prepareTwitterMedia(post);
+        if (mediaId) {
+          const entry = socialPublisher.getSchedule().find(p => p.id === post.id);
+          if (entry) entry.twitterMediaId = mediaId;
+          socialPublisher._save(socialPublisher.schedulePath, socialPublisher.schedule);
+          console.log('[Social] Twitter media pre-uploaded for scheduled post', post.id);
+        }
+      } catch (e) {
+        console.error('[Social] Twitter pre-upload failed:', e.message);
+      }
+    }
+  } catch (e) {
+    if (!res.headersSent) res.status(500).json({ error: e.message });
+  }
+});
+
+// DELETE /api/social/schedule/:id — cancel a scheduled post
+app.delete('/api/social/schedule/:id', (req, res) => {
+  if (!_socialGuard(req, res)) return;
+  const ok = socialPublisher.cancelPost(req.params.id);
+  res.json({ ok });
+});
+
+// POST /api/social/publish-now — immediate publish (no schedule)
+app.post('/api/social/publish-now', async (req, res) => {
+  if (!_socialGuard(req, res)) return;
+  try {
+    // Inject Twitch credentials so the downloader can use authenticated GQL requests
+    const post = { ...req.body, _twitchToken: state.twitch?.apiToken, _twitchClientId: TWITCH_CLIENT_ID };
+    const results = await socialPublisher.publish(post);
+    res.json(results);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+function _oauthDonePage(platform, success, err) {
+  const color = success ? '#48bb78' : '#ef4444';
+  const msg   = success ? `${platform} connected successfully!` : `Error: ${err || 'Unknown error'}`;
+  return `<!DOCTYPE html><html><body style="font-family:system-ui;text-align:center;padding:60px;background:#0d0d14;color:#fff">
+    <div style="font-size:48px;margin-bottom:20px;">${success ? '✓' : '✗'}</div>
+    <h2 style="color:${color};margin-bottom:12px;">${msg}</h2>
+    <p style="color:rgba(255,255,255,0.5);">You can close this window and return to NE Broadcast Suite.</p>
+    <script>setTimeout(()=>window.close(),2000)</script>
+  </body></html>`;
+}
 
 // Set webhook URL for EventSub (using ngrok or public URL)
 const EVENTSUB_WEBHOOK_URL = process.env.EVENTSUB_WEBHOOK_URL || 'http://localhost:3000/api/twitch/eventsub/webhook';
@@ -12706,6 +15827,7 @@ module.exports.shutdown = function () {
 
   try { _saveAppStateNow(true); } catch (e) { /* ignore */ }   // sync flush so the write completes before exit
   stats.close();
+  playerDb.close();
 };
 
 module.exports.broadcastCrashAlert = function (message) {
@@ -12736,4 +15858,5 @@ module.exports.getRlSpectatorUiConfig = function () {
 module.exports.hideRlNativeUi = function () {
   return triggerRlHideNativeUi();
 };
+
 

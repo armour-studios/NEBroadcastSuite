@@ -33,7 +33,7 @@
   <div id="bar">
     <div class="station" id="station"></div>
     <div class="team a" id="ta">TBD</div>
-    <div class="mid"><div class="score" id="score">0â€“0</div><div class="round" id="round"></div></div>
+    <div class="mid"><div class="score" id="score">0–0</div><div class="round" id="round"></div></div>
     <div class="team b" id="tb">TBD</div>
   </div>
 
@@ -58,7 +58,7 @@
         cur = sig;
         $('ta').textContent = set.teamA || 'TBD';
         $('tb').textContent = set.teamB || 'TBD';
-        $('score').textContent = (set.scoreA != null ? set.scoreA : 0) + 'â€“' + (set.scoreB != null ? set.scoreB : 0);
+        $('score').textContent = (set.scoreA != null ? set.scoreA : 0) + '–' + (set.scoreB != null ? set.scoreB : 0);
         $('round').textContent = set.round || '';
       }
       bar.classList.add('show');

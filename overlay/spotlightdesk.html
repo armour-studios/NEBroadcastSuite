@@ -51,8 +51,8 @@
     .sp-cam-card { display: flex; flex-direction: column; border-radius: 14px; overflow: hidden; border: 1px solid var(--duo-border); background: var(--duo-surface); box-shadow: 0 18px 50px rgba(0,0,0,.55); opacity: 0; min-height: 0; }
     .sp-casters[data-count="1"] .sp-cam-card { flex: 0 0 auto; }
     .sp-casters[data-count="1"] .sp-cam-hole { aspect-ratio: 16 / 9; }
-    .sp-casters[data-count="2"] .sp-cam-card { flex: 1 1 0; }
-    .sp-casters[data-count="2"] .sp-cam-hole { flex: 1 1 auto; }
+    .sp-casters[data-count="2"] .sp-cam-card { flex: 0 0 auto; }
+    .sp-casters[data-count="2"] .sp-cam-hole { aspect-ratio: 16 / 9; flex: 0 0 auto; }
     .sp-stage.show .sp-cam-card:nth-child(1) { animation: inL .7s cubic-bezier(.16,.84,.24,1) .12s forwards; }
     .sp-stage.show .sp-cam-card:nth-child(2) { animation: inL .7s cubic-bezier(.16,.84,.24,1) .2s forwards; }
     .sp-cam-card::before { content: ''; display: block; height: 3px; flex: 0 0 auto; background: linear-gradient(90deg, transparent, var(--duo-accent) 30%, var(--duo-accent2) 70%, transparent); }
