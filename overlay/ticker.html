@@ -132,7 +132,10 @@
           var sep = document.createElement('span'); sep.className = 'tk-sep'; track.appendChild(sep);
         });
       } else {
-        var span = document.createElement('span'); span.className = 'ticker-segment'; span.textContent = messages.join('        ') + '        '; track.appendChild(span);
+        messages.forEach(function (msg) {
+          var span = document.createElement('span'); span.className = 'ticker-segment'; span.textContent = msg; track.appendChild(span);
+          var sep = document.createElement('span'); sep.className = 'tk-sep'; track.appendChild(sep);
+        });
       }
     }
     track.style.animationDuration = speed + 's';
