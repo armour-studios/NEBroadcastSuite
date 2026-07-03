@@ -314,6 +314,7 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     const g = el('crew-f-group'); if (g) g.value = 'casters';
     const s = el('crew-f-social'); if (s) s.value = 'none';
     const dc = el('crew-f-default-cam'); if (dc) dc.innerHTML = dccCamOptionsHtml('', '— None —');
+    const ds = el('crew-f-desk-slot'); if (ds) ds.value = '0';
     const titleEl = el('crew-edit-dlg-title'); if (titleEl) titleEl.textContent = 'Add Crew Member';
     if (saveBtn) saveBtn.textContent = 'Save';
   }
@@ -328,6 +329,7 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     const g = el('crew-f-group'); if (g) g.value = d.group || 'casters';
     const s = el('crew-f-social'); if (s) s.value = d.social || 'none';
     const dc = el('crew-f-default-cam'); if (dc) dc.innerHTML = dccCamOptionsHtml(d.defaultCam || '', '— None —');
+    const ds = el('crew-f-desk-slot'); if (ds) ds.value = String(crewDeskSlot(d));
     const titleEl = el('crew-edit-dlg-title');
     if (titleEl) titleEl.textContent = d.id ? 'Edit ' + (d.name || 'Crew Member') : 'Add Crew Member';
     if (saveBtn) saveBtn.textContent = d.id ? 'Update' : 'Save';
@@ -354,18 +356,18 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     const payload = { name, handle, role, group, social, socialHandle, defaultCam, country, paypal, notes };
     if (editId) payload.id = editId;
     send(editId ? 'update_crew_member' : 'add_crew_member', payload);
-    // Mirror into the DCC director library so the member shows in the Host staging tab. When opened
-    // from the Hosts grid we update that exact entry; on a brand-new add we create one (the server
-    // dedupes by name/handle, so this never makes a duplicate).
+    // Keep the caster-library profile — what the desk overlay reads through the lineup — in sync with
+    // this crew profile on BOTH add and edit. Carry social + default cam so the overlay nameplate can
+    // show the handle AND the right social icon (the old code dropped social entirely, and skipped the
+    // library on a plain edit — so name/social never reached the scene). The overlay shows the social
+    // handle, falling back to the gamertag. No id ⇒ the server dedupes by name/handle.
     const groupToKind = { casters: 'caster', observers: 'observer', hosts: 'host', guests: 'host' };
     const kind = groupToKind[group] || 'caster';
-    if (_fromLibId) {
-      send('save_caster_to_library', { id: _fromLibId, kind, name, handle, role, country, notes });
-      setTimeout(() => { if (typeof renderDccHostsGrid === 'function') renderDccHostsGrid(); }, 350);
-    } else if (!editId) {
-      send('save_caster_to_library', { kind, name, handle, role, country, notes, camSlot: defaultCam });
-      setTimeout(() => { if (typeof renderDccAll === 'function') renderDccAll(); if (typeof renderDccHostsGrid === 'function') renderDccHostsGrid(); }, 350);
-    }
+    const deskSlot = parseInt(el('crew-f-desk-slot')?.value || '0', 10) || 0;
+    const libPayload = { kind, name, handle: socialHandle || handle, role, social, country, notes, camSlot: defaultCam, deskSlot };
+    if (_fromLibId) libPayload.id = _fromLibId;
+    send('save_caster_to_library', libPayload);
+    setTimeout(() => { if (typeof renderDccAll === 'function') renderDccAll(); if (typeof renderDccHostsGrid === 'function') renderDccHostsGrid(); }, 350);
     if (dlg) dlg.close();
     setTimeout(renderCrewList, 300);
   });
@@ -399,6 +401,68 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     }
   });
 
+  // Import
+  const importBtn = el('crew-import-btn');
+  const importFile = el('crew-import-file');
+  if (importBtn && importFile) {
+    importBtn.addEventListener('click', () => importFile.click());
+    importFile.addEventListener('change', () => {
+      const file = importFile.files[0]; if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        try {
+          const data = JSON.parse(ev.target.result);
+          const entries = Array.isArray(data) ? data : (Array.isArray(data.crew) ? data.crew : []);
+          entries.forEach((m) => {
+            send('add_crew_member', { name: m.name, handle: m.handle, role: m.role, group: m.group,
+              social: m.social, socialHandle: m.socialHandle, defaultCam: m.defaultCam,
+              country: m.country, paypal: m.paypal, notes: m.notes });
+          });
+          setTimeout(renderCrewList, 500);
+        } catch (e) { alert('Invalid JSON file'); }
+        importFile.value = '';
+      };
+      reader.readAsText(file);
+    });
+  }
+
+  // Export
+  const exportBtn = el('crew-export-btn');
+  if (exportBtn) {
+    exportBtn.addEventListener('click', () => {
+      const members = (typeof currentState !== 'undefined' && currentState.crew) ? currentState.crew : [];
+      const json = JSON.stringify(members, null, 2);
+      const blob = new Blob([json], { type: 'application/json' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'crew-library.json';
+      a.click();
+    });
+  }
+
+  // Sort A-Z
+  const sortBtn = el('crew-sort-btn');
+  if (sortBtn) {
+    sortBtn.addEventListener('click', () => {
+      const members = (typeof currentState !== 'undefined' && currentState.crew) ? [...currentState.crew] : [];
+      members.sort((a, b) => (a.name || '').toLowerCase().localeCompare((b.name || '').toLowerCase()));
+      send('update_crew_order', { crew: members });
+      setTimeout(renderCrewList, 300);
+    });
+  }
+
+  // Delete All
+  const deleteAllBtn = el('crew-delete-all-btn');
+  if (deleteAllBtn) {
+    deleteAllBtn.addEventListener('click', () => {
+      const members = (typeof currentState !== 'undefined' && currentState.crew) ? currentState.crew : [];
+      if (!members.length) return;
+      if (!confirm(`Delete all ${members.length} crew member${members.length === 1 ? '' : 's'}? This cannot be undone.`)) return;
+      send('delete_all_crew', {});
+      setTimeout(renderCrewList, 300);
+    });
+  }
+
   // Called from the Hosts grid edit button — bridges library entry to crew profile form
   window._openCrewFormEdit = function(libId) {
     const lib  = (currentState && currentState.casters && currentState.casters.library) || [];
@@ -425,6 +489,19 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
   };
 })();
 
+// A crew member's current desk-lineup slot (0 = off desk). The lineup keys on the caster-library id,
+// so resolve it from currentState by name/handle (the same match the server dedupes on).
+function crewDeskSlot(d) {
+  const cast = (typeof currentState !== 'undefined' && currentState.casters) || {};
+  const lib = cast.library || [], lineup = cast.lineup || [];
+  const nm = (d.name || '').toLowerCase(), hd = (d.socialHandle || d.handle || '').toLowerCase();
+  const prof = lib.find((c) => nm && (c.name || '').toLowerCase() === nm)
+            || (hd && lib.find((c) => (c.handle || '').toLowerCase() === hd));
+  if (!prof) return 0;
+  const e = lineup.find((x) => x.libraryId === prof.id);
+  return e ? (Number(e.slot) || 0) : 0;
+}
+
 function renderCrewList() {
   const list = el('crew-list'); if (!list) return;
   const q   = (el('crew-search')?.value || '').trim().toLowerCase();
@@ -435,6 +512,8 @@ function renderCrewList() {
     if (!q) return true;
     return [(m.name||''), (m.handle||''), (m.role||'')].some((v) => v.toLowerCase().includes(q));
   });
+  const countEl = el('crew-count');
+  if (countEl) countEl.textContent = members.length ? `(${members.length})` : '';
   const GROUP_LABEL = { casters: 'Casters', hosts: 'Hosts', guests: 'Guests', observers: 'Observers' };
   const GROUP_COLOR = { casters: '#e83a8b', hosts: '#a855f7', guests: '#3b82f6', observers: '#2dd4bf' };
   if (!filtered.length) {
@@ -445,6 +524,8 @@ function renderCrewList() {
     const color = GROUP_COLOR[m.group] || '#888';
     const label = GROUP_LABEL[m.group] || m.group || '';
     const initials = (m.name || '?').split(' ').map((w) => w[0]).slice(0, 2).join('').toUpperCase();
+    const slot = crewDeskSlot(m);
+    const slotBadge = slot ? `<span style="display:inline-block;margin:4px 0 0 6px;background:#22c55e22;color:#22c55e;padding:1px 7px;border-radius:99px;font-size:10px;font-weight:700;">DESK ${slot}</span>` : '';
     const metaLine = [m.handle ? `@${m.handle}` : null, m.role || null].filter(Boolean).join(' · ');
     const dataAttr = JSON.stringify(m).replace(/'/g, "&#39;");
     return `<div class="tc-card" data-crew-id="${m.id}" data-crew-data='${dataAttr}'>
@@ -454,7 +535,7 @@ function renderCrewList() {
         <div class="tc-card-info">
           <div class="tc-card-name">${tlEsc(m.name)}</div>
           <div class="tc-card-meta">${metaLine ? tlEsc(metaLine) : ''}</div>
-          <span style="display:inline-block;margin-top:4px;background:${color}22;color:${color};padding:1px 7px;border-radius:99px;font-size:10px;font-weight:700;">${tlEsc(label)}</span>
+          <span style="display:inline-block;margin-top:4px;background:${color}22;color:${color};padding:1px 7px;border-radius:99px;font-size:10px;font-weight:700;">${tlEsc(label)}</span>${slotBadge}
         </div>
       </div>
       <div class="tc-card-footer">
@@ -1488,19 +1569,22 @@ function renderDccHostsGrid() {
   const nav = document.getElementById('gfx-scene-nav');
   if (!nav) return;
 
-  // Per-scene metadata for the unified top bar.
+  // Per-scene metadata for the unified top bar. hasApply = this scene has its own editable content
+  // worth saving without forcing it on/off (Apply, in the panel footer). Scenes whose content
+  // already saves live as you edit it (series/matchup/veto/draft/spotlight/bracket) have no Apply —
+  // Push to Live (top bar) is the only action they need.
   const SCENE_META = {
-    break:     { name: 'Break / Starting Soon', link: 'countdown.html',       hasClear: true,  hasQueue: true,  hasPush: true  },
-    winner:    { name: 'Winner / Post-match',   link: 'winner.html',          hasClear: true,  hasQueue: true,  hasPush: true  },
-    intro:     { name: 'Team Line-up / Intro',  link: 'intro.html',           hasClear: true,  hasQueue: true,  hasPush: true  },
-    ticker:    { name: 'Ticker',                link: 'ticker.html',          hasClear: true,  hasQueue: false, hasPush: true,  pushLabel: 'Apply', pushId: 'btn-ticker-apply' },
+    break:     { name: 'Break / Starting Soon', link: 'countdown.html',       hasClear: true,  hasQueue: true,  hasPush: true,  hasApply: true  },
+    winner:    { name: 'Winner / Post-match',   link: 'winner.html',          hasClear: true,  hasQueue: true,  hasPush: true,  hasApply: true  },
+    intro:     { name: 'Team Line-up / Intro',  link: 'intro.html',           hasClear: true,  hasQueue: true,  hasPush: true,  hasApply: true  },
+    ticker:    { name: 'Ticker',                link: 'ticker.html',          hasClear: true,  hasQueue: false, hasPush: true,  hasApply: true,  pushId: 'btn-ticker-apply' },
     series:    { name: 'Series Score',          link: 'series.html',          hasClear: true,  hasQueue: false, hasPush: true  },
     matchup:   { name: 'Pre-Match Lineup',      link: 'matchup.html',         hasClear: true,  hasQueue: false, hasPush: true  },
-    veto:      { name: 'Map Veto',              link: 'mapscreen.html',       hasClear: true,  hasQueue: true,  hasPush: true,  clearId: 'btn-hide-veto-gfx', pushId: 'btn-show-veto-gfx' },
+    veto:      { name: 'Map Pool',               link: 'mapscreen.html',       hasClear: true,  hasQueue: true,  hasPush: true,  clearId: 'btn-hide-veto-gfx', pushId: 'btn-show-veto-gfx' },
     draft:     { name: 'Champion Draft',        link: 'draft.html',           hasClear: true,  hasQueue: false, hasPush: true  },
     spotlight: { name: 'Spotlight',             link: 'watchlist.html',       hasClear: true,  hasQueue: false, hasPush: true  },
-    standings: { name: 'Standings',             link: 'standings.html',       hasClear: true,  hasQueue: false, hasPush: true,  pushId: 'btn-gfx-standings-push', clearId: 'btn-gfx-standings-clear' },
-    schedule:  { name: 'Upcoming Matches',      link: 'schedule.html',        hasClear: true,  hasQueue: false, hasPush: true,  pushId: 'btn-gfx-schedule-push', clearId: 'btn-gfx-schedule-clear' },
+    standings: { name: 'Standings',             link: 'standings.html',       hasClear: true,  hasQueue: false, hasPush: true,  hasApply: true,  pushId: 'btn-gfx-standings-push', clearId: 'btn-gfx-standings-clear' },
+    schedule:  { name: 'Upcoming Matches',      link: 'schedule.html',        hasClear: true,  hasQueue: false, hasPush: true,  hasApply: true,  pushId: 'btn-gfx-schedule-push', clearId: 'btn-gfx-schedule-clear' },
     bracket:   { name: 'Bracket',               link: 'bracket.html',         hasClear: true,  hasQueue: false, hasPush: true  },
   };
 
@@ -1524,18 +1608,23 @@ function renderDccHostsGrid() {
       if (meta.link) { sceneLink.href = base + '/' + meta.link; sceneLink.textContent = meta.link; sceneLink.style.display = ''; }
       else sceneLink.style.display = 'none';
     }
-    // Footer buttons
-    const footPush = el('gfx-foot-push'), footQueue = el('gfx-foot-queue'), footHide = el('gfx-foot-hide');
-    if (footPush) { footPush.style.display = meta.hasPush ? '' : 'none'; footPush.textContent = meta.pushLabel || 'Push to Live'; }
+    // Top bar Push to Live — the sole way to change what's live.
+    const topPush = el('gfx-top-push'); if (topPush) topPush.style.display = meta.hasPush ? '' : 'none';
+    // Footer: Apply (save content, no visibility change) + Add to Rundown only. No Clear here —
+    // Clear All (top bar) and Push to Live (top bar) are the only visibility controls now.
+    const footPush = el('gfx-foot-push'), footQueue = el('gfx-foot-queue');
+    const hasApply = !!meta.hasApply;
+    if (footPush) footPush.style.display = hasApply ? '' : 'none';
     if (footQueue) footQueue.style.display = meta.hasQueue ? '' : 'none';
-    if (footHide) footHide.style.display = meta.hasClear ? '' : 'none';
+    const footer = el('gfx-panel-footer');
+    if (footer) footer.style.display = (hasApply || meta.hasQueue) ? '' : 'none';
     // Live dot on sidenav + LIVE badge in top bar
     const liveScene = currentState && currentState.gfxActive;
     document.querySelectorAll('.gfx-sidenav-btn[data-gfxscene]').forEach((b) => b.classList.toggle('gfx-nav-live', b.dataset.gfxscene === liveScene));
     const badge = el('gfx-live-badge'); if (badge) badge.style.display = liveScene ? '' : 'none';
   }
 
-  // Clear ALL GFX scenes (one-click clear everything).
+  // Clear ALL GFX scenes (one-click clear everything) — top bar only.
   function clearAllGfxScenes() {
     Object.entries(SCENE_META).forEach(([k, meta]) => {
       if (meta.hasClear) el(meta.clearId || ('btn-hide-' + k))?.click();
@@ -1544,7 +1633,9 @@ function renderDccHostsGrid() {
     refreshTopBar(currentKey);
   }
 
-  // Push a scene, auto-clearing the previously live GFX scene first.
+  // Push a scene LIVE, auto-clearing the previously live GFX scene first. This is the ONLY action
+  // that changes visibility / gfxActive — it hides every other scene on gfx.html and shows this one
+  // (the scene's own standalone overlay URL is unaffected either way, per its own visible flag).
   function doPush(key) {
     const meta = SCENE_META[key] || {};
     const prev = currentState && currentState.gfxActive;
@@ -1557,23 +1648,45 @@ function renderDccHostsGrid() {
     setTimeout(() => refreshTopBar(key), 50);
   }
 
-  // Top bar: "Clear All" clears every GFX overlay.
+  // Save a scene's content WITHOUT touching visibility/gfxActive — omitting the `visible` key from
+  // each set_X payload lets the server preserve whatever's already showing (a widespread convention
+  // in this codebase's WS handlers).
+  function stripVisible(payload) { const { visible, ...rest } = payload || {}; return rest; }
+  const SCENE_APPLY = {
+    break: () => el('btn-update-break')?.click(),
+    winner: () => send('set_winner', stripVisible(winnerPayload(true))),
+    intro: () => send('set_intro', stripVisible(introPayload(true))),
+    ticker: () => send('set_ticker', tickerContentPayload()),
+    standings: () => {
+      const src = document.querySelector('#gfx-std-src .gfx-src-tab.is-on')?.dataset.stdsrc || 'league';
+      if (src === 'manual') { el('gfx-std-save')?.click(); return; }
+      const r = buildStandingsPayload();
+      if (!r.ok) { gfxStdStatus(r.err, true); return; }
+      send('set_standings', r.payload);
+      gfxStdStatus('Saved.', false);
+    },
+    schedule: () => {
+      send('set_upcoming', buildScheduleContentPayload());
+      const st = el('gfx-sch-status');
+      if (st) { st.textContent = 'Saved.'; setTimeout(() => { st.textContent = ''; }, 2500); }
+    },
+  };
+  function applyScene(key) {
+    const fn = SCENE_APPLY[key];
+    if (fn) fn();
+    gfxFootStatus('Saved.', true);
+  }
+
+  // Top bar: "Clear All" clears every GFX overlay; "Push to Live" is the sole way to make the
+  // currently-edited scene live.
   document.getElementById('gfx-top-clear')?.addEventListener('click', () => { clearAllGfxScenes(); gfxFootStatus('All scenes cleared.', false); });
   // Hidden delegation targets kept for rundown and external callers.
   document.getElementById('gfx-top-queue')?.addEventListener('click', () => el('btn-queue-' + currentKey)?.click());
   document.getElementById('gfx-top-push')?.addEventListener('click', () => doPush(currentKey));
 
-  // Panel footer buttons.
-  el('gfx-foot-push')?.addEventListener('click', () => doPush(currentKey));
+  // Panel footer: Apply only (saves content, no visibility change).
+  el('gfx-foot-push')?.addEventListener('click', () => applyScene(currentKey));
   el('gfx-foot-queue')?.addEventListener('click', () => el('gfx-top-queue')?.click());
-  el('gfx-foot-hide')?.addEventListener('click', () => {
-    const meta = SCENE_META[currentKey] || {};
-    el(meta.clearId || ('btn-hide-' + currentKey))?.click();
-    const live = currentState && currentState.gfxActive;
-    if (live === currentKey) send('set_gfx_active', { scene: null });
-    gfxFootStatus('Hidden.', false);
-    setTimeout(() => refreshTopBar(currentKey), 50);
-  });
 
   // Dynamic preview scaling — scales to fit the 220px height strip, centers horizontally.
   function fitScenePreviews() {
@@ -1609,6 +1722,7 @@ function renderDccHostsGrid() {
         if (typeof fitLivePreviews === 'function') setTimeout(fitLivePreviews, 40);
       } catch (_) {}
     }
+    if (key === 'veto' && typeof mpSyncFromState === 'function') mpSyncFromState(currentState);
     requestAnimationFrame(() => requestAnimationFrame(fitScenePreviews));
     try { localStorage.setItem('gfx_active_grp', key); } catch (_) {}
   }
@@ -1685,6 +1799,75 @@ function renderDccHostsGrid() {
   // Veto push live / clear (hidden delegation targets wired here).
   el('btn-show-veto-gfx')?.addEventListener('click', () => send('set_veto', { visible: true }));
   el('btn-hide-veto-gfx')?.addEventListener('click', () => send('set_veto', { visible: false }));
+
+  // ── Map Pool (manual mode) ────────────────────────────────────────────────
+  // A simpler alternative to the guided pick/ban sequence: pick Best-of-X, get that many map
+  // slots, choose each map from the active game's pool (server-provided vetoPools[activeGame]),
+  // and enter a score to overlay team logos + result on that card. Auto-saves as you edit
+  // (mirrors mapscreen.html's data contract — same set_veto {title, maps} the guided veto uses).
+  function mpMapPool() {
+    const game = currentState && currentState.activeGame;
+    return (currentState && currentState.vetoPools && currentState.vetoPools[game]) || [];
+  }
+  function mpRenderSlots(prefill) {
+    const wrap = el('mp-slots'); if (!wrap) return;
+    const n = parseInt(el('mp-bestof')?.value, 10) || 5;
+    const pool = mpMapPool();
+    const existing = prefill || [];
+    wrap.innerHTML = '';
+    for (let i = 0; i < n; i++) {
+      const m = existing[i] || {};
+      const row = document.createElement('div'); row.className = 'mp-slot';
+      const num = document.createElement('span'); num.className = 'mp-slot-num'; num.textContent = i + 1;
+      const sel = document.createElement('select'); sel.className = 'input-select mp-map-select';
+      sel.innerHTML = '<option value="">— Select map —</option>' +
+        pool.map((p) => `<option value="${p.id}"${p.name === m.name ? ' selected' : ''}>${p.name}</option>`).join('');
+      const scA = document.createElement('input'); scA.type = 'number'; scA.className = 'input-text mp-score-a';
+      scA.min = '0'; scA.placeholder = 'A'; scA.value = (m.score && m.score.a) || '';
+      const sep = document.createElement('span'); sep.className = 'mp-sep'; sep.textContent = '–';
+      const scB = document.createElement('input'); scB.type = 'number'; scB.className = 'input-text mp-score-b';
+      scB.min = '0'; scB.placeholder = 'B'; scB.value = (m.score && m.score.b) || '';
+      [sel, scA, scB].forEach((inp) => { inp.addEventListener('input', mpSendDebounced); inp.addEventListener('change', mpSendDebounced); });
+      row.appendChild(num); row.appendChild(sel); row.appendChild(scA); row.appendChild(sep); row.appendChild(scB);
+      wrap.appendChild(row);
+    }
+  }
+  function mpBuildMapsPayload() {
+    const wrap = el('mp-slots'); if (!wrap) return [];
+    const pool = mpMapPool();
+    return [...wrap.querySelectorAll('.mp-slot')].map((row) => {
+      const sel = row.querySelector('.mp-map-select');
+      const p = pool.find((x) => x.id === sel.value);
+      const a = parseInt(row.querySelector('.mp-score-a').value, 10);
+      const b = parseInt(row.querySelector('.mp-score-b').value, 10);
+      const hasScore = !isNaN(a) || !isNaN(b);
+      const sa = isNaN(a) ? 0 : a, sb = isNaN(b) ? 0 : b;
+      return {
+        name: p ? p.name : '', image: p ? (p.image || '') : '', action: 'pick', by: '',
+        winner: (hasScore && sa !== sb) ? (sa > sb ? 'a' : 'b') : '',
+        score: { a: sa, b: sb }
+      };
+    }).filter((m) => m.name);   // skip unselected slots — the overlay only shows real picks
+  }
+  const mpSendDebounced = debounce(() => {
+    send('set_veto', { title: (el('mp-title')?.value || '').trim(), maps: mpBuildMapsPayload() });
+  }, 350);
+  el('mp-bestof')?.addEventListener('change', () => { mpRenderSlots(mpBuildMapsPayload()); mpSendDebounced(); });
+  el('mp-title')?.addEventListener('input', mpSendDebounced);
+  // Populate from current state when the Map Pool tab opens — best-of guessed from the map count
+  // already saved (falls back to the series' own Best-of setting, then 5).
+  function mpSyncFromState(data) {
+    const v = (data && data.veto) || {};
+    const titleEl = el('mp-title');
+    if (titleEl && document.activeElement !== titleEl) titleEl.value = (v.title && v.title !== 'MAP POOL') ? v.title : '';
+    const maps = Array.isArray(v.maps) ? v.maps : [];
+    const boSel = el('mp-bestof');
+    if (boSel && document.activeElement !== boSel) {
+      const guess = [1, 3, 5, 7].includes(maps.length) ? maps.length : (data && data.bestOf) || 5;
+      boSel.value = String(guess);
+    }
+    if (document.activeElement?.closest('#mp-slots') == null) mpRenderSlots(maps);
+  }
 
   // Ticker — hide (push uses the existing btn-ticker-apply).
   el('btn-hide-ticker')?.addEventListener('click', () => send('set_ticker', { visible: false }));
@@ -1858,31 +2041,36 @@ function renderDccHostsGrid() {
     ).join('');
   }
 
-  el('btn-gfx-standings-push')?.addEventListener('click', () => {
+  // Content only (no visibility) — shared by the top-bar Push (adds visible:true) and the panel's
+  // Apply action. Returns { title, rows } for league/start.gg sources; { title } for manual (that
+  // source's rows are edited + saved separately via #gfx-std-save, which already omits visible).
+  function buildStandingsPayload() {
     const title = (el('gfx-std-title')?.value || '').trim();
     const src = document.querySelector('#gfx-std-src .gfx-src-tab.is-on')?.dataset.stdsrc || 'league';
     if (src === 'league') {
       const lid = el('gfx-std-league')?.value;
       const lg = lid && currentState && (currentState.leagues || []).find((l) => l.id === lid);
-      if (!lg) { gfxStdStatus('Select a league first.', true); return; }
+      if (!lg) return { ok: false, err: 'Select a league first.' };
       const byId = {}; (lg.standings || []).forEach((s) => { byId[s.teamId] = s; });
       const teamsById = {}; (lg.teams || []).forEach(t => { teamsById[t.id] = t; });
       const ordered = (lg.standings && lg.standings.length)
         ? lg.standings.map(s => teamsById[s.teamId]).filter(Boolean)
         : (lg.teams || []).slice().sort((a, b) => ((byId[b.id] || {}).pts || 0) - ((byId[a.id] || {}).pts || 0));
       const rows = ordered.map((tm, i) => { const s = byId[tm.id] || {}; const r = lgResolveTeam(tm); return { placement: i + 1, name: r.name || 'Team', logo: r.logo || null, wins: s.w || 0, losses: s.l || 0, points: s.pts || 0 }; });
-      send('set_standings', { visible: true, title, rows });
-      gfxStdStatus('Pushed live from league.', false);
+      return { ok: true, payload: { title, rows }, msg: 'from league' };
     } else if (src === 'startgg') {
       const teams = ((currentState && currentState.startgg) || {}).eventTeams || [];
-      if (!teams.length) { gfxStdStatus('No start.gg event loaded.', true); return; }
+      if (!teams.length) return { ok: false, err: 'No start.gg event loaded.' };
       const rows = teams.map((tm, i) => ({ placement: i + 1, name: tm.name || 'Team', logo: tm.logo || null, wins: 0, losses: 0, points: 0 }));
-      send('set_standings', { visible: true, title, rows });
-      gfxStdStatus('Pushed live from start.gg seeding.', false);
-    } else {
-      send('set_standings', { visible: true, title });
-      gfxStdStatus('Pushed live.', false);
+      return { ok: true, payload: { title, rows }, msg: 'from start.gg seeding' };
     }
+    return { ok: true, payload: { title }, msg: '' };
+  }
+  el('btn-gfx-standings-push')?.addEventListener('click', () => {
+    const r = buildStandingsPayload();
+    if (!r.ok) { gfxStdStatus(r.err, true); return; }
+    send('set_standings', { ...r.payload, visible: true });
+    gfxStdStatus('Pushed live' + (r.msg ? ' ' + r.msg : '') + '.', false);
   });
   el('btn-gfx-standings-clear')?.addEventListener('click', () => {
     send('set_standings', { visible: false });
@@ -2026,14 +2214,20 @@ function renderDccHostsGrid() {
     ).join('') || '<p class="sps-empty" style="margin:0;">No upcoming matches in queue.</p>';
   }
 
+  // Content only (no visibility) — shared by the top-bar Push (adds visible:true) and Apply.
+  function buildScheduleContentPayload() {
+    return {
+      title: (el('gfx-sch-title')?.value || 'UPCOMING MATCHES').trim(),
+      eyebrow: (el('gfx-sch-eyebrow')?.value || 'On Deck').trim(),
+      layout: el('gfx-sch-layout')?.value === 'board' ? 'board' : 'cards',
+      matches: gfxBuildScheduleMatches()
+    };
+  }
   el('btn-gfx-schedule-push')?.addEventListener('click', () => {
-    const title = (el('gfx-sch-title')?.value || 'UPCOMING MATCHES').trim();
-    const eyebrow = (el('gfx-sch-eyebrow')?.value || 'On Deck').trim();
-    const layout = el('gfx-sch-layout')?.value === 'board' ? 'board' : 'cards';
-    const matches = gfxBuildScheduleMatches();
-    send('set_upcoming', { visible: true, title, eyebrow, layout, matches });
+    const payload = buildScheduleContentPayload();
+    send('set_upcoming', { ...payload, visible: true });
     const st = el('gfx-sch-status');
-    if (st) { st.textContent = `Pushed ${matches.length} match${matches.length !== 1 ? 'es' : ''} live.`; setTimeout(() => { st.textContent = ''; }, 2500); }
+    if (st) { st.textContent = `Pushed ${payload.matches.length} match${payload.matches.length !== 1 ? 'es' : ''} live.`; setTimeout(() => { st.textContent = ''; }, 2500); }
   });
   // Persist layout/eyebrow immediately so the live overlay reflects a toggle even before Push.
   el('gfx-sch-layout')?.addEventListener('change', (e) => {
@@ -3834,6 +4028,8 @@ function applyState(data) {
   const otCol = el('input-ot-color'); if (otCol) otCol.value = ot.color || '#ffffff';
   const otPrev = el('preview-ot-logo');
   if (otPrev) { otPrev.src = ot.logo || ''; otPrev.style.display = ot.logo ? 'block' : 'none'; }
+  const suSel = el('select-speed-unit');
+  if (suSel && document.activeElement !== suSel) suSel.value = (data.speedUnit === 'kmh') ? 'kmh' : 'mph';
 
   // Replay ad slot
   const rp = data.replay || {};
@@ -5352,9 +5548,7 @@ el('bb-clear')?.addEventListener('click', async () => {
   if (!await appConfirm('Clear this phase?', 'Clear')) return;
   bbModel.winners = []; bbModel.losers = []; bbModel.finals = []; bbModel.rounds = []; bbModel.roster = [];
   bbRender(); bbSendPhases({ visible: false });
-  const v = el('bb-visible'); if (v) v.checked = false;
 });
-el('bb-visible')?.addEventListener('change', function () { bbSendPhases({ visible: this.checked }); });
 
 // One overlay phase → a builder phase (editable fields).
 function bbPhaseFromOverlay(op) {
@@ -5387,13 +5581,11 @@ function bbHydrate(bracket) {
     bbPhases = phases.map(bbPhaseFromOverlay);
     _bbPhaseSeq = bbPhases.length;
     bbActiveId = phases.some((p) => p.id === bracket.activePhaseId) ? bracket.activePhaseId : bbPhases[0].id;
-    const vis = el('bb-visible'); if (vis) vis.checked = !!bracket.visible;
     bbLoadPhase(bbActiveId);
     bbRenderPhases();
   } else if (hasFlat) {
     bbPhases = [bbPhaseFromOverlay(bracket)];
     bbActiveId = bbPhases[0].id; _bbPhaseSeq = 1;
-    const vis = el('bb-visible'); if (vis) vis.checked = !!bracket.visible;
     bbLoadPhase(bbActiveId);
     bbRenderPhases();
   }
@@ -6067,6 +6259,9 @@ el('input-replay-label')?.addEventListener('input', function() {
 });
 el('select-replay-color')?.addEventListener('change', function() {
   send('set_replay', { colorMode: this.value });
+});
+el('select-speed-unit')?.addEventListener('change', function() {
+  send('set_speed_unit', { unit: this.value });
 });
 el('input-replay-logo')?.addEventListener('change', async function() {
   const file = this.files && this.files[0];
@@ -11378,7 +11573,7 @@ async function evSyncPush() {
     // Backfill any COMPLETED start.gg results onto the Challonge bracket. For a finished PAST
     // event this fills in the entire bracket in one shot; for a future/current event with nothing
     // played yet it's a harmless no-op (results then flow live via the auto-sync link below).
-    let resultsPushed = 0;
+    let resultsPushed = 0, pushWarn = '';
     if (_evSyncEvent && _evSyncEvent.eventSlug) {
       setLog('Pulling match results from start.gg…', null);
       try {
@@ -11386,7 +11581,10 @@ async function evSyncPush() {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ tournamentSlug: slug, eventSlug: _evSyncEvent.eventSlug })
         }).then(r => r.json());
-        if (pr.ok) resultsPushed = pr.pushed || 0;
+        if (pr.ok) {
+          resultsPushed = pr.pushed || 0;
+          if ((pr.unmatchedNames && pr.unmatchedNames.length) || (pr.unplaced && pr.unplaced.length)) pushWarn = pr.message || '';
+        }
       } catch (e) { /* non-fatal — participants/bracket are already pushed */ }
     }
 
@@ -11400,7 +11598,8 @@ async function evSyncPush() {
     const viewUrl = `https://challonge.com/${slug}`;
     const autoMsg = autoSync ? ' · Auto-sync enabled.' : '';
     const resMsg = resultsPushed ? ` · ${resultsPushed} result(s) filled in.` : '';
-    setLog(`Done! ${sr.message || ''}${resMsg}${autoMsg}`, true);
+    const warnMsg = pushWarn ? ` — Heads up: ${pushWarn}` : '';
+    setLog(`Done! ${sr.message || ''}${resMsg}${autoMsg}${warnMsg}`, pushWarn ? null : true);
     if (pushBtn) { pushBtn.textContent = 'View on Challonge ↗'; pushBtn.onclick = () => window.open(viewUrl, '_blank', 'noopener'); pushBtn.disabled = false; }
   } catch (e) {
     setLog(e.message, false);
@@ -18366,16 +18565,17 @@ function getTickerMessages() {
     .filter(Boolean);
 }
 
-el('btn-ticker-apply')?.addEventListener('click', () => {
-  send('set_ticker', {
-    visible: !!el('check-ticker-visible')?.checked,
+// Content only (no visibility) — reused by both the top-bar Push (adds visible:true) and the
+// panel's Apply action (saves content live without forcing the scene on/off).
+function tickerContentPayload() {
+  return {
     source: el('select-ticker-source')?.value || 'manual',
     messages: getTickerMessages(),
     speed: parseInt(el('input-ticker-speed')?.value) || 40
-  });
-});
-el('check-ticker-visible')?.addEventListener('change', function() {
-  send('set_ticker', { visible: this.checked });
+  };
+}
+el('btn-ticker-apply')?.addEventListener('click', () => {
+  send('set_ticker', { ...tickerContentPayload(), visible: true });
 });
 el('select-ticker-source')?.addEventListener('change', function() {
   send('set_ticker', { source: this.value });
@@ -18384,8 +18584,6 @@ el('select-ticker-source')?.addEventListener('change', function() {
 
 function applyTickerState(data) {
   const ticker = data.ticker || {};
-  const cb = el('check-ticker-visible');
-  if (cb) cb.checked = !!ticker.visible;
 
   const srcEl = el('select-ticker-source');
   if (srcEl && document.activeElement !== srcEl) srcEl.value = ticker.source || 'manual';
@@ -19079,6 +19277,7 @@ let brandSponsors = [];           // [{ id?, name, logo, tier }]
 let pendingSponsorLogo = null;
 let brandBannerImages = [];       // base64 images for this kit's banner
 let brandBannerCaptions = [];     // optional per-image text, parallel to brandBannerImages
+let brandReplaySkin = null;       // per-profile replay transition background (base64), or null
 // Brand packages: a profile holds 1+ named packages (sponsor set + placements + banner) — e.g. one
 // per sponsorship deal / event type. The working vars above mirror the CURRENTLY-EDITED package;
 // brandPackages is the full list, editingPackageId = which one is loaded, editingActivePackageId =
@@ -19087,7 +19286,7 @@ let brandPackages = [];
 let editingPackageId = null;
 let editingActivePackageId = null;
 function newBrandPackage(name) {
-  return { id: 'p' + Math.random().toString(36).slice(2, 9), name: name || 'Package', sponsorLabel: 'PARTNERS', sponsorInterval: 6, sponsorMode: 'cycle', sponsors: [], bannerImages: [], bannerCaptions: [], bannerSlant: 'right', bannerHeader: '', bannerInterval: 10 };
+  return { id: 'p' + Math.random().toString(36).slice(2, 9), name: name || 'Package', sponsorLabel: 'PARTNERS', sponsorInterval: 6, sponsorMode: 'cycle', sponsors: [], bannerImages: [], bannerCaptions: [], bannerSlant: 'right', bannerHeader: '', bannerInterval: 10, replaySkin: null };
 }
 // Copy the live editor fields back into the package being edited (call before switching/saving).
 function flushEditorToPackage() {
@@ -19102,6 +19301,7 @@ function flushEditorToPackage() {
   pkg.bannerInterval = Number(el('input-brand-banner-interval').value) || 10;
   pkg.bannerSlant = el('select-brand-banner-slant')?.value || 'right';
   pkg.bannerHeader = el('input-brand-banner-header')?.value || '';
+  pkg.replaySkin = brandReplaySkin;
 }
 // Load a package's sponsor/banner config into the editor fields.
 function loadPackageIntoEditor(pkg) {
@@ -19115,8 +19315,16 @@ function loadPackageIntoEditor(pkg) {
   el('input-brand-banner-interval').value = pkg.bannerInterval || 10;
   if (el('select-brand-banner-slant')) el('select-brand-banner-slant').value = pkg.bannerSlant || 'right';
   if (el('input-brand-banner-header')) el('input-brand-banner-header').value = pkg.bannerHeader || '';
+  brandReplaySkin = pkg.replaySkin || null;
+  setBrandReplaySkinPreview(brandReplaySkin);
   renderBrandSponsors();
   renderKitBannerImages();
+}
+// Show/hide the replay-skin preview thumbnail + clear the file input.
+function setBrandReplaySkinPreview(url) {
+  const prev = el('preview-brand-replayskin'), fileIn = el('input-brand-replayskin');
+  if (prev) { if (url) { prev.src = url; prev.style.display = ''; } else { prev.style.display = 'none'; prev.removeAttribute('src'); } }
+  if (fileIn && !url) fileIn.value = '';
 }
 function selectEditorPackage(id) {
   flushEditorToPackage();
@@ -19226,6 +19434,7 @@ function ensurePlacements(s) {
   return s.placements;
 }
 
+let sponsorsSortable = null;
 function renderBrandSponsors() {
   const list = el('sponsors-list'); const empty = el('sponsors-empty');
   if (!list) return;
@@ -19234,8 +19443,11 @@ function renderBrandSponsors() {
   brandSponsors.forEach((s, idx) => {
     ensurePlacements(s);
     const row = document.createElement('div'); row.className = 'sponsor-row preset-item';
+    row._sponsorRef = s;   // kept in sync by drag-reorder below (DOM order → array order)
 
     const head = document.createElement('div'); head.className = 'sponsor-row-head';
+    const grip = document.createElement('span'); grip.className = 'sponsor-row-grip'; grip.title = 'Drag to reorder'; grip.textContent = '⠿';
+    head.appendChild(grip);
     const thumb = document.createElement('div'); thumb.className = 'sponsor-row-thumb';
     if (s.logo) { const img = document.createElement('img'); img.src = s.logo; thumb.appendChild(img); }
     else { thumb.textContent = 'TXT'; }
@@ -19269,6 +19481,14 @@ function renderBrandSponsors() {
 
     row.appendChild(head); row.appendChild(spots); list.appendChild(row);
   });
+
+  if (sponsorsSortable) { sponsorsSortable.destroy(); sponsorsSortable = null; }
+  if (brandSponsors.length > 1 && typeof Sortable !== 'undefined') {
+    sponsorsSortable = Sortable.create(list, {
+      animation: 150, draggable: '.sponsor-row', handle: '.sponsor-row-grip',
+      onEnd: () => { brandSponsors = [...list.querySelectorAll('.sponsor-row')].map((r) => r._sponsorRef).filter(Boolean); }
+    });
+  }
 }
 
 // Show/hide the square brand-logo preview vs the empty placeholder.
@@ -19430,7 +19650,13 @@ function renderBrands(data) {
     const delBtn = document.createElement('button');
     delBtn.className = 'btn btn-danger btn-sm'; delBtn.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>';
     delBtn.addEventListener('click', async () => {
-      const ok = await customConfirm('Delete Brand Kit', `Delete "${k.name}"?`, 'Delete');
+      // This removes the WHOLE profile, not just the currently-live package — warn explicitly so
+      // deleting one package (e.g. a game-specific one) doesn't surprise-delete the rest. To remove
+      // just one package, use Edit → select its tab → Delete Package instead.
+      const pkgWarn = nPkg > 1
+        ? ` This client has ${nPkg} packages (${(k.packages || []).map((p) => p.name).join(', ')}) — deleting it removes ALL of them, not just one. To delete a single package, open Edit instead.`
+        : '';
+      const ok = await customConfirm('Delete Brand Kit', `Delete "${k.name}"? This deletes the entire client profile and ALL of its brand packages — this cannot be undone.${pkgWarn}`, 'Delete Everything');
       if (ok) send('delete_brand_kit', { id: k.id });
     });
     actions.appendChild(actBtn); actions.appendChild(editBtn); actions.appendChild(dupBtn); actions.appendChild(urlBtn); actions.appendChild(delBtn);
@@ -19444,7 +19670,7 @@ function loadBrandIntoForm(k) {
   pendingBrandLogo = k.logo || null;
   // Server sends kit.packages; fall back to wrapping legacy top-level sponsor/banner fields.
   let src = Array.isArray(k.packages) && k.packages.length ? k.packages
-    : [{ id: k.activePackageId, name: 'Main', sponsorLabel: k.sponsorLabel, sponsorInterval: k.sponsorInterval, sponsorMode: k.sponsorMode, sponsors: k.sponsors, bannerImages: k.bannerImages, bannerCaptions: k.bannerCaptions, bannerSlant: k.bannerSlant, bannerHeader: k.bannerHeader, bannerInterval: k.bannerInterval }];
+    : [{ id: k.activePackageId, name: 'Main', sponsorLabel: k.sponsorLabel, sponsorInterval: k.sponsorInterval, sponsorMode: k.sponsorMode, sponsors: k.sponsors, bannerImages: k.bannerImages, bannerCaptions: k.bannerCaptions, bannerSlant: k.bannerSlant, bannerHeader: k.bannerHeader, bannerInterval: k.bannerInterval, replaySkin: k.replaySkin }];
   brandPackages = src.map((p) => ({
     id: p.id || ('p' + Math.random().toString(36).slice(2, 9)),
     name: p.name || 'Main',
@@ -19457,6 +19683,7 @@ function loadBrandIntoForm(k) {
     bannerSlant: p.bannerSlant || 'right',
     bannerHeader: p.bannerHeader || '',
     bannerInterval: p.bannerInterval || 10,
+    replaySkin: p.replaySkin || null,
   }));
   editingActivePackageId = (k.activePackageId && brandPackages.some((p) => p.id === k.activePackageId)) ? k.activePackageId : brandPackages[0].id;
   editingPackageId = editingActivePackageId;
@@ -19515,6 +19742,17 @@ el('btn-clear-brand-logo')?.addEventListener('click', () => {
   pendingBrandLogo = null;
   const f = el('input-brand-logo'); if (f) f.value = '';
   setBrandLogoPreview(null);
+});
+
+// Per-profile replay transition background (full-frame image).
+el('input-brand-replayskin')?.addEventListener('change', async (e) => {
+  const f = e.target.files[0]; if (!f) return;
+  brandReplaySkin = await fileToBase64(f, 1600);   // full-frame background — keep it wide/crisp
+  setBrandReplaySkinPreview(brandReplaySkin);
+});
+el('btn-brand-replayskin-clear')?.addEventListener('click', () => {
+  brandReplaySkin = null;
+  setBrandReplaySkinPreview(null);
 });
 
 // Per-game overlay design pickers.

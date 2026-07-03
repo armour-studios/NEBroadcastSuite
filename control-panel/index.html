@@ -881,13 +881,8 @@
         <p style="font-size:11px; color:var(--muted); margin-top:5px;">Shown on the quick swipe after the replay. Falls back to the sponsor logo, then the brand-kit logo.</p>
       </div>
       <div style="flex:1; min-width:200px;">
-        <label class="field-label" for="input-replay-skin">Replay Transition Background — brand image</label>
-        <div style="display:flex; gap:8px; align-items:center;">
-          <input type="file" id="input-replay-skin" accept="image/png,image/webp,image/*" class="input-text" style="padding:6px; flex:1;">
-          <img id="preview-replay-skin" alt="" style="height:30px; max-width:90px; object-fit:contain; display:none; background:rgba(255,255,255,.06); border-radius:4px;">
-          <button class="btn btn-ghost btn-sm" id="btn-replay-skin-clear" type="button">Clear</button>
-        </div>
-        <p style="font-size:11px; color:var(--muted); margin-top:5px;">Full-frame image (1920×1080) used as the BACKGROUND of the replay transition swipe — separate from the logos. The REPLAY text + sponsor/brand logo still show on top; a transparent PNG lets the dark panel show through.</p>
+        <label class="field-label">Replay Transition Background</label>
+        <p style="font-size:11px; color:var(--muted); margin-top:5px;">Now set <strong>per brand profile</strong> so it swaps automatically with the active profile — upload it in the <strong>brand editor</strong> (Saved Brand Kits → edit → <em>Replay Transition Background</em>).</p>
       </div>
     </div>
 
@@ -2330,6 +2325,9 @@
     </div>
     <div class="talent-topbar-actions" id="talent-topbar-crew-actions" style="display:none;">
       <button class="btn btn-ghost btn-sm" id="crew-add-btn">+ Add Crew</button>
+      <button class="btn btn-ghost btn-sm" id="crew-import-btn" title="Import crew from JSON">&#x2193; Import</button>
+      <button class="btn btn-ghost btn-sm" id="crew-export-btn" title="Export crew as JSON">&#x2191; Export</button>
+      <input type="file" id="crew-import-file" class="input-file-hidden" accept=".json">
     </div>
   </div>
 
@@ -2375,6 +2373,14 @@
       </select>
     </div>
 
+    <!-- Crew count + sort/delete bar -->
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+      <h3 class="section-title" style="margin-bottom: 0;">Crew <span id="crew-count" style="color:var(--muted); font-weight:400; font-size:13px;"></span></h3>
+      <div style="display:flex; gap:8px; align-items:center;">
+        <button class="btn btn-ghost btn-sm" id="crew-sort-btn" style="white-space:nowrap;">Sort A-Z</button>
+        <button class="btn btn-ghost btn-sm" id="crew-delete-all-btn" style="white-space:nowrap; color:#f56565;" title="Delete all crew members">Delete All</button>
+      </div>
+    </div>
     <!-- Crew grid (rendered by JS) -->
     <div id="crew-list" class="teams-grid"></div>
 
@@ -3999,7 +4005,9 @@
     <!-- Unified Graphics Hub: full-width top bar + nav/scene body below -->
     <div class="gfx-top">
 
-      <!-- Top bar: editing scene name + links | Clear All -->
+      <!-- Top bar: editing scene name + links | Clear All | Push to Live. This is now the ONLY
+           place that changes what's live — pushing hides every other scene on gfx.html and shows
+           this one (each scene's own standalone overlay URL is unaffected either way). -->
       <div class="gfx-top-bar">
         <span class="gfx-top-label">Editing</span>
         <div class="gfx-top-scene">
@@ -4010,9 +4018,9 @@
         <div class="gfx-top-actions">
           <span class="gfx-live-badge" id="gfx-live-badge" style="display:none;">LIVE</span>
           <button class="gfx-btn-clear" id="gfx-top-clear" title="Clear all GFX overlays">Clear All</button>
-          <!-- delegation targets kept for Queue (rundown) -->
+          <!-- delegation target kept for Queue (rundown) -->
           <button class="btn btn-ghost btn-sm" id="gfx-top-queue" style="display:none;"></button>
-          <button class="btn btn-primary btn-sm" id="gfx-top-push" style="display:none;"></button>
+          <button class="btn btn-primary btn-sm" id="gfx-top-push" title="Show this scene on gfx.html — hides every other scene there">Push to Live</button>
         </div>
       </div>
 
@@ -4026,7 +4034,7 @@
           <button class="gfx-sidenav-btn" data-gfxscene="ticker">Ticker</button>
           <button class="gfx-sidenav-btn" data-gfxscene="series">Series</button>
           <button class="gfx-sidenav-btn" data-gfxscene="matchup">Matchup</button>
-          <button class="gfx-sidenav-btn" data-gfxscene="veto">Map Veto</button>
+          <button class="gfx-sidenav-btn" data-gfxscene="veto">Map Pool</button>
           <button class="gfx-sidenav-btn" data-gfxscene="draft">Draft</button>
           <button class="gfx-sidenav-btn" data-gfxscene="spotlight" id="gfx-tab-spotlight">Spotlight</button>
           <button class="gfx-sidenav-btn" data-gfxscene="standings">Standings</button>
@@ -4151,7 +4159,6 @@
               <div class="gfx-scene-body">
                 <div style="display:flex; justify-content:space-between; align-items:center;">
                   <span style="font-size:12px; font-weight:700;">Ticker</span>
-                  <label class="qt-toggle"><span>Show</span><span class="switch"><input type="checkbox" id="check-ticker-visible"><span class="slider"></span></span></label>
                 </div>
                 <div class="field-row">
                   <label class="field-label" for="select-ticker-source">Source</label>
@@ -4165,8 +4172,8 @@
                   <textarea id="input-ticker-messages" class="input-text" rows="4" style="resize:vertical; font-family:inherit;" placeholder="Powered by ACME Energy&#10;Follow @yourbrand on X&#10;Next match at 8PM ET"></textarea>
                 </div>
                 <div class="field-row">
-                  <label class="field-label" for="input-ticker-speed">Loop speed (sec)</label>
-                  <input type="number" id="input-ticker-speed" class="input-text" style="width:110px;" value="40" min="5" max="300" step="1">
+                  <label class="field-label" for="input-ticker-speed">Full-loop duration (sec) <span class="field-hint">— lower = faster scroll, higher = slower</span></label>
+                  <input type="number" id="input-ticker-speed" class="input-text" style="width:110px;" value="40" min="3" max="600" step="1">
                 </div>
               </div>
             </div>
@@ -4177,6 +4184,7 @@
             <div class="gfx-scene-split">
               <div class="live-pv"><iframe id="gfx-pv-series" src="http://localhost:3000/series.html?preview=1" title="Series preview"></iframe></div>
               <div class="gfx-scene-body" id="gfx-series-body">
+                <p class="field-hint" style="margin:0 0 8px;">The compact "lower third" companion to the Map Pool board — safe to keep on screen during live play or over a caster shot. Automatically shows the maps &amp; scores you enter on the <strong>Map Pool</strong> scene once any are picked.</p>
                 <!-- Format -->
                 <div class="gfx-ctrl-row">
                   <span class="field-label" style="flex-shrink:0;">Format</span>
@@ -4243,9 +4251,24 @@
             <button id="btn-hide-veto-gfx" style="display:none;"></button>
             <button id="btn-queue-veto" style="display:none;"></button>
             <div class="gfx-scene-split">
-              <div class="live-pv"><iframe id="gfx-pv-veto" src="http://localhost:3000/mapscreen.html?preview=1" title="Veto preview"></iframe></div>
+              <div class="live-pv"><iframe id="gfx-pv-veto" src="http://localhost:3000/mapscreen.html?preview=1" title="Map Pool preview"></iframe></div>
               <div class="gfx-scene-body">
-                <p style="font-size:12px; color:var(--muted); margin:0 0 6px;">Run the pick &amp; ban in <strong>Dashboard &rarr; Veto</strong>, then use Push Live in the top bar to show the result.</p>
+                <p class="field-hint" style="margin:0 0 10px;">Uses the active game's map pool. Need a live pick/ban sequence instead? Run it in <strong>Dashboard &rarr; Veto</strong> — this board still shows the result. Changes here save automatically.</p>
+                <div class="gfx-ctrl-row">
+                  <label class="field-label" style="flex-shrink:0;" for="mp-title">Title</label>
+                  <input type="text" id="mp-title" class="input-text" placeholder="MAP POOL" style="flex:1; min-width:0;">
+                </div>
+                <div class="gfx-ctrl-row">
+                  <label class="field-label" style="flex-shrink:0;" for="mp-bestof">Best of</label>
+                  <select id="mp-bestof" class="input-select" style="max-width:110px;">
+                    <option value="1">Bo1</option>
+                    <option value="3">Bo3</option>
+                    <option value="5" selected>Bo5</option>
+                    <option value="7">Bo7</option>
+                  </select>
+                  <span class="field-hint">Sets how many map slots show below.</span>
+                </div>
+                <div id="mp-slots" class="mp-slots"></div>
               </div>
             </div>
           </div>
@@ -4414,13 +4437,14 @@
             </div>
           </div>
 
-          <!-- Shared scene footer: Clear (left) + Push to Live (right) — same spot for every scene,
-               updated per-scene by refreshTopBar(). Pinned below the scroll area so it never clips. -->
+          <!-- Shared scene footer: Apply ONLY — saves this scene's content without changing what's
+               live. Going live/hiding is exclusively a TOP BAR action now (Push to Live / Clear
+               All) — see refreshTopBar(). Hidden entirely for scenes with nothing to apply
+               (content already saves live as you edit it). Pinned below the scroll area. -->
           <div class="gfx-panel-footer" id="gfx-panel-footer">
-            <button class="gfx-btn-clear gfx-btn-clear-sm" id="gfx-foot-hide">Clear</button>
             <span class="gfx-foot-status" id="gfx-foot-status"></span>
             <button class="btn btn-ghost btn-sm" id="gfx-foot-queue" style="display:none;">Add to Rundown</button>
-            <button class="btn btn-primary" id="gfx-foot-push">Push to Live</button>
+            <button class="btn btn-primary" id="gfx-foot-push">Apply</button>
           </div>
 
         </div><!-- /gfx-main-col -->
@@ -4532,10 +4556,6 @@
   <section class="section">
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
       <h3 class="section-title" style="margin-bottom:0;">Tournament Event</h3>
-      <div style="display:flex; align-items:center; gap:10px;">
-        <span class="field-label" style="margin:0;">Show Bracket</span>
-        <input type="checkbox" id="check-bracket-visible" style="width:18px; height:18px; cursor:pointer; accent-color:#055fdb;">
-      </div>
     </div>
     <p style="font-size:12px; color:var(--muted); margin-bottom:10px;">
       Pick the event <strong>once</strong> — <em>Load Event</em> pulls in every team, their players, and the
@@ -4600,10 +4620,6 @@
   <section class="section">
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
       <h3 class="section-title" style="margin-bottom:0;">Upcoming Matches</h3>
-      <label class="qt-toggle" title="Show the upcoming matches scene on the overlay">
-        <span>Show</span>
-        <span class="switch"><input type="checkbox" id="check-upcoming-visible"><span class="slider"></span></span>
-      </label>
     </div>
     <p style="font-size:12px; color:var(--muted); margin-bottom:10px;">
       Auto-populates from the start.gg stream queue (matches marked <em>upcoming</em> on your stream).
@@ -4639,10 +4655,6 @@
   <section class="section">
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
       <h3 class="section-title" style="margin-bottom:0;">Standings</h3>
-      <label class="qt-toggle" title="Show the standings scene on the overlay">
-        <span>Show</span>
-        <span class="switch"><input type="checkbox" id="check-standings-visible"><span class="slider"></span></span>
-      </label>
     </div>
     <p style="font-size:12px; color:var(--muted); margin-bottom:10px;">
       Auto-pulls standings from the loaded bracket (round-robin / swiss). Override with manual rows below if you need custom ordering or points columns.
@@ -4695,7 +4707,6 @@
         <button class="btn btn-ghost btn-sm" id="bb-seed" title="Fill empty slots from your saved/seeded teams">Seed teams</button>
         <button class="btn btn-ghost btn-sm bb-swiss-only" id="bb-swiss-pair" title="Pair empty Swiss matches by current standings" style="display:none;">Auto-pair</button>
         <label class="qt-toggle" title="Push every change to the overlay automatically"><span>Auto-save</span><span class="switch"><input type="checkbox" id="bb-autosave" checked><span class="slider"></span></span></label>
-        <label class="qt-toggle" title="Show the bracket scene on the overlay"><span>Show</span><span class="switch"><input type="checkbox" id="bb-visible"><span class="slider"></span></span></label>
         <button class="btn btn-blue btn-sm" id="bb-save">Save Bracket</button>
         <button class="btn btn-danger btn-sm" id="bb-clear">Clear</button>
       </div>
@@ -4848,6 +4859,17 @@
       <input type="file" id="input-brand-banner-image" accept="image/*" style="display:none;">
     </div>
     <div id="brand-banner-images-list" style="display:grid; grid-template-columns:repeat(auto-fill,minmax(140px,1fr)); gap:10px;"></div>
+
+    <h4 style="margin:20px 0 4px; font-size:13px; color:#e0e0e0; border-top:1px solid rgba(255,255,255,0.08); padding-top:16px;">Replay Transition Background</h4>
+    <p style="font-size:11px; color:var(--muted); margin:0 0 10px;">
+      Optional full-frame image (1920×1080) used as the BACKGROUND of the replay transition for <strong>this profile</strong> —
+      it swaps automatically when you switch brand profiles. Leave empty for the default transition; a transparent PNG lets the dark panel show through.
+    </p>
+    <div style="display:flex; gap:8px; align-items:center;">
+      <input type="file" id="input-brand-replayskin" accept="image/png,image/webp,image/*" class="input-text" style="padding:6px; flex:1;">
+      <img id="preview-brand-replayskin" alt="" style="height:34px; max-width:110px; object-fit:contain; display:none; background:rgba(255,255,255,.06); border-radius:4px;">
+      <button class="btn btn-ghost btn-sm" id="btn-brand-replayskin-clear" type="button">Clear</button>
+    </div>
 
     </div>
     <div class="mp-foot">
@@ -5967,6 +5989,18 @@ PacketSendRate=10</pre>
           <button type="button" class="btn btn-secondary btn-sm" id="btn-rl-ui-hide-now">Hide native UI now</button>
           <span id="rl-ui-hide-status" class="field-hint" style="margin:0;"></span>
         </div>
+      </div>
+
+      <div style="margin-top:16px; padding-top:14px; border-top:1px solid rgba(255,255,255,.08);">
+        <h4 class="section-title" style="font-size:13px; margin-bottom:6px;">Shot speed unit</h4>
+        <p class="section-desc" style="margin-bottom:10px;">
+          The Stats API always reports goal speed in <strong>km/h</strong> and doesn't expose your in-game unit setting,
+          so choose how the goal + replay shot speed displays. It converts automatically.
+        </p>
+        <select id="select-speed-unit" class="input-select" style="max-width:220px;">
+          <option value="mph">MPH (imperial)</option>
+          <option value="kmh">KM/H (metric)</option>
+        </select>
       </div>
 
       <!-- Team Record moved to the game-agnostic Match — Teams panel (gear → Team Record), since it applies to every game. -->
@@ -7562,6 +7596,17 @@ PacketSendRate=10</pre>
         <label class="field-label">Default Cam</label>
         <!-- Options populated from DCC_CAM_OPTIONS (shared with DCC) so the list always matches DCC. -->
         <select id="crew-f-default-cam" class="input-select"><option value="">— None —</option></select>
+      </div>
+      <div class="crew-dlg-field" style="max-width:130px;">
+        <label class="field-label">Desk Slot</label>
+        <!-- Puts this caster on the desk lineup (drives the overlay caster positions). -->
+        <select id="crew-f-desk-slot" class="input-select">
+          <option value="0">— Off desk —</option>
+          <option value="1">Caster 1</option>
+          <option value="2">Caster 2</option>
+          <option value="3">Caster 3</option>
+          <option value="4">Caster 4</option>
+        </select>
       </div>
     </div>
     <div class="crew-dlg-row">

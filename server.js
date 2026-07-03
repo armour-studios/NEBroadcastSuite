@@ -8216,6 +8216,27 @@ function handleControlMessage(msg, ws) {
       } else {
         state.casters.library.push(entry);
       }
+      // Optional: assign/clear this caster's desk-lineup slot in the SAME call (used by the crew page
+      // so producers can put a caster on-air without opening the Casters lineup UI). We know the final
+      // library id here, so no client-side lookup is needed. Mirrors the swap/bump logic the Casters
+      // page uses: taking an occupied slot bumps its current occupant to this caster's old slot (or off).
+      if (typeof d.deskSlot !== 'undefined') {
+        const libId = (idx >= 0) ? state.casters.library[idx].id : entry.id;
+        const slot = Math.max(0, Math.min(4, parseInt(d.deskSlot, 10) || 0));
+        if (!Array.isArray(state.casters.lineup)) state.casters.lineup = [];
+        let lineup = state.casters.lineup;
+        if (slot === 0) {
+          state.casters.lineup = lineup.filter((x) => x.libraryId !== libId);
+        } else {
+          const occ = lineup.find((x) => Number(x.slot) === slot && x.libraryId !== libId);
+          const mine = lineup.find((x) => x.libraryId === libId);
+          const oldSlot = mine ? Number(mine.slot) : 0;
+          if (mine) mine.slot = slot;
+          else lineup.push({ libraryId: libId, slot, roomId: '', streamId: libId });
+          if (occ) { if (oldSlot) occ.slot = oldSlot; else state.casters.lineup = lineup.filter((x) => x !== occ); }
+        }
+        if (!state.casters.lineup.length) state.casters.list = [];   // resolveLineupToList no-ops on empty
+      }
       resolveLineupToList();   // re-join so name/handle/social edits propagate to overlay immediately
       saveAppState();
       broadcastFullState();
@@ -8266,6 +8287,23 @@ function handleControlMessage(msg, ws) {
         saveAppState();
         broadcastFullState();
       }
+      break;
+    }
+
+    case 'update_crew_order': {
+      const ordered = msg.data?.crew;
+      if (Array.isArray(ordered)) {
+        state.crew = ordered;
+        saveAppState();
+        broadcastFullState();
+      }
+      break;
+    }
+
+    case 'delete_all_crew': {
+      state.crew = [];
+      saveAppState();
+      broadcastFullState();
       break;
     }
 
