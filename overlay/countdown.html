@@ -148,7 +148,7 @@
     const EMBED = SceneBase.qp('embed') === '1';   // ?embed=1 → force-show the live break (config preview)
     function render(b) {
       b = b || {};
-      stageEl.classList.toggle('show', !!b.visible || EMBED);
+      stageEl.classList.add('show');
       // An explicit blank title means "no top text" — only fall back to STARTING SOON when
       // the producer never set a title at all (undefined/null), not when they cleared it.
       const titleText = (b.title != null) ? b.title : 'STARTING SOON';

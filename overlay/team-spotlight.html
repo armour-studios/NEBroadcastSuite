@@ -135,8 +135,7 @@
     // ?embed=1 → in-builder WYSIWYG: always render the live state, ignoring the on-air toggle.
     var EMBED = SceneBase.qp('embed') === '1';
     var stage = el('ts-stage');
-    stage.classList.toggle('show', SceneBase.preview || !!ts.visible || EMBED);
-    if (!SceneBase.preview && !ts.visible && !EMBED) return;
+    stage.classList.add('show');
 
     document.documentElement.style.setProperty('--accent', SceneBase.brandColor(data));
     document.documentElement.style.setProperty('--accent-2', SceneBase.brandAccent(data));

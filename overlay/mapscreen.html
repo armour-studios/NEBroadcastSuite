@@ -10,22 +10,30 @@
 -->
 <head>
   <meta charset="UTF-8">
-  <title>NE Broadcast Suite — Map Veto</title>
+  <title>NE Broadcast Suite — Map Pool</title>
   <link rel="stylesheet" href="scene.css" />
   <style>
-    body { display: flex; flex-direction: column; align-items: center; justify-content: center; }
-    #veto-stage { opacity: 0; transition: opacity 0.35s ease; width: 1920px; }
+    /* #veto-stage (not body) is the centering container — position:absolute + flex fills the
+       whole 1920x1080 canvas and centers its children as a block, so the title/row/footer
+       cluster stays true-centered for any slot count (1-7 maps) instead of drifting off-centre
+       from ad-hoc margin-top spacing on individual children. */
+    body { position: relative; }
+    #veto-stage {
+      position: absolute; inset: 0;
+      display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 56px;
+      opacity: 0; transition: opacity 0.35s ease;
+    }
     #veto-stage.show { opacity: 1; }
 
     .veto-head {
-      text-align: center; margin-top: 70px;
+      text-align: center;
       animation: veto-drop 0.6s backwards cubic-bezier(0,0,0,1);
     }
     .veto-title { font-family: 'Rajdhani', var(--main-font); font-weight: 700; font-size: 4em; color: #fff; letter-spacing: 0.04em; }
     .veto-sub   { font-family: 'Rajdhani', var(--main-font); font-weight: 600; font-size: 1.4em; color: var(--accent); letter-spacing: 0.3em; margin-top: 6px; }
     @keyframes veto-drop { 0% { opacity: 0; transform: translateY(-40px); } 100% { opacity: 1; transform: translateY(0); } }
 
-    .veto-row { display: flex; gap: 26px; justify-content: center; align-items: stretch; margin-top: 70px; padding: 0 60px; }
+    .veto-row { display: flex; gap: 26px; justify-content: center; align-items: stretch; padding: 0 60px; max-width: 1920px; }
 
     .map-card {
       position: relative; width: 300px; height: 620px; border-radius: 6px; overflow: hidden;
@@ -43,8 +51,18 @@
       padding: 8px 22px; border-radius: 3px; font-family: 'Rajdhani', var(--main-font); font-weight: 700;
       font-size: 1.25em; letter-spacing: 0.12em; color: #fff; text-transform: uppercase; white-space: nowrap;
     }
-    .map-card .score { position: absolute; bottom: 24px; left: 0; right: 0; text-align: center; font-family: 'Rajdhani', var(--main-font); font-weight: 700; font-size: 2.4em; color: #fff; -webkit-text-stroke: 2px rgba(0,0,0,.6); paint-order: stroke fill; }
-    .map-card .score b { color: #fff; }
+    /* Completed map: image desaturates, and the result (winning team's logo + score) sits as
+       one block centered — both horizontally AND vertically — over the card, independent of
+       where the map name/mode labels are. */
+    .map-card.completed .img { filter: grayscale(100%) brightness(.55); }
+    .map-card .result {
+      position: absolute; top: 50%; left: 0; right: 0; transform: translateY(-50%);
+      display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px;
+    }
+    .map-card .result-logo { width: 88px; height: 88px; object-fit: contain; filter: drop-shadow(0 8px 20px rgba(0,0,0,.65)); }
+    .map-card .result-logo.on-dark { filter: brightness(0) invert(1) drop-shadow(0 8px 20px rgba(0,0,0,.65)); }
+    .map-card .result-score { display: flex; align-items: center; gap: 12px; font-family: 'Rajdhani', var(--main-font); font-weight: 700; font-size: 2.8em; color: #fff; -webkit-text-stroke: 2px rgba(0,0,0,.6); paint-order: stroke fill; }
+    .map-card .result-score .sep { font-weight: 700; font-size: .6em; color: rgba(255,255,255,.5); -webkit-text-stroke: 0; }
 
     .map-card.ban .img  { filter: grayscale(100%) brightness(0.45); }
     .map-card.ban { border-bottom-color: #555; }
@@ -57,7 +75,7 @@
 <body>
   <div id="veto-stage">
     <div class="veto-head">
-      <div class="veto-title" id="veto-title">MAP VETO</div>
+      <div class="veto-title" id="veto-title">MAP POOL</div>
       <div class="veto-sub" id="veto-sub"></div>
     </div>
     <div class="veto-row" id="veto-row"></div>
@@ -92,10 +110,9 @@
 
     function render(data) {
       const v = data.veto || {};
-      stage.classList.toggle('show', !!v.visible);
-      if (!v.visible) return;
+      stage.classList.add('show');
 
-      titleEl.textContent = (v.title || 'MAP VETO').toUpperCase();
+      titleEl.textContent = (v.title || 'MAP POOL').toUpperCase();
       const maps = Array.isArray(v.maps) ? v.maps : [];
 
       // Rebuild only when the data changes (avoid restarting card animations each tick).
@@ -113,16 +130,20 @@
 
       rowEl.innerHTML = '';
       maps.forEach((m, i) => {
-        const card = document.createElement('div');
-        card.className = 'map-card' + (m.action ? ' ' + m.action : '');
-        card.style.width = w + 'px';
-        card.style.animationDelay = (0.4 + i * 0.12) + 's';
-
         const t = teamFor(m.by, data);
         const completed = (m.winner === 'a' || m.winner === 'b') || (m.score && (m.score.a || m.score.b));
 
+        const card = document.createElement('div');
+        card.className = 'map-card' + (m.action ? ' ' + m.action : '') + (completed ? ' completed' : '');
+        card.style.width = w + 'px';
+        card.style.animationDelay = (0.4 + i * 0.12) + 's';
+
         const img = document.createElement('div'); img.className = 'img';
-        if (m.image) img.style.backgroundImage = `url('${m.image}')`; else img.style.background = '#0c0e11';
+        // Games without real map art yet (image:'' in the pool) still look intentional — a
+        // subtle brand-tinted gradient instead of flat black. Completed maps grayscale via CSS
+        // (.map-card.completed .img) regardless of which background this ends up being.
+        if (m.image) img.style.backgroundImage = `url('${m.image}')`;
+        else img.style.background = 'radial-gradient(circle at 50% 30%, color-mix(in srgb, var(--accent) 22%, #14161c), #0a0b0f)';
         const shade = document.createElement('div'); shade.className = 'shade';
         const mode = document.createElement('div'); mode.className = 'mode'; mode.textContent = (m.mode || '').toUpperCase();
         const name = document.createElement('div'); name.className = 'name'; name.textContent = (m.name || 'TBA').toUpperCase();
@@ -134,10 +155,20 @@
         if (m.winner === 'b') card.style.borderBottomColor = orange.color;
 
         if (completed) {
-          const sc = document.createElement('div'); sc.className = 'score';
+          // One centered block: the WINNING team's logo above the score. No logo shown for a
+          // draw/no-winner-yet score (score still displays either way).
+          const result = document.createElement('div'); result.className = 'result';
+          const winnerTeam = m.winner === 'a' ? blue : m.winner === 'b' ? orange : null;
+          if (winnerTeam && winnerTeam.logo) {
+            const logo = document.createElement('img'); logo.className = 'result-logo'; logo.src = winnerTeam.logo;
+            if (SceneBase.isDefaultGameLogo(winnerTeam.logo)) logo.classList.add('on-dark');
+            result.appendChild(logo);
+          }
           const a = (m.score && m.score.a) || 0, b = (m.score && m.score.b) || 0;
-          sc.innerHTML = m.winner === 'a' ? `<b>${a}</b> – ${b}` : m.winner === 'b' ? `${a} – <b>${b}</b>` : `${a} – ${b}`;
-          card.appendChild(sc);
+          const sc = document.createElement('div'); sc.className = 'result-score';
+          sc.innerHTML = `<span>${a}</span><span class="sep">–</span><span>${b}</span>`;
+          result.appendChild(sc);
+          card.appendChild(result);
         } else {
           const chip = document.createElement('div'); chip.className = 'chip';
           chip.textContent = chipText(m, data);

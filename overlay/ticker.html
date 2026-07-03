@@ -113,19 +113,16 @@
     }
     var sponsor = (data && data.brand && data.brand.spots && data.brand.spots.ticker) || t.sponsor || '';
     var count = isStartgg ? matches.length : messages.length;
-    var visible = (EMBED || SceneBase.preview || (!!t.visible && (count > 0 || !!sponsor)));
-
-    bar.classList.toggle('hidden', !visible);
+    bar.classList.remove('hidden');
     bar.classList.toggle('startgg', isStartgg);
     bar.classList.toggle('has-sponsor', !!sponsor);
     document.documentElement.style.setProperty('--brand', SceneBase.brandAccent(data));
     var sp = el('ticker-sponsor'); if (sp && sponsor) sp.src = sponsor;
-    if (!visible) _sig = '';  // reset so scroll rebuilds on show; content still updates below
 
     var speed = (t.speed > 0) ? t.speed : 40;
     var sig = JSON.stringify({ s: isStartgg, m: matches, x: messages, sp: sponsor, speed: speed });
     if (sig === _sig) return;
-    _sig = visible ? sig : '';
+    _sig = sig;
 
     track.innerHTML = '';
     for (var copy = 0; copy < 2; copy++) {

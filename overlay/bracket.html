@@ -303,7 +303,7 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
   function render(data) {
     const b = data.bracket || {};
     const stage = el('bk-stage'), scaleEl = el('bk-scale'), emptyEl = el('bk-empty');
-    stage.classList.toggle('show', SceneBase.preview || FORCE_SHOW || !!b.visible);
+    stage.classList.add('show');
 
     // Effective view: URL override > state-driven view.
     const view = (URL_PART || b.view || 'both').toLowerCase();

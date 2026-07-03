@@ -246,9 +246,7 @@ html, body {
 
     const stState   = data.standings || {};
     const bracket   = data.bracket || {};
-    const visible   = !!stState.visible;
-
-    stage.classList.toggle('show', visible);
+    stage.classList.add('show');
 
     // Brand accent
     if (accent) accent.style.background = SceneBase.brandColor(data);

@@ -192,9 +192,7 @@
     function render(data) {
       const d = data.draft || {};
       _lastDraft = d;
-      const show = !!d.visible || EMBED || SceneBase.preview;
-      stage.classList.toggle('show', show);
-      if (!show) { _sig = ''; return; }
+      stage.classList.add('show');
 
       // Timer: reset the countdown whenever the turn advances.
       const turnKey = (d.ops ? d.ops.length : 0) + ':' + (d.turn ? d.turn.team + d.turn.action : 'none');

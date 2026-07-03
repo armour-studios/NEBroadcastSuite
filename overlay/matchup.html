@@ -208,7 +208,7 @@
       data = data || {};
       applyBrandTheme(data);
       const casters = data.casters || {};
-      el('stage').classList.toggle('show', data.gfxActive === 'matchup');
+      el('stage').classList.add('show');
       const blue = SceneBase.teamSide(data, 'blue'), orange = SceneBase.teamSide(data, 'orange');
       renderTeam(1, blue, 'a', data); renderTeam(2, orange, 'b', data);
       el('sa').textContent = blue.series != null ? blue.series : 0;

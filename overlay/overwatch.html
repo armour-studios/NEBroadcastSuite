@@ -431,8 +431,7 @@ const PREVIEW=new URLSearchParams(location.search).get('preview')==='1';
 function render(state){
   const ow=state.owMatch||{}, veto=state.veto||{}, teams=state.teams||{}, brand=state.brand||{};
   const board=document.getElementById('ow-board'); if(!board) return;
-  const visible=!!ow.visible||PREVIEW;
-  board.classList.toggle('hidden',!visible);
+  board.classList.remove('hidden');
 
   const tA=teams.blue||{}, tB=teams.orange||{};
   setText('ow-name-a',(tA.name||'TEAM A').toUpperCase());

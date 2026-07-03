@@ -818,8 +818,7 @@ function mrDevUpdateLbl(){
 function render(state){
   const mr=state.mrMatch||{}, veto=state.veto||{}, teams=state.teams||{}, brand=state.brand||{};
   const board=document.getElementById('mr-board'); if(!board) return;
-  const visible=!!mr.visible||PREVIEW;
-  board.classList.toggle('hidden',!visible);
+  board.classList.remove('hidden');
 
   const tA=teams.blue||{}, tB=teams.orange||{};
   const MR_FB='/assets/games/rivals.png';

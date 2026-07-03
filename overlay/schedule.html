@@ -298,8 +298,7 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
       data = Object.assign({}, data, { upcoming: demo.upcoming, startgg: Object.assign({}, data.startgg, demo.startgg) });
     }
     const up = data.upcoming || {};
-    stage.classList.toggle('show', SceneBase.preview || !!up.visible);
-    if (!SceneBase.preview && !up.visible) return;
+    stage.classList.add('show');
 
     document.documentElement.style.setProperty('--accent', SceneBase.brandColor(data));
     document.documentElement.style.setProperty('--accent-2', SceneBase.brandAccent(data));

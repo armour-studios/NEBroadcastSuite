@@ -203,8 +203,7 @@
       if (accent2) root.style.setProperty('--duo-accent2', accent2);
       if (data.fontFamily) root.style.fontFamily = `'${data.fontFamily}', 'Inter', system-ui, sans-serif`;
 
-      const visible = !!intro.visible || EMBED;
-      stage.classList.toggle('show', visible);
+      stage.classList.add('show');
 
       const side = (sideOverride === 'blue' || sideOverride === 'orange') ? sideOverride : (intro.side || 'blue');
       const team = SceneBase.teamSide(data, side);

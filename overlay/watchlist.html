@@ -220,8 +220,7 @@
     // ?embed=1 → in-builder WYSIWYG: always render the live state, ignoring the on-air toggle.
     var EMBED = SceneBase.qp('embed') === '1';
     var stage = el('wl-stage');
-    stage.classList.toggle('show', SceneBase.preview || !!w.visible || EMBED);
-    if (!SceneBase.preview && !w.visible && !EMBED) return;
+    stage.classList.add('show');
 
     // Only rebuild (and re-run the entry animation) when something that affects the card actually
     // changed — NOT on every full_state broadcast (that caused the random re-load/flicker).
