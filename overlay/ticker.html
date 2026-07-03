@@ -14,7 +14,7 @@
   .ticker.hidden { display: none; }
   /* LIVE badge (start.gg) — pulsing green circle + LIVE, pinned left, above the track */
   .ticker-live { flex-shrink: 0; display: none; align-items: center; gap: 11px; padding: 0 22px; position: relative; z-index: 2;
-    background: var(--live); color: #04130a; font-weight: 800; font-size: 21px; letter-spacing: 3px; }
+    background: var(--live); color: #04130a; font-weight: 700; font-size: 21px; letter-spacing: 3px; }
   .ticker.startgg .ticker-live { display: flex; }
   .tk-dot { width: 13px; height: 13px; border-radius: 50%; background: #04130a; animation: tk-pulse 1.2s ease-out infinite; }
   @keyframes tk-pulse { 0% { box-shadow: 0 0 0 0 rgba(4,19,10,.55); } 70% { box-shadow: 0 0 0 10px rgba(4,19,10,0); } 100% { box-shadow: 0 0 0 0 rgba(4,19,10,0); } }
@@ -30,17 +30,17 @@
   @keyframes ticker-scroll { from { transform: translateX(0); } to { transform: translateX(-50%); } }
   /* Match scoreline: [LIVE|FINAL] [logoA] TEAM A  s - s  TEAM B [logoB] */
   .tk-match { display: inline-flex; align-items: center; gap: 12px; }
-  .tk-stat { display: inline-flex; align-items: center; gap: 7px; font-weight: 800; font-size: 14px; letter-spacing: 2px; border-radius: 4px; padding: 3px 9px; }
+  .tk-stat { display: inline-flex; align-items: center; gap: 7px; font-weight: 700; font-size: 14px; letter-spacing: 2px; border-radius: 4px; padding: 3px 9px; }
   .tk-live { color: #04130a; background: var(--live); }
   .tk-live .tk-stat-dot { width: 8px; height: 8px; border-radius: 50%; background: #04130a; animation: tk-pulse2 1.2s ease-out infinite; }
   @keyframes tk-pulse2 { 0% { box-shadow: 0 0 0 0 rgba(4,19,10,.5); } 70% { box-shadow: 0 0 0 6px rgba(4,19,10,0); } 100% { box-shadow: 0 0 0 0 rgba(4,19,10,0); } }
   .tk-final { color: #9aa3b0; border: 1px solid rgba(255,255,255,.22); }
   .tk-logo { height: 32px; width: 32px; object-fit: contain; }
   .tk-team { font-weight: 700; font-size: 23px; color: #fff; text-transform: uppercase; letter-spacing: .02em; }
-  .tk-score { font-weight: 800; font-size: 23px; color: var(--brand); text-transform: uppercase; padding: 0 4px; font-variant-numeric: tabular-nums; }
+  .tk-score { font-weight: 700; font-size: 23px; color: var(--brand); text-transform: uppercase; padding: 0 4px; font-variant-numeric: tabular-nums; }
   .tk-sep { color: rgba(255,255,255,.25); font-size: 22px; padding: 0 28px; }
   /* Manual-message segment — all caps too */
-  .ticker-segment { font-weight: 600; font-size: 24px; color: #fff; text-transform: uppercase; letter-spacing: .02em; padding-right: 40px; }
+  .ticker-segment { font-weight: 600; font-size: 24px; color: #fff; text-transform: uppercase; letter-spacing: .02em; }
   /* ?embed=1 (in-builder preview): centre + enlarge */
   .tk-embed .ticker { bottom: auto; top: 50%; transform: translateY(-50%); height: 140px; }
   .tk-embed .ticker-live { font-size: 48px; padding: 0 46px; gap: 22px; }
@@ -51,7 +51,7 @@
   .tk-embed .tk-logo { height: 82px; width: 82px; }
   .tk-embed .tk-team, .tk-embed .tk-score { font-size: 60px; }
   .tk-embed .tk-sep { font-size: 54px; padding: 0 58px; }
-  .tk-embed .ticker-segment { font-size: 60px; padding-right: 80px; }
+  .tk-embed .ticker-segment { font-size: 60px; }
   .tk-embed .ticker-track { padding-left: 56px; }
 </style>
 </head>
