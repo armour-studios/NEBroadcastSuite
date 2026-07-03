@@ -1,4 +1,4 @@
-﻿require('dotenv').config({ path: (() => { const p = require('path'), f = require('fs'); const dev = p.join(__dirname, '.env.local'); return f.existsSync(dev) ? dev : p.join(__dirname, '.env.production'); })() });
+require('dotenv').config({ path: (() => { const p = require('path'), f = require('fs'); const dev = p.join(__dirname, '.env.local'); return f.existsSync(dev) ? dev : p.join(__dirname, '.env.production'); })() });
 const express = require('express');
 const WebSocket = require('ws');
 const http = require('http');
@@ -226,6 +226,7 @@ let state = {
   // (team = teams.x.color, brand = active kit, default = per-game) and the effective colour is
   // computed at broadcast time, so toggling never overwrites a team's own colour.
   colorMode: 'team',        // 'team' | 'brand' | 'default'
+  sceneBg: {},              // live bg fill per overlay path, keyed by pathname
   banner: { visible: false, images: [], captions: [], interval: 10, slant: 'right', header: '' },
   casters: { visible: true, list: [], lowerThird: '', library: [], vdo: { room: '', password: '' }, guestsVdo: { room: '', password: '' }, observersVdo: { room: '', password: '' }, rooms: [], lineup: [], activeLayout: '', interview: { room: '', password: '' }, apiKey: '', interviewee: null, deskRoomId: '', slotLabels: { 1: 'Caster 1', 2: 'Caster 2', 3: 'Caster 3', 4: 'Caster 4' } },   // list = on-air slots; library = saved casters/guests/observers (by kind); vdo/guestsVdo/observersVdo = the three shared group rooms; rooms = named VDO rooms; lineup = this-show active assignments; apiKey = director IFrame-API key; interviewee = spotlight-desk right cam; deskRoomId = which named room is the interview/desk room
   // VDO.Ninja talent workflow. Global config (server-side, replaces the old localStorage settings);
@@ -1457,6 +1458,7 @@ function loadState() {
       if (typeof saved.defaultBestOf === 'number') state.defaultBestOf = saved.defaultBestOf;
       if (saved.facecamsEnabled !== undefined) state.facecamsEnabled = saved.facecamsEnabled;
       if (saved.replayCams !== undefined) state.replayCams = saved.replayCams;
+      if (saved.sceneBg && typeof saved.sceneBg === 'object') state.sceneBg = { ...saved.sceneBg };
       if (saved.banner) state.banner = saved.banner;
       if (saved.casters && typeof saved.casters === 'object') {
         state.casters = {
@@ -1872,7 +1874,8 @@ function _saveAppStateNow(sync = false) {
       },
       rlSpectatorUi: state.rlSpectatorUi || rlSpectatorUi.DEFAULTS,
       vdo: state.vdo,
-      flows: state.flows || []
+      flows: state.flows || [],
+      sceneBg: state.sceneBg || {}
     };
     safeWriteJson(stateFile, toSave, sync);
     saveTwitchData(sync);
@@ -3260,6 +3263,24 @@ async function buildChallongeParticipantMap(slug) {
   return map;
 }
 
+// Normalize a team/entrant name for matching across start.gg ↔ Challonge (case, spacing and
+// punctuation differ constantly). Deliberately keeps alphanumerics only — no substring/"contains"
+// matching, so "Tarn C" never collapses into "Tarn B".
+function _normName(s) { return String(s || '').toLowerCase().replace(/[^a-z0-9]/g, ''); }
+
+// Resolve a start.gg entrant name to a Challonge participant {id,name}. Tries exact (lowercased)
+// then a normalized-equality pass. Returns null if nothing matches — caller should surface that
+// rather than silently dropping the result (a dropped prerequisite stalls the whole cascade).
+function resolveChallongeParticipant(pm, name) {
+  if (!name) return null;
+  const lc = String(name).toLowerCase();
+  if (pm[lc]) return pm[lc];
+  const n = _normName(name);
+  if (!n) return null;
+  for (const k in pm) { if (_normName(k) === n) return pm[k]; }
+  return null;
+}
+
 async function syncLinkedChallongeTournament(ev) {
   const link = ev.challongeSync;
   if (!link || !link.enabled || !link.slug || !challongeApiKey) return;
@@ -3271,12 +3292,15 @@ async function syncLinkedChallongeTournament(ev) {
     const pm = link.participantMap;
     if (!link.pushedMatches) link.pushedMatches = {};
 
-    // Gather completed bracket matches from all phases
+    // Gather completed bracket matches from all phases, in bracket order
+    // (winners early→late, then losers early→late, then finals).
+    // Bracket order matters so we push prerequisites before downstream matches.
     const completedMatches = [];
     (state.bracket.phases || []).forEach(phase => {
       ['winners', 'losers', 'finals'].forEach(side => {
         (phase[side] || []).forEach(round => {
-          (round || []).forEach(match => {
+          // Each round is { name, sets: [{a,b}] } — iterate round.sets, not round itself
+          (round.sets || []).forEach(match => {
             const { a, b } = match || {};
             if (!a || !b || (!a.winner && !b.winner)) return;
             if (!a.name || !b.name || a.name === 'TBD' || b.name === 'TBD') return;
@@ -3287,45 +3311,58 @@ async function syncLinkedChallongeTournament(ev) {
     });
     if (!completedMatches.length) return;
 
-    const mData = await client.get(`/tournaments/${link.slug}/matches.json`);
-    const openMatches = (mData || []).filter(m => (m.match || m).state === 'open');
-    if (!openMatches.length) return;
+    // Resolve entrant names to Challonge participants once (tolerant of case/spacing/punctuation).
+    completedMatches.forEach((cm) => {
+      cm.pA = resolveChallongeParticipant(pm, cm.a.name);
+      cm.pB = resolveChallongeParticipant(pm, cm.b.name);
+      cm.consumed = false;
+    });
 
-    let pushed = 0;
-    for (const { a, b } of completedMatches) {
-      const key = [a.name, b.name].sort().join('|||');
-      if (link.pushedMatches[key]) continue;
-      const pA = pm[a.name.toLowerCase()];
-      const pB = pm[b.name.toLowerCase()];
-      if (!pA || !pB) continue;
-      const cMatch = openMatches.find(m => {
+    // Multi-pass: re-fetch Challonge's open matches after each push so that matches which become
+    // open as a result (e.g. Grand Finals after Losers Finals) are picked up in the same cycle.
+    // Dedup is keyed by the CHALLONGE match id (stable, and distinguishes a Grand-Finals rematch
+    // of two teams from their earlier meeting — the old name-pair key blocked the rematch).
+    let totalPushed = 0;
+    for (let pass = 0; pass < 20; pass++) {
+      const mData = await client.get(`/tournaments/${link.slug}/matches.json`);
+      const openMatches = (mData || []).filter(m => (m.match || m).state === 'open');
+      if (!openMatches.length) break;
+
+      let pushedThisPass = 0;
+      for (const m of openMatches) {
         const d = m.match || m;
-        return (d.player1_id === pA.id && d.player2_id === pB.id) ||
-               (d.player1_id === pB.id && d.player2_id === pA.id);
-      });
-      if (!cMatch) continue;
-      const d = cMatch.match || cMatch;
-      const winnerId = a.winner ? pA.id : pB.id;
-      const isAp1 = d.player1_id === pA.id;
-      const sA = a.score != null ? a.score : 0;
-      const sB = b.score != null ? b.score : 0;
-      const scoresCSV = isAp1 ? `${sA}-${sB}` : `${sB}-${sA}`;
-      try {
-        await client.put(`/tournaments/${link.slug}/matches/${d.id}.json`, {
-          match: { winner_id: winnerId, scores_csv: scoresCSV }
-        });
-        link.pushedMatches[key] = true;
-        pushed++;
-      } catch (err) {
-        console.error(`[challonge-sync] Match ${a.name} vs ${b.name}:`, err.message);
+        if (!d.player1_id || !d.player2_id) continue;
+        if (link.pushedMatches[String(d.id)]) continue;
+        const cm = completedMatches.find(c => !c.consumed && c.pA && c.pB &&
+          ((d.player1_id === c.pA.id && d.player2_id === c.pB.id) ||
+           (d.player1_id === c.pB.id && d.player2_id === c.pA.id)));
+        if (!cm) continue;
+        const winnerId = cm.a.winner ? cm.pA.id : cm.pB.id;
+        const isAp1 = d.player1_id === cm.pA.id;
+        const sA = cm.a.score != null ? cm.a.score : 0;
+        const sB = cm.b.score != null ? cm.b.score : 0;
+        const scoresCSV = isAp1 ? `${sA}-${sB}` : `${sB}-${sA}`;
+        try {
+          await client.put(`/tournaments/${link.slug}/matches/${d.id}.json`, {
+            match: { winner_id: winnerId, scores_csv: scoresCSV }
+          });
+          link.pushedMatches[String(d.id)] = true;
+          cm.consumed = true;
+          pushedThisPass++;
+          totalPushed++;
+        } catch (err) {
+          cm.consumed = true;   // skip a rejected set instead of spinning the cascade
+          console.error(`[challonge-sync] Match ${cm.a.name} vs ${cm.b.name}:`, err.message);
+        }
       }
+      if (pushedThisPass === 0) break; // no progress this pass, stop
     }
-    if (pushed > 0) {
+    if (totalPushed > 0) {
       link.lastSyncAt = new Date().toISOString();
       link.lastError = null;
       saveAppState();
       broadcastFullState();
-      console.log(`[challonge-sync] Pushed ${pushed} result(s) to ${link.slug}`);
+      console.log(`[challonge-sync] Pushed ${totalPushed} result(s) to ${link.slug}`);
     }
   } catch (e) {
     if (ev.challongeSync) { ev.challongeSync.lastError = e.message; broadcastFullState(); }
@@ -8531,6 +8568,21 @@ function handleControlMessage(msg, ws) {
       break;
     }
 
+    case 'set_scene_bg': {
+      const { path, bg } = msg.data || {};
+      if (typeof path === 'string' && path) {
+        if (!state.sceneBg) state.sceneBg = {};
+        if (bg && bg.on) {
+          state.sceneBg[path] = { on: true, color: (bg.color || '#000000').slice(0, 20), op: Math.max(1, Math.min(100, Number(bg.op) || 50)) };
+        } else {
+          delete state.sceneBg[path];
+        }
+        saveAppState();
+        broadcastFullState();
+      }
+      break;
+    }
+
     // Legacy: old clients sent a brand-colours on/off toggle → map it onto colorMode.
     case 'delete_brand_kit': {
       savedBrandKits = savedBrandKits.filter((b) => b.id !== msg.data?.id);
@@ -8561,7 +8613,7 @@ function handleControlMessage(msg, ws) {
           .filter(Boolean)
           .slice(0, 30);
       }
-      if (Number(p.speed) > 0) state.ticker.speed = Math.min(300, Math.max(5, Number(p.speed)));
+      if (Number(p.speed) > 0) state.ticker.speed = Math.min(600, Math.max(3, Number(p.speed)));
       if (state.ticker.source === 'startgg') state.ticker.feed = formatTickerFeed(state.startgg.matchFeed);   // build now; refreshes each poll
       saveAppState();
       broadcastFullState();
@@ -12899,46 +12951,68 @@ function startHttpServer(baseDir) {
         let scoreA = scoreOf(s0), scoreB = scoreOf(s1);
         const winnerIsA = s.winnerId === s0.entrant.id;
         if (scoreA == null || scoreB == null) { scoreA = winnerIsA ? 1 : 0; scoreB = winnerIsA ? 0 : 1; }   // DQ/no-score sets
-        completed.push({ nameA, nameB, scoreA, scoreB, winnerIsA });
+        completed.push({ nameA, nameB, scoreA, scoreB, winnerIsA, round: Number(s.round) || 0 });
       });
       if (!completed.length) return res.json({ ok: true, pushed: 0, total: 0, message: 'No completed matches yet on start.gg for this event.' });
+
+      // Order so that when the SAME two teams meet more than once (e.g. Winners match then a Grand
+      // Finals rematch), the earlier-bracket result is consumed first: winners/GF (round>0) ascending,
+      // then losers (round<0) by depth. This keeps rematches from grabbing each other's result.
+      const _rk = (r) => (r >= 0 ? r : 1e6 + Math.abs(r));
+      completed.sort((a, b) => _rk(a.round) - _rk(b.round));
 
       const pm = await buildChallongeParticipantMap(slug);
       const cClient = createChallongeClient(challongeApiKey);
 
-      // Challonge only opens round 2 once round 1's results are recorded, so cascade: push
-      // whatever is open, re-check, repeat until a full pass makes no further progress.
-      const pushedKeys = new Set();
+      // Resolve each set's two entrants to Challonge participants up front (tolerant of case/spacing/
+      // punctuation differences). Names that don't resolve are reported, not silently dropped — a
+      // missing prerequisite stalls the cascade and leaves losers/grand finals empty.
+      const nameMisses = new Set();
+      completed.forEach((cm) => {
+        cm.pA = resolveChallongeParticipant(pm, cm.nameA);
+        cm.pB = resolveChallongeParticipant(pm, cm.nameB);
+        cm.consumed = false;
+        if (!cm.pA) nameMisses.add(cm.nameA);
+        if (!cm.pB) nameMisses.add(cm.nameB);
+      });
+
+      // Challonge only opens a match once its feeders are recorded, so cascade: fill every open
+      // match we can, re-fetch, repeat until a full pass makes no progress. Iterate OPEN matches and
+      // take the first unconsumed set for each pairing — so a Grand-Finals rematch gets its OWN
+      // result instead of being deduped away (the previous bug that left grand finals blank).
       let pushed = 0, guard = 0, progressed = true;
-      while (progressed && guard < 40) {
+      while (progressed && guard < 60) {
         guard++;
         progressed = false;
         const mData = await cClient.get(`/tournaments/${slug}/matches.json`);
         const openMatches = (mData || []).filter((m) => (m.match || m).state === 'open');
         if (!openMatches.length) break;
-        for (const cm of completed) {
-          const key2 = [cm.nameA, cm.nameB].map((n) => n.toLowerCase()).sort().join('|||');
-          if (pushedKeys.has(key2)) continue;
-          const pA = pm[cm.nameA.toLowerCase()], pB = pm[cm.nameB.toLowerCase()];
-          if (!pA || !pB) continue;
-          const match = openMatches.find((m) => {
-            const d = m.match || m;
-            return (d.player1_id === pA.id && d.player2_id === pB.id) || (d.player1_id === pB.id && d.player2_id === pA.id);
-          });
-          if (!match) continue;
-          const d = match.match || match;
-          const isAp1 = d.player1_id === pA.id;
-          const winnerId = cm.winnerIsA ? pA.id : pB.id;
+        for (const m of openMatches) {
+          const d = m.match || m;
+          if (!d.player1_id || !d.player2_id) continue;
+          const cm = completed.find((c) => !c.consumed && c.pA && c.pB &&
+            ((d.player1_id === c.pA.id && d.player2_id === c.pB.id) ||
+             (d.player1_id === c.pB.id && d.player2_id === c.pA.id)));
+          if (!cm) continue;
+          const isAp1 = d.player1_id === cm.pA.id;
+          const winnerId = cm.winnerIsA ? cm.pA.id : cm.pB.id;
           const scoresCSV = isAp1 ? `${cm.scoreA}-${cm.scoreB}` : `${cm.scoreB}-${cm.scoreA}`;
           try {
             await cClient.put(`/tournaments/${slug}/matches/${d.id}.json`, { match: { winner_id: winnerId, scores_csv: scoresCSV } });
-            pushedKeys.add(key2); pushed++; progressed = true;
+            cm.consumed = true; pushed++; progressed = true;
           } catch (e) {
+            cm.consumed = true;   // don't let one rejected set spin the cascade — skip it and continue
             console.error('[challonge push-results] failed:', cm.nameA, 'vs', cm.nameB, e.message);
           }
         }
       }
-      res.json({ ok: true, pushed, total: completed.length, message: `Pushed ${pushed} of ${completed.length} completed result(s) to Challonge.` });
+
+      const misses = Array.from(nameMisses);
+      const unplaced = completed.filter((c) => c.pA && c.pB && !c.consumed).map((c) => `${c.nameA} vs ${c.nameB}`);
+      let message = `Pushed ${pushed} of ${completed.length} completed result(s) to Challonge.`;
+      if (misses.length) message += ` ${misses.length} team name(s) don't match any Challonge participant: ${misses.slice(0, 8).join(', ')}${misses.length > 8 ? '…' : ''}. Rename them in Challonge to match start.gg, then push again.`;
+      else if (unplaced.length) message += ` ${unplaced.length} result(s) never found an open Challonge match — the bracket shape likely differs from start.gg. Try Rebuild bracket, then push again.`;
+      res.json({ ok: true, pushed, total: completed.length, unmatchedNames: misses, unplaced, message });
     } catch (e) {
       res.status(400).json({ ok: false, error: e.message });
     }

@@ -271,6 +271,20 @@
         series: (data && data.series) ? (data.series[side] || 0) : 0
       };
     },
+    applyBg(bg) {
+      let el = document.getElementById('scene-bg-wash');
+      if (!bg || !bg.on) { if (el) el.remove(); return; }
+      if (!el) {
+        el = document.createElement('div');
+        el.id = 'scene-bg-wash';
+        el.style.cssText = 'position:fixed;inset:0;z-index:-9999;pointer-events:none;';
+        const b = document.body || document.documentElement;
+        if (b) b.insertBefore(el, b.firstChild);
+      }
+      const hex = (bg.color || '#000000').replace(/^#/, '');
+      el.style.background = '#' + hex;
+      el.style.opacity = Math.min(1, Math.max(0, (Number(bg.op) || 50) / 100));
+    },
     preview: PREVIEW,
     demoState,
     connect(onState) {
@@ -314,6 +328,7 @@
               });
             }
             applyBrand(msg.data);
+            SceneBase.applyBg((msg.data.sceneBg || {})[global.location.pathname]);
             try { onState(msg.data); } catch (e) { console.error('[scene] render error', e); }
           }
         };

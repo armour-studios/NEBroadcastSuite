@@ -1,4 +1,4 @@
-﻿/* ─── Control Panel Logic ────────────────────────────────────────────────── */
+/* ─── Control Panel Logic ────────────────────────────────────────────────── */
 
 const WS_URL = 'ws://localhost:3001';
 let ws;
@@ -10336,7 +10336,7 @@ function buildSceneCard(it, groupName) {
           <input type="range" class="ss-bg-op" min="1" max="100" value="${bg.op == null ? 50 : bg.op}" title="Opacity">
           <span class="ss-bg-op-val">${bg.op == null ? 50 : bg.op}%</span>
         </div>
-        <div class="scene-bg-hint">Background fill is off by default. After changing it, re-Copy the URL into OBS to apply.</div>
+        <div class="scene-bg-hint">Background fill updates live in OBS. Re-copy the URL only when adding this overlay as a new browser source.</div>
       </div>`;
 
   const thumb   = card.querySelector('.scene-thumb-frame');
@@ -10357,7 +10357,7 @@ function buildSceneCard(it, groupName) {
       thumb.src = src;
     } else { thumb.dataset.src = src; }
   }
-  function persist() { saveSceneBg(it.path, bg); reflect(); refreshThumb(); }
+  function persist() { saveSceneBg(it.path, bg); send('set_scene_bg', { path: it.path, bg }); reflect(); refreshThumb(); }
 
   bgBtn.addEventListener('click', (e) => { e.stopPropagation(); panel.hidden = !panel.hidden; });
   onChk.addEventListener('change', () => { bg.on = onChk.checked; persist(); });
