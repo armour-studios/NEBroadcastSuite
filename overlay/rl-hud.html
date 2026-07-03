@@ -64,12 +64,14 @@ img{display:block;}
 /* slanted event banner — seats ON TOP of the bar, angled top corners over the feed */
 .event-name{
   position:absolute;top:0;left:50%;transform:translateX(-50%);z-index:41;
-  max-width:1080px;padding:6px 66px 9px;
-  background:linear-gradient(180deg,var(--panel-1),var(--panel-2));
+  max-width:1080px;padding:5px 66px 5px;line-height:1;
+  /* OPAQUE panel (not the .96 var) so where it seats on the scorebar the two don't stack into a darker
+     band; short height so it only just meets the bar's top instead of clipping deep into it. */
+  background:linear-gradient(180deg,rgb(20,23,31),rgb(11,13,19));
   clip-path:polygon(34px 0,calc(100% - 34px) 0,100% 100%,0 100%);
   font-size:13px;font-weight:700;letter-spacing:3px;color:#d7dae0;text-transform:uppercase;
   text-align:center;white-space:nowrap;overflow:hidden;
-  box-shadow:0 6px 16px rgba(0,0,0,.4);
+  box-shadow:0 2px 7px rgba(0,0,0,.28);
   animation:headIn .5s cubic-bezier(.2,.7,.3,1) backwards;
 }
 .event-name:empty{display:none;}
@@ -137,10 +139,6 @@ img{display:block;}
   padding:0 22px;background:rgba(0,0,0,.3);min-width:124px;}
 .ot-badge{display:none;}
 .timer{font-weight:800;font-size:32px;font-variant-numeric:tabular-nums;line-height:1;letter-spacing:.01em;}
-/* title-sponsor logo under the timer (brand 'title' placement) — pinned bottom, doesn't move the clock */
-.timer-logo{position:absolute;left:50%;bottom:3px;transform:translateX(-50%);max-height:18px;max-width:150px;
-  object-fit:contain;display:block;filter:drop-shadow(0 1px 3px rgba(0,0,0,.6));}
-.timer-logo.hidden{display:none;}
 .timer.ot{color:var(--orange);text-shadow:0 0 16px rgba(255,122,51,.75);}
 
 /* GAME n of X — neutral sub-tab that HANGS BELOW the center timer */
@@ -165,7 +163,10 @@ img{display:block;}
 .gs-label.gs-ot-row{display:grid;grid-template-columns:1fr auto 1fr;gap:7px;}
 .gs-cell{display:flex;align-items:center;gap:7px;min-width:0;overflow:hidden;white-space:nowrap;justify-content:center;}
 .game-sub.gs-ot-width{width:min(480px,92vw);max-width:min(480px,92vw);}
-.gs-logo{max-height:34px;max-width:160px;object-fit:contain;margin:7px 18px 6px;filter:drop-shadow(0 2px 5px rgba(0,0,0,.5));}
+/* title sponsor — floats in the seam just above the GAME label, over the scorebar's empty lower-centre.
+   Transparent (no panel bg) so it never stacks a second layer on the scorebar. */
+.gs-logo{position:absolute;top:73px;left:50%;transform:translateX(-50%);z-index:3;
+  max-height:19px;max-width:150px;object-fit:contain;filter:drop-shadow(0 2px 5px rgba(0,0,0,.55));}
 .gs-logo.hidden{display:none;}
 
 /* OVERTIME card — REPLACES the GAME n of X tab during OT (same spot). A red OVERTIME tab (matching
@@ -278,13 +279,11 @@ img{display:block;}
 /* event tab — a small team-colour PILL that snaps out from the inner edge toward centre,
    carrying the RL icon (colour adapts for contrast). Compact + quick. */
 .pc-cond{position:absolute;z-index:0;top:50%;height:100%;transform:translateY(-50%);display:flex;align-items:center;white-space:nowrap;
-  /* full sidebar-bar height, on its OWN layer: accent-tinted panel + depth shadow so it reads as a
-     separate card sliding out from behind, not part of the stat card. */
-  background:linear-gradient(180deg,color-mix(in srgb,var(--fx-color,#888) 55%,#0a0d14),color-mix(in srgb,var(--fx-color,#888) 30%,#0a0d14));opacity:0;
-  box-shadow:0 6px 18px rgba(0,0,0,.55),inset 0 0 0 1.5px color-mix(in srgb,var(--fx-color,#fff) 60%,#ffffff),0 0 18px -3px var(--fx-color,#888);}
-/* the RL icon is WHITE, glowing in the active accent (team / brand / game colour via --fx-color) */
-.pc.blue .pc-cond .pc-ic,.pc.orange .pc-cond .pc-ic{width:30px;height:30px;opacity:1;color:#fff;
-  filter:drop-shadow(0 0 6px var(--fx-color,#888)) drop-shadow(0 0 2px var(--fx-color,#888));}
+  /* no panel and no outline — just the icon slides out toward centre */
+  background:none;opacity:0;}
+/* the RL icon is WHITE, glowing in the active side colour (--fx-color) + a dark drop shadow for depth */
+.pc.blue .pc-cond .pc-ic,.pc.orange .pc-cond .pc-ic{width:32px;height:32px;opacity:1;color:#fff;
+  filter:drop-shadow(0 0 7px var(--fx-color,#888)) drop-shadow(0 0 3px var(--fx-color,#888)) drop-shadow(0 2px 4px rgba(0,0,0,.7));}
 .pc-cond svg{width:28px;height:28px;}
 /* The pill sits BEHIND the card (z-index:0) and slides out from under its inner edge — a clean
    translate + fade instead of a clip-path wipe. Rounded only on the outer (visible) corners. */
@@ -327,19 +326,11 @@ img{display:block;}
 @keyframes pcDemoFlash{from{opacity:.85;}to{opacity:0;}}
 
 /* ─── BOTTOM-RIGHT: polygonal stat bar flowing into a circular boost ─── */
-.br{position:absolute;right:30px;bottom:62px;z-index:30;display:flex;flex-direction:column;align-items:flex-end;gap:2px;
+.br{position:absolute;right:30px;bottom:62px;z-index:30;display:flex;align-items:flex-end;   /* boost anchors to the card row, not the cam; z-index keeps the boost circle above the ticker bar */
   filter:drop-shadow(0 16px 26px rgba(0,0,0,.55));   /* one shadow around the whole shape */
   transform:translateY(28px);opacity:0;
   transition:transform .45s cubic-bezier(.2,.85,.25,1),opacity .45s;}
 .br.show{transform:translateY(0);opacity:1;}
-/* the bar + boost circle row (was the old .br layout) */
-.br-row{display:flex;align-items:flex-end;}   /* boost anchors to the card row, not the cam */
-/* title-sponsor logo (brand 'title' placement): the wrap exactly overlays the player-stats bar
-   (430px wide, offset left of the boost's 84px overhang) so the logo centres over the STATS, not
-   the boost. */
-.br-titlewrap{width:430px;margin-right:84px;display:flex;justify-content:center;}
-.br-titlewrap.hidden{display:none;}
-.br-title-logo{max-height:48px;max-width:380px;object-fit:contain;filter:drop-shadow(0 2px 5px rgba(0,0,0,.6));}
 
 /* the polygonal bar — slanted left edge; its right end tucks behind the circle */
 .br-bar{position:relative;width:430px;overflow:hidden;
@@ -534,45 +525,61 @@ img{display:block;}
 
 /* ───── REPLAY TRANSITION — dark panel swipes IN (sponsor visible), holds, swipes OUT ──── */
 .replay-wipe{position:absolute;top:0;bottom:0;left:-16%;right:-16%;z-index:80;pointer-events:none;overflow:hidden;
-  --rp-dur:2.6s;display:flex;align-items:center;justify-content:center;
+  --rp-dur:2.4s;display:flex;align-items:center;justify-content:center;
   /* soft team-colour glow over a dark panel — depth without the per-frame cost of a striped texture */
   background:
     radial-gradient(140% 140% at 30% 50%,color-mix(in srgb,var(--replay-color,#fff) 17%,transparent) 0%,transparent 60%),
     linear-gradient(120deg,rgba(8,11,18,.965) 0%,rgba(14,20,32,.98) 55%,rgba(8,11,18,.965) 100%);
   transform:translateX(-130%) skewX(-8deg);will-change:transform;backface-visibility:hidden;}
-.replay-wipe.logo-only{--rp-dur:1.6s;}   /* the after-replay outro is quicker */
-.replay-wipe.play{animation:replaySwipe var(--rp-dur) cubic-bezier(.66,0,.2,1);}
-@keyframes replaySwipe{0%{transform:translateX(-130%) skewX(-8deg);}18%{transform:translateX(0) skewX(-8deg);}
-  80%{transform:translateX(0) skewX(-8deg);}100%{transform:translateX(130%) skewX(-8deg);}}
-/* thick vertical colour bar on the trailing side of the wipe */
-.replay-wipe::after{content:'';position:absolute;top:0;bottom:0;right:15%;width:26px;
-  background:linear-gradient(90deg,color-mix(in srgb,var(--replay-color,#fff) 70%,#000) 0%,var(--replay-color,#fff) 50%,color-mix(in srgb,var(--replay-color,#fff) 70%,#000) 100%);
-  box-shadow:0 0 48px var(--replay-color,#fff),0 0 14px var(--replay-color,#fff);}
+.replay-wipe.logo-only{--rp-dur:1.4s;}   /* the after-replay outro is quicker */
+/* snappy in/out — fast transit, long hold, punchy easing */
+.replay-wipe.play{animation:replaySwipe var(--rp-dur) cubic-bezier(.85,0,.15,1);}
+@keyframes replaySwipe{0%{transform:translateX(-130%) skewX(-8deg);}13%{transform:translateX(0) skewX(-8deg);}
+  85%{transform:translateX(0) skewX(-8deg);}100%{transform:translateX(130%) skewX(-8deg);}}
+/* diagonal ACCENT SPEED-LINES on the trailing side (replaces the old thin vertical bar) */
+.replay-wipe::after{content:'';position:absolute;top:-6%;bottom:-6%;right:4%;width:38%;z-index:2;pointer-events:none;
+  background:repeating-linear-gradient(96deg,color-mix(in srgb,var(--replay-color,#fff) 82%,transparent) 0 6px,transparent 6px 40px);
+  -webkit-mask:linear-gradient(90deg,transparent,#000 82%);mask:linear-gradient(90deg,transparent,#000 82%);
+  filter:drop-shadow(0 0 9px var(--replay-color,#fff));opacity:.82;}
+/* energetic light-streak that sweeps across right after the panel covers */
+.replay-wipe::before{content:'';position:absolute;top:-10%;bottom:-10%;left:-30%;width:24%;z-index:3;pointer-events:none;
+  background:linear-gradient(100deg,transparent 0%,rgba(255,255,255,.20) 46%,rgba(255,255,255,.32) 54%,transparent 100%);opacity:0;}
+.replay-wipe.play::before{animation:rpStreak var(--rp-dur) ease;}
+@keyframes rpStreak{0%,13%{opacity:0;left:-30%;}19%{opacity:.9;}40%{opacity:.9;left:120%;}44%,100%{opacity:0;left:120%;}}
 
-/* optional brand skin: full-frame transparent image behind the transition content (over the dark
-   panel, under the REPLAY text + brand logo). Counter-skewed + sized to the 1920×1080 stage so it
-   stays upright and fills the frame while the panel is centred. */
+/* optional brand skin: full-frame image layered ABOVE everything else so a border/frame image sits
+   over the whole transition (edges frame it; text/logo show through its transparent centre).
+   Counter-skewed + sized to the 1920×1080 stage so it stays upright and fills the frame. */
 .replay-skin{position:absolute;top:50%;left:50%;width:1920px;height:1080px;
-  transform:translate(-50%,-50%) skewX(8deg);object-fit:cover;z-index:1;pointer-events:none;}
+  transform:translate(-50%,-50%) skewX(8deg);object-fit:cover;z-index:6;pointer-events:none;}
 .replay-skin.hidden{display:none;}
+/* scrim: darkens the centre over the skin so the outline REPLAY text reads on ANY background
+   (incl. a light/white skin) while the skin's edges still show. */
+.replay-scrim{position:absolute;inset:0;z-index:1;pointer-events:none;
+  background:radial-gradient(58% 86% at 50% 50%,rgba(4,6,10,.66) 0%,rgba(4,6,10,.3) 48%,transparent 74%);}
 /* content (counter-skewed so it stays upright): sponsor logo ABOVE the word + chevrons */
-.replay-stack{position:relative;z-index:2;display:flex;flex-direction:column;align-items:center;gap:24px;transform:skewX(8deg);}
+.replay-stack{position:relative;z-index:4;display:flex;flex-direction:column;align-items:center;gap:24px;transform:skewX(8deg);}
 .replay-logo{max-height:128px;max-width:600px;object-fit:contain;opacity:0;filter:drop-shadow(0 6px 18px rgba(0,0,0,.6));}
 .replay-chevrons{display:flex;gap:9px;opacity:0;}
 .replay-chevrons i{width:0;height:0;border-style:solid;border-width:11px 0 11px 18px;
   border-color:transparent transparent transparent var(--replay-color,#fff);}
-.replay-text{position:relative;font-size:200px;font-weight:900;font-style:italic;letter-spacing:.1em;
-  white-space:nowrap;text-transform:uppercase;line-height:1;padding:0 .14em;overflow:visible;
-  background:linear-gradient(100deg,#fff 40%,var(--replay-color,#fff));-webkit-background-clip:text;background-clip:text;color:transparent;
+/* OUTLINE type: hollow italic letters with an accent glow + a dark edge for contrast on any bg */
+.replay-text{position:relative;font-size:212px;font-weight:900;font-style:italic;letter-spacing:.05em;
+  white-space:nowrap;text-transform:uppercase;line-height:1;padding:0 .16em;overflow:visible;
+  color:transparent;-webkit-text-stroke:2.5px #f2f6ff;
+  filter:drop-shadow(0 0 3px rgba(0,0,0,.8)) drop-shadow(0 0 30px color-mix(in srgb,var(--replay-color,#fff) 60%,transparent)) drop-shadow(0 8px 20px rgba(0,0,0,.5));
   opacity:0;}
 .replay-text::after{content:'';position:absolute;left:6%;right:6%;bottom:-16px;height:5px;border-radius:3px;
   background:var(--replay-color,#fff);box-shadow:0 0 18px var(--replay-color,#fff);transform:scaleX(0);transform-origin:left;}
 /* content fades in once the panel covers, holds longer, fades before it swipes away */
-.replay-wipe.play .replay-text{animation:rpContent var(--rp-dur) ease;}
+.replay-wipe.play .replay-text{animation:rpTextPunch var(--rp-dur) cubic-bezier(.2,.9,.25,1);}   /* SNAP in with a scale punch */
+.replay-wipe.play .replay-stack{animation:rpStackShake .5s cubic-bezier(.36,.07,.19,.97) .12s;}   /* quick impact shake */
 .replay-wipe.play .replay-logo{animation:rpContent var(--rp-dur) ease .06s backwards;}
 .replay-wipe.play .replay-chevrons{animation:rpContent var(--rp-dur) ease backwards;}
 .replay-wipe.play .replay-text::after{animation:replayUnderline var(--rp-dur) cubic-bezier(.3,.6,.15,1);}
 @keyframes rpContent{0%,11%{opacity:0;}21%{opacity:1;}78%{opacity:1;}88%,100%{opacity:0;}}
+@keyframes rpTextPunch{0%,9%{opacity:0;transform:scale(1.4);}15%{opacity:1;transform:scale(.98);}19%{transform:scale(1.03);}24%{transform:scale(1);}82%{opacity:1;transform:scale(1);}90%,100%{opacity:0;transform:scale(1.08);}}
+@keyframes rpStackShake{0%,100%{transform:skewX(8deg) translate(0,0);}15%{transform:skewX(8deg) translate(-4px,3px);}35%{transform:skewX(8deg) translate(4px,-2px);}55%{transform:skewX(8deg) translate(-3px,2px);}75%{transform:skewX(8deg) translate(2px,-1px);}}
 @keyframes replayUnderline{0%,16%{transform:scaleX(0);}30%{transform:scaleX(1);}76%{transform:scaleX(1);}100%{transform:scaleX(1);}}
 /* small SCORING-TEAM logo beneath the REPLAY word (full swipe only; brand logo as fallback) */
 .replay-team-logo{max-height:90px;max-width:230px;object-fit:contain;opacity:0;margin-top:8px;filter:drop-shadow(0 5px 14px rgba(0,0,0,.55));}
@@ -700,10 +707,12 @@ img{display:block;}
 @keyframes wiRise{from{opacity:0;transform:translateY(22px);}to{opacity:1;transform:translateY(0);}}
 
 /* ───────────────────────────── SPONSOR RAIL ────────────────────────────── */
+/* bottom-left, vertically in line with the boost statcard bar (bottom:62) so the two mirror each other;
+   the left side has room for many sponsors. Rides with the statcard — hidden when the card is hidden. */
 .sponsor{position:absolute;left:40px;bottom:62px;display:flex;align-items:center;gap:14px;
-  padding:11px 18px;background:var(--glass);backdrop-filter:blur(10px);
+  padding:9px 16px;background:var(--glass);backdrop-filter:blur(10px);
   border:1px solid var(--hair);border-radius:13px;}
-.sr-label{font-size:11px;letter-spacing:.26em;color:var(--muted);text-transform:uppercase;}
+.sr-label{display:none;}   /* no PARTNERS label on the in-game overlay (the scoreboard scene keeps its own .sb-rail-lbl) */
 .sr-slot{display:flex;align-items:center;min-width:90px;height:34px;}
 .sr-slot.static{gap:18px;}   /* show all partner logos side by side (static mode) */
 .sr-logo{max-height:34px;max-width:150px;object-fit:contain;}
@@ -821,10 +830,9 @@ img{display:block;}
       </div>
       <span id="score-blue" class="score blue">0</span>
     </div>
-    <div class="center">
+    <div id="timer-center" class="center">
       <span id="ot-badge" class="ot-badge hidden">OT</span>
       <span id="timer" class="timer">5:00</span>
-      <img id="timer-logo" class="timer-logo hidden" alt="">
     </div>
     <div class="team orange">
       <span id="score-orange" class="score orange">0</span>
@@ -853,11 +861,12 @@ img{display:block;}
 </svg>
 <!-- slanted event banner — seats on top of the bar -->
 <div id="event-name" class="event-name">ROCKET LEAGUE TOURNAMENT</div>
-<!-- GAME n of X sub-card (hangs below center) — label + title-sponsor logo hanging beneath, matching
-     the OVERTIME card. REPLACED by the red OVERTIME card during overtime. -->
+<!-- title-sponsor logo — floats (transparent) in the seam between the scorebar and the GAME label so it
+     can sit higher without a second opaque panel stacking on the scorebar (which reads as a double layer) -->
+<img id="game-sub-logo" class="gs-logo hidden" alt="">
+<!-- GAME n of X sub-card (hangs below center) — label only. REPLACED by the red OVERTIME card during overtime. -->
 <div id="game-sub" class="game-sub">
   <span id="game-sub-label" class="gs-label">GAME 1 OF 5</span>
-  <img id="game-sub-logo" class="gs-logo hidden" alt="">
 </div>
 <!-- OVERTIME card: takes the GAME n of X spot during OT — a red OVERTIME tab (dashboard label) with
      the sponsor / AI-trophy logo hanging beneath it in the same card. -->
@@ -872,29 +881,25 @@ img{display:block;}
 
 <!-- BOTTOM-RIGHT: polygonal stat bar flowing into a circular boost -->
 <div id="br" class="br">
-  <!-- title sponsor (brand 'title' placement) — centred above the player-stats bar (not the boost) -->
-  <div id="br-titlewrap" class="br-titlewrap hidden"><img id="br-title-logo" class="br-title-logo" alt=""></div>
-  <div class="br-row">
-    <div class="br-bar">
-      <div id="cam" class="cam"><div class="cam-load"><img alt=""></div><div class="cam-live"><i></i>LIVE</div><div class="cam-stub">NO CAM</div></div>
-      <div class="card-head">
-        <span id="cname" class="cname">PLAYER</span>
-        <div class="head-score"><span class="hs-lbl">Score</span><span id="st-score" class="hs-val">0</span></div>
-      </div>
-      <div class="stats">
-        <div class="stat"><span id="st-goals" class="stat-val">0</span><span class="stat-lbl">Goals</span></div>
-        <div class="stat"><span id="st-assists" class="stat-val">0</span><span class="stat-lbl">Assists</span></div>
-        <div class="stat"><span id="st-saves" class="stat-val">0</span><span class="stat-lbl">Saves</span></div>
-        <div class="stat"><span id="st-shots" class="stat-val">0</span><span class="stat-lbl">Shots</span></div>
-        <div class="stat"><span id="st-demos" class="stat-val">0</span><span class="stat-lbl">Bumps</span></div>
-      </div>
+  <div class="br-bar">
+    <div id="cam" class="cam"><div class="cam-load"><img alt=""></div><div class="cam-live"><i></i>LIVE</div><div class="cam-stub">NO CAM</div></div>
+    <div class="card-head">
+      <span id="cname" class="cname">PLAYER</span>
+      <div class="head-score"><span class="hs-lbl">Score</span><span id="st-score" class="hs-val">0</span></div>
     </div>
-    <div class="boost">
-      <canvas id="boost-canvas" width="138" height="138"></canvas>
-      <div class="boost-core">
-        <span id="boost-val" class="boost-val">0</span>
-        <span class="boost-lbl">BOOST</span>
-      </div>
+    <div class="stats">
+      <div class="stat"><span id="st-goals" class="stat-val">0</span><span class="stat-lbl">Goals</span></div>
+      <div class="stat"><span id="st-assists" class="stat-val">0</span><span class="stat-lbl">Assists</span></div>
+      <div class="stat"><span id="st-saves" class="stat-val">0</span><span class="stat-lbl">Saves</span></div>
+      <div class="stat"><span id="st-shots" class="stat-val">0</span><span class="stat-lbl">Shots</span></div>
+      <div class="stat"><span id="st-demos" class="stat-val">0</span><span class="stat-lbl">Bumps</span></div>
+    </div>
+  </div>
+  <div class="boost">
+    <canvas id="boost-canvas" width="138" height="138"></canvas>
+    <div class="boost-core">
+      <span id="boost-val" class="boost-val">0</span>
+      <span class="boost-lbl">BOOST</span>
     </div>
   </div>
 </div>
@@ -916,7 +921,7 @@ img{display:block;}
   </div>
   <div class="rlt-stats">
     <div id="rlt-speed-wrap" class="rlt-stat">
-      <span class="rlt-stat-val"><span id="rlt-speed">0</span><span class="rlt-unit">KM/H</span></span>
+      <span class="rlt-stat-val"><span id="rlt-speed">0</span><span id="rlt-unit" class="rlt-unit">MPH</span></span>
       <span class="rlt-stat-lbl">SHOT SPEED</span>
     </div>
     <div id="rlt-goals-wrap" class="rlt-stat">
@@ -940,6 +945,7 @@ img{display:block;}
 <!-- REPLAY TRANSITION — full-screen, plays once when the goal replay starts -->
 <div id="replay-wipe" class="replay-wipe hidden">
   <img id="replay-skin" class="replay-skin hidden" alt="">
+  <div class="replay-scrim"></div>
   <div class="replay-stack">
     <img id="replay-logo" class="replay-logo hidden" alt="">
     <div class="replay-chevrons"><i></i><i></i><i></i></div>
@@ -960,7 +966,7 @@ img{display:block;}
   <div id="goal-card" class="goal-card blue">
     <div class="goal-speed">
       <span id="goal-speed" class="goal-speed-val">0</span>
-      <span class="goal-speed-lbl">KM/H</span>
+      <span id="goal-speed-lbl" class="goal-speed-lbl">MPH</span>
     </div>
     <div class="goal-info">
       <span class="goal-tag">GOAL</span>
@@ -1442,8 +1448,9 @@ function pickSpectated(players, spectated){
 function renderStatcard(players, spectated, facecams){
   const mod=el('br');
   const p=pickSpectated(players, spectated);
-  if(!p){ if(mod) mod.classList.remove('show'); showCam(null,facecams); return; }
+  if(!p){ if(mod) mod.classList.remove('show'); syncSponsorToStatcard(); showCam(null,facecams); return; }
   if(mod) mod.classList.add('show');
+  syncSponsorToStatcard();
   // after a replay the HUD is cleared; restore it once we're back in normal play (NOT the replay
   // 'goal' view). During the post-replay kickoff hold we WAIT for the clock to tick (ball touched,
   // handled in applyGame) so the sidebars animate in at kickoff instead of popping back immediately;
@@ -1462,25 +1469,26 @@ function renderStatcard(players, spectated, facecams){
   const pct=Math.max(0,Math.min(100,p.boost||0));
   drawBoost(pct, color); setText('boost-val', Math.round(pct));
   showCam(p, facecams);
-
-  // Title sponsor above the player-stats bar — but NOT when a facecam is up (the cam takes that space).
-  const camShowing = !!(el('cam') && el('cam').classList.contains('on'));
-  const tLogo = titleSponsorLogo();
-  const brl=el('br-title-logo'), brw=el('br-titlewrap');
-  if(brl && brw){
-    if(tLogo && !camShowing){ brl.src=tLogo; brw.classList.remove('hidden'); }
-    else { if(!tLogo) brl.removeAttribute('src'); brw.classList.add('hidden'); }
-  }
 }
 
 /* ── sponsor rail ─────────────────────────────────────────────────────────── */
 let srTimer=null, srIdx=0;
+let _sponsorHasContent=false;
+function statcardVisible(){   // the bottom-right statcard is up = has a spectated player AND not hidden for a replay/kickoff
+  const m=el('br');
+  return !!(m && m.classList.contains('show') && !m.classList.contains('r-hide'));
+}
+function syncSponsorToStatcard(){   // partners rail rides with the statcard — it hides whenever the card is hidden
+  const rail=el('sponsor'); if(!rail) return;
+  rail.classList.toggle('hidden', !(_sponsorHasContent && statcardVisible()));
+}
 function renderSponsorRail(brand){
   const rail=el('sponsor'); if(!rail) return;
   const sp=(brand && (brand.railSponsors || brand.sponsors))||[];
   if(srTimer){ clearInterval(srTimer); srTimer=null; }
-  if(!sp.length){ rail.classList.add('hidden'); return; }
-  rail.classList.remove('hidden');
+  _sponsorHasContent = sp.length>0;
+  if(!sp.length){ syncSponsorToStatcard(); return; }
+  syncSponsorToStatcard();
   setText('sr-label', brand.sponsorLabel||'PARTNERS');
   const slot=el('sr-slot'); if(!slot) return;
   const one=(s)=>{ s=s||{}; if(s.logo){ const i=document.createElement('img'); i.className='sr-logo'; i.src=s.logo; i.alt=s.name||''; return i; }
@@ -1562,11 +1570,17 @@ function renderTicker(data){
 
 /* ── goal banner ──────────────────────────────────────────────────────────── */
 let goalTimer=null;
+// Shot speed: the RL Stats API reports km/h; convert to the producer-selected unit (default MPH).
+// (RL doesn't expose the player's UI unit setting, so this follows the control-panel toggle.)
+function fmtSpeed(kph){
+  if(currentState.speedUnit==='kmh') return { val: Math.round(kph||0), lbl:'KM/H' };
+  return { val: Math.round((kph||0)*0.621371), lbl:'MPH' };
+}
 function showGoal(goal){
   if(!goal) return;
   const banner=el('goal'), card=el('goal-card');
   card.className='goal-card '+(teamOf(goal)===0?'blue':'orange');
-  setText('goal-speed', goal.speed||0);
+  { const s=fmtSpeed(goal.speed); setText('goal-speed', s.val); setText('goal-speed-lbl', s.lbl); }
   setText('goal-scorer', (goal.scorer||'').toUpperCase());
   const a=el('goal-assist');
   if(goal.assisterName){ a.textContent='ASSIST · '+goal.assisterName.toUpperCase(); a.classList.remove('hidden'); }
@@ -1672,7 +1686,7 @@ function showReplay(mode){
   }
   if(logoOnly && !logo) return;   // no logo to show on the outro → skip it entirely
   w.classList.remove('hidden','play'); void w.offsetWidth; w.classList.add('play');
-  clearTimeout(replayTimer); replayTimer=setTimeout(()=>{ w.classList.add('hidden'); w.classList.remove('play'); }, logoOnly?1700:2700);
+  clearTimeout(replayTimer); replayTimer=setTimeout(()=>{ w.classList.add('hidden'); w.classList.remove('play'); }, logoOnly?1500:2500);
 }
 // hideReplay must NOT interrupt an in-flight swipe — it self-completes via its own timer
 function hideReplay(){ clearTimeout(goalRevealTimer); }
@@ -1683,7 +1697,7 @@ function hideReplay(){ clearTimeout(goalRevealTimer); }
 //   view_change goal → replay started → show the scorer lower third (+ fires T1 if not yet shown) [showView]
 //   view_change hud  → replay ENDED → TRANSITION 2 (logo outro), then kickoff                     [endGoalCycle]
 let replayOutroTimer=null, outroPlayed=false, replayStarted=false, brazilGoal=false, introTimer=null, introPlayed=false;
-let hudArmed=true, prevGameTime=null, hudRearmSafety=null, kickoffHold=false;
+let hudArmed=true, prevGameTime=null, hudRearmSafety=null, kickoffHold=false, kickoffHoldStart=0;
 // ── transition timing ─────────────────────────────────────────────────────────
 // TRANSITION 1 fires this long after the ball hits the net — tuned so it lands a beat before the
 // replay starts (RL cuts to the replay ~2.5–3s after a goal). It also fires automatically the
@@ -1727,20 +1741,24 @@ function endGoalCycle(toScoreboard){   // replay ENDED → clear the HUD until p
 function hudHideForReplay(){   // replay started → hide the live HUD, leaving ONLY the replay lower third
   el('players-blue').classList.add('r-hide'); el('players-orange').classList.add('r-hide');
   el('br').classList.add('r-hide');
+  syncSponsorToStatcard();
 }
 function hudClearForKickoff(){ // replay ended → everything stays hidden until live play resumes
   hudArmed=false;
   kickoffHold=true;             // don't let renderStatcard re-show the HUD until the clock ticks (ball touched)
   prevGameTime=null;            // re-baseline the clock so the FIRST tick after kickoff is what releases the hold
+  kickoffHoldStart=Date.now();  // hard wall-clock cap (checked every frame) so the HUD can't stay hidden if the timer is throttled/cleared
   el('players-blue').classList.add('r-hide'); el('players-orange').classList.add('r-hide');
   el('br').classList.add('r-hide');
-  clearTimeout(hudRearmSafety); hudRearmSafety=setTimeout(hudShow, 8000);   // backstop re-show if the clock never ticks (updates stop)
+  syncSponsorToStatcard();
+  clearTimeout(hudRearmSafety); hudRearmSafety=setTimeout(hudShow, 6000);   // backstop re-show if game updates stop entirely
 }
 function hudShow(){            // ball touched + spectating → animate the sidebars + statcard back in
   clearTimeout(hudRearmSafety);
   hudArmed=true; kickoffHold=false;
   el('players-blue').classList.remove('r-hide'); el('players-orange').classList.remove('r-hide');
   el('br').classList.remove('r-hide');
+  syncSponsorToStatcard();
 }
 
 // ── REPLAY lower third: who scored + their boost + the assister ───────────────
@@ -1762,10 +1780,9 @@ function showReplayLowerThird(){
   const a=el('rlt-assist');
   if(goal.assisterName){ setText('rlt-assist-name', String(goal.assisterName).toUpperCase()); a.classList.remove('hidden'); }
   else a.classList.add('hidden');
-  // shot speed (km/h, from the goal event)
-  const speed = goal.speed!=null ? Math.round(goal.speed) : null;
+  // shot speed — converted to the producer-selected unit (mph/kmh)
   const sw=el('rlt-speed-wrap');
-  if(speed!=null && speed>0){ setText('rlt-speed', speed); sw.classList.remove('hidden'); } else sw.classList.add('hidden');
+  if(goal.speed!=null && goal.speed>0){ const s=fmtSpeed(goal.speed); setText('rlt-speed', s.val); setText('rlt-unit', s.lbl); sw.classList.remove('hidden'); } else sw.classList.add('hidden');
   // scorer's goals this game (brace / hat-trick) — explicit value if given, else the live player tally
   const sp=(currentState.players||[]).find(p=>p.name===goal.scorer);
   const gls = goal.scorerGoals!=null ? goal.scorerGoals : (sp && sp.goals!=null ? sp.goals : 1);
@@ -2095,7 +2112,7 @@ function drawHeaderOutline(){
   // dip DOWN and around the GAME tab (or the OT card if OT is showing)
   const gs=el('game-sub'), ots=el('ot-subbar'), g=vis(gs)?gs:(vis(ots)?ots:null);
   if(g){
-    const gw=g.offsetWidth, gh=g.offsetHeight, gL=CX-gw/2, gR=CX+gw/2, gB=sBot+gh;
+    const gw=g.offsetWidth, gh=g.offsetHeight, gL=CX-gw/2, gR=CX+gw/2, gB=(g.offsetTop||sBot)+gh;
     const gsl=Math.min(15, gw/2);   // slant inset — matches the card's clip-path so the beam follows the slanted edges
     d+=' L '+f(gR)+' '+f(sBot)
      + ' L '+f(gR-gsl)+' '+f(gB)
@@ -2189,12 +2206,11 @@ function applyGame(game, bestOf, fmt){
       parts.forEach((p,i)=>{ if(i) label.appendChild(sepEl()); label.appendChild(p); });
     }
   }
-  // title-sponsor logo (brand 'title' placement) sits in the timer box, under the clock — always on,
-  // in regulation and OT alike. (The GAME card is label-only now; game-sub-logo stays hidden.)
+  // title-sponsor logo (brand 'title' placement) floats above the round/game label. Hidden during OT so
+  // it never sits over the OVERTIME swipe/card.
   const tLogo=titleSponsorLogo();
-  const tim=el('timer-logo');
-  if(tim){ if(tLogo){ tim.src=tLogo; tim.classList.remove('hidden'); } else { tim.removeAttribute('src'); tim.classList.add('hidden'); } }
-  // (the title logo above the boost/stat card is rendered in renderStatcard, which knows the cam state)
+  const gsl=el('game-sub-logo');
+  if(gsl){ if(tLogo && !isOT){ gsl.src=tLogo; gsl.classList.remove('hidden'); } else { gsl.classList.add('hidden'); } }
 
   // OT = the plugin's authoritative overtime flag ONLY. Rocket League sets isOT exactly
   // when overtime actually begins — i.e. the ball touched the ground at 0:00 while tied.
@@ -2207,7 +2223,10 @@ function applyGame(game, bestOf, fmt){
   // the post-replay kickoff hold and animate the HUD back in (so it returns AT kickoff, not the
   // instant the replay ends). prevGameTime is re-baselined to null in hudClearForKickoff.
   const gt = (typeof game.time === 'number') ? game.time : null;
-  if(kickoffHold && !isOT && gt!=null && prevGameTime!=null && gt < prevGameTime) hudShow();
+  if(kickoffHold){
+    if(!isOT && gt!=null && prevGameTime!=null && gt < prevGameTime) hudShow();          // clock ticked down → ball touched, release AT kickoff
+    else if(Date.now() - kickoffHoldStart > 5000) hudShow();                              // hard cap: never let the HUD stay hidden past a slow kickoff
+  }
   prevGameTime = gt;
 
   // ── Overtime: the bottom bar stays put and just gains an OVERTIME chip in the middle (built above).
@@ -2315,7 +2334,7 @@ function dispatch(msg){
     case 'game_reset':   // a new game/match → release the post-match scoreboard
       el('players-blue').innerHTML=''; el('players-orange').innerHTML='';
       { const cp=el('cam-pool'); if(cp) cp.innerHTML=''; const cm=el('cam'); if(cm){ [...cm.querySelectorAll('iframe')].forEach(f=>f.remove()); } }
-      el('br').classList.remove('show'); el('cam').classList.remove('on');
+      el('br').classList.remove('show'); el('cam').classList.remove('on'); syncSponsorToStatcard();
       prevBlue=prevOrange=null; colCache={}; activeView=null; otShown=false; pcPrev={};
       goalCycleActive=false; outroPlayed=false; replayStarted=false; brazilGoal=false; introPlayed=false; lastSwipeAt=0; clearTimeout(goalCycleTimer); clearTimeout(replayOutroTimer); clearTimeout(introTimer); el('replay-wipe').classList.remove('logo-only');
       endBrazil();   // a fresh game can't inherit a stuck BRAZIL theme (e.g. previous game ended 7-1)
@@ -2346,14 +2365,14 @@ connect();
    so you can preview goal/replay/overtime/scorecard without RL or the server. */
 const DEV = {
   eventName:'PRO CHAMPIONSHIP SERIES', bestOf:7,
-  brand:{ logo:'/assets/rl.png', color:'#2f8dff' },   // broadcaster/org logo shown atop the scoreboard
+  brand:{ logo:'/assets/rl.png', color:'#2f8dff', spots:{ title:'/assets/rl.png' } },   // broadcaster/org logo + a title sponsor for dev preview
   teams:{ blue:{name:'TEAM ALPHA',logo:'/assets/rl.png',color:'#2f8dff'},
           orange:{name:'TEAM OMEGA',logo:'/assets/rl.png',color:'#c026d3'} },
   game:{ blueScore:1, orangeScore:1, number:4, isOT:false },
   series:{ blue:2, orange:1 },
   spectated:'PONCHO',
   overtime:{ label:'OVERTIME', logo:null, bg:'#e0202a', color:'#ffffff' },
-  replay:{ label:'REPLAY', logo:'/assets/rl.png', outroLogo:'/assets/rl.png', colorMode:'team', skin:'/assets/replay-skin-test.png' },   // real asset so the dev preview shows a logo; skin = drop your test background at assets/replay-skin-test.png
+  replay:{ label:'REPLAY', logo:'/assets/rl.png', outroLogo:'/assets/rl.png', colorMode:'team', skin:'/assets/images/replay-skin-test.png' },   // real asset for the dev logo; skin = test background at assets/images/replay-skin-test.png
   scoreboardAd:{ label:'PRESENTED BY', logo:null },
   players:[
     {name:'PONCHO',team:0,score:540,goals:2,assists:1,saves:3,shots:5,demos:1,boost:67,isPrimary:true},

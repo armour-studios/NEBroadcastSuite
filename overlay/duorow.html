@@ -416,6 +416,15 @@
       text-transform: none;
       letter-spacing: 0;
     }
+
+    .cam-country { display: inline-flex; align-items: center; }
+    .cam-flag {
+      height: 20px;
+      width: auto;
+      display: block;
+      border-radius: 3px;
+      box-shadow: 0 1px 3px rgba(0,0,0,.45);
+    }
     .cam-handle::before {
       font-family: 'Font Awesome 6 Brands';
       font-weight: 400;
@@ -489,7 +498,7 @@
       filter: drop-shadow(0 2px 6px rgba(0,0,0,.35));
     }
 
-    /* Brand logo + event title — small strip under "Presented by", on its OWN solid card (same
+    /* Brand logo + event title — strip ABOVE "Presented by", on its OWN solid card (same
        treatment as .presented-by) so it stays legible over transparent-compositied game footage
        instead of relying on contrast against whatever happens to be behind the overlay. */
     .brand-strip {
@@ -516,7 +525,7 @@
       background: rgba(255,255,255,.15);
     }
     .brand-strip-event {
-      font-size: 12px;
+      font-size: 18px;
       font-weight: 700;
       letter-spacing: 0.12em;
       text-transform: uppercase;
@@ -524,7 +533,7 @@
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
-      max-width: 500px;
+      max-width: min(78vw, 1100px);
     }
 
     .deck-strip {
@@ -691,16 +700,16 @@
     </div>
 
     <div class="zone-footer">
+      <div class="brand-strip is-empty" id="brand-strip">
+        <img id="brand-strip-logo" class="brand-strip-logo" alt="" style="display:none">
+        <span class="brand-strip-sep" id="brand-strip-sep" style="display:none"></span>
+        <span id="brand-strip-event" class="brand-strip-event"></span>
+      </div>
       <div class="footer-row">
         <div class="presented-by is-empty" id="presented-by">
           <span class="pb-label" id="pb-label">PRESENTED BY</span>
           <img id="pb-logo" class="pb-logo" alt="" style="display:none">
         </div>
-      </div>
-      <div class="brand-strip is-empty" id="brand-strip">
-        <img id="brand-strip-logo" class="brand-strip-logo" alt="" style="display:none">
-        <span class="brand-strip-sep" id="brand-strip-sep" style="display:none"></span>
-        <span id="brand-strip-event" class="brand-strip-event"></span>
       </div>
       <div class="deck-strip is-empty" id="deck-strip">
         <span id="tagline" class="deck-strip-text">Live</span>
@@ -760,6 +769,7 @@
           <div class="cam-plate">
             <span id="staffname${i}" class="cam-name">—</span>
             <span id="socials${i}" class="cam-handle" style="display:none"></span>
+            <span id="country${i}" class="cam-country" style="display:none"></span>
           </div>`;
         cams.appendChild(card);
       }
@@ -806,6 +816,17 @@
           socEl.style.display = '';
         } else {
           socEl.style.display = 'none';
+        }
+        const ctryEl = el('country' + (i + 1));
+        if (ctryEl) {
+          const code = (c.country || '').toString().trim().toLowerCase();
+          if (casters && casters.showCountry && code) {
+            // Image flag (renders on Windows/OBS, unlike flag emoji). Local bundled SVG first,
+            // flagcdn.com as the fallback until flags are downloaded.
+            ctryEl.innerHTML = '<img class="cam-flag" alt="" src="/assets/flags/' + code + '.svg"'
+              + ' onerror="this.onerror=null;this.src=\'https://flagcdn.com/' + code + '.svg\'">';
+            ctryEl.style.display = '';
+          } else { ctryEl.innerHTML = ''; ctryEl.style.display = 'none'; }
         }
       }
     }
@@ -865,8 +886,8 @@
       }
     }
 
-    // Small brand-logo + event-title strip under "Presented by" — identifies the org/event without
-    // competing visually with the sponsor call-out above it.
+    // Brand-logo + event-title strip above "Presented by" — identifies the org/event, sitting over
+    // the sponsor call-out below it.
     function renderBrandStrip(data) {
       const brand = data.brand || {};
       const wrap = el('brand-strip');
@@ -949,10 +970,11 @@
       render({
         casters: {
           visible: true,
+          showCountry: true,
           lowerThird: 'Summer Showdown 2026 — Grand Final',
           list: [
-            { id: 'c1', name: 'Jordan Reyes', handle: 'jreyescasts', camUrl: '', slot: 1, social: 'x' },
-            { id: 'c2', name: 'Mia Tanaka', handle: 'miaplays', camUrl: '', slot: 2, social: 'twitch' }
+            { id: 'c1', name: 'Jordan Reyes', handle: 'jreyescasts', camUrl: '', slot: 1, social: 'x', country: 'us' },
+            { id: 'c2', name: 'Mia Tanaka', handle: 'miaplays', camUrl: '', slot: 2, social: 'twitch', country: 'jp' }
           ]
         },
         brand: {

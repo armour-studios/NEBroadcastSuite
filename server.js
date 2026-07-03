@@ -5808,6 +5808,7 @@ flowBus.setMaxListeners(100);
 
 const _flowSeqState  = {};  // { [flowId]: { step: number, timeoutHandle: Timeout|null } }
 const _flowLastFired = {};  // { [flowId]: ms timestamp } — for cooldown enforcement
+const _flowIntervals = new Map(); // { flowId → intervalHandle } — for timer_interval triggers
 
 const FLOW_TRIGGER_TYPES = [
   // Rocket League
@@ -5823,6 +5824,8 @@ const FLOW_TRIGGER_TYPES = [
   'twitch_stream_online', 'twitch_stream_offline', 'twitch_raid', 'twitch_sub', 'twitch_bits', 'twitch_follow', 'twitch_channel_points', 'twitch_hype_train', 'twitch_poll_end', 'twitch_ad_break',
   // In-app / Timer
   'timer_countdown_end', 'break_shown', 'break_hidden',
+  // Scheduled
+  'time_of_day',
   // Manual
   'manual'
 ];
@@ -5831,6 +5834,34 @@ function initFlowEngine() {
   FLOW_TRIGGER_TYPES.forEach(type => {
     flowBus.on(type, data => _onFlowTrigger(type, data || {}));
   });
+  // Minute tick for time_of_day triggers — fires on every minute boundary.
+  setInterval(() => {
+    const now = new Date();
+    const hhmm = now.getHours().toString().padStart(2, '0') + ':' + now.getMinutes().toString().padStart(2, '0');
+    flowBus.emit('time_of_day', { time: hhmm });
+  }, 60000);
+  _syncFlowIntervals();
+}
+
+// Start/stop per-flow setIntervals for timer_interval triggers.
+function _syncFlowIntervals() {
+  // Stop intervals for flows that were deleted, disabled, or no longer have a timer trigger.
+  for (const [flowId, handle] of _flowIntervals) {
+    const flow = (state.flows || []).find(f => f.id === flowId);
+    const hasTimer = flow && flow.enabled && (flow.triggers || []).some(t => t.type === 'timer_interval');
+    if (!hasTimer) { clearInterval(handle); _flowIntervals.delete(flowId); }
+  }
+  // Start intervals for eligible flows that aren't running yet.
+  for (const flow of (state.flows || [])) {
+    if (!flow.enabled || _flowIntervals.has(flow.id)) continue;
+    const trig = (flow.triggers || []).find(t => t.type === 'timer_interval');
+    if (!trig) continue;
+    const ms = Math.max(1000, (Number((trig.params || {}).seconds) || 60) * 1000);
+    _flowIntervals.set(flow.id, setInterval(() => {
+      const live = (state.flows || []).find(f => f.id === flow.id);
+      if (live && live.enabled) _fireFlow(live, { type: 'timer_interval' });
+    }, ms));
+  }
 }
 
 function _onFlowTrigger(type, data) {
@@ -5883,8 +5914,62 @@ function _triggerMatches(trigger, type, data) {
     }
     case 'series_ended':
       return !p.winner || p.winner === 'any' || data.winner === p.winner;
+    case 'time_of_day':
+      return !!p.time && p.time === data.time;
     case 'manual':
       return !p.flowId || p.flowId === data.flowId;
+    default:
+      return true;
+  }
+}
+
+// ── Conditions (AND guards checked at fire time) ─────────────────────────────
+function _checkFlowConditions(conditions) {
+  for (const cond of conditions) {
+    if (!_evalCondition(cond)) return false;
+  }
+  return true;
+}
+function _evalCondition(cond) {
+  const p = cond.params || {};
+  switch (cond.type) {
+    case 'if_obs_scene':
+      return !p.scene || ((state.obs || {}).currentScene || '') === p.scene;
+    case 'if_streaming':
+      return !!((state.obs || {}).streaming);
+    case 'if_not_streaming':
+      return !((state.obs || {}).streaming);
+    case 'if_recording':
+      return !!((state.obs || {}).recording);
+    case 'if_not_recording':
+      return !((state.obs || {}).recording);
+    case 'if_game_number': {
+      const n = Number(p.value);
+      return isNaN(n) || state.game.number === n;
+    }
+    case 'if_series_state': {
+      const b = state.series.blue || 0, o = state.series.orange || 0;
+      if (p.compare === 'blue_leads')   return b > o;
+      if (p.compare === 'orange_leads') return o > b;
+      if (p.compare === 'tied')         return b === o;
+      return true;
+    }
+    case 'if_score_diff': {
+      const diff = Math.abs((state.game.blueScore || 0) - (state.game.orangeScore || 0));
+      const val = Number(p.value) || 0;
+      if (p.op === 'gte') return diff >= val;
+      if (p.op === 'lte') return diff <= val;
+      if (p.op === 'eq')  return diff === val;
+      return true;
+    }
+    case 'if_time_range': {
+      const now = new Date();
+      const cur = now.getHours() * 60 + now.getMinutes();
+      const [sh, sm] = (p.start || '00:00').split(':').map(Number);
+      const [eh, em] = (p.end   || '23:59').split(':').map(Number);
+      const start = sh * 60 + sm, end = eh * 60 + em;
+      return start <= end ? (cur >= start && cur <= end) : (cur >= start || cur <= end);
+    }
     default:
       return true;
   }
@@ -5916,11 +6001,19 @@ async function _fireFlow(flow, triggerData) {
   const now = Date.now();
   const cooldown = Number(flow.cooldown) || 0;
   if (cooldown > 0 && _flowLastFired[flow.id] && now - _flowLastFired[flow.id] < cooldown) return;
+  // Conditions: all must pass (AND logic)
+  if ((flow.conditions || []).length && !_checkFlowConditions(flow.conditions)) return;
   _flowLastFired[flow.id] = now;
 
-  for (const action of (flow.actions || [])) {
-    try { await _executeFlowAction(action, triggerData); }
-    catch (e) { console.error('[Flow]', flow.name, '→', action.type, e.message); }
+  const repeatCount = Math.max(1, Number(flow.repeatCount) || 1);
+  const repeatDelay = Math.max(0, Number(flow.repeatDelay) || 0);
+  for (let rep = 0; rep < repeatCount; rep++) {
+    if (rep > 0 && repeatDelay > 0) await new Promise(r => setTimeout(r, repeatDelay));
+    for (const action of (flow.actions || [])) {
+      if (Number(action.delay) > 0) await new Promise(r => setTimeout(r, Number(action.delay)));
+      try { await _executeFlowAction(action, triggerData); }
+      catch (e) { console.error('[Flow]', flow.name, '→', action.type, e.message); }
+    }
   }
 }
 
@@ -6128,6 +6221,28 @@ async function _executeFlowAction(action, ctx) {
       if (obsClient && obsClient.isConnected() && p.sourceName && p.filterName)
         await obsClient.setSourceFilterEnabled(p.sourceName.trim(), p.filterName.trim(), false).catch(() => {});
       break;
+    case 'obs_set_transition':
+      if (obsClient && obsClient.isConnected()) {
+        try {
+          if (p.transitionName) await obsClient.call('SetCurrentSceneTransition', { transitionName: p.transitionName });
+          if (p.durationMs != null) await obsClient.call('SetCurrentSceneTransitionDuration', { transitionDuration: Number(p.durationMs) || 300 });
+        } catch(e) { console.warn('[Flow] set transition:', e.message); }
+      }
+      break;
+    case 'match_set_score':
+      if (p.team === 'blue')   { state.game.blueScore   = Math.max(0, Number(p.value) || 0); broadcastFullState(); }
+      if (p.team === 'orange') { state.game.orangeScore = Math.max(0, Number(p.value) || 0); broadcastFullState(); }
+      break;
+    case 'run_flow': {
+      const target = p.flowId && (state.flows || []).find(f => f.id === p.flowId && f.enabled);
+      if (target) {
+        for (const a of (target.actions || [])) {
+          if (Number(a.delay) > 0) await new Promise(r => setTimeout(r, Number(a.delay)));
+          try { await _executeFlowAction(a, ctx); } catch(e) { console.error('[Flow] run_flow sub-action:', e.message); }
+        }
+      }
+      break;
+    }
   }
 }
 
@@ -10501,7 +10616,7 @@ function handleControlMessage(msg, ws) {
       if (typeof p.visible === 'boolean') state.upcoming.visible = p.visible;
       if (typeof p.title === 'string') state.upcoming.title = p.title;
       if (typeof p.eyebrow === 'string') state.upcoming.eyebrow = p.eyebrow;
-      if (p.layout === 'cards' || p.layout === 'board') state.upcoming.layout = p.layout;
+      if (['cards', 'board', 'single', 'dual'].includes(p.layout)) state.upcoming.layout = p.layout;
       if (Array.isArray(p.matches)) state.upcoming.matches = p.matches;
       saveAppState();
       broadcastFullState();
@@ -10617,6 +10732,7 @@ function handleControlMessage(msg, ws) {
       const idx = state.flows.findIndex(f => f.id === flow.id);
       if (idx >= 0) state.flows[idx] = flow;
       else state.flows.push(flow);
+      _syncFlowIntervals();
       saveAppState();
       broadcastFullState();
       break;
@@ -10627,6 +10743,7 @@ function handleControlMessage(msg, ws) {
       if (!id) break;
       if (_flowSeqState[id]) { clearTimeout(_flowSeqState[id].timeoutHandle); delete _flowSeqState[id]; }
       state.flows = state.flows.filter(f => f.id !== id);
+      _syncFlowIntervals();
       saveAppState();
       broadcastFullState();
       break;
@@ -10638,6 +10755,7 @@ function handleControlMessage(msg, ws) {
       if (f) {
         f.enabled = !f.enabled;
         if (!f.enabled && _flowSeqState[id]) { clearTimeout(_flowSeqState[id].timeoutHandle); delete _flowSeqState[id]; }
+        _syncFlowIntervals();
         saveAppState();
         broadcastFullState();
       }

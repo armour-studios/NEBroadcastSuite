@@ -26,21 +26,21 @@
      nothing of it renders outside this mask no matter how far the animation's translateX travels. */
   .ticker-mask { flex: 1 1 auto; min-width: 0; height: 100%; overflow: hidden; position: relative; display: flex; align-items: center; }
   .ticker-track { display: inline-flex; align-items: center; white-space: nowrap; animation: ticker-scroll linear infinite;
-    padding-left: 28px; position: relative; }
+    padding-left: 28px; position: relative; font-size: 23px; font-weight: 700; line-height: 1; }
   @keyframes ticker-scroll { from { transform: translateX(0); } to { transform: translateX(-50%); } }
   /* Match scoreline: [LIVE|FINAL] [logoA] TEAM A  s - s  TEAM B [logoB] */
   .tk-match { display: inline-flex; align-items: center; gap: 12px; }
-  .tk-stat { display: inline-flex; align-items: center; gap: 7px; font-weight: 700; font-size: 14px; letter-spacing: 2px; border-radius: 4px; padding: 3px 9px; }
+  .tk-stat { display: inline-flex; align-items: center; gap: 7px; letter-spacing: 2px; border-radius: 4px; padding: 2px 8px; }
   .tk-live { color: #04130a; background: var(--live); }
   .tk-live .tk-stat-dot { width: 8px; height: 8px; border-radius: 50%; background: #04130a; animation: tk-pulse2 1.2s ease-out infinite; }
   @keyframes tk-pulse2 { 0% { box-shadow: 0 0 0 0 rgba(4,19,10,.5); } 70% { box-shadow: 0 0 0 6px rgba(4,19,10,0); } 100% { box-shadow: 0 0 0 0 rgba(4,19,10,0); } }
   .tk-final { color: #9aa3b0; border: 1px solid rgba(255,255,255,.22); }
-  .tk-logo { height: 32px; width: 32px; object-fit: contain; }
-  .tk-team { font-weight: 700; font-size: 23px; color: #fff; text-transform: uppercase; letter-spacing: .02em; }
-  .tk-score { font-weight: 700; font-size: 23px; color: var(--brand); text-transform: uppercase; padding: 0 4px; font-variant-numeric: tabular-nums; }
-  .tk-sep { color: rgba(255,255,255,.25); font-size: 22px; padding: 0 28px; }
-  /* Manual-message segment — all caps too */
-  .ticker-segment { font-weight: 600; font-size: 24px; color: #fff; text-transform: uppercase; letter-spacing: .02em; }
+  .tk-logo { height: 28px; width: 28px; object-fit: contain; }
+  .tk-team { color: #fff; text-transform: uppercase; letter-spacing: .02em; }
+  .tk-score { color: var(--brand); text-transform: uppercase; padding: 0 4px; font-variant-numeric: tabular-nums; }
+  .tk-sep { color: rgba(255,255,255,.25); padding: 0 28px; }
+  /* Manual-message segment */
+  .ticker-segment { color: #fff; text-transform: uppercase; letter-spacing: .02em; }
   /* ?embed=1 (in-builder preview): centre + enlarge */
   .tk-embed .ticker { bottom: auto; top: 50%; transform: translateY(-50%); height: 140px; }
   .tk-embed .ticker-live { font-size: 48px; padding: 0 46px; gap: 22px; }

@@ -214,7 +214,7 @@
         <span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/></svg></span><span class="nav-label">ESPORTS</span></button>
       <button class="tab-btn nav-item" data-tab="replays" id="tab-replays">
         <span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/><polygon points="10 8 16 12 10 16 10 8" fill="currentColor" stroke="none"/></svg></span><span class="nav-label">Video Editor</span></button>
-      <button class="tab-btn nav-item" data-tab="social" id="tab-social">
+      <button class="tab-btn nav-item" data-tab="social" id="tab-social" style="display:none;">
         <span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg></span><span class="nav-label">Social</span></button>
 
       <div class="nav-group-label">System</div>
@@ -513,18 +513,8 @@
         <button class="btn btn-primary btn-xs" id="dash-pv-take" disabled>PUSH LIVE</button>
       </div>
     </div>
-    <div class="deck-layout">
-      <div class="deck-main">
-        <div id="dash-deck-grid" class="deck-grid"></div>
-        <p id="dash-deck-empty" class="deck-empty" style="display:none;">No buttons yet — click + Add to create one.</p>
-      </div>
-      <aside class="deck-side">
-        <section class="section deck-pv-section">
-          <div class="deck-pv-head"><span>Live preview</span><button class="btn btn-ghost btn-xs" id="dash-pv-reload" title="Reload preview">⟳</button></div>
-          <div class="live-pv"><iframe id="dash-pv-frame" src="http://localhost:3000/live.html" title="Live preview"></iframe></div>
-        </section>
-      </aside>
-    </div>
+    <div id="dash-deck-grid" class="deck-grid"></div>
+    <p id="dash-deck-empty" class="deck-empty" style="display:none;">No buttons yet — click + Add to create one.</p>
   </section>
 
   <!-- Active Game switcher removed from the Dashboard — it lives in the top header dropdown + sidebar. -->
@@ -1791,6 +1781,9 @@
               <input type="text" class="input-text dcc-slot-lbl-input" id="dcc-slot-lbl-2" data-slot-label="2" value="Caster 2" maxlength="30" placeholder="Slot 2" spellcheck="false">
               <input type="text" class="input-text dcc-slot-lbl-input" id="dcc-slot-lbl-3" data-slot-label="3" value="Caster 3" maxlength="30" placeholder="Slot 3" spellcheck="false">
               <input type="text" class="input-text dcc-slot-lbl-input" id="dcc-slot-lbl-4" data-slot-label="4" value="Caster 4" maxlength="30" placeholder="Slot 4" spellcheck="false">
+              <label class="dcc-slot-toggle" title="Show each caster's country on the desk overlay">
+                <input type="checkbox" id="dcc-show-country"> Show country
+              </label>
             </div>
             <div id="dcc-crew-list" class="dcc-section-roster"></div>
           </div>
@@ -2377,6 +2370,9 @@
     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
       <h3 class="section-title" style="margin-bottom: 0;">Crew <span id="crew-count" style="color:var(--muted); font-weight:400; font-size:13px;"></span></h3>
       <div style="display:flex; gap:8px; align-items:center;">
+        <label class="dcc-slot-toggle" style="margin:0;" title="Show each caster's country on the desk overlay">
+          <input type="checkbox" id="crew-show-country"> Show country on desk
+        </label>
         <button class="btn btn-ghost btn-sm" id="crew-sort-btn" style="white-space:nowrap;">Sort A-Z</button>
         <button class="btn btn-ghost btn-sm" id="crew-delete-all-btn" style="white-space:nowrap; color:#f56565;" title="Delete all crew members">Delete All</button>
       </div>
@@ -4266,9 +4262,12 @@
                     <option value="5" selected>Bo5</option>
                     <option value="7">Bo7</option>
                   </select>
-                  <span class="field-hint">Sets how many map slots show below.</span>
+                  <span class="field-hint">Sets the starting map count &amp; the max — a series doesn't always play every map (Bo5 is often decided 3-0/3-1). Add slots below as it goes further.</span>
                 </div>
                 <div id="mp-slots" class="mp-slots"></div>
+                <div style="margin-top:8px;">
+                  <button type="button" class="btn btn-ghost btn-sm" id="mp-add-slot">+ Add map</button>
+                </div>
               </div>
             </div>
           </div>
@@ -4355,47 +4354,66 @@
               <div class="gfx-scene-body" id="gfx-schedule-body">
                 <button id="btn-gfx-schedule-push" style="display:none;"></button>
                 <button id="btn-gfx-schedule-clear" style="display:none;"></button>
-                <!-- Title -->
+                <!-- Title + Layout -->
                 <div class="gfx-ctrl-row">
                   <label class="field-label" style="flex-shrink:0;" for="gfx-sch-title">Title</label>
-                  <input type="text" id="gfx-sch-title" class="input-text" placeholder="UPCOMING MATCHES / WEEK 11" style="flex:1; min-width:0;">
-                </div>
-                <!-- Layout + eyebrow -->
-                <div class="gfx-ctrl-row">
-                  <label class="field-label" style="flex-shrink:0;" for="gfx-sch-layout">Layout</label>
-                  <select id="gfx-sch-layout" class="input-select" style="max-width:150px;">
-                    <option value="cards">Cards row</option>
-                    <option value="board">Weekly board</option>
+                  <input type="text" id="gfx-sch-title" class="input-text" placeholder="UPCOMING MATCHES" style="flex:1; min-width:0;">
+                  <select id="gfx-sch-layout" class="input-select" style="max-width:124px; flex-shrink:0;">
+                    <option value="cards">1 Column</option>
+                    <option value="board">2 Columns</option>
                   </select>
-                  <input type="text" id="gfx-sch-eyebrow" class="input-text" placeholder="On Deck" style="flex:1; min-width:0;" title="Small label shown above the title">
                 </div>
-                <!-- Stream queue -->
-                <div class="gfx-sch-section">
-                  <div class="gfx-sch-head">
-                    <span class="field-label" style="margin:0;">On stream</span>
-                    <span id="gfx-sch-conn" class="sps-desc"></span>
+                <!-- Source tabs -->
+                <div class="gfx-ctrl-row" style="margin-top:4px;">
+                  <div class="gfx-src-tabs">
+                    <button type="button" class="gfx-src-tab is-on" id="gfx-sch-tab-auto">Tournament</button>
+                    <button type="button" class="gfx-src-tab" id="gfx-sch-tab-manual">Manual</button>
                   </div>
-                  <div id="gfx-sch-live-slot" class="gfx-sch-live">No stream match queued.</div>
-                  <div class="field-label" style="margin:8px 0 4px;">Next up</div>
-                  <div id="gfx-sch-next-list" class="gfx-sch-next"></div>
-                  <p id="gfx-sch-no-queue" class="sps-empty" style="display:none;">No queue — connect a tournament platform in Settings.</p>
+                  <span id="gfx-sch-conn" class="sps-desc" style="margin-left:8px; align-self:center;"></span>
                 </div>
-                <!-- Manual entries -->
-                <details class="sps-section" open>
-                  <summary>Matches — manual, start.gg or league</summary>
-                  <div id="gfx-sch-manual-list"></div>
-                  <p id="gfx-sch-manual-empty" class="sps-empty">No matches yet — add one or pull from a source below.</p>
-                  <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-top:8px;">
-                    <button class="btn btn-secondary btn-sm" id="gfx-sch-add">+ Add match</button>
-                    <button class="btn btn-secondary btn-sm" id="gfx-sch-pull-startgg" title="Fill rows from the current event queue">Pull Queue</button>
-                    <span style="display:inline-flex; gap:4px; align-items:center;">
-                      <select id="gfx-sch-league" class="input-select" style="max-width:150px;"><option value="">League…</option></select>
-                      <select id="gfx-sch-week" class="input-select" style="max-width:110px;"><option value="">All weeks</option></select>
-                      <button class="btn btn-secondary btn-sm" id="gfx-sch-pull-league" title="Fill rows from the selected in-app league week (matches + scores)">Pull</button>
-                    </span>
+                <!-- Auto/tournament panel -->
+                <div id="gfx-sch-auto-wrap">
+                  <div class="gfx-sch-section" style="margin-top:6px;">
+                    <div class="field-label" style="margin-bottom:4px;">On stream</div>
+                    <div id="gfx-sch-live-slot" class="gfx-sch-live">No stream match queued.</div>
+                    <div class="field-label" style="margin:6px 0 3px;">Next up</div>
+                    <div id="gfx-sch-next-list" class="gfx-sch-next"></div>
+                    <p id="gfx-sch-no-queue" class="sps-empty" style="display:none;">No queue — connect a tournament platform in Settings.</p>
                   </div>
-                  <p class="field-hint" style="margin-top:6px;">Date &amp; Time are optional; toggle <strong>Stream</strong> to mark which match is on the broadcast.</p>
-                </details>
+                  <div style="display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin-top:8px;">
+                    <button class="btn btn-secondary btn-sm" id="gfx-sch-pull-startgg">Pull Queue</button>
+                    <select id="gfx-sch-league" class="input-select" style="max-width:128px;"><option value="">League…</option></select>
+                    <select id="gfx-sch-week" class="input-select" style="max-width:96px;"><option value="">All weeks</option></select>
+                    <button class="btn btn-secondary btn-sm" id="gfx-sch-pull-league">Pull</button>
+                  </div>
+                </div>
+                <!-- Manual add form -->
+                <div id="gfx-sch-manual-wrap" style="display:none; margin-top:8px;">
+                  <div style="display:flex; gap:6px; align-items:center;">
+                    <input type="text" id="gfx-sch-fa" class="input-text" placeholder="Team A" list="saved-teams-datalist" autocomplete="off" style="flex:1; min-width:0; font-size:11px;">
+                    <span style="color:var(--muted); font-size:11px; flex-shrink:0;">vs</span>
+                    <input type="text" id="gfx-sch-fb" class="input-text" placeholder="Team B" list="saved-teams-datalist" autocomplete="off" style="flex:1; min-width:0; font-size:11px;">
+                  </div>
+                  <div style="display:flex; gap:6px; align-items:center; margin-top:5px; flex-wrap:wrap;">
+                    <input type="text" id="gfx-sch-fround" class="input-text" placeholder="Round / Label" style="flex:1; min-width:80px; font-size:11px;">
+                    <input type="date" id="gfx-sch-fdate" class="input-text" style="width:130px; font-size:11px;">
+                    <input type="time" id="gfx-sch-ftime" class="input-text" style="width:88px; font-size:11px;">
+                    <label class="qt-toggle" style="margin:0; flex-shrink:0;" title="Mark as the streamed match">
+                      <span>Stream</span>
+                      <span class="switch"><input type="checkbox" id="gfx-sch-fstream"><span class="slider"></span></span>
+                    </label>
+                    <button class="btn btn-primary btn-sm" id="gfx-sch-add" style="flex-shrink:0;">+ Add</button>
+                  </div>
+                </div>
+                <!-- Shared match list -->
+                <div style="margin-top:10px;">
+                  <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:4px;">
+                    <span class="field-label" style="margin:0;" id="gfx-sch-count"></span>
+                    <button class="btn btn-ghost btn-xs" id="gfx-sch-clear-all" style="color:#f56565;">Clear all</button>
+                  </div>
+                  <div id="gfx-sch-list"></div>
+                  <p id="gfx-sch-manual-empty" class="sps-empty">No matches — pull from start.gg queue or add manually.</p>
+                </div>
                 <p id="gfx-sch-status" class="sps-desc" style="margin-top:4px;"></p>
               </div>
             </div>
@@ -7590,7 +7608,7 @@ PacketSendRate=10</pre>
     <div class="crew-dlg-row">
       <div class="crew-dlg-field">
         <label class="field-label">Country</label>
-        <input type="text" id="crew-f-country" class="input-text" placeholder="USA, Canada, UK…" maxlength="60">
+        <div id="crew-f-country-mount"></div>
       </div>
       <div class="crew-dlg-field" style="max-width:140px;">
         <label class="field-label">Default Cam</label>

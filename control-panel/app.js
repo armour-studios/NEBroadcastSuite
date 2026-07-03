@@ -290,10 +290,21 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     const crewActs = document.getElementById('talent-topbar-crew-actions');
     if (crewActs) crewActs.style.display = page === 'crew' ? '' : 'none';
     if (page === 'crew') renderCrewList();
+    try { localStorage.setItem('talent_active_page', page); } catch (_) {}
   }
 
   nav.querySelectorAll('.talent-page-btn').forEach((b) => b.addEventListener('click', () => showPage(b.dataset.talentpage)));
   window._talentShowPage = showPage;
+  // Reopen whichever Talent sub-page (Teams/Crew) the producer was last on — survives refresh.
+  // Deferred to a macrotask: this IIFE runs very early in the file (near the top), and showPage()
+  // reaches into renderCrewList() — calling that synchronously this early risks the same TDZ crash
+  // documented for switchRole('monitor')/loadScenePreviews if it touches any `let`/`const` declared
+  // further down. setTimeout(...,0) waits for the whole script to finish once first — cheap
+  // insurance, no visible delay.
+  setTimeout(() => {
+    let savedTalentPage; try { savedTalentPage = localStorage.getItem('talent_active_page'); } catch (_) {}
+    if (savedTalentPage && panels[savedTalentPage]) showPage(savedTalentPage);
+  }, 0);
 })();
 
 // ── Crew page: unified talent profile manager ──
@@ -305,16 +316,29 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
 
   let editId     = null;
   let _fromLibId = null; // set when opened from the Hosts grid edit button
+  let _crewCountry = ''; // ISO alpha-2 code from the flag picker (shared with player country storage)
+
+  // Mount the searchable flag-thumbnail country picker (same widget the player editor uses) into the
+  // dialog so you get flags-while-searching. It stores the lowercase ISO code in _crewCountry.
+  function mountCountryPicker(code) {
+    const mount = el('crew-f-country-mount'); if (!mount) return;
+    _crewCountry = (code || '').toLowerCase();
+    mount.innerHTML = '';
+    if (typeof buildCountryControl === 'function') {
+      mount.appendChild(buildCountryControl(_crewCountry, (c) => { _crewCountry = (c || '').toLowerCase(); }));
+    }
+  }
 
   function clearForm() {
     editId = null;
     _fromLibId = null;
-    ['crew-f-name','crew-f-handle','crew-f-role','crew-f-social-handle','crew-f-country','crew-f-paypal'].forEach((id) => { const e = el(id); if (e) e.value = ''; });
+    ['crew-f-name','crew-f-handle','crew-f-role','crew-f-social-handle','crew-f-paypal'].forEach((id) => { const e = el(id); if (e) e.value = ''; });
     const notes = el('crew-f-notes'); if (notes) notes.value = '';
     const g = el('crew-f-group'); if (g) g.value = 'casters';
     const s = el('crew-f-social'); if (s) s.value = 'none';
     const dc = el('crew-f-default-cam'); if (dc) dc.innerHTML = dccCamOptionsHtml('', '— None —');
     const ds = el('crew-f-desk-slot'); if (ds) ds.value = '0';
+    mountCountryPicker('');
     const titleEl = el('crew-edit-dlg-title'); if (titleEl) titleEl.textContent = 'Add Crew Member';
     if (saveBtn) saveBtn.textContent = 'Save';
   }
@@ -324,7 +348,8 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     editId = d.id || null;
     const set = (id, v) => { const e = el(id); if (e) e.value = v || ''; };
     set('crew-f-name', d.name); set('crew-f-handle', d.handle); set('crew-f-role', d.role);
-    set('crew-f-social-handle', d.socialHandle); set('crew-f-country', d.country); set('crew-f-paypal', d.paypal);
+    set('crew-f-social-handle', d.socialHandle); set('crew-f-paypal', d.paypal);
+    mountCountryPicker(d.country);
     const notes = el('crew-f-notes'); if (notes) notes.value = d.notes || '';
     const g = el('crew-f-group'); if (g) g.value = d.group || 'casters';
     const s = el('crew-f-social'); if (s) s.value = d.social || 'none';
@@ -349,7 +374,7 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     const social       = el('crew-f-social')?.value || 'none';
     const socialHandle = el('crew-f-social-handle')?.value.trim();
     const defaultCam   = el('crew-f-default-cam')?.value || '';
-    const country      = el('crew-f-country')?.value.trim();
+    const country      = _crewCountry;
     const paypal       = el('crew-f-paypal')?.value.trim();
     const notes        = el('crew-f-notes')?.value.trim();
     if (!name) { el('crew-f-name')?.focus(); return; }
@@ -376,6 +401,10 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
   const search = el('crew-search'), filterGroup = el('crew-filter-group');
   if (search) search.addEventListener('input', renderCrewList);
   if (filterGroup) filterGroup.addEventListener('change', renderCrewList);
+
+  // Show-country-on-desk toggle (mirrors the caster-desk slot-labels bar; same server state)
+  const crewShowCountry = el('crew-show-country');
+  if (crewShowCountry) crewShowCountry.addEventListener('change', () => send('set_casters_show_country', { showCountry: crewShowCountry.checked }));
 
   // Group filter pills → sync hidden select + re-render
   const crewGroupNav = el('crew-group-nav');
@@ -1206,6 +1235,8 @@ function renderDccHostsGrid() {
       if (e.key === 'Enter') e.target.blur();
     });
   }
+  const showCountryCb = el('dcc-show-country');
+  if (showCountryCb) showCountryCb.addEventListener('change', () => send('set_casters_show_country', { showCountry: showCountryCb.checked }));
 
   // ── Players pane: team rosters ───────────────────────────────────────────
   ['blue', 'orange'].forEach((side) => {
@@ -1801,19 +1832,26 @@ function renderDccHostsGrid() {
   el('btn-hide-veto-gfx')?.addEventListener('click', () => send('set_veto', { visible: false }));
 
   // ── Map Pool (manual mode) ────────────────────────────────────────────────
-  // A simpler alternative to the guided pick/ban sequence: pick Best-of-X, get that many map
-  // slots, choose each map from the active game's pool (server-provided vetoPools[activeGame]),
-  // and enter a score to overlay team logos + result on that card. Auto-saves as you edit
-  // (mirrors mapscreen.html's data contract — same set_veto {title, maps} the guided veto uses).
+  // A simpler alternative to the guided pick/ban sequence: choose each map from the active
+  // game's pool and enter a score. A Best-of-X series does NOT always play all X maps — Bo3 is
+  // often decided 2-0, Bo5 often 3-0/3-1 — so "Best of X" only sets the natural STARTING count
+  // (the minimum maps needed to decide the series) and a ceiling (can't play more maps than the
+  // format allows); the producer grows the list with "+ Add map" only if the series actually
+  // goes that far, and can remove a slot they added by mistake. Auto-saves as you edit (mirrors
+  // mapscreen.html's data contract — same set_veto {title, maps} the guided veto uses).
   function mpMapPool() {
     const game = currentState && currentState.activeGame;
     return (currentState && currentState.vetoPools && currentState.vetoPools[game]) || [];
   }
-  function mpRenderSlots(prefill) {
+  function mpMinSlots(bo) { return Math.max(1, Math.ceil((Number(bo) || 5) / 2)); }   // maps needed to CLINCH
+  function mpMaxSlots(bo) { return Math.max(1, Number(bo) || 5); }                    // can't exceed the format
+  // count omitted → max(existing picks, the format's minimum). Pass it explicitly for Add/Remove/BO-change.
+  function mpRenderSlots(prefill, count) {
     const wrap = el('mp-slots'); if (!wrap) return;
-    const n = parseInt(el('mp-bestof')?.value, 10) || 5;
-    const pool = mpMapPool();
+    const bo = parseInt(el('mp-bestof')?.value, 10) || 5;
     const existing = prefill || [];
+    const n = Math.max(1, Math.min(mpMaxSlots(bo), count != null ? count : Math.max(existing.length, mpMinSlots(bo))));
+    const pool = mpMapPool();
     wrap.innerHTML = '';
     for (let i = 0; i < n; i++) {
       const m = existing[i] || {};
@@ -1827,15 +1865,21 @@ function renderDccHostsGrid() {
       const sep = document.createElement('span'); sep.className = 'mp-sep'; sep.textContent = '–';
       const scB = document.createElement('input'); scB.type = 'number'; scB.className = 'input-text mp-score-b';
       scB.min = '0'; scB.placeholder = 'B'; scB.value = (m.score && m.score.b) || '';
+      const rm = document.createElement('button'); rm.type = 'button'; rm.className = 'btn btn-ghost btn-xs mp-slot-rm';
+      rm.textContent = '×'; rm.title = 'Remove this map slot'; rm.disabled = n <= 1;
+      rm.addEventListener('click', () => { mpRenderSlots(mpBuildMapsPayload(true), n - 1); mpSendDebounced(); });
       [sel, scA, scB].forEach((inp) => { inp.addEventListener('input', mpSendDebounced); inp.addEventListener('change', mpSendDebounced); });
-      row.appendChild(num); row.appendChild(sel); row.appendChild(scA); row.appendChild(sep); row.appendChild(scB);
+      row.appendChild(num); row.appendChild(sel); row.appendChild(scA); row.appendChild(sep); row.appendChild(scB); row.appendChild(rm);
       wrap.appendChild(row);
     }
+    const addBtn = el('mp-add-slot'); if (addBtn) addBtn.style.display = n >= mpMaxSlots(bo) ? 'none' : '';
   }
-  function mpBuildMapsPayload() {
+  // keepBlanks=true preserves unselected slots (needed so Add/Remove/BO-change re-render at the
+  // exact right index) — the version actually SENT to the server always filters them out.
+  function mpBuildMapsPayload(keepBlanks) {
     const wrap = el('mp-slots'); if (!wrap) return [];
     const pool = mpMapPool();
-    return [...wrap.querySelectorAll('.mp-slot')].map((row) => {
+    const rows = [...wrap.querySelectorAll('.mp-slot')].map((row) => {
       const sel = row.querySelector('.mp-map-select');
       const p = pool.find((x) => x.id === sel.value);
       const a = parseInt(row.querySelector('.mp-score-a').value, 10);
@@ -1847,25 +1891,40 @@ function renderDccHostsGrid() {
         winner: (hasScore && sa !== sb) ? (sa > sb ? 'a' : 'b') : '',
         score: { a: sa, b: sb }
       };
-    }).filter((m) => m.name);   // skip unselected slots — the overlay only shows real picks
+    });
+    return keepBlanks ? rows : rows.filter((m) => m.name);   // sent payload skips unselected slots
   }
   const mpSendDebounced = debounce(() => {
     send('set_veto', { title: (el('mp-title')?.value || '').trim(), maps: mpBuildMapsPayload() });
   }, 350);
-  el('mp-bestof')?.addEventListener('change', () => { mpRenderSlots(mpBuildMapsPayload()); mpSendDebounced(); });
+  el('mp-add-slot')?.addEventListener('click', () => {
+    const cur = mpBuildMapsPayload(true);
+    mpRenderSlots(cur, cur.length + 1);
+    mpSendDebounced();
+  });
+  el('mp-bestof')?.addEventListener('change', () => {
+    // Keep whatever's already picked (capped to the new format's max); re-derive the slot count
+    // from that, not a hard reset — switching Bo5→Bo7 shouldn't erase the 3 maps already entered.
+    const bo = parseInt(el('mp-bestof')?.value, 10) || 5;
+    const capped = mpBuildMapsPayload(true).slice(0, mpMaxSlots(bo));
+    mpRenderSlots(capped, Math.max(mpMinSlots(bo), capped.length));
+    mpSendDebounced();
+    // Map Pool's best-of IS the series format — write it to the same global state.bestOf the
+    // Series panel/scoreboard already use, so the lower third knows the real series length
+    // even when only some of the maps have been entered yet.
+    send('set_best_of', { value: bo });
+  });
   el('mp-title')?.addEventListener('input', mpSendDebounced);
-  // Populate from current state when the Map Pool tab opens — best-of guessed from the map count
-  // already saved (falls back to the series' own Best-of setting, then 5).
+  // Populate from current state when the Map Pool tab opens. Best-of drives the MAX/starting
+  // count, but the actual slot count shown is whatever's already saved (or that format's minimum
+  // if nothing's picked yet) — never force it down to a stale best-of-derived count.
   function mpSyncFromState(data) {
     const v = (data && data.veto) || {};
     const titleEl = el('mp-title');
     if (titleEl && document.activeElement !== titleEl) titleEl.value = (v.title && v.title !== 'MAP POOL') ? v.title : '';
     const maps = Array.isArray(v.maps) ? v.maps : [];
     const boSel = el('mp-bestof');
-    if (boSel && document.activeElement !== boSel) {
-      const guess = [1, 3, 5, 7].includes(maps.length) ? maps.length : (data && data.bestOf) || 5;
-      boSel.value = String(guess);
-    }
+    if (boSel && document.activeElement !== boSel) boSel.value = String((data && data.bestOf) || 5);
     if (document.activeElement?.closest('#mp-slots') == null) mpRenderSlots(maps);
   }
 
@@ -2100,11 +2159,11 @@ function renderDccHostsGrid() {
   });
 
   // ── Schedule panel ───────────────────────────────────────────────────────
-  // Collect the editable rows (manual-typed + pulled-from-start.gg/league). Each row
-  // carries round/teams/date/time/stream; a setId (from start.gg) lets the overlay
-  // dedupe against the live queue. The overlay also auto-merges the live start.gg queue.
-  // Format native date/time picker values (ISO YYYY-MM-DD / 24h HH:MM) into the friendly strings
-  // the overlay shows; anything that isn't in that exact shape passes through unchanged.
+  // State lives in _schMatches (JS array). Initialized once from server state on first load,
+  // then driven locally. Auto-saved to server via set_upcoming on every change.
+  let _schMatches = [];
+  let _schInitialized = false;
+
   function schFmtDate(v) {
     const s = (v || '').trim(); const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
     if (!m) return s;
@@ -2117,55 +2176,55 @@ function renderDccHostsGrid() {
     let h = +m[1]; const ap = h >= 12 ? 'PM' : 'AM'; h = h % 12 || 12;
     return h + ':' + m[2] + ' ' + ap;
   }
-  function gfxBuildScheduleMatches() {
-    const out = [];
-    document.querySelectorAll('#gfx-sch-manual-list .gfx-sch-manual-row').forEach((r) => {
-      const v = (s) => (r.querySelector(s)?.value || '').trim();
-      const a = v('.sch-f-a'), b = v('.sch-f-b');
-      if (!a && !b) return;
-      const m = { round: v('.sch-f-round'), teamA: a, teamB: b, date: schFmtDate(v('.sch-f-date')), time: schFmtTime(v('.sch-f-time')),
-        stream: !!r.querySelector('.sch-f-stream')?.checked };
-      if (r.dataset.setid) m.setId = r.dataset.setid;
-      // Scores/week/game-by-game come from pulled sources (league/start.gg) and ride along in the
-      // row's dataset so the board layout can render them; manual rows just leave them unset.
-      if (r.dataset.scorea !== undefined && r.dataset.scorea !== '') m.scoreA = Number(r.dataset.scorea);
-      if (r.dataset.scoreb !== undefined && r.dataset.scoreb !== '') m.scoreB = Number(r.dataset.scoreb);
-      if (r.dataset.week) m.week = r.dataset.week;
-      if (r.dataset.games) { try { m.games = JSON.parse(r.dataset.games); } catch (_) {} }
-      out.push(m);
+
+  function schRenderList() {
+    const list = el('gfx-sch-list');
+    const emptyEl = el('gfx-sch-manual-empty');
+    const countEl = el('gfx-sch-count');
+    if (!list) return;
+    list.innerHTML = '';
+    const n = _schMatches.length;
+    if (countEl) countEl.textContent = n ? n + ' match' + (n > 1 ? 'es' : '') : '';
+    if (emptyEl) emptyEl.style.display = n ? 'none' : '';
+    _schMatches.forEach((m, i) => {
+      const esc = (s) => (s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      const row = document.createElement('div'); row.className = 'gfx-sch-list-row';
+      row.innerHTML =
+        `<div class="gfx-sch-list-teams"><span class="gfx-sch-list-team">${esc(m.teamA || 'TBD')}</span><span class="gfx-sch-vs">vs</span><span class="gfx-sch-list-team">${esc(m.teamB || 'TBD')}</span></div>`
+        + `<div class="gfx-sch-list-meta">`
+        + (m.round ? `<span class="gfx-sch-round">${esc(m.round)}</span>` : '')
+        + ((m.date || m.time) ? `<span class="gfx-sch-list-when">${esc([m.date, m.time].filter(Boolean).join(' · '))}</span>` : '')
+        + (m.stream ? `<span class="gfx-sch-list-badge">On Air</span>` : '')
+        + `</div>`;
+      const del = document.createElement('button');
+      del.className = 'btn btn-ghost btn-xs'; del.textContent = '×'; del.title = 'Remove';
+      del.addEventListener('click', () => { _schMatches.splice(i, 1); schRenderList(); schAutoSave(); });
+      row.appendChild(del);
+      list.appendChild(row);
     });
-    return out.slice(0, 12);
   }
-  // Add an editable schedule row, optionally pre-filled (from start.gg / league / blank).
-  function gfxAddScheduleRow(m) {
-    const list = el('gfx-sch-manual-list'); if (!list) return;
-    m = m || {};
-    const q = (s) => (s || '').toString().replace(/"/g, '&quot;');
-    const row = document.createElement('div'); row.className = 'gfx-sch-manual-row';
-    if (m.setId) row.dataset.setid = m.setId;
-    if (m.scoreA != null) row.dataset.scorea = m.scoreA;
-    if (m.scoreB != null) row.dataset.scoreb = m.scoreB;
-    if (m.week) row.dataset.week = m.week;
-    if (Array.isArray(m.games) && m.games.length) row.dataset.games = JSON.stringify(m.games);
-    row.innerHTML =
-      `<input class="input-text sch-f-round" placeholder="Round" style="width:84px;" value="${q(m.round)}">`
-      + `<input class="input-text sch-f-a" placeholder="Team A" list="saved-teams-datalist" autocomplete="off" value="${q(m.teamA)}">`
-      + `<span class="gfx-sch-vs">vs</span>`
-      + `<input class="input-text sch-f-b" placeholder="Team B" list="saved-teams-datalist" autocomplete="off" value="${q(m.teamB)}">`
-      + `<input class="input-text sch-f-date" type="date" title="Date" style="width:140px;" value="${q(m.date)}">`
-      + `<input class="input-text sch-f-time" type="time" title="Time" style="width:110px;" value="${q(m.time)}">`
-      + `<label class="qt-toggle" style="margin:0;" title="Mark as the streamed match"><span>Stream</span><span class="switch"><input type="checkbox" class="sch-f-stream" ${m.stream ? 'checked' : ''}><span class="slider"></span></span></label>`
-      + `<button class="btn btn-ghost btn-xs gfx-sch-rm">×</button>`;
-    row.querySelector('.gfx-sch-rm').addEventListener('click', () => { row.remove(); const e = el('gfx-sch-manual-empty'); if (e) e.style.display = list.children.length ? 'none' : ''; });
-    list.appendChild(row);
-    const e = el('gfx-sch-manual-empty'); if (e) e.style.display = 'none';
+
+  function schAutoSave() {
+    send('set_upcoming', {
+      matches: _schMatches,
+      title: (el('gfx-sch-title')?.value || 'UPCOMING MATCHES').trim(),
+      layout: el('gfx-sch-layout')?.value || 'cards'
+    });
+  }
+
+  function buildScheduleContentPayload() {
+    return {
+      title: (el('gfx-sch-title')?.value || 'UPCOMING MATCHES').trim(),
+      layout: el('gfx-sch-layout')?.value || 'cards',
+      matches: _schMatches
+    };
   }
 
   function gfxRenderScheduleQueue(state) {
     const sg = (state && state.startgg) || {};
     const queue = sg.queue || [];
     const connected = !!sg.connected;
-    // Keep the league-source dropdown in sync with the in-app leagues.
+    // Sync league dropdown
     const lgSel = el('gfx-sch-league');
     if (lgSel) {
       const leagues = (state && state.leagues) || [];
@@ -2177,14 +2236,22 @@ function renderDccHostsGrid() {
         if (prev) lgSel.value = prev;
       }
     }
-    // Reflect saved layout/eyebrow/title (skip fields the producer is editing).
     const up = (state && state.upcoming) || {};
-    const lay = up.layout === 'board' ? 'board' : 'cards';
-    const laySel = el('gfx-sch-layout'); if (laySel && document.activeElement !== laySel) laySel.value = lay;
-    const pv = el('gfx-pv-schedule');
-    if (pv && pv.dataset.lay !== lay) { pv.dataset.lay = lay; pv.src = (window.SCENE_BASE_URL || 'http://localhost:3000') + '/schedule.html?preview=1&layout=' + lay; }
-    const eyeIn = el('gfx-sch-eyebrow'); if (eyeIn && document.activeElement !== eyeIn && !eyeIn.value) eyeIn.value = up.eyebrow || '';
-    const ttlIn = el('gfx-sch-title'); if (ttlIn && document.activeElement !== ttlIn && !ttlIn.value) ttlIn.value = up.title && up.title !== 'UPCOMING MATCHES' ? up.title : '';
+    const raw = up.layout || 'cards';
+    const lay = (raw === 'board' || raw === 'dual') ? 'board' : 'cards';
+    // Initialize layout, title, and matches only on first load — never overwrite after that
+    // (every broadcast would otherwise reset the dropdown the moment the user clicks away)
+    if (!_schInitialized) {
+      _schInitialized = true;
+      const laySel = el('gfx-sch-layout'); if (laySel) laySel.value = lay;
+      const pv = el('gfx-pv-schedule');
+      if (pv) { pv.dataset.lay = lay; pv.src = (window.SCENE_BASE_URL || 'http://localhost:3000') + '/schedule.html?preview=1&layout=' + lay; }
+      const ttlIn = el('gfx-sch-title'); if (ttlIn && !ttlIn.value) ttlIn.value = up.title && up.title !== 'UPCOMING MATCHES' ? up.title : '';
+      if (Array.isArray(up.matches) && up.matches.length) {
+        _schMatches = up.matches.slice();
+        schRenderList();
+      }
+    }
     if (typeof gfxFillScheduleWeeks === 'function' && document.activeElement !== el('gfx-sch-week')) gfxFillScheduleWeeks();
     const conn = el('gfx-sch-conn');
     if (conn) conn.textContent = connected ? (queue.length ? `${queue.length} in queue` : 'Connected — no queue') : 'start.gg not connected';
@@ -2214,31 +2281,69 @@ function renderDccHostsGrid() {
     ).join('') || '<p class="sps-empty" style="margin:0;">No upcoming matches in queue.</p>';
   }
 
-  // Content only (no visibility) — shared by the top-bar Push (adds visible:true) and Apply.
-  function buildScheduleContentPayload() {
-    return {
-      title: (el('gfx-sch-title')?.value || 'UPCOMING MATCHES').trim(),
-      eyebrow: (el('gfx-sch-eyebrow')?.value || 'On Deck').trim(),
-      layout: el('gfx-sch-layout')?.value === 'board' ? 'board' : 'cards',
-      matches: gfxBuildScheduleMatches()
-    };
-  }
+  // Push to live (top-bar button)
   el('btn-gfx-schedule-push')?.addEventListener('click', () => {
     const payload = buildScheduleContentPayload();
     send('set_upcoming', { ...payload, visible: true });
     const st = el('gfx-sch-status');
     if (st) { st.textContent = `Pushed ${payload.matches.length} match${payload.matches.length !== 1 ? 'es' : ''} live.`; setTimeout(() => { st.textContent = ''; }, 2500); }
   });
-  // Persist layout/eyebrow immediately so the live overlay reflects a toggle even before Push.
+  el('btn-gfx-schedule-clear')?.addEventListener('click', () => send('set_upcoming', { visible: false }));
+
+  // Layout toggle — persist immediately so the preview iframe updates
   el('gfx-sch-layout')?.addEventListener('change', (e) => {
-    const lay = e.target.value === 'board' ? 'board' : 'cards';
+    const lay = e.target.value;
     send('set_upcoming', { layout: lay });
-    // Reflect the layout in the in-panel preview iframe (preview honors ?layout=).
     const pv = el('gfx-pv-schedule');
-    if (pv) { const base = (window.SCENE_BASE_URL || 'http://localhost:3000'); pv.src = base + '/schedule.html?preview=1&layout=' + lay; }
+    if (pv) pv.src = (window.SCENE_BASE_URL || 'http://localhost:3000') + '/schedule.html?preview=1&layout=' + lay;
   });
-  el('gfx-sch-eyebrow')?.addEventListener('change', (e) => send('set_upcoming', { eyebrow: (e.target.value || '').trim() }));
-  // Populate the week dropdown from the chosen league's schedule.
+
+  // Source tab toggle
+  el('gfx-sch-tab-auto')?.addEventListener('click', () => {
+    el('gfx-sch-tab-auto').classList.add('is-on'); el('gfx-sch-tab-manual').classList.remove('is-on');
+    el('gfx-sch-auto-wrap').style.display = ''; el('gfx-sch-manual-wrap').style.display = 'none';
+  });
+  el('gfx-sch-tab-manual')?.addEventListener('click', () => {
+    el('gfx-sch-tab-manual').classList.add('is-on'); el('gfx-sch-tab-auto').classList.remove('is-on');
+    el('gfx-sch-manual-wrap').style.display = ''; el('gfx-sch-auto-wrap').style.display = 'none';
+  });
+
+  // Add match from form
+  el('gfx-sch-add')?.addEventListener('click', () => {
+    const a = (el('gfx-sch-fa')?.value || '').trim();
+    const b = (el('gfx-sch-fb')?.value || '').trim();
+    if (!a && !b) return;
+    _schMatches.push({
+      round: (el('gfx-sch-fround')?.value || '').trim(),
+      teamA: a, teamB: b,
+      date: schFmtDate(el('gfx-sch-fdate')?.value || ''),
+      time: schFmtTime(el('gfx-sch-ftime')?.value || ''),
+      stream: !!(el('gfx-sch-fstream')?.checked)
+    });
+    ['gfx-sch-fa', 'gfx-sch-fb', 'gfx-sch-fround', 'gfx-sch-fdate', 'gfx-sch-ftime'].forEach((id) => { const e = el(id); if (e) e.value = ''; });
+    const fs = el('gfx-sch-fstream'); if (fs) fs.checked = false;
+    schRenderList(); schAutoSave();
+  });
+
+  // Clear all
+  el('gfx-sch-clear-all')?.addEventListener('click', () => {
+    if (!_schMatches.length || !confirm('Clear all scheduled matches?')) return;
+    _schMatches = []; schRenderList(); schAutoSave();
+  });
+
+  // Pull from start.gg queue
+  el('gfx-sch-pull-startgg')?.addEventListener('click', () => {
+    const sg = (currentState && currentState.startgg) || {};
+    const queue = (sg.queue || []);
+    const rows = [...queue.filter((q) => q.live), ...queue.filter((q) => !q.live).slice(0, 5)];
+    const st = el('gfx-sch-status');
+    if (!rows.length) { if (st) { st.textContent = 'No start.gg queue — connect & load an event in Settings.'; setTimeout(() => { st.textContent = ''; }, 3000); } return; }
+    rows.forEach((q) => _schMatches.push({ setId: String(q.setId || ''), round: q.round || '', teamA: q.teamA || '', teamB: q.teamB || '', date: '', time: '', stream: !!q.live }));
+    schRenderList(); schAutoSave();
+    if (st) { st.textContent = `Added ${rows.length} match${rows.length > 1 ? 'es' : ''} from queue.`; setTimeout(() => { st.textContent = ''; }, 2500); }
+  });
+
+  // Populate week dropdown from selected league
   function gfxFillScheduleWeeks() {
     const wSel = el('gfx-sch-week'); if (!wSel) return;
     const lg = (currentState.leagues || []).find((l) => String(l.id) === String(el('gfx-sch-league')?.value || ''));
@@ -2250,41 +2355,31 @@ function renderDccHostsGrid() {
   }
   el('gfx-sch-league')?.addEventListener('change', gfxFillScheduleWeeks);
 
-  el('gfx-sch-add')?.addEventListener('click', () => gfxAddScheduleRow());
-  // Pull from the current start.gg queue (live + next) into editable rows.
-  el('gfx-sch-pull-startgg')?.addEventListener('click', () => {
-    const sg = (currentState && currentState.startgg) || {};
-    const queue = (sg.queue || []);
-    const rows = [...queue.filter((q) => q.live), ...queue.filter((q) => !q.live).slice(0, 5)];
-    if (!rows.length) { const st = el('gfx-sch-status'); if (st) st.textContent = 'No start.gg queue — connect & load an event in Settings.'; return; }
-    rows.forEach((q) => gfxAddScheduleRow({ setId: String(q.setId || ''), round: q.round || '', teamA: q.teamA || '', teamB: q.teamB || '', stream: !!q.live }));
-  });
-  // Pull matches from the selected in-app league (optionally a single week). Carries scores so the
-  // board layout can show results; picking a week auto-switches to the board + titles it "WEEK N".
+  // Pull from league
   el('gfx-sch-pull-league')?.addEventListener('click', () => {
     const id = el('gfx-sch-league')?.value || '';
     const lg = (currentState.leagues || []).find((l) => String(l.id) === String(id));
     const st = el('gfx-sch-status');
-    if (!lg) { if (st) st.textContent = 'Pick a league first.'; return; }
+    if (!lg) { if (st) { st.textContent = 'Pick a league first.'; setTimeout(() => { st.textContent = ''; }, 2000); } return; }
     const week = (el('gfx-sch-week')?.value || '').trim();
     let sched = (lg.schedule || []);
     if (week) sched = sched.filter((m) => String(m.week || '') === week);
-    else sched = sched.filter((m) => !m.result || m.result.scoreA == null);   // no week → just the unplayed ones
+    else sched = sched.filter((m) => !m.result || m.result.scoreA == null);
     sched = sched.slice(0, 12);
-    if (!sched.length) { if (st) st.textContent = week ? `No matches in week ${week}.` : 'No upcoming matches in that league.'; return; }
-    const lgTeamName = (id) => { const tm = (lg.teams || []).find(t => t.id === id); return tm ? lgResolveTeam(tm).name : (id || ''); };
-    sched.forEach((m) => gfxAddScheduleRow({
+    if (!sched.length) { if (st) { st.textContent = week ? `No matches in week ${week}.` : 'No upcoming matches in that league.'; setTimeout(() => { st.textContent = ''; }, 2500); } return; }
+    const lgTeamName = (id) => { const tm = (lg.teams || []).find((t) => t.id === id); return tm ? lgResolveTeam(tm).name : (id || ''); };
+    sched.forEach((m) => _schMatches.push({
       round: m.week ? ('Week ' + m.week) : (lg.name || ''),
       teamA: lgTeamName(m.teamA), teamB: lgTeamName(m.teamB),
-      date: m.date || '', time: m.time || '', week: m.week || '',
+      date: m.date || '', time: m.time || '', week: m.week || '', stream: false,
       scoreA: m.result && m.result.scoreA != null ? m.result.scoreA : null,
       scoreB: m.result && m.result.scoreB != null ? m.result.scoreB : null
     }));
-    // A week pull is a "weekly board" by nature — flip the layout + heading to match.
     if (week) {
-      const lay = el('gfx-sch-layout'); if (lay) lay.value = 'board';
+      const lay = el('gfx-sch-layout'); if (lay) lay.value = 'dual';
       const ttl = el('gfx-sch-title'); if (ttl) ttl.value = 'WEEK ' + week;
     }
+    schRenderList(); schAutoSave();
     if (st) { st.textContent = `Added ${sched.length} match${sched.length !== 1 ? 'es' : ''}${week ? ' from week ' + week : ''}.`; setTimeout(() => { st.textContent = ''; }, 2500); }
   });
 
@@ -3992,6 +4087,11 @@ function applyState(data) {
       if (opt) opt.textContent = sl[i] || `Caster ${i}`;
     });
   }
+  if (data.casters) {
+    [el('dcc-show-country'), el('crew-show-country')].forEach((scc) => {
+      if (scc && document.activeElement !== scc) scc.checked = !!data.casters.showCountry;
+    });
+  }
   // DCC database sections — re-render when visible (any non-monitor tab is open)
   if ((data.showRoster || data.crew || data.teams || data.casters) && typeof renderDccAll === 'function' && el('dcc-database-view') && el('dcc-database-view').style.display !== 'none') {
     _ap('renderDccAll', () => renderDccAll());
@@ -5035,9 +5135,20 @@ function _assetsShow(which) {
   if (pp) pp.style.display = _assetsTab === 'profiles' ? '' : 'none';
   if (_assetsTab === 'overlays') { if (typeof loadScenePreviews === 'function') loadScenePreviews(); }
   else { if (typeof unloadScenePreviews === 'function') unloadScenePreviews(); if (_assetsTab === 'media' && typeof mdLoad === 'function') mdLoad(); }
+  try { localStorage.setItem('assets_active_tab', _assetsTab); } catch (_) {}
 }
 window._assetsShow = _assetsShow;
 document.querySelectorAll('#assets-subnav .ev-subnav-btn').forEach((b) => b.addEventListener('click', function () { _assetsShow(this.dataset.assettab); }));
+// Reopen whichever Assets sub-tab (Assets/Overlays/Profiles) the producer was last on — survives
+// refresh. Deferred to a macrotask: _assetsShow() reaches into loadScenePreviews()/
+// unloadScenePreviews(), which reference `_scenePreviewTimer`, a `let` declared thousands of
+// lines further down — calling this synchronously here throws the same TDZ crash documented for
+// the old switchRole('monitor') bug (and, uncaught at top level, HALTS the rest of the script from
+// ever running — confirmed live via CDP debugging). setTimeout(...,0) waits for the full script.
+setTimeout(() => {
+  let saved; try { saved = localStorage.getItem('assets_active_tab'); } catch (_) {}
+  if (saved === 'overlays' || saved === 'profiles') _assetsShow(saved);
+}, 0);
 
 // Toolbar "+ Folder" — same as the in-grid Create Folder tile.
 el('md-newfolder-btn')?.addEventListener('click', async () => {
@@ -11209,9 +11320,8 @@ el('btn-teams-use-current-event')?.addEventListener('click', () => {
 });
 
 // ── Events sub-nav (start.gg | Leagues) ───────────────────────────────────
-document.querySelectorAll('#ev-subnav .ev-subnav-btn').forEach((b) => b.addEventListener('click', function () {
-  document.querySelectorAll('#ev-subnav .ev-subnav-btn').forEach((x) => x.classList.toggle('active', x === this));
-  const t = this.dataset.evtab;
+function evShowSubtab(t) {
+  document.querySelectorAll('#ev-subnav .ev-subnav-btn').forEach((x) => x.classList.toggle('active', x.dataset.evtab === t));
   const sg = el('ev-startgg-panel'), lg = el('ev-leagues-panel'), me = el('ev-myevents-panel'), sd = el('ev-seeding-panel');
   if (sg) sg.style.display = t === 'startgg' ? '' : 'none';
   if (lg) lg.style.display = t === 'leagues' ? '' : 'none';
@@ -11221,7 +11331,19 @@ document.querySelectorAll('#ev-subnav .ev-subnav-btn').forEach((b) => b.addEvent
   if (t === 'myevents') { renderMyEvents(); evRefreshAllOnOpen(); }
   // Land on the event picker; openSeedingStudio() re-shows the studio right after when seeding a specific event.
   if (t === 'seeding') { seedShowStudio(false); renderSeedPicker(); evRefreshAllOnOpen(); }
-}));
+  try { localStorage.setItem('ev_active_subtab', t); } catch (_) {}
+}
+document.querySelectorAll('#ev-subnav .ev-subnav-btn').forEach((b) => b.addEventListener('click', function () { evShowSubtab(this.dataset.evtab); }));
+// Reopen whichever Events sub-tab the producer was last on — survives refresh. Guarded against a
+// saved tab whose button no longer exists (e.g. 'brackets'/'spotlight' get pruned from this nav).
+// Deferred to a macrotask: evShowSubtab() reaches into lgRender()/renderMyEvents()/
+// evRefreshAllOnOpen()/seedShowStudio()/renderSeedPicker() — calling those synchronously here
+// risks the same TDZ crash documented for switchRole('monitor')/loadScenePreviews if any transitively
+// touch a `let`/`const` declared further down. setTimeout(...,0) waits for the script to finish.
+setTimeout(() => {
+  let saved; try { saved = localStorage.getItem('ev_active_subtab'); } catch (_) {}
+  if (saved && document.querySelector(`#ev-subnav .ev-subnav-btn[data-evtab="${saved}"]`)) evShowSubtab(saved);
+}, 0);
 
 // Relative "x ago" for sync timestamps.
 function evAgo(ts) {
@@ -15806,16 +15928,25 @@ document.querySelectorAll('.js-goto-scenes').forEach((b) => b.addEventListener('
 
 // ══════════════ Camera Feeds tab — Players / Casters / Gameplay / Settings ══════════════
 const CF_OVERLAY_BASE = 'http://localhost:3000';
+function cfShowSubtab(cf) {
+  document.querySelectorAll('#cf-subnav .cf-tab').forEach((b) => b.classList.toggle('active', b.dataset.cf === cf));
+  document.querySelectorAll('#tab-facecams-content .cf-panel').forEach((p) => p.classList.toggle('active', p.id === 'cf-panel-' + cf));
+  if (cf === 'talent') cfLoadTalent();
+  if (cf === 'players') fetchVdoLinksForFacecam();
+  if (cf === 'casters') cfLoadCasterVdo();
+  try { localStorage.setItem('cf_active_subtab', cf); } catch (_) {}
+}
 document.querySelectorAll('#cf-subnav .cf-tab').forEach((btn) => {
-  btn.addEventListener('click', () => {
-    const cf = btn.dataset.cf;
-    document.querySelectorAll('#cf-subnav .cf-tab').forEach((b) => b.classList.toggle('active', b === btn));
-    document.querySelectorAll('#tab-facecams-content .cf-panel').forEach((p) => p.classList.toggle('active', p.id === 'cf-panel-' + cf));
-    if (cf === 'talent') cfLoadTalent();
-    if (cf === 'players') fetchVdoLinksForFacecam();
-    if (cf === 'casters') cfLoadCasterVdo();
-  });
+  btn.addEventListener('click', () => cfShowSubtab(btn.dataset.cf));
 });
+// Reopen whichever Camera Feeds sub-tab was last active — survives refresh. Deferred to a
+// macrotask: cfLoadTalent()/fetchVdoLinksForFacecam() reference VDO_API, a `const` declared just
+// below this block — calling them synchronously here would hit the same TDZ crash documented for
+// the old switchRole('monitor') bug, so setTimeout(...,0) waits for the script to finish once first.
+setTimeout(() => {
+  let saved; try { saved = localStorage.getItem('cf_active_subtab'); } catch (_) {}
+  if (saved && document.querySelector(`#cf-subnav .cf-tab[data-cf="${saved}"]`)) cfShowSubtab(saved);
+}, 0);
 
 // ── Talent Rooms (VDO.ninja automation) ─────────────────────────────────────
 const VDO_API = 'http://localhost:3000';
@@ -21947,6 +22078,10 @@ const FLOW_TRIGGER_GROUPS = [
     ['break_shown',         'Break screen shown'],
     ['break_hidden',        'Break screen hidden'],
   ]},
+  { label: 'Scheduled', items: [
+    ['timer_interval', 'Every N seconds (interval)'],
+    ['time_of_day',    'At a specific time (daily)'],
+  ]},
   { label: 'Manual', items: [
     ['manual', 'Manual / button'],
   ]},
@@ -21999,6 +22134,10 @@ function flowTriggerParamsHtml(trig) {
       return `<input type="number" class="ft-param input-text" data-k="minBits" min="1" value="${p.minBits||''}" placeholder="min bits (blank=any)" style="width:150px;">`;
     case 'twitch_channel_points':
       return `<input type="text" class="ft-param input-text" data-k="rewardTitle" placeholder="reward title (blank=any)" value="${poEsc(p.rewardTitle||'')}" style="width:170px;">`;
+    case 'timer_interval':
+      return `<input type="number" class="ft-param input-text" data-k="seconds" min="1" value="${p.seconds||60}" style="width:72px;"> <span style="font-size:11px;color:var(--muted);">seconds</span>`;
+    case 'time_of_day':
+      return `<input type="time" class="ft-param input-text" data-k="time" value="${poEsc(p.time||'20:00')}" style="width:110px;">`;
     default:
       return '';
   }
@@ -22008,6 +22147,7 @@ function flowTriggerParamsHtml(trig) {
 const FLOW_ACTION_GROUPS = [
   { label: 'OBS', items: [
     ['obs_scene',           'Cut to scene'],
+    ['obs_set_transition',  'Set scene transition'],
     ['obs_start_stream',    'Start stream'],
     ['obs_stop_stream',     'Stop stream'],
     ['obs_start_record',    'Start recording'],
@@ -22050,11 +22190,13 @@ const FLOW_ACTION_GROUPS = [
   ]},
   { label: 'Match / Series', items: [
     ['match_advance_game',     'Advance game number'],
+    ['match_set_score',        'Set in-game score'],
     ['match_set_series_score', 'Set series score'],
     ['match_reset_series',     'Reset series'],
   ]},
   { label: 'Generic', items: [
     ['wait',         'Wait (delay)'],
+    ['run_flow',     'Run another flow'],
     ['http_webhook', 'HTTP webhook (POST)'],
   ]},
 ];
@@ -22098,6 +22240,9 @@ function flowActionLabel(a) {
     case 'obs_set_volume': return (p.inputName || '?') + ' → ' + (p.volumeDb != null ? p.volumeDb : -6) + ' dB';
     case 'obs_filter_enable': return 'Filter on: "' + (p.filterName || '?') + '" on ' + (p.sourceName || '?');
     case 'obs_filter_disable': return 'Filter off: "' + (p.filterName || '?') + '" on ' + (p.sourceName || '?');
+    case 'obs_set_transition': return 'Transition: ' + (p.transitionName || '?') + (p.durationMs ? ' ' + p.durationMs + 'ms' : '');
+    case 'match_set_score': return 'Set ' + (p.team || '?') + ' score → ' + (p.value ?? '?');
+    case 'run_flow': { const tf = (_flows||[]).find(f=>f.id===p.flowId); return 'Run flow: ' + (tf ? tf.name : (p.flowId || '?')); }
     default: return allActions[a.type] || a.type;
   }
 }
@@ -22160,6 +22305,79 @@ function flowActionParamsHtml(a) {
     case 'obs_filter_disable':
       return `<input type="text" class="fa-param input-text" data-k="sourceName" placeholder="source name" value="${poEsc(p.sourceName||'')}" style="width:130px;">
         <input type="text" class="fa-param input-text" data-k="filterName" placeholder="filter name" value="${poEsc(p.filterName||'')}" style="width:130px;">`;
+    case 'obs_set_transition': {
+      const trans = (currentState.obs && currentState.obs.availableTransitions) || [];
+      const transOpts = trans.length
+        ? trans.map(t => `<option value="${poEsc(t)}"${p.transitionName===t?' selected':''}>${poEsc(t)}</option>`).join('')
+        : `<option value="${poEsc(p.transitionName||'')}">— type name —</option>`;
+      return `<select class="fa-param input-select" data-k="transitionName" style="width:150px;">${transOpts}</select>
+        <input type="number" class="fa-param input-text" data-k="durationMs" min="0" value="${p.durationMs??300}" style="width:66px;" title="Duration ms (0 = keep current)"> <span style="font-size:11px;color:var(--muted);">ms</span>`;
+    }
+    case 'match_set_score':
+      return `<select class="fa-param input-select" data-k="team" style="width:90px;"><option value="blue"${p.team==='blue'?' selected':''}>Blue</option><option value="orange"${p.team==='orange'?' selected':''}>Orange</option></select>
+        <input type="number" class="fa-param input-text" data-k="value" min="0" max="99" value="${p.value??0}" style="width:52px;" title="New score value">`;
+    case 'run_flow': {
+      const flows = _flows || [];
+      const opts = flows.map(f => `<option value="${poEsc(f.id)}"${p.flowId===f.id?' selected':''}>${poEsc(f.name||f.id)}</option>`).join('');
+      return `<select class="fa-param input-select" data-k="flowId" style="width:200px;"><option value="">— pick a flow —</option>${opts}</select>`;
+    }
+    default:
+      return '';
+  }
+}
+
+// ── Condition catalogue (AND guards — all must be true at fire time) ──────────
+const FLOW_CONDITION_GROUPS = [
+  { label: 'OBS', items: [
+    ['if_obs_scene',    'Current scene is…'],
+    ['if_streaming',    'Stream is live'],
+    ['if_not_streaming','Stream is NOT live'],
+    ['if_recording',    'Recording is active'],
+    ['if_not_recording','Recording is NOT active'],
+  ]},
+  { label: 'Match / Series', items: [
+    ['if_game_number',  'Current game number is…'],
+    ['if_series_state', 'Series score state…'],
+    ['if_score_diff',   'In-game score difference…'],
+  ]},
+  { label: 'Time', items: [
+    ['if_time_range',   'Current time is between…'],
+  ]},
+];
+const FLOW_COND_LABEL = Object.fromEntries(FLOW_CONDITION_GROUPS.flatMap(g => g.items));
+
+function _flowCondOptGroups(selected) {
+  return FLOW_CONDITION_GROUPS.map(g =>
+    `<optgroup label="${g.label}">${g.items.map(([v,l]) =>
+      `<option value="${v}"${selected===v?' selected':''}>${l}</option>`
+    ).join('')}</optgroup>`
+  ).join('');
+}
+
+function flowConditionParamsHtml(cond) {
+  const p = cond.params || {};
+  const scenes = (currentState.obs && currentState.obs.availableScenes) || [];
+  switch (cond.type) {
+    case 'if_obs_scene':
+      return `<select class="fc-param input-select" data-k="scene" style="width:160px;">${scenes.map(s=>`<option value="${poEsc(s)}"${p.scene===s?' selected':''}>${poEsc(s)}</option>`).join('')||'<option value="">(OBS offline)</option>'}</select>`;
+    case 'if_game_number':
+      return `<input type="number" class="fc-param input-text" data-k="value" min="1" max="9" value="${p.value||1}" style="width:52px;">`;
+    case 'if_series_state':
+      return `<select class="fc-param input-select" data-k="compare" style="width:150px;">
+        <option value="blue_leads"${p.compare==='blue_leads'?' selected':''}>Blue is leading</option>
+        <option value="orange_leads"${p.compare==='orange_leads'?' selected':''}>Orange is leading</option>
+        <option value="tied"${p.compare==='tied'?' selected':''}>Series is tied</option>
+      </select>`;
+    case 'if_score_diff':
+      return `<select class="fc-param input-select" data-k="op" style="width:80px;">
+        <option value="gte"${(!p.op||p.op==='gte')?' selected':''}>≥</option>
+        <option value="eq"${p.op==='eq'?' selected':''}>= exactly</option>
+        <option value="lte"${p.op==='lte'?' selected':''}>≤</option>
+      </select>
+      <input type="number" class="fc-param input-text" data-k="value" min="0" value="${p.value||1}" style="width:48px;"> <span style="font-size:11px;color:var(--muted);">goals</span>`;
+    case 'if_time_range':
+      return `<input type="time" class="fc-param input-text" data-k="start" value="${poEsc(p.start||'00:00')}" style="width:100px;"> <span style="font-size:11px;color:var(--muted);">–</span>
+        <input type="time" class="fc-param input-text" data-k="end" value="${poEsc(p.end||'23:59')}" style="width:100px;">`;
     default:
       return '';
   }
@@ -22262,8 +22480,11 @@ function openFlowEditor(f) {
       return { id: 'ac_'+Math.random().toString(36).slice(2,7), type: a.type, params: {} };
     });
   } else {
-    _flowDraft = { id: 'fl_'+Math.random().toString(36).slice(2,9), name: '', enabled: true, triggerMode: 'any', triggers: [], actions: [], cooldown: 0 };
+    _flowDraft = { id: 'fl_'+Math.random().toString(36).slice(2,9), name: '', enabled: true, triggerMode: 'any', triggers: [], conditions: [], actions: [], cooldown: 0, repeatCount: 1, repeatDelay: 0 };
   }
+  if (!_flowDraft.conditions) _flowDraft.conditions = [];
+  if (_flowDraft.repeatCount == null) _flowDraft.repeatCount = 1;
+  if (_flowDraft.repeatDelay == null) _flowDraft.repeatDelay = 0;
   renderFlowEditor();
 }
 
@@ -22299,13 +22520,19 @@ function renderFlowEditor() {
     </div>`;
   }).join('') || '<div class="fe-empty">No triggers — add one below to define when this flow fires.</div>';
 
-  // ── Action rows ───────────────────────────────────────────────────────────
+  // ── Action rows (with per-action delay) ───────────────────────────────────
   const actionsHtml = (d.actions||[]).map((a, i) => {
     const isFirst = i === 0;
     const isLast  = i === d.actions.length - 1;
+    const delayMs = Number(a.delay) || 0;
     return `<div class="fe-act-row" data-i="${i}">
       <span class="fe-act-num">${i + 1}</span>
       <div class="fe-act-body">
+        <div class="fe-act-delay-row">
+          <span class="fe-muted" style="font-size:10px;">delay</span>
+          <input type="number" class="fa-delay input-text" data-i="${i}" min="0" value="${delayMs}" style="width:64px;font-size:11px;" title="Wait this many ms before running this action">
+          <span class="fe-muted" style="font-size:10px;">ms then:</span>
+        </div>
         <select class="fa-type input-select fe-sel" data-i="${i}">${_flowActOptGroups(a.type)}</select>
         <div class="fe-act-params">${flowActionParamsHtml(a)}</div>
       </div>
@@ -22316,6 +22543,16 @@ function renderFlowEditor() {
       </div>
     </div>`;
   }).join('') || '<div class="fe-empty">No actions yet — pick one from the dropdown below.</div>';
+
+  // ── Condition rows (AND guards) ───────────────────────────────────────────
+  const conditionsHtml = (d.conditions||[]).map((c, i) =>
+    `<div class="fe-cond-row" data-i="${i}">
+      <span class="fe-step-lbl" style="color:#34d399;">${i===0?'IF':'AND'}</span>
+      <select class="fc-type input-select fe-sel" data-i="${i}">${_flowCondOptGroups(c.type)}</select>
+      <div class="fe-inline-params">${flowConditionParamsHtml(c)}</div>
+      <button class="fe-rm-btn fc-rm" data-i="${i}" title="Remove condition">✕</button>
+    </div>`
+  ).join('') || '<div class="fe-empty" style="font-size:11px;color:var(--muted);padding:8px 0;">No conditions — flow fires on any matching trigger.</div>';
 
   // ── Modal scaffold ────────────────────────────────────────────────────────
   const modal = document.createElement('div');
@@ -22328,8 +22565,13 @@ function renderFlowEditor() {
         <input id="fe-name" class="input-text fe-name-input" placeholder="Flow name…" value="${poEsc(d.name||'')}">
         <div class="fe-header-right">
           <span class="fe-muted">Cooldown</span>
-          <input id="fe-cooldown" type="number" class="input-text" min="0" value="${d.cooldown||0}" style="width:68px;" title="Minimum ms between fires">
+          <input id="fe-cooldown" type="number" class="input-text" min="0" value="${d.cooldown||0}" style="width:62px;" title="Minimum ms between fires">
           <span class="fe-muted">ms</span>
+          <span class="fe-muted" style="margin-left:8px;">Repeat</span>
+          <input id="fe-repeat-count" type="number" class="input-text" min="1" max="99" value="${d.repeatCount||1}" style="width:46px;" title="Run actions this many times">
+          <span class="fe-muted">×</span>
+          <input id="fe-repeat-delay" type="number" class="input-text" min="0" value="${d.repeatDelay||0}" style="width:58px;" title="ms gap between repeats">
+          <span class="fe-muted">ms gap</span>
           <button id="fe-save" class="btn btn-primary btn-sm">Save</button>
           <button id="fe-cancel" class="btn btn-ghost btn-sm">Cancel</button>
         </div>
@@ -22349,6 +22591,16 @@ function renderFlowEditor() {
           <div class="fe-add-bar">
             <select id="fe-add-trigger" class="input-select" style="width:100%;">
               <option value="">+ Add trigger…</option>${_flowTrigOptGroups('')}
+            </select>
+          </div>
+
+          <div class="fe-col-hdr" style="margin-top:10px;">
+            <span>AND ONLY IF (conditions)</span>
+          </div>
+          <div id="fe-conditions" class="fe-list">${conditionsHtml}</div>
+          <div class="fe-add-bar">
+            <select id="fe-add-condition" class="input-select" style="width:100%;">
+              <option value="">+ Add condition…</option>${_flowCondOptGroups('')}
             </select>
           </div>
         </div>
@@ -22379,6 +22631,8 @@ function renderFlowEditor() {
 
   feid('fe-name').addEventListener('input', e => { d.name = e.target.value; });
   feid('fe-cooldown').addEventListener('input', e => { d.cooldown = Number(e.target.value)||0; });
+  feid('fe-repeat-count').addEventListener('input', e => { d.repeatCount = Math.max(1, Number(e.target.value)||1); });
+  feid('fe-repeat-delay').addEventListener('input', e => { d.repeatDelay = Number(e.target.value)||0; });
   feid('fe-mode-any').addEventListener('click', () => { d.triggerMode='any'; renderFlowEditor(); });
   feid('fe-mode-seq').addEventListener('click', () => { d.triggerMode='sequence'; renderFlowEditor(); });
 
@@ -22389,9 +22643,16 @@ function renderFlowEditor() {
     renderFlowEditor();
   });
 
+  feid('fe-add-condition').addEventListener('change', function() {
+    if (!this.value) return;
+    d.conditions.push({ id:'co_'+Math.random().toString(36).slice(2,7), type:this.value, params:{} });
+    this.value = '';
+    renderFlowEditor();
+  });
+
   feid('fe-add-action').addEventListener('change', function() {
     if (!this.value) return;
-    d.actions.push({ id:'ac_'+Math.random().toString(36).slice(2,7), type:this.value, params:{} });
+    d.actions.push({ id:'ac_'+Math.random().toString(36).slice(2,7), type:this.value, params:{}, delay:0 });
     this.value = '';
     renderFlowEditor();
   });
@@ -22422,6 +22683,30 @@ function renderFlowEditor() {
     const k = inp.dataset.k;
     const upd = () => { if (d.actions[i]) d.actions[i].params[k] = inp.type==='number'?(Number(inp.value)||0):inp.value; };
     inp.addEventListener('change', upd); inp.addEventListener('input', upd);
+  });
+
+  modal.querySelectorAll('.fa-delay').forEach(inp => {
+    inp.addEventListener('input', function() {
+      if (d.actions[+this.dataset.i]) d.actions[+this.dataset.i].delay = Number(this.value)||0;
+    });
+  });
+
+  modal.querySelectorAll('.fc-type').forEach(sel => {
+    sel.addEventListener('change', function() {
+      d.conditions[+this.dataset.i] = { ...d.conditions[+this.dataset.i], type:this.value, params:{} };
+      renderFlowEditor();
+    });
+  });
+
+  modal.querySelectorAll('.fc-param').forEach(inp => {
+    const i = +inp.closest('[data-i]').dataset.i;
+    const k = inp.dataset.k;
+    const upd = () => { if (d.conditions[i]) d.conditions[i].params[k] = inp.type==='number'?(Number(inp.value)||0):inp.value; };
+    inp.addEventListener('change', upd); inp.addEventListener('input', upd);
+  });
+
+  modal.querySelectorAll('.fc-rm').forEach(btn => {
+    btn.addEventListener('click', function() { d.conditions.splice(+this.dataset.i,1); renderFlowEditor(); });
   });
 
   modal.querySelectorAll('.ft-timeout').forEach(inp => {
@@ -26384,7 +26669,7 @@ el('stats-load-more')?.addEventListener('click', () => loadStatsMatches(false));
 
 // ── Stats deep analytics (leaderboards / team records / head-to-head) ───────
 const STATS_API = 'http://localhost:3000/api/stats';
-let _statsTab = 'overview';
+let _statsTab = (() => { try { return localStorage.getItem('stats_active_tab') || 'overview'; } catch (_) { return 'overview'; } })();
 function statsShowTab(tab) {
   _statsTab = tab;
   document.querySelectorAll('#stats-subnav .ev-subnav-btn').forEach((b) => b.classList.toggle('active', b.dataset.stab === tab));
@@ -26397,6 +26682,7 @@ function statsShowTab(tab) {
   else if (tab === 'teams') loadStatsTeams();
   else if (tab === 'sponsors') loadAdProof();
   else if (tab === 'reports') loadReports();
+  try { localStorage.setItem('stats_active_tab', tab); } catch (_) {}
 }
 
 // ════════════════ Analytics dashboard (Overview / Broadcasts / Audience / Event) ════════════════

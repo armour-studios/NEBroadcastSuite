@@ -6,337 +6,275 @@
 <title>NE Broadcast Suite — Schedule</title>
 <link rel="stylesheet" href="fonts.css">
 <!--
-  schedule.html — SCHEDULE: one centered middle row of upcoming matches (duorow design).
-  (Formerly upcoming.html; overlay/upcoming.html is now a redirect stub for old OBS sources.)
-  Sources merge into data.upcoming.matches + the live start.gg queue (data.startgg.queue):
-  manual entries, start.gg current event sets, and the in-app league schedule (the control
-  panel imports those into upcoming.matches). Stream matches are marked and can show an
-  optional date/time. No baked background — fill/opacity is set per-graphic in the Scenes page.
+  schedule.html — SCHEDULE overlay.
+  Visual: mini duocaster match-hud style per row (team color wash + logos + dark VS center).
+  Data:   data.upcoming.matches (manual) merged with data.startgg.queue (auto).
+  Layout: 'cards' = 1 column | 'board' = 2 columns.
 -->
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 :root {
-  --duo-surface: #1a1d24; --duo-surface2: #20242e; --duo-border: #2e3340;
-  --duo-accent: #e83a8b; --duo-accent2: #8b5cf6; --duo-text: #eef1f7; --duo-muted: #8b93a8;
   --accent: #055fdb; --accent-2: #e97139;
+  --muted: #8b93a8;
   --disp: 'Rajdhani', sans-serif; --body: 'Inter', sans-serif;
 }
-html, body { width: 1920px; height: 1080px; overflow: hidden; background: transparent; font-family: var(--body); -webkit-font-smoothing: antialiased; color: var(--duo-text); }
+html { width: 1920px; height: 1080px; overflow: hidden; background: transparent; }
+body { width: 1920px; height: 1080px; overflow: hidden; background: transparent; font-family: var(--body); -webkit-font-smoothing: antialiased; color: #eef1f7; display: flex; align-items: center; justify-content: center; }
 
-.sch-stage { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
-  padding: 60px; gap: 40px; opacity: 0; transition: opacity .45s ease; }
+.sch-stage { width: 1000px; display: flex; flex-direction: column; align-items: center; gap: 22px; opacity: 0; transition: opacity .45s ease; }
 .sch-stage.show { opacity: 1; }
+.sch-inner { display: contents; }
 
-/* Header */
-.sch-head { flex: 0 0 auto; display: flex; flex-direction: column; align-items: center; gap: 8px; }
-.sch-eyebrow { font-family: var(--disp); font-weight: 700; font-size: 17px; letter-spacing: .42em; text-transform: uppercase; color: var(--accent); }
-.sch-title { font-family: var(--disp); font-weight: 700; font-size: 60px; line-height: .96; letter-spacing: .02em; text-transform: uppercase; color: #fff;
-  text-shadow: 0 0 30px color-mix(in srgb, var(--accent) 38%, transparent); }
-.sch-rule { width: 220px; height: 3px; border-radius: 2px; margin-top: 4px;
-  background: linear-gradient(90deg, transparent, var(--accent), var(--accent-2), transparent); }
+/* ── Header ── */
+.sch-head { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.sch-brand-logo { height: 80px; width: auto; max-width: 280px; object-fit: contain; filter: drop-shadow(0 2px 8px rgba(0,0,0,.6)); }
+.sch-eyebrow { font-family: var(--disp); font-weight: 700; font-size: 20px; letter-spacing: .44em; text-transform: uppercase; color: var(--accent); }
+.sch-title { font-family: var(--disp); font-weight: 700; font-size: 72px; line-height: .96; letter-spacing: .02em; text-transform: uppercase; color: #fff; text-shadow: 0 0 28px color-mix(in srgb, var(--accent) 35%, transparent); }
+.sch-rule { width: 240px; height: 3px; border-radius: 2px; margin-top: 4px; background: linear-gradient(90deg, transparent, var(--accent), var(--accent-2), transparent); }
 
-/* One middle row */
-.sch-row { flex: 0 0 auto; display: flex; align-items: stretch; justify-content: center; gap: 22px; flex-wrap: nowrap; max-width: 100%; }
+/* ── Match list grid ── */
+.sch-list { width: 1000px; display: grid; grid-template-columns: 1fr; gap: 22px; }
+.sch-list.dual { grid-template-columns: 1fr 1fr; }
+.sch-entry-wrap { display: flex; flex-direction: column; gap: 6px; }
+.sch-entry-meta { display: flex; align-items: center; justify-content: center; gap: 10px; }
+.sch-meta-date { font-family: var(--disp); font-size: 14px; font-weight: 800; letter-spacing: .07em; color: rgba(255,255,255,.85); white-space: nowrap; line-height: 1; text-transform: uppercase; }
 
-/* Match card */
-.sch-card { position: relative; width: 312px; display: flex; flex-direction: column; border-radius: 14px; overflow: hidden;
-  border: 1px solid var(--duo-border); background: linear-gradient(180deg, var(--duo-surface2), var(--duo-surface));
-  box-shadow: 0 18px 46px rgba(0,0,0,.5); opacity: 0; }
-.sch-stage.show .sch-card { animation: cardIn .65s cubic-bezier(.16,.84,.24,1) both; }
-@keyframes cardIn { from { opacity: 0; transform: translateY(30px) scale(.96); } to { opacity: 1; transform: none; } }
-.sch-card::before { content: ''; position: absolute; left: 0; right: 0; top: 0; height: 3px; z-index: 2; background: var(--accent); opacity: .7; }
-.sch-card.on-stream::before { background: #22e07a; opacity: 1; box-shadow: 0 0 18px rgba(34,224,122,.6); }
-.sch-card.live::before { background: #ff3b46; opacity: 1; box-shadow: 0 0 18px rgba(255,59,70,.6); }
+/* ── Entry: mini match-hud row ── */
+.sch-entry {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+  height: 68px;
+  border-radius: 10px;
+  overflow: hidden;
+  background: linear-gradient(180deg, rgba(24,27,34,.98) 0%, rgba(10,12,16,.99) 100%);
+  box-shadow: 0 8px 28px rgba(0,0,0,.55);
+  opacity: 0;
+}
+.sch-stage.show .sch-entry { animation: entryIn .6s cubic-bezier(.16,.84,.24,1) both; }
+@keyframes entryIn { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+/* top hairline */
+.sch-entry::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 1px; background: linear-gradient(90deg, transparent 4%, rgba(255,255,255,.28) 50%, transparent 96%); z-index: 3; pointer-events: none; }
 
-.sch-chead { display: flex; align-items: center; gap: 8px; padding: 11px 16px; min-height: 44px;
-  border-bottom: 1px solid var(--duo-border); background: linear-gradient(90deg, rgba(255,255,255,.05), transparent 75%); }
-.sch-round { font-family: var(--disp); font-weight: 700; font-size: 15px; letter-spacing: .12em; text-transform: uppercase; color: #c4ccdb;
-  flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.sch-mark { display: inline-flex; align-items: center; gap: 6px; font-family: var(--disp); font-weight: 800; font-size: 11px;
-  letter-spacing: .12em; border-radius: 999px; padding: 4px 10px; white-space: nowrap; }
-.sch-mark .pdot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; animation: pulse 1.5s ease-in-out infinite; }
-.sch-mark.stream { color: #04210f; background: #22e07a; }
-.sch-mark.live { color: #fff; background: #ff3b46; box-shadow: 0 0 14px rgba(255,59,70,.5); }
-@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .4; } }
+/* ── Team sides ── */
+.sch-side {
+  flex: 1 1 0; min-width: 0;
+  position: relative;
+  display: flex; align-items: center;
+  gap: 10px; overflow: hidden;
+}
+.sch-side.a { padding: 0 10px 0 14px; }
+.sch-side.b { padding: 0 14px 0 10px; }
 
-.sch-body { display: flex; flex-direction: column; gap: 8px; padding: 16px 14px; }
-.sch-team { display: flex; align-items: center; gap: 12px; min-width: 0; }
-.sch-logo-wrap { width: 48px; height: 48px; border-radius: 11px; flex: 0 0 auto; display: grid; place-items: center;
-  background: rgba(255,255,255,.05); border: 1px solid var(--duo-border); }
-.sch-logo { width: 38px; height: 38px; object-fit: contain; filter: drop-shadow(0 2px 5px rgba(0,0,0,.5)); }
-.sch-logo.logo-on-dark { filter: brightness(0) invert(1) drop-shadow(0 2px 5px rgba(0,0,0,.5)); }
-.sch-name { font-family: var(--disp); font-weight: 700; font-size: 25px; line-height: 1.04; color: #eef1f7; letter-spacing: .01em;
-  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-.sch-mid { display: flex; align-items: center; gap: 12px; padding: 1px 2px; }
-.sch-mid .ln { flex: 1; height: 1px; background: var(--duo-border); }
-.sch-vs { font-family: var(--disp); font-weight: 800; font-size: 15px; letter-spacing: .14em; color: #6b7488; }
-.sch-score { font-family: var(--disp); font-weight: 800; font-size: 22px; color: #fff; font-variant-numeric: tabular-nums;
-  background: rgba(255,255,255,.06); border: 1px solid var(--duo-border); border-radius: 8px; padding: 1px 12px; }
+/* color wash from outer edge */
+.sch-side.a::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 55%; background: linear-gradient(90deg, color-mix(in srgb, var(--col-a, var(--accent)) 22%, transparent), transparent); }
+.sch-side.b::before { content: ''; position: absolute; right: 0; top: 0; bottom: 0; width: 55%; background: linear-gradient(270deg, color-mix(in srgb, var(--col-b, var(--accent-2)) 20%, transparent), transparent); }
 
-.sch-when { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 10px 14px;
-  border-top: 1px solid var(--duo-border); background: rgba(0,0,0,.18);
-  font-family: var(--disp); font-weight: 700; font-size: 15px; letter-spacing: .08em; text-transform: uppercase; color: #aeb6c6; }
-.sch-when.is-empty { display: none; }
-.sch-when svg { width: 14px; height: 14px; opacity: .7; }
-.sch-when .time { color: #fff; }
+/* bottom accent bar */
+.sch-side.a::after { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: linear-gradient(90deg, var(--col-a, var(--accent)) 0%, color-mix(in srgb, var(--col-a, var(--accent)) 38%, transparent) 55%, transparent 100%); box-shadow: 0 0 12px color-mix(in srgb, var(--col-a, var(--accent)) 55%, transparent); }
+.sch-side.b::after { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: linear-gradient(270deg, var(--col-b, var(--accent-2)) 0%, color-mix(in srgb, var(--col-b, var(--accent-2)) 38%, transparent) 55%, transparent 100%); box-shadow: 0 0 12px color-mix(in srgb, var(--col-b, var(--accent-2)) 55%, transparent); }
 
-.sch-empty { font-family: var(--disp); font-weight: 600; font-size: 30px; letter-spacing: .08em; color: rgba(255,255,255,.22); text-transform: uppercase; }
+/* logo */
+.sch-logo { width: 54px; height: 54px; object-fit: contain; flex: 0 0 54px; position: relative; z-index: 1; filter: drop-shadow(0 2px 6px rgba(0,0,0,.55)); }
+.sch-logo.logo-on-dark { filter: brightness(0) invert(1) drop-shadow(0 2px 6px rgba(0,0,0,.55)); }
 
-/* ── Board / weekly matchup layout (team-colored bars + logos, like a league week sheet) ── */
-.sch-board { flex: 0 0 auto; display: flex; flex-direction: column; gap: 9px; width: 100%; max-width: 1180px; }
-.sch-bitem { display: flex; flex-direction: column; gap: 3px; opacity: 0; }
-.sch-stage.show .sch-bitem { animation: cardIn .55s cubic-bezier(.16,.84,.24,1) both; }
-.sch-brow { display: grid; grid-template-columns: 66px 1fr 168px 1fr 66px; align-items: stretch; gap: 6px; height: 60px; }
-.sch-blogo { display: grid; place-items: center; background: rgba(0,0,0,.4); border: 1px solid var(--duo-border); border-radius: 9px; }
-.sch-blogo img { width: 46px; height: 46px; object-fit: contain; filter: drop-shadow(0 2px 5px rgba(0,0,0,.5)); }
-.sch-blogo img.logo-on-dark { filter: brightness(0) invert(1) drop-shadow(0 2px 5px rgba(0,0,0,.5)); }
-.sch-bteam { display: flex; align-items: center; padding: 0 20px; border-radius: 9px; overflow: hidden;
-  font-family: var(--disp); font-weight: 800; font-size: 27px; letter-spacing: .01em; line-height: 1;
-  white-space: nowrap; text-overflow: ellipsis; box-shadow: inset 0 0 0 1px rgba(255,255,255,.08); }
-.sch-bteam span { overflow: hidden; text-overflow: ellipsis; }
-.sch-bteam.b { justify-content: flex-end; text-align: right; }
-.sch-bscore { display: grid; grid-template-columns: 1fr 26px 1fr; align-items: center; background: rgba(0,0,0,.42);
-  border: 1px solid var(--duo-border); border-radius: 9px; }
-.sch-bscore .n { font-family: var(--disp); font-weight: 800; font-size: 30px; color: #fff; text-align: center; font-variant-numeric: tabular-nums; }
-.sch-bscore .d { color: var(--duo-muted); font-weight: 700; font-size: 22px; text-align: center; }
-.sch-bscore.vs .n { font-size: 15px; letter-spacing: .12em; color: #6b7488; }
-.sch-brow.on-stream .sch-bscore { border-color: rgba(34,224,122,.6); box-shadow: 0 0 16px rgba(34,224,122,.35); }
-.sch-brow.live .sch-bscore { border-color: rgba(255,59,70,.7); box-shadow: 0 0 16px rgba(255,59,70,.45); }
-.sch-bmeta { display: flex; align-items: center; justify-content: center; gap: 12px; min-height: 15px;
-  font-family: var(--disp); font-weight: 700; font-size: 13px; letter-spacing: .1em; text-transform: uppercase; color: #aeb6c6; }
-.sch-bmeta:empty { display: none; }
-.sch-bmeta .when { color: #cdd4e2; }
-.sch-bmeta .mk { display: inline-flex; align-items: center; gap: 5px; border-radius: 999px; padding: 2px 9px; font-weight: 800; font-size: 11px; }
-.sch-bmeta .mk .pdot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; animation: pulse 1.5s ease-in-out infinite; }
-.sch-bmeta .mk.stream { color: #04210f; background: #22e07a; }
-.sch-bmeta .mk.live { color: #fff; background: #ff3b46; }
-.sch-bmeta .games { color: #8b93a8; letter-spacing: .04em; }
+/* name */
+.sch-name { flex: 1 1 0; min-width: 0; position: relative; z-index: 1; font-family: var(--disp); font-size: 25px; font-weight: 800; letter-spacing: .03em; text-transform: uppercase; line-height: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #fff; }
+.sch-side.a .sch-name { text-shadow: 0 0 16px color-mix(in srgb, var(--col-a, var(--accent)) 50%, transparent); }
+.sch-side.b .sch-name { text-align: right; text-shadow: 0 0 16px color-mix(in srgb, var(--col-b, var(--accent-2)) 50%, transparent); }
+
+/* ── Center column ── */
+.sch-center {
+  flex: 0 0 148px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 5px;
+  position: relative; z-index: 2;
+  background: rgba(6,8,12,.97);
+  border-left: 1px solid rgba(255,255,255,.1);
+  border-right: 1px solid rgba(255,255,255,.1);
+}
+.sch-list.dual .sch-center { flex: 0 0 120px; }
+
+.sch-vs { font-family: var(--disp); font-size: 34px; font-weight: 900; letter-spacing: .1em; color: #fff; text-shadow: 0 1px 4px rgba(0,0,0,.85); line-height: 1; }
+
+/* ON AIR badge (above the card) */
+.sch-onair { display: inline-flex; align-items: center; gap: 5px; align-self: flex-start; background: #22e07a; color: #04130a; border-radius: 999px; padding: 3px 12px; font-family: var(--disp); font-size: 13px; font-weight: 800; letter-spacing: .1em; line-height: 1; }
+.sch-onair .pdot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; animation: pulse 1.4s ease-in-out infinite; }
+@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .3; } }
+
+.sch-empty { font-family: var(--disp); font-weight: 600; font-size: 28px; letter-spacing: .08em; color: rgba(255,255,255,.2); text-transform: uppercase; }
 </style>
 </head>
 <body>
 <div id="sch-stage" class="sch-stage">
-  <div class="sch-head">
-    <div class="sch-eyebrow" id="sch-eyebrow">On Deck</div>
-    <div class="sch-title" id="sch-title">SCHEDULE</div>
-    <div class="sch-rule"></div>
+  <div class="sch-inner">
+    <div class="sch-head">
+      <img id="sch-brand-logo" class="sch-brand-logo" src="" alt="" style="display:none;">
+      <div class="sch-eyebrow" id="sch-eyebrow">On Deck</div>
+      <div class="sch-title" id="sch-title">SCHEDULE</div>
+      <div class="sch-rule"></div>
+    </div>
+    <div class="sch-list" id="sch-list"></div>
+    <div class="sch-empty" id="sch-empty" style="display:none;">No upcoming matches</div>
   </div>
-  <div class="sch-row" id="sch-row"></div>
-  <div class="sch-board" id="sch-board" style="display:none;"></div>
-  <div class="sch-empty" id="sch-empty" style="display:none;">No upcoming matches</div>
 </div>
 
 <script src="scene-base.js"></script>
 <script>
 (function () {
-  const el = (id) => document.getElementById(id);
-  const LAYOUT_QP = new URLSearchParams(location.search).get('layout');
-  const CLOCK ='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>';
+  var el = function (id) { return document.getElementById(id); };
+  var LAYOUT_QP = new URLSearchParams(location.search).get('layout');
+  var _lastSig = null;
 
-  function svgFallback(letter, color) {
+  function svgFallback(letter) {
     return 'data:image/svg+xml;utf8,' + encodeURIComponent(
-      `<svg xmlns="http://www.w3.org/2000/svg" width="160" height="160"><rect width="160" height="160" rx="30" fill="${color}"/><text x="80" y="112" font-size="92" fill="#fff" text-anchor="middle" font-family="Arial,sans-serif" font-weight="bold">${letter}</text></svg>`);
-  }
-  function teamEl(name, logoSrc) {
-    const wrap = document.createElement('div'); wrap.className = 'sch-team';
-    const lw = document.createElement('div'); lw.className = 'sch-logo-wrap';
-    const src = logoSrc || svgFallback((name || '?')[0].toUpperCase(), '#39415a');
-    const img = document.createElement('img');
-    img.className = 'sch-logo' + (SceneBase.isDefaultGameLogo(src) ? ' logo-on-dark' : '');
-    img.src = src; img.alt = ''; img.onerror = function () { this.style.visibility = 'hidden'; };
-    lw.appendChild(img);
-    const nm = document.createElement('div'); nm.className = 'sch-name'; nm.textContent = name || 'TBD';
-    wrap.appendChild(lw); wrap.appendChild(nm);
-    return wrap;
-  }
-  function whenText(m) {
-    const parts = [];
-    if (m.date) parts.push(m.date);
-    if (m.time) parts.push(m.time);
-    const s = parts.join(' · ') || (m.scheduledTime || '');
-    return s.trim();
-  }
-  function buildCard(m, idx) {
-    const card = document.createElement('div');
-    card.className = 'sch-card' + (m.live ? ' live' : (m.stream ? ' on-stream' : ''));
-    card.style.animationDelay = (0.08 + idx * 0.1) + 's';
-
-    const head = document.createElement('div'); head.className = 'sch-chead';
-    const round = document.createElement('span'); round.className = 'sch-round'; round.textContent = m.round || 'Match';
-    head.appendChild(round);
-    if (m.live) { const mk = document.createElement('span'); mk.className = 'sch-mark live'; mk.innerHTML = '<span class="pdot"></span>LIVE'; head.appendChild(mk); }
-    else if (m.stream) { const mk = document.createElement('span'); mk.className = 'sch-mark stream'; mk.innerHTML = '<span class="pdot"></span>ON STREAM'; head.appendChild(mk); }
-    card.appendChild(head);
-
-    const body = document.createElement('div'); body.className = 'sch-body';
-    body.appendChild(teamEl(m.teamA, m.logoA));
-    const mid = document.createElement('div'); mid.className = 'sch-mid';
-    if (m.live && (m.scoreA != null || m.scoreB != null)) {
-      mid.innerHTML = '<span class="ln"></span><span class="sch-score">' + (m.scoreA == null ? 0 : m.scoreA) + ' – ' + (m.scoreB == null ? 0 : m.scoreB) + '</span><span class="ln"></span>';
-    } else {
-      mid.innerHTML = '<span class="ln"></span><span class="sch-vs">VS</span><span class="ln"></span>';
-    }
-    body.appendChild(mid);
-    body.appendChild(teamEl(m.teamB, m.logoB));
-    card.appendChild(body);
-
-    const when = whenText(m);
-    const wEl = document.createElement('div'); wEl.className = 'sch-when' + (when ? '' : ' is-empty');
-    if (when) wEl.innerHTML = CLOCK + '<span class="time">' + when.replace(/[<>&]/g, '') + '</span>';
-    card.appendChild(wEl);
-    return card;
+      '<svg xmlns="http://www.w3.org/2000/svg" width="120" height="120"><rect width="120" height="120" rx="22" fill="#39415a"/><text x="60" y="84" font-size="68" fill="#fff" text-anchor="middle" font-family="Arial,sans-serif" font-weight="bold">' + letter + '</text></svg>');
   }
 
   function logoFor(name, fallback, maps) {
-    const k = (name || '').toLowerCase();
+    var k = (name || '').toLowerCase();
     return fallback || maps.saved[k] || maps.sgg[k] || '';
   }
   function colorFor(name, fallback, maps) {
-    const k = (name || '').toLowerCase();
+    var k = (name || '').toLowerCase();
     return maps.color[k] || fallback;
   }
-  // Pick black/white text for a given bar colour so team names stay legible.
-  function textOn(hex) {
-    const c = String(hex || '').replace('#', '');
-    if (c.length < 6) return '#fff';
-    const r = parseInt(c.slice(0, 2), 16), g = parseInt(c.slice(2, 4), 16), b = parseInt(c.slice(4, 6), 16);
-    return (0.299 * r + 0.587 * g + 0.114 * b) / 255 > 0.62 ? '#0b0d12' : '#fff';
+  function whenText(m) {
+    var parts = [];
+    if (m.date) parts.push(m.date);
+    if (m.time) parts.push(m.time);
+    return (parts.join(' · ') || m.scheduledTime || '').trim();
   }
+
+  function buildEntry(m, idx, maps, accentA, accentB) {
+    var wrap = document.createElement('div');
+    wrap.className = 'sch-entry-wrap';
+
+    // Meta row: ON AIR badge + date, centered above the card
+    var when = whenText(m);
+    if ((m.live || m.stream) || when) {
+      var meta = document.createElement('div'); meta.className = 'sch-entry-meta';
+      if (m.live || m.stream) {
+        var badge = document.createElement('div'); badge.className = 'sch-onair';
+        var dot = document.createElement('span'); dot.className = 'pdot'; badge.appendChild(dot);
+        badge.appendChild(document.createTextNode(m.live ? 'LIVE' : 'ON AIR'));
+        meta.appendChild(badge);
+      }
+      if (when) {
+        var dt = document.createElement('span'); dt.className = 'sch-meta-date'; dt.textContent = when;
+        meta.appendChild(dt);
+      }
+      wrap.appendChild(meta);
+    }
+
+    var entry = document.createElement('div');
+    entry.className = 'sch-entry';
+    entry.style.animationDelay = (0.07 + idx * 0.09) + 's';
+
+    var colA = colorFor(m.teamA, accentA, maps);
+    var colB = colorFor(m.teamB, accentB, maps);
+    entry.style.setProperty('--col-a', colA);
+    entry.style.setProperty('--col-b', colB);
+
+    // Side A
+    var sideA = document.createElement('div'); sideA.className = 'sch-side a';
+    var srcA = logoFor(m.teamA, m.logoA, maps) || svgFallback((m.teamA || '?')[0].toUpperCase());
+    var imgA = document.createElement('img'); imgA.className = 'sch-logo'; imgA.src = srcA; imgA.alt = '';
+    if (SceneBase.isDefaultGameLogo(srcA)) imgA.classList.add('logo-on-dark');
+    imgA.onerror = function () { this.style.visibility = 'hidden'; };
+    var nameA = document.createElement('span'); nameA.className = 'sch-name'; nameA.textContent = m.teamA || 'TBD';
+    sideA.appendChild(imgA); sideA.appendChild(nameA);
+
+    // Center
+    var center = document.createElement('div'); center.className = 'sch-center';
+    var vs = document.createElement('span'); vs.className = 'sch-vs'; vs.textContent = 'VS';
+    center.appendChild(vs);
+
+    // Side B
+    var sideB = document.createElement('div'); sideB.className = 'sch-side b';
+    var nameB = document.createElement('span'); nameB.className = 'sch-name'; nameB.textContent = m.teamB || 'TBD';
+    var srcB = logoFor(m.teamB, m.logoB, maps) || svgFallback((m.teamB || '?')[0].toUpperCase());
+    var imgB = document.createElement('img'); imgB.className = 'sch-logo'; imgB.src = srcB; imgB.alt = '';
+    if (SceneBase.isDefaultGameLogo(srcB)) imgB.classList.add('logo-on-dark');
+    imgB.onerror = function () { this.style.visibility = 'hidden'; };
+    sideB.appendChild(nameB); sideB.appendChild(imgB);
+
+    entry.appendChild(sideA); entry.appendChild(center); entry.appendChild(sideB);
+    wrap.appendChild(entry);
+    return wrap;
+  }
+
   function buildMatches(queue, manual, maps) {
-    const auto = (queue || []).filter((m) => {
-      const s = typeof m.state === 'number' ? m.state : (m.status === 'upcoming' ? 1 : (m.status === 'done' ? 3 : 2));
+    var auto = (queue || []).filter(function (m) {
+      var s = typeof m.state === 'number' ? m.state : (m.status === 'upcoming' ? 1 : (m.status === 'done' ? 3 : 2));
       return s === 1 || s === 2;
-    }).map((m) => ({
-      setId: m.setId, round: m.round || 'Match', teamA: m.teamA || 'TBD', teamB: m.teamB || 'TBD',
-      logoA: logoFor(m.teamA, m.logoA, maps), logoB: logoFor(m.teamB, m.logoB, maps),
-      stream: m.stream || '', live: m.state === 2 || m.live === true, scoreA: m.scoreA, scoreB: m.scoreB,
-      date: m.date || '', time: m.time || '', scheduledTime: '', week: m.week || '', games: m.games || null
-    }));
-    const overrideMap = {}; const appends = [];
-    (manual || []).forEach((m) => { if (m.setId) overrideMap[m.setId] = m; else appends.push({
-      round: m.round || 'Match', teamA: m.teamA || 'TBD', teamB: m.teamB || 'TBD',
-      logoA: logoFor(m.teamA, m.teamALogo || m.logoA, maps), logoB: logoFor(m.teamB, m.teamBLogo || m.logoB, maps),
-      stream: m.stream || '', live: false, scoreA: m.scoreA != null ? m.scoreA : null, scoreB: m.scoreB != null ? m.scoreB : null,
-      date: m.date || '', time: m.time || '', scheduledTime: m.scheduledTime || '', week: m.week || '', games: m.games || null
-    }); });
-    const merged = auto.map((m) => {
-      const ov = overrideMap[m.setId];
-      if (!ov) return m;
-      const mm = Object.assign({}, m, ov);
-      // Manual overrides carry names but not always a resolved logo — re-resolve so logos never blank out.
+    }).map(function (m) {
+      return { setId: m.setId, round: m.round || '', teamA: m.teamA || 'TBD', teamB: m.teamB || 'TBD',
+        logoA: logoFor(m.teamA, m.logoA, maps), logoB: logoFor(m.teamB, m.logoB, maps),
+        stream: !!(m.stream), live: !!(m.state === 2 || m.live),
+        date: m.date || '', time: m.time || '', scheduledTime: '' };
+    });
+    var overrideMap = {}, appends = [];
+    (manual || []).forEach(function (m) {
+      if (m.setId) { overrideMap[m.setId] = m; }
+      else appends.push({ round: m.round || '', teamA: m.teamA || 'TBD', teamB: m.teamB || 'TBD',
+        logoA: logoFor(m.teamA, m.teamALogo || m.logoA, maps), logoB: logoFor(m.teamB, m.teamBLogo || m.logoB, maps),
+        stream: !!(m.stream), live: false, date: m.date || '', time: m.time || '', scheduledTime: m.scheduledTime || '' });
+    });
+    var merged = auto.map(function (m) {
+      var ov = overrideMap[m.setId]; if (!ov) return m;
+      var mm = Object.assign({}, m, ov);
       mm.logoA = logoFor(mm.teamA, ov.teamALogo || ov.logoA || m.logoA, maps);
       mm.logoB = logoFor(mm.teamB, ov.teamBLogo || ov.logoB || m.logoB, maps);
       return mm;
     });
-    merged.sort((a, b) => (b.live ? 1 : 0) - (a.live ? 1 : 0));
-    // De-dupe: a manual entry with no setId must not repeat a matchup already coming from start.gg.
-    const _pair = (m) => (m.teamA || '').toLowerCase().trim() + '|' + (m.teamB || '').toLowerCase().trim();
-    const _rev  = (m) => (m.teamB || '').toLowerCase().trim() + '|' + (m.teamA || '').toLowerCase().trim();
-    const _have = new Set(merged.map(_pair));
-    const dedupAppends = appends.filter((m) => !_have.has(_pair(m)) && !_have.has(_rev(m)));
+    merged.sort(function (a, b) { return (b.live ? 1 : 0) - (a.live ? 1 : 0); });
+    var _pair = function (m) { return (m.teamA || '').toLowerCase().trim() + '|' + (m.teamB || '').toLowerCase().trim(); };
+    var _rev  = function (m) { return (m.teamB || '').toLowerCase().trim() + '|' + (m.teamA || '').toLowerCase().trim(); };
+    var _have = new Set(merged.map(_pair));
+    var dedupAppends = appends.filter(function (m) { return !_have.has(_pair(m)) && !_have.has(_rev(m)); });
     return merged.concat(dedupAppends).slice(0, 12);
   }
 
-  // Board layout — one team-colored row per matchup (logos on the outside, score/VS in the middle).
-  function buildBoard(container, matches, maps, accentA, accentB) {
-    container.innerHTML = '';
-    matches.forEach((m, idx) => {
-      const item = document.createElement('div'); item.className = 'sch-bitem';
-      item.style.animationDelay = (0.06 + idx * 0.07) + 's';
-
-      const rowEl = document.createElement('div');
-      rowEl.className = 'sch-brow' + (m.live ? ' live' : (m.stream ? ' on-stream' : ''));
-
-      const mkLogo = (name, logo) => {
-        const wrap = document.createElement('div'); wrap.className = 'sch-blogo';
-        const src = logoFor(name, logo, maps);
-        if (src) { const img = document.createElement('img'); img.src = src; img.alt = '';
-          if (SceneBase.isDefaultGameLogo(src)) img.classList.add('logo-on-dark');
-          img.onerror = function () { this.style.visibility = 'hidden'; }; wrap.appendChild(img); }
-        return wrap;
-      };
-      const mkTeam = (name, color, side) => {
-        const t = document.createElement('div'); t.className = 'sch-bteam' + (side === 'b' ? ' b' : '');
-        t.style.background = color; t.style.color = textOn(color);
-        const s = document.createElement('span'); s.textContent = name || 'TBD'; t.appendChild(s);
-        return t;
-      };
-      const colA = colorFor(m.teamA, accentA, maps), colB = colorFor(m.teamB, accentB, maps);
-      const hasScore = m.scoreA != null && m.scoreB != null;
-      const score = document.createElement('div'); score.className = 'sch-bscore' + (hasScore ? '' : ' vs');
-      score.innerHTML = hasScore
-        ? `<span class="n">${m.scoreA}</span><span class="d">–</span><span class="n">${m.scoreB}</span>`
-        : `<span class="n"></span><span class="n">VS</span><span class="n"></span>`;
-
-      rowEl.appendChild(mkLogo(m.teamA, m.logoA));
-      rowEl.appendChild(mkTeam(m.teamA, colA, 'a'));
-      rowEl.appendChild(score);
-      rowEl.appendChild(mkTeam(m.teamB, colB, 'b'));
-      rowEl.appendChild(mkLogo(m.teamB, m.logoB));
-      item.appendChild(rowEl);
-
-      // Optional meta line: date/time · game-by-game · ON STREAM / LIVE.
-      const meta = document.createElement('div'); meta.className = 'sch-bmeta';
-      const when = whenText(m);
-      if (when) meta.innerHTML += `<span class="when">${when.replace(/[<>&]/g, '')}</span>`;
-      if (Array.isArray(m.games) && m.games.length) {
-        const gs = m.games.map((g) => (g.a != null ? g.a : g.scoreA) + '-' + (g.b != null ? g.b : g.scoreB)).join('  ');
-        meta.innerHTML += `<span class="games">${gs}</span>`;
-      }
-      if (m.live) meta.innerHTML += '<span class="mk live"><span class="pdot"></span>LIVE</span>';
-      else if (m.stream) meta.innerHTML += '<span class="mk stream"><span class="pdot"></span>ON STREAM</span>';
-      item.appendChild(meta);
-
-      container.appendChild(item);
-    });
-  }
-
   function render(data) {
-    const stage = el('sch-stage'), row = el('sch-row'), empty = el('sch-empty');
-    if (!stage || !row) return;
+    var stage = el('sch-stage'), list = el('sch-list'), empty = el('sch-empty');
+    if (!stage || !list) return;
     if (SceneBase.preview && !((data.startgg && data.startgg.queue || []).length) && !((data.upcoming && data.upcoming.matches || []).length)) {
-      const demo = SceneBase.demoState();
+      var demo = SceneBase.demoState();
       data = Object.assign({}, data, { upcoming: demo.upcoming, startgg: Object.assign({}, data.startgg, demo.startgg) });
     }
-    const up = data.upcoming || {};
+    var up = data.upcoming || {};
     stage.classList.add('show');
-
     document.documentElement.style.setProperty('--accent', SceneBase.brandColor(data));
     document.documentElement.style.setProperty('--accent-2', SceneBase.brandAccent(data));
-    if (data.fontFamily) document.documentElement.style.fontFamily = `'${data.fontFamily}', 'Inter', system-ui, sans-serif`;
+    if (data.fontFamily) document.documentElement.style.fontFamily = "'" + data.fontFamily + "', 'Inter', system-ui, sans-serif";
     el('sch-title').textContent = (up.title || 'SCHEDULE').toUpperCase();
     el('sch-eyebrow').textContent = (up.eyebrow || 'On Deck').toUpperCase();
+    var brandLogo = (data.brand && data.brand.logo) || '';
+    var logoEl = el('sch-brand-logo');
+    if (brandLogo) { logoEl.src = brandLogo; logoEl.style.display = ''; } else { logoEl.style.display = 'none'; logoEl.removeAttribute('src'); }
 
-    const accentA = SceneBase.brandColor(data), accentB = SceneBase.brandAccent(data);
-    const maps = { saved: {}, sgg: (data.startgg && data.startgg.logoMap) || {}, color: {} };
-    (data.savedTeams || []).forEach((t) => {
-      if (!t || !t.name) return; const k = t.name.toLowerCase();
-      if (t.logo) maps.saved[k] = t.logo;
-      if (t.color) maps.color[k] = t.color;
+    var accentA = SceneBase.brandColor(data);
+    var accentB = SceneBase.brandAccent(data);
+    var mapsData = { saved: {}, sgg: (data.startgg && data.startgg.logoMap) || {}, color: {} };
+    (data.savedTeams || []).forEach(function (t) {
+      if (!t || !t.name) return; var k = t.name.toLowerCase();
+      if (t.logo) mapsData.saved[k] = t.logo;
+      if (t.color) mapsData.color[k] = t.color;
     });
 
-    // ?layout=board|cards forces the layout in preview (control-panel preview iframe uses this).
-    const layout = ((LAYOUT_QP || up.layout) === 'board') ? 'board' : 'cards';
-    const all = buildMatches((data.startgg || {}).queue, up.matches, maps);
-    const matches = layout === 'board' ? all : all.slice(0, 6);
-    // Cards shrink a touch when many matches share the row so they always fit 1920.
-    const w = matches.length >= 6 ? 280 : matches.length === 5 ? 300 : 312;
-    // Only rebuild (and re-trigger the entry animation) when the schedule actually changed.
-    // full_state broadcasts are frequent; rebuilding every time re-ran the animation = flashing.
-    const sig = JSON.stringify({ layout, w, m: matches });
+    var raw = LAYOUT_QP || up.layout || 'cards';
+    var isDual = raw === 'board' || raw === 'dual';
+    var all = buildMatches((data.startgg || {}).queue, up.matches, mapsData);
+    var sig = JSON.stringify({ d: isDual, m: all });
     if (sig === _lastSig) return;
     _lastSig = sig;
-    const board = el('sch-board');
-    empty.style.display = matches.length ? 'none' : 'block';
-    if (layout === 'board') {
-      row.style.display = 'none'; board.style.display = '';
-      buildBoard(board, matches, maps, accentA, accentB);
-    } else {
-      board.style.display = 'none'; row.style.display = '';
-      row.innerHTML = '';
-      matches.forEach((m, i) => { const c = buildCard(m, i); c.style.width = w + 'px'; row.appendChild(c); });
-    }
+    list.className = 'sch-list' + (isDual ? ' dual' : '');
+    list.innerHTML = '';
+    empty.style.display = all.length ? 'none' : 'block';
+    all.forEach(function (m, i) { list.appendChild(buildEntry(m, i, mapsData, accentA, accentB)); });
   }
-  let _lastSig = null;
+
   SceneBase.connect(render);
 })();
 </script>

@@ -4,11 +4,14 @@
 <meta charset="UTF-8">
 <title>NE Broadcast Suite — Series Scoreboard</title>
 <!--
-  SERIES SCOREBOARD overlay (browser source, 1920×1080).
-  Renders the Series editor data from the control panel: division, the two teams
-  with their series (map-win) score, "MAP X OF Y", and a per-map result strip.
-  Reads full_state.match { format, division, maps:[{name,scoreA,scoreB,played}] }
-  plus teams.blue / teams.orange for names, logos and colours.
+  SERIES SCOREBOARD overlay (browser source, 1920×1080) — the "smaller lower third" companion to
+  the full-screen Map Pool board (mapscreen.html): a compact, transparent, bottom-anchored card
+  meant to stay up during live gameplay or over a caster shot, not a full-screen reveal.
+  LINKED to Map Pool: when full_state.veto.maps has real picks, this reads THAT (the exact same
+  maps/scores shown on the Map Pool board) so producers maintain one map list, not two. Falls back
+  to the legacy Match/Series editor (full_state.match.maps) when Map Pool is empty/unused.
+  Shows: division, the two teams with their series (map-win) score, "MAP X OF Y", and a per-map
+  result strip. teams.blue / teams.orange supply names, logos and colours either way.
 -->
 <style>
   @import url('/fonts.css');
@@ -69,12 +72,31 @@
       else { img.removeAttribute('src'); img.classList.add('ph'); }
     }
 
+    // Series links to the Map Pool board (state.veto.maps) when it has real picks — the SAME data
+    // shown full-screen there — so producers maintain one map list, not two. Falls back to the
+    // legacy Match/Series editor (state.match.maps) when Map Pool is empty/unused. Map Pool's
+    // score shape is {a,b} (an object); normalize to the flat scoreA/scoreB/played this card uses.
+    function mapsFromVetoPool(v) {
+      return (Array.isArray(v.maps) ? v.maps : []).filter((m) => m.name).map((m) => ({
+        name: m.name,
+        scoreA: (m.score && m.score.a) || 0,
+        scoreB: (m.score && m.score.b) || 0,
+        played: !!(m.winner || (m.score && (m.score.a || m.score.b)))
+      }));
+    }
     function render(data) {
-      const m = data.match || { maps: [] };
+      const veto = data.veto || {};
+      const linkedToVeto = Array.isArray(veto.maps) && veto.maps.some((mp) => mp.name);
+      const legacy = data.match || { maps: [] };
+      const m = linkedToVeto ? { ...legacy, maps: mapsFromVetoPool(veto) } : legacy;
       const teams = data.teams || {};
       const a = teams.blue || {}, b = teams.orange || {};
       const maps = Array.isArray(m.maps) ? m.maps : [];
-      const total = maps.length || FORMAT_MAPS[m.format] || 0;
+      // Map Pool doesn't carry its own format field — its Best-of selector writes straight to
+      // the app's global state.bestOf (same field the Series panel/scoreboard use), so once
+      // linked that's the authoritative series length, not just however many slots are filled
+      // in so far (a Bo5 that's 3-0 should still read "of 5", not "of 3").
+      const total = linkedToVeto ? (data.bestOf || maps.length || 0) : (maps.length || FORMAT_MAPS[m.format] || 0);
 
       $('division').textContent = m.division || '';
       $('name-a').textContent = a.name || 'Team A';
@@ -97,7 +119,7 @@
         <span class="ms">${mp.played ? (mp.scoreA + ' - ' + mp.scoreB) : '—'}</span></div>`).join('');
       strip.style.display = maps.length ? 'flex' : 'none';
 
-      $('wrap').classList.toggle('show', (data.match.seriesVisible !== false) && (total > 0 || data.gfxActive === 'series'));
+      $('wrap').classList.toggle('show', (m.seriesVisible !== false) && (total > 0 || data.gfxActive === 'series'));
     }
 
     function connect() {
