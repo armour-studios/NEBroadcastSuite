@@ -230,7 +230,7 @@ let state = {
   colorMode: 'team',        // 'team' | 'brand' | 'default'
   sceneBg: {},              // live bg fill per overlay path, keyed by pathname
   banner: { visible: false, images: [], captions: [], interval: 10, slant: 'right', header: '' },
-  casters: { visible: true, list: [], lowerThird: '', library: [], vdo: { room: '', password: '' }, guestsVdo: { room: '', password: '' }, observersVdo: { room: '', password: '' }, rooms: [], lineup: [], activeLayout: '', interview: { room: '', password: '' }, apiKey: '', interviewee: null, deskRoomId: '', slotLabels: { 1: 'Caster 1', 2: 'Caster 2', 3: 'Caster 3', 4: 'Caster 4' } },   // list = on-air slots; library = saved casters/guests/observers (by kind); vdo/guestsVdo/observersVdo = the three shared group rooms; rooms = named VDO rooms; lineup = this-show active assignments; apiKey = director IFrame-API key; interviewee = spotlight-desk right cam; deskRoomId = which named room is the interview/desk room
+  casters: { visible: true, showCountry: false, list: [], lowerThird: '', library: [], vdo: { room: '', password: '' }, guestsVdo: { room: '', password: '' }, observersVdo: { room: '', password: '' }, rooms: [], lineup: [], activeLayout: '', interview: { room: '', password: '' }, apiKey: '', interviewee: null, deskRoomId: '', slotLabels: { 1: 'Caster 1', 2: 'Caster 2', 3: 'Caster 3', 4: 'Caster 4' } },   // list = on-air slots; showCountry = render each caster's country on the desk; library = saved casters/guests/observers (by kind); vdo/guestsVdo/observersVdo = the three shared group rooms; rooms = named VDO rooms; lineup = this-show active assignments; apiKey = director IFrame-API key; interviewee = spotlight-desk right cam; deskRoomId = which named room is the interview/desk room
   // VDO.Ninja talent workflow. Global config (server-side, replaces the old localStorage settings);
   // per-team rooms/passwords live on teams.x.vdo, per-player IDs on the player objects.
   vdo: {
@@ -1474,6 +1474,7 @@ function loadState() {
       if (saved.casters && typeof saved.casters === 'object') {
         state.casters = {
           visible: !!saved.casters.visible,
+          showCountry: !!saved.casters.showCountry,
           lowerThird: typeof saved.casters.lowerThird === 'string' ? saved.casters.lowerThird : '',
           list: Array.isArray(saved.casters.list) ? saved.casters.list : [],
           library: Array.isArray(saved.casters.library) ? saved.casters.library : [],
@@ -1768,6 +1769,9 @@ function loadState() {
       if (Array.isArray(saved.flows)) {
         state.flows = saved.flows;
       }
+      if (Array.isArray(saved.crew)) {
+        state.crew = saved.crew;
+      }
       if (Array.isArray(saved.adProofSessions)) {
         state.adProofSessions = saved.adProofSessions;
       }
@@ -1887,7 +1891,8 @@ function _saveAppStateNow(sync = false) {
       rlSpectatorUi: state.rlSpectatorUi || rlSpectatorUi.DEFAULTS,
       vdo: state.vdo,
       flows: state.flows || [],
-      sceneBg: state.sceneBg || {}
+      sceneBg: state.sceneBg || {},
+      crew: state.crew || []
     };
     safeWriteJson(stateFile, toSave, sync);
     saveTwitchData(sync);
@@ -2050,6 +2055,7 @@ function resolveLineupToList() {
       name: prof.name || '',
       handle: prof.handle || '',
       social: prof.social || 'none',
+      country: prof.country || '',
       slot: Number(entry.slot) || (i + 1),
       streamId: sid,
       room: vdo ? vdo.room : '',
@@ -8164,6 +8170,12 @@ function handleControlMessage(msg, ws) {
       saveAppState();
       broadcastFullState();
       obsSwitch(state.casters.visible ? 'casters' : 'inGame');
+      break;
+
+    case 'set_casters_show_country':
+      state.casters.showCountry = !!msg.data?.showCountry;
+      saveAppState();
+      broadcastFullState();
       break;
 
     // Saved-caster library — reusable people you can load into any slot.
