@@ -1583,7 +1583,9 @@ function loadState() {
           gameMode: typeof saved.owMatch.gameMode === 'string' ? saved.owMatch.gameMode : 'escort',
           showMapLabels: typeof saved.owMatch.showMapLabels === 'boolean' ? saved.owMatch.showMapLabels : true,
           mapWinners: Array.isArray(saved.owMatch.mapWinners) ? saved.owMatch.mapWinners : [],
-          mapModes:   Array.isArray(saved.owMatch.mapModes)   ? saved.owMatch.mapModes   : []
+          mapModes:   Array.isArray(saved.owMatch.mapModes)   ? saved.owMatch.mapModes   : [],
+          attackSide: saved.owMatch.attackSide || null,
+          showAttack: !!saved.owMatch.showAttack
         };
       }
       if (saved.mrMatch && typeof saved.mrMatch === 'object') {
@@ -1807,6 +1809,9 @@ function _saveAppStateNow(sync = false) {
       activeBrandKitId: state.activeBrandKitId,
       useBrandColors: state.useBrandColors,
       colorMode: state.colorMode,
+      clock24h: state.clock24h,
+      showSeries: state.showSeries,
+      defaultBestOf: state.defaultBestOf,
       eventName: state.eventName,
       gameLabel: state.gameLabel,
       roundLabel: state.roundLabel,
@@ -1816,9 +1821,10 @@ function _saveAppStateNow(sync = false) {
       leagueStandings: state.leagueStandings,
       fontFamily: state.fontFamily,
       facecamsEnabled: state.facecamsEnabled,
+      replayCams: state.replayCams,
+      deskFooter: state.deskFooter,
       banner: state.banner,
       casters: state.casters,
-      playouts: state.playouts,
       ticker: state.ticker,
       draftAuto: { enabled: !!(state.draft && state.draft.auto && state.draft.auto.enabled), lockfilePath: (state.draft && state.draft.auto && state.draft.auto.lockfilePath) || '' },
       lolHudMode: (state.lol && state.lol.hudMode) || 'auto',
@@ -1828,6 +1834,8 @@ function _saveAppStateNow(sync = false) {
       overtime: state.overtime,
       replay: state.replay,
       scoreboardAd: state.scoreboardAd,
+      watchlist: state.watchlist,
+      teamSpotlight: state.teamSpotlight,
       breakScreen: {
         visible: state.breakScreen.visible,
         title: state.breakScreen.title,
