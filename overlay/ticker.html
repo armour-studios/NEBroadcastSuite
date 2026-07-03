@@ -103,6 +103,7 @@
 
   function render(data) {
     var t = (data && data.ticker) || {};
+    if (data && data.fontFamily) document.documentElement.style.fontFamily = "'" + data.fontFamily + "', 'Inter', system-ui, sans-serif";
     var bar = el('ticker'), track = el('ticker-track');
     var isStartgg = t.source === 'startgg';
     var matches = isStartgg ? ((data && data.startgg && data.startgg.matchFeed) || []).filter(function (m) { return m && (m.status === 'live' || m.status === 'done'); }) : [];
