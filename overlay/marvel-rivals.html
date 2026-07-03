@@ -820,7 +820,6 @@ function render(state){
   const board=document.getElementById('mr-board'); if(!board) return;
   const visible=!!mr.visible||PREVIEW;
   board.classList.toggle('hidden',!visible);
-  if(!visible) return;
 
   const tA=teams.blue||{}, tB=teams.orange||{};
   const MR_FB='/assets/games/rivals.png';

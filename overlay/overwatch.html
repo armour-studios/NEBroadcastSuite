@@ -433,7 +433,6 @@ function render(state){
   const board=document.getElementById('ow-board'); if(!board) return;
   const visible=!!ow.visible||PREVIEW;
   board.classList.toggle('hidden',!visible);
-  if(!visible) return;
 
   const tA=teams.blue||{}, tB=teams.orange||{};
   setText('ow-name-a',(tA.name||'TEAM A').toUpperCase());

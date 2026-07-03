@@ -128,13 +128,13 @@
       const w = data.winner || {};
       const visible = !!w.visible || EMBED;
       stage.classList.toggle('show', visible);
-      if (!visible) { _sig = ''; return; }
+      if (!visible) _sig = '';  // reset so animation replays on show; content still updates below
 
       const r = resolve(w, data);
       const sig = JSON.stringify(r);
       if (sig === _sig) return;
       const first = !_sig;
-      _sig = sig;
+      _sig = visible ? sig : '';  // keep empty while hidden so any content change always flows through
 
       if (r.color) document.documentElement.style.setProperty('--accent', r.color);
       el('w-name').textContent = (r.name + ' WINS!').toUpperCase();

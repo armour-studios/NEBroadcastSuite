@@ -21,8 +21,12 @@
   /* Sponsor logo — fixed on the left, next to LIVE */
   .ticker-sponsor { flex-shrink: 0; align-self: center; height: 34px; margin: 0 18px; object-fit: contain; display: none; position: relative; z-index: 2; }
   .ticker.has-sponsor .ticker-sponsor { display: block; }
+  /* The scrolling lane is CLIPPED to its own box, which sits (via flex order) strictly to the right
+     of the sponsor logo/LIVE badge — the marquee can never slide visually behind them, because
+     nothing of it renders outside this mask no matter how far the animation's translateX travels. */
+  .ticker-mask { flex: 1 1 auto; min-width: 0; height: 100%; overflow: hidden; position: relative; }
   .ticker-track { display: inline-flex; align-items: center; white-space: nowrap; animation: ticker-scroll linear infinite;
-    padding-left: 28px; position: relative; z-index: 1; }
+    padding-left: 28px; position: relative; }
   @keyframes ticker-scroll { from { transform: translateX(0); } to { transform: translateX(-50%); } }
   /* Match scoreline: [LIVE|FINAL] [logoA] TEAM A  s - s  TEAM B [logoB] */
   .tk-match { display: inline-flex; align-items: center; gap: 12px; }
@@ -54,7 +58,7 @@
 <body>
   <div id="ticker" class="ticker hidden">
     <img class="ticker-sponsor" id="ticker-sponsor" alt="">
-    <div id="ticker-track" class="ticker-track"></div>
+    <div class="ticker-mask"><div id="ticker-track" class="ticker-track"></div></div>
   </div>
 <script src="scene-base.js"></script>
 <script>
@@ -116,12 +120,12 @@
     bar.classList.toggle('has-sponsor', !!sponsor);
     document.documentElement.style.setProperty('--brand', SceneBase.brandAccent(data));
     var sp = el('ticker-sponsor'); if (sp && sponsor) sp.src = sponsor;
-    if (!visible) { _sig = ''; return; }
+    if (!visible) _sig = '';  // reset so scroll rebuilds on show; content still updates below
 
     var speed = (t.speed > 0) ? t.speed : 40;
     var sig = JSON.stringify({ s: isStartgg, m: matches, x: messages, sp: sponsor, speed: speed });
     if (sig === _sig) return;
-    _sig = sig;
+    _sig = visible ? sig : '';
 
     track.innerHTML = '';
     for (var copy = 0; copy < 2; copy++) {

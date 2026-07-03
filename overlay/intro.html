@@ -205,7 +205,6 @@
 
       const visible = !!intro.visible || EMBED;
       stage.classList.toggle('show', visible);
-      if (!visible) return;
 
       const side = (sideOverride === 'blue' || sideOverride === 'orange') ? sideOverride : (intro.side || 'blue');
       const team = SceneBase.teamSide(data, side);
