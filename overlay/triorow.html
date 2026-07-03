@@ -198,7 +198,7 @@
         if (!nameEl || !socEl) continue;
         nameEl.textContent = (c.name || '—').toString();
         const handle = SceneBase.formatCasterHandle(c), social = (c.social || 'none').toString().toLowerCase();
-        if (handle && social !== 'none') {
+        if (handle) {
           socEl.className = 'cam-handle ' + SceneBase.socialPlatformClass(social);
           socEl.textContent = handle; socEl.style.display = '';
         } else { socEl.style.display = 'none'; }

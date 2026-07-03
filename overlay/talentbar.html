@@ -119,7 +119,7 @@
       wrap.innerHTML = '';
       list.forEach(c => {
         const handle = SceneBase.formatCasterHandle(c), social = (c.social || 'none').toString().toLowerCase();
-        const socHtml = (handle && social !== 'none') ? `<span class="tb-handle ${SceneBase.socialPlatformClass(social)}">${handle.replace(/</g, '&lt;')}</span>` : '';
+        const socHtml = (handle) ? `<span class="tb-handle ${SceneBase.socialPlatformClass(social)}">${handle.replace(/</g, '&lt;')}</span>` : '';
         const item = document.createElement('div');
         item.className = 'tb-talent';
         item.innerHTML = `<div class="tb-cam"></div><div class="tb-text"><span class="tb-name">${(c.name || '—').toString().replace(/</g, '&lt;')}</span>${socHtml}</div>`;

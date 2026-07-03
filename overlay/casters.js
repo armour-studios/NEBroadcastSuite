@@ -27,7 +27,9 @@ function renderCasters(casters) {
   if (!stage || !listEl) return;
 
   const items = orderedCasters(casters);
-  const visible = !!(casters && casters.visible) && items.length > 0;
+  // casters.html is a standalone OBS source — always show when items exist.
+  // (SceneBase.casterStageVisible returns true for standalone scenes regardless of the visibility toggle.)
+  const visible = SceneBase.casterStageVisible(casters) && items.length > 0;
 
   stage.classList.toggle('show', visible);
 
@@ -80,7 +82,7 @@ function renderCasters(casters) {
       ? SceneBase.formatCasterHandle(c)
       : (c.handle || '').trim();
     const social = (c.social || 'none').toString().toLowerCase();
-    if (handleText && social !== 'none') {
+    if (handleText) {
       const handle = document.createElement('div');
       const cls = (typeof SceneBase !== 'undefined')
         ? SceneBase.socialPlatformClass(social)

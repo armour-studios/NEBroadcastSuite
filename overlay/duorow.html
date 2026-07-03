@@ -88,9 +88,9 @@
       display: flex;
       flex-direction: column;
       align-items: center;
-      justify-content: center;
+      justify-content: flex-start;
       gap: 12px;
-      padding-top: 8px;
+      padding-top: 18px;
     }
 
     /* ── Entry animations (on .show) ───────────────────────────────── */
@@ -98,6 +98,7 @@
     .duo-stage:not(.show) .match-hud,
     .duo-stage:not(.show) .cam-card,
     .duo-stage:not(.show) .footer-row,
+    .duo-stage:not(.show) .brand-strip,
     .duo-stage:not(.show) .match-feed,
     .duo-stage:not(.show) .deck-strip,
     .duo-stage:not(.show) .duo-bestof {
@@ -120,6 +121,9 @@
     }
     .duo-stage.show .footer-row {
       animation: footerUp .65s cubic-bezier(.16,.84,.24,1) .32s forwards;
+    }
+    .duo-stage.show .brand-strip {
+      animation: footerUp .6s cubic-bezier(.16,.84,.24,1) .36s forwards;
     }
     .duo-stage.show .match-feed {
       animation: stripUp .6s cubic-bezier(.16,.84,.24,1) .38s forwards;
@@ -485,6 +489,44 @@
       filter: drop-shadow(0 2px 6px rgba(0,0,0,.35));
     }
 
+    /* Brand logo + event title — small strip under "Presented by", on its OWN solid card (same
+       treatment as .presented-by) so it stays legible over transparent-compositied game footage
+       instead of relying on contrast against whatever happens to be behind the overlay. */
+    .brand-strip {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      padding: 7px 22px;
+      background: linear-gradient(180deg, rgba(20,23,30,.96), rgba(10,12,16,.98));
+      border: 1px solid rgba(255,255,255,.08);
+      border-radius: 8px;
+      box-shadow: 0 8px 24px rgba(0,0,0,.4), inset 0 1px 0 rgba(255,255,255,.06);
+    }
+    .brand-strip.is-empty { display: none; }
+    .brand-strip-logo {
+      height: 26px;
+      max-width: 120px;
+      object-fit: contain;
+      filter: drop-shadow(0 2px 5px rgba(0,0,0,.35));
+    }
+    .brand-strip-sep {
+      width: 1px;
+      height: 14px;
+      background: rgba(255,255,255,.15);
+    }
+    .brand-strip-event {
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: #d6dbe6;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 500px;
+    }
+
     .deck-strip {
       width: 100%;
       max-width: min(900px, calc(var(--stage-w) - 2 * var(--pad-x)));
@@ -655,6 +697,11 @@
           <img id="pb-logo" class="pb-logo" alt="" style="display:none">
         </div>
       </div>
+      <div class="brand-strip is-empty" id="brand-strip">
+        <img id="brand-strip-logo" class="brand-strip-logo" alt="" style="display:none">
+        <span class="brand-strip-sep" id="brand-strip-sep" style="display:none"></span>
+        <span id="brand-strip-event" class="brand-strip-event"></span>
+      </div>
       <div class="deck-strip is-empty" id="deck-strip">
         <span id="tagline" class="deck-strip-text">Live</span>
       </div>
@@ -752,7 +799,7 @@
         nameEl.textContent = (c.name || '—').toString();
         const handle = SceneBase.formatCasterHandle(c);
         const social = (c.social || 'none').toString().toLowerCase();
-        if (handle && social !== 'none') {
+        if (handle) {
           const cls = SceneBase.socialPlatformClass(social);
           socEl.className = 'cam-handle' + (cls ? ' ' + cls : '');
           socEl.textContent = handle;
@@ -818,6 +865,22 @@
       }
     }
 
+    // Small brand-logo + event-title strip under "Presented by" — identifies the org/event without
+    // competing visually with the sponsor call-out above it.
+    function renderBrandStrip(data) {
+      const brand = data.brand || {};
+      const wrap = el('brand-strip');
+      const logoEl = el('brand-strip-logo');
+      const sepEl = el('brand-strip-sep');
+      const evEl = el('brand-strip-event');
+      const evName = (data.eventName || '').toString().trim();
+      const hasLogo = !!brand.logo;
+      if (hasLogo) { logoEl.src = brand.logo; logoEl.style.display = ''; } else { logoEl.style.display = 'none'; logoEl.removeAttribute('src'); }
+      evEl.textContent = evName.toUpperCase();
+      sepEl.style.display = (hasLogo && evName) ? '' : 'none';
+      wrap.classList.toggle('is-empty', !hasLogo && !evName);
+    }
+
     function renderDeckStrip(data) {
       const tag = ((data.casters && data.casters.lowerThird) || '').toString().trim();
       const strip = el('deck-strip');
@@ -876,6 +939,7 @@
       else el('duo-bestof-text').innerHTML = 'BEST OF <b>' + bo + '</b> &nbsp;·&nbsp; GAME <b>' + gameNum + '</b>';
 
       renderPresentedBy(data);
+      renderBrandStrip(data);
       renderDeckStrip(data);
       renderSponsorFooter(data.brand, data.deskFooter);
     }
@@ -892,6 +956,7 @@
           ]
         },
         brand: {
+          logo: 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="90" height="34"><text x="4" y="25" font-size="22" fill="#e8eaf0" font-family="Arial" font-weight="bold">NE</text></svg>'),
           sponsors: [
             { name: 'Acme', logo: 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="120" height="48"><text x="10" y="34" font-size="28" fill="#fff" font-family="Arial">ACME</text></svg>') },
             { name: 'Nova', logo: 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="120" height="48"><text x="10" y="34" font-size="28" fill="#fff" font-family="Arial">NOVA</text></svg>') }

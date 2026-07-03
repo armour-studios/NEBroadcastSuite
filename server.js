@@ -8216,6 +8216,7 @@ function handleControlMessage(msg, ws) {
       } else {
         state.casters.library.push(entry);
       }
+      resolveLineupToList();   // re-join so name/handle/social edits propagate to overlay immediately
       saveAppState();
       broadcastFullState();
       break;
@@ -8223,6 +8224,7 @@ function handleControlMessage(msg, ws) {
     case 'delete_caster_from_library': {
       if (Array.isArray(state.casters.library)) {
         state.casters.library = state.casters.library.filter((c) => c.id !== msg.data?.id);
+        resolveLineupToList();   // remove stale list entries for deleted caster
         saveAppState();
         broadcastFullState();
       }

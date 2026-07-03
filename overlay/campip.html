@@ -102,7 +102,7 @@
       pip.innerHTML = '';
       list.forEach(c => {
         const handle = SceneBase.formatCasterHandle(c), social = (c.social || 'none').toString().toLowerCase();
-        const socHtml = (handle && social !== 'none') ? `<span class="pip-handle ${SceneBase.socialPlatformClass(social)}">${handle.replace(/</g, '&lt;')}</span>` : '';
+        const socHtml = (handle) ? `<span class="pip-handle ${SceneBase.socialPlatformClass(social)}">${handle.replace(/</g, '&lt;')}</span>` : '';
         const card = document.createElement('div');
         card.className = 'pip-cam';
         card.innerHTML = `<div class="pip-hole"></div><div class="pip-plate"><span class="pip-name">${(c.name || '—').toString().replace(/</g, '&lt;')}</span>${socHtml}</div>`;

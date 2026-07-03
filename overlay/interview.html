@@ -176,7 +176,7 @@
         el('staffname' + (i + 1)).textContent = (c.name || '—').toString();
         const socEl = el('socials' + (i + 1));
         const handle = SceneBase.formatCasterHandle(c), social = (c.social || 'none').toString().toLowerCase();
-        if (handle && social !== 'none') { socEl.className = 'cam-handle ' + SceneBase.socialPlatformClass(social); socEl.textContent = handle; socEl.style.display = ''; }
+        if (handle) { socEl.className = 'cam-handle ' + SceneBase.socialPlatformClass(social); socEl.textContent = handle; socEl.style.display = ''; }
         else socEl.style.display = 'none';
       }
     }

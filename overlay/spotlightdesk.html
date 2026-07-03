@@ -203,7 +203,7 @@
         const nameEl = el('castname' + (i + 1)), tagEl = el('casttag' + (i + 1));
         if (nameEl) nameEl.textContent = (c.name || '—').toString();
         const handle = SceneBase.formatCasterHandle(c), social = (c.social || 'none').toString().toLowerCase();
-        if (tagEl) { if (handle && social !== 'none') { tagEl.textContent = handle; tagEl.style.display = ''; } else tagEl.style.display = 'none'; }
+        if (tagEl) { if (handle) { tagEl.textContent = handle; tagEl.style.display = ''; } else tagEl.style.display = 'none'; }
         if (NO_CAMS) continue;
         const camUrl = ((c.camUrl) || '').trim();
         if (camUrl === _lastCamUrl[i]) continue;
