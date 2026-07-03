@@ -214,6 +214,8 @@ let state = {
   eventName: '',   // fresh installs start with no preset title — the producer sets their own
   gameLabel: '',   // custom "GAME x | BEST OF x" override (e.g. "UPCOMING MATCH"); '' = auto
   roundLabel: '',  // optional bracket round/stage shown on the overlay (e.g. "WINNERS FINALS"); '' = hidden
+  speedUnit: 'mph', // shot-speed display unit: 'mph' | 'kmh'. RL's Stats API reports km/h and does NOT
+                    // expose the player's UI unit setting, so this is a manual toggle. Overlay converts.
   fontFamily: 'Industry',
   clock24h: false,
   showSeries: true,
@@ -1048,7 +1050,7 @@ function sanitizePlacements(p) {
 // level — they're wrapped into a single "Main" package on load so every read path resolves
 // through activePackage().
 function brandId() { return Math.random().toString(36).slice(2, 11); }
-const PACKAGE_FIELDS = ['sponsorLabel', 'sponsorInterval', 'sponsorMode', 'sponsors', 'bannerImages', 'bannerCaptions', 'bannerSlant', 'bannerHeader', 'bannerInterval'];
+const PACKAGE_FIELDS = ['sponsorLabel', 'sponsorInterval', 'sponsorMode', 'sponsors', 'bannerImages', 'bannerCaptions', 'bannerSlant', 'bannerHeader', 'bannerInterval', 'replaySkin'];
 
 function sanitizePackage(p, fallbackName) {
   p = p || {};
@@ -1067,6 +1069,7 @@ function sanitizePackage(p, fallbackName) {
     bannerSlant: ['right', 'left', 'box'].includes(p.bannerSlant) ? p.bannerSlant : 'right',
     bannerHeader: typeof p.bannerHeader === 'string' ? p.bannerHeader.slice(0, 40) : '',
     bannerInterval: Number(p.bannerInterval) > 0 ? Number(p.bannerInterval) : 10,
+    replaySkin: p.replaySkin || null,   // per-profile replay transition background image
   };
 }
 
@@ -1124,6 +1127,7 @@ function activeBrand() {
     sponsorMode: pkg.sponsorMode === 'static' ? 'static' : 'cycle',
     bannerImages: Array.isArray(pkg.bannerImages) ? pkg.bannerImages : [],
     bannerInterval: Number(pkg.bannerInterval) > 0 ? Number(pkg.bannerInterval) : 10,
+    replaySkin: pkg.replaySkin || null,        // per-profile replay transition background
     sponsors,                                  // all (for the editor + back-compat consumers)
     railSponsors: tagged('rail'),              // rotating corner bug
     deskSponsors: tagged('desk'),              // caster-desk footer logos
@@ -1323,6 +1327,10 @@ function applyBrandSlots() {
   state.replay.logo = resolve(state.replay.logo, b.spots.replayGoal);
   state.replay.outroLogo = resolve(state.replay.outroLogo, b.spots.replayOutro);
   state.scoreboardAd.logo = resolve(state.scoreboardAd.logo, b.spots.scoreboard);
+  // Replay transition BACKGROUND (skin): the active profile's image wins; a manual (non-brand) upload
+  // is kept when the active profile has none, and a previous profile's skin is cleared when you switch.
+  const allBrandSkins = new Set(savedBrandKits.flatMap((k) => (k.packages || []).map((p) => p.replaySkin).filter(Boolean)));
+  state.replay.skin = (b.replaySkin != null) ? b.replaySkin : (allBrandSkins.has(state.replay.skin) ? null : state.replay.skin);
 }
 
 // Banner images for broadcast.
@@ -1393,6 +1401,7 @@ function capturePreset() {
     roundLabel: state.roundLabel,
     teamRecord: state.teamRecord,
     leagueStandings: state.leagueStandings,
+    speedUnit: state.speedUnit,
     fontFamily: state.fontFamily,
     bestOf: state.bestOf,
     facecamsEnabled: state.facecamsEnabled,
@@ -1411,6 +1420,7 @@ function applyPreset(cfg) {
   if (typeof cfg.eventName === 'string') state.eventName = cfg.eventName;
   if (typeof cfg.gameLabel === 'string') state.gameLabel = cfg.gameLabel;
   if (typeof cfg.roundLabel === 'string') state.roundLabel = cfg.roundLabel;
+  if (cfg.speedUnit === 'mph' || cfg.speedUnit === 'kmh') state.speedUnit = cfg.speedUnit;
   if (cfg.teamRecord && typeof cfg.teamRecord === 'object') state.teamRecord = { ...state.teamRecord, ...cfg.teamRecord };
   if (cfg.leagueStandings && typeof cfg.leagueStandings === 'object') state.leagueStandings = { ...state.leagueStandings, ...cfg.leagueStandings };
   if (typeof cfg.fontFamily === 'string') state.fontFamily = cfg.fontFamily;
@@ -1447,6 +1457,7 @@ function loadState() {
       if (typeof saved.eventName === 'string') state.eventName = saved.eventName;
       if (typeof saved.gameLabel === 'string') state.gameLabel = saved.gameLabel;
       if (typeof saved.roundLabel === 'string') state.roundLabel = saved.roundLabel;
+      if (saved.speedUnit === 'mph' || saved.speedUnit === 'kmh') state.speedUnit = saved.speedUnit;
       if (saved.teamRecord && typeof saved.teamRecord === 'object') state.teamRecord = { ...state.teamRecord, ...saved.teamRecord };
       if (typeof saved.autoTeamsFromGame === 'boolean') state.autoTeamsFromGame = saved.autoTeamsFromGame;
       if (saved.leagueStandings && typeof saved.leagueStandings === 'object') state.leagueStandings = { ...state.leagueStandings, ...saved.leagueStandings };
@@ -1795,6 +1806,7 @@ function _saveAppStateNow(sync = false) {
       eventName: state.eventName,
       gameLabel: state.gameLabel,
       roundLabel: state.roundLabel,
+      speedUnit: state.speedUnit,
       teamRecord: state.teamRecord,
       autoTeamsFromGame: state.autoTeamsFromGame,
       leagueStandings: state.leagueStandings,
@@ -3181,6 +3193,7 @@ async function loadChalongeTournament(slug) {
     url: tournament.full_challonge_url || `https://challonge.com/${slug}`,
     loadedAt: new Date().toISOString()
   };
+  setActivePlatform('challonge');   // this is now the active platform — silence start.gg / NXGEN follow
   state.challonge.queueFetchedAt = Date.now();
 
   // Apply bracket to state.bracket
@@ -3488,6 +3501,7 @@ async function loadNxgenEvent(slug) {
     url: event.streamUrl || `https://www.nxgen.pro/events/${slug}`,
     loadedAt: new Date().toISOString()
   };
+  setActivePlatform('nxgen');   // this is now the active platform — silence start.gg / Challonge follow
 
   const phase = {
     id: 'nxgen-main',
@@ -3555,6 +3569,17 @@ function setNxgenPolling(enabled) {
     refreshNxgenLive();
     _nxgenPollTimer = setInterval(refreshNxgenLive, 30000);
   }
+}
+
+// Only ONE tournament platform (start.gg / Challonge / NXGEN) may drive the broadcast at a time —
+// two live auto-follows fighting over the scoreboard is exactly the "trouble" to prevent. Making a
+// platform active turns the OTHERS' auto-follow + live polling OFF. (Result push-back via each
+// event's challongeSync link is a separate one-directional path and is deliberately left running.)
+function setActivePlatform(platform) {
+  state.activeEvent.platform = platform || null;
+  if (platform !== 'startgg')   { state.startgg.autoFollow  = false; if (state.startgg.queueEnabled) setStartggQueuePolling(false); }
+  if (platform !== 'challonge') { state.challonge.autoFollow = false; setChallongePolling(false); }
+  if (platform !== 'nxgen')     { state.nxgen.autoFollow    = false; setNxgenPolling(false); }
 }
 
 // ─── My Events live-refresh ───────────────────────────────────────────────────
@@ -4579,6 +4604,7 @@ async function activateStartggEvent(tournamentSlug, eventSlug, meta) {
   }
   // One-click setup: turn on the queue + auto-follow so the live match auto-pushes to the scoreboard,
   // and begin live polling (queue + bracket + standings refresh) now that we have a slug.
+  setActivePlatform('startgg');   // active platform — silence Challonge / NXGEN follow before we start ours
   state.startgg.queueEnabled = true;
   state.startgg.autoFollow = true;
   setStartggQueuePolling(true);
@@ -7321,6 +7347,12 @@ function handleControlMessage(msg, ws) {
       broadcastFullState();
       break;
 
+    case 'set_speed_unit':
+      state.speedUnit = (msg.data && msg.data.unit === 'kmh') ? 'kmh' : 'mph';
+      saveAppState();
+      broadcastFullState();
+      break;
+
     case 'set_team_record_settings': {
       const d = msg.data || {};
       if (typeof d.enabled === 'boolean') state.teamRecord.enabled = d.enabled;
@@ -8572,10 +8604,12 @@ function handleControlMessage(msg, ws) {
       const { path, bg } = msg.data || {};
       if (typeof path === 'string' && path) {
         if (!state.sceneBg) state.sceneBg = {};
+        const cleanPath = path.split('?')[0];   // strip ?timer=1 etc — overlays key by pathname
         if (bg && bg.on) {
-          state.sceneBg[path] = { on: true, color: (bg.color || '#000000').slice(0, 20), op: Math.max(1, Math.min(100, Number(bg.op) || 50)) };
+          state.sceneBg[cleanPath] = { on: true, color: (bg.color || '#000000').slice(0, 20), op: Math.max(1, Math.min(100, Number(bg.op) || 50)) };
         } else {
-          delete state.sceneBg[path];
+          // Store explicit off so overlays can remove a URL-param bg; undefined means untouched.
+          state.sceneBg[cleanPath] = { on: false };
         }
         saveAppState();
         broadcastFullState();
@@ -9897,6 +9931,7 @@ function handleControlMessage(msg, ws) {
     case 'startgg_set_autofollow': {
       if (typeof msg.data?.streamName === 'string') state.startgg.streamName = msg.data.streamName;
       setStartggAutoFollow(!!msg.data?.enabled);
+      if (state.startgg.autoFollow) setActivePlatform('startgg');   // silence Challonge / NXGEN follow
       if (state.startgg.autoFollow && !state.startgg.queueEnabled && startggApiToken && state.startgg.tournamentSlug) {
         setStartggQueuePolling(true);
       }
@@ -9921,6 +9956,7 @@ function handleControlMessage(msg, ws) {
 
     case 'set_challonge_auto_follow': {
       state.challonge.autoFollow = !!msg.data?.enabled;
+      if (state.challonge.autoFollow) setActivePlatform('challonge');   // silence start.gg / NXGEN follow
       saveAppState();
       broadcastFullState();
       break;
@@ -10083,6 +10119,7 @@ function handleControlMessage(msg, ws) {
 
     case 'set_nxgen_auto_follow': {
       state.nxgen.autoFollow = !!msg.data?.enabled;
+      if (state.nxgen.autoFollow) setActivePlatform('nxgen');   // silence start.gg / Challonge follow
       saveAppState();
       broadcastFullState();
       break;
@@ -14356,6 +14393,10 @@ module.exports.start = function(baseDir) {
   if (state.startgg.queueEnabled && startggApiToken && state.startgg.tournamentSlug) {
     setStartggQueuePolling(true);
   }
+  // Enforce single-active-platform on boot too: if a tournament platform was the active event last
+  // session, make sure the other platforms' auto-follow didn't survive in the saved state and start
+  // fighting it after restart.
+  if (state.activeEvent && state.activeEvent.platform) setActivePlatform(state.activeEvent.platform);
 
 
   // AI training-data recorder (Phase 0 — local JSONL of producer decisions + context).

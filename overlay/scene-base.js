@@ -328,7 +328,11 @@
               });
             }
             applyBrand(msg.data);
-            SceneBase.applyBg((msg.data.sceneBg || {})[global.location.pathname]);
+            // Only override URL-param bg when the server has an explicit entry for this
+            // scene (including {on:false}). undefined = server has never been told about
+            // this scene's bg → leave whatever ?bg= URL param applied untouched.
+            const _sbEntry = (msg.data.sceneBg || {})[global.location.pathname];
+            if (_sbEntry !== undefined) SceneBase.applyBg(_sbEntry);
             try { onState(msg.data); } catch (e) { console.error('[scene] render error', e); }
           }
         };
