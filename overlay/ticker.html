@@ -24,7 +24,7 @@
   /* The scrolling lane is CLIPPED to its own box, which sits (via flex order) strictly to the right
      of the sponsor logo/LIVE badge — the marquee can never slide visually behind them, because
      nothing of it renders outside this mask no matter how far the animation's translateX travels. */
-  .ticker-mask { flex: 1 1 auto; min-width: 0; height: 100%; overflow: hidden; position: relative; }
+  .ticker-mask { flex: 1 1 auto; min-width: 0; height: 100%; overflow: hidden; position: relative; display: flex; align-items: center; }
   .ticker-track { display: inline-flex; align-items: center; white-space: nowrap; animation: ticker-scroll linear infinite;
     padding-left: 28px; position: relative; }
   @keyframes ticker-scroll { from { transform: translateX(0); } to { transform: translateX(-50%); } }
@@ -129,10 +129,10 @@
       if (isStartgg) {
         matches.forEach(function (m) {
           track.appendChild(buildMatch(m));
-          var sep = document.createElement('span'); sep.className = 'tk-sep'; sep.textContent = '•'; track.appendChild(sep);
+          var sep = document.createElement('span'); sep.className = 'tk-sep'; track.appendChild(sep);
         });
       } else {
-        var span = document.createElement('span'); span.className = 'ticker-segment'; span.textContent = messages.join('   •   ') + '   •   '; track.appendChild(span);
+        var span = document.createElement('span'); span.className = 'ticker-segment'; span.textContent = messages.join('        ') + '        '; track.appendChild(span);
       }
     }
     track.style.animationDuration = speed + 's';
