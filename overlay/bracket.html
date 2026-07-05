@@ -23,7 +23,7 @@
 
 html, body { width: 1920px; height: 1080px; overflow: hidden; background: transparent; font-family: var(--body); color: var(--ink); -webkit-font-smoothing: antialiased; }
 
-.bk-stage { position: absolute; inset: 0; display: flex; flex-direction: column; padding: 44px 80px 40px;
+.bk-stage { position: absolute; inset: 0; display: flex; flex-direction: column; padding: 28px 52px 28px;
   opacity: 0; transform: scale(1.012); transition: opacity .55s ease, transform .55s ease; }
 .bk-stage.show { opacity: 1; transform: scale(1); }
 
@@ -38,73 +38,117 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
   -webkit-mask-image: radial-gradient(85% 65% at 50% 32%, #000 0%, transparent 78%);
   mask-image: radial-gradient(85% 65% at 50% 32%, #000 0%, transparent 78%); }
 
-/* ── Header ── */
-.bk-header { display: flex; align-items: center; gap: 22px; margin-bottom: 22px; flex: 0 0 auto; }
-.bk-bar { width: 7px; align-self: stretch; min-height: 62px; border-radius: 4px;
-  background: linear-gradient(180deg, var(--accent), var(--accent-2)); box-shadow: 0 0 22px var(--accent); }
-.bk-head-text { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
-.bk-eyebrow { font-family: var(--disp); font-weight: 700; font-size: 16px; letter-spacing: .42em; text-transform: uppercase; color: var(--accent); }
-.bk-title { font-family: var(--disp); font-weight: 700; font-size: 54px; line-height: .95; letter-spacing: .02em; text-transform: uppercase; color: #fff;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 1100px; }
-.bk-head-right { margin-left: auto; display: flex; align-items: center; gap: 12px; }
-.bk-format { font-family: var(--disp); font-weight: 800; font-size: 15px; letter-spacing: .16em; text-transform: uppercase; color: #04121f;
-  background: linear-gradient(135deg, var(--accent), var(--accent-2)); border-radius: 999px; padding: 9px 18px; white-space: nowrap;
-  box-shadow: 0 6px 18px rgba(0,0,0,.35); }
-.bk-phases { display: flex; gap: 8px; }
-.bk-phase { font-family: var(--disp); font-weight: 700; font-size: 14px; letter-spacing: .08em; text-transform: uppercase;
-  padding: 8px 16px; border-radius: 999px; color: var(--muted); background: var(--panel-1); border: 1px solid var(--hair); }
+/* ── Header — absolute bottom-right (centered in butterfly mode) ── */
+.bk-header { position: absolute; bottom: 28px; right: 52px; z-index: 10;
+  display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
+.bk-stage.butterfly .bk-header { right: auto; left: 50%; transform: translateX(-50%); align-items: center; }
+.bk-stage.butterfly .bk-title { text-align: center; }
+.bk-stage.butterfly .bk-eyebrow { text-align: center; }
+.bk-stage.butterfly { padding-bottom: 88px; }
+.bk-bar { display: none; }
+.bk-head-text { display: flex; flex-direction: column; align-items: flex-end; gap: 3px; }
+.bk-eyebrow { font-family: var(--disp); font-weight: 700; font-size: 12px; letter-spacing: .42em; text-transform: uppercase;
+  color: var(--accent); text-align: right; }
+.bk-title { font-family: var(--disp); font-weight: 700; font-size: 34px; line-height: 1; letter-spacing: .02em; text-transform: uppercase; color: #fff;
+  text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 760px; }
+.bk-head-right { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
+.bk-format { font-family: var(--disp); font-weight: 800; font-size: 12px; letter-spacing: .14em; text-transform: uppercase; color: #04121f;
+  background: linear-gradient(135deg, var(--accent), var(--accent-2)); border-radius: 999px; padding: 6px 14px; white-space: nowrap;
+  box-shadow: 0 4px 14px rgba(0,0,0,.35); }
+.bk-phases { display: flex; gap: 6px; }
+.bk-phase { font-family: var(--disp); font-weight: 700; font-size: 12px; letter-spacing: .08em; text-transform: uppercase;
+  padding: 6px 12px; border-radius: 999px; color: var(--muted); background: var(--panel-1); border: 1px solid var(--hair); }
 .bk-phase.active { color: #fff; background: var(--accent); border-color: transparent; box-shadow: 0 4px 14px rgba(0,0,0,.35); }
 
 /* ── Body / scale ── */
-/* The bracket is laid out to a fixed 1760-wide design canvas (the safe area) so
-   the round columns spread edge-to-edge and FILL the frame instead of floating in
-   the middle; fit() then only shrinks it if a huge bracket is taller than the canvas. */
 .bk-body { flex: 1 1 auto; display: flex; align-items: center; justify-content: center; min-height: 0; }
-.bk-scale { transform-origin: center center; display: flex; flex-direction: column; align-items: stretch; gap: 26px; width: 1760px; }
+.bk-scale { transform-origin: center center; display: flex; flex-direction: column; align-items: stretch; gap: 12px; width: 1816px; }
 
 /* ── Section (Winners / Losers) ── */
 .bk-section { display: flex; flex-direction: column; align-items: center; width: 100%; }
-.bk-section-label { font-family: var(--disp); font-weight: 700; font-size: 22px; letter-spacing: .26em; text-transform: uppercase;
-  color: #cfd6e4; margin-bottom: 14px; display: inline-flex; align-items: center; gap: 14px; }
-.bk-section-label::before, .bk-section-label::after { content: ''; width: 46px; height: 2px; background: linear-gradient(90deg, transparent, var(--line)); }
-.bk-section-label::after { background: linear-gradient(90deg, var(--line), transparent); }
+.bk-section-label { display: none; }
 
-/* Fixed, uniform match cards; columns spread across the full canvas width. */
-.bk-rounds { position: relative; display: flex; align-items: stretch; justify-content: space-evenly; gap: 48px; width: 100%; }
+/* Section pills — shown in the bottom-right header cluster */
+.bk-section-pills { display: flex; gap: 6px; margin-top: 2px; }
+.bk-spill { font-family: var(--disp); font-weight: 700; font-size: 11px; letter-spacing: .18em; text-transform: uppercase;
+  padding: 4px 10px; border-radius: 999px; border: 1px solid; white-space: nowrap; }
+.bk-spill.wb { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.bk-spill.lb { color: var(--accent-2); border-color: color-mix(in srgb, var(--accent-2) 45%, transparent); background: color-mix(in srgb, var(--accent-2) 12%, transparent); }
+
+/* Match cards; columns flex-fill the full canvas width — no dead side space. */
+.bk-rounds { position: relative; display: flex; align-items: stretch; gap: 32px; width: 100%; }
+
+/* ── Butterfly (full double-elim): WB left → GF center ← LB right ── */
+.bk-scale.butterfly { flex-direction: row; height: 920px; }
+.bk-scale.butterfly .bk-section { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.bk-scale.butterfly .bk-section .bk-rounds { flex: 1; min-height: 0; }
+.bk-scale.butterfly .bk-section.losers .bk-rounds { flex-direction: row-reverse; }
+
+/* Grand Finals center column */
+.bk-gf { flex: 0 0 210px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 0 10px; position: relative; }
+.bk-gf::before, .bk-gf::after { content: ''; position: absolute; top: 15%; bottom: 15%; width: 1px; background: linear-gradient(180deg, transparent, rgba(255,214,107,.3) 40%, rgba(255,214,107,.3) 60%, transparent); }
+.bk-gf::before { left: 0; } .bk-gf::after { right: 0; }
+.bk-gf-label { font-family: var(--disp); font-weight: 800; font-size: 12px; letter-spacing: .3em; text-transform: uppercase; color: #ffd66b; text-align: center; white-space: nowrap; margin-bottom: 6px;
+  text-shadow: 0 0 20px rgba(255,214,107,.5); }
+.bk-gf .bk-match { width: 100%; border-color: rgba(255,214,107,.4); box-shadow: 0 0 0 1px rgba(255,214,107,.12), 0 6px 24px rgba(0,0,0,.55); }
 .bk-connectors { position: absolute; inset: 0; pointer-events: none; z-index: 0; overflow: visible; }
-.bk-connectors path { fill: none; stroke: var(--line); stroke-width: 2; stroke-linejoin: round; }
+.bk-connectors path { fill: none; stroke: rgba(255,255,255,.2); stroke-width: 1.5; stroke-linejoin: round; }
+.bk-section.losers .bk-connectors path { stroke: rgba(233,113,57,.25); }
 
-/* ── Round column (fixed width) ── */
-.bk-round { position: relative; z-index: 1; display: flex; flex-direction: column; width: 340px; flex: 0 0 340px; }
-.bk-round-name { font-family: var(--disp); font-weight: 700; font-size: 19px; letter-spacing: .14em; text-transform: uppercase;
-  color: var(--accent-2); text-align: center; margin-bottom: 16px; height: 22px; }
-.bk-round.is-final .bk-round-name { color: #ffd66b; }
-.bk-matches { display: flex; flex-direction: column; justify-content: space-around; gap: 22px; flex: 1; min-height: 0; }
+/* ── Round column — flex-fill: columns always span edge to edge ── */
+.bk-round { position: relative; z-index: 1; display: flex; flex-direction: column; flex: 1; min-width: 0; }
+.bk-round-name { font-family: var(--disp); font-weight: 700; font-size: 13px; letter-spacing: .22em; text-transform: uppercase;
+  color: rgba(255,255,255,.35); text-align: center; margin-bottom: 10px; height: 16px; }
+.bk-round.is-final .bk-round-name { color: rgba(255,214,107,.7); }
+.bk-matches { display: flex; flex-direction: column; justify-content: space-around; gap: 10px; flex: 1; min-height: 0; }
 
-/* ── Match (fixed size) ── */
-.bk-match { position: relative; width: 340px; border-radius: 12px; border: 1px solid var(--hair);
-  background: linear-gradient(180deg, rgba(22,25,33,.96), rgba(13,15,21,.96)); box-shadow: 0 12px 30px rgba(0,0,0,.45); }
-.bk-match.is-final { border-color: rgba(255,214,107,.5); box-shadow: 0 0 0 1px rgba(255,214,107,.22), 0 14px 34px rgba(0,0,0,.5); }
-.bk-match.live { border-color: var(--accent); }
-.bk-match.live::after { content: 'LIVE'; position: absolute; top: -10px; right: 10px; font-family: var(--disp); font-weight: 800;
-  font-size: 11px; letter-spacing: .12em; color: #fff; background: #ff3b46; border-radius: 999px; padding: 2px 9px; box-shadow: 0 0 14px rgba(255,59,70,.55); }
+/* ── Match card ── */
+.bk-match { position: relative; width: 100%; border-radius: 6px; overflow: hidden;
+  border: 1px solid rgba(255,255,255,.08);
+  background: linear-gradient(180deg, rgba(20,23,32,.97) 0%, rgba(12,14,20,.97) 100%);
+  box-shadow: 0 4px 16px rgba(0,0,0,.5); }
+.bk-match.is-final { border-color: rgba(255,214,107,.4); box-shadow: 0 0 0 1px rgba(255,214,107,.15), 0 6px 24px rgba(0,0,0,.55); }
+.bk-match.live { border-color: var(--accent); box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 30%, transparent), 0 4px 20px rgba(0,0,0,.5); }
+.bk-match.live::after { content: 'LIVE'; position: absolute; top: -9px; right: 8px; font-family: var(--disp); font-weight: 800;
+  font-size: 10px; letter-spacing: .12em; color: #fff; background: #ff3b46; border-radius: 999px; padding: 2px 8px; box-shadow: 0 0 10px rgba(255,59,70,.55); }
 
-.bk-slot { display: flex; align-items: center; gap: 13px; padding: 0 16px; height: 62px; }
-.bk-slot + .bk-slot { border-top: 1px solid var(--hair); }
-.bk-slot:first-child { border-radius: 12px 12px 0 0; }
-.bk-slot:last-child { border-radius: 0 0 12px 12px; }
-.bk-logo { width: 34px; height: 34px; object-fit: contain; flex: 0 0 auto; filter: drop-shadow(0 1px 3px rgba(0,0,0,.5)); }
-.bk-logo.logo-on-dark { filter: invert(1) drop-shadow(0 1px 3px rgba(0,0,0,.5)); }
-.bk-logo-ph { width: 34px; height: 34px; border-radius: 8px; flex: 0 0 auto; background: rgba(255,255,255,.06); border: 1px solid var(--hair); }
-.bk-name { font-family: var(--disp); font-weight: 600; font-size: 25px; color: #cfd4de; letter-spacing: .01em;
-  flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.bk-score { font-family: var(--disp); font-weight: 800; font-size: 25px; color: #7e8597; min-width: 32px; text-align: center;
+/* ── Slot (one team row) ── */
+.bk-slot { display: flex; align-items: center; gap: 10px; padding: 0 12px 0 0; height: 50px; position: relative; }
+.bk-slot + .bk-slot { border-top: 1px solid rgba(255,255,255,.06); }
+.bk-slot-accent { width: 3px; align-self: stretch; flex-shrink: 0; background: transparent; }
+.bk-logo { width: 28px; height: 28px; object-fit: contain; flex: 0 0 auto; filter: drop-shadow(0 1px 2px rgba(0,0,0,.6)); }
+.bk-logo.logo-on-dark { filter: invert(1) drop-shadow(0 1px 2px rgba(0,0,0,.6)); }
+.bk-logo-ph { width: 28px; height: 28px; border-radius: 5px; flex: 0 0 auto; background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.08); }
+/* Abbrev badge — replaces logo in abbrev mode */
+.bk-logo-badge { display: none; flex: 0 0 28px; width: 28px; height: 28px; border-radius: 5px; align-items: center; justify-content: center;
+  font-family: var(--disp); font-weight: 900; color: #fff; text-align: center; letter-spacing: .02em; line-height: 1;
+  background: color-mix(in srgb, var(--badge-col, #4a5568) 55%, rgba(0,0,0,.5));
+  border: 1px solid color-mix(in srgb, var(--badge-col, #4a5568) 70%, transparent); }
+.bk-name { font-family: var(--disp); font-weight: 600; font-size: 22px; color: #fff; letter-spacing: .01em;
+  flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bk-name .bk-short { display: none; }
+.bk-name .bk-full  { display: inline; }
+/* Abbreviation mode: swap logo → badge, full name → short */
+.bk-abbrev .bk-logo        { display: none; }
+.bk-abbrev .bk-logo-ph     { display: none; }
+.bk-abbrev .bk-logo-badge  { display: flex; }
+.bk-abbrev .bk-name .bk-full  { display: none; }
+.bk-abbrev .bk-name .bk-short { display: inline; font-size: 24px; font-weight: 800; letter-spacing: .03em; }
+.bk-score { font-family: var(--disp); font-weight: 800; font-size: 22px; color: rgba(255,255,255,.6); min-width: 28px; text-align: center;
   font-variant-numeric: tabular-nums; }
-.bk-slot.winner { background: linear-gradient(90deg, rgba(255,255,255,.09), transparent 85%); box-shadow: inset 4px 0 0 var(--accent); }
+.bk-slot.winner .bk-slot-accent { background: var(--accent); box-shadow: 2px 0 8px color-mix(in srgb, var(--accent) 50%, transparent); }
+.bk-slot.winner { background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 10%, transparent) 0%, transparent 70%); }
 .bk-slot.winner .bk-name { color: #fff; font-weight: 700; }
-.bk-slot.winner .bk-score { color: #fff; }
-.bk-slot.loser .bk-name { color: #767d8c; }
-.bk-slot.loser .bk-logo { opacity: .55; }
+.bk-slot.winner .bk-score { color: #e8ecf4; }
+.bk-slot.loser .bk-name { color: rgba(118,125,140,.6); }
+.bk-slot.loser .bk-logo { opacity: .4; }
+.bk-slot.loser .bk-logo-badge { opacity: .45; }
+.bk-slot.loser .bk-score { color: rgba(126,133,151,.4); }
+.bk-section.losers .bk-slot.winner .bk-slot-accent { background: var(--accent-2); box-shadow: 2px 0 8px color-mix(in srgb, var(--accent-2) 50%, transparent); }
+.bk-section.losers .bk-slot.winner { background: linear-gradient(90deg, color-mix(in srgb, var(--accent-2) 10%, transparent) 0%, transparent 70%); }
+.bk-slot.focused { outline: 1px solid color-mix(in srgb, var(--accent) 45%, transparent); }
+.bk-slot.focused .bk-slot-accent { background: var(--accent); }
+.bk-slot.focused .bk-name { color: #fff; font-weight: 800; }
 
 /* ── Standings (round-robin / swiss) ── */
 .bk-standings { align-self: center; width: 1100px; max-width: 100%; border-radius: 16px; overflow: hidden; border: 1px solid var(--hair);
@@ -135,7 +179,7 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
 <div id="bk-stage" class="bk-stage">
   <div class="bk-bg"></div>
   <header class="bk-header">
-    <div class="bk-bar"></div>
+    <div class="bk-section-pills" id="bk-section-pills"></div>
     <div class="bk-head-text">
       <div class="bk-eyebrow">Tournament Bracket</div>
       <div class="bk-title" id="bk-title"></div>
@@ -155,10 +199,21 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
   const SVGNS = 'http://www.w3.org/2000/svg';
   function el(id) { return document.getElementById(id); }
   let logoByName = {};
+  let abbrevByName = {};
+  let colorByName = {};
   let _sig = '';
 
   function logoFor(name) { return (name && logoByName[name.toLowerCase()]) || null; }
   function isDark(src) { try { return SceneBase.isDefaultGameLogo(src); } catch (e) { return false; } }
+
+  function abbrev(name) {
+    if (!name || name === 'TBD') return name;
+    const s = name.trim();
+    if (s.length <= 5) return s.toUpperCase();
+    const words = s.split(/\s+/);
+    if (words.length >= 2) return words.map(function(w) { return w[0]; }).join('').toUpperCase().slice(0, 5);
+    return s.slice(0, 3).toUpperCase();
+  }
 
   function fmtType(t) {
     return ({ SINGLE_ELIMINATION: 'Single Elimination', DOUBLE_ELIMINATION: 'Double Elimination',
@@ -170,6 +225,10 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
     const known = s.name && s.name !== 'TBD';
     const row = document.createElement('div');
     row.className = 'bk-slot' + (s.winner ? ' winner' : (known ? ' loser' : ''));
+    const accent = document.createElement('div'); accent.className = 'bk-slot-accent'; row.appendChild(accent);
+    const displayName = s.name || 'TBD';
+    const shortName = abbrevByName[displayName.toLowerCase()] || abbrev(displayName);
+    // Logo / placeholder (shown in normal mode)
     const logo = known ? logoFor(s.name) : null;
     if (logo) {
       const img = document.createElement('img');
@@ -179,7 +238,17 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
     } else {
       const ph = document.createElement('span'); ph.className = 'bk-logo-ph'; row.appendChild(ph);
     }
-    const name = document.createElement('div'); name.className = 'bk-name'; name.textContent = s.name || 'TBD';
+    // Abbrev badge (shown in abbrev mode instead of logo)
+    const badge = document.createElement('span'); badge.className = 'bk-logo-badge';
+    const badgeColor = known ? (colorByName[displayName.toLowerCase()] || null) : null;
+    if (badgeColor) badge.style.setProperty('--badge-col', badgeColor);
+    const badgeText = shortName.slice(0, 5);
+    badge.style.fontSize = (badgeText.length <= 2 ? 13 : badgeText.length <= 3 ? 11 : badgeText.length <= 4 ? 9 : 8) + 'px';
+    badge.textContent = badgeText;
+    row.appendChild(badge);
+    const name = document.createElement('div'); name.className = 'bk-name';
+    name.innerHTML = '<span class="bk-full">' + displayName.replace(/&/g,'&amp;').replace(/</g,'&lt;') + '</span>'
+                   + '<span class="bk-short">' + shortName.replace(/&/g,'&amp;').replace(/</g,'&lt;') + '</span>';
     const score = document.createElement('div'); score.className = 'bk-score';
     score.textContent = (s.score === null || s.score === undefined) ? '–' : s.score;
     row.appendChild(name); row.appendChild(score);
@@ -209,10 +278,22 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
     return col;
   }
 
+  // Grand Finals center piece for butterfly layout.
+  function buildGF(finals) {
+    const wrap = document.createElement('div');
+    wrap.className = 'bk-gf';
+    const lbl = document.createElement('div'); lbl.className = 'bk-gf-label'; lbl.textContent = 'Grand Finals';
+    wrap.appendChild(lbl);
+    finals.forEach(function(round) {
+      (round.sets || []).forEach(function(set) { wrap.appendChild(buildMatch(set, true)); });
+    });
+    return wrap;
+  }
+
   // Section = label + a horizontal band of round columns + an SVG connector layer.
-  function buildSection(label, rounds, finalsStart) {
+  function buildSection(label, rounds, finalsStart, sectionClass) {
     const section = document.createElement('div');
-    section.className = 'bk-section';
+    section.className = 'bk-section' + (sectionClass ? ' ' + sectionClass : '');
     if (label) { const l = document.createElement('div'); l.className = 'bk-section-label'; l.textContent = label; section.appendChild(l); }
     const band = document.createElement('div'); band.className = 'bk-rounds';
     const svg = document.createElementNS(SVGNS, 'svg'); svg.setAttribute('class', 'bk-connectors'); band.appendChild(svg);
@@ -222,6 +303,8 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
   }
 
   // Elbow connectors between adjacent round columns of one .bk-rounds band.
+  // In the reversed losers bracket the flex order is right-to-left, so connection
+  // points swap: parent left-edge → child right-edge instead of parent right → child left.
   function drawConnectors(band) {
     const svg = band.querySelector('.bk-connectors'); if (!svg) return;
     while (svg.firstChild) svg.removeChild(svg.firstChild);
@@ -229,6 +312,7 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
     if (!base.width) return;
     svg.setAttribute('width', base.width); svg.setAttribute('height', base.height);
     svg.setAttribute('viewBox', '0 0 ' + base.width + ' ' + base.height);
+    const isRev = getComputedStyle(band).flexDirection === 'row-reverse';
     const cols = Array.prototype.slice.call(band.querySelectorAll('.bk-round'));
     for (let c = 1; c < cols.length; c++) {
       const parents = Array.prototype.slice.call(cols[c - 1].querySelectorAll('.bk-match'));
@@ -236,14 +320,16 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
       if (!parents.length || !children.length) continue;
       children.forEach((child, j) => {
         const cr = child.getBoundingClientRect();
-        const cx = cr.left - base.left, cy = cr.top - base.top + cr.height / 2;
+        const cx = (isRev ? cr.right : cr.left) - base.left;
+        const cy = cr.top - base.top + cr.height / 2;
         let feeders;
         if (parents.length >= children.length * 2 - 1) feeders = [parents[2 * j], parents[2 * j + 1]];
         else if (parents.length === children.length) feeders = [parents[j]];
         else feeders = [parents[Math.min(parents.length - 1, Math.round(j * parents.length / children.length))]];
         feeders.filter(Boolean).forEach((p) => {
           const pr = p.getBoundingClientRect();
-          const px = pr.right - base.left, py = pr.top - base.top + pr.height / 2;
+          const px = (isRev ? pr.left : pr.right) - base.left;
+          const py = pr.top - base.top + pr.height / 2;
           const midX = px + (cx - px) / 2;
           const path = document.createElementNS(SVGNS, 'path');
           path.setAttribute('d', 'M ' + px + ' ' + py + ' H ' + midX + ' V ' + cy + ' H ' + cx);
@@ -279,7 +365,8 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
   // Scale the fixed-size bracket to FILL the 16:9 canvas: never overflow, but
   // upscale small brackets (cap 1.5×) so an 8-team and a 32-team event both frame
   // consistently instead of floating tiny in the middle.
-  var MAX_FIT = 1.5;
+  var MAX_FIT = 2.2;
+  var ABBREV_THRESHOLD = 0.72; // switch to initials when bracket is scaled below this
   function fit() {
     const scaleEl = el('bk-scale'); const body = scaleEl.parentElement;
     scaleEl.style.transform = 'scale(1)';
@@ -288,6 +375,7 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
     if (!sw || !sh) return;
     const s = Math.min(MAX_FIT, cw / sw, ch / sh);
     scaleEl.style.transform = 'scale(' + s + ')';
+    scaleEl.classList.toggle('bk-abbrev', s < ABBREV_THRESHOLD);
   }
 
   // ?show=1 — always render the live bracket (ignore the on-air visible flag, no demo fallback).
@@ -319,8 +407,9 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
     const isElim = winners.length || losers.length || finals.length;
     const hasData = isElim || standings.length;
 
+    const focusTeam = (data.startgg && data.startgg.focusTeam) || '';
     const sig = JSON.stringify({ t: b.title, ty: b.type, w: winners, l: losers, f: finals, s: standings,
-      ph: phases.map((p) => p.id + p.name), ap: b.activePhaseId, lg: logoByName, vw: view, rn: ROUNDS_N });
+      ph: phases.map((p) => p.id + p.name), ap: b.activePhaseId, lg: logoByName, vw: view, rn: ROUNDS_N, ft: focusTeam });
     if (sig === _sig) return;
     _sig = sig;
 
@@ -339,25 +428,57 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
     });
 
     scaleEl.innerHTML = '';
+    const pillsEl = el('bk-section-pills'); if (pillsEl) pillsEl.innerHTML = '';
     if (isElim) {
       const isDouble = losers.length > 0;
+      // Butterfly layout: only when showing both brackets with no round-trim applied.
+      const butterfly = SHOW_W && SHOW_L && isDouble && ROUNDS_N === 0;
+      scaleEl.classList.toggle('butterfly', butterfly);
+      scaleEl.classList.toggle('bk-abbrev', butterfly);
+      stage.classList.toggle('butterfly', butterfly);
       let rendered = false;
-      if (SHOW_W) {
-        // winners (+ grand finals) — trim to last N columns if requested (finalsStart shifts with the cut).
-        let winnerCols = winners.concat(finals);
-        let wFinalsStart = winners.length;
-        if (ROUNDS_N > 0 && winnerCols.length > ROUNDS_N) {
-          const cut = winnerCols.length - ROUNDS_N;
-          winnerCols = winnerCols.slice(cut);
-          wFinalsStart = Math.max(0, winners.length - cut);
+
+      if (butterfly) {
+        // WB left (winners only — finals go to center GF piece)
+        if (winners.length) {
+          scaleEl.appendChild(buildSection('', winners, null, 'winners'));
+          if (pillsEl) { const p = document.createElement('span'); p.className = 'bk-spill wb'; p.textContent = 'Winners Bracket'; pillsEl.appendChild(p); }
         }
-        if (winnerCols.length) { scaleEl.appendChild(buildSection(isDouble ? 'Winners Bracket' : '', winnerCols, wFinalsStart)); rendered = true; }
+        // GF center
+        if (finals.length) scaleEl.appendChild(buildGF(finals));
+        // LB right (reversed via CSS: losers[0] = LB R1 renders far-right, LB Finals near center)
+        if (losers.length) {
+          scaleEl.appendChild(buildSection('', losers, null, 'losers'));
+          if (pillsEl) { const p = document.createElement('span'); p.className = 'bk-spill lb'; p.textContent = 'Losers Bracket'; pillsEl.appendChild(p); }
+        }
+        rendered = !!(winners.length || finals.length || losers.length);
+      } else {
+        // Stacked layout (single-elim, or partial views: upper/lower/finals)
+        scaleEl.classList.remove('butterfly');
+        if (SHOW_W) {
+          let winnerCols = winners.concat(finals);
+          let wFinalsStart = winners.length;
+          if (ROUNDS_N > 0 && winnerCols.length > ROUNDS_N) {
+            const cut = winnerCols.length - ROUNDS_N;
+            winnerCols = winnerCols.slice(cut);
+            wFinalsStart = Math.max(0, winners.length - cut);
+          }
+          if (winnerCols.length) {
+            scaleEl.appendChild(buildSection(isDouble ? 'Winners Bracket' : '', winnerCols, wFinalsStart, 'winners'));
+            if (pillsEl && isDouble) { const p = document.createElement('span'); p.className = 'bk-spill wb'; p.textContent = 'Winners Bracket'; pillsEl.appendChild(p); }
+            rendered = true;
+          }
+        }
+        if (SHOW_L && isDouble) {
+          const loserCols = _lastN(losers);
+          if (loserCols.length) {
+            scaleEl.appendChild(buildSection('Losers Bracket', loserCols, null, 'losers'));
+            if (pillsEl) { const p = document.createElement('span'); p.className = 'bk-spill lb'; p.textContent = 'Losers Bracket'; pillsEl.appendChild(p); }
+            rendered = true;
+          }
+        }
       }
-      if (SHOW_L && isDouble) {
-        const loserCols = _lastN(losers);
-        if (loserCols.length) { scaleEl.appendChild(buildSection('Losers Bracket', loserCols)); rendered = true; }
-      }
-      emptyEl.classList.toggle('hidden', rendered);   // e.g. ?part=losers on a single-elim → show empty
+      emptyEl.classList.toggle('hidden', rendered);
     } else if (standings.length) {
       scaleEl.appendChild(buildStandings(standings));
     }
@@ -368,6 +489,15 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
       scaleEl.style.transform = 'scale(1)';
       scaleEl.querySelectorAll('.bk-rounds').forEach(drawConnectors);
       fit();
+      if (focusTeam) {
+        var fn = focusTeam.toLowerCase();
+        scaleEl.querySelectorAll('.bk-name').forEach(function(nameEl) {
+          var slot = nameEl.closest('.bk-slot');
+          if (slot) slot.classList.toggle('focused', nameEl.textContent.toLowerCase().includes(fn));
+        });
+      } else {
+        scaleEl.querySelectorAll('.bk-slot.focused').forEach(function(s) { s.classList.remove('focused'); });
+      }
     });
   }
 
@@ -384,10 +514,16 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
           startgg: Object.assign({}, data.startgg, { logoMap: (demo.startgg && demo.startgg.logoMap) || {} }) });
       }
     }
-    logoByName = {};
+    logoByName = {}; abbrevByName = {}; colorByName = {};
     const sgg = (d.startgg && d.startgg.logoMap) || {};
     Object.keys(sgg).forEach((k) => { if (sgg[k]) logoByName[k] = sgg[k]; });
-    (d.savedTeams || []).forEach((t) => { if (t && t.name && t.logo) logoByName[t.name.toLowerCase()] = t.logo; });
+    (d.savedTeams || []).forEach((t) => {
+      if (!t || !t.name) return;
+      const k = t.name.toLowerCase();
+      if (t.logo)  logoByName[k]   = t.logo;
+      if (t.abbr)  abbrevByName[k] = t.abbr.toUpperCase().slice(0, 6);
+      if (t.color && /^#[0-9a-f]{3,8}$/i.test(t.color)) colorByName[k] = t.color;
+    });
     render(d);
   }
 

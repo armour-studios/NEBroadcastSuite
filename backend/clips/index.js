@@ -43,6 +43,8 @@ function createClipSystem({ dataDir, getObsClient, onUpdate, onEncodeProgress, o
     encoder,
     onHighlightEvent,
     enqueueMontage,
+    prepareForAir: encoder.prepareForAir,
+    isAirPrepReady: encoder.isAirPrepReady,
     setSettings: (p) => manager.setSettings(p),
     getLastError: () => manager.getLastError(),
     getState: () => ({

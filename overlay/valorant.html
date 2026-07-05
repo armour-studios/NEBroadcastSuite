@@ -1521,6 +1521,11 @@ function syncColumn(containerId, players, side, teamLogo) {
       rowReg.set(p.name, card);
     } else {
       updateCard(card, p);
+      const bgDiv = card.querySelector('.pbar1-team-bg');
+      if (bgDiv) {
+        const expected = teamLogo ? `url('${teamLogo}')` : '';
+        if (bgDiv.style.backgroundImage !== expected) bgDiv.style.backgroundImage = expected;
+      }
     }
     if (container.children[i] !== card) container.insertBefore(card, container.children[i] || null);
   });

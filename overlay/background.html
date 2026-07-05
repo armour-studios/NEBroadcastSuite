@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1920">
+<title>NE Broadcast Suite — Background</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { width: 1920px; height: 1080px; overflow: hidden; background: #000; }
+#bg {
+  width: 100%; height: 100%;
+  transition: background 0.6s ease, opacity 0.4s ease;
+}
+#bg-img {
+  position: absolute; inset: 0;
+  width: 100%; height: 100%;
+  object-fit: cover;
+  opacity: 0;
+  transition: opacity 0.6s ease;
+}
+#bg-img.visible { opacity: 1; }
+</style>
+</head>
+<body>
+<div id="bg"></div>
+<img id="bg-img" src="" alt="">
+
+<script src="scene-base.js"></script>
+<script>
+(function () {
+  var bg    = document.getElementById('bg');
+  var bgImg = document.getElementById('bg-img');
+
+  function apply(state) {
+    var cfg = (state && state.background) || {};
+    var type   = cfg.type   || 'gradient';
+    var color1 = cfg.color1 || '#07090f';
+    var color2 = cfg.color2 || '#0c1220';
+    var angle  = cfg.angle  != null ? cfg.angle : 135;
+    var imgUrl = cfg.imageUrl || '';
+
+    if (type === 'image' && imgUrl) {
+      bgImg.src = imgUrl;
+      bgImg.classList.add('visible');
+      bg.style.background = color1; // fallback while image loads
+    } else {
+      bgImg.classList.remove('visible');
+      if (type === 'solid') {
+        bg.style.background = color1;
+      } else {
+        // gradient (default)
+        bg.style.background = 'linear-gradient(' + angle + 'deg, ' + color1 + ', ' + color2 + ')';
+      }
+    }
+  }
+
+  SceneBase.connect(apply);
+})();
+</script>
+</body>
+</html>

@@ -1599,7 +1599,8 @@ function renderBuyPhase(cs){
   const t  = all.filter(p => p.team === 'T');
   // Rebuild only when buy-relevant data changes (players keep buying through freezetime).
   const sig = JSON.stringify(all.map(p => [p.steamid, p.money, p.equip, p.weapon, p.hasKit, p.hasBomb, p.helmet, p.armor, (p.nades||[]).join(','), p.kills, p.deaths, p.assists, p.alive])
-    .concat([cs.ct.score, cs.t.score, cs.round.number, appTeams.blue.name, appTeams.orange.name]));
+    .concat([cs.ct.score, cs.t.score, cs.round.number, appTeams.blue.name, appTeams.orange.name,
+      (appTeams.blue.logo || '').slice(20, 44), (appTeams.orange.logo || '').slice(20, 44)]));
   if (sig === _buySig) return;
   _buySig = sig;
 

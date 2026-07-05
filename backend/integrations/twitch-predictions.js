@@ -38,6 +38,12 @@ class PredictionManager {
       throw new Error('No active prediction to resolve');
     }
 
+    // Clear state and cooldown before the API call so that even if the call
+    // fails, the next game can still create a new prediction rather than being
+    // blocked by the 5-minute cooldown from the previous one.
+    this.currentPrediction = null;
+    this.cooldownUntil = 0;
+
     console.log(`[Twitch] Resolving prediction ${pid} with outcome: ${outcomeId}`);
     const result = await this.client.resolvePrediction(
       this.broadcasterId,
@@ -46,13 +52,18 @@ class PredictionManager {
     );
 
     if (result) {
-      this.currentPrediction = null;
-      this.cooldownUntil = 0; // allow immediate re-creation for the next game
       console.log('[Twitch] Prediction resolved');
       return result;
     }
 
     throw new Error('Failed to resolve prediction on Twitch API');
+  }
+
+  // Called by the EventSub handler when channel.prediction.end arrives so the
+  // cooldown is cleared even if server-side resolve wasn't the trigger.
+  clearCooldown() {
+    this.currentPrediction = null;
+    this.cooldownUntil = 0;
   }
 
   async lockPrediction(predictionId = null) {

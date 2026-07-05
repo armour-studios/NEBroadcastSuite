@@ -36,6 +36,18 @@ body{
   background:transparent; -webkit-font-smoothing:antialiased; position:relative;
 }
 .hidden{display:none !important;}
+/* Manual "Hide UI" (Match ▸ Teams gear, RL) — blanks the persistent live HUD for a clean gameplay feed.
+   Producer-triggered scenes (replay/goal/winner/intro/scoreboard) are left alone. */
+body.ui-hidden #scorebar,
+body.ui-hidden #event-name,
+body.ui-hidden #game-sub,
+body.ui-hidden #ot-subbar,
+body.ui-hidden #ot-swipe,
+body.ui-hidden #players-blue,
+body.ui-hidden #players-orange,
+body.ui-hidden #br,
+body.ui-hidden #tk,
+body.ui-hidden #sponsor{display:none !important;}
 img{display:block;}
 
 /* ───────────────────── TOP SCOREBOARD (CS2 header style) ─────────────────── */
@@ -136,10 +148,12 @@ img{display:block;}
 /* center block: TIME stays vertically centred (aligned with the team scores); the optional
    title-sponsor logo is absolutely pinned in the bottom of the box so it never shifts the clock. */
 .center{position:relative;display:flex;align-items:center;justify-content:center;
-  padding:0 22px;background:rgba(0,0,0,.3);min-width:124px;}
+  padding:0 22px;background:rgba(0,0,0,.3);min-width:124px;transition:background .3s ease;}
+/* OVERTIME: the timer box goes red with white text */
+.center.ot{background:var(--ot-bg,#e0202a);box-shadow:inset 0 2px 0 rgba(255,255,255,.16),inset 0 -3px 9px rgba(0,0,0,.3);}
 .ot-badge{display:none;}
 .timer{font-weight:800;font-size:32px;font-variant-numeric:tabular-nums;line-height:1;letter-spacing:.01em;}
-.timer.ot{color:var(--orange);text-shadow:0 0 16px rgba(255,122,51,.75);}
+.timer.ot{color:#fff;text-shadow:0 1px 4px rgba(0,0,0,.5);}
 
 /* GAME n of X — neutral sub-tab that HANGS BELOW the center timer */
 /* GAME n of X sub-card: a connected panel hanging under the timer (label row + optional title-sponsor
@@ -163,6 +177,14 @@ img{display:block;}
 .gs-label.gs-ot-row{display:grid;grid-template-columns:1fr auto 1fr;gap:7px;}
 .gs-cell{display:flex;align-items:center;gap:7px;min-width:0;overflow:hidden;white-space:nowrap;justify-content:center;}
 .game-sub.gs-ot-width{width:min(480px,92vw);max-width:min(480px,92vw);}
+/* OT STACK: row 1 = OVERTIME + the title-sponsor logo beside it (white, NOT red — the red now lives in
+   the timer box); row 2 = the round/game line beneath */
+.gs-label.gs-ot-stack{flex-direction:column;height:auto;gap:4px;padding:5px 18px 6px;align-items:center;}
+.gs-ot-head{display:flex;align-items:center;justify-content:center;}
+.gs-label.gs-ot-stack .gs-ot{background:none;color:#fff;border-radius:0;padding:0;text-indent:0;font-size:12px;}
+.gs-ot-logo{max-height:22px;max-width:130px;object-fit:contain;margin-left:14px;padding-left:14px;
+  border-left:2px solid rgba(255,255,255,.26);filter:drop-shadow(0 1px 3px rgba(0,0,0,.5));}
+.gs-ot-line2{display:flex;align-items:center;justify-content:center;gap:8px;}
 /* title sponsor — floats in the seam just above the GAME label, over the scorebar's empty lower-centre.
    Transparent (no panel bg) so it never stacks a second layer on the scorebar. */
 .gs-logo{position:absolute;top:73px;left:50%;transform:translateX(-50%);z-index:3;
@@ -190,9 +212,14 @@ img{display:block;}
   background:var(--ot-bg,#e0202a);transform:translateX(-101%);pointer-events:none;}
 .ot-swipe.play{animation:otSwipe 2s cubic-bezier(.7,0,.18,1);}
 @keyframes otSwipe{0%{transform:translateX(-101%);}24%{transform:translateX(0);}70%{transform:translateX(0);}100%{transform:translateX(101%);}}
-.ot-swipe-text{font-size:36px;font-weight:900;letter-spacing:.3em;padding-left:.3em;color:var(--ot-color,#fff);
-  text-transform:uppercase;white-space:nowrap;opacity:0;text-shadow:0 2px 9px rgba(0,0,0,.45);}
-.ot-swipe.play .ot-swipe-text{animation:otSwipeTxt 2s ease;}
+/* OVERTIME label + (optional) title-sponsor logo, split by a hairline, both riding the swipe in together */
+.ots-inner{display:flex;align-items:center;gap:0;opacity:0;}
+.ot-swipe.play .ots-inner{animation:otSwipeTxt 2s ease;}
+.ot-swipe-text{font-size:34px;font-weight:900;letter-spacing:.3em;padding-left:.3em;color:var(--ot-color,#fff);
+  text-transform:uppercase;white-space:nowrap;text-shadow:0 2px 9px rgba(0,0,0,.45);}
+.ot-swipe-logo{max-height:40px;max-width:170px;object-fit:contain;margin-left:26px;padding-left:26px;
+  border-left:2px solid rgba(255,255,255,.5);filter:drop-shadow(0 2px 8px rgba(0,0,0,.55));}
+.ot-swipe-logo.hidden{display:none;}
 @keyframes otSwipeTxt{0%,16%{opacity:0;transform:scale(1.1);}28%{opacity:1;transform:scale(1);}66%{opacity:1;transform:scale(1);}100%{opacity:0;transform:scale(.99);}}
 
 /* ─────────── SIDE PLAYER LISTS (polygonal panels; events extend to centre) ─── */
@@ -613,16 +640,19 @@ img{display:block;}
   transition:opacity .55s ease, transform .55s cubic-bezier(.2,.8,.25,1);}
 .sb.intro .sb-stage{opacity:0;transform:translateY(26px);}
 
-/* top row: brand logo + scoreboard sponsor beside it, with a divider between */
-.sb-head{display:flex;align-items:center;justify-content:center;gap:34px;}
+/* top row: brand logo DEAD-CENTRE, scoreboard sponsor sitting just to its right (in the right 1fr
+   column) so the sponsor never pulls the logo off the stage centreline that everything else shares. */
+.sb-head{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;}
+.sb-toplogo{grid-column:2;justify-self:center;}
+.sb-sponsor{grid-column:3;justify-self:start;}
 /* divider between the brand logo and the sponsor — only when BOTH are present */
-.sb-head .sb-toplogo:not(.hidden) + .sb-sponsor:not(.empty){position:relative;padding-left:34px;}
+.sb-head .sb-toplogo:not(.hidden) + .sb-sponsor:not(.empty){position:relative;padding-left:36px;margin-left:36px;}
 .sb-head .sb-toplogo:not(.hidden) + .sb-sponsor:not(.empty)::before{content:'';position:absolute;left:0;top:50%;
   transform:translateY(-50%);width:1px;height:60px;background:rgba(255,255,255,.14);}
 /* broadcaster / brand-kit logo — centred at the top of the scoreboard, above the event title */
 .sb-toplogo{max-height:104px;max-width:380px;object-fit:contain;filter:drop-shadow(0 4px 16px rgba(0,0,0,.55));}
 /* headline: event + team logos/names + final score (winner in gold) */
-.sb-event{font-size:15px;letter-spacing:.42em;color:var(--muted);text-transform:uppercase;}
+.sb-event{font-size:15px;letter-spacing:.42em;color:#fff;text-transform:uppercase;}
 .sb-result{display:flex;align-items:center;justify-content:center;gap:56px;}
 .sb-hteam{display:flex;align-items:center;gap:22px;width:500px;transition:opacity .4s;}
 .sb-hteam.left{justify-content:flex-end;}
@@ -635,16 +665,21 @@ img{display:block;}
 .sb-hteam.win .sb-hname{color:var(--gold);}
 .sb-scoreline{display:flex;flex-direction:column;align-items:center;gap:8px;flex:none;}
 .sb-scores{display:flex;align-items:center;gap:28px;}
+/* FINAL sits between the two scores (narrow, so the scores stay close + centred); the series is pinned
+   ABSOLUTELY below FINAL so it's dead-centre under it WITHOUT widening the gap between the scores. */
+.sb-mid{position:relative;display:flex;align-items:center;justify-content:center;}
 .sb-num{font-size:108px;font-weight:900;font-variant-numeric:tabular-nums;line-height:.9;color:#eef2fb;}
 .sb-num.win{color:var(--gold);text-shadow:0 0 38px rgba(255,206,77,.4);}
-.sb-dash{font-size:13px;letter-spacing:.3em;color:var(--muted);}
-.sb-series{font-size:11px;letter-spacing:.24em;color:var(--muted);text-transform:uppercase;}
+.sb-dash{font-size:13px;letter-spacing:.3em;color:#fff;}
+.sb-series{position:absolute;top:100%;left:50%;transform:translateX(-50%);margin-top:16px;
+  font-size:11px;letter-spacing:.24em;color:#fff;text-transform:uppercase;white-space:nowrap;}
 
 /* stats board — each team is its OWN mini-table (header + player rows), with a small gap between. */
 .sb-board{width:100%;}
-/* Reserve the left gutter the floating team logos occupy (logo 96px + 24px gap) so the
-   table+logos block is centred on screen — without it the outside-left logos pull it left. */
-#sb-body{display:flex;flex-direction:column;gap:16px;padding-left:120px;}   /* small space between the two team tables */
+/* The team logos float OUTSIDE each card on the left (96px + 24px gap = 120px). Reserve that as a LEFT
+   gutter AND an equal RIGHT gutter so the card block is centred on the stage centreline (matching the
+   scores above) — a left gutter alone would shove the table 60px right of centre. */
+#sb-body{display:flex;flex-direction:column;gap:16px;padding-left:120px;padding-right:120px;}   /* + gap between the two team tables */
 .sb-grid{display:grid;grid-template-columns:1fr repeat(6,82px);align-items:center;}
 /* one team = one card; its logo FLOATS just outside the card to the LEFT, vertically centred on it.
    overflow VISIBLE lets the logo escape; the card bg respects the radius and the header carries the
@@ -682,13 +717,13 @@ img{display:block;}
 /* sponsor slot */
 .sb-sponsor{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;}
 .sb-sponsor.empty{display:none;}
-.sb-sponsor-lbl{font-size:10px;letter-spacing:.32em;color:var(--muted);text-transform:uppercase;}
+.sb-sponsor-lbl{font-size:10px;letter-spacing:.32em;color:#fff;text-transform:uppercase;}
 .sb-sponsor img{max-height:52px;max-width:200px;object-fit:contain;}
 
 /* partners rail along the bottom of the scoreboard (brand rail sponsors) */
 .sb-rail{display:flex;align-items:center;justify-content:center;flex-wrap:wrap;gap:26px;margin-top:4px;}
 .sb-rail.empty{display:none;}
-.sb-rail-lbl{font-size:11px;letter-spacing:.3em;color:var(--muted);text-transform:uppercase;margin-right:4px;}
+.sb-rail-lbl{font-size:11px;letter-spacing:.3em;color:#fff;text-transform:uppercase;margin-right:4px;}
 .sb-rail-logo{max-height:42px;max-width:150px;object-fit:contain;filter:drop-shadow(0 3px 10px rgba(0,0,0,.5));}
 
 /* WINNER intro — plays first, then dissolves into the scorecard */
@@ -847,7 +882,7 @@ img{display:block;}
     </div>
   </div>
   <!-- OVERTIME swipe — a red wall sweeps across the scorebar (over the team names), holds OVERTIME, sweeps off -->
-  <div id="ot-swipe" class="ot-swipe hidden"><span id="ot-swipe-text" class="ot-swipe-text">OVERTIME</span></div>
+  <div id="ot-swipe" class="ot-swipe hidden"><div class="ots-inner"><span id="ot-swipe-text" class="ot-swipe-text">OVERTIME</span><img id="ot-swipe-logo" class="ot-swipe-logo hidden" alt=""></div></div>
 </div>
 <!-- animated light tracing the silhouette of the whole top cluster (event title + scorebar + GAME tab); path built in JS -->
 <svg id="header-outline" viewBox="0 0 1920 210" preserveAspectRatio="none" aria-hidden="true">
@@ -1005,10 +1040,12 @@ img{display:block;}
       <div class="sb-scoreline">
         <div class="sb-scores">
           <span id="sb-num-a" class="sb-num">0</span>
-          <span class="sb-dash">FINAL</span>
+          <div class="sb-mid">
+            <span class="sb-dash">FINAL</span>
+            <span id="sb-series" class="sb-series"></span>
+          </div>
           <span id="sb-num-b" class="sb-num">0</span>
         </div>
-        <span id="sb-series" class="sb-series"></span>
       </div>
       <div id="sb-hteam-b" class="sb-hteam right">
         <img id="sb-logo-b" class="sb-hlogo" src="/assets/rl.png" alt="">
@@ -1472,7 +1509,7 @@ function renderStatcard(players, spectated, facecams){
 }
 
 /* ── sponsor rail ─────────────────────────────────────────────────────────── */
-let srTimer=null, srIdx=0;
+let srTimer=null, srIdx=0, _srSig='';
 let _sponsorHasContent=false;
 function statcardVisible(){   // the bottom-right statcard is up = has a spectated player AND not hidden for a replay/kickoff
   const m=el('br');
@@ -1487,12 +1524,15 @@ function renderSponsorRail(brand){
   const sp=(brand && (brand.railSponsors || brand.sponsors))||[];
   if(srTimer){ clearInterval(srTimer); srTimer=null; }
   _sponsorHasContent = sp.length>0;
-  if(!sp.length){ syncSponsorToStatcard(); return; }
+  if(!sp.length){ _srSig=''; syncSponsorToStatcard(); return; }
   syncSponsorToStatcard();
   setText('sr-label', brand.sponsorLabel||'PARTNERS');
   const slot=el('sr-slot'); if(!slot) return;
   const one=(s)=>{ s=s||{}; if(s.logo){ const i=document.createElement('img'); i.className='sr-logo'; i.src=s.logo; i.alt=s.name||''; return i; }
     const t=document.createElement('span'); t.className='sr-name'; t.textContent=s.name||''; return t; };
+  // Reset to first sponsor whenever the list changes; otherwise keep position (avoids flicker).
+  const sig=sp.map(s=>(s.name||'')+':'+(s.logo||'').slice(20,44)+':'+(s.logo||'').length).join('|');
+  if(sig!==_srSig){ _srSig=sig; srIdx=0; }
   // 'static' → show every partner logo side by side; 'cycle' (default) → rotate one at a time.
   if((brand.sponsorMode||'cycle')==='static'){
     slot.classList.add('static'); slot.innerHTML='';
@@ -1980,7 +2020,6 @@ function playWinnerIntro(){
 
 /* ── view switching ───────────────────────────────────────────────────────── */
 let activeView=null, sbLocked=false, sbHoldTimer=null, sbSafetyTimer=null;
-const SB_MIN_HOLD_MS = 6000;        // brief guard so a stray update can't yank the WINNER intro away
 const SB_SAFETY_MS   = 30*60*1000;  // backstop only: never sit on the board forever if no new-game signal ever comes
 function unlockScoreboard(){ sbLocked=false; clearTimeout(sbHoldTimer); clearTimeout(sbSafetyTimer); }
 function showView(name){
@@ -1999,7 +2038,10 @@ function showView(name){
   } else if(name==='scoreboard'){
     if(activeView!=='scoreboard'){                    // first entry only → don't re-lock on repeat updates
       playWinnerIntro();                              // WINNER announcement, then the board
-      sbLocked=true; clearTimeout(sbHoldTimer); sbHoldTimer=setTimeout(()=>{ sbLocked=false; }, SB_MIN_HOLD_MS);
+      // Hold the board until the next game_reset (the authoritative "new game" signal) so it survives the
+      // WHOLE between-matches lobby — even if the server sends a live 'hud' view meanwhile. game_reset
+      // (or the safety backstop) is the only way off, so it can't get stuck here forever.
+      sbLocked=true; clearTimeout(sbHoldTimer);
       clearTimeout(sbSafetyTimer); sbSafetyTimer=setTimeout(()=>{ sbLocked=false; showView('hud'); }, SB_SAFETY_MS);
     }
     hideGoal(); hideReplay(); el('replay-tag').classList.add('hidden');
@@ -2025,6 +2067,7 @@ function applyFullState(data){
     if(data.replay==null && currentState.replay) data.replay=currentState.replay;
   }
   currentState=data;
+  document.body.classList.toggle('ui-hidden', !!data.rlHudHidden);   // manual "Hide UI" → clean feed
   if(data.fontFamily) document.documentElement.style.setProperty('--main-font', `'${data.fontFamily}', sans-serif`);
   if(data.brand){
     if(data.brand.color)  document.documentElement.style.setProperty('--accent', data.brand.color);
@@ -2192,14 +2235,17 @@ function applyGame(game, bestOf, fmt){
       label.className='gs-label'; if(gsCard) gsCard.classList.remove('gs-ot-width');
       label.appendChild(seg('BRAZIL'));
     } else if(isOT){
-      // OVERTIME sits dead-centre (under the timer); round + game flank it in equal side zones so the
-      // chip stays centred no matter how long each side's text is.
-      label.className='gs-label gs-ot-row'; if(gsCard) gsCard.classList.add('gs-ot-width');
-      const left=document.createElement('span'); left.className='gs-cell gs-left';
-      if(round){ left.appendChild(seg(round)); left.appendChild(sepEl()); }
-      const right=document.createElement('span'); right.className='gs-cell gs-right';
-      right.appendChild(sepEl()); right.appendChild(seg(gameLine));
-      label.appendChild(left); label.appendChild(seg('OVERTIME','gs-ot')); label.appendChild(right);
+      // Row 1: OVERTIME + (optional) title-sponsor logo beside it. Row 2: (round ·) GAME line.
+      label.className='gs-label gs-ot-stack'; if(gsCard) gsCard.classList.remove('gs-ot-width');
+      const head=document.createElement('span'); head.className='gs-ot-head';
+      head.appendChild(seg('OVERTIME','gs-ot'));
+      const otLogo=titleSponsorLogo();
+      if(otLogo){ const im=document.createElement('img'); im.className='gs-ot-logo'; im.src=otLogo; im.alt=''; head.appendChild(im); }
+      label.appendChild(head);
+      const line2=document.createElement('span'); line2.className='gs-ot-line2';
+      if(round){ line2.appendChild(seg(round)); line2.appendChild(sepEl()); }
+      if(gameLine) line2.appendChild(seg(gameLine));
+      if(line2.childNodes.length) label.appendChild(line2);
     } else {
       label.className='gs-label'; if(gsCard) gsCard.classList.remove('gs-ot-width');
       const parts=[]; if(round) parts.push(seg(round)); parts.push(seg(gameLine));
@@ -2218,6 +2264,7 @@ function applyGame(game, bestOf, fmt){
   // is dribbling/keeping it up) regulation is still live at 0:00 and OT hasn't started.
   const t=el('timer');
   if(t){ t.textContent=(isOT?'+':'')+(fmt || game.formattedTime || '5:00'); t.className='timer'+(isOT?' ot':''); }
+  // (the red timer box is applied in the OT block below — delayed to be revealed BY the swipe, not before it)
 
   // Ball touched → live play resumed: the regulation clock ticks DOWN. That's the signal to release
   // the post-replay kickoff hold and animate the HUD back in (so it returns AT kickoff, not the
@@ -2236,10 +2283,18 @@ function applyGame(game, bestOf, fmt){
   // Fire the swipe only when OT begins DURING a live session — never on a browser-source reload that
   // starts already in OT (sawRegulation stays false until we've processed a regulation update).
   if(isOT){
-    if(!otShown){ if(sawRegulation) triggerOvertimeSwipe(); otShown=true; scheduleHeaderOutline(); }
+    if(!otShown){
+      otShown=true; scheduleHeaderOutline();
+      if(sawRegulation) triggerOvertimeSwipe();                          // swipe reveals the red timer box mid-sweep (sets otBoxPending)
+      else { const tc=el('timer-center'); if(tc) tc.classList.add('ot'); }   // reload already in OT: no swipe → red the box now
+    } else if(!otBoxPending){
+      const tc=el('timer-center'); if(tc) tc.classList.add('ot');        // keep the box red once revealed (skip while the swipe still masks it)
+    }
   } else {
     if(otShown) scheduleHeaderOutline();   // OT ended → bottom tab swapped back
     otShown=false; sawRegulation=true;
+    clearTimeout(otBoxTimer); otBoxPending=false;
+    const tc=el('timer-center'); if(tc) tc.classList.remove('ot');       // regulation → not red
   }
 }
 
@@ -2298,9 +2353,15 @@ function renderOvertimeSlot(ot){
   if(im){ if(logo){ im.src=logo; im.classList.remove('hidden'); } else { im.removeAttribute('src'); im.classList.add('hidden'); } }
 }
 let otShown=false, otSwipeTimer=null, sawRegulation=false;   // sawRegulation: seen a live non-OT update this session (gates the OT swipe on reload)
+let otBoxTimer=null, otBoxPending=false;   // the red timer box is revealed BY the swipe (mid-sweep), not before it
 function triggerOvertimeSwipe(){
   const w=el('ot-swipe'); if(!w) return;
+  const lg=el('ot-swipe-logo'), t=titleSponsorLogo();   // brand the OT swipe with the title sponsor
+  if(lg){ if(t){ lg.src=t; lg.classList.remove('hidden'); } else { lg.removeAttribute('src'); lg.classList.add('hidden'); } }
   w.classList.remove('hidden','play'); void w.offsetWidth; w.classList.add('play');
+  // turn the timer box red WHILE the red wall covers the centre (~mid-swipe), so it's already red when uncovered
+  otBoxPending=true; clearTimeout(otBoxTimer);
+  otBoxTimer=setTimeout(()=>{ otBoxPending=false; const c=el('timer-center'); if(c) c.classList.add('ot'); }, 1100);
   clearTimeout(otSwipeTimer);
   otSwipeTimer=setTimeout(()=>{ w.classList.add('hidden'); w.classList.remove('play'); }, 2000);   // matches the otSwipe animation
 }
@@ -2330,6 +2391,9 @@ function dispatch(msg){
       if(msg.data.view==='scoreboard')
         renderScoreboard(msg.data.playerCache || currentState.playerCache || {}, currentState, msg.data.series);
       showView(msg.data.view||'hud');
+      break;
+    case 'clear_scoreboard':   // producer manually cleared the held post-game board → drop back to the HUD
+      unlockScoreboard(); showView('hud');
       break;
     case 'game_reset':   // a new game/match → release the post-match scoreboard
       el('players-blue').innerHTML=''; el('players-orange').innerHTML='';

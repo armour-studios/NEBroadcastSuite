@@ -439,6 +439,7 @@ let bannerIntervalId = null;
 let currentBannerIdx = 0;
 let sponsorRailTimer = null;
 let sponsorRailIdx = 0;
+let _srListSig = '';
 
 // Sponsor rail — rotating corner bug fed by the active brand kit's sponsors.
 function renderSponsorRail(brand) {
@@ -447,10 +448,13 @@ function renderSponsorRail(brand) {
   // Only sponsors tagged for the rail (placements.rail); falls back to all for legacy brands.
   const sp = (brand && (brand.railSponsors || brand.sponsors)) || [];
   if (sponsorRailTimer) { clearInterval(sponsorRailTimer); sponsorRailTimer = null; }
-  if (!sp.length) { rail.classList.add('hidden'); return; }
+  if (!sp.length) { rail.classList.add('hidden'); _srListSig = ''; return; }
   rail.classList.remove('hidden');
   setText('sponsor-rail-label', brand.sponsorLabel || 'PARTNERS');
-  if (sponsorRailIdx >= sp.length) sponsorRailIdx = 0;
+  // Reset to first sponsor whenever the list changes; otherwise keep position (avoids flicker).
+  const sig = sp.map(s => (s.name || '') + ':' + (s.logo || '').slice(20, 44) + ':' + (s.logo || '').length).join('|');
+  if (sig !== _srListSig) { _srListSig = sig; sponsorRailIdx = 0; }
+  else if (sponsorRailIdx >= sp.length) sponsorRailIdx = 0;
   const draw = () => {
     const s = sp[sponsorRailIdx] || {};
     const slot = el('sponsor-rail-slot'); if (!slot) return;

@@ -234,8 +234,9 @@ function generateSceneCollection({
   const gfxTransition = makeBrowser('[GFX] Transition',      '/transitionbgg.html',     { restart: true, shutdown: true });
 
   // ── Draggable add-on overlays (no dedicated scene; drop onto any scene) ─────
-  const gfxTicker   = makeBrowser('[GFX] Ticker',           '/ticker.html');
-  const gfxSponsor  = makeBrowser('[GFX] Sponsor Banner',   '/sponsor-banner.html');
+  const gfxTicker      = makeBrowser('[GFX] Ticker',              '/ticker.html');
+  const gfxSponsorRail = makeBrowser('[GFX] Sponsor Rail',        '/sponsor-rail.html');
+  const gfxSponsor     = makeBrowser('[GFX] Sponsor Banner',      '/sponsor-banner.html');
   const gfxListenIn = makeBrowser('[GFX] Listen-In Captions', '/listen-in.html');
   const gfxIntCam   = makeBrowser('[GFX] Interviewee Cam',  '/int-cam.html');
 

@@ -286,8 +286,14 @@
       el.style.opacity = Math.min(1, Math.max(0, (Number(bg.op) || 50) / 100));
     },
     preview: PREVIEW,
+    standalone: !PREVIEW && (typeof window !== 'undefined') && (window.parent === window),
     demoState,
     connect(onState) {
+      // Standalone: scene is the top-level frame, not embedded inside gfx.html's iframe system.
+      // Standalone sources added directly to OBS always show their content — they don't participate
+      // in the on-demand trigger/switch system (that's gfx.html's job).
+      const standalone = !PREVIEW && (global.parent === global);
+
       // Preview: render sample data immediately (live WS data, if any, overrides it).
       if (PREVIEW) {
         document.documentElement.classList.add('preview');
@@ -295,6 +301,13 @@
         applyBrand(demo);
         try { onState(demo); } catch (e) { console.error('[scene] preview render error', e); }
       }
+
+      // Standalone: render demo data immediately so the scene is never invisible while WS connects.
+      // The real full_state from WS overwrites this as soon as the connection is established.
+      if (standalone) {
+        try { onState(demoState()); } catch (e) {}
+      }
+
       let ws;
       // The server omits the heavy brand/banner blobs (base64 sponsor/banner images) from most
       // broadcasts and only re-sends them when they change — backfill from the last full payload
@@ -319,18 +332,19 @@
               if (k in msg.data) _cache[k] = msg.data[k];
               else if (k in _cache) msg.data[k] = _cache[k];
             }
-            // In preview mode force every visibility flag on so the scene always renders.
-            if (PREVIEW) {
+            // Preview + standalone both force visibility flags on so the scene always renders
+            // its content regardless of the on-air trigger state.
+            if (PREVIEW || standalone) {
               const d = msg.data;
               const forceVisible = (obj) => obj && typeof obj === 'object' ? { ...obj, visible: true } : obj;
-              ['breakScreen', 'winner', 'intro', 'veto', 'casters', 'ticker', 'owMatch', 'upcoming', 'spotlight', 'watchlist', 'draft'].forEach((k) => {
+              ['breakScreen', 'winner', 'intro', 'veto', 'casters', 'ticker', 'owMatch', 'upcoming', 'spotlight', 'watchlist', 'draft', 'bracket', 'standings'].forEach((k) => {
                 if (d[k]) d[k] = forceVisible(d[k]);
               });
             }
             applyBrand(msg.data);
             // Only override URL-param bg when the server has an explicit entry for this
             // scene (including {on:false}). undefined = server has never been told about
-            // this scene's bg → leave whatever ?bg= URL param applied untouched.
+            // this scene's bg → leave whatever ?bg= URL param applied untougged.
             const _sbEntry = (msg.data.sceneBg || {})[global.location.pathname];
             if (_sbEntry !== undefined) SceneBase.applyBg(_sbEntry);
             try { onState(msg.data); } catch (e) { console.error('[scene] render error', e); }

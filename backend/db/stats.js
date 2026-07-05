@@ -747,6 +747,42 @@ function deletePlayerStats(name) {
   if (n) { try { sqlite.store.deletePlayerStatsByName(name); } catch (e) {} _queueSave(); } return n;
 }
 
+// Per-player stats scoped to a specific tournament — used by the lineup overlay.
+// tournament param is a substring match against match.tournament (case-insensitive).
+function getPlayerEventStats(playerName, tournament) {
+  const DB = _source();
+  if (!playerName || !tournament) return null;
+  const nameLow = String(playerName).toLowerCase();
+  const tLow = String(tournament).toLowerCase();
+
+  const matchIds = new Set(
+    DB.matches
+      .filter((m) => m.game_type === 'rl' && m.tournament && m.tournament.toLowerCase().includes(tLow))
+      .map((m) => m.id)
+  );
+  if (!matchIds.size) return null;
+
+  const gameMap = new Map();
+  DB.games.forEach((g) => { if (matchIds.has(g.match_id)) gameMap.set(g.id, g); });
+  if (!gameMap.size) return null;
+
+  const rows = DB.rl_player_stats.filter((p) =>
+    gameMap.has(p.game_id) && (p.player_name || '').toLowerCase() === nameLow
+  );
+  if (!rows.length) return null;
+
+  let goals = 0, assists = 0, saves = 0, games = 0, wins = 0;
+  for (const r of rows) {
+    goals += r.goals || 0;
+    assists += r.assists || 0;
+    saves += r.saves || 0;
+    games++;
+    const g = gameMap.get(r.game_id);
+    if (g && g.winner && r.team && g.winner === r.team) wins++;
+  }
+  return { games, wins, goals, assists, saves, gpg: games ? +(goals / games).toFixed(1) : 0 };
+}
+
 module.exports = {
   init, close,
   startMatch, endMatch,
@@ -756,7 +792,7 @@ module.exports = {
   saveValorantPlayerStats,
   getRecentMatches, getMatchDetail, getPlayerHistory, getAggregateStats,
   getLeaders, getTeamRecords, getHeadToHead,
-  getPlayerProfile, listPlayers,
+  getPlayerProfile, listPlayers, getPlayerEventStats,
   getMapStats, getPacing, getTournaments, getStartggSetIds,
   getDashboard, getFilterOptions,
   deleteMatch, clearAllMatches, deleteMatchesByTeam, deletePlayerStats

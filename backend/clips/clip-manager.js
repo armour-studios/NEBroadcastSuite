@@ -310,7 +310,18 @@ function createClipManager({ dataDir, getObsClient, onUpdate, onCapture }) {
   function reorderMontage(montageId, clipIds) {
     const m = montages.find((x) => x.id === montageId);
     if (!m || !Array.isArray(clipIds)) return false;
-    m.clipIds = clipIds.filter((id) => library.some((c) => c.id === id));
+    const next = clipIds.filter((id) => library.some((c) => c.id === id));
+    const changed = JSON.stringify(next) !== JSON.stringify(m.clipIds || []);
+    m.clipIds = next;
+    // Adding/removing/reordering clips invalidates any existing encode — it was rendered from the OLD
+    // clip set, so "Play Live" would play a STALE file (e.g. only the originally-encoded clips, which
+    // looks like the playlist "froze after the first clip"). Drop the stale export so the status
+    // returns to DRAFT and the next Play Live re-encodes with the current clips.
+    if (changed && m.outputPath) {
+      try { fs.unlinkSync(m.outputPath); } catch (e) { /* ignore */ }
+      delete m.outputPath;
+      m.status = 'draft';
+    }
     save();
     return true;
   }

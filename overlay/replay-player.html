@@ -40,6 +40,7 @@
 <body>
   <div id="stage" class="idle">
     <video id="vid" playsinline></video>
+    <video id="vid2" playsinline></video>
     <video id="stinger" playsinline></video>
     <img id="logo" alt="">
     <div id="label"></div>
@@ -47,13 +48,24 @@
 
   <script>
     const WS = 'ws://' + (location.hostname || 'localhost') + ':3001';
-    // Which bus this source plays: ?bus=program (default, live to air) or ?bus=preview (staging monitor).
-    const BUS = new URLSearchParams(location.search).get('bus') === 'preview' ? 'preview' : 'program';
+    // Bus routing: default (no params) = program — the ONE shared on-air source that every single clip
+    // AND every playlist now plays through (the playlist just cuts OBS to its chosen scene). ?bus=preview
+    // is the staging monitor. ?playlist=<id> is LEGACY (per-playlist dedicated sources) — no longer
+    // pushed to; use the plain /replay-player.html source instead.
+    const _QP = new URLSearchParams(location.search);
+    const _PLAYLIST_ID = _QP.get('playlist');
+    const BUS = _PLAYLIST_ID ? 'pl_' + _PLAYLIST_ID
+      : (_QP.get('bus') === 'preview' ? 'preview' : 'program');
     const stage = document.getElementById('stage');
-    const vid = document.getElementById('vid');
     const stinger = document.getElementById('stinger');
     const logo = document.getElementById('logo');
     const label = document.getElementById('label');
+    // Two stacked <video> elements so a 'fade' transition can be a true crossfade — the incoming
+    // clip dissolves directly over the outgoing one — instead of dipping through black between
+    // them. `activeVideo` is whichever is currently on screen; `idleVideo` is the other one,
+    // available to preload the next clip into. They swap roles after each crossfade.
+    let activeVideo = document.getElementById('vid');
+    let idleVideo = document.getElementById('vid2');
     let ws = null;
     let currentUrl = null;
     let transToken = 0;       // cancels a stale transition if a new play() interrupts it
@@ -65,45 +77,72 @@
 
     function sendWS(obj) { try { if (ws && ws.readyState === 1) ws.send(JSON.stringify(obj)); } catch (e) {} }
     function wait(ms) { return new Promise((r) => setTimeout(r, ms)); }
-    function waitReady() {
+    // Stacking order for the crossfade — two fixed values swapped between the pair, never growing
+    // unbounded (a long broadcast can run hundreds of replay switches), and always well under the
+    // stinger overlay's z-index:5.
+    function bringToFront(v, other) { v.style.zIndex = '2'; other.style.zIndex = '1'; }
+    function waitReady(v) {
       return new Promise((res) => {
         let done = false; const f = () => { if (done) return; done = true; res(); };
         if (curIn > 0) {
           // resolve once we've landed on the in-point (avoids flashing frame 0)
-          if (vid.readyState >= 2 && Math.abs(vid.currentTime - curIn) < 0.15) return f();
-          vid.addEventListener('seeked', f, { once: true });
+          if (v.readyState >= 2 && Math.abs(v.currentTime - curIn) < 0.15) return f();
+          v.addEventListener('seeked', f, { once: true });
           setTimeout(f, 1500);
         } else {
-          if (vid.readyState >= 2) return f();
-          vid.addEventListener('loadeddata', f, { once: true });
+          if (v.readyState >= 2) return f();
+          v.addEventListener('loadeddata', f, { once: true });
           setTimeout(f, 1500);
         }
       });
     }
 
-    // Jump to the in-point once the file knows its dimensions/duration.
-    vid.addEventListener('loadedmetadata', () => {
-      if (curIn > 0 && vid.currentTime < curIn - 0.05) { try { vid.currentTime = curIn; } catch (e) {} }
-    });
+    // Jump to the in-point once the file knows its dimensions/duration. Wired to both elements —
+    // whichever one is actively loading a new src is the one this should apply to.
+    function wireVideoEvents(v) {
+      v.addEventListener('loadedmetadata', () => {
+        if (v !== activeVideo) return;
+        if (curIn > 0 && v.currentTime < curIn - 0.05) { try { v.currentTime = curIn; } catch (e) {} }
+      });
+      v.addEventListener('timeupdate', () => {
+        if (v !== activeVideo) return;
+        if (curOut != null && v.currentTime >= curOut - 0.02) {
+          if (curLoop) { try { v.currentTime = curIn; } catch (e) {} }
+          else { reachEnd(); return; }
+        }
+        const t = Date.now();
+        if (t - lastSent < 400) return;
+        lastSent = t;
+        const outAt = (curOut != null ? curOut : (v.duration || 0));
+        const cur = Math.max(0, (v.currentTime || 0) - curIn);
+        const span = Math.max(0, outAt - curIn);
+        sendWS({ type: 'replay_progress', data: { bus: BUS, currentTime: cur, duration: span, remaining: Math.max(0, outAt - (v.currentTime || 0)) } });
+      });
+      v.addEventListener('ended', () => {
+        if (v !== activeVideo) return;
+        if (curLoop) { endedFired = false; try { v.currentTime = curIn; } catch (e) {} const p = v.play(); if (p && p.catch) p.catch(() => {}); }
+        else reachEnd();
+      });
+    }
 
-    function swapAndPlay(url, keepHidden) {
+    function loadInto(v, url, keepHidden) {
       currentUrl = url;
       stage.classList.remove('idle');
-      vid.loop = false;          // looping is handled manually so it respects the trim range
-      vid.src = url;
-      vid.muted = false; vid.volume = 1;
+      v.loop = false;          // looping is handled manually so it respects the trim range
+      v.src = url;
+      v.muted = false; v.volume = 1;
       // Filename caption intentionally hidden on the program output.
       label.textContent = ''; label.classList.remove('show');
-      const p = vid.play();
+      const p = v.play();
       if (p && p.catch) p.catch(() => { /* autoplay blocked; OBS allows it */ });
       if (!keepHidden) {
         if (curIn > 0) {
           // Hold black until we land on the in-point, so frame 0 never flashes.
-          let shown = false; const reveal = () => { if (shown) return; shown = true; requestAnimationFrame(() => vid.classList.add('show')); };
-          vid.addEventListener('seeked', reveal, { once: true });
+          let shown = false; const reveal = () => { if (shown) return; shown = true; requestAnimationFrame(() => v.classList.add('show')); };
+          v.addEventListener('seeked', reveal, { once: true });
           setTimeout(reveal, 600);
         } else {
-          requestAnimationFrame(() => vid.classList.add('show'));
+          requestAnimationFrame(() => v.classList.add('show'));
         }
       }
     }
@@ -119,20 +158,20 @@
       transition = transition || 'cut';
 
       if (sameUrl && wasLive) {   // already up — just make sure it's rolling
-        vid.muted = false; vid.volume = 1;
-        const p = vid.play(); if (p && p.catch) p.catch(() => {});
+        activeVideo.muted = false; activeVideo.volume = 1;
+        const p = activeVideo.play(); if (p && p.catch) p.catch(() => {});
         return;
       }
 
       // Hard cut → swap straight in (with a quick fade-up).
-      if (transition === 'cut') { swapAndPlay(url); return; }
+      if (transition === 'cut') { loadInto(activeVideo, url); return; }
 
       // Stinger: play a short video over the top and swap the clip underneath at its midpoint.
       // It needs no outgoing clip, so it also works as an intro on the very first clip.
       if (transition === 'stinger' && stingerUrl) {
         const tok = ++transToken;
         let swapped = false;
-        const doSwap = () => { if (!swapped && tok === transToken) { swapped = true; swapAndPlay(url); } };
+        const doSwap = () => { if (!swapped && tok === transToken) { swapped = true; loadInto(activeVideo, url); } };
         const onTime = () => { if (stinger.duration && stinger.currentTime >= stinger.duration * 0.5) doSwap(); };
         const cleanup = () => {
           stinger.removeEventListener('timeupdate', onTime);
@@ -152,63 +191,75 @@
       }
 
       // Fade / logo need an outgoing clip to ease from; on the very first clip just swap in.
-      if (!wasLive) { swapAndPlay(url); return; }
+      if (!wasLive) { loadInto(activeVideo, url); return; }
 
-      // Easing between clips: dip the outgoing clip out, optionally flash a logo, swap, ease in.
+      if (transition === 'fade') {
+        // True crossfade — dissolve directly into the next clip instead of dipping through black.
+        // Preload the incoming clip into the currently-idle <video> (stacked, opacity 0), then fade
+        // it in ON TOP of the still-fully-visible outgoing clip; the outgoing one never needs its
+        // own opacity touched since the incoming one covers it completely once the fade completes.
+        const tok = ++transToken;
+        const incoming = idleVideo;
+        const outgoing = activeVideo;
+        loadInto(incoming, url, true);
+        await waitReady(incoming);
+        if (tok !== transToken) return;            // a newer play() took over
+        bringToFront(incoming, outgoing);
+        activeVideo = incoming;                     // progress/trim enforcement now tracks the new clip
+        idleVideo = outgoing;
+        requestAnimationFrame(() => incoming.classList.add('show'));
+        await wait(300);                            // matches the .26s CSS opacity transition + margin
+        if (tok === transToken) {                   // only clean up if a newer transition hasn't already claimed `outgoing`
+          outgoing.pause();
+          outgoing.classList.remove('show');
+          outgoing.removeAttribute('src');
+          outgoing.load();
+        }
+        return;
+      }
+
+      // Logo: dip the outgoing clip to black, flash a logo card, then ease the new clip up.
       const tok = ++transToken;
-      vid.classList.remove('show');
-      if (transition === 'logo' && logoUrl) { logo.src = logoUrl; logo.classList.add('show'); }
+      activeVideo.classList.remove('show');
+      if (logoUrl) { logo.src = logoUrl; logo.classList.add('show'); }
       await wait(270);
       if (tok !== transToken) return;            // a newer play() took over
-      swapAndPlay(url, true);                     // load next, held at opacity 0
-      await waitReady();
+      loadInto(activeVideo, url, true);           // load next, held at opacity 0
+      await waitReady(activeVideo);
       if (tok !== transToken) return;
-      if (transition === 'logo') { await wait(220); logo.classList.remove('show'); }
-      vid.classList.add('show');
+      await wait(220); logo.classList.remove('show');
+      activeVideo.classList.add('show');
     }
 
     function stop() {
-      transToken++;
+      const tok = ++transToken;
       currentUrl = null;
       curIn = 0; curOut = null; curLoop = false; endedFired = false;
-      vid.pause();
-      vid.removeAttribute('src');
-      vid.load();
-      vid.classList.remove('show');
+      [activeVideo, idleVideo].forEach((v) => {
+        v.pause();
+        v.removeAttribute('src');
+        v.load();
+        v.classList.remove('show');
+      });
       logo.classList.remove('show');
-      stage.classList.add('idle');
       label.classList.remove('show');
+      // Delay idle (transparent background) until after the opacity fade completes — otherwise
+      // the black stage disappears while the video is still fading, revealing OBS sources underneath.
+      setTimeout(() => { if (transToken === tok) stage.classList.add('idle'); }, 320);
     }
 
     function reachEnd() {
       if (endedFired) return;
       endedFired = true;
-      vid.pause();
+      activeVideo.pause();
       label.classList.remove('show');
       sendWS({ type: 'replay_ended', data: { bus: BUS } });
     }
 
     // Enforce the out-point + report playback (time-remaining relative to the trim range).
     let lastSent = 0;
-    vid.addEventListener('timeupdate', () => {
-      if (curOut != null && vid.currentTime >= curOut - 0.02) {
-        if (curLoop) { try { vid.currentTime = curIn; } catch (e) {} }
-        else { reachEnd(); return; }
-      }
-      const t = Date.now();
-      if (t - lastSent < 400) return;
-      lastSent = t;
-      const outAt = (curOut != null ? curOut : (vid.duration || 0));
-      const cur = Math.max(0, (vid.currentTime || 0) - curIn);
-      const span = Math.max(0, outAt - curIn);
-      sendWS({ type: 'replay_progress', data: { bus: BUS, currentTime: cur, duration: span, remaining: Math.max(0, outAt - (vid.currentTime || 0)) } });
-    });
-
-    // Natural end of file (used when there's no explicit out-point).
-    vid.addEventListener('ended', () => {
-      if (curLoop) { endedFired = false; try { vid.currentTime = curIn; } catch (e) {} const p = vid.play(); if (p && p.catch) p.catch(() => {}); }
-      else reachEnd();
-    });
+    wireVideoEvents(activeVideo);
+    wireVideoEvents(idleVideo);
 
     // The server strips the heavy replay blob (base64 logos/thumbnails) from most broadcasts and
     // only re-sends it on change — backfill from the last full payload so a light broadcast that

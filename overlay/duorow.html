@@ -97,8 +97,7 @@
     .duo-stage:not(.show) .duo-eventbar,
     .duo-stage:not(.show) .match-hud,
     .duo-stage:not(.show) .cam-card,
-    .duo-stage:not(.show) .footer-row,
-    .duo-stage:not(.show) .brand-strip,
+    .duo-stage:not(.show) .identity-bar,
     .duo-stage:not(.show) .match-feed,
     .duo-stage:not(.show) .deck-strip,
     .duo-stage:not(.show) .duo-bestof {
@@ -119,11 +118,8 @@
     .duo-stage.show .cam-card:nth-child(2) {
       animation: camEnterR .75s cubic-bezier(.16,.84,.24,1) .22s forwards;
     }
-    .duo-stage.show .footer-row {
+    .duo-stage.show .identity-bar {
       animation: footerUp .65s cubic-bezier(.16,.84,.24,1) .32s forwards;
-    }
-    .duo-stage.show .brand-strip {
-      animation: footerUp .6s cubic-bezier(.16,.84,.24,1) .36s forwards;
     }
     .duo-stage.show .match-feed {
       animation: stripUp .6s cubic-bezier(.16,.84,.24,1) .38s forwards;
@@ -471,17 +467,9 @@
 
     .presented-by {
       display: flex;
-      flex-direction: column;
+      flex-direction: row;
       align-items: center;
-      justify-content: center;
-      gap: 4px;
-      min-width: 200px;
-      max-width: 320px;
-      padding: 8px 20px;
-      background: linear-gradient(180deg, rgba(20,23,30,.96), rgba(10,12,16,.98));
-      border: 1px solid rgba(255,255,255,.08);
-      border-radius: 8px;
-      box-shadow: 0 8px 24px rgba(0,0,0,.4), inset 0 1px 0 rgba(255,255,255,.06);
+      gap: 10px;
     }
     .presented-by.is-empty { display: none; }
     .pb-label {
@@ -492,30 +480,49 @@
       color: var(--duo-muted);
     }
     .pb-logo {
-      height: 36px;
-      max-width: 200px;
+      height: 28px;
+      max-width: 160px;
       object-fit: contain;
-      filter: drop-shadow(0 2px 6px rgba(0,0,0,.35));
+      filter: drop-shadow(0 2px 5px rgba(0,0,0,.35));
     }
 
-    /* Brand logo + event title — strip ABOVE "Presented by", on its OWN solid card (same
-       treatment as .presented-by) so it stays legible over transparent-compositied game footage
-       instead of relying on contrast against whatever happens to be behind the overlay. */
+    /* Event branding — sits as the left side of .identity-bar */
     .brand-strip {
       display: flex;
       align-items: center;
+      gap: 10px;
+    }
+    .brand-strip.is-empty { display: none; }
+
+    /* Unified identity bar: event branding + title sponsor on one horizontal line */
+    .identity-bar {
+      display: flex;
+      align-items: center;
       justify-content: center;
-      gap: 12px;
-      padding: 7px 22px;
+      gap: 0;
+      padding: 8px 22px;
       background: linear-gradient(180deg, rgba(20,23,30,.96), rgba(10,12,16,.98));
       border: 1px solid rgba(255,255,255,.08);
       border-radius: 8px;
       box-shadow: 0 8px 24px rgba(0,0,0,.4), inset 0 1px 0 rgba(255,255,255,.06);
+      position: relative; overflow: hidden;
     }
-    .brand-strip.is-empty { display: none; }
+    .identity-bar::before {
+      content: ''; position: absolute; top: 0; left: 12%; right: 12%; height: 1px;
+      background: linear-gradient(90deg, transparent, rgba(255,255,255,.2), transparent);
+      pointer-events: none;
+    }
+    .identity-bar.is-empty { display: none; }
+    /* Thin vertical divider between event and sponsor sides */
+    .ib-mid-sep {
+      width: 1px; height: 18px;
+      background: rgba(255,255,255,.16);
+      flex-shrink: 0;
+      margin: 0 16px;
+    }
     .brand-strip-logo {
-      height: 26px;
-      max-width: 120px;
+      height: 38px;
+      max-width: 140px;
       object-fit: contain;
       filter: drop-shadow(0 2px 5px rgba(0,0,0,.35));
     }
@@ -700,12 +707,13 @@
     </div>
 
     <div class="zone-footer">
-      <div class="brand-strip is-empty" id="brand-strip">
-        <img id="brand-strip-logo" class="brand-strip-logo" alt="" style="display:none">
-        <span class="brand-strip-sep" id="brand-strip-sep" style="display:none"></span>
-        <span id="brand-strip-event" class="brand-strip-event"></span>
-      </div>
-      <div class="footer-row">
+      <div class="identity-bar is-empty" id="identity-bar">
+        <div class="brand-strip is-empty" id="brand-strip">
+          <img id="brand-strip-logo" class="brand-strip-logo" alt="" style="display:none">
+          <span class="brand-strip-sep" id="brand-strip-sep" style="display:none"></span>
+          <span id="brand-strip-event" class="brand-strip-event"></span>
+        </div>
+        <span class="ib-mid-sep" id="ib-mid-sep" style="display:none"></span>
         <div class="presented-by is-empty" id="presented-by">
           <span class="pb-label" id="pb-label">PRESENTED BY</span>
           <img id="pb-logo" class="pb-logo" alt="" style="display:none">
@@ -746,7 +754,7 @@
     function activeCamCount(casters) {
       const list = (casters && Array.isArray(casters.list)) ? casters.list : [];
       let count = 0;
-      for (let i = 1; i <= 3; i++) {
+      for (let i = 1; i <= 2; i++) {
         const c = list.find(x => Number(x.slot) === i);
         if (c && (c.name || c.camUrl)) count = i;
       }
@@ -902,6 +910,14 @@
       wrap.classList.toggle('is-empty', !hasLogo && !evName);
     }
 
+    function syncIdentityBar() {
+      const eventEmpty = el('brand-strip').classList.contains('is-empty');
+      const sponsorEmpty = el('presented-by').classList.contains('is-empty');
+      el('identity-bar').classList.toggle('is-empty', eventEmpty && sponsorEmpty);
+      const sep = el('ib-mid-sep');
+      if (sep) sep.style.display = (!eventEmpty && !sponsorEmpty) ? '' : 'none';
+    }
+
     function renderDeckStrip(data) {
       const tag = ((data.casters && data.casters.lowerThird) || '').toString().trim();
       const strip = el('deck-strip');
@@ -961,6 +977,7 @@
 
       renderPresentedBy(data);
       renderBrandStrip(data);
+      syncIdentityBar();
       renderDeckStrip(data);
       renderSponsorFooter(data.brand, data.deskFooter);
     }

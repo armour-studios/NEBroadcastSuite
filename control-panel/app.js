@@ -1,5 +1,45 @@
 /* ─── Control Panel Logic ────────────────────────────────────────────────── */
 
+/* ─── Console/error capture for bug reports ───────────────────────────────
+   Wraps console.log/warn/error/info/debug to ALSO keep a rolling in-memory
+   buffer (still calls through to the real console — devtools is unaffected),
+   plus captures uncaught errors and unhandled promise rejections. The
+   bug-report modal attaches this buffer so a report shows exactly what the
+   console was doing right before something broke, instead of relying on
+   the user to notice/describe/screenshot an error. Placed at the very top
+   of the file (before any other declaration) so it captures from the
+   earliest possible point and never risks referencing anything not yet
+   initialized. */
+const __consoleBuffer = [];
+const __CONSOLE_BUFFER_MAX = 400;
+function __pushConsoleEntry(level, args) {
+  try {
+    const text = Array.prototype.map.call(args, (a) => {
+      if (typeof a === 'string') return a;
+      if (a instanceof Error) return (a.stack || a.message || String(a));
+      try { return JSON.stringify(a); } catch (_) { return String(a); }
+    }).join(' ');
+    __consoleBuffer.push(`[${new Date().toISOString().slice(11, 23)}] ${level.toUpperCase()}: ${text}`);
+    if (__consoleBuffer.length > __CONSOLE_BUFFER_MAX) __consoleBuffer.shift();
+  } catch (_) { /* never let logging itself throw */ }
+}
+['log', 'warn', 'error', 'info', 'debug'].forEach((level) => {
+  const orig = console[level] ? console[level].bind(console) : function () {};
+  console[level] = function (...args) { __pushConsoleEntry(level, args); orig.apply(console, args); };
+});
+window.addEventListener('error', (e) => {
+  __pushConsoleEntry('error', [`Uncaught: ${e.message} (${e.filename}:${e.lineno}:${e.colno})`]);
+});
+window.addEventListener('unhandledrejection', (e) => {
+  const r = e.reason;
+  __pushConsoleEntry('error', [`Unhandled rejection: ${(r && (r.stack || r.message)) || r}`]);
+});
+function getConsoleBufferText(maxChars) {
+  const text = __consoleBuffer.join('\n');
+  if (!maxChars || text.length <= maxChars) return text;
+  return '…(truncated, showing the most recent output)…\n' + text.slice(-maxChars);
+}
+
 const WS_URL = 'ws://localhost:3001';
 let ws;
 let _hbTimer = null, _lastRx = 0;   // WebSocket heartbeat (half-open detection)
@@ -125,6 +165,31 @@ function backupUploadToLibrary(file, dataUrl) {
   }).catch(() => {});
 }
 
+// Upload an image FILE to the server media store and return its ABSOLUTE served URL. Use this for
+// heavy full-frame assets (e.g. the replay-transition background) instead of embedding base64 in a
+// broadcast/persisted blob — a URL keeps the brand-kit JSON tiny so saves + library broadcasts stay
+// fast. Absolute (http://localhost:3000/...) so it resolves from the file:// control panel AND from
+// OBS overlays. Downscales/re-encodes first (same pipeline as fileToBase64).
+async function uploadImageFile(file, folder, maxDim) {
+  const dataUrl = await new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = (e) => resolve(e.target.result);
+    r.onerror = reject;
+    r.readAsDataURL(file);
+  });
+  const optimized = await downscaleDataUrl(dataUrl, file && file.type, maxDim);
+  const base = (file.name || 'img').replace(/\.[^.]+$/, '').replace(/[^\w-]+/g, '_').slice(0, 40) || 'img';
+  const mime = (optimized.match(/^data:image\/([a-z0-9.+-]+)/i) || [])[1];
+  const ext = (mime || 'webp').toLowerCase().replace('jpeg', 'jpg').replace('svg+xml', 'svg');
+  const name = `${base}-${hashStr(optimized)}.${ext}`;
+  const res = await fetch('http://localhost:3000/api/media/upload', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path: folder, name, dataUrl: optimized })
+  }).then((r) => r.json());
+  if (!res || !res.ok || !res.url) throw new Error('media upload failed');
+  return 'http://localhost:3000' + res.url;
+}
+
 // ── Custom Modal ──────────────────────────────────────────────────────────
 let modalResolve = null;
 
@@ -148,6 +213,41 @@ function closeModal(result) {
 el('modal-btn-confirm')?.addEventListener('click', () => closeModal(true));
 el('modal-btn-cancel')?.addEventListener('click', () => closeModal(false));
 el('modal-btn-close')?.addEventListener('click', () => closeModal(false));
+
+// Prompt for a line of text (Electron disables window.prompt). Resolves to the trimmed string, or
+// null if cancelled/empty. Self-contained overlay — no HTML needed.
+function customPrompt(title, message, defaultValue = '', confirmText = 'Create') {
+  return new Promise((resolve) => {
+    const ov = document.createElement('div');
+    ov.className = 'app-prompt-overlay';
+    ov.innerHTML =
+      '<div class="app-prompt-card">' +
+        '<div class="app-prompt-title"></div>' +
+        '<div class="app-prompt-msg"></div>' +
+        '<input class="input-text app-prompt-input" type="text" autocomplete="off">' +
+        '<div class="app-prompt-btns">' +
+          '<button class="btn btn-primary btn-sm app-prompt-ok"></button>' +
+          '<button class="btn btn-ghost btn-sm app-prompt-cancel">Cancel</button>' +
+        '</div>' +
+      '</div>';
+    ov.querySelector('.app-prompt-title').textContent = title || '';
+    const msgEl = ov.querySelector('.app-prompt-msg');
+    if (message) msgEl.textContent = message; else msgEl.style.display = 'none';
+    const inp = ov.querySelector('.app-prompt-input');
+    inp.value = defaultValue || '';
+    ov.querySelector('.app-prompt-ok').textContent = confirmText;
+    document.body.appendChild(ov);
+    const close = (val) => { ov.remove(); resolve(val); };
+    ov.querySelector('.app-prompt-ok').addEventListener('click', () => close(inp.value.trim() || null));
+    ov.querySelector('.app-prompt-cancel').addEventListener('click', () => close(null));
+    ov.addEventListener('mousedown', (e) => { if (e.target === ov) close(null); });
+    inp.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); close(inp.value.trim() || null); }
+      else if (e.key === 'Escape') { e.preventDefault(); close(null); }
+    });
+    setTimeout(() => { inp.focus(); inp.select(); }, 30);
+  });
+}
 
 // ── Sidebar tab switching ───────────────────────────────────────────────────
 document.querySelectorAll('.tab-btn').forEach(btn => {
@@ -177,6 +277,10 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
         else el('tab-principal-content')?.appendChild(mt);
       }
     }
+    // On Air + Graphics sections live in dash-grid and are borrowed by the Production → Graphics
+    // pane while Production is active, then returned so they stay in the customize system.
+    if (tab === 'produccion') _returnGraphicsToProd();
+    else _borrowGraphicsToDash();
   });
 });
 
@@ -615,9 +719,10 @@ function renderDccHostsPane() {
     return { ...libEntry, ...m, libraryId: libEntry.id, _cfGroup: cfGroup, _lib: libEntry };
   });
   // Apply filter + search
-  const activeFilter = list.closest('#dcc-db-hosts') && list.closest('#dcc-db-hosts').querySelector('.dcc-crew-filter.active');
+  const filtersRoot  = el('stg-filters') || document;
+  const activeFilter = filtersRoot.querySelector('.dcc-crew-filter.active');
   const kindFilter = activeFilter ? activeFilter.dataset.filter : 'all';
-  const query = ((el('dcc-crew-search') && el('dcc-crew-search').value) || '').toLowerCase().trim();
+  const query = ((el('stg-search') && el('stg-search').value) || '').toLowerCase().trim();
   let members = allMembers;
   if (kindFilter !== 'all') members = members.filter((m) => m.kind === kindFilter);
   if (query) members = members.filter((m) =>
@@ -650,7 +755,7 @@ function renderDccHostsPane() {
         .map(([v, lbl]) => `<option value="${v}"${Number(v) === curSlot ? ' selected' : ''}>${lbl}</option>`).join('');
       slotSelHtml = `<select class="dcc-cam-select dcc-overlay-slot" title="Overlay slot" style="max-width:92px;">${slotOpts}</select>`;
     }
-    return `<div class="talent-row mc-player dcc-lib-row" data-libid="${tlEsc(m.libraryId||'')}" data-stream="${tlEsc(m.streamId||'')}" data-kind="${tlEsc(m.kind||'')}">
+    return `<div class="talent-row mc-player dcc-lib-row dcc-crew-card-${m.kind||''}" data-libid="${tlEsc(m.libraryId||'')}" data-stream="${tlEsc(m.streamId||'')}" data-kind="${tlEsc(m.kind||'')}">
       <div class="mc-p-line">
         <span class="mc-stats">
           <span class="mc-stat mc-stat-conn" data-conn="${isConn?1:0}" title="VDO connection"></span>
@@ -704,6 +809,17 @@ function renderDccTeamSection(side) {
   const badgeEl = el(`dcc-badge-team-${side}`);
   if (badgeEl) { badgeEl.textContent = (team.name || (side === 'blue' ? 'BLUE' : 'ORANGE')).toUpperCase().slice(0, 12); badgeEl.style.background = teamColor; }
 
+  const roomEl = el(`dcc-room-team-${side}`);
+  if (roomEl) {
+    if (!team.vdo || !team.vdo.room) {
+      roomEl.textContent = players.length ? 'No VDO room yet — click the lightning icon to generate' : '';
+      roomEl.style.color = players.length ? '#f59e0b' : '';
+    } else {
+      roomEl.textContent = 'Room: ' + team.vdo.room;
+      roomEl.style.color = '';
+    }
+  }
+
   const vdoTeam = (typeof _cfDirectorData !== 'undefined' && _cfDirectorData && _cfDirectorData.teams && _cfDirectorData.teams[side]) || {};
   const vByPid  = {};
   (vdoTeam.players || []).forEach((vp) => { vByPid[String(vp.playerId)] = vp; });
@@ -746,47 +862,36 @@ function renderDccAll() {
 
 function renderDccTeamsPane() {
   const wrap = el('dcc-teams-list'); if (!wrap) return;
-  const query  = ((el('dcc-teams-search') && el('dcc-teams-search').value) || '').toLowerCase().trim();
-  let   saved  = (currentState && currentState.savedTeams) || [];
+  const query = ((el('stg-search') && el('stg-search').value) || '').toLowerCase().trim();
+  let   saved = (currentState && currentState.savedTeams) || [];
   if (query) saved = saved.filter((t) => (t.name || '').toLowerCase().includes(query));
-  const active = (currentState && currentState.teams) || {};
-  const blueNm  = (active.blue && active.blue.name)   || '';
-  const orangeNm= (active.orange && active.orange.name) || '';
 
   if (!saved.length) {
-    wrap.innerHTML = `<div class="roster-empty">No teams in staging yet. Add teams in <b>Talent &rarr; Teams</b> or use <b>↑ CSV</b> above to bulk import.</div>`;
+    wrap.innerHTML = `<div class="roster-empty">No teams yet. Add teams in <b>Talent &rarr; Teams</b> or click <b>+ Add</b>.</div>`;
     return;
   }
   wrap.innerHTML = saved.map((t, idx) => {
     const color   = t.color || '#6b7280';
     const players = t.players || [];
-    const isBlue  = blueNm && t.name && t.name.toLowerCase() === blueNm.toLowerCase();
-    const isOrange= orangeNm && t.name && t.name.toLowerCase() === orangeNm.toLowerCase();
-    const activeBadge = (isBlue || isOrange)
-      ? `<span class="dcc-section-badge" style="background:#22c55e;font-size:9px;">LIVE</span>`
-      : '';
-    const playerRows = players.map((p) => `<div class="dcc-team-player-row">
-        <span class="mc-stat mc-stat-conn" data-conn="0" style="flex:0 0 auto;"></span>
-        <span style="flex:1;font-size:12px;">${tlEsc(p.name || '—')}</span>
-      </div>`).join('');
-    return `<div class="talent-row mc-player dcc-lib-row" data-tidx="${idx}">
-      <div class="mc-p-line">
-        <span style="width:10px;height:10px;border-radius:50%;background:${color};flex:0 0 auto;"></span>
-        <span class="mc-p-name">${tlEsc(t.name || 'Unnamed')}</span>
-        ${activeBadge}
-        <span class="cf-grp-sub">${players.length} player${players.length !== 1 ? 's' : ''}</span>
-        <span class="mc-p-quick">
-          <button class="btn btn-secondary btn-xs" data-load-team-blue="${idx}" title="Load as Team 1">&rarr; Team 1</button>
-          <button class="btn btn-secondary btn-xs" data-load-team-orange="${idx}" title="Load as Team 2">&rarr; Team 2</button>
-          <button class="cf-ico-btn mc-expand" title="View players">${svgIcon('chevdown')}</button>
-        </span>
+    const playerRows = players.map((p) => `<div class="dcc-team-player">
+      <span class="mc-stat mc-stat-conn" data-conn="0"></span>
+      <span class="dcc-team-player-name">${tlEsc(p.name || '—')}</span>
+    </div>`).join('');
+    return `<div class="dcc-team-card" data-tidx="${idx}">
+      <div class="dcc-team-card-main">
+        <div class="dcc-team-swatch" style="background:${color}"></div>
+        <div class="dcc-team-info">
+          <span class="dcc-team-name">${tlEsc(t.name || 'Unnamed')}</span>
+          <span class="dcc-team-meta">${players.length} player${players.length !== 1 ? 's' : ''}</span>
+        </div>
+        <div class="dcc-team-actions">
+          <button class="cf-ico-btn mc-expand" title="Show players">${svgIcon('chevdown')}</button>
+        </div>
       </div>
       <div class="mc-p-body" hidden>
-        <div class="gm-sect">
-          ${players.length ? playerRows : '<span style="color:var(--muted);font-size:12px;">No players on this team.</span>'}
-          <div class="gm-sect-actions" style="margin-top:6px;">
-            <button class="btn btn-ghost btn-xs" data-edit-team-idx="${idx}">${svgIcon('pencil')} Edit in Teams</button>
-          </div>
+        <div class="dcc-team-roster">
+          ${players.length ? playerRows : '<span class="dcc-empty-note">No players on this team.</span>'}
+          <button class="btn btn-ghost btn-xs" data-edit-team-idx="${idx}" style="margin-top:6px;">${svgIcon('pencil')} Edit</button>
         </div>
       </div>
     </div>`;
@@ -856,6 +961,23 @@ function renderDccHostsGrid() {
     const col = drop.closest('.dcc-hosts-col');
     const countEl = col && col.querySelector('.dcc-hosts-col-count');
     if (countEl) countEl.textContent = members.length;
+
+    // Room indicator — everyone in this column is SUPPOSED to share one VDO room; show it so a
+    // mismatch (e.g. after a mid-show "New room" regen, or a Custom URL override on one member)
+    // is visible instead of only surfacing as "they can't hear each other" during a live test.
+    const roomEl = el(`dcc-hosts-col-room-${kind}`);
+    if (roomEl) {
+      const grp = cfGroups[kindToGroup[kind]];
+      const overrideCount = members.filter((m) => m._lib && m._lib.camUrl).length;
+      const warnColor = '#f59e0b';
+      if (!grp || !grp.room) {
+        roomEl.textContent = members.length ? 'No VDO room yet — click "Generate room" below' : '';
+        roomEl.style.color = members.length ? warnColor : '';
+      } else {
+        roomEl.textContent = 'Room: ' + grp.room + (overrideCount ? ` (${overrideCount} on a custom URL, not this room)` : '');
+        roomEl.style.color = overrideCount > 0 ? warnColor : '';
+      }
+    }
 
     if (!members.length) {
       drop.innerHTML = `<div class="roster-empty" style="padding:28px 12px; text-align:center; font-size:11px; color:var(--muted);">No ${EMPTY_LABEL[kind]} yet<br><span style="opacity:.6;">Drag cards here or add from Staging</span></div>`;
@@ -954,7 +1076,17 @@ function renderDccHostsGrid() {
     const gen = e.target.closest('[data-gen-cfgroup]');
     if (gen) { send('regenerate_group_room', { group: gen.dataset.genCfgroup }); setTimeout(doRefresh, 700); return; }
     const regen = e.target.closest('[data-regen-cfgroup]');
-    if (regen) { send('regenerate_group_room', { group: regen.dataset.regenCfgroup }); setTimeout(doRefresh, 700); return; }
+    if (regen) {
+      // This resets the ONE shared room every member of the group is in — anyone who already
+      // joined with the old link gets silently stranded there and won't hear/see the rest
+      // (this is exactly how two casters end up unable to hear each other mid-show).
+      appConfirm("Get a new room for this whole group? Anyone already connected with the current link will be cut off from the rest — they'll need the new invite link to rejoin.", 'New room', true).then((ok) => {
+        if (!ok) return;
+        send('regenerate_group_room', { group: regen.dataset.regenCfgroup });
+        setTimeout(doRefresh, 700);
+      });
+      return;
+    }
     // Remove
     const rem = e.target.closest('[data-rem-lib]');
     if (rem) {
@@ -1161,7 +1293,17 @@ function renderDccHostsGrid() {
       const obs     = e.target.closest('[data-obs-id]');
       const edit    = e.target.closest('[data-edit-lib]');
       if (rem)    { send('delete_caster_from_library', { id: rem.dataset.remLib }); setTimeout(refresh, 350); return; }
-      if (regen)  { send('regenerate_group_room', { group: regen.dataset.regenCfgroup }); setTimeout(refresh, 400); return; }
+      if (regen)  {
+        // Resets the ONE shared room for the whole group — anyone already connected with the
+        // current link gets silently stranded there (this is how two casters end up unable to
+        // hear each other mid-show).
+        appConfirm("Get a new room for this whole group? Anyone already connected with the current link will be cut off from the rest — they'll need the new invite link to rejoin.", 'New room', true).then((ok) => {
+          if (!ok) return;
+          send('regenerate_group_room', { group: regen.dataset.regenCfgroup });
+          setTimeout(refresh, 400);
+        });
+        return;
+      }
       if (gen)    { send('regenerate_group_room', { group: gen.dataset.genCfgroup }); setTimeout(refresh, 400); return; }
       if (copy)   { const u = copy.dataset.copyUrl; if (u) navigator.clipboard?.writeText(u).catch(() => {}); return; }
       if (edit)   { openCrewDialog(edit.dataset.editLib); return; }
@@ -1259,17 +1401,6 @@ function renderDccHostsGrid() {
     }
   });
 
-  // ── Teams + OOS pane ─────────────────────────────────────────────────────
-  const dccTeamsSearch = el('dcc-teams-search');
-  if (dccTeamsSearch) dccTeamsSearch.addEventListener('input', () => {
-    const q = dccTeamsSearch.value.toLowerCase().trim();
-    const teamsList = el('dcc-teams-list');
-    if (!teamsList) return;
-    teamsList.querySelectorAll('.dcc-lib-row[data-tidx]').forEach((row) => {
-      const name = (row.querySelector('.mc-p-name') && row.querySelector('.mc-p-name').textContent || '').toLowerCase();
-      row.style.display = q && !name.includes(q) ? 'none' : '';
-    });
-  });
 
   // Teams CSV import: name,color,player1,player2,…
   const teamsCsv = el('dcc-teams-csv');
@@ -1300,20 +1431,7 @@ function renderDccHostsGrid() {
   const teamsList = el('dcc-teams-list');
   if (teamsList) {
     teamsList.addEventListener('click', (e) => {
-      const loadBlue   = e.target.closest('[data-load-team-blue]');
-      const loadOrange = e.target.closest('[data-load-team-orange]');
-      const editBtn    = e.target.closest('[data-edit-team-idx]');
-      if (loadBlue || loadOrange) {
-        const side  = loadBlue ? 'blue' : 'orange';
-        const idx   = parseInt((loadBlue || loadOrange).dataset[loadBlue ? 'loadTeamBlue' : 'loadTeamOrange'], 10);
-        const saved = (currentState && currentState.savedTeams) || [];
-        const team  = saved[idx];
-        if (team) {
-          send('apply_saved_team', { side, name: team.name });
-          setTimeout(() => { renderDccTeamSection(side); renderDccTeamsPane(); }, 400);
-        }
-        return;
-      }
+      const editBtn = e.target.closest('[data-edit-team-idx]');
       if (editBtn) {
         const teamsTab    = document.querySelector('[data-tab="talent"]') || document.querySelector('[href="#talent"]');
         if (teamsTab) teamsTab.click();
@@ -1323,33 +1441,56 @@ function renderDccHostsGrid() {
     });
   }
 
-  // ── Staging sub-tab switching ────────────────────────────────────────────
-  const stagingPane = el('dcc-db-staging');
-  if (stagingPane) {
-    stagingPane.querySelectorAll('.dcc-sub-tab').forEach((btn) => {
+  // ── Staging: unified segment switcher + shared search + filter chips + Add ──
+  const stgSeg    = el('stg-seg');
+  const stgSearch = el('stg-search');
+  const stgAdd    = el('stg-add');
+  const stgFilters = el('stg-filters');
+
+  let _stgTab = 'teams';
+
+  function _stgSwitch(tab) {
+    _stgTab = tab;
+    stgSeg && stgSeg.querySelectorAll('.stg-seg-btn').forEach((b) => b.classList.toggle('active', b.dataset.stab === tab));
+    document.querySelectorAll('#dcc-db-staging .dcc-stab-pane').forEach((p) => { p.style.display = 'none'; });
+    const pane = el(`dcc-stab-${tab}`);
+    if (pane) pane.style.display = '';
+    if (stgFilters) stgFilters.style.display = tab === 'hosts' ? '' : 'none';
+    if (stgSearch)  stgSearch.placeholder = tab === 'teams' ? 'Search teams…' : 'Search crew…';
+    if (stgSearch)  stgSearch.value = '';
+    if (tab === 'hosts') renderDccHostsPane();
+    else renderDccTeamsPane();
+  }
+
+  if (stgSeg) {
+    stgSeg.querySelectorAll('.stg-seg-btn').forEach((btn) => {
+      btn.addEventListener('click', () => _stgSwitch(btn.dataset.stab));
+    });
+  }
+  if (stgSearch) stgSearch.addEventListener('input', () => {
+    if (_stgTab === 'hosts') renderDccHostsPane(); else renderDccTeamsPane();
+  });
+  if (stgFilters) {
+    stgFilters.querySelectorAll('.dcc-crew-filter').forEach((btn) => {
       btn.addEventListener('click', () => {
-        stagingPane.querySelectorAll('.dcc-sub-tab').forEach((b) => b.classList.remove('active'));
+        stgFilters.querySelectorAll('.dcc-crew-filter').forEach((b) => b.classList.remove('active'));
         btn.classList.add('active');
-        const tab = btn.dataset.stab;
-        stagingPane.querySelectorAll('.dcc-stab-pane').forEach((p) => { p.style.display = 'none'; });
-        const tabPane = el(`dcc-stab-${tab}`);
-        if (tabPane) tabPane.style.display = '';
-        if (tab === 'hosts') renderDccHostsPane();
-        else if (tab === 'teams') renderDccTeamsPane();
+        renderDccHostsPane();
       });
     });
   }
-
-  // ── Staging: Add Team button → navigate to Talent → Teams ───────────────
-  const addTeamBtn = el('dcc-staging-add-team');
-  if (addTeamBtn) {
-    addTeamBtn.addEventListener('click', () => {
-      document.querySelector('[data-tab="talent"]')?.click();
-      setTimeout(() => {
-        document.querySelector('[data-talentpage="teams"]')?.click();
-        el('te-new')?.click();        // start a fresh blank team (the Talent-page add-team flow)
-        el('te-name')?.focus();
-      }, 180);
+  if (stgAdd) {
+    stgAdd.addEventListener('click', () => {
+      if (_stgTab === 'hosts') {
+        openCrewDialog(null);
+      } else {
+        document.querySelector('[data-tab="talent"]')?.click();
+        setTimeout(() => {
+          document.querySelector('[data-talentpage="teams"]')?.click();
+          el('te-new')?.click();
+          el('te-name')?.focus();
+        }, 180);
+      }
     });
   }
 
@@ -1360,7 +1501,14 @@ function renderDccHostsGrid() {
   const lobbyAddBtn   = el('dcc-lobby-add');
 
   if (lobbyGenBtn) {
-    lobbyGenBtn.addEventListener('click', () => {
+    lobbyGenBtn.addEventListener('click', async () => {
+      // This one button handles both first-time creation AND regeneration — only warn when a
+      // room already exists, since regenerating strands anyone already connected with the old link.
+      const hasRoom = !!(currentState.casters && currentState.casters.guestsVdo && currentState.casters.guestsVdo.room);
+      if (hasRoom) {
+        const ok = await appConfirm("Get a new lobby room? Anyone already connected with the current link will be cut off — they'll need the new invite link to rejoin.", 'New room', true);
+        if (!ok) return;
+      }
       send('regenerate_group_room', { group: 'guests' });
       showToast('Generating lobby room…', '#8b5cf6');
       setTimeout(() => {
@@ -1400,6 +1548,39 @@ function renderDccHostsGrid() {
       }
     });
   }
+})();
+
+// ── On Air / Graphics dashboard borrow/return ─────────────────────────────────────────────────────
+// The On Air board and Graphics hub are dashboard sections (data-dash-id="onair"/"graphics") that
+// live in #dash-grid. When Production tab is active they move into #prod-graphics-tab so they
+// appear in the Graphics sub-pane. When any other tab (Dashboard etc.) is active they return.
+function _borrowGraphicsToDash() {
+  const src = el('prod-graphics-tab');
+  const dst1 = el('dash-section-onair');
+  const dst2 = el('dash-section-graphics');
+  if (!src || !dst1 || !dst2 || !src.firstChild) return;
+  const onairEl = src.querySelector('.gfx-onair');
+  if (onairEl) dst1.appendChild(onairEl);
+  while (src.firstChild) dst2.appendChild(src.firstChild);
+  // Defer applyDashLayout: DASH_WIDGETS is a const (TDZ until line ~16431) so calling
+  // applyDashLayout synchronously from the startup IIFE would throw a ReferenceError.
+  if (typeof applyDashLayout === 'function') setTimeout(applyDashLayout, 0);
+}
+function _returnGraphicsToProd() {
+  const dst = el('prod-graphics-tab');
+  const src1 = el('dash-section-onair');
+  const src2 = el('dash-section-graphics');
+  if (!dst) return;
+  if (src1) {
+    const onairEl = src1.querySelector('.gfx-onair');
+    if (onairEl) dst.appendChild(onairEl);
+  }
+  if (src2) { while (src2.firstChild) dst.appendChild(src2.firstChild); }
+}
+// Initial borrow — dashboard is the default view; don't borrow if Production is restored.
+(function () {
+  const saved = (() => { try { return localStorage.getItem('ne_active_tab'); } catch { return null; } })();
+  if (saved !== 'produccion') _borrowGraphicsToDash();
 })();
 
 // ── Production page: one flat sub-nav (Deck | Graphics | Rundown | Flows | Hotkeys | NEURAL AI) ──
@@ -1611,12 +1792,12 @@ function renderDccHostsGrid() {
     ticker:    { name: 'Ticker',                link: 'ticker.html',          hasClear: true,  hasQueue: false, hasPush: true,  hasApply: true,  pushId: 'btn-ticker-apply' },
     series:    { name: 'Series Score',          link: 'series.html',          hasClear: true,  hasQueue: false, hasPush: true  },
     matchup:   { name: 'Pre-Match Lineup',      link: 'matchup.html',         hasClear: true,  hasQueue: false, hasPush: true  },
-    veto:      { name: 'Map Pool',               link: 'mapscreen.html',       hasClear: true,  hasQueue: true,  hasPush: true,  clearId: 'btn-hide-veto-gfx', pushId: 'btn-show-veto-gfx' },
-    draft:     { name: 'Champion Draft',        link: 'draft.html',           hasClear: true,  hasQueue: false, hasPush: true  },
-    spotlight: { name: 'Spotlight',             link: 'watchlist.html',       hasClear: true,  hasQueue: false, hasPush: true  },
-    standings: { name: 'Standings',             link: 'standings.html',       hasClear: true,  hasQueue: false, hasPush: true,  hasApply: true,  pushId: 'btn-gfx-standings-push', clearId: 'btn-gfx-standings-clear' },
-    schedule:  { name: 'Upcoming Matches',      link: 'schedule.html',        hasClear: true,  hasQueue: false, hasPush: true,  hasApply: true,  pushId: 'btn-gfx-schedule-push', clearId: 'btn-gfx-schedule-clear' },
-    bracket:   { name: 'Bracket',               link: 'bracket.html',         hasClear: true,  hasQueue: false, hasPush: true  },
+    veto:      { name: 'Map Pool',               link: 'mapscreen.html',       hasClear: true,  hasQueue: false, hasPush: true,  clearId: 'btn-hide-veto-gfx', pushId: 'btn-show-veto-gfx', popout: true },
+    draft:     { name: 'Champion Draft',        link: 'draft.html',           hasClear: true,  hasQueue: false, hasPush: true,  popout: true },
+    spotlight: { name: 'Spotlight',             link: 'watchlist.html',       hasClear: true,  hasQueue: false, hasPush: true,  popout: true },
+    standings: { name: 'Standings',             link: 'standings.html',       hasClear: true,  hasQueue: false, hasPush: true,  hasApply: true,  pushId: 'btn-gfx-standings-push', clearId: 'btn-gfx-standings-clear', popout: true },
+    schedule:  { name: 'Upcoming Matches',      link: 'schedule.html',        hasClear: true,  hasQueue: false, hasPush: true,  hasApply: true,  pushId: 'btn-gfx-schedule-push', clearId: 'btn-gfx-schedule-clear', popout: true },
+    bracket:   { name: 'Bracket',               link: 'bracket.html',         hasClear: true,  hasQueue: false, hasPush: true,  popout: true },
   };
 
   let currentKey = 'break';
@@ -1643,16 +1824,22 @@ function renderDccHostsGrid() {
     const topPush = el('gfx-top-push'); if (topPush) topPush.style.display = meta.hasPush ? '' : 'none';
     // Footer: Apply (save content, no visibility change) + Add to Rundown only. No Clear here —
     // Clear All (top bar) and Push to Live (top bar) are the only visibility controls now.
+    // Pop-out scenes have their own footer inside the modal — this shared one only applies to
+    // whatever's currently rendered inline in the settings column.
     const footPush = el('gfx-foot-push'), footQueue = el('gfx-foot-queue');
-    const hasApply = !!meta.hasApply;
+    const hasApply = !meta.popout && !!meta.hasApply;
+    const hasQueue = !meta.popout && !!meta.hasQueue;
     if (footPush) footPush.style.display = hasApply ? '' : 'none';
-    if (footQueue) footQueue.style.display = meta.hasQueue ? '' : 'none';
+    if (footQueue) footQueue.style.display = hasQueue ? '' : 'none';
     const footer = el('gfx-panel-footer');
-    if (footer) footer.style.display = (hasApply || meta.hasQueue) ? '' : 'none';
-    // Live dot on sidenav + LIVE badge in top bar
+    if (footer) footer.style.display = (hasApply || hasQueue) ? '' : 'none';
+    // Live dot on sidenav + "Live on gfx.html" name + always-visible status pill.
     const liveScene = currentState && currentState.gfxActive;
     document.querySelectorAll('.gfx-sidenav-btn[data-gfxscene]').forEach((b) => b.classList.toggle('gfx-nav-live', b.dataset.gfxscene === liveScene));
-    const badge = el('gfx-live-badge'); if (badge) badge.style.display = liveScene ? '' : 'none';
+    const liveNameEl = el('gfx-live-name');
+    if (liveNameEl) liveNameEl.textContent = liveScene ? ((SCENE_META[liveScene] && SCENE_META[liveScene].name) || liveScene) : 'Nothing';
+    const badge = el('gfx-live-badge');
+    if (badge) { badge.classList.toggle('is-off', !liveScene); badge.textContent = liveScene ? 'LIVE' : 'OFF AIR'; }
   }
 
   // Clear ALL GFX scenes (one-click clear everything) — top bar only.
@@ -1661,6 +1848,9 @@ function renderDccHostsGrid() {
       if (meta.hasClear) el(meta.clearId || ('btn-hide-' + k))?.click();
     });
     send('set_gfx_active', { scene: null });
+    // Optimistic update — the server round-trip hasn't landed yet, so reflect "nothing live" in
+    // the top bar immediately rather than waiting on the next full_state broadcast.
+    if (currentState) currentState.gfxActive = null;
     refreshTopBar(currentKey);
   }
 
@@ -1675,8 +1865,17 @@ function renderDccHostsGrid() {
     }
     el(meta.pushId || ('btn-show-' + key))?.click();
     send('set_gfx_active', { scene: key });
+    // Optimistic update — reflect the new live scene immediately rather than waiting on the
+    // server round-trip (same reasoning as clearAllGfxScenes above).
+    if (currentState) currentState.gfxActive = key;
     gfxFootStatus((meta.name || key) + ' pushed live.', true);
-    setTimeout(() => refreshTopBar(key), 50);
+    refreshTopBar(key);
+    // Auto-cut OBS: when the producer has armed it, switch OBS to their chosen scene so the graphic
+    // and the OBS scene that holds it go live together.
+    if (el('gfx-autocut-on')?.checked) {
+      const _sc = (el('gfx-autocut-scene')?.value || '').trim();
+      if (_sc) { send('obs_switch_scene', { sceneName: _sc }); gfxFootStatus((meta.name || key) + ' live — cut OBS to ' + _sc + '.', true); }
+    }
   }
 
   // Save a scene's content WITHOUT touching visibility/gfxActive — omitting the `visible` key from
@@ -1719,10 +1918,11 @@ function renderDccHostsGrid() {
   el('gfx-foot-push')?.addEventListener('click', () => applyScene(currentKey));
   el('gfx-foot-queue')?.addEventListener('click', () => el('gfx-top-queue')?.click());
 
-  // Dynamic preview scaling — scales to fit the 220px height strip, centers horizontally.
+  // Dynamic preview scaling — scales the single shared fixed-preview iframe (and any currently
+  // open pop-out's own embedded preview, once pop-outs exist) to fit its container.
   function fitScenePreviews() {
     let anyMissed = false;
-    document.querySelectorAll('.gfx-scene-card .live-pv').forEach(function(wrap) {
+    document.querySelectorAll('.gfx-fixed-preview .live-pv, .gfx-popout-box .live-pv').forEach(function(wrap) {
       const iframe = wrap.querySelector('iframe');
       if (!iframe) return;
       const w = wrap.offsetWidth, h = wrap.offsetHeight || wrap.clientHeight;
@@ -1734,16 +1934,10 @@ function renderDccHostsGrid() {
     if (anyMissed) setTimeout(fitScenePreviews, 120);
   }
 
-  // Tab switching.
-  const ALIAS = { scenes: 'break', lower: 'spotlight', manual: 'bracket', upcoming: 'schedule', brackets: 'bracket' };
-  function show(which) {
-    const btns = Array.from(nav.querySelectorAll('.gfx-sidenav-btn[data-gfxscene]'));
-    const keys = btns.map((b) => b.dataset.gfxscene);
-    const key = keys.includes(which) ? which : (ALIAS[which] && keys.includes(ALIAS[which]) ? ALIAS[which] : keys[0]);
-    currentKey = key;
-    btns.forEach((b) => b.classList.toggle('active', b.dataset.gfxscene === key));
-    gtab.querySelectorAll('.gfx-scene-panel').forEach((p) => { p.style.display = (p.dataset.gfxpanel === key) ? '' : 'none'; });
-    refreshTopBar(key);
+  // Scene-specific side effects that must fire whenever a scene becomes the active one — whether
+  // that's by inline selection or by opening its pop-out. Kept as one function so both paths stay
+  // in sync (previously these lived directly inside show(), only reachable via sidenav select).
+  function runSceneSideEffects(key) {
     if (key === 'spotlight') {
       try {
         if (typeof renderSpotlight === 'function') renderSpotlight();
@@ -1754,10 +1948,167 @@ function renderDccHostsGrid() {
       } catch (_) {}
     }
     if (key === 'veto' && typeof mpSyncFromState === 'function') mpSyncFromState(currentState);
+  }
+
+  // Front-facing panels for pop-out scenes. Bracket, Map Pool and Spotlight host real, persistent
+  // quick-action controls (import field, map-pool form, team search/reorder) — those never get
+  // rebuilt here, they self-update via their own state-driven render functions, so typing/dragging
+  // in them never gets clobbered by a state broadcast. Standings/Schedule/Draft don't need real
+  // inputs on the front panel, so they keep the simple text-summary + quick-action rebuild.
+  function renderPopoutSummary(key) {
+    const data = currentState || {};
+    const row = (label, value) => `<div class="gfx-pos-row"><span class="gfx-pos-label">${label}</span><span class="gfx-pos-value">${value}</span></div>`;
+    const empty = (msg) => `<p class="gfx-pos-empty">${msg}</p>`;
+    if (key === 'standings') {
+      const body = el('gfx-front-standings-body'); if (!body) return;
+      const s = data.standings || {};
+      const srcBtn = document.querySelector('#gfx-std-src .gfx-src-tab.is-on');
+      const src = srcBtn ? srcBtn.textContent.trim() : 'League';
+      body.innerHTML = row('Title', tlEsc(s.title || 'STANDINGS')) + row('Source', tlEsc(src)) + row('Rows', (s.rows && s.rows.length) || 0);
+    } else if (key === 'schedule') {
+      const body = el('gfx-front-schedule-body'); if (!body) return;
+      const u = data.upcoming || {};
+      const matches = u.matches || [];
+      const onStream = matches.find((m) => m.stream) || matches[0];
+      let html = row('Queued', matches.length) + (onStream
+        ? row('On stream', tlEsc((onStream.teamA || 'TBD') + ' vs ' + (onStream.teamB || 'TBD')))
+        : empty('No matches queued.'));
+      html += qa('schedule-pull', 'Pull Queue');
+      body.innerHTML = html;
+    } else if (key === 'draft') {
+      const body = el('gfx-front-draft-body'); if (!body) return;
+      const d = data.draft || {};
+      const started = !!(d.sequence && d.sequence.length);
+      body.innerHTML = !started
+        ? (empty('No draft started yet.') + qa('draft-start', 'Start Draft'))
+        : (row('Game', tlEsc(d.game || '')) + row('Progress', (d.ops || []).length + ' / ' + d.sequence.length) + row('Status', d.complete ? 'Complete' : 'In progress'));
+    }
+    // bracket / veto / spotlight: nothing to rebuild — their front panels host persistent real
+    // markup (moved-not-cloned from their pop-out editors) that updates itself in place.
+  }
+  // Quick-action button markup for the Standings/Schedule/Draft summary cards — handled by one
+  // delegated listener on the whole front-panel container below.
+  function qa(action, label) { return `<button type="button" class="btn btn-secondary btn-sm gfx-pos-qa" data-qa="${action}">${label}</button>`; }
+  el('gfx-popout-summary')?.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-qa]'); if (!btn) return;
+    const action = btn.dataset.qa;
+    if (action === 'draft-start') el('btn-draft-start')?.click();
+    else if (action === 'schedule-pull') el('gfx-sch-pull-startgg')?.click();
+  });
+
+  // Open/close a scene's pop-out editor (Bracket, Spotlight, and — once converted — Standings,
+  // Schedule, Map Pool, Draft). The modal id convention is #gfx-popout-<key>.
+  function openGfxPopout(key) {
+    const modal = el('gfx-popout-' + key); if (!modal) return;
+    modal.style.display = 'flex';
+    runSceneSideEffects(key);
+    requestAnimationFrame(() => requestAnimationFrame(fitScenePreviews));
+  }
+  function closeGfxPopout(key) {
+    const modal = el('gfx-popout-' + key); if (modal) modal.style.display = 'none';
+  }
+  window._gfxOpenPopout = openGfxPopout;
+  window._gfxClosePopout = closeGfxPopout;
+  // Keep the front-facing summary live as state changes (e.g. a match gets queued elsewhere)
+  // while a pop-out scene is the current selection but its editor isn't open.
+  window._gfxRefreshPopoutSummary = () => { if (SCENE_META[currentKey] && SCENE_META[currentKey].popout) renderPopoutSummary(currentKey); };
+  el('gfx-popout-summary-open')?.addEventListener('click', () => openGfxPopout(currentKey));
+  // Generic wiring for every pop-out present in the DOM: close (× button or backdrop click),
+  // Push Live / Clear / Apply footer buttons reuse the exact same SCENE_META-driven actions as
+  // the main top bar so there's only one push/clear/apply implementation in the whole hub.
+  document.querySelectorAll('.mp-modal[id^="gfx-popout-"]').forEach((modal) => {
+    const key = modal.id.replace('gfx-popout-', '');
+    modal.addEventListener('click', (e) => { if (e.target === modal) closeGfxPopout(key); });
+    modal.querySelectorAll('[data-popout-close]').forEach((b) => b.addEventListener('click', () => closeGfxPopout(key)));
+    modal.querySelectorAll('[data-popout-push]').forEach((b) => b.addEventListener('click', () => doPush(key)));
+    modal.querySelectorAll('[data-popout-clear]').forEach((b) => b.addEventListener('click', () => {
+      const meta = SCENE_META[key] || {};
+      el(meta.clearId || ('btn-hide-' + key))?.click();
+    }));
+    modal.querySelectorAll('[data-popout-apply]').forEach((b) => b.addEventListener('click', () => applyScene(key)));
+    modal.querySelectorAll('[data-popout-queue]').forEach((b) => b.addEventListener('click', () => el('btn-queue-' + key)?.click()));
+    // Internal tabs within a pop-out (e.g. Map Pool's "Guided Veto" / "Quick Map Pool").
+    modal.querySelectorAll('.gfx-popout-tab[data-ptab]').forEach((tabBtn) => {
+      tabBtn.addEventListener('click', () => {
+        modal.querySelectorAll('.gfx-popout-tab[data-ptab]').forEach((b) => b.classList.toggle('is-on', b === tabBtn));
+        modal.querySelectorAll('.gfx-popout-pane[data-ppane]').forEach((p) => { p.hidden = p.dataset.ppane !== tabBtn.dataset.ptab; });
+      });
+    });
+  });
+
+  // Tab switching.
+  const ALIAS = { scenes: 'break', lower: 'spotlight', manual: 'bracket', upcoming: 'schedule', brackets: 'bracket' };
+  function show(which) {
+    const btns = Array.from(nav.querySelectorAll('.gfx-sidenav-btn[data-gfxscene]'));
+    const keys = btns.map((b) => b.dataset.gfxscene);
+    // 'series' has no sidenav button of its own — it shares Map Pool's entry via the mode toggle
+    // below — so fall back to any valid SCENE_META key, not just ones with a button.
+    const key = keys.includes(which) ? which : (SCENE_META[which] ? which : (ALIAS[which] && keys.includes(ALIAS[which]) ? ALIAS[which] : keys[0]));
+    currentKey = key;
+    const navHighlightKey = (key === 'series') ? 'veto' : key;
+    btns.forEach((b) => b.classList.toggle('active', b.dataset.gfxscene === navHighlightKey));
+    // Swap the single shared fixed-preview iframe to this scene's own standalone overlay page —
+    // happens regardless of inline vs. pop-out, so you can glance at any scene without opening it.
+    const previewIframe = el('gfx-fixed-preview-iframe');
+    if (previewIframe && SCENE_META[key] && SCENE_META[key].link) {
+      const base = window.SCENE_BASE_URL || 'http://localhost:3000';
+      const newSrc = base + '/' + SCENE_META[key].link + '?preview=1';
+      if (previewIframe.getAttribute('src') !== newSrc) previewIframe.src = newSrc;
+    }
+    refreshTopBar(key);
+    // Map Pool / Series mode toggle — visible only for these two scenes; reuses show() itself
+    // as the transport so Push Live/Clear/preview swap above all stay correct with zero extra code.
+    const msToggle = el('gfx-mapseries-toggle');
+    if (msToggle) {
+      msToggle.style.display = (key === 'veto' || key === 'series') ? '' : 'none';
+      msToggle.querySelectorAll('.sp-mode-btn').forEach((b) => b.classList.toggle('is-on', b.dataset.mstoggle === key));
+    }
+    const isPopout = !!(SCENE_META[key] && SCENE_META[key].popout) && !!el('gfx-popout-' + key);
+    const summary = el('gfx-popout-summary');
+    if (isPopout) {
+      // Pop-out scenes: show that scene's front panel (quick actions / status) instead of the
+      // full editor — the editor itself only opens when the Settings button is clicked.
+      gtab.querySelectorAll('.gfx-scene-panel').forEach((p) => { p.style.display = 'none'; });
+      if (summary) {
+        summary.style.display = '';
+        summary.querySelectorAll('.gfx-front-panel[data-frontkey]').forEach((p) => { p.style.display = (p.dataset.frontkey === key) ? '' : 'none'; });
+      }
+      renderPopoutSummary(key);
+    } else {
+      if (summary) summary.style.display = 'none';
+      gtab.querySelectorAll('.gfx-scene-panel').forEach((p) => { p.style.display = (p.dataset.gfxpanel === key) ? '' : 'none'; });
+    }
+    // Refresh data pickers so they always show current state when navigated to.
+    if (key === 'matchup' && typeof window._gfxRefreshMatchupPickers === 'function') window._gfxRefreshMatchupPickers(currentState);
+    if (key === 'winner'  && typeof window._gfxRefreshWinnerPicker   === 'function') window._gfxRefreshWinnerPicker(currentState);
+    if (key === 'draft'   && typeof renderDraftManager === 'function') renderDraftManager(currentState);
+    runSceneSideEffects(key);
     requestAnimationFrame(() => requestAnimationFrame(fitScenePreviews));
     try { localStorage.setItem('gfx_active_grp', key); } catch (_) {}
   }
   nav.querySelectorAll('.gfx-sidenav-btn[data-gfxscene]').forEach((b) => b.addEventListener('click', () => show(b.dataset.gfxscene)));
+  document.querySelectorAll('#gfx-mapseries-toggle .sp-mode-btn').forEach((b) => b.addEventListener('click', () => show(b.dataset.mstoggle)));
+
+  // Collapsible sidenav category groups (Show/Match/Event/Talent & Features) — state persists
+  // across sessions like the rest of the hub's per-scene preference (gfx_active_grp).
+  const NAV_COLLAPSE_KEY = 'gfx_nav_collapsed';
+  function getNavCollapsed() { try { return JSON.parse(localStorage.getItem(NAV_COLLAPSE_KEY) || '[]'); } catch (_) { return []; } }
+  function setNavCollapsed(arr) { try { localStorage.setItem(NAV_COLLAPSE_KEY, JSON.stringify(arr)); } catch (_) {} }
+  const collapsedGroups = new Set(getNavCollapsed());
+  nav.querySelectorAll('.gfx-nav-group[data-navgroup]').forEach((grp) => {
+    if (collapsedGroups.has(grp.dataset.navgroup)) grp.classList.add('collapsed');
+  });
+  nav.querySelectorAll('.gfx-nav-cat[data-navtoggle]').forEach((catBtn) => {
+    catBtn.addEventListener('click', () => {
+      const grp = catBtn.closest('.gfx-nav-group'); if (!grp) return;
+      grp.classList.toggle('collapsed');
+      const set = new Set(getNavCollapsed());
+      const key = grp.dataset.navgroup;
+      if (grp.classList.contains('collapsed')) set.add(key); else set.delete(key);
+      setNavCollapsed(Array.from(set));
+    });
+  });
+
   window._gfxCfgShow = (which) => show(which);
   window._gfxSceneMeta = SCENE_META;  // expose for on-air board auto-clear
   window._gfxDoPush = doPush;         // expose for external callers (hotkeys, rundown)
@@ -1795,12 +2146,11 @@ function renderDccHostsGrid() {
     ['input-bracket-slug', 'bb-phases'].forEach((id) => {
       const sec = sectIn(id); if (sec) { sec.classList.add('gfx-injected'); bracketBody.appendChild(sec); }
     });
-    // The injected start.gg editor is the complete one (Load Event + view chips + match picker), so
-    // hide the static quick-import duplicate. The bracket builder runs FULL WIDTH (CSS drops the left
-    // preview column for this scene), so the injected inline `bracket-live-preview` stays on as the
+    // The injected start.gg editor is the complete one (Load Event + view chips + match picker).
+    // The quick-import source tabs + slug field live on the front panel now (#gfx-front-bracket),
+    // not inside this pop-out body. The bracket builder runs FULL WIDTH (CSS drops the left preview
+    // column for this scene), so the injected inline `bracket-live-preview` stays on as the
     // bracket's own full-width, collapsible preview.
-    const hideById = (id) => { const e = document.getElementById(id); if (e) e.style.display = 'none'; };
-    hideById('gfx-bkt-static');        // static source tabs + quick import (superseded)
     const btn = document.getElementById('gfx-tab-bracket');
     if (btn) btn.style.display = '';
   }
@@ -1926,7 +2276,19 @@ function renderDccHostsGrid() {
     const boSel = el('mp-bestof');
     if (boSel && document.activeElement !== boSel) boSel.value = String((data && data.bestOf) || 5);
     if (document.activeElement?.closest('#mp-slots') == null) mpRenderSlots(maps);
+    if (typeof window._gfxRefreshVetoSeriesLink === 'function') window._gfxRefreshVetoSeriesLink(data);
   }
+  // Exposed so the front-panel live-refresh hook (outside this IIFE) can reach it.
+  window._gfxSyncVetoFront = mpSyncFromState;
+
+  // Series overlay (series.html) reads state.veto.maps directly once any pick/decider lands —
+  // same condition it uses client-side — so producers can see right here whether it's linked yet.
+  window._gfxRefreshVetoSeriesLink = function (data) {
+    const statusEl = el('mp-series-link-status'); if (!statusEl) return;
+    const maps = ((data && data.veto && data.veto.maps) || []).filter((m) => m.action === 'pick' || m.action === 'decider');
+    if (maps.length) { statusEl.textContent = `Linked — ${maps.length} map${maps.length > 1 ? 's' : ''} picked`; statusEl.style.color = '#4ade80'; }
+    else { statusEl.textContent = 'Not linked yet — showing the manual Series editor until a map is picked'; statusEl.style.color = 'var(--muted)'; }
+  };
 
   // Ticker — hide (push uses the existing btn-ticker-apply).
   el('btn-hide-ticker')?.addEventListener('click', () => send('set_ticker', { visible: false }));
@@ -1965,14 +2327,22 @@ function renderDccHostsGrid() {
     el(id)?.addEventListener('change', doBreakPreview);
   });
 
+  function _winnerNameFromSel(sel) {
+    if (!sel || sel === 'blue' || sel === 'orange') return '';
+    if (sel === '__custom__') return (el('input-winner-name')?.value || '').trim();
+    if (sel.startsWith('__saved_')) {
+      const idx = parseInt(sel.replace('__saved_', ''), 10);
+      const t = currentState && currentState.savedTeams && currentState.savedTeams[idx];
+      return t ? (t.name || '') : '';
+    }
+    return '';
+  }
   const doWinnerPreview = debounce(() => {
     if (typeof send !== 'function') return;
     const sel = el('select-winner-side')?.value || 'blue';
     const subtitle = (el('input-winner-subtitle')?.value || '').trim();
-    const payload = sel === '__custom__'
-      ? { side: '', name: (el('input-winner-name')?.value || '').trim(), subtitle }
-      : { side: sel, name: '', subtitle };
-    send('set_winner', payload);
+    const isSide = sel === 'blue' || sel === 'orange';
+    send('set_winner', isSide ? { side: sel, name: '', subtitle } : { side: '', name: _winnerNameFromSel(sel), subtitle });
   }, 350);
   ['select-winner-side', 'input-winner-name', 'input-winner-subtitle'].forEach((id) => {
     el(id)?.addEventListener('input', doWinnerPreview);
@@ -1981,13 +2351,15 @@ function renderDccHostsGrid() {
 
   const doIntroPreview = debounce(() => {
     if (typeof send !== 'function') return;
-    send('set_intro', { side: el('select-intro-side')?.value || 'blue', title: (el('input-intro-title')?.value || '').trim(), showFooter: el('check-intro-footer') ? !!el('check-intro-footer').checked : true });
+    send('set_intro', { side: el('select-intro-side')?.value || 'blue', title: (el('input-intro-title')?.value || '').trim(), showFooter: el('check-intro-footer') ? !!el('check-intro-footer').checked : false, showRealName: el('check-intro-realname') ? !!el('check-intro-realname').checked : false });
   }, 350);
   ['select-intro-side', 'input-intro-title'].forEach((id) => {
     el(id)?.addEventListener('input', doIntroPreview);
     el(id)?.addEventListener('change', doIntroPreview);
   });
-  el('check-intro-footer')?.addEventListener('change', doIntroPreview);
+  ['check-intro-footer', 'check-intro-realname'].forEach((id) => {
+    el(id)?.addEventListener('change', doIntroPreview);
+  });
 
   // ── Series panel: format pills, stage field, map grid ───────────────────
   document.querySelectorAll('#gfx-ser-format .gfx-pill').forEach((btn) => {
@@ -2061,6 +2433,11 @@ function renderDccHostsGrid() {
     el('gfx-std-league-wrap').style.display  = src === 'league' ? '' : 'none';
     el('gfx-std-sg-wrap').style.display      = src === 'startgg' ? '' : 'none';
     el('gfx-std-manual-wrap').style.display  = src === 'manual' ? '' : 'none';
+    // Side-column config that goes with each source (split out of the old single stacked column
+    // so the pop-out can show config + live rows side by side).
+    const leagueSel = el('gfx-std-league-select-wrap'); if (leagueSel) leagueSel.style.display = src === 'league' ? '' : 'none';
+    const sgSel = el('gfx-std-sg-select-wrap'); if (sgSel) sgSel.style.display = src === 'startgg' ? '' : 'none';
+    const manualActions = el('gfx-std-manual-actions-wrap'); if (manualActions) manualActions.style.display = src === 'manual' ? '' : 'none';
     document.querySelectorAll('#gfx-std-src .gfx-src-tab').forEach((b) => b.classList.toggle('is-on', b.dataset.stdsrc === src));
   }
   document.querySelectorAll('#gfx-std-src .gfx-src-tab').forEach((b) => b.addEventListener('click', () => gfxStdSrc(b.dataset.stdsrc)));
@@ -2300,12 +2677,34 @@ function renderDccHostsGrid() {
 
   // Source tab toggle
   el('gfx-sch-tab-auto')?.addEventListener('click', () => {
-    el('gfx-sch-tab-auto').classList.add('is-on'); el('gfx-sch-tab-manual').classList.remove('is-on');
-    el('gfx-sch-auto-wrap').style.display = ''; el('gfx-sch-manual-wrap').style.display = 'none';
+    el('gfx-sch-tab-auto').classList.add('is-on'); el('gfx-sch-tab-manual').classList.remove('is-on'); el('gfx-sch-tab-team')?.classList.remove('is-on');
+    el('gfx-sch-auto-wrap').style.display = ''; el('gfx-sch-manual-wrap').style.display = 'none'; if (el('gfx-sch-team-wrap')) el('gfx-sch-team-wrap').style.display = 'none';
   });
   el('gfx-sch-tab-manual')?.addEventListener('click', () => {
-    el('gfx-sch-tab-manual').classList.add('is-on'); el('gfx-sch-tab-auto').classList.remove('is-on');
-    el('gfx-sch-manual-wrap').style.display = ''; el('gfx-sch-auto-wrap').style.display = 'none';
+    el('gfx-sch-tab-manual').classList.add('is-on'); el('gfx-sch-tab-auto').classList.remove('is-on'); el('gfx-sch-tab-team')?.classList.remove('is-on');
+    el('gfx-sch-manual-wrap').style.display = ''; el('gfx-sch-auto-wrap').style.display = 'none'; if (el('gfx-sch-team-wrap')) el('gfx-sch-team-wrap').style.display = 'none';
+  });
+  el('gfx-sch-tab-team')?.addEventListener('click', () => {
+    el('gfx-sch-tab-team').classList.add('is-on'); el('gfx-sch-tab-auto').classList.remove('is-on'); el('gfx-sch-tab-manual').classList.remove('is-on');
+    el('gfx-sch-team-wrap').style.display = ''; el('gfx-sch-auto-wrap').style.display = 'none'; el('gfx-sch-manual-wrap').style.display = 'none';
+  });
+
+  // Team queue search
+  el('gfx-sch-team-load')?.addEventListener('click', () => {
+    const slug = (el('gfx-sch-team-slug')?.value || '').trim();
+    const name = (el('gfx-sch-team-name')?.value || '').trim();
+    const st = el('gfx-sch-team-status');
+    if (!name) { if (st) { st.textContent = 'Enter a team name.'; st.style.color = '#f56565'; } return; }
+    if (st) { st.textContent = 'Searching...'; st.style.color = 'var(--muted)'; }
+    send('startgg_fetch_team_queue', { teamName: name, tournamentSlug: slug });
+  });
+  el('gfx-sch-team-pull')?.addEventListener('click', () => {
+    const tq = (currentState && currentState.startgg && currentState.startgg.teamQueue) || [];
+    if (!tq.length) return;
+    tq.forEach((q) => _schMatches.push({ setId: q.setId || '', round: q.round || '', teamA: q.teamA || 'TBD', teamB: q.teamB || 'TBD', logoA: q.logoA || '', logoB: q.logoB || '', date: '', time: '', stream: !!q.live }));
+    schRenderList(); schAutoSave();
+    const st = el('gfx-sch-team-status');
+    if (st) { st.textContent = `Added ${tq.length} match(es) to schedule.`; st.style.color = '#9ae6b4'; }
   });
 
   // Add match from form
@@ -2417,6 +2816,29 @@ function renderDccHostsGrid() {
     });
   };
 
+  window._gfxRefreshWinnerPicker = function (state) {
+    const sel = el('select-winner-side'); if (!sel) return;
+    const teams  = (state && state.savedTeams) || [];
+    const blueNm = (state && state.teams && state.teams.blue && state.teams.blue.name)   || '';
+    const orgNm  = (state && state.teams && state.teams.orange && state.teams.orange.name) || '';
+    const prev   = sel.value;
+    sel.innerHTML = '';
+    // Blue / Orange quick options (label = actual team name when loaded)
+    const mkOpt = (val, lbl) => { const o = document.createElement('option'); o.value = val; o.textContent = lbl; return o; };
+    sel.appendChild(mkOpt('blue',   blueNm   || 'Blue team'));
+    sel.appendChild(mkOpt('orange', orgNm    || 'Orange team'));
+    if (teams.length) {
+      const sep = document.createElement('option'); sep.disabled = true; sep.textContent = '──────────'; sel.appendChild(sep);
+      teams.forEach((t, i) => sel.appendChild(mkOpt('__saved_' + i, t.name || '(unnamed)')));
+    }
+    sel.appendChild(mkOpt('__custom__', '— Custom name… —'));
+    // Restore previous selection if it still makes sense
+    if (prev && Array.from(sel.options).some((o) => o.value === prev)) sel.value = prev;
+    // Show/hide custom name row
+    const row = el('winner-custom-row');
+    if (row) row.style.display = (sel.value === '__custom__') ? '' : 'none';
+  };
+
   window._gfxRefreshStandingsLeagues = function (state) {
     const sel = el('gfx-std-league'); if (!sel) return;
     const prev = sel.value;
@@ -2433,6 +2855,7 @@ function renderDccHostsGrid() {
   };
 
   window._gfxRefreshScheduleQueue = gfxRenderScheduleQueue;
+  window._schSetMatches = function(matches) { _schMatches = matches.slice(); schRenderList(); schAutoSave(); };
 
   window.addEventListener('resize', fitScenePreviews);
 
@@ -2468,82 +2891,6 @@ function renderDccHostsGrid() {
         setTimeout(() => obs.disconnect(), 15000);
       }
     });
-
-    // Custom bracket popup.
-    const popup = el('gfx-bkt-popup');
-    function bktPopClose() { if (popup) popup.style.display = 'none'; }
-
-    el('gfx-bkt-build')?.addEventListener('click', () => {
-      if (!popup) return;
-      popup.style.display = 'flex';
-      bktPopRenderTeams();
-    });
-    el('gfx-bkt-pop-close')?.addEventListener('click', bktPopClose);
-    el('gfx-bkt-pop-cancel')?.addEventListener('click', bktPopClose);
-    popup?.addEventListener('click', (e) => { if (e.target === popup) bktPopClose(); });
-    el('bkt-pop-size')?.addEventListener('change', bktPopRenderTeams);
-
-    function bktPopRenderTeams() {
-      const n = parseInt(el('bkt-pop-size')?.value) || 8;
-      const wrap = el('bkt-pop-teams'); if (!wrap) return;
-      const existing = [...wrap.querySelectorAll('input')].map((i) => i.value);
-      wrap.innerHTML = '';
-      const grid = document.createElement('div');
-      grid.className = 'bkt-pop-team-grid';
-      for (let i = 0; i < n; i++) {
-        const row = document.createElement('div');
-        row.className = 'bkt-pop-team-row';
-        const num = document.createElement('span');
-        num.className = 'bkt-pop-team-num'; num.textContent = i + 1;
-        const inp = document.createElement('input');
-        inp.type = 'text'; inp.className = 'input-text bkt-pop-team-inp';
-        inp.placeholder = 'Team ' + (i + 1); inp.value = existing[i] || '';
-        row.appendChild(num); row.appendChild(inp);
-        grid.appendChild(row);
-      }
-      wrap.appendChild(grid);
-    }
-
-    el('gfx-bkt-pop-save')?.addEventListener('click', () => {
-      const title = (el('bkt-pop-title')?.value || 'Bracket').trim();
-      const type  = el('bkt-pop-type')?.value  || 'single';
-      const teams = [...(el('bkt-pop-teams')?.querySelectorAll('.bkt-pop-team-inp') || [])].map((i) => i.value.trim());
-      send('set_bracket_phases', buildBktPayload(title, type, teams));
-      const s = el('bkt-pop-status');
-      if (s) s.textContent = 'Saved. Use Push Live in the top bar to show the bracket.';
-      setTimeout(bktPopClose, 1800);
-    });
-
-    function buildBktPayload(title, type, teams) {
-      const TYPE_MAP = { single: 'SINGLE_ELIMINATION', double: 'DOUBLE_ELIMINATION', roundrobin: 'ROUND_ROBIN' };
-      const id = 'manual-gfx';
-      let phase;
-      if (type === 'roundrobin') {
-        const n = teams.length;
-        const schedule = [];
-        for (let r = 0; r < n - 1; r++) {
-          const sets = [];
-          for (let i = 0; i < Math.floor(n / 2); i++) {
-            sets.push({ a: { name: teams[i] || '', score: 0, winner: false }, b: { name: teams[n - 1 - i] || '', score: 0, winner: false } });
-          }
-          schedule.push({ name: 'Round ' + (r + 1), sets });
-        }
-        phase = { id, name: 'Phase 1', type: TYPE_MAP[type], winners: [], losers: [], finals: [], standings: [], schedule, roster: teams.map((t) => t || '') };
-      } else {
-        const rounds = [];
-        let slot = [...teams];
-        let rn = 1;
-        while (slot.length > 1) {
-          const sets = slot.reduce((acc, _, i) => (i % 2 === 0 ? [...acc, { a: { name: slot[i] || '', score: 0, winner: false }, b: { name: slot[i + 1] || '', score: 0, winner: false } }] : acc), []);
-          const label = slot.length === 2 ? 'Grand Final' : slot.length === 4 ? 'Semifinal' : 'Round ' + rn;
-          rounds.push({ name: label, sets });
-          slot = sets.map(() => '');
-          rn++;
-        }
-        phase = { id, name: 'Phase 1', type: TYPE_MAP[type], winners: rounds, losers: [], finals: [], standings: [], schedule: [], roster: [] };
-      }
-      return { phases: [phase], activePhaseId: id, title, teams: [] };
-    }
   })();
 
   const saved = (() => { try { return localStorage.getItem('gfx_active_grp'); } catch (_) { return null; } })();
@@ -3328,7 +3675,7 @@ function setBugMode(mode) {
   el('bug-severity-row').style.display  = isBug ? '' : 'none';
   el('bug-priority-row').style.display  = isBug ? 'none' : '';
   el('bug-image-row').style.display     = isBug ? '' : 'none';
-  el('bug-send').textContent            = isBug ? 'Send to Discord' : 'Submit request';
+  el('bug-send').textContent            = isBug ? 'Send report' : 'Submit request';
   const tabBug = el('bug-tab-bug'), tabFeat = el('bug-tab-feature');
   const accent = 'var(--cp-accent)';
   tabBug.style.cssText  = isBug  ? `background:${accent};color:#fff;border-color:${accent}` : '';
@@ -3347,6 +3694,9 @@ el('btn-bug-report')?.addEventListener('click', () => {
     setBugMode('bug');
     if (typeof setBugImage === 'function') setBugImage(null);
     const sb = el('bug-send'); if (sb) sb.disabled = false;
+    const ghRow = el('bug-github-link-row'); if (ghRow) ghRow.style.display = 'none';
+    const cp = el('bug-console-preview'); if (cp) cp.style.display = 'none';
+    const cpBtn = el('bug-console-preview-btn'); if (cpBtn) cpBtn.textContent = 'Preview';
     setTimeout(() => el('bug-title')?.focus(), 0);
   }
 });
@@ -3385,6 +3735,14 @@ el('bug-report-modal')?.addEventListener('paste', (e) => {
     if (it.type && it.type.startsWith('image/')) { const f = it.getAsFile(); if (f) { loadBugImageFile(f); e.preventDefault(); break; } }
   }
 });
+// Let the reporter see exactly what console output would be attached before sending it.
+el('bug-console-preview-btn')?.addEventListener('click', function () {
+  const ta = el('bug-console-preview'); if (!ta) return;
+  const show = ta.style.display === 'none';
+  if (show) ta.value = getConsoleBufferText() || '(no console output captured yet)';
+  ta.style.display = show ? '' : 'none';
+  this.textContent = show ? 'Hide' : 'Preview';
+});
 
 el('bug-send')?.addEventListener('click', async () => {
   const title = (el('bug-title')?.value || '').trim();
@@ -3409,14 +3767,23 @@ el('bug-send')?.addEventListener('click', async () => {
         priority: el('bug-priority')?.value || '',
         reporter: (el('bug-reporter')?.value || '').trim(),
         image: _bugMode === 'bug' ? (_bugImage || undefined) : undefined,
+        consoleLog: el('bug-include-console')?.checked ? (getConsoleBufferText() || undefined) : undefined,
         context: { game: gameName, page, app: 'NE Broadcast Suite' }
       })
     });
     const d = await r.json().catch(() => ({}));
     if (r.ok && d.ok) {
-      bugStatus('Sent — thanks!', true);
+      // Partial failure (e.g. Discord sent but GitHub rejected it, or vice versa) still counts as
+      // an overall success — surface the detail rather than hiding it behind a plain "Sent".
+      bugStatus(d.message ? `Sent (${d.message})` : 'Sent — thanks!', true);
       el('bug-title').value = ''; el('bug-desc').value = ''; setBugImage(null);
-      setTimeout(() => { el('bug-report-modal').style.display = 'none'; }, 1100);
+      const ghRow = el('bug-github-link-row'), ghLink = el('bug-github-link');
+      if (d.githubUrl && ghRow && ghLink) {
+        ghLink.href = d.githubUrl;
+        ghRow.style.display = '';
+      } else {
+        setTimeout(() => { el('bug-report-modal').style.display = 'none'; }, 1100);
+      }
     } else { bugStatus(d.message || 'Failed to send.', false); }
   } catch (e) {
     bugStatus(e.name === 'AbortError' ? 'Timed out reaching the server — is it running?' : ('Could not reach the server: ' + e.message), false);
@@ -3656,7 +4023,7 @@ function bbOpenTriggerConfig(stateKey, btn) {
     }
     body.appendChild(row);
   });
-  el('bb-trigger-go').textContent = live ? 'Update' : 'Go Live';
+  el('bb-trigger-go').textContent = live ? 'Update' : 'Push Live';
   el('bb-trigger-hide').style.display = live ? '' : 'none';
   pop.dataset.state = stateKey;
   pop.style.display = 'block';
@@ -3675,6 +4042,10 @@ el('bb-trigger-go')?.addEventListener('click', () => {
     else { const tgt = el(inp.dataset.target); if (tgt) tgt.value = inp.value; }
   });
   send(g.msg, g.show());
+  if (el('gfx-autocut-on')?.checked) {
+    const sc = (el('gfx-autocut-scene')?.value || '').trim();
+    if (sc) send('obs_switch_scene', { sceneName: sc });
+  }
   el('bb-trigger-pop').style.display = 'none';
 });
 el('bb-trigger-hide')?.addEventListener('click', () => {
@@ -4051,7 +4422,7 @@ function applyState(data) {
   // UI always sees a complete state. Mutating `data` in place also feeds the render functions
   // that run after applyState() in the message handler.
   if (data && currentState) {
-    for (const k of ['savedTeams', 'playerProfiles', 'brandKits', 'draftRosters', 'brand', 'banner', 'mainBanner', 'playouts', 'bracket', 'replay', 'crew']) {
+    for (const k of ['savedTeams', 'playerProfiles', 'brandKits', 'brandKitsVer', 'draftRosters', 'brand', 'banner', 'mainBanner', 'playouts', 'bracket', 'replay', 'crew']) {
       if (data[k] === undefined && currentState[k] !== undefined) data[k] = currentState[k];
     }
   }
@@ -4074,6 +4445,9 @@ function applyState(data) {
   if (typeof renderAiPage === 'function') _ap('renderAiPage', () => renderAiPage(data));
   // Talent/VDO surfaces read a cached /api/vdo/links — re-pull it when teams/sides/casters change.
   if (typeof cfMaybeRefreshTalent === 'function') _ap('cfMaybeRefreshTalent', () => cfMaybeRefreshTalent(data));
+  // Social preset — hydrate controls when brand changes (bgImage / presentedBy), or the state-level
+  // fallback used when no brand kit is active.
+  if (((data.brand && data.brand.socialPreset) || data.socialPreset) && typeof window._socHydratePreset === 'function') _ap('socHydratePreset', () => window._socHydratePreset());
   // Crew page — re-render when crew list changes
   if (data.crew && typeof renderCrewList === 'function' && el('talent-panel-crew') && el('talent-panel-crew').style.display !== 'none') _ap('renderCrewList', () => renderCrewList());
   // Sync slot label inputs whenever casters state arrives
@@ -4108,8 +4482,6 @@ function applyState(data) {
   }
   // Keep the open Customize panel current as OBS scenes / overlay live-states change.
   if (_bbCzOpen && typeof bbRenderCustomizeList === 'function') _ap('bbRenderCustomizeList', () => bbRenderCustomizeList());
-  // Replays → playout playlists (skip while the producer is editing one)
-  if (typeof renderPlayouts === 'function' && !_playoutDraft) _ap('renderPlayouts', () => renderPlayouts(data));
   if (typeof renderAdSched === 'function') _ap('renderAdSched', () => renderAdSched(data));
   if (typeof renderRdAddTarget === 'function') _ap('renderRdAddTarget', () => renderRdAddTarget());
   if (typeof renderRundown === 'function') _ap('renderRundown', () => renderRundown());
@@ -4118,7 +4490,15 @@ function applyState(data) {
   if (typeof renderProdShow === 'function') _ap('renderProdShow', () => renderProdShow());
   if (typeof renderQrailLive === 'function') _ap('renderQrailLive', () => renderQrailLive());
   if (typeof evLiveRefreshOpen === 'function') _ap('evLiveRefreshOpen', () => evLiveRefreshOpen());
-  if (typeof renderSpotlight === 'function') _ap('renderSpotlight', () => { const sp = el('ev-spotlight-panel'); if (sp && sp.offsetParent !== null) renderSpotlight(); });
+  if (typeof renderSpotlight === 'function') _ap('renderSpotlight', () => {
+    const sp = el('ev-spotlight-panel'), front = el('gfx-front-spotlight');
+    if ((sp && sp.offsetParent !== null) || (front && front.offsetParent !== null)) renderSpotlight();
+  });
+  // Keep the Quick Map Pool front panel current if maps get picked elsewhere (e.g. the Guided
+  // Veto tab in the same scene's Settings pop-out) while the front panel itself stays visible.
+  if (typeof window._gfxSyncVetoFront === 'function') _ap('mpSyncFromState-front', () => {
+    const front = el('gfx-front-veto'); if (front && front.offsetParent !== null) window._gfxSyncVetoFront(data);
+  });
 
   // Overtime ad slot
   const ot = data.overtime || {};
@@ -4171,7 +4551,10 @@ function applyState(data) {
   if (typeof syncTeamsAlign === 'function') syncTeamsAlign();
   renderSeriesPanel(data.match, teams);
   if (typeof window._gfxRefreshSeriesControls === 'function') window._gfxRefreshSeriesControls(data);
+  if (typeof window._gfxRefreshVetoSeriesLink === 'function') window._gfxRefreshVetoSeriesLink(data);
+  if (typeof window._gfxRefreshPopoutSummary === 'function') window._gfxRefreshPopoutSummary();
   if (typeof window._gfxRefreshMatchupPickers === 'function') window._gfxRefreshMatchupPickers(data);
+  if (typeof window._gfxRefreshWinnerPicker   === 'function') window._gfxRefreshWinnerPicker(data);
   if (typeof window._gfxRefreshStandingsLeagues === 'function') window._gfxRefreshStandingsLeagues(data);
   if (typeof window._gfxRefreshScheduleQueue === 'function') window._gfxRefreshScheduleQueue(data);
   updateFacecamTeamHeaders(teams, data);
@@ -4205,6 +4588,8 @@ function applyState(data) {
 
   // Multi-game side labels (Blue/Orange → CT/T, A/B, …) + team-colour headers
   relabelTeamSides(data);
+  // Re-apply actual team names after relabelTeamSides so the trigger sidebar shows real names.
+  if (typeof syncTeamSideSelects === 'function') syncTeamSideSelects(teams);
 
   // Colour mode (Team / Brand / Game) — reflect the active segment + lock the pickers.
   // The server computes the effective side colours; the client just mirrors the mode.
@@ -4217,8 +4602,10 @@ function applyState(data) {
   populateSavedTeamsDropdowns();
   renderTeamsList(data.savedTeams || []);
 
-  // start.gg event teams (transient)
+  // start.gg event teams (transient — inside Import modal)
   renderStartggTeams(data.startgg?.eventTeams || [], data.startgg?.selectedEvent || null);
+  // Event teams panel — all platforms, visible on Teams page
+  renderEventTeamsPanel(data);
 
   // Unified active event card
   const ae = data.activeEvent;
@@ -4383,6 +4770,7 @@ function applyState(data) {
   renderPresets(data.presets);
   renderCustomOverlayManager(data);
   renderBrands(data);
+  renderDashBrandKit(data);
   renderCasterDeskSponsors(data);
   renderAdSponsorPickers(data);
   applyCsgoState(data);
@@ -4391,6 +4779,9 @@ function applyState(data) {
 
   // OBS settings
   applyObsState(data);
+
+  // Background overlay
+  if (typeof window._bgApplyState === 'function') window._bgApplyState(data);
 
   // Version
   if (data.version) {
@@ -4600,6 +4991,8 @@ function populateSavedTeamsDropdowns() {
   }
   updateTeamSavedBadge('blue');
   updateTeamSavedBadge('orange');
+  // Keep the Stream Queue team picker in sync (no-op unless the team list actually changed).
+  if (typeof refreshSggTeamPicker === 'function') refreshSggTeamPicker();
 }
 
 // Common player roles per game (dropdown options). Games without a fixed role set fall back
@@ -4762,7 +5155,6 @@ function renderMatchPlayers(side, players) {
   players = Array.isArray(players) ? players : [];
   const cams = currentState.facecams || currentState.savedFacecams || [];
   const camKey = cams.map(c => c.name).join(',');
-  // Does the active game use heroes/agents/operators? Show a Hero field if so.
   const gameId = currentState.activeGame;
   const gameCfg = (currentState.games && currentState.games[gameId]) || null;
   const heroFeatures = ['heroes', 'agents', 'operators', 'legends', 'draft'];
@@ -4770,105 +5162,302 @@ function renderMatchPlayers(side, players) {
   const _profiles = currentState.playerProfiles || {};
   const sig = JSON.stringify(players.map(p => {
     const r = _profiles[(p.name || '').trim().toLowerCase()] || {};
-    return [p.id, p.name, p.assignedCamera || '', p.hero || '', p.role || '', p.country || '', p.info || '', p.startgg || '', p.sixmans || '', r.startggSlug || '', (r.sixmans && r.sixmans.name) || ''];
+    return [p.id, p.name, p.realName || '', p.assignedCamera || '', p.hero || '', p.role || '', p.country || '', p.info || '', p.startgg || '', p.sixmans || '', r.startggSlug || '', (r.sixmans && r.sixmans.name) || '', p.status || '', p.photo ? '1' : '0', r.image ? '1' : '0', p.twitter || '', p.twitch || '', p.discord || '', p.instagram || '', p.tiktok || '', p.youtube || '', r.twitter || '', r.twitch || ''];
   })) + '|' + camKey + '|' + usesHeroes + '|' + currentState.activeGame;
   if (wrap.dataset.sig === sig) return;
-  if (wrap.contains(document.activeElement)) return;   // don't clobber a field being edited
+  if (wrap.classList.contains('tp-removing')) return;
+  if (wrap.contains(document.activeElement)) return;
+  if (wrap.querySelector('.tp-player-card.tp-editing')) return;
   wrap.dataset.sig = sig;
   wrap.innerHTML = '';
   if (!players.length) {
     wrap.innerHTML = '<div class="tp-empty">No players yet — pick a team or add one.</div>';
     return;
   }
+
   players.forEach((p) => {
-    const card = document.createElement('div');
-    card.className = 'tp-player-card';
+    const r = _profiles[(p.name || '').trim().toLowerCase()] || {};
+    const avatarSrc = p.photo || r.image || '';
 
-    // Row 1: player name (full width) + delete
-    const mainRow = document.createElement('div');
-    mainRow.className = 'tp-row';
+    const card = document.createElement('div'); card.className = 'tp-player-card';
+    const avatarFile = document.createElement('input');
+    avatarFile.type = 'file'; avatarFile.accept = 'image/*'; avatarFile.style.display = 'none';
+    card.appendChild(avatarFile);
 
-    const inp = document.createElement('input');
-    inp.className = 'input-text tp-name';
-    inp.value = p.name || '';
-    inp.placeholder = 'Player name';
-    inp.addEventListener('change', () => {
-      if (p.id) send('edit_player', { side, playerId: p.id, playerData: { name: inp.value.trim() } });
+    // ── COMPACT BAR ──────────────────────────────────────────────────────
+    const bar = document.createElement('div'); bar.className = 'tp-row';
+
+    const barAvatar = document.createElement('img'); barAvatar.className = 'tp-player-avatar'; barAvatar.title = p.name || 'Player';
+    if (avatarSrc) barAvatar.src = avatarSrc;
+    bar.appendChild(barAvatar);
+
+    const nameInp = document.createElement('input'); nameInp.className = 'input-text tp-name'; nameInp.value = p.name || ''; nameInp.placeholder = 'Player name';
+    nameInp.addEventListener('change', () => { if (p.id) send('edit_player', { side, playerId: p.id, playerData: { name: nameInp.value.trim() } }); });
+    nameInp.addEventListener('keydown', (e) => { if (e.key === 'Enter') nameInp.blur(); });
+    bar.appendChild(nameInp);
+
+    const statusBtn = document.createElement('button');
+    statusBtn.className = `btn tp-status ${p.status === 'sub' ? 'sub' : 'starter'}`;
+    statusBtn.textContent = p.status === 'sub' ? 'Sub' : 'Starter'; statusBtn.title = 'Toggle Starter / Sub';
+    statusBtn.addEventListener('click', () => {
+      const next = p.status === 'sub' ? 'starter' : 'sub';
+      p.status = next;
+      statusBtn.textContent = next === 'sub' ? 'Sub' : 'Starter'; statusBtn.className = `btn tp-status ${next}`;
+      if (p.id) send('edit_player', { side, playerId: p.id, playerData: { status: next } });
     });
-    inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') inp.blur(); });
+    bar.appendChild(statusBtn);
 
-    const del = document.createElement('button');
-    del.className = 'tp-del'; del.textContent = '×'; del.title = 'Remove player';
-    del.addEventListener('click', () => { if (p.id) send('delete_player', { side, playerId: p.id }); });
-
-    mainRow.appendChild(inp);
-    const chipsHtml = playerProfileChips(p);
-    if (chipsHtml) {
-      const tmp = document.createElement('span');
-      tmp.innerHTML = chipsHtml;
-      mainRow.appendChild(tmp.firstChild);
+    // Social icons — player fields + registry fallbacks
+    const socWrap = document.createElement('div'); socWrap.className = 'tp-bar-socials';
+    const sggVal = p.startgg || r.startggSlug || '';
+    const sixVal = p.sixmans || (r.sixmans && r.sixmans.name) || '';
+    if (sggVal) {
+      const a = document.createElement('a'); a.className = 'tp-bar-soc-icon'; a.href = teStartggLink(sggVal); a.target = '_blank'; a.rel = 'noopener'; a.title = `start.gg: ${sggVal}`;
+      a.innerHTML = `<img src="../assets/images/start.png" style="height:13px;filter:brightness(0)invert(1);opacity:.75;display:block">`;
+      socWrap.appendChild(a);
     }
-    mainRow.appendChild(del);
-    card.appendChild(mainRow);
-
-    // Row 2: camera assignment + optional VDO feed copy
-    const detailRow = document.createElement('div');
-    detailRow.className = 'tp-detail-row';
-
-    const cam = document.createElement('select');
-    cam.className = 'input-select tp-cam';
-    cam.title = 'Assign a camera to this player';
-    cam.innerHTML = '<option value="">No camera</option>'
-      + cams.map(c => `<option value="${c.name}">${c.nickname || c.name}</option>`).join('');
-    cam.value = p.assignedCamera || '';
-    cam.addEventListener('change', () => {
-      if (p.id) send('edit_player', { side, playerId: p.id, playerData: { assignedCamera: cam.value || null } });
+    if (sixVal) {
+      const a = document.createElement('a'); a.className = 'tp-bar-soc-icon'; a.href = teSixmansLink(sixVal); a.target = '_blank'; a.rel = 'noopener'; a.title = `6mans: ${sixVal}`;
+      a.innerHTML = `<img src="../assets/images/sixmanlogo.webp" style="height:13px;filter:brightness(0)invert(1);opacity:.75;display:block">`;
+      socWrap.appendChild(a);
+    }
+    const socVals = { twitter: p.twitter || r.twitter || '', twitch: p.twitch || r.twitch || '', discord: p.discord || '', instagram: p.instagram || '', tiktok: p.tiktok || '', youtube: p.youtube || '' };
+    TE_SOCIALS.forEach(soc => {
+      const val = socVals[soc.key]; if (!val) return;
+      const url = soc.urlFn ? soc.urlFn(val) : null;
+      const icon = url ? document.createElement('a') : document.createElement('span');
+      icon.className = 'tp-bar-soc-icon'; icon.style.color = soc.color; icon.title = `${soc.label}: ${val}`;
+      if (url) { icon.href = url; icon.target = '_blank'; icon.rel = 'noopener'; }
+      icon.innerHTML = teSocIconHtml(soc, 13);
+      socWrap.appendChild(icon);
     });
-    detailRow.appendChild(cam);
+    bar.appendChild(socWrap);
+
+    const cbx = document.createElement('input'); cbx.type = 'checkbox'; cbx.className = 'tp-remove-check'; cbx.dataset.playerId = p.id || '';
+    cbx.addEventListener('change', () => card.classList.toggle('tp-selected', cbx.checked));
+    bar.prepend(cbx);
+
+    const editBtn = document.createElement('button'); editBtn.className = 'btn btn-ghost btn-sm tp-edit-btn-sm'; editBtn.textContent = 'Edit';
+    const del = document.createElement('button'); del.className = 'tp-del'; del.textContent = '×'; del.title = 'Remove player';
+    del.addEventListener('click', () => {
+      if (!p.id) return;
+      appConfirm(`Remove ${p.name || 'this player'} from the roster? This can't be undone.`, 'Remove', true).then((ok) => {
+        if (!ok) return;
+        send('delete_player', { side, playerId: p.id }); card.remove(); wrap.dataset.sig = '';
+      });
+    });
+    bar.append(editBtn, del);
+    card.appendChild(bar);
+
+    // ── EDIT POPUP ────────────────────────────────────────────────────────
+    const popup = document.createElement('div'); popup.className = 'te-edit-popup';
+    const hdr = document.createElement('div'); hdr.className = 'te-popup-header';
+    const hdrTitle = document.createElement('span'); hdrTitle.className = 'te-popup-title'; hdrTitle.textContent = 'Edit Player';
+    const hdrClose = document.createElement('button'); hdrClose.className = 'te-popup-close'; hdrClose.title = 'Close'; hdrClose.textContent = '×';
+    hdr.append(hdrTitle, hdrClose); popup.appendChild(hdr);
+
+    const body = document.createElement('div'); body.className = 'te-popup-body';
+
+    // Left col: big avatar + status toggle
+    const leftCol = document.createElement('div'); leftCol.className = 'te-popup-left';
+    const popAvatar = document.createElement('img'); popAvatar.className = 'tp-player-avatar'; popAvatar.title = 'Click to change photo';
+    if (avatarSrc) popAvatar.src = avatarSrc;
+    popAvatar.addEventListener('click', () => avatarFile.click());
+    const popStatus = document.createElement('button');
+    popStatus.className = `btn tp-status ${p.status === 'sub' ? 'sub' : 'starter'}`;
+    popStatus.style.cssText = 'width:100%;margin-top:6px;font-size:10px;';
+    popStatus.textContent = p.status === 'sub' ? 'Sub' : 'Starter';
+    popStatus.addEventListener('click', () => {
+      const next = p.status === 'sub' ? 'starter' : 'sub';
+      p.status = next;
+      popStatus.textContent = next === 'sub' ? 'Sub' : 'Starter'; popStatus.className = `btn tp-status ${next}`; popStatus.style.cssText = 'width:100%;margin-top:6px;font-size:10px;';
+      statusBtn.textContent = next === 'sub' ? 'Sub' : 'Starter'; statusBtn.className = `btn tp-status ${next}`;
+      if (p.id) send('edit_player', { side, playerId: p.id, playerData: { status: next } });
+    });
+    leftCol.append(popAvatar, popStatus); body.appendChild(leftCol);
+
+    // Right col: fields
+    const rightCol = document.createElement('div'); rightCol.className = 'te-popup-right';
+    const mkField = (label, ctrl) => {
+      const row = document.createElement('div'); row.className = 'te-popup-field';
+      const lbl = document.createElement('span'); lbl.className = 'te-popup-label'; lbl.textContent = label;
+      row.append(lbl, ctrl); return row;
+    };
+
+    const cam = document.createElement('select'); cam.className = 'input-select';
+    cam.innerHTML = '<option value="">No camera</option>' + cams.map(c => `<option value="${c.name}">${c.nickname || c.name}</option>`).join('');
+    cam.value = p.assignedCamera || '';
+    cam.addEventListener('change', () => { if (p.id) send('edit_player', { side, playerId: p.id, playerData: { assignedCamera: cam.value || null } }); });
+    rightCol.appendChild(mkField('Camera', cam));
 
     if (_vdoLinks) {
       const vt = _vdoLinks.teams && _vdoLinks.teams[side];
-      const vp = vt && (vt.players || []).find(vp => vp.name === p.name);
+      const vp = vt && (vt.players || []).find(vpl => vpl.name === p.name);
       if (vp && vp.obsUrl) {
-        const feedBtn = document.createElement('button');
-        feedBtn.className = 'btn btn-ghost btn-sm tp-vdo-copy';
-        feedBtn.title = 'Copy VDO camera feed (OBS browser source for this player)';
-        feedBtn.textContent = '⊞ Feed';
+        const feedBtn = document.createElement('button'); feedBtn.className = 'btn btn-ghost btn-sm'; feedBtn.textContent = 'Copy Feed URL'; feedBtn.style.marginLeft = '60px';
         feedBtn.addEventListener('click', () => tlCopy(vp.obsUrl, feedBtn));
-        detailRow.appendChild(feedBtn);
+        rightCol.appendChild(feedBtn);
       }
     }
-    card.appendChild(detailRow);
 
-    // Row 3: hero/agent (if the game uses them), role, country, IGN/info
-    const meta = document.createElement('div');
-    meta.className = 'tp-meta-row';
     if (usesHeroes) {
-      const hero = buildHeroControl(p.hero || '', (val) => {
-        if (p.id) send('edit_player', { side, playerId: p.id, playerData: { hero: val } });
-      });
-      meta.appendChild(hero);
+      const hero = buildHeroControl(p.hero || '', (val) => { if (p.id) send('edit_player', { side, playerId: p.id, playerData: { hero: val } }); });
+      rightCol.appendChild(mkField('Hero', hero));
     }
-    const role = buildRoleControl(p.role || '', rolesForActiveGame(), (val) => {
-      if (p.id) send('edit_player', { side, playerId: p.id, playerData: { role: val } });
+
+    const roleCtrl = buildRoleControl(p.role || '', rolesForActiveGame(), (val) => { if (p.id) send('edit_player', { side, playerId: p.id, playerData: { role: val } }); });
+    const countryCtrl = buildCountryControl(p.country || '', (code) => { if (p.id) send('edit_player', { side, playerId: p.id, playerData: { country: code } }); });
+    const infoInp = document.createElement('input'); infoInp.className = 'input-text'; infoInp.value = p.info || ''; infoInp.placeholder = 'IGN / info';
+    infoInp.addEventListener('change', () => { if (p.id) send('edit_player', { side, playerId: p.id, playerData: { info: infoInp.value.trim() } }); });
+    infoInp.addEventListener('keydown', (e) => { if (e.key === 'Enter') infoInp.blur(); });
+    rightCol.append(mkField('Role', roleCtrl), mkField('Country', countryCtrl), mkField('IGN', infoInp));
+
+    // Socials
+    const sHead = document.createElement('div'); sHead.className = 'te-popup-section-head'; sHead.textContent = 'Socials';
+    rightCol.appendChild(sHead);
+    const socGrid = document.createElement('div'); socGrid.className = 'te-popup-links-grid';
+
+    // start.gg row
+    const sggRow2 = document.createElement('div'); sggRow2.className = 'te-popup-link-row';
+    const sggIco = document.createElement('span'); sggIco.className = 'te-popup-link-icon'; sggIco.innerHTML = `<img src="../assets/images/start.png" style="height:14px;filter:brightness(0)invert(1);opacity:.7">`;
+    const sggInp = document.createElement('input'); sggInp.className = 'input-text'; sggInp.placeholder = 'start.gg slug or link'; sggInp.value = p.startgg || r.startggSlug || '';
+    sggInp.addEventListener('change', () => { if (p.id) send('edit_player', { side, playerId: p.id, playerData: { startgg: sggInp.value.trim() } }); });
+    const sggA = document.createElement('a'); sggA.className = `te-plink-open${sggInp.value ? '' : ' is-off'}`; sggA.target = '_blank'; sggA.textContent = '↗'; sggA.href = teStartggLink(sggInp.value);
+    sggInp.addEventListener('input', () => { sggA.href = teStartggLink(sggInp.value); sggA.classList.toggle('is-off', !sggInp.value); });
+    sggRow2.append(sggIco, sggInp, sggA); socGrid.appendChild(sggRow2);
+
+    TE_SOCIALS.forEach(soc => {
+      const socRow = document.createElement('div'); socRow.className = 'te-popup-link-row';
+      const ico = document.createElement('span'); ico.className = 'te-popup-link-icon';
+      ico.innerHTML = teSocIconHtml(soc, 14).replace('<svg', `<svg style="color:${soc.color}"`);
+      const inp2 = document.createElement('input'); inp2.className = 'input-text'; inp2.placeholder = soc.ph;
+      inp2.value = p[soc.key] || (soc.key === 'twitter' ? r.twitter : soc.key === 'twitch' ? r.twitch : '') || '';
+      inp2.addEventListener('change', () => { if (p.id) send('edit_player', { side, playerId: p.id, playerData: { [soc.key]: inp2.value.trim() } }); });
+      socRow.append(ico, inp2); socGrid.appendChild(socRow);
     });
-    const country = buildCountryControl(p.country || '', (code) => {
-      if (p.id) send('edit_player', { side, playerId: p.id, playerData: { country: code } });
+
+    rightCol.appendChild(socGrid); body.appendChild(rightCol); popup.appendChild(body); card.appendChild(popup);
+
+    avatarFile.addEventListener('change', async () => {
+      const f = avatarFile.files[0]; if (!f) return;
+      const b64 = await fileToBase64(f);
+      barAvatar.src = b64; popAvatar.src = b64; avatarFile.value = '';
+      if (p.id) send('edit_player', { side, playerId: p.id, playerData: { photo: b64 } });
     });
-    const info = document.createElement('input');
-    info.className = 'input-text tp-info';
-    info.value = p.info || ''; info.placeholder = 'IGN / info';
-    info.addEventListener('change', () => { if (p.id) send('edit_player', { side, playerId: p.id, playerData: { info: info.value.trim() } }); });
-    info.addEventListener('keydown', (e) => { if (e.key === 'Enter') info.blur(); });
-    meta.appendChild(role); meta.appendChild(country); meta.appendChild(info);
-    card.appendChild(meta);
+
+    const openPopup = () => {
+      // Close any other open match-panel popups
+      wrap.querySelectorAll('.tp-player-card.tp-editing').forEach(c => {
+        if (c !== card) {
+          c.classList.remove('tp-editing');
+          const eb = c.querySelector('.tp-edit-btn-sm'); if (eb) eb.textContent = 'Edit';
+          const op = c.querySelector('.te-edit-popup'); if (op) op.removeAttribute('style');
+        }
+      });
+      // Position as fixed overlay so it escapes any overflow:auto scroll container
+      const rect = card.getBoundingClientRect();
+      const popW = Math.max(rect.width, 440);
+      const leftPx = Math.min(rect.left, window.innerWidth - popW - 8);
+      const topPx = rect.bottom + 4;
+      popup.style.cssText = `display:block;position:fixed;top:${topPx}px;left:${leftPx}px;width:${popW}px;z-index:9999;`;
+      card.classList.add('tp-editing'); editBtn.textContent = 'Done';
+    };
+    const closePopup = () => {
+      card.classList.remove('tp-editing');
+      popup.removeAttribute('style');
+      editBtn.textContent = 'Edit';
+    };
+    editBtn.addEventListener('click', () => card.classList.contains('tp-editing') ? closePopup() : openPopup());
+    hdrClose.addEventListener('click', closePopup);
+
+    const popFooter = document.createElement('div'); popFooter.className = 'te-popup-footer';
+    const savePopBtn = document.createElement('button'); savePopBtn.className = 'btn te-popup-save'; savePopBtn.textContent = 'Save';
+    savePopBtn.addEventListener('click', closePopup);
+    popFooter.appendChild(savePopBtn); popup.appendChild(popFooter);
 
     wrap.appendChild(card);
   });
+
+  if (!wrap._tpOutsideHandler) {
+    const closeAll = () => {
+      wrap.querySelectorAll('.tp-player-card.tp-editing').forEach(c => {
+        c.classList.remove('tp-editing');
+        const eb = c.querySelector('.tp-edit-btn-sm'); if (eb) eb.textContent = 'Edit';
+        const op = c.querySelector('.te-edit-popup'); if (op) op.removeAttribute('style');
+      });
+    };
+    wrap._tpOutsideHandler = (e) => {
+      wrap.querySelectorAll('.tp-player-card.tp-editing').forEach(c => {
+        if (!c.contains(e.target)) closeAll();
+      });
+    };
+    document.addEventListener('click', wrap._tpOutsideHandler);
+    // Close popup when the panel scrolls (fixed popup would drift from the card)
+    wrap.closest('.tab-content, [data-scroll]')?.addEventListener('scroll', closeAll, { passive: true });
+  }
 }
 ['blue', 'orange'].forEach((side) => {
   el(`btn-add-player-${side}`)?.addEventListener('click', () => {
     send('add_player', { side, player: { name: '' } });
+  });
+
+  const rmBtn  = el(`btn-rm-player-${side}`);
+  const addBtn = el(`btn-add-player-${side}`);
+  if (!rmBtn) return;
+
+  let _rmConfirmBtn      = null;
+  let _rmChangeHandler   = null;
+
+  const exitRemove = () => {
+    const wrap = el(`team-players-${side}`);
+    if (wrap) {
+      wrap.classList.remove('tp-removing');
+      if (_rmChangeHandler) { wrap.removeEventListener('change', _rmChangeHandler); _rmChangeHandler = null; }
+      wrap.querySelectorAll('.tp-remove-check').forEach(c => { c.checked = false; });
+      wrap.querySelectorAll('.tp-player-card.tp-selected').forEach(c => c.classList.remove('tp-selected'));
+    }
+    rmBtn.textContent = '- Remove';
+    rmBtn.classList.remove('is-active');
+    if (addBtn) addBtn.style.display = '';
+    _rmConfirmBtn?.remove(); _rmConfirmBtn = null;
+  };
+
+  const enterRemove = () => {
+    const wrap = el(`team-players-${side}`);
+    if (!wrap) return;
+    wrap.classList.add('tp-removing');
+    rmBtn.textContent = 'Cancel';
+    rmBtn.classList.add('is-active');
+    if (addBtn) addBtn.style.display = 'none';
+
+    _rmConfirmBtn = document.createElement('button');
+    _rmConfirmBtn.className = 'tp-rm-confirm';
+    _rmConfirmBtn.textContent = 'Delete (0)';
+    _rmConfirmBtn.style.display = 'none';
+    rmBtn.insertAdjacentElement('beforebegin', _rmConfirmBtn);
+
+    _rmChangeHandler = () => {
+      const n = wrap.querySelectorAll('.tp-remove-check:checked').length;
+      _rmConfirmBtn.textContent = `Delete (${n})`;
+      _rmConfirmBtn.style.display = n > 0 ? '' : 'none';
+    };
+    wrap.addEventListener('change', _rmChangeHandler);
+
+    _rmConfirmBtn.addEventListener('click', () => {
+      const checked = [...wrap.querySelectorAll('.tp-remove-check:checked')];
+      const ids = checked.map(cb => cb.dataset.playerId).filter(Boolean);
+      ids.forEach(pId => send('delete_player', { side, playerId: pId }));
+      checked.forEach(cb => cb.closest('.tp-player-card')?.remove());
+      wrap.dataset.sig = '';
+      exitRemove();
+    });
+  };
+
+  rmBtn.addEventListener('click', () => {
+    const wrap = el(`team-players-${side}`);
+    if (!wrap) return;
+    if (wrap.classList.contains('tp-removing')) exitRemove();
+    else enterRemove();
   });
 });
 
@@ -5725,13 +6314,13 @@ function renderTeamsList(teams) {
   const list = el('teams-list');
   if (!list) return;
 
-  const countEl = el('teams-count');
+  const countEl = el('teams-tab-count');
   if (countEl) countEl.textContent = teams.length ? '(' + teams.length + ')' : '';
 
   // Only rebuild the DOM when the data actually changes — this list can hold hundreds of
   // start.gg-imported teams, and rebuilding it on every full_state was the freeze. Use a CHEAP
   // Include favorite in the signature so cards re-render when fav status changes.
-  const sig = teams.map((t) => (t.name || '') + '|' + (t.logo ? t.logo.length : 0) + '|' + (t.favorite ? '1' : '0')).join('~');
+  const sig = teams.map((t) => (t.name || '') + '|' + (t.logo ? t.logo.length : 0) + '|' + (t.favorite ? '1' : '0') + '|' + (t.color || '') + '|' + (t.players || []).length).join('~');
   if (sig === _teamsListSig) return;
   _teamsListSig = sig;
 
@@ -5791,6 +6380,41 @@ function applyTeamsFilter() {
 el('teams-search')?.addEventListener('input', applyTeamsFilter);
 
 let _sggTeamsSig = '';
+let _sggTeamsFilter = '';
+// Filter the Event Teams list by name (show/hide existing rows, so it survives the sig-gated rebuild).
+function applySggTeamsFilter() {
+  const list = el('startgg-teams-list');
+  if (!list) return;
+  const q = _sggTeamsFilter.trim().toLowerCase();
+  const items = list.querySelectorAll('.team-list-item');
+  let shown = 0;
+  items.forEach((it) => {
+    const match = !q || (it.dataset.name || '').toLowerCase().includes(q);
+    it.style.display = match ? '' : 'none';
+    if (match) shown++;
+  });
+  const empty   = el('sgg-teams-empty');
+  const nomatch = el('sgg-teams-nomatch');
+  const total   = items.length;
+  if (empty)   empty.style.display   = total === 0 ? '' : 'none';
+  if (nomatch) nomatch.style.display = (total > 0 && shown === 0) ? '' : 'none';
+  const countEl = el('sgg-teams-count');
+  if (countEl && total) countEl.textContent = (q && shown !== total) ? `(${shown}/${total})` : `(${total})`;
+  const clearBtn = el('sgg-teams-search-clear');
+  if (clearBtn) clearBtn.style.display = q ? '' : 'none';
+}
+(function wireSggTeamsSearch() {
+  const input = el('sgg-teams-search');
+  const clear = el('sgg-teams-search-clear');
+  if (input && !input._wired) {
+    input._wired = true;
+    input.addEventListener('input', () => { _sggTeamsFilter = input.value || ''; applySggTeamsFilter(); });
+  }
+  if (clear && !clear._wired) {
+    clear._wired = true;
+    clear.addEventListener('click', () => { _sggTeamsFilter = ''; if (input) input.value = ''; applySggTeamsFilter(); if (input) input.focus(); });
+  }
+})();
 function renderStartggTeams(teams = [], selectedEvent = null) {
   const list = el('startgg-teams-list');
   const empty = el('sgg-teams-empty');
@@ -5898,7 +6522,135 @@ function renderStartggTeams(teams = [], selectedEvent = null) {
     item.appendChild(actions);
     list.appendChild(item);
   });
+
+  // Re-apply the active search filter to the freshly-built rows (and refresh the count/empty states).
+  applySggTeamsFilter();
 }
+
+let _eventTeamsSig = '';
+function renderEventTeamsPanel(data) {
+  const list = el('event-teams-list');
+  if (!list) return;
+
+  const sggTeams  = (data.startgg?.eventTeams  || []).map(t => ({ ...t, _plat: 'start.gg' }));
+  const challTeams = (data.challonge?.eventTeams || []).map(t => ({ ...t, _plat: 'challonge' }));
+  const nxgenTeams = (data.nxgen?.eventTeams    || []).map(t => ({ ...t, _plat: 'nxgen' }));
+  const all = [...sggTeams, ...challTeams, ...nxgenTeams];
+
+  const evName = data.startgg?.selectedEvent?.name || data.startgg?.selectedEvent?.tournamentName || '';
+  const sig = evName + '::' + all.map(t => t.name + '|' + (t.logo ? t.logo.length : 0) + '|' + t._plat).join('~');
+  if (sig === _eventTeamsSig) return;
+  _eventTeamsSig = sig;
+
+  const tabCount = el('event-tab-count');
+  if (tabCount) tabCount.textContent = all.length ? '(' + all.length + ')' : '';
+  const srcEl = el('event-teams-source');
+  if (srcEl) srcEl.textContent = evName ? 'From: ' + evName : '';
+
+  list.querySelectorAll('.tc-card, .event-teams-empty').forEach(c => c.remove());
+  if (!all.length) {
+    const msg = document.createElement('p');
+    msg.className = 'event-teams-empty';
+    msg.style.cssText = 'color:var(--muted); font-size:13px; margin:0; padding:4px 0;';
+    msg.textContent = 'No event teams loaded. Import a tournament from the Events tab to populate this list.';
+    list.appendChild(msg);
+    return;
+  }
+
+  const frag = document.createDocumentFragment();
+  all.forEach(t => {
+    const card = document.createElement('div');
+    card.className = 'tc-card';
+    card.dataset.search = (t.name || '').toLowerCase();
+    card.style.setProperty('--team-accent', t.color || '#3b82f6');
+
+    const accent = document.createElement('div'); accent.className = 'tc-card-accent';
+    const body   = document.createElement('div'); body.className   = 'tc-card-body';
+    const logo   = document.createElement('img'); logo.className   = 'tc-card-logo'; logo.loading = 'lazy';
+    logo.src = t.logo || teePlaceholder(t.name, t.color);
+    const info   = document.createElement('div'); info.className   = 'tc-card-info';
+    const nameEl = document.createElement('div'); nameEl.className = 'tc-card-name'; nameEl.textContent = t.name;
+    const meta   = document.createElement('div'); meta.className   = 'tc-card-meta';
+    const np = (t.players || []).filter(p => p && (p.name || '').trim()).length;
+    meta.textContent = (np ? np + (np === 1 ? ' player' : ' players') : 'No roster') + ' · ' + t._plat;
+    info.append(nameEl, meta);
+    body.append(logo, info);
+
+    const footer  = document.createElement('div'); footer.className = 'tc-card-footer';
+
+    const editBtn = document.createElement('button');
+    editBtn.className = 'tc-edit tc-edit-primary'; editBtn.title = 'Edit players and data'; editBtn.textContent = 'Edit';
+    editBtn.addEventListener('click', e => {
+      e.stopPropagation();
+      const existingSaved = (currentState.savedTeams || []).find(s => s.name === t.name);
+      teLoad({
+        oldName: existingSaved ? t.name : null,
+        name: t.name,
+        logo: t.logo || null,
+        color: t.color || '#055fdb',
+        players: (t.players || []).map(p => ({ ...p, photo: p.photo || p.image || '' }))
+      });
+      openTeamEditor();
+    });
+
+    const saveBtn = document.createElement('button');
+    saveBtn.className = 'tc-edit'; saveBtn.title = 'Save to team library (quick)'; saveBtn.textContent = 'Save';
+    saveBtn.addEventListener('click', e => {
+      e.stopPropagation();
+      if (t._plat === 'start.gg') {
+        send('save_startgg_team', { name: t.name });
+      } else {
+        send('save_team', { name: t.name, logo: t.logo || null, color: t.color || '#055fdb', players: t.players || [] });
+      }
+      saveBtn.textContent = 'Saved!';
+      setTimeout(() => { saveBtn.textContent = 'Save'; }, 2000);
+    });
+
+    footer.append(editBtn, saveBtn);
+    card.append(accent, body, footer);
+    frag.appendChild(card);
+  });
+  list.appendChild(frag);
+  applyEventTeamsFilter();
+}
+
+// Keyword filter over the Event Teams list (pure show/hide — no re-render), mirroring applyTeamsFilter().
+function applyEventTeamsFilter() {
+  const list = el('event-teams-list'); if (!list) return;
+  const q = (el('event-teams-search')?.value || '').trim().toLowerCase();
+  const items = list.querySelectorAll('.tc-card');
+  let shown = 0;
+  items.forEach((item) => { const m = !q || (item.dataset.search || '').includes(q); item.style.display = m ? '' : 'none'; if (m) shown++; });
+  const nomatch = el('event-teams-nomatch');
+  if (nomatch) nomatch.style.display = (items.length > 0 && q && shown === 0) ? '' : 'none';
+}
+el('event-teams-search')?.addEventListener('input', applyEventTeamsFilter);
+
+el('btn-save-all-event-teams')?.addEventListener('click', () => {
+  send('save_startgg_teams_bulk', {});
+});
+el('btn-clear-event-teams')?.addEventListener('click', () => {
+  if (!confirm('Remove all event teams from this session?')) return;
+  send('mass_delete_startgg_teams', {});
+});
+
+function switchTeamsTab(tab) {
+  const savedPanel = el('teams-panel-saved');
+  const eventPanel = el('teams-panel-event');
+  const savedActions = el('talent-topbar-teams-actions');
+  const eventActions = el('talent-topbar-event-actions');
+  if (savedPanel) savedPanel.style.display = tab === 'saved' ? '' : 'none';
+  if (eventPanel) eventPanel.style.display = tab === 'event'  ? '' : 'none';
+  if (savedActions) savedActions.style.display = tab === 'saved' ? '' : 'none';
+  if (eventActions) eventActions.style.display = tab === 'event'  ? '' : 'none';
+  document.querySelectorAll('#teams-sub-nav .talent-page-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.teamstab === tab);
+  });
+}
+el('teams-sub-nav')?.addEventListener('click', e => {
+  const btn = e.target.closest('[data-teamstab]');
+  if (btn) switchTeamsTab(btn.dataset.teamstab);
+});
 
 el('btn-sort-teams-abc')?.addEventListener('click', () => {
   if (!currentState.savedTeams || currentState.savedTeams.length <= 1) return;
@@ -6023,7 +6775,9 @@ function startEditTeam(t) {
   document.querySelector('[data-tab="equipos"]')?.click();
   if (typeof window._ttShow === 'function') window._ttShow('library');
   else if (typeof teamsShowTab === 'function') teamsShowTab('library');
-  teLoad({ oldName: t.name, name: t.name, logo: t.logo, color: t.color, players: t.players, favorite: t.favorite });
+  // Always use freshest data from currentState in case the card closure is stale (e.g. color changed since last render)
+  const fresh = (currentState && currentState.savedTeams || []).find(s => s.name === t.name) || t;
+  teLoad({ oldName: fresh.name, name: fresh.name, logo: fresh.logo, color: fresh.color, players: fresh.players, favorite: fresh.favorite });
   openTeamEditor();
   el('te-name')?.focus();
 }
@@ -6591,13 +7345,15 @@ function teamOwnColor(side) {
   return (t && (t.ownColor || t.color)) || el('input-color-' + side)?.value || null;
 }
 el('btn-quick-save-blue')?.addEventListener('click', () => {
-  const name = el('input-name-blue').value.trim().toUpperCase();
+  // Store the name as typed (don't force upper-case) — overlays upper-case at render, and the server
+  // matches the library case-insensitively, so this keeps a picked "Team Alpha" from duplicating.
+  const name = el('input-name-blue').value.trim();
   if (!name) { showToast('Enter team name.', '#ef4444'); return; }
   send('save_team', { name, logo: pendingLogoBlue || null, color: teamOwnColor('blue') });
 });
 
 el('btn-quick-save-orange')?.addEventListener('click', () => {
-  const name = el('input-name-orange').value.trim().toUpperCase();
+  const name = el('input-name-orange').value.trim();
   if (!name) { showToast('Enter team name.', '#ef4444'); return; }
   send('save_team', { name, logo: pendingLogoOrange || null, color: teamOwnColor('orange') });
 });
@@ -6606,6 +7362,9 @@ el('btn-quick-save-orange')?.addEventListener('click', () => {
 function scorecardHTML(sfx) {
   const bo = [1, 3, 5, 7].map((v) => `<label class="bo-opt"><input type="radio" name="bestof-${sfx}" value="${v}">${v}</label>`).join('');
   return `
+  <div class="sc-live-tags" title="What's currently showing on the overlay">
+    <span class="sc-live-tag-val" id="sc-live-status-${sfx}">—</span>
+  </div>
   <div class="sc-teams-score">
     <div class="sc-side-col">
       <span class="sc-team-name" id="series-label-blue-${sfx}">A</span>
@@ -6720,6 +7479,26 @@ wireScorecard('scorecard-teams', 'teams');
   el('btn-pull-league')?.addEventListener('click', () => pullLeagueStandings('input-league-slug', 'league-pull-status'));
 })();
 
+// Green "connected & working" outline on the Match-settings auto controls so producers know they'll do
+// something: "From Platform" (Round/Stage) lights up when a tournament platform is loaded (it'll pull
+// the live round); "Auto" (Match Label) lights up when the label is blank (the overlay is auto-computing
+// BEST OF X · GAME X). Driven from state on every broadcast.
+function updateMspConnectedState(data) {
+  const plat = data && data.activeEvent && data.activeEvent.platform;
+  const platName = plat === 'startgg' ? 'start.gg' : plat === 'challonge' ? 'Challonge' : plat === 'nxgen' ? 'NXGEN' : plat;
+  document.querySelectorAll('[data-msp="round-startgg"]').forEach((b) => {
+    b.classList.toggle('msp-connected', !!plat);
+    b.title = plat
+      ? `Connected to ${platName} — pull the live round/stage`
+      : 'Load a tournament (ESPORTS ▸ platform) to pull the round automatically';
+  });
+  const labelAuto = !((data && data.gameLabel) || '').trim();
+  document.querySelectorAll('[data-msp="label-auto"]').forEach((b) => {
+    b.classList.toggle('msp-connected', labelAuto);
+    b.title = labelAuto ? 'Auto-filling the label (BEST OF X · GAME X) — active' : 'Reset the label to auto (BEST OF X · GAME X)';
+  });
+}
+
 // Shared start.gg League standings pull — used by both the Dashboard match gear popover and the
 // Rocket League section in Integrations (mirrored controls, suffixed -int).
 async function pullLeagueStandings(slugId, statusId) {
@@ -6763,6 +7542,7 @@ document.querySelectorAll('#tr-source-seg .seg-btn').forEach((b) => {
 // Auto team names from the live game (match saved library → logos/colours).
 el('chk-auto-teams-game')?.addEventListener('change', (e) => send('set_auto_teams_from_game', { enabled: e.target.checked }));
 
+let _autoLeaguePullSlug = '';
 function syncSeriesDeskUI(data) {
   const g = (data.games && data.games[data.activeGame]) || null;
   const labels = (g && g.teamLabels) || { a: 'Blue', b: 'Orange' };
@@ -6782,7 +7562,16 @@ function syncSeriesDeskUI(data) {
     if (glEl && document.activeElement !== glEl) glEl.value = data.gameLabel || '';
     const rlEl = el(`input-round-label-${sfx}`);
     if (rlEl && document.activeElement !== rlEl) rlEl.value = data.roundLabel || '';
+    // What's actually live on the overlay right now, combined the same way rl-hud.html shows it:
+    // ROUND / STAGE | GAME n OF X — a blank Match Label auto-shows "GAME n OF X" there, not nothing.
+    const liveStatus = el(`sc-live-status-${sfx}`);
+    if (liveStatus) {
+      const round = (data.roundLabel || '').trim().toUpperCase();
+      const gameLine = (data.gameLabel || '').trim() ? data.gameLabel.trim().toUpperCase() : `GAME ${data.game?.number ?? 1} OF ${bo}`;
+      liveStatus.textContent = round ? `${round} | ${gameLine}` : gameLine;
+    }
   });
+  updateMspConnectedState(data);
   const atg = el('chk-auto-teams-game'); if (atg && document.activeElement !== atg) atg.checked = !!data.autoTeamsFromGame;
   const tr = data.teamRecord || {};
   const ls = data.leagueStandings || {};
@@ -6796,6 +7585,20 @@ function syncSeriesDeskUI(data) {
   if (status && !status.textContent) {
     if (ls.lastError) status.textContent = 'Error: ' + ls.lastError;
     else if (Array.isArray(ls.teams) && ls.teams.length) status.textContent = `${ls.teams.length} teams loaded${ls.name ? ' from ' + ls.name : ''}.`;
+  }
+  // "Tournament" source promises to auto-pull from the platform — don't make the producer paste
+  // a league URL by hand when one's already loaded via the Events panel. Prefill from the active
+  // event and auto-run the pull once per distinct event (re-fires if a different event loads).
+  if (trSource === 'startgg') {
+    const ae = data.activeEvent || {};
+    const wantSlug = (ae.platform === 'startgg' && (ae.url || ae.slug)) ? (ae.url || ae.slug) : '';
+    if (wantSlug && slugIn && document.activeElement !== slugIn) {
+      if (!slugIn.value) slugIn.value = wantSlug;
+      if (_autoLeaguePullSlug !== wantSlug) {
+        _autoLeaguePullSlug = wantSlug;
+        pullLeagueStandings('input-league-slug', 'league-pull-status');
+      }
+    }
   }
   // Source-dependent sections: in-app league box for In-app, start.gg box for Tournament, hint for Manual.
   const statsBox = el('tr-stats-box'); if (statsBox) statsBox.style.display = trSource === 'stats' ? '' : 'none';
@@ -6977,39 +7780,209 @@ el('btn-mt-popout')?.addEventListener('click', () => openPopout('match'));
 // ── Team editor (create / edit a saved team: logo, name, colour, roster) ──────
 // The colour is saved on the team and applied to the live match (and thus the overlays)
 // whenever the team is loaded — see set_team / save_team `color`.
-let teModel = { oldName: null, name: '', logo: null, color: '#055fdb', players: [] };
+let teModel = { oldName: null, name: '', abbr: '', logo: null, color: '#055fdb', players: [] };
 const teUid = () => 'p' + Math.random().toString(36).slice(2, 9);
 function teStatus(msg, ok) { const s = el('te-status'); if (s) { s.textContent = msg || ''; s.style.color = ok === false ? '#f56565' : (ok ? 'var(--good,#48bb78)' : 'var(--muted)'); } }
+
+// Social platform config — drives player bar icons and the edit popup link fields.
+const TE_SOCIALS = [
+  { key: 'twitter',   label: 'X / Twitter', color: '#e7e9ea', ph: '@handle or x.com/…',       urlFn: v => 'https://x.com/' + encodeURIComponent(v.replace(/^@/, '')),        svg: 'M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-4.714-6.231-5.401 6.231H2.74l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z' },
+  { key: 'twitch',    label: 'Twitch',       color: '#9146ff', ph: 'channel name',              urlFn: v => 'https://twitch.tv/' + encodeURIComponent(v),                       svg: 'M11.571 4.714h1.715v5.143H11.57zm4.715 0H18v5.143h-1.714zM6 0L1.714 4.286v15.428h5.143V24l4.286-4.286h3.428L22.286 12V0zm14.571 11.143l-3.428 3.428h-3.429l-3 3v-3H6.857V1.714h13.714z' },
+  { key: 'discord',   label: 'Discord',      color: '#7289da', ph: 'username',                  urlFn: null, svg: 'M20.317 4.37a19.791 19.791 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 0 0-5.487 0 12.64 12.64 0 0 0-.617-1.25.077.077 0 0 0-.079-.037A19.736 19.736 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057c.002.022.015.043.03.056a19.9 19.9 0 0 0 5.993 3.03.077.077 0 0 0 .084-.028 14.09 14.09 0 0 0 1.226-1.994.076.076 0 0 0-.041-.106 13.107 13.107 0 0 1-1.872-.892.077.077 0 0 1-.008-.128 10.2 10.2 0 0 0 .372-.292.074.074 0 0 1 .077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 0 1 .078.01c.12.098.246.198.373.292a.077.077 0 0 1-.006.127 12.299 12.299 0 0 1-1.873.892.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.839 19.839 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 0 0-.031-.03z' },
+  { key: 'instagram', label: 'Instagram',    color: '#e1306c', ph: '@handle',                   urlFn: v => 'https://instagram.com/' + encodeURIComponent(v.replace(/^@/, '')), svg: 'M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4 0-2.209 1.791-4 4-4s4 1.791 4 4c0 2.21-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.44s-.644-1.44-1.439-1.44z' },
+  { key: 'tiktok',    label: 'TikTok',       color: '#69c9d0', ph: '@handle',                   urlFn: v => 'https://tiktok.com/@' + encodeURIComponent(v.replace(/^@/, '')),   svg: 'M19.59 6.69a4.83 4.83 0 01-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 01-2.88 2.5 2.89 2.89 0 01-2.89-2.89 2.89 2.89 0 012.89-2.89c.28 0 .54.04.79.1V9.01a6.29 6.29 0 00-.79-.05 6.34 6.34 0 00-6.34 6.34 6.34 6.34 0 006.34 6.34 6.34 6.34 0 006.33-6.34V8.74a8.16 8.16 0 004.77 1.52V6.79a4.84 4.84 0 01-1-.1z' },
+  { key: 'youtube',   label: 'YouTube',      color: '#ff4444', ph: '@handle or youtube.com/…',  urlFn: v => 'https://youtube.com/@' + encodeURIComponent(v.replace(/^@/, '')),  svg: 'M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z' },
+];
+
+function teSocIconHtml(soc, size) {
+  return `<svg viewBox="0 0 24 24" width="${size}" height="${size}" aria-hidden="true"><path fill="currentColor" d="${soc.svg}"/></svg>`;
+}
+
 function teRenderPlayers() {
   const wrap = el('te-players-list'); if (!wrap) return;
   wrap.innerHTML = '';
   if (!teModel.players.length) { wrap.innerHTML = '<div class="tp-empty">No players yet — add your roster.</div>'; return; }
   teModel.players.forEach((p) => {
     const row = document.createElement('div'); row.className = 'te-player-row';
-    const name = document.createElement('input'); name.className = 'input-text te-pname'; name.placeholder = 'Player name'; name.value = p.name || '';
-    name.addEventListener('input', () => { p.name = name.value; });
-    const role = buildRoleControl(p.role || '', rolesForActiveGame(), (val) => { p.role = val; });
-    const country = buildCountryControl(p.country || '', (code) => { p.country = code; });
-    const del = document.createElement('button'); del.className = 'btn btn-ghost btn-sm te-del'; del.textContent = '✕'; del.title = 'Remove player';
+
+    // Hidden file input — shared by bar avatar and popup avatar
+    const avatarFile = document.createElement('input');
+    avatarFile.type = 'file'; avatarFile.accept = 'image/*'; avatarFile.style.display = 'none';
+    row.append(avatarFile);
+
+    // ── PLAYER BAR ──────────────────────────────────────────────────────
+    const bar = document.createElement('div'); bar.className = 'te-player-bar';
+
+    const barAvatar = document.createElement('img');
+    barAvatar.className = 'tp-player-avatar'; barAvatar.title = p.name || 'Player';
+    if (p.photo) barAvatar.src = p.photo;
+    bar.append(barAvatar);
+
+    const barName = document.createElement('span'); barName.className = 'te-bar-name';
+    barName.textContent = p.name || '(unnamed)';
+    bar.append(barName);
+
+    const barStatus = document.createElement('span');
+    barStatus.className = `te-bar-status ${p.status === 'sub' ? 'sub' : 'starter'}`;
+    barStatus.textContent = p.status === 'sub' ? 'Sub' : 'Starter';
+    bar.append(barStatus);
+
+    // Social icons — only filled-in platforms shown
+    const iconsWrap = document.createElement('div'); iconsWrap.className = 'te-bar-socials';
+    const buildBarIcons = () => {
+      iconsWrap.innerHTML = '';
+      if (p.startgg) {
+        const a = document.createElement('a'); a.className = 'te-soc-icon'; a.href = teStartggLink(p.startgg); a.target = '_blank'; a.rel = 'noopener'; a.title = `start.gg: ${p.startgg}`;
+        a.innerHTML = `<img src="../assets/images/start.png" alt="start.gg" class="te-soc-icon-img">`;
+        iconsWrap.append(a);
+      }
+      if (p.sixmans) {
+        const a = document.createElement('a'); a.className = 'te-soc-icon'; a.href = teSixmansLink(p.sixmans); a.target = '_blank'; a.rel = 'noopener'; a.title = `6mans: ${p.sixmans}`;
+        a.innerHTML = `<img src="../assets/images/sixmanlogo.webp" alt="6mans" class="te-soc-icon-img">`;
+        iconsWrap.append(a);
+      }
+      TE_SOCIALS.forEach(soc => {
+        const val = p[soc.key]; if (!val) return;
+        const url = soc.urlFn ? soc.urlFn(val) : null;
+        const icon = url ? document.createElement('a') : document.createElement('span');
+        icon.className = 'te-soc-icon'; icon.style.color = soc.color; icon.title = `${soc.label}: ${val}`;
+        if (url) { icon.href = url; icon.target = '_blank'; icon.rel = 'noopener'; }
+        icon.innerHTML = teSocIconHtml(soc, 15);
+        iconsWrap.append(icon);
+      });
+    };
+    buildBarIcons();
+    bar.append(iconsWrap);
+
+    // Edit + delete buttons
+    const editBtn = document.createElement('button'); editBtn.className = 'btn btn-ghost btn-sm te-edit-btn'; editBtn.textContent = 'Edit'; editBtn.title = 'Edit player details';
+    const del = document.createElement('button'); del.className = 'te-del'; del.textContent = '✕'; del.title = 'Remove player';
     del.addEventListener('click', () => { teModel.players = teModel.players.filter((x) => x !== p); teRenderPlayers(); });
-    row.append(name, role, country, del);
-    // Editable start.gg + 6mans links (stored on the player, with open-↗ buttons).
-    const links = document.createElement('div'); links.className = 'te-plinks';
-    links.innerHTML =
-      `<label class="te-plink-field"><span><img src="../assets/images/start.png" alt="start.gg" class="te-plink-logo"></span>`
-      + `<input class="input-text te-plink te-plink-sgg" placeholder="profile link or slug" value="${tlEsc(p.startgg || '')}">`
-      + `<a class="te-plink-open${p.startgg ? '' : ' is-off'}" target="_blank" title="Open start.gg">↗</a></label>`
-      + `<label class="te-plink-field"><span><img src="../assets/images/sixmanlogo.webp" alt="6mans" class="te-plink-logo"></span>`
-      + `<input class="input-text te-plink te-plink-six" placeholder="rl6mans username or link" value="${tlEsc(p.sixmans || '')}">`
-      + `<a class="te-plink-open${p.sixmans ? '' : ' is-off'}" target="_blank" title="Open 6mans">↗</a></label>`;
-    const sgg = links.querySelector('.te-plink-sgg'), sggA = links.querySelectorAll('.te-plink-open')[0];
-    const six = links.querySelector('.te-plink-six'), sixA = links.querySelectorAll('.te-plink-open')[1];
-    const syncSgg = () => { p.startgg = sgg.value.trim(); sggA.href = teStartggLink(p.startgg); sggA.classList.toggle('is-off', !p.startgg); };
-    const syncSix = () => { p.sixmans = six.value.trim(); sixA.href = teSixmansLink(p.sixmans); sixA.classList.toggle('is-off', !p.sixmans); };
-    sgg.addEventListener('input', syncSgg); six.addEventListener('input', syncSix); syncSgg(); syncSix();
-    row.append(links);
+    bar.append(editBtn, del);
+    row.append(bar);
+
+    // ── EDIT POPUP ──────────────────────────────────────────────────────
+    const popup = document.createElement('div'); popup.className = 'te-edit-popup';
+
+    const hdr = document.createElement('div'); hdr.className = 'te-popup-header';
+    const hdrTitle = document.createElement('span'); hdrTitle.className = 'te-popup-title'; hdrTitle.textContent = 'Edit Player';
+    const hdrClose = document.createElement('button'); hdrClose.className = 'te-popup-close'; hdrClose.title = 'Close'; hdrClose.textContent = '×';
+    hdr.append(hdrTitle, hdrClose);
+    popup.append(hdr);
+
+    const body = document.createElement('div'); body.className = 'te-popup-body';
+
+    // Left column: big avatar + status toggle
+    const leftCol = document.createElement('div'); leftCol.className = 'te-popup-left';
+    const popAvatar = document.createElement('img'); popAvatar.className = 'tp-player-avatar te-popup-avatar';
+    popAvatar.title = 'Click to change photo';
+    if (p.photo) popAvatar.src = p.photo;
+    popAvatar.addEventListener('click', () => avatarFile.click());
+    const popStatus = document.createElement('button');
+    popStatus.className = `btn tp-status ${p.status === 'sub' ? 'sub' : 'starter'}`;
+    popStatus.style.cssText = 'width:100%;margin-top:6px;font-size:10px;';
+    popStatus.textContent = p.status === 'sub' ? 'Sub' : 'Starter';
+    popStatus.addEventListener('click', () => {
+      p.status = p.status === 'sub' ? 'starter' : 'sub';
+      popStatus.textContent = p.status === 'sub' ? 'Sub' : 'Starter';
+      popStatus.className = `btn tp-status ${p.status}`; popStatus.style.cssText = 'width:100%;margin-top:6px;font-size:10px;';
+      barStatus.textContent = p.status === 'sub' ? 'Sub' : 'Starter';
+      barStatus.className = `te-bar-status ${p.status}`;
+    });
+    leftCol.append(popAvatar, popStatus);
+    body.append(leftCol);
+
+    // Right column: name, role, country + all links
+    const rightCol = document.createElement('div'); rightCol.className = 'te-popup-right';
+
+    const mkField = (labelText, ctrl) => {
+      const row2 = document.createElement('div'); row2.className = 'te-popup-field';
+      const lbl = document.createElement('span'); lbl.className = 'te-popup-label'; lbl.textContent = labelText;
+      row2.append(lbl, ctrl); return row2;
+    };
+
+    const nameInp = document.createElement('input'); nameInp.className = 'input-text'; nameInp.value = p.name || ''; nameInp.placeholder = 'Player name';
+    nameInp.addEventListener('input', () => { p.name = nameInp.value; barName.textContent = nameInp.value || '(unnamed)'; barAvatar.title = nameInp.value || 'Player'; });
+    const roleCtrl = buildRoleControl(p.role || '', rolesForActiveGame(), v => { p.role = v; });
+    const countryCtrl = buildCountryControl(p.country || '', code => { p.country = code; });
+    const realNameInp = document.createElement('input'); realNameInp.className = 'input-text'; realNameInp.value = p.realName || ''; realNameInp.placeholder = 'Legal / full name (optional)';
+    realNameInp.addEventListener('input', () => { p.realName = realNameInp.value; });
+    rightCol.append(mkField('Name', nameInp), mkField('Real Name', realNameInp), mkField('Role', roleCtrl), mkField('Country', countryCtrl));
+
+    // Profile links section
+    const pHead = document.createElement('div'); pHead.className = 'te-popup-section-head'; pHead.textContent = 'Profile Links';
+    rightCol.append(pHead);
+    const mkLink = (iconHtml, inpPh, val, syncCb) => {
+      const r = document.createElement('div'); r.className = 'te-popup-link-row';
+      const ico = document.createElement('span'); ico.className = 'te-popup-link-icon'; ico.innerHTML = iconHtml;
+      const inp = document.createElement('input'); inp.className = 'input-text'; inp.placeholder = inpPh; inp.value = val || '';
+      inp.addEventListener('input', function() { syncCb(this.value.trim()); });
+      r.append(ico, inp); return { row: r, inp };
+    };
+    const linksGrid = document.createElement('div'); linksGrid.className = 'te-popup-links-grid';
+
+    // start.gg
+    const { row: sggRow, inp: sggInp } = mkLink(`<img src="../assets/images/start.png" alt="SGG" style="height:14px;filter:brightness(0)invert(1);opacity:.7">`, 'start.gg link or slug', p.startgg, v => { p.startgg = v; buildBarIcons(); });
+    const sggA = document.createElement('a'); sggA.className = `te-plink-open${p.startgg ? '' : ' is-off'}`; sggA.target = '_blank'; sggA.title = 'Open'; sggA.textContent = '↗';
+    const syncSgg = () => { p.startgg = sggInp.value.trim(); sggA.href = teStartggLink(p.startgg); sggA.classList.toggle('is-off', !p.startgg); buildBarIcons(); };
+    sggInp.removeEventListener('input', sggInp._sync); sggInp.addEventListener('input', syncSgg); syncSgg();
+    sggRow.append(sggA);
+
+    // 6mans
+    const { row: sixRow, inp: sixInp } = mkLink(`<img src="../assets/images/sixmanlogo.webp" alt="6mans" style="height:14px;filter:brightness(0)invert(1);opacity:.7">`, '6mans username or link', p.sixmans, v => { p.sixmans = v; buildBarIcons(); });
+    const sixA = document.createElement('a'); sixA.className = `te-plink-open${p.sixmans ? '' : ' is-off'}`; sixA.target = '_blank'; sixA.title = 'Open'; sixA.textContent = '↗';
+    const syncSix = () => { p.sixmans = sixInp.value.trim(); sixA.href = teSixmansLink(p.sixmans); sixA.classList.toggle('is-off', !p.sixmans); buildBarIcons(); };
+    sixInp.removeEventListener('input', sixInp._sync); sixInp.addEventListener('input', syncSix); syncSix();
+    sixRow.append(sixA);
+
+    linksGrid.append(sggRow, sixRow);
+    rightCol.append(linksGrid);
+
+    // Social link section
+    const sHead = document.createElement('div'); sHead.className = 'te-popup-section-head'; sHead.textContent = 'Socials';
+    rightCol.append(sHead);
+
+    const socialsGrid = document.createElement('div'); socialsGrid.className = 'te-popup-links-grid';
+    TE_SOCIALS.forEach(soc => {
+      const { row: sr } = mkLink(teSocIconHtml(soc, 14).replace('<svg', `<svg style="color:${soc.color}"`), soc.ph, p[soc.key], v => { p[soc.key] = v; buildBarIcons(); });
+      socialsGrid.append(sr);
+    });
+    rightCol.append(socialsGrid);
+    body.append(rightCol);
+    popup.append(body);
+    row.append(popup);
+
+    // Avatar file upload updates both bar and popup avatars
+    avatarFile.addEventListener('change', async () => {
+      const f = avatarFile.files[0]; if (!f) return;
+      p.photo = await fileToBase64(f);
+      barAvatar.src = p.photo; popAvatar.src = p.photo;
+      avatarFile.value = '';
+    });
+
+    // Toggle popup open/close
+    const openPopup = () => {
+      wrap.querySelectorAll('.te-player-row.te-editing').forEach(r => {
+        if (r !== row) { r.classList.remove('te-editing'); const eb = r.querySelector('.te-edit-btn'); if (eb) eb.textContent = 'Edit'; }
+      });
+      row.classList.add('te-editing'); editBtn.textContent = 'Done';
+    };
+    const closePopup = () => { row.classList.remove('te-editing'); editBtn.textContent = 'Edit'; };
+    editBtn.addEventListener('click', () => row.classList.contains('te-editing') ? closePopup() : openPopup());
+    hdrClose.addEventListener('click', closePopup);
+
     wrap.appendChild(row);
   });
+
+  // Close any open popup when clicking outside
+  if (!wrap._outsideHandler) {
+    wrap._outsideHandler = (e) => {
+      wrap.querySelectorAll('.te-player-row.te-editing').forEach(r => {
+        if (!r.contains(e.target)) { r.classList.remove('te-editing'); const eb = r.querySelector('.te-edit-btn'); if (eb) eb.textContent = 'Edit'; }
+      });
+    };
+    document.addEventListener('click', wrap._outsideHandler);
+  }
 }
 // Thematic logo placeholder (no white box): a dashed, team-coloured tile with the team's
 // initials — or a shield glyph before a name is typed. Updates live as name/colour change.
@@ -7031,6 +8004,7 @@ function teRefreshLogoPreview() {
 }
 function teRender() {
   if (el('te-name')) el('te-name').value = teModel.name || '';
+  if (el('te-abbr')) el('te-abbr').value = teModel.abbr || '';
   if (el('te-color')) el('te-color').value = /^#[0-9a-f]{6}$/i.test(teModel.color) ? teModel.color : '#055fdb';
   teRefreshLogoPreview();
   if (el('te-title')) el('te-title').textContent = teModel.oldName ? 'Edit Team' : 'Create Team';
@@ -7042,27 +8016,47 @@ function teLoad(team) {
   teModel = {
     oldName: team.oldName || null,
     name: team.name || '',
+    abbr: team.abbr || '',
     logo: team.logo || null,
     color: team.color || '#055fdb',
     favorite: !!team.favorite,
     players: (team.players || []).map((p) => {
-      // Prefill empty links from the auto-linked registry (start.gg slug / 6mans name).
+      // Backfill from the player-profile registry: start.gg slug, 6mans, and any
+      // social/country/photo data the import pipeline wrote there (even if the player
+      // object itself came from a raw event-team with only name/id).
       const reg = (currentState.playerProfiles || {})[(p.name || '').trim().toLowerCase()] || {};
       const startgg = p.startgg || (reg.startggSlug ? 'https://www.start.gg/' + String(reg.startggSlug).replace(/^\/+/, '') : '');
       const sixmans = p.sixmans || ((reg.sixmans && reg.sixmans.name) ? reg.sixmans.name : '');
-      return { id: p.id || teUid(), name: p.name || '', role: p.role || '', country: p.country || '', startgg, sixmans };
+      return {
+        id: p.id || teUid(),
+        name: p.name || '',
+        role: p.role || '',
+        country:   p.country   || reg.countryCode || '',
+        startgg,
+        sixmans,
+        status:    p.status    || 'starter',
+        realName:  p.realName  || reg.realName || '',
+        photo:     p.photo     || p.image || reg.image || '',
+        discord:   p.discord   || '',
+        twitter:   p.twitter   || reg.twitter || '',
+        twitch:    p.twitch    || reg.twitch  || '',
+        instagram: p.instagram || '',
+        tiktok:    p.tiktok    || '',
+        youtube:   p.youtube   || '',
+      };
     })
   };
   teStatus('');
   teRender();
 }
 el('te-name')?.addEventListener('input', function () { teModel.name = this.value; if (!teModel.logo) teRefreshLogoPreview(); });
+el('te-abbr')?.addEventListener('input', function () { teModel.abbr = this.value.toUpperCase().slice(0, 6); this.value = teModel.abbr; });
 el('te-color')?.addEventListener('input', function () { teModel.color = this.value; if (!teModel.logo) teRefreshLogoPreview(); });
 el('te-add-player')?.addEventListener('click', () => {
-  teModel.players.push({ id: teUid(), name: '', role: '', country: '' });
+  teModel.players.push({ id: teUid(), name: '', role: '', country: '', status: 'starter', photo: '', discord: '', twitter: '', twitch: '', instagram: '', tiktok: '', youtube: '' });
   teRenderPlayers();
-  const rows = el('te-players-list')?.querySelectorAll('.te-player-row .te-pname');
-  if (rows && rows.length) rows[rows.length - 1].focus();
+  const rows = el('te-players-list')?.querySelectorAll('.te-player-row .te-edit-btn');
+  if (rows && rows.length) rows[rows.length - 1].click();
 });
 // Set the editor preview to a real (non-fallback) logo: update src AND drop the
 // game-logo-white filter that teRender() applies to a blank team — otherwise an
@@ -7089,10 +8083,11 @@ el('te-save')?.addEventListener('click', () => {
   send('save_team', {
     oldName: teModel.oldName || null,
     name,
+    abbr: (teModel.abbr || '').trim().toUpperCase().slice(0, 6) || null,
     logo: teModel.logo || null,
     color: teModel.color || null,
     favorite: teModel.favorite || false,
-    players: teModel.players.map((p) => ({ id: p.id, name: (p.name || '').trim(), role: (p.role || '').trim(), country: (p.country || '').toLowerCase(), startgg: (p.startgg || '').trim(), sixmans: (p.sixmans || '').trim() })).filter((p) => p.name)
+    players: teModel.players.map((p) => ({ id: p.id, name: (p.name || '').trim(), role: (p.role || '').trim(), country: (p.country || '').toLowerCase(), startgg: (p.startgg || '').trim(), sixmans: (p.sixmans || '').trim(), status: p.status || 'starter', photo: p.photo || '', discord: (p.discord || '').trim(), twitter: (p.twitter || '').trim(), twitch: (p.twitch || '').trim(), instagram: (p.instagram || '').trim(), tiktok: (p.tiktok || '').trim(), youtube: (p.youtube || '').trim() })).filter((p) => p.name)
   });
   teModel.oldName = name;
   if (el('te-title')) el('te-title').textContent = 'Edit Team';
@@ -9568,14 +10563,13 @@ el('btn-hide-break')?.addEventListener('click', () => {
 el('select-winner-side')?.addEventListener('change', function() {
   const row = el('winner-custom-row');
   if (row) row.style.display = this.value === '__custom__' ? '' : 'none';
+  doWinnerPreview && doWinnerPreview();
 });
 function winnerPayload(visible) {
   const sel = el('select-winner-side')?.value || 'blue';
   const subtitle = (el('input-winner-subtitle')?.value || '').trim();
-  if (sel === '__custom__') {
-    return { visible, side: '', name: (el('input-winner-name')?.value || '').trim(), subtitle };
-  }
-  return { visible, side: sel, name: '', subtitle };
+  if (sel === 'blue' || sel === 'orange') return { visible, side: sel, name: '', subtitle };
+  return { visible, side: '', name: _winnerNameFromSel(sel), subtitle };
 }
 el('btn-show-winner')?.addEventListener('click', () => send('set_winner', winnerPayload(true)));
 el('btn-hide-winner')?.addEventListener('click', () => send('set_winner', { visible: false }));
@@ -9585,7 +10579,9 @@ function introPayload(visible) {
   return {
     visible,
     side: el('select-intro-side')?.value || 'blue',
-    title: (el('input-intro-title')?.value || '').trim()
+    title: (el('input-intro-title')?.value || '').trim(),
+    showFooter: el('check-intro-footer') ? !!el('check-intro-footer').checked : false,
+    showRealName: el('check-intro-realname') ? !!el('check-intro-realname').checked : false
   };
 }
 el('btn-show-intro')?.addEventListener('click', () => send('set_intro', introPayload(true)));
@@ -9626,7 +10622,11 @@ el('btn-veto-start')?.addEventListener('click', () => {
 });
 el('veto-game')?.addEventListener('change', () => renderVetoManager(currentState));
 el('btn-veto-undo')?.addEventListener('click', () => send('veto_undo', {}));
-el('btn-veto-reset')?.addEventListener('click', () => send('veto_reset', {}));
+el('btn-veto-reset')?.addEventListener('click', () => {
+  appConfirm('Reset the map veto? Every pick and ban made so far will be wiped and cannot be recovered.', 'Reset', true).then((ok) => {
+    if (ok) send('veto_reset', {});
+  });
+});
 el('btn-veto-show')?.addEventListener('click', () => send('veto_visible', { visible: true }));
 el('btn-veto-hide2')?.addEventListener('click', () => send('veto_visible', { visible: false }));
 
@@ -9715,7 +10715,6 @@ function renderVetoManager(data) {
 }
 
 // ── Guided champion/hero Pick & Ban draft manager ────────────────────────────
-let _draftGameInit = false;
 
 function submitDraftPick() {
   const inp = el('draft-input'); if (!inp) return;
@@ -9728,7 +10727,11 @@ el('btn-draft-start')?.addEventListener('click', () => {
 el('btn-draft-submit')?.addEventListener('click', submitDraftPick);
 el('draft-input')?.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); submitDraftPick(); } });
 el('btn-draft-undo')?.addEventListener('click', () => send('draft_undo', {}));
-el('btn-draft-reset')?.addEventListener('click', () => send('draft_reset', {}));
+el('btn-draft-reset')?.addEventListener('click', () => {
+  appConfirm('Reset the draft board? Every pick and ban made so far will be wiped and cannot be recovered.', 'Reset', true).then((ok) => {
+    if (ok) send('draft_reset', {});
+  });
+});
 el('btn-draft-show')?.addEventListener('click', () => send('draft_visible', { visible: true }));
 el('btn-draft-hide')?.addEventListener('click', () => send('draft_visible', { visible: false }));
 el('draft-game')?.addEventListener('change', () => renderDraftManager(currentState));
@@ -9750,10 +10753,13 @@ function renderDraftManager(data) {
   const games = data.games || {};
 
   // Populate game dropdown once
-  if (!_draftGameInit && dGames.length) {
+  const _dgSig = dGames.join(',');
+  if (dGames.length && sel.dataset.draftGamesSig !== _dgSig) {
+    const prev = sel.value;
     sel.innerHTML = '';
     dGames.forEach(g => { const o = document.createElement('option'); o.value = g; o.textContent = (games[g] && games[g].name) || g; sel.appendChild(o); });
-    _draftGameInit = true;
+    sel.dataset.draftGamesSig = _dgSig;
+    if (prev && dGames.includes(prev)) sel.value = prev;
   }
 
   const d = data.draft || {};
@@ -10422,17 +11428,23 @@ document.addEventListener('click', (e) => {
 const ONAIR_SCENES = [
   { key: 'casters',   label: 'Casters / Desk',   msg: 'set_casters_visibility', path: 'casters.visible' },
   { key: 'break',     label: 'Break / Countdown', msg: 'set_break',             path: 'breakScreen.visible' },
-  { key: 'winner',    label: 'Winner',           msg: 'set_winner',             path: 'winner.visible' },
-  { key: 'intro',     label: 'Team Line-up',     msg: 'set_intro',              path: 'intro.visible' },
-  { key: 'veto',      label: 'Map Veto',         msg: 'set_veto',               path: 'veto.visible' },
-  { key: 'bracket',   label: 'Bracket',          msg: 'set_bracket_settings',   path: 'bracket.visible' },
-  { key: 'upcoming',  label: 'Upcoming Matches', msg: 'set_upcoming',           path: 'upcoming.visible' },
-  { key: 'standings', label: 'Standings',        msg: 'set_standings',          path: 'standings.visible' },
-  { key: 'ticker',    label: 'Ticker',           msg: 'set_ticker',             path: 'ticker.visible' },
-  { key: 'spotlight', label: 'Player Spotlight', msg: 'set_spotlight',          path: 'spotlight.visible' },
-  { key: 'watchlist', label: 'Teams to Watch',   msg: 'set_watchlist',          path: 'watchlist.visible' },
-  { key: 'teamspot',  label: 'Team Spotlight',   msg: 'set_team_spotlight',     path: 'teamSpotlight.visible' },
-  { key: 'banner',    label: 'Sponsor Banner',   msg: 'set_banner_visibility',  path: 'banner.visible' }
+  { key: 'winner',    label: 'Winner',            msg: 'set_winner',            path: 'winner.visible' },
+  { key: 'intro',     label: 'Team Intro',        msg: 'set_intro',             path: 'intro.visible' },
+  // Matchup has no independent visible flag — it's active when gfxActive === 'matchup'.
+  // check() is used for on-detection; showData/hideData carry the correct WS payload.
+  { key: 'matchup',   label: 'Matchup',           msg: 'set_gfx_active',        path: 'gfxActive',
+    check: (s) => !!(s && s.gfxActive === 'matchup'),
+    showData: { scene: 'matchup' }, hideData: { scene: null } },
+  { key: 'veto',      label: 'Map Pool / Series', msg: 'set_veto',              path: 'veto.visible' },
+  { key: 'draft',     label: 'Draft',             msg: 'draft_visible',         path: 'draft.visible' },
+  { key: 'bracket',   label: 'Bracket',           msg: 'set_bracket_settings',  path: 'bracket.visible' },
+  { key: 'upcoming',  label: 'Upcoming Matches',  msg: 'set_upcoming',          path: 'upcoming.visible' },
+  { key: 'standings', label: 'Standings',         msg: 'set_standings',         path: 'standings.visible' },
+  { key: 'ticker',    label: 'Ticker',            msg: 'set_ticker',            path: 'ticker.visible' },
+  { key: 'spotlight', label: 'Player Spotlight',  msg: 'set_spotlight',         path: 'spotlight.visible' },
+  { key: 'watchlist', label: 'Teams to Watch',    msg: 'set_watchlist',         path: 'watchlist.visible' },
+  { key: 'teamspot',  label: 'Team Spotlight',    msg: 'set_team_spotlight',    path: 'teamSpotlight.visible' },
+  { key: 'banner',    label: 'Sponsor Banner',    msg: 'set_banner_visibility', path: 'banner.visible' }
 ];
 window.ONAIR_SCENES = ONAIR_SCENES;   // TDZ-safe handle for early-init render hooks
 
@@ -10475,6 +11487,7 @@ const ICON_SVG = {
   layout:   '<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M3 9h18"/><path d="M9 21V9"/>',
   monitor:  '<rect width="20" height="14" x="2" y="3" rx="2"/><path d="M8 21h8"/><path d="M12 17v4"/>',
   list:     '<line x1="8" x2="21" y1="6" y2="6"/><line x1="8" x2="21" y1="12" y2="12"/><line x1="8" x2="21" y1="18" y2="18"/><line x1="3" x2="3.01" y1="6" y2="6"/><line x1="3" x2="3.01" y1="12" y2="12"/><line x1="3" x2="3.01" y1="18" y2="18"/>',
+  grid:     '<rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/>',
 };
 function svgIcon(key, cls) {
   return `<svg class="svg-ico${cls ? ' ' + cls : ''}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICON_SVG[key] || ''}</svg>`;
@@ -10515,9 +11528,10 @@ const SCENE_SOURCES = [
     { name: '★ Trigger Graphics (all-in-one)', path: '/triggers.html', live: null, desc: 'ONE source for every triggered graphic — countdown, winner, intro, veto, draft, bracket, upcoming, standings. Add it to any scene; the qrail Triggers/Overlays buttons pop the right one over it.' },
     { name: 'Countdown / Starting Soon', path: '/countdown.html', live: 'breakScreen.visible', desc: 'Break standby timer with movie-countdown finish.' },
     { name: 'Starting Soon — Timer only', path: '/countdown.html?timer=1', live: 'breakScreen.visible', desc: 'Countdown with no background — overlay on b-roll.' },
+    { name: 'Intermission Card', path: '/intermission.html', live: 'breakScreen.visible', desc: 'Centered card: brand logo + event title + countdown. Layer over a map or b-roll in OBS.' },
     { name: 'Winner', path: '/winner.html', live: 'winner.visible', desc: 'Champion screen — team logo, name, subtitle.' },
     { name: 'Team Line-up', path: '/intro.html', live: 'intro.visible', desc: 'Animated roster cards. Add ?side=blue|orange.' },
-    { name: 'Matchup Desk (pre-game)', path: '/matchup.html', live: 'casters.visible', desc: 'Tale of the tape — both rosters side by side + casters.' },
+    { name: 'Matchup (pre-game)', path: '/matchup.html', live: null, desc: 'Cinematic split-screen — team color washes, large watermark logos, VS pillar, series pips.' },
     { name: 'Draft Screen', path: '/draft.html', live: null, desc: 'Animated pick/ban draft for character / agent select.' },
   ]},
   { group: 'Bracket & Veto', icon: 'trophy', items: [
@@ -10541,6 +11555,8 @@ const SCENE_SOURCES = [
     { name: 'Replay Wipe', path: '/replay.html', live: null, desc: '"REPLAY" plate slide-in. ?label=, ?team=.' },
   ]},
   { group: 'Sponsors & Branding', icon: 'handshake', items: [
+    { name: 'Sponsor Rail', path: '/sponsor-rail.html', live: null, desc: 'Horizontal logo rail — cycles or shows all rail sponsors. ?mode=cycle|static, ?height=80, ?label=1, ?interval=N.' },
+    { name: 'Sponsor Rail (static)', path: '/sponsor-rail.html?mode=static', live: null, desc: 'All rail sponsor logos displayed at once.' },
     { name: 'Sponsor Banner (Main)', path: '/sponsor-banner.html?src=main', live: 'banner.visible', desc: 'Rotating sponsor strip driven by the Main banner.' },
     { name: 'Sponsor Banner (Active brand)', path: '/sponsor-banner.html?src=brand', live: 'banner.visible', desc: 'Sponsor strip driven by the active client brand kit.' },
   ]},
@@ -10576,6 +11592,7 @@ function buildOnAirGrid() {
 
 let _sceneFilterGroup = 'all';   // active category chip
 let _sceneFilterText = '';       // search box text (lowercased)
+let _sceneViewMode = 'grid';     // 'grid' or 'list'
 
 const SCENE_DEFAULT_ASPECT = '1920 × 1080';
 
@@ -10606,6 +11623,34 @@ function mergeSceneGroups(discovered) {
       items: extra.map((o) => ({ name: prettySceneName(o.file), path: o.path, live: null, desc: 'Auto-discovered overlay.' })) });
   }
   return groups;
+}
+
+// Compact list-view row for a scene — no thumbnail, just name + description + actions.
+function buildSceneRow(it, groupName) {
+  const base = SCENE_BASE_URL + it.path;
+  const row = document.createElement('div');
+  row.className = 'scene-row';
+  row.dataset.search = (it.name + ' ' + (it.desc || '') + ' ' + groupName).toLowerCase();
+  row.dataset.live = it.live || '';
+  row.innerHTML = `
+    <div class="scene-row-info">
+      <div class="scene-row-name">${it.name}</div>
+    </div>
+    <div class="scene-row-desc">${it.desc || ''}</div>
+    <div class="scene-row-acts">
+      <button class="btn btn-primary btn-xs sr-open">Open</button>
+      <button class="btn btn-ghost btn-xs sr-copy">Copy</button>
+      <span class="scene-onair-pill sr-air" hidden>ON AIR</span>
+    </div>`;
+  row.querySelector('.sr-open').addEventListener('click', () => window.open(base, '_blank'));
+  const copyBtn = row.querySelector('.sr-copy');
+  copyBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const done = () => { copyBtn.textContent = 'Copied!'; setTimeout(() => { copyBtn.textContent = 'Copy'; }, 1200); };
+    if (navigator.clipboard) navigator.clipboard.writeText(base).then(done).catch(() => prompt('Copy URL:', base));
+    else prompt('Copy URL:', base);
+  });
+  return row;
 }
 
 // One scene card: thumbnail (+ aspect badge + on-air pill), actions, and a
@@ -10689,48 +11734,60 @@ async function buildSceneSourceList() {
   if (!wrap || wrap.dataset.built) return;
   wrap.dataset.built = '1';
 
-  // Auto-discover every overlay on disk, then merge curated metadata so new HTML
-  // scenes show up without hand-editing a list.
   let discovered = [];
   try { const r = await fetch(SCENE_BASE_URL + '/api/overlays'); const j = await r.json(); discovered = (j && j.overlays) || []; } catch {}
   const groups = mergeSceneGroups(discovered);
   const totalScenes = groups.reduce((n, g) => n + g.items.length, 0);
 
-  // ── Toolbar: search + category chips ─────────────────────
-  const bar = document.createElement('div');
-  bar.className = 'scene-toolbar';
-  bar.innerHTML = `
+  // ── Top bar: search + grid/list toggle ──────────────────────────────────
+  const topbar = document.createElement('div');
+  topbar.className = 'scene-topbar';
+  topbar.innerHTML = `
     <div class="scene-search">
       <span class="scene-search-ico">${svgIcon('search')}</span>
-      <input type="text" id="scene-search-input" placeholder="Search ${totalScenes} scenes…" autocomplete="off" spellcheck="false">
+      <input type="text" id="scene-search-input" placeholder="Search ${totalScenes} overlays…" autocomplete="off" spellcheck="false">
       <button class="scene-search-clear" id="scene-search-clear" title="Clear" hidden>×</button>
     </div>
-    <div class="scene-chips" id="scene-chips"></div>`;
-  wrap.appendChild(bar);
+    <div class="scene-view-toggle">
+      <button class="scene-vtog${_sceneViewMode === 'grid' ? ' active' : ''}" data-mode="grid" title="Grid view">${svgIcon('grid')}</button>
+      <button class="scene-vtog${_sceneViewMode === 'list' ? ' active' : ''}" data-mode="list" title="List view">${svgIcon('list')}</button>
+    </div>`;
+  wrap.appendChild(topbar);
 
-  const chips = bar.querySelector('#scene-chips');
-  const mkChip = (key, label, iconHtml) => {
+  // ── Two-column layout: sidebar nav + groups area ─────────────────────────
+  const layout = document.createElement('div');
+  layout.className = 'scene-layout';
+  wrap.appendChild(layout);
+
+  const nav = document.createElement('nav');
+  nav.className = 'scene-nav';
+  nav.id = 'scene-nav';
+  layout.appendChild(nav);
+
+  const main = document.createElement('div');
+  main.className = 'scene-groups-area';
+  main.id = 'scene-groups-area';
+  layout.appendChild(main);
+
+  // ── Sidebar nav items ─────────────────────────────────────────────────────
+  const mkNavItem = (key, label, iconHtml, count) => {
     const b = document.createElement('button');
-    b.className = 'scene-chip' + (key === _sceneFilterGroup ? ' active' : '');
+    b.className = 'scene-nav-item' + (key === _sceneFilterGroup ? ' active' : '');
     b.dataset.group = key;
-    b.innerHTML = (iconHtml || '') + `<span>${label}</span>`;
+    b.innerHTML = (iconHtml ? `<span class="scene-nav-ico">${iconHtml}</span>` : '') + `<span class="scene-nav-label">${label}</span><span class="scene-nav-count">${count}</span>`;
     b.addEventListener('click', () => { _sceneFilterGroup = key; applySceneFilter(); });
     return b;
   };
-  chips.appendChild(mkChip('all', 'All'));
-  chips.appendChild(mkChip('__onair', 'On air', '<span class="scene-chip-dot"></span>'));
-  groups.forEach((g) => chips.appendChild(mkChip(g.group, g.group, svgIcon(g.icon))));
+  nav.appendChild(mkNavItem('all', 'All', '', totalScenes));
+  const onAirItem = mkNavItem('__onair', 'On Air', '<span class="scene-chip-dot"></span>', 0);
+  onAirItem.id = 'scene-nav-onair';
+  nav.appendChild(onAirItem);
+  const navSep = document.createElement('div');
+  navSep.className = 'scene-nav-sep';
+  nav.appendChild(navSep);
+  groups.forEach((g) => nav.appendChild(mkNavItem(g.group, g.group, svgIcon(g.icon), g.items.length)));
 
-  const search = bar.querySelector('#scene-search-input');
-  const clearBtn = bar.querySelector('#scene-search-clear');
-  search.addEventListener('input', () => {
-    _sceneFilterText = search.value.trim().toLowerCase();
-    clearBtn.hidden = !_sceneFilterText;
-    applySceneFilter();
-  });
-  clearBtn.addEventListener('click', () => { search.value = ''; _sceneFilterText = ''; clearBtn.hidden = true; applySceneFilter(); });
-
-  // ── Groups + cards ────────────────────────────────────────────────────────
+  // ── Groups: grid cards + list rows ────────────────────────────────────────
   groups.forEach((g) => {
     const section = document.createElement('div');
     section.className = 'scene-group';
@@ -10741,33 +11798,72 @@ async function buildSceneSourceList() {
     section.appendChild(head);
     const grid = document.createElement('div');
     grid.className = 'scene-card-grid';
-    g.items.forEach((it) => grid.appendChild(buildSceneCard(it, g.group)));
+    grid.hidden = _sceneViewMode !== 'grid';
+    const listWrap = document.createElement('div');
+    listWrap.className = 'scene-row-list';
+    listWrap.hidden = _sceneViewMode !== 'list';
+    g.items.forEach((it) => {
+      grid.appendChild(buildSceneCard(it, g.group));
+      listWrap.appendChild(buildSceneRow(it, g.group));
+    });
     section.appendChild(grid);
-    wrap.appendChild(section);
+    section.appendChild(listWrap);
+    main.appendChild(section);
   });
-  refreshSceneOnAir(currentState);
 
-  // If the Scenes tab is already open, start the previews now that the cards exist.
+  // ── Search ────────────────────────────────────────────────────────────────
+  const search = topbar.querySelector('#scene-search-input');
+  const clearBtn = topbar.querySelector('#scene-search-clear');
+  search.addEventListener('input', () => {
+    _sceneFilterText = search.value.trim().toLowerCase();
+    clearBtn.hidden = !_sceneFilterText;
+    applySceneFilter();
+  });
+  clearBtn.addEventListener('click', () => { search.value = ''; _sceneFilterText = ''; clearBtn.hidden = true; applySceneFilter(); });
+
+  // ── View toggle ───────────────────────────────────────────────────────────
+  topbar.querySelectorAll('.scene-vtog').forEach((b) => {
+    b.addEventListener('click', () => {
+      _sceneViewMode = b.dataset.mode;
+      topbar.querySelectorAll('.scene-vtog').forEach((x) => x.classList.toggle('active', x.dataset.mode === _sceneViewMode));
+      applySceneViewMode();
+      applySceneFilter();
+      if (_sceneViewMode === 'grid' && typeof loadScenePreviews === 'function') loadScenePreviews();
+      else if (typeof unloadScenePreviews === 'function') unloadScenePreviews();
+    });
+  });
+
+  refreshSceneOnAir(currentState);
   if (el('tab-media-content')?.classList.contains('active') && _assetsTab === 'overlays' && typeof loadScenePreviews === 'function') loadScenePreviews();
 }
 
-// Show/hide cards + group sections to match the active category chip + search text.
+// Show/hide grid cards or list rows to match active sidebar group + search text.
+function applySceneViewMode() {
+  const isGrid = _sceneViewMode === 'grid';
+  document.querySelectorAll('.scene-card-grid').forEach((g) => { g.hidden = !isGrid; });
+  document.querySelectorAll('.scene-row-list').forEach((l) => { l.hidden = isGrid; });
+}
+
 function applySceneFilter() {
   const wrap = el('scene-source-list');
   if (!wrap) return;
-  document.querySelectorAll('#scene-chips .scene-chip').forEach((c) =>
-    c.classList.toggle('active', c.dataset.group === _sceneFilterGroup));
+  document.querySelectorAll('#scene-nav .scene-nav-item').forEach((b) =>
+    b.classList.toggle('active', b.dataset.group === _sceneFilterGroup));
+  const isGrid = _sceneViewMode === 'grid';
   let totalShown = 0;
   wrap.querySelectorAll('.scene-group').forEach((section) => {
     const groupName = section.dataset.group;
     let shown = 0;
-    section.querySelectorAll('.scene-card').forEach((card) => {
-      const matchText = !_sceneFilterText || card.dataset.search.includes(_sceneFilterText);
+    const matchItem = (item) => {
+      const matchText = !_sceneFilterText || item.dataset.search.includes(_sceneFilterText);
       let matchGroup = true;
-      if (_sceneFilterGroup === '__onair') matchGroup = card.classList.contains('is-onair');
+      if (_sceneFilterGroup === '__onair') matchGroup = item.classList.contains('is-onair');
       else if (_sceneFilterGroup !== 'all') matchGroup = groupName === _sceneFilterGroup;
-      const show = matchText && matchGroup;
-      card.style.display = show ? '' : 'none';
+      return matchText && matchGroup;
+    };
+    section.querySelectorAll(isGrid ? '.scene-card' : '.scene-row').forEach((item) => {
+      const show = matchItem(item);
+      item.style.display = show ? '' : 'none';
       if (show) shown++;
     });
     section.style.display = shown ? '' : 'none';
@@ -10778,8 +11874,10 @@ function applySceneFilter() {
     empty = document.createElement('div');
     empty.id = 'scene-empty';
     empty.className = 'scene-empty';
-    empty.textContent = 'No scenes match your search.';
-    wrap.appendChild(empty);
+    empty.textContent = 'No overlays match your search.';
+    const groupsArea = el('scene-groups-area');
+    if (groupsArea) groupsArea.appendChild(empty);
+    else wrap.appendChild(empty);
   }
   empty.style.display = totalShown ? 'none' : '';
 }
@@ -10798,12 +11896,18 @@ function refreshSceneOnAir(state) {
     if (pill) pill.hidden = !on;
     if (on) liveCount++;
   });
+  wrap.querySelectorAll('.scene-row').forEach((row) => {
+    const key = row.dataset.live;
+    let on = false;
+    if (key && key !== 'always') on = !!getPath(state || {}, key);
+    row.classList.toggle('is-onair', on);
+    const pill = row.querySelector('.sr-air');
+    if (pill) pill.hidden = !on;
+  });
+  const navOnAir = el('scene-nav-onair');
+  if (navOnAir) { const c = navOnAir.querySelector('.scene-nav-count'); if (c) c.textContent = liveCount; }
   const badge = el('scene-onair-count');
-  if (badge) {
-    badge.textContent = liveCount ? `${liveCount} on air` : '';
-    badge.style.display = liveCount ? '' : 'none';
-  }
-  // Keep the on-air chip count fresh if that filter is active.
+  if (badge) { badge.textContent = liveCount ? `${liveCount} on air` : ''; badge.style.display = liveCount ? '' : 'none'; }
   if (_sceneFilterGroup === '__onair') applySceneFilter();
 }
 
@@ -10916,10 +12020,20 @@ el('se-revert')?.addEventListener('click', async () => {
   } catch (e) { seStatus(e.message || 'Revert failed.', false); }
 });
 
+function renderWatchlistInfo(data) {
+  const infoEl = el('ck-watchlist-info'); if (!infoEl) return;
+  const teams = (data.watchlist && data.watchlist.teams) || [];
+  if (!teams.length) {
+    infoEl.textContent = 'No teams — star teams on Events tab';
+  } else {
+    infoEl.textContent = teams.map((t) => t.name || '').filter(Boolean).join(', ');
+  }
+}
+
 // Reflect live visibility into the toggles + card highlight.
 function applyScenesCockpit(data) {
   renderCockpitStatus(data);
-  populateCockpitSpotlight(data);
+  renderWatchlistInfo(data);
   ONAIR_SCENES.forEach((s) => {
     const on = !!getPath(data, s.path);
     const cb = el('air-' + s.key);
@@ -10939,16 +12053,40 @@ document.querySelectorAll('.js-cut-all').forEach((btn) => {
 // Each button shows the graphic's live state (green "On Air" when visible) and a
 // single click flips it: live → hide, off → show with the row's current options.
 const GOLIVE_TRIGGERS = [
-  { toggle: 'ck-break-toggle',     state: 'breakScreen', msg: 'set_break',     show: () => startBreakFromRail() },
-  { toggle: 'ck-winner-toggle',    state: 'winner',      msg: 'set_winner',    show: () => ({ visible: true, side: el('ck-winner-side')?.value || 'blue' }) },
-  { toggle: 'ck-intro-toggle',     state: 'intro',       msg: 'set_intro',     show: () => ({ visible: true, side: el('ck-intro-side')?.value || 'blue' }) },
-  { toggle: 'ck-spotlight-toggle', state: 'spotlight',   msg: 'set_spotlight', show: () => ({ visible: true, playerName: el('ck-spotlight-player')?.value || '' }) },
-  { toggle: 'ck-veto-toggle',      state: 'veto',        msg: 'set_veto',      show: () => ({ visible: true }) },
+  { toggle: 'ck-break-toggle',    state: 'breakScreen', sceneKey: 'break',    msg: 'set_break',    show: () => startBreakFromRail() },
+  { toggle: 'ck-matchup-toggle',  state: 'matchup',     sceneKey: 'matchup',  pushOnly: true },
+  { toggle: 'ck-winner-toggle',   state: 'winner',      sceneKey: 'winner',   msg: 'set_winner',   show: () => ({ visible: true, side: el('ck-winner-side')?.value || 'blue' }) },
+  { toggle: 'ck-intro-toggle',    state: 'intro',       sceneKey: 'intro',    msg: 'set_intro',    show: () => ({ visible: true, side: el('ck-intro-side')?.value || 'blue' }) },
+  { toggle: 'ck-veto-toggle',     state: 'veto',        sceneKey: 'veto',     msg: 'set_veto',     show: () => ({ visible: true }) },
+  { toggle: 'ck-spotlight-toggle',state: 'watchlist',   sceneKey: 'spotlight',msg: 'set_watchlist',show: () => ({ visible: true }) },
+  { toggle: 'ck-schedule-toggle', state: 'upcoming',    sceneKey: 'schedule', msg: 'set_upcoming', show: () => ({ visible: true }) },
 ];
 GOLIVE_TRIGGERS.forEach((t) => {
   el(t.toggle)?.addEventListener('click', () => {
-    const live = !!(currentState[t.state] && currentState[t.state].visible);
-    send(t.msg, live ? { visible: false } : t.show());
+    const gfxLive = !!(currentState && currentState.gfxActive === t.sceneKey);
+    const overlayLive = !!(currentState && currentState[t.state] && currentState[t.state].visible);
+    const live = gfxLive || overlayLive;
+    if (live) {
+      if (!t.pushOnly) send(t.msg, { visible: false });
+      send('set_gfx_active', { scene: '' });
+      if (currentState) currentState.gfxActive = '';
+      if (typeof refreshTopBar === 'function') refreshTopBar('');
+    } else {
+      // Clear whichever GFX scene is currently active before pushing ours.
+      const prev = currentState && currentState.gfxActive;
+      if (prev && prev !== t.sceneKey && typeof SCENE_META !== 'undefined' && SCENE_META[prev]) {
+        const pm = SCENE_META[prev];
+        el(pm.clearId || ('btn-hide-' + prev))?.click();
+      }
+      if (!t.pushOnly) send(t.msg, t.show());
+      send('set_gfx_active', { scene: t.sceneKey });
+      if (currentState) currentState.gfxActive = t.sceneKey;
+      if (typeof refreshTopBar === 'function') refreshTopBar(t.sceneKey);
+      if (el('gfx-autocut-on')?.checked) {
+        const sc = (el('gfx-autocut-scene')?.value || '').trim();
+        if (sc) send('obs_switch_scene', { sceneName: sc });
+      }
+    }
   });
 });
 // All trigger graphics share one browser source (overlay/triggers.html).
@@ -10970,12 +12108,12 @@ function renderGoLive(data) {
   let liveCount = 0;
   GOLIVE_TRIGGERS.forEach((t) => {
     const btn = el(t.toggle); if (!btn) return;
-    const live = !!(data[t.state] && data[t.state].visible);
+    const live = !!(data[t.state] && data[t.state].visible) || data.gfxActive === t.sceneKey;
     if (live) liveCount++;
     const row = btn.closest('.gl-row');
     if (row) row.classList.toggle('live', live);
-    btn.textContent = live ? '● On Air' : 'Go Live';
-    btn.title = live ? 'Click to take off air' : 'Show this graphic';
+    btn.textContent = live ? '● On Air' : 'Push Live';
+    btn.title = live ? 'Click to take off air' : 'Push this graphic live';
   });
   const count = el('gl-live-count');
   if (count) count.textContent = liveCount ? `${liveCount} live` : '';
@@ -10996,6 +12134,7 @@ let _evTournaments = [];
 let _evFilter = 'upcoming';   // 'upcoming' | 'past' | 'all'
 let _evSearch = '';
 let _evMode = 'mine';         // 'mine' = my admin tournaments | 'search' = global start.gg search
+let _evSource = 'startgg';    // 'startgg' | 'challonge' | 'nxgen' — which platform the grid is showing
 
 function evStatus(msg, kind) {
   const s = el('ev-status'); if (!s) return;
@@ -11049,6 +12188,63 @@ async function evLoadTournaments(opts) {
     if (!opts.silent) evStatus(e.message || 'Failed to load. Check your start.gg token in Settings.', 'err');
   } finally { if (btn) btn.disabled = false; }
 }
+// Challonge and NXGEN tournaments are one bracket each (no nested "events" the way a start.gg
+// tournament can have), so they're normalized into the same card shape as start.gg tournaments —
+// same search/filter/sort in applyEventsView() — but tagged with `platform` so renderEventsGrid()
+// gives them inline "+ My Events" / "Set live" actions instead of a detail-drilldown click.
+async function evLoadChallongeTournaments() {
+  const btn = el('ev-load'); if (btn) btn.disabled = true;
+  evStatus('Loading your Challonge tournaments…');
+  try {
+    const r = await fetch('http://localhost:3000/api/challonge/my-tournaments', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.error || ('HTTP ' + r.status));
+    _evTournaments = (data.tournaments || []).map((t) => ({
+      platform: 'challonge', slug: t.slug, name: t.name,
+      startAt: t.startedAt ? Math.floor(new Date(t.startedAt).getTime() / 1000) : null,
+      numAttendees: t.participantsCount || 0, eventCount: 1, image: t.logo || '', game: t.gameName || '',
+    }));
+    evSetMode('Challonge — my tournaments');
+    applyEventsView();
+    evStatus(_evTournaments.length ? '' : 'No Challonge tournaments found — confirm your API key in Settings → Integrations.');
+  } catch (e) {
+    evStatus(e.message || 'Failed to load. Check your Challonge API key in Settings.', 'err');
+  } finally { if (btn) btn.disabled = false; }
+}
+async function evLoadNxgenTournaments() {
+  const btn = el('ev-load'); if (btn) btn.disabled = true;
+  evStatus('Loading your NXGEN events…');
+  try {
+    const r = await fetch('http://localhost:3000/api/nxgen/events', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ limit: 100, includePast: true }) });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.error || ('HTTP ' + r.status));
+    _evTournaments = (data.events || []).map((e) => ({
+      platform: 'nxgen', slug: e.slug, name: e.name,
+      startAt: e.eventDate ? Math.floor(new Date(e.eventDate).getTime() / 1000) || null : null,
+      numAttendees: e.participantCount || 0, eventCount: 1, image: e.coverImage || '', game: e.activity || '',
+    }));
+    evSetMode('NXGEN — events');
+    applyEventsView();
+    evStatus(_evTournaments.length ? '' : 'No NXGEN events found — confirm your API key in Settings → Integrations.');
+  } catch (e) {
+    evStatus(e.message || 'Failed to load. Check your NXGEN API key in Settings.', 'err');
+  } finally { if (btn) btn.disabled = false; }
+}
+// Switch which platform the Tournaments grid is showing.
+function evSetSource(src) {
+  _evSource = ['challonge', 'nxgen'].includes(src) ? src : 'startgg';
+  document.querySelectorAll('#ev-src-seg .ev-seg-btn').forEach((b) => b.classList.toggle('active', b.dataset.src === _evSource));
+  const searchbar = el('ev-searchbar'); if (searchbar) searchbar.style.display = _evSource === 'startgg' ? '' : 'none';
+  const loadBtn = el('ev-load');
+  if (loadBtn) loadBtn.textContent = _evSource === 'challonge' ? 'My Challonge tournaments' : _evSource === 'nxgen' ? 'My NXGEN events' : 'My tournaments';
+  _evTournaments = []; _evDetail = null;
+  const sec = el('ev-detail-section'); if (sec) sec.style.display = 'none';
+  const toolbar = el('ev-toolbar'); if (toolbar) toolbar.style.display = '';
+  if (_evSource === 'challonge') evLoadChallongeTournaments();
+  else if (_evSource === 'nxgen') evLoadNxgenTournaments();
+  else evLoadTournaments();
+}
+document.querySelectorAll('#ev-src-seg .ev-seg-btn').forEach((b) => b.addEventListener('click', () => evSetSource(b.dataset.src)));
 // Filter (upcoming/past/all) + name search + sort, then render. Default: upcoming,
 // soonest tournament first → farthest. Past: most recent first.
 function evStartTs(t) { return t.startAt || t.endAt || 0; }
@@ -11090,21 +12286,40 @@ function renderEventsGrid(list, now) {
   }
   list.forEach((t) => {
     const past = !evIsUpcoming(t, now);
-    const card = document.createElement('button');
+    const platform = t.platform || 'startgg';
+    // Start.gg tournaments can hold several events, so the whole card is a <button> that drills
+    // into the detail view (unchanged). Challonge/NXGEN tournaments are one bracket each — a plain
+    // <div> card with its own inline action <button>s (a <button> can't nest another <button>).
+    const card = document.createElement(platform === 'startgg' ? 'button' : 'div');
     card.className = 'ev-card' + (past ? ' ev-card-past' : '');
+    const platformBadge = platform !== 'startgg' ? `<span class="ev-pill ev-pill-src">${platform === 'challonge' ? 'CHALLONGE' : 'NXGEN'}</span>` : '';
     card.innerHTML = `<div class="ev-card-img"></div><div class="ev-card-body">
       <div class="ev-card-name"></div><div class="ev-card-meta"></div>
-      <div class="ev-card-stats"><span class="ev-pill"></span><span class="ev-pill"></span></div></div>`;
+      <div class="ev-card-stats">${platformBadge}<span class="ev-pill"></span><span class="ev-pill"></span></div>
+      ${platform !== 'startgg' ? '<div class="ev-card-acts"><button type="button" class="btn btn-secondary btn-sm ev-card-addmy">+ My Events</button><button type="button" class="btn btn-primary btn-sm ev-card-live">Set live</button></div>' : ''}</div>`;
     const img = card.querySelector('.ev-card-img');
     if (t.image) { const i = document.createElement('img'); i.src = t.image; i.alt = ''; img.appendChild(i); }
     else img.textContent = (t.name || '?').slice(0, 1).toUpperCase();
     card.querySelector('.ev-card-name').textContent = t.name || '(untitled)';
     const rel = evRelDate(evStartTs(t), now);
     card.querySelector('.ev-card-meta').textContent = [fmtEvDate(t.startAt), rel, [t.city, t.countryCode].filter(Boolean).join(', ')].filter(Boolean).join(' · ');
-    const pills = card.querySelectorAll('.ev-pill');
-    pills[0].textContent = (t.numAttendees || 0) + ' entrants';
-    pills[1].textContent = (t.eventCount || 0) + ' events';
-    card.addEventListener('click', () => evOpenDetail(t.slug));
+    const pills = card.querySelectorAll('.ev-pill:not(.ev-pill-src)');
+    pills[0].textContent = (t.numAttendees || 0) + (platform === 'startgg' ? ' entrants' : ' teams');
+    if (platform === 'startgg') pills[1].textContent = (t.eventCount || 0) + ' events'; else pills[1].remove();
+    if (platform === 'startgg') {
+      card.addEventListener('click', () => evOpenDetail(t.slug));
+    } else {
+      card.querySelector('.ev-card-addmy')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        send('add_my_event', { platform, platformSlug: t.slug, name: t.name, tournamentName: t.name, game: t.game || '', numEntrants: t.numAttendees || 0, startAt: t.startAt || null, image: t.image || '' });
+        const btn = e.currentTarget; btn.textContent = 'Added ✓'; setTimeout(() => { btn.textContent = '+ My Events'; }, 1400);
+      });
+      card.querySelector('.ev-card-live')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        send(platform === 'challonge' ? 'load_challonge_tournament' : 'load_nxgen_event', { slug: t.slug });
+        evStatus(`Loading "${t.name}" live…`);
+      });
+    }
     grid.appendChild(card);
   });
 }
@@ -11383,35 +12598,75 @@ function renderMyEvents() {
   list.innerHTML = '';
   const esc = (s) => (s || '').toString().replace(/&/g, '&amp;').replace(/</g, '&lt;');
   events.forEach((ev) => {
+    const platform = ev.platform || 'startgg';   // older saved entries have no field — they're start.gg
     const card = document.createElement('div'); card.className = 'my-event-card';
     const rosterN = Array.isArray(ev.roster) ? ev.roster.length : (ev.numEntrants || 0);
     const sub = [ev.game, rosterN ? rosterN + ' teams' : '', ev.tournamentName].filter(Boolean).join(' · ');
-    const isLive = (currentState.startgg && currentState.startgg.eventSlug) === ev.eventSlug;
-    card.innerHTML = evCardLogo(ev) + `<div class="me-info"><div class="me-name">${esc(ev.name || 'Event')}${isLive ? ' <span class="me-live">LIVE</span>' : ''}</div>`
-      + `<div class="me-sub">${esc(sub)}</div><div class="me-meta">${evSyncBadge(ev)}</div></div>`;
+    const isLive = platform === 'challonge' ? (currentState.challonge && currentState.challonge.tournamentSlug) === ev.platformSlug
+      : platform === 'nxgen' ? (currentState.nxgen && currentState.nxgen.eventSlug) === ev.platformSlug
+      : platform === 'manual' ? false
+      : (currentState.startgg && currentState.startgg.eventSlug) === ev.eventSlug;
+    const srcBadge = platform !== 'startgg' ? ` <span class="me-src-badge">${platform === 'challonge' ? 'Challonge' : platform === 'nxgen' ? 'NXGEN' : 'Manual'}</span>` : '';
+    const metaText = platform === 'startgg' ? evSyncBadge(ev) : platform === 'manual' ? 'Manual entry — no platform to sync from.' : 'No auto-sync for this platform yet — refresh manually as needed.';
+    card.innerHTML = evCardLogo(ev) + `<div class="me-info"><div class="me-name">${esc(ev.name || 'Event')}${srcBadge}${isLive ? ' <span class="me-live">LIVE</span>' : ''}</div>`
+      + `<div class="me-sub">${esc(sub)}</div><div class="me-meta">${metaText}</div></div>`;
     const acts = document.createElement('div'); acts.className = 'me-acts';
     const mk = (cls, label, fn, title) => { const b = document.createElement('button'); b.className = cls; b.innerHTML = label; if (title) b.title = title; b.addEventListener('click', fn); return b; };
-    // Core actions (always visible)
-    acts.appendChild(mk('btn btn-primary btn-sm', isLive ? 'Reload' : 'Set live', () => {
-      send('activate_startgg_event', { eventSlug: ev.eventSlug, tournamentSlug: ev.tournamentSlug });
-    }, 'Make this the broadcast event — imports teams + bracket + queue'));
-    acts.appendChild(mk('btn btn-secondary btn-sm', 'Seeding', () => openSeedingStudio(ev), 'Open the seeding studio for this event'));
-    acts.appendChild(mk('btn btn-secondary btn-sm', 'Pre-load teams', () => send('import_startgg_teams', { eventSlug: ev.eventSlug }), 'Import this event\'s entrants into your team library'));
-    const refr = mk('btn btn-ghost btn-sm', '↻', () => { refr.disabled = true; refr.textContent = '…'; send('refresh_my_event', { id: ev.id }); setTimeout(() => { refr.disabled = false; refr.innerHTML = '↻'; }, 2500); }, 'Refresh this event from the platform now');
-    acts.appendChild(refr);
-    acts.appendChild(mk('btn btn-ghost btn-sm', 'View event ↗', () => window.open('https://www.start.gg/' + ev.eventSlug, '_blank', 'noopener'), 'Open on platform'));
+    // "Set live" activates a platform's bracket/queue — nothing to activate for a manual entry.
+    if (platform !== 'manual') {
+      acts.appendChild(mk('btn btn-primary btn-sm', isLive ? 'Reload' : 'Set live', () => {
+        if (platform === 'challonge') send('load_challonge_tournament', { slug: ev.platformSlug });
+        else if (platform === 'nxgen') send('load_nxgen_event', { slug: ev.platformSlug });
+        else send('activate_startgg_event', { eventSlug: ev.eventSlug, tournamentSlug: ev.tournamentSlug });
+      }, 'Make this the broadcast event — imports teams + bracket + queue'));
+    }
+    acts.appendChild(mk('btn btn-secondary btn-sm', 'Seeding', () => openSeedingStudio(ev), 'Open the seeding studio for this event — add teams by hand here'));
+    if (platform === 'startgg') {
+      acts.appendChild(mk('btn btn-secondary btn-sm', 'Pre-load teams', () => send('import_startgg_teams', { eventSlug: ev.eventSlug }), 'Import this event\'s entrants into your team library'));
+      const refr = mk('btn btn-ghost btn-sm', '↻', () => { refr.disabled = true; refr.textContent = '…'; send('refresh_my_event', { id: ev.id }); setTimeout(() => { refr.disabled = false; refr.innerHTML = '↻'; }, 2500); }, 'Refresh this event from the platform now');
+      acts.appendChild(refr);
+      acts.appendChild(mk('btn btn-ghost btn-sm', 'View event ↗', () => window.open('https://www.start.gg/' + ev.eventSlug, '_blank', 'noopener'), 'Open on platform'));
+    } else if (platform === 'challonge') {
+      acts.appendChild(mk('btn btn-secondary btn-sm', 'Pre-load teams', () => send('import_challonge_teams', { slug: ev.platformSlug }), 'Import this tournament\'s participants into your team library'));
+      acts.appendChild(mk('btn btn-ghost btn-sm', 'View event ↗', () => window.open('https://challonge.com/' + ev.platformSlug, '_blank', 'noopener'), 'Open on platform'));
+    } else if (platform === 'manual' && ev.url) {
+      acts.appendChild(mk('btn btn-ghost btn-sm', 'View event ↗', () => window.open(ev.url, '_blank', 'noopener'), 'Open the link you saved for this event'));
+    }
+    // NXGEN has no standalone "import by slug" or confirmed public tournament URL yet — Set
+    // live/Seeding above still work; those two extra actions are start.gg/Challonge-only for now.
 
-    // Platform-linking sub-row — hidden until the gear (settings) button reveals it.
-    const linkRow = document.createElement('div'); linkRow.className = 'me-linking';
-    const isSynced = !!(ev.challongeSync && ev.challongeSync.slug);
-    linkRow.style.display = isSynced ? 'flex' : 'none';   // auto-open when already linked
-    const gear = mk('btn btn-ghost btn-sm me-gear', '⚙ Link platform', () => {
-      const show = linkRow.style.display === 'none';
-      linkRow.style.display = show ? 'flex' : 'none';
-      gear.classList.toggle('is-on', show);
-    }, 'Link / sync this event to another platform (Challonge)');
-    gear.classList.toggle('is-on', isSynced);
-    acts.appendChild(gear);
+    // Platform-linking sub-row (push a start.gg event to a Challonge mirror for live score sync) —
+    // only meaningful for a start.gg-sourced event; doesn't apply to an already-Challonge/NXGEN one.
+    let linkRow = null;
+    if (platform === 'startgg') {
+      linkRow = document.createElement('div'); linkRow.className = 'me-linking';
+      const isSynced = !!(ev.challongeSync && ev.challongeSync.slug);
+      linkRow.style.display = isSynced ? 'flex' : 'none';   // auto-open when already linked
+      const gear = mk('btn btn-ghost btn-sm me-gear', '⚙ Link platform', () => {
+        const show = linkRow.style.display === 'none';
+        linkRow.style.display = show ? 'flex' : 'none';
+        gear.classList.toggle('is-on', show);
+      }, 'Link / sync this event to another platform (Challonge)');
+      gear.classList.toggle('is-on', isSynced);
+      acts.appendChild(gear);
+
+      linkRow.appendChild(mk('btn btn-blue btn-sm', 'Push / Sync to Challonge', () => openEvSyncModal(ev),
+        'Full workflow: download start.gg data, map players via CSV, create/select a Challonge event, push seeding, keep scores synced live'));
+      linkRow.appendChild(mk('btn btn-ghost btn-sm', 'Link existing', () => openChalLinkModal(ev), 'Link an existing Challonge tournament for real-time score sync'));
+      if (isSynced) {
+        const linkBadge = document.createElement('span');
+        linkBadge.style.cssText = 'font-size:10px;padding:2px 7px;border-radius:3px;background:rgba(16,185,129,.15);color:#86efac;white-space:nowrap;cursor:default;align-self:center;';
+        const errMark = ev.challongeSync.lastError ? ' !' : (ev.challongeSync.enabled ? '' : ' (paused)');
+        linkBadge.textContent = `Synced: ${ev.challongeSync.slug}${errMark}`;
+        if (ev.challongeSync.lastError) linkBadge.title = ev.challongeSync.lastError;
+        linkRow.appendChild(linkBadge);
+        const unlink = mk('btn btn-ghost btn-sm', 'Unlink', () => {
+          if (unlink.dataset.armed) { send('unlink_event_challonge', { eventId: ev.id }); return; }
+          unlink.dataset.armed = '1'; unlink.textContent = 'Confirm?'; setTimeout(() => { delete unlink.dataset.armed; unlink.textContent = 'Unlink'; }, 2400);
+        }, 'Remove the real-time Challonge sync link for this event');
+        linkRow.appendChild(unlink);
+      }
+    }
 
     const del = mk('btn btn-ghost btn-sm me-del', '✕', () => {
       if (del.dataset.armed) { send('remove_my_event', { id: ev.id }); return; }
@@ -11419,29 +12674,67 @@ function renderMyEvents() {
     }, 'Remove from My Events');
     acts.appendChild(del);
 
-    // Linking actions live in the sub-row: the full push/sync workflow + link-existing + unlink.
-    linkRow.appendChild(mk('btn btn-blue btn-sm', 'Push / Sync to Challonge', () => openEvSyncModal(ev),
-      'Full workflow: download start.gg data, map players via CSV, create/select a Challonge event, push seeding, keep scores synced live'));
-    linkRow.appendChild(mk('btn btn-ghost btn-sm', 'Link existing', () => openChalLinkModal(ev), 'Link an existing Challonge tournament for real-time score sync'));
-    if (isSynced) {
-      const linkBadge = document.createElement('span');
-      linkBadge.style.cssText = 'font-size:10px;padding:2px 7px;border-radius:3px;background:rgba(16,185,129,.15);color:#86efac;white-space:nowrap;cursor:default;align-self:center;';
-      const errMark = ev.challongeSync.lastError ? ' !' : (ev.challongeSync.enabled ? '' : ' (paused)');
-      linkBadge.textContent = `Synced: ${ev.challongeSync.slug}${errMark}`;
-      if (ev.challongeSync.lastError) linkBadge.title = ev.challongeSync.lastError;
-      linkRow.appendChild(linkBadge);
-      const unlink = mk('btn btn-ghost btn-sm', 'Unlink', () => {
-        if (unlink.dataset.armed) { send('unlink_event_challonge', { eventId: ev.id }); return; }
-        unlink.dataset.armed = '1'; unlink.textContent = 'Confirm?'; setTimeout(() => { delete unlink.dataset.armed; unlink.textContent = 'Unlink'; }, 2400);
-      }, 'Remove the real-time Challonge sync link for this event');
-      linkRow.appendChild(unlink);
-    }
-
     card.appendChild(acts);
-    card.appendChild(linkRow);
+    if (linkRow) card.appendChild(linkRow);
     list.appendChild(card);
   });
 }
+// Manual "+ Add Event" — a My Event with no platform behind it (a LAN, a one-off, anything not on
+// start.gg/Challonge/NXGEN). No "Set live"/pre-load/auto-sync since there's no API to pull from;
+// it's a plain reference you seed and manage by hand (Seeding tab already supports manual entry).
+let _meAddLogo = '';
+function meAddResetForm() {
+  ['me-add-name', 'me-add-tournament', 'me-add-date', 'me-add-entrants', 'me-add-url'].forEach((id) => { const e = el(id); if (e) e.value = ''; });
+  const g = el('me-add-game'); if (g) g.value = '';
+  _meAddLogo = '';
+  const lp = el('me-add-logo-preview'), le = el('me-add-logo-empty');
+  if (lp) { lp.style.display = 'none'; lp.removeAttribute('src'); }
+  if (le) le.style.display = '';
+}
+el('me-add-btn')?.addEventListener('click', () => {
+  const form = el('me-add-form'); if (!form) return;
+  const show = form.style.display === 'none';
+  form.style.display = show ? '' : 'none';
+  if (show) { const g = el('me-add-game'); if (g) lgGameOptions(g); el('me-add-name')?.focus(); }
+});
+el('me-add-cancel')?.addEventListener('click', () => {
+  const form = el('me-add-form'); if (form) form.style.display = 'none';
+  meAddResetForm();
+});
+el('me-add-logo-preview')?.addEventListener('click', () => el('me-add-logo-file')?.click());
+el('me-add-logo-empty')?.addEventListener('click', () => el('me-add-logo-file')?.click());
+el('me-add-logo-clear')?.addEventListener('click', () => {
+  _meAddLogo = '';
+  const lp = el('me-add-logo-preview'), le = el('me-add-logo-empty');
+  if (lp) { lp.style.display = 'none'; lp.removeAttribute('src'); }
+  if (le) le.style.display = '';
+});
+el('me-add-logo-file')?.addEventListener('change', async function () {
+  const f = this.files && this.files[0]; this.value = ''; if (!f) return;
+  try {
+    _meAddLogo = await fileToBase64(f, 400);
+    const lp = el('me-add-logo-preview'), le = el('me-add-logo-empty');
+    if (lp) { lp.src = _meAddLogo; lp.style.display = ''; }
+    if (le) le.style.display = 'none';
+  } catch (e) { evStatus('Could not load logo.', 'err'); }
+});
+el('me-add-save')?.addEventListener('click', () => {
+  const name = (el('me-add-name')?.value || '').trim();
+  if (!name) { evStatus('Enter an event name.', 'err'); return; }
+  const tournamentName = (el('me-add-tournament')?.value || '').trim();
+  const game = el('me-add-game')?.value || '';
+  const dateVal = el('me-add-date')?.value || '';
+  const startAt = dateVal ? Math.floor(new Date(dateVal + 'T00:00:00').getTime() / 1000) : null;
+  const numEntrants = Number(el('me-add-entrants')?.value) || 0;
+  const url = (el('me-add-url')?.value || '').trim();
+  send('add_my_event', {
+    platform: 'manual', platformSlug: 'manual-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+    name, tournamentName, game, startAt, numEntrants, image: _meAddLogo, url,
+  });
+  el('me-add-form') && (el('me-add-form').style.display = 'none');
+  meAddResetForm();
+  evStatus(`Added "${name}" to MY EVENTS.`, 'ok');
+});
 // ── Cross-Platform Event Sync Modal ───────────────────────────────────────────
 
 let _evSyncEvent = null;             // My Event being synced
@@ -12112,6 +13405,9 @@ let _seedLeagueId = '';         // optional league cross-reference (returning te
 let _seedMode = 'rl-6mans';     // active rank system (per-event)
 let _seedAgg = 'best';          // how a team's value aggregates its players: best | avg | sum
 let _seedSortKey = 'rank';      // current order: rank | league | seed | name
+let _seedTab = 'verified';      // active seeding tab: 'verified' | 'unverified'
+let _seedUnvSort = 'unranked';  // unverified tab sort: 'unranked' | 'name'
+let _seedUnvShowAll = false;    // when true, show all teams including verified ones
 
 // Rank systems per title. kind 'num' = free number (MMR/Premier/Elo); 'tier' = named tiers + division.
 const SEED_RANK_MODES = {
@@ -12126,6 +13422,390 @@ const SEED_RANK_MODES = {
   'generic':  { label: 'Generic · number / Elo',    kind: 'num',  ph: 'number' },
 };
 function seedMode() { return SEED_RANK_MODES[_seedMode] || SEED_RANK_MODES.generic; }
+
+// A team is "verified" when every player has a non-empty rank.
+function isTeamVerified(row) {
+  const ps = row.players || [];
+  return ps.length > 0 && ps.every((p) => p.rank && p.rank.trim());
+}
+
+function seedUpdateTabCounts() {
+  const vBtn = el('seed-tab-verified'), uvBtn = el('seed-tab-unverified');
+  if (!vBtn || !uvBtn) return;
+  const verified = _seedRows.filter((r) => isTeamVerified(r)).length;
+  const unverified = _seedRows.length - verified;
+  vBtn.textContent = 'Verified' + (_seedRows.length ? ` (${verified})` : '');
+  uvBtn.textContent = 'Unverified' + (_seedRows.length ? ` (${unverified})` : '');
+}
+
+function seedSwitchTab(tab) {
+  _seedTab = tab;
+  const vPanel = el('seed-verified-panel'), uvPanel = el('seed-unverified-panel');
+  const vBtn = el('seed-tab-verified'), uvBtn = el('seed-tab-unverified');
+  if (vPanel)  vPanel.style.display  = tab === 'verified'   ? '' : 'none';
+  if (uvPanel) uvPanel.style.display = tab === 'unverified' ? '' : 'none';
+  if (vBtn)  vBtn.classList.toggle('active',  tab === 'verified');
+  if (uvBtn) uvBtn.classList.toggle('active', tab === 'unverified');
+  if (tab === 'unverified') { seedRenderUnverified(); }
+}
+
+// The rank string a lookup result yields under the current seed mode (single source of truth for
+// both the "Use" buttons and the auto-apply in "Lookup All"). Returns null when nothing is usable.
+function _6mUseRank(result) {
+  if (!result || !result.found) return null;
+  if (_seedMode === 'rl-6mans' || _seedMode === 'rl-tier') return result.rank || null;
+  if (_seedMode === 'rl-mmr') return result.elo > 0 ? String(result.elo) : null;
+  return null;
+}
+function _tgUseRank(result) {
+  if (!result || !result.found) return null;
+  if (_seedMode === 'rl-6mans') return result.sixmansTier || null;
+  if (_seedMode === 'rl-mmr') return result.mmr != null ? String(Math.round(result.mmr)) : null;
+  if (_seedMode === 'rl-tier') return result.rank || result.tier || null;
+  return null;
+}
+// Build the rl6mans lookup result block for one player.
+function build6mansResult(result, ti, pi) {
+  const esc = (s) => (s || '').toString().replace(/&/g, '&amp;').replace(/</g, '&lt;');
+  if (!result || !result.found) {
+    const msg = (result && result.error === 'not_found')
+      ? 'Not on rl6mans.com — enter rank manually'
+      : 'Not found — enter rank manually';
+    return `<div class="seed-6m-result seed-6m-err">${msg}</div>`;
+  }
+  const useRank = _6mUseRank(result);
+  const useBtn = useRank
+    ? `<button class="btn btn-primary btn-xs seed-6m-use" data-ti="${ti}" data-pi="${pi}" data-rank="${esc(useRank)}">Use ${esc(useRank)}</button>`
+    : '';
+  return `<div class="seed-6m-result">
+    <span class="seed-6m-rank">${esc(result.rank || 'Unranked')}</span>
+    ${result.elo > 0 ? `<span class="seed-6m-elo">${result.elo} ELO</span>` : ''}
+    ${result.region ? `<span class="seed-6m-region">${esc(result.region)}</span>` : ''}
+    ${result.wins != null ? `<span class="seed-6m-record">${result.wins}W-${result.losses || 0}L</span>` : ''}
+    ${useBtn}
+  </div>`;
+}
+
+// Look up one player on rl6mans.com and store the result on the player object.
+async function _6mansLookupPlayer(ti, pi, name) {
+  const resp = await fetch('http://localhost:3000/api/rl6mans/profile', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name }),
+  });
+  const data = await resp.json();
+  const row = _seedRows[ti]; if (!row) return null;
+  const p = row.players[pi]; if (!p) return null;
+  p._6mResult = data.ok ? data.profile : { found: false, error: data.error || 'network' };
+  return p._6mResult;
+}
+
+// Build the tracker.gg in-game rank result block.
+function buildTGResult(result, ti, pi) {
+  const esc = (s) => (s || '').toString().replace(/&/g, '&amp;').replace(/</g, '&lt;');
+  if (!result || !result.found) {
+    const errMap = {
+      not_found:      'Not found on tracker.gg',
+      load_failed:    'Page failed to load',
+      timeout:        'Timed out — try again',
+      render_timeout: 'Rank data not found on page',
+      no_rank:        'No ranked data on profile',
+    };
+    const msg = errMap[result && result.error] || 'Lookup failed — enter rank manually';
+    return `<div class="seed-tg-result seed-tg-err">${msg}</div>`;
+  }
+  const useRank = _tgUseRank(result);
+  const useBtn = useRank
+    ? `<button class="btn btn-primary btn-xs seed-tg-use" data-ti="${ti}" data-pi="${pi}" data-rank="${esc(useRank)}">Use ${esc(useRank)}</button>`
+    : '';
+  return `<div class="seed-tg-result">
+    <span class="seed-tg-tier">${esc(result.tier || '')}${result.division ? ' ' + esc(result.division) : ''}</span>
+    ${result.mmr != null ? `<span class="seed-tg-mmr">${Math.round(result.mmr).toLocaleString()} MMR</span>` : ''}
+    ${result.sixmansTier ? `<span class="seed-tg-6mmap">6mans: ${esc(result.sixmansTier)}</span>` : ''}
+    ${useBtn}
+  </div>`;
+}
+
+// Look up a player's in-game rank on tracker.gg via the in-app browser (no API key required).
+async function _tgLookupByAccount(ti, pi, platform, username) {
+  const resp = await fetch('http://localhost:3000/api/trackergg/lookup', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ platform, username }),
+  });
+  const data = await resp.json();
+  const row = _seedRows[ti]; if (!row) return null;
+  const p = row.players[pi]; if (!p) return null;
+  p._tgResult = data;
+  return data;
+}
+
+// Render the Unverified tab — fills #seed-unv-list only (sidebar is static HTML).
+function seedRenderUnverified() {
+  const panel = el('seed-unverified-panel');
+  if (!panel || panel.style.display === 'none') return;
+  const list = el('seed-unv-list'); if (!list) return;
+  const esc = (s) => (s || '').toString().replace(/&/g, '&amp;').replace(/</g, '&lt;');
+  list.innerHTML = '';
+  seedUpdateTabCounts();
+
+  // Keep sort buttons in sync with state.
+  panel.querySelectorAll('.seed-unv-sortbtn').forEach((b) => b.classList.toggle('active', b.dataset.unvsort === _seedUnvSort));
+  const showAllBtn = el('seed-unv-showall-btn');
+  if (showAllBtn) showAllBtn.classList.toggle('is-on', _seedUnvShowAll);
+
+  // Build display rows.
+  let rows = _seedRows.map((row, ti) => ({ row, ti }));
+  if (!_seedUnvShowAll) rows = rows.filter(({ row }) => !isTeamVerified(row));
+
+  if (!rows.length) {
+    list.innerHTML = `<div class="seed-empty">${_seedUnvShowAll ? 'No teams loaded yet.' : 'All teams are verified — every player has a rank.'}</div>`;
+    return;
+  }
+
+  // Sort.
+  if (_seedUnvSort === 'name') {
+    rows.sort((a, b) => (a.row.name || '').localeCompare(b.row.name || ''));
+  } else {
+    rows.sort((a, b) => {
+      const ua = (a.row.players || []).filter((p) => !p.rank || !p.rank.trim()).length;
+      const ub = (b.row.players || []).filter((p) => !p.rank || !p.rank.trim()).length;
+      return ub - ua;
+    });
+  }
+
+  const mode = seedMode();
+  let listId = '';
+  if (mode.kind === 'tier' && mode.tiers) {
+    listId = 'seed-unv-tier-opts';
+    let dl = document.getElementById(listId);
+    if (!dl) { dl = document.createElement('datalist'); dl.id = listId; list.appendChild(dl); }
+    const opts = mode.nodiv ? mode.tiers.slice() : mode.tiers.flatMap((t) => ['III', 'II', 'I'].map((d) => `${t} ${d}`));
+    dl.innerHTML = opts.map((o) => `<option value="${esc(o)}">`).join('');
+  }
+
+  rows.forEach(({ row, ti }) => {
+    const card = document.createElement('div');
+    card.className = 'seed-team';
+    const unvCount = (row.players || []).filter((p) => !p.rank || !p.rank.trim()).length;
+    const statusBadge = unvCount === 0
+      ? `<span class="seed-unv-verified-badge">Verified</span>`
+      : `<span class="seed-unv-badge">${unvCount} unranked</span>`;
+    const head = `<div class="seed-team-head">
+      <span class="seed-num">${ti + 1}</span>
+      <div class="seed-team-name">${esc(row.name) || '(unnamed)'}</div>
+      ${statusBadge}
+    </div>`;
+
+    const playersHtml = (row.players || []).map((p, pi) => {
+      const isRanked = p.rank && p.rank.trim();
+      // Tracker.gg lookup row — pre-filled with the player's known Epic/Steam account. start.gg hides
+      // OTHER players' connected accounts (its `authorizations` field is self-only), so epic/steam are
+      // usually empty; fall back to the gamertag as the Epic username — for RL it's almost always the
+      // player's Epic display name — so the row is ready to look up (and editable) instead of blank.
+      const tgPlt = p.epic ? 'epic' : p.steam ? 'steam' : 'epic';
+      const tgUsr = esc(p.epic || p.steam || p.gamerTag || '');
+      const tgRowHtml = `<div class="seed-tg-row">
+        <select class="seed-tg-plat-sel">
+          <option value="epic"${tgPlt === 'epic' ? ' selected' : ''}>epic</option>
+          <option value="steam"${tgPlt === 'steam' ? ' selected' : ''}>steam</option>
+          <option value="psn">psn</option>
+          <option value="xbl">xbl</option>
+          <option value="switch">switch</option>
+        </select>
+        <input class="input-text seed-tg-id-inp" value="${tgUsr}" placeholder="username">
+        <button class="btn btn-ghost btn-xs seed-tg-rank-btn" data-ti="${ti}" data-pi="${pi}" title="Look up in-game rank on tracker.gg">Rank</button>
+      </div>`;
+      const m6ResultHtml = p._6mResult ? build6mansResult(p._6mResult, ti, pi) : '';
+      const tgResultHtml = p._tgResult ? buildTGResult(p._tgResult, ti, pi) : '';
+      return `<div class="seed-unv-player${isRanked ? ' seed-unv-player-ranked' : ''}" data-ti="${ti}" data-pi="${pi}">
+        <div class="seed-unv-player-top">
+          <span class="seed-ptag">${esc(p.gamerTag) || '(player)'}</span>
+          <input class="input-text seed-prank seed-unv-prank" data-ti="${ti}" data-pi="${pi}"
+            value="${esc(p.rank)}" placeholder="${esc(mode.ph || 'rank')}"${listId ? ` list="${listId}"` : ''}
+            title="Enter rank manually">
+          <button class="btn btn-ghost btn-xs seed-6m-lookup" data-ti="${ti}" data-pi="${pi}" data-name="${esc(p.gamerTag)}" title="Look up on rl6mans.com">6mans</button>
+        </div>
+        ${tgRowHtml}
+        ${m6ResultHtml}
+        ${tgResultHtml}
+      </div>`;
+    }).join('');
+
+    card.innerHTML = head + `<div class="seed-players-wrap">${playersHtml}</div>`;
+    list.appendChild(card);
+  });
+
+  // Rank inputs — immediate edit without going to verified tab.
+  list.querySelectorAll('.seed-unv-prank').forEach((inp) => {
+    inp.addEventListener('mousedown', (e) => e.stopPropagation());
+    inp.addEventListener('change', function () {
+      const ti = +this.dataset.ti, pi = +this.dataset.pi;
+      const row = _seedRows[ti]; if (!row) return;
+      const p = row.players[pi]; if (!p) return;
+      p.rank = this.value.trim();
+      p.rankValue = seedRankValue(p.rank, _seedMode);
+      seedRecomputeValues();
+      const playerDiv = this.closest('.seed-unv-player');
+      if (playerDiv) playerDiv.classList.toggle('seed-unv-player-ranked', !!p.rank);
+      const card2 = this.closest('.seed-team');
+      if (card2) {
+        const badge = card2.querySelector('.seed-unv-badge, .seed-unv-verified-badge');
+        const unvLeft = (row.players || []).filter((pp) => !pp.rank || !pp.rank.trim()).length;
+        if (badge) {
+          if (unvLeft === 0) { badge.className = 'seed-unv-verified-badge'; badge.textContent = 'Verified'; }
+          else { badge.className = 'seed-unv-badge'; badge.textContent = unvLeft + ' unranked'; }
+        }
+      }
+      seedUpdateTabCounts();
+    });
+  });
+
+  // Per-player 6mans lookup buttons.
+  list.querySelectorAll('.seed-6m-lookup').forEach((btn) => {
+    btn.addEventListener('click', async function () {
+      const ti = +this.dataset.ti, pi = +this.dataset.pi, name = this.dataset.name;
+      this.disabled = true; this.textContent = '...';
+      try {
+        await _6mansLookupPlayer(ti, pi, name);
+        seedRenderUnverified();
+      } catch (e) {
+        this.disabled = false; this.textContent = '6mans';
+        seedStatus('6mans lookup failed: ' + (e.message || 'network error'), 'err');
+      }
+    });
+  });
+
+  // Use buttons — apply 6mans looked-up rank.
+  list.querySelectorAll('.seed-6m-use').forEach((btn) => {
+    btn.addEventListener('click', function () {
+      const ti = +this.dataset.ti, pi = +this.dataset.pi, rank = this.dataset.rank;
+      const row = _seedRows[ti]; if (!row) return;
+      const p = row.players[pi]; if (!p) return;
+      p.rank = rank; p.rankValue = seedRankValue(rank, _seedMode);
+      seedRecomputeValues();
+      seedRenderUnverified();
+      seedRender();
+    });
+  });
+
+  // Rank buttons — tracker.gg in-game rank lookup (reads platform + username from the row's inputs).
+  list.querySelectorAll('.seed-tg-rank-btn').forEach((btn) => {
+    btn.addEventListener('click', async function () {
+      const ti = +this.dataset.ti, pi = +this.dataset.pi;
+      const row2 = this.closest('.seed-tg-row');
+      const platform = row2 ? (row2.querySelector('.seed-tg-plat-sel') || {}).value || 'epic' : 'epic';
+      const username = (row2 ? (row2.querySelector('.seed-tg-id-inp') || {}).value : '') || '';
+      if (!username.trim()) { seedStatus('Enter a username first.', 'warn'); return; }
+      this.disabled = true; this.textContent = '...';
+      try {
+        await _tgLookupByAccount(ti, pi, platform, username.trim());
+        seedRenderUnverified();
+      } catch (e) {
+        this.disabled = false; this.textContent = 'Rank';
+        seedStatus('tracker.gg lookup failed: ' + (e.message || 'network error'), 'err');
+      }
+    });
+  });
+
+  // Persist tracker.gg account edits onto the player (p.epic / p.steam) so a corrected username or
+  // platform survives the frequent re-renders (every 6mans lookup re-renders the list) and is saved
+  // with the seeding. Without this, an edit would revert to the gamertag pre-fill on the next render.
+  list.querySelectorAll('.seed-tg-row').forEach((rowEl) => {
+    const wrap = rowEl.closest('.seed-unv-player'); if (!wrap) return;
+    const ti = +wrap.dataset.ti, pi = +wrap.dataset.pi;
+    const inp = rowEl.querySelector('.seed-tg-id-inp');
+    const sel = rowEl.querySelector('.seed-tg-plat-sel');
+    const persist = () => {
+      const p = _seedRows[ti] && _seedRows[ti].players[pi]; if (!p) return;
+      const plat = (sel && sel.value) || 'epic';
+      const v = (inp && inp.value.trim()) || '';
+      if (plat === 'steam') p.steam = v; else if (plat === 'epic') p.epic = v;
+    };
+    if (inp) { inp.addEventListener('mousedown', (e) => e.stopPropagation()); inp.addEventListener('change', persist); }
+    if (sel) sel.addEventListener('change', persist);
+  });
+
+  // Use buttons — apply tracker.gg looked-up rank.
+  list.querySelectorAll('.seed-tg-use').forEach((btn) => {
+    btn.addEventListener('click', function () {
+      const ti = +this.dataset.ti, pi = +this.dataset.pi, rank = this.dataset.rank;
+      const row = _seedRows[ti]; if (!row) return;
+      const p = row.players[pi]; if (!p) return;
+      p.rank = rank; p.rankValue = seedRankValue(rank, _seedMode);
+      seedRecomputeValues();
+      seedRenderUnverified();
+      seedRender();
+    });
+  });
+
+  // Lookup All button — look up every unranked player on rl6mans.com.
+  const lookupAllBtn = el('seed-unv-lookup-all');
+  if (lookupAllBtn) {
+    const newBtn = lookupAllBtn.cloneNode(true);
+    lookupAllBtn.replaceWith(newBtn);
+    newBtn.addEventListener('click', async function () {
+      const targets = [];
+      rows.forEach(({ row, ti }) => {
+        (row.players || []).forEach((p, pi) => {
+          if (!p.rank || !p.rank.trim()) targets.push({ ti, pi, name: p.gamerTag });
+        });
+      });
+      if (!targets.length) { seedStatus('No unranked players to look up.', 'info'); return; }
+      const statusEl = el('seed-unv-lookup-status');
+      this.disabled = true;
+      const stillUnranked = () => targets.filter((t) => {
+        const p = _seedRows[t.ti] && _seedRows[t.ti].players[t.pi];
+        return p && (!p.rank || !p.rank.trim());
+      });
+      const apply = (t, useRank) => {
+        const p = _seedRows[t.ti] && _seedRows[t.ti].players[t.pi];
+        if (p && useRank) { p.rank = useRank; p.rankValue = seedRankValue(useRank, _seedMode); return true; }
+        return false;
+      };
+      let got6m = 0, gotTg = 0;
+
+      // Pass 1 — rl6mans.com by gamertag. Confident hits auto-apply (the profile is an exact-tag match).
+      this.textContent = `rl6mans 0/${targets.length}`;
+      if (statusEl) { statusEl.style.display = ''; statusEl.textContent = `rl6mans 0 / ${targets.length}`; }
+      let d1 = 0;
+      for (const t of targets) {
+        try { if (apply(t, _6mUseRank(await _6mansLookupPlayer(t.ti, t.pi, t.name)))) got6m++; } catch (_) {}
+        d1++;
+        this.textContent = `rl6mans ${d1}/${targets.length}`;
+        if (statusEl) statusEl.textContent = `rl6mans ${d1} / ${targets.length}`;
+      }
+
+      // Pass 2 — tracker.gg fallback for anyone still unranked, using the pre-filled account
+      // (Epic = gamertag by default). Best-effort: a gamertag that isn't the player's Epic won't match.
+      const left = stillUnranked();
+      if (left.length) {
+        let d2 = 0;
+        for (const t of left) {
+          const p = _seedRows[t.ti] && _seedRows[t.ti].players[t.pi];
+          if (p) {
+            const platform = p.epic ? 'epic' : p.steam ? 'steam' : 'epic';
+            const username = (p.epic || p.steam || p.gamerTag || '').trim();
+            if (username) {
+              try { if (apply(t, _tgUseRank(await _tgLookupByAccount(t.ti, t.pi, platform, username)))) gotTg++; } catch (_) {}
+            }
+          }
+          d2++;
+          this.textContent = `tracker.gg ${d2}/${left.length}`;
+          if (statusEl) statusEl.textContent = `tracker.gg ${d2} / ${left.length}`;
+        }
+      }
+
+      this.disabled = false; this.textContent = 'Lookup All';
+      if (statusEl) statusEl.style.display = 'none';
+      seedRecomputeValues();
+      seedRenderUnverified();
+      seedRender();
+      const remaining = stillUnranked().length;
+      const parts = [`${got6m} from rl6mans`];
+      if (gotTg) parts.push(`${gotTg} from tracker.gg`);
+      seedStatus(`Auto-ranked ${parts.join(' + ')}` + (remaining ? ` · ${remaining} still need a manual rank` : ' · every player ranked'), remaining ? 'warn' : 'ok');
+    });
+  }
+}
 // Best default rank system for a game id/name.
 function seedDefaultMode(game) {
   const g = (game || '').toString().toLowerCase();
@@ -12154,11 +13834,16 @@ function seedRankValue(str, modeKey) {
   return ti * 10 + div;
 }
 // A team's seed value from its players' ranks, under the active aggregation (best | avg | sum).
+// For avg: divide by ALL players (not just ranked ones) so teams with unranked players sort lower.
 function seedTeamValue(row) {
-  const vals = (row.players || []).map((p) => p.rankValue).filter((v) => v != null && Number.isFinite(v));
+  const ps = row.players || [];
+  const vals = ps.map((p) => p.rankValue).filter((v) => v != null && Number.isFinite(v));
   if (!vals.length) return null;
   if (_seedAgg === 'sum') return vals.reduce((a, b) => a + b, 0);
-  if (_seedAgg === 'avg') return Math.round((vals.reduce((a, b) => a + b, 0) / vals.length) * 10) / 10;
+  if (_seedAgg === 'avg') {
+    const total = ps.length || 1;
+    return Math.round((vals.reduce((a, b) => a + b, 0) / total) * 10) / 10;
+  }
   return Math.max(...vals);   // best player (default)
 }
 // Re-derive every player's rankValue under the current mode (after a mode change / import).
@@ -12306,6 +13991,8 @@ function openSeedingStudio(ev) {
   _seedEvent = (currentState.myEvents || []).find((e) => e.id === ev.id || e.eventSlug === ev.eventSlug) || ev;
   el('seed-title').textContent = 'Seeding — ' + (_seedEvent.name || 'event');
   seedShowStudio(true);
+  _seedUnvSort = 'unranked'; _seedUnvShowAll = false;
+  seedSwitchTab('verified');
   seedUpdateHeader();
   // Restore per-event config (rank system + aggregation), else infer from the game.
   const sd = _seedEvent.seeding || {};
@@ -12317,7 +14004,11 @@ function openSeedingStudio(ev) {
   if (Array.isArray(sd.entrants) && sd.entrants.length) {
     _seedRows = sd.entrants.map((x) => ({
       entrantId: x.entrantId || '', name: x.name || '', seedNum: x.seedNum || null,
-      players: (x.players || []).map((p) => ({ gamerTag: p.gamerTag || '', rank: p.rank || '', rankValue: null })),
+      players: (x.players || []).map((p) => ({
+        gamerTag: p.gamerTag || '', rank: p.rank || '', rankValue: null,
+        epic: p.epic || '', steam: p.steam || '', alts: Array.isArray(p.alts) ? p.alts : [],
+        startggSlug: p.startggSlug || null, startggPlayerId: p.startggPlayerId || null,
+      })),
       leaguePts: null,
     }));
     seedRecomputeValues();
@@ -12335,7 +14026,7 @@ function seedFromRoster(roster) {
   _seedRows = (roster || []).map((e) => ({
     entrantId: e.entrantId || '', name: e.name || '', seedNum: e.seedNum || null,
     players: (e.players || []).map((p) => ({ gamerTag: p.gamerTag || '', rank: '', rankValue: null,
-      epic: p.epic || '', alts: p.alts || [],
+      epic: p.epic || '', steam: p.steam || '', alts: p.alts || [],
       startggSlug: p.startggSlug || null, startggPlayerId: p.startggPlayerId || null })),
     leaguePts: null, perfScore: null,
   }));
@@ -12351,7 +14042,7 @@ function seedMergeRoster(roster) {
     if (have.has(key)) return;
     _seedRows.push({ entrantId: e.entrantId || '', name: e.name || '', seedNum: e.seedNum || null,
       players: (e.players || []).map((p) => ({ gamerTag: p.gamerTag || '', rank: '', rankValue: null,
-        epic: p.epic || '', alts: p.alts || [],
+        epic: p.epic || '', steam: p.steam || '', alts: p.alts || [],
         startggSlug: p.startggSlug || null, startggPlayerId: p.startggPlayerId || null })),
       leaguePts: null, perfScore: null });
     added++;
@@ -12377,7 +14068,7 @@ async function seedLoadStartgg() {
       const players = (e.players || []).map((p) => {
         const op = old && (old.players || []).find((x) => x.gamerTag === p.gamerTag);
         return { gamerTag: p.gamerTag, rank: op ? op.rank : '', rankValue: null,
-          epic: p.epic || '', alts: p.alts || [],
+          epic: p.epic || '', steam: p.steam || '', alts: p.alts || [],
           startggSlug: p.startggSlug || null, startggPlayerId: p.startggPlayerId || null };
       });
       return { entrantId: e.entrantId, name: e.name, seedNum: e.seedNum || null, players, leaguePts: null, perfScore: null };
@@ -12402,14 +14093,24 @@ function seedOrderLabel() {
 // Build a profile URL from a stored value that may be a full URL OR a slug/username.
 function teStartggLink(v) { v = (v || '').trim(); return /^https?:\/\//i.test(v) ? v : 'https://www.start.gg/' + v.replace(/^\/+/, ''); }
 function teSixmansLink(v) { v = (v || '').trim(); return /^https?:\/\//i.test(v) ? v : 'https://www.rl6mans.com/profile/' + encodeURIComponent(v.toLowerCase()); }
+function teTwitterLink(v) { v = (v || '').trim().replace(/^@/, ''); return /^https?:\/\//i.test(v) ? v : 'https://x.com/' + encodeURIComponent(v); }
+function teTwitchLink(v)  { v = (v || '').trim(); return /^https?:\/\//i.test(v) ? v : 'https://twitch.tv/' + encodeURIComponent(v); }
+function teInstaLink(v)   { v = (v || '').trim().replace(/^@/, ''); return /^https?:\/\//i.test(v) ? v : 'https://instagram.com/' + encodeURIComponent(v); }
+function teTikTokLink(v)  { v = (v || '').trim().replace(/^@/, ''); return /^https?:\/\//i.test(v) ? v : 'https://tiktok.com/@' + encodeURIComponent(v); }
+function teYouTubeLink(v) { v = (v || '').trim().replace(/^@/, ''); return /^https?:\/\//i.test(v) ? v : 'https://youtube.com/@' + encodeURIComponent(v); }
 
 // Profile-link chips for a player (start.gg + 6mans). Accepts a gamertag string OR a
 // player object. Prefers links STORED on the player; falls back to the auto-linked
 // registry (state.playerProfiles, keyed by gamertag). Shown across seeding/team/match.
 function playerProfileChips(p) {
-  let tag = '', storedSgg = '', storedSix = '';
+  let tag = '', storedSgg = '', storedSix = '', storedSocials = {};
   if (typeof p === 'string') tag = p;
-  else if (p) { tag = p.gamerTag || p.name || ''; storedSgg = p.startgg || ''; storedSix = p.sixmans || ''; }
+  else if (p) {
+    tag = p.gamerTag || p.name || '';
+    storedSgg = p.startgg || '';
+    storedSix = p.sixmans || '';
+    storedSocials = { twitter: p.twitter || '', twitch: p.twitch || '', discord: p.discord || '', instagram: p.instagram || '', tiktok: p.tiktok || '', youtube: p.youtube || '' };
+  }
   const reg = (tag && currentState.playerProfiles) ? currentState.playerProfiles[tag.trim().toLowerCase()] : null;
   const chips = [];
   const sggUrl = storedSgg ? teStartggLink(storedSgg)
@@ -12424,10 +14125,30 @@ function playerProfileChips(p) {
     if (meta) sixTitle = '6mans · ' + meta;
   }
   if (sixUrl) chips.push(`<a class="pp-chip pp-6m" href="${sixUrl}" target="_blank" title="${tlEsc(sixTitle)}"><img src="../assets/images/sixmanlogo.webp" alt="6mans"></a>`);
-  if (reg && reg.twitch) chips.push(`<a class="pp-chip pp-twitch" href="https://twitch.tv/${encodeURIComponent(reg.twitch)}" target="_blank" title="Twitch: ${tlEsc(reg.twitch)}"><svg viewBox="0 0 24 24" width="12" height="12"><path fill="currentColor" d="M11.571 4.714h1.715v5.143H11.57zm4.715 0H18v5.143h-1.714zM6 0L1.714 4.286v15.428h5.143V24l4.286-4.286h3.428L22.286 12V0zm14.571 11.143l-3.428 3.428h-3.429l-3 3v-3H6.857V1.714h13.714z"/></svg></a>`);
-  if (reg && reg.twitter) chips.push(`<a class="pp-chip pp-twitter" href="https://x.com/${encodeURIComponent(reg.twitter)}" target="_blank" title="X/Twitter: ${tlEsc(reg.twitter)}"><svg viewBox="0 0 24 24" width="12" height="12"><path fill="currentColor" d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-4.714-6.231-5.401 6.231H2.74l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg></a>`);
+  // Twitch — player-stored takes priority over registry
+  const twitchVal = storedSocials.twitch || (reg && reg.twitch) || '';
+  if (twitchVal) chips.push(`<a class="pp-chip pp-twitch" href="https://twitch.tv/${encodeURIComponent(twitchVal)}" target="_blank" title="Twitch: ${tlEsc(twitchVal)}"><svg viewBox="0 0 24 24" width="12" height="12"><path fill="currentColor" d="M11.571 4.714h1.715v5.143H11.57zm4.715 0H18v5.143h-1.714zM6 0L1.714 4.286v15.428h5.143V24l4.286-4.286h3.428L22.286 12V0zm14.571 11.143l-3.428 3.428h-3.429l-3 3v-3H6.857V1.714h13.714z"/></svg></a>`);
+  // Twitter/X — player-stored takes priority over registry
+  const twitterVal = storedSocials.twitter || (reg && reg.twitter) || '';
+  if (twitterVal) chips.push(`<a class="pp-chip pp-twitter" href="https://x.com/${encodeURIComponent(twitterVal.replace(/^@/, ''))}" target="_blank" title="X/Twitter: ${tlEsc(twitterVal)}"><svg viewBox="0 0 24 24" width="12" height="12"><path fill="currentColor" d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-4.714-6.231-5.401 6.231H2.74l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg></a>`);
+  // Player-stored-only socials
+  if (storedSocials.discord) chips.push(`<span class="pp-chip pp-discord" title="Discord: ${tlEsc(storedSocials.discord)}">DC</span>`);
+  if (storedSocials.instagram) chips.push(`<a class="pp-chip pp-instagram" href="https://instagram.com/${encodeURIComponent(storedSocials.instagram.replace(/^@/, ''))}" target="_blank" title="Instagram: ${tlEsc(storedSocials.instagram)}">IG</a>`);
+  if (storedSocials.tiktok) chips.push(`<a class="pp-chip pp-tiktok" href="https://tiktok.com/@${encodeURIComponent(storedSocials.tiktok.replace(/^@/, ''))}" target="_blank" title="TikTok: ${tlEsc(storedSocials.tiktok)}">TK</a>`);
+  if (storedSocials.youtube) chips.push(`<a class="pp-chip pp-youtube" href="https://youtube.com/@${encodeURIComponent(storedSocials.youtube.replace(/^@/, ''))}" target="_blank" title="YouTube: ${tlEsc(storedSocials.youtube)}">YT</a>`);
   if (reg && reg.countryCode) chips.push(`<span class="pp-chip pp-flag" title="${tlEsc(reg.country || reg.countryCode.toUpperCase())}"><img src="https://flagcdn.com/16x12/${reg.countryCode.toLowerCase()}.png" alt="${tlEsc(reg.countryCode.toUpperCase())}" width="16" height="12"></span>`);
   return chips.length ? `<span class="pp-chips">${chips.join('')}</span>` : '';
+}
+
+// Return 'flag' (B/B+), 'flag-high' (A/X), or null.  Only fires for rl-6mans mode.
+const _RL6MANS_FLAG  = new Set(['b', 'b+']);
+const _RL6MANS_FLAGX = new Set(['a', 'x']);
+function seedRankAlertLevel(rank, modeKey) {
+  if (modeKey !== 'rl-6mans') return null;
+  const s = (rank || '').trim().toLowerCase();
+  if (_RL6MANS_FLAGX.has(s)) return 'flag-high';
+  if (_RL6MANS_FLAG.has(s))  return 'flag';
+  return null;
 }
 
 function seedRender() {
@@ -12435,6 +14156,7 @@ function seedRender() {
   seedRenumber();
   seedOrderLabel();
   seedUpdateHeader();
+  seedUpdateTabCounts();
   list.innerHTML = '';
   if (!_seedRows.length) { list.innerHTML = '<div class="seed-empty">No teams yet — Pull from Platform or Import a CSV.</div>'; return; }
   const esc = (s) => (s || '').toString().replace(/&/g, '&amp;').replace(/</g, '&lt;');
@@ -12463,8 +14185,15 @@ function seedRender() {
     const head = `<div class="seed-team-head"><span class="seed-grip" title="Drag to reorder">⠿</span><span class="seed-num">${i + 1}</span>`
       + `<div class="seed-team-name">${esc(row.name) || '(unnamed)'}</div>${lpts}${tvBadge}${perfBadge}</div>`;
     const players = (row.players || []).length
-      ? (row.players || []).map((p, pi) => `<div class="seed-player"><span class="seed-ptag">${esc(p.gamerTag) || '(player)'}</span>${playerProfileChips(p.gamerTag)}`
-          + `<input class="input-text seed-prank" data-pi="${pi}" value="${esc(p.rank)}" placeholder="${esc(mode.ph || 'rank')}"${listId ? ` list="${listId}"` : ''} title="Player rank — sets this team's seed value"></div>`).join('')
+      ? (row.players || []).map((p, pi) => {
+          const alert = seedRankAlertLevel(p.rank, _seedMode);
+          const alertClass = alert ? ` seed-prank-${alert}` : '';
+          const alertTitle = alert === 'flag-high' ? ' title="High-tier rank — double-check before finalising seeds"'
+                           : alert === 'flag'      ? ' title="Mid-tier rank — verify before finalising seeds"'
+                           : ' title="Player rank — sets this team\'s seed value"';
+          return `<div class="seed-player"><span class="seed-ptag">${esc(p.gamerTag) || '(player)'}</span>${playerProfileChips(p.gamerTag)}`
+            + `<input class="input-text seed-prank${alertClass}" data-pi="${pi}" value="${esc(p.rank)}" placeholder="${esc(mode.ph || 'rank')}"${listId ? ` list="${listId}"` : ''}${alertTitle}></div>`;
+        }).join('')
       : '<div class="seed-noplayers">No players listed — Pull from Platform or add a player column to your CSV.</div>';
     card.innerHTML = head + `<div class="seed-players-wrap">${players}</div>`;
     card.querySelectorAll('.seed-prank').forEach((inp) => {
@@ -12496,16 +14225,24 @@ function seedRender() {
 // Unified sort. key: rank | league | seed | name. 'rank'/'league' use the team aggregate value.
 function seedSort(key) {
   _seedSortKey = key;
-  const rv = (r) => { const v = seedTeamValue(r); return v == null ? -Infinity : v; };
+  // Safe descending comparator — unranked (null) always goes below ranked teams.
+  // Using -Infinity causes NaN when both teams are null, producing indeterminate order.
+  const cmpRank = (a, b) => {
+    const av = seedTeamValue(a), bv = seedTeamValue(b);
+    if (av === null && bv === null) return 0;
+    if (av === null) return 1;
+    if (bv === null) return -1;
+    return bv - av;
+  };
   if (key === 'name') _seedRows.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
   else if (key === 'seed') _seedRows.sort((a, b) => (a.seedNum || 99999) - (b.seedNum || 99999));
   else if (key === 'league') _seedRows.sort((a, b) => {
     const ar = a.leaguePts != null, br = b.leaguePts != null;
-    if (ar && br) return (b.leaguePts - a.leaguePts) || (rv(b) - rv(a));
-    if (ar !== br) return ar ? -1 : 1;          // returning teams first
-    return rv(b) - rv(a);
+    if (ar && br) return (b.leaguePts - a.leaguePts) || cmpRank(a, b);
+    if (ar !== br) return ar ? -1 : 1;
+    return cmpRank(a, b);
   });
-  else _seedRows.sort((a, b) => rv(b) - rv(a));   // 'rank'
+  else _seedRows.sort(cmpRank);   // 'rank' — unranked teams always bottom
   seedRender();
   if (key !== 'league') seedStatus(`Ordered by ${({ rank: 'team rank', seed: 'start.gg seed', name: 'name' }[key] || key)}. Drag to fine-tune, then Save.`);
 }
@@ -12602,7 +14339,11 @@ function seedSave() {
   if (!_seedEvent) return;
   const entrants = _seedRows.map((r) => ({
     entrantId: r.entrantId || '', name: r.name || '', seedNum: r.seedNum || null,
-    players: (r.players || []).map((p) => ({ gamerTag: p.gamerTag || '', rank: p.rank || '' })),
+    players: (r.players || []).map((p) => ({
+      gamerTag: p.gamerTag || '', rank: p.rank || '',
+      epic: p.epic || '', steam: p.steam || '', alts: Array.isArray(p.alts) ? p.alts : [],
+      startggSlug: p.startggSlug || null, startggPlayerId: p.startggPlayerId || null,
+    })),
   }));
   send('set_event_seeding', { id: _seedEvent.id, source: _seedEvent.seeding?.source || 'startgg', rankMode: _seedMode, agg: _seedAgg, entrants });
   seedStatus(`Saved · ${entrants.length} teams · ${seedMode().label} · ${seedAggLabel()}.`, 'ok');
@@ -13004,6 +14745,17 @@ el('seed-aggmethod')?.addEventListener('change', function () {
 el('seed-copy')?.addEventListener('click', seedCopyList);
 el('seed-save')?.addEventListener('click', seedSave);
 el('seed-push')?.addEventListener('click', seedPushStartgg);
+el('seed-tab-verified')?.addEventListener('click', () => seedSwitchTab('verified'));
+el('seed-tab-unverified')?.addEventListener('click', () => seedSwitchTab('unverified'));
+
+// Unverified tab controls.
+document.querySelectorAll('.seed-unv-sortbtn').forEach((b) => b.addEventListener('click', () => {
+  _seedUnvSort = b.dataset.unvsort; seedRenderUnverified();
+}));
+el('seed-unv-showall-btn')?.addEventListener('click', () => {
+  _seedUnvShowAll = !_seedUnvShowAll; seedRenderUnverified();
+});
+// #seed-unv-lookup-all click is wired inside seedRenderUnverified() to stay in sync with the current row set.
 el('seed-import-csv')?.addEventListener('click', () => el('seed-csv-file')?.click());
 el('seed-csv-file')?.addEventListener('change', function () {
   const f = this.files && this.files[0]; if (!f) return;
@@ -13570,7 +15322,7 @@ function renderSpotlight() {
   const sig = JSON.stringify({ f: (w.fields || []).map((f) => [f.id, f.label]), t: (w.teams || []).map((t) => [t.id, t.name, (t.players || []).join(',')]) });
   if (sig !== _wlSig) { _wlSig = sig; wlRenderFields(w); wlRenderTeams(w); } else wlSyncValues(w);
   const em = el('wl-empty-msg'); if (em) em.style.display = (w.teams || []).length ? 'none' : '';
-  spPopulateEvents(); renderSpTeamPick();
+  spPopulateEvents();
   if (_spMode === 'solo') { renderSpSoloList(); renderSpLink(); }
   renderTeamSpotlightBar();
   spRefreshPreviewBar();
@@ -13714,46 +15466,82 @@ function spSetSource(src) {
   _spSrc = (src === 'library') ? 'library' : 'event';
   document.querySelectorAll('#sp-src-tabs .sp-src-tab').forEach((b) => b.classList.toggle('is-on', b.dataset.spsrc === _spSrc));
   const evSel = el('sp-event'); if (evSel) evSel.style.display = _spSrc === 'event' ? '' : 'none';
-  renderSpTeamPick(true);
+  if (_spTeamSearchCtl) _spTeamSearchCtl.refresh();
 }
-function renderSpTeamPick(force) {
-  const wrap = el('sp-team-pick'); if (!wrap) return;
-  const q = ((el('sp-team-search') && el('sp-team-search').value) || '').trim().toLowerCase();
+// Candidates for the Add-team search — same shape/logo lookup as before, minus teams already added.
+function spTeamSearchCandidates(q) {
+  q = (q || '').trim().toLowerCase();
   const marked = new Set(((currentState.watchlist && currentState.watchlist.teams) || []).map((t) => (t.name || '').toLowerCase()));
-  let list = [], emptyMsg = '';
+  let list = [];
   if (_spSrc === 'library') {
-    list = (currentState.savedTeams || []).map((t) => ({ name: t.name || '', players: (t.players || []).map((p) => p.name || p.gamerTag).filter(Boolean), logo: t.logo || '', entrantId: '', eventSlug: '' }));
-    emptyMsg = 'No saved teams yet — add them on the Teams page.';
+    list = (currentState.savedTeams || []).map((t) => ({ name: t.name || '', players: (t.players || []).map((p) => p.name || p.gamerTag).filter(Boolean), logo: t.logo || '', entrantId: '', eventSlug: '', source: 'saved' }));
   } else {
-    const ev = spSelectedEvent();
-    if (!ev) { wrap.innerHTML = '<span class="sp-pick-empty">Pick a saved event above to list its teams.</span>'; _spPickSig = 'noev'; return; }
-    list = ((ev && ev.roster) || []).map((rt) => ({ name: rt.name || '', players: (rt.players || []).map((p) => p.gamerTag).filter(Boolean), logo: '', entrantId: rt.entrantId || '', eventSlug: ev.eventSlug, _evName: ev.name }));
-    emptyMsg = 'No teams synced yet — open My Events and Refresh.';
+    const ev = spSelectedEvent(); if (!ev) return [];
+    list = ((ev && ev.roster) || []).map((rt) => ({ name: rt.name || '', players: (rt.players || []).map((p) => p.gamerTag).filter(Boolean), logo: '', entrantId: rt.entrantId || '', eventSlug: ev.eventSlug, _evName: ev.name, source: 'event' }));
   }
-  const shown = q ? list.filter((t) => (t.name || '').toLowerCase().includes(q) || (t.players || []).some((p) => p.toLowerCase().includes(q))) : list;
-  const sig = _spSrc + '#' + q + '#' + list.map((t) => (t.name || '') + ':' + (t.logo ? t.logo.length : 0)).join(',') + '#' + [...marked].sort().join(',');
-  if (!force && sig === _spPickSig && wrap.children.length) return;
-  _spPickSig = sig;
-  wrap.innerHTML = '';
-  if (!list.length) { wrap.innerHTML = `<span class="sp-pick-empty">${emptyMsg}</span>`; return; }
-  if (!shown.length) { wrap.innerHTML = '<span class="sp-pick-empty">No teams match your search.</span>'; return; }
-  shown.forEach((t) => {
-    const on = marked.has((t.name || '').toLowerCase());
-    const logo = spTeamLogo(t.name, t.logo);
-    const chip = document.createElement('button'); chip.type = 'button'; chip.className = 'sp-pick-chip' + (on ? ' is-on' : '');
-    chip.innerHTML = (logo ? `<img class="sp-pick-logo" src="${_wlEsc(logo)}" alt="">` : `<span class="sp-pick-tick">${on ? '✓' : '+'}</span>`)
-      + `<span class="sp-pick-name">${_wlEsc(t.name || 'Team')}</span>` + (on ? '<span class="sp-pick-on">✓</span>' : '');
-    chip.title = (t.players || []).join(', ');
-    chip.addEventListener('click', () => {
-      chip.classList.toggle('is-on');
-      send('toggle_watchlist_team', { team: { name: t.name, players: t.players, entrantId: t.entrantId, eventSlug: t.eventSlug }, event: t._evName || '' });
-    });
-    wrap.appendChild(chip);
-  });
+  list = list.filter((t) => t.name && !marked.has(t.name.toLowerCase()));
+  return (q ? list.filter((t) => (t.name || '').toLowerCase().includes(q) || (t.players || []).some((p) => p.toLowerCase().includes(q))) : list).slice(0, 60);
 }
+// Add-team search — same logo-capable typeahead pattern as Match > Teams (setupTeamTypeahead) and
+// the League "search library to add" field (setupLeagueTeamSearch): type, pick a result from the
+// .team-dd popover, it's added immediately and the field clears so the next one can be typed.
+let _spTeamSearchCtl = null;
+function setupSpotlightTeamSearch() {
+  const input = el('sp-team-search'), dd = el('sp-team-dd');
+  if (!input || !dd) return null;
+  let items = [], active = -1, open = false;
+  const close = () => { dd.classList.remove('show'); open = false; active = -1; };
+  const position = () => {
+    const r = input.getBoundingClientRect();
+    dd.style.left = r.left + 'px'; dd.style.width = r.width + 'px';
+    const below = window.innerHeight - r.bottom;
+    if (below < 220 && r.top > below) { dd.style.top = 'auto'; dd.style.bottom = (window.innerHeight - r.top + 4) + 'px'; }
+    else { dd.style.bottom = 'auto'; dd.style.top = (r.bottom + 4) + 'px'; }
+  };
+  const render = () => {
+    if (!items.length) {
+      const msg = _spSrc === 'library'
+        ? ((currentState.savedTeams || []).length ? 'No matching teams' : 'No saved teams yet — add them on the Teams page')
+        : (!spSelectedEvent() ? 'Pick a saved event above to search its teams.' : 'No matching teams');
+      dd.innerHTML = `<div class="team-dd-empty">${msg}</div>`;
+      position(); dd.classList.add('show'); open = true; return;
+    }
+    dd.innerHTML = items.map((t, i) => {
+      const logo = spTeamLogo(t.name, t.logo);
+      const nm = _wlEsc((t.name || '').toUpperCase());
+      const tag = t.source === 'event' ? '<span class="team-dd-tag">EVENT</span>' : '';
+      return `<div class="team-dd-item${i === active ? ' active' : ''}" data-i="${i}" role="option">`
+        + `<img class="team-dd-logo${logo ? '' : ' game-logo-white'}" src="${logo || gameLogo()}" alt="" onerror="this.style.visibility='hidden'">`
+        + `<span class="team-dd-name">${nm}</span>${tag}</div>`;
+    }).join('');
+    position(); dd.classList.add('show'); open = true;
+    const act = dd.querySelector('.team-dd-item.active'); if (act) act.scrollIntoView({ block: 'nearest' });
+  };
+  const refresh = () => { items = spTeamSearchCandidates(input.value); active = -1; render(); };
+  const pick = (t) => {
+    if (!t) return;
+    send('toggle_watchlist_team', { team: { name: t.name, players: t.players, entrantId: t.entrantId, eventSlug: t.eventSlug }, event: t._evName || '' });
+    input.value = ''; refresh(); input.focus();
+  };
+  input.addEventListener('focus', refresh);
+  input.addEventListener('input', refresh);
+  input.addEventListener('keydown', (e) => {
+    if (!open && e.key === 'ArrowDown') { refresh(); return; }
+    if (!open) return;
+    if (e.key === 'ArrowDown') { e.preventDefault(); active = Math.min(items.length - 1, active + 1); render(); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); active = Math.max(0, active - 1); render(); }
+    else if (e.key === 'Enter') { e.preventDefault(); if (active >= 0 && items[active]) pick(items[active]); else if (items.length === 1) pick(items[0]); }
+    else if (e.key === 'Escape') { close(); }
+  });
+  dd.addEventListener('mousedown', (e) => { const it = e.target.closest('.team-dd-item'); if (!it) return; e.preventDefault(); pick(items[Number(it.dataset.i)]); });
+  input.addEventListener('blur', () => setTimeout(close, 150));
+  window.addEventListener('scroll', () => { if (open) position(); }, true);
+  window.addEventListener('resize', () => { if (open) close(); });
+  return { refresh, close };
+}
+_spTeamSearchCtl = setupSpotlightTeamSearch();
 document.querySelectorAll('#sp-src-tabs .sp-src-tab').forEach((b) => b.addEventListener('click', () => spSetSource(b.dataset.spsrc)));
-el('sp-event')?.addEventListener('change', () => renderSpTeamPick(true));
-el('sp-team-search')?.addEventListener('input', () => renderSpTeamPick(true));
+el('sp-event')?.addEventListener('change', () => { if (_spTeamSearchCtl) _spTeamSearchCtl.refresh(); });
 function spCustomAdd() {
   const inp = el('sp-custom-name'); const name = (inp && inp.value || '').trim(); if (!name) return;
   const marked = new Set(((currentState.watchlist && currentState.watchlist.teams) || []).map((t) => (t.name || '').toLowerCase()));
@@ -13765,24 +15553,73 @@ function spCustomAdd() {
 el('sp-custom-add')?.addEventListener('click', spCustomAdd);
 el('sp-custom-name')?.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); spCustomAdd(); } });
 let _spSoloSig = '';
+// Team Spotlight's solo-pick control — a logo-capable dropdown (native <select> can't host <img>,
+// so this is a custom button + popover list, styled and behaving like a dropdown/combobox).
+function spSoloDdClose() { const dd = el('sp-solo-dd'); const menu = el('sp-solo-dd-menu'); if (dd) dd.classList.remove('is-open'); if (menu) menu.style.display = 'none'; }
+function spSoloDdOpen() { const dd = el('sp-solo-dd'); const menu = el('sp-solo-dd-menu'); if (dd) dd.classList.add('is-open'); if (menu) menu.style.display = ''; }
 function renderSpSoloList() {
-  const wrap = el('sp-solo-list'); if (!wrap) return;
+  const menu = el('sp-solo-dd-menu'), btn = el('sp-solo-dd-btn'); if (!menu || !btn) return;
   const teams = (currentState.watchlist && currentState.watchlist.teams) || [];
   const cur = (currentState.teamSpotlight && currentState.teamSpotlight.name || '').toLowerCase();
-  const sig = cur + '#' + teams.map((t) => (t.name || '') + ':' + (t.players || []).length + ':' + (t.entrantId ? 1 : 0)).join(',');
-  if (sig === _spSoloSig && wrap.children.length) return;
-  _spSoloSig = sig;
-  wrap.innerHTML = '';
-  if (!teams.length) { wrap.innerHTML = '<span class="sp-pick-empty">No teams marked yet — add some above or in Teams to Watch.</span>'; return; }
-  teams.forEach((t) => {
-    const on = (t.name || '').toLowerCase() === cur;
-    const card = document.createElement('button'); card.type = 'button'; card.className = 'sp-solo-card' + (on ? ' is-on' : '');
-    const link = t.entrantId ? '<span class="sp-solo-link ok" title="Linked to start.gg">● start.gg</span>' : '<span class="sp-solo-link" title="Not linked — link it after selecting for full stats">○ no link</span>';
-    card.innerHTML = `<span class="sp-solo-name">${_wlEsc(t.name || 'Team')}</span><span class="sp-solo-players">${_wlEsc((t.players || []).join(' · ')) || 'no players'}</span>${link}`;
-    card.addEventListener('click', () => tsSpotlight(t));
-    wrap.appendChild(card);
-  });
+  const sig = cur + '#' + teams.map((t) => (t.name || '') + ':' + (t.players || []).length + ':' + (t.entrantId ? 1 : 0) + ':' + (t.logo || '')).join(',');
+  if (sig !== _spSoloSig || !menu.children.length) {
+    _spSoloSig = sig;
+    menu.innerHTML = '';
+    if (!teams.length) {
+      menu.innerHTML = '<span class="sp-pick-empty">No teams marked yet — add some in Teams to Watch.</span>';
+    } else {
+      teams.forEach((t) => {
+        const on = (t.name || '').toLowerCase() === cur;
+        const logoUrl = spTeamLogo(t.name, t.logo);
+        const item = document.createElement('button'); item.type = 'button'; item.className = 'sp-solo-dd-item' + (on ? ' is-on' : '');
+        const link = t.entrantId
+          ? '<span class="sp-solo-dd-item-link ok" title="Linked to start.gg">● start.gg</span>'
+          : '<span class="sp-solo-dd-item-link" title="Not linked — link it after selecting for full stats">○ no link</span>';
+        item.innerHTML = (logoUrl ? `<img class="sp-solo-dd-item-logo" src="${_wlEsc(logoUrl)}" alt="">` : `<span class="sp-solo-dd-item-logo"></span>`)
+          + `<span class="sp-solo-dd-item-main"><span class="sp-solo-dd-item-name">${_wlEsc(t.name || 'Team')}</span><span class="sp-solo-dd-item-players">${_wlEsc((t.players || []).join(' · ')) || 'no players'}</span></span>`
+          + link;
+        item.addEventListener('click', () => { tsSpotlight(t); spSoloDdClose(); });
+        menu.appendChild(item);
+      });
+    }
+  }
+  // Closed-button face always reflects the current pick — cheap, updates even when the menu itself
+  // didn't need a rebuild (e.g. only the spotlighted team changed, not the team list).
+  const curTeam = teams.find((t) => (t.name || '').toLowerCase() === cur);
+  const logoEl = el('sp-solo-dd-logo'), labelEl = el('sp-solo-dd-label');
+  if (curTeam) {
+    const logoUrl = spTeamLogo(curTeam.name, curTeam.logo);
+    if (logoEl) { if (logoUrl) { logoEl.src = logoUrl; logoEl.style.display = ''; } else logoEl.style.display = 'none'; }
+    if (labelEl) labelEl.textContent = curTeam.name || 'Team';
+  } else {
+    if (logoEl) logoEl.style.display = 'none';
+    if (labelEl) labelEl.textContent = 'Select a team to spotlight…';
+  }
 }
+el('sp-solo-dd-btn')?.addEventListener('click', (e) => {
+  e.stopPropagation();
+  const dd = el('sp-solo-dd'); if (!dd) return;
+  if (dd.classList.contains('is-open')) spSoloDdClose(); else spSoloDdOpen();
+});
+document.addEventListener('click', (e) => {
+  const dd = el('sp-solo-dd'); if (!dd || !dd.classList.contains('is-open')) return;
+  if (!dd.contains(e.target)) spSoloDdClose();
+});
+
+// "Add team" dropdown (Teams to Watch) — opens the same source-tabs/search/pick-list/custom-add
+// controls in a popover instead of an always-expanded scroll-and-click grid. Stays open after a
+// pick so several teams can be added in a row; closes on outside click or the button again.
+function spAddDdClose() { const dd = el('sp-adddd'); const menu = el('sp-adddd-menu'); if (dd) dd.classList.remove('is-open'); if (menu) menu.style.display = 'none'; }
+function spAddDdOpen() { const dd = el('sp-adddd'); const menu = el('sp-adddd-menu'); if (dd) dd.classList.add('is-open'); if (menu) menu.style.display = ''; el('sp-team-search')?.focus(); }
+el('sp-adddd-btn')?.addEventListener('click', (e) => {
+  e.stopPropagation();
+  const dd = el('sp-adddd'); if (!dd) return;
+  if (dd.classList.contains('is-open')) spAddDdClose(); else spAddDdOpen();
+});
+document.addEventListener('click', (e) => {
+  const dd = el('sp-adddd'); if (!dd || !dd.classList.contains('is-open')) return;
+  if (!dd.contains(e.target)) spAddDdClose();
+});
 function spRefreshPreviewBar() {
   const base = (typeof SCENE_BASE_URL !== 'undefined' ? SCENE_BASE_URL : 'http://localhost:3000');
   const open = el('sp-open'); if (open) open.href = base + (_spMode === 'solo' ? '/team-spotlight.html' : '/watchlist.html') + '?preview=1';
@@ -13893,7 +15730,7 @@ function lgGameOptions(sel) {
 function lgNewPlayer() { return { id: lgUid('pl'), name: '', role: '', salary: 0, stats: '' }; }
 function lgNewTeam() { return { id: lgUid('tm'), name: '', logo: null, players: [] }; }
 function lgNewLeague() {
-  return { id: lgUid('lg'), name: 'New League', game: currentState.activeGame || '', type: 'team', season: '', salaryCap: 0, starterCount: 3, logo: null, abbr: '', status: 'active', teams: [], freeAgents: [], standings: [], schedule: [], scoring: { win: 3, loss: 0, draw: 1, otw: 2 }, playoffN: 4, tiebreak: 'gd', startggSource: '' };
+  return { id: lgUid('lg'), name: 'New League', game: currentState.activeGame || '', type: 'team', season: '', salaryCap: 0, starterCount: 3, logo: null, abbr: '', status: 'active', teams: [], freeAgents: [], standings: [], schedule: [], scoring: { win: 3, loss: 0, draw: 1, otw: 2 }, playoffN: 4, tiebreak: 'gd', startggSource: '', linkedEventId: '' };
 }
 
 function lgRenderList() {
@@ -13940,6 +15777,29 @@ function lgAddTeamByName(name) {
   lgRenderTeams(); lgRenderStandingsTab(); lgSave();
   lgStatus(name + ' added.', true);
   return true;
+}
+// Import a saved event's roster as embedded (unlinked) teams — for a league scoped to just that
+// one event, so producers don't have to add each team by hand from the central library. Embedded
+// teams carry their own name/logo/players (lgResolveTeam's fallback path) rather than referencing
+// currentState.savedTeams, so this never touches the shared team library.
+function lgImportTeamsFromEvent(eventId) {
+  const lg = lgActive(); if (!lg) return { added: 0, eventName: '' };
+  const ev = (currentState.myEvents || []).find((e) => e.id === eventId);
+  if (!ev) return { added: 0, eventName: '' };
+  lg.teams = lg.teams || [];
+  const existing = new Set(lg.teams.map((t) => lgResolveTeam(t).name.toLowerCase()));
+  let added = 0;
+  (ev.roster || []).forEach((rt) => {
+    const name = (rt.name || '').trim();
+    if (!name || existing.has(name.toLowerCase())) return;
+    const players = (rt.players || []).map((p) => ({ id: lgUid('pl'), name: p.gamerTag || '', role: '', salary: 0, stats: '' }));
+    lg.teams.push({ id: lgUid('tm'), name, logo: '', players });
+    existing.add(name.toLowerCase());
+    added++;
+  });
+  lg.linkedEventId = eventId;
+  lgRenderTeams(); lgRenderStandingsTab(); lgRenderList(); lgUpdateBanner(); lgSave();
+  return { added, eventName: ev.name || '' };
 }
 // Go-Live matchup launcher: pick two league teams → push to Blue/Orange + reset series.
 function lgRenderMatchup() {
@@ -14372,6 +16232,14 @@ function lgRenderSettingsTab() {
   const capEl = el('lg-cap'); if (capEl && document.activeElement !== capEl) capEl.value = lg.salaryCap || 0;
   const scEl = el('lg-starter-count'); if (scEl && document.activeElement !== scEl) scEl.value = lg.starterCount || 3;
   lgRenderSggSource(lg);
+  const evEl = el('lg-linked-event');
+  if (evEl) {
+    const evs = currentState.myEvents || [];
+    evEl.innerHTML = '<option value="">— None —</option>' + evs.map((e) => `<option value="${e.id}">${(e.name || 'Event').replace(/</g, '&lt;')}</option>`).join('');
+    evEl.value = (lg.linkedEventId && evs.some((e) => e.id === lg.linkedEventId)) ? lg.linkedEventId : '';
+  }
+  const linkStatus = el('lg-linked-event-status');
+  if (linkStatus) linkStatus.textContent = lg.linkedEventId ? 'Importing adds any new roster teams — already-added teams are left alone.' : '';
   const sc = lg.scoring || {};
   const setV = (id, v) => { const e = el(id); if (e && document.activeElement !== e) e.value = v; };
   setV('lg-pts-win', sc.win ?? 3); setV('lg-pts-loss', sc.loss ?? 0); setV('lg-pts-draw', sc.draw ?? 1); setV('lg-pts-otw', sc.otw ?? 2);
@@ -14473,10 +16341,12 @@ function lgUpdateBanner() {
   const type = { team: 'Team League', freeagent: 'Free Agent Pool', salary: 'Rating Cap' }[lg.type] || lg.type || '';
   const STATUS_LABELS = { active: 'Active', playoffs: 'Playoffs', offseason: 'Off-season', complete: 'Complete' };
   const status = lg.status || 'active';
+  const linkedEvent = lg.linkedEventId ? (currentState.myEvents || []).find((e) => e.id === lg.linkedEventId) : null;
   chips.innerHTML = [
     game && `<span class="lg2-chip">${game.replace(/</g, '&lt;')}</span>`,
     lg.season && `<span class="lg2-chip">${lg.season.replace(/</g, '&lt;')}</span>`,
     type && `<span class="lg2-chip">${type}</span>`,
+    linkedEvent && `<span class="lg2-chip" title="Teams imported from this event">Event: ${(linkedEvent.name || 'Event').replace(/</g, '&lt;')}</span>`,
     `<span class="lg2-chip">${(lg.teams || []).length} teams</span>`,
     `<span class="lg2-status-chip" data-s="${status}">${STATUS_LABELS[status] || status}</span>`,
   ].filter(Boolean).join('');
@@ -14508,6 +16378,13 @@ el('lg-game')?.addEventListener('change', function () { const lg = lgActive(); i
 el('lg-season')?.addEventListener('change', function () { const lg = lgActive(); if (lg) { lg.season = this.value.trim(); lgSave(); lgUpdateBanner(); } });
 el('lg-cap')?.addEventListener('change', function () { const lg = lgActive(); if (lg) { lg.salaryCap = Number(this.value) || 0; lgRenderTeams(); lgRenderStandingsTab(); lgSave(); } });
 el('lg-starter-count')?.addEventListener('change', function () { const lg = lgActive(); if (lg) { lg.starterCount = Number(this.value) || 3; lgRenderTeams(); lgSave(); } });
+el('lg-linked-event')?.addEventListener('change', function () { const lg = lgActive(); if (lg) { lg.linkedEventId = this.value || ''; lgSave(); lgUpdateBanner(); } });
+el('lg-import-event-teams')?.addEventListener('click', function () {
+  const evId = el('lg-linked-event')?.value || '';
+  if (!evId) { lgStatus('Pick an event first.', false); return; }
+  const { added, eventName } = lgImportTeamsFromEvent(evId);
+  lgStatus(added ? `Imported ${added} team${added > 1 ? 's' : ''} from ${eventName}.` : `No new teams to import from ${eventName || 'that event'}.`, !!added);
+});
 // Start.gg league source typeahead
 (function () {
   const inp = el('lg-sgg-search'), dd = el('lg-sgg-dd');
@@ -14688,7 +16565,11 @@ async function evSearchTournaments() {
   } finally { if (btn) btn.disabled = false; }
 }
 
-el('ev-load')?.addEventListener('click', () => { _evMode = 'mine'; evSetMode('My tournaments'); evLoadTournaments(); });
+el('ev-load')?.addEventListener('click', () => {
+  if (_evSource === 'challonge') evLoadChallongeTournaments();
+  else if (_evSource === 'nxgen') evLoadNxgenTournaments();
+  else { _evMode = 'mine'; evSetMode('My tournaments'); evLoadTournaments(); }
+});
 el('ev-search-btn')?.addEventListener('click', evSearchTournaments);
 el('ev-search')?.addEventListener('input', function () {
   // In "my tournaments" mode the box filters the loaded list live; in search mode it's the query (submit to search).
@@ -14940,16 +16821,16 @@ const DASH_CFG_KEY = 'ne_dash_v2';
 // Widget registry — panels the user can show/hide and reorder on the Dashboard.
 // auto-only panels (data-dash-auto) are not in this list; their visibility is managed by game logic.
 const DASH_WIDGETS = [
-  { id: 'event',    title: 'Event',          icon: 'calendar',   desc: 'Tournament name, start.gg event and status',       sel: '[data-dash-id="event"]',    defaultOn: true,  span: 'full' },
-  { id: 'deck',     title: 'Deck',           icon: 'layout',     desc: 'Scene switcher, preview and hotkey buttons',       sel: '[data-dash-id="deck"]',     defaultOn: true,  span: 'full' },
-  { id: 'teams',    title: 'Teams',          icon: 'users',      desc: 'Team names, rosters, scores and side swap',       sel: '[data-dash-id="teams"]',    defaultOn: true,  span: 'full' },
-  { id: 'adslots',  title: 'Ad Slots',       icon: 'film',       desc: 'Sponsor ad slots and commercial break controls',  sel: '[data-dash-id="adslots"]',  defaultOn: true,  span: 'full' },
-  { id: 'director', title: 'Director',       icon: 'zap',        desc: 'AI director controls and clip queue manager',     sel: '[data-dash-id="director"]', defaultOn: true,  span: 'full' },
+  { id: 'event',    title: 'Event',          icon: 'calendar',   desc: 'Tournament name, start.gg event and status',        sel: '[data-dash-id="event"]',    defaultOn: true,  span: 'full' },
+  { id: 'deck',     title: 'Deck',           icon: 'layout',     desc: 'Scene switcher, preview and hotkey buttons',        sel: '[data-dash-id="deck"]',     defaultOn: true,  span: 'full' },
+  { id: 'teams',    title: 'Teams',          icon: 'users',      desc: 'Team names, rosters, scores and side swap',         sel: '[data-dash-id="teams"]',    defaultOn: true,  span: 'full' },
+  { id: 'graphics', title: 'Graphics',       icon: 'sparkles',   desc: 'Full graphics hub — scenes, preview and settings',  sel: '[data-dash-id="graphics"]', defaultOn: true,  span: 'full', fixedSpan: 'full' },
+  { id: 'onair',    title: 'On Air',         icon: 'zap',        desc: 'Quick-toggle card grid for all overlays',           sel: '[data-dash-id="onair"]',    defaultOn: false, span: 'full' },
+  { id: 'adslots',  title: 'Ad Slots',       icon: 'film',       desc: 'Sponsor ad slots and commercial break controls',    sel: '[data-dash-id="adslots"]',  defaultOn: true,  span: 'full' },
+  { id: 'director', title: 'Director',       icon: 'zap',        desc: 'AI director controls and clip queue manager',       sel: '[data-dash-id="director"]', defaultOn: true,  span: 'full' },
   { id: 'series',   title: 'Series',         icon: 'trophy',     desc: 'Best-of series scoreboard and match history',     sel: '[data-dash-id="series"]',   defaultOn: false, span: '1'    },
   { id: 'talent',   title: 'Talent',         icon: 'mic',        desc: 'On-air talent, camera feeds and VDO rooms',      sel: '[data-dash-id="talent"]',   defaultOn: false, span: '1'    },
   { id: 'casters',  title: 'Caster Desk',    icon: 'headphones', desc: 'Caster names, social handles and desk layout',   sel: '[data-dash-id="casters"]',  defaultOn: false, span: '1'    },
-  { id: 'veto',     title: 'Map Veto',       icon: 'flag',       desc: 'Guided map pick and ban board',                  sel: '[data-dash-id="veto"]',     defaultOn: false, span: 'full' },
-  { id: 'draft',    title: 'Champion Draft', icon: 'sparkles',   desc: 'Hero and champion pick & ban draft board',       sel: '[data-dash-id="draft"]',    defaultOn: false, span: 'full' },
   { id: 'queue',    title: 'Stream Queue',   icon: 'list',       desc: 'Upcoming matches auto-loaded from the bracket',  sel: '#dash-mini-queue',          defaultOn: false, span: '1'    },
   { id: 'twitch',   title: 'Twitch Live',    icon: 'chat',       desc: 'Live viewer count and stream status',            sel: '#dash-mini-twitch',         defaultOn: false, span: '1'    },
   { id: 'obs',      title: 'OBS Status',     icon: 'monitor',    desc: 'Active OBS scene and recording status',          sel: '#dash-mini-obs',            defaultOn: false, span: '1'    },
@@ -14974,21 +16855,40 @@ function getDashPanel(id) { return DASH_WIDGETS.find((w) => w.id === id); }
 // Apply config: set order, display, span, and column count on every widget section.
 function applyDashLayout() {
   const grid = el('dash-grid'); if (!grid) return;
-  const cfg = getDashCfg() || defaultDashCfg();
+  let cfg = getDashCfg() || defaultDashCfg();
+  // One-time migration: old configs had onair before graphics and defaulted it on.
+  // Flip onair off and move graphics in front so the full hub is the default graphics surface.
+  if (!cfg._gfxMigrated) {
+    const op = cfg.panels.find((p) => p.id === 'onair');
+    const gp = cfg.panels.find((p) => p.id === 'graphics');
+    if (op && op.on && gp) {
+      op.on = false;
+      // Move graphics immediately before onair in the order array.
+      cfg.panels = cfg.panels.filter((p) => p.id !== 'graphics');
+      const oi = cfg.panels.findIndex((p) => p.id === 'onair');
+      cfg.panels.splice(oi, 0, gp);
+    }
+    cfg._gfxMigrated = true;
+    setDashCfg(cfg);
+  }
 
   // Grid column count
   grid.dataset.cols = cfg.cols || 1;
 
-  // Auto-conditional panels (veto, draft, ow, mr) keep their own display rules; skip them.
   // User-managed panels: apply order + display + span from config.
   const panels = cfg.panels || DASH_WIDGETS.map((w) => ({ id: w.id, on: w.defaultOn, span: w.span }));
+  // Fill in any widget added after the user last saved their config (keeps them visible at the end).
+  DASH_WIDGETS.forEach((w) => {
+    if (!panels.find((p) => p.id === w.id)) panels.push({ id: w.id, on: w.defaultOn, span: w.span });
+  });
   panels.forEach((p, i) => {
     const w = getDashPanel(p.id); if (!w) return;
     const section = grid.querySelector(w.sel);
     if (!section) return;
     section.style.order = i;
     section.style.display = p.on ? '' : 'none';
-    section.dataset.dashSpan = p.span || w.span || '1';
+    // fixedSpan overrides any user-set span (e.g. Graphics is always full-width).
+    section.dataset.dashSpan = w.fixedSpan || p.span || w.span || '1';
   });
 
   // Keep column picker buttons in sync
@@ -15039,7 +16939,7 @@ function addDashHandles() {
     const p = cfg.panels.find((x) => x.id === w.id) || { span: w.span };
     const curSpan = p.span || w.span || '1';
 
-    const widthBtnsHtml = cols > 1
+    const widthBtnsHtml = (cols > 1 && !w.fixedSpan)
       ? `<div class="dash-handle-widths">${['1','2','full'].map((s) =>
           `<button class="dash-handle-w${curSpan === s ? ' active' : ''}" data-span="${s}" title="${_DASH_W_TITLES[s]}">${_DASH_W_SVG[s]}</button>`
         ).join('')}</div>`
@@ -15059,8 +16959,9 @@ function addDashHandles() {
       btn.addEventListener('click', (e) => {
         e.stopPropagation();
         const c = getDashCfg() || defaultDashCfg();
-        const pp = c.panels.find((x) => x.id === w.id);
-        if (pp) pp.span = btn.dataset.span;
+        let pp = c.panels.find((x) => x.id === w.id);
+        if (!pp) { pp = { id: w.id, on: w.defaultOn, span: w.span }; c.panels.push(pp); }
+        pp.span = btn.dataset.span;
         setDashCfg(c);
         applyDashLayout();
         removeDashHandles();
@@ -15071,8 +16972,9 @@ function addDashHandles() {
     handle.querySelector('.dash-handle-hide')?.addEventListener('click', (e) => {
       e.stopPropagation();
       const c = getDashCfg() || defaultDashCfg();
-      const pp = c.panels.find((x) => x.id === w.id);
-      if (pp) pp.on = false;
+      let pp = c.panels.find((x) => x.id === w.id);
+      if (!pp) { pp = { id: w.id, on: w.defaultOn, span: w.span }; c.panels.push(pp); }
+      pp.on = false;
       setDashCfg(c);
       applyDashLayout();
       removeDashHandles();
@@ -15126,12 +17028,17 @@ function renderDashCatalog() {
 }
 
 // Drag-to-reorder panels in edit mode.
-// Shows a blue insertion line (top or bottom of target) based on cursor position.
+// Left/right 25% edge = side-by-side (half-width). Top/bottom centre = own row (full-width).
 let _dashDragId = null;
+let _dashScrollRaf = null;
+
+function _dashScrollStop() {
+  if (_dashScrollRaf) { cancelAnimationFrame(_dashScrollRaf); _dashScrollRaf = null; }
+}
 
 function _dashClearDragCls(grid) {
-  grid.querySelectorAll('.dash-dragging, .dash-insert-top, .dash-insert-bot').forEach((x) => {
-    x.classList.remove('dash-dragging', 'dash-insert-top', 'dash-insert-bot');
+  grid.querySelectorAll('.dash-dragging, .dash-insert-top, .dash-insert-bot, .dash-insert-left, .dash-insert-right').forEach((x) => {
+    x.classList.remove('dash-dragging', 'dash-insert-top', 'dash-insert-bot', 'dash-insert-left', 'dash-insert-right');
   });
 }
 
@@ -15151,46 +17058,83 @@ function wireDashGridDrag() {
     const target = e.target.closest('[data-dash-id]');
     if (!target || target.dataset.dashId === _dashDragId) return;
     e.preventDefault(); e.dataTransfer.dropEffect = 'move';
-    // Clear old indicators, then set new one based on cursor half
-    grid.querySelectorAll('.dash-insert-top, .dash-insert-bot').forEach((x) => {
-      x.classList.remove('dash-insert-top', 'dash-insert-bot');
+    grid.querySelectorAll('.dash-insert-top, .dash-insert-bot, .dash-insert-left, .dash-insert-right').forEach((x) => {
+      x.classList.remove('dash-insert-top', 'dash-insert-bot', 'dash-insert-left', 'dash-insert-right');
     });
     const rect = target.getBoundingClientRect();
-    target.classList.add(e.clientY < rect.top + rect.height / 2 ? 'dash-insert-top' : 'dash-insert-bot');
+    const cols = parseInt(grid.dataset.cols, 10) || 1;
+    const pctX = (e.clientX - rect.left) / rect.width;
+    const pctY = (e.clientY - rect.top)  / rect.height;
+    if (cols > 1 && pctX < 0.25)      target.classList.add('dash-insert-left');
+    else if (cols > 1 && pctX > 0.75) target.classList.add('dash-insert-right');
+    else                               target.classList.add(pctY < 0.5 ? 'dash-insert-top' : 'dash-insert-bot');
+
+    // Auto-scroll when cursor is near the top or bottom of the scroll container.
+    _dashScrollStop();
+    const scroll = el('tab-scroll');
+    if (scroll) {
+      const sr = scroll.getBoundingClientRect();
+      const ZONE = 80, SPEED = 10;
+      if (e.clientY < sr.top + ZONE) {
+        const rate = SPEED * (1 - (e.clientY - sr.top) / ZONE);
+        const step = () => { scroll.scrollTop -= rate; _dashScrollRaf = requestAnimationFrame(step); };
+        _dashScrollRaf = requestAnimationFrame(step);
+      } else if (e.clientY > sr.bottom - ZONE) {
+        const rate = SPEED * ((e.clientY - (sr.bottom - ZONE)) / ZONE);
+        const step = () => { scroll.scrollTop += rate; _dashScrollRaf = requestAnimationFrame(step); };
+        _dashScrollRaf = requestAnimationFrame(step);
+      }
+    }
   });
 
   grid.addEventListener('dragleave', (e) => {
-    // Only clear when leaving the grid entirely
     if (!e.relatedTarget || !grid.contains(e.relatedTarget)) {
-      grid.querySelectorAll('.dash-insert-top, .dash-insert-bot').forEach((x) => {
-        x.classList.remove('dash-insert-top', 'dash-insert-bot');
+      _dashScrollStop();
+      grid.querySelectorAll('.dash-insert-top, .dash-insert-bot, .dash-insert-left, .dash-insert-right').forEach((x) => {
+        x.classList.remove('dash-insert-top', 'dash-insert-bot', 'dash-insert-left', 'dash-insert-right');
       });
     }
   });
 
   grid.addEventListener('drop', (e) => {
+    _dashScrollStop();
     if (!_dashDragId) return;
     const target = e.target.closest('[data-dash-id]');
     if (!target || target.dataset.dashId === _dashDragId) { _dashDragId = null; _dashClearDragCls(grid); return; }
     e.preventDefault();
-    const insertBefore = target.classList.contains('dash-insert-top');
+    const isLeft  = target.classList.contains('dash-insert-left');
+    const isRight = target.classList.contains('dash-insert-right');
     const cfg = getDashCfg() || defaultDashCfg();
+    // Ensure src + tgt are in config (may be missing if config was saved before these widgets existed).
+    [_dashDragId, target.dataset.dashId].forEach((id) => {
+      if (!cfg.panels.find((p) => p.id === id)) {
+        const w = getDashPanel(id); if (w) cfg.panels.push({ id, on: w.defaultOn, span: w.span });
+      }
+    });
     const srcIdx = cfg.panels.findIndex((p) => p.id === _dashDragId);
-    let tgtIdx = cfg.panels.findIndex((p) => p.id === target.dataset.dashId);
-    if (srcIdx >= 0 && tgtIdx >= 0 && srcIdx !== tgtIdx) {
-      const [item] = cfg.panels.splice(srcIdx, 1);
-      tgtIdx = cfg.panels.findIndex((p) => p.id === target.dataset.dashId);
-      cfg.panels.splice(insertBefore ? tgtIdx : tgtIdx + 1, 0, item);
-      setDashCfg(cfg);
-      applyDashLayout();
-      removeDashHandles();
-      addDashHandles();
+    if (srcIdx < 0) { _dashDragId = null; _dashClearDragCls(grid); return; }
+    const [item] = cfg.panels.splice(srcIdx, 1);
+    const tgtIdx = cfg.panels.findIndex((p) => p.id === target.dataset.dashId);
+    cfg.panels.splice(tgtIdx < 0 ? cfg.panels.length : (isRight ? tgtIdx + 1 : tgtIdx), 0, item);
+    const srcWidget = getDashPanel(item.id);
+    const tgtWidget = getDashPanel(target.dataset.dashId);
+    if (isLeft || isRight) {
+      if (!srcWidget?.fixedSpan) item.span = '1';
+      const tgtPanel = cfg.panels.find((p) => p.id === target.dataset.dashId);
+      if (tgtPanel && !tgtWidget?.fixedSpan) tgtPanel.span = '1';
+    } else {
+      if (!srcWidget?.fixedSpan) item.span = 'full';
     }
+    setDashCfg(cfg);
+    applyDashLayout();
+    removeDashHandles();
+    addDashHandles();
     _dashDragId = null;
     _dashClearDragCls(grid);
   });
 
   grid.addEventListener('dragend', () => {
+    _dashScrollStop();
     _dashDragId = null;
     _dashClearDragCls(grid);
   });
@@ -15933,7 +17877,7 @@ function cfShowSubtab(cf) {
   document.querySelectorAll('#tab-facecams-content .cf-panel').forEach((p) => p.classList.toggle('active', p.id === 'cf-panel-' + cf));
   if (cf === 'talent') cfLoadTalent();
   if (cf === 'players') fetchVdoLinksForFacecam();
-  if (cf === 'casters') cfLoadCasterVdo();
+  if (cf === 'gameplay') { renderCfShares(); renderCfStations(currentState); }
   try { localStorage.setItem('cf_active_subtab', cf); } catch (_) {}
 }
 document.querySelectorAll('#cf-subnav .cf-tab').forEach((btn) => {
@@ -16798,11 +18742,25 @@ el('cf-talent-teams')?.addEventListener('click', (e) => {
     return;
   }
   const regen = e.target.closest('.talent-regen');
-  if (regen) { send('generate_team_vdo', { side: regen.dataset.side, regenerate: true }); setTimeout(cfLoadTalent, 350); return; }
+  if (regen) {
+    appConfirm("Get a new room for this team? Anyone already connected with the current link — players or casters — will be cut off and need the new invite link to rejoin.", 'New room', true).then((ok) => {
+      if (!ok) return;
+      send('generate_team_vdo', { side: regen.dataset.side, regenerate: true });
+      setTimeout(cfLoadTalent, 350);
+    });
+    return;
+  }
   const genSaved = e.target.closest('.talent-gen-saved');
   if (genSaved) { send('generate_saved_team_vdo', { teamName: genSaved.dataset.teamName }); setTimeout(cfLoadTalent, 500); return; }
   const regenSaved = e.target.closest('.talent-regen-saved');
-  if (regenSaved) { send('generate_saved_team_vdo', { teamName: regenSaved.dataset.teamName, regenerate: true }); setTimeout(cfLoadTalent, 500); return; }
+  if (regenSaved) {
+    appConfirm("Get a new room for this team? Anyone already connected with the current link will be cut off and need the new invite link to rejoin.", 'New room', true).then((ok) => {
+      if (!ok) return;
+      send('generate_saved_team_vdo', { teamName: regenSaved.dataset.teamName, regenerate: true });
+      setTimeout(cfLoadTalent, 500);
+    });
+    return;
+  }
   if (e.target.id === 'talent-gen-all-btn' || e.target.closest('#talent-gen-all-btn')) {
     send('generate_saved_team_vdo', {}); setTimeout(cfLoadTalent, 600); return;
   }
@@ -16950,7 +18908,6 @@ el('cf-vdo-save')?.addEventListener('click', () => {
   });
   const s = el('cf-vdo-status'); if (s) { s.textContent = 'Saved. Caster, share + talent-room links will use these settings.'; s.className = 'ev-status ev-ok'; }
   renderCfShares();
-  renderCfCasters(currentState);  // rebuild caster URLs with the new settings
 });
 
 // Build a clean VDO.ninja VIEW url from a stream id (or pass a full URL through unchanged).
@@ -16986,8 +18943,6 @@ function buildVdoView(idOrUrl, opts) {
   return url;
 }
 
-// ── Camera Feeds: Active Caster Scene picker ────────────────────────────────
-let _cfActiveLayoutBuilt = false;
 
 // ── Unified talent-group cards (Casters · Guests · Observers) ────────────────
 // Teams-style cards fed by the shared group rooms from /api/vdo/links. One renderer for all
@@ -17165,7 +19120,14 @@ function cfWireGroupCards() {
       const qr = e.target.closest('.gm-qr');
       if (qr) { const row = e.target.closest('.mc-player'); const box = row && row.querySelector('.talent-qr'); if (box) box.hidden = !box.hidden; return; }
       const regen = e.target.closest('.cf-grp-regen');
-      if (regen) { send('regenerate_group_room', { group: regen.dataset.group }); setTimeout(cfLoadGroups, 400); return; }
+      if (regen) {
+        appConfirm("Get a new room for this whole group? Anyone already connected with the current link will be cut off from the rest — they'll need the new invite link to rejoin.", 'New room', true).then((ok) => {
+          if (!ok) return;
+          send('regenerate_group_room', { group: regen.dataset.group });
+          setTimeout(cfLoadGroups, 400);
+        });
+        return;
+      }
       // Quick "→ Interview": move this member into the Interview / Desk room.
       const mvIntv = e.target.closest('.gm-move-intv');
       if (mvIntv) {
@@ -17275,1043 +19237,6 @@ function cfWireGroupCards() {
   });
 }
 
-// Quick "go live" triggers for the most-used caster overlays. One click sets the active
-// caster layout AND makes the caster overlay visible over the program; clicking the live
-// one hides it. Reuses the existing set_caster_active_layout / set_casters_visibility messages.
-const CF_CASTER_TRIGGERS = [
-  { path: '/casters.html',   name: 'Casters Grid',  icon: 'users'  },
-  { path: '/campip.html',    name: 'Cam Over Game', icon: 'camera' },
-  { path: '/talentbar.html', name: 'Talent Bar',    icon: 'film'   },
-  { path: '/interview.html', name: 'Interview',     icon: 'mic'    },
-];
-function renderCfCasterTriggers(data) {
-  const wrap = el('cf-caster-triggers'); if (!wrap) return;
-  const c = (data && data.casters) || {};
-  const active = c.activeLayout || '';
-  const visible = !!c.visible;
-  wrap.innerHTML = '';
-  const lbl = document.createElement('span');
-  lbl.className = 'cf-trig-lbl'; lbl.textContent = 'GO LIVE';
-  wrap.appendChild(lbl);
-  CF_CASTER_TRIGGERS.forEach((t) => {
-    const isLive = visible && active === t.path;
-    const b = document.createElement('button');
-    b.className = 'cf-ico-btn cf-trig-btn' + (isLive ? ' is-on' : '');
-    b.innerHTML = svgIcon(t.icon) + `<span class="cf-ico-lbl">${t.name}</span>`;
-    b.title = isLive ? (t.name + ' is live — click to hide') : ('Trigger ' + t.name + ' over the program');
-    b.addEventListener('click', () => {
-      if (isLive) { send('set_casters_visibility', { visible: false }); }
-      else { send('set_caster_active_layout', { path: t.path }); send('set_casters_visibility', { visible: true }); }
-    });
-    wrap.appendChild(b);
-  });
-  const hide = document.createElement('button');
-  hide.className = 'cf-ico-btn cf-ico-del cf-trig-hide';
-  hide.innerHTML = '<span class="cf-ico-lbl">Hide</span>';
-  hide.title = 'Hide all caster overlays';
-  hide.disabled = !visible;
-  hide.addEventListener('click', () => send('set_casters_visibility', { visible: false }));
-  wrap.appendChild(hide);
-}
-function renderCfActiveLayout(data) {
-  const wrap = el('cf-active-layout-grid');
-  if (!wrap) return;
-  const active = (data.casters && data.casters.activeLayout) || '';
-  if (!_cfActiveLayoutBuilt) {
-    _cfActiveLayoutBuilt = true;
-    (CF_CASTER_SCENES_LIST || []).forEach((s) => {
-      const url = CF_OVERLAY_BASE + s.path;
-      const row = document.createElement('div');
-      row.dataset.path = s.path;
-      row.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;flex-wrap:wrap;';
-      const left = document.createElement('div');
-      left.style.cssText = 'display:flex;align-items:center;gap:8px;min-width:0;';
-      const badge = document.createElement('span');
-      badge.className = 'cf-layout-live-badge';
-      badge.textContent = 'LIVE';
-      badge.style.cssText = 'display:none;font-size:9px;font-weight:800;letter-spacing:.07em;padding:2px 8px;background:#e83a8b;color:#fff;border-radius:8px;flex-shrink:0;';
-      const nameEl = document.createElement('span');
-      nameEl.style.cssText = 'font-weight:700;font-size:13px;color:#e6e8ee;';
-      nameEl.textContent = s.name;
-      const descEl = document.createElement('span');
-      // find the matching CASTER_DESK_LAYOUTS entry for description
-      const desk = (typeof CASTER_DESK_LAYOUTS !== 'undefined' ? CASTER_DESK_LAYOUTS : []).find(d => d.path === s.path);
-      descEl.style.cssText = 'font-size:11px;color:var(--muted);';
-      descEl.textContent = desk ? desk.desc : '';
-      left.appendChild(badge); left.appendChild(nameEl); left.appendChild(descEl);
-      const acts = document.createElement('div');
-      acts.style.cssText = 'display:flex;gap:6px;flex-shrink:0;';
-      const setBtn = document.createElement('button');
-      setBtn.className = 'btn btn-secondary btn-sm cf-layout-set-btn';
-      setBtn.textContent = 'Set Active';
-      setBtn.addEventListener('click', () => send('set_caster_active_layout', { path: s.path }));
-      const openBtn = document.createElement('button');
-      openBtn.className = 'btn btn-secondary btn-sm';
-      openBtn.textContent = 'Open ↗';
-      openBtn.addEventListener('click', () => window.open(url, '_blank'));
-      const copyBtn = document.createElement('button');
-      copyBtn.className = 'btn btn-secondary btn-sm';
-      copyBtn.textContent = 'Copy URL';
-      copyBtn.addEventListener('click', () => {
-        if (navigator.clipboard) navigator.clipboard.writeText(url);
-        copyBtn.textContent = 'Copied!'; setTimeout(() => { copyBtn.textContent = 'Copy URL'; }, 900);
-      });
-      acts.appendChild(setBtn); acts.appendChild(openBtn); acts.appendChild(copyBtn);
-      row.appendChild(left); row.appendChild(acts);
-      wrap.appendChild(row);
-    });
-  }
-  wrap.querySelectorAll('[data-path]').forEach(row => {
-    const isActive = row.dataset.path === active;
-    const badge = row.querySelector('.cf-layout-live-badge');
-    const setBtn = row.querySelector('.cf-layout-set-btn');
-    if (badge) badge.style.display = isActive ? '' : 'none';
-    if (setBtn) setBtn.textContent = isActive ? 'Active ✓' : 'Set Active';
-    row.style.borderColor = isActive ? 'var(--cp-accent)' : 'var(--border)';
-    row.style.background = isActive ? 'rgba(232,58,139,.08)' : 'var(--surface2)';
-  });
-}
-
-// ── Camera Feeds: Lineup slots ──────────────────────────────────────────────
-let _cfLineupDraft = [];
-
-function _vdoBaseLocal() { return ((cfVdo && cfVdo().base) || 'https://vdo.ninja').replace(/\/+$/, ''); }
-function _vdoSlugLocal(s) { return String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 48); }
-function _buildLineupJoinUrl(entry, prof, roomVdo, lang) {
-  if (!roomVdo || !roomVdo.room || !roomVdo.password) return '';
-  const sid = entry.streamId || ('caster_' + (entry.slot || 1));
-  return `${_vdoBaseLocal()}/?room=${roomVdo.room}&push=${sid}&transcribe=${lang || 'en-US'}&webcam&autostart#p=${roomVdo.password}`;
-}
-function _buildLineupObsUrl(entry, prof, roomVdo) {
-  if (!roomVdo || !roomVdo.room || !roomVdo.password) return '';
-  const sid = entry.streamId || ('caster_' + (entry.slot || 1));
-  return `${_vdoBaseLocal()}/?room=${roomVdo.room}&view=${sid}&solo&cleanoutput&autostart#p=${roomVdo.password}`;
-}
-
-const _CF_POSITION_LABELS = ['Left / Top', 'Right', 'Third Cam', 'Fourth Cam', 'Fifth Cam', 'Sixth Cam'];
-
-function renderCfLineup(data) {
-  // Keep the lineup draft synced with live state even though the old lineup UI is retired (the
-  // card's On-air ★ now drives it) — so any legacy caller using _cfLineupDraft stays consistent.
-  _cfLineupDraft = ((data.casters && data.casters.lineup) || []).map(e => ({ ...e }));
-  const wrap = el('cf-lineup-slots');
-  if (!wrap || _editingInside(wrap)) return;
-  const library = (data.casters && data.casters.library) || [];
-  const rooms = (data.casters && data.casters.rooms) || [];
-  const lang = (data.vdo && data.vdo.lang) || 'en-US';
-  if (!_cfLineupDraft.length) {
-    _cfLineupDraft = [
-      { libraryId: '', slot: 1, roomId: '', streamId: 'caster_1' },
-      { libraryId: '', slot: 2, roomId: '', streamId: 'caster_2' }
-    ];
-  }
-  wrap.innerHTML = '';
-
-  _cfLineupDraft.forEach((entry, i) => {
-    const slotNum = entry.slot || (i + 1);
-    const prof = library.find(p => p.id === entry.libraryId) || {};
-    const room = rooms.find(r => r.id === entry.roomId) || null;
-    const roomVdo = room ? room.vdo : null;
-    const joinUrl = _buildLineupJoinUrl(entry, prof, roomVdo, lang);
-    const obsUrl = _buildLineupObsUrl(entry, prof, roomVdo);
-    const hasLinks = !!(joinUrl || obsUrl);
-    const posLabel = _CF_POSITION_LABELS[slotNum - 1] || ('Position ' + slotNum);
-    const sid = entry.streamId || ('caster_' + slotNum);   // stream id used for join/view + connection pulse
-
-    const card = document.createElement('div');
-    card.className = 'cf-ln-card' + (entry.libraryId ? ' is-assigned' : '');
-
-    // ── Header: badge + label + ▲▼ + remove ───────────────────────────────
-    const hd = document.createElement('div');
-    hd.className = 'cf-ln-head';
-    const badge = document.createElement('span');
-    badge.className = 'cf-ln-badge';
-    badge.textContent = 'CASTER ' + slotNum;
-    const posEl = document.createElement('span');
-    posEl.className = 'cf-ln-pos';
-    posEl.textContent = posLabel;
-    const upBtn = document.createElement('button');
-    upBtn.className = 'cf-ico-btn'; upBtn.innerHTML = svgIcon('chevup'); upBtn.title = 'Move up one position';
-    upBtn.disabled = (i === 0);
-    upBtn.addEventListener('click', () => {
-      if (i === 0) return;
-      const a = _cfLineupDraft[i - 1], b = _cfLineupDraft[i];
-      [a.libraryId, b.libraryId] = [b.libraryId, a.libraryId];
-      [a.roomId, b.roomId] = [b.roomId, a.roomId];
-      [a.customCamUrl, b.customCamUrl] = [b.customCamUrl, a.customCamUrl];
-      send('set_caster_lineup', { lineup: _cfLineupDraft });
-    });
-    const dnBtn = document.createElement('button');
-    dnBtn.className = 'cf-ico-btn'; dnBtn.innerHTML = svgIcon('chevdown'); dnBtn.title = 'Move down one position';
-    dnBtn.disabled = (i === _cfLineupDraft.length - 1);
-    dnBtn.addEventListener('click', () => {
-      if (i >= _cfLineupDraft.length - 1) return;
-      const a = _cfLineupDraft[i], b = _cfLineupDraft[i + 1];
-      [a.libraryId, b.libraryId] = [b.libraryId, a.libraryId];
-      [a.roomId, b.roomId] = [b.roomId, a.roomId];
-      [a.customCamUrl, b.customCamUrl] = [b.customCamUrl, a.customCamUrl];
-      send('set_caster_lineup', { lineup: _cfLineupDraft });
-    });
-    const rmBtn = document.createElement('button');
-    rmBtn.className = 'cf-ico-btn cf-ico-del'; rmBtn.innerHTML = svgIcon('trash'); rmBtn.title = 'Remove position';
-    rmBtn.addEventListener('click', () => {
-      _cfLineupDraft.splice(i, 1);
-      _cfLineupDraft.forEach((e, j) => { e.slot = j + 1; });
-      send('set_caster_lineup', { lineup: _cfLineupDraft });
-    });
-    // Live connection pulse — same source as the Teams talent cards (_connectedStreams,
-    // populated by the Director consoles' guest lists). Honest: grey until monitoring detects them.
-    const connDot = document.createElement('span');
-    connDot.className = 'mc-stat mc-stat-conn cf-ln-conn';
-    connDot.dataset.conn = '0'; connDot.dataset.stream = sid;
-    connDot.title = 'Connection — start Director monitoring to detect';
-    // One-line summary name shown when collapsed.
-    const nameLineEl = document.createElement('span');
-    nameLineEl.className = 'cf-ln-name';
-    if (prof.name || prof.handle) { nameLineEl.textContent = prof.name || ('@' + prof.handle); }
-    else { nameLineEl.textContent = 'No caster assigned'; nameLineEl.classList.add('is-empty'); }
-    // Collapsible body — the card shows just one line until expanded. Assigned slots start
-    // collapsed (clean); empty slots open so the Assign picker is right there.
-    const body = document.createElement('div');
-    body.className = 'cf-ln-body';
-    body.hidden = !!entry.libraryId;
-    const expandBtn = document.createElement('button');
-    expandBtn.className = 'cf-ico-btn cf-ln-expand' + (body.hidden ? '' : ' is-open');
-    expandBtn.innerHTML = svgIcon('chevdown'); expandBtn.title = 'Expand / collapse';
-    expandBtn.addEventListener('click', () => {
-      body.hidden = !body.hidden;
-      expandBtn.classList.toggle('is-open', !body.hidden);
-      card.classList.toggle('is-open', !body.hidden);
-    });
-    card.classList.toggle('is-open', !body.hidden);
-    hd.appendChild(connDot); hd.appendChild(badge); hd.appendChild(nameLineEl); hd.appendChild(posEl);
-    hd.appendChild(upBtn); hd.appendChild(dnBtn); hd.appendChild(expandBtn); hd.appendChild(rmBtn);
-
-    // ── Caster assignment: display + button picker panel ──────────────────
-    const assignWrap = document.createElement('div');
-    assignWrap.style.cssText = 'margin-bottom:10px;';
-    const assignDisplay = document.createElement('div');
-    assignDisplay.className = 'cf-ln-assign' + (entry.libraryId ? ' is-assigned' : '');
-    const assignInfo = document.createElement('div');
-    assignInfo.style.cssText = 'flex:1;min-width:0;';
-    if (prof.name || prof.handle) {
-      const roleTag = prof.role ? ` <span style="font-size:11px;font-weight:400;color:var(--muted);">${prof.role.replace(/&/g,'&amp;').replace(/</g,'&lt;')}</span>` : '';
-      const sub = prof.handle ? '@' + prof.handle.replace(/&/g,'&amp;').replace(/</g,'&lt;') : '';
-      assignInfo.innerHTML = `<div style="font-size:14px;font-weight:700;color:#fff;">${(prof.name || prof.handle).replace(/&/g,'&amp;').replace(/</g,'&lt;')}${roleTag}</div>`
-        + (sub ? `<div style="font-size:11px;color:var(--muted);">${sub}</div>` : '');
-    } else {
-      assignInfo.innerHTML = '<div style="font-size:13px;color:var(--muted);font-style:italic;">No caster assigned</div>';
-    }
-    const changeBtn = document.createElement('button');
-    changeBtn.className = 'btn btn-secondary btn-sm';
-    changeBtn.textContent = entry.libraryId ? 'Change' : 'Assign';
-    assignDisplay.appendChild(assignInfo);
-    assignDisplay.appendChild(changeBtn);
-
-    const pickerPanel = document.createElement('div');
-    pickerPanel.style.cssText = 'display:none;margin-top:6px;padding:10px 12px;background:rgba(0,0,0,.25);border:1px solid var(--border);border-radius:8px;';
-
-    changeBtn.addEventListener('click', () => {
-      if (pickerPanel.style.display !== 'none') {
-        pickerPanel.style.display = 'none';
-        changeBtn.textContent = entry.libraryId ? 'Change' : 'Assign';
-        return;
-      }
-      pickerPanel.innerHTML = '';
-      const ph = document.createElement('div');
-      ph.style.cssText = 'display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;';
-      const pl = document.createElement('span');
-      pl.style.cssText = 'font-size:11px;color:var(--muted);font-weight:700;letter-spacing:.05em;';
-      pl.textContent = 'SELECT CASTER FOR ' + badge.textContent + ':';
-      const cancelPick = document.createElement('button');
-      cancelPick.className = 'btn btn-ghost btn-xs'; cancelPick.textContent = 'Cancel';
-      cancelPick.addEventListener('click', () => {
-        pickerPanel.style.display = 'none';
-        changeBtn.textContent = entry.libraryId ? 'Change' : 'Assign';
-      });
-      ph.appendChild(pl); ph.appendChild(cancelPick);
-      pickerPanel.appendChild(ph);
-      const grid = document.createElement('div');
-      grid.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;';
-      if (!library.length) {
-        grid.innerHTML = '<span style="font-size:12px;color:var(--muted);font-style:italic;">No casters in library — add them below.</span>';
-      } else {
-        if (entry.libraryId) {
-          const clrBtn = document.createElement('button');
-          clrBtn.className = 'btn btn-ghost btn-sm';
-          clrBtn.textContent = 'Clear slot';
-          clrBtn.style.cssText = 'color:#f56565;border-color:rgba(245,101,101,.3);';
-          clrBtn.addEventListener('click', () => {
-            _cfLineupDraft[i].libraryId = '';
-            send('set_caster_lineup', { lineup: _cfLineupDraft });
-            pickerPanel.style.display = 'none';
-          });
-          grid.appendChild(clrBtn);
-        }
-        library.forEach(p => {
-          const isActive = p.id === entry.libraryId;
-          const pb = document.createElement('button');
-          pb.className = isActive ? 'btn btn-primary btn-sm' : 'btn btn-secondary btn-sm';
-          pb.textContent = (p.name || p.handle || 'Caster') + (p.role ? ' · ' + p.role : '') + (isActive ? ' (current)' : '');
-          pb.title = p.handle ? '@' + p.handle : '';
-          pb.addEventListener('click', () => {
-            _cfLineupDraft[i].libraryId = p.id;
-            _cfLineupDraft[i].streamId = 'caster_' + slotNum;
-            send('set_caster_lineup', { lineup: _cfLineupDraft });
-            pickerPanel.style.display = 'none';
-          });
-          grid.appendChild(pb);
-        });
-      }
-      pickerPanel.appendChild(grid);
-      pickerPanel.style.display = '';
-      changeBtn.textContent = 'Close';
-    });
-
-    assignWrap.appendChild(assignDisplay);
-    assignWrap.appendChild(pickerPanel);
-
-    // ── VDO Room ──────────────────────────────────────────────────────────
-    const roomRow = document.createElement('div');
-    roomRow.style.cssText = 'margin-bottom:10px;';
-    const roomLbl = document.createElement('label');
-    roomLbl.style.cssText = 'font-size:11px;color:var(--muted);display:block;margin-bottom:4px;';
-    roomLbl.textContent = 'VDO Room:';
-    const roomSel = document.createElement('select');
-    roomSel.className = 'input-select';
-    roomSel.style.cssText = 'width:100%;font-size:12px;';
-    roomSel.innerHTML = '<option value="">— No room assigned —</option>' +
-      rooms.map(r => `<option value="${r.id}">${r.name.replace(/</g,'&lt;')}${r.vdo && r.vdo.room ? ' (ready)' : ' (no VDO yet)'}</option>`).join('');
-    roomSel.value = entry.roomId || '';
-    roomSel.addEventListener('change', () => {
-      _cfLineupDraft[i].roomId = roomSel.value;
-      send('set_caster_lineup', { lineup: _cfLineupDraft });
-    });
-    roomRow.appendChild(roomLbl);
-    roomRow.appendChild(roomSel);
-
-    // ── Links ─────────────────────────────────────────────────────────────
-    const linkRow = document.createElement('div');
-    linkRow.style.cssText = 'padding-top:10px;border-top:1px solid var(--border);display:flex;gap:8px;flex-wrap:wrap;align-items:center;';
-    if (!hasLinks) {
-      const hint = document.createElement('span');
-      hint.style.cssText = 'font-size:11px;color:var(--muted);font-style:italic;';
-      if (!entry.roomId) hint.textContent = 'No room assigned — use "Generate All Links" to auto-provision.';
-      else if (!roomVdo || !roomVdo.room) hint.textContent = 'Room has no VDO — click "Generate All Links" above.';
-      else hint.textContent = 'Assign a caster then click "Generate All Links".';
-      linkRow.appendChild(hint);
-    } else {
-      // Icon-button links in the same style as the Teams talent rooms (Invite · View · QR · Open).
-      const nameLabel = prof.name || (prof.handle ? '@' + prof.handle : 'Caster');
-      const cap = document.createElement('span');
-      cap.className = 'tl-grp-cap'; cap.style.cssText = 'flex:0 0 auto;';
-      cap.textContent = nameLabel;
-      linkRow.appendChild(cap);
-      function _icoCopy(icon, label, url, title) {
-        const b = document.createElement('button');
-        b.className = 'cf-ico-btn'; b.title = title || url || ''; b.disabled = !url;
-        b.innerHTML = svgIcon(icon) + (label ? `<span class="cf-ico-lbl">${label}</span>` : '');
-        b.addEventListener('click', () => {
-          if (!url) return;
-          if (navigator.clipboard) navigator.clipboard.writeText(url);
-          const o = b.innerHTML; b.classList.add('is-copied');
-          b.innerHTML = svgIcon('check') + '<span class="cf-ico-lbl">Copied</span>';
-          setTimeout(() => { b.classList.remove('is-copied'); b.innerHTML = o; }, 1000);
-        });
-        return b;
-      }
-      linkRow.appendChild(_icoCopy('userplus', 'Invite', joinUrl, 'Copy the caster join link'));
-      linkRow.appendChild(_icoCopy('copy', 'View', obsUrl, 'Copy the OBS browser-source view link'));
-      if (joinUrl) {
-        const qrBox = document.createElement('div');
-        qrBox.className = 'talent-qr'; qrBox.hidden = true; qrBox.style.cssText = 'flex-basis:100%;';
-        qrBox.innerHTML = `<img alt="Join QR" src="${VDO_API}/api/vdo/qr?text=${encodeURIComponent(joinUrl)}"><span class="talent-qr-cap">Scan to join as <b>${(nameLabel || '').replace(/&/g, '&amp;').replace(/</g, '&lt;')}</b></span>`;
-        const qrBtn = document.createElement('button');
-        qrBtn.className = 'cf-ico-btn'; qrBtn.title = 'Show join QR'; qrBtn.innerHTML = svgIcon('qr');
-        qrBtn.addEventListener('click', () => { qrBox.hidden = !qrBox.hidden; });
-        const openA = document.createElement('a');
-        openA.className = 'cf-ico-btn'; openA.href = joinUrl; openA.target = '_blank'; openA.rel = 'noopener';
-        openA.title = 'Open the join link to test'; openA.innerHTML = svgIcon('external');
-        linkRow.appendChild(qrBtn);
-        linkRow.appendChild(openA);
-        linkRow.appendChild(qrBox);
-      }
-    }
-
-    // ── Custom View URL override ───────────────────────────────────────────
-    const hasCustom = !!(entry.customCamUrl);
-    const customUrlWrap = document.createElement('div');
-    customUrlWrap.style.cssText = 'padding-top:10px;border-top:1px solid '
-      + (hasCustom ? 'rgba(74,222,128,.35)' : 'var(--border)') + ';'
-      + (hasCustom ? 'background:rgba(74,222,128,.06);border-radius:0 0 8px 8px;padding:10px 14px 12px;margin:0 -14px -14px;' : '');
-
-    const cuHdr = document.createElement('div');
-    cuHdr.style.cssText = 'display:flex;align-items:center;gap:8px;margin-bottom:6px;';
-    const cuLbl = document.createElement('span');
-    cuLbl.style.cssText = 'font-size:11px;font-weight:700;letter-spacing:.04em;flex:1;color:'
-      + (hasCustom ? 'rgba(74,222,128,.9)' : 'var(--muted)') + ';';
-    cuLbl.textContent = 'CUSTOM VIEW URL';
-    cuHdr.appendChild(cuLbl);
-    if (hasCustom) {
-      const cuBadge = document.createElement('span');
-      cuBadge.style.cssText = 'font-size:10px;font-weight:800;padding:2px 8px;background:rgba(74,222,128,.15);'
-        + 'color:rgba(74,222,128,.9);border:1px solid rgba(74,222,128,.3);border-radius:6px;flex-shrink:0;';
-      cuBadge.textContent = 'OVERRIDE ACTIVE';
-      cuHdr.appendChild(cuBadge);
-    }
-    customUrlWrap.appendChild(cuHdr);
-    if (hasCustom) {
-      const cuHint = document.createElement('p');
-      cuHint.style.cssText = 'font-size:11px;color:rgba(74,222,128,.65);margin:0 0 8px;';
-      cuHint.textContent = 'Overlays are using this URL for the camera feed. Clear to revert to auto-generated VDO.';
-      customUrlWrap.appendChild(cuHint);
-    }
-
-    const cuRow = document.createElement('div');
-    cuRow.style.cssText = 'display:flex;gap:6px;align-items:center;';
-    const customUrlInp = document.createElement('input');
-    customUrlInp.type = 'text'; customUrlInp.className = 'input-text';
-    customUrlInp.style.cssText = 'flex:1;font-size:11px;' + (hasCustom ? 'border-color:rgba(74,222,128,.4);' : '');
-    customUrlInp.placeholder = 'Paste a VDO view link — overlays will use it instead of auto-generated';
-    customUrlInp.maxLength = 1000;
-    customUrlInp.value = entry.customCamUrl || '';
-
-    const cuSaveBtn = document.createElement('button');
-    cuSaveBtn.className = 'btn btn-primary btn-sm'; cuSaveBtn.textContent = 'Save';
-    cuSaveBtn.title = 'Save this URL — overlays switch to it immediately';
-
-    function _doSaveCustomUrl() {
-      const val = customUrlInp.value.trim();
-      _cfLineupDraft[i].customCamUrl = val;
-      send('set_caster_lineup', { lineup: _cfLineupDraft });
-      cuSaveBtn.textContent = 'Saved!';
-      setTimeout(() => { cuSaveBtn.textContent = 'Save'; }, 1500);
-    }
-    customUrlInp.addEventListener('input', () => { _cfLineupDraft[i].customCamUrl = customUrlInp.value.trim(); });
-    customUrlInp.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); _doSaveCustomUrl(); } });
-    cuSaveBtn.addEventListener('click', _doSaveCustomUrl);
-
-    cuRow.appendChild(customUrlInp);
-    cuRow.appendChild(cuSaveBtn);
-    if (hasCustom) {
-      const cuClearBtn = document.createElement('button');
-      cuClearBtn.className = 'btn btn-ghost btn-sm'; cuClearBtn.textContent = 'Clear';
-      cuClearBtn.style.color = '#f56565';
-      cuClearBtn.title = 'Remove override — overlays go back to auto-generated VDO view link';
-      cuClearBtn.addEventListener('click', () => {
-        customUrlInp.value = '';
-        _cfLineupDraft[i].customCamUrl = '';
-        send('set_caster_lineup', { lineup: _cfLineupDraft });
-      });
-      cuRow.appendChild(cuClearBtn);
-    }
-    customUrlWrap.appendChild(cuRow);
-
-    // ── Per-caster audio (volume / pan / mono) — baked into this caster's VDO view URL ──
-    const ea = entry.audio || {};
-    const audioWrap = document.createElement('div');
-    audioWrap.style.cssText = 'padding-top:10px;margin-top:8px;border-top:1px solid var(--border);display:flex;gap:14px;align-items:center;flex-wrap:wrap;';
-    audioWrap.innerHTML = `<span style="font-size:11px;font-weight:700;color:var(--muted);letter-spacing:.04em;">AUDIO</span>
-      <label style="font-size:11px;display:flex;align-items:center;gap:4px;" title="Volume 0–200">vol<input type="number" class="ln-a-vol input-text" min="0" max="200" step="5" style="width:64px;" value="${ea.volume != null ? ea.volume : 100}"></label>
-      <label style="font-size:11px;display:flex;align-items:center;gap:4px;" title="Stereo pan (left ↔ right)">pan<input type="range" class="ln-a-pan" min="-100" max="100" step="5" value="${ea.pan != null ? ea.pan : 0}"></label>
-      <label style="font-size:11px;display:flex;align-items:center;gap:5px;" title="Down-mix to mono"><input type="checkbox" class="ln-a-mono" ${ea.mono ? 'checked' : ''}> mono</label>`;
-    const _saveLnAudio = () => {
-      const vol = parseInt(audioWrap.querySelector('.ln-a-vol').value, 10);
-      const pan = parseInt(audioWrap.querySelector('.ln-a-pan').value, 10) || 0;
-      const mono = audioWrap.querySelector('.ln-a-mono').checked;
-      const audio = {};
-      if (Number.isFinite(vol) && vol !== 100) audio.volume = vol;
-      if (pan) audio.pan = pan;
-      if (mono) audio.mono = true;
-      _cfLineupDraft[i].audio = Object.keys(audio).length ? audio : undefined;
-      send('set_caster_lineup', { lineup: _cfLineupDraft });
-    };
-    audioWrap.querySelectorAll('.ln-a-vol, .ln-a-pan, .ln-a-mono').forEach((elx) => elx.addEventListener('change', _saveLnAudio));
-
-    body.appendChild(assignWrap); body.appendChild(roomRow); body.appendChild(linkRow); body.appendChild(customUrlWrap); body.appendChild(audioWrap);
-    card.appendChild(hd); card.appendChild(body);
-    wrap.appendChild(card);
-  });
-}
-
-el('cf-lineup-add-slot')?.addEventListener('click', () => {
-  const maxSlot = _cfLineupDraft.reduce((m, e) => Math.max(m, Number(e.slot) || 0), 0);
-  if (maxSlot >= 6) return;
-  _cfLineupDraft.push({ libraryId: '', slot: maxSlot + 1, roomId: '', streamId: 'caster_' + (maxSlot + 1) });
-  send('set_caster_lineup', { lineup: _cfLineupDraft });
-});
-el('cf-lineup-clear')?.addEventListener('click', () => {
-  appConfirm('Clear this show\'s entire caster lineup?', 'Clear').then(ok => { if (!ok) return; send('set_caster_lineup', { lineup: [] }); });
-});
-el('cf-lineup-apply')?.addEventListener('click', () => {
-  send('set_caster_lineup', { lineup: _cfLineupDraft });
-  const btn = el('cf-lineup-apply');
-  if (btn) { btn.textContent = 'Applied ✓'; setTimeout(() => { btn.textContent = 'Apply to overlay'; }, 1100); }
-});
-el('cf-lineup-gen-all')?.addEventListener('click', () => {
-  const lineup = currentState?.casters?.lineup || [];
-  if (!lineup.length) return;
-  send('generate_all_caster_links', {});
-  const btn = el('cf-lineup-gen-all');
-  if (btn) { const orig = btn.textContent; btn.textContent = 'Generating…'; btn.disabled = true; setTimeout(() => { btn.textContent = orig; btn.disabled = false; }, 2500); }
-});
-
-// ── Separated-audio layout helper: frames-only desk + per-caster solo OBS sources ──────────
-function cfSepDeskUrl() {
-  const base = (typeof SCENE_BASE_URL !== 'undefined' ? SCENE_BASE_URL : 'http://localhost:3000');
-  const layout = el('cf-sep-layout')?.value || '/duorow.html';
-  return base + layout + '?cams=off';
-}
-let _cfSepSig = '';
-function renderCfSeparatedAudio(data) {
-  const list = el('cf-sep-list'); if (!list) return;
-  const urlEl = el('cf-sep-desk-url'); if (urlEl) urlEl.textContent = cfSepDeskUrl();
-  const casters = ((data.casters && data.casters.list) || []).filter((c) => c && (c.name || c.streamId) && c.camUrl);
-  const sig = JSON.stringify(casters.map((c) => [c.slot, c.name, c.camUrl]));
-  if (sig === _cfSepSig) return;
-  _cfSepSig = sig;
-  list.innerHTML = '';
-  if (!casters.length) {
-    list.innerHTML = '<p class="section-desc" style="font-size:12px;">Assign casters in the lineup below — each one\'s solo source URL will appear here to copy into OBS.</p>';
-    return;
-  }
-  casters.forEach((c) => {
-    const row = document.createElement('div');
-    row.style.cssText = 'display:flex;align-items:center;gap:10px;padding:7px 10px;border:1px solid var(--border);border-radius:8px;background:var(--surface2);';
-    const name = document.createElement('span');
-    name.style.cssText = 'font-weight:700;font-size:12.5px;min-width:120px;';
-    name.textContent = `CAM ${c.slot} · ${c.name || c.streamId}`;
-    const btn = document.createElement('button');
-    btn.className = 'btn btn-ghost btn-sm';
-    btn.textContent = 'Copy solo source';
-    btn.title = 'Copy this caster\'s solo VDO view — add as its own OBS browser source (Control audio via OBS)';
-    btn.addEventListener('click', () => { if (typeof copyText === 'function') copyText(c.camUrl, btn); else if (navigator.clipboard) navigator.clipboard.writeText(c.camUrl); });
-    row.appendChild(name); row.appendChild(btn);
-    list.appendChild(row);
-  });
-}
-el('cf-sep-copy-desk')?.addEventListener('click', (e) => {
-  if (typeof copyText === 'function') copyText(cfSepDeskUrl(), e.currentTarget);
-  else if (navigator.clipboard) navigator.clipboard.writeText(cfSepDeskUrl());
-});
-el('cf-sep-layout')?.addEventListener('change', () => {
-  const urlEl = el('cf-sep-desk-url'); if (urlEl) urlEl.textContent = cfSepDeskUrl();
-});
-
-// ── Camera Feeds: VDO Rooms manager ─────────────────────────────────────────
-function renderCfRooms(data) {
-  const wrap = el('cf-caster-rooms');
-  if (!wrap || _editingInside(wrap)) return;
-  const rooms = (data.casters && data.casters.rooms) || [];
-  wrap.innerHTML = '';
-  if (!rooms.length) {
-    wrap.innerHTML = '<p class="section-desc" style="margin:0;font-style:italic;">No rooms yet — click "+ New Room" to create one (e.g. Main Desk, Interview, Sideline).</p>';
-    return;
-  }
-  rooms.forEach(room => {
-    const hasVdo = !!(room.vdo && room.vdo.room && room.vdo.password);
-    const card = document.createElement('div');
-    card.className = 'cf-room-card' + (hasVdo ? ' is-ready' : '');
-    const hd = document.createElement('div');
-    hd.className = 'cf-room-head';
-    const stat = document.createElement('span');
-    stat.className = 'cf-room-dot' + (hasVdo ? ' is-ready' : '');
-    stat.title = hasVdo ? 'VDO ready' : 'No VDO credentials yet';
-    const nameInp = document.createElement('input');
-    nameInp.type = 'text'; nameInp.className = 'input-text cf-room-name';
-    nameInp.placeholder = 'Room name'; nameInp.maxLength = 60; nameInp.value = room.name;
-    nameInp.addEventListener('change', () => send('save_caster_room', { id: room.id, name: nameInp.value.trim() || room.name }));
-    const genBtn = document.createElement('button');
-    genBtn.className = hasVdo ? 'btn btn-ghost btn-sm' : 'btn btn-primary btn-sm';
-    genBtn.innerHTML = hasVdo ? svgIcon('refresh') + ' Regen VDO' : svgIcon('zap') + ' Generate VDO';
-    genBtn.title = hasVdo ? 'Regenerate VDO credentials (existing join links will break)' : 'Generate VDO room credentials for this room';
-    genBtn.addEventListener('click', () => {
-      if (!hasVdo) { send('generate_caster_room_vdo', { id: room.id, regenerate: false }); return; }
-      appConfirm('Regenerate VDO for "' + room.name + '"? Existing join links will stop working.', 'Regenerate').then(ok => { if (!ok) return; send('generate_caster_room_vdo', { id: room.id, regenerate: true }); });
-    });
-    // Designate this as the interview / desk room (where casters sit + interviews land).
-    const isDesk = room.id === ((data.casters && data.casters.deskRoomId) || '');
-    if (isDesk) card.classList.add('is-desk');
-    const deskBtn = document.createElement('button');
-    deskBtn.className = 'cf-ico-btn cf-room-desk' + (isDesk ? ' is-on' : '');
-    deskBtn.innerHTML = svgIcon('star') + '<span class="cf-ico-lbl">' + (isDesk ? 'Desk room' : 'Set as desk') + '</span>';
-    deskBtn.title = isDesk ? 'This is the interview / desk room — interviews + the spotlight-desk cam use it. Click to unset.' : 'Use this as the interview / desk room (casters sit here; interviews land here)';
-    deskBtn.addEventListener('click', () => send('set_desk_room', { roomId: isDesk ? '' : room.id }));
-    const delBtn = document.createElement('button');
-    delBtn.className = 'cf-ico-btn cf-ico-del'; delBtn.innerHTML = svgIcon('trash'); delBtn.title = 'Delete room';
-    let _rmDelTimer = null;
-    delBtn.addEventListener('click', () => {
-      if (delBtn.classList.contains('is-armed')) { clearTimeout(_rmDelTimer); send('delete_caster_room', { id: room.id }); return; }
-      delBtn.classList.add('is-armed'); delBtn.innerHTML = svgIcon('trash') + '<span class="cf-ico-lbl">Sure?</span>';
-      _rmDelTimer = setTimeout(() => { delBtn.classList.remove('is-armed'); delBtn.innerHTML = svgIcon('trash'); }, 2600);
-    });
-    hd.appendChild(stat); hd.appendChild(nameInp); hd.appendChild(deskBtn); hd.appendChild(genBtn); hd.appendChild(delBtn);
-    card.appendChild(hd);
-    if (hasVdo) {
-      const info = document.createElement('div');
-      info.className = 'cf-room-info';
-      const roomUrl = `${_vdoBaseLocal()}/?room=${room.vdo.room}#p=${room.vdo.password}`;
-      const roomId = document.createElement('span');
-      roomId.className = 'cf-room-id';
-      roomId.textContent = room.vdo.room;
-      const copyRoomBtn = document.createElement('button');
-      copyRoomBtn.className = 'cf-ico-btn'; copyRoomBtn.innerHTML = svgIcon('copy') + '<span class="cf-ico-lbl">Room URL</span>';
-      copyRoomBtn.title = 'Copy the room URL';
-      copyRoomBtn.addEventListener('click', () => {
-        if (navigator.clipboard) navigator.clipboard.writeText(roomUrl);
-        const o = copyRoomBtn.innerHTML; copyRoomBtn.innerHTML = svgIcon('check') + '<span class="cf-ico-lbl">Copied</span>'; setTimeout(() => { copyRoomBtn.innerHTML = o; }, 900);
-      });
-      info.appendChild(roomId); info.appendChild(copyRoomBtn);
-      card.appendChild(info);
-    } else {
-      const noVdo = document.createElement('p');
-      noVdo.textContent = 'No VDO credentials yet — Generate VDO, or plug in an existing room below.';
-      noVdo.style.cssText = 'font-size:11px;color:var(--muted);margin:6px 0 0;font-style:italic;';
-      card.appendChild(noVdo);
-    }
-    // Plug in an existing VDO room (name + password) instead of generating new credentials.
-    const esc = (s) => (s || '').toString().replace(/"/g, '&quot;');
-    const creds = document.createElement('details');
-    creds.className = 'cf-room-creds';
-    creds.innerHTML = '<summary>Use an existing VDO room (custom)</summary>'
-      + '<div class="cf-room-creds-row">'
-      + `<input type="text" class="input-text cf-rc-room" placeholder="Room name" value="${esc(room.vdo && room.vdo.room)}" spellcheck="false">`
-      + `<input type="text" class="input-text cf-rc-pass" placeholder="Password" value="${esc(room.vdo && room.vdo.password)}" spellcheck="false">`
-      + '<button class="btn btn-secondary btn-sm cf-rc-save">Use room</button></div>';
-    creds.querySelector('.cf-rc-save').addEventListener('click', () => {
-      const r = creds.querySelector('.cf-rc-room').value.trim();
-      const pw = creds.querySelector('.cf-rc-pass').value.trim();
-      if (r && pw) send('set_caster_room_creds', { id: room.id, room: r, password: pw });
-    });
-    card.appendChild(creds);
-    wrap.appendChild(card);
-  });
-}
-
-// Room add — inserts an inline mini-form at the top of the rooms list
-el('cf-room-add')?.addEventListener('click', () => {
-  const wrap = el('cf-caster-rooms');
-  if (!wrap || wrap.querySelector('.cf-new-room-form')) return;
-  const form = document.createElement('div');
-  form.className = 'cf-new-room-form';
-  form.style.cssText = 'display:flex;gap:8px;align-items:center;padding:10px 12px;background:rgba(255,255,255,0.04);border:1px solid var(--cp-accent);border-radius:8px;';
-  const inp = document.createElement('input');
-  inp.type = 'text'; inp.className = 'input-text'; inp.style.flex = '1';
-  inp.placeholder = 'Room name (e.g. Main Desk, Interview, Sideline)'; inp.maxLength = 60;
-  const saveBtn = document.createElement('button');
-  saveBtn.className = 'btn btn-primary btn-sm'; saveBtn.textContent = 'Add Room';
-  const cancelBtn = document.createElement('button');
-  cancelBtn.className = 'btn btn-ghost btn-sm'; cancelBtn.textContent = 'Cancel';
-  function _doSaveRoom() {
-    const name = inp.value.trim();
-    if (!name) { inp.focus(); return; }
-    send('save_caster_room', { name });
-    form.remove();
-  }
-  saveBtn.addEventListener('click', _doSaveRoom);
-  cancelBtn.addEventListener('click', () => form.remove());
-  inp.addEventListener('keydown', e => { if (e.key === 'Enter') _doSaveRoom(); if (e.key === 'Escape') form.remove(); });
-  form.appendChild(inp); form.appendChild(saveBtn); form.appendChild(cancelBtn);
-  wrap.insertBefore(form, wrap.firstChild);
-  inp.focus();
-});
-
-// ── Camera Feeds: Compact library (for slot assignment) ──────────────────────
-let _cfLibSearch = '';
-let _cfHostSearch = '';   // Hosts tab uses the same library renderer, filtered to kind:'host'
-const _CF_SOCIAL_OPTS = [
-  { v: 'none', l: 'No social' }, { v: 'x', l: 'X / Twitter' }, { v: 'twitch', l: 'Twitch' },
-  { v: 'youtube', l: 'YouTube' }, { v: 'instagram', l: 'Instagram' }, { v: 'tiktok', l: 'TikTok' },
-  { v: 'kick', l: 'Kick' }, { v: 'discord', l: 'Discord' }, { v: 'facebook', l: 'Facebook' }, { v: 'other', l: 'Other' }
-];
-function renderCfCasterLibrary(data, opts) {
-  opts = opts || {};
-  const host = opts.host === true;                       // Hosts tab uses the same renderer, filtered
-  const wrap = el(opts.wrapId || 'cf-caster-library-rows');
-  if (!wrap || _editingInside(wrap)) return;
-  const noun = host ? 'guest' : 'caster';
-  const searchVal = host ? _cfHostSearch : _cfLibSearch;
-  const allLib = (data.casters && data.casters.library) || [];
-  // Casters = anything that isn't a guest or an observer; guests = kind:'host'.
-  const library = allLib.filter(p => host ? (p.kind === 'host') : (p.kind !== 'host' && p.kind !== 'observer'));
-  const lineup = (data.casters && data.casters.lineup) || [];
-  const PLAT = { x: 'X', twitch: 'Twitch', youtube: 'YT', instagram: 'IG', tiktok: 'TikTok', discord: 'Discord', kick: 'Kick', facebook: 'FB', other: 'Link' };
-  wrap.innerHTML = '';
-  if (!library.length) {
-    wrap.innerHTML = `<p class="section-desc" style="margin:0;font-style:italic;">No saved ${noun}s yet — click "+ New ${host ? 'Guest' : 'Caster'}" above to add one.</p>`;
-    return;
-  }
-  const q = (searchVal || '').toLowerCase();
-  const filtered = q ? library.filter(p =>
-    (p.name || '').toLowerCase().includes(q) ||
-    (p.handle || '').toLowerCase().includes(q) ||
-    (p.role || '').toLowerCase().includes(q)
-  ) : library;
-  if (!filtered.length) {
-    wrap.innerHTML = '<p class="section-desc" style="margin:0;">No results for "' + searchVal + '".</p>';
-    return;
-  }
-  if (!document.getElementById('cf-role-dl')) {
-    const dl = document.createElement('datalist'); dl.id = 'cf-role-dl';
-    ['Play-by-Play', 'Color Caster', 'Host', 'Analyst', 'Desk Analyst', 'Interviewer', 'Observer'].forEach(r => {
-      const o = document.createElement('option'); o.value = r; dl.appendChild(o);
-    });
-    document.body.appendChild(dl);
-  }
-  const esc = s => (s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;');
-  const initials = s => (s || '?').trim().split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase() || '?';
-  filtered.forEach(p => {
-    const inLineup = lineup.some(e => e.libraryId === p.id);
-    const card = document.createElement('div');
-    card.className = 'cf-lib-card' + (inLineup ? ' is-live' : '');
-
-    const summaryRow = document.createElement('div');
-    summaryRow.className = 'cf-lib-row';
-
-    const av = document.createElement('div');
-    av.className = 'cf-lib-av';
-    av.textContent = initials(p.name || p.handle);
-
-    const info = document.createElement('div');
-    info.className = 'cf-lib-info';
-    const sub = [p.handle ? '@' + p.handle : '', p.social && p.social !== 'none' ? (PLAT[p.social] || '') : ''].filter(Boolean).join(' · ');
-    const liveTag = inLineup ? ' <span class="cf-lib-live">LIVE</span>' : '';
-    const roleTag = p.role ? ` <span class="cf-lib-role">${esc(p.role)}</span>` : '';
-    info.innerHTML = `<div class="cf-lib-name">${esc(p.name || p.handle || 'Caster')}${liveTag}${roleTag}</div>`
-      + (sub ? `<div class="cf-lib-sub">${esc(sub)}</div>` : '');
-    summaryRow.appendChild(av);
-    summaryRow.appendChild(info);
-
-    const acts = document.createElement('div');
-    acts.className = 'cf-lib-acts';
-
-    const addBtn = document.createElement('button');
-    if (inLineup) {
-      addBtn.className = 'cf-ico-btn is-on'; addBtn.innerHTML = svgIcon('check'); addBtn.disabled = true; addBtn.title = 'In lineup';
-    } else {
-      const nextSlot = _cfLineupDraft.reduce((m, e) => Math.max(m, Number(e.slot) || 0), 0) + 1;
-      if (nextSlot > 6) {
-        addBtn.className = 'cf-ico-btn'; addBtn.innerHTML = svgIcon('plus'); addBtn.disabled = true; addBtn.title = 'Max 6 casters in lineup';
-      } else {
-        addBtn.className = 'cf-ico-btn cf-ico-add';
-        addBtn.innerHTML = svgIcon('plus') + '<span class="cf-ico-lbl">C' + nextSlot + '</span>'; addBtn.title = 'Add to Caster ' + nextSlot;
-        addBtn.addEventListener('click', () => {
-          const slot = _cfLineupDraft.reduce((m, e) => Math.max(m, Number(e.slot) || 0), 0) + 1;
-          if (slot > 6) return;
-          _cfLineupDraft.push({ libraryId: p.id, slot, roomId: '', streamId: 'caster_' + slot });
-          send('set_caster_lineup', { lineup: _cfLineupDraft });
-        });
-      }
-    }
-    const editBtn = document.createElement('button');
-    editBtn.className = 'cf-ico-btn'; editBtn.innerHTML = svgIcon('pencil'); editBtn.title = 'Edit';
-    const delBtn = document.createElement('button');
-    delBtn.className = 'cf-ico-btn cf-ico-del'; delBtn.innerHTML = svgIcon('trash'); delBtn.title = 'Delete';
-    // Inline two-step delete (no fragile native confirm): first click arms, second confirms.
-    let _delTimer = null;
-    delBtn.addEventListener('click', () => {
-      if (delBtn.classList.contains('is-armed')) {
-        clearTimeout(_delTimer);
-        send('delete_caster_from_library', { id: p.id });
-        return;
-      }
-      delBtn.classList.add('is-armed'); delBtn.innerHTML = svgIcon('trash') + '<span class="cf-ico-lbl">Sure?</span>';
-      _delTimer = setTimeout(() => { delBtn.classList.remove('is-armed'); delBtn.innerHTML = svgIcon('trash'); }, 2600);
-    });
-    acts.appendChild(addBtn); acts.appendChild(editBtn); acts.appendChild(delBtn);
-    summaryRow.appendChild(acts);
-    card.appendChild(summaryRow);
-
-    const editForm = document.createElement('div');
-    editForm.style.cssText = 'display:none;padding:10px 12px;border-top:1px solid var(--border);background:rgba(0,0,0,.2);';
-    const sopts = _CF_SOCIAL_OPTS.map(o => `<option value="${o.v}"${p.social===o.v?' selected':''}>${o.l}</option>`).join('');
-    const qn = (p.name||'').replace(/"/g,'&quot;'), qh = (p.handle||'').replace(/"/g,'&quot;');
-    const qr = (p.role||'').replace(/"/g,'&quot;'), qc = (p.camUrl||'').replace(/"/g,'&quot;');
-    editForm.innerHTML =
-      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">'
-      + `<div><label style="font-size:11px;color:var(--muted);display:block;margin-bottom:3px;">Name</label><input class="input-text ef-name" value="${qn}" maxlength="40" placeholder="Display name" style="width:100%;font-size:12px;"></div>`
-      + `<div><label style="font-size:11px;color:var(--muted);display:block;margin-bottom:3px;">@Handle</label><input class="input-text ef-handle" value="${qh}" maxlength="80" placeholder="@handle" style="width:100%;font-size:12px;"></div>`
-      + '</div>'
-      + '<div style="display:grid;grid-template-columns:1fr 120px 130px;gap:8px;margin-bottom:8px;">'
-      + `<div><label style="font-size:11px;color:var(--muted);display:block;margin-bottom:3px;">Role / Title</label><input class="input-text ef-role" value="${qr}" maxlength="40" placeholder="Play-by-Play, Host, Analyst…" list="cf-role-dl" style="width:100%;font-size:12px;"></div>`
-      + `<div><label style="font-size:11px;color:var(--muted);display:block;margin-bottom:3px;">Type</label><select class="input-select ef-kind" style="width:100%;font-size:12px;"><option value="caster"${p.kind === 'host' ? '' : ' selected'}>Caster</option><option value="host"${p.kind === 'host' ? ' selected' : ''}>Guest</option></select></div>`
-      + `<div><label style="font-size:11px;color:var(--muted);display:block;margin-bottom:3px;">Social</label><select class="input-select ef-social" style="width:100%;font-size:12px;">${sopts}</select></div>`
-      + '</div>'
-      + `<div style="margin-bottom:10px;"><label style="font-size:11px;color:var(--muted);display:block;margin-bottom:3px;">Fallback Cam URL</label><input class="input-text ef-cam" value="${qc}" maxlength="500" placeholder="https://… (leave blank)" style="width:100%;font-size:12px;"></div>`
-      + '<div style="display:flex;gap:8px;"><button class="btn btn-primary btn-sm ef-save">Save Changes</button><button class="btn btn-ghost btn-sm ef-cancel">Cancel</button></div>';
-    editBtn.addEventListener('click', () => {
-      const showing = editForm.style.display !== 'none';
-      editForm.style.display = showing ? 'none' : '';
-      if (!showing) editForm.querySelector('.ef-name').focus();
-    });
-    editForm.querySelector('.ef-cancel').addEventListener('click', () => { editForm.style.display = 'none'; });
-    editForm.querySelector('.ef-save').addEventListener('click', () => {
-      const name = editForm.querySelector('.ef-name').value.trim();
-      const handle = editForm.querySelector('.ef-handle').value.trim();
-      const role = editForm.querySelector('.ef-role').value.trim();
-      const social = editForm.querySelector('.ef-social').value;
-      const camUrl = editForm.querySelector('.ef-cam').value.trim();
-      const kind = editForm.querySelector('.ef-kind')?.value === 'host' ? 'host' : 'caster';
-      if (!name && !handle) { editForm.querySelector('.ef-name').focus(); return; }
-      send('save_caster_to_library', { id: p.id, name, handle, role, social, camUrl, kind });
-      editForm.style.display = 'none';
-    });
-    card.appendChild(editForm);
-    wrap.appendChild(card);
-  });
-}
-
-// New caster profile form
-el('cf-lib-add-btn')?.addEventListener('click', () => {
-  const form = el('cf-lib-add-form');
-  if (!form) return;
-  const showing = form.style.display !== 'none';
-  form.style.display = showing ? 'none' : '';
-  if (!showing) el('cf-nc-name')?.focus();
-});
-el('cf-nc-cancel')?.addEventListener('click', () => {
-  const form = el('cf-lib-add-form'); if (form) form.style.display = 'none';
-});
-el('cf-nc-save')?.addEventListener('click', () => {
-  const name = (el('cf-nc-name')?.value || '').trim();
-  const handle = (el('cf-nc-handle')?.value || '').trim();
-  const role = (el('cf-nc-role')?.value || '').trim();
-  const social = el('cf-nc-social')?.value || 'none';
-  const camUrl = (el('cf-nc-cam')?.value || '').trim();
-  if (!name && !handle) { el('cf-nc-name')?.focus(); return; }
-  send('save_caster_to_library', { name, handle, role, social, camUrl });
-  if (el('cf-nc-name')) el('cf-nc-name').value = '';
-  if (el('cf-nc-handle')) el('cf-nc-handle').value = '';
-  if (el('cf-nc-role')) el('cf-nc-role').value = '';
-  if (el('cf-nc-social')) el('cf-nc-social').value = 'none';
-  if (el('cf-nc-cam')) el('cf-nc-cam').value = '';
-  const form = el('cf-lib-add-form'); if (form) form.style.display = 'none';
-});
-el('cf-nc-name')?.addEventListener('keydown', e => { if (e.key === 'Enter') el('cf-nc-save')?.click(); });
-el('cf-nc-handle')?.addEventListener('keydown', e => { if (e.key === 'Enter') el('cf-nc-save')?.click(); });
-
-el('cf-caster-lib-search')?.addEventListener('input', function() {
-  _cfLibSearch = this.value;
-  renderCfCasterLibrary(currentState);
-});
-
-// ── Hosts tab — same library system, tagged kind:'host' ──────────────────────
-el('cf-host-add-btn')?.addEventListener('click', () => {
-  const form = el('cf-host-add-form'); if (!form) return;
-  const showing = form.style.display !== 'none';
-  form.style.display = showing ? 'none' : '';
-  if (!showing) el('cf-nh-name')?.focus();
-});
-el('cf-nh-cancel')?.addEventListener('click', () => {
-  const form = el('cf-host-add-form'); if (form) form.style.display = 'none';
-});
-el('cf-nh-save')?.addEventListener('click', () => {
-  const name = (el('cf-nh-name')?.value || '').trim();
-  const handle = (el('cf-nh-handle')?.value || '').trim();
-  const role = (el('cf-nh-role')?.value || '').trim() || 'Host';
-  const social = el('cf-nh-social')?.value || 'none';
-  if (!name && !handle) { el('cf-nh-name')?.focus(); return; }
-  send('save_caster_to_library', { name, handle, role, social, kind: 'host' });
-  ['cf-nh-name', 'cf-nh-handle', 'cf-nh-role'].forEach(id => { if (el(id)) el(id).value = ''; });
-  if (el('cf-nh-social')) el('cf-nh-social').value = 'none';
-  const form = el('cf-host-add-form'); if (form) form.style.display = 'none';
-});
-el('cf-nh-name')?.addEventListener('keydown', e => { if (e.key === 'Enter') el('cf-nh-save')?.click(); });
-el('cf-nh-handle')?.addEventListener('keydown', e => { if (e.key === 'Enter') el('cf-nh-save')?.click(); });
-el('cf-host-lib-search')?.addEventListener('input', function() {
-  _cfHostSearch = this.value;
-  renderCfCasterLibrary(currentState, { host: true, wrapId: 'cf-hosts-library-rows' });
-});
-
-// ── Observers tab — same library system, tagged kind:'observer' ──────────────
-el('cf-obs-add-btn')?.addEventListener('click', () => {
-  const form = el('cf-obs-add-form'); if (!form) return;
-  const showing = form.style.display !== 'none';
-  form.style.display = showing ? 'none' : '';
-  if (!showing) el('cf-no-name')?.focus();
-});
-el('cf-no-cancel')?.addEventListener('click', () => {
-  const form = el('cf-obs-add-form'); if (form) form.style.display = 'none';
-});
-el('cf-no-save')?.addEventListener('click', () => {
-  const name = (el('cf-no-name')?.value || '').trim();
-  const role = (el('cf-no-role')?.value || '').trim() || 'Observer';
-  if (!name) { el('cf-no-name')?.focus(); return; }
-  send('save_caster_to_library', { name, role, kind: 'observer' });
-  if (el('cf-no-name')) el('cf-no-name').value = '';
-  if (el('cf-no-role')) el('cf-no-role').value = '';
-  const form = el('cf-obs-add-form'); if (form) form.style.display = 'none';
-  setTimeout(cfLoadGroups, 300);
-});
-el('cf-no-name')?.addEventListener('keydown', e => { if (e.key === 'Enter') el('cf-no-save')?.click(); });
-
-// ── Casters: VDO links that feed the caster HTML scenes (shared via set_casters) ──
-const CF_CASTER_SCENES_LIST = [
-  { name: 'Casters', path: '/casters.html' }, { name: 'Single Cam', path: '/singlecam.html' },
-  { name: 'Duo Row', path: '/duorow.html' }, { name: 'Trio Row', path: '/triorow.html' },
-  { name: 'Duo SingleCam', path: '/duosinglecam.html' }, { name: 'Analyst Desk', path: '/analystspecial.html' },
-  { name: 'Cam Over Game', path: '/campip.html' }, { name: 'Talent Bar', path: '/talentbar.html' },
-];
-function buildCfCasterScenes() {
-  const grid = el('cf-caster-scenes'); if (!grid || grid.dataset.built) return;
-  grid.dataset.built = '1';
-  CF_CASTER_SCENES_LIST.forEach((s) => {
-    const url = CF_OVERLAY_BASE + s.path;
-    const card = document.createElement('div'); card.className = 'cf-scene-card';
-    card.innerHTML = '<span class="cf-scene-name"></span><div class="cf-scene-acts"><button class="btn btn-secondary btn-sm">Open ↗</button><button class="btn btn-ghost btn-sm">Copy URL</button></div>';
-    card.querySelector('.cf-scene-name').textContent = s.name;
-    const [openBtn, copyBtn] = card.querySelectorAll('button');
-    openBtn.addEventListener('click', () => window.open(url, '_blank'));
-    copyBtn.addEventListener('click', () => { if (navigator.clipboard) navigator.clipboard.writeText(url); copyBtn.textContent = 'Copied'; setTimeout(() => { copyBtn.textContent = 'Copy URL'; }, 900); });
-    grid.appendChild(card);
-  });
-}
-const CF_SOCIALS = [['none', '— none —'], ['x', 'X / Twitter'], ['twitch', 'Twitch'], ['youtube', 'YouTube'], ['instagram', 'Instagram'], ['tiktok', 'TikTok'], ['kick', 'Kick'], ['discord', 'Discord'], ['facebook', 'Facebook'], ['other', 'Other / link']];
-function cfCasterRow(c) {
-  c = c || {};
-  const row = document.createElement('div'); row.className = 'cf-caster-row';
-  row.innerHTML = `
-    <div class="cf-caster-line">
-      <input type="text" class="input-text cf-c-name" placeholder="Caster name">
-      <select class="input-select cf-c-social" title="Social platform shown on the caster card">${CF_SOCIALS.map(([v, l]) => `<option value="${v}">${l}</option>`).join('')}</select>
-      <input type="text" class="input-text cf-c-handle" placeholder="@handle (shown on card)">
-    </div>
-    <div class="cf-caster-line">
-      <input type="text" class="input-text cf-c-id" placeholder="VDO stream ID (or paste full view URL)">
-      <input type="text" class="input-text cf-c-room" placeholder="room (optional)">
-      <label class="cf-c-vol" title="Audio volume for this caster (0–100)">vol<input type="number" class="input-text" min="0" max="100" step="5"></label>
-      <button class="tp-del cf-c-del" title="Remove">×</button>
-    </div>
-    <details class="cf-c-audio">
-      <summary>Audio adjustments</summary>
-      <div class="cf-caster-line cf-c-audio-line">
-        <label title="Stereo pan (left ↔ right)">pan<input type="range" class="cf-c-pan" min="-100" max="100" step="5" value="0"></label>
-        <label class="cf-c-monolbl" title="Down-mix this caster to mono"><input type="checkbox" class="cf-c-mono"> mono</label>
-        <label title="Audio bitrate kbps (blank = auto)">ab<input type="number" class="input-text cf-c-ab" min="0" step="16" placeholder="auto" style="width:70px;"></label>
-      </div>
-      <input type="text" class="input-text cf-c-aparams" placeholder="extra VDO audio params e.g. &compressor&limiter">
-    </details>`;
-  row.querySelector('.cf-c-name').value = c.name || '';
-  row.querySelector('.cf-c-social').value = c.social || 'none';
-  row.querySelector('.cf-c-handle').value = c.handle || '';
-  // Prefer the stored stream id; fall back to a pasted full camUrl.
-  row.querySelector('.cf-c-id').value = c.streamId || c.camUrl || '';
-  row.querySelector('.cf-c-room').value = c.room || '';
-  row.querySelector('.cf-c-vol input').value = (c.volume != null ? c.volume : 100);
-  const a = c.audio || {};
-  row.querySelector('.cf-c-pan').value = (a.pan != null ? a.pan : 0);
-  row.querySelector('.cf-c-mono').checked = !!a.mono;
-  row.querySelector('.cf-c-ab').value = (a.ab != null ? a.ab : '');
-  row.querySelector('.cf-c-aparams').value = a.params || '';
-  if (a.pan || a.mono || a.ab || a.params) row.querySelector('.cf-c-audio').open = true;
-  row.querySelector('.cf-c-del').addEventListener('click', () => row.remove());
-  return row;
-}
-// Read the per-caster audio override object out of a caster row.
-function cfCasterRowAudio(r) {
-  const pan = parseInt(r.querySelector('.cf-c-pan')?.value, 10) || 0;
-  const mono = !!r.querySelector('.cf-c-mono')?.checked;
-  const abRaw = (r.querySelector('.cf-c-ab')?.value || '').trim();
-  const params = (r.querySelector('.cf-c-aparams')?.value || '').trim();
-  const audio = {};
-  if (pan) audio.pan = pan;
-  if (mono) audio.mono = true;
-  if (abRaw !== '') audio.ab = Math.max(0, parseInt(abRaw, 10) || 0);
-  if (params) audio.params = params;
-  return audio;
-}
-let _cfCastersSig = '';
-function renderCfCasters(data) {
-  const wrap = el('cf-casters-rows'); if (!wrap) return;
-  const list = (data.casters && data.casters.list) || [];
-  const v = cfVdo();
-  const sig = JSON.stringify({ list: list.map((c) => [c.name, c.streamId, c.camUrl, c.room, c.volume, c.social, c.handle, c.audio]), v });
-  if (sig === _cfCastersSig) return;
-  if (_editingInside(wrap)) return;
-  _cfCastersSig = sig;
-  wrap.innerHTML = '';
-  (list.length ? list : [{}, {}]).forEach((c) => wrap.appendChild(cfCasterRow(c)));
-}
-el('cf-caster-add')?.addEventListener('click', () => { const w = el('cf-casters-rows'); if (w) w.appendChild(cfCasterRow({})); });
-el('cf-casters-apply')?.addEventListener('click', () => {
-  const existing = (currentState.casters && currentState.casters.list) || [];
-  const rows = [...document.querySelectorAll('#cf-casters-rows .cf-caster-row')];
-  const list = rows.map((r, i) => {
-    const streamId = r.querySelector('.cf-c-id').value.trim();
-    const room = r.querySelector('.cf-c-room').value.trim();
-    const volume = Math.max(0, Math.min(100, parseInt(r.querySelector('.cf-c-vol input').value, 10) || 0));
-    const audio = cfCasterRowAudio(r);
-    return {
-      id: existing[i] && existing[i].id,
-      name: r.querySelector('.cf-c-name').value.trim(),
-      streamId, room, volume, audio,
-      // The clean view URL the scene embeds — audio (volume + pan/mono/ab/params) baked in.
-      camUrl: buildVdoView(streamId, { room, audio: Object.assign({ volume }, audio) }),
-      handle: r.querySelector('.cf-c-handle').value.trim(),
-      social: r.querySelector('.cf-c-social').value || 'none',
-      slot: i + 1,
-    };
-  }).filter((c) => c.name || c.streamId);
-  send('set_casters', { list });   // server reads msg.data.list
-  setTimeout(cfLoadCasterVdo, 300);
-  _cfCastersSig = '';
-  const apply = el('cf-casters-apply'); if (apply) { apply.textContent = 'Applied ✓'; setTimeout(() => { apply.textContent = 'Apply to overlay'; }, 1100); }
-});
-
-// ── Caster VDO Room ──────────────────────────────────────────────────────────
-async function cfLoadCasterVdo() {
-  const wrap = el('cf-caster-vdo-links');
-  if (!wrap) return;
-  try {
-    const d = await (await fetch(`${VDO_API}/api/vdo/caster-links`)).json();
-    if (!d.hasRoom) {
-      wrap.innerHTML = '<div class="talent-empty">No caster room yet — click <b>Generate room</b> above to create private links for each caster.</div>';
-      return;
-    }
-    if (!d.casters || !d.casters.length) {
-      wrap.innerHTML = '<div class="talent-empty">No casters configured. Add casters below, click Apply, then generate the room.</div>';
-      return;
-    }
-    const rows = d.casters.map((c) => {
-      const handle = c.handle ? ` <span class="caster-vdo-handle">${tlEsc(c.handle)}</span>` : '';
-      return `<div class="caster-vdo-row">
-        <span class="caster-vdo-name">${tlEsc(c.name)}${handle}</span>
-        <code class="caster-vdo-sid">${tlEsc(c.streamId)}</code>
-        <div class="talent-actions">
-          <button class="btn btn-primary btn-sm tl-copy" data-url="${tlEsc(c.joinUrl)}">Copy join link</button>
-          <button class="btn btn-ghost btn-sm tl-qr-c">QR</button>
-          <a class="btn btn-ghost btn-sm" href="${tlEsc(c.joinUrl)}" target="_blank" rel="noopener">Open</a>
-          <button class="btn btn-ghost btn-sm tl-copy" data-url="${tlEsc(c.obsUrl)}">Copy OBS feed</button>
-        </div>
-        <div class="talent-qr" hidden><img src="${VDO_API}/api/vdo/qr?text=${encodeURIComponent(c.joinUrl)}" alt=""><span class="talent-qr-cap">Scan to join as <b>${tlEsc(c.name)}</b></span></div>
-      </div>`;
-    }).join('');
-    const roomInfo = `<div class="caster-vdo-room-info"><span class="talent-room">${tlEsc(d.room)}</span><span style="font-size:11px;color:var(--muted);margin-left:6px;">${d.casters.length} caster${d.casters.length !== 1 ? 's' : ''}</span></div>`;
-    wrap.innerHTML = roomInfo + `<div class="caster-vdo-rows">${rows}</div>`;
-  } catch (e) {
-    wrap.innerHTML = `<p style="color:#f56565;font-size:12px;">Error loading caster links: ${tlEsc(e.message)}</p>`;
-  }
-}
-el('cf-caster-vdo-generate')?.addEventListener('click', () => {
-  const btn = el('cf-caster-vdo-generate');
-  if (btn) { btn.disabled = true; btn.textContent = 'Generating…'; }
-  send('generate_caster_vdo', {});
-  setTimeout(() => {
-    cfLoadCasterVdo();
-    if (btn) { btn.disabled = false; btn.innerHTML = svgIcon('zap') + ' Generate room'; }
-  }, 500);
-});
-el('cf-caster-vdo-refresh')?.addEventListener('click', cfLoadCasterVdo);
-el('cf-caster-vdo-links')?.addEventListener('click', (e) => {
-  const copy = e.target.closest('.tl-copy[data-url]');
-  if (copy) { tlCopy(copy.dataset.url, copy); return; }
-  const qrBtn = e.target.closest('.tl-qr-c');
-  if (qrBtn) {
-    const row = qrBtn.closest('.caster-vdo-row');
-    if (row) { const qr = row.querySelector('.talent-qr'); if (qr) qr.hidden = !qr.hidden; }
-  }
-});
-
 // ── Gameplay: screenshare / observer push links ──
 const CF_SHARES_KEY = 'ne_cf_shares';
 function cfShares() { try { return JSON.parse(localStorage.getItem(CF_SHARES_KEY) || '[]'); } catch { return []; } }
@@ -18387,7 +19312,6 @@ function renderCfStations(data) {
   });
 }
 
-buildCfCasterScenes();
 cfLoadVdoSettings();
 renderCfShares();
 
@@ -18402,6 +19326,10 @@ function renderStreamQueue(data) {
   const qOn = el('sgg-queue-enabled');
   if (qOn && document.activeElement !== qOn) qOn.checked = !!sg.queueEnabled;
   const af = el('sgg-autofollow'); if (af && document.activeElement !== af) af.checked = !!sg.autoFollow;
+  // Once the event is connected the queue polls automatically — the manual Queue toggle is redundant,
+  // so hide it (leaving just Auto-follow). Still shown pre-connection as an escape hatch.
+  const qToggle = el('sgg-queue-toggle');
+  if (qToggle) qToggle.style.display = sg.connected ? 'none' : '';
   const status = el('sgg-status');
   if (status) {
     if (sg.connected && sg.queueFetchedAt) {
@@ -18465,6 +19393,50 @@ function renderStreamQueue(data) {
     wrap.appendChild(row);
   });
 }
+el('sgg-tab-queue')?.addEventListener('click', () => {
+  el('sgg-tab-queue').classList.add('is-on'); el('sgg-tab-team').classList.remove('is-on');
+  el('sgg-queue-wrap').style.display = ''; el('sgg-team-wrap').style.display = 'none';
+  if (el('sgg-queue-toggles')) el('sgg-queue-toggles').style.display = '';
+});
+el('sgg-tab-team')?.addEventListener('click', () => {
+  el('sgg-tab-team').classList.add('is-on'); el('sgg-tab-queue').classList.remove('is-on');
+  el('sgg-team-wrap').style.display = ''; el('sgg-queue-wrap').style.display = 'none';
+  if (el('sgg-queue-toggles')) el('sgg-queue-toggles').style.display = '';   // Queue + Auto-follow apply in team mode too
+  refreshSggTeamPicker();
+});
+
+// Logo-carrying team picker for the Stream Queue → Team search (same searchable component as the
+// Match team / brand-kit pickers, so producers see logos instead of a plain text datalist).
+let _sggPickedTeam = '';
+let _sggPickerSig = '';
+function refreshSggTeamPicker(force) {
+  const mount = el('sgg-team-pick');
+  if (!mount || typeof buildSearchPicker !== 'function') return;
+  const teams = allMatchTeams();
+  const sig = teams.map((t) => (t.name || '') + '|' + (t.logo ? '1' : '0')).join('~');
+  if (!force && sig === _sggPickerSig && mount.firstChild) return;
+  _sggPickerSig = sig;
+  const items = teams.map((t) => ({ value: t.name, label: t.name, img: t.logo || '../assets/rl.png' }));
+  mount.innerHTML = '';
+  mount.appendChild(buildSearchPicker({
+    items, value: _sggPickedTeam, placeholder: 'Search team…', emptyLabel: '— Clear —',
+    className: 'sgg-team-pick',
+    onPick: (name) => {
+      _sggPickedTeam = name || '';
+      if (!name) return;
+      const st = el('sgg-status');
+      if (st) { st.textContent = 'Searching…'; st.style.color = 'var(--muted)'; }
+      send('startgg_fetch_team_queue', { teamName: name });
+    },
+  }));
+}
+el('sgg-team-search')?.addEventListener('click', () => {
+  const name = (_sggPickedTeam || '').trim();
+  const st = el('sgg-status');
+  if (!name) { if (st) { st.textContent = 'Pick a team first.'; st.style.color = '#f56565'; } return; }
+  if (st) { st.textContent = 'Searching...'; st.style.color = 'var(--muted)'; }
+  send('startgg_fetch_team_queue', { teamName: name });
+});
 el('sgg-load')?.addEventListener('click', () => send('startgg_fetch_queue', { tournamentSlug: (el('sgg-tournament')?.value || '').trim() }));
 el('sgg-queue-enabled')?.addEventListener('change', function () {
   send('startgg_set_queue', { enabled: this.checked });
@@ -18807,12 +19779,25 @@ function populateMatchPicker(matches) {
   if (current && list.some((m) => m.id === current)) sel.value = current;
 }
 
+let _bracketAutoLoadDone = false;
 function applyBracketState(data) {
   const bracket = data.bracket || {};
   bbHydrate(bracket);   // restore a manual bracket into the builder once
 
   const slugEl = el('input-bracket-slug');
-  if (slugEl && document.activeElement !== slugEl) slugEl.value = bracket.eventSlug || '';
+  if (slugEl && document.activeElement !== slugEl) {
+    slugEl.value = bracket.eventSlug || data.startgg?.eventSlug || '';
+  }
+
+  // Auto-load bracket from the linked start.gg event on first state if there's no bracket yet.
+  const linkedSlug = data.startgg?.eventSlug || '';
+  const hasData = !!(bracket.lastFetchAt || (bracket.winners || []).length || (bracket.losers || []).length);
+  if (!_bracketAutoLoadDone && linkedSlug && !hasData && !bracket.lastError) {
+    _bracketAutoLoadDone = true;
+    const statusEl = el('bracket-status');
+    if (statusEl) { statusEl.textContent = 'Loading bracket from linked event…'; statusEl.style.color = 'var(--muted)'; }
+    send('fetch_bracket', { eventSlug: linkedSlug });
+  }
 
   const cbVisible = el('check-bracket-visible');
   if (cbVisible) cbVisible.checked = !!bracket.visible;
@@ -19019,16 +20004,6 @@ function applyProductionState(data) {
   const cbCasters = el('check-casters-visible');
   if (cbCasters) cbCasters.checked = !!data.casters?.visible;
 
-  // Camera Feeds → Casters tab
-  renderCfCasterTriggers(data);
-  renderCfActiveLayout(data);
-  renderCfLineup(data);
-  renderCfRooms(data);
-  renderCfCasterLibrary(data);
-  renderCfCasterLibrary(data, { host: true, wrapId: 'cf-hosts-library-rows' });   // Guests tab roster
-  renderCfSeparatedAudio(data);
-  // Refresh the Teams-style group cards (Casters/Guests/Observers) when one of their tabs is open.
-  if (typeof cfLoadGroups === 'function' && document.querySelector('#cf-panel-casters.active, #cf-panel-hosts.active, #cf-panel-gameplay.active')) cfLoadGroups();
   // Keep the Director mixer in sync with audio/roster changes while it's running.
   if (_directorOn && typeof cfRenderMixer === 'function') cfRenderMixer();
   if (typeof cfUpdateMoveButtons === 'function') cfUpdateMoveButtons();   // reflect interviewee/on-air state live
@@ -19084,6 +20059,17 @@ function applyProductionState(data) {
       statusEl.style.color = 'var(--muted)';
     }
   }
+
+  // Intro panel — sync form fields from state (never override while user is editing)
+  const _intr = data.intro || {};
+  const intrSide = el('select-intro-side');
+  if (intrSide && document.activeElement !== intrSide) intrSide.value = _intr.side || 'blue';
+  const intrTitle = el('input-intro-title');
+  if (intrTitle && document.activeElement !== intrTitle) intrTitle.value = _intr.title || '';
+  const intrFoot = el('check-intro-footer');
+  if (intrFoot) intrFoot.checked = !!_intr.showFooter;
+  const intrRealName = el('check-intro-realname');
+  if (intrRealName) intrRealName.checked = !!_intr.showRealName;
 }
 
 // ── Game & overlay design ───────────────────────────────────────────────────
@@ -19617,7 +20603,7 @@ function renderBrandSponsors() {
   if (brandSponsors.length > 1 && typeof Sortable !== 'undefined') {
     sponsorsSortable = Sortable.create(list, {
       animation: 150, draggable: '.sponsor-row', handle: '.sponsor-row-grip',
-      onEnd: () => { brandSponsors = [...list.querySelectorAll('.sponsor-row')].map((r) => r._sponsorRef).filter(Boolean); }
+      onEnd: () => { brandSponsors = [...list.querySelectorAll('.sponsor-row')].map((r) => r._sponsorRef).filter(Boolean); renderBrandSponsors(); }
     });
   }
 }
@@ -19677,16 +20663,12 @@ function kitActivePackage(k) {
 function renderBrands(data) {
   const kits = data.brandKits || [];
 
-  // Skip the select + list rebuild when the brand library and active kit are unchanged.
-  // Mirror the server's librarySig fields so any edit (color/logo/sponsor/banner/package change)
-  // refreshes the closures and the Edit buttons always carry up-to-date kit data.
-  const sig = (data.activeBrandKitId || '') + '::' + kits.map((k) => {
-    const pkg = kitActivePackage(k);
-    const sp = (pkg.sponsors || []).reduce((a, s) => a + ((s?.logo || '').length) + ((s?.name || '').length), 0);
-    const bn = (pkg.bannerImages || []).reduce((a, img) => a + ((img || '').length), 0);
-    return k.id + '|' + (k.name || '') + '|' + (k.color || '') + '|' + (k.accent || '') + '|' + (k.logo ? k.logo.length : 0)
-      + '|' + (k.activePackageId || '') + '|' + ((k.packages || []).length) + '|' + (pkg.sponsors || []).length + '|' + sp + '|' + bn;
-  }).join('~');
+  // Skip the select + list rebuild when nothing brand-related changed. Keyed on the server's
+  // monotonic brandKitsVer (bumped on EVERY brand-kit mutation) + the active-kit selection, so any
+  // edit — reorder, tier, same-length rename, a non-active package — refreshes the closures and the
+  // Edit buttons always carry up-to-date kit data. (The old length/count hash missed those and made
+  // sponsor edits silently revert.)
+  const sig = (data.activeBrandKitId || '') + '::' + (data.brandKitsVer || 0);
   if (renderBrands._sig === sig) return;
   renderBrands._sig = sig;
 
@@ -19795,6 +20777,66 @@ function renderBrands(data) {
   });
 }
 
+// Compact Dashboard brand-kit strip (above Event): shows the active client + its sponsors, and lets
+// you search/switch/edit/add kits without leaving the Dashboard. Reuses the Profiles editor modal.
+function renderDashBrandKit(data) {
+  const panel = el('dash-brandkit'); if (!panel) return;
+  const kits = data.brandKits || [];
+  const activeId = data.activeBrandKitId || '';
+  // Cheap guard (version + active) so we don't rebuild the strip every broadcast.
+  const sig = activeId + '::' + (data.brandKitsVer || 0);
+  if (renderDashBrandKit._sig === sig) return;
+  const mount = el('dbk-picker-mount');
+  if (mount && mount.contains(document.activeElement)) return;   // don't clobber an open picker; retry next tick
+  renderDashBrandKit._sig = sig;
+
+  const active = kits.find((k) => k.id === activeId) || null;
+
+  // Sponsors of the active package.
+  const spWrap = el('dbk-sponsors');
+  if (spWrap) {
+    spWrap.innerHTML = '';
+    const sponsors = active ? (kitActivePackage(active).sponsors || []) : [];
+    if (!active) { const s = document.createElement('span'); s.className = 'dbk-hint'; s.textContent = 'Pick or add a brand kit →'; spWrap.appendChild(s); }
+    else if (!sponsors.length) { const s = document.createElement('span'); s.className = 'dbk-hint'; s.textContent = 'No sponsors in this package'; spWrap.appendChild(s); }
+    else {
+      sponsors.slice(0, 24).forEach((sp) => {
+        if (sp.logo) { const im = document.createElement('img'); im.className = 'dbk-sponsor'; im.src = sp.logo; im.alt = ''; im.title = sp.name || ''; spWrap.appendChild(im); }
+        else if (sp.name) { const t = document.createElement('span'); t.className = 'dbk-sponsor-txt'; t.textContent = sp.name; t.title = sp.name; spWrap.appendChild(t); }
+      });
+      if (sponsors.length > 24) { const m = document.createElement('span'); m.className = 'dbk-sponsor-txt'; m.textContent = '+' + (sponsors.length - 24); spWrap.appendChild(m); }
+    }
+  }
+
+  // Searchable kit picker — shows each kit's LOGO next to its name in the dropdown (native <select>
+  // can't render images). Picking a kit makes it the active client.
+  if (mount && typeof buildSearchPicker === 'function') {
+    const items = kits.map((k) => ({ value: k.id, label: k.name || '(unnamed)', img: k.logo || '' }));
+    mount.innerHTML = '';
+    mount.appendChild(buildSearchPicker({
+      items, value: activeId, placeholder: 'No brand kit', emptyLabel: '— No brand kit —',
+      className: 'dbk-kit-pick',
+      onPick: (id) => send('activate_brand_kit', { id: id || null }),
+    }));
+  }
+}
+// Dashboard brand-kit strip controls (bound once). Edit/Duplicate act on the ACTIVE kit.
+function _dbkActiveKit() {
+  const id = (currentState && currentState.activeBrandKitId) || '';
+  return ((currentState && currentState.brandKits) || []).find((x) => x.id === id) || null;
+}
+el('dbk-edit')?.addEventListener('click', () => {
+  const k = _dbkActiveKit();
+  if (k) { openBrandEditor(); loadBrandIntoForm(k); }
+  else { resetBrandForm(); openBrandEditor(); }   // nothing active → open a blank new-kit form
+});
+el('dbk-dup')?.addEventListener('click', () => {
+  const k = _dbkActiveKit();
+  if (k) send('duplicate_brand_kit', { id: k.id });
+  else if (typeof showToast === 'function') showToast('Activate a brand kit first to duplicate it.', '#f59e0b');
+});
+el('dbk-new')?.addEventListener('click', () => { resetBrandForm(); openBrandEditor(); });
+
 function loadBrandIntoForm(k) {
   editingBrandId = k.id;
   editingBrandThemes = (k.themes && typeof k.themes === 'object') ? { ...k.themes } : {};
@@ -19875,10 +20917,26 @@ el('btn-clear-brand-logo')?.addEventListener('click', () => {
   setBrandLogoPreview(null);
 });
 
-// Per-profile replay transition background (full-frame image).
+// Per-profile replay transition background (full-frame image). It's the heaviest single kit asset, so
+// we store it as a FILE (served URL) rather than base64 embedded in the kit — that keeps the brand
+// JSON tiny so saves + library broadcasts stay fast (embedding it re-serialized MBs on every save).
+// Falls back to inline base64 if the media upload is unavailable. Save is blocked while it uploads
+// (saving mid-upload used to drop the image silently). Capped at 1440px — plenty for a skewed bg.
 el('input-brand-replayskin')?.addEventListener('change', async (e) => {
   const f = e.target.files[0]; if (!f) return;
-  brandReplaySkin = await fileToBase64(f, 1600);   // full-frame background — keep it wide/crisp
+  const saveBtn = el('btn-save-brand');
+  if (saveBtn) saveBtn.disabled = true;
+  if (typeof showToast === 'function') showToast('Uploading replay background…', '#3b82f6');
+  try {
+    brandReplaySkin = await uploadImageFile(f, 'brand-skins', 1440);
+  } catch (_) {
+    try {
+      brandReplaySkin = await fileToBase64(f, 1440);
+      if (typeof showToast === 'function') showToast('Saved inline (media upload unavailable).', '#f59e0b');
+    } catch (__) {}
+  } finally {
+    if (saveBtn) saveBtn.disabled = false;
+  }
   setBrandReplaySkinPreview(brandReplaySkin);
 });
 el('btn-brand-replayskin-clear')?.addEventListener('click', () => {
@@ -19940,7 +20998,14 @@ el('btn-rename-package')?.addEventListener('click', renameBrandPackage);
 el('btn-del-package')?.addEventListener('click', deleteBrandPackage);
 
 // Brand editor modal — opened by "+ New Brand Kit" and each kit's Edit button.
-function openBrandEditor() { const m = el('brand-editor-modal'); if (m) m.style.display = 'flex'; }
+function openBrandEditor() {
+  const m = el('brand-editor-modal');
+  if (!m) return;
+  // The editor lives inside the Assets▸Profiles panel (display:none on other tabs). Lift it to <body>
+  // so it opens from anywhere — e.g. the Dashboard brand-kit strip — not just the Profiles page.
+  if (m.parentElement !== document.body) document.body.appendChild(m);
+  m.style.display = 'flex';
+}
 function closeBrandEditor() { const m = el('brand-editor-modal'); if (m) m.style.display = 'none'; }
 el('btn-open-new-brand')?.addEventListener('click', () => { resetBrandForm(); openBrandEditor(); });
 el('brand-editor-close')?.addEventListener('click', () => { resetBrandForm(); closeBrandEditor(); });
@@ -20139,10 +21204,10 @@ function getObsPayload() {
     autoSwitch: !!el('check-obs-autoswitch')?.checked,
     autoReplayOnGoal: !!el('check-obs-autoreplay')?.checked,
     postGameToCastersSec: Math.max(0, parseInt(el('input-obs-postgame-casters')?.value, 10) || 0),
-    kickoff: {
-      enabled: !!el('check-obs-kickoff')?.checked,
-      scene: el('select-obs-kickoff-scene')?.value || ''
-    },
+    // Kickoff scene automation is NOT included here — it's owned exclusively by
+    // sendRlSceneAuto()/set_rl_scene_automation (Match — Teams gear panel) now. This payload used
+    // to always include a `kickoff` object read from a hidden, unreachable duplicate control pair,
+    // which silently reset the real setting to disabled on every OBS Settings save/test.
     scenes
   };
   const pw = el('input-obs-password')?.value.trim();
@@ -20176,6 +21241,50 @@ function populateObsSceneSelects(available, mapping, kickoffScene) {
     fillSceneSelect(el(`select-obs-scene-${k}`), available, (mapping && mapping[k]) || '');
   });
   fillSceneSelect(el('select-obs-kickoff-scene'), available, kickoffScene || '');
+}
+
+// ── RL scene automation (Match ▸ Teams gear panel, Rocket League only) ───────────────────────────
+let _lastRlSceneSig = '';
+function sendRlSceneAuto() {
+  send('set_rl_scene_automation', {
+    kickoff: {
+      enabled: !!(el('chk-rl-kickoff') && el('chk-rl-kickoff').checked),
+      scene: (el('sel-rl-kickoff-scene') || {}).value || ''
+    },
+    postGame: {
+      enabled: !!(el('chk-rl-postgame') && el('chk-rl-postgame').checked),
+      scene: (el('sel-rl-postgame-scene') || {}).value || '',
+      delaySec: Number((el('inp-rl-postgame-delay') || {}).value) || 20
+    }
+  });
+}
+function wireRlSceneAuto() {
+  ['chk-rl-kickoff', 'sel-rl-kickoff-scene', 'chk-rl-postgame', 'sel-rl-postgame-scene', 'inp-rl-postgame-delay'].forEach(function (id) {
+    const e = el(id);
+    if (e && !e._rlWired) { e._rlWired = true; e.addEventListener('change', sendRlSceneAuto); }
+  });
+  const clr = el('btn-rl-clear-board');
+  if (clr && !clr._rlWired) { clr._rlWired = true; clr.addEventListener('click', function () { send('clear_scoreboard', {}); }); }
+  const hide = el('chk-rl-hide-ui');
+  if (hide && !hide._rlWired) { hide._rlWired = true; hide.addEventListener('change', function () { send('set_rl_hide_ui', { hidden: this.checked }); }); }
+}
+function applyRlSceneAuto(data) {
+  wireRlSceneAuto();   // idempotent — the panel elements exist after DOM load (relocated, not recreated)
+  const sec = el('msp-rl-scenes');
+  if (sec) sec.style.display = (data && data.activeGame === 'rocket-league') ? '' : 'none';
+  const obs = (data && data.obs) || {};
+  const ko = obs.kickoff || {}, pg = obs.postGame || {};
+  // Only rebuild the scene <select>s when the live list / saved scene changes (don't wipe an open dropdown).
+  const sig = JSON.stringify({ a: obs.availableScenes || [], k: ko.scene || '', p: pg.scene || '' });
+  if (sig !== _lastRlSceneSig) {
+    _lastRlSceneSig = sig;
+    fillSceneSelect(el('sel-rl-kickoff-scene'), obs.availableScenes || [], ko.scene || '');
+    fillSceneSelect(el('sel-rl-postgame-scene'), obs.availableScenes || [], pg.scene || '');
+  }
+  const kEn = el('chk-rl-kickoff'); if (kEn) kEn.checked = !!ko.enabled;
+  const pEn = el('chk-rl-postgame'); if (pEn) pEn.checked = !!pg.enabled;
+  const pd = el('inp-rl-postgame-delay'); if (pd && document.activeElement !== pd) pd.value = pg.delaySec || 20;
+  const hEn = el('chk-rl-hide-ui'); if (hEn && document.activeElement !== hEn) hEn.checked = !!(data && data.rlHudHidden);
 }
 
 const SCENE_CONTROL_MOMENTS = [
@@ -20312,7 +21421,9 @@ function applyObsState(data) {
   }
 
   populateObsSceneSelects(obs.availableScenes || [], obs.scenes || {}, (obs.kickoff && obs.kickoff.scene) || '');
+  applyRlSceneAuto(data);   // RL-only kickoff/post-game scene automation in the Match ▸ Teams gear panel
   if (typeof syncReplayProgramScene === 'function') syncReplayProgramScene(obs);
+  if (typeof syncGfxAutocutScene === 'function') syncGfxAutocutScene(obs);
 
   // Status bar pill
   const obsStatusEl = el('obs-status');
@@ -20973,20 +22084,43 @@ function renderPlaylistPane(c) {
   // Vertical playlist picker (click a row to select; the hidden <select> stays the source of truth).
   const listV = el('rp-playlist-list');
   if (listV) {
-    const sig = JSON.stringify(montages.map((x) => [x.id, x.name, (x.clipIds || []).length])) + '|' + mId;
+    const encodeActive = c.encode && c.encode.active;
+    // Badge label already varies with everything that should invalidate the cached render (clip
+    // count via EMPTY, encode %, ready/draft, live attribution) — include it in sig so state
+    // transitions actually repaint instead of getting stuck on a stale badge.
+    const sig = JSON.stringify(montages.map((x) => [x.id, x.name, (x.clipIds || []).length, montageBadgeInfo(x, encodeActive).label])) + '|' + mId;
     if (listV.dataset.sig !== sig) {
       listV.dataset.sig = sig;
       listV.innerHTML = montages.length ? montages.map((x) => {
         const n = (x.clipIds || []).length;
-        return `<div class="rp-pl-row${x.id === mId ? ' active' : ''}" data-mid="${x.id}">
+        const isActive = x.id === mId;
+        const badge = montageBadgeInfo(x, encodeActive);
+        return `<div class="rp-pl-row${isActive ? ' active' : ''}${isActive && _plCollapsed ? ' collapsed' : ''}" data-mid="${x.id}">
+          <span class="rp-pl-row-chev">&#9660;</span>
           <span class="rp-pl-row-name">${(x.name || 'Playlist').replace(/</g, '&lt;')}</span>
           <span class="rp-pl-row-count">${n} clip${n === 1 ? '' : 's'}</span>
+          <span class="rp-pl-badge rp-pl-badge--${badge.cls}">${badge.label}</span>
           <button class="rp-pl-row-del" data-mid="${x.id}" title="Delete this playlist">✕</button>
         </div>`;
       }).join('') : '<div class="rp-empty" style="padding:12px 6px;">No playlists yet — hit <b>+ New</b> or add a clip from the editor.</div>';
       listV.querySelectorAll('.rp-pl-row').forEach((row) => {
         row.addEventListener('click', (e) => {
           if (e.target.closest('.rp-pl-row-del')) return;
+          if (row.classList.contains('active')) {
+            // Toggle collapse without full re-render
+            _plCollapsed = !_plCollapsed;
+            row.classList.toggle('collapsed', _plCollapsed);
+            const show = !_plCollapsed && !!m;
+            const nameRow = el('rp-pl-name-row'); if (nameRow) nameRow.style.display = show ? '' : 'none';
+            const liveRow = el('rp-pl-live-row'); if (liveRow) liveRow.style.display = show ? 'grid' : 'none';
+            const transRow = el('rp-pl-trans-row'); if (transRow) transRow.style.display = show ? '' : 'none';
+            const encOpts = el('rp-pl-encode-opts'); if (encOpts) encOpts.style.display = show ? '' : 'none';
+            const urlRow  = el('rp-pl-url-row');  if (urlRow)  urlRow.style.display  = show ? '' : 'none';
+            const tl = el('montage-timeline');    if (tl) tl.style.display = show ? '' : 'none';
+            const tot = el('rp-pl-total');        if (tot) tot.style.display = show ? '' : 'none';
+            return;
+          }
+          _plCollapsed = false;
           selEdit.value = row.dataset.mid;
           if (selAdd) selAdd.value = row.dataset.mid;
           renderPlaylistPane(currentState.clips || {});
@@ -21004,16 +22138,46 @@ function renderPlaylistPane(c) {
       });
     }
   }
+  const show = m && !_plCollapsed;
   const nameRow = el('rp-pl-name-row');
-  if (nameRow) nameRow.style.display = m ? '' : 'none';
+  if (nameRow) nameRow.style.display = show ? '' : 'none';
+  const statusLine = el('rp-pl-status');
+  if (statusLine) statusLine.textContent = (show && m) ? montageStatusLine(m, c.encode && c.encode.active) : '';
   const liveRow = el('rp-pl-live-row');
-  if (liveRow) liveRow.style.display = m ? 'grid' : 'none';
+  if (liveRow) liveRow.style.display = show ? 'grid' : 'none';
+  const transRow = el('rp-pl-trans-row');
+  if (transRow) transRow.style.display = show ? '' : 'none';
+  const encOpts = el('rp-pl-encode-opts');
+  if (encOpts) encOpts.style.display = show ? '' : 'none';
+  const urlRow = el('rp-pl-url-row');
+  if (urlRow) {
+    urlRow.style.display = show ? '' : 'none';
+    if (show && m) {
+      // One shared browser source for EVERYTHING (single clips + all playlists). Add this once to OBS;
+      // clips and playlists all render here and the playlist just cuts to its chosen scene. (No more
+      // per-playlist ?playlist=<id> sources — those fought each other.)
+      const obsUrl = (window.SCENE_BASE_URL || 'http://localhost:3000') + '/replay-player.html';
+      const urlText = el('rp-pl-url-text'); if (urlText) urlText.value = obsUrl;
+      const copyBtn = el('rp-pl-url-copy');
+      if (copyBtn && !copyBtn.dataset.wired) {
+        copyBtn.dataset.wired = '1';
+        copyBtn.addEventListener('click', () => {
+          const txt = el('rp-pl-url-text'); if (!txt) return;
+          navigator.clipboard.writeText(txt.value).then(() => {
+            const orig = copyBtn.textContent; copyBtn.textContent = 'Copied!';
+            setTimeout(() => { copyBtn.textContent = orig; }, 1800);
+          }).catch(() => { txt.select(); document.execCommand('copy'); });
+        });
+      }
+    }
+  }
   if (m) syncPlaylistLiveControls(m);
   if (typeof updatePlaylistLiveBtns === 'function') updatePlaylistLiveBtns();
 
-  if (!m) {
-    timeline.innerHTML = '<div class="rp-empty">Select a playlist above to edit its clips.</div>';
-    if (totalEl) totalEl.textContent = '';
+  if (!m || _plCollapsed) {
+    timeline.style.display = '';
+    timeline.innerHTML = _plCollapsed ? '' : '<div class="rp-empty">Select a playlist above to edit its clips.</div>';
+    if (totalEl) { totalEl.textContent = ''; totalEl.style.display = ''; }
     return;
   }
   const nameEl = el('rp-playlist-name');
@@ -21077,7 +22241,7 @@ function renderPlaylistPane(c) {
   }
 }
 
-function addClipToPlaylist(clip, c) {
+async function addClipToPlaylist(clip, c) {
   const sel = el('rp-add-to-playlist-sel') || el('select-montage-edit');
   const mId = sel?.value;
   const montages = (c || currentState.clips)?.montages || [];
@@ -21087,7 +22251,10 @@ function addClipToPlaylist(clip, c) {
     if (!order.includes(clip.id)) order.push(clip.id);
     send('montage_reorder', { montageId: m.id, clipIds: order });
   } else {
-    const name = el('rp-playlist-name')?.value?.trim() || ('Playlist ' + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+    // "— New playlist —" chosen: let the producer NAME it in the moment (default to a timestamp).
+    const preset = el('rp-playlist-name')?.value?.trim() || ('Playlist ' + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+    const name = await customPrompt('New playlist', 'Name this playlist', preset, 'Create');
+    if (!name) return;   // cancelled
     _pendingNewMontage = true;
     send('montage_create', { name, clipIds: [clip.id], template: el('select-montage-template')?.value || 'highlights' });
   }
@@ -21121,6 +22288,19 @@ let _plLoop = false;          // loop the playlist continuously
 let _plReturnEnabled = true;  // switch back to the origin scene when the playlist finishes
 let _plReturnScene = '';      // explicit OBS scene to cut to when the playlist finishes
 let _plAdvanceTimer = null;
+let _plBus = 'program';       // active WS bus: 'program' | 'preview' | 'pl_<id>'
+// true when the live push is ONE already-encoded file (transitions baked in server-side) rather
+// than the per-clip playback that advancePlaylist()/_plLiveItems/_plLiveIdx drive — those are only
+// ever populated by the per-clip automation path (playMontageById), so replay_ended for an
+// encoded push must go straight to finishPlayout(), not advancePlaylist()'s stale per-clip index.
+let _plEncodedMode = false;
+// Which montage id is actually live right now — presentation-only (drives the row status badge),
+// set at every live-push entry point, cleared alongside _plBus/_plEncodedMode in finishPlayout()/
+// endReplayProgram(). Needed because playMontageById() (5 of 6 automation triggers) never
+// otherwise records which montage it's playing per-clip.
+let _plLiveMontageId = null;
+let _plCollapsed = false;     // whether the selected playlist's content pane is collapsed
+let _plPendingEncodeAndPlay = null;  // montageId waiting for encode to finish before playing
 // Normalize a clip-library clip into a live playout item.
 function clipToLiveItem(clip) {
   return { url: clipUrl(clip), name: clip.name || 'Clip', trimIn: clip.trimIn || 0, trimOut: clip.trimOut ?? undefined, duration: clip.duration };
@@ -21131,27 +22311,104 @@ let _plKind = 'replay';       // top-bar label tag for what's on air: 'replay' |
 function pushPlaylistLive() {
   const mId = el('select-montage-edit')?.value; if (!mId) return;
   const m = (currentState.clips?.montages || []).find((x) => x.id === mId); if (!m) return;
+
+  // If the playlist is already encoded, play the single pre-rendered file — smooth, no clip gaps.
+  const encodedUrl = montageUrl(m);
+  if (encodedUrl) {
+    // Everything (single clips + encoded playlists) shares ONE browser source: the program bus /
+    // replay-player.html. The playlist only chooses which OBS SCENE to cut to (its programScene) —
+    // the video always lands on the same source. Because it's one source, pushing this replaces
+    // whatever was playing (no two sources fighting).
+    stopOtherProgramSources('program');   // stop a single clip / other playlist first (no fighting)
+    _plBus = 'program';
+    _plEncodedMode = true;
+    _plLiveMontageId = mId;
+    _plKind = m.kind || 'ad';
+    _plScene = (m.programScene || '').trim();
+    _plLoop = !!el('rp-pl-loop')?.checked;
+    _plReturnEnabled = el('rp-pl-return') ? !!el('rp-pl-return').checked : true;
+    _plReturnScene = '';
+    // Effective cut-to scene: the playlist's own scene, else the global Program-scene dropdown. Pass
+    // the SAME value to the server (which also switches on the program bus) so they can't race to two
+    // different scenes — beginReplayProgram resolves it identically client-side.
+    const effScene = _plScene || (el('rp-program-scene')?.value || '').trim();
+    beginReplayProgram(_plScene || undefined);
+    _plLiveActive = true;
+    updatePlaylistLiveBtns();
+    send('replay_play', { bus: _plBus, url: encodedUrl, name: m.name || 'Playlist', loop: _plLoop, scene: effScene || undefined });
+    return;
+  }
+
+  // No encoded file — encode first, then auto-play when done.
   const lib = currentState.clips?.library || [];
-  _plLiveItems = (m.clipIds || []).map((id) => lib.find((cl) => cl.id === id)).filter(Boolean).map(clipToLiveItem);
-  if (!_plLiveItems.length) { if (typeof showToast === 'function') showToast('Playlist is empty', '#fbbf24'); return; }
-  _plLoop = !!el('rp-pl-loop')?.checked;
-  _plReturnEnabled = el('rp-pl-return') ? !!el('rp-pl-return').checked : true;
-  _plReturnScene = '';
-  _plScene = (m.programScene || '').trim();
-  _plTransition = m.transition || { type: 'cut' };
-  _plKind = m.kind || 'ad';
-  beginReplayProgram(_plScene || undefined);   // per-playlist scene wins, else the global Program scene
-  _plLiveActive = true;
-  updatePlaylistLiveBtns();
-  _plLiveIdx = 0; playNextLive();
+  const items = (m.clipIds || []).map((id) => lib.find((cl) => cl.id === id)).filter(Boolean);
+  if (!items.length) { showToast('Playlist is empty', '#fbbf24'); return; }
+  _plPendingEncodeAndPlay = mId;
+  showToast('Encoding playlist for smooth playback...', '#60a5fa');
+  send('montage_encode', {
+    montageId: mId,
+    opts: {
+      quality: el('rp-quality')?.value || 'medium',
+      gpu: !!el('rp-gpu')?.checked,
+      format: el('rp-format')?.value || '.mp4',
+      transition: m.transition?.type || 'cut'
+    }
+  });
 }
 // Toggle the right-column playlist's Play live / Stop buttons to match playout state.
+// Play Live is only shown when the playlist is encoded (READY) — no button for drafts/empty/encoding.
 function updatePlaylistLiveBtns() {
   const stop = el('rp-pl-stop'), play = el('rp-playlist-push-live');
   if (stop) stop.style.display = _plLiveActive ? '' : 'none';
-  if (play) play.style.display = _plLiveActive ? 'none' : '';
+  if (play) {
+    const mId = el('select-montage-edit')?.value;
+    const m = (currentState.clips?.montages || []).find((x) => x.id === mId);
+    const isReady = !!montageUrl(m);
+    play.style.display = (!_plLiveActive && isReady) ? '' : 'none';
+  }
 }
 el('rp-pl-stop')?.addEventListener('click', () => { stopPlayoutLive(); updatePlaylistLiveBtns(); });
+
+// Stop whatever is on the Program output (a single clip — INCLUDING a looping one — or a playlist)
+// and return to the scene marked for return. Reuses the vetted stop paths so return-to-scene stays
+// consistent: playlists go through finishPlayout(); a single clip through endReplayProgram() (which
+// returns to the pre-clip scene when the "Return" toggle is on).
+function stopProgramNow() {
+  clearTimeout(_plAdvanceTimer);
+  clearTimeout(_replayFallbackTimer);
+  if (_plLiveActive) { stopPlayoutLive(); }
+  else if (_replayActive) { endReplayProgram(false); }
+  else {
+    send('replay_stop', { bus: _plBus || 'program' });
+    const st = el('rp-screen-status'); if (st) { st.textContent = 'Program stopped.'; st.style.color = 'var(--muted)'; }
+  }
+  updatePlaylistLiveBtns();
+  const sb = el('rp-stop-program'); if (sb) sb.style.display = 'none';
+}
+el('rp-stop-program')?.addEventListener('click', stopProgramNow);
+
+// Mutual exclusion for the ONE shared program source: everything (single clips + encoded/per-clip
+// playlists) plays on the program bus / replay-player.html, so at most one thing is ever on air. Before
+// a NEW push, cancel whatever was playing so its timers/sequencing can't fire under the new video.
+// Because it's the same source, the new replay_play simply replaces the current video — no "fighting".
+function stopOtherProgramSources(newBus) {
+  newBus = newBus || 'program';
+  const cur = _plBus || 'program';
+  // A legacy different-bus output (e.g. the staging 'preview' monitor) must be stopped on the overlay.
+  if ((_replayActive || _plLiveActive) && cur !== newBus) {
+    send('replay_stop', { bus: cur });
+  }
+  // Kill any in-flight timers from the outgoing clip/playlist so a stale 'ended'/advance/return can't
+  // fire over the incoming push. (_replayActive is intentionally left set so beginReplayProgram keeps
+  // the original pre-replay scene as the return origin across a takeover.)
+  clearTimeout(_plAdvanceTimer);
+  clearTimeout(_replayFallbackTimer);
+  // Stop a per-clip playlist's sequencing loop (advancePlaylist would otherwise keep pushing clips).
+  if (_plLiveActive) {
+    _plLiveActive = false; _plEncodedMode = false; _plLiveMontageId = null;
+    updatePlaylistLiveBtns();
+  }
+}
 // Playlist settings popover (gear): output format/quality, transition, auto ad-break.
 el('rp-pl-settings-toggle')?.addEventListener('click', () => {
   const p = el('rp-pl-settings'); if (!p) return;
@@ -21172,31 +22429,15 @@ function playMontageById(id, opts) {
   _plScene = (m.programScene || '').trim();
   _plTransition = m.transition || { type: 'cut' };
   _plKind = m.kind || 'ad';
+  stopOtherProgramSources('program');   // stop any single clip / other playlist so they don't fight
+  _plBus = 'program';   // automation/flow calls always use the main program bus
+  _plEncodedMode = false;
+  _plLiveMontageId = id;
   beginReplayProgram(_plScene || undefined);
   _plLiveActive = true;
   if (typeof updatePlaylistLiveBtns === 'function') updatePlaylistLiveBtns();
   _plLiveIdx = 0; playNextLive();
   return true;
-}
-// Push a saved playout playlist (mixed clips + media files) live, with auto-return to its scene.
-function pushPlayoutLive(po) {
-  if (!po || !Array.isArray(po.items) || !po.items.length) return;
-  const lib = currentState.clips?.library || [];
-  _plLiveItems = po.items.map((it) => {
-    if (it.type === 'clip') { const clip = lib.find((c) => c.id === it.id); return clip ? clipToLiveItem(clip) : null; }
-    if (it.type === 'file') return { url: fileUrl(it.path), name: it.name || 'Video', trimIn: 0, trimOut: undefined, duration: it.duration || 15 };
-    return null;
-  }).filter(Boolean);
-  if (!_plLiveItems.length) { showToast('Playlist has no playable items', '#f56565'); return; }
-  if (!po.programScene && !(el('rp-program-scene')?.value || '').trim()) {
-    showToast('No playback scene set — pick "Play on scene" on this playlist (or the global Program scene) so OBS cuts to the replay-player source.', '#fbbf24', 6500);
-  }
-  _plLoop = !!po.loop; _plReturnScene = po.returnScene || '';
-  _plScene = (po.programScene || '').trim();
-  _plTransition = null;   // playout playlists use the global transition select
-  beginReplayProgram(po.programScene);   // cut to this playlist's playback scene
-  _plLiveActive = true;
-  _plLiveIdx = 0; playNextLive();
 }
 function stopPlayoutLive() {
   _plLiveActive = false; _plLoop = false;
@@ -21205,17 +22446,22 @@ function stopPlayoutLive() {
 }
 // End-of-playlist handoff: cut to the playlist's chosen scene, else return to where we came from.
 function finishPlayout() {
+  const stopBus = _plBus || 'program';
   if (_plReturnScene) {
-    send('replay_stop', { bus: 'program' });
+    send('replay_stop', { bus: stopBus });
     send('obs_switch_scene', { sceneName: _plReturnScene });
     const st = el('rp-screen-status'); if (st) { st.textContent = 'Returned to ' + _plReturnScene; st.style.color = 'var(--muted)'; }
     _plReturnScene = ''; _replayActive = false; clearTimeout(_replayFallbackTimer); stopReplayCountdown(); _replayOrigin = '';
   } else if (_plReturnEnabled) {
-    endReplayProgram();   // return to the scene that was live before the playlist started
+    endReplayProgram();
   } else {
-    send('replay_stop', { bus: 'program' });
+    send('replay_stop', { bus: stopBus });
     _replayActive = false; clearTimeout(_replayFallbackTimer); stopReplayCountdown(); _replayOrigin = '';
   }
+  // Done with this playlist's dedicated bus/mode (if any) — don't leak it into the next push.
+  _plBus = 'program';
+  _plEncodedMode = false;
+  _plLiveMontageId = null;
   if (typeof updatePlaylistLiveBtns === 'function') updatePlaylistLiveBtns();
 }
 // Transition for the active playlist (per-playlist setting wins; falls back to the global select).
@@ -21230,7 +22476,7 @@ function playNextLive() {
   const item = _plLiveItems[_plLiveIdx]; if (!item) return;
   const url = item.url; if (!url) { _plLiveIdx++; playNextLive(); return; }
   const t = playlistTransitionOpts();   // ease between items (cut / fade / logo / stinger) on the overlay
-  send('replay_play', { bus: 'program', url, name: item.name || 'Clip', loop: false,
+  send('replay_play', { bus: _plBus, url, name: item.name || 'Clip', loop: false,
     trimIn: item.trimIn || 0, trimOut: item.trimOut ?? undefined, scene: _plScene || undefined,
     transition: t.transition, transitionLogo: t.transitionLogo, stinger: t.stinger });
   const st = el('rp-screen-status');
@@ -21346,96 +22592,9 @@ el('rp-stinger-file')?.addEventListener('change', async function () {
 // scene → playlist auto-trigger. Kept as a documented no-op in case anything still references it.
 function checkPlaylistAutoTrigger() { /* intentionally does nothing — no scene-triggered auto-play */ }
 
-// ── Playout playlists UI (commercials / intros / outros) ──────────────────
-let _playoutDraft = null;
+// HTML-escape helper — still used by renderRdAddTarget()/renderRundown()/renderAdSched() below
+// (the "Playout playlists" UI this was originally written for is gone; those call sites remain).
 function poEsc(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
-function playoutItemLabel(it) {
-  if (it.type === 'clip') { const c = (currentState.clips?.library || []).find(x => x.id === it.id); return (c && c.name) || it.name || '(missing clip)'; }
-  return it.name || (it.path || '').split(/[\\/]/).pop() || 'video';
-}
-function renderPlayouts(data) {
-  const wrap = el('rp-playout-list'); if (!wrap) return;
-  const list = (data && data.playouts) || [];
-  const stop = el('rp-playout-stop'); if (stop) stop.style.display = _plLiveActive ? '' : 'none';
-  if (!list.length) { wrap.innerHTML = '<div class="rp-empty" style="padding:14px;font-size:12px;color:var(--muted);">No playout playlists yet. Create one for ad breaks, intros or outros.</div>'; return; }
-  wrap.innerHTML = '';
-  list.forEach(po => {
-    const row = document.createElement('div');
-    row.style.cssText = 'display:flex;align-items:center;gap:10px;padding:9px 12px;border:1px solid var(--border);border-radius:9px;background:var(--surface2);flex-wrap:wrap;';
-    const n = (po.items || []).length;
-    row.innerHTML = `<span style="font-weight:800;font-size:10px;letter-spacing:.08em;text-transform:uppercase;padding:2px 7px;border-radius:5px;background:rgba(124,58,237,.18);color:#c4b5fd;">${poEsc(po.kind || 'general')}</span>
-      <span style="font-weight:700;font-size:13px;">${poEsc(po.name)}</span>
-      <span style="font-size:11px;color:var(--muted);">${n} item${n === 1 ? '' : 's'}${po.programScene ? ' · ▶ ' + poEsc(po.programScene) : ''}${po.loop ? ' · loop' : (po.returnScene ? ' · → ' + poEsc(po.returnScene) : '')}</span>
-      <span style="flex:1;"></span>`;
-    const push = document.createElement('button'); push.className = 'btn btn-warning btn-sm'; push.textContent = 'Push Live'; push.disabled = !n;
-    push.addEventListener('click', () => { pushPlayoutLive(po); renderPlayouts(currentState); });
-    const edit = document.createElement('button'); edit.className = 'btn btn-ghost btn-sm'; edit.textContent = 'Edit';
-    edit.addEventListener('click', () => openPlayoutEditor(po));
-    const del = document.createElement('button'); del.className = 'btn btn-ghost btn-sm'; del.style.color = '#f56565'; del.textContent = 'Delete';
-    del.addEventListener('click', () => { appConfirm('Delete playlist "' + po.name + '"?', 'Delete').then(ok => { if (ok) send('delete_playout', { id: po.id }); }); });
-    row.appendChild(push); row.appendChild(edit); row.appendChild(del);
-    wrap.appendChild(row);
-  });
-}
-function openPlayoutEditor(po) {
-  _playoutDraft = po ? JSON.parse(JSON.stringify(po)) : { id: '', name: '', kind: 'commercial', loop: false, returnScene: '', items: [] };
-  renderPlayoutEditor();
-}
-function renderPlayoutEditor() {
-  const box = el('rp-playout-editor'); if (!box) return;
-  const d = _playoutDraft;
-  if (!d) { box.style.display = 'none'; box.innerHTML = ''; return; }
-  box.style.display = '';
-  const scenes = (currentState.obs && currentState.obs.availableScenes) || [];
-  const staging = _stagingFiles || [];
-  const lib = currentState.clips?.library || [];
-  const progOpts = '<option value="">— use global Program scene —</option>' + scenes.map(s => `<option value="${poEsc(s)}"${d.programScene === s ? ' selected' : ''}>${poEsc(s)}</option>`).join('');
-  const sceneOpts = '<option value="">— return to previous scene —</option>' + scenes.map(s => `<option value="${poEsc(s)}"${d.returnScene === s ? ' selected' : ''}>${poEsc(s)}</option>`).join('');
-  const itemsHtml = d.items.map((it, i) => `<div class="po-item" data-i="${i}" style="display:flex;align-items:center;gap:8px;padding:6px 8px;border:1px solid var(--border);border-radius:7px;background:var(--bg);">
-      <span style="font-size:10px;font-weight:800;color:var(--muted);width:38px;flex:0 0 auto;">${it.type === 'clip' ? 'CLIP' : 'FILE'}</span>
-      <span style="flex:1;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${poEsc(playoutItemLabel(it))}</span>
-      ${it.type === 'file' ? `<input type="number" class="po-dur input-text" min="1" max="3600" value="${it.duration || 15}" title="Duration (seconds)" style="width:62px;flex:0 0 auto;"><span style="font-size:11px;color:var(--muted);">s</span>` : ''}
-      <button class="po-up btn btn-ghost btn-xs" ${i === 0 ? 'disabled' : ''}>↑</button>
-      <button class="po-down btn btn-ghost btn-xs" ${i === d.items.length - 1 ? 'disabled' : ''}>↓</button>
-      <button class="po-rm btn btn-ghost btn-xs" style="color:#f56565;">✕</button>
-    </div>`).join('') || '<div style="font-size:12px;color:var(--muted);padding:8px;">No items yet — add clips or media files below.</div>';
-  box.innerHTML = `<div style="border:1px solid var(--cp-accent);border-radius:10px;padding:14px;background:rgba(124,58,237,.05);">
-    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:10px;">
-      <input id="po-name" class="input-text" placeholder="Playlist name" value="${poEsc(d.name)}" style="flex:1;min-width:160px;">
-      <select id="po-kind" class="input-select" style="max-width:160px;">${['commercial', 'intro', 'outro', 'general'].map(k => `<option value="${k}"${d.kind === k ? ' selected' : ''}>${k[0].toUpperCase() + k.slice(1)}</option>`).join('')}</select>
-      <label class="qt-toggle"><span>Loop</span><span class="switch"><input type="checkbox" id="po-loop" ${d.loop ? 'checked' : ''}><span class="slider"></span></span></label>
-    </div>
-    <div class="field-row" style="margin-bottom:8px;"><label class="field-label" for="po-prog">Play on scene</label><select id="po-prog" class="input-select" style="max-width:340px;" title="OBS scene that holds the replay-player browser source — cut here on Push Live">${progOpts}</select></div>
-    <div class="field-row" style="margin-bottom:10px;"><label class="field-label" for="po-return">When finished${''}</label><select id="po-return" class="input-select" style="max-width:340px;" title="Cut to this scene after the last item (ignored while Loop is on)">${sceneOpts}</select></div>
-    <div id="po-items" style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px;">${itemsHtml}</div>
-    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px;">
-      <select id="po-add-file" class="input-select" style="max-width:240px;"><option value="">Add media file…</option>${staging.map(f => `<option value="${poEsc(f.path)}">${poEsc(f.name)}</option>`).join('')}</select>
-      <select id="po-add-clip" class="input-select" style="max-width:240px;"><option value="">Add library clip…</option>${lib.map(c => `<option value="${poEsc(c.id)}">${poEsc(c.name || 'Clip')}</option>`).join('')}</select>
-    </div>
-    <div style="display:flex;gap:8px;">
-      <button id="po-save" class="btn btn-primary btn-sm">Save playlist</button>
-      <button id="po-cancel" class="btn btn-ghost btn-sm">Cancel</button>
-    </div>
-  </div>`;
-  el('po-name')?.addEventListener('input', e => { d.name = e.target.value; });
-  el('po-kind')?.addEventListener('change', e => { d.kind = e.target.value; });
-  el('po-loop')?.addEventListener('change', e => { d.loop = e.target.checked; });
-  el('po-prog')?.addEventListener('change', e => { d.programScene = e.target.value; });
-  el('po-return')?.addEventListener('change', e => { d.returnScene = e.target.value; });
-  el('po-add-file')?.addEventListener('change', function () { if (!this.value) return; const f = staging.find(x => x.path === this.value); d.items.push({ type: 'file', path: this.value, name: (f && f.name) || '', duration: 15 }); renderPlayoutEditor(); });
-  el('po-add-clip')?.addEventListener('change', function () { if (!this.value) return; const c = lib.find(x => x.id === this.value); d.items.push({ type: 'clip', id: this.value, name: (c && c.name) || '' }); renderPlayoutEditor(); });
-  box.querySelectorAll('.po-item').forEach(row => {
-    const i = +row.dataset.i;
-    row.querySelector('.po-dur')?.addEventListener('change', e => { d.items[i].duration = Math.max(1, parseInt(e.target.value, 10) || 15); });
-    row.querySelector('.po-up')?.addEventListener('click', () => { if (i > 0) { [d.items[i - 1], d.items[i]] = [d.items[i], d.items[i - 1]]; renderPlayoutEditor(); } });
-    row.querySelector('.po-down')?.addEventListener('click', () => { if (i < d.items.length - 1) { [d.items[i + 1], d.items[i]] = [d.items[i], d.items[i + 1]]; renderPlayoutEditor(); } });
-    row.querySelector('.po-rm')?.addEventListener('click', () => { d.items.splice(i, 1); renderPlayoutEditor(); });
-  });
-  el('po-save')?.addEventListener('click', () => { if (!d.name.trim()) d.name = 'Playlist'; send('save_playout', d); _playoutDraft = null; renderPlayoutEditor(); });
-  el('po-cancel')?.addEventListener('click', () => { _playoutDraft = null; renderPlayoutEditor(); });
-}
-el('rp-playout-new')?.addEventListener('click', () => openPlayoutEditor(null));
-el('rp-playout-stop')?.addEventListener('click', () => { stopPlayoutLive(); renderPlayouts(currentState); });
 
 // ── Auto ad-break scheduler ───────────────────────────────────────────────
 // Client-driven: every N minutes, push the chosen playout live (it auto-returns). Skips a fire
@@ -21841,7 +23000,8 @@ function syncTeamSideSelects(teams) {
   teams = teams || (currentState && currentState.teams) || {};
   const bn = (teams.blue && teams.blue.name) || 'Blue team';
   const on = (teams.orange && teams.orange.name) || 'Orange team';
-  ['select-winner-side', 'select-intro-side', 'ck-winner-side', 'ck-intro-side'].forEach((id) => {
+  // select-winner-side is fully managed by _gfxRefreshWinnerPicker — skip it here
+  ['select-intro-side', 'ck-winner-side', 'ck-intro-side'].forEach((id) => {
     const sel = el(id); if (!sel) return;
     const ob = sel.querySelector('option[value="blue"]'); if (ob) ob.textContent = bn;
     const oo = sel.querySelector('option[value="orange"]'); if (oo) oo.textContent = on;
@@ -21850,45 +23010,99 @@ function syncTeamSideSelects(teams) {
 
 // ── Production ▸ Graphics: board of every overlay you can push live (show / hide) ──
 function gfxPathVal(obj, dotted) { return String(dotted).split('.').reduce((o, k) => (o == null ? undefined : o[k]), obj); }
+const GFX_KEY2TRIG = { break: 'breakScreen', winner: 'winner', intro: 'intro', veto: 'veto', spotlight: 'spotlight' };
+// Punch-up graphics: only one of these can be live at a time — showing one auto-hides whichever
+// other one is live. Casters, Ticker, Sponsor Banner and Teams to Watch are NOT in this set — they
+// run as independent, persistent overlays alongside whatever punch-up graphic is showing.
+const GFX_ONAIR_EXCLUSIVE = new Set(['break', 'winner', 'intro', 'matchup', 'veto', 'draft', 'bracket', 'upcoming', 'standings', 'spotlight', 'teamspot']);
+function onairTrig(key) { return (typeof GOLIVE_TRIGGERS !== 'undefined' ? GOLIVE_TRIGGERS : []).find((t) => t.state === GFX_KEY2TRIG[key]); }
+function onairHide(s) { const trig = onairTrig(s.key); if (trig) send(trig.msg, { visible: false }); else send(s.msg, s.hideData || { visible: false }); }
+function onairShow(s) { const trig = onairTrig(s.key); if (trig) send(trig.msg, trig.show()); else send(s.msg, s.showData || { visible: true }); }
+// Resolve whether a scene is currently on — prefers a custom check() over the dot-path, so scenes
+// like Matchup (detected via gfxActive, not a dedicated .visible flag) work correctly.
+function onairIsOn(s, state) { return s.check ? s.check(state) : !!gfxPathVal(state, s.path); }
+
+// Custom card order — reorderable like the Deck grid, persisted the same way.
+const ONAIR_ORDER_KEY = 'ne_onair_order_v1';
+function onairLoadOrder() {
+  let saved = []; try { saved = JSON.parse(localStorage.getItem(ONAIR_ORDER_KEY) || '[]'); } catch (_) {}
+  const keys = (window.ONAIR_SCENES || []).map((s) => s.key);
+  const kept = saved.filter((k) => keys.includes(k));
+  return kept.concat(keys.filter((k) => !kept.includes(k)));   // newly-added scenes land at the end
+}
+function onairSaveOrder() { try { localStorage.setItem(ONAIR_ORDER_KEY, JSON.stringify(_onairOrder)); } catch (_) {} }
+let _onairOrder = onairLoadOrder();
+let _onairEdit = false;
+
 function renderGraphicsBoard() {
   const wrap = el('prod-graphics-board'); if (!wrap) return;
-  const list = (window.ONAIR_SCENES || []);
-  if (!wrap.dataset.built && list.length) {
-    wrap.dataset.built = '1';
-    wrap.innerHTML = list.map((s) => `<div class="gfx-card" data-key="${s.key}"><span class="gfx-dot"></span><span class="gfx-name">${dEsc(s.label)}</span><button class="btn btn-secondary btn-xs gfx-toggle" id="gfx-bt-${s.key}">Show</button></div>`).join('');
+  const byKey = {}; (window.ONAIR_SCENES || []).forEach((s) => { byKey[s.key] = s; });
+  const ordered = _onairOrder.map((k) => byKey[k]).filter(Boolean);
+  wrap.classList.toggle('gfx-board-editing', _onairEdit);
+  // Only rebuild the DOM when the order or edit mode actually changes — avoids wiping toggle
+  // button state/animations on every unrelated state broadcast.
+  const sig = ordered.map((s) => s.key).join(',') + '|' + _onairEdit;
+  if (wrap.dataset.sig !== sig) {
+    wrap.dataset.sig = sig;
+    wrap.innerHTML = ordered.map((s) => `<div class="gfx-card" data-key="${s.key}"${_onairEdit ? ' draggable="true"' : ''}><span class="gfx-dot"></span><span class="gfx-name">${dEsc(s.label)}</span><button class="btn btn-secondary btn-xs gfx-toggle" id="gfx-bt-${s.key}">Show</button></div>`).join('');
   }
-  list.forEach((s) => {
-    const on = !!gfxPathVal(currentState, s.path);
+  ordered.forEach((s) => {
+    const on = onairIsOn(s, currentState);
     const card = wrap.querySelector('.gfx-card[data-key="' + s.key + '"]'); if (!card) return;
     card.classList.toggle('on', on);
     const bt = el('gfx-bt-' + s.key); if (bt) { bt.textContent = on ? 'Hide' : 'Show'; bt.className = 'btn btn-' + (on ? 'danger' : 'secondary') + ' btn-xs gfx-toggle'; }
   });
 }
-const GFX_KEY2TRIG = { break: 'breakScreen', winner: 'winner', intro: 'intro', veto: 'veto', spotlight: 'spotlight' };
-// GFX scenes that are mutually exclusive (showing one should auto-hide the previous).
-const GFX_EXCLUSIVE_KEYS = new Set(Object.keys(typeof SCENE_META !== 'undefined' ? {} : {})); // populated after SCENE_META is defined inside buildGraphicsHub
 el('prod-graphics-board')?.addEventListener('click', (e) => {
+  if (_onairEdit) return;   // reorder mode — drag only, toggle buttons are inert (see CSS)
   const btn = e.target.closest('.gfx-toggle'); if (!btn) return;
   const key = btn.closest('.gfx-card')?.dataset.key;
   const s = (window.ONAIR_SCENES || []).find((x) => x.key === key); if (!s) return;
-  const on = !!gfxPathVal(currentState, s.path);
-  if (!on) {
-    // Turning a GFX scene ON — auto-clear the previously live GFX scene if different.
+  const on = onairIsOn(s, currentState);
+  if (!on && GFX_ONAIR_EXCLUSIVE.has(key)) {
+    // Turning a punch-up graphic ON — hide every OTHER punch-up graphic that's currently live.
+    (window.ONAIR_SCENES || []).forEach((other) => {
+      if (other.key === key || !GFX_ONAIR_EXCLUSIVE.has(other.key)) return;
+      if (onairIsOn(other, currentState)) onairHide(other);
+    });
     const liveScene = currentState && currentState.gfxActive;
     if (liveScene && liveScene !== key) {
       const sm = (typeof window._gfxSceneMeta !== 'undefined') ? window._gfxSceneMeta : {};
       const pm = sm[liveScene]; if (pm) el(pm.clearId || ('btn-hide-' + liveScene))?.click();
     }
     send('set_gfx_active', { scene: key });
-  } else {
+  } else if (on && GFX_ONAIR_EXCLUSIVE.has(key)) {
     const liveScene = currentState && currentState.gfxActive;
     if (liveScene === key) send('set_gfx_active', { scene: null });
   }
-  const trig = (typeof GOLIVE_TRIGGERS !== 'undefined' ? GOLIVE_TRIGGERS : []).find((t) => t.state === GFX_KEY2TRIG[key]);
-  if (trig) send(trig.msg, on ? { visible: false } : trig.show());
-  else send(s.msg, { visible: !on });
+  if (on) onairHide(s); else onairShow(s);
   renderGraphicsBoard();
 });
+// Reorder mode — drag-and-drop, mirrors the Deck grid's edit/drag pattern.
+el('onair-edit-toggle')?.addEventListener('click', function () {
+  _onairEdit = !_onairEdit;
+  this.classList.toggle('active', _onairEdit);
+  this.textContent = _onairEdit ? 'Done' : 'Reorder';
+  renderGraphicsBoard();
+});
+(function wireOnairBoardDrag() {
+  const wrap = el('prod-graphics-board'); if (!wrap) return;
+  let dragKey = null;
+  wrap.addEventListener('dragstart', (e) => {
+    const t = e.target.closest('.gfx-card'); if (!t || !_onairEdit) { e.preventDefault(); return; }
+    dragKey = t.dataset.key; t.classList.add('gfx-card-drag');
+  });
+  wrap.addEventListener('dragend', (e) => { const t = e.target.closest('.gfx-card'); if (t) t.classList.remove('gfx-card-drag'); dragKey = null; });
+  wrap.addEventListener('dragover', (e) => { if (_onairEdit) e.preventDefault(); });
+  wrap.addEventListener('drop', (e) => {
+    if (!_onairEdit || !dragKey) return; e.preventDefault();
+    const tgt = e.target.closest('.gfx-card'); if (!tgt) return;
+    const from = _onairOrder.indexOf(dragKey), to = _onairOrder.indexOf(tgt.dataset.key);
+    if (from < 0 || to < 0 || from === to) return;
+    const [m] = _onairOrder.splice(from, 1); _onairOrder.splice(to, 0, m);
+    onairSaveOrder(); renderGraphicsBoard();
+  });
+})();
 // Live-preview reloads + jump to the full qrail Twitch panel from the Deck.
 el('deck-pv-reload')?.addEventListener('click', () => { const f = el('deck-pv-frame'); if (f) f.src = f.src; });
 el('gfx-pv-reload')?.addEventListener('click', () => { const f = el('gfx-pv-frame'); if (f) f.src = f.src; });
@@ -21938,7 +23152,9 @@ function renderRdAddTarget() {
   const prev = existing ? existing.value : '';
   const type = el('rd-add-type')?.value || 'scene';
   const scenes = (currentState.obs && currentState.obs.availableScenes) || [];
-  const playouts = currentState.playouts || [];
+  // 'playout' segments run via playMontageById(seg.target), which looks up clips.montages — the
+  // picker must list the SAME id space, not the old (dead) state.playouts.
+  const playouts = (currentState.clips && currentState.clips.montages) || [];
   const opt = (v, l) => `<option value="${poEsc(v)}">${poEsc(l)}</option>`;
   if (type === 'scene') wrap.innerHTML = `<select id="rd-add-target" class="input-select" style="max-width:220px;">${scenes.map((s) => opt(s, s)).join('') || '<option value="">(OBS not connected)</option>'}</select>`;
   else if (type === 'trigger') wrap.innerHTML = `<select id="rd-add-target" class="input-select" style="max-width:180px;">${RD_TRIGGERS.map((t) => opt(t[0], t[1])).join('')}</select>`;
@@ -22072,6 +23288,7 @@ const FLOW_TRIGGER_GROUPS = [
     ['twitch_follow',          'New follower'],
     ['twitch_channel_points',  'Channel points redeemed'],
     ['twitch_hype_train',      'Hype Train starts'],
+    ['twitch_chat_command',    'Chat command (!command)'],
   ]},
   { label: 'In-App / Timer', items: [
     ['timer_countdown_end', 'Countdown timer ends'],
@@ -22079,8 +23296,9 @@ const FLOW_TRIGGER_GROUPS = [
     ['break_hidden',        'Break screen hidden'],
   ]},
   { label: 'Scheduled', items: [
-    ['timer_interval', 'Every N seconds (interval)'],
-    ['time_of_day',    'At a specific time (daily)'],
+    ['timer_interval',  'Every N seconds (interval)'],
+    ['time_of_day',     'At a specific time (daily)'],
+    ['cron_schedule',   'Cron schedule (advanced)'],
   ]},
   { label: 'Manual', items: [
     ['manual', 'Manual / button'],
@@ -22138,6 +23356,10 @@ function flowTriggerParamsHtml(trig) {
       return `<input type="number" class="ft-param input-text" data-k="seconds" min="1" value="${p.seconds||60}" style="width:72px;"> <span style="font-size:11px;color:var(--muted);">seconds</span>`;
     case 'time_of_day':
       return `<input type="time" class="ft-param input-text" data-k="time" value="${poEsc(p.time||'20:00')}" style="width:110px;">`;
+    case 'twitch_chat_command':
+      return `<input type="text" class="ft-param input-text" data-k="command" placeholder="!command (blank = any)" value="${poEsc((p.command||'').replace(/^!/,''))}" style="width:200px;">`;
+    case 'cron_schedule':
+      return `<input type="text" class="ft-param input-text" data-k="expr" placeholder="min hr day mon wday  e.g. 0 20 * * 5" value="${poEsc(p.expr||'0 20 * * *')}" style="width:220px;" title="Standard 5-field cron: minute hour day-of-month month weekday&#10;Examples:&#10;0 20 * * 5  = Fridays at 8pm&#10;30 19 * * 1,3,5 = Mon/Wed/Fri at 7:30pm&#10;0 * * * *  = every hour">`;
     default:
       return '';
   }
@@ -22170,6 +23392,7 @@ const FLOW_ACTION_GROUPS = [
     ['twitch_prediction_resolve', 'Resolve prediction (by outcome #)'],
     ['twitch_prediction_cancel',  'Cancel prediction'],
     ['twitch_announcement',       'Post chat announcement'],
+    ['twitch_send_chat',          'Send chat message'],
     ['twitch_clip',               'Create clip'],
     ['twitch_channel_title',      'Update channel title'],
     ['twitch_create_poll',        'Create poll'],
@@ -22194,10 +23417,24 @@ const FLOW_ACTION_GROUPS = [
     ['match_set_series_score', 'Set series score'],
     ['match_reset_series',     'Reset series'],
   ]},
+  { label: 'OBS Media', items: [
+    ['obs_playback_start', 'Play media source (restart)'],
+    ['obs_playback_stop',  'Stop media source'],
+    ['obs_playback_pause', 'Pause media source'],
+  ]},
+  { label: 'Variables', items: [
+    ['set_variable',       'Set variable'],
+    ['increment_variable', 'Increment variable'],
+    ['cycle_variable',     'Cycle variable through list'],
+    ['reset_variable',     'Reset / clear variable'],
+  ]},
   { label: 'Generic', items: [
-    ['wait',         'Wait (delay)'],
-    ['run_flow',     'Run another flow'],
-    ['http_webhook', 'HTTP webhook (POST)'],
+    ['wait',                 'Wait (delay)'],
+    ['run_flow',             'Run another flow'],
+    ['random_choice',        'Random choice (run random flow)'],
+    ['stop_flow',            'Stop flow (abort remaining)'],
+    ['http_webhook',         'HTTP webhook (POST)'],
+    ['send_discord_webhook', 'Discord webhook (embed)'],
   ]},
 ];
 
@@ -22243,6 +23480,17 @@ function flowActionLabel(a) {
     case 'obs_set_transition': return 'Transition: ' + (p.transitionName || '?') + (p.durationMs ? ' ' + p.durationMs + 'ms' : '');
     case 'match_set_score': return 'Set ' + (p.team || '?') + ' score → ' + (p.value ?? '?');
     case 'run_flow': { const tf = (_flows||[]).find(f=>f.id===p.flowId); return 'Run flow: ' + (tf ? tf.name : (p.flowId || '?')); }
+    case 'set_variable':        return '{{' + (p.name||'?') + '}} = "' + (p.value||'').slice(0,20) + '"';
+    case 'increment_variable':  return (p.name||'?') + ' += ' + (p.amount!=null?p.amount:1);
+    case 'cycle_variable':      return 'Cycle {{' + (p.name||'?') + '}}';
+    case 'reset_variable':      return 'Reset {{' + (p.name || 'all') + '}}';
+    case 'stop_flow':           return 'Stop flow';
+    case 'send_discord_webhook':return 'Discord: "' + (p.title||p.message||'').slice(0,24) + '"';
+    case 'twitch_send_chat':    return 'Chat: "' + (p.message||'').slice(0,28) + '"';
+    case 'random_choice':       return 'Random: ' + ((p.flowIds||'').split(',').filter(Boolean).length) + ' choices';
+    case 'obs_playback_start':  return 'Play: "' + (p.inputName||'?') + '"';
+    case 'obs_playback_stop':   return 'Stop: "' + (p.inputName||'?') + '"';
+    case 'obs_playback_pause':  return 'Pause: "' + (p.inputName||'?') + '"';
     default: return allActions[a.type] || a.type;
   }
 }
@@ -22321,6 +23569,40 @@ function flowActionParamsHtml(a) {
       const opts = flows.map(f => `<option value="${poEsc(f.id)}"${p.flowId===f.id?' selected':''}>${poEsc(f.name||f.id)}</option>`).join('');
       return `<select class="fa-param input-select" data-k="flowId" style="width:200px;"><option value="">— pick a flow —</option>${opts}</select>`;
     }
+    case 'set_variable':
+      return `<input type="text" class="fa-param input-text" data-k="name" placeholder="var_name" value="${poEsc(p.name||'')}" style="width:120px;">
+        <span style="font-size:11px;color:var(--muted);">=</span>
+        <input type="text" class="fa-param input-text" data-k="value" placeholder="value (supports {{tokens}})" value="${poEsc(p.value||'')}" style="width:170px;">`;
+    case 'increment_variable':
+      return `<input type="text" class="fa-param input-text" data-k="name" placeholder="var_name" value="${poEsc(p.name||'')}" style="width:120px;">
+        <span style="font-size:11px;color:var(--muted);">+=</span>
+        <input type="number" class="fa-param input-text" data-k="amount" value="${p.amount!=null?p.amount:1}" style="width:60px;" title="Amount to add (negative to subtract)">`;
+    case 'cycle_variable':
+      return `<input type="text" class="fa-param input-text" data-k="name" placeholder="var_name" value="${poEsc(p.name||'')}" style="width:110px;">
+        <span style="font-size:11px;color:var(--muted);">list:</span>
+        <input type="text" class="fa-param input-text" data-k="list" placeholder="a,b,c (comma-separated)" value="${poEsc(p.list||'')}" style="width:200px;" title="Each fire advances to the next item, wrapping around">`;
+    case 'reset_variable':
+      return `<input type="text" class="fa-param input-text" data-k="name" placeholder="var_name (blank = clear all)" value="${poEsc(p.name||'')}" style="width:220px;">`;
+    case 'stop_flow':
+      return `<span style="font-size:11px;color:var(--muted);">Stops executing remaining actions immediately.</span>`;
+    case 'twitch_send_chat':
+      return `<input type="text" class="fa-param input-text" data-k="message" placeholder="chat message (supports {{tokens}})" value="${poEsc(p.message||'')}" style="width:270px;">`;
+    case 'send_discord_webhook':
+      return `<input type="text" class="fa-param input-text" data-k="url" placeholder="Discord webhook URL" value="${poEsc(p.url||'')}" style="width:230px;">
+        <input type="text" class="fa-param input-text" data-k="title" placeholder="Embed title" value="${poEsc(p.title||'')}" style="width:150px;">
+        <input type="text" class="fa-param input-text" data-k="message" placeholder="Body (supports {{tokens}})" value="${poEsc(p.message||'')}" style="width:230px;">
+        <input type="text" class="fa-param input-text" data-k="color" placeholder="#rrggbb" value="${poEsc(p.color||'')}" style="width:72px;" title="Hex sidebar color">`;
+    case 'random_choice': {
+      const allF = _flows || [];
+      const selIds = (p.flowIds||'').split(',').map(s=>s.trim()).filter(Boolean);
+      const opts = allF.map(f => `<option value="${poEsc(f.id)}"${selIds.includes(f.id)?' selected':''}>${poEsc(f.name||f.id)}</option>`).join('');
+      return `<select class="fa-param input-select" data-k="flowIds" multiple size="3" style="width:220px;height:64px;" title="Hold Ctrl/Cmd to select multiple flows">${opts||'<option disabled>No flows yet</option>'}</select>
+        <span style="font-size:10px;color:var(--muted);display:block;margin-top:2px;">One is picked at random each fire</span>`;
+    }
+    case 'obs_playback_start':
+    case 'obs_playback_stop':
+    case 'obs_playback_pause':
+      return `<input type="text" class="fa-param input-text" data-k="inputName" placeholder="media source name" value="${poEsc(p.inputName||'')}" style="width:220px;">`;
     default:
       return '';
   }
@@ -22342,6 +23624,13 @@ const FLOW_CONDITION_GROUPS = [
   ]},
   { label: 'Time', items: [
     ['if_time_range',   'Current time is between…'],
+  ]},
+  { label: 'Variables / Flow', items: [
+    ['if_variable',        'Variable value is…'],
+    ['if_flow_last_fired', 'Flow fired within last…'],
+  ]},
+  { label: 'Match / Series (extended)', items: [
+    ['if_match_point', 'Team is on match point'],
   ]},
 ];
 const FLOW_COND_LABEL = Object.fromEntries(FLOW_CONDITION_GROUPS.flatMap(g => g.items));
@@ -22378,6 +23667,32 @@ function flowConditionParamsHtml(cond) {
     case 'if_time_range':
       return `<input type="time" class="fc-param input-text" data-k="start" value="${poEsc(p.start||'00:00')}" style="width:100px;"> <span style="font-size:11px;color:var(--muted);">–</span>
         <input type="time" class="fc-param input-text" data-k="end" value="${poEsc(p.end||'23:59')}" style="width:100px;">`;
+    case 'if_variable':
+      return `<input type="text" class="fc-param input-text" data-k="name" placeholder="var_name" value="${poEsc(p.name||'')}" style="width:110px;">
+        <select class="fc-param input-select" data-k="op" style="width:96px;">
+          <option value="eq"${(!p.op||p.op==='eq')?' selected':''}>= equals</option>
+          <option value="neq"${p.op==='neq'?' selected':''}>≠ not equals</option>
+          <option value="gt"${p.op==='gt'?' selected':''}>&#62; greater</option>
+          <option value="gte"${p.op==='gte'?' selected':''}>≥ greater/eq</option>
+          <option value="lt"${p.op==='lt'?' selected':''}>&#60; less</option>
+          <option value="lte"${p.op==='lte'?' selected':''}>≤ less/eq</option>
+          <option value="contains"${p.op==='contains'?' selected':''}>contains</option>
+        </select>
+        <input type="text" class="fc-param input-text" data-k="value" placeholder="value" value="${poEsc(p.value||'')}" style="width:100px;">`;
+    case 'if_flow_last_fired': {
+      const fls = _flows || [];
+      const fopts = fls.map(f => `<option value="${poEsc(f.id)}"${p.flowId===f.id?' selected':''}>${poEsc(f.name||f.id)}</option>`).join('');
+      return `<select class="fc-param input-select" data-k="flowId" style="width:160px;"><option value="">— pick flow —</option>${fopts}</select>
+        <span style="font-size:11px;color:var(--muted);">within last</span>
+        <input type="number" class="fc-param input-text" data-k="maxAgoMs" min="100" value="${p.maxAgoMs||5000}" style="width:76px;">
+        <span style="font-size:11px;color:var(--muted);">ms</span>`;
+    }
+    case 'if_match_point':
+      return `<select class="fc-param input-select" data-k="team" style="width:120px;">
+        <option value="any"${(!p.team||p.team==='any')?' selected':''}>Either team</option>
+        <option value="blue"${p.team==='blue'?' selected':''}>Blue team</option>
+        <option value="orange"${p.team==='orange'?' selected':''}>Orange team</option>
+      </select>`;
     default:
       return '';
   }
@@ -22400,23 +23715,56 @@ function _flowTrigColor(type) {
   if (type.startsWith('twitch_')) return '#c084fc';
   if (type.startsWith('obs_')) return '#60a5fa';
   if (type === 'timer_countdown_end' || type.startsWith('break_')) return '#34d399';
+  if (type === 'cron_schedule' || type === 'time_of_day') return '#fbbf24';
   return '#94a3b8';
+}
+
+function _flowTimeAgo(serverMs) {
+  if (!serverMs) return null;
+  const sec = Math.floor((Date.now() - serverMs) / 1000);
+  if (sec < 5)    return 'just fired';
+  if (sec < 60)   return sec + 's ago';
+  if (sec < 3600) return Math.floor(sec / 60) + 'm ago';
+  return Math.floor(sec / 3600) + 'h ago';
+}
+
+function renderFlowVars() {
+  const panel = document.getElementById('flow-vars-panel');
+  const list  = document.getElementById('flow-vars-list');
+  if (!panel || !list) return;
+  const vars = (currentState && currentState.flowVars) || {};
+  const entries = Object.entries(vars);
+  if (!entries.length) { panel.style.display = 'none'; return; }
+  panel.style.display = '';
+  list.innerHTML = entries.map(([k, v]) =>
+    `<span class="flow-var-chip" title="{{${poEsc(k)}}} = ${poEsc(String(v))}">
+      <span class="flow-var-name">{{${poEsc(k)}}}</span><span class="flow-var-val">${poEsc(String(v))}</span>
+      <button class="flow-var-rm" data-k="${poEsc(k)}" title="Reset this variable">✕</button>
+    </span>`
+  ).join('');
+  list.querySelectorAll('.flow-var-rm').forEach(btn => {
+    btn.addEventListener('click', () => send('reset_flow_var', { name: btn.dataset.k }));
+  });
 }
 
 function renderFlows() {
   if (currentState && currentState.flows) _flows = currentState.flows;
+  renderFlowVars();
   const list = el('flow-list'); if (!list) return;
   if (list.contains(document.activeElement)) return;
   if (!_flows.length) {
     list.innerHTML = '<div style="padding:20px 14px;text-align:center;font-size:12px;color:var(--muted);line-height:1.6;">No flows yet.<br>Click <strong>+ New Flow</strong> to build your first automation.</div>';
     return;
   }
+  const fireLog = (currentState && currentState.flowFireLog) || {};
   list.innerHTML = '';
   _flows.forEach((f) => {
     const triggers = f.triggers || (f.trigger ? [f.trigger] : []);
     const actions  = f.actions  || [];
     const isSeq    = f.triggerMode === 'sequence';
     const isOn     = f.enabled !== false;
+    const lastFiredMs  = (fireLog[f.id] || [])[0] || null;
+    const lastFiredStr = _flowTimeAgo(lastFiredMs);
 
     const trigChips = triggers.map((t, ti) => {
       const lbl   = FLOW_TRIG_LABEL[t.type] || t.type;
@@ -22439,6 +23787,7 @@ function renderFlows() {
         <span class="flow-card-name">${poEsc(f.name||'Unnamed')}</span>
         <div class="flow-card-meta">
           <span class="flow-card-count">${actions.length} step${actions.length===1?'':'s'}</span>
+          ${lastFiredStr ? `<span class="flow-card-fired" title="Last fired">${lastFiredStr}</span>` : ''}
           <label class="qt-toggle" style="font-size:11px;">
             <span style="color:var(--muted)">On</span>
             <span class="switch"><input type="checkbox" ${isOn?'checked':''}><span class="slider"></span></span>
@@ -22447,14 +23796,19 @@ function renderFlows() {
       </div>
       <div class="flow-card-triggers">${trigChips||'<span style="font-size:11px;color:var(--muted)">No trigger set</span>'}</div>
       <div class="flow-card-actions">${actSummary}${actMore}</div>
+      ${f.notes ? `<div class="flow-card-notes">${poEsc(f.notes)}</div>` : ''}
       <div class="flow-card-btns">
         <button class="fc-fire btn btn-xs" style="background:rgba(124,92,255,.18);color:#c4b5fd;border:1px solid rgba(124,92,255,.3);">Fire now</button>
+        <button class="fc-test btn btn-ghost btn-xs" title="Dry-run: check conditions and preview actions without executing">Test</button>
+        <button class="fc-export btn btn-ghost btn-xs" title="Export flow as JSON">Export</button>
         <button class="fc-edit btn btn-ghost btn-xs">Edit</button>
         <button class="fc-del btn btn-ghost btn-xs" style="color:#f56565;">Delete</button>
       </div>`;
 
     card.querySelector('input[type=checkbox]').addEventListener('change', () => send('toggle_flow', { id: f.id }));
     card.querySelector('.fc-fire').addEventListener('click', () => flowFire(f));
+    card.querySelector('.fc-test').addEventListener('click', () => flowDryRun(f));
+    card.querySelector('.fc-export').addEventListener('click', () => downloadFlowJson(f));
     card.querySelector('.fc-edit').addEventListener('click', () => openFlowEditor(f));
     card.querySelector('.fc-del').addEventListener('click', (e) => {
       appConfirm('Delete flow "' + (f.name||'this flow') + '"?', 'Delete').then(ok => {
@@ -22563,6 +23917,7 @@ function renderFlowEditor() {
 
       <div class="fe-header">
         <input id="fe-name" class="input-text fe-name-input" placeholder="Flow name…" value="${poEsc(d.name||'')}">
+        <textarea id="fe-notes" class="input-text fe-notes-input" placeholder="Notes (optional, shown on card)…" rows="1" style="width:100%;resize:none;font-size:11px;color:var(--muted);margin-top:4px;padding:3px 6px;">${poEsc(d.notes||'')}</textarea>
         <div class="fe-header-right">
           <span class="fe-muted">Cooldown</span>
           <input id="fe-cooldown" type="number" class="input-text" min="0" value="${d.cooldown||0}" style="width:62px;" title="Minimum ms between fires">
@@ -22630,6 +23985,7 @@ function renderFlowEditor() {
   const feid = (id) => document.getElementById(id);
 
   feid('fe-name').addEventListener('input', e => { d.name = e.target.value; });
+  feid('fe-notes').addEventListener('input', e => { d.notes = e.target.value; });
   feid('fe-cooldown').addEventListener('input', e => { d.cooldown = Number(e.target.value)||0; });
   feid('fe-repeat-count').addEventListener('input', e => { d.repeatCount = Math.max(1, Number(e.target.value)||1); });
   feid('fe-repeat-delay').addEventListener('input', e => { d.repeatDelay = Number(e.target.value)||0; });
@@ -22759,7 +24115,164 @@ function renderFlowEditor() {
   if (!d.name) setTimeout(() => feid('fe-name')?.focus(), 30);
 }
 
+// ── Flow utilities ────────────────────────────────────────────────────────────
+
+function downloadFlowJson(f) {
+  const json = JSON.stringify(f, null, 2);
+  const blob = new Blob([json], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = (f.name || 'flow').replace(/[^a-z0-9_-]/gi, '_') + '.json';
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+function flowDryRun(f) {
+  send('flow_dry_run', { id: f.id });
+}
+
+function _showDryRunModal(data) {
+  const { flowName, conditions, actions, conditionsPassed } = data || {};
+  let existing = document.getElementById('flow-dryrun-modal');
+  if (existing) existing.remove();
+  const m = document.createElement('div');
+  m.id = 'flow-dryrun-modal';
+  m.className = 'flow-modal-overlay';
+  const condHtml = (conditions || []).map(c => {
+    const icon = c.passed ? '<span style="color:#34d399;">PASS</span>' : '<span style="color:#f56565;">FAIL</span>';
+    return `<div class="dryrun-row">${icon} <span class="dryrun-ctype">${poEsc(c.type||'')}</span></div>`;
+  }).join('') || '<div class="dryrun-row" style="color:var(--muted);">No conditions</div>';
+  const actHtml = (actions || []).map((a, i) => {
+    const rp = a.resolvedParams || {};
+    const preview = Object.entries(rp).slice(0,2).map(([k,v])=>`${k}: ${String(v).slice(0,40)}`).join(', ');
+    return `<div class="dryrun-row"><span class="dryrun-step">${i+1}</span> <span class="dryrun-atype">${poEsc(a.type||'')}</span>${a.delay ? ` <span style="color:var(--muted);">[+${a.delay}ms]</span>` : ''}${preview ? ` — <span style="color:var(--muted);font-size:10px;">${poEsc(preview)}</span>` : ''}</div>`;
+  }).join('') || '<div class="dryrun-row" style="color:var(--muted);">No actions</div>';
+  const fireLabel = conditionsPassed
+    ? '<span style="color:#34d399;font-weight:700;">Would FIRE</span>'
+    : '<span style="color:#f56565;font-weight:700;">Would NOT fire (conditions failed)</span>';
+  m.innerHTML = `
+    <div class="flow-modal-dialog dryrun-dialog">
+      <div class="fe-header" style="border-bottom:1px solid var(--border);padding-bottom:8px;margin-bottom:10px;">
+        <strong>Dry Run: ${poEsc(flowName||'Flow')}</strong>
+        <span style="margin-left:12px;">${fireLabel}</span>
+        <button class="btn btn-ghost btn-sm" id="dryrun-close" style="margin-left:auto;">Close</button>
+      </div>
+      <div style="margin-bottom:10px;">
+        <div style="font-size:10px;font-weight:700;color:var(--muted);letter-spacing:.06em;margin-bottom:4px;">CONDITIONS</div>
+        ${condHtml}
+      </div>
+      <div>
+        <div style="font-size:10px;font-weight:700;color:var(--muted);letter-spacing:.06em;margin-bottom:4px;">ACTIONS</div>
+        ${actHtml}
+      </div>
+    </div>`;
+  document.body.appendChild(m);
+  m.querySelector('#dryrun-close').addEventListener('click', () => m.remove());
+  m.addEventListener('click', e => { if (e.target === m) m.remove(); });
+}
+
+const FLOW_TEMPLATES = [
+  {
+    name: 'Auto-tweet on goal',
+    triggers: [{ id: 'tr0', type: 'rl_goal', params: {} }],
+    conditions: [],
+    actions: [{ id: 'ac0', type: 'twitch_send_chat', params: { message: 'GOAL! {{blue_team}} {{blue_score}} - {{orange_score}} {{orange_team}} #RocketLeague' }, delay: 0 }],
+    enabled: true
+  },
+  {
+    name: 'Discord announce on match start',
+    triggers: [{ id: 'tr0', type: 'rl_match_started', params: {} }],
+    conditions: [],
+    actions: [{ id: 'ac0', type: 'send_discord_webhook', params: { url: '', content: 'Match starting: {{blue_team}} vs {{orange_team}}' }, delay: 0 }],
+    enabled: true
+  },
+  {
+    name: 'Scene cut on overtime',
+    triggers: [{ id: 'tr0', type: 'rl_overtime_started', params: {} }],
+    conditions: [],
+    actions: [{ id: 'ac0', type: 'obs_switch_scene', params: { scene: 'Overtime' }, delay: 0 }],
+    enabled: true
+  },
+  {
+    name: 'Match-point alert',
+    triggers: [{ id: 'tr0', type: 'rl_goal', params: {} }],
+    conditions: [{ id: 'co0', type: 'if_match_point', params: {} }],
+    actions: [{ id: 'ac0', type: 'twitch_send_chat', params: { message: 'MATCH POINT!' }, delay: 0 }],
+    enabled: true
+  },
+  {
+    name: 'Hourly scene refresh (cron)',
+    triggers: [{ id: 'tr0', type: 'cron_schedule', params: { expr: '0 * * * *' } }],
+    conditions: [],
+    actions: [{ id: 'ac0', type: 'gfx_push_live', params: { scene: '' }, delay: 0 }],
+    enabled: false
+  },
+  {
+    name: 'Counter: track kills',
+    triggers: [{ id: 'tr0', type: 'manual', params: {} }],
+    conditions: [],
+    actions: [{ id: 'ac0', type: 'increment_variable', params: { name: 'kills', amount: 1 }, delay: 0 }, { id: 'ac1', type: 'twitch_send_chat', params: { message: 'Kills: {{kills}}' }, delay: 0 }],
+    enabled: true
+  }
+];
+
+function _showTemplatesPicker() {
+  let existing = document.getElementById('flow-tpl-modal');
+  if (existing) { existing.remove(); return; }
+  const m = document.createElement('div');
+  m.id = 'flow-tpl-modal';
+  m.className = 'flow-modal-overlay';
+  const rows = FLOW_TEMPLATES.map((t, i) =>
+    `<div class="tpl-row" data-i="${i}">
+      <strong>${poEsc(t.name)}</strong>
+      <div style="font-size:10px;color:var(--muted);">${t.triggers.map(tr=>tr.type).join(', ')} → ${t.actions.map(a=>a.type).join(', ')}</div>
+    </div>`).join('');
+  m.innerHTML = `
+    <div class="flow-modal-dialog" style="max-width:440px;">
+      <div class="fe-header" style="border-bottom:1px solid var(--border);padding-bottom:8px;margin-bottom:10px;">
+        <strong>Flow Templates</strong>
+        <button class="btn btn-ghost btn-sm" id="tpl-close" style="margin-left:auto;">Close</button>
+      </div>
+      <div id="tpl-list">${rows}</div>
+    </div>`;
+  document.body.appendChild(m);
+  m.querySelector('#tpl-close').addEventListener('click', () => m.remove());
+  m.addEventListener('click', e => { if (e.target === m) m.remove(); });
+  m.querySelectorAll('.tpl-row').forEach(row => {
+    row.addEventListener('click', () => {
+      const tpl = FLOW_TEMPLATES[+row.dataset.i];
+      const draft = JSON.parse(JSON.stringify(tpl));
+      draft.id = 'fl_' + Math.random().toString(36).slice(2, 9);
+      draft.triggers = (draft.triggers || []).map((t, i) => ({ ...t, id: 'tr_' + i }));
+      draft.conditions = (draft.conditions || []).map((c, i) => ({ ...c, id: 'co_' + i }));
+      draft.actions = (draft.actions || []).map((a, i) => ({ ...a, id: 'ac_' + i }));
+      m.remove();
+      openFlowEditor(draft);
+    });
+  });
+}
+
 el('flow-new')?.addEventListener('click', () => openFlowEditor(null));
+el('flow-templates')?.addEventListener('click', _showTemplatesPicker);
+el('flow-import-input')?.addEventListener('change', function() {
+  const file = this.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (ev) => {
+    try {
+      const data = JSON.parse(ev.target.result);
+      const flows = Array.isArray(data) ? data : [data];
+      flows.forEach(f => {
+        if (!f || typeof f !== 'object' || !f.triggers) return;
+        f.id = 'fl_' + Math.random().toString(36).slice(2, 9);
+        openFlowEditor(f);
+      });
+    } catch { if (typeof showToast === 'function') showToast('Invalid flow JSON', '#f56565', 2000); }
+  };
+  reader.readAsText(file);
+  this.value = '';
+});
+el('flow-vars-clear-all')?.addEventListener('click', () => send('reset_flow_var', {}));
 renderFlows();
 
 // ── Production Show pane: OBS status bar + Quick Scenes + Predictions ────────
@@ -23257,7 +24770,6 @@ function cfTalentRefresh(btn) {
 function cfRefreshTalentSurfaces() {
   if (typeof cfTalentRefresh === 'function') cfTalentRefresh();                                 // rail (pulls links → renderQtalent)
   if (typeof cfLoadTalent === 'function' && el('cf-talent-teams')) cfLoadTalent();              // Talent page Match Control + library
-  if (typeof cfLoadCasterVdo === 'function' && el('cf-caster-vdo-links')) cfLoadCasterVdo();    // caster VDO quick tool
 }
 // Signature of the talent-relevant state — teams/sides/rosters/casters/desk/vdo-room. When it
 // changes (e.g. switching team sides), the cached links are stale, so re-pull + re-render.
@@ -23859,18 +25371,24 @@ function endReplayProgram(silent) {
   _replayActive = false;
   clearTimeout(_replayFallbackTimer);
   stopReplayCountdown();
+  // Single shared source: single clips and encoded playlists all play on the program bus, so this
+  // stops whatever's actually on air. (_plBus is reset back to 'program' below.)
+  const bus = _plBus || 'program';
   const ret = el('rp-return-scene');
   if (!silent && ret && ret.checked && _replayOrigin) {
-    send('replay_stop', { bus: 'program' });
+    send('replay_stop', { bus });
     send('obs_switch_scene', { sceneName: _replayOrigin });
     const st = el('rp-screen-status'); if (st) { st.textContent = 'Returned to ' + _replayOrigin; st.style.color = 'var(--muted)'; }
   } else if (!silent) {
     // Shared-source model: even when we're staying on the playback scene (Return off),
     // clear the program player so it doesn't freeze on the last frame in whatever scene
     // is still on air. The scene then shows its own background again.
-    send('replay_stop', { bus: 'program' });
+    send('replay_stop', { bus });
   }
   _replayOrigin = '';
+  _plBus = 'program';
+  _plEncodedMode = false;
+  _plLiveMontageId = null;
 }
 
 // Time-remaining readout, driven by the overlay's playback reports.
@@ -23937,7 +25455,11 @@ function applyReplayMonitors(replay) {
   setReplayMonitor('rp-mon-pgm', 'rp-mon-pgm-cell', replay.program);
   // Authoritative revert: if the server says nothing is on the program bus (and no playlist is
   // sequencing), drop the top-bar REPLAY/AD override. clearTopbarReplay() is a no-op when idle.
+  const onAir = (replay.program && replay.program.playing) || _plLiveActive || _replayActive;
   if (!(replay.program && replay.program.playing) && !_plLiveActive) clearTopbarReplay();
+  // Show the on-air Stop button whenever something is live (covers a looping single clip, which
+  // otherwise had no visible way to stop).
+  const sb = el('rp-stop-program'); if (sb) sb.style.display = onAir ? '' : 'none';
 }
 function setReplayMonitor(vidId, cellId, bus) {
   const v = el(vidId); const cell = el(cellId); if (!v || !cell) return;
@@ -24028,15 +25550,19 @@ function applyClipsState(c) {
   const montageListEl = el('montage-list');
   if (montageListEl) {
     const exps = (c.montages || []).filter((m) => m.outputPath);   // only encoded exports
-    montageListEl.innerHTML = exps.length ? exps.map((m) =>
-      `<div class="montage-card">
-        <div style="min-width:0;"><strong>${(m.name || 'Montage').replace(/</g, '&lt;')}</strong><div style="font-size:11px;color:var(--muted)">${(m.clipIds || []).length} clips · exported</div></div>
-        <div style="display:flex;gap:6px;align-items:center;">
+    montageListEl.classList.toggle('empty', !exps.length);
+    montageListEl.innerHTML = exps.length ? exps.map((m) => {
+      const n = (m.clipIds || []).length;
+      return `<div class="montage-card">
+        <div class="montage-card-name" title="${(m.name || 'Montage').replace(/"/g, '&quot;').replace(/</g, '&lt;')}">${(m.name || 'Montage').replace(/</g, '&lt;')}</div>
+        <div class="montage-card-meta">${n} clip${n === 1 ? '' : 's'} &middot; encoded</div>
+        <div class="montage-card-actions">
           <button class="btn btn-danger btn-sm btn-montage-screen" data-mid="${m.id}" title="Play this export on Program">To air</button>
-          <button class="rp-vi-del btn-montage-delx" data-mid="${m.id}" title="Delete this encoded file (the playlist stays)">✕</button>
+          <button class="btn btn-secondary btn-sm btn-montage-save" data-mid="${m.id}" title="Save encoded file to disk">Save As&hellip;</button>
+          <button class="rp-vi-del btn-montage-delx" data-mid="${m.id}" title="Delete this encoded file (the playlist stays)">&times;</button>
         </div>
-      </div>`
-    ).join('') : '<div style="color:var(--muted);font-size:12px;">No exports yet — encode a playlist to create one.</div>';
+      </div>`;
+    }).join('') : '<div class="montage-list-empty">No exports yet — encode a playlist to create one.</div>';
     montageListEl.querySelectorAll('.btn-montage-screen').forEach((btn) => {
       btn.addEventListener('click', () => {
         const m = (c.montages || []).find((x) => x.id === btn.dataset.mid);
@@ -24045,6 +25571,9 @@ function applyClipsState(c) {
         send('replay_play', { bus: 'program', url, name: m.name || 'Montage', loop: !!el('rp-loop')?.checked });
         const st = el('rp-screen-status'); if (st) { st.textContent = 'ON AIR: ' + (m.name || 'Montage'); st.style.color = 'var(--good, #48bb78)'; }
       });
+    });
+    montageListEl.querySelectorAll('.btn-montage-save').forEach((btn) => {
+      btn.addEventListener('click', () => send('montage_save_export', { montageId: btn.dataset.mid }));
     });
     montageListEl.querySelectorAll('.btn-montage-delx').forEach((btn) => {
       btn.addEventListener('click', async () => {
@@ -24055,6 +25584,13 @@ function applyClipsState(c) {
   }
 
   renderPlaylistPane(c);
+  // Keep social clip-prep dropdowns in sync when the library updates
+  if (el('soc-panel-clipprep') && el('soc-panel-clipprep').style.display !== 'none') {
+    if (typeof window._socHandleEncodeProgress !== 'undefined') {
+      // socPopulateClipDropdowns is defined inside the Social IIFE — call via window bridge
+      if (typeof window._socPopulateClipDropdowns === 'function') window._socPopulateClipDropdowns();
+    }
+  }
 }
 
 // ── Clip preview + visual trim bar ─────────────────────────────────────────
@@ -24287,6 +25823,33 @@ function montageUrl(m) {
   if (!m || !m.outputPath) return '';
   return 'http://localhost:3000/data/clips/exports/' + m.outputPath.split(/[\\/]/).pop();
 }
+// Status badge for a playlist row — one glance to answer "will Play Live be instant or does it
+// need to encode first, and is this the thing currently on air?" `encodeActive` is c.encode?.active
+// (already carries montageId — see montage-encoder.js summarize()), so this can attribute an
+// in-progress encode to the exact row it belongs to, not just show a global spinner.
+function montageBadgeInfo(m, encodeActive) {
+  if (!(m.clipIds || []).length) return { cls: 'empty', label: 'EMPTY' };
+  if (_plLiveActive && _plLiveMontageId === m.id) return { cls: 'live', label: '● LIVE' };
+  if (encodeActive && encodeActive.montageId === m.id && (encodeActive.status === 'encoding' || encodeActive.status === 'queued')) {
+    return { cls: 'encoding', label: 'ENCODING ' + (encodeActive.progress || 0) + '%' };
+  }
+  if (m.status === 'error') return { cls: 'error', label: 'ERROR' };
+  if (montageUrl(m)) return { cls: 'ready', label: 'READY' };
+  return { cls: 'draft', label: 'DRAFT' };
+}
+// Fuller status line for the expanded card — same inputs, more words (bus/scene detail on LIVE).
+function montageStatusLine(m, encodeActive) {
+  const b = montageBadgeInfo(m, encodeActive);
+  if (b.cls === 'live') {
+    const via = _plEncodedMode ? ('file · bus ' + _plBus) : 'per-clip · program bus';
+    return 'LIVE · ' + via + (_plScene ? (' · scene ' + _plScene) : '');
+  }
+  if (b.cls === 'encoding') return b.label + '…';
+  if (b.cls === 'ready') return 'Encoded — Play Live plays the file instantly';
+  if (b.cls === 'error') return 'Last encode failed — try again';
+  if (b.cls === 'empty') return 'No clips yet';
+  return 'Not encoded — Play Live will encode first';
+}
 // Resolve the URL + label for whatever the editor currently has loaded.
 function currentEditorClip() {
   if (!_previewClip) return null;
@@ -24316,6 +25879,33 @@ el('rp-program-scene')?.addEventListener('change', function () {
   try { localStorage.setItem(RP_PROGRAM_SCENE_KEY, this.value || ''); } catch {}
 });
 
+// Graphics "Auto-cut OBS" (Production ▸ Graphics ▸ On air): keep the destination-scene dropdown filled
+// from OBS's scene list and restore the producer's saved choice + toggle across reloads. On Push Live,
+// doPush() reads these elements and cuts OBS to the chosen scene (see doPush).
+const GFX_AUTOCUT_SCENE_KEY = 'ne_gfx_autocut_scene';
+const GFX_AUTOCUT_ON_KEY = 'ne_gfx_autocut_on';
+function syncGfxAutocutScene(obs) {
+  const sel = el('gfx-autocut-scene'); if (!sel) return;
+  const scenes = Array.isArray(obs && obs.availableScenes) ? obs.availableScenes : [];
+  const saved = (() => { try { return localStorage.getItem(GFX_AUTOCUT_SCENE_KEY) || ''; } catch { return ''; } })();
+  const want = sel.value || saved;
+  const sig = JSON.stringify(scenes);
+  if (sel.dataset.sig !== sig) {
+    sel.dataset.sig = sig;
+    sel.innerHTML = '<option value="">— scene —</option>' +
+      scenes.map((s) => `<option value="${String(s).replace(/"/g, '&quot;')}">${String(s).replace(/</g, '&lt;')}</option>`).join('');
+  }
+  if (want && scenes.includes(want) && document.activeElement !== sel) sel.value = want;
+}
+el('gfx-autocut-scene')?.addEventListener('change', function () {
+  try { localStorage.setItem(GFX_AUTOCUT_SCENE_KEY, this.value || ''); } catch {}
+});
+(function initGfxAutocutToggle() {
+  const t = el('gfx-autocut-on'); if (!t) return;
+  try { t.checked = localStorage.getItem(GFX_AUTOCUT_ON_KEY) === '1'; } catch {}
+  t.addEventListener('change', function () { try { localStorage.setItem(GFX_AUTOCUT_ON_KEY, this.checked ? '1' : '0'); } catch {} });
+})();
+
 function sendToScreen(bus) {
   const sel = currentEditorClip();
   if (!sel || !sel.url) {
@@ -24325,6 +25915,7 @@ function sendToScreen(bus) {
   const loop = !!el('rp-loop')?.checked;
   const programScene = (el('rp-program-scene')?.value || '').trim();
   if (bus === 'program') {
+    stopOtherProgramSources('program');   // don't let a running playlist fight this single clip
     if (!programScene) showToast('No OBS scene selected — pick a scene next to "To Air" so OBS switches to the replay-player source.', '#fbbf24', 5000);
     beginReplayProgram();
   }
@@ -24353,7 +25944,7 @@ el('rp-to-preview')?.addEventListener('click', () => sendToScreen('preview'));
 // Editor, but the action stays available via the hotkey/Stream-Deck command.
 function rpClearProgram() {
   _plLiveActive = false;
-  send('replay_stop', { bus: 'program' });
+  send('replay_stop', { bus: _plBus || 'program' });   // one shared source → stop whatever's on air
   endReplayProgram(true);   // manual clear — just reset, don't auto-switch scenes
   const st = el('rp-screen-status'); if (st) { st.textContent = 'Program cleared.'; st.style.color = 'var(--muted)'; }
 }
@@ -24394,10 +25985,12 @@ el('rp-save-playlist')?.addEventListener('click', async () => {
   const clip = (currentState.clips?.library || []).find((x) => x.id === _previewClip.id) || _previewClip;
   addClipToPlaylist(clip, currentState.clips);
 });
-el('rp-new-playlist')?.addEventListener('click', () => {
+el('rp-new-playlist')?.addEventListener('click', async () => {
   const n = ((currentState.clips && currentState.clips.montages) || []).length + 1;
+  const name = await customPrompt('New playlist', 'Name this playlist', 'Playlist ' + n, 'Create');
+  if (!name) return;
   _pendingNewMontage = true;   // auto-select the new playlist when it comes back
-  send('montage_create', { name: 'Playlist ' + n, clipIds: [], template: el('select-montage-template')?.value || 'highlights' });
+  send('montage_create', { name, clipIds: [], template: el('select-montage-template')?.value || 'highlights' });
 });
 el('rp-rename-playlist')?.addEventListener('click', () => {
   const mId = el('select-montage-edit')?.value; if (!mId) return;
@@ -24456,6 +26049,15 @@ el('rp-clear-playlist')?.addEventListener('click', () => {
   const mId = el('select-montage-edit')?.value;
   if (mId) send('montage_reorder', { montageId: mId, clipIds: [] });
 });
+// "Encode options" (format/quality/GPU) — collapsed by default, set-once-per-playlist technicals
+// that don't need to compete with the transition control or the clip timeline for space.
+el('rp-pl-encode-opts-toggle')?.addEventListener('click', () => {
+  const body = el('rp-pl-encode-opts-body'); const chev = el('rp-pl-encode-opts-chev');
+  if (!body) return;
+  const open = body.style.display === 'none';
+  body.style.display = open ? 'flex' : 'none';
+  if (chev) chev.innerHTML = open ? '&#9662;' : '&#9656;';
+});
 
 function applyEncodeProgress(enc) {
   const active = enc && enc.active;
@@ -24497,6 +26099,33 @@ function applyEncodeProgress(enc) {
       rpWrap.style.display = 'none';
       if (rpEnc) rpEnc.disabled = false;
     }
+  }
+
+  // Auto-play the encoded file if "Play Live" triggered the encode.
+  if (isDone && _plPendingEncodeAndPlay) {
+    const pendingId = _plPendingEncodeAndPlay;
+    _plPendingEncodeAndPlay = null;
+    setTimeout(() => {
+      const m = (currentState.clips?.montages || []).find((x) => x.id === pendingId);
+      const url = montageUrl(m);
+      if (!url) { showToast('Encode done. Click Play Live to send to air.', '#48bb78'); return; }
+      // Same unified model as pushPlaylistLive: play on the shared program source, not a pl_<id> bus.
+      stopOtherProgramSources('program');
+      _plBus = 'program';
+      _plEncodedMode = true;
+      _plLiveMontageId = pendingId;
+      _plKind = m.kind || 'ad';
+      _plScene = (m.programScene || '').trim();
+      _plLoop = !!el('rp-pl-loop')?.checked;
+      _plReturnEnabled = el('rp-pl-return') ? !!el('rp-pl-return').checked : true;
+      _plReturnScene = '';
+      const effScene = _plScene || (el('rp-program-scene')?.value || '').trim();
+      beginReplayProgram(_plScene || undefined);
+      _plLiveActive = true;
+      if (typeof updatePlaylistLiveBtns === 'function') updatePlaylistLiveBtns();
+      send('replay_play', { bus: _plBus, url, name: m.name || 'Playlist', loop: _plLoop, scene: effScene || undefined });
+      showToast('Playlist live', '#48bb78');
+    }, 800);
   }
 }
 
@@ -25437,7 +27066,6 @@ function connect() {
       _r('renderUpNext',       () => renderUpNext(msg.data));
       _r('renderPlayerCams',   () => renderPlayerCams(msg.data));
       _r('renderStreamQueue',  () => renderStreamQueue(msg.data));
-      _r('renderCfCasters',    () => renderCfCasters(msg.data));
       _r('renderCfStations',   () => renderCfStations(msg.data));
       _r('applyDirectorState', () => applyDirectorState(msg.data.director));
       _r('applyClipsState',    () => applyClipsState(msg.data.clips));
@@ -25457,15 +27085,22 @@ function connect() {
     } else if (msg.type === 'replay_progress') {
       // The on-air player reports its position → drive the time-remaining readout, but ONLY while
       // the control panel has actually sent something to air. Otherwise a player source still loaded
-      // in OBS keeps reporting and the countdown flashes/updates with nothing live.
-      if ((msg.data?.bus || 'program') === 'program' && (_replayActive || _plLiveActive)) {
+      // in OBS keeps reporting and the countdown flashes/updates with nothing live. Everything now
+      // shares the program bus, so match against _plBus ('program', or 'preview' for the staging monitor).
+      if ((msg.data?.bus || 'program') === (_plBus || 'program') && (_replayActive || _plLiveActive)) {
         _lastProgressRx = Date.now(); showReplayCountdown(msg.data?.remaining || 0);
       }
     } else if (msg.type === 'replay_ended') {
-      if ((msg.data?.bus || 'program') === 'program') {
-        if (_plLiveActive) {
-          // Playlist: the overlay confirmed the clip finished — advance immediately instead of
-          // waiting for the safety-net timer.
+      if ((msg.data?.bus || 'program') === (_plBus || 'program')) {
+        if (_plLiveActive && _plEncodedMode) {
+          // One already-encoded file (transitions baked in) — there's no next clip to advance to,
+          // just finish. advancePlaylist()'s _plLiveItems/_plLiveIdx are only populated by the
+          // per-clip automation paths and would be stale/wrong here.
+          _plLiveActive = false;
+          finishPlayout();
+        } else if (_plLiveActive) {
+          // Per-clip playlist: the overlay confirmed the clip finished — advance immediately
+          // instead of waiting for the safety-net timer.
           advancePlaylist();
         } else {
           endReplayProgram();
@@ -25501,6 +27136,10 @@ function connect() {
     } else if (msg.type === 'encode_progress') {
       currentState.encode = msg.data;
       applyEncodeProgress(msg.data);
+      if (typeof window._socHandleEncodeProgress === 'function') window._socHandleEncodeProgress(msg.data);
+    } else if (msg.type === 'montage_save_result') {
+      const d = msg.data || {};
+      showToast(d.message || 'Done', d.ok ? '#48bb78' : '#f87171');
     } else if (msg.type === 'clips-result') {
       const st = el('clips-status');
       if (st) { st.textContent = msg.data.message || ''; st.style.color = msg.data.ok ? '#9ae6b4' : '#f56565'; }
@@ -25529,6 +27168,47 @@ function connect() {
         const r = el(id);
         if (r) { r.textContent = msg.data.message || ''; r.style.color = msg.data.ok ? '#9ae6b4' : '#f56565'; }
       });
+    } else if (msg.type === 'startgg-team-result') {
+      // Update status in both the dashboard stream queue panel and the schedule overlay panel
+      const st = el('sgg-status');
+      if (st) { st.textContent = msg.data.message || ''; st.style.color = msg.data.ok ? '#9ae6b4' : '#f56565'; }
+      const gst = el('gfx-sch-team-status');
+      if (gst) { gst.textContent = msg.data.message || ''; gst.style.color = msg.data.ok ? '#9ae6b4' : '#f56565'; }
+      if (msg.data.ok) {
+        const tq = (currentState && currentState.startgg && currentState.startgg.teamQueue) || [];
+        // 1. Auto-populate the schedule graphics queue so the overlay updates immediately
+        if (typeof window._schSetMatches === 'function' && tq.length) {
+          window._schSetMatches(tq.map(q => ({ setId: q.setId || '', round: q.round || '', teamA: q.teamA || 'TBD', teamB: q.teamB || 'TBD', logoA: q.logoA || '', logoB: q.logoB || '', date: '', time: '', stream: !!q.live })));
+        }
+        // 2. Auto-push live match (or first upcoming) to scoreboard
+        const pushSet = tq.find(q => q.live) || tq[0];
+        if (pushSet && pushSet.setId) send('startgg_push_set', { setId: pushSet.setId });
+        // 3. Render dashboard team queue rows with per-match Push buttons
+        const dashList = el('sgg-team-queue');
+        if (dashList) {
+          dashList.innerHTML = '';
+          if (!tq.length) {
+            dashList.innerHTML = '<div style="color:var(--muted);font-size:12px;padding:4px 0;">No upcoming matches found.</div>';
+          } else {
+            tq.forEach((q) => {
+              const row = document.createElement('div');
+              row.className = 'sgg-row' + (q.live ? ' live' : '');
+              row.innerHTML = `<span class="sgg-badge">${q.live ? 'LIVE' : 'NEXT'}</span><span class="sgg-match"><span class="sgg-team"><b></b></span><span class="sgg-vs">vs</span><span class="sgg-team"><b></b></span><span class="sgg-round"></span></span><button class="btn btn-secondary btn-sm sgg-push">Push</button>`;
+              const bolds = row.querySelectorAll('.sgg-team b');
+              if (bolds[0]) bolds[0].textContent = q.teamA || 'TBD';
+              if (bolds[1]) bolds[1].textContent = q.teamB || 'TBD';
+              row.querySelector('.sgg-round').textContent = q.round || '';
+              row.querySelector('.sgg-push').addEventListener('click', () => send('startgg_push_set', { setId: q.setId }));
+              dashList.appendChild(row);
+            });
+          }
+        }
+        // 4. Render schedule overlay panel team list
+        const list = el('gfx-sch-team-list');
+        const res = el('gfx-sch-team-results');
+        if (list) list.innerHTML = tq.map(q => `<div class="gfx-sch-next-row">${q.live ? '<span class="gnr-live">LIVE</span>' : ''}<span class="gnr-round">${q.round || ''}</span><span class="gnr-teams">${q.teamA || 'TBD'} vs ${q.teamB || 'TBD'}</span></div>`).join('') || '<div style="color:var(--muted);font-size:11px;padding:4px 0;">No upcoming matches found.</div>';
+        if (res) res.style.display = tq.length ? '' : 'none';
+      }
     } else if (msg.type === 'challonge-result') {
       if (typeof window._handleChallongeResult === 'function') window._handleChallongeResult(msg.data);
     } else if (msg.type === 'nxgen-result') {
@@ -25537,8 +27217,15 @@ function connect() {
       const d = msg.data || {};
       const logEl = el('ev-sync-log');
       if (logEl) { logEl.textContent = d.message || ''; logEl.style.color = d.ok ? (d.linked ? '#86efac' : 'var(--muted)') : '#f87171'; }
+    } else if (msg.type === 'flow_dry_run_result') {
+      _showDryRunModal(msg.data);
     } else if (msg.type === 'obs-screenshot') {
       applyObsScreenshot(msg.data);
+    } else if (msg.type === 'replay_preparing') {
+      // Server is running a quick decode-friendly transcode before this clip actually goes to air
+      // (only fires when it isn't already cached from a prior push) — let the producer know why
+      // there's a brief pause instead of it looking stuck.
+      showToast('Preparing clip for air…', '#fbbf24', 2500);
     } else if (msg.type === 'obs-result') {
       const color = msg.data.ok ? '#9ae6b4' : '#f56565';
       ['obs-result', 'replay-status'].forEach((id) => {
@@ -25549,6 +27236,12 @@ function connect() {
       const st = el('rl-ui-hide-status');
       if (st) {
         st.textContent = (msg.data.auto ? 'Auto: ' : '') + (msg.data.message || '');
+        st.style.color = msg.data.ok ? '#9ae6b4' : '#f56565';
+      }
+    } else if (msg.type === 'rl-scene-result') {
+      const st = el('rl-scene-auto-status');
+      if (st) {
+        st.textContent = msg.data.message || '';
         st.style.color = msg.data.ok ? '#9ae6b4' : '#f56565';
       }
     } else if (msg.type === 'bracket-result' || msg.type === 'event-result') {
@@ -26684,6 +28377,1053 @@ function statsShowTab(tab) {
   else if (tab === 'reports') loadReports();
   try { localStorage.setItem('stats_active_tab', tab); } catch (_) {}
 }
+
+// ════════════════════════════════════════════════════════════════════
+//  SOCIAL EXPORT — Graphics cards + Clip Prep (intro/main/outro bake)
+// ════════════════════════════════════════════════════════════════════
+
+(function () {
+  // ── Tab switching ──────────────────────────────────────────────────
+  document.querySelectorAll('#rp-subnav .ev-subnav-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('#rp-subnav .ev-subnav-btn').forEach((b) => b.classList.remove('active'));
+      btn.classList.add('active');
+      const target = btn.dataset.rpmain;
+      el('rp-panel-editor').style.display  = target === 'editor'  ? '' : 'none';
+      el('rp-panel-exports').style.display = target === 'exports' ? '' : 'none';
+      el('rp-panel-social').style.display  = target === 'social'  ? '' : 'none';
+      if (target === 'social') { socSyncTwitchField(); if (typeof window._socHydratePreset === 'function') window._socHydratePreset(); socRefreshAll(); }
+    });
+  });
+
+  document.querySelectorAll('.soc-sub-tab').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.soc-sub-tab').forEach((b) => b.classList.remove('active'));
+      btn.classList.add('active');
+      const target = btn.dataset.soctab;
+      el('soc-panel-graphics').style.display = target === 'graphics' ? '' : 'none';
+      el('soc-panel-clipprep').style.display  = target === 'clipprep'  ? '' : 'none';
+      if (target === 'clipprep') socPopulateClipDropdowns();
+    });
+  });
+
+  // ── Shared helpers ─────────────────────────────────────────────────
+
+  // Image cache — keyed by URL; resolves to HTMLImageElement or null on error
+  const _imgCache = new Map();
+  function loadImg(url) {
+    if (!url) return Promise.resolve(null);
+    if (_imgCache.has(url)) return Promise.resolve(_imgCache.get(url));
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload  = () => { _imgCache.set(url, img); resolve(img); };
+      img.onerror = () => { _imgCache.set(url, null); resolve(null); };
+      img.src = url;
+    });
+  }
+
+  function socLogoUrl(teamName) {
+    if (!teamName || teamName === 'TBD') return null;
+    const k = teamName.toLowerCase();
+    // Live match teams first (carries logo directly)
+    const liveTeams = currentState.teams || {};
+    for (const side of ['blue', 'orange']) {
+      if (liveTeams[side] && (liveTeams[side].name || '').toLowerCase() === k && liveTeams[side].logo)
+        return liveTeams[side].logo;
+    }
+    // Saved team library
+    const saved = (currentState.savedTeams || []).find((t) => t && t.name && t.name.toLowerCase() === k);
+    if (saved && saved.logo) return saved.logo;
+    // start.gg logo map
+    const logoMap = (currentState.startgg && currentState.startgg.logoMap) || {};
+    return logoMap[k] || null;
+  }
+
+  function socTeamColor(teamName) {
+    const k = (teamName || '').toLowerCase();
+    // Live match teams first
+    const liveTeams = currentState.teams || {};
+    for (const side of ['blue', 'orange']) {
+      if (liveTeams[side] && (liveTeams[side].name || '').toLowerCase() === k && liveTeams[side].color)
+        return liveTeams[side].color;
+    }
+    const saved = (currentState.savedTeams || []).find((t) => t && t.name && t.name.toLowerCase() === k);
+    return (saved && saved.color) || null;
+  }
+
+  function socTwitchLink() {
+    const inp = el('soc-twitch-link');
+    if (inp && inp.value.trim()) return inp.value.trim();
+    const ch = currentState.twitch && currentState.twitch.displayName;
+    return ch ? 'twitch.tv/' + ch : '';
+  }
+
+  function socSyncTwitchField() {
+    const inp = el('soc-twitch-link');
+    if (!inp || inp.value.trim()) return;
+    const ch = currentState.twitch && currentState.twitch.displayName;
+    if (ch) inp.value = 'twitch.tv/' + ch;
+  }
+
+  // ── Platform config ────────────────────────────────────────────────
+  const SOC_PLATFORMS = {
+    instagram: { label: 'Instagram',    W: 1080, H: 1080, layout: 'square'    },
+    story:     { label: 'Story / Reel', W: 1080, H: 1920, layout: 'vertical'  },
+    twitter:   { label: 'Twitter / X',  W: 1200, H: 675,  layout: 'landscape' },
+  };
+  let _socPlatform = 'instagram';
+  let _socCustomBg = null;          // HTMLImageElement from uploaded preset bg
+  let _socCustomBgUrl = '';         // data URL string (for server save)
+  let _socPresentedByEnabled = true;
+  let _socBgStyle = 'auto';         // 'auto' (team colours) | 'dark' (clean) | 'spotlight' — used when no custom image
+  function socGetPlatform() { return SOC_PLATFORMS[_socPlatform] || SOC_PLATFORMS.instagram; }
+
+  function socResizeCanvas(id) {
+    const c = el(id);
+    if (!c) return null;
+    const p = socGetPlatform();
+    if (c.width !== p.W)  c.width  = p.W;
+    if (c.height !== p.H) c.height = p.H;
+    const MAX_W = 280, MAX_H = 240;
+    const scale = Math.min(MAX_W / p.W, MAX_H / p.H);
+    c.style.width  = Math.round(p.W * scale) + 'px';
+    c.style.height = Math.round(p.H * scale) + 'px';
+    return p;
+  }
+
+  function socCanvasCtx(id) {
+    const p = socResizeCanvas(id);
+    if (!p) return null;
+    const c = el(id);
+    const ctx = c.getContext('2d');
+    ctx.clearRect(0, 0, c.width, c.height);
+    return ctx;
+  }
+
+  // ── Drawing primitives ─────────────────────────────────────────────
+
+  function socGetAbbr(name) {
+    if (!name || name === 'TBD') return 'TBD';
+    const k = name.toLowerCase();
+    const saved = (currentState.savedTeams || []).find((t) => t && t.name && t.name.toLowerCase() === k);
+    if (saved && saved.abbr) return saved.abbr.toUpperCase().slice(0, 4);
+    const words = name.trim().split(/\s+/);
+    if (words.length >= 2) return words.map((w) => w[0]).join('').toUpperCase().slice(0, 4);
+    return name.slice(0, 3).toUpperCase();
+  }
+
+  function socDrawBg(ctx, W, H, colA, colB) {
+    if (_socCustomBg) {
+      const sc = Math.max(W / _socCustomBg.width, H / _socCustomBg.height);
+      const dx = (W - _socCustomBg.width  * sc) / 2;
+      const dy = (H - _socCustomBg.height * sc) / 2;
+      ctx.drawImage(_socCustomBg, dx, dy, _socCustomBg.width * sc, _socCustomBg.height * sc);
+      // Darken toward the edges + a bottom-up scrim so text/badges/footer stay legible over a photo.
+      const scr = ctx.createLinearGradient(0, 0, 0, H);
+      scr.addColorStop(0, 'rgba(6,8,12,0.55)'); scr.addColorStop(0.4, 'rgba(6,8,12,0.32)'); scr.addColorStop(1, 'rgba(6,8,12,0.68)');
+      ctx.fillStyle = scr; ctx.fillRect(0, 0, W, H);
+      const vig = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.36, W / 2, H / 2, Math.max(W, H) * 0.76);
+      vig.addColorStop(0, 'transparent'); vig.addColorStop(1, 'rgba(0,0,0,0.5)');
+      ctx.fillStyle = vig; ctx.fillRect(0, 0, W, H);
+      return;
+    }
+    // Neutral dark base matching the broadcast scenes (duorow #161922 → #111318 → #0a0c10).
+    const base = ctx.createLinearGradient(0, 0, W * 0.35, H);
+    base.addColorStop(0, '#171a24'); base.addColorStop(0.55, '#111318'); base.addColorStop(1, '#0a0b0f');
+    ctx.fillStyle = base; ctx.fillRect(0, 0, W, H);
+
+    const style = _socBgStyle || 'auto';
+    if (style === 'auto' && (colA || colB)) {
+      // Restrained team-colour washes from each side (left = A, right = B) — lighter than before so the
+      // card reads dark/premium and the logos+names pop instead of drowning in colour.
+      if (colA) {
+        const gA = ctx.createLinearGradient(0, 0, W * 0.58, 0);
+        gA.addColorStop(0, colA + '2b'); gA.addColorStop(0.5, colA + '0e'); gA.addColorStop(1, 'transparent');
+        ctx.fillStyle = gA; ctx.fillRect(0, 0, W, H);
+      }
+      if (colB) {
+        const gB = ctx.createLinearGradient(W, 0, W * 0.42, 0);
+        gB.addColorStop(0, colB + '2b'); gB.addColorStop(0.5, colB + '0e'); gB.addColorStop(1, 'transparent');
+        ctx.fillStyle = gB; ctx.fillRect(0, 0, W, H);
+      }
+    } else if (style === 'spotlight' && (colA || colB)) {
+      // A single soft spotlight behind the crest, tinted by a blend of both team colours.
+      const g = ctx.createRadialGradient(W / 2, H * 0.42, 0, W / 2, H * 0.42, Math.max(W, H) * 0.6);
+      g.addColorStop(0, (colA || colB) + '30'); g.addColorStop(0.45, (colB || colA) + '10'); g.addColorStop(1, 'transparent');
+      ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+    }
+    // 'dark' style: no team wash — just the neutral base + texture + vignette below (clean/minimal).
+
+    // Faint diagonal light streaks for subtle motion/energy.
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.globalAlpha = 0.03;
+    ctx.strokeStyle = '#ffffff'; ctx.lineWidth = Math.max(2, W * 0.006);
+    for (let i = -1; i <= 3; i++) {
+      const x = W * (0.2 * i + 0.1);
+      ctx.beginPath(); ctx.moveTo(x, -20); ctx.lineTo(x + W * 0.22, H + 20); ctx.stroke();
+    }
+    ctx.restore();
+
+    // Faint dot grid for texture.
+    const sp = Math.round(Math.min(W, H) / 16);
+    ctx.fillStyle = 'rgba(255,255,255,0.014)';
+    for (let x = sp * 0.5; x < W; x += sp)
+      for (let y = sp * 0.5; y < H; y += sp) {
+        ctx.beginPath(); ctx.arc(x, y, 1.3, 0, Math.PI * 2); ctx.fill();
+      }
+    // Vignette for depth (scenes sit on a dark, focused stage).
+    const vig = ctx.createRadialGradient(W / 2, H * 0.46, Math.min(W, H) * 0.32, W / 2, H / 2, Math.max(W, H) * 0.76);
+    vig.addColorStop(0, 'transparent'); vig.addColorStop(1, 'rgba(0,0,0,0.5)');
+    ctx.fillStyle = vig; ctx.fillRect(0, 0, W, H);
+  }
+
+  function socDrawHeader(ctx, W, eventY, badgeCY, eventName, badgeText, badgeColor, s) {
+    s = s || 1;
+    if (eventName) {
+      ctx.save();
+      ctx.font = `600 ${Math.round(22 * s)}px "Rajdhani", sans-serif`;
+      ctx.fillStyle = 'rgba(255,255,255,0.35)';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+      ctx.fillText(eventName, W / 2, eventY);
+      ctx.restore();
+    }
+    if (badgeText) {
+      const txt = badgeText.toUpperCase();
+      ctx.save();
+      ctx.font = `800 ${Math.round(17 * s)}px "Rajdhani", sans-serif`;
+      ctx.letterSpacing = `${Math.round(2 * s)}px`;
+      const tw = ctx.measureText(txt).width;
+      const ph = Math.round(32 * s), pw = tw + Math.round(40 * s);
+      const bx = W / 2 - pw / 2, by = badgeCY - ph / 2;
+      const bc = badgeColor || '#8b5cf6';
+      // Dark scene-surface pill with a glowing coloured border (matches the desk/bestof bars) instead
+      // of a flat colour block.
+      ctx.shadowColor = bc; ctx.shadowBlur = Math.round(13 * s);
+      ctx.fillStyle = 'rgba(20,22,29,0.94)';
+      ctx.beginPath(); ctx.roundRect(bx, by, pw, ph, ph / 2); ctx.fill();
+      ctx.shadowBlur = 0;
+      ctx.strokeStyle = bc; ctx.lineWidth = Math.max(1.5, 2 * s);
+      ctx.beginPath(); ctx.roundRect(bx, by, pw, ph, ph / 2); ctx.stroke();
+      ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(txt, W / 2, badgeCY);
+      ctx.restore();
+    }
+  }
+
+  function socDrawLogoCircle(ctx, cx, cy, r, img, color, abbr) {
+    // Soft team-colour glow behind the badge.
+    const glow = ctx.createRadialGradient(cx, cy, r * 0.3, cx, cy, r * 1.55);
+    glow.addColorStop(0, color + '3a'); glow.addColorStop(1, 'transparent');
+    ctx.fillStyle = glow;
+    ctx.beginPath(); ctx.arc(cx, cy, r * 1.55, 0, Math.PI * 2); ctx.fill();
+    // Scene-surface disc (subtle top-lit gradient like the desk cards), with a top highlight.
+    const surf = ctx.createLinearGradient(cx, cy - r, cx, cy + r);
+    surf.addColorStop(0, '#20242e'); surf.addColorStop(1, '#14161d');
+    ctx.fillStyle = surf;
+    ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill();
+    // Faint inner ring (glass edge), then the glowing team-colour ring.
+    ctx.strokeStyle = 'rgba(255,255,255,0.08)'; ctx.lineWidth = Math.max(1, r * 0.02);
+    ctx.beginPath(); ctx.arc(cx, cy, r - Math.max(1, r * 0.03), 0, Math.PI * 2); ctx.stroke();
+    ctx.save();
+    ctx.shadowColor = color; ctx.shadowBlur = Math.round(r * 0.22);
+    ctx.strokeStyle = color; ctx.lineWidth = Math.max(2.5, r * 0.036);
+    ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke();
+    ctx.restore();
+    if (img) {
+      ctx.save();
+      ctx.beginPath(); ctx.arc(cx, cy, r - 3, 0, Math.PI * 2); ctx.clip();
+      const pad = r * 0.13;
+      const sc = Math.min((r * 2 - pad * 2) / img.width, (r * 2 - pad * 2) / img.height);
+      ctx.drawImage(img, cx - img.width * sc / 2, cy - img.height * sc / 2, img.width * sc, img.height * sc);
+      ctx.restore();
+    } else {
+      const a = abbr || '?';
+      ctx.save();
+      ctx.font = `900 ${Math.round(r * (a.length <= 2 ? 0.72 : 0.52))}px "Rajdhani", sans-serif`;
+      ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(a, cx, cy); ctx.restore();
+    }
+  }
+
+  // Set by each card renderer (in its synchronous draw section) so socDrawTeamLabel can size names
+  // without threading state through every call site. _socPairA/_socPairB = the two team names, so BOTH
+  // names can share ONE font size; _socPairFs caches that shared size (computed once per pair).
+  let _socDrawW = 1080, _socPairA = '', _socPairB = '', _socPairFs = 0;
+  // Largest 900-weight Rajdhani size at which `name` fits within maxW.
+  function socFitName(ctx, name, baseFs, maxW) {
+    const disp = (name || 'TBD').toUpperCase().slice(0, 24);
+    let fs = baseFs || 50;
+    ctx.font = `900 ${fs}px "Rajdhani", sans-serif`;
+    while (ctx.measureText(disp).width > maxW && fs > 16) { fs -= 2; ctx.font = `900 ${fs}px "Rajdhani", sans-serif`; }
+    return fs;
+  }
+  function socDrawTeamLabel(ctx, cx, nameY, tagY, name, color, fontSize, winner) {
+    const disp = (name || 'TBD').toUpperCase().slice(0, 24);
+    const W = _socDrawW || 1080;
+    const half = Math.abs(cx - W / 2);
+    // Max width a name may take: up to the centre line (side-by-side) or the card edge (centred), minus
+    // a gutter — so a long name never overflows into the other team or off the card.
+    const maxW = half > W * 0.03 ? (2 * half - W * 0.055) : (W * 0.86);
+    ctx.save();
+    // Both team names render at ONE shared size (the larger name's fit) so they always match — computed
+    // once for the pair, then reused. Falls back to per-name fit when only one team is being drawn.
+    let fs;
+    if (_socPairA && _socPairB) {
+      if (!_socPairFs) _socPairFs = Math.min(socFitName(ctx, _socPairA, fontSize || 50, maxW), socFitName(ctx, _socPairB, fontSize || 50, maxW));
+      fs = _socPairFs;
+    } else {
+      fs = socFitName(ctx, name, fontSize || 50, maxW);
+    }
+    ctx.font = `900 ${fs}px "Rajdhani", sans-serif`;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+    // Slight lift on the name so it reads crisply on the busy background.
+    ctx.shadowColor = 'rgba(0,0,0,0.55)'; ctx.shadowBlur = Math.round(fs * 0.12); ctx.shadowOffsetY = 2;
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText(disp, cx, nameY);
+    ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0; ctx.shadowOffsetY = 0;
+    // Glowing team-colour underline — the scenes' signature accent (rounded, with a colour glow).
+    const tw = Math.min(ctx.measureText(disp).width + Math.round(fs * 0.5), maxW);
+    const bh = Math.max(4, Math.round(fs * 0.09));
+    ctx.shadowColor = color; ctx.shadowBlur = Math.round(fs * 0.28);
+    ctx.fillStyle = color;
+    ctx.beginPath(); ctx.roundRect(cx - tw / 2, tagY, tw, bh, bh / 2); ctx.fill();
+    ctx.restore();
+  }
+
+  function socDrawVsZone(ctx, W, cy, round, colA, colB, s) {
+    s = s || 1;
+    const R = Math.round(44 * s);
+    const gap = R + Math.round(14 * s), lineLen = Math.round(210 * s);
+    // Bright team-colour feed lines running into the medallion.
+    const lgL = ctx.createLinearGradient(W / 2 - gap, cy, W / 2 - gap - lineLen, cy);
+    lgL.addColorStop(0, (colA || '#6366f1')); lgL.addColorStop(1, 'transparent');
+    ctx.strokeStyle = lgL; ctx.lineWidth = Math.max(2, 3 * s);
+    ctx.beginPath(); ctx.moveTo(W / 2 - gap, cy); ctx.lineTo(W / 2 - gap - lineLen, cy); ctx.stroke();
+    const lgR = ctx.createLinearGradient(W / 2 + gap, cy, W / 2 + gap + lineLen, cy);
+    lgR.addColorStop(0, (colB || '#9333ea')); lgR.addColorStop(1, 'transparent');
+    ctx.strokeStyle = lgR;
+    ctx.beginPath(); ctx.moveTo(W / 2 + gap, cy); ctx.lineTo(W / 2 + gap + lineLen, cy); ctx.stroke();
+    // Solid scene-surface medallion + glass ring (matches the desk-scene surfaces).
+    const surf = ctx.createLinearGradient(W / 2, cy - R, W / 2, cy + R);
+    surf.addColorStop(0, '#20242e'); surf.addColorStop(1, '#12141b');
+    ctx.save(); ctx.shadowColor = 'rgba(0,0,0,0.5)'; ctx.shadowBlur = Math.round(16 * s); ctx.shadowOffsetY = 3;
+    ctx.fillStyle = surf; ctx.beginPath(); ctx.arc(W / 2, cy, R, 0, Math.PI * 2); ctx.fill(); ctx.restore();
+    ctx.strokeStyle = 'rgba(255,255,255,0.15)'; ctx.lineWidth = Math.max(1.5, 2 * s);
+    ctx.beginPath(); ctx.arc(W / 2, cy, R, 0, Math.PI * 2); ctx.stroke();
+    // VS text — bright white with a soft glow.
+    ctx.save();
+    ctx.font = `900 ${Math.round(38 * s)}px "Rajdhani", sans-serif`;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.shadowColor = 'rgba(255,255,255,0.4)'; ctx.shadowBlur = Math.round(14 * s);
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText('VS', W / 2, cy + Math.round(2 * s));
+    ctx.restore();
+    // Round label below the medallion.
+    if (round) {
+      ctx.save();
+      ctx.font = `700 ${Math.round(15 * s)}px "Rajdhani", sans-serif`;
+      ctx.fillStyle = 'rgba(255,255,255,0.45)'; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+      ctx.fillText(round.toUpperCase(), W / 2, cy + R + Math.round(24 * s)); ctx.restore();
+    }
+  }
+
+  function socDrawScore(ctx, cx, cy, score, color, win, fontSize) {
+    if (score === null || score === undefined) return;
+    ctx.save();
+    ctx.font = `900 ${fontSize || 130}px "Rajdhani", sans-serif`;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    if (win) {
+      ctx.shadowColor = color + '88'; ctx.shadowBlur = Math.round(fontSize * 0.18);
+      ctx.fillStyle = '#ffffff';
+    } else {
+      ctx.fillStyle = 'rgba(255,255,255,0.20)';
+    }
+    ctx.fillText(String(score), cx, cy);
+    ctx.shadowBlur = 0; ctx.restore();
+  }
+
+  function socDrawWinnerBadge(ctx, cx, y, s) {
+    s = s || 1;
+    const bw = Math.round(140 * s), bh = Math.round(32 * s);
+    ctx.save();
+    ctx.fillStyle = '#22c55e22'; ctx.strokeStyle = '#22c55e66'; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.roundRect(cx - bw / 2, y, bw, bh, bh / 2); ctx.fill(); ctx.stroke();
+    ctx.font = `800 ${Math.round(14 * s)}px "Rajdhani", sans-serif`;
+    ctx.fillStyle = '#4ade80'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText('WINNER', cx, y + bh / 2); ctx.restore();
+  }
+
+  // link: twitch/stream URL; brandImg: pre-loaded brand logo Image; railImgs: pre-loaded sponsor Images[]
+  function socFooter(ctx, W, H, link, s, brandImg, railImgs) {
+    s = s || 1;
+    const hasRail = railImgs && railImgs.length;
+    const fh = Math.round((hasRail ? 118 : 88) * s);
+    const fg = ctx.createLinearGradient(0, H - fh, 0, H);
+    fg.addColorStop(0, 'rgba(0,0,0,0)'); fg.addColorStop(0.5, 'rgba(0,0,0,0.72)'); fg.addColorStop(1, 'rgba(0,0,0,0.92)');
+    ctx.fillStyle = fg; ctx.fillRect(0, H - fh, W, fh);
+    // Subtle top separator
+    ctx.save(); ctx.globalAlpha = 0.18;
+    ctx.fillStyle = '#ffffff'; ctx.fillRect(Math.round(W * 0.08), H - fh + 1, Math.round(W * 0.84), 1);
+    ctx.restore();
+    // Sponsor rail
+    if (hasRail) {
+      const maxH = Math.round(28 * s);
+      const gap   = Math.round(22 * s);
+      const filtered = railImgs.filter(Boolean);
+      const widths = filtered.map(img => Math.round(img.width * (maxH / img.height)));
+      const totalW = widths.reduce((a, b) => a + b, 0) + gap * (filtered.length - 1);
+      let cx = W / 2 - totalW / 2;
+      const railY = H - fh + Math.round(22 * s);
+      ctx.save(); ctx.globalAlpha = 0.62;
+      filtered.forEach((img, i) => {
+        ctx.drawImage(img, cx, railY, widths[i], maxH);
+        cx += widths[i] + gap;
+      });
+      ctx.restore();
+    }
+    // Stream link
+    if (link) {
+      ctx.save();
+      ctx.font = `600 ${Math.round(17 * s)}px "Rajdhani", sans-serif`;
+      ctx.fillStyle = 'rgba(255,255,255,0.40)';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+      ctx.fillText(link, W / 2, H - Math.round(14 * s)); ctx.restore();
+    }
+    // Brand bug — bottom-right corner
+    if (brandImg) {
+      const size = Math.round(36 * s);
+      const pad  = Math.round(11 * s);
+      const bx   = W - size - pad;
+      const by   = H - size - pad;
+      const sc   = Math.min(size / brandImg.width, size / brandImg.height);
+      ctx.save(); ctx.globalAlpha = 0.5;
+      ctx.drawImage(brandImg,
+        bx + (size - brandImg.width * sc) / 2,
+        by + (size - brandImg.height * sc) / 2,
+        brandImg.width * sc, brandImg.height * sc);
+      ctx.restore();
+    }
+  }
+
+  // Returns pre-loaded {brandImg, railImgs} for the active brand kit
+  async function socLoadBrandAssets() {
+    const brand = currentState.brand || {};
+    const [brandImg, presentedByImg] = await Promise.all([
+      loadImg(brand.logo || null),
+      _socPresentedByEnabled ? loadImg((brand.spots && brand.spots.title) || null) : Promise.resolve(null),
+    ]);
+    const rawSpons = (brand.railSponsors && brand.railSponsors.length
+      ? brand.railSponsors : (brand.sponsors || [])).filter(s => s && s.logo);
+    const railImgs = (await Promise.all(rawSpons.slice(0, 8).map(s => loadImg(s.logo)))).filter(Boolean);
+    return { brandImg, presentedByImg, railImgs };
+  }
+
+  // "PRESENTED BY" + sponsor logo — top-right of card header
+  function socDrawPresentedBy(ctx, W, topY, img, s) {
+    if (!img || !_socPresentedByEnabled) return;
+    s = s || 1;
+    const pad   = Math.round(16 * s);
+    const maxW  = Math.round(88 * s);
+    const maxH  = Math.round(30 * s);
+    const sc    = Math.min(maxH / img.height, maxW / img.width);
+    const lw    = img.width * sc, lh = img.height * sc;
+    const labelY = topY + Math.round(18 * s);
+    const logoY  = labelY + Math.round(6 * s);
+    ctx.save();
+    ctx.font = `700 ${Math.round(9 * s)}px "Rajdhani", sans-serif`;
+    ctx.fillStyle = 'rgba(255,255,255,0.28)';
+    ctx.textAlign = 'right'; ctx.textBaseline = 'alphabetic';
+    ctx.fillText('PRESENTED BY', W - pad, labelY);
+    ctx.globalAlpha = 0.68;
+    ctx.drawImage(img, W - pad - lw, logoY, lw, lh);
+    ctx.restore();
+  }
+
+  // Thin brand-color accent bar across the very top of the card
+  function socTopBar(ctx, W, colA, colB, s) {
+    s = s || 1;
+    const h = Math.round(4 * s);
+    const bar = ctx.createLinearGradient(0, 0, W, 0);
+    bar.addColorStop(0,   colA || '#4f46e5');
+    bar.addColorStop(0.5, '#7c3aed');
+    bar.addColorStop(1,   colB || '#9333ea');
+    ctx.fillStyle = bar; ctx.fillRect(0, 0, W, h);
+  }
+
+  function socDiagSplit(ctx, W, H, headerH, footerH, colA, colB) {
+    // Very subtle team-side triangles (the directional washes in socDrawBg already carry most of the
+    // colour) + a soft central seam glow instead of a hard diagonal edge, so the middle doesn't read
+    // as an unpolished line.
+    const off = Math.round(W * 0.05);
+    ctx.save(); ctx.globalAlpha = 0.05;
+    ctx.fillStyle = colA;
+    ctx.beginPath(); ctx.moveTo(0, headerH); ctx.lineTo(W / 2 - off, headerH); ctx.lineTo(W / 2 + off, H - footerH); ctx.lineTo(0, H - footerH); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = colB;
+    ctx.beginPath(); ctx.moveTo(W, headerH); ctx.lineTo(W / 2 + off, headerH); ctx.lineTo(W / 2 - off, H - footerH); ctx.lineTo(W, H - footerH); ctx.closePath(); ctx.fill();
+    ctx.restore();
+    // Soft vertical light seam down the centre where the teams "clash".
+    const seam = ctx.createLinearGradient(W / 2 - off * 1.6, 0, W / 2 + off * 1.6, 0);
+    seam.addColorStop(0, 'transparent'); seam.addColorStop(0.5, 'rgba(255,255,255,0.05)'); seam.addColorStop(1, 'transparent');
+    ctx.fillStyle = seam; ctx.fillRect(W / 2 - off * 1.6, headerH, off * 3.2, H - headerH - footerH);
+  }
+
+  // ── Queue state ────────────────────────────────────────────────────
+  let _socQueueIdx = 0;
+
+  function socGetQueue() {
+    return ((currentState.startgg && currentState.startgg.queue) || []).filter((q) => q.state !== 3);
+  }
+
+  function socUpdateQueueLabel() {
+    const q = socGetQueue();
+    const lbl = el('soc-queue-label');
+    if (lbl) lbl.textContent = q.length ? `Match ${_socQueueIdx + 1} of ${q.length}` : 'No upcoming matches';
+  }
+
+  el('soc-queue-prev')?.addEventListener('click', () => {
+    const q = socGetQueue();
+    if (!q.length) return;
+    _socQueueIdx = (_socQueueIdx - 1 + q.length) % q.length;
+    socUpdateQueueLabel(); socDrawMatchup();
+  });
+  el('soc-queue-next')?.addEventListener('click', () => {
+    const q = socGetQueue();
+    if (!q.length) return;
+    _socQueueIdx = (_socQueueIdx + 1) % q.length;
+    socUpdateQueueLabel(); socDrawMatchup();
+  });
+
+  // ── Platform toggle ────────────────────────────────────────────────
+  document.querySelectorAll('#soc-platform-tabs .soc-plat-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('#soc-platform-tabs .soc-plat-btn').forEach((b) => b.classList.remove('active'));
+      btn.classList.add('active');
+      _socPlatform = btn.dataset.plat || 'instagram';
+      socRefreshAll();
+    });
+  });
+
+  // ── Card Preset panel ─────────────────────────────────────────────
+  (function () {
+    const presetToggle = el('soc-preset-toggle');
+    const presetPanel  = el('soc-preset-panel');
+    const bgUpload     = el('soc-bg-upload');
+    const bgClear      = el('soc-bg-clear');
+    const bgFilename   = el('soc-bg-filename');
+    const bgStyle      = el('soc-bg-style');
+    const presChk      = el('soc-presented-toggle');
+
+    function sendPreset() {
+      sendWS({ type: 'set_brand_social_preset', data: {
+        bgImageUrl: _socCustomBgUrl,
+        bgStyle: _socBgStyle,
+        presentedByEnabled: _socPresentedByEnabled,
+      }});
+    }
+
+    if (presetToggle && presetPanel) {
+      presetToggle.addEventListener('click', () => {
+        const open = presetPanel.style.display !== 'none';
+        presetPanel.style.display = open ? 'none' : '';
+        presetToggle.classList.toggle('active', !open);
+      });
+    }
+
+    if (bgUpload) {
+      bgUpload.addEventListener('change', (e) => {
+        const file = e.target.files && e.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+          _socCustomBgUrl = ev.target.result;
+          const img = new Image();
+          img.onload = () => {
+            _socCustomBg = img;
+            if (bgFilename) bgFilename.textContent = file.name;
+            if (bgClear) bgClear.style.display = '';
+            sendPreset();
+            socRefreshAll();
+          };
+          img.src = _socCustomBgUrl;
+        };
+        reader.readAsDataURL(file);
+      });
+    }
+
+    if (bgClear) {
+      bgClear.addEventListener('click', () => {
+        _socCustomBg = null;
+        _socCustomBgUrl = '';
+        if (bgFilename) bgFilename.textContent = '';
+        bgClear.style.display = 'none';
+        if (bgUpload) bgUpload.value = '';
+        sendPreset();
+        socRefreshAll();
+      });
+    }
+
+    if (bgStyle) {
+      bgStyle.value = _socBgStyle;
+      bgStyle.addEventListener('change', () => {
+        _socBgStyle = bgStyle.value || 'auto';
+        sendPreset();
+        socRefreshAll();
+      });
+    }
+
+    if (presChk) {
+      presChk.addEventListener('change', () => {
+        _socPresentedByEnabled = presChk.checked;
+        sendPreset();
+        socRefreshAll();
+      });
+    }
+
+    // Hydrate from the saved preset when the social tab is opened — a brand kit's own preset if
+    // one's active, else the state-level fallback (so this works with no brand kit set up at all).
+    window._socHydratePreset = function () {
+      const preset = (currentState.brand && currentState.brand.socialPreset) || currentState.socialPreset;
+      if (!preset) return;
+      if (typeof preset.presentedByEnabled === 'boolean') {
+        _socPresentedByEnabled = preset.presentedByEnabled;
+        if (presChk) presChk.checked = _socPresentedByEnabled;
+      }
+      if (preset.bgStyle) {
+        _socBgStyle = preset.bgStyle;
+        if (bgStyle) bgStyle.value = _socBgStyle;
+      }
+      const savedUrl = preset.bgImageUrl || '';
+      if (savedUrl && savedUrl !== _socCustomBgUrl) {
+        _socCustomBgUrl = savedUrl;
+        const img = new Image();
+        img.onload = () => { _socCustomBg = img; socRefreshAll(); };
+        img.src = savedUrl;
+        if (bgClear) bgClear.style.display = '';
+        if (bgFilename) bgFilename.textContent = 'Saved background';
+      } else if (!savedUrl && _socCustomBgUrl) {
+        _socCustomBg = null;
+        _socCustomBgUrl = '';
+        if (bgClear) bgClear.style.display = 'none';
+        if (bgFilename) bgFilename.textContent = '';
+      }
+    };
+  })();
+
+  // ── Matchup Graphic ────────────────────────────────────────────────
+  async function socDrawMatchup() {
+    const ctx = socCanvasCtx('soc-canvas-matchup');
+    if (!ctx) return;
+    const { W, H, layout } = socGetPlatform();
+    const queue = socGetQueue();
+    const item  = queue[_socQueueIdx] || null;
+    const liveB = (currentState.teams && currentState.teams.blue)   || {};
+    const liveO = (currentState.teams && currentState.teams.orange) || {};
+    const tA    = item ? (item.teamA || 'TBD') : (liveB.name || 'Team A');
+    const tB    = item ? (item.teamB || 'TBD') : (liveO.name || 'Team B');
+    const round = item ? (item.round || '') : '';
+    const colA  = socTeamColor(tA) || '#4f46e5';
+    const colB  = socTeamColor(tB) || '#9333ea';
+    const event = (currentState.eventName || '').toUpperCase();
+    const link  = socTwitchLink();
+    const [iA, iB, { brandImg, presentedByImg, railImgs }] = await Promise.all([
+      loadImg(socLogoUrl(tA)), loadImg(socLogoUrl(tB)), socLoadBrandAssets(),
+    ]);
+    _socDrawW = W; _socPairA = tA; _socPairB = tB; _socPairFs = 0;  // one shared name size for this pair
+    socDrawBg(ctx, W, H, colA, colB);
+
+    if (layout === 'vertical') {
+      const s = W / 1080;
+      socTopBar(ctx, W, colA, colB, s);
+      socDrawPresentedBy(ctx, W, 0, presentedByImg, s);
+      socDrawHeader(ctx, W, Math.round(76 * s), Math.round(118 * s), event, round || 'MATCHUP', null, s);
+      ctx.save(); ctx.globalAlpha = 0.09;
+      const wA = ctx.createLinearGradient(0, H * 0.14, 0, H * 0.50);
+      wA.addColorStop(0, colA); wA.addColorStop(1, 'transparent');
+      ctx.fillStyle = wA; ctx.fillRect(0, H * 0.14, W, H * 0.36);
+      const wB = ctx.createLinearGradient(0, H * 0.50, 0, H * 0.86);
+      wB.addColorStop(0, 'transparent'); wB.addColorStop(1, colB);
+      ctx.fillStyle = wB; ctx.fillRect(0, H * 0.50, W, H * 0.36);
+      ctx.restore();
+      const R = Math.round(150 * s);
+      const cyA = H * 0.287, cyB = H * 0.713;
+      socDrawLogoCircle(ctx, W / 2, cyA, R, iA, colA, socGetAbbr(tA));
+      socDrawTeamLabel(ctx, W / 2, cyA + R + Math.round(58 * s), cyA + R + Math.round(67 * s), tA, colA, Math.round(54 * s));
+      socDrawVsZone(ctx, W, H / 2, round, colA, colB, s);
+      socDrawLogoCircle(ctx, W / 2, cyB, R, iB, colB, socGetAbbr(tB));
+      socDrawTeamLabel(ctx, W / 2, cyB + R + Math.round(58 * s), cyB + R + Math.round(67 * s), tB, colB, Math.round(54 * s));
+      socFooter(ctx, W, H, link, s, brandImg, railImgs);
+
+    } else if (layout === 'landscape') {
+      const hs = H / 675;
+      socTopBar(ctx, W, colA, colB, hs);
+      socDrawPresentedBy(ctx, W, 0, presentedByImg, hs);
+      socDrawHeader(ctx, W, Math.round(46 * hs), Math.round(74 * hs), event, round || 'MATCHUP', null, hs);
+      const R = Math.round(82 * hs), cyT = H * 0.44;
+      const cxA = W * 0.215, cxB = W * 0.785;
+      socDiagSplit(ctx, W, H, Math.round(92 * hs), Math.round(56 * hs), colA, colB);
+      socDrawLogoCircle(ctx, cxA, cyT, R, iA, colA, socGetAbbr(tA));
+      socDrawTeamLabel(ctx, cxA, cyT + R + Math.round(36 * hs), cyT + R + Math.round(44 * hs), tA, colA, Math.round(36 * hs));
+      socDrawLogoCircle(ctx, cxB, cyT, R, iB, colB, socGetAbbr(tB));
+      socDrawTeamLabel(ctx, cxB, cyT + R + Math.round(36 * hs), cyT + R + Math.round(44 * hs), tB, colB, Math.round(36 * hs));
+      socDrawVsZone(ctx, W, cyT, round, colA, colB, hs);
+      socFooter(ctx, W, H, link, hs, brandImg, railImgs);
+
+    } else {
+      const s = W / 1080;
+      socTopBar(ctx, W, colA, colB, s);
+      socDrawPresentedBy(ctx, W, 0, presentedByImg, s);
+      socDrawHeader(ctx, W, Math.round(56 * s), Math.round(94 * s), event, round || 'MATCHUP', null, s);
+      const R = Math.round(136 * s), cyT = H * 0.375;
+      const cxA = W * 0.265, cxB = W * 0.735;
+      socDiagSplit(ctx, W, H, Math.round(120 * s), Math.round(90 * s), colA, colB);
+      socDrawLogoCircle(ctx, cxA, cyT, R, iA, colA, socGetAbbr(tA));
+      socDrawTeamLabel(ctx, cxA, cyT + R + Math.round(56 * s), cyT + R + Math.round(65 * s), tA, colA, Math.round(50 * s));
+      socDrawLogoCircle(ctx, cxB, cyT, R, iB, colB, socGetAbbr(tB));
+      socDrawTeamLabel(ctx, cxB, cyT + R + Math.round(56 * s), cyT + R + Math.round(65 * s), tB, colB, Math.round(50 * s));
+      socDrawVsZone(ctx, W, H * 0.726, round, colA, colB, s);
+      socFooter(ctx, W, H, link, s, brandImg, railImgs);
+    }
+  }
+
+  // ── Match Result ───────────────────────────────────────────────────
+  async function socDrawResult() {
+    const ctx = socCanvasCtx('soc-canvas-result');
+    if (!ctx) return;
+    const { W, H, layout } = socGetPlatform();
+    const liveB  = (currentState.teams && currentState.teams.blue)   || {};
+    const liveO  = (currentState.teams && currentState.teams.orange) || {};
+    const series = currentState.series || {};
+    const tA  = liveB.name   || 'Team A';
+    const tB  = liveO.name   || 'Team B';
+    const sA  = series.blue   != null ? series.blue   : null;
+    const sB  = series.orange != null ? series.orange : null;
+    const winA = sA !== null && sB !== null && Number(sA) > Number(sB);
+    const winB = sA !== null && sB !== null && Number(sB) > Number(sA);
+    const colA = socTeamColor(tA) || '#4f46e5';
+    const colB = socTeamColor(tB) || '#9333ea';
+    const event = (currentState.eventName || '').toUpperCase();
+    const link  = socTwitchLink();
+    const [iA, iB, { brandImg, presentedByImg, railImgs }] = await Promise.all([
+      loadImg(socLogoUrl(tA)), loadImg(socLogoUrl(tB)), socLoadBrandAssets(),
+    ]);
+    _socDrawW = W; _socPairA = tA; _socPairB = tB; _socPairFs = 0;  // one shared name size for this pair
+    socDrawBg(ctx, W, H, colA, colB);
+
+    if (layout === 'vertical') {
+      const s = W / 1080;
+      socTopBar(ctx, W, colA, colB, s);
+      socDrawPresentedBy(ctx, W, 0, presentedByImg, s);
+      socDrawHeader(ctx, W, Math.round(76 * s), Math.round(118 * s), event, 'FINAL SCORE', '#15803d', s);
+      const R = Math.round(126 * s);
+      const cyA = H * 0.248;
+      socDrawLogoCircle(ctx, W / 2, cyA, R, iA, colA, socGetAbbr(tA));
+      socDrawTeamLabel(ctx, W / 2, cyA + R + Math.round(52 * s), cyA + R + Math.round(61 * s), tA, colA, Math.round(48 * s), winA);
+      if (winA) socDrawWinnerBadge(ctx, W / 2, cyA + R + Math.round(72 * s), s);
+      socDrawScore(ctx, W / 2, H * 0.435, sA, colA, winA, Math.round(148 * s));
+      ctx.save(); ctx.strokeStyle = 'rgba(255,255,255,0.10)'; ctx.lineWidth = 1.5; ctx.setLineDash([10, 8]);
+      ctx.beginPath(); ctx.moveTo(W * 0.12, H / 2); ctx.lineTo(W * 0.88, H / 2); ctx.stroke();
+      ctx.setLineDash([]); ctx.restore();
+      socDrawScore(ctx, W / 2, H * 0.565, sB, colB, winB, Math.round(148 * s));
+      const cyB = H * 0.752;
+      socDrawTeamLabel(ctx, W / 2, cyB - R - Math.round(58 * s), cyB - R - Math.round(50 * s), tB, colB, Math.round(48 * s), winB);
+      if (winB) socDrawWinnerBadge(ctx, W / 2, cyB - R - Math.round(98 * s), s);
+      socDrawLogoCircle(ctx, W / 2, cyB, R, iB, colB, socGetAbbr(tB));
+      socFooter(ctx, W, H, link, s, brandImg, railImgs);
+
+    } else if (layout === 'landscape') {
+      const hs = H / 675;
+      socTopBar(ctx, W, colA, colB, hs);
+      socDrawPresentedBy(ctx, W, 0, presentedByImg, hs);
+      socDrawHeader(ctx, W, Math.round(44 * hs), Math.round(72 * hs), event, 'FINAL SCORE', '#15803d', hs);
+      const R = Math.round(74 * hs), cyT = H * 0.43;
+      const cxA = W * 0.21, cxB = W * 0.79;
+      socDiagSplit(ctx, W, H, Math.round(90 * hs), Math.round(56 * hs), colA, colB);
+      socDrawLogoCircle(ctx, cxA, cyT, R, iA, colA, socGetAbbr(tA));
+      socDrawTeamLabel(ctx, cxA, cyT + R + Math.round(32 * hs), cyT + R + Math.round(40 * hs), tA, colA, Math.round(32 * hs), winA);
+      if (winA) socDrawWinnerBadge(ctx, cxA, cyT + R + Math.round(48 * hs), hs * 0.88);
+      socDrawLogoCircle(ctx, cxB, cyT, R, iB, colB, socGetAbbr(tB));
+      socDrawTeamLabel(ctx, cxB, cyT + R + Math.round(32 * hs), cyT + R + Math.round(40 * hs), tB, colB, Math.round(32 * hs), winB);
+      if (winB) socDrawWinnerBadge(ctx, cxB, cyT + R + Math.round(48 * hs), hs * 0.88);
+      socDrawScore(ctx, W * 0.40, cyT - Math.round(8 * hs), sA, colA, winA, Math.round(96 * hs));
+      socDrawScore(ctx, W * 0.60, cyT - Math.round(8 * hs), sB, colB, winB, Math.round(96 * hs));
+      ctx.save(); ctx.strokeStyle = 'rgba(255,255,255,0.14)'; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.moveTo(W / 2, cyT - Math.round(42 * hs)); ctx.lineTo(W / 2, cyT + Math.round(42 * hs)); ctx.stroke(); ctx.restore();
+      socFooter(ctx, W, H, link, hs, brandImg, railImgs);
+
+    } else {
+      const s = W / 1080;
+      socTopBar(ctx, W, colA, colB, s);
+      socDrawPresentedBy(ctx, W, 0, presentedByImg, s);
+      socDrawHeader(ctx, W, Math.round(56 * s), Math.round(94 * s), event, 'FINAL SCORE', '#15803d', s);
+      const R = Math.round(124 * s), cyT = H * 0.338;
+      const cxA = W * 0.265, cxB = W * 0.735;
+      socDiagSplit(ctx, W, H, Math.round(120 * s), Math.round(90 * s), colA, colB);
+      socDrawLogoCircle(ctx, cxA, cyT, R, iA, colA, socGetAbbr(tA));
+      socDrawTeamLabel(ctx, cxA, cyT + R + Math.round(52 * s), cyT + R + Math.round(61 * s), tA, colA, Math.round(46 * s), winA);
+      if (winA) socDrawWinnerBadge(ctx, cxA, cyT + R + Math.round(72 * s), s);
+      socDrawLogoCircle(ctx, cxB, cyT, R, iB, colB, socGetAbbr(tB));
+      socDrawTeamLabel(ctx, cxB, cyT + R + Math.round(52 * s), cyT + R + Math.round(61 * s), tB, colB, Math.round(46 * s), winB);
+      if (winB) socDrawWinnerBadge(ctx, cxB, cyT + R + Math.round(72 * s), s);
+      const scY = H * 0.748;
+      socDrawScore(ctx, cxA, scY, sA, colA, winA, Math.round(144 * s));
+      socDrawScore(ctx, cxB, scY, sB, colB, winB, Math.round(144 * s));
+      ctx.save(); ctx.strokeStyle = 'rgba(255,255,255,0.12)'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(W / 2, scY - Math.round(62 * s)); ctx.lineTo(W / 2, scY + Math.round(62 * s)); ctx.stroke(); ctx.restore();
+      socFooter(ctx, W, H, link, s, brandImg, railImgs);
+    }
+  }
+
+  // ── Bracket Snapshot ───────────────────────────────────────────────
+  async function socDrawBracket() {
+    const ctx = socCanvasCtx('soc-canvas-bracket');
+    if (!ctx) return;
+    const { W, H, layout } = socGetPlatform();
+    const b      = currentState.bracket || {};
+    const rounds = b.winners || [];
+    const event  = (currentState.eventName || b.title || '').toUpperCase();
+    const link   = socTwitchLink();
+    const s      = Math.min(W / 1080, H / 1080);
+    const { brandImg, presentedByImg, railImgs } = await socLoadBrandAssets();
+    socDrawBg(ctx, W, H, null, null);
+    socTopBar(ctx, W, '#4f46e5', '#9333ea', s);
+    socDrawPresentedBy(ctx, W, 0, presentedByImg, s);
+    const headerH = Math.round(100 * s);
+    socDrawHeader(ctx, W, Math.round(54 * s), Math.round(86 * s), event,
+      b.type ? b.type.replace(/_/g, ' ').toUpperCase() : 'BRACKET', '#5b21b6', s);
+    if (!rounds.length) {
+      ctx.save();
+      ctx.font = `600 ${Math.round(24 * s)}px "Rajdhani", sans-serif`;
+      ctx.fillStyle = 'rgba(255,255,255,0.16)'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText('No bracket loaded', W / 2, H / 2); ctx.restore();
+      socFooter(ctx, W, H, link, s, brandImg, railImgs); return;
+    }
+    const maxCols = layout === 'vertical' ? 2 : layout === 'landscape' ? 5 : 4;
+    const show = rounds.slice(-maxCols);
+    const PAD = Math.round(24 * s), GAP = Math.round(8 * s);
+    const colW = (W - PAD * 2 - GAP * (show.length - 1)) / show.length;
+    const startY = headerH + Math.round(4 * s), endY = H - Math.round(88 * s);
+    const accents = ['#6366f1', '#7c3aed', '#9333ea', '#a855f7', '#c026d3'];
+    show.forEach((round, ri) => {
+      const rx  = PAD + ri * (colW + GAP);
+      const rcx = rx + colW / 2;
+      const acc = accents[ri % accents.length];
+      ctx.save();
+      ctx.font = `800 ${Math.round(13 * s)}px "Rajdhani", sans-serif`;
+      ctx.fillStyle = acc; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+      ctx.fillText((round.label || round.round || 'Round').toUpperCase(), rcx, startY + Math.round(16 * s));
+      ctx.fillStyle = acc + '40';
+      ctx.fillRect(rx, startY + Math.round(20 * s), colW, Math.round(2 * s));
+      ctx.restore();
+      const matches = round.matches || [];
+      const avail   = endY - startY - Math.round(24 * s);
+      const slotH   = Math.min(Math.round(92 * s), Math.max(Math.round(38 * s), (avail - (matches.length - 1) * Math.round(5 * s)) / Math.max(matches.length, 1)));
+      matches.slice(0, 12).forEach((match, mi) => {
+        const my    = startY + Math.round(26 * s) + mi * (slotH + Math.round(5 * s));
+        const halfH = slotH / 2;
+        const nameA = ((match.a && match.a.name) || 'TBD').toUpperCase().slice(0, 14);
+        const nameB = ((match.b && match.b.name) || 'TBD').toUpperCase().slice(0, 14);
+        const winA  = !!(match.a && match.a.winner);
+        const winB  = !!(match.b && match.b.winner);
+        const cA    = socTeamColor(match.a && match.a.name);
+        const cB    = socTeamColor(match.b && match.b.name);
+        const fs    = Math.round(Math.min(15, Math.max(10, slotH / 5.8)));
+        ctx.save();
+        ctx.fillStyle = 'rgba(255,255,255,0.04)';
+        ctx.beginPath(); ctx.roundRect(rx, my, colW, slotH, Math.round(6 * s)); ctx.fill();
+        if (winA) { ctx.fillStyle = '#22c55e0c'; ctx.beginPath(); ctx.roundRect(rx, my, colW, halfH, [Math.round(6 * s), Math.round(6 * s), 0, 0]); ctx.fill(); }
+        if (winB) { ctx.fillStyle = '#22c55e0c'; ctx.beginPath(); ctx.roundRect(rx, my + halfH, colW, halfH, [0, 0, Math.round(6 * s), Math.round(6 * s)]); ctx.fill(); }
+        if (cA) { ctx.fillStyle = cA; ctx.fillRect(rx, my, Math.round(3 * s), halfH); }
+        ctx.font = `${winA ? 800 : 600} ${fs}px "Rajdhani", sans-serif`;
+        ctx.fillStyle = winA ? '#4ade80' : 'rgba(255,255,255,0.82)';
+        ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+        ctx.fillText(nameA, rx + Math.round(7 * s), my + halfH / 2);
+        if (match.a && match.a.score != null) {
+          ctx.textAlign = 'right'; ctx.fillStyle = winA ? '#4ade80' : 'rgba(255,255,255,0.32)';
+          ctx.fillText(String(match.a.score), rx + colW - Math.round(5 * s), my + halfH / 2);
+        }
+        ctx.fillStyle = 'rgba(255,255,255,0.07)'; ctx.fillRect(rx + Math.round(4 * s), my + halfH, colW - Math.round(8 * s), 1);
+        if (cB) { ctx.fillStyle = cB; ctx.fillRect(rx, my + halfH, Math.round(3 * s), halfH); }
+        ctx.font = `${winB ? 800 : 600} ${fs}px "Rajdhani", sans-serif`;
+        ctx.fillStyle = winB ? '#4ade80' : 'rgba(255,255,255,0.82)';
+        ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+        ctx.fillText(nameB, rx + Math.round(7 * s), my + halfH + halfH / 2);
+        if (match.b && match.b.score != null) {
+          ctx.textAlign = 'right'; ctx.fillStyle = winB ? '#4ade80' : 'rgba(255,255,255,0.32)';
+          ctx.fillText(String(match.b.score), rx + colW - Math.round(5 * s), my + halfH + halfH / 2);
+        }
+        ctx.restore();
+      });
+    });
+    socFooter(ctx, W, H, link, s, brandImg, railImgs);
+  }
+
+  function socRefreshAll() {
+    socUpdateQueueLabel();
+    socDrawMatchup();
+    socDrawResult();
+    socDrawBracket();
+  }
+
+  function socBindDownload(btnId, canvasId, filenameBase) {
+    el(btnId)?.addEventListener('click', () => {
+      const c = el(canvasId);
+      if (!c) return;
+      c.toBlob((blob) => {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = filenameBase + '-' + _socPlatform + '.png'; a.click();
+        setTimeout(() => URL.revokeObjectURL(url), 2000);
+      }, 'image/png');
+    });
+  }
+
+  el('soc-refresh-result')?.addEventListener('click',  () => socDrawResult());
+  el('soc-refresh-matchup')?.addEventListener('click', () => socDrawMatchup());
+  el('soc-refresh-bracket')?.addEventListener('click', socDrawBracket);
+  el('soc-twitch-link')?.addEventListener('input', () => { socDrawMatchup(); socDrawResult(); socDrawBracket(); });
+  socBindDownload('soc-dl-result',  'soc-canvas-result',  'match-result');
+  socBindDownload('soc-dl-matchup', 'soc-canvas-matchup', 'matchup');
+  socBindDownload('soc-dl-bracket', 'soc-canvas-bracket', 'bracket');
+
+  // ── Clip Prep ──────────────────────────────────────────────────────
+
+  function socPopulateClipDropdowns() {
+    const library = (currentState.clips && currentState.clips.library) || [];
+    const opts = library
+      .filter((c) => c && c.path)
+      .map((c) => ({ id: c.id, label: c.name || c.id }));
+
+    ['soc-sel-intro', 'soc-sel-outro'].forEach((selId) => {
+      const sel = el(selId);
+      if (!sel) return;
+      const cur = sel.value;
+      sel.innerHTML = '<option value="">None</option>' +
+        opts.map((o) => `<option value="${o.id}">${o.label.replace(/&/g,'&amp;').replace(/</g,'&lt;')}</option>`).join('');
+      if (cur) sel.value = cur;
+    });
+
+    const mainSel = el('soc-sel-clip');
+    if (mainSel) {
+      const cur = mainSel.value;
+      mainSel.innerHTML = '<option value="">— pick a clip —</option>' +
+        opts.map((o) => `<option value="${o.id}">${o.label.replace(/&/g,'&amp;').replace(/</g,'&lt;')}</option>`).join('');
+      if (cur) mainSel.value = cur;
+    }
+  }
+
+  let _socBakeJobId = null;
+
+  el('soc-btn-bake')?.addEventListener('click', async () => {
+    const clipId = el('soc-sel-clip')?.value;
+    if (!clipId) { showToast('Pick a main clip first.', '#ef4444'); return; }
+    const introId    = el('soc-sel-intro')?.value    || '';
+    const outroId    = el('soc-sel-outro')?.value    || '';
+    const transition = el('soc-opt-transition')?.value || 'fade';
+    const quality    = el('soc-opt-quality')?.value   || 'high';
+
+    const statusEl = el('soc-bake-status');
+    const resultEl = el('soc-bake-result');
+    const barEl    = el('soc-bake-bar');
+    const msgEl    = el('soc-bake-msg');
+    if (statusEl) { statusEl.style.display = ''; barEl.style.width = '0%'; msgEl.textContent = 'Sending to encoder…'; msgEl.style.color = ''; }
+    if (resultEl) resultEl.style.display = 'none';
+
+    try {
+      const resp = await fetch('http://localhost:3000/api/clips/social-encode', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ introId, clipId, outroId, opts: { transition, quality } })
+      });
+      const data = await resp.json();
+      if (!resp.ok || !data.ok) throw new Error(data.error || 'Encode failed');
+      _socBakeJobId = data.jobId;
+      if (msgEl) msgEl.textContent = 'Encoding…';
+    } catch (e) {
+      if (msgEl) { msgEl.textContent = 'Error: ' + e.message; msgEl.style.color = '#f56565'; }
+    }
+  });
+
+  function socHandleEncodeProgress(progress) {
+    if (!_socBakeJobId) return;
+    const statusEl = el('soc-bake-status');
+    const resultEl = el('soc-bake-result');
+    const barEl    = el('soc-bake-bar');
+    const msgEl    = el('soc-bake-msg');
+    const active   = progress && progress.active;
+    if (active && active.id === _socBakeJobId) {
+      if (barEl) barEl.style.width = Math.min(100, Math.round(active.progress || 0)) + '%';
+      if (msgEl) msgEl.textContent = active.status === 'encoding' ? `Encoding… ${Math.round(active.progress || 0)}%` : 'Processing…';
+      if (active.status === 'done' && active.outputPath) {
+        _socBakeJobId = null;
+        if (statusEl) statusEl.style.display = 'none';
+        if (resultEl) {
+          resultEl.style.display = '';
+          const nameEl = el('soc-bake-result-name');
+          if (nameEl) nameEl.textContent = active.name || 'Social clip ready';
+          const dlLink = el('soc-dl-baked');
+          if (dlLink) {
+            dlLink.href = 'http://localhost:3000/api/clips/file?path=' + encodeURIComponent(active.outputPath);
+            dlLink.download = (active.name || 'social_clip') + '.mp4';
+          }
+        }
+      }
+      if (active.status === 'error') {
+        _socBakeJobId = null;
+        if (msgEl) { msgEl.textContent = 'Encode failed: ' + (active.error || 'unknown error'); msgEl.style.color = '#f56565'; }
+      }
+    }
+  }
+
+  window._socHandleEncodeProgress  = socHandleEncodeProgress;
+  window._socPopulateClipDropdowns = socPopulateClipDropdowns;
+
+  // ── Background OBS Source ──────────────────────────────────────────────────
+  (function () {
+    var bgType  = el('bg-type');
+    var bgC1    = el('bg-color1');
+    var bgC2    = el('bg-color2');
+    var bgAngle = el('bg-angle');
+    var bgImgIn = el('bg-image-url');
+    var bgApply = el('bg-apply');
+    var c2wrap  = el('bg-color2-wrap');
+    var angWrap = el('bg-angle-wrap');
+    var imgWrap = el('bg-img-wrap');
+
+    function bgShowFields() {
+      var t = bgType ? bgType.value : 'gradient';
+      if (c2wrap)  c2wrap.style.display  = (t === 'gradient') ? '' : 'none';
+      if (angWrap) angWrap.style.display = (t === 'gradient') ? '' : 'none';
+      if (imgWrap) imgWrap.style.display = (t === 'image')    ? '' : 'none';
+    }
+    if (bgType) bgType.addEventListener('change', bgShowFields);
+    bgShowFields();
+
+    function bgApplyState(data) {
+      var bg = (data && data.background) || {};
+      if (bgType  && document.activeElement !== bgType)  bgType.value  = bg.type  || 'gradient';
+      if (bgC1    && document.activeElement !== bgC1)    bgC1.value    = bg.color1 || '#07090f';
+      if (bgC2    && document.activeElement !== bgC2)    bgC2.value    = bg.color2 || '#0c1220';
+      if (bgAngle && document.activeElement !== bgAngle) bgAngle.value = bg.angle != null ? bg.angle : 135;
+      if (bgImgIn && document.activeElement !== bgImgIn) bgImgIn.value = bg.imageUrl || '';
+      bgShowFields();
+    }
+    window._bgApplyState = bgApplyState;
+
+    if (bgApply) {
+      bgApply.addEventListener('click', function () {
+        send('set_background', {
+          type:     bgType  ? bgType.value  : 'gradient',
+          color1:   bgC1    ? bgC1.value    : '#07090f',
+          color2:   bgC2    ? bgC2.value    : '#0c1220',
+          angle:    bgAngle ? Number(bgAngle.value) : 135,
+          imageUrl: bgImgIn ? bgImgIn.value.trim() : ''
+        });
+      });
+    }
+  })();
+})();
 
 // ════════════════ Analytics dashboard (Overview / Broadcasts / Audience / Event) ════════════════
 const ANALYTICS_API = 'http://localhost:3000/api/analytics';
@@ -28326,13 +31066,6 @@ el('btn-chat-send')?.addEventListener('click', async () => {
 // ── Decorate Camera Feeds → Casters / Talent section headers with leading icons ──
 (function decorateCfSectionIcons() {
   const MAP = {
-    'cf-panel-casters': [
-      ['Separated audio layout', 'headphones'],
-      ['Active Caster Scene', 'film'],
-      ['VDO Rooms', 'users'],
-      ["This Show's Lineup", 'mic'],
-      ['Caster Library', 'star'],
-    ],
     'cf-panel-talent': [
       ['Talent Rooms', 'users'],
       ['LISTEN IN', 'headphones'],

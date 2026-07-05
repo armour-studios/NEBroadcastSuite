@@ -209,6 +209,7 @@ function gameHasFeature(gameId, feat) {
 let state = {
   version: appVersion,
   view: 'hud',              // 'hud' | 'scoreboard' | 'goal'
+  rlHudHidden: false,       // manual "hide UI" — blanks the live RL HUD overlay for a clean feed (not persisted)
   activeGame: 'rocket-league',
   themesByGame: { 'rocket-league': 'classic', 'csgo': 'cs2-hud' },
   eventName: '',   // fresh installs start with no preset title — the producer sets their own
@@ -254,9 +255,6 @@ let state = {
   listenIn: { active: false, side: '', name: '', url: '' },
   // Break / "starting soon" standby. endsAt = epoch ms target for the countdown scene; null = no timer.
   breakScreen: { visible: false, title: 'STARTING SOON', message: '', endsAt: null, frozenSeconds: null, finalMessage: "WE'RE LIVE!", thenScene: '', thenPlayout: '' },
-  // Playout playlists — sequences of clips and/or media files (commercials/intros/outros) that can
-  // be pushed live through the replay program bus with auto-return. See save_playout.
-  playouts: [],
   ticker: { visible: false, messages: [], speed: 40, source: 'manual', feed: [], sponsor: '' },   // scrolling lower-third; speed = loop seconds
   // Sponsor proof-of-play: archived per-broadcast impression reports (estimated on-screen seconds
   // per sponsor logo, by placement). The live session is tracked in-memory (adProof); completed
@@ -282,7 +280,7 @@ let state = {
     // LoL champ-select automation — fills the board live from the League Client (LCU).
     auto: { enabled: false, status: 'off', statusDetail: '', lockfilePath: '' } },
   // Team-lineup / player-intro card scene. side = which team to feature ('blue'|'orange'); style = card variant.
-  intro: { visible: false, side: 'blue', title: '', style: 1, showFooter: true },
+  intro: { visible: false, side: 'blue', title: '', style: 1, showFooter: false },
   // Overtime ad slot — sellable sponsor slot shown on the overlay during OT.
   overtime: { label: 'OVERTIME', logo: null, bg: '#e0202a', color: '#ffffff' },
   // Replay ad slot. logo = sponsor on the goal swipe; outroLogo = logo on the after-replay swipe
@@ -292,6 +290,8 @@ let state = {
   replay: { label: 'REPLAY', logo: null, outroLogo: null, colorMode: 'team', skin: null },
   // Scoreboard ad slot — sponsor logo + uploadable scene background on the scorecard.
   scoreboardAd: { label: 'PRESENTED BY', logo: null, background: null },
+  // OBS background browser source (background.html). type: 'solid'|'gradient'|'image'.
+  background: { type: 'gradient', color1: '#07090f', color2: '#0c1220', angle: 135, imageUrl: '' },
   // Desk footer logos — manual Dashboard override. When non-empty these replace the active
   // brand's desk-tagged sponsors on the caster-desk scenes; when empty the brand's logos show.
   deskFooter: { logos: [] },
@@ -395,6 +395,8 @@ let state = {
     streams: [],           // [streamName] available on the tournament
     streamName: '',        // selected stream to follow ('' = first/any)
     queue: [],             // [{ setId, stream, round, state, teamA, teamB, live }]
+    teamQueue: [],         // team-search results (non-admin path)
+    focusTeam: '',         // team name to highlight in bracket overlay
     matchFeed: [],         // [{ setId, round, teamA, teamB, scoreA, scoreB, status, stream }] for desk tickers
     autoFollow: false,     // auto-push the in-progress set when queue polls
     queueEnabled: false,   // dashboard toggle — poll stream queue from Settings API config
@@ -452,8 +454,10 @@ let state = {
     autoReplayOnGoal: false,   // save an OBS replay-buffer clip on every goal
     lastError: null,
     postGameToCastersSec: 0,  // auto-switch post-game → casters after N seconds (0 = off)
-    kickoff: { enabled: false, scene: '' },  // smart trigger: auto-cut to this scene at the 3-2-1 kickoff countdown
+    kickoff: { enabled: false, scene: '', transition: '' },  // smart trigger: auto-cut to this scene at the 3-2-1 kickoff countdown
+    postGame: { enabled: false, scene: '', delaySec: 20, transition: '' },  // RL: after the post-game scoreboard shows for delaySec, cut to this scene
     availableScenes: [],
+    availableTransitions: [],
     currentScene: '',    // live OBS PROGRAM scene = what viewers see (authoritative "on air")
     scenes: {            // OBS scene name to switch to for each broadcast moment
       inGame: '',
@@ -695,7 +699,9 @@ let state = {
   // Each flow: { id, name, enabled, triggerMode: 'any'|'sequence', triggers: [...], actions: [...], cooldown }
   // Triggers: { id, type, params, timeout (sequence mode only) }
   // Actions:  { id, type, params }
-  flows: []
+  flows: [],
+  // Named key/value pairs set by set_variable/increment_variable actions; used in {{token}} substitution
+  flowVars: {}
 };
 
 let directorEngine = null;
@@ -714,6 +720,12 @@ let savedPresets = [];  // [{ id, name, game, config }] — broadcast config pre
 // Client/production identities. Selecting one recolors overlays + loads its sellable sponsor set.
 let savedBrandKits = []; // [{ id, name, logo, color, accent, font, sponsorLabel, sponsorInterval,
                          //    sponsors: [{ id, name, logo, tier }], themes: { [gameId]: themeId } }]
+// Monotonic version bumped on EVERY brand-kit mutation (via saveBrandKits). librarySig() and the
+// client's renderBrands signature key off it so the brand library re-broadcasts + the editor's
+// closures refresh on ANY change — the old length/count hash missed reorders, tier changes,
+// same-length renames and edits to non-active packages, which made sponsor edits silently revert.
+let brandKitsVer = 0;
+let savedTeamsVer = 0;
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -775,6 +787,7 @@ function loadTeams() {
 }
 
 function saveTeams() {
+  savedTeamsVer++;
   try { safeWriteJson(teamsFile, savedTeams); } catch (e) { console.error('Error saving teams:', e); }
 }
 
@@ -800,7 +813,32 @@ function loadBrandKits() {
 }
 
 function saveBrandKits() {
+  brandKitsVer++;   // any persisted brand-kit change forces a library re-broadcast (see brandKitsVer)
   try { safeWriteJson(brandsFile, savedBrandKits); } catch (e) { console.error('Error saving brand kits:', e); }
+}
+
+// Mirror a match team's roster into the saved-team library so roster edits made in the Match — Teams
+// panel actually persist. Matches the library entry by NORMALIZED name (trim + case-insensitive) —
+// the panel uppercases the match name (applyTeam), so an exact match against the saved "Team Alpha"
+// used to silently fail. CREATES the library entry when missing, so a team typed/imported into the
+// match (never saved before) still saves. Field-preserving: keeps saved-only per-player data (country,
+// links, etc.) and layers the live edits on top. Skips placeholder/unnamed sides.
+function persistRosterToLibrary(side) {
+  const t = state.teams[side];
+  if (!t) return;
+  const name = (t.name || '').trim();
+  const low = name.toLowerCase();
+  if (!name || low === 'blue' || low === 'orange') return;
+  let saved = savedTeams.find((s) => (s.name || '').trim().toLowerCase() === low);
+  if (!saved) { saved = { name, logo: t.logo || null, players: [] }; savedTeams.push(saved); }
+  const prev = Array.isArray(saved.players) ? saved.players : [];
+  saved.players = (t.players || []).map((p) => {
+    const old = (p.id && prev.find((o) => o.id === p.id))
+             || (p.name && prev.find((o) => (o.name || '').trim().toLowerCase() === (p.name || '').trim().toLowerCase()));
+    return old ? { ...old, ...p } : { ...p };
+  });
+  if (t.logo && !saved.logo) saved.logo = t.logo;
+  saveTeams();
 }
 
 // ─── Producer profile export / import ──────────────────────────────────────
@@ -1143,6 +1181,8 @@ function activeBrand() {
     // Package metadata for the editor + Dashboard quick-switch (names only — no base64).
     packages: (Array.isArray(kit.packages) ? kit.packages : []).map((p) => ({ id: p.id, name: p.name })),
     activePackageId: kit.activePackageId || null,
+    // Social card preset (bg image + feature toggles) — stored per brand kit
+    socialPreset: kit.socialPreset || { bgImageUrl: '', bgStyle: 'auto', presentedByEnabled: true },
   };
 }
 
@@ -1546,7 +1586,6 @@ function loadState() {
           thenPlayout: ''
         };
       }
-      if (Array.isArray(saved.playouts)) state.playouts = saved.playouts;
       // Momentary production graphics: restore content, but never auto-show on restart.
       if (saved.winner && typeof saved.winner === 'object') {
         state.winner = {
@@ -1571,7 +1610,7 @@ function loadState() {
           side: (saved.intro.side === 'orange' || saved.intro.side === 'blue') ? saved.intro.side : 'blue',
           title: saved.intro.title || '',
           style: [1, 2].includes(Number(saved.intro.style)) ? Number(saved.intro.style) : 1,
-          showFooter: saved.intro.showFooter !== false   // default true — off if using the standalone Sponsor Banner add-on
+          showFooter: false   // always reset — was auto-true before; opt-in via checkbox now
         };
       }
       if (saved.owMatch && typeof saved.owMatch === 'object') {
@@ -1688,14 +1727,22 @@ function loadState() {
           postGameToCastersSec: Number(saved.obs.postGameToCastersSec) || 0,
           kickoff: {
             enabled: !!(saved.obs.kickoff && saved.obs.kickoff.enabled),
-            scene: (saved.obs.kickoff && saved.obs.kickoff.scene) || ''
+            scene: (saved.obs.kickoff && saved.obs.kickoff.scene) || '',
+            transition: (saved.obs.kickoff && saved.obs.kickoff.transition) || ''
+          },
+          postGame: {
+            enabled: !!(saved.obs.postGame && saved.obs.postGame.enabled),
+            scene: (saved.obs.postGame && saved.obs.postGame.scene) || '',
+            delaySec: Number(saved.obs.postGame && saved.obs.postGame.delaySec) || 20,
+            transition: (saved.obs.postGame && saved.obs.postGame.transition) || ''
           },
           commercialAutoReturn: saved.obs.commercialAutoReturn !== false,
           scenes: { ...state.obs.scenes, ...(saved.obs.scenes || {}) },
           // runtime fields are not restored
           connected: false,
           lastError: null,
-          availableScenes: []
+          availableScenes: [],
+          availableTransitions: []
         };
       }
       if (typeof saved.obsPassword === 'string') {
@@ -1724,6 +1771,9 @@ function loadState() {
       }
       if (saved.standings && typeof saved.standings === 'object') {
         state.standings = { ...state.standings, ...saved.standings, visible: false, rows: Array.isArray(saved.standings.rows) ? saved.standings.rows : [] };
+      }
+      if (saved.socialPreset && typeof saved.socialPreset === 'object') {
+        state.socialPreset = { ...saved.socialPreset };
       }
       if (saved.watchlist && typeof saved.watchlist === 'object') {
         state.watchlist = {
@@ -1842,7 +1892,6 @@ function _saveAppStateNow(sync = false) {
         message: state.breakScreen.message,
         finalMessage: state.breakScreen.finalMessage
       },
-      playouts: state.playouts,
       // Persist content for the momentary production graphics; visibility is reset on restart.
       winner: { side: state.winner.side, name: state.winner.name, logo: state.winner.logo, color: state.winner.color, subtitle: state.winner.subtitle },
       veto: { title: state.veto.title, maps: state.veto.maps },
@@ -1871,6 +1920,7 @@ function _saveAppStateNow(sync = false) {
         autoReplayOnGoal: state.obs.autoReplayOnGoal,
         postGameToCastersSec: state.obs.postGameToCastersSec,
         kickoff: state.obs.kickoff,
+        postGame: state.obs.postGame,
         commercialAutoReturn: state.obs.commercialAutoReturn,
         scenes: state.obs.scenes
       },
@@ -1879,6 +1929,7 @@ function _saveAppStateNow(sync = false) {
       bracket: state.bracket,
       upcoming: state.upcoming,
       standings: state.standings,
+      socialPreset: state.socialPreset || null,   // Social Export background/presented-by fallback (no brand kit active)
       csgoCfgPath: state.csgo.cfgPath,
       director: {
         enabled: state.director?.enabled !== false,
@@ -2414,7 +2465,10 @@ function buildLiveState() {
     formattedTime: formatTime(state.game.time),
     teamRecords: resolveTeamRecords(),   // resolved season/league record line per side (tiny)
     flows: state.flows || [],
+    flowVars: state.flowVars || {},
+    flowFireLog: _flowFireLog,
     showRoster: state.showRoster || [],
+    background: state.background,
     overlays: overlayClientInfo()   // live overlay browser-source count for the pre-flight checklist
   };
 }
@@ -2439,6 +2493,7 @@ function upsertPlayerProfile(gamerTag, patch) {
   if (patch.country) next.country = String(patch.country).slice(0, 80);
   if (patch.countryCode) next.countryCode = String(patch.countryCode).slice(0, 4).toLowerCase();
   if (patch.image) next.image = String(patch.image).slice(0, 400);   // start.gg profile image URL
+  if (patch.realName) next.realName = String(patch.realName).slice(0, 160); // start.gg display/legal name
   if (patch.sixmans) {
     const s = patch.sixmans;
     next.sixmans = {
@@ -2454,7 +2509,7 @@ function upsertPlayerProfile(gamerTag, patch) {
   state.playerProfiles[key] = next;
   playerProfilesVer++;
   // Write-through to the persistent player DB so data survives state resets
-  playerDb.upsert(gamerTag, { displayName: next.gamerTag, startggSlug: next.startggSlug || null, startggId: next.startggPlayerId || null, sixmans: next.sixmans || null, twitch: next.twitch || null, twitter: next.twitter || null, country: next.country || null, countryCode: next.countryCode || null, image: next.image || null });
+  playerDb.upsert(gamerTag, { displayName: next.gamerTag, realName: next.realName || null, startggSlug: next.startggSlug || null, startggId: next.startggPlayerId || null, sixmans: next.sixmans || null, twitch: next.twitch || null, twitter: next.twitter || null, country: next.country || null, countryCode: next.countryCode || null, image: next.image || null });
 }
 
 function libraryData() {
@@ -2462,7 +2517,9 @@ function libraryData() {
     savedTeams,
     playerProfiles: state.playerProfiles || {},   // per-player start.gg + 6mans links
     brandKits: savedBrandKits,
+    brandKitsVer,                                 // lets the client detect ANY brand-kit change cheaply
     brand: activeBrand(),
+    socialPreset: state.socialPreset || null,      // Social Export background/presented-by, when no brand kit is active
     banner: bannerForBroadcast(),
     mainBanner: state.banner,
     bracket: state.bracket,   // manual bracket (embedded team logos) — backfilled by bracket overlay + panel
@@ -2477,23 +2534,30 @@ function staticData() {
 // Cheap signature (no base64 stringify — only lengths/counts) to detect library changes between
 // broadcasts. Captures team name/colour/logo/roster and brand name/colours/logo/sponsors/banners.
 function librarySig() {
-  const t = savedTeams.map((t) => t.name + ':' + (t.color || '') + ':' + (t.logo ? t.logo.length : 0) + ':' + (t.players || []).length).join(',');
+  const t = savedTeams.map((t) => {
+    const logoFp = t.logo ? (t.logo.slice(20, 44) + ':' + t.logo.length) : '0';
+    const pSig = (t.players || []).map(p => (p.name || '') + ':' + ((p.photo || p.image || '').slice(20, 44))).join(';');
+    return t.name + ':' + (t.color || '') + ':' + logoFp + ':' + pSig;
+  }).join(',');
   const b = savedBrandKits.map((k) => {
     const pkg = activePackage(k) || {};
     const sp = (pkg.sponsors || []).reduce((a, s) => a + ((s && s.logo || '').length) + ((s && s.name || '').length), 0);
     const bn = (pkg.bannerImages || []).reduce((a, img) => a + ((img || '').length), 0);
+    const pl = (pkg.sponsors || []).map((s) => SPONSOR_SPOTS.filter((spot) => s.placements && s.placements[spot]).join('+')).join(',');
     return k.id + ':' + (k.name || '') + ':' + (k.color || '') + ':' + (k.accent || '') + ':' + (k.logo ? k.logo.length : 0)
       + ':' + (k.activePackageId || '') + ':' + ((k.packages || []).length)
-      + ':' + (pkg.sponsors || []).length + ':' + sp + ':' + bn;
+      + ':' + (pkg.sponsors || []).length + ':' + sp + ':' + bn + ':' + pl;
   }).join(',');
   // …plus active-kit selection + banner toggle/images so brand/banner/mainBanner re-send when they change.
   const bn = (state.banner.images || []).reduce((a, i) => a + ((i || '').length), 0);
   // bracket + replay carry big base64 logos/thumbnails — sign their STRUCTURE + scalar fields but
   // collapse any long string to its length so we never stringify the base64 (this runs per-broadcast).
   const lite = (o) => { try { return JSON.stringify(o, (k, v) => (typeof v === 'string' && v.length > 200) ? ('len' + v.length) : v) || ''; } catch { return ''; } };
+  const sp = state.socialPreset || {};
   const extra = '|ab:' + (state.activeBrandKitId || '') + '|bv:' + (state.banner.visible ? 1 : 0) + '|bi:' + bn
     + '|brk:' + lite(state.bracket) + '|rpl:' + lite(state.replay) + '|crew:' + (state.crew || []).length
-    + '|pp:' + playerProfilesVer;
+    + '|pp:' + playerProfilesVer + '|bk:' + brandKitsVer + '|st:' + savedTeamsVer
+    + '|sp:' + (sp.bgImageUrl ? sp.bgImageUrl.length : 0) + ':' + (sp.presentedByEnabled ? 1 : 0) + ':' + (sp.bgStyle || '');
   return savedTeams.length + '#' + t + '||' + savedBrandKits.length + '#' + b + extra;
 }
 
@@ -2709,11 +2773,12 @@ async function syncStartGgSet(setId) {
   if (set.fullRoundText) state.roundLabel = String(set.fullRoundText).toUpperCase();
 
   // Auto-apply saved logos/players when the entrant matches a team in the library;
-  // fall back to the start.gg team logo. Always reset first so a stale logo from the
-  // previous push never silently blocks the lookup for the new team.
+  // fall back to the start.gg team logo. Always reset both first so a stale logo OR
+  // roster from the previous push never silently carries over onto the new team.
   [['blue', blueEntrant], ['orange', orangeEntrant]].forEach(([side, ent]) => {
     const tn = (state.teams[side].name || '').toUpperCase();
     state.teams[side].logo = '';
+    state.teams[side].players = [];
     const saved = savedTeams.find((t) => (t.name || '').toUpperCase() === tn);
     if (saved) {
       if (saved.logo) state.teams[side].logo = saved.logo;
@@ -2978,6 +3043,105 @@ async function fetchStreamQueue(tournamentSlug) {
   state.startgg.lastError = null;
   broadcastFullState();
   return { streams, count: queue.length };
+}
+
+// Fetch a team's upcoming sets from start.gg without needing tournament-admin access.
+async function fetchTeamQueue(teamName, tournamentSlug) {
+  if (!startggApiToken) throw new Error('No Start.gg API token set in Integrations.');
+  const slug = (tournamentSlug || state.startgg.tournamentSlug || '').trim()
+    .replace(/^https?:\/\/(www\.)?start\.gg\//i, '')
+    .replace(/^tournament\//i, '').split('/')[0];
+  if (!slug) throw new Error('Enter a tournament URL or slug.');
+  if (!teamName) throw new Error('Enter a team name.');
+  const client = createStartGgClient(startggApiToken);
+  // Entrant has no direct `sets` field in start.gg's schema — sets live on Event and must be
+  // filtered by entrantIds, which we only know after resolving the matching entrants. Two-step:
+  // 1) find entrants matching the team name per event, 2) fetch that event's sets filtered to them.
+  const entrantsQuery = `query TeamEntrants($slug: String!, $name: String!) {
+    tournament(slug: $slug) {
+      events {
+        id
+        name
+        entrants(query: { filter: { name: $name }, perPage: 8 }) { nodes {
+          id name
+        }}
+      }
+    }
+  }`;
+  const eRes = await client.request(entrantsQuery, { slug: `tournament/${slug}`, name: teamName });
+  const events = eRes?.tournament?.events || [];
+  const raw = [];
+  const allEntrants = [];
+  for (const ev of events) {
+    const entrantIds = (ev.entrants?.nodes || []).map(e => e.id).filter((id) => id != null);
+    if (!entrantIds.length) continue;
+    // Pull full participant data (gamerTag, country, images, socials) per entrant — not just
+    // name/logo — so both teams in every queued match get merged into the team/player library
+    // the same way a full event import would, and overlay scenes have what they need to render.
+    const setsQuery = `query TeamSets($eventId: ID!, $entrantIds: [ID]) {
+      event(id: $eventId) {
+        sets(filters: { entrantIds: $entrantIds }, perPage: 20) { nodes {
+          id fullRoundText state
+          slots {
+            entrant {
+              id name
+              participants { gamerTag player { id user { slug name images { url type } authorizations { type externalUsername } location { country } } } }
+              team { images { url type } }
+            }
+            standing { stats { score { value } } }
+          }
+        }}
+      }
+    }`;
+    const sRes = await client.request(setsQuery, { eventId: ev.id, entrantIds });
+    const sets = sRes?.event?.sets?.nodes || [];
+    for (const set of sets) {
+      if (set.state === 3) continue;
+      const slots = set.slots || [];
+      const ents = slots.map(s => s?.entrant).filter(Boolean);
+      allEntrants.push(...ents);
+      raw.push({
+        setId: String(set.id),
+        stream: ev.name || '',
+        round: set.fullRoundText || '',
+        state: set.state,
+        teamA: ents[0]?.name || 'TBD',
+        teamB: ents[1]?.name || 'TBD',
+        scoreA: slots[0]?.standing?.stats?.score?.value ?? null,
+        scoreB: slots[1]?.standing?.stats?.score?.value ?? null,
+        slots,
+        live: set.state === 2
+      });
+    }
+  }
+  const seen = new Set();
+  const deduped = raw.filter(q => !seen.has(q.setId) && seen.add(q.setId));
+  deduped.sort((a, b) => (b.live ? 1 : 0) - (a.live ? 1 : 0));
+  // mergeEntrantsIntoLibrary populates savedTeams rosters + playerProfiles (country/twitch/image)
+  // and also overwrites state.startgg.eventTeams — but here we've only seen the queued team's
+  // opponents, not the full event, so union it back with whatever picker list already existed
+  // instead of shrinking it.
+  const prevEventTeams = state.startgg.eventTeams || [];
+  mergeEntrantsIntoLibrary(allEntrants);
+  if (prevEventTeams.length) {
+    const byName = new Map(prevEventTeams.map(t => [t.name, t]));
+    (state.startgg.eventTeams || []).forEach(t => byName.set(t.name, t));
+    state.startgg.eventTeams = [...byName.values()];
+  }
+  deduped.forEach(q => { q.logoA = logoForTeamName(q.teamA); q.logoB = logoForTeamName(q.teamB); });
+  state.startgg.teamQueue = deduped;
+  state.startgg.focusTeam = teamName;
+  state.upcoming.matches = deduped.map(q => ({
+    id: q.setId, round: q.round || '',
+    teamA: q.teamA || 'TBD', teamB: q.teamB || 'TBD',
+    teamALogo: q.logoA || '', teamBLogo: q.logoB || '',
+    date: '', time: '', stream: !!q.live,
+    scoreA: q.scoreA ?? null, scoreB: q.scoreB ?? null,
+    week: '', note: ''
+  }));
+  saveAppState();
+  broadcastFullState();
+  return { count: deduped.length };
 }
 
 // Stream queue polling — driven by Settings API token + tournament slug + queueEnabled toggle.
@@ -3848,6 +4012,7 @@ async function fetchAllSets(client, slug, perPage = 50, maxPages = 16) {
   let event = null;
   const all = [];
   do {
+    if (page > 1) await new Promise((r) => setTimeout(r, 350));   // stagger for start.gg rate limits
     const res = await client.request(query, { slug, perPage, page });
     event = res && res.event;
     if (!event) throw new Error('Event not found — check the slug/URL and your token');
@@ -3878,6 +4043,7 @@ async function fetchEntrantTrueSeeds(eventSlug) {
   let page = 1, totalPages = 1;
   const map = {};
   do {
+    if (page > 1) await new Promise((r) => setTimeout(r, 350));   // stagger for start.gg rate limits
     const res = await client.request(query, { slug: eventSlug, perPage: 75, page });
     const ev = res && res.event;
     if (!ev) throw new Error('Event not found — check the slug/URL and your token');
@@ -3910,6 +4076,7 @@ async function fetchAllEntrants(client, slug, perPage = 50, maxPages = 16) {
   let page = 1, totalPages = 1, withExt = true;
   const all = [];
   do {
+    if (page > 1) await new Promise((r) => setTimeout(r, 350));   // stagger for start.gg rate limits
     let res;
     try {
       res = await client.request(buildQuery(withExt), { slug, perPage, page });
@@ -3949,6 +4116,7 @@ async function fetchEventSeeding(apiToken, eventSlugRaw) {
   let page = 1, totalPages = 1, evName = '', evImage = '', withAuth = true;
   const all = [];
   do {
+    if (page > 1) await new Promise((r) => setTimeout(r, 350));   // stagger for start.gg rate limits
     let res;
     try {
       res = await client.request(buildQuery(withAuth), { slug, perPage: 75, page });
@@ -3971,14 +4139,19 @@ async function fetchEventSeeding(apiToken, eventSlugRaw) {
         const u = (p.player && p.player.user) || {};
         const auths = u.authorizations || [];
         const epic = (auths.find((a) => a && (a.type === 'EPIC' || a.type === 'EPICGAMES')) || {}).externalUsername || '';
-        // All connected-account usernames are candidate identities (Epic first, then Steam/Xbox/etc.).
-        const alts = [epic, ...auths.map((a) => a && a.externalUsername)].filter(Boolean);
+        const steam = (auths.find((a) => a && a.type === 'STEAM') || {}).externalUsername || '';
+        // Build alts as {platform, username} objects so the UI can display and look up each account.
+        const _altSeen = new Set();
+        const alts = auths
+          .filter((a) => a && a.externalUsername)
+          .map((a) => ({ platform: (a.type || '').toLowerCase().replace('epicgames', 'epic'), username: a.externalUsername }))
+          .filter((a) => { const k = a.platform + ':' + a.username; if (_altSeen.has(k)) return false; _altSeen.add(k); return true; });
         const gamerTag = p.gamerTag || u.name || '';
         const startggPlayerId = p.player && p.player.id ? String(p.player.id) : null;
         const image = ((u.images || []).find((i) => /profile/i.test(i.type || '')) || (u.images || [])[0] || {}).url || '';
         // Auto-link the start.gg profile into the registry for every entrant we see.
         if (gamerTag && u.slug) upsertPlayerProfile(gamerTag, { startggSlug: u.slug, startggPlayerId, image });
-        return { gamerTag, epic, alts: [...new Set(alts)], startggSlug: u.slug || null, startggPlayerId, image };
+        return { gamerTag, epic, steam, alts, startggSlug: u.slug || null, startggPlayerId, image };
       }).filter((p) => p.gamerTag)
     }));
     totalPages = (ev.entrants && ev.entrants.pageInfo && ev.entrants.pageInfo.totalPages) || 1;
@@ -4228,6 +4401,7 @@ async function fetchTournamentDetail(apiToken, tournamentSlug, maxPlayerPages = 
   let head = null;
   const players = [];
   do {
+    if (page > 1) await new Promise((r) => setTimeout(r, 350));   // stagger for start.gg rate limits
     const res = await client.request(query, { slug: `tournament/${slug}`, page });
     const t = res && res.tournament;
     if (!t) break;
@@ -4335,9 +4509,21 @@ function mapEntrantsToTeams(entrants) {
         const country = (u.location && u.location.country) || null;
         const countryCode = _countryCode(country);
         const image = ((u.images || []).find((i) => /profile/i.test(i.type || '')) || (u.images || [])[0] || {}).url || null;
-        // Auto-link the start.gg profile into the registry on team import.
-        if (tag && u.slug) upsertPlayerProfile(tag, { startggSlug: u.slug, startggPlayerId: p.player && p.player.id ? String(p.player.id) : null, twitch, twitter, country, countryCode, image });
-        return { id: Math.random().toString(36).slice(2, 11), name: tag, platform: 'steam', platformId: '', assignedCamera: null };
+        // u.name is the user's display/legal name on start.gg (different from gamerTag)
+        const realName = (u.name && u.name.trim() && u.name.trim() !== tag) ? u.name.trim() : null;
+        const startggPlayerId = p.player && p.player.id ? String(p.player.id) : null;
+        if (tag) {
+          const patch = {};
+          if (u.slug) { patch.startggSlug = u.slug; patch.startggPlayerId = startggPlayerId; }
+          if (twitch) patch.twitch = twitch;
+          if (twitter) patch.twitter = twitter;
+          if (country) patch.country = country;
+          if (countryCode) patch.countryCode = countryCode;
+          if (image) patch.image = image;
+          if (realName) patch.realName = realName;
+          if (Object.keys(patch).length) upsertPlayerProfile(tag, patch);
+        }
+        return { id: Math.random().toString(36).slice(2, 11), name: tag, platform: 'startgg', platformId: startggPlayerId || '', assignedCamera: null };
       })
       .filter((p) => p.name);
     const logo = pickEntrantLogo(ent);
@@ -4449,9 +4635,20 @@ function mergeEntrantsIntoLibrary(entrants) {
         const country = (u.location && u.location.country) || null;
         const countryCode = _countryCode(country);
         const image = ((u.images || []).find((i) => /profile/i.test(i.type || '')) || (u.images || [])[0] || {}).url || null;
-        // Auto-link the start.gg profile into the registry on team import.
-        if (tag && u.slug) upsertPlayerProfile(tag, { startggSlug: u.slug, startggPlayerId: p.player && p.player.id ? String(p.player.id) : null, twitch, twitter, country, countryCode, image });
-        return { id: Math.random().toString(36).slice(2, 11), name: tag, platform: 'steam', platformId: '', assignedCamera: null };
+        const realName = (u.name && u.name.trim() && u.name.trim() !== tag) ? u.name.trim() : null;
+        const startggPlayerId = p.player && p.player.id ? String(p.player.id) : null;
+        if (tag) {
+          const patch = {};
+          if (u.slug) { patch.startggSlug = u.slug; patch.startggPlayerId = startggPlayerId; }
+          if (twitch) patch.twitch = twitch;
+          if (twitter) patch.twitter = twitter;
+          if (country) patch.country = country;
+          if (countryCode) patch.countryCode = countryCode;
+          if (image) patch.image = image;
+          if (realName) patch.realName = realName;
+          if (Object.keys(patch).length) upsertPlayerProfile(tag, patch);
+        }
+        return { id: Math.random().toString(36).slice(2, 11), name: tag, platform: 'startgg', platformId: startggPlayerId || '', assignedCamera: null };
       })
       .filter((p) => p.name);
     playersTotal += players.length;
@@ -5809,6 +6006,7 @@ flowBus.setMaxListeners(100);
 const _flowSeqState  = {};  // { [flowId]: { step: number, timeoutHandle: Timeout|null } }
 const _flowLastFired = {};  // { [flowId]: ms timestamp } — for cooldown enforcement
 const _flowIntervals = new Map(); // { flowId → intervalHandle } — for timer_interval triggers
+const _flowFireLog   = {};  // { [flowId]: number[] } — last 20 fire timestamps per flow
 
 const FLOW_TRIGGER_TYPES = [
   // Rocket League
@@ -5821,7 +6019,7 @@ const FLOW_TRIGGER_TYPES = [
   'obs_scene_changed', 'obs_stream_started', 'obs_stream_stopped', 'obs_recording_started', 'obs_recording_stopped', 'obs_replay_saved',
   'obs_source_shown', 'obs_source_hidden', 'obs_input_muted', 'obs_input_unmuted', 'obs_media_started', 'obs_media_ended',
   // Twitch
-  'twitch_stream_online', 'twitch_stream_offline', 'twitch_raid', 'twitch_sub', 'twitch_bits', 'twitch_follow', 'twitch_channel_points', 'twitch_hype_train', 'twitch_poll_end', 'twitch_ad_break',
+  'twitch_stream_online', 'twitch_stream_offline', 'twitch_raid', 'twitch_sub', 'twitch_bits', 'twitch_follow', 'twitch_channel_points', 'twitch_hype_train', 'twitch_poll_end', 'twitch_ad_break', 'twitch_chat_command',
   // In-app / Timer
   'timer_countdown_end', 'break_shown', 'break_hidden',
   // Scheduled
@@ -5830,15 +6028,35 @@ const FLOW_TRIGGER_TYPES = [
   'manual'
 ];
 
+// Simple 5-field cron matcher: "minute hour day month weekday" — supports * and comma lists.
+function _matchesCron(expr, date) {
+  const parts = (expr || '').trim().split(/\s+/);
+  if (parts.length !== 5) return false;
+  const [m, h, dom, mo, dow] = parts;
+  const match = (part, val) => part === '*' || part.split(',').some(p => Number(p.trim()) === val);
+  return match(m, date.getMinutes()) && match(h, date.getHours()) &&
+         match(dom, date.getDate()) && match(mo, date.getMonth() + 1) &&
+         match(dow, date.getDay());
+}
+
 function initFlowEngine() {
   FLOW_TRIGGER_TYPES.forEach(type => {
     flowBus.on(type, data => _onFlowTrigger(type, data || {}));
   });
-  // Minute tick for time_of_day triggers — fires on every minute boundary.
+  // Minute tick: time_of_day events + cron_schedule evaluation.
   setInterval(() => {
     const now = new Date();
     const hhmm = now.getHours().toString().padStart(2, '0') + ':' + now.getMinutes().toString().padStart(2, '0');
     flowBus.emit('time_of_day', { time: hhmm });
+    // Cron triggers fire directly — not via flowBus — to avoid wiring a bus listener.
+    for (const flow of (state.flows || [])) {
+      if (!flow.enabled) continue;
+      for (const trig of (flow.triggers || [])) {
+        if (trig.type === 'cron_schedule' && (trig.params || {}).expr) {
+          if (_matchesCron(trig.params.expr, now)) _fireFlow(flow, { type: 'cron_schedule', time: hhmm });
+        }
+      }
+    }
   }, 60000);
   _syncFlowIntervals();
 }
@@ -5916,6 +6134,8 @@ function _triggerMatches(trigger, type, data) {
       return !p.winner || p.winner === 'any' || data.winner === p.winner;
     case 'time_of_day':
       return !!p.time && p.time === data.time;
+    case 'twitch_chat_command':
+      return !p.command || data.command === p.command.toLowerCase().replace(/^!/, '');
     case 'manual':
       return !p.flowId || p.flowId === data.flowId;
     default:
@@ -5970,6 +6190,34 @@ function _evalCondition(cond) {
       const start = sh * 60 + sm, end = eh * 60 + em;
       return start <= end ? (cur >= start && cur <= end) : (cur >= start || cur <= end);
     }
+    case 'if_variable': {
+      const val = String((state.flowVars || {})[p.name] ?? '');
+      const cmp = String(p.value ?? '');
+      const nv = Number(val), nc = Number(cmp);
+      if (p.op === 'eq')       return val === cmp;
+      if (p.op === 'neq')      return val !== cmp;
+      if (p.op === 'gt')       return !isNaN(nv) && !isNaN(nc) && nv > nc;
+      if (p.op === 'lt')       return !isNaN(nv) && !isNaN(nc) && nv < nc;
+      if (p.op === 'gte')      return !isNaN(nv) && !isNaN(nc) && nv >= nc;
+      if (p.op === 'lte')      return !isNaN(nv) && !isNaN(nc) && nv <= nc;
+      if (p.op === 'contains') return val.toLowerCase().includes(cmp.toLowerCase());
+      return !!val; // no op = just check if var is set and non-empty
+    }
+    case 'if_flow_last_fired': {
+      if (!p.flowId || !p.maxAgoMs) return true;
+      const last = _flowLastFired[p.flowId];
+      if (!last) return false;
+      return (Date.now() - last) <= Number(p.maxAgoMs);
+    }
+    case 'if_match_point': {
+      const half = Math.ceil((state.bestOf || 5) / 2);
+      const b = state.series?.blue || 0, o = state.series?.orange || 0;
+      const blueMP   = b === half - 1;
+      const orangeMP = o === half - 1;
+      if (p.team === 'blue')   return blueMP;
+      if (p.team === 'orange') return orangeMP;
+      return blueMP || orangeMP; // 'any' — either team
+    }
     default:
       return true;
   }
@@ -5997,6 +6245,37 @@ function _handleSequenceTrigger(flow, type, data) {
   }
 }
 
+// Thrown by the stop_flow action to exit the current flow cleanly.
+class _StopFlow extends Error {
+  constructor() { super('stop_flow'); this.name = '_StopFlow'; }
+}
+
+// Replace {{token}} placeholders in a string with live game-state and flow-var values.
+function _substituteTokens(text, ctx) {
+  if (!text || typeof text !== 'string') return text;
+  const g = state.game || {};
+  const blue   = state.teams?.blue   || {};
+  const orange = state.teams?.orange || {};
+  let out = text
+    .replaceAll('{{blue_score}}',    String(g.blueScore   ?? 0))
+    .replaceAll('{{orange_score}}',  String(g.orangeScore ?? 0))
+    .replaceAll('{{blue_team}}',     blue.name   || 'Blue')
+    .replaceAll('{{orange_team}}',   orange.name || 'Orange')
+    .replaceAll('{{series_blue}}',   String(state.series?.blue   || 0))
+    .replaceAll('{{series_orange}}', String(state.series?.orange || 0))
+    .replaceAll('{{game_number}}',   String(g.number || 1))
+    .replaceAll('{{map_name}}',      g.map || '')
+    .replaceAll('{{event_title}}',   state.eventTitle || '')
+    .replaceAll('{{best_of}}',       String(state.bestOf || 5));
+  for (const [k, v] of Object.entries(state.flowVars || {}))
+    out = out.replaceAll(`{{${k}}}`, String(v ?? ''));
+  if (ctx && typeof ctx === 'object')
+    for (const [k, v] of Object.entries(ctx))
+      if (typeof v === 'string' || typeof v === 'number')
+        out = out.replaceAll(`{{trigger.${k}}}`, String(v));
+  return out;
+}
+
 async function _fireFlow(flow, triggerData) {
   const now = Date.now();
   const cooldown = Number(flow.cooldown) || 0;
@@ -6004,6 +6283,10 @@ async function _fireFlow(flow, triggerData) {
   // Conditions: all must pass (AND logic)
   if ((flow.conditions || []).length && !_checkFlowConditions(flow.conditions)) return;
   _flowLastFired[flow.id] = now;
+  // Track fire history (last 20 per flow)
+  if (!_flowFireLog[flow.id]) _flowFireLog[flow.id] = [];
+  _flowFireLog[flow.id].unshift(now);
+  if (_flowFireLog[flow.id].length > 20) _flowFireLog[flow.id].length = 20;
 
   const repeatCount = Math.max(1, Number(flow.repeatCount) || 1);
   const repeatDelay = Math.max(0, Number(flow.repeatDelay) || 0);
@@ -6012,13 +6295,20 @@ async function _fireFlow(flow, triggerData) {
     for (const action of (flow.actions || [])) {
       if (Number(action.delay) > 0) await new Promise(r => setTimeout(r, Number(action.delay)));
       try { await _executeFlowAction(action, triggerData); }
-      catch (e) { console.error('[Flow]', flow.name, '→', action.type, e.message); }
+      catch (e) {
+        if (e instanceof _StopFlow) return; // stop_flow action — exit cleanly
+        console.error('[Flow]', flow.name, '→', action.type, e.message);
+      }
     }
   }
 }
 
 async function _executeFlowAction(action, ctx) {
-  const p = action.params || {};
+  const rawP = action.params || {};
+  // Substitute {{tokens}} in all string param values before executing
+  const p = Object.fromEntries(
+    Object.entries(rawP).map(([k, v]) => [k, typeof v === 'string' ? _substituteTokens(v, ctx) : v])
+  );
   switch (action.type) {
     case 'wait':
       await new Promise(r => setTimeout(r, Math.max(0, Number(p.ms) || 0)));
@@ -6097,11 +6387,13 @@ async function _executeFlowAction(action, ctx) {
       if (predictionManager) try { await predictionManager.lockPrediction(); } catch(e){}
       break;
     case 'twitch_prediction_resolve':
-      if (predictionManager && predictionManager.currentPrediction) try {
-        const outcomes = predictionManager.currentPrediction.outcomes || [];
+      if (predictionManager) try {
+        const _cur = predictionManager.currentPrediction || state.twitch.predictions.current;
+        const _outcomes = _cur?.outcomes || [];
         const idx = Number(p.outcomeIndex) || 0;
-        const outcomeId = outcomes[idx] && outcomes[idx].id;
-        if (outcomeId) await predictionManager.resolvePrediction(outcomeId);
+        const _outcomeId = _outcomes[idx]?.id;
+        const _predId = _cur?.id;
+        if (_outcomeId && _predId) await predictionManager.resolvePrediction(_outcomeId, _predId);
       } catch(e){ console.warn('[Flow] prediction resolve:', e.message); }
       break;
     case 'twitch_prediction_cancel':
@@ -6243,6 +6535,90 @@ async function _executeFlowAction(action, ctx) {
       }
       break;
     }
+    case 'stop_flow':
+      throw new _StopFlow();
+    case 'set_variable': {
+      if (p.name) {
+        if (!state.flowVars) state.flowVars = {};
+        state.flowVars[p.name] = p.value ?? '';
+        broadcastFullState();
+      }
+      break;
+    }
+    case 'increment_variable': {
+      if (p.name) {
+        if (!state.flowVars) state.flowVars = {};
+        const cur = Number(state.flowVars[p.name]) || 0;
+        state.flowVars[p.name] = String(cur + (Number(rawP.amount) || 1));
+        broadcastFullState();
+      }
+      break;
+    }
+    case 'reset_variable': {
+      if (!state.flowVars) state.flowVars = {};
+      if (p.name) delete state.flowVars[p.name];
+      else state.flowVars = {};
+      broadcastFullState();
+      break;
+    }
+    case 'twitch_send_chat': {
+      if (p.message && chatManager && chatManager.isConnected) {
+        chatManager.sendMessage(p.message);
+      }
+      break;
+    }
+    case 'send_discord_webhook': {
+      if (!rawP.url) break;
+      const embed = {};
+      if (p.title)   embed.title       = p.title;
+      if (p.message) embed.description = p.message;
+      if (p.color)   embed.color       = parseInt(p.color.replace('#', ''), 16) || 0;
+      const body = { embeds: [embed] };
+      if (p.content) body.content = p.content;
+      try { await axios.post(rawP.url, body, { timeout: 5000 }); }
+      catch(e) { console.warn('[Flow] discord webhook:', e.message); }
+      break;
+    }
+    case 'cycle_variable': {
+      if (p.name && p.list) {
+        if (!state.flowVars) state.flowVars = {};
+        const items = rawP.list.split(',').map(s => s.trim()).filter(Boolean);
+        if (!items.length) break;
+        const cur = state.flowVars[p.name];
+        const idx = items.indexOf(String(cur));
+        state.flowVars[p.name] = items[(idx + 1) % items.length];
+        broadcastFullState();
+      }
+      break;
+    }
+    case 'random_choice': {
+      const ids = (rawP.flowIds || '').split(',').map(s => s.trim()).filter(Boolean);
+      if (!ids.length) break;
+      const picked = ids[Math.floor(Math.random() * ids.length)];
+      const target = (state.flows || []).find(f => f.id === picked && f.enabled);
+      if (target) {
+        for (const a of (target.actions || [])) {
+          if (Number(a.delay) > 0) await new Promise(r => setTimeout(r, Number(a.delay)));
+          try { await _executeFlowAction(a, ctx); } catch(e) { console.error('[Flow] random_choice:', e.message); }
+        }
+      }
+      break;
+    }
+    case 'obs_playback_start':
+      if (obsClient && obsClient.isConnected() && p.inputName) {
+        try { await obsClient.call('TriggerMediaInputAction', { inputName: p.inputName.trim(), mediaAction: 'OBS_WEBSOCKET_MEDIA_INPUT_ACTION_RESTART' }); } catch(e){}
+      }
+      break;
+    case 'obs_playback_stop':
+      if (obsClient && obsClient.isConnected() && p.inputName) {
+        try { await obsClient.call('TriggerMediaInputAction', { inputName: p.inputName.trim(), mediaAction: 'OBS_WEBSOCKET_MEDIA_INPUT_ACTION_STOP' }); } catch(e){}
+      }
+      break;
+    case 'obs_playback_pause':
+      if (obsClient && obsClient.isConnected() && p.inputName) {
+        try { await obsClient.call('TriggerMediaInputAction', { inputName: p.inputName.trim(), mediaAction: 'OBS_WEBSOCKET_MEDIA_INPUT_ACTION_PAUSE' }); } catch(e){}
+      }
+      break;
   }
 }
 
@@ -6347,6 +6723,7 @@ async function _doConnectObs() {
   try {
     await obsClient.connect({ url: state.obs.url, password: obsPassword });
     state.obs.availableScenes = await obsClient.getScenes();
+    state.obs.availableTransitions = await obsClient.getTransitions();
     state.obs.lastError = null;
     try {
       state.obs.replayBufferActive = await obsClient.isReplayBufferActive();
@@ -6369,6 +6746,7 @@ async function disconnectObs() {
   try { await obsClient.disconnect(); } catch (e) { /* ignore */ }
   state.obs.connected = false;
   state.obs.availableScenes = [];
+  state.obs.availableTransitions = [];
   broadcastFullState();
 }
 
@@ -6406,6 +6784,52 @@ function obsSwitchSceneName(name) {
   if (!sceneName) return;
   console.log(`[OBS] Countdown auto-switch → ${sceneName}`);
   obsClient.switchScene(sceneName);
+}
+
+// Opt-in RL scene automation (kickoff / post-game). These are per-trigger, producer-enabled cuts, so
+// they fire regardless of the blanket OBS_AUTO_SWITCH_DISABLED — but still respect the OBS connection,
+// obs.enabled, and AI-director shielding. The caller already checked the trigger's own enable flag.
+// Returns { ok, reason } instead of failing silently — callers broadcast this so a producer can see
+// exactly why an expected cut didn't happen, instead of just "nothing happened."
+function rlSwitchScene(name, reason, transitionName) {
+  const sceneName = (name || '').trim();
+  if (!sceneName) return { ok: false, reason: 'no_scene' };
+  if (!obsClient) return { ok: false, reason: 'obs_not_connected' };
+  if (!state.obs.enabled) return { ok: false, reason: 'obs_disabled' };
+  if (!obsClient.isConnected()) return { ok: false, reason: 'obs_not_connected' };
+  if (aiShielded()) return { ok: false, reason: 'ai_shielded' };
+  const tn = (transitionName || '').trim();
+  console.log(`[OBS] RL auto-switch → ${sceneName} (${reason || 'rl'}${tn ? ', transition: ' + tn : ''})`);
+  if (tn) {
+    obsClient.switchSceneWithTransition(sceneName, tn);
+  } else {
+    obsClient.switchScene(sceneName);
+  }
+  return { ok: true };
+}
+const RL_SCENE_FAIL_MESSAGES = {
+  no_scene: 'no scene selected',
+  obs_not_connected: 'OBS is not connected',
+  obs_disabled: 'OBS integration is disabled (Settings → OBS)',
+  ai_shielded: 'AI director shield is active'
+};
+function broadcastRlSceneResult(phase, sceneName, result) {
+  const message = result.ok
+    ? `Cut to "${sceneName}" (${phase})`
+    : `${phase === 'kickoff' ? 'Kickoff' : 'Post-game'} cut to "${sceneName}" skipped — ${RL_SCENE_FAIL_MESSAGES[result.reason] || result.reason}`;
+  broadcast(bridgeClients, { type: 'rl-scene-result', data: { ok: !!result.ok, phase, message } });
+}
+
+// Reset the held post-game scoreboard back to the live HUD (drop the frozen board). Used by the manual
+// "Clear Scoreboard" button and by the post-game auto-switch (once we've cut away, the board resets so
+// cutting back shows the live HUD, not the stale board).
+function clearPostGameBoard() {
+  if (_postGameTimer) { clearTimeout(_postGameTimer); _postGameTimer = null; }
+  if (_boardLingerTimer) { clearTimeout(_boardLingerTimer); _boardLingerTimer = null; }
+  state.view = 'hud';
+  state.scoreboard = null;
+  broadcast(bridgeClients, { type: 'clear_scoreboard', data: {} });
+  broadcastFullState();
 }
 
 // When the break countdown has both a target time AND a "then" scene, schedule the cut.
@@ -6674,16 +7098,37 @@ function returnToInGameForKickoff() {
   state.awaitingKickoff = false;
   state.scoreboard = null;          // new game kicking off → drop the frozen post-game scoreboard
   const wasBoard = (state.view === 'scoreboard');
+  // If the next kickoff arrives before the post-game→casters timer fired, that timer's own
+  // `state.view === 'scoreboard'` guard (below, in handleMatchEnded) would silently no-op once we
+  // flip state.view to 'hud' here — so cancel it explicitly and say why, instead of letting it
+  // expire later doing nothing with no explanation.
+  if (_postGameTimer) {
+    clearTimeout(_postGameTimer);
+    _postGameTimer = null;
+    broadcast(bridgeClients, { type: 'rl-scene-result', data: { ok: false, phase: 'postgame', message: 'Post-game cut to casters cancelled — the next kickoff started first.' } });
+  }
+  if (_boardLingerTimer) { clearTimeout(_boardLingerTimer); _boardLingerTimer = null; }
+  // Same idea, one step earlier: the winning-goal replay's end (or the fallback timer) never got a
+  // chance to even arm the post-game timer before this kickoff arrived — cancel the wait outright.
+  if (_pendingPostGameFinalize) {
+    _pendingPostGameFinalize = false;
+    if (_pendingFinalizeFallbackTimer) { clearTimeout(_pendingFinalizeFallbackTimer); _pendingFinalizeFallbackTimer = null; }
+    broadcast(bridgeClients, { type: 'rl-scene-result', data: { ok: false, phase: 'postgame', message: 'Post-game cut to casters cancelled — the next kickoff started before the post-game board was even shown.' } });
+  }
+  // _pendingFinalizeDirectTimer (the 800ms "no replay" timer) is intentionally NOT cancelled here:
+  // if it fires after this kickoff, finalizePostGameBoard checks awaitingKickoff and bails out early.
+  // Cancelling it would also cancel it for cases like RoundStarted firing quickly after MatchEnded.
   state.view = 'hud';
   state.inReplay = false;
   broadcastFullState();
-  // the post-game scoreboard was HELD through the wait, so the HUD wasn't reset at match-created —
-  // reset it now, at the kickoff, for the new game.
-  if (wasBoard) broadcast(bridgeClients, { type: 'game_reset', data: { gameNumber: state.game.number } });
+  // Always send game_reset at between-game kickoffs so overlays reset their HUD state.
+  // wasBoard check was removed: after a caster switch clearPostGameBoard already set view='hud',
+  // so wasBoard would be false even though a new game IS starting and the overlay needs resetting.
+  broadcast(bridgeClients, { type: 'game_reset', data: { gameNumber: state.game.number } });
   // Smart Trigger: at the kickoff countdown, cut to the producer-chosen scene if set; otherwise the
   // mapped In-Game scene. (Both respect the master autoSwitch + OBS connection state.)
   const kt = state.obs.kickoff;
-  if (kt && kt.enabled && kt.scene && state.obs.autoSwitch) obsSwitchSceneName(kt.scene);
+  if (kt && kt.enabled && kt.scene) broadcastRlSceneResult('kickoff', kt.scene, rlSwitchScene(kt.scene, 'kickoff', kt.transition));   // opt-in RL kickoff cut (bypasses the disabled global auto-switch)
   else obsSwitch('inGame');   // the RL overlay scene comes up at kickoff, not during "choose teams"
 }
 // Kickoff fallback for stats APIs that don't emit clock_started / countdown events: when we're
@@ -6693,6 +7138,12 @@ function returnToInGameForKickoff() {
 // (game.SecondsRemaining) rather than ClockUpdatedSeconds.
 function maybeReturnForKickoff(prevTime) {
   if (!state.awaitingKickoff) return;
+  // Don't trigger while the post-game board is pending or visible: RL fires match_created almost
+  // immediately after game end and the lobby clock starts ticking (300→299) before finalizePostGameBoard
+  // has had a chance to run. Without this guard, maybeReturnForKickoff fires prematurely, clears
+  // _pendingPostGameFinalize, and the caster-cut timer is never armed for subsequent games.
+  // CountdownBegin / RoundStarted bypass all of these guards (they call returnToInGameForKickoff directly).
+  if (state.view === 'scoreboard' || _pendingPostGameFinalize || _pendingFinalizeDirectTimer) return;
   const t = state.game.time;
   if (typeof t === 'number' && typeof prevTime === 'number' && t < prevTime && t >= 150) {
     console.log('[RL] Kickoff inferred from the running match clock (' + t + 's) — returning to the in-game overlay.');
@@ -6977,16 +7428,96 @@ function handleGoalReplayStart() {
 
 function handleGoalReplayEnd() {
   flowBus.emit('rl_replay_end', {});
-  if (state.view !== 'goal' && !state.inReplay) return;
+  if (state.view !== 'goal' && !state.inReplay && !_pendingPostGameFinalize) return;
+  // If the winning-goal replay ends while the post-game scoreboard is already showing (the finalize
+  // already ran, e.g. via the fallback timer), don't reset the view — it should keep holding.
+  if (state.view === 'scoreboard') { state.inReplay = false; state.currentGoal = null; return; }
 
-  state.view = 'hud';
   state.inReplay = false;
   state.currentGoal = null;
+  // MatchEnded fired while this replay was still playing — THIS is the actual end of the winning
+  // goal's replay, so finalize the post-game board + arm the caster-cut timer now (see handleMatchEnded).
+  if (_pendingPostGameFinalize) {
+    finalizePostGameBoard();
+    return;
+  }
+
+  state.view = 'hud';
   broadcast(bridgeClients, { type: 'view_change', data: { view: 'hud' } });
   obsSwitch('inGame');
 }
 
 let _postGameTimer = null;
+let _boardLingerTimer = null;           // 2s delay after OBS cut so the overlay holds through the transition
+let _pendingPostGameFinalize = false;   // MatchEnded fired but the winning-goal replay is still playing
+let _pendingFinalizeFallbackTimer = null;
+let _pendingFinalizeDirectTimer = null; // tracks the 800ms "no replay" setTimeout so it can be cancelled at kickoff
+
+// Freeze the final scoreboard and arm the post-game→casters cut. Called either almost immediately
+// (no replay was in progress when MatchEnded fired) or from handleGoalReplayEnd() once the winning
+// goal's replay actually finishes — NOT a fixed guess at how long that replay takes. Real RL replay
+// durations vary widely (~5-20s+ depending on the play and highlight settings); anchoring to the
+// actual replay-end event is both what was asked for and the only way the delay the producer
+// configured means what they think it means (measured from when they can actually see the board).
+function finalizePostGameBoard() {
+  if (_pendingFinalizeFallbackTimer) { clearTimeout(_pendingFinalizeFallbackTimer); _pendingFinalizeFallbackTimer = null; }
+  _pendingPostGameFinalize = false;
+  _pendingFinalizeDirectTimer = null;   // clear in case called from the replay path while the direct timer still refs
+  // If the kickoff already fired (RoundStarted / CountdownBegin arrived before this ran), skip:
+  // we'd set view='scoreboard' mid-game and arm a stale caster-cut timer.
+  if (!state.awaitingKickoff) return;
+
+  state.view = 'scoreboard';
+  // Snapshot the final scoreboard so it survives the next match_created (which clears the live cache)
+  // and so the overlay can re-render it from a full_state on reload/reconnect (not just the view_change).
+  state.scoreboard = {
+    players: Object.values(state.playerCache || {}).map(p => ({ ...p })),
+    blueScore: state.game.blueScore ?? 0,
+    orangeScore: state.game.orangeScore ?? 0,
+    series: { ...state.series }
+  };
+  broadcast(bridgeClients, {
+    type: 'view_change',
+    data: { view: 'scoreboard', series: state.series, playerCache: state.playerCache }
+  });
+  obsSwitch('postGame');
+
+  // Cancel any stray timer left over from a previous cycle before setting the new one.
+  if (_postGameTimer) { clearTimeout(_postGameTimer); _postGameTimer = null; }
+  // Opt-in RL post-game scene cut: after the board has been up for delaySec, cut OBS to the chosen
+  // scene (e.g. caster desk). Only switches the OBS scene — the overlay scoreboard keeps holding
+  // until returnToInGameForKickoff() fires at the next kickoff (which broadcasts game_reset and
+  // clears the board). Cutting back to the RL overlay scene then shows the live HUD, not stale data.
+  const pg = state.obs.postGame;
+  if (pg && pg.enabled && pg.scene && pg.delaySec > 0) {
+    broadcast(bridgeClients, { type: 'rl-scene-result', data: { ok: true, phase: 'postgame', message: `Post-game cut to "${pg.scene}" armed for ${pg.delaySec}s.` } });
+    _postGameTimer = setTimeout(() => {
+      _postGameTimer = null;
+      if (state.view === 'scoreboard') {
+        const result = rlSwitchScene(pg.scene, 'post-game', pg.transition);
+        broadcastRlSceneResult('postgame', pg.scene, result);
+        if (result.ok) {
+          // Set server state immediately so all guards (maybeReturnForKickoff, finalizePostGameBoard)
+          // work correctly for the next game. Delay only the overlay broadcasts so the scoreboard
+          // content stays visible on the overlay through the OBS transition (stinger/fade).
+          state.view = 'hud';
+          state.scoreboard = null;
+          _boardLingerTimer = setTimeout(() => {
+            _boardLingerTimer = null;
+            broadcast(bridgeClients, { type: 'clear_scoreboard', data: {} });
+            broadcastFullState();
+          }, 2000);
+        }
+      } else {
+        // Shouldn't normally reach here — returnToInGameForKickoff() cancels this timer outright
+        // when the next kickoff beats it — but report it if it ever does (e.g. some other code
+        // path changed state.view in between).
+        broadcast(bridgeClients, { type: 'rl-scene-result', data: { ok: false, phase: 'postgame', message: `Post-game cut to "${pg.scene}" skipped — view was "${state.view}", not "scoreboard".` } });
+      }
+    }, pg.delaySec * 1000);
+  }
+}
+
 function handleMatchEnded(data) {
   resetOvertimeTrigger();   // game over — clear the OT latch so the next game can trigger its own
   state.awaitingKickoff = true;   // we're in post-game — return to the in-game overlay on the next kickoff (clock_started)
@@ -7067,32 +7598,27 @@ function handleMatchEnded(data) {
   saveAppState();
   broadcastFullState();
 
-  setTimeout(() => {
-    // Freeze playerCache as final scoreboard data
-    state.view = 'scoreboard';
-    // Snapshot the final scoreboard so it survives the next match_created (which clears the live cache)
-    // and so the overlay can re-render it from a full_state on reload/reconnect (not just the view_change).
-    state.scoreboard = {
-      players: Object.values(state.playerCache || {}).map(p => ({ ...p })),
-      blueScore: state.game.blueScore ?? 0,
-      orangeScore: state.game.orangeScore ?? 0,
-      series: { ...state.series }
-    };
-    broadcast(bridgeClients, {
-      type: 'view_change',
-      data: {
-        view: 'scoreboard',
-        series: state.series,
-        playerCache: state.playerCache
+  // Finalize once the winning-goal replay actually ends — not a fixed guess. If no replay is in
+  // progress right now (MatchEnded arrived after ReplayEnd already fired, or there's no replay to
+  // show), there's nothing to wait for, so finalize almost immediately (a short buffer for any
+  // trailing stat updates to land, same as the old delay's intent — just far shorter, since we're
+  // no longer trying to also outlast an in-progress replay with it).
+  if (state.inReplay || state.view === 'goal') {
+    _pendingPostGameFinalize = true;
+    // Safety net: if the API never sends a clean replay-end for this particular replay, finalize
+    // anyway after a generous ceiling so post-game→casters automation can't be stuck waiting forever.
+    _pendingFinalizeFallbackTimer = setTimeout(() => {
+      if (_pendingPostGameFinalize) {
+        console.log('[RL] Winning-goal replay-end never arrived — finalizing post-game board via fallback timer.');
+        finalizePostGameBoard();
       }
-    });
-    obsSwitch('postGame');
-
-    // The post-game scoreboard HOLDS on screen until the NEXT game's kickoff (clock starts /
-    // countdown begins → returnToInGameForKickoff). No timed auto-switch to the caster desk, so it
-    // can't be pulled off early. Cancel any stray timer from a previous cycle.
-    if (_postGameTimer) { clearTimeout(_postGameTimer); _postGameTimer = null; }
-  }, 3000);
+    }, 20000);
+  } else {
+    _pendingFinalizeDirectTimer = setTimeout(() => {
+      _pendingFinalizeDirectTimer = null;
+      finalizePostGameBoard();
+    }, 800);
+  }
 }
 
 // Normalize a raw Twitch API prediction result into our internal shape.
@@ -7248,8 +7774,11 @@ function startPredictionPolling() {
 }
 
 function handleMatchCreated(data) {
-  // New game starts — cancel any pending post-game auto-switch, reset game data, keep series
-  if (_postGameTimer) { clearTimeout(_postGameTimer); _postGameTimer = null; }
+  // New game starts — reset game data, keep series. Do NOT cancel _postGameTimer here:
+  // RL fires match_created almost immediately after game end, before the post-game delay
+  // has elapsed. Do NOT cancel _postGameTimer here — let it run so OBS cuts to the caster
+  // scene on schedule. If the kickoff fires first, state.view flips to 'hud' and the timer
+  // guard prevents a stale mid-game switch.
   // If a game just finished, the post-game scoreboard is up — KEEP it through the wait / "choose
   // teams" and only swap to the in-game overlay at the next KICKOFF (returnToInGameForKickoff).
   const holdBoard = (state.view === 'scoreboard');
@@ -7278,8 +7807,8 @@ function handleMatchCreated(data) {
 
   // Auto-prediction: create "Who will win?" using the active team names
   if (state.twitch.connected && predictionManager && state.twitch.predictions.settings.autoCreate) {
-    const blueTeam   = state.teams.blue.name   || 'Blue';
-    const orangeTeam = state.teams.orange.name || 'Orange';
+    const blueTeam   = (state.teams.blue.name   || 'Blue').slice(0, 25);
+    const orangeTeam = (state.teams.orange.name || 'Orange').slice(0, 25);
     const title = state.twitch.predictions.settings.template === 'teams'
       ? `Game ${state.game.number}: Who will win?`
       : 'Who will win this game?';
@@ -8138,7 +8667,8 @@ function handleControlMessage(msg, ws) {
         side: (i.side === 'orange' || i.side === 'blue') ? i.side : (cur.side ?? 'blue'),
         title: typeof i.title === 'string' ? i.title : (cur.title ?? ''),
         style: [1, 2].includes(Number(i.style)) ? Number(i.style) : (cur.style ?? 1),
-        showFooter: ('showFooter' in i) ? !!i.showFooter : (cur.showFooter ?? true)
+        showFooter: ('showFooter' in i) ? !!i.showFooter : (cur.showFooter ?? false),
+        showRealName: ('showRealName' in i) ? !!i.showRealName : (cur.showRealName ?? false)
       };
       saveAppState();
       broadcastFullState();
@@ -8829,39 +9359,30 @@ function handleControlMessage(msg, ws) {
       break;
     }
 
-    // ── Playout playlists (commercials / intros / outros) ────────────────────
-    // Sequences of clip refs and/or media-file paths pushed live through the replay program bus.
-    case 'save_playout': {
-      const d = msg.data || {};
-      const VALID_KIND = new Set(['commercial', 'intro', 'outro', 'general']);
-      const items = Array.isArray(d.items) ? d.items.slice(0, 100).map((it) => {
-        if (it && it.type === 'clip' && it.id) return { type: 'clip', id: String(it.id).slice(0, 64), name: (it.name || '').toString().slice(0, 120) };
-        if (it && it.type === 'file' && it.path) return { type: 'file', path: String(it.path).slice(0, 1000), name: (it.name || '').toString().slice(0, 120), duration: Math.max(1, Math.min(3600, Math.round(Number(it.duration)) || 15)) };
-        return null;
-      }).filter(Boolean) : [];
-      const id = (d.id || '').toString() || ('po_' + Math.random().toString(36).slice(2, 10));
-      const entry = {
-        id,
-        name: (d.name || 'Playlist').toString().slice(0, 80),
-        kind: VALID_KIND.has(d.kind) ? d.kind : 'general',
-        loop: !!d.loop,
-        programScene: (d.programScene || '').toString().slice(0, 120),   // OBS scene to play on
-        returnScene: (d.returnScene || '').toString().slice(0, 120),     // OBS scene to finish to
-        items
-      };
-      if (!Array.isArray(state.playouts)) state.playouts = [];
-      const idx = state.playouts.findIndex((p) => p.id === id);
-      if (idx >= 0) state.playouts[idx] = entry; else state.playouts.push(entry);
+    case 'set_background': {
+      const bg = msg.data || {};
+      if (['solid', 'gradient', 'image'].includes(bg.type)) state.background.type = bg.type;
+      if (typeof bg.color1 === 'string') state.background.color1 = bg.color1.slice(0, 20);
+      if (typeof bg.color2 === 'string') state.background.color2 = bg.color2.slice(0, 20);
+      if (typeof bg.angle === 'number') state.background.angle = Math.max(0, Math.min(360, bg.angle));
+      if (typeof bg.imageUrl === 'string') state.background.imageUrl = bg.imageUrl.slice(0, 2000);
       saveAppState();
       broadcastFullState();
       break;
     }
-    case 'delete_playout': {
-      if (Array.isArray(state.playouts)) {
-        state.playouts = state.playouts.filter((p) => p.id !== msg.data?.id);
-        saveAppState();
-        broadcastFullState();
-      }
+
+    case 'set_brand_social_preset': {
+      const kitId = state.activeBrandKitId;
+      const kit = kitId && savedBrandKits.find((k) => k.id === kitId);
+      // No active brand kit → save to a state-level fallback instead of silently dropping it (a
+      // kit-scoped preset only makes sense once kits are in use; most setups never activate one).
+      const target = kit ? (kit.socialPreset || (kit.socialPreset = {})) : (state.socialPreset || (state.socialPreset = {}));
+      const p = msg.data || {};
+      if (typeof p.bgImageUrl === 'string') target.bgImageUrl = p.bgImageUrl.slice(0, 5000000);
+      if (typeof p.bgStyle === 'string' && ['auto', 'dark', 'spotlight'].includes(p.bgStyle)) target.bgStyle = p.bgStyle;
+      if (typeof p.presentedByEnabled === 'boolean') target.presentedByEnabled = p.presentedByEnabled;
+      saveAppState();
+      broadcastFullState();
       break;
     }
 
@@ -8994,31 +9515,48 @@ function handleControlMessage(msg, ws) {
       break;
     }
 
-    // ── MY EVENTS — add/remove a start.gg event to the app's saved list ──────
+    // ── MY EVENTS — add/remove an event to the app's saved list. Start.gg events auto-sync their
+    // roster (see refreshMyEvent) every ~3 min; Challonge/NXGEN events are saved as a reference —
+    // no recurring sync loop for them yet, so `eventSlug` is left blank for those (refreshMyEvent's
+    // own `!ev.eventSlug` guard already skips them safely).
     case 'add_my_event': {
       const d = msg.data || {};
-      const eventSlug = (d.eventSlug || '').toString().trim();
-      if (!eventSlug) break;
+      const platform = ['challonge', 'nxgen', 'manual'].includes(d.platform) ? d.platform : 'startgg';
+      const eventSlug = platform === 'startgg' ? (d.eventSlug || '').toString().trim() : '';
+      const platformSlug = platform === 'startgg' ? '' : (d.platformSlug || '').toString().trim();
+      if (platform === 'startgg' ? !eventSlug : !platformSlug) break;
       if (!Array.isArray(state.myEvents)) state.myEvents = [];
-      if (state.myEvents.some((e) => e.eventSlug === eventSlug)) { ws.send(JSON.stringify({ type: 'event-result', data: { ok: true, message: 'Already in MY EVENTS.' } })); break; }
+      const dupe = platform === 'startgg'
+        ? state.myEvents.some((e) => e.eventSlug === eventSlug)
+        : state.myEvents.some((e) => e.platform === platform && e.platformSlug === platformSlug);
+      if (dupe) { ws.send(JSON.stringify({ type: 'event-result', data: { ok: true, message: 'Already in MY EVENTS.' } })); break; }
       state.myEvents.unshift({
         id: 'ev' + Math.random().toString(36).slice(2, 10),
-        tournamentSlug: (d.tournamentSlug || eventSlug.replace(/\/event\/.*$/, '')).toString(),
+        platform,
+        tournamentSlug: platform === 'startgg' ? (d.tournamentSlug || eventSlug.replace(/\/event\/.*$/, '')).toString() : '',
         eventSlug,
+        platformSlug,
         name: (d.name || '').toString().slice(0, 160),
         tournamentName: (d.tournamentName || '').toString().slice(0, 160),
         game: (d.game || '').toString().slice(0, 80),
         numEntrants: Number(d.numEntrants) || 0,
         startAt: d.startAt || null,
-        image: (d.image || '').toString().slice(0, 600),
+        // Platform logos are short URLs; a manually-uploaded logo is a full base64 data URI —
+        // don't truncate either (a truncated data URI is just corrupt image data).
+        image: (d.image || '').toString(),
+        url: (d.url || '').toString().slice(0, 600),
         addedAt: Date.now(),
         seeding: null
       });
       saveAppState();
       broadcastFullState();
       ws.send(JSON.stringify({ type: 'event-result', data: { ok: true, message: `Added "${d.name || 'event'}" to MY EVENTS.` } }));
-      // Pull its roster (teams + players + seeds) right away so seeding has data immediately.
-      { const added = state.myEvents.find((e) => e.eventSlug === eventSlug); if (added) refreshMyEvent(added).then((ok) => { if (ok) { saveAppState(); broadcastFullState(); } }).catch(() => {}); }
+      // Pull its roster (teams + players + seeds) right away so seeding has data immediately —
+      // start.gg only; Challonge/NXGEN entries keep whatever summary info was saved above.
+      if (platform === 'startgg') {
+        const added = state.myEvents.find((e) => e.eventSlug === eventSlug);
+        if (added) refreshMyEvent(added).then((ok) => { if (ok) { saveAppState(); broadcastFullState(); } }).catch(() => {});
+      }
       break;
     }
     case 'remove_my_event': {
@@ -9068,7 +9606,18 @@ function handleControlMessage(msg, ws) {
             entrantId: (x.entrantId || '').toString(),
             name: (x.name || '').toString().slice(0, 160),
             seedNum: i + 1,
-            players: Array.isArray(x.players) ? x.players.slice(0, 12).map((p) => ({ gamerTag: (p.gamerTag || '').toString().slice(0, 80), rank: (p.rank || '').toString().slice(0, 40) })) : []
+            players: Array.isArray(x.players) ? x.players.slice(0, 12).map((p) => ({
+              gamerTag: (p.gamerTag || '').toString().slice(0, 80),
+              rank:     (p.rank    || '').toString().slice(0, 40),
+              epic:     (p.epic    || '').toString().slice(0, 80),
+              steam:    (p.steam   || '').toString().slice(0, 80),
+              alts:     Array.isArray(p.alts) ? p.alts.slice(0, 8).map((a) => ({
+                          platform: (a && a.platform ? a.platform : '').toString().slice(0, 20),
+                          username: (a && a.username ? a.username : '').toString().slice(0, 80),
+                        })).filter((a) => a.username) : [],
+              startggSlug:     p.startggSlug     ? String(p.startggSlug).slice(0, 120)  : null,
+              startggPlayerId: p.startggPlayerId ? String(p.startggPlayerId).slice(0, 40) : null,
+            })) : []
           })) : []
         };
         saveAppState();
@@ -9164,22 +9713,29 @@ function handleControlMessage(msg, ws) {
     case 'save_team': {
       const { name, logo, oldName, color } = msg.data;
       const players = Array.isArray(msg.data.players) ? msg.data.players : null;
+      const favorite = typeof msg.data.favorite === 'boolean' ? msg.data.favorite : undefined;
+      // Match the library entry by NORMALIZED name (trim + case-insensitive) so a quick-save of a
+      // match team (whose name the panel uppercases) UPDATES the existing "Team Alpha" instead of
+      // spawning a duplicate "TEAM ALPHA". Only an explicit rename (oldName present) changes the
+      // stored casing; a plain re-save keeps the library entry's own name.
+      const _tn = (s) => (s || '').trim().toLowerCase();
       let idx = -1;
-      if (oldName) idx = savedTeams.findIndex(t => t.name === oldName);
-      if (idx === -1) idx = savedTeams.findIndex(t => t.name === name);
+      if (oldName) idx = savedTeams.findIndex(t => _tn(t.name) === _tn(oldName));
+      if (idx === -1) idx = savedTeams.findIndex(t => _tn(t.name) === _tn(name));
 
       if (idx >= 0) {
         const prev = savedTeams[idx] || {};
         savedTeams[idx] = {
           ...prev,
-          name,
+          name: oldName ? name : (prev.name || name),
           logo: logo !== undefined ? logo : prev.logo,
           color: color !== undefined ? color : prev.color,
           // Preserve the existing roster unless an explicit players array was sent.
-          players: players !== null ? players : (prev.players || [])
+          players: players !== null ? players : (prev.players || []),
+          ...(favorite !== undefined && { favorite })
         };
       } else {
-        savedTeams.push({ name, logo: logo || null, color: color || null, players: players || [] });
+        savedTeams.push({ name, logo: logo || null, color: color || null, players: players || [], ...(favorite !== undefined && { favorite }) });
       }
 
       saveTeams();
@@ -9202,8 +9758,16 @@ function handleControlMessage(msg, ws) {
             platform: p.platform || '',
             platformId: p.platformId || '',
             camSlot: p.camSlot || p.assignedCamera || '',
-            startgg: p.startgg || '',     // carry profile links to the live team
+            startgg: p.startgg || '',
             sixmans: p.sixmans || '',
+            status: p.status || 'starter',
+            photo: p.photo || '',
+            discord: p.discord || '',
+            twitter: p.twitter || '',
+            twitch: p.twitch || '',
+            instagram: p.instagram || '',
+            tiktok: p.tiktok || '',
+            youtube: p.youtube || '',
           }));
         }
         saveAppState();
@@ -9342,15 +9906,7 @@ function handleControlMessage(msg, ws) {
         if (!state.teams[side].players) state.teams[side].players = [];
         const newPlayer = { id: Math.random().toString(36).substr(2, 9), ...player };
         state.teams[side].players.push(newPlayer);
-
-        // Also save to savedTeams if the team exists there
-        const teamName = state.teams[side].name;
-        const savedTeam = savedTeams.find(t => t.name === teamName);
-        if (savedTeam) {
-          if (!savedTeam.players) savedTeam.players = [];
-          savedTeam.players.push(newPlayer);
-          saveTeams();
-        }
+        persistRosterToLibrary(side);   // mirror to the saved-team library (create/update by name)
 
         saveAppState();
         broadcastFullState();
@@ -9364,15 +9920,7 @@ function handleControlMessage(msg, ws) {
         const player = state.teams[side].players?.find(p => p.id === playerId);
         if (player) {
           Object.assign(player, playerData);
-
-          // Also update in savedTeams
-          const teamName = state.teams[side].name;
-          const savedTeam = savedTeams.find(t => t.name === teamName);
-          if (savedTeam && savedTeam.players) {
-            const savedPlayer = savedTeam.players.find(p => p.id === playerId);
-            if (savedPlayer) Object.assign(savedPlayer, playerData);
-            saveTeams();
-          }
+          persistRosterToLibrary(side);   // mirror the edit to the saved-team library
 
           saveAppState();
           broadcastFullState();
@@ -9385,14 +9933,7 @@ function handleControlMessage(msg, ws) {
       const { side, playerId } = msg.data || {};
       if (side && state.teams[side]) {
         state.teams[side].players = state.teams[side].players?.filter(p => p.id !== playerId) || [];
-
-        // Also remove from savedTeams
-        const teamName = state.teams[side].name;
-        const savedTeam = savedTeams.find(t => t.name === teamName);
-        if (savedTeam && savedTeam.players) {
-          savedTeam.players = savedTeam.players.filter(p => p.id !== playerId);
-          saveTeams();
-        }
+        persistRosterToLibrary(side);   // mirror the removal to the saved-team library
 
         saveAppState();
         broadcastFullState();
@@ -9950,7 +10491,7 @@ function handleControlMessage(msg, ws) {
       state.ticker = { visible: false, messages: [], speed: 40, source: 'manual', sponsor: '' };
       state.spotlight = { visible: false, playerName: '' };
       state.winner = { visible: false, side: '', name: '', logo: null, color: '', subtitle: '' };
-      state.intro  = { visible: false, side: 'blue', title: '', style: 1, showFooter: true };
+      state.intro  = { visible: false, side: 'blue', title: '', style: 1, showFooter: false };
       state.veto   = { visible: false, title: state.veto.title || '', maps: [] };
       state.draft  = { ...state.draft, visible: false, ops: [], turn: null, complete: false };
       state.bestOf = 5;
@@ -10080,6 +10621,19 @@ function handleControlMessage(msg, ws) {
           state.startgg.lastError = e.message;
           broadcastFullState();
           ws.send(JSON.stringify({ type: 'startgg-result', data: { ok: false, message: e.message } }));
+        }
+      })();
+      break;
+    }
+    case 'startgg_fetch_team_queue': {
+      (async () => {
+        try {
+          const { teamName, tournamentSlug } = msg.data || {};
+          if (tournamentSlug) state.startgg.tournamentSlug = tournamentSlug.trim();
+          const r = await fetchTeamQueue(teamName, state.startgg.tournamentSlug);
+          ws.send(JSON.stringify({ type: 'startgg-team-result', data: { ok: true, message: `Found ${r.count} match(es).` } }));
+        } catch (e) {
+          ws.send(JSON.stringify({ type: 'startgg-team-result', data: { ok: false, message: e.message } }));
         }
       })();
       break;
@@ -10381,6 +10935,41 @@ function handleControlMessage(msg, ws) {
       break;
     }
 
+    // ── RL scene automation (Match ▸ Teams panel) — opt-in kickoff + post-game OBS scene cuts ─────
+    case 'set_rl_scene_automation': {
+      const p = msg.data || {};
+      if (p.kickoff && typeof p.kickoff === 'object') {
+        state.obs.kickoff = {
+          enabled: !!p.kickoff.enabled,
+          scene: typeof p.kickoff.scene === 'string' ? p.kickoff.scene.trim() : '',
+          transition: typeof p.kickoff.transition === 'string' ? p.kickoff.transition.trim() : ''
+        };
+      }
+      if (p.postGame && typeof p.postGame === 'object') {
+        state.obs.postGame = {
+          enabled: !!p.postGame.enabled,
+          scene: typeof p.postGame.scene === 'string' ? p.postGame.scene.trim() : '',
+          delaySec: Math.max(1, Math.min(120, Math.round(Number(p.postGame.delaySec) || 20))),
+          transition: typeof p.postGame.transition === 'string' ? p.postGame.transition.trim() : ''
+        };
+      }
+      saveAppState();
+      broadcastFullState();
+      break;
+    }
+
+    // Manual "clear the post-game board now" (it otherwise holds until the next kickoff).
+    case 'clear_scoreboard': {
+      clearPostGameBoard();
+      break;
+    }
+
+    case 'set_rl_hide_ui': {
+      state.rlHudHidden = !!(msg.data && msg.data.hidden);
+      broadcastFullState();
+      break;
+    }
+
     // ── OBS WebSocket ────────────────────────────────────────────────────
     case 'set_obs_settings': {
       const payload = msg.data || {};
@@ -10399,12 +10988,10 @@ function handleControlMessage(msg, ws) {
       if (typeof payload.postGameToCastersSec === 'number') {
         state.obs.postGameToCastersSec = Math.max(0, Math.min(120, Math.round(payload.postGameToCastersSec)));
       }
-      if (payload.kickoff && typeof payload.kickoff === 'object') {
-        state.obs.kickoff = {
-          enabled: !!payload.kickoff.enabled,
-          scene: typeof payload.kickoff.scene === 'string' ? payload.kickoff.scene.trim() : ''
-        };
-      }
+      // state.obs.kickoff is intentionally NOT settable from here — it's owned exclusively by
+      // 'set_rl_scene_automation' (Match — Teams gear panel). This handler used to also accept a
+      // `kickoff` field, which a hidden/unreachable duplicate control on this page sent on every
+      // save with default (disabled) values, silently resetting the real setting each time.
       if (payload.scenes && typeof payload.scenes === 'object') {
         state.obs.scenes = { ...state.obs.scenes, ...payload.scenes };
       }
@@ -10550,40 +11137,68 @@ function handleControlMessage(msg, ws) {
     // ── Replay to screen (browser source) ───────────────────────────────
     case 'replay_play': {
       const p = msg.data || {};
-      const bus = p.bus === 'preview' ? 'preview' : 'program';
-      const url = typeof p.url === 'string' ? p.url.trim() : '';
-      if (!url) {
+      // 'preview'/'program' are the two fixed buses; a playlist given its OWN dedicated browser
+      // source (replay-player.html?playlist=<id>) sends bus:'pl_<id>' — that must pass through
+      // as-is, not collapse into 'program', or the dedicated source never receives anything (the
+      // whole point of giving it its own bus is independence from the main program output).
+      const bus = (typeof p.bus === 'string' && p.bus.trim()) ? p.bus.trim() : 'program';
+      const rawUrl = typeof p.url === 'string' ? p.url.trim() : '';
+      if (!rawUrl) {
         ws.send(JSON.stringify({ type: 'obs-result', data: { ok: false, message: 'No replay URL to play.' } }));
         break;
       }
-      state.replay[bus] = {
-        url,
-        name: typeof p.name === 'string' ? p.name : '',
-        loop: !!p.loop,
-        playing: true,
-        trimIn: typeof p.trimIn === 'number' ? p.trimIn : 0,
-        trimOut: typeof p.trimOut === 'number' ? p.trimOut : null,
-        // transition is a tiny string and safe to persist in full_state; the logo image is
-        // forwarded only on this live message (never stored) so no blob enters the broadcast.
-        transition: typeof p.transition === 'string' ? p.transition : 'cut'
+
+      const commit = (url) => {
+        state.replay[bus] = {
+          url,
+          name: typeof p.name === 'string' ? p.name : '',
+          loop: !!p.loop,
+          playing: true,
+          trimIn: typeof p.trimIn === 'number' ? p.trimIn : 0,
+          trimOut: typeof p.trimOut === 'number' ? p.trimOut : null,
+          // transition is a tiny string and safe to persist in full_state; the logo image is
+          // forwarded only on this live message (never stored) so no blob enters the broadcast.
+          transition: typeof p.transition === 'string' ? p.transition : 'cut'
+        };
+        broadcast(bridgeClients, { type: 'replay_play', data: { bus, ...state.replay[bus], transitionLogo: typeof p.transitionLogo === 'string' ? p.transitionLogo : '', stinger: typeof p.stinger === 'string' ? p.stinger : '' } });
+        broadcastFullState();
+        // User-triggered replay — switch OBS to the target scene.
+        // p.scene comes from the "Program scene" dropdown on the Replays page (or per-playlist override).
+        // Falls back to the globally-mapped 'replay' scene key in OBS settings.
+        // Note: we bypass obsSwitch() here intentionally — this is a manual producer action,
+        // not an automatic game-event switch, so OBS_AUTO_SWITCH_DISABLED must not block it.
+        if (bus === 'program') {
+          const sc = (typeof p.scene === 'string' ? p.scene.trim() : '')
+            || (state.obs && state.obs.scenes && state.obs.scenes.replay || '').trim();
+          if (sc && obsClient && obsClient.isConnected()) { obsClient.switchScene(sc); }
+        }
       };
-      broadcast(bridgeClients, { type: 'replay_play', data: { bus, ...state.replay[bus], transitionLogo: typeof p.transitionLogo === 'string' ? p.transitionLogo : '', stinger: typeof p.stinger === 'string' ? p.stinger : '' } });
-      broadcastFullState();
-      // User-triggered replay — switch OBS to the target scene.
-      // p.scene comes from the "Program scene" dropdown on the Replays page (or per-playlist override).
-      // Falls back to the globally-mapped 'replay' scene key in OBS settings.
-      // Note: we bypass obsSwitch() here intentionally — this is a manual producer action,
-      // not an automatic game-event switch, so OBS_AUTO_SWITCH_DISABLED must not block it.
-      if (bus === 'program') {
-        const sc = (typeof p.scene === 'string' ? p.scene.trim() : '')
-          || (state.obs && state.obs.scenes && state.obs.scenes.replay || '').trim();
-        if (sc && obsClient && obsClient.isConnected()) { obsClient.switchScene(sc); }
+
+      // Raw replay-buffer/highlight clips are often H.264 High-Profile with heavy B-frame usage —
+      // fine for storage, expensive for OBS's own Browser Source (CEF) to decode in real time
+      // (continuous lag/dropped frames a normal browser tab doesn't show). Transparently swap in a
+      // fast, decode-friendly baseline transcode before going to air — cached by source path, so
+      // repeat pushes of the same clip are instant. Montage exports (a different URL/route, already
+      // a normal CRF encode) skip this; only the raw /api/clips/file route is affected.
+      const clipMatch = /^(.*)\/api\/clips\/file\?(?:.*&)?path=([^&]+)/.exec(rawUrl);
+      const clipPath = clipMatch ? (() => { try { return decodeURIComponent(clipMatch[2]); } catch (e) { return null; } })() : null;
+      if (clipPath && clipSystem) {
+        if (!clipSystem.isAirPrepReady(clipPath)) {
+          ws.send(JSON.stringify({ type: 'replay_preparing', data: { bus } }));
+        }
+        clipSystem.prepareForAir(clipPath).then((preparedPath) => {
+          const url = (preparedPath === clipPath) ? rawUrl : `${clipMatch[1]}/api/clips/file?path=${encodeURIComponent(preparedPath)}`;
+          commit(url);
+        }).catch(() => commit(rawUrl));
+      } else {
+        commit(rawUrl);
       }
       break;
     }
 
     case 'replay_stop': {
-      const bus = (msg.data && msg.data.bus) === 'preview' ? 'preview' : 'program';
+      const p = msg.data || {};
+      const bus = (typeof p.bus === 'string' && p.bus.trim()) ? p.bus.trim() : 'program';
       state.replay[bus] = { url: '', name: '', loop: false, playing: false };
       broadcast(bridgeClients, { type: 'replay_stop', data: { bus } });
       broadcastFullState();
@@ -10768,6 +11383,37 @@ function handleControlMessage(msg, ws) {
       break;
     }
 
+    case 'reset_flow_var': {
+      const varName = msg.data && msg.data.name;
+      if (!state.flowVars) state.flowVars = {};
+      if (varName) delete state.flowVars[varName];
+      else state.flowVars = {};
+      broadcastFullState();
+      break;
+    }
+
+    case 'flow_dry_run': {
+      const drId = msg.data && msg.data.id;
+      const drFlow = (state.flows || []).find(f => f.id === drId);
+      if (!drFlow) break;
+      const drLog = { flowId: drId, flowName: drFlow.name, conditions: [], actions: [], conditionsPassed: false };
+      // Evaluate conditions
+      const conds = drFlow.conditions || [];
+      drLog.conditions = conds.map(c => ({
+        type: c.type, params: c.params || {},
+        passed: _evalCondition(c)
+      }));
+      drLog.conditionsPassed = !conds.length || drLog.conditions.every(c => c.passed);
+      // Describe each action (with resolved tokens, no execution)
+      const mockCtx = {};
+      drLog.actions = (drFlow.actions || []).map((a, i) => {
+        const rp = Object.fromEntries(Object.entries(a.params || {}).map(([k,v]) => [k, typeof v === 'string' ? _substituteTokens(v, mockCtx) : v]));
+        return { index: i, type: a.type, delay: a.delay || 0, rawParams: a.params || {}, resolvedParams: rp };
+      });
+      ws.send(JSON.stringify({ type: 'flow_dry_run_result', data: drLog }));
+      break;
+    }
+
     // Hard-reload every connected overlay/browser source — busts OBS's in-memory cache so they
     // pick up freshly-served code (used after overlay updates that OBS would otherwise keep stale).
     case 'reload_overlays': {
@@ -10832,7 +11478,7 @@ function handleControlMessage(msg, ws) {
     case 'fetch_bracket': {
       (async () => {
         try {
-          const slug = (msg.data?.eventSlug || state.bracket.eventSlug || '').trim();
+          const slug = (msg.data?.eventSlug || state.bracket.eventSlug || state.startgg.eventSlug || '').trim();
           const result = await fetchBracket(slug);
           const label = result.type ? result.type.replace(/_/g, ' ').toLowerCase() : 'bracket';
           ws.send(JSON.stringify({
@@ -11297,6 +11943,30 @@ function handleControlMessage(msg, ws) {
       break;
     }
 
+    case 'montage_save_export': {
+      if (!clipSystem || !msg.data?.montageId) break;
+      const _saveMontage = (clipSystem.getState().montages || []).find((x) => x.id === msg.data.montageId);
+      const _savePath = _saveMontage && _saveMontage.outputPath;
+      const _saveReply = (ok, message) => { try { ws.send(JSON.stringify({ type: 'montage_save_result', data: { ok, message } })); } catch {} };
+      if (!_savePath) { _saveReply(false, 'No encoded file found — encode the playlist first.'); break; }
+      if (!fs.existsSync(_savePath)) { _saveReply(false, 'Encoded file not found on disk.'); break; }
+      const _saveExt = path.extname(_savePath) || '.mp4';
+      const _saveName = (_saveMontage.name || 'playlist').replace(/[<>:"/\\|?*]/g, '_') + _saveExt;
+      const _saveDesktop = (() => { try { return _electronApp.getPath('desktop'); } catch { return os.homedir(); } })();
+      dialog.showSaveDialog({
+        title: 'Save Encoded Playlist',
+        defaultPath: path.join(_saveDesktop, _saveName),
+        filters: [{ name: 'Video', extensions: [_saveExt.replace('.', '')] }]
+      }).then(({ canceled, filePath }) => {
+        if (canceled || !filePath) return;
+        fs.copyFile(_savePath, filePath, (err) => {
+          if (err) _saveReply(false, 'Save failed: ' + err.message);
+          else _saveReply(true, 'Saved to ' + filePath);
+        });
+      }).catch((e) => _saveReply(false, 'Dialog error: ' + e.message));
+      break;
+    }
+
     case 'montage_encode': {
       if (clipSystem && msg.data?.montageId) {
         const m = clipSystem.getState().montages.find((x) => x.id === msg.data.montageId);
@@ -11633,6 +12303,14 @@ function startHttpServer(baseDir) {
       res.json({ ok: true, profile });
     } catch (e) { res.status(500).json({ ok: false, message: e.message }); }
   });
+  app.get('/api/stats/player-event', (req, res) => {
+    try {
+      const { name, tournament } = req.query;
+      if (!name || !tournament) return res.status(400).json({ ok: false, message: 'name and tournament params required' });
+      const result = stats.getPlayerEventStats(name, tournament);
+      res.json({ ok: true, stats: result || null });
+    } catch (e) { res.status(500).json({ ok: false, message: e.message }); }
+  });
 
   // ── Filtered analytics dashboard (single source of truth) ──────────────────
   app.get('/api/stats/filters', (req, res) => {
@@ -11938,12 +12616,18 @@ function startHttpServer(baseDir) {
     res.json({ ok: true });
   });
 
-  // ── In-app bug report → Discord webhook ─────────────────────────────────────
+  // ── In-app bug report → Discord webhook + GitHub Issues ──────────────────────
   // This route is registered before the global express.json() below, so it needs
   // its own body parser — otherwise req.body is empty and reports look blank.
+  // GITHUB_TOKEN is a dev-only secret (like BUG_REPORT_WEBHOOK) — NOT in gen-prod-env.js's
+  // PUBLIC_KEYS, so it's stripped from distributed builds; only Armour's own dev environment
+  // files real GitHub issues. Discord and GitHub are attempted independently — either one
+  // succeeding counts as an overall success, so a misconfigured/down one doesn't block the other.
   app.post('/api/bug-report', express.json({ limit: '12mb' }), async (req, res) => {
     const hook = process.env.BUG_REPORT_WEBHOOK || '';
-    if (!hook) return res.status(503).json({ ok: false, message: 'No bug-report webhook configured (set BUG_REPORT_WEBHOOK in .env.local).' });
+    const ghToken = process.env.GITHUB_TOKEN || '';
+    const ghRepo = process.env.GITHUB_REPO || 'armour-studios/NEBroadcastSuite';
+    if (!hook && !ghToken) return res.status(503).json({ ok: false, message: 'No bug-report destination configured (set BUG_REPORT_WEBHOOK and/or GITHUB_TOKEN in .env.local).' });
     const b = req.body || {};
     const isFeature = b.type === 'feature';
     const title = String(b.title || '').trim().slice(0, 256);
@@ -11993,6 +12677,18 @@ function startHttpServer(baseDir) {
       }
     }
 
+    // Optional browser console log (recent output + any uncaught errors, captured client-side).
+    // Kept as a plain-text FILE attachment rather than jammed into the embed — Discord embed
+    // fields/descriptions have small character limits a console dump blows through instantly.
+    let logBuf = null;
+    const LOG_NAME = 'console.log';
+    const LOG_CAP = 60000;   // defense in depth — cap regardless of what the client already trimmed
+    if (typeof b.consoleLog === 'string' && b.consoleLog.trim()) {
+      const raw = b.consoleLog;
+      const capped = raw.length > LOG_CAP ? `…(truncated, showing the most recent output)…\n${raw.slice(-LOG_CAP)}` : raw;
+      logBuf = Buffer.from(capped, 'utf8');
+    }
+
     const severity = ['low', 'medium', 'high', 'critical'].includes(b.severity) ? b.severity : 'medium';
     const embedColor = isFeature ? 0x7c3aed : { low: 0x4ade80, medium: 0xfbbf24, high: 0xf97316, critical: 0xdc2626 }[severity];
     const embed = {
@@ -12005,33 +12701,98 @@ function startHttpServer(baseDir) {
       timestamp: new Date().toISOString()
     };
     if (imgBuf) embed.image = { url: `attachment://${imgName}` };
+
+    // Discord supports multiple files per message (files[0], files[1], …) each needing a matching
+    // {id, filename} entry in `attachments` — build both lists together so ids always line up.
+    const discordFiles = [];
+    if (imgBuf) {
+      const ext = imgName.split('.').pop();
+      discordFiles.push({ id: discordFiles.length, filename: imgName, buf: imgBuf, mime: ext === 'jpg' ? 'image/jpeg' : `image/${ext}` });
+    }
+    if (logBuf) discordFiles.push({ id: discordFiles.length, filename: LOG_NAME, buf: logBuf, mime: 'text/plain' });
+
     const payload = {
       username: isFeature ? 'NE Feature Requests' : 'NE Bug Reports',
       embeds: [embed],
-      ...(imgBuf ? { attachments: [{ id: 0, filename: imgName }] } : {})
+      ...(discordFiles.length ? { attachments: discordFiles.map((f) => ({ id: f.id, filename: f.filename })) } : {})
     };
+
+    const result = { discordOk: false, githubOk: false, githubUrl: null, errors: [] };
 
     // Use axios (Node 16 in Electron has no global fetch). 8s timeout so a slow/unreachable
     // Discord can't hang the request. Discord returns 204 on success → axios resolves on 2xx.
-    try {
-      if (imgBuf) {
-        const ext = imgName.split('.').pop();
-        const mime = ext === 'jpg' ? 'image/jpeg' : `image/${ext}`;
-        const form = new FormData();
-        form.append('payload_json', JSON.stringify(payload), { contentType: 'application/json' });
-        form.append('files[0]', imgBuf, { filename: imgName, contentType: mime });
-        await axios.post(hook, form, { headers: form.getHeaders(), timeout: 12000, maxContentLength: Infinity, maxBodyLength: Infinity });
-      } else {
-        await axios.post(hook, payload, { headers: { 'Content-Type': 'application/json' }, timeout: 8000 });
+    if (hook) {
+      try {
+        if (discordFiles.length) {
+          const form = new FormData();
+          form.append('payload_json', JSON.stringify(payload), { contentType: 'application/json' });
+          discordFiles.forEach((f) => form.append(`files[${f.id}]`, f.buf, { filename: f.filename, contentType: f.mime }));
+          await axios.post(hook, form, { headers: form.getHeaders(), timeout: 12000, maxContentLength: Infinity, maxBodyLength: Infinity });
+        } else {
+          await axios.post(hook, payload, { headers: { 'Content-Type': 'application/json' }, timeout: 8000 });
+        }
+        result.discordOk = true;
+      } catch (e) {
+        if (e.response) {
+          const txt = typeof e.response.data === 'string' ? e.response.data : JSON.stringify(e.response.data || {});
+          result.errors.push(`Discord rejected the report (${e.response.status}). ${String(txt).slice(0, 160)}`);
+        } else {
+          result.errors.push((e.code === 'ECONNABORTED') ? 'Discord did not respond in time (timed out).' : e.message);
+        }
       }
-      res.json({ ok: true });
-    } catch (e) {
-      if (e.response) {
-        const txt = typeof e.response.data === 'string' ? e.response.data : JSON.stringify(e.response.data || {});
-        return res.status(502).json({ ok: false, message: `Discord rejected the report (${e.response.status}). ${String(txt).slice(0, 160)}` });
+    }
+
+    if (ghToken) {
+      try {
+        const labels = [isFeature ? 'enhancement' : 'bug'];
+        if (!isFeature) labels.push('severity:' + severity);
+        if (b.category) labels.push('area:' + String(b.category).slice(0, 40));
+        let bodyLines = [
+          description || '_(no details provided)_',
+          '',
+          '---',
+          b.reporter ? `**Reporter:** ${b.reporter}` : '',
+          ctx.page ? `**Page:** ${ctx.page}` : '',
+          ctx.game ? `**Game:** ${ctx.game}` : '',
+          imgBuf ? '_A screenshot was attached to the Discord report._' : '',
+          `_Submitted from ${(ctx.app || 'NE Broadcast Suite')} v${appVersion}_`
+        ].filter(Boolean).join('\n');
+        // GitHub issue bodies have plenty of headroom (65536 chars) but a raw dump is unwieldy —
+        // wrap it in a collapsed <details> block so it's there without overwhelming the issue.
+        if (logBuf) {
+          const GH_LOG_CAP = 15000;
+          const logText = logBuf.toString('utf8');
+          const ghLog = logText.length > GH_LOG_CAP ? logText.slice(-GH_LOG_CAP) : logText;
+          bodyLines += `\n\n<details>\n<summary>Console log${ghLog.length < logText.length ? ' (truncated, most recent output)' : ''}</summary>\n\n\`\`\`\n${ghLog}\n\`\`\`\n\n</details>`;
+        }
+        const ghRes = await axios.post(`https://api.github.com/repos/${ghRepo}/issues`, {
+          title: (title || (isFeature ? 'Feature request' : 'Bug report')).slice(0, 256),
+          body: bodyLines,
+          labels
+        }, {
+          headers: {
+            Authorization: `Bearer ${ghToken}`,
+            Accept: 'application/vnd.github+json',
+            'X-GitHub-Api-Version': '2022-11-28'
+          },
+          timeout: 10000
+        });
+        result.githubOk = true;
+        result.githubUrl = (ghRes.data && ghRes.data.html_url) || null;
+      } catch (e) {
+        if (e.response) {
+          const txt = typeof e.response.data === 'string' ? e.response.data : JSON.stringify((e.response.data && e.response.data.message) || e.response.data || {});
+          result.errors.push(`GitHub rejected the issue (${e.response.status}). ${String(txt).slice(0, 160)}`);
+        } else {
+          result.errors.push((e.code === 'ECONNABORTED') ? 'GitHub did not respond in time (timed out).' : e.message);
+        }
       }
-      const msg = (e.code === 'ECONNABORTED') ? 'Discord did not respond in time (timed out).' : e.message;
-      res.status(500).json({ ok: false, message: msg });
+    }
+
+    if (result.discordOk || result.githubOk) {
+      res.json({ ok: true, discordOk: result.discordOk, githubOk: result.githubOk, githubUrl: result.githubUrl, message: result.errors.join(' ') || undefined });
+    } else {
+      res.status(502).json({ ok: false, message: result.errors.join(' ') || 'Failed to send report.' });
     }
   });
 
@@ -12241,6 +13002,30 @@ function startHttpServer(baseDir) {
     if (!clipSystem) return res.json({ library: [], clips: [] });
     const { library } = clipSystem.getState();
     res.json({ library: library || [], clips: library || [] });
+  });
+
+  // POST /api/clips/social-encode — bake intro + clip + outro into a social-ready MP4
+  app.post('/api/clips/social-encode', (req, res) => {
+    if (!clipSystem) return res.status(503).json({ error: 'Clip system not ready' });
+    const { introId, clipId, outroId, opts = {} } = req.body || {};
+    if (!clipId) return res.status(400).json({ error: 'No clip selected' });
+    const library = clipSystem.getState().library || [];
+    const findClip = (id) => (id ? library.find((c) => c.id === id) : null);
+    const mainClip = findClip(clipId);
+    if (!mainClip || !mainClip.path) return res.status(400).json({ error: 'Clip not found or has no video file' });
+    const segments = [];
+    const intro = findClip(introId);
+    if (intro && intro.path) segments.push({ path: intro.path, trimIn: 0, trimOut: null, name: 'Intro' });
+    segments.push({ path: mainClip.path, trimIn: mainClip.trimIn || 0, trimOut: mainClip.trimOut || null, name: mainClip.name || 'Clip' });
+    const outro = findClip(outroId);
+    if (outro && outro.path) segments.push({ path: outro.path, trimIn: 0, trimOut: null, name: 'Outro' });
+    const safeName = 'social_' + (mainClip.name || 'clip').replace(/[^a-z0-9]/gi, '_').toLowerCase();
+    const jobId = clipSystem.encoder.enqueue({
+      name: safeName,
+      segments,
+      opts: { quality: opts.quality || 'high', transition: opts.transition || 'fade', format: '.mp4' }
+    });
+    res.json({ ok: true, jobId });
   });
 
   // The control panel runs from a file:// origin (Electron loadFile), so allow it to
@@ -12861,6 +13646,28 @@ function startHttpServer(baseDir) {
     } catch (err) {
       console.error('[rl6mans/profile]', err.message);
       res.status(500).json({ error: err.message || 'Profile lookup failed' });
+    }
+  });
+
+  // Check whether the tracker.gg API key is configured.
+  app.get('/api/trackergg/status', (_req, res) => {
+    res.json({ configured: true, method: 'browser' });
+  });
+
+  // tracker.gg rank lookup — uses in-app BrowserWindow, no API key required.
+  app.post('/api/trackergg/lookup', async (req, res) => {
+    const platform = (req.body?.platform || '').toString().trim().toLowerCase();
+    const username = (req.body?.username || '').toString().trim();
+    if (!platform || !username) return res.status(400).json({ error: 'platform and username required' });
+    const validPlatforms = ['epic', 'steam', 'psn', 'xbl', 'switch'];
+    if (!validPlatforms.includes(platform)) return res.status(400).json({ found: false, error: 'bad_platform', platform });
+    try {
+      const trackergg = require('./backend/trackergg');
+      const result = await trackergg.lookup(platform, username);
+      res.json(result);
+    } catch (err) {
+      console.error('[trackergg/lookup]', err.message);
+      res.status(500).json({ found: false, error: err.message || 'Lookup failed' });
     }
   });
 
@@ -15086,6 +15893,7 @@ class EventSubService {
           broadcast(bridgeClients, { type: 'full_state', data: buildLiveState() });
           saveTwitchData();
           stopPredictionPolling();
+          if (predictionManager) predictionManager.clearCooldown();
           const resolvedId = pred.id;
           setTimeout(() => {
             if (state.twitch.predictions.current?.id === resolvedId) {
@@ -15534,6 +16342,12 @@ class TwitchChatManager {
 
       if (message.startsWith('!')) {
         this.handleCommand(match[1], message);
+        // Emit for flow twitch_chat_command triggers
+        const _cmdParts = message.trim().slice(1).split(/\s+/);
+        flowBus.emit('twitch_chat_command', {
+          user: username, command: _cmdParts[0].toLowerCase(),
+          message: message.trim(), args: _cmdParts.slice(1).join(' ')
+        });
       }
       console.log(`[Chat] ${username}: ${message}`);
     } catch (err) {

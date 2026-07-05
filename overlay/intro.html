@@ -1,17 +1,12 @@
 <!DOCTYPE html>
 <html lang="en">
 <!--
-  intro.html — team line-up / starting roster card (duorow design language).
+  intro.html — team line-up / starting roster card.
   Driven by full_state.intro { visible, side:'blue'|'orange', title, style }.
-  Each player card resolves a photo in this order:
-    1. player.photo / player.image
-    2. start.gg profile image (from playerProfiles[gamertag].image, auto-pulled)
-    3. the team logo (as a placeholder)
-    4. the player's initials
-  Shows the player's position/role (Starter/Sub/Alternate/Captain…) and stats
-  (6mans rank + ELO from playerProfiles, country flag) under each name.
-  ?side=blue|orange overrides the configured side. No baked background — the Scenes
-  page sets fill colour + opacity per graphic.
+  Each player row resolves a photo: player.photo/image → playerProfiles[tag].image → team logo → initials.
+  Socials (twitter, twitch) and country come from start.gg via playerProfiles.
+  Event stats (G/A/S/GPG) come from the start.gg historical import in the stats DB.
+  ?side=blue|orange overrides the configured side.
 -->
 <head>
   <meta charset="UTF-8">
@@ -25,317 +20,609 @@
     }
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     html, body { width: 1920px; height: 1080px; overflow: hidden; background: transparent;
-      font-family: 'Inter', system-ui, sans-serif; color: var(--duo-text); -webkit-font-smoothing: antialiased; }
+      font-family: 'Rajdhani', 'Inter', system-ui, sans-serif; color: var(--duo-text);
+      -webkit-font-smoothing: antialiased; }
 
-    #stage { position: absolute; inset: 0; display: flex; flex-direction: column; padding: 46px 60px 40px;
+    /* ── Stage ────────────────────────────────────────────────────────────── */
+    #stage { position: absolute; inset: 0; display: flex; flex-direction: row;
       opacity: 0; transition: opacity .4s ease; }
     #stage.show { opacity: 1; }
 
-    /* ── Header ─────────────────────────────────────────────────────────── */
-    .li-head { flex: 0 0 auto; display: flex; align-items: center; gap: 22px; height: 132px;
-      padding: 0 28px; position: relative; margin-bottom: 38px;
-      background: linear-gradient(100deg, color-mix(in srgb, var(--team-color) 26%, rgba(16,18,24,.96)) 0%, rgba(12,14,20,.97) 60%);
-      border: 1px solid var(--duo-border); border-radius: 14px; overflow: hidden;
-      box-shadow: 0 16px 40px rgba(0,0,0,.5); }
-    .li-head::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 7px;
-      background: var(--team-color); box-shadow: 0 0 26px color-mix(in srgb, var(--team-color) 70%, transparent); }
-    .li-head::after { content: ''; position: absolute; left: 0; right: 0; top: 0; height: 1px;
-      background: linear-gradient(90deg, transparent, rgba(255,255,255,.3) 50%, transparent); }
-    .li-logo { width: 96px; height: 96px; object-fit: contain; flex: 0 0 auto;
-      filter: drop-shadow(0 4px 12px rgba(0,0,0,.55)); }
-    .li-logo.on-dark { filter: brightness(0) invert(1) drop-shadow(0 4px 12px rgba(0,0,0,.55)); }
-    .li-head-text { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
-    .li-team { font-family: 'Rajdhani','Inter',sans-serif; font-weight: 700; font-size: 56px; line-height: .92;
-      text-transform: uppercase; color: #fff; letter-spacing: .01em;
-      text-shadow: 0 0 26px color-mix(in srgb, var(--team-color) 45%, transparent); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .li-sub { font-family: 'Rajdhani','Inter',sans-serif; font-weight: 600; font-size: 20px; letter-spacing: .26em;
-      text-transform: uppercase; color: var(--team-color); }
-    .li-head-spacer { flex: 1 1 auto; }
-    .li-count { font-family: 'Rajdhani','Inter',sans-serif; font-weight: 700; font-size: 22px; letter-spacing: .12em;
-      text-transform: uppercase; color: var(--duo-muted); white-space: nowrap; }
-    .li-count b { color: #fff; font-size: 30px; }
+    /* ── LEFT PANEL ───────────────────────────────────────────────────────── */
+    .lh-left {
+      width: 520px; flex-shrink: 0; position: relative; overflow: hidden;
+      background: #040810;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      padding: 60px 44px;
+    }
+    .lh-wash {
+      position: absolute; inset: 0; pointer-events: none; z-index: 0;
+      background: linear-gradient(155deg,
+        color-mix(in srgb, var(--team-color) 55%, transparent) 0%,
+        color-mix(in srgb, var(--team-color) 24%, transparent) 48%,
+        transparent 100%);
+    }
+    .lh-glow {
+      position: absolute; inset: 0; pointer-events: none; z-index: 0;
+      background: radial-gradient(ellipse 80% 72% at 50% 46%,
+        color-mix(in srgb, var(--team-color) 22%, transparent), transparent);
+    }
+    .lh-logo-bg {
+      position: absolute; z-index: 1; pointer-events: none;
+      top: 50%; left: 50%; width: 700px; height: 700px; object-fit: contain;
+      opacity: 0; transform: translate(-50%, -50%) scale(.82);
+      transition: opacity .9s ease .2s, transform .95s cubic-bezier(.16,.84,.24,1) .2s;
+    }
+    #stage.show .lh-logo-bg { opacity: .12; transform: translate(-50%, -50%) scale(1); }
 
-    /* ── Player grid ────────────────────────────────────────────────────── */
-    .li-grid { flex: 1 1 0; min-height: 0; display: flex; flex-wrap: wrap; align-content: center;
-      justify-content: center; gap: 26px; }
-    .li-card { display: flex; flex-direction: column; border-radius: 13px; overflow: hidden;
-      border: 1px solid var(--duo-border); background: var(--duo-surface);
-      box-shadow: 0 18px 44px rgba(0,0,0,.5); opacity: 0; }
-    /* `both` fill: hidden during the stagger delay (backwards) AND stays visible after
-       the animation ends (forwards) — otherwise the card reverts to opacity:0 and vanishes. */
-    #stage.show .li-card { animation: cardIn .7s cubic-bezier(.16,.84,.24,1) both; }
-    @keyframes cardIn { from { opacity: 0; transform: translateY(34px) scale(.96); } to { opacity: 1; transform: none; } }
+    .lh-content {
+      position: relative; z-index: 2;
+      display: flex; flex-direction: column; align-items: center;
+      opacity: 0;
+    }
+    #stage.show .lh-content { animation: contentIn .55s cubic-bezier(.16,.84,.24,1) .08s both; }
+    @keyframes contentIn { from { opacity: 0; transform: translateX(-20px); } to { opacity: 1; transform: none; } }
 
-    .li-photo { position: relative; width: 100%; aspect-ratio: 4 / 3; flex: 0 0 auto; overflow: hidden;
-      background: radial-gradient(circle at 50% 30%, var(--duo-surface2), #0c0e13); }
-    .li-photo::before { content: ''; position: absolute; left: 0; right: 0; top: 0; height: 3px; z-index: 3;
-      background: linear-gradient(90deg, var(--team-color), color-mix(in srgb, var(--team-color) 30%, transparent));
-      box-shadow: 0 0 16px color-mix(in srgb, var(--team-color) 55%, transparent); }
-    .li-photo img.face { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: top center; }
-    .li-photo .logo-ph { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; }
-    .li-photo .logo-ph img { width: 58%; height: 58%; object-fit: contain; opacity: .42;
-      filter: drop-shadow(0 6px 18px rgba(0,0,0,.5)); }
-    .li-photo .logo-ph.on-dark img { filter: brightness(0) invert(1) drop-shadow(0 6px 18px rgba(0,0,0,.5)); opacity: .3; }
-    .li-photo .initials { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
-      font-family: 'Rajdhani','Inter',sans-serif; font-weight: 700; font-size: 110px; line-height: 1;
-      color: var(--team-color); opacity: .85; }
-    .li-photo::after { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 46%;
-      background: linear-gradient(180deg, transparent, rgba(8,10,14,.92)); pointer-events: none; }
-    .li-pos { position: absolute; top: 12px; right: 12px; z-index: 4; font-size: 12px; font-weight: 800;
-      letter-spacing: .14em; text-transform: uppercase; padding: 4px 10px; border-radius: 5px; color: #fff;
-      background: var(--team-color); box-shadow: 0 4px 12px rgba(0,0,0,.45); }
-    .li-pos.is-cap { background: linear-gradient(135deg, var(--duo-accent), var(--duo-accent2)); }
-    .li-pos.is-sub { background: rgba(20,23,30,.92); border: 1px solid var(--duo-border); color: #f0b860; }
-    .li-pos.is-alt { background: rgba(20,23,30,.92); border: 1px solid var(--duo-border); color: var(--duo-muted); }
+    .lh-logo-wrap { width: 192px; height: 192px;
+      display: flex; align-items: center; justify-content: center; margin-bottom: 28px; }
+    .lh-logo { width: 88%; height: 88%; object-fit: contain;
+      filter: drop-shadow(0 0 36px color-mix(in srgb, var(--team-color) 60%, transparent))
+              drop-shadow(0 6px 24px rgba(0,0,0,.85)); }
+    .lh-logo.on-dark { filter: brightness(0) invert(1)
+              drop-shadow(0 0 36px color-mix(in srgb, var(--team-color) 50%, transparent))
+              drop-shadow(0 6px 24px rgba(0,0,0,.85)); }
+    .lh-logo-init { font-family: 'Rajdhani', 'Inter', sans-serif; font-weight: 700; font-size: 88px;
+      color: rgba(255,255,255,.9); text-transform: uppercase; line-height: 1;
+      text-shadow: 0 0 48px color-mix(in srgb, var(--team-color) 65%, transparent),
+                   0 4px 28px rgba(0,0,0,.8); }
+    .lh-tname { font-family: 'Rajdhani', 'Inter', sans-serif; font-weight: 900;
+      font-size: 40px; text-transform: uppercase; letter-spacing: .03em; color: #fff;
+      text-align: center; line-height: 1.1; margin-bottom: 8px;
+      text-shadow: 0 0 60px color-mix(in srgb, var(--team-color) 65%, transparent),
+        0 4px 20px rgba(0,0,0,.95), 0 1px 4px rgba(0,0,0,.9);
+      overflow-wrap: break-word; word-break: break-word; }
+    .lh-sub { font-size: 11px; font-weight: 700; letter-spacing: .24em; text-transform: uppercase;
+      color: rgba(255,255,255,.38); text-align: center; margin-bottom: 28px; }
+    .lh-tstats { display: flex; align-items: stretch; gap: 0;
+      border: 1px solid rgba(255,255,255,.1); border-radius: 8px; overflow: hidden;
+      background: rgba(0,0,0,.24); max-width: 100%; }
+    .lh-tstats:empty { display: none; }
+    .lh-tstat { display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: 3px; padding: 10px 16px; line-height: 1; }
+    .lh-tstat + .lh-tstat { border-left: 1px solid rgba(255,255,255,.1); }
+    .lh-tstat .v { font-family: 'Rajdhani', 'Inter', sans-serif; font-weight: 700; font-size: 26px;
+      color: #fff; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .lh-tstat .k { font-size: 9px; font-weight: 800; letter-spacing: .14em; text-transform: uppercase;
+      color: rgba(255,255,255,.38); white-space: nowrap; }
+    .lh-vsep {
+      position: absolute; top: 8%; right: 0; bottom: 8%; z-index: 3;
+      width: 2px; pointer-events: none;
+      background: linear-gradient(180deg, transparent, var(--team-color) 50%, transparent);
+      box-shadow: 0 0 22px var(--team-color), 0 0 8px var(--team-color);
+    }
 
-    .li-plate { flex: 0 0 auto; position: relative; padding: 14px 18px 16px;
-      background: linear-gradient(180deg, var(--duo-surface2), var(--duo-surface));
-      border-top: 1px solid var(--duo-border); }
-    .li-plate::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: var(--team-color); }
-    .li-name { font-family: 'Rajdhani','Inter',sans-serif; font-weight: 700; font-size: 32px; line-height: 1;
-      text-transform: uppercase; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .li-stats { display: flex; align-items: center; gap: 10px; margin-top: 9px; min-height: 22px; }
-    .li-stat { display: inline-flex; align-items: center; gap: 5px; font-size: 13px; font-weight: 700;
-      letter-spacing: .04em; color: #d6dbe6; }
-    .li-stat .lbl { font-size: 9px; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; color: var(--duo-muted); }
-    .li-rank { display: inline-flex; align-items: center; justify-content: center; min-width: 26px; height: 24px;
-      padding: 0 7px; border-radius: 5px; font-size: 14px; font-weight: 800; color: #fff;
-      background: linear-gradient(135deg, var(--team-color), color-mix(in srgb, var(--team-color) 55%, #000)); }
-    .li-elo { font-variant-numeric: tabular-nums; color: #fff; }
-    .li-flag { font-size: 18px; line-height: 1; display: inline-flex; align-items: center; gap: 5px; }
-    .li-cc { font-size: 12px; font-weight: 700; letter-spacing: .02em; color: #d6dbe6; text-transform: none; }
-    .li-handle { font-size: 13px; font-weight: 600; color: var(--duo-muted); margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .li-stats.is-empty { display: none; }
+    /* ── RIGHT PANEL ──────────────────────────────────────────────────────── */
+    .lh-right { flex: 1; min-width: 0; display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      padding: 52px 60px; }
+    #stage.has-foot .lh-right { padding-bottom: 100px; }
+    #stage.has-foot .lh-left  { padding-bottom: 100px; }
 
-    /* Team stats in the header */
-    .li-teamstats { display: flex; align-items: stretch; gap: 0; }
-    .li-tstat { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; padding: 0 20px; line-height: 1; }
-    .li-tstat + .li-tstat { border-left: 1px solid var(--duo-border); }
-    .li-tstat .v { font-family: 'Rajdhani','Inter',sans-serif; font-weight: 700; font-size: 34px; color: #fff; font-variant-numeric: tabular-nums; }
-    .li-tstat .v small { font-size: 16px; color: var(--duo-muted); font-weight: 700; }
-    .li-tstat .k { font-size: 10px; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; color: var(--duo-muted); }
+    .lh-right-lbl { font-size: 18px; font-weight: 900; letter-spacing: .28em; text-transform: uppercase;
+      color: #fff; text-align: center; margin-bottom: 28px; flex-shrink: 0;
+      width: 100%; max-width: 860px;
+      text-shadow: 0 0 40px color-mix(in srgb, var(--team-color) 55%, transparent),
+                   0 1px 8px rgba(0,0,0,.8); }
 
-    /* Footer — brand "presented by" + sponsor logos */
-    .li-foot { flex: 0 0 auto; display: flex; align-items: center; justify-content: center; gap: 30px; min-height: 64px; margin-top: 26px; opacity: 0; }
-    #stage.show .li-foot { animation: footIn .6s cubic-bezier(.16,.84,.24,1) .5s both; }
-    @keyframes footIn { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: none; } }
-    .li-foot.is-empty { display: none; }
-    .li-presented { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 8px 22px;
-      background: linear-gradient(180deg, rgba(20,23,30,.96), rgba(10,12,16,.98)); border: 1px solid var(--duo-border); border-radius: 9px;
-      box-shadow: 0 8px 24px rgba(0,0,0,.4); }
-    .li-presented.is-empty { display: none; }
-    .li-pb-label { font-size: 9px; font-weight: 800; letter-spacing: .2em; text-transform: uppercase; color: var(--duo-muted); }
-    .li-pb-logo { height: 34px; max-width: 220px; object-fit: contain; filter: drop-shadow(0 2px 6px rgba(0,0,0,.35)); }
-    .li-sponsors { display: flex; align-items: center; gap: 22px; flex-wrap: wrap; justify-content: center; }
-    .li-sponsors.is-empty { display: none; }
-    .li-sponsor { height: 42px; max-width: 150px; object-fit: contain; opacity: .92; filter: drop-shadow(0 2px 6px rgba(0,0,0,.3)); }
+    /* ── Card list — natural height; right panel justify-content:center handles vertical position */
+    .lh-rows { display: flex; flex-direction: column; gap: 10px;
+      width: 100%; max-width: 860px; }
+
+    /* ── Card grid: accent | avatar | name+info | status ──────────────────── */
+    .lh-hdr, .lh-row { display: grid;
+      grid-template-columns: 6px 140px 1fr auto;
+      align-items: center; }
+
+    .lh-rows.has-stats .lh-hdr,
+    .lh-rows.has-stats .lh-row {
+      grid-template-columns: 6px 140px 1fr auto 70px 70px 70px 88px; }
+
+    /* Header row */
+    .lh-hdr { display: none; }
+    .lh-rows.has-stats .lh-hdr { display: grid; height: 0; margin-bottom: 2px; align-items: end; }
+    .lh-hdr-cell { display: flex; align-items: center; justify-content: center;
+      font-size: 8px; font-weight: 800; letter-spacing: .18em; text-transform: uppercase;
+      padding-bottom: 4px; border-bottom: 1px solid rgba(255,255,255,.1); }
+    .lh-hdr-cell.col-g   { color: rgba(244,208,64,.7); }
+    .lh-hdr-cell.col-a   { color: rgba(147,197,253,.7); }
+    .lh-hdr-cell.col-s   { color: rgba(110,231,183,.65); }
+    .lh-hdr-cell.col-gpg { color: rgba(255,255,255,.35); }
+
+    /* ── Player card ─────────────────────────────────────────────────────── */
+    .lh-row {
+      min-height: 140px;
+      position: relative; overflow: hidden;
+      background: linear-gradient(90deg, rgba(4,8,18,.96) 0%, rgba(8,12,24,.84) 60%, rgba(6,10,20,.78) 100%);
+      border: 1px solid rgba(255,255,255,.07);
+      border-left: none;
+      border-radius: 8px;
+      opacity: 0;
+    }
+    .lh-row.is-sub { border-color: rgba(246,173,85,.14); }
+    #stage.show .lh-row { animation: rowIn .48s cubic-bezier(.16,.84,.24,1) both; }
+    @keyframes rowIn { from { opacity:0; transform:translateX(18px); } to { opacity:1; transform:none; } }
+
+    /* Left accent bar (col 1) — must stretch full card height regardless of align-items */
+    .lh-accent {
+      align-self: stretch;
+      background: var(--team-color);
+      border-radius: 8px 0 0 8px;
+      box-shadow: 6px 0 28px color-mix(in srgb, var(--team-color) 65%, transparent);
+    }
+    .lh-row.is-cap .lh-accent {
+      background: linear-gradient(180deg, var(--duo-accent), var(--duo-accent2));
+      box-shadow: 6px 0 24px color-mix(in srgb, var(--duo-accent) 60%, transparent);
+    }
+    .lh-row.is-sub .lh-accent {
+      background: rgba(246,173,85,.65);
+      box-shadow: 6px 0 18px rgba(246,173,85,.28);
+    }
+
+    /* Avatar (col 2) — square: width and height both 140px */
+    .lh-avatar-wrap { position: relative; width: 140px; height: 140px; align-self: center; flex-shrink: 0; }
+    .lh-avatar { width: 100%; height: 100%; background: rgba(255,255,255,.04);
+      border-right: 1px solid rgba(255,255,255,.07);
+      overflow: hidden; display: flex; align-items: center; justify-content: center;
+      box-shadow: inset -24px 0 48px color-mix(in srgb, var(--team-color) 24%, transparent); }
+    .lh-avatar img.face { position: absolute; inset: 0; width: 100%; height: 100%;
+      object-fit: cover; object-position: top center; }
+    .lh-avatar .logo-ph { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; }
+    .lh-avatar .logo-ph img { width: 48%; height: 48%; object-fit: contain; opacity: .55; }
+    .lh-avatar .logo-ph.on-dark img { filter: brightness(0) invert(1); opacity: .4; }
+    .lh-avatar .init-text { font-family: 'Rajdhani', 'Inter', sans-serif; font-weight: 700;
+      font-size: 36px; color: var(--team-color); text-transform: uppercase; }
+
+    /* Name block (col 3) */
+    .lh-name-block { display: flex; flex-direction: column; justify-content: center;
+      gap: 8px; min-width: 0; padding: 16px 20px; align-self: center; }
+    .lh-pname-row { display: flex; align-items: center; gap: 10px; min-width: 0; }
+    .lh-pname { font-family: 'Rajdhani', 'Inter', sans-serif; font-weight: 800;
+      font-size: 32px; line-height: 1; text-transform: uppercase; color: #fff;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      text-shadow: 0 1px 14px rgba(0,0,0,.7),
+                   0 0 28px color-mix(in srgb, var(--team-color) 38%, transparent); }
+    .lh-role-badge { font-size: 7px; font-weight: 800; letter-spacing: .13em; text-transform: uppercase;
+      padding: 3px 8px; border-radius: 3px; color: rgba(255,255,255,.7); flex-shrink: 0;
+      background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.12); white-space: nowrap; }
+    .lh-role-badge.is-cap { background: linear-gradient(135deg, var(--duo-accent), var(--duo-accent2)); color: #fff; border-color: transparent; }
+
+    /* Real name line — shown when intro.showRealName is enabled */
+    .lh-realname { font-size: 12px; font-weight: 500; letter-spacing: .03em;
+      color: rgba(255,255,255,.4); text-transform: none; white-space: nowrap;
+      overflow: hidden; text-overflow: ellipsis; margin-top: -4px; }
+
+    /* Country row */
+    .lh-country-row { display: flex; align-items: center; gap: 8px; }
+    .lh-flag-inline { width: 24px; height: 16px; border-radius: 2px; overflow: hidden;
+      border: 1px solid rgba(255,255,255,.22); flex-shrink: 0; }
+    .lh-flag-inline img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .lh-country-name { font-size: 12px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase;
+      color: rgba(255,255,255,.72); white-space: nowrap; }
+
+    /* Social chips — Twitter/X + Twitch, whichever are available from start.gg */
+    .lh-socials-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .lh-social { display: inline-flex; align-items: center; gap: 5px;
+      font-size: 11px; font-weight: 700; white-space: nowrap; }
+    .lh-social .plat {
+      font-size: 7px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase;
+      padding: 2px 6px; border-radius: 3px; flex-shrink: 0;
+    }
+    .lh-social.tw .plat { background: rgba(231,233,234,.1); border: 1px solid rgba(231,233,234,.2); color: #e7e9ea; }
+    .lh-social.tt .plat { background: rgba(145,71,255,.18); border: 1px solid rgba(145,71,255,.3); color: #9147ff; }
+    .lh-social .handle { color: rgba(255,255,255,.55); }
+
+    /* Status badge column (col 4) */
+    .lh-status-col {
+      align-self: stretch;
+      display: flex; align-items: center; justify-content: center;
+      padding: 0 20px 0 12px;
+    }
+    .lh-status-badge {
+      font-size: 9px; font-weight: 800; letter-spacing: .16em; text-transform: uppercase;
+      padding: 5px 12px; border-radius: 4px; white-space: nowrap;
+      flex-shrink: 0;
+    }
+    .lh-status-badge.badge-starter {
+      background: color-mix(in srgb, var(--team-color) 28%, transparent);
+      border: 1px solid color-mix(in srgb, var(--team-color) 50%, transparent);
+      color: color-mix(in srgb, var(--team-color) 100%, #fff 60%);
+    }
+    .lh-row.is-cap .lh-status-badge.badge-starter {
+      background: linear-gradient(135deg, color-mix(in srgb, var(--duo-accent) 30%, transparent), color-mix(in srgb, var(--duo-accent2) 30%, transparent));
+      border-color: color-mix(in srgb, var(--duo-accent) 45%, transparent);
+      color: var(--duo-accent);
+    }
+    .lh-status-badge.badge-sub {
+      background: rgba(246,173,85,.12);
+      border: 1px solid rgba(246,173,85,.3);
+      color: #f6ad55;
+    }
+    .lh-status-badge.badge-alt {
+      background: rgba(255,255,255,.06);
+      border: 1px solid rgba(255,255,255,.12);
+      color: rgba(255,255,255,.38);
+    }
+
+    /* ── Stat columns (hidden unless .has-stats) ─────────────────────────── */
+    .lh-sc { display: none; align-self: stretch; flex-direction: column; align-items: center; justify-content: center; gap: 2px; }
+    .lh-rows.has-stats .lh-sc { display: flex; }
+    .lh-sc.col-g   { background: rgba(244,208,64,.08); border-left: 1px solid rgba(244,208,64,.12); }
+    .lh-sc.col-a   { background: rgba(147,197,253,.07); border-left: 1px solid rgba(147,197,253,.1); }
+    .lh-sc.col-s   { background: rgba(110,231,183,.07); border-left: 1px solid rgba(110,231,183,.1); }
+    .lh-sc.col-gpg { background: rgba(255,255,255,.04); border-left: 1px solid rgba(255,255,255,.07); }
+    .lh-sn { font-family: 'Rajdhani', 'Inter', sans-serif; font-weight: 900;
+      font-size: 28px; line-height: 1; font-variant-numeric: tabular-nums; }
+    .lh-sc.col-g   .lh-sn { color: #f4d060; text-shadow: 0 0 20px rgba(244,208,64,.5); }
+    .lh-sc.col-a   .lh-sn { color: #93c5fd; text-shadow: 0 0 20px rgba(147,197,253,.4); }
+    .lh-sc.col-s   .lh-sn { color: #6ee7b7; text-shadow: 0 0 20px rgba(110,231,183,.35); }
+    .lh-sc.col-gpg .lh-sn { color: rgba(255,255,255,.8); font-size: 22px; }
+    .lh-sl { font-size: 7px; font-weight: 800; letter-spacing: .18em; text-transform: uppercase;
+      color: rgba(255,255,255,.28); }
+
+    /* ── Sponsor footer ──────────────────────────────────────────────────── */
+    .lh-foot {
+      position: absolute; bottom: 0; left: 0; right: 0; z-index: 20;
+      height: 68px;
+      background: rgba(5,7,14,.88);
+      border-top: 1px solid rgba(255,255,255,.07);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      display: flex; align-items: center; justify-content: center; gap: 52px;
+      padding: 0 80px;
+      opacity: 0;
+    }
+    #stage.show .lh-foot { animation: footIn .6s cubic-bezier(.16,.84,.24,1) .5s both; }
+    @keyframes footIn { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+    .lh-foot.is-empty { display: none; }
+    .lh-sponsors { display: flex; align-items: center; gap: 52px; }
+    .lh-sponsors.is-empty { display: none; }
+    .lh-sponsor { height: 34px; max-width: 130px; object-fit: contain; opacity: .82;
+      filter: drop-shadow(0 1px 6px rgba(0,0,0,.4)); }
   </style>
 </head>
 <body>
   <div id="stage">
-    <div class="li-head">
-      <img class="li-logo" id="li-logo" alt="">
-      <div class="li-head-text">
-        <div class="li-team" id="li-team">TEAM</div>
-        <div class="li-sub" id="li-sub">STARTING LINE-UP</div>
+
+    <!-- LEFT: team identity panel -->
+    <div class="lh-left">
+      <div class="lh-wash" aria-hidden="true"></div>
+      <div class="lh-glow" aria-hidden="true"></div>
+      <img class="lh-logo-bg" id="lh-logo-bg" alt="" aria-hidden="true">
+
+      <div class="lh-content">
+        <div class="lh-logo-wrap">
+          <img class="lh-logo" id="lh-logo" alt="" style="display:none">
+          <span class="lh-logo-init" id="lh-logo-init">T</span>
+        </div>
+        <div class="lh-tname" id="lh-tname">TEAM</div>
+        <div class="lh-sub" id="lh-sub">STARTING LINE-UP</div>
+        <div class="lh-tstats" id="lh-tstats"></div>
       </div>
-      <div class="li-head-spacer"></div>
-      <div class="li-teamstats" id="li-teamstats"></div>
+
+      <div class="lh-vsep" aria-hidden="true"></div>
     </div>
-    <div class="li-grid" id="li-grid"></div>
-    <div class="li-foot is-empty" id="li-foot">
-      <div class="li-presented is-empty" id="li-presented">
-        <span class="li-pb-label" id="li-pb-label">PRESENTED BY</span>
-        <img class="li-pb-logo" id="li-pb-logo" alt="" style="display:none">
-      </div>
-      <div class="li-sponsors is-empty" id="li-sponsors"></div>
+
+    <!-- RIGHT: roster cards -->
+    <div class="lh-right">
+      <div class="lh-right-lbl" id="lh-right-lbl">Starting Lineup</div>
+      <div class="lh-rows" id="lh-rows"></div>
     </div>
+
+    <!-- SPONSOR RAIL -->
+    <div class="lh-foot is-empty" id="lh-foot">
+      <div class="lh-sponsors is-empty" id="lh-sponsors"></div>
+    </div>
+
   </div>
 
   <script src="scene-base.js"></script>
   <script>
     const el = (id) => document.getElementById(id);
-    const stage = el('stage'), grid = el('li-grid');
+    const stage = el('stage'), rows = el('lh-rows');
     const sideOverride = SceneBase.qp('side');
-    const EMBED = SceneBase.qp('embed') === '1';
     let _sig = '';
+    let _lastData = null;
+
+    const _evCache = {};
+    function _evKey(tag, evName) { return tag.toLowerCase() + '::' + evName.toLowerCase(); }
+    function _evStat(tag, evName) { return evName && tag ? _evCache[_evKey(tag, evName)] : null; }
+    function _fetchEventStats(players, evName) {
+      if (!evName) return;
+      let pending = 0;
+      players.map((p) => (p.gamerTag || p.name || '').trim()).filter(Boolean).forEach((tag) => {
+        const key = _evKey(tag, evName);
+        if (key in _evCache) return;
+        _evCache[key] = 'loading';
+        pending++;
+        fetch('http://localhost:3000/api/stats/player-event?name=' + encodeURIComponent(tag) + '&tournament=' + encodeURIComponent(evName))
+          .then((r) => r.json())
+          .then((d) => { _evCache[key] = (d && d.stats && d.stats.games > 0) ? d.stats : null; })
+          .catch(() => { _evCache[key] = null; })
+          .finally(() => { if (--pending === 0 && _lastData) { _sig = ''; render(_lastData); } });
+      });
+    }
 
     function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c])); }
     function initials(name) { const w = (name || '?').trim().split(/\s+/); return ((w[0]||'?')[0] + (w[1] ? w[1][0] : '')).toUpperCase(); }
-    function flagEmoji(cc) { cc = (cc || '').toUpperCase(); if (!/^[A-Z]{2}$/.test(cc)) return ''; return String.fromCodePoint(...[...cc].map((c) => 0x1F1E6 + c.charCodeAt(0) - 65)); }
-    // Common esports countries — enough to label a flag with its name instead of leaving it bare.
     const COUNTRY_NAMES = { US:'USA', CA:'Canada', GB:'UK', IE:'Ireland', AU:'Australia', NZ:'New Zealand',
       DE:'Germany', FR:'France', SE:'Sweden', NO:'Norway', DK:'Denmark', FI:'Finland', IS:'Iceland',
       NL:'Netherlands', BE:'Belgium', CH:'Switzerland', AT:'Austria', ES:'Spain', PT:'Portugal', IT:'Italy',
       GR:'Greece', PL:'Poland', CZ:'Czechia', HU:'Hungary', RO:'Romania', UA:'Ukraine', RU:'Russia', TR:'Turkey',
       IL:'Israel', ZA:'South Africa', NG:'Nigeria', BR:'Brazil', MX:'Mexico', AR:'Argentina', CL:'Chile',
-      CO:'Colombia', PE:'Peru', VE:'Venezuela', EC:'Ecuador', JP:'Japan', KR:'South Korea', CN:'China',
+      CO:'Colombia', PE:'Peru', VE:'Venezuela', EC:'Ecuador', JP:'Japan', KR:'Korea', CN:'China',
       TW:'Taiwan', HK:'Hong Kong', SG:'Singapore', ID:'Indonesia', MY:'Malaysia', PH:'Philippines',
       TH:'Thailand', VN:'Vietnam', IN:'India', PK:'Pakistan' };
     function countryName(cc) { return COUNTRY_NAMES[(cc || '').toUpperCase()] || ''; }
-    // The team's country badge for the header — only shown when every player who HAS a country
-    // shares the same one, so a mixed-region roster doesn't get a misleading single flag.
+    function flagSrc(cc) { return 'https://flagcdn.com/w40/' + (cc || '').toLowerCase() + '.png'; }
+    function profileFor(data, p) {
+      const tag = (p.gamerTag || p.name || '').trim().toLowerCase();
+      return (tag && data.playerProfiles && data.playerProfiles[tag]) || null;
+    }
     function teamCountry(players, data) {
       const ccs = players.map((p) => { const pr = profileFor(data, p); return pr && pr.countryCode; }).filter(Boolean);
       if (!ccs.length) return '';
       const uniq = [...new Set(ccs.map((c) => c.toUpperCase()))];
       return uniq.length === 1 ? uniq[0] : '';
     }
-    function profileFor(data, p) {
-      const tag = (p.gamerTag || p.name || '').trim().toLowerCase();
-      return (tag && data.playerProfiles && data.playerProfiles[tag]) || null;
-    }
-    // Role text → position class + display label.
-    function posClass(role) {
-      const r = (role || '').toLowerCase();
-      if (/cap|\(c\)|captain/.test(r)) return 'is-cap';
-      if (/\bsub\b|substitute|6th|reserve/.test(r)) return 'is-sub';
-      if (/\balt\b|alternate|standin|stand-in/.test(r)) return 'is-alt';
-      return '';
-    }
 
     function render(data) {
       data = data || {};
+      _lastData = data;
       const intro = data.intro || {};
       const root = document.documentElement;
       const color = SceneBase.brandColor(data), accent2 = SceneBase.brandAccent(data);
       if (color) root.style.setProperty('--duo-accent', color);
       if (accent2) root.style.setProperty('--duo-accent2', accent2);
-      if (data.fontFamily) root.style.fontFamily = `'${data.fontFamily}', 'Inter', system-ui, sans-serif`;
+      if (data.fontFamily) root.style.fontFamily = `'${data.fontFamily}', 'Rajdhani', 'Inter', system-ui, sans-serif`;
 
       stage.classList.add('show');
 
       const side = (sideOverride === 'blue' || sideOverride === 'orange') ? sideOverride : (intro.side || 'blue');
       const team = SceneBase.teamSide(data, side);
-
       const brand = data.brand || {};
-      // Prefer desk-tagged sponsors; fall back to ALL sponsors only for legacy kits with no
-      // placement tags at all, and de-dupe by logo so none render twice.
+      const ad = data.scoreboardAd || {};
       const _anyTagged = (brand.deskSponsors || []).length || (brand.railSponsors || []).length || (brand.bannerSponsors || []).length;
       const _rawSpons = (brand.deskSponsors || []).length ? brand.deskSponsors : (_anyTagged ? [] : (brand.sponsors || []));
-      const _seenSp = new Set();
-      const spons = (Array.isArray(_rawSpons) ? _rawSpons : []).filter((s) => s && s.logo && !_seenSp.has(s.logo) && (_seenSp.add(s.logo), true));
-      const sig = JSON.stringify({ side, title: intro.title, name: team.name, logo: team.logo, color: team.color,
-        players: team.players, pp: data.playerProfiles ? Object.keys(data.playerProfiles).length : 0,
-        ad: (data.scoreboardAd || {}).logo || '', sp: spons.map((s) => s && s.logo).join(','), foot: intro.showFooter !== false,
-        tr: (data.teamRecords || {}).enabled ? (data.teamRecords[side] || '') : '' });
+      const _seenSp = new Set(ad.logo ? [ad.logo] : []);
+      const _brandSpons = (Array.isArray(_rawSpons) ? _rawSpons : []).filter((s) => s && s.logo && !_seenSp.has(s.logo) && (_seenSp.add(s.logo), true));
+      const spons = ad.logo ? [{ logo: ad.logo, name: ad.label || '' }, ..._brandSpons] : _brandSpons;
+      const ev = data.activeEvent || {};
+      const evName = (ev.name || '').trim();
+      const standings = (data.bracket && Array.isArray(data.bracket.standings)) ? data.bracket.standings : [];
+      const tnameLow = (team.name || '').toLowerCase().trim();
+      const bst = tnameLow ? standings.find((s) => {
+        const sn = (s.name || '').toLowerCase().trim();
+        return sn && (sn.includes(tnameLow) || tnameLow.includes(sn));
+      }) : null;
+      const players = (team.players && team.players.length) ? team.players : [{ name: 'TBD' }];
+
+      _fetchEventStats(players, evName);
+      const evLoaded = evName ? players.filter((p) => {
+        const t = (p.gamerTag || p.name || '').trim();
+        return t && typeof _evStat(t, evName) === 'object' && _evStat(t, evName) !== null;
+      }).length : 0;
+
+      const sig = JSON.stringify({ side, name: team.name, logo: team.logo, color: team.color,
+        players: team.players,
+        pp: data.playerProfiles ? Object.values(data.playerProfiles).map(p => [(p.image || '').slice(20, 44), p.twitter||'', p.twitch||''].join('~')).join('|') : '',
+        showRealName: !!intro.showRealName,
+        sp: spons.map((s) => s && s.logo).join(','),
+        foot: intro.showFooter === true,
+        tr: (data.teamRecords || {}).enabled ? (data.teamRecords[side] || '') : '',
+        ev: evName + ':' + (ev.numEntrants || 0),
+        bst: bst ? `${bst.wins||0}-${bst.losses||0}:${bst.placement||0}` : '',
+        evL: evLoaded });
       if (sig === _sig) return;
       _sig = sig;
 
       root.style.setProperty('--team-color', team.color);
-      el('li-team').textContent = (team.name || 'TEAM').toUpperCase();
-      el('li-sub').textContent = (intro.title || 'STARTING LINE-UP').toUpperCase();
-      const logo = el('li-logo');
-      SceneBase.applyTeamLogo(logo, team.customLogo, team.logo);
-      logo.classList.toggle('on-dark', !!team.logoOnDark);
 
-      const players = (team.players && team.players.length) ? team.players : [{ name: 'TBD' }];
+      // ── Left panel ──────────────────────────────────────────────────────
+      const hasLogo = !!(team.customLogo || team.logo);
+      const logoEl = el('lh-logo'), logoInitEl = el('lh-logo-init'), logoBgEl = el('lh-logo-bg');
+      if (hasLogo) {
+        SceneBase.applyTeamLogo(logoEl, team.customLogo, team.logo);
+        SceneBase.applyTeamLogo(logoBgEl, team.customLogo, team.logo);
+        logoEl.classList.toggle('on-dark', !!team.logoOnDark);
+        logoEl.style.display = ''; logoInitEl.style.display = 'none'; logoBgEl.style.display = '';
+      } else {
+        logoEl.style.display = 'none'; logoBgEl.style.display = 'none';
+        logoInitEl.style.display = '';
+        logoInitEl.textContent = (team.name || 'T')[0].toUpperCase();
+      }
+      el('lh-tname').textContent = (team.name || 'TEAM').toUpperCase();
+      el('lh-right-lbl').textContent = (intro.title || 'Starting Lineup');
 
-      // Team stats auto-derived from start.gg-linked profiles: average 6mans ELO + roster size +
-      // season record (when the producer has Team Record enabled) + a country badge when the whole
-      // roster shares one nationality.
-      const elos = players.map((p) => { const pr = profileFor(data, p); return pr && pr.sixmans && pr.sixmans.elo; }).filter((e) => e > 0);
-      const avgElo = elos.length ? Math.round(elos.reduce((a, b) => a + b, 0) / elos.length) : null;
       const tr = data.teamRecords || {};
       const record = tr.enabled ? (tr[side] || '') : '';
+      const subRecord = bst && (bst.wins != null || bst.losses != null)
+        ? `${bst.wins || 0}W – ${bst.losses || 0}L`
+        : (record || (intro.title || 'STARTING LINE-UP').toUpperCase());
+      el('lh-sub').textContent = subRecord;
+
       const cc = teamCountry(players, data);
       const ts = [];
-      if (cc) ts.push(`<div class="li-tstat"><span class="v" style="font-size:30px;">${flagEmoji(cc)}</span><span class="k">${esc(countryName(cc) || cc)}</span></div>`);
-      if (record) ts.push(`<div class="li-tstat"><span class="v">${esc(record)}</span><span class="k">Record</span></div>`);
-      if (avgElo) ts.push(`<div class="li-tstat"><span class="v">${avgElo}</span><span class="k">Avg ELO</span></div>`);
-      ts.push(`<div class="li-tstat"><span class="v">${players.length}</span><span class="k">${players.length === 1 ? 'Player' : 'Players'}</span></div>`);
-      el('li-teamstats').innerHTML = ts.join('');
+      if (cc) ts.push(`<div class="lh-tstat"><div style="display:flex;align-items:center;gap:5px;"><img src="${flagSrc(cc)}" style="width:22px;height:16px;object-fit:cover;border-radius:2px;border:1px solid rgba(255,255,255,.15);" alt="" onerror="this.style.display='none'"><span class="v" style="font-size:15px;">${esc(countryName(cc) || cc)}</span></div><span class="k">Country</span></div>`);
+      if (bst && (bst.wins != null || bst.losses != null)) {
+        ts.push(`<div class="lh-tstat"><span class="v">${bst.wins || 0}-${bst.losses || 0}</span><span class="k">Event</span></div>`);
+        if (bst.placement) ts.push(`<div class="lh-tstat"><span class="v">#${bst.placement}</span><span class="k">Seed</span></div>`);
+      } else if (record) {
+        ts.push(`<div class="lh-tstat"><span class="v">${esc(record)}</span><span class="k">Record</span></div>`);
+      }
+      if (ev.numEntrants > 0) ts.push(`<div class="lh-tstat"><span class="v">${ev.numEntrants}</span><span class="k">Field</span></div>`);
+      el('lh-tstats').innerHTML = ts.join('');
 
-      // Skippable: producers who ALSO place the standalone [GFX] Sponsor Banner add-on source on
-      // this OBS scene should turn this off (Scenes → Intro → "Presented-by footer") to avoid
-      // showing the same sponsor logo twice — once from each source.
-      if (intro.showFooter === false) el('li-foot').style.display = 'none';
-      else { el('li-foot').style.display = ''; renderFooter(data, brand, spons); }
+      if (intro.showFooter !== true) {
+        el('lh-foot').style.display = 'none'; stage.classList.remove('has-foot');
+      } else {
+        el('lh-foot').style.display = ''; renderFooter(spons);
+      }
 
-      // Card width adapts to roster size so 1–6 players stay centred and large.
-      const n = players.length;
-      const cardW = n <= 3 ? 360 : n === 4 ? 340 : n <= 6 ? 300 : 260;
-      grid.innerHTML = '';
+      // ── Player cards ─────────────────────────────────────────────────────
+      rows.innerHTML = '';
+
+      const anyStats = evName && players.some((p) => {
+        const t = (p.gamerTag || p.name || '').trim();
+        const es = _evStat(t, evName);
+        return es && typeof es === 'object' && es.games > 0;
+      });
+      rows.classList.toggle('has-stats', anyStats);
+
+      if (anyStats) {
+        const hdr = document.createElement('div');
+        hdr.className = 'lh-hdr';
+        hdr.innerHTML = '<div></div><div></div><div></div><div></div>'
+          + '<div class="lh-hdr-cell col-g">G</div>'
+          + '<div class="lh-hdr-cell col-a">A</div>'
+          + '<div class="lh-hdr-cell col-s">S</div>'
+          + '<div class="lh-hdr-cell col-gpg">GPG</div>';
+        rows.appendChild(hdr);
+      }
 
       players.forEach((p, i) => {
         const prof = profileFor(data, p) || {};
         const photo = p.photo || p.image || prof.image || '';
         const role = (p.role || '').toString().trim();
-        const six = prof.sixmans || null;
-        const cc = prof.countryCode || '';
 
-        // Photo: explicit/start.gg photo → team logo placeholder → initials.
-        let photoHtml;
-        if (photo) photoHtml = `<img class="face" src="${esc(photo)}" alt="" onerror="this.remove()">`;
-        else if (team.logo) photoHtml = `<div class="logo-ph ${team.logoOnDark ? 'on-dark' : ''}"><img src="${esc(team.logo)}" alt=""></div>`;
-        else photoHtml = `<div class="initials">${esc(initials(p.name || p.gamerTag))}</div>`;
+        // Status — p.status ('starter'|'sub') takes priority, fall back to role string
+        const statusRaw = (p.status || '').toLowerCase();
+        const roleLC = role.toLowerCase();
+        const isCap = /cap|\(c\)|captain/.test(roleLC);
+        const isSub = statusRaw === 'sub' || /\bsub\b|substitute|6th|reserve/.test(roleLC);
+        const isAlt = /\balt\b|alternate|standin|stand-in/.test(roleLC);
 
-        const posHtml = role ? `<span class="li-pos ${posClass(role)}">${esc(role)}</span>` : '';
+        let statusLabel, statusClass;
+        if (isCap) { statusLabel = 'Captain'; statusClass = 'badge-starter'; }
+        else if (isSub) { statusLabel = 'Sub'; statusClass = 'badge-sub'; }
+        else if (isAlt) { statusLabel = 'Alternate'; statusClass = 'badge-alt'; }
+        else { statusLabel = 'Starter'; statusClass = 'badge-starter'; }
 
-        // start.gg handle (gamertag) under the name when it differs from the display name.
+        // Role badge next to name — only for non-trivial role labels
+        const showRoleBadge = role && !/^(starter|sub|substitute|alternate|alt|reserve|stand-in|standin)$/i.test(role);
+        const roleBadgeHtml = showRoleBadge
+          ? `<span class="lh-role-badge${isCap ? ' is-cap' : ''}">${esc(role)}</span>`
+          : '';
+
+        // Country from start.gg via playerProfiles
+        const pcc = ((prof.countryCode || p.country || '').toUpperCase()).slice(0, 2);
+
+        // Avatar
+        let avatarInner;
+        if (photo) {
+          avatarInner = `<img class="face" src="${esc(photo)}" alt="" onerror="this.remove()">`;
+        } else if (team.logo) {
+          avatarInner = `<div class="logo-ph ${team.logoOnDark ? 'on-dark' : ''}"><img src="${esc(team.logo)}" alt=""></div>`;
+        } else {
+          avatarInner = `<div class="init-text">${esc(initials(p.name || p.gamerTag))}</div>`;
+        }
+
         const name = (p.name || p.gamerTag || ('Player ' + (i + 1))).toString();
-        const tag = (p.gamerTag || '').toString().trim();
-        const handle = (tag && tag.toLowerCase() !== name.trim().toLowerCase()) ? '@' + tag : '';
+        const showRealName = !!intro.showRealName;
+        const realName = (p.realName || prof.realName || '').trim();
 
-        // Stats line: 6mans rank+ELO, country flag + name.
-        const stats = [];
-        if (six && six.rank) stats.push(`<span class="li-stat"><span class="li-rank">${esc(six.rank)}</span>${six.elo ? `<span class="li-elo">${six.elo}</span><span class="lbl">ELO</span>` : ''}</span>`);
-        else if (six && six.elo) stats.push(`<span class="li-stat"><span class="li-elo">${six.elo}</span><span class="lbl">ELO</span></span>`);
-        if (cc) stats.push(`<span class="li-stat li-flag">${flagEmoji(cc)}<span class="li-cc">${esc(countryName(cc) || cc)}</span></span>`);
+        // Real name line (optional, shown when intro.showRealName is on)
+        const realNameHtml = showRealName && realName
+          ? `<span class="lh-realname">${esc(realName)}</span>`
+          : '';
 
-        const card = document.createElement('div');
-        card.className = 'li-card';
-        card.style.width = cardW + 'px';
-        card.style.animationDelay = (0.12 + i * 0.1) + 's';
-        card.innerHTML = `
-          <div class="li-photo">${photoHtml}${posHtml}</div>
-          <div class="li-plate">
-            <div class="li-name">${esc(name)}</div>
-            ${handle ? `<div class="li-handle">${esc(handle)}</div>` : ''}
-            <div class="li-stats ${stats.length ? '' : 'is-empty'}">${stats.join('')}</div>
-          </div>`;
-        grid.appendChild(card);
+        // Country row — flag + name (no rank)
+        let countryHtml = '';
+        if (pcc) {
+          countryHtml = `<div class="lh-country-row">`
+            + `<div class="lh-flag-inline"><img src="${flagSrc(pcc)}" alt="" onerror="this.parentNode.style.display='none'"></div>`
+            + `<span class="lh-country-name">${esc(countryName(pcc) || pcc)}</span>`
+            + `</div>`;
+        }
+
+        // Social handles — show whichever are available (Twitter, Twitch, or both)
+        const tw = (p.twitter || prof.twitter || '').replace(/^@/, '').trim();
+        const tt = (p.twitch  || prof.twitch  || '').replace(/^@/, '').trim();
+        let socialsHtml = '';
+        if (tw || tt) {
+          socialsHtml = `<div class="lh-socials-row">`;
+          if (tw) socialsHtml += `<span class="lh-social tw"><span class="plat">X</span><span class="handle">@${esc(tw)}</span></span>`;
+          if (tt) socialsHtml += `<span class="lh-social tt"><span class="plat">TWITCH</span><span class="handle">${esc(tt)}</span></span>`;
+          socialsHtml += `</div>`;
+        }
+
+        // Stat columns (from start.gg historical import)
+        const evSt = _evStat((p.gamerTag || p.name || '').toString().trim(), evName);
+        const hs = evSt && typeof evSt === 'object' && evSt.games > 0;
+        function sc(cls, val, lbl) {
+          return `<div class="lh-sc ${cls}"><span class="lh-sn">${val}</span><span class="lh-sl">${lbl}</span></div>`;
+        }
+
+        const cardCls = ['lh-row', isCap ? 'is-cap' : '', isSub ? 'is-sub' : ''].filter(Boolean).join(' ');
+        const row = document.createElement('div');
+        row.className = cardCls;
+        row.style.animationDelay = (0.15 + i * 0.1) + 's';
+        row.innerHTML =
+          `<div class="lh-accent"></div>`
+          + `<div class="lh-avatar-wrap"><div class="lh-avatar">${avatarInner}</div></div>`
+          + `<div class="lh-name-block">`
+            + `<div class="lh-pname-row"><span class="lh-pname">${esc(name)}</span>${roleBadgeHtml}</div>`
+            + realNameHtml
+            + countryHtml
+            + socialsHtml
+          + `</div>`
+          + `<div class="lh-status-col"><span class="lh-status-badge ${statusClass}">${esc(statusLabel)}</span></div>`
+          + sc('col-g',   hs ? evSt.goals   : '—', 'G')
+          + sc('col-a',   hs ? evSt.assists : '—', 'A')
+          + sc('col-s',   hs ? evSt.saves   : '—', 'S')
+          + sc('col-gpg', hs ? evSt.gpg     : '—', 'GPG');
+        rows.appendChild(row);
       });
     }
 
-    // Footer: brand "presented by" (scoreboardAd) + sponsor logos (brand desk/sponsors).
-    function renderFooter(data, brand, spons) {
-      const slot = data.scoreboardAd || {};
-      const pres = el('li-presented'), pbLogo = el('li-pb-logo'), pbLabel = el('li-pb-label');
-      pbLabel.textContent = (slot.label || 'PRESENTED BY').toString().trim();
-      if (slot.logo) { pbLogo.src = slot.logo; pbLogo.style.display = ''; pres.classList.remove('is-empty'); }
-      else { pbLogo.style.display = 'none'; pbLogo.removeAttribute('src'); pres.classList.add('is-empty'); }
+    function renderFooter(spons) {
       const sponsors = (spons || []).filter((s) => s && s.logo);
-      const sp = el('li-sponsors');
-      sp.innerHTML = sponsors.map((s) => `<img class="li-sponsor" src="${esc(s.logo)}" alt="${esc(s.name || '')}">`).join('');
+      const sp = el('lh-sponsors');
+      sp.innerHTML = sponsors.map((s) => `<img class="lh-sponsor" src="${esc(s.logo)}" alt="${esc(s.name || '')}">`).join('');
       sp.classList.toggle('is-empty', !sponsors.length);
-      el('li-foot').classList.toggle('is-empty', pres.classList.contains('is-empty') && !sponsors.length);
+      el('lh-foot').classList.toggle('is-empty', !sponsors.length);
+      stage.classList.toggle('has-foot', !!sponsors.length);
     }
 
     SceneBase.connect(render);
 
     if (location.protocol === 'file:') {
       document.documentElement.classList.add('preview');
+      const _prevEv = 'rocket rush season 6';
+      [['aqua', { games:8, wins:6, goals:14, assists:8, saves:11, gpg:1.8 }],
+       ['nova', { games:8, wins:6, goals:9, assists:12, saves:18, gpg:1.1 }],
+       ['rhythm', { games:7, wins:5, goals:7, assists:6, saves:14, gpg:1.0 }],
+       ['echo', { games:6, wins:4, goals:5, assists:9, saves:16, gpg:0.8 }]].forEach(([t,s]) => {
+        _evCache[_evKey(t, _prevEv)] = s;
+      });
       render({
         teams: { blue: { name: 'Frost Esports', color: '#3b82f6', logo: null, players: [
-          { name: 'Aqua', gamerTag: 'Aqua', role: 'Captain' },
-          { name: 'Nova', gamerTag: 'Nova', role: 'Starter' },
-          { name: 'Rhythm', gamerTag: 'Rhythm', role: 'Starter' },
-          { name: 'Echo', gamerTag: 'Echo', role: 'Sub' }
+          { name: 'Aqua',   gamerTag: 'Aqua',   role: 'Captain', status: 'starter', realName: 'James Carter' },
+          { name: 'Nova',   gamerTag: 'Nova',   role: '',        status: 'starter', realName: 'Lena Park' },
+          { name: 'Rhythm', gamerTag: 'Rhythm', role: '',        status: 'starter', realName: '' },
+          { name: 'Echo',   gamerTag: 'Echo',   role: '',        status: 'sub',     realName: 'Marco Silva' }
         ] } },
         playerProfiles: {
-          aqua: { gamerTag: 'AquaRL', sixmans: { rank: 'S', elo: 3120 }, countryCode: 'us' },
-          nova: { sixmans: { rank: 'A', elo: 2655 }, countryCode: 'ca' },
-          rhythm: { sixmans: { rank: 'B+', elo: 2210 }, countryCode: 'gb' },
-          echo: { sixmans: { rank: 'C', elo: 1740 }, countryCode: 'de' }
+          aqua:   { gamerTag: 'Aqua',   countryCode: 'us', twitter: 'AquaRL',  twitch: 'aquarl' },
+          nova:   { gamerTag: 'Nova',   countryCode: 'ca', twitter: 'NovaGG',  twitch: '' },
+          rhythm: { gamerTag: 'Rhythm', countryCode: 'gb', twitter: '',        twitch: 'rhythmgg' },
+          echo:   { gamerTag: 'Echo',   countryCode: 'de', twitter: '',        twitch: '' }
         },
-        brand: { sponsors: [
-          { name: 'Acme', logo: 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="130" height="46"><text x="8" y="33" font-size="26" fill="#fff" font-family="Arial" font-weight="bold">ACME</text></svg>') },
-          { name: 'Nova', logo: 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="130" height="46"><text x="8" y="33" font-size="26" fill="#fff" font-family="Arial" font-weight="bold">NOVA</text></svg>') }
-        ] },
-        scoreboardAd: { label: 'PRESENTED BY', logo: 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="180" height="40"><rect width="180" height="40" rx="5" fill="#1a1d24"/><text x="90" y="27" font-size="17" fill="#e8eaf0" text-anchor="middle" font-family="Arial" font-weight="bold">SPONSOR</text></svg>') },
+        brand: { sponsors: [] },
+        scoreboardAd: {},
         teamRecords: { enabled: true, blue: '14-3' },
-        intro: { visible: true, side: 'blue', title: 'Starting Line-up', showFooter: true }
+        activeEvent: { platform: 'startgg', name: 'Rocket Rush Season 6', numEntrants: 24 },
+        bracket: { standings: [{ name: 'Frost Esports', wins: 3, losses: 1, placement: 2 }] },
+        intro: { visible: true, side: 'blue', title: 'Starting Line-up', showFooter: false, showRealName: true }
       });
       stage.classList.add('show');
     }

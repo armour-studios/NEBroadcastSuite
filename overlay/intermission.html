@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<!--
+  intermission.html — compact horizontal card: logo | countdown | event title.
+  Transparent background — layer over a map loop or b-roll in OBS.
+
+  Driven by full_state:
+    breakScreen.visible       — show / hide the card (standalone always shows)
+    breakScreen.title         — label above the countdown (e.g. "NEXT MAP IN")
+    breakScreen.endsAt        — epoch ms countdown target
+    breakScreen.frozenSeconds — paused value overrides endsAt
+    eventName                 — event title line
+    brand.logo / brand.color  — logo image + accent colour
+
+  URL params:
+    ?label=NEXT MAP IN  override label
+    ?title=off          hide event title
+    ?showTimer=0        hide countdown
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <link rel="stylesheet" href="/fonts.css">
+  <style>
+    :root { --accent: #e83a8b; --accent2: #8b5cf6; }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      width: 1920px; height: 1080px; overflow: hidden;
+      background: transparent;
+      font-family: 'Rajdhani', 'Inter', system-ui, sans-serif;
+      -webkit-font-smoothing: antialiased;
+      display: flex; align-items: center; justify-content: center;
+    }
+
+    /* Card — no padding-top, no min-height; content drives size */
+    .im-card {
+      width: 900px;
+      opacity: 0; transition: opacity .5s ease;
+      animation: none;
+    }
+    .im-card.show {
+      opacity: 1;
+      animation: imFloat 5s ease-in-out .5s infinite;
+    }
+    @keyframes imFloat {
+      0%, 100% { transform: translateY(0); }
+      50%       { transform: translateY(-12px); }
+    }
+
+    /* Panel — column: [body row] then [progress bar] */
+    .im-panel {
+      width: 100%;
+      background: rgba(7, 9, 16, .92);
+      border: 1px solid rgba(255,255,255,.08);
+      border-radius: 20px;
+      display: flex; flex-direction: column;
+      overflow: hidden;
+      box-shadow: 0 40px 100px rgba(0,0,0,.7), 0 0 0 1px rgba(255,255,255,.04);
+      backdrop-filter: blur(24px);
+      -webkit-backdrop-filter: blur(24px);
+      position: relative;
+    }
+    .im-panel::before {
+      content: ''; position: absolute; top: 0; left: 10%; right: 10%; height: 2px;
+      background: linear-gradient(to right, transparent, var(--accent), var(--accent2), transparent);
+      border-radius: 0 0 4px 4px;
+      animation: accentPulse 2.8s ease-in-out infinite;
+    }
+    @keyframes accentPulse {
+      0%, 100% { opacity: .65; }
+      50%       { opacity: 1; }
+    }
+
+    /* Body row */
+    .im-body {
+      display: flex; flex-direction: row; align-items: center;
+      padding: 36px 44px;
+    }
+
+    /* Left: brand logo */
+    .im-left {
+      width: 104px; flex-shrink: 0;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .im-logo {
+      width: 84px; height: 84px; object-fit: contain; display: block;
+      animation: logoPulse 3s ease-in-out infinite;
+    }
+    @keyframes logoPulse {
+      0%, 100% { filter: drop-shadow(0 4px 16px rgba(0,0,0,.6)) drop-shadow(0 0 0px var(--accent)); }
+      50%       { filter: drop-shadow(0 4px 16px rgba(0,0,0,.6)) drop-shadow(0 0 24px var(--accent)); }
+    }
+
+    /* Vertical separator */
+    .im-vsep {
+      width: 1px; align-self: stretch; flex-shrink: 0;
+      background: linear-gradient(to bottom, transparent, rgba(255,255,255,.14), transparent);
+      margin: 0 44px;
+    }
+
+    /* Right: countdown + event title */
+    .im-right {
+      flex: 1;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+    }
+
+    .im-countdown { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+    .im-countdown.hidden { display: none; }
+
+    .im-label {
+      font-size: 12px; font-weight: 800; letter-spacing: .44em; text-transform: uppercase;
+      color: var(--accent); line-height: 1;
+    }
+
+    .im-time {
+      font-size: 88px; font-weight: 900; letter-spacing: -.02em; line-height: 1;
+      color: #fff; text-align: center;
+      text-shadow: 0 0 80px rgba(255,255,255,.16), 0 0 140px color-mix(in srgb, var(--accent) 28%, transparent);
+    }
+    .im-time.big { font-size: 104px; }
+
+    /* Divider kept for JS compat — not rendered in horizontal layout */
+    .im-divider { display: none; }
+
+    .im-event {
+      font-size: 11px; font-weight: 700; letter-spacing: .26em; text-transform: uppercase;
+      color: rgba(255,255,255,.6); text-align: center; line-height: 1;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%;
+      margin-top: 12px;
+    }
+    .im-event.hidden { display: none; }
+
+    /* Progress bar — full width, pinned to bottom inside panel */
+    .im-progress {
+      width: 100%; height: 4px;
+      background: rgba(255,255,255,.06);
+      position: relative; overflow: hidden; flex-shrink: 0;
+    }
+    .im-progress.hidden { display: none; }
+    .im-progress-fill {
+      height: 100%;
+      background: linear-gradient(to right, var(--accent), var(--accent2), var(--accent));
+      box-shadow: 0 0 10px var(--accent);
+      transition: width .9s linear;
+      width: 100%;
+      position: absolute; left: 50%; transform: translateX(-50%);
+    }
+  </style>
+</head>
+<body>
+  <div class="im-card" id="card">
+    <div class="im-panel">
+      <div class="im-body">
+        <div class="im-left">
+          <img class="im-logo" id="logo" src="" alt="">
+        </div>
+        <div class="im-vsep"></div>
+        <div class="im-right">
+          <div class="im-countdown hidden" id="countdown-wrap">
+            <div class="im-label" id="label">INTERMISSION</div>
+            <div class="im-time" id="time">—</div>
+          </div>
+          <div class="im-divider hidden" id="divider"></div>
+          <div class="im-event hidden" id="event-title"></div>
+        </div>
+      </div>
+      <div class="im-progress hidden" id="progress">
+        <div class="im-progress-fill" id="progress-fill"></div>
+      </div>
+    </div>
+  </div>
+
+  <script src="scene-base.js"></script>
+  <script>
+    const QP     = new URLSearchParams(location.search);
+    const QLABEL = QP.get('label');
+    const QTITLE = QP.get('title');
+    const SHOW_TIMER = QP.get('showTimer') !== '0';
+    const card = document.getElementById('card');
+
+    function el(id) { return document.getElementById(id); }
+    function fmtTime(sec) {
+      sec = Math.max(0, Math.round(sec));
+      const h = Math.floor(sec / 3600);
+      const m = Math.floor((sec % 3600) / 60);
+      const s = sec % 60;
+      if (h > 0) return h + ':' + String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0');
+      return m + ':' + String(s).padStart(2, '0');
+    }
+
+    let _endsAt = null, _frozen = null, _totalSec = null, _startedAt = null;
+    let _tickTimer = null;
+
+    function startTick() {
+      clearInterval(_tickTimer);
+      _tickTimer = setInterval(tick, 250);
+    }
+    function tick() {
+      if (_frozen != null) { el('time').textContent = fmtTime(_frozen); updateProgress(_frozen); return; }
+      if (!_endsAt) return;
+      const rem = Math.max(0, (_endsAt - Date.now()) / 1000);
+      el('time').textContent = fmtTime(rem);
+      updateProgress(rem);
+    }
+    function updateProgress(remSec) {
+      const prog = el('progress-fill');
+      if (!prog || !_totalSec) return;
+      const pct = Math.min(100, Math.max(0, (remSec / _totalSec) * 100));
+      prog.style.width = pct + '%';
+    }
+
+    function render(data) {
+      data = data || {};
+      const b = data.breakScreen || {};
+      const standalone = SceneBase.standalone;
+      const visible = standalone || b.visible;
+      card.classList.toggle('show', !!visible);
+      if (!visible) return;
+
+      const root = document.documentElement;
+      const accent = SceneBase.brandColor(data);
+      const accent2 = SceneBase.brandAccent(data);
+      if (accent) root.style.setProperty('--accent', accent);
+      if (accent2) root.style.setProperty('--accent2', accent2);
+
+      const logoImg = el('logo');
+      const brandLogo = (data.brand && data.brand.logo) ? data.brand.logo : '';
+      SceneBase.applyTeamLogo(logoImg, brandLogo, '');
+
+      let titleText = '';
+      if (QTITLE != null) { titleText = /^(off|none|hide|0)$/i.test(QTITLE.trim()) ? '' : QTITLE.trim(); }
+      else { titleText = (data.eventName || '').toString().trim(); }
+      const titleEl = el('event-title');
+      titleEl.textContent = titleText.toUpperCase();
+      titleEl.classList.toggle('hidden', !titleText);
+      el('divider').classList.toggle('hidden', !titleText);
+
+      const labelText = QLABEL || b.title || 'INTERMISSION';
+      el('label').textContent = labelText.toUpperCase();
+
+      const hasEndsAt = !!b.endsAt;
+      const hasFrozen = b.frozenSeconds != null;
+      const hasTimer  = SHOW_TIMER && (hasEndsAt || hasFrozen);
+      el('countdown-wrap').classList.toggle('hidden', !hasTimer);
+      el('progress').classList.toggle('hidden', !hasTimer);
+      el('time').classList.toggle('big', !titleText);
+
+      if (hasTimer) {
+        _frozen = hasFrozen ? Math.max(0, Math.round(b.frozenSeconds)) : null;
+        _endsAt = hasEndsAt ? b.endsAt : null;
+        if (!_startedAt && _endsAt) {
+          const remNow = (_endsAt - Date.now()) / 1000;
+          if (remNow > 0 && !_totalSec) { _totalSec = remNow; _startedAt = Date.now(); }
+        }
+        if (!_tickTimer) startTick();
+        tick();
+      } else {
+        clearInterval(_tickTimer); _tickTimer = null;
+      }
+    }
+
+    if (location.protocol === 'file:') {
+      render({
+        breakScreen: { visible: true, title: 'NEXT MAP IN', endsAt: Date.now() + 4 * 60 * 1000 + 22 * 1000 },
+        eventName: 'Summer Showdown 2024',
+        brand: { color: '#e83a8b', accent: '#8b5cf6', logo: '' }
+      });
+    } else {
+      SceneBase.connect(render);
+    }
+  </script>
+</body>
+</html>

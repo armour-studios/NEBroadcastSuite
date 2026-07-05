@@ -203,6 +203,32 @@ function createObsClient({
     }
   }
 
+  async function switchSceneWithTransition(sceneName, transitionName) {
+    if (!connected || !sceneName) return false;
+    try {
+      if (transitionName) {
+        await obs.call('SetCurrentSceneTransition', { transitionName });
+      }
+      await obs.call('SetCurrentProgramScene', { sceneName });
+      emitScene(sceneName);
+      return true;
+    } catch (e) {
+      lastError = e && e.message ? e.message : String(e);
+      return false;
+    }
+  }
+
+  async function getTransitions() {
+    if (!connected) return [];
+    try {
+      const res = await obs.call('GetSceneTransitionList');
+      return (res.transitions || []).map(t => t.transitionName).filter(Boolean);
+    } catch (e) {
+      lastError = e && e.message ? e.message : String(e);
+      return [];
+    }
+  }
+
   async function call(request, params) {
     if (!connected) return null;
     try {
@@ -299,6 +325,8 @@ function createObsClient({
     startReplayBuffer,
     stopReplayBuffer,
     isReplayBufferActive,
+    getTransitions,
+    switchSceneWithTransition,
     isConnected: () => connected,
     getCurrentScene: () => currentScene,
     getLastError: () => lastError,

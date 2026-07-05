@@ -1,246 +1,556 @@
 <!DOCTYPE html>
 <!--
-  matchup.html — pre-game "tale of the tape": logo VS logo with team names, series
-  score, and each team's roster (country flag, name, position, social). duorow design
-  language; driven by full_state (teams[].players, series, eventName, playerProfiles).
-  No baked background — the Scenes page sets fill colour + opacity per graphic.
+  matchup.html — pre-game matchup card
+  Top bar: brand logo + event title.
+  Two team halves: logo toward center (full opacity) + player roster below logo.
+  Team names at bottom corners with dark scrim for readability.
+  Dark center VS pillar.
+  Driven by full_state: teams.blue/orange (name, color, logo, players, series), bestOf, eventName, roundLabel, brand.
+  ?title=      override event label  ?title=off  hides it
+  ?sponsors=0  hide the sponsor rail even if sponsors are configured
 -->
 <html lang="en">
 <head>
   <meta charset="utf-8" />
   <link rel="stylesheet" href="/fonts.css">
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
   <style>
     :root {
-      --duo-surface: #1a1d24; --duo-surface2: #20242e; --duo-border: #2e3340;
-      --duo-accent: #e83a8b; --duo-accent2: #8b5cf6; --duo-muted: #8b93a8;
-      --team-a: #055fdb; --team-b: #e97139;
+      --team-a: #22c55e;
+      --team-b: #8b5cf6;
+      --cw: 240px;
+      --tb: 80px;
     }
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    html, body { width: 1920px; height: 1080px; overflow: hidden; background: transparent;
-      font-family: 'Inter', system-ui, sans-serif; color: #e8eaf0; -webkit-font-smoothing: antialiased; }
+    html, body {
+      width: 1920px; height: 1080px; overflow: hidden;
+      background: transparent;
+      font-family: 'Rajdhani', 'Inter', system-ui, sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
 
-    .mu-stage { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center;
-      padding: 52px 70px 46px; opacity: 0; transition: opacity .4s ease; }
+    /* ── Stage ── */
+    .mu-stage {
+      position: absolute; inset: 0;
+      display: grid;
+      grid-template-columns: 1fr var(--cw) 1fr;
+      opacity: 0; transition: opacity .55s ease;
+    }
     .mu-stage.show { opacity: 1; }
 
-    /* Header */
-    .mu-header { flex: 0 0 auto; text-align: center; margin-bottom: 26px; }
-    .mu-eyebrow { font-family: 'Rajdhani','Inter',sans-serif; font-weight: 700; font-size: 18px; letter-spacing: .42em; text-transform: uppercase; color: var(--duo-accent); }
-    .mu-title { font-family: 'Rajdhani','Inter',sans-serif; font-weight: 700; font-size: 46px; letter-spacing: .02em; text-transform: uppercase; color: #fff; line-height: 1; margin-top: 2px; }
-    .mu-title.is-empty { display: none; }
+    :root {
+      --rail-h: 0px;
+    }
 
-    /* Hero — logo VS logo */
-    .mu-hero { flex: 0 0 auto; display: grid; grid-template-columns: 1fr 220px 1fr; align-items: center; width: 100%;
-      max-width: 1480px; margin-bottom: 30px; }
-    .mu-side { display: flex; flex-direction: column; align-items: center; gap: 12px; opacity: 0; }
-    .mu-stage.show .mu-side--a { animation: inL .7s cubic-bezier(.16,.84,.24,1) .1s both; }
-    .mu-stage.show .mu-side--b { animation: inR .7s cubic-bezier(.16,.84,.24,1) .18s both; }
-    @keyframes inL { from { opacity: 0; transform: translateX(-44px); } to { opacity: 1; transform: none; } }
-    @keyframes inR { from { opacity: 0; transform: translateX(44px); } to { opacity: 1; transform: none; } }
-    .mu-logo-wrap { width: 192px; height: 192px; border-radius: 26px; display: grid; place-items: center;
-      background: radial-gradient(circle at 50% 35%, var(--duo-surface2), #0c0e13); border: 1px solid var(--duo-border);
-      box-shadow: 0 20px 50px rgba(0,0,0,.5); position: relative; }
-    .mu-side--a .mu-logo-wrap { box-shadow: 0 20px 50px rgba(0,0,0,.5), inset 0 0 0 2px color-mix(in srgb, var(--team-a) 45%, transparent); }
-    .mu-side--b .mu-logo-wrap { box-shadow: 0 20px 50px rgba(0,0,0,.5), inset 0 0 0 2px color-mix(in srgb, var(--team-b) 45%, transparent); }
-    .mu-logo-wrap::before { content: ''; position: absolute; left: 14%; right: 14%; bottom: -3px; height: 3px; border-radius: 2px; }
-    .mu-side--a .mu-logo-wrap::before { background: var(--team-a); box-shadow: 0 0 18px color-mix(in srgb, var(--team-a) 70%, transparent); }
-    .mu-side--b .mu-logo-wrap::before { background: var(--team-b); box-shadow: 0 0 18px color-mix(in srgb, var(--team-b) 70%, transparent); }
-    .mu-logo { width: 140px; height: 140px; object-fit: contain; filter: drop-shadow(0 6px 16px rgba(0,0,0,.5)); }
-    .mu-logo.logo-on-dark { filter: brightness(0) invert(1) drop-shadow(0 6px 16px rgba(0,0,0,.5)); }
-    .mu-name { font-family: 'Rajdhani','Inter',sans-serif; font-weight: 700; font-size: 42px; text-transform: uppercase; color: #fff;
-      text-align: center; line-height: .96; max-width: 540px; }
-    .mu-side--a .mu-name { text-shadow: 0 0 22px color-mix(in srgb, var(--team-a) 45%, transparent); }
-    .mu-side--b .mu-name { text-shadow: 0 0 22px color-mix(in srgb, var(--team-b) 45%, transparent); }
-    .mu-tstat { font-family: 'Rajdhani','Inter',sans-serif; font-weight: 700; font-size: 16px; letter-spacing: .12em; text-transform: uppercase; color: var(--duo-muted); }
-    .mu-tstat b { color: #fff; font-size: 19px; }
-    .mu-tstat.is-empty { display: none; }
+    /* ─────────────────────────────────────────────
+       TOP BAR — logo + event title centered together
+    ───────────────────────────────────────────── */
+    .mu-topbar {
+      position: absolute; top: 0; left: 0; right: 0; z-index: 20;
+      height: var(--tb);
+      background: rgba(5, 7, 14, .9);
+      border-bottom: 1px solid rgba(255,255,255,.07);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      display: flex; align-items: center; justify-content: center;
+      box-shadow: 0 6px 40px rgba(0,0,0,.6);
+    }
 
-    .mu-center { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; }
-    .mu-vs { width: 110px; height: 110px; border-radius: 50%; display: grid; place-items: center;
-      font-family: 'Rajdhani','Inter',sans-serif; font-weight: 900; font-size: 46px; color: #fff;
-      background: radial-gradient(circle at 50% 35%, var(--duo-surface2), #0b0d12); border: 2px solid var(--duo-accent);
-      box-shadow: 0 0 0 6px rgba(8,10,14,.9), 0 14px 34px rgba(0,0,0,.6); }
-    .mu-series { display: flex; align-items: center; gap: 12px; font-family: 'Rajdhani','Inter',sans-serif; font-weight: 900; font-size: 46px; line-height: 1; }
-    .mu-series .sa { color: var(--team-a); } .mu-series .sb { color: var(--team-b); } .mu-series .sep { color: var(--duo-muted); font-size: 30px; }
-    .mu-bo { font-size: 13px; font-weight: 800; letter-spacing: .2em; text-transform: uppercase; color: var(--duo-muted); }
+    /* centered group: logo + divider + text */
+    .mu-topbar-center {
+      display: flex; align-items: center; gap: 16px;
+    }
+    .mu-topbar-logo {
+      height: 46px; width: auto; max-width: 160px;
+      object-fit: contain; flex-shrink: 0;
+      filter: drop-shadow(0 2px 8px rgba(0,0,0,.5));
+    }
+    .mu-topbar-logo.is-hidden { display: none; }
+    .mu-topbar-sep {
+      width: 1px; height: 30px;
+      background: rgba(255,255,255,.15); flex-shrink: 0;
+    }
+    .mu-topbar-sep.is-hidden { display: none; }
+    .mu-topbar-info {
+      display: flex; flex-direction: column; align-items: flex-start; gap: 1px;
+    }
+    .mu-topbar-event {
+      font-size: 18px; font-weight: 800; letter-spacing: .26em; text-transform: uppercase;
+      color: rgba(255,255,255,.85); line-height: 1;
+    }
+    .mu-topbar-round {
+      font-size: 11px; font-weight: 700; letter-spacing: .34em; text-transform: uppercase;
+      color: rgba(255,255,255,.36); line-height: 1;
+    }
+    .mu-topbar-round.is-hidden { display: none; }
 
-    /* Rosters */
-    .mu-rosters { flex: 1 1 0; min-height: 0; display: grid; grid-template-columns: 1fr 220px 1fr; align-content: start; align-items: stretch;
-      width: 100%; max-width: 1480px; gap: 0 0; }
-    /* Both columns stretch to the taller roster's height and centre their rows, so a
-       3-vs-4 (or any uneven count) stays balanced around a shared midline. */
-    .mu-roster { display: flex; flex-direction: column; justify-content: center; gap: 9px; opacity: 0; }
-    .mu-stage.show .mu-roster--a { animation: inUp .6s cubic-bezier(.16,.84,.24,1) .3s both; }
-    .mu-stage.show .mu-roster--b { animation: inUp .6s cubic-bezier(.16,.84,.24,1) .38s both; }
-    @keyframes inUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: none; } }
-    .mu-prow { display: flex; align-items: center; gap: 12px; padding: 10px 18px; border-radius: 10px;
-      background: linear-gradient(180deg, var(--duo-surface2), var(--duo-surface)); border: 1px solid var(--duo-border); position: relative; }
-    .mu-prow::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; border-radius: 10px 0 0 10px; }
-    .mu-roster--a .mu-prow::before { background: var(--team-a); } .mu-roster--b .mu-prow::before { background: var(--team-b); }
-    .mu-roster--b .mu-prow { flex-direction: row-reverse; text-align: right; }
-    .mu-roster--b .mu-prow::before { left: auto; right: 0; border-radius: 0 10px 10px 0; }
-    .mu-flag { font-size: 22px; line-height: 1; flex: 0 0 auto; width: 26px; text-align: center; }
-    .mu-pid { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1 1 auto; }
-    .mu-roster--b .mu-pid { align-items: flex-end; }
-    .mu-pname { font-size: 26px; font-weight: 800; color: #eef1f7; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1; }
-    .mu-psocial { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; color: var(--duo-muted); }
-    .mu-psocial.is-empty { display: none; }
-    .mu-psocial i { font-size: 13px; }
-    .mu-psocial i.fa-twitch { color: #9146ff; } .mu-psocial i.fa-x-twitter { color: #e8eaf0; } .mu-psocial i.fa-youtube { color: #ff0033; }
-    .mu-rank { display: inline-flex; align-items: center; justify-content: center; min-width: 26px; height: 24px; padding: 0 7px; border-radius: 5px;
-      font-size: 14px; font-weight: 800; color: #fff; flex: 0 0 auto; }
-    .mu-roster--a .mu-rank { background: linear-gradient(135deg, var(--team-a), color-mix(in srgb, var(--team-a) 55%, #000)); }
-    .mu-roster--b .mu-rank { background: linear-gradient(135deg, var(--team-b), color-mix(in srgb, var(--team-b) 55%, #000)); }
-    .mu-prole { font-size: 11px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; color: var(--duo-muted); flex: 0 0 auto; }
-    .mu-prole.is-cap { color: #fff; background: linear-gradient(135deg, var(--duo-accent), var(--duo-accent2)); padding: 3px 8px; border-radius: 5px; }
-    .mu-prole.is-sub { color: #f0b860; } .mu-prole.is-alt { color: var(--duo-muted); }
-    .mu-empty { color: var(--duo-muted); font-size: 16px; padding: 14px; text-align: center; }
-    .mu-mid-spacer { }
+    /* ─────────────────────────────────────────────
+       SPONSOR RAIL (bottom)
+    ───────────────────────────────────────────── */
+    .mu-sponsors {
+      position: absolute; bottom: 0; left: 0; right: 0; z-index: 20;
+      height: 64px;
+      background: rgba(5, 7, 14, .88);
+      border-top: 1px solid rgba(255,255,255,.07);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      display: none; align-items: center; justify-content: center; gap: 52px;
+      padding: 0 60px;
+    }
+    .mu-sponsors.show { display: flex; }
+    .mu-sponsor-img {
+      height: 34px; width: auto; max-width: 130px;
+      object-fit: contain; opacity: .82;
+      filter: drop-shadow(0 1px 6px rgba(0,0,0,.4));
+    }
+    /* push team name scrim up when sponsor rail is visible */
+    .mu-stage.has-sponsors .mu-bottom { bottom: 64px; }
+
+    /* ─────────────────────────────────────────────
+       HALVES
+    ───────────────────────────────────────────── */
+    .mu-half {
+      position: relative; overflow: hidden;
+    }
+
+    /* semi-transparent team color wash */
+    .mu-half--a {
+      background: linear-gradient(90deg,
+        color-mix(in srgb, var(--team-a) 62%, transparent) 0%,
+        color-mix(in srgb, var(--team-a) 28%, transparent) 45%,
+        transparent 85%
+      );
+    }
+    .mu-half--b {
+      background: linear-gradient(270deg,
+        color-mix(in srgb, var(--team-b) 62%, transparent) 0%,
+        color-mix(in srgb, var(--team-b) 28%, transparent) 45%,
+        transparent 85%
+      );
+    }
+
+    /* radial glow */
+    .mu-half::before {
+      content: ''; position: absolute; inset: 0; pointer-events: none;
+    }
+    .mu-half--a::before {
+      background: radial-gradient(ellipse 65% 70% at 48% 52%, color-mix(in srgb, var(--team-a) 22%, transparent), transparent);
+    }
+    .mu-half--b::before {
+      background: radial-gradient(ellipse 65% 70% at 52% 52%, color-mix(in srgb, var(--team-b) 22%, transparent), transparent);
+    }
+
+    /* ─────────────────────────────────────────────
+       LOGO + PLAYERS (toward center, full opacity)
+    ───────────────────────────────────────────── */
+    .mu-logo-block {
+      position: absolute;
+      /* center horizontally in the column, vertically in the content area below topbar */
+      top: calc(var(--tb) / 2 + 50%);
+      left: 50%;
+      transform: translate(-50%, -50%);
+      display: flex; flex-direction: column; align-items: center;
+      gap: 18px; z-index: 5;
+    }
+
+    /* Large background watermark — same logo, larger, behind the foreground logo */
+    .mu-logo-bg {
+      position: absolute; top: 50%; left: 50%;
+      width: 1080px; height: 1080px;
+      object-fit: contain;
+      opacity: 0;
+      transition: opacity .9s ease .18s, transform .9s cubic-bezier(.16,.84,.24,1) .18s;
+    }
+    .mu-half--a .mu-logo-bg { transform: translate(-53%, -50%) scale(.84); }
+    .mu-half--b .mu-logo-bg { transform: translate(-47%, -50%) scale(.84); }
+    .mu-stage.show .mu-half--a .mu-logo-bg { opacity: .18; transform: translate(-53%, -50%) scale(1); }
+    .mu-stage.show .mu-half--b .mu-logo-bg { opacity: .18; transform: translate(-47%, -50%) scale(1); }
+
+    .mu-logo-fg {
+      width: 300px; height: 300px;
+      object-fit: contain;
+      opacity: 0;
+      transform: scale(.82);
+      transition: opacity .7s ease .22s, transform .75s cubic-bezier(.16,.84,.24,1) .22s;
+      filter: drop-shadow(0 6px 28px rgba(0,0,0,.75)) drop-shadow(0 2px 8px rgba(0,0,0,.5));
+    }
+    .mu-stage.show .mu-logo-fg {
+      opacity: 1; transform: scale(1);
+    }
+    /* Default/monochrome game logo (e.g. the Rocket League mark) sits on a dark stage → render it
+       white instead of black. Matches the treatment used across the other scenes. */
+    .mu-logo-fg.logo-on-dark {
+      filter: brightness(0) invert(1) drop-shadow(0 6px 28px rgba(0,0,0,.6)) drop-shadow(0 2px 8px rgba(0,0,0,.5));
+    }
+    .mu-logo-bg.logo-on-dark { filter: brightness(0) invert(1); }
+
+    /* Abbreviation crest — shown in place of the logo when a team has no custom logo (instead of a
+       default game logo). Same 300px footprint + entrance animation as the logo. */
+    .mu-logo-abbr {
+      width: 300px; height: 300px; border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-family: inherit; font-weight: 900; font-size: 118px; line-height: 1;
+      letter-spacing: .02em; text-transform: uppercase; color: #fff;
+      background: radial-gradient(circle at 50% 34%, rgba(42,46,58,.96), rgba(13,15,21,.98));
+      text-shadow: 0 4px 20px rgba(0,0,0,.9), 0 1px 4px rgba(0,0,0,.9);
+      opacity: 0; transform: scale(.82);
+      transition: opacity .7s ease .22s, transform .75s cubic-bezier(.16,.84,.24,1) .22s;
+    }
+    .mu-half--a .mu-logo-abbr { border: 6px solid var(--team-a);
+      box-shadow: 0 0 40px -4px var(--team-a), inset 0 0 44px rgba(0,0,0,.5), 0 6px 28px rgba(0,0,0,.6); }
+    .mu-half--b .mu-logo-abbr { border: 6px solid var(--team-b);
+      box-shadow: 0 0 40px -4px var(--team-b), inset 0 0 44px rgba(0,0,0,.5), 0 6px 28px rgba(0,0,0,.6); }
+    .mu-stage.show .mu-logo-abbr { opacity: 1; transform: scale(1); }
+
+    /* Player name list */
+    .mu-players {
+      display: flex; flex-direction: column; align-items: center; gap: 3px;
+      opacity: 0; transition: opacity .5s ease .6s;
+    }
+    .mu-stage.show .mu-players { opacity: 1; }
+
+    .mu-player {
+      font-size: 22px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase;
+      color: #fff; line-height: 1.45;
+      text-shadow: 0 2px 14px rgba(0,0,0,.95), 0 1px 4px rgba(0,0,0,.9);
+    }
+
+    /* ─────────────────────────────────────────────
+       TEAM NAME (bottom corners, dark scrim)
+    ───────────────────────────────────────────── */
+    .mu-bottom {
+      position: absolute; bottom: 0; left: 0; right: 0;
+      padding: 70px 58px 50px;
+      /* dark gradient behind names for legibility */
+      background: linear-gradient(to top,
+        rgba(0,0,0,.78) 0%,
+        rgba(0,0,0,.42) 50%,
+        transparent 100%
+      );
+      z-index: 6;
+    }
+    .mu-bottom--b { text-align: right; }
+
+    .mu-city {
+      font-size: 18px; font-weight: 700;
+      letter-spacing: .36em; text-transform: uppercase;
+      color: #fff; line-height: 1; margin-bottom: 2px;
+      text-shadow: 0 2px 14px rgba(0,0,0,.95), 0 1px 4px rgba(0,0,0,.9);
+    }
+    .mu-city.is-empty { display: none; }
+
+    .mu-teamname {
+      font-size: 88px; font-weight: 900;
+      letter-spacing: .03em; text-transform: uppercase; line-height: .88;
+      color: #fff;
+    }
+    .mu-half--a .mu-teamname {
+      text-shadow:
+        0 0 60px color-mix(in srgb, var(--team-a) 65%, transparent),
+        0 4px 20px rgba(0,0,0,.95),
+        0 1px 4px rgba(0,0,0,.9);
+    }
+    .mu-half--b .mu-teamname {
+      text-shadow:
+        0 0 60px color-mix(in srgb, var(--team-b) 65%, transparent),
+        0 4px 20px rgba(0,0,0,.95),
+        0 1px 4px rgba(0,0,0,.9);
+    }
+
+    .mu-stage.show .mu-bottom    { animation: slideUp .72s cubic-bezier(.16,.84,.24,1) .44s both; }
+    .mu-stage.show .mu-bottom--b { animation: slideUp .72s cubic-bezier(.16,.84,.24,1) .54s both; }
+    @keyframes slideUp {
+      from { opacity: 0; transform: translateY(36px); }
+      to   { opacity: 1; transform: none; }
+    }
+
+    /* series pip row */
+    .mu-pips { display: flex; gap: 6px; margin-top: 10px; }
+    .mu-bottom--b .mu-pips { justify-content: flex-end; }
+    .mu-pip {
+      width: 14px; height: 14px; border-radius: 50%;
+      background: rgba(255,255,255,.12); border: 2px solid rgba(255,255,255,.22);
+    }
+    .mu-pip.won { background: #fff; border-color: #fff; }
+    .mu-half--a .mu-pip.won { background: var(--team-a); border-color: var(--team-a); box-shadow: 0 0 8px var(--team-a); }
+    .mu-half--b .mu-pip.won { background: var(--team-b); border-color: var(--team-b); box-shadow: 0 0 8px var(--team-b); }
+
+    /* ─────────────────────────────────────────────
+       CENTER PILLAR
+    ───────────────────────────────────────────── */
+    .mu-center {
+      position: relative; z-index: 10;
+      background: linear-gradient(180deg, rgba(6,8,16,.88) 0%, rgba(11,14,24,.92) 50%, rgba(6,8,16,.88) 100%);
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: 4px;
+      box-shadow:
+        -40px 0 80px rgba(0,0,0,.55),
+         40px 0 80px rgba(0,0,0,.55);
+    }
+
+    .mu-center::before, .mu-center::after {
+      content: ''; position: absolute; top: 8%; bottom: 8%; width: 2px;
+    }
+    .mu-center::before {
+      left: 0;
+      background: linear-gradient(to bottom, transparent, var(--team-a) 50%, transparent);
+      box-shadow: 0 0 24px var(--team-a), 0 0 8px var(--team-a);
+    }
+    .mu-center::after {
+      right: 0;
+      background: linear-gradient(to bottom, transparent, var(--team-b) 50%, transparent);
+      box-shadow: 0 0 24px var(--team-b), 0 0 8px var(--team-b);
+    }
+
+    .mu-divider {
+      width: 80px; height: 1px;
+      background: linear-gradient(to right, transparent, rgba(255,255,255,.2), transparent);
+      margin: 8px 0;
+    }
+    .mu-round {
+      font-size: 11px; font-weight: 800; letter-spacing: .4em; text-transform: uppercase;
+      color: rgba(255,255,255,.3); text-align: center; padding: 0 16px; line-height: 1.4;
+    }
+    .mu-round.is-empty { display: none; }
+
+    .mu-vs-text {
+      font-size: 160px; font-weight: 900; line-height: 1;
+      letter-spacing: -.01em; color: #fff;
+      text-shadow: 0 0 80px rgba(255,255,255,.08);
+    }
+    .mu-stage.show .mu-vs-text {
+      animation: vsIn .85s cubic-bezier(.16,.84,.24,1) .05s both;
+    }
+    @keyframes vsIn {
+      from { opacity: 0; transform: scale(.65); }
+      to   { opacity: 1; transform: scale(1); }
+    }
+
+    .mu-score {
+      display: flex; align-items: center; gap: 14px;
+      font-size: 52px; font-weight: 900; line-height: 1;
+    }
+    .mu-score .sa { color: var(--team-a); }
+    .mu-score .sb { color: var(--team-b); }
+    .mu-score .sep { color: rgba(255,255,255,.25); font-size: 34px; }
+    .mu-score.is-zero { display: none; }
+
+    .mu-bo-label {
+      font-size: 18px; font-weight: 800; letter-spacing: .35em; text-transform: uppercase;
+      color: #fff;
+    }
   </style>
 </head>
 <body>
   <div id="stage" class="mu-stage">
-    <div class="mu-header">
-      <div class="mu-eyebrow">Matchup</div>
-      <div class="mu-title is-empty" id="title"></div>
-    </div>
-    <div class="mu-hero">
-      <div class="mu-side mu-side--a">
-        <div class="mu-logo-wrap"><img id="logo1" class="mu-logo" alt=""></div>
-        <div id="name1" class="mu-name">BLUE</div>
-        <div id="stat1" class="mu-tstat is-empty"></div>
-      </div>
-      <div class="mu-center">
-        <div class="mu-vs">VS</div>
-        <div class="mu-series"><span class="sa" id="sa">0</span><span class="sep">–</span><span class="sb" id="sb">0</span></div>
-        <div class="mu-bo" id="bo">BEST OF 5</div>
-      </div>
-      <div class="mu-side mu-side--b">
-        <div class="mu-logo-wrap"><img id="logo2" class="mu-logo" alt=""></div>
-        <div id="name2" class="mu-name">ORANGE</div>
-        <div id="stat2" class="mu-tstat is-empty"></div>
+
+    <!-- ── Top bar ── -->
+    <div class="mu-topbar">
+      <div class="mu-topbar-center">
+        <img class="mu-topbar-logo is-hidden" id="brand-logo" src="" alt="">
+        <div class="mu-topbar-sep is-hidden" id="tb-sep-l"></div>
+        <div class="mu-topbar-info">
+          <div class="mu-topbar-event" id="tb-event"></div>
+        </div>
       </div>
     </div>
-    <div class="mu-rosters">
-      <div class="mu-roster mu-roster--a" id="roster1"></div>
-      <div class="mu-mid-spacer"></div>
-      <div class="mu-roster mu-roster--b" id="roster2"></div>
+
+    <!-- ── Sponsor rail ── -->
+    <div class="mu-sponsors" id="sponsors"></div>
+
+    <!-- ── Left: Team A ── -->
+    <div class="mu-half mu-half--a">
+      <img id="logo1bg" class="mu-logo-bg" alt="">
+      <div class="mu-logo-block">
+        <img id="logo1" class="mu-logo-fg" alt="">
+        <div id="abbr1" class="mu-logo-abbr" style="display:none;"></div>
+        <div id="players1" class="mu-players"></div>
+      </div>
+      <div class="mu-bottom">
+        <div id="city1" class="mu-city is-empty"></div>
+        <div id="name1" class="mu-teamname">BLUE</div>
+        <div id="pips1" class="mu-pips"></div>
+      </div>
     </div>
+
+    <!-- ── Center pillar ── -->
+    <div class="mu-center">
+      <div id="round" class="mu-round is-empty"></div>
+      <div class="mu-divider"></div>
+      <div class="mu-vs-text">VS</div>
+      <div class="mu-score is-zero" id="scorerow">
+        <span class="sa" id="sa">0</span>
+        <span class="sep">–</span>
+        <span class="sb" id="sb">0</span>
+      </div>
+      <div class="mu-divider"></div>
+      <div id="bo" class="mu-bo-label">BEST OF 5</div>
+    </div>
+
+    <!-- ── Right: Team B ── -->
+    <div class="mu-half mu-half--b">
+      <img id="logo2bg" class="mu-logo-bg" alt="">
+      <div class="mu-logo-block">
+        <img id="logo2" class="mu-logo-fg" alt="">
+        <div id="abbr2" class="mu-logo-abbr" style="display:none;"></div>
+        <div id="players2" class="mu-players"></div>
+      </div>
+      <div class="mu-bottom mu-bottom--b">
+        <div id="city2" class="mu-city is-empty"></div>
+        <div id="name2" class="mu-teamname">ORANGE</div>
+        <div id="pips2" class="mu-pips"></div>
+      </div>
+    </div>
+
   </div>
 
   <script src="scene-base.js"></script>
   <script>
     const el = (id) => document.getElementById(id);
     const QP = new URLSearchParams(location.search);
-    const QTITLE = QP.get('title');
-    function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c])); }
-    function flagEmoji(cc) { cc = (cc || '').toUpperCase(); if (!/^[A-Z]{2}$/.test(cc)) return ''; return String.fromCodePoint(...[...cc].map((c) => 0x1F1E6 + c.charCodeAt(0) - 65)); }
-    function resolveTitle(data) {
-      if (QTITLE != null) { const t = QTITLE.trim(); return /^(off|none|hide|0)$/i.test(t) ? '' : t; }
-      return (data.eventName || '').toString().trim();
-    }
-    function profileFor(data, p) {
-      const tag = (p.gamerTag || p.name || '').trim().toLowerCase();
-      return (tag && data.playerProfiles && data.playerProfiles[tag]) || null;
-    }
-    function posClass(role) {
-      const r = (role || '').toLowerCase();
-      if (/cap|\(c\)|captain/.test(r)) return 'is-cap';
-      if (/\bsub\b|substitute|6th|reserve/.test(r)) return 'is-sub';
-      if (/\balt\b|alternate|standin|stand-in/.test(r)) return 'is-alt';
-      return '';
-    }
-    function socialHtml(prof) {
-      if (!prof) return '';
-      if (prof.twitch) return `<span class="mu-psocial"><i class="fa-brands fa-twitch"></i>${esc(prof.twitch)}</span>`;
-      if (prof.twitter) return `<span class="mu-psocial"><i class="fa-brands fa-x-twitter"></i>${esc(prof.twitter)}</span>`;
-      return '';
+
+    function splitTeamName(name) {
+      const parts = (name || '').trim().split(/\s+/);
+      if (parts.length < 2) return { city: '', team: (name || '').toUpperCase() };
+      return {
+        city: parts.slice(0, -1).join(' ').toUpperCase(),
+        team: parts[parts.length - 1].toUpperCase()
+      };
     }
 
-    function applyBrandTheme(data) {
-      const root = document.documentElement;
-      const color = SceneBase.brandColor(data), accent2 = SceneBase.brandAccent(data);
-      if (color) root.style.setProperty('--duo-accent', color);
-      if (accent2) root.style.setProperty('--duo-accent2', accent2);
-      if (data.fontFamily) root.style.fontFamily = `'${data.fontFamily}', 'Inter', system-ui, sans-serif`;
+    // Team-name abbreviation (matches the social card: explicit abbr → initials → first 3 letters).
+    function teamAbbr(team) {
+      const name = ((team && team.name) || '').trim();
+      if (!name) return '?';
+      if (team && team.abbr) return String(team.abbr).toUpperCase().slice(0, 4);
+      const words = name.split(/\s+/).filter(Boolean);
+      if (words.length >= 2) return words.map((w) => w[0]).join('').toUpperCase().slice(0, 4);
+      return name.slice(0, 3).toUpperCase();
     }
 
-    function renderTeam(idx, t, side, data) {
-      SceneBase.applyTeamLogo(el('logo' + idx), t.customLogo, t.logo);
-      el('logo' + idx).classList.toggle('logo-on-dark', !!t.logoOnDark);
-      el('name' + idx).textContent = (t.name || (side === 'b' ? 'ORANGE' : 'BLUE')).toUpperCase();
-      document.documentElement.style.setProperty(side === 'b' ? '--team-b' : '--team-a', t.color || (side === 'b' ? '#e97139' : '#055fdb'));
+    // Show the team logo, or fall back to the name abbreviation when there's no custom logo
+    // (rather than a default game logo).
+    function setTeamCrest(logoImg, bgImg, abbrEl, team) {
+      const custom = ((team && team.customLogo) || '').trim();
+      if (custom) {
+        SceneBase.applyTeamLogo(bgImg, custom, team.logo);
+        SceneBase.applyTeamLogo(logoImg, custom, team.logo);
+        if (abbrEl) abbrEl.style.display = 'none';
+      } else {
+        if (logoImg) logoImg.style.display = 'none';
+        if (bgImg) bgImg.style.display = 'none';
+        if (abbrEl) { abbrEl.textContent = teamAbbr(team); abbrEl.style.display = ''; }
+      }
+    }
 
-      const players = (t.players || []).filter((p) => p && (p.name || p.gamerTag)).slice(0, 6);
+    function renderPips(container, won, needed) {
+      container.innerHTML = '';
+      for (let i = 0; i < (needed || 0); i++) {
+        const d = document.createElement('div');
+        d.className = 'mu-pip' + (i < (won || 0) ? ' won' : '');
+        container.appendChild(d);
+      }
+    }
 
-      // Team stat: average 6mans ELO across linked profiles.
-      const elos = players.map((p) => { const pr = profileFor(data, p); return pr && pr.sixmans && pr.sixmans.elo; }).filter((e) => e > 0);
-      const avg = elos.length ? Math.round(elos.reduce((a, b) => a + b, 0) / elos.length) : null;
-      const statEl = el('stat' + idx);
-      statEl.innerHTML = avg ? `AVG ELO <b>${avg}</b>` : '';
-      statEl.classList.toggle('is-empty', !avg);
-
-      const wrap = el('roster' + idx); wrap.innerHTML = '';
-      if (!players.length) { wrap.innerHTML = '<div class="mu-empty">Roster TBD</div>'; return; }
-      players.forEach((p) => {
-        const prof = profileFor(data, p) || {};
-        const cc = prof.countryCode || '';
-        const flag = flagEmoji(cc);
-        const role = (p.role || '').toString().trim();
-        const six = prof.sixmans || null;
-        // Skip unranked players' rank badge (no "UNRANKED" chips).
-        const isRanked = six && six.rank && !/unranked/i.test(six.rank);
-        const rank = isRanked ? `<span class="mu-rank">${esc(six.rank)}</span>` : '';
-        const social = socialHtml(prof);
-        const roleHtml = role ? `<span class="mu-prole ${posClass(role)}">${esc(role)}</span>` : '';
-        const row = document.createElement('div'); row.className = 'mu-prow';
-        row.innerHTML =
-          `<span class="mu-flag">${flag}</span>`
-          + rank
-          + `<span class="mu-pid"><span class="mu-pname">${esc(p.name || p.gamerTag)}</span>${social}</span>`
-          + roleHtml;
-        wrap.appendChild(row);
+    function renderPlayers(container, players) {
+      container.innerHTML = '';
+      (players || []).slice(0, 6).forEach((p) => {
+        const d = document.createElement('div');
+        d.className = 'mu-player';
+        d.textContent = (p.gamertag || p.name || '').toUpperCase();
+        if (d.textContent) container.appendChild(d);
       });
     }
 
     function render(data) {
       data = data || {};
-      applyBrandTheme(data);
-      const casters = data.casters || {};
       el('stage').classList.add('show');
-      const blue = SceneBase.teamSide(data, 'blue'), orange = SceneBase.teamSide(data, 'orange');
-      renderTeam(1, blue, 'a', data); renderTeam(2, orange, 'b', data);
-      el('sa').textContent = blue.series != null ? blue.series : 0;
-      el('sb').textContent = orange.series != null ? orange.series : 0;
-      el('bo').textContent = 'BEST OF ' + (data.bestOf || 5);
-      const ttl = resolveTitle(data);
-      el('title').textContent = ttl.toUpperCase(); el('title').classList.toggle('is-empty', !ttl);
+
+      const blue   = SceneBase.teamSide(data, 'blue');
+      const orange = SceneBase.teamSide(data, 'orange');
+      const bo     = data.bestOf || 5;
+      const winsNeeded = Math.ceil(bo / 2);
+
+      // ── Top bar ──
+      const brandLogo = (data.brand && data.brand.logo) ? data.brand.logo : '';
+      const brandEl = el('brand-logo');
+      SceneBase.applyTeamLogo(brandEl, brandLogo, '');
+      const hasBrand = !!brandLogo;
+      brandEl.classList.toggle('is-hidden', !hasBrand);
+      el('tb-sep-l').classList.toggle('is-hidden', !hasBrand);
+
+      let titleText = '';
+      const qt = QP.get('title');
+      if (qt != null) { titleText = /^(off|none|hide|0)$/i.test(qt.trim()) ? '' : qt.trim(); }
+      else { titleText = (data.eventName || '').toString().trim(); }
+      el('tb-event').textContent = titleText.toUpperCase();
+
+      // Round/stage label — shown only in the center pillar (above the VS); no longer duplicated
+      // under the event title in the top bar.
+      const roundText = (data.roundLabel || '').toString().trim();
+      el('round').textContent = roundText.toUpperCase();
+      el('round').classList.toggle('is-empty', !roundText);
+
+      // ── Sponsor rail ── (?sponsors=0 to suppress)
+      const sponsorsEl = el('sponsors');
+      const showSponsors = QP.get('sponsors') !== '0';
+      const sponsors = showSponsors
+        ? (data.sponsors || (data.brand && data.brand.sponsors) || []).filter((s) => s && s.logo)
+        : [];
+      sponsorsEl.innerHTML = sponsors.map((s) =>
+        `<img class="mu-sponsor-img" src="${s.logo}" alt="${(s.name || '').replace(/"/g, '')}">`
+      ).join('');
+      sponsorsEl.classList.toggle('show', sponsors.length > 0);
+      el('stage').classList.toggle('has-sponsors', sponsors.length > 0);
+
+      // ── Team A ──
+      document.documentElement.style.setProperty('--team-a', blue.color || '#22c55e');
+      setTeamCrest(el('logo1'), el('logo1bg'), el('abbr1'), blue);
+      const an = splitTeamName(blue.name);
+      el('city1').textContent = an.city;
+      el('city1').classList.toggle('is-empty', !an.city);
+      el('name1').textContent = an.team;
+      renderPips(el('pips1'), blue.series, winsNeeded);
+      renderPlayers(el('players1'), blue.players);
+
+      // ── Team B ──
+      document.documentElement.style.setProperty('--team-b', orange.color || '#8b5cf6');
+      setTeamCrest(el('logo2'), el('logo2bg'), el('abbr2'), orange);
+      const bn = splitTeamName(orange.name);
+      el('city2').textContent = bn.city;
+      el('city2').classList.toggle('is-empty', !bn.city);
+      el('name2').textContent = bn.team;
+      renderPips(el('pips2'), orange.series, winsNeeded);
+      renderPlayers(el('players2'), orange.players);
+
+      // ── Center ──
+      const sa = blue.series ?? 0;
+      const sb = orange.series ?? 0;
+      el('sa').textContent = sa;
+      el('sb').textContent = sb;
+      el('scorerow').classList.toggle('is-zero', sa === 0 && sb === 0);
+      el('bo').textContent = 'BEST OF ' + bo;
     }
 
     if (location.protocol === 'file:') {
-      document.documentElement.classList.add('preview');
       render({
         teams: {
-          blue: { name: 'Velocity Gaming', color: '#3b82f6', players: [
-            { name: 'Aqua', gamerTag: 'Aqua', role: 'Captain' }, { name: 'Nova', gamerTag: 'Nova' }, { name: 'Rhythm', gamerTag: 'Rhythm' }, { name: 'Surge', gamerTag: 'Surge', role: 'Sub' }] },
-          orange: { name: 'Team Apex Esports', color: '#f97316', players: [
-            { name: 'Blaze', gamerTag: 'Blaze', role: 'Captain' }, { name: 'Cinder', gamerTag: 'Cinder' }, { name: 'Ash', gamerTag: 'Ash', role: 'Sub' }] }
+          blue: {
+            name: 'Texas OpTic', color: '#22c55e', logo: '',
+            players: [{ gamertag: 'iLLeY' }, { gamertag: 'Scump' }, { gamertag: 'Shotzzy' }, { gamertag: 'Dashy' }, { gamertag: 'Pred' }]
+          },
+          orange: {
+            name: 'Toronto Ultra', color: '#7c3aed', logo: '',
+            players: [{ gamertag: 'Insight' }, { gamertag: 'Cammy' }, { gamertag: 'Gwinn' }, { gamertag: 'CleanX' }, { gamertag: 'HyDra' }]
+          }
         },
-        playerProfiles: {
-          aqua: { sixmans: { rank: 'S', elo: 3120 }, countryCode: 'us', twitch: 'aquarl' },
-          nova: { sixmans: { rank: 'A', elo: 2655 }, countryCode: 'ca', twitter: 'novaplays' },
-          rhythm: { sixmans: { rank: 'B+', elo: 2210 }, countryCode: 'gb' },
-          surge: { sixmans: { rank: 'C', elo: 1820 }, countryCode: 'au' },
-          blaze: { sixmans: { rank: 'A', elo: 2740 }, countryCode: 'fr', twitch: 'blazegg' },
-          cinder: { sixmans: { rank: 'B', elo: 2080 }, countryCode: 'de' },
-          ash: { sixmans: { rank: 'C', elo: 1690 }, countryCode: 'se' }
-        },
-        series: { blue: 1, orange: 2 }, bestOf: 5, eventName: 'Summer Showdown — Grand Final',
-        casters: { visible: true }, brand: { color: '#7c3aed', accent: '#22d3ee' }
+        series: { blue: 1, orange: 2 }, bestOf: 5,
+        eventName: 'Summer Showdown 2024',
+        roundLabel: 'Grand Final',
+        brand: { logo: '' }
       });
-      el('stage').classList.add('show');
-    } else { SceneBase.connect(render); }
+    } else {
+      SceneBase.connect(render);
+    }
   </script>
 </body>
 </html>

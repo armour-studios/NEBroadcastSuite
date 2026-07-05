@@ -11,47 +11,61 @@ function createStartGgClient(apiToken) {
     };
   }
 
+  const MAX_RETRIES = 4;
+
   return {
     async request(query, variables) {
-      let res;
-      try {
-        res = await axios.post(
-          STARTGG_API_URL,
-          { query, variables },
-          {
-            headers: {
-              Authorization: `Bearer ${apiToken}`,
-              'User-Agent': 'NE-Broadcast-Suite/1.0',
-              Accept: 'application/json',
-              'Content-Type': 'application/json'
-            },
-            timeout: 20000,
-            validateStatus: () => true  // handle all status codes ourselves
-          }
-        );
-      } catch (err) {
-        throw new Error(`Start.gg network error: ${err.message}`);
-      }
+      for (let attempt = 0; ; attempt++) {
+        let res;
+        try {
+          res = await axios.post(
+            STARTGG_API_URL,
+            { query, variables },
+            {
+              headers: {
+                Authorization: `Bearer ${apiToken}`,
+                'User-Agent': 'NE-Broadcast-Suite/1.0',
+                Accept: 'application/json',
+                'Content-Type': 'application/json'
+              },
+              timeout: 20000,
+              validateStatus: () => true  // handle all status codes ourselves
+            }
+          );
+        } catch (err) {
+          throw new Error(`Start.gg network error: ${err.message}`);
+        }
 
-      const body = res.data;
+        // start.gg rate-limits in short bursts (independent of the per-minute quota) — back off
+        // and retry rather than failing the whole action on what's usually a transient 429.
+        if (res.status === 429) {
+          if (attempt >= MAX_RETRIES) throw new Error('Start.gg rate limit — too many requests, try again in a minute.');
+          const retryAfterHeader = parseFloat(res.headers['retry-after']);
+          const waitMs = Number.isFinite(retryAfterHeader) ? retryAfterHeader * 1000 : Math.min(20000, 2000 * Math.pow(2, attempt));
+          await new Promise((r) => setTimeout(r, waitMs));
+          continue;
+        }
 
-      // start.gg returns 400 for auth failures with { success: false, message: '...' }
-      if (res.status === 400 || res.status === 401) {
-        const msg = (typeof body === 'object' && body.message) || `HTTP ${res.status}`;
-        throw new Error(msg);
-      }
-      if (res.status !== 200) {
-        throw new Error(`Start.gg returned HTTP ${res.status}`);
-      }
+        const body = res.data;
 
-      if (body.errors && body.errors.length) {
-        const msg = body.errors.map((e) => e.message).join('; ');
-        throw new Error(msg);
+        // start.gg returns 400 for auth failures with { success: false, message: '...' }
+        if (res.status === 400 || res.status === 401) {
+          const msg = (typeof body === 'object' && body.message) || `HTTP ${res.status}`;
+          throw new Error(msg);
+        }
+        if (res.status !== 200) {
+          throw new Error(`Start.gg returned HTTP ${res.status}`);
+        }
+
+        if (body.errors && body.errors.length) {
+          const msg = body.errors.map((e) => e.message).join('; ');
+          throw new Error(msg);
+        }
+        if (!body.data) {
+          throw new Error('Start.gg API returned no data');
+        }
+        return body.data;
       }
-      if (!body.data) {
-        throw new Error('Start.gg API returned no data');
-      }
-      return body.data;
     }
   };
 }

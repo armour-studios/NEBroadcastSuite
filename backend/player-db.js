@@ -96,12 +96,14 @@ function upsert(gamertag, fields) {
   const next = { ...cur };
 
   if (fields.displayName  !== undefined) next.displayName  = fields.displayName || cur.displayName || gamertag;
+  if (fields.realName     !== undefined) next.realName     = fields.realName     || null;
   if (fields.startggSlug  !== undefined) next.startggSlug  = fields.startggSlug  || null;
   if (fields.startggId    !== undefined) next.startggId    = fields.startggId    || null;
   if (fields.twitch       !== undefined) next.twitch       = fields.twitch       || null;
   if (fields.twitter      !== undefined) next.twitter      = fields.twitter      || null;
   if (fields.country      !== undefined) next.country      = fields.country      || null;
   if (fields.countryCode  !== undefined) next.countryCode  = fields.countryCode  || null;
+  if (fields.image        !== undefined) next.image        = fields.image        || null;
 
   if (fields.sixmans !== undefined) {
     if (!fields.sixmans) {
@@ -154,6 +156,7 @@ function toProfilesMap() {
   for (const [key, r] of _db) {
     map[key] = {
       gamerTag:        r.displayName || r.gamertag,
+      realName:        r.realName    || null,
       startggSlug:     r.startggSlug || '',
       startggPlayerId: r.startggId   || '',
       sixmans:         r.sixmans     || null,
@@ -161,6 +164,7 @@ function toProfilesMap() {
       twitter:         r.twitter     || null,
       country:         r.country     || null,
       countryCode:     r.countryCode || null,
+      image:           r.image       || null,
       updatedAt:       r.updatedAt,
     };
   }

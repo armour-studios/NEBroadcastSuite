@@ -36,6 +36,9 @@ body { width: 1920px; height: 1080px; overflow: hidden; background: transparent;
 .sch-list { width: 1000px; display: grid; grid-template-columns: 1fr; gap: 22px; }
 .sch-list.dual { grid-template-columns: 1fr 1fr; }
 .sch-entry-wrap { display: flex; flex-direction: column; gap: 6px; }
+/* An odd match count leaves the last card alone in the final row of the 2-column grid — span
+   both columns and center it there instead of letting it sit left-aligned under column 1. */
+.sch-list.dual .sch-entry-wrap:last-child:nth-child(odd) { grid-column: 1 / -1; justify-self: center; width: calc(50% - 11px); }
 .sch-entry-meta { display: flex; align-items: center; justify-content: center; gap: 10px; }
 .sch-meta-date { font-family: var(--disp); font-size: 14px; font-weight: 800; letter-spacing: .07em; color: rgba(255,255,255,.85); white-space: nowrap; line-height: 1; text-transform: uppercase; }
 

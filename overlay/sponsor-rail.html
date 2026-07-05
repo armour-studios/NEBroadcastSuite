@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<!--
+  sponsor-rail.html — horizontal sponsor logo rail for OBS browser source.
+  Transparent background — layer over any scene.
+
+  Driven by full_state:
+    brand.railSponsors[]  — pre-filtered array of { name, logo, tier }
+    brand.sponsorLabel    — label string, e.g. "PRESENTED BY" (default "PARTNERS")
+    brand.sponsorMode     — 'cycle' (one at a time) | 'static' (all at once)
+    brand.sponsorInterval — seconds per logo in cycle mode (default 6)
+    brand.color / accent  — bar accent line colour
+
+  URL params (all optional):
+    ?mode=cycle|static    override sponsorMode
+    ?interval=N           override sponsorInterval (seconds)
+    ?label=1              show the sponsor label text (default hidden)
+    ?label=off            force-hide label even if set on brand
+    ?height=N             bar height px (default 80)
+    ?bg=rgba(0,0,0,.72)   override panel background
+    ?maxLogos=N           cap how many logos show in static mode
+    ?logopad=N            logo horizontal padding px (default 24)
+    ?align=left|center    logo alignment in static mode (default center)
+    ?accent=1             show top accent line (default 1)
+    ?standalone=1         force show even when not connected
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <link rel="stylesheet" href="/fonts.css">
+  <style>
+    :root {
+      --accent:  #e83a8b;
+      --accent2: #8b5cf6;
+      --bar-h:   80px;
+      --logo-h:  calc(var(--bar-h) * 0.55);
+      --bg:      rgba(7, 9, 16, .82);
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      width: 1920px; height: var(--bar-h);
+      overflow: hidden; background: transparent;
+      font-family: 'Rajdhani', 'Inter', system-ui, sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* ── Rail bar — single centered group: label + logos inline ── */
+    .rail-bar {
+      width: 100%; height: 100%;
+      background: var(--bg);
+      border-top: 1px solid rgba(255,255,255,.07);
+      position: relative;
+      display: flex; align-items: center; justify-content: center;
+      overflow: hidden;
+      opacity: 0; transition: opacity .5s ease;
+    }
+    .rail-bar.show { opacity: 1; }
+
+    /* Top accent line */
+    .rail-bar::before {
+      content: '';
+      position: absolute; top: 0; left: 0; right: 0; height: 2px;
+      background: linear-gradient(to right, transparent 0%, var(--accent) 20%, var(--accent2) 80%, transparent 100%);
+    }
+    .rail-bar.no-accent::before { display: none; }
+
+    /* ── Centered group wraps label + separator + logos as one unit ── */
+    .rail-group {
+      display: flex; align-items: center;
+      gap: 0; height: 100%;
+      max-width: 100%; overflow: hidden;
+    }
+
+    /* ── Label ── */
+    .rail-label {
+      flex-shrink: 0;
+      font-size: 10px; font-weight: 800; letter-spacing: .26em; text-transform: uppercase;
+      color: var(--accent);
+      white-space: nowrap; line-height: 1;
+      padding-right: 20px;
+      display: none;
+    }
+    .rail-bar.show-label .rail-label { display: block; }
+
+    .rail-label-sep {
+      flex-shrink: 0;
+      width: 1px; height: 36px;
+      background: rgba(255,255,255,.12);
+      margin-right: 4px;
+      display: none;
+    }
+    .rail-bar.show-label .rail-label-sep { display: block; }
+
+    /* ── Logo stage ── */
+    .rail-stage {
+      height: 100%;
+      position: relative;
+      display: flex; align-items: center; justify-content: center;
+    }
+
+    /* ── CYCLE MODE — one logo at a time, crossfade ── */
+    .rail-stage.mode-cycle {
+      min-width: 280px;
+    }
+    .rail-stage.mode-cycle .cycle-slot {
+      position: absolute; inset: 0;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .rail-stage.mode-cycle .cycle-slot img {
+      max-height: var(--logo-h); max-width: 320px;
+      object-fit: contain; display: block;
+      opacity: 0; transition: opacity .6s ease;
+      filter: drop-shadow(0 2px 8px rgba(0,0,0,.5));
+    }
+    .rail-stage.mode-cycle .cycle-slot.active img { opacity: 1; }
+
+    /* ── STATIC MODE — all logos in a row ── */
+    .rail-stage.mode-static .static-logos {
+      display: flex; align-items: center;
+      gap: 0; height: 100%;
+    }
+    .rail-stage.mode-static .static-logos .logo-wrap {
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0; height: 100%;
+      padding: 0 var(--logo-pad, 28px);
+      position: relative;
+    }
+    .rail-stage.mode-static .static-logos .logo-wrap + .logo-wrap::before {
+      content: '';
+      position: absolute; left: 0; top: 50%; transform: translateY(-50%);
+      width: 1px; height: 28px;
+      background: rgba(255,255,255,.1);
+    }
+    .rail-stage.mode-static .static-logos img {
+      max-height: var(--logo-h); max-width: 220px;
+      object-fit: contain; display: block;
+      filter: drop-shadow(0 2px 8px rgba(0,0,0,.4));
+    }
+
+    /* ── Empty state ── */
+    .rail-empty {
+      color: rgba(255,255,255,.2);
+      font-size: 12px; font-weight: 600; letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+  </style>
+</head>
+<body>
+  <div class="rail-bar" id="rail">
+    <div class="rail-group">
+      <div class="rail-label" id="rail-label">PARTNERS</div>
+      <div class="rail-label-sep"></div>
+      <div class="rail-stage" id="rail-stage">
+        <span class="rail-empty" id="rail-empty" style="display:none">No sponsors configured</span>
+      </div>
+    </div>
+  </div>
+
+  <script src="scene-base.js"></script>
+  <script>
+    const QP = new URLSearchParams(location.search);
+
+    // Apply height from ?height=N
+    const qH = parseInt(QP.get('height') || '0', 10);
+    if (qH > 0) document.documentElement.style.setProperty('--bar-h', qH + 'px');
+
+    // Apply background from ?bg=...
+    const qBg = QP.get('bg');
+    if (qBg) document.documentElement.style.setProperty('--bg', qBg);
+
+    // Apply logo padding from ?logopad=N
+    const qPad = parseInt(QP.get('logopad') || '0', 10);
+    if (qPad > 0) document.documentElement.style.setProperty('--logo-pad', qPad + 'px');
+
+    const rail      = document.getElementById('rail');
+    const labelEl   = document.getElementById('rail-label');
+    const stage     = document.getElementById('rail-stage');
+    const emptyEl   = document.getElementById('rail-empty');
+
+    // Cycle state
+    let _cycleSlots = [];
+    let _cycleIdx   = 0;
+    let _cycleTimer = null;
+
+    function stopCycle() {
+      clearInterval(_cycleTimer);
+      _cycleTimer = null;
+    }
+
+    function startCycle(interval) {
+      stopCycle();
+      if (_cycleSlots.length < 2) return;  // single logo: just stays visible
+      _cycleTimer = setInterval(() => {
+        _cycleSlots[_cycleIdx].classList.remove('active');
+        _cycleIdx = (_cycleIdx + 1) % _cycleSlots.length;
+        _cycleSlots[_cycleIdx].classList.add('active');
+      }, interval * 1000);
+    }
+
+    function buildCycle(sponsors, interval) {
+      stopCycle();
+      stage.className = 'rail-stage mode-cycle';
+      stage.innerHTML = '';
+      _cycleSlots = [];
+      _cycleIdx = 0;
+
+      sponsors.forEach((sp, i) => {
+        const slot = document.createElement('div');
+        slot.className = 'cycle-slot' + (i === 0 ? ' active' : '');
+        const img = document.createElement('img');
+        img.src = sp.logo; img.alt = sp.name || '';
+        slot.appendChild(img);
+        stage.appendChild(slot);
+        _cycleSlots.push(slot);
+      });
+
+      startCycle(interval);
+    }
+
+    function buildStatic(sponsors, align, maxLogos) {
+      stopCycle();
+      const alignClass = align === 'left' ? 'align-left' : 'align-center';
+      stage.className = `rail-stage mode-static ${alignClass}`;
+      stage.innerHTML = '';
+
+      const row = document.createElement('div');
+      row.className = 'static-logos';
+
+      const list = maxLogos > 0 ? sponsors.slice(0, maxLogos) : sponsors;
+      list.forEach(sp => {
+        const wrap = document.createElement('div');
+        wrap.className = 'logo-wrap';
+        const img = document.createElement('img');
+        img.src = sp.logo; img.alt = sp.name || '';
+        wrap.appendChild(img);
+        row.appendChild(wrap);
+      });
+
+      stage.appendChild(row);
+    }
+
+    let _lastSig = '';
+
+    function render(data) {
+      data = data || {};
+      const b = data.brand || {};
+
+      // Brand colours
+      const accent  = SceneBase.brandColor(data);
+      const accent2 = SceneBase.brandAccent(data);
+      if (accent)  document.documentElement.style.setProperty('--accent',  accent);
+      if (accent2) document.documentElement.style.setProperty('--accent2', accent2);
+
+      // Accent line
+      const showAccent = QP.get('accent') !== '0';
+      rail.classList.toggle('no-accent', !showAccent);
+
+      // Sponsors with Rail placement enabled and a logo uploaded
+      const sponsors = (b.sponsors || []).filter(s => s.logo && s.placements && s.placements.rail);
+
+      // Resolved params (URL overrides state)
+      const mode     = QP.get('mode')     || b.sponsorMode     || 'cycle';
+      const interval = parseFloat(QP.get('interval') || b.sponsorInterval || 6);
+      const maxLogos = parseInt(QP.get('maxLogos') || '0', 10);
+      const align    = QP.get('align') || 'center';
+
+      // Label: shown by default; ?label=off/0 hides it
+      const qLabel      = QP.get('label');
+      const doShowLabel = qLabel !== 'off' && qLabel !== '0';
+      rail.classList.toggle('show-label', doShowLabel);
+      labelEl.textContent = b.sponsorLabel || 'PARTNERS';
+
+      // Visibility
+      const visible = SceneBase.standalone || sponsors.length > 0;
+      rail.classList.toggle('show', !!visible);
+
+      if (!sponsors.length) {
+        stage.className = 'rail-stage';
+        stage.innerHTML = '';
+        stage.appendChild(emptyEl);
+        emptyEl.style.display = SceneBase.standalone ? '' : 'none';
+        stopCycle();
+        return;
+      }
+
+      // Change-detect: only rebuild DOM if something meaningful changed
+      const sig = [mode, interval, maxLogos, align, sponsors.map(s => s.logo).join('|')].join(',');
+      if (sig === _lastSig) return;
+      _lastSig = sig;
+
+      if (mode === 'static') {
+        buildStatic(sponsors, align, maxLogos);
+      } else {
+        buildCycle(sponsors, interval);
+      }
+    }
+
+    if (location.protocol === 'file:') {
+      render({
+        brand: {
+          color: '#e83a8b', accent: '#8b5cf6',
+          sponsorLabel: 'PRESENTED BY',
+          sponsorMode: 'static',
+          sponsorInterval: 5,
+          railSponsors: [
+            { name: 'Acme Corp',   logo: '' },
+            { name: 'Sponsors Co', logo: '' },
+            { name: 'Partner Inc', logo: '' },
+          ]
+        }
+      });
+      // Show the empty-preview bar even with no real logos
+      rail.classList.add('show');
+    } else {
+      SceneBase.connect(render);
+    }
+  </script>
+</body>
+</html>

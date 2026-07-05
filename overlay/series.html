@@ -77,7 +77,10 @@
     // legacy Match/Series editor (state.match.maps) when Map Pool is empty/unused. Map Pool's
     // score shape is {a,b} (an object); normalize to the flat scoreA/scoreB/played this card uses.
     function mapsFromVetoPool(v) {
-      return (Array.isArray(v.maps) ? v.maps : []).filter((m) => m.name).map((m) => ({
+      // Only picked/decider maps belong in the series — banned and not-yet-decided pool maps
+      // still carry a `name` (rebuildVetoBoard stamps the whole pool), so filtering on `name`
+      // alone let every banned map leak into the strip as an extra "—" pip.
+      return (Array.isArray(v.maps) ? v.maps : []).filter((m) => m.name && (m.action === 'pick' || m.action === 'decider')).map((m) => ({
         name: m.name,
         scoreA: (m.score && m.score.a) || 0,
         scoreB: (m.score && m.score.b) || 0,
@@ -86,7 +89,7 @@
     }
     function render(data) {
       const veto = data.veto || {};
-      const linkedToVeto = Array.isArray(veto.maps) && veto.maps.some((mp) => mp.name);
+      const linkedToVeto = Array.isArray(veto.maps) && veto.maps.some((mp) => mp.name && (mp.action === 'pick' || mp.action === 'decider'));
       const legacy = data.match || { maps: [] };
       const m = linkedToVeto ? { ...legacy, maps: mapsFromVetoPool(veto) } : legacy;
       const teams = data.teams || {};
