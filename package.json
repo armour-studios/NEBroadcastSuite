@@ -10,7 +10,7 @@
     "dev:watch": "nodemon --watch server.js --watch backend --exec \"electron .\"",
     "build": "node scripts/gen-prod-env.js && electron-builder --win nsis",
     "build:portable": "node scripts/gen-prod-env.js && electron-builder --win portable",
-    "release": "node scripts/gen-prod-env.js && electron-builder --win nsis --publish always"
+    "release": "node scripts/gen-prod-env.js && node scripts/release.js"
   },
   "dependencies": {
     "adm-zip": "^0.5.17",

@@ -223,11 +223,8 @@
 
     function renderPresentedBy(data) {
       const slot = data.scoreboardAd || {}, wrap = el('presented-by'), label = el('pb-label'), logo = el('pb-logo');
-      const labelText = (slot.label || 'PRESENTED BY').toString().trim();
-      label.textContent = labelText;
-      if (slot.logo) { logo.src = slot.logo; logo.style.display = ''; wrap.classList.remove('is-empty'); }
-      else if (labelText) { logo.style.display = 'none'; logo.removeAttribute('src'); wrap.classList.remove('is-empty'); }
-      else wrap.classList.add('is-empty');
+      if (slot.logo) { label.textContent = (slot.label || 'PRESENTED BY').toString().trim(); logo.src = slot.logo; logo.style.display = ''; wrap.classList.remove('is-empty'); }
+      else { logo.style.display = 'none'; logo.removeAttribute('src'); wrap.classList.add('is-empty'); }
     }
 
     function renderDeckStrip(data) {

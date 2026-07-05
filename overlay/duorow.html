@@ -879,17 +879,14 @@
       const wrap = el('presented-by');
       const label = el('pb-label');
       const logo = el('pb-logo');
-      const labelText = (slot.label || 'PRESENTED BY').toString().trim();
-      label.textContent = labelText;
       if (slot.logo) {
+        label.textContent = (slot.label || 'PRESENTED BY').toString().trim();
         logo.src = slot.logo;
         logo.style.display = '';
         wrap.classList.remove('is-empty');
-      } else if (labelText) {
+      } else {
         logo.style.display = 'none';
         logo.removeAttribute('src');
-        wrap.classList.remove('is-empty');
-      } else {
         wrap.classList.add('is-empty');
       }
     }
