@@ -1624,7 +1624,14 @@ function _returnGraphicsToProd() {
   sub.querySelectorAll('.ev-subnav-btn').forEach((b) => b.addEventListener('click', () => window._pdShow(b.dataset.pd)));
   let saved = (() => { try { return localStorage.getItem('prod_active_tab'); } catch (_) { return null; } })();
   if (saved === 'production') saved = 'deck';   // migrate the old combined-scroll value
-  window._pdShow((saved && ['deck', 'graphics', 'rundown', 'flows', 'hotkeys', 'director'].includes(saved)) ? saved : 'deck');
+  const initialPdTab = (saved && ['deck', 'graphics', 'rundown', 'flows', 'hotkeys', 'director'].includes(saved)) ? saved : 'deck';
+  // Defer this first call: ONAIR_SCENES is a const declared much later in the file (~line 11428),
+  // and _pdShow('graphics') needs window.ONAIR_SCENES (its TDZ-safe handle, set right after that
+  // declaration) to render the graphics board. Calling it synchronously here — which happens on
+  // every load where Graphics was the last-viewed Production sub-tab — always misses that handle
+  // and silently skips the render, leaving the board empty until the user manually reselects the
+  // tab later (by which point the rest of the script has finished running).
+  setTimeout(() => window._pdShow(initialPdTab), 0);
   try { if (localStorage.getItem('ne_active_tab') === 'director') localStorage.setItem('ne_active_tab', 'produccion'); } catch (_) {}
 })();
 
@@ -2068,7 +2075,11 @@ function _returnGraphicsToProd() {
     if (isPopout) {
       // Pop-out scenes: show that scene's front panel (quick actions / status) instead of the
       // full editor — the editor itself only opens when the Settings button is clicked.
-      gtab.querySelectorAll('.gfx-scene-panel').forEach((p) => { p.style.display = 'none'; });
+      // Global lookup, not gtab-scoped: when the hub has been borrowed onto the Dashboard (see
+      // _borrowGraphicsToDash), these panels are no longer descendants of gtab (#prod-graphics-tab,
+      // now an empty shell) — a gtab-scoped query silently finds nothing and the whole panel
+      // switcher stops working whenever the app starts on Dashboard instead of Production.
+      document.querySelectorAll('.gfx-scene-panel').forEach((p) => { p.style.display = 'none'; });
       if (summary) {
         summary.style.display = '';
         summary.querySelectorAll('.gfx-front-panel[data-frontkey]').forEach((p) => { p.style.display = (p.dataset.frontkey === key) ? '' : 'none'; });
@@ -2076,7 +2087,7 @@ function _returnGraphicsToProd() {
       renderPopoutSummary(key);
     } else {
       if (summary) summary.style.display = 'none';
-      gtab.querySelectorAll('.gfx-scene-panel').forEach((p) => { p.style.display = (p.dataset.gfxpanel === key) ? '' : 'none'; });
+      document.querySelectorAll('.gfx-scene-panel').forEach((p) => { p.style.display = (p.dataset.gfxpanel === key) ? '' : 'none'; });
     }
     // Refresh data pickers so they always show current state when navigated to.
     if (key === 'matchup' && typeof window._gfxRefreshMatchupPickers === 'function') window._gfxRefreshMatchupPickers(currentState);
@@ -23399,11 +23410,15 @@ const FLOW_ACTION_GROUPS = [
     ['twitch_shoutout',           'Give shoutout'],
   ]},
   { label: 'Overlays', items: [
+    ['overlay_countdown_start','Start countdown timer'],
+    ['overlay_break_show',   'Show break screen'],
+    ['overlay_break_hide',   'Hide break screen'],
+    ['set_event_title',      'Set event title'],
+    ['set_round_label',      'Set round / stage label'],
+    ['set_match_label',      'Set match label'],
     ['overlay_lower_third',  'Lower third (auto-hide)'],
     ['overlay_ticker',       'Set ticker text'],
     ['overlay_ticker_hide',  'Hide ticker'],
-    ['overlay_break_show',   'Show break screen'],
-    ['overlay_break_hide',   'Hide break screen'],
     ['overlay_casters_show', 'Show casters overlay'],
     ['overlay_casters_hide', 'Hide casters overlay'],
     ['overlay_winner',       'Show winner graphic'],
@@ -23461,6 +23476,10 @@ function flowActionLabel(a) {
     case 'obs_stream_marker': return 'Stream marker' + (p.description ? ': ' + p.description : '');
     case 'overlay_lower_third': return 'Lower third: "' + (p.text || '').slice(0, 24) + '"';
     case 'overlay_ticker': return 'Ticker: "' + (p.text || '').slice(0, 24) + '"';
+    case 'overlay_countdown_start': return 'Countdown ' + (p.seconds || 300) + 's' + (p.title ? ' · ' + p.title.slice(0, 16) : '') + (p.thenScene ? ' → ' + p.thenScene : '');
+    case 'set_event_title': return 'Event title: "' + (p.title || '').slice(0, 26) + '"';
+    case 'set_round_label': return p.text ? ('Round: "' + p.text.slice(0, 24) + '"') : 'Clear round label';
+    case 'set_match_label': return p.text ? ('Match label: "' + p.text.slice(0, 22) + '"') : 'Auto match label';
     case 'overlay_winner': return 'Winner: ' + (p.side || 'blue');
     case 'match_set_series_score': return `Series: Blue ${p.blue ?? '?'} – Orange ${p.orange ?? '?'}`;
     case 'twitch_prediction_create': return 'Create prediction: "' + (p.title || 'Who wins?').slice(0, 20) + '"';
@@ -23510,6 +23529,16 @@ function flowActionParamsHtml(a) {
       return `<input type="text" class="fa-param input-text" data-k="text" placeholder="text" value="${poEsc(p.text||'')}" style="width:150px;"> <input type="number" class="fa-param input-text" data-k="duration" min="0" value="${p.duration||5000}" style="width:70px;" title="auto-hide after ms"> <span style="font-size:11px;color:var(--muted);">ms</span>`;
     case 'overlay_ticker':
       return `<input type="text" class="fa-param input-text" data-k="text" placeholder="text" value="${poEsc(p.text||'')}" style="width:200px;">`;
+    case 'overlay_countdown_start':
+      return `<input type="number" class="fa-param input-text" data-k="seconds" min="0" value="${p.seconds||300}" style="width:64px;" title="Countdown length in seconds"> <span style="font-size:11px;color:var(--muted);">sec</span>
+        <input type="text" class="fa-param input-text" data-k="title" placeholder="STARTING SOON" value="${poEsc(p.title||'')}" style="width:140px;">
+        <select class="fa-param input-select" data-k="thenScene" title="OBS scene to cut to when it hits 0 (optional)" style="width:150px;"><option value="">— stay on break —</option>${scenes.map(s=>`<option value="${poEsc(s)}"${p.thenScene===s?' selected':''}>${poEsc(s)}</option>`).join('')}</select>`;
+    case 'set_event_title':
+      return `<input type="text" class="fa-param input-text" data-k="title" placeholder="Event title" value="${poEsc(p.title||'')}" style="width:250px;">`;
+    case 'set_round_label':
+      return `<input type="text" class="fa-param input-text" data-k="text" placeholder="e.g. WINNERS FINALS (blank = hide)" value="${poEsc(p.text||'')}" style="width:250px;">`;
+    case 'set_match_label':
+      return `<input type="text" class="fa-param input-text" data-k="text" placeholder="e.g. UPCOMING MATCH (blank = auto)" value="${poEsc(p.text||'')}" style="width:250px;">`;
     case 'overlay_winner':
       return `<select class="fa-param input-select" data-k="side" style="width:100px;"><option value="blue"${p.side==='blue'?' selected':''}>Blue</option><option value="orange"${p.side==='orange'?' selected':''}>Orange</option></select>
         <input type="text" class="fa-param input-text" data-k="name" placeholder="name" value="${poEsc(p.name||'')}" style="width:120px;">`;

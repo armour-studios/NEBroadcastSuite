@@ -6346,6 +6346,40 @@ async function _executeFlowAction(action, ctx) {
       break;
     case 'overlay_break_hide':
       state.breakScreen = { ...state.breakScreen, visible: false };
+      clearBreakAutoSwitch();
+      broadcastFullState();
+      break;
+    case 'overlay_countdown_start': {
+      // Start the "starting soon" break-screen countdown. Optional thenScene auto-cuts to that OBS
+      // scene when it reaches 0 (same engine as the manual break countdown).
+      const secs = Math.max(0, Number(p.seconds) || 0);
+      state.breakScreen = {
+        ...state.breakScreen,
+        visible: true,
+        title: (typeof p.title === 'string' && p.title.trim()) ? p.title : (state.breakScreen.title || 'STARTING SOON'),
+        endsAt: secs > 0 ? Date.now() + secs * 1000 : null,
+        frozenSeconds: null,
+        thenScene: typeof p.thenScene === 'string' ? p.thenScene : (state.breakScreen.thenScene || ''),
+        thenPlayout: ''
+      };
+      scheduleBreakAutoSwitch();
+      saveAppState();
+      broadcastFullState();
+      break;
+    }
+    case 'set_event_title':
+      state.eventName = (p.title || '').toString();
+      saveAppState();
+      broadcastFullState();
+      break;
+    case 'set_round_label':
+      state.roundLabel = (p.text || '').toString();
+      saveAppState();
+      broadcastFullState();
+      break;
+    case 'set_match_label':
+      state.gameLabel = (p.text || '').toString();
+      saveAppState();
       broadcastFullState();
       break;
     case 'overlay_casters_show':

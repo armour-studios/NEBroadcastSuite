@@ -6020,32 +6020,6 @@ body.popout-qrail .qrail-popout-strip { display: none !important; }
 .bb-cz-ctag { font-size: 9px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); flex: 0 0 auto; }
 .bb-cz-empty { font-size: 12px; color: var(--muted); padding: 6px 2px; }
 
-/* ════════════════════════════ Frameless title bar ════════════════════════════ */
-/* The header IS the title bar now — draggable, with native min/max/close overlaid
-   at the top-right (reserve ~140px) and our own controls kept clickable (no-drag). */
-.prod-header { -webkit-app-region: drag; padding-right: 144px; }
-/* `-webkit-app-region` is NOT inherited and defaults to no-drag, so any child wrapper without an
-   explicit rule covers the bar and blocks dragging over it — that's why the top bar "doesn't always
-   drag." Denylist approach: make the WHOLE header and EVERY descendant draggable, then re-assert
-   no-drag ONLY on the interactive controls and their subtrees (an icon inside a button must not eat
-   the drag). This way every gap/wrapper/label-text area is grabbable, present or future. */
-.prod-header * { -webkit-app-region: drag; }
-.prod-header a, .prod-header a *,
-.prod-header button, .prod-header button *,
-.prod-header select, .prod-header input, .prod-header textarea,
-.prod-header label, .prod-header label *,
-.prod-header .topbar-iconbtn, .prod-header .topbar-iconbtn *,
-.prod-header .prod-timer, .prod-header .prod-timer *,
-.prod-header .conn-signal, .prod-header .conn-signal *,
-.prod-header .tb-conn, .prod-header .tb-conn *,
-.prod-header .tb-clickable, .prod-header .tb-clickable *,
-.prod-header .tb-ad-area, .prod-header .tb-ad-area *,
-.prod-header .golive-area, .prod-header .golive-area *,
-.prod-header .notif-area, .prod-header .notif-area *,
-.prod-header .discord-user-area, .prod-header .discord-user-area *,
-.prod-header .game-dd-menu, .prod-header .game-dd-menu * { -webkit-app-region: no-drag; }
-/* Plain text labels (e.g. "Game") don't wrap an interactive control — keep them grabbable. */
-.prod-header .prod-header-label { -webkit-app-region: drag; }
 .topbar-iconbtn {
   display: inline-flex; align-items: center; justify-content: center;
   width: 30px; height: 30px; border-radius: 8px; cursor: pointer;
@@ -6614,16 +6588,19 @@ body.sides-swapped .qrail-head { flex-direction: row-reverse; }
 /* Top bar: title | editing scene + links | live-on-gfx.html scene | status pill + Clear All + Push
    Live. "Editing" and "Live" are deliberately distinct fields — selecting a scene never changes
    what's on air, only Push Live does. */
-.gfx-top-bar { display:flex; align-items:center; gap:16px; padding:10px 16px; border-bottom:1px solid var(--border); background:var(--surface2); flex-shrink:0; flex-wrap:wrap; }
+.gfx-top-bar { display:flex; align-items:center; gap:16px; padding:10px 16px; border-bottom:1px solid var(--border); background:var(--surface2); flex-shrink:0; flex-wrap:nowrap; overflow-x:auto; overflow-y:hidden; }
 .gfx-top-title { font-size:13px; font-weight:900; letter-spacing:.08em; text-transform:uppercase; color:var(--text); flex-shrink:0; padding-right:16px; border-right:1px solid var(--border); }
-.gfx-top-scene, .gfx-top-live { display:flex; align-items:center; gap:8px; min-width:0; }
+.gfx-top-scene, .gfx-top-live { display:flex; align-items:center; gap:8px; min-width:0; flex-shrink:1; }
 .gfx-top-scene-lbl { font-size:9px; font-weight:900; letter-spacing:.1em; text-transform:uppercase; color:var(--muted); flex-shrink:0; }
-.gfx-top-scene-name, .gfx-top-live-name { font-size:12px; font-weight:700; color:var(--text); white-space:nowrap; }
+.gfx-top-scene-name, .gfx-top-live-name { font-size:12px; font-weight:700; color:var(--text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0; }
 .gfx-top-live { padding-left:16px; border-left:1px solid var(--border); }
 .gfx-top-live-name { color:#4ade80; }
-.gfx-top-scene-link { font-size:10px; opacity:.6; white-space:nowrap; }
+.gfx-top-scene-link { font-size:10px; opacity:.6; white-space:nowrap; flex-shrink:0; }
 .gfx-top-scene-link:hover { opacity:1; }
-.gfx-top-actions { display:flex; align-items:center; gap:8px; flex-shrink:0; margin-left:auto; }
+/* This whole group (auto-cut toggle + scene select + OFF AIR/LIVE pill + Clear All + Push Live)
+   must always render as one unbroken line — never wrap or drop to a second row. The scene-name
+   labels to its left shrink/ellipsis first to make room. */
+.gfx-top-actions { display:flex; align-items:center; gap:8px; flex-shrink:0; flex-wrap:nowrap; margin-left:auto; white-space:nowrap; }
 /* Always-visible two-state pill — grey/OFF AIR when nothing's live, green/LIVE otherwise. */
 .gfx-live-badge { font-size:9px; font-weight:900; letter-spacing:.12em; padding:3px 8px; border-radius:4px; background:#3a4048; color:var(--muted); text-transform:uppercase; transition:background .15s,color .15s; }
 .gfx-live-badge:not(.is-off) { background:#22c55e; color:#000; }
@@ -7167,24 +7144,12 @@ tr.lg2-drag-over { outline: 2px solid var(--accent, #4a9eff); outline-offset: -1
 .dbk-picker .sp-btn { min-width: 160px; max-width: 230px; height: 34px; }
 .dbk-picker .sp-img { width: 22px; height: 22px; object-fit: contain; border-radius: 4px; background: rgba(255,255,255,.06); }
 
-/* Responsive: must come AFTER the base .dbk-picker rules above to win on equal specificity */
+/* Responsive: stay on one line — picker shrinks, sponsors hide, label hides */
 @media (max-width: 900px) {
-  .dash-brandkit { flex-wrap: wrap; gap: 8px; }
-  /* Picker grows to fill the gap between the head and controls */
-  .dbk-picker { flex: 1; min-width: 0; border-right: none; padding-right: 0; }
-  .dbk-picker .sp-btn { width: 100%; min-width: 0; max-width: none; }
-  /* Sponsors get their own full-width row below */
-  .dbk-sponsors { order: 5; width: 100%; flex-basis: 100%; }
-}
-/* Below ~640 px: full vertical stack */
-@media (max-width: 640px) {
-  .dash-brandkit { flex-direction: column; align-items: stretch; gap: 8px; }
-  .dbk-head { order: 1; }
-  .dbk-picker { order: 2; flex: none; width: 100%; border-right: none; padding-right: 0; }
-  .dbk-picker .sp-btn { width: 100%; min-width: 0; max-width: none; }
-  .dbk-sponsors { order: 3; width: 100%; }
-  .dbk-controls { order: 4; display: flex; justify-content: flex-end; gap: 6px; }
-  .dbk-controls .btn { flex: 1; text-align: center; }
+  .dbk-picker { flex: 1; min-width: 0; }
+  .dbk-picker .sp-btn { min-width: 0; max-width: none; width: 100%; }
+  .dbk-sponsors { display: none; }
+  .dbk-title { display: none; }
 }
 
 /* ── customPrompt() text-input dialog ── */
@@ -7206,3 +7171,26 @@ tr.lg2-drag-over { outline: 2px solid var(--accent, #4a9eff); outline-offset: -1
   box-shadow: 0 0 0 1px rgba(34, 197, 94, 0.45), 0 0 8px rgba(34, 197, 94, 0.22);
 }
 .btn.msp-connected:hover { background: rgba(34, 197, 94, 0.12) !important; }
+
+/* ═══════════════════════════ Frameless title bar — MUST BE LAST ══════════════════════════ */
+/* Placed at the end of this file so no later rule can silently override the drag at equal
+   specificity. Denylist approach: every prod-header descendant is draggable by default, then
+   interactive controls are explicitly set back to no-drag (higher specificity wins there). */
+.prod-header { -webkit-app-region: drag; padding-right: 144px; user-select: none; }
+.prod-header * { -webkit-app-region: drag; }
+.prod-header a, .prod-header a *,
+.prod-header button, .prod-header button *,
+.prod-header select, .prod-header input, .prod-header textarea,
+.prod-header label, .prod-header label *,
+.prod-header .topbar-iconbtn, .prod-header .topbar-iconbtn *,
+.prod-header .prod-timer, .prod-header .prod-timer *,
+.prod-header .conn-signal, .prod-header .conn-signal *,
+.prod-header .tb-conn, .prod-header .tb-conn *,
+.prod-header .tb-clickable, .prod-header .tb-clickable *,
+.prod-header .tb-ad-area, .prod-header .tb-ad-area *,
+.prod-header .golive-area, .prod-header .golive-area *,
+.prod-header .notif-area, .prod-header .notif-area *,
+.prod-header .discord-user-area, .prod-header .discord-user-area *,
+.prod-header .game-dd-menu, .prod-header .game-dd-menu *,
+.prod-header #brand-icon-btn { -webkit-app-region: no-drag; }
+.prod-header .prod-header-label { -webkit-app-region: drag; }

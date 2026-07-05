@@ -201,6 +201,13 @@ function createSplashWindow() {
 }
 
 function createControlPanel() {
+  // The window is frameless (titleBarStyle:'hidden') and the menu bar is hidden below, but
+  // Electron's default application menu still exists underneath and registers its own
+  // Ctrl+Shift+I/F12 "Toggle Developer Tools" accelerator. That fired in parallel with the
+  // before-input-event handler below (same toggle, same keys) and the two raced — open then
+  // instantly close in the same tick — so DevTools appeared to never open. Removing the
+  // default menu leaves the before-input-event handler as the sole toggle.
+  Menu.setApplicationMenu(null);
   controlPanel = new BrowserWindow({
     width: 760,
     height: 820,
@@ -223,7 +230,9 @@ function createControlPanel() {
   controlPanel.loadFile(path.join(__dirname, 'control-panel', 'index.html'));
   controlPanel.setMenuBarVisibility(false);
 
-  // F12 / Ctrl+Shift+I → toggle DevTools on the control panel
+  // F12 / Ctrl+Shift+I → toggle DevTools; Ctrl+R / Ctrl+Shift+R → reload. Removing the default
+  // application menu (above) dropped its built-in accelerators for all three, so they're
+  // reimplemented here manually.
   controlPanel.webContents.on('before-input-event', (event, input) => {
     if (input.type !== 'keyDown') return;
     const devToolsKey = input.key === 'F12' ||
@@ -234,6 +243,11 @@ function createControlPanel() {
       } else {
         controlPanel.webContents.openDevTools({ mode: 'detach' });
       }
+      return;
+    }
+    if (input.key === 'r' && input.control) {
+      if (input.shift) controlPanel.webContents.reloadIgnoringCache();
+      else controlPanel.webContents.reload();
     }
   });
 
