@@ -593,7 +593,7 @@
       stage.classList.toggle('has-foot', !!sponsors.length);
     }
 
-    SceneBase.connect(render);
+    SceneBase.connect((data) => { SceneBase.applySceneConfig('intro', data); render(data); });
 
     if (location.protocol === 'file:') {
       document.documentElement.classList.add('preview');

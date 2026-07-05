@@ -180,7 +180,7 @@
         rowEl.appendChild(card);
       });
     }
-    SceneBase.connect(render);
+    SceneBase.connect((data) => { SceneBase.applySceneConfig('veto', data); render(data); });
 
     if (location.protocol === 'file:') {
       render({ teams: { blue: { name: 'FROST', color: '#3b82f6' }, orange: { name: 'EMBER', color: '#f97316' } },

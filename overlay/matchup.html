@@ -549,7 +549,7 @@
         brand: { logo: '' }
       });
     } else {
-      SceneBase.connect(render);
+      SceneBase.connect((data) => { SceneBase.applySceneConfig('matchup', data); render(data); });
     }
   </script>
 </body>

@@ -357,6 +357,35 @@
     }
   };
 
+  // Apply per-scene color/font preset config to :root CSS vars.
+  // Call this in each overlay's onState after applyBrand so it takes priority.
+  SceneBase.applySceneConfig = function(sceneKey, data) {
+    const cfg = ((data.sceneConfig || {})[sceneKey]) || {};
+    const root = document.documentElement;
+    if (cfg.accent) {
+      root.style.setProperty('--duo-accent',  cfg.accent);
+      root.style.setProperty('--accent',       cfg.accent);
+    } else {
+      root.style.removeProperty('--duo-accent');
+      root.style.removeProperty('--accent');
+    }
+    if (cfg.accent2) {
+      root.style.setProperty('--duo-accent2', cfg.accent2);
+      root.style.setProperty('--accent-2',    cfg.accent2);
+    } else {
+      root.style.removeProperty('--duo-accent2');
+      root.style.removeProperty('--accent-2');
+    }
+    if (cfg.font) {
+      const fv = `'${cfg.font}', sans-serif`;
+      root.style.setProperty('--main-font',  fv);
+      root.style.setProperty('--scene-font', fv);
+    } else {
+      root.style.removeProperty('--main-font');
+      root.style.removeProperty('--scene-font');
+    }
+  };
+
   global.SceneBase = SceneBase;
 
   // ── Frame guide ────────────────────────────────────────────────────────────

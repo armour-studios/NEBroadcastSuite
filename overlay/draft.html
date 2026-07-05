@@ -217,7 +217,7 @@
       cols.replaceChildren(newA, newB);
     }
 
-    SceneBase.connect(render);
+    SceneBase.connect((data) => { SceneBase.applySceneConfig('draft', data); render(data); });
     setInterval(() => { if (_lastDraft) tickTimer(_lastDraft); }, 1000);
 
     if (EMBED || location.protocol === 'file:') {

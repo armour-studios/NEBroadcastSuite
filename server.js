@@ -535,6 +535,7 @@ let state = {
   // Which production graphic is currently showing in the unified gfx.html overlay.
   // null = nothing showing. Values match SCENE_META keys: 'break','winner','intro','ticker', etc.
   gfxActive: null,
+  scenePresets: {},   // { [sceneKey]: { active: string, presets: { [name]: { label, config: { accent, accent2, font } } } } }
   // "Teams to Watch" spotlight graphic — a small set of teams the producer marks on an event,
   // each with custom fields (CURRENT RANK / POINTS / …). Team logos are resolved by name in the
   // overlay (savedTeams / start.gg logo map) so this stays tiny in the broadcast.
@@ -1510,6 +1511,7 @@ function loadState() {
       if (saved.facecamsEnabled !== undefined) state.facecamsEnabled = saved.facecamsEnabled;
       if (saved.replayCams !== undefined) state.replayCams = saved.replayCams;
       if (saved.sceneBg && typeof saved.sceneBg === 'object') state.sceneBg = { ...saved.sceneBg };
+      if (saved.scenePresets && typeof saved.scenePresets === 'object') state.scenePresets = saved.scenePresets;
       if (saved.banner) state.banner = saved.banner;
       if (saved.casters && typeof saved.casters === 'object') {
         state.casters = {
@@ -1951,6 +1953,7 @@ function _saveAppStateNow(sync = false) {
       vdo: state.vdo,
       flows: state.flows || [],
       sceneBg: state.sceneBg || {},
+      scenePresets: state.scenePresets || {},
       crew: state.crew || []
     };
     safeWriteJson(stateFile, toSave, sync);
@@ -2407,6 +2410,16 @@ function resolveTeamRecords() {
   };
 }
 
+// Derive the active preset's config for each scene — small flat object broadcast to overlays.
+function buildSceneConfig() {
+  const out = {};
+  for (const [key, sp] of Object.entries(state.scenePresets || {})) {
+    const cfg = ((sp.presets || {})[sp.active || 'Default'] || {}).config || {};
+    if (Object.keys(cfg).some((k) => cfg[k])) out[key] = cfg;
+  }
+  return out;
+}
+
 function buildLiveState() {
   const publicStartgg = { ...state.startgg, hasToken: !!startggApiToken };
   const publicChallonge = { ...state.challonge, hasKey: !!challongeApiKey };
@@ -2469,7 +2482,8 @@ function buildLiveState() {
     flowFireLog: _flowFireLog,
     showRoster: state.showRoster || [],
     background: state.background,
-    overlays: overlayClientInfo()   // live overlay browser-source count for the pre-flight checklist
+    overlays: overlayClientInfo(),   // live overlay browser-source count for the pre-flight checklist
+    sceneConfig: buildSceneConfig()  // active preset config per scene, applied by SceneBase.applySceneConfig
   };
 }
 
@@ -7487,6 +7501,26 @@ let _pendingPostGameFinalize = false;   // MatchEnded fired but the winning-goal
 let _pendingFinalizeFallbackTimer = null;
 let _pendingFinalizeDirectTimer = null; // tracks the 800ms "no replay" setTimeout so it can be cancelled at kickoff
 
+// Post-game roster for the scoreboard. playerCache accumulates EVERY name seen this game — reconnects,
+// name-variant strings (e.g. "PHYNR" vs "PHYNR †"), coaches, and brief transients — which pile up as
+// extra 0-stat rows and inflate the board. Cap each team to its actual roster size (top by score) so
+// only the players who really played show. rosterSize is the upper bound; the live packet's per-team
+// count refines it (2v2 vs 3v3), with a fallback to rosterSize when the packet is momentarily empty.
+function scoreboardRoster() {
+  const teamNum = (p) => (Number(p.team) === 1 ? 1 : 0);
+  const live = Array.isArray(state.players) ? state.players : [];
+  const rs = (GAMES[state.activeGame] && GAMES[state.activeGame].rosterSize) || 3;
+  const capFor = (t) => { const n = live.filter((p) => teamNum(p) === t).length; return n > 0 ? Math.min(n, rs) : rs; };
+  const all = Object.values(state.playerCache || {}).map((p) => ({ ...p }));
+  const pick = (t) => all
+    .filter((p) => teamNum(p) === t)
+    .sort((a, b) => (b.score || 0) - (a.score || 0))
+    .slice(0, capFor(t));
+  const out = {};
+  [...pick(0), ...pick(1)].forEach((p) => { out[p.name] = p; });
+  return out;
+}
+
 // Freeze the final scoreboard and arm the post-game→casters cut. Called either almost immediately
 // (no replay was in progress when MatchEnded fired) or from handleGoalReplayEnd() once the winning
 // goal's replay actually finishes — NOT a fixed guess at how long that replay takes. Real RL replay
@@ -7504,15 +7538,16 @@ function finalizePostGameBoard() {
   state.view = 'scoreboard';
   // Snapshot the final scoreboard so it survives the next match_created (which clears the live cache)
   // and so the overlay can re-render it from a full_state on reload/reconnect (not just the view_change).
+  const roster = scoreboardRoster();
   state.scoreboard = {
-    players: Object.values(state.playerCache || {}).map(p => ({ ...p })),
+    players: Object.values(roster).map(p => ({ ...p })),
     blueScore: state.game.blueScore ?? 0,
     orangeScore: state.game.orangeScore ?? 0,
     series: { ...state.series }
   };
   broadcast(bridgeClients, {
     type: 'view_change',
-    data: { view: 'scoreboard', series: state.series, playerCache: state.playerCache }
+    data: { view: 'scoreboard', series: state.series, playerCache: roster }
   });
   obsSwitch('postGame');
 
@@ -8024,6 +8059,38 @@ function handleControlMessage(msg, ws) {
       saveAppState();
       broadcastFullState();
       break;
+
+    case 'save_scene_preset': {
+      const { scene: _sp_scene, name: _sp_name, config: _sp_cfg } = msg.data || {};
+      if (!_sp_scene || !_sp_name) break;
+      if (!state.scenePresets[_sp_scene]) state.scenePresets[_sp_scene] = { active: 'Default', presets: {} };
+      state.scenePresets[_sp_scene].presets[_sp_name] = { label: _sp_name, config: _sp_cfg || {} };
+      state.scenePresets[_sp_scene].active = _sp_name;
+      saveAppState();
+      broadcastFullState();
+      break;
+    }
+    case 'delete_scene_preset': {
+      const { scene: _dp_scene, name: _dp_name } = msg.data || {};
+      if (!_dp_scene || !_dp_name || _dp_name === 'Default') break;
+      const _dp_sp = state.scenePresets[_dp_scene];
+      if (_dp_sp) {
+        delete _dp_sp.presets[_dp_name];
+        if (_dp_sp.active === _dp_name) _dp_sp.active = 'Default';
+      }
+      saveAppState();
+      broadcastFullState();
+      break;
+    }
+    case 'activate_scene_preset': {
+      const { scene: _ap_scene, name: _ap_name } = msg.data || {};
+      if (!_ap_scene || !_ap_name) break;
+      if (!state.scenePresets[_ap_scene]) state.scenePresets[_ap_scene] = { active: _ap_name, presets: {} };
+      else state.scenePresets[_ap_scene].active = _ap_name;
+      saveAppState();
+      broadcastFullState();
+      break;
+    }
 
     // Custom "GAME x | BEST OF x" label override (e.g. "UPCOMING MATCH" or any custom text).
     // Empty string restores the automatic GAME/BEST-OF text.
@@ -9722,10 +9789,18 @@ function handleControlMessage(msg, ws) {
       broadcastFullState();
       break;
 
-    case 'force_scoreboard':
+    case 'force_scoreboard': {
       state.view = 'scoreboard';
-      broadcast(bridgeClients, { type: 'view_change', data: { view: 'scoreboard', playerCache: state.playerCache } });
+      const roster = scoreboardRoster();
+      state.scoreboard = {
+        players: Object.values(roster).map((p) => ({ ...p })),
+        blueScore: state.game.blueScore ?? 0,
+        orangeScore: state.game.orangeScore ?? 0,
+        series: { ...state.series }
+      };
+      broadcast(bridgeClients, { type: 'view_change', data: { view: 'scoreboard', playerCache: roster } });
       break;
+    }
 
     case 'force_hud':
       state.view = 'hud';
@@ -15555,7 +15630,14 @@ class EventSubService {
     this.shouldRun = false;
     if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
     this._clearKeepalive();
-    if (this.ws) { try { this.ws.removeAllListeners(); this.ws.close(); } catch (_) {} this.ws = null; }
+    if (this.ws) {
+      try {
+        this.ws.removeAllListeners();
+        this.ws.on('error', () => {});  // absorb async error if socket was still CONNECTING
+        this.ws.terminate();
+      } catch (_) {}
+      this.ws = null;
+    }
     this.sessionId = null;
     this.connected = false;
   }
@@ -15563,7 +15645,14 @@ class EventSubService {
   _connect() {
     if (!this.shouldRun) return;
     if (!state.twitch.apiToken) { console.warn('[EventSub] No Twitch token — WS not started'); return; }
-    if (this.ws) { try { this.ws.removeAllListeners(); this.ws.close(); } catch (_) {} this.ws = null; }
+    if (this.ws) {
+      try {
+        this.ws.removeAllListeners();
+        this.ws.on('error', () => {});  // absorb async error if socket was still CONNECTING
+        this.ws.terminate();
+      } catch (_) {}
+      this.ws = null;
+    }
 
     let ws;
     try { ws = new WebSocket(this.wsUrl); }
@@ -15625,7 +15714,7 @@ class EventSubService {
     this._clearKeepalive();
     this.keepaliveTimer = setTimeout(() => {
       console.warn('[EventSub] Keepalive timeout — forcing reconnect');
-      if (this.ws) { try { this.ws.close(); } catch (_) {} }
+      if (this.ws) { try { this.ws.terminate(); } catch (_) {} }
     }, ((this._kaTimeout || 10) + 5) * 1000);
   }
 

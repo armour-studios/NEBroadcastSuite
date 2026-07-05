@@ -278,7 +278,7 @@ body { width: 1920px; height: 1080px; overflow: hidden; background: transparent;
     all.forEach(function (m, i) { list.appendChild(buildEntry(m, i, mapsData, accentA, accentB)); });
   }
 
-  SceneBase.connect(render);
+  SceneBase.connect((data) => { SceneBase.applySceneConfig('schedule', data); render(data); });
 })();
 </script>
 </body>

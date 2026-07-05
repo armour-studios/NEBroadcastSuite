@@ -128,7 +128,7 @@
     function connect() {
       const ws = new WebSocket(WS);
       ws.onopen = () => ws.send(JSON.stringify({ type: 'request_state' }));
-      ws.onmessage = ({ data }) => { let m; try { m = JSON.parse(data); } catch { return; } if (m.type === 'full_state') render(m.data); };
+      ws.onmessage = ({ data }) => { let m; try { m = JSON.parse(data); } catch { return; } if (m.type === 'full_state') { SceneBase.applySceneConfig('series', m.data); render(m.data); } };
       ws.onclose = () => setTimeout(connect, 800);
       ws.onerror = () => { try { ws.close(); } catch {} };
     }

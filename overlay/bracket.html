@@ -527,7 +527,7 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
     render(d);
   }
 
-  SceneBase.connect(applyState);
+  SceneBase.connect((data) => { SceneBase.applySceneConfig('bracket', data); applyState(data); });
 })();
 </script>
 </body>

@@ -2904,6 +2904,130 @@ function _returnGraphicsToProd() {
     });
   })();
 
+  // ── Per-scene customization preset bars ────────────────────────────────────
+  const GFX_FONTS = ['Industry', 'Bourgeois', 'Rajdhani', 'Barlow Condensed', 'Oswald', 'Bebas Neue',
+    'Inter', 'Anton', 'Exo 2', 'Teko', 'Saira Condensed', 'Saira', 'Arial', 'Impact', 'Verdana'];
+  const GFX_DEFAULT_ACCENT  = '#e83a8b';
+  const GFX_DEFAULT_ACCENT2 = '#8b5cf6';
+
+  function custBarHtml(sceneKey) {
+    const fontOpts = `<option value="">— use global —</option>` +
+      GFX_FONTS.map((f) => `<option value="${f}">${f}</option>`).join('');
+    return `<div class="gfx-cust-bar" data-scene="${sceneKey}">
+      <div class="gfx-cust-head">
+        <span class="gfx-cust-title">PRESET</span>
+        <span class="gfx-cust-active-name" data-cust-active="${sceneKey}">Default</span>
+        <button class="gfx-cust-toggle btn-icon" data-cust-toggle="${sceneKey}" title="Customize scene appearance">
+          <svg viewBox="0 0 16 16" width="12" height="12" fill="currentColor"><path d="M8 4a1 1 0 1 1 0-2 1 1 0 0 1 0 2zM8 9a1 1 0 1 1 0-2 1 1 0 0 1 0 2zM8 14a1 1 0 1 1 0-2 1 1 0 0 1 0 2z"/></svg>
+        </button>
+      </div>
+      <div class="gfx-cust-body" data-cust-body="${sceneKey}" hidden>
+        <div class="gfx-cust-preset-row">
+          <select class="input-select gfx-cust-sel" data-cust-sel="${sceneKey}">
+            <option value="Default">Default</option>
+          </select>
+          <button class="btn btn-xs gfx-cust-save" data-cust-save="${sceneKey}">Save As</button>
+          <button class="btn btn-xs btn-danger gfx-cust-del" data-cust-del="${sceneKey}">Delete</button>
+        </div>
+        <div class="gfx-cust-fields">
+          <label class="gfx-cust-field">
+            <span class="gfx-cust-lbl">Accent</span>
+            <input type="color" class="gfx-cust-color1" data-cust-c1="${sceneKey}" value="${GFX_DEFAULT_ACCENT}">
+          </label>
+          <label class="gfx-cust-field">
+            <span class="gfx-cust-lbl">Accent 2</span>
+            <input type="color" class="gfx-cust-color2" data-cust-c2="${sceneKey}" value="${GFX_DEFAULT_ACCENT2}">
+          </label>
+          <label class="gfx-cust-field gfx-cust-field-wide">
+            <span class="gfx-cust-lbl">Font</span>
+            <select class="input-select gfx-cust-font-sel" data-cust-font="${sceneKey}">${fontOpts}</select>
+          </label>
+        </div>
+        <div class="gfx-cust-actions">
+          <button class="btn btn-xs btn-secondary gfx-cust-apply" data-cust-apply="${sceneKey}">Apply Preview</button>
+          <button class="btn btn-xs gfx-cust-reset" data-cust-reset="${sceneKey}">Reset</button>
+        </div>
+      </div>
+    </div>`;
+  }
+
+  // Inject a customize bar before the .gfx-scene-body of each scene panel.
+  document.querySelectorAll('.gfx-scene-panel[data-gfxpanel]').forEach((panel) => {
+    const key = panel.dataset.gfxpanel;
+    if (!SCENE_META[key]) return;
+    const body = panel.querySelector('.gfx-scene-body');
+    if (!body || panel.querySelector('.gfx-cust-bar')) return;  // already injected
+    body.insertAdjacentHTML('beforebegin', custBarHtml(key));
+  });
+
+  // Toggle expand/collapse of a customize body.
+  document.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-cust-toggle]');
+    if (!btn) return;
+    const key = btn.dataset.custToggle;
+    const body = document.querySelector(`[data-cust-body="${key}"]`);
+    if (body) body.hidden = !body.hidden;
+  });
+
+  // Build the config object from the current UI inputs for a scene.
+  function custReadConfig(sceneKey) {
+    const c1  = document.querySelector(`[data-cust-c1="${sceneKey}"]`);
+    const c2  = document.querySelector(`[data-cust-c2="${sceneKey}"]`);
+    const fnt = document.querySelector(`[data-cust-font="${sceneKey}"]`);
+    return {
+      accent:  (c1  && c1.value  !== GFX_DEFAULT_ACCENT)  ? c1.value  : '',
+      accent2: (c2  && c2.value  !== GFX_DEFAULT_ACCENT2) ? c2.value  : '',
+      font:    (fnt && fnt.value) ? fnt.value : '',
+    };
+  }
+
+  // Save As — prompt for a name, then save.
+  document.addEventListener('click', async (e) => {
+    const btn = e.target.closest('[data-cust-save]');
+    if (!btn) return;
+    const key = btn.dataset.custSave;
+    const sel = document.querySelector(`[data-cust-sel="${key}"]`);
+    const current = sel ? sel.value : 'Default';
+    const name = await customPrompt('Save Preset', '', current === 'Default' ? '' : current, 'Save');
+    if (name == null || !name.trim()) return;
+    send('save_scene_preset', { scene: key, name: name.trim(), config: custReadConfig(key) });
+  });
+
+  // Delete preset (cannot delete Default).
+  document.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-cust-del]');
+    if (!btn) return;
+    const key = btn.dataset.custDel;
+    const sel = document.querySelector(`[data-cust-sel="${key}"]`);
+    const name = sel ? sel.value : '';
+    if (!name || name === 'Default') { alert('Cannot delete the Default preset.'); return; }
+    if (!confirm(`Delete preset "${name}"?`)) return;
+    send('delete_scene_preset', { scene: key, name });
+  });
+
+  // Activate preset from dropdown.
+  document.addEventListener('change', (e) => {
+    const sel = e.target.closest('[data-cust-sel]');
+    if (!sel) return;
+    send('activate_scene_preset', { scene: sel.dataset.custSel, name: sel.value });
+  });
+
+  // Apply preview — send the current picker values live without saving.
+  document.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-cust-apply]');
+    if (!btn) return;
+    const key = btn.dataset.custApply;
+    send('save_scene_preset', { scene: key, name: '__preview__', config: custReadConfig(key) });
+  });
+
+  // Reset — activate Default, restoring brand colors.
+  document.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-cust-reset]');
+    if (!btn) return;
+    const key = btn.dataset.custReset;
+    send('activate_scene_preset', { scene: key, name: 'Default' });
+  });
+
   const saved = (() => { try { return localStorage.getItem('gfx_active_grp'); } catch (_) { return null; } })();
   show(saved || 'break');
   setTimeout(fitScenePreviews, 120);
@@ -12042,6 +12166,35 @@ function renderWatchlistInfo(data) {
 }
 
 // Reflect live visibility into the toggles + card highlight.
+function renderScenePresets(data) {
+  const presets = data.scenePresets || {};
+  document.querySelectorAll('.gfx-cust-bar[data-scene]').forEach((bar) => {
+    const key = bar.dataset.scene;
+    const sp = presets[key] || { active: 'Default', presets: {} };
+    const active = sp.active || 'Default';
+    const names = ['Default', ...Object.keys(sp.presets || {}).filter((n) => n !== 'Default' && n !== '__preview__')];
+
+    const sel  = bar.querySelector(`[data-cust-sel="${key}"]`);
+    const lbl  = bar.querySelector(`[data-cust-active="${key}"]`);
+    if (sel) {
+      sel.innerHTML = names.map((n) => `<option value="${n}"${n === active ? ' selected' : ''}>${n}</option>`).join('');
+    }
+    if (lbl) lbl.textContent = active;
+
+    // Update color pickers and font selector from the active preset's config (skip __preview__).
+    if (active === '__preview__') return;
+    const cfg = ((sp.presets || {})[active] || {}).config || {};
+    const c1  = bar.querySelector(`[data-cust-c1="${key}"]`);
+    const c2  = bar.querySelector(`[data-cust-c2="${key}"]`);
+    const fnt = bar.querySelector(`[data-cust-font="${key}"]`);
+    const GFX_DA  = '#e83a8b';
+    const GFX_DA2 = '#8b5cf6';
+    if (c1)  c1.value  = cfg.accent  || GFX_DA;
+    if (c2)  c2.value  = cfg.accent2 || GFX_DA2;
+    if (fnt) fnt.value = cfg.font    || '';
+  });
+}
+
 function applyScenesCockpit(data) {
   renderCockpitStatus(data);
   renderWatchlistInfo(data);
@@ -27087,6 +27240,7 @@ function connect() {
       _r('applyState',         () => applyState(msg.data));
       _r('applyRlSpectatorUi', () => applyRlSpectatorUi(msg.data));
       _r('applyScenesCockpit', () => applyScenesCockpit(msg.data));
+      _r('renderScenePresets', () => renderScenePresets(msg.data));
       _r('renderQuickToolbar',   () => renderQuickToolbar(msg.data));
       _r('renderDashMiniPanels', () => renderDashMiniPanels(msg.data));
       _r('renderQrailScenes',    () => renderQrailScenes(msg.data));

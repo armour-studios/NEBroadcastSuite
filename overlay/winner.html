@@ -145,7 +145,7 @@
 
       if (!first) replay();   // a fresh win while already visible — replay the reveal, don't just swap text
     }
-    SceneBase.connect(render);
+    SceneBase.connect((data) => { SceneBase.applySceneConfig('winner', data); render(data); });
 
     // Preview: replay the full reveal sequence every ~7 s (2 s animation + 5 s pause).
     if (SceneBase.preview) {
