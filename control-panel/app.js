@@ -12173,11 +12173,13 @@ function renderScenePresets(data) {
     const sp = presets[key] || { active: 'Default', presets: {} };
     const active = sp.active || 'Default';
     const names = ['Default', ...Object.keys(sp.presets || {}).filter((n) => n !== 'Default' && n !== '__preview__')];
+    const sig = active + '|' + names.join(',');
 
     const sel  = bar.querySelector(`[data-cust-sel="${key}"]`);
     const lbl  = bar.querySelector(`[data-cust-active="${key}"]`);
-    if (sel) {
+    if (sel && sel.dataset.rspSig !== sig) {
       sel.innerHTML = names.map((n) => `<option value="${n}"${n === active ? ' selected' : ''}>${n}</option>`).join('');
+      sel.dataset.rspSig = sig;
     }
     if (lbl) lbl.textContent = active;
 

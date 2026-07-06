@@ -2446,6 +2446,7 @@ function buildLiveState() {
     bracket: undefined,
     replay: undefined,
     playerProfiles: undefined,
+    scenePresets: undefined,
     teams: {
       blue:   { ...state.teams.blue,   color: eff.blue,   ownColor: state.teams.blue.color },
       orange: { ...state.teams.orange, color: eff.orange, ownColor: state.teams.orange.color }
@@ -2944,6 +2945,40 @@ function buildStartggMatchFeed(queue, recentSets, excludeSetId) {
   return items.sort((a, b) => rank(a.status) - rank(b.status)).slice(0, 10);
 }
 
+// Guarantee the on-air match shows as LIVE in the ticker. start.gg frequently never flips a set to
+// "in progress" (state 2), and the producer may push a match that isn't the idx-0 queued set (or the
+// stream queue may be empty when pushing via Team search) — so the only reliable "this is live now"
+// signal is the set the producer put on air (state.startgg.setId) + the current match teams/series
+// score. Without this, a single-stream broadcast shows FINAL results only. Idempotent.
+function ensureOnAirLiveInFeed() {
+  const sg = state.startgg;
+  if (!sg) return;
+  const setId = (sg.setId || sg.lastPushedSetId || '').toString().trim();
+  if (!setId) return;                       // only force-live an explicitly pushed set
+  const feed = sg.matchFeed || (sg.matchFeed = []);
+  const link = currentStreamedSetLink();
+  const teamA = (link && link.teamA) || (state.teams.blue && state.teams.blue.name) || '';
+  const teamB = (link && link.teamB) || (state.teams.orange && state.teams.orange.name) || '';
+  if (!teamA || !teamB) return;             // nothing meaningful on air
+  const idx = feed.findIndex((m) => String(m.setId) === setId);
+  const numOr = (v, fb) => (typeof v === 'number' ? v : fb);
+  const item = {
+    setId,
+    round: idx >= 0 ? feed[idx].round : '',
+    teamA, teamB,
+    // Prefer the live series score the producer is tracking; fall back to start.gg's standing score.
+    scoreA: numOr(state.series && state.series.blue,   idx >= 0 ? feed[idx].scoreA : null),
+    scoreB: numOr(state.series && state.series.orange, idx >= 0 ? feed[idx].scoreB : null),
+    status: 'live',
+    stream: idx >= 0 ? feed[idx].stream : '',
+    logoA: sg.logoMap[teamA.trim().toLowerCase()] || (idx >= 0 ? feed[idx].logoA : '') || '',
+    logoB: sg.logoMap[teamB.trim().toLowerCase()] || (idx >= 0 ? feed[idx].logoB : '') || ''
+  };
+  if (idx >= 0) feed[idx] = item; else feed.unshift(item);
+  const rank = (st) => (st === 'live' ? 0 : st === 'done' ? 1 : 2);
+  sg.matchFeed = feed.sort((a, b) => rank(a.status) - rank(b.status)).slice(0, 10);
+}
+
 async function fetchRecentEventSets(client, eventSlug) {
   const slug = parseEventSlug(eventSlug);
   if (!slug) return [];
@@ -3050,7 +3085,11 @@ async function fetchStreamQueue(tournamentSlug) {
 
   state.startgg.streams = streams;
   state.startgg.queue = queue;
-  state.startgg.matchFeed = buildStartggMatchFeed(queue, recentSets, state.startgg.setId);
+  // Include the on-air set in the feed too — it's the LIVE match, and the ticker should show it
+  // (previously excluding state.startgg.setId meant a single-stream event's only live match was
+  // filtered out, leaving the ticker showing FINAL results only).
+  state.startgg.matchFeed = buildStartggMatchFeed(queue, recentSets);
+  ensureOnAirLiveInFeed();   // force the pushed on-air match to appear as LIVE
   if (state.ticker.source === 'startgg') state.ticker.feed = formatTickerFeed(state.startgg.matchFeed);
   state.startgg.queueFetchedAt = new Date().toISOString();
   state.startgg.connected = true;
@@ -3184,6 +3223,8 @@ async function startggPollTick() {
       if (live && live.setId && live.setId !== state.startgg.lastPushedSetId) {
         await syncStartGgSet(live.setId);
         state.startgg.lastPushedSetId = live.setId;
+        ensureOnAirLiveInFeed();   // reflect the newly auto-followed match as LIVE in the ticker
+        if (state.ticker.source === 'startgg') state.ticker.feed = formatTickerFeed(state.startgg.matchFeed);
         console.log(`[Start.gg] Auto-followed live set ${live.setId}: ${live.teamA} vs ${live.teamB}`);
       }
     }
@@ -7500,6 +7541,7 @@ let _boardLingerTimer = null;           // 2s delay after OBS cut so the overlay
 let _pendingPostGameFinalize = false;   // MatchEnded fired but the winning-goal replay is still playing
 let _pendingFinalizeFallbackTimer = null;
 let _pendingFinalizeDirectTimer = null; // tracks the 800ms "no replay" setTimeout so it can be cancelled at kickoff
+let _pendingFinalizeRoster = null;      // roster snapshot taken at MatchEnded, consumed by finalizePostGameBoard
 
 // Post-game roster for the scoreboard. playerCache accumulates EVERY name seen this game — reconnects,
 // name-variant strings (e.g. "PHYNR" vs "PHYNR †"), coaches, and brief transients — which pile up as
@@ -7538,7 +7580,8 @@ function finalizePostGameBoard() {
   state.view = 'scoreboard';
   // Snapshot the final scoreboard so it survives the next match_created (which clears the live cache)
   // and so the overlay can re-render it from a full_state on reload/reconnect (not just the view_change).
-  const roster = scoreboardRoster();
+  const roster = _pendingFinalizeRoster || scoreboardRoster();
+  _pendingFinalizeRoster = null;
   state.scoreboard = {
     players: Object.values(roster).map(p => ({ ...p })),
     blueScore: state.game.blueScore ?? 0,
@@ -7666,6 +7709,10 @@ function handleMatchEnded(data) {
 
   saveAppState();
   broadcastFullState();
+
+  // Snapshot the roster NOW before handleMatchCreated can clear state.playerCache. The finalize
+  // timer below fires 800ms later, by which time playerCache may already be empty.
+  _pendingFinalizeRoster = scoreboardRoster();
 
   // Finalize once the winning-goal replay actually ends — not a fixed guess. If no replay is in
   // progress right now (MatchEnded arrived after ReplayEnd already fired, or there's no replay to
@@ -8062,11 +8109,11 @@ function handleControlMessage(msg, ws) {
 
     case 'save_scene_preset': {
       const { scene: _sp_scene, name: _sp_name, config: _sp_cfg } = msg.data || {};
-      if (!_sp_scene || !_sp_name) break;
+      if (!_sp_scene || !_sp_name || _sp_name === 'Default') break;
       if (!state.scenePresets[_sp_scene]) state.scenePresets[_sp_scene] = { active: 'Default', presets: {} };
       state.scenePresets[_sp_scene].presets[_sp_name] = { label: _sp_name, config: _sp_cfg || {} };
       state.scenePresets[_sp_scene].active = _sp_name;
-      saveAppState();
+      if (_sp_name !== '__preview__') saveAppState();
       broadcastFullState();
       break;
     }
@@ -10755,6 +10802,8 @@ function handleControlMessage(msg, ws) {
           if (!setId) throw new Error('No set selected');
           const result = await syncStartGgSet(setId);
           state.startgg.lastPushedSetId = setId;
+          ensureOnAirLiveInFeed();   // show the just-pushed match as LIVE in the ticker right away
+          if (state.ticker.source === 'startgg') state.ticker.feed = formatTickerFeed(state.startgg.matchFeed);
           broadcastFullState();
           ws.send(JSON.stringify({ type: 'startgg-result', data: { ok: true, message: `Pushed ${result.entrants.join(' vs ') || setId} to overlay` } }));
         } catch (e) {

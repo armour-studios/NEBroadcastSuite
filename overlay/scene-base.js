@@ -360,7 +360,8 @@
   // Apply per-scene color/font preset config to :root CSS vars.
   // Call this in each overlay's onState after applyBrand so it takes priority.
   SceneBase.applySceneConfig = function(sceneKey, data) {
-    const cfg = ((data.sceneConfig || {})[sceneKey]) || {};
+    if (!((data.sceneConfig || {})[sceneKey])) return;
+    const cfg = data.sceneConfig[sceneKey];
     const root = document.documentElement;
     if (cfg.accent) {
       root.style.setProperty('--duo-accent',  cfg.accent);

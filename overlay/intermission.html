@@ -31,70 +31,129 @@
       display: flex; align-items: center; justify-content: center;
     }
 
-    /* Card — no padding-top, no min-height; content drives size */
+    /* Card — content drives size; ambient glow behind it so it reads over b-roll */
     .im-card {
-      width: 900px;
+      position: relative;
+      width: 1000px;
       opacity: 0; transition: opacity .5s ease;
-      animation: none;
     }
     .im-card.show {
       opacity: 1;
-      animation: imFloat 5s ease-in-out .5s infinite;
+      animation: imFloat 6s ease-in-out .5s infinite;
+    }
+    .im-card::before {
+      content: ''; position: absolute; left: 50%; top: 50%;
+      transform: translate(-50%, -50%);
+      width: 1500px; height: 860px; z-index: -1; pointer-events: none;
+      background: radial-gradient(ellipse 50% 50% at 50% 50%,
+        color-mix(in srgb, var(--accent) 22%, transparent), transparent 66%);
+      filter: blur(26px);
     }
     @keyframes imFloat {
       0%, 100% { transform: translateY(0); }
-      50%       { transform: translateY(-12px); }
+      50%       { transform: translateY(-9px); }
     }
 
     /* Panel — column: [body row] then [progress bar] */
     .im-panel {
+      position: relative;
       width: 100%;
-      background: rgba(7, 9, 16, .92);
-      border: 1px solid rgba(255,255,255,.08);
-      border-radius: 20px;
+      background: linear-gradient(165deg,
+        rgba(17, 19, 30, .95) 0%,
+        rgba(9, 11, 19, .96) 55%,
+        rgba(6, 7, 13, .97) 100%);
+      border: 1px solid rgba(255,255,255,.10);
+      border-radius: 24px;
       display: flex; flex-direction: column;
       overflow: hidden;
-      box-shadow: 0 40px 100px rgba(0,0,0,.7), 0 0 0 1px rgba(255,255,255,.04);
-      backdrop-filter: blur(24px);
-      -webkit-backdrop-filter: blur(24px);
-      position: relative;
+      box-shadow:
+        0 44px 120px rgba(0,0,0,.72),
+        0 0 0 1px rgba(255,255,255,.04),
+        0 0 70px -14px color-mix(in srgb, var(--accent) 42%, transparent);
+      backdrop-filter: blur(26px);
+      -webkit-backdrop-filter: blur(26px);
     }
+    /* top accent line */
     .im-panel::before {
-      content: ''; position: absolute; top: 0; left: 10%; right: 10%; height: 2px;
+      content: ''; position: absolute; top: 0; left: 8%; right: 8%; height: 2px; z-index: 4;
       background: linear-gradient(to right, transparent, var(--accent), var(--accent2), transparent);
       border-radius: 0 0 4px 4px;
       animation: accentPulse 2.8s ease-in-out infinite;
+    }
+    /* faint top sheen */
+    .im-panel::after {
+      content: ''; position: absolute; inset: 0; z-index: 2; pointer-events: none; border-radius: 24px;
+      background: linear-gradient(180deg, rgba(255,255,255,.05), transparent 26%);
     }
     @keyframes accentPulse {
       0%, 100% { opacity: .65; }
       50%       { opacity: 1; }
     }
 
+    /* Corner brackets */
+    .im-corner {
+      position: absolute; width: 22px; height: 22px; z-index: 5; pointer-events: none;
+      border: 2px solid color-mix(in srgb, var(--accent) 72%, transparent);
+      opacity: .72;
+    }
+    .im-corner.tl { top: 13px; left: 13px; border-right: 0; border-bottom: 0; border-radius: 7px 0 0 0; }
+    .im-corner.tr { top: 13px; right: 13px; border-left: 0; border-bottom: 0; border-radius: 0 7px 0 0; }
+    .im-corner.bl { bottom: 15px; left: 13px; border-right: 0; border-top: 0; border-radius: 0 0 0 7px; }
+    .im-corner.br { bottom: 15px; right: 13px; border-left: 0; border-top: 0; border-radius: 0 0 7px 0; }
+
     /* Body row */
     .im-body {
       display: flex; flex-direction: row; align-items: center;
-      padding: 36px 44px;
+      padding: 40px 50px;
+      position: relative; z-index: 3;
     }
 
-    /* Left: brand logo */
+    /* Left: brand logo on an accent-ringed disc, with an optional "presented by" sponsor below */
     .im-left {
-      width: 104px; flex-shrink: 0;
+      flex-shrink: 0;
+      display: flex; flex-direction: column; align-items: center; gap: 16px;
+    }
+    .im-logo-disc {
+      width: 190px; height: 190px; flex-shrink: 0;
       display: flex; align-items: center; justify-content: center;
+      border-radius: 50%;
+      background: radial-gradient(circle at 50% 36%, rgba(36,40,52,.92), rgba(11,13,20,.96));
+      border: 1px solid color-mix(in srgb, var(--accent) 32%, rgba(255,255,255,.09));
+      box-shadow: inset 0 0 34px rgba(0,0,0,.55),
+        0 0 46px -12px color-mix(in srgb, var(--accent) 60%, transparent);
     }
     .im-logo {
-      width: 84px; height: 84px; object-fit: contain; display: block;
+      width: 144px; height: 144px; object-fit: contain; display: block;
       animation: logoPulse 3s ease-in-out infinite;
+    }
+
+    /* Presented-by (title sponsor) under the brand logo */
+    .im-presented {
+      display: flex; flex-direction: column; align-items: center; gap: 6px;
+      max-width: 190px;
+    }
+    .im-presented.is-empty { display: none; }
+    .im-pb-label {
+      font-size: 10px; font-weight: 800; letter-spacing: .3em; text-transform: uppercase;
+      color: #ffffff; line-height: 1;
+    }
+    .im-pb-logo {
+      height: 34px; max-width: 180px; width: auto; object-fit: contain;
+      opacity: .92; filter: drop-shadow(0 1px 6px rgba(0,0,0,.5));
     }
     @keyframes logoPulse {
       0%, 100% { filter: drop-shadow(0 4px 16px rgba(0,0,0,.6)) drop-shadow(0 0 0px var(--accent)); }
-      50%       { filter: drop-shadow(0 4px 16px rgba(0,0,0,.6)) drop-shadow(0 0 24px var(--accent)); }
+      50%       { filter: drop-shadow(0 4px 16px rgba(0,0,0,.6)) drop-shadow(0 0 22px var(--accent)); }
     }
 
-    /* Vertical separator */
+    /* Vertical separator (accent-tinted) */
     .im-vsep {
       width: 1px; align-self: stretch; flex-shrink: 0;
-      background: linear-gradient(to bottom, transparent, rgba(255,255,255,.14), transparent);
-      margin: 0 44px;
+      background: linear-gradient(to bottom,
+        transparent,
+        color-mix(in srgb, var(--accent) 45%, rgba(255,255,255,.14)),
+        transparent);
+      margin: 0 48px;
     }
 
     /* Right: countdown + event title */
@@ -103,55 +162,88 @@
       display: flex; flex-direction: column; align-items: center; justify-content: center;
     }
 
-    .im-countdown { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+    .im-countdown { display: flex; flex-direction: column; align-items: center; gap: 8px; }
     .im-countdown.hidden { display: none; }
 
     .im-label {
-      font-size: 12px; font-weight: 800; letter-spacing: .44em; text-transform: uppercase;
+      font-size: 20px; font-weight: 800; letter-spacing: .42em; text-transform: uppercase;
       color: var(--accent); line-height: 1;
+      display: flex; align-items: center; gap: 12px;
+    }
+    .im-label::before {
+      content: ''; width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0;
+      background: var(--accent); box-shadow: 0 0 10px var(--accent);
+      animation: dotPulse 1.5s ease-in-out infinite;
+    }
+    @keyframes dotPulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50%       { opacity: .35; transform: scale(.66); }
     }
 
     .im-time {
-      font-size: 88px; font-weight: 900; letter-spacing: -.02em; line-height: 1;
+      font-size: 94px; font-weight: 900; letter-spacing: -.01em; line-height: 1;
       color: #fff; text-align: center;
-      text-shadow: 0 0 80px rgba(255,255,255,.16), 0 0 140px color-mix(in srgb, var(--accent) 28%, transparent);
+      font-variant-numeric: tabular-nums; font-feature-settings: "tnum" 1;
+      text-shadow: 0 0 70px rgba(255,255,255,.18),
+        0 0 130px color-mix(in srgb, var(--accent) 32%, transparent);
     }
-    .im-time.big { font-size: 104px; }
+    .im-time.big { font-size: 112px; }
 
     /* Divider kept for JS compat — not rendered in horizontal layout */
     .im-divider { display: none; }
 
     .im-event {
-      font-size: 11px; font-weight: 700; letter-spacing: .26em; text-transform: uppercase;
-      color: rgba(255,255,255,.6); text-align: center; line-height: 1;
-      white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%;
-      margin-top: 12px;
+      font-size: 19px; font-weight: 700; letter-spacing: .24em; text-transform: uppercase;
+      color: rgba(255,255,255,.68); text-align: center; line-height: 1.1;
+      white-space: nowrap; overflow: hidden;
+      width: 100%; max-width: 640px;
+      margin-top: 18px; padding-top: 16px;
+      border-top: 1px solid rgba(255,255,255,.08);
     }
     .im-event.hidden { display: none; }
 
-    /* Progress bar — full width, pinned to bottom inside panel */
+    /* Progress bar — sits under the timer column only (not the full panel width) */
     .im-progress {
-      width: 100%; height: 4px;
-      background: rgba(255,255,255,.06);
-      position: relative; overflow: hidden; flex-shrink: 0;
+      width: 320px; max-width: 84%; height: 5px; margin-top: 20px;
+      background: rgba(255,255,255,.08);
+      border-radius: 3px;
+      position: relative; overflow: hidden; flex-shrink: 0; z-index: 3;
     }
     .im-progress.hidden { display: none; }
     .im-progress-fill {
       height: 100%;
       background: linear-gradient(to right, var(--accent), var(--accent2), var(--accent));
-      box-shadow: 0 0 10px var(--accent);
+      box-shadow: 0 0 14px color-mix(in srgb, var(--accent) 80%, transparent);
       transition: width .9s linear;
       width: 100%;
       position: absolute; left: 50%; transform: translateX(-50%);
+    }
+    .im-progress-fill::after {
+      content: ''; position: absolute; inset: 0;
+      background: linear-gradient(100deg, transparent 22%, rgba(255,255,255,.45) 50%, transparent 78%);
+      background-size: 220% 100%;
+      animation: imShimmer 2.4s linear infinite;
+    }
+    @keyframes imShimmer {
+      0%   { background-position: 220% 0; }
+      100% { background-position: -220% 0; }
     }
   </style>
 </head>
 <body>
   <div class="im-card" id="card">
     <div class="im-panel">
+      <span class="im-corner tl"></span><span class="im-corner tr"></span>
+      <span class="im-corner bl"></span><span class="im-corner br"></span>
       <div class="im-body">
         <div class="im-left">
-          <img class="im-logo" id="logo" src="" alt="">
+          <div class="im-logo-disc">
+            <img class="im-logo" id="logo" src="" alt="">
+          </div>
+          <div class="im-presented is-empty" id="presented-by">
+            <span class="im-pb-label" id="pb-label">PRESENTED BY</span>
+            <img class="im-pb-logo" id="pb-logo" alt="" style="display:none">
+          </div>
         </div>
         <div class="im-vsep"></div>
         <div class="im-right">
@@ -159,12 +251,12 @@
             <div class="im-label" id="label">INTERMISSION</div>
             <div class="im-time" id="time">—</div>
           </div>
+          <div class="im-progress hidden" id="progress">
+            <div class="im-progress-fill" id="progress-fill"></div>
+          </div>
           <div class="im-divider hidden" id="divider"></div>
           <div class="im-event hidden" id="event-title"></div>
         </div>
-      </div>
-      <div class="im-progress hidden" id="progress">
-        <div class="im-progress-fill" id="progress-fill"></div>
       </div>
     </div>
   </div>
@@ -178,6 +270,17 @@
     const card = document.getElementById('card');
 
     function el(id) { return document.getElementById(id); }
+    // Shrink the event title so the whole thing stays on ONE line within its column.
+    function fitEventTitle() {
+      const e = el('event-title');
+      if (!e || !e.textContent) return;
+      let size = 19;
+      e.style.fontSize = size + 'px';
+      let guard = 0;
+      while (e.scrollWidth > e.clientWidth && size > 9 && guard++ < 60) {
+        size -= 1; e.style.fontSize = size + 'px';
+      }
+    }
     function fmtTime(sec) {
       sec = Math.max(0, Math.round(sec));
       const h = Math.floor(sec / 3600);
@@ -226,6 +329,17 @@
       const brandLogo = (data.brand && data.brand.logo) ? data.brand.logo : '';
       SceneBase.applyTeamLogo(logoImg, brandLogo, '');
 
+      // Presented-by (title sponsor) under the logo — same source as the other scenes (scoreboardAd).
+      const slot = data.scoreboardAd || {};
+      const pbWrap = el('presented-by');
+      if (slot.logo) {
+        el('pb-label').textContent = (slot.label || 'PRESENTED BY').toString().trim();
+        const pbLogo = el('pb-logo'); pbLogo.src = slot.logo; pbLogo.style.display = '';
+        pbWrap.classList.remove('is-empty');
+      } else {
+        pbWrap.classList.add('is-empty');
+      }
+
       let titleText = '';
       if (QTITLE != null) { titleText = /^(off|none|hide|0)$/i.test(QTITLE.trim()) ? '' : QTITLE.trim(); }
       else { titleText = (data.eventName || '').toString().trim(); }
@@ -233,6 +347,7 @@
       titleEl.textContent = titleText.toUpperCase();
       titleEl.classList.toggle('hidden', !titleText);
       el('divider').classList.toggle('hidden', !titleText);
+      if (titleText) fitEventTitle();
 
       const labelText = QLABEL || b.title || 'INTERMISSION';
       el('label').textContent = labelText.toUpperCase();
@@ -262,7 +377,8 @@
       render({
         breakScreen: { visible: true, title: 'NEXT MAP IN', endsAt: Date.now() + 4 * 60 * 1000 + 22 * 1000 },
         eventName: 'Summer Showdown 2024',
-        brand: { color: '#e83a8b', accent: '#8b5cf6', logo: '' }
+        brand: { color: '#e83a8b', accent: '#8b5cf6', logo: '' },
+        scoreboardAd: { label: 'PRESENTED BY', logo: 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="160" height="40"><rect width="160" height="40" rx="4" fill="#1a1d24"/><text x="80" y="27" font-size="18" fill="#e8eaf0" text-anchor="middle" font-family="Arial" font-weight="bold">SPONSOR</text></svg>') }
       });
     } else {
       SceneBase.connect(render);
