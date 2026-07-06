@@ -1765,6 +1765,14 @@ function _returnGraphicsToProd() {
   panel.dataset.redesigned = '1';
 })();
 
+// Both team modals live inside #tab-equipos-content in the HTML, which can be display:none when
+// another tab is active — that would trap position:fixed children. Move them to document.body once
+// so they always render over the full viewport regardless of which tab is open.
+['te-editor-modal', 'teams-import-modal'].forEach(function(id) {
+  const m = document.getElementById(id);
+  if (m && m.parentElement !== document.body) document.body.appendChild(m);
+});
+
 // ── Move the tournament / bracket graphics from Production → Competitions (Events) tab ──
 // Relocates the DOM nodes (IDs unchanged, so every existing handler keeps working) into a new
 // "Brackets & Graphics" sub-tab under Competitions. Runs before the #ev-subnav click handler binds.
@@ -2964,10 +2972,11 @@ function _returnGraphicsToProd() {
     </div>`;
   }
 
-  // Inject a customize bar before the .gfx-scene-body of each scene panel.
+  // Inject the accent/font customize bar — ONLY on the Pre-Game Show. Every other scene's theming
+  // comes from the active brand kit (+ per-game theme), so a per-scene override there is just clutter.
   document.querySelectorAll('.gfx-scene-panel[data-gfxpanel]').forEach((panel) => {
     const key = panel.dataset.gfxpanel;
-    if (!SCENE_META[key]) return;
+    if (key !== 'preshow' || !SCENE_META[key]) return;
     const body = panel.querySelector('.gfx-scene-body');
     if (!body || panel.querySelector('.gfx-cust-bar')) return;  // already injected
     body.insertAdjacentHTML('beforebegin', custBarHtml(key));
@@ -19713,6 +19722,18 @@ function renderPreshowGfxPanel(data) {
     }
   }
 
+  // Topic-preset dropdown — named saved sets of headline + topics.
+  const tpSel = el('preshow-topic-preset');
+  if (tpSel && document.activeElement !== tpSel) {
+    const names = Object.keys(pre.topicPresets || {});
+    const sig = names.join('|');
+    if (tpSel.dataset.sig !== sig) {
+      tpSel.dataset.sig = sig;
+      tpSel.innerHTML = '<option value="">— Load a preset —</option>' +
+        names.map((n) => `<option value="${esc(n)}">${esc(n)}</option>`).join('');
+    }
+  }
+
   const list = el('preshow-topics-list');
   if (!list) return;
   const topics = Array.isArray(pre.topics) ? pre.topics : [];
@@ -19786,6 +19807,26 @@ el('btn-preshow-add-topic')?.addEventListener('click', () => {
 });
 el('preshow-headline')?.addEventListener('input', function () {
   send('set_preshow', { headline: this.value });
+});
+// Topic presets: load on select, save/delete via the buttons.
+el('preshow-topic-preset')?.addEventListener('change', function () {
+  const name = this.value; if (!name) return;
+  const p = ((currentState.preshow && currentState.preshow.topicPresets) || {})[name];
+  if (!p) return;
+  send('set_preshow', { headline: p.headline || '', topics: Array.isArray(p.topics) ? p.topics : [], activeTopicIndex: 0 });
+  showToast(`Loaded topic preset "${name}"`, '#22c55e');
+});
+el('btn-preshow-tp-save')?.addEventListener('click', async () => {
+  const cur = el('preshow-topic-preset')?.value || '';
+  const name = await customPrompt('Save Topic Preset', 'Saves the current headline + topics.', cur, 'Save');
+  if (name == null || !name.trim()) return;
+  send('save_preshow_topic_preset', { name: name.trim() });
+  showToast(`Saved topic preset "${name.trim()}"`, '#22c55e');
+});
+el('btn-preshow-tp-del')?.addEventListener('click', () => {
+  const name = el('preshow-topic-preset')?.value || '';
+  if (!name) { showToast('Pick a preset to delete', '#fbbf24'); return; }
+  send('delete_preshow_topic_preset', { name });
 });
 el('preshow-home-scene')?.addEventListener('change', function () {
   send('set_preshow', { homeScene: this.value });
