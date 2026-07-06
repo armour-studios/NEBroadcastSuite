@@ -1259,7 +1259,7 @@ function renderDccHostsGrid() {
 
   // ── Crew toolbar: + Add button ───────────────────────────────────────────
   const crewAddBtn = el('dcc-crew-add');
-  if (crewAddBtn) crewAddBtn.addEventListener('click', () => openCrewDialog(null));
+  if (crewAddBtn) crewAddBtn.addEventListener('click', () => { if (typeof window.openCrewAdd === 'function') window.openCrewAdd('casters'); });
 
   // ── Crew toolbar: filter chips ───────────────────────────────────────────
 
@@ -1492,7 +1492,7 @@ function renderDccHostsGrid() {
   if (stgAdd) {
     stgAdd.addEventListener('click', () => {
       if (_stgTab === 'hosts') {
-        openCrewDialog(null);
+        if (typeof window.openCrewAdd === 'function') window.openCrewAdd('hosts');
       } else {
         document.querySelector('[data-tab="talent"]')?.click();
         setTimeout(() => {
@@ -1539,7 +1539,7 @@ function renderDccHostsGrid() {
       showToast('OBS URL copied!', '#22c55e');
     });
   }
-  if (lobbyAddBtn) lobbyAddBtn.addEventListener('click', () => openCrewDialog(null));
+  if (lobbyAddBtn) lobbyAddBtn.addEventListener('click', () => { if (typeof window.openCrewAdd === 'function') window.openCrewAdd('guests'); });
 
   const lobbyRoster = el('dcc-lobby-roster');
   if (lobbyRoster) {
@@ -6909,6 +6909,7 @@ function teamsShowTab(tab) {
 document.querySelectorAll('#teams-subnav .ev-subnav-btn').forEach((b) => b.addEventListener('click', () => teamsShowTab(b.dataset.teamtab)));
 
 function openTeamEditor() {
+  if (typeof window._tlOpenEditor === 'function') { window._tlOpenEditor(); return; }
   const m = el('te-editor-modal');
   if (m) m.classList.add('show');
 }
