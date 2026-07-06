@@ -436,7 +436,7 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
   function clearForm() {
     editId = null;
     _fromLibId = null;
-    ['crew-f-name','crew-f-handle','crew-f-role','crew-f-social-handle','crew-f-paypal'].forEach((id) => { const e = el(id); if (e) e.value = ''; });
+    ['crew-f-name','crew-f-handle','crew-f-role','crew-f-social-handle','crew-f-paypal','crew-f-vdo'].forEach((id) => { const e = el(id); if (e) e.value = ''; });
     const notes = el('crew-f-notes'); if (notes) notes.value = '';
     const g = el('crew-f-group'); if (g) g.value = 'casters';
     const s = el('crew-f-social'); if (s) s.value = 'none';
@@ -452,7 +452,7 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     editId = d.id || null;
     const set = (id, v) => { const e = el(id); if (e) e.value = v || ''; };
     set('crew-f-name', d.name); set('crew-f-handle', d.handle); set('crew-f-role', d.role);
-    set('crew-f-social-handle', d.socialHandle); set('crew-f-paypal', d.paypal);
+    set('crew-f-social-handle', d.socialHandle); set('crew-f-paypal', d.paypal); set('crew-f-vdo', d.camUrl);
     mountCountryPicker(d.country);
     const notes = el('crew-f-notes'); if (notes) notes.value = d.notes || '';
     const g = el('crew-f-group'); if (g) g.value = d.group || 'casters';
@@ -466,6 +466,14 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
   }
 
   addBtn.addEventListener('click', () => { clearForm(); if (dlg) dlg.showModal(); setTimeout(() => el('crew-f-name')?.focus(), 50); });
+  // Open the SAME full add form from anywhere (e.g. the Camera Feeds group "+ Add"), preset to a group,
+  // so hosts/casters/observers are all added with one identical question set (incl. country autofill).
+  window.openCrewAdd = function (group) {
+    clearForm();
+    const g = el('crew-f-group'); if (g && group) g.value = group;
+    if (dlg) dlg.showModal();
+    setTimeout(() => el('crew-f-name')?.focus(), 50);
+  };
   if (cancelBtn) cancelBtn.addEventListener('click', () => { if (dlg) dlg.close(); });
   const closeBtn = el('crew-edit-dlg-close'); if (closeBtn) closeBtn.addEventListener('click', () => { if (dlg) dlg.close(); });
   if (dlg) dlg.addEventListener('close', clearForm);
@@ -480,9 +488,10 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     const defaultCam   = el('crew-f-default-cam')?.value || '';
     const country      = _crewCountry;
     const paypal       = el('crew-f-paypal')?.value.trim();
+    const camUrl       = el('crew-f-vdo')?.value.trim() || '';
     const notes        = el('crew-f-notes')?.value.trim();
     if (!name) { el('crew-f-name')?.focus(); return; }
-    const payload = { name, handle, role, group, social, socialHandle, defaultCam, country, paypal, notes };
+    const payload = { name, handle, role, group, social, socialHandle, defaultCam, country, paypal, camUrl, notes };
     if (editId) payload.id = editId;
     send(editId ? 'update_crew_member' : 'add_crew_member', payload);
     // Keep the caster-library profile — what the desk overlay reads through the lineup — in sync with
@@ -493,7 +502,7 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     const groupToKind = { casters: 'caster', observers: 'observer', hosts: 'host', guests: 'host' };
     const kind = groupToKind[group] || 'caster';
     const deskSlot = parseInt(el('crew-f-desk-slot')?.value || '0', 10) || 0;
-    const libPayload = { kind, name, handle: socialHandle || handle, role, social, country, notes, camSlot: defaultCam, deskSlot };
+    const libPayload = { kind, name, handle: socialHandle || handle, role, social, country, notes, camUrl, camSlot: defaultCam, deskSlot };
     if (_fromLibId) libPayload.id = _fromLibId;
     send('save_caster_to_library', libPayload);
     setTimeout(() => { if (typeof renderDccAll === 'function') renderDccAll(); if (typeof renderDccHostsGrid === 'function') renderDccHostsGrid(); }, 350);
@@ -609,14 +618,15 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
       (nm && c.name && c.name.toLowerCase() === nm) ||
       (hd && c.handle && c.handle.toLowerCase() === hd)
     );
+    const libCamUrl = libEntry.camUrl || '';
     if (crewEntry) {
-      openCrewEdit(crewEntry, libId);
+      openCrewEdit({ ...crewEntry, camUrl: libCamUrl }, libId);
     } else {
       openCrewEdit({
         id: null, name: libEntry.name || '', handle: libEntry.handle || '',
         role: libEntry.role || '', group: kindToGroup[libEntry.kind] || 'casters',
         social: 'none', socialHandle: '', country: libEntry.country || '',
-        defaultCam: '', paypal: '', notes: libEntry.notes || '',
+        defaultCam: '', paypal: '', camUrl: libCamUrl, notes: libEntry.notes || '',
       }, libId);
     }
   };
@@ -1306,7 +1316,7 @@ function renderDccHostsGrid() {
       }
       if (gen)    { send('regenerate_group_room', { group: gen.dataset.genCfgroup }); setTimeout(refresh, 400); return; }
       if (copy)   { const u = copy.dataset.copyUrl; if (u) navigator.clipboard?.writeText(u).catch(() => {}); return; }
-      if (edit)   { openCrewDialog(edit.dataset.editLib); return; }
+      if (edit)   { if (typeof window._openCrewFormEdit === 'function') window._openCrewFormEdit(edit.dataset.editLib); return; }
       if (obsPush) {
         const url = obsPush.dataset.obsPushUrl || '';
         const cam = obsPush.dataset.obsCam     || '';
@@ -1797,6 +1807,9 @@ function _returnGraphicsToProd() {
     winner:    { name: 'Winner / Post-match',   link: 'winner.html',          hasClear: true,  hasQueue: true,  hasPush: true,  hasApply: true  },
     intro:     { name: 'Team Line-up / Intro',  link: 'intro.html',           hasClear: true,  hasQueue: true,  hasPush: true,  hasApply: true  },
     ticker:    { name: 'Ticker',                link: 'ticker.html',          hasClear: true,  hasQueue: false, hasPush: true,  hasApply: true,  pushId: 'btn-ticker-apply' },
+    // Standalone OBS scene (like duorow/quaddesk) — not part of gfx.html's push/clear layering,
+    // so no Push Live / Clear / Apply here. This panel is just a live-synced settings form.
+    preshow:   { name: 'Pre-Game Show',          link: 'preshow.html',         hasClear: false, hasQueue: false, hasPush: false },
     series:    { name: 'Series Score',          link: 'series.html',          hasClear: true,  hasQueue: false, hasPush: true  },
     matchup:   { name: 'Pre-Match Lineup',      link: 'matchup.html',         hasClear: true,  hasQueue: false, hasPush: true  },
     veto:      { name: 'Map Pool',               link: 'mapscreen.html',       hasClear: true,  hasQueue: false, hasPush: true,  clearId: 'btn-hide-veto-gfx', pushId: 'btn-show-veto-gfx', popout: true },
@@ -4907,6 +4920,7 @@ function applyState(data) {
   renderBrands(data);
   renderDashBrandKit(data);
   renderCasterDeskSponsors(data);
+  renderPreshowGfxPanel(data);
   renderAdSponsorPickers(data);
   applyCsgoState(data);
   applyValorantState(data);
@@ -19190,6 +19204,8 @@ function cfGroupCard(g, key, color) {
         <button class="cf-ico-btn cf-grp-regen" data-group="${key}" title="New room + password (invalidates old links)">${svgIcon('refresh')}</button>
       </div>
     </div>
+    <!-- Fallback inline quick-add — the "+ Add" button opens the full crew dialog (openCrewAdd);
+         this stays only as a no-JS fallback. -->
     <div class="cf-grp-add-form" data-group="${key}" hidden>
       <input class="input-text cf-ga-name" placeholder="Name" maxlength="40">
       <input class="input-text cf-ga-handle" placeholder="@handle (optional)" maxlength="80">
@@ -19306,6 +19322,10 @@ function cfWireGroupCards() {
       // + Add: reveal the inline add form on this card.
       const addBtn = e.target.closest('.cf-grp-add');
       if (addBtn) {
+        // Open the SAME full crew add form (country autofill + all questions) preset to this group,
+        // instead of a separate minimal inline form — one identical form for casters/hosts/observers.
+        const grp = addBtn.dataset.group || (e.target.closest('.cf-grp-add-form')?.dataset.group) || 'casters';
+        if (typeof window.openCrewAdd === 'function') { window.openCrewAdd(grp); return; }
         const card = e.target.closest('.cf-group-team'); const form = card && card.querySelector('.cf-grp-add-form');
         if (form) { form.hidden = !form.hidden; if (!form.hidden) form.querySelector('.cf-ga-name')?.focus(); }
         return;
@@ -19563,11 +19583,13 @@ el('sgg-tab-queue')?.addEventListener('click', () => {
   el('sgg-tab-queue').classList.add('is-on'); el('sgg-tab-team').classList.remove('is-on');
   el('sgg-queue-wrap').style.display = ''; el('sgg-team-wrap').style.display = 'none';
   if (el('sgg-queue-toggles')) el('sgg-queue-toggles').style.display = '';
+  send('startgg_set_upcoming_mode', { mode: 'event' });   // upcoming/schedule board follows the stream queue
 });
 el('sgg-tab-team')?.addEventListener('click', () => {
   el('sgg-tab-team').classList.add('is-on'); el('sgg-tab-queue').classList.remove('is-on');
   el('sgg-team-wrap').style.display = ''; el('sgg-queue-wrap').style.display = 'none';
   if (el('sgg-queue-toggles')) el('sgg-queue-toggles').style.display = '';   // Queue + Auto-follow apply in team mode too
+  send('startgg_set_upcoming_mode', { mode: 'team' });   // upcoming/schedule board follows the searched team
   refreshSggTeamPicker();
 });
 
@@ -19619,6 +19641,7 @@ const CASTER_DESK_LAYOUTS = [
   { name: 'Casters (grid)', path: '/casters.html', desc: 'Flexible 1–4 cam grid' },
   { name: 'Single Cam', path: '/singlecam.html', desc: 'Solo caster + scorebar' },
   { name: 'Duo Row', path: '/duorow.html', desc: '2 cams + scorebar' },
+  { name: 'Pre-Game Show', path: '/preshow.html', desc: '2 cams + topics rail + kickoff countdown' },
   { name: 'Trio Row', path: '/triorow.html', desc: '3 cams + scorebar' },
   { name: 'Duo (single cam)', path: '/duosinglecam.html', desc: '2 casters, 1 cam' },
   { name: 'Analyst Desk', path: '/analystspecial.html', desc: 'Analyst layout' },
@@ -19671,6 +19694,105 @@ el('input-desk-footer-logo')?.addEventListener('change', async function () {
   send('set_desk_footer', { logos: cur.concat([b64]) });
 });
 el('btn-desk-footer-clear')?.addEventListener('click', () => send('set_desk_footer', { logos: [] }));
+
+// ── Pre-Game Show settings (Graphics ▸ Show ▸ Pre-Game Show): topics + headline + return scene ──
+let _preshowTopicsSig = '';
+function renderPreshowGfxPanel(data) {
+  const headline = el('preshow-headline');
+  const pre = data.preshow || {};
+  if (headline && document.activeElement !== headline) headline.value = pre.headline || '';
+
+  const scenes = (data.obs && data.obs.availableScenes) || [];
+  const homeSel = el('preshow-home-scene');
+  if (homeSel) {
+    const homeSig = JSON.stringify(scenes) + '::' + (pre.homeScene || '');
+    if (homeSel.dataset.sig !== homeSig && document.activeElement !== homeSel) {
+      homeSel.dataset.sig = homeSig;
+      fillSceneSelect(homeSel, scenes, pre.homeScene || '');
+    }
+  }
+
+  const list = el('preshow-topics-list');
+  if (!list) return;
+  const topics = Array.isArray(pre.topics) ? pre.topics : [];
+  const activeIdx = pre.activeTopicIndex || 0;
+  const sig = JSON.stringify(topics) + '::' + activeIdx + '::' + JSON.stringify(scenes);
+  if (sig === _preshowTopicsSig) return;
+  // Don't rebuild while a topic's own text input is focused — that'd yank the cursor mid-type.
+  const focused = document.activeElement;
+  if (focused && focused.tagName === 'INPUT' && list.contains(focused)) return;
+  _preshowTopicsSig = sig;
+
+  list.innerHTML = '';
+  if (!topics.length) {
+    const empty = document.createElement('p');
+    empty.className = 'field-hint';
+    empty.style.margin = '0';
+    empty.textContent = 'No topics yet — add one below.';
+    list.appendChild(empty);
+    return;
+  }
+  topics.forEach((t, i) => {
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex; align-items:center; gap:8px;';
+    const activeBtn = document.createElement('button');
+    activeBtn.type = 'button'; activeBtn.className = 'btn btn-ghost btn-sm';
+    activeBtn.title = 'Set as active topic — also cuts OBS to its Scene, if set';
+    activeBtn.textContent = i === activeIdx ? '●' : '○';
+    activeBtn.style.color = i === activeIdx ? '#4ade80' : '';
+    activeBtn.addEventListener('click', () => {
+      send('set_preshow', { activeTopicIndex: i });
+      const sceneName = (t && t.sceneName) || '';
+      if (sceneName) send('obs_switch_scene', { sceneName });
+    });
+    const input = document.createElement('input');
+    input.type = 'text'; input.className = 'input-text'; input.style.flex = '1';
+    input.maxLength = 60; input.placeholder = 'Topic…'; input.value = (t && t.text) || '';
+    input.addEventListener('input', function () {
+      const cur = (currentState.preshow && currentState.preshow.topics) || [];
+      const next = cur.map((x) => ({ ...x }));
+      next[i] = { ...(next[i] || {}), text: this.value };
+      send('set_preshow', { topics: next });
+    });
+    const sceneSel = document.createElement('select');
+    sceneSel.className = 'input-select'; sceneSel.style.width = '150px'; sceneSel.style.flexShrink = '0';
+    sceneSel.title = 'Optional — cut OBS to this scene when this topic goes active';
+    fillSceneSelect(sceneSel, scenes, (t && t.sceneName) || '');
+    sceneSel.addEventListener('change', function () {
+      const cur = (currentState.preshow && currentState.preshow.topics) || [];
+      const next = cur.map((x) => ({ ...x }));
+      next[i] = { ...(next[i] || {}), sceneName: this.value };
+      send('set_preshow', { topics: next });
+    });
+    const delBtn = document.createElement('button');
+    delBtn.type = 'button'; delBtn.className = 'btn btn-ghost btn-sm'; delBtn.title = 'Remove topic';
+    delBtn.textContent = '✕';
+    delBtn.addEventListener('click', () => {
+      const cur = (currentState.preshow && currentState.preshow.topics) || [];
+      const next = cur.slice(); next.splice(i, 1);
+      let nextActive = (currentState.preshow && currentState.preshow.activeTopicIndex) || 0;
+      if (nextActive >= next.length) nextActive = Math.max(0, next.length - 1);
+      send('set_preshow', { topics: next, activeTopicIndex: nextActive });
+    });
+    row.append(activeBtn, input, sceneSel, delBtn);
+    list.appendChild(row);
+  });
+}
+el('btn-preshow-add-topic')?.addEventListener('click', () => {
+  const cur = (currentState.preshow && currentState.preshow.topics) || [];
+  if (cur.length >= 12) return;
+  send('set_preshow', { topics: cur.concat([{ text: 'New topic', sceneName: '' }]) });
+});
+el('preshow-headline')?.addEventListener('input', function () {
+  send('set_preshow', { headline: this.value });
+});
+el('preshow-home-scene')?.addEventListener('change', function () {
+  send('set_preshow', { homeScene: this.value });
+});
+el('btn-preshow-return')?.addEventListener('click', () => {
+  const home = (currentState.preshow && currentState.preshow.homeScene) || '';
+  if (home) send('obs_switch_scene', { sceneName: home });
+});
 
 function buildCasterDeskLayouts() {
   const wrap = el('caster-desk-layouts');
@@ -20673,6 +20795,34 @@ function renderBrandPackageBar() {
   });
 }
 
+async function populateBrandObsSelects(currentCollection, currentProfile) {
+  const collSel = el('select-brand-obs-collection');
+  const profSel = el('select-brand-obs-profile');
+  if (!collSel || !profSel) return;
+  const base = (typeof SCENE_BASE_URL !== 'undefined' ? SCENE_BASE_URL : null) || 'http://localhost:3000';
+  const safeJson = (r) => { if (!r.ok) throw new Error('http' + r.status); return r.json(); };
+  try {
+    const [cRes, pRes] = await Promise.all([
+      fetch(base + '/api/obs/scene-collections').then(safeJson),
+      fetch(base + '/api/obs/profiles').then(safeJson),
+    ]);
+    collSel.innerHTML = '<option value="">— None —</option>' +
+      (cRes.collections || []).map((c) => `<option value="${c}">${c}</option>`).join('');
+    profSel.innerHTML = '<option value="">— None —</option>' +
+      (pRes.profiles || []).map((p) => `<option value="${p}">${p}</option>`).join('');
+    if (currentCollection) collSel.value = currentCollection;
+    if (currentProfile) profSel.value = currentProfile;
+  } catch (e) {
+    const label = (e && e.message && e.message.startsWith('http')) ? '— Reload app —' : '— OBS not connected —';
+    collSel.innerHTML = `<option value="">${label}</option>`;
+    profSel.innerHTML = `<option value="">${label}</option>`;
+  }
+}
+el('btn-refresh-obs-collections')?.addEventListener('click', () =>
+  populateBrandObsSelects(el('select-brand-obs-collection')?.value || '', el('select-brand-obs-profile')?.value || ''));
+el('btn-refresh-obs-profiles')?.addEventListener('click', () =>
+  populateBrandObsSelects(el('select-brand-obs-collection')?.value || '', el('select-brand-obs-profile')?.value || ''));
+
 function resetBrandForm() {
   editingBrandId = null;
   editingBrandThemes = {};
@@ -20694,6 +20844,7 @@ function resetBrandForm() {
   populateBrandDesign();
   loadPackageIntoEditor(pkg);     // fills sponsor-label / interval / banner fields + renders lists
   renderBrandPackageBar();
+  populateBrandObsSelects('', '');
 }
 
 // Spots a sponsor logo can be assigned to (checkmarks in the brand editor).
@@ -20922,6 +21073,10 @@ function renderBrands(data) {
     dupBtn.className = 'btn btn-ghost btn-sm'; dupBtn.textContent = 'Duplicate';
     dupBtn.title = 'Duplicate this profile and all its packages';
     dupBtn.addEventListener('click', () => send('duplicate_brand_kit', { id: k.id }));
+    const expBtn = document.createElement('button');
+    expBtn.className = 'btn btn-ghost btn-sm'; expBtn.textContent = 'Export';
+    expBtn.title = 'Export this brand kit to a file (includes OBS profile settings)';
+    expBtn.addEventListener('click', () => send('export_brand_kit', { id: k.id }));
     const urlBtn = document.createElement('button');
     urlBtn.className = 'btn btn-ghost btn-sm'; urlBtn.textContent = 'Banner URL';
     urlBtn.title = "Copy this brand's standalone banner OBS browser-source URL";
@@ -20938,7 +21093,7 @@ function renderBrands(data) {
       const ok = await customConfirm('Delete Brand Kit', `Delete "${k.name}"? This deletes the entire client profile and ALL of its brand packages — this cannot be undone.${pkgWarn}`, 'Delete Everything');
       if (ok) send('delete_brand_kit', { id: k.id });
     });
-    actions.appendChild(actBtn); actions.appendChild(editBtn); actions.appendChild(dupBtn); actions.appendChild(urlBtn); actions.appendChild(delBtn);
+    actions.appendChild(actBtn); actions.appendChild(editBtn); actions.appendChild(dupBtn); actions.appendChild(expBtn); actions.appendChild(urlBtn); actions.appendChild(delBtn);
     item.appendChild(main); item.appendChild(actions); list.appendChild(item);
   });
 }
@@ -21034,6 +21189,7 @@ function loadBrandIntoForm(k) {
   populateBrandDesign();
   loadPackageIntoEditor(brandPackages.find((p) => p.id === editingPackageId));
   renderBrandPackageBar();
+  populateBrandObsSelects(k.obsSceneCollection || '', k.obsProfile || '');
 }
 
 function renderKitBannerImages() {
@@ -21152,6 +21308,8 @@ el('btn-save-brand')?.addEventListener('click', () => {
     themes: editingBrandThemes,
     packages: brandPackages,
     activePackageId: editingActivePackageId,
+    obsSceneCollection: (el('select-brand-obs-collection')?.value || '').trim(),
+    obsProfile: (el('select-brand-obs-profile')?.value || '').trim(),
   });
   resetBrandForm();
   closeBrandEditor();
@@ -21174,6 +21332,7 @@ function openBrandEditor() {
 }
 function closeBrandEditor() { const m = el('brand-editor-modal'); if (m) m.style.display = 'none'; }
 el('btn-open-new-brand')?.addEventListener('click', () => { resetBrandForm(); openBrandEditor(); });
+el('btn-import-brand-kit')?.addEventListener('click', () => send('import_brand_kit'));
 el('brand-editor-close')?.addEventListener('click', () => { resetBrandForm(); closeBrandEditor(); });
 el('brand-editor-modal')?.addEventListener('click', (e) => { if (e.target === el('brand-editor-modal')) { resetBrandForm(); closeBrandEditor(); } });
 

@@ -4332,6 +4332,7 @@
               <button class="gfx-sidenav-btn active" data-gfxscene="break">Break</button>
               <button class="gfx-sidenav-btn" data-gfxscene="intro">Team Intro</button>
               <button class="gfx-sidenav-btn" data-gfxscene="ticker">Ticker</button>
+              <button class="gfx-sidenav-btn" data-gfxscene="preshow">Pre-Game Show</button>
             </div>
           </div>
 
@@ -4625,6 +4626,28 @@
               <div class="field-row">
                 <label class="field-label" for="input-ticker-speed">Full-loop duration (sec) <span class="field-hint">— lower = faster scroll, higher = slower</span></label>
                 <input type="number" id="input-ticker-speed" class="input-text" style="width:110px;" value="40" min="3" max="600" step="1">
+              </div>
+            </div>
+          </div>
+
+          <!-- PRE-GAME SHOW -->
+          <div class="gfx-scene-panel" data-gfxpanel="preshow" style="display:none;">
+            <div class="gfx-scene-body">
+              <p class="field-hint" style="margin:0 0 8px;">Discussion topics &amp; headline for the <strong>Pre-Game Show</strong> desk (add it as its own OBS browser source — see Talent ▸ Caster Desk ▸ OBS Desk Layouts). Cams, team match-up and the kickoff countdown all read from settings you already have elsewhere.</p>
+              <div class="field-row">
+                <label class="field-label" for="preshow-headline">Headline</label>
+                <input type="text" id="preshow-headline" class="input-text" placeholder="e.g. THE LAST PLAYER TO QUALIFY" maxlength="140">
+              </div>
+              <label class="field-label">Topics <span class="field-hint" style="font-weight:400;">— click ● to mark one active on the rail; give it a Scene to cut there too</span></label>
+              <div id="preshow-topics-list" style="display:flex; flex-direction:column; gap:6px; margin:8px 0;"></div>
+              <button class="btn btn-ghost btn-sm" id="btn-preshow-add-topic" type="button">+ Add Topic</button>
+              <p class="field-hint" style="margin:10px 0 0;">Caster boxes show each caster's assigned cam — set the cam (or paste a custom VDO link that overrides the room) in <strong>Camera Feeds ▸ Hosts</strong> / the Director Control Center. Run the OBS source with <code>?cams=off</code> to layer your own OBS "Caster" scenes behind the boxes instead.</p>
+              <div class="field-row" style="margin-top:14px; border-top:1px solid var(--border); padding-top:12px;">
+                <label class="field-label" for="preshow-home-scene">Return-to scene <span class="field-hint" style="font-weight:400;">— what "Return" below cuts back to (usually the Pre-Game Show OBS scene)</span></label>
+                <div style="display:flex; gap:8px;">
+                  <select id="preshow-home-scene" class="input-select" style="flex:1;"><option value="">— None —</option></select>
+                  <button class="btn btn-secondary btn-sm" id="btn-preshow-return" type="button" title="Cut OBS back to the Return-to scene">↩ Return</button>
+                </div>
               </div>
             </div>
           </div>
@@ -5546,6 +5569,25 @@
       <button class="btn btn-ghost btn-sm" id="btn-brand-replayskin-clear" type="button">Clear</button>
     </div>
 
+    <h4 style="margin:20px 0 4px; font-size:13px; color:#e0e0e0; border-top:1px solid rgba(255,255,255,0.08); padding-top:16px;">OBS Integration</h4>
+    <p style="font-size:11px; color:var(--muted); margin:0 0 10px;">Auto-switches OBS to these when this brand kit is activated. Requires OBS to be connected.</p>
+    <div style="display:flex; gap:12px; flex-wrap:wrap;">
+      <div style="flex:1; min-width:160px;">
+        <label class="field-label" for="select-brand-obs-collection" style="display:block; margin-bottom:4px;">Scene Collection</label>
+        <div style="display:flex; gap:5px; align-items:center;">
+          <select id="select-brand-obs-collection" class="input-select" style="flex:1; min-width:0;"><option value="">— None —</option></select>
+          <button class="btn btn-ghost btn-xs" id="btn-refresh-obs-collections" title="Refresh from OBS">↺</button>
+        </div>
+      </div>
+      <div style="flex:1; min-width:160px;">
+        <label class="field-label" for="select-brand-obs-profile" style="display:block; margin-bottom:4px;">Profile</label>
+        <div style="display:flex; gap:5px; align-items:center;">
+          <select id="select-brand-obs-profile" class="input-select" style="flex:1; min-width:0;"><option value="">— None —</option></select>
+          <button class="btn btn-ghost btn-xs" id="btn-refresh-obs-profiles" title="Refresh from OBS">↺</button>
+        </div>
+      </div>
+    </div>
+
     </div>
     <div class="mp-foot">
       <button class="btn btn-primary" id="btn-save-brand">Save Brand Kit</button>
@@ -5556,7 +5598,10 @@
   <section class="section">
     <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:10px;">
       <h3 class="section-title" style="margin:0;">Saved Brand Kits</h3>
-      <button class="btn btn-primary btn-sm" id="btn-open-new-brand">+ New Brand Kit</button>
+      <div style="display:flex;gap:6px;">
+        <button class="btn btn-ghost btn-sm" id="btn-import-brand-kit">Import Kit</button>
+        <button class="btn btn-primary btn-sm" id="btn-open-new-brand">+ New Brand Kit</button>
+      </div>
     </div>
     <div id="brands-list" class="presets-list">
       <p class="empty-msg" id="brands-empty">No brand kits yet.</p>
@@ -8341,6 +8386,12 @@ PacketSendRate=10</pre>
           <option value="3">Caster 3</option>
           <option value="4">Caster 4</option>
         </select>
+      </div>
+    </div>
+    <div class="crew-dlg-row">
+      <div class="crew-dlg-field">
+        <label class="field-label">VDO URL <span style="font-weight:400;opacity:.6;">(leave blank to auto-generate room)</span></label>
+        <input type="text" id="crew-f-vdo" class="input-text" placeholder="https://vdo.ninja/…" spellcheck="false">
       </div>
     </div>
     <div class="crew-dlg-row">
