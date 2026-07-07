@@ -262,6 +262,9 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     if (tab === 'media' && typeof mdLoad === 'function') mdLoad();   // lazy-load media on open
     if (tab === 'events' && typeof evAutoLoad === 'function') evAutoLoad();   // auto-pull in-house tournaments
     if (tab === 'replays' && !_stagingLoading) scanStagingArea();   // auto-scan the OBS folder
+    // Switcher page: start/stop program/preview polling only while it's open.
+    if (tab === 'switcher') { if (typeof switcherOnShow === 'function') switcherOnShow(); }
+    else if (typeof switcherOnHide === 'function') switcherOnHide();
     // Cameras page: re-pull VDO links for whichever sub-tab is active on entry.
     if (tab === 'facecams' && typeof cfShowSubtab === 'function') {
       const active = document.querySelector('#cf-subnav .cf-tab.active');
@@ -5312,6 +5315,7 @@ function applyState(data) {
   // OBS settings
   applyObsState(data);
   if (typeof applyVmixState === 'function') applyVmixState(data);
+  if (_swWatch && typeof renderSwitcher === 'function') renderSwitcher(data);
 
   // Background overlay
   if (typeof window._bgApplyState === 'function') window._bgApplyState(data);
@@ -6429,9 +6433,9 @@ let _bbPhaseSeq = 0;
 let _bbHydrated = false;
 let _bbSaveTimer = null;
 
-const BB_FIELDS = ['type', 'size', 'swissRounds', 'winners', 'losers', 'finals', 'rounds', 'roster'];
+const BB_FIELDS = ['type', 'size', 'swissRounds', 'winners', 'losers', 'finals', 'rounds', 'roster', 'pools'];
 function bbNewPhase(name, type) {
-  return { id: 'ph' + (++_bbPhaseSeq), name: name || ('Phase ' + (bbPhases.length + 1)), type: type || 'single', size: 8, swissRounds: 5, winners: [], losers: [], finals: [], rounds: [], roster: [] };
+  return { id: 'ph' + (++_bbPhaseSeq), name: name || ('Phase ' + (bbPhases.length + 1)), type: type || 'single', size: 8, swissRounds: 5, winners: [], losers: [], finals: [], rounds: [], roster: [], pools: [] };
 }
 function bbActivePhase() { return bbPhases.find((p) => p.id === bbActiveId) || null; }
 function bbEnsurePhase() {
@@ -6439,16 +6443,29 @@ function bbEnsurePhase() {
   if (!bbActiveId) bbActiveId = bbPhases[0].id;
 }
 // Copy bbModel ↔ the active phase object.
-function bbCommit() { const ph = bbActivePhase(); if (ph) BB_FIELDS.forEach((k) => { ph[k] = bbModel[k]; }); }
+function bbCommit() {
+  const ph = bbActivePhase(); if (!ph) return;
+  bbCommitPool();   // flush the currently-edited pool's roster/rounds into bbModel.pools first
+  BB_FIELDS.forEach((k) => { ph[k] = bbModel[k]; });
+  ph.activePoolId = bbActivePoolId;
+}
 function bbLoadPhase(id) {
   bbActiveId = id;
   const ph = bbActivePhase(); if (!ph) return;
   BB_FIELDS.forEach((k) => { bbModel[k] = ph[k] !== undefined ? ph[k] : bbModel[k]; });
+  if (Array.isArray(bbModel.pools) && bbModel.pools.length) {
+    const wantId = ph.activePoolId && bbModel.pools.some((p) => p.id === ph.activePoolId) ? ph.activePoolId : bbModel.pools[0].id;
+    bbLoadPool(wantId);
+  } else {
+    bbActivePoolId = '';
+  }
   // reflect type/size/rounds in the toolbar
   const seg = el('bb-type-seg'); if (seg) seg.querySelectorAll('.seg-btn').forEach((x) => x.classList.toggle('active', x.dataset.type === bbModel.type));
   const sz = el('bb-size'); if (sz) sz.value = bbModel.size;
   const rn = el('bb-rounds-num'); if (rn) rn.value = bbModel.swissRounds;
+  const pc = el('bb-pool-count'); if (pc) pc.value = Math.max(1, (bbModel.pools || []).length);
   bbSyncTypeUi();
+  bbRenderPools();
   bbRender();
 }
 
@@ -6522,26 +6539,129 @@ function bbGenerate() {
       }));
     }
   }
+  bbCommitPool();   // this may run mid-split, iterating other pools — keep pool storage in sync immediately
   bbRender();
   bbAutosave();
 }
-// Auto-compute W/L standings from every played match in the schedule.
+// Auto-compute standings from every played match in the schedule — Wins/Losses plus the
+// same Sets Played/Set Wins-Losses/Game Wins-Losses stats Start.gg's own Pool/Swiss
+// standings show (server-side buildBracket() computes the identical fields for
+// Start.gg-derived pools, so manual and imported brackets render identically).
 function bbComputeStandings(rounds, roster) {
   rounds = rounds || bbModel.rounds; roster = roster || bbModel.roster;
   const tally = {};
-  const seed = (name) => { if (name && !tally[name]) tally[name] = { name, wins: 0, losses: 0 }; };
+  const seed = (name) => { if (name && !tally[name]) tally[name] = { name, wins: 0, losses: 0, setsPlayed: 0, setsTotal: 0, gameWins: 0, gameLosses: 0 }; };
   roster.forEach(seed);
   rounds.forEach((round) => round.sets.forEach((set) => {
     seed(set.a.name); seed(set.b.name);
+    if (set.a.name) tally[set.a.name].setsTotal++;
+    if (set.b.name) tally[set.b.name].setsTotal++;
     const w = bbWinnerOf(set);
     if (!w || !set.a.name || !set.b.name) return;
-    if (w === 'a') { tally[set.a.name].wins++; tally[set.b.name].losses++; }
-    else { tally[set.b.name].wins++; tally[set.a.name].losses++; }
+    const as = Number(set.a.score) || 0, bs = Number(set.b.score) || 0;
+    tally[set.a.name].gameWins += as; tally[set.a.name].gameLosses += bs;
+    tally[set.b.name].gameWins += bs; tally[set.b.name].gameLosses += as;
+    if (w === 'a') { tally[set.a.name].wins++; tally[set.a.name].setsPlayed++; tally[set.b.name].losses++; tally[set.b.name].setsPlayed++; }
+    else { tally[set.b.name].wins++; tally[set.b.name].setsPlayed++; tally[set.a.name].losses++; tally[set.a.name].setsPlayed++; }
   }));
   return Object.values(tally)
     .filter((t) => t.name)
     .sort((x, y) => (y.wins - y.losses) - (x.wins - x.losses) || y.wins - x.wins || x.name.localeCompare(y.name))
-    .map((t, i) => ({ placement: i + 1, name: t.name, wins: t.wins, losses: t.losses }));
+    .map((t, i) => ({ placement: i + 1, name: t.name, wins: t.wins, losses: t.losses,
+      setsPlayed: t.setsPlayed, setsTotal: t.setsTotal, setWins: t.wins, setLosses: t.losses,
+      gameWins: t.gameWins, gameLosses: t.gameLosses }));
+}
+// Head-to-head matrix for a Round Robin group — same { teams, cells } shape the Start.gg
+// import path produces, so bracket.html's Head-to-head grid view works for manual pools too.
+function bbComputeMatrix(rounds, roster) {
+  const names = (roster || []).filter(Boolean);
+  if (names.length < 2) return null;
+  const ids = {};
+  const teams = names.map((name, i) => { const id = 'e' + i; ids[name] = id; return { id, name }; });
+  const cells = {};
+  (rounds || []).forEach((round) => (round.sets || []).forEach((set) => {
+    const an = set.a && set.a.name, bn = set.b && set.b.name;
+    if (!an || !bn || !ids[an] || !ids[bn]) return;
+    const w = bbWinnerOf(set);
+    const aScore = Number(set.a.score) || 0, bScore = Number(set.b.score) || 0;
+    cells[ids[an] + '_' + ids[bn]] = { aScore, bScore, winner: w === 'a' ? 'a' : (w === 'b' ? 'b' : null), played: !!w };
+    cells[ids[bn] + '_' + ids[an]] = { aScore: bScore, bScore: aScore, winner: w === 'a' ? 'b' : (w === 'b' ? 'a' : null), played: !!w };
+  }));
+  return { teams, cells };
+}
+
+// ── Pools (Round Robin / Swiss phases split into N parallel groups — Start.gg
+// "Pool Play") ── bbModel.roster/rounds always hold the ACTIVE pool's own arrays once
+// a phase has pools; switching pools swaps those arrays in/out, the exact same pattern
+// bbPhases already uses for switching phases — every existing render/generate/standings
+// function above keeps working completely unmodified for a single active pool.
+let bbActivePoolId = '';
+let _bbPoolSeq = 0;
+function bbActivePoolObj() { return (bbModel.pools || []).find((p) => p.id === bbActivePoolId) || null; }
+function bbCommitPool() {
+  const p = bbActivePoolObj();
+  if (p) { p.roster = bbModel.roster; p.rounds = bbModel.rounds; }
+}
+function bbLoadPool(id) {
+  const p = (bbModel.pools || []).find((x) => x.id === id); if (!p) return;
+  bbActivePoolId = id;
+  bbModel.roster = p.roster; bbModel.rounds = p.rounds;
+  bbModel.size = p.roster.length || bbModel.size;
+  const sz = el('bb-size'); if (sz) sz.value = bbModel.size;
+}
+function bbPoolName(i) { return 'Pool ' + String.fromCharCode(65 + (i % 26)); }
+// Split (or re-split) this phase's roster into N parallel pools. n<=1 collapses any
+// existing pools back into a single flat group. Snake-distributes by current roster
+// order (== seed order) so pools stay balanced, same idea as start.gg's own seeding.
+function bbSplitIntoPools(n) {
+  n = Math.max(1, Math.min(16, n || 1));
+  bbCommitPool();
+  const seen = new Set(); const allNames = [];
+  (bbModel.pools && bbModel.pools.length ? bbModel.pools.flatMap((p) => p.roster || []) : bbModel.roster).forEach((nm) => {
+    const t = (nm || '').trim(); if (t && !seen.has(t.toLowerCase())) { seen.add(t.toLowerCase()); allNames.push(t); }
+  });
+  if (n <= 1) {
+    bbModel.pools = []; bbActivePoolId = '';
+    bbModel.roster = allNames; bbModel.size = allNames.length || bbModel.size;
+    bbGenerate();
+    bbRenderPools();
+    return;
+  }
+  const buckets = Array.from({ length: n }, () => []);
+  allNames.forEach((nm, i) => {
+    const lap = Math.floor(i / n), pos = lap % 2 === 0 ? i % n : n - 1 - (i % n);
+    buckets[pos].push(nm);
+  });
+  bbModel.pools = buckets.map((roster, i) => ({ id: 'pool' + (++_bbPoolSeq), name: bbPoolName(i), roster, rounds: [] }));
+  bbModel.pools.forEach((p) => {
+    bbModel.roster = p.roster; bbModel.rounds = []; bbModel.size = p.roster.length;
+    bbGenerate();               // fills bbModel.rounds for this pool (also writes it back via bbCommitPool above)
+    p.roster = bbModel.roster; p.rounds = bbModel.rounds;
+  });
+  bbLoadPool(bbModel.pools[0].id);
+  bbRenderPools();
+  bbRender();
+  bbAutosave();
+}
+function bbRenderPools() {
+  const wrap = el('bb-pools'); if (!wrap) return;
+  const pools = bbModel.pools || [];
+  if (!bbIsTable() || pools.length < 2) { wrap.innerHTML = ''; wrap.style.display = 'none'; return; }
+  wrap.style.display = 'flex';
+  wrap.innerHTML = pools.map((p) =>
+    `<div class="bb-phase-tab${p.id === bbActivePoolId ? ' active' : ''}" data-poolid="${p.id}" title="Double-click to rename">
+       <span class="bb-phase-name">${(p.name || 'Pool').replace(/</g, '&lt;')}</span>
+     </div>`).join('');
+  wrap.querySelectorAll('.bb-phase-tab').forEach((t) => {
+    t.addEventListener('click', () => { if (t.dataset.poolid !== bbActivePoolId) bbSelectPool(t.dataset.poolid); });
+    t.addEventListener('dblclick', () => bbRenamePool(t.dataset.poolid));
+  });
+}
+function bbSelectPool(id) { bbCommitPool(); bbLoadPool(id); bbRenderPools(); bbRender(); bbAutosave(); }
+function bbRenamePool(id) {
+  const p = (bbModel.pools || []).find((x) => x.id === id); if (!p) return;
+  const name = prompt('Pool name:', p.name); if (name == null) return;
+  p.name = name.trim() || p.name; bbRenderPools(); bbAutosave();
 }
 function bbTeamsDatalist() {
   const dl = el('bb-teams-datalist'); if (!dl) return;
@@ -6636,7 +6756,9 @@ function bbRenderRoster() {
   const wrap = el('bb-roster'); if (!wrap) return;
   if (!bbIsTable()) { wrap.style.display = 'none'; return; }
   wrap.style.display = 'block';
-  wrap.innerHTML = '<div class="bb-roster-label">Tournament teams</div><div class="bb-roster-grid">'
+  const poolObj = bbActivePoolObj();
+  const label = poolObj ? `${poolObj.name || 'Pool'} teams` : 'Tournament teams';
+  wrap.innerHTML = '<div class="bb-roster-label">' + label.replace(/</g, '&lt;') + '</div><div class="bb-roster-grid">'
     + bbModel.roster.map((nm, i) => `<input class="input-text bb-roster-name" data-i="${i}" list="bb-teams-datalist" value="${(nm || '').replace(/"/g, '&quot;')}" placeholder="Team ${i + 1}">`).join('')
     + '</div>';
   wrap.querySelectorAll('.bb-roster-name').forEach((inp) => {
@@ -6658,6 +6780,7 @@ function bbRender() {
   const board = el('bb-board'); if (!board) return;
   bbTeamsDatalist();
   bbRenderPhases();
+  bbRenderPools();
   bbRenderRoster();
   const hasElim = bbModel.winners.length || bbModel.losers.length;
   const hasTable = bbModel.rounds.length;
@@ -6735,7 +6858,19 @@ function bbPhaseToPayload(ph) {
   const TYPE = { single: 'SINGLE_ELIMINATION', double: 'DOUBLE_ELIMINATION', roundrobin: 'ROUND_ROBIN', swiss: 'SWISS' };
   const table = ph.type === 'roundrobin' || ph.type === 'swiss';
   const base = { id: ph.id, name: ph.name, type: TYPE[ph.type] || 'SINGLE_ELIMINATION' };
-  if (table) Object.assign(base, { winners: [], losers: [], finals: [], standings: bbComputeStandings(ph.rounds || [], ph.roster || []), schedule: ph.rounds || [], roster: ph.roster || [] });
+  if (table) {
+    const matrix = ph.type === 'roundrobin' ? bbComputeMatrix(ph.rounds || [], ph.roster || []) : null;
+    Object.assign(base, { winners: [], losers: [], finals: [], standings: bbComputeStandings(ph.rounds || [], ph.roster || []), schedule: ph.rounds || [], roster: ph.roster || [], matrix });
+    const pools = Array.isArray(ph.pools) ? ph.pools : [];
+    if (pools.length > 1) {
+      base.pools = pools.map((p) => ({
+        id: p.id, name: p.name, type: TYPE[ph.type] || 'ROUND_ROBIN',
+        roster: p.roster || [], schedule: p.rounds || [],
+        standings: bbComputeStandings(p.rounds || [], p.roster || []),
+        matrix: ph.type === 'roundrobin' ? bbComputeMatrix(p.rounds || [], p.roster || []) : null
+      }));
+    }
+  }
   else Object.assign(base, { winners: conv(ph.winners), losers: conv(ph.losers), finals: conv(ph.finals), standings: [], schedule: [], roster: [] });
   return base;
 }
@@ -6793,6 +6928,7 @@ async function bbDeletePhase(id) {
 function bbSyncTypeUi() {
   document.querySelectorAll('.bb-rounds-field').forEach((e) => { e.style.display = bbModel.type === 'swiss' ? '' : 'none'; });
   document.querySelectorAll('.bb-swiss-only').forEach((e) => { e.style.display = bbModel.type === 'swiss' ? '' : 'none'; });
+  document.querySelectorAll('.bb-table-only').forEach((e) => { e.style.display = bbIsTable() ? '' : 'none'; });
 }
 // Seed empty slots from the saved/seeded team list.
 function bbSeedTeams() {
@@ -6826,17 +6962,25 @@ function bbSwissPair() {
 }
 el('bb-type-seg') && el('bb-type-seg').querySelectorAll('.seg-btn').forEach((b) => b.addEventListener('click', function () {
   el('bb-type-seg').querySelectorAll('.seg-btn').forEach((x) => x.classList.remove('active'));
-  this.classList.add('active'); bbModel.type = this.dataset.type; bbSyncTypeUi();
+  this.classList.add('active'); bbModel.type = this.dataset.type;
+  if (!bbIsTable()) { bbModel.pools = []; bbActivePoolId = ''; }   // pools only apply to Round Robin / Swiss
+  bbSyncTypeUi();
+  bbRenderPools();
 }));
 el('bb-size')?.addEventListener('change', function () { bbModel.size = Number(this.value) || 8; });
 el('bb-rounds-num')?.addEventListener('change', function () { bbModel.swissRounds = Math.max(1, Math.min(12, Number(this.value) || 5)); });
 el('bb-seed')?.addEventListener('click', bbSeedTeams);
 el('bb-swiss-pair')?.addEventListener('click', bbSwissPair);
 el('bb-generate')?.addEventListener('click', bbGenerate);
+el('bb-pool-split')?.addEventListener('click', () => {
+  const n = Math.max(1, Math.min(16, Number(el('bb-pool-count')?.value) || 1));
+  bbSplitIntoPools(n);
+});
 el('bb-save')?.addEventListener('click', () => { bbSendPhases(); bbStatus('Bracket saved & pushed.', true); });
 el('bb-clear')?.addEventListener('click', async () => {
   if (!await appConfirm('Clear this phase?', 'Clear')) return;
-  bbModel.winners = []; bbModel.losers = []; bbModel.finals = []; bbModel.rounds = []; bbModel.roster = [];
+  bbModel.winners = []; bbModel.losers = []; bbModel.finals = []; bbModel.rounds = []; bbModel.roster = []; bbModel.pools = []; bbActivePoolId = '';
+  bbRenderPools();
   bbRender(); bbSendPhases({ visible: false });
 });
 
@@ -6864,6 +7008,15 @@ function bbPhaseFromOverlay(op) {
     ph.roster = Array.isArray(op.roster) && op.roster.length ? op.roster.slice() : (op.standings || []).map((s) => s.name).filter(Boolean);
     ph.rounds = Array.isArray(op.schedule) ? op.schedule : [];
     ph.size = ph.roster.length || 8;
+    if (Array.isArray(op.pools) && op.pools.length > 1) {
+      ph.pools = op.pools.map((p, i) => ({
+        id: p.id || ('pool' + i),
+        name: p.name || bbPoolName(i),
+        roster: Array.isArray(p.roster) ? p.roster.slice() : [],
+        rounds: Array.isArray(p.schedule) ? p.schedule : []
+      }));
+      ph.activePoolId = ph.pools[0].id;
+    }
   } else {
     ph.winners = fromOverlay(op.winners); ph.losers = fromOverlay(op.losers); ph.finals = fromOverlay(op.finals);
   }
@@ -18025,7 +18178,8 @@ function renderQrailScenes(data) {
   // Which scenes are mapped to a moment hotkey (1..9), so we can badge them.
   const hotkeyByScene = {};
   SCENE_CONTROL_MOMENTS.forEach((m, i) => { const sn = (obs.scenes || {})[m.key]; if (sn) hotkeyByScene[sn] = i + 1; });
-  if (sub) sub.textContent = connected ? String(list.length) : '';
+  // Header sub shows WHAT'S ON PROGRAM — far more useful mid-show than a scene count.
+  if (sub) sub.textContent = connected ? (obs.currentScene || String(list.length)) : '';
 
   const sig = JSON.stringify({ list, connected, enabled, hk: hotkeyByScene });
   if (sig !== _qrailSceneSig) {
@@ -18035,18 +18189,32 @@ function renderQrailScenes(data) {
     if (!enabled) hint('OBS off — enable in Settings → OBS');
     else if (!connected) hint('Connecting to OBS… scenes appear here automatically');
     else if (!list.length) hint('No scenes found in this OBS profile');
-    else list.forEach((name) => {
-      const b = document.createElement('button');
-      b.className = 'qrail-scene-btn';
-      b.dataset.scene = name;
-      const hk = hotkeyByScene[name];
-      b.innerHTML = (hk ? `<kbd class="qt-key">${hk}</kbd>` : '<span class="qt-key qt-key-blank"></span>') +
-        `<span class="qss-name"></span>`;
-      b.querySelector('.qss-name').textContent = name;
-      b.title = `Cut program to "${name}"`;
-      b.addEventListener('click', () => send('obs_switch_scene', { sceneName: name }));
-      wrap.appendChild(b);
-    });
+    else {
+      const sceneBtn = (name, hk, label) => {
+        const b = document.createElement('button');
+        b.className = 'qrail-scene-btn';
+        b.dataset.scene = name;
+        b.innerHTML = (hk ? `<kbd class="qt-key">${hk}</kbd>` : '<span class="qt-key qt-key-blank"></span>') +
+          `<span class="qss-name"></span>`;
+        b.querySelector('.qss-name').textContent = label || name;
+        b.title = `Cut program to "${name}"` + (label ? ` (${label} moment · hotkey ${hk})` : '');
+        b.addEventListener('click', () => send('obs_switch_scene', { sceneName: name }));
+        wrap.appendChild(b);
+      };
+      const groupLbl = (t) => { const g = document.createElement('div'); g.className = 'qrail-scenes-hint'; g.style.cssText = 'font-weight:800;letter-spacing:.1em;text-transform:uppercase;font-size:9px;margin:2px 0 4px;'; g.textContent = t; wrap.appendChild(g); };
+      // Mapped broadcast moments first — the cuts you actually make mid-show, with their
+      // hotkey numbers; then the rest of the collection (mapped scenes not repeated).
+      const seen = new Set();
+      const moments = SCENE_CONTROL_MOMENTS
+        .map((m, i) => ({ label: m.label, sn: (obs.scenes || {})[m.key], hk: i + 1 }))
+        .filter((m) => m.sn && list.includes(m.sn) && !seen.has(m.sn) && seen.add(m.sn));
+      if (moments.length) {
+        groupLbl('Moments');
+        moments.forEach((m) => sceneBtn(m.sn, m.hk, m.label));
+        groupLbl('All scenes');
+      }
+      list.filter((n) => !seen.has(n)).forEach((name) => sceneBtn(name, hotkeyByScene[name]));
+    }
   }
   // Highlight the live program scene every tick (no rebuild).
   const live = connected ? (obs.currentScene || '') : '';
@@ -18132,6 +18300,120 @@ el('qk-put-upnext')?.addEventListener('click', () => {
   const t = el('ck-break-title'); if (t) t.value = 'UP NEXT';
   if (typeof bbOpenTriggerConfig === 'function') bbOpenTriggerConfig('breakScreen', el('qk-put-upnext'));
 });
+
+// ── Switcher page: program/preview + take + multiview + audio (backend-routed) ──
+let _swWatch = false, _swShotTimer = null, _swObsAudio = [], _swGridSig = '';
+function swBackend(data) { return (data && data.switcher && data.switcher.target) === 'vmix' ? 'vmix' : 'obs'; }
+function swSources(data) {
+  if (swBackend(data) === 'vmix') {
+    const v = data.vmix || {};
+    return (v.inputs || []).map((i) => ({ id: String(i.number), name: i.title || ('Input ' + i.number), isProgram: i.number === v.active, isPreview: i.number === v.preview }));
+  }
+  const obs = data.obs || {};
+  return (obs.availableScenes || []).filter((s) => !/^═/.test(s)).map((s) => ({ id: s, name: s, isProgram: s === obs.currentScene, isPreview: s === obs.currentPreviewScene }));
+}
+function _swScreenImg(id, img) {
+  const box = el(id); if (!box) return;
+  let im = box.querySelector('img');
+  if (!im) { im = document.createElement('img'); box.innerHTML = ''; box.appendChild(im); }
+  im.src = img;
+}
+function renderSwitcher(data) {
+  if (!el('tab-switcher-content')) return;
+  const backend = swBackend(data);
+  document.querySelectorAll('#sw-target-seg .sw-seg-btn').forEach((b) => b.classList.toggle('active', b.dataset.target === backend));
+  const st = el('sw-status');
+  if (st) {
+    if (backend === 'vmix') { const v = data.vmix || {}; st.textContent = !v.enabled ? 'vMix disabled — enable in Settings → vMix' : (v.connected ? `vMix connected · ${(v.inputs || []).length} inputs` : (v.lastError || 'vMix not connected')); }
+    else { const o = data.obs || {}; st.textContent = !o.enabled ? 'OBS disabled — enable in Settings → OBS' : (o.connected ? `OBS connected${o.studioMode ? ' · Studio Mode on' : ' · Studio Mode off (TAKE turns it on)'}` : (o.lastError || 'OBS not connected')); }
+  }
+  const sources = swSources(data);
+  const prog = sources.find((s) => s.isProgram), prev = sources.find((s) => s.isPreview);
+  if (el('sw-prog-name')) el('sw-prog-name').textContent = prog ? prog.name : '—';
+  if (el('sw-prev-name')) el('sw-prev-name').textContent = prev ? prev.name : '—';
+  if (!prev && el('sw-prev-screen')) el('sw-prev-screen').innerHTML = '<span class="sw-mon-ph">No preview</span>';
+
+  const grid = el('sw-grid');
+  if (grid) {
+    const sig = backend + '|' + sources.map((s) => s.id + ':' + s.name).join(',');
+    if (sig !== _swGridSig) {
+      _swGridSig = sig;
+      grid.innerHTML = sources.length ? '' : `<div class="sw-mixer-empty">No sources — connect ${backend === 'vmix' ? 'vMix' : 'OBS'} in Settings.</div>`;
+      sources.forEach((s) => {
+        const t = document.createElement('div'); t.className = 'sw-tile'; t.dataset.id = s.id;
+        t.innerHTML = '<span class="sw-tile-badge"></span><span class="sw-tile-name"></span>';
+        t.querySelector('.sw-tile-name').textContent = s.name;
+        t.addEventListener('click', () => send('switcher_set_preview', { name: s.id }));
+        t.addEventListener('dblclick', () => send('obs_switch_scene', { sceneName: s.id }));
+        if (backend === 'obs') t.addEventListener('mouseenter', () => { if (!t._shot) { t._shot = 1; send('switcher_screenshot', { name: s.id }); setTimeout(() => { t._shot = 0; }, 4000); } });
+        grid.appendChild(t);
+      });
+    }
+    grid.querySelectorAll('.sw-tile').forEach((t) => {
+      const s = sources.find((x) => x.id === t.dataset.id);
+      t.classList.toggle('is-program', !!(s && s.isProgram));
+      t.classList.toggle('is-preview', !!(s && s.isPreview));
+      const badge = t.querySelector('.sw-tile-badge'); if (badge) badge.textContent = (s && s.isProgram) ? 'PGM' : (s && s.isPreview) ? 'PVW' : '';
+    });
+  }
+  renderSwMixer(data, backend);
+}
+function renderSwMixer(data, backend) {
+  const wrap = el('sw-mixer'); if (!wrap) return;
+  let channels;
+  if (backend === 'vmix') channels = ((data.vmix || {}).inputs || []).filter((i) => i.audio).map((i) => ({ id: String(i.number), name: i.title || ('Input ' + i.number), vol: i.volume == null ? 100 : i.volume, muted: !!i.muted, model: 'vmix' }));
+  else channels = (_swObsAudio || []).map((s) => ({ id: s.name, name: s.name, vol: s.volumeDb == null ? 0 : s.volumeDb, muted: !!s.muted, model: 'obs' }));
+  const sig = backend + '|' + channels.map((c) => c.id).join(',');
+  if (wrap._sig !== sig) {
+    wrap._sig = sig;
+    wrap.innerHTML = channels.length ? '' : `<div class="sw-mixer-empty">${backend === 'vmix' ? 'No audio inputs.' : 'Click Refresh to load OBS audio sources.'}</div>`;
+    channels.forEach((c) => {
+      const ch = document.createElement('div'); ch.className = 'sw-ch'; ch.dataset.id = c.id;
+      const min = c.model === 'vmix' ? 0 : -60, max = c.model === 'vmix' ? 100 : 0;
+      ch.innerHTML = `<span class="sw-ch-name">${_stEsc(c.name)}</span><input type="range" class="sw-ch-fader" min="${min}" max="${max}" step="1" value="${c.vol}"><span class="sw-ch-val"></span><button class="sw-ch-mute">MUTE</button>`;
+      const fader = ch.querySelector('.sw-ch-fader'), val = ch.querySelector('.sw-ch-val'), mute = ch.querySelector('.sw-ch-mute');
+      const showVal = () => { val.textContent = c.model === 'vmix' ? Math.round(fader.value) + '%' : Math.round(fader.value) + ' dB'; };
+      showVal();
+      fader.addEventListener('input', () => { showVal(); send('switcher_audio_set', { id: c.id, volume: Number(fader.value) }); });
+      mute.classList.toggle('on', c.muted);
+      mute.addEventListener('click', () => { const now = !mute.classList.contains('on'); mute.classList.toggle('on', now); send('switcher_audio_set', { id: c.id, muted: now }); });
+      wrap.appendChild(ch);
+    });
+  } else {
+    channels.forEach((c) => {
+      let ch = null; wrap.querySelectorAll('.sw-ch').forEach((x) => { if (x.dataset.id === c.id) ch = x; });
+      if (!ch) return;
+      const fader = ch.querySelector('.sw-ch-fader'), mute = ch.querySelector('.sw-ch-mute'), val = ch.querySelector('.sw-ch-val');
+      if (document.activeElement !== fader) { fader.value = c.vol; if (val) val.textContent = c.model === 'vmix' ? Math.round(c.vol) + '%' : Math.round(c.vol) + ' dB'; }
+      mute.classList.toggle('on', c.muted);
+    });
+  }
+}
+function swTick() {
+  if (!_swWatch || !currentState) return;
+  if (swBackend(currentState) === 'obs') {
+    const srcs = swSources(currentState);
+    const prog = srcs.find((s) => s.isProgram), prev = srcs.find((s) => s.isPreview);
+    if (prog) send('switcher_screenshot', { name: prog.id });
+    if (prev) send('switcher_screenshot', { name: prev.id });
+  }
+}
+function switcherOnShow() {
+  _swWatch = true; send('switcher_watch', { on: true });
+  send('switcher_audio_list');
+  if (currentState) renderSwitcher(currentState);
+  swTick();
+  clearInterval(_swShotTimer); _swShotTimer = setInterval(swTick, 1000);
+}
+function switcherOnHide() {
+  if (!_swWatch) return;
+  _swWatch = false; send('switcher_watch', { on: false });
+  clearInterval(_swShotTimer); _swShotTimer = null;
+}
+el('sw-cut')?.addEventListener('click', () => send('switcher_take', { mode: 'cut' }));
+el('sw-fade')?.addEventListener('click', () => send('switcher_take', { mode: 'fade', duration: parseInt(el('sw-fade-dur')?.value, 10) || 500 }));
+el('sw-audio-refresh')?.addEventListener('click', () => send('switcher_audio_list'));
+document.querySelectorAll('#sw-target-seg .sw-seg-btn').forEach((b) => b.addEventListener('click', () => send('set_switcher_target', { target: b.dataset.target })));
 
 // ── Bottom bar: "Up Next" from the start.gg stream queue ────────────────────
 function renderUpNext(data) {
@@ -28662,6 +28944,18 @@ function connect() {
     } else if (msg.type === 'vmix-result') {
       const elx = el('vmix-result');
       if (elx) { elx.textContent = msg.data.message || ''; elx.style.color = msg.data.ok ? '#9ae6b4' : '#f56565'; }
+    } else if (msg.type === 'switcher-screenshot') {
+      if (msg.data && msg.data.ok && msg.data.img && typeof currentState !== 'undefined') {
+        const srcs = (typeof swSources === 'function') ? swSources(currentState) : [];
+        const prog = srcs.find((s) => s.isProgram), prev = srcs.find((s) => s.isPreview);
+        if (prog && prog.id === msg.data.name) _swScreenImg('sw-prog-screen', msg.data.img);
+        if (prev && prev.id === msg.data.name) _swScreenImg('sw-prev-screen', msg.data.img);
+        const t = Array.from(document.querySelectorAll('#sw-grid .sw-tile')).find((x) => x.dataset.id === msg.data.name);
+        if (t) { let im = t.querySelector('img'); if (!im) { im = document.createElement('img'); t.insertBefore(im, t.firstChild); } im.src = msg.data.img; }
+      }
+    } else if (msg.type === 'switcher-audio') {
+      _swObsAudio = (msg.data && msg.data.sources) || [];
+      if (_swWatch && typeof renderSwMixer === 'function' && currentState) renderSwMixer(currentState, swBackend(currentState));
     } else if (msg.type === 'autofollow-pushed') {
       showToast(msg.data.message || 'Auto-follow updated the match.', '#8b5cf6', 6000);
     } else if (msg.type === 'obs-ensure-result') {
