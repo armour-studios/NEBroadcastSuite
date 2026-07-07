@@ -82,8 +82,10 @@
       body: 'Link Twitch, YouTube, OBS, start.gg, Challonge and more. Set your API keys and tokens here first — the rest of the app builds on these connections.' },
 
     // ── Finale: the single best first setup step ──
-    { target: '#btn-obs-download-collection', tab: 'integrations', placement: 'auto', title: 'Set up OBS in one click',
-      body: 'Best first move: here in Integrations ▸ OBS, click “Save Scene Collection” to install a ready-made OBS scene collection — 30 scenes plus caster/host cam framing, all pre-wired to these overlays. Import it in OBS and you’re broadcast-ready. Replay this tour anytime from Settings ▸ Getting Started.' }
+    { target: '#btn-obs-download-collection', tab: 'integrations', placement: 'auto',
+      run: function () { if (window.showIntegration) window.showIntegration('obs'); },
+      title: 'Set up OBS in one click',
+      body: 'Best first move: here in Integrations ▸ OBS, click “Save Scene Collection” to install a ready-made OBS scene collection — 32 scenes plus caster/player cam framing, all pre-wired to these overlays. Import it in OBS and you’re broadcast-ready. Replay this tour anytime from Settings ▸ Getting Started.' }
   ];
 
   var overlay, hl, tip, elStep, elTitle, elBody, btnBack, btnNext, curIdx = 0, active = false;

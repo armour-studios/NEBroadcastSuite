@@ -1,175 +1,187 @@
 <!DOCTYPE html>
+<!--
+  standings.html — thematic leaderboard overlay. Resolves rows from (priority):
+    1. manual override rows        (state.standings.rows — pushed from control panel)
+    2. loaded bracket / start.gg   (state.bracket.standings — round-robin / swiss auto)
+  Sources (start.gg event, in-app league, manual) all funnel into those rows via the
+  control panel's Standings section. W/L columns are optional (state.standings.showRecord);
+  a PTS column appears automatically when any row carries points.
+-->
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=1920">
 <title>NE Broadcast Suite — Standings</title>
+<link rel="stylesheet" href="/fonts.css">
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 :root {
-  --accent:     #055fdb;
-  --accent-2:   #e97139;
-  --main-font:  'Bourgeois', sans-serif;
-  --stage-w:    1920px;
-  --stage-h:    1080px;
+  --accent:    #055fdb;
+  --accent-2:  #4d90ff;
+  --gold:      #ffcf5c;
+  --silver:    #cfd8e6;
+  --bronze:    #e0965a;
+  --main-font: 'Bourgeois', 'Inter', sans-serif;
+  --stage-w:   1920px;
+  --stage-h:   1080px;
 }
 
 html, body {
-  width: var(--stage-w);
-  height: var(--stage-h);
-  overflow: hidden;
-  background: transparent;
-  font-family: var(--main-font);
-  -webkit-font-smoothing: antialiased;
+  width: var(--stage-w); height: var(--stage-h);
+  overflow: hidden; background: transparent;
+  font-family: var(--main-font); -webkit-font-smoothing: antialiased;
 }
 
 /* ── Stage ── */
 .st-stage {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 64px 120px;
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  padding: 70px 130px;
   background:
-    radial-gradient(ellipse 100% 65% at 50% 20%, rgba(5,95,219,0.13) 0%, rgba(0,0,0,0) 55%),
-    linear-gradient(180deg, rgba(10,12,17,0.97) 0%, rgba(14,16,23,0.97) 100%);
-  opacity: 0;
-  transform: scale(1.02);
-  transition: opacity 0.5s ease, transform 0.5s ease;
+    radial-gradient(ellipse 90% 60% at 50% 0%, color-mix(in srgb, var(--accent) 22%, transparent) 0%, rgba(0,0,0,0) 60%),
+    radial-gradient(ellipse 70% 50% at 50% 100%, color-mix(in srgb, var(--accent) 10%, transparent) 0%, rgba(0,0,0,0) 55%),
+    linear-gradient(180deg, rgba(9,11,16,0.98) 0%, rgba(13,15,22,0.99) 100%);
+  opacity: 0; transform: scale(1.015);
+  transition: opacity 0.55s ease, transform 0.55s ease;
 }
-.st-stage.show {
-  opacity: 1;
-  transform: scale(1);
+.st-stage.show { opacity: 1; transform: scale(1); }
+
+/* faint diagonal texture + accent sweep */
+.st-stage::before {
+  content: ''; position: absolute; inset: 0; pointer-events: none;
+  background-image: repeating-linear-gradient(115deg, rgba(255,255,255,0.014) 0 2px, transparent 2px 46px);
+  mask-image: linear-gradient(180deg, rgba(0,0,0,0.9), rgba(0,0,0,0.15));
+}
+.st-stage::after {
+  content: ''; position: absolute; top: 0; left: 50%; transform: translateX(-50%);
+  width: 1300px; height: 4px; border-radius: 4px;
+  background: linear-gradient(90deg, transparent, var(--accent) 30%, var(--accent-2) 70%, transparent);
+  box-shadow: 0 0 30px color-mix(in srgb, var(--accent) 70%, transparent);
+  opacity: 0.85;
 }
 
-/* ── Title ── */
+/* ── Header ── */
 .st-header {
-  display: flex;
-  align-items: center;
-  gap: 20px;
-  width: 100%;
-  max-width: 1200px;
-  margin-bottom: 36px;
+  position: relative; width: 100%; max-width: 1300px;
+  display: flex; align-items: center; gap: 22px; margin-bottom: 30px;
 }
 .st-accent-bar {
-  width: 6px;
-  height: 52px;
-  border-radius: 3px;
-  background: var(--accent);
+  width: 8px; align-self: stretch; min-height: 64px; border-radius: 4px;
+  background: linear-gradient(180deg, var(--accent), var(--accent-2));
+  box-shadow: 0 0 22px color-mix(in srgb, var(--accent) 60%, transparent);
   flex-shrink: 0;
 }
-.st-title {
-  font-size: 46px;
-  font-weight: 800;
-  letter-spacing: 4px;
-  text-transform: uppercase;
-  color: #ffffff;
-  text-shadow: 0 4px 24px rgba(5,95,219,0.35);
+.st-headtext { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.st-eyebrow {
+  font-size: 16px; font-weight: 700; letter-spacing: 6px; text-transform: uppercase;
+  color: var(--accent-2);
 }
+.st-title {
+  font-size: 58px; font-weight: 800; letter-spacing: 3px; text-transform: uppercase;
+  color: #fff; line-height: 0.98; text-shadow: 0 6px 30px rgba(0,0,0,0.6);
+}
+.st-subtitle {
+  font-size: 22px; font-weight: 600; letter-spacing: 1px;
+  color: #99a1b3; margin-top: 2px;
+}
+.st-subtitle:empty { display: none; }
+.st-count {
+  margin-left: auto; flex-shrink: 0; align-self: flex-start;
+  display: inline-flex; align-items: baseline; gap: 8px;
+  padding: 10px 18px; border-radius: 10px;
+  background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.09);
+}
+.st-count b { font-size: 30px; font-weight: 800; color: #fff; }
+.st-count span { font-size: 13px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; color: #6a7080; }
+.st-count:empty { display: none; }
 
 /* ── Table ── */
-.st-table {
-  width: 100%;
-  max-width: 1200px;
-  border-radius: 14px;
-  overflow: hidden;
-  box-shadow: 0 20px 56px rgba(0,0,0,0.55);
-  border: 1px solid rgba(255,255,255,0.07);
-}
+.st-table { width: 100%; max-width: 1300px; display: flex; flex-direction: column; gap: 8px; }
 
 .st-row {
-  display: grid;
-  grid-template-columns: 80px 64px 1fr 90px 90px 90px;
-  align-items: center;
-  height: 72px;
-  padding: 0 28px;
-  border-bottom: 1px solid rgba(255,255,255,0.05);
-  opacity: 0;
-  transform: translateX(-12px);
-  transition: opacity 0.35s ease, transform 0.35s ease;
+  display: grid; grid-template-columns: var(--st-cols); align-items: center;
+  column-gap: 8px; height: 84px; padding: 0 26px 0 0;
+  border-radius: 14px;
+  background: linear-gradient(90deg, rgba(24,28,38,0.96), rgba(16,19,27,0.96));
+  border: 1px solid rgba(255,255,255,0.06);
+  box-shadow: 0 10px 26px rgba(0,0,0,0.4);
+  position: relative; overflow: hidden;
+  opacity: 0; transform: translateX(-18px);
+  transition: opacity 0.4s cubic-bezier(.16,.84,.24,1), transform 0.4s cubic-bezier(.16,.84,.24,1);
 }
-.st-row.visible {
-  opacity: 1;
-  transform: translateX(0);
+.st-row.visible { opacity: 1; transform: translateX(0); }
+/* per-team accent stripe on the left */
+.st-row::before {
+  content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 5px;
+  background: var(--row-accent, var(--accent));
 }
 
-.st-row:last-child { border-bottom: none; }
-
+/* Header row */
 .st-head {
-  background: rgba(5,95,219,0.16);
-  height: 52px;
-  opacity: 1 !important;
-  transform: none !important;
+  height: 46px; padding: 0 26px 0 0; background: none; border: none; box-shadow: none;
+  opacity: 1 !important; transform: none !important; overflow: visible;
+}
+.st-head::before { display: none; }
+.st-head > div {
+  font-size: 14px; font-weight: 700; letter-spacing: 2.5px; text-transform: uppercase;
+  color: #626a7c;
 }
 
-.st-row:not(.st-head):nth-child(even) {
-  background: rgba(18,21,30,0.95);
-}
-.st-row:not(.st-head):nth-child(odd) {
-  background: rgba(13,15,22,0.95);
-}
+/* Podium tints */
+.st-row.rank-1 { background: linear-gradient(90deg, color-mix(in srgb, var(--gold) 26%, rgba(24,28,38,0.96)), rgba(16,19,27,0.96) 62%); border-color: color-mix(in srgb, var(--gold) 40%, transparent); }
+.st-row.rank-2 { background: linear-gradient(90deg, color-mix(in srgb, var(--silver) 18%, rgba(24,28,38,0.96)), rgba(16,19,27,0.96) 58%); border-color: color-mix(in srgb, var(--silver) 28%, transparent); }
+.st-row.rank-3 { background: linear-gradient(90deg, color-mix(in srgb, var(--bronze) 20%, rgba(24,28,38,0.96)), rgba(16,19,27,0.96) 58%); border-color: color-mix(in srgb, var(--bronze) 30%, transparent); }
 
-/* Top 3 highlight */
-.st-row.rank-1 { background: linear-gradient(90deg, rgba(5,95,219,0.22) 0%, rgba(13,15,22,0.95) 70%) !important; border-left: 4px solid var(--accent); padding-left: 24px; }
-.st-row.rank-2 { background: linear-gradient(90deg, rgba(5,95,219,0.11) 0%, rgba(13,15,22,0.95) 60%) !important; }
-.st-row.rank-3 { background: linear-gradient(90deg, rgba(5,95,219,0.06) 0%, rgba(13,15,22,0.95) 50%) !important; }
-
-/* Columns */
-.st-col-rank {
-  font-size: 28px;
-  font-weight: 800;
-  color: var(--accent-2);
-  text-align: center;
+/* Rank cell */
+.st-col-rank { display: flex; align-items: center; justify-content: center; }
+.st-badge {
+  width: 54px; height: 54px; border-radius: 12px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 28px; font-weight: 800; color: #cbd2e0;
+  background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);
 }
-.st-head .st-col-rank { font-size: 14px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; color: #6a7080; }
+.rank-1 .st-badge { background: linear-gradient(160deg, #ffe08a, var(--gold)); color: #3a2c05; border-color: color-mix(in srgb, var(--gold) 70%, #fff); box-shadow: 0 6px 20px color-mix(in srgb, var(--gold) 45%, transparent); }
+.rank-2 .st-badge { background: linear-gradient(160deg, #eef2f8, var(--silver)); color: #2b3140; border-color: #fff; box-shadow: 0 6px 20px color-mix(in srgb, var(--silver) 40%, transparent); }
+.rank-3 .st-badge { background: linear-gradient(160deg, #f2b485, var(--bronze)); color: #3c2410; border-color: color-mix(in srgb, var(--bronze) 70%, #fff); box-shadow: 0 6px 20px color-mix(in srgb, var(--bronze) 40%, transparent); }
+.st-head .st-col-rank { justify-content: center; }
 
-.st-col-logo {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-.st-team-logo {
-  width: 44px;
-  height: 44px;
-  object-fit: contain;
-  filter: drop-shadow(0 2px 5px rgba(0,0,0,0.5));
-}
-.st-team-logo.logo-on-dark { filter: invert(1) drop-shadow(0 2px 5px rgba(0,0,0,0.5)); }
+/* Logo */
+.st-col-logo { display: flex; align-items: center; justify-content: center; }
+.st-team-logo { width: 52px; height: 52px; object-fit: contain; filter: drop-shadow(0 2px 6px rgba(0,0,0,0.55)); }
+.st-team-logo.logo-on-dark { filter: brightness(0) invert(1) drop-shadow(0 2px 6px rgba(0,0,0,0.55)); }
 
+/* Name */
 .st-col-name {
-  font-size: 28px;
-  font-weight: 700;
-  color: #e2e5ed;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  letter-spacing: 0.5px;
-  padding-left: 4px;
+  font-size: 32px; font-weight: 700; color: #f0f2f7; letter-spacing: 0.5px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-left: 6px;
 }
-.st-head .st-col-name { font-size: 14px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; color: #6a7080; padding-left: 4px; }
+.rank-1 .st-col-name { color: #fff; }
 
+/* Stat cells */
 .st-col-stat {
-  font-size: 28px;
-  font-weight: 700;
-  text-align: center;
-  font-variant-numeric: tabular-nums;
-  color: #9aa0ad;
+  font-size: 30px; font-weight: 800; text-align: center; font-variant-numeric: tabular-nums;
+  color: #aeb6c6;
 }
-.st-col-stat.wins  { color: #6ee7a0; }
-.st-col-stat.losses { color: #f08a8a; }
-.st-col-stat.pts   { color: #f5e07a; }
-.st-head .st-col-stat { font-size: 14px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; color: #6a7080; }
+.st-col-stat.wins   { color: #7ef0b0; }
+.st-col-stat.losses { color: #f39191; }
+.st-col-stat.pts {
+  color: #0c0f16; font-weight: 800;
+  display: flex; align-items: center; justify-content: center;
+}
+.st-pts-chip {
+  min-width: 68px; padding: 8px 4px; border-radius: 10px;
+  background: linear-gradient(160deg, #ffe58f, #f5c944);
+  box-shadow: 0 4px 14px rgba(245,201,68,0.28);
+}
+.st-head .st-col-stat { color: #626a7c; }
 
 /* ── Empty ── */
 .st-empty {
-  font-size: 28px;
-  font-weight: 500;
-  color: rgba(255,255,255,0.2);
-  text-align: center;
+  font-size: 30px; font-weight: 500; color: rgba(255,255,255,0.22); text-align: center;
 }
+
+.st-preview-logo { background: repeating-linear-gradient(45deg,#181b22,#181b22 10px,#20242e 10px,#20242e 20px); border-radius: 10px; }
 </style>
 </head>
 <body>
@@ -177,10 +189,15 @@ html, body {
 <div id="st-stage" class="st-stage">
   <div class="st-header">
     <div class="st-accent-bar" id="st-accent"></div>
-    <div class="st-title" id="st-title">STANDINGS</div>
+    <div class="st-headtext">
+      <div class="st-eyebrow" id="st-eyebrow">Standings</div>
+      <div class="st-title" id="st-title">STANDINGS</div>
+      <div class="st-subtitle" id="st-subtitle"></div>
+    </div>
+    <div class="st-count" id="st-count"></div>
   </div>
   <div class="st-table" id="st-table"></div>
-  <div class="st-empty" id="st-empty" style="display:none;">No standings data — load an event or build a bracket.</div>
+  <div class="st-empty" id="st-empty" style="display:none;">No standings data — pull start.gg, a league, or add manual rows.</div>
 </div>
 
 <script src="scene-base.js"></script>
@@ -190,92 +207,124 @@ html, body {
 
   function svgFallback(letter, color) {
     return 'data:image/svg+xml;utf8,' + encodeURIComponent(
-      `<svg xmlns="http://www.w3.org/2000/svg" width="160" height="160"><rect width="160" height="160" rx="22" fill="${color}"/><text x="80" y="108" font-size="86" fill="#fff" text-anchor="middle" font-family="Arial,sans-serif" font-weight="bold">${letter}</text></svg>`);
+      `<svg xmlns="http://www.w3.org/2000/svg" width="160" height="160"><rect width="160" height="160" rx="24" fill="${color}"/><text x="80" y="110" font-size="88" fill="#fff" text-anchor="middle" font-family="Arial,sans-serif" font-weight="bold">${letter}</text></svg>`);
   }
 
-  function logoMap(savedTeams) {
-    const map = {};
-    (savedTeams || []).forEach(t => { if (t && t.name && t.logo) map[t.name.toLowerCase()] = t.logo; });
-    return map;
+  function teamMaps(savedTeams) {
+    const logos = {}, colors = {};
+    (savedTeams || []).forEach(t => {
+      if (!t || !t.name) return;
+      const k = t.name.toLowerCase();
+      if (t.logo) logos[k] = t.logo;
+      if (t.color) colors[k] = t.color;
+    });
+    return { logos, colors };
   }
 
-  function buildHead(hasPoints) {
+  function colStops(showRecord, hasPoints) {
+    // rank | logo | name | [W] | [L] | [PTS]
+    let cols = '92px 74px minmax(0,1fr)';
+    if (showRecord) cols += ' 96px 96px';
+    if (hasPoints)  cols += ' 116px';
+    return cols;
+  }
+
+  function headCell(txt, cls) { return `<div class="st-col-${cls}">${txt}</div>`; }
+
+  function buildHead(showRecord, hasPoints) {
     const row = document.createElement('div');
     row.className = 'st-row st-head';
-    row.innerHTML = `
-      <div class="st-col-rank">#</div>
-      <div class="st-col-logo"></div>
-      <div class="st-col-name">Team</div>
-      <div class="st-col-stat">W</div>
-      <div class="st-col-stat">L</div>
-      <div class="st-col-stat">${hasPoints ? 'PTS' : ''}</div>
-    `;
+    let html = headCell('#', 'rank') + headCell('', 'logo') + headCell('Team', 'name');
+    if (showRecord) html += `<div class="st-col-stat">W</div><div class="st-col-stat">L</div>`;
+    if (hasPoints)  html += `<div class="st-col-stat">PTS</div>`;
+    row.innerHTML = html;
     return row;
   }
 
-  function buildDataRow(entry, logos, idx, hasPoints) {
+  function buildDataRow(entry, maps, idx, showRecord, hasPoints, accent) {
     const rank = Number(entry.placement) || (idx + 1);
-    const logo = entry.logo || logos[(entry.name || '').toLowerCase()] || svgFallback((entry.name || '?')[0].toUpperCase(), '#2a3050');
+    const nameKey = (entry.name || '').toLowerCase();
+    const logo = entry.logo || maps.logos[nameKey] || svgFallback((entry.name || '?')[0].toUpperCase(), '#2a3050');
     const isDefaultLogo = SceneBase.isDefaultGameLogo(logo);
+    const rowAccent = entry.color || maps.colors[nameKey] || accent;
 
     const row = document.createElement('div');
-    const rankClass = rank <= 3 ? ` rank-${rank}` : '';
-    row.className = `st-row${rankClass}`;
+    row.className = 'st-row' + (rank <= 3 ? ` rank-${rank}` : '');
+    row.style.setProperty('--row-accent', rowAccent);
 
-    const imgTag = `<img class="st-team-logo${isDefaultLogo ? ' logo-on-dark' : ''}" src="${logo}" alt="">`;
+    let html = `
+      <div class="st-col-rank"><div class="st-badge">${rank}</div></div>
+      <div class="st-col-logo"><img class="st-team-logo${isDefaultLogo ? ' logo-on-dark' : ''}" src="${logo}" alt=""></div>
+      <div class="st-col-name">${entry.name || 'TBD'}</div>`;
+    if (showRecord) {
+      html += `<div class="st-col-stat wins">${entry.wins ?? '—'}</div>`;
+      html += `<div class="st-col-stat losses">${entry.losses ?? '—'}</div>`;
+    }
+    if (hasPoints) {
+      html += `<div class="st-col-stat pts"><span class="st-pts-chip">${entry.points ?? '—'}</span></div>`;
+    }
+    row.innerHTML = html;
 
-    row.innerHTML = `
-      <div class="st-col-rank">${rank}</div>
-      <div class="st-col-logo">${imgTag}</div>
-      <div class="st-col-name">${entry.name || 'TBD'}</div>
-      <div class="st-col-stat wins">${entry.wins ?? '—'}</div>
-      <div class="st-col-stat losses">${entry.losses ?? '—'}</div>
-      <div class="st-col-stat pts">${hasPoints ? (entry.points ?? '—') : ''}</div>
-    `;
-
-    setTimeout(() => row.classList.add('visible'), 80 + idx * 55);
+    setTimeout(() => row.classList.add('visible'), 100 + idx * 60);
     return row;
   }
 
   function render(data) {
-    const stage  = el('st-stage');
-    const table  = el('st-table');
-    const empty  = el('st-empty');
-    const accent = el('st-accent');
+    const stage = el('st-stage'), table = el('st-table'), empty = el('st-empty'), accentEl = el('st-accent');
     if (!stage || !table) return;
 
-    const stState   = data.standings || {};
-    const bracket   = data.bracket || {};
+    const stState = data.standings || {};
+    const bracket = data.bracket || {};
     stage.classList.add('show');
 
-    // Brand accent
-    if (accent) accent.style.background = SceneBase.brandColor(data);
+    const accent = SceneBase.brandColor(data) || '#055fdb';
+    const accent2 = SceneBase.brandAccent(data) || accent;
+    document.documentElement.style.setProperty('--accent', accent);
+    document.documentElement.style.setProperty('--accent-2', accent2);
+    if (data.fontFamily) document.documentElement.style.setProperty('--main-font', `'${data.fontFamily}', 'Bourgeois', 'Inter', sans-serif`);
 
-    // Title
-    const titleEl = el('st-title');
+    // Title / subtitle
     const title = (stState.title || bracket.title || 'STANDINGS').toUpperCase();
-    if (titleEl) titleEl.textContent = title;
+    el('st-title').textContent = title;
+    el('st-subtitle').textContent = (stState.subtitle || '').toString();
 
-    // Resolve rows: manual override > bracket.standings
+    // Resolve rows: manual override > bracket/start.gg standings
     const rows = (stState.rows && stState.rows.length > 0) ? stState.rows : (bracket.standings || []);
-    const logos = logoMap(data.savedTeams);
+    const maps = teamMaps(data.savedTeams);
 
     table.innerHTML = '';
     if (rows.length === 0) {
       table.style.display = 'none';
       empty.style.display = '';
+      el('st-count').innerHTML = '';
       return;
     }
-
     table.style.display = '';
     empty.style.display = 'none';
 
+    const showRecord = stState.showRecord !== false && rows.some(r => r.wins != null || r.losses != null);
     const hasPoints = rows.some(r => r.points != null);
-    table.appendChild(buildHead(hasPoints));
-    rows.forEach((r, i) => table.appendChild(buildDataRow(r, logos, i, hasPoints)));
+
+    el('st-count').innerHTML = `<b>${rows.length}</b><span>Teams</span>`;
+    table.style.setProperty('--st-cols', colStops(showRecord, hasPoints));
+
+    table.appendChild(buildHead(showRecord, hasPoints));
+    rows.forEach((r, i) => table.appendChild(buildDataRow(r, maps, i, showRecord, hasPoints, accent)));
   }
 
-  SceneBase.connect(render);
+  if (location.protocol === 'file:') {
+    render({
+      standings: { title: 'Summer Showdown', subtitle: 'Group Stage · Week 4', showRecord: true, rows: [
+        { placement: 1, name: 'Velocity Gaming', color: '#3b82f6', wins: 8, losses: 1, points: 24 },
+        { placement: 2, name: 'Team Apex Esports', color: '#f97316', wins: 7, losses: 2, points: 21 },
+        { placement: 3, name: 'Nova Collective', color: '#a855f7', wins: 6, losses: 3, points: 18 },
+        { placement: 4, name: 'Iron Wolves', color: '#22c55e', wins: 5, losses: 4, points: 15 },
+        { placement: 5, name: 'Phantom Squad', color: '#ef4444', wins: 3, losses: 6, points: 9 },
+        { placement: 6, name: 'Echo Rising', color: '#14b8a6', wins: 1, losses: 8, points: 3 } ] }
+    });
+  } else {
+    SceneBase.connect(render);
+  }
 })();
 </script>
 </body>

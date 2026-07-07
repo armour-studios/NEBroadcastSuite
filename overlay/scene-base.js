@@ -122,35 +122,77 @@
       })(),
       upcoming: { visible: true, title: 'UPCOMING MATCHES', matches: [] },
       bracket: {
+        // A tournament IN FLIGHT: quarterfinals done, one semifinal live (FROST vs EMBER —
+        // the demo's on-air pair, so the LIVE badge shows), later rounds still TBD.
+        // set.state mirrors start.gg (1=upcoming → dimmed, 2=live, 3=done).
         visible: true, title: 'PRO INVITATIONAL', type: 'DOUBLE_ELIMINATION', activePhaseId: 'p1',
         phases: [{ id: 'p1', name: 'Playoffs' }, { id: 'p2', name: 'Day 2' }],
         winners: [
           { name: 'Quarterfinals', round: 1, sets: [
-            { a: { name: 'FROST ESPORTS', score: 3, winner: true },  b: { name: 'EMBER GAMING', score: 1, winner: false } },
-            { a: { name: 'NEON WOLVES', score: 2, winner: false },   b: { name: 'APEX TITANS', score: 3, winner: true } },
-            { a: { name: 'VOID KINGS', score: 3, winner: true },     b: { name: 'SOLAR FLARE', score: 0, winner: false } },
-            { a: { name: 'IRON CLAD', score: 1, winner: false },     b: { name: 'STORM RIDERS', score: 3, winner: true } }
+            { a: { name: 'FROST ESPORTS', score: 3, winner: true },  b: { name: 'NEON WOLVES', score: 1, winner: false }, state: 3 },
+            { a: { name: 'EMBER GAMING', score: 3, winner: true },   b: { name: 'APEX TITANS', score: 2, winner: false }, state: 3 },
+            { a: { name: 'VOID KINGS', score: 3, winner: true },     b: { name: 'SOLAR FLARE', score: 0, winner: false }, state: 3 },
+            { a: { name: 'STORM RIDERS', score: 3, winner: true },   b: { name: 'IRON CLAD', score: 1, winner: false }, state: 3 }
           ] },
           { name: 'Semifinals', round: 2, sets: [
-            { a: { name: 'FROST ESPORTS', score: 3, winner: true },  b: { name: 'APEX TITANS', score: 2, winner: false } },
-            { a: { name: 'VOID KINGS', score: 1, winner: false },    b: { name: 'STORM RIDERS', score: 3, winner: true } }
+            { a: { name: 'FROST ESPORTS', score: 2 },                b: { name: 'EMBER GAMING', score: 2 }, state: 2 },
+            { a: { name: 'VOID KINGS', score: 3, winner: true },     b: { name: 'STORM RIDERS', score: 2, winner: false }, state: 3 }
           ] }
         ],
         losers: [
           { name: 'Losers Round 1', round: -1, sets: [
-            { a: { name: 'EMBER GAMING', score: 3, winner: true },   b: { name: 'NEON WOLVES', score: 2, winner: false } },
-            { a: { name: 'SOLAR FLARE', score: 1, winner: false },   b: { name: 'IRON CLAD', score: 3, winner: true } }
+            { a: { name: 'NEON WOLVES', score: 3, winner: true },    b: { name: 'APEX TITANS', score: 2, winner: false }, state: 3 },
+            { a: { name: 'SOLAR FLARE', score: 1, winner: false },   b: { name: 'IRON CLAD', score: 3, winner: true }, state: 3 }
           ] },
           { name: 'Losers Final', round: -2, sets: [
-            { a: { name: 'APEX TITANS', score: 3, winner: true },    b: { name: 'EMBER GAMING', score: 2, winner: false } }
+            { a: { name: 'STORM RIDERS', score: 0 },                 b: { name: 'TBD', score: 0 }, state: 1 }
           ] }
         ],
         finals: [
           { name: 'Grand Final', round: 3, sets: [
-            { a: { name: 'FROST ESPORTS', score: 4, winner: true },  b: { name: 'STORM RIDERS', score: 2, winner: false } }
+            { a: { name: 'VOID KINGS', score: 0 },                   b: { name: 'TBD', score: 0 }, state: 1 }
           ] }
         ],
-        standings: []
+        // Pool-play demo (schedule / standings / head-to-head grid views + ?part= overrides).
+        schedule: [
+          { name: 'Round 1', round: 1, sets: [
+            { a: { name: 'FROST ESPORTS', score: 3, winner: true }, b: { name: 'SOLAR FLARE', score: 1, winner: false }, state: 3 },
+            { a: { name: 'EMBER GAMING', score: 3, winner: true },  b: { name: 'IRON CLAD', score: 0, winner: false }, state: 3 },
+            { a: { name: 'VOID KINGS', score: 2, winner: false },   b: { name: 'STORM RIDERS', score: 3, winner: true }, state: 3 }
+          ] },
+          { name: 'Round 2', round: 2, sets: [
+            { a: { name: 'FROST ESPORTS', score: 2 },               b: { name: 'EMBER GAMING', score: 2 }, state: 2 },
+            { a: { name: 'STORM RIDERS', score: 3, winner: true },  b: { name: 'IRON CLAD', score: 1, winner: false }, state: 3 },
+            { a: { name: 'VOID KINGS', score: 0 },                  b: { name: 'SOLAR FLARE', score: 0 }, state: 1 }
+          ] },
+          { name: 'Round 3', round: 3, sets: [
+            { a: { name: 'FROST ESPORTS', score: 0 },               b: { name: 'STORM RIDERS', score: 0 }, state: 1 },
+            { a: { name: 'EMBER GAMING', score: 0 },                b: { name: 'VOID KINGS', score: 0 }, state: 1 },
+            { a: { name: 'SOLAR FLARE', score: 0 },                 b: { name: 'IRON CLAD', score: 0 }, state: 1 }
+          ] }
+        ],
+        standings: [
+          { placement: 1, name: 'STORM RIDERS', wins: 2, losses: 0, played: true,  setsPlayed: 2, setsTotal: 3, gameWins: 6, gameLosses: 3 },
+          { placement: 2, name: 'FROST ESPORTS', wins: 1, losses: 0, played: true,  setsPlayed: 1, setsTotal: 3, gameWins: 3, gameLosses: 1 },
+          { placement: 3, name: 'EMBER GAMING', wins: 1, losses: 0, played: true,  setsPlayed: 1, setsTotal: 3, gameWins: 3, gameLosses: 0 },
+          { placement: 4, name: 'VOID KINGS', wins: 0, losses: 1, played: true,   setsPlayed: 1, setsTotal: 3, gameWins: 2, gameLosses: 3 },
+          { placement: 5, name: 'SOLAR FLARE', wins: 0, losses: 1, played: true,  setsPlayed: 1, setsTotal: 3, gameWins: 1, gameLosses: 3 },
+          { placement: 6, name: 'IRON CLAD', wins: 0, losses: 2, played: true,    setsPlayed: 2, setsTotal: 3, gameWins: 1, gameLosses: 6 }
+        ],
+        roster: ['STORM RIDERS', 'FROST ESPORTS', 'EMBER GAMING', 'VOID KINGS', 'SOLAR FLARE', 'IRON CLAD'],
+        matrix: {
+          teams: [
+            { id: 't1', name: 'FROST ESPORTS' }, { id: 't2', name: 'EMBER GAMING' },
+            { id: 't3', name: 'VOID KINGS' }, { id: 't4', name: 'STORM RIDERS' },
+            { id: 't5', name: 'SOLAR FLARE' }, { id: 't6', name: 'IRON CLAD' }
+          ],
+          cells: {
+            't1_t5': { aScore: 3, bScore: 1, winner: 'a', played: true }, 't5_t1': { aScore: 1, bScore: 3, winner: 'b', played: true },
+            't2_t6': { aScore: 3, bScore: 0, winner: 'a', played: true }, 't6_t2': { aScore: 0, bScore: 3, winner: 'b', played: true },
+            't3_t4': { aScore: 2, bScore: 3, winner: 'b', played: true }, 't4_t3': { aScore: 3, bScore: 2, winner: 'a', played: true },
+            't4_t6': { aScore: 3, bScore: 1, winner: 'a', played: true }, 't6_t4': { aScore: 1, bScore: 3, winner: 'b', played: true }
+          }
+        }
       }
     };
   }
@@ -177,7 +219,7 @@
     return v || fallback;
   }
 
-  const STANDALONE_CASTER_RE = /\/(casters|duorow|triorow|duosinglecam|singlecam|analystspecial|campip|talentbar|interview|quaddesk|spotlightdesk|vertical)\.html$/i;
+  const STANDALONE_CASTER_RE = /\/(casters|duorow|triorow|duosinglecam|singlecam|analystspecial|campip|talentbar|interview|quaddesk|spotlightdesk|vertical|preshow)\.html$/i;
   const standaloneCasterScene = STANDALONE_CASTER_RE.test(global.location.pathname);
 
   const SceneBase = {

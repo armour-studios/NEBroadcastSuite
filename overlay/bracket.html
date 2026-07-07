@@ -9,10 +9,12 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 :root {
-  --accent:   #055fdb;
-  --accent-2: #e97139;
-  --ink:      #eef1f7;
-  --muted:    #98a2b6;
+  /* Default palette = the NE desk-scene (duorow) design language; the active brand
+     kit overrides both accents at runtime via SceneBase.brandColor/brandAccent. */
+  --accent:   #e83a8b;
+  --accent-2: #8b5cf6;
+  --ink:      #e8eaf0;
+  --muted:    #8b93a8;
   --panel-1:  rgba(255,255,255,0.05);
   --panel-2:  rgba(255,255,255,0.015);
   --hair:     rgba(255,255,255,0.09);
@@ -29,8 +31,8 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
 
 .bk-bg { position: absolute; inset: 0; z-index: -2;
   background:
-    radial-gradient(120% 75% at 50% -8%, rgba(80,130,255,0.20) 0%, transparent 50%),
-    radial-gradient(80% 60% at 100% 108%, rgba(233,113,57,0.12) 0%, transparent 55%),
+    radial-gradient(120% 75% at 50% -8%, color-mix(in srgb, var(--accent) 18%, transparent) 0%, transparent 50%),
+    radial-gradient(80% 60% at 100% 108%, color-mix(in srgb, var(--accent-2) 12%, transparent) 0%, transparent 55%),
     linear-gradient(180deg, #0b0d12 0%, #0e1118 55%, #0b0d12 100%); }
 .bk-bg::after { content: ''; position: absolute; inset: 0;
   background-image: linear-gradient(var(--hair) 1px, transparent 1px), linear-gradient(90deg, var(--hair) 1px, transparent 1px);
@@ -93,7 +95,7 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
 .bk-gf .bk-match { width: 100%; border-color: rgba(255,214,107,.4); box-shadow: 0 0 0 1px rgba(255,214,107,.12), 0 6px 24px rgba(0,0,0,.55); }
 .bk-connectors { position: absolute; inset: 0; pointer-events: none; z-index: 0; overflow: visible; }
 .bk-connectors path { fill: none; stroke: rgba(255,255,255,.2); stroke-width: 1.5; stroke-linejoin: round; }
-.bk-section.losers .bk-connectors path { stroke: rgba(233,113,57,.25); }
+.bk-section.losers .bk-connectors path { stroke: color-mix(in srgb, var(--accent-2) 30%, transparent); }
 
 /* ── Round column — flex-fill: columns always span edge to edge ── */
 .bk-round { position: relative; z-index: 1; display: flex; flex-direction: column; flex: 1; min-width: 0; }
@@ -109,6 +111,8 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
   box-shadow: 0 4px 16px rgba(0,0,0,.5); }
 .bk-match.is-final { border-color: rgba(255,214,107,.4); box-shadow: 0 0 0 1px rgba(255,214,107,.15), 0 6px 24px rgba(0,0,0,.55); }
 .bk-match.live { border-color: var(--accent); box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 30%, transparent), 0 4px 20px rgba(0,0,0,.5); }
+.bk-match.upcoming { opacity: .72; }
+.bk-match.upcoming .bk-score { color: rgba(255,255,255,.25); }
 .bk-match.live::after { content: 'LIVE'; position: absolute; top: -9px; right: 8px; font-family: var(--disp); font-weight: 800;
   font-size: 10px; letter-spacing: .12em; color: #fff; background: #ff3b46; border-radius: 999px; padding: 2px 8px; box-shadow: 0 0 10px rgba(255,59,70,.55); }
 
@@ -139,7 +143,9 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
 .bk-slot.winner .bk-slot-accent { background: var(--accent); box-shadow: 2px 0 8px color-mix(in srgb, var(--accent) 50%, transparent); }
 .bk-slot.winner { background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 10%, transparent) 0%, transparent 70%); }
 .bk-slot.winner .bk-name { color: #fff; font-weight: 700; }
-.bk-slot.winner .bk-score { color: #e8ecf4; }
+/* Broadcast-style: the winning score reads as a filled chip so the result is legible at a glance. */
+.bk-slot.winner .bk-score { color: #fff; background: color-mix(in srgb, var(--accent) 82%, #000); border-radius: 5px; padding: 3px 0; box-shadow: 0 2px 8px color-mix(in srgb, var(--accent) 40%, transparent); }
+.bk-section.losers .bk-slot.winner .bk-score { background: color-mix(in srgb, var(--accent-2) 82%, #000); box-shadow: 0 2px 8px color-mix(in srgb, var(--accent-2) 40%, transparent); }
 .bk-slot.loser .bk-name { color: rgba(118,125,140,.6); }
 .bk-slot.loser .bk-logo { opacity: .4; }
 .bk-slot.loser .bk-logo-badge { opacity: .45; }
@@ -150,13 +156,34 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
 .bk-slot.focused .bk-slot-accent { background: var(--accent); }
 .bk-slot.focused .bk-name { color: #fff; font-weight: 800; }
 
+/* ── Schedule (round-robin / swiss round-by-round pairings) — reuses .bk-round/.bk-match/.bk-slot ── */
+.bk-schedule { width: 100%; }
+.bk-schedule .bk-rounds { gap: 24px; }
+/* Round headers become pills so pool-play reads as a SCHEDULE, not a bracket fragment */
+.bk-schedule .bk-round-name { height: auto; margin-bottom: 14px; padding: 6px 0; color: #fff;
+  background: linear-gradient(180deg, rgba(255,255,255,.07), rgba(255,255,255,.02));
+  border: 1px solid var(--hair); border-radius: 999px; position: relative; overflow: hidden; }
+.bk-schedule .bk-round-name::after { content: ''; position: absolute; left: 18%; right: 18%; bottom: 0; height: 2px;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent); }
+.bk-schedule .bk-matches { justify-content: flex-start; gap: 14px; }
+
 /* ── Standings (round-robin / swiss) ── */
 .bk-standings { align-self: center; width: 1100px; max-width: 100%; border-radius: 16px; overflow: hidden; border: 1px solid var(--hair);
   background: linear-gradient(180deg, rgba(22,25,33,.96), rgba(13,15,21,.96)); box-shadow: 0 18px 44px rgba(0,0,0,.5); }
-.bk-st-row { display: grid; grid-template-columns: 100px 1fr 100px 100px 150px; align-items: center; height: 68px; padding: 0 32px; }
+.bk-st-row { display: grid; grid-template-columns: 100px 1fr 100px 100px 150px; align-items: center; height: 64px; padding: 0 32px; position: relative; }
+.bk-standings.enriched { width: 1320px; }
+.bk-standings.enriched .bk-st-row { grid-template-columns: 100px 1fr 100px 100px 120px 150px 150px; }
 .bk-st-row + .bk-st-row { border-top: 1px solid var(--hair); }
+.bk-st-row:nth-child(odd):not(.bk-st-head) { background: rgba(255,255,255,.018); }
 .bk-st-head { background: rgba(255,255,255,.06); height: 52px; }
+.bk-st-head::after { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 2px;
+  background: linear-gradient(90deg, var(--accent), var(--accent-2), transparent 85%); }
 .bk-st-head > div { font-family: var(--disp); font-weight: 700; font-size: 15px; letter-spacing: .16em; text-transform: uppercase; color: #aeb6c4; }
+/* Medal accent bars on the podium rows — stronger placement signal than a tinted number alone */
+.bk-st-row.r1::before, .bk-st-row.r2::before, .bk-st-row.r3::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; }
+.bk-st-row.r1::before { background: #ffd66b; box-shadow: 0 0 12px rgba(255,214,107,.4); }
+.bk-st-row.r2::before { background: #cdd6e4; }
+.bk-st-row.r3::before { background: #e0944a; }
 .bk-st-rank { font-family: var(--disp); font-weight: 800; font-size: 24px; color: var(--muted); text-align: center; }
 .bk-st-row.r1 .bk-st-rank { color: #ffd66b; } .bk-st-row.r2 .bk-st-rank { color: #cdd6e4; } .bk-st-row.r3 .bk-st-rank { color: #e0944a; }
 .bk-st-team { display: flex; align-items: center; gap: 14px; min-width: 0; }
@@ -165,8 +192,28 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
 .bk-st-name { font-family: var(--disp); font-weight: 700; font-size: 24px; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .bk-st-rec { font-family: var(--disp); font-weight: 800; font-size: 24px; text-align: center; font-variant-numeric: tabular-nums; }
 .bk-st-w { color: #5fe39a; } .bk-st-l { color: #f08a8a; }
+.bk-st-extra { font-family: var(--disp); font-weight: 700; font-size: 18px; color: var(--muted); text-align: center; font-variant-numeric: tabular-nums; }
 .bk-st-bar { height: 9px; border-radius: 999px; background: rgba(255,255,255,.08); overflow: hidden; }
 .bk-st-bar > span { display: block; height: 100%; border-radius: 999px; background: linear-gradient(90deg, var(--accent), var(--accent-2)); }
+
+/* ── Matrix (round robin / pool play head-to-head grid) ── */
+.bk-matrix { align-self: center; max-width: 100%; border-radius: 16px; border: 1px solid var(--hair); padding: 24px;
+  background: linear-gradient(180deg, rgba(22,25,33,.96), rgba(13,15,21,.96)); box-shadow: 0 18px 44px rgba(0,0,0,.5); }
+.bk-mx-table { display: grid; gap: 4px; }
+.bk-mx-cell { display: flex; align-items: center; justify-content: center; height: 60px; border-radius: 7px;
+  font-family: var(--disp); font-weight: 700; font-size: 18px; font-variant-numeric: tabular-nums; background: rgba(255,255,255,.03); color: #fff; }
+.bk-mx-corner { background: transparent; }
+.bk-mx-head { background: linear-gradient(180deg, rgba(255,255,255,.09), rgba(255,255,255,.04)); color: #e3e8f1;
+  font-size: 14px; letter-spacing: .04em; padding: 0 8px; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  border-bottom: 2px solid color-mix(in srgb, var(--accent) 45%, transparent); }
+.bk-mx-rowhead { justify-content: flex-start; gap: 10px; padding-left: 14px; text-align: left;
+  border-bottom: none; border-right: 2px solid color-mix(in srgb, var(--accent) 45%, transparent); }
+.bk-mx-logo { width: 24px; height: 24px; object-fit: contain; flex: 0 0 auto; }
+.bk-mx-logo.logo-on-dark { filter: invert(1); }
+.bk-mx-diag { background: repeating-linear-gradient(45deg, rgba(255,255,255,.02), rgba(255,255,255,.02) 6px, transparent 6px, transparent 12px); }
+.bk-mx-unplayed { color: rgba(255,255,255,.22); }
+.bk-mx-played.win { color: #6ff0a4; background: rgba(95,227,154,.14); box-shadow: inset 0 0 0 1px rgba(95,227,154,.22); }
+.bk-mx-played.loss { color: #f5a0a0; background: rgba(240,138,138,.09); box-shadow: inset 0 0 0 1px rgba(240,138,138,.16); }
 
 /* ── Empty ── */
 .bk-empty { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
@@ -202,6 +249,7 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
   let abbrevByName = {};
   let colorByName = {};
   let _sig = '';
+  let _livePair = '';   // on-air teams (sorted, upper, '|'-joined) — drives the LIVE badge
 
   function logoFor(name) { return (name && logoByName[name.toLowerCase()]) || null; }
   function isDark(src) { try { return SceneBase.isDefaultGameLogo(src); } catch (e) { return false; } }
@@ -260,8 +308,17 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
     const a = set.a || {}, b = set.b || {};
     const known = (a.name && a.name !== 'TBD') && (b.name && b.name !== 'TBD');
     const decided = a.winner || b.winner;
-    const inPlay = known && !decided && (((a.score || 0) + (b.score || 0)) > 0);
-    m.className = 'bk-match' + (isFinal ? ' is-final' : '') + (inPlay ? ' live' : '');
+    // LIVE = this set's pair is the pair currently on the scoreboard (either order) and it
+    // isn't decided yet. The old score-sum heuristic missed 0-0 sets and never turned off
+    // when a partially-scored set was abandoned.
+    const pair = known
+      ? [String(a.name).trim().toUpperCase(), String(b.name).trim().toUpperCase()].sort().join('|')
+      : '';
+    const inPlay = known && !decided && !!_livePair && pair === _livePair;
+    // start.gg state 1 = not started — render slightly muted so a pre-event bracket
+    // clearly reads as "scheduled", not "results".
+    const upcoming = set.state === 1 && !decided && !inPlay;
+    m.className = 'bk-match' + (isFinal ? ' is-final' : '') + (inPlay ? ' live' : '') + (upcoming ? ' upcoming' : '');
     m.appendChild(buildSlot(a));
     m.appendChild(buildSlot(b));
     return m;
@@ -341,24 +398,113 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
 
   function buildStandings(standings) {
     const wrap = document.createElement('div'); wrap.className = 'bk-standings';
+    // Round Robin/Swiss rows carry extra stat fields (Sets Played, Game Wins-Losses) that
+    // Start.gg's own standings tables show — elimination-bracket rows never have them, so
+    // this stays a plain W/L table there (zero visual change for the far more common case).
+    const enriched = standings.some((s) => s.setsTotal != null);
+    wrap.classList.toggle('enriched', enriched);
     const head = document.createElement('div'); head.className = 'bk-st-row bk-st-head';
-    head.innerHTML = '<div class="bk-st-rank">#</div><div>Team</div><div style="text-align:center">W</div><div style="text-align:center">L</div><div style="text-align:center">Win %</div>';
+    head.innerHTML = '<div class="bk-st-rank">#</div><div>Team</div><div style="text-align:center">W</div><div style="text-align:center">L</div>'
+      + (enriched ? '<div style="text-align:center">Played</div><div style="text-align:center">Games</div>' : '')
+      + '<div style="text-align:center">Win %</div>';
     wrap.appendChild(head);
     standings.forEach((s, i) => {
       const total = (s.wins || 0) + (s.losses || 0);
       const pct = total ? Math.round((s.wins / total) * 100) : 0;
-      const row = document.createElement('div'); row.className = 'bk-st-row' + (i < 3 ? ' r' + (i + 1) : '');
-      const rank = document.createElement('div'); rank.className = 'bk-st-rank'; rank.textContent = s.placement;
+      // played === false → the event hasn't produced a result for this team yet: no rank
+      // number and no medal tint, so a pre-event table doesn't imply real placements.
+      const noResult = s.played === false && total === 0;
+      const row = document.createElement('div'); row.className = 'bk-st-row' + (!noResult && i < 3 ? ' r' + (i + 1) : '');
+      const rank = document.createElement('div'); rank.className = 'bk-st-rank'; rank.textContent = noResult ? '–' : s.placement;
       const team = document.createElement('div'); team.className = 'bk-st-team';
       const logo = logoFor(s.name);
       if (logo) { const img = document.createElement('img'); img.className = 'bk-st-logo' + (isDark(logo) ? ' logo-on-dark' : ''); img.src = logo; img.onerror = function () { this.style.display = 'none'; }; team.appendChild(img); }
       const nm = document.createElement('div'); nm.className = 'bk-st-name'; nm.textContent = s.name; team.appendChild(nm);
       const w = document.createElement('div'); w.className = 'bk-st-rec bk-st-w'; w.textContent = s.wins;
       const l = document.createElement('div'); l.className = 'bk-st-rec bk-st-l'; l.textContent = s.losses;
+      row.appendChild(rank); row.appendChild(team); row.appendChild(w); row.appendChild(l);
+      if (enriched) {
+        const played = document.createElement('div'); played.className = 'bk-st-extra';
+        played.textContent = (s.setsPlayed || 0) + '/' + (s.setsTotal || 0);
+        const games = document.createElement('div'); games.className = 'bk-st-extra';
+        games.textContent = (s.gameWins || 0) + '-' + (s.gameLosses || 0);
+        row.appendChild(played); row.appendChild(games);
+      }
       const bar = document.createElement('div'); bar.className = 'bk-st-bar'; bar.innerHTML = '<span style="width:' + pct + '%"></span>';
-      row.appendChild(rank); row.appendChild(team); row.appendChild(w); row.appendChild(l); row.appendChild(bar);
+      row.appendChild(bar);
       wrap.appendChild(row);
     });
+    return wrap;
+  }
+
+  // Head-to-head grid for Round Robin pools — rows/columns are both team names, each
+  // cell is that pairing's result. Matches how Start.gg itself presents Pool Play.
+  function buildMatrix(matrix) {
+    const teams = (matrix && matrix.teams) || [];
+    const cells = (matrix && matrix.cells) || {};
+    const wrap = document.createElement('div'); wrap.className = 'bk-matrix';
+    const table = document.createElement('div'); table.className = 'bk-mx-table';
+    table.style.gridTemplateColumns = '220px repeat(' + teams.length + ', minmax(64px, 1fr))';
+    const corner = document.createElement('div'); corner.className = 'bk-mx-cell bk-mx-corner'; table.appendChild(corner);
+    teams.forEach((t) => {
+      const h = document.createElement('div'); h.className = 'bk-mx-cell bk-mx-head';
+      const short = abbrevByName[t.name.toLowerCase()] || abbrev(t.name);
+      h.textContent = short; h.title = t.name;
+      table.appendChild(h);
+    });
+    teams.forEach((rowTeam) => {
+      const rh = document.createElement('div'); rh.className = 'bk-mx-cell bk-mx-head bk-mx-rowhead';
+      const logo = logoFor(rowTeam.name);
+      if (logo) { const img = document.createElement('img'); img.className = 'bk-mx-logo' + (isDark(logo) ? ' logo-on-dark' : ''); img.src = logo; img.onerror = function () { this.style.display = 'none'; }; rh.appendChild(img); }
+      const nm = document.createElement('span'); nm.textContent = rowTeam.name; rh.appendChild(nm);
+      table.appendChild(rh);
+      teams.forEach((colTeam) => {
+        const cell = document.createElement('div'); cell.className = 'bk-mx-cell';
+        if (colTeam.id === rowTeam.id) {
+          cell.classList.add('bk-mx-diag');
+        } else {
+          const c = cells[rowTeam.id + '_' + colTeam.id];
+          if (c && c.played) {
+            cell.classList.add('bk-mx-played', c.winner === 'a' ? 'win' : (c.winner === 'b' ? 'loss' : ''));
+            cell.textContent = (c.aScore == null ? '-' : c.aScore) + '-' + (c.bScore == null ? '-' : c.bScore);
+          } else {
+            cell.classList.add('bk-mx-unplayed');
+            cell.textContent = '–';
+          }
+        }
+        table.appendChild(cell);
+      });
+    });
+    wrap.appendChild(table);
+    return wrap;
+  }
+
+  // Manually-built schedules (Bracket Builder) don't stamp an explicit a.winner/b.winner flag the
+  // way start.gg-derived sets do — infer one from the scores so buildMatch/buildSlot's win/live
+  // styling (and the "LIVE" badge) still work correctly for those too.
+  function withInferredWinners(schedule) {
+    return (schedule || []).map((r) => ({
+      ...r,
+      sets: (r.sets || []).map((set) => {
+        const a = set.a || {}, b = set.b || {};
+        if (a.winner || b.winner) return set;   // already explicit
+        const bothKnown = a.name && a.name !== 'TBD' && b.name && b.name !== 'TBD';
+        const bothScored = a.score != null && b.score != null;
+        if (bothKnown && bothScored && a.score !== b.score) {
+          return { a: { ...a, winner: a.score > b.score }, b: { ...b, winner: b.score > a.score } };
+        }
+        return set;
+      })
+    }));
+  }
+
+  // Round-robin / Swiss round-by-round pairings — reuses buildColumn (same {name,sets} shape
+  // as the elimination rounds), just laid out as one flat row of columns with no connectors.
+  function buildSchedule(schedule) {
+    const wrap = document.createElement('div'); wrap.className = 'bk-schedule';
+    const band = document.createElement('div'); band.className = 'bk-rounds';
+    withInferredWinners(schedule).forEach((r) => band.appendChild(buildColumn(r, false)));
+    wrap.appendChild(band);
     return wrap;
   }
 
@@ -393,23 +539,42 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
     const stage = el('bk-stage'), scaleEl = el('bk-scale'), emptyEl = el('bk-empty');
     stage.classList.add('show');
 
-    // Effective view: URL override > state-driven view.
-    const view = (URL_PART || b.view || 'both').toLowerCase();
+    const winners = b.winners || [], losers = b.losers || [], finals = b.finals || [], schedule = b.schedule || [];
+    const matrix = (b.matrix && b.matrix.teams && b.matrix.teams.length) ? b.matrix : null;
+
+    // Effective view: URL override > state-driven view — but NEVER a view this bracket has no
+    // data for (a stale saved "matrix" on an elim bracket used to blank the whole overlay).
+    let view = (URL_PART || b.view || 'both').toLowerCase();
+    if (view === 'matrix' && !matrix) view = (winners.length || losers.length) ? 'both' : ((b.standings || []).length ? 'standings' : 'both');
+    if (view === 'schedule' && !schedule.length) view = (winners.length || losers.length) ? 'both' : ((b.standings || []).length ? 'standings' : 'both');
+    if ((view === 'losers' || view === 'lower') && !losers.length) view = 'both';
     const SHOW_W = view !== 'losers' && view !== 'lower';
     const SHOW_L = view !== 'winners' && view !== 'upper';
     let ROUNDS_N = 0;
     if (URL_ROUNDS != null) ROUNDS_N = Math.max(0, parseInt(URL_ROUNDS, 10) || 0);
     else if (view === 'finals') ROUNDS_N = Math.max(1, parseInt(b.rounds, 10) || 4);   // finals stretch
     const _lastN = (arr) => (ROUNDS_N > 0 && arr.length > ROUNDS_N) ? arr.slice(arr.length - ROUNDS_N) : arr;
-
-    const winners = b.winners || [], losers = b.losers || [], finals = b.finals || [], standings = b.standings || [];
+    // Bracket's own standings table now reads the SAME source the standalone Standings scene
+    // does (state.standings — League / start.gg-seed / Manual, whichever the producer picked
+    // there) before falling back to the computed round-robin/swiss record table, so producers
+    // only have to configure one standings source instead of two disconnected ones.
+    const stState = data.standings || {};
+    const standings = (stState.rows && stState.rows.length > 0) ? stState.rows : (b.standings || []);
     const phases = b.phases || [];
+    const pools = b.pools || [];
     const isElim = winners.length || losers.length || finals.length;
-    const hasData = isElim || standings.length;
+    const hasData = isElim || schedule.length || standings.length || !!matrix;
 
     const focusTeam = (data.startgg && data.startgg.focusTeam) || '';
-    const sig = JSON.stringify({ t: b.title, ty: b.type, w: winners, l: losers, f: finals, s: standings,
-      ph: phases.map((p) => p.id + p.name), ap: b.activePhaseId, lg: logoByName, vw: view, rn: ROUNDS_N, ft: focusTeam });
+    // The on-air pair (Match — Teams / bracket "Go Live" / auto-follow): the set whose teams
+    // are currently on the scoreboard gets the LIVE badge — a real signal, unlike scores.
+    _livePair = [
+      ((data.teams && data.teams.blue && data.teams.blue.name) || '').trim().toUpperCase(),
+      ((data.teams && data.teams.orange && data.teams.orange.name) || '').trim().toUpperCase()
+    ].filter(Boolean).sort().join('|');
+    const sig = JSON.stringify({ t: b.title, ty: b.type, w: winners, l: losers, f: finals, sc: schedule, s: standings, mx: matrix,
+      ph: phases.map((p) => p.id + p.name), ap: b.activePhaseId, pl: pools.map((p) => p.id + p.name), apl: b.activePoolId,
+      lg: logoByName, vw: view, rn: ROUNDS_N, ft: focusTeam, lp: _livePair });
     if (sig === _sig) return;
     _sig = sig;
 
@@ -479,8 +644,27 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
         }
       }
       emptyEl.classList.toggle('hidden', rendered);
-    } else if (standings.length) {
-      scaleEl.appendChild(buildStandings(standings));
+    } else if (schedule.length || standings.length || matrix) {
+      // Round-robin / Swiss: ?part=schedule (round-by-round pairings only), ?part=standings
+      // (record table only), ?part=matrix (Round Robin head-to-head grid only — not offered
+      // for Swiss, whose pairings aren't all-play-all); anything else (including the elim-only
+      // 'both'/'winners'/'losers' values, which don't apply here) shows schedule+standings
+      // stacked, same "both" spirit as elim brackets — matrix is only ever explicit, so an
+      // existing single-pool/Swiss event's default view is completely unaffected.
+      // ONE section at a time — an elim-only view value ('both' etc.) left over from a linked
+      // platform import used to stack schedule + standings together, which read as several
+      // overlays rendered on top of each other. Explicit views still show exactly what they say.
+      let rrView = view;
+      if (!['schedule', 'standings', 'matrix'].includes(rrView)) {
+        rrView = schedule.length ? 'schedule' : (standings.length ? 'standings' : 'matrix');
+      }
+      const wantMatrix = !!matrix && rrView === 'matrix';
+      const wantSchedule = schedule.length > 0 && rrView === 'schedule';
+      const wantStandings = standings.length > 0 && rrView === 'standings';
+      if (wantMatrix) scaleEl.appendChild(buildMatrix(matrix));
+      if (wantSchedule) scaleEl.appendChild(buildSchedule(schedule));
+      if (wantStandings) scaleEl.appendChild(buildStandings(standings));
+      emptyEl.classList.toggle('hidden', wantMatrix || wantSchedule || wantStandings);
     }
 
     // Connectors are computed in the wrapper's UNSCALED coordinate space, then fit()
@@ -523,6 +707,15 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
       if (t.logo)  logoByName[k]   = t.logo;
       if (t.abbr)  abbrevByName[k] = t.abbr.toUpperCase().slice(0, 6);
       if (t.color && /^#[0-9a-f]{3,8}$/i.test(t.color)) colorByName[k] = t.color;
+    });
+    // Fallback: logos carried on the bracket itself (manual builder teams that aren't in the
+    // saved-teams library still get a logo). Saved-teams / start.gg take priority above.
+    ((d.bracket && d.bracket.teams) || []).forEach((t) => {
+      if (!t || !t.name) return;
+      const k = t.name.toLowerCase();
+      if (t.logo && !logoByName[k]) logoByName[k] = t.logo;
+      if (t.abbr && !abbrevByName[k]) abbrevByName[k] = t.abbr.toUpperCase().slice(0, 6);
+      if (t.color && !colorByName[k] && /^#[0-9a-f]{3,8}$/i.test(t.color)) colorByName[k] = t.color;
     });
     render(d);
   }

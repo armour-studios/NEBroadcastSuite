@@ -95,7 +95,8 @@
 
     /* ?cams=off framing: transparent hole so the per-caster OBS source shows through. */
     .duo-stage.frames-only .cam-hole { background: transparent; }
-    .duo-stage.frames-only .cam-card { background: transparent; box-shadow: none; }
+    .duo-stage.frames-only .cam-card { background: transparent; box-shadow: none; border-color: transparent; }
+    .duo-stage.frames-only .cam-card::before { display: none; }
     .preview .cam-hole { background: repeating-linear-gradient(45deg, #181b22, #181b22 16px, #20242e 16px, #20242e 32px); }
     .preview .cam-hole::after { content: 'CAM'; position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 30px; font-weight: 800; letter-spacing: .3em; color: #4a5162; }
     .preview .cam-hole iframe { position: relative; z-index: 1; }

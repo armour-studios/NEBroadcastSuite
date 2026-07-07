@@ -25,6 +25,7 @@ const rlSpectatorUi = require('./backend/integrations/rl-spectator-ui');
 const { createOverlayEditor } = require('./backend/scenes/overlay-editor');
 const vetoData = require('./backend/veto');
 const draftData = require('./backend/draft');
+const vmix = require('./backend/vmix');   // vMix HTTP control — the full alternative to OBS (docs/vmix-integration.md)
 const lolChampSelect = require('./backend/lol-champselect');
 const lolLive = require('./backend/lol-live');
 const lolOcr = require('./backend/lol-ocr');
@@ -231,7 +232,7 @@ let state = {
   colorMode: 'team',        // 'team' | 'brand' | 'default'
   sceneBg: {},              // live bg fill per overlay path, keyed by pathname
   banner: { visible: false, images: [], captions: [], interval: 10, slant: 'right', header: '' },
-  casters: { visible: true, showCountry: false, list: [], lowerThird: '', library: [], vdo: { room: '', password: '' }, guestsVdo: { room: '', password: '' }, observersVdo: { room: '', password: '' }, rooms: [], lineup: [], activeLayout: '', interview: { room: '', password: '' }, apiKey: '', interviewee: null, deskRoomId: '', slotLabels: { 1: 'Caster 1', 2: 'Caster 2', 3: 'Caster 3', 4: 'Caster 4' } },   // list = on-air slots; showCountry = render each caster's country on the desk; library = saved casters/guests/observers (by kind); vdo/guestsVdo/observersVdo = the three shared group rooms; rooms = named VDO rooms; lineup = this-show active assignments; apiKey = director IFrame-API key; interviewee = spotlight-desk right cam; deskRoomId = which named room is the interview/desk room
+  casters: { visible: true, showCountry: false, list: [], lowerThird: '', library: [], vdo: { room: '', password: '' }, guestsVdo: { room: '', password: '' }, observersVdo: { room: '', password: '' }, rooms: [], lineup: [], activeLayout: '', interview: { room: '', password: '' }, apiKey: '', interviewee: null, playerCam: null, deskRoomId: '', slotLabels: { 1: 'Caster 1', 2: 'Caster 2', 3: 'Caster 3', 4: 'Caster 4', 5: 'Player' } },   // list = on-air slots; showCountry = render each caster's country on the desk; library = saved casters/guests/observers (by kind); vdo/guestsVdo/observersVdo = the three shared group rooms; rooms = named VDO rooms; lineup = this-show active assignments; apiKey = director IFrame-API key; interviewee = spotlight-desk right cam; playerCam = slot-5 player feed ({camUrl,name,playerId}); deskRoomId = which named room is the interview/desk room
   // VDO.Ninja talent workflow. Global config (server-side, replaces the old localStorage settings);
   // per-team rooms/passwords live on teams.x.vdo, per-player IDs on the player objects.
   vdo: {
@@ -295,6 +296,13 @@ let state = {
   // Desk footer logos — manual Dashboard override. When non-empty these replace the active
   // brand's desk-tagged sponsors on the caster-desk scenes; when empty the brand's logos show.
   deskFooter: { logos: [] },
+  // Desk Show (preshow.html) — 2-cam standalone OBS scene; cams/team-matchup/kickoff
+  // timer/brand logo all reuse existing state (casters/upcoming/breakScreen/teams/brand). Only
+  // the discussion-topics rail + headline need their own settings.
+  // Each topic: { text, sceneName } — sceneName is an optional OBS scene to cut to when that
+  // topic goes active (e.g. cut to the Bracket while discussing "who's going to Worlds").
+  // homeScene is the OBS scene "Return" switches back to (typically the Desk Show scene).
+  preshow: { headline: '', topics: [], activeTopicIndex: 0, homeScene: '', topicPresets: {} },
   csgo: {                                                 // CS2 Game State Integration
     connected: false,
     lastUpdate: 0,
@@ -459,6 +467,8 @@ let state = {
     availableScenes: [],
     availableTransitions: [],
     currentScene: '',    // live OBS PROGRAM scene = what viewers see (authoritative "on air")
+    currentPreviewScene: '',  // Studio Mode preview scene (the Switcher page's "next")
+    studioMode: false,        // OBS Studio Mode on/off (needed for preview/program + TAKE)
     scenes: {            // OBS scene name to switch to for each broadcast moment
       inGame: '',
       replay: '',
@@ -471,25 +481,60 @@ let state = {
     commercialAutoReturn: true,  // auto-cut back to program when the commercial video ends
     replayBufferActive: false    // live status from OBS ReplayBufferStateChanged
   },
+  // vMix — the FULL ALTERNATIVE production backend to OBS (either/or, never both). HTTP Web API
+  // (default :8088) polled for live state; functions fired by flows + the switcher. See
+  // docs/vmix-integration.md. state.switcher.target picks which backend is live.
+  vmix: {
+    enabled: false,
+    connected: false,
+    host: '127.0.0.1',
+    port: 8088,
+    lastError: null,
+    version: '',
+    edition: '',
+    active: null,        // program input number
+    preview: null,       // preview input number
+    streaming: false,
+    recording: false,
+    inputs: [],          // [{ number, key, type, title, state }]
+    overlays: []         // [{ number, input }] — overlay channels 1-4
+  },
+  // Which production switcher is live. Mutually exclusive — vMix is a full alternative to OBS.
+  switcher: { target: 'obs' },   // 'obs' | 'vmix'
   // Runtime (not persisted): are we currently in a commercial, and where to return.
   commercial: { active: false, returnScene: '' },
   bracket: {
     visible: false,
     eventSlug: '',
+    followActive: true,   // auto-point at the ACTIVE event (Dashboard ▸ Event); false = producer typed an explicit slug
     title: '',
+    // How the current phases were populated. 'imported' = a platform feed owns the data and the
+    // live-refresh tick may overwrite it; 'manual' = the in-app builder owns it and NOTHING external
+    // should clobber it. Prevents the old silent collision where a manual edit wiped an import (and
+    // vice-versa). source names the platform for 'imported'. Default '' = empty/no bracket yet.
+    mode: '',            // '' | 'imported' | 'manual'
+    source: '',          // '' | 'startgg' | 'challonge' | 'nxgen'
     type: '',            // SINGLE_ELIMINATION | DOUBLE_ELIMINATION | ROUND_ROBIN | SWISS (mirrors active phase)
     winners: [],         // [{ name, round, sets: [{ a:{name,score,winner}, b:{...} }] }] (mirrors active phase)
     losers: [],
     finals: [],
     standings: [],       // [{ placement, name, wins, losses }] for round-robin / swiss (mirrors active phase)
+    schedule: [],        // [{ name, round, sets: [{a,b}] }] round-by-round pairings, round-robin/swiss only
+    roster: [],          // round-robin/swiss entrant names (mirrors active phase)
     matches: [],         // [{ id, round, a, b, state }] flat picker list
     // Multi-phase events (e.g. Day 1 double-elim → Day 2 single-elim/swiss).
-    // Each phase: { id, name, type, winners, losers, finals, standings, schedule, roster }.
-    // Top-level winners/losers/finals/standings/type mirror the ACTIVE phase so the
-    // existing overlay keeps working unchanged.
+    // Each phase: { id, name, type, winners, losers, finals, standings, schedule, roster, pools }.
+    // Each phase also has pools: [{ id, name, type, roster, schedule, standings, matrix }] — one
+    // entry per Start.gg phaseGroup (Pool 1, Pool 2, ...); single-pool phases still get one entry
+    // so winners/losers/finals/standings/schedule/roster below always mirror pools[0].
+    // Top-level winners/losers/finals/standings/type/schedule/roster mirror the ACTIVE phase's
+    // ACTIVE POOL so the existing overlay keeps working unchanged.
     phases: [],
     activePhaseId: '',
-    view: 'both',        // overlay view: both | winners | losers | finals (set from the Brackets tab)
+    pools: [],           // [{ id, name }] lightweight list of the active phase's pools, for the pool selector
+    activePoolId: '',
+    matrix: null,        // { teams:[{id,name}], cells:{ "idA_idB": {aScore,bScore,winner} } } — Round Robin pools only
+    view: 'both',        // overlay view: both | winners | losers | finals | schedule | standings | matrix
     rounds: 4,           // for view='finals' — how many last round-columns of each bracket to show
     lastFetchAt: null,
     lastError: null
@@ -499,11 +544,17 @@ let state = {
     title: 'UPCOMING MATCHES',
     eyebrow: 'On Deck',    // small label above the title (board layout uses title as e.g. "WEEK 11")
     layout: 'cards',       // 'cards' = duorow card row | 'board' = weekly matchup board (team-colored bars)
+    // 'event' = follow the stream queue (marked-as-stream matches + a couple non-stream upcoming);
+    // 'team' = the searched team's own matches. Set by which Stream Queue tab / fetch is used.
+    source: 'event',
     matches: []   // manual entries/overrides: [{id,round,teamA,teamB,teamALogo,teamBLogo,date,time,stream,scoreA,scoreB,week,note}]
   },
   standings: {
     visible: false,
     title: '',    // '' = inherit bracket.title; auto-populated from bracket.standings if rows is empty
+    subtitle: '', // optional line under the title (e.g. "Week 4 · Group A" or a season label)
+    showRecord: true, // false = hide the W/L columns (clean points-only leaderboard)
+    source: 'auto',   // 'auto' (bracket/start.gg) | 'league' | 'startgg-league' | 'manual' — informational; rows always win
     rows: []      // manual override: [{placement,name,logo,wins,losses,points}]
   },
   // Season / league record shown under each team name on the top scorebar overlay.
@@ -875,6 +926,7 @@ function buildProfileBundle() {
         scoreboardAd:         s.scoreboardAd,
         deskFooter:           s.deskFooter,
         vdo:                  s.vdo,
+        preshow:              s.preshow,   // Desk Show headline/topics + saved topic presets
         customOverlayLayouts: s.customOverlayLayouts
       }
     }
@@ -917,7 +969,7 @@ function applyProfileBundle(bundle, options) {
   }
   if (want('settings') && d.settings && typeof d.settings === 'object') {
     const v = d.settings;
-    ['fontFamily', 'colorMode', 'activeBrandKitId', 'bestOf', 'banner', 'ticker', 'overtime', 'replay', 'scoreboardAd', 'deskFooter', 'vdo', 'customOverlayLayouts']
+    ['fontFamily', 'colorMode', 'activeBrandKitId', 'bestOf', 'banner', 'ticker', 'overtime', 'replay', 'scoreboardAd', 'deskFooter', 'preshow', 'vdo', 'customOverlayLayouts']
       .forEach((k) => { if (v[k] !== undefined) state[k] = v[k]; });
     if (v.themesByGame && typeof v.themesByGame === 'object') state.themesByGame = { ...state.themesByGame, ...v.themesByGame };
     state.useBrandColors = (state.colorMode === 'brand');
@@ -1511,7 +1563,15 @@ function loadState() {
       if (saved.facecamsEnabled !== undefined) state.facecamsEnabled = saved.facecamsEnabled;
       if (saved.replayCams !== undefined) state.replayCams = saved.replayCams;
       if (saved.sceneBg && typeof saved.sceneBg === 'object') state.sceneBg = { ...saved.sceneBg };
-      if (saved.scenePresets && typeof saved.scenePresets === 'object') state.scenePresets = saved.scenePresets;
+      if (saved.scenePresets && typeof saved.scenePresets === 'object') {
+        state.scenePresets = saved.scenePresets;
+        // A '__preview__' preset is an unsaved live-preview scratchpad — if the app closed while
+        // one was active it would silently override brand colours on air forever. Reset to Default.
+        Object.values(state.scenePresets).forEach((sp) => {
+          if (sp && sp.active === '__preview__') sp.active = 'Default';
+        });
+      }
+      if (saved.brand && typeof saved.brand === 'object') state.brand = saved.brand;
       if (saved.banner) state.banner = saved.banner;
       if (saved.casters && typeof saved.casters === 'object') {
         state.casters = {
@@ -1521,17 +1581,20 @@ function loadState() {
           list: Array.isArray(saved.casters.list) ? saved.casters.list : [],
           library: Array.isArray(saved.casters.library) ? saved.casters.library : [],
           vdo: (saved.casters.vdo && saved.casters.vdo.room) ? saved.casters.vdo : { room: '', password: '' },
+          guestsVdo: (saved.casters.guestsVdo && saved.casters.guestsVdo.room) ? saved.casters.guestsVdo : { room: '', password: '' },
+          observersVdo: (saved.casters.observersVdo && saved.casters.observersVdo.room) ? saved.casters.observersVdo : { room: '', password: '' },
           rooms: Array.isArray(saved.casters.rooms) ? saved.casters.rooms : [],
           lineup: Array.isArray(saved.casters.lineup) ? saved.casters.lineup : [],
           activeLayout: typeof saved.casters.activeLayout === 'string' ? saved.casters.activeLayout : '',
           interview: (saved.casters.interview && saved.casters.interview.room) ? saved.casters.interview : { room: '', password: '' },
           apiKey: typeof saved.casters.apiKey === 'string' ? saved.casters.apiKey : '',
           interviewee: (saved.casters.interviewee && typeof saved.casters.interviewee === 'object') ? saved.casters.interviewee : null,
+          playerCam: (saved.casters.playerCam && typeof saved.casters.playerCam === 'object') ? saved.casters.playerCam : null,
           deskRoomId: typeof saved.casters.deskRoomId === 'string' ? saved.casters.deskRoomId : '',
           slotLabels: (function() {
             const sl = saved.casters.slotLabels;
-            if (!sl || typeof sl !== 'object') return { 1: 'Caster 1', 2: 'Caster 2', 3: 'Caster 3', 4: 'Caster 4' };
-            return { 1: String(sl[1] || 'Caster 1').slice(0, 30), 2: String(sl[2] || 'Caster 2').slice(0, 30), 3: String(sl[3] || 'Caster 3').slice(0, 30), 4: String(sl[4] || 'Caster 4').slice(0, 30) };
+            if (!sl || typeof sl !== 'object') return { 1: 'Caster 1', 2: 'Caster 2', 3: 'Caster 3', 4: 'Caster 4', 5: 'Player' };
+            return { 1: String(sl[1] || 'Caster 1').slice(0, 30), 2: String(sl[2] || 'Caster 2').slice(0, 30), 3: String(sl[3] || 'Caster 3').slice(0, 30), 4: String(sl[4] || 'Caster 4').slice(0, 30), 5: String(sl[5] || 'Player').slice(0, 30) };
           })()
         };
       }
@@ -1571,6 +1634,20 @@ function loadState() {
       }
       if (saved.deskFooter && Array.isArray(saved.deskFooter.logos)) {
         state.deskFooter = { logos: saved.deskFooter.logos.filter((l) => typeof l === 'string' && l) };
+      }
+      if (saved.preshow && typeof saved.preshow === 'object') {
+        state.preshow = {
+          headline: typeof saved.preshow.headline === 'string' ? saved.preshow.headline : '',
+          topics: Array.isArray(saved.preshow.topics)
+            ? saved.preshow.topics.filter((t) => t && typeof t === 'object').map((t) => ({
+                text: typeof t.text === 'string' ? t.text : '',
+                sceneName: typeof t.sceneName === 'string' ? t.sceneName : ''
+              }))
+            : [],
+          activeTopicIndex: Math.max(0, parseInt(saved.preshow.activeTopicIndex, 10) || 0),
+          homeScene: typeof saved.preshow.homeScene === 'string' ? saved.preshow.homeScene : '',
+          topicPresets: (saved.preshow.topicPresets && typeof saved.preshow.topicPresets === 'object') ? saved.preshow.topicPresets : {}
+        };
       }
       if (saved.vdo && typeof saved.vdo === 'object') {
         state.vdo = { ...state.vdo, ...saved.vdo };
@@ -1750,6 +1827,14 @@ function loadState() {
       if (typeof saved.obsPassword === 'string') {
         obsPassword = saved.obsPassword;
       }
+      if (saved.vmix && typeof saved.vmix === 'object') {
+        state.vmix.enabled = !!saved.vmix.enabled;
+        if (typeof saved.vmix.host === 'string' && saved.vmix.host.trim()) state.vmix.host = saved.vmix.host.trim();
+        if (Number(saved.vmix.port) > 0) state.vmix.port = Number(saved.vmix.port);
+      }
+      if (saved.switcher && (saved.switcher.target === 'vmix' || saved.switcher.target === 'obs')) {
+        state.switcher.target = saved.switcher.target;
+      }
       if (typeof saved.csgoCfgPath === 'string') {
         state.csgo.cfgPath = saved.csgoCfgPath;
       }
@@ -1762,9 +1847,14 @@ function loadState() {
           losers: Array.isArray(saved.bracket.losers) ? saved.bracket.losers : [],
           finals: Array.isArray(saved.bracket.finals) ? saved.bracket.finals : [],
           standings: Array.isArray(saved.bracket.standings) ? saved.bracket.standings : [],
+          schedule: Array.isArray(saved.bracket.schedule) ? saved.bracket.schedule : [],
+          roster: Array.isArray(saved.bracket.roster) ? saved.bracket.roster : [],
           matches: Array.isArray(saved.bracket.matches) ? saved.bracket.matches : [],
           phases: Array.isArray(saved.bracket.phases) ? saved.bracket.phases : [],
           activePhaseId: saved.bracket.activePhaseId || '',
+          pools: Array.isArray(saved.bracket.pools) ? saved.bracket.pools : [],
+          activePoolId: saved.bracket.activePoolId || '',
+          matrix: saved.bracket.matrix || null,
           lastError: null
         };
       }
@@ -1875,6 +1965,7 @@ function _saveAppStateNow(sync = false) {
       facecamsEnabled: state.facecamsEnabled,
       replayCams: state.replayCams,
       deskFooter: state.deskFooter,
+      preshow: state.preshow,
       banner: state.banner,
       casters: state.casters,
       ticker: state.ticker,
@@ -1927,11 +2018,14 @@ function _saveAppStateNow(sync = false) {
         scenes: state.obs.scenes
       },
       obsPassword,
+      vmix: { enabled: state.vmix.enabled, host: state.vmix.host, port: state.vmix.port },
+      switcher: { target: state.switcher.target },
       // Persist the full bracket so it renders instantly on restart (then refreshes)
       bracket: state.bracket,
       upcoming: state.upcoming,
       standings: state.standings,
       socialPreset: state.socialPreset || null,   // Social Export background/presented-by fallback (no brand kit active)
+      brand: state.brand || null,                 // global accent fallback (Settings ▸ Appearance) when no kit is active
       csgoCfgPath: state.csgo.cfgPath,
       director: {
         enabled: state.director?.enabled !== false,
@@ -2112,6 +2206,10 @@ function resolveLineupToList() {
               : ((state.casters.vdo && state.casters.vdo.room) ? state.casters.vdo : null);
     const sid = entry.streamId || ('caster_' + (entry.slot || (i + 1)));
     const fakeCaster = { streamId: sid, handle: prof.handle, name: prof.name, camUrl: prof.camUrl, audio: entry.audio };
+    // camUrl precedence: per-slot lineup override → the caster's explicit custom view link
+    // (prof.camUrl / vdoOverride, pasted in the DCC) → the auto-generated room feed. A pasted link
+    // must WIN over the generated room so producers can point a caster at any third-party feed.
+    const customLink = (entry.customCamUrl || prof.vdoOverride || prof.camUrl || '').toString().trim();
     return {
       id: prof.id || ('lineup_' + (entry.slot || (i + 1))),
       name: prof.name || '',
@@ -2121,7 +2219,7 @@ function resolveLineupToList() {
       slot: Number(entry.slot) || (i + 1),
       streamId: sid,
       room: vdo ? vdo.room : '',
-      camUrl: entry.customCamUrl || (vdo ? buildCasterObsUrlFromVdo(fakeCaster, vdo) : (prof.camUrl || '')),
+      camUrl: customLink || (vdo ? buildCasterObsUrlFromVdo(fakeCaster, vdo) : ''),
     };
   });
 }
@@ -2533,7 +2631,9 @@ function libraryData() {
     playerProfiles: state.playerProfiles || {},   // per-player start.gg + 6mans links
     brandKits: savedBrandKits,
     brandKitsVer,                                 // lets the client detect ANY brand-kit change cheaply
-    brand: activeBrand(),
+    // Active kit wins; with no kit, fall back to the producer's global accent colour
+    // (Settings ▸ Appearance, set_global_accent) so that control actually reaches overlays.
+    brand: activeBrand() || ((state.brand && state.brand.color) ? { color: state.brand.color, accent: state.brand.accent || null } : null),
     socialPreset: state.socialPreset || null,      // Social Export background/presented-by, when no brand kit is active
     banner: bannerForBroadcast(),
     mainBanner: state.banner,
@@ -2736,6 +2836,30 @@ async function testStartGgConnection() {
   return user;
 }
 
+// Close out the current series (stats match + scores + game number) — shared by the
+// reset_series WS case and the start.gg push/auto-follow paths, so advancing to the
+// next set never carries the previous match's score or game number onto the overlay.
+function finalizeAndResetSeries() {
+  if (statsCurrentMatchId) {
+    stats.endMatch(statsCurrentMatchId, {
+      scoreA: state.series.blue,
+      scoreB: state.series.orange,
+      winner: state.series.blue > state.series.orange ? 'a'
+            : state.series.orange > state.series.blue ? 'b' : null
+    });
+    try { analytics.event('match_complete'); } catch (e) {}
+  }
+  statsCurrentMatchId = null;
+  statsCurrentGameId  = null;
+  statsCs2GameId      = null;
+  statsValGameId      = null;
+  state.game.number = 1;
+  state.series.blue = 0;
+  state.series.orange = 0;
+  // Clear OW map winners so the next match recounts from a clean slate.
+  if (state.owMatch) state.owMatch.mapWinners = [];
+}
+
 async function syncStartGgSet(setId) {
   if (!startggApiToken) {
     throw new Error('Missing Start.gg API token');
@@ -2767,6 +2891,13 @@ async function syncStartGgSet(setId) {
     throw new Error('Set not found');
   }
 
+  // Advancing to a DIFFERENT set: close out and reset the previous series first
+  // (same as the bracket builder's Go Live). Re-pushing the same set keeps the
+  // in-progress score untouched.
+  if (String(state.startgg.lastPushedSetId || '') !== String(setId)) {
+    finalizeAndResetSeries();
+  }
+
   const entrants = (set.slots || [])
     .map(slot => slot?.entrant)
     .filter(Boolean);
@@ -2787,18 +2918,25 @@ async function syncStartGgSet(setId) {
   // overwrite when the set actually carries a round, so a set without one doesn't blank a manual label.
   if (set.fullRoundText) state.roundLabel = String(set.fullRoundText).toUpperCase();
 
-  // Auto-apply saved logos/players when the entrant matches a team in the library;
-  // fall back to the start.gg team logo. Always reset both first so a stale logo OR
-  // roster from the previous push never silently carries over onto the new team.
+  // Auto-apply logos/rosters — the activated event's REAL rosters (eventTeams) first, then
+  // the local team library, matching the autofill_stream_teams precedence so Push and
+  // Auto-fill produce the same result. Always reset both first so a stale logo OR roster
+  // from the previous push never silently carries over onto the new team.
+  let gotRealRoster = false;
   [['blue', blueEntrant], ['orange', orangeEntrant]].forEach(([side, ent]) => {
     const tn = (state.teams[side].name || '').toUpperCase();
     state.teams[side].logo = '';
     state.teams[side].players = [];
+    const et = (state.startgg.eventTeams || []).find((t) => (t.name || '').toUpperCase() === tn);
     const saved = savedTeams.find((t) => (t.name || '').toUpperCase() === tn);
-    if (saved) {
-      if (saved.logo) state.teams[side].logo = saved.logo;
-      if (Array.isArray(saved.players) && saved.players.length) {
-        state.teams[side].players = saved.players;
+    const src = (et && Array.isArray(et.players) && et.players.length) ? et
+              : (saved && Array.isArray(saved.players) && saved.players.length) ? saved
+              : (et || saved || null);
+    if (src) {
+      if (src.logo) state.teams[side].logo = src.logo;
+      if (Array.isArray(src.players) && src.players.length) {
+        state.teams[side].players = src.players;
+        gotRealRoster = true;
       }
     }
     if (!state.teams[side].logo) {
@@ -2807,42 +2945,30 @@ async function syncStartGgSet(setId) {
     }
   });
 
-  const bluePlayers = extractEntrantPlayers(blueEntrant?.name).map((name) => ({
-    name,
-    primaryid: null,
-    team: 0,
-    score: 0,
-    goals: 0,
-    assists: 0,
-    saves: 0,
-    shots: 0,
-    demos: 0,
-    boost: 0,
-    isPrimary: false,
-    isDemolished: false
-  }));
-  const orangePlayers = extractEntrantPlayers(orangeEntrant?.name).map((name) => ({
-    name,
-    primaryid: null,
-    team: 1,
-    score: 0,
-    goals: 0,
-    assists: 0,
-    saves: 0,
-    shots: 0,
-    demos: 0,
-    boost: 0,
-    isPrimary: false,
-    isDemolished: false
-  }));
-
-  const combinedPlayers = [...bluePlayers, ...orangePlayers];
-  if (combinedPlayers.length > 0) {
-    state.players = combinedPlayers;
-    state.playerCache = {};
-    combinedPlayers.forEach((p) => {
-      state.playerCache[p.name] = { ...p };
-    });
+  if (gotRealRoster) {
+    // Real rosters landed on the team cards — mirror them into the flat overlay list.
+    rebuildCombinedPlayers();
+  } else {
+    // No roster found anywhere: fall back to splitting the entrant NAME. This is only
+    // meaningful for doubles-style entrants ("A / B"); a plain team-name entrant would
+    // produce a bogus one-player roster named after the team, so skip that case.
+    const bluePlayers = extractEntrantPlayers(blueEntrant?.name).map((name) => ({
+      name, primaryid: null, team: 0, score: 0, goals: 0, assists: 0, saves: 0,
+      shots: 0, demos: 0, boost: 0, isPrimary: false, isDemolished: false
+    }));
+    const orangePlayers = extractEntrantPlayers(orangeEntrant?.name).map((name) => ({
+      name, primaryid: null, team: 1, score: 0, goals: 0, assists: 0, saves: 0,
+      shots: 0, demos: 0, boost: 0, isPrimary: false, isDemolished: false
+    }));
+    const looksLikeNameList = bluePlayers.length > 1 || orangePlayers.length > 1;
+    const combinedPlayers = [...bluePlayers, ...orangePlayers];
+    if (looksLikeNameList && combinedPlayers.length > 0) {
+      state.players = combinedPlayers;
+      state.playerCache = {};
+      combinedPlayers.forEach((p) => {
+        state.playerCache[p.name] = { ...p };
+      });
+    }
   }
 
   state.startgg.lastSyncAt = new Date().toISOString();
@@ -2926,30 +3052,60 @@ function currentStreamedSetLink() {
     tournament: (sg.selectedEvent && (sg.selectedEvent.tournamentName || sg.selectedEvent.name)) || null
   };
 }
-function buildStartggMatchFeed(queue, recentSets, excludeSetId) {
-  const items = [];
+function buildStartggMatchFeed(queue, recentSets) {
   const seen = new Set();
-  const push = (item) => {
+  const live = [];
+  const done = [];
+  const consider = (item) => {
     if (!item || !item.teamA || !item.teamB || item.teamA === 'TBD' || item.teamB === 'TBD') return;
-    if (excludeSetId && item.setId === String(excludeSetId)) return;
     const key = item.setId || `${item.teamA}|${item.teamB}|${item.round}`;
     if (seen.has(key)) return;
     seen.add(key);
-    items.push(item);
+    if (item.status === 'live') live.push(item);
+    else if (item.status === 'done') done.push(item);
   };
-  (queue || []).forEach((q) => push(mapStartggSetToFeedItem(q, { live: q.live, stream: q.stream })));
+  // Live = sets on a stream (queue idx-0) + every in-progress (state 2) set in the event.
+  (queue || []).forEach((q) => consider(mapStartggSetToFeedItem(q, { live: q.live, stream: q.stream })));
   (recentSets || []).forEach((s) => {
-    if (Number(s.state) === 2 || Number(s.state) === 3) push(mapStartggSetToFeedItem(s));
+    const st = Number(s.state);
+    if (st === 2 || st === 3) consider(mapStartggSetToFeedItem(s));   // 2 → live, 3 → done
   });
-  const rank = (st) => (st === 'live' ? 0 : st === 'done' ? 1 : 2);
-  return items.sort((a, b) => rank(a.status) - rank(b.status)).slice(0, 10);
+  // Compose: LIVE matches lead. Fill the rest with the most-recent FINALS up to a target size — so a
+  // freshly-finished match shows as FINAL for a few loops then rotates out as newer results arrive,
+  // and when there are few live matches (late in the bracket) the ticker fills with final scores.
+  const TARGET = 10;
+  const finalsToShow = Math.max(3, TARGET - live.length);
+  return live.concat(done.slice(0, finalsToShow)).slice(0, 14);   // done is RECENT-ordered (newest first)
 }
 
-// Guarantee the on-air match shows as LIVE in the ticker. start.gg frequently never flips a set to
-// "in progress" (state 2), and the producer may push a match that isn't the idx-0 queued set (or the
-// stream queue may be empty when pushing via Team search) — so the only reliable "this is live now"
-// signal is the set the producer put on air (state.startgg.setId) + the current match teams/series
-// score. Without this, a single-stream broadcast shows FINAL results only. Idempotent.
+// A couple of NON-stream upcoming (state 1) matches to supplement the schedule/upcoming board in
+// event-queue mode — the overlay already renders the stream-queue rows (state.startgg.queue), so this
+// only adds not-yet-started sets that aren't queued on a stream. Returned WITHOUT a setId so the
+// schedule overlay appends them as extra rows (setId items there only override existing queue rows).
+function buildEventUpcomingExtras(queue, allSets) {
+  const queued = new Set((queue || []).map((q) => String(q.setId)));
+  const bad = (n) => !n || n === 'TBD';
+  const out = [];
+  for (const s of (allSets || [])) {
+    if (out.length >= 3) break;
+    if (Number(s.state) !== 1) continue;
+    const m = mapStartggSetToFeedItem(s);
+    if (queued.has(String(m.setId))) continue;
+    if (bad(m.teamA) && bad(m.teamB)) continue;
+    out.push({
+      round: m.round || '', teamA: m.teamA, teamB: m.teamB,
+      teamALogo: m.logoA || '', teamBLogo: m.logoB || '',
+      date: '', time: '', stream: false, scoreA: m.scoreA ?? null, scoreB: m.scoreB ?? null,
+      week: '', note: ''
+    });
+  }
+  return out;
+}
+
+// Safety net + enrichment for the on-air match. The event feed already pulls in-progress (state 2)
+// sets, but this guarantees the set the producer PUSHED (state.startgg.setId) is present as LIVE even
+// if start.gg hasn't flipped it to state 2 yet, and overrides its score with the producer's live
+// series score (more current than start.gg's standing). Idempotent.
 function ensureOnAirLiveInFeed() {
   const sg = state.startgg;
   if (!sg) return;
@@ -2979,27 +3135,43 @@ function ensureOnAirLiveInFeed() {
   sg.matchFeed = feed.sort((a, b) => rank(a.status) - rank(b.status)).slice(0, 10);
 }
 
+// Pull the event's IN-PROGRESS sets (start.gg state 2) and its most-recently-COMPLETED sets
+// (state 3) explicitly via the state filter — RECENT sort alone can bury live sets behind a flood
+// of just-reported finals. Returns a combined node list (each carries its own `state`).
 async function fetchRecentEventSets(client, eventSlug) {
   const slug = parseEventSlug(eventSlug);
   if (!slug) return [];
-  const query = `
-    query RecentSets($slug: String!) {
-      event(slug: $slug) {
-        sets(perPage: 12, page: 1, sortType: RECENT) {
-          nodes {
-            id
-            fullRoundText
-            state
-            slots {
-              entrant { id name }
-              standing { stats { score { value } } }
-            }
-          }
-        }
+  const setFields = `
+    nodes {
+      id
+      fullRoundText
+      state
+      slots {
+        entrant { id name }
+        standing { stats { score { value } } }
       }
     }`;
-  const res = await client.request(query, { slug });
-  return res?.event?.sets?.nodes || [];
+  const query = `
+    query FeedSets($slug: String!) {
+      event(slug: $slug) {
+        live:   sets(perPage: 24, page: 1, filters: { state: [2] }) { ${setFields} }
+        recent: sets(perPage: 20, page: 1, sortType: RECENT, filters: { state: [3] }) { ${setFields} }
+        soon:   sets(perPage: 16, page: 1, sortType: CALL_ORDER, filters: { state: [1] }) { ${setFields} }
+      }
+    }`;
+  try {
+    const res = await client.request(query, { slug });
+    const ev = (res && res.event) || {};
+    const liveNodes = (ev.live && ev.live.nodes) || [];
+    const doneNodes = (ev.recent && ev.recent.nodes) || [];
+    const soonNodes = (ev.soon && ev.soon.nodes) || [];
+    return [...liveNodes, ...doneNodes, ...soonNodes];
+  } catch (e) {
+    // Fallback for any event/permission that rejects the state filter: RECENT sweep, split by state.
+    const q2 = `query RecentSets($slug: String!) { event(slug: $slug) { sets(perPage: 40, page: 1, sortType: RECENT) { ${setFields} } } }`;
+    const res = await client.request(q2, { slug });
+    return (res && res.event && res.event.sets && res.event.sets.nodes) || [];
+  }
 }
 
 // Fetch the tournament's STREAM QUEUE — the sets a TO has marked for each stream.
@@ -3091,6 +3263,9 @@ async function fetchStreamQueue(tournamentSlug) {
   state.startgg.matchFeed = buildStartggMatchFeed(queue, recentSets);
   ensureOnAirLiveInFeed();   // force the pushed on-air match to appear as LIVE
   if (state.ticker.source === 'startgg') state.ticker.feed = formatTickerFeed(state.startgg.matchFeed);
+  // Event-queue mode: keep the upcoming/schedule board following the stream queue, adding a couple of
+  // non-stream upcoming matches. (Team mode leaves upcoming.matches to the last team search.)
+  if (state.upcoming.source === 'event') state.upcoming.matches = buildEventUpcomingExtras(queue, recentSets);
   state.startgg.queueFetchedAt = new Date().toISOString();
   state.startgg.connected = true;
   state.startgg.lastError = null;
@@ -3184,11 +3359,12 @@ async function fetchTeamQueue(teamName, tournamentSlug) {
   deduped.forEach(q => { q.logoA = logoForTeamName(q.teamA); q.logoB = logoForTeamName(q.teamB); });
   state.startgg.teamQueue = deduped;
   state.startgg.focusTeam = teamName;
+  state.upcoming.source = 'team';   // upcoming/schedule board now follows this team's matches
   state.upcoming.matches = deduped.map(q => ({
-    id: q.setId, round: q.round || '',
+    id: q.setId, setId: q.setId, round: q.round || '',
     teamA: q.teamA || 'TBD', teamB: q.teamB || 'TBD',
     teamALogo: q.logoA || '', teamBLogo: q.logoB || '',
-    date: '', time: '', stream: !!q.live,
+    date: '', time: '', stream: !!q.live, state: q.state, live: !!q.live,
     scoreA: q.scoreA ?? null, scoreB: q.scoreB ?? null,
     week: '', note: ''
   }));
@@ -3226,11 +3402,26 @@ async function startggPollTick() {
         ensureOnAirLiveInFeed();   // reflect the newly auto-followed match as LIVE in the ticker
         if (state.ticker.source === 'startgg') state.ticker.feed = formatTickerFeed(state.startgg.matchFeed);
         console.log(`[Start.gg] Auto-followed live set ${live.setId}: ${live.teamA} vs ${live.teamB}`);
+        // Tell the producer their scoreboard just changed by itself (auto-follow is silently
+        // enabled on event activation — without this it looks like a haunted scoreboard).
+        broadcast(bridgeClients, { type: 'autofollow-pushed', data: {
+          message: `Auto-follow: now showing ${live.teamA || 'TBD'} vs ${live.teamB || 'TBD'} (live on stream). Series score reset.`
+        } });
       }
     }
     // Live bracket/score refresh every tick (~20s) so progression + scores update on the bracket
     // (and standings) overlay without re-importing teams each time.
-    if ((state.bracket.eventSlug || '').trim()) {
+    // The bracket FOLLOWS the active event (Dashboard ▸ Event panel) unless the producer typed a
+    // different slug into the bracket panel (followActive=false) or built a manual bracket — a
+    // stale eventSlug here used to re-import the wrong event (e.g. a 400-team LCQ) forever.
+    if (state.bracket.mode !== 'manual' && state.bracket.followActive !== false) {
+      const activeSlug = (state.startgg.eventSlug || '').trim();
+      if (activeSlug && (state.bracket.eventSlug || '').trim() !== activeSlug) {
+        console.log(`[Bracket] Following active event: ${activeSlug} (was ${state.bracket.eventSlug || 'none'})`);
+        state.bracket.eventSlug = activeSlug;
+      }
+    }
+    if ((state.bracket.eventSlug || '').trim() && state.bracket.mode !== 'manual') {
       try { await fetchBracket(state.bracket.eventSlug); } catch (e) { /* non-fatal */ }
     }
   } catch (e) {
@@ -3438,6 +3629,8 @@ async function loadChalongeTournament(slug) {
   state.bracket.teams = teams;
   state.bracket.matches = [];
   state.bracket.eventSlug = 'challonge:' + slug;
+  state.bracket.mode = 'imported';
+  state.bracket.source = 'challonge';
   state.bracket.lastFetchAt = Date.now();
   syncActiveBracketPhase();
   broadcastFullState();
@@ -3755,6 +3948,8 @@ async function loadNxgenEvent(slug) {
   }
   state.bracket.activePhaseId = 'nxgen-main';
   state.bracket.eventSlug = 'nxgen:' + slug;
+  state.bracket.mode = 'imported';
+  state.bracket.source = 'nxgen';
 
   return { name: event.name, teamsCount: participants.length, matchesCount: matches.length };
 }
@@ -3928,12 +4123,15 @@ function applyGameTeamName(side, rawName) {
   return changed;
 }
 
-// Turn a flat list of Start.gg sets into a structured, type-aware bracket.
+// Turn a flat list of Start.gg sets — all from ONE pool/phaseGroup — into a
+// structured, type-aware bracket. Round Robin pools also get a head-to-head
+// matrix and enriched standings (Sets Played/Set Count/Game Count) to match
+// how Start.gg itself presents Pool Play; elimination standings stay plain.
 function buildBracket(sets) {
   const list = Array.isArray(sets) ? sets : [];
 
-  // Dominant bracket type across the sets (an event/phase can mix, we pick the
-  // most common so the display picks the right layout).
+  // Dominant bracket type across the sets (a pool's sets are normally all one
+  // type; we pick the most common just in case of stray mixed data).
   const typeCounts = {};
   list.forEach((s) => {
     const t = s.phaseGroup && s.phaseGroup.bracketType;
@@ -3953,32 +4151,59 @@ function buildBracket(sets) {
     };
   };
 
-  // Live W–L standings (used for round-robin / swiss, computed from results).
+  // Live standings (used for round-robin / swiss, computed from results). For
+  // non-elimination pools this also tallies Sets Played/Total, Set Wins-Losses
+  // and Game Wins-Losses — the exact stat columns Start.gg's own Pool/Swiss
+  // standings tables show, derived entirely from data already fetched (no
+  // extra API round-trip).
   const standingsMap = new Map();
   list.forEach((s) => {
     const slots = s.slots || [];
     const e0 = slots[0] && slots[0].entrant;
     const e1 = slots[1] && slots[1].entrant;
+    const sc0 = slots[0] && slots[0].standing && slots[0].standing.stats && slots[0].standing.stats.score
+      ? slots[0].standing.stats.score.value : null;
+    const sc1 = slots[1] && slots[1].standing && slots[1].standing.stats && slots[1].standing.stats.score
+      ? slots[1].standing.stats.score.value : null;
     [e0, e1].forEach((e) => {
-      if (e && e.id && !standingsMap.has(e.id)) standingsMap.set(e.id, { name: e.name, wins: 0, losses: 0 });
+      if (e && e.id && !standingsMap.has(e.id)) {
+        standingsMap.set(e.id, { id: e.id, name: e.name, wins: 0, losses: 0, setsPlayed: 0, setsTotal: 0, gameWins: 0, gameLosses: 0 });
+      }
     });
+    if (e0 && e0.id) standingsMap.get(e0.id).setsTotal++;
+    if (e1 && e1.id) standingsMap.get(e1.id).setsTotal++;
     if (s.winnerId && e0 && e1) {
       const winId = s.winnerId;
       const win = winId === e0.id ? e0 : (winId === e1.id ? e1 : null);
       const lose = winId === e0.id ? e1 : (winId === e1.id ? e0 : null);
-      if (win && standingsMap.has(win.id)) standingsMap.get(win.id).wins++;
-      if (lose && standingsMap.has(lose.id)) standingsMap.get(lose.id).losses++;
+      if (win && standingsMap.has(win.id)) { standingsMap.get(win.id).wins++; standingsMap.get(win.id).setsPlayed++; }
+      if (lose && standingsMap.has(lose.id)) { standingsMap.get(lose.id).losses++; standingsMap.get(lose.id).setsPlayed++; }
+      const gw0 = (typeof sc0 === 'number' && sc0 >= 0) ? sc0 : 0;
+      const gw1 = (typeof sc1 === 'number' && sc1 >= 0) ? sc1 : 0;
+      if (e0 && e0.id) { standingsMap.get(e0.id).gameWins += gw0; standingsMap.get(e0.id).gameLosses += gw1; }
+      if (e1 && e1.id) { standingsMap.get(e1.id).gameWins += gw1; standingsMap.get(e1.id).gameLosses += gw0; }
     }
   });
-  const standings = [...standingsMap.values()]
-    .sort((a, b) => (b.wins - a.wins) || (a.losses - b.losses) || a.name.localeCompare(b.name))
-    .map((s, i) => ({ placement: i + 1, name: s.name, wins: s.wins, losses: s.losses }));
+  const standingsRaw = [...standingsMap.values()]
+    .sort((a, b) => (b.wins - a.wins) || (a.losses - b.losses) || a.name.localeCompare(b.name));
+  const standings = standingsRaw.map((s, i) => {
+    // played=false → the overlay shows '–' instead of a rank so an unstarted event never
+    // implies alphabetical seeding is a real placement.
+    const row = { placement: i + 1, name: s.name, wins: s.wins, losses: s.losses, played: s.setsPlayed > 0 };
+    if (!isElim) {
+      row.setsPlayed = s.setsPlayed;
+      row.setsTotal = s.setsTotal;
+      row.setWins = s.wins;
+      row.setLosses = s.losses;
+      row.gameWins = s.gameWins;
+      row.gameLosses = s.gameLosses;
+    }
+    return row;
+  });
+  const roster = standingsRaw.map((s) => s.name);
 
-  if (!isElim) {
-    return { type, winners: [], losers: [], finals: [], standings };
-  }
-
-  // Elimination: group sets into rounds, split winners / losers / grand finals.
+  // Group sets into rounds — shared by the elimination split below AND the Swiss/Round-Robin
+  // schedule (each round's pairings), so both read the exact same {name,round,sets} shape.
   const isGrandFinal = (s) => /grand\s*final/i.test(s.fullRoundText || '');
   const groupRounds = (filterFn, sortFn) => {
     const m = new Map();
@@ -3986,11 +4211,40 @@ function buildBracket(sets) {
       const key = s.fullRoundText || `Round ${s.round}`;
       if (!m.has(key)) m.set(key, { name: key, round: s.round, sets: [] });
       const slots = s.slots || [];
-      m.get(key).sets.push({ a: mapSlot(slots[0], s), b: mapSlot(slots[1], s) });
+      // state: start.gg set state (1=upcoming, 2=live, 3=done) — lets the overlay dim
+      // unstarted sets so a pre-event bracket doesn't read as if matches already happened.
+      m.get(key).sets.push({ a: mapSlot(slots[0], s), b: mapSlot(slots[1], s), state: s.state || 0 });
     });
     return [...m.values()].sort(sortFn);
   };
 
+  // Head-to-head matrix — Round Robin pools only (Swiss pairings aren't all-play-all,
+  // a matrix would be mostly empty gaps, so we don't build one for Swiss).
+  let matrix = null;
+  if (type === 'ROUND_ROBIN') {
+    const teams = standingsRaw.map((s) => ({ id: String(s.id), name: s.name }));
+    const cells = {};
+    list.forEach((s) => {
+      const slots = s.slots || [];
+      const e0 = slots[0] && slots[0].entrant;
+      const e1 = slots[1] && slots[1].entrant;
+      if (!e0 || !e1 || e0.id == null || e1.id == null) return;
+      const a = mapSlot(slots[0], s);
+      const b = mapSlot(slots[1], s);
+      const played = s.winnerId != null;
+      cells[`${e0.id}_${e1.id}`] = { aScore: a.score, bScore: b.score, winner: played ? (a.winner ? 'a' : (b.winner ? 'b' : null)) : null, played };
+      cells[`${e1.id}_${e0.id}`] = { aScore: b.score, bScore: a.score, winner: played ? (b.winner ? 'a' : (a.winner ? 'b' : null)) : null, played };
+    });
+    matrix = { teams, cells };
+  }
+
+  if (!isElim) {
+    // Swiss / Round-Robin: no winners/losers split, just the round-by-round pairing schedule.
+    const schedule = groupRounds(() => true, (a, b) => a.round - b.round);
+    return { type, winners: [], losers: [], finals: [], standings, schedule, roster, matrix };
+  }
+
+  // Elimination: group sets into rounds, split winners / losers / grand finals.
   const winners = groupRounds(
     (s) => s.round > 0 && !isGrandFinal(s),
     (a, b) => a.round - b.round
@@ -4001,11 +4255,17 @@ function buildBracket(sets) {
   );
   const finals = groupRounds(isGrandFinal, (a, b) => a.round - b.round);
 
-  return { type, winners, losers, finals, standings };
+  return { type, winners, losers, finals, standings, schedule: [], roster, matrix: null };
 }
 
 // Split a flat Start.gg set list into one bracket PHASE per Start.gg phase
-// (so a Day-1 double-elim and a Day-2 single-elim/swiss stay separate).
+// (so a Day-1 double-elim and a Day-2 single-elim/swiss stay separate), then
+// further split each phase into POOLS — one per Start.gg phaseGroup, e.g. a
+// Round Robin phase running 8 parallel pools at once. A phase with a single
+// phaseGroup still gets one pool entry, and the phase-level winners/losers/
+// finals/standings/schedule/roster fields mirror that one pool directly —
+// this is what keeps existing single-pool/elimination events rendering
+// exactly as before.
 function buildPhases(sets) {
   const groups = new Map();
   (sets || []).forEach((s) => {
@@ -4018,12 +4278,36 @@ function buildPhases(sets) {
   return [...groups.values()]
     .sort((a, b) => a.order - b.order)
     .map((g) => {
-      const b = buildBracket(g.sets);
-      return { id: g.id, name: g.name, type: b.type, winners: b.winners, losers: b.losers, finals: b.finals, standings: b.standings, schedule: [], roster: [] };
+      const poolGroups = new Map();
+      g.sets.forEach((s) => {
+        const pg = s.phaseGroup || null;
+        const pid = pg && pg.id != null ? String(pg.id) : 'default';
+        const pname = (pg && pg.displayIdentifier) || g.name;
+        if (!poolGroups.has(pid)) poolGroups.set(pid, { id: pid, name: pname, sets: [] });
+        poolGroups.get(pid).sets.push(s);
+      });
+      const pools = [...poolGroups.values()]
+        .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }))
+        .map((pg) => {
+          const b = buildBracket(pg.sets);
+          return { id: pg.id, name: pg.name, type: b.type, roster: b.roster, schedule: b.schedule, standings: b.standings, matrix: b.matrix };
+        });
+      const p0 = pools[0] || { id: '', type: '', roster: [], schedule: [], standings: [], matrix: null };
+      // Winners/losers/finals always come from the WHOLE phase's sets (not per-pool) —
+      // elimination phases are effectively always a single pool in practice, and this
+      // preserves exact prior behavior for them regardless of the pools split above.
+      const bAll = buildBracket(g.sets);
+      return {
+        id: g.id, name: g.name, type: bAll.type,
+        winners: bAll.winners, losers: bAll.losers, finals: bAll.finals,
+        standings: p0.standings, schedule: p0.schedule, roster: p0.roster,
+        pools, activePoolId: p0.id || ''
+      };
     });
 }
 
-// Copy the active phase's bracket data up to the top-level fields the overlay reads.
+// Copy the active phase's bracket data — and that phase's ACTIVE POOL — up to
+// the top-level fields the overlay reads.
 function syncActiveBracketPhase() {
   const phases = state.bracket.phases || [];
   if (!phases.length) return;
@@ -4033,7 +4317,32 @@ function syncActiveBracketPhase() {
   state.bracket.winners = ph.winners || [];
   state.bracket.losers = ph.losers || [];
   state.bracket.finals = ph.finals || [];
-  state.bracket.standings = ph.standings || [];
+
+  const pools = Array.isArray(ph.pools) ? ph.pools : [];
+  state.bracket.pools = pools.map((pl) => ({ id: pl.id, name: pl.name }));
+  let pool = pools.find((pl) => pl.id === state.bracket.activePoolId);
+  if (!pool) { pool = pools[0] || null; state.bracket.activePoolId = pool ? pool.id : ''; }
+
+  state.bracket.standings = (pool ? pool.standings : ph.standings) || [];
+  state.bracket.schedule = (pool ? pool.schedule : ph.schedule) || [];   // Swiss/Round-Robin round-by-round pairings
+  state.bracket.roster = (pool ? pool.roster : ph.roster) || [];
+  state.bracket.matrix = (pool ? pool.matrix : null) || null;
+
+  // Never leave the saved view pointing at data this bracket doesn't have — a stale "matrix"
+  // on an elim bracket rendered the overlay as a blank page with no clue why.
+  const hasElim = state.bracket.winners.length || state.bracket.losers.length || state.bracket.finals.length;
+  const fallback = hasElim ? 'both' : (state.bracket.standings.length ? 'standings' : 'both');
+  if (state.bracket.view === 'matrix' && !state.bracket.matrix) state.bracket.view = fallback;
+  if (state.bracket.view === 'schedule' && !state.bracket.schedule.length) state.bracket.view = fallback;
+  if (state.bracket.view === 'losers' && !state.bracket.losers.length) state.bracket.view = fallback;
+  // And the mirror case: an elim-only view ('both'/'winners'/'losers'/'finals') on a
+  // round-robin/Swiss phase — pick the format's real default so a linked platform import
+  // renders correctly without the producer touching the view chips.
+  if (!hasElim && ['both', 'winners', 'losers', 'finals'].includes(state.bracket.view)) {
+    state.bracket.view = state.bracket.schedule.length ? 'schedule'
+                       : (state.bracket.standings.length ? 'standings'
+                       : (state.bracket.matrix ? 'matrix' : state.bracket.view));
+  }
 }
 
 // Pull every page of an event's sets (capped so a misconfigured event can't loop).
@@ -4052,7 +4361,7 @@ async function fetchAllSets(client, slug, perPage = 50, maxPages = 16) {
             round
             state
             winnerId
-            phaseGroup { bracketType phase { id name } }
+            phaseGroup { id displayIdentifier bracketType phase { id name } }
             slots {
               entrant { id name }
               standing { stats { score { value } } }
@@ -4625,6 +4934,8 @@ function applyBracketResult(slug, event, sets) {
     phases,
     activePhaseId: keepId,
     matches: buildMatches(sets),
+    mode: 'imported',
+    source: 'startgg',
     lastFetchAt: new Date().toISOString(),
     lastError: null
   };
@@ -4839,6 +5150,9 @@ async function activateStartggEvent(tournamentSlug, eventSlug, meta) {
 
   state.startgg.tournamentSlug = tSlug;
   state.startgg.eventSlug = evSlug;
+  // Activating an event is the explicit "this is my event" — the bracket follows it again
+  // even if a different slug was typed into the bracket panel earlier.
+  state.bracket.followActive = true;
   state.startgg.enabled = true;
   state.startgg.selectedEvent = {
     tournamentSlug: tSlug,
@@ -6094,6 +6408,29 @@ function _matchesCron(expr, date) {
          match(dow, date.getDay());
 }
 
+// ── Scene-dwell triggers — Advanced-Scene-Switcher-style "after N seconds on scene X" ──
+// Re-armed on every OBS program-scene change: every enabled flow with an obs_scene_dwell
+// trigger matching the NEW scene gets a timer; a scene change before it lands cancels all.
+let _dwellTimers = [];
+function armSceneDwellFlows(sceneName) {
+  _dwellTimers.forEach(clearTimeout);
+  _dwellTimers = [];
+  if (!sceneName) return;
+  for (const flow of (state.flows || [])) {
+    if (!flow.enabled) continue;
+    (flow.triggers || []).forEach((t) => {
+      if (t.type !== 'obs_scene_dwell') return;
+      const p = t.params || {};
+      if (p.scene && p.scene.toLowerCase() !== sceneName.toLowerCase()) return;
+      const secs = Math.max(1, Number(p.seconds) || 30);
+      _dwellTimers.push(setTimeout(() => {
+        if ((state.obs.currentScene || '') !== sceneName) return;   // scene moved on — stale timer
+        _fireFlow(flow, { scene: sceneName, dwellSec: secs });
+      }, secs * 1000));
+    });
+  }
+}
+
 function initFlowEngine() {
   FLOW_TRIGGER_TYPES.forEach(type => {
     flowBus.on(type, data => _onFlowTrigger(type, data || {}));
@@ -6135,6 +6472,8 @@ function _syncFlowIntervals() {
       if (live && live.enabled) _fireFlow(live, { type: 'timer_interval' });
     }, ms));
   }
+  // Re-arm scene-dwell timers against the current program scene (flow edits change eligibility).
+  if (typeof armSceneDwellFlows === 'function') armSceneDwellFlows(state.obs.currentScene || '');
 }
 
 function _onFlowTrigger(type, data) {
@@ -6369,13 +6708,65 @@ async function _executeFlowAction(action, ctx) {
       await new Promise(r => setTimeout(r, Math.max(0, Number(p.ms) || 0)));
       break;
     case 'obs_scene':
+      // AI Shield promises to pause ALL scene automation — flows included.
+      if (aiShielded()) { console.log('[Flow] obs_scene skipped — AI shield engaged'); break; }
       if (obsClient && obsClient.isConnected() && p.scene)
         obsClient.switchScene(p.scene.trim());
+      break;
+    // Switch back to whatever scene was on program before the last cut (ASS-style "previous scene").
+    case 'obs_scene_previous':
+      if (aiShielded()) { console.log('[Flow] obs_scene_previous skipped — AI shield engaged'); break; }
+      if (obsClient && obsClient.isConnected() && state.obs.previousScene)
+        obsClient.switchScene(state.obs.previousScene);
       break;
     case 'obs_save_replay':
       if (obsClient && obsClient.isConnected())
         try { await obsClient.call('SaveReplayBuffer'); } catch(e){}
       break;
+
+    // ── vMix flow actions (fire vMix HTTP functions) ──────────────────────────
+    case 'vmix_cut': {
+      // Cut / transition PROGRAM to an input. Input = number | name | GUID.
+      if (aiShielded()) { console.log('[Flow] vmix_cut skipped — AI shield engaged'); break; }
+      const fn = (p.transition && p.transition !== 'Cut') ? p.transition : 'Cut';
+      const params = { Input: p.input };
+      const dur = Number(p.duration); if (dur > 0) params.Duration = Math.round(dur);
+      await vmixDo(fn, params);
+      break;
+    }
+    case 'vmix_overlay': {
+      // Overlay channel 1-4 In / Out / Off (or toggle). Input optional (sets what the channel shows).
+      if (aiShielded()) { console.log('[Flow] vmix_overlay skipped — AI shield engaged'); break; }
+      const ch = Math.max(1, Math.min(4, Number(p.channel) || 1));
+      const act = (p.action || 'In');                       // In | Out | Off | toggle
+      const fn = 'OverlayInput' + ch + (act === 'toggle' ? '' : act);
+      const params = {}; if (p.input) params.Input = p.input;
+      await vmixDo(fn, params);
+      break;
+    }
+    case 'vmix_start_stream': await vmixDo('StartStreaming', p.value !== undefined && p.value !== '' ? { Value: p.value } : {}); break;
+    case 'vmix_stop_stream':  await vmixDo('StopStreaming',  p.value !== undefined && p.value !== '' ? { Value: p.value } : {}); break;
+    case 'vmix_start_record': await vmixDo('StartRecording'); break;
+    case 'vmix_stop_record':  await vmixDo('StopRecording');  break;
+    case 'vmix_replay_last':  await vmixDo('ReplayPlayLastEvent'); break;
+    case 'vmix_fade_to_black': await vmixDo('FadeToBlack'); break;
+    case 'vmix_set_text': {
+      // Update a Title/GT text field: SelectedName like "Headline.Text"; Input = the title input.
+      const params = { Input: p.input, SelectedName: p.selectedName, Value: p.value !== undefined ? String(p.value) : '' };
+      await vmixDo('SetText', params);
+      break;
+    }
+    case 'vmix_function': {
+      // Power-user escape hatch: any vMix function + optional Input/Value/Duration.
+      if (!p.function) break;
+      const params = {};
+      if (p.input) params.Input = p.input;
+      if (p.value !== undefined && p.value !== '') params.Value = p.value;
+      const dur = Number(p.duration); if (dur > 0) params.Duration = Math.round(dur);
+      await vmixDo(p.function, params);
+      break;
+    }
+
     case 'overlay_ticker':
       state.ticker = { ...state.ticker, messages: [p.text || ''].filter(Boolean), visible: true };
       broadcastFullState();
@@ -6565,9 +6956,15 @@ async function _executeFlowAction(action, ctx) {
       break;
     case 'http_webhook': {
       if (!p.url) break;
+      // Ads must NEVER auto-play: refuse to let a flow loop back into our own ad endpoint,
+      // and tag every flow-originated request so the ad route can reject it server-side too.
+      if (/\/api\/twitch\/ad\//i.test(p.url)) {
+        console.warn('[Flow] webhook blocked — flows may not trigger ad breaks:', p.url);
+        break;
+      }
       let body = {};
       try { body = p.body ? JSON.parse(p.body) : {}; } catch(e){}
-      try { await axios.post(p.url, body, { timeout: 5000 }); }
+      try { await axios.post(p.url, body, { timeout: 5000, headers: { 'X-NE-Flow': '1' } }); }
       catch(e) { console.warn('[Flow] webhook failed:', e.message); }
       break;
     }
@@ -6727,14 +7124,16 @@ function setupObsClient() {
     onSceneChange: (sceneName) => {
       const prev = state.obs.currentScene || '';
       state.obs.currentScene = sceneName || '';
+      if ((sceneName || '') !== prev) state.obs.previousScene = prev;   // for the obs_scene_previous flow action
       if (telemetry && (sceneName || '') !== prev) telemetry.sceneChange({ scene: sceneName || '', prevScene: prev, source: 'unknown' });
       if ((sceneName || '') !== prev) try { analytics.event('scene_change', { scene: sceneName || '' }); } catch (e) {}
       flowBus.emit('obs_scene_changed', { scene: sceneName || '' });
+      armSceneDwellFlows(sceneName || '');
       broadcastFullState();
     },
     // Live mirror of the connected OBS profile's scene collection.
     onSceneListChange: (scenes) => {
-      state.obs.availableScenes = Array.isArray(scenes) ? scenes : [];
+      state.obs.availableScenes = filterSwitchableScenes(scenes);
       broadcastFullState();
     },
     // A media (commercial video) finished — auto-cut back to program if enabled.
@@ -6811,7 +7210,7 @@ async function _doConnectObs() {
   if (!obsClient) return false;
   try {
     await obsClient.connect({ url: state.obs.url, password: obsPassword });
-    state.obs.availableScenes = await obsClient.getScenes();
+    state.obs.availableScenes = filterSwitchableScenes(await obsClient.getScenes());
     state.obs.availableTransitions = await obsClient.getTransitions();
     state.obs.lastError = null;
     try {
@@ -6828,6 +7227,13 @@ async function _doConnectObs() {
     console.warn('[OBS] Connect failed:', e && e.message ? e.message : e);
     return false;
   }
+}
+
+// Scenes a producer can actually cut to — drops the generated collection's blank
+// "═══ DIVIDER ═══" separators and the "=> Cam" utility scenes (cutting to either
+// puts a black frame / a lone cam on program).
+function filterSwitchableScenes(scenes) {
+  return (Array.isArray(scenes) ? scenes : []).filter((s) => !/^═/.test(s) && !/^=>/.test(s));
 }
 
 async function disconnectObs() {
@@ -6863,10 +7269,12 @@ function obsSwitch(sceneKey) {
 }
 
 // Switch OBS to a literal scene name (not one of the mapped keys). Used by the countdown
-// auto-switch, where the producer explicitly picked the destination scene — so it bypasses
-// the scene-mapping in obsSwitch() but still respects the OBS connection/enabled state.
+// auto-switch, where the producer explicitly picked BOTH the trigger and the destination
+// scene for THIS break — that's a producer-armed cut like rlSwitchScene, so it is exempt
+// from the blanket OBS_AUTO_SWITCH_DISABLED kill switch (which guards game-event automation),
+// while still respecting the OBS connection/enabled state and the AI shield.
 function obsSwitchSceneName(name) {
-  if (OBS_AUTO_SWITCH_DISABLED || aiShielded()) return;
+  if (aiShielded()) return;
   if (!obsClient || !state.obs.enabled) return;
   if (!obsClient.isConnected()) return;
   const sceneName = (name || '').trim();
@@ -6874,6 +7282,135 @@ function obsSwitchSceneName(name) {
   console.log(`[OBS] Countdown auto-switch → ${sceneName}`);
   obsClient.switchScene(sceneName);
 }
+
+// ── vMix control (full alternative backend) ────────────────────────────────────────────────
+// Fire a vMix function via the HTTP API using the configured host/port. No-op unless enabled.
+async function vmixDo(fn, params) {
+  if (!state.vmix.enabled) return { ok: false, reason: 'vmix_disabled' };
+  try {
+    await vmix.vmixCall(state.vmix.host, state.vmix.port, fn, params || {});
+    return { ok: true };
+  } catch (e) {
+    state.vmix.lastError = e.message;
+    return { ok: false, reason: e.message };
+  }
+}
+
+// Poll vMix state (~1.5s) while enabled; broadcast only when something meaningful changes so we
+// don't spam full_state. Marks connected/disconnected + lastError.
+let _vmixSig = '';
+async function pollVmix() {
+  if (!state.vmix.enabled) {
+    if (state.vmix.connected) { state.vmix.connected = false; broadcastFullState(); }
+    return;
+  }
+  try {
+    const s = await vmix.vmixState(state.vmix.host, state.vmix.port);
+    Object.assign(state.vmix, {
+      connected: true, lastError: null,
+      version: s.version, edition: s.edition, active: s.active, preview: s.preview,
+      streaming: s.streaming, recording: s.recording, inputs: s.inputs, overlays: s.overlays
+    });
+  } catch (e) {
+    state.vmix.connected = false;
+    state.vmix.lastError = e.code === 'ECONNREFUSED' ? 'vMix not reachable (is it running with the Web API on?)' : e.message;
+  }
+  const sig = JSON.stringify({
+    c: state.vmix.connected, a: state.vmix.active, p: state.vmix.preview,
+    st: state.vmix.streaming, rec: state.vmix.recording, e: state.vmix.lastError,
+    n: state.vmix.inputs.map((i) => i.number + ':' + i.title + ':' + (i.volume == null ? '' : Math.round(i.volume)) + ':' + (i.muted ? 1 : 0)).join(','),
+    ov: state.vmix.overlays.map((o) => o.input).join(','),
+    ver: state.vmix.version
+  });
+  if (sig !== _vmixSig) { _vmixSig = sig; broadcastFullState(); }
+}
+setInterval(() => { pollVmix().catch(() => {}); }, 1500);
+
+// ── Production switcher routing (OBS or vMix — mutually exclusive) ────────────
+// Cut PROGRAM to a target on the ACTIVE backend. OBS: scene NAME. vMix: input (matched by
+// number / name / GUID). vMix matches inputs by title, so as long as vMix input titles mirror
+// the OBS scene names, every existing obs_switch_scene caller in the app works on BOTH backends
+// with no per-caller changes. No-op when the active backend isn't ready.
+function switcherCut(target, opts) {
+  target = (target == null ? '' : String(target)).trim();
+  if (!target) return;
+  if (state.switcher.target === 'vmix') {
+    if (!state.vmix.enabled) return;
+    const fn = (opts && opts.transition) || 'Cut';
+    const params = { Input: target };
+    if (opts && opts.duration) params.Duration = opts.duration;
+    vmixDo(fn, params);
+    return;
+  }
+  if (obsClient && obsClient.isConnected()) obsClient.switchScene(target);
+}
+
+// Set the PREVIEW (next) source on the active backend. OBS needs Studio Mode on.
+async function switcherSetPreview(target) {
+  target = (target == null ? '' : String(target)).trim(); if (!target) return;
+  if (state.switcher.target === 'vmix') { if (state.vmix.enabled) vmixDo('PreviewInput', { Input: target }); return; }
+  if (!obsClient || !obsClient.isConnected()) return;
+  try {
+    if (!state.obs.studioMode) { await obsClient.call('SetStudioModeEnabled', { studioModeEnabled: true }); state.obs.studioMode = true; }
+    await obsClient.call('SetCurrentPreviewScene', { sceneName: target });
+    state.obs.currentPreviewScene = target;
+    broadcastFullState();
+  } catch (e) { /* non-fatal */ }
+}
+
+// TAKE preview → program. mode 'cut' | 'fade'. OBS uses Studio Mode transition; vMix Cut/Fade.
+async function switcherTake(mode, durationMs) {
+  const fade = mode === 'fade';
+  if (state.switcher.target === 'vmix') {
+    if (!state.vmix.enabled) return;
+    vmixDo(fade ? 'Fade' : 'Cut', fade && durationMs ? { Duration: durationMs } : {});
+    return;
+  }
+  if (!obsClient || !obsClient.isConnected()) return;
+  try {
+    if (!state.obs.studioMode) { await obsClient.call('SetStudioModeEnabled', { studioModeEnabled: true }); state.obs.studioMode = true; }
+    // Pick the transition: Cut for instant, or the first Fade-like transition for a dissolve.
+    const trans = fade ? (['Fade', 'Fade to Black', 'Cross Dissolve'].find((t) => (state.obs.availableTransitions || []).includes(t)) || 'Fade') : 'Cut';
+    try { await obsClient.call('SetCurrentSceneTransition', { transitionName: trans }); } catch (e) {}
+    if (fade && durationMs) try { await obsClient.call('SetCurrentSceneTransitionDuration', { transitionDuration: durationMs }); } catch (e) {}
+    await obsClient.call('TriggerStudioModeTransition');
+  } catch (e) { /* non-fatal */ }
+}
+
+// Adjust audio on a source. OBS: SetInputVolume(dB) / SetInputMute. vMix: SetVolume(0-100) / Audio.
+async function switcherAudioSet(id, opts) {
+  opts = opts || {};
+  if (state.switcher.target === 'vmix') {
+    if (!state.vmix.enabled) return;
+    if (opts.volume != null) vmixDo('SetVolume', { Input: id, Value: Math.max(0, Math.min(100, Math.round(opts.volume))) });
+    if (opts.muted != null) vmixDo(opts.muted ? 'AudioOff' : 'AudioOn', { Input: id });
+    return;
+  }
+  if (!obsClient || !obsClient.isConnected()) return;
+  try {
+    if (opts.volume != null) await obsClient.call('SetInputVolume', { inputName: id, inputVolumeDb: Math.max(-60, Math.min(0, opts.volume)) });
+    if (opts.muted != null) await obsClient.call('SetInputMute', { inputName: id, inputMuted: !!opts.muted });
+  } catch (e) { /* non-fatal */ }
+}
+
+// Poll OBS program/preview/studio-mode while the Switcher page is open (client toggles _switcherWatching).
+let _switcherWatching = false;
+let _obsPreviewSig = '';
+async function pollObsPreview() {
+  if (!_switcherWatching || state.switcher.target !== 'obs') return;
+  if (!obsClient || !obsClient.isConnected()) return;
+  try {
+    const sm = await obsClient.call('GetStudioModeEnabled');
+    state.obs.studioMode = !!(sm && sm.studioModeEnabled);
+    if (state.obs.studioMode) {
+      const pv = await obsClient.call('GetCurrentPreviewScene');
+      state.obs.currentPreviewScene = (pv && (pv.sceneName || pv.currentPreviewSceneName)) || '';
+    }
+    const sig = state.obs.studioMode + '|' + state.obs.currentPreviewScene;
+    if (sig !== _obsPreviewSig) { _obsPreviewSig = sig; broadcastFullState(); }
+  } catch (e) { /* non-fatal */ }
+}
+setInterval(() => { pollObsPreview().catch(() => {}); }, 1500);
 
 // Opt-in RL scene automation (kickoff / post-game). These are per-trigger, producer-enabled cuts, so
 // they fire regardless of the blanket OBS_AUTO_SWITCH_DISABLED — but still respect the OBS connection,
@@ -8292,6 +8829,59 @@ function handleControlMessage(msg, ws) {
       break;
     }
 
+    // ── Desk Show (preshow.html) — discussion-topics rail + headline ───
+    case 'set_preshow': {
+      const p = msg.data || {};
+      const cur = state.preshow || {};
+      const topics = Array.isArray(p.topics)
+        ? p.topics.filter((t) => t && typeof t === 'object').map((t) => ({
+            text: typeof t.text === 'string' ? t.text.slice(0, 60) : '',
+            sceneName: typeof t.sceneName === 'string' ? t.sceneName.slice(0, 100) : ''
+          })).slice(0, 12)
+        : cur.topics;
+      state.preshow = {
+        headline: typeof p.headline === 'string' ? p.headline.slice(0, 140) : (cur.headline ?? ''),
+        topics,
+        activeTopicIndex: ('activeTopicIndex' in p) ? Math.max(0, parseInt(p.activeTopicIndex, 10) || 0) : (cur.activeTopicIndex ?? 0),
+        homeScene: typeof p.homeScene === 'string' ? p.homeScene.slice(0, 100) : (cur.homeScene ?? ''),
+        topicPresets: (cur.topicPresets && typeof cur.topicPresets === 'object') ? cur.topicPresets : {}
+      };
+      saveAppState();
+      broadcastFullState();
+      break;
+    }
+
+    // Save the CURRENT headline + topics as a named Desk Show topic preset (queue different sets).
+    // Stored both at state level AND on the active brand kit, so presets travel with the kit/profile.
+    case 'save_preshow_topic_preset': {
+      const nm = ((msg.data && msg.data.name) || '').toString().slice(0, 60).trim();
+      if (!nm) break;
+      if (!state.preshow.topicPresets || typeof state.preshow.topicPresets !== 'object') state.preshow.topicPresets = {};
+      const preset = {
+        headline: state.preshow.headline || '',
+        topics: JSON.parse(JSON.stringify(state.preshow.topics || []))
+      };
+      state.preshow.topicPresets[nm] = preset;
+      const _kit = savedBrandKits.find((b) => b.id === state.activeBrandKitId);
+      if (_kit) {
+        if (!_kit.topicPresets || typeof _kit.topicPresets !== 'object') _kit.topicPresets = {};
+        _kit.topicPresets[nm] = JSON.parse(JSON.stringify(preset));
+        saveBrandKits();
+      }
+      saveAppState();
+      broadcastFullState();
+      break;
+    }
+    case 'delete_preshow_topic_preset': {
+      const nm = ((msg.data && msg.data.name) || '').toString();
+      let _changed = false;
+      if (state.preshow.topicPresets && nm in state.preshow.topicPresets) { delete state.preshow.topicPresets[nm]; _changed = true; }
+      const _kit = savedBrandKits.find((b) => b.id === state.activeBrandKitId);
+      if (_kit && _kit.topicPresets && nm in _kit.topicPresets) { delete _kit.topicPresets[nm]; saveBrandKits(); _changed = true; }
+      if (_changed) { saveAppState(); broadcastFullState(); }
+      break;
+    }
+
     // ── Break / "starting soon" standby (countdown scene) ────────────────
     // Partial updates merge. endsAt = epoch ms target (or null to clear the timer).
     case 'set_break': {
@@ -8992,6 +9582,7 @@ function handleControlMessage(msg, ws) {
         handle: (d.handle || '').toString().slice(0, 80),
         role: (d.role || '').toString().slice(0, 40),
         camUrl: (d.camUrl || '').toString().slice(0, 1000),
+        ...(typeof d.vdoOverride === 'string' ? { vdoOverride: d.vdoOverride.slice(0, 1000) } : {}),
         social: VALID_SOCIAL.has(social) ? social : 'none',
         ...(typeof d.camSlot  === 'string' ? { camSlot:  d.camSlot.slice(0, 40) } : {}),
         ...(typeof d.country  === 'string' ? { country:  d.country.slice(0, 60) } : {}),
@@ -9020,6 +9611,7 @@ function handleControlMessage(msg, ws) {
         if (typeof d.handle  === 'string') cur.handle  = entry.handle;
         if (typeof d.role    === 'string') cur.role    = entry.role;
         if (typeof d.camUrl  === 'string') cur.camUrl  = entry.camUrl;
+        if (typeof d.vdoOverride === 'string') cur.vdoOverride = d.vdoOverride.slice(0, 1000);
         if (typeof d.camSlot === 'string') cur.camSlot = d.camSlot.slice(0, 40);
         if (typeof d.country === 'string') cur.country = d.country.slice(0, 60);
         if (typeof d.notes   === 'string') cur.notes   = d.notes.slice(0, 500);
@@ -9096,7 +9688,26 @@ function handleControlMessage(msg, ws) {
     }
     case 'delete_crew_member': {
       if (Array.isArray(state.crew)) {
+        const member = state.crew.find((c) => c.id === msg.data?.id);
         state.crew = state.crew.filter((c) => c.id !== msg.data?.id);
+        // Crew + caster-library are twins linked by name/handle: purge the library entry and
+        // free any desk-lineup slot it held, or a "deleted" caster stays on the desk overlay.
+        if (member && Array.isArray(state.casters.library)) {
+          const nm = (member.name || '').toString().toLowerCase();
+          const hd = (member.handle || '').toString().toLowerCase();
+          const deadIds = new Set(state.casters.library
+            .filter(c => (hd && c.handle && c.handle.toLowerCase() === hd) ||
+                         (nm && c.name && c.name.toLowerCase() === nm))
+            .map(c => c.id));
+          if (deadIds.size) {
+            state.casters.library = state.casters.library.filter(c => !deadIds.has(c.id));
+            if (Array.isArray(state.casters.lineup)) {
+              state.casters.lineup = state.casters.lineup.filter(e => !deadIds.has(e.libraryId));
+            }
+            if ((state.casters.lineup || []).length) resolveLineupToList();
+            else if (Array.isArray(state.casters.list)) state.casters.list = state.casters.list.filter(c => !deadIds.has(c.id));
+          }
+        }
         saveAppState();
         broadcastFullState();
       }
@@ -9219,6 +9830,40 @@ function handleControlMessage(msg, ws) {
       break;
     }
 
+    // Create a browser source in OBS if it doesn't exist yet (or retarget it if it does).
+    // Used by LISTEN IN's "Add to OBS" so producers never hand-configure the source; audio is
+    // rerouted (= "Control audio via OBS") and monitored so it reaches both stream and producer.
+    case 'obs_ensure_browser_source': {
+      const d = msg.data || {};
+      const name = (d.sourceName || '').toString().trim();
+      const url = (d.url || '').toString().trim();
+      if (!name || !url) break;
+      (async () => {
+        let ok = false, message = '';
+        try {
+          if (!obsClient || !obsClient.isConnected()) throw new Error('Not connected to OBS — connect in Integrations, then try again.');
+          const cur = await obsClient.call('GetCurrentProgramScene');
+          const sceneName = (d.sceneName || '').toString().trim() || cur.currentProgramSceneName;
+          const list = await obsClient.call('GetInputList');
+          const exists = (list.inputs || []).some((i) => i.inputName === name);
+          if (exists) {
+            await obsClient.call('SetInputSettings', { inputName: name, inputSettings: { url } });
+            message = `"${name}" already exists in OBS — URL updated.`;
+          } else {
+            await obsClient.call('CreateInput', {
+              sceneName, inputName: name, inputKind: 'browser_source',
+              inputSettings: { url, width: 1920, height: 1080, reroute_audio: true }
+            });
+            await obsClient.call('SetInputAudioMonitorType', { inputName: name, monitorType: 'OBS_MONITORING_TYPE_MONITOR_AND_OUTPUT' }).catch(() => {});
+            message = `Added "${name}" to scene "${sceneName}" — audio is monitored and on stream.`;
+          }
+          ok = true;
+        } catch (e) { message = (e && e.message) || 'OBS error'; }
+        try { ws.send(JSON.stringify({ type: 'obs-ensure-result', data: { ok, message } })); } catch (e) {}
+      })();
+      break;
+    }
+
     // Per-member audio for a library person (caster/guest/observer) — baked into their group
     // room view URL by buildTalentGroup, and driven by the Director mixer.
     case 'set_library_audio': {
@@ -9233,6 +9878,7 @@ function handleControlMessage(msg, ws) {
       if (g === 'casters') ensureCasterVdo(true);
       else if (g === 'guests') ensureGuestsVdo(true);
       else if (g === 'observers') ensureObserversVdo(true);
+      else if (g === 'interview') ensureInterviewVdo(true);
       else break;
       saveAppState();
       broadcastFullState();
@@ -9367,6 +10013,8 @@ function handleControlMessage(msg, ws) {
         accent: k.accent || null,
         font: k.font || null,
         themes: (k.themes && typeof k.themes === 'object') ? k.themes : {},
+        obsSceneCollection: (typeof k.obsSceneCollection === 'string') ? k.obsSceneCollection.trim() : '',
+        obsProfile: (typeof k.obsProfile === 'string') ? k.obsProfile.trim() : '',
         packages: [],
         activePackageId: null,
       };
@@ -9397,6 +10045,9 @@ function handleControlMessage(msg, ws) {
       state.activeBrandKitId = id;
       const kit = savedBrandKits.find((b) => b.id === id);
       if (kit) ensureKitPackages(kit);
+      // Load this kit's saved Desk Show topic presets (each kit carries its own sets; empty if the
+      // kit has none). No kit active → keep the state-level presets as a global fallback.
+      if (kit) state.preshow.topicPresets = { ...(kit.topicPresets || {}) };
       // Automation: snap this game's theme to the kit's preferred design, if set.
       if (kit && kit.themes && isValidTheme(state.activeGame, kit.themes[state.activeGame])) {
         state.themesByGame[state.activeGame] = kit.themes[state.activeGame];
@@ -9404,6 +10055,13 @@ function handleControlMessage(msg, ws) {
       applyBrandSlots();           // fill the ad slots from this brand's sponsor placements
       saveAppState();
       broadcastFullState();        // brand colours apply automatically when colorMode === 'brand'
+      // OBS auto-switch: if the kit has a preferred scene collection or profile, load it now.
+      if (kit && kit.obsSceneCollection && obsClient && obsClient.isConnected()) {
+        obsClient.call('SetCurrentSceneCollection', { sceneCollectionName: kit.obsSceneCollection }).catch(() => {});
+      }
+      if (kit && kit.obsProfile && obsClient && obsClient.isConnected()) {
+        obsClient.call('SetCurrentProfile', { profileName: kit.obsProfile }).catch(() => {});
+      }
       break;
     }
 
@@ -9437,6 +10095,52 @@ function handleControlMessage(msg, ws) {
         saveBrandKits();
         broadcastFullState();
       }
+      break;
+    }
+
+    case 'export_brand_kit': {
+      (async () => {
+        const kit = savedBrandKits.find((b) => b.id === msg.data?.id);
+        if (!kit) { sendImportExportResult(ws, false, 'Brand kit not found.'); return; }
+        const { canceled, filePath } = await dialog.showSaveDialog({
+          title: 'Export Brand Kit',
+          defaultPath: (kit.name || 'brand-kit').replace(/[^a-z0-9]/gi, '-').toLowerCase() + '-brand-kit.json',
+          filters: [{ name: 'NE Brand Kit', extensions: ['json'] }],
+        });
+        if (canceled || !filePath) { sendImportExportResult(ws, false, 'Export cancelled.'); return; }
+        try {
+          const payload = { format: 'ne-brand-kit', version: 1, exportedAt: Date.now(), kit: JSON.parse(JSON.stringify(kit)) };
+          await fsp.writeFile(filePath, JSON.stringify(payload, null, 2));
+          sendImportExportResult(ws, true, `Brand kit "${kit.name}" exported.`);
+        } catch (e) { sendImportExportResult(ws, false, 'Export failed: ' + e.message); }
+      })();
+      break;
+    }
+
+    case 'import_brand_kit': {
+      (async () => {
+        try {
+          const { canceled, filePaths } = await dialog.showOpenDialog({
+            title: 'Import Brand Kit',
+            filters: [{ name: 'NE Brand Kit', extensions: ['json'] }],
+            properties: ['openFile'],
+          });
+          if (canceled || !filePaths || !filePaths[0]) { sendImportExportResult(ws, false, 'Import cancelled.'); return; }
+          const raw = await fsp.readFile(filePaths[0], 'utf8');
+          const parsed = JSON.parse(raw);
+          if (!parsed || parsed.format !== 'ne-brand-kit' || !parsed.kit)
+            throw new Error('Not a valid NE Brand Kit file.');
+          const incoming = parsed.kit;
+          if (!incoming.id) incoming.id = brandId();
+          ensureKitPackages(incoming);
+          const idx = savedBrandKits.findIndex((k) => (k.id && k.id === incoming.id) || k.name === incoming.name);
+          if (idx >= 0) Object.assign(savedBrandKits[idx], incoming);
+          else savedBrandKits.unshift(incoming);
+          saveBrandKits();
+          broadcastFullState();
+          sendImportExportResult(ws, true, `Brand kit "${incoming.name}" imported.`);
+        } catch (e) { sendImportExportResult(ws, false, 'Import failed: ' + e.message); }
+      })();
       break;
     }
 
@@ -9575,7 +10279,7 @@ function handleControlMessage(msg, ws) {
       const set = q.find((s) => s.live && (!wantStream || s.stream === wantStream))
                || q.find((s) => s.live) || q[0];
       if (!set) {
-        state.startgg.lastError = 'No match on the stream queue yet — load the queue first (Settings → start.gg).';
+        state.startgg.lastError = 'Stream queue is empty — on start.gg, attach sets to your stream (Match Settings → Stream), then they appear here.';
         broadcastFullState();
         break;
       }
@@ -9813,25 +10517,7 @@ function handleControlMessage(msg, ws) {
       break;
 
     case 'reset_series':
-      // Stats: close out the series before wiping scores
-      if (statsCurrentMatchId) {
-        stats.endMatch(statsCurrentMatchId, {
-          scoreA: state.series.blue,
-          scoreB: state.series.orange,
-          winner: state.series.blue > state.series.orange ? 'a'
-                : state.series.orange > state.series.blue ? 'b' : null
-        });
-        try { analytics.event('match_complete'); } catch (e) {}
-      }
-      statsCurrentMatchId = null;
-      statsCurrentGameId  = null;
-      statsCs2GameId      = null;
-      statsValGameId      = null;
-      state.game.number = 1;
-      state.series.blue = 0;
-      state.series.orange = 0;
-      // Clear OW map winners so the next match recounts from a clean slate.
-      if (state.owMatch) state.owMatch.mapWinners = [];
+      finalizeAndResetSeries();
       saveAppState();
       broadcastFullState();
       break;
@@ -10144,6 +10830,11 @@ function handleControlMessage(msg, ws) {
         if (Array.isArray(team.players)) {
           team.players.forEach((p) => { if (!p.vdoStreamId) p.vdoStreamId = playerStreamId(p); });
         }
+        // A regenerated room invalidates the old links — a listen-in feed still pointed at
+        // the dead room would silently play nothing, so drop it and let the producer re-arm.
+        if (regen && state.listenIn && state.listenIn.active && state.listenIn.side === side) {
+          state.listenIn = { active: false, side: '', scope: '', name: '', url: '' };
+        }
       }
       saveAppState();
       broadcastFullState();
@@ -10190,6 +10881,8 @@ function handleControlMessage(msg, ws) {
       const room = { id, name, vdo: (existing && existing.vdo) || { room: '', password: '' } };
       if (idx >= 0) state.casters.rooms[idx] = room;
       else state.casters.rooms.push(room);
+      // New rooms get credentials immediately (producers can still "Link existing" to override).
+      if (!room.vdo.room) ensureRoomVdo(room);
       saveAppState();
       broadcastFullState();
       break;
@@ -10213,6 +10906,42 @@ function handleControlMessage(msg, ws) {
       if (!room) break;
       ensureRoomVdo(room, !!msg.data?.regenerate);
       resolveLineupToList();
+      saveAppState();
+      broadcastFullState();
+      break;
+    }
+    // Plug an existing VDO room (name + password) into a MATCH TEAM or SAVED TEAM instead of
+    // generating one — players' join/OBS links derive from team.vdo, so they follow instantly.
+    case 'set_team_vdo_creds': {
+      const d = msg.data || {};
+      const vroom = (d.room || '').toString().trim().slice(0, 100);
+      const vpass = (d.password || '').toString().trim().slice(0, 100);
+      if (!vroom) break;
+      let team = null;
+      if (d.side === 'blue' || d.side === 'orange') team = state.teams[d.side];
+      else if (d.teamName) team = savedTeams.find(t => t.name === d.teamName);
+      if (!team) break;
+      team.vdo = { room: vroom, password: vpass };
+      // Refresh the mirrored library-team room too when the match team is a saved team.
+      if (d.side && team.name) {
+        const savedTwin = savedTeams.find(t => t.name === team.name);
+        if (savedTwin) savedTwin.vdo = { room: vroom, password: vpass };
+      }
+      if (d.teamName) saveTeams(); else saveAppState();
+      broadcastFullState();
+      break;
+    }
+    // Plug an existing VDO room into one of the shared talent group rooms
+    // (casters = HOSTS desk, guests = LOBBY, observers = OBSERVERS).
+    case 'set_group_room_creds': {
+      const d = msg.data || {};
+      const vroom = (d.room || '').toString().trim().slice(0, 100);
+      const vpass = (d.password || '').toString().trim().slice(0, 100);
+      const key = d.group === 'guests' ? 'guestsVdo' : d.group === 'observers' ? 'observersVdo'
+                : d.group === 'casters' ? 'vdo' : d.group === 'interview' ? 'interview' : null;
+      if (!vroom || !key) break;
+      state.casters[key] = { room: vroom, password: vpass };
+      if (key === 'vdo') resolveLineupToList();   // caster room feeds the desk lineup URLs
       saveAppState();
       broadcastFullState();
       break;
@@ -10360,10 +11089,12 @@ function handleControlMessage(msg, ws) {
     }
 
     // Assign a player's VDO camera feed to a specific caster overlay slot.
+    // Slots 1-4 = desk caster slots; slot 5 = the Player cam (Spotlight/Interview Desk),
+    // kept in casters.playerCam so lineup rebuilds can't wipe it.
     case 'assign_talent_cam': {
       const { side, playerId, teamName, slot } = msg.data || {};
       const slotNum = Number(slot);
-      if (slotNum < 1 || slotNum > 4) break;
+      if (slotNum < 1 || slotNum > 5) break;
       let team, player;
       if (side === 'blue' || side === 'orange') {
         team = state.teams[side];
@@ -10375,6 +11106,12 @@ function handleControlMessage(msg, ws) {
       if (!team || !player || !team.vdo?.room) break;
       const camUrl = buildObsViewUrl(team, player);
       if (!camUrl) break;
+      if (slotNum === 5) {
+        state.casters.playerCam = { camUrl, name: player.name || '', playerId: player.id || '', side: side || '', teamName: teamName || (team.name || '') };
+        saveAppState();
+        broadcastFullState();
+        break;
+      }
       if (!Array.isArray(state.casters.list)) state.casters.list = [];
       let entry = state.casters.list.find(c => Number(c.slot) === slotNum);
       if (!entry) {
@@ -10383,6 +11120,14 @@ function handleControlMessage(msg, ws) {
         state.casters.list.sort((a, b) => Number(a.slot) - Number(b.slot));
       }
       entry.camUrl = camUrl;
+      saveAppState();
+      broadcastFullState();
+      break;
+    }
+
+    // Clear the slot-5 player cam.
+    case 'clear_player_cam': {
+      state.casters.playerCam = null;
       saveAppState();
       broadcastFullState();
       break;
@@ -10762,6 +11507,19 @@ function handleControlMessage(msg, ws) {
           }));
         }
       })();
+      break;
+    }
+
+    // Which source drives the upcoming/schedule board: 'event' (stream queue) or 'team' (team search).
+    // Sent when the producer switches the Stream Queue tab.
+    case 'startgg_set_upcoming_mode': {
+      const mode = (msg.data && msg.data.mode === 'team') ? 'team' : 'event';
+      state.upcoming.source = mode;
+      // event → overlay shows the live stream queue (+ a couple non-stream extras, filled next poll).
+      // team → clear until a team search populates it (so stale event extras don't show as "team").
+      state.upcoming.matches = (mode === 'event') ? buildEventUpcomingExtras(state.startgg.queue, []) : [];
+      saveAppState();
+      broadcastFullState();
       break;
     }
 
@@ -11172,6 +11930,103 @@ function handleControlMessage(msg, ws) {
       break;
     }
 
+    // ── vMix (full alternative production backend) ──────────────────────────
+    case 'set_vmix_settings': {
+      const p = msg.data || {};
+      if (typeof p.enabled === 'boolean') state.vmix.enabled = p.enabled;
+      if (typeof p.host === 'string' && p.host.trim()) state.vmix.host = p.host.trim();
+      if (typeof p.port === 'number' && p.port > 0) state.vmix.port = Math.max(1, Math.min(65535, Math.round(p.port)));
+      if (!state.vmix.enabled) { state.vmix.connected = false; state.vmix.lastError = null; }
+      saveAppState();
+      broadcastFullState();
+      if (state.vmix.enabled) pollVmix().catch(() => {});   // immediate connect attempt
+      break;
+    }
+
+    // Pick the live production backend (mutually exclusive — vMix is a full alternative to OBS).
+    case 'set_switcher_target': {
+      state.switcher.target = (msg.data && msg.data.target) === 'vmix' ? 'vmix' : 'obs';
+      saveAppState();
+      broadcastFullState();
+      break;
+    }
+
+    // ── Producer Switcher page (program/preview + take + audio, routed by backend) ──
+    case 'switcher_watch': {
+      _switcherWatching = !!(msg.data && msg.data.on);
+      if (_switcherWatching) { pollObsPreview().catch(() => {}); pollVmix().catch(() => {}); }
+      break;
+    }
+    case 'switcher_set_preview': switcherSetPreview((msg.data && msg.data.name) || '').catch(() => {}); break;
+    case 'switcher_take': switcherTake((msg.data && msg.data.mode) || 'cut', Number(msg.data && msg.data.duration) || 0).catch(() => {}); break;
+    case 'switcher_studio_mode': {
+      (async () => {
+        if (obsClient && obsClient.isConnected()) {
+          try { await obsClient.call('SetStudioModeEnabled', { studioModeEnabled: !!(msg.data && msg.data.on) }); state.obs.studioMode = !!(msg.data && msg.data.on); broadcastFullState(); } catch (e) {}
+        }
+      })();
+      break;
+    }
+    case 'switcher_audio_set': switcherAudioSet((msg.data && msg.data.id), msg.data || {}).catch(() => {}); break;
+    case 'switcher_audio_list': {
+      (async () => {
+        // vMix audio already rides in state.vmix.inputs; this is the OBS side.
+        if (state.switcher.target === 'vmix' || !obsClient || !obsClient.isConnected()) { ws.send(JSON.stringify({ type: 'switcher-audio', data: { backend: state.switcher.target, sources: [] } })); return; }
+        try {
+          const list = await obsClient.call('GetInputList');
+          const inputs = (list && list.inputs) || [];
+          const out = [];
+          for (const inp of inputs) {
+            const name = inp.inputName;
+            try {
+              const vol = await obsClient.call('GetInputVolume', { inputName: name });
+              const mute = await obsClient.call('GetInputMute', { inputName: name });
+              out.push({ name, volumeDb: vol && typeof vol.inputVolumeDb === 'number' ? vol.inputVolumeDb : 0, muted: !!(mute && mute.inputMuted) });
+            } catch (e) { /* input without audio — skip */ }
+          }
+          ws.send(JSON.stringify({ type: 'switcher-audio', data: { backend: 'obs', sources: out } }));
+        } catch (e) { ws.send(JSON.stringify({ type: 'switcher-audio', data: { backend: 'obs', sources: [], error: e.message } })); }
+      })();
+      break;
+    }
+    case 'switcher_screenshot': {
+      (async () => {
+        const name = (msg.data && msg.data.name || '').trim();
+        if (!obsClient || !obsClient.isConnected() || !name) { ws.send(JSON.stringify({ type: 'switcher-screenshot', data: { ok: false, name } })); return; }
+        try {
+          const r = await obsClient.call('GetSourceScreenshot', { sourceName: name, imageFormat: 'jpg', imageWidth: 320, imageHeight: 180, imageCompressionQuality: 40 });
+          ws.send(JSON.stringify({ type: 'switcher-screenshot', data: { ok: !!(r && r.imageData), name, img: (r && r.imageData) || null } }));
+        } catch (e) { ws.send(JSON.stringify({ type: 'switcher-screenshot', data: { ok: false, name } })); }
+      })();
+      break;
+    }
+
+    // Fire an arbitrary vMix function from the UI (test button / power actions).
+    case 'vmix_call': {
+      const p = msg.data || {};
+      if (p.function) (async () => { const r = await vmixDo(p.function, p.params || {}); if (!r.ok) broadcastFullState(); })();
+      break;
+    }
+
+    // Quick connection test — used by the Settings "Test" button.
+    case 'vmix_test_connection': {
+      (async () => {
+        try {
+          const s = await vmix.vmixState(state.vmix.host, state.vmix.port);
+          state.vmix.connected = true; state.vmix.lastError = null;
+          Object.assign(state.vmix, { version: s.version, edition: s.edition, inputs: s.inputs, overlays: s.overlays, active: s.active, preview: s.preview, streaming: s.streaming, recording: s.recording });
+          broadcastFullState();
+          ws.send(JSON.stringify({ type: 'vmix-result', data: { ok: true, message: `Connected — vMix ${s.version} (${s.edition}), ${s.inputs.length} input(s).`, inputs: s.inputs } }));
+        } catch (e) {
+          state.vmix.connected = false;
+          state.vmix.lastError = e.code === 'ECONNREFUSED' ? 'vMix not reachable (running with Web API on?)' : e.message;
+          broadcastFullState();
+          ws.send(JSON.stringify({ type: 'vmix-result', data: { ok: false, message: state.vmix.lastError } }));
+        }
+      })();
+      break;
+    }
+
     case 'obs_test_connection': {
       (async () => {
         if (!createObsClient) {
@@ -11197,7 +12052,7 @@ function handleControlMessage(msg, ws) {
           ws.send(JSON.stringify({ type: 'obs-result', data: { ok: false, message: 'Not connected to OBS.' } }));
           return;
         }
-        const scenes = await obsClient.getScenes();
+        const scenes = filterSwitchableScenes(await obsClient.getScenes());
         state.obs.availableScenes = scenes;
         broadcastFullState();
         ws.send(JSON.stringify({ type: 'obs-result', data: { ok: true, message: `Refreshed — ${scenes.length} scene(s).`, scenes } }));
@@ -11210,9 +12065,8 @@ function handleControlMessage(msg, ws) {
       // A manual cut cancels any pending auto post-game→casters or countdown→scene switch.
       if (_postGameTimer) { clearTimeout(_postGameTimer); _postGameTimer = null; }
       clearBreakAutoSwitch();
-      if (obsClient && obsClient.isConnected() && sceneName) {
-        obsClient.switchScene(sceneName);
-      }
+      // Route through the active backend (OBS scene name or vMix input) — one path, both switchers.
+      if (sceneName) switcherCut(sceneName);
       break;
     }
 
@@ -11401,6 +12255,9 @@ function handleControlMessage(msg, ws) {
       const p = msg.data || {};
       if (typeof p.visible === 'boolean') state.standings.visible = p.visible;
       if (typeof p.title === 'string') state.standings.title = p.title;
+      if (typeof p.subtitle === 'string') state.standings.subtitle = p.subtitle;
+      if (typeof p.showRecord === 'boolean') state.standings.showRecord = p.showRecord;
+      if (typeof p.source === 'string') state.standings.source = p.source;
       if (Array.isArray(p.rows)) state.standings.rows = p.rows;
       saveAppState();
       broadcastFullState();
@@ -11487,10 +12344,16 @@ function handleControlMessage(msg, ws) {
     // ── Bracket ──────────────────────────────────────────────────────────
     case 'set_bracket_settings': {
       const p = msg.data || {};
-      if (typeof p.eventSlug === 'string') state.bracket.eventSlug = p.eventSlug.trim();
+      if (typeof p.eventSlug === 'string') {
+        state.bracket.eventSlug = p.eventSlug.trim();
+        // Typing a slug that ISN'T the active event = explicit override → stop following the
+        // active event. Clearing it (or matching the active event) resumes following.
+        state.bracket.followActive = !state.bracket.eventSlug
+          || state.bracket.eventSlug === (state.startgg.eventSlug || '').trim();
+      }
       if (typeof p.visible === 'boolean') state.bracket.visible = p.visible;
       // Overlay view mode — drives the single bracket source + the live preview.
-      if (typeof p.view === 'string' && ['both', 'winners', 'losers', 'finals'].includes(p.view)) state.bracket.view = p.view;
+      if (typeof p.view === 'string' && ['both', 'winners', 'losers', 'finals', 'schedule', 'standings', 'matrix'].includes(p.view)) state.bracket.view = p.view;
       if (p.rounds != null) { const n = parseInt(p.rounds, 10); if (Number.isFinite(n) && n >= 1 && n <= 20) state.bracket.rounds = n; }
       saveAppState();
       broadcastFullState();
@@ -11590,6 +12453,8 @@ function handleControlMessage(msg, ws) {
       if (Array.isArray(p.teams)) state.bracket.teams = p.teams;     // [{name,logo}] for overlay logos
       state.bracket.matches = [];
       state.bracket.eventSlug = '';      // manual mode is not start.gg-backed
+      state.bracket.mode = 'manual';     // the in-app builder now owns these phases — no external clobber
+      state.bracket.source = '';
       state.bracket.lastFetchAt = Date.now();
       syncActiveBracketPhase();          // mirror the active phase to the top-level overlay fields
       if (typeof p.visible === 'boolean') state.bracket.visible = p.visible;
@@ -11603,11 +12468,25 @@ function handleControlMessage(msg, ws) {
     case 'bracket_select_phase': {
       const p = msg.data || {};
       if (p.phaseId != null) state.bracket.activePhaseId = p.phaseId;
+      if (p.poolId != null) state.bracket.activePoolId = p.poolId;   // reset to a specific pool when switching phase, if given
       syncActiveBracketPhase();
       if (typeof p.visible === 'boolean') state.bracket.visible = p.visible;
       saveAppState();
       broadcastFullState();
       if (typeof p.visible === 'boolean') obsSwitch(p.visible ? 'bracket' : 'inGame');
+      break;
+    }
+
+    // Switch which pool (Start.gg phaseGroup, or a manually-built pool) is live
+    // on the overlay, when the active phase has more than one running at once.
+    case 'bracket_select_pool': {
+      const p = msg.data || {};
+      const ph = (state.bracket.phases || []).find((x) => x.id === state.bracket.activePhaseId);
+      const pools = (ph && ph.pools) || [];
+      if (p.poolId != null && pools.some((pl) => pl.id === p.poolId)) state.bracket.activePoolId = p.poolId;
+      syncActiveBracketPhase();
+      saveAppState();
+      broadcastFullState();
       break;
     }
 
@@ -11617,13 +12496,18 @@ function handleControlMessage(msg, ws) {
       state.bracket.phases = [{
         id: 'phase1', name: 'Bracket', type: p.type || 'SINGLE_ELIMINATION',
         winners: p.winners || [], losers: p.losers || [], finals: p.finals || [],
-        standings: p.standings || [], schedule: p.schedule || [], roster: p.roster || []
+        standings: p.standings || [], schedule: p.schedule || [], roster: p.roster || [],
+        pools: Array.isArray(p.pools) ? p.pools : []
       }];
       state.bracket.activePhaseId = 'phase1';
       if (typeof p.title === 'string') state.bracket.title = p.title;
       if (Array.isArray(p.teams)) state.bracket.teams = p.teams;
       state.bracket.matches = [];
       state.bracket.eventSlug = '';
+      // Manual ownership — without this, a later eventSlug set would let the start.gg
+      // poll silently overwrite the hand-built bracket (set_bracket_phases gets this right).
+      state.bracket.mode = 'manual';
+      state.bracket.source = '';
       state.bracket.lastFetchAt = Date.now();
       syncActiveBracketPhase();
       if (typeof p.visible === 'boolean') state.bracket.visible = p.visible;
@@ -11810,12 +12694,14 @@ function handleControlMessage(msg, ws) {
     case 'set_director': {
       const d = msg.data || {};
       if (directorEngine) {
-        directorEngine.setSettings({
-          enabled: 'enabled' in d ? !!d.enabled : undefined,
-          sensitivity: 'sensitivity' in d ? Number(d.sensitivity) : undefined,
-          lockTarget: 'lockTarget' in d ? (d.lockTarget || null) : undefined,
-          autoSwitch: 'autoSwitch' in d ? !!d.autoSwitch : undefined
-        });
+        // Patch must only carry the keys the client actually sent — setSettings
+        // tests key presence, so a present-but-undefined key wipes that setting.
+        const patch = {};
+        if ('enabled' in d) patch.enabled = !!d.enabled;
+        if ('sensitivity' in d) patch.sensitivity = Number(d.sensitivity);
+        if ('lockTarget' in d) patch.lockTarget = d.lockTarget || null;
+        if ('autoSwitch' in d) patch.autoSwitch = !!d.autoSwitch;
+        directorEngine.setSettings(patch);
         state.director = mergeDirectorRuntime(directorEngine.getState());
         autoSwitch.setEnabled(!!state.director.autoSwitch);
       } else if (state.director) {
@@ -12263,15 +13149,37 @@ function startHttpServer(baseDir) {
     }
   });
 
+  // Almost every overlay file opens with a `<!-- filename.html — description... -->` header
+  // comment (see duorow.html, preshow.html, etc.) — pull the first line of it as a free
+  // auto-description so newly-added, not-yet-curated scenes still show something useful in
+  // the "Other Overlays" fallback group instead of a generic placeholder.
+  async function overlayAutoDescription(filePath) {
+    try {
+      const fh = await fsp.open(filePath, 'r');
+      const buf = Buffer.alloc(2048);
+      const { bytesRead } = await fh.read(buf, 0, 2048, 0);
+      await fh.close();
+      const head = buf.slice(0, bytesRead).toString('utf8');
+      const m = head.match(/<!--\s*([\s\S]*?)-->/);
+      if (!m) return '';
+      const firstLine = m[1].split('\n').map((l) => l.trim()).find((l) => l);
+      if (!firstLine) return '';
+      return firstLine.replace(/^[\w.-]+\.html\s*[—-]\s*/, '').trim();
+    } catch (e) { return ''; }
+  }
+
   // List every overlay HTML on disk so the Scenes page auto-discovers new scenes
   // (no need to hand-maintain a list). Internal pages are excluded.
   app.get('/api/overlays', async (req, res) => {
     const EXCLUDE = new Set(['scenes.html', 'index.html', 'upcoming.html']);  // launcher + overlay index + upcoming→schedule redirect stub
     try {
-      const files = (await require('fs').promises.readdir(overlayDir))
+      const files = (await fsp.readdir(overlayDir))
         .filter((f) => /\.html$/i.test(f) && !EXCLUDE.has(f.toLowerCase()))
         .sort();
-      res.json({ ok: true, overlays: files.map((f) => ({ file: f, path: '/' + f })) });
+      const overlays = await Promise.all(files.map(async (f) => ({
+        file: f, path: '/' + f, desc: await overlayAutoDescription(path.join(overlayDir, f))
+      })));
+      res.json({ ok: true, overlays });
     } catch (e) {
       res.status(500).json({ ok: false, message: e.message });
     }
@@ -12299,6 +13207,18 @@ function startHttpServer(baseDir) {
           ];
     return candidates.find(d => { try { return fs.existsSync(d); } catch { return false; } }) || '';
   }
+
+  // OBS scene collections and profiles — used by brand kit editor to populate picker dropdowns.
+  app.get('/api/obs/scene-collections', async (req, res) => {
+    if (!obsClient || !obsClient.isConnected()) return res.json({ ok: true, collections: [], current: '' });
+    const r = await obsClient.call('GetSceneCollectionList').catch(() => null);
+    res.json({ ok: true, collections: (r && r.sceneCollections) || [], current: (r && r.currentSceneCollectionName) || '' });
+  });
+  app.get('/api/obs/profiles', async (req, res) => {
+    if (!obsClient || !obsClient.isConnected()) return res.json({ ok: true, profiles: [], current: '' });
+    const r = await obsClient.call('GetProfileList').catch(() => null);
+    res.json({ ok: true, profiles: (r && r.profiles) || [], current: (r && r.currentProfileName) || '' });
+  });
 
   // Returns all audio/video inputs currently known to OBS — used to populate flow action dropdowns.
   app.get('/api/obs/inputs', async (req, res) => {
@@ -12387,6 +13307,16 @@ function startHttpServer(baseDir) {
         try { await obsClient.call('SetCurrentSceneCollection', { sceneCollectionName: OBS_COLLECTION_NAME }); switched = true; }
         catch (wsErr) { console.warn('[OBS] SetCurrentSceneCollection failed:', wsErr.message); }
       }
+
+      // Post-install glue: auto-map EMPTY broadcast moments to the collection's known scene
+      // names so hotkeys/quick-bar work immediately (never overwrites a producer's own mapping).
+      const AUTO_MAP = { inGame: 'In Game', replay: 'Replay', postGame: 'Post-Game (Winner)',
+        break: 'Break (Countdown)', casters: 'DuoCam Row', bracket: 'Bracket' };
+      let mapped = false;
+      Object.entries(AUTO_MAP).forEach(([key, sceneName]) => {
+        if (!state.obs.scenes[key]) { state.obs.scenes[key] = sceneName; mapped = true; }
+      });
+      if (mapped) { saveAppState(); broadcastFullState(); }
 
       res.json({
         ok: true,
@@ -15283,6 +16213,8 @@ function startHttpServer(baseDir) {
 
   // POST /api/twitch/ad/run — run a Twitch ad break (commercial) of the given length (seconds)
   app.post('/api/twitch/ad/run', async (req, res) => {
+    // Ads are producer-action ONLY: reject anything originating from the flow engine.
+    if (req.headers['x-ne-flow']) return res.status(403).json({ error: 'Ads cannot be triggered by automations' });
     if (!twitchClient || !state.twitch.connected) return res.status(400).json({ error: 'Twitch not connected' });
     if (state.twitch.adsEnabled === false) return res.status(409).json({ error: 'Ads are turned off' });
     const length = [30, 60, 90, 120, 150, 180].includes(Number(req.body && req.body.length)) ? Number(req.body.length) : 30;

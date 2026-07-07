@@ -23,7 +23,7 @@
     .duo-stage { display: flex; flex-direction: column; width: var(--stage-w); height: var(--stage-h);
       padding: 16px var(--pad-x) 16px; opacity: 0; transition: opacity .35s ease; }
     .duo-stage.show { opacity: 1; }
-    .zone-hud { flex: 0 0 auto; display: flex; align-items: center; justify-content: center; }
+    .zone-hud { flex: 0 0 auto; display: flex; flex-direction: column; align-items: center; justify-content: center; }
     .zone-cams { flex: 1 1 0; min-height: 0; display: flex; align-items: center; justify-content: center; padding: 14px 0; }
     .cam-block { display: flex; flex-direction: column; align-items: center; width: var(--cam-w); max-width: calc(var(--stage-w) - 2 * var(--pad-x)); }
     .zone-footer { flex: 0 0 auto; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; }
@@ -67,7 +67,8 @@
     .cam-hole iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
     /* ?cams=off framing: transparent hole so a per-caster OBS source shows through. */
     .duo-stage.frames-only .cam-hole { background: transparent; }
-    .duo-stage.frames-only .cam-card { background: transparent; box-shadow: none; }
+    .duo-stage.frames-only .cam-card { background: transparent; box-shadow: none; border-color: transparent; }
+    .duo-stage.frames-only .cam-card::before { display: none; }
     .cam-plates { display: flex; flex: 0 0 var(--cam-plate-h); height: var(--cam-plate-h); border-top: 1px solid var(--duo-border);
       background: linear-gradient(180deg, var(--duo-surface2), var(--duo-surface)); }
     .cam-plate { flex: 1 1 0; min-width: 0; display: flex; align-items: center; justify-content: center; gap: 12px; padding: 0 18px; position: relative; }
@@ -82,7 +83,7 @@
     .cam-handle.kick::before { content: "K"; font-family: 'Inter', sans-serif; font-weight: 900; color: #53fc18; }
     .cam-handle.link::before { content: "\f0c1"; font-family: 'Font Awesome 6 Free'; font-weight: 900; color: var(--duo-muted); }
 
-    /* ── "Presented by" attached under the cam ── */
+    /* ── "Presented by" attached under the scoreboard HUD ── */
     .presented-by { align-self: center; display: inline-flex; align-items: center; gap: 14px; padding: 8px 24px;
       background: linear-gradient(180deg, var(--duo-surface2), var(--duo-surface));
       border: 1px solid var(--duo-border); border-top: 0; border-radius: 0 0 10px 10px; box-shadow: 0 10px 24px rgba(0,0,0,.4); }
@@ -111,6 +112,7 @@
         <div class="match-center"><span class="match-vs">VS</span></div>
         <div class="match-team match-team--b"><span id="teamscore2" class="match-score">0</span><span id="teamname2" class="match-name">ORANGE</span><img id="teamlogo2" class="match-logo" alt=""></div>
       </header>
+      <div class="presented-by is-empty" id="presented-by"><span class="pb-label" id="pb-label">PRESENTED BY</span><img id="pb-logo" class="pb-logo" alt="" style="display:none"></div>
     </div>
 
     <div class="zone-cams">
@@ -122,7 +124,6 @@
             <div class="cam-plate"><span id="staffname2" class="cam-name">—</span><span id="socials2" class="cam-handle" style="display:none"></span></div>
           </div>
         </div>
-        <div class="presented-by is-empty" id="presented-by"><span class="pb-label" id="pb-label">PRESENTED BY</span><img id="pb-logo" class="pb-logo" alt="" style="display:none"></div>
       </div>
     </div>
 

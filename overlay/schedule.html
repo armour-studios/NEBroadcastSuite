@@ -207,7 +207,21 @@ body { width: 1920px; height: 1080px; overflow: hidden; background: transparent;
     return wrap;
   }
 
-  function buildMatches(queue, manual, maps) {
+  function buildMatches(queue, manual, maps, source) {
+    // TEAM mode: the board follows the searched team's own matches only — ignore the stream queue.
+    if (source === 'team') {
+      var tm = (manual || []).filter(function (m) {
+        var s = typeof m.state === 'number' ? m.state : 2;
+        return s !== 3;   // hide completed
+      }).map(function (m) {
+        return { setId: m.setId, round: m.round || '', teamA: m.teamA || 'TBD', teamB: m.teamB || 'TBD',
+          logoA: logoFor(m.teamA, m.teamALogo || m.logoA, maps), logoB: logoFor(m.teamB, m.teamBLogo || m.logoB, maps),
+          stream: !!(m.stream), live: !!(m.state === 2 || m.live),
+          date: m.date || '', time: m.time || '', scheduledTime: m.scheduledTime || '' };
+      });
+      tm.sort(function (a, b) { return (b.live ? 1 : 0) - (a.live ? 1 : 0); });
+      return tm.slice(0, 12);
+    }
     var auto = (queue || []).filter(function (m) {
       var s = typeof m.state === 'number' ? m.state : (m.status === 'upcoming' ? 1 : (m.status === 'done' ? 3 : 2));
       return s === 1 || s === 2;
@@ -268,7 +282,7 @@ body { width: 1920px; height: 1080px; overflow: hidden; background: transparent;
 
     var raw = LAYOUT_QP || up.layout || 'cards';
     var isDual = raw === 'board' || raw === 'dual';
-    var all = buildMatches((data.startgg || {}).queue, up.matches, mapsData);
+    var all = buildMatches((data.startgg || {}).queue, up.matches, mapsData, up.source);
     var sig = JSON.stringify({ d: isDual, m: all });
     if (sig === _lastSig) return;
     _lastSig = sig;

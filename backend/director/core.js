@@ -142,10 +142,10 @@ function createDirectorCore({ learning, onStateChange }) {
   }
 
   function setSettings(patch) {
-    if ('enabled' in patch) settings.enabled = !!patch.enabled;
-    if ('sensitivity' in patch) settings.sensitivity = Math.max(0, Math.min(1, Number(patch.sensitivity) || 0.5));
-    if ('lockTarget' in patch) settings.lockTarget = patch.lockTarget || null;
-    if ('autoSwitch' in patch) settings.autoSwitch = !!patch.autoSwitch;
+    if (patch.enabled !== undefined) settings.enabled = !!patch.enabled;
+    if (patch.sensitivity !== undefined) settings.sensitivity = Math.max(0, Math.min(1, Number(patch.sensitivity) || 0.5));
+    if ('lockTarget' in patch && patch.lockTarget !== undefined) settings.lockTarget = patch.lockTarget || null;
+    if (patch.autoSwitch !== undefined) settings.autoSwitch = !!patch.autoSwitch;
     emit();
   }
 

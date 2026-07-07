@@ -212,8 +212,12 @@
       <button class="tab-btn nav-item" data-tab="produccion" id="tab-produccion">
         <span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg></span><span class="nav-label">Production</span></button>
 
+      <button class="tab-btn nav-item" data-tab="switcher" id="tab-switcher">
+        <span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="9" height="7" rx="1"/><rect x="13" y="4" width="9" height="7" rx="1"/><line x1="4" y1="15" x2="4" y2="20"/><line x1="8" y1="15" x2="8" y2="20"/><line x1="12" y1="15" x2="12" y2="20"/><line x1="16" y1="15" x2="16" y2="20"/><line x1="20" y1="15" x2="20" y2="20"/></svg></span><span class="nav-label">Switcher</span></button>
       <button class="tab-btn nav-item" data-tab="equipos" id="tab-equipos">
         <span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span><span class="nav-label">Talent</span></button>
+      <button class="tab-btn nav-item" data-tab="facecams" id="tab-facecams">
+        <span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg></span><span class="nav-label">Cameras</span></button>
       <button class="tab-btn nav-item" data-tab="events" id="tab-events">
         <span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/></svg></span><span class="nav-label">ESPORTS</span></button>
       <button class="tab-btn nav-item" data-tab="replays" id="tab-replays">
@@ -894,6 +898,17 @@
         <p class="msp-hint" id="rl-scene-auto-status" style="margin-top:8px;"></p>
       </div>
 
+      <!-- In-Game Player Cams — map live in-game names to a person's cam feed (HUD facecams) -->
+      <div class="msp-col msp-rl-strip" id="msp-playercams">
+        <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:6px;">
+          <p class="msp-label" style="flex:1; margin:0;">In-Game Player Cams <span class="msp-hint">(HUD facecams — link each in-game name to a cam feed)</span></p>
+          <button class="btn btn-ghost btn-sm" id="btn-playercams-automatch" type="button" title="Link every in-game name to the roster player or crew member with the same name">Auto-link by name</button>
+          <button class="btn btn-ghost btn-sm" id="btn-playercams-refresh" type="button" title="Re-pull in-game names from the live game and refresh cam feeds">Refresh</button>
+        </div>
+        <div id="msp-playercams-rows" class="playercams-rows"></div>
+        <p class="msp-hint" id="msp-playercams-status"></p>
+      </div>
+
     </div>
     <div id="autofill-stream-status" class="ev-status" style="margin:-6px 0 8px;"></div>
     <datalist id="saved-teams-datalist"></datalist>
@@ -1507,7 +1522,7 @@
         <button class="dcc-role-tab" data-dcrole="lobby">Lobby</button>
         <button class="dcc-role-tab" data-dcrole="staging">Staging</button>
         <div class="dcc-bar-gap"></div>
-        <span class="dcc-bar-title"><span class="dcc-mon-dot" id="dcc-mon-status-dot" title="Monitoring status"></span>Director Control Center</span>
+        <span class="dcc-bar-title"><span class="dcc-mon-dot" id="dcc-mon-status-dot" title="Monitoring status"></span>Talent Monitor</span>
         <button class="dcc-bar-icon-btn" id="dcc-refresh-btn" title="Refresh talent and connection status">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" width="12" height="12"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M3 21v-5h5"/></svg>
         </button>
@@ -1588,6 +1603,15 @@
           </div>
           <div class="dcc-hosts-col-room" id="dcc-room-team-orange" style="padding:3px 12px;font-size:10px;font-family:monospace;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="Everyone on this team shares this VDO room — if a player's room differs, they won't hear or see the rest of the team"></div>
           <div id="dcc-roster-team-orange" class="dcc-section-roster"></div>
+
+          <!-- In-Game Player Cams — same mapping panel as Match - Teams settings -->
+          <div class="dcc-section-head" style="margin-top:10px;">
+            <span class="dcc-section-name">In-Game Player Cams <span style="font-size:10px;color:var(--muted);font-weight:600;">(HUD facecams)</span></span>
+            <button class="btn btn-ghost btn-xs" id="dcc-playercams-automatch" title="Link every in-game name to the roster player or crew member with the same name">Auto-link</button>
+            <button class="btn btn-ghost btn-xs" id="dcc-playercams-refresh" title="Re-pull in-game names and cam feeds">Refresh</button>
+          </div>
+          <div id="dcc-playercams-rows" class="playercams-rows" style="padding:4px 12px;"></div>
+          <p class="msp-hint" id="dcc-playercams-status" style="padding:0 12px;"></p>
 
         </div><!-- /dcc-db-players -->
 
@@ -1745,20 +1769,36 @@
 <div id="tab-facecams-content" class="tab-content">
   <div class="page-head"><h1>Camera Feeds</h1><p>Player, caster and gameplay video feeds (VDO.ninja) routed into your OBS scenes — assign cams, set rooms, request screenshares.</p></div>
   <div class="cf-subnav" id="cf-subnav">
-    <button type="button" class="cf-tab active" data-cf="players">Players</button>
-    <button type="button" class="cf-tab" data-cf="talent">Talent Rooms</button>
+    <!-- Players sub-tab retired: player cam assignment lives natively in Match — Teams
+         (gear ▸ In-Game Player Cams) and the Talent Monitor's Players tab — the same shared
+         panel. The hidden button + panel markup stay so legacy render functions are safe. -->
+    <button type="button" class="cf-tab" data-cf="players" style="display:none;">Players</button>
+    <button type="button" class="cf-tab active" data-cf="talent">Talent Rooms</button>
     <button type="button" class="cf-tab" data-cf="gameplay">Gameplay</button>
     <button type="button" class="btn btn-ghost btn-sm" id="cf-goto-vdo-settings" style="margin-left:auto;" title="VDO.ninja settings now live in the Integrations page"><svg class="svg-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg> VDO Settings ↗</button>
   </div>
 
-  <!-- ───────────── PLAYERS ───────────── -->
-  <div class="cf-panel active" id="cf-panel-players">
+  <!-- ───────────── PLAYERS (retired — hidden sub-tab; see note in cf-subnav) ───────────── -->
+  <div class="cf-panel" id="cf-panel-players">
   <div id="facecams-disabled-warning" style="display: none; background: #c53030; color: white; padding: 10px 15px; border-radius: 8px; margin: 0 15px 20px 15px; font-weight: 600; align-items: center; gap: 10px;">
     <span>Facecams are currently disabled in Settings. They will not be visible on the overlay.</span>
   </div>
+  <!-- Unified In-Game Player Cams — the SAME panel as Match — Teams (gear) and the Talent
+       Monitor's Players tab, so cam assignment works identically everywhere. -->
+  <section class="section">
+    <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:6px;">
+      <h3 class="section-title" style="flex:1; margin:0;">In-Game Player Cams</h3>
+      <button class="btn btn-ghost btn-sm" id="cfp-playercams-automatch" type="button" title="Link every in-game name to the roster player or crew member with the same name">Auto-link by name</button>
+      <button class="btn btn-ghost btn-sm" id="cfp-playercams-refresh" type="button">Refresh</button>
+    </div>
+    <p class="section-desc" style="margin:0 0 10px; max-width:680px;">Link each live in-game name to a cam feed — the HUD overlays show the mapped cam for whoever is being spectated. The same panel lives in <strong>Match — Teams ▸ gear</strong> and the Dashboard <strong>Talent Monitor ▸ Players</strong> tab.</p>
+    <div id="cfp-playercams-rows" class="playercams-rows"></div>
+    <p class="msp-hint" id="cfp-playercams-status"></p>
+  </section>
+
   <section class="section">
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; gap:14px; flex-wrap:wrap;">
-      <h3 class="section-title" style="margin-bottom:0;">Facecams</h3>
+      <h3 class="section-title" style="margin-bottom:0;">Manual facecam editor <span style="font-size:11px;color:var(--muted);font-weight:600;">(legacy — the panel above is the quick way)</span></h3>
       <label class="qt-toggle" title="Show player facecams on the overlay (same setting as Settings → Enable Facecams)" style="margin-left:auto;">
         <span>Show on overlay</span>
         <label class="switch"><input type="checkbox" id="cf-facecams-enabled" checked><span class="slider"></span></label>
@@ -1983,7 +2023,21 @@
 
 
   <!-- ───────────── TALENT ROOMS (VDO automation) ───────────── -->
-  <div class="cf-panel" id="cf-panel-talent">
+  <div class="cf-panel active" id="cf-panel-talent">
+
+    <!-- Rooms manager — every VDO room in one place: generate, or link a room you already have -->
+    <section class="section" id="cf-rooms-section">
+      <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:14px; flex-wrap:wrap; margin-bottom:6px;">
+        <div>
+          <h3 class="section-title" style="margin-bottom:4px;">VDO Rooms</h3>
+          <p class="section-desc" style="margin:0; max-width:680px;">All rooms this show uses. Rooms <strong>generate automatically</strong> when needed — or hit <strong>Link existing</strong> on any row to plug in a VDO.ninja room you already run (room name + password). Add extra talent rooms with <strong>+ New talent room</strong> and pick which one is the <strong>desk</strong> (where casters sit and interviews happen).</p>
+        </div>
+        <button class="btn btn-primary btn-sm" id="cf-room-add" title="Add another talent room (e.g. a second desk, green room, standby)">+ New talent room</button>
+      </div>
+      <div id="cf-rooms-list" class="cf-rooms-list" style="display:flex; flex-direction:column; gap:6px;"></div>
+      <p class="msp-hint" id="cf-rooms-status" style="margin-top:6px;"></p>
+    </section>
+
     <section class="section">
       <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:14px; flex-wrap:wrap; margin-bottom:6px;">
         <div>
@@ -2012,6 +2066,7 @@
       <div class="dcc-flex-row">
         <span class="stat-pill" id="cf-listen-active">Nobody on listen-in</span>
         <button class="btn btn-danger btn-sm" id="cf-listen-clear">Stop</button>
+        <button class="btn btn-secondary btn-sm" id="cf-listen-obs" title="Add listen-in.html to your current OBS scene as a browser source with audio monitored and on stream — no manual setup">Add to OBS</button>
         <button class="btn btn-ghost btn-sm listen-feed-btn" id="cf-listen-open" hidden>Open feed &#x2197;</button>
         <label class="qt-toggle listen-toggle">
           <span>Show transcription</span>
@@ -2053,7 +2108,7 @@
 
 <!-- ════════════════════════════════════════════ TAB: TEAMS ═══ -->
 <div id="tab-equipos-content" class="tab-content">
-  <div class="page-head"><h1>On-Air Talent</h1><p>Every player, caster, guest &amp; observer in one place &mdash; live connection &amp; camera status, in-depth VDO audio, and drag a person onto a room to move them. Switch to <strong>Database</strong> mode to manage rosters, generate VDO rooms, and assign cams.</p></div>
+  <div class="page-head"><h1>On-Air Talent</h1><p>Every player, caster, guest &amp; observer in one place &mdash; live connection &amp; camera status, in-depth VDO audio, and drag a person onto a room to move them. Rooms, join links and cam assignments live on the <strong>Cameras</strong> page (sidebar); the live monitor is the <strong>Talent Monitor</strong> widget on the Dashboard.</p></div>
 
   <!-- ───────────── DIRECTOR CONTROL CENTER ───────────── -->
   <style>
@@ -4311,6 +4366,7 @@
             <span class="switch"><input type="checkbox" id="gfx-autocut-on"><span class="slider"></span></span>
           </label>
           <select id="gfx-autocut-scene" class="input-select gfx-autocut-scene" title="OBS scene to cut to when a graphic goes live"><option value="">— scene —</option></select>
+          <span id="gfx-obs-chip" style="display:none; font-size:11px; font-weight:700; letter-spacing:.04em; padding:4px 10px; border-radius:999px; border:1px solid var(--border,#2e3340); color:var(--muted); white-space:nowrap; max-width:230px; overflow:hidden; text-overflow:ellipsis;" title="Current OBS program scene"></span>
           <span class="gfx-live-badge is-off" id="gfx-live-badge">OFF AIR</span>
           <button class="gfx-btn-clear" id="gfx-top-clear" title="Clear all GFX overlays">Clear All</button>
           <!-- delegation target kept for Queue (rundown) -->
@@ -4332,7 +4388,7 @@
               <button class="gfx-sidenav-btn active" data-gfxscene="break">Break</button>
               <button class="gfx-sidenav-btn" data-gfxscene="intro">Team Intro</button>
               <button class="gfx-sidenav-btn" data-gfxscene="ticker">Ticker</button>
-              <button class="gfx-sidenav-btn" data-gfxscene="preshow">Pre-Game Show</button>
+              <button class="gfx-sidenav-btn" data-gfxscene="preshow">Desk Show</button>
             </div>
           </div>
 
@@ -4381,6 +4437,13 @@
         </div>
 
         <div class="gfx-settings-col" id="gfx-settings-col">
+          <!-- Uniform scene header — identical anatomy on every scene (name · on-air state ·
+               overlay link) so navigating scene to scene always lands on the same frame. -->
+          <div id="gfx-scene-head" style="display:flex; align-items:center; gap:10px; padding-bottom:10px; margin-bottom:12px; border-bottom:1px solid var(--border);">
+            <span id="gfx-scene-head-name" style="font-family:'Rajdhani','Inter',sans-serif; font-weight:700; font-size:17px; letter-spacing:.05em; text-transform:uppercase; color:var(--text,#e8eaf0); flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">Scene</span>
+            <span id="gfx-scene-head-live" class="gfx-live-badge is-off" style="font-size:10px;">OFF AIR</span>
+            <a id="gfx-scene-head-link" href="#" target="_blank" class="overlay-link" style="font-size:11px; white-space:nowrap;">overlay ↗</a>
+          </div>
 
           <!-- Map Pool / Series mode toggle — they're the same underlying pick/ban data
                (series.html reads state.veto.maps once any are picked, falling back to the manual
@@ -4400,39 +4463,131 @@
                readout otherwise — plus a Settings button that opens the full editor. -->
           <div id="gfx-popout-summary" class="gfx-popout-summary" style="display:none;">
 
-            <!-- BRACKET — quick start.gg import (moved out of the pop-out; identical markup/ids,
-                 so gfx-bkt-fetch's handler in app.js needs no change). -->
+            <!-- BRACKET — guided source switcher: one clean place to pick a platform (start.gg /
+                 Challonge / NXGEN) or build a custom bracket, then switch phase/pool/view below.
+                 Deep editing (full builder grid, match picker) lives under "More settings". -->
             <div class="gfx-front-panel" data-frontkey="bracket" id="gfx-front-bracket" style="display:none;">
-              <div class="gfx-ctrl-row">
-                <span class="field-label" style="flex-shrink:0;">Source</span>
-                <div class="gfx-src-tabs">
-                  <button type="button" class="gfx-src-tab is-on" id="gfx-bkt-tab-sg">Tournament</button>
-                  <button type="button" class="gfx-src-tab" id="gfx-bkt-tab-custom">Custom</button>
+
+              <!-- Mini control center — live status + clickable stage/view chips. What's on the
+                   overlay is driven RIGHT HERE; importing/building lives in the drawer below. -->
+              <div id="gfx-bkt-cc">
+                <div id="gfx-bkt-cc-status" style="font-size:12px; color:var(--muted); margin-bottom:8px;">No bracket loaded yet — pick a source below.</div>
+                <div id="gfx-bkt-cc-phases" style="display:none; align-items:center; gap:6px; flex-wrap:wrap; margin-bottom:6px;">
+                  <span class="bk-views-lbl">Phase</span>
+                  <span id="gfx-bkt-cc-phase-chips" style="display:inline-flex; gap:6px; flex-wrap:wrap;"></span>
+                </div>
+                <div id="gfx-bkt-cc-pools" style="display:none; align-items:center; gap:6px; flex-wrap:wrap; margin-bottom:6px;">
+                  <span class="bk-views-lbl">Pool</span>
+                  <span id="gfx-bkt-cc-pool-chips" style="display:inline-flex; gap:6px; flex-wrap:wrap;"></span>
+                </div>
+                <div id="gfx-bkt-cc-views" style="display:none; align-items:center; gap:6px; flex-wrap:wrap;">
+                  <span class="bk-views-lbl">View</span>
+                  <span id="gfx-bkt-cc-view-chips" style="display:inline-flex; gap:6px; flex-wrap:wrap;"></span>
                 </div>
               </div>
-              <div id="gfx-bkt-sg-wrap">
+
+              <details id="gfx-bkt-import" style="margin-top:12px; border-top:1px solid var(--border); padding-top:10px;">
+                <summary style="cursor:pointer; font-size:11px; font-weight:800; letter-spacing:.1em; text-transform:uppercase; color:var(--muted);">Import / change source</summary>
+              <div class="gfx-ctrl-row" style="margin-top:10px;">
+                <span class="field-label" style="flex-shrink:0;">Source</span>
+                <div class="gfx-src-tabs" id="gfx-bkt-srctabs">
+                  <button type="button" class="gfx-src-tab is-on" data-bktsrc="sg">start.gg</button>
+                  <button type="button" class="gfx-src-tab" data-bktsrc="challonge">Challonge</button>
+                  <button type="button" class="gfx-src-tab" data-bktsrc="nxgen">NXGEN</button>
+                  <button type="button" class="gfx-src-tab" data-bktsrc="manual">Manual</button>
+                </div>
+              </div>
+
+              <!-- start.gg -->
+              <div class="gfx-bkt-srcwrap" data-bktwrap="sg">
                 <div class="gfx-ctrl-row" style="margin-top:2px;">
                   <label class="field-label" style="flex-shrink:0; white-space:nowrap;" for="gfx-bkt-slug">Event URL / Slug</label>
-                  <input type="text" id="gfx-bkt-slug" class="input-text" placeholder="event-name/bracket-name" style="flex:1; min-width:0;">
+                  <input type="text" id="gfx-bkt-slug" class="input-text" placeholder="tournament/slug/event/slug" style="flex:1; min-width:0;">
                 </div>
-                <div style="margin-top:8px;">
-                  <button class="btn btn-blue btn-sm" id="gfx-bkt-fetch">Import Bracket</button>
-                </div>
+                <div style="margin-top:8px;"><button class="btn btn-blue btn-sm" id="gfx-bkt-fetch">Import from start.gg</button></div>
                 <p id="gfx-bkt-sg-status" class="sps-desc" style="margin-top:6px;"></p>
               </div>
-              <div id="gfx-bkt-custom-wrap" style="display:none;">
-                <p class="field-hint" style="margin:0 0 8px;">Build a bracket by hand. Saving saves to the overlay without pushing it live.</p>
-                <button class="btn btn-secondary btn-sm" id="gfx-bkt-build">Build Custom Bracket</button>
+
+              <!-- Challonge -->
+              <div class="gfx-bkt-srcwrap" data-bktwrap="challonge" style="display:none;">
+                <div class="gfx-ctrl-row" style="margin-top:2px;">
+                  <label class="field-label" style="flex-shrink:0; white-space:nowrap;" for="gfx-bkt-ch-slug">Tournament URL / Slug</label>
+                  <input type="text" id="gfx-bkt-ch-slug" class="input-text" placeholder="challonge.com/xxxxx  or  xxxxx" style="flex:1; min-width:0;">
+                </div>
+                <div style="margin-top:8px;"><button class="btn btn-blue btn-sm" id="gfx-bkt-ch-fetch">Import from Challonge</button></div>
+                <p class="field-hint" style="margin:6px 0 0;">Needs your Challonge API key in Settings. Auto-syncs scores live.</p>
+                <p id="gfx-bkt-ch-status" class="sps-desc" style="margin-top:4px;"></p>
               </div>
+
+              <!-- NXGEN -->
+              <div class="gfx-bkt-srcwrap" data-bktwrap="nxgen" style="display:none;">
+                <div class="gfx-ctrl-row" style="margin-top:2px;">
+                  <label class="field-label" style="flex-shrink:0; white-space:nowrap;" for="gfx-bkt-nx-slug">Event Slug</label>
+                  <input type="text" id="gfx-bkt-nx-slug" class="input-text" placeholder="nxgen event slug" style="flex:1; min-width:0;">
+                </div>
+                <div style="margin-top:8px;"><button class="btn btn-blue btn-sm" id="gfx-bkt-nx-fetch">Import from NXGEN</button></div>
+                <p id="gfx-bkt-nx-status" class="sps-desc" style="margin-top:6px;"></p>
+              </div>
+
+              <!-- Manual -->
+              <div class="gfx-bkt-srcwrap" data-bktwrap="manual" style="display:none;">
+                <div class="gfx-ctrl-row" style="margin-top:2px;">
+                  <span class="field-label" style="flex-shrink:0;">Format</span>
+                  <div class="gfx-src-tabs" id="gfx-bkt-mformat">
+                    <button type="button" class="gfx-src-tab is-on" data-mfmt="single">Single Elim</button>
+                    <button type="button" class="gfx-src-tab" data-mfmt="double">Double Elim</button>
+                    <button type="button" class="gfx-src-tab" data-mfmt="roundrobin">Round Robin</button>
+                    <button type="button" class="gfx-src-tab" data-mfmt="swiss">Swiss</button>
+                  </div>
+                </div>
+                <div class="gfx-ctrl-row">
+                  <label class="field-label" style="flex-shrink:0;" for="gfx-bkt-msize">Teams</label>
+                  <select id="gfx-bkt-msize" class="input-select" style="max-width:120px;">
+                    <option>4</option><option>6</option><option selected>8</option><option>12</option><option>16</option><option>24</option><option>32</option>
+                  </select>
+                </div>
+                <div style="margin-top:8px; display:flex; gap:8px; flex-wrap:wrap;">
+                  <button class="btn btn-blue btn-sm" id="gfx-bkt-mbuild">Build &amp; open editor</button>
+                </div>
+                <p class="field-hint" style="margin:6px 0 0;">Creates an empty bracket you fill in the full editor (More settings). Nothing external overwrites a custom bracket.</p>
+                <p id="gfx-bkt-m-status" class="sps-desc" style="margin-top:4px;"></p>
+              </div>
+              </details>
             </div>
 
-            <!-- STANDINGS — compact status readout (config lives in the pop-out). -->
+            <!-- STANDINGS — quick inline controls; deep source/rows config lives under "More settings". -->
             <div class="gfx-front-panel" data-frontkey="standings" id="gfx-front-standings" style="display:none;">
+              <!-- Mini control center: pick the rows source right here (proxies the pop-out's
+                   source tabs, so all existing load/apply wiring is reused untouched). -->
+              <div class="gfx-ctrl-row">
+                <span class="field-label" style="flex-shrink:0;">Source</span>
+                <div class="gfx-src-tabs" id="gfx-front-std-src">
+                  <button type="button" class="gfx-src-tab" data-fstdsrc="league" title="Rows from an in-app league">League</button>
+                  <button type="button" class="gfx-src-tab" data-fstdsrc="startgg" title="Rows from the loaded start.gg event / bracket">start.gg</button>
+                  <button type="button" class="gfx-src-tab" data-fstdsrc="manual" title="Hand-entered rows (edit in More settings)">Manual</button>
+                </div>
+              </div>
+              <div class="gfx-ctrl-row">
+                <label class="field-label" style="flex-shrink:0;" for="gfx-front-std-title">Title</label>
+                <input type="text" id="gfx-front-std-title" class="input-text" placeholder="STANDINGS" style="flex:1; min-width:0;">
+              </div>
+              <div class="gfx-ctrl-row">
+                <label class="field-label" style="flex-shrink:0;" for="gfx-front-std-subtitle">Subtitle</label>
+                <input type="text" id="gfx-front-std-subtitle" class="input-text" placeholder="e.g. Week 4 · Group A" style="flex:1; min-width:0;">
+              </div>
+              <div class="gfx-ctrl-row" style="justify-content:space-between;">
+                <span class="field-label" style="flex-shrink:0;">Show Win / Loss</span>
+                <label class="switch"><input type="checkbox" id="gfx-front-std-showrecord" checked><span class="slider"></span></label>
+              </div>
               <div class="gfx-popout-summary-body" id="gfx-front-standings-body"></div>
             </div>
 
-            <!-- SCHEDULE — compact status readout + Pull Queue quick action. -->
+            <!-- SCHEDULE — quick inline title + Pull Queue; deep source/layout config under "More settings". -->
             <div class="gfx-front-panel" data-frontkey="schedule" id="gfx-front-schedule" style="display:none;">
+              <div class="gfx-ctrl-row">
+                <label class="field-label" style="flex-shrink:0;" for="gfx-front-sch-title">Title</label>
+                <input type="text" id="gfx-front-sch-title" class="input-text" placeholder="UPCOMING MATCHES" style="flex:1; min-width:0;">
+              </div>
               <div class="gfx-popout-summary-body" id="gfx-front-schedule-body"></div>
             </div>
 
@@ -4500,7 +4655,7 @@
               <p id="wl-empty-msg" class="sps-empty">No teams featured yet.</p>
             </div>
 
-            <button type="button" class="btn btn-primary gfx-popout-summary-btn" id="gfx-popout-summary-open">Settings</button>
+            <button type="button" class="btn btn-ghost btn-sm gfx-popout-summary-btn" id="gfx-popout-summary-open">More settings…</button>
           </div>
 
           <!-- BREAK -->
@@ -4630,20 +4785,28 @@
             </div>
           </div>
 
-          <!-- PRE-GAME SHOW -->
+          <!-- DESK SHOW -->
           <div class="gfx-scene-panel" data-gfxpanel="preshow" style="display:none;">
             <div class="gfx-scene-body">
-              <p class="field-hint" style="margin:0 0 8px;">Discussion topics &amp; headline for the <strong>Pre-Game Show</strong> desk (add it as its own OBS browser source — see Talent ▸ Caster Desk ▸ OBS Desk Layouts). Cams, team match-up and the kickoff countdown all read from settings you already have elsewhere.</p>
+              <p class="field-hint" style="margin:0 0 8px;">Discussion topics &amp; headline for the <strong>Desk Show</strong> layout (add it as its own OBS browser source — see Talent ▸ Caster Desk ▸ OBS Desk Layouts). Cams, team match-up and the kickoff countdown all read from settings you already have elsewhere.</p>
               <div class="field-row">
                 <label class="field-label" for="preshow-headline">Headline</label>
                 <input type="text" id="preshow-headline" class="input-text" placeholder="e.g. THE LAST PLAYER TO QUALIFY" maxlength="140">
+              </div>
+              <div class="field-row">
+                <label class="field-label">Topic Presets <span class="field-hint" style="font-weight:400;">— save the current headline + topics as a named set, then switch between sets</span></label>
+                <div style="display:flex; gap:8px;">
+                  <select id="preshow-topic-preset" class="input-select" style="flex:1;"><option value="">— Load a preset —</option></select>
+                  <button class="btn btn-secondary btn-sm" id="btn-preshow-tp-save" type="button" title="Save current headline + topics as a new preset">Save As</button>
+                  <button class="btn btn-ghost btn-sm" id="btn-preshow-tp-del" type="button" title="Delete the selected preset">Delete</button>
+                </div>
               </div>
               <label class="field-label">Topics <span class="field-hint" style="font-weight:400;">— click ● to mark one active on the rail; give it a Scene to cut there too</span></label>
               <div id="preshow-topics-list" style="display:flex; flex-direction:column; gap:6px; margin:8px 0;"></div>
               <button class="btn btn-ghost btn-sm" id="btn-preshow-add-topic" type="button">+ Add Topic</button>
               <p class="field-hint" style="margin:10px 0 0;">Caster boxes show each caster's assigned cam — set the cam (or paste a custom VDO link that overrides the room) in <strong>Camera Feeds ▸ Hosts</strong> / the Director Control Center. Run the OBS source with <code>?cams=off</code> to layer your own OBS "Caster" scenes behind the boxes instead.</p>
               <div class="field-row" style="margin-top:14px; border-top:1px solid var(--border); padding-top:12px;">
-                <label class="field-label" for="preshow-home-scene">Return-to scene <span class="field-hint" style="font-weight:400;">— what "Return" below cuts back to (usually the Pre-Game Show OBS scene)</span></label>
+                <label class="field-label" for="preshow-home-scene">Return-to scene <span class="field-hint" style="font-weight:400;">— what "Return" below cuts back to (usually the Desk Show OBS scene)</span></label>
                 <div style="display:flex; gap:8px;">
                   <select id="preshow-home-scene" class="input-select" style="flex:1;"><option value="">— None —</option></select>
                   <button class="btn btn-secondary btn-sm" id="btn-preshow-return" type="button" title="Cut OBS back to the Return-to scene">↩ Return</button>
@@ -4716,10 +4879,14 @@
                live. Going live/hiding is exclusively a TOP BAR action now (Push Live / Clear
                All) — see refreshTopBar(). Hidden entirely for scenes with nothing to apply
                (content already saves live as you edit it). Pinned below the scroll area. -->
+          <!-- Per-scene appearance preset bar (accent / accent 2 / font override) — only shown
+               for scenes whose overlays apply sceneConfig; rebuilt per scene by show(). -->
+          <div id="gfx-preset-mount"></div>
+
           <div class="gfx-panel-footer" id="gfx-panel-footer">
             <span class="gfx-foot-status" id="gfx-foot-status"></span>
             <button class="btn btn-ghost btn-sm" id="gfx-foot-queue" style="display:none;">Add to Rundown</button>
-            <button class="btn btn-primary" id="gfx-foot-push">Apply</button>
+            <button class="btn btn-primary" id="gfx-foot-push" title="Save this scene's content — does NOT change what's on air (that's Push Live, top right)">Save changes</button>
           </div>
 
         </div><!-- /gfx-settings-col -->
@@ -4794,6 +4961,14 @@
               <div class="gfx-ctrl-row">
                 <label class="field-label" style="flex-shrink:0;" for="gfx-std-title">Title</label>
                 <input type="text" id="gfx-std-title" class="input-text" placeholder="STANDINGS" style="flex:1; min-width:0;">
+              </div>
+              <div class="gfx-ctrl-row">
+                <label class="field-label" style="flex-shrink:0;" for="gfx-std-subtitle">Subtitle</label>
+                <input type="text" id="gfx-std-subtitle" class="input-text" placeholder="e.g. Week 4 · Group A" style="flex:1; min-width:0;">
+              </div>
+              <div class="gfx-ctrl-row" style="justify-content:space-between;">
+                <span class="field-label" style="flex-shrink:0;">Show Win / Loss</span>
+                <label class="switch"><input type="checkbox" id="gfx-std-showrecord" checked><span class="slider"></span></label>
               </div>
               <div class="gfx-ctrl-row">
                 <span class="field-label" style="flex-shrink:0;">Source</span>
@@ -5255,35 +5430,23 @@
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
       <h3 class="section-title" style="margin-bottom:0;">Tournament Event</h3>
     </div>
-    <p style="font-size:12px; color:var(--muted); margin-bottom:10px;">
-      Pick the event <strong>once</strong> — <em>Load Event</em> pulls in every team, their players, and the
-      full bracket from Start.gg in one go (uses the API token from Settings). The bracket renders on its own
-      browser source and supports single/double elim, round-robin and swiss. Re-fetch any time to refresh scores.
-    </p>
-    <div style="display:flex; align-items:center; gap:10px; background:rgba(255,255,255,0.04); border:1px dashed var(--border); border-radius:8px; padding:10px 12px; margin-bottom:10px;">
-      <span style="font-size:12px; color:var(--muted);">Bracket browser source / scene:</span>
-      <a href="http://localhost:3000/bracket.html" target="_blank" class="overlay-link" style="font-weight:600;">
-        http://localhost:3000/bracket.html
-      </a>
+    <!-- Producer-logical order: what's loaded → get data in → navigate it → how it displays
+         → act on it → preview. Same elements/IDs as before, just arranged the way you use them. -->
+
+    <!-- 1 · STATUS: what bracket is loaded + ownership (imported vs custom) -->
+    <div id="bracket-mode-bar" style="display:none; align-items:center; gap:10px; flex-wrap:wrap; background:rgba(255,255,255,0.04); border:1px solid var(--border); border-radius:8px; padding:8px 12px; margin-bottom:10px;">
+      <span id="bracket-mode-label" style="font-size:12px; color:var(--muted);"></span>
+      <button type="button" class="btn btn-ghost btn-xs" id="bracket-edit-as-custom" style="display:none;">Edit as custom</button>
     </div>
 
-    <!-- Bracket view — drives the single bracket source + the live preview, in real time -->
-    <div class="bk-views" id="bracket-views">
-      <span class="bk-views-lbl">Bracket view:</span>
-      <button type="button" class="bk-view-chip" data-view="both" title="Full double-elim bracket">Full</button>
-      <button type="button" class="bk-view-chip" data-view="winners" title="Winners / upper bracket only (+ grand finals)">Upper only</button>
-      <button type="button" class="bk-view-chip" data-view="losers" title="Losers / lower bracket only">Lower only</button>
-      <button type="button" class="bk-view-chip" data-view="finals" title="Both brackets, last 4 rounds — quarterfinals → grand finals">Finals stretch (QF→GF)</button>
-      <button type="button" class="btn btn-ghost btn-sm" id="bk-reload-obs" title="Force every OBS browser source to reload now — use this once if the bracket in OBS is stuck on an old version (OBS caches the page in memory).">↻ Reload OBS sources</button>
-      <span class="bk-views-hint">Applies to the live <code>bracket.html</code> source <strong>and</strong> the preview — one browser source, switch any time. If OBS looks stale after an update, hit <strong>Reload OBS sources</strong> once.</span>
-    </div>
-
+    <!-- 2 · SOURCE: which event feeds the bracket. Follows the active Dashboard event
+         automatically; typing a different slug here is an explicit override. -->
+    <p class="bk-zone-lbl" style="font-size:10px; font-weight:800; letter-spacing:.12em; text-transform:uppercase; color:var(--muted); margin:0 0 6px;">Source</p>
     <div class="field-row">
       <label class="field-label" for="input-bracket-slug">Event URL or Slug</label>
       <input type="text" id="input-bracket-slug" class="input-text"
-             placeholder="https://start.gg/tournament/.../event/...  or  tournament/slug/event/slug">
+             placeholder="Auto — follows the active event. Paste a URL/slug to override.">
     </div>
-
     <div style="display:flex; gap:8px; flex-wrap:wrap;">
       <button class="btn btn-primary" id="btn-load-event">Load Event (Teams + Players + Bracket)</button>
       <button class="btn btn-blue" id="btn-bracket-fetch">Refresh Bracket</button>
@@ -5291,18 +5454,36 @@
     </div>
     <!-- Inline event picker — shown when the pasted tournament has more than one event -->
     <div id="bracket-event-picker" class="bk-ev-picker" style="display:none;"></div>
-    <div id="bracket-status" style="margin-top:10px; font-size:13px; color:var(--muted);"></div>
+    <div id="bracket-status" style="margin-top:8px; font-size:13px; color:var(--muted);"></div>
 
-    <!-- Live bracket preview — shows the loaded start.gg bracket updating in real time (off-air) -->
-    <details class="bk-live-preview" id="bracket-live-preview" open>
-      <summary>Live bracket preview <span class="bk-live-dot"></span> <span style="font-weight:400;color:var(--muted);">updates in real time — this is off-air, use “Show Bracket” to cut it live</span></summary>
-      <div class="bk-live-frame">
-        <iframe src="http://localhost:3000/bracket.html?show=1&thumb=1" title="Live bracket preview" referrerpolicy="no-referrer"></iframe>
+    <!-- 3 · STAGE: multi-phase events (groups → playoffs) and pools -->
+    <div class="bk-phasepool" id="bracket-phasepool" style="display:none; margin:12px 0 0;">
+      <div id="bracket-phase-row" class="bk-pp-row" style="display:none; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:6px;">
+        <span class="bk-views-lbl">Phase:</span>
+        <span id="bracket-phase-chips" style="display:inline-flex; gap:6px; flex-wrap:wrap;"></span>
       </div>
-    </details>
+      <div id="bracket-pool-row" class="bk-pp-row" style="display:none; align-items:center; gap:8px; flex-wrap:wrap;">
+        <span class="bk-views-lbl">Pool / Group:</span>
+        <span id="bracket-pool-chips" style="display:inline-flex; gap:6px; flex-wrap:wrap;"></span>
+      </div>
+    </div>
 
-    <!-- Current match picker -->
-    <div id="match-picker-wrap" style="display:none; border-top:1px solid var(--border); padding-top:16px; margin-top:16px;">
+    <!-- 4 · DISPLAY: how the overlay renders it. Chips without data for this bracket hide
+         themselves; the format auto-picks a sensible default on import. -->
+    <p class="bk-zone-lbl" style="font-size:10px; font-weight:800; letter-spacing:.12em; text-transform:uppercase; color:var(--muted); margin:14px 0 6px; border-top:1px solid var(--border); padding-top:12px;">Overlay display</p>
+    <div class="bk-views" id="bracket-views">
+      <button type="button" class="bk-view-chip" data-view="both" title="Full double-elim bracket">Full</button>
+      <button type="button" class="bk-view-chip" data-view="winners" title="Winners / upper bracket only (+ grand finals)">Upper only</button>
+      <button type="button" class="bk-view-chip" data-view="losers" title="Losers / lower bracket only">Lower only</button>
+      <button type="button" class="bk-view-chip" data-view="finals" title="Both brackets, last 4 rounds — quarterfinals → grand finals">Finals stretch (QF→GF)</button>
+      <button type="button" class="bk-view-chip" data-view="schedule" title="Round-robin / Swiss only — round-by-round pairings, no standings table">Schedule only</button>
+      <button type="button" class="bk-view-chip" data-view="standings" title="Round-robin / Swiss only — standings table, no round-by-round pairings">Standings only</button>
+      <button type="button" class="bk-view-chip" data-view="matrix" title="Round-robin only — head-to-head results grid (every team vs every team)">Head-to-head grid</button>
+      <button type="button" class="btn btn-ghost btn-sm" id="bk-reload-obs" title="Force every OBS browser source to reload now — use this once if the bracket in OBS is stuck on an old version (OBS caches the page in memory).">↻ Reload OBS sources</button>
+    </div>
+
+    <!-- 5 · ACT: put the live matchup on the scoreboard -->
+    <div id="match-picker-wrap" style="display:none; border-top:1px solid var(--border); padding-top:12px; margin-top:14px;">
       <label class="field-label">Current Match</label>
       <p style="font-size:11px; color:var(--muted); margin-bottom:10px;">
         Pick the live matchup — it pushes both teams (names, logos, players) to the overlay and starts a fresh series.
@@ -5312,6 +5493,14 @@
         <button class="btn btn-primary" id="btn-push-match" style="white-space:nowrap;">Push to Overlay</button>
       </div>
     </div>
+
+    <!-- 6 · PREVIEW: off-air live view of exactly what the OBS source shows -->
+    <details class="bk-live-preview" id="bracket-live-preview" open>
+      <summary>Live bracket preview <span class="bk-live-dot"></span> <span style="font-weight:400;color:var(--muted);">off-air — updates in real time. Overlay source: <code>bracket.html</code>. Stale in OBS? Hit ↻ Reload OBS sources.</span></summary>
+      <div class="bk-live-frame">
+        <iframe src="http://localhost:3000/bracket.html?show=1&thumb=1" title="Live bracket preview" referrerpolicy="no-referrer"></iframe>
+      </div>
+    </details>
   </section>
 
   <!-- Upcoming Matches overlay -->
@@ -5355,7 +5544,8 @@
       <h3 class="section-title" style="margin-bottom:0;">Standings</h3>
     </div>
     <p style="font-size:12px; color:var(--muted); margin-bottom:10px;">
-      Auto-pulls standings from the loaded bracket (round-robin / swiss). Override with manual rows below if you need custom ordering or points columns.
+      A thematic leaderboard you can drive from three sources: the loaded <b>start.gg</b> event / bracket,
+      an <b>in-app league</b>, or <b>manual entry</b>. Load a source below to fill the rows, tweak as needed, then Save.
     </p>
     <div style="display:flex; align-items:center; gap:10px; background:rgba(255,255,255,0.04); border:1px dashed var(--border); border-radius:8px; padding:10px 12px; margin-bottom:14px;">
       <span style="font-size:12px; color:var(--muted);">Overlay browser source / scene:</span>
@@ -5367,14 +5557,38 @@
       <label class="field-label" for="input-standings-title">Title (blank = inherit event name)</label>
       <input type="text" id="input-standings-title" class="input-text" placeholder="STANDINGS" style="max-width:380px;">
     </div>
-    <div style="margin-top:14px;">
+    <div class="field-row">
+      <label class="field-label" for="input-standings-subtitle">Subtitle (optional)</label>
+      <input type="text" id="input-standings-subtitle" class="input-text" placeholder="e.g. Group Stage · Week 4" style="max-width:380px;">
+    </div>
+    <div style="display:flex; align-items:center; gap:12px; margin:6px 0 14px;">
+      <label class="switch"><input type="checkbox" id="check-standings-showrecord" checked><span class="slider"></span></label>
+      <span style="font-size:13px; color:var(--text);">Show Win / Loss columns</span>
+      <span style="font-size:11px; color:var(--muted);">(off = clean points-only leaderboard)</span>
+    </div>
+
+    <!-- Source loaders -->
+    <div style="background:rgba(255,255,255,0.03); border:1px solid var(--border); border-radius:10px; padding:12px; margin-bottom:14px;">
+      <div class="field-label" style="margin-bottom:8px;">Load rows from a source</div>
+      <div style="display:flex; flex-wrap:wrap; gap:8px; align-items:center;">
+        <button class="btn btn-ghost btn-sm" id="btn-standings-load-bracket">start.gg / Bracket</button>
+        <span style="width:1px; height:22px; background:var(--border);"></span>
+        <select id="standings-league-src" class="input-text" style="max-width:220px;"></select>
+        <button class="btn btn-ghost btn-sm" id="btn-standings-load-league">Load League</button>
+      </div>
+      <p style="font-size:11px; color:var(--muted); margin-top:8px;">
+        Loading a source replaces the rows below with an editable copy — nothing goes live until you Save.
+      </p>
+    </div>
+
+    <div style="margin-top:4px;">
       <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:8px;">
-        <span class="field-label" style="margin:0;">Manual Override Rows</span>
+        <span class="field-label" style="margin:0;">Rows (editable)</span>
         <button class="btn btn-primary btn-sm" id="btn-standings-add">+ Add Row</button>
       </div>
       <div id="standings-rows-list" style="display:flex; flex-direction:column; gap:8px;"></div>
       <p id="standings-manual-empty" style="font-size:12px; color:var(--muted); margin-top:8px;">
-        No manual rows — using bracket standings automatically.
+        No manual rows — the overlay falls back to the loaded bracket standings automatically.
       </p>
     </div>
     <div style="margin-top:14px; display:flex; gap:8px;">
@@ -5749,7 +5963,7 @@
     <div class="integration-card" data-integration="obs" style="padding: 20px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; cursor: pointer; transition: all 0.2s ease; display: flex; flex-direction: column;">
       <div style="display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 12px;">
         <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="1.5" style="color: #86efac;"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
-        <span style="font-size: 11px; color: #4ade80; background: rgba(74, 222, 128, 0.1); padding: 2px 8px; border-radius: 4px;">Connected</span>
+        <span id="obs-card-badge" style="font-size: 11px; color: #fbbf24; background: rgba(251, 191, 36, 0.1); padding: 2px 8px; border-radius: 4px;">Setup</span>
       </div>
       <h4 style="font-size: 14px; font-weight: 600; margin-bottom: 4px;">OBS / Switcher</h4>
       <p style="font-size: 12px; color: var(--muted); margin: 0 0 12px 0; line-height: 1.4; flex: 1;">Connect to OBS, stream to multiple destinations.</p>
@@ -5770,7 +5984,7 @@
     <div class="integration-card" data-integration="games" style="padding: 20px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; cursor: pointer; transition: all 0.2s ease; display: flex; flex-direction: column;">
       <div style="display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 12px;">
         <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="1.5"><line x1="6" y1="11" x2="10" y2="11"/><line x1="8" y1="9" x2="8" y2="13"/><line x1="15" y1="12" x2="15.01" y2="12"/><line x1="18" y1="10" x2="18.01" y2="10"/><rect x="2" y="6" width="20" height="12" rx="6"/></svg>
-        <span style="font-size: 11px; color: #4ade80; background: rgba(74, 222, 128, 0.1); padding: 2px 8px; border-radius: 4px;">Connected</span>
+        <span id="games-card-badge" style="font-size: 11px; color: var(--muted); background: rgba(255,255,255,0.06); padding: 2px 8px; border-radius: 4px;">Local</span>
       </div>
       <h4 style="font-size: 14px; font-weight: 600; margin-bottom: 4px;">Games & GSI</h4>
       <p style="font-size: 12px; color: var(--muted); margin: 0 0 12px 0; line-height: 1.4; flex: 1;">CS2 GSI, Rocket League API, game state tracking.</p>
@@ -5781,7 +5995,7 @@
     <div class="integration-card" data-integration="startgg" style="padding: 20px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; cursor: pointer; transition: all 0.2s ease; display: flex; flex-direction: column;">
       <div style="display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 12px;">
         <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/></svg>
-        <span style="font-size: 11px; color: #fbbf24; background: rgba(251, 191, 36, 0.1); padding: 2px 8px; border-radius: 4px;">Setup</span>
+        <span id="startgg-card-badge" style="font-size: 11px; color: #fbbf24; background: rgba(251, 191, 36, 0.1); padding: 2px 8px; border-radius: 4px;">Setup</span>
       </div>
       <h4 style="font-size: 14px; font-weight: 600; margin-bottom: 4px;">Tournament Platforms</h4>
       <p style="font-size: 12px; color: var(--muted); margin: 0 0 12px 0; line-height: 1.4; flex: 1;">Connect tournament platforms — start.gg, Challonge, and more.</p>
@@ -6775,8 +6989,9 @@ PacketSendRate=10</pre>
         <input type="text" id="cf-vdo-base" class="input-text" placeholder="https://vdo.ninja">
       </div>
       <div class="field-row">
-        <label class="field-label" for="cf-vdo-room">Room name <span style="opacity:.5;font-weight:400;">(optional — groups your feeds)</span></label>
+        <label class="field-label" for="cf-vdo-room">Manual-link room <span style="opacity:.5;font-weight:400;">(only for hand-built view links above — does NOT change team/talent rooms)</span></label>
         <input type="text" id="cf-vdo-room" class="input-text" placeholder="e.g. my-show">
+        <p class="msp-hint" style="margin-top:4px;">To use an existing VDO room for teams or talent, go to <strong>Cameras ▸ Talent Rooms ▸ VDO Rooms</strong> and hit <strong>Link existing</strong> on that room.</p>
       </div>
       <div class="field-row">
         <label class="field-label" for="cf-vdo-params">Extra view params <span style="opacity:.5;font-weight:400;">(appended to view links)</span></label>
@@ -6937,6 +7152,10 @@ PacketSendRate=10</pre>
               <label class="field-label" for="select-obs-scene-casters">Casters</label>
               <select id="select-obs-scene-casters" class="input-select" data-scene-key="casters"><option value="">— None —</option></select>
             </div>
+            <div class="field-row" style="margin-bottom: 0;">
+              <label class="field-label" for="select-obs-scene-bracket">Bracket</label>
+              <select id="select-obs-scene-bracket" class="input-select" data-scene-key="bracket"><option value="">— None —</option></select>
+            </div>
           </div>
           <label class="qt-toggle" style="margin-top:12px;" title="When the commercial scene's video finishes playing, automatically cut back to the program scene">
             <span>Auto-return when the ad video ends</span>
@@ -6947,24 +7166,18 @@ PacketSendRate=10</pre>
         <div style="border-top: 1px solid rgba(255,255,255,0.1); padding-top: 14px; margin-top: 4px;">
           <label class="field-label" style="margin-bottom: 8px;">Scene Collection</label>
           <p style="font-size: 11px; color: var(--muted); margin-bottom: 12px; line-height: 1.6;">
-            Saves a ready-to-use OBS scene collection — <strong>30 scenes</strong> (pre-game, live game HUDs,
-            desk/caster layouts, brackets) plus <strong>cam framing scenes</strong>
-            (<code>=&gt; Caster 1–4 Cam</code>, <code>=&gt; Host Cam</code>). VDO.ninja view links are pulled
-            from the Casters tab (slots 1–4). You pick where to save it (it defaults to your OBS scenes folder
-            if found); then in OBS choose <strong>Scene Collection → Import</strong>. Saved as
-            <code>NE Broadcast - Combined/Separated Template.json</code>.
+            Saves a ready-to-use OBS scene collection — <strong>32 scenes</strong> (pre-game, live game HUDs,
+            desk/caster layouts, post-game) plus <strong>cam framing scenes</strong>
+            (<code>=&gt; Caster 1–4 Cam</code>, <code>=&gt; Player Cam</code>). You pick where to save it
+            (defaults to your OBS scenes folder if found); then in OBS choose
+            <strong>Scene Collection → Import</strong>. Saved as <code>NE Broadcast Suite.json</code>.
           </p>
-          <div class="field-row" style="margin-bottom:10px;">
-            <label class="field-label" for="obs-collection-audio">Caster audio</label>
-            <select id="obs-collection-audio" class="input-select" style="max-width:340px;">
-              <option value="separated">Separated — one OBS browser source per caster (recommended)</option>
-              <option value="combined">Combined — overlay embeds cams directly (single fader)</option>
-            </select>
-          </div>
           <p style="font-size:11px;color:var(--muted);margin:-4px 0 12px;line-height:1.5;">
-            <strong>Separated</strong>: each caster slot is a permanent OBS browser source (<code>castercam.html&#63;slot=N</code>)
+            Each caster slot is a permanent OBS browser source (<code>castercam.html&#63;slot=N</code>)
             that auto-updates when you change caster assignments here — OBS never needs to be touched.
-            Each source gets its own audio fader so you can EQ/compress/duck independently.
+            Each source gets its own audio fader (already routed to all tracks) so you can
+            EQ/compress/duck independently. <strong>Re-importing resets any manual scene tweaks</strong>
+            you made in OBS to this collection.
           </p>
           <button class="btn btn-primary" id="btn-obs-download-collection">
             &#8659;&nbsp;Save Scene Collection…
@@ -6979,6 +7192,50 @@ PacketSendRate=10</pre>
         </div>
 
         <div id="obs-result" style="font-size: 13px; color: var(--muted);"></div>
+      </div>
+    </section>
+
+    <!-- ── vMix — the full alternative production backend to OBS ── -->
+    <section class="section">
+      <h3 class="section-title">vMix Integration <span style="font-size:11px; font-weight:600; color:var(--muted);">— alternative to OBS</span></h3>
+      <div style="display:flex; flex-direction:column; gap:12px; background:rgba(255,255,255,0.05); padding:15px; border-radius:8px;">
+        <p style="font-size:12px; color:var(--muted); margin:0;">
+          vMix is a <strong>full alternative to OBS</strong> — pick one production backend. Turn on vMix's
+          Web API (Settings → Web Controller in vMix) then connect below. Your overlays run in vMix as
+          <strong>Web Browser inputs</strong>, and Flows can fire vMix actions (see the Flows editor's vMix group).
+        </p>
+
+        <div class="field-row" style="margin-bottom:0; display:flex; align-items:center; gap:12px;">
+          <label class="field-label" style="margin:0;">Program backend</label>
+          <div class="seg" id="switcher-target-seg">
+            <button type="button" class="seg-btn active" data-target="obs">OBS</button>
+            <button type="button" class="seg-btn" data-target="vmix">vMix</button>
+          </div>
+          <span style="font-size:11px; color:var(--muted);">Which switcher producer actions drive.</span>
+        </div>
+
+        <div style="display:flex; align-items:center; gap:15px;">
+          <label for="check-vmix-enabled" style="font-weight:600; color:#e0e0e0; cursor:pointer;">Enable vMix Integration</label>
+          <input type="checkbox" id="check-vmix-enabled" style="width:18px; height:18px; cursor:pointer; accent-color:#055fdb;">
+        </div>
+
+        <div style="display:grid; grid-template-columns:1fr 140px; gap:10px;">
+          <div class="field-row" style="margin-bottom:0;">
+            <label class="field-label" for="input-vmix-host">vMix Host</label>
+            <input type="text" id="input-vmix-host" class="input-text" placeholder="127.0.0.1">
+          </div>
+          <div class="field-row" style="margin-bottom:0;">
+            <label class="field-label" for="input-vmix-port">Web API Port</label>
+            <input type="number" id="input-vmix-port" class="input-text" placeholder="8088" min="1" max="65535" style="width:100%;">
+          </div>
+        </div>
+
+        <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:6px;">
+          <button class="btn btn-secondary" id="btn-vmix-save">Save Settings</button>
+          <button class="btn btn-primary" id="btn-vmix-test">Test Connection</button>
+        </div>
+        <div id="vmix-result" style="font-size:13px; color:var(--muted);"></div>
+        <div id="vmix-live-status" style="font-size:12px; color:var(--muted);"></div>
       </div>
     </section>
   </div>
@@ -7659,10 +7916,31 @@ PacketSendRate=10</pre>
     </div>
     <div class="qrail-body">
 
-      <!-- ── QUICK: scene cuts + overlay view ── -->
+      <!-- ── QUICK: producer cockpit — now/next, put-on-air chips (with gear), program cuts ── -->
       <div class="qrail-panel active" data-qpanel="quick">
-        <div class="qrail-group">
-          <div class="qrail-label">OBS Scenes <span class="qrail-sub" id="qrail-scenes-sub"></span></div>
+
+        <!-- Now / Next -->
+        <div class="qk-nownext" id="qk-nownext">
+          <div class="qk-nn-row">
+            <span class="qk-nn-tag qk-nn-live">NOW</span>
+            <span class="qk-nn-val" id="qk-now">—</span>
+          </div>
+          <div class="qk-nn-row">
+            <span class="qk-nn-tag">NEXT</span>
+            <span class="qk-nn-val qk-nn-next" id="qk-next">—</span>
+            <button class="qk-nn-put" id="qk-put-upnext" title="Put the Up Next screen on air (set title + timer)">Put ▸</button>
+          </div>
+        </div>
+
+        <!-- Put on air — chip per graphic; a chip with a gear opens its options (title/timer/side). -->
+        <div class="qrail-group qk-grp">
+          <div class="qrail-label">Put On Air <span class="qrail-sub"><a href="#" id="qk-clear-all" title="Clear every on-air graphic">clear all</a></span></div>
+          <div class="qk-put" id="qk-put"></div>
+        </div>
+
+        <!-- Program scene cuts -->
+        <div class="qrail-group qk-grp">
+          <div class="qrail-label">Program <span class="qrail-sub" id="qrail-scenes-sub"></span></div>
           <div id="qrail-scenes" class="qrail-scenes"></div>
         </div>
       </div>

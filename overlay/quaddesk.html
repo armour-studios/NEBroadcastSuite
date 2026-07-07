@@ -17,11 +17,11 @@
     }
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     html, body { width: var(--stage-w); height: var(--stage-h); overflow: hidden; background: transparent; font-family: 'Inter', system-ui, sans-serif; color: #e8eaf0; -webkit-font-smoothing: antialiased; }
-    .duo-stage { display: flex; flex-direction: column; width: var(--stage-w); height: var(--stage-h); padding: 14px var(--pad-x) 12px; opacity: 0; transition: opacity .35s ease; }
+    .duo-stage { display: flex; flex-direction: column; width: var(--stage-w); height: var(--stage-h); padding: 14px var(--pad-x) 26px; opacity: 0; transition: opacity .35s ease; }
     .duo-stage.show { opacity: 1; }
     .zone-hud { flex: 0 0 auto; display: flex; align-items: center; justify-content: center; }
     .zone-cams { flex: 1 1 0; min-height: 0; display: flex; align-items: center; justify-content: center; padding: 12px 0; }
-    .quad { display: grid; grid-template-columns: 1fr 1fr; gap: var(--cam-gap); width: min(1366px, 100%); align-content: center; }
+    .quad { display: grid; grid-template-columns: 1fr 1fr; gap: var(--cam-gap); width: min(1280px, 100%); align-content: center; }
     .zone-footer { flex: 0 0 auto; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; }
 
     .duo-stage:not(.show) .match-hud, .duo-stage:not(.show) .cam-card, .duo-stage:not(.show) .deck-strip, .duo-stage:not(.show) .presented-by { opacity: 0; }
@@ -35,7 +35,7 @@
     @keyframes camIn { from { opacity: 0; transform: scale(.95); } to { opacity: 1; transform: none; } }
     @keyframes stripUp { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
 
-    .match-hud { position: relative; display: flex; align-items: stretch; width: min(1366px, 100%); flex: 0 0 var(--hud-h); height: var(--hud-h);
+    .match-hud { position: relative; display: flex; align-items: stretch; width: min(1366px, 100%); flex: 0 0 auto; height: var(--hud-h);
       background: linear-gradient(180deg, rgba(24,27,34,.98), rgba(10,12,16,.99)); border-radius: 12px; overflow: hidden; border: 1px solid rgba(255,255,255,.07); box-shadow: 0 12px 32px rgba(0,0,0,.55); }
     .match-hud::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 1px; background: linear-gradient(90deg, transparent 4%, rgba(255,255,255,.35) 50%, transparent 96%); z-index: 3; }
     .match-team { flex: 1 1 0; min-width: 0; position: relative; display: flex; align-items: center; gap: 8px; }
@@ -60,7 +60,8 @@
     .cam-hole iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
     /* ?cams=off framing: transparent holes so per-caster OBS sources show through. */
     .duo-stage.frames-only .cam-hole { background: transparent; }
-    .duo-stage.frames-only .cam-card { background: transparent; box-shadow: none; }
+    .duo-stage.frames-only .cam-card { background: transparent; box-shadow: none; border-color: transparent; }
+    .duo-stage.frames-only .cam-card::before { display: none; }
     .cam-plate { display: flex; align-items: center; justify-content: center; gap: 11px; height: var(--cam-plate-h); flex: 0 0 var(--cam-plate-h); padding: 0 16px; background: linear-gradient(180deg, var(--duo-surface2), var(--duo-surface)); border-top: 1px solid var(--duo-border); }
     .cam-name { font-size: 19px; font-weight: 800; letter-spacing: .03em; text-transform: uppercase; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .cam-handle { font-size: 13px; font-weight: 600; color: #9aa3b8; }

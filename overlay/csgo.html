@@ -574,6 +574,15 @@
   .focus-hpfill.low  { background: #f0c14b !important; }
   .focus-hpfill.crit { background: #ff5a5a !important; }
 
+  /* ── Observed-player facecam — collapses to nothing when the player has no cam ── */
+  .focus-cam { position: absolute; bottom: 108px; left: 50%; transform: translateX(-50%);
+    width: 300px; height: 0; overflow: hidden; border-radius: 10px; background: #05070c;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.6); transition: height 0.35s ease; }
+  .focus-cam.on { height: 169px; border: 1px solid rgba(255,255,255,0.1); }
+  .focus-cam iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0;
+    opacity: 0; transition: opacity 0.25s ease; pointer-events: none; }
+  .focus-cam iframe.active { opacity: 1; }
+
   .preview-badge { position: absolute; bottom: 130px; left: 50%; transform: translateX(-50%);
     background: rgba(0,0,0,0.7); color: #fff; border: 1px solid var(--accent-2); font-size: 15px; font-weight: 700; letter-spacing: 2px; padding: 6px 16px; border-radius: 999px; }
 
@@ -759,6 +768,9 @@
 </div>
 
 <div id="focus" class="focus hidden"></div>
+<!-- Observed-player facecam — seated above the focus bar; feed mapped in
+     Match — Teams ▸ gear ▸ In-Game Player Cams (matched by steamid / in-game name) -->
+<div id="focus-cam" class="focus-cam"></div>
 
 <!-- Transient + conditional broadcast callouts -->
 <div id="cs-announce" class="cs-announce hidden"></div>
@@ -1348,6 +1360,31 @@ function buildFocus(){
 }
 
 // Two-line bar:  row1 = NAME · HP · ARMOR,  row2 = [kill]K · [skull]D · MONEY · loadout
+/* ── Observed-player facecam ────────────────────────────────────────────────
+   Feeds come from savedFacecams ({name, platformId, link}) mapped in the app
+   (Match — Teams ▸ gear ▸ In-Game Player Cams). Matched by steamid first, then
+   exact in-game name. Iframes persist per link so switching never reloads. */
+let facecams = [], facecamsEnabled = true;
+const _camFrames = new Map();   // link → iframe
+function findCsFacecam(p){
+  if (!p || !facecams.length) return null;
+  return facecams.find(fc => fc.platformId && fc.platformId === p.steamid)
+      || facecams.find(fc => fc.name === p.name) || null;
+}
+function syncFocusCam(obs){
+  const box = el('focus-cam'); if (!box) return;
+  const fc = (facecamsEnabled && obs) ? findCsFacecam(obs) : null;
+  const link = (fc && fc.link) || null;
+  if (link && !_camFrames.has(link)) {
+    const fr = document.createElement('iframe');
+    fr.src = link; fr.allow = 'autoplay; encrypted-media';
+    box.appendChild(fr);
+    _camFrames.set(link, fr);
+  }
+  for (const [l, fr] of _camFrames) fr.classList.toggle('active', l === link);
+  box.classList.toggle('on', !!link);
+}
+
 function renderFocus(o){
   const f = el('focus');
   if (!o || !o.name) { f.classList.add('hidden'); return; }
@@ -1874,6 +1911,7 @@ function render(cs){
 
   renderRadar(cs);
   renderFocus(cs.observed);
+  syncFocusCam(cs.observed);
   renderCallouts(cs, live);
 
   // Buy / freeze phase: slide up the economy+loadout board, hide the live side columns.
@@ -1910,6 +1948,8 @@ function connect(){
       renderBanner(d.banner);    // bottom-right sponsor banner (producer-controlled)
       showHistory = !!(d.csgo && d.csgo.showHistory);
       builtinRadar = !!(d.csgo && d.csgo.builtinRadar);
+      if (Array.isArray(d.facecams)) facecams = d.facecams;
+      facecamsEnabled = d.facecamsEnabled !== false;
       lastRealCs = d.csgo;
       if (!devState) render(d.csgo);   // don't let live data overwrite a running dev sim
     } else if (msg.type === 'csgo_update') {

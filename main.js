@@ -230,6 +230,16 @@ function createControlPanel() {
   controlPanel.loadFile(path.join(__dirname, 'control-panel', 'index.html'));
   controlPanel.setMenuBarVisibility(false);
 
+  // Auto-open DevTools on launch (detached) — but ONLY on the developer's own machine, never in
+  // a build shipped to end users. .env.local is the existing dev-vs-production signal server.js
+  // already uses (see its dotenv.config path above) and it's scrubbed out of white-label/public
+  // builds, so its presence here is a reliable "this is a dev machine" check. Checked directly via
+  // fs rather than process.env because server.js (which loads the .env file) isn't required until
+  // after this window is created, so its dotenv config hasn't run yet at this point.
+  if (fs.existsSync(path.join(__dirname, '.env.local'))) {
+    controlPanel.webContents.openDevTools({ mode: 'detach' });
+  }
+
   // F12 / Ctrl+Shift+I → toggle DevTools; Ctrl+R / Ctrl+Shift+R → reload. Removing the default
   // application menu (above) dropped its built-in accelerators for all three, so they're
   // reimplemented here manually.
@@ -249,6 +259,18 @@ function createControlPanel() {
       if (input.shift) controlPanel.webContents.reloadIgnoringCache();
       else controlPanel.webContents.reload();
     }
+  });
+
+  // Forward renderer errors to the main-process stdout so real crashes are visible even when
+  // the DevTools console is flooded with VDO.ninja WebRTC spam (postMessage/sequence errors
+  // from their embedded iframes repeat every ~300ms and bury our own error output).
+  controlPanel.webContents.on('console-message', (_ev, level, message, line, sourceId) => {
+    if (level < 2) return; // 0=verbose 1=info 2=warning 3=error
+    const isVdoNoise = (message && message.includes('postMessage') && message.includes('sequence')) ||
+      (sourceId && (sourceId.includes('webrtc.js') || sourceId.includes('?director=') || sourceId.includes('?room=')));
+    if (isVdoNoise) return;
+    const tag = level === 3 ? 'ERR' : 'WARN';
+    console.error(`[renderer:${tag}] ${message}${sourceId ? ` (${sourceId}:${line})` : ''}`);
   });
 
   controlPanel.on('focus', () => {

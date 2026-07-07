@@ -1,0 +1,681 @@
+<!DOCTYPE html>
+<!--
+  preshow.html — Desk Show: 2 caster cams in a row + a discussion-topics rail, with a
+  bottom bar carrying tournament branding, the "first up" match-up, a kickoff countdown, a
+  headline, and a secondary sponsor/platform badge. Shares duorow.html's design language.
+  A separate scene from duorow — that one is untouched.
+
+  Driven by full_state on WS :3001 via SceneBase.connect(). Reuses existing state wherever
+  possible: casters (cams), upcoming.matches[0] (first-up match-up, falls back to teams.blue/orange),
+  breakScreen (kickoff countdown), brand.logo (tournament bug), scoreboardAd (secondary badge).
+  Only the topics rail + headline are new: state.preshow = { headline, topics[], activeTopicIndex }.
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <link rel="stylesheet" href="/fonts.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+  <style>
+    :root {
+      --duo-bg: #111318;
+      --duo-surface: #1a1d24;
+      --duo-surface2: #20242e;
+      --duo-border: #2e3340;
+      --duo-accent: #e83a8b;
+      --duo-accent2: #8b5cf6;
+      --duo-text: #e8eaf0;
+      --duo-muted: #8b93a8;
+      --team-a: #055fdb;
+      --team-b: #e97139;
+      --stage-w: 1920px;
+      --stage-h: 1080px;
+      --pad-x: 24px;
+      --cam-gap: 14px;
+      --cam-plate-h: 50px;
+      --rail-w: 300px;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html, body {
+      width: var(--stage-w); height: var(--stage-h);
+      overflow: hidden;
+      background: transparent;
+      font-family: 'Inter', system-ui, sans-serif;
+      color: var(--duo-text);
+      -webkit-font-smoothing: antialiased;
+    }
+
+    .preshow-stage {
+      display: flex;
+      flex-direction: column;
+      width: var(--stage-w);
+      height: var(--stage-h);
+      padding: 20px var(--pad-x) 18px;
+      gap: 16px;
+      opacity: 0;
+      transition: opacity 0.35s ease;
+    }
+    .preshow-stage.show { opacity: 1; }
+
+    /* ── Entry animations ──────────────────────────────────────────── */
+    .preshow-stage:not(.show) .cam-card,
+    .preshow-stage:not(.show) .topics-rail,
+    .preshow-stage:not(.show) .preshow-footer {
+      opacity: 0;
+    }
+    .preshow-stage.show .cam-card:nth-child(1) { animation: camIn .6s cubic-bezier(.16,.84,.24,1) .06s forwards; }
+    .preshow-stage.show .cam-card:nth-child(2) { animation: camIn .6s cubic-bezier(.16,.84,.24,1) .12s forwards; }
+    .preshow-stage.show .cam-card:nth-child(3) { animation: camIn .6s cubic-bezier(.16,.84,.24,1) .18s forwards; }
+    .preshow-stage.show .cam-card:nth-child(4) { animation: camIn .6s cubic-bezier(.16,.84,.24,1) .24s forwards; }
+    .preshow-stage.show .topics-rail  { animation: railIn .6s cubic-bezier(.16,.84,.24,1) .28s forwards; }
+    .preshow-stage.show .preshow-footer { animation: footerUp .6s cubic-bezier(.16,.84,.24,1) .34s forwards; }
+    @keyframes camIn   { from { opacity: 0; transform: scale(.97); }        to { opacity: 1; transform: none; } }
+    @keyframes railIn  { from { opacity: 0; transform: translateX(24px); }  to { opacity: 1; transform: none; } }
+    @keyframes footerUp{ from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: none; } }
+
+    /* ── Top zone: cam row + topics rail ─────────────────────────────── */
+    .zone-top {
+      flex: 1 1 0;
+      min-height: 0;
+      display: grid;
+      grid-template-columns: 1fr var(--rail-w);
+      gap: 20px;
+    }
+
+    .duo-cams {
+      display: flex;
+      align-items: stretch;
+      justify-content: center;
+      gap: var(--cam-gap);
+      min-width: 0;
+      height: 100%;
+    }
+    .cam-card {
+      flex: 1 1 0;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      border-radius: 3px;
+      overflow: hidden;
+      border: 1px solid var(--duo-border);
+      background: var(--duo-surface);
+      box-shadow: 0 14px 40px rgba(0,0,0,.45);
+    }
+    .cam-card::before {
+      content: '';
+      display: block;
+      height: 2px;
+      flex: 0 0 auto;
+      background: linear-gradient(90deg, transparent, var(--duo-accent) 30%, var(--duo-accent2) 70%, transparent);
+    }
+    .cam-hole {
+      position: relative;
+      width: 100%;
+      flex: 1 1 0;
+      min-height: 0;
+      background: #0d0f14;
+      overflow: hidden;
+    }
+    .preshow-stage.frames-only .cam-hole { background: transparent; }
+    .preshow-stage.frames-only .cam-card { background: transparent; box-shadow: none; border-color: transparent; }
+    .preshow-stage.frames-only .cam-card::before { display: none; }
+    /* The cam hole is TALLER than a 16:9 feed, so a plain 100%×100% iframe letterboxes the
+       source (black bars). Instead keep the iframe at 16:9 and size it to COVER the hole —
+       the smallest 16:9 box that fills the container, cropping the sides — so the caster's
+       feed fills the whole tall camera box. */
+    .cam-hole iframe {
+      position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+      width: auto; height: auto; min-width: 100%; min-height: 100%;
+      aspect-ratio: 16 / 9; border: 0;
+    }
+
+    .cam-plate {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      height: var(--cam-plate-h);
+      flex: 0 0 var(--cam-plate-h);
+      padding: 0 14px;
+      background: linear-gradient(180deg, var(--duo-surface2), var(--duo-surface));
+      border-top: 1px solid var(--duo-border);
+    }
+    .cam-name { font-size: 17px; font-weight: 800; letter-spacing: .03em; text-transform: uppercase; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .cam-handle { font-size: 12px; font-weight: 600; color: #9aa3b8; }
+    .cam-handle::before { font-family: 'Font Awesome 6 Brands'; font-weight: 400; margin-right: 5px; }
+    .cam-handle.twitch::before { content: "\f1e8"; color: #9146ff; }
+    .cam-handle.youtube::before { content: "\f167"; color: #ff0033; }
+    .cam-handle.x-twitter::before { content: "\e61b"; color: #e8eaf0; }
+    .cam-handle.instagram::before { content: "\f16d"; color: #e1306c; }
+    .cam-handle.tiktok::before { content: "\e07b"; color: #25f4ee; }
+    .cam-handle.discord::before { content: "\f392"; color: #5865f2; }
+    .cam-handle.facebook::before { content: "\f09a"; color: #1877f2; }
+    .cam-handle.kick::before { content: "K"; font-family: 'Inter', sans-serif; font-weight: 900; color: #53fc18; }
+    .cam-handle.link::before { content: "\f0c1"; font-family: 'Font Awesome 6 Free'; font-weight: 900; color: var(--duo-muted); }
+
+    /* ── Topics rail ─────────────────────────────────────────────────── */
+    .topics-rail {
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+      border-radius: 10px;
+      overflow: hidden;
+      border: 1px solid var(--duo-border);
+      background: var(--duo-surface);
+      box-shadow: 0 14px 40px rgba(0,0,0,.45);
+    }
+    .topics-head {
+      position: relative;
+      overflow: hidden;
+      flex: 0 0 auto;
+      padding: 16px 20px;
+      font-size: 15px;
+      font-weight: 900;
+      letter-spacing: .18em;
+      text-transform: uppercase;
+      text-align: center;
+      color: #fff;
+      background: linear-gradient(135deg, var(--duo-accent2), color-mix(in srgb, var(--duo-accent2) 58%, #05060a));
+    }
+    /* Animated accent underline under the header. */
+    .topics-head::after {
+      content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 3px;
+      background: linear-gradient(90deg, transparent, var(--duo-accent), var(--duo-accent2), transparent);
+      background-size: 220% 100%;
+      animation: accentLine 12s linear infinite;
+    }
+    @keyframes accentLine { 0% { background-position: 220% 0; } 100% { background-position: -220% 0; } }
+    .topics-list {
+      flex: 1 1 0;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .topics-item {
+      position: relative;
+      flex: 1 1 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 0 22px;
+      font-size: 23px;
+      font-weight: 800;
+      letter-spacing: .01em;
+      text-transform: uppercase;
+      color: var(--duo-muted);
+      background: var(--duo-surface);
+      border-top: 1px solid var(--duo-border);
+      line-height: 1.15;
+      transition: color .45s ease, background-color .45s ease, font-size .45s cubic-bezier(.16,.84,.24,1),
+                  padding-left .5s cubic-bezier(.16,.84,.24,1), letter-spacing .5s ease, text-shadow .45s ease;
+      /* staggered slide-in — plays ONCE on DOM creation (list rebuild), --i set per row in JS.
+         Active state is done purely with the transition above so switching topics stays smooth. */
+      animation: topicEnter .55s cubic-bezier(.16,.84,.24,1) both;
+      animation-delay: calc(var(--i, 0) * 70ms);
+    }
+    /* Active topic: larger + white with a soft glow; smoothly transitioned. The continuous motion
+       (pulsing bar + travelling shine) lives on the ::before/::after so it never re-triggers the
+       element's own slide-in when the active row changes. */
+    .topics-item.is-active {
+      color: #fff;
+      font-size: 25px; font-weight: 900;
+      letter-spacing: .03em;
+      background-color: color-mix(in srgb, var(--duo-accent) 26%, var(--duo-surface2));
+      text-shadow: 0 2px 18px color-mix(in srgb, var(--duo-accent) 55%, transparent);
+    }
+    .topics-item.is-active::before {
+      content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 7px;
+      background: linear-gradient(180deg, var(--duo-accent) 0%, var(--duo-accent2) 50%, var(--duo-accent) 100%);
+      background-size: 100% 220%;
+      box-shadow: 0 0 24px color-mix(in srgb, var(--duo-accent) 90%, transparent),
+                  0 0 8px  color-mix(in srgb, var(--duo-accent) 100%, transparent);
+      animation: topicBarFlow 2.2s linear infinite;
+    }
+    .topics-item.is-active::after {
+      content: ''; position: absolute; inset: 0; pointer-events: none;
+      background: linear-gradient(100deg, transparent 34%,
+        color-mix(in srgb, var(--duo-accent) 16%, transparent) 50%, transparent 66%);
+      background-size: 260% 100%;
+      animation: topicShine 3.4s linear infinite;
+    }
+    @keyframes topicEnter { from { opacity: 0; transform: translateX(-20px); } to { opacity: 1; transform: none; } }
+    @keyframes topicShine { 0% { background-position: 220% 0; } 100% { background-position: -220% 0; } }
+    @keyframes topicBarFlow { from { background-position: 0 220%; } to { background-position: 0 0%; } }
+    .topics-empty { display: flex; align-items: center; justify-content: center; height: 100%; color: var(--duo-muted); font-size: 15px; text-transform: uppercase; letter-spacing: .1em; }
+
+    /* ── Footer bar ──────────────────────────────────────────────────── */
+    .preshow-footer {
+      position: relative;
+      flex: 0 0 auto;
+      display: flex;
+      align-items: stretch;
+      gap: 0;
+      height: 104px;
+      border-radius: 10px;
+      overflow: hidden;
+      background: linear-gradient(180deg, rgba(24,27,34,.98), rgba(10,12,16,.99));
+      border: 1px solid rgba(255,255,255,.08);
+      box-shadow: 0 12px 32px rgba(0,0,0,.5);
+    }
+    /* Animated accent underline along the bottom of the footer (bottom overlay). */
+    .preshow-footer::before {
+      content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 3px; z-index: 4;
+      background: linear-gradient(90deg, transparent, var(--duo-accent), var(--duo-accent2), transparent);
+      background-size: 220% 100%;
+      animation: accentLine 12s linear infinite;
+    }
+    .pf-brand {
+      flex: 0 0 auto;
+      display: flex; align-items: center; justify-content: center; gap: 12px;
+      padding: 0 18px;
+      background: var(--duo-surface2);
+      border-right: 1px solid var(--duo-border);
+    }
+    .pf-brand > img { max-width: 68px; max-height: 68px; object-fit: contain; flex: 0 0 auto; }
+    .pf-brand.is-empty { display: none; }
+    /* "Presented by <title sponsor LOGO>" — centered; only shown once a title sponsor is set. */
+    .pf-brand-presented { display: flex; flex-direction: column; align-items: center; gap: 6px; line-height: 1; }
+    .pf-brand-presented.hidden { display: none; }
+    .pf-brand-presented-lbl { font-size: 10px; font-weight: 700; letter-spacing: .18em; text-transform: uppercase; color: var(--duo-muted); white-space: nowrap; text-align: center; }
+    .pf-brand-presented-logo { height: 44px; width: auto; max-width: 200px; object-fit: contain; display: block; }
+    .pf-brand { min-width: 220px; padding: 0 22px; }
+
+    .pf-matchup {
+      flex: 0 0 auto;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      gap: 4px;
+      padding: 0 20px;
+      border-right: 1px solid rgba(255,255,255,.08);
+    }
+    .pf-matchup-lbl {
+      font-size: 9px; font-weight: 900; letter-spacing: .18em; text-transform: uppercase;
+      color: #fff; text-align: center;
+    }
+    .pf-matchup-row { display: flex; align-items: center; gap: 8px; }
+    .pf-matchup-logo { width: 26px; height: 26px; object-fit: contain; }
+    .pf-matchup-logo.logo-on-dark { filter: brightness(0) invert(1); }
+    .pf-matchup-name { font-size: 15px; font-weight: 800; letter-spacing: .02em; text-transform: uppercase; color: #fff; white-space: nowrap; }
+    .pf-matchup-vs { font-size: 11px; font-weight: 700; color: var(--duo-muted); margin: 0 2px; }
+
+    .pf-kickoff {
+      flex: 0 0 auto;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 2px;
+      padding: 0 26px;
+      background: linear-gradient(135deg, var(--duo-accent), var(--duo-accent2));
+      border-right: 1px solid rgba(255,255,255,.1);
+    }
+    .pf-kickoff.hidden { display: none; }
+    .pf-kickoff-lbl { font-size: 10px; font-weight: 900; letter-spacing: .16em; text-transform: uppercase; color: rgba(255,255,255,.85); }
+    .pf-kickoff-time { font-size: 26px; font-weight: 900; color: #fff; font-variant-numeric: tabular-nums; line-height: 1; }
+
+    .pf-headline {
+      flex: 1 1 0;
+      min-width: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 0 26px;
+      font-size: 26px;
+      font-weight: 900;
+      letter-spacing: .02em;
+      text-transform: uppercase;
+      color: #fff;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .pf-badge {
+      flex: 0 0 auto;
+      width: 170px;
+      display: flex; align-items: center; justify-content: center;
+      background: var(--duo-surface2);
+      border-left: 1px solid rgba(255,255,255,.08);
+    }
+    .pf-badge img { max-width: 130px; max-height: 50px; object-fit: contain; transition: opacity .24s ease; }
+    .pf-badge.is-empty { display: none; }
+
+    /* Preview: visible cam placeholders */
+    .preview .cam-hole {
+      background: repeating-linear-gradient(45deg, #181b22, #181b22 16px, #20242e 16px, #20242e 32px);
+    }
+    .preview .cam-hole::after {
+      content: 'CAM';
+      position: absolute; inset: 0;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 22px; font-weight: 800; letter-spacing: .3em;
+      color: #4a5162;
+    }
+    .preview .cam-hole iframe { z-index: 1; position: relative; }
+  </style>
+</head>
+<body>
+  <div id="stage" class="preshow-stage">
+
+    <div class="zone-top">
+      <main class="duo-cams" id="cams"></main>
+      <aside class="topics-rail">
+        <div class="topics-head">Topics</div>
+        <div class="topics-list" id="topics-list"></div>
+      </aside>
+    </div>
+
+    <footer class="preshow-footer">
+      <div class="pf-brand is-empty" id="pf-brand">
+        <img id="pf-brand-logo" alt="">
+        <div class="pf-brand-presented hidden" id="pf-brand-presented">
+          <span class="pf-brand-presented-lbl" id="pf-presented-lbl">Presented by</span>
+          <img id="pf-presented-logo" class="pf-brand-presented-logo" alt="">
+        </div>
+      </div>
+      <div class="pf-matchup">
+        <span class="pf-matchup-lbl">First Up</span>
+        <div class="pf-matchup-row">
+          <img id="pf-logo-a" class="pf-matchup-logo" alt="">
+          <span id="pf-name-a" class="pf-matchup-name">TBD</span>
+          <span class="pf-matchup-vs">VS</span>
+          <span id="pf-name-b" class="pf-matchup-name">TBD</span>
+          <img id="pf-logo-b" class="pf-matchup-logo" alt="">
+        </div>
+      </div>
+      <div class="pf-kickoff hidden" id="pf-kickoff">
+        <span class="pf-kickoff-lbl" id="pf-kickoff-lbl">Kickoff</span>
+        <span class="pf-kickoff-time" id="pf-kickoff-time">—</span>
+      </div>
+      <div class="pf-headline" id="pf-headline"></div>
+      <div class="pf-badge is-empty" id="pf-badge"><img id="pf-badge-logo" alt=""></div>
+    </footer>
+
+  </div>
+
+  <script src="scene-base.js"></script>
+  <script>
+    function el(id) { return document.getElementById(id); }
+
+    const CAM_COUNT = 2;
+    const NO_CAMS = new URLSearchParams(location.search).get('cams') === 'off';
+    if (NO_CAMS) document.getElementById('stage')?.classList.add('frames-only');
+    let _lastCamUrl = new Array(CAM_COUNT).fill(null);
+
+    function applyBrandTheme(data) {
+      const root = document.documentElement;
+      const color = SceneBase.brandColor(data);
+      const accent2 = SceneBase.brandAccent(data);
+      if (color) root.style.setProperty('--duo-accent', color);
+      if (accent2) root.style.setProperty('--duo-accent2', accent2);
+      if (data.fontFamily) root.style.fontFamily = `'${data.fontFamily}', 'Inter', system-ui, sans-serif`;
+    }
+
+    function buildCams() {
+      const cams = el('cams');
+      cams.innerHTML = '';
+      for (let i = 1; i <= CAM_COUNT; i++) {
+        const card = document.createElement('div');
+        card.className = 'cam-card';
+        card.innerHTML = `<div id="hole${i}" class="cam-hole"></div>
+          <div class="cam-plate">
+            <span id="staffname${i}" class="cam-name">—</span>
+            <span id="socials${i}" class="cam-handle" style="display:none"></span>
+          </div>`;
+        cams.appendChild(card);
+      }
+    }
+
+    function renderCasters(casters) {
+      if (NO_CAMS) return;
+      const slots = SceneBase.castersBySlots(casters, CAM_COUNT);
+      for (let i = 0; i < CAM_COUNT; i++) {
+        // The caster's assigned cam (set via the desk lineup / DCC Hosts — a custom VDO link there
+        // overrides the auto room). Run the source with ?cams=off to layer an OBS scene behind instead.
+        const camUrl = ((slots[i] && slots[i].camUrl) || '').trim();
+        if (camUrl === _lastCamUrl[i]) continue;
+        _lastCamUrl[i] = camUrl;
+        const hole = el('hole' + (i + 1));
+        if (!hole) continue;
+        hole.querySelectorAll('iframe').forEach(f => f.remove());
+        if (camUrl) {
+          const iframe = document.createElement('iframe');
+          iframe.src = camUrl;
+          iframe.setAttribute('allow', 'autoplay; encrypted-media; microphone; camera; fullscreen');
+          iframe.referrerPolicy = 'no-referrer';
+          hole.appendChild(iframe);
+        }
+      }
+    }
+
+    function renderCasterText(casters) {
+      const slots = SceneBase.castersBySlots(casters, CAM_COUNT);
+      for (let i = 0; i < CAM_COUNT; i++) {
+        const c = slots[i] || {};
+        const nameEl = el('staffname' + (i + 1));
+        const socEl = el('socials' + (i + 1));
+        if (!nameEl || !socEl) continue;
+        nameEl.textContent = (c.name || '—').toString();
+        const handle = SceneBase.formatCasterHandle(c);
+        const social = (c.social || 'none').toString().toLowerCase();
+        if (handle) {
+          socEl.className = 'cam-handle ' + SceneBase.socialPlatformClass(social);
+          socEl.textContent = handle;
+          socEl.style.display = '';
+        } else {
+          socEl.style.display = 'none';
+        }
+      }
+    }
+
+    let _topicsSig = '';
+    function renderTopics(data) {
+      const pre = data.preshow || {};
+      const topics = Array.isArray(pre.topics) ? pre.topics : [];
+      const activeIdx = pre.activeTopicIndex || 0;
+      const wrap = el('topics-list');
+
+      // Only REBUILD the DOM when the topic text list actually changes (full_state broadcasts fire on
+      // every score/clock tick — rebuilding each time re-ran the entrance animation and made it glitch).
+      const textSig = topics.map(topicText).join('||');
+      if (textSig !== _topicsSig) {
+        _topicsSig = textSig;
+        wrap.innerHTML = '';
+        if (!topics.length) { wrap.innerHTML = '<div class="topics-empty">No topics set</div>'; return; }
+        topics.forEach((t, i) => {
+          const item = document.createElement('div');
+          item.className = 'topics-item' + (i === activeIdx ? ' is-active' : '');
+          item.style.setProperty('--i', i);   // staggered entrance delay (plays once on rebuild)
+          item.textContent = topicText(t);
+          wrap.appendChild(item);
+        });
+        return;
+      }
+      // Same topics — only the active row may have changed: toggle the class so CSS transitions it
+      // smoothly (no rebuild, no re-triggered slide-in).
+      wrap.querySelectorAll('.topics-item').forEach((it, i) => it.classList.toggle('is-active', i === activeIdx));
+    }
+    // Pull a clean string out of a topic regardless of shape (string, {text}, {label}, nested) so a
+    // stray object never renders as "[object Object]".
+    function topicText(t) {
+      if (t == null) return '';
+      if (typeof t === 'string') return t;
+      if (typeof t.text === 'string') return t.text;
+      if (t.text && typeof t.text === 'object') return topicText(t.text);
+      if (typeof t.label === 'string') return t.label;
+      if (typeof t.title === 'string') return t.title;
+      return '';
+    }
+
+    // "First up" match-up — the next queued match from the Schedule feed, falling back to
+    // whatever the currently-configured teams are so the card is never empty.
+    function renderMatchup(data) {
+      const matches = (data.upcoming && Array.isArray(data.upcoming.matches)) ? data.upcoming.matches : [];
+      const next = matches[0];
+      const nameA = el('pf-name-a'), nameB = el('pf-name-b'), logoA = el('pf-logo-a'), logoB = el('pf-logo-b');
+      if (next) {
+        nameA.textContent = (next.teamA || 'TBD').toUpperCase();
+        nameB.textContent = (next.teamB || 'TBD').toUpperCase();
+        SceneBase.applyTeamLogo(logoA, next.teamALogo, '');
+        SceneBase.applyTeamLogo(logoB, next.teamBLogo, '');
+        logoA.style.display = next.teamALogo ? '' : 'none';
+        logoB.style.display = next.teamBLogo ? '' : 'none';
+      } else {
+        const blue = SceneBase.teamSide(data, 'blue');
+        const orange = SceneBase.teamSide(data, 'orange');
+        nameA.textContent = blue.name.toUpperCase();
+        nameB.textContent = orange.name.toUpperCase();
+        SceneBase.applyTeamLogo(logoA, blue.customLogo, blue.logo);
+        SceneBase.applyTeamLogo(logoB, orange.customLogo, orange.logo);
+      }
+    }
+
+    // Kickoff countdown — reuses breakScreen (same field the Break/Starting-Soon scene drives).
+    let _endsAt = null, _frozen = null, _tickTimer = null;
+    function fmtTime(sec) {
+      sec = Math.max(0, Math.round(sec));
+      const m = Math.floor(sec / 60), s = sec % 60;
+      return m + ':' + String(s).padStart(2, '0');
+    }
+    function tick() {
+      const timeEl = el('pf-kickoff-time');
+      if (_frozen != null) { timeEl.textContent = fmtTime(_frozen); return; }
+      if (!_endsAt) return;
+      timeEl.textContent = fmtTime((_endsAt - Date.now()) / 1000);
+    }
+    function renderKickoff(data) {
+      const b = data.breakScreen || {};
+      const hasEndsAt = !!b.endsAt;
+      const hasFrozen = b.frozenSeconds != null;
+      const hasTimer = hasEndsAt || hasFrozen;
+      el('pf-kickoff').classList.toggle('hidden', !hasTimer);
+      el('pf-kickoff-lbl').textContent = (b.title || 'Kickoff').toString();
+      if (hasTimer) {
+        _frozen = hasFrozen ? Math.max(0, Math.round(b.frozenSeconds)) : null;
+        _endsAt = hasEndsAt ? b.endsAt : null;
+        if (!_tickTimer) _tickTimer = setInterval(tick, 250);
+        tick();
+      } else if (_tickTimer) {
+        clearInterval(_tickTimer); _tickTimer = null;
+      }
+    }
+
+    function renderBrandBug(data) {
+      const wrap = el('pf-brand');
+      const logo = (data.brand && data.brand.logo) || '';
+      const brandLogoEl = el('pf-brand-logo');
+      if (logo) { brandLogoEl.src = logo; brandLogoEl.style.display = ''; }
+      else { brandLogoEl.style.display = 'none'; brandLogoEl.removeAttribute('src'); }
+      // "Presented by" shows the title-sponsor LOGO, only once a title sponsor (scoreboardAd) is set.
+      const sponsor = data.scoreboardAd || {};
+      const hasTitleSponsor = !!sponsor.logo;
+      const pres = el('pf-brand-presented');
+      pres.classList.toggle('hidden', !hasTitleSponsor);
+      if (hasTitleSponsor) {
+        el('pf-presented-logo').src = sponsor.logo;
+        el('pf-presented-lbl').textContent = (sponsor.label || 'Presented by');
+      }
+      // The whole bug hides only when there's neither a brand logo nor a title sponsor.
+      wrap.classList.toggle('is-empty', !logo && !hasTitleSponsor);
+    }
+
+    // Bottom-right = sponsor rail: cycles through the brand kit's RAIL-tagged sponsors only
+    // (crossfade). Hides when none — the title sponsor is shown separately under "Presented by".
+    let _pfSpList = [], _pfSpIdx = 0, _pfSpTimer = null, _pfSpSig = '';
+    function renderBadge(data) {
+      const wrap = el('pf-badge');
+      const list = ((data.brand && data.brand.railSponsors) || []).filter((s) => s && s.logo);
+      const sig = list.map((s) => s.logo).join('|');
+      if (!list.length) {
+        wrap.classList.add('is-empty');
+        clearInterval(_pfSpTimer); _pfSpTimer = null; _pfSpSig = ''; _pfSpList = [];
+        return;
+      }
+      wrap.classList.remove('is-empty');
+      if (sig === _pfSpSig) return;     // unchanged → let the running cycle continue
+      _pfSpSig = sig; _pfSpList = list; _pfSpIdx = 0;
+      const img = el('pf-badge-logo');
+      img.style.opacity = '1'; img.src = list[0].logo;
+      clearInterval(_pfSpTimer); _pfSpTimer = null;
+      if (list.length > 1) {
+        _pfSpTimer = setInterval(() => {
+          _pfSpIdx = (_pfSpIdx + 1) % _pfSpList.length;
+          img.style.opacity = '0';
+          setTimeout(() => { img.src = _pfSpList[_pfSpIdx].logo; img.style.opacity = '1'; }, 240);
+        }, 4000);
+      }
+    }
+
+    function renderHeadline(data) {
+      const pre = data.preshow || {};
+      el('pf-headline').textContent = (pre.headline || '').toString().toUpperCase();
+    }
+
+    function render(data) {
+      data = data || {};
+      applyBrandTheme(data);
+
+      const casters = data.casters || {};
+      el('stage').classList.toggle('show', SceneBase.casterStageVisible(casters));
+
+      renderCasters(casters);
+      renderCasterText(casters);
+      renderTopics(data);
+      renderMatchup(data);
+      renderKickoff(data);
+      renderBrandBug(data);
+      renderBadge(data);
+      renderHeadline(data);
+    }
+
+    buildCams();
+
+    if (location.protocol === 'file:') {
+      document.documentElement.classList.add('preview');
+      render({
+        casters: {
+          visible: true,
+          list: [
+            { id: 'c1', name: 'Jordan Reyes', handle: 'jreyescasts', camUrl: '', slot: 1, social: 'x' },
+            { id: 'c2', name: 'Mia Tanaka', handle: 'miaplays', camUrl: '', slot: 2, social: 'twitch' }
+          ]
+        },
+        brand: {
+          logo: 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="90" height="90"><text x="6" y="55" font-size="34" fill="#e8eaf0" font-family="Arial" font-weight="bold">26</text></svg>'),
+          railSponsors: [
+            { logo: 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="130" height="44"><rect width="130" height="44" rx="4" fill="#1a1d24"/><text x="65" y="29" font-size="17" fill="#e8eaf0" text-anchor="middle" font-family="Arial" font-weight="bold">PARTNER A</text></svg>') },
+            { logo: 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="130" height="44"><rect width="130" height="44" rx="4" fill="#1a1d24"/><text x="65" y="29" font-size="17" fill="#e8eaf0" text-anchor="middle" font-family="Arial" font-weight="bold">PARTNER B</text></svg>') }
+          ]
+        },
+        upcoming: {
+          matches: [{ teamA: 'First Up', teamB: 'Villainous', teamALogo: '', teamBLogo: '' }]
+        },
+        breakScreen: { title: 'KICKOFF', endsAt: Date.now() + 30 * 60 * 1000 + 51 * 1000 },
+        preshow: {
+          headline: 'THE LAST PLAYER TO QUALIFY',
+          topics: [
+            { text: "Who's going to Worlds?", sceneName: '' },
+            { text: 'Saturday recap', sceneName: '' },
+            { text: 'Progressive top plays', sceneName: '' },
+            { text: 'Sunday predictions', sceneName: '' },
+            { text: 'Kickoff', sceneName: '' }
+          ],
+          activeTopicIndex: 1
+        },
+        scoreboardAd: {
+          logo: 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="140" height="46"><rect width="140" height="46" rx="4" fill="#1a1d24"/><text x="70" y="30" font-size="16" fill="#e8eaf0" text-anchor="middle" font-family="Arial" font-weight="bold">STORE</text></svg>')
+        }
+      });
+      el('stage').classList.add('show');
+    } else {
+      SceneBase.connect(data => { render(data); SceneBase.applySceneConfig('preshow', data); });
+    }
+  </script>
+</body>
+</html>

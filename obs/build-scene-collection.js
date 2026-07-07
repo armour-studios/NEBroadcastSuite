@@ -34,6 +34,17 @@ const OVERLAY_HOST  = 'http://localhost:3000';
 const MAIN_CANVAS   = '6c69626f-6273-4c00-9d88-c5136d61696e'; // OBS main canvas UUID (fixed)
 const COLLECTION_NAME = 'NE Broadcast Suite';
 
+// Scene-list label colors (ARGB uint32, A=0xBF semi-transparent — matches OBS preset tints).
+// These appear as colored left-stripes in OBS's Scenes panel for quick category scanning.
+const SCENE_COLORS = {
+  none:     0,           // no label
+  pregame:  3208970239,  // 0xBF44FFFF  cyan   — pre-game / break
+  gameplay: 3221202995,  // 0xBFFFA833  orange — live gameplay
+  desk:     3208970052,  // 0xBF44FF44  green  — caster desk
+  postgame: 3221225267,  // 0xBFFFFF33  yellow — post-game / winner
+  utility:  3214975136,  // 0xBFA0A0A0  gray   — utility cam framing scenes
+};
+
 // ─── Low-level source builders ────────────────────────────────────────────────
 const AUDIO_BASE = {
   mixers: 255, sync: 0, flags: 0, volume: 1.0, balance: 0.5,
@@ -50,7 +61,7 @@ const BROWSER_HK = {
   'ObsBrowser.Refresh': [],
 };
 
-function makeBrowser(name, url, { restart = false, shutdown = false, w = 1920, h = 1080 } = {}) {
+function makeBrowser(name, url, { restart = false, shutdown = false, w = 1920, h = 1080, rerouteAudio = false } = {}) {
   return {
     prev_ver: 536936450, name, uuid: randomUUID(),
     id: 'browser_source', versioned_id: 'browser_source',
@@ -59,9 +70,14 @@ function makeBrowser(name, url, { restart = false, shutdown = false, w = 1920, h
       width: w, height: h,
       restart_when_active: restart,
       shutdown,
+      // reroute_audio = OBS captures the page's audio as its OWN source with its own fader/track —
+      // used for the per-caster cam feeds so each caster keeps a separate audio track.
+      ...(rerouteAudio ? { reroute_audio: true } : {}),
       css: 'body { background: rgba(0,0,0,0); margin: 0; overflow: hidden; }',
     },
-    ...AUDIO_BASE, mixers: 0, hotkeys: BROWSER_HK,
+    // Rerouted (caster cam) sources MUST be on the output tracks or their voices never reach
+    // the stream/recording (mixers is a track bitmask; 255 = all tracks, OBS's default).
+    ...AUDIO_BASE, mixers: rerouteAudio ? 255 : 0, hotkeys: BROWSER_HK,
   };
 }
 
@@ -147,6 +163,7 @@ function makeScene(name, items, {
   canvasUuid      = MAIN_CANVAS,
   showInMultiview = true,
   transitionMs    = 300,
+  color           = 0,   // SCENE_COLORS.* — shows as a colored stripe in OBS Scenes panel
 } = {}) {
   const hotkeys = { 'OBSBasic.SelectScene': [] };
   items.forEach(it => {
@@ -159,6 +176,7 @@ function makeScene(name, items, {
     settings: { custom_size: false, id_counter: items.length + 1, items },
     ...AUDIO_BASE, mixers: 0, hotkeys,
     canvas_uuid: canvasUuid,
+    color,
     private_settings: { show_in_multiview: showInMultiview, transition_duration: transitionMs },
   };
 }
@@ -191,10 +209,11 @@ function generateSceneCollection({
   // assigned to that desk slot over WS and renders their live VDO.ninja view. The OBS URL
   // never changes, so swapping rooms / custom view links / re-assigning casters just works
   // with NO need to regenerate or reinstall the collection. (Slot map: 1=C1 2=C2 3=Host 4=C4.)
-  const vdoHost    = makeBrowser('[CAM] Host (slot 3)',     '/castercam.html?slot=3');
-  const vdoCaster1 = makeBrowser('[CAM] Caster 1 (slot 1)', '/castercam.html?slot=1');
-  const vdoCaster2 = makeBrowser('[CAM] Caster 2 (slot 2)', '/castercam.html?slot=2');
-  const vdoCaster4 = makeBrowser('[CAM] Caster 4 (slot 4)', '/castercam.html?slot=4');
+  const vdoHost    = makeBrowser('[CAM] Host (slot 3)',     '/castercam.html?slot=3', { rerouteAudio: true });
+  const vdoCaster1 = makeBrowser('[CAM] Caster 1 (slot 1)', '/castercam.html?slot=1', { rerouteAudio: true });
+  const vdoCaster2 = makeBrowser('[CAM] Caster 2 (slot 2)', '/castercam.html?slot=2', { rerouteAudio: true });
+  const vdoCaster4 = makeBrowser('[CAM] Caster 4 (slot 4)', '/castercam.html?slot=4', { rerouteAudio: true });
+  const vdoPlayer  = makeBrowser('[CAM] Player (slot 5)',   '/castercam.html?slot=5', { rerouteAudio: true });
 
   // ── Game HUD overlay sources (transparent, sit over Game Capture) ──────────
   const gfxRlHud   = makeBrowser('[GFX] RL HUD',            '/rl-hud.html');
@@ -212,19 +231,23 @@ function generateSceneCollection({
   const gfxDuoSingle = makeBrowser('[GFX] Duo SingleCam',  '/duosinglecam.html' + co);
   const gfxAnalyst   = makeBrowser('[GFX] Analyst Desk',   '/analystspecial.html' + co);
   const gfxQuad      = makeBrowser('[GFX] Quad Desk',      '/quaddesk.html' + co);
-  const gfxSpotlight = makeBrowser('[GFX] Spotlight Desk', '/spotlightdesk.html' + co);
-  const gfxInterview = makeBrowser('[GFX] Interview',      '/interview.html' + co);
+  const gfxPreshow   = makeBrowser('[GFX] Desk Show',      '/preshow.html' + co);
+  const gfxSpotlight = makeBrowser('[GFX] Spotlight Desk', '/spotlightdesk.html' + co + '&casters=1');
+  const gfxInterview     = makeBrowser('[GFX] Interview',       '/interview.html' + co);
+  const gfxInterviewDesk = makeBrowser('[GFX] Interview Desk',  '/interview-desk.html' + co);
   // Cams embedded always (responsive / multi-cam layouts — combined cams regardless of mode):
   const gfxMatchup   = makeBrowser('[GFX] Matchup',        '/matchup.html');
   const gfxCampip    = makeBrowser('[GFX] Cam PIP',        '/campip.html');
   const gfxTalentbar = makeBrowser('[GFX] Talent Bar',     '/talentbar.html');
 
   // ── Full-screen graphic sources ────────────────────────────────────────────
-  const gfxAway       = makeBrowser('[GFX] Away Screen',    '/countdown.html',         { restart: true, shutdown: true });
-  const gfxCountdown  = makeBrowser('[GFX] Countdown',      '/countdown.html',         { restart: true, shutdown: true });
-  const gfxWinner     = makeBrowser('[GFX] Winner',         '/winner.html',            { restart: true, shutdown: true });
-  const gfxTeam1      = makeBrowser('[GFX] Team 1 Intro',   '/intro.html?side=blue',   { restart: true, shutdown: true });
-  const gfxTeam2      = makeBrowser('[GFX] Team 2 Intro',   '/intro.html?side=orange', { restart: true, shutdown: true });
+  const gfxAway        = makeBrowser('[GFX] Away Screen',    '/countdown.html',               { restart: true, shutdown: true });
+  const gfxCountdown   = makeBrowser('[GFX] Countdown',      '/countdown.html',               { restart: true, shutdown: true });
+  const gfxWinner      = makeBrowser('[GFX] Winner',         '/winner.html',                  { restart: true, shutdown: true });
+  const gfxWinTeam1    = makeBrowser('[GFX] Team 1 Winner',  '/winner.html?side=blue',        { restart: true, shutdown: true });
+  const gfxWinTeam2    = makeBrowser('[GFX] Team 2 Winner',  '/winner.html?side=orange',      { restart: true, shutdown: true });
+  const gfxTeam1       = makeBrowser('[GFX] Team 1 Intro',   '/intro.html?side=blue',         { restart: true, shutdown: true });
+  const gfxTeam2       = makeBrowser('[GFX] Team 2 Intro',   '/intro.html?side=orange',       { restart: true, shutdown: true });
   const gfxMapVeto    = makeBrowser('[GFX] Map Veto',        '/mapscreen.html',         { restart: true, shutdown: true });
   const gfxDraft      = makeBrowser('[GFX] Draft',           '/draft.html');
   const gfxBracket    = makeBrowser('[GFX] Bracket',         '/bracket.html');
@@ -246,34 +269,36 @@ function generateSceneCollection({
   // can hand-place a cam anywhere; used automatically by the desks in separated mode.
   function camScene(sceneName, vdoSrc) {
     const il = itemList();
-    il.add(vdoSrc.name, vdoSrc.uuid, { locked: false, ...FULL_INNER });
-    return makeScene(sceneName, il.get(), { showInMultiview: false, transitionMs: 0 });
+    // locked: true — prevents accidental drag in OBS; source can still be swapped via right-click → Properties.
+    il.add(vdoSrc.name, vdoSrc.uuid, { locked: true, ...FULL_INNER });
+    return makeScene(sceneName, il.get(), { showInMultiview: false, transitionMs: 0, color: SCENE_COLORS.utility });
   }
 
   const sceneHostCam    = camScene('=> Host Cam',     vdoHost);
   const sceneCaster1Cam = camScene('=> Caster 1 Cam', vdoCaster1);
   const sceneCaster2Cam = camScene('=> Caster 2 Cam', vdoCaster2);
   const sceneCaster4Cam = camScene('=> Caster 4 Cam', vdoCaster4);
+  const scenePlayerCam  = camScene('=> Player Cam',   vdoPlayer);
 
   // ── Generic helpers ─────────────────────────────────────────────────────────
   // Full-screen graphic over the looping background.
-  function simpleScene(sceneName, gfxSrc, transMs, multiview = true) {
+  function simpleScene(sceneName, gfxSrc, transMs, multiview = true, color = 0) {
     const il = itemList();
     il.add(bgLoop.name,  bgLoop.uuid,  { ...FULL,         colorPreset: 5 });
     il.add(gfxSrc.name,  gfxSrc.uuid,  { ...FULL_STRETCH, colorPreset: 7 });
-    return makeScene(sceneName, il.get(), { transitionMs: transMs, showInMultiview: multiview });
+    return makeScene(sceneName, il.get(), { transitionMs: transMs, showInMultiview: multiview, color });
   }
 
   // Caster desk: background → cam utility scenes (behind holes) → overlay graphic → transition.
   // The overlay HTML runs with ?cams=off so its cam holes are transparent; the utility scenes
   // show through. Users can swap the browser source in any => Cam scene for Discord, NDI, etc.
-  function deskScene(sceneName, gfxSrc, addCams) {
+  function deskScene(sceneName, gfxSrc, addCams, color = 0) {
     const il = itemList();
     il.add(bgLoop.name, bgLoop.uuid, { ...FULL, colorPreset: 5 });
     if (addCams) addCams(il);
     il.add(gfxSrc.name, gfxSrc.uuid, { ...FULL, colorPreset: 7 });
     il.add(gfxTransition.name, gfxTransition.uuid, { ...FULL_STRETCH, visible: false, colorPreset: 6 });
-    return makeScene(sceneName, il.get(), { transitionMs: 300 });
+    return makeScene(sceneName, il.get(), { transitionMs: 300, color });
   }
 
   // Gameplay scene: Game Capture on the bottom, a stack of game HUDs (only `active` shown),
@@ -291,7 +316,12 @@ function generateSceneCollection({
   const sceneInGame   = gameScene('In Game', gfxRlHud);                    // un-hide your game's HUD
   const scenePipCams  = gameScene('In Game — Cam PIP', gfxRlHud, [gfxCampip]);
   const sceneTalent   = gameScene('In Game — Talent Bar', gfxRlHud, [gfxTalentbar]);
-  const sceneReplay   = simpleScene('Replay', gfxReplay, 500, false);
+  const sceneReplay   = simpleScene('Replay', gfxReplay, 500, false, SCENE_COLORS.gameplay);
+
+  // Apply gameplay color to the three In Game scenes (gameScene() builds directly, so set color after)
+  sceneInGame.color   = SCENE_COLORS.gameplay;
+  scenePipCams.color  = SCENE_COLORS.gameplay;
+  sceneTalent.color   = SCENE_COLORS.gameplay;
 
   // ── Caster / desk scenes ─────────────────────────────────────────────────
   // Separated-mode hole geometry. Each cam scene (a full 16:9 source) is COVER-framed into the
@@ -301,79 +331,125 @@ function generateSceneCollection({
   //   bounds_type 3 = OBS SCALE_OUTER (cover/fill, crop overflow). pos = hole top-left, bounds = hole size.
   const frame = (x, y, w, h) => ({ pos: { x, y }, scale: { x: 1, y: 1 }, bounds: { x: w, y: h }, boundsType: 3, colorPreset: 4 });
 
+  // All frame() positions below are inner cam-hole pixel rects at 1920×1080 (?cams=off).
+  // Formula: x = stage_pad_l + card_border_l, y = zone_y + zone_pad_t + centering_offset + card_border_t + ::before_h
+  // w = card_inner_w, h = card_inner_w × 9/16 (or flex-stretch h for preshow).
   const sceneSingle = deskScene('SingleCam', gfxSingle, il => {
-    il.add(sceneCaster1Cam.name, sceneCaster1Cam.uuid, frame(371, 238, 1178, 673));
-  });
+    // --cam-w:1180, border:1, ::before:3, --cam-plate-h:58, --hud-h:120, stage-pad:16/24
+    // cam-card 726px tall, centered in 900px zone-cams content → y=237+1+3=241; w=1178, h=1178×9/16=663
+    il.add(sceneCaster1Cam.name, sceneCaster1Cam.uuid, frame(371, 241, 1178, 663));
+  }, SCENE_COLORS.desk);
   const sceneDuoCam = deskScene('DuoCam Row', gfxDuoRow, il => {
-    il.add(sceneCaster1Cam.name, sceneCaster1Cam.uuid, frame(24,  248, 928, 522));
-    il.add(sceneCaster2Cam.name, sceneCaster2Cam.uuid, frame(968, 248, 928, 522));
-  });
-  // Hole geometry: inner cam-hole dimensions after the 16:9 layout fix (aspect-ratio 16:9, flex:0 0 auto).
-  // All positions are inner cam-hole rect (border + ::before already stripped) at 1920×1080.
+    // no border on cam-card, ::before:2, --cam-plate-h:54, zone splits evenly → zone-cams top=250; y=250+2=252
+    il.add(sceneCaster1Cam.name, sceneCaster1Cam.uuid, frame(24,  252, 928, 522));
+    il.add(sceneCaster2Cam.name, sceneCaster2Cam.uuid, frame(968, 252, 928, 522));
+  }, SCENE_COLORS.desk);
   const sceneTrioCam = deskScene('TrioCam Row', gfxTrioRow, il => {
-    // 3 cards × 613px outer (611px inner), hud 128px, stage-pad 16/24, cams centered → y≈406
-    il.add(sceneCaster1Cam.name, sceneCaster1Cam.uuid, frame(25,   406, 611, 344));
-    il.add(sceneCaster2Cam.name, sceneCaster2Cam.uuid, frame(654,  406, 611, 344));
-    il.add(sceneHostCam.name,    sceneHostCam.uuid,    frame(1283, 406, 611, 344));
-  });
+    // 3 cards × 613.3px outer (611px inner), border:1, stage-pad:56/24, zone-pb:10px (always),
+    // zone-cams inner=842px; frames-only hides ::before(3px) → card-h=400; offset=(842-400)/2=221
+    // hole y = 56+128+10+14+221+1(border) = 430; cam3 x=24+613.3×2+16×2+1=1284
+    il.add(sceneCaster1Cam.name, sceneCaster1Cam.uuid, frame(25,   430, 611, 344));
+    il.add(sceneCaster2Cam.name, sceneCaster2Cam.uuid, frame(654,  430, 611, 344));
+    il.add(sceneHostCam.name,    sceneHostCam.uuid,    frame(1284, 430, 611, 344));
+  }, SCENE_COLORS.desk);
   const sceneQuad = deskScene('Quad Desk', gfxQuad, il => {
-    // 2×2 grid in 1366px, hud 100px, stage-pad 14/24; rows centered → y≈157 / y≈603
-    il.add(sceneCaster1Cam.name, sceneCaster1Cam.uuid, frame(278, 157, 673, 379));
-    il.add(sceneCaster2Cam.name, sceneCaster2Cam.uuid, frame(969, 157, 673, 379));
-    il.add(sceneHostCam.name,    sceneHostCam.uuid,    frame(278, 603, 673, 379));
-    il.add(sceneCaster4Cam.name, sceneCaster4Cam.uuid, frame(969, 603, 673, 379));
-  });
+    // 2×2 CSS Grid, max-width:1280px, gap:16px, hud:100px, stage-pad:14/24/26
+    // grid left = (1872-1280)/2+24=320; card=(1280-16)/2=632 outer; hole=630 (border 1px each)
+    // hole h=354 (630×9/16); frames-only hides ::before(3) → card-h=402; zone-cams-inner=916
+    // row-center-offset=(916-820)/2=48; hole y = 14+100+12+48+1=175 / 593
+    il.add(sceneCaster1Cam.name, sceneCaster1Cam.uuid, frame(321, 175, 630, 354));
+    il.add(sceneCaster2Cam.name, sceneCaster2Cam.uuid, frame(969, 175, 630, 354));
+    il.add(sceneHostCam.name,    sceneHostCam.uuid,    frame(321, 593, 630, 354));
+    il.add(sceneCaster4Cam.name, sceneCaster4Cam.uuid, frame(969, 593, 630, 354));
+  }, SCENE_COLORS.desk);
   const sceneAnalyst = deskScene('Analyst Desk', gfxAnalyst, il => {
-    // Left col: 2 stacked cams (600px wide, 336px tall holes). Right: big host cam (1254×705).
-    il.add(sceneCaster1Cam.name, sceneCaster1Cam.uuid, frame(25,  20,  598, 336));
-    il.add(sceneCaster2Cam.name, sceneCaster2Cam.uuid, frame(25,  547, 598, 336));
+    // stage-pad:16/24/14; zone-footer:12px (padding-top, always); an-body=1038px
+    // Left: 600px col, 2 cams stacked, justify:center; frames-only hides ::before(3) → card-h=388
+    // stack=792px; center-offset=(1038-792)/2=123; hole y=16+123+1(border)=140
+    // cam2 card-top=16+123+388+16=543; cam2 hole y=544; w=598(hole in 600px card), h=336
+    // Right: 1256px (flex:1); hud=104px+gap=12 above cam; an-right justify:center
+    //   frames-only cam-h=757; block=873; center-offset=(1038-873)/2=82.5; cam top=16+82.5+116=214.5
+    il.add(sceneCaster1Cam.name, sceneCaster1Cam.uuid, frame(25,  140, 598, 336));
+    il.add(sceneCaster2Cam.name, sceneCaster2Cam.uuid, frame(25,  544, 598, 336));
     il.add(sceneHostCam.name,    sceneHostCam.uuid,    frame(641, 217, 1254, 705));
-  });
+  }, SCENE_COLORS.desk);
   const sceneDuoSingle = deskScene('Duo SingleCam', gfxDuoSingle, il => {
-    il.add(sceneCaster1Cam.name, sceneCaster1Cam.uuid, frame(361, 232, 1198, 684));
-  });
+    // --cam-w:1200, border:1, ::before:3, --cam-plate-h:60, --hud-h:122, stage-pad:16/24
+    // cam-card 739px tall, centered in 898px zone-cams content → y=231.5+1+3=236; h=1198×9/16=674
+    il.add(sceneCaster1Cam.name, sceneCaster1Cam.uuid, frame(361, 236, 1198, 674));
+  }, SCENE_COLORS.desk);
   const sceneSpotlight = deskScene('Spotlight Desk', gfxSpotlight, il => {
-    // sp-casters 720px wide, single cam 718×404 (16:9), centered in body below header
-    il.add(sceneCaster1Cam.name, sceneCaster1Cam.uuid, frame(31, 330, 718, 404));
-  });
-  const sceneInterview = deskScene('Interview', gfxInterview, il => {
-    il.add(sceneCaster1Cam.name, sceneCaster1Cam.uuid, frame(29,  268, 917, 526));
-    il.add(sceneCaster2Cam.name, sceneCaster2Cam.uuid, frame(974, 268, 917, 526));
-  });
+    // sp-stage pad: 32/26/16; header 58px(flex:0 0 58px)+16px-mb=74px; zone-footer margin-top:12px → sp-body=946px
+    // sp-body top = 32+74 = 106px; frames-only hides ::before on both cards + border-color transparent
+    // Left (analyst): 500px col; align-self:flex-start; card border=1px; hole y=106+1=107; w=498(500-2), h=280(498×9/16)
+    il.add(sceneCaster1Cam.name, sceneCaster1Cam.uuid, frame(27,  107, 498, 280));
+    // Right (player): 1920-52-500-20=1348px col; x=26+500+20+1=547; align-self:stretch; ::before hidden
+    // hole y=106+1=107; w=1346(1348-2), h=757(1346×9/16)
+    il.add(scenePlayerCam.name,  scenePlayerCam.uuid,  frame(547, 107, 1346, 757));
+  }, SCENE_COLORS.desk);
+  // Interview Desk — host (slot 1, left 38%) + guest/interviewee (right 62%)
+  // id-stage pad: 28/24/16; header ~80px; body h=904px; cards centered in body.
+  // Left (host): card=467px → offset=(904-467)/2=219; hole y=28+80+219+4=331; w=720, h=405
+  // Right (guest): card=714px → offset=(904-714)/2=95; hole y=28+80+95+4=207; x=24+720+18=762, w=1134, h=638
+  const sceneInterviewDesk = deskScene('Interview Desk', gfxInterviewDesk, il => {
+    il.add(sceneCaster1Cam.name, sceneCaster1Cam.uuid, frame(24,  331,  720, 405));
+    il.add(scenePlayerCam.name,  scenePlayerCam.uuid,  frame(762, 207, 1134, 638));
+  }, SCENE_COLORS.desk);
+  const sceneInterview = deskScene('VS / Head-to-Head', gfxInterview, il => {
+    // iv-body flex-row gap:26, border:1, ::before:4, --cam-plate-h:64; each card 919px outer (917px inner)
+    // stage-pad:30/28/18, header~44px → iv-body top=74, h=972; cam-card 587px centered → y=266.5+1+4=272
+    // h=917×9/16=517; cam2 x=28+919+26+iv-vs_w+26+1 (verified against current x=974 source positions)
+    il.add(sceneCaster1Cam.name, sceneCaster1Cam.uuid, frame(29,  272, 917, 517));
+    il.add(sceneCaster2Cam.name, sceneCaster2Cam.uuid, frame(974, 272, 917, 517));
+  }, SCENE_COLORS.desk);
   // Matchup embeds its own (small, responsive) caster strip — combined cams regardless of mode.
-  const sceneMatchup = deskScene('Matchup', gfxMatchup, null);
+  const sceneMatchup = deskScene('Matchup', gfxMatchup, null, SCENE_COLORS.pregame);
+  // Desk Show — two tall cam holes (left/right) + topics rail + footer. Rects computed from
+  // preshow.html at 1920×1080 (?cams=off): stage pad 20/24/18, 16px gap, 104px footer → zone-top 922px;
+  // cams column 1552px split into two 769px cards (14px gap), each card = 2px accent + hole + 50px plate.
+  const scenePreshow = deskScene('Desk Show', gfxPreshow, il => {
+    il.add(sceneCaster1Cam.name, sceneCaster1Cam.uuid, frame(25,  23, 767, 868));
+    il.add(sceneCaster2Cam.name, sceneCaster2Cam.uuid, frame(808, 23, 767, 868));
+  }, SCENE_COLORS.pregame);
 
   // ── Pre-game / break / standalone graphic scenes ──────────────────────────
-  const sceneAway      = simpleScene('Away / Standby',     gfxAway,      500);
-  const sceneCountdown = simpleScene('Break (Countdown)',  gfxCountdown, 300);
-  const sceneMapVeto   = simpleScene('Map Veto',           gfxMapVeto,   500);
-  const sceneDraft     = simpleScene('Draft',              gfxDraft,     300);
-  const sceneTeam1     = simpleScene('Team 1 Intro',       gfxTeam1,     500, false);
-  const sceneTeam2     = simpleScene('Team 2 Intro',       gfxTeam2,     500, false);
-  const sceneUpcoming  = simpleScene('Upcoming',           gfxUpcoming,  300);
-  const sceneStandings = simpleScene('Standings',          gfxStandings, 300);
-  const sceneBracket   = simpleScene('Bracket',            gfxBracket,   300);
-  const sceneWinner    = simpleScene('Post-Game (Winner)', gfxWinner,    500);
+  const sceneAway      = simpleScene('Away / Standby',     gfxAway,      500, true,  SCENE_COLORS.pregame);
+  const sceneCountdown = simpleScene('Break (Countdown)',  gfxCountdown, 300, true,  SCENE_COLORS.pregame);
+  const sceneMapVeto   = simpleScene('Map Veto',           gfxMapVeto,   500, true,  SCENE_COLORS.pregame);
+  const sceneDraft     = simpleScene('Draft',              gfxDraft,     300, true,  SCENE_COLORS.pregame);
+  const sceneTeam1     = simpleScene('Team 1 Intro',       gfxTeam1,     500, false, SCENE_COLORS.pregame);
+  const sceneTeam2     = simpleScene('Team 2 Intro',       gfxTeam2,     500, false, SCENE_COLORS.pregame);
+  const sceneUpcoming  = simpleScene('Upcoming',           gfxUpcoming,  300, true,  SCENE_COLORS.pregame);
+  const sceneStandings = simpleScene('Standings',          gfxStandings, 300, true,  SCENE_COLORS.pregame);
+  const sceneBracket   = simpleScene('Bracket',            gfxBracket,   300, true,  SCENE_COLORS.pregame);
+  // Post-game winner scenes — side param pre-selects which team side winner.html highlights.
+  const sceneWinner    = simpleScene('Post-Game (Winner)', gfxWinner,    500, true,  SCENE_COLORS.postgame);
+  const sceneTeam1Win  = simpleScene('Team 1 Win',         gfxWinTeam1,  500, true,  SCENE_COLORS.postgame);
+  const sceneTeam2Win  = simpleScene('Team 2 Win',         gfxWinTeam2,  500, true,  SCENE_COLORS.postgame);
 
-  // Dividers — blank separators in the OBS scene list
-  const dividerLive  = makeScene('───  LIVE  ───',    [], { showInMultiview: false });
-  const dividerDesk  = makeScene('───  DESK  ───',    [], { showInMultiview: false });
-  const dividerUtil  = makeScene('───  UTILITY  ───', [], { showInMultiview: false });
+  // Category dividers — blank separator scenes that group the list in OBS (no scene folders in OBS).
+  const dividerPre      = makeScene('═══  PRE-GAME  ═══',   [], { showInMultiview: false, color: SCENE_COLORS.pregame  });
+  const dividerLive     = makeScene('═══  GAMEPLAY  ═══',   [], { showInMultiview: false, color: SCENE_COLORS.gameplay });
+  const dividerDesk     = makeScene('═══  DESK  ═══',       [], { showInMultiview: false, color: SCENE_COLORS.desk     });
+  const dividerPostGame = makeScene('═══  POST-GAME  ═══',  [], { showInMultiview: false, color: SCENE_COLORS.postgame });
+  const dividerUtil     = makeScene('═══  UTILITY  ═══',    [], { showInMultiview: false, color: SCENE_COLORS.utility  });
 
   // ── Scene order ────────────────────────────────────────────────────────────
   const allScenes = [
-    // Pre-game / break
+    // Pre-game / break / graphics
+    dividerPre,
     sceneAway,
     sceneCountdown,
-    sceneMapVeto,
-    sceneDraft,
     sceneMatchup,
     sceneTeam1,
     sceneTeam2,
+    sceneMapVeto,
+    sceneDraft,
     sceneUpcoming,
     sceneStandings,
     sceneBracket,
-    // Live
+    scenePreshow,
+    // Live gameplay
     dividerLive,
     sceneInGame,
     scenePipCams,
@@ -384,30 +460,36 @@ function generateSceneCollection({
     sceneSingle,
     sceneDuoCam,
     sceneTrioCam,
+    sceneDuoSingle,
     sceneQuad,
     sceneAnalyst,
-    sceneDuoSingle,
     sceneSpotlight,
+    sceneInterviewDesk,
     sceneInterview,
+    // Post-game
+    dividerPostGame,
     sceneWinner,
+    sceneTeam1Win,
+    sceneTeam2Win,
     // Utility — cam framing scenes
     dividerUtil,
     sceneHostCam,
     sceneCaster1Cam,
     sceneCaster2Cam,
     sceneCaster4Cam,
+    scenePlayerCam,
   ];
 
   // ── All non-scene sources ─────────────────────────────────────────────────
   const sharedSources = [
     bgLoop, gameCapture,
-    vdoHost, vdoCaster1, vdoCaster2, vdoCaster4,
+    vdoHost, vdoCaster1, vdoCaster2, vdoCaster4, vdoPlayer,
     gfxRlHud, gfxCs2Hud, gfxValHud, gfxLolHud, gfxOwHud, gfxMrHud,
-    gfxSingle, gfxDuoRow, gfxTrioRow, gfxDuoSingle, gfxAnalyst, gfxQuad, gfxSpotlight, gfxInterview,
+    gfxSingle, gfxDuoRow, gfxTrioRow, gfxDuoSingle, gfxAnalyst, gfxQuad, gfxSpotlight, gfxInterview, gfxInterviewDesk, gfxPreshow,
     gfxMatchup, gfxCampip, gfxTalentbar,
-    gfxAway, gfxCountdown, gfxWinner, gfxTeam1, gfxTeam2,
+    gfxAway, gfxCountdown, gfxWinner, gfxWinTeam1, gfxWinTeam2, gfxTeam1, gfxTeam2,
     gfxMapVeto, gfxDraft, gfxBracket, gfxUpcoming, gfxStandings, gfxReplay, gfxTransition,
-    gfxTicker, gfxSponsor, gfxListenIn, gfxIntCam,
+    gfxTicker, gfxSponsorRail, gfxSponsor, gfxListenIn, gfxIntCam,
   ];
 
   // ── Audio capture stubs ───────────────────────────────────────────────────

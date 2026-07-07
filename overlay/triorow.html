@@ -20,9 +20,10 @@
       font-family: 'Inter', system-ui, sans-serif; color: var(--duo-text); -webkit-font-smoothing: antialiased; }
 
     .duo-stage { display: flex; flex-direction: column; width: var(--stage-w); height: var(--stage-h);
-      padding: 16px var(--pad-x) 16px; opacity: 0; transition: opacity .35s ease; }
+      padding: 56px var(--pad-x) 16px; opacity: 0; transition: opacity .35s ease; }
     .duo-stage.show { opacity: 1; }
-    .zone-hud { flex: 0 0 auto; display: flex; align-items: center; justify-content: center; }
+    .zone-hud { flex: 0 0 auto; display: flex; flex-direction: column; align-items: center; gap: 0; }
+    .zone-pb { flex: 0 0 auto; display: flex; justify-content: center; padding: 10px 0 0; }
     .zone-cams { flex: 1 1 0; min-height: 0; display: flex; align-items: center; justify-content: center; padding: 14px 0; }
     .zone-footer { flex: 0 0 auto; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; }
 
@@ -76,7 +77,8 @@
     .cam-hole iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
     /* ?cams=off framing: transparent holes so per-caster OBS sources show through. */
     .duo-stage.frames-only .cam-hole { background: transparent; }
-    .duo-stage.frames-only .cam-card { background: transparent; box-shadow: none; }
+    .duo-stage.frames-only .cam-card { background: transparent; box-shadow: none; border-color: transparent; }
+    .duo-stage.frames-only .cam-card::before { display: none; }
     .cam-plate { display: flex; align-items: center; justify-content: center; gap: 12px; height: var(--cam-plate-h); flex: 0 0 var(--cam-plate-h);
       padding: 0 18px; background: linear-gradient(180deg, var(--duo-surface2), var(--duo-surface)); border-top: 1px solid var(--duo-border); }
     .cam-name { font-size: 20px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -131,13 +133,16 @@
       </header>
     </div>
 
-    <div class="zone-cams"><main class="duo-cams" id="cams"></main></div>
-
-    <div class="zone-footer">
+    <div class="zone-pb">
       <div class="presented-by is-empty" id="presented-by">
         <span class="pb-label" id="pb-label">PRESENTED BY</span>
         <img id="pb-logo" class="pb-logo" alt="" style="display:none">
       </div>
+    </div>
+
+    <div class="zone-cams"><main class="duo-cams" id="cams"></main></div>
+
+    <div class="zone-footer">
       <div class="deck-strip is-empty" id="deck-strip"><span id="tagline" class="deck-strip-text">Live</span></div>
     </div>
   </div>

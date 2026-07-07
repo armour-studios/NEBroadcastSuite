@@ -41,12 +41,15 @@
   <script>
     (function () {
       const q = new URLSearchParams(location.search);
-      // slot 1..4 (Host = slot 3). Accept ?slot= or ?host for the host feed.
+      // slot 1..4 = desk casters (Host = slot 3); slot 5 = the Player cam
+      // (explicit playerCam assignment, falling back to the current interviewee).
+      // Accept ?slot= or ?host for the host feed.
       let SLOT = parseInt(q.get('slot'), 10);
       if (q.has('host')) SLOT = 3;
       if (!SLOT || SLOT < 1) SLOT = 1;
-      SLOT = Math.max(1, Math.min(4, SLOT));
-      document.getElementById('slotn').textContent = SLOT === 3 ? 'HOST' : SLOT;
+      SLOT = Math.max(1, Math.min(5, SLOT));
+      document.getElementById('slotn').textContent = SLOT === 3 ? 'HOST' : (SLOT === 5 ? 'PLAYER' : SLOT);
+      if (SLOT === 5) document.getElementById('idletext').textContent = 'PLAYER CAM — NO FEED';
 
       const DEBUG = q.get('debug') === '1';
       const frame = document.getElementById('frame');
@@ -87,7 +90,14 @@
         gotState = true;
         applyLogo(SceneBase.brandLogo(data));
         const casters = data && data.casters;
-        const caster = SceneBase.casterBySlot(casters, SLOT);
+        let caster = SceneBase.casterBySlot(casters, SLOT);
+        if (SLOT === 5 && !(caster && caster.camUrl)) {
+          // Player slot: explicit playerCam assignment wins, else the current interviewee.
+          const pc = casters && casters.playerCam;
+          const iv = casters && casters.interviewee;
+          if (pc && pc.camUrl) caster = pc;
+          else if (iv && iv.camUrl) caster = iv;
+        }
         const url = ((caster && caster.camUrl) || '').toString().trim();
         apply(url);
         if (DEBUG) {

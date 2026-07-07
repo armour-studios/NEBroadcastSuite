@@ -262,6 +262,11 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     if (tab === 'media' && typeof mdLoad === 'function') mdLoad();   // lazy-load media on open
     if (tab === 'events' && typeof evAutoLoad === 'function') evAutoLoad();   // auto-pull in-house tournaments
     if (tab === 'replays' && !_stagingLoading) scanStagingArea();   // auto-scan the OBS folder
+    // Cameras page: re-pull VDO links for whichever sub-tab is active on entry.
+    if (tab === 'facecams' && typeof cfShowSubtab === 'function') {
+      const active = document.querySelector('#cf-subnav .cf-tab.active');
+      cfShowSubtab((active && active.dataset.cf) || 'talent');
+    }
     // Scene previews are live overlays — only run them while Assets ▸ Overlays is open.
     if (tab === 'media' && _assetsTab === 'overlays') { if (typeof loadScenePreviews === 'function') loadScenePreviews(); }
     else if (typeof unloadScenePreviews === 'function') unloadScenePreviews();
@@ -344,6 +349,8 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
         p.style.display = show ? '' : 'none';
       });
       loadDbRole(r);
+      // Players pane carries the In-Game Player Cams mapping — refresh it on entry.
+      if (r === 'players') setTimeout(() => { if (typeof renderPlayerCams === 'function') renderPlayerCams(); }, 0);
     }
     updateMonDot();
   }
@@ -448,7 +455,11 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
   }
 
   function openCrewEdit(d, fromLibId) {
-    _fromLibId = fromLibId || null;
+    // Resolve the caster-library twin NOW (by the pre-edit name/handle) so a rename
+    // updates that entry in place. Without the id, the server dedupes by the NEW
+    // name/handle, finds nothing, and forks a duplicate "ghost" that keeps the old
+    // name on the desk overlay.
+    _fromLibId = fromLibId || crewLibraryId(d) || null;
     editId = d.id || null;
     const set = (id, v) => { const e = el(id); if (e) e.value = v || ''; };
     set('crew-f-name', d.name); set('crew-f-handle', d.handle); set('crew-f-role', d.role);
@@ -536,7 +547,22 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
   if (list) list.addEventListener('click', (e) => {
     const del  = e.target.closest('[data-crew-del]');
     const edit = e.target.closest('[data-crew-edit]');
-    if (del) { send('delete_crew_member', { id: del.dataset.crewDel }); setTimeout(renderCrewList, 300); }
+    if (del) {
+      // Inline 2-step confirm (same pattern as the CF caster cards): first click arms,
+      // second click within 3s deletes. Deleting is destructive — it also removes the
+      // caster's library profile and frees their desk slot server-side.
+      if (del.dataset.armed) {
+        send('delete_crew_member', { id: del.dataset.crewDel });
+        setTimeout(renderCrewList, 300);
+      } else {
+        del.dataset.armed = '1';
+        del.textContent = 'Sure?';
+        del.style.color = '#f56565';
+        setTimeout(() => {
+          if (del.isConnected) { delete del.dataset.armed; del.textContent = 'Del'; del.style.color = ''; }
+        }, 3000);
+      }
+    }
     if (edit) {
       const card = edit.closest('[data-crew-id]'); if (!card) return;
       openCrewEdit(JSON.parse(card.dataset.crewData || '{}'));
@@ -632,18 +658,154 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
   };
 })();
 
-// A crew member's current desk-lineup slot (0 = off desk). The lineup keys on the caster-library id,
-// so resolve it from currentState by name/handle (the same match the server dedupes on).
+// A crew member's caster-library twin, resolved by name/handle (the same match the
+// server dedupes on). Used to carry the library id through edits so renames update
+// the existing entry instead of forking a duplicate.
+function crewLibraryEntry(d) {
+  const cast = (typeof currentState !== 'undefined' && currentState.casters) || {};
+  const lib = cast.library || [];
+  const nm = (d.name || '').toLowerCase(), hd = (d.socialHandle || d.handle || '').toLowerCase();
+  return lib.find((c) => nm && (c.name || '').toLowerCase() === nm)
+      || (hd && lib.find((c) => (c.handle || '').toLowerCase() === hd))
+      || null;
+}
+function crewLibraryId(d) {
+  const prof = crewLibraryEntry(d);
+  return prof ? prof.id : null;
+}
+// A crew member's current desk-lineup slot (0 = off desk). The lineup keys on the caster-library id.
 function crewDeskSlot(d) {
   const cast = (typeof currentState !== 'undefined' && currentState.casters) || {};
-  const lib = cast.library || [], lineup = cast.lineup || [];
-  const nm = (d.name || '').toLowerCase(), hd = (d.socialHandle || d.handle || '').toLowerCase();
-  const prof = lib.find((c) => nm && (c.name || '').toLowerCase() === nm)
-            || (hd && lib.find((c) => (c.handle || '').toLowerCase() === hd));
+  const lineup = cast.lineup || [];
+  const prof = crewLibraryEntry(d);
   if (!prof) return 0;
   const e = lineup.find((x) => x.libraryId === prof.id);
   return e ? (Number(e.slot) || 0) : 0;
 }
+
+// ── In-Game Player Cams (HUD facecams) ──────────────────────────────────────
+// Maps in-game player names → a person's cam feed and saves them as facecam
+// entries ({name, platformId, link}) which the game HUD overlays (RL statcard /
+// replay grid) resolve by in-game name or platform id. Names auto-pull from the
+// live game feed (RL Stats API / CS2 GSI) and fall back to the match rosters.
+let _pcamVdoCache = null;
+async function _pcamVdoLinks(force) {
+  if (_pcamVdoCache && !force) return _pcamVdoCache;
+  try {
+    const r = await fetch('http://localhost:3000/api/vdo/links');
+    _pcamVdoCache = await r.json();
+  } catch (e) { _pcamVdoCache = null; }
+  return _pcamVdoCache;
+}
+// Every linkable cam feed: match-team players (VDO room feeds), team library, crew cams.
+function _pcamSources(vdo) {
+  const out = [], seen = new Set();
+  const push = (person, label, url, group) => {
+    const u = (url || '').toString().trim();
+    if (!u || seen.has(u)) return;
+    seen.add(u);
+    out.push({ person: (person || '').toLowerCase(), label, url: u, group });
+  };
+  if (vdo && vdo.teams) ['blue', 'orange'].forEach((side) => {
+    const t = vdo.teams[side]; if (!t) return;
+    (t.players || []).forEach((p) => push(p.name, `${p.name} — ${t.name || side}`, p.obsUrl, 'Match players'));
+  });
+  ((vdo && vdo.allTeams) || []).forEach((t) => (t.players || []).forEach((p) =>
+    push(p.name, `${p.name} — ${t.name}`, p.obsUrl, 'Team library')));
+  ((currentState?.casters?.library) || []).forEach((c) =>
+    push(c.name || c.handle, `${c.name || c.handle} — crew`, c.vdoOverride || c.camUrl, 'Crew'));
+  return out;
+}
+// In-game names: live RL feed → live CS2 feed → match rosters as a fallback.
+function _pcamRows() {
+  const st = currentState || {};
+  const rl = Array.isArray(st.players) ? st.players : [];
+  const cs = (st.csgo && Array.isArray(st.csgo.players)) ? st.csgo.players : [];
+  if (rl.length) return rl.map((p) => ({ name: p.name || '', pid: p.primaryid ? (String(p.primaryid).split('|')[1] || '') : '', live: true })).filter((r) => r.name);
+  if (cs.length) return cs.map((p) => ({ name: p.name || '', pid: p.steamid || '', live: true })).filter((r) => r.name);
+  const rows = [];
+  ['blue', 'orange'].forEach((side) => ((st.teams?.[side]?.players) || []).forEach((p) => {
+    if (p.name) rows.push({ name: p.name, pid: '', live: false });
+  }));
+  return rows;
+}
+const _PCAM_MOUNTS = [
+  { rows: 'msp-playercams-rows', status: 'msp-playercams-status' },
+  { rows: 'dcc-playercams-rows', status: 'dcc-playercams-status' },
+  { rows: 'cfp-playercams-rows', status: 'cfp-playercams-status' },
+];
+async function renderPlayerCams(forceVdo) {
+  const mounts = _PCAM_MOUNTS.map((m) => ({ rows: el(m.rows), status: el(m.status) })).filter((m) => m.rows);
+  if (!mounts.length) return;
+  const vdo = await _pcamVdoLinks(forceVdo);
+  const sources = _pcamSources(vdo);
+  const facecams = (currentState && currentState.facecams) || [];
+  const rows = _pcamRows();
+  const anyLive = rows.some((r) => r.live);
+  const groups = {};
+  sources.forEach((s) => { (groups[s.group] = groups[s.group] || []).push(s); });
+  const rowHtml = rows.map((r) => {
+    const fc = facecams.find((f) => f.name === r.name);
+    const cur = (fc && fc.link) || '';
+    const inSources = sources.some((s) => s.url === cur);
+    const opts = ['<option value="">— no cam —</option>'];
+    Object.keys(groups).forEach((g) => {
+      opts.push(`<optgroup label="${tlEsc(g)}">` + groups[g].map((s) =>
+        `<option value="${tlEsc(s.url)}"${s.url === cur ? ' selected' : ''}>${tlEsc(s.label)}</option>`).join('') + '</optgroup>');
+    });
+    if (cur && !inSources) opts.push(`<option value="${tlEsc(cur)}" selected>Current link (custom)</option>`);
+    opts.push('<option value="__custom__">Custom URL…</option>');
+    return `<div class="pcam-row" style="display:flex;align-items:center;gap:10px;padding:3px 0;">
+      <span style="flex:0 0 190px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;font-weight:700;color:#e8eaf0;" title="${tlEsc(r.name)}">${tlEsc(r.name)}
+        ${r.live ? '<span style="margin-left:6px;font-size:9px;font-weight:800;letter-spacing:.1em;color:#22c55e;">LIVE</span>' : ''}
+        ${cur ? '<span style="margin-left:6px;font-size:9px;font-weight:800;letter-spacing:.1em;color:#8b5cf6;">CAM</span>' : ''}
+      </span>
+      <select class="input-select pcam-sel" data-pcam="${tlEsc(r.name)}" data-pid="${tlEsc(r.pid)}" style="flex:1;min-width:0;font-size:12px;">${opts.join('')}</select>
+    </div>`;
+  }).join('');
+  const statusText = !rows.length
+    ? 'No players found — load a match (Match — Teams) or start the game feed, then hit Refresh.'
+    : (anyLive ? 'Names pulled live from the game feed.' : 'No live game feed — names from the match rosters. Start the game and hit Refresh to pull exact in-game names.');
+  mounts.forEach((m) => {
+    m.rows.innerHTML = rowHtml || '';
+    if (m.status) m.status.textContent = statusText;
+  });
+}
+function _pcamAutoMatch() {
+  (async () => {
+    const vdo = await _pcamVdoLinks();
+    const sources = _pcamSources(vdo);
+    const facecams = (currentState && currentState.facecams) || [];
+    let linked = 0;
+    _pcamRows().forEach((r) => {
+      if (facecams.find((f) => f.name === r.name && f.link)) return;   // already mapped
+      const hit = sources.find((s) => s.person === r.name.toLowerCase());
+      if (hit) { send('save_facecam', { name: r.name, platformId: r.pid, link: hit.url }); linked++; }
+    });
+    showToast(linked ? `Auto-linked ${linked} player cam${linked !== 1 ? 's' : ''}` : 'No name matches found — link them with the dropdowns', linked ? '#22c55e' : '#fbbf24');
+    setTimeout(() => renderPlayerCams(), 400);
+  })();
+}
+;(function wirePlayerCams() {
+  _PCAM_MOUNTS.forEach((m) => {
+    const rowsEl = el(m.rows); if (!rowsEl) return;
+    rowsEl.addEventListener('change', (e) => {
+      const sel = e.target.closest('[data-pcam]'); if (!sel) return;
+      const name = sel.dataset.pcam, pid = sel.dataset.pid || '';
+      let link = sel.value;
+      if (link === '__custom__') {
+        link = prompt(`Cam URL for ${name} (any embeddable URL — VDO view link, Twitch embed, …)`) || '';
+        if (!link.trim()) { renderPlayerCams(); return; }
+      }
+      if (!link) { send('delete_facecam', { name }); showToast(`Cam cleared for ${name}`, '#fbbf24'); }
+      else { send('save_facecam', { name, platformId: pid, link: link.trim() }); showToast(`Cam linked for ${name}`, '#22c55e'); }
+      setTimeout(() => renderPlayerCams(), 400);
+    });
+  });
+  [['btn-playercams-automatch', _pcamAutoMatch], ['dcc-playercams-automatch', _pcamAutoMatch], ['cfp-playercams-automatch', _pcamAutoMatch],
+   ['btn-playercams-refresh', () => renderPlayerCams(true)], ['dcc-playercams-refresh', () => renderPlayerCams(true)], ['cfp-playercams-refresh', () => renderPlayerCams(true)]]
+    .forEach(([id, fn]) => { const b = el(id); if (b) b.addEventListener('click', fn); });
+})();
 
 function renderCrewList() {
   const list = el('crew-list'); if (!list) return;
@@ -1817,7 +1979,7 @@ function _returnGraphicsToProd() {
     ticker:    { name: 'Ticker',                link: 'ticker.html',          hasClear: true,  hasQueue: false, hasPush: true,  hasApply: true,  pushId: 'btn-ticker-apply' },
     // Standalone OBS scene (like duorow/quaddesk) — not part of gfx.html's push/clear layering,
     // so no Push Live / Clear / Apply here. This panel is just a live-synced settings form.
-    preshow:   { name: 'Pre-Game Show',          link: 'preshow.html',         hasClear: false, hasQueue: false, hasPush: false },
+    preshow:   { name: 'Desk Show',              link: 'preshow.html',         hasClear: false, hasQueue: false, hasPush: false },
     series:    { name: 'Series Score',          link: 'series.html',          hasClear: true,  hasQueue: false, hasPush: true  },
     matchup:   { name: 'Pre-Match Lineup',      link: 'matchup.html',         hasClear: true,  hasQueue: false, hasPush: true  },
     veto:      { name: 'Map Pool',               link: 'mapscreen.html',       hasClear: true,  hasQueue: false, hasPush: true,  clearId: 'btn-hide-veto-gfx', pushId: 'btn-show-veto-gfx', popout: true },
@@ -1861,6 +2023,27 @@ function _returnGraphicsToProd() {
     if (footQueue) footQueue.style.display = hasQueue ? '' : 'none';
     const footer = el('gfx-panel-footer');
     if (footer) footer.style.display = (hasApply || hasQueue) ? '' : 'none';
+    // Uniform scene header — same frame on every scene: name, THIS scene's on-air state
+    // (gfx layer OR the scene's own visible flag), and its overlay link.
+    const headName = el('gfx-scene-head-name');
+    if (headName) {
+      headName.textContent = meta.name || key;
+      const VIS_PATHS = {
+        bracket: 'bracket.visible', veto: 'veto.visible', standings: 'standings.visible',
+        schedule: 'upcoming.visible', spotlight: 'watchlist.visible', winner: 'winner.visible',
+        intro: 'intro.visible', break: 'breakScreen.visible', ticker: 'ticker.visible', draft: 'draft.visible'
+      };
+      const ownVisible = (typeof getPath === 'function' && VIS_PATHS[key])
+        ? !!getPath(currentState || {}, VIS_PATHS[key]) : false;
+      const onAir = (currentState && currentState.gfxActive === key) || ownVisible;
+      const headLive = el('gfx-scene-head-live');
+      if (headLive) { headLive.classList.toggle('is-off', !onAir); headLive.textContent = onAir ? 'ON AIR' : 'OFF AIR'; }
+      const headLink = el('gfx-scene-head-link');
+      if (headLink) {
+        if (meta.link) { headLink.style.display = ''; headLink.href = (window.SCENE_BASE_URL || 'http://localhost:3000') + '/' + meta.link; }
+        else headLink.style.display = 'none';
+      }
+    }
     // Live dot on sidenav + "Live on gfx.html" name + always-visible status pill.
     const liveScene = currentState && currentState.gfxActive;
     document.querySelectorAll('.gfx-sidenav-btn[data-gfxscene]').forEach((b) => b.classList.toggle('gfx-nav-live', b.dataset.gfxscene === liveScene));
@@ -1868,7 +2051,34 @@ function _returnGraphicsToProd() {
     if (liveNameEl) liveNameEl.textContent = liveScene ? ((SCENE_META[liveScene] && SCENE_META[liveScene].name) || liveScene) : 'Nothing';
     const badge = el('gfx-live-badge');
     if (badge) { badge.classList.toggle('is-off', !liveScene); badge.textContent = liveScene ? 'LIVE' : 'OFF AIR'; }
+    // Push button reflects whether the EDITED scene is the live one (re-push is harmless).
+    if (topPush) {
+      const isLive = !!liveScene && liveScene === key;
+      topPush.textContent = isLive ? 'Live — Re-push' : 'Push Live';
+      topPush.style.opacity = isLive ? '.75' : '';
+    }
+    // OBS program chip — pushing a graphic only changes gfx.html layering; whether viewers see
+    // it depends on which OBS scene is on program. Surface that here, amber when a graphic is
+    // live but Auto-cut is off (the "why isn't my graphic on stream?" trap).
+    const obsChip = el('gfx-obs-chip');
+    if (obsChip) {
+      const obs = (currentState && currentState.obs) || {};
+      if (obs.connected && obs.currentScene) {
+        obsChip.style.display = '';
+        obsChip.textContent = 'OBS: ' + obs.currentScene;
+        const warn = !!liveScene && !el('gfx-autocut-on')?.checked;
+        obsChip.style.color = warn ? '#fbbf24' : 'var(--muted)';
+        obsChip.style.borderColor = warn ? 'rgba(251,191,36,.45)' : 'var(--border,#2e3340)';
+        obsChip.title = warn
+          ? 'A graphic is live on gfx.html, but OBS is on "' + obs.currentScene + '" — viewers only see the graphic if that scene shows gfx.html. Arm Auto-cut OBS to switch scenes on push.'
+          : 'Current OBS program scene';
+      } else {
+        obsChip.style.display = 'none';
+      }
+    }
   }
+  // State-driven topbar refresh (OBS program scene / gfxActive can change server-side).
+  window._gfxRefreshTopBar = () => refreshTopBar(currentKey);
 
   // Clear ALL GFX scenes (one-click clear everything) — top bar only.
   function clearAllGfxScenes() {
@@ -1903,6 +2113,13 @@ function _returnGraphicsToProd() {
     if (el('gfx-autocut-on')?.checked) {
       const _sc = (el('gfx-autocut-scene')?.value || '').trim();
       if (_sc) { send('obs_switch_scene', { sceneName: _sc }); gfxFootStatus((meta.name || key) + ' live — cut OBS to ' + _sc + '.', true); }
+    } else {
+      // No auto-cut: the graphic only reaches viewers if the current OBS program scene shows
+      // gfx.html — say so instead of letting "pushed live" imply it's on stream.
+      const _obs = (currentState && currentState.obs) || {};
+      if (_obs.connected && _obs.currentScene) {
+        gfxFootStatus((meta.name || key) + ' pushed — OBS is on "' + _obs.currentScene + '". Viewers see it only if that scene shows gfx.html.', false);
+      }
     }
   }
 
@@ -1990,12 +2207,20 @@ function _returnGraphicsToProd() {
     if (key === 'standings') {
       const body = el('gfx-front-standings-body'); if (!body) return;
       const s = data.standings || {};
-      const srcBtn = document.querySelector('#gfx-std-src .gfx-src-tab.is-on');
+      // Sync inline quick-edit controls (don't clobber a field the producer is typing in)
+      const tEl = el('gfx-front-std-title'); if (tEl && document.activeElement !== tEl) tEl.value = s.title || '';
+      const sEl = el('gfx-front-std-subtitle'); if (sEl && document.activeElement !== sEl) sEl.value = s.subtitle || '';
+      const rEl = el('gfx-front-std-showrecord'); if (rEl && document.activeElement !== rEl) rEl.checked = s.showRecord !== false;
+      const srcBtn = document.querySelector('#gfx-std-src .gfx-std-src-tab.is-on, #gfx-std-src .gfx-src-tab.is-on');
       const src = srcBtn ? srcBtn.textContent.trim() : 'League';
-      body.innerHTML = row('Title', tlEsc(s.title || 'STANDINGS')) + row('Source', tlEsc(src)) + row('Rows', (s.rows && s.rows.length) || 0);
+      // Mirror the pop-out's active source onto the front-panel chips.
+      const srcKey = srcBtn ? srcBtn.dataset.stdsrc : 'league';
+      document.querySelectorAll('#gfx-front-std-src .gfx-src-tab').forEach((t) => t.classList.toggle('is-on', t.dataset.fstdsrc === srcKey));
+      body.innerHTML = row('Source', tlEsc(src)) + row('Rows', (s.rows && s.rows.length) || 0);
     } else if (key === 'schedule') {
       const body = el('gfx-front-schedule-body'); if (!body) return;
       const u = data.upcoming || {};
+      const tEl = el('gfx-front-sch-title'); if (tEl && document.activeElement !== tEl) tEl.value = u.title || '';
       const matches = u.matches || [];
       const onStream = matches.find((m) => m.stream) || matches[0];
       let html = row('Queued', matches.length) + (onStream
@@ -2023,6 +2248,25 @@ function _returnGraphicsToProd() {
     if (action === 'draft-start') el('btn-draft-start')?.click();
     else if (action === 'schedule-pull') el('gfx-sch-pull-startgg')?.click();
   });
+
+  // Inline quick-edit controls on the Standings / Schedule front cards — write straight to state
+  // (title/subtitle/showRecord all take live effect), so producers don't open "More settings" for
+  // the common tweaks. Deep source/rows/layout config still lives in the pop-out.
+  // Standings front-panel source chips — proxy-click the pop-out's real source tabs so the
+  // existing load/apply wiring stays the single implementation.
+  el('gfx-front-std-src')?.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-fstdsrc]'); if (!b) return;
+    document.querySelector(`#gfx-std-src .gfx-src-tab[data-stdsrc="${b.dataset.fstdsrc}"]`)?.click();
+    el('gfx-front-std-src')?.querySelectorAll('.gfx-src-tab').forEach((t) => t.classList.toggle('is-on', t === b));
+    renderPopoutSummary('standings');
+  });
+  const _stdTitle = debounce(() => send('set_standings', { title: (el('gfx-front-std-title')?.value || '').trim() }), 350);
+  el('gfx-front-std-title')?.addEventListener('input', _stdTitle);
+  const _stdSub = debounce(() => send('set_standings', { subtitle: (el('gfx-front-std-subtitle')?.value || '').trim() }), 350);
+  el('gfx-front-std-subtitle')?.addEventListener('input', _stdSub);
+  el('gfx-front-std-showrecord')?.addEventListener('change', function () { send('set_standings', { showRecord: this.checked }); });
+  const _schTitle = debounce(() => send('set_upcoming', { title: (el('gfx-front-sch-title')?.value || '').trim() }), 350);
+  el('gfx-front-sch-title')?.addEventListener('input', _schTitle);
 
   // Open/close a scene's pop-out editor (Bracket, Spotlight, and — once converted — Standings,
   // Schedule, Map Pool, Draft). The modal id convention is #gfx-popout-<key>.
@@ -2114,6 +2358,24 @@ function _returnGraphicsToProd() {
     if (key === 'matchup' && typeof window._gfxRefreshMatchupPickers === 'function') window._gfxRefreshMatchupPickers(currentState);
     if (key === 'winner'  && typeof window._gfxRefreshWinnerPicker   === 'function') window._gfxRefreshWinnerPicker(currentState);
     if (key === 'draft'   && typeof renderDraftManager === 'function') renderDraftManager(currentState);
+    // Per-scene appearance preset bar — only for scenes whose overlay applies sceneConfig
+    // (SceneBase.applySceneConfig). The document-level data-cust-* handlers below drive it.
+    const presetMount = el('gfx-preset-mount');
+    if (presetMount) {
+      const PRESET_SCENES = ['bracket', 'break', 'draft', 'intro', 'matchup', 'preshow', 'schedule', 'series', 'veto', 'winner'];
+      if (PRESET_SCENES.includes(key)) {
+        if (presetMount.dataset.scene !== key) {
+          presetMount.dataset.scene = key;
+          presetMount.innerHTML = custBarHtml(key);
+        }
+        presetMount.style.display = '';
+        if (typeof renderScenePresets === 'function' && currentState) renderScenePresets(currentState);
+      } else {
+        presetMount.style.display = 'none';
+        presetMount.dataset.scene = '';
+        presetMount.innerHTML = '';
+      }
+    }
     runSceneSideEffects(key);
     requestAnimationFrame(() => requestAnimationFrame(fitScenePreviews));
     try { localStorage.setItem('gfx_active_grp', key); } catch (_) {}
@@ -2417,6 +2679,28 @@ function _returnGraphicsToProd() {
     }));
   }
 
+  // When the Map Pool has picked/decider maps, the Series overlay renders THOSE (same data,
+  // different style) — so the Series editor shows them read-only instead of a second grid the
+  // producer would fill in twice. "Enter manually" is the escape hatch for a Series-only board.
+  let _serManualOverride = false;
+  function _serVetoPicks() {
+    return (((currentState && currentState.veto) || {}).maps || [])
+      .filter((m) => m.action === 'pick' || m.action === 'decider');
+  }
+  function _serEnsureBanner() {
+    let b = el('gfx-ser-link-banner');
+    if (!b) {
+      b = document.createElement('div');
+      b.id = 'gfx-ser-link-banner';
+      b.style.cssText = 'display:none; align-items:center; gap:8px; flex-wrap:wrap; background:rgba(74,222,128,0.08); border:1px solid rgba(74,222,128,0.35); border-radius:8px; padding:8px 10px; margin-bottom:8px; font-size:12px;';
+      const head = el('gfx-ser-maps')?.previousElementSibling; // the .gfx-ser-map-head
+      const wrap = el('gfx-ser-maps');
+      if (head && head.parentNode) head.parentNode.insertBefore(b, head);
+      else if (wrap && wrap.parentNode) wrap.parentNode.insertBefore(b, wrap);
+    }
+    return b;
+  }
+
   function gfxRenderSeriesMaps(maps, teams) {
     const wrap = el('gfx-ser-maps'); if (!wrap) return;
     const blueN = (teams && teams.blue && teams.blue.name) || 'A';
@@ -2424,6 +2708,44 @@ function _returnGraphicsToProd() {
     const colA = el('gfx-ser-col-a'), colB = el('gfx-ser-col-b');
     if (colA) colA.textContent = blueN.length > 8 ? blueN.slice(0, 8) + '…' : blueN;
     if (colB) colB.textContent = orgN.length > 8 ? orgN.slice(0, 8) + '…' : orgN;
+
+    // ── Linked-to-Map-Pool read-only mode ──
+    const picks = _serVetoPicks();
+    const banner = _serEnsureBanner();
+    const head = el('gfx-ser-maps')?.previousElementSibling;
+    if (picks.length && !_serManualOverride) {
+      banner.style.display = 'flex';
+      banner.innerHTML = `<span style="color:#4ade80; font-weight:600;">Linked to Map Pool</span>
+        <span style="color:var(--muted);">${picks.length} map${picks.length > 1 ? 's' : ''} — edit them on the Map Pool scene.</span>
+        <button class="btn btn-ghost btn-xs" id="gfx-ser-manual-btn" style="margin-left:auto;">Enter manually instead</button>`;
+      el('gfx-ser-manual-btn')?.addEventListener('click', () => { _serManualOverride = true; gfxRenderSeriesMaps(maps, teams); });
+      if (head) head.style.display = '';
+      wrap.innerHTML = picks.map((m, i) => {
+        const a = (m.score && m.score.a) || 0, b = (m.score && m.score.b) || 0;
+        const done = m.winner || a || b;
+        return `<div class="gfx-ser-map-row gfx-ser-map-row--linked" style="opacity:.85;">
+          <span class="gfx-ser-map-num">${i + 1}</span>
+          <input class="input-text gfx-ser-map-name" value="${(m.name || '').replace(/"/g, '&quot;')}" disabled>
+          <input type="number" class="input-text gfx-ser-map-sa" value="${a}" disabled>
+          <span class="gfx-ser-map-sep">:</span>
+          <input type="number" class="input-text gfx-ser-map-sb" value="${b}" disabled>
+          <label class="gfx-ser-map-done"><input type="checkbox" class="gfx-ser-map-pl" ${done ? 'checked' : ''} disabled><span>${m.action === 'decider' ? 'Dec' : 'Done'}</span></label>
+        </div>`;
+      }).join('');
+      return;
+    }
+    // Manual mode (no picks yet, or producer opted into a Series-only board)
+    if (picks.length && _serManualOverride) {
+      banner.style.display = 'flex';
+      banner.innerHTML = `<span style="color:var(--muted);">Series-only maps (ignoring Map Pool).</span>
+        <button class="btn btn-ghost btn-xs" id="gfx-ser-link-btn" style="margin-left:auto;">Use Map Pool maps</button>`;
+      el('gfx-ser-link-btn')?.addEventListener('click', () => { _serManualOverride = false; gfxRenderSeriesMaps(maps, teams); });
+    } else {
+      banner.style.display = 'none';
+    }
+    if (head) head.style.display = '';
+    // Purge any read-only rows left over from linked mode before diffing editable rows
+    wrap.querySelectorAll('.gfx-ser-map-row--linked').forEach((r) => r.remove());
     const existing = [...wrap.querySelectorAll('.gfx-ser-map-row')];
     maps.forEach((map, i) => {
       if (existing[i]) {
@@ -2512,8 +2834,15 @@ function _returnGraphicsToProd() {
   // Content only (no visibility) — shared by the top-bar Push (adds visible:true) and the panel's
   // Apply action. Returns { title, rows } for league/start.gg sources; { title } for manual (that
   // source's rows are edited + saved separately via #gfx-std-save, which already omits visible).
+  function gfxStdCommon() {
+    return {
+      title: (el('gfx-std-title')?.value || '').trim(),
+      subtitle: (el('gfx-std-subtitle')?.value || '').trim(),
+      showRecord: el('gfx-std-showrecord') ? el('gfx-std-showrecord').checked : true,
+    };
+  }
   function buildStandingsPayload() {
-    const title = (el('gfx-std-title')?.value || '').trim();
+    const common = gfxStdCommon();
     const src = document.querySelector('#gfx-std-src .gfx-src-tab.is-on')?.dataset.stdsrc || 'league';
     if (src === 'league') {
       const lid = el('gfx-std-league')?.value;
@@ -2525,15 +2854,18 @@ function _returnGraphicsToProd() {
         ? lg.standings.map(s => teamsById[s.teamId]).filter(Boolean)
         : (lg.teams || []).slice().sort((a, b) => ((byId[b.id] || {}).pts || 0) - ((byId[a.id] || {}).pts || 0));
       const rows = ordered.map((tm, i) => { const s = byId[tm.id] || {}; const r = lgResolveTeam(tm); return { placement: i + 1, name: r.name || 'Team', logo: r.logo || null, wins: s.w || 0, losses: s.l || 0, points: s.pts || 0 }; });
-      return { ok: true, payload: { title, rows }, msg: 'from league' };
+      return { ok: true, payload: { ...common, source: 'league', rows }, msg: 'from league' };
     } else if (src === 'startgg') {
       const teams = ((currentState && currentState.startgg) || {}).eventTeams || [];
       if (!teams.length) return { ok: false, err: 'No start.gg event loaded.' };
       const rows = teams.map((tm, i) => ({ placement: i + 1, name: tm.name || 'Team', logo: tm.logo || null, wins: 0, losses: 0, points: 0 }));
-      return { ok: true, payload: { title, rows }, msg: 'from start.gg seeding' };
+      return { ok: true, payload: { ...common, source: 'startgg-league', rows }, msg: 'from start.gg seeding' };
     }
-    return { ok: true, payload: { title }, msg: '' };
+    return { ok: true, payload: { ...common, source: 'manual' }, msg: '' };
   }
+  el('gfx-std-showrecord')?.addEventListener('change', function () {
+    send('set_standings', { showRecord: this.checked });
+  });
   el('btn-gfx-standings-push')?.addEventListener('click', () => {
     const r = buildStandingsPayload();
     if (!r.ok) { gfxStdStatus(r.err, true); return; }
@@ -2563,7 +2895,7 @@ function _returnGraphicsToProd() {
       const inputs = r.querySelectorAll('input');
       return { placement: i + 1, name: inputs[0]?.value.trim() || '', wins: parseInt(inputs[1]?.value) || 0, losses: parseInt(inputs[2]?.value) || 0, points: parseInt(inputs[3]?.value) || 0 };
     });
-    send('set_standings', { title, rows });
+    send('set_standings', { ...gfxStdCommon(), source: 'manual', rows });
     gfxStdStatus('Saved.', false);
   });
 
@@ -2891,37 +3223,71 @@ function _returnGraphicsToProd() {
 
   window.addEventListener('resize', fitScenePreviews);
 
-  // ── GFX Bracket panel ──────────────────────────────────────────────────────
+  // ── GFX Bracket panel — guided source switcher (start.gg / Challonge / NXGEN / Manual) ──
   (function () {
-    const tabSg = el('gfx-bkt-tab-sg'), tabCustom = el('gfx-bkt-tab-custom');
-    const wrapSg = el('gfx-bkt-sg-wrap'), wrapCustom = el('gfx-bkt-custom-wrap');
-
+    // Segmented source picker: show only the chosen source's input.
     function bktSetSrc(src) {
-      if (tabSg) tabSg.classList.toggle('is-on', src === 'sg');
-      if (tabCustom) tabCustom.classList.toggle('is-on', src === 'custom');
-      if (wrapSg) wrapSg.style.display = src === 'sg' ? '' : 'none';
-      if (wrapCustom) wrapCustom.style.display = src === 'custom' ? '' : 'none';
+      document.querySelectorAll('#gfx-bkt-srctabs .gfx-src-tab').forEach((t) => t.classList.toggle('is-on', t.dataset.bktsrc === src));
+      document.querySelectorAll('#gfx-front-bracket .gfx-bkt-srcwrap').forEach((w) => { w.style.display = w.dataset.bktwrap === src ? '' : 'none'; });
     }
-    tabSg?.addEventListener('click', () => bktSetSrc('sg'));
-    tabCustom?.addEventListener('click', () => bktSetSrc('custom'));
+    document.querySelectorAll('#gfx-bkt-srctabs .gfx-src-tab').forEach((t) => t.addEventListener('click', () => bktSetSrc(t.dataset.bktsrc)));
 
-    // Start.gg import — syncs slug to the ESPORTS bracket machinery and triggers fetch.
+    // Mirror a status field from the ESPORTS #bracket-status line for ~15s after an import kicks off.
+    function mirrorBracketStatus(statusEl) {
+      const srcEl = el('bracket-status'); if (!srcEl || !statusEl) return;
+      const obs = new MutationObserver(() => { if (srcEl.textContent) statusEl.textContent = srcEl.textContent; });
+      obs.observe(srcEl, { childList: true, characterData: true, subtree: true });
+      setTimeout(() => obs.disconnect(), 15000);
+    }
+
+    // start.gg — reuse the ESPORTS bracket machinery (slug field + fetch button).
     el('gfx-bkt-fetch')?.addEventListener('click', () => {
       const slug = (el('gfx-bkt-slug')?.value || '').trim();
       const statusEl = el('gfx-bkt-sg-status');
       if (!slug) { if (statusEl) statusEl.textContent = 'Enter an event URL or slug first.'; return; }
-      const target = el('input-bracket-slug');
-      if (target) target.value = slug;
+      const target = el('input-bracket-slug'); if (target) target.value = slug;
       el('btn-bracket-fetch')?.click();
       if (statusEl) statusEl.textContent = 'Importing…';
-      const srcEl = el('bracket-status');
-      if (srcEl) {
-        const obs = new MutationObserver(() => {
-          if (statusEl && srcEl.textContent) statusEl.textContent = srcEl.textContent;
-        });
-        obs.observe(srcEl, { childList: true, characterData: true, subtree: true });
-        setTimeout(() => obs.disconnect(), 15000);
-      }
+      mirrorBracketStatus(statusEl);
+    });
+
+    // Challonge — same load path the platform tab uses.
+    el('gfx-bkt-ch-fetch')?.addEventListener('click', () => {
+      const slug = (el('gfx-bkt-ch-slug')?.value || '').trim();
+      const statusEl = el('gfx-bkt-ch-status');
+      if (!slug) { if (statusEl) statusEl.textContent = 'Enter a Challonge URL or slug first.'; return; }
+      send('load_challonge_tournament', { slug });
+      if (statusEl) statusEl.textContent = 'Importing from Challonge…';
+      mirrorBracketStatus(statusEl);
+    });
+
+    // NXGEN — same load path the platform tab uses.
+    el('gfx-bkt-nx-fetch')?.addEventListener('click', () => {
+      const slug = (el('gfx-bkt-nx-slug')?.value || '').trim();
+      const statusEl = el('gfx-bkt-nx-status');
+      if (!slug) { if (statusEl) statusEl.textContent = 'Enter an NXGEN event slug first.'; return; }
+      send('load_nxgen_event', { slug });
+      if (statusEl) statusEl.textContent = 'Importing from NXGEN…';
+      mirrorBracketStatus(statusEl);
+    });
+
+    // Manual — pick a format + size on the front card, scaffold an empty bracket in the builder,
+    // then open the full editor. Drives the existing builder controls (#bb-type-seg / #bb-size).
+    document.querySelectorAll('#gfx-bkt-mformat .gfx-src-tab').forEach((t) => t.addEventListener('click', () => {
+      document.querySelectorAll('#gfx-bkt-mformat .gfx-src-tab').forEach((x) => x.classList.toggle('is-on', x === t));
+    }));
+    el('gfx-bkt-mbuild')?.addEventListener('click', () => {
+      const fmt = document.querySelector('#gfx-bkt-mformat .gfx-src-tab.is-on')?.dataset.mfmt || 'single';
+      const size = el('gfx-bkt-msize')?.value || '8';
+      const statusEl = el('gfx-bkt-m-status');
+      // Drive the builder's own controls so its model + rendering stay the single source of truth.
+      const typeBtn = document.querySelector(`#bb-type-seg .seg-btn[data-type="${fmt}"]`);
+      if (typeBtn) typeBtn.click();
+      const sizeSel = el('bb-size'); if (sizeSel) { sizeSel.value = size; sizeSel.dispatchEvent(new Event('change')); }
+      if (typeof bbGenerate === 'function') bbGenerate();
+      if (typeof bbSendPhases === 'function') bbSendPhases();   // persist as manual mode
+      if (statusEl) statusEl.textContent = `Built an empty ${size}-team ${fmt} bracket — opening editor…`;
+      el('gfx-popout-summary-open')?.click();   // open "More settings" (the full builder)
     });
   })();
 
@@ -2972,15 +3338,9 @@ function _returnGraphicsToProd() {
     </div>`;
   }
 
-  // Inject the accent/font customize bar — ONLY on the Pre-Game Show. Every other scene's theming
-  // comes from the active brand kit (+ per-game theme), so a per-scene override there is just clutter.
-  document.querySelectorAll('.gfx-scene-panel[data-gfxpanel]').forEach((panel) => {
-    const key = panel.dataset.gfxpanel;
-    if (key !== 'preshow' || !SCENE_META[key]) return;
-    const body = panel.querySelector('.gfx-scene-body');
-    if (!body || panel.querySelector('.gfx-cust-bar')) return;  // already injected
-    body.insertAdjacentHTML('beforebegin', custBarHtml(key));
-  });
+  // The per-scene accent/accent-2/font "PRESET" bar is injected into #gfx-preset-mount by show()
+  // for scenes whose overlays apply sceneConfig — default theming still comes from the active
+  // brand kit (+ per-game theme); a preset is an explicit per-scene override on top.
 
   // Toggle expand/collapse of a customize body.
   document.addEventListener('click', (e) => {
@@ -3083,6 +3443,20 @@ function _returnGraphicsToProd() {
     if (subnav) { const b = document.createElement('button'); b.type = 'button'; b.className = 'ev-subnav-btn'; b.dataset.tw = 'stream'; b.textContent = 'Stream'; subnav.appendChild(b); }
   }
   const workflowTab = qtab('workflow'); if (workflowTab) workflowTab.remove();
+
+  // 4) Aggressive 7-tab rethink (QUICK · RUNDOWN · QUEUE · FLOWS · TALENT · AI · STREAM):
+  //    Graphics' function (overlay toggles + triggers) now lives in the QUICK cockpit, so hide its
+  //    tab but KEEP the panel DOM as the hidden backing store — the cockpit chips reuse its
+  //    ck-*-toggle buttons and the trigger-config gear clones its option controls.
+  const gTab = qtab('graphics');
+  if (gTab) {
+    const gdot = document.getElementById('qrail-golive-dot'), qTab = qtab('quick');
+    if (gdot && qTab) qTab.appendChild(gdot);   // keep the trigger live-dot on the Quick tab
+    gTab.style.display = 'none';
+  }
+  // Pin Notes to the bottom of the strip (by the popout), off the main tab list.
+  const nTab = qtab('notes'), tabsEl = document.getElementById('qrail-tabs'), popBtn = document.getElementById('qrail-popout-btn');
+  if (nTab && tabsEl && popBtn) tabsEl.insertBefore(nTab, popBtn);
 })();
 
 // ── Sidebar collapse ────────────────────────────────────────────────────────
@@ -3118,7 +3492,7 @@ const PAGE_LABELS = {
   director: 'Director', replays: 'Video Editor', scenes: 'Overlays',
   equipos: 'Talent', facecams: 'Camera Feeds', brands: 'Profiles',
   media: 'Assets', integrations: 'Integrations', stats: 'Analytics',
-  ajustes: 'Settings', roles: 'Roles',
+  ajustes: 'Settings', roles: 'Roles', switcher: 'Switcher',
 };
 
 function openPopout(page) {
@@ -3296,10 +3670,10 @@ function qrailExpand(tab) {
 }
 
 const QRAIL_TAB_TITLES = {
-  quick: 'Quick Actions', ros: 'Run of Show', startgg: 'Start.gg', graphics: 'Overlays',
+  quick: 'Quick', ros: 'Rundown', startgg: 'Queue', graphics: 'Overlays',
   golive: 'Trigger Graphics', flows: 'Flows', talent: 'Talent',
   ai: 'NEURAL AI', notes: 'Producer Notes', checklist: 'Run-of-Show',
-  workflow: 'Stream', twitch: 'Twitch'
+  workflow: 'Stream', twitch: 'Stream'
 };
 function qrailShowTab(tab) {
   document.querySelectorAll('#qrail-tabs .qrail-tab').forEach((b) => b.classList.toggle('active', b.dataset.qtab === tab));
@@ -4937,6 +5311,7 @@ function applyState(data) {
 
   // OBS settings
   applyObsState(data);
+  if (typeof applyVmixState === 'function') applyVmixState(data);
 
   // Background overlay
   if (typeof window._bgApplyState === 'function') window._bgApplyState(data);
@@ -6172,23 +6547,55 @@ function bbTeamsDatalist() {
   const dl = el('bb-teams-datalist'); if (!dl) return;
   dl.innerHTML = allMatchTeams().map((t) => `<option value="${(t.name || '').replace(/"/g, '&quot;')}">`).join('');
 }
+function bbIsBye(name) { return /^bye$/i.test((name || '').trim()); }
 function bbWinnerOf(set) {
+  // Explicit winner mark (the W toggle) beats score inference — needed for forfeits / 0-0.
+  if (set.a.win) return 'a';
+  if (set.b.win) return 'b';
+  // A BYE slot always loses.
+  if (bbIsBye(set.a.name) && set.b.name) return 'b';
+  if (bbIsBye(set.b.name) && set.a.name) return 'a';
   const a = Number(set.a.score) || 0, b = Number(set.b.score) || 0;
   if (a === b) return null;
   return a > b ? 'a' : 'b';
 }
 // Advance the winner of (section, roundIdx, setIdx) into the structurally next slot.
+// Double elim also DROPS the loser into the right losers-bracket slot automatically:
+//   WB round 1 losers  → LB round 1 (two per match), WB round k≥2 losers → LB round 2k-2
+//   (the "minor" round, slot b — slot a belongs to the LB advancer).
 function bbAdvance(section, ri, si) {
   const arr = bbModel[section];
   const set = arr[ri] && arr[ri].sets[si]; if (!set) return;
-  const w = bbWinnerOf(set); if (!w) { bbStatus('Enter scores first to pick a winner.', false); return; }
+  const w = bbWinnerOf(set); if (!w) { bbStatus('Enter scores (or click W on the winner) first.', false); return; }
   const team = set[w];
+  const loser = set[w === 'a' ? 'b' : 'a'];
   let target, slot;
   if (section === 'winners' && ri < arr.length - 1) { target = arr[ri + 1].sets[Math.floor(si / 2)]; slot = si % 2 === 0 ? 'a' : 'b'; }
   else if (section === 'winners' && bbModel.type === 'double') { target = bbModel.finals[0] && bbModel.finals[0].sets[0]; slot = 'a'; }
-  else if (section === 'losers' && ri < arr.length - 1) { target = arr[ri + 1].sets[Math.floor(si / 2)]; slot = si % 2 === 0 ? 'a' : 'b'; }
+  else if (section === 'losers' && ri < arr.length - 1) {
+    const next = arr[ri + 1];
+    if (next.sets.length === arr[ri].sets.length) { target = next.sets[si]; slot = 'a'; }             // major → minor: same count, advancer takes slot a
+    else { target = next.sets[Math.floor(si / 2)]; slot = si % 2 === 0 ? 'a' : 'b'; }                  // halving round
+  }
   else if (section === 'losers') { target = bbModel.finals[0] && bbModel.finals[0].sets[0]; slot = 'b'; }
-  if (target) { target[slot] = { name: team.name, score: 0 }; bbRender(); bbAutosave(); bbStatus('Advanced ' + (team.name || 'winner') + '.', true); }
+  let msg = 'Advanced ' + (team.name || 'winner') + '.';
+  if (target) target[slot] = { name: team.name, score: 0 };
+  // Auto-drop the WB loser into the losers bracket (double elim only, skip byes).
+  if (section === 'winners' && bbModel.type === 'double' && loser && loser.name && !bbIsBye(loser.name)) {
+    const lb = bbModel.losers || [];
+    const lri = ri === 0 ? 0 : (2 * ri) - 1;
+    const lRound = lb[lri];
+    if (lRound) {
+      let lTarget, lSlot;
+      if (ri === 0) { lTarget = lRound.sets[Math.floor(si / 2)]; lSlot = si % 2 === 0 ? 'a' : 'b'; }
+      else { lTarget = lRound.sets[si]; lSlot = 'b'; }
+      if (lTarget && (!lTarget[lSlot] || !lTarget[lSlot].name)) {
+        lTarget[lSlot] = { name: loser.name, score: 0 };
+        msg = 'Advanced ' + (team.name || 'winner') + ' — ' + loser.name + ' dropped to ' + (lRound.name || 'losers') + '.';
+      }
+    }
+  }
+  if (target) { bbRender(); bbAutosave(); bbStatus(msg, true); }
 }
 function bbStatus(msg, ok) {
   const s = el('bb-status'); if (!s) return;
@@ -6197,20 +6604,25 @@ function bbStatus(msg, ok) {
 function bbSectionHtml(section, label) {
   const arr = bbModel[section];
   if (!arr || !arr.length) return '';
+  const isTable = section === 'rounds';
+  const secClass = section === 'losers' ? ' losers' : (section === 'finals' ? ' finals' : '');
   const cols = arr.map((round, ri) => {
     const sets = round.sets.map((set, si) => {
       const w = bbWinnerOf(set);
-      return `<div class="bb-set">
-        <div class="bb-slot${w === 'a' ? ' win' : ''}">
-          <input class="input-text bb-name" list="bb-teams-datalist" data-sec="${section}" data-r="${ri}" data-s="${si}" data-side="a" value="${(set.a.name || '').replace(/"/g, '&quot;')}" placeholder="TBA">
-          <input type="number" class="input-text bb-score" min="0" data-sec="${section}" data-r="${ri}" data-s="${si}" data-side="a" value="${set.a.score || 0}">
+      const slot = (side) => {
+        const bye = bbIsBye(set[side].name);
+        return `<div class="bb-slot${w === side ? ' win' : ''}${bye ? ' bb-bye' : ''}">
+          <button class="bb-win-btn${set[side].win ? ' on' : ''}" data-sec="${section}" data-r="${ri}" data-s="${si}" data-side="${side}" title="Mark this team as the winner (works for forfeits / no score)">W</button>
+          <input class="input-text bb-name" list="bb-teams-datalist" data-sec="${section}" data-r="${ri}" data-s="${si}" data-side="${side}" value="${(set[side].name || '').replace(/"/g, '&quot;')}" placeholder="TBA">
+          <input type="number" class="input-text bb-score" min="0" data-sec="${section}" data-r="${ri}" data-s="${si}" data-side="${side}" value="${set[side].score || 0}">
+        </div>`;
+      };
+      return `<div class="bb-match">
+        ${slot('a')}${slot('b')}
+        <div class="bb-match-actions">
+          ${isTable ? '' : `<button class="bb-adv" data-sec="${section}" data-r="${ri}" data-s="${si}" title="Advance the winner into the next round${bbModel.type === 'double' && section === 'winners' ? ' (loser auto-drops to the losers bracket)' : ''}">Advance <span aria-hidden="true">→</span></button>`}
+          <button class="bb-live" data-sec="${section}" data-r="${ri}" data-s="${si}" title="Push this matchup live to the overlay (Blue vs Orange)">Go Live</button>
         </div>
-        <div class="bb-slot${w === 'b' ? ' win' : ''}">
-          <input class="input-text bb-name" list="bb-teams-datalist" data-sec="${section}" data-r="${ri}" data-s="${si}" data-side="b" value="${(set.b.name || '').replace(/"/g, '&quot;')}" placeholder="TBA">
-          <input type="number" class="input-text bb-score" min="0" data-sec="${section}" data-r="${ri}" data-s="${si}" data-side="b" value="${set.b.score || 0}">
-        </div>
-        ${section === 'rounds' ? '' : `<button class="bb-adv" data-sec="${section}" data-r="${ri}" data-s="${si}" title="Advance winner">→</button>`}
-        <button class="bb-live" data-sec="${section}" data-r="${ri}" data-s="${si}" title="Push this matchup live to the overlay (Blue vs Orange)">LIVE</button>
       </div>`;
     }).join('');
     return `<div class="bb-round">
@@ -6218,7 +6630,7 @@ function bbSectionHtml(section, label) {
       <div class="bb-round-sets">${sets}</div>
     </div>`;
   }).join('');
-  return `<div class="bb-section"><div class="bb-section-label">${label}</div><div class="bb-cols">${cols}</div></div>`;
+  return `<div class="bb-section${secClass}"><div class="bb-section-label">${label}</div><div class="bb-cols">${cols}</div></div>`;
 }
 function bbRenderRoster() {
   const wrap = el('bb-roster'); if (!wrap) return;
@@ -6257,9 +6669,16 @@ function bbRender() {
   if (bbIsTable()) {
     board.innerHTML = bbSectionHtml('rounds', bbModel.type === 'swiss' ? 'Swiss Rounds' : 'Round-Robin Schedule');
   } else {
+    // Double elim: offer a bracket-reset second Grand Final set (LB winner takes GF 1).
+    const canReset = bbModel.type === 'double' && bbModel.finals.length === 1;
     board.innerHTML = bbSectionHtml('winners', bbModel.type === 'double' ? 'Winners Bracket' : 'Bracket')
       + bbSectionHtml('losers', 'Losers Bracket')
-      + bbSectionHtml('finals', 'Grand Final');
+      + bbSectionHtml('finals', 'Grand Final')
+      + (canReset ? '<button class="btn btn-ghost btn-xs" id="bb-gf-reset" title="Add a second Grand Final set for when the losers-bracket team wins the first one" style="margin:4px 0 0 8px;">+ Add reset set</button>' : '');
+    if (canReset) board.querySelector('#bb-gf-reset')?.addEventListener('click', () => {
+      bbModel.finals.push({ name: 'Grand Final (Reset)', sets: [{ a: { name: '', score: 0 }, b: { name: '', score: 0 } }] });
+      bbRender(); bbAutosave();
+    });
   }
   board.querySelectorAll('.bb-name').forEach((inp) => {
     inp.addEventListener('change', () => { bbModel[inp.dataset.sec][inp.dataset.r].sets[inp.dataset.s][inp.dataset.side].name = inp.value.trim(); bbAutosave(); if (bbIsTable()) bbRenderStandings(); });
@@ -6274,9 +6693,19 @@ function bbRender() {
   });
   board.querySelectorAll('.bb-adv').forEach((b) => b.addEventListener('click', () => bbAdvance(b.dataset.sec, +b.dataset.r, +b.dataset.s)));
   board.querySelectorAll('.bb-live').forEach((b) => b.addEventListener('click', () => bbPushMatch(b.dataset.sec, +b.dataset.r, +b.dataset.s)));
+  board.querySelectorAll('.bb-win-btn').forEach((b) => b.addEventListener('click', () => {
+    const set = bbModel[b.dataset.sec][+b.dataset.r].sets[+b.dataset.s];
+    const side = b.dataset.side, other = side === 'a' ? 'b' : 'a';
+    set[side].win = !set[side].win;
+    if (set[side].win) set[other].win = false;
+    bbRender(); bbAutosave();
+    if (bbIsTable()) bbRenderStandings();
+  }));
   bbRenderStandings();
 }
-// Push a bracket matchup live: load both teams (name + logo + roster) into Blue/Orange and reset the series.
+// Push a bracket matchup live: load both teams (name + logo + roster) into Blue/Orange.
+// The series only resets when the PAIR actually changes — re-clicking Go Live on the
+// match that's already live must never wipe an in-progress series score.
 function bbPushMatch(section, ri, si) {
   const set = bbModel[section] && bbModel[section][ri] && bbModel[section][ri].sets[si];
   if (!set) return;
@@ -6285,8 +6714,11 @@ function bbPushMatch(section, ri, si) {
   const ta = findTeam(a), tb = findTeam(b);
   send('set_team', { side: 'blue', name: a, logo: (ta && ta.logo) || null, color: (ta && ta.color) || undefined, players: (ta && ta.players) || [] });
   send('set_team', { side: 'orange', name: b, logo: (tb && tb.logo) || null, color: (tb && tb.color) || undefined, players: (tb && tb.players) || [] });
-  send('reset_series');
-  bbStatus(`${a} vs ${b} pushed to the overlay.`, true);
+  const curA = (currentState?.teams?.blue?.name || '').trim().toUpperCase();
+  const curB = (currentState?.teams?.orange?.name || '').trim().toUpperCase();
+  const samePair = curA === a.toUpperCase() && curB === b.toUpperCase();
+  if (!samePair) send('reset_series');
+  bbStatus(`${a} vs ${b} pushed to the overlay${samePair ? ' (series score kept)' : ''}.`, true);
 }
 // Convert one phase → the overlay-ready shape (winners/losers/finals or standings).
 function bbPhaseToPayload(ph) {
@@ -6413,10 +6845,17 @@ function bbPhaseFromOverlay(op) {
   const TYPE = { SINGLE_ELIMINATION: 'single', DOUBLE_ELIMINATION: 'double', ROUND_ROBIN: 'roundrobin', SWISS: 'swiss' };
   const fromOverlay = (arr) => (arr || []).map((round) => ({
     name: round.name || '',
-    sets: (round.sets || []).map((s) => ({
-      a: { name: s.a && s.a.name === 'TBD' ? '' : ((s.a && s.a.name) || ''), score: (s.a && s.a.score) || 0 },
-      b: { name: s.b && s.b.name === 'TBD' ? '' : ((s.b && s.b.name) || ''), score: (s.b && s.b.score) || 0 }
-    }))
+    sets: (round.sets || []).map((s) => {
+      const out = {
+        a: { name: s.a && s.a.name === 'TBD' ? '' : ((s.a && s.a.name) || ''), score: (s.a && s.a.score) || 0 },
+        b: { name: s.b && s.b.name === 'TBD' ? '' : ((s.b && s.b.name) || ''), score: (s.b && s.b.score) || 0 }
+      };
+      // Preserve an explicit winner mark that score inference couldn't reproduce (forfeit / 0-0).
+      const sa = Number(out.a.score) || 0, sb = Number(out.b.score) || 0;
+      if (s.a && s.a.winner && !(sa > sb)) out.a.win = true;
+      if (s.b && s.b.winner && !(sb > sa)) out.b.win = true;
+      return out;
+    })
   }));
   const type = TYPE[op.type] || ((op.standings && op.standings.length) ? 'roundrobin' : 'single');
   const ph = bbNewPhase(op.name || 'Bracket', type);
@@ -6431,8 +6870,13 @@ function bbPhaseFromOverlay(op) {
   return ph;
 }
 // Hydrate the builder from a saved/imported bracket (once). Handles phases + legacy flat.
+// IMPORTANT: only hydrate from a MANUAL bracket. If the current bracket was imported
+// (start.gg / Challonge / NXGEN), the builder stays empty so an accidental edit can't
+// autosave over — and silently disconnect — the live import. To hand-edit an import, the
+// producer uses the explicit "Edit as custom" action (which copies it into manual mode).
 function bbHydrate(bracket) {
   if (_bbHydrated || !bracket) return;
+  if (bracket.mode === 'imported') { _bbHydrated = true; return; }
   const phases = Array.isArray(bracket.phases) ? bracket.phases : [];
   const hasFlat = (bracket.winners && bracket.winners.length) || (bracket.standings && bracket.standings.length);
   if (phases.length) {
@@ -7609,6 +8053,7 @@ wireScorecard('scorecard-teams', 'teams');
     const open = panel.style.display !== 'none';
     panel.style.display = open ? 'none' : 'grid';
     btn.classList.toggle('active', !open);
+    if (!open && typeof renderPlayerCams === 'function') renderPlayerCams();
   });
   panel.addEventListener('click', (e) => {
     const b = e.target.closest('[data-msp]'); if (!b) return;
@@ -11664,6 +12109,7 @@ const SCENE_SOURCES = [
     { name: 'Valorant HUD', path: '/valorant.html', live: 'always', desc: 'Round scorebar, agents, spike + economy.' },
     { name: 'Overwatch 2 HUD', path: '/overwatch.html', live: 'always', desc: 'Hero line-up, objective + score HUD.' },
     { name: 'Marvel Rivals HUD', path: '/marvel-rivals.html', live: 'always', desc: 'Hero roster + objective scorebar.' },
+    { name: 'LoL HUD', path: '/lol-hud.html', live: 'always', desc: 'Team gold estimate + player loadouts, auto champ-select fill.' },
     { name: 'Series Scoreboard', path: '/series.html', live: 'always', desc: 'Standalone series / match scoreboard banner.' },
     { name: 'Mini Station', path: '/ministation.html', live: 'always', desc: 'Compact mini-HUD for split-screen / B-feeds.' },
     { name: 'Director Preview', path: '/director-preview.html', live: 'always', desc: 'Producer-only director bug — add ?director=1.' },
@@ -11679,6 +12125,7 @@ const SCENE_SOURCES = [
     { name: 'Talent Bar (lower third)', path: '/talentbar.html', live: 'casters.visible', desc: 'Slim bottom strip of caster cams + names over gameplay/replay.' },
     { name: 'Interview / Head-to-head', path: '/interview.html', live: 'casters.visible', desc: 'Two big cams side by side with a VS medallion.' },
     { name: 'Quad Desk (2×2)', path: '/quaddesk.html', live: 'casters.visible', desc: 'Four-person panel — 2×2 framed cams + scorebar.' },
+    { name: 'Desk Show', path: '/preshow.html', live: 'casters.visible', desc: '2 caster cams + discussion-topics rail + kickoff countdown + first-up match-up.' },
     { name: 'Player Spotlight Desk', path: '/spotlightdesk.html', live: 'casters.visible', desc: 'Analyst cam + featured player card with live stats.' },
     { name: 'Vertical (9:16)', path: '/vertical.html', live: 'casters.visible', desc: 'Vertical co-stream — set the OBS source to 1080×1920.', aspect: '1080 × 1920' },
     { name: 'Listen In (player mic + captions)', path: '/listen-in.html', live: 'listenIn.active', desc: 'Live team/player mic + captions on stream (VDO).' },
@@ -11692,6 +12139,7 @@ const SCENE_SOURCES = [
     { name: 'Team Line-up', path: '/intro.html', live: 'intro.visible', desc: 'Animated roster cards. Add ?side=blue|orange.' },
     { name: 'Matchup (pre-game)', path: '/matchup.html', live: null, desc: 'Cinematic split-screen — team color washes, large watermark logos, VS pillar, series pips.' },
     { name: 'Draft Screen', path: '/draft.html', live: null, desc: 'Animated pick/ban draft for character / agent select.' },
+    { name: 'Ticker', path: '/ticker.html', live: 'ticker.visible', desc: 'Scrolling lower-third — manual messages or live start.gg scores.' },
   ]},
   { group: 'Bracket & Veto', icon: 'trophy', items: [
     { name: 'Bracket', path: '/bracket.html', live: 'bracket.visible', desc: 'Live bracket — elim columns or standings table.' },
@@ -11702,11 +12150,19 @@ const SCENE_SOURCES = [
   { group: 'Replays', icon: 'film', items: [
     { name: 'Replay / Montage Player', path: '/replay-player.html', live: null, desc: 'Full-screen OBS replay buffer + montage playout.' },
   ]},
+  { group: 'Spotlight', icon: 'star', items: [
+    { name: 'Team Spotlight', path: '/team-spotlight.html', live: null, desc: 'Single-team deep dive — seed, placement, record, recent form, next match, roster.' },
+    { name: 'Teams to Watch', path: '/watchlist.html', live: null, desc: 'Multi-team grid/podium overlay with custom fields + roster.' },
+  ]},
+  { group: 'Background & Ambient', icon: 'sparkles', items: [
+    { name: 'Background', path: '/background.html', live: 'always', desc: 'OBS background layer — solid, gradient or image (Settings ▸ Background).' },
+  ]},
   { group: 'Twitch Interactions', icon: 'chat', items: [
     { name: 'Twitch Alerts', path: '/twitch-alerts.html', live: null, desc: 'Follower, sub and donation alerts overlay.' },
     { name: 'Predictions', path: '/twitch-predictions.html', live: null, desc: 'Channel-point prediction tracker with hide timer.' },
     { name: 'Giveaway Wheel', path: '/twitch-wheel.html', live: null, desc: 'On-screen spin wheel for chat giveaways.' },
     { name: 'Mini-Games', path: '/twitch-minigames.html', live: null, desc: 'Interactive Twitch chat mini-games overlay.' },
+    { name: 'Polls', path: '/twitch-polls.html', live: null, desc: 'Channel-point poll tracker overlay.' },
   ]},
   { group: 'Stingers & Transitions', icon: 'sparkles', items: [
     { name: 'Transition (accent)', path: '/transition.html', live: null, desc: 'Brand wipe with centre logo. ?team=blue|orange.' },
@@ -11779,7 +12235,7 @@ function mergeSceneGroups(discovered) {
   const extra = (discovered || []).filter((o) => o.file && !curated.has(o.file.toLowerCase()));
   if (extra.length) {
     groups.push({ group: 'Other Overlays', icon: 'film',
-      items: extra.map((o) => ({ name: prettySceneName(o.file), path: o.path, live: null, desc: 'Auto-discovered overlay.' })) });
+      items: extra.map((o) => ({ name: prettySceneName(o.file), path: o.path, live: null, desc: o.desc || 'Auto-discovered overlay.' })) });
   }
   return groups;
 }
@@ -17017,7 +17473,7 @@ const DASH_WIDGETS = [
   { id: 'graphics', title: 'Graphics',       icon: 'sparkles',   desc: 'Full graphics hub — scenes, preview and settings',  sel: '[data-dash-id="graphics"]', defaultOn: true,  span: 'full', fixedSpan: 'full' },
   { id: 'onair',    title: 'On Air',         icon: 'zap',        desc: 'Quick-toggle card grid for all overlays',           sel: '[data-dash-id="onair"]',    defaultOn: false, span: 'full' },
   { id: 'adslots',  title: 'Ad Slots',       icon: 'film',       desc: 'Sponsor ad slots and commercial break controls',    sel: '[data-dash-id="adslots"]',  defaultOn: true,  span: 'full' },
-  { id: 'director', title: 'Director',       icon: 'zap',        desc: 'AI director controls and clip queue manager',       sel: '[data-dash-id="director"]', defaultOn: true,  span: 'full' },
+  { id: 'director', title: 'Talent Monitor', icon: 'zap',        desc: 'Live VDO talent monitor — rooms, transfers, staging (the AI director lives in Production, NEURAL AI)', sel: '[data-dash-id="director"]', defaultOn: true,  span: 'full' },
   { id: 'series',   title: 'Series',         icon: 'trophy',     desc: 'Best-of series scoreboard and match history',     sel: '[data-dash-id="series"]',   defaultOn: false, span: '1'    },
   { id: 'talent',   title: 'Talent',         icon: 'mic',        desc: 'On-air talent, camera feeds and VDO rooms',      sel: '[data-dash-id="talent"]',   defaultOn: false, span: '1'    },
   { id: 'casters',  title: 'Caster Desk',    icon: 'headphones', desc: 'Caster names, social handles and desk layout',   sel: '[data-dash-id="casters"]',  defaultOn: false, span: '1'    },
@@ -17390,7 +17846,9 @@ function renderDashMiniPanels(data) {
     if (bufPill) { bufPill.textContent = obs.replayBufferActive ? 'Buffer On' : 'Buffer Off'; bufPill.classList.toggle('on', !!obs.replayBufferActive); }
     const scenesList = el('dmobs-scenes-list');
     if (scenesList) {
-      const scenes = obs.availableScenes || [];
+      // Skip the collection's blank "═══ DIVIDER ═══" separator scenes — clicking one cuts
+      // program to black, and they'd eat most of this widget's 10 slots.
+      const scenes = (obs.availableScenes || []).filter((s) => !/^═/.test(s));
       const current = obs.currentScene || '';
       scenesList.innerHTML = scenes.slice(0, 10).map((s) => `<button class="dmobs-scene-btn${s === current ? ' on' : ''}" data-scene="${dEsc(s)}">${dEsc(s)}</button>`).join('');
       scenesList.querySelectorAll('.dmobs-scene-btn').forEach((b) => {
@@ -17527,6 +17985,39 @@ el('qt-autoswitch')?.addEventListener('change', function () {
 let _qrailSceneSig = '';
 function renderQrailScenes(data) {
   const wrap = el('qrail-scenes'); if (!wrap) return;
+  const sub = el('qrail-scenes-sub');
+
+  // vMix backend — the Program grid is the vMix input list; cutting sends the input number
+  // (routed through the switcher server-side). Overlay toggles above stay backend-agnostic.
+  if ((data.switcher && data.switcher.target) === 'vmix') {
+    const v = data.vmix || {};
+    const inputs = Array.isArray(v.inputs) ? v.inputs : [];
+    if (sub) sub.textContent = v.connected ? String(inputs.length) : '';
+    const sig = JSON.stringify({ vmix: 1, c: v.connected, en: v.enabled, n: inputs.map((i) => i.number + ':' + i.title) });
+    if (sig !== _qrailSceneSig) {
+      _qrailSceneSig = sig;
+      wrap.innerHTML = '';
+      const hint = (t) => { const h = document.createElement('div'); h.className = 'qrail-scenes-hint'; h.textContent = t; wrap.appendChild(h); };
+      if (!v.enabled) hint('vMix off — enable in Settings → vMix');
+      else if (!v.connected) hint('Connecting to vMix… inputs appear here automatically');
+      else if (!inputs.length) hint('No inputs found in vMix');
+      else inputs.forEach((inp) => {
+        const b = document.createElement('button');
+        b.className = 'qrail-scene-btn';
+        b.dataset.vnum = String(inp.number);
+        b.innerHTML = '<span class="qt-key qt-key-blank"></span><span class="qss-name"></span>';
+        b.querySelector('.qss-name').textContent = inp.title || ('Input ' + inp.number);
+        b.title = `Cut program to "${inp.title || inp.number}"`;
+        b.addEventListener('click', () => send('obs_switch_scene', { sceneName: String(inp.number) }));
+        wrap.appendChild(b);
+      });
+    }
+    const active = v.connected && v.active != null ? String(v.active) : '';
+    wrap.querySelectorAll('.qrail-scene-btn').forEach((b) => b.classList.toggle('live', !!active && b.dataset.vnum === active));
+    return;
+  }
+
+  // OBS backend
   const obs = data.obs || {};
   const list = Array.isArray(obs.availableScenes) ? obs.availableScenes : [];
   const connected = !!obs.connected;
@@ -17534,7 +18025,6 @@ function renderQrailScenes(data) {
   // Which scenes are mapped to a moment hotkey (1..9), so we can badge them.
   const hotkeyByScene = {};
   SCENE_CONTROL_MOMENTS.forEach((m, i) => { const sn = (obs.scenes || {})[m.key]; if (sn) hotkeyByScene[sn] = i + 1; });
-  const sub = el('qrail-scenes-sub');
   if (sub) sub.textContent = connected ? String(list.length) : '';
 
   const sig = JSON.stringify({ list, connected, enabled, hk: hotkeyByScene });
@@ -17562,6 +18052,86 @@ function renderQrailScenes(data) {
   const live = connected ? (obs.currentScene || '') : '';
   wrap.querySelectorAll('.qrail-scene-btn').forEach((b) => b.classList.toggle('live', !!live && b.dataset.scene === live));
 }
+
+// ── Quick panel cockpit: Now/Next + "Put On Air" chips (reuse the golive toggles + config gear) ──
+// trig entries drive the existing GOLIVE_TRIGGERS toggle buttons + trigger-config popover; ov
+// entries are plain overlay show/hide via bbActionInfo. cfg=true means a gear opens its options.
+const QK_PUT = [
+  { label: 'Break',     trig: 'breakScreen', toggle: 'ck-break-toggle',     scene: 'break',    cfg: true },
+  { label: 'Matchup',   trig: 'matchup',     toggle: 'ck-matchup-toggle',   scene: 'matchup' },
+  { label: 'Winner',    trig: 'winner',      toggle: 'ck-winner-toggle',    scene: 'winner',   cfg: true },
+  { label: 'Line-up',   trig: 'intro',       toggle: 'ck-intro-toggle',     scene: 'intro',    cfg: true },
+  { label: 'Map Pool',  trig: 'veto',        toggle: 'ck-veto-toggle',      scene: 'veto' },
+  { label: 'Teams',     trig: 'watchlist',   toggle: 'ck-spotlight-toggle', scene: 'spotlight' },
+  { label: 'Schedule',  trig: 'upcoming',    toggle: 'ck-schedule-toggle',  scene: 'schedule' },
+  { label: 'Bracket',   ov: 'bracket' },
+  { label: 'Standings', ov: 'standings' },
+  { label: 'Ticker',    ov: 'ticker' },
+  { label: 'Sponsor',   ov: 'banner' },
+  { label: 'Desk',      ov: 'casters' },
+];
+let _qkPutBuilt = false;
+function _qkIsLive(item) {
+  const s = currentState || {};
+  if (item.ov) { const info = bbActionInfo({ t: 'overlay', k: item.ov }); return !!(info && info.live); }
+  return (s.gfxActive === item.scene) || !!(s[item.trig] && s[item.trig].visible);
+}
+function renderQuickPanel(data) {
+  data = data || {};
+  const obs = data.obs || {};
+  // NOW = live program scene (OBS) or program input (vMix), whichever backend is active
+  const nowEl = el('qk-now');
+  if (nowEl) {
+    if ((data.switcher && data.switcher.target) === 'vmix') {
+      const v = data.vmix || {};
+      const act = (v.inputs || []).find((i) => i.number === v.active);
+      nowEl.textContent = (v.connected && v.active != null) ? (act ? (act.title || ('Input ' + v.active)) : ('Input ' + v.active)) : '—';
+    } else {
+      nowEl.textContent = (obs.connected && obs.currentScene) ? obs.currentScene : '—';
+    }
+  }
+  // NEXT = next queued set from the start.gg stream queue (mirrors renderUpNext)
+  const nextEl = el('qk-next');
+  if (nextEl) {
+    const q = Array.isArray(data.startgg && data.startgg.queue) ? data.startgg.queue : [];
+    const n = (data.startgg && data.startgg.queueEnabled)
+      ? (q.find((x) => !x.live && x.state !== 3) || q.find((x) => x.live) || q[0])
+      : null;
+    nextEl.textContent = n ? `${n.round ? n.round + ' · ' : ''}${n.teamA || 'TBD'} vs ${n.teamB || 'TBD'}` : '—';
+  }
+  // Put-on-air chips — build once, reflect live state each tick.
+  const wrap = el('qk-put');
+  if (wrap) {
+    if (!_qkPutBuilt) {
+      _qkPutBuilt = true;
+      wrap.innerHTML = '';
+      QK_PUT.forEach((item, i) => {
+        const chip = document.createElement('div'); chip.className = 'qk-chip'; chip.dataset.i = i;
+        chip.innerHTML = `<button class="qk-chip-main" title="Put ${item.label} on air">${item.label}</button>`
+          + (item.cfg ? `<button class="qk-chip-gear" title="${item.label} options"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>` : '');
+        chip.querySelector('.qk-chip-main').addEventListener('click', () => {
+          if (item.ov) { const info = bbActionInfo({ t: 'overlay', k: item.ov }); if (info) info.run(); return; }
+          // trigger: if it has options and isn't live yet, open the config gear to set them first
+          if (item.cfg && !_qkIsLive(item) && typeof bbOpenTriggerConfig === 'function') { bbOpenTriggerConfig(item.trig, chip); return; }
+          el(item.toggle)?.click();
+        });
+        const gear = chip.querySelector('.qk-chip-gear');
+        if (gear) gear.addEventListener('click', (e) => { e.stopPropagation(); if (typeof bbOpenTriggerConfig === 'function') bbOpenTriggerConfig(item.trig, chip); });
+        wrap.appendChild(chip);
+      });
+    }
+    wrap.querySelectorAll('.qk-chip').forEach((chip) => {
+      const item = QK_PUT[+chip.dataset.i]; if (item) chip.classList.toggle('on', _qkIsLive(item));
+    });
+  }
+}
+// Static cockpit actions.
+el('qk-clear-all')?.addEventListener('click', (e) => { e.preventDefault(); el('gfx-top-clear')?.click(); });
+el('qk-put-upnext')?.addEventListener('click', () => {
+  // Preset the break title to "UP NEXT" then open its config so the producer sets the timer & pushes.
+  const t = el('ck-break-title'); if (t) t.value = 'UP NEXT';
+  if (typeof bbOpenTriggerConfig === 'function') bbOpenTriggerConfig('breakScreen', el('qk-put-upnext'));
+});
 
 // ── Bottom bar: "Up Next" from the start.gg stream queue ────────────────────
 function renderUpNext(data) {
@@ -18063,10 +18633,12 @@ document.querySelectorAll('.js-goto-scenes').forEach((b) => b.addEventListener('
 // ══════════════ Camera Feeds tab — Players / Casters / Gameplay / Settings ══════════════
 const CF_OVERLAY_BASE = 'http://localhost:3000';
 function cfShowSubtab(cf) {
+  // Players sub-tab retired — player cam assignment lives in Match — Teams (gear) and the
+  // Talent Monitor's Players tab. Old saved subtab values / deep links land on Talent Rooms.
+  if (cf === 'players') cf = 'talent';
   document.querySelectorAll('#cf-subnav .cf-tab').forEach((b) => b.classList.toggle('active', b.dataset.cf === cf));
   document.querySelectorAll('#tab-facecams-content .cf-panel').forEach((p) => p.classList.toggle('active', p.id === 'cf-panel-' + cf));
   if (cf === 'talent') cfLoadTalent();
-  if (cf === 'players') fetchVdoLinksForFacecam();
   if (cf === 'gameplay') { renderCfShares(); renderCfStations(currentState); }
   try { localStorage.setItem('cf_active_subtab', cf); } catch (_) {}
 }
@@ -18146,6 +18718,7 @@ async function cfLoadTalent() {
     if (hint) hint.innerHTML = (anyMatchPlayers || allTeams.some(t => t.hasRoom && t.players.length))
       ? '' : '<div class="talent-note">Set up teams + rosters on the <b>Teams</b> page, then hit <b>Generate rooms</b> to create private VDO rooms for every player.</div>';
     cfUpdateListenPill(currentState);
+    renderVdoRooms();             // rooms manager reads currentState + this fresh fetch
     _cfDirectorData = d;          // cache for the Director Control Center
     cfRenderDirectorCenter();
     cfWireTalentDrag();
@@ -18158,6 +18731,132 @@ async function cfLoadTalent() {
     else if (typeof cfSyncDirectorConsoles === 'function') cfSyncDirectorConsoles();   // add any new rooms
   } catch (e) { wrap.innerHTML = `<p style="color:#f56565;">Error: ${tlEsc(e.message)}</p>`; }
 }
+
+// ── VDO Rooms manager — every room in one list; generate or link an existing room ──
+function vdoRoomJoinUrl(vdo) {
+  if (!vdo || !vdo.room) return '';
+  const base = (currentState?.vdo?.base) || 'https://vdo.ninja';
+  const lang = (currentState?.vdo?.lang) || '';
+  return `${base}/?room=${encodeURIComponent(vdo.room)}${lang ? '&transcribe=' + encodeURIComponent(lang) : ''}&webcam&autostart${vdo.password ? '#p=' + encodeURIComponent(vdo.password) : ''}`;
+}
+function _vdoRoomRows() {
+  const st = currentState || {};
+  const rows = [];
+  ['blue', 'orange'].forEach((side) => {
+    const t = st.teams?.[side]; if (!t) return;
+    rows.push({ kind: 'team', key: side, label: t.name || (side.toUpperCase() + ' TEAM'),
+      badge: side === 'blue' ? 'TEAM A' : 'TEAM B', color: t.color || (side === 'blue' ? '#3b82f6' : '#f97316'),
+      vdo: t.vdo || null });
+  });
+  const c = st.casters || {};
+  rows.push({ kind: 'group', key: 'casters',   label: 'Hosts / Casters desk', badge: 'HOSTS',     color: '#e83a8b', vdo: c.vdo });
+  rows.push({ kind: 'group', key: 'guests',    label: 'Guest lobby',          badge: 'LOBBY',     color: '#a855f7', vdo: c.guestsVdo });
+  rows.push({ kind: 'group', key: 'observers', label: 'In-game observers',    badge: 'OBSERVERS', color: '#2dd4bf', vdo: c.observersVdo });
+  rows.push({ kind: 'group', key: 'interview', label: 'Interview room',       badge: 'INTERVIEW', color: '#fbbf24', vdo: c.interview });
+  (c.rooms || []).forEach((r) => rows.push({ kind: 'named', key: r.id, label: r.name || 'Talent room',
+    badge: 'ROOM', color: '#8b5cf6', vdo: r.vdo, isDesk: c.deskRoomId === r.id }));
+  return rows;
+}
+function renderVdoRooms() {
+  const list = el('cf-rooms-list'); if (!list) return;
+  const rows = _vdoRoomRows();
+  list.innerHTML = rows.map((r) => {
+    const has = !!(r.vdo && r.vdo.room);
+    const rid = `${r.kind}:${r.key}`;
+    const join = has ? vdoRoomJoinUrl(r.vdo) : '';
+    return `<div class="cf-room-row" data-room="${tlEsc(rid)}" style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; padding:8px 12px; background:var(--surface-2,#191c23); border:1px solid var(--border,#2e3340); border-radius:9px;">
+      <span style="flex:0 0 76px; text-align:center; font-size:9px; font-weight:800; letter-spacing:.08em; padding:3px 0; border-radius:99px; background:${tlEsc(r.color)}22; color:${tlEsc(r.color)};">${tlEsc(r.badge)}</span>
+      <span style="flex:1 1 150px; min-width:0; font-size:13px; font-weight:700; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${tlEsc(r.label)}${r.isDesk ? ' <span style="font-size:9px;font-weight:800;color:#fbbf24;letter-spacing:.08em;">DESK</span>' : ''}</span>
+      ${has ? `<span class="talent-room" title="Room name — click to copy" data-copy="${tlEsc(r.vdo.room)}" style="cursor:pointer;">${tlEsc(r.vdo.room)}</span>
+        <span class="talent-room cf-room-pw" title="Password — click to reveal / copy" data-pw="${tlEsc(r.vdo.password || '')}" style="cursor:pointer;">${r.vdo.password ? '••••••' : 'no password'}</span>
+        <button class="cf-ico-btn" data-copy="${tlEsc(join)}" title="Copy the room-level join link (anyone with it joins this room)"><span class="cf-ico-lbl">Join link</span></button>`
+      : '<span class="talent-room" style="opacity:.6;">no room yet</span>'}
+      <button class="btn btn-ghost btn-xs cf-room-link" title="Use a VDO.ninja room you already have — paste its room name + password">Link existing</button>
+      <button class="btn btn-ghost btn-xs cf-room-gen" title="${has ? 'Generate NEW credentials (old links stop working)' : 'Generate room credentials'}">${has ? 'New room' : 'Generate'}</button>
+      ${r.kind === 'named' ? `${r.isDesk ? '' : '<button class="btn btn-ghost btn-xs cf-room-desk" title="Make this the desk/interview room (casters + interviews resolve here)">Set desk</button>'}
+        <button class="btn btn-ghost btn-xs cf-room-del" title="Delete this room" style="color:#f56565;">Del</button>` : ''}
+      <div class="cf-room-linkform" style="display:none; flex-basis:100%; gap:8px; align-items:center; padding-top:6px;">
+        <input type="text" class="input-text cf-room-linkname" placeholder="existing room name" style="flex:1; min-width:140px;" maxlength="100">
+        <input type="text" class="input-text cf-room-linkpw" placeholder="room password" style="flex:1; min-width:120px;" maxlength="100">
+        <button class="btn btn-primary btn-xs cf-room-linksave">Use this room</button>
+        <button class="btn btn-ghost btn-xs cf-room-linkcancel">Cancel</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+;(function wireVdoRooms() {
+  const list = el('cf-rooms-list'); if (!list) return;
+  const parseRow = (node) => {
+    const row = node.closest('.cf-room-row'); if (!row) return null;
+    const [kind, ...rest] = (row.dataset.room || '').split(':');
+    return { row, kind, key: rest.join(':') };
+  };
+  const roomMsg = (kind, key, creds) => {
+    if (kind === 'team')  return ['set_team_vdo_creds',   { side: key, ...creds }];
+    if (kind === 'group') return ['set_group_room_creds', { group: key, ...creds }];
+    return ['set_caster_room_creds', { id: key, ...creds }];
+  };
+  list.addEventListener('click', (e) => {
+    const copyBtn = e.target.closest('[data-copy]');
+    if (copyBtn && !e.target.closest('.cf-room-linkform')) {
+      navigator.clipboard?.writeText(copyBtn.dataset.copy || '');
+      showToast('Copied!', '#22c55e');
+      return;
+    }
+    const pw = e.target.closest('.cf-room-pw');
+    if (pw) {
+      if (pw.textContent === '••••••') { pw.textContent = pw.dataset.pw || ''; }
+      else { navigator.clipboard?.writeText(pw.dataset.pw || ''); showToast('Password copied', '#22c55e'); }
+      return;
+    }
+    const ctx = parseRow(e.target); if (!ctx) return;
+    if (e.target.closest('.cf-room-link')) {
+      const form = ctx.row.querySelector('.cf-room-linkform');
+      if (form) { form.style.display = form.style.display === 'none' ? 'flex' : 'none'; form.querySelector('.cf-room-linkname')?.focus(); }
+    } else if (e.target.closest('.cf-room-linkcancel')) {
+      const form = ctx.row.querySelector('.cf-room-linkform');
+      if (form) form.style.display = 'none';
+    } else if (e.target.closest('.cf-room-linksave')) {
+      const name = ctx.row.querySelector('.cf-room-linkname')?.value.trim();
+      const pass = ctx.row.querySelector('.cf-room-linkpw')?.value.trim();
+      if (!name) { showToast('Enter the existing room name', '#fbbf24'); return; }
+      const [type, data] = roomMsg(ctx.kind, ctx.key, { room: name, password: pass || '' });
+      send(type, data);
+      showToast('Room linked — join links now point at your room', '#22c55e');
+      setTimeout(() => { renderVdoRooms(); if (typeof cfLoadTalent === 'function') cfLoadTalent(); }, 450);
+    } else if (e.target.closest('.cf-room-gen')) {
+      if (ctx.kind === 'team') send('generate_team_vdo', { side: ctx.key, regenerate: true });
+      else if (ctx.kind === 'group') send('regenerate_group_room', { group: ctx.key });
+      else send('generate_caster_room_vdo', { id: ctx.key, regenerate: true });
+      showToast('Generating room… old links stop working', '#8b5cf6');
+      setTimeout(() => { renderVdoRooms(); if (typeof cfLoadTalent === 'function') cfLoadTalent(); }, 500);
+    } else if (e.target.closest('.cf-room-desk')) {
+      send('set_desk_room', { roomId: ctx.key });
+      setTimeout(renderVdoRooms, 400);
+    } else if (e.target.closest('.cf-room-del')) {
+      const btn = e.target.closest('.cf-room-del');
+      if (btn.dataset.armed) { send('delete_caster_room', { id: ctx.key }); setTimeout(renderVdoRooms, 400); }
+      else {
+        btn.dataset.armed = '1'; btn.textContent = 'Sure?';
+        setTimeout(() => { if (btn.isConnected) { delete btn.dataset.armed; btn.textContent = 'Del'; } }, 3000);
+      }
+    }
+  });
+  const add = el('cf-room-add');
+  if (add) add.addEventListener('click', () => {
+    const name = prompt('Name for the new talent room (e.g. "Analyst desk 2", "Green room")');
+    if (!name || !name.trim()) return;
+    send('save_caster_room', { name: name.trim() });
+    showToast('Room created', '#22c55e');
+    setTimeout(renderVdoRooms, 450);
+  });
+  // LISTEN IN → one-click OBS browser source (created on the current program scene).
+  const listenObs = el('cf-listen-obs');
+  if (listenObs) listenObs.addEventListener('click', () => {
+    send('obs_ensure_browser_source', { sourceName: '[NE] Listen-In', url: 'http://localhost:3000/listen-in.html' });
+    showToast('Adding Listen-In to OBS…', '#8b5cf6');
+  });
+})();
 
 // Live filter of the talent teams/players by name or gamertag.
 function cfFilterTalent() {
@@ -18617,10 +19316,14 @@ function talentRow(side, p, teamName, room) {
     ? `<button class="btn btn-ghost btn-sm tl-listen" title="Put this player's mic + live captions on stream">${svgIcon('headphones')} Listen in</button>`
     : '';
   const casterList = (currentState?.casters?.list) || [];
-  const assignedSlot = p.obsUrl ? (casterList.find(c => c.camUrl === p.obsUrl)?.slot || 0) : 0;
-  const camOpts = [1,2,3,4].map(n => `<option value="${n}"${assignedSlot===n?' selected':''}>CAM ${n}</option>`).join('');
+  const playerCamUrl = (currentState?.casters?.playerCam?.camUrl) || '';
+  const assignedSlot = p.obsUrl
+    ? (playerCamUrl === p.obsUrl ? 5 : (casterList.find(c => c.camUrl === p.obsUrl)?.slot || 0))
+    : 0;
+  const camOpts = [1,2,3,4].map(n => `<option value="${n}"${assignedSlot===n?' selected':''}>CAM ${n}</option>`).join('')
+    + `<option value="5"${assignedSlot===5?' selected':''}>Player Cam</option>`;
   const camSelect = p.obsUrl
-    ? `<select class="input-select tl-cam-slot" title="Assign this player's feed to a camera slot in the desk overlay"><option value="0"${!assignedSlot?' selected':''}>Set as CAM…</option>${camOpts}</select>`
+    ? `<select class="input-select tl-cam-slot" title="Assign this player's feed to a camera slot in the desk overlay (Player Cam = Spotlight / Interview Desk)"><option value="0"${!assignedSlot?' selected':''}>Set as CAM…</option>${camOpts}</select>`
     : '';
   const a = p.audio || {};
   const audioBlock = p.obsUrl ? `
@@ -18990,12 +19693,17 @@ el('cf-talent-teams')?.addEventListener('change', (e) => {
   const camSlot = e.target.closest('.tl-cam-slot');
   if (camSlot) {
     const slot = parseInt(camSlot.value, 10);
-    if (slot >= 1 && slot <= 4) {
+    if (slot >= 1 && slot <= 5) {
       if (row.dataset.side) {
         send('assign_talent_cam', { side: row.dataset.side, playerId: row.dataset.pid, slot });
       } else if (row.dataset.teamName) {
         send('assign_talent_cam', { teamName: row.dataset.teamName, playerId: row.dataset.pid, slot });
       }
+      setTimeout(cfLoadTalent, 350);
+    } else if (slot === 0) {
+      // "Set as CAM…" re-selected: clear the player-cam assignment if this row held it.
+      const pc = currentState?.casters?.playerCam;
+      if (pc && pc.playerId === row.dataset.pid) send('clear_player_cam');
       setTimeout(cfLoadTalent, 350);
     }
     return;
@@ -19651,7 +20359,7 @@ const CASTER_DESK_LAYOUTS = [
   { name: 'Casters (grid)', path: '/casters.html', desc: 'Flexible 1–4 cam grid' },
   { name: 'Single Cam', path: '/singlecam.html', desc: 'Solo caster + scorebar' },
   { name: 'Duo Row', path: '/duorow.html', desc: '2 cams + scorebar' },
-  { name: 'Pre-Game Show', path: '/preshow.html', desc: '2 cams + topics rail + kickoff countdown' },
+  { name: 'Desk Show', path: '/preshow.html', desc: '2 cams + topics rail + kickoff countdown' },
   { name: 'Trio Row', path: '/triorow.html', desc: '3 cams + scorebar' },
   { name: 'Duo (single cam)', path: '/duosinglecam.html', desc: '2 casters, 1 cam' },
   { name: 'Analyst Desk', path: '/analystspecial.html', desc: 'Analyst layout' },
@@ -19705,7 +20413,7 @@ el('input-desk-footer-logo')?.addEventListener('change', async function () {
 });
 el('btn-desk-footer-clear')?.addEventListener('click', () => send('set_desk_footer', { logos: [] }));
 
-// ── Pre-Game Show settings (Graphics ▸ Show ▸ Pre-Game Show): topics + headline + return scene ──
+// ── Desk Show settings (Graphics ▸ Show ▸ Desk Show): topics + headline + return scene ──
 let _preshowTopicsSig = '';
 function renderPreshowGfxPanel(data) {
   const headline = el('preshow-headline');
@@ -19728,9 +20436,10 @@ function renderPreshowGfxPanel(data) {
     const names = Object.keys(pre.topicPresets || {});
     const sig = names.join('|');
     if (tpSel.dataset.sig !== sig) {
+      const _e = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
       tpSel.dataset.sig = sig;
       tpSel.innerHTML = '<option value="">— Load a preset —</option>' +
-        names.map((n) => `<option value="${esc(n)}">${esc(n)}</option>`).join('');
+        names.map((n) => `<option value="${_e(n)}">${_e(n)}</option>`).join('');
     }
   }
 
@@ -20109,9 +20818,132 @@ function populateMatchPicker(matches) {
   if (current && list.some((m) => m.id === current)) sel.value = current;
 }
 
+// ── Phase / pool selector + import-mode bar (Group/pool stages, multi-phase events) ──
+function renderBracketPhasePool(bracket) {
+  const wrap = el('bracket-phasepool'); if (!wrap) return;
+  const phases = Array.isArray(bracket.phases) ? bracket.phases : [];
+  const phaseRow = el('bracket-phase-row'), phaseChips = el('bracket-phase-chips');
+  const poolRow = el('bracket-pool-row'), poolChips = el('bracket-pool-chips');
+  if (phases.length > 1 && phaseChips) {
+    phaseChips.innerHTML = phases.map((p) =>
+      `<button type="button" class="bk-view-chip${p.id === bracket.activePhaseId ? ' is-active' : ''}" data-phaseid="${_stEsc(p.id)}">${_stEsc(p.name || 'Phase')}</button>`
+    ).join('');
+    if (phaseRow) phaseRow.style.display = 'flex';
+  } else if (phaseRow) phaseRow.style.display = 'none';
+  const activePhase = phases.find((p) => p.id === bracket.activePhaseId) || phases[0];
+  const pools = (activePhase && Array.isArray(activePhase.pools)) ? activePhase.pools : [];
+  if (pools.length > 1 && poolChips) {
+    poolChips.innerHTML = pools.map((pl) =>
+      `<button type="button" class="bk-view-chip${pl.id === bracket.activePoolId ? ' is-active' : ''}" data-poolid="${_stEsc(pl.id)}">${_stEsc(pl.name || 'Pool')}</button>`
+    ).join('');
+    if (poolRow) poolRow.style.display = 'flex';
+  } else if (poolRow) poolRow.style.display = 'none';
+  wrap.style.display = (phases.length > 1 || pools.length > 1) ? 'block' : 'none';
+}
+
+function renderBracketModeBar(bracket) {
+  const bar = el('bracket-mode-bar'), lbl = el('bracket-mode-label'), editBtn = el('bracket-edit-as-custom');
+  if (!bar || !lbl) return;
+  const hasData = !!(bracket.lastFetchAt || (bracket.phases || []).length || (bracket.winners || []).length);
+  if (!hasData) { bar.style.display = 'none'; return; }
+  bar.style.display = 'flex';
+  if (bracket.mode === 'imported') {
+    const src = ({ startgg: 'start.gg', challonge: 'Challonge', nxgen: 'NXGEN' })[bracket.source] || 'a platform';
+    lbl.innerHTML = `<strong style="color:#60a5fa;">Imported</strong> from ${src} — auto-refreshing scores. Builder edits are held back so the feed isn't overwritten.`;
+    if (editBtn) editBtn.style.display = '';
+  } else if (bracket.mode === 'manual') {
+    lbl.innerHTML = `<strong style="color:#4ade80;">Custom bracket</strong> — hand-built here. No external source will overwrite it.`;
+    if (editBtn) editBtn.style.display = 'none';
+  } else {
+    lbl.textContent = 'Bracket loaded.';
+    if (editBtn) editBtn.style.display = 'none';
+  }
+}
+
+// One-time wiring for the phase/pool chips + "Edit as custom" takeover.
+let _bracketPPWired = false;
+function wireBracketPhasePool() {
+  if (_bracketPPWired) return; _bracketPPWired = true;
+  el('bracket-phase-chips')?.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-phaseid]'); if (!b) return;
+    send('bracket_select_phase', { phaseId: b.dataset.phaseid });
+  });
+  el('bracket-pool-chips')?.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-poolid]'); if (!b) return;
+    send('bracket_select_pool', { poolId: b.dataset.poolid });
+  });
+  el('bracket-edit-as-custom')?.addEventListener('click', () => {
+    const bracket = (currentState && currentState.bracket) || {};
+    if (!confirm('Copy this imported bracket into the custom builder? The live platform import will stop auto-updating this bracket.')) return;
+    _bbHydrated = false;
+    bbHydrate({ ...bracket, mode: 'manual' });   // bypass the imported-skip guard, load into the builder
+    bbSendPhases();                               // persists as manual mode server-side
+  });
+}
+wireBracketPhasePool();
+
+// ── Bracket mini control center (Graphics hub front panel) ──────────────────
+// Live status + clickable phase/pool/view chips right on the scene's front panel, so
+// switching what's on the overlay never requires opening "More settings". Sends the
+// same WS messages as the full editor; renders from state on every broadcast.
+function renderBracketCC(bracket) {
+  const cc = el('gfx-bkt-cc'); if (!cc) return;
+  const b = bracket || {};
+  const hasData = !!(b.lastFetchAt || (b.winners || []).length || (b.schedule || []).length || (b.standings || []).length);
+  const st = el('gfx-bkt-cc-status');
+  if (st) {
+    if (!hasData) st.textContent = 'No bracket loaded yet — pick a source below.';
+    else {
+      const typeLabel = (b.type || '').replace(/_/g, ' ').toLowerCase() || 'bracket';
+      const src = b.mode === 'manual' ? 'custom' : ({ startgg: 'start.gg', challonge: 'Challonge', nxgen: 'NXGEN' })[b.source] || 'imported';
+      st.innerHTML = `<strong style="color:var(--text,#e8eaf0);">${tlEsc(b.title || 'Bracket')}</strong> · ${tlEsc(typeLabel)} · ${tlEsc(src)}${b.visible ? ' · <span style="color:#4ade80;font-weight:800;">ON AIR</span>' : ''}`;
+    }
+  }
+  const chip = (label, active, attrs) =>
+    `<button type="button" class="bk-view-chip${active ? ' is-active' : ''}" ${attrs}>${tlEsc(label)}</button>`;
+  const phases = b.phases || [], pools = b.pools || [];
+  const phRow = el('gfx-bkt-cc-phases'), phWrap = el('gfx-bkt-cc-phase-chips');
+  if (phRow && phWrap) {
+    phRow.style.display = phases.length > 1 ? 'flex' : 'none';
+    phWrap.innerHTML = phases.map((p) => chip(p.name || 'Phase', p.id === b.activePhaseId, `data-ccphase="${tlEsc(p.id)}"`)).join('');
+  }
+  const plRow = el('gfx-bkt-cc-pools'), plWrap = el('gfx-bkt-cc-pool-chips');
+  if (plRow && plWrap) {
+    plRow.style.display = pools.length > 1 ? 'flex' : 'none';
+    plWrap.innerHTML = pools.map((p) => chip(p.name || 'Pool', p.id === b.activePoolId, `data-ccpool="${tlEsc(p.id)}"`)).join('');
+  }
+  const vRow = el('gfx-bkt-cc-views'), vWrap = el('gfx-bkt-cc-view-chips');
+  if (vRow && vWrap) {
+    const hasElim = (b.winners || []).length || (b.losers || []).length;
+    const VIEWS = [
+      ['both', 'Full', hasElim],
+      ['winners', 'Upper', hasElim && (b.losers || []).length],
+      ['losers', 'Lower', (b.losers || []).length],
+      ['finals', 'Finals', hasElim],
+      ['schedule', 'Schedule', (b.schedule || []).length],
+      ['standings', 'Standings', (b.standings || []).length],
+      ['matrix', 'Grid', !!b.matrix],
+    ].filter(([, , show]) => show);
+    vRow.style.display = hasData && VIEWS.length ? 'flex' : 'none';
+    vWrap.innerHTML = VIEWS.map(([v, label]) => chip(label, (b.view || 'both') === v, `data-ccview="${v}"`)).join('');
+  }
+}
+;(function wireBracketCC() {
+  const cc = el('gfx-bkt-cc'); if (!cc) return;
+  cc.addEventListener('click', (e) => {
+    const ph = e.target.closest('[data-ccphase]');
+    if (ph) { send('bracket_select_phase', { phaseId: ph.dataset.ccphase }); return; }
+    const pl = e.target.closest('[data-ccpool]');
+    if (pl) { send('bracket_select_pool', { poolId: pl.dataset.ccpool }); return; }
+    const v = e.target.closest('[data-ccview]');
+    if (v) send('set_bracket_settings', { view: v.dataset.ccview });
+  });
+})();
+
 let _bracketAutoLoadDone = false;
 function applyBracketState(data) {
   const bracket = data.bracket || {};
+  renderBracketCC(bracket);   // mini control center on the Graphics front panel
   bbHydrate(bracket);   // restore a manual bracket into the builder once
 
   const slugEl = el('input-bracket-slug');
@@ -20132,10 +20964,24 @@ function applyBracketState(data) {
   const cbVisible = el('check-bracket-visible');
   if (cbVisible) cbVisible.checked = !!bracket.visible;
 
-  // Reflect the active bracket view on the chips.
+  // Reflect the active bracket view on the chips — and hide the chips whose view has no
+  // data for this bracket (clicking Matrix on an elim bracket just blanks the overlay).
   const bview = bracket.view || 'both';
-  document.querySelectorAll('#bracket-views .bk-view-chip').forEach((c) => c.classList.toggle('is-active', (c.dataset.view || 'both') === bview));
+  const hasSchedule = !!(bracket.schedule && bracket.schedule.length);
+  const hasMatrix = !!bracket.matrix;
+  const hasLosers = !!(bracket.losers && bracket.losers.length);
+  document.querySelectorAll('#bracket-views .bk-view-chip').forEach((c) => {
+    const v = c.dataset.view || 'both';
+    c.classList.toggle('is-active', v === bview);
+    const show = v === 'schedule' ? hasSchedule
+               : v === 'matrix'   ? hasMatrix
+               : (v === 'losers' || v === 'finals') ? hasLosers || v !== 'losers'
+               : true;
+    c.style.display = show ? '' : 'none';
+  });
 
+  renderBracketPhasePool(bracket);
+  renderBracketModeBar(bracket);
   populateMatchPicker(bracket.matches);
 
   const statusEl = el('bracket-status');
@@ -20272,10 +21118,54 @@ function applyStandingsState(data) {
   if (cb && document.activeElement !== cb) cb.checked = !!st.visible;
   const titleEl = el('input-standings-title');
   if (titleEl && document.activeElement !== titleEl) titleEl.value = st.title || '';
+  const subEl = el('input-standings-subtitle');
+  if (subEl && document.activeElement !== subEl) subEl.value = st.subtitle || '';
+  const recEl = el('check-standings-showrecord');
+  if (recEl && document.activeElement !== recEl) recEl.checked = st.showRecord !== false;
   if (document.activeElement?.closest('#standings-rows-list') == null) {
     _standingsRows = Array.isArray(st.rows) ? st.rows.map(r => ({ ...r })) : [];
     renderStandingsRowList();
   }
+  // Keep the league source dropdown in sync with available leagues
+  const lgSel = el('standings-league-src');
+  if (lgSel && document.activeElement !== lgSel) {
+    const cur = lgSel.value;
+    const leagues = (currentState && currentState.leagues) || [];
+    lgSel.innerHTML = leagues.length
+      ? leagues.map(l => `<option value="${l.id}">${_stEsc(l.name || 'League')}</option>`).join('')
+      : '<option value="">No leagues yet</option>';
+    if (cur && leagues.some(l => String(l.id) === String(cur))) lgSel.value = cur;
+  }
+}
+
+function _stEsc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+
+// Build editable standings rows from an in-app league (mirrors lg-push-standings).
+function standingsRowsFromLeague(lg) {
+  if (!lg) return [];
+  const byId = {}; (lg.standings || []).forEach((s) => { byId[s.teamId] = s; });
+  const teamsById = {}; (lg.teams || []).forEach(t => { teamsById[t.id] = t; });
+  const ordered = (lg.standings && lg.standings.length)
+    ? lg.standings.map(s => teamsById[s.teamId]).filter(Boolean)
+    : (lg.teams || []).slice().sort((a, b) => ((byId[b.id] || {}).pts || 0) - ((byId[a.id] || {}).pts || 0));
+  return ordered.map((tm, i) => {
+    const s = byId[tm.id] || {};
+    const r = (typeof lgResolveTeam === 'function') ? lgResolveTeam(tm) : { name: tm.teamName, logo: tm.logo };
+    return { placement: i + 1, name: r.name || tm.teamName || 'Team', logo: r.logo || null, wins: s.w || 0, losses: s.l || 0, points: s.pts || 0 };
+  });
+}
+
+// Build editable standings rows from the loaded start.gg event / bracket.
+function standingsRowsFromBracket() {
+  const src = (currentState && currentState.bracket && Array.isArray(currentState.bracket.standings)) ? currentState.bracket.standings : [];
+  return src.map((r, i) => ({
+    placement: Number(r.placement) || (i + 1),
+    name: r.name || 'TBD',
+    logo: r.logo || null,
+    wins: r.wins ?? null,
+    losses: r.losses ?? null,
+    points: r.points ?? null
+  }));
 }
 
 el('check-standings-visible')?.addEventListener('change', function () {
@@ -20294,9 +21184,40 @@ el('btn-standings-clear-manual')?.addEventListener('click', () => {
   renderStandingsRowList();
 });
 
+el('check-standings-showrecord')?.addEventListener('change', function () {
+  send('set_standings', { showRecord: this.checked });
+});
+
+el('btn-standings-load-bracket')?.addEventListener('click', () => {
+  const rows = standingsRowsFromBracket();
+  const st = el('standings-status');
+  if (!rows.length) { if (st) { st.textContent = 'No start.gg / bracket standings loaded yet.'; st.style.color = '#f0a5a5'; } return; }
+  _standingsRows = rows;
+  renderStandingsRowList();
+  const empty = el('standings-manual-empty'); if (empty) empty.style.display = 'none';
+  if (st) { st.textContent = `Loaded ${rows.length} team(s) from start.gg / bracket — review, then Save.`; st.style.color = '#9ae6b4'; setTimeout(() => { st.textContent = ''; }, 4000); }
+});
+
+el('btn-standings-load-league')?.addEventListener('click', () => {
+  const id = el('standings-league-src')?.value || '';
+  const lg = ((currentState && currentState.leagues) || []).find(l => String(l.id) === String(id));
+  const st = el('standings-status');
+  if (!lg) { if (st) { st.textContent = 'Pick a league first.'; st.style.color = '#f0a5a5'; } return; }
+  const rows = standingsRowsFromLeague(lg);
+  if (!rows.length) { if (st) { st.textContent = 'That league has no teams / standings yet.'; st.style.color = '#f0a5a5'; } return; }
+  _standingsRows = rows;
+  renderStandingsRowList();
+  const empty = el('standings-manual-empty'); if (empty) empty.style.display = 'none';
+  const titleEl = el('input-standings-title');
+  if (titleEl && !titleEl.value.trim()) titleEl.value = [lg.name, lg.season].filter(Boolean).join(' — ');
+  if (st) { st.textContent = `Loaded ${rows.length} team(s) from ${lg.name || 'league'} — review, then Save.`; st.style.color = '#9ae6b4'; setTimeout(() => { st.textContent = ''; }, 4000); }
+});
+
 el('btn-standings-save')?.addEventListener('click', () => {
   const title = (el('input-standings-title')?.value || '').trim();
-  send('set_standings', { title, rows: _standingsRows });
+  const subtitle = (el('input-standings-subtitle')?.value || '').trim();
+  const showRecord = el('check-standings-showrecord') ? el('check-standings-showrecord').checked : true;
+  send('set_standings', { title, subtitle, showRecord, rows: _standingsRows });
   const st = el('standings-status');
   if (st) { st.textContent = 'Saved.'; st.style.color = '#9ae6b4'; setTimeout(() => { st.textContent = ''; }, 2500); }
 });
@@ -21552,7 +22473,7 @@ function applyCsgoState(data) {
 }
 
 // ── OBS settings ────────────────────────────────────────────────────────────
-const OBS_SCENE_KEYS = ['inGame', 'replay', 'postGame', 'break', 'commercial', 'casters'];
+const OBS_SCENE_KEYS = ['inGame', 'replay', 'postGame', 'break', 'commercial', 'casters', 'bracket'];
 let _lastObsSceneSig = '';
 
 function getObsPayload() {
@@ -21804,6 +22725,22 @@ function applyObsState(data) {
     }
   }
 
+  // Integrations store-card badge — reflects the REAL connection state.
+  const obsCard = el('obs-card-badge');
+  if (obsCard) {
+    const st = obs.connected ? ['Connected', '#4ade80', 'rgba(74,222,128,.1)']
+             : obs.enabled   ? ['Connecting…', '#fbbf24', 'rgba(251,191,36,.1)']
+             :                 ['Setup', '#fbbf24', 'rgba(251,191,36,.1)'];
+    obsCard.textContent = st[0]; obsCard.style.color = st[1]; obsCard.style.background = st[2];
+  }
+  const sggCard = el('startgg-card-badge');
+  if (sggCard) {
+    const has = !!(data.startgg && data.startgg.hasToken);
+    sggCard.textContent = has ? 'Connected' : 'Setup';
+    sggCard.style.color = has ? '#4ade80' : '#fbbf24';
+    sggCard.style.background = has ? 'rgba(74,222,128,.1)' : 'rgba(251,191,36,.1)';
+  }
+
   // Status line
   const resultEl = el('obs-result');
   if (resultEl) {
@@ -21840,6 +22777,46 @@ el('btn-obs-test')?.addEventListener('click', () => {
 el('btn-obs-refresh-scenes')?.addEventListener('click', () => {
   send('obs_refresh_scenes');
 });
+
+// ── vMix settings (full alternative production backend) ──────────────────────
+function getVmixPayload() {
+  return {
+    enabled: !!el('check-vmix-enabled')?.checked,
+    host: (el('input-vmix-host')?.value || '').trim() || '127.0.0.1',
+    port: parseInt(el('input-vmix-port')?.value, 10) || 8088,
+  };
+}
+el('btn-vmix-save')?.addEventListener('click', () => {
+  send('set_vmix_settings', getVmixPayload());
+  const r = el('vmix-result'); if (r) { r.textContent = 'Saved.'; r.style.color = '#4ade80'; setTimeout(() => { r.textContent = ''; }, 2500); }
+});
+el('check-vmix-enabled')?.addEventListener('change', () => send('set_vmix_settings', getVmixPayload()));
+el('btn-vmix-test')?.addEventListener('click', () => {
+  send('set_vmix_settings', getVmixPayload());
+  send('vmix_test_connection');
+  const r = el('vmix-result'); if (r) { r.textContent = 'Testing connection…'; r.style.color = 'var(--muted)'; }
+});
+document.querySelectorAll('#switcher-target-seg .seg-btn').forEach((b) => b.addEventListener('click', () => send('set_switcher_target', { target: b.dataset.target })));
+
+function applyVmixState(data) {
+  const v = data.vmix || {};
+  const cb = el('check-vmix-enabled'); if (cb && document.activeElement !== cb) cb.checked = !!v.enabled;
+  const h = el('input-vmix-host'); if (h && document.activeElement !== h) h.value = v.host || '127.0.0.1';
+  const p = el('input-vmix-port'); if (p && document.activeElement !== p) p.value = v.port || 8088;
+  const target = (data.switcher && data.switcher.target) || 'obs';
+  document.querySelectorAll('#switcher-target-seg .seg-btn').forEach((b) => b.classList.toggle('active', b.dataset.target === target));
+  const st = el('vmix-live-status');
+  if (st) {
+    if (!v.enabled) st.textContent = '';
+    else if (v.connected) {
+      const prog = v.active != null ? ('#' + v.active) : '—', prev = v.preview != null ? ('#' + v.preview) : '—';
+      st.innerHTML = `<span style="color:#4ade80;">● Connected</span> — vMix ${_stEsc(v.version || '')} ${v.edition ? '(' + _stEsc(v.edition) + ')' : ''} · ${(v.inputs || []).length} inputs · PGM ${prog} / PRV ${prev}`
+        + (v.streaming ? ' · <span style="color:#ef4444;">STREAMING</span>' : '') + (v.recording ? ' · <span style="color:#ef4444;">REC</span>' : '');
+    } else {
+      st.innerHTML = `<span style="color:#f0a5a5;">● ${_stEsc(v.lastError || 'Not connected')}</span>`;
+    }
+  }
+}
 
 el('btn-obs-clear-password')?.addEventListener('click', () => {
   const btn = el('btn-obs-clear-password');
@@ -23634,6 +24611,7 @@ const FLOW_TRIGGER_GROUPS = [
   ]},
   { label: 'OBS', items: [
     ['obs_scene_changed',     'Scene changes to…'],
+    ['obs_scene_dwell',       'On scene for N seconds…'],
     ['obs_stream_started',    'Stream goes live'],
     ['obs_stream_stopped',    'Stream ends'],
     ['obs_recording_started', 'Recording starts'],
@@ -23698,6 +24676,9 @@ function flowTriggerParamsHtml(trig) {
       return `<select class="ft-param input-select" data-k="winner" style="width:100px;"><option value="any"${(!p.winner||p.winner==='any')?' selected':''}>Either</option><option value="CT"${p.winner==='CT'?' selected':''}>CT</option><option value="T"${p.winner==='T'?' selected':''}>T</option></select>`;
     case 'obs_scene_changed':
       return (() => { const scenes=(currentState.obs&&currentState.obs.availableScenes)||[]; return `<select class="ft-param input-select" data-k="scene" style="width:160px;"><option value="">Any scene</option>${scenes.map(s=>`<option value="${poEsc(s)}"${p.scene===s?' selected':''}>${poEsc(s)}</option>`).join('')}</select>`; })();
+    case 'obs_scene_dwell':
+      return (() => { const scenes=(currentState.obs&&currentState.obs.availableScenes)||[]; return `<select class="ft-param input-select" data-k="scene" style="width:150px;" title="Which scene to watch (any = whatever's on program)"><option value="">Any scene</option>${scenes.map(s=>`<option value="${poEsc(s)}"${p.scene===s?' selected':''}>${poEsc(s)}</option>`).join('')}</select>
+        <input type="number" class="ft-param input-text" data-k="seconds" min="1" max="7200" value="${p.seconds||30}" style="width:64px;" title="Fire after the scene has been on program this long (a scene change before then cancels it)"> <span style="font-size:11px;color:var(--muted);">sec on scene</span>`; })();
     case 'obs_source_shown':
     case 'obs_source_hidden':
       return `<input type="text" class="ft-param input-text" data-k="sourceName" placeholder="source name (blank=any)" value="${poEsc(p.sourceName||'')}" style="width:180px;">`;
@@ -23736,6 +24717,7 @@ function flowTriggerParamsHtml(trig) {
 const FLOW_ACTION_GROUPS = [
   { label: 'OBS', items: [
     ['obs_scene',           'Cut to scene'],
+    ['obs_scene_previous',  'Cut back to previous scene'],
     ['obs_set_transition',  'Set scene transition'],
     ['obs_start_stream',    'Start stream'],
     ['obs_stop_stream',     'Stop stream'],
@@ -23752,6 +24734,18 @@ const FLOW_ACTION_GROUPS = [
     ['obs_set_volume',      'Set audio input volume (dB)'],
     ['obs_filter_enable',   'Enable source filter'],
     ['obs_filter_disable',  'Disable source filter'],
+  ]},
+  { label: 'vMix', items: [
+    ['vmix_cut',            'Cut / transition to input'],
+    ['vmix_overlay',        'Overlay channel In / Out'],
+    ['vmix_fade_to_black',  'Fade to black'],
+    ['vmix_start_stream',   'Start streaming'],
+    ['vmix_stop_stream',    'Stop streaming'],
+    ['vmix_start_record',   'Start recording'],
+    ['vmix_stop_record',    'Stop recording'],
+    ['vmix_replay_last',    'Play last replay'],
+    ['vmix_set_text',       'Set title text'],
+    ['vmix_function',       'Run vMix function (advanced)'],
   ]},
   { label: 'Twitch', items: [
     ['twitch_prediction_create',  'Create prediction'],
@@ -23866,6 +24860,16 @@ function flowActionLabel(a) {
     case 'obs_playback_start':  return 'Play: "' + (p.inputName||'?') + '"';
     case 'obs_playback_stop':   return 'Stop: "' + (p.inputName||'?') + '"';
     case 'obs_playback_pause':  return 'Pause: "' + (p.inputName||'?') + '"';
+    case 'vmix_cut':            return 'vMix: ' + (p.transition||'Cut') + ' → ' + (p.input||'?');
+    case 'vmix_overlay':        return 'vMix Overlay ' + (p.channel||1) + ' ' + (p.action||'In');
+    case 'vmix_fade_to_black':  return 'vMix: Fade to black';
+    case 'vmix_start_stream':   return 'vMix: Start stream' + (p.value!==''&&p.value!=null?' ('+p.value+')':'');
+    case 'vmix_stop_stream':    return 'vMix: Stop stream';
+    case 'vmix_start_record':   return 'vMix: Start recording';
+    case 'vmix_stop_record':    return 'vMix: Stop recording';
+    case 'vmix_replay_last':    return 'vMix: Play last replay';
+    case 'vmix_set_text':       return 'vMix text: ' + (p.selectedName||'?') + ' = "' + (p.value||'').slice(0,16) + '"';
+    case 'vmix_function':       return 'vMix: ' + (p.function||'?') + (p.input?' ('+p.input+')':'');
     default: return allActions[a.type] || a.type;
   }
 }
@@ -23879,6 +24883,28 @@ function flowActionParamsHtml(a) {
       return `<input type="number" class="fa-param input-text" data-k="ms" min="0" value="${p.ms||1000}" style="width:80px;"> <span style="font-size:11px;color:var(--muted);">ms</span>`;
     case 'obs_scene':
       return `<select class="fa-param input-select" data-k="scene" style="width:170px;">${scenes.map(s=>`<option value="${poEsc(s)}"${p.scene===s?' selected':''}>${poEsc(s)}</option>`).join('')||'<option value="">(OBS offline)</option>'}</select>`;
+    case 'vmix_cut': {
+      const trans = ['Cut','Fade','Merge','Wipe','Slide','Fly','CrossZoom','Cube','CubeZoom','Stinger1','Stinger2','Stinger3','Stinger4'];
+      return `<input type="text" class="fa-param input-text" data-k="input" placeholder="input # / name / GUID" value="${poEsc(p.input||'')}" style="width:150px;">
+        <select class="fa-param input-select" data-k="transition" style="width:110px;">${trans.map(t=>`<option value="${t}"${(p.transition||'Cut')===t?' selected':''}>${t}</option>`).join('')}</select>
+        <input type="number" class="fa-param input-text" data-k="duration" min="0" placeholder="ms" value="${p.duration||''}" style="width:64px;" title="Transition duration in ms (blank = default)">`;
+    }
+    case 'vmix_overlay':
+      return `<span style="font-size:11px;color:var(--muted);">Ch</span> <select class="fa-param input-select" data-k="channel" style="width:56px;">${[1,2,3,4].map(n=>`<option value="${n}"${String(p.channel||1)==String(n)?' selected':''}>${n}</option>`).join('')}</select>
+        <select class="fa-param input-select" data-k="action" style="width:90px;">${['In','Out','Off','toggle'].map(a=>`<option value="${a}"${(p.action||'In')===a?' selected':''}>${a}</option>`).join('')}</select>
+        <input type="text" class="fa-param input-text" data-k="input" placeholder="input (optional)" value="${poEsc(p.input||'')}" style="width:130px;">`;
+    case 'vmix_start_stream':
+    case 'vmix_stop_stream':
+      return `<input type="text" class="fa-param input-text" data-k="value" placeholder="destination # (blank = all)" value="${poEsc(p.value||'')}" style="width:150px;" title="0-4 for a specific streaming destination, blank for all">`;
+    case 'vmix_set_text':
+      return `<input type="text" class="fa-param input-text" data-k="input" placeholder="title input # / name" value="${poEsc(p.input||'')}" style="width:130px;">
+        <input type="text" class="fa-param input-text" data-k="selectedName" placeholder="field e.g. Headline.Text" value="${poEsc(p.selectedName||'')}" style="width:150px;">
+        <input type="text" class="fa-param input-text" data-k="value" placeholder="text" value="${poEsc(p.value||'')}" style="width:150px;">`;
+    case 'vmix_function':
+      return `<input type="text" class="fa-param input-text" data-k="function" placeholder="Function name" value="${poEsc(p.function||'')}" style="width:150px;">
+        <input type="text" class="fa-param input-text" data-k="input" placeholder="Input (opt)" value="${poEsc(p.input||'')}" style="width:110px;">
+        <input type="text" class="fa-param input-text" data-k="value" placeholder="Value (opt)" value="${poEsc(p.value||'')}" style="width:110px;">
+        <input type="number" class="fa-param input-text" data-k="duration" min="0" placeholder="ms" value="${p.duration||''}" style="width:60px;">`;
     case 'obs_stream_marker':
       return `<input type="text" class="fa-param input-text" data-k="description" placeholder="marker description" value="${poEsc(p.description||'')}" style="width:180px;">`;
     case 'overlay_lower_third':
@@ -24565,17 +25591,17 @@ const FLOW_TEMPLATES = [
     enabled: true
   },
   {
-    name: 'Discord announce on match start',
-    triggers: [{ id: 'tr0', type: 'rl_match_started', params: {} }],
+    name: 'Discord announce on kickoff',
+    triggers: [{ id: 'tr0', type: 'rl_round_started', params: {} }],
     conditions: [],
-    actions: [{ id: 'ac0', type: 'send_discord_webhook', params: { url: '', content: 'Match starting: {{blue_team}} vs {{orange_team}}' }, delay: 0 }],
+    actions: [{ id: 'ac0', type: 'send_discord_webhook', params: { url: '', content: 'Match live: {{blue_team}} vs {{orange_team}}' }, delay: 0 }],
     enabled: true
   },
   {
     name: 'Scene cut on overtime',
-    triggers: [{ id: 'tr0', type: 'rl_overtime_started', params: {} }],
+    triggers: [{ id: 'tr0', type: 'rl_overtime', params: {} }],
     conditions: [],
-    actions: [{ id: 'ac0', type: 'obs_switch_scene', params: { scene: 'Overtime' }, delay: 0 }],
+    actions: [{ id: 'ac0', type: 'obs_scene', params: { scene: 'Overtime' }, delay: 0 }],
     enabled: true
   },
   {
@@ -24586,10 +25612,10 @@ const FLOW_TEMPLATES = [
     enabled: true
   },
   {
-    name: 'Hourly scene refresh (cron)',
+    name: 'Hourly overlay refresh (cron)',
     triggers: [{ id: 'tr0', type: 'cron_schedule', params: { expr: '0 * * * *' } }],
     conditions: [],
-    actions: [{ id: 'ac0', type: 'gfx_push_live', params: { scene: '' }, delay: 0 }],
+    actions: [{ id: 'ac0', type: 'overlay_reload', params: {}, delay: 0 }],
     enabled: false
   },
   {
@@ -24727,7 +25753,7 @@ function renderProdQuickScenes() {
     tile.appendChild(pinBtn);
     tile.appendChild(label);
     tile.addEventListener('click', () => {
-      send('obs_switch_scene', { scene: name });
+      send('obs_switch_scene', { sceneName: name });
     });
     return tile;
   }
@@ -25511,8 +26537,16 @@ function renderQrailStartgg(data) {
   }
 
   if (!queue.length) {
+    // The queue only contains sets the TO has ATTACHED TO A STREAM in start.gg admin —
+    // a connected event with nothing marked shows empty forever. Say so, with the fix.
+    const slug = (currentState?.startgg?.tournamentSlug || '').trim();
+    const adminLink = slug
+      ? `<br><a href="https://www.start.gg/admin/tournament/${encodeURIComponent(slug)}/stream-queue" target="_blank" style="color:var(--cp-accent);text-decoration:underline;">Open start.gg stream queue admin ↗</a>`
+      : '';
     list.innerHTML = evName
-      ? '<div class="qsgg-empty">' + (queueEnabled ? 'Waiting for matches to be queued…' : 'Enable queue polling on the Dashboard to track live sets.') + '</div>'
+      ? '<div class="qsgg-empty">' + (queueEnabled
+          ? 'No sets on the stream queue. On start.gg, attach sets to your stream (Match Settings → Stream) and they’ll appear here.' + adminLink
+          : 'Enable queue polling on the Dashboard to track live sets.') + '</div>'
       : '<div class="qsgg-empty">No event loaded.<br><span class="qsgg-goto-dash" style="color:var(--cp-accent);cursor:pointer;text-decoration:underline;">Load one in Dashboard ↗</span></div>';
     list.querySelector('.qsgg-goto-dash')?.addEventListener('click', () => { document.querySelector('.tab-btn[data-tab="principal"]')?.click(); });
     return;
@@ -26281,14 +27315,20 @@ function syncGfxAutocutScene(obs) {
       scenes.map((s) => `<option value="${String(s).replace(/"/g, '&quot;')}">${String(s).replace(/</g, '&lt;')}</option>`).join('');
   }
   if (want && scenes.includes(want) && document.activeElement !== sel) sel.value = want;
+  // Keep the GFX topbar's OBS chip + live badge in step with server state (runs per full_state).
+  if (typeof window._gfxRefreshTopBar === 'function') window._gfxRefreshTopBar();
 }
 el('gfx-autocut-scene')?.addEventListener('change', function () {
   try { localStorage.setItem(GFX_AUTOCUT_SCENE_KEY, this.value || ''); } catch {}
+  if (typeof window._gfxRefreshTopBar === 'function') window._gfxRefreshTopBar();
 });
 (function initGfxAutocutToggle() {
   const t = el('gfx-autocut-on'); if (!t) return;
   try { t.checked = localStorage.getItem(GFX_AUTOCUT_ON_KEY) === '1'; } catch {}
-  t.addEventListener('change', function () { try { localStorage.setItem(GFX_AUTOCUT_ON_KEY, this.checked ? '1' : '0'); } catch {} });
+  t.addEventListener('change', function () {
+    try { localStorage.setItem(GFX_AUTOCUT_ON_KEY, this.checked ? '1' : '0'); } catch {}
+    if (typeof window._gfxRefreshTopBar === 'function') window._gfxRefreshTopBar();   // OBS chip warn state
+  });
 })();
 
 function sendToScreen(bus) {
@@ -27447,6 +28487,7 @@ function connect() {
       _r('renderQuickToolbar',   () => renderQuickToolbar(msg.data));
       _r('renderDashMiniPanels', () => renderDashMiniPanels(msg.data));
       _r('renderQrailScenes',    () => renderQrailScenes(msg.data));
+      _r('renderQuickPanel',     () => renderQuickPanel(msg.data));
       _r('renderQrailStartgg',  () => renderQrailStartgg(msg.data));
       _r('renderGoLive',       () => renderGoLive(msg.data));
       _r('renderUpNext',       () => renderUpNext(msg.data));
@@ -27618,6 +28659,20 @@ function connect() {
         const elx = el(id);
         if (elx) { elx.textContent = msg.data.message || ''; elx.style.color = color; }
       });
+    } else if (msg.type === 'vmix-result') {
+      const elx = el('vmix-result');
+      if (elx) { elx.textContent = msg.data.message || ''; elx.style.color = msg.data.ok ? '#9ae6b4' : '#f56565'; }
+    } else if (msg.type === 'autofollow-pushed') {
+      showToast(msg.data.message || 'Auto-follow updated the match.', '#8b5cf6', 6000);
+    } else if (msg.type === 'obs-ensure-result') {
+      showToast(msg.data.message || (msg.data.ok ? 'Added to OBS.' : 'OBS error'), msg.data.ok ? '#22c55e' : '#c53030', 6000);
+    } else if (msg.type === 'twitch_auth_invalid') {
+      // Server halted EventSub/chat/stream-poll because the OAuth token expired
+      // (implicit grant = no refresh). Without this toast the producer is silently
+      // logged out mid-show and only notices when alerts/stats stop.
+      showToast('Twitch session expired — reconnect in Integrations → Twitch to resume alerts, chat and stream stats.', '#c53030', 12000);
+      const tw = el('twitch-test-result');
+      if (tw) { tw.textContent = 'Token expired — sign in with Twitch again to reconnect.'; tw.style.color = '#f56565'; }
     } else if (msg.type === 'rl-ui-result') {
       const st = el('rl-ui-hide-status');
       if (st) {
@@ -27882,6 +28937,7 @@ el('btn-twitch-login')?.addEventListener('click', () => {
     // Step 4: Check if window opened successfully
     if (!oauthWindow) {
       console.error('[OAuth] Failed to open OAuth window - popup may be blocked');
+      showToast('Could not open the Twitch login window — allow popups for this app and try again.', '#c53030', 7000);
       return;
     }
 
@@ -27922,10 +28978,12 @@ el('btn-twitch-login')?.addEventListener('click', () => {
             send('request_state');
           } catch (err) {
             console.error('[OAuth] Error sending token to server:', err);
+            showToast('Twitch login succeeded but saving the token failed — try again.', '#c53030', 7000);
           }
         } else if (tokenRes.status === 401) {
           clearInterval(pollInterval);
           oauthWindow?.close();
+          showToast('Twitch login session expired — click "Sign in with Twitch" again.', '#c53030', 7000);
         }
         // 202 = pending, keep polling
       } catch (err) {
@@ -27940,6 +28998,7 @@ el('btn-twitch-login')?.addEventListener('click', () => {
       }
       if (oauthWindow && !oauthWindow.closed) {
         oauthWindow.close();
+        showToast('Twitch login timed out — click "Sign in with Twitch" to retry.', '#fbbf24', 7000);
       }
     }, 600000);
 
