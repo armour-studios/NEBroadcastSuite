@@ -2579,6 +2579,7 @@ function buildLiveState() {
     flows: state.flows || [],
     flowVars: state.flowVars || {},
     flowFireLog: _flowFireLog,
+    autoLog: _autoLog,   // unified automation timeline (What's Armed panel)
     showRoster: state.showRoster || [],
     background: state.background,
     overlays: overlayClientInfo(),   // live overlay browser-source count for the pre-flight checklist
@@ -4326,7 +4327,7 @@ function syncActiveBracketPhase() {
   state.bracket.standings = (pool ? pool.standings : ph.standings) || [];
   state.bracket.schedule = (pool ? pool.schedule : ph.schedule) || [];   // Swiss/Round-Robin round-by-round pairings
   state.bracket.roster = (pool ? pool.roster : ph.roster) || [];
-  state.bracket.matrix = (pool ? pool.matrix : null) || null;
+  state.bracket.matrix = (pool ? pool.matrix : (ph.matrix || null)) || null;   // ph.matrix: single-group manual Round Robin (no pools split)
 
   // Never leave the saved view pointing at data this bracket doesn't have — a stale "matrix"
   // on an elim bracket rendered the overlay as a blank page with no clue why.
@@ -6681,6 +6682,7 @@ async function _fireFlow(flow, triggerData) {
   if (!_flowFireLog[flow.id]) _flowFireLog[flow.id] = [];
   _flowFireLog[flow.id].unshift(now);
   if (_flowFireLog[flow.id].length > 20) _flowFireLog[flow.id].length = 20;
+  logAuto('flow', `Flow fired: ${flow.name || flow.id}${triggerData && triggerData.dwellSec ? ` (after ${triggerData.dwellSec}s on "${triggerData.scene}")` : ''}`);
 
   const repeatCount = Math.max(1, Number(flow.repeatCount) || 1);
   const repeatDelay = Math.max(0, Number(flow.repeatDelay) || 0);
@@ -6709,15 +6711,19 @@ async function _executeFlowAction(action, ctx) {
       break;
     case 'obs_scene':
       // AI Shield promises to pause ALL scene automation — flows included.
-      if (aiShielded()) { console.log('[Flow] obs_scene skipped — AI shield engaged'); break; }
-      if (obsClient && obsClient.isConnected() && p.scene)
+      if (aiShielded()) { logAuto('flow', `Flow scene cut to "${p.scene}" BLOCKED — AI shield engaged`); break; }
+      if (obsClient && obsClient.isConnected() && p.scene) {
+        logAuto('flow', `Flow cut to "${p.scene.trim()}"`);
         obsClient.switchScene(p.scene.trim());
+      }
       break;
     // Switch back to whatever scene was on program before the last cut (ASS-style "previous scene").
     case 'obs_scene_previous':
-      if (aiShielded()) { console.log('[Flow] obs_scene_previous skipped — AI shield engaged'); break; }
-      if (obsClient && obsClient.isConnected() && state.obs.previousScene)
+      if (aiShielded()) { logAuto('flow', 'Flow previous-scene cut BLOCKED — AI shield engaged'); break; }
+      if (obsClient && obsClient.isConnected() && state.obs.previousScene) {
+        logAuto('flow', `Flow cut back to previous scene "${state.obs.previousScene}"`);
         obsClient.switchScene(state.obs.previousScene);
+      }
       break;
     case 'obs_save_replay':
       if (obsClient && obsClient.isConnected())
@@ -7236,6 +7242,16 @@ function filterSwitchableScenes(scenes) {
   return (Array.isArray(scenes) ? scenes : []).filter((s) => !/^═/.test(s) && !/^=>/.test(s));
 }
 
+// ── Unified automation activity log ─────────────────────────────────────────
+// One timeline of every action AUTOMATION took (RL cuts, countdown handoffs, flow fires,
+// flow scene switches) so producers can always answer "why did the scene just change?".
+// Session-only ring buffer, broadcast in live state, rendered by the What's Armed panel.
+const _autoLog = [];
+function logAuto(kind, message) {
+  _autoLog.unshift({ ts: Date.now(), kind, message: String(message).slice(0, 200) });
+  if (_autoLog.length > 50) _autoLog.length = 50;
+}
+
 async function disconnectObs() {
   if (!obsClient) return;
   try { await obsClient.disconnect(); } catch (e) { /* ignore */ }
@@ -7280,6 +7296,7 @@ function obsSwitchSceneName(name) {
   const sceneName = (name || '').trim();
   if (!sceneName) return;
   console.log(`[OBS] Countdown auto-switch → ${sceneName}`);
+  logAuto('countdown', `Countdown ended — cut to "${sceneName}"`);
   obsClient.switchScene(sceneName);
 }
 
@@ -7443,6 +7460,7 @@ function broadcastRlSceneResult(phase, sceneName, result) {
   const message = result.ok
     ? `Cut to "${sceneName}" (${phase})`
     : `${phase === 'kickoff' ? 'Kickoff' : 'Post-game'} cut to "${sceneName}" skipped — ${RL_SCENE_FAIL_MESSAGES[result.reason] || result.reason}`;
+  logAuto('rl-scene', message);
   broadcast(bridgeClients, { type: 'rl-scene-result', data: { ok: !!result.ok, phase, message } });
 }
 
@@ -12497,7 +12515,7 @@ function handleControlMessage(msg, ws) {
         id: 'phase1', name: 'Bracket', type: p.type || 'SINGLE_ELIMINATION',
         winners: p.winners || [], losers: p.losers || [], finals: p.finals || [],
         standings: p.standings || [], schedule: p.schedule || [], roster: p.roster || [],
-        pools: Array.isArray(p.pools) ? p.pools : []
+        pools: Array.isArray(p.pools) ? p.pools : [], matrix: p.matrix || null
       }];
       state.bracket.activePhaseId = 'phase1';
       if (typeof p.title === 'string') state.bracket.title = p.title;

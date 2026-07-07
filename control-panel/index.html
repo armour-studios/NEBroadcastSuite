@@ -2717,6 +2717,24 @@
     <div class="ai-telemetry-status" id="ai-telemetry-status"></div>
   </div>
 
+  <!-- ── What's Armed — every automation that can act on its own, plus what actually fired ── -->
+  <section class="section" id="whats-armed" style="margin-top:14px;">
+    <div style="display:flex; align-items:baseline; gap:10px; flex-wrap:wrap; margin-bottom:10px;">
+      <h3 class="section-title" style="margin:0;">What's Armed</h3>
+      <span class="section-desc" style="margin:0;">Everything that can change your broadcast without a click — and a live log of what automation actually did.</span>
+    </div>
+    <div style="display:grid; grid-template-columns:minmax(280px,1fr) minmax(320px,1.4fr); gap:16px;">
+      <div>
+        <p style="font-size:10px; font-weight:800; letter-spacing:.12em; text-transform:uppercase; color:var(--muted); margin:0 0 8px;">Armed now</p>
+        <div id="armed-list" style="display:flex; flex-direction:column; gap:6px;"></div>
+      </div>
+      <div>
+        <p style="font-size:10px; font-weight:800; letter-spacing:.12em; text-transform:uppercase; color:var(--muted); margin:0 0 8px;">Automation activity</p>
+        <div id="auto-log" style="display:flex; flex-direction:column; gap:4px; max-height:260px; overflow-y:auto; font-size:12px;"></div>
+      </div>
+    </div>
+  </section>
+
 </div>
 </div>
 
@@ -5618,6 +5636,9 @@
         <button class="btn btn-secondary btn-sm" id="bb-generate">Generate</button>
         <button class="btn btn-ghost btn-sm" id="bb-seed" title="Fill empty slots from your saved/seeded teams">Seed teams</button>
         <button class="btn btn-ghost btn-sm bb-swiss-only" id="bb-swiss-pair" title="Pair empty Swiss matches by current standings" style="display:none;">Auto-pair</button>
+        <label class="field-label bb-table-only" style="margin:0; display:none;" for="bb-pool-count">Pools</label>
+        <input type="number" id="bb-pool-count" class="input-text bb-table-only" min="1" max="16" value="1" style="width:56px; display:none;" title="Split this phase's roster into N parallel Round Robin / Swiss pools (Start.gg &quot;Pool Play&quot;) — 1 = a single group.">
+        <button class="btn btn-ghost btn-sm bb-table-only" id="bb-pool-split" style="display:none;" title="Split (or re-split) the roster into the chosen number of pools">Split into pools</button>
         <label class="qt-toggle" title="Push every change to the overlay automatically"><span>Auto-save</span><span class="switch"><input type="checkbox" id="bb-autosave" checked><span class="slider"></span></span></label>
         <button class="btn btn-blue btn-sm" id="bb-save">Save Bracket</button>
         <button class="btn btn-danger btn-sm" id="bb-clear">Clear</button>
@@ -5629,6 +5650,7 @@
     </p>
     <datalist id="bb-teams-datalist"></datalist>
     <div id="bb-phases" class="bb-phases"></div>
+    <div id="bb-pools" class="bb-phases" style="display:none;"></div>
     <div id="bb-roster" class="bb-roster" style="display:none;"></div>
     <div id="bb-board" class="bb-board"></div>
     <div id="bb-standings" class="bb-standings-wrap" style="display:none;"></div>
@@ -7240,6 +7262,45 @@ PacketSendRate=10</pre>
     </section>
   </div>
 
+</div>
+
+<!-- ══════════════════ SWITCHER TAB ══════════════════ -->
+<div id="tab-switcher-content" class="tab-content">
+  <div class="page-head"><h1>Switcher</h1><p>Program / preview production control — cut &amp; fade between sources, preview what's next, and mix audio. Drives whichever backend is live (OBS Studio Mode or vMix).</p></div>
+
+  <div class="sw-topbar">
+    <div class="sw-seg" id="sw-target-seg">
+      <button type="button" class="sw-seg-btn" data-target="obs">OBS</button>
+      <button type="button" class="sw-seg-btn" data-target="vmix">vMix</button>
+    </div>
+    <span class="sw-status" id="sw-status"></span>
+  </div>
+
+  <!-- Program / Preview monitors + take controls -->
+  <div class="sw-monitors">
+    <div class="sw-mon sw-mon-preview">
+      <div class="sw-mon-head"><span class="sw-mon-tag sw-tag-prev">PREVIEW</span><span class="sw-mon-name" id="sw-prev-name">—</span></div>
+      <div class="sw-mon-screen" id="sw-prev-screen"><span class="sw-mon-ph">No preview</span></div>
+    </div>
+    <div class="sw-take">
+      <button type="button" class="sw-take-btn sw-cut" id="sw-cut" title="Cut preview to program instantly">CUT</button>
+      <button type="button" class="sw-take-btn sw-auto" id="sw-fade" title="Fade preview to program">FADE</button>
+      <div class="sw-take-dur"><input type="number" id="sw-fade-dur" value="500" min="0" step="50"><span>ms</span></div>
+    </div>
+    <div class="sw-mon sw-mon-program">
+      <div class="sw-mon-head"><span class="sw-mon-tag sw-tag-prog">PROGRAM</span><span class="sw-mon-name" id="sw-prog-name">—</span></div>
+      <div class="sw-mon-screen" id="sw-prog-screen"><span class="sw-mon-ph">On air</span></div>
+    </div>
+  </div>
+
+  <!-- Scrollable lower area: multiview grid + audio mixer (monitors + take stay fixed above) -->
+  <div class="sw-lower">
+    <div class="sw-section-label">Sources <span class="sw-hint">click → load to Preview · double-click → cut to Program &nbsp;·&nbsp; <kbd class="sw-kbd">Enter</kbd> CUT&nbsp; <kbd class="sw-kbd">Space</kbd> FADE</span></div>
+    <div class="sw-grid" id="sw-grid"></div>
+
+    <div class="sw-section-label">Audio Mixer <button class="btn btn-ghost btn-xs" id="sw-audio-refresh" style="margin-left:8px;">Refresh</button></div>
+    <div class="sw-mixer" id="sw-mixer"></div>
+  </div>
 </div>
 
 <!-- ══════════════════ STATS TAB ══════════════════ -->

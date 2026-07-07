@@ -12830,6 +12830,69 @@ function renderScenePresets(data) {
   });
 }
 
+// ── What's Armed — every automation that can act on its own + the unified activity log ──
+let _armedSig = '', _autoLogSig = '';
+function renderWhatsArmed(data) {
+  const list = el('armed-list');
+  if (list) {
+    const items = [];
+    const add = (kind, text, warn) => items.push({ kind, text, warn: !!warn });
+    if (data.ai && data.ai.shield) add('SHIELD', 'AI Shield ENGAGED — all scene automation paused', true);
+    const obs = data.obs || {};
+    if (obs.kickoff && obs.kickoff.enabled && obs.kickoff.scene) add('RL', `Kickoff → cut to "${obs.kickoff.scene}"`);
+    if (obs.postGame && obs.postGame.enabled && obs.postGame.scene) add('RL', `Post-game → "${obs.postGame.scene}" after ${obs.postGame.delaySec || 20}s`);
+    const bs = data.breakScreen || {};
+    if (bs.visible && bs.endsAt && bs.thenScene) add('BREAK', `Countdown ends → cut to "${bs.thenScene}"`);
+    (data.flows || []).forEach((f) => {
+      if (!f.enabled) return;
+      (f.triggers || []).forEach((t) => {
+        if (t.type === 'obs_scene_dwell') {
+          const p = t.params || {};
+          add('FLOW', `${f.name || 'Flow'}: after ${p.seconds || 30}s on ${p.scene ? `"${p.scene}"` : 'any scene'}`);
+        }
+      });
+      if ((f.actions || []).some((a) => a.type === 'obs_scene' || a.type === 'obs_scene_previous')) {
+        const trigs = (f.triggers || []).map((t) => t.type).filter((t) => t !== 'manual' && t !== 'obs_scene_dwell');
+        if (trigs.length) add('FLOW', `${f.name || 'Flow'}: scene cut on ${trigs.join(' / ').replace(/_/g, ' ')}`);
+      }
+    });
+    const dir = data.director || {};
+    if (dir.enabled && dir.autoSwitch) add('AI', 'CS2 auto-spectate — observer keys on game events');
+    const clips = data.clips || {};
+    if (clips.autoCapture !== false && (clips.captureMode || 'auto') === 'auto') add('CLIPS', 'Auto-clipping game moments (silent)');
+    const sg = data.startgg || {};
+    if (sg.autoFollow && sg.queueEnabled) add('QUEUE', 'Auto-follow — live start.gg set replaces the scoreboard');
+    const sig = JSON.stringify(items);
+    if (sig !== _armedSig) {
+      _armedSig = sig;
+      list.innerHTML = items.length ? items.map((i) =>
+        `<div style="display:flex; align-items:center; gap:8px; padding:7px 10px; background:${i.warn ? 'rgba(251,191,36,.08)' : 'rgba(255,255,255,.03)'}; border:1px solid ${i.warn ? 'rgba(251,191,36,.35)' : 'var(--border)'}; border-radius:8px;">
+          <span style="flex:0 0 auto; font-size:9px; font-weight:800; letter-spacing:.08em; padding:2px 7px; border-radius:99px; background:rgba(139,92,246,.16); color:#c4b5fd;">${tlEsc(i.kind)}</span>
+          <span style="font-size:12px; color:${i.warn ? '#fbbf24' : 'var(--text,#e8eaf0)'};">${tlEsc(i.text)}</span>
+        </div>`).join('')
+        : '<div style="font-size:12px; color:var(--muted); padding:6px 2px;">Nothing armed — every scene change is manual right now.</div>';
+    }
+  }
+  const logEl = el('auto-log');
+  if (logEl) {
+    const log = data.autoLog || [];
+    const sig = log.length ? log[0].ts + ':' + log.length : '0';
+    if (sig !== _autoLogSig) {
+      _autoLogSig = sig;
+      logEl.innerHTML = log.length ? log.map((e) => {
+        const t = new Date(e.ts);
+        const hh = String(t.getHours()).padStart(2, '0') + ':' + String(t.getMinutes()).padStart(2, '0') + ':' + String(t.getSeconds()).padStart(2, '0');
+        return `<div style="display:flex; gap:8px; align-items:baseline; padding:3px 0; border-bottom:1px solid rgba(255,255,255,.04);">
+          <span style="flex:0 0 auto; font-family:monospace; font-size:10px; color:var(--muted);">${hh}</span>
+          <span style="flex:0 0 auto; font-size:9px; font-weight:800; letter-spacing:.06em; color:#8b93a8; text-transform:uppercase;">${tlEsc(e.kind)}</span>
+          <span style="min-width:0; color:var(--text,#e8eaf0);">${tlEsc(e.message)}</span>
+        </div>`;
+      }).join('')
+      : '<div style="font-size:12px; color:var(--muted);">No automated actions yet this session.</div>';
+    }
+  }
+}
+
 function applyScenesCockpit(data) {
   renderCockpitStatus(data);
   renderWatchlistInfo(data);
@@ -18410,10 +18473,20 @@ function switcherOnHide() {
   _swWatch = false; send('switcher_watch', { on: false });
   clearInterval(_swShotTimer); _swShotTimer = null;
 }
+function _swFlash(id) { const b = el(id); if (!b) return; b.style.filter = 'brightness(1.5)'; setTimeout(() => { b.style.filter = ''; }, 140); }
 el('sw-cut')?.addEventListener('click', () => send('switcher_take', { mode: 'cut' }));
 el('sw-fade')?.addEventListener('click', () => send('switcher_take', { mode: 'fade', duration: parseInt(el('sw-fade-dur')?.value, 10) || 500 }));
 el('sw-audio-refresh')?.addEventListener('click', () => send('switcher_audio_list'));
 document.querySelectorAll('#sw-target-seg .sw-seg-btn').forEach((b) => b.addEventListener('click', () => send('set_switcher_target', { target: b.dataset.target })));
+// Keyboard TAKE — only while the Switcher page is open and not typing in a field.
+document.addEventListener('keydown', (e) => {
+  const page = el('tab-switcher-content');
+  if (!page || !page.classList.contains('active')) return;
+  const ae = document.activeElement, tag = (ae && ae.tagName) || '';
+  if (/^(INPUT|TEXTAREA|SELECT)$/.test(tag) || (ae && ae.isContentEditable)) return;
+  if (e.key === 'Enter') { e.preventDefault(); _swFlash('sw-cut'); send('switcher_take', { mode: 'cut' }); }
+  else if (e.key === ' ' || e.code === 'Space') { e.preventDefault(); _swFlash('sw-fade'); send('switcher_take', { mode: 'fade', duration: parseInt(el('sw-fade-dur')?.value, 10) || 500 }); }
+});
 
 // ── Bottom bar: "Up Next" from the start.gg stream queue ────────────────────
 function renderUpNext(data) {
@@ -28766,6 +28839,7 @@ function connect() {
       _r('applyRlSpectatorUi', () => applyRlSpectatorUi(msg.data));
       _r('applyScenesCockpit', () => applyScenesCockpit(msg.data));
       _r('renderScenePresets', () => renderScenePresets(msg.data));
+      _r('renderWhatsArmed',   () => renderWhatsArmed(msg.data));
       _r('renderQuickToolbar',   () => renderQuickToolbar(msg.data));
       _r('renderDashMiniPanels', () => renderDashMiniPanels(msg.data));
       _r('renderQrailScenes',    () => renderQrailScenes(msg.data));
