@@ -6,6 +6,9 @@
   Sources (start.gg event, in-app league, manual) all funnel into those rows via the
   control panel's Standings section. W/L columns are optional (state.standings.showRecord);
   a PTS column appears automatically when any row carries points.
+  Redesigned 2026-07: landscape 16:9 layout — a title/branding HERO on the left + the standings
+  BOARD on the right (fills the widescreen); team-color row washes, medal-glow podium, per-team
+  win-rate bar. Keeps fit()/split/sponsor/sig-guard + the standalone demo-flash guard.
 -->
 <html lang="en">
 <head>
@@ -20,8 +23,10 @@
   --accent:    #055fdb;
   --accent-2:  #4d90ff;
   --gold:      #ffcf5c;
-  --silver:    #cfd8e6;
+  --silver:    #d3dcec;
   --bronze:    #e0965a;
+  --base-1:    #14181f;
+  --base-2:    #0d1017;
   --main-font: 'Bourgeois', 'Inter', sans-serif;
   --stage-w:   1920px;
   --stage-h:   1080px;
@@ -36,186 +41,166 @@ html, body {
 /* ── Stage ── */
 .st-stage {
   position: absolute; inset: 0;
-  display: flex; flex-direction: column; align-items: center; justify-content: center;
-  padding: 56px 90px 72px;
+  display: flex; align-items: center; justify-content: center;
+  padding: 60px 76px;
   background:
-    radial-gradient(ellipse 90% 60% at 50% 0%, color-mix(in srgb, var(--accent) 22%, transparent) 0%, rgba(0,0,0,0) 60%),
-    radial-gradient(ellipse 70% 50% at 50% 100%, color-mix(in srgb, var(--accent) 10%, transparent) 0%, rgba(0,0,0,0) 55%),
-    linear-gradient(180deg, rgba(9,11,16,0.98) 0%, rgba(13,15,22,0.99) 100%);
+    radial-gradient(ellipse 70% 60% at 12% 0%, color-mix(in srgb, var(--accent) 30%, transparent) 0%, rgba(0,0,0,0) 55%),
+    radial-gradient(ellipse 55% 45% at 100% 108%, color-mix(in srgb, var(--accent-2) 15%, transparent) 0%, rgba(0,0,0,0) 55%),
+    linear-gradient(180deg, #090b10 0%, #0d1017 55%, #090b10 100%);
   opacity: 0; transform: scale(1.015);
   transition: opacity 0.55s ease, transform 0.55s ease;
 }
 .st-stage.show { opacity: 1; transform: scale(1); }
 
-/* faint diagonal texture + accent sweep */
+/* faint diagonal texture, masked toward the edges */
 .st-stage::before {
   content: ''; position: absolute; inset: 0; pointer-events: none;
-  background-image: repeating-linear-gradient(115deg, rgba(255,255,255,0.014) 0 2px, transparent 2px 46px);
-  mask-image: linear-gradient(180deg, rgba(0,0,0,0.9), rgba(0,0,0,0.15));
-}
-.st-stage::after {
-  content: ''; position: absolute; top: 0; left: 50%; transform: translateX(-50%);
-  width: 1300px; height: 4px; border-radius: 4px;
-  background: linear-gradient(90deg, transparent, var(--accent) 30%, var(--accent-2) 70%, transparent);
-  box-shadow: 0 0 30px color-mix(in srgb, var(--accent) 70%, transparent);
-  opacity: 0.85;
+  background-image: repeating-linear-gradient(120deg, rgba(255,255,255,0.015) 0 2px, transparent 2px 52px);
+  -webkit-mask-image: radial-gradient(120% 90% at 40% 40%, #000 0%, transparent 82%);
+  mask-image: radial-gradient(120% 90% at 40% 40%, #000 0%, transparent 82%);
 }
 
-/* ── Header ── */
-.st-header {
-  position: relative; width: 100%; max-width: 1300px;
-  display: flex; align-items: center; gap: 22px; margin-bottom: 30px;
+/* ── Landscape wrapper: [hero] [board] — sized natural, scaled to fill 16:9 ── */
+/* min-height (not height): small fields still stretch to fill 900px, but a tall team list
+   GROWS the wrapper so fit() sees the real size and downscales — fixed height used to clip
+   overflowing rows at the top/bottom. */
+.st-scale { display: flex; align-items: stretch; gap: 58px; width: 1808px; min-height: 900px; transform-origin: center center; }
+
+/* ── Left hero — event branding, big title, team count ── */
+.st-hero {
+  flex: 0 0 500px; display: flex; flex-direction: column; justify-content: center; gap: 18px;
+  position: relative; padding-left: 36px; min-width: 0;
 }
-.st-accent-bar {
-  width: 8px; align-self: stretch; min-height: 64px; border-radius: 4px;
+.st-hero::before {
+  content: ''; position: absolute; left: 0; top: 8%; bottom: 8%; width: 11px; border-radius: 6px;
   background: linear-gradient(180deg, var(--accent), var(--accent-2));
-  box-shadow: 0 0 22px color-mix(in srgb, var(--accent) 60%, transparent);
-  flex-shrink: 0;
+  box-shadow: 0 0 30px color-mix(in srgb, var(--accent) 68%, transparent);
 }
-.st-headtext { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .st-eyebrow {
-  font-size: 16px; font-weight: 700; letter-spacing: 6px; text-transform: uppercase;
-  color: var(--accent-2);
+  display: inline-flex; align-items: center; gap: 12px;
+  font-size: 17px; font-weight: 800; letter-spacing: 8px; text-transform: uppercase; color: var(--accent-2);
 }
+.st-eyebrow::before { content: ''; width: 26px; height: 2px; background: currentColor; border-radius: 2px; }
 .st-title {
-  font-size: 58px; font-weight: 800; letter-spacing: 3px; text-transform: uppercase;
-  color: #fff; line-height: 0.98; text-shadow: 0 6px 30px rgba(0,0,0,0.6);
+  font-size: 76px; font-weight: 800; letter-spacing: 1px; text-transform: uppercase;
+  color: #fff; line-height: 0.92; text-shadow: 0 8px 40px rgba(0,0,0,0.7);
 }
-.st-subtitle {
-  font-size: 22px; font-weight: 600; letter-spacing: 1px;
-  color: #99a1b3; margin-top: 2px;
-}
+.st-subtitle { font-size: 25px; font-weight: 600; letter-spacing: 1px; color: #97a0b4; }
 .st-subtitle:empty { display: none; }
 .st-count {
-  margin-left: auto; flex-shrink: 0; align-self: flex-start;
-  display: inline-flex; align-items: baseline; gap: 8px;
-  padding: 10px 18px; border-radius: 10px;
-  background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.09);
+  margin-top: 16px; display: flex; align-items: baseline; gap: 14px; line-height: 1;
+  padding-top: 22px; border-top: 1px solid rgba(255,255,255,0.09);
 }
-.st-count b { font-size: 30px; font-weight: 800; color: #fff; }
-.st-count span { font-size: 13px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; color: #6a7080; }
+.st-count b {
+  font-size: 92px; font-weight: 800; color: #fff;
+  background: linear-gradient(180deg, #fff, #b9c2d6); -webkit-background-clip: text; background-clip: text; color: transparent;
+}
+.st-count span { font-size: 15px; font-weight: 800; letter-spacing: 4px; text-transform: uppercase; color: #6a7080; }
 .st-count:empty { display: none; }
 
-/* ── Scale wrapper — header + table(s) render at natural size, then scale to fill 16:9 ── */
-.st-scale { display: flex; flex-direction: column; align-items: center; transform-origin: center center; }
-
-/* ── Table(s) — one column normally; big fields split into two side-by-side tables ── */
-.st-cols { display: flex; gap: 26px; align-items: flex-start; }
-.st-table { width: 1300px; display: flex; flex-direction: column; gap: 8px; }
-.st-cols.split .st-table { width: 880px; }
-.st-cols.split .st-row { height: 66px; }
-.st-cols.split .st-col-name { font-size: 25px; }
-.st-cols.split .st-col-stat { font-size: 24px; }
-.st-cols.split .st-badge { width: 44px; height: 44px; font-size: 22px; }
+/* ── Right board — the table(s), vertically centered ── */
+.st-board { flex: 1 1 0; min-width: 0; display: flex; align-items: center; }
+.st-cols { width: 100%; display: flex; gap: 22px; align-items: stretch; }
+.st-table { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 10px; justify-content: center; }
+.st-cols.split .st-row { height: 68px; }
+.st-cols.split .st-col-name .st-name-txt { font-size: 25px; }
+.st-cols.split .st-badge { width: 46px; height: 46px; font-size: 23px; }
 .st-cols.split .st-team-logo { width: 42px; height: 42px; }
+.st-cols.split .st-wr { display: none; }
+.st-cols.split .st-pts-num { font-size: 32px; }
 
-/* ── Sponsor rail — "presented by" strip pinned bottom-center, from the active brand kit ── */
-.st-sponsors { position: absolute; bottom: 26px; left: 50%; transform: translateX(-50%);
-  display: flex; align-items: center; gap: 40px; padding: 10px 30px; border-radius: 12px;
-  background: rgba(10,12,17,.72); border: 1px solid rgba(255,255,255,.07); }
-.st-sponsors.is-empty { display: none; }
-.st-sponsors-lbl { font-size: 10px; font-weight: 800; letter-spacing: .24em; text-transform: uppercase; color: #6a7080; }
-.st-sponsor { height: 30px; max-width: 120px; object-fit: contain; opacity: .85; filter: drop-shadow(0 2px 6px rgba(0,0,0,.4)); }
-
+/* ── Row ── */
 .st-row {
   display: grid; grid-template-columns: var(--st-cols); align-items: center;
-  column-gap: 8px; height: 84px; padding: 0 26px 0 0;
-  border-radius: 14px;
-  background: linear-gradient(90deg, rgba(24,28,38,0.96), rgba(16,19,27,0.96));
-  border: 1px solid rgba(255,255,255,0.06);
-  box-shadow: 0 10px 26px rgba(0,0,0,0.4);
-  position: relative; overflow: hidden;
-  opacity: 0; transform: translateX(-18px);
-  transition: opacity 0.4s cubic-bezier(.16,.84,.24,1), transform 0.4s cubic-bezier(.16,.84,.24,1);
+  column-gap: 10px; height: 96px; padding: 0 24px 0 0;
+  border-radius: 13px; position: relative; overflow: hidden;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--row-accent, var(--accent)) 22%, var(--base-1)) 0%, var(--base-1) 46%, var(--base-2) 100%);
+  border: 1px solid color-mix(in srgb, var(--row-accent, var(--accent)) 22%, rgba(255,255,255,0.05));
+  box-shadow: 0 10px 26px rgba(0,0,0,0.42);
+  opacity: 0; transform: translateX(-20px);
+  transition: opacity 0.42s cubic-bezier(.16,.84,.24,1), transform 0.42s cubic-bezier(.16,.84,.24,1);
 }
 .st-row.visible { opacity: 1; transform: translateX(0); }
-/* per-team accent stripe on the left */
 .st-row::before {
-  content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 5px;
+  content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 6px;
   background: var(--row-accent, var(--accent));
+  box-shadow: 0 0 16px color-mix(in srgb, var(--row-accent, var(--accent)) 65%, transparent);
 }
 
 /* Header row */
 .st-head {
-  height: 46px; padding: 0 26px 0 0; background: none; border: none; box-shadow: none;
-  opacity: 1 !important; transform: none !important; overflow: visible;
+  height: 38px; padding: 0 24px 0 0; background: none; border: none; box-shadow: none;
+  opacity: 1 !important; transform: none !important; overflow: visible; flex: 0 0 auto;
 }
 .st-head::before { display: none; }
-.st-head > div {
-  font-size: 14px; font-weight: 700; letter-spacing: 2.5px; text-transform: uppercase;
-  color: #626a7c;
-}
+.st-head > div { font-size: 13px; font-weight: 800; letter-spacing: 2.5px; text-transform: uppercase; color: #5c6474; }
 
-/* Podium tints */
-.st-row.rank-1 { background: linear-gradient(90deg, color-mix(in srgb, var(--gold) 26%, rgba(24,28,38,0.96)), rgba(16,19,27,0.96) 62%); border-color: color-mix(in srgb, var(--gold) 40%, transparent); }
-.st-row.rank-2 { background: linear-gradient(90deg, color-mix(in srgb, var(--silver) 18%, rgba(24,28,38,0.96)), rgba(16,19,27,0.96) 58%); border-color: color-mix(in srgb, var(--silver) 28%, transparent); }
-.st-row.rank-3 { background: linear-gradient(90deg, color-mix(in srgb, var(--bronze) 20%, rgba(24,28,38,0.96)), rgba(16,19,27,0.96) 58%); border-color: color-mix(in srgb, var(--bronze) 30%, transparent); }
+/* Podium — medal glow rings */
+.st-row.rank-1 { box-shadow: 0 0 0 1px color-mix(in srgb, var(--gold) 55%, transparent), 0 12px 34px rgba(0,0,0,0.5), 0 0 42px color-mix(in srgb, var(--gold) 22%, transparent); border-color: color-mix(in srgb, var(--gold) 45%, transparent); }
+.st-row.rank-2 { box-shadow: 0 0 0 1px color-mix(in srgb, var(--silver) 40%, transparent), 0 11px 30px rgba(0,0,0,0.48); border-color: color-mix(in srgb, var(--silver) 32%, transparent); }
+.st-row.rank-3 { box-shadow: 0 0 0 1px color-mix(in srgb, var(--bronze) 42%, transparent), 0 11px 30px rgba(0,0,0,0.48); border-color: color-mix(in srgb, var(--bronze) 34%, transparent); }
 
-/* Rank cell */
+/* Rank badge */
 .st-col-rank { display: flex; align-items: center; justify-content: center; }
 .st-badge {
-  width: 54px; height: 54px; border-radius: 12px;
+  width: 58px; height: 58px; border-radius: 14px;
   display: flex; align-items: center; justify-content: center;
-  font-size: 28px; font-weight: 800; color: #cbd2e0;
-  background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);
+  font-size: 29px; font-weight: 800; color: #d6dcea; font-variant-numeric: tabular-nums;
+  background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.12);
 }
-.rank-1 .st-badge { background: linear-gradient(160deg, #ffe08a, var(--gold)); color: #3a2c05; border-color: color-mix(in srgb, var(--gold) 70%, #fff); box-shadow: 0 6px 20px color-mix(in srgb, var(--gold) 45%, transparent); }
-.rank-2 .st-badge { background: linear-gradient(160deg, #eef2f8, var(--silver)); color: #2b3140; border-color: #fff; box-shadow: 0 6px 20px color-mix(in srgb, var(--silver) 40%, transparent); }
-.rank-3 .st-badge { background: linear-gradient(160deg, #f2b485, var(--bronze)); color: #3c2410; border-color: color-mix(in srgb, var(--bronze) 70%, #fff); box-shadow: 0 6px 20px color-mix(in srgb, var(--bronze) 40%, transparent); }
-.st-head .st-col-rank { justify-content: center; }
+.rank-1 .st-badge { background: linear-gradient(155deg, #ffe9a8, var(--gold)); color: #4a3708; border-color: color-mix(in srgb, var(--gold) 75%, #fff); box-shadow: 0 6px 22px color-mix(in srgb, var(--gold) 48%, transparent); }
+.rank-2 .st-badge { background: linear-gradient(155deg, #f4f8ff, var(--silver)); color: #2b3140; border-color: #fff; box-shadow: 0 6px 22px color-mix(in srgb, var(--silver) 42%, transparent); }
+.rank-3 .st-badge { background: linear-gradient(155deg, #f6bd8c, var(--bronze)); color: #442a12; border-color: color-mix(in srgb, var(--bronze) 75%, #fff); box-shadow: 0 6px 22px color-mix(in srgb, var(--bronze) 42%, transparent); }
 
 /* Logo */
 .st-col-logo { display: flex; align-items: center; justify-content: center; }
-.st-team-logo { width: 52px; height: 52px; object-fit: contain; filter: drop-shadow(0 2px 6px rgba(0,0,0,0.55)); }
-.st-team-logo.logo-on-dark { filter: brightness(0) invert(1) drop-shadow(0 2px 6px rgba(0,0,0,0.55)); }
+.st-team-logo { width: 56px; height: 56px; object-fit: contain; filter: drop-shadow(0 2px 7px rgba(0,0,0,0.6)); }
+.st-team-logo.logo-on-dark { filter: brightness(0) invert(1) drop-shadow(0 2px 7px rgba(0,0,0,0.6)); }
 
-/* Name */
-.st-col-name {
-  font-size: 32px; font-weight: 700; color: #f0f2f7; letter-spacing: 0.5px;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-left: 6px;
-}
-.rank-1 .st-col-name { color: #fff; }
+/* Name + win-rate bar */
+.st-col-name { display: flex; flex-direction: column; justify-content: center; gap: 8px; min-width: 0; padding-left: 4px; }
+.st-name-txt { font-size: 33px; font-weight: 700; color: #f2f4f8; letter-spacing: 0.4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rank-1 .st-name-txt { color: #fff; }
+.st-wr { position: relative; width: 240px; max-width: 62%; height: 6px; border-radius: 3px; background: rgba(255,255,255,0.08); overflow: hidden; }
+.st-wr > span { position: absolute; inset: 0 auto 0 0; border-radius: 3px; background: linear-gradient(90deg, var(--row-accent, var(--accent)), color-mix(in srgb, var(--row-accent, var(--accent)) 55%, #fff)); box-shadow: 0 0 8px color-mix(in srgb, var(--row-accent, var(--accent)) 55%, transparent); }
 
 /* Stat cells */
-.st-col-stat {
-  font-size: 30px; font-weight: 800; text-align: center; font-variant-numeric: tabular-nums;
-  color: #aeb6c6;
-}
-.st-col-stat.wins   { color: #7ef0b0; }
+.st-col-stat { font-size: 31px; font-weight: 800; text-align: center; font-variant-numeric: tabular-nums; color: #aeb6c6; }
+.st-col-stat.wins   { color: #6ff0a8; }
 .st-col-stat.losses { color: #f39191; }
-.st-col-stat.pts {
-  color: #0c0f16; font-weight: 800;
-  display: flex; align-items: center; justify-content: center;
+.st-col-stat.pts { display: flex; align-items: center; justify-content: center; }
+.st-pts-num {
+  font-size: 42px; font-weight: 800; line-height: 1;
+  background: linear-gradient(160deg, #ffe9a8, var(--gold)); -webkit-background-clip: text; background-clip: text; color: transparent;
+  filter: drop-shadow(0 2px 6px rgba(245,201,68,0.3));
 }
-.st-pts-chip {
-  min-width: 68px; padding: 8px 4px; border-radius: 10px;
-  background: linear-gradient(160deg, #ffe58f, #f5c944);
-  box-shadow: 0 4px 14px rgba(245,201,68,0.28);
-}
-.st-head .st-col-stat { color: #626a7c; }
+.st-head .st-col-stat { color: #5c6474; font-size: 13px; }
 
 /* ── Empty ── */
-.st-empty {
-  font-size: 30px; font-weight: 500; color: rgba(255,255,255,0.22); text-align: center;
-}
+.st-empty { font-size: 30px; font-weight: 600; color: rgba(255,255,255,0.22); text-align: center; }
 
-.st-preview-logo { background: repeating-linear-gradient(45deg,#181b22,#181b22 10px,#20242e 10px,#20242e 20px); border-radius: 10px; }
+/* ── Sponsor rail ── */
+.st-sponsors { position: absolute; bottom: 26px; right: 76px;
+  display: flex; align-items: center; gap: 34px; padding: 10px 28px; border-radius: 12px;
+  background: rgba(9,11,16,.74); border: 1px solid rgba(255,255,255,.07); }
+.st-sponsors.is-empty { display: none; }
+.st-sponsors-lbl { font-size: 10px; font-weight: 800; letter-spacing: .24em; text-transform: uppercase; color: #6a7080; }
+.st-sponsor { height: 30px; max-width: 120px; object-fit: contain; opacity: .88; filter: drop-shadow(0 2px 6px rgba(0,0,0,.4)); }
 </style>
 </head>
 <body>
 
 <div id="st-stage" class="st-stage">
   <div class="st-scale" id="st-scale">
-    <div class="st-header">
-      <div class="st-accent-bar" id="st-accent"></div>
-      <div class="st-headtext">
-        <div class="st-eyebrow" id="st-eyebrow">Standings</div>
-        <div class="st-title" id="st-title">STANDINGS</div>
-        <div class="st-subtitle" id="st-subtitle"></div>
-      </div>
+    <div class="st-hero">
+      <div class="st-eyebrow" id="st-eyebrow">Standings</div>
+      <div class="st-title" id="st-title">STANDINGS</div>
+      <div class="st-subtitle" id="st-subtitle"></div>
       <div class="st-count" id="st-count"></div>
     </div>
-    <div class="st-cols" id="st-cols"></div>
+    <div class="st-board">
+      <div class="st-cols" id="st-cols"></div>
+    </div>
   </div>
   <div class="st-empty" id="st-empty" style="display:none;">No standings data — pull start.gg, a league, or add manual rows.</div>
   <div class="st-sponsors is-empty" id="st-sponsors"></div>
@@ -225,6 +210,7 @@ html, body {
 <script>
 (function () {
   function el(id) { return document.getElementById(id); }
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
 
   function svgFallback(letter, color) {
     return 'data:image/svg+xml;utf8,' + encodeURIComponent(
@@ -244,10 +230,10 @@ html, body {
 
   function colStops(showRecord, hasPoints, hasExtra) {
     // rank | logo | name | [W] | [L] | [Played] | [Games] | [PTS]
-    let cols = '92px 74px minmax(0,1fr)';
-    if (showRecord) cols += ' 96px 96px';
-    if (hasExtra)   cols += ' 110px 130px';
-    if (hasPoints)  cols += ' 116px';
+    let cols = '96px 80px minmax(0,1fr)';
+    if (showRecord) cols += ' 92px 92px';
+    if (hasExtra)   cols += ' 108px 128px';
+    if (hasPoints)  cols += ' 120px';
     return cols;
   }
 
@@ -278,10 +264,16 @@ html, body {
     row.className = 'st-row' + (!noResult && rank <= 3 ? ` rank-${rank}` : '');
     row.style.setProperty('--row-accent', rowAccent);
 
+    // Win-rate bar (only when there's a real W/L record to show).
+    const w = entry.wins || 0, l = entry.losses || 0;
+    const wr = (showRecord && (w + l) > 0) ? Math.round((w / (w + l)) * 100) : null;
+    const nameCell = `<div class="st-col-name"><span class="st-name-txt">${esc(entry.name || 'TBD')}</span>`
+      + (wr != null ? `<span class="st-wr"><span style="width:${wr}%"></span></span>` : '') + `</div>`;
+
     let html = `
       <div class="st-col-rank"><div class="st-badge">${rank}</div></div>
       <div class="st-col-logo"><img class="st-team-logo${isDefaultLogo ? ' logo-on-dark' : ''}" src="${logo}" alt=""></div>
-      <div class="st-col-name">${entry.name || 'TBD'}</div>`;
+      ${nameCell}`;
     if (showRecord) {
       html += `<div class="st-col-stat wins">${entry.wins ?? '—'}</div>`;
       html += `<div class="st-col-stat losses">${entry.losses ?? '—'}</div>`;
@@ -291,31 +283,39 @@ html, body {
       html += `<div class="st-col-stat">${entry.gameWins ?? 0}-${entry.gameLosses ?? 0}</div>`;
     }
     if (hasPoints) {
-      html += `<div class="st-col-stat pts"><span class="st-pts-chip">${entry.points ?? '—'}</span></div>`;
+      html += `<div class="st-col-stat pts"><span class="st-pts-num">${entry.points ?? '—'}</span></div>`;
     }
     row.innerHTML = html;
 
-    setTimeout(() => row.classList.add('visible'), 100 + idx * 60);
+    setTimeout(() => row.classList.add('visible'), 100 + idx * 55);
     return row;
   }
 
-  // Scale the natural-size layout to fill the 16:9 canvas (matches bracket.html's fit()).
+  // Scale the natural-size landscape layout to fill the 16:9 canvas (matches bracket.html's fit()).
   function fit() {
-    const stage = el('st-stage'), scale = el('st-scale');
-    if (!stage || !scale) return;
+    const scale = el('st-scale');
+    if (!scale) return;
     scale.style.transform = 'scale(1)';
-    const availW = 1920 - 180, availH = 1080 - 56 - 72 - 70;   // stage padding + sponsor rail
-    const w = scale.offsetWidth || 1, h = scale.offsetHeight || 1;
-    const s = Math.min(availW / w, availH / h, 1.12);
+    const availW = 1920 - 152, availH = 1080 - 120;   // stage padding
+    // scrollWidth/Height see content that overflows the wrapper's own box — offsetHeight
+    // alone missed rows spilling past the min-height and let them clip.
+    const w = Math.max(scale.offsetWidth, scale.scrollWidth) || 1;
+    const h = Math.max(scale.offsetHeight, scale.scrollHeight) || 1;
+    const s = Math.min(availW / w, availH / h, 1.06);
     scale.style.transform = `scale(${s})`;
   }
 
-  // Only rebuild the DOM (and replay the row animations) when CONTENT changes — the old
-  // renderer rebuilt on every state broadcast, which read as the page constantly refreshing.
+  // Only rebuild the DOM (and replay the row animations) when CONTENT changes.
   let _sig = '';
   function render(data) {
     const stage = el('st-stage'), cols = el('st-cols'), empty = el('st-empty');
     if (!stage || !cols) return;
+
+    // Suppress the scene-base standalone "demo" flash on refresh: scene-base renders demoState()
+    // (which carries a PRO INVITATIONAL bracket) once so a live source isn't blank while the WS
+    // connects. Real server state ALWAYS includes a `standings` object; the demo does not — so on a
+    // live OBS source (not the control-panel ?preview) hold the scene hidden until real WS state.
+    if (!data.standings && !SceneBase.preview) { stage.classList.remove('show'); return; }
 
     const stState = data.standings || {};
     const bracket = data.bracket || {};
@@ -324,19 +324,14 @@ html, body {
     const accent = SceneBase.brandColor(data) || '#e83a8b';
     const accent2 = SceneBase.brandAccent(data) || accent;
 
-    // Title falls back through: producer title → bracket title → EVENT NAME → generic.
     const title = (stState.title || bracket.title || data.eventName || 'STANDINGS').toString().toUpperCase();
     const subtitle = (stState.subtitle || '').toString();
 
-    // Resolve rows. Manual rows always win. start.gg-sourced rows are a snapshot of an
-    // event/league pull — when the LIVE bracket carries the linked event's standings, prefer
-    // those (rows frozen from a previous event used to shadow the real data forever).
+    // Resolve rows. Manual rows always win; start.gg-sourced rows defer to the live bracket
+    // standings; stale league leftovers (no name overlap with the live event) lose to live.
     const live = bracket.standings || [];
     const frozen = (stState.rows && stState.rows.length > 0) ? stState.rows : [];
     const src = (stState.source || '').toString();
-    // League tables (startgg-league) are deliberate — keep them, but only while they belong
-    // to THIS event: zero team-name overlap with the live standings means they're leftovers
-    // from a previous event and the live data wins.
     const liveNames = new Set(live.map((r) => (r.name || '').toLowerCase()));
     const overlap = frozen.some((r) => liveNames.has((r.name || '').toLowerCase()));
     const rows = (src === 'manual' && frozen.length) ? frozen
@@ -347,8 +342,6 @@ html, body {
 
     const showRecord = stState.showRecord !== false && rows.some(r => r.wins != null || r.losses != null);
     const hasPoints = rows.some(r => r.points != null);
-    // Sets Played / Game Wins-Losses — the extra stat columns Start.gg's own Pool/Swiss
-    // standings show, present on Bracket's Round Robin/Swiss rows (see overlay/bracket.html).
     const hasExtra = rows.some(r => r.setsTotal != null);
 
     // Sponsor rail — active brand kit, desk placement first (same rule as intro.html).
@@ -385,8 +378,8 @@ html, body {
     empty.style.display = 'none';
     el('st-count').innerHTML = `<b>${rows.length}</b><span>Teams</span>`;
 
-    // Two side-by-side tables for big fields — that's what actually uses a 16:9 frame.
-    const split = rows.length > 12;
+    // Split the board into two side-by-side tables once the single list gets long.
+    const split = rows.length > 10;
     cols.classList.toggle('split', split);
     const halves = split
       ? [rows.slice(0, Math.ceil(rows.length / 2)), rows.slice(Math.ceil(rows.length / 2))]
