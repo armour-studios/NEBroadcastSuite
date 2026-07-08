@@ -4603,13 +4603,39 @@ function bbOpenTriggerConfig(stateKey, btn) {
   el('bb-trigger-go').textContent = live ? 'Update' : 'Push Live';
   el('bb-trigger-hide').style.display = live ? '' : 'none';
   pop.dataset.state = stateKey;
+  // Measure hidden, then place: prefer ABOVE the chip, flip BELOW when the popover
+  // would poke into the titlebar strip — the window controls (min/max/close) are an
+  // OS overlay that paints over the page, so no z-index can save us up there.
+  pop.style.visibility = 'hidden';
   pop.style.display = 'block';
-  // Anchor above the clicked button.
   const r = btn.getBoundingClientRect();
-  pop.style.left = Math.max(8, Math.min(window.innerWidth - pop.offsetWidth - 8, r.left)) + 'px';
-  pop.style.bottom = (window.innerHeight - r.top + 8) + 'px';
+  const W = pop.offsetWidth, H = pop.offsetHeight;
+  const SAFE_TOP = 64;   // topbar + window-controls overlay
+  pop.style.left = Math.max(8, Math.min(window.innerWidth - W - 8, r.left - (W - r.width) / 2)) + 'px';
+  if (r.top - 8 - H >= SAFE_TOP) {
+    pop.style.top = '';
+    pop.style.bottom = (window.innerHeight - r.top + 8) + 'px';
+  } else {
+    pop.style.bottom = '';
+    pop.style.top = Math.max(SAFE_TOP, Math.min(window.innerHeight - H - 8, r.bottom + 8)) + 'px';
+  }
+  pop.style.visibility = '';
 }
 el('bb-trigger-close')?.addEventListener('click', () => { el('bb-trigger-pop').style.display = 'none'; });
+// Click-away / Escape close the popover — a floating "put on air" panel must never linger.
+document.addEventListener('mousedown', (e) => {
+  const pop = el('bb-trigger-pop');
+  if (!pop || pop.style.display === 'none') return;
+  if (e.target.closest('#bb-trigger-pop')) return;
+  // Clicks on any trigger chip/gear re-open with fresh fields; don't fight that handler.
+  if (e.target.closest('.qk-chip, .sw-dock-chip, .qt-act-btn, .bb-action-btn, .gl-row')) return;
+  pop.style.display = 'none';
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  const pop = el('bb-trigger-pop');
+  if (pop && pop.style.display !== 'none') pop.style.display = 'none';
+});
 el('bb-trigger-go')?.addEventListener('click', () => {
   const stateKey = el('bb-trigger-pop').dataset.state;
   const g = (typeof GOLIVE_TRIGGERS !== 'undefined' ? GOLIVE_TRIGGERS : []).find((x) => x.state === stateKey); if (!g) return;
@@ -21559,14 +21585,30 @@ el('rp-buffer-save')?.addEventListener('click', () => send('obs_save_replay'));
 el('rp-to-program')?.addEventListener('click', () => sendToScreen('program'));
 el('rp-to-preview')?.addEventListener('click', () => sendToScreen('preview'));
 
-// ── Qrail REPLAY panel — save the buffer + push the latest clips to air without leaving
-// the cockpit. Reuses the Video Editor's program-bus machinery (beginReplayProgram /
-// endReplayProgram / shared replay-player source) so the two surfaces can never fight;
-// scene + transition + return-scene settings come from the REPLAYS page controls.
+// ── Qrail REPLAY panel — buffer status/toggle + save + push the latest clips to air
+// without leaving the cockpit. Reuses the Video Editor's program-bus machinery
+// (beginReplayProgram / endReplayProgram / shared replay-player source) so the two
+// surfaces can never fight; scene + transition + return-scene settings come from the
+// REPLAYS page controls. "Edit" borrows the REPLAYS page's own Video Editor pane into
+// a popup (see qrOpenClipEditor below) rather than building a second editor instance.
 let _qrClipsSig = '';
 function renderQrailReplay(data) {
+  const st = (data || currentState || {});
+  const obs = st.obs || {};
+  const pill = el('qr-buffer-pill');
+  if (pill) { pill.textContent = obs.replayBufferActive ? 'Buffer On' : 'Buffer Off'; pill.classList.toggle('on', !!obs.replayBufferActive); }
+  const toggleBtn = el('qr-buffer-toggle');
+  if (toggleBtn) {
+    toggleBtn.textContent = obs.replayBufferActive ? 'Stop Buffer' : 'Start Buffer';
+    toggleBtn.disabled = !obs.connected;
+    toggleBtn.style.opacity = obs.connected ? '1' : '0.45';
+    toggleBtn.title = obs.connected
+      ? (obs.replayBufferActive ? 'Stop the OBS replay buffer' : 'Start the OBS replay buffer — required before Save Replay can capture anything')
+      : 'Connect to OBS in Settings → OBS first';
+  }
+
   const list = el('qr-clip-list'); if (!list) return;
-  const lib = (((data || currentState || {}).clips) || {}).library || [];
+  const lib = st.clips?.library || [];
   const latest = lib.slice(-5).reverse();   // library appends — last entries are the newest saves
   const sig = JSON.stringify(latest.map((c) => c.id + ':' + (c.name || '') + ':' + (c.duration || 0)));
   if (sig === _qrClipsSig) return;
@@ -21580,13 +21622,63 @@ function renderQrailReplay(data) {
     const row = document.createElement('div');
     row.className = 'qr-clip-row';
     const dur = c.duration ? (Math.round(c.duration) + 's') : '';
-    row.innerHTML = `<span class="qr-clip-name" title="${esc(c.name || 'Clip')}">${esc(c.name || 'Clip')}</span>`
-      + `<span class="qr-clip-dur">${dur}</span>`
-      + `<button class="btn btn-primary btn-sm qr-toair" title="Play this clip on the program bus now (cuts OBS to the replay scene, returns when it ends)">To Air</button>`;
+    const rawPath = c.path || c.rawPath || '';
+    row.innerHTML = `
+      <div class="qr-clip-info">
+        <div class="qr-clip-thumb">
+          <svg class="qr-clip-thumb-icon" viewBox="0 0 24 24" width="12" height="12" fill="rgba(255,255,255,0.28)"><path d="M8 5v14l11-7z"/></svg>
+          ${rawPath ? `<img class="qr-clip-thumb-img" alt="" loading="lazy" src="${thumbUrl(rawPath)}">` : ''}
+        </div>
+        <span class="qr-clip-name" title="${esc(c.name || 'Clip')}">${esc(c.name || 'Clip')}</span>
+        <span class="qr-clip-dur">${dur}</span>
+      </div>
+      <div class="qr-clip-btns">
+        <button class="btn btn-secondary btn-sm qr-edit" title="Quick edit — opens the Video Editor in a popup to trim and push live">Edit</button>
+        <button class="btn btn-primary btn-sm qr-toair" title="Play this clip on the program bus now (cuts OBS to the replay scene, returns when it ends)">To Air</button>
+      </div>`;
+    const thumbImg = row.querySelector('.qr-clip-thumb-img');
+    if (thumbImg) {
+      thumbImg.addEventListener('load', () => thumbImg.classList.add('loaded'));
+      thumbImg.addEventListener('error', () => thumbImg.remove());
+    }
+    row.querySelector('.qr-edit').addEventListener('click', () => qrOpenClipEditor(c));
     row.querySelector('.qr-toair').addEventListener('click', () => qrailClipToAir(c));
     list.appendChild(row);
   });
 }
+el('qr-buffer-toggle')?.addEventListener('click', () => send('obs_toggle_replay_buffer'));
+
+// Quick-edit popup: borrows the REPLAYS page's own Video Editor pane (#clip-preview-card)
+// by physically relocating it into the modal (not cloning) — every id-based lookup inside
+// it (loadClipPreview, trim bar, To Air/Preview, Save edit, Add to playlist…) keeps working
+// unmodified regardless of which container currently holds it. Only one editor instance
+// exists, so it's "checked out" to whichever surface has it open at a time.
+let _qrEditHome = null;   // { parent, next } — where the editor pane lives when NOT popped out
+function qrOpenClipEditor(clip) {
+  const card = el('clip-preview-card');
+  const body = el('qr-edit-body');
+  const modal = el('qr-edit-modal');
+  if (!card || !body || !modal) return;
+  if (card.parentElement !== body) {
+    _qrEditHome = { parent: card.parentElement, next: card.nextElementSibling };
+    body.appendChild(card);
+  }
+  modal.style.display = '';
+  if (typeof loadClipPreview === 'function') loadClipPreview(clip);
+}
+function qrCloseClipEditor() {
+  const modal = el('qr-edit-modal');
+  if (modal) modal.style.display = 'none';
+  const card = el('clip-preview-card');
+  if (card && _qrEditHome) {
+    if (_qrEditHome.next) _qrEditHome.parent.insertBefore(card, _qrEditHome.next);
+    else _qrEditHome.parent.appendChild(card);
+    _qrEditHome = null;
+  }
+}
+el('qr-edit-close')?.addEventListener('click', qrCloseClipEditor);
+el('qr-edit-modal')?.addEventListener('click', (e) => { if (e.target.id === 'qr-edit-modal') qrCloseClipEditor(); });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && el('qr-edit-modal')?.style.display !== 'none') qrCloseClipEditor(); });
 function qrailClipToAir(clip) {
   const url = clipUrl(clip);
   if (!url) { showToast('Clip file not found on disk', '#f56565'); return; }
