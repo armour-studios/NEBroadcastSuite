@@ -2401,6 +2401,15 @@ function _returnGraphicsToProd() {
     const existing = prefill || [];
     const n = Math.max(1, Math.min(mpMaxSlots(bo), count != null ? count : Math.max(existing.length, mpMinSlots(bo))));
     const pool = mpMapPool();
+    // Key the two score columns to the REAL teams — name + team-color underline —
+    // so it's obvious which side is being marked with what score.
+    const _tms = (currentState && currentState.teams) || {};
+    const _tA = (_tms.blue && _tms.blue.name) || 'Blue';
+    const _tB = (_tms.orange && _tms.orange.name) || 'Orange';
+    const _cA = (_tms.blue && _tms.blue.color) || '#3b82f6';
+    const _cB = (_tms.orange && _tms.orange.color) || '#e97139';
+    const keyEl = el('mp-team-key');
+    if (keyEl) keyEl.innerHTML = 'Scores: <b style="color:' + _cA + ';">' + dEsc(_tA) + '</b> left · <b style="color:' + _cB + ';">' + dEsc(_tB) + '</b> right';
     wrap.innerHTML = '';
     for (let i = 0; i < n; i++) {
       const m = existing[i] || {};
@@ -2410,10 +2419,14 @@ function _returnGraphicsToProd() {
       sel.innerHTML = '<option value="">— Select map —</option>' +
         pool.map((p) => `<option value="${p.id}"${p.name === m.name ? ' selected' : ''}>${p.name}</option>`).join('');
       const scA = document.createElement('input'); scA.type = 'number'; scA.className = 'input-text mp-score-a';
-      scA.min = '0'; scA.placeholder = 'A'; scA.value = (m.score && m.score.a) || '';
+      scA.min = '0'; scA.placeholder = _tA.slice(0, 6); scA.title = _tA + ' score';
+      scA.style.borderBottom = '2px solid ' + _cA;
+      scA.value = (m.score && m.score.a) || '';
       const sep = document.createElement('span'); sep.className = 'mp-sep'; sep.textContent = '–';
       const scB = document.createElement('input'); scB.type = 'number'; scB.className = 'input-text mp-score-b';
-      scB.min = '0'; scB.placeholder = 'B'; scB.value = (m.score && m.score.b) || '';
+      scB.min = '0'; scB.placeholder = _tB.slice(0, 6); scB.title = _tB + ' score';
+      scB.style.borderBottom = '2px solid ' + _cB;
+      scB.value = (m.score && m.score.b) || '';
       const rm = document.createElement('button'); rm.type = 'button'; rm.className = 'btn btn-ghost btn-xs mp-slot-rm';
       rm.textContent = '×'; rm.title = 'Remove this map slot'; rm.disabled = n <= 1;
       rm.addEventListener('click', () => { mpRenderSlots(mpBuildMapsPayload(true), n - 1); mpSendDebounced(); });
@@ -2467,6 +2480,20 @@ function _returnGraphicsToProd() {
   // Populate from current state when the Map Pool tab opens. Best-of drives the MAX/starting
   // count, but the actual slot count shown is whatever's already saved (or that format's minimum
   // if nothing's picked yet) — never force it down to a stale best-of-derived count.
+  // One click pulls the series editor's maps + scores (Match — Teams) into the pool.
+  el('mp-from-series')?.addEventListener('click', () => {
+    const match = (currentState && currentState.match) || {};
+    const maps = Array.isArray(match.maps) ? match.maps.filter((m) => m && m.name) : [];
+    if (!maps.length) { showToast('No maps in the series editor yet — set them in Match — Teams.', '#fbbf24'); return; }
+    const fmtN = parseInt(String(match.format || '').replace(/\D/g, ''), 10);
+    const boSel = el('mp-bestof');
+    if (boSel && fmtN && [...boSel.options].some((o) => +o.value === fmtN)) boSel.value = String(fmtN);
+    const prefill = maps.map((m) => ({ name: m.name, score: { a: m.scoreA ?? '', b: m.scoreB ?? '' } }));
+    mpRenderSlots(prefill, Math.max(prefill.length, 1));
+    mpSendDebounced();
+    showToast('Pulled ' + prefill.length + ' map(s) from the series editor', '#22c55e');
+  });
+
   function mpSyncFromState(data) {
     const v = (data && data.veto) || {};
     const titleEl = el('mp-title');
@@ -14846,12 +14873,16 @@ el('preshow-preset-save')?.addEventListener('click', async () => {
   send('save_preshow_preset', { name: name.trim() });
   showToast(`Topics saved as "${name.trim()}"`, '#22c55e');
 });
-el('preshow-preset-load')?.addEventListener('click', () => {
-  const id = el('preshow-preset-sel')?.value;
+function preshowLoadPreset(id) {
   if (!id) { showToast('Pick a preset to load.', '#fbbf24'); return; }
   send('apply_preshow_preset', { id });
   showToast('Topic preset loaded.', '#22c55e');
-});
+}
+el('preshow-preset-load')?.addEventListener('click', () => preshowLoadPreset(el('preshow-preset-sel')?.value));
+// Picking a preset from the dropdown loads it immediately — Load stays as an explicit re-load
+// (useful to discard in-progress edits back to the selected preset, since re-picking the same
+// already-selected option doesn't fire another 'change' event).
+el('preshow-preset-sel')?.addEventListener('change', function () { if (this.value) preshowLoadPreset(this.value); });
 el('preshow-preset-del')?.addEventListener('click', async () => {
   const sel = el('preshow-preset-sel');
   const id = sel?.value;
