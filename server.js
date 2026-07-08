@@ -1470,9 +1470,16 @@ function adProofCsv(sess) {
 function applyBrandSlots() {
   const b = activeBrand();
   if (!b) return;
-  const sponsorLogos = new Set(b.sponsors.map((s) => s.logo).filter(Boolean));
-  // tagged → use it; no tag but the slot currently holds a brand sponsor → clear (the tick was
-  // removed); otherwise keep (it's a manual Dashboard upload, not owned by the brand).
+  // Ownership check must span EVERY kit's sponsors (all packages), not just the active kit's —
+  // otherwise a slot filled by the PREVIOUS kit's sponsor (e.g. trophi.ai on the scoreboard)
+  // looks like a manual upload after switching kits and sticks forever. Mirrors the
+  // all-kits replaySkin ownership set below.
+  const sponsorLogos = new Set(savedBrandKits.flatMap((k) =>
+    (k.packages || []).flatMap((p) => (p.sponsors || []).map((s) => s && s.logo))
+      .concat((k.sponsors || []).map((s) => s && s.logo))
+  ).filter(Boolean));
+  // tagged → use it; no tag but the slot currently holds ANY brand sponsor → clear (the tick
+  // was removed / the kit changed); otherwise keep (a manual Dashboard upload, not brand-owned).
   const resolve = (cur, tagged) => (tagged != null ? tagged : (sponsorLogos.has(cur) ? null : cur));
   state.overtime.logo = resolve(state.overtime.logo, b.spots.overtime);
   state.replay.logo = resolve(state.replay.logo, b.spots.replayGoal);
@@ -14328,46 +14335,47 @@ function startHttpServer(baseDir) {
     }
   });
 
-  app.post('/api/media/folder', mediaJson, (req, res) => {
+  app.post('/api/media/folder', mediaJson, async (req, res) => {
     const { path: rel, name } = req.body || {};
     const safeName = String(name || '').replace(/[^\w\-. ]+/g, '').trim();
     if (!safeName) return res.status(400).json({ ok: false, error: 'Bad folder name' });
     const abs = safeMediaPath((rel ? rel + '/' : '') + safeName);
     if (!abs) return res.status(400).json({ ok: false, error: 'Bad path' });
-    try { fs.mkdirSync(abs, { recursive: true }); res.json({ ok: true }); }
+    try { await fsp.mkdir(abs, { recursive: true }); res.json({ ok: true }); }
     catch (e) { res.status(500).json({ ok: false, error: e.message }); }
   });
 
-  app.post('/api/media/upload', mediaJson, (req, res) => {
+  app.post('/api/media/upload', mediaJson, async (req, res) => {
     const { path: rel, name, dataUrl, url } = req.body || {};
     const safeName = String(name || '').replace(/[^\w\-. ]+/g, '_').trim();
     if (!safeName) return res.status(400).json({ ok: false, error: 'Missing file name' });
     const dir = safeMediaPath(rel || '');
     if (!dir) return res.status(400).json({ ok: false, error: 'Bad path' });
     try {
-      fs.mkdirSync(dir, { recursive: true });
+      await fsp.mkdir(dir, { recursive: true });
       // Web album: store a tiny .url pointer instead of binary data.
       if (url && !dataUrl) {
-        fs.writeFileSync(path.join(dir, safeName.replace(IMG_RE, '') + '.url'), String(url));
+        await fsp.writeFile(path.join(dir, safeName.replace(IMG_RE, '') + '.url'), String(url));
         return res.json({ ok: true, web: true });
       }
       const m = /^data:[^;]+;base64,(.+)$/s.exec(dataUrl || '');
       if (!m) return res.status(400).json({ ok: false, error: 'Expected a base64 data URL' });
       const fname = IMG_RE.test(safeName) ? safeName : safeName + '.png';
-      fs.writeFileSync(path.join(dir, fname), Buffer.from(m[1], 'base64'));
+      // Async — uploads run up to the 40MB body cap; a sync write that size freezes the window.
+      await fsp.writeFile(path.join(dir, fname), Buffer.from(m[1], 'base64'));
       res.json({ ok: true, name: fname, url: '/data/media/' + ((rel ? rel + '/' : '') + fname).split('/').map(encodeURIComponent).join('/') });
     } catch (e) {
       res.status(500).json({ ok: false, error: e.message });
     }
   });
 
-  app.post('/api/media/delete', mediaJson, (req, res) => {
+  app.post('/api/media/delete', mediaJson, async (req, res) => {
     const abs = safeMediaPath((req.body || {}).path);
     if (!abs || abs === mediaRoot) return res.status(400).json({ ok: false, error: 'Bad path' });
     try {
-      const st = fs.statSync(abs);
-      if (st.isDirectory()) fs.rmSync(abs, { recursive: true, force: true });
-      else fs.unlinkSync(abs);
+      const st = await fsp.stat(abs);
+      if (st.isDirectory()) await fsp.rm(abs, { recursive: true, force: true });
+      else await fsp.unlink(abs);
       res.json({ ok: true });
     } catch (e) {
       res.status(500).json({ ok: false, error: e.message });
