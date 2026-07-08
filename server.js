@@ -313,7 +313,8 @@ let state = {
   // homeScene is the OBS scene "Return" switches back to (typically the Desk Show scene).
   // headline/topics mirror the active brand package's own topicsHeadline/topics fields
   // (syncActivePreshowTopics()) — not independently persisted here.
-  preshow: { headline: '', topics: [], activeTopicIndex: 0, homeScene: '' },
+  // predictions[i] = caster in desk slot i+1's pick for the upcoming match: '' | 'blue' | 'orange'.
+  preshow: { headline: '', topics: [], activeTopicIndex: 0, homeScene: '', predictions: ['', ''] },
   csgo: {                                                 // CS2 Game State Integration
     connected: false,
     lastUpdate: 0,
@@ -1854,7 +1855,10 @@ function loadState() {
               }))
             : [],
           activeTopicIndex: Math.max(0, parseInt(saved.preshow.activeTopicIndex, 10) || 0),
-          homeScene: typeof saved.preshow.homeScene === 'string' ? saved.preshow.homeScene : ''
+          homeScene: typeof saved.preshow.homeScene === 'string' ? saved.preshow.homeScene : '',
+          predictions: Array.isArray(saved.preshow.predictions)
+            ? [0, 1].map((i) => (['blue', 'orange'].includes(saved.preshow.predictions[i]) ? saved.preshow.predictions[i] : ''))
+            : ['', '']
           // headline/topics restored above are transient — syncActivePreshowTopics() (called once
           // brand kits finish loading) overwrites them from the active package right after boot.
         };
@@ -10057,10 +10061,14 @@ function handleControlMessage(msg, ws) {
           })).slice(0, 12)
         : cur.topics;
       const headline = typeof p.headline === 'string' ? p.headline.slice(0, 140) : (cur.headline ?? '');
+      const predictions = Array.isArray(p.predictions)
+        ? [0, 1].map((i) => (['blue', 'orange'].includes(p.predictions[i]) ? p.predictions[i] : ''))
+        : (Array.isArray(cur.predictions) ? cur.predictions : ['', '']);
       state.preshow = {
         headline, topics,
         activeTopicIndex: ('activeTopicIndex' in p) ? Math.max(0, parseInt(p.activeTopicIndex, 10) || 0) : (cur.activeTopicIndex ?? 0),
-        homeScene: typeof p.homeScene === 'string' ? p.homeScene.slice(0, 100) : (cur.homeScene ?? '')
+        homeScene: typeof p.homeScene === 'string' ? p.homeScene.slice(0, 100) : (cur.homeScene ?? ''),
+        predictions
       };
       // Headline/topics are brand content — persist onto the active package too, so switching
       // packages (or kits) brings the right Desk Show topics back automatically.
@@ -16599,6 +16607,30 @@ function startHttpServer(baseDir) {
     }
   });
 
+  // If the app has no record of a running prediction, ADOPT the channel's live one from
+  // Twitch (created on the dashboard / another tool, or lost across a relaunch or a
+  // failed-create confusion) so resolve/lock/cancel still work on it.
+  async function adoptActivePrediction() {
+    if (state.twitch.predictions.current) return state.twitch.predictions.current;
+    if (!twitchClient || !state.twitch.channelId) return null;
+    try {
+      const list = await twitchClient.getLatestPredictions(state.twitch.channelId, 5);
+      const live = (list || []).find((p) => p.status === 'ACTIVE' || p.status === 'LOCKED');
+      if (!live) return null;
+      const endsAt = new Date(live.created_at).getTime() + (Number(live.prediction_window) || 0) * 1000;
+      const secs = Math.max(0, Math.round((endsAt - Date.now()) / 1000));
+      state.twitch.predictions.current = normalizePrediction(live, secs);
+      if (predictionManager) predictionManager.currentPrediction = live;
+      broadcast(bridgeClients, { type: 'full_state', data: buildLiveState() });
+      saveTwitchData();
+      console.log('[Twitch] Adopted live prediction from Twitch:', live.id, `"${live.title}"`);
+      return state.twitch.predictions.current;
+    } catch (e) {
+      console.warn('[Twitch] adopt prediction failed:', e.message);
+      return null;
+    }
+  }
+
   // Prediction resolution
   app.post('/api/twitch/prediction/resolve', async (req, res) => {
     const { outcomeId } = req.body;
@@ -16607,8 +16639,8 @@ function startHttpServer(baseDir) {
       return res.status(400).json({ error: 'Twitch not connected' });
     }
 
-    if (!state.twitch.predictions.current) {
-      return res.status(400).json({ error: 'No active prediction' });
+    if (!(await adoptActivePrediction())) {
+      return res.status(400).json({ error: 'No active prediction — none running on the channel either' });
     }
 
     if (!outcomeId) {
@@ -16649,7 +16681,7 @@ function startHttpServer(baseDir) {
   // Prediction lock (close voting window early)
   app.post('/api/twitch/prediction/lock', async (req, res) => {
     if (!predictionManager) return res.status(400).json({ error: 'Twitch not connected' });
-    if (!state.twitch.predictions.current) return res.status(400).json({ error: 'No active prediction' });
+    if (!(await adoptActivePrediction())) return res.status(400).json({ error: 'No active prediction — none running on the channel either' });
     try {
       await predictionManager.lockPrediction(state.twitch.predictions.current.id);
       res.json({ success: true });
@@ -16662,7 +16694,7 @@ function startHttpServer(baseDir) {
   // Prediction cancel
   app.post('/api/twitch/prediction/cancel', async (req, res) => {
     if (!predictionManager) return res.status(400).json({ error: 'Twitch not connected' });
-    if (!state.twitch.predictions.current) return res.status(400).json({ error: 'No active prediction' });
+    if (!(await adoptActivePrediction())) return res.status(400).json({ error: 'No active prediction — none running on the channel either' });
     try {
       stopPredictionPolling();
       await predictionManager.cancelPrediction(state.twitch.predictions.current.id);

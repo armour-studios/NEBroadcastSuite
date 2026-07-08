@@ -130,6 +130,21 @@ class TwitchClient {
     }
   }
 
+  // Latest predictions on the channel, newest first — lets the app ADOPT a prediction it
+  // didn't create (Twitch dashboard, another tool) so resolve/lock/cancel still work on it.
+  async getLatestPredictions(broadcasterId, first = 5) {
+    try {
+      const res = await axios.get(`${TWITCH_API_BASE}/predictions`, {
+        params: { broadcaster_id: broadcasterId, first },
+        headers: this.headers
+      });
+      return res.data.data || [];
+    } catch (err) {
+      console.error('[Twitch] getLatestPredictions error:', err.response?.data?.message || err.message);
+      return [];
+    }
+  }
+
   async lockPrediction(broadcasterId, predictionId) {
     try {
       const res = await axios.patch(
