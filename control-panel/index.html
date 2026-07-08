@@ -6064,6 +6064,12 @@
     <button type="button" class="ev-subnav-btn" data-inttab="twitch">Twitch</button>
   </div>
 
+  <!-- Back bar — shown on every app panel; Browse is the only landing view -->
+  <div id="int-backbar" style="display:none; align-items:center; gap:12px; margin-bottom:16px;">
+    <button type="button" class="btn btn-secondary btn-sm" id="int-back">&larr; All integrations</button>
+    <span id="int-backbar-title" style="font-size:12px; font-weight:800; letter-spacing:.1em; text-transform:uppercase; color:var(--muted);"></span>
+  </div>
+
   <!-- BROWSE: app-store style landing — every integration as a card with its live status -->
   <div id="integration-store" class="integration-panel" style="display:none;">
     <div class="int-status-strip" id="int-status-strip">
@@ -6346,6 +6352,7 @@
           </div>
         </div>
         <button class="btn btn-ghost btn-sm" id="btn-save-pred-settings" style="margin-top: 10px; width: 100%;">Save Auto-Predict Settings</button>
+        <div id="pred-auto-status" style="display:none; margin-top:8px; font-size:12px; line-height:1.35; padding:7px 10px; border-radius:7px; background:rgba(255,255,255,.04); border:1px solid rgba(255,255,255,.08);"></div>
       </div>
 
       <!-- Manual Create Form -->

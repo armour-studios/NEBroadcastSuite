@@ -3745,7 +3745,7 @@ function qrailShowTab(tab) {
   const title = el('qrail-paneltitle'); if (title) title.textContent = QRAIL_TAB_TITLES[tab] || '';
   // Live sections refresh as their tab opens (queue now lives under NEXT, AI under AUTO).
   if ((tab === 'ros' || tab === 'flows' || tab === 'talent') && typeof renderQrailLive === 'function') renderQrailLive();
-  if (tab === 'replay' && typeof renderQrailReplay === 'function') renderQrailReplay(currentState);
+  if (tab === 'replay' && typeof renderQrailReplay === 'function') { renderQrailReplay(currentState); if (typeof qrScanFolder === 'function') qrScanFolder(); }
   if (tab === 'talent' && typeof cfTalentAutoOpen === 'function') cfTalentAutoOpen();
   if (tab === 'twitch') setTimeout(() => { const c = el('twitch-chat'); if (c) c.scrollTop = c.scrollHeight; }, 100);
   qrailExpand(tab);
@@ -17058,6 +17058,14 @@ function _intShowTab(which) {
     twitch: [el('integration-twitch'), el('integration-twitchgames')]
   };
   Object.entries(panels).forEach(([key, els]) => els.forEach((p) => { if (p) p.style.display = key === _intTab ? '' : 'none'; }));
+  // Browse is the landing; every app panel shows a way back.
+  const backbar = el('int-backbar');
+  if (backbar) {
+    backbar.style.display = _intTab === 'store' ? 'none' : 'flex';
+    const titles = { switcher: 'Video Switcher — OBS / vMix', cameras: 'Cameras — VDO.Ninja',
+      games: 'Games & GSI', tournaments: 'Tournament Platforms', twitch: 'Twitch' };
+    const t = el('int-backbar-title'); if (t) t.textContent = titles[_intTab] || '';
+  }
   if (_intTab === 'cameras' && typeof cfLoadVdoSettings === 'function') cfLoadVdoSettings();
   try { localStorage.setItem('integrations_active_tab', _intTab); } catch (_) {}
 }
@@ -17066,11 +17074,12 @@ document.querySelectorAll('#int-subnav .ev-subnav-btn').forEach((b) => b.addEven
 // Deferred like Assets' subnav restore — some panel init code referenced here isn't defined until
 // later in the script; calling synchronously here risks the same TDZ crash documented for that case.
 setTimeout(() => {
-  let saved; try { saved = localStorage.getItem('integrations_active_tab'); } catch (_) {}
-  _intShowTab(saved || 'store');
+  // Always land on Browse — the store grid is the Integrations page.
+  _intShowTab('store');
 }, 0);
 
 // ── Browse grid: cards navigate to their section; status chips follow live state ──
+el('int-back')?.addEventListener('click', () => _intShowTab('store'));
 document.querySelectorAll('#int-store-grid .int-card').forEach((card) => {
   card.addEventListener('click', () => {
     _intShowTab(card.dataset.goto);
@@ -19139,7 +19148,7 @@ function flowActionLabel(a) {
     case 'set_event_title': return 'Event title: "' + (p.title || '').slice(0, 26) + '"';
     case 'set_round_label': return p.text ? ('Round: "' + p.text.slice(0, 24) + '"') : 'Clear round label';
     case 'set_match_label': return p.text ? ('Match label: "' + p.text.slice(0, 22) + '"') : 'Auto match label';
-    case 'overlay_winner': return 'Winner: ' + (p.side || 'blue');
+    case 'overlay_winner': return 'Winner: ' + (p.side === 'blue' ? 'Blue' : p.side === 'orange' ? 'Orange' : 'series winner');
     case 'match_set_series_score': return `Series: Blue ${p.blue ?? '?'} – Orange ${p.orange ?? '?'}`;
     case 'twitch_prediction_create': return 'Create prediction: "' + (p.title || 'Who wins?').slice(0, 20) + '"';
     case 'twitch_prediction_resolve': return 'Resolve → outcome #' + ((p.outcomeIndex || 0) + 1);
@@ -19231,8 +19240,8 @@ function flowActionParamsHtml(a) {
     case 'set_match_label':
       return `<input type="text" class="fa-param input-text" data-k="text" placeholder="e.g. UPCOMING MATCH (blank = auto)" value="${poEsc(p.text||'')}" style="width:250px;">`;
     case 'overlay_winner':
-      return `<select class="fa-param input-select" data-k="side" style="width:100px;"><option value="blue"${p.side==='blue'?' selected':''}>Blue</option><option value="orange"${p.side==='orange'?' selected':''}>Orange</option></select>
-        <input type="text" class="fa-param input-text" data-k="name" placeholder="name" value="${poEsc(p.name||'')}" style="width:120px;">`;
+      return `<select class="fa-param input-select" data-k="side" style="width:150px;" title="Auto uses the winner from the trigger (e.g. Series Ended) — pick a side to force it"><option value="auto"${(!p.side||p.side==='auto')?' selected':''}>Auto (series winner)</option><option value="blue"${p.side==='blue'?' selected':''}>Blue</option><option value="orange"${p.side==='orange'?' selected':''}>Orange</option></select>
+        <input type="text" class="fa-param input-text" data-k="name" placeholder="name (auto if blank)" value="${poEsc(p.name||'')}" style="width:120px;">`;
     case 'twitch_prediction_create':
       return `<input type="text" class="fa-param input-text" data-k="title" placeholder="Who will win?" value="${poEsc(p.title||'')}" style="width:130px;">
         <input type="text" class="fa-param input-text" data-k="outcome1" placeholder="Option 1" value="${poEsc(p.outcome1||'')}" style="width:90px;">
@@ -21702,18 +21711,37 @@ function renderQrailBufferStatus(data) {
 }
 
 let _qrClipsSig = '';
+// Un-imported files sitting in the OBS replay folder (scan-folder), cached so the renderer
+// stays synchronous; refreshed on tab open and clips_update.
+let _qrFolderFiles = [];
+let _qrScanBusy = false;
+async function qrScanFolder() {
+  if (_qrScanBusy) return;
+  _qrScanBusy = true;
+  try {
+    const r = await fetch('http://localhost:3000/api/clips/scan-folder');
+    const d = await r.json();
+    _qrFolderFiles = (d.files || []).filter((f) => !f.imported);
+  } catch (_) { /* folder not configured — library-only view */ }
+  _qrScanBusy = false;
+  renderQrailReplay(currentState);
+}
 function renderQrailReplay(data) {
   renderQrailBufferStatus(data);
   const st = (data || currentState || {});
   const list = el('qr-clip-list'); if (!list) return;
-  const lib = st.clips?.library || [];
-  const latest = lib.slice(-5).reverse();   // library appends — last entries are the newest saves
-  const sig = JSON.stringify(latest.map((c) => c.id + ':' + (c.name || '') + ':' + (c.duration || 0)));
+  // Merge the imported library (unshift = newest FIRST — slice(-5) used to show the OLDEST
+  // five, which is why fresh Twitch imports never appeared) with un-imported files straight
+  // from the OBS replay folder, newest first across both sources.
+  const lib = (st.clips?.library || []).map((c) => ({ t: c.createdAt || 0, c }));
+  const files = _qrFolderFiles.map((f) => ({ t: f.mtimeMs || 0, c: { name: f.name, rawPath: f.path, duration: null, _folderFile: true } }));
+  const latest = lib.concat(files).sort((a, b) => b.t - a.t).slice(0, 8).map((x) => x.c);
+  const sig = JSON.stringify(latest.map((c) => (c.id || c.rawPath) + ':' + (c.name || '') + ':' + (c.duration || 0)));
   if (sig === _qrClipsSig) return;
   _qrClipsSig = sig;
   list.innerHTML = '';
   if (!latest.length) {
-    list.innerHTML = '<div class="field-hint" style="margin:0;">No clips yet — Save Replay while the OBS buffer is running, or import clips on the REPLAYS page.</div>';
+    list.innerHTML = '<div class="field-hint" style="margin:0;">No clips yet — Save Replay while the OBS buffer is running, or set the replay folder on the REPLAYS page.</div>';
     return;
   }
   latest.forEach((c) => {
@@ -21731,7 +21759,7 @@ function renderQrailReplay(data) {
         <span class="qr-clip-dur">${dur}</span>
       </div>
       <div class="qr-clip-btns">
-        <button class="btn btn-secondary btn-sm qr-edit" title="Quick edit — opens the Video Editor in a popup to trim and push live">Edit</button>
+        ${c._folderFile ? '' : '<button class="btn btn-secondary btn-sm qr-edit" title="Quick edit — opens the Video Editor in a popup to trim and push live">Edit</button>'}
         <button class="btn btn-primary btn-sm qr-toair" title="Play this clip on the program bus now (cuts OBS to the replay scene, returns when it ends)">To Air</button>
       </div>`;
     const thumbImg = row.querySelector('.qr-clip-thumb-img');
@@ -21739,7 +21767,7 @@ function renderQrailReplay(data) {
       thumbImg.addEventListener('load', () => thumbImg.classList.add('loaded'));
       thumbImg.addEventListener('error', () => thumbImg.remove());
     }
-    row.querySelector('.qr-edit').addEventListener('click', () => qrOpenClipEditor(c));
+    row.querySelector('.qr-edit')?.addEventListener('click', () => qrOpenClipEditor(c));
     row.querySelector('.qr-toair').addEventListener('click', () => qrailClipToAir(c));
     list.appendChild(row);
   });
@@ -21828,8 +21856,10 @@ async function qrTwLoad() {
       const row = document.createElement('div');
       row.className = 'qr-clip-row';
       const dur = c.duration ? Math.round(c.duration) + 's' : '';
-      row.innerHTML = `<span class="qr-clip-name" title="${esc(c.title || 'Clip')}">${esc(c.title || 'Clip')}</span>`
-        + `<span class="qr-clip-dur">${dur}</span>`
+      row.innerHTML = `<div class="qr-clip-info">`
+        + `<div class="qr-clip-thumb">${c.thumbnail_url ? `<img class="qr-clip-thumb-img loaded" alt="" loading="lazy" src="${esc(c.thumbnail_url)}">` : ''}</div>`
+        + `<span class="qr-clip-name" title="${esc(c.title || 'Clip')}">${esc(c.title || 'Clip')}</span>`
+        + `<span class="qr-clip-dur">${dur}</span></div>`
         + `<button class="btn btn-secondary btn-sm qr-tw-import" title="Download this Twitch clip into the local clip library">Import</button>`;
       const btn = row.querySelector('.qr-tw-import');
       btn.addEventListener('click', async () => {
@@ -24041,6 +24071,17 @@ el('btn-save-minigame-settings')?.addEventListener('click', () => {
 function populateTwitchGameSettings(twitch) {
   const ps = twitch?.predictions?.settings || {};
   if (el('pred-auto-create'))    el('pred-auto-create').checked  = !!ps.autoCreate;
+  // Last auto-prediction outcome (why it did / didn't fire on the last match start/end).
+  const _la = twitch?.predictions?.lastAuto;
+  const _laEl = el('pred-auto-status');
+  if (_laEl) {
+    if (_la && _la.message) {
+      const good = _la.kind === 'created' || _la.kind === 'resolved';
+      _laEl.textContent = (good ? '✓ ' : _la.kind === 'skip' ? '• ' : '✗ ') + _la.message;
+      _laEl.style.color = good ? '#4ade80' : _la.kind === 'skip' ? '#fbbf24' : '#f87171';
+      _laEl.style.display = '';
+    } else { _laEl.style.display = 'none'; }
+  }
   if (el('pred-auto-template'))  el('pred-auto-template').value  = ps.template  || 'teams';
   if (el('pred-auto-cooldown'))  el('pred-auto-cooldown').value  = formatMmss(Math.round((ps.cooldown ?? 300000) / 1000));
   const loopSecs = ps.overlayLoop ?? 30;

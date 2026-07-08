@@ -7635,3 +7635,6 @@ tr.lg2-drag-over { outline: 2px solid var(--accent, #4a9eff); outline-offset: -1
 /* Twitch glyph ships dark - match the app: white mark on the purple tile */
 .int-card[data-card="twitch"] .int-card-logo { background: linear-gradient(135deg, #6d28d9, #4c1d95); }
 .int-card[data-card="twitch"] .int-card-logo img { filter: brightness(0) invert(1); }
+
+/* Integrations: the Browse cards ARE the navigation - category pills retired */
+#int-subnav { display: none; }
