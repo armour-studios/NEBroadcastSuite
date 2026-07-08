@@ -622,6 +622,7 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
   var ABBREV_THRESHOLD = 0.72; // switch to initials when bracket is scaled below this
   function fit(forceAbbrev) {
     const scaleEl = el('bk-scale'); const body = scaleEl.parentElement;
+    scaleEl.style.transition = 'none';   // fit() measures + snaps; only the focus zoom animates
     scaleEl.style.transform = 'scale(1)';
     const cw = body.clientWidth, ch = body.clientHeight;
     const sw = scaleEl.scrollWidth, sh = scaleEl.scrollHeight;
@@ -629,6 +630,66 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
     const s = Math.min(MAX_FIT, cw / sw, ch / sh);
     scaleEl.style.transform = 'scale(' + s + ')';
     scaleEl.classList.toggle('bk-abbrev', !!forceAbbrev || s < ABBREV_THRESHOLD);
+  }
+
+  // ── Team-run zoom: after fit(), magnify the focused team's branch so every opponent name
+  // reads on screen — a camera move into their path. Animates on focus change / clear;
+  // subsequent re-renders with the same focus re-apply the frame without re-animating.
+  var _zoomSig = '', _lastZoomTransform = '';
+  var ZOOM_EASE = 'transform .9s cubic-bezier(.22,.9,.24,1)';
+  function zoomToPath(scaleEl, pathEls, sigKey) {
+    var body = scaleEl.parentElement;
+    if (!pathEls.length || !body) { zoomReset(scaleEl); return; }
+    var u = null;
+    pathEls.forEach(function(m) {
+      var r = m.getBoundingClientRect();
+      if (!u) u = { l: r.left, t: r.top, r: r.right, b: r.bottom };
+      else { u.l = Math.min(u.l, r.left); u.t = Math.min(u.t, r.top); u.r = Math.max(u.r, r.right); u.b = Math.max(u.b, r.bottom); }
+    });
+    var bd = body.getBoundingClientRect();
+    var el0 = scaleEl.getBoundingClientRect();
+    // Degenerate geometry (hidden source, control-panel thumb, mid-layout race) — a zoom
+    // computed from zero-size rects lands on scale(0) and blanks the scene. Keep fit()'s frame.
+    if (bd.width < 80 || bd.height < 80 || el0.width < 10 || (u.r - u.l) < 4 || (u.b - u.t) < 4) { return; }
+    var PAD = 46, MAX_ZOOM = 2.2;   // cap so a one-match run doesn't blow up past readable
+    var k = Math.max(1, Math.min(MAX_ZOOM,
+      (bd.width - PAD * 2) / Math.max(1, u.r - u.l),
+      (bd.height - PAD * 2) / Math.max(1, u.b - u.t)));
+    var s0 = el0.width / Math.max(1, scaleEl.offsetWidth);   // the scale fit() just applied
+    // transform-origin is the element centre: scaling by k keeps the centre S fixed, then the
+    // translate (applied after the scale, so in screen pixels) moves the path centre to the
+    // viewport centre.
+    var S  = { x: el0.left + el0.width / 2,  y: el0.top + el0.height / 2 };
+    var Uc = { x: (u.l + u.r) / 2,           y: (u.t + u.b) / 2 };
+    var Bc = { x: bd.left + bd.width / 2,    y: bd.top + bd.height / 2 };
+    var tx = Bc.x - S.x - (Uc.x - S.x) * k;
+    var ty = Bc.y - S.y - (Uc.y - S.y) * k;
+    var target = 'translate(' + tx.toFixed(1) + 'px,' + ty.toFixed(1) + 'px) scale(' + (s0 * k).toFixed(4) + ')';
+    scaleEl.style.transition = (sigKey !== _zoomSig) ? ZOOM_EASE : 'none';
+    _zoomSig = sigKey;
+    scaleEl.style.transform = target;
+    _lastZoomTransform = target;
+    scaleEl.dataset.zoomed = '1';
+    // A big bracket fits abbreviated (short tags, no logos) — but zoomed in it may now be
+    // comfortably readable, so swap the full names + logos back on. bk-abbrev only switches
+    // what displays inside fixed-size slots, so the geometry measured above cannot shift.
+    scaleEl.classList.toggle('bk-abbrev', (s0 * k) < ABBREV_THRESHOLD);
+  }
+  function zoomReset(scaleEl) {
+    if (!scaleEl.dataset.zoomed) { _zoomSig = ''; return; }
+    delete scaleEl.dataset.zoomed;
+    _zoomSig = '';
+    // fit() already snapped the transform home this frame (before paint) — replay from the
+    // zoomed frame so clearing the focus animates back out instead of jumping.
+    var home = scaleEl.style.transform;
+    if (_lastZoomTransform) {
+      scaleEl.style.transition = 'none';
+      scaleEl.style.transform = _lastZoomTransform;
+      void scaleEl.offsetWidth;   // commit the zoomed frame before animating home
+      scaleEl.style.transition = ZOOM_EASE;
+      scaleEl.style.transform = home;
+    }
+    _lastZoomTransform = '';
   }
 
   // ?show=1 — always render the live bracket (ignore the on-air visible flag, no demo fallback).
@@ -797,24 +858,31 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
       fit(isElim && SHOW_W && SHOW_L && ROUNDS_N === 0);
       if (focusTeam) {
         var fn = focusTeam.toLowerCase();
-        // Team-run focus: light the team's slot in every match they appear in AND mark those
-        // matches on-path — everything else recedes (see .bk-focus-mode CSS), so the viewer
-        // reads the team's whole progression through the bracket at a glance.
+        // Team-run focus: light the team's slot in every match they appear in, mark those
+        // matches on-path (everything else recedes — see .bk-focus-mode CSS), then ZOOM the
+        // camera into the union of those matches so every opponent name reads on screen.
         scaleEl.classList.add('bk-focus-mode');
         scaleEl.querySelectorAll('.bk-name').forEach(function(nameEl) {
           var slot = nameEl.closest('.bk-slot');
           if (slot) slot.classList.toggle('focused', nameEl.textContent.toLowerCase().includes(fn));
         });
+        var pathEls = [];
         scaleEl.querySelectorAll('.bk-match').forEach(function(m) {
           var onPath = Array.prototype.some.call(m.querySelectorAll('.bk-name'), function(n) {
             return n.textContent.toLowerCase().includes(fn);
           });
           m.classList.toggle('on-path', onPath);
+          if (onPath) pathEls.push(m);
         });
+        // Pool/ladder/schedule views have no .bk-match elements — zoom to the focused
+        // slots/rows instead so the camera move works in every bracket view.
+        if (!pathEls.length) pathEls = Array.prototype.slice.call(scaleEl.querySelectorAll('.bk-slot.focused, .bk-lad-team.focused'));
+        zoomToPath(scaleEl, pathEls, fn + '|' + view + '|' + pathEls.length);
       } else {
         scaleEl.classList.remove('bk-focus-mode');
         scaleEl.querySelectorAll('.bk-slot.focused').forEach(function(s) { s.classList.remove('focused'); });
         scaleEl.querySelectorAll('.bk-match.on-path').forEach(function(m) { m.classList.remove('on-path'); });
+        zoomReset(scaleEl);
       }
     });
   }
