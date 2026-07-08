@@ -10,7 +10,7 @@ const FormData = require('form-data');
 const fsp = require('fs/promises');
 const os = require('os');
 const AdmZip = require('adm-zip');
-const { dialog, app: _electronApp } = require('electron');
+const { dialog, app: _electronApp, safeStorage } = require('electron');
 const { EventEmitter } = require('events');
 const IS_DEV = () => _electronApp && !_electronApp.isPackaged;
 const { createStartGgClient } = require('./backend/integrations/startgg-client');
@@ -94,6 +94,8 @@ let stateFile;
 let facecamsFile;
 let presetsFile;
 let brandsFile;
+let wsTokenFile;
+let wsAuthToken = '';   // shared secret required on every WS bridge connection — see getOrCreateWsToken()
 let startggApiToken = '';
 let challongeApiKey = '';
 let nxgenApiKey = '';
@@ -672,6 +674,7 @@ let state = {
       enabled: true,
       current: null,
       history: [],
+      lastAuto: null,   // { kind:'created'|'resolved'|'skip'|'error', message, ts } — last auto-prediction attempt (diagnostics surfaced in the panel)
       settings: {
         autoCreate: false,
         template: 'generic',
@@ -838,6 +841,51 @@ function safeReadJson(filePath, fallback) {
   return fallback;
 }
 
+// ── Secret-at-rest encryption (OBS password, start.gg/Challonge/NXGEN keys, Twitch/Discord
+// OAuth tokens) — these previously landed in state.json / twitch-data.json / discord-user.json
+// as plaintext. safeStorage encrypts with the OS keychain (DPAPI/Keychain/libsecret), so the
+// files are unreadable outside this machine+user even if copied. The 'enc:' prefix marks the
+// new format; unprefixed strings are legacy plaintext from a pre-migration state.json and are
+// read as-is, then re-saved encrypted on the next write. Falls back to plaintext (with a
+// warning) only if the OS has no keychain available (e.g. a headless/no-keyring Linux box) —
+// better to keep working than to lose saved credentials.
+function encryptSecret(plain) {
+  if (!plain) return '';
+  try {
+    if (safeStorage && safeStorage.isEncryptionAvailable && safeStorage.isEncryptionAvailable()) {
+      return 'enc:' + safeStorage.encryptString(String(plain)).toString('base64');
+    }
+  } catch (e) { console.warn('[secrets] encryption unavailable, storing plaintext:', e.message); }
+  return plain;
+}
+function decryptSecret(stored) {
+  if (!stored || typeof stored !== 'string') return '';
+  if (!stored.startsWith('enc:')) return stored;   // legacy plaintext, or plaintext fallback above
+  try {
+    if (safeStorage && safeStorage.isEncryptionAvailable && safeStorage.isEncryptionAvailable()) {
+      return safeStorage.decryptString(Buffer.from(stored.slice(4), 'base64'));
+    }
+  } catch (e) { console.warn('[secrets] failed to decrypt a stored secret (OS keychain changed?):', e.message); }
+  return '';   // can't decrypt without the OS keychain that encrypted it — treat as unset, not garbage
+}
+
+// ── WS bridge auth token ─────────────────────────────────────────────────────
+// The :3001 bridge accepts a `?token=` query param on every connection (control panel,
+// overlay browser sources, anything else). Loopback-only by default, so this mainly
+// guards the opt-in WS_HOST=0.0.0.0 (multi-PC) case — without it, anyone who can reach
+// the port gets full unauthenticated read+control of the broadcast. Generated once and
+// persisted (not part of state.json / Producer Profile exports) so it survives restarts
+// but doesn't leak into a shared/exported profile.
+function getOrCreateWsToken() {
+  try {
+    const existing = safeReadJson(wsTokenFile, null);
+    if (existing && typeof existing.token === 'string' && existing.token.length >= 32) return existing.token;
+  } catch (e) {}
+  const token = require('crypto').randomBytes(24).toString('hex');
+  try { safeWriteJson(wsTokenFile, { token }, true); } catch (e) { console.error('[bridge] failed to persist WS token:', e.message); }
+  return token;
+}
+
 function loadTeams() {
   savedTeams = safeReadJson(teamsFile, []);
 }
@@ -989,12 +1037,12 @@ function saveTwitchData(sync = false) {
 
   try {
     const data = {
-      apiToken:       state.twitch.apiToken       || '',
-      refreshToken:   state.twitch.refreshToken   || '',
+      apiToken:       encryptSecret(state.twitch.apiToken       || ''),
+      refreshToken:   encryptSecret(state.twitch.refreshToken   || ''),
       displayName:    state.twitch.displayName    || '',
       channelId:      state.twitch.channelId      || '',
       profilePicture: state.twitch.profilePicture || '',
-      webhookSecret:  state.twitch.webhookSecret,
+      webhookSecret:  encryptSecret(state.twitch.webhookSecret),
       predictions:    state.twitch.predictions,
       wheel:          state.twitch.wheel,
       minigame:       state.twitch.minigame,
@@ -1060,12 +1108,12 @@ function loadTwitchData() {
     if (fs.existsSync(twitchDataFile)) {
       const data = safeReadJson(twitchDataFile, {});
       // Restore auth credentials so the app reconnects without re-OAuth
-      if (data.apiToken)       state.twitch.apiToken       = data.apiToken;
-      if (data.refreshToken)   state.twitch.refreshToken   = data.refreshToken;
+      if (data.apiToken)       state.twitch.apiToken       = decryptSecret(data.apiToken);
+      if (data.refreshToken)   state.twitch.refreshToken   = decryptSecret(data.refreshToken);
       if (data.displayName)    state.twitch.displayName    = data.displayName;
       if (data.channelId)      state.twitch.channelId      = data.channelId;
       if (data.profilePicture) state.twitch.profilePicture = data.profilePicture;
-      if (data.webhookSecret)  state.twitch.webhookSecret  = data.webhookSecret;
+      if (data.webhookSecret)  state.twitch.webhookSecret  = decryptSecret(data.webhookSecret);
       if (data.predictions) {
         Object.assign(state.twitch.predictions, data.predictions);
         // Don't resume an in-progress prediction across restarts — it can't be
@@ -1098,8 +1146,8 @@ function saveDiscordUser(sync = false) {
       discriminator: state.discord.discriminator || '',
       globalName:   state.discord.globalName   || '',
       avatarUrl:    state.discord.avatarUrl    || '',
-      accessToken:  state.discord.accessToken  || '',
-      refreshToken: state.discord.refreshToken || ''
+      accessToken:  encryptSecret(state.discord.accessToken  || ''),
+      refreshToken: encryptSecret(state.discord.refreshToken || '')
     };
     safeWriteJson(discordDataFile, data, sync);
   } catch (err) {
@@ -1116,8 +1164,8 @@ function loadDiscordUser() {
       if (data.discriminator) state.discord.discriminator = data.discriminator;
       if (data.globalName)   state.discord.globalName   = data.globalName;
       if (data.avatarUrl)    state.discord.avatarUrl    = data.avatarUrl;
-      if (data.accessToken)  { state.discord.accessToken = data.accessToken; state.discord.connected = true; }
-      if (data.refreshToken) state.discord.refreshToken = data.refreshToken;
+      if (data.accessToken)  { state.discord.accessToken = decryptSecret(data.accessToken); state.discord.connected = true; }
+      if (data.refreshToken) state.discord.refreshToken = decryptSecret(data.refreshToken);
       console.log('[Discord] User loaded', data.username ? `(${data.username})` : '');
     }
   } catch (err) {
@@ -1912,7 +1960,7 @@ function loadState() {
         };
       }
       if (typeof saved.startggApiToken === 'string') {
-        startggApiToken = saved.startggApiToken;
+        startggApiToken = decryptSecret(saved.startggApiToken);
       }
       if (saved.challonge && typeof saved.challonge === 'object') {
         state.challonge = {
@@ -1926,7 +1974,7 @@ function loadState() {
         };
       }
       if (typeof saved.challongeApiKey === 'string') {
-        challongeApiKey = saved.challongeApiKey;
+        challongeApiKey = decryptSecret(saved.challongeApiKey);
       }
       if (saved.nxgen && typeof saved.nxgen === 'object') {
         state.nxgen = {
@@ -1940,7 +1988,7 @@ function loadState() {
         };
       }
       if (typeof saved.nxgenApiKey === 'string') {
-        nxgenApiKey = saved.nxgenApiKey;
+        nxgenApiKey = decryptSecret(saved.nxgenApiKey);
       }
       if (saved.activeEvent && typeof saved.activeEvent === 'object') {
         state.activeEvent = { ...state.activeEvent, ...saved.activeEvent };
@@ -1974,7 +2022,7 @@ function loadState() {
         };
       }
       if (typeof saved.obsPassword === 'string') {
-        obsPassword = saved.obsPassword;
+        obsPassword = decryptSecret(saved.obsPassword);
       }
       if (saved.vmix && typeof saved.vmix === 'object') {
         state.vmix.enabled = !!saved.vmix.enabled;
@@ -2149,11 +2197,11 @@ function _saveAppStateNow(sync = false) {
       myEvents: state.myEvents,
       game: { number: state.game.number },
       startgg: state.startgg,
-      startggApiToken,
+      startggApiToken: encryptSecret(startggApiToken),
       challonge: { enabled: state.challonge.enabled, tournamentSlug: state.challonge.tournamentSlug, selectedTournament: state.challonge.selectedTournament, logoMap: state.challonge.logoMap, autoFollow: state.challonge.autoFollow },
-      challongeApiKey,
+      challongeApiKey: encryptSecret(challongeApiKey),
       nxgen: { enabled: state.nxgen.enabled, eventSlug: state.nxgen.eventSlug, selectedEvent: state.nxgen.selectedEvent, logoMap: state.nxgen.logoMap, autoFollow: state.nxgen.autoFollow },
-      nxgenApiKey,
+      nxgenApiKey: encryptSecret(nxgenApiKey),
       activeEvent: state.activeEvent,
       obs: {
         enabled: state.obs.enabled,
@@ -2166,7 +2214,7 @@ function _saveAppStateNow(sync = false) {
         commercialAutoReturn: state.obs.commercialAutoReturn,
         scenes: state.obs.scenes
       },
-      obsPassword,
+      obsPassword: encryptSecret(obsPassword),
       vmix: { enabled: state.vmix.enabled, host: state.vmix.host, port: state.vmix.port },
       switcher: { target: state.switcher.target },
       // Persist the full bracket so it renders instantly on restart (then refreshes)
@@ -4679,7 +4727,7 @@ async function fetchAllSets(client, slug, perPage = 32, maxPages = 63) {
   const all = [];
   do {
     if (page > 1) await new Promise((r) => setTimeout(r, 500));   // stagger for start.gg rate limits
-    const res = await client.request(query, { slug, perPage, page });
+    const res = await startggRequestWithBackoff(client, query, { slug, perPage, page });
     event = res && res.event;
     if (!event) throw new Error('Event not found — check the slug/URL and your token');
     all.push(...((event.sets && event.sets.nodes) || []));
@@ -5245,20 +5293,141 @@ function applyBracketResult(slug, event, sets) {
 }
 
 // Refresh just the bracket (scores/progression) without re-importing teams.
+// ── Phased bracket import ────────────────────────────────────────────────────
+// Big events (RLCS: 1600+ sets / 50+ pages) used to import as ONE monolithic sweep:
+// the panel's request timed out ("No response from the server") and two sweeps in
+// the same minute tripped start.gg's 80 req/min budget. Now:
+//   1. one cheap query gets the phase list,
+//   2. sets are fetched PER PHASE — live phases first — and the bracket re-assembles
+//      and broadcasts after each phase, so the UI fills in progressively,
+//   3. COMPLETED phases cache for the app session (their results can't change), so a
+//      steady-state refresh only spends requests on the phase that's actually moving,
+//   4. rate-limit responses back off and resume instead of failing request #43 of 50.
+const _bracketPhaseCache = new Map();   // slug|phaseId -> { sets, phaseState }
+let _bracketFetchInFlight = '';         // slug mid-import — never stack a second sweep
+
+// start.gg rate limiting surfaces as a 429/error (sometimes an empty body) — back off
+// and retry the ONE page instead of failing the whole import.
+async function startggRequestWithBackoff(client, query, vars, tries = 4) {
+  for (let i = 0; ; i++) {
+    try {
+      return await client.request(query, vars);
+    } catch (e) {
+      const msg = String((e && e.message) || '');
+      const limited = /429|rate ?limit|too many/i.test(msg);
+      if (!limited || i >= tries - 1) throw e;
+      const wait = 15000 * (i + 1);
+      console.log('[Bracket] start.gg rate limit - backing off ' + (wait / 1000) + 's (page retry ' + (i + 1) + ')');
+      await new Promise((r) => setTimeout(r, wait));
+    }
+  }
+}
+
+const BRACKET_SET_FIELDS = `
+            id
+            fullRoundText
+            round
+            state
+            winnerId
+            phaseGroup { id displayIdentifier bracketType phase { id name } }
+            slots {
+              prereqType
+              prereqId
+              prereqPlacement
+              seed { placeholderName progressionSource { originPlacement originPhaseGroup { id } originPhase { id name } } }
+              entrant { id name }
+              standing { stats { score { value } } }
+            }`;
+
+async function fetchEventPhaseMeta(client, slug) {
+  const query = `
+    query BracketPhases($slug: String!) {
+      event(slug: $slug) {
+        id
+        name
+        tournament { name }
+        phases { id name state phaseGroups(query: { perPage: 64 }) { nodes { id } } }
+      }
+    }`;
+  const res = await startggRequestWithBackoff(client, query, { slug });
+  const event = res && res.event;
+  if (!event) throw new Error('Event not found — check the slug/URL and your token');
+  return event;
+}
+
+async function fetchPhaseSets(client, slug, phase) {
+  const ids = ((phase.phaseGroups && phase.phaseGroups.nodes) || []).map((g) => g.id).filter((x) => x != null);
+  if (!ids.length) return [];
+  // ids inlined (server-provided integers): the literal-array form is the one verified
+  // against the live API; a typed $ids variable is the only shape we could not test.
+  const query = `
+    query BracketPhaseSets($slug: String!, $perPage: Int!, $page: Int!) {
+      event(slug: $slug) {
+        sets(perPage: $perPage, page: $page, sortType: ROUND, filters: { phaseGroupIds: [${ids.join(', ')}] }) {
+          pageInfo { totalPages }
+          nodes {${BRACKET_SET_FIELDS}
+          }
+        }
+      }
+    }`;
+  const all = [];
+  let page = 1, totalPages = 1;
+  do {
+    if (page > 1) await new Promise((r) => setTimeout(r, 500));   // 80 req/min budget
+    const res = await startggRequestWithBackoff(client, query, { slug, perPage: 32, page });
+    const sets = res && res.event && res.event.sets;
+    if (!sets) break;
+    all.push(...(sets.nodes || []));
+    totalPages = (sets.pageInfo && sets.pageInfo.totalPages) || 1;
+    page++;
+  } while (page <= totalPages && page <= 63);
+  return all;
+}
+
 async function fetchBracket(rawSlug) {
   if (!startggApiToken) throw new Error('Missing Start.gg API token (set it in Settings)');
   const slug = parseEventSlug(rawSlug);
   if (!slug) throw new Error('Missing event slug or URL');
-
-  const client = createStartGgClient(startggApiToken);
-  const { event, sets } = await fetchAllSets(client, slug);
-  applyBracketResult(slug, event, sets);
-  saveAppState();
-  broadcastFullState();
-  syncAllLinkedChallongeTournaments().catch(() => {});
-
-  const rounds = state.bracket.winners.length + state.bracket.losers.length + state.bracket.finals.length;
-  return { title: event.name || '', type: state.bracket.type, rounds, sets: sets.length };
+  if (_bracketFetchInFlight === slug) {
+    // An import for this event is already running — report it instead of stacking
+    // another 50-request sweep on the same rate budget.
+    return { title: state.bracket.title || '', type: state.bracket.type,
+      rounds: state.bracket.winners.length + state.bracket.losers.length + state.bracket.finals.length,
+      sets: (state.bracket.matches || []).length, inProgress: true };
+  }
+  _bracketFetchInFlight = slug;
+  try {
+    const client = createStartGgClient(startggApiToken);
+    const event = await fetchEventPhaseMeta(client, slug);
+    const phases = event.phases || [];
+    // Fetch order: live phases first, then upcoming, COMPLETED last (usually cache
+    // hits) — the part of the bracket people are watching lands on the overlay first.
+    const rank = (p) => (p.state === 'ACTIVE' ? 0 : p.state !== 'COMPLETED' ? 1 : 2);
+    const order = [...phases].sort((a, b) => rank(a) - rank(b));
+    const combined = () => phases.flatMap((p) => ((_bracketPhaseCache.get(slug + '|' + p.id) || {}).sets) || []);
+    let done = 0;
+    for (const ph of order) {
+      const key = slug + '|' + ph.id;
+      const cached = _bracketPhaseCache.get(key);
+      const settled = ph.state === 'COMPLETED' && cached && cached.phaseState === 'COMPLETED';
+      if (!settled) {
+        const sets = await fetchPhaseSets(client, slug, ph);
+        _bracketPhaseCache.set(key, { sets, phaseState: ph.state });
+        await new Promise((r) => setTimeout(r, 600));   // breathe between phases
+      }
+      done++;
+      state.bracket.progress = done < order.length ? { done, total: order.length, phase: ph.name || '' } : null;
+      applyBracketResult(slug, event, combined());
+      broadcastFullState();   // the bracket fills in phase by phase
+    }
+    state.bracket.progress = null;
+    saveAppState();
+    syncAllLinkedChallongeTournaments().catch(() => {});
+    const rounds = state.bracket.winners.length + state.bracket.losers.length + state.bracket.finals.length;
+    return { title: event.name || '', tournamentName: (event.tournament && event.tournament.name) || '', type: state.bracket.type, rounds, sets: combined().length };
+  } finally {
+    _bracketFetchInFlight = '';
+  }
 }
 
 // ISO 3166-1 alpha-2 lookup for the most common esports countries.
@@ -5373,10 +5542,12 @@ async function loadEvent(rawSlug) {
   if (!slug) throw new Error('Missing event slug or URL');
 
   const client = createStartGgClient(startggApiToken);
-  const { event, sets } = await fetchAllSets(client, slug);
+  // Bracket via the phased import (live phase first, completed phases cached,
+  // progressive broadcasts) — the old single fetchAllSets sweep timed out on
+  // RLCS-scale events and tripped start.gg rate limits.
+  const bk = await fetchBracket(slug);
+  const event = { name: state.bracket.title || bk.title || '', tournament: { name: bk.tournamentName || '' } };
   const entrants = await fetchAllEntrants(client, slug);
-
-  applyBracketResult(slug, event, sets);          // bracket → phases
   // Only populate the transient event roster — don't touch savedTeams (user saves manually)
   const eventTeams = mapEntrantsToTeams(entrants);
   state.startgg.eventTeams = eventTeams;
@@ -5395,7 +5566,7 @@ async function loadEvent(rawSlug) {
     teams: entrants.length,
     players,
     logos,
-    sets: sets.length
+    sets: bk.sets
   };
 }
 
@@ -7152,10 +7323,25 @@ async function _executeFlowAction(action, ctx) {
       state.casters = { ...state.casters, visible: false };
       broadcastFullState();
       break;
-    case 'overlay_winner':
-      state.winner = { ...state.winner, visible: true, side: p.side || 'blue', name: p.name || '' };
+    case 'overlay_winner': {
+      // Resolve the winning side. An explicit side param wins; otherwise ('auto' or unset) use the
+      // trigger's winner — series_ended passes { winner } and only fires once the SERIES is clinched
+      // (ceil(bestOf/2) game wins; Bo1 = the single game) — falling back to whoever leads the series.
+      // This is what makes a "series_ended → show winner" flow display the real champion, not a preset.
+      const side = (p.side && p.side !== 'auto') ? p.side
+                 : (ctx && (ctx.winner === 'blue' || ctx.winner === 'orange')) ? ctx.winner
+                 : (state.series.blue > state.series.orange ? 'blue'
+                    : state.series.orange > state.series.blue ? 'orange' : 'blue');
+      const team = (state.teams && state.teams[side]) || {};
+      state.winner = {
+        ...state.winner, visible: true, side,
+        name:  p.name || team.name || state.winner.name || '',
+        logo:  p.name ? state.winner.logo : (team.logo || state.winner.logo || null),
+        color: team.color || state.winner.color || '',
+      };
       broadcastFullState();
       break;
+    }
     case 'overlay_winner_hide':
       state.winner = { ...state.winner, visible: false };
       broadcastFullState();
@@ -7795,6 +7981,12 @@ function rlSwitchScene(name, reason, transitionName) {
   if (!state.obs.enabled) return { ok: false, reason: 'obs_disabled' };
   if (!obsClient.isConnected()) return { ok: false, reason: 'obs_not_connected' };
   if (aiShielded()) return { ok: false, reason: 'ai_shielded' };
+  // The scene must still exist in OBS. Renaming/deleting/reorganizing the scene in OBS is the most
+  // common reason these RL auto-cuts "silently stop working" — the old code fired the switch and
+  // reported success even when OBS had no such scene. Only validate when we actually have a scene
+  // list (empty = not fetched yet → don't block, let OBS decide).
+  const scenes = state.obs.availableScenes || [];
+  if (scenes.length && !scenes.includes(sceneName)) return { ok: false, reason: 'scene_missing' };
   const tn = (transitionName || '').trim();
   console.log(`[OBS] RL auto-switch → ${sceneName} (${reason || 'rl'}${tn ? ', transition: ' + tn : ''})`);
   if (tn) {
@@ -7808,14 +8000,17 @@ const RL_SCENE_FAIL_MESSAGES = {
   no_scene: 'no scene selected',
   obs_not_connected: 'OBS is not connected',
   obs_disabled: 'OBS integration is disabled (Settings → OBS)',
-  ai_shielded: 'AI director shield is active'
+  ai_shielded: 'AI director shield is active',
+  scene_missing: 'that scene no longer exists in OBS (renamed/deleted) — re-pick it in Match ▸ Teams gear'
 };
 function broadcastRlSceneResult(phase, sceneName, result) {
   const message = result.ok
     ? `Cut to "${sceneName}" (${phase})`
     : `${phase === 'kickoff' ? 'Kickoff' : 'Post-game'} cut to "${sceneName}" skipped — ${RL_SCENE_FAIL_MESSAGES[result.reason] || result.reason}`;
   logAuto('rl-scene', message);
-  broadcast(bridgeClients, { type: 'rl-scene-result', data: { ok: !!result.ok, phase, message } });
+  // A failed cut here is a real problem the producer should fix (wrong scene name, OBS off, shield) —
+  // flag it for the notification bell so it isn't missed with the gear panel closed.
+  broadcast(bridgeClients, { type: 'rl-scene-result', data: { ok: !!result.ok, phase, message, notify: !result.ok } });
 }
 
 // Reset the held post-game scoreboard back to the live HUD (drop the frozen board). Used by the manual
@@ -8128,6 +8323,11 @@ function returnToInGameForKickoff() {
   const kt = state.obs.kickoff;
   if (kt && kt.enabled && kt.scene) broadcastRlSceneResult('kickoff', kt.scene, rlSwitchScene(kt.scene, 'kickoff', kt.transition));   // opt-in RL kickoff cut (bypasses the disabled global auto-switch)
   else obsSwitch('inGame');   // the RL overlay scene comes up at kickoff, not during "choose teams"
+  // Hide RL's native UI NOW that gameplay is starting (this is the consistent moment). Reset first so
+  // every game re-hides — RL re-shows its UI at each kickoff; the per-packet path then retries if the
+  // press fails. matchDelayMs still applies so RL has settled into play before the key is sent.
+  rlSpectatorUi.resetAutoTracking();
+  scheduleRlHideNativeUi(state.game.number);
 }
 // Kickoff fallback for stats APIs that don't emit clock_started / countdown events: when we're
 // awaiting kickoff and the MATCH clock is running DOWN near 5:00 (>= 150s — so the separate ~60s
@@ -8341,9 +8541,8 @@ function handleUpdateState(data) {
       facecams: savedFacecams
     }
   });
-  if (state.activeGame === 'rocket-league' && normalised.length >= 2) {
-    scheduleRlHideNativeUi(state.game.number);
-  }
+  // Native-UI auto-hide is fired once at the kickoff (returnToInGameForKickoff) — no per-packet
+  // retries: the key is a toggle, so repeated blind presses risk flipping the UI the wrong way.
 
   maybeTriggerOvertime();   // fire the OVERTIME graphic at the 0:00 ground-touch, not RL's late kickoff flag
   feedDirectorRL();
@@ -8484,7 +8683,10 @@ function finalizePostGameBoard() {
   _pendingFinalizeDirectTimer = null;   // clear in case called from the replay path while the direct timer still refs
   // If the kickoff already fired (RoundStarted / CountdownBegin arrived before this ran), skip:
   // we'd set view='scoreboard' mid-game and arm a stale caster-cut timer.
-  if (!state.awaitingKickoff) return;
+  if (!state.awaitingKickoff) {
+    logAuto('rl-scene', 'Post-game board skipped — the next kickoff started before it could finalize.');
+    return;
+  }
 
   state.view = 'scoreboard';
   // Snapshot the final scoreboard so it survives the next match_created (which clears the live cache)
@@ -8514,7 +8716,13 @@ function finalizePostGameBoard() {
     broadcast(bridgeClients, { type: 'rl-scene-result', data: { ok: true, phase: 'postgame', message: `Post-game cut to "${pg.scene}" armed for ${pg.delaySec}s.` } });
     _postGameTimer = setTimeout(() => {
       _postGameTimer = null;
-      if (state.view === 'scoreboard') {
+      // Fire only while we're genuinely in the POST-GAME window — i.e. still awaiting the next
+      // kickoff. This is robust to the winning-goal REPLAY briefly flipping state.view to 'goal'
+      // after the board shows (the old `view === 'scoreboard'` guard rejected that, so the cut
+      // never fired — this is the "view was goal not scoreboard" skip). It still can't fire
+      // mid-game: the timer is only armed post-game (finalize guards on awaitingKickoff) and
+      // returnToInGameForKickoff() cancels it the instant the next game kicks off.
+      if (state.awaitingKickoff) {
         const result = rlSwitchScene(pg.scene, 'post-game', pg.transition);
         broadcastRlSceneResult('postgame', pg.scene, result);
         if (result.ok) {
@@ -8530,13 +8738,46 @@ function finalizePostGameBoard() {
           }, 2000);
         }
       } else {
-        // Shouldn't normally reach here — returnToInGameForKickoff() cancels this timer outright
-        // when the next kickoff beats it — but report it if it ever does (e.g. some other code
-        // path changed state.view in between).
-        broadcast(bridgeClients, { type: 'rl-scene-result', data: { ok: false, phase: 'postgame', message: `Post-game cut to "${pg.scene}" skipped — view was "${state.view}", not "scoreboard".` } });
+        // The next game kicked off before the delay elapsed — returnToInGameForKickoff() normally
+        // cancels this timer outright, so this is just a belt-and-suspenders report.
+        broadcast(bridgeClients, { type: 'rl-scene-result', data: { ok: false, phase: 'postgame', message: `Post-game cut to "${pg.scene}" skipped — the next game already kicked off.` } });
       }
     }, pg.delaySec * 1000);
+  } else if (pg && pg.enabled && !pg.scene) {
+    // Toggle is on but no scene chosen — that's silent misconfiguration; say so.
+    broadcast(bridgeClients, { type: 'rl-scene-result', data: { ok: false, phase: 'postgame', notify: true, message: 'Post-game cut is ON but no scene is selected — pick one in Match ▸ Teams gear.' } });
   }
+}
+
+// Why is an auto-prediction not firing right now? Returns a human reason, or null if all gates pass.
+// Every gate here fails SILENTLY in the create/resolve paths, so this is the single source of truth
+// producers can see (surfaced in the panel via state.twitch.predictions.lastAuto).
+function autoPredSkipReason() {
+  if (!state.twitch.predictions.settings.autoCreate) return 'Auto-create is OFF — enable it in Twitch → Predictions';
+  if (!state.twitch.connected || _twitchTokenInvalid)  return 'Twitch not connected — reconnect on the Twitch tab (token may have expired)';
+  if (!predictionManager)                              return 'Twitch prediction manager not ready — reconnect Twitch';
+  return null;
+}
+// Record + broadcast the last auto-prediction outcome so the panel can show it (and it hits the log).
+function setAutoPredStatus(kind, message) {
+  console.log(`[AutoPred] ${kind}: ${message}`);
+  try {
+    state.twitch.predictions.lastAuto = { kind, message, ts: new Date().toISOString() };
+    broadcast(bridgeClients, { type: 'full_state', data: buildLiveState() });
+  } catch (_) {}
+}
+// Classify a Twitch API error so the producer gets an actionable message (and we flip `connected`
+// off on a 401 so the UI stops claiming a dead token is live).
+function explainTwitchApiError(e) {
+  const status = e && (e.status || e.statusCode || (e.response && e.response.status));
+  if (status === 401) {
+    _twitchTokenInvalid = true;
+    state.twitch.connected = false;
+    return 'Twitch token expired (401) — reconnect Twitch. Implicit-grant tokens cannot auto-refresh.';
+  }
+  if (status === 403) return 'Twitch rejected it (403) — Channel Points Predictions require an Affiliate or Partner channel.';
+  if (status === 429) return 'Twitch rate-limited it (429) — try again shortly.';
+  return (e && e.message) || 'Unknown Twitch API error';
 }
 
 function handleMatchEnded(data) {
@@ -8591,7 +8832,7 @@ function handleMatchEnded(data) {
             state.twitch.predictions.current = resolved;
             broadcast(bridgeClients, { type: 'full_state', data: buildLiveState() });
             saveTwitchData();
-            console.log('[AutoPred] Score-resolved — winner:', winnerName);
+            setAutoPredStatus('resolved', `Match end — resolved to winner "${winnerName}"`);
             setTimeout(() => {
               if (state.twitch.predictions.current?.id === resolvedId) {
                 state.twitch.predictions.history.unshift(state.twitch.predictions.current);
@@ -8602,9 +8843,9 @@ function handleMatchEnded(data) {
               }
             }, 18000);
           })
-          .catch(e => console.warn('[AutoPred] Score-resolve failed:', e.message));
+          .catch(e => setAutoPredStatus('error', `Resolve failed — ${explainTwitchApiError(e)}`));
       } else {
-        console.warn('[AutoPred] No outcome matched winner:', winnerName, '— outcomes:', current.outcomes?.map(o => o.title));
+        setAutoPredStatus('error', `Couldn't auto-resolve — no prediction outcome matched winner "${winnerName}". Use the panel to resolve manually.`);
       }
     }
   }
@@ -8831,7 +9072,10 @@ function handleMatchCreated(data) {
   //       returnToInGameForKickoff() fires the game_reset + swaps the view/scene.
 
   // Auto-prediction: create "Who will win?" using the active team names
-  if (state.twitch.connected && predictionManager && state.twitch.predictions.settings.autoCreate) {
+  const _apSkip = autoPredSkipReason();
+  if (_apSkip) {
+    setAutoPredStatus('skip', `Match start — no prediction opened: ${_apSkip}`);
+  } else {
     const blueTeam   = (state.teams.blue.name   || 'Blue').slice(0, 25);
     const orangeTeam = (state.teams.orange.name || 'Orange').slice(0, 25);
     const title = state.twitch.predictions.settings.template === 'teams'
@@ -8849,7 +9093,7 @@ function handleMatchCreated(data) {
           // EventSub (channel.prediction.progress/lock/end) now delivers real-time updates.
           // Polling kept only as fallback in case EventSub disconnects mid-prediction.
           startPredictionPolling();
-          console.log('[AutoPred] Created:', result.id);
+          setAutoPredStatus('created', `Opened "${title}" (${blueTeam} vs ${orangeTeam}) for ${durationSecs}s`);
           // Fallback: auto-cancel if still unresolved 60s after voting ends
           const msUntilEnd = durationSecs * 1000 + 60000;
           setTimeout(() => {
@@ -8867,7 +9111,7 @@ function handleMatchCreated(data) {
             }
           }, msUntilEnd);
         })
-        .catch(e => console.warn('[AutoPred] Create failed:', e.message));
+        .catch(e => setAutoPredStatus('error', `Create failed — ${explainTwitchApiError(e)}`));
     };
 
     // If there's a leftover active prediction from the previous game, cancel it first
@@ -8902,7 +9146,8 @@ function handleMatchCreated(data) {
   // NOTE: do NOT switch OBS to the in-game scene here. A new match is created during the "choose
   // teams" phase — nobody needs to see the RL overlay yet. We bring up the in-game scene at the
   // KICKOFF (handleCountdownBegin), or the first live clock tick as a fallback. See awaitingKickoff.
-  scheduleRlHideNativeUi(state.game.number);
+  // The native-UI auto-hide is likewise deferred to the kickoff (returnToInGameForKickoff) — pressing
+  // it here during "choose teams" was too early; RL re-shows its UI when gameplay actually starts.
 
   // Stats: lazy-create a match record the first time a game starts in a series.
   // Link to the start.gg set being streamed (manual setId OR the auto-followed one) so the live
@@ -8945,6 +9190,9 @@ function scheduleRlHideNativeUi(gameNumber) {
 
 async function triggerRlHideNativeUi() {
   const result = await rlSpectatorUi.runHideNativeUi(state.rlSpectatorUi);
+  // Producer just hid the UI by hand — mark it hidden so a pending/retrying auto-hide press won't
+  // fire the toggle again and bring the UI back up.
+  if (result.ok) rlSpectatorUi.markHidden();
   broadcast(bridgeClients, {
     type: 'rl-ui-result',
     data: {
@@ -8964,7 +9212,28 @@ function startBridgeServer() {
   // bridge must not be reachable from the LAN. Multi-PC setups (overlay sources on another
   // machine) can opt back in with WS_HOST=0.0.0.0 in .env.local — they accept the exposure.
   const wsHost = process.env.WS_HOST || '127.0.0.1';
-  bridgeWss = new WebSocket.Server({ host: wsHost, port: WS_PORT });
+  // Only enforce the token when the bridge is actually LAN-exposed (WS_HOST set to anything
+  // but loopback). At least a dozen overlay scenes predate scene-base.js and open their own
+  // raw WebSocket without fetching a token — gating on wsHost means the default single-PC
+  // setup (the overwhelming common case) never breaks, including for any of those un-migrated
+  // scenes or a future one that forgets to fetch it. The opt-in multi-PC case (WS_HOST=0.0.0.0)
+  // is the one the audit actually flagged as unauthenticated-control-from-the-LAN — that's the
+  // case this protects, and every current overlay + the control panel has been updated to send
+  // the token so it keeps working there too.
+  const enforceToken = wsHost !== '127.0.0.1' && wsHost !== 'localhost';
+  bridgeWss = new WebSocket.Server({
+    host: wsHost, port: WS_PORT,
+    // Reject the handshake itself (before 'connection' fires) unless the caller has the
+    // token handed out by GET /api/ws-token. Clients fetch the token once over HTTP (same
+    // trust boundary as the rest of the API) and append it as ?token=…
+    verifyClient: (info, cb) => {
+      if (!enforceToken) return cb(true);
+      let token = '';
+      try { token = new URL(info.req.url, 'http://bridge').searchParams.get('token') || ''; } catch (e) {}
+      if (token && token === wsAuthToken) return cb(true);
+      cb(false, 401, 'Unauthorized');
+    }
+  });
 
   bridgeWss.on('connection', (ws) => {
     bridgeClients.add(ws);
@@ -13015,11 +13284,20 @@ function handleControlMessage(msg, ws) {
       (async () => {
         try {
           const slug = (msg.data?.eventSlug || state.bracket.eventSlug || state.startgg.eventSlug || '').trim();
+          // Immediate ack: a big import runs for a while — without this the panel's
+          // request timed out with "No response from the server" while data was
+          // actually loading fine in the background.
+          ws.send(JSON.stringify({
+            type: 'bracket-result',
+            data: { ok: true, message: 'Importing bracket — large events load phase by phase…' }
+          }));
           const result = await fetchBracket(slug);
           const label = result.type ? result.type.replace(/_/g, ' ').toLowerCase() : 'bracket';
           ws.send(JSON.stringify({
             type: 'bracket-result',
-            data: { ok: true, message: `Loaded ${result.sets} set(s) — ${label}` }
+            data: { ok: true, message: result.inProgress
+              ? 'Import already running — phases appear as they load'
+              : `Loaded ${result.sets} set(s) — ${label}` }
           }));
         } catch (e) {
           state.bracket.lastError = e.message;
@@ -14400,15 +14678,44 @@ function startHttpServer(baseDir) {
   // Auto-reload overlays when their files change on disk (app update, overlay editor save,
   // manual edit). Headers are already no-store, but a page LOADED in OBS's CEF stays in
   // memory until reloaded — this pushes the reload so producers never touch OBS's cache.
+  //
+  // CRITICAL: only reload when a watched file's CONTENT actually changes. fs.watch fires on
+  // metadata-only touches too — and when the project lives under OneDrive (or an AV scanner is
+  // active), those touches are near-constant, which used to reload every overlay browser source
+  // on a loop ("lots of full-frame refreshes"). We dedupe by SHA-1 of the bytes and pre-hash on
+  // startup so the first spurious touch after boot doesn't reload either.
   try {
+    const _crypto = require('crypto');
+    const overlayDir = path.join(baseDir, 'overlay');
+    const _ovHashes = new Map();
+    const _ovPending = new Set();
     let _ovReloadTimer = null;
-    fs.watch(path.join(baseDir, 'overlay'), { recursive: true }, (evt, file) => {
+    const _hashFile = (rel) => {
+      try { return _crypto.createHash('sha1').update(fs.readFileSync(path.join(overlayDir, rel))).digest('hex'); }
+      catch (_) { return null; }
+    };
+    // Seed hashes for the files present at boot so a metadata-only touch is a no-op.
+    try { fs.readdirSync(overlayDir).forEach((f) => { if (/\.(html|css|js)$/i.test(f)) { const h = _hashFile(f); if (h) _ovHashes.set(f, h); } }); } catch (_) {}
+
+    fs.watch(overlayDir, { recursive: true }, (evt, file) => {
       if (!file || !/\.(html|css|js)$/i.test(file)) return;
+      if (/(^|[\\/])~\$|\.tmp$|\.crdownload$|\.swp$/i.test(file)) return;   // editor / OneDrive / download temp files
+      _ovPending.add(file);
       clearTimeout(_ovReloadTimer);
       _ovReloadTimer = setTimeout(() => {
-        console.log(`[Overlay] ${file} changed — reloading all overlay browser sources`);
-        broadcast(bridgeClients, { type: 'reload_overlays' });
-      }, 800);
+        const pending = [..._ovPending]; _ovPending.clear();
+        const changed = [];
+        for (const rel of pending) {
+          const h = _hashFile(rel);
+          if (h && _ovHashes.get(rel) !== h) { _ovHashes.set(rel, h); changed.push(rel); }
+        }
+        if (changed.length) {
+          console.log(`[Overlay] content changed (${changed.join(', ')}) — reloading affected overlay sources`);
+          // Pass the changed files so each overlay reloads ONLY if it's affected (and can hot-swap
+          // a pure CSS change without blanking). Editing standings.html won't touch the bracket source.
+          broadcast(bridgeClients, { type: 'reload_overlays', files: changed });
+        }
+      }, 1000);
     });
   } catch (e) { console.warn('[Overlay] file watcher unavailable:', e.message); }
 
@@ -14636,6 +14943,15 @@ function startHttpServer(baseDir) {
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
     if (req.method === 'OPTIONS') return res.sendStatus(204);
     next();
+  });
+
+  // Hands the WS bridge auth token to same-host clients (control panel + overlay browser
+  // sources) so they can open ws://…:3001/?token=… — see getOrCreateWsToken() / the
+  // bridgeWss connection handler in startBridgeServer(). Same trust boundary as every
+  // other route on this HTTP server; the point isn't to hide the token from this host,
+  // it's to keep a bare port-scan of :3001 from getting in when WS_HOST=0.0.0.0 is set.
+  app.get('/api/ws-token', (req, res) => {
+    res.json({ token: wsAuthToken });
   });
 
   // ── Media library ─────────────────────────────────────────────────────────
@@ -16885,8 +17201,10 @@ module.exports.start = function(baseDir) {
   brandsFile = path.join(dataDir, 'brands.json');
   twitchDataFile  = path.join(dataDir, 'twitch-data.json');
   discordDataFile = path.join(dataDir, 'discord-user.json');
+  wsTokenFile     = path.join(dataDir, 'ws-token.json');
 
   fs.mkdirSync(dataDir, { recursive: true });
+  wsAuthToken = getOrCreateWsToken();
   stats.init(dataDir);
   analytics.init({ dataDir, getState: () => state, broadcast, bridgeClients });
   playerDb.init(dataDir);
