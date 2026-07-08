@@ -12,80 +12,99 @@
   // run    = optional fn to run after the page switches, before measuring (e.g. open a sub-tab)
   // placement = preferred tooltip side ('right' hugs the sidebar; else auto below/above)
   var STEPS = [
+    // ── Orientation ──
     { title: 'Welcome to NE Broadcast Suite',
-      body: "This tour walks you through the whole app — the sidebar pages, the sub-tabs inside them, the quick-actions rail, and the key features you'll use to run a broadcast. Use Next and Back to move, or Skip to leave. You can replay it anytime from Settings." },
+      body: "This tour walks the whole app — the sidebar pages, the sub-tabs inside them, the top bar, the quick-actions rail and the key features you'll use to run a broadcast. Use Next / Back (or the arrow keys), or Skip to leave. Replay it anytime from Settings \u25B8 Getting Started." },
     { target: '.sidebar-nav', placement: 'right', title: 'The left sidebar — your pages',
-      body: "Everything lives here. The top group (Live) are the pages you run a show from; the lower group (System) are setup and tools. Let's walk through each one and what's inside it." },
+      body: "Everything lives here. The top group are the pages you run a show from; the lower group are setup and tools. We'll visit each one." },
     { target: '#qrail', tab: 'principal', title: 'The right rail — quick actions',
-      body: 'This rail is on every page. Its icons open quick panels: scene cuts, the rundown, the start.gg queue, overlay toggles, graphic triggers, automation flows, talent cams, NEURAL AI, notes and Twitch chat — so you never have to leave the page you’re on to run the show. Drag its edge to resize it.' },
+      body: "This rail rides along on every page. Its icon tabs open quick panels: QUICK (scene cuts + put-on-air), Rundown, the start.gg queue, overlay toggles, graphic triggers, Flows, Replay, Talent cams and Twitch chat — so you never leave the page you're on to run the show. Drag its edge to resize it." },
+    { target: '#qk-put', tab: 'principal',
+      run: function () { var t = document.querySelector('.qrail-tab[data-qtab="quick"]'); if (t) t.click(); },
+      title: 'Put-on-air chips',
+      body: "Each chip puts one graphic on air — click it to fire, click again to clear. Chips with a gear take options first (team, player, countdown length): the gear opens a small setup panel; press the same gear again or click away to close it." },
 
-    // ── Dashboard: the most-used page, so cover its key widgets ──
+    // ── Dashboard ──
     { target: '#tab-principal', tab: 'principal', placement: 'right', title: 'Dashboard — your live cockpit',
-      body: 'This is where you actually run the broadcast. It’s a customizable grid of widgets — let’s look at the important ones.' },
+      body: "Where you actually run the broadcast: a customizable grid of widgets. Let's look at the important ones." },
     { target: '[data-dash-id="event"]', tab: 'principal', title: 'Event & tournament',
-      body: 'Name your broadcast, then connect a tournament with the platform tabs (start.gg, Challonge or NXGEN) to auto-pull teams, brackets and the live match.' },
-    { target: '[data-dash-id="teams"]', tab: 'principal', title: 'Match — Teams & score',
-      body: 'Set the two teams, their logos, colors, series score and rosters. This drives the scoreboard and every team-aware overlay.' },
+      body: "Name your broadcast, then link a tournament (start.gg, Challonge or NXGEN). The ACTIVE event drives everything downstream — the bracket, standings, the stream queue and the scores ticker all follow it automatically." },
+    { target: '[data-dash-id="teams"]', tab: 'principal', title: 'Match — teams & score',
+      body: "Set the two teams, logos, colors, series score and rosters. This drives the scoreboard and every team-aware overlay — the lineup card, matchup, winner screen. The gear opens match settings: series format, team records, scene automation." },
     { target: '[data-dash-id="obs"]', tab: 'principal', title: 'OBS & going live',
-      body: 'Connect OBS here, then cut between your scenes and go live. The app follows OBS so overlays and automation stay in sync with what’s on air.' },
+      body: "Connect OBS here, then cut scenes and go live. The app follows OBS so overlays and automation stay in sync with what's on air. Prefer vMix? The suite can drive that instead — pick your switcher in Integrations." },
     { target: '#dash-customize-btn', tab: 'principal', title: 'Make it yours',
-      body: 'Click Customize to rearrange widgets, change columns, or add/remove cards — build the cockpit that fits how you produce.' },
+      body: "Click Customize to rearrange widgets, change columns, or add/remove cards — build the cockpit that fits how you produce." },
 
-    // ── Production + its 6 sub-tabs ──
+    // ── Top bar ──
+    { target: '#ck-chip-program', title: 'PROGRAM — what viewers see',
+      body: "The live OBS program scene, always visible. If a graphic is pushed but this scene doesn't show overlays, your viewers aren't seeing it — this chip is the single source of truth for what's on air." },
+    { target: '#prod-timer', title: 'Countdown timer',
+      body: "The producer segment timer — it drives the countdown overlay. The small arrow opens the full panel (set the time, countdown text, what happens when it hits zero); use the up arrow in its header to tuck it away, or pop it out to a second monitor." },
+    { target: '#btn-bb-clip', title: 'Clip — instant highlights',
+      body: "Saves the OBS replay buffer AND creates a Twitch clip in one press. The dot shows readiness: green = buffer + Twitch both live. If the replay buffer is off, the button becomes 'Start Replay Buffer' — press it and clips are ready to capture." },
+    { target: '#tb-ad-area', title: 'Twitch ads — manual only',
+      body: "Ad controls live here: allow/deny ads, pick a length, play one now, or snooze the next. Ads NEVER fire automatically — a commercial only runs when you press the button." },
+    { target: '.topbar-right', title: 'Utilities',
+      body: "The notifications bell, an OBS program preview, bug reporting (files straight to the devs), and Settings." },
+
+    // ── Production ──
     { target: '#tab-produccion', tab: 'produccion', placement: 'right', title: 'Production — build your show',
-      body: 'Everything you cut to during a broadcast lives here, split across a row of sub-tabs.' },
-    { target: '#pd-subnav', tab: 'produccion', title: 'Production sub-tabs',
-      body: 'Deck (your Stream-Deck button grid) · Graphics (overlay graphics) · Rundown (run of show) · Flows (automation) · Hotkeys · NEURAL AI (the director). Click any tab to switch panels — let’s look at the two you’ll use most.' },
-    { target: '#prod-graphics-board', tab: 'produccion', run: function () { if (window._pdShow) window._pdShow('graphics'); }, title: 'Production ▸ Graphics',
-      body: 'The Graphics panel is where you build and stage on-screen elements — lower thirds, stat cards, standings, matchups, sponsor plates and more. Configure each, preview it, then push it live to the overlay (or stage it and fire it from a trigger or flow).' },
-    { target: '#flows-section', tab: 'produccion', run: function () { if (window._pdShow) window._pdShow('flows'); }, title: 'Production ▸ Flows',
-      body: 'Flows are automations — a chain of actions (scene cuts, overlays, timers, commercials) you fire with one click or a hotkey. Build your show’s repeatable moments here: going live, starting-soon, ad breaks, back-from-break and match transitions, so one button runs the whole sequence.' },
-
-    // ── Talent + role sub-tabs ──
-    { target: '#tab-equipos', tab: 'equipos', placement: 'right', title: 'Talent — teams & on-air crew',
-      body: 'Manage everyone in front of and behind the camera. It’s organized by role across the sub-tabs.' },
-    { target: '#tab-equipos-content .ev-subnav, #tab-equipos-content .cf-subnav', tab: 'equipos', title: 'Talent sub-tabs',
-      body: 'Teams · Player Rooms · Casters · Observers · Guests. Set up each person’s VDO camera room, the caster desk lineup, and the Director Control Center for moving people between rooms live.' },
-
-    // ── ESPORTS + its sub-tabs ──
-    { target: '#tab-events', tab: 'events', placement: 'right', title: 'ESPORTS — tournaments & leagues',
-      body: 'Connect brackets and manage the competitive side of your event.' },
-    { target: '#ev-subnav', tab: 'events', title: 'ESPORTS sub-tabs',
-      body: 'Tournaments · Leagues · My Events · Seeding · Spotlight. Pull a bracket, seed players by rank, mark teams to watch, and auto-follow the live match onto your scoreboard.' },
+      body: "Everything you cut to during a broadcast, split across a row of sub-tabs: Deck, Graphics, Rundown, Flows, Hotkeys and NEURAL AI." },
+    { target: '.deck-layout', tab: 'produccion', run: function () { if (window._pdShow) window._pdShow('deck'); },
+      title: 'Production \u25B8 Deck',
+      body: "Your on-screen Stream Deck: a customizable button grid for scene cuts, graphics and flows, each with an optional hotkey. Click Edit to add, reorder or restyle buttons." },
+    { target: '#prod-graphics-board', tab: 'produccion', run: function () { if (window._pdShow) window._pdShow('graphics'); },
+      title: 'Production \u25B8 Graphics',
+      body: "Every overlay graphic as a card — lower thirds, standings, bracket, matchup, desk topics, sponsor plates. Edit content right on the card, then Push Live. The bracket card is a mini control center: pick the phase and pool, search for a team, switch views." },
+    { target: '#flows-section', tab: 'produccion', run: function () { if (window._pdShow) window._pdShow('flows'); },
+      title: 'Production \u25B8 Flows',
+      body: "Automations — a chain of actions (scene cuts, overlays, timers) fired by one click, a hotkey, or a trigger like 'kickoff' or 'match ended'. Build your repeatable moments: going live, starting-soon, back-from-break, match transitions." },
+    { target: '#whats-armed', tab: 'produccion', run: function () { if (window._pdShow) window._pdShow('director'); },
+      title: "What's Armed — trust, verified",
+      body: "Every automation currently allowed to act on its own — auto-switching, flow triggers, the AI director — listed in one place, with a log of what actually fired. If the show ever changes scenes 'by itself', this panel tells you exactly why." },
 
     // ── Video Editor ──
     { target: '#tab-replays', tab: 'replays', placement: 'right', title: 'Video Editor — replays & clips',
-      body: 'Capture replays from the OBS buffer, trim clips, and build montages & playlists (commercials, intros, outros).' },
-    { target: '#rp-to-program', tab: 'replays', title: 'Push replays live to OBS',
-      body: 'Once a replay or playlist is ready, hit “To Air” to push it straight to your OBS Program output — it switches to your chosen scene, plays with audio, and can auto-return when it finishes. “Preview” cues it to the preview bus first, without going live.' },
+      body: "Capture replays from the OBS buffer, trim clips in the editor, and build playlists and montages (commercials, intros, halftime reels) with transitions and status badges that show what's ready to air." },
+    { target: '#rp-to-program', tab: 'replays', title: 'Push it to air',
+      body: "'To Air' plays a clip or an encoded playlist straight on your OBS program — it switches to your chosen scene, plays with audio, and can auto-return when done. 'Preview' cues it on the preview bus first, without going live." },
 
-    // ── Assets + sub-tabs ──
+    // ── Talent ──
+    { target: '#tab-equipos', tab: 'equipos', placement: 'right', title: 'Talent — teams & on-air crew',
+      body: "Everyone in front of the camera. Teams (with CSV import and JSON backup), casters and their desk lineup, guests — and private VDO.Ninja camera rooms with per-person join links and QR codes. No pasting URLs around." },
+    { target: '#tab-equipos-content .ev-subnav, #tab-equipos-content .cf-subnav', tab: 'equipos', title: 'Talent sub-tabs',
+      body: "Teams \u00B7 Player Rooms \u00B7 Casters \u00B7 Observers \u00B7 Guests. The Director Control Center moves people between rooms live, and Listen-In lets you hear any room with captions." },
+
+    // ── ESPORTS ──
+    { target: '#tab-events', tab: 'events', placement: 'right', title: 'ESPORTS — tournaments & leagues',
+      body: "The competitive side. Pull a bracket and it adapts to any scale — phases and pools are selectable, swiss stages render as a records ladder, and you can search a team by name to jump straight to their pool." },
+    { target: '#ev-subnav', tab: 'events', title: 'ESPORTS sub-tabs',
+      body: "Tournaments \u00B7 Leagues \u00B7 My Events \u00B7 Seeding \u00B7 Spotlight. Seeding verifies player ranks against rl6mans and start.gg profiles; Spotlight builds a teams-to-watch overlay from starred teams." },
+
+    // ── Assets ──
     { target: '#tab-media', tab: 'media', placement: 'right', title: 'Assets — media, overlays & profiles',
-      body: 'Your media library, the live overlay/scene editor, and your client brand profiles.' },
-    { target: '#assets-subnav', tab: 'media', title: 'Assets sub-tabs',
-      body: 'Three sub-tabs — Assets (your media library: logos, backgrounds, sponsor art), Overlays (edit scene HTML with live previews), and Profiles (client brand kits — a logo, colors and sponsor set that recolor every overlay at once, so you can rebrand the whole show in one click).' },
+      body: "Your media library, a live scene-HTML editor, and brand Profiles." },
+    { target: '#assets-subnav', tab: 'media', title: 'Brand kits & packages',
+      body: "A Profile is a full brand kit — logo, colors, fonts, sponsor placements — and each kit holds packages (per-sponsor or per-show variants). Packages capture your whole show setup: desk topics, tickers, titles, scene presets. 'Save & Activate' switches the entire broadcast's look in one click." },
 
-    // ── Analytics + sub-tabs ──
+    // ── Analytics ──
     { target: '#tab-stats', tab: 'stats', placement: 'right', title: 'Analytics — measure the show',
-      body: 'Data on every broadcast, plus your player/team database and printable reports.' },
+      body: "Data on every broadcast, plus the player/team stats database." },
     { target: '#stats-subnav', tab: 'stats', title: 'Analytics sub-tabs',
-      body: 'Overview · Broadcasts · Audience · Event · Players · Teams · Proof of Play. Track viewers, engagement, tournament ops and per-sponsor on-screen exposure.' },
+      body: "Overview \u00B7 Broadcasts \u00B7 Audience (live Twitch followers, subs, clips) \u00B7 Event (import a tournament's full history from start.gg) \u00B7 Players \u00B7 Teams \u00B7 Proof of Play for per-sponsor on-screen exposure reports." },
 
-    // ── Top-bar utilities (the account / notifications cluster) ──
-    { target: '.topbar-right', title: 'Top bar — account & utilities',
-      body: 'Up here: the notifications bell, an OBS Program preview, and the account menu (the gear/avatar) — which is where you’ll find Report a Bug, Feature Request, Roles & Teams, and Settings.' },
+    // ── Integrations ──
+    { target: '#int-store-grid', tab: 'integrations', placement: 'right', title: 'Integrations — the app store',
+      body: "Every platform the suite talks to, as cards with LIVE connection status: green connected, amber needs attention, gray not set up. Click a card to open just that app's settings — each key field has a 'How do I get this?' walkthrough with exact steps and links." },
 
-    // ── Settings & Integrations ──
+    // ── Settings + finale ──
     { target: '#tab-ajustes', tab: 'ajustes', placement: 'right', title: 'Settings — preferences',
-      body: 'App preferences, per-game overlays, keyboard shortcuts, software updates — and Getting Started, where you can replay this walkthrough anytime.' },
-    { target: '#tab-integrations', tab: 'integrations', placement: 'right', title: 'Integrations — connect accounts',
-      body: 'Link Twitch, YouTube, OBS, start.gg, Challonge and more. Set your API keys and tokens here first — the rest of the app builds on these connections.' },
-
-    // ── Finale: the single best first setup step ──
+      body: "App preferences, per-game options, keyboard shortcuts, software updates — and Getting Started, where you can replay this walkthrough anytime." },
     { target: '#btn-obs-download-collection', tab: 'integrations', placement: 'auto',
       run: function () { if (window._intShowTab) window._intShowTab('switcher'); },
-      title: 'Set up OBS in one click',
-      body: 'Best first move: here in Integrations ▸ OBS, click “Save Scene Collection” to install a ready-made OBS scene collection — 32 scenes plus caster/player cam framing, all pre-wired to these overlays. Import it in OBS and you’re broadcast-ready. Replay this tour anytime from Settings ▸ Getting Started.' }
+      title: 'Best first move: OBS in one click',
+      body: "Here in Integrations \u25B8 OBS Studio, click 'Save Scene Collection' to install a ready-made OBS scene collection — 32 scenes plus caster/player cam framing, pre-wired to these overlays. Import it in OBS and you're broadcast-ready. Replay this tour anytime from Settings \u25B8 Getting Started." }
   ];
 
   var overlay, hl, tip, elStep, elTitle, elBody, btnBack, btnNext, curIdx = 0, active = false;
