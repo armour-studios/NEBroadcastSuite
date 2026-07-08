@@ -625,11 +625,19 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
     scaleEl.style.transition = 'none';   // fit() measures + snaps; only the focus zoom animates
     scaleEl.style.transform = 'scale(1)';
     const cw = body.clientWidth, ch = body.clientHeight;
-    const sw = scaleEl.scrollWidth, sh = scaleEl.scrollHeight;
+    let sw = scaleEl.scrollWidth, sh = scaleEl.scrollHeight;
     if (!sw || !sh) return;
-    const s = Math.min(MAX_FIT, cw / sw, ch / sh);
+    let s = Math.min(MAX_FIT, cw / sw, ch / sh);
+    // Toggling bk-abbrev swaps full/short names and logos, which CHANGES column widths — so a
+    // scale computed from the pre-toggle layout is wrong for the post-toggle one (clearing a
+    // team-zoom left the lower bracket tiny because of exactly this). Toggle, then re-measure.
+    const wantAbbrev = !!forceAbbrev || s < ABBREV_THRESHOLD;
+    if (wantAbbrev !== scaleEl.classList.contains('bk-abbrev')) {
+      scaleEl.classList.toggle('bk-abbrev', wantAbbrev);
+      sw = scaleEl.scrollWidth; sh = scaleEl.scrollHeight;
+      if (sw && sh) s = Math.min(MAX_FIT, cw / sw, ch / sh);
+    }
     scaleEl.style.transform = 'scale(' + s + ')';
-    scaleEl.classList.toggle('bk-abbrev', !!forceAbbrev || s < ABBREV_THRESHOLD);
   }
 
   // ── Team-run zoom: after fit(), magnify the focused team's branch so every opponent name
@@ -640,40 +648,47 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
   function zoomToPath(scaleEl, pathEls, sigKey) {
     var body = scaleEl.parentElement;
     if (!pathEls.length || !body) { zoomReset(scaleEl); return; }
-    var u = null;
-    pathEls.forEach(function(m) {
-      var r = m.getBoundingClientRect();
-      if (!u) u = { l: r.left, t: r.top, r: r.right, b: r.bottom };
-      else { u.l = Math.min(u.l, r.left); u.t = Math.min(u.t, r.top); u.r = Math.max(u.r, r.right); u.b = Math.max(u.b, r.bottom); }
-    });
-    var bd = body.getBoundingClientRect();
-    var el0 = scaleEl.getBoundingClientRect();
+    function measure() {
+      var u = null;
+      pathEls.forEach(function(m) {
+        var r = m.getBoundingClientRect();
+        if (!u) u = { l: r.left, t: r.top, r: r.right, b: r.bottom };
+        else { u.l = Math.min(u.l, r.left); u.t = Math.min(u.t, r.top); u.r = Math.max(u.r, r.right); u.b = Math.max(u.b, r.bottom); }
+      });
+      var bd = body.getBoundingClientRect();
+      var el0 = scaleEl.getBoundingClientRect();
+      var PAD = 46, MAX_ZOOM = 2.2;   // cap so a one-match run doesn't blow up past readable
+      var k = Math.max(1, Math.min(MAX_ZOOM,
+        (bd.width - PAD * 2) / Math.max(1, u.r - u.l),
+        (bd.height - PAD * 2) / Math.max(1, u.b - u.t)));
+      return { u: u, bd: bd, el0: el0, k: k, s0: el0.width / Math.max(1, scaleEl.offsetWidth) };
+    }
+    var g = measure();
     // Degenerate geometry (hidden source, control-panel thumb, mid-layout race) — a zoom
     // computed from zero-size rects lands on scale(0) and blanks the scene. Keep fit()'s frame.
-    if (bd.width < 80 || bd.height < 80 || el0.width < 10 || (u.r - u.l) < 4 || (u.b - u.t) < 4) { return; }
-    var PAD = 46, MAX_ZOOM = 2.2;   // cap so a one-match run doesn't blow up past readable
-    var k = Math.max(1, Math.min(MAX_ZOOM,
-      (bd.width - PAD * 2) / Math.max(1, u.r - u.l),
-      (bd.height - PAD * 2) / Math.max(1, u.b - u.t)));
-    var s0 = el0.width / Math.max(1, scaleEl.offsetWidth);   // the scale fit() just applied
+    if (g.bd.width < 80 || g.bd.height < 80 || g.el0.width < 10 || (g.u.r - g.u.l) < 4 || (g.u.b - g.u.t) < 4) { return; }
+    // A big bracket fits abbreviated (short tags, no logos) — zoomed in it may be comfortably
+    // readable, so swap full names/logos back on. That CHANGES column widths, so re-measure
+    // before computing the final frame (assuming fixed geometry here shrank the lower bracket).
+    var wantAbbrev = (g.s0 * g.k) < ABBREV_THRESHOLD;
+    if (wantAbbrev !== scaleEl.classList.contains('bk-abbrev')) {
+      scaleEl.classList.toggle('bk-abbrev', wantAbbrev);
+      g = measure();
+    }
     // transform-origin is the element centre: scaling by k keeps the centre S fixed, then the
     // translate (applied after the scale, so in screen pixels) moves the path centre to the
     // viewport centre.
-    var S  = { x: el0.left + el0.width / 2,  y: el0.top + el0.height / 2 };
-    var Uc = { x: (u.l + u.r) / 2,           y: (u.t + u.b) / 2 };
-    var Bc = { x: bd.left + bd.width / 2,    y: bd.top + bd.height / 2 };
-    var tx = Bc.x - S.x - (Uc.x - S.x) * k;
-    var ty = Bc.y - S.y - (Uc.y - S.y) * k;
-    var target = 'translate(' + tx.toFixed(1) + 'px,' + ty.toFixed(1) + 'px) scale(' + (s0 * k).toFixed(4) + ')';
+    var S  = { x: g.el0.left + g.el0.width / 2,   y: g.el0.top + g.el0.height / 2 };
+    var Uc = { x: (g.u.l + g.u.r) / 2,            y: (g.u.t + g.u.b) / 2 };
+    var Bc = { x: g.bd.left + g.bd.width / 2,     y: g.bd.top + g.bd.height / 2 };
+    var tx = Bc.x - S.x - (Uc.x - S.x) * g.k;
+    var ty = Bc.y - S.y - (Uc.y - S.y) * g.k;
+    var target = 'translate(' + tx.toFixed(1) + 'px,' + ty.toFixed(1) + 'px) scale(' + (g.s0 * g.k).toFixed(4) + ')';
     scaleEl.style.transition = (sigKey !== _zoomSig) ? ZOOM_EASE : 'none';
     _zoomSig = sigKey;
     scaleEl.style.transform = target;
     _lastZoomTransform = target;
     scaleEl.dataset.zoomed = '1';
-    // A big bracket fits abbreviated (short tags, no logos) — but zoomed in it may now be
-    // comfortably readable, so swap the full names + logos back on. bk-abbrev only switches
-    // what displays inside fixed-size slots, so the geometry measured above cannot shift.
-    scaleEl.classList.toggle('bk-abbrev', (s0 * k) < ABBREV_THRESHOLD);
   }
   function zoomReset(scaleEl) {
     if (!scaleEl.dataset.zoomed) { _zoomSig = ''; return; }
