@@ -640,13 +640,10 @@ img{display:block;}
   transition:opacity .55s ease, transform .55s cubic-bezier(.2,.8,.25,1);}
 .sb.intro .sb-stage{opacity:0;transform:translateY(26px);}
 
-/* top row: brand logo DEAD-CENTRE, scoreboard sponsor sitting just to its right (in the right 1fr
-   column) so the sponsor never pulls the logo off the stage centreline that everything else shares. */
-.sb-head{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;}
-.sb-toplogo{grid-column:2;justify-self:center;}
-.sb-sponsor{grid-column:3;justify-self:start;}
+/* top row: the brand logo + "presented by" sponsor form ONE lockup, centred as a unit on the stage */
+.sb-head{display:flex;align-items:center;justify-content:center;gap:34px;}
 /* divider between the brand logo and the sponsor — only when BOTH are present */
-.sb-head .sb-toplogo:not(.hidden) + .sb-sponsor:not(.empty){position:relative;padding-left:36px;margin-left:36px;}
+.sb-head .sb-toplogo:not(.hidden) + .sb-sponsor:not(.empty){position:relative;padding-left:34px;}
 .sb-head .sb-toplogo:not(.hidden) + .sb-sponsor:not(.empty)::before{content:'';position:absolute;left:0;top:50%;
   transform:translateY(-50%);width:1px;height:60px;background:rgba(255,255,255,.14);}
 /* broadcaster / brand-kit logo — centred at the top of the scoreboard, above the event title */
@@ -1141,7 +1138,7 @@ img{display:block;}
    player: { name, team(0 blue|1 orange — may arrive as a string), score, goals,
              assists, saves, shots, demos, boost, isDemolished, primaryid, isPrimary }
    ═══════════════════════════════════════════════════════════════════════════ */
-const WS_URL = 'ws://localhost:3001';
+const WS_URL = 'ws://' + (location.hostname || 'localhost') + ':3001';   // host-aware: works when the source is loaded from another machine via http://<host>:3000
 // Team colors — defaults; overridden live by the app's per-team color (teams.*.color).
 let BLUE = '#2f8dff', ORANGE = '#ff7a33';
 const teamOf = p => (Number(p.team) === 1 ? 1 : 0);   // robust: tolerate "1"/1/null

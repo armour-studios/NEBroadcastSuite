@@ -1921,13 +1921,19 @@ function render(cs){
   else { buyEl.classList.remove('show'); document.body.classList.remove('buying'); }
 }
 
+// Library blobs (brand kit / banner) ride broadcasts only when they change — carry the
+// last-seen values forward so light broadcasts don't wipe the sponsor rail/banner mid-show
+// (same contract scene-base.js implements for base scenes; pattern from rl-hud.html).
+const _lib = { brand: null, banner: null };
 function connect(){
-  const sock = new WebSocket('ws://localhost:3001');
+  const sock = new WebSocket('ws://' + (location.hostname || 'localhost') + ':3001');
   sock.onopen = () => sock.send(JSON.stringify({ type: 'request_state' }));
   sock.onmessage = ({ data }) => {
     let msg; try { msg = JSON.parse(data); } catch { return; }
     if (msg.type === 'full_state') {
       const d = msg.data;
+      if ('brand' in d) _lib.brand = d.brand; else d.brand = _lib.brand;
+      if ('banner' in d) _lib.banner = d.banner; else d.banner = _lib.banner;
       document.documentElement.dataset.theme = d.theme || 'default';
       if (d.fontFamily) document.documentElement.style.setProperty('--main-font', `'${d.fontFamily}', sans-serif`);
       eventName = (d.eventName || '').trim();

@@ -106,6 +106,8 @@
     </div>
     <div class="topbar-right">
       <span class="stat-pill stat-program" id="ck-chip-program" title="The live OBS program scene — what viewers actually see">PROGRAM: —</span>
+      <span class="stat-pill stat-gfx" id="ck-chip-gfx" title="Graphic live on the gfx.html overlay layer — Push Live / Clear All control this">GFX: —</span>
+      <span class="stat-pill stat-armed" id="ck-chip-armed" title="Armed automations that can change scenes on their own — click to review What's Armed">ARMED: 0</span>
       <span class="tb-divider"></span>
       <div class="tb-group tb-prod">
         <div class="prod-timer top-timer" id="prod-timer" title="Producer segment timer — drives the countdown overlay">
@@ -212,7 +214,11 @@
       <button class="tab-btn nav-item" data-tab="produccion" id="tab-produccion">
         <span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg></span><span class="nav-label">Production</span></button>
 
-      <button class="tab-btn nav-item" data-tab="switcher" id="tab-switcher">
+      <!-- Switcher page hidden from nav (screenshot-multiview lag bothered the producer's eyes) —
+           code is intentionally left intact in case it's revisited later. Its OBS-Studio-Mode
+           auto-enable side effect is separately hard-disabled below, so it stays inert even if
+           this page is ever reopened by hand. -->
+      <button class="tab-btn nav-item" data-tab="switcher" id="tab-switcher" style="display:none;">
         <span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="9" height="7" rx="1"/><rect x="13" y="4" width="9" height="7" rx="1"/><line x1="4" y1="15" x2="4" y2="20"/><line x1="8" y1="15" x2="8" y2="20"/><line x1="12" y1="15" x2="12" y2="20"/><line x1="16" y1="15" x2="16" y2="20"/><line x1="20" y1="15" x2="20" y2="20"/></svg></span><span class="nav-label">Switcher</span></button>
       <button class="tab-btn nav-item" data-tab="equipos" id="tab-equipos">
         <span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span><span class="nav-label">Talent</span></button>
@@ -2116,8 +2122,8 @@
     /* overflow visible so the tab bar can stick to the top of the page while the panel scrolls */
     .dcc-wrap { border: 1px solid var(--border); border-radius: 12px; overflow: visible; background: var(--surface2); margin-bottom: 14px; }
     /* Sticky tab bar — always reachable; no more scrolling up to switch DCC tabs. */
-    .dcc-bar { position: sticky; top: 0; z-index: 30; display: flex; align-items: center; gap: 2px; padding: 6px 8px; border-bottom: 1px solid var(--border); background: var(--surface2); border-radius: 12px 12px 0 0; flex-wrap: wrap; box-shadow: 0 6px 14px -10px rgba(0,0,0,.6); }
-    .dcc-bar-title { display: inline-flex; align-items: center; font-size: 10px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); padding: 0 10px; white-space: nowrap; }
+    .dcc-bar { position: sticky; top: 0; z-index: 30; display: flex; align-items: center; gap: 6px; padding: 10px 12px; border-bottom: 1px solid var(--border); background: linear-gradient(180deg, var(--surface2), color-mix(in srgb, var(--surface2) 88%, #000)); border-radius: 12px 12px 0 0; flex-wrap: wrap; box-shadow: 0 6px 14px -10px rgba(0,0,0,.6); }
+    .dcc-bar-title { display: inline-flex; align-items: center; gap: 8px; font-size: 10px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); padding: 0 6px; white-space: nowrap; }
     /* On the DASHBOARD: fixed-height console so switching tabs never resizes the panel (no page
        jump when a tab has few people); the active view scrolls internally. In a popout window it's
        left to fill/grow with the resizable window instead. */
@@ -2125,9 +2131,9 @@
     body:not(.popout-mode) .dcc-wrap > .dcc-bar { flex: 0 0 auto; }
     body:not(.popout-mode) #dcc-monitor-view,
     body:not(.popout-mode) #dcc-database-view { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
-    .dcc-role-tab { flex: 0 0 auto; padding: 7px 13px; background: transparent; border: none; border-radius: 7px; cursor: pointer; font-family: inherit; font-size: 11px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); transition: color .12s, background .12s; white-space: nowrap; }
+    .dcc-role-tab { flex: 0 0 auto; padding: 8px 15px; background: transparent; border: 1px solid transparent; border-radius: 9px; cursor: pointer; font-family: inherit; font-size: 11px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); transition: color .12s, background .12s, border-color .12s; white-space: nowrap; }
     .dcc-role-tab:hover { background: rgba(255,255,255,.06); color: var(--text); }
-    .dcc-role-tab.active { color: #fff; background: var(--cp-accent); }
+    .dcc-role-tab.active { color: #fff; background: var(--cp-accent); box-shadow: 0 4px 14px -4px color-mix(in srgb, var(--cp-accent) 70%, transparent); }
     .dcc-bar-gap { flex: 1; }
     .dcc-monitor { display: grid; grid-template-columns: 1fr 300px; min-height: 500px; }
     @media (max-width: 900px) { .dcc-monitor { grid-template-columns: 1fr; min-height: auto; } }
@@ -2142,11 +2148,12 @@
     .dc-idle { flex: 1; display: flex; align-items: center; justify-content: center; padding: 32px; text-align: center; }
     .dc-idle-note { font-size: 13px; color: var(--muted); line-height: 1.6; max-width: 360px; }
     .dc-note { font-size: 11px; color: var(--muted); padding: 5px 12px; border-top: 1px solid var(--border); margin: 0; background: var(--surface2); }
-    .dcc-talent-head { display: flex; align-items: center; justify-content: space-between; padding: 9px 12px; border-bottom: 1px solid var(--border); background: var(--surface2); }
-    .dcc-talent-head-label { font-size: 10px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
-    .dcc-talent-scroll { flex: 1; overflow-y: auto; padding: 6px 8px; }
-    .dcc-vdo-settings { border-top: 1px solid var(--border); padding: 10px 12px; background: var(--surface2); display: flex; flex-direction: column; gap: 8px; }
-    .dcc-vdo-settings-label { font-size: 10px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+    .dcc-talent-head { position:relative; display: flex; align-items: center; justify-content: space-between; padding: 11px 14px 11px 16px; border-bottom: 1px solid var(--border); background: linear-gradient(90deg, color-mix(in srgb, var(--cp-accent) 6%, var(--surface2)), var(--surface2) 60%); }
+    .dcc-talent-head::before { content:''; position:absolute; left:0; top:50%; transform:translateY(-50%); width:4px; height:15px; border-radius:0 3px 3px 0; background:var(--cp-accent); }
+    .dcc-talent-head-label { font-size: 10px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
+    .dcc-talent-scroll { flex: 1; overflow-y: auto; padding: 8px; display:flex; flex-direction:column; gap:6px; }
+    .dcc-vdo-settings { border-top: 1px solid var(--border); padding: 12px 14px; background: var(--surface2); display: flex; flex-direction: column; gap: 8px; }
+    .dcc-vdo-settings-label { font-size: 10px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
     .dcc-db-pane { display: none; }
     .dcc-db-pane.active { display: block; }
     .dcc-db-group { padding: 14px 16px; border-bottom: 1px solid var(--border); }
@@ -2237,19 +2244,32 @@
     .roster-card-actions { display:flex; flex-direction:column; gap:4px; align-items:flex-end; flex-shrink:0; }
     .roster-empty { padding:28px 16px; text-align:center; color:var(--muted); font-size:13px; line-height:1.6; }
     /* DCC Database — per-group sections */
-    .dcc-section-head { display:flex; align-items:center; gap:8px; padding:8px 14px; border-bottom:1px solid var(--border); background:var(--surface2); flex-wrap:wrap; }
-    .dcc-section-badge { font-size:9px; font-weight:900; letter-spacing:.08em; text-transform:uppercase; padding:2px 8px; border-radius:99px; color:#fff; flex-shrink:0; }
-    .dcc-section-name { font-size:12px; font-weight:700; color:var(--text); flex:1; min-width:80px; }
-    .dcc-crew-card { display:grid; grid-template-columns:1fr auto auto; align-items:center; gap:10px; padding:9px 14px; border-bottom:1px solid var(--border); }
-    .dcc-crew-card:last-child { border-bottom:none; }
+    .dcc-section-head { position:relative; display:flex; align-items:center; gap:9px; padding:11px 16px 11px 18px; border-bottom:1px solid var(--border); background:linear-gradient(90deg, color-mix(in srgb, var(--cp-accent) 6%, var(--surface2)), var(--surface2) 60%); flex-wrap:wrap; }
+    .dcc-section-head::before { content:''; position:absolute; left:0; top:50%; transform:translateY(-50%); width:4px; height:16px; border-radius:0 3px 3px 0; background:var(--cp-accent); }
+    .dcc-section-badge { font-size:9px; font-weight:900; letter-spacing:.08em; text-transform:uppercase; padding:3px 9px; border-radius:99px; color:#fff; flex-shrink:0; }
+    .dcc-section-name { font-size:12.5px; font-weight:800; letter-spacing:.02em; color:var(--text); flex:1; min-width:80px; }
+    .dcc-crew-card { display:grid; grid-template-columns:1fr auto auto; align-items:center; gap:10px; padding:9px 12px; background:rgba(255,255,255,.03); border:1px solid var(--border); border-radius:10px; transition:border-color .12s, background .12s; }
+    .dcc-crew-card:hover { border-color:rgba(255,255,255,.16); background:rgba(255,255,255,.05); }
     .dcc-crew-card-left { display:flex; align-items:center; gap:8px; min-width:0; }
     .dcc-crew-card-fields { display:flex; flex-wrap:wrap; align-items:center; gap:6px; }
     .dcc-field-row { display:flex; align-items:center; gap:5px; }
     .dcc-field-label { font-size:10px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:var(--muted); min-width:28px; flex-shrink:0; }
-    .dcc-cam-select { font-size:11px; padding:3px 6px; border-radius:5px; border:1px solid var(--border); background:var(--surface2); color:var(--text); cursor:pointer; max-width:110px; }
+    .dcc-cam-select { font-size:11px; padding:3px 6px; border-radius:6px; border:1px solid var(--border); background:var(--surface2); color:var(--text); cursor:pointer; max-width:110px; }
     .mc-p-quick .dcc-cam-select { height:28px; }
-    .dcc-section-roster { display:flex; flex-direction:column; }
+    /* Captioned cam-routing groups so producers can see WHERE each dropdown sends the feed. */
+    .dcc-camset { display:inline-flex; flex-direction:column; gap:2px; }
+    .dcc-camset-lbl { font-size:8px; font-weight:700; letter-spacing:.05em; text-transform:uppercase; color:var(--text-dim, #8a93a6); line-height:1; padding-left:2px; }
+    .dcc-camset:first-of-type .dcc-camset-lbl { color:var(--cp-accent, #5b8cff); }
+    /* Roster rows + crew columns render as cards (was flat divided rows) to match the Talent Rooms UI. */
+    .dcc-section-roster { display:flex; flex-direction:column; gap:6px; padding:10px 14px; }
+    .dcc-section-roster .dcc-lib-row { background:rgba(255,255,255,.03); border:1px solid var(--border); border-radius:10px; transition:border-color .12s, background .12s; }
+    .dcc-section-roster .dcc-lib-row:hover { border-color:rgba(255,255,255,.16); background:rgba(255,255,255,.05); }
+    .dcc-lib-row > .mc-p-line { padding:9px 12px; }
     .dcc-lib-row .mc-p-body { padding:8px 12px 10px; border-top:1px solid var(--border); }
+    /* In-Game Player Cams rows → carded */
+    .playercams-rows { display:flex; flex-direction:column; gap:6px; }
+    .playercams-rows .pcam-row { padding:8px 12px !important; background:rgba(255,255,255,.03); border:1px solid var(--border); border-radius:10px; transition:border-color .12s, background .12s; }
+    .playercams-rows .pcam-row:hover { border-color:rgba(255,255,255,.16); background:rgba(255,255,255,.05); }
     .dcc-team-player-row { display:flex; align-items:center; gap:8px; padding:3px 0; border-bottom:1px solid rgba(255,255,255,.04); }
     .dcc-team-player-row:last-child { border-bottom:none; }
     #dcc-teams-list { display:flex; flex-direction:column; }
@@ -4610,6 +4630,18 @@
                   <button type="button" class="gfx-src-tab" data-fstdsrc="manual" title="Hand-entered rows (edit in More settings)">Manual</button>
                 </div>
               </div>
+              <div id="gfx-std-league-select-wrap">
+                <div class="gfx-ctrl-row">
+                  <label class="field-label" style="flex-shrink:0;" for="gfx-std-league">League</label>
+                  <select id="gfx-std-league" class="input-select" style="flex:1; min-width:0;"><option value="">Select league…</option></select>
+                </div>
+              </div>
+              <div id="gfx-std-sg-select-wrap" style="display:none;">
+                <div class="gfx-ctrl-row">
+                  <label class="field-label" style="flex-shrink:0;" for="gfx-std-sg-event">Event</label>
+                  <select id="gfx-std-sg-event" class="input-select" style="flex:1; min-width:0;"><option value="">Select event…</option></select>
+                </div>
+              </div>
               <div class="gfx-ctrl-row">
                 <label class="field-label" style="flex-shrink:0;" for="gfx-front-std-title">Title</label>
                 <input type="text" id="gfx-front-std-title" class="input-text" placeholder="STANDINGS" style="flex:1; min-width:0;">
@@ -4630,6 +4662,14 @@
               <div class="gfx-ctrl-row">
                 <label class="field-label" style="flex-shrink:0;" for="gfx-front-sch-title">Title</label>
                 <input type="text" id="gfx-front-sch-title" class="input-text" placeholder="UPCOMING MATCHES" style="flex:1; min-width:0;">
+              </div>
+              <!-- The most common action — pulling matches from the active tournament/league — lives
+                   right here; manual add, team search, and layout choice stay in "More settings". -->
+              <div style="display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin-top:8px;">
+                <button class="btn btn-secondary btn-sm" id="gfx-sch-pull-startgg">Pull Queue</button>
+                <select id="gfx-sch-league" class="input-select" style="max-width:128px;"><option value="">League…</option></select>
+                <select id="gfx-sch-week" class="input-select" style="max-width:96px;"><option value="">All weeks</option></select>
+                <button class="btn btn-secondary btn-sm" id="gfx-sch-pull-league">Pull</button>
               </div>
               <div class="gfx-popout-summary-body" id="gfx-front-schedule-body"></div>
             </div>
@@ -4938,7 +4978,7 @@
           <div class="gfx-panel-footer" id="gfx-panel-footer">
             <span class="gfx-foot-status" id="gfx-foot-status"></span>
             <button class="btn btn-ghost btn-sm" id="gfx-foot-queue" style="display:none;">Add to Rundown</button>
-            <button class="btn btn-primary" id="gfx-foot-push" title="Save this scene's content — does NOT change what's on air (that's Push Live, top right)">Save changes</button>
+            <button class="btn btn-secondary" id="gfx-foot-push" title="Save this scene's content — does NOT change what's on air (that's Push Live, top right)">Save changes</button>
           </div>
 
         </div><!-- /gfx-settings-col -->
@@ -5010,18 +5050,9 @@
                when this lived in the old 300px Graphics-hub split; the pop-out has room to spare. -->
           <div class="gfx-std-layout">
             <div class="gfx-std-side">
-              <div class="gfx-ctrl-row">
-                <label class="field-label" style="flex-shrink:0;" for="gfx-std-title">Title</label>
-                <input type="text" id="gfx-std-title" class="input-text" placeholder="STANDINGS" style="flex:1; min-width:0;">
-              </div>
-              <div class="gfx-ctrl-row">
-                <label class="field-label" style="flex-shrink:0;" for="gfx-std-subtitle">Subtitle</label>
-                <input type="text" id="gfx-std-subtitle" class="input-text" placeholder="e.g. Week 4 · Group A" style="flex:1; min-width:0;">
-              </div>
-              <div class="gfx-ctrl-row" style="justify-content:space-between;">
-                <span class="field-label" style="flex-shrink:0;">Show Win / Loss</span>
-                <label class="switch"><input type="checkbox" id="gfx-std-showrecord" checked><span class="slider"></span></label>
-              </div>
+              <!-- Title/Subtitle/Show-record and the League/Event pickers now live on the front
+                   card only (Graphics ▸ Standings) — single source of truth, no more duplicate
+                   fields to fall out of sync. This column is just source + manual row tools now. -->
               <div class="gfx-ctrl-row">
                 <span class="field-label" style="flex-shrink:0;">Source</span>
               </div>
@@ -5029,18 +5060,6 @@
                 <button type="button" class="gfx-src-tab is-on" data-stdsrc="league">League</button>
                 <button type="button" class="gfx-src-tab" data-stdsrc="startgg">Tournament</button>
                 <button type="button" class="gfx-src-tab" data-stdsrc="manual">Manual</button>
-              </div>
-              <div id="gfx-std-league-select-wrap">
-                <div class="gfx-ctrl-row">
-                  <label class="field-label" style="flex-shrink:0;" for="gfx-std-league">League</label>
-                  <select id="gfx-std-league" class="input-select" style="flex:1; min-width:0;"><option value="">Select league…</option></select>
-                </div>
-              </div>
-              <div id="gfx-std-sg-select-wrap" style="display:none;">
-                <div class="gfx-ctrl-row">
-                  <label class="field-label" style="flex-shrink:0;" for="gfx-std-sg-event">Event</label>
-                  <select id="gfx-std-sg-event" class="input-select" style="flex:1; min-width:0;"><option value="">Select event…</option></select>
-                </div>
               </div>
               <div id="gfx-std-manual-actions-wrap" style="display:none;">
                 <div style="display:flex; gap:6px; flex-wrap:wrap;">
@@ -5094,10 +5113,8 @@
                on the right — was one long stacked column in the old 300px Graphics-hub split. -->
           <div class="gfx-sch-layout">
             <div class="gfx-sch-side">
-              <div class="gfx-ctrl-row">
-                <label class="field-label" style="flex-shrink:0;" for="gfx-sch-title">Title</label>
-                <input type="text" id="gfx-sch-title" class="input-text" placeholder="UPCOMING MATCHES" style="flex:1; min-width:0;">
-              </div>
+              <!-- Title now lives on the front card only (Graphics ▸ Schedule) — single source of
+                   truth for Push/Apply/Save. -->
               <div class="gfx-ctrl-row">
                 <label class="field-label" style="flex-shrink:0;" for="gfx-sch-layout">Layout</label>
                 <select id="gfx-sch-layout" class="input-select" style="flex:1; min-width:0;">
@@ -5119,12 +5136,9 @@
                   <div class="field-label" style="margin:6px 0 3px;">Next up</div>
                   <div id="gfx-sch-next-list" class="gfx-sch-next"></div>
                   <p id="gfx-sch-no-queue" class="sps-empty" style="display:none;">No queue — connect a tournament platform in Settings.</p>
-                </div>
-                <div style="display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin-top:8px;">
-                  <button class="btn btn-secondary btn-sm" id="gfx-sch-pull-startgg">Pull Queue</button>
-                  <select id="gfx-sch-league" class="input-select" style="max-width:128px;"><option value="">League…</option></select>
-                  <select id="gfx-sch-week" class="input-select" style="max-width:96px;"><option value="">All weeks</option></select>
-                  <button class="btn btn-secondary btn-sm" id="gfx-sch-pull-league">Pull</button>
+                  <!-- Pull actions moved to the front card (Graphics ▸ Schedule) — the on-stream /
+                       next-up read-outs above are the detail view; pulling itself doesn't need
+                       "More settings" open. -->
                 </div>
               </div>
               <!-- Manual add form -->
@@ -8911,14 +8925,15 @@ PacketSendRate=10</pre>
     /* Kind badge on crew rows */
     .dcc-kind-badge { display:inline-block; font-size:9px; font-weight:700; padding:1px 5px; border-radius:4px; white-space:nowrap; vertical-align:middle; margin-right:4px; }
     /* Hosts 3-column grid */
-    .dcc-hosts-grid { display:grid; grid-template-columns:1fr 1fr 1fr; height:100%; overflow:hidden; }
-    .dcc-hosts-col { display:flex; flex-direction:column; border-right:1px solid var(--border); overflow:hidden; }
-    .dcc-hosts-col:last-child { border-right:none; }
-    .dcc-hosts-col-hd { display:flex; align-items:center; gap:8px; padding:9px 12px; border-bottom:1px solid var(--border); background:var(--surface3); flex:0 0 auto; }
-    .dcc-hosts-drop { flex:1; padding:6px; overflow-y:auto; transition:background .15s; }
-    .dcc-hosts-drop.drag-over { background:rgba(124,58,237,.08); outline:2px dashed rgba(167,139,250,.4); outline-offset:-4px; border-radius:6px; }
-    /* Host cards inherit .talent-row + .mc-player; just add drag affordance */
-    .dcc-host-card { cursor:grab; margin-bottom:4px; }
+    .dcc-hosts-grid { display:grid; grid-template-columns:1fr 1fr 1fr; gap:12px; height:100%; overflow:hidden; padding:14px; }
+    .dcc-hosts-col { display:flex; flex-direction:column; border:1px solid var(--border); border-radius:12px; overflow:hidden; background:rgba(255,255,255,.02); min-height:0; }
+    .dcc-hosts-col-hd { display:flex; align-items:center; gap:8px; padding:11px 13px; border-bottom:1px solid var(--border); background:linear-gradient(180deg, var(--surface3), color-mix(in srgb, var(--surface3) 85%, #000)); flex:0 0 auto; }
+    .dcc-hosts-drop { flex:1; padding:8px; overflow-y:auto; transition:background .15s; display:flex; flex-direction:column; gap:6px; min-height:60px; }
+    .dcc-hosts-drop.drag-over { background:rgba(124,58,237,.08); outline:2px dashed rgba(167,139,250,.45); outline-offset:-4px; border-radius:8px; }
+    /* Host cards inherit .talent-row + .mc-player; card treatment + drag affordance */
+    .dcc-host-card { cursor:grab; margin-bottom:0; background:rgba(255,255,255,.03); border:1px solid var(--border); border-radius:10px; transition:border-color .12s, background .12s; }
+    .dcc-host-card:hover { border-color:rgba(255,255,255,.18); background:rgba(255,255,255,.05); }
+    .dcc-host-card > .mc-p-line { padding:9px 11px; }
     .dcc-host-card:active { cursor:grabbing; }
     .dcc-host-card.dragging { opacity:.35; pointer-events:none; }
     .dcc-host-slot-badge { font-size:9px; font-weight:700; padding:2px 6px; border-radius:4px; background:rgba(232,58,139,.18); color:#e83a8b; white-space:nowrap; flex:0 0 auto; margin-right:2px; }
@@ -9182,6 +9197,9 @@ PacketSendRate=10</pre>
 <script src="stats-analytics.js"></script>
 <script src="seeding-spotlight.js"></script>
 <script src="leagues.js"></script>
+<script src="events.js"></script>
+<script src="bracket-builder.js"></script>
+<script src="camera-feeds.js"></script>
 <script src="../app-store-nav.js"></script>
 <script src="tour.js"></script>
 

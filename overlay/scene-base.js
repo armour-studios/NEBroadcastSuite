@@ -14,7 +14,7 @@
  *   SceneBase.qp(name)           -> URL query param (scenes accept ?team=, ?style=, etc.)
  */
 (function (global) {
-  const WS_URL = 'ws://localhost:3001';
+  const WS_URL = 'ws://' + (location.hostname || 'localhost') + ':3001';   // host-aware: works when the source is loaded from another machine via http://<host>:3000
   const FALLBACK_ACCENT = '#055fdb';
   const FALLBACK_ACCENT2 = '#e97139';
 

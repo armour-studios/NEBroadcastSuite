@@ -1,6 +1,6 @@
 /* ─── Overlay logic — connects to WS bridge on :3001 ────────────────────── */
 
-const WS_URL = 'ws://localhost:3001';
+const WS_URL = 'ws://' + (location.hostname || 'localhost') + ':3001';   // host-aware: works when the source is loaded from another machine via http://<host>:3000
 const BLUE   = '#055fdb';
 const ORANGE = '#e97139';
 

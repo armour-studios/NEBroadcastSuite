@@ -1,7 +1,16 @@
 const { spawn } = require('child_process');
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const fsp = require('fs/promises');
+
+// Lower a child process to BELOW_NORMAL priority so encodes never starve the live broadcast.
+// os.setPriority is native — the old `wmic ... setpriority` shell-out silently no-ops on
+// current Windows 11 builds (wmic was removed from the OS).
+function lowerPriority(pid) {
+  if (process.platform !== 'win32' || !pid) return;
+  try { os.setPriority(pid, os.constants.priority.PRIORITY_BELOW_NORMAL); } catch (e) { /* optional tweak */ }
+}
 const { getTemplate } = require('./templates');
 
 /**
@@ -61,16 +70,7 @@ function createMontageEncoder({ clipsDir, onProgress }) {
     return new Promise((resolve, reject) => {
       const proc = spawn(ffmpegPath, args, { windowsHide: true, detached: false });
 
-      if (process.platform === 'win32' && proc.pid) {
-        // Lower ffmpeg's priority (BELOW_NORMAL) so encodes don't starve the live overlay.
-        // `wmic` was REMOVED in recent Windows 11 builds — a missing binary emits an async
-        // 'error' event, NOT a sync throw, so the try/catch alone does nothing: without the
-        // .on('error') handler below the error becomes an uncaughtException and crashes the app.
-        try {
-          const pr = spawn('wmic', ['process', 'where', `processid=${proc.pid}`, 'CALL', 'setpriority', '16384'], { windowsHide: true });
-          pr.on('error', () => { /* wmic unavailable — priority tweak is optional, ignore */ });
-        } catch (e) { /* ignore */ }
-      }
+      lowerPriority(proc.pid);
 
       let stderr = '';
       proc.stderr.on('data', (d) => {
@@ -460,15 +460,7 @@ function createMontageEncoder({ clipsDir, onProgress }) {
   function runAirPrepFfmpeg(args) {
     return new Promise((resolve, reject) => {
       const proc = spawn(ffmpegPath, args, { windowsHide: true });
-      if (process.platform === 'win32' && proc.pid) {
-        // Lower priority so this brief transcode never competes with OBS/the live broadcast.
-        // wmic is gone on recent Windows 11 builds — .on('error') is required, not optional
-        // (a missing binary is an async error event, not a sync throw).
-        try {
-          const pr = spawn('wmic', ['process', 'where', `processid=${proc.pid}`, 'CALL', 'setpriority', '16384'], { windowsHide: true });
-          pr.on('error', () => {});
-        } catch (e) { /* ignore */ }
-      }
+      lowerPriority(proc.pid);
       let stderr = '';
       proc.stderr.on('data', (d) => { stderr += d.toString(); });
       proc.on('close', (code) => code === 0 ? resolve() : reject(new Error(stderr.slice(-400) || `ffmpeg exit ${code}`)));

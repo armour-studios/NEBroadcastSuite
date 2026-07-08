@@ -1833,13 +1833,17 @@ function applyBrand(data) {
 }
 
 // ── WebSocket ──────────────────────────────────────────────────────────────
+// Brand kit rides broadcasts only when it changes — carry the last-seen value forward so
+// light broadcasts don't wipe the sponsor rail mid-show (pattern from rl-hud.html/scene-base).
+const _lib = { brand: null };
 function connect() {
-  const sock = new WebSocket('ws://localhost:3001');
+  const sock = new WebSocket('ws://' + (location.hostname || 'localhost') + ':3001');
   sock.onopen  = () => sock.send(JSON.stringify({ type: 'request_state' }));
   sock.onmessage = ({ data }) => {
     let msg; try { msg = JSON.parse(data); } catch { return; }
     if (msg.type === 'full_state') {
       const d = msg.data;
+      if ('brand' in d) _lib.brand = d.brand; else d.brand = _lib.brand;
       applyBrand(d);
       appTeams     = { blue: (d.teams && d.teams.blue) || {}, orange: (d.teams && d.teams.orange) || {} };
       appSeries    = d.series || { blue: 0, orange: 0 };

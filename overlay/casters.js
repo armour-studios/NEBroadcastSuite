@@ -1,6 +1,6 @@
 ﻿/* ─── Standalone caster scene — connects to the WS bridge on :3001 ────────── */
 
-const WS_URL = 'ws://localhost:3001';
+const WS_URL = 'ws://' + (location.hostname || 'localhost') + ':3001';   // host-aware: works when the source is loaded from another machine via http://<host>:3000
 
 let ws;
 let currentState = {};

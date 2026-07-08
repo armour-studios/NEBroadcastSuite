@@ -28,6 +28,14 @@ let tray = null;
 let encodeTrayTitle = 'NE Broadcast Suite';
 let rlUiHotkeyRegistered = null;
 
+// Dev machines only (same .env.local signal as the DevTools auto-open below): expose the
+// Chromium remote-debugging port so UI changes can be verified against the REAL renderer
+// (drive tabs, read the console) instead of static checks. Binds 127.0.0.1 only; never
+// active in shipped builds (.env.local is scrubbed from them).
+if (fs.existsSync(path.join(__dirname, '.env.local'))) {
+  app.commandLine.appendSwitch('remote-debugging-port', '9222');
+}
+
 const CRASH_LOG = path.join(
   process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'),
   'ne-broadcast-suite', 'logs', 'crash.log'

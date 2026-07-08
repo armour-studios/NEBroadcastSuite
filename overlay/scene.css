@@ -8,7 +8,7 @@
  */
 
 @import url('/fonts.css');
-@import url('https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/brands.min.css');
+@import url('/assets/vendor/fontawesome/css/brands.min.css');
 
 :root {
   --main-font: 'Bourgeois', 'Rajdhani', sans-serif;

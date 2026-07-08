@@ -401,7 +401,7 @@ function applyBrand(d){
 
 // ── WebSocket ────────────────────────────────────────────────────────────────
 function connect(){
-  const sock=new WebSocket('ws://localhost:3001');
+  const sock=new WebSocket('ws://' + (location.hostname || 'localhost') + ':3001');
   sock.onopen=()=>sock.send(JSON.stringify({type:'request_state'}));
   sock.onmessage=({data})=>{
     let msg; try{ msg=JSON.parse(data); }catch{ return; }

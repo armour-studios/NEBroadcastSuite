@@ -3,6 +3,17 @@
    image pipeline, dialog helpers) lives in core.js, loaded before this file.
    This file carries the feature domains; they extract to per-domain files next. */
 
+// Shared state read by code in THIS file but written/managed by camera-feeds.js (which
+// loads after us). Declared here so load-time paths in app.js (DCC status renderers,
+// qrail talent) never hit a cross-script TDZ — a `let` in a later script does not exist
+// until that script runs, and referencing it during our load blanked the whole panel.
+const VDO_API = 'http://localhost:3000';
+let _vdoLinks = null;              // cached VDO links for facecam auto-fill
+let _cfDirectorData = null;        // DCC: latest /api/vdo/director payload
+let _directorOn = false;           // DCC: monitoring toggle
+let _connectedStreams = new Set(); // stream IDs present in any room
+let _videoStreams = new Set();     // stream IDs whose camera is live (sending video)
+
 
 // ── Sidebar tab switching ───────────────────────────────────────────────────
 document.querySelectorAll('.tab-btn').forEach(btn => {
@@ -528,6 +539,9 @@ async function renderPlayerCamMounts(forceVdo) {
     ? 'No players found — load a match (Match — Teams) or start the game feed, then hit Refresh.'
     : (anyLive ? 'Names pulled live from the game feed.' : 'No live game feed — names from the match rosters. Start the game and hit Refresh to pull exact in-game names.');
   mounts.forEach((m) => {
+    // Don't rebuild a grid the user is actively picking in — a state-driven re-render would
+    // otherwise reset the open dropdown mid-selection (why the DCC "wouldn't let me assign").
+    if (m.rows.contains(document.activeElement)) return;
     m.rows.innerHTML = rowHtml || '';
     if (m.status) m.status.textContent = statusText;
   });
@@ -759,12 +773,29 @@ function renderDccTeamSection(side) {
     return;
   }
 
+  // Don't rebuild the roster while the producer is mid-selection in one of its dropdowns —
+  // a state-driven re-render would otherwise reset the open <select>.
+  if (rosterDiv.contains(document.activeElement)) return;
+
+  // Live in-game players (RL) for the "link camera to in-game player" dropdown — grouped by side.
+  const ingamePlayers = ((currentState && currentState.players) || []).filter((pl) => pl && pl.name);
+  const facecams = (currentState && currentState.facecams) || [];
+  const igBlue = ingamePlayers.filter((pl) => Number(pl.team) !== 1);
+  const igOrange = ingamePlayers.filter((pl) => Number(pl.team) === 1);
+
   rosterDiv.innerHTML = players.map((p) => {
     const vp      = vByPid[String(p.id)] || {};
     const isConn  = !!(vp.streamId && connected.has(vp.streamId));
     const joinUrl = vp.joinUrl || '';
     const obsUrl  = vp.obsUrl  || '';
     const camSlotSel = `<select class="dcc-cam-select" title="Overlay cam slot" data-pcam-side="${tlEsc(side)}" data-pcam-id="${tlEsc(String(p.id))}" style="max-width:96px;">${dccCamOptionsHtml(p.camSlot, 'Off air')}</select>`;
+    // Which in-game player currently uses THIS player's cam feed (so we can pre-select it).
+    const linkedName = obsUrl ? ((facecams.find((f) => f && f.link && f.link === obsUrl) || {}).name || '') : '';
+    const igOpt = (pl) => `<option value="${tlEsc(pl.name)}"${linkedName && pl.name.toLowerCase() === linkedName.toLowerCase() ? ' selected' : ''}>${tlEsc(pl.name)}</option>`;
+    const igOpts = (igBlue.length && igOrange.length)
+      ? `<optgroup label="Blue">${igBlue.map(igOpt).join('')}</optgroup><optgroup label="Orange">${igOrange.map(igOpt).join('')}</optgroup>`
+      : ingamePlayers.map(igOpt).join('');
+    const ingameSel = `<select class="dcc-cam-select dcc-ingame-sel" title="Link this player's camera to an in-game player — shows on their HUD statcard" data-obs="${tlEsc(obsUrl)}" data-prev="${tlEsc(linkedName)}" style="max-width:150px;"><option value="">Link to in-game…</option>${igOpts}</select>`;
     return `<div class="talent-row mc-player dcc-lib-row" data-pside="${tlEsc(side)}" data-pid="${tlEsc(String(p.id))}">
       <div class="mc-p-line">
         <span class="mc-stats">
@@ -774,7 +805,14 @@ function renderDccTeamSection(side) {
         <span class="mc-p-name">${tlEsc(p.name || '—')}</span>
         <span class="cf-grp-sub" style="color:${teamColor};">${tlEsc(team.name || side)}</span>
         <span class="mc-p-quick">
-          ${camSlotSel}
+          <span class="dcc-camset" title="Shows this player's camera on the in-game RL HUD statcard">
+            <span class="dcc-camset-lbl">In-game HUD</span>
+            ${ingameSel}
+          </span>
+          <span class="dcc-camset" title="Places this player's feed into a cam slot on the desk / talent OBS scenes">
+            <span class="dcc-camset-lbl">Desk cam</span>
+            ${camSlotSel}
+          </span>
           <button class="cf-ico-btn" data-copy-url="${tlEsc(joinUrl)}" title="Copy invite / join link"${joinUrl ? '' : ' disabled'}>${svgIcon('userplus')}</button>
           <button class="cf-ico-btn" data-copy-url="${tlEsc(obsUrl)}" title="Copy OBS view link"${obsUrl ? '' : ' disabled'}>${svgIcon('copy')}</button>
           ${!joinUrl ? `<button class="cf-ico-btn" data-pgen-side="${tlEsc(side)}" data-pgen-id="${tlEsc(String(p.id))}" title="Generate VDO link for this player">${svgIcon('zap')}</button>` : ''}
@@ -783,11 +821,33 @@ function renderDccTeamSection(side) {
     </div>`;
   }).join('');
 }
+// Link a roster player's camera to an in-game player (writes a facecam: in-game name → this cam).
+;(function wireDccIngameLink() {
+  document.addEventListener('change', (e) => {
+    const sel = e.target.closest('.dcc-ingame-sel'); if (!sel) return;
+    const obs = sel.dataset.obs || '', name = sel.value, prev = sel.dataset.prev || '';
+    if (name && !obs) { if (typeof showToast === 'function') showToast("Generate this player's VDO link first (Generate button)", '#fbbf24'); sel.value = prev; return; }
+    if (prev && prev !== name) send('delete_facecam', { name: prev });   // free the old in-game mapping
+    if (name) {
+      const ig = ((currentState && currentState.players) || []).find((pl) => pl && pl.name && pl.name.toLowerCase() === name.toLowerCase());
+      const pid = ig && ig.primaryid ? (String(ig.primaryid).split('|')[1] || null) : null;
+      send('save_facecam', { name, platformId: pid, link: obs });
+      if (typeof showToast === 'function') showToast(`Cam linked to ${name}`, '#22c55e');
+    } else if (prev) {
+      if (typeof showToast === 'function') showToast(`Cam unlinked from ${prev}`, '#fbbf24');
+    }
+    sel.dataset.prev = name;
+  });
+})();
 
 function renderDccAll() {
   renderDccTeamSection('blue');
   renderDccTeamSection('orange');
   renderDccHostsPane();
+  // The DCC hosts the In-Game Player Cams grid (#dcc-playercams-rows) too — render it here so it
+  // populates whenever the DCC is shown, not only after opening the Match-Teams gear / Players tab
+  // (which left it empty on the DCC, so there was nothing to assign cams to).
+  if (typeof renderPlayerCamMounts === 'function') renderPlayerCamMounts();
 }
 
 function renderDccTeamsPane() {
@@ -1801,7 +1861,12 @@ function _returnGraphicsToProd() {
     // (gfx layer OR the scene's own visible flag), and its overlay link.
     const headName = el('gfx-scene-head-name');
     if (headName) {
-      headName.textContent = meta.name || key;
+      // Scenes without an Apply step broadcast every edit AS YOU TYPE (their inputs send
+      // straight to the server) — badge them so the producer knows typing is on-air-visible
+      // whenever the scene is live. Standalone scenes (preshow) cut via the switcher instead.
+      const liveEdit = !meta.hasApply && !meta.standaloneScene;
+      headName.innerHTML = esc(meta.name || key)
+        + (liveEdit ? ' <span class="gfx-liveedit-badge" title="No Apply step — edits in this panel reach the overlay immediately while it is on air">LIVE EDIT</span>' : '');
       const VIS_PATHS = {
         bracket: 'bracket.visible', veto: 'veto.visible', standings: 'standings.visible',
         schedule: 'upcoming.visible', spotlight: 'watchlist.visible', winner: 'winner.visible',
@@ -1853,6 +1918,8 @@ function _returnGraphicsToProd() {
   }
   // State-driven topbar refresh (OBS program scene / gfxActive can change server-side).
   window._gfxRefreshTopBar = () => refreshTopBar(currentKey);
+  // Display name for a gfx scene key — used by the topbar ON AIR strip (GFX chip).
+  window._gfxSceneName = (k) => ((SCENE_META[k] || {}).name) || k;
 
   // Clear ALL GFX scenes (one-click clear everything) — top bar only.
   function clearAllGfxScenes() {
@@ -2016,10 +2083,11 @@ function _returnGraphicsToProd() {
       const tEl = el('gfx-front-sch-title'); if (tEl && document.activeElement !== tEl) tEl.value = u.title || '';
       const matches = u.matches || [];
       const onStream = matches.find((m) => m.stream) || matches[0];
-      let html = row('Queued', matches.length) + (onStream
+      // Pull Queue/League/Week are real buttons directly on the front card now (not a quick-action
+      // proxy) — this summary is just the read-out.
+      const html = row('Queued', matches.length) + (onStream
         ? row('On stream', tlEsc((onStream.teamA || 'TBD') + ' vs ' + (onStream.teamB || 'TBD')))
         : empty('No matches queued.'));
-      html += qa('schedule-pull', 'Pull Queue');
       body.innerHTML = html;
     } else if (key === 'draft') {
       const body = el('gfx-front-draft-body'); if (!body) return;
@@ -2039,7 +2107,6 @@ function _returnGraphicsToProd() {
     const btn = e.target.closest('[data-qa]'); if (!btn) return;
     const action = btn.dataset.qa;
     if (action === 'draft-start') el('btn-draft-start')?.click();
-    else if (action === 'schedule-pull') el('gfx-sch-pull-startgg')?.click();
   });
 
   // Inline quick-edit controls on the Standings / Schedule front cards — write straight to state
@@ -2639,11 +2706,13 @@ function _returnGraphicsToProd() {
   // Content only (no visibility) — shared by the top-bar Push (adds visible:true) and the panel's
   // Apply action. Returns { title, rows } for league/start.gg sources; { title } for manual (that
   // source's rows are edited + saved separately via #gfx-std-save, which already omits visible).
+  // Title/Subtitle/Show-record live ONLY on the front card now (Graphics ▸ Standings) — reading
+  // from there is what makes them the single source of truth for Push/Apply/Save.
   function gfxStdCommon() {
     return {
-      title: (el('gfx-std-title')?.value || '').trim(),
-      subtitle: (el('gfx-std-subtitle')?.value || '').trim(),
-      showRecord: el('gfx-std-showrecord') ? el('gfx-std-showrecord').checked : true,
+      title: (el('gfx-front-std-title')?.value || '').trim(),
+      subtitle: (el('gfx-front-std-subtitle')?.value || '').trim(),
+      showRecord: el('gfx-front-std-showrecord') ? el('gfx-front-std-showrecord').checked : true,
     };
   }
   // Shared: build standings-shaped rows [{placement,name,logo,wins,losses,points}] from an
@@ -2674,9 +2743,6 @@ function _returnGraphicsToProd() {
     }
     return { ok: true, payload: { ...common, source: 'manual' }, msg: '' };
   }
-  el('gfx-std-showrecord')?.addEventListener('change', function () {
-    send('set_standings', { showRecord: this.checked });
-  });
   el('btn-gfx-standings-push')?.addEventListener('click', () => {
     const r = buildStandingsPayload();
     if (!r.ok) { gfxStdStatus(r.err, true); return; }
@@ -2701,7 +2767,6 @@ function _returnGraphicsToProd() {
     el('gfx-std-empty').style.display = '';
   });
   el('gfx-std-save')?.addEventListener('click', () => {
-    const title = (el('gfx-std-title')?.value || '').trim();
     const rows = [...(el('gfx-std-rows-list') || { querySelectorAll: () => [] }).querySelectorAll('.gfx-std-edit-row')].map((r, i) => {
       const inputs = r.querySelectorAll('input');
       return { placement: i + 1, name: inputs[0]?.value.trim() || '', wins: parseInt(inputs[1]?.value) || 0, losses: parseInt(inputs[2]?.value) || 0, points: parseInt(inputs[3]?.value) || 0 };
@@ -2756,17 +2821,18 @@ function _returnGraphicsToProd() {
     });
   }
 
+  // Title lives on the front card only now (Graphics ▸ Schedule) — single source of truth.
   function schAutoSave() {
     send('set_upcoming', {
       matches: _schMatches,
-      title: (el('gfx-sch-title')?.value || 'UPCOMING MATCHES').trim(),
+      title: (el('gfx-front-sch-title')?.value || 'UPCOMING MATCHES').trim(),
       layout: el('gfx-sch-layout')?.value || 'cards'
     });
   }
 
   function buildScheduleContentPayload() {
     return {
-      title: (el('gfx-sch-title')?.value || 'UPCOMING MATCHES').trim(),
+      title: (el('gfx-front-sch-title')?.value || 'UPCOMING MATCHES').trim(),
       layout: el('gfx-sch-layout')?.value || 'cards',
       matches: _schMatches
     };
@@ -2798,7 +2864,8 @@ function _returnGraphicsToProd() {
       const laySel = el('gfx-sch-layout'); if (laySel) laySel.value = lay;
       const pv = el('gfx-pv-schedule');
       if (pv) { pv.dataset.lay = lay; pv.src = (window.SCENE_BASE_URL || 'http://localhost:3000') + '/schedule.html?preview=1&layout=' + lay; }
-      const ttlIn = el('gfx-sch-title'); if (ttlIn && !ttlIn.value) ttlIn.value = up.title && up.title !== 'UPCOMING MATCHES' ? up.title : '';
+      // Title hydration handled by renderPopoutSummary('schedule') on every broadcast now
+      // (front card owns it) — no separate one-time sync needed here.
       if (Array.isArray(up.matches) && up.matches.length) {
         _schMatches = up.matches.slice();
         schRenderList();
@@ -2951,7 +3018,7 @@ function _returnGraphicsToProd() {
     }));
     if (week) {
       const lay = el('gfx-sch-layout'); if (lay) lay.value = 'dual';
-      const ttl = el('gfx-sch-title'); if (ttl) ttl.value = 'WEEK ' + week;
+      const ttl = el('gfx-front-sch-title'); if (ttl) ttl.value = 'WEEK ' + week;
     }
     schRenderList(); schAutoSave();
     if (st) { st.textContent = `Added ${sched.length} match${sched.length !== 1 ? 'es' : ''}${week ? ' from week ' + week : ''}.`; setTimeout(() => { st.textContent = ''; }, 2500); }
@@ -3311,6 +3378,33 @@ function _returnGraphicsToProd() {
     if (gdot && qTab) qTab.appendChild(gdot);   // keep the trigger live-dot on the Quick tab
     gTab.style.display = 'none';
   }
+  // 5) NEXT = Rundown + Queue — fold the Start.gg queue panel into the Run-of-Show panel.
+  const rosP = panel('ros'), sggP = panel('startgg');
+  if (rosP && sggP) { rosP.appendChild(sepEl()); move(sggP, rosP); sggP.remove(); }
+  const sggTab = qtab('startgg'), rosTab0 = qtab('ros');
+  if (sggTab) { const sdot = document.getElementById('qrail-sgg-dot'); if (sdot && rosTab0) rosTab0.appendChild(sdot); sggTab.remove(); }
+
+  // 6) AUTO = Flows + Neural AI — fold the AI panel into the Flows panel.
+  const flowsP = panel('flows'), aiP = panel('ai');
+  if (flowsP && aiP) { flowsP.appendChild(sepEl()); move(aiP, flowsP); aiP.remove(); }
+  const aiTab = qtab('ai'), flowsTab0 = qtab('flows');
+  if (aiTab) { const adot = document.getElementById('qrail-ai-dot'); if (adot && flowsTab0) flowsTab0.appendChild(adot); aiTab.remove(); }
+
+  // 7) Final 6-tab identity: AIR · NEXT · TALENT · AUTO · STREAM · NOTES.
+  //    Icon-only strip; each tab gets a floating label pill (shown on hover / when active).
+  const setLabel = (t, txt, title) => {
+    const b = qtab(t); if (!b) return;
+    let l = b.querySelector('.qrail-tab-label');
+    if (!l) { l = document.createElement('span'); l.className = 'qrail-tab-label'; b.appendChild(l); }
+    l.textContent = txt; if (title) b.title = title;
+  };
+  setLabel('quick',  'Air',    'Air — scenes, overlays & triggers');
+  setLabel('ros',    'Next',   'Next — run of show & stream queue');
+  setLabel('talent', 'Talent', 'Talent — cams, listen-in & interviews');
+  setLabel('flows',  'Auto',   'Auto — flows & Neural AI director');
+  setLabel('twitch', 'Stream', 'Stream — title, chat, activity & predictions');
+  setLabel('notes',  'Notes',  'Notes — producer notes');
+
   // Pin Notes to the bottom of the strip (by the popout), off the main tab list.
   const nTab = qtab('notes'), tabsEl = document.getElementById('qrail-tabs'), popBtn = document.getElementById('qrail-popout-btn');
   if (nTab && tabsEl && popBtn) tabsEl.insertBefore(nTab, popBtn);
@@ -3430,8 +3524,9 @@ if (_popoutPage === 'triggers') {
     _pb.removeAttribute('hidden');
   }
   requestAnimationFrame(() => {
-    const tab = document.querySelector('.qrail-tab[data-qtab="golive"]');
-    if (tab) tab.click();   // activate the Trigger Graphics panel
+    // Triggers merged into the AIR cockpit (golive tab removed) — open AIR.
+    const tab = document.querySelector('.qrail-tab[data-qtab="quick"]');
+    if (tab) tab.click();
   });
 } else if (_popoutPage === 'timer') {
   // Special popout: the producer / countdown timer, full window (drag to a second monitor).
@@ -3487,6 +3582,10 @@ if (_popoutPage === 'triggers') {
     const wasScenes = saved === 'scenes';   // Overlays merged into Assets ▸ Overlays
     const wasBrands = saved === 'brands';   // Profiles merged into Assets ▸ Profiles
     if (wasScenes || wasBrands) saved = 'media';
+    // Switcher page is hidden from nav (laggy screenshot multiview) — its button is display:none,
+    // but .click() still fires on a hidden element, so a stale saved tab would silently reopen it
+    // (and re-arm its OBS Studio-Mode auto-enable) on the next launch without this guard.
+    if (saved === 'switcher') saved = 'produccion';
     if (saved && saved !== 'principal') {
       const btn = document.querySelector('.tab-btn[data-tab="' + saved + '"]');
       if (btn) btn.click();
@@ -3527,15 +3626,21 @@ function qrailExpand(tab) {
 }
 
 const QRAIL_TAB_TITLES = {
-  quick: 'Quick', ros: 'Rundown', startgg: 'Queue', graphics: 'Overlays',
-  golive: 'Trigger Graphics', flows: 'Flows', talent: 'Talent',
-  ai: 'NEURAL AI', notes: 'Producer Notes', checklist: 'Run-of-Show',
-  workflow: 'Stream', twitch: 'Stream'
+  // 6-tab identity (AIR·NEXT·TALENT·AUTO·STREAM·NOTES). Keys stay the panels' data-qpanel names.
+  quick: 'On Air', ros: 'Up Next', flows: 'Automation', talent: 'On-Air Talent',
+  twitch: 'Stream', notes: 'Producer Notes',
+  // legacy keys — their panels are merged away, kept so any direct caller still titles correctly.
+  startgg: 'Up Next', graphics: 'On Air', golive: 'On Air', ai: 'Automation',
+  workflow: 'Stream', checklist: 'Run-of-Show',
 };
 function qrailShowTab(tab) {
   document.querySelectorAll('#qrail-tabs .qrail-tab').forEach((b) => b.classList.toggle('active', b.dataset.qtab === tab));
   document.querySelectorAll('.qrail-body .qrail-panel').forEach((p) => p.classList.toggle('active', p.dataset.qpanel === tab));
   const title = el('qrail-paneltitle'); if (title) title.textContent = QRAIL_TAB_TITLES[tab] || '';
+  // Live sections refresh as their tab opens (queue now lives under NEXT, AI under AUTO).
+  if ((tab === 'ros' || tab === 'flows' || tab === 'talent') && typeof renderQrailLive === 'function') renderQrailLive();
+  if (tab === 'talent' && typeof cfTalentAutoOpen === 'function') cfTalentAutoOpen();
+  if (tab === 'twitch') setTimeout(() => { const c = el('twitch-chat'); if (c) c.scrollTop = c.scrollHeight; }, 100);
   qrailExpand(tab);
 }
 
@@ -4481,8 +4586,8 @@ el('btn-reset-all-wf')?.addEventListener('click', () => el('btn-reset-all')?.cli
 
   el('btn-flows-refresh-stream')?.addEventListener('click', refreshStreamInfo);
 
-  // Refresh when the Flows panel opens
-  document.querySelectorAll('.qrail-tab[data-qtab="workflow"]').forEach(tab => {
+  // Refresh stream info when the STREAM tab opens (stream panel merged into Twitch/Stream).
+  document.querySelectorAll('.qrail-tab[data-qtab="twitch"]').forEach(tab => {
     tab.addEventListener('click', refreshStreamInfo);
   });
 
@@ -6276,632 +6381,7 @@ el('btn-lib-sponsor-logo')?.addEventListener('click', () => mpOpen((url) => {
   setSponsorLogoPreview(url);   // show the picked logo so it's clear it's ready to add
 }));
 
-// ── Bracket builder (manual; feeds bracket.html) ──────────────────────────
-// bbModel rounds: { name, sets: [{ a:{name,score}, b:{name,score} }] }
-// Elim uses winners/losers/finals; Round Robin & Swiss use rounds[] + roster[] + auto standings.
-// bbModel = the live working copy of the ACTIVE phase. Multi-phase events (Day 1
-// double-elim → Day 2 single-elim/swiss) keep one entry per phase in bbPhases.
-const bbModel = { type: 'single', size: 8, rosterCount: 8, swissRounds: 5, winners: [], losers: [], finals: [], rounds: [], roster: [] };
-const bbIsTable = () => bbModel.type === 'roundrobin' || bbModel.type === 'swiss';
-let bbPhases = [];        // [{ id, name, type, size, swissRounds, winners, losers, finals, rounds, roster }]
-let bbActiveId = null;
-let _bbPhaseSeq = 0;
-let _bbHydrated = false;
-let _bbSaveTimer = null;
-
-const BB_FIELDS = ['type', 'size', 'swissRounds', 'winners', 'losers', 'finals', 'rounds', 'roster', 'pools'];
-function bbNewPhase(name, type) {
-  return { id: 'ph' + (++_bbPhaseSeq), name: name || ('Phase ' + (bbPhases.length + 1)), type: type || 'single', size: 8, swissRounds: 5, winners: [], losers: [], finals: [], rounds: [], roster: [], pools: [] };
-}
-function bbActivePhase() { return bbPhases.find((p) => p.id === bbActiveId) || null; }
-function bbEnsurePhase() {
-  if (!bbPhases.length) { const p = bbNewPhase('Phase 1', bbModel.type); bbPhases.push(p); bbActiveId = p.id; }
-  if (!bbActiveId) bbActiveId = bbPhases[0].id;
-}
-// Copy bbModel ↔ the active phase object.
-function bbCommit() {
-  const ph = bbActivePhase(); if (!ph) return;
-  bbCommitPool();   // flush the currently-edited pool's roster/rounds into bbModel.pools first
-  BB_FIELDS.forEach((k) => { ph[k] = bbModel[k]; });
-  ph.activePoolId = bbActivePoolId;
-}
-function bbLoadPhase(id) {
-  bbActiveId = id;
-  const ph = bbActivePhase(); if (!ph) return;
-  BB_FIELDS.forEach((k) => { bbModel[k] = ph[k] !== undefined ? ph[k] : bbModel[k]; });
-  if (Array.isArray(bbModel.pools) && bbModel.pools.length) {
-    const wantId = ph.activePoolId && bbModel.pools.some((p) => p.id === ph.activePoolId) ? ph.activePoolId : bbModel.pools[0].id;
-    bbLoadPool(wantId);
-  } else {
-    bbActivePoolId = '';
-  }
-  // reflect type/size/rounds in the toolbar
-  const seg = el('bb-type-seg'); if (seg) seg.querySelectorAll('.seg-btn').forEach((x) => x.classList.toggle('active', x.dataset.type === bbModel.type));
-  const sz = el('bb-size'); if (sz) sz.value = bbModel.size;
-  const rn = el('bb-rounds-num'); if (rn) rn.value = bbModel.swissRounds;
-  const pc = el('bb-pool-count'); if (pc) pc.value = Math.max(1, (bbModel.pools || []).length);
-  bbSyncTypeUi();
-  bbRenderPools();
-  bbRender();
-}
-
-function bbRoundName(matchCount, section, isLast) {
-  if (section === 'finals') return 'Grand Final';
-  if (section === 'losers') return isLast ? "Losers' Final" : 'Losers Round';
-  if (isLast) return section === 'winners' && bbModel.type === 'double' ? "Winners' Final" : 'Final';
-  if (matchCount >= 8) return 'Round of ' + (matchCount * 2);
-  if (matchCount === 4) return 'Quarterfinals';
-  if (matchCount === 2) return 'Semifinals';
-  return 'Final';
-}
-function bbEmptySet() { return { a: { name: '', score: 0 }, b: { name: '', score: 0 } }; }
-function bbMakeRounds(counts, section) {
-  return counts.map((cnt, idx) => ({
-    name: bbRoundName(cnt, section, idx === counts.length - 1),
-    sets: Array.from({ length: cnt }, bbEmptySet)
-  }));
-}
-// Single round-robin schedule (circle method). n must be even.
-function bbRoundRobinPairs(n) {
-  const idx = [...Array(n).keys()];
-  const rounds = [];
-  for (let r = 0; r < n - 1; r++) {
-    const matches = [];
-    for (let i = 0; i < n / 2; i++) matches.push([idx[i], idx[n - 1 - i]]);
-    rounds.push(matches);
-    idx.splice(1, 0, idx.pop());   // rotate, fixing idx[0]
-  }
-  return rounds;
-}
-function bbGenerate() {
-  bbEnsurePhase();
-  const size = bbModel.size;
-  if (bbModel.type === 'single' || bbModel.type === 'double') {
-    const p2 = 1 << Math.ceil(Math.log2(size));   // snap to a power of two (byes if needed)
-    const winCounts = [];
-    for (let m = p2 / 2; m >= 1; m = Math.floor(m / 2)) winCounts.push(m);
-    bbModel.winners = bbMakeRounds(winCounts, 'winners');
-    if (bbModel.type === 'double') {
-      const loseCounts = [];
-      for (let m = p2 / 4; m >= 1; m = Math.floor(m / 2)) { loseCounts.push(m); loseCounts.push(m); }
-      bbModel.losers = bbMakeRounds(loseCounts, 'losers');
-      bbModel.finals = bbMakeRounds([1], 'finals');
-    } else { bbModel.losers = []; bbModel.finals = []; }
-    bbModel.rounds = [];
-  } else {
-    // Round Robin / Swiss — build a roster, then a schedule of rounds.
-    const n = bbModel.size;
-    if (bbModel.roster.length < n) while (bbModel.roster.length < n) bbModel.roster.push('');
-    bbModel.roster.length = n;
-    bbModel.winners = []; bbModel.losers = []; bbModel.finals = [];
-    if (bbModel.type === 'roundrobin') {
-      const pairs = bbRoundRobinPairs(n % 2 === 0 ? n : n + 1);
-      bbModel.rounds = pairs.map((matches, ri) => ({
-        name: 'Round ' + (ri + 1),
-        sets: matches.filter(([a, b]) => a < n && b < n).map(([a, b]) => ({
-          a: { name: bbModel.roster[a] || '', score: 0 }, b: { name: bbModel.roster[b] || '', score: 0 }
-        }))
-      }));
-    } else {
-      const rc = Math.max(1, Math.min(12, bbModel.swissRounds || Math.ceil(Math.log2(n))));
-      bbModel.rounds = Array.from({ length: rc }, (_, ri) => ({
-        name: 'Round ' + (ri + 1),
-        sets: Array.from({ length: Math.floor(n / 2) }, (_, mi) => {
-          // Round 1 seeds sequentially from the roster; later rounds are filled by the producer.
-          const a = ri === 0 ? bbModel.roster[mi * 2] || '' : '';
-          const b = ri === 0 ? bbModel.roster[mi * 2 + 1] || '' : '';
-          return { a: { name: a, score: 0 }, b: { name: b, score: 0 } };
-        })
-      }));
-    }
-  }
-  bbCommitPool();   // this may run mid-split, iterating other pools — keep pool storage in sync immediately
-  bbRender();
-  bbAutosave();
-}
-// Auto-compute standings from every played match in the schedule — Wins/Losses plus the
-// same Sets Played/Set Wins-Losses/Game Wins-Losses stats Start.gg's own Pool/Swiss
-// standings show (server-side buildBracket() computes the identical fields for
-// Start.gg-derived pools, so manual and imported brackets render identically).
-function bbComputeStandings(rounds, roster) {
-  rounds = rounds || bbModel.rounds; roster = roster || bbModel.roster;
-  const tally = {};
-  const seed = (name) => { if (name && !tally[name]) tally[name] = { name, wins: 0, losses: 0, setsPlayed: 0, setsTotal: 0, gameWins: 0, gameLosses: 0 }; };
-  roster.forEach(seed);
-  rounds.forEach((round) => round.sets.forEach((set) => {
-    seed(set.a.name); seed(set.b.name);
-    if (set.a.name) tally[set.a.name].setsTotal++;
-    if (set.b.name) tally[set.b.name].setsTotal++;
-    const w = bbWinnerOf(set);
-    if (!w || !set.a.name || !set.b.name) return;
-    const as = Number(set.a.score) || 0, bs = Number(set.b.score) || 0;
-    tally[set.a.name].gameWins += as; tally[set.a.name].gameLosses += bs;
-    tally[set.b.name].gameWins += bs; tally[set.b.name].gameLosses += as;
-    if (w === 'a') { tally[set.a.name].wins++; tally[set.a.name].setsPlayed++; tally[set.b.name].losses++; tally[set.b.name].setsPlayed++; }
-    else { tally[set.b.name].wins++; tally[set.b.name].setsPlayed++; tally[set.a.name].losses++; tally[set.a.name].setsPlayed++; }
-  }));
-  return Object.values(tally)
-    .filter((t) => t.name)
-    .sort((x, y) => (y.wins - y.losses) - (x.wins - x.losses) || y.wins - x.wins || x.name.localeCompare(y.name))
-    .map((t, i) => ({ placement: i + 1, name: t.name, wins: t.wins, losses: t.losses,
-      setsPlayed: t.setsPlayed, setsTotal: t.setsTotal, setWins: t.wins, setLosses: t.losses,
-      gameWins: t.gameWins, gameLosses: t.gameLosses }));
-}
-// Head-to-head matrix for a Round Robin group — same { teams, cells } shape the Start.gg
-// import path produces, so bracket.html's Head-to-head grid view works for manual pools too.
-function bbComputeMatrix(rounds, roster) {
-  const names = (roster || []).filter(Boolean);
-  if (names.length < 2) return null;
-  const ids = {};
-  const teams = names.map((name, i) => { const id = 'e' + i; ids[name] = id; return { id, name }; });
-  const cells = {};
-  (rounds || []).forEach((round) => (round.sets || []).forEach((set) => {
-    const an = set.a && set.a.name, bn = set.b && set.b.name;
-    if (!an || !bn || !ids[an] || !ids[bn]) return;
-    const w = bbWinnerOf(set);
-    const aScore = Number(set.a.score) || 0, bScore = Number(set.b.score) || 0;
-    cells[ids[an] + '_' + ids[bn]] = { aScore, bScore, winner: w === 'a' ? 'a' : (w === 'b' ? 'b' : null), played: !!w };
-    cells[ids[bn] + '_' + ids[an]] = { aScore: bScore, bScore: aScore, winner: w === 'a' ? 'b' : (w === 'b' ? 'a' : null), played: !!w };
-  }));
-  return { teams, cells };
-}
-
-// ── Pools (Round Robin / Swiss phases split into N parallel groups — Start.gg
-// "Pool Play") ── bbModel.roster/rounds always hold the ACTIVE pool's own arrays once
-// a phase has pools; switching pools swaps those arrays in/out, the exact same pattern
-// bbPhases already uses for switching phases — every existing render/generate/standings
-// function above keeps working completely unmodified for a single active pool.
-let bbActivePoolId = '';
-let _bbPoolSeq = 0;
-function bbActivePoolObj() { return (bbModel.pools || []).find((p) => p.id === bbActivePoolId) || null; }
-function bbCommitPool() {
-  const p = bbActivePoolObj();
-  if (p) { p.roster = bbModel.roster; p.rounds = bbModel.rounds; }
-}
-function bbLoadPool(id) {
-  const p = (bbModel.pools || []).find((x) => x.id === id); if (!p) return;
-  bbActivePoolId = id;
-  bbModel.roster = p.roster; bbModel.rounds = p.rounds;
-  bbModel.size = p.roster.length || bbModel.size;
-  const sz = el('bb-size'); if (sz) sz.value = bbModel.size;
-}
-function bbPoolName(i) { return 'Pool ' + String.fromCharCode(65 + (i % 26)); }
-// Split (or re-split) this phase's roster into N parallel pools. n<=1 collapses any
-// existing pools back into a single flat group. Snake-distributes by current roster
-// order (== seed order) so pools stay balanced, same idea as start.gg's own seeding.
-function bbSplitIntoPools(n) {
-  n = Math.max(1, Math.min(16, n || 1));
-  bbCommitPool();
-  const seen = new Set(); const allNames = [];
-  (bbModel.pools && bbModel.pools.length ? bbModel.pools.flatMap((p) => p.roster || []) : bbModel.roster).forEach((nm) => {
-    const t = (nm || '').trim(); if (t && !seen.has(t.toLowerCase())) { seen.add(t.toLowerCase()); allNames.push(t); }
-  });
-  if (n <= 1) {
-    bbModel.pools = []; bbActivePoolId = '';
-    bbModel.roster = allNames; bbModel.size = allNames.length || bbModel.size;
-    bbGenerate();
-    bbRenderPools();
-    return;
-  }
-  const buckets = Array.from({ length: n }, () => []);
-  allNames.forEach((nm, i) => {
-    const lap = Math.floor(i / n), pos = lap % 2 === 0 ? i % n : n - 1 - (i % n);
-    buckets[pos].push(nm);
-  });
-  bbModel.pools = buckets.map((roster, i) => ({ id: 'pool' + (++_bbPoolSeq), name: bbPoolName(i), roster, rounds: [] }));
-  bbModel.pools.forEach((p) => {
-    bbModel.roster = p.roster; bbModel.rounds = []; bbModel.size = p.roster.length;
-    bbGenerate();               // fills bbModel.rounds for this pool (also writes it back via bbCommitPool above)
-    p.roster = bbModel.roster; p.rounds = bbModel.rounds;
-  });
-  bbLoadPool(bbModel.pools[0].id);
-  bbRenderPools();
-  bbRender();
-  bbAutosave();
-}
-function bbRenderPools() {
-  const wrap = el('bb-pools'); if (!wrap) return;
-  const pools = bbModel.pools || [];
-  if (!bbIsTable() || pools.length < 2) { wrap.innerHTML = ''; wrap.style.display = 'none'; return; }
-  wrap.style.display = 'flex';
-  wrap.innerHTML = pools.map((p) =>
-    `<div class="bb-phase-tab${p.id === bbActivePoolId ? ' active' : ''}" data-poolid="${p.id}" title="Double-click to rename">
-       <span class="bb-phase-name">${(p.name || 'Pool').replace(/</g, '&lt;')}</span>
-     </div>`).join('');
-  wrap.querySelectorAll('.bb-phase-tab').forEach((t) => {
-    t.addEventListener('click', () => { if (t.dataset.poolid !== bbActivePoolId) bbSelectPool(t.dataset.poolid); });
-    t.addEventListener('dblclick', () => bbRenamePool(t.dataset.poolid));
-  });
-}
-function bbSelectPool(id) { bbCommitPool(); bbLoadPool(id); bbRenderPools(); bbRender(); bbAutosave(); }
-function bbRenamePool(id) {
-  const p = (bbModel.pools || []).find((x) => x.id === id); if (!p) return;
-  const name = prompt('Pool name:', p.name); if (name == null) return;
-  p.name = name.trim() || p.name; bbRenderPools(); bbAutosave();
-}
-function bbTeamsDatalist() {
-  const dl = el('bb-teams-datalist'); if (!dl) return;
-  dl.innerHTML = allMatchTeams().map((t) => `<option value="${(t.name || '').replace(/"/g, '&quot;')}">`).join('');
-}
-function bbIsBye(name) { return /^bye$/i.test((name || '').trim()); }
-function bbWinnerOf(set) {
-  // Explicit winner mark (the W toggle) beats score inference — needed for forfeits / 0-0.
-  if (set.a.win) return 'a';
-  if (set.b.win) return 'b';
-  // A BYE slot always loses.
-  if (bbIsBye(set.a.name) && set.b.name) return 'b';
-  if (bbIsBye(set.b.name) && set.a.name) return 'a';
-  const a = Number(set.a.score) || 0, b = Number(set.b.score) || 0;
-  if (a === b) return null;
-  return a > b ? 'a' : 'b';
-}
-// Advance the winner of (section, roundIdx, setIdx) into the structurally next slot.
-// Double elim also DROPS the loser into the right losers-bracket slot automatically:
-//   WB round 1 losers  → LB round 1 (two per match), WB round k≥2 losers → LB round 2k-2
-//   (the "minor" round, slot b — slot a belongs to the LB advancer).
-function bbAdvance(section, ri, si) {
-  const arr = bbModel[section];
-  const set = arr[ri] && arr[ri].sets[si]; if (!set) return;
-  const w = bbWinnerOf(set); if (!w) { bbStatus('Enter scores (or click W on the winner) first.', false); return; }
-  const team = set[w];
-  const loser = set[w === 'a' ? 'b' : 'a'];
-  let target, slot;
-  if (section === 'winners' && ri < arr.length - 1) { target = arr[ri + 1].sets[Math.floor(si / 2)]; slot = si % 2 === 0 ? 'a' : 'b'; }
-  else if (section === 'winners' && bbModel.type === 'double') { target = bbModel.finals[0] && bbModel.finals[0].sets[0]; slot = 'a'; }
-  else if (section === 'losers' && ri < arr.length - 1) {
-    const next = arr[ri + 1];
-    if (next.sets.length === arr[ri].sets.length) { target = next.sets[si]; slot = 'a'; }             // major → minor: same count, advancer takes slot a
-    else { target = next.sets[Math.floor(si / 2)]; slot = si % 2 === 0 ? 'a' : 'b'; }                  // halving round
-  }
-  else if (section === 'losers') { target = bbModel.finals[0] && bbModel.finals[0].sets[0]; slot = 'b'; }
-  let msg = 'Advanced ' + (team.name || 'winner') + '.';
-  if (target) target[slot] = { name: team.name, score: 0 };
-  // Auto-drop the WB loser into the losers bracket (double elim only, skip byes).
-  if (section === 'winners' && bbModel.type === 'double' && loser && loser.name && !bbIsBye(loser.name)) {
-    const lb = bbModel.losers || [];
-    const lri = ri === 0 ? 0 : (2 * ri) - 1;
-    const lRound = lb[lri];
-    if (lRound) {
-      let lTarget, lSlot;
-      if (ri === 0) { lTarget = lRound.sets[Math.floor(si / 2)]; lSlot = si % 2 === 0 ? 'a' : 'b'; }
-      else { lTarget = lRound.sets[si]; lSlot = 'b'; }
-      if (lTarget && (!lTarget[lSlot] || !lTarget[lSlot].name)) {
-        lTarget[lSlot] = { name: loser.name, score: 0 };
-        msg = 'Advanced ' + (team.name || 'winner') + ' — ' + loser.name + ' dropped to ' + (lRound.name || 'losers') + '.';
-      }
-    }
-  }
-  if (target) { bbRender(); bbAutosave(); bbStatus(msg, true); }
-}
-function bbStatus(msg, ok) {
-  const s = el('bb-status'); if (!s) return;
-  s.textContent = msg || ''; s.style.color = ok === false ? '#f56565' : (ok ? 'var(--good, #48bb78)' : 'var(--muted)');
-}
-function bbSectionHtml(section, label) {
-  const arr = bbModel[section];
-  if (!arr || !arr.length) return '';
-  const isTable = section === 'rounds';
-  const secClass = section === 'losers' ? ' losers' : (section === 'finals' ? ' finals' : '');
-  const cols = arr.map((round, ri) => {
-    const sets = round.sets.map((set, si) => {
-      const w = bbWinnerOf(set);
-      const slot = (side) => {
-        const bye = bbIsBye(set[side].name);
-        return `<div class="bb-slot${w === side ? ' win' : ''}${bye ? ' bb-bye' : ''}">
-          <button class="bb-win-btn${set[side].win ? ' on' : ''}" data-sec="${section}" data-r="${ri}" data-s="${si}" data-side="${side}" title="Mark this team as the winner (works for forfeits / no score)">W</button>
-          <input class="input-text bb-name" list="bb-teams-datalist" data-sec="${section}" data-r="${ri}" data-s="${si}" data-side="${side}" value="${(set[side].name || '').replace(/"/g, '&quot;')}" placeholder="TBA">
-          <input type="number" class="input-text bb-score" min="0" data-sec="${section}" data-r="${ri}" data-s="${si}" data-side="${side}" value="${set[side].score || 0}">
-        </div>`;
-      };
-      return `<div class="bb-match">
-        ${slot('a')}${slot('b')}
-        <div class="bb-match-actions">
-          ${isTable ? '' : `<button class="bb-adv" data-sec="${section}" data-r="${ri}" data-s="${si}" title="Advance the winner into the next round${bbModel.type === 'double' && section === 'winners' ? ' (loser auto-drops to the losers bracket)' : ''}">Advance <span aria-hidden="true">→</span></button>`}
-          <button class="bb-live" data-sec="${section}" data-r="${ri}" data-s="${si}" title="Push this matchup live to the overlay (Blue vs Orange)">Go Live</button>
-        </div>
-      </div>`;
-    }).join('');
-    return `<div class="bb-round">
-      <input class="bb-round-name" data-sec="${section}" data-r="${ri}" value="${(round.name || '').replace(/"/g, '&quot;')}">
-      <div class="bb-round-sets">${sets}</div>
-    </div>`;
-  }).join('');
-  return `<div class="bb-section${secClass}"><div class="bb-section-label">${label}</div><div class="bb-cols">${cols}</div></div>`;
-}
-function bbRenderRoster() {
-  const wrap = el('bb-roster'); if (!wrap) return;
-  if (!bbIsTable()) { wrap.style.display = 'none'; return; }
-  wrap.style.display = 'block';
-  const poolObj = bbActivePoolObj();
-  const label = poolObj ? `${poolObj.name || 'Pool'} teams` : 'Tournament teams';
-  wrap.innerHTML = '<div class="bb-roster-label">' + label.replace(/</g, '&lt;') + '</div><div class="bb-roster-grid">'
-    + bbModel.roster.map((nm, i) => `<input class="input-text bb-roster-name" data-i="${i}" list="bb-teams-datalist" value="${(nm || '').replace(/"/g, '&quot;')}" placeholder="Team ${i + 1}">`).join('')
-    + '</div>';
-  wrap.querySelectorAll('.bb-roster-name').forEach((inp) => {
-    inp.addEventListener('change', () => { bbModel.roster[+inp.dataset.i] = inp.value.trim(); bbAutosave(); bbRenderStandings(); });
-    inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') inp.blur(); });
-  });
-}
-function bbRenderStandings() {
-  const wrap = el('bb-standings'); if (!wrap) return;
-  if (!bbIsTable()) { wrap.style.display = 'none'; return; }
-  const rows = bbComputeStandings();
-  wrap.style.display = 'block';
-  wrap.innerHTML = '<div class="bb-standings-label">Standings (auto from scores)</div>'
-    + '<div class="bb-standings-table"><div class="bb-st-row bb-st-head"><span>#</span><span>Team</span><span>W</span><span>L</span></div>'
-    + rows.map((s) => `<div class="bb-st-row"><span>${s.placement}</span><span class="bb-st-name">${(s.name || '').replace(/</g, '&lt;')}</span><span>${s.wins}</span><span>${s.losses}</span></div>`).join('')
-    + '</div>';
-}
-function bbRender() {
-  const board = el('bb-board'); if (!board) return;
-  bbTeamsDatalist();
-  bbRenderPhases();
-  bbRenderPools();
-  bbRenderRoster();
-  const hasElim = bbModel.winners.length || bbModel.losers.length;
-  const hasTable = bbModel.rounds.length;
-  if (!hasElim && !hasTable) {
-    board.innerHTML = '<div class="rp-empty">Pick a size + type and hit Generate to build a bracket.</div>';
-    bbRenderStandings();
-    return;
-  }
-  if (bbIsTable()) {
-    board.innerHTML = bbSectionHtml('rounds', bbModel.type === 'swiss' ? 'Swiss Rounds' : 'Round-Robin Schedule');
-  } else {
-    // Double elim: offer a bracket-reset second Grand Final set (LB winner takes GF 1).
-    const canReset = bbModel.type === 'double' && bbModel.finals.length === 1;
-    board.innerHTML = bbSectionHtml('winners', bbModel.type === 'double' ? 'Winners Bracket' : 'Bracket')
-      + bbSectionHtml('losers', 'Losers Bracket')
-      + bbSectionHtml('finals', 'Grand Final')
-      + (canReset ? '<button class="btn btn-ghost btn-xs" id="bb-gf-reset" title="Add a second Grand Final set for when the losers-bracket team wins the first one" style="margin:4px 0 0 8px;">+ Add reset set</button>' : '');
-    if (canReset) board.querySelector('#bb-gf-reset')?.addEventListener('click', () => {
-      bbModel.finals.push({ name: 'Grand Final (Reset)', sets: [{ a: { name: '', score: 0 }, b: { name: '', score: 0 } }] });
-      bbRender(); bbAutosave();
-    });
-  }
-  board.querySelectorAll('.bb-name').forEach((inp) => {
-    inp.addEventListener('change', () => { bbModel[inp.dataset.sec][inp.dataset.r].sets[inp.dataset.s][inp.dataset.side].name = inp.value.trim(); bbAutosave(); if (bbIsTable()) bbRenderStandings(); });
-    inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') inp.blur(); });
-  });
-  board.querySelectorAll('.bb-score').forEach((inp) => {
-    inp.addEventListener('change', () => { bbModel[inp.dataset.sec][inp.dataset.r].sets[inp.dataset.s][inp.dataset.side].score = Number(inp.value) || 0; bbRender(); bbAutosave(); });
-  });
-  board.querySelectorAll('.bb-round-name').forEach((inp) => {
-    inp.addEventListener('change', () => { bbModel[inp.dataset.sec][inp.dataset.r].name = inp.value.trim(); bbAutosave(); });
-    inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') inp.blur(); });
-  });
-  board.querySelectorAll('.bb-adv').forEach((b) => b.addEventListener('click', () => bbAdvance(b.dataset.sec, +b.dataset.r, +b.dataset.s)));
-  board.querySelectorAll('.bb-live').forEach((b) => b.addEventListener('click', () => bbPushMatch(b.dataset.sec, +b.dataset.r, +b.dataset.s)));
-  board.querySelectorAll('.bb-win-btn').forEach((b) => b.addEventListener('click', () => {
-    const set = bbModel[b.dataset.sec][+b.dataset.r].sets[+b.dataset.s];
-    const side = b.dataset.side, other = side === 'a' ? 'b' : 'a';
-    set[side].win = !set[side].win;
-    if (set[side].win) set[other].win = false;
-    bbRender(); bbAutosave();
-    if (bbIsTable()) bbRenderStandings();
-  }));
-  bbRenderStandings();
-}
-// Push a bracket matchup live: load both teams (name + logo + roster) into Blue/Orange.
-// The series only resets when the PAIR actually changes — re-clicking Go Live on the
-// match that's already live must never wipe an in-progress series score.
-function bbPushMatch(section, ri, si) {
-  const set = bbModel[section] && bbModel[section][ri] && bbModel[section][ri].sets[si];
-  if (!set) return;
-  const a = (set.a.name || '').trim(), b = (set.b.name || '').trim();
-  if (!a || !b) { bbStatus('Both slots need a team before going live.', false); return; }
-  const ta = findTeam(a), tb = findTeam(b);
-  send('set_team', { side: 'blue', name: a, logo: (ta && ta.logo) || null, color: (ta && ta.color) || undefined, players: (ta && ta.players) || [] });
-  send('set_team', { side: 'orange', name: b, logo: (tb && tb.logo) || null, color: (tb && tb.color) || undefined, players: (tb && tb.players) || [] });
-  const curA = (currentState?.teams?.blue?.name || '').trim().toUpperCase();
-  const curB = (currentState?.teams?.orange?.name || '').trim().toUpperCase();
-  const samePair = curA === a.toUpperCase() && curB === b.toUpperCase();
-  if (!samePair) send('reset_series');
-  bbStatus(`${a} vs ${b} pushed to the overlay${samePair ? ' (series score kept)' : ''}.`, true);
-}
-// Convert one phase → the overlay-ready shape (winners/losers/finals or standings).
-function bbPhaseToPayload(ph) {
-  const conv = (arr) => (arr || []).map((round, ri) => ({
-    name: round.name, round: ri + 1,
-    sets: round.sets.map((set) => {
-      const w = bbWinnerOf(set);
-      return {
-        a: { name: set.a.name || 'TBD', score: Number(set.a.score) || 0, winner: w === 'a' },
-        b: { name: set.b.name || 'TBD', score: Number(set.b.score) || 0, winner: w === 'b' }
-      };
-    })
-  }));
-  const TYPE = { single: 'SINGLE_ELIMINATION', double: 'DOUBLE_ELIMINATION', roundrobin: 'ROUND_ROBIN', swiss: 'SWISS' };
-  const table = ph.type === 'roundrobin' || ph.type === 'swiss';
-  const base = { id: ph.id, name: ph.name, type: TYPE[ph.type] || 'SINGLE_ELIMINATION' };
-  if (table) {
-    const matrix = ph.type === 'roundrobin' ? bbComputeMatrix(ph.rounds || [], ph.roster || []) : null;
-    Object.assign(base, { winners: [], losers: [], finals: [], standings: bbComputeStandings(ph.rounds || [], ph.roster || []), schedule: ph.rounds || [], roster: ph.roster || [], matrix });
-    const pools = Array.isArray(ph.pools) ? ph.pools : [];
-    if (pools.length > 1) {
-      base.pools = pools.map((p) => ({
-        id: p.id, name: p.name, type: TYPE[ph.type] || 'ROUND_ROBIN',
-        roster: p.roster || [], schedule: p.rounds || [],
-        standings: bbComputeStandings(p.rounds || [], p.roster || []),
-        matrix: ph.type === 'roundrobin' ? bbComputeMatrix(p.rounds || [], p.roster || []) : null
-      }));
-    }
-  }
-  else Object.assign(base, { winners: conv(ph.winners), losers: conv(ph.losers), finals: conv(ph.finals), standings: [], schedule: [], roster: [] });
-  return base;
-}
-// Commit the live phase, then push ALL phases + the active id to the overlay.
-function bbSendPhases(extra) {
-  bbEnsurePhase(); bbCommit();
-  const teams = allMatchTeams().filter((t) => t.logo).map((t) => ({ name: t.name, logo: t.logo }));
-  send('set_bracket_phases', Object.assign({
-    phases: bbPhases.map(bbPhaseToPayload),
-    activePhaseId: bbActiveId,
-    title: (currentState.bracket && currentState.bracket.title) || 'Bracket',
-    teams
-  }, extra || {}));
-}
-function bbAutosave() {
-  if (!el('bb-autosave') || !el('bb-autosave').checked) return;
-  clearTimeout(_bbSaveTimer);
-  _bbSaveTimer = setTimeout(() => bbSendPhases(), 500);
-}
-// ── Phase tabs (Day 1 / Day 2 …) ──────────────────────────────────────────
-function bbRenderPhases() {
-  const wrap = el('bb-phases'); if (!wrap) return;
-  if (!bbPhases.length) { wrap.innerHTML = ''; return; }
-  wrap.innerHTML = bbPhases.map((p) =>
-    `<div class="bb-phase-tab${p.id === bbActiveId ? ' active' : ''}" data-pid="${p.id}" title="Double-click to rename">
-       <span class="bb-phase-name">${(p.name || 'Phase').replace(/</g, '&lt;')}</span>
-       ${bbPhases.length > 1 ? `<button class="bb-phase-del" data-del="${p.id}" title="Delete phase">×</button>` : ''}
-     </div>`).join('') + '<button class="bb-phase-add" id="bb-phase-add" title="Add a phase (e.g. Day 2)">+ Phase</button>';
-  wrap.querySelectorAll('.bb-phase-tab').forEach((t) => {
-    t.addEventListener('click', (e) => { if (e.target.closest('.bb-phase-del')) return; if (t.dataset.pid !== bbActiveId) bbSelectPhase(t.dataset.pid); });
-    t.addEventListener('dblclick', () => bbRenamePhase(t.dataset.pid));
-  });
-  wrap.querySelectorAll('.bb-phase-del').forEach((b) => b.addEventListener('click', (e) => { e.stopPropagation(); bbDeletePhase(b.dataset.del); }));
-  el('bb-phase-add')?.addEventListener('click', bbAddPhase);
-}
-function bbSelectPhase(id) { bbCommit(); bbLoadPhase(id); bbRenderPhases(); bbAutosave(); }
-function bbAddPhase() {
-  bbCommit();
-  const p = bbNewPhase('Phase ' + (bbPhases.length + 1), 'single');
-  bbPhases.push(p);
-  bbLoadPhase(p.id); bbRenderPhases(); bbSendPhases();
-}
-function bbRenamePhase(id) {
-  const ph = bbPhases.find((x) => x.id === id); if (!ph) return;
-  const name = prompt('Phase name:', ph.name); if (name == null) return;
-  ph.name = name.trim() || ph.name; bbRenderPhases(); bbSendPhases();
-}
-async function bbDeletePhase(id) {
-  if (bbPhases.length <= 1) return;
-  if (!await appConfirm('Delete this phase?', 'Delete')) return;
-  bbPhases = bbPhases.filter((x) => x.id !== id);
-  if (bbActiveId === id) { bbActiveId = bbPhases[0].id; bbLoadPhase(bbActiveId); }
-  bbRenderPhases(); bbSendPhases();
-}
-function bbSyncTypeUi() {
-  document.querySelectorAll('.bb-rounds-field').forEach((e) => { e.style.display = bbModel.type === 'swiss' ? '' : 'none'; });
-  document.querySelectorAll('.bb-swiss-only').forEach((e) => { e.style.display = bbModel.type === 'swiss' ? '' : 'none'; });
-  document.querySelectorAll('.bb-table-only').forEach((e) => { e.style.display = bbIsTable() ? '' : 'none'; });
-}
-// Seed empty slots from the saved/seeded team list.
-function bbSeedTeams() {
-  const names = allMatchTeams().map((t) => t.name).filter(Boolean);
-  if (!names.length) { bbStatus('No saved teams to seed from.', false); return; }
-  if (bbIsTable()) {
-    for (let i = 0; i < bbModel.roster.length; i++) if (!bbModel.roster[i]) bbModel.roster[i] = names[i] || '';
-    if (bbModel.type === 'roundrobin') bbGenerate();        // reflow the schedule with seeded names
-    else { (bbModel.rounds[0]?.sets || []).forEach((set, mi) => { if (!set.a.name) set.a.name = bbModel.roster[mi * 2] || ''; if (!set.b.name) set.b.name = bbModel.roster[mi * 2 + 1] || ''; }); bbRender(); bbAutosave(); }
-  } else if (bbModel.winners[0]) {
-    let k = 0;
-    bbModel.winners[0].sets.forEach((set) => { if (!set.a.name) set.a.name = names[k++] || ''; if (!set.b.name) set.b.name = names[k++] || ''; });
-    bbRender(); bbAutosave();
-  }
-  bbStatus('Seeded from team list.', true);
-}
-// Swiss: fill empty matches by pairing teams in current-standings order.
-function bbSwissPair() {
-  const standings = bbComputeStandings().map((s) => s.name);
-  const pool = standings.length ? standings : bbModel.roster.filter(Boolean);
-  bbModel.rounds.forEach((round) => {
-    const used = new Set();
-    round.sets.forEach((set) => { if (set.a.name) used.add(set.a.name); if (set.b.name) used.add(set.b.name); });
-    const avail = pool.filter((n) => !used.has(n));
-    round.sets.forEach((set) => {
-      if (!set.a.name && avail.length) set.a.name = avail.shift();
-      if (!set.b.name && avail.length) set.b.name = avail.shift();
-    });
-  });
-  bbRender(); bbAutosave(); bbStatus('Paired empty Swiss matches by standings.', true);
-}
-el('bb-type-seg') && el('bb-type-seg').querySelectorAll('.seg-btn').forEach((b) => b.addEventListener('click', function () {
-  el('bb-type-seg').querySelectorAll('.seg-btn').forEach((x) => x.classList.remove('active'));
-  this.classList.add('active'); bbModel.type = this.dataset.type;
-  if (!bbIsTable()) { bbModel.pools = []; bbActivePoolId = ''; }   // pools only apply to Round Robin / Swiss
-  bbSyncTypeUi();
-  bbRenderPools();
-}));
-el('bb-size')?.addEventListener('change', function () { bbModel.size = Number(this.value) || 8; });
-el('bb-rounds-num')?.addEventListener('change', function () { bbModel.swissRounds = Math.max(1, Math.min(12, Number(this.value) || 5)); });
-el('bb-seed')?.addEventListener('click', bbSeedTeams);
-el('bb-swiss-pair')?.addEventListener('click', bbSwissPair);
-el('bb-generate')?.addEventListener('click', bbGenerate);
-el('bb-pool-split')?.addEventListener('click', () => {
-  const n = Math.max(1, Math.min(16, Number(el('bb-pool-count')?.value) || 1));
-  bbSplitIntoPools(n);
-});
-el('bb-save')?.addEventListener('click', () => { bbSendPhases(); bbStatus('Bracket saved & pushed.', true); });
-el('bb-clear')?.addEventListener('click', async () => {
-  if (!await appConfirm('Clear this phase?', 'Clear')) return;
-  bbModel.winners = []; bbModel.losers = []; bbModel.finals = []; bbModel.rounds = []; bbModel.roster = []; bbModel.pools = []; bbActivePoolId = '';
-  bbRenderPools();
-  bbRender(); bbSendPhases({ visible: false });
-});
-
-// One overlay phase → a builder phase (editable fields).
-function bbPhaseFromOverlay(op) {
-  const TYPE = { SINGLE_ELIMINATION: 'single', DOUBLE_ELIMINATION: 'double', ROUND_ROBIN: 'roundrobin', SWISS: 'swiss' };
-  const fromOverlay = (arr) => (arr || []).map((round) => ({
-    name: round.name || '',
-    sets: (round.sets || []).map((s) => {
-      const out = {
-        a: { name: s.a && s.a.name === 'TBD' ? '' : ((s.a && s.a.name) || ''), score: (s.a && s.a.score) || 0 },
-        b: { name: s.b && s.b.name === 'TBD' ? '' : ((s.b && s.b.name) || ''), score: (s.b && s.b.score) || 0 }
-      };
-      // Preserve an explicit winner mark that score inference couldn't reproduce (forfeit / 0-0).
-      const sa = Number(out.a.score) || 0, sb = Number(out.b.score) || 0;
-      if (s.a && s.a.winner && !(sa > sb)) out.a.win = true;
-      if (s.b && s.b.winner && !(sb > sa)) out.b.win = true;
-      return out;
-    })
-  }));
-  const type = TYPE[op.type] || ((op.standings && op.standings.length) ? 'roundrobin' : 'single');
-  const ph = bbNewPhase(op.name || 'Bracket', type);
-  if (op.id) ph.id = op.id;
-  if (type === 'roundrobin' || type === 'swiss') {
-    ph.roster = Array.isArray(op.roster) && op.roster.length ? op.roster.slice() : (op.standings || []).map((s) => s.name).filter(Boolean);
-    ph.rounds = Array.isArray(op.schedule) ? op.schedule : [];
-    ph.size = ph.roster.length || 8;
-    if (Array.isArray(op.pools) && op.pools.length > 1) {
-      ph.pools = op.pools.map((p, i) => ({
-        id: p.id || ('pool' + i),
-        name: p.name || bbPoolName(i),
-        roster: Array.isArray(p.roster) ? p.roster.slice() : [],
-        rounds: Array.isArray(p.schedule) ? p.schedule : []
-      }));
-      ph.activePoolId = ph.pools[0].id;
-    }
-  } else {
-    ph.winners = fromOverlay(op.winners); ph.losers = fromOverlay(op.losers); ph.finals = fromOverlay(op.finals);
-  }
-  return ph;
-}
-// Hydrate the builder from a saved/imported bracket (once). Handles phases + legacy flat.
-// IMPORTANT: only hydrate from a MANUAL bracket. If the current bracket was imported
-// (start.gg / Challonge / NXGEN), the builder stays empty so an accidental edit can't
-// autosave over — and silently disconnect — the live import. To hand-edit an import, the
-// producer uses the explicit "Edit as custom" action (which copies it into manual mode).
-function bbHydrate(bracket) {
-  if (_bbHydrated || !bracket) return;
-  if (bracket.mode === 'imported') { _bbHydrated = true; return; }
-  const phases = Array.isArray(bracket.phases) ? bracket.phases : [];
-  const hasFlat = (bracket.winners && bracket.winners.length) || (bracket.standings && bracket.standings.length);
-  if (phases.length) {
-    bbPhases = phases.map(bbPhaseFromOverlay);
-    _bbPhaseSeq = bbPhases.length;
-    bbActiveId = phases.some((p) => p.id === bracket.activePhaseId) ? bracket.activePhaseId : bbPhases[0].id;
-    bbLoadPhase(bbActiveId);
-    bbRenderPhases();
-  } else if (hasFlat) {
-    bbPhases = [bbPhaseFromOverlay(bracket)];
-    bbActiveId = bbPhases[0].id; _bbPhaseSeq = 1;
-    bbLoadPhase(bbActiveId);
-    bbRenderPhases();
-  }
-  _bbHydrated = true;
-}
+// (Bracket builder domain lives in bracket-builder.js)
 
 // Badge: ✓ Saved (in library) · Event (seeded, not yet saved) · Not saved (manual/new).
 function updateTeamSavedBadge(side) {
@@ -12722,6 +12202,22 @@ function renderWhatsArmed(data) {
     if (clips.autoCapture !== false && (clips.captureMode || 'auto') === 'auto') add('CLIPS', 'Auto-clipping game moments (silent)');
     const sg = data.startgg || {};
     if (sg.autoFollow && sg.queueEnabled) add('QUEUE', 'Auto-follow — live start.gg set replaces the scoreboard');
+    // Topbar ON AIR strip — ARMED chip mirrors this list so the producer sees the count
+    // without opening the panel. Click-through wired once, here, because this renderer is
+    // the single owner of the armed-items computation.
+    const armedChip = el('ck-chip-armed');
+    if (armedChip) {
+      armedChip.textContent = 'ARMED: ' + items.length;
+      armedChip.classList.toggle('is-on', items.length > 0);
+      armedChip.classList.toggle('is-warn', items.some((i) => i.warn));
+      if (!armedChip._wired) {
+        armedChip._wired = true;
+        armedChip.addEventListener('click', () => {
+          document.querySelector('.tab-btn[data-tab="principal"]')?.click();
+          setTimeout(() => el('whats-armed')?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 80);
+        });
+      }
+    }
     const sig = JSON.stringify(items);
     if (sig !== _armedSig) {
       _armedSig = sig;
@@ -12849,1279 +12345,7 @@ function renderGoLive(data) {
 el('ck-view-scoreboard')?.addEventListener('click', () => send('force_scoreboard'));
 el('ck-view-hud')?.addEventListener('click', () => send('force_hud'));
 
-// ══════════════ Events tab — start.gg admin tournaments + sponsorship data ══════════════
-const EV_API = 'http://localhost:3000/api/startgg';
-let _evDetail = null;
-let _evTournaments = [];
-let _evFilter = 'upcoming';   // 'upcoming' | 'past' | 'all'
-let _evSearch = '';
-let _evMode = 'mine';         // 'mine' = my admin tournaments | 'search' = global start.gg search
-let _evSource = 'startgg';    // 'startgg' | 'challonge' | 'nxgen' — which platform the grid is showing
-
-function evStatus(msg, kind) {
-  const s = el('ev-status'); if (!s) return;
-  s.textContent = msg || '';
-  s.className = 'ev-status' + (kind ? ' ev-' + kind : '');
-}
-function fmtEvDate(ts) {
-  if (!ts) return '';
-  try { return new Date(ts * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }); } catch { return ''; }
-}
-async function evPost(path, body) {
-  const r = await fetch(EV_API + path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
-  const data = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(data.error || ('HTTP ' + r.status));
-  return data;
-}
-// Auto-load the producer's in-house tournaments when the Competitions tab first opens — instant
-// from the local cache, then refreshed from start.gg in the background. No button click needed.
-let _evAutoLoaded = false;
-function evAutoLoad() {
-  if (_evAutoLoaded) return;
-  _evAutoLoaded = true;
-  _evMode = 'mine';
-  let cachedCount = 0;
-  try {
-    const c = JSON.parse(localStorage.getItem('ne_my_tournaments') || 'null');
-    if (c && Array.isArray(c.tournaments) && c.tournaments.length) {
-      _evTournaments = c.tournaments; cachedCount = c.tournaments.length;
-      if (typeof evSetMode === 'function') evSetMode('My tournaments');
-      const toolbar = el('ev-toolbar'); if (toolbar) toolbar.style.display = '';
-      applyEventsView();
-    }
-  } catch (e) {}
-  evLoadTournaments({ silent: cachedCount > 0 });   // refresh from start.gg (quiet if we showed cache)
-}
-async function evLoadTournaments(opts) {
-  opts = opts || {};
-  _evMode = 'mine';
-  const btn = el('ev-load'); if (btn) btn.disabled = true;
-  if (!opts.silent) evStatus('Loading your tournaments…');
-  try {
-    const data = await evPost('/my-tournaments', {});
-    _evTournaments = data.tournaments || [];
-    try { localStorage.setItem('ne_my_tournaments', JSON.stringify({ tournaments: _evTournaments, at: Date.now() })); } catch (e) {}
-    _evSearch = (el('ev-search')?.value || '').trim();   // box filters the loaded list in mine mode
-    const toolbar = el('ev-toolbar'); if (toolbar) toolbar.style.display = '';
-    if (typeof evSetMode === 'function') evSetMode('My tournaments');
-    applyEventsView();
-    evStatus(_evTournaments.length ? '' : 'No tournaments found for this token — confirm you admin/staff events and your token is set in Settings → start.gg.');
-  } catch (e) {
-    if (!opts.silent) evStatus(e.message || 'Failed to load. Check your start.gg token in Settings.', 'err');
-  } finally { if (btn) btn.disabled = false; }
-}
-// Challonge and NXGEN tournaments are one bracket each (no nested "events" the way a start.gg
-// tournament can have), so they're normalized into the same card shape as start.gg tournaments —
-// same search/filter/sort in applyEventsView() — but tagged with `platform` so renderEventsGrid()
-// gives them inline "+ My Events" / "Set live" actions instead of a detail-drilldown click.
-async function evLoadChallongeTournaments() {
-  const btn = el('ev-load'); if (btn) btn.disabled = true;
-  evStatus('Loading your Challonge tournaments…');
-  try {
-    const r = await fetch('http://localhost:3000/api/challonge/my-tournaments', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
-    const data = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(data.error || ('HTTP ' + r.status));
-    _evTournaments = (data.tournaments || []).map((t) => ({
-      platform: 'challonge', slug: t.slug, name: t.name,
-      startAt: t.startedAt ? Math.floor(new Date(t.startedAt).getTime() / 1000) : null,
-      numAttendees: t.participantsCount || 0, eventCount: 1, image: t.logo || '', game: t.gameName || '',
-    }));
-    evSetMode('Challonge — my tournaments');
-    applyEventsView();
-    evStatus(_evTournaments.length ? '' : 'No Challonge tournaments found — confirm your API key in Settings → Integrations.');
-  } catch (e) {
-    evStatus(e.message || 'Failed to load. Check your Challonge API key in Settings.', 'err');
-  } finally { if (btn) btn.disabled = false; }
-}
-async function evLoadNxgenTournaments() {
-  const btn = el('ev-load'); if (btn) btn.disabled = true;
-  evStatus('Loading your NXGEN events…');
-  try {
-    const r = await fetch('http://localhost:3000/api/nxgen/events', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ limit: 100, includePast: true }) });
-    const data = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(data.error || ('HTTP ' + r.status));
-    _evTournaments = (data.events || []).map((e) => ({
-      platform: 'nxgen', slug: e.slug, name: e.name,
-      startAt: e.eventDate ? Math.floor(new Date(e.eventDate).getTime() / 1000) || null : null,
-      numAttendees: e.participantCount || 0, eventCount: 1, image: e.coverImage || '', game: e.activity || '',
-    }));
-    evSetMode('NXGEN — events');
-    applyEventsView();
-    evStatus(_evTournaments.length ? '' : 'No NXGEN events found — confirm your API key in Settings → Integrations.');
-  } catch (e) {
-    evStatus(e.message || 'Failed to load. Check your NXGEN API key in Settings.', 'err');
-  } finally { if (btn) btn.disabled = false; }
-}
-// Switch which platform the Tournaments grid is showing.
-function evSetSource(src) {
-  _evSource = ['challonge', 'nxgen'].includes(src) ? src : 'startgg';
-  document.querySelectorAll('#ev-src-seg .ev-seg-btn').forEach((b) => b.classList.toggle('active', b.dataset.src === _evSource));
-  const searchbar = el('ev-searchbar'); if (searchbar) searchbar.style.display = _evSource === 'startgg' ? '' : 'none';
-  const loadBtn = el('ev-load');
-  if (loadBtn) loadBtn.textContent = _evSource === 'challonge' ? 'My Challonge tournaments' : _evSource === 'nxgen' ? 'My NXGEN events' : 'My tournaments';
-  _evTournaments = []; _evDetail = null;
-  const sec = el('ev-detail-section'); if (sec) sec.style.display = 'none';
-  const toolbar = el('ev-toolbar'); if (toolbar) toolbar.style.display = '';
-  if (_evSource === 'challonge') evLoadChallongeTournaments();
-  else if (_evSource === 'nxgen') evLoadNxgenTournaments();
-  else evLoadTournaments();
-}
-document.querySelectorAll('#ev-src-seg .ev-seg-btn').forEach((b) => b.addEventListener('click', () => evSetSource(b.dataset.src)));
-// Filter (upcoming/past/all) + name search + sort, then render. Default: upcoming,
-// soonest tournament first → farthest. Past: most recent first.
-function evStartTs(t) { return t.startAt || t.endAt || 0; }
-function evIsUpcoming(t, now) { return (t.endAt || t.startAt || 0) >= now; }
-function applyEventsView() {
-  const now = Date.now() / 1000;
-  const q = _evSearch.trim().toLowerCase();
-  let list = _evTournaments.slice();
-  if (q) list = list.filter((t) => (t.name || '').toLowerCase().includes(q) || (t.slug || '').toLowerCase().includes(q));
-
-  const upAsc = (a, b) => (evStartTs(a) || Infinity) - (evStartTs(b) || Infinity);   // soonest first
-  const pastDesc = (a, b) => evStartTs(b) - evStartTs(a);                             // most recent first
-  if (_evFilter === 'upcoming') list = list.filter((t) => evIsUpcoming(t, now)).sort(upAsc);
-  else if (_evFilter === 'past') list = list.filter((t) => !evIsUpcoming(t, now)).sort(pastDesc);
-  else list = list.filter((t) => evIsUpcoming(t, now)).sort(upAsc)
-    .concat(list.filter((t) => !evIsUpcoming(t, now)).sort(pastDesc));
-
-  const cnt = el('ev-count');
-  if (cnt) cnt.textContent = list.length + (list.length === 1 ? ' tournament' : ' tournaments');
-  renderEventsGrid(list, now);
-}
-function evRelDate(ts, now) {
-  if (!ts) return '';
-  const days = Math.round((ts - now) / 86400);
-  if (days === 0) return 'today';
-  if (days > 0) return days === 1 ? 'tomorrow' : (days < 14 ? `in ${days} days` : (days < 60 ? `in ${Math.round(days / 7)} weeks` : `in ${Math.round(days / 30)} months`));
-  const ago = -days;
-  return ago === 1 ? 'yesterday' : (ago < 14 ? `${ago} days ago` : (ago < 60 ? `${Math.round(ago / 7)} weeks ago` : `${Math.round(ago / 30)} months ago`));
-}
-function renderEventsGrid(list, now) {
-  const grid = el('ev-grid'); if (!grid) return;
-  now = now || Date.now() / 1000;
-  const sec = el('ev-detail-section'); if (sec) sec.style.display = 'none';
-  grid.style.display = '';
-  grid.innerHTML = '';
-  if (!list.length) {
-    grid.innerHTML = `<div class="ev-empty" style="grid-column:1/-1;">${_evSearch ? 'No tournaments match your search.' : 'No ' + (_evFilter === 'all' ? '' : _evFilter + ' ') + 'tournaments.'}</div>`;
-    return;
-  }
-  list.forEach((t) => {
-    const past = !evIsUpcoming(t, now);
-    const platform = t.platform || 'startgg';
-    // Start.gg tournaments can hold several events, so the whole card is a <button> that drills
-    // into the detail view (unchanged). Challonge/NXGEN tournaments are one bracket each — a plain
-    // <div> card with its own inline action <button>s (a <button> can't nest another <button>).
-    const card = document.createElement(platform === 'startgg' ? 'button' : 'div');
-    card.className = 'ev-card' + (past ? ' ev-card-past' : '');
-    const platformBadge = platform !== 'startgg' ? `<span class="ev-pill ev-pill-src">${platform === 'challonge' ? 'CHALLONGE' : 'NXGEN'}</span>` : '';
-    card.innerHTML = `<div class="ev-card-img"></div><div class="ev-card-body">
-      <div class="ev-card-name"></div><div class="ev-card-meta"></div>
-      <div class="ev-card-stats">${platformBadge}<span class="ev-pill"></span><span class="ev-pill"></span></div>
-      ${platform !== 'startgg' ? '<div class="ev-card-acts"><button type="button" class="btn btn-secondary btn-sm ev-card-addmy">+ My Events</button><button type="button" class="btn btn-primary btn-sm ev-card-live">Set live</button></div>' : ''}</div>`;
-    const img = card.querySelector('.ev-card-img');
-    if (t.image) { const i = document.createElement('img'); i.src = t.image; i.alt = ''; img.appendChild(i); }
-    else img.textContent = (t.name || '?').slice(0, 1).toUpperCase();
-    card.querySelector('.ev-card-name').textContent = t.name || '(untitled)';
-    const rel = evRelDate(evStartTs(t), now);
-    card.querySelector('.ev-card-meta').textContent = [fmtEvDate(t.startAt), rel, [t.city, t.countryCode].filter(Boolean).join(', ')].filter(Boolean).join(' · ');
-    const pills = card.querySelectorAll('.ev-pill:not(.ev-pill-src)');
-    pills[0].textContent = (t.numAttendees || 0) + (platform === 'startgg' ? ' entrants' : ' teams');
-    if (platform === 'startgg') pills[1].textContent = (t.eventCount || 0) + ' events'; else pills[1].remove();
-    if (platform === 'startgg') {
-      card.addEventListener('click', () => evOpenDetail(t.slug));
-    } else {
-      card.querySelector('.ev-card-addmy')?.addEventListener('click', (e) => {
-        e.stopPropagation();
-        send('add_my_event', { platform, platformSlug: t.slug, name: t.name, tournamentName: t.name, game: t.game || '', numEntrants: t.numAttendees || 0, startAt: t.startAt || null, image: t.image || '' });
-        const btn = e.currentTarget; btn.textContent = 'Added ✓'; setTimeout(() => { btn.textContent = '+ My Events'; }, 1400);
-      });
-      card.querySelector('.ev-card-live')?.addEventListener('click', (e) => {
-        e.stopPropagation();
-        send(platform === 'challonge' ? 'load_challonge_tournament' : 'load_nxgen_event', { slug: t.slug });
-        evStatus(`Loading "${t.name}" live…`);
-      });
-    }
-    grid.appendChild(card);
-  });
-}
-async function evOpenDetail(slug) {
-  // Show the locally-cached detail instantly (great for past events), then refresh from the API.
-  let cached = null;
-  try { cached = JSON.parse(localStorage.getItem('ne_tourn_detail_' + slug) || 'null'); } catch (e) {}
-  if (cached && cached.detail) { _evDetail = cached.detail; renderEventDetail(cached.detail); evStatus('Refreshing…'); }
-  else evStatus('Loading tournament…');
-  try {
-    const data = await evPost('/tournament-detail', { slug });
-    _evDetail = data.detail;
-    renderEventDetail(data.detail);
-    try { localStorage.setItem('ne_tourn_detail_' + slug, JSON.stringify({ detail: data.detail, at: Date.now() })); } catch (e) {}
-    evStatus('');
-  } catch (e) { if (!cached) evStatus(e.message || 'Failed to load tournament.', 'err'); else evStatus(''); }
-}
-let _evTeams = [];            // teams (with players) of the currently-selected event
-let _evTeamsCache = {};       // eventSlug → teams (avoid refetching)
-let _evSelSlug = '';          // selected event slug
-let _evSelName = '';          // selected event name (→ Teams to Watch subtitle)
-const _evEsc = (s) => (s || '').toString().replace(/&/g, '&amp;').replace(/</g, '&lt;');
-function renderEventDetail(d) {
-  _evDetail = d;
-  const grid = el('ev-grid'); if (grid) grid.style.display = 'none';
-  const sec = el('ev-detail-section'); if (sec) sec.style.display = '';
-  el('ev-detail-name').textContent = d.name || '';
-  const s = d.summary || {};
-  // Hero
-  const logo = el('ev-hero-logo'); if (logo) { logo.innerHTML = ''; if (d.image) { const i = document.createElement('img'); i.src = d.image; i.alt = ''; logo.appendChild(i); } else logo.textContent = (d.name || '?').slice(0, 1).toUpperCase(); }
-  const bg = el('ev-hero-bg'); if (bg) bg.style.backgroundImage = d.image ? `url("${d.image}")` : 'none';
-  const dateRange = [fmtEvDate(s.startAt), fmtEvDate(s.endAt)].filter(Boolean).join(' – ');
-  const meta = el('ev-hero-meta'); if (meta) meta.textContent = [dateRange, d.location, (s.attendees || 0) + ' attendees'].filter(Boolean).join('  ·  ');
-  const games = el('ev-hero-games'); if (games) games.innerHTML = (d.games || []).map((g) => `<span class="ev-game-chip">${_evEsc(g)}</span>`).join('');
-  const sgg = el('ev-hero-startgg'); if (sgg) sgg.href = 'https://www.start.gg/' + (d.slug || '');
-  // Stat cards
-  const stats = [
-    ['Attendees', s.attendees || 0], ['Events', s.eventCount || 0],
-    ['Total entrants', s.totalEntrants || 0], ['Unique players', s.uniquePlayers || 0],
-    ['Games', s.gameCount || 0], ['Dates', dateRange || '—'],
-  ];
-  const sg = el('ev-stat-grid'); sg.innerHTML = '';
-  stats.forEach(([k, v]) => {
-    const cell = document.createElement('div'); cell.className = 'ev-stat';
-    cell.innerHTML = '<div class="ev-stat-v"></div><div class="ev-stat-k"></div>';
-    cell.querySelector('.ev-stat-v').textContent = v;
-    cell.querySelector('.ev-stat-k').textContent = k;
-    sg.appendChild(cell);
-  });
-  // Events — clickable cards (select → load teams) with quick actions
-  el('ev-events-count').textContent = (d.events || []).length;
-  const ev = el('ev-events-list'); ev.innerHTML = '';
-  (d.events || []).forEach((e) => {
-    const row = document.createElement('div'); row.className = 'ev-event-row'; row.dataset.slug = e.slug;
-    row.innerHTML = '<div class="ev-event-info"><div class="ev-event-name"></div><div class="ev-event-sub"></div></div>'
-      + '<div class="ev-event-acts"><button class="btn btn-secondary btn-sm ev-add-my" title="Save this event to My Events (live sync + seeding)">+ My Events</button>'
-      + '<button class="btn btn-primary btn-sm ev-activate" title="Import all teams + load the bracket and make this the live broadcast event">Set live</button></div>';
-    row.querySelector('.ev-event-name').textContent = e.name;
-    row.querySelector('.ev-event-sub').textContent = [e.game, (e.numEntrants || 0) + ' teams', e.state].filter(Boolean).join(' · ');
-    row.querySelector('.ev-activate').addEventListener('click', (cev) => { cev.stopPropagation(); evActivateEvent(d, e); });
-    row.querySelector('.ev-add-my').addEventListener('click', (clickEv) => {
-      clickEv.stopPropagation();
-      send('add_my_event', { eventSlug: e.slug, tournamentSlug: d.slug || '', name: e.name, tournamentName: d.name || '', game: e.game || '', numEntrants: e.numEntrants || 0, startAt: e.startAt || null, image: d.image || '' });
-      const btn = clickEv.currentTarget; btn.textContent = 'Added ✓'; setTimeout(() => { btn.textContent = '+ My Events'; }, 1400);
-    });
-    row.addEventListener('click', () => evSelectEvent(e));
-    ev.appendChild(row);
-  });
-  // Auto-select the first (or biggest) event so its teams show immediately.
-  const first = (d.events || []).slice().sort((a, b) => (b.numEntrants || 0) - (a.numEntrants || 0))[0];
-  if (first) evSelectEvent(first); else { _evTeams = []; renderEventTeams(''); }
-  el('ev-sponsor-text').textContent = buildSponsorSummary(d);
-}
-// Select an event → highlight it + load its teams (with players) into the right column.
-async function evSelectEvent(e) {
-  _evSelSlug = e.slug; _evSelName = e.name || '';
-  document.querySelectorAll('#ev-events-list .ev-event-row').forEach((r) => r.classList.toggle('is-sel', r.dataset.slug === e.slug));
-  const title = el('ev-teams-title'); if (title) title.textContent = 'Teams · ' + (e.name || '');
-  if (_evTeamsCache[e.slug]) { _evTeams = _evTeamsCache[e.slug]; renderEventTeams(el('ev-players-filter')?.value || ''); return; }
-  _evTeams = []; renderEventTeams('', true);   // loading
-  try {
-    const r = await fetch(EV_API + '/event-seeding', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ eventSlug: e.slug }) });
-    const data = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(data.error || ('HTTP ' + r.status));
-    _evTeams = (data.entrants || []).map((t) => ({ entrantId: t.entrantId, name: t.name, seedNum: t.seedNum, players: (t.players || []).map((p) => p.gamerTag).filter(Boolean) }));
-    _evTeamsCache[e.slug] = _evTeams;
-    if (_evSelSlug === e.slug) renderEventTeams(el('ev-players-filter')?.value || '');
-  } catch (err) {
-    if (_evSelSlug === e.slug) { const list = el('ev-players-list'); if (list) list.innerHTML = `<div class="ev-empty">Couldn't load teams: ${_evEsc(err.message)}</div>`; }
-  }
-}
-// Render the selected event's teams as readable cards, each with its players. Searchable.
-function renderEventTeams(filter, loading) {
-  const list = el('ev-players-list'); if (!list) return;
-  if (loading) { list.innerHTML = '<div class="ev-empty">Loading teams…</div>'; el('ev-players-count').textContent = ''; return; }
-  const f = (filter || '').trim().toLowerCase();
-  const shown = !f ? _evTeams : _evTeams.filter((t) => (t.name || '').toLowerCase().includes(f) || (t.players || []).some((p) => p.toLowerCase().includes(f)));
-  el('ev-players-count').textContent = _evTeams.length ? _evTeams.length + ' teams · ' + _evTeams.reduce((n, t) => n + (t.players || []).length, 0) + ' players' : '';
-  list.innerHTML = '';
-  if (!shown.length) { list.innerHTML = `<div class="ev-empty">${_evTeams.length ? 'No teams match.' : 'No teams listed for this event yet.'}</div>`; return; }
-  shown.forEach((t) => {
-    const card = document.createElement('div'); card.className = 'ev-team-card';
-    const players = (t.players || []).length
-      ? `<div class="ev-team-players">${(t.players || []).map((p) => `<span class="ev-team-player">${_evEsc(p)}</span>`).join('')}</div>`
-      : '<div class="ev-team-players ev-team-noplayers">—</div>';
-    const marked = (currentState.watchlist && currentState.watchlist.teams || []).some((x) => (x.name || '').toLowerCase() === (t.name || '').toLowerCase());
-    card.innerHTML = `<div class="ev-team-head">${t.seedNum ? `<span class="ev-team-seed" title="Current start.gg seed">${t.seedNum}</span>` : ''}<span class="ev-team-name">${_evEsc(t.name) || '(unnamed)'}</span><span class="ev-team-count">${(t.players || []).length}</span>`
-      + `<button class="ev-team-star${marked ? ' is-on' : ''}" title="Feature in Teams to Watch">★</button></div>${players}`;
-    card.querySelector('.ev-team-star').addEventListener('click', function () {
-      const on = this.classList.toggle('is-on');   // optimistic
-      send('toggle_watchlist_team', { team: { name: t.name, players: t.players || [], entrantId: t.entrantId || '', eventSlug: _evSelSlug }, event: _evSelName });
-      evStatus(on ? `Added "${t.name}" to Teams to Watch.` : `Removed "${t.name}" from Teams to Watch.`, 'ok');
-    });
-    list.appendChild(card);
-  });
-}
-function buildSponsorSummary(d) {
-  const s = d.summary || {};
-  return [
-    d.name,
-    d.location ? 'Location: ' + d.location : null,
-    'Dates: ' + ([fmtEvDate(s.startAt), fmtEvDate(s.endAt)].filter(Boolean).join(' – ') || '—'),
-    'Attendees: ' + (s.attendees || 0),
-    'Events: ' + (s.eventCount || 0) + ' (' + (s.totalEntrants || 0) + ' total entrants)',
-    'Unique players listed: ' + (s.uniquePlayers || 0),
-    'Games: ' + ((s.games || []).join(', ') || '—'),
-    'start.gg: https://www.start.gg/' + (d.slug || ''),
-  ].filter((x) => x != null).join('\n');
-}
-function evActivateEvent(d, e) {
-  send('activate_startgg_event', { tournamentSlug: d.slug, eventSlug: e.slug, name: e.name, tournamentName: d.name });
-  evStatus(`Activating "${e.name}" — importing teams + bracket and making it the live event…`, 'ok');
-}
-// ── Import Teams modal (↓ Import button on Teams topbar) ──────────────────
-(function () {
-  const modal = el('teams-import-modal');
-  function openImportModal(tab) {
-    if (!modal) return;
-    modal.classList.add('show');
-    if (tab) switchImportTab(tab);
-  }
-  function closeImportModal() { modal?.classList.remove('show'); }
-
-  function switchImportTab(tab) {
-    modal?.querySelectorAll('.import-tab-btn').forEach((b) => {
-      const active = b.dataset.importtab === tab;
-      b.classList.toggle('active', active);
-      b.style.borderBottomColor = active ? 'var(--cp-accent)' : 'transparent';
-      b.style.color = active ? 'var(--text)' : 'var(--muted)';
-    });
-    const csvPane = el('import-tab-csv'), sggPane = el('import-tab-startgg'), jsonPane = el('import-tab-json');
-    if (csvPane) csvPane.style.display = tab === 'csv' ? '' : 'none';
-    if (jsonPane) jsonPane.style.display = tab === 'json' ? '' : 'none';
-    if (sggPane) sggPane.style.display = tab === 'startgg' ? '' : 'none';
-  }
-
-  el('btn-teams-import')?.addEventListener('click', () => openImportModal('csv'));
-  el('teams-import-modal-close')?.addEventListener('click', closeImportModal);
-  modal?.addEventListener('mousedown', (e) => { if (e.target === modal) closeImportModal(); });
-  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && modal?.classList.contains('show')) closeImportModal(); });
-
-  modal?.querySelectorAll('.import-tab-btn').forEach((b) => {
-    b.addEventListener('click', () => switchImportTab(b.dataset.importtab));
-  });
-
-  // CSV file status feedback
-  el('teams-csv')?.addEventListener('change', () => {
-    const st = el('teams-csv-status');
-    if (st) { st.textContent = ''; }
-  });
-})();
-
-// ── Export Teams as JSON (full backup — includes logos + player info) ───────
-// CSV can't carry images, so the export is JSON: team name/colour/logo(base64) +
-// each player's name/role/country/start.gg/6mans. Re-import via the Backup (JSON) tab.
-el('btn-teams-export')?.addEventListener('click', () => {
-  const teams = (currentState && currentState.savedTeams) || [];
-  if (!teams.length) { showToast('No saved teams to export.', '#f59e0b'); return; }
-  const out = teams.map((t) => ({
-    name: t.name || '', color: t.color || '', logo: t.logo || null, favorite: !!t.favorite,
-    players: (t.players || []).map((p) => ({ name: p.name || '', role: p.role || '', country: p.country || '', startgg: p.startgg || '', sixmans: p.sixmans || '' }))
-  }));
-  const payload = { app: 'NE Broadcast Suite', kind: 'teams-library', version: 1, exportedAt: new Date().toISOString(), teams: out };
-  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a'); a.href = url; a.download = 'teams-library.json'; a.click();
-  URL.revokeObjectURL(url);
-  const withLogos = teams.filter((t) => t.logo).length;
-  showToast(`Exported ${teams.length} team${teams.length !== 1 ? 's' : ''}${withLogos ? ` (${withLogos} with logos)` : ''}`, '#22c55e');
-});
-
-// Teams page — pull rosters straight from a start.gg event into the library.
-function teamsStartggImport(slug) {
-  const st = el('teams-startgg-status');
-  if (!slug) { if (st) { st.textContent = 'Paste a start.gg event or tournament URL first.'; st.style.color = '#f56565'; } return; }
-  send('import_startgg_teams', { eventSlug: slug });
-  if (st) { st.textContent = 'Importing teams from start.gg…'; st.style.color = 'var(--muted)'; }
-}
-el('btn-teams-startgg-pull')?.addEventListener('click', () => {
-  teamsStartggImport((el('teams-startgg-slug')?.value || '').trim());
-});
-el('btn-teams-use-current-event')?.addEventListener('click', () => {
-  const sgg = (currentState && currentState.startgg) || {};
-  const url = sgg.eventSlug
-    ? 'https://www.start.gg/' + sgg.eventSlug
-    : sgg.tournamentSlug
-      ? 'https://www.start.gg/tournament/' + sgg.tournamentSlug
-      : '';
-  const inp = el('teams-startgg-slug');
-  if (!url) { const st = el('teams-startgg-status'); if (st) { st.textContent = 'No start.gg event connected yet — configure one in Settings.'; st.style.color = '#f56565'; } return; }
-  if (inp) inp.value = url;
-  teamsStartggImport(url);
-});
-
-// ── Events sub-nav (start.gg | Leagues) ───────────────────────────────────
-function evShowSubtab(t) {
-  document.querySelectorAll('#ev-subnav .ev-subnav-btn').forEach((x) => x.classList.toggle('active', x.dataset.evtab === t));
-  const sg = el('ev-startgg-panel'), lg = el('ev-leagues-panel'), me = el('ev-myevents-panel'), sd = el('ev-seeding-panel');
-  if (sg) sg.style.display = t === 'startgg' ? '' : 'none';
-  if (lg) lg.style.display = t === 'leagues' ? '' : 'none';
-  if (me) me.style.display = t === 'myevents' ? '' : 'none';
-  if (sd) sd.style.display = t === 'seeding' ? '' : 'none';
-  if (t === 'leagues') lgRender();
-  if (t === 'myevents') { renderMyEvents(); evRefreshAllOnOpen(); }
-  // Land on the event picker; openSeedingStudio() re-shows the studio right after when seeding a specific event.
-  if (t === 'seeding') { seedShowStudio(false); renderSeedPicker(); evRefreshAllOnOpen(); }
-  try { localStorage.setItem('ev_active_subtab', t); } catch (_) {}
-}
-document.querySelectorAll('#ev-subnav .ev-subnav-btn').forEach((b) => b.addEventListener('click', function () { evShowSubtab(this.dataset.evtab); }));
-// Reopen whichever Events sub-tab the producer was last on — survives refresh. Guarded against a
-// saved tab whose button no longer exists (e.g. 'brackets'/'spotlight' get pruned from this nav).
-// Deferred to a macrotask: evShowSubtab() reaches into lgRender()/renderMyEvents()/
-// evRefreshAllOnOpen()/seedShowStudio()/renderSeedPicker() — calling those synchronously here
-// risks the same TDZ crash documented for switchRole('monitor')/loadScenePreviews if any transitively
-// touch a `let`/`const` declared further down. setTimeout(...,0) waits for the script to finish.
-setTimeout(() => {
-  let saved; try { saved = localStorage.getItem('ev_active_subtab'); } catch (_) {}
-  if (saved && document.querySelector(`#ev-subnav .ev-subnav-btn[data-evtab="${saved}"]`)) evShowSubtab(saved);
-}, 0);
-
-// Relative "x ago" for sync timestamps.
-function evAgo(ts) {
-  if (!ts) return 'never';
-  const s = Math.max(0, Math.round((Date.now() - ts) / 1000));
-  if (s < 60) return s < 10 ? 'just now' : s + 's ago';
-  const m = Math.round(s / 60); if (m < 60) return m + 'm ago';
-  const h = Math.round(m / 60); if (h < 24) return h + 'h ago';
-  return Math.round(h / 24) + 'd ago';
-}
-function evSyncBadge(ev) {
-  if (ev.syncError) return `<span class="me-sync me-sync-err" title="${(ev.syncError || '').replace(/"/g, '')}">sync failed</span>`;
-  if (ev.lastSync) return `<span class="me-sync" title="Auto-syncs from start.gg every ~3 min">● synced ${evAgo(ev.lastSync)}</span>`;
-  return `<span class="me-sync me-sync-wait">● awaiting sync…</span>`;
-}
-// Event logo (start.gg image) shown left of My Events / seeding cards; letter fallback otherwise.
-function evCardLogo(ev) {
-  const esc = (s) => (s || '').toString().replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
-  return ev.image
-    ? `<div class="me-logo"><img src="${esc(ev.image)}" alt="" loading="lazy"></div>`
-    : `<div class="me-logo me-logo-empty">${esc((ev.name || '?').slice(0, 1).toUpperCase())}</div>`;
-}
-// Throttle client-triggered "refresh all" so toggling tabs doesn't hammer start.gg.
-let _evRefreshAt = 0;
-function evRefreshAllOnOpen() {
-  if (!(currentState.myEvents || []).length) return;
-  if (Date.now() - _evRefreshAt < 60000) return;   // at most once / min from the client
-  _evRefreshAt = Date.now();
-  send('refresh_my_event', {});   // server force-refreshes every My Event
-}
-// ── MY EVENTS — saved start.gg events with quick actions + live sync ──────
-function renderMyEvents() {
-  const list = el('my-events-list'); if (!list) return;
-  const empty = el('my-events-empty');
-  const events = currentState.myEvents || [];
-  if (empty) empty.style.display = events.length ? 'none' : '';
-  list.innerHTML = '';
-  const esc = (s) => (s || '').toString().replace(/&/g, '&amp;').replace(/</g, '&lt;');
-  events.forEach((ev) => {
-    const platform = ev.platform || 'startgg';   // older saved entries have no field — they're start.gg
-    const card = document.createElement('div'); card.className = 'my-event-card';
-    const rosterN = Array.isArray(ev.roster) ? ev.roster.length : (ev.numEntrants || 0);
-    const sub = [ev.game, rosterN ? rosterN + ' teams' : '', ev.tournamentName].filter(Boolean).join(' · ');
-    const isLive = platform === 'challonge' ? (currentState.challonge && currentState.challonge.tournamentSlug) === ev.platformSlug
-      : platform === 'nxgen' ? (currentState.nxgen && currentState.nxgen.eventSlug) === ev.platformSlug
-      : platform === 'manual' ? false
-      : (currentState.startgg && currentState.startgg.eventSlug) === ev.eventSlug;
-    const srcBadge = platform !== 'startgg' ? ` <span class="me-src-badge">${platform === 'challonge' ? 'Challonge' : platform === 'nxgen' ? 'NXGEN' : 'Manual'}</span>` : '';
-    const metaText = platform === 'startgg' ? evSyncBadge(ev) : platform === 'manual' ? 'Manual entry — no platform to sync from.' : 'No auto-sync for this platform yet — refresh manually as needed.';
-    card.innerHTML = evCardLogo(ev) + `<div class="me-info"><div class="me-name">${esc(ev.name || 'Event')}${srcBadge}${isLive ? ' <span class="me-live">LIVE</span>' : ''}</div>`
-      + `<div class="me-sub">${esc(sub)}</div><div class="me-meta">${metaText}</div></div>`;
-    const acts = document.createElement('div'); acts.className = 'me-acts';
-    const mk = (cls, label, fn, title) => { const b = document.createElement('button'); b.className = cls; b.innerHTML = label; if (title) b.title = title; b.addEventListener('click', fn); return b; };
-    // "Set live" activates a platform's bracket/queue — nothing to activate for a manual entry.
-    if (platform !== 'manual') {
-      acts.appendChild(mk('btn btn-primary btn-sm', isLive ? 'Reload' : 'Set live', () => {
-        if (platform === 'challonge') send('load_challonge_tournament', { slug: ev.platformSlug });
-        else if (platform === 'nxgen') send('load_nxgen_event', { slug: ev.platformSlug });
-        else send('activate_startgg_event', { eventSlug: ev.eventSlug, tournamentSlug: ev.tournamentSlug });
-      }, 'Make this the broadcast event — imports teams + bracket + queue'));
-    }
-    acts.appendChild(mk('btn btn-secondary btn-sm', 'Seeding', () => openSeedingStudio(ev), 'Open the seeding studio for this event — add teams by hand here'));
-    if (platform === 'startgg') {
-      acts.appendChild(mk('btn btn-secondary btn-sm', 'Pre-load teams', () => send('import_startgg_teams', { eventSlug: ev.eventSlug }), 'Import this event\'s entrants into your team library'));
-      const refr = mk('btn btn-ghost btn-sm', '↻', () => { refr.disabled = true; refr.textContent = '…'; send('refresh_my_event', { id: ev.id }); setTimeout(() => { refr.disabled = false; refr.innerHTML = '↻'; }, 2500); }, 'Refresh this event from the platform now');
-      acts.appendChild(refr);
-      acts.appendChild(mk('btn btn-ghost btn-sm', 'View event ↗', () => window.open('https://www.start.gg/' + ev.eventSlug, '_blank', 'noopener'), 'Open on platform'));
-    } else if (platform === 'challonge') {
-      acts.appendChild(mk('btn btn-secondary btn-sm', 'Pre-load teams', () => send('import_challonge_teams', { slug: ev.platformSlug }), 'Import this tournament\'s participants into your team library'));
-      acts.appendChild(mk('btn btn-ghost btn-sm', 'View event ↗', () => window.open('https://challonge.com/' + ev.platformSlug, '_blank', 'noopener'), 'Open on platform'));
-    } else if (platform === 'manual' && ev.url) {
-      acts.appendChild(mk('btn btn-ghost btn-sm', 'View event ↗', () => window.open(ev.url, '_blank', 'noopener'), 'Open the link you saved for this event'));
-    }
-    // NXGEN has no standalone "import by slug" or confirmed public tournament URL yet — Set
-    // live/Seeding above still work; those two extra actions are start.gg/Challonge-only for now.
-
-    // Platform-linking sub-row (push a start.gg event to a Challonge mirror for live score sync) —
-    // only meaningful for a start.gg-sourced event; doesn't apply to an already-Challonge/NXGEN one.
-    let linkRow = null;
-    if (platform === 'startgg') {
-      linkRow = document.createElement('div'); linkRow.className = 'me-linking';
-      const isSynced = !!(ev.challongeSync && ev.challongeSync.slug);
-      linkRow.style.display = isSynced ? 'flex' : 'none';   // auto-open when already linked
-      const gear = mk('btn btn-ghost btn-sm me-gear', '⚙ Link platform', () => {
-        const show = linkRow.style.display === 'none';
-        linkRow.style.display = show ? 'flex' : 'none';
-        gear.classList.toggle('is-on', show);
-      }, 'Link / sync this event to another platform (Challonge)');
-      gear.classList.toggle('is-on', isSynced);
-      acts.appendChild(gear);
-
-      linkRow.appendChild(mk('btn btn-blue btn-sm', 'Push / Sync to Challonge', () => openEvSyncModal(ev),
-        'Full workflow: download start.gg data, map players via CSV, create/select a Challonge event, push seeding, keep scores synced live'));
-      linkRow.appendChild(mk('btn btn-ghost btn-sm', 'Link existing', () => openChalLinkModal(ev), 'Link an existing Challonge tournament for real-time score sync'));
-      if (isSynced) {
-        const linkBadge = document.createElement('span');
-        linkBadge.style.cssText = 'font-size:10px;padding:2px 7px;border-radius:3px;background:rgba(16,185,129,.15);color:#86efac;white-space:nowrap;cursor:default;align-self:center;';
-        const errMark = ev.challongeSync.lastError ? ' !' : (ev.challongeSync.enabled ? '' : ' (paused)');
-        linkBadge.textContent = `Synced: ${ev.challongeSync.slug}${errMark}`;
-        if (ev.challongeSync.lastError) linkBadge.title = ev.challongeSync.lastError;
-        linkRow.appendChild(linkBadge);
-        const unlink = mk('btn btn-ghost btn-sm', 'Unlink', () => {
-          if (unlink.dataset.armed) { send('unlink_event_challonge', { eventId: ev.id }); return; }
-          unlink.dataset.armed = '1'; unlink.textContent = 'Confirm?'; setTimeout(() => { delete unlink.dataset.armed; unlink.textContent = 'Unlink'; }, 2400);
-        }, 'Remove the real-time Challonge sync link for this event');
-        linkRow.appendChild(unlink);
-      }
-    }
-
-    const del = mk('btn btn-ghost btn-sm me-del', '✕', () => {
-      if (del.dataset.armed) { send('remove_my_event', { id: ev.id }); return; }
-      del.dataset.armed = '1'; del.textContent = 'Remove?'; setTimeout(() => { del.removeAttribute('data-armed'); del.textContent = '✕'; }, 2600);
-    }, 'Remove from My Events');
-    acts.appendChild(del);
-
-    card.appendChild(acts);
-    if (linkRow) card.appendChild(linkRow);
-    list.appendChild(card);
-  });
-}
-// Manual "+ Add Event" — a My Event with no platform behind it (a LAN, a one-off, anything not on
-// start.gg/Challonge/NXGEN). No "Set live"/pre-load/auto-sync since there's no API to pull from;
-// it's a plain reference you seed and manage by hand (Seeding tab already supports manual entry).
-let _meAddLogo = '';
-function meAddResetForm() {
-  ['me-add-name', 'me-add-tournament', 'me-add-date', 'me-add-entrants', 'me-add-url'].forEach((id) => { const e = el(id); if (e) e.value = ''; });
-  const g = el('me-add-game'); if (g) g.value = '';
-  _meAddLogo = '';
-  const lp = el('me-add-logo-preview'), le = el('me-add-logo-empty');
-  if (lp) { lp.style.display = 'none'; lp.removeAttribute('src'); }
-  if (le) le.style.display = '';
-}
-el('me-add-btn')?.addEventListener('click', () => {
-  const form = el('me-add-form'); if (!form) return;
-  const show = form.style.display === 'none';
-  form.style.display = show ? '' : 'none';
-  if (show) { const g = el('me-add-game'); if (g) lgGameOptions(g); el('me-add-name')?.focus(); }
-});
-el('me-add-cancel')?.addEventListener('click', () => {
-  const form = el('me-add-form'); if (form) form.style.display = 'none';
-  meAddResetForm();
-});
-el('me-add-logo-preview')?.addEventListener('click', () => el('me-add-logo-file')?.click());
-el('me-add-logo-empty')?.addEventListener('click', () => el('me-add-logo-file')?.click());
-el('me-add-logo-clear')?.addEventListener('click', () => {
-  _meAddLogo = '';
-  const lp = el('me-add-logo-preview'), le = el('me-add-logo-empty');
-  if (lp) { lp.style.display = 'none'; lp.removeAttribute('src'); }
-  if (le) le.style.display = '';
-});
-el('me-add-logo-file')?.addEventListener('change', async function () {
-  const f = this.files && this.files[0]; this.value = ''; if (!f) return;
-  try {
-    _meAddLogo = await fileToBase64(f, 400);
-    const lp = el('me-add-logo-preview'), le = el('me-add-logo-empty');
-    if (lp) { lp.src = _meAddLogo; lp.style.display = ''; }
-    if (le) le.style.display = 'none';
-  } catch (e) { evStatus('Could not load logo.', 'err'); }
-});
-el('me-add-save')?.addEventListener('click', () => {
-  const name = (el('me-add-name')?.value || '').trim();
-  if (!name) { evStatus('Enter an event name.', 'err'); return; }
-  const tournamentName = (el('me-add-tournament')?.value || '').trim();
-  const game = el('me-add-game')?.value || '';
-  const dateVal = el('me-add-date')?.value || '';
-  const startAt = dateVal ? Math.floor(new Date(dateVal + 'T00:00:00').getTime() / 1000) : null;
-  const numEntrants = Number(el('me-add-entrants')?.value) || 0;
-  const url = (el('me-add-url')?.value || '').trim();
-  send('add_my_event', {
-    platform: 'manual', platformSlug: 'manual-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
-    name, tournamentName, game, startAt, numEntrants, image: _meAddLogo, url,
-  });
-  el('me-add-form') && (el('me-add-form').style.display = 'none');
-  meAddResetForm();
-  evStatus(`Added "${name}" to MY EVENTS.`, 'ok');
-});
-// ── Cross-Platform Event Sync Modal ───────────────────────────────────────────
-
-let _evSyncEvent = null;             // My Event being synced
-let _evSyncMappings = {};            // name.toLowerCase() → challongeUsername from CSV upload
-let _evSyncParticipants = [];        // resolved participant list (shown in preview)
-let _evSyncChalTournaments = null;   // cached Challonge tournament list for the existing picker
-let _evSyncChalSearchTimer = null;
-let _evSyncLinkedSlug = '';          // slug selected from the existing-tournament picker
-
-function openEvSyncModal(ev) {
-  _evSyncEvent = ev;
-  _evSyncMappings = {};
-  _evSyncChalTournaments = null; // force fresh tournament list on open
-  _evSyncLinkedSlug = (ev.challongeSync && ev.challongeSync.slug) || '';
-
-  // Resolve participants from seeding studio data or roster
-  _evSyncParticipants = resolveEvSyncParticipants(ev);
-
-  // Pre-fill fields from event data
-  const nameInp = el('ev-sync-t-name');
-  const slugInp = el('ev-sync-t-slug');
-  const gameInp = el('ev-sync-t-game');
-  const titleEl = el('ev-sync-modal-title');
-
-  if (titleEl) titleEl.textContent = `Push "${ev.name || 'Event'}" to Platform`;
-  if (nameInp) nameInp.value = ev.name || '';
-  if (slugInp) {
-    const autoSlug = (ev.name || 'event').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 55);
-    slugInp.value = autoSlug;
-    evSyncUpdateSlugPreview(autoSlug);
-  }
-  if (gameInp) gameInp.value = ev.game || '';
-
-  // Source info bar
-  const srcEl = el('ev-sync-source-info');
-  if (srcEl) {
-    const n = _evSyncParticipants.length;
-    const seeded = _evSyncParticipants.filter(p => p.seed).length;
-    srcEl.innerHTML = `<strong style="color:var(--fg);">${escapeHtml(ev.name || '')}</strong>&nbsp;·&nbsp;start.gg&nbsp;·&nbsp;${n} participant${n !== 1 ? 's' : ''}${seeded ? `&nbsp;·&nbsp;${seeded} seeded` : ''}`;
-  }
-
-  // Select mode: switch to "existing" if this event already has a Challonge link
-  if (_evSyncLinkedSlug) {
-    const modeExisting = el('ev-sync-mode-existing');
-    if (modeExisting) { modeExisting.checked = true; evSyncToggleMode('existing'); }
-    // Pre-fill picker with the existing link
-    const chalSearch = el('ev-sync-chal-search');
-    if (chalSearch) chalSearch.value = _evSyncLinkedSlug;
-    const chalClear = el('ev-sync-chal-clear');
-    if (chalClear) chalClear.style.display = 'block';
-    const selDiv = el('ev-sync-chal-selected');
-    if (selDiv) {
-      const sync = ev.challongeSync || {};
-      const lastSync = sync.lastSyncAt ? ` · Last sync: ${new Date(sync.lastSyncAt).toLocaleTimeString()}` : '';
-      const errPart = sync.lastError ? ` · Error: ${escapeHtml(sync.lastError)}` : '';
-      selDiv.innerHTML = `Linked: <strong style="color:var(--fg);">challonge.com/${escapeHtml(_evSyncLinkedSlug)}</strong>${lastSync}${errPart}`;
-      selDiv.style.display = '';
-    }
-    const autoSync = el('ev-sync-autosync');
-    if (autoSync) autoSync.checked = !!(ev.challongeSync && ev.challongeSync.enabled);
-  } else {
-    const modeCreate = el('ev-sync-mode-create');
-    if (modeCreate) { modeCreate.checked = true; evSyncToggleMode('create'); }
-    const chalSearch = el('ev-sync-chal-search');
-    if (chalSearch) chalSearch.value = '';
-    const selDiv = el('ev-sync-chal-selected');
-    if (selDiv) selDiv.style.display = 'none';
-    const chalClear = el('ev-sync-chal-clear');
-    if (chalClear) chalClear.style.display = 'none';
-  }
-
-  // Clear CSV status + log
-  const csvSt = el('ev-sync-csv-status'); if (csvSt) csvSt.textContent = '';
-  const logEl = el('ev-sync-log'); if (logEl) logEl.textContent = '';
-
-  evSyncRenderPreview();
-  el('ev-sync-modal').removeAttribute('hidden');
-}
-
-function resolveEvSyncParticipants(ev) {
-  // Try seeding studio data first (has seedNum)
-  const seedEntrants = ev.seeding && Array.isArray(ev.seeding.entrants) ? ev.seeding.entrants : [];
-  if (seedEntrants.length > 0) {
-    return seedEntrants
-      .slice()
-      .sort((a, b) => (a.seedNum || 9999) - (b.seedNum || 9999))
-      .map((e, i) => ({
-        name: e.name || '',
-        seed: e.seedNum || (i + 1),
-        players: (e.players || []).map(p => p.gamerTag).filter(Boolean)
-      }));
-  }
-  // Fall back to roster
-  const roster = Array.isArray(ev.roster) ? ev.roster : [];
-  if (roster.length > 0) {
-    return roster.map((t, i) => ({
-      name: t.name || t.teamName || '',
-      seed: i + 1,
-      players: Array.isArray(t.players) ? t.players.map(p => p.gamerTag || p.name).filter(Boolean) : []
-    }));
-  }
-  return [];
-}
-
-function evSyncToggleMode(mode) {
-  const createFields   = el('ev-sync-create-fields');
-  const existingFields = el('ev-sync-existing-fields');
-  if (createFields)   createFields.style.display   = mode === 'create'   ? '' : 'none';
-  if (existingFields) existingFields.style.display  = mode === 'existing' ? '' : 'none';
-}
-
-function evSyncUpdateSlugPreview(raw) {
-  const clean = (raw || '').toLowerCase().replace(/[^a-z0-9_]/g, '_').replace(/__+/g, '_').replace(/^_|_$/g, '').slice(0, 60);
-  const prev = el('ev-sync-slug-preview'); if (prev) prev.textContent = clean || '…';
-}
-
-function evSyncRenderPreview() {
-  const label = el('ev-sync-preview-label');
-  const container = el('ev-sync-preview');
-  if (!container) return;
-  const list = _evSyncParticipants;
-  if (label) label.textContent = `Participants (${list.length})`;
-  if (!list.length) {
-    container.innerHTML = '<div style="font-size:12px; color:var(--muted); padding:6px;">No participants found — open Seeding or Pre-load Teams first to populate the list.</div>';
-    return;
-  }
-  container.innerHTML = list.map((p, i) => {
-    const mapped = _evSyncMappings[(p.name || '').toLowerCase()];
-    const sub = p.players.length ? `<span style="color:var(--muted);">${p.players.slice(0,3).map(escapeHtml).join(', ')}${p.players.length>3?'…':''}</span>` : '';
-    const userBadge = mapped ? `<span style="font-size:10px; padding:1px 6px; border-radius:3px; background:rgba(74,222,128,.15); color:#86efac; flex-shrink:0;">@${escapeHtml(mapped)}</span>` : '';
-    return `<div style="display:flex; align-items:center; gap:8px; padding:3px 6px; border-radius:4px; background:rgba(255,255,255,.025);">
-      <span style="font-size:10px; color:var(--muted); width:22px; text-align:right; flex-shrink:0;">${p.seed}</span>
-      <span style="flex:1; font-size:12px; font-weight:600;">${escapeHtml(p.name)}</span>
-      ${sub}
-      ${userBadge}
-    </div>`;
-  }).join('');
-}
-
-// CSV parsing for username mapping
-function parseEvSyncCsv(text) {
-  const lines = text.trim().split(/\r?\n/);
-  if (!lines.length) return {};
-  // Detect header
-  const header = lines[0].split(',').map(h => h.trim().toLowerCase().replace(/[^a-z0-9_]/g, ''));
-  const nameIdx = header.findIndex(h => ['name','team','teamname','player','gamertag'].includes(h));
-  const userIdx = header.findIndex(h => ['challonge_username','challongeusername','username','challonge'].includes(h));
-  const map = {};
-  const start = (nameIdx >= 0 && userIdx >= 0) ? 1 : 0; // skip header if detected
-  for (let i = start; i < lines.length; i++) {
-    const cols = lines[i].split(',').map(c => c.trim().replace(/^"|"$/g, ''));
-    if (!cols.length || !cols[0]) continue;
-    const ni = nameIdx >= 0 ? nameIdx : 0;
-    const ui = userIdx >= 0 ? userIdx : 1;
-    const name = (cols[ni] || '').trim();
-    const username = (cols[ui] || '').trim();
-    if (name && username) map[name.toLowerCase()] = username;
-  }
-  return map;
-}
-
-async function evSyncPush() {
-  const logEl   = el('ev-sync-log');
-  const pushBtn = el('ev-sync-push-btn');
-  const setLog  = (msg, ok) => { if (logEl) { logEl.textContent = msg; logEl.style.color = ok === false ? '#f87171' : ok === true ? '#86efac' : 'var(--muted)'; } };
-
-  const mode = document.querySelector('input[name="ev-sync-mode"]:checked')?.value || 'create';
-  const startBracket = !!el('ev-sync-start-bracket')?.checked;
-
-  if (!_evSyncParticipants.length) { setLog('No participants to push.', false); return; }
-  if (!currentState.challonge?.hasKey) { setLog('Add your Challonge API key in Settings → Integrations first.', false); return; }
-
-  if (pushBtn) { pushBtn.disabled = true; pushBtn.textContent = 'Pushing…'; }
-
-  try {
-    let slug;
-
-    if (mode === 'create') {
-      const name = (el('ev-sync-t-name')?.value || '').trim();
-      const rawSlug = (el('ev-sync-t-slug')?.value || '').trim();
-      const type = el('ev-sync-t-type')?.value || 'single elimination';
-      const gameName = (el('ev-sync-t-game')?.value || '').trim();
-      const isPrivate = !!el('ev-sync-t-private')?.checked;
-      if (!name) throw new Error('Enter a tournament name.');
-      if (!rawSlug) throw new Error('Enter a URL slug.');
-
-      setLog('Creating tournament…', null);
-      const cr = await fetch('http://localhost:3000/api/challonge/create-tournament', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, slug: rawSlug, tournamentType: type, gameName, private: isPrivate })
-      }).then(r => r.json());
-      if (!cr.ok) throw new Error(cr.error || 'Failed to create tournament');
-      slug = cr.slug;
-      setLog(`Tournament created: challonge.com/${slug}`, null);
-    } else {
-      // Use slug from the picker (preferred) or whatever is typed in the search input
-      slug = _evSyncLinkedSlug || (el('ev-sync-chal-search')?.value || '').trim().replace(/^https?:\/\/[^/]*challonge\.com\//,'').replace(/\/$/, '');
-      if (!slug) throw new Error('Select a tournament from the list first.');
-    }
-
-    const clearExisting = mode === 'existing' && !!el('ev-sync-clear-existing')?.checked;
-    if (clearExisting) {
-      // Wiping the Challonge-side roster is irreversible on their platform — make it explicit,
-      // and never leave the checkbox armed for the next sync.
-      const ok = await appConfirm('Delete ALL existing participants on the Challonge tournament before syncing? This wipes its current roster on challonge.com.', 'Wipe and sync');
-      if (!ok) { setLog('Sync cancelled.', null); return; }
-    }
-    if (el('ev-sync-clear-existing')) el('ev-sync-clear-existing').checked = false;
-
-    // Build participant payload with mappings
-    const participants = _evSyncParticipants.map(p => ({
-      name: p.name,
-      seed: p.seed,
-      challongeUsername: _evSyncMappings[(p.name || '').toLowerCase()] || null
-    }));
-
-    setLog(`Syncing ${participants.length} participants…`, null);
-    // eventSlug lets the server override each seed with start.gg's TRUE bracket seed (initialSeedNum)
-    // instead of trusting locally-cached roster/seeding-studio order, which can drift from what
-    // actually produced the real bracket's bye placement.
-    const sr = await fetch('http://localhost:3000/api/challonge/sync-participants', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tournamentSlug: slug, participants, clearExisting, eventSlug: _evSyncEvent && _evSyncEvent.eventSlug })
-    }).then(r => r.json());
-    // The route reports the real reason in .message (a summary) and .errors (per-chunk detail) —
-    // it never sets .error, so checking only sr.error silently discarded the actual cause.
-    const syncErrText = sr.message || (Array.isArray(sr.errors) && sr.errors.join('; ')) || sr.error || '';
-    // Re-pushing to a tournament that already has its bracket started fails to (re-)add
-    // participants — expected, not fatal. But the EXISTING bracket may have been seeded wrong
-    // (e.g. from before this fix), producing a different shape than start.gg's real bracket, which
-    // would silently block every result from matching. So actively REPAIR it: reset, re-apply the
-    // true seed to every participant, and regenerate — rather than just skipping past the problem.
-    const alreadySetUp = /no longer be added|already been taken|already exist/i.test(syncErrText);
-    if (!sr.ok && !sr.added && !alreadySetUp) throw new Error(syncErrText || 'Sync failed (no detail returned)');
-
-    if (alreadySetUp && _evSyncEvent && _evSyncEvent.eventSlug) {
-      setLog('Bracket already started — repairing seeds & regenerating to match start.gg…', null);
-      const rb = await fetch('http://localhost:3000/api/challonge/rebuild-bracket', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tournamentSlug: slug, eventSlug: _evSyncEvent.eventSlug })
-      }).then(r => r.json());
-      if (!rb.ok) throw new Error(rb.error || 'Failed to rebuild bracket');
-      setLog(rb.message || 'Bracket rebuilt.', null);
-    } else if (startBracket) {
-      setLog('Generating bracket…', null);
-      const br = await fetch('http://localhost:3000/api/challonge/start-bracket', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tournamentSlug: slug })
-      }).then(r => r.json());
-      // "Already started" is likewise non-fatal here (e.g. an existing tournament whose bracket
-      // was generated outside this app) — fall through to the results backfill either way.
-      if (!br.ok && !/already.*start|state/i.test(br.error || '')) throw new Error(br.error || 'Failed to start bracket');
-    }
-
-    // Backfill any COMPLETED start.gg results onto the Challonge bracket. For a finished PAST
-    // event this fills in the entire bracket in one shot; for a future/current event with nothing
-    // played yet it's a harmless no-op (results then flow live via the auto-sync link below).
-    let resultsPushed = 0, pushWarn = '';
-    if (_evSyncEvent && _evSyncEvent.eventSlug) {
-      setLog('Pulling match results from start.gg…', null);
-      try {
-        const pr = await fetch('http://localhost:3000/api/challonge/push-results', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ tournamentSlug: slug, eventSlug: _evSyncEvent.eventSlug })
-        }).then(r => r.json());
-        if (pr.ok) {
-          resultsPushed = pr.pushed || 0;
-          if ((pr.unmatchedNames && pr.unmatchedNames.length) || (pr.unplaced && pr.unplaced.length)) pushWarn = pr.message || '';
-        }
-      } catch (e) { /* non-fatal — participants/bracket are already pushed */ }
-    }
-
-    // Link for live auto-sync. A freshly CREATED tournament is always linked (you built it to run it
-    // live); for an EXISTING tournament, link only when the "keep synced" box is ticked.
-    const autoSync = (mode === 'create') || (mode === 'existing' && !!el('ev-sync-autosync')?.checked);
-    if (autoSync && _evSyncEvent && slug) {
-      send('link_event_challonge', { eventId: _evSyncEvent.id, challongeSlug: slug, enabled: true });
-    }
-
-    const viewUrl = `https://challonge.com/${slug}`;
-    const autoMsg = autoSync ? ' · Auto-sync enabled.' : '';
-    const resMsg = resultsPushed ? ` · ${resultsPushed} result(s) filled in.` : '';
-    const warnMsg = pushWarn ? ` — Heads up: ${pushWarn}` : '';
-    setLog(`Done! ${sr.message || ''}${resMsg}${autoMsg}${warnMsg}`, pushWarn ? null : true);
-    if (pushBtn) { pushBtn.textContent = 'View on Challonge ↗'; pushBtn.onclick = () => window.open(viewUrl, '_blank', 'noopener'); pushBtn.disabled = false; }
-  } catch (e) {
-    setLog(e.message, false);
-    if (pushBtn) { pushBtn.disabled = false; pushBtn.textContent = 'Push to Challonge'; }
-  }
-}
-
-// ── Challonge Link Modal — lightweight "just search, pick & link" ─────────────
-
-let _chalLinkEvent = null;
-let _chalLinkSlug = '';
-let _chalLinkTournaments = null;
-let _chalLinkSearchTimer = null;
-
-function openChalLinkModal(ev) {
-  _chalLinkEvent = ev;
-  _chalLinkSlug = (ev.challongeSync && ev.challongeSync.slug) || '';
-  _chalLinkTournaments = null;
-
-  const titleEl = el('ev-chal-link-title');
-  if (titleEl) titleEl.textContent = `Link Challonge: ${ev.name || 'Event'}`;
-
-  const curDiv = el('ev-chal-link-current');
-  if (curDiv) {
-    if (_chalLinkSlug) { curDiv.textContent = `Currently linked: challonge.com/${_chalLinkSlug}`; curDiv.style.display = ''; }
-    else curDiv.style.display = 'none';
-  }
-
-  const srch = el('ev-chal-link-search');
-  if (srch) srch.value = '';
-  const clr = el('ev-chal-link-clear');
-  if (clr) clr.style.display = 'none';
-  const res = el('ev-chal-link-results');
-  if (res) res.style.display = 'none';
-  const sel = el('ev-chal-link-selected');
-  if (sel) sel.style.display = 'none';
-  const logEl = el('ev-chal-link-log');
-  if (logEl) logEl.textContent = '';
-  const btn = el('ev-chal-link-btn');
-  if (btn) { btn.disabled = true; btn.textContent = 'Link tournament'; }
-  const commInp = el('ev-chal-link-community');
-  if (commInp && !commInp.value) commInp.value = localStorage.getItem('ne_challonge_community') || '';
-
-  el('ev-chal-link-modal').removeAttribute('hidden');
-  setTimeout(() => el('ev-chal-link-search')?.focus(), 80);
-}
-
-function renderChalLinkDropdown(tournaments, filterQuery) {
-  const container = el('ev-chal-link-results');
-  if (!container) return;
-  const filtered = filterQuery
-    ? tournaments.filter(t => (t.name || '').toLowerCase().includes(filterQuery) || (t.slug || '').toLowerCase().includes(filterQuery))
-    : tournaments;
-  if (!filtered.length) {
-    container.innerHTML = filterQuery
-      ? `<div class="ev-dropdown-msg">No match for "${escapeHtml(filterQuery)}"</div>`
-      : '<div class="ev-dropdown-msg">No Challonge tournaments found.</div>';
-    container.style.display = 'block';
-    return;
-  }
-  container.innerHTML = '';
-  filtered.forEach(t => {
-    const row = document.createElement('div');
-    row.className = 'ev-dropdown-row';
-    row.innerHTML = _chalTournamentRowHtml(t);
-    row.addEventListener('click', () => {
-      const si = el('ev-chal-link-search');
-      if (si) si.value = t.name || t.slug;
-      const cb = el('ev-chal-link-clear');
-      if (cb) cb.style.display = 'block';
-      container.style.display = 'none';
-      _chalLinkSlug = t.slug || '';
-      const selDiv = el('ev-chal-link-selected');
-      if (selDiv) {
-        const pCount = t.participantsCount ? ` · ${t.participantsCount} participants` : '';
-        const stLabel = t.state ? ` · ${t.state}` : '';
-        selDiv.innerHTML = `<strong style="color:var(--fg);">challonge.com/${escapeHtml(_chalLinkSlug)}</strong>${pCount}${stLabel}`;
-        selDiv.style.display = '';
-      }
-      const btn = el('ev-chal-link-btn');
-      if (btn) btn.disabled = false;
-    });
-    container.appendChild(row);
-  });
-  container.style.display = 'block';
-}
-
-(function wireChalLinkModal() {
-  ['ev-chal-link-close', 'ev-chal-link-cancel'].forEach(id => {
-    el(id)?.addEventListener('click', () => el('ev-chal-link-modal').setAttribute('hidden', ''));
-  });
-  el('ev-chal-link-modal')?.addEventListener('click', e => {
-    if (e.target === el('ev-chal-link-modal')) el('ev-chal-link-modal').setAttribute('hidden', '');
-  });
-
-  const searchInput = el('ev-chal-link-search');
-  const resultsDiv  = el('ev-chal-link-results');
-  const clearBtn    = el('ev-chal-link-clear');
-  if (!searchInput || !resultsDiv) return;
-
-  async function loadLinkTournaments() {
-    resultsDiv.innerHTML = '<div class="ev-dropdown-msg">Loading your Challonge tournaments…</div>';
-    resultsDiv.style.display = 'block';
-    try {
-      const community = (el('ev-chal-link-community')?.value || '').trim();
-      if (community) localStorage.setItem('ne_challonge_community', community);
-      const subdomains = community ? [community] : [];
-      const resp = await fetch('http://localhost:3000/api/challonge/my-tournaments', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ subdomains }) });
-      const data = await resp.json();
-      _chalLinkTournaments = resp.ok ? (data.tournaments || []) : [];
-      renderChalLinkDropdown(_chalLinkTournaments, '');
-      if (data.subdomainErrors?.length) {
-        const errEl = el('ev-chal-link-results');
-        if (errEl) errEl.insertAdjacentHTML('beforeend', data.subdomainErrors.map(e => `<div class="ev-dropdown-msg" style="color:#f59e0b;">Community "${escapeHtml(e.subdomain)}": ${escapeHtml(e.error)}</div>`).join(''));
-      }
-    } catch (e) {
-      _chalLinkTournaments = [];
-      resultsDiv.innerHTML = `<div class="ev-dropdown-msg" style="color:#ef4444;">Error: ${escapeHtml(e.message)}</div>`;
-    }
-  }
-
-  // Restore saved community from localStorage
-  const savedComm = localStorage.getItem('ne_challonge_community') || '';
-  if (savedComm) { const ci = el('ev-chal-link-community'); if (ci) ci.value = savedComm; }
-
-  el('ev-chal-link-community-reload')?.addEventListener('click', () => {
-    _chalLinkTournaments = null;
-    loadLinkTournaments();
-  });
-
-  searchInput.addEventListener('focus', () => {
-    if (!currentState.challonge?.hasKey) {
-      resultsDiv.innerHTML = '<div class="ev-dropdown-msg" style="color:#f59e0b;">Add a Challonge API key in Integrations first.</div>';
-      resultsDiv.style.display = 'block';
-      return;
-    }
-    if (_chalLinkTournaments !== null) {
-      renderChalLinkDropdown(_chalLinkTournaments, searchInput.value.trim().toLowerCase());
-      resultsDiv.style.display = 'block';
-      return;
-    }
-    loadLinkTournaments();
-  });
-
-  searchInput.addEventListener('input', () => {
-    const q = searchInput.value.trim();
-    if (clearBtn) clearBtn.style.display = q ? 'block' : 'none';
-    clearTimeout(_chalLinkSearchTimer);
-    _chalLinkSearchTimer = setTimeout(() => {
-      if (_chalLinkTournaments !== null) renderChalLinkDropdown(_chalLinkTournaments, q.toLowerCase());
-    }, 60);
-  });
-
-  if (clearBtn) clearBtn.addEventListener('click', () => {
-    searchInput.value = '';
-    clearBtn.style.display = 'none';
-    _chalLinkSlug = '';
-    const selDiv = el('ev-chal-link-selected');
-    if (selDiv) selDiv.style.display = 'none';
-    const btn = el('ev-chal-link-btn');
-    if (btn) btn.disabled = true;
-    if (_chalLinkTournaments !== null) renderChalLinkDropdown(_chalLinkTournaments, '');
-    searchInput.focus();
-  });
-
-  document.addEventListener('click', e => {
-    if (!e.target.closest('#ev-chal-link-wrap') && !e.target.closest('#ev-chal-link-results')) {
-      resultsDiv.style.display = 'none';
-    }
-  }, true);
-
-  el('ev-chal-link-btn')?.addEventListener('click', () => {
-    const btn   = el('ev-chal-link-btn');
-    const logEl = el('ev-chal-link-log');
-    const setLog = (msg, ok) => { if (logEl) { logEl.textContent = msg; logEl.style.color = ok === false ? '#f87171' : ok ? '#86efac' : 'var(--muted)'; } };
-    if (!_chalLinkSlug || !_chalLinkEvent) { setLog('Select a tournament first.', false); return; }
-    if (btn) { btn.disabled = true; btn.textContent = 'Linking…'; }
-    setLog('Building participant map…', null);
-    // Use a one-shot listener so we know when this specific link-result comes back
-    const onMsg = (e2) => {
-      try {
-        const m = JSON.parse(e2.data);
-        if (m.type !== 'link-result') return;
-        ws.removeEventListener('message', onMsg);
-        if (m.data.ok && !m.data.loading) {
-          setLog(m.data.message || 'Linked!', true);
-          const curDiv = el('ev-chal-link-current');
-          if (curDiv) { curDiv.textContent = `Linked: challonge.com/${_chalLinkSlug}`; curDiv.style.display = ''; }
-          if (btn) { btn.textContent = 'Linked'; }
-          setTimeout(() => el('ev-chal-link-modal').setAttribute('hidden', ''), 1200);
-        } else if (!m.data.ok) {
-          setLog(m.data.message || 'Failed.', false);
-          if (btn) { btn.disabled = false; btn.textContent = 'Link tournament'; }
-        }
-      } catch {}
-    };
-    ws.addEventListener('message', onMsg);
-    send('link_event_challonge', { eventId: _chalLinkEvent.id, challongeSlug: _chalLinkSlug, enabled: true });
-  });
-})();
-
-function _chalTournamentRowHtml(t) {
-  const stateColors = { underway: '#10b981', pending: '#f59e0b', ended: '#9ca3af' };
-  const stateBg     = { underway: 'rgba(16,185,129,0.15)', pending: 'rgba(245,158,11,0.15)', ended: 'rgba(107,114,128,0.2)' };
-  const sc  = stateColors[t.state] || '#9ca3af';
-  const sbg = stateBg[t.state]    || 'rgba(107,114,128,0.2)';
-  const meta = [
-    t.type ? t.type.replace(/_/g, ' ') : '',
-    t.gameName || '',
-    t.participantsCount ? `${t.participantsCount} teams` : '',
-    t.subdomain ? `${t.subdomain}/…` : '',
-  ].filter(Boolean).map(escapeHtml).join(' · ');
-  // Letter avatar: first alphanumeric character, skip symbols like [$
-  const letter = (((t.name || t.slug || '').match(/[A-Za-z0-9]/) || ['?'])[0]).toUpperCase();
-  let hash = 0;
-  for (let i = 0; i < (t.name || '').length; i++) hash = ((hash << 5) - hash + (t.name || '').charCodeAt(i)) | 0;
-  const hue = Math.abs(hash) % 360;
-  const avBg  = `hsl(${hue},45%,22%)`;
-  const avClr = `hsl(${hue},70%,72%)`;
-  const avatarHtml = `<div class="ev-dropdown-logo-ph" style="background:${avBg};color:${avClr};font-size:15px;font-weight:700;">${escapeHtml(letter)}</div>`;
-  const logoHtml = t.logo
-    ? `<img class="ev-dropdown-logo" src="${escapeHtml(t.logo)}" alt="" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">${avatarHtml.replace('style="', 'style="display:none;')}`
-    : avatarHtml;
-  return `${logoHtml}<div class="ev-dropdown-info"><div class="ev-dropdown-name">${escapeHtml(t.name || t.slug || '')}</div><div class="ev-dropdown-meta">${meta}</div></div><span class="ev-dropdown-badge" style="background:${sbg};color:${sc};text-transform:capitalize;">${escapeHtml(t.state || '')}</span>`;
-}
-
-function renderEvSyncChalDropdown(tournaments, filterQuery) {
-  const container = el('ev-sync-chal-results');
-  if (!container) return;
-  const filtered = filterQuery
-    ? tournaments.filter(t => (t.name || '').toLowerCase().includes(filterQuery) || (t.slug || '').toLowerCase().includes(filterQuery))
-    : tournaments;
-  if (!filtered.length) {
-    container.innerHTML = filterQuery
-      ? `<div class="ev-dropdown-msg">No match for "${escapeHtml(filterQuery)}"</div>`
-      : '<div class="ev-dropdown-msg">No Challonge tournaments found.</div>';
-    container.style.display = 'block';
-    return;
-  }
-  container.innerHTML = '';
-  filtered.forEach(t => {
-    const row = document.createElement('div');
-    row.className = 'ev-dropdown-row';
-    row.innerHTML = _chalTournamentRowHtml(t);
-    row.addEventListener('click', () => {
-      const srch = el('ev-sync-chal-search');
-      if (srch) srch.value = t.name || t.slug;
-      const clr = el('ev-sync-chal-clear');
-      if (clr) clr.style.display = 'block';
-      container.style.display = 'none';
-      _evSyncLinkedSlug = t.slug || '';
-      const selDiv = el('ev-sync-chal-selected');
-      if (selDiv) {
-        const pCount = t.participantsCount ? ` · ${t.participantsCount} participants` : '';
-        selDiv.innerHTML = `Selected: <strong style="color:var(--fg);">challonge.com/${escapeHtml(_evSyncLinkedSlug)}</strong>${pCount}`;
-        selDiv.style.display = '';
-      }
-    });
-    container.appendChild(row);
-  });
-  container.style.display = 'block';
-}
-
-// Wire up modal events (runs once on load)
-(function wireEvSyncModal() {
-  // Close buttons
-  ['ev-sync-modal-close', 'ev-sync-modal-close2'].forEach(id => {
-    el(id)?.addEventListener('click', () => el('ev-sync-modal').setAttribute('hidden', ''));
-  });
-  // Click outside to close
-  el('ev-sync-modal')?.addEventListener('click', (e) => {
-    if (e.target === el('ev-sync-modal')) el('ev-sync-modal').setAttribute('hidden', '');
-  });
-
-  // Mode toggle
-  document.querySelectorAll('input[name="ev-sync-mode"]').forEach(r => {
-    r.addEventListener('change', () => evSyncToggleMode(r.value));
-  });
-
-  // Slug live preview
-  el('ev-sync-t-slug')?.addEventListener('input', () => evSyncUpdateSlugPreview(el('ev-sync-t-slug').value));
-
-  // CSV upload
-  el('ev-sync-csv-btn')?.addEventListener('click', () => el('ev-sync-csv-file')?.click());
-  el('ev-sync-csv-file')?.addEventListener('change', (e) => {
-    const file = e.target.files?.[0]; if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (ev2) => {
-      _evSyncMappings = parseEvSyncCsv(ev2.target.result || '');
-      const n = Object.keys(_evSyncMappings).length;
-      const st = el('ev-sync-csv-status');
-      if (st) { st.textContent = n ? `${n} mapping${n !== 1 ? 's' : ''} loaded from CSV.` : 'No valid mappings found — check your CSV has name and challonge_username columns.'; st.style.color = n ? '#86efac' : '#f59e0b'; }
-      evSyncRenderPreview();
-    };
-    reader.readAsText(file);
-    e.target.value = '';
-  });
-
-  // Push button
-  el('ev-sync-push-btn')?.addEventListener('click', evSyncPush);
-
-  // Existing-tournament picker
-  (function wireEvSyncChalPicker() {
-    const searchInput = el('ev-sync-chal-search');
-    const resultsDiv  = el('ev-sync-chal-results');
-    const clearBtn    = el('ev-sync-chal-clear');
-    if (!searchInput || !resultsDiv) return;
-
-    async function loadEvSyncTournaments() {
-      resultsDiv.innerHTML = '<div class="ev-dropdown-msg">Loading your Challonge tournaments…</div>';
-      resultsDiv.style.display = 'block';
-      try {
-        const community = (el('ev-sync-chal-community')?.value || '').trim();
-        if (community) localStorage.setItem('ne_challonge_community', community);
-        const subdomains = community ? [community] : [];
-        const resp = await fetch('http://localhost:3000/api/challonge/my-tournaments', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ subdomains }) });
-        const data = await resp.json();
-        _evSyncChalTournaments = resp.ok ? (data.tournaments || []) : [];
-        renderEvSyncChalDropdown(_evSyncChalTournaments, '');
-        if (data.subdomainErrors?.length) {
-          const errEl = el('ev-sync-chal-results');
-          if (errEl) errEl.insertAdjacentHTML('beforeend', data.subdomainErrors.map(e => `<div class="ev-dropdown-msg" style="color:#f59e0b;">Community "${escapeHtml(e.subdomain)}": ${escapeHtml(e.error)}</div>`).join(''));
-        }
-      } catch (e) {
-        _evSyncChalTournaments = [];
-        resultsDiv.innerHTML = `<div class="ev-dropdown-msg" style="color:#ef4444;">Error loading tournaments: ${escapeHtml(e.message)}</div>`;
-      }
-    }
-
-    // Restore saved community
-    const savedCommSync = localStorage.getItem('ne_challonge_community') || '';
-    if (savedCommSync) { const ci = el('ev-sync-chal-community'); if (ci) ci.value = savedCommSync; }
-
-    el('ev-sync-chal-community-reload')?.addEventListener('click', () => {
-      _evSyncChalTournaments = null;
-      loadEvSyncTournaments();
-    });
-
-    searchInput.addEventListener('focus', () => {
-      if (!currentState.challonge?.hasKey) {
-        resultsDiv.innerHTML = '<div class="ev-dropdown-msg" style="color:#f59e0b;">Add a Challonge API key in Integrations first.</div>';
-        resultsDiv.style.display = 'block';
-        return;
-      }
-      if (_evSyncChalTournaments !== null) {
-        renderEvSyncChalDropdown(_evSyncChalTournaments, searchInput.value.trim().toLowerCase());
-        resultsDiv.style.display = 'block';
-        return;
-      }
-      loadEvSyncTournaments();
-    });
-
-    searchInput.addEventListener('input', () => {
-      const q = searchInput.value.trim();
-      if (clearBtn) clearBtn.style.display = q ? 'block' : 'none';
-      clearTimeout(_evSyncChalSearchTimer);
-      _evSyncChalSearchTimer = setTimeout(() => {
-        if (_evSyncChalTournaments !== null) renderEvSyncChalDropdown(_evSyncChalTournaments, q.toLowerCase());
-      }, 60);
-    });
-
-    if (clearBtn) clearBtn.addEventListener('click', () => {
-      searchInput.value = '';
-      clearBtn.style.display = 'none';
-      _evSyncLinkedSlug = '';
-      const selDiv = el('ev-sync-chal-selected');
-      if (selDiv) selDiv.style.display = 'none';
-      if (_evSyncChalTournaments !== null) renderEvSyncChalDropdown(_evSyncChalTournaments, '');
-      searchInput.focus();
-    });
-
-    document.addEventListener('click', (e) => {
-      if (!e.target.closest('#ev-sync-chal-search-wrap') && !e.target.closest('#ev-sync-chal-results')) {
-        resultsDiv.style.display = 'none';
-      }
-    }, true);
-  })();
-})();
+// (Events domain lives in events.js)
 
 // (Seeding studio + Spotlight domains live in seeding-spotlight.js)
 
@@ -14235,6 +12459,15 @@ function renderCockpitStatus(data) {
     prog.title = obs.connected
       ? 'Live OBS program scene — what viewers see'
       : 'OBS not connected — program scene unknown. Overlay graphics only reach air via the OBS scene.';
+  }
+  // GFX = the graphic live on the gfx.html layer. Together with PROGRAM (and ARMED, updated by
+  // renderWhatsArmed) this topbar strip is THE single answer to "what is on air right now".
+  const gfxChip = el('ck-chip-gfx');
+  if (gfxChip) {
+    const key = data.gfxActive || null;
+    const name = key ? (typeof window._gfxSceneName === 'function' ? window._gfxSceneName(key) : key) : null;
+    gfxChip.textContent = 'GFX: ' + (name || '—');
+    gfxChip.classList.toggle('live', !!key);
   }
 
   const rlConn = el('rl-stats-conn');
@@ -15070,11 +13303,21 @@ function swSources(data) {
   const obs = data.obs || {};
   return (obs.availableScenes || []).filter((s) => !/^═/.test(s)).map((s) => ({ id: s, name: s, isProgram: s === obs.currentScene, isPreview: s === obs.currentPreviewScene }));
 }
+// Cross-fade a polled still into an <img> instead of a hard `src` swap — the abrupt pop on every
+// ~1s poll (arriving at irregular intervals since OBS's screenshot render time varies) is what
+// reads as "random screenshots" flicker rather than a live monitor. First paint skips the fade.
+function _swFadeSwapImg(im, src) {
+  if (!src || im.src === src) return;
+  if (!im.dataset.swFade) { im.dataset.swFade = '1'; im.style.transition = 'opacity .2s ease'; }
+  if (!im.src) { im.src = src; im.style.opacity = '1'; return; }
+  im.style.opacity = '0';
+  setTimeout(() => { im.src = src; im.style.opacity = '1'; }, 180);
+}
 function _swScreenImg(id, img) {
   const box = el(id); if (!box) return;
   let im = box.querySelector('img');
   if (!im) { im = document.createElement('img'); box.innerHTML = ''; box.appendChild(im); }
-  im.src = _swSrc(img);
+  _swFadeSwapImg(im, _swSrc(img));
 }
 function renderSwitcher(data) {
   if (!el('tab-switcher-content')) return;
@@ -15246,8 +13489,13 @@ function swTick() {
   // virtual-camera feed is showing it live.
   if (prog && !_swProgStream) swQueueShot(prog.id, true);
   if (prev) swQueueShot(prev.id, true);
-  const rest = srcs.filter((s) => !s.isProgram && !s.isPreview);
-  if (rest.length) { const g = rest[_swGridCursor % rest.length]; _swGridCursor++; swQueueShot(g.id); }
+  // Rest of the wall refreshes every OTHER tick (one tile per 2s, not 1s) — fewer, smoother pops
+  // instead of a constant one-a-second churn across the grid.
+  _swGridCursor++;
+  if (_swGridCursor % 2 === 0) {
+    const rest = srcs.filter((s) => !s.isProgram && !s.isPreview);
+    if (rest.length) { const g = rest[Math.floor(_swGridCursor / 2) % rest.length]; swQueueShot(g.id); }
+  }
 }
 function switcherOnShow() {
   _swWatch = true; send('switcher_watch', { on: true });
@@ -15255,6 +13503,9 @@ function switcherOnShow() {
   if (currentState) renderSwitcher(currentState);
   swTick();
   clearInterval(_swShotTimer); _swShotTimer = setInterval(swTick, 1000);
+  // Auto-attempt the smooth Virtual-Camera live feed for Program on open — falls back silently to
+  // the polled-screenshot monitor (still handled above) if OBS's Virtual Camera isn't running.
+  if (!_swProgStream) swProgLiveStart(true);
 }
 function switcherOnHide() {
   if (!_swWatch) return;
@@ -15267,31 +13518,41 @@ function switcherOnHide() {
 // OBS "Start Virtual Camera" exposes the PROGRAM as a system webcam; we capture it locally for a
 // smooth, low-latency live monitor (the one live-video path a web panel gets for free). Program-only.
 let _swProgStream = null;
-async function swProgLiveStart() {
+const SW_VCAM_RE = /obs\s*virtual|obs-camera|obs cam|vmix|virtual cam/i;
+// silent=true is the auto-attempt on page open — it must NEVER trigger a camera permission prompt
+// or grab an arbitrary default device (that could be the producer's real webcam, not OBS's virtual
+// one). It only proceeds if camera permission was already granted in an earlier explicit click AND
+// a device that looks like a virtual camera is actually present; otherwise it quietly does nothing
+// and the polled-screenshot monitor keeps covering Program, same as before this existed.
+async function swProgLiveStart(silent) {
   const btn = el('sw-prog-live'), sel = el('sw-prog-device'), st = el('sw-status');
   try {
-    // Initial grab unlocks device labels + permission.
-    let stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
-    const cams = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'videoinput');
+    let cams = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'videoinput');
+    const labelsKnown = cams.some((d) => d.label);
+    if (!labelsKnown) {
+      if (silent) return;   // never prompt for camera access just from opening the page
+      // First-ever use: grab the default device once to unlock real device labels + permission.
+      const unlock = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+      unlock.getTracks().forEach((t) => t.stop());
+      cams = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'videoinput');
+    }
+    const vcam = cams.find((d) => SW_VCAM_RE.test(d.label || ''));
+    if (silent && !vcam) return;   // no OBS/vMix virtual camera found — don't silently grab a random real one
     if (sel) {
       sel.innerHTML = cams.map((d, i) => `<option value="${d.deviceId}">${_stEsc(d.label || ('Camera ' + (i + 1)))}</option>`).join('');
-      const pick = cams.find((d) => /obs\s*virtual|obs-camera|obs cam|vmix|virtual cam/i.test(d.label || ''));
-      if (pick) sel.value = pick.deviceId; else if (cams[0]) sel.value = cams[0].deviceId;
+      sel.value = vcam ? vcam.deviceId : (cams[0] && cams[0].deviceId) || '';
       sel.style.display = '';
     }
-    const chosen = sel ? sel.value : (cams[0] && cams[0].deviceId);
-    const curId = stream.getVideoTracks()[0] && stream.getVideoTracks()[0].getSettings().deviceId;
-    if (chosen && chosen !== curId) {
-      stream.getTracks().forEach((t) => t.stop());
-      stream = await navigator.mediaDevices.getUserMedia({ video: { deviceId: { exact: chosen } }, audio: false });
-    }
+    const chosen = sel ? sel.value : (vcam && vcam.deviceId);
+    if (!chosen) throw new Error('No camera device found');
+    const stream = await navigator.mediaDevices.getUserMedia({ video: { deviceId: { exact: chosen } }, audio: false });
     _swProgStream = stream;
     const v = el('sw-prog-video'); if (v) { v.srcObject = stream; v.style.display = ''; }
     const box = el('sw-prog-screen'); if (box) box.querySelectorAll('img, .sw-mon-ph').forEach((e) => { e.style.display = 'none'; });
     if (btn) { btn.classList.add('on'); btn.textContent = 'Live'; }
     if (st && !/connected/i.test(st.textContent)) st.textContent = '';
   } catch (e) {
-    if (st) st.textContent = 'Live feed error: ' + (e.name || e.message) + ' — click "Start Virtual Camera" in OBS, then retry.';
+    if (!silent) { if (st) st.textContent = 'Live feed error: ' + (e.name || e.message) + ' — click "Start Virtual Camera" in OBS, then retry.'; }
     swProgLiveStop();
   }
 }
@@ -15841,1592 +14102,8 @@ document.querySelectorAll('.js-goto-scenes').forEach((b) => b.addEventListener('
   if (typeof window._assetsShow === 'function') window._assetsShow('overlays');
 }));
 
-// ══════════════ Camera Feeds tab — Players / Casters / Gameplay / Settings ══════════════
-const CF_OVERLAY_BASE = 'http://localhost:3000';
-function cfShowSubtab(cf) {
-  // Players sub-tab retired — player cam assignment lives in Match — Teams (gear) and the
-  // Talent Monitor's Players tab. Old saved subtab values / deep links land on Talent Rooms.
-  if (cf === 'players') cf = 'talent';
-  document.querySelectorAll('#cf-subnav .cf-tab').forEach((b) => b.classList.toggle('active', b.dataset.cf === cf));
-  document.querySelectorAll('#tab-facecams-content .cf-panel').forEach((p) => p.classList.toggle('active', p.id === 'cf-panel-' + cf));
-  if (cf === 'talent') cfLoadTalent();
-  if (cf === 'gameplay') { renderCfShares(); renderCfStations(currentState); }
-  try { localStorage.setItem('cf_active_subtab', cf); } catch (_) {}
-}
-document.querySelectorAll('#cf-subnav .cf-tab').forEach((btn) => {
-  btn.addEventListener('click', () => cfShowSubtab(btn.dataset.cf));
-});
-// Reopen whichever Camera Feeds sub-tab was last active — survives refresh. Deferred to a
-// macrotask: cfLoadTalent()/fetchVdoLinksForFacecam() reference VDO_API, a `const` declared just
-// below this block — calling them synchronously here would hit the same TDZ crash documented for
-// the old switchRole('monitor') bug, so setTimeout(...,0) waits for the script to finish once first.
-setTimeout(() => {
-  let saved; try { saved = localStorage.getItem('cf_active_subtab'); } catch (_) {}
-  if (saved && document.querySelector(`#cf-subnav .cf-tab[data-cf="${saved}"]`)) cfShowSubtab(saved);
-}, 0);
-
-// ── Talent Rooms (VDO.ninja automation) ─────────────────────────────────────
-const VDO_API = 'http://localhost:3000';
-let _vdoLinks = null;  // cached VDO links for facecam auto-fill
-function tlEsc(s) { return esc(s); }   // legacy alias — canonical esc() lives at the top of the file
-
-async function fetchVdoLinksForFacecam() {
-  try { _vdoLinks = await (await fetch(`${VDO_API}/api/vdo/links`)).json(); } catch (e) {}
-}
-
-async function cfLoadTalent() {
-  const wrap = el('cf-talent-teams'); if (!wrap) return;
-  wrap.innerHTML = '<p class="section-desc">Loading…</p>';
-  try {
-    const d = await (await fetch(`${VDO_API}/api/vdo/links`)).json();
-    _vdoLinks = d; // keep cache warm for facecam auto-fill
-    let html = '';
-
-    // ── Broadcast Teams — compact side-by-side Match Control ───────────────
-    let anyMatchPlayers = false;
-    const matchCards = ['blue', 'orange'].map((side) => {
-      const t = d.teams && d.teams[side]; if (!t) return '';
-      if (t.players && t.players.length) anyMatchPlayers = true;
-      return mcTeamCard(side, t);
-    }).join('');
-    html += `<div class="talent-section-head">Broadcast Teams · Match Control</div><div class="mc-grid">${matchCards || '<div class="talent-empty">No active match teams.</div>'}</div>`;
-
-    // ── Team Library (all saved teams) ────────────────────────────────────
-    const allTeams = d.allTeams || [];
-    html += `<details class="tl-library"${allTeams.length > 4 ? '' : ' open'}>
-      <summary class="talent-section-head tl-lib-summary">${svgIcon('chevdown')} Team Library <span class="tl-lib-count">${allTeams.length}</span></summary>
-      <div class="tl-lib-tools"><button class="btn btn-primary btn-xs" id="talent-gen-all-btn" title="Generate rooms for every team that doesn't have one yet">${svgIcon('zap')} Generate all rooms</button></div>
-      <div class="talent-grid">`;
-    if (!allTeams.length) {
-      html += '<div class="talent-empty">No saved teams yet. Add teams on the <b>Teams</b> page.</div>';
-    } else {
-      allTeams.forEach((t) => {
-        const players = t.players || [];
-        let rows;
-        if (!t.hasRoom) {
-          rows = `<div class="talent-empty" style="display:flex;align-items:center;gap:10px">No room yet.
-            <button class="btn btn-primary btn-xs talent-gen-saved" data-team-name="${tlEsc(t.name)}">${svgIcon('zap')} Generate room</button></div>`;
-        } else if (!players.length) {
-          rows = '<div class="talent-empty">No players on this team.</div>';
-        } else {
-          rows = players.map((p) => talentRow(null, p, t.name, t.room)).join('');
-        }
-        html += `<div class="talent-team" style="--tc:${tlEsc(t.color) || '#555'}">
-          <div class="talent-team-head">
-            <span class="talent-dot"></span>
-            <span class="talent-team-name">${tlEsc(t.name)}</span>
-            ${t.room ? `<span class="talent-room">${tlEsc(t.room)}</span>` : ''}
-            ${t.hasRoom ? `<button class="btn btn-ghost btn-sm talent-regen-saved" data-team-name="${tlEsc(t.name)}" title="New room (invalidates old links)">${svgIcon('refresh')} New room</button>` : ''}
-          </div>
-          <div class="talent-rows">${rows}</div>
-        </div>`;
-      });
-    }
-    html += '</div></details>';
-
-    wrap.innerHTML = html;
-    const hint = el('cf-talent-hint');
-    if (hint) hint.innerHTML = (anyMatchPlayers || allTeams.some(t => t.hasRoom && t.players.length))
-      ? '' : '<div class="talent-note">Set up teams + rosters on the <b>Teams</b> page, then hit <b>Generate rooms</b> to create private VDO rooms for every player.</div>';
-    cfUpdateListenPill(currentState);
-    renderVdoRooms();             // rooms manager reads currentState + this fresh fetch
-    _cfDirectorData = d;          // cache for the Director Control Center
-    cfRenderDirectorCenter();
-    cfWireTalentDrag();
-    cfUpdateMoveButtons();        // restore move-button states from tracked occupants
-    cfUpdateConnStatus();         // restore connection dots
-    cfFilterTalent();             // re-apply any active search filter
-    // Auto-start the (media-free) director presence so connection status updates the moment a
-    // player joins — no need to manually open the Director Control Center.
-    if (!_directorOn) { cfStartDirectorConsoles(); renderQtalent(); }
-    else if (typeof cfSyncDirectorConsoles === 'function') cfSyncDirectorConsoles();   // add any new rooms
-  } catch (e) { wrap.innerHTML = `<p style="color:#f56565;">Error: ${tlEsc(e.message)}</p>`; }
-}
-
-// ── VDO Rooms manager — every room in one list; generate or link an existing room ──
-function vdoRoomJoinUrl(vdo) {
-  if (!vdo || !vdo.room) return '';
-  const base = (currentState?.vdo?.base) || 'https://vdo.ninja';
-  const lang = (currentState?.vdo?.lang) || '';
-  return `${base}/?room=${encodeURIComponent(vdo.room)}${lang ? '&transcribe=' + encodeURIComponent(lang) : ''}&webcam&autostart${vdo.password ? '#p=' + encodeURIComponent(vdo.password) : ''}`;
-}
-function _vdoRoomRows() {
-  const st = currentState || {};
-  const rows = [];
-  ['blue', 'orange'].forEach((side) => {
-    const t = st.teams?.[side]; if (!t) return;
-    rows.push({ kind: 'team', key: side, label: t.name || (side.toUpperCase() + ' TEAM'),
-      badge: side === 'blue' ? 'TEAM A' : 'TEAM B', color: t.color || (side === 'blue' ? '#3b82f6' : '#f97316'),
-      vdo: t.vdo || null });
-  });
-  const c = st.casters || {};
-  rows.push({ kind: 'group', key: 'casters',   label: 'Hosts / Casters desk', badge: 'HOSTS',     color: '#e83a8b', vdo: c.vdo });
-  rows.push({ kind: 'group', key: 'guests',    label: 'Guest lobby',          badge: 'LOBBY',     color: '#a855f7', vdo: c.guestsVdo });
-  rows.push({ kind: 'group', key: 'observers', label: 'In-game observers',    badge: 'OBSERVERS', color: '#2dd4bf', vdo: c.observersVdo });
-  rows.push({ kind: 'group', key: 'interview', label: 'Interview room',       badge: 'INTERVIEW', color: '#fbbf24', vdo: c.interview });
-  (c.rooms || []).forEach((r) => rows.push({ kind: 'named', key: r.id, label: r.name || 'Talent room',
-    badge: 'ROOM', color: '#8b5cf6', vdo: r.vdo, isDesk: c.deskRoomId === r.id }));
-  return rows;
-}
-function renderVdoRooms() {
-  const list = el('cf-rooms-list'); if (!list) return;
-  const rows = _vdoRoomRows();
-  list.innerHTML = rows.map((r) => {
-    const has = !!(r.vdo && r.vdo.room);
-    const rid = `${r.kind}:${r.key}`;
-    const join = has ? vdoRoomJoinUrl(r.vdo) : '';
-    return `<div class="cf-room-row" data-room="${tlEsc(rid)}" style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; padding:8px 12px; background:var(--surface-2,#191c23); border:1px solid var(--border,#2e3340); border-radius:9px;">
-      <span style="flex:0 0 76px; text-align:center; font-size:9px; font-weight:800; letter-spacing:.08em; padding:3px 0; border-radius:99px; background:${tlEsc(r.color)}22; color:${tlEsc(r.color)};">${tlEsc(r.badge)}</span>
-      <span style="flex:1 1 150px; min-width:0; font-size:13px; font-weight:700; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${tlEsc(r.label)}${r.isDesk ? ' <span style="font-size:9px;font-weight:800;color:#fbbf24;letter-spacing:.08em;">DESK</span>' : ''}</span>
-      ${has ? `<span class="talent-room" title="Room name — click to copy" data-copy="${tlEsc(r.vdo.room)}" style="cursor:pointer;">${tlEsc(r.vdo.room)}</span>
-        <span class="talent-room cf-room-pw" title="Password — click to reveal / copy" data-pw="${tlEsc(r.vdo.password || '')}" style="cursor:pointer;">${r.vdo.password ? '••••••' : 'no password'}</span>
-        <button class="cf-ico-btn" data-copy="${tlEsc(join)}" title="Copy the room-level join link (anyone with it joins this room)"><span class="cf-ico-lbl">Join link</span></button>`
-      : '<span class="talent-room" style="opacity:.6;">no room yet</span>'}
-      <button class="btn btn-ghost btn-xs cf-room-link" title="Use a VDO.ninja room you already have — paste its room name + password">Link existing</button>
-      <button class="btn btn-ghost btn-xs cf-room-gen" title="${has ? 'Generate NEW credentials (old links stop working)' : 'Generate room credentials'}">${has ? 'New room' : 'Generate'}</button>
-      ${r.kind === 'named' ? `${r.isDesk ? '' : '<button class="btn btn-ghost btn-xs cf-room-desk" title="Make this the desk/interview room (casters + interviews resolve here)">Set desk</button>'}
-        <button class="btn btn-ghost btn-xs cf-room-del" title="Delete this room" style="color:#f56565;">Del</button>` : ''}
-      <div class="cf-room-linkform" style="display:none; flex-basis:100%; gap:8px; align-items:center; padding-top:6px;">
-        <input type="text" class="input-text cf-room-linkname" placeholder="existing room name" style="flex:1; min-width:140px;" maxlength="100">
-        <input type="text" class="input-text cf-room-linkpw" placeholder="room password" style="flex:1; min-width:120px;" maxlength="100">
-        <button class="btn btn-primary btn-xs cf-room-linksave">Use this room</button>
-        <button class="btn btn-ghost btn-xs cf-room-linkcancel">Cancel</button>
-      </div>
-    </div>`;
-  }).join('');
-}
-;(function wireVdoRooms() {
-  const list = el('cf-rooms-list'); if (!list) return;
-  const parseRow = (node) => {
-    const row = node.closest('.cf-room-row'); if (!row) return null;
-    const [kind, ...rest] = (row.dataset.room || '').split(':');
-    return { row, kind, key: rest.join(':') };
-  };
-  const roomMsg = (kind, key, creds) => {
-    if (kind === 'team')  return ['set_team_vdo_creds',   { side: key, ...creds }];
-    if (kind === 'group') return ['set_group_room_creds', { group: key, ...creds }];
-    return ['set_caster_room_creds', { id: key, ...creds }];
-  };
-  list.addEventListener('click', (e) => {
-    const copyBtn = e.target.closest('[data-copy]');
-    if (copyBtn && !e.target.closest('.cf-room-linkform')) {
-      navigator.clipboard?.writeText(copyBtn.dataset.copy || '');
-      showToast('Copied!', '#22c55e');
-      return;
-    }
-    const pw = e.target.closest('.cf-room-pw');
-    if (pw) {
-      if (pw.textContent === '••••••') { pw.textContent = pw.dataset.pw || ''; }
-      else { navigator.clipboard?.writeText(pw.dataset.pw || ''); showToast('Password copied', '#22c55e'); }
-      return;
-    }
-    const ctx = parseRow(e.target); if (!ctx) return;
-    if (e.target.closest('.cf-room-link')) {
-      const form = ctx.row.querySelector('.cf-room-linkform');
-      if (form) { form.style.display = form.style.display === 'none' ? 'flex' : 'none'; form.querySelector('.cf-room-linkname')?.focus(); }
-    } else if (e.target.closest('.cf-room-linkcancel')) {
-      const form = ctx.row.querySelector('.cf-room-linkform');
-      if (form) form.style.display = 'none';
-    } else if (e.target.closest('.cf-room-linksave')) {
-      const name = ctx.row.querySelector('.cf-room-linkname')?.value.trim();
-      const pass = ctx.row.querySelector('.cf-room-linkpw')?.value.trim();
-      if (!name) { showToast('Enter the existing room name', '#fbbf24'); return; }
-      const [type, data] = roomMsg(ctx.kind, ctx.key, { room: name, password: pass || '' });
-      send(type, data);
-      showToast('Room linked — join links now point at your room', '#22c55e');
-      setTimeout(() => { renderVdoRooms(); if (typeof cfLoadTalent === 'function') cfLoadTalent(); }, 450);
-    } else if (e.target.closest('.cf-room-gen')) {
-      if (ctx.kind === 'team') send('generate_team_vdo', { side: ctx.key, regenerate: true });
-      else if (ctx.kind === 'group') send('regenerate_group_room', { group: ctx.key });
-      else send('generate_caster_room_vdo', { id: ctx.key, regenerate: true });
-      showToast('Generating room… old links stop working', '#8b5cf6');
-      setTimeout(() => { renderVdoRooms(); if (typeof cfLoadTalent === 'function') cfLoadTalent(); }, 500);
-    } else if (e.target.closest('.cf-room-desk')) {
-      send('set_desk_room', { roomId: ctx.key });
-      setTimeout(renderVdoRooms, 400);
-    } else if (e.target.closest('.cf-room-del')) {
-      const btn = e.target.closest('.cf-room-del');
-      if (btn.dataset.armed) { send('delete_caster_room', { id: ctx.key }); setTimeout(renderVdoRooms, 400); }
-      else {
-        btn.dataset.armed = '1'; btn.textContent = 'Sure?';
-        setTimeout(() => { if (btn.isConnected) { delete btn.dataset.armed; btn.textContent = 'Del'; } }, 3000);
-      }
-    }
-  });
-  const add = el('cf-room-add');
-  if (add) add.addEventListener('click', () => {
-    const name = prompt('Name for the new talent room (e.g. "Analyst desk 2", "Green room")');
-    if (!name || !name.trim()) return;
-    send('save_caster_room', { name: name.trim() });
-    showToast('Room created', '#22c55e');
-    setTimeout(renderVdoRooms, 450);
-  });
-  // LISTEN IN → one-click OBS browser source (created on the current program scene).
-  const listenObs = el('cf-listen-obs');
-  if (listenObs) listenObs.addEventListener('click', () => {
-    send('obs_ensure_browser_source', { sourceName: '[NE] Listen-In', url: 'http://localhost:3000/listen-in.html' });
-    showToast('Adding Listen-In to OBS…', '#8b5cf6');
-  });
-})();
-
-// Live filter of the talent teams/players by name or gamertag.
-function cfFilterTalent() {
-  const q = (el('cf-talent-search')?.value || '').trim().toLowerCase();
-  const clear = el('cf-talent-search-clear'); if (clear) clear.style.display = q ? '' : 'none';
-  if (q) { const lib = document.querySelector('#cf-talent-teams .tl-library'); if (lib) lib.open = true; }   // reveal library matches
-  document.querySelectorAll('#cf-talent-teams .talent-team, #cf-talent-teams .mc-team').forEach((team) => {
-    const teamName = (team.querySelector('.talent-team-name, .mc-team-name')?.textContent || '').toLowerCase();
-    const teamMatch = !q || teamName.includes(q);
-    let anyVisible = false;
-    team.querySelectorAll('.talent-row, .mc-player').forEach((r) => {
-      const show = !q || teamMatch || (r.dataset.search || '').toLowerCase().includes(q);
-      r.classList.toggle('tl-hidden', !show);
-      if (show) anyVisible = true;
-    });
-    team.classList.toggle('tl-hidden', !(teamMatch || anyVisible));
-  });
-}
-el('cf-talent-search')?.addEventListener('input', cfFilterTalent);
-el('cf-talent-search-clear')?.addEventListener('click', () => {
-  const s = el('cf-talent-search'); if (s) s.value = '';
-  cfFilterTalent(); s?.focus();
-});
-
-// ── Director Control Center ──────────────────────────────────────────────────
-// One producer joins every active room as VDO director (embedded consoles) and can drag a player
-// onto the Interview room to transfer them with the IFrame-API "forward" command — no action on
-// the player's end. Source room's console must be live for the transfer to fire.
-let _cfDirectorData = null;
-let _directorOn = false;
-const _directorFrames = {};           // roomId -> { iframe, ready }
-let _roomOccupants = {};              // streamId -> { name, homeRoom, currentRoom, side } (players pulled out of their team room)
-let _dcActiveRoom = '';
-
-// The rooms we mount consoles for: both match teams + caster desk + interview room.
-function cfDirectorConsoles() {
-  const d = _cfDirectorData; if (!d) return [];
-  const out = [];
-  ['blue', 'orange'].forEach((side) => {
-    const t = d.teams && d.teams[side];
-    if (t && t.room && t.directorUrl) out.push({ key: side, label: t.name || side.toUpperCase(), color: t.color || '#888', room: t.room, url: t.directorUrl, kind: 'team' });
-  });
-  // Hosts (casters desk) · Guests · Observers — each its own room. No separate interview/desk console.
-  const G = d.groups || {};
-  [['casters', 'HOSTS', '#e83a8b'], ['observers', 'OBSERVERS', '#2dd4bf'], ['guests', 'LOBBY', '#a855f7']].forEach(([k, label, color]) => {
-    const g = G[k];
-    if (g && g.room && g.directorUrl) out.push({ key: k, label, color, room: g.room, url: g.directorUrl, kind: 'group' });
-  });
-  // Deduplicate by room ID — casterRoom and groups.casters often share the same VDO room.
-  const seen = new Set();
-  return out.filter((c) => { if (!c.room || seen.has(c.room)) return false; seen.add(c.room); return true; });
-}
-function cfPostToRoom(roomId, msg) {
-  const f = _directorFrames[roomId];
-  if (!f || !f.iframe || !f.iframe.contentWindow) return false;
-  try { f.iframe.contentWindow.postMessage(msg, '*'); return true; } catch (e) { return false; }
-}
-
-function cfRenderDirectorCenter() {
-  const idle = el('cf-dc-idle'), armed = el('cf-dc-armed');
-  if (!idle || !armed) return;
-  const ivRoom = _cfDirectorData && _cfDirectorData.interview ? _cfDirectorData.interview.room : '';
-  const ivRoomEl = el('cf-dc-interview-room'); if (ivRoomEl) ivRoomEl.textContent = ivRoom ? ('room: ' + ivRoom) : '(no interview room yet)';
-  idle.style.display = _directorOn ? 'none' : '';
-  armed.style.display = _directorOn ? '' : 'none';
-  el('cf-dc-start').style.display = _directorOn ? 'none' : '';
-  el('cf-dc-stop').style.display = _directorOn ? '' : 'none';
-  if (_directorOn) { cfRenderConsoleTabs(); cfRenderOccupants(); }
-  if (typeof window._dccUpdateMonDot === 'function') window._dccUpdateMonDot();
-}
-
-// Unified audio mixer — every live feed (team players + casters/guests/observers) in one strip.
-// Routes each change to the right handler: set_player_audio for team players, set_library_audio
-// for group members. Mirrors the same values the per-card audio controls write.
-function cfRenderMixer() {
-  const wrap = el('cf-dc-mixer'); if (!wrap || _editingInside(wrap)) return;
-  const rows = [];
-  ['blue', 'orange'].forEach((side) => {
-    const t = (typeof currentState !== 'undefined' && currentState.teams) ? currentState.teams[side] : null;
-    if (!t) return;
-    (t.players || []).forEach((p) => rows.push({ label: p.name || '—', group: t.name || side, color: t.color || '#888', audio: p.vdoAudio || {}, kind: 'player', side, playerId: p.id }));
-  });
-  const G = (_cfDirectorData && _cfDirectorData.groups) || {};
-  // Live audio comes from the broadcast library (set_library_audio updates it), so the mixer
-  // stays in sync after edits even though the member list itself comes from the cached groups.
-  const libById = {};
-  ((typeof currentState !== 'undefined' && currentState.casters && currentState.casters.library) || []).forEach((p) => { if (p.id) libById[p.id] = p; });
-  [['casters', '#e83a8b'], ['guests', '#a855f7'], ['observers', '#2dd4bf']].forEach(([k, color]) => {
-    const g = G[k]; if (!g) return;
-    (g.members || []).forEach((m) => {
-      const live = libById[m.libraryId];
-      rows.push({ label: m.name || m.handle || '—', group: g.name || k, color, audio: (live && live.audio) || m.audio || {}, kind: 'lib', id: m.libraryId });
-    });
-  });
-  wrap._rows = rows;
-  if (!rows.length) { wrap.innerHTML = '<div class="dc-mixer-empty">No feeds yet — add teams, casters, guests or observers.</div>'; return; }
-  wrap.innerHTML = '<div class="dc-mixer-head">Audio mixer · every feed</div>' + rows.map((r, i) =>
-    `<div class="dc-mix-row" data-i="${i}" style="--tc:${r.color}">
-      <span class="dc-mix-dot"></span>
-      <span class="dc-mix-name">${tlEsc(r.label)} <span class="dc-mix-grp">${tlEsc(r.group)}</span></span>
-      <label class="dc-mix-ctl" title="Volume 0–200">vol<input type="number" class="dc-mix-vol" min="0" max="200" step="5" value="${r.audio.volume != null ? r.audio.volume : 100}"></label>
-      <label class="dc-mix-ctl" title="Stereo pan">pan<input type="range" class="dc-mix-pan" min="-100" max="100" step="5" value="${r.audio.pan != null ? r.audio.pan : 0}"></label>
-      <label class="dc-mix-ctl"><input type="checkbox" class="dc-mix-mono"${r.audio.mono ? ' checked' : ''}>mono</label>
-    </div>`).join('');
-}
-
-function cfRenderConsoleTabs() {
-  const tabs = el('cf-dc-tabs'); if (!tabs) return;
-  const consoles = cfDirectorConsoles();
-  tabs.innerHTML = '';
-  consoles.forEach((c) => {
-    const b = document.createElement('button');
-    b.className = 'dc-tab' + (c.room === _dcActiveRoom ? ' active' : '');
-    b.style.setProperty('--dc-tc', c.color);
-    const ready = _directorFrames[c.room] && _directorFrames[c.room].ready;
-    b.innerHTML = `<span class="dc-tab-dot"></span>${tlEsc(c.label)}${ready ? '' : ' <span class="dc-tab-load">…</span>'}`;
-    b.addEventListener('click', () => cfSwitchConsole(c.room));
-    // Drop a dragged talent/member row onto a tab to transfer that person into this room.
-    b.addEventListener('dragover', (e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; b.classList.add('dc-tab-drop'); });
-    b.addEventListener('dragleave', () => b.classList.remove('dc-tab-drop'));
-    b.addEventListener('drop', (e) => {
-      e.preventDefault(); b.classList.remove('dc-tab-drop');
-      let p; try { p = JSON.parse(e.dataTransfer.getData('text/plain')); } catch (_) { return; }
-      if (p && p.stream) cfMovePlayerToRoom({ stream: p.stream, name: p.name, side: p.side || '', homeRoom: p.homeRoom || '' }, c.room, c.label);
-    });
-    tabs.appendChild(b);
-  });
-}
-function cfSwitchConsole(roomId) {
-  _dcActiveRoom = roomId;
-  // Keep ALL consoles rendered (display:none suspends iframes → no guest-list updates). Just
-  // bring the chosen one to the front with .is-active; the rest stay live but invisible.
-  Object.entries(_directorFrames).forEach(([rid, f]) => { if (f.iframe) f.iframe.classList.toggle('is-active', rid === roomId); });
-  cfRenderConsoleTabs();
-}
-
-function cfStartDirectorConsoles() {
-  const consoles = cfDirectorConsoles();
-  if (!consoles.length) { const n = el('cf-dc-note'); if (n) n.textContent = 'No rooms to manage yet — generate team/caster rooms first.'; }
-  _directorOn = true;
-  cfRenderDirectorCenter();
-  const host = el('cf-dc-consoles'); if (!host) return;
-  host.innerHTML = '';
-  consoles.forEach((c, idx) => {
-    const f = document.createElement('iframe');
-    f.className = 'dc-frame' + (idx === 0 ? ' is-active' : '');
-    f.src = c.url;
-    f.allow = 'camera;microphone;fullscreen;display-capture;autoplay';
-    f.setAttribute('referrerpolicy', 'no-referrer');
-    host.appendChild(f);
-    _directorFrames[c.room] = { iframe: f, ready: false, kind: c.kind };
-    if (idx === 0) _dcActiveRoom = c.room;
-  });
-  cfRenderConsoleTabs();
-  clearInterval(_connPoll); _connPoll = setInterval(cfPollGuests, 3000); setTimeout(cfPollGuests, 1200);
-  cfUpdateConnStatus();
-  const n = el('cf-dc-note'); if (n) n.textContent = 'Monitoring rooms as director (no camera/mic). Connection dots update as players join. Use the per-player buttons or drag onto the Interview room to transfer.';
-}
-// Mount consoles for any rooms that appeared after the director started (e.g. the Casters / Guests /
-// Observers rooms get provisioned when you open those tabs). Adds them live without a restart, so
-// moving/monitoring works on every group page — not just Teams.
-function cfSyncDirectorConsoles() {
-  if (!_directorOn) return;
-  const host = el('cf-dc-consoles'); if (!host) return;
-  let added = false;
-  cfDirectorConsoles().forEach((c) => {
-    if (!c.room || _directorFrames[c.room]) return;   // already mounted
-    const f = document.createElement('iframe');
-    f.className = 'dc-frame';
-    f.src = c.url;
-    f.allow = 'camera;microphone;fullscreen;display-capture;autoplay';
-    f.setAttribute('referrerpolicy', 'no-referrer');
-    host.appendChild(f);
-    _directorFrames[c.room] = { iframe: f, ready: false, kind: c.kind };
-    added = true;
-  });
-  if (added) { cfRenderConsoleTabs(); setTimeout(cfPollGuests, 800); }
-}
-function cfStopDirectorConsoles() {
-  _directorOn = false;
-  clearInterval(_connPoll); _connPoll = null; _connectedStreams = new Set(); _videoStreams = new Set();
-  Object.values(_directorFrames).forEach((f) => { if (f.iframe) f.iframe.remove(); });
-  Object.keys(_directorFrames).forEach((k) => delete _directorFrames[k]);
-  const host = el('cf-dc-consoles'); if (host) host.innerHTML = '';
-  cfRenderDirectorCenter();
-  cfUpdateConnStatus();
-}
-
-// Resolve a logical room key → actual VDO room id. The interview room IS the production/caster
-// desk room, so 'interview' and 'production' both resolve to the caster room. 'home' = team room.
-function cfRoomId(key, homeRoom) {
-  const d = _cfDirectorData || {};
-  if (key === 'production' || key === 'interview') return d.casterRoom ? d.casterRoom.room : '';
-  if (key === 'home') return homeRoom || '';
-  // Group rooms (Casters / Guests / Observers) can also be transfer targets.
-  const g = d.groups && d.groups[key];
-  if (g && g.room) return g.room;
-  return '';
-}
-function cfRoomLabel(roomId) {
-  const d = _cfDirectorData || {};
-  if (d.casterRoom && roomId === d.casterRoom.room) return 'Interview';
-  const G = d.groups || {};
-  for (const k of ['casters', 'guests', 'observers']) { if (G[k] && G[k].room === roomId) return G[k].name || k; }
-  return 'their team room';
-}
-function cfPlayerCurrentRoom(stream, homeRoom) {
-  return (_roomOccupants[stream] && _roomOccupants[stream].currentRoom) || homeRoom;
-}
-// Director-side transfer a player to a target room (forward from whichever room they're in now).
-// player = { stream, name, side, homeRoom }. targetKey ∈ 'production' | 'interview' | 'home'.
-// Core transfer: move a tracked person to an explicit target room id (any monitored room).
-function cfMovePlayerToRoom(player, target, label) {
-  const note = el('cf-dc-note');
-  if (!player || !player.stream) return false;
-  if (!_directorOn) { if (note) note.textContent = 'Start the director consoles first (top of Director Control Center).'; return false; }
-  if (!target) { if (note) note.textContent = "That room isn't provisioned yet — generate the room first."; return false; }
-  const current = cfPlayerCurrentRoom(player.stream, player.homeRoom);
-  if (current === target) { if (note) note.textContent = `${player.name} is already in ${cfRoomLabel(target)}.`; return false; }
-  const f = _directorFrames[current];
-  if (!f) { if (note) note.textContent = `No live console for ${player.name}'s current room — can't transfer from there.`; return false; }
-  const ok = cfPostToRoom(current, { action: 'forward', target: player.stream, value: target });
-  if (ok) {
-    if (target === player.homeRoom) delete _roomOccupants[player.stream];
-    else _roomOccupants[player.stream] = { name: player.name, homeRoom: player.homeRoom, currentRoom: target, side: player.side || '' };
-    cfRenderOccupants(); if (typeof cfUpdateMoveButtons === 'function') cfUpdateMoveButtons();
-    if (note) note.textContent = `Moved ${player.name} → ${label || cfRoomLabel(target)}.` + (f.ready ? '' : ' (console still connecting — retry if nothing moved)');
-    return true;
-  }
-  if (note) note.textContent = 'Transfer command failed — console may still be loading.';
-  return false;
-}
-function cfMovePlayer(player, targetKey) {
-  return cfMovePlayerToRoom(player, cfRoomId(targetKey, player.homeRoom), cfRoomLabel(cfRoomId(targetKey, player.homeRoom)));
-}
-// Move every player on a team at once.
-function cfMoveTeam(side, targetKey) {
-  const d = _cfDirectorData; const t = d && d.teams && d.teams[side]; if (!t) return;
-  (t.players || []).forEach((p) => cfMovePlayer({ stream: p.streamId, name: p.name || p.streamId, side, homeRoom: t.room }, targetKey));
-}
-// Interview-room drop zone occupants (drag target). Also lists anyone currently in production.
-function cfRenderOccupants() {
-  const host = el('cf-dc-occupants'); if (!host) return;
-  const ids = Object.keys(_roomOccupants);
-  host.innerHTML = '';
-  if (!ids.length) { host.innerHTML = '<span class="dc-occ-empty">No players pulled out of their team room.</span>'; return; }
-  ids.forEach((sid) => {
-    const o = _roomOccupants[sid];
-    const chip = document.createElement('div');
-    chip.className = 'dc-occ';
-    chip.innerHTML = `<span class="dc-occ-name">${tlEsc(o.name)}</span><span class="dc-occ-loc">${tlEsc(cfRoomLabel(o.currentRoom))}</span>`;
-    const back = document.createElement('button');
-    back.className = 'btn btn-ghost btn-xs'; back.textContent = 'Return';
-    back.title = 'Send back to their team room';
-    back.addEventListener('click', () => cfMovePlayer({ stream: sid, name: o.name, side: o.side, homeRoom: o.homeRoom }, 'home'));
-    chip.appendChild(back);
-    host.appendChild(chip);
-  });
-}
-// Reflect each player's current location on the Match Control row (live, between refreshes):
-// when a player is in the interview/desk room, swap their "→ Interview" button for "Return".
-function cfUpdateMoveButtons() {
-  const ivPid = currentState?.casters?.interviewee ? String(currentState.casters.interviewee.playerId) : '';
-  document.querySelectorAll('.mc-player[data-stream]').forEach((row) => {
-    const sid = row.dataset.stream;
-    const isInterviewee = ivPid && String(row.dataset.pid) === ivPid;
-    const loc = _roomOccupants[sid] ? cfRoomLabel(_roomOccupants[sid].currentRoom) : (isInterviewee ? 'Interview' : '');
-    row.dataset.loc = loc;
-    const intv = row.querySelector('.mc-intv'), ret = row.querySelector('.mc-return');
-    if (intv) intv.style.display = loc ? 'none' : '';
-    if (ret) ret.style.display = loc ? '' : 'none';
-    row.classList.toggle('is-onair', !!loc);
-    row.classList.toggle('is-interviewee', !!isInterviewee);
-    const badge = row.querySelector('.mc-loc');
-    if (badge) { badge.textContent = isInterviewee ? 'ON SPOTLIGHT' : (loc || ''); badge.style.display = loc ? '' : 'none'; }
-  });
-}
-
-// Live connection status from the director consoles' guest lists (best-effort; needs consoles on).
-let _connectedStreams = new Set();   // stream IDs present in any room
-let _videoStreams = new Set();       // stream IDs whose camera is live (sending video)
-let _connPoll = null;
-function cfPollGuests() {
-  Object.values(_directorFrames).forEach((f) => {
-    if (f.iframe && f.iframe.contentWindow) { try { f.iframe.contentWindow.postMessage({ action: 'getGuestList', cib: 'gl' }, '*'); } catch (e) {} }
-  });
-}
-function cfUpdateConnStatus() {
-  const live = _directorOn;
-  document.querySelectorAll('.mc-player[data-stream]').forEach((row) => {
-    const sid = row.dataset.stream;
-    const on = _connectedStreams.has(sid);
-    const dot = row.querySelector('.mc-stat-conn');
-    if (dot) { dot.dataset.conn = !live ? '0' : (on ? '1' : '0'); dot.title = !live ? 'Start monitoring to detect connection' : (on ? 'Connected' : 'Not detected in any room'); }
-    // Camera icon pulses green when the player is live in a room with their camera up.
-    const camEl = row.querySelector('.mc-stat-cam');
-    if (camEl) {
-      const camLive = live && _videoStreams.has(sid);
-      camEl.classList.toggle('live', camLive);
-      camEl.title = camLive ? 'Camera live' : (camEl.dataset.camConfig === '1' ? 'Camera linked (not live yet)' : 'No camera');
-    }
-  });
-  document.querySelectorAll('.mc-team[data-side]').forEach((team) => {
-    const rows = [...team.querySelectorAll('.mc-player[data-stream]')];
-    const any = rows.some((r) => _connectedStreams.has(r.dataset.stream));
-    const all = rows.length && rows.every((r) => _connectedStreams.has(r.dataset.stream));
-    const dot = team.querySelector('.mc-team-conn');
-    if (dot) { dot.dataset.conn = !live ? '0' : (all ? '1' : (any ? 'partial' : '0')); dot.title = !live ? 'Start director consoles to detect connection' : (all ? 'All players connected' : (any ? 'Some players connected' : 'No players detected')); }
-  });
-  // Caster lineup cards — same live pulse, keyed by each slot's stream id.
-  document.querySelectorAll('.cf-ln-conn[data-stream], .qtalent-conn[data-stream]').forEach((dot) => {
-    const on = _connectedStreams.has(dot.dataset.stream);
-    dot.dataset.conn = !live ? '0' : (on ? '1' : '0');
-    dot.title = !live ? 'Start Director monitoring to detect connection' : (on ? 'Connected' : 'Not detected in the room');
-  });
-  // Talent camera dots (rail + dashboard) — pulse green when monitoring sees their video.
-  document.querySelectorAll('.qtalent-host .qtalent-cam[data-stream]').forEach((cam) => {
-    const camLive = live && _videoStreams.has(cam.dataset.stream);
-    cam.classList.toggle('live', camLive);
-    cam.title = camLive ? 'Camera live' : 'Camera not live';
-  });
-  // Live-update each talent host's connection count without a full re-render.
-  if (live) {
-    document.querySelectorAll('.qtalent-host').forEach((host) => {
-      const monTxt = host.querySelector('.qtalent-mon .qt-mon-txt'); if (!monTxt) return;
-      const dots = host.querySelectorAll('.qtalent-conn[data-stream]');
-      const conn = Array.prototype.filter.call(dots, (dt) => dt.dataset.conn === '1').length;
-      monTxt.textContent = `Monitoring · ${conn}/${dots.length} connected`;
-    });
-  }
-}
-
-// Drag a talent row → drop on the Interview room (still supported alongside the buttons).
-function cfWireTalentDrag() {
-  document.querySelectorAll('#cf-talent-teams [draggable="true"][data-stream]').forEach((row) => {
-    if (row._dragWired) return; row._dragWired = true;
-    row.addEventListener('dragstart', (e) => {
-      const payload = JSON.stringify({ homeRoom: row.dataset.room || '', stream: row.dataset.stream || '', name: row.dataset.name || '', side: row.dataset.side || '' });
-      e.dataTransfer.setData('text/plain', payload);
-      e.dataTransfer.effectAllowed = 'move';
-      row.classList.add('dragging');
-    });
-    row.addEventListener('dragend', () => row.classList.remove('dragging'));
-  });
-  const drop = el('cf-dc-drop');
-  if (drop && !drop._dropWired) {
-    drop._dropWired = true;
-    drop.addEventListener('dragover', (e) => { e.preventDefault(); drop.classList.add('drag-over'); e.dataTransfer.dropEffect = 'move'; });
-    drop.addEventListener('dragleave', () => drop.classList.remove('drag-over'));
-    drop.addEventListener('drop', (e) => {
-      e.preventDefault(); drop.classList.remove('drag-over');
-      let p; try { p = JSON.parse(e.dataTransfer.getData('text/plain')); } catch (_) { return; }
-      if (!p || !p.stream) return;
-      cfMovePlayer({ stream: p.stream, name: p.name, side: p.side, homeRoom: p.homeRoom }, 'interview');
-    });
-  }
-}
-
-// Mark a console ready + harvest its guest list (connection status) from VDO IFrame-API messages.
-window.addEventListener('message', (e) => {
-  if (!_directorOn) return;
-  const fr = Object.values(_directorFrames).find((f) => f.iframe && f.iframe.contentWindow === e.source);
-  if (!fr) return;
-  if (!fr.ready) { fr.ready = true; cfRenderConsoleTabs(); cfPollGuests(); }
-  const data = e.data;
-  if (data && Array.isArray(data.guestList)) {
-    fr.guests = new Set(); fr.video = new Set();
-    data.guestList.forEach((g) => {
-      if (!g) return;
-      const id = g.streamID || g.streamId || g.id || g.UUID || g.label;
-      if (!id) return;
-      fr.guests.add(String(id));
-      // Camera live unless VDO explicitly reports video as off/muted (fields vary by version; if
-      // none are present we assume video, since players join with &webcam).
-      const noVid = g.videoMuted === true || g.video === false || g.novideo === true || g.noVideo === true || g.hasVideo === false;
-      if (!noVid) fr.video.add(String(id));
-    });
-    _connectedStreams = new Set(); _videoStreams = new Set();
-    Object.values(_directorFrames).forEach((f) => {
-      if (f.guests) f.guests.forEach((id) => _connectedStreams.add(id));
-      if (f.video) f.video.forEach((id) => _videoStreams.add(id));
-    });
-    cfUpdateConnStatus();
-  } else if (data && data.action === 'guest-connected' && (data.streamID || data.streamId)) {
-    const id = String(data.streamID || data.streamId);
-    _connectedStreams.add(id); _videoStreams.add(id); cfUpdateConnStatus();
-  }
-});
-
-el('cf-dc-start')?.addEventListener('click', async () => {
-  // Pull fresh room data (teams + caster/interview + the Casters/Guests/Observers group rooms)
-  // before mounting consoles, so every provisioned room shows up — even started from the dock.
-  try { const d = await (await fetch(`${VDO_API}/api/vdo/links`)).json(); _cfDirectorData = d; } catch (_) {}
-  cfStartDirectorConsoles();
-  renderQtalent();
-});
-el('cf-dc-stop')?.addEventListener('click', cfStopDirectorConsoles);
-
-// Unified mixer — route each row's audio change to the right handler.
-el('cf-dc-mixer')?.addEventListener('change', (e) => {
-  const rowEl = e.target.closest('.dc-mix-row'); if (!rowEl) return;
-  const wrap = el('cf-dc-mixer'); const r = (wrap._rows || [])[+rowEl.dataset.i]; if (!r) return;
-  const vol = parseInt(rowEl.querySelector('.dc-mix-vol')?.value, 10);
-  const pan = parseInt(rowEl.querySelector('.dc-mix-pan')?.value, 10) || 0;
-  const mono = !!rowEl.querySelector('.dc-mix-mono')?.checked;
-  const audio = {};
-  if (Number.isFinite(vol) && vol !== 100) audio.volume = vol;
-  if (pan) audio.pan = pan;
-  if (mono) audio.mono = true;
-  if (r.kind === 'player') send('set_player_audio', { side: r.side, playerId: r.playerId, audio });
-  else if (r.kind === 'lib' && r.id) send('set_library_audio', { id: r.id, audio });
-});
-
-// Director settings popover — listening / transcript / OBS audio routing.
-el('cf-dc-settings-btn')?.addEventListener('click', (e) => {
-  e.stopPropagation();
-  const pop = el('cf-dc-settings'); if (!pop) return;
-  const showing = pop.style.display !== 'none';
-  pop.style.display = showing ? 'none' : '';
-  if (!showing) {
-    const v = (typeof currentState !== 'undefined' && currentState.vdo) || {};
-    if (el('cf-dc-captions')) el('cf-dc-captions').checked = v.listenCaptions !== false;
-    if (el('cf-dc-lang')) el('cf-dc-lang').value = v.lang || 'en-US';
-  }
-});
-document.addEventListener('click', (e) => {
-  const pop = el('cf-dc-settings');
-  if (pop && pop.style.display !== 'none' && !pop.contains(e.target) && e.target.id !== 'cf-dc-settings-btn' && !e.target.closest('#cf-dc-settings-btn')) pop.style.display = 'none';
-});
-el('cf-dc-captions')?.addEventListener('change', function () { send('set_listen_captions', { on: this.checked }); });
-el('cf-dc-lang')?.addEventListener('change', function () { send('set_vdo_config', { lang: this.value }); });
-el('cf-dc-obs-apply')?.addEventListener('click', async () => {
-  const btn = el('cf-dc-obs-apply'); const orig = btn ? btn.textContent : '';
-  if (btn) { btn.textContent = 'Saving…'; btn.disabled = true; }
-  try {
-    const res = await fetch('http://localhost:3000/api/obs/install-collection', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.error || ('Server error ' + res.status));
-    if (data.canceled) { /* user backed out */ }
-    else if (typeof showToast === 'function') showToast(data.message || 'OBS collection saved.', '#22c55e');
-  } catch (err) {
-    if (typeof showToast === 'function') showToast('OBS save failed: ' + err.message, '#c53030');
-  } finally { if (btn) { btn.textContent = orig || 'Save…'; btn.disabled = false; } }
-});
-
-el('cf-dc-open-interview')?.addEventListener('click', () => {
-  const d = _cfDirectorData; const u = d && d.interview ? d.interview.directorUrl : '';
-  if (u) window.open(u, '_blank', 'noopener');
-});
-
-// side = 'blue'|'orange' for match players (enables Listen In); null for library players.
-// teamName = saved team name for library players (used for stream-ID override persistence).
-// room = the player's actual VDO room id (drives drag-to-interview director transfer).
-function talentRow(side, p, teamName, room) {
-  const join = encodeURIComponent(p.joinUrl);
-  const listenBtn = side
-    ? `<button class="btn btn-ghost btn-sm tl-listen" title="Put this player's mic + live captions on stream">${svgIcon('headphones')} Listen in</button>`
-    : '';
-  const casterList = (currentState?.casters?.list) || [];
-  const playerCamUrl = (currentState?.casters?.playerCam?.camUrl) || '';
-  const assignedSlot = p.obsUrl
-    ? (playerCamUrl === p.obsUrl ? 5 : (casterList.find(c => c.camUrl === p.obsUrl)?.slot || 0))
-    : 0;
-  const camOpts = [1,2,3,4].map(n => `<option value="${n}"${assignedSlot===n?' selected':''}>CAM ${n}</option>`).join('')
-    + `<option value="5"${assignedSlot===5?' selected':''}>Player Cam</option>`;
-  const camSelect = p.obsUrl
-    ? `<select class="input-select tl-cam-slot" title="Assign this player's feed to a camera slot in the desk overlay (Player Cam = Spotlight / Interview Desk)"><option value="0"${!assignedSlot?' selected':''}>Set as CAM…</option>${camOpts}</select>`
-    : '';
-  const a = p.audio || {};
-  const audioBlock = p.obsUrl ? `
-    <details class="talent-audio"${(a.volume!=null||a.pan||a.mono)?' open':''}>
-      <summary>Audio</summary>
-      <div class="talent-audio-line">
-        <label title="Volume 0–200">vol<input type="number" class="tl-a-vol" min="0" max="200" step="5" value="${a.volume!=null?a.volume:100}"></label>
-        <label title="Stereo pan (left ↔ right)">pan<input type="range" class="tl-a-pan" min="-100" max="100" step="5" value="${a.pan!=null?a.pan:0}"></label>
-        <label title="Down-mix to mono"><input type="checkbox" class="tl-a-mono"${a.mono?' checked':''}> mono</label>
-      </div>
-    </details>` : '';
-  const camGrp = (camSelect || listenBtn) ? `<div class="tl-grp">
-        <span class="tl-grp-cap">On Desk</span>
-        <div class="tl-grp-btns">${camSelect}${listenBtn}</div>
-      </div>` : '';
-  return `<div class="talent-row" draggable="true" data-side="${tlEsc(side || '')}" data-pid="${tlEsc(p.playerId)}" data-team-name="${tlEsc(teamName || '')}" data-stream="${tlEsc(p.streamId || '')}" data-room="${tlEsc(room || '')}" data-name="${tlEsc(p.name || '')}" data-search="${tlEsc((p.name || '') + ' ' + (p.streamId || ''))}">
-    <div class="tl-id">
-      <span class="talent-drag-grip" title="Drag into the Interview room (director consoles must be running)">${svgIcon('grip')}</span>
-      <div class="tl-id-main">
-        <span class="talent-gt-name" title="Gamertag — drives the feed ID">${tlEsc(p.name) || '(unnamed)'}</span>
-        <input class="talent-sid" value="${tlEsc(p.streamId)}" spellcheck="false" title="Stream ID (defaults to the gamertag — edit to override)">
-      </div>
-    </div>
-    <div class="tl-links">
-      <div class="tl-grp">
-        <span class="tl-grp-cap">Talent link</span>
-        <div class="tl-grp-btns">
-          <button class="cf-ico-btn tl-copy" data-url="${tlEsc(p.joinUrl)}" data-kind="join" title="Copy the player's join link">${svgIcon('copy')}<span class="cf-ico-lbl">Join link</span></button>
-          <button class="cf-ico-btn tl-qr" title="Show join QR">${svgIcon('qr')}</button>
-          <a class="cf-ico-btn" href="${tlEsc(p.joinUrl)}" target="_blank" rel="noopener" title="Open the join link">${svgIcon('external')}</a>
-        </div>
-      </div>
-      <div class="tl-grp">
-        <span class="tl-grp-cap">OBS feed</span>
-        <div class="tl-grp-btns">
-          <button class="cf-ico-btn tl-copy" data-url="${tlEsc(p.obsUrl)}" data-kind="obs" title="Copy the OBS browser-source view link">${svgIcon('copy')}<span class="cf-ico-lbl">View link</span></button>
-        </div>
-      </div>
-      ${camGrp}
-      ${p.interviewUrl ? `<div class="tl-grp">
-        <span class="tl-grp-cap"><span class="tl-grp-cap-ico" title="Move this player into the interview room — best done by dragging onto the Interview room with director consoles running. These links are a fallback.">${svgIcon('mic')}</span> Interview</span>
-        <div class="tl-grp-btns">
-          <button class="cf-ico-btn tl-copy" data-url="${tlEsc(p.interviewUrl)}" data-kind="interview" title="Fallback: send the player this link to hop into the interview room">${svgIcon('copy')}<span class="cf-ico-lbl">Join link</span></button>
-          <button class="cf-ico-btn tl-copy" data-url="${tlEsc(p.interviewViewUrl)}" data-kind="interview-view" title="Their solo desk feed from the interview room — paste into a caster slot's Custom View URL or Set as CAM">${svgIcon('copy')}<span class="cf-ico-lbl">Desk feed</span></button>
-        </div>
-      </div>` : ''}
-    </div>
-    ${audioBlock}
-    <div class="talent-qr" hidden><img alt="Join QR for ${tlEsc(p.name)}" src="${VDO_API}/api/vdo/qr?text=${join}"><span class="talent-qr-cap">Scan to join as <b>${tlEsc(p.name) || p.streamId}</b></span></div>
-  </div>`;
-}
-
-// ── Match Control: compact side-by-side broadcast-team cards ──────────────────
-// Each player gets: in-game name (RL roster) · inline camera (facecam by name) · move-to-room
-// buttons (Production / Interview / Return) · a collapsible block with all the VDO links.
-function mcCamFor(p) {
-  const cams = currentState.facecams || currentState.savedFacecams || [];
-  const cam = cams.find((fc) => (p.primaryid && fc.platformId && String(fc.platformId) === String(p.primaryid))
-    || (fc.name && p.name && fc.name.toLowerCase() === p.name.toLowerCase()));
-  return cam ? (cam.link || '') : '';
-}
-// Persist a Match-Control camera input as a facecam keyed to the player's name/ID, and sync dots.
-function mcSaveCamera(camInput) {
-  const link = (camInput.value || '').trim();
-  const name = camInput.dataset.pname || '';
-  const pid = camInput.dataset.pid || '';
-  if (!name && !pid) return;
-  if (link) {
-    const cams = currentState.facecams || currentState.savedFacecams || [];
-    const existing = cams.find((fc) => (pid && fc.platformId && String(fc.platformId) === String(pid)) || (fc.name && name && fc.name.toLowerCase() === name.toLowerCase()));
-    send('save_facecam', { name: name || pid, platform: (existing && existing.platform) || (pid ? 'steam' : 'bot'), platformId: pid || null, link });
-  } else {
-    send('delete_facecam', { name: name || pid });
-  }
-  const row = camInput.closest('.mc-player');
-  camInput.closest('.mc-cam')?.querySelector('.mc-cam-dot')?.classList.toggle('on', !!link);
-  const statCam = row?.querySelector('.mc-stat-cam');
-  if (statCam) { statCam.classList.toggle('on', !!link); statCam.dataset.camConfig = link ? '1' : '0'; }
-}
-function mcTeamCard(side, t) {
-  const players = (t.players || []).length
-    ? (t.players || []).map((p) => mcPlayerRow(side, p, t)).join('')
-    : '<div class="talent-empty">No players yet — add this team\'s roster on the <b>Teams</b> page.</div>';
-  return `<div class="mc-team talent-team" style="--tc:${tlEsc(t.color) || '#888'}" data-side="${side}" data-room="${tlEsc(t.room || '')}">
-    <div class="mc-team-head talent-team-head">
-      <span class="mc-team-conn mc-stat" data-conn="0" title="Team connection — start director consoles to detect"></span>
-      <span class="mc-team-name talent-team-name">${tlEsc(t.name) || side.toUpperCase()}</span>
-      <span class="talent-room" title="Private team room">${tlEsc(t.room)}</span>
-      <div class="mc-team-tools">
-        <button class="cf-ico-btn mc-team-move-btn" data-team-move="interview" data-side="${side}" title="Pull the whole team into the Interview / Desk room">${svgIcon('mic')}<span class="cf-ico-lbl">Team → Interview</span></button>
-        <button class="cf-ico-btn mc-team-move-btn cf-ico-del" data-team-move="home" data-side="${side}" title="Send the whole team back to their own room">${svgIcon('refresh')}<span class="cf-ico-lbl">Return all</span></button>
-        <button class="cf-ico-btn tl-listen-room" data-side="${side}" title="Listen in on the whole team room">${svgIcon('headphones')}</button>
-        <button class="cf-ico-btn mc-team-rlcam" data-side="${side}" title="Set every player's VDO feed as their Rocket League facecam">${svgIcon('camera')}<span class="cf-ico-lbl">All → RL cams</span></button>
-        <button class="cf-ico-btn talent-regen" data-side="${side}" title="New room + password (invalidates old links)">${svgIcon('refresh')}</button>
-      </div>
-    </div>
-    <div class="mc-players talent-rows">${players}</div>
-  </div>`;
-}
-// One-line collapsible player row: status dots · name · quick actions (listen, copy view,
-// interview/return, expand). Expanded body has stream-ID, camera (facecam), all VDO links + audio.
-function mcPlayerRow(side, p, t) {
-  const camSaved = mcCamFor(p);                 // saved facecam link (if any)
-  const camVal = camSaved || (p.obsUrl || '');  // default to the auto-generated VDO view link
-  const join = encodeURIComponent(p.joinUrl);
-  // In-game players for this team from the live Rocket League data (same source as the Players page).
-  const sideTeam = side === 'blue' ? 0 : 1;
-  const sidePlayers = (currentState.players || []).filter((pl) => pl && (pl.team === sideTeam || pl.team === side));
-  const ingameOpts = sidePlayers.map((pl) => `<option value="${tlEsc(pl.name)}"${(pl.name && p.name && pl.name.toLowerCase() === p.name.toLowerCase()) ? ' selected' : ''}>${tlEsc(pl.name)}</option>`).join('');
-  const ingameSelect = `<select class="input-select mc-ingame-sel" title="Link this camera to an in-game player → shows on their overlay statcard"><option value="">Link to in-game player…</option>${ingameOpts}</select>`;
-  const a = p.audio || {};
-  const audioBlock = p.obsUrl ? `<details class="talent-audio"${(a.volume != null || a.pan || a.mono) ? ' open' : ''}><summary>Audio</summary><div class="talent-audio-line"><label title="Volume 0–200">vol<input type="number" class="tl-a-vol" min="0" max="200" step="5" value="${a.volume != null ? a.volume : 100}"></label><label title="Stereo pan">pan<input type="range" class="tl-a-pan" min="-100" max="100" step="5" value="${a.pan != null ? a.pan : 0}"></label><label><input type="checkbox" class="tl-a-mono"${a.mono ? ' checked' : ''}> mono</label></div></details>` : '';
-  return `<div class="talent-row mc-player" draggable="true" data-side="${tlEsc(side)}" data-pid="${tlEsc(p.playerId)}" data-stream="${tlEsc(p.streamId || '')}" data-room="${tlEsc(t.room || '')}" data-name="${tlEsc(p.name || '')}" data-search="${tlEsc((p.name || '') + ' ' + (p.streamId || ''))}">
-    <div class="mc-p-line">
-      <span class="talent-drag-grip" title="Drag to the Interview / Desk room">${svgIcon('grip')}</span>
-      <span class="mc-stats">
-        <span class="mc-stat mc-stat-conn" data-conn="0" title="Connection — monitoring detects this automatically"></span>
-        <span class="mc-stat mc-stat-cam${camSaved ? ' on' : ''}" data-cam-config="${camSaved ? '1' : '0'}" title="${camSaved ? 'Camera linked' : 'No camera linked'}">${svgIcon('camera')}</span>
-      </span>
-      <span class="mc-p-name" title="In-game name (Rocket League roster)">${tlEsc(p.name) || '(unnamed)'}</span>
-      <span class="mc-loc" style="display:none"></span>
-      <span class="mc-p-quick">
-        <button class="cf-ico-btn tl-listen" title="Listen in on this player">${svgIcon('headphones')}</button>
-        <button class="cf-ico-btn tl-copy" data-url="${tlEsc(p.joinUrl)}" data-kind="join" title="Copy the invite / join link">${svgIcon('userplus')}</button>
-        <button class="cf-ico-btn tl-copy" data-url="${tlEsc(p.obsUrl)}" data-kind="obs" title="Copy the OBS view link">${svgIcon('copy')}</button>
-        <button class="cf-ico-btn mc-rlcam${camSaved ? ' is-on' : ''}" data-pname="${tlEsc(p.name || '')}" data-pid="${tlEsc(p.primaryid || '')}" data-obs="${tlEsc(p.obsUrl || '')}" title="${camSaved ? 'Linked as RL facecam — click to unlink' : 'Set this VDO feed as the Rocket League facecam'}">${svgIcon('camera')}</button>
-        <button class="cf-ico-btn mc-move-btn mc-intv" data-move="interview" title="Pull into the Interview / Desk room (sets them as interviewee)">${svgIcon('mic')}</button>
-        <button class="cf-ico-btn mc-move-btn cf-ico-del mc-return" data-move="home" title="Send back to their team room" style="display:none">${svgIcon('refresh')}</button>
-        <button class="cf-ico-btn mc-expand" title="Details, camera & all links">${svgIcon('chevdown')}</button>
-      </span>
-    </div>
-    <div class="mc-p-body" hidden>
-      <div class="mc-field">
-        <span class="mc-field-lbl">Camera</span>
-        <div class="mc-cam">
-          <span class="mc-cam-dot${camSaved ? ' on' : ''}" title="${camSaved ? 'Camera linked' : 'No camera linked'}">${svgIcon('camera')}</span>
-          <input class="input-text mc-cam-input" data-pname="${tlEsc(p.name || '')}" data-pid="${tlEsc(p.primaryid || '')}" data-default="${tlEsc(p.obsUrl || '')}" placeholder="VDO view link (default) — paste a URL to overwrite" value="${tlEsc(camVal)}" spellcheck="false">
-          <button class="cf-ico-btn mc-cam-reset" title="Reset to the auto-generated VDO view link">${svgIcon('refresh')}</button>
-        </div>
-      </div>
-      <div class="mc-field"><span class="mc-field-lbl">Stream ID</span><input class="input-text talent-sid mc-p-sid" value="${tlEsc(p.streamId)}" spellcheck="false" title="Stream ID (defaults to gamertag — edit to override)"></div>
-      <div class="mc-field">
-        <span class="mc-field-lbl">In-game</span>
-        <div class="mc-p-links">
-          <div class="tl-grp"><span class="tl-grp-cap">Link camera to in-game player</span><div class="tl-grp-btns">
-            ${ingameSelect}
-          </div></div>
-        </div>
-      </div>
-      <div class="mc-field">
-        <span class="mc-field-lbl">Links</span>
-        <div class="mc-p-links">
-          <div class="tl-grp"><span class="tl-grp-cap">Talent link</span><div class="tl-grp-btns">
-            <button class="cf-ico-btn tl-copy" data-url="${tlEsc(p.joinUrl)}" data-kind="join" title="Copy the player's invite/join link">${svgIcon('copy')}<span class="cf-ico-lbl">Invite</span></button>
-            <button class="cf-ico-btn tl-qr" title="Show join QR">${svgIcon('qr')}</button>
-            <a class="cf-ico-btn" href="${tlEsc(p.joinUrl)}" target="_blank" rel="noopener" title="Open join link">${svgIcon('external')}</a>
-          </div></div>
-          <div class="tl-grp"><span class="tl-grp-cap">OBS feed</span><div class="tl-grp-btns">
-            <button class="cf-ico-btn tl-copy" data-url="${tlEsc(p.obsUrl)}" data-kind="obs" title="Copy the OBS browser-source view link">${svgIcon('copy')}<span class="cf-ico-lbl">View</span></button>
-          </div></div>
-          ${audioBlock}
-          <div class="talent-qr" hidden><img alt="Join QR for ${tlEsc(p.name)}" src="${VDO_API}/api/vdo/qr?text=${join}"><span class="talent-qr-cap">Scan to join as <b>${tlEsc(p.name) || p.streamId}</b></span></div>
-        </div>
-      </div>
-    </div>
-  </div>`;
-}
-// Read a talent row's per-player audio controls and push them to the server.
-function tlSendPlayerAudio(row) {
-  if (!row) return;
-  const vol = parseInt(row.querySelector('.tl-a-vol')?.value, 10);
-  const pan = parseInt(row.querySelector('.tl-a-pan')?.value, 10) || 0;
-  const mono = !!row.querySelector('.tl-a-mono')?.checked;
-  const audio = {};
-  if (Number.isFinite(vol) && vol !== 100) audio.volume = vol;
-  if (pan) audio.pan = pan;
-  if (mono) audio.mono = true;
-  const payload = { playerId: row.dataset.pid, audio };
-  if (row.dataset.side) payload.side = row.dataset.side;
-  else if (row.dataset.teamName) payload.teamName = row.dataset.teamName;
-  send('set_player_audio', payload);
-  setTimeout(cfLoadTalent, 350);   // refresh OBS feed URLs with the new audio params
-}
-
-function cfUpdateListenPill(state) {
-  const li = state && state.listenIn;
-  const pill = el('cf-listen-active');
-  if (pill) {
-    if (li && li.active && li.name) {
-      pill.innerHTML = svgIcon('headphones') + ' ' + tlEsc(li.name) + (li.scope === 'room' ? ' — ROOM' : '');
-      pill.classList.add('ok');
-    } else { pill.textContent = 'Nobody on listen-in'; pill.classList.remove('ok'); }
-  }
-  // Open-feed (debug): let the producer open the exact VDO listen URL to verify what's playing.
-  const open = el('cf-listen-open');
-  if (open) { open.style.display = (li && li.active && li.url) ? 'block' : 'none'; open.dataset.url = (li && li.url) || ''; }
-  // Show-transcription toggle reflects the live state (skip while the producer is interacting with it).
-  const capToggle = el('cf-listen-captions');
-  if (capToggle && document.activeElement !== capToggle) {
-    capToggle.checked = !(state && state.vdo && state.vdo.listenCaptions === false);
-  }
-  // Green LISTENING state on whichever room/player button is the active feed.
-  const activeRoomSide = (li && li.active && li.scope === 'room') ? li.side : null;
-  document.querySelectorAll('.tl-listen-room').forEach((b) => {
-    const on = !!activeRoomSide && b.dataset.side === activeRoomSide;
-    b.classList.toggle('tl-listening', on);
-    b.innerHTML = on ? '<span class="live-dot"></span> LISTENING' : svgIcon('headphones') + ' Listen to room';
-    b.title = on ? 'Click to stop listening and hide the overlay' : 'Listen to the whole team room';
-  });
-  const activePid = (li && li.active && li.scope === 'player') ? li.playerId : null;
-  const activeSide = li && li.active ? li.side : null;
-  document.querySelectorAll('.tl-listen').forEach((b) => {
-    const r = b.closest('.talent-row');
-    const on = !!activePid && r && r.dataset.pid === activePid && r.dataset.side === activeSide;
-    b.classList.toggle('tl-listening', on);
-    b.innerHTML = on ? '<span class="live-dot"></span> LISTENING' : svgIcon('headphones') + ' Listen in';
-    b.title = on ? 'Click to stop listening and hide the overlay' : 'Listen in on this player';
-  });
-}
-async function tlCopy(text, btn) {
-  try {
-    await navigator.clipboard.writeText(text);
-    if (btn) {
-      const o = btn.innerHTML; btn.classList.add('is-copied');
-      btn.innerHTML = svgIcon('check') + '<span class="cf-ico-lbl">Copied</span>';
-      setTimeout(() => { btn.innerHTML = o; btn.classList.remove('is-copied'); }, 1200);
-    }
-  } catch { /* clipboard blocked */ }
-}
-
-// Delegated actions inside the talent grid
-el('cf-talent-teams')?.addEventListener('click', (e) => {
-  const row = e.target.closest('.talent-row');
-  // Match Control: move a single player / whole team between rooms (director transfer).
-  const moveBtn = e.target.closest('.mc-move-btn');
-  if (moveBtn) {
-    const mrow = e.target.closest('.mc-player');
-    if (mrow) {
-      const key = moveBtn.dataset.move;
-      cfMovePlayer({ stream: mrow.dataset.stream, name: mrow.dataset.name, side: mrow.dataset.side, homeRoom: mrow.dataset.room }, key);
-      // Interview → also set this player as the spotlight-desk interviewee (right cam); Return clears it.
-      if (key === 'interview') send('set_interviewee', { side: mrow.dataset.side, playerId: mrow.dataset.pid });
-      else if (key === 'home') send('clear_interviewee', { side: mrow.dataset.side, playerId: mrow.dataset.pid });
-    }
-    return;
-  }
-  const teamMoveBtn = e.target.closest('.mc-team-move-btn');
-  if (teamMoveBtn) { cfMoveTeam(teamMoveBtn.dataset.side, teamMoveBtn.dataset.teamMove); return; }
-  const expandBtn = e.target.closest('.mc-expand');
-  if (expandBtn) { const mrow = e.target.closest('.mc-player'); const body = mrow && mrow.querySelector('.mc-p-body'); if (body) { body.hidden = !body.hidden; mrow.classList.toggle('is-open', !body.hidden); } return; }
-  // Reset camera to the auto-generated VDO view link (and persist it).
-  const camReset = e.target.closest('.mc-cam-reset');
-  if (camReset) {
-    const inp = camReset.closest('.mc-cam')?.querySelector('.mc-cam-input');
-    if (inp) {
-      inp.value = inp.dataset.default || '';
-      mcSaveCamera(inp);
-      const mrow = e.target.closest('.mc-player');
-      mrow?.querySelector('.mc-stat-cam')?.classList.toggle('on', !!inp.value.trim());
-    }
-    return;
-  }
-  // One-click: use this player's VDO feed as their Rocket League facecam (toggle on/off).
-  // Reuses the existing facecam pipeline (save_facecam keyed by name/primaryid) so the RL
-  // overlay shows the cam — no trip to the manual facecam grid.
-  const rlcam = e.target.closest('.mc-rlcam');
-  if (rlcam) {
-    const name = rlcam.dataset.pname || '', pid = rlcam.dataset.pid || '', obs = rlcam.dataset.obs || '';
-    const on = rlcam.classList.contains('is-on');
-    if (on) {
-      send('delete_facecam', { name: name || pid });
-    } else {
-      if (!obs) { if (typeof showToast === 'function') showToast('No VDO feed yet — generate the team room first.', '#c53030'); return; }
-      send('save_facecam', { name: name || pid, platform: pid ? 'steam' : 'bot', platformId: pid || null, link: obs });
-    }
-    rlcam.classList.toggle('is-on', !on);
-    rlcam.closest('.mc-player')?.querySelector('.mc-stat-cam')?.classList.toggle('on', !on);
-    return;
-  }
-  // Team-level: link every player's VDO feed as their RL facecam at once.
-  const teamRlcam = e.target.closest('.mc-team-rlcam');
-  if (teamRlcam) {
-    const card = teamRlcam.closest('.mc-team'); let n = 0;
-    card?.querySelectorAll('.mc-rlcam').forEach((b) => {
-      const obs = b.dataset.obs || ''; if (!obs) return;
-      const nm = b.dataset.pname || '', pd = b.dataset.pid || '';
-      send('save_facecam', { name: nm || pd, platform: pd ? 'steam' : 'bot', platformId: pd || null, link: obs });
-      b.classList.add('is-on');
-      b.closest('.mc-player')?.querySelector('.mc-stat-cam')?.classList.add('on'); n++;
-    });
-    if (typeof showToast === 'function') showToast(n ? `Linked ${n} player cam${n > 1 ? 's' : ''} to RL facecams.` : 'No VDO feeds yet — generate the team room first.', n ? '#22c55e' : '#c53030');
-    return;
-  }
-  const copyBtn = e.target.closest('.tl-copy');
-  if (copyBtn) { tlCopy(copyBtn.dataset.url, copyBtn); return; }
-  if (e.target.closest('.tl-qr') && row) { const qr = row.querySelector('.talent-qr'); if (qr) qr.hidden = !qr.hidden; return; }
-  const listenRoom = e.target.closest('.tl-listen-room');
-  if (listenRoom) {
-    const li = currentState && currentState.listenIn;
-    if (li && li.active && li.scope === 'room' && li.side === listenRoom.dataset.side) send('clear_listen_in');
-    else send('set_listen_in', { side: listenRoom.dataset.side, scope: 'room' });
-    return;
-  }
-  const listenPlayer = e.target.closest('.tl-listen');
-  if (listenPlayer && row && row.dataset.side) {
-    const li = currentState && currentState.listenIn;
-    if (li && li.active && li.scope === 'player' && li.side === row.dataset.side && li.playerId === row.dataset.pid) send('clear_listen_in');
-    else send('set_listen_in', { side: row.dataset.side, playerId: row.dataset.pid });
-    return;
-  }
-  const regen = e.target.closest('.talent-regen');
-  if (regen) {
-    appConfirm("Get a new room for this team? Anyone already connected with the current link — players or casters — will be cut off and need the new invite link to rejoin.", 'New room', true).then((ok) => {
-      if (!ok) return;
-      send('generate_team_vdo', { side: regen.dataset.side, regenerate: true });
-      setTimeout(cfLoadTalent, 350);
-    });
-    return;
-  }
-  const genSaved = e.target.closest('.talent-gen-saved');
-  if (genSaved) { send('generate_saved_team_vdo', { teamName: genSaved.dataset.teamName }); setTimeout(cfLoadTalent, 500); return; }
-  const regenSaved = e.target.closest('.talent-regen-saved');
-  if (regenSaved) {
-    appConfirm("Get a new room for this team? Anyone already connected with the current link will be cut off and need the new invite link to rejoin.", 'New room', true).then((ok) => {
-      if (!ok) return;
-      send('generate_saved_team_vdo', { teamName: regenSaved.dataset.teamName, regenerate: true });
-      setTimeout(cfLoadTalent, 500);
-    });
-    return;
-  }
-  if (e.target.id === 'talent-gen-all-btn' || e.target.closest('#talent-gen-all-btn')) {
-    send('generate_saved_team_vdo', {}); setTimeout(cfLoadTalent, 600); return;
-  }
-});
-
-// Stream-ID override → re-resolve that player's links
-el('cf-talent-teams')?.addEventListener('change', (e) => {
-  const row = e.target.closest('.talent-row'); if (!row) return;
-  const sid = e.target.closest('.talent-sid');
-  if (sid) {
-    if (row.dataset.side) {
-      send('set_player_stream_id', { side: row.dataset.side, playerId: row.dataset.pid, streamId: sid.value });
-    } else if (row.dataset.teamName) {
-      send('set_saved_team_player_stream_id', { teamName: row.dataset.teamName, playerId: row.dataset.pid, streamId: sid.value });
-    }
-    setTimeout(cfLoadTalent, 350);
-    return;
-  }
-  // Match Control: inline camera URL — keyed to this player's name/ID (defaults to VDO view link).
-  const camInput = e.target.closest('.mc-cam-input');
-  if (camInput) { mcSaveCamera(camInput); return; }
-  // Link the camera to a specific in-game player (RL roster) → that player's overlay statcard cam.
-  const ingameSel = e.target.closest('.mc-ingame-sel');
-  if (ingameSel) {
-    const mrow = e.target.closest('.mc-player'); if (!mrow) return;
-    const inName = ingameSel.value;
-    const link = (mrow.querySelector('.mc-cam-input')?.value || '').trim();
-    if (inName && link) {
-      const pl = (currentState.players || []).find((x) => x && x.name === inName);
-      const pid = pl ? (pl.primaryid || pl.id || '') : '';
-      send('save_facecam', { name: inName, platform: (pid ? 'steam' : 'bot'), platformId: pid || null, link });
-      mrow.querySelector('.mc-cam-dot')?.classList.add('on');
-      const sc = mrow.querySelector('.mc-stat-cam'); if (sc) { sc.classList.add('on'); sc.dataset.camConfig = '1'; }
-    }
-    return;
-  }
-  const camSlot = e.target.closest('.tl-cam-slot');
-  if (camSlot) {
-    const slot = parseInt(camSlot.value, 10);
-    if (slot >= 1 && slot <= 5) {
-      if (row.dataset.side) {
-        send('assign_talent_cam', { side: row.dataset.side, playerId: row.dataset.pid, slot });
-      } else if (row.dataset.teamName) {
-        send('assign_talent_cam', { teamName: row.dataset.teamName, playerId: row.dataset.pid, slot });
-      }
-      setTimeout(cfLoadTalent, 350);
-    } else if (slot === 0) {
-      // "Set as CAM…" re-selected: clear the player-cam assignment if this row held it.
-      const pc = currentState?.casters?.playerCam;
-      if (pc && pc.playerId === row.dataset.pid) send('clear_player_cam');
-      setTimeout(cfLoadTalent, 350);
-    }
-    return;
-  }
-  // Per-player audio controls (volume / pan / mono).
-  if (e.target.closest('.tl-a-vol, .tl-a-pan, .tl-a-mono')) { tlSendPlayerAudio(row); return; }
-});
-el('cf-talent-generate')?.addEventListener('click', () => { send('generate_team_vdo', {}); setTimeout(cfLoadTalent, 350); });
-el('cf-talent-refresh')?.addEventListener('click', cfLoadTalent);
-el('cf-listen-clear')?.addEventListener('click', () => send('clear_listen_in'));
-el('cf-listen-open')?.addEventListener('click', () => { const u = el('cf-listen-open')?.dataset.url; if (u) window.open(u, '_blank', 'noopener'); });
-el('cf-listen-captions')?.addEventListener('change', function () { send('set_listen_captions', { on: this.checked }); });
-
-// VDO.ninja settings now live on the Integrations page — jump there from the Camera Feeds tab,
-// and (re)load the saved settings whenever the VDO integration panel is opened.
-el('cf-goto-vdo-settings')?.addEventListener('click', () => {
-  if (typeof switchTab === 'function') switchTab('integrations');
-  if (typeof window._intShowTab === 'function') window._intShowTab('cameras');
-  if (typeof cfLoadVdoSettings === 'function') cfLoadVdoSettings();
-});
-
-// ── VDO.ninja settings (localStorage; feeds every link the page builds) ──
-const CF_VDO_KEY = 'ne_vdo_settings';
-const CF_VDO_DEFAULTS = { base: 'https://vdo.ninja', room: '', viewParams: '', pushParams: '', cleanOutput: true, transparent: false, cover: true, volume: 100, bitrate: '', codec: '', buffer: '',
-  // Audio defaults applied to every view/OBS feed (per-caster / per-player can override).
-  audioMono: false, audioBitrate: '', audioParams: '' };
-function cfVdo() {
-  try { return Object.assign({}, CF_VDO_DEFAULTS, JSON.parse(localStorage.getItem(CF_VDO_KEY) || '{}')); }
-  catch { return Object.assign({}, CF_VDO_DEFAULTS); }
-}
-// Turn a normalized audio object into a VDO.ninja URL param string (no leading '&').
-// Fields: volume 0–200, pan −100..+100 (0 = centre → &panning 0–180), mono, noaudio, ab (kbps),
-// params (free-text extra VDO audio params, e.g. "&compressor&limiter").
-function vdoAudioParams(a) {
-  a = a || {};
-  const out = [];
-  const vol = a.volume;
-  if (vol != null && vol !== '' && +vol !== 100) out.push('volume=' + Math.max(0, Math.min(200, parseInt(vol, 10) || 0)));
-  if (a.mono) out.push('mono');
-  if (a.noaudio) out.push('noaudio');
-  if (a.ab !== undefined && a.ab !== null && a.ab !== '') out.push('ab=' + (parseInt(a.ab, 10) || 0));
-  if (a.pan != null && a.pan !== '' && +a.pan !== 0) {
-    const deg = Math.round((Math.max(-100, Math.min(100, +a.pan)) + 100) / 200 * 180);   // −100→0(L) … 0→90(C) … 100→180(R)
-    out.push('panning=' + deg);
-  }
-  if (a.params) out.push(String(a.params).replace(/^&+/, '').trim());
-  return out.filter(Boolean).join('&');
-}
-// Global audio defaults from the saved VDO settings.
-function cfVdoAudioDefaults() {
-  const v = cfVdo();
-  return { volume: v.volume, mono: !!v.audioMono, ab: v.audioBitrate || '', pan: 0, params: v.audioParams || '' };
-}
-function cfLoadVdoSettings() {
-  const v = cfVdo();
-  const set = (id, val) => { const e = el(id); if (e && e.type !== 'checkbox') e.value = val; };
-  set('cf-vdo-base', v.base); set('cf-vdo-room', v.room); set('cf-vdo-params', v.viewParams); set('cf-vdo-push', v.pushParams);
-  if (el('cf-vdo-clean')) el('cf-vdo-clean').checked = v.cleanOutput !== false;
-  if (el('cf-vdo-transparent')) el('cf-vdo-transparent').checked = !!v.transparent;
-  if (el('cf-vdo-cover')) el('cf-vdo-cover').checked = v.cover !== false;
-  if (el('cf-vdo-volume')) { el('cf-vdo-volume').value = v.volume ?? 100; const lab = el('cf-vdo-volume-val'); if (lab) lab.textContent = v.volume ?? 100; }
-  set('cf-vdo-bitrate', v.bitrate || ''); set('cf-vdo-buffer', v.buffer || '');
-  if (el('cf-vdo-codec')) el('cf-vdo-codec').value = v.codec || '';
-  // Audio defaults
-  set('cf-vdo-ab', v.audioBitrate || ''); set('cf-vdo-audioparams', v.audioParams || '');
-  if (el('cf-vdo-mono')) el('cf-vdo-mono').checked = !!v.audioMono;
-  // Caption language is server-side (Talent Rooms config), not localStorage.
-  if (el('cf-vdo-lang')) el('cf-vdo-lang').value = (currentState?.vdo?.lang) || 'en-US';
-}
-el('cf-vdo-volume')?.addEventListener('input', function () { const lab = el('cf-vdo-volume-val'); if (lab) lab.textContent = this.value; });
-el('cf-vdo-save')?.addEventListener('click', () => {
-  const v = {
-    base: (el('cf-vdo-base').value || 'https://vdo.ninja').trim().replace(/\/+$/, ''),
-    room: el('cf-vdo-room').value.trim(),
-    viewParams: el('cf-vdo-params').value.trim(),
-    pushParams: el('cf-vdo-push').value.trim(),
-    cleanOutput: !!el('cf-vdo-clean')?.checked,
-    transparent: !!el('cf-vdo-transparent')?.checked,
-    cover: !!el('cf-vdo-cover')?.checked,
-    volume: parseInt(el('cf-vdo-volume')?.value, 10) || 0,
-    bitrate: (el('cf-vdo-bitrate')?.value || '').trim(),
-    codec: el('cf-vdo-codec')?.value || '',
-    buffer: (el('cf-vdo-buffer')?.value || '').trim(),
-    audioMono: !!el('cf-vdo-mono')?.checked,
-    audioBitrate: (el('cf-vdo-ab')?.value || '').trim(),
-    audioParams: (el('cf-vdo-audioparams')?.value || '').trim(),
-  };
-  try { localStorage.setItem(CF_VDO_KEY, JSON.stringify(v)); } catch {}
-  // Mirror to the server-side config that powers the Talent Rooms workflow (rooms, join links,
-  // OBS feeds, listen-in). The caption language field is talent-only, so preserve it.
-  send('set_vdo_config', {
-    base: v.base, cleanOutput: v.cleanOutput, transparent: v.transparent, cover: v.cover,
-    volume: v.volume, bitrate: v.bitrate, codec: v.codec, buffer: v.buffer,
-    audioMono: v.audioMono, audioBitrate: v.audioBitrate, audioParams: v.audioParams,
-    viewParams: v.viewParams, pushParams: v.pushParams,
-    lang: (el('cf-vdo-lang')?.value || currentState?.vdo?.lang || 'en-US')
-  });
-  const s = el('cf-vdo-status'); if (s) { s.textContent = 'Saved. Caster, share + talent-room links will use these settings.'; s.className = 'ev-status ev-ok'; }
-  renderCfShares();
-});
-
-// Build a clean VDO.ninja VIEW url from a stream id (or pass a full URL through unchanged).
-function buildVdoView(idOrUrl, opts) {
-  opts = opts || {};
-  const v = cfVdo();
-  let s = (idOrUrl || '').trim();
-  if (!s) return '';
-  if (/^https?:\/\//i.test(s)) {
-    // Pasted full URL → keep it, but still ensure it fills the frame + autoplays.
-    if (v.cover !== false && !/[?&]cover\b/i.test(s)) s += '&cover';
-    if (!/[?&]autostart\b/i.test(s)) s += '&autostart';
-    return s;
-  }
-  const room = (opts.room || '').trim() || v.room;
-  let url = `${v.base}/?view=${encodeURIComponent(s)}`;
-  if (room) url += `&room=${encodeURIComponent(room)}`;
-  if (opts.solo) url += '&solo';             // isolate just this feed (one source = one OBS audio fader)
-  if (v.cleanOutput !== false) url += '&cleanoutput';
-  if (v.transparent) url += '&transparent';
-  if (v.cover !== false) url += '&cover';   // fill the frame (crop to edges, no letterbox)
-  url += '&autostart';                       // play immediately, no click needed
-  // Audio: global defaults, with an optional per-feed override (opts.audio) or legacy opts.volume.
-  const audio = Object.assign(cfVdoAudioDefaults(),
-    (opts.volume != null && opts.volume !== '') ? { volume: opts.volume } : {},
-    opts.audio || {});
-  const aStr = vdoAudioParams(audio);
-  if (aStr) url += '&' + aStr;
-  if (v.codec) url += `&codec=${v.codec}`;
-  if (v.bitrate) url += `&bitrate=${parseInt(v.bitrate, 10) || 0}`;
-  if (v.buffer) url += `&buffer=${parseInt(v.buffer, 10) || 0}`;
-  if (v.viewParams) url += (v.viewParams[0] === '&' ? '' : '&') + v.viewParams.replace(/^&/, '');
-  return url;
-}
-
-
-// ── Unified talent-group cards (Casters · Guests · Observers) ────────────────
-// Teams-style cards fed by the shared group rooms from /api/vdo/links. One renderer for all
-// three so they match the Teams UI (room header + collapsible member rows, connection pulse,
-// Join/View/QR links, audio). Members come from the caster library, filtered by kind.
-const _CF_GROUP_META = {
-  casters:   { label: 'HOSTS',     color: '#e83a8b', container: 'cf-casters-group' },
-  guests:    { label: 'LOBBY',     color: '#a855f7', container: 'cf-guests-group' },
-  observers: { label: 'OBSERVERS', color: '#2dd4bf', container: 'cf-observers-group' },
-};
-const _CF_SOCIAL_LABEL = { x: 'X', twitch: 'Twitch', youtube: 'YouTube', instagram: 'Instagram', tiktok: 'TikTok', discord: 'Discord', kick: 'Kick', facebook: 'Facebook', other: 'Link' };
-const _cfGroupSearch = { casters: '', guests: '', observers: '' };
-// Hide member rows that don't match the per-group search query (filters the library list).
-function cfFilterGroup(key) {
-  const meta = _CF_GROUP_META[key]; if (!meta) return;
-  const wrap = el(meta.container); if (!wrap) return;
-  const q = (_cfGroupSearch[key] || '').toLowerCase().trim();
-  wrap.querySelectorAll('.cf-grp-row').forEach((row) => {
-    row.style.display = (!q || (row.dataset.search || '').includes(q)) ? '' : 'none';
-  });
-}
-
-// The member LIST comes from the broadcast caster library (so adds/edits show instantly and don't
-// depend on the /api/vdo/links round-trip), merged with the server group's per-member feed URLs.
-function cfGroupMembersFor(key, serverGroup) {
-  const lib = (typeof currentState !== 'undefined' && currentState.casters && currentState.casters.library) || [];
-  const pred = key === 'guests' ? (p => p.kind === 'host')
-            : key === 'observers' ? (p => p.kind === 'observer')
-            : (p => p.kind !== 'host' && p.kind !== 'observer');
-  const byId = {};
-  ((serverGroup && serverGroup.members) || []).forEach((sm) => { if (sm.libraryId) byId[sm.libraryId] = sm; });
-  return lib.filter(pred).map((p) => {
-    const sm = byId[p.id] || {};
-    return {
-      libraryId: p.id, name: p.name || '', handle: p.handle || '', role: p.role || '', social: p.social || 'none',
-      camUrl: p.camUrl || '', audio: p.audio || null,
-      streamId: sm.streamId || '',
-      joinUrl: sm.joinUrl || '',
-      obsUrl: p.camUrl ? p.camUrl : (sm.obsUrl || ''),   // custom view link overrides the auto feed
-    };
-  });
-}
-
-async function cfLoadGroups() {
-  let d = {};
-  try { d = await (await fetch(`${VDO_API}/api/vdo/links`)).json(); } catch (e) { d = {}; }
-  _cfDirectorData = d;   // keep Director data + the per-member "Move to" room options fresh
-  if (typeof cfSyncDirectorConsoles === 'function') cfSyncDirectorConsoles();   // pick up group rooms live
-  const groups = d.groups || {};
-  Object.keys(_CF_GROUP_META).forEach((key) => {
-    const meta = _CF_GROUP_META[key];
-    const wrap = el(meta.container); if (!wrap || _editingInside(wrap)) return;
-    const sg = groups[key] || {};
-    const g = { name: meta.label, room: sg.room || '', members: cfGroupMembersFor(key, sg) };
-    wrap.innerHTML = cfGroupCard(g, key, meta.color);
-    cfFilterGroup(key);   // re-apply any active search filter after the re-render
-  });
-  cfWireGroupCards();
-  if (typeof cfUpdateConnStatus === 'function') cfUpdateConnStatus();
-}
-
-function cfGroupCard(g, key, color) {
-  const members = g.members || [];
-  const addLbl = key === 'guests' ? 'guest' : (key === 'observers' ? 'observer' : 'caster');
-  const rows = members.length
-    ? members.map((m) => cfGroupMemberRow(m, g.room, key)).join('')
-    : `<div class="talent-empty">No ${addLbl}s yet — click <b>+ Add</b> above. Their shared room is created automatically.</div>`;
-  const roomTag = g.room
-    ? `<span class="talent-room" title="Shared ${tlEsc(g.name)} room — everyone in this group joins it">${tlEsc(g.room)}</span>`
-    : `<span class="talent-room" style="opacity:.55" title="The room is created automatically once a member is added">no room yet</span>`;
-  return `<div class="mc-team talent-team cf-group-team" style="--tc:${color}" data-group="${key}" data-room="${tlEsc(g.room || '')}">
-    <div class="mc-team-head talent-team-head">
-      <span class="mc-team-conn mc-stat" data-conn="0" title="Room connection — start Director monitoring to detect"></span>
-      <span class="mc-team-name talent-team-name">${tlEsc(g.name)}</span>
-      ${roomTag}
-      <div class="mc-team-tools">
-        <input type="search" class="input-text cf-grp-search" data-group="${key}" placeholder="Search ${addLbl}s…" value="${tlEsc(_cfGroupSearch[key] || '')}" title="Filter the ${addLbl} library">
-        <button class="cf-ico-btn cf-ico-add cf-grp-add" data-group="${key}" title="Add a ${addLbl}">${svgIcon('plus')}<span class="cf-ico-lbl">Add</span></button>
-        <button class="cf-ico-btn cf-grp-regen" data-group="${key}" title="New room + password (invalidates old links)">${svgIcon('refresh')}</button>
-      </div>
-    </div>
-    <!-- Fallback inline quick-add — the "+ Add" button opens the full crew dialog (openCrewAdd);
-         this stays only as a no-JS fallback. -->
-    <div class="cf-grp-add-form" data-group="${key}" hidden>
-      <input class="input-text cf-ga-name" placeholder="Name" maxlength="40">
-      <input class="input-text cf-ga-handle" placeholder="@handle (optional)" maxlength="80">
-      <button class="btn btn-primary btn-xs cf-ga-save">Add ${addLbl}</button>
-      <button class="btn btn-ghost btn-xs cf-ga-cancel">Cancel</button>
-    </div>
-    <div class="mc-players talent-rows">${rows}</div>
-  </div>`;
-}
-
-// Room <option> list for the per-member "Move to" dropdown — every monitored room except the
-// member's current one (Interview/Desk, team rooms, the three group rooms).
-function cfRoomOptions(excludeRoom) {
-  const d = _cfDirectorData || {};
-  const opts = [];
-  if (d.casterRoom && d.casterRoom.room) opts.push([d.casterRoom.room, 'Interview / Desk']);
-  ['blue', 'orange'].forEach((s) => { const t = d.teams && d.teams[s]; if (t && t.room) opts.push([t.room, t.name || s]); });
-  const G = d.groups || {};
-  [['casters', 'HOSTS'], ['observers', 'OBSERVERS'], ['guests', 'LOBBY']].forEach(([k, lbl]) => { const g = G[k]; if (g && g.room) opts.push([g.room, g.name || lbl]); });
-  return opts.filter(([room]) => room && room !== excludeRoom).map(([room, label]) => `<option value="${tlEsc(room)}">${tlEsc(label)}</option>`).join('');
-}
-
-function cfGroupMemberRow(m, groupRoom, key) {
-  const a = m.audio || {};
-  const sid = m.streamId || '';
-  const join = encodeURIComponent(m.joinUrl || '');
-  const socialTxt = (m.social && m.social !== 'none') ? (_CF_SOCIAL_LABEL[m.social] || 'Link') : '';
-  const sub = [m.handle ? '@' + m.handle : '', socialTxt].filter(Boolean).join(' · ');
-  const socialOpts = ['none'].concat(Object.keys(_CF_SOCIAL_LABEL)).map((v) => `<option value="${v}"${(m.social || 'none') === v ? ' selected' : ''}>${v === 'none' ? 'No social' : (_CF_SOCIAL_LABEL[v] || v)}</option>`).join('');
-  const audioBlock = `<details class="talent-audio"${(a.volume != null || a.pan || a.mono) ? ' open' : ''}><summary>Audio</summary><div class="talent-audio-line"><label title="Volume 0–200">vol<input type="number" class="gm-a-vol" min="0" max="200" step="5" value="${a.volume != null ? a.volume : 100}"></label><label title="Stereo pan">pan<input type="range" class="gm-a-pan" min="-100" max="100" step="5" value="${a.pan != null ? a.pan : 0}"></label><label><input type="checkbox" class="gm-a-mono"${a.mono ? ' checked' : ''}> mono</label></div></details>`;
-  // Casters get a spot selector (Off air / Caster 1–4) — the chosen spot maps directly to the
-  // overlay position via state.casters.lineup (resolved to the overlay's caster list server-side).
-  let slotSel = '';
-  if (key === 'casters') {
-    const lineup = (typeof currentState !== 'undefined' && currentState.casters && currentState.casters.lineup) || [];
-    const ent = lineup.find((e) => e.libraryId === m.libraryId);
-    const curSlot = ent ? (ent.slot || 0) : 0;
-    slotSel = `<select class="input-select gm-slot" title="Assign this caster to an overlay spot">
-      <option value="0"${curSlot === 0 ? ' selected' : ''}>Off air</option>
-      ${[1, 2, 3, 4].map((n) => `<option value="${n}"${curSlot === n ? ' selected' : ''}>Caster ${n}</option>`).join('')}
-    </select>`;
-  }
-  const searchHay = ((m.name || '') + ' ' + (m.handle || '') + ' ' + (m.role || '')).toLowerCase();
-  return `<div class="talent-row mc-player cf-grp-row" draggable="true" data-stream="${tlEsc(sid)}" data-libid="${tlEsc(m.libraryId || '')}" data-name="${tlEsc(m.name || '')}" data-room="${tlEsc(groupRoom || '')}" data-search="${tlEsc(searchHay)}">
-    <div class="mc-p-line">
-      <span class="mc-stats">
-        <span class="mc-stat mc-stat-conn" data-conn="0" title="Connection — Director monitoring detects this"></span>
-        <span class="mc-stat mc-stat-cam" title="Camera — pulses when monitoring sees their video">${svgIcon('camera')}</span>
-      </span>
-      <span class="mc-p-name">${tlEsc(m.name || m.handle || '—')}${m.role ? ` <span class="cf-grp-role">${tlEsc(m.role)}</span>` : ''}</span>
-      ${sub ? `<span class="cf-grp-sub">${tlEsc(sub)}</span>` : ''}
-      <span class="mc-p-quick">
-        ${slotSel}
-        <button class="cf-ico-btn tl-copy" data-url="${tlEsc(m.joinUrl)}" title="Copy the invite / join link"${m.joinUrl ? '' : ' disabled'}>${svgIcon('userplus')}</button>
-        <button class="cf-ico-btn tl-copy" data-url="${tlEsc(m.obsUrl)}" title="Copy the OBS view link"${m.obsUrl ? '' : ' disabled'}>${svgIcon('copy')}</button>
-        <button class="cf-ico-btn gm-move-intv" title="Move into the Interview / Desk room">${svgIcon('mic')}</button>
-        <button class="cf-ico-btn mc-expand" title="Edit profile · move to another room · audio">${svgIcon('chevdown')}</button>
-      </span>
-    </div>
-    <div class="mc-p-body gm-body" hidden>
-      <div class="gm-sect">
-        <div class="gm-sect-row"><span class="gm-sect-lbl">Name</span><input class="input-text gm-e-name" placeholder="Display name" value="${tlEsc(m.name || '')}" maxlength="40"></div>
-        <div class="gm-sect-row"><span class="gm-sect-lbl">Handle</span><input class="input-text gm-e-handle" placeholder="@handle" value="${tlEsc(m.handle || '')}" maxlength="80"></div>
-        <div class="gm-sect-row"><span class="gm-sect-lbl">Social</span><select class="input-select gm-e-social">${socialOpts}</select></div>
-        <div class="gm-sect-row"><span class="gm-sect-lbl">Role</span><input class="input-text gm-e-role" placeholder="Play-by-Play, Host, Analyst…" value="${tlEsc(m.role || '')}" maxlength="40" list="cf-role-dl"></div>
-        <div class="gm-sect-row"><span class="gm-sect-lbl" title="Paste a VDO.ninja view link to override the auto-generated room feed (e.g. an external source)">Custom view</span><input class="input-text gm-e-cam" placeholder="Auto — paste a VDO view link to override" value="${tlEsc(m.camUrl || '')}" maxlength="1000" spellcheck="false">${m.camUrl ? '<span class="gm-override-tag">OVERRIDE</span>' : ''}</div>
-        <div class="gm-sect-actions"><span class="gm-save-note">Changes save automatically.</span></div>
-      </div>
-      <div class="gm-sect">
-        <div class="gm-sect-row"><span class="gm-sect-lbl">Move to</span><select class="input-select gm-move-sel"><option value="">Move to a room…</option>${cfRoomOptions(groupRoom)}</select><span class="gm-move-hint">Director must be running.</span></div>
-        <div class="gm-sect-row"><span class="gm-sect-lbl">Links</span><span class="tl-grp-btns">
-          <button class="cf-ico-btn tl-copy" data-url="${tlEsc(m.joinUrl)}"${m.joinUrl ? '' : ' disabled'} title="Copy invite/join link">${svgIcon('userplus')}<span class="cf-ico-lbl">Invite</span></button>
-          <button class="cf-ico-btn tl-copy" data-url="${tlEsc(m.obsUrl)}"${m.obsUrl ? '' : ' disabled'} title="Copy OBS view link">${svgIcon('copy')}<span class="cf-ico-lbl">View</span></button>
-          <button class="cf-ico-btn gm-qr"${m.joinUrl ? '' : ' disabled'} title="Show join QR">${svgIcon('qr')}</button>
-          ${m.joinUrl ? `<a class="cf-ico-btn" href="${tlEsc(m.joinUrl)}" target="_blank" rel="noopener" title="Open join link">${svgIcon('external')}</a>` : ''}
-        </span></div>
-        <div class="gm-sect-row"><span class="gm-sect-lbl">Audio</span><div class="gm-audio-inline"><label title="Volume 0–200">vol<input type="number" class="gm-a-vol" min="0" max="200" step="5" value="${a.volume != null ? a.volume : 100}"></label><label title="Stereo pan">pan<input type="range" class="gm-a-pan" min="-100" max="100" step="5" value="${a.pan != null ? a.pan : 0}"></label><label><input type="checkbox" class="gm-a-mono"${a.mono ? ' checked' : ''}> mono</label></div></div>
-        ${m.joinUrl ? `<div class="talent-qr" hidden><img alt="Join QR" src="${VDO_API}/api/vdo/qr?text=${join}"><span class="talent-qr-cap">Scan to join as <b>${tlEsc(m.name || m.handle)}</b></span></div>` : ''}
-      </div>
-    </div>
-  </div>`;
-}
-
-// Delegated interactions for the three group cards (copy, expand, QR, audio, room regen).
-function cfWireGroupCards() {
-  Object.values(_CF_GROUP_META).forEach((meta) => {
-    const wrap = el(meta.container);
-    if (!wrap || wrap._grpWired) return; wrap._grpWired = true;
-    wrap.addEventListener('click', (e) => {
-      const copyBtn = e.target.closest('.tl-copy');
-      if (copyBtn) { if (copyBtn.dataset.url) tlCopy(copyBtn.dataset.url, copyBtn); return; }
-      const exp = e.target.closest('.mc-expand');
-      if (exp) { const row = e.target.closest('.mc-player'); const b = row && row.querySelector('.mc-p-body'); if (b) { b.hidden = !b.hidden; row.classList.toggle('is-open', !b.hidden); } return; }
-      const qr = e.target.closest('.gm-qr');
-      if (qr) { const row = e.target.closest('.mc-player'); const box = row && row.querySelector('.talent-qr'); if (box) box.hidden = !box.hidden; return; }
-      const regen = e.target.closest('.cf-grp-regen');
-      if (regen) {
-        appConfirm("Get a new room for this whole group? Anyone already connected with the current link will be cut off from the rest — they'll need the new invite link to rejoin.", 'New room', true).then((ok) => {
-          if (!ok) return;
-          send('regenerate_group_room', { group: regen.dataset.group });
-          setTimeout(cfLoadGroups, 400);
-        });
-        return;
-      }
-      // Quick "→ Interview": move this member into the Interview / Desk room.
-      const mvIntv = e.target.closest('.gm-move-intv');
-      if (mvIntv) {
-        const row = e.target.closest('.cf-grp-row'); if (!row) return;
-        const target = (typeof cfRoomId === 'function') ? cfRoomId('interview', '') : '';
-        const ok = cfMovePlayerToRoom({ stream: row.dataset.stream, name: row.dataset.name, side: '', homeRoom: row.dataset.room }, target, 'Interview / Desk');
-        if (typeof showToast === 'function') showToast(ok ? `Moving ${row.dataset.name || 'them'} → Interview / Desk…` : 'Start Director monitoring first (Director Control Center below).', ok ? '#22c55e' : '#f59e0b');
-        return;
-      }
-      // + Add: reveal the inline add form on this card.
-      const addBtn = e.target.closest('.cf-grp-add');
-      if (addBtn) {
-        // Open the SAME full crew add form (country autofill + all questions) preset to this group,
-        // instead of a separate minimal inline form — one identical form for casters/hosts/observers.
-        const grp = addBtn.dataset.group || (e.target.closest('.cf-grp-add-form')?.dataset.group) || 'casters';
-        if (typeof window.openCrewAdd === 'function') { window.openCrewAdd(grp); return; }
-        const card = e.target.closest('.cf-group-team'); const form = card && card.querySelector('.cf-grp-add-form');
-        if (form) { form.hidden = !form.hidden; if (!form.hidden) form.querySelector('.cf-ga-name')?.focus(); }
-        return;
-      }
-      const gaCancel = e.target.closest('.cf-ga-cancel');
-      if (gaCancel) { const f = e.target.closest('.cf-grp-add-form'); if (f) f.hidden = true; return; }
-      const gaSave = e.target.closest('.cf-ga-save');
-      if (gaSave) {
-        const form = e.target.closest('.cf-grp-add-form'); if (!form) return;
-        const grp = form.dataset.group;
-        const name = (form.querySelector('.cf-ga-name')?.value || '').trim();
-        const handle = (form.querySelector('.cf-ga-handle')?.value || '').trim();
-        if (!name && !handle) { form.querySelector('.cf-ga-name')?.focus(); return; }
-        const kind = grp === 'guests' ? 'host' : (grp === 'observers' ? 'observer' : 'caster');
-        send('save_caster_to_library', { name, handle, kind });
-        form.querySelector('.cf-ga-name').value = ''; form.querySelector('.cf-ga-handle').value = '';
-        form.hidden = true;
-        setTimeout(cfLoadGroups, 300);
-        return;
-      }
-    });
-    // Drag a member onto a Director console tab to transfer them into that room.
-    wrap.addEventListener('dragstart', (e) => {
-      // Don't start a drag when the user is using a control (slot select, inputs, buttons).
-      if (e.target.closest('select, input, button, a, .mc-p-body')) { e.preventDefault(); return; }
-      const row = e.target.closest('.cf-grp-row'); if (!row) return;
-      e.dataTransfer.setData('text/plain', JSON.stringify({ stream: row.dataset.stream || '', name: row.dataset.name || '', side: '', homeRoom: row.dataset.room || '' }));
-      e.dataTransfer.effectAllowed = 'move';
-      row.classList.add('dragging');
-    });
-    wrap.addEventListener('dragend', (e) => { const row = e.target.closest('.cf-grp-row'); if (row) row.classList.remove('dragging'); });
-    // Search box — filter this group's library rows live (re-render is skipped while focused here).
-    wrap.addEventListener('input', (e) => {
-      const s = e.target.closest('.cf-grp-search'); if (!s) return;
-      _cfGroupSearch[s.dataset.group] = s.value;
-      cfFilterGroup(s.dataset.group);
-    });
-    wrap.addEventListener('change', (e) => {
-      // Move-to-room: transfer this person into the chosen room (via the Director's IFrame API).
-      const moveSel = e.target.closest('.gm-move-sel');
-      if (moveSel) {
-        const room = moveSel.value; const row = e.target.closest('.cf-grp-row');
-        if (room && row) {
-          const label = moveSel.options[moveSel.selectedIndex]?.text || 'room';
-          const ok = cfMovePlayerToRoom({ stream: row.dataset.stream, name: row.dataset.name, side: '', homeRoom: row.dataset.room }, room, label);
-          if (typeof showToast === 'function') showToast(ok ? `Moving ${row.dataset.name || 'them'} → ${label}…` : 'Start Director monitoring first (Director Control Center below).', ok ? '#22c55e' : '#f59e0b');
-        }
-        moveSel.value = '';
-        return;
-      }
-      // Assign a caster to an overlay spot (Off air / Caster 1–4). Swaps if the spot is taken.
-      const slotSel = e.target.closest('.gm-slot');
-      if (slotSel) {
-        const row = e.target.closest('.cf-grp-row'); const id = row && row.dataset.libid; if (!id) return;
-        const newSlot = parseInt(slotSel.value, 10) || 0;
-        let lineup = ((currentState.casters && currentState.casters.lineup) || []).map((x) => ({ ...x }));
-        if (newSlot === 0) {
-          lineup = lineup.filter((x) => x.libraryId !== id);
-        } else {
-          const occ = lineup.find((x) => x.slot === newSlot && x.libraryId !== id);
-          let mine = lineup.find((x) => x.libraryId === id);
-          const oldSlot = mine ? mine.slot : 0;
-          if (mine) { mine.slot = newSlot; }
-          else { lineup.push({ libraryId: id, slot: newSlot, roomId: '', streamId: row.dataset.stream || '' }); }
-          if (occ) { if (oldSlot) occ.slot = oldSlot; else lineup = lineup.filter((x) => x !== occ); }   // swap, or bump off
-        }
-        send('set_caster_lineup', { lineup });
-        return;
-      }
-      // Auto-save profile edits as they change (name / @handle / social / role / custom view link).
-      if (e.target.closest('.gm-e-name, .gm-e-handle, .gm-e-social, .gm-e-role, .gm-e-cam')) {
-        const row = e.target.closest('.cf-grp-row'); const id = row && row.dataset.libid; if (!id) return;
-        send('save_caster_to_library', {
-          id,
-          name: (row.querySelector('.gm-e-name')?.value || '').trim(),
-          handle: (row.querySelector('.gm-e-handle')?.value || '').trim(),
-          social: row.querySelector('.gm-e-social')?.value || 'none',
-          role: (row.querySelector('.gm-e-role')?.value || '').trim(),
-          camUrl: (row.querySelector('.gm-e-cam')?.value || '').trim(),
-        });
-        return;
-      }
-      if (!e.target.closest('.gm-a-vol, .gm-a-pan, .gm-a-mono')) return;
-      const row = e.target.closest('.cf-grp-row'); if (!row) return;
-      const id = row.dataset.libid; if (!id) return;
-      const vol = parseInt(row.querySelector('.gm-a-vol')?.value, 10);
-      const pan = parseInt(row.querySelector('.gm-a-pan')?.value, 10) || 0;
-      const mono = !!row.querySelector('.gm-a-mono')?.checked;
-      const audio = {};
-      if (Number.isFinite(vol) && vol !== 100) audio.volume = vol;
-      if (pan) audio.pan = pan;
-      if (mono) audio.mono = true;
-      send('set_library_audio', { id, audio });
-    });
-  });
-}
-
-// ── Gameplay: screenshare / observer push links ──
-const CF_SHARES_KEY = 'ne_cf_shares';
-function cfShares() { try { return JSON.parse(localStorage.getItem(CF_SHARES_KEY) || '[]'); } catch { return []; } }
-function cfSaveShares(l) { try { localStorage.setItem(CF_SHARES_KEY, JSON.stringify(l)); } catch {} }
-function cfSlug(s) { return ((s || 'feed').toLowerCase().replace(/[^a-z0-9]+/g, '').slice(0, 12)) || 'feed'; }
-function renderCfShares() {
-  const wrap = el('cf-share-list'); if (!wrap) return;
-  const v = cfVdo(); const list = cfShares();
-  wrap.innerHTML = '';
-  if (!list.length) { wrap.innerHTML = '<div class="ev-empty">No share links yet — create one above and send it to the player / observer.</div>'; return; }
-  list.forEach((sh, idx) => {
-    const room = v.room ? `&room=${encodeURIComponent(v.room)}` : '';
-    let pushUrl = `${v.base}/?push=${sh.streamId}${room}&${sh.screen ? 'screenshare' : 'webcam'}`;
-    if (v.codec) pushUrl += `&codec=${v.codec}`;
-    if (v.bitrate) pushUrl += `&bitrate=${parseInt(v.bitrate, 10) || 0}`;
-    if (v.pushParams) pushUrl += (v.pushParams[0] === '&' ? '' : '&') + v.pushParams.replace(/^&/, '');
-    const viewUrl = buildVdoView(sh.streamId, {});
-    const card = document.createElement('div'); card.className = 'cf-share-card';
-    card.innerHTML = `<div class="cf-share-head"><span class="cf-share-label"></span><span class="cf-share-tag"></span><button class="tp-del" title="Remove">×</button></div>
-      <div class="cf-share-line"><span>Send to them</span><input class="input-text" readonly><button class="btn btn-secondary btn-sm">Copy</button></div>
-      <div class="cf-share-line"><span>OBS view</span><input class="input-text" readonly><button class="btn btn-secondary btn-sm">Copy</button></div>`;
-    card.querySelector('.cf-share-label').textContent = sh.label || 'Feed';
-    card.querySelector('.cf-share-tag').textContent = sh.screen ? 'screen' : 'cam';
-    const lines = card.querySelectorAll('.cf-share-line');
-    lines[0].querySelector('input').value = pushUrl;
-    lines[1].querySelector('input').value = viewUrl;
-    lines[0].querySelector('button').addEventListener('click', () => { if (navigator.clipboard) navigator.clipboard.writeText(pushUrl); });
-    lines[1].querySelector('button').addEventListener('click', () => { if (navigator.clipboard) navigator.clipboard.writeText(viewUrl); });
-    card.querySelector('.tp-del').addEventListener('click', () => { const l = cfShares(); l.splice(idx, 1); cfSaveShares(l); renderCfShares(); });
-    wrap.appendChild(card);
-  });
-}
-el('cf-share-create')?.addEventListener('click', () => {
-  const label = (el('cf-share-label').value || '').trim();
-  const screen = !!el('cf-share-screen').checked;
-  const streamId = 'ne' + cfSlug(label) + Math.floor(Math.random() * 9000 + 1000);
-  const l = cfShares(); l.unshift({ id: streamId, label, screen, streamId }); cfSaveShares(l);
-  el('cf-share-label').value = '';
-  renderCfShares();
-});
-
-// ── Gameplay: stream stations (start.gg) + station mini-HUD links ──
-let _cfStationsSig = '';
-function renderCfStations(data) {
-  const wrap = el('cf-stations'); if (!wrap) return;
-  const sg = data.startgg || {};
-  const streams = sg.streams || [];
-  const queue = sg.queue || [];
-  const sub = el('cf-stations-sub'); if (sub) sub.textContent = streams.length ? String(streams.length) : '';
-  const sig = JSON.stringify({ streams, q: queue.map((x) => [x.stream, x.teamA, x.teamB, x.live, x.scoreA, x.scoreB, x.round]) });
-  if (sig === _cfStationsSig) return;
-  _cfStationsSig = sig;
-  wrap.innerHTML = '';
-  if (!streams.length) { wrap.innerHTML = '<div class="ev-empty">No stream stations — enable the start.gg stream queue (Settings / Dashboard) to pull them.</div>'; return; }
-  streams.forEach((name) => {
-    const onIt = queue.filter((q) => q.stream === name);
-    const liveSet = onIt.find((q) => q.live) || onIt[0];
-    const hudUrl = `${CF_OVERLAY_BASE}/ministation.html?stream=${encodeURIComponent(name)}`;
-    const card = document.createElement('div'); card.className = 'cf-station-card';
-    card.innerHTML = `<div class="cf-station-head"><span class="cf-station-name"></span><span class="cf-station-live"></span></div>
-      <div class="cf-station-match"></div>
-      <div class="cf-station-acts"><button class="btn btn-secondary btn-sm">Open mini-HUD ↗</button><button class="btn btn-ghost btn-sm">Copy URL</button></div>`;
-    card.querySelector('.cf-station-name').textContent = name;
-    const liveTag = card.querySelector('.cf-station-live');
-    if (liveSet && liveSet.live) { liveTag.textContent = 'LIVE'; liveTag.className = 'cf-station-live on'; }
-    card.querySelector('.cf-station-match').textContent = liveSet
-      ? `${liveSet.teamA || 'TBD'} vs ${liveSet.teamB || 'TBD'}` + ((liveSet.scoreA != null && liveSet.scoreB != null) ? `  (${liveSet.scoreA}–${liveSet.scoreB})` : '') + (liveSet.round ? '  · ' + liveSet.round : '')
-      : 'No match queued';
-    const [openBtn, copyBtn] = card.querySelectorAll('.cf-station-acts button');
-    openBtn.addEventListener('click', () => window.open(hudUrl, '_blank'));
-    copyBtn.addEventListener('click', () => { if (navigator.clipboard) navigator.clipboard.writeText(hudUrl); copyBtn.textContent = 'Copied'; setTimeout(() => { copyBtn.textContent = 'Copy URL'; }, 900); });
-    wrap.appendChild(card);
-  });
-}
-
-cfLoadVdoSettings();
-renderCfShares();
-
+// ── Camera Feeds / VDO talent domain (cf*, vdo*) — extracted to camera-feeds.js ──
+function tlEsc(s) { return esc(s); }   // legacy alias — canonical esc() lives in core.js; kept in app.js (used across app.js + seeding-spotlight.js)
 // ── Dashboard: start.gg stream queue ────────────────────────────────────────
 let _sggQueueSig = '';
 function renderStreamQueue(data) {
@@ -26055,7 +22732,7 @@ function connect() {
         if (prog && prog.id === d.name) _swScreenImg('sw-prog-screen', d.img);
         if (prev && prev.id === d.name) _swScreenImg('sw-prev-screen', d.img);
         const t = Array.from(document.querySelectorAll('#sw-grid .sw-tile')).find((x) => x.dataset.id === d.name);
-        if (t) { let im = t.querySelector('img'); if (!im) { im = document.createElement('img'); t.insertBefore(im, t.firstChild); } im.src = _swSrc(d.img); }
+        if (t) { let im = t.querySelector('img'); if (!im) { im = document.createElement('img'); t.insertBefore(im, t.firstChild); } _swFadeSwapImg(im, _swSrc(d.img)); }
       }
     } else if (msg.type === 'switcher-audio') {
       _swObsAudio = (msg.data && msg.data.sources) || [];
@@ -27140,50 +23817,10 @@ function addActivityItem(type, user, detail, icon) {
 }
 
 
-// Right-rail tab switching
-document.querySelectorAll('.qrail-tab').forEach(btn => {
-  btn.addEventListener('click', () => {
-    const qtab = btn.dataset.qtab;
+// Right-rail tab switching is handled by the single qrailShowTab() handler above
+// (title, panel toggle, live-section refresh, and collapse-on-reclick all live there).
+// The former duplicate handler here was removed — it fought the collapse toggle.
 
-    // Update button state
-    document.querySelectorAll('.qrail-tab').forEach(b => b.classList.remove('active'));
-    btn.classList.add('active');
-
-    // Show/hide panels
-    document.querySelectorAll('.qrail-panel').forEach(p => p.classList.remove('active'));
-    const panel = document.querySelector(`.qrail-panel[data-qpanel="${qtab}"]`);
-    if (panel) panel.classList.add('active');
-
-    // Update title
-    const titleEl = el('qrail-paneltitle');
-    if (titleEl) {
-      const titles = {
-        'quick': 'Quick Actions',
-        'graphics': 'Overlays',
-        'golive': 'Trigger Graphics',
-        'notes': 'Producer Notes',
-        'checklist': 'Run-of-Show',
-        'workflow': 'Twitch Stream',
-        'ros': 'Run of Show',
-        'flows': 'Flows',
-        'talent': 'On-Air Talent',
-        'twitch': 'Twitch'
-      };
-      titles.ai = 'AI Director';
-      titleEl.textContent = titles[qtab] || 'Panel';
-      if (qtab === 'ros' || qtab === 'flows' || qtab === 'talent') { if (typeof renderQrailLive === 'function') renderQrailLive(); }
-      if (qtab === 'talent' && typeof cfTalentAutoOpen === 'function') cfTalentAutoOpen();
-    }
-
-    // Scroll chat to bottom when opening the Twitch panel.
-    if (qtab === 'twitch') {
-      setTimeout(() => {
-        const chatEl = el('twitch-chat');
-        if (chatEl) chatEl.scrollTop = chatEl.scrollHeight;
-      }, 100);
-    }
-  });
-});
 // Twitch sub-nav: Chat | Activity | Predict.
 document.querySelectorAll('#tw-subnav .ev-subnav-btn').forEach((btn) => {
   btn.addEventListener('click', () => {

@@ -188,6 +188,7 @@ html, body {
   filter: drop-shadow(0 2px 6px rgba(245,201,68,0.3));
 }
 .st-head .st-col-stat { color: #5c6474; font-size: 12px; }
+.st-col-grouplbl { display: block; font-size: 9px; font-weight: 700; letter-spacing: .12em; color: #5c6474; opacity: .8; margin-bottom: 1px; }
 
 /* "+N more" footnote when the field is bigger than the board */
 .st-more { font-size: 15px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase;
@@ -304,7 +305,7 @@ html, body {
     const row = document.createElement('div');
     row.className = 'st-row st-head';
     let html = `<div class="st-col-rank">#</div><div class="st-col-logo"></div><div class="st-col-name">Team</div>`;
-    if (showRecord) html += `<div class="st-col-stat" title="Series wins">W</div><div class="st-col-stat" title="Series losses">L</div>`;
+    if (showRecord) html += `<div class="st-col-stat" title="Set wins"><span class="st-col-grouplbl">Set</span>W</div><div class="st-col-stat" title="Set losses"><span class="st-col-grouplbl">Set</span>L</div>`;
     if (hasGames)   html += `<div class="st-col-stat">Games</div>`;
     if (hasPoints)  html += `<div class="st-col-stat">PTS</div>`;
     row.innerHTML = html;
