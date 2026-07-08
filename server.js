@@ -1205,6 +1205,31 @@ function capturePackageSnapshot() {
   };
 }
 
+// Activate a profile (brand kit) — the ONE path for every activation side effect: topics,
+// show snapshot, theme snap, ad slots, OBS collection/profile switch. Used by the
+// activate_brand_kit WS case and by save_brand_kit's "Save & Activate".
+function activateBrandKitById(id) {
+  state.activeBrandKitId = id || null;
+  const kit = savedBrandKits.find((b) => b.id === id);
+  if (kit) ensureKitPackages(kit);
+  syncActivePreshowTopics();   // Desk Show headline/topics follow the newly-active kit's active package
+  if (kit) applyPackageSnapshot(activePackage(kit));   // captured show setup travels with the package
+  // Automation: snap this game's theme to the kit's preferred design, if set.
+  if (kit && kit.themes && isValidTheme(state.activeGame, kit.themes[state.activeGame])) {
+    state.themesByGame[state.activeGame] = kit.themes[state.activeGame];
+  }
+  applyBrandSlots();           // fill the ad slots from this brand's sponsor placements
+  saveAppState();
+  broadcastFullState();        // brand colours apply automatically when colorMode === 'brand'
+  // OBS auto-switch: if the kit has a preferred scene collection or profile, load it now.
+  if (kit && kit.obsSceneCollection && obsClient && obsClient.isConnected()) {
+    obsClient.call('SetCurrentSceneCollection', { sceneCollectionName: kit.obsSceneCollection }).catch(() => {});
+  }
+  if (kit && kit.obsProfile && obsClient && obsClient.isConnected()) {
+    obsClient.call('SetCurrentProfile', { profileName: kit.obsProfile }).catch(() => {});
+  }
+}
+
 // Apply a package's captured show setup. Only fields the snapshot carries are touched, so a
 // package captured before a feature existed can't blank newer state.
 function applyPackageSnapshot(pkg) {
@@ -1694,6 +1719,7 @@ function loadState() {
         });
       }
       if (saved.brand && typeof saved.brand === 'object') state.brand = saved.brand;
+      if (Array.isArray(saved.preshowPresets)) state.preshowPresets = saved.preshowPresets;
       if (saved.banner) state.banner = saved.banner;
       if (saved.casters && typeof saved.casters === 'object') {
         state.casters = {
@@ -2149,6 +2175,7 @@ function _saveAppStateNow(sync = false) {
       standings: state.standings,
       socialPreset: state.socialPreset || null,   // Social Export background/presented-by fallback (no brand kit active)
       brand: state.brand || null,                 // global accent fallback (Settings ▸ Appearance) when no kit is active
+      preshowPresets: state.preshowPresets || [], // Desk Show named topic rundowns
       csgoCfgPath: state.csgo.cfgPath,
       director: {
         enabled: state.director?.enabled !== false,
@@ -2641,6 +2668,65 @@ function buildSceneConfig() {
   return out;
 }
 
+// ── Broadcast tier schema ────────────────────────────────────────────────────
+// Every top-level key of the broadcast payload must be declared here:
+//   'live'    — rides EVERY broadcast. Keep it small: no base64, no libraries.
+//   'library' — heavy / rarely-changing; travels via libraryData() (on connect + on
+//               change, gated by librarySig — a new library key MUST also be signed).
+//   'local'   — server-only; never broadcast.
+// An undeclared key still broadcasts (so nothing breaks) but warns loudly once per key.
+// That warning is the tripwire: payload bloat used to creep in silently because the old
+// spread-then-denylist defaulted every new state key straight onto the wire (~600KB/broadcast
+// at its worst — leagues alone carried 368KB of base64 logos into every goal update).
+const BROADCAST_TIERS = {
+  // heavy libraries → libraryData()
+  bracket: 'library', replay: 'library', playerProfiles: 'library',
+  leagues: 'library', clips: 'library', brand: 'library',
+  // server-only (overlays get the derived sceneConfig instead)
+  scenePresets: 'local',
+  // live production/scoreboard state (from the state literal)
+  version: 'live', view: 'live', rlHudHidden: 'live', activeGame: 'live', themesByGame: 'live',
+  eventName: 'live', gameLabel: 'live', roundLabel: 'live', speedUnit: 'live', fontFamily: 'live',
+  clock24h: 'live', showSeries: 'live', defaultBestOf: 'live', facecamsEnabled: 'live',
+  replayCams: 'live', activeBrandKitId: 'live', useBrandColors: 'live', colorMode: 'live',
+  sceneBg: 'live', banner: 'live', casters: 'live', vdo: 'live', listenIn: 'live',
+  breakScreen: 'live', ticker: 'live', adProofSessions: 'live', spotlight: 'live', winner: 'live',
+  veto: 'live', owMatch: 'live', mrMatch: 'live', customOverlayLayouts: 'live', draft: 'live',
+  intro: 'live', overtime: 'live', scoreboardAd: 'live', background: 'live', deskFooter: 'live',
+  preshow: 'live', csgo: 'live', valorant: 'live', lol: 'live', bestOf: 'live', teams: 'live',
+  teamPlayers: 'live', series: 'live', match: 'live', myEvents: 'live', game: 'live',
+  gameTeams: 'live', players: 'live', playerCache: 'live', currentGoal: 'live',
+  spectatedPlayer: 'live', rlConnected: 'live', rlSpectatorUi: 'live', startgg: 'live',
+  challonge: 'live', nxgen: 'live', activeEvent: 'live', obs: 'live', vmix: 'live',
+  switcher: 'live', commercial: 'live', upcoming: 'live', standings: 'live', teamRecord: 'live',
+  autoTeamsFromGame: 'live', leagueStandings: 'live', gfxActive: 'live', watchlist: 'live',
+  teamSpotlight: 'live', director: 'live', ai: 'live', encode: 'live', twitch: 'live',
+  discord: 'live', flows: 'live', flowVars: 'live',
+  // runtime-added state keys (mirrored in libraryData where noted)
+  crew: 'live',            // also in libraryData — overlays read it live, panel backfills it
+  socialPreset: 'live',    // also in libraryData
+  awaitingKickoff: 'live', inReplay: 'live', otTriggered: 'live', rlBall: 'live',
+  scoreboard: 'live', showRoster: 'live', sponsorBanner: 'live', preshowPresets: 'live',
+  playerProfilesVer: 'live',
+  // derived keys buildLiveState() adds on top of state
+  games: 'live', vetoPools: 'live', vetoMeta: 'live', draftGames: 'live', theme: 'live',
+  activeOverlay: 'live', overlayLayout: 'live', presets: 'live', facecams: 'live',
+  formattedTime: 'live', teamRecords: 'live', flowFireLog: 'live', autoLog: 'live',
+  overlays: 'live', sceneConfig: 'live'
+};
+const _untieredWarned = new Set();
+function stripByTier(payload) {
+  for (const k of Object.keys(payload)) {
+    const tier = BROADCAST_TIERS[k];
+    if (tier === 'library' || tier === 'local') { payload[k] = undefined; continue; }
+    if (!tier && !_untieredWarned.has(k)) {
+      _untieredWarned.add(k);
+      console.warn(`[broadcast] state.${k} has NO BROADCAST_TIERS entry — it is riding every live broadcast. Declare it 'live', 'library' or 'local' in server.js BROADCAST_TIERS.`);
+    }
+  }
+  return payload;
+}
+
 function buildLiveState() {
   const publicStartgg = { ...state.startgg, hasToken: !!startggApiToken };
   const publicChallonge = { ...state.challonge, hasKey: !!challongeApiKey };
@@ -2657,25 +2743,11 @@ function buildLiveState() {
   // Effective side colours for the active mode — overlays read teams.x.color; the control
   // panel can still see each team's own colour via teams.x.ownColor.
   const eff = effectiveTeamColors();
-  return {
+  // Heavy / rarely-changing keys (bracket ≈ 0.9MB logos, replay ≈ 0.4MB thumbnails, leagues,
+  // clips, the raw brand fallback…) are stripped by stripByTier() per BROADCAST_TIERS above and
+  // re-sent only on change via libraryData(). Clients backfill from the last library snapshot.
+  return stripByTier({
     ...state,
-    // Heavy / rarely-changing data stripped from the live broadcast and re-sent only on change
-    // via libraryData() (gated by librarySig). Clients backfill from the last library snapshot.
-    // bracket ≈ 0.9MB embedded team logos, replay ≈ 0.4MB frame thumbnails.
-    // playerProfiles is in libraryData() (gated by playerProfilesVer) — excluding here avoids
-    // resending every registered player's profile on every goal/scene change.
-    bracket: undefined,
-    replay: undefined,
-    playerProfiles: undefined,
-    scenePresets: undefined,
-    // leagues carry base64 team logos (hundreds of KB); clips carry the whole library metadata.
-    // Neither is read by overlays — control panel backfills both from the library snapshot.
-    leagues: undefined,
-    clips: undefined,
-    // state.brand is the raw global-accent fallback; libraryData() sends the resolved brand
-    // (active kit or that fallback). Leaving the raw one here clobbered the kit brand (and its
-    // sponsors) in every light broadcast on clients that cache-merge by key presence.
-    brand: undefined,
     teams: {
       blue:   { ...state.teams.blue,   color: eff.blue,   ownColor: state.teams.blue.color },
       orange: { ...state.teams.orange, color: eff.orange, ownColor: state.teams.orange.color }
@@ -2715,7 +2787,7 @@ function buildLiveState() {
     background: state.background,
     overlays: overlayClientInfo(),   // live overlay browser-source count for the pre-flight checklist
     sceneConfig: buildSceneConfig()  // active preset config per scene, applied by SceneBase.applySceneConfig
-  };
+  });
 }
 
 // Heavy blobs that change rarely → sent on connect, then re-sent only when they change.
@@ -3559,6 +3631,7 @@ async function startggPollTick() {
 }
 let _standingsMirrorSig = '';
 let _startggBracketTick = 0;
+let _lastBracketFetchSlug = '';
 
 // The Bracket scene's "Tournament Organizer" source FOLLOWS the active event (Dashboard ▸ Event
 // panel) unless the producer typed a different slug into the bracket panel (followActive=false)
@@ -3575,6 +3648,14 @@ async function syncBracketToActiveEvent() {
     }
   }
   if ((state.bracket.eventSlug || '').trim() && state.bracket.mode !== 'manual') {
+    // Scale-aware cadence: small events refresh every tick (~20s); major-scale ones
+    // (hundreds of sets) every 3rd tick (~60s) so a 1500-set fetch isn't back-to-back.
+    // A slug change always fetches immediately regardless of the throttle.
+    const slugChanged = state.bracket.eventSlug !== _lastBracketFetchSlug;
+    const bigEvent = (state.bracket.matches || []).length > 400;
+    _startggBracketTick++;
+    if (!slugChanged && bigEvent && _startggBracketTick % 3 !== 0) return;
+    _lastBracketFetchSlug = state.bracket.eventSlug;
     try { await fetchBracket(state.bracket.eventSlug); } catch (e) { /* non-fatal */ }
     // start.gg-sourced standings mirror the live event standings each refresh, so the
     // standings overlay updates as scores come in (manual/league rows are never touched).
@@ -4447,7 +4528,12 @@ function buildPhases(sets) {
         .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }))
         .map((pg) => {
           const b = buildBracket(pg.sets);
-          return { id: pg.id, name: pg.name, type: b.type, roster: b.roster, schedule: b.schedule, standings: b.standings, matrix: b.matrix };
+          // Pools carry their OWN elimination arrays: major-scale events (RLCS Opens) run MANY
+          // double-elim pools per phase — merging at phase level produced one unreadable
+          // mega-bracket with every pool's Round 1 stacked into a single column.
+          return { id: pg.id, name: pg.name, type: b.type, roster: b.roster, schedule: b.schedule,
+            standings: b.standings, matrix: b.matrix,
+            winners: b.winners, losers: b.losers, finals: b.finals };
         });
       const p0 = pools[0] || { id: '', type: '', roster: [], schedule: [], standings: [], matrix: null };
       // Winners/losers/finals always come from the WHOLE phase's sets (not per-pool) —
@@ -4480,6 +4566,13 @@ function syncActiveBracketPhase() {
   let pool = pools.find((pl) => pl.id === state.bracket.activePoolId);
   if (!pool) { pool = pools[0] || null; state.bracket.activePoolId = pool ? pool.id : ''; }
 
+  // Multi-pool elimination phase: show the ACTIVE POOL's bracket, not the phase-wide merge.
+  const poolElim = pool && ((pool.winners || []).length || (pool.losers || []).length || (pool.finals || []).length);
+  if (poolElim && pools.length > 1) {
+    state.bracket.winners = pool.winners || [];
+    state.bracket.losers = pool.losers || [];
+    state.bracket.finals = pool.finals || [];
+  }
   state.bracket.standings = (pool ? pool.standings : ph.standings) || [];
   state.bracket.schedule = (pool ? pool.schedule : ph.schedule) || [];   // Swiss/Round-Robin round-by-round pairings
   state.bracket.roster = (pool ? pool.roster : ph.roster) || [];
@@ -4492,18 +4585,21 @@ function syncActiveBracketPhase() {
   if (state.bracket.view === 'matrix' && !state.bracket.matrix) state.bracket.view = fallback;
   if (state.bracket.view === 'schedule' && !state.bracket.schedule.length) state.bracket.view = fallback;
   if (state.bracket.view === 'losers' && !state.bracket.losers.length) state.bracket.view = fallback;
+  if (state.bracket.view === 'standings' && hasElim) state.bracket.view = 'both';
   // And the mirror case: an elim-only view ('both'/'winners'/'losers'/'finals') on a
   // round-robin/Swiss phase — pick the format's real default so a linked platform import
   // renders correctly without the producer touching the view chips.
-  if (!hasElim && ['both', 'winners', 'losers', 'finals'].includes(state.bracket.view)) {
-    state.bracket.view = state.bracket.schedule.length ? 'schedule'
-                       : (state.bracket.standings.length ? 'standings'
-                       : (state.bracket.matrix ? 'matrix' : state.bracket.view));
+  if (!hasElim && ['winners', 'losers', 'finals', 'standings'].includes(state.bracket.view)) {
+    // 'both' on pool play = the records LADDER (the overlay's default view for swiss/RR).
+    state.bracket.view = 'both';
   }
 }
 
 // Pull every page of an event's sets (capped so a misconfigured event can't loop).
-async function fetchAllSets(client, slug, perPage = 50, maxPages = 16) {
+// 40 pages × 50 = 2000 sets — enough for major-scale events (e.g. RLCS Opens: hundreds of
+// teams across swiss pools + top cut). Big events get a slower bracket-refresh cadence
+// in startggPollTick so this doesn't hammer the API every 20s.
+async function fetchAllSets(client, slug, perPage = 50, maxPages = 40) {
   const query = `
     query BracketSets($slug: String!, $perPage: Int!, $page: Int!) {
       event(slug: $slug) {
@@ -7540,12 +7636,15 @@ function switcherCut(target, opts) {
 }
 
 // Set the PREVIEW (next) source on the active backend. OBS needs Studio Mode on.
+// Studio Mode auto-enable is intentionally disabled (Switcher page — the only caller — is hidden
+// from nav): this now silently no-ops on OBS unless Studio Mode was already turned on some other,
+// deliberate way, so it can never flip a live show into Studio Mode by accident.
 async function switcherSetPreview(target) {
   target = (target == null ? '' : String(target)).trim(); if (!target) return;
   if (state.switcher.target === 'vmix') { if (state.vmix.enabled) vmixDo('PreviewInput', { Input: target }); return; }
   if (!obsClient || !obsClient.isConnected()) return;
+  if (!state.obs.studioMode) return;
   try {
-    if (!state.obs.studioMode) { await obsClient.call('SetStudioModeEnabled', { studioModeEnabled: true }); state.obs.studioMode = true; }
     await obsClient.call('SetCurrentPreviewScene', { sceneName: target });
     state.obs.currentPreviewScene = target;
     broadcastFullState();
@@ -7554,6 +7653,7 @@ async function switcherSetPreview(target) {
 
 // TAKE preview → program. mode 'cut' | 'fade'. OBS uses Studio Mode transition; vMix Cut/Fade.
 // TAKE preview → program. transition: 'Cut' | 'Fade' | 'Stinger1..4' | 'Wipe' | 'Slide' | ...
+// Studio Mode auto-enable disabled — see switcherSetPreview above; no-ops on OBS unless already on.
 async function switcherTake(transition, durationMs) {
   transition = transition || 'Cut';
   const isCut = transition === 'Cut';
@@ -7563,8 +7663,8 @@ async function switcherTake(transition, durationMs) {
     return;
   }
   if (!obsClient || !obsClient.isConnected()) return;
+  if (!state.obs.studioMode) return;
   try {
-    if (!state.obs.studioMode) { await obsClient.call('SetStudioModeEnabled', { studioModeEnabled: true }); state.obs.studioMode = true; }
     // Map the requested transition onto OBS's configured transitions (Cut/Fade are always present;
     // Stinger/Wipe only if the OBS profile has one — fall back to Fade, else Cut).
     const avail = state.obs.availableTransitions || [];
@@ -8828,10 +8928,15 @@ function startBridgeServer() {
     if (_lastUpdateStatus) { try { ws.send(JSON.stringify({ type: 'update_status', data: _lastUpdateStatus })); } catch (e) {} }
 
     ws.on('message', (raw) => {
+      let msg = null;
+      try { msg = JSON.parse(raw.toString()); } catch (e) { return; }   // malformed frame — drop quietly
       try {
-        const msg = JSON.parse(raw.toString());
         handleControlMessage(msg, ws);
-      } catch (e) { /* ignore */ }
+      } catch (e) {
+        // A handler crash used to be indistinguishable from a malformed frame — both vanished
+        // into one silent catch. Log the message type so broken controls leave a trail.
+        console.error(`[bridge] handler crashed for '${msg && msg.type}':`, e && e.message);
+      }
     });
 
     ws.on('close', () => { const was = ws._role; bridgeClients.delete(ws); if (was === 'overlay') maybeBroadcastOverlayCount(); });
@@ -8853,7 +8958,88 @@ function startBridgeServer() {
   console.log(`[Bridge] WS server on :${WS_PORT}`);
 }
 
+// ── WS handler registry ──────────────────────────────────────────────────────
+// The incremental exit from the 296-case switch below: message types registered here
+// dispatch directly (same (msg, ws) contract as the switch); everything else falls
+// through to the legacy switch. Migrate cases group-by-group — veto_*/draft_* are the
+// template: move the case body verbatim into registerWsHandlers({ type(msg, ws) {…} })
+// and delete the case. Handler crashes are caught + logged by the ws.on('message') wrapper.
+const WS_HANDLERS = Object.create(null);
+function registerWsHandlers(map) {
+  for (const k of Object.keys(map)) {
+    if (WS_HANDLERS[k]) console.warn(`[bridge] duplicate WS handler registered for '${k}' — the later one wins`);
+    WS_HANDLERS[k] = map[k];
+  }
+}
+
+// ── Map veto + champion draft handlers (first groups migrated out of the switch) ──
+registerWsHandlers({
+  set_veto(msg) {
+    const v = msg.data || {};
+    const cur = state.veto || {};
+    const maps = Array.isArray(v.maps) ? v.maps.slice(0, 7).map((m) => ({
+      name: (m.name || '').toString().slice(0, 40),
+      mode: (m.mode || '').toString().slice(0, 40),
+      image: (m.image || '').toString().slice(0, 2000),
+      action: ['ban', 'pick', 'decider'].includes(m.action) ? m.action : '',
+      by: ['a', 'b'].includes(m.by) ? m.by : '',
+      winner: ['a', 'b'].includes(m.winner) ? m.winner : '',
+      score: { a: Number(m.score?.a) || 0, b: Number(m.score?.b) || 0 }
+    })) : cur.maps;
+    state.veto = {
+      visible: ('visible' in v) ? !!v.visible : !!cur.visible,
+      title: typeof v.title === 'string' ? v.title : (cur.title ?? ''),
+      maps
+    };
+    saveAppState();
+    broadcastFullState();
+  },
+  // Guided multi-game map veto
+  veto_start(msg, ws) {
+    try {
+      const d = msg.data || {};
+      vetoStart({ game: d.game, bestOf: d.bestOf, teamStart: d.teamStart, title: d.title });
+      if (typeof d.visible === 'boolean') state.veto.visible = d.visible;
+      saveAppState(); broadcastFullState();
+    } catch (e) {
+      ws.send(JSON.stringify({ type: 'csgo-result', data: { ok: false, message: e.message } }));
+    }
+  },
+  veto_action(msg) {   // apply the current ban/pick step to a map
+    vetoApply((msg.data && msg.data.mapId) || '');
+    saveAppState(); broadcastFullState();
+  },
+  veto_undo()  { vetoUndo();  saveAppState(); broadcastFullState(); },
+  veto_reset() { vetoReset(); saveAppState(); broadcastFullState(); },
+  veto_result(msg) {   // record a played-map score/winner
+    const d = msg.data || {};
+    vetoResult(d.mapId, d.winner, d.score);
+    saveAppState(); broadcastFullState();
+  },
+  veto_visible(msg) {
+    if (state.veto) state.veto.visible = !!(msg.data && msg.data.visible);
+    saveAppState(); broadcastFullState();
+  },
+  // Champion/hero draft
+  draft_start(msg, ws) {
+    try {
+      const d = msg.data || {};
+      draftStart({ game: d.game, teamStart: d.teamStart, title: d.title });
+      if (typeof d.visible === 'boolean') state.draft.visible = d.visible;
+      saveAppState(); broadcastFullState();
+    } catch (e) {
+      ws.send(JSON.stringify({ type: 'csgo-result', data: { ok: false, message: e.message } }));
+    }
+  },
+  draft_action(msg)  { draftAction((msg.data && msg.data.name) || ''); saveAppState(); broadcastFullState(); },
+  draft_undo()       { draftUndo();  saveAppState(); broadcastFullState(); },
+  draft_reset()      { draftReset(); saveAppState(); broadcastFullState(); },
+  draft_visible(msg) { if (state.draft) state.draft.visible = !!(msg.data && msg.data.visible); saveAppState(); broadcastFullState(); }
+});
+
 function handleControlMessage(msg, ws) {
+  const h = WS_HANDLERS[msg.type];
+  if (h) return void h(msg, ws);
   switch (msg.type) {
     // App-level heartbeat: lets a client confirm its receive direction is alive (half-open detection).
     case 'ping':
@@ -9058,6 +9244,48 @@ function handleControlMessage(msg, ws) {
     }
 
     // ── Desk Show (preshow.html) — discussion-topics rail + headline ───
+    // ── Desk Show topic presets — named rundowns (pre-show / halftime / post-show…) ──
+    case 'save_preshow_preset': {
+      const name = (msg.data?.name || '').toString().trim().slice(0, 40);
+      if (!name) break;
+      if (!Array.isArray(state.preshowPresets)) state.preshowPresets = [];
+      const entry = {
+        id: Math.random().toString(36).slice(2, 11),
+        name,
+        headline: (state.preshow && state.preshow.headline) || '',
+        topics: JSON.parse(JSON.stringify((state.preshow && state.preshow.topics) || []))
+      };
+      const idx = state.preshowPresets.findIndex((p) => p.name.toLowerCase() === name.toLowerCase());
+      if (idx >= 0) { entry.id = state.preshowPresets[idx].id; state.preshowPresets[idx] = entry; }
+      else state.preshowPresets.push(entry);
+      saveAppState();
+      broadcastFullState();
+      break;
+    }
+    case 'apply_preshow_preset': {
+      const preset = (state.preshowPresets || []).find((p) => p.id === msg.data?.id);
+      if (!preset) break;
+      state.preshow.headline = preset.headline || '';
+      state.preshow.topics = JSON.parse(JSON.stringify(preset.topics || []));
+      state.preshow.activeTopicIndex = 0;
+      // Same rule as set_preshow: topics are brand content — persist onto the active package
+      // so kit/package switches bring this rundown back.
+      const kit = savedBrandKits.find((b) => b.id === state.activeBrandKitId);
+      const pkg = kit ? activePackage(kit) : null;
+      if (kit && pkg) { pkg.topicsHeadline = state.preshow.headline; pkg.topics = state.preshow.topics; saveBrandKits(); }
+      saveAppState();
+      broadcastFullState();
+      break;
+    }
+    case 'delete_preshow_preset': {
+      if (Array.isArray(state.preshowPresets)) {
+        state.preshowPresets = state.preshowPresets.filter((p) => p.id !== msg.data?.id);
+        saveAppState();
+        broadcastFullState();
+      }
+      break;
+    }
+
     case 'set_preshow': {
       const p = msg.data || {};
       const cur = state.preshow || {};
@@ -9245,58 +9473,7 @@ function handleControlMessage(msg, ws) {
     }
 
     // ── Map veto / map-pool overview board ───────────────────────────────
-    case 'set_veto': {
-      const v = msg.data || {};
-      const cur = state.veto || {};
-      const maps = Array.isArray(v.maps) ? v.maps.slice(0, 7).map((m) => ({
-        name: (m.name || '').toString().slice(0, 40),
-        mode: (m.mode || '').toString().slice(0, 40),
-        image: (m.image || '').toString().slice(0, 2000),
-        action: ['ban', 'pick', 'decider'].includes(m.action) ? m.action : '',
-        by: ['a', 'b'].includes(m.by) ? m.by : '',
-        winner: ['a', 'b'].includes(m.winner) ? m.winner : '',
-        score: { a: Number(m.score?.a) || 0, b: Number(m.score?.b) || 0 }
-      })) : cur.maps;
-      state.veto = {
-        visible: ('visible' in v) ? !!v.visible : !!cur.visible,
-        title: typeof v.title === 'string' ? v.title : (cur.title ?? ''),
-        maps
-      };
-      saveAppState();
-      broadcastFullState();
-      break;
-    }
-
-    // ── Guided multi-game map veto ───────────────────────────────────────
-    case 'veto_start': {
-      try {
-        const d = msg.data || {};
-        vetoStart({ game: d.game, bestOf: d.bestOf, teamStart: d.teamStart, title: d.title });
-        if (typeof d.visible === 'boolean') state.veto.visible = d.visible;
-        saveAppState(); broadcastFullState();
-      } catch (e) {
-        ws.send(JSON.stringify({ type: 'csgo-result', data: { ok: false, message: e.message } }));
-      }
-      break;
-    }
-    case 'veto_action': {     // apply the current ban/pick step to a map
-      vetoApply((msg.data && msg.data.mapId) || '');
-      saveAppState(); broadcastFullState();
-      break;
-    }
-    case 'veto_undo':   { vetoUndo();  saveAppState(); broadcastFullState(); break; }
-    case 'veto_reset':  { vetoReset(); saveAppState(); broadcastFullState(); break; }
-    case 'veto_result': {     // record a played-map score/winner
-      const d = msg.data || {};
-      vetoResult(d.mapId, d.winner, d.score);
-      saveAppState(); broadcastFullState();
-      break;
-    }
-    case 'veto_visible': {
-      if (state.veto) state.veto.visible = !!(msg.data && msg.data.visible);
-      saveAppState(); broadcastFullState();
-      break;
-    }
+    // (set_veto / veto_* migrated to the WS_HANDLERS registry above handleControlMessage)
 
     // ── Overwatch 2 series scoreboard ────────────────────────────────────
     case 'ow_set_match': {
@@ -9538,22 +9715,7 @@ function handleControlMessage(msg, ws) {
       break;
     }
 
-    // ── Champion/hero draft ──────────────────────────────────────────────
-    case 'draft_start': {
-      try {
-        const d = msg.data || {};
-        draftStart({ game: d.game, teamStart: d.teamStart, title: d.title });
-        if (typeof d.visible === 'boolean') state.draft.visible = d.visible;
-        saveAppState(); broadcastFullState();
-      } catch (e) {
-        ws.send(JSON.stringify({ type: 'csgo-result', data: { ok: false, message: e.message } }));
-      }
-      break;
-    }
-    case 'draft_action':  { draftAction((msg.data && msg.data.name) || ''); saveAppState(); broadcastFullState(); break; }
-    case 'draft_undo':    { draftUndo();  saveAppState(); broadcastFullState(); break; }
-    case 'draft_reset':   { draftReset(); saveAppState(); broadcastFullState(); break; }
-    case 'draft_visible': { if (state.draft) state.draft.visible = !!(msg.data && msg.data.visible); saveAppState(); broadcastFullState(); break; }
+    // (draft_* migrated to the WS_HANDLERS registry above handleControlMessage)
     // Toggle LoL champ-select automation (reads the live draft from the League Client).
     case 'lol_draft_auto': {
       if (!state.draft) break;
@@ -10241,35 +10403,23 @@ function handleControlMessage(msg, ws) {
         PACKAGE_FIELDS.forEach((f) => delete existing[f]);   // strip any legacy top-level duplicates
       } else savedBrandKits.push(entry);
       saveBrandKits();
-      // If this is the live brand, push its sponsor placements into the ad slots now.
-      if (entry.id === state.activeBrandKitId) applyBrandSlots();
+      // "Save & Activate" — put the saved profile on air in the same action (covers new kits
+      // too, whose id only exists server-side). Plain save on the already-live kit still runs
+      // the full package-activation side effects so a ★-star change takes effect in ONE save.
+      if (msg.data && msg.data.activate) {
+        activateBrandKitById(entry.id);
+      } else if (entry.id === state.activeBrandKitId) {
+        applyBrandSlots();
+        syncActivePreshowTopics();
+        const liveKit = existing || savedBrandKits.find((b) => b.id === entry.id);
+        if (applyPackageSnapshot(activePackage(liveKit))) saveAppState();
+      }
       broadcastFullState();
       break;
     }
 
     case 'activate_brand_kit': {
-      const id = msg.data?.id || null;
-      state.activeBrandKitId = id;
-      const kit = savedBrandKits.find((b) => b.id === id);
-      if (kit) ensureKitPackages(kit);
-      syncActivePreshowTopics();   // Desk Show headline/topics follow the newly-active kit's active package
-      // Captured show setup (scene presets / ticker / titles / caster lineup / OBS mappings)
-      // travels with the kit's active package.
-      if (kit) applyPackageSnapshot(activePackage(kit));
-      // Automation: snap this game's theme to the kit's preferred design, if set.
-      if (kit && kit.themes && isValidTheme(state.activeGame, kit.themes[state.activeGame])) {
-        state.themesByGame[state.activeGame] = kit.themes[state.activeGame];
-      }
-      applyBrandSlots();           // fill the ad slots from this brand's sponsor placements
-      saveAppState();
-      broadcastFullState();        // brand colours apply automatically when colorMode === 'brand'
-      // OBS auto-switch: if the kit has a preferred scene collection or profile, load it now.
-      if (kit && kit.obsSceneCollection && obsClient && obsClient.isConnected()) {
-        obsClient.call('SetCurrentSceneCollection', { sceneCollectionName: kit.obsSceneCollection }).catch(() => {});
-      }
-      if (kit && kit.obsProfile && obsClient && obsClient.isConnected()) {
-        obsClient.call('SetCurrentProfile', { profileName: kit.obsProfile }).catch(() => {});
-      }
+      activateBrandKitById(msg.data?.id || null);
       break;
     }
 
@@ -10878,6 +11028,9 @@ function handleControlMessage(msg, ws) {
       // Also sync top level slugs for queue etc.
       if (d.tournamentSlug) state.startgg.tournamentSlug = d.tournamentSlug.trim();
       if (d.eventSlug) state.startgg.eventSlug = d.eventSlug.trim();
+      // The Bracket scene's "Tournament Organizer" source follows this immediately — without this
+      // it wouldn't notice the switch until the next ~20s poll tick.
+      syncBracketToActiveEvent().then(() => { saveAppState(); broadcastFullState(); }).catch(() => {});
       saveAppState();
       broadcastFullState();
       break;
@@ -12728,6 +12881,61 @@ function handleControlMessage(msg, ws) {
       syncActiveBracketPhase();
       saveAppState();
       broadcastFullState();
+      break;
+    }
+
+    // Find a team anywhere in the loaded tournament: auto-select the phase + pool they play
+    // in and highlight them on the overlay (startgg.focusTeam). Empty name clears the focus.
+    // Built for major-scale events where hunting a team through 30 pool chips is hopeless.
+    case 'bracket_focus_team': {
+      const q = (msg.data?.name || '').toString().trim().toLowerCase();
+      if (!q) {
+        state.startgg.focusTeam = '';
+        broadcastFullState();
+        ws.send(JSON.stringify({ type: 'bracket-result', data: { ok: true, message: 'Team focus cleared.' } }));
+        break;
+      }
+      const nameHit = (n) => n && n !== 'TBD' && n.toLowerCase().includes(q);
+      let found = null;   // { phaseId, poolId, name }
+      for (const ph of (state.bracket.phases || [])) {
+        for (const pl of (ph.pools || [])) {
+          const names = [...(pl.roster || []), ...((pl.standings || []).map((r) => r.name))];
+          const hit = names.find(nameHit);
+          if (hit) { found = { phaseId: ph.id, poolId: pl.id, name: hit }; break; }
+          for (const round of (pl.schedule || [])) {
+            for (const s of (round.sets || [])) {
+              const hit2 = [s.a && s.a.name, s.b && s.b.name].find(nameHit);
+              if (hit2) { found = { phaseId: ph.id, poolId: pl.id, name: hit2 }; break; }
+            }
+            if (found) break;
+          }
+          if (found) break;
+        }
+        if (found) break;
+        // Elimination phases keep sets at phase level (winners/losers/finals).
+        for (const round of [...(ph.winners || []), ...(ph.losers || []), ...(ph.finals || []), ...(ph.schedule || [])]) {
+          for (const s of (round.sets || [])) {
+            const hit = [s.a && s.a.name, s.b && s.b.name].find(nameHit);
+            if (hit) { found = { phaseId: ph.id, poolId: '', name: hit }; break; }
+          }
+          if (found) break;
+        }
+        if (found) break;
+      }
+      if (found) {
+        state.bracket.activePhaseId = found.phaseId;
+        if (found.poolId) state.bracket.activePoolId = found.poolId;
+        state.startgg.focusTeam = found.name;
+        syncActiveBracketPhase();
+        saveAppState();
+        broadcastFullState();
+        const ph = (state.bracket.phases || []).find((x) => x.id === found.phaseId);
+        const pl = ph && (ph.pools || []).find((x) => x.id === found.poolId);
+        ws.send(JSON.stringify({ type: 'bracket-result', data: { ok: true,
+          message: `Found ${found.name} — ${ph ? ph.name : 'phase'}${pl ? ' · ' + pl.name : ''}. Highlighted on the bracket.` } }));
+      } else {
+        ws.send(JSON.stringify({ type: 'bracket-result', data: { ok: false, message: `No team matching "${msg.data.name}" in this bracket.` } }));
+      }
       break;
     }
 

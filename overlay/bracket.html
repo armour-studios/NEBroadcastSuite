@@ -169,6 +169,28 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
 .bk-schedule .bk-round-name::after { content: ''; position: absolute; left: 18%; right: 18%; bottom: 0; height: 2px;
   background: linear-gradient(90deg, transparent, var(--accent), transparent); }
 .bk-schedule .bk-matches { justify-content: flex-start; gap: 14px; }
+/* ── Records ladder (swiss / round-robin default view): teams bucketed by W-L ── */
+.bk-ladder { display: flex; align-items: flex-start; justify-content: center; gap: 22px; width: 100%; }
+.bk-lad-bucket { flex: 1 1 0; min-width: 150px; max-width: 300px; display: flex; flex-direction: column; gap: 8px; }
+.bk-lad-head { text-align: center; font-family: var(--disp); font-weight: 700; font-size: 22px;
+  letter-spacing: .1em; color: #fff; padding: 8px 0; border-radius: 999px;
+  background: linear-gradient(180deg, rgba(255,255,255,.08), rgba(255,255,255,.02));
+  border: 1px solid var(--hair); position: relative; overflow: hidden; }
+.bk-lad-head::after { content: ''; position: absolute; left: 16%; right: 16%; bottom: 0; height: 2px;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent); }
+.bk-lad-bucket.qualified .bk-lad-head { color: #6ff0a8; }
+.bk-lad-bucket.qualified .bk-lad-head::after { background: linear-gradient(90deg, transparent, #6ff0a8, transparent); }
+.bk-lad-bucket.eliminated .bk-lad-head { color: #f39191; }
+.bk-lad-bucket.eliminated .bk-lad-head::after { background: linear-gradient(90deg, transparent, #f39191, transparent); }
+.bk-lad-team { display: flex; align-items: center; gap: 9px; padding: 7px 10px; border-radius: 7px;
+  background: linear-gradient(180deg, rgba(20,23,32,.97), rgba(12,14,20,.97));
+  border: 1px solid rgba(255,255,255,.08); border-left: 3px solid var(--team-c, rgba(255,255,255,.14)); }
+.bk-lad-bucket.eliminated .bk-lad-team { opacity: .62; }
+.bk-lad-logo { width: 26px; height: 26px; object-fit: contain; flex: 0 0 auto; }
+.bk-lad-logo.logo-on-dark { filter: invert(1); }
+.bk-lad-name { font-family: var(--disp); font-weight: 600; font-size: 17px; color: #fff;
+  min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bk-lad-team.focused { outline: 1px solid var(--accent); box-shadow: 0 0 14px color-mix(in srgb, var(--accent) 40%, transparent); }
 /* Dense rounds (>8 sets): two-column grid, double-width column */
 .bk-schedule .bk-round.bk-dense { flex: 2; }
 .bk-schedule .bk-round.bk-dense .bk-matches { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
@@ -518,6 +540,42 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
     }));
   }
 
+  // Swiss / RR records ladder — teams bucketed by W-L record, best bucket left. Reads
+  // STANDINGS (not sets), so it renders correctly from round 1 even though start.gg only
+  // creates later swiss rounds once pairings exist. Undefeated buckets read as qualified-
+  // green once a team can no longer be caught? No — colour is purely by record sign:
+  // all-wins bucket green, all-losses bucket red, mixed neutral.
+  function buildLadder(standings) {
+    const wrap = document.createElement('div'); wrap.className = 'bk-ladder';
+    const buckets = new Map();
+    (standings || []).forEach((s) => {
+      const w = s.wins || 0, l = s.losses || 0;
+      if (s.played === false && !w && !l) return;   // pre-event rows: no bucket
+      const key = w + '-' + l;
+      if (!buckets.has(key)) buckets.set(key, { w, l, teams: [] });
+      buckets.get(key).teams.push(s);
+    });
+    const ordered = [...buckets.values()].sort((a, b) => (b.w - b.l) - (a.w - a.l) || b.w - a.w);
+    ordered.forEach((bk) => {
+      const col = document.createElement('div');
+      col.className = 'bk-lad-bucket' + (bk.l === 0 && bk.w > 0 ? ' qualified' : (bk.w === 0 && bk.l > 0 ? ' eliminated' : ''));
+      const head = document.createElement('div'); head.className = 'bk-lad-head'; head.textContent = bk.w + ' – ' + bk.l;
+      col.appendChild(head);
+      bk.teams.forEach((s) => {
+        const t = document.createElement('div'); t.className = 'bk-lad-team';
+        const color = colorByName[(s.name || '').toLowerCase()];
+        if (color) t.style.setProperty('--team-c', color);
+        const logo = logoFor(s.name);
+        if (logo) { const img = document.createElement('img'); img.className = 'bk-lad-logo' + (isDark(logo) ? ' logo-on-dark' : ''); img.src = logo; img.onerror = function () { this.style.display = 'none'; }; t.appendChild(img); }
+        const nm = document.createElement('div'); nm.className = 'bk-lad-name bk-name'; nm.textContent = s.name || 'TBD';
+        t.appendChild(nm);
+        col.appendChild(t);
+      });
+      wrap.appendChild(col);
+    });
+    return wrap;
+  }
+
   // Round-robin / Swiss round-by-round pairings — reuses buildColumn (same {name,sets} shape
   // as the elimination rounds), just laid out as one flat row of columns with no connectors.
   function buildSchedule(schedule) {
@@ -688,16 +746,21 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
       // platform import used to stack schedule + standings together, which read as several
       // overlays rendered on top of each other. Explicit views still show exactly what they say.
       let rrView = view;
-      if (!['schedule', 'standings', 'matrix'].includes(rrView)) {
-        rrView = schedule.length ? 'schedule' : (standings.length ? 'standings' : 'matrix');
+      if (!['schedule', 'standings', 'matrix', 'ladder'].includes(rrView)) {
+        // Default pool-play view = the records LADDER (teams bucketed by W-L) — reads
+        // standings, so swiss renders fully even when only round 1's sets exist yet.
+        rrView = standings.some((s) => (s.wins || 0) + (s.losses || 0) > 0) ? 'ladder'
+               : (schedule.length ? 'schedule' : (standings.length ? 'standings' : 'matrix'));
       }
+      const wantLadder = rrView === 'ladder' && standings.length > 0;
       const wantMatrix = !!matrix && rrView === 'matrix';
       const wantSchedule = schedule.length > 0 && rrView === 'schedule';
       const wantStandings = standings.length > 0 && rrView === 'standings';
+      if (wantLadder) scaleEl.appendChild(buildLadder(standings));
       if (wantMatrix) scaleEl.appendChild(buildMatrix(matrix));
       if (wantSchedule) scaleEl.appendChild(buildSchedule(schedule));
       if (wantStandings) scaleEl.appendChild(buildStandings(standings, b.showRecord));
-      emptyEl.classList.toggle('hidden', wantMatrix || wantSchedule || wantStandings);
+      emptyEl.classList.toggle('hidden', wantLadder || wantMatrix || wantSchedule || wantStandings);
     }
 
     // Connectors are computed in the wrapper's UNSCALED coordinate space, then fit()
