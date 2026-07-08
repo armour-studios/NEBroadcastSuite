@@ -356,6 +356,22 @@
     <button class="btn btn-primary btn-sm" id="dash-tour-cta-go">Start walkthrough</button>
     <button class="dash-tour-cta-x" id="dash-tour-cta-x" title="Dismiss (won't show again)" aria-label="Dismiss">&#x2715;</button>
   </div>
+  <!-- Small dismissible promo banner for Nameless Esports — the ✕ retires it for good (localStorage) -->
+  <div id="dash-nameless-cta" class="dash-nameless-cta" style="display:none;">
+    <img class="dash-nameless-cta-logo" src="../assets/images/nameless.png" alt="">
+    <span class="dash-nameless-cta-txt">NE Broadcast Suite is brought to you by <strong>Nameless Esports</strong></span>
+    <div class="dash-nameless-cta-links">
+      <a class="dash-nameless-cta-pill" href="https://www.namelessesports.com" target="_blank" rel="noopener noreferrer">
+        <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+        Website
+      </a>
+      <a class="dash-nameless-cta-pill dash-nameless-cta-pill--discord" href="https://namelessesports.com/discord" target="_blank" rel="noopener noreferrer">
+        <svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor"><path d="M20.317 4.492c-1.53-.69-3.17-1.2-4.885-1.49a.075.075 0 0 0-.079.036c-.21.369-.444.85-.608 1.23a18.566 18.566 0 0 0-5.487 0 12.36 12.36 0 0 0-.617-1.23A.077.077 0 0 0 8.562 3c-1.714.29-3.354.8-4.885 1.491a.07.07 0 0 0-.032.027C.533 9.093-.32 13.555.099 17.961a.08.08 0 0 0 .031.055 20.03 20.03 0 0 0 5.993 2.98.078.078 0 0 0 .084-.026 13.83 13.83 0 0 0 1.226-1.963.074.074 0 0 0-.041-.104 13.2 13.2 0 0 1-1.872-.878.075.075 0 0 1-.008-.125c.126-.093.252-.19.372-.287a.075.075 0 0 1 .078-.01c3.927 1.764 8.18 1.764 12.061 0a.075.075 0 0 1 .079.009c.12.098.245.195.372.288a.075.075 0 0 1-.006.125c-.598.344-1.22.635-1.873.877a.075.075 0 0 0-.041.105c.36.687.772 1.341 1.225 1.962a.077.077 0 0 0 .084.028 19.963 19.963 0 0 0 6.002-2.981.076.076 0 0 0 .032-.054c.5-5.094-.838-9.52-3.549-13.442a.06.06 0 0 0-.031-.028zM8.02 15.278c-1.182 0-2.157-1.069-2.157-2.38 0-1.312.956-2.38 2.157-2.38 1.211 0 2.176 1.077 2.157 2.38 0 1.311-.956 2.38-2.157 2.38zm7.975 0c-1.183 0-2.157-1.069-2.157-2.38 0-1.312.955-2.38 2.157-2.38 1.21 0 2.176 1.077 2.157 2.38 0 1.311-.946 2.38-2.157 2.38z"/></svg>
+        Discord
+      </a>
+    </div>
+    <button class="dash-nameless-cta-x" id="dash-nameless-cta-x" title="Dismiss (won't show again)" aria-label="Dismiss">&#x2715;</button>
+  </div>
   <!-- Dashboard customise toolbar — trigger row always visible; controls appear in edit mode -->
   <div id="dash-customize-bar" class="dash-customize-bar">
     <div class="dcb-trigger-row">
@@ -4412,6 +4428,9 @@
           <!-- delegation target kept for Queue (rundown) -->
           <button class="btn btn-ghost btn-sm" id="gfx-top-queue" style="display:none;"></button>
           <button class="gfx-btn-pushlive" id="gfx-top-push" title="Show this scene on gfx.html — hides every other scene there">Push Live</button>
+          <button type="button" class="btn btn-ghost btn-sm gfx-top-popout" id="gfx-top-popout" title="Pop out the Graphics control panel into its own window">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" width="12" height="12"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+          </button>
         </div>
       </div>
 
@@ -4466,6 +4485,7 @@
             <div class="gfx-nav-group-items">
               <button class="gfx-sidenav-btn" data-gfxscene="spotlight" id="gfx-tab-spotlight">Spotlight</button>
               <button class="gfx-sidenav-btn" data-gfxscene="winner">Winner</button>
+              <button class="gfx-sidenav-btn" data-gfxscene="credits">Credits</button>
             </div>
           </div>
         </nav>
@@ -4843,6 +4863,22 @@
                 <label class="field-label" for="input-winner-subtitle">Subtitle</label>
                 <input type="text" id="input-winner-subtitle" class="input-text" placeholder="2025 Spring Champions" maxlength="80">
               </div>
+            </div>
+          </div>
+
+          <!-- CREDITS -->
+          <div class="gfx-scene-panel" data-gfxpanel="credits" style="display:none;">
+            <button id="btn-show-credits" style="display:none;"></button>
+            <button id="btn-hide-credits" style="display:none;"></button>
+            <button id="btn-queue-credits" style="display:none;"></button>
+            <div class="gfx-scene-body">
+              <p class="field-hint" style="margin:0;">Scrolling shoutout of follows, subs, cheers and raids from this stream — pulled automatically from your Twitch activity. The current caster lineup and crew are credited automatically.</p>
+              <div class="field-row" style="margin-top:10px;">
+                <label class="field-label" for="input-credits-talent">Additional talent (one per line: Name — Role)</label>
+                <textarea id="input-credits-talent" class="input-text" rows="4" style="resize:vertical; font-family:inherit;" placeholder="Jay Smith — Caster (early show)&#10;Dana Lee — Observer&#10;Sam Ortiz — Producer"></textarea>
+                <p class="field-hint" style="margin:4px 0 0;">People from other shifts of this broadcast who aren't in the current lineup — they're added to the talent bar alongside the live crew.</p>
+              </div>
+              <button class="btn btn-secondary btn-sm" id="btn-credits-talent-apply" style="margin-top:6px;">Save talent credits</button>
             </div>
           </div>
 
@@ -6640,6 +6676,23 @@
         <button class="btn btn-ghost btn-sm" id="btn-credits-clear" style="flex:1;">Clear Log</button>
       </div>
 
+      <!-- Credit Sponsors — dedicated big call-outs in the end roll (separate from the sponsor bar) -->
+      <div style="margin:14px 0 10px; padding-top:12px; border-top:1px solid rgba(255,255,255,0.08);">
+        <div style="font-size:12px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--muted);margin-bottom:2px;">Credit Sponsors</div>
+        <p class="section-desc" style="margin:0 0 10px;">A big call-out block in the roll — separate from the brand sponsor bar at the bottom.</p>
+        <div style="display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap;">
+          <input type="text" id="cs-name" class="input-text" placeholder="Sponsor name" style="flex:2;min-width:130px;">
+          <input type="text" id="cs-tier" class="input-text" placeholder="Tier (optional)" style="flex:1;min-width:110px;">
+        </div>
+        <div style="display:flex;gap:6px;margin-bottom:10px;align-items:center;">
+          <input type="file" id="cs-logo-file" accept="image/*" style="display:none;">
+          <button class="btn btn-ghost btn-sm" id="cs-logo-btn" type="button">Logo…</button>
+          <span id="cs-logo-name" style="font-size:11px;color:var(--muted);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">No logo</span>
+          <button class="btn btn-primary btn-sm" id="cs-add" type="button">Add</button>
+        </div>
+        <div id="cs-list" style="display:flex;flex-direction:column;gap:5px;"></div>
+      </div>
+
       <div style="font-size:11px;color:var(--muted);text-align:center;line-height:1.5;">
         Activity accumulates while Twitch is connected. Add to OBS as browser source (1920×1080, transparent BG).
       </div>
@@ -7114,6 +7167,7 @@ PacketSendRate=10</pre>
           <div><label class="field-label" for="input-rl-ui-key">Key</label><input type="text" id="input-rl-ui-key" class="input-text" value="h" maxlength="8"></div>
           <div><label class="field-label" for="input-rl-ui-presses">Presses</label><input type="number" id="input-rl-ui-presses" class="input-text" value="2" min="1" max="4"></div>
           <div><label class="field-label" for="input-rl-ui-gap">Gap (ms)</label><input type="number" id="input-rl-ui-gap" class="input-text" value="250" min="50" max="2000" step="50"></div>
+          <div><label class="field-label" for="input-rl-ui-delay" title="How long after the kickoff before the hide key is pressed — lower = triggers earlier (min 0.5s)">Hide delay (s)</label><input type="number" id="input-rl-ui-delay" class="input-text" value="1.5" min="0.5" max="10" step="0.5"></div>
           <div><label class="field-label" for="input-rl-ui-hotkey">Global hotkey</label><input type="text" id="input-rl-ui-hotkey" class="input-text" value="F9" placeholder="F9"></div>
         </div>
         <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
@@ -8202,9 +8256,10 @@ PacketSendRate=10</pre>
           </div>
         </div>
 
-        <!-- Put on air — chip per graphic; a chip with a gear opens its options (title/timer/side). -->
+        <!-- Put on air — chip per graphic + every real OBS scene (deduped by name); a chip with a
+             gear opens its options (title/timer/side). "reorder" drags chips into any order. -->
         <div class="qrail-group qk-grp">
-          <div class="qrail-label">Put On Air <span class="qrail-sub"><a href="#" id="qk-clear-all" title="Clear every on-air graphic">clear all</a></span></div>
+          <div class="qrail-label">Put On Air <span class="qrail-sub"><a href="#" id="qk-put-reorder" title="Drag chips into a custom order">reorder</a> &middot; <a href="#" id="qk-clear-all" title="Clear every on-air graphic">clear all</a></span></div>
           <div class="qk-put" id="qk-put"></div>
         </div>
 
@@ -8694,6 +8749,9 @@ PacketSendRate=10</pre>
 
 <!-- ══════════════════ Bottom Transport bar (live OBS scene cuts) ══════════════════ -->
 <div class="bottom-bar" id="bottom-bar">
+  <button class="bb-expand-toggle" id="bb-expand-toggle" title="Show the rest of the bar" style="display:none;">
+    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+  </button>
   <span class="bb-tag">PROGRAM CUTS</span>
   <div class="bb-scenes" id="qt-obs-scenes"><span class="qt-hint" id="qt-obs-hint">OBS scenes appear here when connected</span></div>
   <div class="bb-upnext" id="bb-upnext" style="display:none;" title="Next match on the start.gg stream queue">

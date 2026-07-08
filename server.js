@@ -236,7 +236,7 @@ let state = {
   banner: { visible: false, images: [], captions: [], interval: 10, slant: 'right', header: '' },
   // Stream-credits extras: producer-added "credit sponsors" — a dedicated big call-out section in
   // the end-of-stream roll, separate from the brand-kit sponsor bar. [{ name, logo, tier }]
-  credits: { sponsors: [] },
+  credits: { sponsors: [], talent: [] },   // talent: manual {name,role} credits (other-shift crew)
   casters: { visible: true, showCountry: false, list: [], lowerThird: '', library: [], vdo: { room: '', password: '' }, guestsVdo: { room: '', password: '' }, observersVdo: { room: '', password: '' }, rooms: [], lineup: [], activeLayout: '', interview: { room: '', password: '' }, apiKey: '', interviewee: null, playerCam: null, deskRoomId: '', slotLabels: { 1: 'Caster 1', 2: 'Caster 2', 3: 'Caster 3', 4: 'Caster 4', 5: 'Player' } },   // list = on-air slots; showCountry = render each caster's country on the desk; library = saved casters/guests/observers (by kind); vdo/guestsVdo/observersVdo = the three shared group rooms; rooms = named VDO rooms; lineup = this-show active assignments; apiKey = director IFrame-API key; interviewee = spotlight-desk right cam; playerCam = slot-5 player feed ({camUrl,name,playerId}); deskRoomId = which named room is the interview/desk room
   // VDO.Ninja talent workflow. Global config (server-side, replaces the old localStorage settings);
   // per-team rooms/passwords live on teams.x.vdo, per-player IDs on the player objects.
@@ -1776,7 +1776,7 @@ function loadState() {
       if (saved.brand && typeof saved.brand === 'object') state.brand = saved.brand;
       if (Array.isArray(saved.preshowPresets)) state.preshowPresets = saved.preshowPresets;
       if (saved.banner) state.banner = saved.banner;
-      if (saved.credits && Array.isArray(saved.credits.sponsors)) state.credits = { sponsors: saved.credits.sponsors };
+      if (saved.credits && Array.isArray(saved.credits.sponsors)) state.credits = { sponsors: saved.credits.sponsors, talent: Array.isArray(saved.credits.talent) ? saved.credits.talent : [] };
       if (saved.casters && typeof saved.casters === 'object') {
         state.casters = {
           visible: !!saved.casters.visible,
@@ -2128,6 +2128,13 @@ function loadState() {
       }
       if (saved.playerProfiles && typeof saved.playerProfiles === 'object') {
         state.playerProfiles = saved.playerProfiles;
+        // Back-fill countryCode from the stored country name for profiles saved before the country
+        // map was expanded — so overlays (credits/intro flags) get a code without re-syncing the event.
+        try {
+          Object.values(state.playerProfiles).forEach((p) => {
+            if (p && !p.countryCode && p.country) { const cc = _countryCode(p.country); if (cc) p.countryCode = cc; }
+          });
+        } catch (e) {}
       }
       if (saved.draftAuto && typeof saved.draftAuto === 'object') {
         if (!state.draft.auto) state.draft.auto = { enabled: false, status: 'off', statusDetail: '', lockfilePath: '' };
@@ -5448,21 +5455,35 @@ async function fetchBracket(rawSlug) {
 
 // ISO 3166-1 alpha-2 lookup for the most common esports countries.
 const _COUNTRY_CODES = {
-  'united states': 'us', 'usa': 'us', 'canada': 'ca', 'united kingdom': 'gb', 'uk': 'gb',
+  'united states': 'us', 'usa': 'us', 'united states of america': 'us', 'america': 'us',
+  'canada': 'ca', 'united kingdom': 'gb', 'uk': 'gb', 'great britain': 'gb',
   'england': 'gb', 'scotland': 'gb', 'wales': 'gb', 'northern ireland': 'gb',
+  'ireland': 'ie', 'republic of ireland': 'ie',
   'australia': 'au', 'new zealand': 'nz', 'germany': 'de', 'france': 'fr',
   'sweden': 'se', 'norway': 'no', 'denmark': 'dk', 'finland': 'fi', 'iceland': 'is',
-  'netherlands': 'nl', 'belgium': 'be', 'switzerland': 'ch', 'austria': 'at',
-  'spain': 'es', 'portugal': 'pt', 'italy': 'it', 'greece': 'gr',
-  'poland': 'pl', 'czechia': 'cz', 'czech republic': 'cz', 'hungary': 'hu',
-  'romania': 'ro', 'ukraine': 'ua', 'russia': 'ru', 'turkey': 'tr',
-  'israel': 'il', 'south africa': 'za', 'nigeria': 'ng',
+  'netherlands': 'nl', 'the netherlands': 'nl', 'holland': 'nl', 'belgium': 'be',
+  'switzerland': 'ch', 'austria': 'at', 'luxembourg': 'lu',
+  'spain': 'es', 'portugal': 'pt', 'italy': 'it', 'greece': 'gr', 'cyprus': 'cy', 'malta': 'mt',
+  'poland': 'pl', 'czechia': 'cz', 'czech republic': 'cz', 'slovakia': 'sk', 'hungary': 'hu',
+  'romania': 'ro', 'bulgaria': 'bg', 'moldova': 'md', 'ukraine': 'ua', 'belarus': 'by',
+  'russia': 'ru', 'russian federation': 'ru', 'turkey': 'tr', 'türkiye': 'tr',
+  'croatia': 'hr', 'serbia': 'rs', 'slovenia': 'si', 'bosnia and herzegovina': 'ba', 'bosnia': 'ba',
+  'north macedonia': 'mk', 'macedonia': 'mk', 'montenegro': 'me', 'albania': 'al', 'kosovo': 'xk',
+  'estonia': 'ee', 'latvia': 'lv', 'lithuania': 'lt',
+  'georgia': 'ge', 'armenia': 'am', 'azerbaijan': 'az', 'kazakhstan': 'kz',
+  'israel': 'il', 'south africa': 'za', 'nigeria': 'ng', 'egypt': 'eg', 'morocco': 'ma',
+  'tunisia': 'tn', 'algeria': 'dz', 'kenya': 'ke', 'ghana': 'gh',
+  'saudi arabia': 'sa', 'united arab emirates': 'ae', 'uae': 'ae', 'qatar': 'qa', 'kuwait': 'kw',
+  'bahrain': 'bh', 'oman': 'om', 'jordan': 'jo', 'lebanon': 'lb', 'iraq': 'iq', 'iran': 'ir',
   'brazil': 'br', 'mexico': 'mx', 'argentina': 'ar', 'chile': 'cl',
-  'colombia': 'co', 'peru': 'pe', 'venezuela': 've', 'ecuador': 'ec',
-  'japan': 'jp', 'south korea': 'kr', 'korea': 'kr', 'china': 'cn',
-  'taiwan': 'tw', 'hong kong': 'hk', 'singapore': 'sg', 'indonesia': 'id',
-  'malaysia': 'my', 'philippines': 'ph', 'thailand': 'th', 'vietnam': 'vn',
-  'india': 'in', 'pakistan': 'pk',
+  'colombia': 'co', 'peru': 'pe', 'venezuela': 've', 'ecuador': 'ec', 'bolivia': 'bo',
+  'uruguay': 'uy', 'paraguay': 'py', 'costa rica': 'cr', 'panama': 'pa', 'guatemala': 'gt',
+  'dominican republic': 'do', 'puerto rico': 'pr', 'jamaica': 'jm', 'trinidad and tobago': 'tt',
+  'japan': 'jp', 'south korea': 'kr', 'korea': 'kr', 'north korea': 'kp', 'china': 'cn',
+  'taiwan': 'tw', 'hong kong': 'hk', 'macau': 'mo', 'singapore': 'sg', 'indonesia': 'id',
+  'malaysia': 'my', 'philippines': 'ph', 'thailand': 'th', 'vietnam': 'vn', 'myanmar': 'mm',
+  'cambodia': 'kh', 'laos': 'la', 'mongolia': 'mn',
+  'india': 'in', 'pakistan': 'pk', 'bangladesh': 'bd', 'sri lanka': 'lk', 'nepal': 'np',
 };
 function _countryCode(name) {
   if (!name) return null;
@@ -12706,6 +12727,16 @@ function handleControlMessage(msg, ws) {
     // Stream-credits "credit sponsors" — the dedicated big call-out list in the end roll.
     case 'set_credits': {
       const d = msg.data || {};
+      if (Array.isArray(d.talent)) {
+        // Manual talent credits — crew from other shifts who still deserve the roll.
+        state.credits.talent = d.talent
+          .filter((t) => t && t.name)
+          .slice(0, 40)
+          .map((t) => ({
+            name: (t.name || '').toString().slice(0, 60),
+            role: (t.role || '').toString().slice(0, 60)
+          }));
+      }
       if (Array.isArray(d.sponsors)) {
         state.credits.sponsors = d.sponsors
           .filter((s) => s && (s.name || s.logo))

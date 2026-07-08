@@ -2259,6 +2259,7 @@ function _returnGraphicsToProd() {
     // Refresh data pickers so they always show current state when navigated to.
     if (key === 'matchup' && typeof window._gfxRefreshMatchupPickers === 'function') window._gfxRefreshMatchupPickers(currentState);
     if (key === 'winner'  && typeof window._gfxRefreshWinnerPicker   === 'function') window._gfxRefreshWinnerPicker(currentState);
+    if (key === 'credits' && typeof window._gfxFillCreditsTalent === 'function') window._gfxFillCreditsTalent(currentState);
     if (key === 'draft'   && typeof renderDraftManager === 'function') renderDraftManager(currentState);
     // Per-scene appearance preset bar (accent/accent2/font overrides) — retired, per-scene
     // theming duplicated what the active Brand Kit's own color/accent/font already provide and
@@ -18959,6 +18960,23 @@ function gfxSetPathVal(obj, dotted, val) {
   o[parts[parts.length - 1]] = val;
 }
 const GFX_KEY2TRIG = { break: 'breakScreen', winner: 'winner', intro: 'intro', veto: 'veto', spotlight: 'spotlight' };
+// ── Stream Credits: manual talent entries ("Name — Role" per line) ──
+window._gfxFillCreditsTalent = function (data) {
+  const ta = el('input-credits-talent');
+  if (!ta || document.activeElement === ta) return;
+  const list = (data && data.credits && data.credits.talent) || [];
+  ta.value = list.map((t) => t.role ? t.name + ' — ' + t.role : t.name).join('\n');
+};
+el('btn-credits-talent-apply')?.addEventListener('click', function () {
+  const ta = el('input-credits-talent');
+  const talent = (ta ? ta.value : '').split(/\n/).map((line) => {
+    const m = line.split(/\s+[—–-]\s+|\s*,\s*/);   // "Name — Role", "Name - Role" or "Name, Role"
+    const name = (m[0] || '').trim();
+    return name ? { name, role: (m[1] || '').trim() } : null;
+  }).filter(Boolean);
+  send('set_credits', { talent });
+  showToast('Talent credits saved — ' + talent.length + ' name(s)', '#22c55e');
+});
 // Punch-up graphics: only one of these can be live at a time — showing one auto-hides whichever
 // other one is live. Casters, Ticker, Sponsor Banner and Teams to Watch are NOT in this set — they
 // run as independent, persistent overlays alongside whatever punch-up graphic is showing.
