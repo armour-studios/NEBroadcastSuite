@@ -2430,11 +2430,22 @@ function casterAudioOverride(caster) {
 // The crew profile is the canonical person record: its Handle/Gamertag field is the DISPLAY
 // name for desks. The caster-library `handle` field can't be trusted for that — the caster
 // card editors historically treat it as the @social username, so the two UIs disagree about
-// what it means. Cross-reference by name at resolve time instead of trying to sync fields.
-function crewGamertagFor(name) {
-  const k = (name || '').toString().trim().toLowerCase();
-  if (!k || !Array.isArray(state.crew)) return '';
-  const hit = state.crew.find((c) => c && (c.name || '').toString().trim().toLowerCase() === k);
+// what it means. Cross-reference at resolve time instead of trying to sync fields.
+// Matching is deliberately generous (library name/handle vs crew name/handle/socialHandle,
+// case-insensitive): producers rename the library card (e.g. to the gamertag itself) and a
+// strict name==name join silently loses the person.
+function crewGamertagFor(profOrName) {
+  if (!Array.isArray(state.crew) || !state.crew.length) return '';
+  const prof = (profOrName && typeof profOrName === 'object') ? profOrName : { name: profOrName };
+  const keys = [prof.name, prof.handle, prof.socialHandle]
+    .map((v) => (v || '').toString().trim().toLowerCase()).filter(Boolean);
+  if (!keys.length) return '';
+  const hit = state.crew.find((c) => {
+    if (!c) return false;
+    const own = [c.name, c.handle, c.socialHandle]
+      .map((v) => (v || '').toString().trim().toLowerCase()).filter(Boolean);
+    return own.some((o) => keys.includes(o));
+  });
   return ((hit && hit.handle) || '').toString().trim();
 }
 
@@ -2458,7 +2469,7 @@ function resolveLineupToList() {
       id: prof.id || ('lineup_' + (entry.slot || (i + 1))),
       name: prof.name || '',
       handle: prof.handle || '',
-      gamertag: crewGamertagFor(prof.name),    // desk display name (crew Handle/Gamertag field)
+      gamertag: crewGamertagFor(prof),         // desk display name (crew Handle/Gamertag field)
       socialHandle: prof.socialHandle || prof.handle || '',   // @-line username
       social: prof.social || 'none',
       country: prof.country || '',
@@ -10415,7 +10426,7 @@ function handleControlMessage(msg, ws) {
           id: c.id || Math.random().toString(36).slice(2, 11),
           name: (c.name || '').toString().slice(0, 40),
           handle: (c.handle || '').toString().slice(0, 80),
-          gamertag: crewGamertagFor(c.name),   // desk display name (crew Handle/Gamertag field)
+          gamertag: crewGamertagFor(c),        // desk display name (crew Handle/Gamertag field)
           socialHandle: (c.socialHandle || c.handle || '').toString().slice(0, 80),
           camUrl: (c.camUrl || '').toString().slice(0, 1000),
           // VDO building blocks (so the control panel can re-show + rebuild the clean view URL).
