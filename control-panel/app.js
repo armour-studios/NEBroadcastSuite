@@ -4624,6 +4624,18 @@ function bbOpenTriggerConfig(stateKey, btn) {
   pop.style.visibility = '';
 }
 el('bb-trigger-close')?.addEventListener('click', () => { el('bb-trigger-pop').style.display = 'none'; });
+// Keep an OPEN popover honest: the Go button label and the Hide button reflect the
+// trigger's CURRENT on-air state, not the state at open time — turning the graphic
+// off from the chip, another panel, or an automation updates the panel in place.
+function bbSyncTriggerPop() {
+  const pop = el('bb-trigger-pop');
+  if (!pop || pop.style.display === 'none') return;
+  const stateKey = pop.dataset.state;
+  if (!stateKey) return;
+  const live = !!(currentState && currentState[stateKey] && currentState[stateKey].visible);
+  const go = el('bb-trigger-go'); if (go) go.textContent = live ? 'Update' : 'Push Live';
+  const hide = el('bb-trigger-hide'); if (hide) hide.style.display = live ? '' : 'none';
+}
 // Click-away / Escape close the popover — a floating "put on air" panel must never linger.
 document.addEventListener('mousedown', (e) => {
   const pop = el('bb-trigger-pop');
@@ -22866,6 +22878,7 @@ function connect() {
       _r('renderDashMiniPanels', () => renderDashMiniPanels(msg.data));
       _r('renderQrailScenes',    () => renderQrailScenes(msg.data));
       _r('renderQuickPanel',     () => renderQuickPanel(msg.data));
+      _r('bbSyncTriggerPop',     () => bbSyncTriggerPop());
       _r('renderQrailStartgg',  () => renderQrailStartgg(msg.data));
       _r('renderGoLive',       () => renderGoLive(msg.data));
       _r('renderUpNext',       () => renderUpNext(msg.data));
