@@ -79,8 +79,9 @@ html, body {
 .st-title {
   font-family: var(--disp);
   font-size: 58px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase;
-  color: #fff; line-height: 0.95; text-shadow: 0 8px 40px rgba(0,0,0,0.7);
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  color: #fff; line-height: 0.98; text-shadow: 0 8px 40px rgba(0,0,0,0.7);
+  /* Whole event name, never truncated — wraps to two lines; fit() rescales if it grows */
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
 }
 .st-subtitle { font-size: 21px; font-weight: 600; letter-spacing: 1px; color: #97a0b4; }
 .st-subtitle:empty { display: none; }
@@ -236,14 +237,21 @@ html, body {
       `<svg xmlns="http://www.w3.org/2000/svg" width="160" height="160"><rect width="160" height="160" rx="24" fill="${color}"/><text x="80" y="110" font-size="88" fill="#fff" text-anchor="middle" font-family="Arial,sans-serif" font-weight="bold">${letter}</text></svg>`);
   }
 
-  function teamMaps(savedTeams) {
+  // Logo/colour lookups from EVERY source we have, cheapest-first at resolve time:
+  // the row's own logo → saved teams DB → start.gg entrant logos (logoMap) →
+  // Challonge/NXGEN logo maps → the bracket's embedded teams (manual imports).
+  function teamMaps(data) {
     const logos = {}, colors = {};
-    (savedTeams || []).forEach(t => {
-      if (!t || !t.name) return;
-      const k = t.name.toLowerCase();
-      if (t.logo) logos[k] = t.logo;
-      if (t.color) colors[k] = t.color;
-    });
+    const put = (name, logo, color) => {
+      if (!name) return;
+      const k = String(name).toLowerCase();
+      if (logo && !logos[k]) logos[k] = logo;
+      if (color && !colors[k]) colors[k] = color;
+    };
+    (data.savedTeams || []).forEach(t => t && put(t.name, t.logo, t.color));
+    const maps = [data.startgg && data.startgg.logoMap, data.challonge && data.challonge.logoMap, data.nxgen && data.nxgen.logoMap];
+    maps.forEach((m) => { if (m) Object.keys(m).forEach((k) => { if (m[k] && !logos[k]) logos[k] = m[k]; }); });
+    ((data.bracket && data.bracket.teams) || []).forEach(t => t && put(t.name, t.logo, t.color));
     return { logos, colors };
   }
 
@@ -353,7 +361,8 @@ html, body {
     const accent = SceneBase.brandColor(data) || '#e83a8b';
     const accent2 = SceneBase.brandAccent(data) || accent;
 
-    const title = (stState.title || bracket.title || data.eventName || 'STANDINGS').toString().toUpperCase();
+    // Full EVENT NAME preferred over the bracket's (often shortened) event title.
+    const title = (stState.title || data.eventName || bracket.title || 'STANDINGS').toString().toUpperCase();
     const subtitle = (stState.subtitle || '').toString();
 
     // Resolve rows. Manual rows always win; start.gg-sourced rows defer to the live bracket
@@ -367,7 +376,7 @@ html, body {
                : (src === 'startgg' && live.length) ? live
                : (src.indexOf('startgg') === 0 && live.length && frozen.length && !overlap) ? live
                : (frozen.length ? frozen : live);
-    const maps = teamMaps(data.savedTeams);
+    const maps = teamMaps(data);
 
     const showRecord = stState.showRecord !== false && rows.some(r => r.wins != null || r.losses != null);
     const hasPoints = rows.some(r => r.points != null);
@@ -381,7 +390,8 @@ html, body {
       .filter((s) => s && s.logo);
 
     const sig = JSON.stringify({ rows, title, subtitle, showRecord, hasPoints, hasGames, accent, accent2,
-      bl: brandLogo.slice(0, 40), f: data.fontFamily || '', sp: sponsors.map((s) => s.logo && s.logo.slice(0, 40)) });
+      bl: brandLogo.slice(0, 40), f: data.fontFamily || '', sp: sponsors.map((s) => s.logo && s.logo.slice(0, 40)),
+      lm: Object.keys(maps.logos).length });   // logo sources arriving later (start.gg fetch) re-render
     if (sig === _sig) return;
     _sig = sig;
 
@@ -427,9 +437,9 @@ html, body {
       podium.style.display = 'none';
     }
 
-    // List: the next ranks under the podium (up to 8 rows), "+N more" beyond that.
+    // List: the next ranks under the podium (top 12 total: podium 3 + 9 rows), "+N more" beyond.
     const listStart = podiumRows.length >= 2 ? 3 : 0;
-    const LIST_MAX = 8;
+    const LIST_MAX = podiumRows.length >= 2 ? 9 : 12;
     const listRows = rows.slice(listStart, listStart + LIST_MAX);
     if (listRows.length) {
       list.style.setProperty('--st-cols', colStops(showRecord, hasGames, hasPoints));
