@@ -234,6 +234,9 @@ let state = {
   colorMode: 'team',        // 'team' | 'brand' | 'default'
   sceneBg: {},              // live bg fill per overlay path, keyed by pathname
   banner: { visible: false, images: [], captions: [], interval: 10, slant: 'right', header: '' },
+  // Stream-credits extras: producer-added "credit sponsors" — a dedicated big call-out section in
+  // the end-of-stream roll, separate from the brand-kit sponsor bar. [{ name, logo, tier }]
+  credits: { sponsors: [] },
   casters: { visible: true, showCountry: false, list: [], lowerThird: '', library: [], vdo: { room: '', password: '' }, guestsVdo: { room: '', password: '' }, observersVdo: { room: '', password: '' }, rooms: [], lineup: [], activeLayout: '', interview: { room: '', password: '' }, apiKey: '', interviewee: null, playerCam: null, deskRoomId: '', slotLabels: { 1: 'Caster 1', 2: 'Caster 2', 3: 'Caster 3', 4: 'Caster 4', 5: 'Player' } },   // list = on-air slots; showCountry = render each caster's country on the desk; library = saved casters/guests/observers (by kind); vdo/guestsVdo/observersVdo = the three shared group rooms; rooms = named VDO rooms; lineup = this-show active assignments; apiKey = director IFrame-API key; interviewee = spotlight-desk right cam; playerCam = slot-5 player feed ({camUrl,name,playerId}); deskRoomId = which named room is the interview/desk room
   // VDO.Ninja talent workflow. Global config (server-side, replaces the old localStorage settings);
   // per-team rooms/passwords live on teams.x.vdo, per-player IDs on the player objects.
@@ -1769,6 +1772,7 @@ function loadState() {
       if (saved.brand && typeof saved.brand === 'object') state.brand = saved.brand;
       if (Array.isArray(saved.preshowPresets)) state.preshowPresets = saved.preshowPresets;
       if (saved.banner) state.banner = saved.banner;
+      if (saved.credits && Array.isArray(saved.credits.sponsors)) state.credits = { sponsors: saved.credits.sponsors };
       if (saved.casters && typeof saved.casters === 'object') {
         state.casters = {
           visible: !!saved.casters.visible,
@@ -2165,6 +2169,7 @@ function _saveAppStateNow(sync = false) {
       preshow: state.preshow,
       banner: state.banner,
       casters: state.casters,
+      credits: state.credits,
       ticker: state.ticker,
       draftAuto: { enabled: !!(state.draft && state.draft.auto && state.draft.auto.enabled), lockfilePath: (state.draft && state.draft.auto && state.draft.auto.lockfilePath) || '' },
       lolHudMode: (state.lol && state.lol.hudMode) || 'auto',
@@ -2737,7 +2742,7 @@ const BROADCAST_TIERS = {
   eventName: 'live', gameLabel: 'live', roundLabel: 'live', speedUnit: 'live', fontFamily: 'live',
   clock24h: 'live', showSeries: 'live', defaultBestOf: 'live', facecamsEnabled: 'live',
   replayCams: 'live', activeBrandKitId: 'live', useBrandColors: 'live', colorMode: 'live',
-  sceneBg: 'live', banner: 'live', casters: 'live', vdo: 'live', listenIn: 'live',
+  sceneBg: 'live', banner: 'live', casters: 'live', vdo: 'live', listenIn: 'live', credits: 'live',
   breakScreen: 'live', ticker: 'live', adProofSessions: 'live', spotlight: 'live', winner: 'live',
   veto: 'live', owMatch: 'live', mrMatch: 'live', customOverlayLayouts: 'live', draft: 'live',
   intro: 'live', overtime: 'live', scoreboardAd: 'live', background: 'live', deskFooter: 'live',
@@ -4758,7 +4763,7 @@ async function fetchEntrantTrueSeeds(eventSlug) {
   const map = {};
   do {
     if (page > 1) await new Promise((r) => setTimeout(r, 350));   // stagger for start.gg rate limits
-    const res = await client.request(query, { slug: eventSlug, perPage: 75, page });
+    const res = await startggRequestWithBackoff(client, query, { slug: eventSlug, perPage: 75, page });
     const ev = res && res.event;
     if (!ev) throw new Error('Event not found — check the slug/URL and your token');
     ((ev.entrants && ev.entrants.nodes) || []).forEach((n) => {
@@ -4772,7 +4777,7 @@ async function fetchEntrantTrueSeeds(eventSlug) {
 
 // Pull every page of an event's entrants (teams + their players).
 // Tries to include social handles and country; falls back silently if the API rejects those fields.
-async function fetchAllEntrants(client, slug, perPage = 50, maxPages = 16) {
+async function fetchAllEntrants(client, slug, perPage = 50, maxPages = 24) {   // 24 pages = 1200 entrants (RLCS Opens exceed the old 800 cap)
   const buildQuery = (withExt) => `
     query EventEntrants($slug: String!, $perPage: Int!, $page: Int!) {
       event(slug: $slug) {
@@ -4790,13 +4795,18 @@ async function fetchAllEntrants(client, slug, perPage = 50, maxPages = 16) {
   let page = 1, totalPages = 1, withExt = true;
   const all = [];
   do {
-    if (page > 1) await new Promise((r) => setTimeout(r, 350));   // stagger for start.gg rate limits
+    if (page > 1) await new Promise((r) => setTimeout(r, 500));   // stagger for start.gg rate limits
     let res;
     try {
-      res = await client.request(buildQuery(withExt), { slug, perPage, page });
+      // Rate limits back off and retry the page (same policy as the bracket import);
+      // schema errors (authorizations/location not queryable) still fall back to the
+      // slimmer selection instead of failing the whole team import.
+      res = await startggRequestWithBackoff(client, buildQuery(withExt), { slug, perPage, page });
     } catch (e) {
-      if (withExt) { withExt = false; res = await client.request(buildQuery(false), { slug, perPage, page }); }
-      else throw e;
+      if (withExt && !/429|rate ?limit|too many/i.test(String(e && e.message || ''))) {
+        withExt = false;
+        res = await startggRequestWithBackoff(client, buildQuery(false), { slug, perPage, page });
+      } else throw e;
     }
     const ev = res && res.event;
     if (!ev) break;
@@ -5542,16 +5552,19 @@ async function loadEvent(rawSlug) {
   if (!slug) throw new Error('Missing event slug or URL');
 
   const client = createStartGgClient(startggApiToken);
-  // Bracket via the phased import (live phase first, completed phases cached,
-  // progressive broadcasts) — the old single fetchAllSets sweep timed out on
-  // RLCS-scale events and tripped start.gg rate limits.
-  const bk = await fetchBracket(slug);
-  const event = { name: state.bracket.title || bk.title || '', tournament: { name: bk.tournamentName || '' } };
+  // TEAMS FIRST: entrants are ~10-20 requests and they're what the user is waiting
+  // to see — apply and broadcast them before starting the long phased bracket import.
   const entrants = await fetchAllEntrants(client, slug);
   // Only populate the transient event roster — don't touch savedTeams (user saves manually)
   const eventTeams = mapEntrantsToTeams(entrants);
   state.startgg.eventTeams = eventTeams;
   indexEntrantLogos(entrants);
+  broadcastFullState();
+  // Bracket via the phased import (live phase first, completed phases cached,
+  // progressive broadcasts) — the old single fetchAllSets sweep timed out on
+  // RLCS-scale events and tripped start.gg rate limits.
+  const bk = await fetchBracket(slug);
+  const event = { name: state.bracket.title || bk.title || '', tournament: { name: bk.tournamentName || '' } };
 
   const players = eventTeams.reduce((sum, t) => sum + (t.players ? t.players.length : 0), 0);
   const logos = eventTeams.filter(t => t.logo).length;
@@ -12675,6 +12688,24 @@ function handleControlMessage(msg, ws) {
 
     case 'set_rl_hide_ui': {
       state.rlHudHidden = !!(msg.data && msg.data.hidden);
+      broadcastFullState();
+      break;
+    }
+
+    // Stream-credits "credit sponsors" — the dedicated big call-out list in the end roll.
+    case 'set_credits': {
+      const d = msg.data || {};
+      if (Array.isArray(d.sponsors)) {
+        state.credits.sponsors = d.sponsors
+          .filter((s) => s && (s.name || s.logo))
+          .slice(0, 40)
+          .map((s) => ({
+            name: (s.name || '').toString().slice(0, 60),
+            logo: (s.logo || '').toString().slice(0, 500000),
+            tier: (s.tier || '').toString().slice(0, 40)
+          }));
+      }
+      saveAppState();
       broadcastFullState();
       break;
     }
