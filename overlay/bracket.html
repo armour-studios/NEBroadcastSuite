@@ -185,8 +185,11 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
   color: rgba(255,255,255,.55); margin-bottom: 10px; }
 .bk-run-band.losers .bk-run-band-label { color: color-mix(in srgb, var(--accent-2) 70%, #fff); }
 .bk-run-band.gf .bk-run-band-label { color: rgba(255,214,107,.85); }
-.bk-run-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-.bk-run-cell { display: flex; flex-direction: column; gap: 6px; width: 300px; }
+/* One line per band, always: wrapping put Winners Final on a second row under the earlier
+   matches, which read out of order. Cells shrink evenly instead (names ellipsize); a run too
+   long even at min width overflows the fixed 1816px wrap and fit() scales the whole view. */
+.bk-run-row { display: flex; align-items: center; gap: 12px; flex-wrap: nowrap; }
+.bk-run-cell { display: flex; flex-direction: column; gap: 6px; flex: 1 1 0; min-width: 190px; max-width: 300px; }
 .bk-run-cell .bk-round-name { height: auto; text-align: left; }
 .bk-run-arrow { font-size: 30px; line-height: 1; color: rgba(255,255,255,.3); padding-top: 24px; }
 /* Bracket-shaped flow: [upper band over lower band] › [GRAND FINALS] — GF always far right,
@@ -196,6 +199,7 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
 .bk-run-arrow-gf { padding-top: 0; font-size: 48px; color: rgba(255,214,107,.5); }
 .bk-run-band.gf { flex: 0 0 300px; }
 .bk-run-band.gf .bk-run-row { flex-direction: column; align-items: stretch; }
+.bk-run-band.gf .bk-run-cell { flex: none; max-width: none; }   /* GF column keeps full-width cards */
 .bk-run-band.gf .bk-run-arrow { display: none; }   /* GF + reset stack vertically, no separators */
 /* Player profile cards (image · gamertag · real name · socials) — a centred bar under the run */
 .bk-run-stats { flex: none; align-self: center; display: flex; flex-direction: column; gap: 12px; padding: 18px 26px;
