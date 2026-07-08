@@ -2447,6 +2447,7 @@ function resolveLineupToList() {
       id: prof.id || ('lineup_' + (entry.slot || (i + 1))),
       name: prof.name || '',
       handle: prof.handle || '',
+      socialHandle: prof.socialHandle || '',   // @-line username; handle is the gamertag
       social: prof.social || 'none',
       country: prof.country || '',
       slot: Number(entry.slot) || (i + 1),
@@ -10402,6 +10403,7 @@ function handleControlMessage(msg, ws) {
           id: c.id || Math.random().toString(36).slice(2, 11),
           name: (c.name || '').toString().slice(0, 40),
           handle: (c.handle || '').toString().slice(0, 80),
+          socialHandle: (c.socialHandle || '').toString().slice(0, 80),
           camUrl: (c.camUrl || '').toString().slice(0, 1000),
           // VDO building blocks (so the control panel can re-show + rebuild the clean view URL).
           streamId: (c.streamId || '').toString().slice(0, 120),
@@ -10458,6 +10460,7 @@ function handleControlMessage(msg, ws) {
         social: VALID_SOCIAL.has(social) ? social : 'none',
         ...(typeof d.camSlot  === 'string' ? { camSlot:  d.camSlot.slice(0, 40) } : {}),
         ...(typeof d.country  === 'string' ? { country:  d.country.slice(0, 60) } : {}),
+        ...(typeof d.socialHandle === 'string' ? { socialHandle: d.socialHandle.slice(0, 80) } : {}),
         ...(typeof d.notes    === 'string' ? { notes:    d.notes.slice(0, 500) } : {}),
         ...(['host', 'caster', 'observer'].includes(d.kind) ? { kind: d.kind } : {}),
         ...(typeof d.slot !== 'undefined' ? { slot: (libSlot >= 1 && libSlot <= 4) ? libSlot : 0 } : {})
@@ -10486,6 +10489,7 @@ function handleControlMessage(msg, ws) {
         if (typeof d.vdoOverride === 'string') cur.vdoOverride = d.vdoOverride.slice(0, 1000);
         if (typeof d.camSlot === 'string') cur.camSlot = d.camSlot.slice(0, 40);
         if (typeof d.country === 'string') cur.country = d.country.slice(0, 60);
+        if (typeof d.socialHandle === 'string') cur.socialHandle = d.socialHandle.slice(0, 80);
         if (typeof d.notes   === 'string') cur.notes   = d.notes.slice(0, 500);
         if (typeof d.social  === 'string') cur.social  = entry.social;
         if (['host', 'caster', 'observer'].includes(d.kind)) cur.kind = d.kind;
@@ -10553,6 +10557,25 @@ function handleControlMessage(msg, ws) {
       if (idx !== -1) {
         const cur = state.crew[idx];
         state.crew[idx] = { ...cur, name: d.name || cur.name, handle: d.handle ?? cur.handle, role: d.role ?? cur.role, group: d.group || cur.group, social: d.social || cur.social, socialHandle: d.socialHandle ?? cur.socialHandle, defaultCam: d.defaultCam ?? cur.defaultCam ?? '', country: d.country ?? cur.country ?? '', paypal: d.paypal ?? cur.paypal ?? '', notes: d.notes ?? cur.notes ?? '' };
+        // Crew ↔ caster-library ↔ on-air slots are twins linked by name/handle (see
+        // delete_crew_member). Without this sync, editing a crew profile left STALE copies
+        // in the library and on the desk — the overlay kept the old gamertag forever.
+        const upd = state.crew[idx];
+        const oldName = (cur.name || '').toLowerCase();
+        const oldHandle = (cur.handle || '').toLowerCase();
+        const matches = (e) => !!e && (((e.name || '').toLowerCase() === oldName && !!oldName)
+          || (!!oldHandle && (e.handle || '').toLowerCase() === oldHandle));
+        const syncEntry = (e) => {
+          if (!matches(e)) return;
+          e.name = upd.name;
+          e.handle = upd.handle;
+          if (upd.social) e.social = upd.social;
+          if (upd.socialHandle !== undefined) e.socialHandle = upd.socialHandle;
+          if (upd.country !== undefined) e.country = upd.country;
+        };
+        (state.casters.library || []).forEach(syncEntry);
+        (state.casters.list || []).forEach(syncEntry);
+        resolveLineupToList();   // rebuild the on-air slots from the refreshed library
         saveAppState();
         broadcastFullState();
       }

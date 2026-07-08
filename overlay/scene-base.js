@@ -285,7 +285,10 @@
       return '';
     },
     formatCasterHandle(caster) {
-      const handle = ((caster && caster.handle) || '').toString().trim();
+      // The @-line prefers the dedicated social username (crew socialHandle); the gamertag
+      // (`handle`) is only the fallback — the two often differ (gamertag "Jonzey", socials
+      // "@ItzJonzey") and the gamertag is already the display name in nameMode 'gamertag'.
+      const handle = ((caster && (caster.socialHandle || caster.handle)) || '').toString().trim();
       if (!handle) return '';
       const social = ((caster && caster.social) || 'none').toString().toLowerCase();
       if (social === 'x' && !handle.startsWith('@')) return '@' + handle.replace(/^@/, '');
