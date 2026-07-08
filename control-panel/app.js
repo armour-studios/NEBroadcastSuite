@@ -2246,10 +2246,10 @@ function _returnGraphicsToProd() {
       if (summary) {
         summary.style.display = '';
         summary.querySelectorAll('.gfx-front-panel[data-frontkey]').forEach((p) => { p.style.display = (p.dataset.frontkey === key) ? '' : 'none'; });
-        // Spotlight's front card IS the whole feature (title + team list + add) — its
-        // pop-out only held styling controls, which read as a broken settings page.
+        // Spotlight's and Schedule's front cards ARE the whole feature (add, edit,
+        // reorder, layout live inline) — their pop-outs only confused things.
         const moreBtn = el('gfx-popout-summary-open');
-        if (moreBtn) moreBtn.style.display = (key === 'spotlight') ? 'none' : '';
+        if (moreBtn) moreBtn.style.display = (key === 'spotlight' || key === 'schedule') ? 'none' : '';
       }
       renderPopoutSummary(key);
     } else {
@@ -2904,6 +2904,7 @@ function _returnGraphicsToProd() {
   // "More settings"). Renders from _schMatches (the single source of truth) and drives the same save.
   function schFrontRender() {
     const body = el('gfx-front-schedule-body'); if (!body) return;
+    if (body.contains(document.activeElement)) return;   // don't rebuild while editing a row
     if (typeof schFillTeamList === 'function') schFillTeamList();
     if (!_schInitialized) {   // hydrate once from server state so indices line up before any edit
       const up = (currentState && currentState.upcoming) || {};
@@ -2917,13 +2918,17 @@ function _returnGraphicsToProd() {
     _schMatches.forEach((m, i) => {
       const rd = m.round ? `<span class="rd" title="${esc(m.round)}">${esc(m.round)}</span>` : '';
       const a = esc(m.teamA || 'TBD'), b = esc(m.teamB || 'TBD');
-      const ti = (m.time || m.date) ? `<span class="ti">${esc(m.time || m.date)}</span>` : '';
       const live = m.stream ? '<span class="live">LIVE</span>' : '';
       const rowEl = document.createElement('div'); rowEl.className = 'gfx-fp-prow';
-      rowEl.innerHTML = `${rd}<span class="tm" title="${a} vs ${b}">${a}<span class="vs">vs</span>${b}</span>${ti}${live}`
+      rowEl.innerHTML = `${rd}<span class="tm" title="${a} vs ${b}">${a}<span class="vs">vs</span>${b}</span>`
+        + `<input type="text" class="input-text gfx-fp-time" value="${esc(m.time || m.date || '')}" placeholder="time" title="Date / time shown on the overlay — edits save automatically" style="width:86px; flex:0 0 auto; font-size:11px; padding:2px 6px;">`
+        + live
         + `<span class="gfx-fp-rowbtns"><button type="button" class="gfx-fp-mv" data-mv="-1" title="Move up">&#8593;</button>`
         + `<button type="button" class="gfx-fp-mv" data-mv="1" title="Move down">&#8595;</button>`
         + `<button type="button" class="gfx-fp-rm" title="Remove">&times;</button></span>`;
+      const tiInp = rowEl.querySelector('.gfx-fp-time');
+      tiInp.addEventListener('change', () => { _schMatches[i].time = tiInp.value.trim(); _schMatches[i].date = ''; schAutoSave(); });
+      tiInp.addEventListener('blur', () => schFrontRender());
       rowEl.querySelector('.gfx-fp-rm').addEventListener('click', () => { _schMatches.splice(i, 1); schRenderList(); schAutoSave(); });
       rowEl.querySelectorAll('.gfx-fp-mv').forEach((btn) => btn.addEventListener('click', () => {
         const j = i + (btn.dataset.mv === '-1' ? -1 : 1);
@@ -20736,6 +20741,24 @@ el('btn-credits-clear')?.addEventListener('click', async () => {
   }
 });
 
+// Diagnostic: how many credited players actually have a resolvable country (start.gg location).
+// Tells us instantly whether missing flags are a DATA gap or a display issue.
+function renderCreditsCountryStat() {
+  const box = el('credits-country-stat'); if (!box) return;
+  const et = (currentState.startgg && currentState.startgg.eventTeams) || [];
+  const profs = currentState.playerProfiles || {};
+  let total = 0, withCC = 0;
+  et.forEach((t) => (t.players || []).forEach((p) => {
+    if (!p || !p.name) return;
+    total++;
+    const cc = p.countryCode || (profs[(p.name || '').trim().toLowerCase()] || {}).countryCode;
+    if (cc) withCC++;
+  }));
+  if (!total) { box.textContent = 'Countries: no event roster loaded — sync the event (Events/Seeding).'; box.style.color = 'var(--muted)'; return; }
+  box.textContent = `Countries: ${withCC} of ${total} event players have one on start.gg`;
+  box.style.color = withCC === 0 ? '#f56565' : withCC < total ? '#fbbf24' : '#9ae6b4';
+}
+
 // ── Credit Sponsors (dedicated big call-outs in the stream-credits roll) ─────
 let _csPendingLogo = '';
 function csSponsors() { return (currentState && currentState.credits && Array.isArray(currentState.credits.sponsors)) ? currentState.credits.sponsors : []; }
@@ -23535,6 +23558,7 @@ async function connect() {
       _r('applyState',         () => applyState(msg.data));
       _r('applyRlSpectatorUi', () => applyRlSpectatorUi(msg.data));
       _r('renderCreditSponsors', () => renderCreditSponsors(msg.data));
+      _r('renderCreditsCountryStat', () => renderCreditsCountryStat());
       _r('applyScenesCockpit', () => applyScenesCockpit(msg.data));
       _r('renderScenePresets', () => renderScenePresets(msg.data));
       _r('renderWhatsArmed',   () => renderWhatsArmed(msg.data));
