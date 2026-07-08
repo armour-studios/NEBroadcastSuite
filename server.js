@@ -302,7 +302,9 @@ let state = {
   // Each topic: { text, sceneName } — sceneName is an optional OBS scene to cut to when that
   // topic goes active (e.g. cut to the Bracket while discussing "who's going to Worlds").
   // homeScene is the OBS scene "Return" switches back to (typically the Desk Show scene).
-  preshow: { headline: '', topics: [], activeTopicIndex: 0, homeScene: '', topicPresets: {} },
+  // headline/topics mirror the active brand package's own topicsHeadline/topics fields
+  // (syncActivePreshowTopics()) — not independently persisted here.
+  preshow: { headline: '', topics: [], activeTopicIndex: 0, homeScene: '' },
   csgo: {                                                 // CS2 Game State Integration
     connected: false,
     lastUpdate: 0,
@@ -960,6 +962,7 @@ function applyProfileBundle(bundle, options) {
   }
   if (want('leagues') && Array.isArray(d.leagues)) {
     state.leagues = mergeAtTop(state.leagues || [], d.leagues, (a, b) => (a.id && a.id === b.id) || a.name === b.name);
+    leaguesVer++;
     parts.push(`${d.leagues.length} leagues`);
   }
   if (want('castersLibrary') && Array.isArray(d.castersLibrary)) {
@@ -1163,6 +1166,13 @@ function sanitizePackage(p, fallbackName) {
     bannerCaptions: Array.isArray(p.bannerCaptions) ? p.bannerCaptions.map((t) => (typeof t === 'string' ? t : '')) : [],
     bannerSlant: ['right', 'left', 'box'].includes(p.bannerSlant) ? p.bannerSlant : 'right',
     bannerHeader: typeof p.bannerHeader === 'string' ? p.bannerHeader.slice(0, 40) : '',
+    // Desk Show (preshow.html) headline + discussion topics — package-scoped like sponsors/banner,
+    // so switching the active package automatically switches what Desk Show shows.
+    topicsHeadline: typeof p.topicsHeadline === 'string' ? p.topicsHeadline.slice(0, 140) : '',
+    topics: Array.isArray(p.topics) ? p.topics.filter((t) => t && typeof t === 'object').map((t) => ({
+      text: typeof t.text === 'string' ? t.text.slice(0, 60) : '',
+      sceneName: typeof t.sceneName === 'string' ? t.sceneName.slice(0, 100) : ''
+    })).slice(0, 12) : [],
     bannerInterval: Number(p.bannerInterval) > 0 ? Number(p.bannerInterval) : 10,
     replaySkin: p.replaySkin || null,   // per-profile replay transition background image
   };
@@ -1243,6 +1253,19 @@ function activeBrand() {
     // Social card preset (bg image + feature toggles) — stored per brand kit
     socialPreset: kit.socialPreset || { bgImageUrl: '', bgStyle: 'auto', presentedByEnabled: true },
   };
+}
+
+// Mirror the active brand package's Desk Show headline/topics into state.preshow — the fields
+// the control panel + overlay/preshow.html actually read/edit live. Content is persisted on the
+// PACKAGE (sanitizePackage, above); this just keeps the live mirror in sync whenever the active
+// kit/package changes, the same "persist on the real record, mirror to the top-level fields the
+// UI reads" pattern used for bracket phases/pools.
+function syncActivePreshowTopics() {
+  const kit = savedBrandKits.find((b) => b.id === state.activeBrandKitId);
+  const pkg = kit ? activePackage(kit) : null;
+  state.preshow.headline = (pkg && pkg.topicsHeadline) || '';
+  state.preshow.topics = (pkg && Array.isArray(pkg.topics)) ? pkg.topics : [];
+  state.preshow.activeTopicIndex = 0;   // the old index may be out of range for the new topic list
 }
 
 // ── Sponsor proof-of-play (impression tracking) ──────────────────────────────
@@ -1680,8 +1703,9 @@ function loadState() {
               }))
             : [],
           activeTopicIndex: Math.max(0, parseInt(saved.preshow.activeTopicIndex, 10) || 0),
-          homeScene: typeof saved.preshow.homeScene === 'string' ? saved.preshow.homeScene : '',
-          topicPresets: (saved.preshow.topicPresets && typeof saved.preshow.topicPresets === 'object') ? saved.preshow.topicPresets : {}
+          homeScene: typeof saved.preshow.homeScene === 'string' ? saved.preshow.homeScene : ''
+          // headline/topics restored above are transient — syncActivePreshowTopics() (called once
+          // brand kits finish loading) overwrites them from the active package right after boot.
         };
       }
       if (saved.vdo && typeof saved.vdo === 'object') {
@@ -2580,6 +2604,14 @@ function buildLiveState() {
     replay: undefined,
     playerProfiles: undefined,
     scenePresets: undefined,
+    // leagues carry base64 team logos (hundreds of KB); clips carry the whole library metadata.
+    // Neither is read by overlays — control panel backfills both from the library snapshot.
+    leagues: undefined,
+    clips: undefined,
+    // state.brand is the raw global-accent fallback; libraryData() sends the resolved brand
+    // (active kit or that fallback). Leaving the raw one here clobbered the kit brand (and its
+    // sponsors) in every light broadcast on clients that cache-merge by key presence.
+    brand: undefined,
     teams: {
       blue:   { ...state.teams.blue,   color: eff.blue,   ownColor: state.teams.blue.color },
       orange: { ...state.teams.orange, color: eff.orange, ownColor: state.teams.orange.color }
@@ -2629,6 +2661,10 @@ function buildLiveState() {
 //     omits them. This keeps live broadcasts at a few hundred bytes instead of ~2.6MB.
 // Merge profile data for one player into the registry (ignores empty fields).
 let playerProfilesVer = 0;
+// Bumped on every leagues/clips mutation so librarySig re-sends them without stringifying
+// their base64 payloads per broadcast.
+let leaguesVer = 0;
+let clipsVer = 0;
 function upsertPlayerProfile(gamerTag, patch) {
   const key = (gamerTag || '').trim().toLowerCase();
   if (!key || !patch) return;
@@ -2675,7 +2711,9 @@ function libraryData() {
     mainBanner: state.banner,
     bracket: state.bracket,   // manual bracket (embedded team logos) — backfilled by bracket overlay + panel
     replay: state.replay,     // replay-monitor thumbnails — backfilled by the replays page
-    crew: state.crew || []    // unified crew profiles (hosts/guests/casters/observers)
+    crew: state.crew || [],   // unified crew profiles (hosts/guests/casters/observers)
+    leagues: state.leagues || [],   // league rosters/standings (base64 team logos) — control panel only
+    clips: state.clips || null      // clip/playlist library metadata — control panel only (live pushes go via clips_update)
   };
 }
 // Static config that never changes after startup → sent on connect only.
@@ -2708,6 +2746,9 @@ function librarySig() {
   const extra = '|ab:' + (state.activeBrandKitId || '') + '|bv:' + (state.banner.visible ? 1 : 0) + '|bi:' + bn
     + '|brk:' + lite(state.bracket) + '|rpl:' + lite(state.replay) + '|crew:' + (state.crew || []).length
     + '|pp:' + playerProfilesVer + '|bk:' + brandKitsVer + '|st:' + savedTeamsVer
+    + '|lgv:' + leaguesVer + '|clv:' + clipsVer
+    // Global accent fallback lives in library brand now (stripped from live) — re-send on change.
+    + '|gac:' + ((state.brand && state.brand.color) || '') + ':' + ((state.brand && state.brand.accent) || '')
     + '|sp:' + (sp.bgImageUrl ? sp.bgImageUrl.length : 0) + ':' + (sp.presentedByEnabled ? 1 : 0) + ':' + (sp.bgStyle || '');
   return savedTeams.length + '#' + t + '||' + savedBrandKits.length + '#' + b + extra;
 }
@@ -5829,6 +5870,7 @@ function syncClipsState() {
     autoMontage: !!cur.autoMontage,
     autoMontageId: cur.autoMontageId || null
   };
+  clipsVer++;
 }
 
 async function triggerClipCapture(meta) {
@@ -8700,7 +8742,11 @@ async function triggerRlHideNativeUi() {
 
 // ─── WS Bridge Server (port 3001) ────────────────────────────────────────────
 function startBridgeServer() {
-  bridgeWss = new WebSocket.Server({ port: WS_PORT });
+  // Loopback by default: every control message mutates producer state with no auth, so the
+  // bridge must not be reachable from the LAN. Multi-PC setups (overlay sources on another
+  // machine) can opt back in with WS_HOST=0.0.0.0 in .env.local — they accept the exposure.
+  const wsHost = process.env.WS_HOST || '127.0.0.1';
+  bridgeWss = new WebSocket.Server({ host: wsHost, port: WS_PORT });
 
   bridgeWss.on('connection', (ws) => {
     bridgeClients.add(ws);
@@ -8851,6 +8897,7 @@ function handleControlMessage(msg, ws) {
       let st = lg.standings.find((s) => s.teamId === team.id);
       if (!st) { st = { teamId: team.id, w: 0, l: 0, pts: 0 }; lg.standings.push(st); }
       ['w', 'l', 'pts'].forEach((k) => { if (k in d && d[k] !== '' && d[k] != null) st[k] = Math.max(0, parseInt(d[k], 10) || 0); });
+      leaguesVer++;
       saveAppState();
       broadcastFullState();
       break;
@@ -8951,46 +8998,25 @@ function handleControlMessage(msg, ws) {
             sceneName: typeof t.sceneName === 'string' ? t.sceneName.slice(0, 100) : ''
           })).slice(0, 12)
         : cur.topics;
+      const headline = typeof p.headline === 'string' ? p.headline.slice(0, 140) : (cur.headline ?? '');
       state.preshow = {
-        headline: typeof p.headline === 'string' ? p.headline.slice(0, 140) : (cur.headline ?? ''),
-        topics,
+        headline, topics,
         activeTopicIndex: ('activeTopicIndex' in p) ? Math.max(0, parseInt(p.activeTopicIndex, 10) || 0) : (cur.activeTopicIndex ?? 0),
-        homeScene: typeof p.homeScene === 'string' ? p.homeScene.slice(0, 100) : (cur.homeScene ?? ''),
-        topicPresets: (cur.topicPresets && typeof cur.topicPresets === 'object') ? cur.topicPresets : {}
+        homeScene: typeof p.homeScene === 'string' ? p.homeScene.slice(0, 100) : (cur.homeScene ?? '')
       };
-      saveAppState();
-      broadcastFullState();
-      break;
-    }
-
-    // Save the CURRENT headline + topics as a named Desk Show topic preset (queue different sets).
-    // Stored both at state level AND on the active brand kit, so presets travel with the kit/profile.
-    case 'save_preshow_topic_preset': {
-      const nm = ((msg.data && msg.data.name) || '').toString().slice(0, 60).trim();
-      if (!nm) break;
-      if (!state.preshow.topicPresets || typeof state.preshow.topicPresets !== 'object') state.preshow.topicPresets = {};
-      const preset = {
-        headline: state.preshow.headline || '',
-        topics: JSON.parse(JSON.stringify(state.preshow.topics || []))
-      };
-      state.preshow.topicPresets[nm] = preset;
-      const _kit = savedBrandKits.find((b) => b.id === state.activeBrandKitId);
-      if (_kit) {
-        if (!_kit.topicPresets || typeof _kit.topicPresets !== 'object') _kit.topicPresets = {};
-        _kit.topicPresets[nm] = JSON.parse(JSON.stringify(preset));
-        saveBrandKits();
+      // Headline/topics are brand content — persist onto the active package too, so switching
+      // packages (or kits) brings the right Desk Show topics back automatically.
+      if (typeof p.headline === 'string' || Array.isArray(p.topics)) {
+        const kit = savedBrandKits.find((b) => b.id === state.activeBrandKitId);
+        const pkg = kit ? activePackage(kit) : null;
+        if (kit && pkg) {
+          pkg.topicsHeadline = headline;
+          pkg.topics = topics;
+          saveBrandKits();
+        }
       }
       saveAppState();
       broadcastFullState();
-      break;
-    }
-    case 'delete_preshow_topic_preset': {
-      const nm = ((msg.data && msg.data.name) || '').toString();
-      let _changed = false;
-      if (state.preshow.topicPresets && nm in state.preshow.topicPresets) { delete state.preshow.topicPresets[nm]; _changed = true; }
-      const _kit = savedBrandKits.find((b) => b.id === state.activeBrandKitId);
-      if (_kit && _kit.topicPresets && nm in _kit.topicPresets) { delete _kit.topicPresets[nm]; saveBrandKits(); _changed = true; }
-      if (_changed) { saveAppState(); broadcastFullState(); }
       break;
     }
 
@@ -10157,9 +10183,7 @@ function handleControlMessage(msg, ws) {
       state.activeBrandKitId = id;
       const kit = savedBrandKits.find((b) => b.id === id);
       if (kit) ensureKitPackages(kit);
-      // Load this kit's saved Desk Show topic presets (each kit carries its own sets; empty if the
-      // kit has none). No kit active → keep the state-level presets as a global fallback.
-      if (kit) state.preshow.topicPresets = { ...(kit.topicPresets || {}) };
+      syncActivePreshowTopics();   // Desk Show headline/topics follow the newly-active kit's active package
       // Automation: snap this game's theme to the kit's preferred design, if set.
       if (kit && kit.themes && isValidTheme(state.activeGame, kit.themes[state.activeGame])) {
         state.themesByGame[state.activeGame] = kit.themes[state.activeGame];
@@ -10185,7 +10209,7 @@ function handleControlMessage(msg, ws) {
         if (kit.packages.some((p) => p.id === msg.data?.packageId)) {
           kit.activePackageId = msg.data.packageId;
           saveBrandKits();
-          if (kit.id === state.activeBrandKitId) applyBrandSlots();
+          if (kit.id === state.activeBrandKitId) { applyBrandSlots(); syncActivePreshowTopics(); }
           broadcastFullState();
         }
       }
@@ -10430,7 +10454,7 @@ function handleControlMessage(msg, ws) {
 
     // Leagues are control-panel-authoritative: the editor pushes the whole list.
     case 'set_leagues': {
-      if (Array.isArray(msg.data && msg.data.leagues)) state.leagues = msg.data.leagues;
+      if (Array.isArray(msg.data && msg.data.leagues)) { state.leagues = msg.data.leagues; leaguesVer++; }
       saveAppState();
       broadcastFullState();
       break;
@@ -10469,6 +10493,7 @@ function handleControlMessage(msg, ws) {
           };
           if (!Array.isArray(state.leagues)) state.leagues = [];
           state.leagues.unshift(league);
+          leaguesVer++;
           saveAppState();
           broadcastFullState();
           ws.send(JSON.stringify({ type: 'event-result', data: { ok: true, leagueId: league.id, message: `Created league "${league.name}" with ${teams.length} team(s) from start.gg.` } }));
@@ -10709,6 +10734,9 @@ function handleControlMessage(msg, ws) {
           state.teams[side].players = src.players.map((p, i) => ({
             id: p.id || (Date.now() + i),
             name: p.name || '',
+            realName: p.realName || '',
+            role: p.role || '',
+            country: p.country || '',
             platform: p.platform || '',
             platformId: p.platformId || '',
             camSlot: p.camSlot || p.assignedCamera || '',
@@ -11397,9 +11425,9 @@ function handleControlMessage(msg, ws) {
         title: 'Export Producer Profile',
         defaultPath: 'NE-Broadcast-Profile.json',
         filters: [{ name: 'NE Broadcast Profile', extensions: ['json'] }]
-      }).then(({ canceled, filePath }) => {
+      }).then(async ({ canceled, filePath }) => {
         if (canceled || !filePath) { sendImportExportResult(ws, false, 'Export cancelled.'); return; }
-        try { fs.writeFileSync(filePath, JSON.stringify(profile, null, 2)); sendImportExportResult(ws, true, 'Profile exported — safe to share (no passwords or tokens included).'); }
+        try { await fsp.writeFile(filePath, JSON.stringify(profile, null, 2)); sendImportExportResult(ws, true, 'Profile exported — safe to share (no passwords or tokens included).'); }
         catch (e) { sendImportExportResult(ws, false, 'Export failed: ' + e.message); }
       });
       break;
@@ -13129,31 +13157,34 @@ function handleControlMessage(msg, ws) {
 
     case 'montage_encode': {
       if (clipSystem && msg.data?.montageId) {
-        const m = clipSystem.getState().montages.find((x) => x.id === msg.data.montageId);
-        const opts = msg.data.opts || {};
-        // 'logo' transition: persist the picked logo (data URL) to a file ffmpeg can read.
-        if (opts.transition === 'logo' && typeof opts.transitionLogo === 'string' && opts.transitionLogo.startsWith('data:image/')) {
-          try {
-            const mm = /^data:image\/(png|jpe?g|webp);base64,([A-Za-z0-9+/=]+)$/.exec(opts.transitionLogo);
-            if (mm) {
-              const dir = path.join(clipSystem.manager.getClipsDir(), 'work');
-              fs.mkdirSync(dir, { recursive: true });
-              const lp = path.join(dir, `translogo_${msg.data.montageId}.${mm[1] === 'jpeg' ? 'jpg' : mm[1]}`);
-              fs.writeFileSync(lp, Buffer.from(mm[2], 'base64'));
-              opts.transitionLogoPath = lp;
-            }
-          } catch (e) { /* falls back to a black dip */ }
-        }
-        delete opts.transitionLogo;   // don't carry the big data URL further
-        const res = clipSystem.enqueueMontage(msg.data.montageId, m?.name || 'Montage', opts);
-        syncClipsState();
-        broadcastClipsUpdate();
-        ws.send(JSON.stringify({
-          type: 'clips-result',
-          data: res && res.error
-            ? { ok: false, message: res.error }
-            : { ok: true, message: 'Encoding started — progress shows in the toolbar.' }
-        }));
+        (async () => {
+          const m = clipSystem.getState().montages.find((x) => x.id === msg.data.montageId);
+          const opts = msg.data.opts || {};
+          // 'logo' transition: persist the picked logo (data URL) to a file ffmpeg can read.
+          // Async write — a multi-MB logo written synchronously stalls the main-process window.
+          if (opts.transition === 'logo' && typeof opts.transitionLogo === 'string' && opts.transitionLogo.startsWith('data:image/')) {
+            try {
+              const mm = /^data:image\/(png|jpe?g|webp);base64,([A-Za-z0-9+/=]+)$/.exec(opts.transitionLogo);
+              if (mm) {
+                const dir = path.join(clipSystem.manager.getClipsDir(), 'work');
+                await fsp.mkdir(dir, { recursive: true });
+                const lp = path.join(dir, `translogo_${msg.data.montageId}.${mm[1] === 'jpeg' ? 'jpg' : mm[1]}`);
+                await fsp.writeFile(lp, Buffer.from(mm[2], 'base64'));
+                opts.transitionLogoPath = lp;
+              }
+            } catch (e) { /* falls back to a black dip */ }
+          }
+          delete opts.transitionLogo;   // don't carry the big data URL further
+          const res = clipSystem.enqueueMontage(msg.data.montageId, m?.name || 'Montage', opts);
+          syncClipsState();
+          broadcastClipsUpdate();
+          ws.send(JSON.stringify({
+            type: 'clips-result',
+            data: res && res.error
+              ? { ok: false, message: res.error }
+              : { ok: true, message: 'Encoding started — progress shows in the toolbar.' }
+          }));
+        })().catch((e) => { try { ws.send(JSON.stringify({ type: 'clips-result', data: { ok: false, message: 'Encode failed to start: ' + e.message } })); } catch {} });
       }
       break;
     }
@@ -13413,7 +13444,7 @@ function startHttpServer(baseDir) {
         return res.json({ ok: false, canceled: true, message: 'Save cancelled.' });
       }
 
-      fs.writeFileSync(filePath, json, 'utf8');
+      await fsp.writeFile(filePath, json, 'utf8');
       console.log(`[OBS] Saved scene collection to ${filePath}`);
 
       // If it landed in the OBS scenes folder, optionally hot-switch via WebSocket.
@@ -14016,6 +14047,21 @@ function startHttpServer(baseDir) {
     setHeaders: (res) => res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate')
   }));
 
+  // Auto-reload overlays when their files change on disk (app update, overlay editor save,
+  // manual edit). Headers are already no-store, but a page LOADED in OBS's CEF stays in
+  // memory until reloaded — this pushes the reload so producers never touch OBS's cache.
+  try {
+    let _ovReloadTimer = null;
+    fs.watch(path.join(baseDir, 'overlay'), { recursive: true }, (evt, file) => {
+      if (!file || !/\.(html|css|js)$/i.test(file)) return;
+      clearTimeout(_ovReloadTimer);
+      _ovReloadTimer = setTimeout(() => {
+        console.log(`[Overlay] ${file} changed — reloading all overlay browser sources`);
+        broadcast(bridgeClients, { type: 'reload_overlays' });
+      }, 800);
+    });
+  } catch (e) { console.warn('[Overlay] file watcher unavailable:', e.message); }
+
   // Serve assets
   app.use('/assets', express.static(path.join(baseDir, 'assets')));
 
@@ -14040,36 +14086,36 @@ function startHttpServer(baseDir) {
 
   // ─── Clips API ────────────────────────────────────────────────────────────
   // Scan the OBS replay/output folder for video files not yet imported.
-  app.get('/api/clips/scan-folder', (req, res) => {
+  app.get('/api/clips/scan-folder', async (req, res) => {
     try {
       const folder = state.clips?.replayFolder || '';
       if (!folder) return res.json({ ok: true, files: [], reason: 'No folder configured' });
       if (!fs.existsSync(folder)) return res.json({ ok: true, files: [], reason: 'Folder not found' });
 
       const VIDEO_EXT = new Set(['.mp4', '.mov', '.mkv', '.ts', '.flv', '.avi', '.wmv']);
-      const entries = fs.readdirSync(folder);
+      // Async walk — a big replay folder scanned with readdirSync/statSync stalls the window.
+      const entries = await fsp.readdir(folder);
       const library = (clipSystem ? clipSystem.getState().library : []) || [];
       // Match by sourceFile (exact original path) so the staging area can show ✓ imported
       const importedSourceFiles = new Set(library.map(c => path.resolve(c.sourceFile || '')).filter(Boolean));
       const importedPaths = new Set(library.map(c => path.resolve(c.path || '')).filter(Boolean));
 
-      const allFiles = entries
-        .filter(f => VIDEO_EXT.has(path.extname(f).toLowerCase()))
-        .map(f => {
-          const full = path.join(folder, f);
-          try {
-            const stat = fs.statSync(full);
-            const resolved = path.resolve(full);
-            const imported = importedPaths.has(resolved) || importedSourceFiles.has(resolved);
-            const importedClip = library.find(c =>
-              path.resolve(c.sourceFile || '') === resolved ||
-              path.resolve(c.path || '') === resolved
-            );
-            return { name: f, path: full, size: stat.size, mtimeMs: stat.mtimeMs, imported, importedId: importedClip?.id || null };
-          } catch { return null; }
-        })
-        .filter(Boolean)
-        .sort((a, b) => b.mtimeMs - a.mtimeMs);
+      const allFiles = [];
+      for (const f of entries) {
+        if (!VIDEO_EXT.has(path.extname(f).toLowerCase())) continue;
+        const full = path.join(folder, f);
+        try {
+          const stat = await fsp.stat(full);
+          const resolved = path.resolve(full);
+          const imported = importedPaths.has(resolved) || importedSourceFiles.has(resolved);
+          const importedClip = library.find(c =>
+            path.resolve(c.sourceFile || '') === resolved ||
+            path.resolve(c.path || '') === resolved
+          );
+          allFiles.push({ name: f, path: full, size: stat.size, mtimeMs: stat.mtimeMs, imported, importedId: importedClip?.id || null });
+        } catch { /* unreadable file — skip */ }
+      }
+      allFiles.sort((a, b) => b.mtimeMs - a.mtimeMs);
 
       // Cap the payload for safety on huge folders, but report the TRUE total so the count
       // stays accurate (the old 100 cap made the count pin at 100 and never drop on delete).
@@ -14259,12 +14305,12 @@ function startHttpServer(baseDir) {
     return abs;
   }
 
-  app.get('/api/media/list', (req, res) => {
+  app.get('/api/media/list', async (req, res) => {
     const rel = req.query.path || '';
     const abs = safeMediaPath(rel);
     if (!abs) return res.status(400).json({ ok: false, error: 'Bad path' });
     try {
-      const entries = fs.existsSync(abs) ? fs.readdirSync(abs, { withFileTypes: true }) : [];
+      const entries = fs.existsSync(abs) ? await fsp.readdir(abs, { withFileTypes: true }) : [];
       const folders = [], files = [];
       for (const e of entries) {
         if (e.name.startsWith('.')) continue;
@@ -14272,7 +14318,7 @@ function startHttpServer(baseDir) {
         if (e.isDirectory()) {
           folders.push({ name: e.name, path: childRel });
         } else if (IMG_RE.test(e.name)) {
-          let size = 0; try { size = fs.statSync(path.join(abs, e.name)).size; } catch (x) {}
+          let size = 0; try { size = (await fsp.stat(path.join(abs, e.name))).size; } catch (x) {}
           files.push({ name: e.name, path: childRel, url: '/data/media/' + childRel.split('/').map(encodeURIComponent).join('/'), size });
         }
       }
@@ -16529,6 +16575,7 @@ module.exports.start = function(baseDir) {
   loadFacecams();
   loadPresets();
   loadBrandKits();
+  syncActivePreshowTopics();   // Desk Show headline/topics come from the active kit/package, not the save file
   loadTwitchData();
   loadDiscordUser();
   initFlowEngine();
