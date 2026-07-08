@@ -7445,3 +7445,13 @@ tr.lg2-drag-over { outline: 2px solid var(--accent, #4a9eff); outline-offset: -1
    SOLID button; Apply/Save (content-only) is the quiet one. The old styling had it inverted. */
 .gfx-btn-pushlive { background: var(--cp-accent); color: #fff; }
 .gfx-btn-pushlive:hover { background: var(--cp-accent-2); border-color: var(--cp-accent-2); color: #fff; }
+
+/* ── Qrail REPLAY panel — latest-clips list ── */
+.qr-clip-list { display: flex; flex-direction: column; gap: 6px; }
+.qr-clip-row {
+  display: flex; align-items: center; gap: 8px; padding: 7px 10px;
+  background: var(--surface2); border: 1px solid var(--border); border-radius: 8px;
+}
+.qr-clip-name { flex: 1 1 auto; min-width: 0; font-size: 12px; font-weight: 700; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.qr-clip-dur { flex: 0 0 auto; font-size: 11px; font-weight: 700; color: var(--muted); font-variant-numeric: tabular-nums; }
+.qr-clip-row .qr-toair { flex: 0 0 auto; }

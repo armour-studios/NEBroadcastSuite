@@ -3628,7 +3628,7 @@ function qrailExpand(tab) {
 const QRAIL_TAB_TITLES = {
   // 6-tab identity (AIR·NEXT·TALENT·AUTO·STREAM·NOTES). Keys stay the panels' data-qpanel names.
   quick: 'On Air', ros: 'Up Next', flows: 'Automation', talent: 'On-Air Talent',
-  twitch: 'Stream', notes: 'Producer Notes',
+  replay: 'Replay', twitch: 'Stream', notes: 'Producer Notes',
   // legacy keys — their panels are merged away, kept so any direct caller still titles correctly.
   startgg: 'Up Next', graphics: 'On Air', golive: 'On Air', ai: 'Automation',
   workflow: 'Stream', checklist: 'Run-of-Show',
@@ -3639,6 +3639,7 @@ function qrailShowTab(tab) {
   const title = el('qrail-paneltitle'); if (title) title.textContent = QRAIL_TAB_TITLES[tab] || '';
   // Live sections refresh as their tab opens (queue now lives under NEXT, AI under AUTO).
   if ((tab === 'ros' || tab === 'flows' || tab === 'talent') && typeof renderQrailLive === 'function') renderQrailLive();
+  if (tab === 'replay' && typeof renderQrailReplay === 'function') renderQrailReplay(currentState);
   if (tab === 'talent' && typeof cfTalentAutoOpen === 'function') cfTalentAutoOpen();
   if (tab === 'twitch') setTimeout(() => { const c = el('twitch-chat'); if (c) c.scrollTop = c.scrollHeight; }, 100);
   qrailExpand(tab);
@@ -21396,6 +21397,59 @@ el('rp-buffer-toggle')?.addEventListener('click', () => send('obs_toggle_replay_
 el('rp-buffer-save')?.addEventListener('click', () => send('obs_save_replay'));
 el('rp-to-program')?.addEventListener('click', () => sendToScreen('program'));
 el('rp-to-preview')?.addEventListener('click', () => sendToScreen('preview'));
+
+// ── Qrail REPLAY panel — save the buffer + push the latest clips to air without leaving
+// the cockpit. Reuses the Video Editor's program-bus machinery (beginReplayProgram /
+// endReplayProgram / shared replay-player source) so the two surfaces can never fight;
+// scene + transition + return-scene settings come from the REPLAYS page controls.
+let _qrClipsSig = '';
+function renderQrailReplay(data) {
+  const list = el('qr-clip-list'); if (!list) return;
+  const lib = (((data || currentState || {}).clips) || {}).library || [];
+  const latest = lib.slice(-5).reverse();   // library appends — last entries are the newest saves
+  const sig = JSON.stringify(latest.map((c) => c.id + ':' + (c.name || '') + ':' + (c.duration || 0)));
+  if (sig === _qrClipsSig) return;
+  _qrClipsSig = sig;
+  list.innerHTML = '';
+  if (!latest.length) {
+    list.innerHTML = '<div class="field-hint" style="margin:0;">No clips yet — Save Replay while the OBS buffer is running, or import clips on the REPLAYS page.</div>';
+    return;
+  }
+  latest.forEach((c) => {
+    const row = document.createElement('div');
+    row.className = 'qr-clip-row';
+    const dur = c.duration ? (Math.round(c.duration) + 's') : '';
+    row.innerHTML = `<span class="qr-clip-name" title="${esc(c.name || 'Clip')}">${esc(c.name || 'Clip')}</span>`
+      + `<span class="qr-clip-dur">${dur}</span>`
+      + `<button class="btn btn-primary btn-sm qr-toair" title="Play this clip on the program bus now (cuts OBS to the replay scene, returns when it ends)">To Air</button>`;
+    row.querySelector('.qr-toair').addEventListener('click', () => qrailClipToAir(c));
+    list.appendChild(row);
+  });
+}
+function qrailClipToAir(clip) {
+  const url = clipUrl(clip);
+  if (!url) { showToast('Clip file not found on disk', '#f56565'); return; }
+  stopOtherProgramSources('program');   // a running playlist must not fight this clip
+  const scene = (el('rp-program-scene')?.value || '').trim();
+  if (!scene) showToast('No replay OBS scene set (REPLAYS page, next to "To Air") — OBS will not auto-switch.', '#fbbf24', 5000);
+  beginReplayProgram();
+  const t = liveTransitionOpts();
+  send('replay_play', {
+    bus: 'program', url, name: clip.name || 'Clip', loop: false,
+    transition: t.transition, transitionLogo: t.transitionLogo,
+    scene: scene || undefined,
+  });
+  showToast('ON AIR: ' + (clip.name || 'Clip'), '#22c55e');
+  // Same safety net as the editor: return to the prior scene even if 'ended' is missed.
+  clearTimeout(_replayFallbackTimer);
+  const d = Number(clip.duration) || 0;
+  if (d > 0) _replayFallbackTimer = setTimeout(() => { if (_replayActive && !_plLiveActive) endReplayProgram(); }, d * 1000 + 1500);
+}
+el('qr-save-replay')?.addEventListener('click', () => {
+  send('obs_save_replay');
+  const st = el('qr-replay-status'); if (st) { st.textContent = 'Replay buffer save requested — the clip appears below once imported.'; setTimeout(() => { if (st) st.textContent = ''; }, 4000); }
+});
+el('qr-replay-stop')?.addEventListener('click', () => endReplayProgram());
 // Clear the program output. The visible "Clear" button was removed from the Video
 // Editor, but the action stays available via the hotkey/Stream-Deck command.
 function rpClearProgram() {
@@ -22570,6 +22624,7 @@ function connect() {
     } else if (msg.type === 'clips_update') {
       currentState.clips = msg.data;
       applyClipsState(msg.data);
+      if (typeof renderQrailReplay === 'function') _r('renderQrailReplay', () => renderQrailReplay(currentState));
     } else if (msg.type === 'replay_progress') {
       // The on-air player reports its position → drive the time-remaining readout, but ONLY while
       // the control panel has actually sent something to air. Otherwise a player source still loaded
