@@ -4717,6 +4717,17 @@
                 </div>
               </div>
               <div class="gfx-fp-field">
+                <span class="gfx-fp-lbl">Add match</span>
+                <div class="gfx-fp-addrow" style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+                  <input type="text" id="gfx-sch-add-a" class="input-text" placeholder="Team A" list="gfx-sch-teamlist" style="flex:1; min-width:110px;">
+                  <span style="font-size:11px; color:var(--muted); flex-shrink:0;">vs</span>
+                  <input type="text" id="gfx-sch-add-b" class="input-text" placeholder="Team B" list="gfx-sch-teamlist" style="flex:1; min-width:110px;">
+                  <input type="text" id="gfx-sch-add-when" class="input-text" placeholder="Fri 8:00 PM" title="Date / time shown on the overlay — free text, e.g. 'Fri 8:00 PM' or 'July 12'" style="flex:0 0 118px;">
+                  <button type="button" class="btn btn-secondary btn-sm" id="gfx-sch-add-front" style="flex-shrink:0;">Add</button>
+                </div>
+                <datalist id="gfx-sch-teamlist"></datalist>
+              </div>
+              <div class="gfx-fp-field">
                 <div class="gfx-fp-sec"><span class="gfx-fp-lbl">On overlay</span><span class="gfx-fp-count" id="gfx-front-sch-count"></span></div>
                 <div class="gfx-fp-preview" id="gfx-front-schedule-body"></div>
               </div>

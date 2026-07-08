@@ -2877,6 +2877,7 @@ function _returnGraphicsToProd() {
   // "More settings"). Renders from _schMatches (the single source of truth) and drives the same save.
   function schFrontRender() {
     const body = el('gfx-front-schedule-body'); if (!body) return;
+    if (typeof schFillTeamList === 'function') schFillTeamList();
     if (!_schInitialized) {   // hydrate once from server state so indices line up before any edit
       const up = (currentState && currentState.upcoming) || {};
       if (Array.isArray(up.matches) && up.matches.length) { _schMatches = up.matches.slice(); _schInitialized = true; }
@@ -2906,6 +2907,38 @@ function _returnGraphicsToProd() {
       body.appendChild(rowEl);
     });
   }
+
+  // Team-name autocomplete for the front card's Add-match row — saved teams + the
+  // linked event's entrants, so adding "the next two matches" is type-ahead fast.
+  function schFillTeamList() {
+    const dl = el('gfx-sch-teamlist'); if (!dl) return;
+    const names = new Set();
+    ((currentState && currentState.savedTeams) || []).forEach((t) => t && t.name && names.add(t.name));
+    ((currentState && currentState.startgg && currentState.startgg.eventTeams) || []).forEach((t) => t && t.name && names.add(t.name));
+    const list = [...names].slice(0, 400);
+    const sig = list.length + '|' + (list[0] || '') + '|' + (list[list.length - 1] || '');
+    if (dl.dataset.sig === sig) return;
+    dl.dataset.sig = sig;
+    dl.innerHTML = list.map((n) => '<option value="' + n.replace(/"/g, '&quot;') + '"></option>').join('');
+  }
+  el('gfx-sch-add-front')?.addEventListener('click', () => {
+    const a = (el('gfx-sch-add-a')?.value || '').trim();
+    const b = (el('gfx-sch-add-b')?.value || '').trim();
+    const when = (el('gfx-sch-add-when')?.value || '').trim();
+    if (!a && !b) { showToast('Type at least one team name.', '#fbbf24'); return; }
+    // No setId: manual rows append alongside queue-pulled ones instead of being deduped.
+    _schMatches.push({ teamA: a || 'TBD', teamB: b || 'TBD', time: when, date: '', round: '', stream: false, state: 1 });
+    ['gfx-sch-add-a', 'gfx-sch-add-b', 'gfx-sch-add-when'].forEach((id) => { const i = el(id); if (i) i.value = ''; });
+    schRenderList(); schAutoSave();
+  });
+  // The Layout picker belongs on the card — with add/reorder/remove inline, the
+  // pop-out is only needed for tournament search now.
+  (function moveSchLayoutToFront() {
+    const sel = el('gfx-sch-layout'); const front = el('gfx-front-schedule');
+    if (!sel || !front) return;
+    const row = sel.closest('.gfx-ctrl-row'); const actions = front.querySelector('.gfx-fp-actions');
+    if (row && actions) front.insertBefore(row, actions);
+  })();
 
   // Title lives on the front card only now (Graphics ▸ Schedule) — single source of truth.
   function schAutoSave() {
