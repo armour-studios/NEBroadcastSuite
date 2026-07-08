@@ -363,9 +363,20 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
   function fillRunStats(teamName, data, rowsEl) {
     _runStatsFor = teamName;
     if (!rowsEl) return;
-    const t = (data.savedTeams || []).find((x) => x && x.name && x.name.toLowerCase() === teamName.toLowerCase());
-    const roster = ((t && t.players) || []).map((p) => p && p.name).filter(Boolean).slice(0, 6);
-    if (!roster.length) { rowsEl.innerHTML = '<div class="bk-run-stats-empty">No roster in the team library for this team.</div>'; return; }
+    // Roster sources, in preference order: the curated saved-teams library, then the event's
+    // imported start.gg teams (startgg.eventTeams — these carry the entrant rosters). Lookup is
+    // forgiving: exact → punctuation/case-normalized → containment (entrant names often carry
+    // sponsor tags the library name doesn't).
+    const norm = function (s) { return String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, ''); };
+    const list = (data.savedTeams || []).concat((data.startgg && data.startgg.eventTeams) || []);
+    const tn = teamName.toLowerCase(), tnn = norm(teamName);
+    const named = list.filter(function (x) { return x && x.name; });
+    const t = named.find(function (x) { return x.name.toLowerCase() === tn; })
+      || named.find(function (x) { return norm(x.name) === tnn; })
+      || named.find(function (x) { return x.name.length >= 3 && (tn.includes(x.name.toLowerCase()) || x.name.toLowerCase().includes(tn)); });
+    if (!t) { rowsEl.innerHTML = '<div class="bk-run-stats-empty">' + escRun(teamName) + ' isn’t in Saved or Event teams — import the team to show roster stats.</div>'; return; }
+    const roster = (t.players || []).map((p) => p && (p.name || p.gamertag)).filter(Boolean).slice(0, 6);
+    if (!roster.length) { rowsEl.innerHTML = '<div class="bk-run-stats-empty">' + escRun(t.name) + ' has no players on its roster yet — add players on the Teams page to show stats.</div>'; return; }
     const game = data.activeGame || '';
     fetch('/api/stats/leaders?limit=500').then((r) => r.json()).then((res) => {
       if (_runStatsFor !== teamName || !rowsEl.isConnected) return;   // focus moved on while fetching
