@@ -58,6 +58,15 @@ function send(type, data) {
 
 function el(id) { return document.getElementById(id); }
 
+// THE HTML escaper. Escapes the full set (& < > " ') so output is safe in both element
+// and attribute contexts. Seven per-domain clones used to coexist with different escape
+// subsets (one missed >, most missed ') — they all delegate here now; use esc() in new code.
+function esc(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
 // True only when the user is actively typing in a text field / select inside `wrap`.
 // Used to guard live re-renders so we don't clobber in-progress edits — but a focused
 // BUTTON (e.g. a just-clicked delete/add) must NOT block the re-render, or deletes appear
@@ -1735,6 +1744,8 @@ function _borrowGraphicsToDash() {
   // Defer applyDashLayout: DASH_WIDGETS is a const (TDZ until line ~16431) so calling
   // applyDashLayout synchronously from the startup IIFE would throw a ReferenceError.
   if (typeof applyDashLayout === 'function') setTimeout(applyDashLayout, 0);
+  // Moving the iframe just reloaded it — re-point the preview at the current scene.
+  setTimeout(() => { if (typeof window._gfxReapplyPreview === 'function') window._gfxReapplyPreview(); }, 60);
 }
 function _returnGraphicsToProd() {
   const dst = el('prod-graphics-tab');
@@ -1746,6 +1757,8 @@ function _returnGraphicsToProd() {
     if (onairEl) dst.appendChild(onairEl);
   }
   if (src2) { while (src2.firstChild) dst.appendChild(src2.firstChild); }
+  // Moving the iframe just reloaded it — re-point the preview at the current scene.
+  setTimeout(() => { if (typeof window._gfxReapplyPreview === 'function') window._gfxReapplyPreview(); }, 60);
 }
 // Initial borrow — dashboard is the default view; don't borrow if Production is restored.
 (function () {
@@ -2337,6 +2350,21 @@ function _returnGraphicsToProd() {
     });
   });
 
+  // Point the shared preview iframe at a scene's standalone overlay (?preview=1). `force` re-sets
+  // the src even when the attribute already matches — needed after the graphics hub is re-parented
+  // (borrowed to the Dashboard / returned), because moving an <iframe> reloads it while the src
+  // attribute still reads the right URL, leaving the preview stuck on the previous scene (e.g.
+  // break's "STARTING SOON") until you navigated away and back.
+  function gfxApplyPreview(key, force) {
+    const previewIframe = el('gfx-fixed-preview-iframe');
+    if (!previewIframe || !SCENE_META[key] || !SCENE_META[key].link) return;
+    const base = window.SCENE_BASE_URL || 'http://localhost:3000';
+    const newSrc = base + '/' + SCENE_META[key].link + '?preview=1';
+    if (force || previewIframe.getAttribute('src') !== newSrc) previewIframe.src = newSrc;
+  }
+  // Re-point the preview at the current scene after a DOM re-parent reloaded the iframe.
+  window._gfxReapplyPreview = () => { if (currentKey) gfxApplyPreview(currentKey, true); };
+
   // Tab switching.
   const ALIAS = { scenes: 'break', lower: 'spotlight', manual: 'bracket', upcoming: 'schedule', brackets: 'bracket' };
   function show(which) {
@@ -2350,12 +2378,7 @@ function _returnGraphicsToProd() {
     btns.forEach((b) => b.classList.toggle('active', b.dataset.gfxscene === navHighlightKey));
     // Swap the single shared fixed-preview iframe to this scene's own standalone overlay page —
     // happens regardless of inline vs. pop-out, so you can glance at any scene without opening it.
-    const previewIframe = el('gfx-fixed-preview-iframe');
-    if (previewIframe && SCENE_META[key] && SCENE_META[key].link) {
-      const base = window.SCENE_BASE_URL || 'http://localhost:3000';
-      const newSrc = base + '/' + SCENE_META[key].link + '?preview=1';
-      if (previewIframe.getAttribute('src') !== newSrc) previewIframe.src = newSrc;
-    }
+    gfxApplyPreview(key);
     refreshTopBar(key);
     // Map Pool / Series mode toggle — visible only for these two scenes; reuses show() itself
     // as the transport so Push Live/Clear/preview swap above all stay correct with zero extra code.
@@ -4268,7 +4291,7 @@ el('roles-add-member-save')?.addEventListener('click', async () => {
 document.getElementById('tab-roles')?.addEventListener('click', loadRoles);
 
 // Helper
-function escHtml(s) { return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function escHtml(s) { return esc(s); }   // legacy alias — canonical esc() lives at the top of the file
 
 // ── Bug report / Feature request → Discord webhook (via the server) ──
 function bugStatus(msg, ok) { const s = el('bug-status'); if (s) { s.textContent = msg || ''; s.style.color = ok === false ? '#f56565' : (ok ? 'var(--good,#48bb78)' : 'var(--muted)'); } }
@@ -5671,7 +5694,7 @@ function _spInstallGlobal() {
   window.addEventListener('scroll', () => { if (_spOpen) _spOpen.close(); }, true);
   window.addEventListener('resize', () => { if (_spOpen) _spOpen.close(); });
 }
-function _spEsc(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;'); }
+function _spEsc(s) { return esc(s); }   // legacy alias — canonical esc() lives at the top of the file
 // opts: { items:[{value,label,img}], value, placeholder, emptyLabel, className, onPick }
 function buildSearchPicker(opts) {
   _spInstallGlobal();
@@ -19289,7 +19312,7 @@ setTimeout(() => {
 // ── Talent Rooms (VDO.ninja automation) ─────────────────────────────────────
 const VDO_API = 'http://localhost:3000';
 let _vdoLinks = null;  // cached VDO links for facecam auto-fill
-function tlEsc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+function tlEsc(s) { return esc(s); }   // legacy alias — canonical esc() lives at the top of the file
 
 async function fetchVdoLinksForFacecam() {
   try { _vdoLinks = await (await fetch(`${VDO_API}/api/vdo/links`)).json(); } catch (e) {}
@@ -21792,7 +21815,7 @@ function applyStandingsState(data) {
   }
 }
 
-function _stEsc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+function _stEsc(s) { return esc(s); }   // legacy alias — canonical esc() lives at the top of the file
 
 // Build editable standings rows from an in-app league (mirrors lg-push-standings).
 function standingsRowsFromLeague(lg) {
@@ -22963,6 +22986,15 @@ el('btn-save-brand')?.addEventListener('click', () => {
     obsSceneCollection: (el('select-brand-obs-collection')?.value || '').trim(),
     obsProfile: (el('select-brand-obs-profile')?.value || '').trim(),
   });
+  // Say WHICH package went live — the ★ star decides that, and when the open tab isn't the
+  // starred one it's easy to think the save "didn't work".
+  const livePkg = brandPackages.find((p) => p.id === editingActivePackageId);
+  const openPkg = brandPackages.find((p) => p.id === editingPackageId);
+  if (livePkg && openPkg && livePkg.id !== openPkg.id) {
+    showToast(`Saved. Live package: "${livePkg.name}" (★) — you were editing "${openPkg.name}". Click a tab's star to make it the live one.`, '#fbbf24', 7000);
+  } else {
+    showToast(`Saved — live package: "${(livePkg && livePkg.name) || 'Main'}".`, '#22c55e');
+  }
   resetBrandForm();
   closeBrandEditor();
 });
@@ -24636,7 +24668,7 @@ function checkPlaylistAutoTrigger() { /* intentionally does nothing — no scene
 
 // HTML-escape helper — still used by renderRdAddTarget()/renderRundown()/renderAdSched() below
 // (the "Playout playlists" UI this was originally written for is gone; those call sites remain).
-function poEsc(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
+function poEsc(s) { return esc(s); }   // legacy alias — canonical esc() lives at the top of the file
 
 // ── Auto ad-break scheduler ───────────────────────────────────────────────
 // Client-driven: every N minutes, push the chosen playout live (it auto-returns). Skips a fire
@@ -24796,7 +24828,7 @@ renderHotkeys();
 // send() the Run of Show would. Stored in localStorage like the rundown + hotkeys; window-shared.
 const DECK_KEY = 'ne_deck_v1';
 const DECK_COLORS = ['#7c5cff', '#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#ec4899', '#14b8a6', '#64748b'];
-function dEsc(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
+function dEsc(s) { return esc(s); }   // legacy alias — canonical esc() lives at the top of the file
 function deckId() { return 'd' + Math.random().toString(36).slice(2, 9); }
 let _deck = (() => { try { return JSON.parse(localStorage.getItem(DECK_KEY)); } catch { return null; } })();
 if (!_deck || !Array.isArray(_deck.buttons)) _deck = { cols: 4, buttons: [] };
@@ -32847,11 +32879,8 @@ function addChatMessage(username, message, color = '') {
 }
 
 // Function to escape HTML
-function escapeHtml(text) {
-  const div = document.createElement('div');
-  div.textContent = text;
-  return div.innerHTML;
-}
+function escapeHtml(text) { return esc(text); }   // legacy alias — canonical esc() lives at the top of the file
+                                                   // (old DOM-based version didn't escape quotes — unsafe in attributes)
 
 // Activity feed items
 const activityItems = [];
