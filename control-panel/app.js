@@ -4581,6 +4581,8 @@ function bbOpenTriggerConfig(stateKey, btn) {
   const g = (typeof GOLIVE_TRIGGERS !== 'undefined' ? GOLIVE_TRIGGERS : []).find((x) => x.state === stateKey);
   const pop = el('bb-trigger-pop'); const body = el('bb-trigger-fields');
   if (!g || !pop || !body) return;
+  // Pressing the same gear while its panel is open toggles it closed.
+  if (pop.style.display !== 'none' && pop.dataset.state === stateKey) { pop.style.display = 'none'; return; }
   const live = !!(currentState[stateKey] && currentState[stateKey].visible);
   el('bb-trigger-title').textContent = BB_TRIGGER_LABELS[stateKey] || stateKey;
   body.innerHTML = '';
@@ -21591,10 +21593,13 @@ el('rp-to-preview')?.addEventListener('click', () => sendToScreen('preview'));
 // surfaces can never fight; scene + transition + return-scene settings come from the
 // REPLAYS page controls. "Edit" borrows the REPLAYS page's own Video Editor pane into
 // a popup (see qrOpenClipEditor below) rather than building a second editor instance.
-let _qrClipsSig = '';
-function renderQrailReplay(data) {
-  const st = (data || currentState || {});
-  const obs = st.obs || {};
+// Buffer status/toggle are driven off state.obs, which rides the small/frequent LIVE broadcast
+// (every full_state). The clip list below rides the separate, heavier 'clips_update' message
+// (clips.library is only re-sent on change — see perf-broadcast-payload). Splitting these apart
+// so the pill/button track the real OBS buffer state immediately instead of only refreshing
+// whenever a clip happens to be saved/imported.
+function renderQrailBufferStatus(data) {
+  const obs = (data || currentState || {}).obs || {};
   const pill = el('qr-buffer-pill');
   if (pill) { pill.textContent = obs.replayBufferActive ? 'Buffer On' : 'Buffer Off'; pill.classList.toggle('on', !!obs.replayBufferActive); }
   const toggleBtn = el('qr-buffer-toggle');
@@ -21606,7 +21611,12 @@ function renderQrailReplay(data) {
       ? (obs.replayBufferActive ? 'Stop the OBS replay buffer' : 'Start the OBS replay buffer — required before Save Replay can capture anything')
       : 'Connect to OBS in Settings → OBS first';
   }
+}
 
+let _qrClipsSig = '';
+function renderQrailReplay(data) {
+  renderQrailBufferStatus(data);
+  const st = (data || currentState || {});
   const list = el('qr-clip-list'); if (!list) return;
   const lib = st.clips?.library || [];
   const latest = lib.slice(-5).reverse();   // library appends — last entries are the newest saves
@@ -22862,6 +22872,7 @@ function connect() {
       _r('renderPlayerCams',   () => renderPlayerCams(msg.data));
       _r('renderStreamQueue',  () => renderStreamQueue(msg.data));
       _r('renderCfStations',   () => renderCfStations(msg.data));
+      _r('renderQrailBufferStatus', () => { if (typeof renderQrailBufferStatus === 'function') renderQrailBufferStatus(msg.data); });
       _r('applyDirectorState', () => applyDirectorState(msg.data.director));
       _r('applyClipsState',    () => applyClipsState(msg.data.clips));
       _r('applyEncodeProgress',() => applyEncodeProgress(msg.data.encode));
