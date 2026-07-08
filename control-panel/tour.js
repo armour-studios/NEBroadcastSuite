@@ -60,6 +60,12 @@
     { target: '#flows-section', tab: 'produccion', run: function () { if (window._pdShow) window._pdShow('flows'); },
       title: 'Production \u25B8 Flows',
       body: "Automations — a chain of actions (scene cuts, overlays, timers) fired by one click, a hotkey, or a trigger like 'kickoff' or 'match ended'. Build your repeatable moments: going live, starting-soon, back-from-break, match transitions." },
+    { target: '#rundown-section', tab: 'produccion', run: function () { if (window._pdShow) window._pdShow('rundown'); },
+      title: 'Production ▸ Rundown',
+      body: "Your run of show — segments in order with notes and timings. Drive it live from the rail's Rundown tab: the current segment is highlighted for you and the crew, so everyone knows where the show is." },
+    { target: '#director-section', tab: 'produccion', run: function () { if (window._pdShow) window._pdShow('director'); },
+      title: 'Production ▸ NEURAL AI',
+      body: "The AI director. It watches the game feed and can suggest — or, when you arm it, make — scene cuts: kickoff to gameplay, goals to replays, downtime to casters. It learns from the cuts you accept and reject. Everything it may do on its own is listed below in What's Armed." },
     { target: '#whats-armed', tab: 'produccion', run: function () { if (window._pdShow) window._pdShow('director'); },
       title: "What's Armed — trust, verified",
       body: "Every automation currently allowed to act on its own — auto-switching, flow triggers, the AI director — listed in one place, with a log of what actually fired. If the show ever changes scenes 'by itself', this panel tells you exactly why." },
@@ -75,6 +81,11 @@
       body: "Everyone in front of the camera. Teams (with CSV import and JSON backup), casters and their desk lineup, guests — and private VDO.Ninja camera rooms with per-person join links and QR codes. No pasting URLs around." },
     { target: '#tab-equipos-content .ev-subnav, #tab-equipos-content .cf-subnav', tab: 'equipos', title: 'Talent sub-tabs',
       body: "Teams \u00B7 Player Rooms \u00B7 Casters \u00B7 Observers \u00B7 Guests. The Director Control Center moves people between rooms live, and Listen-In lets you hear any room with captions." },
+
+    { target: '#dcc-monitor-view',
+      run: function () { var t = document.querySelector('.qrail-tab[data-qtab="talent"]'); if (t) t.click(); },
+      title: 'Talent Monitor & Director Control Center',
+      body: "The rail's Talent tab monitors every camera room from any page. Pop it out into the full Director Control Center to move casters and players between rooms live, cue interviews, and listen in on any room without putting it on air." },
 
     // ── ESPORTS ──
     { target: '#tab-events', tab: 'events', placement: 'right', title: 'ESPORTS — tournaments & leagues',
