@@ -7513,3 +7513,6 @@ tr.lg2-drag-over { outline: 2px solid var(--accent, #4a9eff); outline-offset: -1
   background: var(--surface3); border-radius: 6px;
 }
 .bkt-find-name { font-size: 12px; font-weight: 700; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* Popped-out timer window: the panel IS the window - no collapse arrow there */
+.popout-timer #ptp-close { display: none; }

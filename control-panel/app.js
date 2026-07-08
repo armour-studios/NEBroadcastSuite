@@ -13829,6 +13829,13 @@ el('ptimer-open')?.addEventListener('click', () => {
   pop.style.display = opening ? 'block' : 'none';
   if (btn) btn.textContent = opening ? '▴' : '▾';
 });
+// Up-arrow in the popover header — same collapse, discoverable from the panel itself.
+el('ptp-close')?.addEventListener('click', () => {
+  const pop = el('ptimer-pop');
+  if (pop) pop.style.display = 'none';
+  const btn = el('ptimer-open');
+  if (btn) btn.textContent = '▾';
+});
 // Popover window actions: pop out into a separate (timer-sized) window + copy the overlay link.
 el('ptp-popout')?.addEventListener('click', () => openPopout('timer'));
 el('dcc-popout-btn')?.addEventListener('click', () => openPopout('dcc'));
