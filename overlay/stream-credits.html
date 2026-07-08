@@ -50,17 +50,19 @@
 
     /* ── Team roster TABLE — aligned columns: logo · team · players (with flags) ── */
     .roll-teams-head { text-align: center; font-size: 14px; font-weight: 700; letter-spacing: 5px; text-transform: uppercase; color: rgba(255,255,255,0.5); margin: 0 0 24px; }
-    .roll-teams-table { display: grid; grid-template-columns: 60px auto minmax(0, 780px); justify-content: center; align-items: center; gap: 2px 28px; margin: 0 auto; padding: 0 40px; }
-    .tt-logo { display: flex; align-items: center; justify-content: center; height: 56px; padding: 9px 0; }
-    .tt-logo img { max-height: 50px; max-width: 66px; object-fit: contain; filter: drop-shadow(0 3px 10px rgba(0,0,0,0.55)); }
+    /* Movie-credit style: one centered block per team — logo, name, roster underneath. */
+.roll-teams-table { display: flex; flex-direction: column; align-items: center; gap: 34px; margin: 0 auto; padding: 0 40px; }
+.tt-block { display: flex; flex-direction: column; align-items: center; gap: 6px; text-align: center; max-width: 900px; }
+    .tt-logo { display: flex; align-items: center; justify-content: center; height: 76px; padding: 0; }
+    .tt-logo img { max-height: 72px; max-width: 110px; object-fit: contain; filter: drop-shadow(0 3px 10px rgba(0,0,0,0.55)); }
     .tt-name { font-size: 24px; font-weight: 800; letter-spacing: 0.5px; text-transform: uppercase; line-height: 1.15; }
-    .tt-players { display: flex; align-items: center; flex-wrap: wrap; gap: 7px 20px; padding: 9px 0; }
+    .tt-players { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 7px 22px; padding: 2px 0 0; }
     .tt-player { display: inline-flex; align-items: center; gap: 8px; font-size: 19px; font-weight: 600; color: rgba(255,255,255,0.92); }
     .tt-flag { width: 27px; height: auto; border-radius: 3px; box-shadow: 0 1px 3px rgba(0,0,0,0.5); flex: 0 0 auto; }
     .tt-cc { font-size: 12px; font-weight: 700; letter-spacing: 1px; color: rgba(255,255,255,0.4); }
     .tt-role { font-size: 12px; font-weight: 500; color: rgba(255,255,255,0.42); }
     .tt-empty { font-size: 15px; color: rgba(255,255,255,0.35); font-style: italic; }
-    .tt-row-sep { grid-column: 1 / -1; height: 1px; background: rgba(255,255,255,0.06); }
+    .tt-row-sep { width: 220px; height: 1px; background: rgba(255,255,255,0.08); }
 
     /* ── Rolling twitch supporter sections ──────────────── */
     .roll-section { text-align: center; margin: 0 auto 40px; max-width: 1240px; }
@@ -305,22 +307,31 @@ function teamsTable(teams) {
   const wrap = document.createElement('div');
   wrap.className = 'roll-teams-table';
   teams.forEach((b, idx) => {
-    const logo = document.createElement('div');
-    logo.className = 'tt-logo';
-    logo.innerHTML = b.logo ? `<img src="${b.logo}" alt="">` : '';
+    // Centered credit block: logo on top, team name, roster underneath.
+    const block = document.createElement('div');
+    block.className = 'tt-block';
+
+    if (b.logo) {
+      const logo = document.createElement('div');
+      logo.className = 'tt-logo';
+      logo.innerHTML = `<img src="${b.logo}" alt="">`;
+      block.appendChild(logo);
+    }
 
     const name = document.createElement('div');
     name.className = 'tt-name';
     name.style.color = b.color;
     name.textContent = b.name;
+    block.appendChild(name);
 
     const players = document.createElement('div');
     players.className = 'tt-players';
     players.innerHTML = b.players.length
       ? b.players.map((p) => `<span class="tt-player">${flagImg(p.cc)}${esc(p.name)}${p.role ? `<span class="tt-role">${esc(p.role)}</span>` : ''}</span>`).join('')
       : '<span class="tt-empty">roster TBA</span>';
+    block.appendChild(players);
 
-    wrap.appendChild(logo); wrap.appendChild(name); wrap.appendChild(players);
+    wrap.appendChild(block);
     if (idx < teams.length - 1) { const sep = document.createElement('div'); sep.className = 'tt-row-sep'; wrap.appendChild(sep); }
   });
   return wrap;
