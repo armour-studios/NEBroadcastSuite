@@ -7631,3 +7631,7 @@ tr.lg2-drag-over { outline: 2px solid var(--accent, #4a9eff); outline-offset: -1
 .int-keyhelp-body ol { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; }
 .int-keyhelp-body a { color: var(--cp-accent, #ec4899); }
 .int-keyhelp-body code { background: var(--white-a06, rgba(255,255,255,.06)); padding: 1px 5px; border-radius: 4px; }
+
+/* Twitch glyph ships dark - match the app: white mark on the purple tile */
+.int-card[data-card="twitch"] .int-card-logo { background: linear-gradient(135deg, #6d28d9, #4c1d95); }
+.int-card[data-card="twitch"] .int-card-logo img { filter: brightness(0) invert(1); }

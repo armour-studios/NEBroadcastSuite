@@ -22991,8 +22991,19 @@ window._nativeAlert = window.alert;
 window.alert = function(msg) { showToast(String(msg || ''), '#ef4444'); };
 
 // ── WebSocket ─────────────────────────────────────────────────────────────
-function connect() {
-  ws = new WebSocket(WS_URL);
+// The bridge (:3001) now requires a token on every connection (see server.js
+// getOrCreateWsToken/verifyClient) — fetched once from the HTTP API (same trust boundary
+// as the rest of the control panel's localhost:3000 calls) and cached for reconnects.
+let _wsToken = null;
+async function connect() {
+  if (!_wsToken) {
+    try {
+      const r = await fetch('http://localhost:3000/api/ws-token');
+      const j = await r.json();
+      _wsToken = j.token || '';
+    } catch (e) { _wsToken = ''; }
+  }
+  ws = new WebSocket(WS_URL + (_wsToken ? ('?token=' + encodeURIComponent(_wsToken)) : ''));
 
   ws.onopen = () => {
     setStatus(true);
