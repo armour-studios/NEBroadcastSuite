@@ -17067,6 +17067,10 @@ function _intShowTab(which) {
   };
   Object.entries(panels).forEach(([key, els]) => els.forEach((p) => { if (p) p.style.display = key === _intTab ? '' : 'none'; }));
   // Browse is the landing; every app panel shows a way back.
+  // Inside an app, the back bar is the only header — the page-head ('Integrations /
+  // Connect and configure...') stacked above it read as a second back bar.
+  const intHead = document.querySelector('#tab-integrations-content .page-head');
+  if (intHead) intHead.style.display = _intTab === 'store' ? '' : 'none';
   const backbar = el('int-backbar');
   if (backbar) {
     backbar.style.display = _intTab === 'store' ? 'none' : 'flex';
