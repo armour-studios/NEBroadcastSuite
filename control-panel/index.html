@@ -4504,47 +4504,67 @@
                 </div>
               </div>
 
-              <details id="gfx-bkt-import" style="margin-top:12px; border-top:1px solid var(--border); padding-top:10px;">
-                <summary style="cursor:pointer; font-size:11px; font-weight:800; letter-spacing:.1em; text-transform:uppercase; color:var(--muted);">Import / change source</summary>
-              <div class="gfx-ctrl-row" style="margin-top:10px;">
+              <div class="gfx-ctrl-row" style="margin-top:12px; border-top:1px solid var(--border); padding-top:10px;">
                 <span class="field-label" style="flex-shrink:0;">Source</span>
                 <div class="gfx-src-tabs" id="gfx-bkt-srctabs">
-                  <button type="button" class="gfx-src-tab is-on" data-bktsrc="sg">start.gg</button>
-                  <button type="button" class="gfx-src-tab" data-bktsrc="challonge">Challonge</button>
-                  <button type="button" class="gfx-src-tab" data-bktsrc="nxgen">NXGEN</button>
-                  <button type="button" class="gfx-src-tab" data-bktsrc="manual">Manual</button>
+                  <button type="button" class="gfx-src-tab" data-bktsrc="league" title="Standings from an in-app league">League</button>
+                  <button type="button" class="gfx-src-tab is-on" data-bktsrc="organizer" title="Follows the active event in the Dashboard">Tournament Organizer</button>
+                  <button type="button" class="gfx-src-tab" data-bktsrc="manual" title="Hand-built bracket — opens the full editor">Manual</button>
                 </div>
               </div>
 
-              <!-- start.gg -->
-              <div class="gfx-bkt-srcwrap" data-bktwrap="sg">
+              <!-- League — fully front-facing, no pop-out needed. -->
+              <div class="gfx-bkt-srcwrap" data-bktwrap="league" style="display:none;">
                 <div class="gfx-ctrl-row" style="margin-top:2px;">
-                  <label class="field-label" style="flex-shrink:0; white-space:nowrap;" for="gfx-bkt-slug">Event URL / Slug</label>
-                  <input type="text" id="gfx-bkt-slug" class="input-text" placeholder="tournament/slug/event/slug" style="flex:1; min-width:0;">
+                  <label class="field-label" style="flex-shrink:0;" for="gfx-bkt-league">League</label>
+                  <select id="gfx-bkt-league" class="input-select" style="flex:1; min-width:0;"><option value="">Select league…</option></select>
                 </div>
-                <div style="margin-top:8px;"><button class="btn btn-blue btn-sm" id="gfx-bkt-fetch">Import from start.gg</button></div>
-                <p id="gfx-bkt-sg-status" class="sps-desc" style="margin-top:6px;"></p>
+                <div class="gfx-ctrl-row">
+                  <label class="field-label" style="flex-shrink:0;" for="gfx-bkt-title">Title</label>
+                  <input type="text" id="gfx-bkt-title" class="input-text" placeholder="e.g. WEEK 6 STANDINGS" style="flex:1; min-width:0;">
+                </div>
+                <div class="gfx-ctrl-row">
+                  <label class="field-label" style="flex-shrink:0;" for="gfx-bkt-subtitle">Subtitle</label>
+                  <input type="text" id="gfx-bkt-subtitle" class="input-text" placeholder="optional" style="flex:1; min-width:0;">
+                </div>
+                <label class="qt-toggle" style="margin-top:6px;"><span>Show Win/Loss</span><span class="switch"><input type="checkbox" id="gfx-bkt-showrecord" checked><span class="slider"></span></span></label>
               </div>
 
-              <!-- Challonge -->
-              <div class="gfx-bkt-srcwrap" data-bktwrap="challonge" style="display:none;">
-                <div class="gfx-ctrl-row" style="margin-top:2px;">
-                  <label class="field-label" style="flex-shrink:0; white-space:nowrap;" for="gfx-bkt-ch-slug">Tournament URL / Slug</label>
-                  <input type="text" id="gfx-bkt-ch-slug" class="input-text" placeholder="challonge.com/xxxxx  or  xxxxx" style="flex:1; min-width:0;">
-                </div>
-                <div style="margin-top:8px;"><button class="btn btn-blue btn-sm" id="gfx-bkt-ch-fetch">Import from Challonge</button></div>
-                <p class="field-hint" style="margin:6px 0 0;">Needs your Challonge API key in Settings. Auto-syncs scores live.</p>
-                <p id="gfx-bkt-ch-status" class="sps-desc" style="margin-top:4px;"></p>
-              </div>
-
-              <!-- NXGEN -->
-              <div class="gfx-bkt-srcwrap" data-bktwrap="nxgen" style="display:none;">
-                <div class="gfx-ctrl-row" style="margin-top:2px;">
-                  <label class="field-label" style="flex-shrink:0; white-space:nowrap;" for="gfx-bkt-nx-slug">Event Slug</label>
-                  <input type="text" id="gfx-bkt-nx-slug" class="input-text" placeholder="nxgen event slug" style="flex:1; min-width:0;">
-                </div>
-                <div style="margin-top:8px;"><button class="btn btn-blue btn-sm" id="gfx-bkt-nx-fetch">Import from NXGEN</button></div>
-                <p id="gfx-bkt-nx-status" class="sps-desc" style="margin-top:6px;"></p>
+              <!-- Tournament Organizer — auto-follows whichever event is active in the Dashboard
+                   (start.gg/Challonge/NXGEN); the connect fields below are only for pointing it at
+                   a DIFFERENT event than the active one. -->
+              <div class="gfx-bkt-srcwrap" data-bktwrap="organizer">
+                <p id="gfx-bkt-org-status" class="sps-desc" style="margin:2px 0 8px;">No active event — connect one below, or set one as Active from the Dashboard.</p>
+                <details id="gfx-bkt-org-override">
+                  <summary style="cursor:pointer; font-size:11px; font-weight:800; letter-spacing:.1em; text-transform:uppercase; color:var(--muted);">Connect a different event</summary>
+                  <div style="margin-top:10px; display:flex; flex-direction:column; gap:12px;">
+                    <div>
+                      <div class="gfx-ctrl-row" style="margin-top:2px;">
+                        <label class="field-label" style="flex-shrink:0; white-space:nowrap;" for="gfx-bkt-slug">start.gg URL / Slug</label>
+                        <input type="text" id="gfx-bkt-slug" class="input-text" placeholder="tournament/slug/event/slug" style="flex:1; min-width:0;">
+                      </div>
+                      <div style="margin-top:8px;"><button class="btn btn-blue btn-sm" id="gfx-bkt-fetch">Import from start.gg</button></div>
+                      <p id="gfx-bkt-sg-status" class="sps-desc" style="margin-top:6px;"></p>
+                    </div>
+                    <div>
+                      <div class="gfx-ctrl-row" style="margin-top:2px;">
+                        <label class="field-label" style="flex-shrink:0; white-space:nowrap;" for="gfx-bkt-ch-slug">Challonge URL / Slug</label>
+                        <input type="text" id="gfx-bkt-ch-slug" class="input-text" placeholder="challonge.com/xxxxx  or  xxxxx" style="flex:1; min-width:0;">
+                      </div>
+                      <div style="margin-top:8px;"><button class="btn btn-blue btn-sm" id="gfx-bkt-ch-fetch">Import from Challonge</button></div>
+                      <p class="field-hint" style="margin:6px 0 0;">Needs your Challonge API key in Settings. Auto-syncs scores live.</p>
+                      <p id="gfx-bkt-ch-status" class="sps-desc" style="margin-top:4px;"></p>
+                    </div>
+                    <div>
+                      <div class="gfx-ctrl-row" style="margin-top:2px;">
+                        <label class="field-label" style="flex-shrink:0; white-space:nowrap;" for="gfx-bkt-nx-slug">NXGEN Event Slug</label>
+                        <input type="text" id="gfx-bkt-nx-slug" class="input-text" placeholder="nxgen event slug" style="flex:1; min-width:0;">
+                      </div>
+                      <div style="margin-top:8px;"><button class="btn btn-blue btn-sm" id="gfx-bkt-nx-fetch">Import from NXGEN</button></div>
+                      <p id="gfx-bkt-nx-status" class="sps-desc" style="margin-top:6px;"></p>
+                    </div>
+                  </div>
+                </details>
               </div>
 
               <!-- Manual -->
@@ -4570,7 +4590,6 @@
                 <p class="field-hint" style="margin:6px 0 0;">Creates an empty bracket you fill in the full editor (More settings). Nothing external overwrites a custom bracket.</p>
                 <p id="gfx-bkt-m-status" class="sps-desc" style="margin-top:4px;"></p>
               </div>
-              </details>
             </div>
 
             <!-- STANDINGS — quick inline controls; deep source/rows config lives under "More settings". -->
@@ -4805,31 +4824,40 @@
 
           <!-- DESK SHOW -->
           <div class="gfx-scene-panel" data-gfxpanel="preshow" style="display:none;">
-            <div class="gfx-scene-body">
-              <p class="field-hint" style="margin:0 0 8px;">Discussion topics &amp; headline for the <strong>Desk Show</strong> layout (add it as its own OBS browser source — see Talent ▸ Caster Desk ▸ OBS Desk Layouts). Cams, team match-up and the kickoff countdown all read from settings you already have elsewhere.</p>
-              <div class="field-row">
-                <label class="field-label" for="preshow-headline">Headline</label>
-                <input type="text" id="preshow-headline" class="input-text" placeholder="e.g. THE LAST PLAYER TO QUALIFY" maxlength="140">
+            <div class="gfx-scene-body ps-panel">
+              <p class="field-hint" style="margin:0 0 14px;">Headline &amp; discussion topics for the <strong>Desk Show</strong> layout. Add it as its own OBS browser source (Talent ▸ Caster Desk ▸ OBS Desk Layouts). Cams, match-up &amp; kickoff countdown read from your existing settings.</p>
+
+              <!-- Presets toolbar -->
+              <div class="ps-presets">
+                <span class="ps-presets-lbl">Preset</span>
+                <select id="preshow-preset-sel" class="input-select"><option value="">— none —</option></select>
+                <button class="btn btn-ghost btn-sm" id="preshow-preset-load" type="button" title="Load the selected preset's headline + topics">Load</button>
+                <button class="btn btn-ghost btn-sm" id="preshow-preset-save" type="button" title="Save the current headline + topics as a named preset">Save…</button>
+                <button class="btn btn-ghost btn-sm ps-del-btn" id="preshow-preset-del" type="button" title="Delete the selected preset">Delete</button>
               </div>
-              <div class="field-row">
-                <label class="field-label">Topic Presets <span class="field-hint" style="font-weight:400;">— save the current headline + topics as a named set, then switch between sets</span></label>
-                <div style="display:flex; gap:8px;">
-                  <select id="preshow-topic-preset" class="input-select" style="flex:1;"><option value="">— Load a preset —</option></select>
-                  <button class="btn btn-secondary btn-sm" id="btn-preshow-tp-save" type="button" title="Save current headline + topics as a new preset">Save As</button>
-                  <button class="btn btn-ghost btn-sm" id="btn-preshow-tp-del" type="button" title="Delete the selected preset">Delete</button>
-                </div>
+
+              <!-- Headline -->
+              <div class="gfx-ctrl-row">
+                <label class="field-label" style="flex-shrink:0;" for="preshow-headline">Headline</label>
+                <input type="text" id="preshow-headline" class="input-text" placeholder="e.g. THE LAST PLAYER TO QUALIFY" maxlength="140" style="flex:1; min-width:0;">
               </div>
-              <label class="field-label">Topics <span class="field-hint" style="font-weight:400;">— click ● to mark one active on the rail; give it a Scene to cut there too</span></label>
-              <div id="preshow-topics-list" style="display:flex; flex-direction:column; gap:6px; margin:8px 0;"></div>
-              <button class="btn btn-ghost btn-sm" id="btn-preshow-add-topic" type="button">+ Add Topic</button>
-              <p class="field-hint" style="margin:10px 0 0;">Caster boxes show each caster's assigned cam — set the cam (or paste a custom VDO link that overrides the room) in <strong>Camera Feeds ▸ Hosts</strong> / the Director Control Center. Run the OBS source with <code>?cams=off</code> to layer your own OBS "Caster" scenes behind the boxes instead.</p>
-              <div class="field-row" style="margin-top:14px; border-top:1px solid var(--border); padding-top:12px;">
-                <label class="field-label" for="preshow-home-scene">Return-to scene <span class="field-hint" style="font-weight:400;">— what "Return" below cuts back to (usually the Desk Show OBS scene)</span></label>
-                <div style="display:flex; gap:8px;">
-                  <select id="preshow-home-scene" class="input-select" style="flex:1;"><option value="">— None —</option></select>
-                  <button class="btn btn-secondary btn-sm" id="btn-preshow-return" type="button" title="Cut OBS back to the Return-to scene">↩ Return</button>
-                </div>
+
+              <!-- Topics -->
+              <div class="ps-section-head">
+                <span class="field-label" style="margin:0;">Topics</span>
+                <button class="btn btn-primary btn-sm" id="btn-preshow-add-topic" type="button">+ Add Topic</button>
               </div>
+              <p class="field-hint" style="margin:0 0 8px;">Click the <b>●</b> to mark one active on the rail; give it a <b>Scene</b> to cut there too. Saved on the active Brand Package, so switching packages switches topics.</p>
+              <div id="preshow-topics-list" class="ps-topics"></div>
+
+              <!-- Return-to scene -->
+              <div class="ps-return">
+                <label class="field-label" style="flex-shrink:0;" for="preshow-home-scene" title="What Return cuts back to — usually the Desk Show OBS scene">Return-to</label>
+                <select id="preshow-home-scene" class="input-select" style="flex:1; min-width:0;"><option value="">— None —</option></select>
+                <button class="btn btn-secondary btn-sm" id="btn-preshow-return" type="button" title="Cut OBS back to the Return-to scene">↩ Return</button>
+              </div>
+
+              <p class="field-hint" style="margin:12px 0 0; padding-top:12px; border-top:1px solid var(--border);">Caster boxes show each caster's assigned cam — set it in <strong>Camera Feeds ▸ Hosts</strong> / the Director Control Center. Run the source with <code>?cams=off</code> to layer your own OBS "Caster" scenes behind the boxes.</p>
             </div>
           </div>
 
@@ -7268,11 +7296,24 @@ PacketSendRate=10</pre>
 <div id="tab-switcher-content" class="tab-content">
   <div class="page-head"><h1>Switcher</h1><p>Program / preview production control — cut &amp; fade between sources, preview what's next, and mix audio. Drives whichever backend is live (OBS Studio Mode or vMix).</p></div>
 
-  <div class="sw-topbar">
+  <!-- Status bar: backend, on-air pills, uptime/viewers/clock, stream/record/replay/FTB -->
+  <div class="sw-statusbar">
     <div class="sw-seg" id="sw-target-seg">
       <button type="button" class="sw-seg-btn" data-target="obs">OBS</button>
       <button type="button" class="sw-seg-btn" data-target="vmix">vMix</button>
     </div>
+    <span class="sw-pill sw-pill-live" id="sw-pill-live">OFF AIR</span>
+    <span class="sw-pill sw-pill-rec" id="sw-pill-rec">REC</span>
+    <span class="sw-stat" id="sw-uptime" title="Stream uptime">00:00:00</span>
+    <span class="sw-stat" id="sw-viewers" title="Live viewers">— viewers</span>
+    <span class="sw-stat sw-wallclock" id="sw-wallclock" title="Local time">--:--</span>
+    <div class="sw-sb-btns">
+      <button type="button" class="sw-mini-btn" id="sw-stream-btn">Start Stream</button>
+      <button type="button" class="sw-mini-btn" id="sw-record-btn">Start Record</button>
+      <button type="button" class="sw-mini-btn" id="sw-replay-btn" title="Save replay buffer (OBS) / play last event (vMix)">Replay</button>
+      <button type="button" class="sw-mini-btn sw-ftb-btn" id="sw-ftb-btn" title="Fade to black">FTB</button>
+    </div>
+    <label class="sw-thumbs" title="Live thumbnails render in OBS (uses GPU). Turn off for zero cost — tiles show names only."><input type="checkbox" id="sw-thumbs" checked> Thumbnails</label>
     <span class="sw-status" id="sw-status"></span>
   </div>
 
@@ -7283,19 +7324,63 @@ PacketSendRate=10</pre>
       <div class="sw-mon-screen" id="sw-prev-screen"><span class="sw-mon-ph">No preview</span></div>
     </div>
     <div class="sw-take">
-      <button type="button" class="sw-take-btn sw-cut" id="sw-cut" title="Cut preview to program instantly">CUT</button>
-      <button type="button" class="sw-take-btn sw-auto" id="sw-fade" title="Fade preview to program">FADE</button>
+      <button type="button" class="sw-take-btn sw-cut" id="sw-cut" title="Cut preview to program instantly (Enter)">CUT</button>
+      <button type="button" class="sw-take-btn sw-auto" id="sw-fade" title="Transition preview to program (Space)">AUTO</button>
+      <select id="sw-trans-type" class="input-select" title="Transition used by AUTO">
+        <option value="Fade" selected>Fade</option>
+        <option value="Merge">Merge</option>
+        <option value="Wipe">Wipe</option>
+        <option value="Slide">Slide</option>
+        <option value="Stinger1">Stinger 1</option>
+        <option value="Stinger2">Stinger 2</option>
+        <option value="Stinger3">Stinger 3</option>
+        <option value="Stinger4">Stinger 4</option>
+      </select>
       <div class="sw-take-dur"><input type="number" id="sw-fade-dur" value="500" min="0" step="50"><span>ms</span></div>
     </div>
     <div class="sw-mon sw-mon-program">
-      <div class="sw-mon-head"><span class="sw-mon-tag sw-tag-prog">PROGRAM</span><span class="sw-mon-name" id="sw-prog-name">—</span></div>
-      <div class="sw-mon-screen" id="sw-prog-screen"><span class="sw-mon-ph">On air</span></div>
+      <div class="sw-mon-head">
+        <span class="sw-mon-tag sw-tag-prog">PROGRAM</span><span class="sw-mon-name" id="sw-prog-name">—</span>
+        <div class="sw-prog-live-ctl">
+          <select id="sw-prog-device" class="input-select" title="Video device — pick OBS Virtual Camera" style="display:none;"></select>
+          <button type="button" class="sw-live-btn" id="sw-prog-live" title="Show the OBS Virtual Camera as a smooth live feed (Start Virtual Camera in OBS first)">Go Live</button>
+        </div>
+      </div>
+      <div class="sw-mon-screen" id="sw-prog-screen">
+        <video id="sw-prog-video" autoplay muted playsinline style="display:none;"></video>
+        <span class="sw-mon-ph">On air</span>
+      </div>
     </div>
   </div>
 
-  <!-- Scrollable lower area: multiview grid + audio mixer (monitors + take stay fixed above) -->
+  <!-- Scrollable lower area: dock + rundown + macros + multiview grid + audio mixer -->
   <div class="sw-lower">
-    <div class="sw-section-label">Sources <span class="sw-hint">click → load to Preview · double-click → cut to Program &nbsp;·&nbsp; <kbd class="sw-kbd">Enter</kbd> CUT&nbsp; <kbd class="sw-kbd">Space</kbd> FADE</span></div>
+    <!-- Graphics dock: put overlays on air without leaving the switcher -->
+    <div class="sw-section-label">Graphics <span class="sw-hint">put overlays on air</span></div>
+    <div class="sw-dock" id="sw-dock"></div>
+
+    <!-- Rundown + Up Next -->
+    <div class="sw-strips">
+      <div class="sw-strip" id="sw-rundown">
+        <div class="sw-strip-head">Rundown <span class="sw-hint" id="sw-rd-status"></span></div>
+        <div class="sw-rd-now"><span class="sw-rd-tag">NOW</span><span class="sw-rd-val" id="sw-rd-now">—</span></div>
+        <div class="sw-rd-next"><span class="sw-rd-tag sw-rd-tag-next">NEXT</span><span class="sw-rd-val" id="sw-rd-next">—</span></div>
+        <div class="sw-rd-btns">
+          <button type="button" class="btn btn-primary btn-sm" id="sw-rd-start">Start</button>
+          <button type="button" class="btn btn-warning btn-sm" id="sw-rd-next-btn">Advance ▶</button>
+        </div>
+      </div>
+      <div class="sw-strip" id="sw-upnext">
+        <div class="sw-strip-head">Up Next <span class="sw-hint">start.gg queue</span></div>
+        <div class="sw-rd-val" id="sw-upnext-val" style="font-size:15px;">—</div>
+      </div>
+    </div>
+
+    <!-- Macros (Flows) -->
+    <div class="sw-section-label">Macros <span class="sw-hint">fire a flow</span></div>
+    <div class="sw-macros" id="sw-macros"></div>
+
+    <div class="sw-section-label">Sources <span class="sw-hint">click → Preview · double-click → Program &nbsp;·&nbsp; <kbd class="sw-kbd">Enter</kbd> CUT&nbsp; <kbd class="sw-kbd">Space</kbd> AUTO&nbsp; <kbd class="sw-kbd">1-9</kbd> cut</span></div>
     <div class="sw-grid" id="sw-grid"></div>
 
     <div class="sw-section-label">Audio Mixer <button class="btn btn-ghost btn-xs" id="sw-audio-refresh" style="margin-left:8px;">Refresh</button></div>

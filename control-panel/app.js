@@ -193,15 +193,10 @@ async function uploadImageFile(file, folder, maxDim) {
 // ── Custom Modal ──────────────────────────────────────────────────────────
 let modalResolve = null;
 
+// Legacy wrapper — now routes to the canonical appConfirm dialog (mp-modal markup stays for other code).
 function customConfirm(title, message, confirmText = 'Confirm') {
-  el('modal-title').textContent = title;
-  el('modal-message').textContent = message;
-  el('modal-btn-confirm').textContent = confirmText;
-  el('modal-container').classList.add('active');
-  
-  return new Promise((resolve) => {
-    modalResolve = resolve;
-  });
+  const combined = title && message ? title + ' — ' + message : (title || message || '');
+  return appConfirm(combined, confirmText);
 }
 
 function closeModal(result) {
@@ -625,10 +620,10 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
   // Delete All
   const deleteAllBtn = el('crew-delete-all-btn');
   if (deleteAllBtn) {
-    deleteAllBtn.addEventListener('click', () => {
+    deleteAllBtn.addEventListener('click', async () => {
       const members = (typeof currentState !== 'undefined' && currentState.crew) ? currentState.crew : [];
       if (!members.length) return;
-      if (!confirm(`Delete all ${members.length} crew member${members.length === 1 ? '' : 's'}? This cannot be undone.`)) return;
+      if (!(await appConfirm(`Delete all ${members.length} crew member${members.length === 1 ? '' : 's'}? This cannot be undone.`, 'Delete'))) return;
       send('delete_all_crew', {});
       setTimeout(renderCrewList, 300);
     });
@@ -969,9 +964,6 @@ function renderDccHostsPane() {
     </div>`;
   }).join('');
 }
-
-// renderDccSection kept as a no-op alias so legacy references don't crash
-function renderDccSection() {}
 
 // renderDccPicker was removed — DCC now uses the CF library directly (no separate show-roster picker)
 
@@ -2707,7 +2699,7 @@ function _returnGraphicsToProd() {
   });
   el('gfx-ser-division')?.addEventListener('change', function () { send('set_match', { division: this.value.trim() }); });
   el('gfx-ser-division')?.addEventListener('keydown', function (e) { if (e.key === 'Enter') this.blur(); });
-  el('gfx-ser-reset')?.addEventListener('click', () => { if (confirm('Reset series to 0-0?')) send('reset_series', {}); });
+  el('gfx-ser-reset')?.addEventListener('click', async () => { if (await appConfirm('Reset series to 0-0?', 'Reset')) send('reset_series', {}); });
 
   function gfxCollectSeriesMaps() {
     return [...(el('gfx-ser-maps') || { querySelectorAll: () => [] }).querySelectorAll('.gfx-ser-map-row')].map((row) => ({
@@ -2880,19 +2872,25 @@ function _returnGraphicsToProd() {
       showRecord: el('gfx-std-showrecord') ? el('gfx-std-showrecord').checked : true,
     };
   }
+  // Shared: build standings-shaped rows [{placement,name,logo,wins,losses,points}] from an
+  // in-app league's current standings — used by both the Standings scene's League source and
+  // the Bracket scene's League source (same rows, different destination field).
+  function buildLeagueStandingsRows(leagueId) {
+    const lg = leagueId && currentState && (currentState.leagues || []).find((l) => l.id === leagueId);
+    if (!lg) return null;
+    const byId = {}; (lg.standings || []).forEach((s) => { byId[s.teamId] = s; });
+    const teamsById = {}; (lg.teams || []).forEach(t => { teamsById[t.id] = t; });
+    const ordered = (lg.standings && lg.standings.length)
+      ? lg.standings.map(s => teamsById[s.teamId]).filter(Boolean)
+      : (lg.teams || []).slice().sort((a, b) => ((byId[b.id] || {}).pts || 0) - ((byId[a.id] || {}).pts || 0));
+    return ordered.map((tm, i) => { const s = byId[tm.id] || {}; const r = lgResolveTeam(tm); return { placement: i + 1, name: r.name || 'Team', logo: r.logo || null, wins: s.w || 0, losses: s.l || 0, points: s.pts || 0 }; });
+  }
   function buildStandingsPayload() {
     const common = gfxStdCommon();
     const src = document.querySelector('#gfx-std-src .gfx-src-tab.is-on')?.dataset.stdsrc || 'league';
     if (src === 'league') {
-      const lid = el('gfx-std-league')?.value;
-      const lg = lid && currentState && (currentState.leagues || []).find((l) => l.id === lid);
-      if (!lg) return { ok: false, err: 'Select a league first.' };
-      const byId = {}; (lg.standings || []).forEach((s) => { byId[s.teamId] = s; });
-      const teamsById = {}; (lg.teams || []).forEach(t => { teamsById[t.id] = t; });
-      const ordered = (lg.standings && lg.standings.length)
-        ? lg.standings.map(s => teamsById[s.teamId]).filter(Boolean)
-        : (lg.teams || []).slice().sort((a, b) => ((byId[b.id] || {}).pts || 0) - ((byId[a.id] || {}).pts || 0));
-      const rows = ordered.map((tm, i) => { const s = byId[tm.id] || {}; const r = lgResolveTeam(tm); return { placement: i + 1, name: r.name || 'Team', logo: r.logo || null, wins: s.w || 0, losses: s.l || 0, points: s.pts || 0 }; });
+      const rows = buildLeagueStandingsRows(el('gfx-std-league')?.value);
+      if (!rows) return { ok: false, err: 'Select a league first.' };
       return { ok: true, payload: { ...common, source: 'league', rows }, msg: 'from league' };
     } else if (src === 'startgg') {
       const teams = ((currentState && currentState.startgg) || {}).eventTeams || [];
@@ -3128,8 +3126,8 @@ function _returnGraphicsToProd() {
   });
 
   // Clear all
-  el('gfx-sch-clear-all')?.addEventListener('click', () => {
-    if (!_schMatches.length || !confirm('Clear all scheduled matches?')) return;
+  el('gfx-sch-clear-all')?.addEventListener('click', async () => {
+    if (!_schMatches.length || !(await appConfirm('Clear all scheduled matches?', 'Clear'))) return;
     _schMatches = []; schRenderList(); schAutoSave();
   });
 
@@ -3328,6 +3326,54 @@ function _returnGraphicsToProd() {
       if (statusEl) statusEl.textContent = `Built an empty ${size}-team ${fmt} bracket — opening editor…`;
       el('gfx-popout-summary-open')?.click();   // open "More settings" (the full builder)
     });
+
+    // League — fully front-facing: pick a league, the rows flow through the same set_standings
+    // pipeline the Standings scene's League source uses (bracket.html already prefers
+    // data.standings.rows over its own computed standings), while title/subtitle/showRecord and
+    // the view mode are Bracket-owned display fields sent via set_bracket_settings.
+    function bktPushLeagueRows() {
+      const rows = buildLeagueStandingsRows(el('gfx-bkt-league')?.value);
+      if (rows) send('set_standings', { source: 'league', rows });
+    }
+    el('gfx-bkt-league')?.addEventListener('change', () => {
+      send('set_bracket_settings', { view: 'standings' });
+      bktPushLeagueRows();
+    });
+    el('gfx-bkt-title')?.addEventListener('input', function () { send('set_bracket_settings', { title: this.value }); });
+    el('gfx-bkt-subtitle')?.addEventListener('input', function () { send('set_bracket_settings', { subtitle: this.value }); });
+    el('gfx-bkt-showrecord')?.addEventListener('change', function () { send('set_bracket_settings', { showRecord: this.checked }); });
+    document.querySelector('#gfx-bkt-srctabs [data-bktsrc="league"]')?.addEventListener('click', () => {
+      send('set_bracket_settings', { view: 'standings' });
+      bktPushLeagueRows();
+    });
+
+    window._gfxRefreshBracketLeagues = function (state) {
+      const sel = el('gfx-bkt-league'); if (!sel) return;
+      const prev = sel.value;
+      const leagues = (state && state.leagues) || [];
+      sel.innerHTML = '<option value="">Select league…</option>';
+      leagues.forEach((lg) => {
+        const opt = document.createElement('option');
+        opt.value = lg.id; opt.textContent = lg.name || lg.id;
+        if (lg.id === prev) opt.selected = true;
+        sel.appendChild(opt);
+      });
+    };
+
+    // Tournament Organizer — status line reflects whichever platform the Dashboard has active,
+    // regardless of which one it is; no slug typing needed for the common case.
+    const PLATFORM_LABEL = { startgg: 'start.gg', challonge: 'Challonge', nxgen: 'NXGEN' };
+    window._gfxRefreshBracketOrgStatus = function (data) {
+      const st = el('gfx-bkt-org-status'); if (!st) return;
+      const ae = (data && data.activeEvent) || {};
+      if (ae.platform && (ae.name || ae.slug)) {
+        st.textContent = `Following: ${ae.name || ae.slug} — ${PLATFORM_LABEL[ae.platform] || ae.platform}`;
+        st.style.color = 'var(--good, #4ade80)';
+      } else {
+        st.textContent = 'No active event — connect one below, or set one as Active from the Dashboard.';
+        st.style.color = 'var(--muted)';
+      }
+    };
   })();
 
   // ── Per-scene customization preset bars ────────────────────────────────────
@@ -3413,14 +3459,14 @@ function _returnGraphicsToProd() {
   });
 
   // Delete preset (cannot delete Default).
-  document.addEventListener('click', (e) => {
+  document.addEventListener('click', async (e) => {
     const btn = e.target.closest('[data-cust-del]');
     if (!btn) return;
     const key = btn.dataset.custDel;
     const sel = document.querySelector(`[data-cust-sel="${key}"]`);
     const name = sel ? sel.value : '';
     if (!name || name === 'Default') { alert('Cannot delete the Default preset.'); return; }
-    if (!confirm(`Delete preset "${name}"?`)) return;
+    if (!(await appConfirm(`Delete preset "${name}"?`, 'Delete'))) return;
     send('delete_scene_preset', { scene: key, name });
   });
 
@@ -5124,6 +5170,8 @@ function applyState(data) {
   if (typeof window._gfxRefreshMatchupPickers === 'function') window._gfxRefreshMatchupPickers(data);
   if (typeof window._gfxRefreshWinnerPicker   === 'function') window._gfxRefreshWinnerPicker(data);
   if (typeof window._gfxRefreshStandingsLeagues === 'function') window._gfxRefreshStandingsLeagues(data);
+  if (typeof window._gfxRefreshBracketLeagues === 'function') window._gfxRefreshBracketLeagues(data);
+  if (typeof window._gfxRefreshBracketOrgStatus === 'function') window._gfxRefreshBracketOrgStatus(data);
   if (typeof window._gfxRefreshScheduleQueue === 'function') window._gfxRefreshScheduleQueue(data);
   updateFacecamTeamHeaders(teams, data);
   if (typeof applyCommercialState === 'function') applyCommercialState(data);
@@ -7418,8 +7466,8 @@ el('event-teams-search')?.addEventListener('input', applyEventTeamsFilter);
 el('btn-save-all-event-teams')?.addEventListener('click', () => {
   send('save_startgg_teams_bulk', {});
 });
-el('btn-clear-event-teams')?.addEventListener('click', () => {
-  if (!confirm('Remove all event teams from this session?')) return;
+el('btn-clear-event-teams')?.addEventListener('click', async () => {
+  if (!(await appConfirm('Remove all event teams from this session?', 'Remove'))) return;
   send('mass_delete_startgg_teams', {});
 });
 
@@ -18978,7 +19026,7 @@ function addReminder() {
 el('reminders-add-btn')?.addEventListener('click', addReminder);
 el('reminders-input')?.addEventListener('keydown', (e) => { if (e.key === 'Enter') addReminder(); });
 el('ros-reset-all')?.addEventListener('click', () => { const l = loadReminders().map((r) => ({ ...r, done: false })); saveReminders(l); renderReminders(); });
-el('ros-clear-all')?.addEventListener('click', () => { if (!loadReminders().length || confirm('Clear all run-of-show steps?')) { saveReminders([]); renderReminders(); } });
+el('ros-clear-all')?.addEventListener('click', async () => { if (!loadReminders().length || await appConfirm('Clear all run-of-show steps?', 'Clear')) { saveReminders([]); renderReminders(); } });
 
 el('ros-export')?.addEventListener('click', () => {
   const list = loadReminders();
@@ -18992,7 +19040,7 @@ el('ros-export')?.addEventListener('click', () => {
 el('ros-import-file')?.addEventListener('change', function () {
   const file = this.files && this.files[0]; if (!file) return;
   const reader = new FileReader();
-  reader.onload = (ev) => {
+  reader.onload = async (ev) => {
     try {
       const data = JSON.parse(ev.target.result);
       const steps = Array.isArray(data.steps) ? data.steps : (Array.isArray(data) ? data : null);
@@ -19000,7 +19048,7 @@ el('ros-import-file')?.addEventListener('change', function () {
       const list = steps.map(s => ({ text: (typeof s === 'string' ? s : s.text || '').trim(), done: false })).filter(s => s.text);
       if (!list.length) { alert('No steps found in file.'); return; }
       const existing = loadReminders();
-      if (existing.length && !confirm(`Replace ${existing.length} existing step(s) with ${list.length} imported step(s)?`)) return;
+      if (existing.length && !(await appConfirm(`Replace ${existing.length} existing step(s) with ${list.length} imported step(s)?`, 'Replace'))) return;
       saveReminders(list); renderReminders();
     } catch { alert('Could not read file — make sure it is a valid Run-of-Show JSON.'); }
   };
@@ -20999,10 +21047,25 @@ el('btn-desk-footer-clear')?.addEventListener('click', () => send('set_desk_foot
 
 // ── Desk Show settings (Graphics ▸ Show ▸ Desk Show): topics + headline + return scene ──
 let _preshowTopicsSig = '';
+let _preshowPresetSig = '';
 function renderPreshowGfxPanel(data) {
   const headline = el('preshow-headline');
   const pre = data.preshow || {};
   if (headline && document.activeElement !== headline) headline.value = pre.headline || '';
+
+  // Named topic presets (saved rundowns — pre-show / halftime / post-show…)
+  const psel = el('preshow-preset-sel');
+  if (psel) {
+    const presets = data.preshowPresets || [];
+    const psig = JSON.stringify(presets.map((p) => p.id + p.name + (p.topics || []).length));
+    if (psig !== _preshowPresetSig && document.activeElement !== psel) {
+      _preshowPresetSig = psig;
+      const keep = psel.value;
+      psel.innerHTML = '<option value="">— presets —</option>' +
+        presets.map((p) => `<option value="${p.id}">${poEsc(p.name)} (${(p.topics || []).length})</option>`).join('');
+      if (keep && presets.some((p) => p.id === keep)) psel.value = keep;
+    }
+  }
 
   const scenes = (data.obs && data.obs.availableScenes) || [];
   const homeSel = el('preshow-home-scene');
@@ -21090,6 +21153,32 @@ el('preshow-headline')?.addEventListener('input', function () {
 });
 el('preshow-home-scene')?.addEventListener('change', function () {
   send('set_preshow', { homeScene: this.value });
+});
+// Topic presets — save/load/delete named rundowns.
+el('preshow-preset-save')?.addEventListener('click', async () => {
+  const cur = el('preshow-preset-sel');
+  const curName = (currentState.preshowPresets || []).find((p) => p.id === cur?.value)?.name || '';
+  const name = typeof customPrompt === 'function'
+    ? await customPrompt('Save Topic Preset', 'Preset name (same name overwrites)', curName, 'Save')
+    : prompt('Preset name (same name overwrites):', curName);
+  if (!name || !name.trim()) return;
+  send('save_preshow_preset', { name: name.trim() });
+  showToast(`Topics saved as "${name.trim()}"`, '#22c55e');
+});
+el('preshow-preset-load')?.addEventListener('click', () => {
+  const id = el('preshow-preset-sel')?.value;
+  if (!id) { showToast('Pick a preset to load.', '#fbbf24'); return; }
+  send('apply_preshow_preset', { id });
+  showToast('Topic preset loaded.', '#22c55e');
+});
+el('preshow-preset-del')?.addEventListener('click', async () => {
+  const sel = el('preshow-preset-sel');
+  const id = sel?.value;
+  if (!id) { showToast('Pick a preset to delete.', '#fbbf24'); return; }
+  const p = (currentState.preshowPresets || []).find((x) => x.id === id);
+  if (!await appConfirm(`Delete topic preset "${(p && p.name) || ''}"?`, 'Delete')) return;
+  send('delete_preshow_preset', { id });
+  if (sel) sel.value = '';
 });
 el('btn-preshow-return')?.addEventListener('click', () => {
   const home = (currentState.preshow && currentState.preshow.homeScene) || '';
@@ -21428,9 +21517,9 @@ function wireBracketPhasePool() {
     const b = e.target.closest('[data-poolid]'); if (!b) return;
     send('bracket_select_pool', { poolId: b.dataset.poolid });
   });
-  el('bracket-edit-as-custom')?.addEventListener('click', () => {
+  el('bracket-edit-as-custom')?.addEventListener('click', async () => {
     const bracket = (currentState && currentState.bracket) || {};
-    if (!confirm('Copy this imported bracket into the custom builder? The live platform import will stop auto-updating this bracket.')) return;
+    if (!(await appConfirm('Copy this imported bracket into the custom builder? The live platform import will stop auto-updating this bracket.', 'Copy', false))) return;
     _bbHydrated = false;
     bbHydrate({ ...bracket, mode: 'manual' });   // bypass the imported-skip guard, load into the builder
     bbSendPhases();                               // persists as manual mode server-side
@@ -21519,6 +21608,15 @@ function applyBracketState(data) {
 
   const cbVisible = el('check-bracket-visible');
   if (cbVisible) cbVisible.checked = !!bracket.visible;
+
+  // Front-card League source fields (title/subtitle/show-record) — only meaningful there, but
+  // harmless to keep in sync regardless of which source tab is active.
+  const bktTitleEl = el('gfx-bkt-title');
+  if (bktTitleEl && document.activeElement !== bktTitleEl) bktTitleEl.value = bracket.title || '';
+  const bktSubEl = el('gfx-bkt-subtitle');
+  if (bktSubEl && document.activeElement !== bktSubEl) bktSubEl.value = bracket.subtitle || '';
+  const bktRecEl = el('gfx-bkt-showrecord');
+  if (bktRecEl && document.activeElement !== bktRecEl) bktRecEl.checked = bracket.showRecord !== false;
 
   // Reflect the active bracket view on the chips — and hide the chips whose view has no
   // data for this bracket (clicking Matrix on an elim bracket just blanks the overlay).
@@ -30332,7 +30430,7 @@ async function loadStatsMatches(reset) {
       div.addEventListener('click', (e) => { if (e.target.closest('.stats-del-match')) return; openStatsDetail(m.id); });
       div.querySelector('.stats-del-match')?.addEventListener('click', async (e) => {
         e.stopPropagation();
-        if (!confirm('Delete this match from the stats database? It affects team & player aggregates.')) return;
+        if (!(await appConfirm('Delete this match from the stats database? It affects team & player aggregates.', 'Delete'))) return;
         try { await fetch('http://localhost:3000/api/stats/match/' + m.id, { method: 'DELETE' }); } catch (_) {}
         _anDash = null; _anDashSig = '';
         loadStatsMatches(true); if (typeof loadStatsAggregate === 'function') loadStatsAggregate();
@@ -30340,7 +30438,7 @@ async function loadStatsMatches(reset) {
       listEl.appendChild(div);
     });
 
-    if (!window._statsClearWired) { window._statsClearWired = true; el('stats-clear-matches')?.addEventListener('click', async () => { if (!confirm('Clear the ENTIRE match history (all matches, games and player stats)? This cannot be undone.')) return; try { await fetch('http://localhost:3000/api/stats/matches', { method: 'DELETE' }); } catch (_) {} _anDash = null; _anDashSig = ''; loadStatsMatches(true); if (typeof loadStatsAggregate === 'function') loadStatsAggregate(); }); }
+    if (!window._statsClearWired) { window._statsClearWired = true; el('stats-clear-matches')?.addEventListener('click', async () => { if (!(await appConfirm('Clear the ENTIRE match history (all matches, games and player stats)? This cannot be undone.', 'Clear'))) return; try { await fetch('http://localhost:3000/api/stats/matches', { method: 'DELETE' }); } catch (_) {} _anDash = null; _anDashSig = ''; loadStatsMatches(true); if (typeof loadStatsAggregate === 'function') loadStatsAggregate(); }); }
     const moreBtn = el('stats-load-more');
     if (moreBtn) moreBtn.style.display = hasMore ? '' : 'none';
     _statsOffset += matches.length;
@@ -31706,8 +31804,8 @@ function wireBusinessForm() {
     const nb = {}; ['sponsorship', 'entry', 'prize', 'production'].forEach((k) => { const v = parseFloat(el('biz-' + k)?.value); if (!isNaN(v)) nb[k] = v; });
     anSaveBusiness(nb); if (typeof showToast === 'function') showToast('Business figures saved', '#22c55e'); renderAnalyticsDashboard();
   });
-  el('biz-clear')?.addEventListener('click', () => {
-    if (!confirm('Clear the saved business figures?')) return;
+  el('biz-clear')?.addEventListener('click', async () => {
+    if (!(await appConfirm('Clear the saved business figures?', 'Clear'))) return;
     anSaveBusiness({}); ['sponsorship', 'entry', 'prize', 'production'].forEach((k) => { const inp = el('biz-' + k); if (inp) inp.value = ''; }); renderAnalyticsDashboard();
   });
 }
@@ -31901,7 +31999,7 @@ async function loadBroadcasts() {
     const rows = (ov && ov.recent) || [];
     sess.innerHTML = (rows.length ? `<div style="display:flex;justify-content:flex-end;margin-bottom:6px;"><button class="btn btn-danger btn-sm" id="an-clear-all">Clear all broadcasts</button></div>` : '') + anSessionsTable(rows);
     sess.querySelectorAll('[data-an-sess]').forEach((r) => r.addEventListener('click', () => openBroadcastDetail(r.dataset.anSess)));
-    el('an-clear-all')?.addEventListener('click', async () => { if (!confirm('Delete ALL broadcast sessions? This cannot be undone.')) return; try { await fetch(ANALYTICS_API + '/sessions', { method: 'DELETE' }); } catch (e) {} loadBroadcasts(); });
+    el('an-clear-all')?.addEventListener('click', async () => { if (!(await appConfirm('Delete ALL broadcast sessions? This cannot be undone.', 'Delete'))) return; try { await fetch(ANALYTICS_API + '/sessions', { method: 'DELETE' }); } catch (e) {} loadBroadcasts(); });
   }
   bindBroadcastControls();
 }
@@ -31970,7 +32068,7 @@ async function openBroadcastDetail(id) {
   </section>`;
   el('an-exp')?.addEventListener('click', () => anFetchDownload(ANALYTICS_API + '/export?session=' + encodeURIComponent(id), 'broadcast.csv'));
   el('an-close')?.addEventListener('click', () => { wrap.style.display = 'none'; wrap.innerHTML = ''; });
-  el('an-del')?.addEventListener('click', async () => { if (!confirm('Delete this broadcast report?')) return; try { await fetch(ANALYTICS_API + '/session/' + id, { method: 'DELETE' }); } catch (er) {} wrap.style.display = 'none'; wrap.innerHTML = ''; loadBroadcasts(); });
+  el('an-del')?.addEventListener('click', async () => { if (!(await appConfirm('Delete this broadcast report?', 'Delete'))) return; try { await fetch(ANALYTICS_API + '/session/' + id, { method: 'DELETE' }); } catch (er) {} wrap.style.display = 'none'; wrap.innerHTML = ''; loadBroadcasts(); });
 }
 
 // YouTube channel stats — subscribers, video views, recent uploads, live viewers.
@@ -32453,11 +32551,11 @@ function renderAdProof(rep) {
       sess.querySelectorAll('[data-app-csv]').forEach((b) => b.addEventListener('click', () => adProofExport(b.dataset.appCsv, 'csv')));
       sess.querySelectorAll('[data-app-json]').forEach((b) => b.addEventListener('click', () => adProofExport(b.dataset.appJson, 'json')));
       sess.querySelectorAll('[data-app-del]').forEach((b) => b.addEventListener('click', async () => {
-        if (!confirm('Delete this saved report?')) return;
+        if (!(await appConfirm('Delete this saved report?', 'Delete'))) return;
         try { const r = await (await fetch(ADPROOF_API + '/session/' + b.dataset.appDel, { method: 'DELETE' })).json(); _adProofReport = r.report; renderAdProof(r.report); } catch (e) {}
       }));
       el('app-clear-all')?.addEventListener('click', async () => {
-        if (!confirm('Delete ALL saved sponsor reports? This cannot be undone.')) return;
+        if (!(await appConfirm('Delete ALL saved sponsor reports? This cannot be undone.', 'Delete'))) return;
         try { const r = await (await fetch(ADPROOF_API + '/sessions', { method: 'DELETE' })).json(); _adProofReport = r.report; renderAdProof(r.report); } catch (e) {}
       });
     }
@@ -32478,15 +32576,15 @@ el('app-stop')?.addEventListener('click', adProofStopSession);
 function _delPlayerCol(v, r) { return '<button class="stats-del-row" data-del-player="' + escapeHtml(r.player) + '" title="Delete this player from the leaderboards">✕</button>'; }
 document.addEventListener('click', async (e) => {
   const dt = e.target.closest && e.target.closest('[data-del-team]');
-  if (dt) { const name = dt.dataset.delTeam; if (!confirm('Delete "' + name + '" — remove every match this team appears in? (affects both teams in those matches)')) return; try { await fetch('http://localhost:3000/api/stats/team/' + encodeURIComponent(name), { method: 'DELETE' }); } catch (_) {} _anDash = null; _anDashSig = ''; if (typeof loadStatsTeams === 'function') loadStatsTeams(); return; }
+  if (dt) { const name = dt.dataset.delTeam; if (!(await appConfirm('Delete "' + name + '" — remove every match this team appears in? (affects both teams in those matches)', 'Delete'))) return; try { await fetch('http://localhost:3000/api/stats/team/' + encodeURIComponent(name), { method: 'DELETE' }); } catch (_) {} _anDash = null; _anDashSig = ''; if (typeof loadStatsTeams === 'function') loadStatsTeams(); return; }
   const dp = e.target.closest && e.target.closest('[data-del-player]');
-  if (dp) { const name = dp.dataset.delPlayer; if (!confirm('Delete player "' + name + '" from the leaderboards?')) return; try { await fetch('http://localhost:3000/api/stats/player/' + encodeURIComponent(name), { method: 'DELETE' }); } catch (_) {} _anDash = null; _anDashSig = ''; if (typeof loadStatsLeaders === 'function') loadStatsLeaders(); return; }
+  if (dp) { const name = dp.dataset.delPlayer; if (!(await appConfirm('Delete player "' + name + '" from the leaderboards?', 'Delete'))) return; try { await fetch('http://localhost:3000/api/stats/player/' + encodeURIComponent(name), { method: 'DELETE' }); } catch (_) {} _anDash = null; _anDashSig = ''; if (typeof loadStatsLeaders === 'function') loadStatsLeaders(); return; }
   const tc = e.target.closest && e.target.closest('#teams-clear-all');
-  if (tc) { if (!confirm('Clear ALL match history? Wipes every team & player record for fresh reporting.')) return; try { await fetch('http://localhost:3000/api/stats/matches', { method: 'DELETE' }); } catch (_) {} _anDash = null; _anDashSig = ''; if (typeof loadStatsTeams === 'function') loadStatsTeams(); return; }
+  if (tc) { if (!(await appConfirm('Clear ALL match history? Wipes every team & player record for fresh reporting.', 'Clear'))) return; try { await fetch('http://localhost:3000/api/stats/matches', { method: 'DELETE' }); } catch (_) {} _anDash = null; _anDashSig = ''; if (typeof loadStatsTeams === 'function') loadStatsTeams(); return; }
 });
 async function loadStatsLeaders() {
   const wrap = el('stats-leaders'); if (!wrap) return;
-  if (!window._pdbClearWired) { window._pdbClearWired = true; el('stats-clear-playerdb')?.addEventListener('click', async () => { if (!confirm('Clear the ENTIRE player database? This wipes saved rank/profile links for fresh reporting.')) return; try { await fetch('http://localhost:3000/api/playerdb', { method: 'DELETE' }); if (typeof showToast === 'function') showToast('Player database cleared', '#22c55e'); } catch (e) {} loadStatsLeaders(); }); }
+  if (!window._pdbClearWired) { window._pdbClearWired = true; el('stats-clear-playerdb')?.addEventListener('click', async () => { if (!(await appConfirm('Clear the ENTIRE player database? This wipes saved rank/profile links for fresh reporting.', 'Clear'))) return; try { await fetch('http://localhost:3000/api/playerdb', { method: 'DELETE' }); if (typeof showToast === 'function') showToast('Player database cleared', '#22c55e'); } catch (e) {} loadStatsLeaders(); }); }
   const dash = await ensureDashboard();
   const L = (dash && dash.leaders) || { rl: [], cs2: [], val: [] };
   let html = '', gh = '';
