@@ -2421,6 +2421,9 @@
     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
       <h3 class="section-title" style="margin-bottom: 0;">Crew <span id="crew-count" style="color:var(--muted); font-weight:400; font-size:13px;"></span></h3>
       <div style="display:flex; gap:8px; align-items:center;">
+        <label class="dcc-slot-toggle" style="margin:0;" title="Desk overlays show each caster's gamertag/handle instead of their profile name">
+          <input type="checkbox" id="crew-name-gamertag" checked> Gamertag on desk
+        </label>
         <label class="dcc-slot-toggle" style="margin:0;" title="Show each caster's country on the desk overlay">
           <input type="checkbox" id="crew-show-country"> Show country on desk
         </label>
@@ -4722,7 +4725,8 @@
                   <input type="text" id="gfx-sch-add-a" class="input-text" placeholder="Team A" list="gfx-sch-teamlist" style="flex:1; min-width:110px;">
                   <span style="font-size:11px; color:var(--muted); flex-shrink:0;">vs</span>
                   <input type="text" id="gfx-sch-add-b" class="input-text" placeholder="Team B" list="gfx-sch-teamlist" style="flex:1; min-width:110px;">
-                  <input type="text" id="gfx-sch-add-when" class="input-text" placeholder="Fri 8:00 PM" title="Date / time shown on the overlay — free text, e.g. 'Fri 8:00 PM' or 'July 12'" style="flex:0 0 118px;">
+                  <input type="text" id="gfx-sch-add-date" class="input-text" placeholder="Jul 12" title="Date shown on the overlay — free text" style="flex:0 0 84px;">
+                  <input type="text" id="gfx-sch-add-when" class="input-text" placeholder="8:00 PM" title="Time shown on the overlay — free text" style="flex:0 0 92px;">
                   <button type="button" class="btn btn-secondary btn-sm" id="gfx-sch-add-front" style="flex-shrink:0;">Add</button>
                 </div>
                 <datalist id="gfx-sch-teamlist"></datalist>

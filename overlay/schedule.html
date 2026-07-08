@@ -34,7 +34,10 @@ body { width: 1920px; height: 1080px; overflow: hidden; background: transparent;
 
 /* ── Match list grid ── */
 .sch-list { width: 1000px; display: grid; grid-template-columns: 1fr; gap: 22px; }
-.sch-list.dual { grid-template-columns: 1fr 1fr; }
+/* Two-column board needs a wider stage: cards have a ~730px minimum, so inside the
+   1000px single-column stage the grid overflowed off-screen right instead of centering. */
+.sch-list.dual { grid-template-columns: 1fr 1fr; width: 1560px; }
+.sch-stage:has(.sch-list.dual) { width: 1560px; }
 .sch-entry-wrap { display: flex; flex-direction: column; gap: 6px; }
 /* An odd match count leaves the last card alone in the final row of the 2-column grid — span
    both columns and center it there instead of letting it sit left-aligned under column 1. */

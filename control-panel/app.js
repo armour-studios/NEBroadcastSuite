@@ -311,6 +311,9 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
   // Show-country-on-desk toggle (mirrors the caster-desk slot-labels bar; same server state)
   const crewShowCountry = el('crew-show-country');
   if (crewShowCountry) crewShowCountry.addEventListener('change', () => send('set_casters_show_country', { showCountry: crewShowCountry.checked }));
+  // Gamertag-vs-name display on the desk overlays (server casters.nameMode; gamertag is default)
+  const crewNameMode = el('crew-name-gamertag');
+  if (crewNameMode) crewNameMode.addEventListener('change', () => send('set_casters_name_mode', { mode: crewNameMode.checked ? 'gamertag' : 'name' }));
 
   // Group filter pills → sync hidden select + re-render
   const crewGroupNav = el('crew-group-nav');
@@ -2904,7 +2907,11 @@ function _returnGraphicsToProd() {
   // "More settings"). Renders from _schMatches (the single source of truth) and drives the same save.
   function schFrontRender() {
     const body = el('gfx-front-schedule-body'); if (!body) return;
-    if (body.contains(document.activeElement)) return;   // don't rebuild while editing a row
+    // Pause rebuilds only while a row FIELD is being typed in — a clicked button
+    // (remove / move) also holds focus, and skipping then froze the list until a
+    // manual refresh.
+    const ae = document.activeElement;
+    if (ae && body.contains(ae) && /^(INPUT|SELECT|TEXTAREA)$/.test(ae.tagName)) return;
     if (typeof schFillTeamList === 'function') schFillTeamList();
     if (!_schInitialized) {   // hydrate once from server state so indices line up before any edit
       const up = (currentState && currentState.upcoming) || {};
@@ -2921,14 +2928,16 @@ function _returnGraphicsToProd() {
       const live = m.stream ? '<span class="live">LIVE</span>' : '';
       const rowEl = document.createElement('div'); rowEl.className = 'gfx-fp-prow';
       rowEl.innerHTML = `${rd}<span class="tm" title="${a} vs ${b}">${a}<span class="vs">vs</span>${b}</span>`
-        + `<input type="text" class="input-text gfx-fp-time" value="${esc(m.time || m.date || '')}" placeholder="time" title="Date / time shown on the overlay — edits save automatically" style="width:86px; flex:0 0 auto; font-size:11px; padding:2px 6px;">`
+        + `<input type="text" class="input-text gfx-fp-date" value="${esc(m.date || '')}" placeholder="date" title="Date shown on the overlay — edits save automatically" style="width:66px; flex:0 0 auto; font-size:11px; padding:2px 6px;">`
+        + `<input type="text" class="input-text gfx-fp-time" value="${esc(m.time || '')}" placeholder="time" title="Time shown on the overlay — edits save automatically" style="width:70px; flex:0 0 auto; font-size:11px; padding:2px 6px;">`
         + live
         + `<span class="gfx-fp-rowbtns"><button type="button" class="gfx-fp-mv" data-mv="-1" title="Move up">&#8593;</button>`
         + `<button type="button" class="gfx-fp-mv" data-mv="1" title="Move down">&#8595;</button>`
         + `<button type="button" class="gfx-fp-rm" title="Remove">&times;</button></span>`;
       const tiInp = rowEl.querySelector('.gfx-fp-time');
-      tiInp.addEventListener('change', () => { _schMatches[i].time = tiInp.value.trim(); _schMatches[i].date = ''; schAutoSave(); });
-      tiInp.addEventListener('blur', () => schFrontRender());
+      tiInp.addEventListener('change', () => { _schMatches[i].time = tiInp.value.trim(); schAutoSave(); });
+      const dtInp = rowEl.querySelector('.gfx-fp-date');
+      dtInp.addEventListener('change', () => { _schMatches[i].date = dtInp.value.trim(); schAutoSave(); });
       rowEl.querySelector('.gfx-fp-rm').addEventListener('click', () => { _schMatches.splice(i, 1); schRenderList(); schAutoSave(); });
       rowEl.querySelectorAll('.gfx-fp-mv').forEach((btn) => btn.addEventListener('click', () => {
         const j = i + (btn.dataset.mv === '-1' ? -1 : 1);
@@ -2958,9 +2967,10 @@ function _returnGraphicsToProd() {
     const b = (el('gfx-sch-add-b')?.value || '').trim();
     const when = (el('gfx-sch-add-when')?.value || '').trim();
     if (!a && !b) { showToast('Type at least one team name.', '#fbbf24'); return; }
+    const dateVal = (el('gfx-sch-add-date')?.value || '').trim();
     // No setId: manual rows append alongside queue-pulled ones instead of being deduped.
-    _schMatches.push({ teamA: a || 'TBD', teamB: b || 'TBD', time: when, date: '', round: '', stream: false, state: 1 });
-    ['gfx-sch-add-a', 'gfx-sch-add-b', 'gfx-sch-add-when'].forEach((id) => { const i = el(id); if (i) i.value = ''; });
+    _schMatches.push({ teamA: a || 'TBD', teamB: b || 'TBD', time: when, date: dateVal, round: '', stream: false, state: 1 });
+    ['gfx-sch-add-a', 'gfx-sch-add-b', 'gfx-sch-add-when', 'gfx-sch-add-date'].forEach((id) => { const i = el(id); if (i) i.value = ''; });
     schRenderList(); schAutoSave();
   });
   // The Layout picker belongs on the card — with add/reorder/remove inline, the
@@ -2971,6 +2981,21 @@ function _returnGraphicsToProd() {
     const row = sel.closest('.gfx-ctrl-row'); const actions = front.querySelector('.gfx-fp-actions');
     if (row && actions) front.insertBefore(row, actions);
   })();
+
+  // Server echo -> local truth: edits made anywhere else (the pop-out list, pulls,
+  // a second panel window) land here on the next broadcast instead of after a refresh.
+  window._schSyncFromState = function (data) {
+    const up = (data && data.upcoming) || {};
+    if (!Array.isArray(up.matches)) return;
+    const ae = document.activeElement;
+    const body = el('gfx-front-schedule-body');
+    if (ae && body && body.contains(ae) && /^(INPUT|SELECT|TEXTAREA)$/.test(ae.tagName)) return;
+    const sig = JSON.stringify(up.matches);
+    if (sig === JSON.stringify(_schMatches)) return;
+    _schMatches = up.matches.slice();
+    _schInitialized = true;
+    schRenderList();
+  };
 
   // Title lives on the front card only now (Graphics ▸ Schedule) — single source of truth.
   function schAutoSave() {
@@ -5206,6 +5231,8 @@ function applyState(data) {
     });
   }
   if (data.casters) {
+    const nmCb = el('crew-name-gamertag');
+    if (nmCb && document.activeElement !== nmCb) nmCb.checked = (data.casters.nameMode || 'gamertag') === 'gamertag';
     [el('dcc-show-country'), el('crew-show-country')].forEach((scc) => {
       if (scc && document.activeElement !== scc) scc.checked = !!data.casters.showCountry;
     });
@@ -14790,6 +14817,40 @@ function renderPreshowGfxPanel(data) {
     }
   }
 
+  // Caster Predictions — one row per desk cam slot (1/2); NOTE: this must stay ABOVE the topics
+  // sig-check/early-return below, or a prediction click (which doesn't touch topics) would never
+  // get reflected here on its own broadcast.
+  const predWrap = el('preshow-predictions');
+  if (predWrap) {
+    const predictions = [0, 1].map((i) => (Array.isArray(pre.predictions) && pre.predictions[i]) || '');
+    const blue = (data.teams && data.teams.blue) || {};
+    const orange = (data.teams && data.teams.orange) || {};
+    const casters = (data.casters && Array.isArray(data.casters.list)) ? data.casters.list : [];
+    const anySlotted = casters.some((c) => c && Number(c.slot) >= 1);
+    const casterAt = (n) => {
+      const hit = casters.find((c) => c && Number(c.slot) === n);
+      if (hit) return hit;
+      return anySlotted ? null : (casters[n - 1] || null);
+    };
+    const predSig = JSON.stringify(predictions) + '::' + (blue.name || '') + '::' + (orange.name || '') + '::'
+      + casters.map((c) => (c && c.slot) + ':' + (c && c.name)).join(',');
+    if (predWrap.dataset.sig !== predSig) {
+      predWrap.dataset.sig = predSig;
+      const blueName = blue.name || 'Blue', orangeName = orange.name || 'Orange';
+      predWrap.innerHTML = [1, 2].map((slot) => {
+        const c = casterAt(slot);
+        const nameHtml = c ? esc(c.name || ('Caster ' + slot)) : `<span class="ps-pred-empty">Slot ${slot} — unassigned</span>`;
+        const pick = predictions[slot - 1];
+        return `<div class="ps-pred-row" data-slot="${slot}">`
+          + `<span class="ps-pred-name">${nameHtml}</span>`
+          + `<div class="ps-pred-picks">`
+          + `<button type="button" class="ps-pred-pick${pick === 'blue' ? ' is-picked-a' : ''}" data-side="blue" title="Pick ${esc(blueName)}">${esc(blueName)}</button>`
+          + `<button type="button" class="ps-pred-pick${pick === 'orange' ? ' is-picked-b' : ''}" data-side="orange" title="Pick ${esc(orangeName)}">${esc(orangeName)}</button>`
+          + `</div></div>`;
+      }).join('');
+    }
+  }
+
   const list = el('preshow-topics-list');
   if (!list) return;
   const topics = Array.isArray(pre.topics) ? pre.topics : [];
@@ -14867,6 +14928,17 @@ el('preshow-headline')?.addEventListener('input', function () {
 el('preshow-home-scene')?.addEventListener('change', function () {
   send('set_preshow', { homeScene: this.value });
 });
+// Caster Predictions — click a team to pick it; click the already-picked team again to clear.
+el('preshow-predictions')?.addEventListener('click', (e) => {
+  const btn = e.target.closest('.ps-pred-pick'); if (!btn) return;
+  const row = btn.closest('.ps-pred-row');
+  const slot = row ? +row.dataset.slot : 0; if (!slot) return;
+  const side = btn.dataset.side;
+  const cur = [0, 1].map((i) => (Array.isArray(currentState.preshow?.predictions) && currentState.preshow.predictions[i]) || '');
+  cur[slot - 1] = (cur[slot - 1] === side) ? '' : side;
+  send('set_preshow', { predictions: cur });
+});
+el('btn-preshow-clear-picks')?.addEventListener('click', () => send('set_preshow', { predictions: ['', ''] }));
 // Topic presets — save/load/delete named rundowns.
 el('preshow-preset-save')?.addEventListener('click', async () => {
   const cur = el('preshow-preset-sel');
@@ -20785,16 +20857,24 @@ function renderCreditsCountryStat() {
   const box = el('credits-country-stat'); if (!box) return;
   const et = (currentState.startgg && currentState.startgg.eventTeams) || [];
   const profs = currentState.playerProfiles || {};
-  let total = 0, withCC = 0;
+  let total = 0, flag = 0, nameOnly = 0;
+  const unmapped = new Set();
   et.forEach((t) => (t.players || []).forEach((p) => {
     if (!p || !p.name) return;
     total++;
-    const cc = p.countryCode || (profs[(p.name || '').trim().toLowerCase()] || {}).countryCode;
-    if (cc) withCC++;
+    const prof = profs[(p.name || '').trim().toLowerCase()] || {};
+    const cc = p.countryCode || prof.countryCode;
+    const cname = p.country || prof.country;
+    if (cc) flag++;
+    else if (cname) { nameOnly++; unmapped.add(cname); }
   }));
   if (!total) { box.textContent = 'Countries: no event roster loaded — sync the event (Events/Seeding).'; box.style.color = 'var(--muted)'; return; }
-  box.textContent = `Countries: ${withCC} of ${total} event players have one on start.gg`;
-  box.style.color = withCC === 0 ? '#f56565' : withCC < total ? '#fbbf24' : '#9ae6b4';
+  let txt = `Countries: ${flag}/${total} players get a flag`;
+  if (nameOnly) txt += ` · ${nameOnly} have a country start.gg couldn't map (see console)`;
+  else if (flag < total) txt += ` · ${total - flag} have no country set on start.gg`;
+  box.textContent = txt;
+  box.style.color = flag === 0 ? '#f56565' : flag < total ? '#fbbf24' : '#9ae6b4';
+  if (unmapped.size) console.log('[Credits] start.gg country names with no flag code (send these to me):', [...unmapped].sort().join(' | '));
 }
 
 // ── Credit Sponsors (dedicated big call-outs in the stream-credits roll) ─────
@@ -23606,6 +23686,7 @@ async function connect() {
       _r('renderQuickPanel',     () => renderQuickPanel(msg.data));
       _r('renderIntegrationStore', () => renderIntegrationStore(msg.data));
       _r('creditsTalent',        () => { const p = document.querySelector('[data-gfxpanel="credits"]'); if (p && p.offsetParent !== null && typeof window._gfxFillCreditsTalent === 'function') window._gfxFillCreditsTalent(msg.data); });
+      _r('schSync',              () => { if (typeof window._schSyncFromState === 'function') window._schSyncFromState(msg.data); });
       _r('bbSyncTriggerPop',     () => bbSyncTriggerPop());
       _r('renderQrailStartgg',  () => renderQrailStartgg(msg.data));
       _r('renderGoLive',       () => renderGoLive(msg.data));
