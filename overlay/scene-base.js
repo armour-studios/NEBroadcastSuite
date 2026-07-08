@@ -121,7 +121,7 @@
           ]
         };
       })(),
-      upcoming: { visible: true, title: 'UPCOMING MATCHES', matches: [] },
+      upcoming: { visible: true, title: 'SCHEDULE', matches: [] },
       bracket: {
         // A tournament IN FLIGHT: quarterfinals done, one semifinal live (FROST vs EMBER —
         // the demo's on-air pair, so the LIVE badge shows), later rounds still TBD.
