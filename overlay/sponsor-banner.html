@@ -158,11 +158,14 @@ function resolveBanner(state) {
   if (pinBrand) { const b = combineKitBanner(findKit(state, pinBrand)); return { slides: b.slides, interval: b.interval, visible: b.slides.length > 0 }; }
   if (srcMode === 'brand') { const b = combineKitBanner(findKit(state, state.activeBrandKitId)); return { slides: b.slides, interval: b.interval, visible: b.slides.length > 0 }; }
   if (srcMode === 'main') { const m = mainBannerData(state); return { slides: m.slides, interval: m.interval, visible: m.visible && m.slides.length > 0 }; }
-  // auto: the active brand's banner if it has content, else the Main Banner — gated by Visibility.
+  // auto: the active brand's banner if it has content, else the Main Banner. The BRAND's
+  // content shows on its own merits — the Main Banner "Visibility" switch only gates the
+  // Main Banner fallback. (It used to gate the brand too, so activating a kit with banner
+  // sponsors showed nothing until a producer flipped an unrelated-looking switch.)
   const main = mainBannerData(state);
   const kit = combineKitBanner(findKit(state, state.activeBrandKitId));
-  const slides = kit.slides.length ? kit.slides : main.slides;
-  return { slides: slides, interval: kit.slides.length ? kit.interval : main.interval, visible: main.visible && slides.length > 0 };
+  if (kit.slides.length) return { slides: kit.slides, interval: kit.interval, visible: true };
+  return { slides: main.slides, interval: main.interval, visible: main.visible && main.slides.length > 0 };
 }
 
 // Brand colours for the stroke / accent / glow.
