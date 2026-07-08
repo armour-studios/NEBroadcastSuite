@@ -83,7 +83,7 @@
 
     // ── Finale: the single best first setup step ──
     { target: '#btn-obs-download-collection', tab: 'integrations', placement: 'auto',
-      run: function () { if (window.showIntegration) window.showIntegration('obs'); },
+      run: function () { if (window._intShowTab) window._intShowTab('switcher'); },
       title: 'Set up OBS in one click',
       body: 'Best first move: here in Integrations ▸ OBS, click “Save Scene Collection” to install a ready-made OBS scene collection — 32 scenes plus caster/player cam framing, all pre-wired to these overlays. Import it in OBS and you’re broadcast-ready. Replay this tour anytime from Settings ▸ Getting Started.' }
   ];
