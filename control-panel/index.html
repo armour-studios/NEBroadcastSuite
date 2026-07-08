@@ -6056,11 +6056,102 @@
   <div class="page-head"><h1>Integrations</h1><p>Connect and configure the platforms your broadcast relies on.</p></div>
 
   <div class="ev-subnav" id="int-subnav">
-    <button type="button" class="ev-subnav-btn active" data-inttab="switcher">Video Switcher</button>
+    <button type="button" class="ev-subnav-btn active" data-inttab="store">Browse</button>
+    <button type="button" class="ev-subnav-btn" data-inttab="switcher">Video Switcher</button>
     <button type="button" class="ev-subnav-btn" data-inttab="cameras">Cameras</button>
     <button type="button" class="ev-subnav-btn" data-inttab="games">Games &amp; GSI</button>
     <button type="button" class="ev-subnav-btn" data-inttab="tournaments">Tournament Platforms</button>
     <button type="button" class="ev-subnav-btn" data-inttab="twitch">Twitch</button>
+  </div>
+
+  <!-- BROWSE: app-store style landing — every integration as a card with its live status -->
+  <div id="integration-store" class="integration-panel" style="display:none;">
+    <div class="int-status-strip" id="int-status-strip">
+      <span class="int-strip-count" id="int-strip-count">—</span>
+      <span class="int-strip-lbl">connected</span>
+    </div>
+    <div class="int-store-grid" id="int-store-grid">
+      <div class="int-card" data-card="obs" data-goto="switcher" data-scroll="integration-obs">
+        <div class="int-card-logo mono-obs">OBS</div>
+        <div class="int-card-body">
+          <div class="int-card-name">OBS Studio</div>
+          <div class="int-card-tag">Scene switching, replay buffer, recording and stream control over WebSocket.</div>
+        </div>
+        <span class="int-card-status" data-st="off">Not set up</span>
+      </div>
+      <div class="int-card" data-card="vmix" data-goto="switcher" data-scroll="integration-obs">
+        <div class="int-card-logo mono-vmix">vMix</div>
+        <div class="int-card-body">
+          <div class="int-card-name">vMix</div>
+          <div class="int-card-tag">Full OBS alternative — cuts, overlays, streaming and instant replay via the HTTP API.</div>
+        </div>
+        <span class="int-card-status" data-st="off">Not set up</span>
+      </div>
+      <div class="int-card" data-card="twitch" data-goto="twitch">
+        <div class="int-card-logo has-img"><img src="../assets/platforms/twitch-icon.svg" alt=""></div>
+        <div class="int-card-body">
+          <div class="int-card-name">Twitch</div>
+          <div class="int-card-tag">Predictions, chat, clips, viewer stats and ad control. Connects with one click — no key needed.</div>
+        </div>
+        <span class="int-card-status" data-st="off">Not connected</span>
+      </div>
+      <div class="int-card" data-card="startgg" data-goto="tournaments" data-scroll="integration-startgg">
+        <div class="int-card-logo has-img"><img src="../assets/platforms/startgg.png" alt=""></div>
+        <div class="int-card-body">
+          <div class="int-card-name">start.gg</div>
+          <div class="int-card-tag">Brackets, stream queue, standings and seeding from your tournament.</div>
+        </div>
+        <span class="int-card-status" data-st="off">No token</span>
+      </div>
+      <div class="int-card" data-card="challonge" data-goto="tournaments" data-scroll="challonge-conn-badge">
+        <div class="int-card-logo has-img"><img src="../assets/platforms/challonge.png" alt=""></div>
+        <div class="int-card-body">
+          <div class="int-card-name">Challonge</div>
+          <div class="int-card-tag">Bracket import and start.gg result mirroring for Challonge tournaments.</div>
+        </div>
+        <span class="int-card-status" data-st="off">No key</span>
+      </div>
+      <div class="int-card" data-card="nxgen" data-goto="tournaments" data-scroll="input-nxgen-key">
+        <div class="int-card-logo mono-nxgen">NX</div>
+        <div class="int-card-body">
+          <div class="int-card-name">NXGEN</div>
+          <div class="int-card-tag">nxgen.pro partner events — queue, teams and live match data.</div>
+        </div>
+        <span class="int-card-status" data-st="off">No key</span>
+      </div>
+      <div class="int-card" data-card="vdo" data-goto="cameras">
+        <div class="int-card-logo mono-vdo">VDO</div>
+        <div class="int-card-body">
+          <div class="int-card-name">VDO.Ninja</div>
+          <div class="int-card-tag">Browser-based caster and player cameras — private rooms, no key required.</div>
+        </div>
+        <span class="int-card-status" data-st="ready">Built-in</span>
+      </div>
+      <div class="int-card" data-card="rl" data-goto="games">
+        <div class="int-card-logo mono-rl">RL</div>
+        <div class="int-card-body">
+          <div class="int-card-name">Rocket League</div>
+          <div class="int-card-tag">Live scoreboard, boost and events from the official Stats API on this PC.</div>
+        </div>
+        <span class="int-card-status" data-st="off">Waiting for game</span>
+      </div>
+      <div class="int-card" data-card="cs2" data-goto="games">
+        <div class="int-card-logo mono-cs2">CS2</div>
+        <div class="int-card-body">
+          <div class="int-card-name">Counter-Strike 2</div>
+          <div class="int-card-tag">Game State Integration — scoreboard, players and radar from the observer client.</div>
+        </div>
+        <span class="int-card-status" data-st="off">Waiting for game</span>
+      </div>
+      <div class="int-card" data-card="lol" data-goto="games">
+        <div class="int-card-logo mono-lol">LoL</div>
+        <div class="int-card-body">
+          <div class="int-card-name">League of Legends</div>
+          <div class="int-card-tag">Champ-select draft board and in-game HUD from the local League client.</div>
+        </div>
+        <span class="int-card-status" data-st="ready">Local client</span>
+      </div>
+    </div>
   </div>
 
   <!-- TWITCH INTEGRATION -->
@@ -6077,6 +6168,7 @@
 
     <section class="section">
       <h3 class="section-title">Authentication</h3>
+      <p class="field-hint" style="margin-top:4px;">No API key needed — click Connect and authorize in the browser window. Twitch sessions expire after a while; if stats stop updating or you see a 401, just reconnect here.</p>
 
       <!-- Login State -->
       <div id="twitch-login-panel" style="padding: 32px 24px; background: linear-gradient(135deg, rgba(145, 70, 255, 0.1) 0%, rgba(145, 70, 255, 0.05) 100%); border: 1px solid rgba(145, 70, 255, 0.3); border-radius: 12px; display:block; text-align: center;">
@@ -6583,6 +6675,9 @@
             <input type="password" id="input-startgg-token" class="input-text" placeholder="Paste your start.gg API token" style="flex: 1;">
             <button id="btn-startgg-change-token" class="btn btn-ghost btn-sm" style="display:none; white-space:nowrap;">Change Token</button>
           </div>
+          <details class="int-keyhelp"><summary>How do I get this?</summary><div class="int-keyhelp-body"><ol><li>Sign in at <a href="https://start.gg" target="_blank" rel="noopener">start.gg</a>, click your profile picture &rarr; <b>Developer Settings</b> — or go straight to <a href="https://start.gg/admin/profile/developer" target="_blank" rel="noopener">start.gg/admin/profile/developer</a>.</li>
+   <li>Click <b>Create new token</b>, name it (e.g. "Broadcast Suite") and copy the 32-character token.</li>
+   <li>Paste it here and press Save — the token is stored locally on this PC only.</li></ol></div></details>
         </div>
 
         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
@@ -6653,6 +6748,9 @@
             <button id="btn-challonge-change-key" class="btn btn-ghost btn-sm" style="display:none; white-space:nowrap;">Change Key</button>
           </div>
           <p class="field-hint" style="margin:4px 0 0;">Find your API key at <strong>challonge.com/settings/developer</strong>.</p>
+          <details class="int-keyhelp"><summary>How do I get this?</summary><div class="int-keyhelp-body"><ol><li>Sign in at <a href="https://challonge.com" target="_blank" rel="noopener">challonge.com</a>.</li>
+   <li>Open <a href="https://challonge.com/settings/developer" target="_blank" rel="noopener">Settings &rarr; Developer API</a>.</li>
+   <li>Copy your API key (generate one if the field is empty) and paste it here.</li></ol></div></details>
         </div>
 
         <!-- Tournament slug -->
@@ -6721,6 +6819,9 @@
             <input type="password" id="input-nxgen-key" class="input-text" placeholder="Paste your NXGEN API key (nxk_…)" style="flex: 1;">
             <button id="btn-nxgen-change-key" class="btn btn-ghost btn-sm" style="display:none; white-space:nowrap;">Change Key</button>
           </div>
+          <details class="int-keyhelp"><summary>How do I get this?</summary><div class="int-keyhelp-body"><ol><li>Sign in to your <a href="https://nxgen.pro" target="_blank" rel="noopener">nxgen.pro dashboard</a>.</li>
+     <li>Open <b>Settings &rarr; API</b> and generate a partner key (starts with <code>nxk_</code>).</li>
+     <li>No API section on your account? Ask NXGEN support to enable partner API access.</li></ol></div></details>
           <p class="field-hint" style="margin:4px 0 0;">Keys are issued by the nxgen.pro team.</p>
         </div>
 
@@ -7133,6 +7234,10 @@ PacketSendRate=10</pre>
               <span id="obs-password-indicator" style="display: none; padding: 8px 10px; background: rgba(74,222,128,0.2); border: 1px solid #4ade80; border-radius: 6px; font-size: 12px; color: #86efac; white-space: nowrap;"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle"><polyline points="20 6 9 17 4 12"/></svg> Saved</span>
               <button type="button" id="btn-obs-clear-password" title="Clear saved password" style="display:none; padding: 6px 10px; background: rgba(245,101,101,0.15); border: 1px solid #f56565; border-radius: 6px; color: #f56565; font-size: 12px; cursor: pointer; white-space: nowrap;">✕ Clear</button>
             </div>
+          <details class="int-keyhelp"><summary>How do I get this?</summary><div class="int-keyhelp-body"><ol><li>In OBS open <b>Tools &rarr; WebSocket Server Settings</b>.</li>
+   <li>Tick <b>Enable WebSocket server</b> (default port 4455).</li>
+   <li>Click <b>Show Connect Info</b> and copy the <b>Server Password</b> into this field.</li>
+   <li>OBS on another PC? Put its IP in the Host field and allow port 4455 through that PC's firewall.</li></ol></div></details>
           </div>
         </div>
 
@@ -7280,6 +7385,9 @@ PacketSendRate=10</pre>
           </div>
         </div>
 
+        <details class="int-keyhelp"><summary>How do I get this?</summary><div class="int-keyhelp-body"><ol><li>In vMix open <b>Settings &rarr; Web Controller</b>.</li>
+   <li>Tick <b>Enable</b> — the port shown there (default 8088) goes in the Port field. No password or key is used.</li>
+   <li>vMix on another PC? Use that PC's IP as Host and allow the port through its firewall.</li></ol></div></details>
         <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:6px;">
           <button class="btn btn-secondary" id="btn-vmix-save">Save Settings</button>
           <button class="btn btn-primary" id="btn-vmix-test">Test Connection</button>
@@ -8149,9 +8257,24 @@ PacketSendRate=10</pre>
           <div class="field-hint" id="qr-replay-status" style="margin:0;"></div>
         </div>
         <div class="qrail-group">
-          <div class="qrail-label">Latest Clips</div>
-          <div id="qr-clip-list" class="qr-clip-list"></div>
-          <div class="field-hint" style="margin:0;">Scene, transition and return-scene settings come from the REPLAYS page. Edit opens the full Video Editor in a popup for quick trims before pushing live.</div>
+          <div class="qr-tabs">
+            <button type="button" class="qr-tab active" data-qrtab="clips">Clips</button>
+            <button type="button" class="qr-tab" data-qrtab="twitch">Twitch</button>
+            <button type="button" class="qr-tab" data-qrtab="playlists">Playlists</button>
+          </div>
+          <div class="qr-sub" data-qrsub="clips">
+            <div id="qr-clip-list" class="qr-clip-list"></div>
+            <div class="field-hint" style="margin:0;">Scene, transition and return-scene settings come from the REPLAYS page. Edit opens the full Video Editor in a popup for quick trims before pushing live.</div>
+          </div>
+          <div class="qr-sub" data-qrsub="twitch" style="display:none;">
+            <div class="qt-act"><button type="button" class="btn btn-secondary btn-sm" id="qr-tw-load">Load Twitch clips</button></div>
+            <div id="qr-tw-list" class="qr-clip-list"></div>
+            <div class="field-hint" style="margin:0;">Import downloads the clip into Clips — trim it in the editor or push it straight to air.</div>
+          </div>
+          <div class="qr-sub" data-qrsub="playlists" style="display:none;">
+            <div id="qr-pl-list" class="qr-clip-list"></div>
+            <div class="field-hint" style="margin:0;">Build and encode playlists on the REPLAYS page; Ready playlists play on the program bus.</div>
+          </div>
         </div>
       </div>
 

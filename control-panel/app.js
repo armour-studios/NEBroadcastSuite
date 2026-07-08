@@ -2092,23 +2092,11 @@ function _returnGraphicsToProd() {
         }).join('');
       }
     } else if (key === 'schedule') {
-      const body = el('gfx-front-schedule-body'); if (!body) return;
       const u = data.upcoming || {};
       const tEl = el('gfx-front-sch-title'); if (tEl && document.activeElement !== tEl) tEl.value = u.title || '';
-      const matches = u.matches || [];
-      const cnt = el('gfx-front-sch-count'); if (cnt) cnt.textContent = matches.length ? (matches.length + (matches.length === 1 ? ' match' : ' matches')) : '';
-      // Live preview of the queued matches (streamed match badged LIVE).
-      if (!matches.length) {
-        body.innerHTML = '<p class="gfx-fp-empty">No matches queued — pull from a tournament / league above.</p>';
-      } else {
-        body.innerHTML = matches.slice(0, 24).map((m) => {
-          const rd = m.round ? `<span class="rd" title="${tlEsc(m.round)}">${tlEsc(m.round)}</span>` : '';
-          const a = tlEsc(m.teamA || 'TBD'), b = tlEsc(m.teamB || 'TBD');
-          const ti = (m.time || m.date) ? `<span class="ti">${tlEsc(String(m.time || m.date))}</span>` : '';
-          const live = m.stream ? '<span class="live">LIVE</span>' : '';
-          return `<div class="gfx-fp-prow">${rd}<span class="tm" title="${a} vs ${b}">${a}<span class="vs">vs</span>${b}</span>${ti}${live}</div>`;
-        }).join('');
-      }
+      // The editable preview (remove/reorder inline) is owned by schFrontRender(), which renders from
+      // _schMatches so edits and the pop-out list stay in lock-step.
+      if (typeof schFrontRender === 'function') schFrontRender();
     } else if (key === 'draft') {
       const body = el('gfx-front-draft-body'); if (!body) return;
       const d = data.draft || {};
@@ -2862,6 +2850,41 @@ function _returnGraphicsToProd() {
       del.addEventListener('click', () => { _schMatches.splice(i, 1); schRenderList(); schAutoSave(); });
       row.appendChild(del);
       list.appendChild(row);
+    });
+    schFrontRender();   // keep the front card's editable preview in lock-step with the pop-out list
+  }
+
+  // Editable match preview ON the Schedule front card (remove / reorder inline — no need to open
+  // "More settings"). Renders from _schMatches (the single source of truth) and drives the same save.
+  function schFrontRender() {
+    const body = el('gfx-front-schedule-body'); if (!body) return;
+    if (!_schInitialized) {   // hydrate once from server state so indices line up before any edit
+      const up = (currentState && currentState.upcoming) || {};
+      if (Array.isArray(up.matches) && up.matches.length) { _schMatches = up.matches.slice(); _schInitialized = true; }
+    }
+    const esc = (s) => (s == null ? '' : String(s)).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const n = _schMatches.length;
+    const cnt = el('gfx-front-sch-count'); if (cnt) cnt.textContent = n ? (n + ' match' + (n > 1 ? 'es' : '')) : '';
+    if (!n) { body.innerHTML = '<p class="gfx-fp-empty">No matches queued — pull from a tournament / league above.</p>'; return; }
+    body.innerHTML = '';
+    _schMatches.forEach((m, i) => {
+      const rd = m.round ? `<span class="rd" title="${esc(m.round)}">${esc(m.round)}</span>` : '';
+      const a = esc(m.teamA || 'TBD'), b = esc(m.teamB || 'TBD');
+      const ti = (m.time || m.date) ? `<span class="ti">${esc(m.time || m.date)}</span>` : '';
+      const live = m.stream ? '<span class="live">LIVE</span>' : '';
+      const rowEl = document.createElement('div'); rowEl.className = 'gfx-fp-prow';
+      rowEl.innerHTML = `${rd}<span class="tm" title="${a} vs ${b}">${a}<span class="vs">vs</span>${b}</span>${ti}${live}`
+        + `<span class="gfx-fp-rowbtns"><button type="button" class="gfx-fp-mv" data-mv="-1" title="Move up">&#8593;</button>`
+        + `<button type="button" class="gfx-fp-mv" data-mv="1" title="Move down">&#8595;</button>`
+        + `<button type="button" class="gfx-fp-rm" title="Remove">&times;</button></span>`;
+      rowEl.querySelector('.gfx-fp-rm').addEventListener('click', () => { _schMatches.splice(i, 1); schRenderList(); schAutoSave(); });
+      rowEl.querySelectorAll('.gfx-fp-mv').forEach((btn) => btn.addEventListener('click', () => {
+        const j = i + (btn.dataset.mv === '-1' ? -1 : 1);
+        if (j < 0 || j >= _schMatches.length) return;
+        const t = _schMatches[i]; _schMatches[i] = _schMatches[j]; _schMatches[j] = t;
+        schRenderList(); schAutoSave();
+      }));
+      body.appendChild(rowEl);
     });
   }
 
@@ -17021,12 +17044,13 @@ el('btn-vmix-test')?.addEventListener('click', () => {
 document.querySelectorAll('#switcher-target-seg .seg-btn').forEach((b) => b.addEventListener('click', () => send('set_switcher_target', { target: b.dataset.target })));
 
 // ── Integrations page — pill subnav (Video Switcher / Cameras / Games & GSI / Tournament Platforms / Twitch) ──
-const INT_TABS = ['switcher', 'cameras', 'games', 'tournaments', 'twitch'];
-let _intTab = 'switcher';
+const INT_TABS = ['store', 'switcher', 'cameras', 'games', 'tournaments', 'twitch'];
+let _intTab = 'store';
 function _intShowTab(which) {
-  _intTab = INT_TABS.includes(which) ? which : 'switcher';
+  _intTab = INT_TABS.includes(which) ? which : 'store';
   document.querySelectorAll('#int-subnav .ev-subnav-btn').forEach((b) => b.classList.toggle('active', b.dataset.inttab === _intTab));
   const panels = {
+    store: [el('integration-store')],
     switcher: [el('integration-obs')],
     cameras: [el('integration-vdo')],
     games: [el('integration-games')],
@@ -17043,8 +17067,44 @@ document.querySelectorAll('#int-subnav .ev-subnav-btn').forEach((b) => b.addEven
 // later in the script; calling synchronously here risks the same TDZ crash documented for that case.
 setTimeout(() => {
   let saved; try { saved = localStorage.getItem('integrations_active_tab'); } catch (_) {}
-  _intShowTab(saved || 'switcher');
+  _intShowTab(saved || 'store');
 }, 0);
+
+// ── Browse grid: cards navigate to their section; status chips follow live state ──
+document.querySelectorAll('#int-store-grid .int-card').forEach((card) => {
+  card.addEventListener('click', () => {
+    _intShowTab(card.dataset.goto);
+    const target = card.dataset.scroll && el(card.dataset.scroll);
+    if (target) setTimeout(() => target.scrollIntoView({ behavior: 'smooth', block: 'center' }), 60);
+  });
+});
+function renderIntegrationStore(data) {
+  const grid = el('int-store-grid');
+  if (!grid) return;
+  const set = (key, st, text) => {
+    const chip = grid.querySelector('.int-card[data-card="' + key + '"] .int-card-status');
+    if (chip) { chip.dataset.st = st; chip.textContent = text; }
+    return st === 'on';
+  };
+  const obs = data.obs || {}, vmix = data.vmix || {}, tw = data.twitch || {};
+  const sgg = data.startgg || {}, ch = data.challonge || {}, nx = data.nxgen || {};
+  let on = 0;
+  on += set('obs',   !obs.enabled ? 'off' : obs.connected ? 'on' : 'warn',
+                     !obs.enabled ? 'Off' : obs.connected ? 'Connected' : 'Not reachable') ? 1 : 0;
+  on += set('vmix',  !vmix.enabled ? 'off' : vmix.connected ? 'on' : 'warn',
+                     !vmix.enabled ? 'Off' : vmix.connected ? 'Connected' : 'Not reachable') ? 1 : 0;
+  on += set('twitch', tw.connected ? 'on' : 'off', tw.connected ? 'Connected' : 'Not connected') ? 1 : 0;
+  on += set('startgg', sgg.hasToken ? 'on' : 'off', sgg.hasToken ? 'Token saved' : 'No token') ? 1 : 0;
+  on += set('challonge', ch.hasKey ? (ch.connected ? 'on' : 'warn') : 'off',
+                         ch.hasKey ? (ch.connected ? 'Connected' : 'Key saved') : 'No key') ? 1 : 0;
+  on += set('nxgen', nx.hasKey ? (nx.connected ? 'on' : 'warn') : 'off',
+                     nx.hasKey ? (nx.connected ? 'Connected' : 'Key saved') : 'No key') ? 1 : 0;
+  on += set('rl',  data.rlConnected ? 'on' : 'off', data.rlConnected ? 'Connected' : 'Waiting for game') ? 1 : 0;
+  on += set('cs2', (data.csgo && data.csgo.connected) ? 'on' : 'off',
+                   (data.csgo && data.csgo.connected) ? 'Connected' : 'Waiting for game') ? 1 : 0;
+  const count = el('int-strip-count');
+  if (count) count.textContent = on + ' of 8';
+}
 
 function applyVmixState(data) {
   const v = data.vmix || {};
@@ -21741,6 +21801,83 @@ el('qr-save-replay')?.addEventListener('click', () => {
   const st = el('qr-replay-status'); if (st) { st.textContent = 'Replay buffer save requested — the clip appears below once imported.'; setTimeout(() => { if (st) st.textContent = ''; }, 4000); }
 });
 el('qr-replay-stop')?.addEventListener('click', () => endReplayProgram());
+
+// ── Qrail REPLAY sub-tabs: Clips | Twitch | Playlists ─────────────────────────
+// Twitch: lists the channel's clips (existing /api/twitch/clips) and imports one into the
+// local clip library via the Social page's download route — it then shows under Clips with
+// its own To Air. Playlists: the montage/playlist library with one-click program playback.
+document.querySelectorAll('.qr-tab[data-qrtab]').forEach((b) => {
+  b.addEventListener('click', () => {
+    document.querySelectorAll('.qr-tab[data-qrtab]').forEach((x) => x.classList.toggle('active', x === b));
+    document.querySelectorAll('.qr-sub[data-qrsub]').forEach((p) => { p.style.display = p.dataset.qrsub === b.dataset.qrtab ? '' : 'none'; });
+    if (b.dataset.qrtab === 'twitch' && !el('qr-tw-list')?.children.length) qrTwLoad();
+    if (b.dataset.qrtab === 'playlists') renderQrailPlaylists(currentState);
+  });
+});
+async function qrTwLoad() {
+  const list = el('qr-tw-list'); if (!list) return;
+  list.innerHTML = '<div class="field-hint" style="margin:0;">Loading Twitch clips…</div>';
+  try {
+    const r = await fetch('http://localhost:3000/api/twitch/clips?first=15');
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Twitch not connected');
+    const clips = data.clips || [];
+    list.innerHTML = '';
+    if (!clips.length) { list.innerHTML = '<div class="field-hint" style="margin:0;">No clips on the channel yet.</div>'; return; }
+    clips.forEach((c) => {
+      const row = document.createElement('div');
+      row.className = 'qr-clip-row';
+      const dur = c.duration ? Math.round(c.duration) + 's' : '';
+      row.innerHTML = `<span class="qr-clip-name" title="${esc(c.title || 'Clip')}">${esc(c.title || 'Clip')}</span>`
+        + `<span class="qr-clip-dur">${dur}</span>`
+        + `<button class="btn btn-secondary btn-sm qr-tw-import" title="Download this Twitch clip into the local clip library">Import</button>`;
+      const btn = row.querySelector('.qr-tw-import');
+      btn.addEventListener('click', async () => {
+        btn.disabled = true; btn.textContent = 'Downloading…';
+        try {
+          const dr = await fetch('http://localhost:3000/api/social/clip/download', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ clipUrl: c.url, thumbnailUrl: c.thumbnail_url, title: c.title })
+          });
+          const dd = await dr.json();
+          if (!dr.ok) throw new Error(dd.error || 'Download failed');
+          btn.textContent = 'Imported';
+          showToast('Twitch clip imported — it is in Clips now', '#22c55e');
+        } catch (e) {
+          btn.disabled = false; btn.textContent = 'Import';
+          showToast('Import failed: ' + e.message, '#f56565');
+        }
+      });
+      list.appendChild(row);
+    });
+  } catch (e) {
+    list.innerHTML = '<div class="field-hint" style="margin:0;">' + esc(e.message) + ' — connect Twitch in Integrations.</div>';
+  }
+}
+let _qrPlSig = '';
+function renderQrailPlaylists(data) {
+  const list = el('qr-pl-list'); if (!list) return;
+  const montages = (((data || currentState || {}).clips) || {}).montages || [];
+  const sig = JSON.stringify(montages.map((m) => m.id + ':' + (m.name || '') + ':' + (m.outputPath ? 1 : 0) + ':' + ((m.clipIds || m.items || []).length)));
+  if (sig === _qrPlSig) return;
+  _qrPlSig = sig;
+  list.innerHTML = '';
+  if (!montages.length) { list.innerHTML = '<div class="field-hint" style="margin:0;">No playlists yet — build one on the REPLAYS page.</div>'; return; }
+  montages.forEach((m) => {
+    const n = (m.clipIds || m.items || []).length;
+    const ready = !!m.outputPath;
+    const row = document.createElement('div');
+    row.className = 'qr-clip-row';
+    row.innerHTML = `<span class="qr-clip-name" title="${esc(m.name || 'Playlist')}">${esc(m.name || 'Playlist')}</span>`
+      + `<span class="qr-clip-dur">${n} clip${n === 1 ? '' : 's'}</span>`
+      + `<span class="qr-pl-badge${ready ? ' is-ready' : ''}">${ready ? 'Ready' : 'Draft'}</span>`
+      + `<button class="btn btn-primary btn-sm qr-pl-air" title="Play this playlist on the program bus">To Air</button>`;
+    row.querySelector('.qr-pl-air').addEventListener('click', () => {
+      if (typeof playMontageById === 'function') { playMontageById(m.id); showToast('Playlist to air: ' + (m.name || 'Playlist'), '#22c55e'); }
+    });
+    list.appendChild(row);
+  });
+}
 // Clear the program output. The visible "Clear" button was removed from the Video
 // Editor, but the action stays available via the hotkey/Stream-Deck command.
 function rpClearProgram() {
@@ -22894,6 +23031,7 @@ function connect() {
       _r('renderDashMiniPanels', () => renderDashMiniPanels(msg.data));
       _r('renderQrailScenes',    () => renderQrailScenes(msg.data));
       _r('renderQuickPanel',     () => renderQuickPanel(msg.data));
+      _r('renderIntegrationStore', () => renderIntegrationStore(msg.data));
       _r('bbSyncTriggerPop',     () => bbSyncTriggerPop());
       _r('renderQrailStartgg',  () => renderQrailStartgg(msg.data));
       _r('renderGoLive',       () => renderGoLive(msg.data));
@@ -22918,6 +23056,7 @@ function connect() {
       currentState.clips = msg.data;
       applyClipsState(msg.data);
       if (typeof renderQrailReplay === 'function') _r('renderQrailReplay', () => renderQrailReplay(currentState));
+      if (typeof renderQrailPlaylists === 'function') _r('renderQrailPlaylists', () => renderQrailPlaylists(currentState));
     } else if (msg.type === 'replay_progress') {
       // The on-air player reports its position → drive the time-remaining readout, but ONLY while
       // the control panel has actually sent something to air. Otherwise a player source still loaded

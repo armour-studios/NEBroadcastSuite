@@ -6904,6 +6904,30 @@ body.sides-swapped .qrail-head { flex-direction: row-reverse; }
   background:var(--surface2); border:1px solid var(--border); border-radius:9px; }
 .gfx-fp-pull .input-select { min-width:0; flex:1; }
 .gfx-fp-pull-sep { width:1px; align-self:stretch; background:var(--border); margin:0 2px; }
+
+/* ── "More settings" pop-out polish: roomier rows, consistent rhythm, no hard truncation,
+      tokenised destructive colour — brings the deep editors up to the front-card quality. ── */
+.gfx-std-rows { gap:5px; }
+.gfx-std-row, .gfx-sch-list-row, .gfx-sch-next-row {
+  padding:8px 11px; font-size:12px; border-radius:9px; transition:border-color .12s ease, background .12s ease; }
+.gfx-std-row:hover, .gfx-sch-list-row:hover, .gfx-sch-next-row:hover { border-color:var(--cp-accent); }
+.gfx-sch-list-teams { min-width:0; overflow:hidden; }
+.gfx-sch-list-team { max-width:none; }            /* the row (flex:1) handles width; ellipsis on teams */
+.gfx-std-edit-row { gap:7px; margin-bottom:6px; align-items:center; }
+.gfx-std-edit-row .input-text { font-size:12px; }
+.gfx-std-rank-lbl { font-weight:900; color:var(--muted); min-width:22px; text-align:center; font-variant-numeric:tabular-nums; }
+#gfx-sch-clear-all { color:var(--red,#f56565) !important; }   /* was an inline hard hex */
+.gfx-sch-live { padding:9px 11px; }
+
+/* Inline row controls on the front-card preview (reorder / remove) — reveal on hover, and collapse
+   their width when hidden so team names get the full row until you actually hover. */
+.gfx-fp-rowbtns { display:flex; gap:1px; flex-shrink:0; opacity:0; max-width:0; overflow:hidden;
+  transition:opacity .12s ease, max-width .14s ease; }
+.gfx-fp-prow:hover .gfx-fp-rowbtns { opacity:1; max-width:92px; margin-left:2px; }
+.gfx-fp-mv, .gfx-fp-rm { background:none; border:none; color:var(--muted); cursor:pointer; font-size:13px; line-height:1;
+  padding:3px 6px; border-radius:6px; }
+.gfx-fp-mv:hover { color:var(--text); background:var(--surface); }
+.gfx-fp-rm:hover { color:var(--red,#f56565); background:var(--surface); }
 .gfx-board { display:grid; grid-template-columns:repeat(auto-fill,minmax(168px,1fr)); gap:8px; }
 .gfx-card { display:flex; align-items:center; gap:8px; padding:8px 10px; border-radius:9px; background:var(--surface2); border:1px solid var(--border); }
 .gfx-card.on { border-color:rgba(34,197,94,.5); background:rgba(34,197,94,.08); }
@@ -7552,3 +7576,58 @@ tr.lg2-drag-over { outline: 2px solid var(--accent, #4a9eff); outline-offset: -1
 
 /* Popped-out timer window: the panel IS the window - no collapse arrow there */
 .popout-timer #ptp-close { display: none; }
+
+/* ── Qrail REPLAY sub-tabs (Clips | Twitch | Playlists) ── */
+.qr-tabs { display: flex; gap: 4px; margin-bottom: 8px; background: var(--white-a04); border-radius: 8px; padding: 3px; }
+.qr-tab { flex: 1; padding: 6px 0; border: none; background: transparent; color: var(--muted);
+  font-size: 12px; font-weight: 700; border-radius: 6px; cursor: pointer; font-family: inherit; transition: background .14s, color .14s; }
+.qr-tab:hover { color: var(--text); }
+.qr-tab.active { background: var(--white-a10); color: #fff; }
+.qr-sub { display: flex; flex-direction: column; gap: 8px; }
+.qr-pl-badge { flex: 0 0 auto; font-size: 10px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase;
+  padding: 2px 8px; border-radius: 999px; color: var(--muted); background: var(--white-a06); border: 1px solid var(--border); }
+.qr-pl-badge.is-ready { color: var(--ok); background: rgba(34,197,94,.1); border-color: rgba(34,197,94,.35); }
+
+/* ════════ Integrations — app-store landing ════════ */
+.int-status-strip { display: flex; align-items: baseline; gap: 8px; margin: 2px 0 16px; }
+.int-strip-count { font-size: 26px; font-weight: 800; color: var(--text, #e8eaf0); font-variant-numeric: tabular-nums; }
+.int-strip-lbl { font-size: 12px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
+.int-store-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px; }
+.int-card { display: flex; align-items: flex-start; gap: 14px; padding: 16px; border-radius: 14px; cursor: pointer;
+  background: linear-gradient(180deg, var(--white-a04, rgba(255,255,255,.04)), var(--white-a02, rgba(255,255,255,.02)));
+  border: 1px solid var(--border); position: relative;
+  transition: transform .12s ease, border-color .12s ease, background .12s ease; }
+.int-card:hover { transform: translateY(-2px); border-color: var(--cp-accent, #ec4899); background: var(--white-a05, rgba(255,255,255,.05)); }
+.int-card-logo { width: 52px; height: 52px; border-radius: 12px; flex-shrink: 0; display: flex; align-items: center; justify-content: center;
+  font-weight: 800; font-size: 15px; letter-spacing: .02em; color: #fff;
+  background: var(--white-a06, rgba(255,255,255,.06)); border: 1px solid var(--white-a08, rgba(255,255,255,.08)); }
+.int-card-logo.has-img img { width: 32px; height: 32px; object-fit: contain; }
+.int-card-logo.mono-obs   { background: linear-gradient(135deg, #1f2937, #111827); }
+.int-card-logo.mono-vmix  { background: linear-gradient(135deg, #14532d, #052e16); }
+.int-card-logo.mono-nxgen { background: linear-gradient(135deg, #7c2d12, #431407); }
+.int-card-logo.mono-vdo   { background: linear-gradient(135deg, #0c4a6e, #082f49); }
+.int-card-logo.mono-rl    { background: linear-gradient(135deg, #1d4ed8, #1e3a8a); }
+.int-card-logo.mono-cs2   { background: linear-gradient(135deg, #b45309, #78350f); }
+.int-card-logo.mono-lol   { background: linear-gradient(135deg, #a16207, #713f12); }
+.int-card-body { min-width: 0; flex: 1; padding-right: 4px; }
+.int-card-name { font-size: 15px; font-weight: 700; color: var(--text, #e8eaf0); margin-bottom: 4px; }
+.int-card-tag { font-size: 12px; line-height: 1.45; color: var(--muted); }
+.int-card-status { position: absolute; top: 12px; right: 12px; font-size: 10px; font-weight: 800; letter-spacing: .08em;
+  text-transform: uppercase; padding: 3px 9px; border-radius: 999px; white-space: nowrap; }
+.int-card-status[data-st="off"]   { background: var(--white-a05, rgba(255,255,255,.05)); border: 1px solid var(--white-a08, rgba(255,255,255,.1)); color: var(--muted); }
+.int-card-status[data-st="warn"]  { background: rgba(251,191,36,.12); border: 1px solid rgba(251,191,36,.35); color: #fbbf24; }
+.int-card-status[data-st="on"]    { background: rgba(74,222,128,.12); border: 1px solid rgba(74,222,128,.4); color: #4ade80; }
+.int-card-status[data-st="ready"] { background: rgba(96,165,250,.1); border: 1px solid rgba(96,165,250,.3); color: #93c5fd; }
+/* room for the status pill so long names/taglines never sit under it */
+.int-card-body { padding-top: 2px; }
+.int-card { padding-top: 18px; }
+
+/* "How do I get this?" key helpers */
+.int-keyhelp { margin-top: 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--white-a03, rgba(255,255,255,.03)); }
+.int-keyhelp summary { cursor: pointer; padding: 8px 12px; font-size: 12px; font-weight: 700; color: var(--cp-accent, #ec4899); list-style: none; }
+.int-keyhelp summary::before { content: "? "; opacity: .8; }
+.int-keyhelp[open] summary { border-bottom: 1px solid var(--border); }
+.int-keyhelp-body { padding: 10px 14px; font-size: 12px; line-height: 1.6; color: var(--muted); }
+.int-keyhelp-body ol { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; }
+.int-keyhelp-body a { color: var(--cp-accent, #ec4899); }
+.int-keyhelp-body code { background: var(--white-a06, rgba(255,255,255,.06)); padding: 1px 5px; border-radius: 4px; }
