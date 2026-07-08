@@ -218,6 +218,7 @@ let state = {
   eventName: '',   // fresh installs start with no preset title — the producer sets their own
   gameLabel: '',   // custom "GAME x | BEST OF x" override (e.g. "UPCOMING MATCH"); '' = auto
   roundLabel: '',  // optional bracket round/stage shown on the overlay (e.g. "WINNERS FINALS"); '' = hidden
+  dateFormat: 'us', // schedule date/time display: 'us' (Jul 12, 8:00 PM) | 'intl' (12 Jul, 20:00)
   speedUnit: 'mph', // shot-speed display unit: 'mph' | 'kmh'. RL's Stats API reports km/h and does NOT
                     // expose the player's UI unit setting, so this is a manual toggle. Overlay converts.
   fontFamily: 'Industry',
@@ -1759,6 +1760,7 @@ function loadState() {
       if (typeof saved.gameLabel === 'string') state.gameLabel = saved.gameLabel;
       if (typeof saved.roundLabel === 'string') state.roundLabel = saved.roundLabel;
       if (saved.speedUnit === 'mph' || saved.speedUnit === 'kmh') state.speedUnit = saved.speedUnit;
+      if (saved.dateFormat === 'us' || saved.dateFormat === 'intl') state.dateFormat = saved.dateFormat;
       if (saved.teamRecord && typeof saved.teamRecord === 'object') state.teamRecord = { ...state.teamRecord, ...saved.teamRecord };
       if (typeof saved.autoTeamsFromGame === 'boolean') state.autoTeamsFromGame = saved.autoTeamsFromGame;
       if (saved.leagueStandings && typeof saved.leagueStandings === 'object') state.leagueStandings = { ...state.leagueStandings, ...saved.leagueStandings };
@@ -9895,6 +9897,12 @@ function handleControlMessage(msg, ws) {
 
     case 'set_speed_unit':
       state.speedUnit = (msg.data && msg.data.unit === 'kmh') ? 'kmh' : 'mph';
+      saveAppState();
+      broadcastFullState();
+      break;
+
+    case 'set_date_format':
+      state.dateFormat = (msg.data && msg.data.format === 'intl') ? 'intl' : 'us';
       saveAppState();
       broadcastFullState();
       break;

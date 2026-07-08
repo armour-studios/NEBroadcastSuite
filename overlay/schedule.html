@@ -145,10 +145,25 @@ body { width: 1920px; height: 1080px; overflow: hidden; background: transparent;
     var k = (name || '').toLowerCase();
     return maps.color[k] || fallback;
   }
+  var MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  var _dateFmt = 'us';
+  function fmtDate(d) {
+    var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(d || '');
+    if (!m) return d || '';   // legacy free-text dates pass through untouched
+    var mon = MONTHS[+m[2] - 1] || m[2], day = +m[3];
+    return _dateFmt === 'intl' ? (day + ' ' + mon) : (mon + ' ' + day);
+  }
+  function fmtTime(t) {
+    var m = /^(\d{2}):(\d{2})/.exec(t || '');
+    if (!m) return t || '';
+    if (_dateFmt === 'intl') return m[1] + ':' + m[2];
+    var h = +m[1], ap = h >= 12 ? 'PM' : 'AM'; h = h % 12 || 12;
+    return h + ':' + m[2] + ' ' + ap;
+  }
   function whenText(m) {
     var parts = [];
-    if (m.date) parts.push(m.date);
-    if (m.time) parts.push(m.time);
+    if (m.date) parts.push(fmtDate(m.date));
+    if (m.time) parts.push(fmtTime(m.time));
     return (parts.join(' · ') || m.scheduledTime || '').trim();
   }
 
@@ -264,6 +279,7 @@ body { width: 1920px; height: 1080px; overflow: hidden; background: transparent;
       data = Object.assign({}, data, { upcoming: demo.upcoming, startgg: Object.assign({}, data.startgg, demo.startgg) });
     }
     var up = data.upcoming || {};
+    _dateFmt = data.dateFormat === 'intl' ? 'intl' : 'us';   // region setting (Settings page)
     stage.classList.add('show');
     document.documentElement.style.setProperty('--accent', SceneBase.brandColor(data));
     document.documentElement.style.setProperty('--accent-2', SceneBase.brandAccent(data));

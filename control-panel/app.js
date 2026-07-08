@@ -968,6 +968,15 @@ function renderDccHostsGrid() {
     const countEl = col && col.querySelector('.dcc-hosts-col-count');
     if (countEl) countEl.textContent = members.length;
 
+    // Inject a "+ Add" button into the column header (once) — opens the crew-database search popover.
+    const hd = col && col.querySelector('.dcc-hosts-col-hd');
+    if (hd && !hd.querySelector('.dcc-hosts-add')) {
+      const b = document.createElement('button');
+      b.className = 'dcc-hosts-add'; b.type = 'button'; b.dataset.addKind = kind;
+      b.textContent = '+ Add'; b.title = 'Add a crew member to this column (search the crew database)';
+      hd.appendChild(b);
+    }
+
     // Room indicator — everyone in this column is SUPPOSED to share one VDO room; show it so a
     // mismatch (e.g. after a mid-show "New room" regen, or a Custom URL override on one member)
     // is visible instead of only surfacing as "they can't hear each other" during a live test.
@@ -1067,6 +1076,9 @@ function renderDccHostsGrid() {
       }
       return;
     }
+    // "+ Add" in a column header → open the crew-database search popover for that column's kind.
+    const addBtn = e.target.closest('.dcc-hosts-add');
+    if (addBtn) { e.stopPropagation(); dccHostsAddOpen(addBtn.dataset.addKind, addBtn, doRefresh); return; }
     // Copy URL to clipboard
     const copyBtn = e.target.closest('[data-copy-url]');
     if (copyBtn) {
@@ -1147,6 +1159,71 @@ function renderDccHostsGrid() {
       setTimeout(doRefresh, 350);
     }
   });
+
+  // ── Crew-database search popover (opened by the "+ Add" button on each column) ──
+  // Lets a producer search existing crew (state.crew + casters.library) and add/move one into
+  // this column instead of re-typing a new crew member each time; "Create new" opens the full form.
+  let _dccAddPop = null;
+  function dccHostsAddClose() { if (_dccAddPop) { _dccAddPop.remove(); _dccAddPop = null; } }
+  function dccHostsAddOpen(kind, anchor, onDone) {
+    dccHostsAddClose();
+    const K = { caster: 'On-Air Talent', observer: 'Observers', host: 'Guests' };
+    const groupOf = { caster: 'casters', observer: 'observers', host: 'hosts' };
+    const pop = document.createElement('div');
+    pop.className = 'dcc-add-pop';
+    pop.innerHTML =
+      `<div class="dcc-add-pop-hd">Add to ${K[kind] || kind}</div>`
+      + `<input type="text" class="dcc-add-search input-text" placeholder="Search crew database…" spellcheck="false">`
+      + `<div class="dcc-add-list"></div>`
+      + `<button class="btn btn-ghost btn-sm dcc-add-new" type="button" style="width:100%;">+ Create new crew member</button>`;
+    document.body.appendChild(pop);
+    _dccAddPop = pop;
+    const r = anchor.getBoundingClientRect();
+    pop.style.top  = Math.max(8, Math.min(r.bottom + 6, window.innerHeight - 360)) + 'px';
+    pop.style.left = Math.max(8, Math.min(r.right - 280, window.innerWidth - 292)) + 'px';
+
+    const search = pop.querySelector('.dcc-add-search');
+    const list = pop.querySelector('.dcc-add-list');
+    const keyOf = (n, h) => (n || '').toLowerCase() + '|' + (h || '').toLowerCase();
+    const build = () => {
+      const q = (search.value || '').trim().toLowerCase();
+      const crew = (currentState && currentState.crew) || [];
+      const lib  = (currentState && currentState.casters && currentState.casters.library) || [];
+      const byKey = new Map();
+      crew.forEach((c) => { if (c && c.name) byKey.set(keyOf(c.name, c.socialHandle || c.handle), { name: c.name, handle: c.socialHandle || c.handle || '', role: c.role || '', social: c.social || 'none', country: c.country || '' }); });
+      lib.forEach((e2) => { if (e2 && e2.name) { const k = keyOf(e2.name, e2.handle); const cur = byKey.get(k) || { name: e2.name, handle: e2.handle || '', role: e2.role || '', social: e2.social || 'none', country: e2.country || '' }; cur._libKind = e2.kind || 'caster'; cur._libId = e2.id; byKey.set(k, cur); } });
+      let items = [...byKey.values()];
+      if (q) items = items.filter((x) => (x.name + ' ' + (x.handle || '') + ' ' + (x.role || '')).toLowerCase().includes(q));
+      items.sort((a, b) => a.name.localeCompare(b.name));
+      list._items = items;
+      list.innerHTML = items.length ? items.map((x, i) => {
+        const here = x._libKind === kind;
+        const elsewhere = x._libKind && x._libKind !== kind ? (K[x._libKind] || x._libKind) : '';
+        return `<button class="dcc-add-item${here ? ' is-here' : ''}" type="button" data-i="${i}"${here ? ' disabled' : ''}>`
+          + `<span class="dcc-add-item-name">${poEsc(x.name)}${x.role ? `<span class="dcc-add-item-role"> · ${poEsc(x.role)}</span>` : ''}</span>`
+          + `<span class="dcc-add-item-tag">${here ? 'here' : (elsewhere ? 'move from ' + elsewhere : 'add')}</span></button>`;
+      }).join('') : `<div class="dcc-add-empty">No crew match${q ? ' "' + poEsc(search.value.trim()) + '"' : ''}. Create a new one below.</div>`;
+    };
+    build();
+    search.addEventListener('input', build);
+    setTimeout(() => search.focus(), 30);
+    list.addEventListener('click', (e2) => {
+      const btn = e2.target.closest('.dcc-add-item'); if (!btn || btn.disabled) return;
+      const x = list._items[+btn.dataset.i]; if (!x) return;
+      const payload = { name: x.name, handle: x.handle || '', role: x.role || '', social: x.social || 'none', country: x.country || '', kind };
+      if (x._libId) payload.id = x._libId;   // update the existing library entry in place (moves its column)
+      send('save_caster_to_library', payload);
+      showToast(`${x.name} added to ${K[kind] || kind}`, '#22c55e');
+      dccHostsAddClose();
+      if (typeof onDone === 'function') setTimeout(onDone, 300);
+    });
+    pop.querySelector('.dcc-add-new').addEventListener('click', () => {
+      dccHostsAddClose();
+      if (typeof openCrewAdd === 'function') openCrewAdd(groupOf[kind] || 'casters');
+    });
+  }
+  document.addEventListener('click', (e) => { if (_dccAddPop && !e.target.closest('.dcc-add-pop') && !e.target.closest('.dcc-hosts-add')) dccHostsAddClose(); });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && _dccAddPop) dccHostsAddClose(); });
 })();
 
 (function initDccSections() {
@@ -2925,11 +3002,12 @@ function _returnGraphicsToProd() {
     _schMatches.forEach((m, i) => {
       const rd = m.round ? `<span class="rd" title="${esc(m.round)}">${esc(m.round)}</span>` : '';
       const a = esc(m.teamA || 'TBD'), b = esc(m.teamB || 'TBD');
-      const live = m.stream ? '<span class="live">LIVE</span>' : '';
+      const live = '';
       const rowEl = document.createElement('div'); rowEl.className = 'gfx-fp-prow';
       rowEl.innerHTML = `${rd}<span class="tm" title="${a} vs ${b}">${a}<span class="vs">vs</span>${b}</span>`
-        + `<input type="text" class="input-text gfx-fp-date" value="${esc(m.date || '')}" placeholder="date" title="Date shown on the overlay — edits save automatically" style="width:66px; flex:0 0 auto; font-size:11px; padding:2px 6px;">`
-        + `<input type="text" class="input-text gfx-fp-time" value="${esc(m.time || '')}" placeholder="time" title="Time shown on the overlay — edits save automatically" style="width:70px; flex:0 0 auto; font-size:11px; padding:2px 6px;">`
+        + `<input type="date" class="input-text gfx-fp-date" value="${esc(/^\d{4}-\d{2}-\d{2}$/.test(m.date || '') ? m.date : '')}" title="Match date — edits save automatically" style="width:118px; flex:0 0 auto; font-size:11px; padding:2px 4px;">`
+        + `<input type="time" class="input-text gfx-fp-time" value="${esc(/^\d{2}:\d{2}/.test(m.time || '') ? m.time.slice(0, 5) : '')}" title="Match time — edits save automatically" style="width:82px; flex:0 0 auto; font-size:11px; padding:2px 4px;">`
+        + `<button type="button" class="gfx-fp-str${m.stream ? ' is-on' : ''}" title="Mark as the stream match — shows the ON AIR badge on the overlay" style="flex:0 0 auto; font-size:9px; font-weight:800; letter-spacing:.06em; padding:3px 7px; border-radius:999px; cursor:pointer; border:1px solid ${m.stream ? 'rgba(74,222,128,.5)' : 'var(--border)'}; background:${m.stream ? 'rgba(74,222,128,.15)' : 'transparent'}; color:${m.stream ? '#4ade80' : 'var(--muted)'};">ON AIR</button>`
         + live
         + `<span class="gfx-fp-rowbtns"><button type="button" class="gfx-fp-mv" data-mv="-1" title="Move up">&#8593;</button>`
         + `<button type="button" class="gfx-fp-mv" data-mv="1" title="Move down">&#8595;</button>`
@@ -2938,6 +3016,10 @@ function _returnGraphicsToProd() {
       tiInp.addEventListener('change', () => { _schMatches[i].time = tiInp.value.trim(); schAutoSave(); });
       const dtInp = rowEl.querySelector('.gfx-fp-date');
       dtInp.addEventListener('change', () => { _schMatches[i].date = dtInp.value.trim(); schAutoSave(); });
+      rowEl.querySelector('.gfx-fp-str').addEventListener('click', () => {
+        _schMatches[i].stream = !_schMatches[i].stream;
+        schRenderList(); schAutoSave();
+      });
       rowEl.querySelector('.gfx-fp-rm').addEventListener('click', () => { _schMatches.splice(i, 1); schRenderList(); schAutoSave(); });
       rowEl.querySelectorAll('.gfx-fp-mv').forEach((btn) => btn.addEventListener('click', () => {
         const j = i + (btn.dataset.mv === '-1' ? -1 : 1);
@@ -2986,6 +3068,8 @@ function _returnGraphicsToProd() {
   // a second panel window) land here on the next broadcast instead of after a refresh.
   window._schSyncFromState = function (data) {
     const up = (data && data.upcoming) || {};
+    const eb = el('gfx-front-sch-eyebrow');
+    if (eb && document.activeElement !== eb && typeof up.eyebrow === 'string') eb.value = up.eyebrow;
     if (!Array.isArray(up.matches)) return;
     const ae = document.activeElement;
     const body = el('gfx-front-schedule-body');
@@ -3002,13 +3086,16 @@ function _returnGraphicsToProd() {
     send('set_upcoming', {
       matches: _schMatches,
       title: (el('gfx-front-sch-title')?.value || 'SCHEDULE').trim(),
+      eyebrow: (el('gfx-front-sch-eyebrow')?.value || '').trim(),
       layout: el('gfx-sch-layout')?.value || 'cards'
     });
   }
+  el('gfx-front-sch-eyebrow')?.addEventListener('change', schAutoSave);
 
   function buildScheduleContentPayload() {
     return {
       title: (el('gfx-front-sch-title')?.value || 'SCHEDULE').trim(),
+      eyebrow: (el('gfx-front-sch-eyebrow')?.value || '').trim(),
       layout: el('gfx-sch-layout')?.value || 'cards',
       matches: _schMatches
     };
@@ -5279,6 +5366,8 @@ function applyState(data) {
   const otCol = el('input-ot-color'); if (otCol) otCol.value = ot.color || '#ffffff';
   const otPrev = el('preview-ot-logo');
   if (otPrev) { otPrev.src = ot.logo || ''; otPrev.style.display = ot.logo ? 'block' : 'none'; }
+  const dfSel = el('select-date-format');
+  if (dfSel && document.activeElement !== dfSel) dfSel.value = data.dateFormat === 'intl' ? 'intl' : 'us';
   const suSel = el('select-speed-unit');
   if (suSel && document.activeElement !== suSel) suSel.value = (data.speedUnit === 'kmh') ? 'kmh' : 'mph';
 
@@ -7502,6 +7591,9 @@ el('select-replay-color')?.addEventListener('change', function() {
 });
 el('select-speed-unit')?.addEventListener('change', function() {
   send('set_speed_unit', { unit: this.value });
+});
+el('select-date-format')?.addEventListener('change', function() {
+  send('set_date_format', { format: this.value });
 });
 el('input-replay-logo')?.addEventListener('change', async function() {
   const file = this.files && this.files[0];
@@ -22915,6 +23007,7 @@ function applyTwitchState(twitch) {
 function renderPredQuickBar(twitch) {
   const activeEl = el('qpred-active');
   const createEl = el('qpred-create');
+  const movedHintEl = el('qpred-moved-hint');
   const dot = el('qrail-predict-dot');
   if (!activeEl || !createEl) return;
 
@@ -22924,6 +23017,7 @@ function renderPredQuickBar(twitch) {
   if (isActive) {
     activeEl.style.display = 'block';
     createEl.style.display = 'none';
+    if (movedHintEl) movedHintEl.style.display = 'block';
     if (dot) dot.style.display = 'block';
 
     const titleEl = el('qpred-active-title');
@@ -22968,6 +23062,7 @@ function renderPredQuickBar(twitch) {
   } else {
     activeEl.style.display = 'none';
     createEl.style.display = 'block';
+    if (movedHintEl) movedHintEl.style.display = 'none';
     if (dot) dot.style.display = 'none';
 
     // Pre-fill team names as placeholders without overriding user input
@@ -23095,12 +23190,6 @@ const EMBED_POLL_MS = 30000;
 function initTwitchEmbed(channelName) {
   if (!channelName) return;
   _embedChannel = channelName;
-  const iframe = el('twitch-embed-iframe');
-  const inp = el('embed-channel-input');
-  if (iframe && !iframe.src.includes('/twitch-embed')) {
-    iframe.src = `http://localhost:3000/twitch-embed?channel=${encodeURIComponent(channelName)}`;
-  }
-  if (inp && !inp.value) inp.value = channelName;
   if (!_embedViewerPoll) {
     startEmbedViewerPoll();
     fetchChatModeSettings();
@@ -23176,15 +23265,6 @@ async function toggleChatMode(mode) {
     }
   } catch (_) {}
 }
-
-el('btn-embed-load')?.addEventListener('click', () => {
-  const ch = (el('embed-channel-input')?.value || '').trim().toLowerCase().replace(/^@/, '');
-  if (!ch) return;
-  _embedChannel = ch;
-  const iframe = el('twitch-embed-iframe');
-  if (iframe) iframe.src = `http://localhost:3000/twitch-embed?channel=${encodeURIComponent(ch)}`;
-  startEmbedViewerPoll();
-});
 
 el('btn-embed-settings')?.addEventListener('click', () => {
   const panel = el('tw-embed-settings-panel');

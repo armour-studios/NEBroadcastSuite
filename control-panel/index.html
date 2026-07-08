@@ -4705,7 +4705,11 @@
             <div class="gfx-front-panel gfx-fp" data-frontkey="schedule" id="gfx-front-schedule" style="display:none;">
               <div class="gfx-fp-field">
                 <label class="gfx-fp-lbl" for="gfx-front-sch-title">Title</label>
-                <input type="text" id="gfx-front-sch-title" class="input-text" placeholder="UPCOMING MATCHES">
+                <input type="text" id="gfx-front-sch-title" class="input-text" placeholder="SCHEDULE">
+              </div>
+              <div class="gfx-fp-field">
+                <label class="gfx-fp-lbl" for="gfx-front-sch-eyebrow">Top text</label>
+                <input type="text" id="gfx-front-sch-eyebrow" class="input-text" placeholder="ON DECK" maxlength="40" title="The small line above the title on the overlay">
               </div>
               <!-- The most common action — pulling matches from the active tournament/league — lives
                    right here; manual add, team search, and layout choice stay in "More settings". -->
@@ -4725,8 +4729,8 @@
                   <input type="text" id="gfx-sch-add-a" class="input-text" placeholder="Team A" list="gfx-sch-teamlist" style="flex:1; min-width:110px;">
                   <span style="font-size:11px; color:var(--muted); flex-shrink:0;">vs</span>
                   <input type="text" id="gfx-sch-add-b" class="input-text" placeholder="Team B" list="gfx-sch-teamlist" style="flex:1; min-width:110px;">
-                  <input type="text" id="gfx-sch-add-date" class="input-text" placeholder="Jul 12" title="Date shown on the overlay — free text" style="flex:0 0 84px;">
-                  <input type="text" id="gfx-sch-add-when" class="input-text" placeholder="8:00 PM" title="Time shown on the overlay — free text" style="flex:0 0 92px;">
+                  <input type="date" id="gfx-sch-add-date" class="input-text" title="Match date" style="flex:0 0 130px;">
+                  <input type="time" id="gfx-sch-add-when" class="input-text" title="Match time" style="flex:0 0 100px;">
                   <button type="button" class="btn btn-secondary btn-sm" id="gfx-sch-add-front" style="flex-shrink:0;">Add</button>
                 </div>
                 <datalist id="gfx-sch-teamlist"></datalist>
@@ -7227,6 +7231,15 @@ PacketSendRate=10</pre>
         </select>
       </div>
 
+      <div style="margin-top:16px; padding-top:14px; border-top:1px solid rgba(255,255,255,.08);">
+        <h4 class="section-title" style="font-size:13px; margin-bottom:6px;">Date &amp; time format</h4>
+        <p class="section-desc" style="margin-bottom:10px;">How dates and times display on overlays (the Schedule board, etc.).</p>
+        <select id="select-date-format" class="input-select" style="max-width:220px;">
+          <option value="us">US — Jul 12, 8:00 PM</option>
+          <option value="intl">International — 12 Jul, 20:00</option>
+        </select>
+      </div>
+
       <!-- Team Record moved to the game-agnostic Match — Teams panel (gear → Team Record), since it applies to every game. -->
     </section>
   </div>
@@ -8655,21 +8668,27 @@ PacketSendRate=10</pre>
             <span id="chat-connection-status" style="display: none; color: #4ade80;"><span class="live-dot" style="background:#4ade80"></span> Connected</span>
             <span id="chat-loading" style="color: #888;">Connecting...</span>
           </div>
-          <!-- ── Twitch Preview Embed ── -->
+          <!-- ── Active Prediction — surfaced here (not just the Predict tab) for quick management while watching chat ── -->
+          <div id="qpred-active" style="display:none;margin-bottom:10px;">
+            <div class="qrail-group" style="background:rgba(145,70,255,0.06);border:1px solid rgba(145,70,255,0.25);border-radius:10px;padding:10px;">
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+                <div class="qrail-label" style="margin:0;">Live Prediction</div>
+                <span id="qpred-timer" style="font-size:11px;color:#9146ff;font-weight:700;background:rgba(145,70,255,0.12);padding:2px 8px;border-radius:10px;"></span>
+              </div>
+              <div id="qpred-active-title" style="font-size:13px;font-weight:700;color:#fff;margin-bottom:14px;line-height:1.3;"></div>
+              <div id="qpred-outcomes" style="display:flex;flex-direction:column;gap:10px;"></div>
+              <button id="btn-qpred-cancel" class="btn btn-danger btn-sm" style="width:100%;margin-top:14px;">Cancel Prediction</button>
+            </div>
+          </div>
+
+          <!-- ── Twitch stream status + settings (video preview removed) ── -->
           <div id="tw-embed-wrap" style="margin-bottom:10px;">
-            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+            <div style="display:flex;align-items:center;justify-content:space-between;">
               <div style="display:flex;align-items:center;gap:6px;">
                 <span id="embed-live-badge" style="display:none;font-size:10px;font-weight:700;background:#ef4444;color:#fff;padding:2px 6px;border-radius:4px;letter-spacing:.5px;">LIVE</span>
                 <span id="embed-viewer-count" style="display:none;font-size:11px;color:#9146ff;background:rgba(145,70,255,0.12);padding:2px 8px;border-radius:10px;"></span>
               </div>
               <button id="btn-embed-settings" class="btn btn-ghost btn-xs" title="Stream settings" style="padding:3px 8px;font-size:11px;">⚙ Settings</button>
-            </div>
-            <div style="position:relative;padding-bottom:56.25%;background:#0e0e10;border-radius:6px;overflow:hidden;border:1px solid rgba(255,255,255,0.08);">
-              <iframe id="twitch-embed-iframe" allowfullscreen style="position:absolute;top:0;left:0;width:100%;height:100%;border:0;"></iframe>
-            </div>
-            <div style="display:flex;gap:6px;margin-top:6px;">
-              <input id="embed-channel-input" class="input-text" style="flex:1;font-size:12px;" placeholder="Channel name…" maxlength="50">
-              <button id="btn-embed-load" class="btn btn-primary btn-sm" style="flex-shrink:0;">Load</button>
             </div>
             <!-- Settings panel -->
             <div id="tw-embed-settings-panel" style="display:none;margin-top:8px;background:rgba(0,0,0,0.2);border-radius:8px;padding:10px 10px 4px;border:1px solid rgba(255,255,255,0.07);">
@@ -8719,7 +8738,7 @@ PacketSendRate=10</pre>
             </div>
           </div>
 
-          <div id="twitch-chat" style="height: 340px; background: rgba(0,0,0,0.3); border-radius: 6px; overflow-y: auto; padding: 8px; border: 1px solid rgba(255,255,255,0.1); display: flex; flex-direction: column;">
+          <div id="twitch-chat" style="height: 560px; background: rgba(0,0,0,0.3); border-radius: 6px; overflow-y: auto; padding: 8px; border: 1px solid rgba(255,255,255,0.1); display: flex; flex-direction: column;">
             <div data-placeholder style="color: #888; font-size: 12px; text-align: center; margin: auto;">Chat messages will appear here</div>
           </div>
           <div style="display:flex;gap:6px;margin-top:8px;">
@@ -8743,17 +8762,9 @@ PacketSendRate=10</pre>
 
       <!-- ── PREDICTION: quick bar ── -->
       <div class="tw-sub" data-twpanel="prediction" style="display:none;">
-        <!-- Active prediction -->
-        <div id="qpred-active" style="display:none;">
-          <div class="qrail-group">
-            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
-              <div class="qrail-label" style="margin:0;">Live Prediction</div>
-              <span id="qpred-timer" style="font-size:11px;color:#9146ff;font-weight:700;background:rgba(145,70,255,0.12);padding:2px 8px;border-radius:10px;"></span>
-            </div>
-            <div id="qpred-active-title" style="font-size:13px;font-weight:700;color:#fff;margin-bottom:14px;line-height:1.3;"></div>
-            <div id="qpred-outcomes" style="display:flex;flex-direction:column;gap:10px;"></div>
-            <button id="btn-qpred-cancel" class="btn btn-danger btn-sm" style="width:100%;margin-top:14px;">Cancel Prediction</button>
-          </div>
+        <!-- Shown instead of the create form while a prediction is live — it's managed from the Chat tab now -->
+        <div id="qpred-moved-hint" style="display:none;padding:26px 10px;text-align:center;color:var(--muted);font-size:12px;line-height:1.5;">
+          A prediction is live.<br>Manage it from the <strong style="color:var(--text);">Chat</strong> tab, above the messages.
         </div>
         <!-- Create prediction -->
         <div id="qpred-create">
@@ -9232,6 +9243,19 @@ PacketSendRate=10</pre>
     .dcc-hosts-grid { display:grid; grid-template-columns:1fr 1fr 1fr; gap:12px; height:100%; overflow:hidden; padding:14px; }
     .dcc-hosts-col { display:flex; flex-direction:column; border:1px solid var(--border); border-radius:12px; overflow:hidden; background:rgba(255,255,255,.02); min-height:0; }
     .dcc-hosts-col-hd { display:flex; align-items:center; gap:8px; padding:11px 13px; border-bottom:1px solid var(--border); background:linear-gradient(180deg, var(--surface3), color-mix(in srgb, var(--surface3) 85%, #000)); flex:0 0 auto; }
+    .dcc-hosts-add { flex:0 0 auto; font-size:10px; font-weight:700; padding:3px 9px; border-radius:6px; border:1px solid var(--border); background:var(--surface2); color:var(--text); cursor:pointer; transition:background .12s, border-color .12s; }
+    .dcc-hosts-add:hover { background:#2a3340; border-color:var(--cp-accent); color:#fff; }
+    /* Crew-database search popover (the "+ Add" flow) */
+    .dcc-add-pop { position:fixed; z-index:4000; width:280px; max-height:352px; display:flex; flex-direction:column; gap:8px; padding:12px; border-radius:12px; background:var(--surface); border:1px solid var(--border); box-shadow:0 18px 46px rgba(0,0,0,.62); }
+    .dcc-add-pop-hd { font-size:11px; font-weight:800; letter-spacing:.08em; text-transform:uppercase; color:var(--muted); }
+    .dcc-add-list { flex:1 1 auto; overflow-y:auto; display:flex; flex-direction:column; gap:4px; min-height:64px; }
+    .dcc-add-item { display:flex; align-items:center; justify-content:space-between; gap:8px; width:100%; padding:7px 10px; border-radius:7px; border:1px solid var(--border); background:rgba(255,255,255,.03); color:var(--text); cursor:pointer; text-align:left; }
+    .dcc-add-item:hover:not(:disabled) { background:#2a3340; border-color:var(--cp-accent); }
+    .dcc-add-item:disabled, .dcc-add-item.is-here { opacity:.5; cursor:default; }
+    .dcc-add-item-name { font-size:12.5px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .dcc-add-item-role { color:var(--muted); font-weight:500; }
+    .dcc-add-item-tag { font-size:10px; font-weight:700; color:var(--muted); flex:0 0 auto; text-transform:uppercase; letter-spacing:.03em; }
+    .dcc-add-empty { font-size:11px; color:var(--muted); text-align:center; padding:18px 8px; line-height:1.5; }
     .dcc-hosts-drop { flex:1; padding:8px; overflow-y:auto; transition:background .15s; display:flex; flex-direction:column; gap:6px; min-height:60px; }
     .dcc-hosts-drop.drag-over { background:rgba(124,58,237,.08); outline:2px dashed rgba(167,139,250,.45); outline-offset:-4px; border-radius:8px; }
     /* Host cards inherit .talent-row + .mc-player; card treatment + drag affordance */
