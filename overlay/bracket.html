@@ -211,6 +211,7 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
   font-family: var(--disp); font-weight: 800; font-size: 18px; color: rgba(255,255,255,.55); }
 .bk-run-pmeta { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
 .bk-run-pname { font-weight: 700; font-size: 17px; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bk-run-flag { width: 22px; height: 15px; border-radius: 2px; object-fit: cover; vertical-align: -2px; margin-right: 7px; }
 .bk-run-socline { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 12px; }
 .bk-run-preal { font-size: 12px; color: rgba(255,255,255,.45); }
 .bk-run-soc { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 600; color: rgba(255,255,255,.6); white-space: nowrap; }
@@ -399,18 +400,27 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
     const roster = Array.from(new Set((t.players || []).map((p) => p && (p.name || p.gamertag)).filter(Boolean))).slice(0, 6);
     if (!roster.length) { rowsEl.innerHTML = '<div class="bk-run-stats-empty">' + escRun(t.name) + ' has no players on its roster yet.</div>'; return; }
     const profiles = data.playerProfiles || {};
+    // Legal/real names only when the producer enabled them — same intro.showRealName toggle
+    // that gates the Team Intro card, so one setting controls it everywhere.
+    const showReal = !!(data.intro && data.intro.showRealName);
     rowsEl.innerHTML = roster.map((n) => {
       const prof = profiles[n.toLowerCase()] || profiles[norm(n)] || {};
       const avatar = prof.image
         ? '<img class="bk-run-avatar" src="' + escRun(prof.image) + '" alt="">'
         : '<span class="bk-run-avatar bk-run-avatar-ph">' + escRun((n[0] || '?').toUpperCase()) + '</span>';
+      // Country flag — same flagcdn source + countryCode field the Team Intro card uses.
+      let cc = (prof.countryCode || '').toString().toUpperCase();
+      if (!cc && /^[A-Za-z]{2}$/.test(prof.country || '')) cc = prof.country.toUpperCase();
+      const flag = cc
+        ? '<img class="bk-run-flag" src="https://flagcdn.com/w40/' + cc.toLowerCase() + '.png" alt="" onerror="this.style.display=\'none\'">'
+        : '';
       const socials = ['twitch', 'twitter'].map(function (k) {
         const h = (prof[k] || '').toString().replace(/^@/, '');
         return h ? '<span class="bk-run-soc">' + SOC_ICONS[k] + escRun('@' + h) + '</span>' : '';
       }).join('');
-      const real = prof.realName ? '<span class="bk-run-preal">' + escRun(prof.realName) + '</span>' : '';
+      const real = (showReal && prof.realName) ? '<span class="bk-run-preal">' + escRun(prof.realName) + '</span>' : '';
       return '<div class="bk-run-player">' + avatar
-        + '<div class="bk-run-pmeta"><span class="bk-run-pname">' + escRun(n) + '</span>'
+        + '<div class="bk-run-pmeta"><span class="bk-run-pname">' + flag + escRun(n) + '</span>'
         + ((socials || real) ? '<span class="bk-run-socline">' + real + socials + '</span>' : '')
         + '</div></div>';
     }).join('');
