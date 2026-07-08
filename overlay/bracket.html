@@ -164,9 +164,13 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
 .bk-title-row { display: flex; align-items: center; gap: 12px; }
 .bk-brand-logo { height: 42px; max-width: 120px; object-fit: contain; filter: drop-shadow(0 2px 8px rgba(0,0,0,.55)); }
 
-/* ── Team tournament run (focused team): upper/lower/GF bands + player-stats column.
+/* ── Team tournament run (focused team): upper/lower/GF flow with the players bar beneath.
       One flex layout of distinct regions — nothing overlaps anything else on canvas. ── */
-.bk-run { display: flex; align-items: flex-start; gap: 34px; width: 1816px; }
+/* Run mode stage: brand + event title (the absolute header) move to the TOP RIGHT, and the
+   stage reserves a band up there so the scaled run content never slides underneath it. */
+.bk-stage.run-mode { padding-top: 132px; }
+.bk-stage.run-mode .bk-header { top: 28px; bottom: auto; }
+.bk-run { display: flex; flex-direction: column; align-items: stretch; gap: 28px; width: 1816px; }
 .bk-run-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 22px; }
 .bk-run-head { display: flex; align-items: center; gap: 18px; padding-bottom: 4px; }
 .bk-run-logo { width: 64px; height: 64px; object-fit: contain; filter: drop-shadow(0 3px 10px rgba(0,0,0,.6)); }
@@ -193,11 +197,13 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
 .bk-run-band.gf { flex: 0 0 300px; }
 .bk-run-band.gf .bk-run-row { flex-direction: column; align-items: stretch; }
 .bk-run-band.gf .bk-run-arrow { display: none; }   /* GF + reset stack vertically, no separators */
-/* Player profile cards (image · gamertag · real name · socials) */
-.bk-run-stats { flex: 0 0 360px; display: flex; flex-direction: column; gap: 10px; padding: 20px; align-self: stretch;
+/* Player profile cards (image · gamertag · real name · socials) — a centred bar under the run */
+.bk-run-stats { flex: none; align-self: center; display: flex; flex-direction: column; gap: 12px; padding: 18px 26px;
+  min-width: 720px; max-width: 1720px;
   background: rgba(255,255,255,.03); border: 1px solid rgba(255,255,255,.08); border-radius: 14px; }
-#bk-run-stats-rows { display: flex; flex-direction: column; gap: 8px; }
-.bk-run-player { display: flex; align-items: center; gap: 12px; padding: 9px 12px; border-radius: 9px;
+.bk-run-stats > .bk-run-band-label { text-align: center; margin-bottom: 0; }
+#bk-run-stats-rows { display: flex; flex-direction: row; flex-wrap: wrap; justify-content: center; gap: 10px; }
+.bk-run-player { flex: 0 0 auto; min-width: 250px; display: flex; align-items: center; gap: 12px; padding: 9px 14px; border-radius: 9px;
   background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.06); }
 .bk-run-avatar { width: 42px; height: 42px; border-radius: 50%; object-fit: cover; flex: 0 0 auto;
   border: 1px solid rgba(255,255,255,.14); background: rgba(255,255,255,.06); }
@@ -960,6 +966,9 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
         scaleEl.appendChild(run);
       }
     }
+    // Run mode re-composes the stage: header (brand + event title) moves to the top right and
+    // the players bar sits bottom-centre (see .bk-stage.run-mode CSS).
+    stage.classList.toggle('run-mode', runMode);
     if (runMode) {
       // run view built above — none of the section/schedule/standings builders apply
     } else if (isElim) {
