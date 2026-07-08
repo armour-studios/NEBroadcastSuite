@@ -28,6 +28,28 @@
       opacity: 0; transition: opacity .4s ease; }
     #stage.show { opacity: 1; }
 
+    /* ── Top band: brand logo + event name above the team panels ─────────── */
+    .lh-head {
+      position: absolute; top: 0; left: 0; right: 0; z-index: 20; height: 84px;
+      display: flex; align-items: center; justify-content: center; gap: 22px;
+      background: rgba(5,7,14,.88);
+      border-bottom: 1px solid rgba(255,255,255,.07);
+      backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+      opacity: 0;
+    }
+    #stage.show .lh-head { animation: headIn .55s cubic-bezier(.16,.84,.24,1) .05s both; }
+    @keyframes headIn { from { opacity: 0; transform: translateY(-14px); } to { opacity: 1; transform: none; } }
+    .lh-head.is-empty { display: none; }
+    .lh-head-logo { height: 46px; max-width: 230px; object-fit: contain;
+      filter: drop-shadow(0 2px 10px rgba(0,0,0,.55)); }
+    .lh-head-sep { width: 1px; height: 38px; background: rgba(255,255,255,.16); }
+    .lh-head-event { font-family: 'Rajdhani', 'Inter', sans-serif; font-weight: 900; font-size: 30px;
+      letter-spacing: .08em; text-transform: uppercase; color: #fff;
+      max-width: 1150px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      text-shadow: 0 2px 14px rgba(0,0,0,.7); }
+    #stage.has-head .lh-left,
+    #stage.has-head .lh-right { padding-top: 116px; }
+
     /* ── LEFT PANEL ───────────────────────────────────────────────────────── */
     .lh-left {
       width: 520px; flex-shrink: 0; position: relative; overflow: hidden;
@@ -81,7 +103,7 @@
       text-shadow: 0 0 60px color-mix(in srgb, var(--team-color) 65%, transparent),
         0 4px 20px rgba(0,0,0,.95), 0 1px 4px rgba(0,0,0,.9);
       overflow-wrap: break-word; word-break: break-word; }
-    .lh-sub { font-size: 11px; font-weight: 700; letter-spacing: .24em; text-transform: uppercase;
+    .lh-sub { font-size: 13px; font-weight: 700; letter-spacing: .24em; text-transform: uppercase;
       color: rgba(255,255,255,.38); text-align: center; margin-bottom: 28px; }
     .lh-tstats { display: flex; align-items: stretch; gap: 0;
       border: 1px solid rgba(255,255,255,.1); border-radius: 8px; overflow: hidden;
@@ -106,7 +128,7 @@
       align-items: center; justify-content: center;
       padding: 52px 60px; }
     #stage.has-foot .lh-right { padding-bottom: 100px; }
-    #stage.has-foot .lh-left  { padding-bottom: 100px; }
+    
 
     .lh-right-lbl { font-size: 18px; font-weight: 900; letter-spacing: .28em; text-transform: uppercase;
       color: #fff; text-align: center; margin-bottom: 28px; flex-shrink: 0;
@@ -191,35 +213,33 @@
       white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
       text-shadow: 0 1px 14px rgba(0,0,0,.7),
                    0 0 28px color-mix(in srgb, var(--team-color) 38%, transparent); }
-    .lh-role-badge { font-size: 7px; font-weight: 800; letter-spacing: .13em; text-transform: uppercase;
-      padding: 3px 8px; border-radius: 3px; color: rgba(255,255,255,.7); flex-shrink: 0;
+    .lh-role-badge { font-size: 9px; font-weight: 800; letter-spacing: .13em; text-transform: uppercase;
+      padding: 4px 9px; border-radius: 3px; color: rgba(255,255,255,.7); flex-shrink: 0;
       background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.12); white-space: nowrap; }
     .lh-role-badge.is-cap { background: linear-gradient(135deg, var(--duo-accent), var(--duo-accent2)); color: #fff; border-color: transparent; }
 
     /* Real name line — shown when intro.showRealName is enabled */
-    .lh-realname { font-size: 12px; font-weight: 500; letter-spacing: .03em;
+    .lh-realname { font-size: 15px; font-weight: 500; letter-spacing: .03em;
       color: rgba(255,255,255,.4); text-transform: none; white-space: nowrap;
       overflow: hidden; text-overflow: ellipsis; margin-top: -4px; }
 
     /* Country row */
     .lh-country-row { display: flex; align-items: center; gap: 8px; }
-    .lh-flag-inline { width: 24px; height: 16px; border-radius: 2px; overflow: hidden;
+    .lh-flag-inline { width: 27px; height: 18px; border-radius: 2px; overflow: hidden;
       border: 1px solid rgba(255,255,255,.22); flex-shrink: 0; }
     .lh-flag-inline img { width: 100%; height: 100%; object-fit: cover; display: block; }
-    .lh-country-name { font-size: 12px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase;
+    .lh-country-name { font-size: 15px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase;
       color: rgba(255,255,255,.72); white-space: nowrap; }
 
-    /* Social chips — Twitter/X + Twitch, whichever are available from start.gg */
-    .lh-socials-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-    .lh-social { display: inline-flex; align-items: center; gap: 5px;
-      font-size: 11px; font-weight: 700; white-space: nowrap; }
-    .lh-social .plat {
-      font-size: 7px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase;
-      padding: 2px 6px; border-radius: 3px; flex-shrink: 0;
-    }
-    .lh-social.tw .plat { background: rgba(231,233,234,.1); border: 1px solid rgba(231,233,234,.2); color: #e7e9ea; }
-    .lh-social.tt .plat { background: rgba(145,71,255,.18); border: 1px solid rgba(145,71,255,.3); color: #9147ff; }
-    .lh-social .handle { color: rgba(255,255,255,.55); }
+    /* Socials — platform LOGOS (X / Twitch marks), not text pills */
+    .lh-socials-row { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+    .lh-social { display: inline-flex; align-items: center; gap: 7px;
+      font-size: 15px; font-weight: 700; white-space: nowrap; }
+    .lh-social .icon { width: 17px; height: 17px; flex-shrink: 0; display: inline-flex; }
+    .lh-social .icon svg { width: 100%; height: 100%; }
+    .lh-social.tw .icon svg { fill: #e7e9ea; }
+    .lh-social.tt .icon svg { fill: #9147ff; }
+    .lh-social .handle { color: rgba(255,255,255,.65); }
 
     /* Status badge column (col 4) */
     .lh-status-col {
@@ -228,8 +248,8 @@
       padding: 0 20px 0 12px;
     }
     .lh-status-badge {
-      font-size: 9px; font-weight: 800; letter-spacing: .16em; text-transform: uppercase;
-      padding: 5px 12px; border-radius: 4px; white-space: nowrap;
+      font-size: 11px; font-weight: 800; letter-spacing: .16em; text-transform: uppercase;
+      padding: 6px 14px; border-radius: 4px; white-space: nowrap;
       flex-shrink: 0;
     }
     .lh-status-badge.badge-starter {
@@ -271,7 +291,9 @@
 
     /* ── Sponsor footer ──────────────────────────────────────────────────── */
     .lh-foot {
-      position: absolute; bottom: 0; left: 0; right: 0; z-index: 20;
+      /* Right column only: starts past the 520px team panel so the sponsor rail
+         is centered under the roster, not the whole scene. */
+      position: absolute; bottom: 0; left: 520px; right: 0; z-index: 20;
       height: 68px;
       background: rgba(5,7,14,.88);
       border-top: 1px solid rgba(255,255,255,.07);
@@ -292,6 +314,13 @@
 </head>
 <body>
   <div id="stage">
+
+    <!-- TOP BAND: brand logo + event name -->
+    <div class="lh-head is-empty" id="lh-head">
+      <img class="lh-head-logo" id="lh-head-logo" alt="" style="display:none">
+      <div class="lh-head-sep" id="lh-head-sep" style="display:none"></div>
+      <div class="lh-head-event" id="lh-head-event"></div>
+    </div>
 
     <!-- LEFT: team identity panel -->
     <div class="lh-left">
@@ -353,6 +382,8 @@
     }
 
     function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c])); }
+    const SVG_X = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231 5.45-6.231zm-1.161 17.52h1.833L7.084 4.126H5.117l11.966 15.644z"/></svg>';
+    const SVG_TWITCH = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11.571 4.714h1.715v5.143H11.57zm4.715 0H18v5.143h-1.714zM6 0L1.714 4.286v15.428h5.143V24l4.286-4.286h3.428L22.286 12V0zm14.571 11.143l-3.428 3.428h-3.429l-3 3v-3H6.857V1.714h13.714z"/></svg>';
     function initials(name) { const w = (name || '?').trim().split(/\s+/); return ((w[0]||'?')[0] + (w[1] ? w[1][0] : '')).toUpperCase(); }
     const COUNTRY_NAMES = { US:'USA', CA:'Canada', GB:'UK', IE:'Ireland', AU:'Australia', NZ:'New Zealand',
       DE:'Germany', FR:'France', SE:'Sweden', NO:'Norway', DK:'Denmark', FI:'Finland', IS:'Iceland',
@@ -419,7 +450,9 @@
         sp: spons.map((s) => s && s.logo).join(','),
         foot: intro.showFooter === true,
         tr: (data.teamRecords || {}).enabled ? (data.teamRecords[side] || '') : '',
-        ev: evName + ':' + (ev.numEntrants || 0),
+        ev: evName,
+        hd: ((data.eventName || '') + '|' + (SceneBase.brandLogo(data) || '').slice(0, 48)),
+        ser: (data.series ? (data.series.blue || 0) + '-' + (data.series.orange || 0) : '') + ':' + ((data.match || {}).seriesVisible !== false),
         bst: bst ? `${bst.wins||0}-${bst.losses||0}:${bst.placement||0}` : '',
         evL: evLoaded });
       if (sig === _sig) return;
@@ -453,14 +486,31 @@
       const cc = teamCountry(players, data);
       const ts = [];
       if (cc) ts.push(`<div class="lh-tstat"><div style="display:flex;align-items:center;gap:5px;"><img src="${flagSrc(cc)}" style="width:22px;height:16px;object-fit:cover;border-radius:2px;border:1px solid rgba(255,255,255,.15);" alt="" onerror="this.style.display='none'"><span class="v" style="font-size:15px;">${esc(countryName(cc) || cc)}</span></div><span class="k">Country</span></div>`);
+      // Series score — this team's games first. Hidden at 0-0 (nothing to say pre-series).
+      const ser = data.series || {};
+      const sb = Number(ser.blue) || 0, so = Number(ser.orange) || 0;
+      const serMine = side === 'blue' ? sb : so, serTheirs = side === 'blue' ? so : sb;
+      if ((data.match || {}).seriesVisible !== false && (sb + so) > 0) {
+        ts.push(`<div class="lh-tstat"><span class="v">${serMine} – ${serTheirs}</span><span class="k">Series</span></div>`);
+      }
       if (bst && (bst.wins != null || bst.losses != null)) {
         ts.push(`<div class="lh-tstat"><span class="v">${bst.wins || 0}-${bst.losses || 0}</span><span class="k">Event</span></div>`);
         if (bst.placement) ts.push(`<div class="lh-tstat"><span class="v">#${bst.placement}</span><span class="k">Seed</span></div>`);
       } else if (record) {
         ts.push(`<div class="lh-tstat"><span class="v">${esc(record)}</span><span class="k">Record</span></div>`);
       }
-      if (ev.numEntrants > 0) ts.push(`<div class="lh-tstat"><span class="v">${ev.numEntrants}</span><span class="k">Field</span></div>`);
       el('lh-tstats').innerHTML = ts.join('');
+
+      // Top band: brand logo + full event name
+      const brandLogo = SceneBase.brandLogo(data);
+      const evTitle = ((data.eventName || '').trim()) || evName;
+      const headEl = el('lh-head'), headLogo = el('lh-head-logo'), headSep = el('lh-head-sep');
+      if (brandLogo) { headLogo.src = brandLogo; headLogo.style.display = ''; } else { headLogo.style.display = 'none'; }
+      el('lh-head-event').textContent = evTitle.toUpperCase();
+      headSep.style.display = (brandLogo && evTitle) ? '' : 'none';
+      const hasHead = !!(brandLogo || evTitle);
+      headEl.classList.toggle('is-empty', !hasHead);
+      stage.classList.toggle('has-head', hasHead);
 
       if (intro.showFooter !== true) {
         el('lh-foot').style.display = 'none'; stage.classList.remove('has-foot');
@@ -502,7 +552,7 @@
         const isAlt = /\balt\b|alternate|standin|stand-in/.test(roleLC);
 
         let statusLabel, statusClass;
-        if (isCap) { statusLabel = 'Captain'; statusClass = 'badge-starter'; }
+        if (isCap) { statusLabel = 'Starter'; statusClass = 'badge-starter'; }   // CAPTAIN already badged by the name
         else if (isSub) { statusLabel = 'Sub'; statusClass = 'badge-sub'; }
         else if (isAlt) { statusLabel = 'Alternate'; statusClass = 'badge-alt'; }
         else { statusLabel = 'Starter'; statusClass = 'badge-starter'; }
@@ -550,8 +600,8 @@
         let socialsHtml = '';
         if (tw || tt) {
           socialsHtml = `<div class="lh-socials-row">`;
-          if (tw) socialsHtml += `<span class="lh-social tw"><span class="plat">X</span><span class="handle">@${esc(tw)}</span></span>`;
-          if (tt) socialsHtml += `<span class="lh-social tt"><span class="plat">TWITCH</span><span class="handle">${esc(tt)}</span></span>`;
+          if (tw) socialsHtml += `<span class="lh-social tw"><span class="icon">${SVG_X}</span><span class="handle">@${esc(tw)}</span></span>`;
+          if (tt) socialsHtml += `<span class="lh-social tt"><span class="icon">${SVG_TWITCH}</span><span class="handle">${esc(tt)}</span></span>`;
           socialsHtml += `</div>`;
         }
 
@@ -620,6 +670,8 @@
         brand: { sponsors: [] },
         scoreboardAd: {},
         teamRecords: { enabled: true, blue: '14-3' },
+        series: { blue: 2, orange: 1 },
+        match: { seriesVisible: true },
         activeEvent: { platform: 'startgg', name: 'Rocket Rush Season 6', numEntrants: 24 },
         bracket: { standings: [{ name: 'Frost Esports', wins: 3, losses: 1, placement: 2 }] },
         intro: { visible: true, side: 'blue', title: 'Starting Line-up', showFooter: false, showRealName: true }
