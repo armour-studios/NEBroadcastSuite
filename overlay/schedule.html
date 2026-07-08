@@ -286,7 +286,11 @@ body { width: 1920px; height: 1080px; overflow: hidden; background: transparent;
     var raw = LAYOUT_QP || up.layout || 'cards';
     var isDual = raw === 'board' || raw === 'dual';
     var all = buildMatches((data.startgg || {}).queue, up.matches, mapsData, up.source);
-    var sig = JSON.stringify({ d: isDual, m: all });
+    // Brand colors are baked into each card (--col-a/--col-b at build time), and the
+    // brand payload can arrive AFTER the first paint (it rides the on-change library
+    // tier) — without the accents in the sig the cards kept default colors until the
+    // match list happened to change.
+    var sig = JSON.stringify({ d: isDual, m: all, a: accentA, b: accentB, c: mapsData.color });
     if (sig === _lastSig) return;
     _lastSig = sig;
     list.className = 'sch-list' + (isDual ? ' dual' : '');
