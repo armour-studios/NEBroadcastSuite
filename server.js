@@ -1079,6 +1079,11 @@ async function refreshTwitchToken() {
   state.twitch.apiToken = access_token;
   if (refresh_token) state.twitch.refreshToken = refresh_token;
   if (twitchClient) twitchClient.updateToken(access_token);
+  // A mid-session 401 flips these off and, before this, ONLY a manual reconnect ever flipped
+  // them back — so one stray 401 (wake-from-sleep race, transient revoke check) permanently
+  // disabled Twitch features even though this refresh just succeeded. The refresh heals them.
+  _twitchTokenInvalid = false;
+  state.twitch.connected = true;
   saveTwitchData();
   broadcast(bridgeClients, { type: 'full_state', data: buildLiveState() });
   console.log('[Twitch] Access token refreshed');
@@ -2134,6 +2139,13 @@ function loadState() {
           Object.values(state.playerProfiles).forEach((p) => {
             if (p && !p.countryCode && p.country) { const cc = _countryCode(p.country); if (cc) p.countryCode = cc; }
           });
+          // Stamp the resolved country onto EXISTING start.gg event-team + saved-team player objects
+          // (older syncs didn't carry it) so the credits/lineup overlays read it straight off the
+          // player — no live playerProfiles match needed.
+          const prof = (nm) => state.playerProfiles[(nm || '').trim().toLowerCase()] || null;
+          const stamp = (pl) => { if (pl && pl.name && !pl.countryCode) { const pr = prof(pl.name); if (pr && (pr.countryCode || pr.country)) { pl.countryCode = pr.countryCode || _countryCode(pr.country) || ''; pl.country = pl.country || pr.country || ''; } } };
+          ((state.startgg && state.startgg.eventTeams) || []).forEach((t) => (t.players || []).forEach(stamp));
+          (savedTeams || []).forEach((t) => (t.players || []).forEach(stamp));
         } catch (e) {}
       }
       if (saved.draftAuto && typeof saved.draftAuto === 'object') {
@@ -5260,7 +5272,7 @@ function mapEntrantsToTeams(entrants) {
           if (realName) patch.realName = realName;
           if (Object.keys(patch).length) upsertPlayerProfile(tag, patch);
         }
-        return { id: Math.random().toString(36).slice(2, 11), name: tag, platform: 'startgg', platformId: startggPlayerId || '', assignedCamera: null };
+        return { id: Math.random().toString(36).slice(2, 11), name: tag, platform: 'startgg', platformId: startggPlayerId || '', assignedCamera: null, country: country || '', countryCode: countryCode || '' };
       })
       .filter((p) => p.name);
     const logo = pickEntrantLogo(ent);
@@ -5522,7 +5534,7 @@ function mergeEntrantsIntoLibrary(entrants) {
           if (realName) patch.realName = realName;
           if (Object.keys(patch).length) upsertPlayerProfile(tag, patch);
         }
-        return { id: Math.random().toString(36).slice(2, 11), name: tag, platform: 'startgg', platformId: startggPlayerId || '', assignedCamera: null };
+        return { id: Math.random().toString(36).slice(2, 11), name: tag, platform: 'startgg', platformId: startggPlayerId || '', assignedCamera: null, country: country || '', countryCode: countryCode || '' };
       })
       .filter((p) => p.name);
     playersTotal += players.length;
@@ -8813,6 +8825,12 @@ function explainTwitchApiError(e) {
   if (status === 401) {
     _twitchTokenInvalid = true;
     state.twitch.connected = false;
+    // Self-heal: with a refresh token stored this is recoverable with no reconnect at all —
+    // kick a refresh now (it clears the flags on success) and tell the producer to just retry.
+    if (state.twitch.refreshToken) {
+      refreshTwitchToken().catch((err) => console.warn('[Twitch] auto-refresh after 401 failed:', err.message));
+      return 'Twitch token expired (401) — auto-refreshing now, try again in a few seconds.';
+    }
     return 'Twitch token expired (401) — reconnect Twitch. Implicit-grant tokens cannot auto-refresh.';
   }
   if (status === 403) return 'Twitch rejected it (403) — Channel Points Predictions require an Affiliate or Partner channel.';
