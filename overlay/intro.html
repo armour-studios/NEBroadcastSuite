@@ -514,15 +514,24 @@
 
       const row = (k, v, cls) => `<div class="lh-info-row${cls ? ' ' + cls : ''}"><span class="k">${k}</span><span class="v">${v}</span></div>`;
       const ts = [];
-      // Series hero — this team's games first. Hidden at 0-0 (nothing to say pre-series).
+      // Series hero — the scoreboard series counter, this team's games first.
+      // Hidden at 0-0 (nothing to say pre-series) and when the total is impossible
+      // for the configured format (stale carry-over from a previous series).
       const ser = data.series || {};
       const sb = Number(ser.blue) || 0, so = Number(ser.orange) || 0;
       const serMine = side === 'blue' ? sb : so, serTheirs = side === 'blue' ? so : sb;
-      const serOn = (data.match || {}).seriesVisible !== false && (sb + so) > 0;
-      if (serOn) ts.push(row('Series', `${serMine} – ${serTheirs}`, 'hero'));
       const fmt = ((data.match || {}).format || '').trim();
+      const fmtN = (() => { const m = fmt.match(/(\d+)/); return m ? parseInt(m[1], 10) : 0; })();
+      const winsNeeded = fmtN ? Math.floor(fmtN / 2) + 1 : 0;
+      const serOn = (data.match || {}).seriesVisible !== false && (sb + so) > 0
+        && (!fmtN || (sb + so) <= fmtN);
+      if (serOn) ts.push(row('Series', `${serMine} – ${serTheirs}`, 'hero'));
       if (fmt) ts.push(row('Format', esc(fmt.toUpperCase())));
-      if (serOn) ts.push(row('Next Game', 'Game ' + (sb + so + 1)));
+      // Next Game only when it provably exists: format known, series undecided,
+      // and the game number fits the format — never "Game 7" in a BO5.
+      const nextGame = sb + so + 1;
+      const decided = winsNeeded && Math.max(serMine, serTheirs) >= winsNeeded;
+      if (serOn && winsNeeded && !decided && nextGame <= fmtN) ts.push(row('Next Game', 'Game ' + nextGame));
       if (bst && (bst.wins != null || bst.losses != null)) {
         ts.push(row('Event Record', `${bst.wins || 0} – ${bst.losses || 0}`));
         if (bst.placement) ts.push(row('Seed', '#' + bst.placement));
