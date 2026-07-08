@@ -21936,21 +21936,44 @@ async function qrTwLoad() {
 let _qrPlSig = '';
 function renderQrailPlaylists(data) {
   const list = el('qr-pl-list'); if (!list) return;
-  const montages = (((data || currentState || {}).clips) || {}).montages || [];
-  const sig = JSON.stringify(montages.map((m) => m.id + ':' + (m.name || '') + ':' + (m.outputPath ? 1 : 0) + ':' + ((m.clipIds || m.items || []).length)));
+  if (typeof _editingInside === 'function' && _editingInside(list)) return;   // don't clobber an open scene select
+  const st = (data || currentState || {});
+  const montages = (st.clips || {}).montages || [];
+  const scenes = (st.obs && st.obs.availableScenes) || [];
+  const lib = (st.clips || {}).library || [];
+  const sig = JSON.stringify(montages.map((m) => m.id + ':' + (m.name || '') + ':' + (m.outputPath ? 1 : 0) + ':' + ((m.clipIds || m.items || []).length) + ':' + (m.programScene || '')) + '|' + scenes.join(','));
   if (sig === _qrPlSig) return;
   _qrPlSig = sig;
   list.innerHTML = '';
   if (!montages.length) { list.innerHTML = '<div class="field-hint" style="margin:0;">No playlists yet — build one on the REPLAYS page.</div>'; return; }
+  const sceneOpts = '<option value="">Scene: global Program scene</option>'
+    + scenes.map((s) => `<option value="${esc(s)}">Scene: ${esc(s)}</option>`).join('');
   montages.forEach((m) => {
     const n = (m.clipIds || m.items || []).length;
     const ready = !!m.outputPath;
+    // Thumbnail: first clip in the playlist, else the encoded output file's first frame.
+    const firstClip = (m.clipIds || []).map((cid) => lib.find((c) => c.id === cid)).find(Boolean);
+    const thumbPath = (firstClip && firstClip.path) || m.outputPath || '';
     const row = document.createElement('div');
-    row.className = 'qr-clip-row';
-    row.innerHTML = `<span class="qr-clip-name" title="${esc(m.name || 'Playlist')}">${esc(m.name || 'Playlist')}</span>`
+    row.className = 'qr-clip-row qr-pl-row';
+    row.innerHTML = `<div class="qr-clip-info">`
+      + `<div class="qr-clip-thumb">${thumbPath ? `<img class="qr-clip-thumb-img" alt="" loading="lazy" src="${thumbUrl(thumbPath)}">` : ''}</div>`
+      + `<span class="qr-clip-name" title="${esc(m.name || 'Playlist')}">${esc(m.name || 'Playlist')}</span>`
       + `<span class="qr-clip-dur">${n} clip${n === 1 ? '' : 's'}</span>`
-      + `<span class="qr-pl-badge${ready ? ' is-ready' : ''}">${ready ? 'Ready' : 'Draft'}</span>`
-      + `<button class="btn btn-primary btn-sm qr-pl-air" title="Play this playlist on the program bus">To Air</button>`;
+      + `<span class="qr-pl-badge${ready ? ' is-ready' : ''}">${ready ? 'Ready' : 'Draft'}</span></div>`
+      + `<div class="qr-clip-btns"><button class="btn btn-primary btn-sm qr-pl-air" title="Play this playlist on the program bus — cuts OBS to the scene below (or the global Program scene)">To Air</button></div>`
+      + `<select class="input-select qr-pl-scene" title="OBS scene this playlist cuts to when it goes to air — saved on the playlist">${sceneOpts}</select>`;
+    const thumbImg = row.querySelector('.qr-clip-thumb-img');
+    if (thumbImg) {
+      thumbImg.addEventListener('load', () => thumbImg.classList.add('loaded'));
+      thumbImg.addEventListener('error', () => thumbImg.remove());
+    }
+    const sceneSel = row.querySelector('.qr-pl-scene');
+    sceneSel.value = m.programScene || '';
+    sceneSel.addEventListener('change', () => {
+      m.programScene = sceneSel.value;   // optimistic — playMontageById reads currentState immediately
+      send('montage_settings', { montageId: m.id, programScene: sceneSel.value });
+    });
     row.querySelector('.qr-pl-air').addEventListener('click', () => {
       if (typeof playMontageById === 'function') { playMontageById(m.id); showToast('Playlist to air: ' + (m.name || 'Playlist'), '#22c55e'); }
     });

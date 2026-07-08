@@ -7653,3 +7653,7 @@ tr.lg2-drag-over { outline: 2px solid var(--accent, #4a9eff); outline-offset: -1
 #int-subnav { display: none; }
 
 .int-card-logo.mono-val { background: linear-gradient(135deg, #be123c, #881337); }
+
+/* Qrail playlist rows: two-line — info + To Air on top, per-playlist scene select beneath */
+.qr-pl-row { flex-wrap: wrap; }
+.qr-pl-row .qr-pl-scene { flex: 1 1 100%; margin-top: 6px; font-size: 11px; padding: 4px 8px; }
