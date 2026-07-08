@@ -2072,23 +2072,43 @@ function _returnGraphicsToProd() {
       const sEl = el('gfx-front-std-subtitle'); if (sEl && document.activeElement !== sEl) sEl.value = s.subtitle || '';
       const rEl = el('gfx-front-std-showrecord'); if (rEl && document.activeElement !== rEl) rEl.checked = s.showRecord !== false;
       const srcBtn = document.querySelector('#gfx-std-src .gfx-std-src-tab.is-on, #gfx-std-src .gfx-src-tab.is-on');
-      const src = srcBtn ? srcBtn.textContent.trim() : 'League';
       // Mirror the pop-out's active source onto the front-panel chips.
       const srcKey = srcBtn ? srcBtn.dataset.stdsrc : 'league';
       document.querySelectorAll('#gfx-front-std-src .gfx-src-tab').forEach((t) => t.classList.toggle('is-on', t.dataset.fstdsrc === srcKey));
-      body.innerHTML = row('Source', tlEsc(src)) + row('Rows', (s.rows && s.rows.length) || 0);
+      // Live preview of the standings rows currently on air.
+      const rows = s.rows || [];
+      const cnt = el('gfx-front-std-count'); if (cnt) cnt.textContent = rows.length ? (rows.length + (rows.length === 1 ? ' team' : ' teams')) : '';
+      if (!rows.length) {
+        body.innerHTML = '<p class="gfx-fp-empty">No rows yet — pick a league / tournament above, or add rows in More settings.</p>';
+      } else {
+        const showRec = s.showRecord !== false;
+        body.innerHTML = rows.slice(0, 24).map((r, i) => {
+          const rk = r.placement || (i + 1);
+          const logo = r.logo ? `<img class="logo" src="${tlEsc(String(r.logo))}" alt="">` : '';
+          const rec = showRec ? `<span class="rec">${(r.wins || 0)}-${(r.losses || 0)}</span>` : '';
+          const pts = (r.points != null && r.points !== '') ? `<span class="pts">${tlEsc(String(r.points))}</span>` : '';
+          const nm = tlEsc(r.name || 'TBD');
+          return `<div class="gfx-fp-prow"><span class="rk">${rk}</span>${logo}<span class="nm" title="${nm}">${nm}</span>${rec}${pts}</div>`;
+        }).join('');
+      }
     } else if (key === 'schedule') {
       const body = el('gfx-front-schedule-body'); if (!body) return;
       const u = data.upcoming || {};
       const tEl = el('gfx-front-sch-title'); if (tEl && document.activeElement !== tEl) tEl.value = u.title || '';
       const matches = u.matches || [];
-      const onStream = matches.find((m) => m.stream) || matches[0];
-      // Pull Queue/League/Week are real buttons directly on the front card now (not a quick-action
-      // proxy) — this summary is just the read-out.
-      const html = row('Queued', matches.length) + (onStream
-        ? row('On stream', tlEsc((onStream.teamA || 'TBD') + ' vs ' + (onStream.teamB || 'TBD')))
-        : empty('No matches queued.'));
-      body.innerHTML = html;
+      const cnt = el('gfx-front-sch-count'); if (cnt) cnt.textContent = matches.length ? (matches.length + (matches.length === 1 ? ' match' : ' matches')) : '';
+      // Live preview of the queued matches (streamed match badged LIVE).
+      if (!matches.length) {
+        body.innerHTML = '<p class="gfx-fp-empty">No matches queued — pull from a tournament / league above.</p>';
+      } else {
+        body.innerHTML = matches.slice(0, 24).map((m) => {
+          const rd = m.round ? `<span class="rd" title="${tlEsc(m.round)}">${tlEsc(m.round)}</span>` : '';
+          const a = tlEsc(m.teamA || 'TBD'), b = tlEsc(m.teamB || 'TBD');
+          const ti = (m.time || m.date) ? `<span class="ti">${tlEsc(String(m.time || m.date))}</span>` : '';
+          const live = m.stream ? '<span class="live">LIVE</span>' : '';
+          return `<div class="gfx-fp-prow">${rd}<span class="tm" title="${a} vs ${b}">${a}<span class="vs">vs</span>${b}</span>${ti}${live}</div>`;
+        }).join('');
+      }
     } else if (key === 'draft') {
       const body = el('gfx-front-draft-body'); if (!body) return;
       const d = data.draft || {};
@@ -2127,6 +2147,12 @@ function _returnGraphicsToProd() {
   el('gfx-front-std-showrecord')?.addEventListener('change', function () { send('set_standings', { showRecord: this.checked }); });
   const _schTitle = debounce(() => send('set_upcoming', { title: (el('gfx-front-sch-title')?.value || '').trim() }), 350);
   el('gfx-front-sch-title')?.addEventListener('input', _schTitle);
+  // Push / Clear right on the front cards — proxy the existing hidden scene buttons so all the
+  // build-payload + visible:true logic stays single-sourced (no clicking up to the top rail).
+  el('gfx-front-std-push')?.addEventListener('click', () => el('btn-gfx-standings-push')?.click());
+  el('gfx-front-std-clear')?.addEventListener('click', () => el('btn-gfx-standings-clear')?.click());
+  el('gfx-front-sch-push')?.addEventListener('click', () => el('btn-gfx-schedule-push')?.click());
+  el('gfx-front-sch-clear')?.addEventListener('click', () => el('btn-gfx-schedule-clear')?.click());
 
   // Open/close a scene's pop-out editor (Bracket, Spotlight, and — once converted — Standings,
   // Schedule, Map Pool, Draft). The modal id convention is #gfx-popout-<key>.
@@ -2441,7 +2467,13 @@ function _returnGraphicsToProd() {
     const maps = Array.isArray(v.maps) ? v.maps : [];
     const boSel = el('mp-bestof');
     if (boSel && document.activeElement !== boSel) boSel.value = String((data && data.bestOf) || 5);
-    if (document.activeElement?.closest('#mp-slots') == null) mpRenderSlots(maps);
+    if (document.activeElement?.closest('#mp-slots') == null) {
+      // Blank slots aren't in the saved payload, so a plain broadcast would otherwise wipe the
+      // empty slot the producer just added with "+ Add map". Never shrink below the current count.
+      const bo = parseInt(boSel?.value, 10) || 5;
+      const curCount = el('mp-slots')?.querySelectorAll('.mp-slot').length || 0;
+      mpRenderSlots(maps, Math.max(maps.length, curCount, mpMinSlots(bo)));
+    }
     if (typeof window._gfxRefreshVetoSeriesLink === 'function') window._gfxRefreshVetoSeriesLink(data);
   }
   // Exposed so the front-panel live-refresh hook (outside this IIFE) can reach it.
@@ -2663,6 +2695,7 @@ function _returnGraphicsToProd() {
     // so the pop-out can show config + live rows side by side).
     const leagueSel = el('gfx-std-league-select-wrap'); if (leagueSel) leagueSel.style.display = src === 'league' ? '' : 'none';
     const sgSel = el('gfx-std-sg-select-wrap'); if (sgSel) sgSel.style.display = src === 'startgg' ? '' : 'none';
+    const bktSel = el('gfx-std-bkt-select-wrap'); if (bktSel) bktSel.style.display = src === 'bracket' ? '' : 'none';
     const manualActions = el('gfx-std-manual-actions-wrap'); if (manualActions) manualActions.style.display = src === 'manual' ? '' : 'none';
     document.querySelectorAll('#gfx-std-src .gfx-src-tab').forEach((b) => b.classList.toggle('is-on', b.dataset.stdsrc === src));
   }
@@ -2740,6 +2773,17 @@ function _returnGraphicsToProd() {
       if (!teams.length) return { ok: false, err: 'No start.gg event loaded.' };
       const rows = teams.map((tm, i) => ({ placement: i + 1, name: tm.name || 'Team', logo: tm.logo || null, wins: 0, losses: 0, points: 0 }));
       return { ok: true, payload: { ...common, source: 'startgg-league', rows }, msg: 'from start.gg seeding' };
+    } else if (src === 'bracket') {
+      const phaseId = el('gfx-std-bkt-phase')?.value;
+      const phases = (currentState && currentState.bracket && currentState.bracket.phases) || [];
+      const ph = phases.find((p) => p.id === phaseId);
+      if (!ph) return { ok: false, err: 'Select a bracket phase first.' };
+      const poolId = el('gfx-std-bkt-pool')?.value;
+      const pool = poolId && Array.isArray(ph.pools) ? ph.pools.find((pl) => pl.id === poolId) : null;
+      const source = (pool ? pool.standings : ph.standings) || [];
+      if (!source.length) return { ok: false, err: 'That phase/pool has no standings table yet.' };
+      const rows = source.map((r, i) => ({ ...r, placement: r.placement || i + 1 }));
+      return { ok: true, payload: { ...common, source: 'bracket-phase', rows }, msg: 'from ' + (ph.name || 'phase') + (pool ? ' · ' + (pool.name || 'pool') : '') };
     }
     return { ok: true, payload: { ...common, source: 'manual' }, msg: '' };
   }
@@ -3095,6 +3139,45 @@ function _returnGraphicsToProd() {
     gfxRefreshStandingsPreview();
     gfxRefreshSgStandingsPreview();
   };
+
+  // Bracket-phase source for Standings: pick any loaded phase (Pool Play / Swiss / Round Robin /
+  // elimination) and, if it has multiple pools, which pool — independent of whichever phase/pool
+  // is currently ACTIVE on the Bracket scene itself (that's a different, live-switched concept).
+  function gfxStdBktPools() {
+    const phaseSel = el('gfx-std-bkt-phase'), poolRow = el('gfx-std-bkt-pool-row'), poolSel = el('gfx-std-bkt-pool');
+    if (!phaseSel || !poolSel) return;
+    const phases = (currentState && currentState.bracket && currentState.bracket.phases) || [];
+    const ph = phases.find((p) => p.id === phaseSel.value);
+    const pools = (ph && Array.isArray(ph.pools)) ? ph.pools : [];
+    const prev = poolSel.value;
+    if (pools.length > 1) {
+      poolSel.innerHTML = '<option value="">Select pool…</option>';
+      pools.forEach((pl) => {
+        const opt = document.createElement('option');
+        opt.value = pl.id; opt.textContent = pl.name || pl.id;
+        if (pl.id === prev) opt.selected = true;
+        poolSel.appendChild(opt);
+      });
+      poolRow.style.display = '';
+    } else {
+      poolSel.innerHTML = '<option value="">Select pool…</option>';
+      poolRow.style.display = 'none';
+    }
+  }
+  window._gfxRefreshStandingsBracketPhases = function (state) {
+    const sel = el('gfx-std-bkt-phase'); if (!sel) return;
+    const prev = sel.value;
+    const phases = (state && state.bracket && state.bracket.phases) || [];
+    sel.innerHTML = '<option value="">Select phase…</option>';
+    phases.forEach((ph) => {
+      const opt = document.createElement('option');
+      opt.value = ph.id; opt.textContent = ph.name || ph.id;
+      if (ph.id === prev) opt.selected = true;
+      sel.appendChild(opt);
+    });
+    gfxStdBktPools();
+  };
+  el('gfx-std-bkt-phase')?.addEventListener('change', gfxStdBktPools);
 
   window._gfxRefreshScheduleQueue = gfxRenderScheduleQueue;
   window._schSetMatches = function(matches) { _schMatches = matches.slice(); schRenderList(); schAutoSave(); };
@@ -5050,6 +5133,7 @@ function applyState(data) {
   if (typeof window._gfxRefreshMatchupPickers === 'function') window._gfxRefreshMatchupPickers(data);
   if (typeof window._gfxRefreshWinnerPicker   === 'function') window._gfxRefreshWinnerPicker(data);
   if (typeof window._gfxRefreshStandingsLeagues === 'function') window._gfxRefreshStandingsLeagues(data);
+  if (typeof window._gfxRefreshStandingsBracketPhases === 'function') window._gfxRefreshStandingsBracketPhases(data);
   if (typeof window._gfxRefreshBracketLeagues === 'function') window._gfxRefreshBracketLeagues(data);
   if (typeof window._gfxRefreshBracketOrgStatus === 'function') window._gfxRefreshBracketOrgStatus(data);
   if (typeof window._gfxRefreshScheduleQueue === 'function') window._gfxRefreshScheduleQueue(data);
@@ -14458,9 +14542,9 @@ function buildCasterDeskLayouts() {
         <span class="cdl-desc">${it.desc}</span>
       </div>
       <span class="cdl-actions">
-        <button type="button" class="btn btn-secondary btn-sm cdl-copy">Copy</button>
-        <button type="button" class="btn btn-secondary btn-sm cdl-preview">Preview</button>
-        <button type="button" class="btn btn-blue btn-sm cdl-open">Open</button>
+        <button type="button" class="btn btn-secondary btn-sm cdl-copy" title="Copy the real URL — use this one for OBS">Copy</button>
+        <button type="button" class="btn btn-secondary btn-sm cdl-preview" title="Opens with sample data for a quick look — do NOT copy this tab's address into OBS, use Copy/Open instead">Preview</button>
+        <button type="button" class="btn btn-blue btn-sm cdl-open" title="Open the real URL — same one OBS should use">Open</button>
       </span>`;
     row.querySelector('.cdl-open').addEventListener('click', () => window.open(url, '_blank'));
     row.querySelector('.cdl-preview').addEventListener('click', () => window.open(url + '?preview=1', '_blank'));
@@ -14782,8 +14866,69 @@ function wireBracketPhasePool() {
 wireBracketPhasePool();
 
 // ── Bracket team search — panel + mini control center. Server finds the team across all
-// phases/pools, auto-selects their bracket view and highlights them (startgg.focusTeam).
+// phases/pools, auto-selects their bracket view and highlights their whole run on the
+// overlay (startgg.focusTeam → bracket.html focus mode). The inputs autocomplete from the
+// loaded bracket's teams with their logos, Match — Teams style, so no blind typing.
 (function wireBracketTeamSearch() {
+  // Every team in the loaded bracket, with a logo when one is known: bracket.teams carries
+  // [{name, logo}] from imports; names found only in rosters/standings/sets fall back to the
+  // saved-teams library logo (the same source the overlay itself uses), else an initial.
+  function bktCandidates() {
+    const b = (currentState && currentState.bracket) || {};
+    const byName = new Map();
+    (b.teams || []).forEach((t) => { if (t && t.name) byName.set(t.name.toLowerCase(), { name: t.name, logo: t.logo || null }); });
+    const addName = (n) => { if (n && n !== 'TBD' && !byName.has(n.toLowerCase())) byName.set(n.toLowerCase(), { name: n, logo: null }); };
+    (b.phases || []).forEach((ph) => {
+      (ph.pools || []).forEach((pl) => {
+        (pl.roster || []).forEach(addName);
+        (pl.standings || []).forEach((r) => addName(r && r.name));
+        (pl.schedule || []).forEach((round) => (round.sets || []).forEach((s) => { addName(s.a && s.a.name); addName(s.b && s.b.name); }));
+      });
+      [...(ph.winners || []), ...(ph.losers || []), ...(ph.finals || []), ...(ph.schedule || [])].forEach((round) => {
+        (round.sets || []).forEach((s) => { addName(s.a && s.a.name); addName(s.b && s.b.name); });
+      });
+    });
+    const saved = (currentState && currentState.savedTeams) || [];
+    byName.forEach((t) => {
+      if (!t.logo) {
+        const hit = saved.find((s) => s && s.name && s.name.toLowerCase() === t.name.toLowerCase());
+        if (hit && hit.logo) t.logo = hit.logo;
+      }
+    });
+    return [...byName.values()].sort((a, z) => a.name.localeCompare(z.name));
+  }
+
+  let dd = null;
+  function closeDd() { if (dd) { dd.remove(); dd = null; } }
+  function openDd(inp) {
+    const q = (inp.value || '').trim().toLowerCase();
+    const list = bktCandidates().filter((t) => !q || t.name.toLowerCase().includes(q)).slice(0, 8);
+    closeDd();
+    if (!list.length) return;
+    dd = document.createElement('div');
+    dd.className = 'bkt-find-dd';
+    const r = inp.getBoundingClientRect();
+    dd.style.cssText = `position:fixed; left:${r.left}px; top:${r.bottom + 4}px; width:${Math.max(r.width, 240)}px; z-index:5000;`;
+    list.forEach((t) => {
+      const row = document.createElement('button');
+      row.type = 'button';
+      row.className = 'bkt-find-row';
+      row.innerHTML = (t.logo
+        ? `<img class="bkt-find-logo" src="${esc(t.logo)}" alt="">`
+        : `<span class="bkt-find-logo bkt-find-initial">${esc((t.name[0] || '?').toUpperCase())}</span>`)
+        + `<span class="bkt-find-name">${esc(t.name)}</span>`;
+      // mousedown (not click) so it fires before the input's blur removes the dropdown
+      row.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        inp.value = t.name;
+        closeDd();
+        send('bracket_focus_team', { name: t.name });
+      });
+      dd.appendChild(row);
+    });
+    document.body.appendChild(dd);
+  }
+
   const doFind = (inputId) => {
     const v = (el(inputId)?.value || '').trim();
     if (!v) { showToast('Type a team name to find.', '#fbbf24'); return; }
@@ -14791,9 +14936,18 @@ wireBracketPhasePool();
   };
   [['bracket-team-search', 'bracket-team-find', 'bracket-team-clear'],
    ['gfx-bkt-cc-search', 'gfx-bkt-cc-find', 'gfx-bkt-cc-clearfocus']].forEach(([inp, find, clear]) => {
-    el(find)?.addEventListener('click', () => doFind(inp));
-    el(inp)?.addEventListener('keydown', (e) => { if (e.key === 'Enter') doFind(inp); });
-    el(clear)?.addEventListener('click', () => { const i = el(inp); if (i) i.value = ''; send('bracket_focus_team', { name: '' }); });
+    const i = el(inp);
+    el(find)?.addEventListener('click', () => { closeDd(); doFind(inp); });
+    if (i) {
+      i.addEventListener('input', () => openDd(i));
+      i.addEventListener('focus', () => openDd(i));
+      i.addEventListener('blur', () => setTimeout(closeDd, 150));
+      i.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { closeDd(); doFind(inp); }
+        else if (e.key === 'Escape') closeDd();
+      });
+    }
+    el(clear)?.addEventListener('click', () => { const x = el(inp); if (x) x.value = ''; closeDd(); send('bracket_focus_team', { name: '' }); });
   });
 })();
 

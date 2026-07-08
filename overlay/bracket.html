@@ -29,16 +29,6 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
   opacity: 0; transform: scale(1.012); transition: opacity .55s ease, transform .55s ease; }
 .bk-stage.show { opacity: 1; transform: scale(1); }
 
-.bk-bg { position: absolute; inset: 0; z-index: -2;
-  background:
-    radial-gradient(120% 75% at 50% -8%, color-mix(in srgb, var(--accent) 18%, transparent) 0%, transparent 50%),
-    radial-gradient(80% 60% at 100% 108%, color-mix(in srgb, var(--accent-2) 12%, transparent) 0%, transparent 55%),
-    linear-gradient(180deg, #0b0d12 0%, #0e1118 55%, #0b0d12 100%); }
-.bk-bg::after { content: ''; position: absolute; inset: 0;
-  background-image: linear-gradient(var(--hair) 1px, transparent 1px), linear-gradient(90deg, var(--hair) 1px, transparent 1px);
-  background-size: 70px 70px; opacity: .04;
-  -webkit-mask-image: radial-gradient(85% 65% at 50% 32%, #000 0%, transparent 78%);
-  mask-image: radial-gradient(85% 65% at 50% 32%, #000 0%, transparent 78%); }
 
 /* ── Header — absolute bottom-right (centered in butterfly mode) ── */
 .bk-header { position: absolute; bottom: 28px; right: 52px; z-index: 10;
@@ -53,7 +43,7 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
   color: var(--accent); text-align: right; }
 .bk-title { font-family: var(--disp); font-weight: 700; font-size: 34px; line-height: 1; letter-spacing: .02em; text-transform: uppercase; color: #fff;
   text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 760px; }
-.bk-subtitle { font-family: var(--body); font-weight: 600; font-size: 15px; color: var(--muted); text-align: right;
+.bk-subtitle { font-family: var(--body); font-weight: 600; font-size: 15px; color: rgba(255,255,255,.85); text-align: right;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 760px; }
 .bk-subtitle:empty { display: none; }
 .bk-head-right { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
@@ -103,7 +93,7 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
 /* ── Round column — flex-fill: columns always span edge to edge ── */
 .bk-round { position: relative; z-index: 1; display: flex; flex-direction: column; flex: 1; min-width: 0; }
 .bk-round-name { font-family: var(--disp); font-weight: 700; font-size: 13px; letter-spacing: .22em; text-transform: uppercase;
-  color: rgba(255,255,255,.35); text-align: center; margin-bottom: 10px; height: 16px; }
+  color: #fff; text-align: center; margin-bottom: 10px; height: 16px; }
 .bk-round.is-final .bk-round-name { color: rgba(255,214,107,.7); }
 .bk-matches { display: flex; flex-direction: column; justify-content: space-around; gap: 10px; flex: 1; min-height: 0; }
 
@@ -158,6 +148,17 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
 .bk-slot.focused { outline: 1px solid color-mix(in srgb, var(--accent) 45%, transparent); }
 .bk-slot.focused .bk-slot-accent { background: var(--accent); }
 .bk-slot.focused .bk-name { color: #fff; font-weight: 800; }
+/* Team-run focus mode: the focused team's matches (their path through the bracket) stay lit
+   and ringed; every other match recedes so the run reads instantly. Connectors fade with the
+   matches so the lit boxes themselves trace the route. */
+.bk-focus-mode .bk-match:not(.on-path) { opacity: .28; filter: saturate(.45); transition: opacity .35s ease; }
+.bk-focus-mode .bk-match.on-path {
+  opacity: 1; transition: opacity .35s ease;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 60%, transparent),
+              0 0 22px color-mix(in srgb, var(--accent) 28%, transparent),
+              0 6px 24px rgba(0,0,0,.55);
+}
+.bk-focus-mode .bk-connectors path { stroke: rgba(255,255,255,.09); }
 
 /* ── Schedule (round-robin / swiss round-by-round pairings) — reuses .bk-round/.bk-match/.bk-slot ── */
 .bk-schedule { width: 100%; }
@@ -260,14 +261,13 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
 
 /* ── Empty ── */
 .bk-empty { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
-  font-family: var(--disp); font-weight: 600; font-size: 30px; letter-spacing: .06em; color: rgba(255,255,255,.24); text-transform: uppercase; }
+  font-family: var(--disp); font-weight: 600; font-size: 30px; letter-spacing: .06em; color: rgba(255,255,255,.85); text-transform: uppercase; }
 .hidden { display: none !important; }
 </style>
 </head>
 <body>
 
 <div id="bk-stage" class="bk-stage">
-  <div class="bk-bg"></div>
   <header class="bk-header">
     <div class="bk-section-pills" id="bk-section-pills"></div>
     <div class="bk-head-text">
@@ -797,12 +797,24 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
       fit(isElim && SHOW_W && SHOW_L && ROUNDS_N === 0);
       if (focusTeam) {
         var fn = focusTeam.toLowerCase();
+        // Team-run focus: light the team's slot in every match they appear in AND mark those
+        // matches on-path — everything else recedes (see .bk-focus-mode CSS), so the viewer
+        // reads the team's whole progression through the bracket at a glance.
+        scaleEl.classList.add('bk-focus-mode');
         scaleEl.querySelectorAll('.bk-name').forEach(function(nameEl) {
           var slot = nameEl.closest('.bk-slot');
           if (slot) slot.classList.toggle('focused', nameEl.textContent.toLowerCase().includes(fn));
         });
+        scaleEl.querySelectorAll('.bk-match').forEach(function(m) {
+          var onPath = Array.prototype.some.call(m.querySelectorAll('.bk-name'), function(n) {
+            return n.textContent.toLowerCase().includes(fn);
+          });
+          m.classList.toggle('on-path', onPath);
+        });
       } else {
+        scaleEl.classList.remove('bk-focus-mode');
         scaleEl.querySelectorAll('.bk-slot.focused').forEach(function(s) { s.classList.remove('focused'); });
+        scaleEl.querySelectorAll('.bk-match.on-path').forEach(function(m) { m.classList.remove('on-path'); });
       }
     });
   }
@@ -813,7 +825,11 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
     // bracket — keep showing the sample instead of letting it blank the scene.
     if (SceneBase.preview) {
       const lb = data.bracket || {};
-      const has = (lb.winners || []).length || (lb.losers || []).length || (lb.finals || []).length || (lb.standings || []).length;
+      // Must match render()'s own hasData check — a Round Robin/Swiss/League-sourced bracket has
+      // real content in schedule/matrix, not winners/losers/finals, and was wrongly falling back
+      // to the demo bracket here even though real pool-play data existed.
+      const has = (lb.winners || []).length || (lb.losers || []).length || (lb.finals || []).length
+        || (lb.standings || []).length || (lb.schedule || []).length || !!(lb.matrix && lb.matrix.teams && lb.matrix.teams.length);
       if (!has) {
         const demo = SceneBase.demoState();
         d = Object.assign({}, data, { bracket: demo.bracket,
