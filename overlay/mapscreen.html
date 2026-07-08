@@ -30,6 +30,7 @@
        gameplay/scene content behind the transparent canvas. */
     .veto-head {
       position: absolute; top: 34px; left: 50%; transform: translateX(-50%); z-index: 2;
+      display: flex; align-items: center; gap: 26px;
       text-align: center; padding: 16px 58px 14px; border-radius: 14px;
       background: linear-gradient(180deg, rgba(17,19,26,.94), rgba(10,12,16,.97));
       border: 1px solid rgba(255,255,255,.09);
@@ -39,8 +40,11 @@
     .veto-head::after { content: ''; position: absolute; left: 14%; right: 14%; bottom: 0; height: 3px;
       border-radius: 3px; background: linear-gradient(90deg, transparent, var(--accent) 35%, var(--accent) 65%, transparent);
       box-shadow: 0 0 16px color-mix(in srgb, var(--accent) 60%, transparent); }
+    .veto-brand { height: 68px; max-width: 150px; object-fit: contain; flex: 0 0 auto;
+      filter: drop-shadow(0 4px 14px rgba(0,0,0,.55)); }
+    .veto-head-text { min-width: 0; }
     .veto-title { font-family: 'Rajdhani', var(--main-font); font-weight: 700; font-size: 4em; color: #fff; letter-spacing: 0.04em;
-      text-shadow: 0 4px 18px rgba(0,0,0,.6); white-space: nowrap; max-width: 1500px; overflow: hidden; text-overflow: ellipsis; }
+      text-shadow: 0 4px 18px rgba(0,0,0,.6); white-space: nowrap; max-width: 1350px; overflow: hidden; text-overflow: ellipsis; }
     .veto-sub   { font-family: 'Rajdhani', var(--main-font); font-weight: 600; font-size: 1.4em; color: var(--accent); letter-spacing: 0.3em; margin-top: 6px; }
     .veto-sub:empty { display: none; }
     @keyframes veto-drop { 0% { opacity: 0; transform: translate(-50%, -40px); } 100% { opacity: 1; transform: translate(-50%, 0); } }
@@ -87,8 +91,11 @@
 <body>
   <div id="veto-stage">
     <div class="veto-head">
-      <div class="veto-title" id="veto-title">MAP POOL</div>
-      <div class="veto-sub" id="veto-sub"></div>
+      <img class="veto-brand" id="veto-brand" alt="" style="display:none;">
+      <div class="veto-head-text">
+        <div class="veto-title" id="veto-title">MAP POOL</div>
+        <div class="veto-sub" id="veto-sub"></div>
+      </div>
     </div>
     <div class="veto-row" id="veto-row"></div>
     <div class="footer">
@@ -125,6 +132,17 @@
       stage.classList.add('show');
 
       titleEl.textContent = (v.title || 'MAP POOL').toUpperCase();
+      // Active brand kit's logo on the header plate (hidden when no kit is active).
+      const brandEl = document.getElementById('veto-brand');
+      if (brandEl) {
+        const logo = SceneBase.brandLogo(data);
+        if (logo) {
+          if (brandEl.getAttribute('src') !== logo) brandEl.src = logo;
+          brandEl.style.display = '';
+        } else {
+          brandEl.style.display = 'none';
+        }
+      }
       const maps = Array.isArray(v.maps) ? v.maps : [];
 
       // Rebuild only when the data changes (avoid restarting card animations each tick).
