@@ -248,7 +248,10 @@
     _casterDisplay(casters, c) {
       if (!c) return c;
       const mode = (casters && casters.nameMode) === 'name' ? 'name' : 'gamertag';
-      const tag = (c.gamertag || c.handle || '').toString().replace(/^@/, '').trim();
+      // ONLY the crew gamertag qualifies as a display name — `handle` is the @social
+      // username in the caster-card UIs and must never become the on-air first name.
+      // No crew gamertag → keep the profile name.
+      const tag = (c.gamertag || '').toString().replace(/^@/, '').trim();
       if (mode === 'gamertag' && tag) return Object.assign({}, c, { name: tag, fullName: c.name || '' });
       return c;
     },

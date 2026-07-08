@@ -2427,6 +2427,17 @@ function casterAudioOverride(caster) {
   return a;
 }
 // Convert lineup + library + rooms → state.casters.list for overlay consumption.
+// The crew profile is the canonical person record: its Handle/Gamertag field is the DISPLAY
+// name for desks. The caster-library `handle` field can't be trusted for that — the caster
+// card editors historically treat it as the @social username, so the two UIs disagree about
+// what it means. Cross-reference by name at resolve time instead of trying to sync fields.
+function crewGamertagFor(name) {
+  const k = (name || '').toString().trim().toLowerCase();
+  if (!k || !Array.isArray(state.crew)) return '';
+  const hit = state.crew.find((c) => c && (c.name || '').toString().trim().toLowerCase() === k);
+  return ((hit && hit.handle) || '').toString().trim();
+}
+
 function resolveLineupToList() {
   const lib = state.casters.library || [];
   const rooms = state.casters.rooms || [];
@@ -2447,7 +2458,8 @@ function resolveLineupToList() {
       id: prof.id || ('lineup_' + (entry.slot || (i + 1))),
       name: prof.name || '',
       handle: prof.handle || '',
-      socialHandle: prof.socialHandle || '',   // @-line username; handle is the gamertag
+      gamertag: crewGamertagFor(prof.name),    // desk display name (crew Handle/Gamertag field)
+      socialHandle: prof.socialHandle || prof.handle || '',   // @-line username
       social: prof.social || 'none',
       country: prof.country || '',
       slot: Number(entry.slot) || (i + 1),
@@ -10403,7 +10415,8 @@ function handleControlMessage(msg, ws) {
           id: c.id || Math.random().toString(36).slice(2, 11),
           name: (c.name || '').toString().slice(0, 40),
           handle: (c.handle || '').toString().slice(0, 80),
-          socialHandle: (c.socialHandle || '').toString().slice(0, 80),
+          gamertag: crewGamertagFor(c.name),   // desk display name (crew Handle/Gamertag field)
+          socialHandle: (c.socialHandle || c.handle || '').toString().slice(0, 80),
           camUrl: (c.camUrl || '').toString().slice(0, 1000),
           // VDO building blocks (so the control panel can re-show + rebuild the clean view URL).
           streamId: (c.streamId || '').toString().slice(0, 120),
@@ -10568,7 +10581,9 @@ function handleControlMessage(msg, ws) {
         const syncEntry = (e) => {
           if (!matches(e)) return;
           e.name = upd.name;
-          e.handle = upd.handle;
+          // Deliberately NOT e.handle: the caster-card UIs treat library `handle` as the
+          // @social username, while the crew Handle/Gamertag feeds the desk display name
+          // via crewGamertagFor() at resolve time — no field fight.
           if (upd.social) e.social = upd.social;
           if (upd.socialHandle !== undefined) e.socialHandle = upd.socialHandle;
           if (upd.country !== undefined) e.country = upd.country;
@@ -17397,6 +17412,9 @@ module.exports.start = function(baseDir) {
   });
   loadTeams();
   loadState();
+  // Re-join the desk lineup against the crew/library so slots carry the current gamertag
+  // (the persisted list is a snapshot; without this, a relaunch keeps stale display names).
+  try { resolveLineupToList(); } catch (e) { /* no lineup yet */ }
   resetRlGameTrack();
   loadFacecams();
   loadPresets();
