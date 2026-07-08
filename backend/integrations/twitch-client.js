@@ -2,6 +2,18 @@ const axios = require('axios');
 
 const TWITCH_API_BASE = 'https://api.twitch.tv/helix';
 
+// Build an error carrying Twitch's OWN explanation (missing scope, channel not eligible,
+// bad title length…). The old catch-log-return-null pattern reduced every failure to a
+// generic "Failed to create prediction on Twitch API" with the real cause only in stdout.
+function twitchApiError(err, what) {
+  const res = err.response;
+  const d = res && res.data;
+  const detail = (d && (d.message || d.error)) ? `${d.message || d.error} (HTTP ${res.status})` : err.message;
+  const e = new Error(`${what} failed: ${detail}`);
+  if (res && res.status) e.status = res.status;   // server's explainTwitchApiError keys off this (401 reconnect / 403 affiliate / 429)
+  return e;
+}
+
 class TwitchClient {
   constructor(clientId, clientSecret, accessToken) {
     this.clientId = clientId;
@@ -55,8 +67,8 @@ class TwitchClient {
       );
       return res.data.data?.[0] || null;
     } catch (err) {
-      console.error('[Twitch] createPrediction error:', err.message);
-      return null;
+      console.error('[Twitch] createPrediction error:', err.response?.data?.message || err.message);
+      throw twitchApiError(err, 'Create prediction');
     }
   }
 
@@ -74,8 +86,8 @@ class TwitchClient {
       );
       return res.data.data?.[0] || null;
     } catch (err) {
-      console.error('[Twitch] resolvePrediction error:', err.message);
-      return null;
+      console.error('[Twitch] resolvePrediction error:', err.response?.data?.message || err.message);
+      throw twitchApiError(err, 'Resolve prediction');
     }
   }
 
@@ -127,8 +139,8 @@ class TwitchClient {
       );
       return res.data.data?.[0] || null;
     } catch (err) {
-      console.error('[Twitch] lockPrediction error:', err.message);
-      return null;
+      console.error('[Twitch] lockPrediction error:', err.response?.data?.message || err.message);
+      throw twitchApiError(err, 'Lock prediction');
     }
   }
 
@@ -141,8 +153,8 @@ class TwitchClient {
       );
       return res.data.data?.[0] || null;
     } catch (err) {
-      console.error('[Twitch] cancelPrediction error:', err.message);
-      return null;
+      console.error('[Twitch] cancelPrediction error:', err.response?.data?.message || err.message);
+      throw twitchApiError(err, 'Cancel prediction');
     }
   }
 
