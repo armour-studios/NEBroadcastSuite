@@ -2876,6 +2876,20 @@ input[type="radio"], input[type="checkbox"] { accent-color: var(--cp-accent); }
 .qk-chip.on { background: linear-gradient(180deg, rgba(74,222,128,.18), rgba(34,197,94,.06)); border-color: rgba(74,222,128,.5); }
 .qk-chip.on .qk-chip-main { color: #fff; }
 .qk-chip.on .qk-chip-main::before { background: var(--ok-2); box-shadow: 0 0 8px rgba(74,222,128,.75); }
+/* Scene-cut chips (real OBS scenes, merged in) — cyan dot instead of grey/green, small tag so
+   they read as "cuts OBS" rather than "pushes a graphic" at a glance. */
+.qk-chip--scene .qk-chip-main { padding-right: 30px; }
+.qk-chip--scene .qk-chip-main::before { background: #38bdf8; }
+.qk-chip--scene.on .qk-chip-main::before { background: var(--ok-2); box-shadow: 0 0 8px rgba(74,222,128,.75); }
+.qk-chip--scene .qk-chip-main::after {
+  content: 'SCN'; position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
+  font-size: 8px; font-weight: 800; letter-spacing: .06em; color: var(--muted); opacity: .7;
+}
+/* Reorder mode — drag handle affordance, mirrors the on-air board's .gfx-board-editing. */
+#qk-put-reorder.active { color: var(--cp-accent); }
+.qk-put.qk-put-editing .qk-chip { cursor: grab; outline: 1px dashed rgba(255,255,255,.2); outline-offset: -3px; }
+.qk-put.qk-put-editing .qk-chip-main, .qk-put.qk-put-editing .qk-chip-gear { pointer-events: none; opacity: .5; }
+.qk-chip.qk-chip-drag { opacity: .4; }
 
 /* ════════════════════════════ Switcher page ════════════════════════════ */
 /* Full-height layout: monitors + take stay fixed; the sources/mixer area scrolls. */
@@ -2958,6 +2972,24 @@ input[type="radio"], input[type="checkbox"] { accent-color: var(--cp-accent); }
 .ps-topics > div > button:last-child:hover { color: #f56565; }
 .ps-topics > div .input-text { background: rgba(0,0,0,.18); }
 .ps-return { display: flex; align-items: center; gap: 8px; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border); }
+/* Caster Predictions — one row per desk cam slot: caster name + a 2-way team pick (click the
+   already-picked side again to clear it). */
+.ps-predictions { display: flex; flex-direction: column; gap: 6px; }
+.ps-pred-row {
+  display: flex; align-items: center; gap: 10px;
+  background: rgba(255,255,255,.03); border: 1px solid var(--border); border-radius: 9px; padding: 8px 10px;
+}
+.ps-pred-name { flex: 1 1 auto; min-width: 0; font-size: 12.5px; font-weight: 700; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ps-pred-name .ps-pred-empty { color: var(--muted); font-weight: 500; font-style: italic; }
+.ps-pred-picks { display: flex; gap: 6px; flex-shrink: 0; }
+.ps-pred-pick {
+  padding: 5px 12px; border-radius: 7px; font-size: 11.5px; font-weight: 800; letter-spacing: .02em;
+  border: 1px solid var(--border); background: rgba(255,255,255,.04); color: var(--muted); cursor: pointer;
+  transition: background .12s, border-color .12s, color .12s; max-width: 130px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ps-pred-pick:hover { color: #fff; background: rgba(255,255,255,.09); }
+.ps-pred-pick.is-picked-a { background: rgba(5,95,219,.28); border-color: #055fdb; color: #fff; }
+.ps-pred-pick.is-picked-b { background: rgba(233,113,57,.28); border-color: #e97139; color: #fff; }
 
 /* Program / preview monitors */
 .sw-monitors { display: grid; grid-template-columns: 1fr auto 1fr; gap: 16px; align-items: center; margin-bottom: 22px; }
@@ -6070,7 +6102,7 @@ body.sides-swapped .qrail-tab-label { right: auto; left: calc(100% + 8px); }
 .qrail-tab:hover .qrail-sgg-logo, .qrail-tab.active .qrail-sgg-logo { opacity: 1; }
 .qrail-tab-dot.is-live { background: var(--ok); animation: sgg-dot-pulse 1.5s ease-out infinite; }
 @keyframes sgg-dot-pulse { 0% { box-shadow: 0 0 0 0 rgba(34,197,94,.7); } 70% { box-shadow: 0 0 0 5px rgba(34,197,94,0); } 100% { box-shadow: 0 0 0 0 rgba(34,197,94,0); } }
-.qrail-paneltitle { flex: 1 1 auto; font-size: 12px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: #c5c8d0; }
+.qrail-paneltitle { flex: 1 1 auto; font-size: 12px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: #c5c8d0; display: none; }
 .qrail-panel { display: none; flex-direction: column; gap: 16px; }
 .qrail-panel.active { display: flex; }
 /* Popout button in qrail-head */
@@ -6810,6 +6842,7 @@ body.sides-swapped .qrail-head { flex-direction: row-reverse; }
    must always render as one unbroken line — never wrap or drop to a second row. The scene-name
    labels to its left shrink/ellipsis first to make room. */
 .gfx-top-actions { display:flex; align-items:center; gap:8px; flex-shrink:0; flex-wrap:nowrap; margin-left:auto; white-space:nowrap; }
+.gfx-top-popout { display:flex; align-items:center; justify-content:center; width:26px; height:26px; padding:0; flex-shrink:0; }
 /* Always-visible two-state pill — grey/OFF AIR when nothing's live, green/LIVE otherwise. */
 .gfx-live-badge { font-size:9px; font-weight:900; letter-spacing:.12em; padding:3px 8px; border-radius:4px; background:#3a4048; color:var(--muted); text-transform:uppercase; transition:background .15s,color .15s; }
 .gfx-live-badge:not(.is-off) { background:var(--ok); color:#000; }
@@ -7387,6 +7420,42 @@ tr.lg2-drag-over { outline: 2px solid var(--accent, #4a9eff); outline-offset: -1
 }
 .dash-tour-cta-x:hover { background: var(--white-a08); color: #fff; }
 
+/* ── Small dismissible Nameless Esports promo banner ──
+   NOTE: no color-mix() here — Electron 18's Chromium (~v100) doesn't support it in the control
+   panel (overlays run in a newer OBS CEF and can use it; this page can't). Accent tinting below
+   uses solid custom-property colors / fixed rgba() instead. */
+.dash-nameless-cta {
+  display: flex; align-items: center; gap: 12px;
+  padding: 9px 10px 9px 12px; margin-bottom: 14px;
+  border-radius: 10px; border: 1px solid var(--border, #2a2f3a); border-left: 3px solid var(--cp-accent);
+  background: var(--surface2, #171a21); font-size: 12px;
+}
+.dash-nameless-cta-logo {
+  flex-shrink: 0; height: 24px; width: 24px; object-fit: contain; border-radius: 6px;
+  filter: drop-shadow(0 1px 4px rgba(0,0,0,.35));
+}
+.dash-nameless-cta-txt { color: var(--muted, #8a92a6); flex: 1; min-width: 0; }
+.dash-nameless-cta-txt strong {
+  font-weight: 800;
+  background: linear-gradient(90deg, var(--cp-accent), var(--cp-accent-2, var(--cp-accent)));
+  -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
+}
+.dash-nameless-cta-links { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.dash-nameless-cta-pill {
+  display: inline-flex; align-items: center; gap: 5px; flex-shrink: 0; white-space: nowrap;
+  padding: 5px 11px; border-radius: 999px; font-weight: 700; font-size: 11.5px;
+  color: #fff; text-decoration: none; background: var(--cp-accent); border: 1px solid transparent;
+  transition: filter .15s, transform .15s;
+}
+.dash-nameless-cta-pill:hover { filter: brightness(1.12); transform: translateY(-1px); }
+.dash-nameless-cta-pill--discord { background: #5865f2; }
+.dash-nameless-cta-x {
+  flex-shrink: 0; width: 22px; height: 22px; border-radius: 6px; cursor: pointer;
+  border: 1px solid transparent; background: transparent; color: var(--muted, #8a92a6);
+  font-size: 11px; line-height: 1; display: inline-flex; align-items: center; justify-content: center;
+}
+.dash-nameless-cta-x:hover { background: var(--white-a08); color: #fff; }
+
 /* ── Dashboard brand-kit strip (compact, above Event) ── */
 .dash-brandkit {
   display: flex; align-items: center; gap: 14px;
@@ -7680,3 +7749,24 @@ tr.lg2-drag-over { outline: 2px solid var(--accent, #4a9eff); outline-offset: -1
 .qr-pl-row .qr-pl-scene:hover, .qr-pl-row .qr-pl-scene:focus {
   border-color: var(--border); background: var(--surface2); color: var(--text);
 }
+
+/* ── Show Deck: talent allocation strip on the Talent page (all sub-tabs) ── */
+.talent-deck {
+  display: flex; align-items: flex-start; gap: 18px; flex-wrap: wrap;
+  padding: 12px 14px; margin-bottom: 18px;
+  background: var(--surface2); border: 1px solid var(--border); border-radius: 12px;
+}
+.td-slots { display: flex; align-items: flex-end; gap: 10px; flex-wrap: wrap; flex: 1 1 auto; min-width: 0; }
+.td-slot { display: flex; flex-direction: column; gap: 4px; min-width: 130px; }
+.td-slot-lbl { font-size: 10px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: var(--label); }
+.td-sel { font-size: 12px; padding: 5px 8px; }
+.td-roster { flex: 1 1 260px; min-width: 220px; display: flex; flex-direction: column; gap: 6px; }
+.td-roster-lbl { font-size: 10px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: var(--label); }
+.td-roster-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.td-chip {
+  font-size: 11px; font-weight: 700; padding: 4px 10px; border-radius: 999px; cursor: pointer;
+  font-family: inherit; color: var(--muted); background: var(--white-a04); border: 1px solid var(--border);
+  transition: color .12s, border-color .12s, background .12s;
+}
+.td-chip:hover { color: var(--text); }
+.td-chip.is-active { color: var(--ok); background: rgba(34,197,94,.1); border-color: rgba(34,197,94,.4); }

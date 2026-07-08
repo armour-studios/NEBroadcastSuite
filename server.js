@@ -238,7 +238,7 @@ let state = {
   // Stream-credits extras: producer-added "credit sponsors" — a dedicated big call-out section in
   // the end-of-stream roll, separate from the brand-kit sponsor bar. [{ name, logo, tier }]
   credits: { sponsors: [], talent: [] },   // talent: manual {name,role} credits (other-shift crew)
-  casters: { visible: true, showCountry: false, nameMode: 'gamertag', list: [], lowerThird: '', library: [], vdo: { room: '', password: '' }, guestsVdo: { room: '', password: '' }, observersVdo: { room: '', password: '' }, rooms: [], lineup: [], activeLayout: '', interview: { room: '', password: '' }, apiKey: '', interviewee: null, playerCam: null, deskRoomId: '', slotLabels: { 1: 'Caster 1', 2: 'Caster 2', 3: 'Caster 3', 4: 'Caster 4', 5: 'Player' } },   // list = on-air slots; showCountry = render each caster's country on the desk; library = saved casters/guests/observers (by kind); vdo/guestsVdo/observersVdo = the three shared group rooms; rooms = named VDO rooms; lineup = this-show active assignments; apiKey = director IFrame-API key; interviewee = spotlight-desk right cam; playerCam = slot-5 player feed ({camUrl,name,playerId}); deskRoomId = which named room is the interview/desk room
+  casters: { visible: true, showCountry: false, nameMode: 'gamertag', showRoles: { host: '', observer: '' }, list: [], lowerThird: '', library: [], vdo: { room: '', password: '' }, guestsVdo: { room: '', password: '' }, observersVdo: { room: '', password: '' }, rooms: [], lineup: [], activeLayout: '', interview: { room: '', password: '' }, apiKey: '', interviewee: null, playerCam: null, deskRoomId: '', slotLabels: { 1: 'Caster 1', 2: 'Caster 2', 3: 'Caster 3', 4: 'Caster 4', 5: 'Player' } },   // list = on-air slots; showCountry = render each caster's country on the desk; library = saved casters/guests/observers (by kind); vdo/guestsVdo/observersVdo = the three shared group rooms; rooms = named VDO rooms; lineup = this-show active assignments; apiKey = director IFrame-API key; interviewee = spotlight-desk right cam; playerCam = slot-5 player feed ({camUrl,name,playerId}); deskRoomId = which named room is the interview/desk room
   // VDO.Ninja talent workflow. Global config (server-side, replaces the old localStorage settings);
   // per-team rooms/passwords live on teams.x.vdo, per-player IDs on the player objects.
   vdo: {
@@ -1790,6 +1790,9 @@ function loadState() {
           visible: !!saved.casters.visible,
           showCountry: !!saved.casters.showCountry,
           nameMode: saved.casters.nameMode === 'name' ? 'name' : 'gamertag',   // desks default to the gamertag/handle
+          showRoles: (saved.casters.showRoles && typeof saved.casters.showRoles === 'object')
+            ? { host: saved.casters.showRoles.host || '', observer: saved.casters.showRoles.observer || '' }
+            : { host: '', observer: '' },
           lowerThird: typeof saved.casters.lowerThird === 'string' ? saved.casters.lowerThird : '',
           list: Array.isArray(saved.casters.list) ? saved.casters.list : [],
           library: Array.isArray(saved.casters.library) ? saved.casters.library : [],
@@ -10467,6 +10470,18 @@ function handleControlMessage(msg, ws) {
       broadcastFullState();
       break;
 
+    // Show Deck host/observer allocation (crew member names) — casters get desk-lineup slots
+    // via save_caster_to_library's deskSlot instead.
+    case 'set_show_roles': {
+      const d = msg.data || {};
+      if (!state.casters.showRoles) state.casters.showRoles = { host: '', observer: '' };
+      if (typeof d.host === 'string') state.casters.showRoles.host = d.host.slice(0, 60);
+      if (typeof d.observer === 'string') state.casters.showRoles.observer = d.observer.slice(0, 60);
+      saveAppState();
+      broadcastFullState();
+      break;
+    }
+
     // Which name the desk overlays display for each caster: their gamertag/handle (default)
     // or the crew profile's real name.
     case 'set_casters_name_mode':
@@ -10577,7 +10592,7 @@ function handleControlMessage(msg, ws) {
       if (!d.name) break;
       if (!Array.isArray(state.crew)) state.crew = [];
       const id = Math.random().toString(36).slice(2, 11);
-      state.crew.push({ id, name: d.name, handle: d.handle || '', role: d.role || '', group: d.group || 'casters', social: d.social || 'none', socialHandle: d.socialHandle || '', defaultCam: d.defaultCam || '', country: d.country || '', paypal: d.paypal || '', notes: d.notes || '' });
+      state.crew.push({ id, name: d.name, handle: d.handle || '', role: d.role || '', group: d.group || 'casters', social: d.social || 'none', socialHandle: d.socialHandle || '', defaultCam: d.defaultCam || '', country: d.country || '', paypal: d.paypal || '', notes: d.notes || '', active: !!d.active });
       saveAppState();
       broadcastFullState();
       break;
@@ -10588,7 +10603,7 @@ function handleControlMessage(msg, ws) {
       const idx = state.crew.findIndex((c) => c.id === d.id);
       if (idx !== -1) {
         const cur = state.crew[idx];
-        state.crew[idx] = { ...cur, name: d.name || cur.name, handle: d.handle ?? cur.handle, role: d.role ?? cur.role, group: d.group || cur.group, social: d.social || cur.social, socialHandle: d.socialHandle ?? cur.socialHandle, defaultCam: d.defaultCam ?? cur.defaultCam ?? '', country: d.country ?? cur.country ?? '', paypal: d.paypal ?? cur.paypal ?? '', notes: d.notes ?? cur.notes ?? '' };
+        state.crew[idx] = { ...cur, name: d.name || cur.name, handle: d.handle ?? cur.handle, role: d.role ?? cur.role, group: d.group || cur.group, social: d.social || cur.social, socialHandle: d.socialHandle ?? cur.socialHandle, defaultCam: d.defaultCam ?? cur.defaultCam ?? '', country: d.country ?? cur.country ?? '', paypal: d.paypal ?? cur.paypal ?? '', notes: d.notes ?? cur.notes ?? '', active: (typeof d.active === 'boolean') ? d.active : !!cur.active };
         // Crew ↔ caster-library ↔ on-air slots are twins linked by name/handle (see
         // delete_crew_member). Without this sync, editing a crew profile left STALE copies
         // in the library and on the desk — the overlay kept the old gamertag forever.

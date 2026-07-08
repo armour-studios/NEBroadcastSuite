@@ -315,6 +315,64 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
   const crewNameMode = el('crew-name-gamertag');
   if (crewNameMode) crewNameMode.addEventListener('change', () => send('set_casters_name_mode', { mode: crewNameMode.checked ? 'gamertag' : 'name' }));
 
+  // ── Show Deck: per-slot talent allocation strip (Talent page, all sub-tabs) ────────────
+  // Caster slots go through save_caster_to_library's deskSlot (same swap/bump plumbing the
+  // Casters lineup uses, so the desk + DCC follow automatically); Host/Observer are show
+  // roles; the On-shift chips toggle crew.active — many casters a night, few active a shift.
+  window._tdSig = '';
+  window.renderTalentDeck = function renderTalentDeck(data) {
+    const wrap = el('td-slots'); const roster = el('td-roster-chips');
+    if (!wrap || !roster || !data) return;
+    if (typeof _editingInside === 'function' && (_editingInside(wrap) || _editingInside(roster))) return;
+    const crew = data.crew || [];
+    const lib = (data.casters && data.casters.library) || [];
+    const lineup = (data.casters && data.casters.lineup) || [];
+    const labels = (data.casters && data.casters.slotLabels) || {};
+    const roles = (data.casters && data.casters.showRoles) || {};
+    const byId = {}; lib.forEach((l) => { if (l && l.id) byId[l.id] = l; });
+    const slotName = (n) => { const e = lineup.find((x) => Number(x.slot) === n); const p = e && byId[e.libraryId]; return (p && p.name) || ''; };
+    const sig = JSON.stringify({ c: crew.map((c) => [c.id, c.name, c.handle, c.group, !!c.active]), s: [1, 2, 3, 4].map(slotName), r: roles, l: labels });
+    if (sig === window._tdSig) return;
+    window._tdSig = sig;
+    const disp = (c) => c.handle || c.name;   // gamertag-first, matching the desk
+    const opts = (list, cur) => '<option value="">—</option>'
+      + list.map((c) => `<option value="${esc(c.name)}"${c.name === cur ? ' selected' : ''}>${esc(disp(c))}</option>`).join('');
+    const group = (g, roleRe) => crew.filter((c) => (c.group || '') === g || roleRe.test(c.role || ''));
+    const casters = group('casters', /caster/i), hosts = group('hosts', /host/i), observers = group('observers', /observer/i);
+    const cell = (label, id, options) =>
+      `<div class="td-slot"><span class="td-slot-lbl">${esc(label)}</span><select class="input-select td-sel" id="${id}">${options}</select></div>`;
+    wrap.innerHTML =
+      cell('Host', 'td-host', opts(hosts.length ? hosts : crew, roles.host || ''))
+      + [1, 2, 3, 4].map((n) => cell(labels[n] || ('Caster ' + n), 'td-c' + n, opts(casters.length ? casters : crew, slotName(n)))).join('')
+      + cell('Observer', 'td-obs', opts(observers.length ? observers : crew, roles.observer || ''));
+    [1, 2, 3, 4].forEach((n) => {
+      el('td-c' + n)?.addEventListener('change', function () {
+        const name = this.value;
+        if (!name) {
+          const cur = slotName(n);
+          if (cur) send('save_caster_to_library', { name: cur, kind: 'caster', deskSlot: 0 });
+          return;
+        }
+        const m = crew.find((c) => c.name === name) || {};
+        send('save_caster_to_library', { name, kind: 'caster', social: m.social, socialHandle: m.socialHandle, country: m.country, deskSlot: n });
+      });
+    });
+    const sendRoles = () => send('set_show_roles', { host: el('td-host')?.value || '', observer: el('td-obs')?.value || '' });
+    el('td-host')?.addEventListener('change', sendRoles);
+    el('td-obs')?.addEventListener('change', sendRoles);
+    roster.innerHTML = '';
+    if (!crew.length) { roster.innerHTML = '<span class="field-hint" style="margin:0;">No crew yet — add people below.</span>'; return; }
+    crew.forEach((c) => {
+      const chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = 'td-chip' + (c.active ? ' is-active' : '');
+      chip.title = c.active ? (disp(c) + ' is on shift — click to mark off') : (disp(c) + ' is off shift — click to mark active');
+      chip.textContent = disp(c);
+      chip.addEventListener('click', () => send('update_crew_member', { id: c.id, active: !c.active }));
+      roster.appendChild(chip);
+    });
+  };
+
   // Group filter pills → sync hidden select + re-render
   const crewGroupNav = el('crew-group-nav');
   if (crewGroupNav) {
@@ -3944,7 +4002,9 @@ const QRAIL_TAB_TITLES = {
 function qrailShowTab(tab) {
   document.querySelectorAll('#qrail-tabs .qrail-tab').forEach((b) => b.classList.toggle('active', b.dataset.qtab === tab));
   document.querySelectorAll('.qrail-body .qrail-panel').forEach((p) => p.classList.toggle('active', p.dataset.qpanel === tab));
-  const title = el('qrail-paneltitle'); if (title) title.textContent = QRAIL_TAB_TITLES[tab] || '';
+  const titleText = QRAIL_TAB_TITLES[tab] || '';
+  const title = el('qrail-paneltitle'); if (title) title.textContent = titleText;
+  const head = el('qrail-head'); if (head) head.title = titleText; // label is hidden — shown as a hover tooltip only
   // Live sections refresh as their tab opens (queue now lives under NEXT, AI under AUTO).
   if ((tab === 'ros' || tab === 'flows' || tab === 'talent') && typeof renderQrailLive === 'function') renderQrailLive();
   if (tab === 'replay' && typeof renderQrailReplay === 'function') { renderQrailReplay(currentState); if (typeof qrScanFolder === 'function') qrScanFolder(); }
@@ -5318,6 +5378,7 @@ function applyState(data) {
     });
   }
   if (data.casters) {
+    if (typeof window.renderTalentDeck === 'function') _ap('renderTalentDeck', () => window.renderTalentDeck(data));
     const nmCb = el('crew-name-gamertag');
     if (nmCb && document.activeElement !== nmCb) nmCb.checked = (data.casters.nameMode || 'gamertag') === 'gamertag';
     [el('dcc-show-country'), el('crew-show-country')].forEach((scc) => {

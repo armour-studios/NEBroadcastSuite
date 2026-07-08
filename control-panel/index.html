@@ -2362,6 +2362,17 @@
     </div>
   </div>
 
+  <!-- ── Show Deck: tonight's allocation — visible on every Talent sub-tab. Caster slots drive
+       the desk lineup + DCC; Host/Observer are show roles; the On-shift chips mark who is
+       actively working right now (many casters per night, few active per shift). ── -->
+  <div class="talent-deck" id="talent-deck">
+    <div class="td-slots" id="td-slots"></div>
+    <div class="td-roster">
+      <span class="td-roster-lbl">On shift</span>
+      <div class="td-roster-chips" id="td-roster-chips"></div>
+    </div>
+  </div>
+
   <div id="talent-panel-teams">
 
   <!-- Teams sub-tab nav -->
@@ -8282,7 +8293,7 @@ PacketSendRate=10</pre>
       </button>
     </nav>
     <div class="qrail-content">
-    <div class="qrail-head">
+    <div class="qrail-head" id="qrail-head">
       <button class="qrail-collapse" id="qrail-collapse" title="Close panel">‹</button>
       <span class="qrail-paneltitle" id="qrail-paneltitle">Quick Actions</span>
       <button class="qrail-return" id="qrail-return" title="Close popout — restore rail in main app" style="display:none">
@@ -8663,7 +8674,6 @@ PacketSendRate=10</pre>
 
       <div class="tw-sub" data-twpanel="chat">
         <div class="qrail-group">
-          <div class="qrail-label">Twitch Chat</div>
           <div style="font-size: 12px; color: var(--muted); margin-bottom: 12px; text-align: center;">
             <span id="chat-connection-status" style="display: none; color: #4ade80;"><span class="live-dot" style="background:#4ade80"></span> Connected</span>
             <span id="chat-loading" style="color: #888;">Connecting...</span>
@@ -8751,7 +8761,6 @@ PacketSendRate=10</pre>
       <!-- ── ACTIVITY: Twitch events feed ── -->
       <div class="tw-sub" data-twpanel="activity" style="display:none;">
         <div class="qrail-group">
-          <div class="qrail-label">Twitch Activity</div>
           <div id="twitch-activity" style="max-height: 600px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px;">
             <div style="color: #888; font-size: 12px; text-align: center; padding: 20px 10px;">
               Follows, subscriptions, raids, and more appear here
