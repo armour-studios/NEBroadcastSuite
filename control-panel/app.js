@@ -4523,6 +4523,11 @@ function bbRenderCustomizeList() {
 el('btn-bb-clip')?.addEventListener('click', () => {
   const btn = el('btn-bb-clip');
   if (btn.disabled) return;
+  if (btn.dataset.mode === 'startbuf') {
+    send('obs_toggle_replay_buffer');
+    showToast('Starting the OBS replay buffer…', '#fbbf24');
+    return;
+  }
   const origHTML = btn.innerHTML;
   btn.disabled = true;
   btn.innerHTML = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;vertical-align:middle;"><path d="M15 10l4.553-2.069A1 1 0 0 1 21 8.845v6.31a1 1 0 0 1-1.447.894L15 14M3 8a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8z"/></svg> Clipping…';
@@ -13181,6 +13186,17 @@ function renderQuickToolbar(data) {
     let dot = btn.querySelector('.bb-clip-dot');
     if (!dot) { dot = document.createElement('span'); dot.className = 'bb-clip-dot'; btn.insertBefore(dot, btn.firstChild); }
     dot.dataset.status = cls;
+    // OBS connected but buffer off -> nothing to clip; the button's real job is
+    // starting the buffer. Label + click mode follow (see the click handler).
+    const wantStart = !!(data.obs && data.obs.connected) && !bufActive;
+    if (!btn.disabled) {
+      btn.dataset.mode = wantStart ? 'startbuf' : 'clip';
+      const lbl = btn.querySelector('.bb-clip-lbl');
+      if (lbl) lbl.textContent = wantStart ? 'Start Replay Buffer' : 'Clip';
+      btn.title = wantStart
+        ? 'OBS replay buffer is OFF — click to start it so clips can capture'
+        : 'Save OBS replay buffer + create Twitch clip (channel must be live for Twitch clip)';
+    }
   })();
 }
 (function wireBbSceneDrag() {

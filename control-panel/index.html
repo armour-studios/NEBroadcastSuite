@@ -4628,7 +4628,7 @@
                 <span class="field-label" style="flex-shrink:0;">Source</span>
                 <div class="gfx-src-tabs" id="gfx-front-std-src">
                   <button type="button" class="gfx-src-tab" data-fstdsrc="league" title="Rows from an in-app league">League</button>
-                  <button type="button" class="gfx-src-tab" data-fstdsrc="startgg" title="Rows from the loaded start.gg event / bracket">start.gg</button>
+                  <button type="button" class="gfx-src-tab" data-fstdsrc="startgg" title="Rows from the loaded tournament event / bracket">Tournament</button>
                   <button type="button" class="gfx-src-tab" data-fstdsrc="bracket" title="Rows from a phase/pool of the loaded bracket">Bracket phase</button>
                   <button type="button" class="gfx-src-tab" data-fstdsrc="manual" title="Hand-entered rows (edit in More settings)">Manual</button>
                 </div>
@@ -8137,11 +8137,12 @@ PacketSendRate=10</pre>
         </div>
       </div>
 
-      <!-- ── REPLAY: buffer save + latest clips to air (settings live on the REPLAYS page) ── -->
+      <!-- ── REPLAY: buffer status/toggle + save + latest clips to air (settings live on the REPLAYS page) ── -->
       <div class="qrail-panel" data-qpanel="replay">
         <div class="qrail-group">
-          <div class="qrail-label">Replay Buffer</div>
+          <div class="qrail-label">Replay Buffer <span class="dmobs-pill" id="qr-buffer-pill">Buffer Off</span></div>
           <div class="qt-act">
+            <button class="btn btn-secondary btn-sm" id="qr-buffer-toggle" title="Start/stop the OBS replay buffer — it has to be running before Save Replay can capture anything">Start Buffer</button>
             <button class="btn btn-secondary btn-sm" id="qr-save-replay" title="Save the OBS replay buffer to disk — the clip appears below once imported">Save Replay</button>
             <button class="btn btn-danger btn-sm" id="qr-replay-stop" title="Stop the on-air replay and return to the previous scene">Stop / Return</button>
           </div>
@@ -8150,7 +8151,7 @@ PacketSendRate=10</pre>
         <div class="qrail-group">
           <div class="qrail-label">Latest Clips</div>
           <div id="qr-clip-list" class="qr-clip-list"></div>
-          <div class="field-hint" style="margin:0;">Scene, transition and return-scene settings come from the REPLAYS page.</div>
+          <div class="field-hint" style="margin:0;">Scene, transition and return-scene settings come from the REPLAYS page. Edit opens the full Video Editor in a popup for quick trims before pushing live.</div>
         </div>
       </div>
 
@@ -8566,7 +8567,7 @@ PacketSendRate=10</pre>
          (OBS_AUTO_SWITCH_DISABLED) so it was a no-op; scene auto-directing lives in Production ▸ NEURAL AI. -->
     <button class="btn btn-ghost btn-sm bb-clip-btn" id="btn-bb-clip" title="Save OBS replay buffer + create Twitch clip (channel must be live for Twitch clip)">
       <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;vertical-align:middle;"><path d="M15 10l4.553-2.069A1 1 0 0 1 21 8.845v6.31a1 1 0 0 1-1.447.894L15 14M3 8a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8z"/></svg>
-      Clip
+      <span class="bb-clip-lbl">Clip</span>
     </button>
     <button class="btn btn-ghost btn-sm" id="btn-bb-marker" title="Place a stream marker at this point in the VOD (channel must be live)">
       <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;vertical-align:middle;"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
@@ -8731,6 +8732,23 @@ PacketSendRate=10</pre>
     <div class="mp-crumbs" id="mp-crumbs"></div>
     <div id="mp-grid" class="md-grid"></div>
     <div id="mp-status" class="director-status-line"></div>
+  </div>
+</div>
+
+<!-- Quick-edit popup: the Video Editor pane (#clip-preview-card, defined inside the REPLAYS tab)
+     gets physically relocated in here on open and returned on close — see qrOpenClipEditor/
+     qrCloseClipEditor in app.js. Lives at the top level (NOT inside #tab-replays-content, which
+     is `display:none` whenever the REPLAYS tab isn't active) so the quickbar's REPLAY panel can
+     open it from any tab. -->
+<div class="mp-modal" id="qr-edit-modal" style="display:none;">
+  <div class="gfx-popout-box">
+    <div class="mp-head">
+      <h3>Quick Edit</h3>
+      <div class="mp-head-tools">
+        <button type="button" class="btn btn-ghost btn-sm" id="qr-edit-close">Close</button>
+      </div>
+    </div>
+    <div class="gfx-popout-body" id="qr-edit-body"></div>
   </div>
 </div>
 
