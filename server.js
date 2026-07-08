@@ -12760,7 +12760,9 @@ function handleControlMessage(msg, ws) {
           .slice(0, 40)
           .map((t) => ({
             name: (t.name || '').toString().slice(0, 60),
-            role: (t.role || '').toString().slice(0, 60)
+            role: (t.role || '').toString().slice(0, 60),
+            // Talent-bar bucket: hosts renders under the "Talent" label on the overlay.
+            group: ['casters', 'hosts', 'production', 'observers'].includes(t.group) ? t.group : ''
           }));
       }
       if (Array.isArray(d.sponsors)) {

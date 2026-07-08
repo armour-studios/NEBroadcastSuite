@@ -19029,22 +19029,60 @@ function gfxSetPathVal(obj, dotted, val) {
   o[parts[parts.length - 1]] = val;
 }
 const GFX_KEY2TRIG = { break: 'breakScreen', winner: 'winner', intro: 'intro', veto: 'veto', spotlight: 'spotlight' };
-// ── Stream Credits: manual talent entries ("Name — Role" per line) ──
+// ── Stream Credits: extra talent from the crew database (or typed), grouped ──
+const CREDITS_GROUP_LABEL = { casters: 'Casters', hosts: 'Talent', production: 'Production', observers: 'Observers' };
 window._gfxFillCreditsTalent = function (data) {
-  const ta = el('input-credits-talent');
-  if (!ta || document.activeElement === ta) return;
-  const list = (data && data.credits && data.credits.talent) || [];
-  ta.value = list.map((t) => t.role ? t.name + ' — ' + t.role : t.name).join('\n');
+  // Crew picker: casters library + crew entries, "Name — Role" per option.
+  const sel = el('credits-crew-sel');
+  if (sel && document.activeElement !== sel) {
+    const seen = new Set(); const opts = [];
+    const addOpt = (name, role) => { const k = (name || '').toLowerCase(); if (!name || seen.has(k)) return; seen.add(k); opts.push({ name, role: role || '' }); };
+    (((data && data.casters) || {}).library || []).forEach((e) => e && addOpt(e.name, e.role));
+    ((data && data.crew) || []).forEach((c) => c && addOpt(c.name, c.role));
+    const sig = opts.length + '|' + (opts[0] ? opts[0].name : '');
+    if (sel.dataset.sig !== sig) {
+      sel.dataset.sig = sig;
+      sel.innerHTML = '<option value="">From crew database…</option>'
+        + opts.map((o) => '<option value="' + tlEsc(o.name) + '" data-role="' + tlEsc(o.role) + '">' + tlEsc(o.name) + (o.role ? ' — ' + tlEsc(o.role) : '') + '</option>').join('');
+    }
+  }
+  // Chip list of saved entries.
+  const list = el('credits-talent-list');
+  if (list) {
+    const talent = ((data && data.credits) || {}).talent || [];
+    list.innerHTML = talent.map((t, i) =>
+      '<span class="stat-pill" style="display:inline-flex; align-items:center; gap:6px;">'
+      + tlEsc(t.name) + (t.role ? ' <span style="opacity:.6;">' + tlEsc(t.role) + '</span>' : '')
+      + ' <span style="opacity:.5; font-size:9px;">' + (CREDITS_GROUP_LABEL[t.group] || 'Auto') + '</span>'
+      + '<button type="button" class="reminders-x" data-crd-rm="' + i + '" title="Remove" style="font-size:11px; line-height:1;">&times;</button></span>').join('')
+      || '<span class="field-hint" style="margin:0;">None yet.</span>';
+    if (!list._wired) {
+      list._wired = true;
+      list.addEventListener('click', (e) => {
+        const b = e.target.closest('[data-crd-rm]'); if (!b) return;
+        const cur = ((currentState && currentState.credits) || {}).talent || [];
+        const next = cur.slice(); next.splice(+b.dataset.crdRm, 1);
+        send('set_credits', { talent: next });
+      });
+    }
+  }
 };
-el('btn-credits-talent-apply')?.addEventListener('click', function () {
-  const ta = el('input-credits-talent');
-  const talent = (ta ? ta.value : '').split(/\n/).map((line) => {
-    const m = line.split(/\s+[—–-]\s+|\s*,\s*/);   // "Name — Role", "Name - Role" or "Name, Role"
-    const name = (m[0] || '').trim();
-    return name ? { name, role: (m[1] || '').trim() } : null;
-  }).filter(Boolean);
-  send('set_credits', { talent });
-  showToast('Talent credits saved — ' + talent.length + ' name(s)', '#22c55e');
+el('credits-crew-sel')?.addEventListener('change', function () {
+  const opt = this.options[this.selectedIndex];
+  const nameInp = el('credits-name'), roleInp = el('credits-role');
+  if (nameInp) nameInp.value = this.value || '';
+  if (roleInp && opt) roleInp.value = opt.dataset.role || '';
+});
+el('credits-talent-add')?.addEventListener('click', () => {
+  const name = (el('credits-name')?.value || '').trim();
+  if (!name) { showToast('Pick someone from the crew list or type a name.', '#fbbf24'); return; }
+  const entry = { name, role: (el('credits-role')?.value || '').trim(), group: el('credits-group-sel')?.value || 'casters' };
+  const cur = ((currentState && currentState.credits) || {}).talent || [];
+  if (cur.some((t) => (t.name || '').toLowerCase() === name.toLowerCase())) { showToast(name + ' is already credited.', '#fbbf24'); return; }
+  send('set_credits', { talent: [...cur, entry] });
+  const sel = el('credits-crew-sel'); if (sel) sel.value = '';
+  ['credits-name', 'credits-role'].forEach((id) => { const i = el(id); if (i) i.value = ''; });
+  showToast('Added ' + name + ' to the credits', '#22c55e');
 });
 // Punch-up graphics: only one of these can be live at a time — showing one auto-hides whichever
 // other one is live. Casters, Ticker, Sponsor Banner and Teams to Watch are NOT in this set — they
@@ -23567,6 +23605,7 @@ async function connect() {
       _r('renderQrailScenes',    () => renderQrailScenes(msg.data));
       _r('renderQuickPanel',     () => renderQuickPanel(msg.data));
       _r('renderIntegrationStore', () => renderIntegrationStore(msg.data));
+      _r('creditsTalent',        () => { const p = document.querySelector('[data-gfxpanel="credits"]'); if (p && p.offsetParent !== null && typeof window._gfxFillCreditsTalent === 'function') window._gfxFillCreditsTalent(msg.data); });
       _r('bbSyncTriggerPop',     () => bbSyncTriggerPop());
       _r('renderQrailStartgg',  () => renderQrailStartgg(msg.data));
       _r('renderGoLive',       () => renderGoLive(msg.data));

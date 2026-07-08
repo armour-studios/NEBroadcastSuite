@@ -179,8 +179,12 @@ function buildTalent(st) {
   (st.crew || []).forEach((c) => c && c.name && place(c.name, c.role, c.group, null));
   ((st.casters && st.casters.library) || []).forEach((e) => e && e.name && place(e.name, e.role, null, e.kind));
   // Producer-added talent (Graphics > Stream Credits) — crew from other shifts of the
-  // same broadcast who aren't in the current lineup but still deserve credit.
-  ((st.credits && st.credits.talent) || []).forEach((t) => t && t.name && place(t.name, t.role, null, null));
+  // same broadcast. An explicit group pins the bucket; otherwise the role rules decide.
+  ((st.credits && st.credits.talent) || []).forEach((t) => {
+    if (!t || !t.name) return;
+    if (['casters', 'hosts', 'production', 'observers'].includes(t.group)) add(t.group, t.name, t.role);
+    else place(t.name, t.role, null, null);
+  });
   const groups = [];
   if (bucket.casters.length)    groups.push({ label: 'Casters',    people: bucket.casters });
   if (bucket.hosts.length)      groups.push({ label: 'Talent',     people: bucket.hosts });
