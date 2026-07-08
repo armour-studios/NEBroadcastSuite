@@ -237,7 +237,7 @@ let state = {
   // Stream-credits extras: producer-added "credit sponsors" — a dedicated big call-out section in
   // the end-of-stream roll, separate from the brand-kit sponsor bar. [{ name, logo, tier }]
   credits: { sponsors: [], talent: [] },   // talent: manual {name,role} credits (other-shift crew)
-  casters: { visible: true, showCountry: false, list: [], lowerThird: '', library: [], vdo: { room: '', password: '' }, guestsVdo: { room: '', password: '' }, observersVdo: { room: '', password: '' }, rooms: [], lineup: [], activeLayout: '', interview: { room: '', password: '' }, apiKey: '', interviewee: null, playerCam: null, deskRoomId: '', slotLabels: { 1: 'Caster 1', 2: 'Caster 2', 3: 'Caster 3', 4: 'Caster 4', 5: 'Player' } },   // list = on-air slots; showCountry = render each caster's country on the desk; library = saved casters/guests/observers (by kind); vdo/guestsVdo/observersVdo = the three shared group rooms; rooms = named VDO rooms; lineup = this-show active assignments; apiKey = director IFrame-API key; interviewee = spotlight-desk right cam; playerCam = slot-5 player feed ({camUrl,name,playerId}); deskRoomId = which named room is the interview/desk room
+  casters: { visible: true, showCountry: false, nameMode: 'gamertag', list: [], lowerThird: '', library: [], vdo: { room: '', password: '' }, guestsVdo: { room: '', password: '' }, observersVdo: { room: '', password: '' }, rooms: [], lineup: [], activeLayout: '', interview: { room: '', password: '' }, apiKey: '', interviewee: null, playerCam: null, deskRoomId: '', slotLabels: { 1: 'Caster 1', 2: 'Caster 2', 3: 'Caster 3', 4: 'Caster 4', 5: 'Player' } },   // list = on-air slots; showCountry = render each caster's country on the desk; library = saved casters/guests/observers (by kind); vdo/guestsVdo/observersVdo = the three shared group rooms; rooms = named VDO rooms; lineup = this-show active assignments; apiKey = director IFrame-API key; interviewee = spotlight-desk right cam; playerCam = slot-5 player feed ({camUrl,name,playerId}); deskRoomId = which named room is the interview/desk room
   // VDO.Ninja talent workflow. Global config (server-side, replaces the old localStorage settings);
   // per-team rooms/passwords live on teams.x.vdo, per-player IDs on the player objects.
   vdo: {
@@ -1787,6 +1787,7 @@ function loadState() {
         state.casters = {
           visible: !!saved.casters.visible,
           showCountry: !!saved.casters.showCountry,
+          nameMode: saved.casters.nameMode === 'name' ? 'name' : 'gamertag',   // desks default to the gamertag/handle
           lowerThird: typeof saved.casters.lowerThird === 'string' ? saved.casters.lowerThird : '',
           list: Array.isArray(saved.casters.list) ? saved.casters.list : [],
           library: Array.isArray(saved.casters.library) ? saved.casters.library : [],
@@ -10428,6 +10429,14 @@ function handleControlMessage(msg, ws) {
 
     case 'set_casters_show_country':
       state.casters.showCountry = !!msg.data?.showCountry;
+      saveAppState();
+      broadcastFullState();
+      break;
+
+    // Which name the desk overlays display for each caster: their gamertag/handle (default)
+    // or the crew profile's real name.
+    case 'set_casters_name_mode':
+      state.casters.nameMode = (msg.data && msg.data.mode) === 'name' ? 'name' : 'gamertag';
       saveAppState();
       broadcastFullState();
       break;

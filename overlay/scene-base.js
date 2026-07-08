@@ -15,6 +15,7 @@
  */
 (function (global) {
   const WS_URL = 'ws://' + (location.hostname || 'localhost') + ':3001';   // host-aware: works when the source is loaded from another machine via http://<host>:3000
+  const HTTP_BASE = 'http://' + (location.hostname || 'localhost') + ':3000';
   const FALLBACK_ACCENT = '#055fdb';
   const FALLBACK_ACCENT2 = '#e97139';
 
@@ -240,19 +241,30 @@
       return (data && data.brand && data.brand.logo) || null;
     },
     // Resolve one of the configured RL-style team slots into a normalised shape.
+    /** Desk display name: the gamertag/handle by default (casters.nameMode 'gamertag'),
+        the crew profile's real name only when the producer switches nameMode to 'name'.
+        Applied here centrally so every desk scene inherits it; the original name stays
+        available as .fullName for scenes that want both lines. */
+    _casterDisplay(casters, c) {
+      if (!c) return c;
+      const mode = (casters && casters.nameMode) === 'name' ? 'name' : 'gamertag';
+      const tag = (c.gamertag || c.handle || '').toString().replace(/^@/, '').trim();
+      if (mode === 'gamertag' && tag) return Object.assign({}, c, { name: tag, fullName: c.name || '' });
+      return c;
+    },
     /** Resolve caster assigned to desk slot 1–4 (falls back to list order). */
     casterBySlot(casters, slot) {
       const list = (casters && Array.isArray(casters.list)) ? casters.list : [];
       const n = Number(slot);
       if (!n || n < 1) return null;
       const hit = list.find(c => c && Number(c.slot) === n);
-      if (hit) return hit;
+      if (hit) return this._casterDisplay(casters, hit);
       // Positional fallback ONLY for legacy lists where NO caster carries an explicit slot.
       // Once any caster is slotted, resolution is strict so slot 2's caster never bleeds into
       // slot 1 (and an unassigned slot stays empty rather than borrowing the wrong feed).
       const anySlotted = list.some(c => c && Number(c.slot) >= 1);
       if (anySlotted) return null;
-      return list[n - 1] || null;
+      return this._casterDisplay(casters, list[n - 1] || null);
     },
     castersBySlots(casters, count) {
       const out = [];
@@ -339,16 +351,28 @@
       // Preview: render sample data immediately (live WS data, if any, overrides it).
       if (PREVIEW) {
         document.documentElement.classList.add('preview');
+        // Safety net: if a ?preview=1 URL ever ends up pasted into a real OBS Browser Source
+        // (e.g. copied from the control panel's "Preview" button instead of "Copy"/"Open"), this
+        // makes it obvious on sight instead of silently airing fabricated team names as if real.
+        const _pwBadge = document.createElement('div');
+        _pwBadge.textContent = 'PREVIEW — SAMPLE DATA';
+        _pwBadge.style.cssText = 'position:fixed;top:10px;left:10px;z-index:999999;font:800 13px/1 ui-monospace,monospace;'
+          + 'letter-spacing:.08em;color:#0b0d12;background:#ffcc00;padding:5px 10px;border-radius:5px;'
+          + 'box-shadow:0 2px 10px rgba(0,0,0,.5);pointer-events:none;';
+        const _mountBadge = () => { const p = document.body || document.documentElement; if (p) p.appendChild(_pwBadge); };
+        if (document.body) _mountBadge(); else document.addEventListener('DOMContentLoaded', _mountBadge);
         const demo = demoState();
         applyBrand(demo);
         try { onState(demo); } catch (e) { console.error('[scene] preview render error', e); }
       }
 
-      // Standalone: render demo data immediately so the scene is never invisible while WS connects.
-      // The real full_state from WS overwrites this as soon as the connection is established.
-      if (standalone) {
-        try { onState(demoState()); } catch (e) {}
-      }
+      // NOTE: standalone sources used to render demoState() immediately here too ("so the scene is
+      // never invisible while WS connects") — removed. That meant EVERY real OBS Browser Source
+      // (i.e. every scene in actual production use, not just ?preview=1) briefly showed fake teams
+      // ("FROST ESPORTS"/"EMBER GAMING") on load, and indefinitely if the :3001 WS never connected
+      // (server not started yet, wrong host/IP, port blocked). A scene's own empty state while it
+      // waits half a second for WS to connect is correct; fabricated data pretending to be real
+      // never is. Preview mode (?preview=1, explicit opt-in above) is unaffected.
 
       let ws;
       // The server omits the heavy brand/banner blobs (base64 sponsor/banner images) from most
@@ -356,8 +380,19 @@
       // so every render still has them.
       const _cache = {};
       const BACKFILL_KEYS = ['brand', 'banner', 'mainBanner', 'brandKits', 'bracket', 'replay', 'playerProfiles', 'savedTeams'];
-      const open = () => {
-        ws = new WebSocket(WS_URL);
+      // The bridge (:3001) requires a token on every connection (server.js getOrCreateWsToken/
+      // verifyClient) — fetched once from the HTTP API this page was itself loaded from (same
+      // trust boundary as the overlay HTML/CSS) and cached for reconnects.
+      let _wsToken = null;
+      const open = async () => {
+        if (!_wsToken) {
+          try {
+            const r = await fetch(HTTP_BASE + '/api/ws-token');
+            const j = await r.json();
+            _wsToken = j.token || '';
+          } catch (e) { _wsToken = ''; }
+        }
+        ws = new WebSocket(WS_URL + (_wsToken ? ('?token=' + encodeURIComponent(_wsToken)) : ''));
         ws.onopen = () => {
           // Identify as a live overlay browser source (feeds the pre-flight "overlays reachable" check).
           try { ws.send(JSON.stringify({ type: 'register', role: 'overlay', page: global.location.pathname })); } catch (e) {}
@@ -366,9 +401,38 @@
         ws.onmessage = ({ data }) => {
           let msg;
           try { msg = JSON.parse(data); } catch { return; }
-          // Producer-triggered hard reload — busts OBS/CEF's in-memory cache so every browser
-          // source picks up freshly-served overlay code (server already sends no-store headers).
-          if (msg.type === 'reload_overlays') { try { global.location.reload(); } catch (e) {} return; }
+          // Overlay code changed on disk (or a producer hit "Reload OBS"). Reloading blanks the
+          // browser source, which is jarring mid-broadcast — so keep it SMOOTH and SCOPED:
+          //  • no file list (explicit "reload everything" button/editor) → hard reload.
+          //  • a change to some OTHER overlay's file → ignore (don't blank this source).
+          //  • a pure .css change to a stylesheet this page links → hot-swap it in place, no reload.
+          //  • an .html / .js change affecting this page → reload (its code must re-execute).
+          // Data/name edits never take this path at all — they arrive as `full_state` and
+          // re-render in place, so updating a name is always seamless.
+          if (msg.type === 'reload_overlays') {
+            const files = Array.isArray(msg.files)
+              ? msg.files.map((f) => String(f).replace(/\\/g, '/').toLowerCase().split('/').pop()).filter(Boolean)
+              : null;
+            if (!files || !files.length) { try { location.reload(); } catch (e) {} return; }
+            const page = (location.pathname.split('/').pop() || '').toLowerCase();
+            const relevant = files.filter((f) => f === 'scene-base.js' || f === 'scene.css' || f === page);
+            if (!relevant.length) return;                          // change to a different overlay — leave this one alone
+            if (relevant.every((f) => f.endsWith('.css'))) {       // stylesheet-only → hot-swap, no blank frame
+              const bust = '?r=' + Date.now();
+              document.querySelectorAll('link[rel="stylesheet"]').forEach((lnk) => {
+                const href = lnk.getAttribute('href') || '';
+                const base = href.split('?')[0].split('/').pop().toLowerCase();
+                if (relevant.indexOf(base) === -1) return;
+                const clone = lnk.cloneNode(false);
+                clone.setAttribute('href', href.split('?')[0] + bust);
+                clone.addEventListener('load', () => setTimeout(() => { try { lnk.remove(); } catch (e) {} }, 60));
+                lnk.parentNode.insertBefore(clone, lnk.nextSibling);
+              });
+              return;
+            }
+            try { location.reload(); } catch (e) {}
+            return;
+          }
           if (msg.type === 'full_state') {
             for (const k of BACKFILL_KEYS) {
               if (k in msg.data) _cache[k] = msg.data[k];
