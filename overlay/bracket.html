@@ -160,6 +160,42 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
 }
 .bk-focus-mode .bk-connectors path { stroke: rgba(255,255,255,.09); }
 
+/* Brand kit logo beside the event title */
+.bk-title-row { display: flex; align-items: center; gap: 12px; }
+.bk-brand-logo { height: 42px; max-width: 120px; object-fit: contain; filter: drop-shadow(0 2px 8px rgba(0,0,0,.55)); }
+
+/* ── Team tournament run (focused team): upper/lower/GF bands + player-stats column.
+      One flex layout of distinct regions — nothing overlaps anything else on canvas. ── */
+.bk-run { display: flex; align-items: flex-start; gap: 34px; width: 1816px; }
+.bk-run-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 22px; }
+.bk-run-head { display: flex; align-items: center; gap: 18px; padding-bottom: 4px; }
+.bk-run-logo { width: 64px; height: 64px; object-fit: contain; filter: drop-shadow(0 3px 10px rgba(0,0,0,.6)); }
+.bk-run-logo.logo-on-dark { filter: brightness(0) invert(1) drop-shadow(0 3px 10px rgba(0,0,0,.6)); }
+.bk-run-eyebrow { font-family: var(--disp); font-weight: 700; font-size: 12px; letter-spacing: .42em; text-transform: uppercase;
+  color: color-mix(in srgb, var(--accent) 75%, #fff); }
+.bk-run-team { font-family: var(--disp); font-weight: 700; font-size: 40px; line-height: 1.05; text-transform: uppercase; color: #fff; }
+.bk-run-record { margin-left: auto; font-family: var(--disp); font-weight: 800; font-size: 26px; padding: 8px 18px; border-radius: 10px;
+  color: #fff; background: color-mix(in srgb, var(--accent) 22%, rgba(0,0,0,.35));
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent); }
+.bk-run-band-label { font-family: var(--disp); font-weight: 700; font-size: 13px; letter-spacing: .3em; text-transform: uppercase;
+  color: rgba(255,255,255,.55); margin-bottom: 10px; }
+.bk-run-band.losers .bk-run-band-label { color: color-mix(in srgb, var(--accent-2) 70%, #fff); }
+.bk-run-band.gf .bk-run-band-label { color: rgba(255,214,107,.85); }
+.bk-run-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.bk-run-cell { display: flex; flex-direction: column; gap: 6px; width: 300px; }
+.bk-run-cell .bk-round-name { height: auto; text-align: left; }
+.bk-run-arrow { font-size: 30px; line-height: 1; color: rgba(255,255,255,.3); padding-top: 24px; }
+.bk-run-stats { flex: 0 0 360px; display: flex; flex-direction: column; gap: 10px; padding: 20px; align-self: stretch;
+  background: rgba(255,255,255,.03); border: 1px solid rgba(255,255,255,.08); border-radius: 14px; }
+#bk-run-stats-rows { display: flex; flex-direction: column; gap: 8px; }
+.bk-run-player { display: flex; align-items: center; gap: 8px; padding: 9px 12px; border-radius: 9px;
+  background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.06); }
+.bk-run-pname { flex: 1 1 auto; min-width: 0; font-weight: 700; font-size: 16px; color: #fff;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bk-run-stat { font-family: var(--disp); font-size: 13px; color: rgba(255,255,255,.6); margin-left: 8px; white-space: nowrap; }
+.bk-run-stat b { color: #fff; font-size: 17px; margin-right: 3px; }
+.bk-run-stats-empty, .bk-run-stats-none { font-size: 13px; color: rgba(255,255,255,.4); }
+
 /* ── Schedule (round-robin / swiss round-by-round pairings) — reuses .bk-round/.bk-match/.bk-slot ── */
 .bk-schedule { width: 100%; }
 .bk-schedule .bk-rounds { gap: 24px; }
@@ -272,7 +308,10 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
     <div class="bk-section-pills" id="bk-section-pills"></div>
     <div class="bk-head-text">
       <div class="bk-eyebrow">Tournament Bracket</div>
-      <div class="bk-title" id="bk-title"></div>
+      <div class="bk-title-row">
+        <img class="bk-brand-logo" id="bk-brand-logo" style="display:none;" alt="">
+        <div class="bk-title" id="bk-title"></div>
+      </div>
       <div class="bk-subtitle" id="bk-subtitle"></div>
     </div>
     <div class="bk-head-right">
@@ -310,6 +349,97 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
   function fmtType(t) {
     return ({ SINGLE_ELIMINATION: 'Single Elimination', DOUBLE_ELIMINATION: 'Double Elimination',
       ROUND_ROBIN: 'Round Robin', SWISS: 'Swiss' })[t] || (t ? t.replace(/_/g, ' ') : '');
+  }
+
+  // ── Team tournament run view ────────────────────────────────────────────────
+  // When a team is focused, replace the whole bracket with THEIR run: an Upper Bracket band,
+  // a Lower Bracket band and a Grand Finals band of match cards (reusing buildMatch so they
+  // look exactly like the playoff bracket), plus a separate Player Stats column. Distinct
+  // flex regions — nothing ever overlaps anything else on the canvas.
+  function escRun(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;'); }
+  let _runStatsFor = '';
+  // rowsEl is passed in directly — this runs while the run view is still detached from the
+  // DOM (renderTeamRun builds it before render() appends it), so an id lookup finds nothing.
+  function fillRunStats(teamName, data, rowsEl) {
+    _runStatsFor = teamName;
+    if (!rowsEl) return;
+    const t = (data.savedTeams || []).find((x) => x && x.name && x.name.toLowerCase() === teamName.toLowerCase());
+    const roster = ((t && t.players) || []).map((p) => p && p.name).filter(Boolean).slice(0, 6);
+    if (!roster.length) { rowsEl.innerHTML = '<div class="bk-run-stats-empty">No roster in the team library for this team.</div>'; return; }
+    const game = data.activeGame || '';
+    fetch('/api/stats/leaders?limit=500').then((r) => r.json()).then((res) => {
+      if (_runStatsFor !== teamName || !rowsEl.isConnected) return;   // focus moved on while fetching
+      const tables = {
+        'rocket-league': [res.rl,  [['goals', 'G'], ['assists', 'A'], ['saves', 'SV']]],
+        'csgo':          [res.cs2, [['kills', 'K'], ['deaths', 'D'], ['assists', 'A']]],
+        'valorant':      [res.val, [['kills', 'K'], ['deaths', 'D'], ['assists', 'A']]]
+      };
+      const pick = tables[game] || [null, null];
+      const lookup = {};
+      (pick[0] || []).forEach((p) => { lookup[(p.player || '').toLowerCase()] = p; });
+      rowsEl.innerHTML = roster.map((n) => {
+        const p = lookup[n.toLowerCase()];
+        const chips = (p && pick[1])
+          ? pick[1].map(function (c) { return '<span class="bk-run-stat"><b>' + (p[c[0]] || 0) + '</b>' + c[1] + '</span>'; }).join('')
+          : '<span class="bk-run-stats-none">no stats yet</span>';
+        return '<div class="bk-run-player"><span class="bk-run-pname">' + escRun(n) + '</span>' + chips + '</div>';
+      }).join('');
+    }).catch(function () {
+      if (_runStatsFor === teamName) rowsEl.innerHTML = '<div class="bk-run-stats-empty">Stats unavailable.</div>';
+    });
+  }
+  function renderTeamRun(b, fn, data) {
+    const bands = [
+      ['UPPER BRACKET', b.winners || [], ''],
+      ['LOWER BRACKET', b.losers || [], 'losers'],
+      ['GRAND FINALS',  b.finals || [], 'gf']
+    ];
+    let total = 0, wins = 0, teamName = '';
+    const main = document.createElement('div'); main.className = 'bk-run-main';
+    bands.forEach(function (bandDef) {
+      const cells = [];
+      (bandDef[1] || []).forEach(function (round) {
+        (round.sets || []).forEach(function (set) {
+          const a = set.a || {}, o = set.b || {};
+          const hitA = a.name && a.name !== 'TBD' && a.name.toLowerCase().includes(fn);
+          const hitB = o.name && o.name !== 'TBD' && o.name.toLowerCase().includes(fn);
+          if (!hitA && !hitB) return;
+          teamName = teamName || (hitA ? a.name : o.name);
+          total++;
+          if ((hitA && a.winner) || (hitB && o.winner)) wins++;
+          cells.push({ round: round.name || '', set: set });
+        });
+      });
+      if (!cells.length) return;
+      const band = document.createElement('div'); band.className = 'bk-run-band' + (bandDef[2] ? ' ' + bandDef[2] : '');
+      const lbl = document.createElement('div'); lbl.className = 'bk-run-band-label'; lbl.textContent = bandDef[0];
+      band.appendChild(lbl);
+      const row = document.createElement('div'); row.className = 'bk-run-row';
+      cells.forEach(function (c, i) {
+        if (i) { const sep = document.createElement('div'); sep.className = 'bk-run-arrow'; sep.textContent = '›'; row.appendChild(sep); }
+        const cell = document.createElement('div'); cell.className = 'bk-run-cell';
+        const rn = document.createElement('div'); rn.className = 'bk-round-name'; rn.textContent = c.round;
+        cell.appendChild(rn);
+        cell.appendChild(buildMatch(c.set, bandDef[2] === 'gf'));
+        row.appendChild(cell);
+      });
+      band.appendChild(row);
+      main.appendChild(band);
+    });
+    if (!total) return null;   // team has no sets in this phase — fall back to the normal bracket
+    const head = document.createElement('div'); head.className = 'bk-run-head';
+    const tLogo = logoFor(teamName);
+    head.innerHTML = (tLogo ? '<img class="bk-run-logo' + (isDark(tLogo) ? ' logo-on-dark' : '') + '" src="' + tLogo + '" alt="">' : '')
+      + '<div><div class="bk-run-eyebrow">Tournament Run</div><div class="bk-run-team">' + escRun(teamName) + '</div></div>'
+      + '<div class="bk-run-record">' + wins + 'W – ' + (total - wins) + 'L</div>';
+    main.insertBefore(head, main.firstChild);
+    const wrap = document.createElement('div'); wrap.className = 'bk-run';
+    wrap.appendChild(main);
+    const stats = document.createElement('div'); stats.className = 'bk-run-stats';
+    stats.innerHTML = '<div class="bk-run-band-label">Player Stats</div><div id="bk-run-stats-rows"><div class="bk-run-stats-empty">Loading…</div></div>';
+    wrap.appendChild(stats);
+    fillRunStats(teamName, data, stats.querySelector('#bk-run-stats-rows'));
+    return wrap;
   }
 
   function buildSlot(slot) {
@@ -757,7 +887,8 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
     ].filter(Boolean).sort().join('|');
     const sig = JSON.stringify({ t: b.title, sub: b.subtitle, sr: b.showRecord, ty: b.type, w: winners, l: losers, f: finals, sc: schedule, s: standings, mx: matrix,
       ph: phases.map((p) => p.id + p.name), ap: b.activePhaseId, pl: pools.map((p) => p.id + p.name), apl: b.activePoolId,
-      lg: logoByName, vw: view, rn: ROUNDS_N, ft: focusTeam, lp: _livePair });
+      lg: logoByName, vw: view, rn: ROUNDS_N, ft: focusTeam, lp: _livePair,
+      bl: ((data.brand && data.brand.logo) || '').slice(0, 48) });
     if (sig === _sig) return;
     _sig = sig;
 
@@ -766,6 +897,13 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
 
     el('bk-title').textContent = (b.title || '').toUpperCase();
     el('bk-subtitle').textContent = b.subtitle || '';
+    // Brand kit logo beside the event title (hidden when no kit / no logo).
+    const brandLogo = el('bk-brand-logo');
+    if (brandLogo) {
+      const bl = (data.brand && data.brand.logo) || '';
+      if (bl) { brandLogo.src = bl; brandLogo.style.display = ''; }
+      else brandLogo.style.display = 'none';
+    }
     const fmt = el('bk-format'); const ft = fmtType(b.type);
     fmt.textContent = ft; fmt.style.display = (ft && hasData) ? '' : 'none';
     emptyEl.classList.toggle('hidden', !!hasData);
@@ -778,7 +916,20 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
 
     scaleEl.innerHTML = '';
     const pillsEl = el('bk-section-pills'); if (pillsEl) pillsEl.innerHTML = '';
-    if (isElim) {
+    // Focused team + elimination data → dedicated tournament-run view instead of the bracket.
+    let runMode = false;
+    if (focusTeam && isElim) {
+      const run = renderTeamRun(b, focusTeam.toLowerCase(), data);
+      if (run) {
+        runMode = true;
+        scaleEl.classList.remove('butterfly'); scaleEl.classList.remove('bk-abbrev');
+        stage.classList.remove('butterfly');
+        scaleEl.appendChild(run);
+      }
+    }
+    if (runMode) {
+      // run view built above — none of the section/schedule/standings builders apply
+    } else if (isElim) {
       const isDouble = losers.length > 0;
       // Butterfly layout: only when showing both brackets with no round-trim applied.
       const butterfly = SHOW_W && SHOW_L && isDouble && ROUNDS_N === 0;
@@ -870,8 +1021,9 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
       // view reuses .bk-rounds for its columns — drawing elbows between swiss/RR rounds
       // painted meaningless progression lines all over pool play.
       scaleEl.querySelectorAll('.bk-section .bk-rounds').forEach(drawConnectors);
-      fit(isElim && SHOW_W && SHOW_L && ROUNDS_N === 0);
-      if (focusTeam) {
+      fit(!runMode && isElim && SHOW_W && SHOW_L && ROUNDS_N === 0);
+      // Run mode IS the focus presentation — no dimming or camera zoom on top of it.
+      if (focusTeam && !runMode) {
         var fn = focusTeam.toLowerCase();
         // Team-run focus: light the team's slot in every match they appear in, mark those
         // matches on-path (everything else recedes — see .bk-focus-mode CSS), then ZOOM the
