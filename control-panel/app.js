@@ -353,7 +353,7 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
       });
       loadDbRole(r);
       // Players pane carries the In-Game Player Cams mapping — refresh it on entry.
-      if (r === 'players') setTimeout(() => { if (typeof renderPlayerCams === 'function') renderPlayerCams(); }, 0);
+      if (r === 'players') setTimeout(() => { if (typeof renderPlayerCamMounts === 'function') renderPlayerCamMounts(); }, 0);
     }
     updateMonDot();
   }
@@ -737,7 +737,10 @@ const _PCAM_MOUNTS = [
   { rows: 'dcc-playercams-rows', status: 'dcc-playercams-status' },
   { rows: 'cfp-playercams-rows', status: 'cfp-playercams-status' },
 ];
-async function renderPlayerCams(forceVdo) {
+// Renders the msp/dcc/cfp player-cam mapping mounts. Named distinctly from the Dashboard's
+// renderPlayerCams — the two used to share a name and this (earlier) declaration was silently
+// shadowed by the later one, leaving these mounts permanently empty.
+async function renderPlayerCamMounts(forceVdo) {
   const mounts = _PCAM_MOUNTS.map((m) => ({ rows: el(m.rows), status: el(m.status) })).filter((m) => m.rows);
   if (!mounts.length) return;
   const vdo = await _pcamVdoLinks(forceVdo);
@@ -786,7 +789,7 @@ function _pcamAutoMatch() {
       if (hit) { send('save_facecam', { name: r.name, platformId: r.pid, link: hit.url }); linked++; }
     });
     showToast(linked ? `Auto-linked ${linked} player cam${linked !== 1 ? 's' : ''}` : 'No name matches found — link them with the dropdowns', linked ? '#22c55e' : '#fbbf24');
-    setTimeout(() => renderPlayerCams(), 400);
+    setTimeout(() => renderPlayerCamMounts(), 400);
   })();
 }
 ;(function wirePlayerCams() {
@@ -798,15 +801,15 @@ function _pcamAutoMatch() {
       let link = sel.value;
       if (link === '__custom__') {
         link = prompt(`Cam URL for ${name} (any embeddable URL — VDO view link, Twitch embed, …)`) || '';
-        if (!link.trim()) { renderPlayerCams(); return; }
+        if (!link.trim()) { renderPlayerCamMounts(); return; }
       }
       if (!link) { send('delete_facecam', { name }); showToast(`Cam cleared for ${name}`, '#fbbf24'); }
       else { send('save_facecam', { name, platformId: pid, link: link.trim() }); showToast(`Cam linked for ${name}`, '#22c55e'); }
-      setTimeout(() => renderPlayerCams(), 400);
+      setTimeout(() => renderPlayerCamMounts(), 400);
     });
   });
   [['btn-playercams-automatch', _pcamAutoMatch], ['dcc-playercams-automatch', _pcamAutoMatch], ['cfp-playercams-automatch', _pcamAutoMatch],
-   ['btn-playercams-refresh', () => renderPlayerCams(true)], ['dcc-playercams-refresh', () => renderPlayerCams(true)], ['cfp-playercams-refresh', () => renderPlayerCams(true)]]
+   ['btn-playercams-refresh', () => renderPlayerCamMounts(true)], ['dcc-playercams-refresh', () => renderPlayerCamMounts(true)], ['cfp-playercams-refresh', () => renderPlayerCamMounts(true)]]
     .forEach(([id, fn]) => { const b = el(id); if (b) b.addEventListener('click', fn); });
 })();
 
@@ -1980,9 +1983,10 @@ function _returnGraphicsToProd() {
     winner:    { name: 'Winner / Post-match',   link: 'winner.html',          hasClear: true,  hasQueue: true,  hasPush: true,  hasApply: true  },
     intro:     { name: 'Team Line-up / Intro',  link: 'intro.html',           hasClear: true,  hasQueue: true,  hasPush: true,  hasApply: true  },
     ticker:    { name: 'Ticker',                link: 'ticker.html',          hasClear: true,  hasQueue: false, hasPush: true,  hasApply: true,  pushId: 'btn-ticker-apply' },
-    // Standalone OBS scene (like duorow/quaddesk) — not part of gfx.html's push/clear layering,
-    // so no Push Live / Clear / Apply here. This panel is just a live-synced settings form.
-    preshow:   { name: 'Desk Show',              link: 'preshow.html',         hasClear: false, hasQueue: false, hasPush: false },
+    // Standalone OBS scene (like duorow/quaddesk) — not a gfx.html layer, so "Push Live" can't mean
+    // "toggle a layer" here. standaloneScene names the real OBS/vMix scene this graphic lives on;
+    // the top-bar button cuts the switcher straight to it instead of calling doPush().
+    preshow:   { name: 'Desk Show',              link: 'preshow.html',         hasClear: false, hasQueue: false, hasPush: true, standaloneScene: 'Desk Show' },
     series:    { name: 'Series Score',          link: 'series.html',          hasClear: true,  hasQueue: false, hasPush: true  },
     matchup:   { name: 'Pre-Match Lineup',      link: 'matchup.html',         hasClear: true,  hasQueue: false, hasPush: true  },
     veto:      { name: 'Map Pool',               link: 'mapscreen.html',       hasClear: true,  hasQueue: false, hasPush: true,  clearId: 'btn-hide-veto-gfx', pushId: 'btn-show-veto-gfx', popout: true },
@@ -2013,8 +2017,19 @@ function _returnGraphicsToProd() {
       if (meta.link) { sceneLink.href = base + '/' + meta.link; sceneLink.textContent = meta.link; sceneLink.style.display = ''; }
       else sceneLink.style.display = 'none';
     }
-    // Top bar Push to Live — the sole way to change what's live.
-    const topPush = el('gfx-top-push'); if (topPush) topPush.style.display = meta.hasPush ? '' : 'none';
+    // Top bar Push to Live — the sole way to change what's live. Standalone scenes (not a
+    // gfx.html layer) get a relabeled button that cuts the switcher straight to their OBS scene.
+    const topPush = el('gfx-top-push');
+    if (topPush) {
+      topPush.style.display = meta.hasPush ? '' : 'none';
+      if (meta.standaloneScene) {
+        topPush.textContent = 'Cut to Scene';
+        topPush.title = `Cut OBS/vMix straight to the "${meta.standaloneScene}" scene`;
+      } else {
+        topPush.textContent = 'Push Live';
+        topPush.title = 'Show this scene on gfx.html — hides every other scene there';
+      }
+    }
     // Footer: Apply (save content, no visibility change) + Add to Rundown only. No Clear here —
     // Clear All (top bar) and Push to Live (top bar) are the only visibility controls now.
     // Pop-out scenes have their own footer inside the modal — this shared one only applies to
@@ -2157,10 +2172,29 @@ function _returnGraphicsToProd() {
 
   // Top bar: "Clear All" clears every GFX overlay; "Push to Live" is the sole way to make the
   // currently-edited scene live.
-  document.getElementById('gfx-top-clear')?.addEventListener('click', () => { clearAllGfxScenes(); gfxFootStatus('All scenes cleared.', false); });
+  document.getElementById('gfx-top-clear')?.addEventListener('click', async () => {
+    // Only prompt when a graphic is actually on air — clearing nothing is harmless. (The qrail
+    // "clear all" link funnels through this button too, so this guard covers both entry points.)
+    if (currentState && currentState.gfxActive) {
+      const ok = await appConfirm('Take every on-air graphic down? A graphic is live right now.', 'Clear all');
+      if (!ok) return;
+    }
+    clearAllGfxScenes(); gfxFootStatus('All scenes cleared.', false);
+  });
   // Hidden delegation targets kept for rundown and external callers.
   document.getElementById('gfx-top-queue')?.addEventListener('click', () => el('btn-queue-' + currentKey)?.click());
-  document.getElementById('gfx-top-push')?.addEventListener('click', () => doPush(currentKey));
+  document.getElementById('gfx-top-push')?.addEventListener('click', () => {
+    const meta = SCENE_META[currentKey] || {};
+    if (meta.standaloneScene) {
+      const backend = typeof swBackend === 'function' ? swBackend(currentState) : 'obs';
+      const ready = backend === 'vmix' ? !!(currentState.vmix && currentState.vmix.connected) : !!(currentState.obs && currentState.obs.connected);
+      if (!ready) { gfxFootStatus(`${backend === 'vmix' ? 'vMix' : 'OBS'} isn't connected — can't cut scenes.`, false); return; }
+      send('obs_switch_scene', { sceneName: meta.standaloneScene });
+      gfxFootStatus(`Cut ${backend === 'vmix' ? 'vMix' : 'OBS'} to "${meta.standaloneScene}".`, true);
+      return;
+    }
+    doPush(currentKey);
+  });
 
   // Panel footer: Apply only (saves content, no visibility change).
   el('gfx-foot-push')?.addEventListener('click', () => applyScene(currentKey));
@@ -2361,11 +2395,13 @@ function _returnGraphicsToProd() {
     if (key === 'matchup' && typeof window._gfxRefreshMatchupPickers === 'function') window._gfxRefreshMatchupPickers(currentState);
     if (key === 'winner'  && typeof window._gfxRefreshWinnerPicker   === 'function') window._gfxRefreshWinnerPicker(currentState);
     if (key === 'draft'   && typeof renderDraftManager === 'function') renderDraftManager(currentState);
-    // Per-scene appearance preset bar — only for scenes whose overlay applies sceneConfig
-    // (SceneBase.applySceneConfig). The document-level data-cust-* handlers below drive it.
+    // Per-scene appearance preset bar (accent/accent2/font overrides) — retired, per-scene
+    // theming duplicated what the active Brand Kit's own color/accent/font already provide and
+    // wasn't used anywhere. PRESET_SCENES stays empty (rather than deleting this block) so the
+    // bar can come back for a specific scene later without rebuilding the mount/render wiring.
     const presetMount = el('gfx-preset-mount');
     if (presetMount) {
-      const PRESET_SCENES = ['bracket', 'break', 'draft', 'intro', 'matchup', 'preshow', 'schedule', 'series', 'veto', 'winner'];
+      const PRESET_SCENES = [];
       if (PRESET_SCENES.includes(key)) {
         if (presetMount.dataset.scene !== key) {
           presetMount.dataset.scene = key;
@@ -3306,16 +3342,14 @@ function _returnGraphicsToProd() {
     return `<div class="gfx-cust-bar" data-scene="${sceneKey}">
       <div class="gfx-cust-head">
         <span class="gfx-cust-title">PRESET</span>
-        <span class="gfx-cust-active-name" data-cust-active="${sceneKey}">Default</span>
+        <span class="gfx-cust-active-name" data-cust-active="${sceneKey}">Brand theme</span>
         <button class="gfx-cust-toggle btn-icon" data-cust-toggle="${sceneKey}" title="Customize scene appearance">
           <svg viewBox="0 0 16 16" width="12" height="12" fill="currentColor"><path d="M8 4a1 1 0 1 1 0-2 1 1 0 0 1 0 2zM8 9a1 1 0 1 1 0-2 1 1 0 0 1 0 2zM8 14a1 1 0 1 1 0-2 1 1 0 0 1 0 2z"/></svg>
         </button>
       </div>
       <div class="gfx-cust-body" data-cust-body="${sceneKey}" hidden>
         <div class="gfx-cust-preset-row">
-          <select class="input-select gfx-cust-sel" data-cust-sel="${sceneKey}">
-            <option value="Default">Default</option>
-          </select>
+          <select class="input-select gfx-cust-sel" data-cust-sel="${sceneKey}"></select>
           <button class="btn btn-xs gfx-cust-save" data-cust-save="${sceneKey}">Save As</button>
           <button class="btn btn-xs btn-danger gfx-cust-del" data-cust-del="${sceneKey}">Delete</button>
         </div>
@@ -4956,7 +4990,7 @@ function applyState(data) {
   // UI always sees a complete state. Mutating `data` in place also feeds the render functions
   // that run after applyState() in the message handler.
   if (data && currentState) {
-    for (const k of ['savedTeams', 'playerProfiles', 'brandKits', 'brandKitsVer', 'draftRosters', 'brand', 'banner', 'mainBanner', 'playouts', 'bracket', 'replay', 'crew']) {
+    for (const k of ['savedTeams', 'playerProfiles', 'brandKits', 'brandKitsVer', 'draftRosters', 'brand', 'banner', 'mainBanner', 'playouts', 'bracket', 'replay', 'crew', 'leagues', 'clips', 'socialPreset']) {
       if (data[k] === undefined && currentState[k] !== undefined) data[k] = currentState[k];
     }
   }
@@ -8206,7 +8240,7 @@ wireScorecard('scorecard-teams', 'teams');
     const open = panel.style.display !== 'none';
     panel.style.display = open ? 'none' : 'grid';
     btn.classList.toggle('active', !open);
-    if (!open && typeof renderPlayerCams === 'function') renderPlayerCams();
+    if (!open && typeof renderPlayerCamMounts === 'function') renderPlayerCamMounts();
   });
   panel.addEventListener('click', (e) => {
     const b = e.target.closest('[data-msp]'); if (!b) return;
@@ -11256,6 +11290,7 @@ el('check-casters-visible')?.addEventListener('change', function() {
 // changed and never clobbers the dropdown while the producer is mid-selection.
 function fillSceneSelect(sel, scenes, current, firstLabel) {
   if (!sel || document.activeElement === sel) return;
+  firstLabel = firstLabel || '— None —';   // callers without a label used to hit the (shadowing) OBS variant, which showed this
   const cur = current || '';
   const sig = (scenes || []).join('|') + '||' + cur + '||' + firstLabel;
   if (sel.dataset.sig === sig) return;
@@ -12805,7 +12840,10 @@ function renderScenePresets(data) {
     const key = bar.dataset.scene;
     const sp = presets[key] || { active: 'Default', presets: {} };
     const active = sp.active || 'Default';
-    const names = ['Default', ...Object.keys(sp.presets || {}).filter((n) => n !== 'Default' && n !== '__preview__')];
+    // 'Default' is a sentinel meaning "no override, use the brand kit's theme" — it's never a
+    // selectable option (the "Reset" button below activates it directly); the dropdown only
+    // ever lists real saved presets.
+    const names = Object.keys(sp.presets || {}).filter((n) => n !== 'Default' && n !== '__preview__');
     const sig = active + '|' + names.join(',');
 
     const sel  = bar.querySelector(`[data-cust-sel="${key}"]`);
@@ -12814,7 +12852,7 @@ function renderScenePresets(data) {
       sel.innerHTML = names.map((n) => `<option value="${n}"${n === active ? ' selected' : ''}>${n}</option>`).join('');
       sel.dataset.rspSig = sig;
     }
-    if (lbl) lbl.textContent = active;
+    if (lbl) lbl.textContent = active === 'Default' ? 'Brand theme' : active;
 
     // Update color pickers and font selector from the active preset's config (skip __preview__).
     if (active === '__preview__') return;
@@ -13799,6 +13837,13 @@ async function evSyncPush() {
     }
 
     const clearExisting = mode === 'existing' && !!el('ev-sync-clear-existing')?.checked;
+    if (clearExisting) {
+      // Wiping the Challonge-side roster is irreversible on their platform — make it explicit,
+      // and never leave the checkbox armed for the next sync.
+      const ok = await appConfirm('Delete ALL existing participants on the Challonge tournament before syncing? This wipes its current roster on challonge.com.', 'Wipe and sync');
+      if (!ok) { setLog('Sync cancelled.', null); return; }
+    }
+    if (el('ev-sync-clear-existing')) el('ev-sync-clear-existing').checked = false;
 
     // Build participant payload with mappings
     const participants = _evSyncParticipants.map(p => ({
@@ -18365,7 +18410,30 @@ el('qk-put-upnext')?.addEventListener('click', () => {
 });
 
 // ── Switcher page: program/preview + take + multiview + audio (backend-routed) ──
-let _swWatch = false, _swShotTimer = null, _swObsAudio = [], _swGridSig = '';
+let _swWatch = false, _swShotTimer = null, _swObsAudio = [], _swGridSig = '', _swGridCursor = 0;
+// Throttled screenshot pipeline — OBS GetSourceScreenshot is expensive, so cap concurrency and
+// queue by name. Keeps the multiview populated + monitors live WITHOUT flooding OBS (the "lag").
+let _swShotQueue = [], _swShotInFlight = 0, _swShotFinish = {};
+const SW_SHOT_MAX = 2;
+function swQueueShot(name, front) {
+  if (!name || _swShotFinish[name] || _swShotQueue.includes(name)) return;   // already queued / in flight
+  if (front) _swShotQueue.unshift(name); else _swShotQueue.push(name);
+  swPumpShots();
+}
+function swPumpShots() {
+  while (_swShotInFlight < SW_SHOT_MAX && _swShotQueue.length) {
+    const name = _swShotQueue.shift();
+    _swShotInFlight++;
+    let done = false;
+    const finish = () => { if (done) return; done = true; delete _swShotFinish[name]; _swShotInFlight = Math.max(0, _swShotInFlight - 1); swPumpShots(); };
+    _swShotFinish[name] = finish;
+    send('switcher_screenshot', { name });
+    setTimeout(finish, 5000);   // watchdog: never wedge the pipe on a lost response
+  }
+}
+function swClearShots() { _swShotQueue = []; _swShotInFlight = 0; _swShotFinish = {}; }
+function swThumbsOn() { const c = el('sw-thumbs'); return c ? c.checked : true; }
+function _swSrc(img) { return /^data:/.test(img) ? img : ('data:image/jpg;base64,' + img); }
 function swBackend(data) { return (data && data.switcher && data.switcher.target) === 'vmix' ? 'vmix' : 'obs'; }
 function swSources(data) {
   if (swBackend(data) === 'vmix') {
@@ -18379,7 +18447,7 @@ function _swScreenImg(id, img) {
   const box = el(id); if (!box) return;
   let im = box.querySelector('img');
   if (!im) { im = document.createElement('img'); box.innerHTML = ''; box.appendChild(im); }
-  im.src = img;
+  im.src = _swSrc(img);
 }
 function renderSwitcher(data) {
   if (!el('tab-switcher-content')) return;
@@ -18394,7 +18462,13 @@ function renderSwitcher(data) {
   const prog = sources.find((s) => s.isProgram), prev = sources.find((s) => s.isPreview);
   if (el('sw-prog-name')) el('sw-prog-name').textContent = prog ? prog.name : '—';
   if (el('sw-prev-name')) el('sw-prev-name').textContent = prev ? prev.name : '—';
-  if (!prev && el('sw-prev-screen')) el('sw-prev-screen').innerHTML = '<span class="sw-mon-ph">No preview</span>';
+  // vMix has no per-input thumbnail over HTTP — show the input NAME in the monitor instead of blank.
+  if (backend === 'vmix') {
+    const ps = el('sw-prog-screen'); if (ps) ps.innerHTML = `<span class="sw-mon-ph">${prog ? _stEsc(prog.name) : 'On air'}</span>`;
+    const vs = el('sw-prev-screen'); if (vs) vs.innerHTML = `<span class="sw-mon-ph">${prev ? _stEsc(prev.name) : 'No preview'}</span>`;
+  } else if (!prev && el('sw-prev-screen') && !el('sw-prev-screen').querySelector('img')) {
+    el('sw-prev-screen').innerHTML = '<span class="sw-mon-ph">No preview</span>';
+  }
 
   const grid = el('sw-grid');
   if (grid) {
@@ -18408,9 +18482,11 @@ function renderSwitcher(data) {
         t.querySelector('.sw-tile-name').textContent = s.name;
         t.addEventListener('click', () => send('switcher_set_preview', { name: s.id }));
         t.addEventListener('dblclick', () => send('obs_switch_scene', { sceneName: s.id }));
-        if (backend === 'obs') t.addEventListener('mouseenter', () => { if (!t._shot) { t._shot = 1; send('switcher_screenshot', { name: s.id }); setTimeout(() => { t._shot = 0; }, 4000); } });
+        if (backend === 'obs') t.addEventListener('mouseenter', () => { if (swThumbsOn()) swQueueShot(s.id, true); });   // priority refresh on hover
         grid.appendChild(t);
       });
+      // Populate every tile once so the wall isn't blank (throttled by the queue).
+      if (backend === 'obs' && swThumbsOn()) sources.forEach((s) => swQueueShot(s.id));
     }
     grid.querySelectorAll('.sw-tile').forEach((t) => {
       const s = sources.find((x) => x.id === t.dataset.id);
@@ -18419,7 +18495,78 @@ function renderSwitcher(data) {
       const badge = t.querySelector('.sw-tile-badge'); if (badge) badge.textContent = (s && s.isProgram) ? 'PGM' : (s && s.isPreview) ? 'PVW' : '';
     });
   }
+  renderSwStatus(data, backend);
+  renderSwDock(data);
+  renderSwRundown(data);
+  renderSwMacros();
   renderSwMixer(data, backend);
+}
+// Status bar: LIVE/REC pills, viewers, stream/record button labels (uptime + clock tick in swTick).
+let _swStreamStart = null;
+function renderSwStatus(data, backend) {
+  const streaming = backend === 'vmix' ? !!(data.vmix && data.vmix.streaming) : !!(data.obs && data.obs.streaming);
+  const recording = backend === 'vmix' ? !!(data.vmix && data.vmix.recording) : !!(data.obs && data.obs.recording);
+  if (streaming && !_swStreamStart) _swStreamStart = Date.now();
+  if (!streaming) _swStreamStart = null;
+  const live = el('sw-pill-live'); if (live) { live.classList.toggle('on', streaming); live.textContent = streaming ? 'ON AIR' : 'OFF AIR'; }
+  const rec = el('sw-pill-rec'); if (rec) rec.classList.toggle('on', recording);
+  const sb = el('sw-stream-btn'); if (sb) { sb.textContent = streaming ? 'Stop Stream' : 'Start Stream'; sb.classList.toggle('on', streaming); }
+  const rb = el('sw-record-btn'); if (rb) { rb.textContent = recording ? 'Stop Record' : 'Start Record'; rb.classList.toggle('on', recording); }
+  const vw = el('sw-viewers'); if (vw) { const n = data.twitch && data.twitch.viewerCount; vw.textContent = (n != null && streaming) ? (Number(n).toLocaleString() + ' viewers') : '— viewers'; }
+}
+// Graphics dock — reuse the Put-On-Air registry (QK_PUT) so overlays fire without leaving the page.
+let _swDockBuilt = false;
+function renderSwDock(data) {
+  const wrap = el('sw-dock'); if (!wrap || typeof QK_PUT === 'undefined') return;
+  if (!_swDockBuilt) {
+    _swDockBuilt = true;
+    wrap.innerHTML = '';
+    QK_PUT.forEach((item, i) => {
+      const chip = document.createElement('div'); chip.className = 'sw-dock-chip'; chip.dataset.i = i;
+      chip.innerHTML = `<span class="sw-dock-lbl">${_stEsc(item.label)}</span>`
+        + (item.cfg ? `<span class="sw-dock-gear" title="options"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/></svg></span>` : '');
+      chip.addEventListener('click', (e) => {
+        if (e.target.closest('.sw-dock-gear')) { if (typeof bbOpenTriggerConfig === 'function') bbOpenTriggerConfig(item.trig, chip); return; }
+        if (item.ov) { const info = bbActionInfo({ t: 'overlay', k: item.ov }); if (info) info.run(); return; }
+        if (item.cfg && !_qkIsLive(item) && typeof bbOpenTriggerConfig === 'function') { bbOpenTriggerConfig(item.trig, chip); return; }
+        el(item.toggle)?.click();
+      });
+      wrap.appendChild(chip);
+    });
+  }
+  wrap.querySelectorAll('.sw-dock-chip').forEach((chip) => { const item = QK_PUT[+chip.dataset.i]; if (item) chip.classList.toggle('on', _qkIsLive(item)); });
+}
+// Rundown (run-of-show) NOW/NEXT + Up Next match from the start.gg queue.
+function renderSwRundown(data) {
+  const segs = (typeof _rdSegs !== 'undefined' && Array.isArray(_rdSegs)) ? _rdSegs : [];
+  const idx = (typeof _rdIdx !== 'undefined') ? _rdIdx : 0;
+  const running = (typeof _rdRunning !== 'undefined') ? _rdRunning : false;
+  const now = running && segs[idx] ? segs[idx] : null;
+  const next = segs[running ? idx + 1 : idx] || null;
+  if (el('sw-rd-now')) el('sw-rd-now').textContent = now ? (now.label || now.name || 'Segment ' + (idx + 1)) : (segs.length ? 'Not started' : 'No rundown');
+  if (el('sw-rd-next')) el('sw-rd-next').textContent = next ? (next.label || next.name || '—') : '—';
+  if (el('sw-rd-status')) el('sw-rd-status').textContent = segs.length ? `${running ? idx + 1 : 0}/${segs.length}` : '';
+  const sb = el('sw-rd-start'); if (sb) sb.textContent = running ? 'Restart' : 'Start';
+  // Up Next — next queued start.gg match
+  const q = Array.isArray(data.startgg && data.startgg.queue) ? data.startgg.queue : [];
+  const m = (data.startgg && data.startgg.queueEnabled) ? (q.find((x) => !x.live && x.state !== 3) || q.find((x) => x.live) || q[0]) : null;
+  if (el('sw-upnext-val')) el('sw-upnext-val').textContent = m ? `${m.round ? m.round + ' · ' : ''}${m.teamA || 'TBD'} vs ${m.teamB || 'TBD'}` : '—';
+}
+// Macros — fire existing Flows.
+let _swMacroSig = '';
+function renderSwMacros() {
+  const wrap = el('sw-macros'); if (!wrap) return;
+  const flows = (typeof _flows !== 'undefined' && Array.isArray(_flows)) ? _flows : [];
+  const sig = flows.map((f) => f.id + ':' + f.name).join(',');
+  if (sig === _swMacroSig) return;
+  _swMacroSig = sig;
+  wrap.innerHTML = flows.length ? '' : '<div class="sw-macros-empty">No flows yet — build them on Production ▸ Flows.</div>';
+  flows.forEach((f) => {
+    const b = document.createElement('button'); b.className = 'sw-macro-btn'; b.textContent = f.name || 'Flow';
+    if (f.enabled === false) b.style.opacity = '.5';
+    b.addEventListener('click', () => { if (typeof flowFire === 'function') flowFire(f); });
+    wrap.appendChild(b);
+  });
 }
 function renderSwMixer(data, backend) {
   const wrap = el('sw-mixer'); if (!wrap) return;
@@ -18433,7 +18580,8 @@ function renderSwMixer(data, backend) {
     channels.forEach((c) => {
       const ch = document.createElement('div'); ch.className = 'sw-ch'; ch.dataset.id = c.id;
       const min = c.model === 'vmix' ? 0 : -60, max = c.model === 'vmix' ? 100 : 0;
-      ch.innerHTML = `<span class="sw-ch-name">${_stEsc(c.name)}</span><input type="range" class="sw-ch-fader" min="${min}" max="${max}" step="1" value="${c.vol}"><span class="sw-ch-val"></span><button class="sw-ch-mute">MUTE</button>`;
+      const meter = c.model === 'vmix' ? '<span class="sw-ch-meter"><span></span></span>' : '';
+      ch.innerHTML = `<span class="sw-ch-name">${_stEsc(c.name)}</span><input type="range" class="sw-ch-fader" min="${min}" max="${max}" step="1" value="${c.vol}">${meter}<span class="sw-ch-val"></span><button class="sw-ch-mute">MUTE</button>`;
       const fader = ch.querySelector('.sw-ch-fader'), val = ch.querySelector('.sw-ch-val'), mute = ch.querySelector('.sw-ch-mute');
       const showVal = () => { val.textContent = c.model === 'vmix' ? Math.round(fader.value) + '%' : Math.round(fader.value) + ' dB'; };
       showVal();
@@ -18452,14 +18600,27 @@ function renderSwMixer(data, backend) {
     });
   }
 }
+function swUpdateClocks() {
+  const wc = el('sw-wallclock'); if (wc) wc.textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  const up = el('sw-uptime');
+  if (up) {
+    if (_swStreamStart) { const s = Math.floor((Date.now() - _swStreamStart) / 1000); up.textContent = [Math.floor(s / 3600), Math.floor(s % 3600 / 60), s % 60].map((n) => String(n).padStart(2, '0')).join(':'); }
+    else up.textContent = '00:00:00';
+  }
+}
 function swTick() {
   if (!_swWatch || !currentState) return;
-  if (swBackend(currentState) === 'obs') {
-    const srcs = swSources(currentState);
-    const prog = srcs.find((s) => s.isProgram), prev = srcs.find((s) => s.isPreview);
-    if (prog) send('switcher_screenshot', { name: prog.id });
-    if (prev) send('switcher_screenshot', { name: prev.id });
-  }
+  swUpdateClocks();
+  if (!swThumbsOn() || swBackend(currentState) !== 'obs') return;
+  const srcs = swSources(currentState);
+  const prog = srcs.find((s) => s.isProgram), prev = srcs.find((s) => s.isPreview);
+  // Program + Preview stay live (priority); the rest of the wall refreshes gently, one tile per
+  // tick, so it stays reasonably current without hammering OBS. Skip program while the smooth
+  // virtual-camera feed is showing it live.
+  if (prog && !_swProgStream) swQueueShot(prog.id, true);
+  if (prev) swQueueShot(prev.id, true);
+  const rest = srcs.filter((s) => !s.isProgram && !s.isPreview);
+  if (rest.length) { const g = rest[_swGridCursor % rest.length]; _swGridCursor++; swQueueShot(g.id); }
 }
 function switcherOnShow() {
   _swWatch = true; send('switcher_watch', { on: true });
@@ -18472,20 +18633,88 @@ function switcherOnHide() {
   if (!_swWatch) return;
   _swWatch = false; send('switcher_watch', { on: false });
   clearInterval(_swShotTimer); _swShotTimer = null;
+  swClearShots();   // drop any queued/in-flight screenshots so OBS isn't polled off-page
+  _swGridSig = '';  // force a fresh grid + snapshots next time the page opens
 }
+// ── Live Program monitor via OBS Virtual Camera (getUserMedia) ──
+// OBS "Start Virtual Camera" exposes the PROGRAM as a system webcam; we capture it locally for a
+// smooth, low-latency live monitor (the one live-video path a web panel gets for free). Program-only.
+let _swProgStream = null;
+async function swProgLiveStart() {
+  const btn = el('sw-prog-live'), sel = el('sw-prog-device'), st = el('sw-status');
+  try {
+    // Initial grab unlocks device labels + permission.
+    let stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+    const cams = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'videoinput');
+    if (sel) {
+      sel.innerHTML = cams.map((d, i) => `<option value="${d.deviceId}">${_stEsc(d.label || ('Camera ' + (i + 1)))}</option>`).join('');
+      const pick = cams.find((d) => /obs\s*virtual|obs-camera|obs cam|vmix|virtual cam/i.test(d.label || ''));
+      if (pick) sel.value = pick.deviceId; else if (cams[0]) sel.value = cams[0].deviceId;
+      sel.style.display = '';
+    }
+    const chosen = sel ? sel.value : (cams[0] && cams[0].deviceId);
+    const curId = stream.getVideoTracks()[0] && stream.getVideoTracks()[0].getSettings().deviceId;
+    if (chosen && chosen !== curId) {
+      stream.getTracks().forEach((t) => t.stop());
+      stream = await navigator.mediaDevices.getUserMedia({ video: { deviceId: { exact: chosen } }, audio: false });
+    }
+    _swProgStream = stream;
+    const v = el('sw-prog-video'); if (v) { v.srcObject = stream; v.style.display = ''; }
+    const box = el('sw-prog-screen'); if (box) box.querySelectorAll('img, .sw-mon-ph').forEach((e) => { e.style.display = 'none'; });
+    if (btn) { btn.classList.add('on'); btn.textContent = 'Live'; }
+    if (st && !/connected/i.test(st.textContent)) st.textContent = '';
+  } catch (e) {
+    if (st) st.textContent = 'Live feed error: ' + (e.name || e.message) + ' — click "Start Virtual Camera" in OBS, then retry.';
+    swProgLiveStop();
+  }
+}
+function swProgLiveStop() {
+  if (_swProgStream) { _swProgStream.getTracks().forEach((t) => t.stop()); _swProgStream = null; }
+  const v = el('sw-prog-video'); if (v) { v.srcObject = null; v.style.display = 'none'; }
+  const box = el('sw-prog-screen'); if (box) box.querySelectorAll('img, .sw-mon-ph').forEach((e) => { e.style.display = ''; });
+  const btn = el('sw-prog-live'); if (btn) { btn.classList.remove('on'); btn.textContent = 'Go Live'; }
+  const sel = el('sw-prog-device'); if (sel) sel.style.display = 'none';
+}
+el('sw-prog-live')?.addEventListener('click', () => { if (_swProgStream) swProgLiveStop(); else swProgLiveStart(); });
+el('sw-prog-device')?.addEventListener('change', function () { if (_swProgStream) swProgLiveStart(); });   // re-open with the chosen device
+
 function _swFlash(id) { const b = el(id); if (!b) return; b.style.filter = 'brightness(1.5)'; setTimeout(() => { b.style.filter = ''; }, 140); }
-el('sw-cut')?.addEventListener('click', () => send('switcher_take', { mode: 'cut' }));
-el('sw-fade')?.addEventListener('click', () => send('switcher_take', { mode: 'fade', duration: parseInt(el('sw-fade-dur')?.value, 10) || 500 }));
+function swAuto() { send('switcher_take', { transition: el('sw-trans-type')?.value || 'Fade', duration: parseInt(el('sw-fade-dur')?.value, 10) || 500 }); }
+el('sw-cut')?.addEventListener('click', () => send('switcher_take', { transition: 'Cut' }));
+el('sw-fade')?.addEventListener('click', swAuto);
 el('sw-audio-refresh')?.addEventListener('click', () => send('switcher_audio_list'));
 document.querySelectorAll('#sw-target-seg .sw-seg-btn').forEach((b) => b.addEventListener('click', () => send('set_switcher_target', { target: b.dataset.target })));
-// Keyboard TAKE — only while the Switcher page is open and not typing in a field.
+// Status-bar producer controls (stream / record / replay / FTB), routed to the active backend.
+el('sw-stream-btn')?.addEventListener('click', function () { send('switcher_stream', { on: !this.classList.contains('on') }); });
+el('sw-record-btn')?.addEventListener('click', function () { send('switcher_record', { on: !this.classList.contains('on') }); });
+el('sw-replay-btn')?.addEventListener('click', () => { send('switcher_replay'); _swFlash('sw-replay-btn'); });
+el('sw-ftb-btn')?.addEventListener('click', () => { send('switcher_ftb'); _swFlash('sw-ftb-btn'); });
+// Rundown controls (reuse the run-of-show engine).
+el('sw-rd-start')?.addEventListener('click', () => { if (typeof rdStart === 'function') { rdStart(); if (currentState) renderSwRundown(currentState); } });
+el('sw-rd-next-btn')?.addEventListener('click', () => { if (typeof rdNext === 'function') { rdNext(); if (currentState) renderSwRundown(currentState); } });
+el('sw-thumbs')?.addEventListener('change', function () {
+  if (this.checked) { _swGridSig = ''; if (currentState) renderSwitcher(currentState); swTick(); }   // re-snapshot everything
+  else {   // off — stop polling, drop images so it's clearly labels-only
+    swClearShots();
+    document.querySelectorAll('#sw-grid .sw-tile img, #sw-prog-screen img, #sw-prev-screen img').forEach((im) => im.remove());
+    const ps = el('sw-prev-screen'); if (ps && !ps.querySelector('.sw-mon-ph')) ps.innerHTML = '<span class="sw-mon-ph">Thumbnails off</span>';
+    const pg = el('sw-prog-screen'); if (pg && !pg.querySelector('.sw-mon-ph')) pg.innerHTML = '<span class="sw-mon-ph">Thumbnails off</span>';
+  }
+});
+// Keyboard: Enter=CUT, Space=AUTO, 1-9=cut that source to program. Only while the Switcher page is
+// open and not typing in a field.
 document.addEventListener('keydown', (e) => {
   const page = el('tab-switcher-content');
   if (!page || !page.classList.contains('active')) return;
   const ae = document.activeElement, tag = (ae && ae.tagName) || '';
   if (/^(INPUT|TEXTAREA|SELECT)$/.test(tag) || (ae && ae.isContentEditable)) return;
-  if (e.key === 'Enter') { e.preventDefault(); _swFlash('sw-cut'); send('switcher_take', { mode: 'cut' }); }
-  else if (e.key === ' ' || e.code === 'Space') { e.preventDefault(); _swFlash('sw-fade'); send('switcher_take', { mode: 'fade', duration: parseInt(el('sw-fade-dur')?.value, 10) || 500 }); }
+  if (e.key === 'Enter') { e.preventDefault(); _swFlash('sw-cut'); send('switcher_take', { transition: 'Cut' }); }
+  else if (e.key === ' ' || e.code === 'Space') { e.preventDefault(); _swFlash('sw-fade'); swAuto(); }
+  else if (/^[1-9]$/.test(e.key)) {
+    const srcs = currentState ? swSources(currentState) : [];
+    const s = srcs[parseInt(e.key, 10) - 1];
+    if (s) { e.preventDefault(); send('obs_switch_scene', { sceneName: s.id }); }   // cut that source to program
+  }
 });
 
 // ── Bottom bar: "Up Next" from the start.gg stream queue ────────────────────
@@ -20648,7 +20877,7 @@ function renderStreamQueue(data) {
     row.querySelector('.sgg-round').textContent = s.round || '';
     const btn = row.querySelector('.sgg-push');
     btn.textContent = onOverlay ? 'On overlay' : 'Push';
-    btn.addEventListener('click', () => send('startgg_push_set', { setId: s.setId }));
+    btn.addEventListener('click', async () => { if (await confirmQueuePush()) send('startgg_push_set', { setId: s.setId }); });
     wrap.appendChild(row);
   });
 }
@@ -20785,19 +21014,6 @@ function renderPreshowGfxPanel(data) {
     }
   }
 
-  // Topic-preset dropdown — named saved sets of headline + topics.
-  const tpSel = el('preshow-topic-preset');
-  if (tpSel && document.activeElement !== tpSel) {
-    const names = Object.keys(pre.topicPresets || {});
-    const sig = names.join('|');
-    if (tpSel.dataset.sig !== sig) {
-      const _e = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-      tpSel.dataset.sig = sig;
-      tpSel.innerHTML = '<option value="">— Load a preset —</option>' +
-        names.map((n) => `<option value="${_e(n)}">${_e(n)}</option>`).join('');
-    }
-  }
-
   const list = el('preshow-topics-list');
   if (!list) return;
   const topics = Array.isArray(pre.topics) ? pre.topics : [];
@@ -20872,32 +21088,17 @@ el('btn-preshow-add-topic')?.addEventListener('click', () => {
 el('preshow-headline')?.addEventListener('input', function () {
   send('set_preshow', { headline: this.value });
 });
-// Topic presets: load on select, save/delete via the buttons.
-el('preshow-topic-preset')?.addEventListener('change', function () {
-  const name = this.value; if (!name) return;
-  const p = ((currentState.preshow && currentState.preshow.topicPresets) || {})[name];
-  if (!p) return;
-  send('set_preshow', { headline: p.headline || '', topics: Array.isArray(p.topics) ? p.topics : [], activeTopicIndex: 0 });
-  showToast(`Loaded topic preset "${name}"`, '#22c55e');
-});
-el('btn-preshow-tp-save')?.addEventListener('click', async () => {
-  const cur = el('preshow-topic-preset')?.value || '';
-  const name = await customPrompt('Save Topic Preset', 'Saves the current headline + topics.', cur, 'Save');
-  if (name == null || !name.trim()) return;
-  send('save_preshow_topic_preset', { name: name.trim() });
-  showToast(`Saved topic preset "${name.trim()}"`, '#22c55e');
-});
-el('btn-preshow-tp-del')?.addEventListener('click', () => {
-  const name = el('preshow-topic-preset')?.value || '';
-  if (!name) { showToast('Pick a preset to delete', '#fbbf24'); return; }
-  send('delete_preshow_topic_preset', { name });
-});
 el('preshow-home-scene')?.addEventListener('change', function () {
   send('set_preshow', { homeScene: this.value });
 });
 el('btn-preshow-return')?.addEventListener('click', () => {
   const home = (currentState.preshow && currentState.preshow.homeScene) || '';
-  if (home) send('obs_switch_scene', { sceneName: home });
+  if (!home) { showToast('Pick a Return-to scene first.', '#fbbf24'); return; }
+  const backend = typeof swBackend === 'function' ? swBackend(currentState) : 'obs';
+  const ready = backend === 'vmix' ? !!(currentState.vmix && currentState.vmix.connected) : !!(currentState.obs && currentState.obs.connected);
+  if (!ready) { showToast(`${backend === 'vmix' ? 'vMix' : 'OBS'} isn't connected — can't cut scenes.`, '#ef4444'); return; }
+  send('obs_switch_scene', { sceneName: home });
+  showToast(`Cutting to "${home}"…`, '#22c55e');
 });
 
 function buildCasterDeskLayouts() {
@@ -22214,6 +22415,25 @@ function renderBrandSponsors() {
     del.addEventListener('click', () => { brandSponsors.splice(idx, 1); renderBrandSponsors(); });
     head.appendChild(thumb); head.appendChild(name); head.appendChild(del);
 
+    const deal = document.createElement('div'); deal.className = 'sponsor-deal-row';
+    const dvLab = document.createElement('label'); dvLab.className = 'sponsor-deal-field';
+    dvLab.title = 'Total $ this sponsor paid for this deal — feeds realized CPM in Sponsor Proof of Play (Analytics).';
+    dvLab.appendChild(document.createTextNode('Deal $'));
+    const dv = document.createElement('input'); dv.type = 'number'; dv.min = '0'; dv.step = '0.01'; dv.placeholder = '—';
+    dv.className = 'input-text sponsor-deal-input';
+    dv.value = s.dealValue != null ? s.dealValue : '';
+    dv.addEventListener('change', () => { const n = parseFloat(dv.value); s.dealValue = (Number.isFinite(n) && n >= 0) ? n : null; });
+    dvLab.appendChild(dv);
+    const cpmLab = document.createElement('label'); cpmLab.className = 'sponsor-deal-field';
+    cpmLab.title = 'Their agreed/market CPM (cost per 1000 impression-seconds) — feeds $ value delivered.';
+    cpmLab.appendChild(document.createTextNode('Target CPM $'));
+    const cpm = document.createElement('input'); cpm.type = 'number'; cpm.min = '0'; cpm.step = '0.01'; cpm.placeholder = '—';
+    cpm.className = 'input-text sponsor-deal-input';
+    cpm.value = s.targetCpm != null ? s.targetCpm : '';
+    cpm.addEventListener('change', () => { const n = parseFloat(cpm.value); s.targetCpm = (Number.isFinite(n) && n >= 0) ? n : null; });
+    cpmLab.appendChild(cpm);
+    deal.appendChild(dvLab); deal.appendChild(cpmLab);
+
     const spots = document.createElement('div'); spots.className = 'sponsor-placements';
     SPONSOR_SPOTS_UI.forEach((sp) => {
       const lab = document.createElement('label'); lab.className = 'sponsor-spot' + (sp.multi ? '' : ' sponsor-spot-single');
@@ -22231,7 +22451,7 @@ function renderBrandSponsors() {
       spots.appendChild(lab);
     });
 
-    row.appendChild(head); row.appendChild(spots); list.appendChild(row);
+    row.appendChild(head); row.appendChild(deal); row.appendChild(spots); list.appendChild(row);
   });
 
   if (sponsorsSortable) { sponsorsSortable.destroy(); sponsorsSortable = null; }
@@ -22384,6 +22604,22 @@ function renderBrands(data) {
     actBtn.className = 'btn btn-primary btn-sm'; actBtn.textContent = isActive ? 'Active' : 'Activate';
     actBtn.disabled = isActive;
     actBtn.addEventListener('click', () => send('activate_brand_kit', { id: k.id }));
+    // Capture the CURRENT show setup into this profile's live package: scene presets, ticker,
+    // event name, board titles, caster lineup + slot labels, OBS moment mappings. Activating
+    // the kit/package later restores it all. (Facecams/replay-cam toggles are deliberately
+    // NOT captured — those are production-dependent, not brand-dependent.)
+    const pkg = kitActivePackage(k);
+    const capBtn = document.createElement('button');
+    capBtn.className = 'btn btn-ghost btn-sm';
+    capBtn.textContent = pkg.showSnapshot ? 'Re-capture' : 'Capture setup';
+    capBtn.title = (pkg.showSnapshot
+      ? 'Update the captured show setup (last captured ' + new Date(pkg.showSnapshot.capturedAt || 0).toLocaleString() + ')'
+      : 'Snapshot the current show setup into "' + (pkg.name || 'Main') + '"')
+      + ' — scene presets · ticker · event name · titles · caster lineup · OBS scene mappings';
+    capBtn.addEventListener('click', () => {
+      send('capture_package_snapshot', { kitId: k.id, packageId: pkg.id });
+      showToast('Show setup captured into "' + (pkg.name || 'Main') + '"', '#22c55e');
+    });
     const editBtn = document.createElement('button');
     editBtn.className = 'btn btn-ghost btn-sm'; editBtn.textContent = 'Edit';
     editBtn.addEventListener('click', () => { openBrandEditor(); loadBrandIntoForm(k); });
@@ -22411,7 +22647,7 @@ function renderBrands(data) {
       const ok = await customConfirm('Delete Brand Kit', `Delete "${k.name}"? This deletes the entire client profile and ALL of its brand packages — this cannot be undone.${pkgWarn}`, 'Delete Everything');
       if (ok) send('delete_brand_kit', { id: k.id });
     });
-    actions.appendChild(actBtn); actions.appendChild(editBtn); actions.appendChild(dupBtn); actions.appendChild(expBtn); actions.appendChild(urlBtn); actions.appendChild(delBtn);
+    actions.appendChild(actBtn); actions.appendChild(capBtn); actions.appendChild(editBtn); actions.appendChild(dupBtn); actions.appendChild(expBtn); actions.appendChild(urlBtn); actions.appendChild(delBtn);
     item.appendChild(main); item.appendChild(actions); list.appendChild(item);
   });
 }
@@ -22602,7 +22838,7 @@ el('input-sponsor-logo')?.addEventListener('change', async (e) => {
 el('btn-add-sponsor')?.addEventListener('click', () => {
   const name = (el('input-sponsor-name').value || '').trim();
   if (!name && !pendingSponsorLogo) { showToast('Enter a sponsor name or pick a logo.', '#ef4444'); return; }
-  brandSponsors.push({ name, logo: pendingSponsorLogo || null, tier: 'partner', placements: defaultPlacements() });
+  brandSponsors.push({ name, logo: pendingSponsorLogo || null, tier: 'partner', placements: defaultPlacements(), dealValue: null, targetCpm: null });
   pendingSponsorLogo = null;
   el('input-sponsor-name').value = '';
   el('input-sponsor-logo').value = '';
@@ -22859,7 +23095,10 @@ function getObsPayload() {
   return payload;
 }
 
-function fillSceneSelect(sel, available, current) {
+// OBS scene-mapping variant (keeps a stale/unlisted scene selectable). Named distinctly from
+// fillSceneSelect above — the two used to share a name and this (later) declaration silently
+// shadowed the sig-guarded one, wiping custom first-option labels and rebuilding on every render.
+function fillObsSceneSelect(sel, available, current) {
   if (!sel) return;
   const list = Array.isArray(available) ? available.slice() : [];
   if (current && !list.includes(current)) list.push(current);  // keep a stale/unlisted scene selectable
@@ -22881,9 +23120,9 @@ function populateObsSceneSelects(available, mapping, kickoffScene) {
   _lastObsSceneSig = sig;
 
   OBS_SCENE_KEYS.forEach(k => {
-    fillSceneSelect(el(`select-obs-scene-${k}`), available, (mapping && mapping[k]) || '');
+    fillObsSceneSelect(el(`select-obs-scene-${k}`), available, (mapping && mapping[k]) || '');
   });
-  fillSceneSelect(el('select-obs-kickoff-scene'), available, kickoffScene || '');
+  fillObsSceneSelect(el('select-obs-kickoff-scene'), available, kickoffScene || '');
 }
 
 // ── RL scene automation (Match ▸ Teams gear panel, Rocket League only) ───────────────────────────
@@ -22907,7 +23146,13 @@ function wireRlSceneAuto() {
     if (e && !e._rlWired) { e._rlWired = true; e.addEventListener('change', sendRlSceneAuto); }
   });
   const clr = el('btn-rl-clear-board');
-  if (clr && !clr._rlWired) { clr._rlWired = true; clr.addEventListener('click', function () { send('clear_scoreboard', {}); }); }
+  if (clr && !clr._rlWired) {
+    clr._rlWired = true;
+    clr.addEventListener('click', async function () {
+      const ok = await appConfirm('Clear the on-air scoreboard now? Team names, scores and series reset on the overlay immediately.', 'Clear scoreboard');
+      if (ok) send('clear_scoreboard', {});
+    });
+  }
   const hide = el('chk-rl-hide-ui');
   if (hide && !hide._rlWired) { hide._rlWired = true; hide.addEventListener('change', function () { send('set_rl_hide_ui', { hidden: this.checked }); }); }
 }
@@ -22921,8 +23166,8 @@ function applyRlSceneAuto(data) {
   const sig = JSON.stringify({ a: obs.availableScenes || [], k: ko.scene || '', p: pg.scene || '' });
   if (sig !== _lastRlSceneSig) {
     _lastRlSceneSig = sig;
-    fillSceneSelect(el('sel-rl-kickoff-scene'), obs.availableScenes || [], ko.scene || '');
-    fillSceneSelect(el('sel-rl-postgame-scene'), obs.availableScenes || [], pg.scene || '');
+    fillObsSceneSelect(el('sel-rl-kickoff-scene'), obs.availableScenes || [], ko.scene || '');
+    fillObsSceneSelect(el('sel-rl-postgame-scene'), obs.availableScenes || [], pg.scene || '');
   }
   const kEn = el('chk-rl-kickoff'); if (kEn) kEn.checked = !!ko.enabled;
   const pEn = el('chk-rl-postgame'); if (pEn) pEn.checked = !!pg.enabled;
@@ -26945,8 +27190,8 @@ function renderQrailStartgg(data) {
     if (isDemo) {
       row.querySelector('.qsgg-push-btn').disabled = true;
     } else {
-      row.querySelector('.qsgg-push-btn').addEventListener('click', () => {
-        send('startgg_push_set', { setId: item.setId });
+      row.querySelector('.qsgg-push-btn').addEventListener('click', async () => {
+        if (await confirmQueuePush()) send('startgg_push_set', { setId: item.setId });
       });
     }
     list.appendChild(row);
@@ -28774,9 +29019,8 @@ _loadNotifs();
 renderNotifBell();
 
 // ── In-app notifications ───────────────────────────────────────────────────
-// All notifications go to the bell (top-right, next to the profile icon). The old
-// top-right toast bar is gone — showToast now just routes into the bell so existing
-// callers keep working unchanged. (autoDismissMs is ignored; bell entries persist.)
+// Every notification goes to the bell (persistent history) AND shows as a transient
+// bottom-right toast via showToast (auto-dismisses; autoDismissMs respected).
 
 // In-app confirm dialog — returns a Promise<bool>, no white OS popup.
 function appConfirm(msg, okLabel, isDanger) {
@@ -28795,8 +29039,38 @@ function appConfirm(msg, okLabel, isDanger) {
   });
 }
 
+// Pushing a queue set loads new teams AND silently resets the series score server-side
+// (startgg_push_set → reset_series). Guard every user-initiated push: when a series is
+// actually running, make the reset explicit before it happens.
+function confirmQueuePush() {
+  const s = (currentState && currentState.series) || {};
+  const b = Number(s.blue || 0), o = Number(s.orange || 0);
+  if (!b && !o) return Promise.resolve(true);
+  const tn = (side, fb) => (((currentState || {}).teams || {})[side] || {}).name || fb;
+  return appConfirm(
+    `Load this match onto the scoreboard? The running series (${tn('blue', 'Blue')} ${b}–${o} ${tn('orange', 'Orange')}) resets to 0–0.`,
+    'Load match'
+  );
+}
+
+// Transient toast + notification bell. The bell keeps the permanent history; the toast is the
+// immediate on-screen confirmation (success/error feedback was invisible when everything went
+// bell-only). Click a toast to dismiss it early.
 function showToast(message, bg, autoDismissMs) {
   try { addNotification(message, bg); } catch (_) {}
+  try {
+    let stack = document.getElementById('toast-stack');
+    if (!stack) { stack = document.createElement('div'); stack.id = 'toast-stack'; document.body.appendChild(stack); }
+    const t = document.createElement('div');
+    t.className = 'toast';
+    if (bg) t.style.borderLeftColor = bg;
+    t.textContent = String(message || '');
+    t.addEventListener('click', () => t.remove());
+    stack.appendChild(t);
+    while (stack.children.length > 4) stack.removeChild(stack.firstChild);   // cap the pile-up
+    const ttl = Math.max(1200, Number(autoDismissMs) || 3500);
+    setTimeout(() => { t.classList.add('hide'); setTimeout(() => t.remove(), 300); }, ttl);
+  } catch (_) {}
 }
 
 // Intercept native alert() → notification bell (no white popup).
@@ -28963,9 +29237,9 @@ function connect() {
         if (typeof window._schSetMatches === 'function' && tq.length) {
           window._schSetMatches(tq.map(q => ({ setId: q.setId || '', round: q.round || '', teamA: q.teamA || 'TBD', teamB: q.teamB || 'TBD', logoA: q.logoA || '', logoB: q.logoB || '', date: '', time: '', stream: !!q.live })));
         }
-        // 2. Auto-push live match (or first upcoming) to scoreboard
+        // 2. Auto-push live match (or first upcoming) to scoreboard — confirmed if a series is running
         const pushSet = tq.find(q => q.live) || tq[0];
-        if (pushSet && pushSet.setId) send('startgg_push_set', { setId: pushSet.setId });
+        if (pushSet && pushSet.setId) confirmQueuePush().then((ok) => { if (ok) send('startgg_push_set', { setId: pushSet.setId }); });
         // 3. Render dashboard team queue rows with per-match Push buttons
         const dashList = el('sgg-team-queue');
         if (dashList) {
@@ -28981,7 +29255,7 @@ function connect() {
               if (bolds[0]) bolds[0].textContent = q.teamA || 'TBD';
               if (bolds[1]) bolds[1].textContent = q.teamB || 'TBD';
               row.querySelector('.sgg-round').textContent = q.round || '';
-              row.querySelector('.sgg-push').addEventListener('click', () => send('startgg_push_set', { setId: q.setId }));
+              row.querySelector('.sgg-push').addEventListener('click', async () => { if (await confirmQueuePush()) send('startgg_push_set', { setId: q.setId }); });
               dashList.appendChild(row);
             });
           }
@@ -29019,17 +29293,26 @@ function connect() {
       const elx = el('vmix-result');
       if (elx) { elx.textContent = msg.data.message || ''; elx.style.color = msg.data.ok ? '#9ae6b4' : '#f56565'; }
     } else if (msg.type === 'switcher-screenshot') {
-      if (msg.data && msg.data.ok && msg.data.img && typeof currentState !== 'undefined') {
+      const d = msg.data || {};
+      if (typeof _swShotFinish !== 'undefined' && _swShotFinish[d.name]) _swShotFinish[d.name]();   // free the pipe slot
+      if (d.ok && d.img && typeof currentState !== 'undefined') {
         const srcs = (typeof swSources === 'function') ? swSources(currentState) : [];
         const prog = srcs.find((s) => s.isProgram), prev = srcs.find((s) => s.isPreview);
-        if (prog && prog.id === msg.data.name) _swScreenImg('sw-prog-screen', msg.data.img);
-        if (prev && prev.id === msg.data.name) _swScreenImg('sw-prev-screen', msg.data.img);
-        const t = Array.from(document.querySelectorAll('#sw-grid .sw-tile')).find((x) => x.dataset.id === msg.data.name);
-        if (t) { let im = t.querySelector('img'); if (!im) { im = document.createElement('img'); t.insertBefore(im, t.firstChild); } im.src = msg.data.img; }
+        if (prog && prog.id === d.name) _swScreenImg('sw-prog-screen', d.img);
+        if (prev && prev.id === d.name) _swScreenImg('sw-prev-screen', d.img);
+        const t = Array.from(document.querySelectorAll('#sw-grid .sw-tile')).find((x) => x.dataset.id === d.name);
+        if (t) { let im = t.querySelector('img'); if (!im) { im = document.createElement('img'); t.insertBefore(im, t.firstChild); } im.src = _swSrc(d.img); }
       }
     } else if (msg.type === 'switcher-audio') {
       _swObsAudio = (msg.data && msg.data.sources) || [];
       if (_swWatch && typeof renderSwMixer === 'function' && currentState) renderSwMixer(currentState, swBackend(currentState));
+    } else if (msg.type === 'vmix-meters') {
+      const wrap = el('sw-mixer');
+      if (wrap) (msg.data && msg.data.levels || []).forEach((lv) => {
+        let ch = null; wrap.querySelectorAll('.sw-ch').forEach((x) => { if (x.dataset.id === String(lv.n)) ch = x; });
+        const bar = ch && ch.querySelector('.sw-ch-meter > span');
+        if (bar) bar.style.width = Math.round(Math.min(1, lv.m || 0) * 100) + '%';
+      });
     } else if (msg.type === 'autofollow-pushed') {
       showToast(msg.data.message || 'Auto-follow updated the match.', '#8b5cf6', 6000);
     } else if (msg.type === 'obs-ensure-result') {
@@ -32099,6 +32382,7 @@ function adProofPlacementStr(byPlacement) {
   const parts = ADPROOF_SPOTS.filter((k) => byPlacement && byPlacement[k]).map((k) => ADPROOF_SPOT_LABEL[k] + ' ' + adProofMmss(byPlacement[k]));
   return parts.join(' · ') || '—';
 }
+function adProofUsd(n) { return (n == null) ? '—' : '$' + Number(n).toLocaleString(undefined, { maximumFractionDigits: 2 }); }
 async function loadAdProof() {
   try { _adProofReport = await (await fetch(ADPROOF_API)).json(); }
   catch (e) { _adProofReport = null; }
@@ -32119,6 +32403,9 @@ function renderAdProof(rep) {
     if (!rep.active && !sponsors.length) {
       cur.innerHTML = '<p class="section-desc" style="margin:0;">No active session. Start one when you go live to begin logging sponsor exposure.</p>';
     } else {
+      // $ columns only appear once at least one sponsor has a deal value / target CPM set
+      // (Brand Kits → sponsor editor) — stays out of the way for producers who don't track $.
+      const hasMoney = sponsors.some((s) => s.dealValue != null || s.targetCpm != null);
       const rows = sponsors.map((s) => `<tr>
         <td class="st-name">${escapeHtml(s.name || '(unnamed)')}</td>
         <td class="st-hi">${adProofMmss(s.seconds)}</td>
@@ -32126,16 +32413,21 @@ function renderAdProof(rep) {
         <td class="st-hi" title="Estimated impressions = concurrent viewers x on-screen seconds">${anNum(s.viewerSeconds || 0)}</td>
         <td>${anNum(s.avgViewers || 0)}</td>
         <td>${anNum(s.peakViewers || 0)}</td>
+        ${hasMoney ? `<td class="st-hi" title="What this sponsor paid for the deal">${adProofUsd(s.dealValue)}</td>
+        <td title="What they effectively paid per 1000 impression-seconds delivered">${s.realizedCpm != null ? adProofUsd(s.realizedCpm) : '—'}</td>
+        <td class="st-hi" title="$ value of the exposure delivered, at their agreed/market CPM">${s.valueDelivered != null ? adProofUsd(s.valueDelivered) : '—'}${s.deliveryPct != null ? ` <span style="color:${s.deliveryPct >= 100 ? '#7ef0b0' : '#f3b45f'};">(${s.deliveryPct}%)</span>` : ''}</td>` : ''}
         <td class="app-place">${escapeHtml(adProofPlacementStr(s.byPlacement))}</td></tr>`).join('')
-        || `<tr><td colspan="7" class="stats-empty">No sponsor exposure logged yet${rep.active ? ' — make sure a brand kit with sponsors is active.' : '.'}</td></tr>`;
+        || `<tr><td colspan="${hasMoney ? 10 : 7}" class="stats-empty">No sponsor exposure logged yet${rep.active ? ' — make sure a brand kit with sponsors is active.' : '.'}</td></tr>`;
+      const moneySummary = (rep.totalDealValue != null || rep.totalValueDelivered != null)
+        ? ` · <span title="Sum of every sponsor's deal value / value delivered this session">${adProofUsd(rep.totalDealValue)} sold · ${adProofUsd(rep.totalValueDelivered)} delivered</span>` : '';
       const head = `<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:8px;">
-          <span class="app-cur-lbl">${rep.active ? 'Current session' : 'Last session (unsaved)'} · ${adProofMmss(rep.durationSec)}${rep.label ? ' · ' + escapeHtml(rep.label) : ''}</span>
+          <span class="app-cur-lbl">${rep.active ? 'Current session' : 'Last session (unsaved)'} · ${adProofMmss(rep.durationSec)}${rep.label ? ' · ' + escapeHtml(rep.label) : ''}${moneySummary}</span>
           <span style="display:flex;gap:6px;">
             <button class="btn btn-secondary btn-sm" id="app-exp-csv">Export CSV</button>
             <button class="btn btn-secondary btn-sm" id="app-exp-json">Export JSON</button>
           </span></div>`;
-      cur.innerHTML = head + `<table class="stats-table"><thead><tr><th>Sponsor</th><th>On screen</th><th>Spots</th><th>Est. impressions</th><th>Avg CCV</th><th>Peak</th><th>Placements</th></tr></thead><tbody>${rows}</tbody></table>`
-        + `<p class="section-desc" style="margin-top:6px;font-size:11px;">Estimated exposure inferred from live overlay state. "On screen" de-duplicates time across placements; "Spots" = distinct appearances. "Est. impressions" = viewer-seconds (concurrent Twitch+YouTube viewers x seconds on screen).</p>`;
+      cur.innerHTML = head + `<table class="stats-table"><thead><tr><th>Sponsor</th><th>On screen</th><th>Spots</th><th>Est. impressions</th><th>Avg CCV</th><th>Peak</th>${hasMoney ? '<th>Deal $</th><th>Realized CPM</th><th>Value delivered</th>' : ''}<th>Placements</th></tr></thead><tbody>${rows}</tbody></table>`
+        + `<p class="section-desc" style="margin-top:6px;font-size:11px;">Estimated exposure inferred from live overlay state. "On screen" de-duplicates time across placements; "Spots" = distinct appearances. "Est. impressions" = viewer-seconds (concurrent Twitch+YouTube viewers x seconds on screen).${hasMoney ? ' "Value delivered" = impression-seconds valued at the sponsor\'s target CPM (set in Brand Kits); the % compares it to what they paid.' : ''}</p>`;
       el('app-exp-csv')?.addEventListener('click', () => adProofExport('current', 'csv'));
       el('app-exp-json')?.addEventListener('click', () => adProofExport('current', 'json'));
     }
@@ -32151,7 +32443,7 @@ function renderAdProof(rep) {
         const when = s.endedAt ? new Date(s.endedAt).toLocaleString() : '';
         return `<div class="app-sess">
           <div class="app-sess-main"><span class="app-sess-lbl">${escapeHtml(s.label || 'Broadcast')}</span>
-            <span class="app-sess-meta">${adProofMmss(s.durationSec)} · ${s.sponsorCount || 0} sponsors · ${escapeHtml(when)}</span></div>
+            <span class="app-sess-meta">${adProofMmss(s.durationSec)} · ${s.sponsorCount || 0} sponsors${s.totalValueDelivered != null ? ` · ${adProofUsd(s.totalValueDelivered)} delivered` : ''} · ${escapeHtml(when)}</span></div>
           <div class="app-sess-act">
             <button class="btn btn-secondary btn-sm" data-app-csv="${s.id}">CSV</button>
             <button class="btn btn-secondary btn-sm" data-app-json="${s.id}">JSON</button>

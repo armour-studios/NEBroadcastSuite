@@ -510,6 +510,8 @@ let state = {
     eventSlug: '',
     followActive: true,   // auto-point at the ACTIVE event (Dashboard ▸ Event); false = producer typed an explicit slug
     title: '',
+    subtitle: '',         // small header line under the title — mainly used by the League source
+    showRecord: true,     // show/hide W-L columns on the standings table (League source toggle)
     // How the current phases were populated. 'imported' = a platform feed owns the data and the
     // live-refresh tick may overwrite it; 'manual' = the in-app builder owns it and NOTHING external
     // should clobber it. Prevents the old silent collision where a manual edit wiped an import (and
@@ -1175,7 +1177,62 @@ function sanitizePackage(p, fallbackName) {
     })).slice(0, 12) : [],
     bannerInterval: Number(p.bannerInterval) > 0 ? Number(p.bannerInterval) : 10,
     replaySkin: p.replaySkin || null,   // per-profile replay transition background image
+    // Captured show setup ("Capture current show setup" in the profile editor): scene presets,
+    // ticker, event name, board titles, caster lineup + slot labels, OBS moment mappings.
+    // Applied on kit/package activation — only the fields the snapshot actually carries.
+    // Deliberately EXCLUDES production-dependent toggles (facecams enabled, replay cams).
+    showSnapshot: (p.showSnapshot && typeof p.showSnapshot === 'object') ? p.showSnapshot : null,
   };
+}
+
+// Snapshot the CURRENT live show setup into a package (see sanitizePackage.showSnapshot).
+function capturePackageSnapshot() {
+  return {
+    capturedAt: Date.now(),
+    scenePresets: JSON.parse(JSON.stringify(state.scenePresets || {})),
+    ticker: {
+      messages: (state.ticker.messages || []).slice(0, 50),
+      speed: state.ticker.speed, source: state.ticker.source, sponsor: state.ticker.sponsor || ''
+    },
+    eventName: state.eventName || '',
+    standingsTitle: (state.standings && state.standings.title) || '',
+    standingsSubtitle: (state.standings && state.standings.subtitle) || '',
+    upcomingTitle: (state.upcoming && state.upcoming.title) || '',
+    lowerThird: (state.casters && state.casters.lowerThird) || '',
+    lineup: JSON.parse(JSON.stringify((state.casters && state.casters.lineup) || [])),
+    slotLabels: { ...((state.casters && state.casters.slotLabels) || {}) },
+    obsScenes: { ...((state.obs && state.obs.scenes) || {}) }
+  };
+}
+
+// Apply a package's captured show setup. Only fields the snapshot carries are touched, so a
+// package captured before a feature existed can't blank newer state.
+function applyPackageSnapshot(pkg) {
+  const s = pkg && pkg.showSnapshot;
+  if (!s || typeof s !== 'object') return false;
+  if (s.scenePresets && typeof s.scenePresets === 'object') state.scenePresets = JSON.parse(JSON.stringify(s.scenePresets));
+  if (s.ticker && typeof s.ticker === 'object') {
+    if (Array.isArray(s.ticker.messages)) state.ticker.messages = s.ticker.messages.slice(0, 50);
+    if (Number(s.ticker.speed) > 0) state.ticker.speed = Number(s.ticker.speed);
+    if (s.ticker.source === 'startgg' || s.ticker.source === 'manual') state.ticker.source = s.ticker.source;
+    if (typeof s.ticker.sponsor === 'string') state.ticker.sponsor = s.ticker.sponsor;
+  }
+  if (s.eventName) state.eventName = String(s.eventName);
+  if (s.standingsTitle) state.standings.title = String(s.standingsTitle);
+  if (s.standingsSubtitle) state.standings.subtitle = String(s.standingsSubtitle);
+  if (s.upcomingTitle) state.upcoming.title = String(s.upcomingTitle);
+  if (typeof s.lowerThird === 'string' && s.lowerThird) state.casters.lowerThird = s.lowerThird;
+  if (Array.isArray(s.lineup) && s.lineup.length) {
+    state.casters.lineup = JSON.parse(JSON.stringify(s.lineup));
+    resolveLineupToList();
+  }
+  if (s.slotLabels && typeof s.slotLabels === 'object' && Object.keys(s.slotLabels).length) {
+    state.casters.slotLabels = { ...state.casters.slotLabels, ...s.slotLabels };
+  }
+  if (s.obsScenes && typeof s.obsScenes === 'object' && Object.values(s.obsScenes).some(Boolean)) {
+    state.obs.scenes = { ...state.obs.scenes, ...s.obsScenes };
+  }
+  return true;
 }
 
 // Migrate a kit in place: guarantee a packages[] array + a valid activePackageId.
@@ -3493,31 +3550,7 @@ async function startggPollTick() {
         } });
       }
     }
-    // Live bracket/score refresh every tick (~20s) so progression + scores update on the bracket
-    // (and standings) overlay without re-importing teams each time.
-    // The bracket FOLLOWS the active event (Dashboard ▸ Event panel) unless the producer typed a
-    // different slug into the bracket panel (followActive=false) or built a manual bracket — a
-    // stale eventSlug here used to re-import the wrong event (e.g. a 400-team LCQ) forever.
-    if (state.bracket.mode !== 'manual' && state.bracket.followActive !== false) {
-      const activeSlug = (state.startgg.eventSlug || '').trim();
-      if (activeSlug && (state.bracket.eventSlug || '').trim() !== activeSlug) {
-        console.log(`[Bracket] Following active event: ${activeSlug} (was ${state.bracket.eventSlug || 'none'})`);
-        state.bracket.eventSlug = activeSlug;
-      }
-    }
-    if ((state.bracket.eventSlug || '').trim() && state.bracket.mode !== 'manual') {
-      try { await fetchBracket(state.bracket.eventSlug); } catch (e) { /* non-fatal */ }
-      // start.gg-sourced standings mirror the live event standings each refresh, so the
-      // standings overlay updates as scores come in (manual/league rows are never touched).
-      if ((state.standings?.source || '') === 'startgg' && (state.bracket.standings || []).length) {
-        const mirrorSig = JSON.stringify(state.bracket.standings.map((r) => [r.placement, r.name, r.wins, r.losses]));
-        if (mirrorSig !== _standingsMirrorSig) {
-          _standingsMirrorSig = mirrorSig;
-          state.standings.rows = state.bracket.standings.map((r) => ({ ...r }));
-          broadcastFullState();
-        }
-      }
-    }
+    await syncBracketToActiveEvent();
   } catch (e) {
     state.startgg.connected = false;
     state.startgg.lastError = e.message;
@@ -3526,6 +3559,35 @@ async function startggPollTick() {
 }
 let _standingsMirrorSig = '';
 let _startggBracketTick = 0;
+
+// The Bracket scene's "Tournament Organizer" source FOLLOWS the active event (Dashboard ▸ Event
+// panel) unless the producer typed a different slug into the bracket panel (followActive=false)
+// or built a manual bracket — a stale eventSlug here used to re-import the wrong event (e.g. a
+// 400-team LCQ) forever. Called on the regular ~20s poll tick AND immediately whenever the active
+// start.gg event changes (activateStartggEvent), so switching events in the Dashboard reflects on
+// the Bracket scene right away instead of waiting up to 20s for the next tick.
+async function syncBracketToActiveEvent() {
+  if (state.bracket.mode !== 'manual' && state.bracket.followActive !== false) {
+    const activeSlug = (state.startgg.eventSlug || '').trim();
+    if (activeSlug && (state.bracket.eventSlug || '').trim() !== activeSlug) {
+      console.log(`[Bracket] Following active event: ${activeSlug} (was ${state.bracket.eventSlug || 'none'})`);
+      state.bracket.eventSlug = activeSlug;
+    }
+  }
+  if ((state.bracket.eventSlug || '').trim() && state.bracket.mode !== 'manual') {
+    try { await fetchBracket(state.bracket.eventSlug); } catch (e) { /* non-fatal */ }
+    // start.gg-sourced standings mirror the live event standings each refresh, so the
+    // standings overlay updates as scores come in (manual/league rows are never touched).
+    if ((state.standings?.source || '') === 'startgg' && (state.bracket.standings || []).length) {
+      const mirrorSig = JSON.stringify(state.bracket.standings.map((r) => [r.placement, r.name, r.wins, r.losses]));
+      if (mirrorSig !== _standingsMirrorSig) {
+        _standingsMirrorSig = mirrorSig;
+        state.standings.rows = state.bracket.standings.map((r) => ({ ...r }));
+        broadcastFullState();
+      }
+    }
+  }
+}
 
 function setStartggQueuePolling(enabled) {
   state.startgg.queueEnabled = !!enabled;
@@ -10191,6 +10253,9 @@ function handleControlMessage(msg, ws) {
       const kit = savedBrandKits.find((b) => b.id === id);
       if (kit) ensureKitPackages(kit);
       syncActivePreshowTopics();   // Desk Show headline/topics follow the newly-active kit's active package
+      // Captured show setup (scene presets / ticker / titles / caster lineup / OBS mappings)
+      // travels with the kit's active package.
+      if (kit) applyPackageSnapshot(activePackage(kit));
       // Automation: snap this game's theme to the kit's preferred design, if set.
       if (kit && kit.themes && isValidTheme(state.activeGame, kit.themes[state.activeGame])) {
         state.themesByGame[state.activeGame] = kit.themes[state.activeGame];
@@ -10216,8 +10281,30 @@ function handleControlMessage(msg, ws) {
         if (kit.packages.some((p) => p.id === msg.data?.packageId)) {
           kit.activePackageId = msg.data.packageId;
           saveBrandKits();
-          if (kit.id === state.activeBrandKitId) { applyBrandSlots(); syncActivePreshowTopics(); }
+          if (kit.id === state.activeBrandKitId) {
+            applyBrandSlots();
+            syncActivePreshowTopics();
+            if (applyPackageSnapshot(activePackage(kit))) saveAppState();
+          }
           broadcastFullState();
+        }
+      }
+      break;
+    }
+
+    // "Capture current show setup" — snapshot the live scene presets / ticker / event name /
+    // board titles / caster lineup + slot labels / OBS moment mappings into a package, so
+    // activating it later restores the whole show configuration.
+    case 'capture_package_snapshot': {
+      const kit = savedBrandKits.find((b) => b.id === msg.data?.kitId);
+      if (kit) {
+        ensureKitPackages(kit);
+        const pkg = kit.packages.find((p) => p.id === msg.data?.packageId);
+        if (pkg) {
+          pkg.showSnapshot = capturePackageSnapshot();
+          saveBrandKits();
+          broadcastFullState();
+          ws.send(JSON.stringify({ type: 'brand-result', data: { ok: true, message: `Show setup captured into "${pkg.name}".` } }));
         }
       }
       break;
@@ -12506,6 +12593,9 @@ function handleControlMessage(msg, ws) {
       // Overlay view mode — drives the single bracket source + the live preview.
       if (typeof p.view === 'string' && ['both', 'winners', 'losers', 'finals', 'schedule', 'standings', 'matrix'].includes(p.view)) state.bracket.view = p.view;
       if (p.rounds != null) { const n = parseInt(p.rounds, 10); if (Number.isFinite(n) && n >= 1 && n <= 20) state.bracket.rounds = n; }
+      if (typeof p.title === 'string') state.bracket.title = p.title.slice(0, 120);
+      if (typeof p.subtitle === 'string') state.bracket.subtitle = p.subtitle.slice(0, 140);
+      if (typeof p.showRecord === 'boolean') state.bracket.showRecord = p.showRecord;
       saveAppState();
       broadcastFullState();
       if (typeof p.visible === 'boolean') obsSwitch(p.visible ? 'bracket' : 'inGame');
