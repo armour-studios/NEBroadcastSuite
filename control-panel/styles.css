@@ -7654,6 +7654,14 @@ tr.lg2-drag-over { outline: 2px solid var(--accent, #4a9eff); outline-offset: -1
 
 .int-card-logo.mono-val { background: linear-gradient(135deg, #be123c, #881337); }
 
-/* Qrail playlist rows: two-line — info + To Air on top, per-playlist scene select beneath */
+/* Qrail playlist rows: two-line — info + To Air on top, per-playlist scene beneath as a quiet
+   ghost control (a full input box was too heavy for the rail; it becomes a real field on hover). */
 .qr-pl-row { flex-wrap: wrap; }
-.qr-pl-row .qr-pl-scene { flex: 1 1 100%; margin-top: 6px; font-size: 11px; padding: 4px 8px; }
+.qr-pl-row .qr-pl-scene {
+  flex: 1 1 100%; margin-top: 4px; font-size: 11px; font-weight: 600; padding: 2px 6px;
+  background: transparent; border: 1px solid transparent; color: var(--muted);
+  border-radius: 6px; cursor: pointer;
+}
+.qr-pl-row .qr-pl-scene:hover, .qr-pl-row .qr-pl-scene:focus {
+  border-color: var(--border); background: var(--surface2); color: var(--text);
+}

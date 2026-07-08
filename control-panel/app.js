@@ -13398,14 +13398,37 @@ function renderQuickPanel(data) {
       nowEl.textContent = (obs.connected && obs.currentScene) ? obs.currentScene : '—';
     }
   }
-  // NEXT = next queued set from the start.gg stream queue (mirrors renderUpNext)
+  // NEXT: when a run of show is built, this row IS the rundown — it names the next phase and
+  // the button advances to it (Start from the top when idle). Only without any rundown does it
+  // fall back to the start.gg queue + the Up Next screen shortcut (the original behavior).
   const nextEl = el('qk-next');
+  const putBtn = el('qk-put-upnext');
   if (nextEl) {
-    const q = Array.isArray(data.startgg && data.startgg.queue) ? data.startgg.queue : [];
-    const n = (data.startgg && data.startgg.queueEnabled)
-      ? (q.find((x) => !x.live && x.state !== 3) || q.find((x) => x.live) || q[0])
-      : null;
-    nextEl.textContent = n ? `${n.round ? n.round + ' · ' : ''}${n.teamA || 'TBD'} vs ${n.teamB || 'TBD'}` : '—';
+    const segs = (typeof _rdSegs !== 'undefined' && Array.isArray(_rdSegs)) ? _rdSegs : [];
+    if (segs.length) {
+      const running = (typeof _rdRunning !== 'undefined') && _rdRunning;
+      const nextIdx = running ? _rdIdx + 1 : 0;
+      const seg = segs[nextIdx];
+      const segName = seg ? (seg.label || (typeof rdTargetLabel === 'function' ? rdTargetLabel(seg) : '') || 'Segment') : '';
+      nextEl.textContent = seg ? `${segName} (${nextIdx + 1}/${segs.length})` : 'End of rundown';
+      if (putBtn) {
+        putBtn.dataset.mode = 'rundown';
+        putBtn.textContent = !running ? 'Start ▸' : (seg ? 'Go ▸' : 'End ▸');
+        putBtn.title = !running ? 'Start the run of show from the top'
+          : (seg ? 'Advance the run of show to this segment' : 'Finish the run of show');
+      }
+    } else {
+      const q = Array.isArray(data.startgg && data.startgg.queue) ? data.startgg.queue : [];
+      const n = (data.startgg && data.startgg.queueEnabled)
+        ? (q.find((x) => !x.live && x.state !== 3) || q.find((x) => x.live) || q[0])
+        : null;
+      nextEl.textContent = n ? `${n.round ? n.round + ' · ' : ''}${n.teamA || 'TBD'} vs ${n.teamB || 'TBD'}` : '—';
+      if (putBtn) {
+        putBtn.dataset.mode = 'upnext';
+        putBtn.textContent = 'Put ▸';
+        putBtn.title = 'Put the Up Next screen on air (set title + timer)';
+      }
+    }
   }
   // Put-on-air chips — build once, reflect live state each tick.
   const wrap = el('qk-put');
@@ -13436,6 +13459,13 @@ function renderQuickPanel(data) {
 // Static cockpit actions.
 el('qk-clear-all')?.addEventListener('click', (e) => { e.preventDefault(); el('gfx-top-clear')?.click(); });
 el('qk-put-upnext')?.addEventListener('click', () => {
+  const btn = el('qk-put-upnext');
+  if (btn && btn.dataset.mode === 'rundown') {
+    // Rundown mode: Start ▸ from idle, Go ▸ to advance, End ▸ finishes (rdNext handles all three).
+    if (typeof rdNext === 'function') rdNext();
+    renderQuickPanel(currentState);
+    return;
+  }
   // Preset the break title to "UP NEXT" then open its config so the producer sets the timer & pushes.
   const t = el('ck-break-title'); if (t) t.value = 'UP NEXT';
   if (typeof bbOpenTriggerConfig === 'function') bbOpenTriggerConfig('breakScreen', el('qk-put-upnext'));
