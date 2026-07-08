@@ -12107,6 +12107,14 @@ function applySceneFilter() {
   if (!wrap) return;
   document.querySelectorAll('#scene-nav .scene-nav-item').forEach((b) =>
     b.classList.toggle('active', b.dataset.group === _sceneFilterGroup));
+  // When a keyword search is active, flatten the group sections into one dense grid/list
+  // (CSS .searching) so matches don't scatter across stacked headers → far less scrolling.
+  const area = el('scene-groups-area');
+  if (area) {
+    area.classList.toggle('searching', !!_sceneFilterText);
+    area.classList.toggle('grid-view', _sceneViewMode === 'grid');
+    area.classList.toggle('list-view', _sceneViewMode !== 'grid');
+  }
   const isGrid = _sceneViewMode === 'grid';
   let totalShown = 0;
   wrap.querySelectorAll('.scene-group').forEach((section) => {
@@ -21873,6 +21881,7 @@ async function qrTwLoad() {
           if (!dr.ok) throw new Error(dd.error || 'Download failed');
           btn.textContent = 'Imported';
           showToast('Twitch clip imported — it is in Clips now', '#22c55e');
+          if (typeof qrScanFolder === 'function') qrScanFolder();   // refresh the merged Clips list
         } catch (e) {
           btn.disabled = false; btn.textContent = 'Import';
           showToast('Import failed: ' + e.message, '#f56565');
