@@ -4365,7 +4365,7 @@ function applyGameTeamName(side, rawName) {
 // structured, type-aware bracket. Round Robin pools also get a head-to-head
 // matrix and enriched standings (Sets Played/Set Count/Game Count) to match
 // how Start.gg itself presents Pool Play; elimination standings stay plain.
-function buildBracket(sets) {
+function buildBracket(sets, advancesTo) {
   const list = Array.isArray(sets) ? sets : [];
 
   // Dominant bracket type across the sets (a pool's sets are normally all one
@@ -4440,6 +4440,15 @@ function buildBracket(sets) {
   });
   const roster = standingsRaw.map((s) => s.name);
 
+  // Origin pill ("Day 1 A25: Winners") — only for slots seeded from a PREVIOUS phase
+  // (prereqType 'seed' + a progressionSource). Within-bracket slots (prereqType 'set')
+  // are covered by the connectors; first-phase seeds have no progression to show.
+  const originName = (slot) => {
+    if (!slot || slot.prereqType !== 'seed') return undefined;
+    const sd = slot.seed;
+    return (sd && sd.progressionSource && sd.placeholderName) ? sd.placeholderName : undefined;
+  };
+
   // Group sets into rounds — shared by the elimination split below AND the Swiss/Round-Robin
   // schedule (each round's pairings), so both read the exact same {name,round,sets} shape.
   const isGrandFinal = (s) => /grand\s*final/i.test(s.fullRoundText || '');
@@ -4451,7 +4460,7 @@ function buildBracket(sets) {
       const slots = s.slots || [];
       // state: start.gg set state (1=upcoming, 2=live, 3=done) — lets the overlay dim
       // unstarted sets so a pre-event bracket doesn't read as if matches already happened.
-      m.get(key).sets.push({ a: mapSlot(slots[0], s), b: mapSlot(slots[1], s), state: s.state || 0 });
+      m.get(key).sets.push({ id: s.id, a: mapSlot(slots[0], s), b: mapSlot(slots[1], s), state: s.state || 0, fromA: originName(slots[0]), fromB: originName(slots[1]) });
     });
     return [...m.values()].sort(sortFn);
   };
@@ -4479,7 +4488,7 @@ function buildBracket(sets) {
   if (!isElim) {
     // Swiss / Round-Robin: no winners/losers split, just the round-by-round pairing schedule.
     const schedule = groupRounds(() => true, (a, b) => a.round - b.round);
-    return { type, winners: [], losers: [], finals: [], standings, schedule, roster, matrix };
+    return { type, winners: [], losers: [], finals: [], standings, schedule, roster, matrix, advancesTo: advancesTo || '' };
   }
 
   // Elimination: group sets into rounds, split winners / losers / grand finals.
@@ -4493,7 +4502,16 @@ function buildBracket(sets) {
   );
   const finals = groupRounds(isGrandFinal, (a, b) => a.round - b.round);
 
-  return { type, winners, losers, finals, standings, schedule: [], roster, matrix: null };
+  // Exit pill: a set whose WINNER has no next set inside this pool is a bracket exit —
+  // when we know where this pool's qualifiers go, tag it ("-> Day 3: Swiss Stage").
+  if (advancesTo) {
+    const winnerFeedsForward = (sid) => list.some((s) =>
+      (s.slots || []).some((sl) => sl && String(sl.prereqId) === String(sid) && sl.prereqPlacement === 1));
+    [winners, losers, finals].forEach((band) => band.forEach((r) => (r.sets || []).forEach((st) => {
+      if (st.id != null && !winnerFeedsForward(st.id)) st.toNext = advancesTo;
+    })));
+  }
+  return { type, winners, losers, finals, standings, schedule: [], roster, matrix: null, advancesTo: advancesTo || '' };
 }
 
 // Split a flat Start.gg set list into one bracket PHASE per Start.gg phase
@@ -4504,13 +4522,33 @@ function buildBracket(sets) {
 // finals/standings/schedule/roster fields mirror that one pool directly —
 // this is what keeps existing single-pool/elimination events rendering
 // exactly as before.
-function buildPhases(sets) {
+function buildPhases(sets, phaseList) {
+  // Display order comes from the event's phases[] array — start.gg's own listing order.
+  // Neither phase id NOR phaseOrder is reliable: a rebuilt phase gets a high id and a
+  // high phaseOrder (RLCS NA Open 6: "Day 2" has phaseOrder 7, "Day 3" has 3).
+  const orderMap = new Map();
+  (Array.isArray(phaseList) ? phaseList : []).forEach((p, i) => { if (p && p.id != null) orderMap.set('p' + p.id, i); });
+  let firstSeen = 0;
+  // Cross-phase progression: originPhaseGroupId -> destination phase names. A slot whose
+  // seed progressed OUT of pool X tells us where X's qualifiers went ("Day 3: Swiss Stage").
+  const destByGroup = new Map();
+  (sets || []).forEach((s) => {
+    const dphase = s.phaseGroup && s.phaseGroup.phase && s.phaseGroup.phase.name;
+    (s.slots || []).forEach((sl) => {
+      const og = sl && sl.seed && sl.seed.progressionSource && sl.seed.progressionSource.originPhaseGroup;
+      if (og && og.id != null && dphase) {
+        const k = String(og.id);
+        if (!destByGroup.has(k)) destByGroup.set(k, new Set());
+        destByGroup.get(k).add(dphase);
+      }
+    });
+  });
   const groups = new Map();
   (sets || []).forEach((s) => {
     const ph = (s.phaseGroup && s.phaseGroup.phase) || null;
     const id = ph && ph.id != null ? 'p' + ph.id : 'default';
     const name = (ph && ph.name) || 'Bracket';
-    if (!groups.has(id)) groups.set(id, { id, name, order: ph && ph.id != null ? Number(ph.id) : 0, sets: [] });
+    if (!groups.has(id)) groups.set(id, { id, name, order: orderMap.has(id) ? orderMap.get(id) : 1000 + (firstSeen++), sets: [] });
     groups.get(id).sets.push(s);
   });
   return [...groups.values()]
@@ -4527,21 +4565,26 @@ function buildPhases(sets) {
       const pools = [...poolGroups.values()]
         .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }))
         .map((pg) => {
-          const b = buildBracket(pg.sets);
+          const b = buildBracket(pg.sets, [...(destByGroup.get(pg.id) || [])].join(' / '));
           // Pools carry their OWN elimination arrays: major-scale events (RLCS Opens) run MANY
           // double-elim pools per phase — merging at phase level produced one unreadable
           // mega-bracket with every pool's Round 1 stacked into a single column.
           return { id: pg.id, name: pg.name, type: b.type, roster: b.roster, schedule: b.schedule,
-            standings: b.standings, matrix: b.matrix,
+            standings: b.standings, matrix: b.matrix, advancesTo: b.advancesTo || '',
             winners: b.winners, losers: b.losers, finals: b.finals };
         });
       const p0 = pools[0] || { id: '', type: '', roster: [], schedule: [], standings: [], matrix: null };
       // Winners/losers/finals always come from the WHOLE phase's sets (not per-pool) —
       // elimination phases are effectively always a single pool in practice, and this
       // preserves exact prior behavior for them regardless of the pools split above.
-      const bAll = buildBracket(g.sets);
+      const phaseDest = new Set();
+      g.sets.forEach((s) => {
+        const k = s.phaseGroup && s.phaseGroup.id != null ? String(s.phaseGroup.id) : '';
+        if (k && destByGroup.has(k)) destByGroup.get(k).forEach((d) => phaseDest.add(d));
+      });
+      const bAll = buildBracket(g.sets, [...phaseDest].join(' / '));
       return {
-        id: g.id, name: g.name, type: bAll.type,
+        id: g.id, name: g.name, type: bAll.type, advancesTo: bAll.advancesTo || '',
         winners: bAll.winners, losers: bAll.losers, finals: bAll.finals,
         standings: p0.standings, schedule: p0.schedule, roster: p0.roster,
         pools, activePoolId: p0.id || ''
@@ -4576,6 +4619,7 @@ function syncActiveBracketPhase() {
   state.bracket.standings = (pool ? pool.standings : ph.standings) || [];
   state.bracket.schedule = (pool ? pool.schedule : ph.schedule) || [];   // Swiss/Round-Robin round-by-round pairings
   state.bracket.roster = (pool ? pool.roster : ph.roster) || [];
+  state.bracket.advancesTo = (pool && pool.advancesTo) || ph.advancesTo || '';
   state.bracket.matrix = (pool ? pool.matrix : (ph.matrix || null)) || null;   // ph.matrix: single-group manual Round Robin (no pools split)
 
   // Never leave the saved view pointing at data this bracket doesn't have — a stale "matrix"
@@ -4599,13 +4643,14 @@ function syncActiveBracketPhase() {
 // 40 pages × 50 = 2000 sets — enough for major-scale events (e.g. RLCS Opens: hundreds of
 // teams across swiss pools + top cut). Big events get a slower bracket-refresh cadence
 // in startggPollTick so this doesn't hammer the API every 20s.
-async function fetchAllSets(client, slug, perPage = 50, maxPages = 40) {
+async function fetchAllSets(client, slug, perPage = 32, maxPages = 63) {
   const query = `
     query BracketSets($slug: String!, $perPage: Int!, $page: Int!) {
       event(slug: $slug) {
         id
         name
         tournament { name }
+        phases { id name }
         sets(perPage: $perPage, page: $page, sortType: ROUND) {
           pageInfo { totalPages }
           nodes {
@@ -4616,6 +4661,10 @@ async function fetchAllSets(client, slug, perPage = 50, maxPages = 40) {
             winnerId
             phaseGroup { id displayIdentifier bracketType phase { id name } }
             slots {
+              prereqType
+              prereqId
+              prereqPlacement
+              seed { placeholderName progressionSource { originPlacement originPhaseGroup { id } originPhase { id name } } }
               entrant { id name }
               standing { stats { score { value } } }
             }
@@ -4629,7 +4678,7 @@ async function fetchAllSets(client, slug, perPage = 50, maxPages = 40) {
   let event = null;
   const all = [];
   do {
-    if (page > 1) await new Promise((r) => setTimeout(r, 350));   // stagger for start.gg rate limits
+    if (page > 1) await new Promise((r) => setTimeout(r, 500));   // stagger for start.gg rate limits
     const res = await client.request(query, { slug, perPage, page });
     event = res && res.event;
     if (!event) throw new Error('Event not found — check the slug/URL and your token');
@@ -5177,7 +5226,7 @@ function buildMatches(sets) {
 }
 
 function applyBracketResult(slug, event, sets) {
-  const phases = buildPhases(sets);
+  const phases = buildPhases(sets, event && event.phases);
   // Keep the active phase across a refresh if it still exists; else first phase.
   const keepId = phases.some((p) => p.id === state.bracket.activePhaseId) ? state.bracket.activePhaseId : (phases[0] && phases[0].id) || '';
   state.bracket = {
@@ -9037,6 +9086,386 @@ registerWsHandlers({
   draft_visible(msg) { if (state.draft) state.draft.visible = !!(msg.data && msg.data.visible); saveAppState(); broadcastFullState(); }
 });
 
+// ── Overwatch 2 series scoreboard handlers ──
+registerWsHandlers({
+  ow_set_match(msg) {
+    const d = msg.data || {};
+    const cur = state.owMatch || {};
+    state.owMatch = {
+      visible: typeof d.visible === 'boolean' ? d.visible : !!cur.visible,
+      format: ['FT2','FT3','FT4'].includes(d.format) ? d.format : (cur.format || 'FT3'),
+      currentMapIdx: typeof d.currentMapIdx === 'number' ? d.currentMapIdx : (cur.currentMapIdx || 0),
+      bansByMap: Array.isArray(d.bansByMap) ? d.bansByMap : (cur.bansByMap || [])
+    };
+    saveAppState(); broadcastFullState();
+  },
+  ow_visible(msg) {
+    if (!state.owMatch) state.owMatch = { visible: false, format: 'FT3', currentMapIdx: 0, bansByMap: [] };
+    state.owMatch.visible = !!(msg.data && msg.data.visible);
+    saveAppState(); broadcastFullState();
+  },
+  ow_set_game_mode(msg) {
+    const VALID_MODES = ['escort','hybrid','control','push','flashpoint','clash'];
+    const mode = msg.data && msg.data.mode;
+    if (VALID_MODES.includes(mode)) {
+      if (!state.owMatch) state.owMatch = { visible: false, format: 'FT3', currentMapIdx: 0, bansByMap: [] };
+      state.owMatch.gameMode = mode;
+      saveAppState(); broadcastFullState();
+    }
+  },
+  ow_set_map_labels(msg) {
+    if (!state.owMatch) state.owMatch = { visible: false, format: 'FT3', currentMapIdx: 0, bansByMap: [] };
+    state.owMatch.showMapLabels = !!(msg.data && msg.data.show);
+    saveAppState(); broadcastFullState();
+  },
+  ow_set_map_mode(msg) {
+    if (!state.owMatch) state.owMatch = { visible: false, format: 'FT3', currentMapIdx: 0, bansByMap: [] };
+    if (!Array.isArray(state.owMatch.mapModes)) state.owMatch.mapModes = [];
+    const mmIdx = msg.data && typeof msg.data.mapIdx === 'number' ? msg.data.mapIdx : -1;
+    const mmVal = msg.data && msg.data.mode;
+    const VALID_MM = ['escort','hybrid','control','push','flashpoint','clash'];
+    if (mmIdx >= 0 && mmIdx < 9 && VALID_MM.includes(mmVal)) {
+      while (state.owMatch.mapModes.length <= mmIdx) state.owMatch.mapModes.push(null);
+      state.owMatch.mapModes[mmIdx] = mmVal;
+      saveAppState(); broadcastFullState();
+    }
+  },
+  ow_set_map_winner(msg) {
+    if (!state.owMatch) state.owMatch = { visible: false, format: 'FT3', currentMapIdx: 0, bansByMap: [] };
+    if (!Array.isArray(state.owMatch.mapWinners)) state.owMatch.mapWinners = [];
+    const mwIdx = msg.data && typeof msg.data.mapIdx === 'number' ? msg.data.mapIdx : -1;
+    const mwVal = msg.data && msg.data.winner; // 'a' | 'b' | null
+    if (mwIdx >= 0 && mwIdx < 9) {
+      while (state.owMatch.mapWinners.length <= mwIdx) state.owMatch.mapWinners.push(null);
+      state.owMatch.mapWinners[mwIdx] = mwVal || null;
+      // Clearing a result also wipes the bans for that map so the ban display resets.
+      if (!mwVal && Array.isArray(state.owMatch.bansByMap)) {
+        state.owMatch.bansByMap[mwIdx] = {};
+      }
+      // Recount series from the full mapWinners array. reset_series clears mapWinners
+      // so this is always a clean count relative to the current match.
+      const winsA = state.owMatch.mapWinners.filter(w => w === 'a').length;
+      const winsB = state.owMatch.mapWinners.filter(w => w === 'b').length;
+      if (!state.series) state.series = {};
+      state.series.blue   = winsA;
+      state.series.orange = winsB;
+      if (!state.game) state.game = {};
+      state.game.number = Math.max(1, Math.min(state.bestOf || 5, winsA + winsB + 1));
+      saveAppState(); broadcastFullState();
+    }
+  },
+  ow_ban_hero(msg) {
+    const d = msg.data || {};
+    const cur = state.owMatch || {};
+    const idx  = Number(d.mapIdx) || 0;
+    const side = d.side === 'b' ? 'b' : 'a';
+    const slot = d.slot === 1 ? 1 : 0;
+    const bansByMap = [...(cur.bansByMap || [])];
+    while (bansByMap.length <= idx) bansByMap.push({});
+    const entry = { ...(bansByMap[idx] || {}) };
+    // Normalise legacy single-object format → 2-element array
+    const prev = entry[side];
+    const arr = Array.isArray(prev) ? [...prev] : (prev && prev.hero ? [prev, { hero:'', role:'' }] : [{ hero:'', role:'' }, { hero:'', role:'' }]);
+    while (arr.length < 2) arr.push({ hero:'', role:'' });
+    arr[slot] = { hero: String(d.hero || ''), role: String(d.role || '') };
+    entry[side] = arr;
+    bansByMap[idx] = entry;
+    state.owMatch = { ...cur, bansByMap };
+    saveAppState(); broadcastFullState();
+  },
+  ow_set_map(msg) {
+    const d = msg.data || {};
+    if (!state.owMatch) state.owMatch = { visible: false, format: 'FT3', currentMapIdx: 0, bansByMap: [], attackSide: null };
+    if (typeof d.currentMapIdx === 'number') state.owMatch.currentMapIdx = d.currentMapIdx;
+    if (['FT2','FT3','FT4'].includes(d.format)) state.owMatch.format = d.format;
+    saveAppState(); broadcastFullState();
+  },
+  ow_set_attack(msg) {
+    if (!state.owMatch) state.owMatch = { visible: false, format: 'FT3', currentMapIdx: 0, bansByMap: [], attackSide: null, showAttack: false };
+    const side = (msg.data && msg.data.side) || null;
+    state.owMatch.attackSide = ['a','b'].includes(side) ? side : null;
+    saveAppState(); broadcastFullState();
+  },
+  ow_show_attack(msg) {
+    if (!state.owMatch) state.owMatch = { visible: false, format: 'FT3', currentMapIdx: 0, bansByMap: [], attackSide: null, showAttack: false };
+    state.owMatch.showAttack = !!(msg.data && msg.data.visible);
+    saveAppState(); broadcastFullState();
+  }
+});
+
+// ── Marvel Rivals series scoreboard handlers ──
+registerWsHandlers({
+  mr_set_match(msg) {
+    const d = msg.data || {};
+    const cur = state.mrMatch || {};
+    state.mrMatch = {
+      visible: typeof d.visible === 'boolean' ? d.visible : !!cur.visible,
+      format: typeof d.format === 'string' ? d.format : (cur.format || 'BO5'),
+      bansByMap: Array.isArray(d.bansByMap) ? d.bansByMap : (cur.bansByMap || []),
+      gameMode: typeof d.gameMode === 'string' ? d.gameMode : (cur.gameMode || 'convergence'),
+      showMapLabels: typeof d.showMapLabels === 'boolean' ? d.showMapLabels : (cur.showMapLabels !== false),
+      mapWinners: Array.isArray(d.mapWinners) ? d.mapWinners : (cur.mapWinners || []),
+      mapModes: Array.isArray(d.mapModes) ? d.mapModes : (cur.mapModes || []),
+      gepData: cur.gepData || null
+    };
+    saveAppState(); broadcastFullState();
+  },
+  mr_visible(msg) {
+    if (!state.mrMatch) state.mrMatch = { visible: false, format: 'BO5', bansByMap: [], gameMode: 'convergence', showMapLabels: true, mapWinners: [], mapModes: [], gepData: null };
+    state.mrMatch.visible = !!(msg.data && msg.data.visible);
+    saveAppState(); broadcastFullState();
+  },
+  mr_set_game_mode(msg) {
+    const MR_VALID_MODES = ['convergence','domination','convoy'];
+    const mrMode = msg.data && msg.data.mode;
+    if (MR_VALID_MODES.includes(mrMode)) {
+      if (!state.mrMatch) state.mrMatch = { visible: false, format: 'BO5', bansByMap: [], gameMode: 'convergence', showMapLabels: true, mapWinners: [], mapModes: [], gepData: null };
+      state.mrMatch.gameMode = mrMode;
+      saveAppState(); broadcastFullState();
+    }
+  },
+  mr_set_map_labels(msg) {
+    if (!state.mrMatch) state.mrMatch = { visible: false, format: 'BO5', bansByMap: [], gameMode: 'convergence', showMapLabels: true, mapWinners: [], mapModes: [], gepData: null };
+    state.mrMatch.showMapLabels = !!(msg.data && msg.data.show);
+    saveAppState(); broadcastFullState();
+  },
+  mr_set_map_mode(msg) {
+    if (!state.mrMatch) state.mrMatch = { visible: false, format: 'BO5', bansByMap: [], gameMode: 'convergence', showMapLabels: true, mapWinners: [], mapModes: [], gepData: null };
+    if (!Array.isArray(state.mrMatch.mapModes)) state.mrMatch.mapModes = [];
+    const mrMmIdx = msg.data && typeof msg.data.mapIdx === 'number' ? msg.data.mapIdx : -1;
+    const mrMmVal = msg.data && msg.data.mode;
+    const MR_VALID_MM = ['convergence','domination','convoy'];
+    if (mrMmIdx >= 0 && mrMmIdx < 9 && MR_VALID_MM.includes(mrMmVal)) {
+      while (state.mrMatch.mapModes.length <= mrMmIdx) state.mrMatch.mapModes.push(null);
+      state.mrMatch.mapModes[mrMmIdx] = mrMmVal;
+      saveAppState(); broadcastFullState();
+    }
+  },
+  mr_set_map_winner(msg) {
+    if (!state.mrMatch) state.mrMatch = { visible: false, format: 'BO5', bansByMap: [], gameMode: 'convergence', showMapLabels: true, mapWinners: [], mapModes: [], gepData: null };
+    if (!Array.isArray(state.mrMatch.mapWinners)) state.mrMatch.mapWinners = [];
+    const mrMwIdx = msg.data && typeof msg.data.mapIdx === 'number' ? msg.data.mapIdx : -1;
+    const mrMwVal = msg.data && msg.data.winner;
+    if (mrMwIdx >= 0 && mrMwIdx < 9) {
+      while (state.mrMatch.mapWinners.length <= mrMwIdx) state.mrMatch.mapWinners.push(null);
+      state.mrMatch.mapWinners[mrMwIdx] = mrMwVal || null;
+      if (!mrMwVal && Array.isArray(state.mrMatch.bansByMap)) {
+        state.mrMatch.bansByMap[mrMwIdx] = {};
+      }
+      const mrWinsA = state.mrMatch.mapWinners.filter(function(w) { return w === 'a'; }).length;
+      const mrWinsB = state.mrMatch.mapWinners.filter(function(w) { return w === 'b'; }).length;
+      if (!state.series) state.series = {};
+      state.series.blue   = mrWinsA;
+      state.series.orange = mrWinsB;
+      if (!state.game) state.game = {};
+      state.game.number = Math.max(1, Math.min(state.bestOf || 5, mrWinsA + mrWinsB + 1));
+      saveAppState(); broadcastFullState();
+    }
+  },
+  mr_ban_hero(msg) {
+    const d = msg.data || {};
+    const cur = state.mrMatch || {};
+    const idx  = Number(d.mapIdx) || 0;
+    const side = d.side === 'b' ? 'b' : 'a';
+    const slot = Math.min(3, Math.max(0, Number(d.slot) || 0));
+    const bansByMap = [...(cur.bansByMap || [])];
+    while (bansByMap.length <= idx) bansByMap.push({});
+    const entry = { ...(bansByMap[idx] || {}) };
+    const prev = entry[side];
+    const arr = Array.isArray(prev) ? [...prev] : [{ hero:'', role:'' },{ hero:'', role:'' },{ hero:'', role:'' },{ hero:'', role:'' }];
+    while (arr.length < 4) arr.push({ hero:'', role:'' });
+    arr[slot] = { hero: String(d.hero || ''), role: String(d.role || '') };
+    entry[side] = arr;
+    bansByMap[idx] = entry;
+    state.mrMatch = { ...cur, bansByMap };
+    saveAppState(); broadcastFullState();
+  }
+});
+
+// ── Simple graphics setters (winner screen + team-lineup/intro card) ──
+registerWsHandlers({
+  set_winner(msg) {
+    const w = msg.data || {};
+    const cur = state.winner || {};
+    state.winner = {
+      visible: ('visible' in w) ? !!w.visible : !!cur.visible,
+      side: ('side' in w) ? (w.side || '') : (cur.side ?? ''),
+      name: typeof w.name === 'string' ? w.name : (cur.name ?? ''),
+      logo: ('logo' in w) ? (w.logo || null) : (cur.logo ?? null),
+      color: ('color' in w) ? (w.color || '') : (cur.color ?? ''),
+      subtitle: typeof w.subtitle === 'string' ? w.subtitle : (cur.subtitle ?? '')
+    };
+    saveAppState();
+    broadcastFullState();
+
+    // Auto-prediction: resolve with the winning team's outcome
+    if (state.twitch.connected && predictionManager && state.twitch.predictions.settings.autoCreate) {
+      const winnerName = state.winner.name || (state.winner.side === 'blue' ? state.teams.blue.name : state.teams.orange.name);
+      const current = state.twitch.predictions.current;
+      // Skip if already resolved by score in handleMatchEnded
+      if (current && current.state !== 'RESOLVED' && current.state !== 'CANCELLED' && winnerName) {
+        const outcome = current.outcomes?.find(o =>
+          o.title.toLowerCase().includes(winnerName.toLowerCase()) ||
+          winnerName.toLowerCase().includes(o.title.toLowerCase())
+        );
+        if (outcome) {
+          stopPredictionPolling();
+          predictionManager.resolvePrediction(outcome.id, current.id)
+            .then(result => {
+              const resolvedId = current.id;
+              const resolved = result
+                ? normalizePrediction(result, 0)
+                : { ...current, state: 'RESOLVED', winningOutcomeId: outcome.id };
+              state.twitch.predictions.current = resolved;
+              broadcast(bridgeClients, { type: 'full_state', data: buildLiveState() });
+              saveTwitchData();
+              console.log('[AutoPred] Resolved with winner:', winnerName);
+              setTimeout(() => {
+                if (state.twitch.predictions.current?.id === resolvedId) {
+                  state.twitch.predictions.history.unshift(state.twitch.predictions.current);
+                  if (state.twitch.predictions.history.length > 50) state.twitch.predictions.history.pop();
+                  state.twitch.predictions.current = null;
+                  broadcast(bridgeClients, { type: 'full_state', data: buildLiveState() });
+                  saveTwitchData();
+                }
+              }, 18000);
+            })
+            .catch(e => console.warn('[AutoPred] Resolve failed:', e.message));
+        } else {
+          console.warn('[AutoPred] No matching outcome for winner:', winnerName, '— outcomes:', current.outcomes?.map(o => o.title));
+        }
+      }
+    }
+  },
+  set_intro(msg) {
+    const i = msg.data || {};
+    const cur = state.intro || {};
+    state.intro = {
+      visible: ('visible' in i) ? !!i.visible : !!cur.visible,
+      side: (i.side === 'orange' || i.side === 'blue') ? i.side : (cur.side ?? 'blue'),
+      title: typeof i.title === 'string' ? i.title : (cur.title ?? ''),
+      style: [1, 2].includes(Number(i.style)) ? Number(i.style) : (cur.style ?? 1),
+      showFooter: ('showFooter' in i) ? !!i.showFooter : (cur.showFooter ?? false),
+      showRealName: ('showRealName' in i) ? !!i.showRealName : (cur.showRealName ?? false)
+    };
+    saveAppState();
+    broadcastFullState();
+  }
+});
+
+// ── Sponsor / announcement ticker ──
+registerWsHandlers({
+  set_ticker(msg) {
+    const p = msg.data || {};
+    if (typeof p.visible === 'boolean') state.ticker.visible = p.visible;
+    if (typeof p.source === 'string') state.ticker.source = (p.source === 'startgg') ? 'startgg' : 'manual';
+    if (typeof p.sponsor === 'string') state.ticker.sponsor = p.sponsor.slice(0, 400000);   // small logo (downscaled client-side)
+    if (Array.isArray(p.messages)) {
+      state.ticker.messages = p.messages
+        .map((m) => (m || '').toString().trim())
+        .filter(Boolean)
+        .slice(0, 30);
+    }
+    if (Number(p.speed) > 0) state.ticker.speed = Math.min(600, Math.max(3, Number(p.speed)));
+    if (state.ticker.source === 'startgg') state.ticker.feed = formatTickerFeed(state.startgg.matchFeed);   // build now; refreshes each poll
+    saveAppState();
+    broadcastFullState();
+  }
+});
+
+// ── Upcoming-matches + standings overlays ──
+registerWsHandlers({
+  set_upcoming(msg) {
+    const p = msg.data || {};
+    if (typeof p.visible === 'boolean') state.upcoming.visible = p.visible;
+    if (typeof p.title === 'string') state.upcoming.title = p.title;
+    if (typeof p.eyebrow === 'string') state.upcoming.eyebrow = p.eyebrow;
+    if (['cards', 'board', 'single', 'dual'].includes(p.layout)) state.upcoming.layout = p.layout;
+    if (Array.isArray(p.matches)) state.upcoming.matches = p.matches;
+    saveAppState();
+    broadcastFullState();
+  },
+  set_standings(msg) {
+    const p = msg.data || {};
+    if (typeof p.visible === 'boolean') state.standings.visible = p.visible;
+    if (typeof p.title === 'string') state.standings.title = p.title;
+    if (typeof p.subtitle === 'string') state.standings.subtitle = p.subtitle;
+    if (typeof p.showRecord === 'boolean') state.standings.showRecord = p.showRecord;
+    if (typeof p.source === 'string') state.standings.source = p.source;
+    if (Array.isArray(p.rows)) state.standings.rows = p.rows;
+    saveAppState();
+    broadcastFullState();
+  }
+});
+
+// ── Teams to Watch (watchlist) + single-team spotlight ──
+registerWsHandlers({
+  set_watchlist(msg) {
+    const p = msg.data || {};
+    const w = state.watchlist;
+    if (typeof p.visible === 'boolean') w.visible = p.visible;
+    if (typeof p.title === 'string') w.title = p.title.slice(0, 80);
+    if (typeof p.subtitle === 'string') w.subtitle = p.subtitle.slice(0, 120);
+    if (typeof p.logo === 'string') w.logo = p.logo.slice(0, 600000);
+    if (Array.isArray(p.fields)) w.fields = p.fields.slice(0, 6).map((f) => ({
+      id: (f.id || ('f' + Math.random().toString(36).slice(2, 7))).toString().slice(0, 24),
+      label: (f.label || 'FIELD').toString().slice(0, 40)
+    }));
+    if (Array.isArray(p.teams)) w.teams = p.teams.slice(0, 12).map((t) => ({
+      id: (t.id || ('t' + Math.random().toString(36).slice(2, 9))).toString().slice(0, 24),
+      name: (t.name || '').toString().slice(0, 80),
+      players: Array.isArray(t.players) ? t.players.slice(0, 8).map((x) => (x || '').toString().slice(0, 60)) : [],
+      values: (t.values && typeof t.values === 'object') ? Object.fromEntries(Object.entries(t.values).slice(0, 6).map(([k, v]) => [k.toString().slice(0, 24), (v || '').toString().slice(0, 40)])) : {},
+      pos: Math.max(0, Math.min(12, Number(t.pos) || 0)),   // 0 = unranked; 1 = podium centre
+      entrantId: (t.entrantId || '').toString().slice(0, 24),
+      eventSlug: (t.eventSlug || '').toString().slice(0, 200)
+    }));
+    saveAppState();
+    broadcastFullState();
+  },
+  // Mark / unmark one team (the ★ on event team cards) — toggles by name, preserving values.
+  toggle_watchlist_team(msg) {
+    const t = (msg.data && msg.data.team) || {};
+    const name = (t.name || '').toString().trim();
+    if (!name) return;
+    const w = state.watchlist;
+    if (!Array.isArray(w.teams)) w.teams = [];
+    const i = w.teams.findIndex((x) => (x.name || '').toLowerCase() === name.toLowerCase());
+    if (i >= 0) w.teams.splice(i, 1);
+    else if (w.teams.length < 12) {
+      w.teams.push({
+        id: 't' + Math.random().toString(36).slice(2, 9),
+        name: name.slice(0, 80),
+        players: Array.isArray(t.players) ? t.players.slice(0, 8).map((x) => (x || '').toString().slice(0, 60)) : [],
+        values: {}, pos: 0,
+        entrantId: (t.entrantId || '').toString().slice(0, 24),   // for the single-team start.gg deep-dive
+        eventSlug: (t.eventSlug || '').toString().slice(0, 200)
+      });
+      // Auto-fill the subtitle with the start.gg event name on the first marked team (overridable).
+      const evName = (msg.data && msg.data.event || '').toString().trim();
+      if (evName && !w.subtitle) w.subtitle = evName.slice(0, 120);
+    }
+    saveAppState();
+    broadcastFullState();
+  },
+  // Single-team spotlight — target a team + (optionally) go live; start.gg data fetched async.
+  set_team_spotlight(msg) {
+    const p = msg.data || {};
+    const ts = state.teamSpotlight;
+    let retarget = false;
+    if (typeof p.name === 'string') { if (p.name !== ts.name) retarget = true; ts.name = p.name.slice(0, 80); }
+    if (typeof p.eventSlug === 'string') ts.eventSlug = p.eventSlug.slice(0, 200);
+    if (typeof p.entrantId === 'string') { if (p.entrantId !== ts.entrantId) retarget = true; ts.entrantId = p.entrantId.slice(0, 24); }
+    if (Array.isArray(p.players)) ts.players = p.players.slice(0, 8).map((x) => ({ gamerTag: ((x && x.gamerTag) || x || '').toString().slice(0, 60), name: '', seedRank: '' }));
+    if (typeof p.visible === 'boolean') ts.visible = p.visible;
+    if (retarget) { ts.sg = { seed: null, placement: null, record: { w: 0, l: 0 }, recent: [], next: null }; ts.lastSync = 0; ts.syncError = ''; }
+    enrichSpotlightSeeding();
+    saveAppState();
+    broadcastFullState();
+    if (p.fetch !== false && ts.entrantId) refreshTeamSpotlight().catch(() => {});
+  }
+});
+
 function handleControlMessage(msg, ws) {
   const h = WS_HANDLERS[msg.type];
   if (h) return void h(msg, ws);
@@ -9416,273 +9845,13 @@ function handleControlMessage(msg, ws) {
       break;
     }
 
-    // ── Post-match WINNER screen ─────────────────────────────────────────
-    case 'set_winner': {
-      const w = msg.data || {};
-      const cur = state.winner || {};
-      state.winner = {
-        visible: ('visible' in w) ? !!w.visible : !!cur.visible,
-        side: ('side' in w) ? (w.side || '') : (cur.side ?? ''),
-        name: typeof w.name === 'string' ? w.name : (cur.name ?? ''),
-        logo: ('logo' in w) ? (w.logo || null) : (cur.logo ?? null),
-        color: ('color' in w) ? (w.color || '') : (cur.color ?? ''),
-        subtitle: typeof w.subtitle === 'string' ? w.subtitle : (cur.subtitle ?? '')
-      };
-      saveAppState();
-      broadcastFullState();
-
-      // Auto-prediction: resolve with the winning team's outcome
-      if (state.twitch.connected && predictionManager && state.twitch.predictions.settings.autoCreate) {
-        const winnerName = state.winner.name || (state.winner.side === 'blue' ? state.teams.blue.name : state.teams.orange.name);
-        const current = state.twitch.predictions.current;
-        // Skip if already resolved by score in handleMatchEnded
-        if (current && current.state !== 'RESOLVED' && current.state !== 'CANCELLED' && winnerName) {
-          const outcome = current.outcomes?.find(o =>
-            o.title.toLowerCase().includes(winnerName.toLowerCase()) ||
-            winnerName.toLowerCase().includes(o.title.toLowerCase())
-          );
-          if (outcome) {
-            stopPredictionPolling();
-            predictionManager.resolvePrediction(outcome.id, current.id)
-              .then(result => {
-                const resolvedId = current.id;
-                const resolved = result
-                  ? normalizePrediction(result, 0)
-                  : { ...current, state: 'RESOLVED', winningOutcomeId: outcome.id };
-                state.twitch.predictions.current = resolved;
-                broadcast(bridgeClients, { type: 'full_state', data: buildLiveState() });
-                saveTwitchData();
-                console.log('[AutoPred] Resolved with winner:', winnerName);
-                setTimeout(() => {
-                  if (state.twitch.predictions.current?.id === resolvedId) {
-                    state.twitch.predictions.history.unshift(state.twitch.predictions.current);
-                    if (state.twitch.predictions.history.length > 50) state.twitch.predictions.history.pop();
-                    state.twitch.predictions.current = null;
-                    broadcast(bridgeClients, { type: 'full_state', data: buildLiveState() });
-                    saveTwitchData();
-                  }
-                }, 18000);
-              })
-              .catch(e => console.warn('[AutoPred] Resolve failed:', e.message));
-          } else {
-            console.warn('[AutoPred] No matching outcome for winner:', winnerName, '— outcomes:', current.outcomes?.map(o => o.title));
-          }
-        }
-      }
-      break;
-    }
+    // (set_winner migrated to the WS_HANDLERS registry above handleControlMessage)
 
     // ── Map veto / map-pool overview board ───────────────────────────────
     // (set_veto / veto_* migrated to the WS_HANDLERS registry above handleControlMessage)
 
-    // ── Overwatch 2 series scoreboard ────────────────────────────────────
-    case 'ow_set_match': {
-      const d = msg.data || {};
-      const cur = state.owMatch || {};
-      state.owMatch = {
-        visible: typeof d.visible === 'boolean' ? d.visible : !!cur.visible,
-        format: ['FT2','FT3','FT4'].includes(d.format) ? d.format : (cur.format || 'FT3'),
-        currentMapIdx: typeof d.currentMapIdx === 'number' ? d.currentMapIdx : (cur.currentMapIdx || 0),
-        bansByMap: Array.isArray(d.bansByMap) ? d.bansByMap : (cur.bansByMap || [])
-      };
-      saveAppState(); broadcastFullState();
-      break;
-    }
-    case 'ow_visible': {
-      if (!state.owMatch) state.owMatch = { visible: false, format: 'FT3', currentMapIdx: 0, bansByMap: [] };
-      state.owMatch.visible = !!(msg.data && msg.data.visible);
-      saveAppState(); broadcastFullState();
-      break;
-    }
-    case 'ow_set_game_mode': {
-      const VALID_MODES = ['escort','hybrid','control','push','flashpoint','clash'];
-      const mode = msg.data && msg.data.mode;
-      if (VALID_MODES.includes(mode)) {
-        if (!state.owMatch) state.owMatch = { visible: false, format: 'FT3', currentMapIdx: 0, bansByMap: [] };
-        state.owMatch.gameMode = mode;
-        saveAppState(); broadcastFullState();
-      }
-      break;
-    }
-    case 'ow_set_map_labels': {
-      if (!state.owMatch) state.owMatch = { visible: false, format: 'FT3', currentMapIdx: 0, bansByMap: [] };
-      state.owMatch.showMapLabels = !!(msg.data && msg.data.show);
-      saveAppState(); broadcastFullState();
-      break;
-    }
-    case 'ow_set_map_mode': {
-      if (!state.owMatch) state.owMatch = { visible: false, format: 'FT3', currentMapIdx: 0, bansByMap: [] };
-      if (!Array.isArray(state.owMatch.mapModes)) state.owMatch.mapModes = [];
-      const mmIdx = msg.data && typeof msg.data.mapIdx === 'number' ? msg.data.mapIdx : -1;
-      const mmVal = msg.data && msg.data.mode;
-      const VALID_MM = ['escort','hybrid','control','push','flashpoint','clash'];
-      if (mmIdx >= 0 && mmIdx < 9 && VALID_MM.includes(mmVal)) {
-        while (state.owMatch.mapModes.length <= mmIdx) state.owMatch.mapModes.push(null);
-        state.owMatch.mapModes[mmIdx] = mmVal;
-        saveAppState(); broadcastFullState();
-      }
-      break;
-    }
-    case 'ow_set_map_winner': {
-      if (!state.owMatch) state.owMatch = { visible: false, format: 'FT3', currentMapIdx: 0, bansByMap: [] };
-      if (!Array.isArray(state.owMatch.mapWinners)) state.owMatch.mapWinners = [];
-      const mwIdx = msg.data && typeof msg.data.mapIdx === 'number' ? msg.data.mapIdx : -1;
-      const mwVal = msg.data && msg.data.winner; // 'a' | 'b' | null
-      if (mwIdx >= 0 && mwIdx < 9) {
-        while (state.owMatch.mapWinners.length <= mwIdx) state.owMatch.mapWinners.push(null);
-        state.owMatch.mapWinners[mwIdx] = mwVal || null;
-        // Clearing a result also wipes the bans for that map so the ban display resets.
-        if (!mwVal && Array.isArray(state.owMatch.bansByMap)) {
-          state.owMatch.bansByMap[mwIdx] = {};
-        }
-        // Recount series from the full mapWinners array. reset_series clears mapWinners
-        // so this is always a clean count relative to the current match.
-        const winsA = state.owMatch.mapWinners.filter(w => w === 'a').length;
-        const winsB = state.owMatch.mapWinners.filter(w => w === 'b').length;
-        if (!state.series) state.series = {};
-        state.series.blue   = winsA;
-        state.series.orange = winsB;
-        if (!state.game) state.game = {};
-        state.game.number = Math.max(1, Math.min(state.bestOf || 5, winsA + winsB + 1));
-        saveAppState(); broadcastFullState();
-      }
-      break;
-    }
-    case 'ow_ban_hero': {
-      const d = msg.data || {};
-      const cur = state.owMatch || {};
-      const idx  = Number(d.mapIdx) || 0;
-      const side = d.side === 'b' ? 'b' : 'a';
-      const slot = d.slot === 1 ? 1 : 0;
-      const bansByMap = [...(cur.bansByMap || [])];
-      while (bansByMap.length <= idx) bansByMap.push({});
-      const entry = { ...(bansByMap[idx] || {}) };
-      // Normalise legacy single-object format → 2-element array
-      const prev = entry[side];
-      const arr = Array.isArray(prev) ? [...prev] : (prev && prev.hero ? [prev, { hero:'', role:'' }] : [{ hero:'', role:'' }, { hero:'', role:'' }]);
-      while (arr.length < 2) arr.push({ hero:'', role:'' });
-      arr[slot] = { hero: String(d.hero || ''), role: String(d.role || '') };
-      entry[side] = arr;
-      bansByMap[idx] = entry;
-      state.owMatch = { ...cur, bansByMap };
-      saveAppState(); broadcastFullState();
-      break;
-    }
-    case 'ow_set_map': {
-      const d = msg.data || {};
-      if (!state.owMatch) state.owMatch = { visible: false, format: 'FT3', currentMapIdx: 0, bansByMap: [], attackSide: null };
-      if (typeof d.currentMapIdx === 'number') state.owMatch.currentMapIdx = d.currentMapIdx;
-      if (['FT2','FT3','FT4'].includes(d.format)) state.owMatch.format = d.format;
-      saveAppState(); broadcastFullState();
-      break;
-    }
-    case 'ow_set_attack': {
-      if (!state.owMatch) state.owMatch = { visible: false, format: 'FT3', currentMapIdx: 0, bansByMap: [], attackSide: null, showAttack: false };
-      const side = (msg.data && msg.data.side) || null;
-      state.owMatch.attackSide = ['a','b'].includes(side) ? side : null;
-      saveAppState(); broadcastFullState();
-      break;
-    }
-    case 'ow_show_attack': {
-      if (!state.owMatch) state.owMatch = { visible: false, format: 'FT3', currentMapIdx: 0, bansByMap: [], attackSide: null, showAttack: false };
-      state.owMatch.showAttack = !!(msg.data && msg.data.visible);
-      saveAppState(); broadcastFullState();
-      break;
-    }
-
-    // ── Marvel Rivals series scoreboard ──────────────────────────────────
-    case 'mr_set_match': {
-      const d = msg.data || {};
-      const cur = state.mrMatch || {};
-      state.mrMatch = {
-        visible: typeof d.visible === 'boolean' ? d.visible : !!cur.visible,
-        format: typeof d.format === 'string' ? d.format : (cur.format || 'BO5'),
-        bansByMap: Array.isArray(d.bansByMap) ? d.bansByMap : (cur.bansByMap || []),
-        gameMode: typeof d.gameMode === 'string' ? d.gameMode : (cur.gameMode || 'convergence'),
-        showMapLabels: typeof d.showMapLabels === 'boolean' ? d.showMapLabels : (cur.showMapLabels !== false),
-        mapWinners: Array.isArray(d.mapWinners) ? d.mapWinners : (cur.mapWinners || []),
-        mapModes: Array.isArray(d.mapModes) ? d.mapModes : (cur.mapModes || []),
-        gepData: cur.gepData || null
-      };
-      saveAppState(); broadcastFullState();
-      break;
-    }
-    case 'mr_visible': {
-      if (!state.mrMatch) state.mrMatch = { visible: false, format: 'BO5', bansByMap: [], gameMode: 'convergence', showMapLabels: true, mapWinners: [], mapModes: [], gepData: null };
-      state.mrMatch.visible = !!(msg.data && msg.data.visible);
-      saveAppState(); broadcastFullState();
-      break;
-    }
-    case 'mr_set_game_mode': {
-      const MR_VALID_MODES = ['convergence','domination','convoy'];
-      const mrMode = msg.data && msg.data.mode;
-      if (MR_VALID_MODES.includes(mrMode)) {
-        if (!state.mrMatch) state.mrMatch = { visible: false, format: 'BO5', bansByMap: [], gameMode: 'convergence', showMapLabels: true, mapWinners: [], mapModes: [], gepData: null };
-        state.mrMatch.gameMode = mrMode;
-        saveAppState(); broadcastFullState();
-      }
-      break;
-    }
-    case 'mr_set_map_labels': {
-      if (!state.mrMatch) state.mrMatch = { visible: false, format: 'BO5', bansByMap: [], gameMode: 'convergence', showMapLabels: true, mapWinners: [], mapModes: [], gepData: null };
-      state.mrMatch.showMapLabels = !!(msg.data && msg.data.show);
-      saveAppState(); broadcastFullState();
-      break;
-    }
-    case 'mr_set_map_mode': {
-      if (!state.mrMatch) state.mrMatch = { visible: false, format: 'BO5', bansByMap: [], gameMode: 'convergence', showMapLabels: true, mapWinners: [], mapModes: [], gepData: null };
-      if (!Array.isArray(state.mrMatch.mapModes)) state.mrMatch.mapModes = [];
-      const mrMmIdx = msg.data && typeof msg.data.mapIdx === 'number' ? msg.data.mapIdx : -1;
-      const mrMmVal = msg.data && msg.data.mode;
-      const MR_VALID_MM = ['convergence','domination','convoy'];
-      if (mrMmIdx >= 0 && mrMmIdx < 9 && MR_VALID_MM.includes(mrMmVal)) {
-        while (state.mrMatch.mapModes.length <= mrMmIdx) state.mrMatch.mapModes.push(null);
-        state.mrMatch.mapModes[mrMmIdx] = mrMmVal;
-        saveAppState(); broadcastFullState();
-      }
-      break;
-    }
-    case 'mr_set_map_winner': {
-      if (!state.mrMatch) state.mrMatch = { visible: false, format: 'BO5', bansByMap: [], gameMode: 'convergence', showMapLabels: true, mapWinners: [], mapModes: [], gepData: null };
-      if (!Array.isArray(state.mrMatch.mapWinners)) state.mrMatch.mapWinners = [];
-      const mrMwIdx = msg.data && typeof msg.data.mapIdx === 'number' ? msg.data.mapIdx : -1;
-      const mrMwVal = msg.data && msg.data.winner;
-      if (mrMwIdx >= 0 && mrMwIdx < 9) {
-        while (state.mrMatch.mapWinners.length <= mrMwIdx) state.mrMatch.mapWinners.push(null);
-        state.mrMatch.mapWinners[mrMwIdx] = mrMwVal || null;
-        if (!mrMwVal && Array.isArray(state.mrMatch.bansByMap)) {
-          state.mrMatch.bansByMap[mrMwIdx] = {};
-        }
-        const mrWinsA = state.mrMatch.mapWinners.filter(function(w) { return w === 'a'; }).length;
-        const mrWinsB = state.mrMatch.mapWinners.filter(function(w) { return w === 'b'; }).length;
-        if (!state.series) state.series = {};
-        state.series.blue   = mrWinsA;
-        state.series.orange = mrWinsB;
-        if (!state.game) state.game = {};
-        state.game.number = Math.max(1, Math.min(state.bestOf || 5, mrWinsA + mrWinsB + 1));
-        saveAppState(); broadcastFullState();
-      }
-      break;
-    }
-    case 'mr_ban_hero': {
-      const d = msg.data || {};
-      const cur = state.mrMatch || {};
-      const idx  = Number(d.mapIdx) || 0;
-      const side = d.side === 'b' ? 'b' : 'a';
-      const slot = Math.min(3, Math.max(0, Number(d.slot) || 0));
-      const bansByMap = [...(cur.bansByMap || [])];
-      while (bansByMap.length <= idx) bansByMap.push({});
-      const entry = { ...(bansByMap[idx] || {}) };
-      const prev = entry[side];
-      const arr = Array.isArray(prev) ? [...prev] : [{ hero:'', role:'' },{ hero:'', role:'' },{ hero:'', role:'' },{ hero:'', role:'' }];
-      while (arr.length < 4) arr.push({ hero:'', role:'' });
-      arr[slot] = { hero: String(d.hero || ''), role: String(d.role || '') };
-      entry[side] = arr;
-      bansByMap[idx] = entry;
-      state.mrMatch = { ...cur, bansByMap };
-      saveAppState(); broadcastFullState();
-      break;
-    }
+    // (ow_* migrated to the WS_HANDLERS registry above handleControlMessage)
+    // (mr_* migrated to the WS_HANDLERS registry above handleControlMessage)
 
     // ── Custom overlay URL management ────────────────────────────────────
     case 'manage_custom_overlay': {
@@ -9765,22 +9934,7 @@ function handleControlMessage(msg, ws) {
       break;
     }
 
-    // ── Team-lineup / player-intro card scene ────────────────────────────
-    case 'set_intro': {
-      const i = msg.data || {};
-      const cur = state.intro || {};
-      state.intro = {
-        visible: ('visible' in i) ? !!i.visible : !!cur.visible,
-        side: (i.side === 'orange' || i.side === 'blue') ? i.side : (cur.side ?? 'blue'),
-        title: typeof i.title === 'string' ? i.title : (cur.title ?? ''),
-        style: [1, 2].includes(Number(i.style)) ? Number(i.style) : (cur.style ?? 1),
-        showFooter: ('showFooter' in i) ? !!i.showFooter : (cur.showFooter ?? false),
-        showRealName: ('showRealName' in i) ? !!i.showRealName : (cur.showRealName ?? false)
-      };
-      saveAppState();
-      broadcastFullState();
-      break;
-    }
+    // (set_intro migrated to the WS_HANDLERS registry above handleControlMessage)
 
     case 'set_font_family':
       state.fontFamily = msg.data.fontFamily || 'Bourgeois';
@@ -10572,24 +10726,7 @@ function handleControlMessage(msg, ws) {
       break;
     }
 
-    // ── Sponsor / announcement ticker ────────────────────────────────────
-    case 'set_ticker': {
-      const p = msg.data || {};
-      if (typeof p.visible === 'boolean') state.ticker.visible = p.visible;
-      if (typeof p.source === 'string') state.ticker.source = (p.source === 'startgg') ? 'startgg' : 'manual';
-      if (typeof p.sponsor === 'string') state.ticker.sponsor = p.sponsor.slice(0, 400000);   // small logo (downscaled client-side)
-      if (Array.isArray(p.messages)) {
-        state.ticker.messages = p.messages
-          .map((m) => (m || '').toString().trim())
-          .filter(Boolean)
-          .slice(0, 30);
-      }
-      if (Number(p.speed) > 0) state.ticker.speed = Math.min(600, Math.max(3, Number(p.speed)));
-      if (state.ticker.source === 'startgg') state.ticker.feed = formatTickerFeed(state.startgg.matchFeed);   // build now; refreshes each poll
-      saveAppState();
-      broadcastFullState();
-      break;
-    }
+    // (set_ticker migrated to the WS_HANDLERS registry above handleControlMessage)
 
     case 'set_background': {
       const bg = msg.data || {};
@@ -12628,32 +12765,7 @@ function handleControlMessage(msg, ws) {
       break;
     }
 
-    // ── Upcoming matches overlay ──────────────────────────────────────────
-    case 'set_upcoming': {
-      const p = msg.data || {};
-      if (typeof p.visible === 'boolean') state.upcoming.visible = p.visible;
-      if (typeof p.title === 'string') state.upcoming.title = p.title;
-      if (typeof p.eyebrow === 'string') state.upcoming.eyebrow = p.eyebrow;
-      if (['cards', 'board', 'single', 'dual'].includes(p.layout)) state.upcoming.layout = p.layout;
-      if (Array.isArray(p.matches)) state.upcoming.matches = p.matches;
-      saveAppState();
-      broadcastFullState();
-      break;
-    }
-
-    // ── Standings overlay ─────────────────────────────────────────────────
-    case 'set_standings': {
-      const p = msg.data || {};
-      if (typeof p.visible === 'boolean') state.standings.visible = p.visible;
-      if (typeof p.title === 'string') state.standings.title = p.title;
-      if (typeof p.subtitle === 'string') state.standings.subtitle = p.subtitle;
-      if (typeof p.showRecord === 'boolean') state.standings.showRecord = p.showRecord;
-      if (typeof p.source === 'string') state.standings.source = p.source;
-      if (Array.isArray(p.rows)) state.standings.rows = p.rows;
-      saveAppState();
-      broadcastFullState();
-      break;
-    }
+    // (set_upcoming / set_standings migrated to the WS_HANDLERS registry above handleControlMessage)
 
     // ── Unified graphics overlay (gfx.html) active scene ─────────────────
     case 'set_gfx_active': {
@@ -12663,74 +12775,7 @@ function handleControlMessage(msg, ws) {
       break;
     }
 
-    // ── Teams to Watch (spotlight) overlay ────────────────────────────────
-    case 'set_watchlist': {
-      const p = msg.data || {};
-      const w = state.watchlist;
-      if (typeof p.visible === 'boolean') w.visible = p.visible;
-      if (typeof p.title === 'string') w.title = p.title.slice(0, 80);
-      if (typeof p.subtitle === 'string') w.subtitle = p.subtitle.slice(0, 120);
-      if (typeof p.logo === 'string') w.logo = p.logo.slice(0, 600000);
-      if (Array.isArray(p.fields)) w.fields = p.fields.slice(0, 6).map((f) => ({
-        id: (f.id || ('f' + Math.random().toString(36).slice(2, 7))).toString().slice(0, 24),
-        label: (f.label || 'FIELD').toString().slice(0, 40)
-      }));
-      if (Array.isArray(p.teams)) w.teams = p.teams.slice(0, 12).map((t) => ({
-        id: (t.id || ('t' + Math.random().toString(36).slice(2, 9))).toString().slice(0, 24),
-        name: (t.name || '').toString().slice(0, 80),
-        players: Array.isArray(t.players) ? t.players.slice(0, 8).map((x) => (x || '').toString().slice(0, 60)) : [],
-        values: (t.values && typeof t.values === 'object') ? Object.fromEntries(Object.entries(t.values).slice(0, 6).map(([k, v]) => [k.toString().slice(0, 24), (v || '').toString().slice(0, 40)])) : {},
-        pos: Math.max(0, Math.min(12, Number(t.pos) || 0)),   // 0 = unranked; 1 = podium centre
-        entrantId: (t.entrantId || '').toString().slice(0, 24),
-        eventSlug: (t.eventSlug || '').toString().slice(0, 200)
-      }));
-      saveAppState();
-      broadcastFullState();
-      break;
-    }
-    // Mark / unmark one team (the ★ on event team cards) — toggles by name, preserving values.
-    case 'toggle_watchlist_team': {
-      const t = (msg.data && msg.data.team) || {};
-      const name = (t.name || '').toString().trim();
-      if (!name) break;
-      const w = state.watchlist;
-      if (!Array.isArray(w.teams)) w.teams = [];
-      const i = w.teams.findIndex((x) => (x.name || '').toLowerCase() === name.toLowerCase());
-      if (i >= 0) w.teams.splice(i, 1);
-      else if (w.teams.length < 12) {
-        w.teams.push({
-          id: 't' + Math.random().toString(36).slice(2, 9),
-          name: name.slice(0, 80),
-          players: Array.isArray(t.players) ? t.players.slice(0, 8).map((x) => (x || '').toString().slice(0, 60)) : [],
-          values: {}, pos: 0,
-          entrantId: (t.entrantId || '').toString().slice(0, 24),   // for the single-team start.gg deep-dive
-          eventSlug: (t.eventSlug || '').toString().slice(0, 200)
-        });
-        // Auto-fill the subtitle with the start.gg event name on the first marked team (overridable).
-        const evName = (msg.data && msg.data.event || '').toString().trim();
-        if (evName && !w.subtitle) w.subtitle = evName.slice(0, 120);
-      }
-      saveAppState();
-      broadcastFullState();
-      break;
-    }
-    // Single-team spotlight — target a team + (optionally) go live; start.gg data fetched async.
-    case 'set_team_spotlight': {
-      const p = msg.data || {};
-      const ts = state.teamSpotlight;
-      let retarget = false;
-      if (typeof p.name === 'string') { if (p.name !== ts.name) retarget = true; ts.name = p.name.slice(0, 80); }
-      if (typeof p.eventSlug === 'string') ts.eventSlug = p.eventSlug.slice(0, 200);
-      if (typeof p.entrantId === 'string') { if (p.entrantId !== ts.entrantId) retarget = true; ts.entrantId = p.entrantId.slice(0, 24); }
-      if (Array.isArray(p.players)) ts.players = p.players.slice(0, 8).map((x) => ({ gamerTag: ((x && x.gamerTag) || x || '').toString().slice(0, 60), name: '', seedRank: '' }));
-      if (typeof p.visible === 'boolean') ts.visible = p.visible;
-      if (retarget) { ts.sg = { seed: null, placement: null, record: { w: 0, l: 0 }, recent: [], next: null }; ts.lastSync = 0; ts.syncError = ''; }
-      enrichSpotlightSeeding();
-      saveAppState();
-      broadcastFullState();
-      if (p.fetch !== false && ts.entrantId) refreshTeamSpotlight().catch(() => {});
-      break;
-    }
+    // (set_watchlist / toggle_watchlist_team / set_team_spotlight migrated to the WS_HANDLERS registry above handleControlMessage)
 
     // ── Bracket ──────────────────────────────────────────────────────────
     case 'set_bracket_settings': {

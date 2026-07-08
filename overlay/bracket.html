@@ -169,6 +169,17 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
 .bk-schedule .bk-round-name::after { content: ''; position: absolute; left: 18%; right: 18%; bottom: 0; height: 2px;
   background: linear-gradient(90deg, transparent, var(--accent), transparent); }
 .bk-schedule .bk-matches { justify-content: flex-start; gap: 14px; }
+/* ── Cross-phase progression pills: where a slot came from / where the winner goes ── */
+.bk-origin { font-size: 12px; line-height: 1; color: rgba(255,255,255,.5); padding: 4px 9px 0;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; letter-spacing: .02em; }
+.bk-exit { font-size: 12px; line-height: 1; font-weight: 600; padding: 4px 9px 5px;
+  color: color-mix(in srgb, var(--accent) 80%, #fff);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bk-exit::before { content: '\2192  '; opacity: .75; }
+.bk-lad-note { text-align: center; font-family: var(--disp); font-size: 16px; font-weight: 600;
+  color: color-mix(in srgb, var(--accent) 80%, #fff); letter-spacing: .05em; }
+.bk-lad-note::before { content: '\2192  '; opacity: .75; }
+
 /* ── Records ladder (swiss / round-robin default view): teams bucketed by W-L ── */
 .bk-ladder { display: flex; align-items: flex-start; justify-content: center; gap: 22px; width: 100%; }
 .bk-lad-bucket { flex: 1 1 0; min-width: 150px; max-width: 300px; display: flex; flex-direction: column; gap: 8px; }
@@ -352,8 +363,11 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
     // clearly reads as "scheduled", not "results".
     const upcoming = set.state === 1 && !decided && !inPlay;
     m.className = 'bk-match' + (isFinal ? ' is-final' : '') + (inPlay ? ' live' : '') + (upcoming ? ' upcoming' : '');
+    if (set.fromA) { const fa = document.createElement('div'); fa.className = 'bk-origin'; fa.textContent = set.fromA; m.appendChild(fa); }
     m.appendChild(buildSlot(a));
     m.appendChild(buildSlot(b));
+    if (set.fromB) { const fb = document.createElement('div'); fb.className = 'bk-origin'; fb.textContent = set.fromB; m.appendChild(fb); }
+    if (set.toNext) { const ex = document.createElement('div'); ex.className = 'bk-exit'; ex.textContent = set.toNext; m.appendChild(ex); }
     return m;
   }
 
@@ -545,7 +559,7 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
   // creates later swiss rounds once pairings exist. Undefeated buckets read as qualified-
   // green once a team can no longer be caught? No — colour is purely by record sign:
   // all-wins bucket green, all-losses bucket red, mixed neutral.
-  function buildLadder(standings) {
+  function buildLadder(standings, advancesTo) {
     const wrap = document.createElement('div'); wrap.className = 'bk-ladder';
     const buckets = new Map();
     (standings || []).forEach((s) => {
@@ -573,6 +587,15 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
       });
       wrap.appendChild(col);
     });
+    if (advancesTo) {
+      const outer = document.createElement('div');
+      outer.style.cssText = 'display:flex; flex-direction:column; gap:16px; width:100%;';
+      const note = document.createElement('div');
+      note.className = 'bk-lad-note';
+      note.textContent = 'Qualifiers advance to ' + advancesTo;
+      outer.appendChild(wrap); outer.appendChild(note);
+      return outer;
+    }
     return wrap;
   }
 
@@ -756,7 +779,7 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
       const wantMatrix = !!matrix && rrView === 'matrix';
       const wantSchedule = schedule.length > 0 && rrView === 'schedule';
       const wantStandings = standings.length > 0 && rrView === 'standings';
-      if (wantLadder) scaleEl.appendChild(buildLadder(standings));
+      if (wantLadder) scaleEl.appendChild(buildLadder(standings, b.advancesTo));
       if (wantMatrix) scaleEl.appendChild(buildMatrix(matrix));
       if (wantSchedule) scaleEl.appendChild(buildSchedule(schedule));
       if (wantStandings) scaleEl.appendChild(buildStandings(standings, b.showRecord));
