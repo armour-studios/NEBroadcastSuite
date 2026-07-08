@@ -30,7 +30,8 @@
 
     /* ── Top band: brand logo + event name above the team panels ─────────── */
     .lh-head {
-      position: absolute; top: 0; left: 0; right: 0; z-index: 20; height: 84px;
+      /* Right column only — the team panel keeps its full-height identity look. */
+      position: absolute; top: 0; left: 520px; right: 0; z-index: 20; height: 84px;
       display: flex; align-items: center; justify-content: center; gap: 22px;
       background: rgba(5,7,14,.88);
       border-bottom: 1px solid rgba(255,255,255,.07);
@@ -47,8 +48,7 @@
       letter-spacing: .08em; text-transform: uppercase; color: #fff;
       max-width: 1150px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
       text-shadow: 0 2px 14px rgba(0,0,0,.7); }
-    #stage.has-head .lh-left,
-    #stage.has-head .lh-right { padding-top: 116px; }
+        #stage.has-head .lh-right { padding-top: 116px; }
 
     /* ── LEFT PANEL ───────────────────────────────────────────────────────── */
     .lh-left {
@@ -78,7 +78,7 @@
     #stage.show .lh-logo-bg { opacity: .12; transform: translate(-50%, -50%) scale(1); }
 
     .lh-content {
-      position: relative; z-index: 2;
+      position: relative; z-index: 2; width: 100%;
       display: flex; flex-direction: column; align-items: center;
       opacity: 0;
     }
@@ -105,17 +105,42 @@
       overflow-wrap: break-word; word-break: break-word; }
     .lh-sub { font-size: 13px; font-weight: 700; letter-spacing: .24em; text-transform: uppercase;
       color: rgba(255,255,255,.38); text-align: center; margin-bottom: 28px; }
-    .lh-tstats { display: flex; align-items: stretch; gap: 0;
-      border: 1px solid rgba(255,255,255,.1); border-radius: 8px; overflow: hidden;
-      background: rgba(0,0,0,.24); max-width: 100%; }
+    /* Structured info stack — label left, value right, team-color accent edge */
+    .lh-tstats { display: flex; flex-direction: column; gap: 9px; width: 100%; }
     .lh-tstats:empty { display: none; }
-    .lh-tstat { display: flex; flex-direction: column; align-items: center; justify-content: center;
-      gap: 3px; padding: 10px 16px; line-height: 1; }
-    .lh-tstat + .lh-tstat { border-left: 1px solid rgba(255,255,255,.1); }
-    .lh-tstat .v { font-family: 'Rajdhani', 'Inter', sans-serif; font-weight: 700; font-size: 26px;
-      color: #fff; font-variant-numeric: tabular-nums; white-space: nowrap; }
-    .lh-tstat .k { font-size: 9px; font-weight: 800; letter-spacing: .14em; text-transform: uppercase;
-      color: rgba(255,255,255,.38); white-space: nowrap; }
+    .lh-info-row { display: flex; align-items: center; justify-content: space-between; gap: 14px;
+      padding: 11px 16px; border-radius: 8px;
+      background: linear-gradient(90deg, rgba(0,0,0,.42), rgba(0,0,0,.22));
+      border: 1px solid rgba(255,255,255,.09);
+      border-left: 3px solid var(--team-color); }
+    .lh-info-row .k { font-size: 12px; font-weight: 800; letter-spacing: .2em; text-transform: uppercase;
+      color: rgba(255,255,255,.45); white-space: nowrap; }
+    .lh-info-row .v { font-family: 'Rajdhani', 'Inter', sans-serif; font-weight: 800; font-size: 24px;
+      line-height: 1; color: #fff; font-variant-numeric: tabular-nums; white-space: nowrap;
+      display: flex; align-items: center; gap: 8px; }
+    /* Series hero row — the one number a lineup card is really about mid-series */
+    .lh-info-row.hero {
+      background: linear-gradient(90deg,
+        color-mix(in srgb, var(--team-color) 30%, rgba(0,0,0,.5)),
+        color-mix(in srgb, var(--team-color) 10%, rgba(0,0,0,.3)));
+      border-color: color-mix(in srgb, var(--team-color) 45%, transparent); }
+    .lh-info-row.hero .v { font-size: 34px; font-weight: 900;
+      text-shadow: 0 0 24px color-mix(in srgb, var(--team-color) 70%, transparent); }
+    .lh-info-flag { width: 26px; height: 18px; object-fit: cover; border-radius: 2px;
+      border: 1px solid rgba(255,255,255,.2); }
+    /* Next-opponent block */
+    .lh-vs { display: flex; align-items: center; justify-content: center; gap: 12px;
+      width: 100%; margin-top: 20px; padding: 12px 16px; border-radius: 8px;
+      background: rgba(0,0,0,.3); border: 1px dashed rgba(255,255,255,.14); }
+    .lh-vs.is-empty { display: none; }
+    .lh-vs .vs-lbl { font-size: 13px; font-weight: 900; letter-spacing: .24em;
+      color: rgba(255,255,255,.4); }
+    .lh-vs .vs-logo { width: 34px; height: 34px; object-fit: contain;
+      filter: drop-shadow(0 2px 8px rgba(0,0,0,.6)); }
+    .lh-vs .vs-logo.on-dark { filter: brightness(0) invert(1) drop-shadow(0 2px 8px rgba(0,0,0,.6)); }
+    .lh-vs .vs-name { font-family: 'Rajdhani', 'Inter', sans-serif; font-weight: 800; font-size: 21px;
+      text-transform: uppercase; color: rgba(255,255,255,.85);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 300px; }
     .lh-vsep {
       position: absolute; top: 8%; right: 0; bottom: 8%; z-index: 3;
       width: 2px; pointer-events: none;
@@ -336,6 +361,11 @@
         <div class="lh-tname" id="lh-tname">TEAM</div>
         <div class="lh-sub" id="lh-sub">STARTING LINE-UP</div>
         <div class="lh-tstats" id="lh-tstats"></div>
+        <div class="lh-vs is-empty" id="lh-vs">
+          <span class="vs-lbl">VS</span>
+          <img class="vs-logo" id="lh-vs-logo" alt="" style="display:none">
+          <span class="vs-name" id="lh-vs-name"></span>
+        </div>
       </div>
 
       <div class="lh-vsep" aria-hidden="true"></div>
@@ -453,6 +483,8 @@
         ev: evName,
         hd: ((data.eventName || '') + '|' + (SceneBase.brandLogo(data) || '').slice(0, 48)),
         ser: (data.series ? (data.series.blue || 0) + '-' + (data.series.orange || 0) : '') + ':' + ((data.match || {}).seriesVisible !== false),
+        fmt: ((data.match || {}).format || ''),
+        opp: (() => { const o = SceneBase.teamSide(data, side === 'blue' ? 'orange' : 'blue') || {}; return (o.name || '') + '|' + ((o.customLogo || o.logo || '')).slice(0, 40); })(),
         bst: bst ? `${bst.wins||0}-${bst.losses||0}:${bst.placement||0}` : '',
         evL: evLoaded });
       if (sig === _sig) return;
@@ -478,28 +510,41 @@
 
       const tr = data.teamRecords || {};
       const record = tr.enabled ? (tr[side] || '') : '';
-      const subRecord = bst && (bst.wins != null || bst.losses != null)
-        ? `${bst.wins || 0}W – ${bst.losses || 0}L`
-        : (record || (intro.title || 'STARTING LINE-UP').toUpperCase());
-      el('lh-sub').textContent = subRecord;
+      el('lh-sub').textContent = (intro.title || 'STARTING LINE-UP').toUpperCase();
 
-      const cc = teamCountry(players, data);
+      const row = (k, v, cls) => `<div class="lh-info-row${cls ? ' ' + cls : ''}"><span class="k">${k}</span><span class="v">${v}</span></div>`;
       const ts = [];
-      if (cc) ts.push(`<div class="lh-tstat"><div style="display:flex;align-items:center;gap:5px;"><img src="${flagSrc(cc)}" style="width:22px;height:16px;object-fit:cover;border-radius:2px;border:1px solid rgba(255,255,255,.15);" alt="" onerror="this.style.display='none'"><span class="v" style="font-size:15px;">${esc(countryName(cc) || cc)}</span></div><span class="k">Country</span></div>`);
-      // Series score — this team's games first. Hidden at 0-0 (nothing to say pre-series).
+      // Series hero — this team's games first. Hidden at 0-0 (nothing to say pre-series).
       const ser = data.series || {};
       const sb = Number(ser.blue) || 0, so = Number(ser.orange) || 0;
       const serMine = side === 'blue' ? sb : so, serTheirs = side === 'blue' ? so : sb;
-      if ((data.match || {}).seriesVisible !== false && (sb + so) > 0) {
-        ts.push(`<div class="lh-tstat"><span class="v">${serMine} – ${serTheirs}</span><span class="k">Series</span></div>`);
-      }
+      const serOn = (data.match || {}).seriesVisible !== false && (sb + so) > 0;
+      if (serOn) ts.push(row('Series', `${serMine} – ${serTheirs}`, 'hero'));
+      const fmt = ((data.match || {}).format || '').trim();
+      if (fmt) ts.push(row('Format', esc(fmt.toUpperCase())));
+      if (serOn) ts.push(row('Next Game', 'Game ' + (sb + so + 1)));
       if (bst && (bst.wins != null || bst.losses != null)) {
-        ts.push(`<div class="lh-tstat"><span class="v">${bst.wins || 0}-${bst.losses || 0}</span><span class="k">Event</span></div>`);
-        if (bst.placement) ts.push(`<div class="lh-tstat"><span class="v">#${bst.placement}</span><span class="k">Seed</span></div>`);
-      } else if (record) {
-        ts.push(`<div class="lh-tstat"><span class="v">${esc(record)}</span><span class="k">Record</span></div>`);
+        ts.push(row('Event Record', `${bst.wins || 0} – ${bst.losses || 0}`));
+        if (bst.placement) ts.push(row('Seed', '#' + bst.placement));
       }
+      if (record) ts.push(row('Season', esc(record)));
+      const cc = teamCountry(players, data);
+      if (cc) ts.push(row('Country', `<img class="lh-info-flag" src="${flagSrc(cc)}" alt="" onerror="this.style.display='none'">${esc(countryName(cc) || cc)}`));
       el('lh-tstats').innerHTML = ts.join('');
+
+      // Next opponent — the other side of the scoreboard, when it's a real team
+      const opp = SceneBase.teamSide(data, side === 'blue' ? 'orange' : 'blue') || {};
+      const oppReal = opp.name && !/^(blue|orange) team$/i.test(opp.name.trim()) && opp.name.trim().toLowerCase() !== tnameLow;
+      const vsEl = el('lh-vs'), vsLogo = el('lh-vs-logo');
+      if (oppReal) {
+        el('lh-vs-name').textContent = opp.name.toUpperCase();
+        if (opp.customLogo || opp.logo) {
+          SceneBase.applyTeamLogo(vsLogo, opp.customLogo, opp.logo);
+          vsLogo.classList.toggle('on-dark', !!opp.logoOnDark);
+          vsLogo.style.display = '';
+        } else vsLogo.style.display = 'none';
+      }
+      vsEl.classList.toggle('is-empty', !oppReal);
 
       // Top band: brand logo + full event name
       const brandLogo = SceneBase.brandLogo(data);
@@ -655,7 +700,8 @@
         _evCache[_evKey(t, _prevEv)] = s;
       });
       render({
-        teams: { blue: { name: 'Frost Esports', color: '#3b82f6', logo: null, players: [
+        teams: { orange: { name: 'Ember Rising', color: '#e97139', logo: null, players: [] },
+          blue: { name: 'Frost Esports', color: '#3b82f6', logo: null, players: [
           { name: 'Aqua',   gamerTag: 'Aqua',   role: 'Captain', status: 'starter', realName: 'James Carter' },
           { name: 'Nova',   gamerTag: 'Nova',   role: '',        status: 'starter', realName: 'Lena Park' },
           { name: 'Rhythm', gamerTag: 'Rhythm', role: '',        status: 'starter', realName: '' },
@@ -671,7 +717,7 @@
         scoreboardAd: {},
         teamRecords: { enabled: true, blue: '14-3' },
         series: { blue: 2, orange: 1 },
-        match: { seriesVisible: true },
+        match: { seriesVisible: true, format: 'BO5' },
         activeEvent: { platform: 'startgg', name: 'Rocket Rush Season 6', numEntrants: 24 },
         bracket: { standings: [{ name: 'Frost Esports', wins: 3, losses: 1, placement: 2 }] },
         intro: { visible: true, side: 'blue', title: 'Starting Line-up', showFooter: false, showRealName: true }
