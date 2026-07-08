@@ -1822,8 +1822,9 @@ function _returnGraphicsToProd() {
     draft:     { name: 'Champion Draft',        link: 'draft.html',           hasClear: true,  hasQueue: false, hasPush: true,  popout: true },
     spotlight: { name: 'Spotlight',             link: 'watchlist.html',       hasClear: true,  hasQueue: false, hasPush: true,  popout: true },
     standings: { name: 'Standings',             link: 'standings.html',       hasClear: true,  hasQueue: false, hasPush: true,  hasApply: true,  pushId: 'btn-gfx-standings-push', clearId: 'btn-gfx-standings-clear', popout: true },
-    schedule:  { name: 'Upcoming Matches',      link: 'schedule.html',        hasClear: true,  hasQueue: false, hasPush: true,  hasApply: true,  pushId: 'btn-gfx-schedule-push', clearId: 'btn-gfx-schedule-clear', popout: true },
+    schedule:  { name: 'Schedule',              link: 'schedule.html',        hasClear: true,  hasQueue: false, hasPush: true,  hasApply: true,  pushId: 'btn-gfx-schedule-push', clearId: 'btn-gfx-schedule-clear', popout: true },
     bracket:   { name: 'Bracket',               link: 'bracket.html',         hasClear: true,  hasQueue: false, hasPush: true,  popout: true },
+    credits:   { name: 'Stream Credits',        link: 'stream-credits.html',  hasClear: true,  hasQueue: false, hasPush: true  },
   };
 
   let currentKey = 'break';
@@ -2245,6 +2246,10 @@ function _returnGraphicsToProd() {
       if (summary) {
         summary.style.display = '';
         summary.querySelectorAll('.gfx-front-panel[data-frontkey]').forEach((p) => { p.style.display = (p.dataset.frontkey === key) ? '' : 'none'; });
+        // Spotlight's front card IS the whole feature (title + team list + add) — its
+        // pop-out only held styling controls, which read as a broken settings page.
+        const moreBtn = el('gfx-popout-summary-open');
+        if (moreBtn) moreBtn.style.display = (key === 'spotlight') ? 'none' : '';
       }
       renderPopoutSummary(key);
     } else {
@@ -2905,14 +2910,14 @@ function _returnGraphicsToProd() {
   function schAutoSave() {
     send('set_upcoming', {
       matches: _schMatches,
-      title: (el('gfx-front-sch-title')?.value || 'UPCOMING MATCHES').trim(),
+      title: (el('gfx-front-sch-title')?.value || 'SCHEDULE').trim(),
       layout: el('gfx-sch-layout')?.value || 'cards'
     });
   }
 
   function buildScheduleContentPayload() {
     return {
-      title: (el('gfx-front-sch-title')?.value || 'UPCOMING MATCHES').trim(),
+      title: (el('gfx-front-sch-title')?.value || 'SCHEDULE').trim(),
       layout: el('gfx-sch-layout')?.value || 'cards',
       matches: _schMatches
     };
@@ -10853,6 +10858,10 @@ function winnerPayload(visible) {
 el('btn-show-winner')?.addEventListener('click', () => send('set_winner', winnerPayload(true)));
 el('btn-hide-winner')?.addEventListener('click', () => send('set_winner', { visible: false }));
 
+// ── Production: Stream Credits — no config, just visibility ─────────────────
+el('btn-show-credits')?.addEventListener('click', () => send('set_credits', { visible: true }));
+el('btn-hide-credits')?.addEventListener('click', () => send('set_credits', { visible: false }));
+
 // ── Production: Team Line-up / Intro ────────────────────────────────────────
 function introPayload(visible) {
   return {
@@ -11717,13 +11726,14 @@ const ONAIR_SCENES = [
   { key: 'veto',      label: 'Map Pool / Series', msg: 'set_veto',              path: 'veto.visible' },
   { key: 'draft',     label: 'Draft',             msg: 'draft_visible',         path: 'draft.visible' },
   { key: 'bracket',   label: 'Bracket',           msg: 'set_bracket_settings',  path: 'bracket.visible' },
-  { key: 'upcoming',  label: 'Upcoming Matches',  msg: 'set_upcoming',          path: 'upcoming.visible' },
+  { key: 'upcoming',  label: 'Schedule',          msg: 'set_upcoming',          path: 'upcoming.visible' },
   { key: 'standings', label: 'Standings',         msg: 'set_standings',         path: 'standings.visible' },
   { key: 'ticker',    label: 'Ticker',            msg: 'set_ticker',            path: 'ticker.visible' },
   { key: 'spotlight', label: 'Player Spotlight',  msg: 'set_spotlight',         path: 'spotlight.visible' },
   { key: 'watchlist', label: 'Teams to Watch',    msg: 'set_watchlist',         path: 'watchlist.visible' },
   { key: 'teamspot',  label: 'Team Spotlight',    msg: 'set_team_spotlight',    path: 'teamSpotlight.visible' },
-  { key: 'banner',    label: 'Sponsor Banner',    msg: 'set_banner_visibility', path: 'banner.visible' }
+  { key: 'banner',    label: 'Sponsor Banner',    msg: 'set_banner_visibility', path: 'banner.visible' },
+  { key: 'credits',   label: 'Stream Credits',    msg: 'set_credits',          path: 'credits.visible' }
 ];
 window.ONAIR_SCENES = ONAIR_SCENES;   // TDZ-safe handle for early-init render hooks
 
@@ -11819,7 +11829,7 @@ const SCENE_SOURCES = [
   { group: 'Bracket & Veto', icon: 'trophy', items: [
     { name: 'Bracket', path: '/bracket.html', live: 'bracket.visible', desc: 'Live bracket — elim columns or standings table.' },
     { name: 'Standings', path: '/standings.html', live: 'standings.visible', desc: 'Dedicated standings leaderboard (auto from bracket or manual).' },
-    { name: 'Upcoming Matches', path: '/schedule.html', live: 'upcoming.visible', desc: 'Next matches from start.gg stream queue or manual entry.' },
+    { name: 'Schedule', path: '/schedule.html', live: 'upcoming.visible', desc: 'Next matches from start.gg stream queue or manual entry.' },
     { name: 'Map Veto', path: '/mapscreen.html', live: 'veto.visible', desc: 'Pick/ban board for CS2 / Valorant-style series.' },
   ]},
   { group: 'Replays', icon: 'film', items: [
@@ -13437,6 +13447,14 @@ function renderQrailScenes(data) {
 // ── Quick panel cockpit: Now/Next + "Put On Air" chips (reuse the golive toggles + config gear) ──
 // trig entries drive the existing GOLIVE_TRIGGERS toggle buttons + trigger-config popover; ov
 // entries are plain overlay show/hide via bbActionInfo. cfg=true means a gear opens its options.
+// gfx: <key> = a real gfx.html layer (LAYER_MAP in overlay/gfx.html) — pushing/clearing it MUST
+// go through window._gfxDoPush / set_gfx_active so gfx.html's layer-switcher actually shows it.
+// Bracket and Standings used to be wired as plain `ov` (direct visibility-flag) chips, same as
+// Ticker/Sponsor/Desk below — but unlike those three, gfx.html owns bracket/standings as
+// mutually-exclusive layers, so toggling only their own .visible flag left the outer gfx-layer
+// never marked .active: the state changed but nothing ever appeared on gfx.html. Ticker/Sponsor/
+// Desk are correctly NOT gfx.html layers (they're meant to be persistent, independently-added
+// sources, not part of the exclusive scene-switcher), so they stay on the direct `ov` path.
 const QK_PUT = [
   { label: 'Break',     trig: 'breakScreen', toggle: 'ck-break-toggle',     scene: 'break',    cfg: true },
   { label: 'Matchup',   trig: 'matchup',     toggle: 'ck-matchup-toggle',   scene: 'matchup' },
@@ -13445,18 +13463,138 @@ const QK_PUT = [
   { label: 'Map Pool',  trig: 'veto',        toggle: 'ck-veto-toggle',      scene: 'veto' },
   { label: 'Teams',     trig: 'watchlist',   toggle: 'ck-spotlight-toggle', scene: 'spotlight' },
   { label: 'Schedule',  trig: 'upcoming',    toggle: 'ck-schedule-toggle',  scene: 'schedule' },
-  { label: 'Bracket',   ov: 'bracket' },
-  { label: 'Standings', ov: 'standings' },
+  { label: 'Bracket',   gfx: 'bracket' },
+  { label: 'Standings', gfx: 'standings' },
+  { label: 'Credits',   gfx: 'credits' },
   { label: 'Ticker',    ov: 'ticker' },
   { label: 'Sponsor',   ov: 'banner' },
   { label: 'Desk',      ov: 'casters' },
 ];
-let _qkPutBuilt = false;
 function _qkIsLive(item) {
   const s = currentState || {};
+  if (item.gfx) return s.gfxActive === item.gfx;
   if (item.ov) { const info = bbActionInfo({ t: 'overlay', k: item.ov }); return !!(info && info.live); }
   return (s.gfxActive === item.scene) || !!(s[item.trig] && s[item.trig].visible);
 }
+// Push/clear a gfx.html-layer chip — mirrors doPush()'s "clear previous, push this, set
+// gfxActive" sequence (app.js ~1952) using the same SCENE_META push/clear button ids, so this
+// chip and the real Graphics ▸ Push Live button for the same scene can never fight.
+function _qkGfxToggle(key) {
+  const live = currentState && currentState.gfxActive === key;
+  if (live) {
+    const meta = (window._gfxSceneMeta && window._gfxSceneMeta[key]) || {};
+    el(meta.clearId || ('btn-hide-' + key))?.click();
+    send('set_gfx_active', { scene: null });
+    if (currentState) currentState.gfxActive = null;
+    if (typeof window._gfxRefreshTopBar === 'function') window._gfxRefreshTopBar();
+  } else if (typeof window._gfxDoPush === 'function') {
+    window._gfxDoPush(key);
+  }
+}
+// Stable id per QK_PUT entry (gfx/ov/trig key — whichever it has) so drag order survives even
+// if the array itself is edited later.
+function qkItemKey(item) { return item.gfx || item.ov || item.trig; }
+// QK_PUT chips PLUS every real OBS scene, deduped by name against the QK_PUT labels — a scene
+// literally named "Bracket" would otherwise sit right next to the "Bracket" graphic chip, two
+// differently-behaving buttons with the same label. (Same merge idea as onairAllItems(), which
+// drives the separate Production ▸ Graphics board — this is its own copy because that board and
+// this rail panel are different surfaces with different chip markup/behavior.)
+function qkAllItems() {
+  const gfx = QK_PUT.map((item) => ({ id: 'qk:' + qkItemKey(item), t: 'qk', item, label: item.label }));
+  const taken = new Set(gfx.map((it) => it.label.toLowerCase()));
+  const rawScenes = (currentState && currentState.obs && Array.isArray(currentState.obs.availableScenes)) ? currentState.obs.availableScenes : [];
+  const scenes = rawScenes
+    .filter((name) => name && !/^═/.test(name.trim()))   // skip the generated collection's blank divider scenes
+    .filter((name) => !taken.has(name.toLowerCase()))
+    .map((name) => ({ id: 'scene:' + name, t: 'scene', k: name, label: name }));
+  return gfx.concat(scenes);
+}
+// Custom chip order — reorderable via the "reorder" link, persisted the same way as the on-air
+// board and Deck grid.
+const QK_ORDER_KEY = 'ne_qk_order_v1';
+function qkLoadOrder() { try { return JSON.parse(localStorage.getItem(QK_ORDER_KEY) || '[]'); } catch (_) { return []; } }
+function qkSaveOrder() { try { localStorage.setItem(QK_ORDER_KEY, JSON.stringify(_qkOrder)); } catch (_) {} }
+let _qkOrder = qkLoadOrder();
+let _qkEdit = false;
+function qkRenderPut() {
+  const wrap = el('qk-put'); if (!wrap) return;
+  const items = qkAllItems();
+  const byId = {}; items.forEach((it) => { byId[it.id] = it; });
+  // Reconcile saved order against the live item set — keep known order, append anything new (an
+  // OBS scene just created) at the end. Self-healing since the OBS scene list can change anytime.
+  const known = _qkOrder.filter((id) => byId[id]);
+  const extraIds = items.map((it) => it.id).filter((id) => !known.includes(id));
+  const orderedIds = known.concat(extraIds);
+  if (extraIds.length || orderedIds.length !== _qkOrder.length) { _qkOrder = orderedIds; qkSaveOrder(); }
+  const ordered = orderedIds.map((id) => byId[id]).filter(Boolean);
+  wrap.classList.toggle('qk-put-editing', _qkEdit);
+  const sig = ordered.map((it) => it.id).join(',') + '|' + _qkEdit;
+  if (wrap.dataset.sig !== sig) {
+    wrap.dataset.sig = sig;
+    wrap.innerHTML = ordered.map((it) => {
+      if (it.t === 'scene') {
+        return `<div class="qk-chip qk-chip--scene" data-id="${dEsc(it.id)}"${_qkEdit ? ' draggable="true"' : ''}><button class="qk-chip-main" title="Cut to ${dEsc(it.label)}">${dEsc(it.label)}</button></div>`;
+      }
+      const item = it.item;
+      return `<div class="qk-chip" data-id="${dEsc(it.id)}"${_qkEdit ? ' draggable="true"' : ''}>`
+        + `<button class="qk-chip-main" title="Put ${dEsc(item.label)} on air">${dEsc(item.label)}</button>`
+        + (item.cfg ? `<button class="qk-chip-gear" title="${dEsc(item.label)} options"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>` : '')
+        + `</div>`;
+    }).join('');
+    Array.from(wrap.children).forEach((chip) => {
+      const it = byId[chip.dataset.id]; if (!it) return;
+      chip.querySelector('.qk-chip-main')?.addEventListener('click', () => {
+        if (_qkEdit) return;
+        if (it.t === 'scene') {
+          send('obs_switch_scene', { sceneName: it.k });
+          if (currentState && currentState.obs) currentState.obs.currentScene = it.k;   // optimistic
+          qkRenderPut();
+          return;
+        }
+        const item = it.item;
+        if (item.gfx) { _qkGfxToggle(item.gfx); return; }
+        if (item.ov) { const info = bbActionInfo({ t: 'overlay', k: item.ov }); if (info) info.run(); return; }
+        // trigger: if it has options and isn't live yet, open the config gear to set them first
+        if (item.cfg && !_qkIsLive(item) && typeof bbOpenTriggerConfig === 'function') { bbOpenTriggerConfig(item.trig, chip); return; }
+        el(item.toggle)?.click();
+      });
+      const gear = chip.querySelector('.qk-chip-gear');
+      if (gear) gear.addEventListener('click', (e) => { e.stopPropagation(); if (typeof bbOpenTriggerConfig === 'function') bbOpenTriggerConfig(it.item.trig, chip); });
+    });
+  }
+  Array.from(wrap.children).forEach((chip) => {
+    const it = byId[chip.dataset.id]; if (!it) return;
+    const on = it.t === 'scene'
+      ? !!(currentState && currentState.obs && currentState.obs.currentScene === it.k)
+      : _qkIsLive(it.item);
+    chip.classList.toggle('on', on);
+  });
+}
+el('qk-put-reorder')?.addEventListener('click', (e) => {
+  e.preventDefault();
+  _qkEdit = !_qkEdit;
+  e.currentTarget.classList.toggle('active', _qkEdit);
+  e.currentTarget.textContent = _qkEdit ? 'done' : 'reorder';
+  qkRenderPut();
+});
+(function wireQkPutDrag() {
+  const wrap = el('qk-put'); if (!wrap) return;
+  let dragId = null;
+  wrap.addEventListener('dragstart', (e) => {
+    const t = e.target.closest('.qk-chip'); if (!t || !_qkEdit) { e.preventDefault(); return; }
+    dragId = t.dataset.id; t.classList.add('qk-chip-drag');
+  });
+  wrap.addEventListener('dragend', (e) => { const t = e.target.closest('.qk-chip'); if (t) t.classList.remove('qk-chip-drag'); dragId = null; });
+  wrap.addEventListener('dragover', (e) => { if (_qkEdit) e.preventDefault(); });
+  wrap.addEventListener('drop', (e) => {
+    if (!_qkEdit || !dragId) return; e.preventDefault();
+    const tgt = e.target.closest('.qk-chip'); if (!tgt) return;
+    const from = _qkOrder.indexOf(dragId), to = _qkOrder.indexOf(tgt.dataset.id);
+    if (from < 0 || to < 0 || from === to) return;
+    const [m] = _qkOrder.splice(from, 1); _qkOrder.splice(to, 0, m);
+    qkSaveOrder(); qkRenderPut();
+  });
+})();
 function renderQuickPanel(data) {
   data = data || {};
   const obs = data.obs || {};
@@ -13500,31 +13638,8 @@ function renderQuickPanel(data) {
       }
     }
   }
-  // Put-on-air chips — build once, reflect live state each tick.
-  const wrap = el('qk-put');
-  if (wrap) {
-    if (!_qkPutBuilt) {
-      _qkPutBuilt = true;
-      wrap.innerHTML = '';
-      QK_PUT.forEach((item, i) => {
-        const chip = document.createElement('div'); chip.className = 'qk-chip'; chip.dataset.i = i;
-        chip.innerHTML = `<button class="qk-chip-main" title="Put ${item.label} on air">${item.label}</button>`
-          + (item.cfg ? `<button class="qk-chip-gear" title="${item.label} options"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>` : '');
-        chip.querySelector('.qk-chip-main').addEventListener('click', () => {
-          if (item.ov) { const info = bbActionInfo({ t: 'overlay', k: item.ov }); if (info) info.run(); return; }
-          // trigger: if it has options and isn't live yet, open the config gear to set them first
-          if (item.cfg && !_qkIsLive(item) && typeof bbOpenTriggerConfig === 'function') { bbOpenTriggerConfig(item.trig, chip); return; }
-          el(item.toggle)?.click();
-        });
-        const gear = chip.querySelector('.qk-chip-gear');
-        if (gear) gear.addEventListener('click', (e) => { e.stopPropagation(); if (typeof bbOpenTriggerConfig === 'function') bbOpenTriggerConfig(item.trig, chip); });
-        wrap.appendChild(chip);
-      });
-    }
-    wrap.querySelectorAll('.qk-chip').forEach((chip) => {
-      const item = QK_PUT[+chip.dataset.i]; if (item) chip.classList.toggle('on', _qkIsLive(item));
-    });
-  }
+  // Put-on-air chips (graphics + every real OBS scene, deduped, drag-reorderable) — see qkRenderPut.
+  qkRenderPut();
 }
 // Static cockpit actions.
 el('qk-clear-all')?.addEventListener('click', (e) => { e.preventDefault(); el('gfx-top-clear')?.click(); });
@@ -13668,6 +13783,7 @@ function renderSwDock(data) {
         + (item.cfg ? `<span class="sw-dock-gear" title="options"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/></svg></span>` : '');
       chip.addEventListener('click', (e) => {
         if (e.target.closest('.sw-dock-gear')) { if (typeof bbOpenTriggerConfig === 'function') bbOpenTriggerConfig(item.trig, chip); return; }
+        if (item.gfx) { _qkGfxToggle(item.gfx); return; }
         if (item.ov) { const info = bbActionInfo({ t: 'overlay', k: item.ov }); if (info) info.run(); return; }
         if (item.cfg && !_qkIsLive(item) && typeof bbOpenTriggerConfig === 'function') { bbOpenTriggerConfig(item.trig, chip); return; }
         el(item.toggle)?.click();
@@ -18833,17 +18949,48 @@ function syncTeamSideSelects(teams) {
 
 // ── Production ▸ Graphics: board of every overlay you can push live (show / hide) ──
 function gfxPathVal(obj, dotted) { return String(dotted).split('.').reduce((o, k) => (o == null ? undefined : o[k]), obj); }
+// Mirrors gfxPathVal but writes — used to update currentState optimistically (see the click
+// handler below) so a second rapid click reads fresh state instead of a stale pre-broadcast value.
+function gfxSetPathVal(obj, dotted, val) {
+  if (!obj) return;
+  const parts = String(dotted).split('.');
+  let o = obj;
+  for (let i = 0; i < parts.length - 1; i++) { if (o[parts[i]] == null) o[parts[i]] = {}; o = o[parts[i]]; }
+  o[parts[parts.length - 1]] = val;
+}
 const GFX_KEY2TRIG = { break: 'breakScreen', winner: 'winner', intro: 'intro', veto: 'veto', spotlight: 'spotlight' };
 // Punch-up graphics: only one of these can be live at a time — showing one auto-hides whichever
 // other one is live. Casters, Ticker, Sponsor Banner and Teams to Watch are NOT in this set — they
 // run as independent, persistent overlays alongside whatever punch-up graphic is showing.
-const GFX_ONAIR_EXCLUSIVE = new Set(['break', 'winner', 'intro', 'matchup', 'veto', 'draft', 'bracket', 'upcoming', 'standings', 'spotlight', 'teamspot']);
+const GFX_ONAIR_EXCLUSIVE = new Set(['break', 'winner', 'intro', 'matchup', 'veto', 'draft', 'bracket', 'upcoming', 'standings', 'spotlight', 'teamspot', 'credits']);
+// overlay/gfx.html's internal LAYER_MAP names "Upcoming Matches" scene as 'schedule', not
+// 'upcoming' — set_gfx_active needs the LAYER_MAP name or gfx.html shows nothing at all even
+// though this board (correctly) thinks the graphic is live.
+const GFX_ONAIR_SCENE_KEY = { upcoming: 'schedule' };
 function onairTrig(key) { return (typeof GOLIVE_TRIGGERS !== 'undefined' ? GOLIVE_TRIGGERS : []).find((t) => t.state === GFX_KEY2TRIG[key]); }
 function onairHide(s) { const trig = onairTrig(s.key); if (trig) send(trig.msg, { visible: false }); else send(s.msg, s.hideData || { visible: false }); }
 function onairShow(s) { const trig = onairTrig(s.key); if (trig) send(trig.msg, trig.show()); else send(s.msg, s.showData || { visible: true }); }
 // Resolve whether a scene is currently on — prefers a custom check() over the dot-path, so scenes
 // like Matchup (detected via gfxActive, not a dedicated .visible flag) work correctly.
 function onairIsOn(s, state) { return s.check ? s.check(state) : !!gfxPathVal(state, s.path); }
+
+// Every real OBS scene, merged with the graphics (ONAIR_SCENES) list and deduped by name —
+// shared by anything that wants a "push a graphic OR cut an OBS scene" combined list. An OBS
+// scene whose name collides with a graphic's key/label (case-insensitive) is dropped from the
+// scene side rather than shown twice (e.g. a leftover OBS scene literally named "Bracket" next
+// to the "Bracket" graphic). Used by the qrail PUT ON AIR panel — NOT this board, which stays
+// graphics-only (see below).
+function onairAllItems() {
+  const ov = (window.ONAIR_SCENES || []).map((s) => ({ id: 'ov:' + s.key, t: 'overlay', k: s.key, label: s.label, ref: s }));
+  const taken = new Set();
+  ov.forEach((it) => { taken.add(it.k.toLowerCase()); taken.add(it.label.toLowerCase()); });
+  const rawScenes = (currentState && currentState.obs && Array.isArray(currentState.obs.availableScenes)) ? currentState.obs.availableScenes : [];
+  const scenes = rawScenes
+    .filter((name) => name && !/^═/.test(name.trim()))   // skip the generated collection's blank divider scenes
+    .filter((name) => !taken.has(name.toLowerCase()))
+    .map((name) => ({ id: 'scene:' + name, t: 'scene', k: name, label: name }));
+  return ov.concat(scenes);
+}
 
 // Custom card order — reorderable like the Deck grid, persisted the same way.
 const ONAIR_ORDER_KEY = 'ne_onair_order_v1';
@@ -18884,22 +19031,34 @@ el('prod-graphics-board')?.addEventListener('click', (e) => {
   const on = onairIsOn(s, currentState);
   if (!on && GFX_ONAIR_EXCLUSIVE.has(key)) {
     // Turning a punch-up graphic ON — hide every OTHER punch-up graphic that's currently live.
+    // Every send() below is paired with an immediate optimistic update to currentState (not just
+    // fire-and-forget) — this board is built for rapid clicking mid-show, and without this a
+    // second click before the server's broadcast round-trip landed would read stale "not live yet"
+    // state for the previous graphic and skip hiding it, leaving more than one marked live at once.
     (window.ONAIR_SCENES || []).forEach((other) => {
       if (other.key === key || !GFX_ONAIR_EXCLUSIVE.has(other.key)) return;
-      if (onairIsOn(other, currentState)) onairHide(other);
+      if (onairIsOn(other, currentState)) { onairHide(other); if (!other.check) gfxSetPathVal(currentState, other.path, false); }
     });
     const liveScene = currentState && currentState.gfxActive;
     if (liveScene && liveScene !== key) {
       const sm = (typeof window._gfxSceneMeta !== 'undefined') ? window._gfxSceneMeta : {};
       const pm = sm[liveScene]; if (pm) el(pm.clearId || ('btn-hide-' + liveScene))?.click();
     }
-    send('set_gfx_active', { scene: key });
+    const gfxKey = GFX_ONAIR_SCENE_KEY[key] || key;
+    send('set_gfx_active', { scene: gfxKey });
+    if (currentState) currentState.gfxActive = gfxKey;
   } else if (on && GFX_ONAIR_EXCLUSIVE.has(key)) {
     const liveScene = currentState && currentState.gfxActive;
-    if (liveScene === key) send('set_gfx_active', { scene: null });
+    const gfxKey = GFX_ONAIR_SCENE_KEY[key] || key;
+    if (liveScene === gfxKey) { send('set_gfx_active', { scene: null }); if (currentState) currentState.gfxActive = null; }
   }
   if (on) onairHide(s); else onairShow(s);
+  // Scenes with a custom check() (matchup: on === gfxActive === 'matchup') don't have a real
+  // independent .visible path — s.path there is just 'gfxActive', already correctly updated
+  // above; writing through it here would clobber that string with a stray boolean.
+  if (!s.check) gfxSetPathVal(currentState, s.path, !on);
   renderGraphicsBoard();
+  if (typeof window._gfxRefreshTopBar === 'function') window._gfxRefreshTopBar();
 });
 // Reorder mode — drag-and-drop, mirrors the Deck grid's edit/drag pattern.
 el('onair-edit-toggle')?.addEventListener('click', function () {
@@ -20495,6 +20654,49 @@ el('btn-credits-clear')?.addEventListener('click', async () => {
   }
 });
 
+// ── Credit Sponsors (dedicated big call-outs in the stream-credits roll) ─────
+let _csPendingLogo = '';
+function csSponsors() { return (currentState && currentState.credits && Array.isArray(currentState.credits.sponsors)) ? currentState.credits.sponsors : []; }
+function csSave(list) { send('set_credits', { sponsors: list }); }
+function renderCreditSponsors(data) {
+  const list = el('cs-list'); if (!list) return;
+  const sponsors = (data && data.credits && Array.isArray(data.credits.sponsors)) ? data.credits.sponsors : csSponsors();
+  const sig = JSON.stringify(sponsors);
+  if (list.dataset.sig === sig) return;   // no change → don't rebuild
+  list.dataset.sig = sig;
+  list.innerHTML = sponsors.length ? '' : '<div style="font-size:11px;color:var(--muted);">No credit sponsors added.</div>';
+  sponsors.forEach((s, i) => {
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;align-items:center;gap:8px;padding:5px 8px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:6px;';
+    row.innerHTML =
+      (s.logo ? `<img src="${s.logo}" alt="" style="height:22px;max-width:48px;object-fit:contain;flex:0 0 auto;">` : '<span style="width:22px;height:22px;flex:0 0 auto;"></span>')
+      + `<span style="flex:1;font-size:12px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${poEsc(s.name || '(logo only)')}${s.tier ? ` <span style="color:var(--muted);font-weight:500;">· ${poEsc(s.tier)}</span>` : ''}</span>`
+      + '<button class="btn btn-ghost btn-xs cs-del" style="flex:0 0 auto;">Remove</button>';
+    row.querySelector('.cs-del').addEventListener('click', () => { const next = csSponsors().slice(); next.splice(i, 1); csSave(next); });
+    list.appendChild(row);
+  });
+}
+el('cs-logo-btn')?.addEventListener('click', () => el('cs-logo-file')?.click());
+el('cs-logo-file')?.addEventListener('change', function () {
+  const f = this.files && this.files[0]; if (!f) return;
+  const reader = new FileReader();
+  reader.onload = () => { _csPendingLogo = reader.result || ''; const n = el('cs-logo-name'); if (n) n.textContent = f.name; };
+  reader.readAsDataURL(f);
+});
+el('cs-add')?.addEventListener('click', () => {
+  const name = (el('cs-name')?.value || '').trim();
+  const tier = (el('cs-tier')?.value || '').trim();
+  if (!name && !_csPendingLogo) { showToast('Add a name or a logo', '#fbbf24'); return; }
+  const next = csSponsors().slice();
+  next.push({ name, tier, logo: _csPendingLogo });
+  csSave(next);
+  _csPendingLogo = '';
+  if (el('cs-name')) el('cs-name').value = '';
+  if (el('cs-tier')) el('cs-tier').value = '';
+  if (el('cs-logo-name')) el('cs-logo-name').textContent = 'No logo';
+  if (el('cs-logo-file')) el('cs-logo-file').value = '';
+});
+
 // ── Qrail panels: Run of Show · Flows · Talent (the live command rail) ─────
 function renderQros() {
   const list = el('qros-list'); if (!list) return;
@@ -21920,7 +22122,7 @@ function renderQrailReplay(data) {
         <span class="qr-clip-dur">${dur}</span>
       </div>
       <div class="qr-clip-btns">
-        ${c._folderFile ? '' : '<button class="btn btn-secondary btn-sm qr-edit" title="Quick edit — opens the Video Editor in a popup to trim and push live">Edit</button>'}
+        <button class="btn btn-secondary btn-sm qr-edit" title="Quick edit — opens the Video Editor in a popup to trim and push live (raw folder files are imported into the library on save)">Edit</button>
         <button class="btn btn-primary btn-sm qr-toair" title="Play this clip on the program bus now (cuts OBS to the replay scene, returns when it ends)">To Air</button>
       </div>`;
     const thumbImg = row.querySelector('.qr-clip-thumb-img');
@@ -23250,6 +23452,7 @@ async function connect() {
       const _r = (label, fn) => { try { fn(); } catch (e) { console.error('[render:' + label + ']', e); } };
       _r('applyState',         () => applyState(msg.data));
       _r('applyRlSpectatorUi', () => applyRlSpectatorUi(msg.data));
+      _r('renderCreditSponsors', () => renderCreditSponsors(msg.data));
       _r('applyScenesCockpit', () => applyScenesCockpit(msg.data));
       _r('renderScenePresets', () => renderScenePresets(msg.data));
       _r('renderWhatsArmed',   () => renderWhatsArmed(msg.data));

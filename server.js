@@ -287,6 +287,10 @@ let state = {
     auto: { enabled: false, status: 'off', statusDetail: '', lockfilePath: '' } },
   // Team-lineup / player-intro card scene. side = which team to feature ('blue'|'orange'); style = card variant.
   intro: { visible: false, side: 'blue', title: '', style: 1, showFooter: false },
+  // Stream Credits scrolling roll (overlay/stream-credits.html) — a gfx.html Push Live scene like
+  // any other; the overlay itself has no visibility gate of its own, so this flag is the only
+  // thing that decides whether it's showing.
+  credits: { visible: false },
   // Overtime ad slot — sellable sponsor slot shown on the overlay during OT.
   overtime: { label: 'OVERTIME', logo: null, bg: '#e0202a', color: '#ffffff' },
   // Replay ad slot. logo = sponsor on the goal swipe; outroLogo = logo on the after-replay swipe
@@ -550,7 +554,7 @@ let state = {
   },
   upcoming: {
     visible: false,
-    title: 'UPCOMING MATCHES',
+    title: 'SCHEDULE',
     eyebrow: 'On Deck',    // small label above the title (board layout uses title as e.g. "WEEK 11")
     layout: 'cards',       // 'cards' = duorow card row | 'board' = weekly matchup board (team-colored bars)
     // 'event' = follow the stream queue (marked-as-stream matches + a couple non-stream upcoming);
@@ -1997,6 +2001,8 @@ function loadState() {
       if (saved.activeEvent && typeof saved.activeEvent === 'object') {
         state.activeEvent = { ...state.activeEvent, ...saved.activeEvent };
       }
+      // Overlay header rename: existing installs carry the old default title.
+      if (state.upcoming && state.upcoming.title === 'UPCOMING MATCHES') state.upcoming.title = 'SCHEDULE';
       if (saved.obs && typeof saved.obs === 'object') {
         state.obs = {
           ...state.obs,
@@ -9366,6 +9372,11 @@ registerWsHandlers({
   draft_undo()       { draftUndo();  saveAppState(); broadcastFullState(); },
   draft_reset()      { draftReset(); saveAppState(); broadcastFullState(); },
   draft_visible(msg) { if (state.draft) state.draft.visible = !!(msg.data && msg.data.visible); saveAppState(); broadcastFullState(); }
+});
+
+// ── Stream Credits (overlay/stream-credits.html) — plain visibility, Push Live like any other gfx.html scene ──
+registerWsHandlers({
+  set_credits(msg) { if (state.credits) state.credits.visible = !!(msg.data && msg.data.visible); saveAppState(); broadcastFullState(); }
 });
 
 // ── Overwatch 2 series scoreboard handlers ──
