@@ -15,6 +15,19 @@ let _connectedStreams = new Set(); // stream IDs present in any room
 let _videoStreams = new Set();     // stream IDs whose camera is live (sending video)
 
 
+// ── Dashboard: small dismissible Nameless Esports promo banner (✕ retires it for good) ──
+(function () {
+  const banner = el('dash-nameless-cta');
+  if (!banner) return;
+  let dismissed = false;
+  try { dismissed = !!localStorage.getItem('ne_nameless_banner_dismissed'); } catch (_) {}
+  banner.style.display = dismissed ? 'none' : '';
+  el('dash-nameless-cta-x')?.addEventListener('click', () => {
+    try { localStorage.setItem('ne_nameless_banner_dismissed', '1'); } catch (_) {}
+    banner.style.display = 'none';
+  });
+})();
+
 // ── Sidebar tab switching ───────────────────────────────────────────────────
 document.querySelectorAll('.tab-btn').forEach(btn => {
   btn.addEventListener('click', () => {
@@ -3550,6 +3563,7 @@ const PAGE_LABELS = {
   equipos: 'Talent', facecams: 'Camera Feeds', brands: 'Profiles',
   media: 'Assets', integrations: 'Integrations', stats: 'Analytics',
   ajustes: 'Settings', roles: 'Roles', switcher: 'Switcher',
+  graphics: 'Graphics',
 };
 
 function openPopout(page) {
@@ -3560,6 +3574,10 @@ function openPopout(page) {
       'popout_' + page, 'width=1280,height=900,resizable=yes');
   }
 }
+// Graphics is a Production sub-tab, not a sidebar data-tab item, so it doesn't pick up the
+// hover-icon injected onto every .tab-btn[data-tab] below — it gets its own trigger on the
+// Graphics top bar instead. See the '?page=graphics' handling further down for the popout side.
+el('gfx-top-popout')?.addEventListener('click', () => openPopout('graphics'));
 
 // Inject popout icon into each sidebar nav item (wraps button, adds sibling icon)
 document.querySelectorAll('.tab-btn[data-tab]').forEach(btn => {
@@ -3673,11 +3691,12 @@ if (_popoutPage === 'triggers') {
   }
   // Activate the target tab after all listeners are set up. Merged pages redirect to their host.
   requestAnimationFrame(() => {
-    const target = _popoutPage === 'facecams' ? 'equipos' : (_popoutPage === 'director' ? 'produccion' : ((_popoutPage === 'scenes' || _popoutPage === 'brands') ? 'media' : _popoutPage));
+    const target = _popoutPage === 'facecams' ? 'equipos' : ((_popoutPage === 'director' || _popoutPage === 'graphics') ? 'produccion' : ((_popoutPage === 'scenes' || _popoutPage === 'brands') ? 'media' : _popoutPage));
     const btn = document.querySelector('.tab-btn[data-tab="' + target + '"]');
     if (btn) btn.click();
     if (_popoutPage === 'facecams' && typeof window._ttShow === 'function') window._ttShow('cameras');
     if (_popoutPage === 'director' && typeof window._pdShow === 'function') window._pdShow('director');
+    if (_popoutPage === 'graphics' && typeof window._pdShow === 'function') window._pdShow('graphics');
     if (_popoutPage === 'scenes' && typeof window._assetsShow === 'function') window._assetsShow('overlays');
     if (_popoutPage === 'brands' && typeof window._assetsShow === 'function') window._assetsShow('profiles');
   });
@@ -5323,6 +5342,10 @@ function applyState(data) {
   if (facecamsWarning) {
     facecamsWarning.style.display = (data.facecamsEnabled === false) ? 'flex' : 'none';
   }
+  // Player-cam mapping only matters if facecams are actually on — hide the whole section
+  // rather than showing controls for a feature that's currently switched off.
+  const mspPlayerCams = el('msp-playercams');
+  if (mspPlayerCams) mspPlayerCams.style.display = (data.facecamsEnabled === false) ? 'none' : '';
 
   // Font family
   if (data.fontFamily) {
@@ -16668,6 +16691,7 @@ function applyRlSpectatorUi(data) {
   setVal('input-rl-ui-key', ui.key || 'h');
   setVal('input-rl-ui-presses', ui.presses ?? 2);
   setVal('input-rl-ui-gap', ui.gapMs ?? 250);
+  setVal('input-rl-ui-delay', ((ui.matchDelayMs ?? 1500) / 1000));
   setVal('input-rl-ui-hotkey', ui.hotkey || 'F9');
 }
 
@@ -16692,6 +16716,11 @@ el('input-rl-ui-presses')?.addEventListener('change', function() {
 });
 el('input-rl-ui-gap')?.addEventListener('change', function() {
   sendRlSpectatorUiPatch({ gapMs: Math.max(50, Number(this.value) || 250) });
+});
+el('input-rl-ui-delay')?.addEventListener('change', function() {
+  // Seconds in the UI → ms. Min 0.5s so the single press still lands after RL is focus-ready.
+  const secs = Math.max(0.5, Math.min(10, Number(this.value) || 1.5));
+  sendRlSpectatorUiPatch({ matchDelayMs: Math.round(secs * 1000) });
 });
 el('input-rl-ui-hotkey')?.addEventListener('change', function() {
   sendRlSpectatorUiPatch({ hotkey: this.value.trim() || 'F9' });
@@ -23451,6 +23480,11 @@ async function connect() {
         st.textContent = msg.data.message || '';
         st.style.color = msg.data.ok ? '#9ae6b4' : '#f56565';
       }
+      // Actionable failures (wrong scene name, OBS off, no scene picked) go to the bell so they're
+      // not missed with the Match ▸ Teams gear panel closed — this is where "it silently broke" hid.
+      if (msg.data.notify && msg.data.message && typeof addNotification === 'function') {
+        try { addNotification(msg.data.message, '#f56565', { title: 'RL scene automation' }); } catch (_) {}
+      }
     } else if (msg.type === 'bracket-result' || msg.type === 'event-result') {
       const resultEl = el('bracket-status');
       if (resultEl) {
@@ -23583,13 +23617,6 @@ async function connect() {
 
   ws.onerror = () => ws.close();
 }
-
-// ── INTEGRATIONS TAB ──────────────────────────────────────────────────────
-// The generic `.tab-btn` handler already activates the panel; this just guards the
-// optional helper (there is no global switchTab — calling it unguarded threw here).
-el('tab-integrations')?.addEventListener('click', () => {
-  if (typeof switchTab === 'function') switchTab('integrations');
-});
 
 // Game-data sub-section switching (CS2 / Valorant / League / Rocket League).
 document.querySelectorAll('.game-tab-btn').forEach(btn => {

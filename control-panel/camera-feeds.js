@@ -1102,7 +1102,9 @@ el('cf-listen-captions')?.addEventListener('change', function () { send('set_lis
 // VDO.ninja settings now live on the Integrations page — jump there from the Camera Feeds tab,
 // and (re)load the saved settings whenever the VDO integration panel is opened.
 el('cf-goto-vdo-settings')?.addEventListener('click', () => {
-  if (typeof switchTab === 'function') switchTab('integrations');
+  // There is no global switchTab — navigation is clicking the sidebar tab button.
+  document.querySelector('.tab-btn[data-tab="integrations"]')?.click();
+  try { _intAppFilter = 'vdo'; } catch (_) {}   // back bar reads "VDO.Ninja"
   if (typeof window._intShowTab === 'function') window._intShowTab('cameras');
   if (typeof cfLoadVdoSettings === 'function') cfLoadVdoSettings();
 });

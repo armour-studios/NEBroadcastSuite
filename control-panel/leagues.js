@@ -761,7 +761,7 @@ el('lg-pts-draw')?.addEventListener('change', function () { const lg = lgActive(
 el('lg-pts-otw')?.addEventListener('change', function () { const lg = lgActive(); if (lg) { lg.scoring = lg.scoring || {}; lg.scoring.otw = Number(this.value) || 0; lgSave(); } });
 el('lg-playoff-n')?.addEventListener('change', function () { const lg = lgActive(); if (lg) { lg.playoffN = Number(this.value) || 4; lgSave(); } });
 el('lg-tiebreak')?.addEventListener('change', function () { const lg = lgActive(); if (lg) { lg.tiebreak = this.value; lgSave(); } });
-el('lg-manage-teams')?.addEventListener('click', () => { if (typeof switchTab === 'function') switchTab('equipos'); });
+el('lg-manage-teams')?.addEventListener('click', () => { document.querySelector('.tab-btn[data-tab="equipos"]')?.click(); });
 el('lg-recalc')?.addEventListener('click', lgComputeStandingsFromSchedule);
 el('lg-add-match')?.addEventListener('click', lgAddMatch);
 el('lg-gen-rr')?.addEventListener('click', lgGenerateRoundRobin);
