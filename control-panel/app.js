@@ -4492,6 +4492,15 @@ function bbTogglePin(t, k, on) {
   if (on) list.push({ t, k });
   bbSetPinned(list);
 }
+// Unified transport-bar order: a list of button tokens (`m:<moment>` for a mapped OBS moment,
+// or `<t>:<k>` for a pin). Position in this list IS the hotkey (1st button = key 1), so dragging
+// a button to a new spot re-binds its key. Unknown tokens (new moments/pins) append in default order.
+const BB_ORDER_KEY = 'ne_bb_order_v1';
+function bbOrder() { try { return (JSON.parse(localStorage.getItem(BB_ORDER_KEY) || '[]') || []).filter((x) => typeof x === 'string'); } catch { return []; } }
+function bbSetOrder(a) { try { localStorage.setItem(BB_ORDER_KEY, JSON.stringify(a)); } catch {} }
+const BB_EXPAND_KEY = 'ne_bb_expanded';
+function bbExpanded() { try { return localStorage.getItem(BB_EXPAND_KEY) === '1'; } catch { return false; } }
+function bbSetExpanded(on) { try { localStorage.setItem(BB_EXPAND_KEY, on ? '1' : '0'); } catch {} }
 // Resolve a pinned descriptor → { label, live, run } against current state.
 function bbActionInfo(p) {
   const obs = currentState.obs || {};
@@ -13154,52 +13163,69 @@ function renderQuickToolbar(data) {
   const pins = (typeof bbPinned === 'function') ? bbPinned() : [];
   // Pinned overlay/trigger live-states go in the sig so the bar rebuilds when they change.
   const pinState = pins.map((p) => { const i = (typeof bbActionInfo === 'function') ? bbActionInfo(p) : null; return i ? `${p.t}:${p.k}:${i.live ? 1 : 0}` : ''; });
-  const sig = JSON.stringify({ scenes, connected, enabled: !!obs.enabled, pins, pinState, prog: obs.currentScene || '' });
+  const sig = JSON.stringify({ scenes, connected, enabled: !!obs.enabled, pins, pinState, ord: bbOrder(), prog: obs.currentScene || '' });
   if (wrap && sig !== _qtSceneSig) {
     _qtSceneSig = sig;
     wrap.innerHTML = '';
     const hintEl = (txt) => { const h = document.createElement('span'); h.className = 'qt-hint'; h.textContent = txt; wrap.appendChild(h); };
-    const sceneBtn = (sn, label, key, pinned) => {
+    const mkBadge = (hk) => hk != null ? `<kbd class="qt-key">${hk}</kbd>` : '';
+    const sceneBtn = (sn, label, hk, token) => {
       const b = document.createElement('button');
       b.className = 'qt-scene-btn';
-      b.innerHTML = (key != null ? `<kbd class="qt-key">${key}</kbd>` : '') + label;
-      b.title = `Cut to "${sn}"` + (key != null ? `  ·  hotkey ${key}` : '');
-      b.dataset.scene = sn;
-      if (pinned) { b.draggable = true; b.dataset.pinScene = sn; }
+      b.innerHTML = mkBadge(hk) + `<span class="qt-act-lbl"></span>`;
+      b.querySelector('.qt-act-lbl').textContent = label;
+      b.title = `Cut to "${sn}"` + (hk != null ? `  ·  hotkey ${hk}` : '') + '  ·  drag to reorder / rebind';
+      b.dataset.scene = sn; b.dataset.bbtoken = token; if (hk != null) b.dataset.hk = hk;
+      b.draggable = true;
       b.addEventListener('click', () => send('obs_switch_scene', { sceneName: sn }));
-      wrap.appendChild(b);
+      return b;
     };
-    const actionBtn = (p, info) => {
+    const actionBtn = (p, info, hk, token) => {
       const b = document.createElement('button');
       b.className = `qt-scene-btn qt-act-btn qt-act-${p.t}` + (info.live ? ' live' : '');
-      b.textContent = info.label;
-      b.title = (p.t === 'overlay' ? 'Toggle overlay · ' : 'Set options & go live · ') + info.label;
+      b.innerHTML = mkBadge(hk) + `<span class="qt-act-lbl"></span>`;
+      b.querySelector('.qt-act-lbl').textContent = info.label;
+      b.title = (p.t === 'overlay' ? 'Toggle overlay · ' : 'Set options & go live · ') + info.label + (hk != null ? `  ·  hotkey ${hk}` : '') + '  ·  drag to reorder / rebind';
+      b.dataset.bbtoken = token; if (hk != null) b.dataset.hk = hk;
+      b.draggable = true;
       b.addEventListener('click', () => {
         // Triggers with options (team/player/countdown) open a config popover; everything else runs.
         if (p.t === 'trigger' && !info.live && typeof bbHasTriggerConfig === 'function' && bbHasTriggerConfig(p.k)) { bbOpenTriggerConfig(p.k, b); return; }
         const fresh = bbActionInfo(p); if (fresh) fresh.run();
       });
-      wrap.appendChild(b);
+      return b;
     };
-    const shown = new Set();
-    let n = 0;
+    // One unified, reorderable button list: mapped OBS moments + pins, deduped by resolved identity.
+    const descriptors = [];
+    const seenScene = new Set(), seenAct = new Set();
     if (obs.enabled && connected) {
       SCENE_CONTROL_MOMENTS.forEach((m) => {
-        const sn = scenes[m.key]; if (!sn || shown.has('s:' + sn)) return;
-        shown.add('s:' + sn); sceneBtn(sn, m.label, ++n, false);
+        const sn = scenes[m.key]; if (!sn || seenScene.has(sn)) return;
+        seenScene.add(sn);
+        descriptors.push({ token: 'm:' + m.key, make: (hk) => sceneBtn(sn, m.label, hk, 'm:' + m.key) });
       });
     }
-    // Pinned actions (scenes + overlays + triggers).
     pins.forEach((p) => {
       if (p.t === 'scene') {
-        if (!obs.enabled || !connected || shown.has('s:' + p.k)) return;
-        shown.add('s:' + p.k); sceneBtn(p.k, p.k, ++n, true);
+        if (!obs.enabled || !connected || seenScene.has(p.k)) return;
+        seenScene.add(p.k);
+        descriptors.push({ token: 'scene:' + p.k, make: (hk) => sceneBtn(p.k, p.k, hk, 'scene:' + p.k) });
       } else {
-        const info = bbActionInfo(p); if (!info || shown.has(p.t + ':' + p.k)) return;
-        shown.add(p.t + ':' + p.k); actionBtn(p, info);
+        const key = p.t + ':' + p.k;
+        if (seenAct.has(key)) return;
+        const info = bbActionInfo(p); if (!info) return;
+        seenAct.add(key);
+        descriptors.push({ token: key, make: (hk) => actionBtn(p, info, hk, key) });
       }
     });
+    // Order by the saved bar order; known tokens first (in saved order), unknowns keep default order.
+    const order = bbOrder();
+    const rankOf = (tok) => { const i = order.indexOf(tok); return i < 0 ? Infinity : i; };
+    descriptors.sort((a, b) => { const ra = rankOf(a.token), rb = rankOf(b.token); return ra === rb ? 0 : ra - rb; });
+    // Render — the first 9 buttons in the row get hotkeys 1..9 (position = key).
+    descriptors.forEach((d, i) => wrap.appendChild(d.make(i < 9 ? i + 1 : null)));
     if (!wrap.children.length) hintEl(obs.enabled ? (connected ? 'No scenes mapped — use Customize' : 'OBS not connected') : 'OBS off — enable in Integrations → OBS');
+    if (typeof bbUpdateExpandToggle === 'function') requestAnimationFrame(bbUpdateExpandToggle);
   }
   // Highlight the SCENE button matching the live program scene (per tick, no rebuild).
   if (wrap) {
@@ -13230,34 +13256,37 @@ function renderQuickToolbar(data) {
     }
   })();
 }
+// Drag ANY bar button (scene / overlay / trigger) to a new spot. Because position = hotkey,
+// reordering IS rebinding — the saved bar order persists the full token order.
 (function wireBbSceneDrag() {
   const wrap = el('qt-obs-scenes'); if (!wrap) return;
   let dragSrc = null;
+  const tokenOf = (e) => { const b = e.target.closest('[data-bbtoken]'); return b ? b.dataset.bbtoken : null; };
   wrap.addEventListener('dragstart', (e) => {
-    const btn = e.target.closest('[data-pin-scene]'); if (!btn) return;
-    dragSrc = btn.dataset.pinScene;
+    const btn = e.target.closest('[data-bbtoken]'); if (!btn) return;
+    dragSrc = btn.dataset.bbtoken;
     e.dataTransfer.effectAllowed = 'move';
     btn.classList.add('qt-drag-src');
   });
   wrap.addEventListener('dragover', (e) => {
     if (!dragSrc) return;
-    const btn = e.target.closest('[data-pin-scene]'); if (!btn || btn.dataset.pinScene === dragSrc) return;
+    const tok = tokenOf(e); if (!tok || tok === dragSrc) return;
     e.preventDefault(); e.dataTransfer.dropEffect = 'move';
     wrap.querySelectorAll('.qt-drag-over').forEach((b) => b.classList.remove('qt-drag-over'));
-    btn.classList.add('qt-drag-over');
+    e.target.closest('[data-bbtoken]').classList.add('qt-drag-over');
   });
   wrap.addEventListener('dragleave', (e) => {
-    const btn = e.target.closest('[data-pin-scene]'); if (btn) btn.classList.remove('qt-drag-over');
+    const btn = e.target.closest('[data-bbtoken]'); if (btn) btn.classList.remove('qt-drag-over');
   });
   wrap.addEventListener('drop', (e) => {
     if (!dragSrc) return;
-    const target = e.target.closest('[data-pin-scene]');
-    if (!target || target.dataset.pinScene === dragSrc) { dragSrc = null; return; }
+    const tgt = tokenOf(e);
+    if (!tgt || tgt === dragSrc) { dragSrc = null; return; }
     e.preventDefault();
-    const pins = bbPinned();
-    const srcIdx = pins.findIndex((p) => p.t === 'scene' && p.k === dragSrc);
-    const tgtIdx = pins.findIndex((p) => p.t === 'scene' && p.k === target.dataset.pinScene);
-    if (srcIdx >= 0 && tgtIdx >= 0) { const [item] = pins.splice(srcIdx, 1); pins.splice(tgtIdx, 0, item); bbSetPinned(pins); _qtSceneSig = ''; }
+    // Persist the FULL visible token order with the dragged item moved before the target.
+    const tokens = [...wrap.querySelectorAll('[data-bbtoken]')].map((b) => b.dataset.bbtoken);
+    const from = tokens.indexOf(dragSrc), to = tokens.indexOf(tgt);
+    if (from >= 0 && to >= 0) { const [item] = tokens.splice(from, 1); tokens.splice(to, 0, item); bbSetOrder(tokens); _qtSceneSig = ''; renderQuickToolbar(currentState); }
     dragSrc = null;
   });
   wrap.addEventListener('dragend', () => {
@@ -13265,6 +13294,27 @@ function renderQuickToolbar(data) {
     wrap.querySelectorAll('.qt-drag-src, .qt-drag-over').forEach((b) => b.classList.remove('qt-drag-src', 'qt-drag-over'));
   });
 })();
+// Expandable second row: collapsed clips the bar to one row; the chevron reveals the rest.
+// The chevron only appears when the buttons actually overflow onto a second row.
+function bbUpdateExpandToggle() {
+  const bar = el('bottom-bar'), wrap = el('qt-obs-scenes'), tog = el('bb-expand-toggle');
+  if (!bar || !wrap || !tog) return;
+  bar.classList.toggle('bb-expanded', bbExpanded());
+  // Measure overflow against a single collapsed row (temporarily force-collapse to read it).
+  const wasExpanded = bar.classList.contains('bb-expanded');
+  bar.classList.remove('bb-expanded');
+  const overflowing = wrap.scrollHeight > wrap.clientHeight + 3;
+  if (wasExpanded) bar.classList.add('bb-expanded');
+  tog.style.display = overflowing ? '' : 'none';
+  tog.classList.toggle('is-open', wasExpanded && overflowing);
+  const rows = overflowing && !wasExpanded ? ' — more below' : '';
+  tog.title = (wasExpanded ? 'Collapse the transport bar' : 'Show the rest of the bar') + rows;
+}
+el('bb-expand-toggle')?.addEventListener('click', () => {
+  bbSetExpanded(!bbExpanded());
+  bbUpdateExpandToggle();
+});
+window.addEventListener('resize', () => { if (typeof bbUpdateExpandToggle === 'function') bbUpdateExpandToggle(); });
 el('qt-view-scoreboard')?.addEventListener('click', () => send('force_scoreboard'));
 el('qt-view-hud')?.addEventListener('click', () => send('force_hud'));
 el('qt-autoswitch')?.addEventListener('change', function () {
@@ -13398,9 +13448,10 @@ function renderQuickPanel(data) {
       nowEl.textContent = (obs.connected && obs.currentScene) ? obs.currentScene : '—';
     }
   }
-  // NEXT: when a run of show is built, this row IS the rundown — it names the next phase and
-  // the button advances to it (Start from the top when idle). Only without any rundown does it
-  // fall back to the start.gg queue + the Up Next screen shortcut (the original behavior).
+  // NEXT is the rundown, full stop: it names the next phase of the run of show and the button
+  // advances to it (Start from the top when idle). With no rundown built it invites the
+  // producer to build one — the old queue/Put-Up-Next fallback is gone (the queue lives on the
+  // NEXT rail tab; the Up Next screen is still reachable from the Break chip below).
   const nextEl = el('qk-next');
   const putBtn = el('qk-put-upnext');
   if (nextEl) {
@@ -13418,15 +13469,11 @@ function renderQuickPanel(data) {
           : (seg ? 'Advance the run of show to this segment' : 'Finish the run of show');
       }
     } else {
-      const q = Array.isArray(data.startgg && data.startgg.queue) ? data.startgg.queue : [];
-      const n = (data.startgg && data.startgg.queueEnabled)
-        ? (q.find((x) => !x.live && x.state !== 3) || q.find((x) => x.live) || q[0])
-        : null;
-      nextEl.textContent = n ? `${n.round ? n.round + ' · ' : ''}${n.teamA || 'TBD'} vs ${n.teamB || 'TBD'}` : '—';
+      nextEl.textContent = 'No rundown built';
       if (putBtn) {
-        putBtn.dataset.mode = 'upnext';
-        putBtn.textContent = 'Put ▸';
-        putBtn.title = 'Put the Up Next screen on air (set title + timer)';
+        putBtn.dataset.mode = 'build';
+        putBtn.textContent = 'Build ▸';
+        putBtn.title = 'Open the Run of Show to build tonight’s rundown';
       }
     }
   }
@@ -13460,15 +13507,14 @@ function renderQuickPanel(data) {
 el('qk-clear-all')?.addEventListener('click', (e) => { e.preventDefault(); el('gfx-top-clear')?.click(); });
 el('qk-put-upnext')?.addEventListener('click', () => {
   const btn = el('qk-put-upnext');
-  if (btn && btn.dataset.mode === 'rundown') {
-    // Rundown mode: Start ▸ from idle, Go ▸ to advance, End ▸ finishes (rdNext handles all three).
-    if (typeof rdNext === 'function') rdNext();
-    renderQuickPanel(currentState);
+  if (btn && btn.dataset.mode === 'build') {
+    // No rundown yet — jump the producer to the Run of Show rail tab to build one.
+    document.querySelector('.qrail-tab[data-qtab="ros"]')?.click();
     return;
   }
-  // Preset the break title to "UP NEXT" then open its config so the producer sets the timer & pushes.
-  const t = el('ck-break-title'); if (t) t.value = 'UP NEXT';
-  if (typeof bbOpenTriggerConfig === 'function') bbOpenTriggerConfig('breakScreen', el('qk-put-upnext'));
+  // Rundown mode: Start ▸ from idle, Go ▸ to advance, End ▸ finishes (rdNext handles all three).
+  if (typeof rdNext === 'function') rdNext();
+  renderQuickPanel(currentState);
 });
 
 // ── Switcher page: program/preview + take + multiview + audio (backend-routed) ──
@@ -16892,8 +16938,16 @@ document.addEventListener('keydown', (e) => {
   const t = e.target;
   if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;
   if (e.key >= '1' && e.key <= '9') {
-    const idx = parseInt(e.key, 10) - 1;
-    if (idx < SCENE_CONTROL_MOMENTS.length) { obsSceneHotkey(idx); e.preventDefault(); }
+    // Position = key: fire the Nth button on the transport bar (whatever it is — scene cut,
+    // overlay toggle, or trigger). The button's own click handler does the right thing, and it
+    // works even while that button is in the collapsed second row.
+    const btn = document.querySelector(`#qt-obs-scenes .qt-scene-btn[data-hk="${e.key}"]`);
+    if (btn) {
+      const lbl = (btn.querySelector('.qt-act-lbl') || btn).textContent.trim();
+      btn.click();
+      flashHotkeyHint(lbl ? `${e.key} · ${lbl}` : `Key ${e.key}`);
+      e.preventDefault();
+    }
   }
 });
 
