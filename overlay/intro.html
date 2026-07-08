@@ -412,6 +412,18 @@
     }
 
     function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c])); }
+    // The current pair's set in the linked bracket — bracket.matches is the flat start.gg
+    // set list (live-first) carrying round labels like "Winners Semi-Final".
+    function findPairMatch(data, nameA, nameB) {
+      const norm = (x) => String(x || '').trim().toLowerCase();
+      const A = norm(nameA), B = norm(nameB);
+      if (!A || !B) return null;
+      const eq = (x, y) => !!(x && y && (x === y || x.includes(y) || y.includes(x)));
+      return ((data.bracket && data.bracket.matches) || []).find((m) => {
+        const a = norm(m.a), b = norm(m.b);
+        return (eq(a, A) && eq(b, B)) || (eq(a, B) && eq(b, A));
+      }) || null;
+    }
     const SVG_X = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231 5.45-6.231zm-1.161 17.52h1.833L7.084 4.126H5.117l11.966 15.644z"/></svg>';
     const SVG_TWITCH = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11.571 4.714h1.715v5.143H11.57zm4.715 0H18v5.143h-1.714zM6 0L1.714 4.286v15.428h5.143V24l4.286-4.286h3.428L22.286 12V0zm14.571 11.143l-3.428 3.428h-3.429l-3 3v-3H6.857V1.714h13.714z"/></svg>';
     function initials(name) { const w = (name || '?').trim().split(/\s+/); return ((w[0]||'?')[0] + (w[1] ? w[1][0] : '')).toUpperCase(); }
@@ -467,6 +479,11 @@
       }) : null;
       const players = (team.players && team.players.length) ? team.players : [{ name: 'TBD' }];
 
+      // Opponent (other side of the scoreboard) + this pair's set in the bracket.
+      const opp = SceneBase.teamSide(data, side === 'blue' ? 'orange' : 'blue') || {};
+      const oppReal = !!(opp.name && !/^(blue|orange) team$/i.test(opp.name.trim()) && opp.name.trim().toLowerCase() !== tnameLow);
+      const pairMatch = oppReal ? findPairMatch(data, team.name, opp.name) : null;
+
       _fetchEventStats(players, evName);
       const evLoaded = evName ? players.filter((p) => {
         const t = (p.gamerTag || p.name || '').trim();
@@ -484,7 +501,9 @@
         hd: ((data.eventName || '') + '|' + (SceneBase.brandLogo(data) || '').slice(0, 48)),
         ser: (data.series ? (data.series.blue || 0) + '-' + (data.series.orange || 0) : '') + ':' + ((data.match || {}).seriesVisible !== false),
         fmt: ((data.match || {}).format || ''),
-        opp: (() => { const o = SceneBase.teamSide(data, side === 'blue' ? 'orange' : 'blue') || {}; return (o.name || '') + '|' + ((o.customLogo || o.logo || '')).slice(0, 40); })(),
+        ttl: intro.title || '',
+        rnd: (pairMatch && pairMatch.round) || '',
+        opp: (opp.name || '') + '|' + ((opp.customLogo || opp.logo || '')).slice(0, 40),
         bst: bst ? `${bst.wins||0}-${bst.losses||0}:${bst.placement||0}` : '',
         evL: evLoaded });
       if (sig === _sig) return;
@@ -532,6 +551,19 @@
       const nextGame = sb + so + 1;
       const decided = winsNeeded && Math.max(serMine, serTheirs) >= winsNeeded;
       if (serOn && winsNeeded && !decided && nextGame <= fmtN) ts.push(row('Next Game', 'Game ' + nextGame));
+
+      // Empty title -> real context from the linked tournament:
+      // "Winners Semi-Final · Game 4" (round from the pair's set, game from the series).
+      if (!(intro.title || '').trim()) {
+        const gameOk = (data.match || {}).seriesVisible !== false
+          && (!fmtN || nextGame <= fmtN) && !(winsNeeded && decided);
+        const autoTitle = [(pairMatch && pairMatch.round) || '', gameOk ? 'Game ' + nextGame : '']
+          .filter(Boolean).join(' · ');
+        if (autoTitle) {
+          el('lh-right-lbl').textContent = autoTitle;
+          el('lh-sub').textContent = autoTitle.toUpperCase();
+        }
+      }
       if (bst && (bst.wins != null || bst.losses != null)) {
         ts.push(row('Event Record', `${bst.wins || 0} – ${bst.losses || 0}`));
         if (bst.placement) ts.push(row('Seed', '#' + bst.placement));
@@ -542,8 +574,6 @@
       el('lh-tstats').innerHTML = ts.join('');
 
       // Next opponent — the other side of the scoreboard, when it's a real team
-      const opp = SceneBase.teamSide(data, side === 'blue' ? 'orange' : 'blue') || {};
-      const oppReal = opp.name && !/^(blue|orange) team$/i.test(opp.name.trim()) && opp.name.trim().toLowerCase() !== tnameLow;
       const vsEl = el('lh-vs'), vsLogo = el('lh-vs-logo');
       if (oppReal) {
         el('lh-vs-name').textContent = opp.name.toUpperCase();
@@ -728,8 +758,9 @@
         series: { blue: 2, orange: 1 },
         match: { seriesVisible: true, format: 'BO5' },
         activeEvent: { platform: 'startgg', name: 'Rocket Rush Season 6', numEntrants: 24 },
-        bracket: { standings: [{ name: 'Frost Esports', wins: 3, losses: 1, placement: 2 }] },
-        intro: { visible: true, side: 'blue', title: 'Starting Line-up', showFooter: false, showRealName: true }
+        bracket: { standings: [{ name: 'Frost Esports', wins: 3, losses: 1, placement: 2 }],
+          matches: [{ id: '1', round: 'Winners Semi-Final', a: 'Frost Esports', b: 'Ember Rising', state: 2 }] },
+        intro: { visible: true, side: 'blue', title: '', showFooter: false, showRealName: true }
       });
       stage.classList.add('show');
     }
