@@ -238,7 +238,7 @@ let state = {
   // Stream-credits extras: producer-added "credit sponsors" — a dedicated big call-out section in
   // the end-of-stream roll, separate from the brand-kit sponsor bar. [{ name, logo, tier }]
   credits: { sponsors: [], talent: [] },   // talent: manual {name,role} credits (other-shift crew)
-  casters: { visible: true, showCountry: false, nameMode: 'gamertag', showRoles: { host: '', observer: '' }, list: [], lowerThird: '', library: [], vdo: { room: '', password: '' }, guestsVdo: { room: '', password: '' }, observersVdo: { room: '', password: '' }, rooms: [], lineup: [], activeLayout: '', interview: { room: '', password: '' }, apiKey: '', interviewee: null, playerCam: null, deskRoomId: '', slotLabels: { 1: 'Caster 1', 2: 'Caster 2', 3: 'Caster 3', 4: 'Caster 4', 5: 'Player' } },   // list = on-air slots; showCountry = render each caster's country on the desk; library = saved casters/guests/observers (by kind); vdo/guestsVdo/observersVdo = the three shared group rooms; rooms = named VDO rooms; lineup = this-show active assignments; apiKey = director IFrame-API key; interviewee = spotlight-desk right cam; playerCam = slot-5 player feed ({camUrl,name,playerId}); deskRoomId = which named room is the interview/desk room
+  casters: { visible: true, showCountry: false, nameMode: 'gamertag', showRoles: { host: '', observer: '' }, shifts: [], list: [], lowerThird: '', library: [], vdo: { room: '', password: '' }, guestsVdo: { room: '', password: '' }, observersVdo: { room: '', password: '' }, rooms: [], lineup: [], activeLayout: '', interview: { room: '', password: '' }, apiKey: '', interviewee: null, playerCam: null, deskRoomId: '', slotLabels: { 1: 'Caster 1', 2: 'Caster 2', 3: 'Caster 3', 4: 'Caster 4', 5: 'Player' } },   // list = on-air slots; showCountry = render each caster's country on the desk; library = saved casters/guests/observers (by kind); vdo/guestsVdo/observersVdo = the three shared group rooms; rooms = named VDO rooms; lineup = this-show active assignments; apiKey = director IFrame-API key; interviewee = spotlight-desk right cam; playerCam = slot-5 player feed ({camUrl,name,playerId}); deskRoomId = which named room is the interview/desk room
   // VDO.Ninja talent workflow. Global config (server-side, replaces the old localStorage settings);
   // per-team rooms/passwords live on teams.x.vdo, per-player IDs on the player objects.
   vdo: {
@@ -1793,6 +1793,7 @@ function loadState() {
           showRoles: (saved.casters.showRoles && typeof saved.casters.showRoles === 'object')
             ? { host: saved.casters.showRoles.host || '', observer: saved.casters.showRoles.observer || '' }
             : { host: '', observer: '' },
+          shifts: Array.isArray(saved.casters.shifts) ? saved.casters.shifts : [],
           lowerThird: typeof saved.casters.lowerThird === 'string' ? saved.casters.lowerThird : '',
           list: Array.isArray(saved.casters.list) ? saved.casters.list : [],
           library: Array.isArray(saved.casters.library) ? saved.casters.library : [],
@@ -10469,6 +10470,90 @@ function handleControlMessage(msg, ws) {
       saveAppState();
       broadcastFullState();
       break;
+
+    // ── Show Deck shifts: save the whole allocation (slots + roles + on-shift marks) as a
+    // named preset, apply one at handoff, or clear everything between shifts. ──
+    case 'save_shift': {
+      const name = ((msg.data && msg.data.name) || '').toString().trim().slice(0, 40);
+      if (!name) break;
+      if (!Array.isArray(state.casters.shifts)) state.casters.shifts = [];
+      const lib = state.casters.library || [];
+      const slotName = (n) => {
+        const e = (state.casters.lineup || []).find((x) => Number(x.slot) === n);
+        const p = e && lib.find((l) => l.id === e.libraryId);
+        return (p && p.name) || '';
+      };
+      const snapshot = {
+        id: Math.random().toString(36).slice(2, 11),
+        name,
+        slots: { 1: slotName(1), 2: slotName(2), 3: slotName(3), 4: slotName(4) },
+        host: (state.casters.showRoles && state.casters.showRoles.host) || '',
+        observer: (state.casters.showRoles && state.casters.showRoles.observer) || '',
+        active: (state.crew || []).filter((c) => c && c.active).map((c) => c.name),
+        // Display options ride the shift too — a shift is the whole desk setup.
+        showCountry: !!state.casters.showCountry,
+        nameMode: state.casters.nameMode === 'name' ? 'name' : 'gamertag'
+      };
+      // Same name overwrites — re-saving a shift updates it instead of stacking duplicates.
+      const existing = state.casters.shifts.findIndex((s) => (s.name || '').toLowerCase() === name.toLowerCase());
+      if (existing >= 0) { snapshot.id = state.casters.shifts[existing].id; state.casters.shifts[existing] = snapshot; }
+      else state.casters.shifts.push(snapshot);
+      saveAppState();
+      broadcastFullState();
+      break;
+    }
+    case 'apply_shift': {
+      const shift = (state.casters.shifts || []).find((s) => s.id === (msg.data && msg.data.id));
+      if (!shift) break;
+      // Slots: rebuild the desk lineup for slots 1-4 from the shift's names (library entry
+      // found by name, created from the crew twin when missing — same join rule as elsewhere).
+      if (!Array.isArray(state.casters.library)) state.casters.library = [];
+      const lib = state.casters.library;
+      const findOrCreate = (nm) => {
+        const k = nm.toLowerCase();
+        let e = lib.find((l) => l && (l.name || '').toLowerCase() === k);
+        if (e) return e;
+        const crew = (state.crew || []).find((c) => c && (c.name || '').toLowerCase() === k) || {};
+        e = { id: Math.random().toString(36).slice(2, 11), name: nm, handle: crew.socialHandle || '', socialHandle: crew.socialHandle || '', social: crew.social || 'none', country: crew.country || '', camUrl: '', kind: 'caster' };
+        lib.push(e);
+        return e;
+      };
+      const lineup = (state.casters.lineup || []).filter((e) => !(Number(e.slot) >= 1 && Number(e.slot) <= 4));
+      [1, 2, 3, 4].forEach((n) => {
+        const nm = (shift.slots && shift.slots[n] || '').toString().trim();
+        if (!nm) return;
+        lineup.push({ libraryId: findOrCreate(nm).id, slot: n });
+      });
+      state.casters.lineup = lineup;
+      state.casters.showRoles = { host: shift.host || '', observer: shift.observer || '' };
+      const activeSet = new Set((shift.active || []).map((n) => (n || '').toLowerCase()));
+      (state.crew || []).forEach((c) => { if (c) c.active = activeSet.has((c.name || '').toLowerCase()); });
+      // Display options saved with the shift (older snapshots without them leave settings alone).
+      if (typeof shift.showCountry === 'boolean') state.casters.showCountry = shift.showCountry;
+      if (shift.nameMode === 'name' || shift.nameMode === 'gamertag') state.casters.nameMode = shift.nameMode;
+      resolveLineupToList();
+      saveAppState();
+      broadcastFullState();
+      break;
+    }
+    case 'delete_shift': {
+      if (Array.isArray(state.casters.shifts)) {
+        state.casters.shifts = state.casters.shifts.filter((s) => s.id !== (msg.data && msg.data.id));
+        saveAppState();
+        broadcastFullState();
+      }
+      break;
+    }
+    case 'clear_shift': {
+      // Empty the desk slots, show roles and every on-shift mark (saved shifts are untouched).
+      state.casters.lineup = (state.casters.lineup || []).filter((e) => !(Number(e.slot) >= 1 && Number(e.slot) <= 4));
+      state.casters.list = [];
+      state.casters.showRoles = { host: '', observer: '' };
+      (state.crew || []).forEach((c) => { if (c) c.active = false; });
+      saveAppState();
+      broadcastFullState();
+      break;
+    }
 
     // Show Deck host/observer allocation (crew member names) — casters get desk-lineup slots
     // via save_caster_to_library's deskSlot instead.

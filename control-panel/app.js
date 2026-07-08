@@ -331,7 +331,8 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     const roles = (data.casters && data.casters.showRoles) || {};
     const byId = {}; lib.forEach((l) => { if (l && l.id) byId[l.id] = l; });
     const slotName = (n) => { const e = lineup.find((x) => Number(x.slot) === n); const p = e && byId[e.libraryId]; return (p && p.name) || ''; };
-    const sig = JSON.stringify({ c: crew.map((c) => [c.id, c.name, c.handle, c.group, !!c.active]), s: [1, 2, 3, 4].map(slotName), r: roles, l: labels });
+    const shifts = (data.casters && data.casters.shifts) || [];
+    const sig = JSON.stringify({ c: crew.map((c) => [c.id, c.name, c.handle, c.group, !!c.active]), s: [1, 2, 3, 4].map(slotName), r: roles, l: labels, sh: shifts.map((s) => s.id + s.name) });
     if (sig === window._tdSig) return;
     window._tdSig = sig;
     const disp = (c) => c.handle || c.name;   // gamertag-first, matching the desk
@@ -371,7 +372,34 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
       chip.addEventListener('click', () => send('update_crew_member', { id: c.id, active: !c.active }));
       roster.appendChild(chip);
     });
+    // Saved shifts — click applies (slots + roles + on-shift marks + display options), × deletes.
+    const shiftWrap = el('td-shift-chips');
+    if (shiftWrap) {
+      shiftWrap.innerHTML = '';
+      if (!shifts.length) shiftWrap.innerHTML = '<span class="field-hint" style="margin:0;">No saved shifts yet.</span>';
+      shifts.forEach((s) => {
+        const chip = document.createElement('span');
+        chip.className = 'td-chip td-shift-chip';
+        chip.title = 'Apply shift "' + (s.name || '') + '" — sets the desk slots, roles, on-shift marks and display options';
+        chip.innerHTML = `<button type="button" class="td-shift-apply">${esc(s.name || 'Shift')}</button><button type="button" class="td-shift-del" title="Delete this shift">×</button>`;
+        chip.querySelector('.td-shift-apply').addEventListener('click', () => {
+          send('apply_shift', { id: s.id });
+          showToast('Shift applied: ' + (s.name || 'Shift'), '#22c55e');
+        });
+        chip.querySelector('.td-shift-del').addEventListener('click', async () => {
+          if (await appConfirm(`Delete the saved shift "${s.name}"? The current allocation is not affected.`, 'Delete')) send('delete_shift', { id: s.id });
+        });
+        shiftWrap.appendChild(chip);
+      });
+    }
   };
+  el('td-shift-save')?.addEventListener('click', async () => {
+    const name = await customPrompt('Save shift', 'Name this shift — saving the current slots, roles, on-shift marks and display options.', '', 'Save');
+    if (name) send('save_shift', { name });
+  });
+  el('td-shift-clear')?.addEventListener('click', async () => {
+    if (await appConfirm('Clear all desk slots, show roles and on-shift marks? Saved shifts are kept.', 'Clear')) send('clear_shift');
+  });
 
   // Group filter pills → sync hidden select + re-render
   const crewGroupNav = el('crew-group-nav');

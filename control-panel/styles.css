@@ -6092,8 +6092,7 @@ section#golive-area .golive-row { padding: 8px 6px; }
   background: #14161c; border: 1px solid var(--border); box-shadow: 0 8px 20px -8px rgba(0,0,0,.85);
   opacity: 0; pointer-events: none; transition: opacity .12s, transform .12s; z-index: 60;
 }
-.qrail-tab:hover .qrail-tab-label,
-.qrail-tab.active .qrail-tab-label { opacity: 1; transform: translateY(-50%) translateX(0); }
+.qrail-tab:hover .qrail-tab-label { opacity: 1; transform: translateY(-50%) translateX(0); }
 .qrail-tab.active .qrail-tab-label { background: rgba(236,72,153,.92); border-color: rgba(236,72,153,.6); }
 body.sides-swapped .qrail-tab-label { right: auto; left: calc(100% + 8px); }
 .qrail-tab-dot { position: absolute; top: 5px; right: 5px; width: 7px; height: 7px; border-radius: 50%; background: var(--ok-2); display: none; }
@@ -7770,3 +7769,19 @@ tr.lg2-drag-over { outline: 2px solid var(--accent, #4a9eff); outline-offset: -1
 }
 .td-chip:hover { color: var(--text); }
 .td-chip.is-active { color: var(--ok); background: rgba(34,197,94,.1); border-color: rgba(34,197,94,.4); }
+
+/* Show Deck shift presets row */
+.td-shifts { flex: 1 1 100%; display: flex; flex-direction: column; gap: 6px; padding-top: 8px; border-top: 1px solid var(--white-a06); }
+.td-shift-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.td-shift-chips { display: flex; flex-wrap: wrap; gap: 6px; flex: 1 1 auto; min-width: 0; }
+.td-shift-chip { display: inline-flex; align-items: center; gap: 2px; padding: 0; overflow: hidden; }
+.td-shift-chip .td-shift-apply {
+  background: none; border: none; cursor: pointer; font-family: inherit;
+  font-size: 11px; font-weight: 700; color: var(--text); padding: 4px 4px 4px 10px;
+}
+.td-shift-chip .td-shift-apply:hover { color: var(--cp-accent); }
+.td-shift-chip .td-shift-del {
+  background: none; border: none; cursor: pointer; font-family: inherit;
+  font-size: 13px; line-height: 1; color: var(--muted); padding: 4px 8px 4px 2px;
+}
+.td-shift-chip .td-shift-del:hover { color: var(--danger-2); }
