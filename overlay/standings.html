@@ -37,7 +37,7 @@ html, body {
 .st-stage {
   position: absolute; inset: 0;
   display: flex; flex-direction: column; align-items: center; justify-content: center;
-  padding: 70px 130px;
+  padding: 56px 90px 72px;
   background:
     radial-gradient(ellipse 90% 60% at 50% 0%, color-mix(in srgb, var(--accent) 22%, transparent) 0%, rgba(0,0,0,0) 60%),
     radial-gradient(ellipse 70% 50% at 50% 100%, color-mix(in srgb, var(--accent) 10%, transparent) 0%, rgba(0,0,0,0) 55%),
@@ -96,8 +96,26 @@ html, body {
 .st-count span { font-size: 13px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; color: #6a7080; }
 .st-count:empty { display: none; }
 
-/* ── Table ── */
-.st-table { width: 100%; max-width: 1300px; display: flex; flex-direction: column; gap: 8px; }
+/* ── Scale wrapper — header + table(s) render at natural size, then scale to fill 16:9 ── */
+.st-scale { display: flex; flex-direction: column; align-items: center; transform-origin: center center; }
+
+/* ── Table(s) — one column normally; big fields split into two side-by-side tables ── */
+.st-cols { display: flex; gap: 26px; align-items: flex-start; }
+.st-table { width: 1300px; display: flex; flex-direction: column; gap: 8px; }
+.st-cols.split .st-table { width: 880px; }
+.st-cols.split .st-row { height: 66px; }
+.st-cols.split .st-col-name { font-size: 25px; }
+.st-cols.split .st-col-stat { font-size: 24px; }
+.st-cols.split .st-badge { width: 44px; height: 44px; font-size: 22px; }
+.st-cols.split .st-team-logo { width: 42px; height: 42px; }
+
+/* ── Sponsor rail — "presented by" strip pinned bottom-center, from the active brand kit ── */
+.st-sponsors { position: absolute; bottom: 26px; left: 50%; transform: translateX(-50%);
+  display: flex; align-items: center; gap: 40px; padding: 10px 30px; border-radius: 12px;
+  background: rgba(10,12,17,.72); border: 1px solid rgba(255,255,255,.07); }
+.st-sponsors.is-empty { display: none; }
+.st-sponsors-lbl { font-size: 10px; font-weight: 800; letter-spacing: .24em; text-transform: uppercase; color: #6a7080; }
+.st-sponsor { height: 30px; max-width: 120px; object-fit: contain; opacity: .85; filter: drop-shadow(0 2px 6px rgba(0,0,0,.4)); }
 
 .st-row {
   display: grid; grid-template-columns: var(--st-cols); align-items: center;
@@ -187,17 +205,20 @@ html, body {
 <body>
 
 <div id="st-stage" class="st-stage">
-  <div class="st-header">
-    <div class="st-accent-bar" id="st-accent"></div>
-    <div class="st-headtext">
-      <div class="st-eyebrow" id="st-eyebrow">Standings</div>
-      <div class="st-title" id="st-title">STANDINGS</div>
-      <div class="st-subtitle" id="st-subtitle"></div>
+  <div class="st-scale" id="st-scale">
+    <div class="st-header">
+      <div class="st-accent-bar" id="st-accent"></div>
+      <div class="st-headtext">
+        <div class="st-eyebrow" id="st-eyebrow">Standings</div>
+        <div class="st-title" id="st-title">STANDINGS</div>
+        <div class="st-subtitle" id="st-subtitle"></div>
+      </div>
+      <div class="st-count" id="st-count"></div>
     </div>
-    <div class="st-count" id="st-count"></div>
+    <div class="st-cols" id="st-cols"></div>
   </div>
-  <div class="st-table" id="st-table"></div>
   <div class="st-empty" id="st-empty" style="display:none;">No standings data — pull start.gg, a league, or add manual rows.</div>
+  <div class="st-sponsors is-empty" id="st-sponsors"></div>
 </div>
 
 <script src="scene-base.js"></script>
@@ -221,35 +242,40 @@ html, body {
     return { logos, colors };
   }
 
-  function colStops(showRecord, hasPoints) {
-    // rank | logo | name | [W] | [L] | [PTS]
+  function colStops(showRecord, hasPoints, hasExtra) {
+    // rank | logo | name | [W] | [L] | [Played] | [Games] | [PTS]
     let cols = '92px 74px minmax(0,1fr)';
     if (showRecord) cols += ' 96px 96px';
+    if (hasExtra)   cols += ' 110px 130px';
     if (hasPoints)  cols += ' 116px';
     return cols;
   }
 
   function headCell(txt, cls) { return `<div class="st-col-${cls}">${txt}</div>`; }
 
-  function buildHead(showRecord, hasPoints) {
+  function buildHead(showRecord, hasPoints, hasExtra) {
     const row = document.createElement('div');
     row.className = 'st-row st-head';
     let html = headCell('#', 'rank') + headCell('', 'logo') + headCell('Team', 'name');
     if (showRecord) html += `<div class="st-col-stat">W</div><div class="st-col-stat">L</div>`;
+    if (hasExtra)   html += `<div class="st-col-stat">Played</div><div class="st-col-stat">Games</div>`;
     if (hasPoints)  html += `<div class="st-col-stat">PTS</div>`;
     row.innerHTML = html;
     return row;
   }
 
-  function buildDataRow(entry, maps, idx, showRecord, hasPoints, accent) {
-    const rank = Number(entry.placement) || (idx + 1);
+  function buildDataRow(entry, maps, idx, showRecord, hasPoints, accent, hasExtra) {
+    // played === false with no record = the event hasn't started for this team — show a
+    // dash instead of implying a real placement (mirrors bracket.html's standings).
+    const noResult = entry.played === false && !(entry.wins || entry.losses);
+    const rank = noResult ? '–' : (Number(entry.placement) || (idx + 1));
     const nameKey = (entry.name || '').toLowerCase();
     const logo = entry.logo || maps.logos[nameKey] || svgFallback((entry.name || '?')[0].toUpperCase(), '#2a3050');
     const isDefaultLogo = SceneBase.isDefaultGameLogo(logo);
     const rowAccent = entry.color || maps.colors[nameKey] || accent;
 
     const row = document.createElement('div');
-    row.className = 'st-row' + (rank <= 3 ? ` rank-${rank}` : '');
+    row.className = 'st-row' + (!noResult && rank <= 3 ? ` rank-${rank}` : '');
     row.style.setProperty('--row-accent', rowAccent);
 
     let html = `
@@ -260,6 +286,10 @@ html, body {
       html += `<div class="st-col-stat wins">${entry.wins ?? '—'}</div>`;
       html += `<div class="st-col-stat losses">${entry.losses ?? '—'}</div>`;
     }
+    if (hasExtra) {
+      html += `<div class="st-col-stat">${entry.setsPlayed ?? 0}/${entry.setsTotal ?? 0}</div>`;
+      html += `<div class="st-col-stat">${entry.gameWins ?? 0}-${entry.gameLosses ?? 0}</div>`;
+    }
     if (hasPoints) {
       html += `<div class="st-col-stat pts"><span class="st-pts-chip">${entry.points ?? '—'}</span></div>`;
     }
@@ -269,47 +299,108 @@ html, body {
     return row;
   }
 
+  // Scale the natural-size layout to fill the 16:9 canvas (matches bracket.html's fit()).
+  function fit() {
+    const stage = el('st-stage'), scale = el('st-scale');
+    if (!stage || !scale) return;
+    scale.style.transform = 'scale(1)';
+    const availW = 1920 - 180, availH = 1080 - 56 - 72 - 70;   // stage padding + sponsor rail
+    const w = scale.offsetWidth || 1, h = scale.offsetHeight || 1;
+    const s = Math.min(availW / w, availH / h, 1.12);
+    scale.style.transform = `scale(${s})`;
+  }
+
+  // Only rebuild the DOM (and replay the row animations) when CONTENT changes — the old
+  // renderer rebuilt on every state broadcast, which read as the page constantly refreshing.
+  let _sig = '';
   function render(data) {
-    const stage = el('st-stage'), table = el('st-table'), empty = el('st-empty'), accentEl = el('st-accent');
-    if (!stage || !table) return;
+    const stage = el('st-stage'), cols = el('st-cols'), empty = el('st-empty');
+    if (!stage || !cols) return;
 
     const stState = data.standings || {};
     const bracket = data.bracket || {};
     stage.classList.add('show');
 
-    const accent = SceneBase.brandColor(data) || '#055fdb';
+    const accent = SceneBase.brandColor(data) || '#e83a8b';
     const accent2 = SceneBase.brandAccent(data) || accent;
+
+    // Title falls back through: producer title → bracket title → EVENT NAME → generic.
+    const title = (stState.title || bracket.title || data.eventName || 'STANDINGS').toString().toUpperCase();
+    const subtitle = (stState.subtitle || '').toString();
+
+    // Resolve rows. Manual rows always win. start.gg-sourced rows are a snapshot of an
+    // event/league pull — when the LIVE bracket carries the linked event's standings, prefer
+    // those (rows frozen from a previous event used to shadow the real data forever).
+    const live = bracket.standings || [];
+    const frozen = (stState.rows && stState.rows.length > 0) ? stState.rows : [];
+    const src = (stState.source || '').toString();
+    // League tables (startgg-league) are deliberate — keep them, but only while they belong
+    // to THIS event: zero team-name overlap with the live standings means they're leftovers
+    // from a previous event and the live data wins.
+    const liveNames = new Set(live.map((r) => (r.name || '').toLowerCase()));
+    const overlap = frozen.some((r) => liveNames.has((r.name || '').toLowerCase()));
+    const rows = (src === 'manual' && frozen.length) ? frozen
+               : (src === 'startgg' && live.length) ? live
+               : (src.indexOf('startgg') === 0 && live.length && frozen.length && !overlap) ? live
+               : (frozen.length ? frozen : live);
+    const maps = teamMaps(data.savedTeams);
+
+    const showRecord = stState.showRecord !== false && rows.some(r => r.wins != null || r.losses != null);
+    const hasPoints = rows.some(r => r.points != null);
+    // Sets Played / Game Wins-Losses — the extra stat columns Start.gg's own Pool/Swiss
+    // standings show, present on Bracket's Round Robin/Swiss rows (see overlay/bracket.html).
+    const hasExtra = rows.some(r => r.setsTotal != null);
+
+    // Sponsor rail — active brand kit, desk placement first (same rule as intro.html).
+    const brand = data.brand || {};
+    const anyTagged = (brand.deskSponsors || []).length || (brand.railSponsors || []).length || (brand.bannerSponsors || []).length;
+    const sponsors = ((brand.deskSponsors || []).length ? brand.deskSponsors : (anyTagged ? [] : (brand.sponsors || [])))
+      .filter((s) => s && s.logo);
+
+    const sig = JSON.stringify({ rows, title, subtitle, showRecord, hasPoints, hasExtra, accent, accent2,
+      f: data.fontFamily || '', sp: sponsors.map((s) => s.logo && s.logo.slice(0, 40)) });
+    if (sig === _sig) return;
+    _sig = sig;
+
     document.documentElement.style.setProperty('--accent', accent);
     document.documentElement.style.setProperty('--accent-2', accent2);
     if (data.fontFamily) document.documentElement.style.setProperty('--main-font', `'${data.fontFamily}', 'Bourgeois', 'Inter', sans-serif`);
-
-    // Title / subtitle
-    const title = (stState.title || bracket.title || 'STANDINGS').toUpperCase();
     el('st-title').textContent = title;
-    el('st-subtitle').textContent = (stState.subtitle || '').toString();
+    el('st-subtitle').textContent = subtitle;
 
-    // Resolve rows: manual override > bracket/start.gg standings
-    const rows = (stState.rows && stState.rows.length > 0) ? stState.rows : (bracket.standings || []);
-    const maps = teamMaps(data.savedTeams);
+    const sp = el('st-sponsors');
+    sp.innerHTML = sponsors.length
+      ? '<span class="st-sponsors-lbl">Presented by</span>' + sponsors.map((s) => `<img class="st-sponsor" src="${s.logo}" alt="">`).join('')
+      : '';
+    sp.classList.toggle('is-empty', !sponsors.length);
 
-    table.innerHTML = '';
+    cols.innerHTML = '';
     if (rows.length === 0) {
-      table.style.display = 'none';
+      cols.style.display = 'none';
       empty.style.display = '';
       el('st-count').innerHTML = '';
       return;
     }
-    table.style.display = '';
+    cols.style.display = '';
     empty.style.display = 'none';
-
-    const showRecord = stState.showRecord !== false && rows.some(r => r.wins != null || r.losses != null);
-    const hasPoints = rows.some(r => r.points != null);
-
     el('st-count').innerHTML = `<b>${rows.length}</b><span>Teams</span>`;
-    table.style.setProperty('--st-cols', colStops(showRecord, hasPoints));
 
-    table.appendChild(buildHead(showRecord, hasPoints));
-    rows.forEach((r, i) => table.appendChild(buildDataRow(r, maps, i, showRecord, hasPoints, accent)));
+    // Two side-by-side tables for big fields — that's what actually uses a 16:9 frame.
+    const split = rows.length > 12;
+    cols.classList.toggle('split', split);
+    const halves = split
+      ? [rows.slice(0, Math.ceil(rows.length / 2)), rows.slice(Math.ceil(rows.length / 2))]
+      : [rows];
+    let idx = 0;
+    halves.forEach((half) => {
+      const table = document.createElement('div');
+      table.className = 'st-table';
+      table.style.setProperty('--st-cols', colStops(showRecord, hasPoints, hasExtra));
+      table.appendChild(buildHead(showRecord, hasPoints, hasExtra));
+      half.forEach((r) => table.appendChild(buildDataRow(r, maps, idx++, showRecord, hasPoints, accent, hasExtra)));
+      cols.appendChild(table);
+    });
+    requestAnimationFrame(fit);
   }
 
   if (location.protocol === 'file:') {

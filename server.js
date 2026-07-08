@@ -1153,7 +1153,11 @@ function sanitizePackage(p, fallbackName) {
     sponsorMode: p.sponsorMode === 'static' ? 'static' : 'cycle',   // rail: cycle one at a time, or show all at once
     sponsors: Array.isArray(p.sponsors) ? p.sponsors.map((s) => ({
       id: s.id || brandId(), name: (s.name || '').toString(), logo: s.logo || null,
-      tier: s.tier || 'partner', placements: sanitizePlacements(s.placements)
+      tier: s.tier || 'partner', placements: sanitizePlacements(s.placements),
+      // Deal $/ROI: what this sponsor paid, and/or their agreed market rate — both optional,
+      // feed the Sponsor Proof of Play $ metrics (realized CPM / value delivered).
+      dealValue: (typeof s.dealValue === 'number' && s.dealValue >= 0) ? s.dealValue : null,
+      targetCpm: (typeof s.targetCpm === 'number' && s.targetCpm >= 0) ? s.targetCpm : null
     })) : [],
     bannerImages: Array.isArray(p.bannerImages) ? p.bannerImages : [],
     bannerCaptions: Array.isArray(p.bannerCaptions) ? p.bannerCaptions.map((t) => (typeof t === 'string' ? t : '')) : [],
@@ -1203,7 +1207,9 @@ function activeBrand() {
   const pkg = activePackage(kit);
   const sponsors = (Array.isArray(pkg.sponsors) ? pkg.sponsors : []).map((s) => ({
     id: s.id, name: s.name || '', logo: s.logo || null, tier: s.tier || 'partner',
-    placements: sanitizePlacements(s.placements)
+    placements: sanitizePlacements(s.placements),
+    dealValue: (typeof s.dealValue === 'number') ? s.dealValue : null,
+    targetCpm: (typeof s.targetCpm === 'number') ? s.targetCpm : null
   }));
   const tagged = (key) => sponsors.filter((s) => s.logo && s.placements[key]);
   return {
@@ -1332,8 +1338,12 @@ function adProofTick() {
   onAir.forEach(({ sponsor, placement }) => {
     if (!sponsor || !sponsor.id) return;
     const rec = adProof.sponsors[sponsor.id] ||
-      (adProof.sponsors[sponsor.id] = { id: sponsor.id, name: sponsor.name || '', seconds: 0, byPlacement: {}, impressions: 0, viewerSeconds: 0, peakViewers: 0, _onPrev: false });
+      (adProof.sponsors[sponsor.id] = { id: sponsor.id, name: sponsor.name || '', seconds: 0, byPlacement: {}, impressions: 0, viewerSeconds: 0, peakViewers: 0, dealValue: null, targetCpm: null, _onPrev: false });
     if (sponsor.name) rec.name = sponsor.name;
+    // Refresh $ terms every tick (like name) so a mid-broadcast edit to the sponsor's deal
+    // value/target CPM in the brand kit editor is reflected in this session's numbers.
+    rec.dealValue = sponsor.dealValue;
+    rec.targetCpm = sponsor.targetCpm;
     rec.byPlacement[placement] = (rec.byPlacement[placement] || 0) + 1;   // placement-seconds
     if (!creditedNow.has(sponsor.id)) { rec.seconds++; rec.viewerSeconds += v; if (v > rec.peakViewers) rec.peakViewers = v; creditedNow.add(sponsor.id); }   // on-air seconds + viewer-seconds (de-duped)
   });
@@ -1346,17 +1356,38 @@ function adProofTick() {
   if (adProof.ticks % 2 === 0) broadcast(bridgeClients, { type: 'adproof_update', data: adProofReport() });
 }
 
+// $/ROI metrics derived from viewer-seconds (treated as impression-seconds, matching this
+// report's existing "viewer-seconds = estimated impressions" convention):
+//   realizedCpm    — what the sponsor effectively paid per 1000 impression-seconds (needs dealValue)
+//   valueDelivered — $ value of the exposure delivered at the sponsor's agreed/market rate (needs targetCpm)
+//   deliveryPct    — valueDelivered vs. what they paid (needs both)
+function adProofValueMetrics(r) {
+  const units = (r.viewerSeconds || 0) / 1000;   // thousands of impression-seconds
+  const dealValue = typeof r.dealValue === 'number' ? r.dealValue : null;
+  const targetCpm = typeof r.targetCpm === 'number' ? r.targetCpm : null;
+  const realizedCpm = (dealValue != null && units > 0) ? +(dealValue / units).toFixed(2) : null;
+  const valueDelivered = (targetCpm != null) ? +(units * targetCpm).toFixed(2) : null;
+  const deliveryPct = (dealValue != null && dealValue > 0 && valueDelivered != null) ? Math.round((valueDelivered / dealValue) * 100) : null;
+  return { dealValue, targetCpm, realizedCpm, valueDelivered, deliveryPct };
+}
+
 function adProofReport() {
   const sponsors = Object.values(adProof.sponsors).map((r) => ({
     id: r.id, name: r.name, seconds: r.seconds, impressions: r.impressions, byPlacement: { ...r.byPlacement },
-    viewerSeconds: r.viewerSeconds || 0, peakViewers: r.peakViewers || 0, avgViewers: r.seconds ? Math.round((r.viewerSeconds || 0) / r.seconds) : 0
+    viewerSeconds: r.viewerSeconds || 0, peakViewers: r.peakViewers || 0, avgViewers: r.seconds ? Math.round((r.viewerSeconds || 0) / r.seconds) : 0,
+    ...adProofValueMetrics(r)
   })).sort((a, b) => b.seconds - a.seconds);
+  const totalDealValue = sponsors.reduce((sum, s) => sum + (s.dealValue || 0), 0);
+  const totalValueDelivered = sponsors.reduce((sum, s) => sum + (s.valueDelivered || 0), 0);
   return {
     active: adProof.active, startedAt: adProof.startedAt, label: adProof.label,
     durationSec: adProof.ticks, sponsors,
+    totalDealValue: totalDealValue || null, totalValueDelivered: totalValueDelivered || null,
     sessions: (state.adProofSessions || []).map((s) => ({
       id: s.id, label: s.label, startedAt: s.startedAt, endedAt: s.endedAt,
-      durationSec: s.durationSec, sponsorCount: (s.sponsors || []).length
+      durationSec: s.durationSec, sponsorCount: (s.sponsors || []).length,
+      totalDealValue: (s.sponsors || []).reduce((sum, x) => sum + (x.dealValue || 0), 0) || null,
+      totalValueDelivered: (s.sponsors || []).reduce((sum, x) => sum + (x.valueDelivered || 0), 0) || null
     }))
   };
 }
@@ -1381,7 +1412,8 @@ function adProofStop() {
     label: adProof.label, startedAt: adProof.startedAt, endedAt: Date.now(), durationSec: adProof.ticks,
     sponsors: Object.values(adProof.sponsors).map((r) => ({
       name: r.name, seconds: r.seconds, impressions: r.impressions, byPlacement: { ...r.byPlacement },
-      viewerSeconds: r.viewerSeconds || 0, peakViewers: r.peakViewers || 0, avgViewers: r.seconds ? Math.round((r.viewerSeconds || 0) / r.seconds) : 0
+      viewerSeconds: r.viewerSeconds || 0, peakViewers: r.peakViewers || 0, avgViewers: r.seconds ? Math.round((r.viewerSeconds || 0) / r.seconds) : 0,
+      ...adProofValueMetrics(r)
     })).sort((a, b) => b.seconds - a.seconds)
   };
   if (!Array.isArray(state.adProofSessions)) state.adProofSessions = [];
@@ -1397,10 +1429,13 @@ function adProofCsv(sess) {
   const spots = SPONSOR_SPOTS;
   const mmss = (s) => { const m = Math.floor(s / 60), x = s % 60; return m + ':' + String(x).padStart(2, '0'); };
   const cell = (v) => { const s = String(v == null ? '' : v); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
-  const head = ['Sponsor', 'Total seconds', 'Total (mm:ss)', 'Impressions', ...spots.map((s) => s + ' sec')];
+  const head = ['Sponsor', 'Total seconds', 'Total (mm:ss)', 'Impressions', 'Deal value ($)', 'Target CPM ($)', 'Realized CPM ($)', 'Value delivered ($)', 'Delivery %', ...spots.map((s) => s + ' sec')];
   const lines = [head.join(',')];
   (sess.sponsors || []).forEach((s) => {
-    lines.push([cell(s.name), s.seconds, mmss(s.seconds), s.impressions, ...spots.map((sp) => (s.byPlacement && s.byPlacement[sp]) || 0)].join(','));
+    const m = adProofValueMetrics(s);
+    lines.push([cell(s.name), s.seconds, mmss(s.seconds), s.impressions,
+      m.dealValue ?? '', m.targetCpm ?? '', m.realizedCpm ?? '', m.valueDelivered ?? '', m.deliveryPct ?? '',
+      ...spots.map((sp) => (s.byPlacement && s.byPlacement[sp]) || 0)].join(','));
   });
   return lines.join('\r\n');
 }
@@ -3424,6 +3459,16 @@ async function startggPollTick() {
     }
     if ((state.bracket.eventSlug || '').trim() && state.bracket.mode !== 'manual') {
       try { await fetchBracket(state.bracket.eventSlug); } catch (e) { /* non-fatal */ }
+      // start.gg-sourced standings mirror the live event standings each refresh, so the
+      // standings overlay updates as scores come in (manual/league rows are never touched).
+      if ((state.standings?.source || '') === 'startgg' && (state.bracket.standings || []).length) {
+        const mirrorSig = JSON.stringify(state.bracket.standings.map((r) => [r.placement, r.name, r.wins, r.losses]));
+        if (mirrorSig !== _standingsMirrorSig) {
+          _standingsMirrorSig = mirrorSig;
+          state.standings.rows = state.bracket.standings.map((r) => ({ ...r }));
+          broadcastFullState();
+        }
+      }
     }
   } catch (e) {
     state.startgg.connected = false;
@@ -3431,6 +3476,7 @@ async function startggPollTick() {
     broadcastFullState();
   }
 }
+let _standingsMirrorSig = '';
 let _startggBracketTick = 0;
 
 function setStartggQueuePolling(enabled) {
@@ -5189,6 +5235,14 @@ async function activateStartggEvent(tournamentSlug, eventSlug, meta) {
   state.startgg.queueEnabled = true;
   state.startgg.autoFollow = true;
   setStartggQueuePolling(true);
+
+  // Standings follow the newly-activated event too — unless the producer built manual rows.
+  // Without this, rows frozen from a PREVIOUS event/league pull shadow the live event forever
+  // (standings.html prefers rows over bracket.standings).
+  if ((state.standings?.source || '') !== 'manual') {
+    state.standings.rows = (state.bracket.standings || []).map((r) => ({ ...r }));
+    state.standings.source = 'startgg';
+  }
 
   saveAppState();
   broadcastFullState();
@@ -7343,6 +7397,18 @@ async function pollVmix() {
 }
 setInterval(() => { pollVmix().catch(() => {}); }, 1500);
 
+// Lightweight vMix VU-meter push — only while the Switcher page is open + vMix is the backend.
+// Sends a tiny 'vmix-meters' message (~2fps) so the mixer shows live level movement without
+// broadcasting full state. OBS exposes no meters over its WS API, so this is vMix-only.
+setInterval(async () => {
+  if (!_switcherWatching || state.switcher.target !== 'vmix' || !state.vmix.enabled) return;
+  try {
+    const s = await vmix.vmixState(state.vmix.host, state.vmix.port);
+    const levels = s.inputs.filter((i) => i.audio).map((i) => ({ n: i.number, m: Math.max(i.meterF1 || 0, i.meterF2 || 0), vol: i.volume, muted: i.muted }));
+    broadcast(bridgeClients, { type: 'vmix-meters', data: { levels } });
+  } catch (e) { /* non-fatal */ }
+}, 500);
+
 // ── Production switcher routing (OBS or vMix — mutually exclusive) ────────────
 // Cut PROGRAM to a target on the ACTIVE backend. OBS: scene NAME. vMix: input (matched by
 // number / name / GUID). vMix matches inputs by title, so as long as vMix input titles mirror
@@ -7376,22 +7442,50 @@ async function switcherSetPreview(target) {
 }
 
 // TAKE preview → program. mode 'cut' | 'fade'. OBS uses Studio Mode transition; vMix Cut/Fade.
-async function switcherTake(mode, durationMs) {
-  const fade = mode === 'fade';
+// TAKE preview → program. transition: 'Cut' | 'Fade' | 'Stinger1..4' | 'Wipe' | 'Slide' | ...
+async function switcherTake(transition, durationMs) {
+  transition = transition || 'Cut';
+  const isCut = transition === 'Cut';
   if (state.switcher.target === 'vmix') {
     if (!state.vmix.enabled) return;
-    vmixDo(fade ? 'Fade' : 'Cut', fade && durationMs ? { Duration: durationMs } : {});
+    vmixDo(transition, (!isCut && durationMs) ? { Duration: durationMs } : {});
     return;
   }
   if (!obsClient || !obsClient.isConnected()) return;
   try {
     if (!state.obs.studioMode) { await obsClient.call('SetStudioModeEnabled', { studioModeEnabled: true }); state.obs.studioMode = true; }
-    // Pick the transition: Cut for instant, or the first Fade-like transition for a dissolve.
-    const trans = fade ? (['Fade', 'Fade to Black', 'Cross Dissolve'].find((t) => (state.obs.availableTransitions || []).includes(t)) || 'Fade') : 'Cut';
+    // Map the requested transition onto OBS's configured transitions (Cut/Fade are always present;
+    // Stinger/Wipe only if the OBS profile has one — fall back to Fade, else Cut).
+    const avail = state.obs.availableTransitions || [];
+    let trans = 'Cut';
+    if (!isCut) {
+      const want = /stinger/i.test(transition) ? avail.find((t) => /stinger/i.test(t)) : avail.find((t) => t.toLowerCase() === transition.toLowerCase());
+      trans = want || avail.find((t) => /fade|dissolve/i.test(t)) || 'Fade';
+    }
     try { await obsClient.call('SetCurrentSceneTransition', { transitionName: trans }); } catch (e) {}
-    if (fade && durationMs) try { await obsClient.call('SetCurrentSceneTransitionDuration', { transitionDuration: durationMs }); } catch (e) {}
+    if (!isCut && durationMs) try { await obsClient.call('SetCurrentSceneTransitionDuration', { transitionDuration: durationMs }); } catch (e) {}
     await obsClient.call('TriggerStudioModeTransition');
   } catch (e) { /* non-fatal */ }
+}
+
+// Stream / record / fade-to-black / replay — routed to the active backend.
+function switcherStream(on) {
+  if (state.switcher.target === 'vmix') { if (state.vmix.enabled) vmixDo(on ? 'StartStreaming' : 'StopStreaming'); return; }
+  if (obsClient && obsClient.isConnected()) obsClient.call(on ? 'StartStream' : 'StopStream').catch(() => {});
+}
+function switcherRecord(on) {
+  if (state.switcher.target === 'vmix') { if (state.vmix.enabled) vmixDo(on ? 'StartRecording' : 'StopRecording'); return; }
+  if (obsClient && obsClient.isConnected()) obsClient.call(on ? 'StartRecord' : 'StopRecord').catch(() => {});
+}
+function switcherFtb() {
+  if (state.switcher.target === 'vmix') { if (state.vmix.enabled) vmixDo('FadeToBlack'); return; }
+  // OBS has no native FTB — cut to a scene named Black/FTB if one exists.
+  const black = (state.obs.availableScenes || []).find((s) => /^(black|ftb|fade to black)$/i.test(s.trim()));
+  if (black && obsClient && obsClient.isConnected()) obsClient.switchScene(black);
+}
+async function switcherReplay() {
+  if (state.switcher.target === 'vmix') { if (state.vmix.enabled) vmixDo('ReplayPlayLastEvent'); return; }
+  if (obsClient && obsClient.isConnected()) try { await obsClient.call('SaveReplayBuffer'); } catch (e) {}
 }
 
 // Adjust audio on a source. OBS: SetInputVolume(dB) / SetInputMute. vMix: SetVolume(0-100) / Audio.
@@ -11976,7 +12070,11 @@ function handleControlMessage(msg, ws) {
       break;
     }
     case 'switcher_set_preview': switcherSetPreview((msg.data && msg.data.name) || '').catch(() => {}); break;
-    case 'switcher_take': switcherTake((msg.data && msg.data.mode) || 'cut', Number(msg.data && msg.data.duration) || 0).catch(() => {}); break;
+    case 'switcher_take': switcherTake((msg.data && msg.data.transition) || 'Cut', Number(msg.data && msg.data.duration) || 0).catch(() => {}); break;
+    case 'switcher_stream': switcherStream(!!(msg.data && msg.data.on)); break;
+    case 'switcher_record': switcherRecord(!!(msg.data && msg.data.on)); break;
+    case 'switcher_ftb': switcherFtb(); break;
+    case 'switcher_replay': switcherReplay().catch(() => {}); break;
     case 'switcher_studio_mode': {
       (async () => {
         if (obsClient && obsClient.isConnected()) {
@@ -16298,7 +16396,10 @@ function startHttpServer(baseDir) {
     let sess;
     if (which === 'current' || which === '') {
       sess = { label: adProof.label || (state.eventName || 'Broadcast'), startedAt: adProof.startedAt, endedAt: Date.now(), durationSec: adProof.ticks,
-        sponsors: Object.values(adProof.sponsors).map((r) => ({ name: r.name, seconds: r.seconds, impressions: r.impressions, byPlacement: { ...r.byPlacement } })).sort((a, b) => b.seconds - a.seconds) };
+        sponsors: Object.values(adProof.sponsors).map((r) => ({
+          name: r.name, seconds: r.seconds, impressions: r.impressions, byPlacement: { ...r.byPlacement },
+          viewerSeconds: r.viewerSeconds || 0, ...adProofValueMetrics(r)
+        })).sort((a, b) => b.seconds - a.seconds) };
     } else {
       sess = (state.adProofSessions || []).find((s) => s.id === which);
       if (!sess) return res.status(404).json({ error: 'Session not found' });
