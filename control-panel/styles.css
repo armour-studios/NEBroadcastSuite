@@ -4867,6 +4867,19 @@ span.lg-pl-role { color: var(--muted); }
   background: var(--ok); color: #04210f; border-radius: 4px; padding: 2px 5px; white-space: nowrap; }
 
 .scene-card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 14px; margin: 0; }
+
+/* ─── Scenes tab: search-flatten ───────────────────────────────────────────
+   While a keyword search is active, drop the per-group headers/spacing and pack
+   every match into ONE dense grid (or one flat list) so results don't scatter
+   across stacked sections — far less scrolling. `display:contents` dissolves the
+   group + inner grid wrappers so their cards/rows become direct children of the
+   groups-area, which becomes the single layout container. */
+.scene-groups-area.searching .scene-group-head { display: none; }
+.scene-groups-area.searching .scene-group { display: contents; margin: 0; }
+.scene-groups-area.searching.grid-view { display: grid; grid-template-columns: repeat(auto-fill, minmax(188px, 1fr)); gap: 12px; align-content: start; }
+.scene-groups-area.searching.grid-view .scene-card-grid { display: contents; }
+.scene-groups-area.searching.list-view .scene-row-list { display: contents; }
+.scene-groups-area.searching #scene-empty { grid-column: 1 / -1; }
 .scene-card { background: var(--surface); border: 1px solid var(--border); border-radius: 11px; overflow: hidden; transition: border-color .15s, box-shadow .15s; }
 .scene-card:hover { border-color: #3a4250; }
 .scene-card.is-onair { border-color: rgba(34,197,94,.5); box-shadow: 0 0 0 1px rgba(34,197,94,.25); }
@@ -7638,3 +7651,5 @@ tr.lg2-drag-over { outline: 2px solid var(--accent, #4a9eff); outline-offset: -1
 
 /* Integrations: the Browse cards ARE the navigation - category pills retired */
 #int-subnav { display: none; }
+
+.int-card-logo.mono-val { background: linear-gradient(135deg, #be123c, #881337); }

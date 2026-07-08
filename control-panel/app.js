@@ -17070,10 +17070,12 @@ function _intShowTab(which) {
   const backbar = el('int-backbar');
   if (backbar) {
     backbar.style.display = _intTab === 'store' ? 'none' : 'flex';
-    const titles = { switcher: 'Video Switcher — OBS / vMix', cameras: 'Cameras — VDO.Ninja',
+    const titles = { switcher: 'Video Switcher', cameras: 'Cameras',
       games: 'Games & GSI', tournaments: 'Tournament Platforms', twitch: 'Twitch' };
-    const t = el('int-backbar-title'); if (t) t.textContent = titles[_intTab] || '';
+    const t = el('int-backbar-title');
+    if (t) t.textContent = (typeof INT_APP_NAMES !== 'undefined' && INT_APP_NAMES[_intAppFilter]) || titles[_intTab] || '';
   }
+  if (typeof _intApplyAppFilter === 'function') _intApplyAppFilter();
   if (_intTab === 'cameras' && typeof cfLoadVdoSettings === 'function') cfLoadVdoSettings();
   try { localStorage.setItem('integrations_active_tab', _intTab); } catch (_) {}
 }
@@ -17087,12 +17089,46 @@ setTimeout(() => {
 }, 0);
 
 // ── Browse grid: cards navigate to their section; status chips follow live state ──
-el('int-back')?.addEventListener('click', () => _intShowTab('store'));
+el('int-back')?.addEventListener('click', () => { _intAppFilter = ''; _intShowTab('store'); });
+// Which app was clicked — shared panels (tournaments, switcher, games) narrow to
+// JUST that app's section so start.gg never shows Challonge's settings, etc.
+let _intAppFilter = '';
+const INT_APP_NAMES = { obs: 'OBS Studio', vmix: 'vMix', twitch: 'Twitch', startgg: 'start.gg',
+  challonge: 'Challonge', nxgen: 'NXGEN', vdo: 'VDO.Ninja', rl: 'Rocket League',
+  cs2: 'Counter-Strike 2', valorant: 'Valorant', lol: 'League of Legends' };
+function _intApplyAppFilter() {
+  // One app = one titled <section class="section"> inside its shared panel.
+  const scope = {
+    startgg:   { panel: 'integration-startgg', title: /^start\.gg/i },
+    challonge: { panel: 'integration-startgg', title: /^challonge/i },
+    nxgen:     { panel: 'integration-startgg', title: /^nxgen/i },
+    obs:       { panel: 'integration-obs', title: /^obs/i },
+    vmix:      { panel: 'integration-obs', title: /^vmix/i },
+  };
+  ['integration-startgg', 'integration-obs'].forEach((pid) => {
+    const p = el(pid); if (!p) return;
+    const cfg = scope[_intAppFilter];
+    p.querySelectorAll('section.section').forEach((sec) => {
+      if (!cfg || cfg.panel !== pid) { sec.style.display = ''; return; }
+      const t = sec.querySelector('.section-title');
+      sec.style.display = cfg.title.test(((t && t.textContent) || '').trim()) ? '' : 'none';
+    });
+  });
+  // Games: select the matching inner game tab and hide the tab row while narrowed.
+  const gameMap = { cs2: 'cs2', rl: 'rl', lol: 'league', valorant: 'valorant' };
+  const bar = document.querySelector('#integration-games .game-tab-row');
+  if (bar) bar.style.display = gameMap[_intAppFilter] ? 'none' : '';
+  if (gameMap[_intAppFilter]) {
+    const b = document.querySelector('#integration-games .game-tab-btn[data-game="' + gameMap[_intAppFilter] + '"]');
+    if (b) b.click();
+  }
+}
 document.querySelectorAll('#int-store-grid .int-card').forEach((card) => {
   card.addEventListener('click', () => {
+    _intAppFilter = card.dataset.card || '';
     _intShowTab(card.dataset.goto);
     const target = card.dataset.scroll && el(card.dataset.scroll);
-    if (target) setTimeout(() => target.scrollIntoView({ behavior: 'smooth', block: 'center' }), 60);
+    if (target) setTimeout(() => target.scrollIntoView({ behavior: 'smooth', block: 'start' }), 60);
   });
 });
 function renderIntegrationStore(data) {

@@ -6066,8 +6066,8 @@
 
   <!-- Back bar — shown on every app panel; Browse is the only landing view -->
   <div id="int-backbar" style="display:none; align-items:center; gap:12px; margin-bottom:16px;">
-    <button type="button" class="btn btn-secondary btn-sm" id="int-back">&larr; All integrations</button>
-    <span id="int-backbar-title" style="font-size:12px; font-weight:800; letter-spacing:.1em; text-transform:uppercase; color:var(--muted);"></span>
+    <button type="button" class="btn btn-secondary btn-sm" id="int-back">&larr; Back to Integrations</button>
+    <span id="int-backbar-title" style="font-size:17px; font-weight:800; color:var(--text, #e8eaf0);"></span>
   </div>
 
   <!-- BROWSE: app-store style landing — every integration as a card with its live status -->
@@ -6148,6 +6148,14 @@
           <div class="int-card-tag">Game State Integration — scoreboard, players and radar from the observer client.</div>
         </div>
         <span class="int-card-status" data-st="off">Waiting for game</span>
+      </div>
+      <div class="int-card" data-card="valorant" data-goto="games">
+        <div class="int-card-logo mono-val">VAL</div>
+        <div class="int-card-body">
+          <div class="int-card-name">Valorant</div>
+          <div class="int-card-tag">Live scoreboard and player data from the built-in Local Client API — fully automatic.</div>
+        </div>
+        <span class="int-card-status" data-st="ready">Local client</span>
       </div>
       <div class="int-card" data-card="lol" data-goto="games">
         <div class="int-card-logo mono-lol">LoL</div>
