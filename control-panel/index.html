@@ -5523,7 +5523,7 @@
       <button type="button" class="bk-view-chip" data-view="losers" title="Losers / lower bracket only">Lower only</button>
       <button type="button" class="bk-view-chip" data-view="finals" title="Both brackets, last 4 rounds — quarterfinals → grand finals">Finals stretch (QF→GF)</button>
       <button type="button" class="bk-view-chip" data-view="schedule" title="Round-robin / Swiss only — round-by-round pairings, no standings table">Schedule only</button>
-      <button type="button" class="bk-view-chip" data-view="standings" title="Round-robin / Swiss only — standings table, no round-by-round pairings">Standings only</button>
+      <!-- Standings has its OWN scene (standings.html, podium design) - the in-bracket standings view was a duplicate renderer and is no longer producer-selectable. -->
       <button type="button" class="bk-view-chip" data-view="matrix" title="Round-robin only — head-to-head results grid (every team vs every team)">Head-to-head grid</button>
       <button type="button" class="btn btn-ghost btn-sm" id="bk-reload-obs" title="Force every OBS browser source to reload now — use this once if the bracket in OBS is stuck on an old version (OBS caches the page in memory).">↻ Reload OBS sources</button>
     </div>
@@ -9167,6 +9167,8 @@ PacketSendRate=10</pre>
 <script src="app.js"></script>
 <script src="social.js"></script>
 <script src="stats-analytics.js"></script>
+<script src="seeding-spotlight.js"></script>
+<script src="leagues.js"></script>
 <script src="../app-store-nav.js"></script>
 <script src="tour.js"></script>
 
