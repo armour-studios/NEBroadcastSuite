@@ -4502,6 +4502,12 @@
                   <span class="bk-views-lbl">View</span>
                   <span id="gfx-bkt-cc-view-chips" style="display:inline-flex; gap:6px; flex-wrap:wrap;"></span>
                 </div>
+                <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap; margin-top:6px;">
+                  <span class="bk-views-lbl">Find</span>
+                  <input type="text" id="gfx-bkt-cc-search" class="input-text" placeholder="team name" style="flex:1; min-width:120px; max-width:240px; font-size:12px;">
+                  <button type="button" class="btn btn-ghost btn-xs" id="gfx-bkt-cc-find">Find</button>
+                  <button type="button" class="btn btn-ghost btn-xs" id="gfx-bkt-cc-clearfocus" title="Clear the bracket highlight">Clear</button>
+                </div>
               </div>
 
               <div class="gfx-ctrl-row" style="margin-top:12px; border-top:1px solid var(--border); padding-top:10px;">
@@ -5512,6 +5518,13 @@
         <span class="bk-views-lbl">Pool / Group:</span>
         <span id="bracket-pool-chips" style="display:inline-flex; gap:6px; flex-wrap:wrap;"></span>
       </div>
+    </div>
+    <!-- Find a team anywhere in the tournament: jumps to their phase/pool + highlights them -->
+    <div class="bk-pp-row" style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin:10px 0 0;">
+      <span class="bk-views-lbl">Find team</span>
+      <input type="text" id="bracket-team-search" class="input-text" placeholder="team name - jumps to their phase/pool and highlights them" style="flex:1; min-width:200px; max-width:400px;">
+      <button type="button" class="btn btn-secondary btn-sm" id="bracket-team-find">Find</button>
+      <button type="button" class="btn btn-ghost btn-sm" id="bracket-team-clear" title="Clear the bracket highlight">Clear</button>
     </div>
 
     <!-- 4 · DISPLAY: how the overlay renders it. Chips without data for this bracket hide

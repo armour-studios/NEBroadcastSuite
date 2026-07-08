@@ -18103,6 +18103,23 @@ function wireBracketPhasePool() {
 }
 wireBracketPhasePool();
 
+// ── Bracket team search — panel + mini control center. Server finds the team across all
+// phases/pools, auto-selects their bracket view and highlights them (startgg.focusTeam).
+(function wireBracketTeamSearch() {
+  const doFind = (inputId) => {
+    const v = (el(inputId)?.value || '').trim();
+    if (!v) { showToast('Type a team name to find.', '#fbbf24'); return; }
+    send('bracket_focus_team', { name: v });
+  };
+  [['bracket-team-search', 'bracket-team-find', 'bracket-team-clear'],
+   ['gfx-bkt-cc-search', 'gfx-bkt-cc-find', 'gfx-bkt-cc-clearfocus']].forEach(([inp, find, clear]) => {
+    el(find)?.addEventListener('click', () => doFind(inp));
+    el(inp)?.addEventListener('keydown', (e) => { if (e.key === 'Enter') doFind(inp); });
+    el(clear)?.addEventListener('click', () => { const i = el(inp); if (i) i.value = ''; send('bracket_focus_team', { name: '' }); });
+  });
+})();
+
+
 // ── Bracket mini control center (Graphics hub front panel) ──────────────────
 // Live status + clickable phase/pool/view chips right on the scene's front panel, so
 // switching what's on the overlay never requires opening "More settings". Sends the
@@ -18131,7 +18148,13 @@ function renderBracketCC(bracket) {
   const plRow = el('gfx-bkt-cc-pools'), plWrap = el('gfx-bkt-cc-pool-chips');
   if (plRow && plWrap) {
     plRow.style.display = pools.length > 1 ? 'flex' : 'none';
-    plWrap.innerHTML = pools.map((p) => chip(p.name || 'Pool', p.id === b.activePoolId, `data-ccpool="${tlEsc(p.id)}"`)).join('');
+    // Major-scale phases (e.g. 30 swiss pools) get a dropdown instead of chip soup.
+    if (pools.length > 10) {
+      plWrap.innerHTML = `<select class="input-select" data-ccpoolsel style="font-size:12px; max-width:220px;">` +
+        pools.map((p) => `<option value="${tlEsc(p.id)}"${p.id === b.activePoolId ? ' selected' : ''}>${tlEsc(p.name || 'Pool')}</option>`).join('') + '</select>';
+    } else {
+      plWrap.innerHTML = pools.map((p) => chip(p.name || 'Pool', p.id === b.activePoolId, `data-ccpool="${tlEsc(p.id)}"`)).join('');
+    }
   }
   const vRow = el('gfx-bkt-cc-views'), vWrap = el('gfx-bkt-cc-view-chips');
   if (vRow && vWrap) {
@@ -18157,6 +18180,10 @@ function renderBracketCC(bracket) {
     if (pl) { send('bracket_select_pool', { poolId: pl.dataset.ccpool }); return; }
     const v = e.target.closest('[data-ccview]');
     if (v) send('set_bracket_settings', { view: v.dataset.ccview });
+  });
+  cc.addEventListener('change', (e) => {
+    const sel = e.target.closest('[data-ccpoolsel]');
+    if (sel) send('bracket_select_pool', { poolId: sel.value });
   });
 })();
 
