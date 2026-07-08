@@ -53,6 +53,9 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
   color: var(--accent); text-align: right; }
 .bk-title { font-family: var(--disp); font-weight: 700; font-size: 34px; line-height: 1; letter-spacing: .02em; text-transform: uppercase; color: #fff;
   text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 760px; }
+.bk-subtitle { font-family: var(--body); font-weight: 600; font-size: 15px; color: var(--muted); text-align: right;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 760px; }
+.bk-subtitle:empty { display: none; }
 .bk-head-right { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
 .bk-format { font-family: var(--disp); font-weight: 800; font-size: 12px; letter-spacing: .14em; text-transform: uppercase; color: #04121f;
   background: linear-gradient(135deg, var(--accent), var(--accent-2)); border-radius: 999px; padding: 6px 14px; white-space: nowrap;
@@ -166,6 +169,9 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
 .bk-schedule .bk-round-name::after { content: ''; position: absolute; left: 18%; right: 18%; bottom: 0; height: 2px;
   background: linear-gradient(90deg, transparent, var(--accent), transparent); }
 .bk-schedule .bk-matches { justify-content: flex-start; gap: 14px; }
+/* Dense rounds (>8 sets): two-column grid, double-width column */
+.bk-schedule .bk-round.bk-dense { flex: 2; }
+.bk-schedule .bk-round.bk-dense .bk-matches { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 
 /* ── Standings (round-robin / swiss) ── */
 .bk-standings { align-self: center; width: 1100px; max-width: 100%; border-radius: 16px; overflow: hidden; border: 1px solid var(--hair);
@@ -173,12 +179,16 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
 .bk-st-row { display: grid; grid-template-columns: 100px 1fr 100px 100px 150px; align-items: center; height: 64px; padding: 0 32px; position: relative; }
 .bk-standings.enriched { width: 1320px; }
 .bk-standings.enriched .bk-st-row { grid-template-columns: 100px 1fr 100px 100px 120px 150px 150px; }
+/* Show Win/Loss OFF — drop the W/L + win% bar columns (League source toggle). */
+.bk-standings.norecord .bk-st-row { grid-template-columns: 100px 1fr; }
+.bk-standings.norecord.enriched .bk-st-row { grid-template-columns: 100px 1fr 120px 150px; }
 .bk-st-row + .bk-st-row { border-top: 1px solid var(--hair); }
 .bk-st-row:nth-child(odd):not(.bk-st-head) { background: rgba(255,255,255,.018); }
 .bk-st-head { background: rgba(255,255,255,.06); height: 52px; }
 .bk-st-head::after { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 2px;
   background: linear-gradient(90deg, var(--accent), var(--accent-2), transparent 85%); }
 .bk-st-head > div { font-family: var(--disp); font-weight: 700; font-size: 15px; letter-spacing: .16em; text-transform: uppercase; color: #aeb6c4; }
+.bk-st-grouplbl { display: block; font-size: 9px; font-weight: 700; letter-spacing: .14em; color: var(--muted); opacity: .75; margin-bottom: 1px; }
 /* Medal accent bars on the podium rows — stronger placement signal than a tinted number alone */
 .bk-st-row.r1::before, .bk-st-row.r2::before, .bk-st-row.r3::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; }
 .bk-st-row.r1::before { background: #ffd66b; box-shadow: 0 0 12px rgba(255,214,107,.4); }
@@ -230,6 +240,7 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
     <div class="bk-head-text">
       <div class="bk-eyebrow">Tournament Bracket</div>
       <div class="bk-title" id="bk-title"></div>
+      <div class="bk-subtitle" id="bk-subtitle"></div>
     </div>
     <div class="bk-head-right">
       <div class="bk-phases" id="bk-phases"></div>
@@ -396,17 +407,21 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
     }
   }
 
-  function buildStandings(standings) {
+  function buildStandings(standings, showRecord) {
     const wrap = document.createElement('div'); wrap.className = 'bk-standings';
     // Round Robin/Swiss rows carry extra stat fields (Sets Played, Game Wins-Losses) that
     // Start.gg's own standings tables show — elimination-bracket rows never have them, so
     // this stays a plain W/L table there (zero visual change for the far more common case).
     const enriched = standings.some((s) => s.setsTotal != null);
     wrap.classList.toggle('enriched', enriched);
+    wrap.classList.toggle('norecord', showRecord === false);
+    // "SET" group label above W/L — start.gg's own terminology for a match (a Bo3/Bo5 is one
+    // Set of individual Games), disambiguating the W/L pair from the Games column when present.
     const head = document.createElement('div'); head.className = 'bk-st-row bk-st-head';
-    head.innerHTML = '<div class="bk-st-rank">#</div><div>Team</div><div style="text-align:center">W</div><div style="text-align:center">L</div>'
+    head.innerHTML = '<div class="bk-st-rank">#</div><div>Team</div>'
+      + (showRecord === false ? '' : '<div style="text-align:center"><span class="bk-st-grouplbl">Set</span>W</div><div style="text-align:center"><span class="bk-st-grouplbl">Set</span>L</div>')
       + (enriched ? '<div style="text-align:center">Played</div><div style="text-align:center">Games</div>' : '')
-      + '<div style="text-align:center">Win %</div>';
+      + (showRecord === false ? '' : '<div style="text-align:center">Win %</div>');
     wrap.appendChild(head);
     standings.forEach((s, i) => {
       const total = (s.wins || 0) + (s.losses || 0);
@@ -420,9 +435,12 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
       const logo = logoFor(s.name);
       if (logo) { const img = document.createElement('img'); img.className = 'bk-st-logo' + (isDark(logo) ? ' logo-on-dark' : ''); img.src = logo; img.onerror = function () { this.style.display = 'none'; }; team.appendChild(img); }
       const nm = document.createElement('div'); nm.className = 'bk-st-name'; nm.textContent = s.name; team.appendChild(nm);
-      const w = document.createElement('div'); w.className = 'bk-st-rec bk-st-w'; w.textContent = s.wins;
-      const l = document.createElement('div'); l.className = 'bk-st-rec bk-st-l'; l.textContent = s.losses;
-      row.appendChild(rank); row.appendChild(team); row.appendChild(w); row.appendChild(l);
+      row.appendChild(rank); row.appendChild(team);
+      if (showRecord !== false) {
+        const w = document.createElement('div'); w.className = 'bk-st-rec bk-st-w'; w.textContent = s.wins;
+        const l = document.createElement('div'); l.className = 'bk-st-rec bk-st-l'; l.textContent = s.losses;
+        row.appendChild(w); row.appendChild(l);
+      }
       if (enriched) {
         const played = document.createElement('div'); played.className = 'bk-st-extra';
         played.textContent = (s.setsPlayed || 0) + '/' + (s.setsTotal || 0);
@@ -430,8 +448,10 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
         games.textContent = (s.gameWins || 0) + '-' + (s.gameLosses || 0);
         row.appendChild(played); row.appendChild(games);
       }
-      const bar = document.createElement('div'); bar.className = 'bk-st-bar'; bar.innerHTML = '<span style="width:' + pct + '%"></span>';
-      row.appendChild(bar);
+      if (showRecord !== false) {
+        const bar = document.createElement('div'); bar.className = 'bk-st-bar'; bar.innerHTML = '<span style="width:' + pct + '%"></span>';
+        row.appendChild(bar);
+      }
       wrap.appendChild(row);
     });
     return wrap;
@@ -503,7 +523,13 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
   function buildSchedule(schedule) {
     const wrap = document.createElement('div'); wrap.className = 'bk-schedule';
     const band = document.createElement('div'); band.className = 'bk-rounds';
-    withInferredWinners(schedule).forEach((r) => band.appendChild(buildColumn(r, false)));
+    withInferredWinners(schedule).forEach((r) => {
+      const col = buildColumn(r, false);
+      // Big swiss rounds (RLCS-Open pools: a dozen+ sets per round) wrap into two columns
+      // so one round doesn't become a skyscraper that scales the whole view unreadable.
+      if ((r.sets || []).length > 8) col.classList.add('bk-dense');
+      band.appendChild(col);
+    });
     wrap.appendChild(band);
     return wrap;
   }
@@ -513,7 +539,7 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
   // consistently instead of floating tiny in the middle.
   var MAX_FIT = 2.2;
   var ABBREV_THRESHOLD = 0.72; // switch to initials when bracket is scaled below this
-  function fit() {
+  function fit(forceAbbrev) {
     const scaleEl = el('bk-scale'); const body = scaleEl.parentElement;
     scaleEl.style.transform = 'scale(1)';
     const cw = body.clientWidth, ch = body.clientHeight;
@@ -521,7 +547,7 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
     if (!sw || !sh) return;
     const s = Math.min(MAX_FIT, cw / sw, ch / sh);
     scaleEl.style.transform = 'scale(' + s + ')';
-    scaleEl.classList.toggle('bk-abbrev', s < ABBREV_THRESHOLD);
+    scaleEl.classList.toggle('bk-abbrev', !!forceAbbrev || s < ABBREV_THRESHOLD);
   }
 
   // ?show=1 — always render the live bracket (ignore the on-air visible flag, no demo fallback).
@@ -572,7 +598,7 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
       ((data.teams && data.teams.blue && data.teams.blue.name) || '').trim().toUpperCase(),
       ((data.teams && data.teams.orange && data.teams.orange.name) || '').trim().toUpperCase()
     ].filter(Boolean).sort().join('|');
-    const sig = JSON.stringify({ t: b.title, ty: b.type, w: winners, l: losers, f: finals, sc: schedule, s: standings, mx: matrix,
+    const sig = JSON.stringify({ t: b.title, sub: b.subtitle, sr: b.showRecord, ty: b.type, w: winners, l: losers, f: finals, sc: schedule, s: standings, mx: matrix,
       ph: phases.map((p) => p.id + p.name), ap: b.activePhaseId, pl: pools.map((p) => p.id + p.name), apl: b.activePoolId,
       lg: logoByName, vw: view, rn: ROUNDS_N, ft: focusTeam, lp: _livePair });
     if (sig === _sig) return;
@@ -582,6 +608,7 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
     document.documentElement.style.setProperty('--accent-2', SceneBase.brandAccent(data));
 
     el('bk-title').textContent = (b.title || '').toUpperCase();
+    el('bk-subtitle').textContent = b.subtitle || '';
     const fmt = el('bk-format'); const ft = fmtType(b.type);
     fmt.textContent = ft; fmt.style.display = (ft && hasData) ? '' : 'none';
     emptyEl.classList.toggle('hidden', !!hasData);
@@ -598,8 +625,14 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
       const isDouble = losers.length > 0;
       // Butterfly layout: only when showing both brackets with no round-trim applied.
       const butterfly = SHOW_W && SHOW_L && isDouble && ROUNDS_N === 0;
+      // Full view (both brackets, no round-trim) is where team count is highest and start.gg
+      // logos are sparsest — badge-abbreviated names read cleaner there than a mix of real
+      // logos and empty placeholder boxes, regardless of how small the fitted scale ends up.
+      // Partial views (upper/lower/finals-stretch only) have more room per team and keep the
+      // normal scale-based logo/abbreviation behavior.
+      const fullView = SHOW_W && SHOW_L && ROUNDS_N === 0;
       scaleEl.classList.toggle('butterfly', butterfly);
-      scaleEl.classList.toggle('bk-abbrev', butterfly);
+      scaleEl.classList.toggle('bk-abbrev', fullView);
       stage.classList.toggle('butterfly', butterfly);
       let rendered = false;
 
@@ -663,7 +696,7 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
       const wantStandings = standings.length > 0 && rrView === 'standings';
       if (wantMatrix) scaleEl.appendChild(buildMatrix(matrix));
       if (wantSchedule) scaleEl.appendChild(buildSchedule(schedule));
-      if (wantStandings) scaleEl.appendChild(buildStandings(standings));
+      if (wantStandings) scaleEl.appendChild(buildStandings(standings, b.showRecord));
       emptyEl.classList.toggle('hidden', wantMatrix || wantSchedule || wantStandings);
     }
 
@@ -671,8 +704,11 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
     // scales the whole wrapper (SVG included) to the canvas — so draw at scale 1 first.
     requestAnimationFrame(() => {
       scaleEl.style.transform = 'scale(1)';
-      scaleEl.querySelectorAll('.bk-rounds').forEach(drawConnectors);
-      fit();
+      // Connectors belong to ELIMINATION bands only (.bk-section wraps those). The schedule
+      // view reuses .bk-rounds for its columns — drawing elbows between swiss/RR rounds
+      // painted meaningless progression lines all over pool play.
+      scaleEl.querySelectorAll('.bk-section .bk-rounds').forEach(drawConnectors);
+      fit(isElim && SHOW_W && SHOW_L && ROUNDS_N === 0);
       if (focusTeam) {
         var fn = focusTeam.toLowerCase();
         scaleEl.querySelectorAll('.bk-name').forEach(function(nameEl) {
