@@ -76,7 +76,6 @@
       "main.js",
       "server.js",
       "splash.html",
-      "app-store-nav.js",
       ".env.production",
       "backend/**/*",
       "obs/**/*",
