@@ -723,8 +723,8 @@ function renderCrewList() {
   });
   const countEl = el('crew-count');
   if (countEl) countEl.textContent = members.length ? `(${members.length})` : '';
-  const GROUP_LABEL = { casters: 'Casters', hosts: 'Hosts', guests: 'Guests', observers: 'Observers' };
-  const GROUP_COLOR = { casters: '#e83a8b', hosts: '#a855f7', guests: '#3b82f6', observers: '#2dd4bf' };
+  const GROUP_LABEL = { casters: 'Casters', hosts: 'Hosts', guests: 'Guests', observers: 'Observers', producer: 'Producer', admin: 'Tournament Admin', socials: 'Social Media' };
+  const GROUP_COLOR = { casters: '#e83a8b', hosts: '#a855f7', guests: '#3b82f6', observers: '#2dd4bf', producer: '#f59e0b', admin: '#ef4444', socials: '#22c55e' };
   if (!filtered.length) {
     list.innerHTML = '<p class="empty-msg" style="grid-column:1/-1;">No crew members found.</p>';
     return;
@@ -14029,8 +14029,8 @@ function renderQrailScenes(data) {
 const QK_PUT = [
   { label: 'Break',     trig: 'breakScreen', toggle: 'ck-break-toggle',     scene: 'break',    cfg: true },
   { label: 'Matchup',   trig: 'matchup',     toggle: 'ck-matchup-toggle',   scene: 'matchup' },
-  { label: 'Winner',    trig: 'winner',      toggle: 'ck-winner-toggle',    scene: 'winner',   cfg: true },
-  { label: 'Line-up',   trig: 'intro',       toggle: 'ck-intro-toggle',     scene: 'intro',    cfg: true },
+  { label: 'Winner',    trig: 'winner',      toggle: 'ck-winner-toggle',    scene: 'winner',   cfg: true, sideSel: 'ck-winner-side' },
+  { label: 'Line-up',   trig: 'intro',       toggle: 'ck-intro-toggle',     scene: 'intro',    cfg: true, sideSel: 'ck-intro-side' },
   { label: 'Map Pool',  trig: 'veto',        toggle: 'ck-veto-toggle',      scene: 'veto' },
   { label: 'Teams',     trig: 'watchlist',   toggle: 'ck-spotlight-toggle', scene: 'spotlight' },
   { label: 'Schedule',  trig: 'upcoming',    toggle: 'ck-schedule-toggle',  scene: 'schedule' },
@@ -14139,6 +14139,23 @@ function qkRenderPut() {
       ? !!(currentState && currentState.obs && currentState.obs.currentScene === it.k)
       : _qkIsLive(it.item);
     chip.classList.toggle('on', on);
+    // Team-dependent chips (Line-up, Winner) show WHO they'll fire for.
+    if (it.item && it.item.sideSel) {
+      const side = (el(it.item.sideSel)?.value === 'orange') ? 'orange' : 'blue';
+      const t = (currentState && currentState.teams && currentState.teams[side]) || {};
+      const name = (t.name || side).toString();
+      let badge = chip.querySelector('.qk-chip-team');
+      if (!badge) {
+        badge = document.createElement('span');
+        badge.className = 'qk-chip-team';
+        badge.title = 'This chip fires for the selected team — change it in the gear options';
+        chip.querySelector('.qk-chip-main')?.appendChild(badge);
+      }
+      const short = name.length > 12 ? name.slice(0, 11) + '…' : name;
+      if (badge.textContent !== short) badge.textContent = short;
+      badge.style.color = t.color || (side === 'blue' ? '#3b82f6' : '#e97139');
+      badge.style.borderColor = 'color-mix(in srgb, ' + (t.color || (side === 'blue' ? '#3b82f6' : '#e97139')) + ' 55%, transparent)';
+    }
   });
 }
 el('qk-put-reorder')?.addEventListener('click', (e) => {
@@ -19596,6 +19613,24 @@ window._gfxFillCreditsTalent = function (data) {
         + opts.map((o) => '<option value="' + tlEsc(o.name) + '" data-role="' + tlEsc(o.role) + '">' + tlEsc(o.name) + (o.role ? ' — ' + tlEsc(o.role) : '') + '</option>').join('');
     }
   }
+  // Event picker for "pull crew from shifts" — only events actually tagged on a saved shift.
+  const evSel = el('credits-shift-event');
+  if (evSel && document.activeElement !== evSel) {
+    const shifts = ((data && data.casters) || {}).shifts || [];
+    const seen = new Map();
+    shifts.forEach((s) => {
+      const key = s.eventSlug || '__none__';
+      if (!seen.has(key)) seen.set(key, s.eventName || (key === '__none__' ? 'No event (untagged shifts)' : key));
+    });
+    const evSig = shifts.length + '|' + [...seen.keys()].join(',');
+    if (evSel.dataset.sig !== evSig) {
+      evSel.dataset.sig = evSig;
+      const prev = evSel.value;
+      evSel.innerHTML = '<option value="">Choose an event…</option>'
+        + [...seen.entries()].map(([slug, name]) => '<option value="' + tlEsc(slug) + '">' + tlEsc(name) + '</option>').join('');
+      if (prev && [...seen.keys()].includes(prev)) evSel.value = prev;
+    }
+  }
   // Chip list of saved entries.
   const list = el('credits-talent-list');
   if (list) {
@@ -19633,6 +19668,42 @@ el('credits-talent-add')?.addEventListener('click', () => {
   const sel = el('credits-crew-sel'); if (sel) sel.value = '';
   ['credits-name', 'credits-role'].forEach((id) => { const i = el(id); if (i) i.value = ''; });
   showToast('Added ' + name + ' to the credits', '#22c55e');
+});
+el('credits-pull-shifts')?.addEventListener('click', () => {
+  const chosen = el('credits-shift-event')?.value || '';
+  if (!chosen) { showToast('Pick an event first.', '#fbbf24'); return; }
+  const shifts = ((currentState && currentState.casters) || {}).shifts || [];
+  const matching = shifts.filter((s) => (chosen === '__none__' ? !s.eventSlug : s.eventSlug === chosen));
+  if (!matching.length) { showToast('No saved shifts for that event.', '#fbbf24'); return; }
+  // Union every name referenced across those shifts — cam slots, host/observer, AND anyone
+  // just marked "on shift" (that's how producers/admins/socials get in, since they have no cam).
+  const names = new Set();
+  matching.forEach((s) => {
+    [1, 2, 3, 4].forEach((n) => { const v = ((s.slots && s.slots[n]) || '').trim(); if (v) names.add(v); });
+    if (s.host) names.add(s.host);
+    if (s.observer) names.add(s.observer);
+    (s.active || []).forEach((n) => { if (n) names.add(n); });
+  });
+  if (!names.size) { showToast('Those shifts have no crew assigned yet.', '#fbbf24'); return; }
+  const crewByName = {}; ((currentState && currentState.crew) || []).forEach((c) => { if (c && c.name) crewByName[c.name.toLowerCase()] = c; });
+  const cur = ((currentState && currentState.credits) || {}).talent || [];
+  const curNames = new Set(cur.map((t) => (t.name || '').toLowerCase()));
+  const added = [];
+  names.forEach((nm) => {
+    const c = crewByName[nm.toLowerCase()];
+    const display = c ? (c.handle || c.name) : nm;   // gamertag-first, same as the desk/credits bar
+    if (curNames.has(display.toLowerCase())) return;
+    const group = !c ? 'casters'
+      : c.group === 'hosts' ? 'hosts'
+      : c.group === 'observers' ? 'observers'
+      : ['production', 'producer', 'admin', 'socials'].includes(c.group) ? 'production'
+      : 'casters';
+    added.push({ name: display, role: c ? (c.role || '') : '', group });
+    curNames.add(display.toLowerCase());
+  });
+  if (!added.length) { showToast('Everyone from that event is already credited.', '#fbbf24'); return; }
+  send('set_credits', { talent: [...cur, ...added] });
+  showToast(`Added ${added.length} crew member${added.length === 1 ? '' : 's'} from that event to the credits.`, '#22c55e');
 });
 // Punch-up graphics: only one of these can be live at a time — showing one auto-hides whichever
 // other one is live. Casters, Ticker, Sponsor Banner and Teams to Watch are NOT in this set — they
