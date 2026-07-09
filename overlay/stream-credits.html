@@ -34,13 +34,13 @@
       background: linear-gradient(180deg, rgba(20,18,30,0.92) 0%, rgba(13,13,20,0.72) 100%);
       border-top: 1px solid rgba(155,109,255,0.25); border-bottom: 1px solid rgba(255,255,255,0.06);
     }
-    .talent-bar-eyebrow { font-size: 11px; font-weight: 700; letter-spacing: 4px; text-transform: uppercase; color: rgba(255,255,255,0.4); }
+    .talent-bar-eyebrow { font-size: 11px; font-weight: 700; letter-spacing: 4px; text-transform: uppercase; color: rgba(255,255,255,0.9); }
     .talent-groups { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 8px 26px; }
     .talent-group { display: inline-flex; align-items: baseline; gap: 10px; }
     .talent-group-label { font-size: 12px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; color: #9b6dff; }
     .talent-names { font-size: 18px; font-weight: 600; color: #fff; }
     .talent-names .sep { color: rgba(255,255,255,0.25); margin: 0 3px; }
-    .talent-names .role { font-size: 12px; font-weight: 500; color: rgba(255,255,255,0.45); margin-left: 3px; }
+    .talent-names .role { font-size: 12px; font-weight: 500; color: rgba(255,255,255,0.92); margin-left: 3px; }
 
     /* ── Scroll viewport (between talent bar and sponsor bar) ─
        top is set at runtime to sit flush under the talent bar (positionViewport) — the talent
@@ -50,7 +50,7 @@
 .cr-brand-logo { height: 48px; max-width: 260px; object-fit: contain; filter: drop-shadow(0 2px 10px rgba(0,0,0,.6)); }
 .cr-title-spon { display: flex; align-items: center; gap: 10px; }
 .cr-title-spon.is-empty { display: none; }
-.cr-ts-label { font-size: 10px; font-weight: 800; letter-spacing: .3em; text-transform: uppercase; color: rgba(255,255,255,.5); }
+.cr-ts-label { font-size: 10px; font-weight: 800; letter-spacing: .3em; text-transform: uppercase; color: rgba(255,255,255,.92); }
 .cr-ts-logo { height: 30px; max-width: 160px; object-fit: contain; filter: drop-shadow(0 1px 6px rgba(0,0,0,.5)); }
 /* ── Side rails: TOP 8 (left) / stream activity (right) ── */
 .cr-rail { position: absolute; top: 318px; bottom: 130px; width: 300px; z-index: 15;
@@ -59,23 +59,23 @@
 .cr-rail-left { left: 24px; }
 .cr-rail-right { right: 24px; }
 .cr-rail-head { font-size: 12px; font-weight: 800; letter-spacing: .3em; text-transform: uppercase;
-  color: rgba(255,255,255,.55); text-align: center; padding-bottom: 8px;
+  color: rgba(255,255,255,.95); text-align: center; padding-bottom: 8px;
   border-bottom: 1px solid rgba(255,255,255,.1); }
 .cr-top8-row { display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-radius: 8px;
   background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.07); }
-.cr-top8-rank { font-size: 14px; font-weight: 900; color: rgba(255,255,255,.45); width: 20px; text-align: center; flex: 0 0 auto; font-variant-numeric: tabular-nums; }
+.cr-top8-rank { font-size: 14px; font-weight: 900; color: rgba(255,255,255,.92); width: 20px; text-align: center; flex: 0 0 auto; font-variant-numeric: tabular-nums; }
 .cr-top8-row:nth-child(2) .cr-top8-rank { color: #f4d060; }
 .cr-top8-row:nth-child(3) .cr-top8-rank { color: #c8ccd6; }
 .cr-top8-row:nth-child(4) .cr-top8-rank { color: #d29a6b; }
 .cr-top8-logo { width: 26px; height: 26px; object-fit: contain; flex: 0 0 auto; }
 .cr-top8-name { font-size: 15px; font-weight: 700; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.cr-top8-rec { margin-left: auto; font-size: 12px; font-weight: 700; color: rgba(255,255,255,.45); flex: 0 0 auto; font-variant-numeric: tabular-nums; }
+.cr-top8-rec { margin-left: auto; font-size: 12px; font-weight: 700; color: rgba(255,255,255,.92); flex: 0 0 auto; font-variant-numeric: tabular-nums; }
 .cr-act-row { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 8px;
   background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.07); }
 .cr-act-ico { font-size: 16px; flex: 0 0 auto; }
 .cr-act-lbl { font-size: 13px; font-weight: 700; color: rgba(255,255,255,.85); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .cr-act-count { margin-left: auto; font-size: 16px; font-weight: 900; color: #fff; flex: 0 0 auto; font-variant-numeric: tabular-nums; }
-.cr-act-names { font-size: 11px; color: rgba(255,255,255,.45); padding: 0 10px 4px; line-height: 1.5;
+.cr-act-names { font-size: 11px; color: rgba(255,255,255,.92); padding: 0 10px 4px; line-height: 1.5;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: -6px; }
     /* Edge fade via an alpha MASK — the old ::before painted a solid-color gradient band,
    which over a transparent/video background rendered as a smeared gray bar. */
@@ -97,7 +97,7 @@
     .end-card.show .end-card-text { transform: none; }
 
     /* ── Team roster TABLE — aligned columns: logo · team · players (with flags) ── */
-    .roll-teams-head { text-align: center; font-size: 14px; font-weight: 700; letter-spacing: 5px; text-transform: uppercase; color: rgba(255,255,255,0.5); margin: 0 0 24px; }
+    .roll-teams-head { text-align: center; font-size: 14px; font-weight: 700; letter-spacing: 5px; text-transform: uppercase; color: rgba(255,255,255,0.92); margin: 0 0 24px; }
     /* Movie-credit style: one centered block per team — logo, name, roster underneath. */
 .roll-teams-table { display: flex; flex-direction: column; align-items: center; gap: 34px; margin: 0 auto; padding: 0 40px; }
 .tt-block { display: flex; flex-direction: column; align-items: center; gap: 6px; text-align: center; max-width: 900px; }
@@ -107,16 +107,16 @@
     .tt-players { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 7px 22px; padding: 2px 0 0; }
     .tt-player { display: inline-flex; align-items: center; gap: 8px; font-size: 19px; font-weight: 600; color: rgba(255,255,255,0.92); }
     .tt-flag { width: 27px; height: auto; border-radius: 3px; box-shadow: 0 1px 3px rgba(0,0,0,0.5); flex: 0 0 auto; }
-    .tt-cc { font-size: 12px; font-weight: 700; letter-spacing: 1px; color: rgba(255,255,255,0.4); }
-    .tt-role { font-size: 12px; font-weight: 500; color: rgba(255,255,255,0.42); }
-    .tt-empty { font-size: 15px; color: rgba(255,255,255,0.35); font-style: italic; }
+    .tt-cc { font-size: 12px; font-weight: 700; letter-spacing: 1px; color: rgba(255,255,255,0.9); }
+    .tt-role { font-size: 12px; font-weight: 500; color: rgba(255,255,255,0.92); }
+    .tt-empty { font-size: 15px; color: rgba(255,255,255,0.85); font-style: italic; }
     .tt-row-sep { width: 220px; height: 1px; background: rgba(255,255,255,0.08); }
 
     /* ── Rolling twitch supporter sections ──────────────── */
     .roll-section { text-align: center; margin: 0 auto 40px; max-width: 1240px; }
     .roll-section-label { display: inline-flex; align-items: center; gap: 12px; margin-bottom: 16px; }
     .roll-section-label .icon { font-size: 20px; }
-    .roll-section-label .title { font-size: 14px; font-weight: 700; letter-spacing: 4px; text-transform: uppercase; color: rgba(255,255,255,0.5); }
+    .roll-section-label .title { font-size: 14px; font-weight: 700; letter-spacing: 4px; text-transform: uppercase; color: rgba(255,255,255,0.92); }
     .roll-section-label .count { font-size: 12px; font-weight: 700; color: rgba(255,255,255,0.28); }
     .name-grid { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 10px 12px; }
     .name-chip {
@@ -142,7 +142,7 @@
     .roll-sponsor { display: flex; flex-direction: column; align-items: center; gap: 8px; }
     .roll-sponsor img { height: 88px; max-width: 260px; object-fit: contain; filter: drop-shadow(0 4px 14px rgba(0,0,0,0.55)); }
     .roll-sponsor-name { font-size: 17px; font-weight: 600; color: rgba(255,255,255,0.85); }
-    .roll-sponsor-tier { font-size: 11px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; color: rgba(255,255,255,0.35); }
+    .roll-sponsor-tier { font-size: 11px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; color: rgba(255,255,255,0.85); }
 
     /* ── Sponsor bar (fixed bottom) ─────────────────────── */
     .sponsor-bar {
@@ -151,7 +151,7 @@
       background: linear-gradient(0deg, rgba(0,0,0,0.72) 0%, transparent 100%);
     }
     .sponsor-bar.is-empty { justify-content: center; }
-    .sponsor-bar-label { font-size: 11px; font-weight: 700; letter-spacing: 3px; text-transform: uppercase; color: rgba(255,255,255,0.35); margin-right: 14px; }
+    .sponsor-bar-label { font-size: 11px; font-weight: 700; letter-spacing: 3px; text-transform: uppercase; color: rgba(255,255,255,0.85); margin-right: 14px; }
     .sponsor-bar-logos { display: flex; align-items: center; gap: 34px; }
     .sponsor-bar-logos img { height: 46px; max-width: 150px; object-fit: contain; opacity: 0.92; filter: drop-shadow(0 2px 8px rgba(0,0,0,0.5)); }
     .sponsor-bar-fallback { font-size: 12px; letter-spacing: 3px; text-transform: uppercase; color: rgba(255,255,255,0.22); }
@@ -159,7 +159,7 @@
     /* ── Empty state ────────────────────────────────────── */
     .empty-state { position: absolute; inset: 250px 0 118px 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; opacity: 0.35; }
     .empty-state .empty-icon { font-size: 48px; }
-    .empty-state .empty-label { font-size: 18px; letter-spacing: 2px; text-transform: uppercase; color: rgba(255,255,255,0.5); }
+    .empty-state .empty-label { font-size: 18px; letter-spacing: 2px; text-transform: uppercase; color: rgba(255,255,255,0.92); }
   </style>
 </head>
 <body>
