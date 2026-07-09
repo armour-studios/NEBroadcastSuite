@@ -6578,13 +6578,22 @@ function renderMatchPlayers(side, players) {
           const op = c.querySelector('.te-edit-popup'); if (op) op.removeAttribute('style');
         }
       });
-      // Position as fixed overlay so it escapes any overflow:auto scroll container
+      // Position as fixed overlay so it escapes any overflow:auto scroll container.
       const rect = card.getBoundingClientRect();
       const popW = Math.max(rect.width, 440);
-      const leftPx = Math.min(rect.left, window.innerWidth - popW - 8);
-      const topPx = rect.bottom + 4;
-      popup.style.cssText = `display:block;position:fixed;top:${topPx}px;left:${leftPx}px;width:${popW}px;z-index:9999;`;
+      const leftPx = Math.max(8, Math.min(rect.left, window.innerWidth - popW - 8));
+      // Show it (hidden) first so we can measure its real height, then place it BELOW the card by
+      // default but flip ABOVE when it would run off the bottom of the screen — and clamp on-screen
+      // if it fits neither. The old code always opened downward, so cards near the bottom lost it.
+      popup.style.cssText = `display:block;position:fixed;left:${leftPx}px;width:${popW}px;z-index:9999;visibility:hidden;top:0;`;
       card.classList.add('tp-editing'); editBtn.textContent = 'Done';
+      const margin = 8, vh = window.innerHeight, popH = popup.offsetHeight || 360;
+      const below = rect.bottom + 4, above = rect.top - popH - 4;
+      const topPx = (below + popH + margin <= vh) ? below
+        : (above >= margin) ? above
+        : Math.max(margin, vh - popH - margin);
+      popup.style.top = topPx + 'px';
+      popup.style.visibility = '';
     };
     const closePopup = () => {
       card.classList.remove('tp-editing');
@@ -7704,7 +7713,7 @@ el('tm-save')?.addEventListener('click', () => {
   if (!name) { tmStatus('Team needs a name.', false); return; }
   send('save_team', {
     oldName: tmModel.oldName || null, name, logo: tmModel.logo || null, color: tmModel.color || null,
-    players: tmModel.players.map((p) => ({ id: p.id, name: (p.name || '').trim(), role: (p.role || '').trim() })).filter((p) => p.name)
+    players: tmModel.players.map((p) => ({ ...p, name: (p.name || '').trim(), role: (p.role || '').trim() })).filter((p) => p.name)
   });
   tmModel.oldName = name;
   el('tm-team-select').value = name;
@@ -8729,7 +8738,9 @@ function teRenderPlayers() {
     const countryCtrl = buildCountryControl(p.country || '', code => { p.country = code; });
     const realNameInp = document.createElement('input'); realNameInp.className = 'input-text'; realNameInp.value = p.realName || ''; realNameInp.placeholder = 'Legal / full name (optional)';
     realNameInp.addEventListener('input', () => { p.realName = realNameInp.value; });
-    rightCol.append(mkField('Name', nameInp), mkField('Real Name', realNameInp), mkField('Role', roleCtrl), mkField('Country', countryCtrl));
+    const customFieldInp = document.createElement('input'); customFieldInp.className = 'input-text'; customFieldInp.value = p.customField || ''; customFieldInp.placeholder = 'Fun fact, hometown, nickname… (shown on Team Intro / Matchup)';
+    customFieldInp.addEventListener('input', () => { p.customField = customFieldInp.value; });
+    rightCol.append(mkField('Name', nameInp), mkField('Real Name', realNameInp), mkField('Role', roleCtrl), mkField('Country', countryCtrl), mkField('Custom Field', customFieldInp));
 
     // Profile links section
     const pHead = document.createElement('div'); pHead.className = 'te-popup-section-head'; pHead.textContent = 'Profile Links';
@@ -8909,7 +8920,7 @@ el('te-save')?.addEventListener('click', () => {
     logo: teModel.logo || null,
     color: teModel.color || null,
     favorite: teModel.favorite || false,
-    players: teModel.players.map((p) => ({ id: p.id, name: (p.name || '').trim(), role: (p.role || '').trim(), country: (p.country || '').toLowerCase(), startgg: (p.startgg || '').trim(), sixmans: (p.sixmans || '').trim(), status: p.status || 'starter', photo: p.photo || '', discord: (p.discord || '').trim(), twitter: (p.twitter || '').trim(), twitch: (p.twitch || '').trim(), instagram: (p.instagram || '').trim(), tiktok: (p.tiktok || '').trim(), youtube: (p.youtube || '').trim() })).filter((p) => p.name)
+    players: teModel.players.map((p) => ({ id: p.id, name: (p.name || '').trim(), realName: (p.realName || '').trim(), info: (p.info || '').trim(), role: (p.role || '').trim(), country: (p.country || '').toLowerCase(), startgg: (p.startgg || '').trim(), sixmans: (p.sixmans || '').trim(), status: p.status || 'starter', photo: p.photo || '', discord: (p.discord || '').trim(), twitter: (p.twitter || '').trim(), twitch: (p.twitch || '').trim(), instagram: (p.instagram || '').trim(), tiktok: (p.tiktok || '').trim(), youtube: (p.youtube || '').trim() })).filter((p) => p.name)
   });
   teModel.oldName = name;
   if (el('te-title')) el('te-title').textContent = 'Edit Team';
@@ -15051,19 +15062,74 @@ function pvBuildOptions() {
       `<optgroup label="${g.group}">` + g.items.map((it) => `<option value="${it.path}">${it.name}</option>`).join('') + '</optgroup>'
     ).join('');
 }
-let _pvObsTimer = null;
-function pvStopObs() { if (_pvObsTimer) { clearInterval(_pvObsTimer); _pvObsTimer = null; } }
+let _pvObsTimer = null, _pvObsStream = null;
+// Screenshot resolution follows the current (resizable) stage width, so it stays sharp when enlarged.
+function pvStageW() { const s = el('pv-stage'); return s ? Math.min(960, Math.max(160, Math.round(s.clientWidth))) : (PV_SIZES[_pvSizeIdx] || 480); }
+function pvObsStartScreenshots() {
+  if (_pvObsTimer || _pvObsStream) return;   // don't poll while the smooth feed is live
+  const poll = () => send('obs_screenshot', { width: pvStageW() });
+  poll();
+  _pvObsTimer = setInterval(poll, 800);
+}
+// Full stop — used when leaving OBS mode / closing the dock.
+function pvStopObs() {
+  if (_pvObsTimer) { clearInterval(_pvObsTimer); _pvObsTimer = null; }
+  if (_pvObsStream) { _pvObsStream.getTracks().forEach((t) => t.stop()); _pvObsStream = null; }
+  const v = el('pv-obs-video'); if (v) { v.srcObject = null; v.style.display = 'none'; }
+  const lb = el('pv-obs-live'); if (lb) { lb.classList.remove('on'); lb.style.display = 'none'; }
+}
+// Smooth live OBS feed via the Virtual Camera (getUserMedia). Auto-starts OBS's virtual cam first.
+async function pvObsLiveStart(silent) {
+  const lb = el('pv-obs-live'), v = el('pv-obs-video'), img = el('pv-obs-img'), msg = el('pv-obs-msg');
+  try {
+    send('obs_virtualcam', { on: true });   // make sure OBS's virtual camera is running
+    let cams = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'videoinput');
+    if (!cams.some((d) => d.label)) {
+      if (silent) return false;   // labels hidden until permission granted — never prompt silently
+      const unlock = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+      unlock.getTracks().forEach((t) => t.stop());
+      cams = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'videoinput');
+    }
+    let vcam = cams.find((d) => SW_VCAM_RE.test(d.label || ''));
+    if (!vcam && !silent) {   // OBS may have just started the vcam — give the device a beat to appear
+      await new Promise((r) => setTimeout(r, 900));
+      cams = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'videoinput');
+      vcam = cams.find((d) => SW_VCAM_RE.test(d.label || ''));
+    }
+    if (!vcam) { if (!silent && msg) { msg.textContent = 'Starting OBS Virtual Camera — give it a second, then click Smooth again.'; msg.style.display = 'flex'; } return false; }
+    const stream = await navigator.mediaDevices.getUserMedia({ video: { deviceId: { exact: vcam.deviceId } }, audio: false });
+    _pvObsStream = stream;
+    if (_pvObsTimer) { clearInterval(_pvObsTimer); _pvObsTimer = null; }   // stop screenshot polling
+    if (v) { v.srcObject = stream; v.style.display = ''; }
+    if (img) img.style.display = 'none';
+    if (msg) msg.style.display = 'none';
+    if (lb) lb.classList.add('on');
+    return true;
+  } catch (e) {
+    if (!silent && msg) { msg.textContent = 'Live feed error: ' + (e.name || e.message); msg.style.display = 'flex'; }
+    pvObsLiveStop();
+    return false;
+  }
+}
+function pvObsLiveStop() {
+  if (_pvObsStream) { _pvObsStream.getTracks().forEach((t) => t.stop()); _pvObsStream = null; }
+  const v = el('pv-obs-video'); if (v) { v.srcObject = null; v.style.display = 'none'; }
+  const lb = el('pv-obs-live'); if (lb) lb.classList.remove('on');
+  if (el('pv-scene')?.value === '__obs__') pvObsStartScreenshots();   // fall back to screenshots
+}
 function pvLoad() {
   const sel = el('pv-scene'), frame = el('pv-frame'), img = el('pv-obs-img'), msg = el('pv-obs-msg');
   if (!sel || !frame) return;
   if (sel.value === '__obs__') {
-    // OBS program screenshot mode — poll a JPEG of the live program scene.
+    // OBS Program mode — start OBS's Virtual Camera, poll a JPEG of the live program (works with no
+    // camera permission), and offer the "Smooth" button for a low-latency getUserMedia feed.
+    pvStopObs();   // clean slate: clears any prior timer/stream and hides the video + button
     frame.style.display = 'none';
     if (img) img.style.display = '';
-    pvStopObs();
-    const poll = () => send('obs_screenshot', { width: PV_SIZES[_pvSizeIdx] || 480 });
-    poll();
-    _pvObsTimer = setInterval(poll, 800);
+    const lb = el('pv-obs-live'); if (lb) { lb.style.display = ''; lb.classList.remove('on'); }
+    send('obs_virtualcam', { on: true });   // START VIRTUAL CAM WHEN NOT ACTIVE
+    pvObsStartScreenshots();
+    if (typeof showToast === 'function') showToast('OBS Program preview — Virtual Camera started. Click "Smooth" for a live feed.', '#22c55e', 2600);
     return;
   }
   pvStopObs();
@@ -15075,14 +15141,14 @@ function pvLoad() {
   frame.src = url;
 }
 function applyObsScreenshot(d) {
-  if (el('pv-scene')?.value !== '__obs__') return;
+  if (el('pv-scene')?.value !== '__obs__' || _pvObsStream) return;   // ignore while the smooth feed is live
   const img = el('pv-obs-img'), msg = el('pv-obs-msg');
   if (d && d.ok && d.img) {
     if (img) { img.src = d.img; img.style.display = ''; }
     if (msg) msg.style.display = 'none';
   } else {
     if (img) img.style.display = 'none';
-    if (msg) { msg.textContent = (d && d.reason) || 'OBS not connected'; msg.style.display = 'flex'; }
+    if (msg) { msg.textContent = (d && d.reason) === 'OBS not connected' ? 'OBS not connected — connect OBS in Settings, then reopen this preview.' : ((d && d.reason) || 'OBS not connected'); msg.style.display = 'flex'; }
   }
 }
 el('btn-preview')?.addEventListener('click', () => {
@@ -15098,12 +15164,23 @@ el('pv-sample')?.addEventListener('change', pvLoad);
 el('pv-reload')?.addEventListener('click', pvLoad);
 el('pv-popout')?.addEventListener('click', () => {
   const sel = el('pv-scene');
-  window.open(pvBaseUrl() + (sel?.value || '/'), 'ne-preview', 'width=960,height=540');
+  // resizable=yes → the popped-out preview window can be dragged to any size.
+  window.open(pvBaseUrl() + (sel?.value || '/'), 'ne-preview', 'width=960,height=540,resizable=yes,scrollbars=no');
 });
+el('pv-obs-live')?.addEventListener('click', () => { if (_pvObsStream) pvObsLiveStop(); else pvObsLiveStart(false); });
 el('pv-size')?.addEventListener('click', () => {
   _pvSizeIdx = (_pvSizeIdx + 1) % PV_SIZES.length;
+  const stage = el('pv-stage'); if (stage) stage.style.width = PV_SIZES[_pvSizeIdx] + 'px';   // inline so it cooperates with drag-resize
   document.documentElement.style.setProperty('--pv-w', PV_SIZES[_pvSizeIdx] + 'px');
 });
+// Drag-to-resize the stage (CSS resize:horizontal) → keep the scaled iframe/screenshot in sync.
+(function pvWireResize() {
+  const stage = el('pv-stage'); if (!stage || typeof ResizeObserver === 'undefined') return;
+  const ro = new ResizeObserver(() => {
+    const w = Math.round(stage.clientWidth); if (w > 0) document.documentElement.style.setProperty('--pv-w', w + 'px');
+  });
+  ro.observe(stage);
+})();
 
 // ── Dashboard: Player Cams (link a cam URL to each active player) ───────────
 let _playerCamsSig = '';
@@ -20079,6 +20156,12 @@ const FLOW_TRIGGER_GROUPS = [
     ['ow_round_start',      'Round starts'],
     ['ow_round_end',        'Round ends'],
     ['ow_match_end',        'Match ended'],
+  ]},
+  { label: 'Marvel Rivals', items: [
+    ['mr_match_start',      'Match starts'],
+    ['mr_round_start',      'Round starts'],
+    ['mr_round_end',        'Round ends'],
+    ['mr_match_end',        'Match ended'],
   ]},
   { label: 'Match / Series', items: [
     ['score_reached',       'Score reaches…'],
