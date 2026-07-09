@@ -210,7 +210,9 @@ function hexA(hex, a) {
 
 /* ── Talent (production crew) → the top bar ─────────────────── */
 function buildTalent(st) {
-  const bucket = { casters: [], hosts: [], production: [], observers: [] };
+  const bucket = { casters: [], hosts: [], production: [], operations: [], observers: [] };
+  // Tournament-ops crew.group values (Show Deck support roles) → the Operations credit line.
+  const OPS_GROUPS = ['admin', 'coordinator', 'replay', 'stats', 'moderator', 'graphics', 'flex', 'socials'];
   const seen = new Set();
   // Trim + drop a leading @ before keying, so "Jonzey" and " Jonzey" (or "@Jonzey" from a
   // library entry saved with a stray handle prefix) collapse into one credit instead of two.
@@ -225,9 +227,10 @@ function buildTalent(st) {
     if (/produc|director/i.test(role || '')) return add('production', name, role);
     const g = (group === 'hosts' || kind === 'host') ? 'hosts'
       : (group === 'observers' || kind === 'observer') ? 'observers'
-      // Backend tournament-ops crew (producer / tournament admin / social media) aren't tied
-      // to a cam, but they still credit under Production alongside on-air producers/directors.
-      : (['production', 'producer', 'admin', 'socials'].includes(group)) ? 'production'
+      : (['production', 'producer'].includes(group)) ? 'production'
+      // Tournament-ops crew (admin, replay, stats, moderator, graphics, flex, socials) aren't tied to
+      // a cam but did their dues — they get their own Operations credit line.
+      : (OPS_GROUPS.includes(group)) ? 'operations'
       : 'casters';
     add(g, name, role);
   };
