@@ -43,6 +43,12 @@ None. Free companion for NE Broadcast Suite users.
 ## Support contact
 armourstudiosllc@gmail.com
 
+## Distribution
+Distributed through the Overwolf app store. Broadcast producers and observer-PC
+operators will install it directly from the store listing; we are not requesting
+sideload/enterprise distribution. Development builds are tested via the standard
+dev-console flow.
+
 ## Notes for reviewer
 This is a data relay for tournament broadcast production. It runs minimized in the
 background (start_window: background, no visible windows), subscribes to the documented
