@@ -261,7 +261,8 @@
     <span class="pv-title">PREVIEW</span>
     <select id="pv-scene" class="input-select pv-scene"></select>
     <label class="pv-sample" title="Render with sample data (?preview=1)"><input type="checkbox" id="pv-sample"> sample</label>
-    <button id="pv-size" class="pv-btn" title="Resize">⤢</button>
+    <button id="pv-obs-live" class="pv-btn pv-btn-wide" title="Smooth live OBS feed via the Virtual Camera (falls back to screenshots)" style="display:none;">Smooth</button>
+    <button id="pv-size" class="pv-btn" title="Cycle preset sizes (or drag the bottom-right corner)">⤢</button>
     <button id="pv-reload" class="pv-btn" title="Reload">⟳</button>
     <button id="pv-popout" class="pv-btn" title="Pop out to a new window">⧉</button>
     <button id="pv-close" class="pv-btn" title="Close">✕</button>
@@ -269,6 +270,7 @@
   <div class="pv-stage" id="pv-stage">
     <iframe id="pv-frame" frameborder="0" allow="autoplay; encrypted-media"></iframe>
     <img id="pv-obs-img" class="pv-obs-img" alt="" style="display:none;">
+    <video id="pv-obs-video" class="pv-obs-video" autoplay muted playsinline style="display:none;"></video>
     <div id="pv-obs-msg" class="pv-obs-msg" style="display:none;"></div>
   </div>
 </div>
@@ -4824,7 +4826,9 @@
                   <span style="font-size:11px; color:var(--muted); flex-shrink:0;">vs</span>
                   <input type="text" id="gfx-sch-add-b" class="input-text" placeholder="Team B" list="gfx-sch-teamlist" style="flex:1; min-width:110px;">
                   <input type="date" id="gfx-sch-add-date" class="input-text" title="Match date" style="flex:0 0 130px;">
-                  <input type="time" id="gfx-sch-add-when" class="input-text" title="Match time" style="flex:0 0 100px;">
+                  <select id="gfx-sch-add-h" class="input-select" title="Hour" style="flex:0 0 58px;"></select>
+                  <select id="gfx-sch-add-m" class="input-select" title="Minutes" style="flex:0 0 58px;"></select>
+                  <select id="gfx-sch-add-ap" class="input-select" title="AM / PM" style="flex:0 0 62px;"><option>AM</option><option selected>PM</option></select>
                   <button type="button" class="btn btn-secondary btn-sm" id="gfx-sch-add-front" style="flex-shrink:0;">Add</button>
                 </div>
                 <datalist id="gfx-sch-teamlist"></datalist>
@@ -6914,6 +6918,7 @@
           <div style="display: flex; gap: 8px; align-items: center;">
             <input type="password" id="input-startgg-token" class="input-text" placeholder="Paste your start.gg API token" style="flex: 1;">
             <button id="btn-startgg-change-token" class="btn btn-ghost btn-sm" style="display:none; white-space:nowrap;">Change Token</button>
+            <button id="btn-startgg-disconnect" class="btn btn-ghost btn-sm" style="display:none; white-space:nowrap; color:var(--danger-2);" title="Remove the saved token and turn start.gg off">Disconnect</button>
           </div>
           <details class="int-keyhelp"><summary>How do I get this?</summary><div class="int-keyhelp-body"><ol><li>Sign in at <a href="https://start.gg" target="_blank" rel="noopener">start.gg</a>, click your profile picture &rarr; <b>Developer Settings</b> — or go straight to <a href="https://start.gg/admin/profile/developer" target="_blank" rel="noopener">start.gg/admin/profile/developer</a>.</li>
    <li>Click <b>Create new token</b>, name it (e.g. "Broadcast Suite") and copy the 32-character token.</li>

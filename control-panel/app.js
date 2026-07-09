@@ -3339,14 +3339,20 @@ function _returnGraphicsToProd() {
       const rowEl = document.createElement('div'); rowEl.className = 'gfx-fp-prow';
       rowEl.innerHTML = `${rd}<span class="tm" title="${a} vs ${b}">${a}<span class="vs">vs</span>${b}</span>`
         + `<input type="date" class="input-text gfx-fp-date" value="${esc(/^\d{4}-\d{2}-\d{2}$/.test(m.date || '') ? m.date : '')}" title="Match date — edits save automatically" style="width:118px; flex:0 0 auto; font-size:11px; padding:2px 4px;">`
-        + `<input type="time" class="input-text gfx-fp-time" value="${esc(/^\d{2}:\d{2}/.test(m.time || '') ? m.time.slice(0, 5) : '')}" title="Match time — edits save automatically" style="width:82px; flex:0 0 auto; font-size:11px; padding:2px 4px;">`
+        + '<select class="input-select gfx-fp-th" title="Hour" style="width:46px; flex:0 0 auto; font-size:11px; padding:2px 2px;"></select>'
+        + '<select class="input-select gfx-fp-tm" title="Minutes" style="width:52px; flex:0 0 auto; font-size:11px; padding:2px 2px;"></select>'
+        + '<select class="input-select gfx-fp-tap" title="AM / PM" style="width:52px; flex:0 0 auto; font-size:11px; padding:2px 2px;"><option>AM</option><option>PM</option></select>'
         + `<button type="button" class="gfx-fp-str${m.stream ? ' is-on' : ''}" title="Mark as the stream match — shows the ON AIR badge on the overlay" style="flex:0 0 auto; font-size:9px; font-weight:800; letter-spacing:.06em; padding:3px 7px; border-radius:999px; cursor:pointer; border:1px solid ${m.stream ? 'rgba(74,222,128,.5)' : 'var(--border)'}; background:${m.stream ? 'rgba(74,222,128,.15)' : 'transparent'}; color:${m.stream ? '#4ade80' : 'var(--muted)'};">ON AIR</button>`
         + live
         + `<span class="gfx-fp-rowbtns"><button type="button" class="gfx-fp-mv" data-mv="-1" title="Move up">&#8593;</button>`
         + `<button type="button" class="gfx-fp-mv" data-mv="1" title="Move down">&#8595;</button>`
         + `<button type="button" class="gfx-fp-rm" title="Remove">&times;</button></span>`;
-      const tiInp = rowEl.querySelector('.gfx-fp-time');
-      tiInp.addEventListener('change', () => { _schMatches[i].time = tiInp.value.trim(); schAutoSave(); });
+      const th = rowEl.querySelector('.gfx-fp-th'), tm = rowEl.querySelector('.gfx-fp-tm'), tap = rowEl.querySelector('.gfx-fp-tap');
+      schFillTimeSel(th, tm);
+      const tcur = schTimeToSel(m.time);
+      th.value = tcur.h; tm.value = tcur.m; tap.value = tcur.ap;
+      const tSave = () => { _schMatches[i].time = schTimeFromSel(th.value, tm.value, tap.value); schAutoSave(); };
+      [th, tm, tap].forEach((x) => x.addEventListener('change', tSave));
       const dtInp = rowEl.querySelector('.gfx-fp-date');
       dtInp.addEventListener('change', () => { _schMatches[i].date = dtInp.value.trim(); schAutoSave(); });
       rowEl.querySelector('.gfx-fp-str').addEventListener('click', () => {
@@ -3380,12 +3386,12 @@ function _returnGraphicsToProd() {
   el('gfx-sch-add-front')?.addEventListener('click', () => {
     const a = (el('gfx-sch-add-a')?.value || '').trim();
     const b = (el('gfx-sch-add-b')?.value || '').trim();
-    const when = (el('gfx-sch-add-when')?.value || '').trim();
+    const when = schTimeFromSel(el('gfx-sch-add-h')?.value, el('gfx-sch-add-m')?.value, el('gfx-sch-add-ap')?.value);
     if (!a && !b) { showToast('Type at least one team name.', '#fbbf24'); return; }
     const dateVal = (el('gfx-sch-add-date')?.value || '').trim();
     // No setId: manual rows append alongside queue-pulled ones instead of being deduped.
     _schMatches.push({ teamA: a || 'TBD', teamB: b || 'TBD', time: when, date: dateVal, round: '', stream: false, state: 1 });
-    ['gfx-sch-add-a', 'gfx-sch-add-b', 'gfx-sch-add-when', 'gfx-sch-add-date'].forEach((id) => { const i = el(id); if (i) i.value = ''; });
+    ['gfx-sch-add-a', 'gfx-sch-add-b', 'gfx-sch-add-date', 'gfx-sch-add-h', 'gfx-sch-add-m'].forEach((id) => { const i = el(id); if (i) i.value = ''; });
     schRenderList(); schAutoSave();
   });
   // The Layout picker belongs on the card — with add/reorder/remove inline, the
@@ -3396,6 +3402,28 @@ function _returnGraphicsToProd() {
     const row = sel.closest('.gfx-ctrl-row'); const actions = front.querySelector('.gfx-fp-actions');
     if (row && actions) front.insertBefore(row, actions);
   })();
+
+  // Bounded 12-hour time selects (hour 1-12 / minute 00-59 / AM-PM) — the native time
+  // spinner scroll-wraps forever, which made picking times miserable.
+  function schFillTimeSel(hSel, mSel) {
+    if (hSel && !hSel.options.length) hSel.innerHTML = '<option value="">Hr</option>' + Array.from({ length: 12 }, (_, i) => '<option>' + (i + 1) + '</option>').join('');
+    if (mSel && !mSel.options.length) mSel.innerHTML = '<option value="">Min</option>' + Array.from({ length: 60 }, (_, i) => '<option>' + String(i).padStart(2, '0') + '</option>').join('');
+  }
+  function schTimeFromSel(h, m, ap) {
+    if (!h) return '';
+    let hh = parseInt(h, 10) % 12;
+    if (ap === 'PM') hh += 12;
+    return String(hh).padStart(2, '0') + ':' + (m || '00');
+  }
+  function schTimeToSel(t) {
+    const x = /^(\d{2}):(\d{2})/.exec(t || '');
+    if (!x) return { h: '', m: '', ap: 'PM' };
+    let hh = +x[1];
+    const ap = hh >= 12 ? 'PM' : 'AM';
+    hh = hh % 12 || 12;
+    return { h: String(hh), m: x[2], ap };
+  }
+  schFillTimeSel(el('gfx-sch-add-h'), el('gfx-sch-add-m'));
 
   // Full-clear hook for the Clear button (defined here because _schMatches is module-scoped).
   window._schClearLocal = function () { _schMatches = []; _schInitialized = true; schRenderList(); };
@@ -6047,6 +6075,7 @@ function applyState(data) {
   const tokenEl = el('input-startgg-token');
   const tokenIndicator = el('startgg-token-indicator');
   const tokenChangeBtn = el('btn-startgg-change-token');
+  const tokenDisconnectBtn = el('btn-startgg-disconnect');
   if (tokenEl && !tokenEl._lockListenerAdded) {
     tokenEl._lockListenerAdded = true;
     // Nothing extra needed — Change button handles unlock
@@ -6060,6 +6089,7 @@ function applyState(data) {
       tokenEl.style.opacity = '0.5';
       tokenEl.style.cursor = 'default';
       if (tokenChangeBtn) tokenChangeBtn.style.display = '';
+      if (tokenDisconnectBtn) tokenDisconnectBtn.style.display = '';
       if (tokenIndicator) {
         tokenIndicator.style.display = 'block';
         if (startgg.connected) {
@@ -6080,6 +6110,7 @@ function applyState(data) {
       tokenEl.style.opacity = '';
       tokenEl.style.cursor = '';
       if (tokenChangeBtn) tokenChangeBtn.style.display = 'none';
+      if (tokenDisconnectBtn) tokenDisconnectBtn.style.display = 'none';
       if (tokenIndicator) tokenIndicator.style.display = 'none';
       tokenEl.placeholder = 'Paste your start.gg API token';
     }
@@ -9316,6 +9347,20 @@ el('btn-startgg-change-token')?.addEventListener('click', () => {
     if (tokenChangeBtn) tokenChangeBtn.style.display = 'none';
     if (tokenIndicator) tokenIndicator.style.display = 'none';
     tokenEl.focus();
+  });
+});
+
+el('btn-startgg-disconnect')?.addEventListener('click', () => {
+  appConfirm(
+    'Disconnect start.gg? This removes the saved API token and turns the integration off. Tournament/event slugs are kept — you can reconnect by pasting a token again.',
+    'Disconnect', true
+  ).then((confirmed) => {
+    if (!confirmed) return;
+    send('startgg_disconnect', {});
+    const tokenEl = el('input-startgg-token');
+    if (tokenEl) { tokenEl.readOnly = false; tokenEl.value = ''; tokenEl.style.opacity = ''; tokenEl.style.cursor = ''; tokenEl.placeholder = 'Paste your start.gg API token'; }
+    ['btn-startgg-change-token', 'btn-startgg-disconnect', 'startgg-token-indicator'].forEach((id) => { const e = el(id); if (e) e.style.display = 'none'; });
+    showToast('start.gg disconnected.', '#22c55e');
   });
 });
 
