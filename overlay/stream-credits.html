@@ -77,8 +77,10 @@
 .cr-act-count { margin-left: auto; font-size: 16px; font-weight: 900; color: #fff; flex: 0 0 auto; font-variant-numeric: tabular-nums; }
 .cr-act-names { font-size: 11px; color: rgba(255,255,255,.45); padding: 0 10px 4px; line-height: 1.5;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: -6px; }
-    .scroll-viewport::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 36px; background: linear-gradient(180deg, #0d0d14 0%, transparent 100%); z-index: 5; pointer-events: none; }
-    .scroll-viewport::after  { content: ''; position: absolute; bottom: 0; left: 0; right: 0; height: 60px; background: linear-gradient(0deg, #0d0d14 0%, transparent 100%); z-index: 5; pointer-events: none; }
+    /* Edge fade via an alpha MASK — the old ::before painted a solid-color gradient band,
+   which over a transparent/video background rendered as a smeared gray bar. */
+.scroll-viewport { -webkit-mask-image: linear-gradient(180deg, transparent 0, #000 36px, #000 calc(100% - 36px), transparent 100%); mask-image: linear-gradient(180deg, transparent 0, #000 36px, #000 calc(100% - 36px), transparent 100%); }
+    /* bottom fade handled by the viewport alpha mask */
     .scroll-track { position: absolute; top: 0; left: 0; right: 0; padding: 16px 0 140px; will-change: transform; }
 
     /* ── Team roster TABLE — aligned columns: logo · team · players (with flags) ── */
