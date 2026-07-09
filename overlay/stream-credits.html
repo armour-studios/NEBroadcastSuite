@@ -213,18 +213,23 @@ function buildTalent(st) {
   const bucket = { casters: [], hosts: [], production: [], operations: [], observers: [] };
   // Tournament-ops crew.group values (Show Deck support roles) → the Operations credit line.
   const OPS_GROUPS = ['admin', 'coordinator', 'replay', 'stats', 'moderator', 'graphics', 'flex', 'socials'];
-  const seen = new Set();
-  // Trim + drop a leading @ before keying, so "Jonzey" and " Jonzey" (or "@Jonzey" from a
-  // library entry saved with a stray handle prefix) collapse into one credit instead of two.
+  // Trim + drop a leading @ before keying, so "Jonzey" / " Jonzey" / "@Jonzey" collapse.
   const norm = (s) => String(s || '').trim().toLowerCase().replace(/^@+/, '');
-  const add = (b, name, role) => {
-    const k = norm(name); if (!k) return;
-    if (seen.has(k)) return;
-    seen.add(k);
+  const toks = (...xs) => xs.map(norm).filter(Boolean);
+  // A person is identified by ANY of their name/handle tokens — the same human is credited from the
+  // crew record (gamertag, e.g. "Jonzey") AND from their caster-library twin (social @handle, e.g.
+  // "ItzJonzey"); those display strings differ, so a display-only key duplicated them (and the library
+  // twin defaulted to Casters). Dedup by identity, and let the crew record's role win.
+  const seen = new Set();          // identity tokens of everyone already credited
+  const crewGoverned = new Set();  // tokens of EVERY crew member — the library must never re-credit them
+  const add = (b, name, role, t) => {
+    const keys = (t && t.length) ? t : toks(name);
+    if (!keys.length || keys.some((k) => seen.has(k))) return;
+    keys.forEach((k) => seen.add(k));
     bucket[b].push({ name: String(name).trim(), role: role || '' });
   };
-  const place = (name, role, group, kind) => {
-    if (/produc|director/i.test(role || '')) return add('production', name, role);
+  const place = (name, role, group, kind, t) => {
+    if (/produc|director/i.test(role || '')) return add('production', name, role, t);
     const g = (group === 'hosts' || kind === 'host') ? 'hosts'
       : (group === 'observers' || kind === 'observer') ? 'observers'
       : (['production', 'producer'].includes(group)) ? 'production'
@@ -232,20 +237,30 @@ function buildTalent(st) {
       // a cam but did their dues — they get their own Operations credit line.
       : (OPS_GROUPS.includes(group)) ? 'operations'
       : 'casters';
-    add(g, name, role);
+    add(g, name, role, t);
   };
-  // Gamertag-first, matching the Show Deck's own display convention — falls back to the
-  // profile name only when no handle is set. Only crew who actually worked this event
-  // (state.crew[].workedEvent — set automatically by going "on shift" on the Show Deck, or by
-  // hand there) are auto-credited — otherwise every name ever entered stayed credited forever.
-  (st.crew || []).forEach((c) => c && c.name && c.workedEvent && place(c.handle || c.name, c.role, c.group, null));
-  ((st.casters && st.casters.library) || []).forEach((e) => e && e.name && place(e.handle || e.name, e.role, null, e.kind));
-  // Producer-added talent (Graphics > Stream Credits) — crew from other shifts of the
-  // same broadcast. An explicit group pins the bucket; otherwise the role rules decide.
+  // Crew is the source of truth for who worked and their role. Record EVERY crew member as governed
+  // (so the library can't re-credit them under Casters), and credit the ones who actually worked.
+  (st.crew || []).forEach((c) => {
+    if (!c || !c.name) return;
+    const t = toks(c.name, c.handle);
+    t.forEach((k) => crewGoverned.add(k));
+    if (c.workedEvent) place(c.handle || c.name, c.role, c.group, null, t);
+  });
+  // Caster library — only credit people who AREN'T a crew member (genuine guests/fill-ins on the
+  // desk). Anyone who is also in crew is already handled above with their real role.
+  ((st.casters && st.casters.library) || []).forEach((e) => {
+    if (!e || !e.name) return;
+    const t = toks(e.name, e.handle);
+    if (t.some((k) => crewGoverned.has(k))) return;
+    place(e.handle || e.name, e.role, null, e.kind, t);
+  });
+  // Producer-added talent (Graphics > Stream Credits) — crew from other shifts of the same broadcast.
   ((st.credits && st.credits.talent) || []).forEach((t) => {
     if (!t || !t.name) return;
-    if (['casters', 'hosts', 'production', 'operations', 'observers'].includes(t.group)) add(t.group, t.name, t.role);
-    else place(t.name, t.role, null, null);
+    const tk = toks(t.name, t.handle);
+    if (['casters', 'hosts', 'production', 'operations', 'observers'].includes(t.group)) add(t.group, t.name, t.role, tk);
+    else place(t.name, t.role, null, null, tk);
   });
   const groups = [];
   if (bucket.casters.length)    groups.push({ label: 'Casters',    people: bucket.casters });
@@ -533,7 +548,7 @@ async function connectWS() {
       const d = msg.data;
       // teams/casters/crew ride every broadcast; bracket/savedTeams/brand ride the on-change library
       // payload; credits is live. Only update keys this message actually carries (backfill).
-      ['teams', 'casters', 'crew', 'bracket', 'savedTeams', 'startgg', 'playerProfiles', 'brand', 'credits'].forEach((k) => { if (d[k] !== undefined) fullState[k] = d[k]; });
+      ['teams', 'casters', 'crew', 'bracket', 'savedTeams', 'startgg', 'playerProfiles', 'brand', 'credits', 'standings'].forEach((k) => { if (d[k] !== undefined) fullState[k] = d[k]; });
       const title = d.twitch?.channelInfo?.title || d.event?.title || d.eventName;
       if (title) document.getElementById('header-title').textContent = title;
       maybeRender();
