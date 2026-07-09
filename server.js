@@ -7010,6 +7010,8 @@ const FLOW_TRIGGER_TYPES = [
   'cs2_round_start', 'cs2_round_end', 'cs2_bomb_planted', 'cs2_half_time', 'cs2_match_ended',
   // Overwatch (Overwolf GEP relay)
   'ow_match_start', 'ow_round_start', 'ow_round_end', 'ow_match_end',
+  // Marvel Rivals (Overwolf GEP relay)
+  'mr_match_start', 'mr_round_start', 'mr_round_end', 'mr_match_end',
   // Universal game / production
   'score_reached', 'series_ended', 'game_started',
   // OBS
@@ -12688,10 +12690,11 @@ function handleControlMessage(msg, ws) {
     // Which source drives the upcoming/schedule board: 'event' (stream queue) or 'team' (team search).
     // Sent when the producer switches the Stream Queue tab.
     case 'startgg_set_upcoming_mode': {
-      const mode = (msg.data && msg.data.mode === 'team') ? 'team' : 'event';
+      const mode = ['team', 'manual'].includes(msg.data && msg.data.mode) ? msg.data.mode : 'event';
       state.upcoming.source = mode;
       // event → overlay shows the live stream queue (+ a couple non-stream extras, filled next poll).
       // team → clear until a team search populates it (so stale event extras don't show as "team").
+      // manual → detached from start.gg entirely; the poll never touches the board (Clear uses this).
       state.upcoming.matches = (mode === 'event') ? buildEventUpcomingExtras(state.startgg.queue, []) : [];
       saveAppState();
       broadcastFullState();
@@ -13288,6 +13291,28 @@ function handleControlMessage(msg, ws) {
           sourceName: scene, imageFormat: 'jpg', imageWidth: width, imageCompressionQuality: 40
         });
         ws.send(JSON.stringify({ type: 'obs-screenshot', data: { ok: !!(r && r.imageData), img: (r && r.imageData) || null, scene } }));
+      })();
+      break;
+    }
+
+    // Ensure OBS's Virtual Camera output is running (so the OBS Program preview can show a smooth
+    // live feed). msg.data.on === false stops it; default is "start if not already active".
+    case 'obs_virtualcam': {
+      (async () => {
+        if (!obsClient || !obsClient.isConnected()) {
+          ws.send(JSON.stringify({ type: 'obs-virtualcam', data: { ok: false, reason: 'OBS not connected' } }));
+          return;
+        }
+        try {
+          const want = !(msg.data && msg.data.on === false);
+          let active = false;
+          try { active = !!(await obsClient.call('GetVirtualCamStatus')).outputActive; } catch (e) {}
+          if (want && !active) { await obsClient.call('StartVirtualCam'); active = true; }
+          else if (!want && active) { await obsClient.call('StopVirtualCam'); active = false; }
+          ws.send(JSON.stringify({ type: 'obs-virtualcam', data: { ok: true, active } }));
+        } catch (e) {
+          ws.send(JSON.stringify({ type: 'obs-virtualcam', data: { ok: false, reason: (e && e.message) || 'Virtual camera unavailable' } }));
+        }
       })();
       break;
     }
@@ -14906,9 +14931,14 @@ function startHttpServer(baseDir) {
   });
 
   // ── Overwolf GEP → Marvel Rivals live game data ─────────────────────────────
-  // Called by a companion Overwolf app running on the spectator PC.
-  // Body: { roster: [{name,character_name,team,kills,deaths,assists,ult_charge,is_alive}×12],
-  //         map: string, match_outcome: string|null, banned_characters: string[] }
+  // Called by the companion Overwolf app (companion-overwolf/) on a PC that is IN the
+  // match — GEP reads the local client (see docs/marvel-rivals-production.md §3).
+  // Body: { roster: [{name,character_name,character_id,team,kills,deaths,assists,ult_charge,is_alive,…}×12],
+  //         map, game_mode, game_type, match_id, scene, match_outcome,
+  //         banned_characters: [{character_id,character_name,is_teammate}], selected_character,
+  //         player_stats: {damage_dealt,damage_block,accuracy,total_heal},
+  //         objective_progress: {game_mode,checkpoint,left_capture,right_capture,team},
+  //         events: ['match_start'|'round_start'|'round_end'|'match_end' | {name:'kill_feed',data:{attacker,victim}}] }
   app.post('/api/mr-gep', express.json({ limit: '64kb' }), (req, res) => {
     const body = req.body || {};
     if (!state.mrMatch) {
@@ -14920,9 +14950,40 @@ function startHttpServer(baseDir) {
       lastSeen: Date.now(),
       roster: Array.isArray(body.roster) ? body.roster.slice(0, 12) : (prevGep.roster || []),
       map: typeof body.map === 'string' && body.map ? body.map : (prevGep.map || null),
+      game_mode: typeof body.game_mode === 'string' && body.game_mode ? body.game_mode : (prevGep.game_mode || null),
+      game_type: typeof body.game_type === 'string' && body.game_type ? body.game_type : (prevGep.game_type || null),
+      match_id: body.match_id || prevGep.match_id || null,
+      scene: body.scene || prevGep.scene || null,
       match_outcome: body.match_outcome || null,
-      banned_characters: Array.isArray(body.banned_characters) ? body.banned_characters : (prevGep.banned_characters || [])
+      banned_characters: Array.isArray(body.banned_characters) ? body.banned_characters : (prevGep.banned_characters || []),
+      selected_character: body.selected_character || prevGep.selected_character || null,
+      player_stats: body.player_stats || prevGep.player_stats || null,
+      objective_progress: body.objective_progress || prevGep.objective_progress || null,
+      killFeed: Array.isArray(prevGep.killFeed) ? prevGep.killFeed : []
     };
+    // Auto game-mode: GEP mode strings map onto the series scoreboard's mode set
+    // (objective_progress.game_mode is the reliable one; match_info.game_mode is a display name).
+    const mrGm = String(body.game_mode || (body.objective_progress && body.objective_progress.game_mode) || '').toLowerCase();
+    const mrHit = ['convergence', 'domination', 'convoy'].find((k) => mrGm.includes(k.slice(0, 6)));
+    if (mrHit) state.mrMatch.gameMode = mrHit;
+    // GEP match/round events → Flow triggers (same shape as the Overwatch relay above).
+    // kill_feed entries accumulate on gepData.killFeed (last 12) for overlay use.
+    const MR_EVENT_TRIGGERS = { match_start: 'mr_match_start', round_start: 'mr_round_start', round_end: 'mr_round_end', match_end: 'mr_match_end' };
+    (Array.isArray(body.events) ? body.events : []).forEach((ev) => {
+      const name = String((typeof ev === 'string' ? ev : (ev && ev.name)) || '').toLowerCase();
+      if (name === 'kill_feed') {
+        const kf = (ev && ev.data) || {};
+        state.mrMatch.gepData.killFeed = state.mrMatch.gepData.killFeed
+          .concat([{ attacker: kf.attacker || null, victim: kf.victim || null, ts: Date.now() }]).slice(-12);
+        return;
+      }
+      const trig = MR_EVENT_TRIGGERS[name];
+      if (trig) flowBus.emit(trig, {
+        map: state.mrMatch.gepData.map || null,
+        game_mode: state.mrMatch.gepData.game_mode || null,
+        match_outcome: state.mrMatch.gepData.match_outcome || null
+      });
+    });
     broadcastFullState();
     res.json({ ok: true });
   });

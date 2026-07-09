@@ -2947,7 +2947,14 @@ function _returnGraphicsToProd() {
   });
 
   // Schedule — clear (push uses the existing btn-gfx-schedule-push).
-  el('btn-gfx-schedule-clear')?.addEventListener('click', () => send('set_upcoming', { visible: false }));
+  el('btn-gfx-schedule-clear')?.addEventListener('click', () => {
+  // Full reset — hide the overlay, empty the board, AND detach from start.gg so the
+  // next poll can't refill it (that refill made a linked event impossible to clear).
+  send('set_upcoming', { visible: false, matches: [] });
+  send('startgg_set_upcoming_mode', { mode: 'manual' });
+  if (typeof window._schClearLocal === 'function') window._schClearLocal();
+  showToast('Schedule cleared — start.gg auto-fill off (pull or Event mode re-enables it)', '#22c55e');
+});
 
   // Bracket — show/hide the bracket overlay.
   el('btn-show-bracket')?.addEventListener('click', () => send('set_bracket_settings', { visible: true }));
@@ -3390,6 +3397,9 @@ function _returnGraphicsToProd() {
     if (row && actions) front.insertBefore(row, actions);
   })();
 
+  // Full-clear hook for the Clear button (defined here because _schMatches is module-scoped).
+  window._schClearLocal = function () { _schMatches = []; _schInitialized = true; schRenderList(); };
+
   // Server echo -> local truth: edits made anywhere else (the pop-out list, pulls,
   // a second panel window) land here on the next broadcast instead of after a refresh.
   window._schSyncFromState = function (data) {
@@ -3496,7 +3506,14 @@ function _returnGraphicsToProd() {
     const st = el('gfx-sch-status');
     if (st) { st.textContent = `Pushed ${payload.matches.length} match${payload.matches.length !== 1 ? 'es' : ''} live.`; setTimeout(() => { st.textContent = ''; }, 2500); }
   });
-  el('btn-gfx-schedule-clear')?.addEventListener('click', () => send('set_upcoming', { visible: false }));
+  el('btn-gfx-schedule-clear')?.addEventListener('click', () => {
+  // Full reset — hide the overlay, empty the board, AND detach from start.gg so the
+  // next poll can't refill it (that refill made a linked event impossible to clear).
+  send('set_upcoming', { visible: false, matches: [] });
+  send('startgg_set_upcoming_mode', { mode: 'manual' });
+  if (typeof window._schClearLocal === 'function') window._schClearLocal();
+  showToast('Schedule cleared — start.gg auto-fill off (pull or Event mode re-enables it)', '#22c55e');
+});
 
   // Layout toggle — persist immediately so the preview iframe updates
   el('gfx-sch-layout')?.addEventListener('change', (e) => {
