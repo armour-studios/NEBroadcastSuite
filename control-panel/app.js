@@ -68,8 +68,30 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     // pane while Production is active, then returned so they stay in the customize system.
     if (tab === 'produccion') _returnGraphicsToProd();
     else _borrowGraphicsToDash();
+    // Show Deck: one element shared between the Talent page and the Dashboard (above the Talent
+    // Monitor). Lend it to the grid on the Dashboard, return it to the Talent page otherwise.
+    placeShowDeck(tab);
   });
 });
+
+// The Show Deck (#talent-deck) is a dashboard widget (id 'showdeck') AND the Talent page's allocation
+// strip. Those pages are never visible together, so the single element is moved: into #dash-grid when
+// the Dashboard (principal) is open — ordered above the Talent Monitor via the widget config — and back
+// to #talent-showdeck-home on the Talent page (or any other tab) so that page keeps it.
+function placeShowDeck(tab) {
+  const sd = el('talent-deck'); if (!sd) return;
+  if (tab === 'principal') {
+    const g = el('dash-grid');
+    if (g && sd.parentElement !== g) g.appendChild(sd);
+    if (typeof applyDashLayout === 'function') applyDashLayout();
+  } else {
+    const home = el('talent-showdeck-home');
+    if (home && sd.parentElement !== home) home.appendChild(sd);
+    // Dashboard customize can hide/reorder the widget via inline styles — clear them so the Talent
+    // page always shows the deck in its normal spot regardless of the dashboard toggle.
+    sd.style.display = ''; sd.style.order = '';
+  }
+}
 
 // ── DCC: Director Control Center — flat nav (Monitor | Players | Hosts | Teams+OOS) ──
 (function initDCC() {
@@ -319,6 +341,10 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
   // Caster slots go through save_caster_to_library's deskSlot (same swap/bump plumbing the
   // Casters lineup uses, so the desk + DCC follow automatically); Host/Observer are show
   // roles; the On-shift chips toggle crew.active — many casters a night, few active a shift.
+  // Support / tournament-operations roles (crew.group values) — no camera slot, but they worked the
+  // event so they're credited. Keep in sync with the #td-support-role-sel options in index.html.
+  const TD_SUPPORT_LABEL = { producer: 'Producer', admin: 'Tournament Admin', coordinator: 'Coordinator', replay: 'Replay Op', stats: 'Statistician', moderator: 'Moderator', graphics: 'Graphics', flex: 'Flex', socials: 'Social' };
+  const TD_SUPPORT_GROUPS = Object.keys(TD_SUPPORT_LABEL);
   window._tdSig = '';
   window.renderTalentDeck = function renderTalentDeck(data) {
     const wrap = el('td-slots'); const roster = el('td-roster-chips');
@@ -332,30 +358,33 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     const byId = {}; lib.forEach((l) => { if (l && l.id) byId[l.id] = l; });
     const slotName = (n) => { const e = lineup.find((x) => Number(x.slot) === n); const p = e && byId[e.libraryId]; return (p && p.name) || ''; };
     const shifts = (data.casters && data.casters.shifts) || [];
-    const sig = JSON.stringify({ c: crew.map((c) => [c.id, c.name, c.handle, c.group, !!c.active, c.country || '']), s: [1, 2, 3, 4].map(slotName), r: roles, l: labels, sh: shifts.map((s) => s.id + s.name) });
+    const sig = JSON.stringify({ c: crew.map((c) => [c.id, c.name, c.handle, c.group, !!c.active, !!c.workedEvent, c.country || '']), s: [1, 2, 3, 4].map(slotName), r: roles, l: labels, sh: shifts.map((s) => s.id + s.name) });
     if (sig === window._tdSig) return;
     window._tdSig = sig;
     const disp = (c) => c.handle || c.name;   // gamertag-first, matching the desk
-    const group = (g, roleRe) => crew.filter((c) => (c.group || '') === g || roleRe.test(c.role || ''));
-    const casters = group('casters', /caster/i), hosts = group('hosts', /host/i), observers = group('observers', /observer/i);
-    const tdMatch = (list, typed) => {
+    // Every slot searches the WHOLE crew. Assigning someone to a spot is what gives them the role,
+    // so there's no reason to pre-filter by group — and pre-filtering hid anyone already sitting in a
+    // slot who wasn't classified under that group, so the slot showed blank and they couldn't be found
+    // or cleared even though the desk still had them.
+    const tdMatch = (typed) => {
       const q = (typed || '').trim().toLowerCase(); if (!q) return null;
-      return list.find((c) => disp(c).toLowerCase() === q) || list.find((c) => (c.name || '').toLowerCase() === q) || null;
+      return crew.find((c) => disp(c).toLowerCase() === q) || crew.find((c) => (c.name || '').toLowerCase() === q) || null;
     };
     // Text input + <datalist> (type to filter) instead of a plain <select> — a long crew roster
     // was impossible to search, and there was no way to add someone new without leaving the deck.
-    const cell = (label, id, list, cur, variant) => {
-      const curC = list.find((c) => c.name === cur);
+    const cell = (label, id, cur, variant) => {
+      const curC = crew.find((c) => c.name === cur);
+      // Fall back to the raw slot name when the occupant isn't a crew record (e.g. added straight to
+      // the desk) so the slot still SHOWS who's in it — a blank slot you can't clear was the bug.
       return `<div class="td-slot td-slot--${variant}"><span class="td-slot-lbl">${esc(label)}</span>
-        <input type="text" class="input-text td-sel" id="${id}" list="${id}-dl" value="${esc(curC ? disp(curC) : '')}" placeholder="Search crew…" autocomplete="off">
-        <datalist id="${id}-dl">${list.map((c) => `<option value="${esc(disp(c))}">`).join('')}</datalist></div>`;
+        <input type="text" class="input-text td-sel" id="${id}" list="${id}-dl" value="${esc(curC ? disp(curC) : (cur || ''))}" placeholder="Search crew…" autocomplete="off">
+        <datalist id="${id}-dl">${crew.map((c) => `<option value="${esc(disp(c))}">`).join('')}</datalist></div>`;
     };
     wrap.innerHTML =
-      cell('Host', 'td-host', hosts.length ? hosts : crew, roles.host || '', 'host')
-      + [1, 2, 3, 4].map((n) => cell(labels[n] || ('Caster ' + n), 'td-c' + n, casters.length ? casters : crew, slotName(n), 'caster')).join('')
-      + cell('Observer', 'td-obs', observers.length ? observers : crew, roles.observer || '', 'obs');
+      cell('Host', 'td-host', roles.host || '', 'host')
+      + [1, 2, 3, 4].map((n) => cell(labels[n] || ('Caster ' + n), 'td-c' + n, slotName(n), 'caster')).join('')
+      + cell('Observer', 'td-obs', roles.observer || '', 'obs');
     [1, 2, 3, 4].forEach((n) => {
-      const list = casters.length ? casters : crew;
       el('td-c' + n)?.addEventListener('change', function () {
         const typed = this.value.trim();
         if (!typed) {
@@ -363,17 +392,16 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
           if (cur) send('save_caster_to_library', { name: cur, kind: 'caster', deskSlot: 0 });
           return;
         }
-        const m = tdMatch(list, typed);
+        const m = tdMatch(typed);
         if (!m) { this.value = ''; showToast(`No crew member named "${typed}" — use + Add Crew above to create them first.`, '#fbbf24'); return; }
         this.value = disp(m);
         send('save_caster_to_library', { name: m.name, kind: 'caster', social: m.social, socialHandle: m.socialHandle, country: m.country, deskSlot: n });
       });
     });
     const sendRoles = () => {
-      const hostList = hosts.length ? hosts : crew, obsList = observers.length ? observers : crew;
       const hostInp = el('td-host'), obsInp = el('td-obs');
       const hostTyped = (hostInp?.value || '').trim(), obsTyped = (obsInp?.value || '').trim();
-      const hostM = tdMatch(hostList, hostTyped), obsM = tdMatch(obsList, obsTyped);
+      const hostM = tdMatch(hostTyped), obsM = tdMatch(obsTyped);
       if (hostTyped && !hostM) { if (hostInp) hostInp.value = ''; showToast(`No crew member named "${hostTyped}" — use + Add Crew above to create them first.`, '#fbbf24'); }
       else if (hostInp && hostM) hostInp.value = disp(hostM);
       if (obsTyped && !obsM) { if (obsInp) obsInp.value = ''; showToast(`No crew member named "${obsTyped}" — use + Add Crew above to create them first.`, '#fbbf24'); }
@@ -382,50 +410,127 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     };
     el('td-host')?.addEventListener('change', sendRoles);
     el('td-obs')?.addEventListener('change', sendRoles);
-    roster.innerHTML = '';
-    if (!crew.length) { roster.innerHTML = '<span class="field-hint" style="margin:0;">No crew yet — add people below.</span>'; return; }
     const flag = (typeof flagSrc === 'function') ? flagSrc : () => '';
-    crew.forEach((c) => {
-      const chip = document.createElement('button');
-      chip.type = 'button';
-      chip.className = 'td-chip' + (c.active ? ' is-active' : '');
-      const cn = (typeof countryName === 'function' && c.country) ? countryName(c.country) : '';
-      chip.title = (cn ? disp(c) + ' · ' + cn + ' — ' : disp(c) + ' — ')
-        + (c.active ? 'on shift, click to mark off' : 'off shift, click to mark active');
+    // A removable member chip (flag + name + ×) shared by On shift and Worked this event.
+    const memberChip = (c, rmAttr) => {
       const cc = (c.country || '').toLowerCase();
-      chip.innerHTML = (cc ? `<img class="td-chip-flag" src="${esc(flag(cc))}" alt="" onerror="this.remove()">` : '')
-        + `<span>${esc(disp(c))}</span>`;
-      chip.addEventListener('click', () => send('update_crew_member', { id: c.id, active: !c.active }));
-      roster.appendChild(chip);
-    });
+      const cn = (typeof countryName === 'function' && c.country) ? countryName(c.country) : '';
+      return `<button type="button" class="td-chip is-active" ${rmAttr}="${esc(c.id)}" title="${esc(cn ? disp(c) + ' · ' + cn : disp(c))} — click to remove">`
+        + (cc ? `<img class="td-chip-flag" src="${esc(flag(cc))}" alt="" onerror="this.remove()">` : '')
+        + `<span>${esc(disp(c))}</span><span class="td-chip-x">&times;</span></button>`;
+    };
+    // On shift = who's working RIGHT NOW (active). Only these show here; search above to add someone.
+    const onNow = crew.filter((c) => c.active);
+    roster.innerHTML = onNow.length
+      ? onNow.map((c) => memberChip(c, 'data-onshift-rm')).join('')
+      : '<span class="field-hint" style="margin:0;">No one on shift — search above to put someone on.</span>';
+    // Worked this event = the credit pool. Anyone put on shift or on the desk lands here automatically
+    // and STAYS after a Clear, so everyone who did their dues gets credited. Search above to add others.
+    const workedWrap = el('td-worked-chips');
+    if (workedWrap) {
+      const worked = crew.filter((c) => c.workedEvent);
+      workedWrap.innerHTML = worked.length
+        ? worked.map((c) => memberChip(c, 'data-worked-rm')).join('')
+        : '<span class="field-hint" style="margin:0;">No one credited yet — anyone on shift or on the desk is added automatically.</span>';
+    }
+    // Support crew — producers / tournament-ops / socials (no camera slot). Shown here so they get
+    // credited too; searching + assigning reclassifies an EXISTING crew member's group.
+    const supportWrap = el('td-support-list');
+    if (supportWrap) {
+      const support = crew.filter((c) => TD_SUPPORT_GROUPS.includes(c.group));
+      supportWrap.innerHTML = support.length ? support.map((c) =>
+        `<span class="dcc-support-chip" data-id="${esc(c.id)}">`
+        + `<span class="nm">${esc(disp(c))}</span>`
+        + `<span class="rl">${esc(c.role || TD_SUPPORT_LABEL[c.group] || '')}</span>`
+        + `<button type="button" class="rm" data-support-rm="${esc(c.id)}" title="Remove from support crew">&times;</button></span>`
+      ).join('') : '<span class="dcc-support-empty">No producers, ops or socials added yet.</span>';
+    }
+    // Shared crew datalist for the On shift / Worked / Support search boxes.
+    ['td-crew-dl', 'td-support-dl'].forEach((id) => { const dl = el(id); if (dl) dl.innerHTML = crew.map((c) => `<option value="${esc(disp(c))}">`).join(''); });
     // Saved shifts — click applies (slots + roles + on-shift marks + display options), × deletes.
     const shiftWrap = el('td-shift-chips');
     if (shiftWrap) {
       shiftWrap.innerHTML = '';
-      if (!shifts.length) shiftWrap.innerHTML = '<span class="field-hint" style="margin:0;">No saved shifts yet.</span>';
+      if (!shifts.length) shiftWrap.innerHTML = '<span class="field-hint" style="margin:0;">No saved presets yet — set up the desk, then Save preset.</span>';
+      const activeShiftId = (data.casters && data.casters.activeShiftId) || '';
       shifts.forEach((s) => {
+        const isLoaded = s.id === activeShiftId;
         const chip = document.createElement('span');
-        chip.className = 'td-chip td-shift-chip';
-        chip.title = 'Apply shift "' + (s.name || '') + '" — sets the desk slots, roles, on-shift marks and display options';
-        chip.innerHTML = `<button type="button" class="td-shift-apply">${esc(s.name || 'Shift')}</button><button type="button" class="td-shift-del" title="Delete this shift">×</button>`;
+        chip.className = 'td-chip td-shift-chip' + (isLoaded ? ' is-active' : '');
+        chip.title = (isLoaded ? 'Currently loaded. ' : '') + 'Apply preset "' + (s.name || '') + '" — sets the desk slots, roles, on-shift marks and display options';
+        chip.innerHTML = `<button type="button" class="td-shift-apply">${isLoaded ? '● ' : ''}${esc(s.name || 'Preset')}</button><button type="button" class="td-shift-del" title="Delete this preset">×</button>`;
         chip.querySelector('.td-shift-apply').addEventListener('click', () => {
           send('apply_shift', { id: s.id });
-          showToast('Shift applied: ' + (s.name || 'Shift'), '#22c55e');
+          showToast('Preset applied: ' + (s.name || 'Preset'), '#22c55e');
         });
         chip.querySelector('.td-shift-del').addEventListener('click', async () => {
-          if (await appConfirm(`Delete the saved shift "${s.name}"? The current allocation is not affected.`, 'Delete')) send('delete_shift', { id: s.id });
+          if (await appConfirm(`Delete the preset "${s.name}"? The current allocation is not affected.`, 'Delete')) send('delete_shift', { id: s.id });
         });
         shiftWrap.appendChild(chip);
       });
     }
   };
   el('td-add-crew')?.addEventListener('click', () => { if (typeof window.openCrewAdd === 'function') window.openCrewAdd(); });
+  // Resolve a typed name/handle to a crew member (shared by the On shift / Worked / Support adders).
+  const _tdFindCrew = (typed) => {
+    const q = (typed || '').trim().toLowerCase(); if (!q) return null;
+    const list = (currentState && currentState.crew) || [];
+    const d = (c) => c.handle || c.name;
+    return list.find((c) => d(c).toLowerCase() === q) || list.find((c) => (c.name || '').toLowerCase() === q) || null;
+  };
+  // On shift: put an existing crew member on shift (also flags them worked → credited).
+  const _tdAddOnShift = () => {
+    const inp = el('td-onshift-search'); const m = _tdFindCrew(inp?.value);
+    if (!m) { showToast('Search for an existing crew member first (+ Add Crew to create one).', '#fbbf24'); return; }
+    send('update_crew_member', { id: m.id, active: true });
+    if (inp) inp.value = '';
+    showToast(`${m.handle || m.name} on shift`, '#22c55e');
+  };
+  el('td-onshift-add')?.addEventListener('click', _tdAddOnShift);
+  el('td-onshift-search')?.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); _tdAddOnShift(); } });
+  el('td-roster-chips')?.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-onshift-rm]'); if (!btn) return;
+    // Off shift — keep workedEvent so they stay credited (that's the whole point of the Worked list).
+    send('update_crew_member', { id: btn.dataset.onshiftRm, active: false });
+  });
+  // Worked this event: manually credit someone who isn't on the desk (guest, fill-in, etc.).
+  const _tdAddWorked = () => {
+    const inp = el('td-worked-search'); const m = _tdFindCrew(inp?.value);
+    if (!m) { showToast('Search for an existing crew member first (+ Add Crew to create one).', '#fbbf24'); return; }
+    send('update_crew_member', { id: m.id, workedEvent: true });
+    if (inp) inp.value = '';
+    showToast(`${m.handle || m.name} added to the credits`, '#22c55e');
+  };
+  el('td-worked-add')?.addEventListener('click', _tdAddWorked);
+  el('td-worked-search')?.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); _tdAddWorked(); } });
+  el('td-worked-chips')?.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-worked-rm]'); if (!btn) return;
+    // Remove from credits entirely (also takes them off shift so the two lists can't disagree).
+    send('update_crew_member', { id: btn.dataset.workedRm, workedEvent: false, active: false });
+  });
+  el('td-support-assign')?.addEventListener('click', () => {
+    const inp = el('td-support-search'); const typed = (inp?.value || '').trim();
+    if (!typed) { showToast('Search for an existing crew member first.', '#fbbf24'); return; }
+    const m = _tdFindCrew(typed);
+    if (!m) { showToast(`No crew member named "${typed}" — use + Add Crew to create them first.`, '#fbbf24'); return; }
+    const group = el('td-support-role-sel')?.value || 'producer';
+    // Support crew worked the event → credit them (workedEvent), same as anyone on the desk.
+    send('update_crew_member', { id: m.id, group, workedEvent: true });
+    if (inp) inp.value = '';
+    showToast(`${m.handle || m.name} added to support crew`, '#22c55e');
+  });
+  el('td-support-list')?.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-support-rm]'); if (!btn) return;
+    // Un-assign from Support Crew, don't delete — the Show Deck is per-event, the crew record
+    // (and their credit history) needs to survive to the next one.
+    send('update_crew_member', { id: btn.dataset.supportRm, group: '' });
+  });
   el('td-shift-save')?.addEventListener('click', async () => {
-    const name = await customPrompt('Save shift', 'Name this shift — saving the current slots, roles, on-shift marks and display options.', '', 'Save');
+    const name = await customPrompt('Save preset', 'Name this desk preset — saves the current slots, roles, on-shift marks and display options so you can re-apply them in one click.', '', 'Save');
     if (name) send('save_shift', { name });
   });
   el('td-shift-clear')?.addEventListener('click', async () => {
-    if (await appConfirm('Clear all desk slots, show roles and on-shift marks? Saved shifts are kept.', 'Clear')) send('clear_shift');
+    if (await appConfirm('Clear the desk slots, show roles and on-shift marks? Everyone stays in "Worked this event" so they keep their credit. Saved presets are untouched.', 'Clear')) send('clear_shift');
   });
 
   // Group filter pills → sync hidden select + re-render
@@ -969,10 +1074,47 @@ function renderDccTeamSection(side) {
   });
 })();
 
+// Producers / tournament admins / social media — backend crew with no camera, so they sit in a
+// plain list under the 3 camera columns rather than needing a VDO-room "kind" of their own.
+function renderDccSupportCrew() {
+  const wrap = el('dcc-support-list'); if (!wrap) return;
+  const crew = (currentState && currentState.crew) || [];
+  const members = crew.filter((c) => c && ['producer', 'admin', 'socials'].includes(c.group));
+  const countEl = el('dcc-support-count'); if (countEl) countEl.textContent = members.length;
+  const LABEL = { producer: 'Producer', admin: 'Admin', socials: 'Social' };
+  wrap.innerHTML = members.length ? members.map((c) => {
+    const disp = c.handle || c.name;
+    return `<span class="dcc-support-chip" data-id="${tlEsc(c.id)}">`
+      + `<span class="nm">${tlEsc(disp)}</span>`
+      + `<span class="rl">${tlEsc(c.role || LABEL[c.group] || '')}</span>`
+      + `<button type="button" class="rm" data-support-rm="${tlEsc(c.id)}" title="Remove from crew">&times;</button></span>`;
+  }).join('') : '<span class="dcc-support-empty">No producers, admins or socials added yet.</span>';
+  const dl = el('dcc-support-dl');
+  if (dl) dl.innerHTML = crew.map((c) => `<option value="${tlEsc(c.handle || c.name)}">`).join('');
+}
+el('dcc-support-assign')?.addEventListener('click', () => {
+  const inp = el('dcc-support-search'); const typed = (inp?.value || '').trim();
+  if (!typed) { showToast('Search for an existing crew member first.', '#fbbf24'); return; }
+  const crewList = (currentState && currentState.crew) || [];
+  const disp = (c) => c.handle || c.name;
+  const m = crewList.find((c) => disp(c).toLowerCase() === typed.toLowerCase())
+    || crewList.find((c) => (c.name || '').toLowerCase() === typed.toLowerCase());
+  if (!m) { showToast(`No crew member named "${typed}" — add them on the Crew tab first.`, '#fbbf24'); return; }
+  const group = el('dcc-support-role-sel')?.value || 'producer';
+  send('update_crew_member', { id: m.id, group });
+  if (inp) inp.value = '';
+  showToast(`${disp(m)} added to Support Crew`, '#22c55e');
+});
+el('dcc-support-list')?.addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-support-rm]'); if (!btn) return;
+  send('update_crew_member', { id: btn.dataset.supportRm, group: '' });
+});
+
 function renderDccAll() {
   renderDccTeamSection('blue');
   renderDccTeamSection('orange');
   renderDccHostsPane();
+  renderDccSupportCrew();
   // The DCC hosts the In-Game Player Cams grid (#dcc-playercams-rows) too — render it here so it
   // populates whenever the DCC is shown, not only after opening the Match-Teams gear / Players tab
   // (which left it empty on the DCC, so there was nothing to assign cams to).
@@ -4084,6 +4226,10 @@ if (_popoutPage === 'triggers') {
       if (btn) btn.click();
       if (wasScenes && typeof window._assetsShow === 'function') window._assetsShow('overlays');
       if (wasBrands && typeof window._assetsShow === 'function') window._assetsShow('profiles');
+    } else if (typeof placeShowDeck === 'function') {
+      // Dashboard is the active tab on load but no tab-button click fires for it — lend the Show
+      // Deck into the grid now so it shows above the Talent Monitor on first paint.
+      placeShowDeck('principal');
     }
   });
 }
@@ -13368,6 +13514,7 @@ const DASH_WIDGETS = [
   { id: 'graphics', title: 'Graphics',       icon: 'sparkles',   desc: 'Full graphics hub — scenes, preview and settings',  sel: '[data-dash-id="graphics"]', defaultOn: true,  span: 'full', fixedSpan: 'full' },
   { id: 'onair',    title: 'On Air',         icon: 'zap',        desc: 'Quick-toggle card grid for all overlays',           sel: '[data-dash-id="onair"]',    defaultOn: false, span: 'full' },
   { id: 'adslots',  title: 'Ad Slots',       icon: 'film',       desc: 'Sponsor ad slots and commercial break controls',    sel: '[data-dash-id="adslots"]',  defaultOn: true,  span: 'full' },
+  { id: 'showdeck', title: 'Show Deck',      icon: 'mic',        desc: "Tonight's desk lineup — caster slots, on-shift crew, saved shifts (shared with the Talent page)", sel: '[data-dash-id="showdeck"]', defaultOn: true,  span: 'full', fixedSpan: 'full' },
   { id: 'director', title: 'Talent Monitor', icon: 'zap',        desc: 'Live VDO talent monitor — rooms, transfers, staging (the AI director lives in Production, NEURAL AI)', sel: '[data-dash-id="director"]', defaultOn: true,  span: 'full' },
   { id: 'series',   title: 'Series',         icon: 'trophy',     desc: 'Best-of series scoreboard and match history',     sel: '[data-dash-id="series"]',   defaultOn: false, span: '1'    },
   { id: 'talent',   title: 'Talent',         icon: 'mic',        desc: 'On-air talent, camera feeds and VDO rooms',      sel: '[data-dash-id="talent"]',   defaultOn: false, span: '1'    },
@@ -13410,6 +13557,17 @@ function applyDashLayout() {
       cfg.panels.splice(oi, 0, gp);
     }
     cfg._gfxMigrated = true;
+    setDashCfg(cfg);
+  }
+  // One-time: drop the new Show Deck widget in right above the Talent Monitor for existing users
+  // (fresh configs already get it in order from DASH_WIDGETS).
+  if (!cfg._showdeckMigrated) {
+    if (!cfg.panels.find((p) => p.id === 'showdeck')) {
+      const di = cfg.panels.findIndex((p) => p.id === 'director');
+      const entry = { id: 'showdeck', on: true, span: 'full' };
+      if (di >= 0) cfg.panels.splice(di, 0, entry); else cfg.panels.push(entry);
+    }
+    cfg._showdeckMigrated = true;
     setDashCfg(cfg);
   }
 

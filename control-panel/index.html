@@ -1671,6 +1671,27 @@
             </div>
 
           </div>
+
+          <!-- Support crew — producers, tournament admins, social media. No camera/VDO room (that's
+               what the 3 columns above are for), so this is a plain add/list, not a drop column. -->
+          <div class="dcc-support-crew" id="dcc-support-crew">
+            <div class="dcc-hosts-col-hd">
+              <span class="dcc-section-badge" style="background:#f59e0b;">SUPPORT</span>
+              <span class="dcc-section-name">Producers, Admins &amp; Socials <span style="font-weight:400;color:var(--muted);">— no camera needed</span></span>
+              <span class="dcc-hosts-col-count" id="dcc-support-count" style="margin-left:auto;font-size:10px;color:var(--muted);font-weight:700;">0</span>
+            </div>
+            <div style="display:flex; gap:6px; padding:8px 12px 0;">
+              <input type="text" id="dcc-support-search" class="input-text" list="dcc-support-dl" placeholder="Search existing crew…" autocomplete="off" style="flex:1; min-width:0; font-size:12px;">
+              <datalist id="dcc-support-dl"></datalist>
+              <select id="dcc-support-role-sel" class="input-select" title="Which support role to file them under" style="flex:0 0 128px; font-size:12px;">
+                <option value="producer">Producer</option>
+                <option value="admin">Tournament Admin</option>
+                <option value="socials">Social Media</option>
+              </select>
+              <button type="button" class="btn btn-ghost btn-sm" id="dcc-support-assign" style="flex-shrink:0;">Add</button>
+            </div>
+            <div class="dcc-support-list" id="dcc-support-list"></div>
+          </div>
         </div><!-- /dcc-db-hosts -->
 
         <!-- STAGING pane: Teams + Hosts -->
@@ -2359,24 +2380,80 @@
     </div>
   </div>
 
-  <!-- ── Show Deck: tonight's allocation — visible on every Talent sub-tab. Caster slots drive
-       the desk lineup + DCC; Host/Observer are show roles; the On-shift chips mark who is
-       actively working right now (many casters per night, few active per shift). ── -->
-  <div class="talent-deck" id="talent-deck">
-    <div class="td-slots" id="td-slots"></div>
-    <div class="td-roster">
-      <span class="td-roster-lbl">On shift</span>
-      <div class="td-roster-chips" id="td-roster-chips"></div>
-    </div>
-    <div class="td-shifts">
-      <span class="td-roster-lbl">Shifts</span>
-      <div class="td-shift-row">
-        <div class="td-shift-chips" id="td-shift-chips"></div>
-        <button type="button" class="btn btn-ghost btn-sm" id="td-shift-save" title="Save the current allocation (slots, roles, on-shift marks, display options) as a named shift">Save shift</button>
-        <button type="button" class="btn btn-ghost btn-sm" id="td-shift-clear" style="color:var(--danger-2);" title="Clear all slots, roles and on-shift marks (saved shifts stay)">Clear</button>
+  <!-- ── Show Deck: tonight's allocation — visible on every Talent sub-tab AND lent to the Dashboard
+       above the Talent Monitor (data-dash-id="showdeck"; the single element is moved between here and
+       #dash-grid on page switch — see placeShowDeck). Caster slots drive the desk lineup + DCC;
+       Host/Observer are show roles; On-shift chips mark who is actively working right now. ── -->
+  <div id="talent-showdeck-home">
+  <div class="talent-deck" id="talent-deck" data-dash-id="showdeck" data-dash-span="full">
+    <div class="td-head">
+      <div class="td-head-titles">
+        <span class="td-title">Show Deck</span>
+        <span class="td-sub">Tonight's desk lineup &mdash; drives the caster overlays &amp; DCC</span>
+      </div>
+      <div class="td-head-opts">
+        <div class="td-opt" title="Desk overlays show each caster's gamertag/handle instead of their profile name">
+          <span>Gamertag on desk</span><label class="switch"><input type="checkbox" id="crew-name-gamertag" checked><span class="slider"></span></label>
+        </div>
+        <div class="td-opt" title="Show each caster's country flag on the desk overlay">
+          <span>Country on desk</span><label class="switch"><input type="checkbox" id="crew-show-country"><span class="slider"></span></label>
+        </div>
+        <button type="button" class="btn btn-ghost btn-sm" id="td-add-crew" title="Add a new crew member without leaving the Show Deck">+ Add Crew</button>
       </div>
     </div>
+    <div class="td-section">
+      <span class="td-roster-lbl">Desk lineup</span>
+      <div class="td-slots" id="td-slots"></div>
+    </div>
+    <datalist id="td-crew-dl"></datalist>
+    <div class="td-section">
+      <span class="td-roster-lbl">Current shift <span class="td-lbl-hint">who's working right now — drives the desk &amp; auto-credits them</span></span>
+      <div style="display:flex; gap:6px; margin:2px 0 8px;">
+        <input type="text" id="td-onshift-search" class="input-text td-sel" list="td-crew-dl" placeholder="Search crew to start their shift…" autocomplete="off" style="flex:1; min-width:0;">
+        <button type="button" class="btn btn-ghost btn-sm" id="td-onshift-add" style="flex-shrink:0;">Start shift</button>
+      </div>
+      <div class="td-roster-chips" id="td-roster-chips"></div>
+    </div>
+    <div class="td-section">
+      <span class="td-roster-lbl">Earlier shifts &amp; credits <span class="td-lbl-hint">casters &amp; crew from other shifts of this broadcast — credited alongside the current shift; survives Clear, click &times; to remove</span></span>
+      <div style="display:flex; gap:6px; margin:2px 0 8px;">
+        <input type="text" id="td-worked-search" class="input-text td-sel" list="td-crew-dl" placeholder="Search crew to credit…" autocomplete="off" style="flex:1; min-width:0;">
+        <button type="button" class="btn btn-ghost btn-sm" id="td-worked-add" style="flex-shrink:0;">Add credit</button>
+      </div>
+      <div class="td-roster-chips" id="td-worked-chips"></div>
+    </div>
+    <div class="td-section">
+      <span class="td-roster-lbl">Support crew <span class="td-lbl-hint">producers, tournament ops, flex &amp; socials — no camera, but credited</span></span>
+      <div style="display:flex; gap:6px; margin:2px 0 8px;">
+        <input type="text" id="td-support-search" class="input-text td-sel" list="td-support-dl" placeholder="Search existing crew…" autocomplete="off" style="flex:1; min-width:0;">
+        <datalist id="td-support-dl"></datalist>
+        <select id="td-support-role-sel" class="input-select" title="Which support / tournament-ops role to file them under" style="flex:0 0 150px;">
+          <option value="producer">Producer</option>
+          <option value="admin">Tournament Admin</option>
+          <option value="coordinator">Coordinator</option>
+          <option value="replay">Replay Operator</option>
+          <option value="stats">Statistician</option>
+          <option value="moderator">Moderator</option>
+          <option value="graphics">Graphics</option>
+          <option value="flex">Flex / Utility</option>
+          <option value="socials">Social Media</option>
+        </select>
+        <button type="button" class="btn btn-ghost btn-sm" id="td-support-assign" style="flex-shrink:0;">Add</button>
+      </div>
+      <div class="dcc-support-list" id="td-support-list"></div>
+    </div>
+    <div class="td-shifts">
+      <div class="td-shift-head">
+        <span class="td-roster-lbl">Presets <span class="td-lbl-hint">save &amp; re-apply a whole desk setup in one click</span></span>
+        <div class="td-shift-actions">
+          <button type="button" class="btn btn-ghost btn-sm" id="td-shift-save" title="Save the current allocation (slots, roles, on-shift marks, display options) as a named preset">Save preset</button>
+          <button type="button" class="btn btn-ghost btn-sm" id="td-shift-clear" style="color:var(--danger-2);" title="Clear the desk slots, roles and on-shift marks — everyone stays credited in Worked this event; presets are untouched">Clear</button>
+        </div>
+      </div>
+      <div class="td-shift-chips" id="td-shift-chips"></div>
+    </div>
   </div>
+  </div><!-- /talent-showdeck-home -->
 
   <div id="talent-panel-teams">
 
@@ -2421,6 +2498,9 @@
         <button type="button" class="talent-page-btn" data-group="hosts">Hosts</button>
         <button type="button" class="talent-page-btn" data-group="guests">Guests</button>
         <button type="button" class="talent-page-btn" data-group="observers">Observers</button>
+        <button type="button" class="talent-page-btn" data-group="producer">Producers</button>
+        <button type="button" class="talent-page-btn" data-group="admin">Admin</button>
+        <button type="button" class="talent-page-btn" data-group="socials">Social Media</button>
       </div>
       <input type="text" id="crew-search" class="input-text" placeholder="Search name, handle, role…" style="flex:1; min-width:150px; max-width:260px;">
       <!-- Hidden select for JS compatibility -->
@@ -2430,6 +2510,9 @@
         <option value="hosts">Hosts</option>
         <option value="guests">Guests</option>
         <option value="observers">Observers</option>
+        <option value="producer">Producers</option>
+        <option value="admin">Admin</option>
+        <option value="socials">Social Media</option>
       </select>
     </div>
 
@@ -2437,12 +2520,7 @@
     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
       <h3 class="section-title" style="margin-bottom: 0;">Crew <span id="crew-count" style="color:var(--muted); font-weight:400; font-size:13px;"></span></h3>
       <div style="display:flex; gap:8px; align-items:center;">
-        <label class="dcc-slot-toggle" style="margin:0;" title="Desk overlays show each caster's gamertag/handle instead of their profile name">
-          <input type="checkbox" id="crew-name-gamertag" checked> Gamertag on desk
-        </label>
-        <label class="dcc-slot-toggle" style="margin:0;" title="Show each caster's country on the desk overlay">
-          <input type="checkbox" id="crew-show-country"> Show country on desk
-        </label>
+        <span class="field-hint" style="margin:0 4px 0 0;">Gamertag &amp; country desk options are on the Show Deck above.</span>
         <button class="btn btn-ghost btn-sm" id="crew-sort-btn" style="white-space:nowrap;">Sort A-Z</button>
         <button class="btn btn-ghost btn-sm" id="crew-delete-all-btn" style="white-space:nowrap; color:#f56565;" title="Delete all crew members">Delete All</button>
       </div>
@@ -4796,6 +4874,7 @@
                 </div>
                 <p class="field-hint" style="margin:6px 0 0;">The compact lower-third companion — auto-shows these picks once any are made. Switch to the <strong>Series Score</strong> mode above to edit its format/stage or use it standalone before any maps are picked.</p>
               </div>
+              <button type="button" class="btn btn-ghost btn-sm" id="btn-veto-front-open" style="width:100%;margin-top:14px;">Open full board</button>
             </div>
 
             <!-- DRAFT — compact status readout + Start Draft quick action. Overwatch gets a real
@@ -4960,6 +5039,14 @@
                 </div>
                 <div id="credits-talent-list" style="display:flex; flex-wrap:wrap; gap:6px; margin-top:8px;"></div>
                 <p class="field-hint" style="margin:4px 0 0;">Crew from other shifts who aren't in the current lineup — they join the top talent bar under the group you pick, alongside the auto-credited live crew.</p>
+              </div>
+              <div class="field-row" style="margin-top:14px; padding-top:12px; border-top:1px solid var(--border);">
+                <label class="field-label">Pull an event's whole crew from Show Deck shifts</label>
+                <div style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
+                  <select id="credits-shift-event" class="input-select" style="flex:1; min-width:180px;"><option value="">Choose an event…</option></select>
+                  <button type="button" class="btn btn-secondary btn-sm" id="credits-pull-shifts" style="flex-shrink:0;">Pull crew</button>
+                </div>
+                <p class="field-hint" style="margin:4px 0 0;">Saved shifts on the Show Deck are tagged with whichever event was live when you saved them. Pick one here to add everyone from its saved shifts — cams, host/observer, and any crew marked on-shift (producers, admins, socials included) — to the credits list above in one go.</p>
               </div>
             </div>
           </div>
@@ -5391,6 +5478,9 @@
               .vm-map.picked { cursor:default; } .vm-map.decider { border-color:#ffd34d !important; cursor:default; }
               .vm-map .vm-by { position:absolute; top:5px; left:5px; z-index:2; font-size:10px; font-weight:800; letter-spacing:.5px;
                 padding:1px 6px; border-radius:4px; color:#fff; background:rgba(0,0,0,.55); }
+              .vm-map .vm-mode { position:absolute; top:5px; right:5px; z-index:2; width:20px; height:20px; border-radius:5px;
+                background:rgba(0,0,0,.55); padding:3px; box-sizing:border-box; }
+              .vm-map .vm-mode img { position:static; width:100%; height:100%; object-fit:contain; opacity:1; }
               .vm-actions { display:flex; gap:8px; flex-wrap:wrap; }
             </style>
             <div class="veto-mgr">
@@ -9090,6 +9180,9 @@ PacketSendRate=10</pre>
           <option value="hosts">Hosts</option>
           <option value="guests">Guests / Lobby</option>
           <option value="observers">Observers</option>
+          <option value="producer">Producer</option>
+          <option value="admin">Tournament Admin</option>
+          <option value="socials">Social Media</option>
         </select>
       </div>
     </div>
@@ -9299,6 +9392,15 @@ PacketSendRate=10</pre>
     .dcc-add-empty { font-size:11px; color:var(--muted); text-align:center; padding:18px 8px; line-height:1.5; }
     .dcc-hosts-drop { flex:1; padding:8px; overflow-y:auto; transition:background .15s; display:flex; flex-direction:column; gap:6px; min-height:60px; }
     .dcc-hosts-drop.drag-over { background:rgba(124,58,237,.08); outline:2px dashed rgba(167,139,250,.45); outline-offset:-4px; border-radius:8px; }
+    /* Support crew strip (producers/admins/socials) — a plain list under the 3 camera columns, not a 4th one. */
+    .dcc-support-crew { flex:0 0 auto; margin:0 14px 14px; border:1px solid var(--border); border-radius:12px; overflow:hidden; background:rgba(255,255,255,.02); }
+    .dcc-support-list { display:flex; flex-wrap:wrap; gap:6px; padding:10px 12px; }
+    .dcc-support-empty { font-size:11px; color:var(--muted); padding:2px; }
+    .dcc-support-chip { display:inline-flex; align-items:center; gap:6px; padding:5px 6px 5px 10px; border-radius:99px; background:var(--surface2); border:1px solid var(--border); font-size:12px; }
+    .dcc-support-chip .nm { font-weight:600; }
+    .dcc-support-chip .rl { color:var(--muted); font-size:11px; }
+    .dcc-support-chip .rm { border:0; background:none; color:var(--muted); cursor:pointer; font-size:13px; line-height:1; padding:2px 4px; border-radius:50%; }
+    .dcc-support-chip .rm:hover { color:#fff; background:rgba(255,255,255,.12); }
     /* Host cards inherit .talent-row + .mc-player; card treatment + drag affordance */
     .dcc-host-card { cursor:grab; margin-bottom:0; background:rgba(255,255,255,.03); border:1px solid var(--border); border-radius:10px; transition:border-color .12s, background .12s; }
     .dcc-host-card:hover { border-color:rgba(255,255,255,.18); background:rgba(255,255,255,.05); }
