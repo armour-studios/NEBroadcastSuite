@@ -495,6 +495,52 @@ function render() {
   const groups   = groupLog(activityLog);
   const activeSecs = SECTIONS.filter((s) => groups[s.key] && groups[s.key].length);
 
+  // ── Header: brand kit logo + (only if labeled) the TITLE sponsor plate ──
+  const _hdrBrand = fullState.brand || {};
+  const _bl = document.getElementById('cr-brand-logo');
+  if (_bl) { if (_hdrBrand.logo) { _bl.src = _hdrBrand.logo; _bl.style.display = ''; } else { _bl.style.display = 'none'; _bl.removeAttribute('src'); } }
+  const _tsWrap = document.getElementById('cr-title-spon');
+  const _tsLogo = document.getElementById('cr-ts-logo');
+  const _titleSpot = _hdrBrand.spots && _hdrBrand.spots.title;
+  if (_tsWrap) { _tsWrap.classList.toggle('is-empty', !_titleSpot); if (_titleSpot && _tsLogo) _tsLogo.src = _titleSpot; }
+
+  // ── Left rail: TOP 8 from the event standings (manual rows win, else bracket) ──
+  const _t8 = document.getElementById('cr-top8');
+  if (_t8) {
+    const _rows = ((fullState.standings && fullState.standings.rows && fullState.standings.rows.length)
+      ? fullState.standings.rows : (fullState.bracket && fullState.bracket.standings) || [])
+      .filter((r) => r && r.name).slice(0, 8);
+    const _logoOf = (name) => {
+      const k = (name || '').toLowerCase().trim();
+      const sv = (fullState.savedTeams || []).find((t) => t && (t.name || '').toLowerCase().trim() === k);
+      if (sv && sv.logo) return sv.logo;
+      return (((fullState.startgg || {}).logoMap) || {})[k] || '';
+    };
+    _t8.classList.toggle('is-empty', !_rows.length);
+    _t8.innerHTML = !_rows.length ? '' : '<div class="cr-rail-head">Top 8</div>' + _rows.map((r, i) => {
+      const lg = _logoOf(r.name);
+      const rec = (r.wins != null || r.losses != null) ? ((r.wins || 0) + '-' + (r.losses || 0)) : '';
+      return '<div class="cr-top8-row"><span class="cr-top8-rank">' + (r.placement || i + 1) + '</span>'
+        + (lg ? '<img class="cr-top8-logo" src="' + lg + '" alt="">' : '')
+        + '<span class="cr-top8-name">' + esc(r.name) + '</span>'
+        + (rec ? '<span class="cr-top8-rec">' + rec + '</span>' : '') + '</div>';
+    }).join('');
+  }
+
+  // ── Right rail: Twitch activity summary — counts per type + latest names ──
+  const _act = document.getElementById('cr-activity');
+  if (_act) {
+    _act.classList.toggle('is-empty', !activeSecs.length);
+    _act.innerHTML = !activeSecs.length ? '' : '<div class="cr-rail-head">Stream Activity</div>' + activeSecs.map((sec) => {
+      const list = groups[sec.key] || [];
+      const names = list.slice(-4).map((e) => esc(e.username || e.from || '')).filter(Boolean).join(', ');
+      return '<div class="cr-act-row"><span class="cr-act-ico">' + sec.icon + '</span>'
+        + '<span class="cr-act-lbl">' + sec.label + '</span>'
+        + '<span class="cr-act-count">' + list.length + '</span></div>'
+        + (names ? '<div class="cr-act-names">' + names + '</div>' : '');
+    }).join('');
+  }
+
   renderTalentBar(talent);
   positionViewport();   // pin the roll flush under the (variable-height) staff bar — no dead space
   renderSponsorBar(brandSpon);
