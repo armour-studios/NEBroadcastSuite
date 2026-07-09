@@ -14863,6 +14863,34 @@ function startHttpServer(baseDir) {
     } catch (e) { res.status(500).json({ ok: false, message: e.message }); }
   });
 
+  // ── Overwolf GEP → Overwatch live game data ─────────────────────────────────
+  // Called by the companion Overwolf app on the spectator PC (same relay pattern as
+  // Marvel Rivals below). Body: { roster: [{player_name,battlenet_tag,hero_name,hero_role,
+  // team,kills,deaths,assists,damage,healed,mitigated,is_local}×12], map, game_mode,
+  // game_state, match_outcome }
+  app.post('/api/ow-gep', express.json({ limit: '64kb' }), (req, res) => {
+    const b = req.body || {};
+    if (!state.owMatch) {
+      state.owMatch = { visible: true, format: 'FT3', currentMapIdx: 0, bansByMap: [], gameMode: 'escort', showMapLabels: true, mapWinners: [], mapModes: [], gepData: null };
+    }
+    const prev = state.owMatch.gepData || {};
+    state.owMatch.gepData = {
+      gepConnected: true,
+      lastSeen: Date.now(),
+      roster: Array.isArray(b.roster) ? b.roster.slice(0, 12) : (prev.roster || []),
+      map: (typeof b.map === 'string' && b.map) ? b.map : (prev.map || null),
+      game_mode: (typeof b.game_mode === 'string' && b.game_mode) ? b.game_mode : (prev.game_mode || null),
+      game_state: b.game_state || prev.game_state || null,
+      match_outcome: b.match_outcome || null
+    };
+    // Auto game-mode: GEP mode strings map cleanly onto the scoreboard's mode set.
+    const gm = String(b.game_mode || '').toLowerCase();
+    const hit = ['escort', 'hybrid', 'control', 'push', 'flashpoint', 'clash'].find((k) => gm.includes(k));
+    if (hit) state.owMatch.gameMode = hit;
+    broadcastFullState();
+    res.json({ ok: true });
+  });
+
   // ── Overwolf GEP → Marvel Rivals live game data ─────────────────────────────
   // Called by a companion Overwolf app running on the spectator PC.
   // Body: { roster: [{name,character_name,team,kills,deaths,assists,ult_charge,is_alive}×12],

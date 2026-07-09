@@ -185,6 +185,14 @@ html,body{width:1920px;height:1080px;overflow:hidden;background:transparent;
   background:rgba(255,255,255,.08);
 }
 .ow-mode-icon img{width:14px;height:14px;object-fit:contain}
+/* ── Live heroes (Overwolf GEP): one icon per player, red ring = currently on a banned hero ── */
+.ow-live { position: absolute; top: calc(100% + 8px); display: flex; gap: 6px; align-items: center; }
+#ow-live-a { left: 14px; }
+#ow-live-b { right: 14px; }
+.ow-live img { width: 34px; height: 34px; border-radius: 7px; object-fit: cover;
+  background: #10131a; border: 1px solid rgba(255,255,255,.28);
+  filter: drop-shadow(0 2px 6px rgba(0,0,0,.6)); }
+.ow-live img.is-banned { border-color: #ef4444; box-shadow: 0 0 10px rgba(239,68,68,.65); }
 </style>
 </head>
 <body>
@@ -520,7 +528,60 @@ function setText(id,v){const e=document.getElementById(id);if(e)e.textContent=v;
 function setSrc(id,v) {const e=document.getElementById(id);if(e)e.src=v;}
 function setStyle(id,p,v){const e=document.getElementById(id);if(e)e.style[p]=v;}
 
-SceneBase.connect(render);
+// ── Live heroes from the Overwolf GEP relay (/api/ow-gep) ──
+// Orients the two GEP teams onto the broadcast sides by matching player names against
+// each team's saved roster; falls back to first-seen team order when nothing matches.
+function renderLiveHeroes(data){
+  var gep = data.owMatch && data.owMatch.gepData;
+  var fresh = gep && gep.gepConnected && Array.isArray(gep.roster) && gep.roster.length && (Date.now() - (gep.lastSeen || 0)) < 60000;
+  var idx = (data.owMatch && data.owMatch.currentMapIdx) || 0;
+  var bans = {};
+  try {
+    [].concat(getBanNames(data, idx, 'a'), getBanNames(data, idx, 'b')).forEach(function(n){ if (n) bans[String(n).toLowerCase()] = 1; });
+  } catch (e) {}
+  var rosterOf = function(side){
+    var t = (data.teams || {})[side === 'a' ? 'blue' : 'orange'] || {};
+    return (t.players || []).map(function(p){ return String(p.gamerTag || p.name || '').toLowerCase().split('#')[0]; }).filter(Boolean);
+  };
+  var known = { a: rosterOf('a'), b: rosterOf('b') };
+  var teamVals = [];
+  (fresh ? gep.roster : []).forEach(function(p){ var tv = String(p.team); if (teamVals.indexOf(tv) < 0) teamVals.push(tv); });
+  var map = {}; // gep team value -> 'a' | 'b'
+  if (teamVals.length) {
+    var votes = { };
+    teamVals.forEach(function(tv){ votes[tv] = { a: 0, b: 0 }; });
+    gep.roster.forEach(function(p){
+      var nm = String(p.player_name || p.name || '').toLowerCase().split('#')[0];
+      if (!nm) return;
+      var tv = String(p.team);
+      ['a', 'b'].forEach(function(side){
+        if (known[side].some(function(x){ return x === nm || x.indexOf(nm) > -1 || nm.indexOf(x) > -1; })) votes[tv][side]++;
+      });
+    });
+    var first = teamVals[0], second = teamVals[1];
+    var firstIsB = votes[first] && votes[first].b > votes[first].a;
+    map[first] = firstIsB ? 'b' : 'a';
+    if (second !== undefined) map[second] = firstIsB ? 'a' : 'b';
+  }
+  ['a', 'b'].forEach(function(side){
+    var panel = document.getElementById('ow-panel-' + side);
+    var host = document.getElementById('ow-live-' + side);
+    if (!host && panel) { host = document.createElement('div'); host.className = 'ow-live'; host.id = 'ow-live-' + side; panel.appendChild(host); }
+    if (!host) return;
+    if (!fresh) { host.innerHTML = ''; host.style.display = 'none'; return; }
+    var players = gep.roster.filter(function(p){ return map[String(p.team)] === side; }).slice(0, 6);
+    host.style.display = players.length ? 'flex' : 'none';
+    host.innerHTML = players.map(function(p){
+      var hero = p.hero_name || '';
+      var url = hero ? heroImgUrl(hero) : '';
+      if (!url) return '';
+      var banned = bans[hero.toLowerCase()] ? ' is-banned' : '';
+      var title = (p.player_name || '') + (hero ? ' — ' + hero : '') + (banned ? ' (BANNED HERO)' : '');
+      return '<img class="' + banned.trim() + '" src="' + url + '" alt="" title="' + title.replace(/"/g, '&quot;') + '" onerror="this.remove()">';
+    }).join('');
+  });
+}
+SceneBase.connect(function(data){ render(data); try { renderLiveHeroes(data); } catch (e) {} });
 
 // Rotate center pill between game counter and map history every 5 seconds
 (function(){
