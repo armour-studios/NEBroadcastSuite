@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html>
+<!-- NE Broadcast Suite — Overwolf relay for Overwatch (game id 10844).
+     Load as an unpacked extension in the Overwolf client on the PC running the game:
+     Overwolf settings > About > Development options > Load unpacked extension.
+     Set SUITE_URL below to the PC running NE Broadcast Suite. -->
+<head><meta charset="utf-8"><title>NE Relay</title></head>
+<body>
+<script>
+// Where NE Broadcast Suite is running (port 3000). localhost if it's the same PC.
+var SUITE_URL = 'http://localhost:3000/api/ow-gep';
+
+var FEATURES = ['gep_internal', 'game_info', 'match_info', 'kill', 'death', 'assist', 'roster'];
+var stateBuf = { roster: {}, map: null, game_mode: null, game_state: null, match_outcome: null };
+var pendingEvents = [];
+var dirty = false;
+
+function post() {
+  if (!dirty && !pendingEvents.length) return;
+  var roster = Object.keys(stateBuf.roster).map(function (k) { return stateBuf.roster[k]; });
+  var body = { roster: roster, map: stateBuf.map, game_mode: stateBuf.game_mode,
+    game_state: stateBuf.game_state, match_outcome: stateBuf.match_outcome, events: pendingEvents };
+  pendingEvents = []; dirty = false;
+  try {
+    fetch(SUITE_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+      .catch(function () {});
+  } catch (e) {}
+}
+setInterval(post, 1500);   // steady relay cadence; events also ride the next tick
+
+function onInfo(info) {
+  try {
+    var d = info && (info.info || info);
+    if (d.match_info) {
+      if (d.match_info.map) { stateBuf.map = String(d.match_info.map); dirty = true; }
+      if (d.match_info.match_outcome) { stateBuf.match_outcome = String(d.match_info.match_outcome); dirty = true; }
+    }
+    if (d.game_info) {
+      if (d.game_info.game_mode) { stateBuf.game_mode = String(d.game_info.game_mode); dirty = true; }
+      if (d.game_info.game_state) { stateBuf.game_state = String(d.game_info.game_state); dirty = true; }
+    }
+    if (d.roster) {
+      // roster arrives as roster_0..roster_11 keys holding JSON strings
+      Object.keys(d.roster).forEach(function (k) {
+        try {
+          var p = typeof d.roster[k] === 'string' ? JSON.parse(d.roster[k]) : d.roster[k];
+          if (p && (p.player_name || p.hero_name)) { stateBuf.roster[k] = p; dirty = true; }
+        } catch (e) {}
+      });
+    }
+  } catch (e) {}
+}
+
+function onEvents(e) {
+  try {
+    ((e && e.events) || []).forEach(function (ev) {
+      var n = String(ev.name || '').toLowerCase();
+      if (['match_start', 'match_end', 'round_start', 'round_end'].indexOf(n) > -1) {
+        if (n === 'match_start' || n === 'round_start') stateBuf.match_outcome = null;
+        if (n === 'match_end' || n === 'match_start') stateBuf.roster = {};   // fresh lobby next map
+        pendingEvents.push(n); dirty = true;
+      }
+    });
+  } catch (e2) {}
+}
+
+function setFeatures() {
+  overwolf.games.events.setRequiredFeatures(FEATURES, function (r) {
+    if (!r || r.status !== 'success') setTimeout(setFeatures, 3000);   // game still loading — retry
+  });
+}
+
+overwolf.games.events.onInfoUpdates2.addListener(onInfo);
+overwolf.games.events.onNewEvents.addListener(onEvents);
+overwolf.games.onGameInfoUpdated.addListener(function (u) {
+  if (u && u.gameInfo && u.gameInfo.isRunning && Math.floor(u.gameInfo.id / 10) === 10844) setFeatures();
+});
+overwolf.games.getRunningGameInfo(function (g) { if (g && g.isRunning) setFeatures(); });
+</script>
+</body>
+</html>
