@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<!-- ow-hud.html — Overwatch IN-GAME HUD driven by REAL game data (Overwolf GEP relay).
+     The series scoreboard (overwatch.html) stays the between-maps scene; this is the
+     live companion: team bar up top, per-player hero/K-D-A/damage/healing strips on the
+     bottom edges. Data: state.owMatch.gepData (via /api/ow-gep), teams/series from state.
+     ?preview=1 renders sample data. -->
+<head>
+<meta charset="utf-8">
+<title>NE Broadcast Suite — Overwatch HUD</title>
+<link rel="stylesheet" href="/fonts.css">
+<style>
+  :root { --accent: #e83a8b; --accent-2: #8b5cf6; --col-a: #3b82f6; --col-b: #f06414; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 1920px; height: 1080px; overflow: hidden; background: transparent;
+    font-family: 'Rajdhani', 'Inter', system-ui, sans-serif; color: #fff; -webkit-font-smoothing: antialiased; }
+  #stage { position: absolute; inset: 0; opacity: 0; transition: opacity .35s ease; }
+  #stage.show { opacity: 1; }
+
+  /* ── Top team bar ── */
+  .tb { position: absolute; top: 0; left: 50%; transform: translateX(-50%);
+    display: flex; align-items: stretch; height: 56px;
+    background: linear-gradient(180deg, rgba(10,12,18,.97), rgba(16,19,28,.94));
+    border: 1px solid rgba(255,255,255,.12); border-top: none; border-radius: 0 0 12px 12px;
+    box-shadow: 0 8px 28px rgba(0,0,0,.5); overflow: hidden; }
+  .tb-side { display: flex; align-items: center; gap: 12px; padding: 0 18px; min-width: 300px; }
+  .tb-side.a { border-bottom: 3px solid var(--col-a); }
+  .tb-side.b { border-bottom: 3px solid var(--col-b); flex-direction: row-reverse; }
+  .tb-name { font-weight: 800; font-size: 24px; text-transform: uppercase; letter-spacing: .04em;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 300px; }
+  .tb-logo { width: 34px; height: 34px; object-fit: contain; }
+  .tb-mid { display: flex; align-items: center; gap: 10px; padding: 0 16px;
+    background: rgba(0,0,0,.45); font-weight: 900; font-size: 30px; font-variant-numeric: tabular-nums; }
+  .tb-mid .dash { color: rgba(255,255,255,.4); font-size: 20px; }
+  .tb-sub { position: absolute; top: 58px; left: 50%; transform: translateX(-50%);
+    font-size: 12px; font-weight: 800; letter-spacing: .22em; text-transform: uppercase;
+    color: rgba(255,255,255,.85); text-shadow: 0 1px 6px rgba(0,0,0,.8); white-space: nowrap; }
+
+  /* ── Bottom player strips ── */
+  .ps { position: absolute; bottom: 14px; display: flex; flex-direction: column; gap: 6px; width: 460px; }
+  .ps.a { left: 14px; }
+  .ps.b { right: 14px; }
+  .pr { display: grid; grid-template-columns: 40px 1fr 76px 62px 62px; align-items: center; gap: 8px;
+    height: 44px; padding: 0 10px 0 0; border-radius: 8px; overflow: hidden;
+    background: linear-gradient(90deg, rgba(8,10,16,.94), rgba(14,17,26,.88));
+    border: 1px solid rgba(255,255,255,.1); border-left: 3px solid var(--tc, var(--col-a)); }
+  .ps.b .pr { border-left: none; border-right: 3px solid var(--tc, var(--col-b)); }
+  .pr img.hero { width: 40px; height: 44px; object-fit: cover; background: #10131a; }
+  .pr img.hero.dead { filter: grayscale(1) brightness(.5); }
+  .pr .nm { font-weight: 700; font-size: 17px; text-transform: uppercase; white-space: nowrap;
+    overflow: hidden; text-overflow: ellipsis; padding-left: 8px; }
+  .pr .kda { font-weight: 800; font-size: 16px; font-variant-numeric: tabular-nums; text-align: center;
+    color: rgba(255,255,255,.95); }
+  .pr .stat { font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums; text-align: center; line-height: 1.05; }
+  .pr .stat b { display: block; font-size: 15px; }
+  .pr .stat.dmg b { color: #fca5a5; } .pr .stat.heal b { color: #86efac; }
+  .pr .stat span { font-size: 8px; font-weight: 800; letter-spacing: .12em; color: rgba(255,255,255,.5); text-transform: uppercase; }
+  .ps-empty { display: none; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <div class="tb">
+    <div class="tb-side a"><img class="tb-logo" id="logo-a" style="display:none"><span class="tb-name" id="name-a">BLUE</span></div>
+    <div class="tb-mid"><span id="score-a">0</span><span class="dash">–</span><span id="score-b">0</span></div>
+    <div class="tb-side b"><img class="tb-logo" id="logo-b" style="display:none"><span class="tb-name" id="name-b">ORANGE</span></div>
+  </div>
+  <div class="tb-sub" id="tb-sub"></div>
+  <div class="ps a" id="ps-a"></div>
+  <div class="ps b" id="ps-b"></div>
+</div>
+<script src="scene-base.js"></script>
+<script>
+(function () {
+  var el = function (id) { return document.getElementById(id); };
+  function heroSlug(n) { return String(n || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''); }
+  function heroImg(n) { var s = heroSlug(n); return s ? '/assets/overwatch/heroes/' + s + '.png' : ''; }
+  function esc(x) { return String(x == null ? '' : x).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+  function short(n) { return Math.round(Number(n) || 0).toLocaleString(); }
+
+  function orient(gep, teams) {
+    // GEP team values -> broadcast sides by roster-name vote (same rule as overwatch.html).
+    var known = { a: [], b: [] };
+    ['a', 'b'].forEach(function (s) {
+      var t = teams[s === 'a' ? 'blue' : 'orange'] || {};
+      known[s] = (t.players || []).map(function (p) { return String(p.gamerTag || p.name || '').toLowerCase().split('#')[0]; }).filter(Boolean);
+    });
+    var vals = [];
+    gep.roster.forEach(function (p) { var v = String(p.team); if (vals.indexOf(v) < 0) vals.push(v); });
+    var map = {};
+    if (vals.length) {
+      var v0 = vals[0], bScore = 0, aScore = 0;
+      gep.roster.forEach(function (p) {
+        if (String(p.team) !== v0) return;
+        var nm = String(p.player_name || '').toLowerCase().split('#')[0];
+        if (known.a.some(function (x) { return x === nm; })) aScore++;
+        if (known.b.some(function (x) { return x === nm; })) bScore++;
+      });
+      map[v0] = bScore > aScore ? 'b' : 'a';
+      if (vals[1] !== undefined) map[vals[1]] = map[v0] === 'a' ? 'b' : 'a';
+    }
+    return map;
+  }
+
+  var _sig = '';
+  function render(data) {
+    var stage = el('stage');
+    var teams = data.teams || {};
+    var gep = (data.owMatch && data.owMatch.gepData) || null;
+    var fresh = gep && gep.gepConnected && Array.isArray(gep.roster) && gep.roster.length && (Date.now() - (gep.lastSeen || 0)) < 60000;
+    var root = document.documentElement;
+    if (teams.blue && teams.blue.color) root.style.setProperty('--col-a', teams.blue.color);
+    if (teams.orange && teams.orange.color) root.style.setProperty('--col-b', teams.orange.color);
+
+    var sig = JSON.stringify([teams.blue && teams.blue.name, teams.orange && teams.orange.name,
+      data.series, fresh && gep.roster.map(function (p) { return [p.player_name, p.hero_name, p.kills, p.deaths, p.assists, p.damage, p.healed, p.is_alive]; }),
+      fresh && gep.map]);
+    if (sig === _sig) return;
+    _sig = sig;
+
+    ['a', 'b'].forEach(function (s) {
+      var t = teams[s === 'a' ? 'blue' : 'orange'] || {};
+      el('name-' + s).textContent = (t.name || (s === 'a' ? 'BLUE' : 'ORANGE')).toUpperCase();
+      var lg = el('logo-' + s);
+      if (t.logo || t.customLogo) { SceneBase.applyTeamLogo(lg, t.customLogo, t.logo); lg.style.display = ''; } else lg.style.display = 'none';
+    });
+    var ser = data.series || {};
+    el('score-a').textContent = Number(ser.blue) || 0;
+    el('score-b').textContent = Number(ser.orange) || 0;
+    el('tb-sub').textContent = fresh && gep.map ? String(gep.map).toUpperCase() : '';
+
+    var map = fresh ? orient(gep, teams) : {};
+    ['a', 'b'].forEach(function (s) {
+      var host = el('ps-' + s);
+      if (!fresh) { host.innerHTML = ''; return; }
+      var players = gep.roster.filter(function (p) { return map[String(p.team)] === s; }).slice(0, 5);
+      var col = getComputedStyle(root).getPropertyValue(s === 'a' ? '--col-a' : '--col-b').trim();
+      host.innerHTML = players.map(function (p) {
+        var url = heroImg(p.hero_name);
+        var dead = p.is_alive === false ? ' dead' : '';
+        return '<div class="pr" style="--tc:' + col + '">'
+          + (url ? '<img class="hero' + dead + '" src="' + url + '" onerror="this.remove()">' : '<span></span>')
+          + '<span class="nm">' + esc(String(p.player_name || '').split('#')[0]) + '</span>'
+          + '<span class="kda">' + (p.kills || 0) + ' / ' + (p.deaths || 0) + ' / ' + (p.assists || 0) + '</span>'
+          + '<span class="stat dmg"><b>' + short(p.damage) + '</b><span>DMG</span></span>'
+          + '<span class="stat heal"><b>' + short(p.healed) + '</b><span>HEAL</span></span>'
+          + '</div>';
+      }).join('');
+    });
+    stage.classList.add('show');
+  }
+
+  SceneBase.connect(function (data) { SceneBase.applySceneConfig('owhud', data); render(data); });
+
+  if (SceneBase.preview || location.protocol === 'file:') {
+    var mk = function (t, n, h, k, d2, a, dm, he, alive) { return { team: t, player_name: n, hero_name: h, kills: k, deaths: d2, assists: a, damage: dm, healed: he, is_alive: alive !== false }; };
+    render({
+      teams: { blue: { name: 'Frost', color: '#3b82f6', players: [{ gamerTag: 'Aqua' }, { gamerTag: 'Nova' }] },
+               orange: { name: 'Ember', color: '#f06414', players: [{ gamerTag: 'Blaze' }] } },
+      series: { blue: 1, orange: 2 },
+      owMatch: { gepData: { gepConnected: true, lastSeen: Date.now(), map: 'Kings Row', roster: [
+        mk(0, 'Aqua#123', 'Reinhardt', 8, 3, 5, 8420, 0), mk(0, 'Nova#12', 'Kiriko', 4, 2, 14, 3100, 9800),
+        mk(0, 'Rhy#1', 'Sojourn', 15, 4, 3, 11200, 0), mk(0, 'Echo#4', 'Tracer', 12, 6, 2, 9100, 0, false), mk(0, 'Vex#9', 'Lucio', 2, 3, 11, 2100, 7200),
+        mk(1, 'Blaze#77', 'Winston', 6, 5, 7, 6900, 0), mk(1, 'Frostee#2', 'Ana', 3, 2, 16, 2800, 10400),
+        mk(1, 'Kry#8', 'Ashe', 13, 7, 1, 10800, 0), mk(1, 'Momo#3', 'Genji', 10, 8, 4, 8700, 0), mk(1, 'Zed#5', 'Brigitte', 5, 4, 9, 4100, 5600)
+      ] } }
+    });
+  }
+})();
+</script>
+</body>
+</html>

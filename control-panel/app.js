@@ -12511,6 +12511,7 @@ const SCENE_SOURCES = [
     { name: 'Overwatch 2 HUD', path: '/overwatch.html', live: 'always', desc: 'Hero line-up, objective + score HUD.' },
     { name: 'Marvel Rivals HUD', path: '/marvel-rivals.html', live: 'always', desc: 'Hero roster + objective scorebar.' },
     { name: 'LoL HUD', path: '/lol-hud.html', live: 'always', desc: 'Team gold estimate + player loadouts, auto champ-select fill.' },
+    { name: 'Overwatch HUD', path: '/ow-hud.html', live: 'owMatch.visible', desc: 'In-game HUD from the Overwolf relay — live heroes, K/D/A, damage & healing per player.' },
     { name: 'Series Scoreboard', path: '/series.html', live: 'always', desc: 'Standalone series / match scoreboard banner.' },
     { name: 'Mini Station', path: '/ministation.html', live: 'always', desc: 'Compact mini-HUD for split-screen / B-feeds.' },
     { name: 'Director Preview', path: '/director-preview.html', live: 'always', desc: 'Producer-only director bug — add ?director=1.' },
