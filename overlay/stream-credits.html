@@ -244,13 +244,14 @@ function buildTalent(st) {
   // same broadcast. An explicit group pins the bucket; otherwise the role rules decide.
   ((st.credits && st.credits.talent) || []).forEach((t) => {
     if (!t || !t.name) return;
-    if (['casters', 'hosts', 'production', 'observers'].includes(t.group)) add(t.group, t.name, t.role);
+    if (['casters', 'hosts', 'production', 'operations', 'observers'].includes(t.group)) add(t.group, t.name, t.role);
     else place(t.name, t.role, null, null);
   });
   const groups = [];
   if (bucket.casters.length)    groups.push({ label: 'Casters',    people: bucket.casters });
   if (bucket.hosts.length)      groups.push({ label: 'Talent',     people: bucket.hosts });
   if (bucket.production.length) groups.push({ label: 'Production', people: bucket.production });
+  if (bucket.operations.length) groups.push({ label: 'Operations', people: bucket.operations });
   if (bucket.observers.length)  groups.push({ label: 'Observers',  people: bucket.observers });
   return groups;
 }
@@ -341,9 +342,13 @@ function buildEventTeams(st) {
 
 /* ── Brand-kit sponsors → the bottom bar ────────────────────── */
 function brandSponsors(st) {
+  // Bottom sponsor rail: every placed sponsor (rail + desk + banner, deduped by logo);
+  // kits with no placements tagged fall back to the full sponsor list.
   const brand = st.brand || {};
-  const any = (brand.deskSponsors || []).length || (brand.railSponsors || []).length || (brand.bannerSponsors || []).length;
-  return ((brand.deskSponsors || []).length ? brand.deskSponsors : (any ? [] : (brand.sponsors || []))).filter((s) => s && s.logo);
+  const placed = [].concat(brand.railSponsors || [], brand.deskSponsors || [], brand.bannerSponsors || []);
+  const src = placed.length ? placed : (brand.sponsors || []);
+  const seen = new Set();
+  return src.filter((s) => s && s.logo && !seen.has(s.logo) && (seen.add(s.logo), true));
 }
 /* ── Producer-added credit sponsors → the big call-out ──────── */
 function creditSponsors(st) {
@@ -475,8 +480,10 @@ function contentSig() {
   const teams  = buildEventTeams(fullState).map((b) => b.name + '@' + b.players.map((p) => p.name + (p.cc || '')).join(','));
   const spon   = creditSponsors(fullState).map((s) => (s.name || '') + '|' + (s.logo || '').slice(0, 24));
   const bspon  = brandSponsors(fullState).map((s) => (s.logo || '').slice(0, 24));
+  const brandSig = ((fullState.brand && fullState.brand.logo) || '').slice(0, 24) + '|' + ((fullState.brand && fullState.brand.spots && fullState.brand.spots.title) || '').slice(0, 24);
+  const t8sig = (((fullState.standings && fullState.standings.rows && fullState.standings.rows.length) ? fullState.standings.rows : (fullState.bracket && fullState.bracket.standings) || []).slice(0, 8)).map((r) => r.name + (r.wins || 0) + '-' + (r.losses || 0)).join(',');
   const acts   = activityLog.map((e) => e.type + ':' + (e.username || e.from || e.level || ''));
-  return JSON.stringify({ talent, teams, spon, bspon, acts });
+  return JSON.stringify({ talent, teams, spon, bspon, acts, brandSig, t8sig });
 }
 function maybeRender() { const sig = contentSig(); if (sig !== _sig) { _sig = sig; render(); } }
 
