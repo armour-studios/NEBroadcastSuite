@@ -11619,6 +11619,14 @@ function renderOwFrontBoard(data, d) {
     // Keyword match on the hero name OR role ("tank" lists every tank).
     const hits = all.filter((h) => (h.name || '').toLowerCase().includes(q) || (h.role || '').toLowerCase().includes(q)).slice(0, 12);
     if (!hits.length) { hide(); return; }
+    // .team-dd is position:fixed (so card overflow can't clip it) — anchor it to the
+    // input on every open, exactly like the Match — Teams search does.
+    const r = inp.getBoundingClientRect();
+    dd.style.left = r.left + 'px';
+    dd.style.width = r.width + 'px';
+    const below = window.innerHeight - r.bottom;
+    if (below < 260 && r.top > below) { dd.style.top = 'auto'; dd.style.bottom = (window.innerHeight - r.top + 4) + 'px'; }
+    else { dd.style.bottom = 'auto'; dd.style.top = (r.bottom + 4) + 'px'; }
     dd.innerHTML = hits.map((h) =>
       '<div class="team-dd-item" role="option" data-name="' + tlEsc(h.name) + '">'
       + (h.image ? '<img class="team-dd-logo" src="http://localhost:3000' + tlEsc(h.image) + '" alt="" style="object-fit:cover;border-radius:4px;" onerror="this.style.visibility=\'hidden\'">' : '')
