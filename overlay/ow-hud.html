@@ -17,30 +17,22 @@
   #stage { position: absolute; inset: 0; opacity: 0; transition: opacity .35s ease; }
   #stage.show { opacity: 1; }
 
-  /* ── Top team bar ── */
-  .tb { position: absolute; top: 0; left: 50%; transform: translateX(-50%);
-    display: flex; align-items: stretch; height: 56px;
-    background: linear-gradient(180deg, rgba(10,12,18,.97), rgba(16,19,28,.94));
-    border: 1px solid rgba(255,255,255,.12); border-top: none; border-radius: 0 0 12px 12px;
-    box-shadow: 0 8px 28px rgba(0,0,0,.5); overflow: hidden; }
-  .tb-side { display: flex; align-items: center; gap: 12px; padding: 0 18px; min-width: 300px; }
-  .tb-side.a { border-bottom: 3px solid var(--col-a); }
-  .tb-side.b { border-bottom: 3px solid var(--col-b); flex-direction: row-reverse; }
-  .tb-name { font-weight: 800; font-size: 24px; text-transform: uppercase; letter-spacing: .04em;
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 300px; }
-  .tb-logo { width: 34px; height: 34px; object-fit: contain; }
-  .tb-mid { display: flex; align-items: center; gap: 10px; padding: 0 16px;
-    background: rgba(0,0,0,.45); font-weight: 900; font-size: 30px; font-variant-numeric: tabular-nums; }
-  .tb-mid .dash { color: rgba(255,255,255,.4); font-size: 20px; }
-  .tb-sub { position: absolute; top: 58px; left: 50%; transform: translateX(-50%);
-    font-size: 12px; font-weight: 800; letter-spacing: .22em; text-transform: uppercase;
-    color: rgba(255,255,255,.85); text-shadow: 0 1px 6px rgba(0,0,0,.8); white-space: nowrap; }
-
+  /* ── Top team bar — Overwatch in-game style: slanted team plates, color fills ── */
+    .tb { position: absolute; top: 0; left: 50%; transform: translateX(-50%); display: flex; align-items: stretch; height: 54px; filter: drop-shadow(0 6px 22px rgba(0,0,0,.55)); animation: tbIn .5s cubic-bezier(.16,.84,.24,1) both; }
+    @keyframes tbIn { from { opacity: 0; transform: translate(-50%, -60px); } to { opacity: 1; transform: translate(-50%, 0); } }
+    .tb-side { display: flex; align-items: center; gap: 12px; padding: 0 26px; min-width: 320px; position: relative; }
+    .tb-side.a { background: linear-gradient(90deg, color-mix(in srgb, var(--col-a) 88%, #000), color-mix(in srgb, var(--col-a) 55%, #0a0c12)); clip-path: polygon(0 0, 100% 0, calc(100% - 18px) 100%, 0 100%); justify-content: flex-end; }
+    .tb-side.b { background: linear-gradient(270deg, color-mix(in srgb, var(--col-b) 88%, #000), color-mix(in srgb, var(--col-b) 55%, #0a0c12)); clip-path: polygon(18px 0, 100% 0, 100% 100%, 0 100%); flex-direction: row-reverse; justify-content: flex-end; }
+    .tb-name { font-weight: 900; font-size: 26px; text-transform: uppercase; letter-spacing: .05em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 300px; text-shadow: 0 2px 8px rgba(0,0,0,.6); }
+    .tb-logo { width: 36px; height: 36px; object-fit: contain; filter: drop-shadow(0 2px 6px rgba(0,0,0,.6)); }
+    .tb-mid { display: flex; align-items: center; gap: 12px; padding: 0 22px; margin: 0 -10px; z-index: 2; background: linear-gradient(180deg, #171a23, #0b0d13); border-bottom: 3px solid var(--accent); clip-path: polygon(14px 0, calc(100% - 14px) 0, 100% 100%, 0 100%); font-weight: 900; font-size: 32px; font-variant-numeric: tabular-nums; }
+    .tb-mid .dash { color: rgba(255,255,255,.4); font-size: 20px; }
+    .tb-sub { position: absolute; top: 58px; left: 50%; transform: translateX(-50%); font-size: 13px; font-weight: 800; letter-spacing: .3em; text-transform: uppercase; color: #fff; text-shadow: 0 1px 8px rgba(0,0,0,.9); white-space: nowrap; animation: tbIn .5s .15s cubic-bezier(.16,.84,.24,1) both; }
   /* ── Bottom player strips ── */
   .ps { position: absolute; bottom: 14px; display: flex; flex-direction: column; gap: 6px; width: 460px; }
   .ps.a { left: 14px; }
   .ps.b { right: 14px; }
-  .pr { display: grid; grid-template-columns: 40px 1fr 76px 62px 62px; align-items: center; gap: 8px;
+  .pr { animation: prIn .4s cubic-bezier(.16,.84,.24,1) both; display: grid; grid-template-columns: 40px 1fr 76px 62px 62px; align-items: center; gap: 8px;
     height: 44px; padding: 0 10px 0 0; border-radius: 8px; overflow: hidden;
     background: linear-gradient(90deg, rgba(8,10,16,.94), rgba(14,17,26,.88));
     border: 1px solid rgba(255,255,255,.1); border-left: 3px solid var(--tc, var(--col-a)); }
@@ -56,6 +48,9 @@
   .pr .stat.dmg b { color: #fca5a5; } .pr .stat.heal b { color: #86efac; }
   .pr .stat span { font-size: 8px; font-weight: 800; letter-spacing: .12em; color: rgba(255,255,255,.5); text-transform: uppercase; }
   .ps-empty { display: none; }
+  @keyframes prIn { from { opacity: 0; transform: translateX(-16px); } to { opacity: 1; transform: none; } }
+  .ps.b .pr { animation-name: prInB; }
+  @keyframes prInB { from { opacity: 0; transform: translateX(16px); } to { opacity: 1; transform: none; } }
 </style>
 </head>
 <body>
@@ -138,7 +133,7 @@
       host.innerHTML = players.map(function (p) {
         var url = heroImg(p.hero_name);
         var dead = p.is_alive === false ? ' dead' : '';
-        return '<div class="pr" style="--tc:' + col + '">'
+        return '<div class="pr" style="--tc:' + col + ';animation-delay:' + (players.indexOf(p) * 0.07) + 's">'
           + (url ? '<img class="hero' + dead + '" src="' + url + '" onerror="this.remove()">' : '<span></span>')
           + '<span class="nm">' + esc(String(p.player_name || '').split('#')[0]) + '</span>'
           + '<span class="kda">' + (p.kills || 0) + ' / ' + (p.deaths || 0) + ' / ' + (p.assists || 0) + '</span>'
