@@ -2636,7 +2636,6 @@ function _returnGraphicsToProd() {
     // Refresh data pickers so they always show current state when navigated to.
     if (key === 'matchup' && typeof window._gfxRefreshMatchupPickers === 'function') window._gfxRefreshMatchupPickers(currentState);
     if (key === 'winner'  && typeof window._gfxRefreshWinnerPicker   === 'function') window._gfxRefreshWinnerPicker(currentState);
-    if (key === 'credits' && typeof window._gfxFillCreditsTalent === 'function') window._gfxFillCreditsTalent(currentState);
     if (key === 'draft'   && typeof renderDraftManager === 'function') renderDraftManager(currentState);
     // Per-scene appearance preset bar (accent/accent2/font overrides) — retired, per-scene
     // theming duplicated what the active Brand Kit's own color/accent/font already provide and
@@ -19754,79 +19753,7 @@ function gfxSetPathVal(obj, dotted, val) {
   o[parts[parts.length - 1]] = val;
 }
 const GFX_KEY2TRIG = { break: 'breakScreen', winner: 'winner', intro: 'intro', veto: 'veto', spotlight: 'spotlight' };
-// ── Stream Credits: extra talent from the crew database (or typed), grouped ──
-const CREDITS_GROUP_LABEL = { casters: 'Casters', hosts: 'Talent', production: 'Production', observers: 'Observers' };
-window._gfxFillCreditsTalent = function (data) {
-  // Crew picker: casters library + crew entries, "Name — Role" per option.
-  const sel = el('credits-crew-sel');
-  if (sel && document.activeElement !== sel) {
-    const seen = new Set(); const opts = [];
-    const addOpt = (name, role) => { const k = (name || '').toLowerCase(); if (!name || seen.has(k)) return; seen.add(k); opts.push({ name, role: role || '' }); };
-    (((data && data.casters) || {}).library || []).forEach((e) => e && addOpt(e.name, e.role));
-    ((data && data.crew) || []).forEach((c) => c && addOpt(c.name, c.role));
-    const sig = opts.length + '|' + (opts[0] ? opts[0].name : '');
-    if (sel.dataset.sig !== sig) {
-      sel.dataset.sig = sig;
-      sel.innerHTML = '<option value="">From crew database…</option>'
-        + opts.map((o) => '<option value="' + tlEsc(o.name) + '" data-role="' + tlEsc(o.role) + '">' + tlEsc(o.name) + (o.role ? ' — ' + tlEsc(o.role) : '') + '</option>').join('');
-    }
-  }
-  // Event picker for "pull crew from shifts" — only events actually tagged on a saved shift.
-  const evSel = el('credits-shift-event');
-  if (evSel && document.activeElement !== evSel) {
-    const shifts = ((data && data.casters) || {}).shifts || [];
-    const seen = new Map();
-    shifts.forEach((s) => {
-      const key = s.eventSlug || '__none__';
-      if (!seen.has(key)) seen.set(key, s.eventName || (key === '__none__' ? 'No event (untagged shifts)' : key));
-    });
-    const evSig = shifts.length + '|' + [...seen.keys()].join(',');
-    if (evSel.dataset.sig !== evSig) {
-      evSel.dataset.sig = evSig;
-      const prev = evSel.value;
-      evSel.innerHTML = '<option value="">Choose an event…</option>'
-        + [...seen.entries()].map(([slug, name]) => '<option value="' + tlEsc(slug) + '">' + tlEsc(name) + '</option>').join('');
-      if (prev && [...seen.keys()].includes(prev)) evSel.value = prev;
-    }
-  }
-  // Chip list of saved entries.
-  const list = el('credits-talent-list');
-  if (list) {
-    const talent = ((data && data.credits) || {}).talent || [];
-    list.innerHTML = talent.map((t, i) =>
-      '<span class="stat-pill" style="display:inline-flex; align-items:center; gap:6px;">'
-      + tlEsc(t.name) + (t.role ? ' <span style="opacity:.6;">' + tlEsc(t.role) + '</span>' : '')
-      + ' <span style="opacity:.5; font-size:9px;">' + (CREDITS_GROUP_LABEL[t.group] || 'Auto') + '</span>'
-      + '<button type="button" class="reminders-x" data-crd-rm="' + i + '" title="Remove" style="font-size:11px; line-height:1;">&times;</button></span>').join('')
-      || '<span class="field-hint" style="margin:0;">None yet.</span>';
-    if (!list._wired) {
-      list._wired = true;
-      list.addEventListener('click', (e) => {
-        const b = e.target.closest('[data-crd-rm]'); if (!b) return;
-        const cur = ((currentState && currentState.credits) || {}).talent || [];
-        const next = cur.slice(); next.splice(+b.dataset.crdRm, 1);
-        send('set_credits', { talent: next });
-      });
-    }
-  }
-};
-el('credits-crew-sel')?.addEventListener('change', function () {
-  const opt = this.options[this.selectedIndex];
-  const nameInp = el('credits-name'), roleInp = el('credits-role');
-  if (nameInp) nameInp.value = this.value || '';
-  if (roleInp && opt) roleInp.value = opt.dataset.role || '';
-});
-el('credits-talent-add')?.addEventListener('click', () => {
-  const name = (el('credits-name')?.value || '').trim();
-  if (!name) { showToast('Pick someone from the crew list or type a name.', '#fbbf24'); return; }
-  const entry = { name, role: (el('credits-role')?.value || '').trim(), group: el('credits-group-sel')?.value || 'casters' };
-  const cur = ((currentState && currentState.credits) || {}).talent || [];
-  if (cur.some((t) => (t.name || '').toLowerCase() === name.toLowerCase())) { showToast(name + ' is already credited.', '#fbbf24'); return; }
-  send('set_credits', { talent: [...cur, entry] });
-  const sel = el('credits-crew-sel'); if (sel) sel.value = '';
-  ['credits-name', 'credits-role'].forEach((id) => { const i = el(id); if (i) i.value = ''; });
-  showToast('Added ' + name + ' to the credits', '#22c55e');
-});
+
 el('credits-pull-shifts')?.addEventListener('click', () => {
   const chosen = el('credits-shift-event')?.value || '';
   if (!chosen) { showToast('Pick an event first.', '#fbbf24'); return; }
@@ -21589,6 +21516,9 @@ let _csPendingLogo = '';
 function csSponsors() { return (currentState && currentState.credits && Array.isArray(currentState.credits.sponsors)) ? currentState.credits.sponsors : []; }
 function csSave(list) { send('set_credits', { sponsors: list }); }
 function renderCreditSponsors(data) {
+  // End-card text mirrors state (don't clobber while the producer is typing).
+  const et = el('credits-endtext');
+  if (et && document.activeElement !== et) et.value = (data && data.credits && data.credits.endText) || '';
   const list = el('cs-list'); if (!list) return;
   const sponsors = (data && data.credits && Array.isArray(data.credits.sponsors)) ? data.credits.sponsors : csSponsors();
   const sig = JSON.stringify(sponsors);
@@ -21625,6 +21555,13 @@ el('cs-add')?.addEventListener('click', () => {
   if (el('cs-tier')) el('cs-tier').value = '';
   if (el('cs-logo-name')) el('cs-logo-name').textContent = 'No logo';
   if (el('cs-logo-file')) el('cs-logo-file').value = '';
+});
+// End-card text — debounced live edit (blank → overlay shows "Thanks For Watching").
+let _credEndT;
+el('credits-endtext')?.addEventListener('input', function () {
+  clearTimeout(_credEndT);
+  const v = this.value;
+  _credEndT = setTimeout(() => send('set_credits', { endText: v }), 300);
 });
 
 // ── Qrail panels: Run of Show · Flows · Talent (the live command rail) ─────
@@ -24380,7 +24317,6 @@ async function connect() {
       _r('renderQrailScenes',    () => renderQrailScenes(msg.data));
       _r('renderQuickPanel',     () => renderQuickPanel(msg.data));
       _r('renderIntegrationStore', () => renderIntegrationStore(msg.data));
-      _r('creditsTalent',        () => { const p = document.querySelector('[data-gfxpanel="credits"]'); if (p && p.offsetParent !== null && typeof window._gfxFillCreditsTalent === 'function') window._gfxFillCreditsTalent(msg.data); });
       _r('schSync',              () => { if (typeof window._schSyncFromState === 'function') window._schSyncFromState(msg.data); });
       _r('bbSyncTriggerPop',     () => bbSyncTriggerPop());
       _r('renderQrailStartgg',  () => renderQrailStartgg(msg.data));
