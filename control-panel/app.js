@@ -2281,20 +2281,53 @@ function _returnGraphicsToProd() {
       const body = el('gfx-front-draft-body'); if (!body) return;
       const d = data.draft || {};
       const started = !!(d.sequence && d.sequence.length);
-      body.innerHTML = !started
-        ? (empty('No draft started yet.') + qa('draft-start', 'Start Draft'))
-        : (row('Game', tlEsc(d.game || '')) + row('Progress', (d.ops || []).length + ' / ' + d.sequence.length) + row('Status', d.complete ? 'Complete' : 'In progress'));
+      // Overwatch bans ARE the whole draft, so they get a real board on the front card instead
+      // of a status readout — everything else keeps the simple summary + Open-full-board link.
+      const isOwActive = started && d.game === 'overwatch';
+      body.style.display = isOwActive ? 'none' : '';
+      if (!started) {
+        // Rebuild ONLY when the relevant inputs actually change (team names) — this card is
+        // re-rendered on every state broadcast, and blindly replacing the <select>'s innerHTML
+        // each time was destroying it out from under an in-progress click, so "Orange first"
+        // could never register. Gating on a signature keeps the live element stable to interact with.
+        const blueTeam = (data.teams?.blue?.name) || 'Blue';
+        const orangeTeam = (data.teams?.orange?.name) || 'Orange';
+        const sig = 'notstarted::' + blueTeam + '::' + orangeTeam;
+        if (body.dataset.sig !== sig) {
+          body.dataset.sig = sig;
+          const prevStart = el('draft-front-start')?.value;
+          body.innerHTML = empty('No draft started yet.')
+            + `<div class="gfx-pos-row"><span class="gfx-pos-label">First</span>
+                <select id="draft-front-start" class="input-select" style="font-size:12px;">
+                  <option value="a">${tlEsc(blueTeam)} first</option>
+                  <option value="b">${tlEsc(orangeTeam)} first</option>
+                </select></div>`
+            + `<button type="button" class="btn btn-primary btn-sm gfx-pos-qa" id="btn-draft-front-start">Start Draft</button>`;
+          const startSel = el('draft-front-start');
+          if (startSel && (prevStart === 'a' || prevStart === 'b')) startSel.value = prevStart;
+        }
+      } else {
+        body.dataset.sig = '';
+        body.innerHTML = row('Game', tlEsc(d.game || '')) + row('Progress', (d.ops || []).length + ' / ' + d.sequence.length) + row('Status', d.complete ? 'Complete' : 'In progress');
+      }
+      const owWrap = el('gfx-front-draft-ow');
+      if (owWrap) {
+        owWrap.style.display = isOwActive ? '' : 'none';
+        if (isOwActive && typeof renderOwFrontBoard === 'function') renderOwFrontBoard(data, d);
+      }
     }
     // bracket / veto / spotlight: nothing to rebuild — their front panels host persistent real
     // markup (moved-not-cloned from their pop-out editors) that updates itself in place.
   }
   // Quick-action button markup for the Standings/Schedule/Draft summary cards — handled by one
   // delegated listener on the whole front-panel container below.
-  function qa(action, label) { return `<button type="button" class="btn btn-secondary btn-sm gfx-pos-qa" data-qa="${action}">${label}</button>`; }
   el('gfx-popout-summary')?.addEventListener('click', (e) => {
-    const btn = e.target.closest('[data-qa]'); if (!btn) return;
-    const action = btn.dataset.qa;
-    if (action === 'draft-start') el('btn-draft-start')?.click();
+    if (e.target.closest('#btn-draft-front-start')) {
+      send('draft_start', { game: currentState?.activeGame || '', teamStart: el('draft-front-start')?.value || 'a', visible: true });
+      // Same as the popup's Start Draft: gfx.html only shows what gfxActive points at, so the
+      // board has to be pushed live here too or bans made from the front card go nowhere visible.
+      doPush('draft');
+    }
   });
 
   // Inline quick-edit controls on the Standings / Schedule front cards — write straight to state
@@ -2414,8 +2447,10 @@ function _returnGraphicsToProd() {
         summary.querySelectorAll('.gfx-front-panel[data-frontkey]').forEach((p) => { p.style.display = (p.dataset.frontkey === key) ? '' : 'none'; });
         // Spotlight's and Schedule's front cards ARE the whole feature (add, edit,
         // reorder, layout live inline) — their pop-outs only confused things.
+        // Draft has its own "Open full board" button (front-card markup, next to the
+        // Overwatch ban board) — the generic More-settings button would just be a duplicate.
         const moreBtn = el('gfx-popout-summary-open');
-        if (moreBtn) moreBtn.style.display = (key === 'spotlight' || key === 'schedule') ? 'none' : '';
+        if (moreBtn) moreBtn.style.display = (key === 'spotlight' || key === 'schedule' || key === 'draft') ? 'none' : '';
       }
       renderPopoutSummary(key);
     } else {
@@ -2584,6 +2619,13 @@ function _returnGraphicsToProd() {
       const sel = document.createElement('select'); sel.className = 'input-select mp-map-select';
       sel.innerHTML = '<option value="">— Select map —</option>' +
         pool.map((p) => `<option value="${p.id}"${p.name === m.name ? ' selected' : ''}>${p.name}</option>`).join('');
+      const pick = document.createElement('select'); pick.className = 'input-select mp-pick-by';
+      pick.title = 'Who picked this map';
+      pick.style.cssText = 'flex:0 0 auto; max-width:120px; font-size:11px;';
+      pick.innerHTML = '<option value="">Pick: —</option>'
+        + '<option value="a"' + (m.by === 'a' && m.action !== 'decider' ? ' selected' : '') + '>' + dEsc(_tA.slice(0, 12)) + ' pick</option>'
+        + '<option value="b"' + (m.by === 'b' && m.action !== 'decider' ? ' selected' : '') + '>' + dEsc(_tB.slice(0, 12)) + ' pick</option>'
+        + '<option value="decider"' + (m.action === 'decider' ? ' selected' : '') + '>Decider</option>';
       const scA = document.createElement('input'); scA.type = 'number'; scA.className = 'input-text mp-score-a';
       scA.min = '0'; scA.placeholder = _tA.slice(0, 6); scA.title = _tA + ' score';
       scA.style.borderBottom = '2px solid ' + _cA;
@@ -2596,8 +2638,8 @@ function _returnGraphicsToProd() {
       const rm = document.createElement('button'); rm.type = 'button'; rm.className = 'btn btn-ghost btn-xs mp-slot-rm';
       rm.textContent = '×'; rm.title = 'Remove this map slot'; rm.disabled = n <= 1;
       rm.addEventListener('click', () => { mpRenderSlots(mpBuildMapsPayload(true), n - 1); mpSendDebounced(); });
-      [sel, scA, scB].forEach((inp) => { inp.addEventListener('input', mpSendDebounced); inp.addEventListener('change', mpSendDebounced); });
-      row.appendChild(num); row.appendChild(sel); row.appendChild(scA); row.appendChild(sep); row.appendChild(scB); row.appendChild(rm);
+      [sel, pick, scA, scB].forEach((inp) => { inp.addEventListener('input', mpSendDebounced); inp.addEventListener('change', mpSendDebounced); });
+      row.appendChild(num); row.appendChild(sel); row.appendChild(pick); row.appendChild(scA); row.appendChild(sep); row.appendChild(scB); row.appendChild(rm);
       wrap.appendChild(row);
     }
     const addBtn = el('mp-add-slot'); if (addBtn) addBtn.style.display = n >= mpMaxSlots(bo) ? 'none' : '';
@@ -2614,8 +2656,13 @@ function _returnGraphicsToProd() {
       const b = parseInt(row.querySelector('.mp-score-b').value, 10);
       const hasScore = !isNaN(a) || !isNaN(b);
       const sa = isNaN(a) ? 0 : a, sb = isNaN(b) ? 0 : b;
+      // Pick attribution — same action/by fields the guided veto writes, so the
+      // mapscreen overlay shows its "TEAM PICK" / "DECIDER" chips.
+      const pk = (row.querySelector('.mp-pick-by') || {}).value || '';
       return {
-        name: p ? p.name : '', image: p ? (p.image || '') : '', action: 'pick', by: '',
+        name: p ? p.name : '', image: p ? (p.image || '') : '',
+        action: pk === 'decider' ? 'decider' : 'pick',
+        by: (pk === 'a' || pk === 'b') ? pk : '',
         winner: (hasScore && sa !== sb) ? (sa > sb ? 'a' : 'b') : '',
         score: { a: sa, b: sb }
       };
@@ -11278,16 +11325,22 @@ function renderVetoManager(data) {
 
 // ── Guided champion/hero Pick & Ban draft manager ────────────────────────────
 
-function submitDraftPick() {
-  const inp = el('draft-input'); if (!inp) return;
+function submitDraftPick(inputId) {
+  const inp = el(inputId || 'draft-input'); if (!inp) return;
   const name = (inp.value || '').trim(); if (!name) return;
   send('draft_action', { name }); inp.value = '';
 }
 el('btn-draft-start')?.addEventListener('click', () => {
   send('draft_start', { game: el('draft-game')?.value || '', teamStart: el('draft-start')?.value || 'a', visible: true });
+  // draft_start only sets state.draft — gfx.html's layer-switcher only ever looks at gfxActive,
+  // so without this the board fills in live but never actually appears on the pushed output.
+  window._gfxDoPush && window._gfxDoPush('draft');
 });
-el('btn-draft-submit')?.addEventListener('click', submitDraftPick);
-el('draft-input')?.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); submitDraftPick(); } });
+el('btn-draft-submit')?.addEventListener('click', () => submitDraftPick('draft-input'));
+el('draft-input')?.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); submitDraftPick('draft-input'); } });
+el('btn-draft-front-submit')?.addEventListener('click', () => submitDraftPick('draft-front-input'));
+el('draft-front-input')?.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); submitDraftPick('draft-front-input'); } });
+el('btn-draft-front-open')?.addEventListener('click', () => window._gfxOpenPopout && window._gfxOpenPopout('draft'));
 el('btn-draft-undo')?.addEventListener('click', () => send('draft_undo', {}));
 el('btn-draft-reset')?.addEventListener('click', () => {
   appConfirm('Reset the draft board? Every pick and ban made so far will be wiped and cannot be recovered.', 'Reset', true).then((ok) => {
@@ -11314,14 +11367,19 @@ function renderDraftManager(data) {
   const dGames = data.draftGames || [];
   const games = data.games || {};
 
-  // Populate game dropdown once
-  const _dgSig = dGames.join(',');
+  // Populate game dropdown once — locked to the event's active game when it has a draft
+  // format, so this popup only ever shows THAT game's board, not a pick-any-of-7-games menu.
+  const locked = dGames.includes(data.activeGame);
+  const _dgSig = dGames.join(',') + '::' + (locked ? data.activeGame : '');
   if (dGames.length && sel.dataset.draftGamesSig !== _dgSig) {
     const prev = sel.value;
     sel.innerHTML = '';
-    dGames.forEach(g => { const o = document.createElement('option'); o.value = g; o.textContent = (games[g] && games[g].name) || g; sel.appendChild(o); });
+    const opts = locked ? [data.activeGame] : dGames;
+    opts.forEach(g => { const o = document.createElement('option'); o.value = g; o.textContent = (games[g] && games[g].name) || g; sel.appendChild(o); });
+    sel.disabled = locked;
+    sel.title = locked ? "Locked to this event's active game" : 'Game (auto-follows app game)';
     sel.dataset.draftGamesSig = _dgSig;
-    if (prev && dGames.includes(prev)) sel.value = prev;
+    if (!locked && prev && dGames.includes(prev)) sel.value = prev;
   }
 
   const d = data.draft || {};
@@ -11464,6 +11522,54 @@ function renderDraftGrid(data, selGame, d, active) {
   const used = new Set((d.ops || []).map((o) => (o.name || '').toLowerCase()));
   grid.querySelectorAll('.dm-hero').forEach((cell) => cell.classList.toggle('used', used.has(cell.dataset.name)));
   grid.classList.toggle('disabled', !(active && d.turn));
+}
+
+// Overwatch front-card ban board — the 4-slot snake order (A,B,B,A) + type-to-ban, live on the
+// main Graphics panel so a producer never has to open the full popout just to run hero bans.
+function renderOwFrontBoard(data, d) {
+  const blueColor = (data.teams?.blue?.color) || '#2f8dff';
+  const orangeColor = (data.teams?.orange?.color) || '#f0444e';
+  const blueTeam = (data.teams?.blue?.name) || 'Blue';
+  const orangeTeam = (data.teams?.orange?.name) || 'Orange';
+  const sideColor = (s) => s === 'b' ? orangeColor : blueColor;
+  const sideName = (s) => s === 'b' ? orangeTeam : blueTeam;
+
+  const turnEl = el('dm-front-ow-turn');
+  if (turnEl) {
+    if (d.turn && d.turn.team) {
+      const c = sideColor(d.turn.team);
+      turnEl.innerHTML = `<b style="color:${c}">${tlEsc(sideName(d.turn.team))}</b> to <span class="act-ban">BAN</span>`;
+    } else {
+      turnEl.innerHTML = '<span class="act-done">Bans complete — picks are simultaneous, no fixed order.</span>';
+    }
+  }
+
+  const slotsEl = el('dm-front-ow-slots');
+  if (slotsEl) {
+    const sig = JSON.stringify({ seq: (d.sequence || []).map((s) => s.by + s.action), ops: d.ops, turn: d.turn });
+    if (slotsEl.dataset.sig !== sig) {
+      slotsEl.dataset.sig = sig;
+      slotsEl.innerHTML = (d.sequence || []).map((step, i) => {
+        const op = (d.ops || [])[i];
+        const isActive = !op && d.turn && (d.ops || []).length === i;
+        const c = sideColor(step.by);
+        const img = op && op.image ? `<img src="http://localhost:3000${op.image}" alt="">` : '';
+        const label = op
+          ? tlEsc(op.name) + (op.role ? `<span class="dm-fslot-role">${tlEsc(op.role)}</span>` : '')
+          : (isActive ? 'selecting…' : tlEsc(sideName(step.by)) + ' ban');
+        return `<div class="dm-fslot${op ? ' filled' : ''}${isActive ? ' active' : ''}" style="--sc:${c}">${img}<span class="dm-fslot-nm">${label}</span></div>`;
+      }).join('');
+    }
+  }
+
+  const inp = el('draft-front-input');
+  if (inp) inp.disabled = !d.turn;
+
+  const dl = el('draft-front-champs');
+  if (dl && dl.dataset.game !== 'overwatch') {
+    dl.dataset.game = 'overwatch'; dl.innerHTML = '';
+    ((data.draftRosters && data.draftRosters.overwatch) || []).forEach((c) => { const o = document.createElement('option'); o.value = c.name; dl.appendChild(o); });
+  }
 }
 
 // ── Overwatch 2 hero ban manager ────────────────────────────────────────────
@@ -23096,7 +23202,7 @@ function applyTwitchState(twitch) {
 function renderPredQuickBar(twitch) {
   const activeEl = el('qpred-active');
   const createEl = el('qpred-create');
-  const movedHintEl = el('qpred-moved-hint');
+  const livePillEl = el('qpred-live-pill');
   const dot = el('qrail-predict-dot');
   if (!activeEl || !createEl) return;
 
@@ -23106,7 +23212,7 @@ function renderPredQuickBar(twitch) {
   if (isActive) {
     activeEl.style.display = 'block';
     createEl.style.display = 'none';
-    if (movedHintEl) movedHintEl.style.display = 'block';
+    if (livePillEl) livePillEl.style.display = 'inline-block';
     if (dot) dot.style.display = 'block';
 
     const titleEl = el('qpred-active-title');
@@ -23151,7 +23257,7 @@ function renderPredQuickBar(twitch) {
   } else {
     activeEl.style.display = 'none';
     createEl.style.display = 'block';
-    if (movedHintEl) movedHintEl.style.display = 'none';
+    if (livePillEl) livePillEl.style.display = 'none';
     if (dot) dot.style.display = 'none';
 
     // Pre-fill team names as placeholders without overriding user input
@@ -24059,6 +24165,8 @@ async function connect() {
       showToast(msg.data.message || 'Auto-follow updated the match.', '#8b5cf6', 6000);
     } else if (msg.type === 'obs-ensure-result') {
       showToast(msg.data.message || (msg.data.ok ? 'Added to OBS.' : 'OBS error'), msg.data.ok ? '#22c55e' : '#c53030', 6000);
+    } else if (msg.type === 'draft-result' && !msg.data.ok) {
+      showToast(msg.data.message || 'Draft error', '#c53030', 5000);
     } else if (msg.type === 'twitch_auth_invalid') {
       // Server halted EventSub/chat/stream-poll because the OAuth token expired
       // (implicit grant = no refresh). Without this toast the producer is silently
