@@ -423,7 +423,7 @@ function placeShowDeck(tab) {
     const onNow = crew.filter((c) => c.active);
     roster.innerHTML = onNow.length
       ? onNow.map((c) => memberChip(c, 'data-onshift-rm')).join('')
-      : '<span class="field-hint" style="margin:0;">No one on shift — search above to put someone on.</span>';
+      : '<span class="field-hint" style="margin:0;">No one on the current shift — search above to add them.</span>';
     // Worked this event = the credit pool. Anyone put on shift or on the desk lands here automatically
     // and STAYS after a Clear, so everyone who did their dues gets credited. Search above to add others.
     const workedWrap = el('td-worked-chips');
