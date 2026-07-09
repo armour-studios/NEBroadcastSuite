@@ -42,11 +42,44 @@
     .talent-names .sep { color: rgba(255,255,255,0.25); margin: 0 3px; }
     .talent-names .role { font-size: 12px; font-weight: 500; color: rgba(255,255,255,0.45); margin-left: 3px; }
 
-    /* ── Scroll viewport (between talent bar and sponsor bar) ─ */
-    .scroll-viewport { position: absolute; top: 250px; bottom: 118px; left: 0; right: 0; overflow: hidden; }
-    .scroll-viewport::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 50px; background: linear-gradient(180deg, #0d0d14 0%, transparent 100%); z-index: 5; pointer-events: none; }
+    /* ── Scroll viewport (between talent bar and sponsor bar) ─
+       top is set at runtime to sit flush under the talent bar (positionViewport) — the talent
+       bar's height varies with how many crew groups there are, so a fixed top left dead space. */
+    .scroll-viewport { position: absolute; top: 306px; bottom: 118px; left: 330px; right: 330px; overflow: hidden; }
+/* ── Header brand identity: kit logo + optional title-sponsor plate ── */
+.cr-brand-logo { height: 54px; max-width: 260px; object-fit: contain; filter: drop-shadow(0 2px 10px rgba(0,0,0,.6)); }
+.cr-title-spon { display: flex; align-items: center; gap: 10px; }
+.cr-title-spon.is-empty { display: none; }
+.cr-ts-label { font-size: 10px; font-weight: 800; letter-spacing: .3em; text-transform: uppercase; color: rgba(255,255,255,.5); }
+.cr-ts-logo { height: 30px; max-width: 160px; object-fit: contain; filter: drop-shadow(0 1px 6px rgba(0,0,0,.5)); }
+/* ── Side rails: TOP 8 (left) / stream activity (right) ── */
+.cr-rail { position: absolute; top: 318px; bottom: 130px; width: 300px; z-index: 15;
+  display: flex; flex-direction: column; gap: 10px; overflow: hidden; }
+.cr-rail.is-empty { display: none; }
+.cr-rail-left { left: 24px; }
+.cr-rail-right { right: 24px; }
+.cr-rail-head { font-size: 12px; font-weight: 800; letter-spacing: .3em; text-transform: uppercase;
+  color: rgba(255,255,255,.55); text-align: center; padding-bottom: 8px;
+  border-bottom: 1px solid rgba(255,255,255,.1); }
+.cr-top8-row { display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-radius: 8px;
+  background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.07); }
+.cr-top8-rank { font-size: 14px; font-weight: 900; color: rgba(255,255,255,.45); width: 20px; text-align: center; flex: 0 0 auto; font-variant-numeric: tabular-nums; }
+.cr-top8-row:nth-child(2) .cr-top8-rank { color: #f4d060; }
+.cr-top8-row:nth-child(3) .cr-top8-rank { color: #c8ccd6; }
+.cr-top8-row:nth-child(4) .cr-top8-rank { color: #d29a6b; }
+.cr-top8-logo { width: 26px; height: 26px; object-fit: contain; flex: 0 0 auto; }
+.cr-top8-name { font-size: 15px; font-weight: 700; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cr-top8-rec { margin-left: auto; font-size: 12px; font-weight: 700; color: rgba(255,255,255,.45); flex: 0 0 auto; font-variant-numeric: tabular-nums; }
+.cr-act-row { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 8px;
+  background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.07); }
+.cr-act-ico { font-size: 16px; flex: 0 0 auto; }
+.cr-act-lbl { font-size: 13px; font-weight: 700; color: rgba(255,255,255,.85); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cr-act-count { margin-left: auto; font-size: 16px; font-weight: 900; color: #fff; flex: 0 0 auto; font-variant-numeric: tabular-nums; }
+.cr-act-names { font-size: 11px; color: rgba(255,255,255,.45); padding: 0 10px 4px; line-height: 1.5;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: -6px; }
+    .scroll-viewport::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 36px; background: linear-gradient(180deg, #0d0d14 0%, transparent 100%); z-index: 5; pointer-events: none; }
     .scroll-viewport::after  { content: ''; position: absolute; bottom: 0; left: 0; right: 0; height: 60px; background: linear-gradient(0deg, #0d0d14 0%, transparent 100%); z-index: 5; pointer-events: none; }
-    .scroll-track { position: absolute; top: 0; left: 0; right: 0; padding: 30px 0 140px; will-change: transform; }
+    .scroll-track { position: absolute; top: 0; left: 0; right: 0; padding: 16px 0 140px; will-change: transform; }
 
     /* ── Team roster TABLE — aligned columns: logo · team · players (with flags) ── */
     .roll-teams-head { text-align: center; font-size: 14px; font-weight: 700; letter-spacing: 5px; text-transform: uppercase; color: rgba(255,255,255,0.5); margin: 0 0 24px; }
@@ -116,8 +149,13 @@
 </head>
 <body>
   <div class="header">
+    <img class="cr-brand-logo" id="cr-brand-logo" src="" alt="" style="display:none;">
     <div class="header-eyebrow">Thank You</div>
     <div class="header-title" id="header-title">Stream Credits</div>
+    <div class="cr-title-spon is-empty" id="cr-title-spon">
+      <span class="cr-ts-label">Presented by</span>
+      <img class="cr-ts-logo" id="cr-ts-logo" src="" alt="">
+    </div>
   </div>
 
   <div class="talent-bar" id="talent-bar" style="display:none;"></div>
@@ -172,14 +210,31 @@ function hexA(hex, a) {
 function buildTalent(st) {
   const bucket = { casters: [], hosts: [], production: [], observers: [] };
   const seen = new Set();
-  const add = (b, name, role) => { if (!name) return; const k = name.toLowerCase(); if (seen.has(k)) return; seen.add(k); bucket[b].push({ name, role: role || '' }); };
+  // Trim + drop a leading @ before keying, so "Jonzey" and " Jonzey" (or "@Jonzey" from a
+  // library entry saved with a stray handle prefix) collapse into one credit instead of two.
+  const norm = (s) => String(s || '').trim().toLowerCase().replace(/^@+/, '');
+  const add = (b, name, role) => {
+    const k = norm(name); if (!k) return;
+    if (seen.has(k)) return;
+    seen.add(k);
+    bucket[b].push({ name: String(name).trim(), role: role || '' });
+  };
   const place = (name, role, group, kind) => {
     if (/produc|director/i.test(role || '')) return add('production', name, role);
-    const g = (group === 'hosts' || kind === 'host') ? 'hosts' : (group === 'observers' || kind === 'observer') ? 'observers' : 'casters';
+    const g = (group === 'hosts' || kind === 'host') ? 'hosts'
+      : (group === 'observers' || kind === 'observer') ? 'observers'
+      // Backend tournament-ops crew (producer / tournament admin / social media) aren't tied
+      // to a cam, but they still credit under Production alongside on-air producers/directors.
+      : (['production', 'producer', 'admin', 'socials'].includes(group)) ? 'production'
+      : 'casters';
     add(g, name, role);
   };
-  (st.crew || []).forEach((c) => c && c.name && place(c.name, c.role, c.group, null));
-  ((st.casters && st.casters.library) || []).forEach((e) => e && e.name && place(e.name, e.role, null, e.kind));
+  // Gamertag-first, matching the Show Deck's own display convention — falls back to the
+  // profile name only when no handle is set. Only crew who actually worked this event
+  // (state.crew[].workedEvent — set automatically by going "on shift" on the Show Deck, or by
+  // hand there) are auto-credited — otherwise every name ever entered stayed credited forever.
+  (st.crew || []).forEach((c) => c && c.name && c.workedEvent && place(c.handle || c.name, c.role, c.group, null));
+  ((st.casters && st.casters.library) || []).forEach((e) => e && e.name && place(e.handle || e.name, e.role, null, e.kind));
   // Producer-added talent (Graphics > Stream Credits) — crew from other shifts of the
   // same broadcast. An explicit group pins the bucket; otherwise the role rules decide.
   ((st.credits && st.credits.talent) || []).forEach((t) => {
@@ -203,6 +258,19 @@ function renderTalentBar(groups) {
     return `<div class="talent-group"><span class="talent-group-label">${esc(g.label)}</span><span class="talent-names">${names}</span></div>`;
   }).join('');
   talentBar.innerHTML = `<div class="talent-bar-eyebrow">Talent</div><div class="talent-groups">${groupHtml}</div>`;
+}
+
+// The talent (staff) bar sits at a fixed top but its height depends on how many crew groups there
+// are. Pin the scrolling roll flush under it — a hardcoded top left a big gap when the staff bar
+// was short (the "dead space between the competitors and the staff").
+const HEADER_H = 168;
+function positionViewport() {
+  const barVisible = talentBar.style.display !== 'none' && talentBar.offsetHeight > 0;
+  const top = barVisible ? HEADER_H + talentBar.offsetHeight : HEADER_H + 8;
+  viewport.style.top = top + 'px';
+  emptyEl.style.top = top + 'px';
+  // Side rails start level with the roll.
+  document.querySelectorAll('.cr-rail').forEach((r) => { r.style.top = (top + 12) + 'px'; });
 }
 
 /* ── Every team + players that competed in the event ────────── */
@@ -372,6 +440,7 @@ function render() {
   const activeSecs = SECTIONS.filter((s) => groups[s.key] && groups[s.key].length);
 
   renderTalentBar(talent);
+  positionViewport();   // pin the roll flush under the (variable-height) staff bar — no dead space
   renderSponsorBar(brandSpon);
 
   track.innerHTML = '';
