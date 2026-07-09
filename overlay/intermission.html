@@ -330,7 +330,13 @@
       SceneBase.applyTeamLogo(logoImg, brandLogo, '');
 
       // Presented-by (title sponsor) under the logo — same source as the other scenes (scoreboardAd).
-      const slot = data.scoreboardAd || {};
+      // Title-sponsor plate: with a brand kit active this shows ONLY a sponsor tagged
+      // "Title" — no title sponsor labeled, no plate (a scoreboard-tagged sponsor stays
+      // on the in-game scoreboard where it belongs). No kit -> manual upload as before.
+      const _pbBrand = data.brand || {};
+      const slot = _pbBrand.id
+        ? { label: (data.scoreboardAd || {}).label, logo: (_pbBrand.spots && _pbBrand.spots.title) || '' }
+        : (data.scoreboardAd || {});
       const pbWrap = el('presented-by');
       if (slot.logo) {
         el('pb-label').textContent = (slot.label || 'PRESENTED BY').toString().trim();

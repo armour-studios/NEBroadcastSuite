@@ -184,7 +184,13 @@
     }
 
     function renderPresentedBy(data) {
-      const slot = data.scoreboardAd || {}, wrap = el('presented-by'), label = el('pb-label'), logo = el('pb-logo');
+      // Title-sponsor plate: with a brand kit active this shows ONLY a sponsor tagged
+      // "Title" — no title sponsor labeled, no plate. No kit -> manual upload as before.
+      const _pbBrand = data.brand || {};
+      const slot = _pbBrand.id
+        ? { label: (data.scoreboardAd || {}).label, logo: (_pbBrand.spots && _pbBrand.spots.title) || '' }
+        : (data.scoreboardAd || {});
+      const wrap = el('presented-by'), label = el('pb-label'), logo = el('pb-logo');
       if (slot.logo) { label.textContent = (slot.label || 'PRESENTED BY').toString().trim(); logo.src = slot.logo; logo.style.display = ''; wrap.classList.remove('is-empty'); }
       else { logo.style.display = 'none'; logo.removeAttribute('src'); wrap.classList.add('is-empty'); }
     }
