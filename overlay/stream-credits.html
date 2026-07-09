@@ -27,7 +27,7 @@
 
     /* ── Talent bar (fixed, below header) ───────────────── */
     .talent-bar {
-      position: absolute; top: 208px; left: 0; right: 0; z-index: 15;
+      position: absolute; bottom: 0; left: 0; right: 0; z-index: 25;
       min-height: 74px; max-height: 132px; overflow: hidden;
       display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px;
       padding: 12px 60px;
@@ -317,12 +317,17 @@ function renderTalentBar(groups) {
 // was short (the "dead space between the competitors and the staff").
 const HEADER_H = 208;
 function positionViewport() {
-  const barVisible = talentBar.style.display !== 'none' && talentBar.offsetHeight > 0;
-  const top = barVisible ? HEADER_H + talentBar.offsetHeight : HEADER_H + 8;
-  viewport.style.top = top + 'px';
-  emptyEl.style.top = top + 'px';
-  // Side rails start level with the roll.
-  document.querySelectorAll('.cr-rail').forEach((r) => { r.style.top = (top + 12) + 'px'; });
+  // Talent bar lives at the BOTTOM now, under the sponsor rail — stack: roll,
+  // then sponsors, then the crew strip pinned to the frame edge.
+  const th = (talentBar.style.display !== 'none') ? talentBar.offsetHeight : 0;
+  const sb = document.querySelector('.sponsor-bar');
+  const sbH = (sb && !sb.classList.contains('is-empty')) ? sb.offsetHeight : 0;
+  if (sb) sb.style.bottom = th + 'px';
+  const bottom = Math.max(th + sbH, 24);
+  viewport.style.top = (HEADER_H + 8) + 'px';
+  viewport.style.bottom = bottom + 'px';
+  emptyEl.style.top = (HEADER_H + 8) + 'px';
+  document.querySelectorAll('.cr-rail').forEach((r) => { r.style.top = (HEADER_H + 20) + 'px'; r.style.bottom = (bottom + 12) + 'px'; });
 }
 
 /* ── Every team + players that competed in the event ────────── */
