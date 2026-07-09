@@ -636,7 +636,7 @@ async function connectWS() {
       // Restart the roll from the top every time the scene is (re)triggered — without
       // this it sat wherever it last ended ('Thanks for watching') on the next push.
       const nowOn = !!((d.credits && d.credits.visible) || d.gfxActive === 'credits');
-      if (nowOn && !window._wasOn) { _scrollY = 0; _scrollDir = 1; _pauseUntil = Date.now() + PAUSE_MS; if (typeof track !== 'undefined' && track) track.style.transform = 'translateY(0)'; }
+      if (nowOn && !window._wasOn) { _scrollY = 0; _scrollDir = 1; _pauseUntil = Date.now() + PAUSE_MS; if (typeof track !== 'undefined' && track) track.style.transform = 'translateY(0)'; if (typeof hideEndCard === 'function') hideEndCard(); else document.querySelectorAll('.end-card, #end-card, .cr-endcard').forEach((e2) => e2.classList.remove('show')); }
       if (d.credits !== undefined || d.gfxActive !== undefined) window._wasOn = nowOn;
       const title = d.twitch?.channelInfo?.title || d.event?.title || d.eventName;
       if (title) document.getElementById('header-title').textContent = title;
