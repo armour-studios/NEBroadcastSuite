@@ -20073,6 +20073,12 @@ const FLOW_TRIGGER_GROUPS = [
     ['cs2_half_time',       'Halftime'],
     ['cs2_match_ended',     'Match ended'],
   ]},
+  { label: 'Overwatch', items: [
+    ['ow_match_start',      'Match starts'],
+    ['ow_round_start',      'Round starts'],
+    ['ow_round_end',        'Round ends'],
+    ['ow_match_end',        'Match ended'],
+  ]},
   { label: 'Match / Series', items: [
     ['score_reached',       'Score reaches…'],
     ['series_ended',        'Series ends'],

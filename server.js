@@ -7008,6 +7008,8 @@ const FLOW_TRIGGER_TYPES = [
   'rl_goal', 'rl_round_started', 'rl_match_ended', 'rl_overtime', 'rl_replay_start', 'rl_replay_end',
   // CS2
   'cs2_round_start', 'cs2_round_end', 'cs2_bomb_planted', 'cs2_half_time', 'cs2_match_ended',
+  // Overwatch (Overwolf GEP relay)
+  'ow_match_start', 'ow_round_start', 'ow_round_end', 'ow_match_end',
   // Universal game / production
   'score_reached', 'series_ended', 'game_started',
   // OBS
@@ -14887,6 +14889,18 @@ function startHttpServer(baseDir) {
     const gm = String(b.game_mode || '').toLowerCase();
     const hit = ['escort', 'hybrid', 'control', 'push', 'flashpoint', 'clash'].find((k) => gm.includes(k));
     if (hit) state.owMatch.gameMode = hit;
+    // GEP match/round events -> Flow triggers (same shape as the CS2 GSI ones). The
+    // companion posts { events: ['match_start' | 'round_start' | 'round_end' | 'match_end', ...] }.
+    const OW_EVENT_TRIGGERS = { match_start: 'ow_match_start', round_start: 'ow_round_start', round_end: 'ow_round_end', match_end: 'ow_match_end' };
+    (Array.isArray(b.events) ? b.events : []).forEach((ev) => {
+      const name = typeof ev === 'string' ? ev : (ev && ev.name);
+      const trig = OW_EVENT_TRIGGERS[String(name || '').toLowerCase()];
+      if (trig) flowBus.emit(trig, {
+        map: state.owMatch.gepData.map || null,
+        game_mode: state.owMatch.gepData.game_mode || null,
+        match_outcome: state.owMatch.gepData.match_outcome || null
+      });
+    });
     broadcastFullState();
     res.json({ ok: true });
   });
