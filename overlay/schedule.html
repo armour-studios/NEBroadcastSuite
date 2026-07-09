@@ -58,6 +58,9 @@ body { width: 1920px; height: 1080px; overflow: hidden; background: transparent;
   opacity: 0;
 }
 .sch-stage.show .sch-entry { animation: entryIn .6s cubic-bezier(.16,.84,.24,1) both; }
+/* Re-renders (poll updates shifting times/scores) update IN PLACE — only the first
+   paint animates, so the date/time line stops endlessly sliding back in. */
+.sch-list[data-animated] .sch-entry { animation: none !important; }
 @keyframes entryIn { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
 /* top hairline */
 .sch-entry::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 1px; background: linear-gradient(90deg, transparent 4%, rgba(255,255,255,.28) 50%, transparent 96%); z-index: 3; pointer-events: none; }
@@ -309,7 +312,10 @@ body { width: 1920px; height: 1080px; overflow: hidden; background: transparent;
     var sig = JSON.stringify({ d: isDual, m: all, a: accentA, b: accentB, c: mapsData.color });
     if (sig === _lastSig) return;
     _lastSig = sig;
+    var animatedBefore = list.dataset.animated === '1';
     list.className = 'sch-list' + (isDual ? ' dual' : '');
+    if (animatedBefore) list.dataset.animated = '1';
+    else setTimeout(function(){ list.dataset.animated = '1'; }, 1200);
     list.innerHTML = '';
     empty.style.display = all.length ? 'none' : 'block';
     all.forEach(function (m, i) { list.appendChild(buildEntry(m, i, mapsData, accentA, accentB)); });
