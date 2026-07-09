@@ -12548,6 +12548,7 @@ const SCENE_SOURCES = [
     { name: 'Countdown / Starting Soon', path: '/countdown.html', live: 'breakScreen.visible', desc: 'Break standby timer with movie-countdown finish.' },
     { name: 'Starting Soon — Timer only', path: '/countdown.html?timer=1', live: 'breakScreen.visible', desc: 'Countdown with no background — overlay on b-roll.' },
     { name: 'Intermission Card', path: '/intermission.html', live: 'breakScreen.visible', desc: 'Centered card: brand logo + event title + countdown. Layer over a map or b-roll in OBS.' },
+    { name: 'Intermission — Full Screen', path: '/intermission2.html', live: 'breakScreen.visible', desc: 'RLCS-style full-screen intermission: brand panel, STARTING SOON, giant outline countdown. Layer over b-roll.' },
     { name: 'Winner', path: '/winner.html', live: 'winner.visible', desc: 'Champion screen — team logo, name, subtitle.' },
     { name: 'Team Line-up', path: '/intro.html', live: 'intro.visible', desc: 'Animated roster cards. Add ?side=blue|orange.' },
     { name: 'Matchup (pre-game)', path: '/matchup.html', live: null, desc: 'Cinematic split-screen — team color washes, large watermark logos, VS pillar, series pips.' },
