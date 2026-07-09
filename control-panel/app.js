@@ -332,43 +332,69 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     const byId = {}; lib.forEach((l) => { if (l && l.id) byId[l.id] = l; });
     const slotName = (n) => { const e = lineup.find((x) => Number(x.slot) === n); const p = e && byId[e.libraryId]; return (p && p.name) || ''; };
     const shifts = (data.casters && data.casters.shifts) || [];
-    const sig = JSON.stringify({ c: crew.map((c) => [c.id, c.name, c.handle, c.group, !!c.active]), s: [1, 2, 3, 4].map(slotName), r: roles, l: labels, sh: shifts.map((s) => s.id + s.name) });
+    const sig = JSON.stringify({ c: crew.map((c) => [c.id, c.name, c.handle, c.group, !!c.active, c.country || '']), s: [1, 2, 3, 4].map(slotName), r: roles, l: labels, sh: shifts.map((s) => s.id + s.name) });
     if (sig === window._tdSig) return;
     window._tdSig = sig;
     const disp = (c) => c.handle || c.name;   // gamertag-first, matching the desk
-    const opts = (list, cur) => '<option value="">—</option>'
-      + list.map((c) => `<option value="${esc(c.name)}"${c.name === cur ? ' selected' : ''}>${esc(disp(c))}</option>`).join('');
     const group = (g, roleRe) => crew.filter((c) => (c.group || '') === g || roleRe.test(c.role || ''));
     const casters = group('casters', /caster/i), hosts = group('hosts', /host/i), observers = group('observers', /observer/i);
-    const cell = (label, id, options) =>
-      `<div class="td-slot"><span class="td-slot-lbl">${esc(label)}</span><select class="input-select td-sel" id="${id}">${options}</select></div>`;
+    const tdMatch = (list, typed) => {
+      const q = (typed || '').trim().toLowerCase(); if (!q) return null;
+      return list.find((c) => disp(c).toLowerCase() === q) || list.find((c) => (c.name || '').toLowerCase() === q) || null;
+    };
+    // Text input + <datalist> (type to filter) instead of a plain <select> — a long crew roster
+    // was impossible to search, and there was no way to add someone new without leaving the deck.
+    const cell = (label, id, list, cur, variant) => {
+      const curC = list.find((c) => c.name === cur);
+      return `<div class="td-slot td-slot--${variant}"><span class="td-slot-lbl">${esc(label)}</span>
+        <input type="text" class="input-text td-sel" id="${id}" list="${id}-dl" value="${esc(curC ? disp(curC) : '')}" placeholder="Search crew…" autocomplete="off">
+        <datalist id="${id}-dl">${list.map((c) => `<option value="${esc(disp(c))}">`).join('')}</datalist></div>`;
+    };
     wrap.innerHTML =
-      cell('Host', 'td-host', opts(hosts.length ? hosts : crew, roles.host || ''))
-      + [1, 2, 3, 4].map((n) => cell(labels[n] || ('Caster ' + n), 'td-c' + n, opts(casters.length ? casters : crew, slotName(n)))).join('')
-      + cell('Observer', 'td-obs', opts(observers.length ? observers : crew, roles.observer || ''));
+      cell('Host', 'td-host', hosts.length ? hosts : crew, roles.host || '', 'host')
+      + [1, 2, 3, 4].map((n) => cell(labels[n] || ('Caster ' + n), 'td-c' + n, casters.length ? casters : crew, slotName(n), 'caster')).join('')
+      + cell('Observer', 'td-obs', observers.length ? observers : crew, roles.observer || '', 'obs');
     [1, 2, 3, 4].forEach((n) => {
+      const list = casters.length ? casters : crew;
       el('td-c' + n)?.addEventListener('change', function () {
-        const name = this.value;
-        if (!name) {
+        const typed = this.value.trim();
+        if (!typed) {
           const cur = slotName(n);
           if (cur) send('save_caster_to_library', { name: cur, kind: 'caster', deskSlot: 0 });
           return;
         }
-        const m = crew.find((c) => c.name === name) || {};
-        send('save_caster_to_library', { name, kind: 'caster', social: m.social, socialHandle: m.socialHandle, country: m.country, deskSlot: n });
+        const m = tdMatch(list, typed);
+        if (!m) { this.value = ''; showToast(`No crew member named "${typed}" — use + Add Crew above to create them first.`, '#fbbf24'); return; }
+        this.value = disp(m);
+        send('save_caster_to_library', { name: m.name, kind: 'caster', social: m.social, socialHandle: m.socialHandle, country: m.country, deskSlot: n });
       });
     });
-    const sendRoles = () => send('set_show_roles', { host: el('td-host')?.value || '', observer: el('td-obs')?.value || '' });
+    const sendRoles = () => {
+      const hostList = hosts.length ? hosts : crew, obsList = observers.length ? observers : crew;
+      const hostInp = el('td-host'), obsInp = el('td-obs');
+      const hostTyped = (hostInp?.value || '').trim(), obsTyped = (obsInp?.value || '').trim();
+      const hostM = tdMatch(hostList, hostTyped), obsM = tdMatch(obsList, obsTyped);
+      if (hostTyped && !hostM) { if (hostInp) hostInp.value = ''; showToast(`No crew member named "${hostTyped}" — use + Add Crew above to create them first.`, '#fbbf24'); }
+      else if (hostInp && hostM) hostInp.value = disp(hostM);
+      if (obsTyped && !obsM) { if (obsInp) obsInp.value = ''; showToast(`No crew member named "${obsTyped}" — use + Add Crew above to create them first.`, '#fbbf24'); }
+      else if (obsInp && obsM) obsInp.value = disp(obsM);
+      send('set_show_roles', { host: hostM ? hostM.name : '', observer: obsM ? obsM.name : '' });
+    };
     el('td-host')?.addEventListener('change', sendRoles);
     el('td-obs')?.addEventListener('change', sendRoles);
     roster.innerHTML = '';
     if (!crew.length) { roster.innerHTML = '<span class="field-hint" style="margin:0;">No crew yet — add people below.</span>'; return; }
+    const flag = (typeof flagSrc === 'function') ? flagSrc : () => '';
     crew.forEach((c) => {
       const chip = document.createElement('button');
       chip.type = 'button';
       chip.className = 'td-chip' + (c.active ? ' is-active' : '');
-      chip.title = c.active ? (disp(c) + ' is on shift — click to mark off') : (disp(c) + ' is off shift — click to mark active');
-      chip.textContent = disp(c);
+      const cn = (typeof countryName === 'function' && c.country) ? countryName(c.country) : '';
+      chip.title = (cn ? disp(c) + ' · ' + cn + ' — ' : disp(c) + ' — ')
+        + (c.active ? 'on shift, click to mark off' : 'off shift, click to mark active');
+      const cc = (c.country || '').toLowerCase();
+      chip.innerHTML = (cc ? `<img class="td-chip-flag" src="${esc(flag(cc))}" alt="" onerror="this.remove()">` : '')
+        + `<span>${esc(disp(c))}</span>`;
       chip.addEventListener('click', () => send('update_crew_member', { id: c.id, active: !c.active }));
       roster.appendChild(chip);
     });
@@ -393,6 +419,7 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
       });
     }
   };
+  el('td-add-crew')?.addEventListener('click', () => { if (typeof window.openCrewAdd === 'function') window.openCrewAdd(); });
   el('td-shift-save')?.addEventListener('click', async () => {
     const name = await customPrompt('Save shift', 'Name this shift — saving the current slots, roles, on-shift marks and display options.', '', 'Save');
     if (name) send('save_shift', { name });
@@ -2457,7 +2484,7 @@ function _returnGraphicsToProd() {
         // Draft has its own "Open full board" button (front-card markup, next to the
         // Overwatch ban board) — the generic More-settings button would just be a duplicate.
         const moreBtn = el('gfx-popout-summary-open');
-        if (moreBtn) moreBtn.style.display = (key === 'spotlight' || key === 'schedule' || key === 'draft') ? 'none' : '';
+        if (moreBtn) moreBtn.style.display = (key === 'spotlight' || key === 'schedule' || key === 'draft' || key === 'veto') ? 'none' : '';
       }
       renderPopoutSummary(key);
     } else {
@@ -2600,6 +2627,7 @@ function _returnGraphicsToProd() {
     const game = currentState && currentState.activeGame;
     return (currentState && currentState.vetoPools && currentState.vetoPools[game]) || [];
   }
+  const MP_MODE_OPTIONS = ['Control', 'Hybrid', 'Escort', 'Push', 'Flashpoint', 'Clash', 'Assault'];
   function mpMinSlots(bo) { return Math.max(1, Math.ceil((Number(bo) || 5) / 2)); }   // maps needed to CLINCH
   function mpMaxSlots(bo) { return Math.max(1, Number(bo) || 5); }                    // can't exceed the format
   // count omitted → max(existing picks, the format's minimum). Pass it explicitly for Add/Remove/BO-change.
@@ -2626,6 +2654,21 @@ function _returnGraphicsToProd() {
       const sel = document.createElement('select'); sel.className = 'input-select mp-map-select';
       sel.innerHTML = '<option value="">— Select map —</option>' +
         pool.map((p) => `<option value="${p.id}"${p.name === m.name ? ' selected' : ''}>${p.name}</option>`).join('');
+      // Game mode — defaults to the selected map's pool type but is fully overridable per row
+      // (some maps rotate through more than one mode across a season/patch).
+      const curPool = pool.find((p) => p.name === m.name);
+      const modeSel = document.createElement('select'); modeSel.className = 'input-select mp-mode-select';
+      modeSel.title = 'Game mode for this map';
+      modeSel.style.cssText = 'flex:0 0 auto; max-width:118px; font-size:11px;';
+      const modeVal = m.mode || (curPool && curPool.type) || '';
+      modeSel.innerHTML = '<option value="">Mode: —</option>' +
+        MP_MODE_OPTIONS.map((md) => `<option value="${md}"${md === modeVal ? ' selected' : ''}>${md}</option>`).join('');
+      if (!modeSel.value && modeVal) { const o = document.createElement('option'); o.value = modeVal; o.textContent = modeVal; o.selected = true; modeSel.appendChild(o); }
+      // Picking a map re-defaults its mode (unless the row already has an explicit override).
+      sel.addEventListener('change', () => {
+        const p = pool.find((x) => x.id === sel.value);
+        if (p && p.type) modeSel.value = p.type;
+      });
       const pick = document.createElement('select'); pick.className = 'input-select mp-pick-by';
       pick.title = 'Who picked this map';
       pick.style.cssText = 'flex:0 0 auto; max-width:120px; font-size:11px;';
@@ -2645,8 +2688,8 @@ function _returnGraphicsToProd() {
       const rm = document.createElement('button'); rm.type = 'button'; rm.className = 'btn btn-ghost btn-xs mp-slot-rm';
       rm.textContent = '×'; rm.title = 'Remove this map slot'; rm.disabled = n <= 1;
       rm.addEventListener('click', () => { mpRenderSlots(mpBuildMapsPayload(true), n - 1); mpSendDebounced(); });
-      [sel, pick, scA, scB].forEach((inp) => { inp.addEventListener('input', mpSendDebounced); inp.addEventListener('change', mpSendDebounced); });
-      row.appendChild(num); row.appendChild(sel); row.appendChild(pick); row.appendChild(scA); row.appendChild(sep); row.appendChild(scB); row.appendChild(rm);
+      [sel, modeSel, pick, scA, scB].forEach((inp) => { inp.addEventListener('input', mpSendDebounced); inp.addEventListener('change', mpSendDebounced); });
+      row.appendChild(num); row.appendChild(sel); row.appendChild(modeSel); row.appendChild(pick); row.appendChild(scA); row.appendChild(sep); row.appendChild(scB); row.appendChild(rm);
       wrap.appendChild(row);
     }
     const addBtn = el('mp-add-slot'); if (addBtn) addBtn.style.display = n >= mpMaxSlots(bo) ? 'none' : '';
@@ -2666,8 +2709,9 @@ function _returnGraphicsToProd() {
       // Pick attribution — same action/by fields the guided veto writes, so the
       // mapscreen overlay shows its "TEAM PICK" / "DECIDER" chips.
       const pk = (row.querySelector('.mp-pick-by') || {}).value || '';
+      const modeOverride = (row.querySelector('.mp-mode-select') || {}).value || '';
       return {
-        name: p ? p.name : '', image: p ? (p.image || '') : '',
+        name: p ? p.name : '', image: p ? (p.image || '') : '', mode: modeOverride || (p ? (p.type || '') : ''),
         action: pk === 'decider' ? 'decider' : 'pick',
         by: (pk === 'a' || pk === 'b') ? pk : '',
         winner: (hasScore && sa !== sb) ? (sa > sb ? 'a' : 'b') : '',
@@ -2697,6 +2741,7 @@ function _returnGraphicsToProd() {
     send('set_best_of', { value: bo });
   });
   el('mp-title')?.addEventListener('input', mpSendDebounced);
+  el('btn-veto-front-open')?.addEventListener('click', () => openGfxPopout('veto'));
   // Populate from current state when the Map Pool tab opens. Best-of drives the MAX/starting
   // count, but the actual slot count shown is whatever's already saved (or that format's minimum
   // if nothing's picked yet) — never force it down to a stale best-of-derived count.
@@ -5039,7 +5084,20 @@ el('bb-trigger-go')?.addEventListener('click', () => {
     if (inp.dataset.kind === 'time') { const s = parseTimeInput(inp.value); if (s != null) setTimerSecs(s); }
     else { const tgt = el(inp.dataset.target); if (tgt) tgt.value = inp.value; }
   });
+  // Feed the gfx.html layer too — this path only sent the trigger message, so gear
+  // chips (Line-up, Break, Winner) showed on standalone pages but never on the
+  // unified gfx.html source. Mirrors the plain toggle path exactly.
+  const prevScene = currentState && currentState.gfxActive;
+  if (prevScene && prevScene !== g.sceneKey && typeof SCENE_META !== 'undefined' && SCENE_META[prevScene]) {
+    const pm = SCENE_META[prevScene];
+    el(pm.clearId || ('btn-hide-' + prevScene))?.click();
+  }
   send(g.msg, g.show());
+  if (g.sceneKey) {
+    send('set_gfx_active', { scene: g.sceneKey });
+    if (currentState) currentState.gfxActive = g.sceneKey;
+    if (typeof refreshTopBar === 'function') refreshTopBar(g.sceneKey);
+  }
   if (el('gfx-autocut-on')?.checked) {
     const sc = (el('gfx-autocut-scene')?.value || '').trim();
     if (sc) send('obs_switch_scene', { sceneName: sc });
@@ -5049,7 +5107,15 @@ el('bb-trigger-go')?.addEventListener('click', () => {
 el('bb-trigger-hide')?.addEventListener('click', () => {
   const stateKey = el('bb-trigger-pop').dataset.state;
   const g = (typeof GOLIVE_TRIGGERS !== 'undefined' ? GOLIVE_TRIGGERS : []).find((x) => x.state === stateKey);
-  if (g) send(g.msg, { visible: false });
+  if (g) {
+    send(g.msg, { visible: false });
+    // Clear the gfx.html layer too when this scene is the one on it.
+    if (g.sceneKey && currentState && currentState.gfxActive === g.sceneKey) {
+      send('set_gfx_active', { scene: '' });
+      currentState.gfxActive = '';
+      if (typeof refreshTopBar === 'function') refreshTopBar('');
+    }
+  }
   el('bb-trigger-pop').style.display = 'none';
 });
 // Workflow tab "Reset broadcast" mirrors the header Reset.
@@ -11246,6 +11312,15 @@ el('btn-veto-reset')?.addEventListener('click', () => {
 el('btn-veto-show')?.addEventListener('click', () => send('veto_visible', { visible: true }));
 el('btn-veto-hide2')?.addEventListener('click', () => send('veto_visible', { visible: false }));
 
+// Overwatch game-mode icons — m.mode carries the pool entry's type (Control/Hybrid/Escort/Push/
+// Flashpoint/Clash). Other games' mode strings have no matching icon, so no badge shows for them.
+const VM_MODE_IMG = {
+  control: '/assets/overwatch/modes/Control.webp', hybrid: '/assets/overwatch/modes/Hybrid.webp',
+  escort: '/assets/overwatch/modes/Escort.webp', push: '/assets/overwatch/modes/Push.webp',
+  flashpoint: '/assets/overwatch/modes/Flashpoint.webp', clash: '/assets/overwatch/modes/Clash.webp',
+  assault: '/assets/overwatch/modes/Assault.webp'
+};
+
 function renderVetoManager(data) {
   const sel = el('veto-game'); if (!sel) return;
   const pools = data.vetoPools || {};
@@ -11280,10 +11355,43 @@ function renderVetoManager(data) {
   const v = data.veto || {};
   const turnEl = el('veto-turn'); const grid = el('veto-grid');
 
-  // Not started yet → clear the board, prompt to start.
+  // No guided sequence running → pull in whatever's already been entered on the Map Pool front
+  // card (or the manual text box) so opening this popup doesn't just show a blank prompt and
+  // hide the producer's work. These cards are read-only (no ban/pick sequence to click through);
+  // Start Veto still runs a fresh guided board on top if that's what's actually wanted.
   if (!Array.isArray(v.pool) || !v.pool.length) {
-    if (turnEl) turnEl.textContent = 'Choose a game + best-of, then Start Veto.';
-    if (grid) grid.innerHTML = '';
+    const manualMaps = Array.isArray(v.maps) ? v.maps.filter((m) => m && m.name) : [];
+    if (manualMaps.length) {
+      if (turnEl) turnEl.innerHTML = 'Showing the maps entered on the <b>Map Pool</b> front card. Edit them there, or click <b>Start Veto</b> above to run a fresh guided ban/pick instead.';
+      if (grid) {
+        grid.innerHTML = '';
+        manualMaps.forEach((m) => {
+          const card = document.createElement('div');
+          card.className = 'vm-map' + (m.action === 'decider' ? ' decider' : ' picked');
+          card.style.cursor = 'default';
+          if (m.image) { const img = document.createElement('img'); img.src = m.image; img.alt = ''; card.appendChild(img); }
+          const modeIcon = VM_MODE_IMG[(m.mode || '').toLowerCase().trim()];
+          if (modeIcon) {
+            const badge = document.createElement('span'); badge.className = 'vm-mode'; badge.title = m.mode;
+            const mi = document.createElement('img'); mi.src = modeIcon; mi.alt = m.mode;
+            mi.onerror = () => badge.remove();
+            badge.appendChild(mi); card.appendChild(badge);
+          }
+          if (m.by && m.action !== 'decider') {
+            const by = document.createElement('span'); by.className = 'vm-by';
+            by.textContent = sideName(m.by); by.style.background = sideColor(m.by); card.appendChild(by);
+          }
+          const lbl = document.createElement('div'); lbl.className = 'vm-label';
+          const extra = m.action === 'decider' ? ' · DECIDER' : (m.score && (m.score.a || m.score.b)) ? ` · ${m.score.a}-${m.score.b}` : '';
+          lbl.textContent = m.name + extra;
+          card.appendChild(lbl);
+          grid.appendChild(card);
+        });
+      }
+    } else {
+      if (turnEl) turnEl.textContent = 'Choose a game + best-of, then Start Veto.';
+      if (grid) grid.innerHTML = '';
+    }
     return;
   }
 
@@ -11315,6 +11423,13 @@ function renderVetoManager(data) {
         if (m.action === 'ban') card.dataset.x = banWord;            // banned-card label = BAN / STRIKE
         if (m.action === 'pick') { card.style.borderColor = sideColor(m.by); }
         if (m.image) { const img = document.createElement('img'); img.src = m.image; img.alt = ''; card.appendChild(img); }
+        const modeIcon = VM_MODE_IMG[(m.mode || '').toLowerCase().trim()];
+        if (modeIcon) {
+          const badge = document.createElement('span'); badge.className = 'vm-mode'; badge.title = m.mode;
+          const mi = document.createElement('img'); mi.src = modeIcon; mi.alt = m.mode;
+          mi.onerror = () => badge.remove();
+          badge.appendChild(mi); card.appendChild(badge);
+        }
         if (m.by && (m.action === 'pick' || m.action === 'ban')) {
           const by = document.createElement('span'); by.className = 'vm-by';
           by.textContent = sideName(m.by); by.style.background = sideColor(m.by); card.appendChild(by);
