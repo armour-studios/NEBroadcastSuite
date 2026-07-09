@@ -291,7 +291,7 @@ let state = {
     // LoL champ-select automation — fills the board live from the League Client (LCU).
     auto: { enabled: false, status: 'off', statusDetail: '', lockfilePath: '' } },
   // Team-lineup / player-intro card scene. side = which team to feature ('blue'|'orange'); style = card variant.
-  intro: { visible: false, side: 'blue', title: '', style: 1, showFooter: false },
+  intro: { visible: false, side: 'blue', title: '', style: 1, showFooter: false, showRealName: true },
   // (state.credits defined once near the top of this state object — sponsors/talent/visible together.)
   // Overtime ad slot — sellable sponsor slot shown on the overlay during OT.
   overtime: { label: 'OVERTIME', logo: null, bg: '#e0202a', color: '#ffffff' },
@@ -2229,7 +2229,7 @@ function _saveAppStateNow(sync = false) {
       // Persist content for the momentary production graphics; visibility is reset on restart.
       winner: { side: state.winner.side, name: state.winner.name, logo: state.winner.logo, color: state.winner.color, subtitle: state.winner.subtitle },
       veto: { title: state.veto.title, maps: state.veto.maps },
-      intro: { side: state.intro.side, title: state.intro.title, style: state.intro.style, showFooter: state.intro.showFooter },
+      intro: { side: state.intro.side, title: state.intro.title, style: state.intro.style, showFooter: state.intro.showFooter, showRealName: state.intro.showRealName !== false },
       owMatch: { visible: !!state.owMatch.visible, format: state.owMatch.format, currentMapIdx: state.owMatch.currentMapIdx, bansByMap: state.owMatch.bansByMap, attackSide: state.owMatch.attackSide || null, showAttack: !!state.owMatch.showAttack, gameMode: state.owMatch.gameMode || 'escort', showMapLabels: state.owMatch.showMapLabels !== false, mapWinners: Array.isArray(state.owMatch.mapWinners) ? state.owMatch.mapWinners : [], mapModes: Array.isArray(state.owMatch.mapModes) ? state.owMatch.mapModes : [] },
       mrMatch: (function(){ const m=state.mrMatch||{}; return { visible: m.visible !== false, format: m.format || 'BO5', bansByMap: m.bansByMap || [], gameMode: m.gameMode || 'convergence', showMapLabels: m.showMapLabels !== false, mapWinners: Array.isArray(m.mapWinners)?m.mapWinners:[], mapModes: Array.isArray(m.mapModes)?m.mapModes:[], gepData: m.gepData||null }; })(),
       customOverlayLayouts: state.customOverlayLayouts || {},

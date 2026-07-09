@@ -208,6 +208,8 @@
     }
     .mu-stage.show .mu-players { opacity: 1; }
 
+    .mu-player-real { font-size: 13px; font-weight: 500; letter-spacing: .04em;
+      color: rgba(255,255,255,.55); text-transform: none; line-height: 1.1; margin-top: 1px; }
     .mu-player {
       font-size: 22px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase;
       color: #fff; line-height: 1.45;
@@ -451,13 +453,25 @@
       }
     }
 
-    function renderPlayers(container, players) {
+    function renderPlayers(container, players, profiles) {
       container.innerHTML = '';
       (players || []).slice(0, 6).forEach((p) => {
+        const tag = (p.gamertag || p.gamerTag || p.name || '');
+        if (!tag) return;
         const d = document.createElement('div');
         d.className = 'mu-player';
-        d.textContent = (p.gamertag || p.name || '').toUpperCase();
-        if (d.textContent) container.appendChild(d);
+        d.textContent = tag.toUpperCase();
+        // Real name IN ADDITION to the gamertag — from the player record or the
+        // start.gg profile registry (keyed by trimmed-lowercase gamertag).
+        const prof = (profiles || {})[tag.trim().toLowerCase()] || {};
+        const real = (p.realName || prof.realName || '').trim();
+        if (real) {
+          const r = document.createElement('div');
+          r.className = 'mu-player-real';
+          r.textContent = real;
+          d.appendChild(r);
+        }
+        container.appendChild(d);
       });
     }
 
@@ -510,7 +524,7 @@
       el('city1').classList.toggle('is-empty', !an.city);
       el('name1').textContent = an.team;
       renderPips(el('pips1'), blue.series, winsNeeded);
-      renderPlayers(el('players1'), blue.players);
+      renderPlayers(el('players1'), blue.players, data.playerProfiles);
 
       // ── Team B ──
       document.documentElement.style.setProperty('--team-b', orange.color || '#8b5cf6');
@@ -520,7 +534,7 @@
       el('city2').classList.toggle('is-empty', !bn.city);
       el('name2').textContent = bn.team;
       renderPips(el('pips2'), orange.series, winsNeeded);
-      renderPlayers(el('players2'), orange.players);
+      renderPlayers(el('players2'), orange.players, data.playerProfiles);
 
       // ── Center ──
       const sa = blue.series ?? 0;
