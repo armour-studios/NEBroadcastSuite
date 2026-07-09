@@ -431,16 +431,13 @@
     <!-- Tournament platform picker -->
     <div class="ev-platform-tabs" id="ev-platform-tabs">
       <button class="ev-plat-tab ev-plat-tab--active" data-plat="startgg" title="Search start.gg tournaments">
-        <svg viewBox="0 0 20 20" width="13" height="13" fill="currentColor" aria-hidden="true"><circle cx="10" cy="10" r="9"/><path d="M7 10.5h6M10 7.5v6" stroke="#fff" stroke-width="1.5" stroke-linecap="round" fill="none"/></svg>
-        start.gg
+        <img class="ev-plat-logo" src="../assets/platforms/startgg.png" alt="start.gg">
       </button>
       <button class="ev-plat-tab" data-plat="challonge" title="Search Challonge tournaments">
-        <svg viewBox="0 0 20 20" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="10" cy="10" r="8"/><path d="M10 6v4l3 2.5" stroke-linecap="round"/></svg>
-        Challonge
+        <img class="ev-plat-logo" src="../assets/platforms/challonge.png" alt="Challonge">
       </button>
       <button class="ev-plat-tab" data-plat="nxgen" title="Search NXGEN tournaments">
-        <svg viewBox="0 0 20 20" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M3 5l7 5-7 5V5z"/><path d="M10 5l7 5-7 5V5z" opacity=".5"/></svg>
-        NXGEN
+        <span class="ev-plat-word">NXGEN</span>
       </button>
     </div>
 
@@ -4801,9 +4798,41 @@
               </div>
             </div>
 
-            <!-- DRAFT — compact status readout + Start Draft quick action. -->
+            <!-- DRAFT — compact status readout + Start Draft quick action. Overwatch gets a real
+                 ban board right here (turn banner + 4 snake ban slots + type-to-ban) since bans
+                 are the whole draft for that game; "Open full board" still reaches the popout. -->
             <div class="gfx-front-panel" data-frontkey="draft" id="gfx-front-draft" style="display:none;">
+              <!-- Editable scene name + subtext, live on the front card (which-side-starts + Start
+                   live in the summary body below, rendered per draft state). -->
+              <div class="dm-front-meta" style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px;">
+                <input id="draft-front-title" class="input-text" placeholder="Scene title (e.g. GRAND FINAL — DRAFT)" style="font-size:12px;">
+                <input id="draft-front-subtitle" class="input-text" placeholder="Subtext (e.g. BEST OF 5)" style="font-size:12px;">
+                <!-- Overwatch only: how many hero bans total (applies on the next Start Draft). -->
+                <div id="draft-front-owbans-row" style="display:none;align-items:center;gap:8px;">
+                  <span class="field-label" style="flex-shrink:0;">Hero bans</span>
+                  <select id="draft-front-owbans" class="input-select" style="flex:1;font-size:12px;">
+                    <option value="4">4 — two per team</option>
+                    <option value="2">2 — one per team</option>
+                  </select>
+                </div>
+              </div>
               <div class="gfx-popout-summary-body" id="gfx-front-draft-body"></div>
+              <div id="gfx-front-draft-ow" class="dm-front-ow" style="display:none;">
+                <div class="dm-front-ow-turn" id="dm-front-ow-turn"></div>
+                <div class="dm-front-ow-slots" id="dm-front-ow-slots"></div>
+                <div class="dm-front-ow-input">
+                  <div class="team-typeahead" style="flex:1; position:relative;">
+                    <input id="draft-front-input" class="input-text" placeholder="Type a hero to ban…" autocomplete="off" style="width:100%;font-size:12px;">
+                    <div class="team-dd" id="draft-front-dd" role="listbox"></div>
+                  </div>
+                  <button type="button" class="btn btn-primary btn-sm" id="btn-draft-front-submit">Ban</button>
+                </div>
+              </div>
+              <div style="display:flex;gap:6px;margin-bottom:6px;">
+                <button type="button" class="btn btn-ghost btn-sm" id="btn-draft-front-undo" style="flex:1;" title="Undo the last pick / ban">Undo</button>
+                <button type="button" class="btn btn-ghost btn-sm" id="btn-draft-front-reset" style="flex:1;" title="Clear every pick & ban made so far (keeps the board & format)">Reset</button>
+              </div>
+              <button type="button" class="btn btn-ghost btn-sm" id="btn-draft-front-open" style="width:100%;">Open full board</button>
             </div>
 
             <!-- SPOTLIGHT — Title, reorderable team list and Add-team search (moved out of
@@ -8677,7 +8706,6 @@ PacketSendRate=10</pre>
         <div class="ev-subnav" id="tw-subnav" style="margin-bottom:10px;">
           <button type="button" class="ev-subnav-btn active" data-tw="chat">Chat</button>
           <button type="button" class="ev-subnav-btn" data-tw="activity">Activity</button>
-          <button type="button" class="ev-subnav-btn" data-tw="prediction">Predict</button>
         </div>
 
       <div class="tw-sub" data-twpanel="chat">
@@ -8686,16 +8714,36 @@ PacketSendRate=10</pre>
             <span id="chat-connection-status" style="display: none; color: #4ade80;"><span class="live-dot" style="background:#4ade80"></span> Connected</span>
             <span id="chat-loading" style="color: #888;">Connecting...</span>
           </div>
-          <!-- ── Active Prediction — surfaced here (not just the Predict tab) for quick management while watching chat ── -->
-          <div id="qpred-active" style="display:none;margin-bottom:10px;">
-            <div class="qrail-group" style="background:rgba(145,70,255,0.06);border:1px solid rgba(145,70,255,0.25);border-radius:10px;padding:10px;">
-              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
-                <div class="qrail-label" style="margin:0;">Live Prediction</div>
-                <span id="qpred-timer" style="font-size:11px;color:#9146ff;font-weight:700;background:rgba(145,70,255,0.12);padding:2px 8px;border-radius:10px;"></span>
-              </div>
-              <div id="qpred-active-title" style="font-size:13px;font-weight:700;color:#fff;margin-bottom:14px;line-height:1.3;"></div>
+
+          <!-- ── Prediction — single card, create or manage, always above chat ── -->
+          <div class="tw-pred-card" id="tw-pred-card">
+            <div class="tw-pred-headrow">
+              <span class="qrail-label" style="margin:0;">Prediction</span>
+              <span id="qpred-live-pill" class="tw-pred-pill" style="display:none;">LIVE</span>
+            </div>
+
+            <!-- Active management -->
+            <div id="qpred-active" style="display:none;">
+              <div id="qpred-active-title" class="tw-pred-title"></div>
               <div id="qpred-outcomes" style="display:flex;flex-direction:column;gap:10px;"></div>
-              <button id="btn-qpred-cancel" class="btn btn-danger btn-sm" style="width:100%;margin-top:14px;">Cancel Prediction</button>
+              <div class="tw-pred-active-foot">
+                <span id="qpred-timer" class="tw-pred-timer"></span>
+                <button id="btn-qpred-cancel" class="btn btn-danger btn-sm">Cancel</button>
+              </div>
+            </div>
+
+            <!-- Create -->
+            <div id="qpred-create">
+              <input id="qpred-new-title" class="input-text" style="margin-bottom:8px;" placeholder="Who will win?" maxlength="45">
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px;">
+                <input id="qpred-opt0" class="input-text" style="font-size:12px;" placeholder="Blue side" maxlength="25">
+                <input id="qpred-opt1" class="input-text" style="font-size:12px;" placeholder="Orange side" maxlength="25">
+              </div>
+              <div style="display:flex;gap:6px;align-items:center;">
+                <span style="font-size:11px;color:var(--muted);white-space:nowrap;">Duration</span>
+                <input id="qpred-duration" class="input-text" style="width:68px;font-size:12px;" value="5:00" placeholder="M:SS">
+                <button id="btn-qpred-create" class="btn btn-primary btn-sm" style="flex:1;">Create</button>
+              </div>
             </div>
           </div>
 
@@ -8777,30 +8825,6 @@ PacketSendRate=10</pre>
         </div>
       </div>
 
-      <!-- ── PREDICTION: quick bar ── -->
-      <div class="tw-sub" data-twpanel="prediction" style="display:none;">
-        <!-- Shown instead of the create form while a prediction is live — it's managed from the Chat tab now -->
-        <div id="qpred-moved-hint" style="display:none;padding:26px 10px;text-align:center;color:var(--muted);font-size:12px;line-height:1.5;">
-          A prediction is live.<br>Manage it from the <strong style="color:var(--text);">Chat</strong> tab, above the messages.
-        </div>
-        <!-- Create prediction -->
-        <div id="qpred-create">
-          <div class="qrail-group">
-            <div class="qrail-label">Quick Prediction</div>
-            <input id="qpred-new-title" class="input-text" style="margin-bottom:8px;" placeholder="Who will win?" maxlength="45">
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px;">
-              <input id="qpred-opt0" class="input-text" style="font-size:12px;" placeholder="Blue side" maxlength="25">
-              <input id="qpred-opt1" class="input-text" style="font-size:12px;" placeholder="Orange side" maxlength="25">
-            </div>
-            <div style="display:flex;gap:6px;align-items:center;">
-              <span style="font-size:11px;color:var(--muted);white-space:nowrap;">Duration</span>
-              <input id="qpred-duration" class="input-text" style="width:68px;font-size:12px;" value="5:00" placeholder="M:SS">
-              <button id="btn-qpred-create" class="btn btn-primary btn-sm" style="flex:1;">Create</button>
-            </div>
-            <div style="margin-top:10px;font-size:11px;color:var(--muted);text-align:center;">No active prediction</div>
-          </div>
-        </div>
-      </div><!-- /tw-sub prediction -->
       </div><!-- /qpanel twitch -->
 
     </div>

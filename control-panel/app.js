@@ -2323,11 +2323,18 @@ function _returnGraphicsToProd() {
   // delegated listener on the whole front-panel container below.
   el('gfx-popout-summary')?.addEventListener('click', (e) => {
     if (e.target.closest('#btn-draft-front-start')) {
-      send('draft_start', { game: currentState?.activeGame || '', teamStart: el('draft-front-start')?.value || 'a', visible: true });
+      send('draft_start', { game: currentState?.activeGame || '', teamStart: el('draft-front-start')?.value || 'a', visible: true,
+        title: el('draft-front-title')?.value || '', subtitle: el('draft-front-subtitle')?.value || '',
+        owBanCount: Number(el('draft-front-owbans')?.value) || 4 });
       // Same as the popup's Start Draft: gfx.html only shows what gfxActive points at, so the
       // board has to be pushed live here too or bans made from the front card go nowhere visible.
       doPush('draft');
     }
+  });
+  // Persist the front-card "which side starts" pick so it survives re-renders and the full board mirrors it.
+  el('gfx-popout-summary')?.addEventListener('change', (e) => {
+    const s = e.target.closest('#draft-front-start');
+    if (s) send('set_draft_meta', { teamStart: s.value === 'b' ? 'b' : 'a' });
   });
 
   // Inline quick-edit controls on the Standings / Schedule front cards — write straight to state
@@ -11341,6 +11348,24 @@ el('draft-input')?.addEventListener('keydown', (e) => { if (e.key === 'Enter') {
 el('btn-draft-front-submit')?.addEventListener('click', () => submitDraftPick('draft-front-input'));
 el('draft-front-input')?.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); submitDraftPick('draft-front-input'); } });
 el('btn-draft-front-open')?.addEventListener('click', () => window._gfxOpenPopout && window._gfxOpenPopout('draft'));
+el('btn-draft-front-undo')?.addEventListener('click', () => send('draft_undo', {}));
+el('btn-draft-front-reset')?.addEventListener('click', () => {
+  appConfirm('Reset the draft board? Every pick and ban made so far will be cleared (the board and format stay).', 'Reset', true)
+    .then((ok) => { if (ok) send('draft_reset', {}); });
+});
+// Front-card scene title / subtext — live-edit the draft overlay's header without a restart.
+let _draftMetaT;
+function _sendDraftMeta() {
+  clearTimeout(_draftMetaT);
+  _draftMetaT = setTimeout(() => send('set_draft_meta', {
+    title: el('draft-front-title')?.value || '', subtitle: el('draft-front-subtitle')?.value || ''
+  }), 300);
+}
+el('draft-front-title')?.addEventListener('input', _sendDraftMeta);
+el('draft-front-subtitle')?.addEventListener('input', _sendDraftMeta);
+// Overwatch hero-ban count — persist the preference now; it takes effect on the next Start Draft
+// (changing it rebuilds the ban sequence, so it can't safely apply mid-draft).
+el('draft-front-owbans')?.addEventListener('change', () => send('set_draft_meta', { owBanCount: Number(el('draft-front-owbans')?.value) || 4 }));
 el('btn-draft-undo')?.addEventListener('click', () => send('draft_undo', {}));
 el('btn-draft-reset')?.addEventListener('click', () => {
   appConfirm('Reset the draft board? Every pick and ban made so far will be wiped and cannot be recovered.', 'Reset', true).then((ok) => {
@@ -11416,7 +11441,18 @@ function renderDraftManager(data) {
   if (startSel && startSel.options.length >= 2) {
     startSel.options[0].textContent = blueTeam   + ' goes first';
     startSel.options[1].textContent = orangeTeam + ' goes first';
+    if (document.activeElement !== startSel) startSel.value = d.teamStart || 'a';
   }
+
+  // Front card: scene title / subtext mirror state (don't clobber while typing).
+  const dfTitle = el('draft-front-title'); if (dfTitle && document.activeElement !== dfTitle) dfTitle.value = d.title || '';
+  const dfSub   = el('draft-front-subtitle'); if (dfSub && document.activeElement !== dfSub) dfSub.value = d.subtitle || '';
+
+  // Overwatch-only hero-ban count selector (2 = one per team, 4 = two per team).
+  const owBansRow = el('draft-front-owbans-row'), owBansSel = el('draft-front-owbans');
+  const isOw = selGame === 'overwatch';
+  if (owBansRow) owBansRow.style.display = isOw ? 'flex' : 'none';
+  if (owBansSel && document.activeElement !== owBansSel) owBansSel.value = String(d.owBanCount === 2 ? 2 : 4);
 
   // Typeahead datalist
   const dl = el('draft-champs');
@@ -11565,12 +11601,44 @@ function renderOwFrontBoard(data, d) {
   const inp = el('draft-front-input');
   if (inp) inp.disabled = !d.turn;
 
-  const dl = el('draft-front-champs');
-  if (dl && dl.dataset.game !== 'overwatch') {
-    dl.dataset.game = 'overwatch'; dl.innerHTML = '';
-    ((data.draftRosters && data.draftRosters.overwatch) || []).forEach((c) => { const o = document.createElement('option'); o.value = c.name; dl.appendChild(o); });
+  // Roster cache for the rich typeahead (portrait + name + role) below.
+  if (data.draftRosters && Array.isArray(data.draftRosters.overwatch) && data.draftRosters.overwatch.length) {
+    window._dmFrontHeroes = data.draftRosters.overwatch;
   }
 }
+
+// ── Hero search typeahead: portrait + name + role, keyword-filtered ──
+(function wireDraftFrontTypeahead() {
+  const inp = el('draft-front-input'), dd = el('draft-front-dd');
+  if (!inp || !dd) return;
+  const hide = () => { dd.classList.remove('show'); dd.innerHTML = ''; };
+  const render = () => {
+    const q = inp.value.trim().toLowerCase();
+    const all = window._dmFrontHeroes || [];
+    if (!q || !all.length) { hide(); return; }
+    // Keyword match on the hero name OR role ("tank" lists every tank).
+    const hits = all.filter((h) => (h.name || '').toLowerCase().includes(q) || (h.role || '').toLowerCase().includes(q)).slice(0, 12);
+    if (!hits.length) { hide(); return; }
+    dd.innerHTML = hits.map((h) =>
+      '<div class="team-dd-item" role="option" data-name="' + tlEsc(h.name) + '">'
+      + (h.image ? '<img class="team-dd-logo" src="http://localhost:3000' + tlEsc(h.image) + '" alt="" style="object-fit:cover;border-radius:4px;" onerror="this.style.visibility=\'hidden\'">' : '')
+      + '<span class="team-dd-name">' + tlEsc(h.name) + '</span>'
+      + (h.role ? '<span style="margin-left:auto;font-size:9px;font-weight:800;letter-spacing:.08em;opacity:.5;text-transform:uppercase;">' + tlEsc(h.role) + '</span>' : '')
+      + '</div>').join('');
+    dd.classList.add('show');
+  };
+  inp.addEventListener('input', render);
+  inp.addEventListener('focus', render);
+  inp.addEventListener('blur', () => setTimeout(hide, 150));
+  inp.addEventListener('keydown', (e) => { if (e.key === 'Escape') hide(); });
+  dd.addEventListener('mousedown', (e) => {
+    const it = e.target.closest('.team-dd-item'); if (!it) return;
+    e.preventDefault();
+    inp.value = it.dataset.name;
+    hide();
+    inp.focus();
+  });
+})();
 
 // ── Overwatch 2 hero ban manager ────────────────────────────────────────────
 const OW_HEROES_BY_ROLE = {
