@@ -547,8 +547,11 @@ function render() {
   }
 
   renderTalentBar(talent);
-  positionViewport();   // pin the roll flush under the (variable-height) staff bar — no dead space
   renderSponsorBar(brandSpon);
+  // Position AFTER both bars render (sponsor bar height was measured before it had content,
+  // so the roll ran on behind it), and again once logos finish loading and settle heights.
+  positionViewport();
+  setTimeout(positionViewport, 350);
 
   track.innerHTML = '';
   const hasRoll = teams.length || activeSecs.length || credSpon.length;
