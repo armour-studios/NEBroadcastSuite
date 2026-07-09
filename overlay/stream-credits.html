@@ -83,6 +83,19 @@
     /* bottom fade handled by the viewport alpha mask */
     .scroll-track { position: absolute; top: 0; left: 0; right: 0; padding: 16px 0 140px; will-change: transform; }
 
+    /* ── End card (fades in over the finished roll) ─────── */
+    .end-card { position: absolute; inset: 0; z-index: 40; display: flex; align-items: center; justify-content: center;
+      opacity: 0; pointer-events: none; transition: opacity 0.9s ease;
+      background: radial-gradient(ellipse 70% 55% at center, rgba(13,13,20,0.92) 0%, rgba(13,13,20,0.78) 55%, rgba(13,13,20,0) 100%); }
+    .end-card.show { opacity: 1; }
+    .end-card-text { max-width: 1500px; padding: 0 60px; text-align: center; line-height: 1.08;
+      font-size: 104px; font-weight: 900; letter-spacing: 3px; text-transform: uppercase;
+      background: linear-gradient(135deg, #fff 30%, #b89eff 100%);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+      filter: drop-shadow(0 6px 34px rgba(155,109,255,0.45));
+      transform: translateY(14px) scale(0.985); transition: transform 0.9s cubic-bezier(.2,.7,.3,1); }
+    .end-card.show .end-card-text { transform: none; }
+
     /* ── Team roster TABLE — aligned columns: logo · team · players (with flags) ── */
     .roll-teams-head { text-align: center; font-size: 14px; font-weight: 700; letter-spacing: 5px; text-transform: uppercase; color: rgba(255,255,255,0.5); margin: 0 0 24px; }
     /* Movie-credit style: one centered block per team — logo, name, roster underneath. */
@@ -173,6 +186,10 @@
 
   <div class="sponsor-bar is-empty" id="sponsor-bar"></div>
 
+  <!-- End card: fades in over everything once the roll finishes (non-loop). Text is customizable
+       (state.credits.endText) and defaults to THANKS FOR WATCHING. -->
+  <div class="end-card" id="end-card"><div class="end-card-text" id="end-card-text">Thanks For Watching</div></div>
+
 <script>
 /* ────────────────────────────────────────────────────────────────
    Stream Credits Overlay
@@ -195,6 +212,20 @@ const viewport  = document.getElementById('scroll-viewport');
 const emptyEl   = document.getElementById('empty-state');
 const talentBar = document.getElementById('talent-bar');
 const sponsorBar= document.getElementById('sponsor-bar');
+const endCard   = document.getElementById('end-card');
+const endCardText = document.getElementById('end-card-text');
+
+/* End card — fades in once the roll finishes (non-loop); text is producer-customizable. */
+const DEFAULT_END_TEXT = 'Thanks For Watching';
+let _ended = false;
+function endText() { return ((fullState.credits && fullState.credits.endText) || '').trim() || DEFAULT_END_TEXT; }
+function showEndCard() {
+  if (_ended || !endCard) return;
+  _ended = true;
+  endCardText.textContent = endText();
+  endCard.classList.add('show');
+}
+function hideEndCard() { _ended = false; if (endCard) endCard.classList.remove('show'); }
 
 let activityLog = [];
 let fullState   = {};
@@ -484,7 +515,8 @@ function render() {
   // 3) Producer-added credit sponsors — the dedicated big call-out
   if (credSpon.length) track.appendChild(creditSponsorSection(credSpon));
 
-  // Reset the roll
+  // Reset the roll (and take the end card back down — the roll is starting over).
+  hideEndCard();
   _scrollY = 0; _scrollDir = 1; _pauseUntil = Date.now() + PAUSE_MS; track.style.transform = 'translateY(0)';
 }
 
@@ -500,7 +532,11 @@ function contentSig() {
   const acts   = activityLog.map((e) => e.type + ':' + (e.username || e.from || e.level || ''));
   return JSON.stringify({ talent, teams, spon, bspon, acts, brandSig, t8sig });
 }
-function maybeRender() { const sig = contentSig(); if (sig !== _sig) { _sig = sig; render(); } }
+function maybeRender() {
+  // Live-update the end-card text (even while it's showing) without resetting the scroll.
+  if (endCardText && endCardText.textContent !== endText()) endCardText.textContent = endText();
+  const sig = contentSig(); if (sig !== _sig) { _sig = sig; render(); }
+}
 
 /* ── Scroll animation ───────────────────────────────────────── */
 let _scrollY = 0, _scrollDir = 1, _pauseUntil = 0, _lastTs = null;
@@ -513,7 +549,7 @@ function animFrame(ts) {
     const maxScroll = Math.max(0, _trackH() - _viewportH());
     if (maxScroll > 0 && Date.now() >= _pauseUntil) {
       _scrollY += SCROLL_SPEED * dt * _scrollDir;
-      if (_scrollY >= maxScroll) { _scrollY = maxScroll; if (LOOP) { _scrollDir = -1; _pauseUntil = Date.now() + PAUSE_MS; } else { _pauseUntil = Date.now() + 999999; } }
+      if (_scrollY >= maxScroll) { _scrollY = maxScroll; if (LOOP) { _scrollDir = -1; _pauseUntil = Date.now() + PAUSE_MS; } else { _pauseUntil = Date.now() + 999999; showEndCard(); } }
       if (_scrollDir === -1 && _scrollY <= 0) { _scrollY = 0; _scrollDir = 1; _pauseUntil = Date.now() + PAUSE_MS; }
       track.style.transform = `translateY(-${_scrollY}px)`;
     }
@@ -533,6 +569,8 @@ async function loadLog() {
     if (!fullState.teams && !fullState.savedTeams) fullState = _previewBroadcast();
   }
   maybeRender();
+  // ?endcard=1 — jump straight to the end card (for styling / OBS positioning without waiting for the roll).
+  if (params.has('endcard')) setTimeout(showEndCard, 400);
 }
 
 async function connectWS() {
