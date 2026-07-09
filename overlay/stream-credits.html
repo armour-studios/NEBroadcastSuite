@@ -633,6 +633,11 @@ async function connectWS() {
       // teams/casters/crew ride every broadcast; bracket/savedTeams/brand ride the on-change library
       // payload; credits is live. Only update keys this message actually carries (backfill).
       ['teams', 'casters', 'crew', 'bracket', 'savedTeams', 'startgg', 'playerProfiles', 'brand', 'credits', 'standings'].forEach((k) => { if (d[k] !== undefined) fullState[k] = d[k]; });
+      // Restart the roll from the top every time the scene is (re)triggered — without
+      // this it sat wherever it last ended ('Thanks for watching') on the next push.
+      const nowOn = !!((d.credits && d.credits.visible) || d.gfxActive === 'credits');
+      if (nowOn && !window._wasOn) { _scrollY = 0; _scrollDir = 1; _pauseUntil = Date.now() + PAUSE_MS; if (typeof track !== 'undefined' && track) track.style.transform = 'translateY(0)'; }
+      if (d.credits !== undefined || d.gfxActive !== undefined) window._wasOn = nowOn;
       const title = d.twitch?.channelInfo?.title || d.event?.title || d.eventName;
       if (title) document.getElementById('header-title').textContent = title;
       maybeRender();
