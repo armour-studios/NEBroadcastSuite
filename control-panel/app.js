@@ -7619,7 +7619,7 @@ function toggleTeamFavorite(t) {
   send('save_team', {
     oldName: t.name, name: t.name,
     logo: t.logo || null, color: t.color || null,
-    players: (t.players || []).map((p) => ({ id: p.id, name: (p.name || '').trim(), role: (p.role || '').trim(), country: (p.country || '').toLowerCase() })).filter((p) => p.name),
+    players: (t.players || []).map((p) => ({ ...p, name: (p.name || '').trim() })).filter((p) => p.name),
     favorite: newFav
   });
   // Optimistically update the local state so the card refreshes immediately.
