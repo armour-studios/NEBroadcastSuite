@@ -126,6 +126,13 @@
 
     function render(data) {
       const w = data.winner || {};
+      // Standalone/preview sources force `visible: true` on this key regardless of real state
+      // (see scene-base.js — that's by design, OBS scene visibility is the real gate for those),
+      // so `visible` alone can't tell "no winner yet" apart from "a real winner, just not on air
+      // via gfx.html". A real winner always has a side or an explicit name; a fresh/idle state has
+      // neither — render nothing rather than defaulting to a bare "WINNER WINS!" placeholder.
+      const hasWinner = w.side === 'blue' || w.side === 'orange' || !!(w.name && w.name.trim());
+      if (!hasWinner) { stage.classList.remove('show'); _sig = ''; return; }
       stage.classList.add('show');
 
       const r = resolve(w, data);

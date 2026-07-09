@@ -41,6 +41,7 @@
     const params = new URLSearchParams(location.search);
     const STREAM = (params.get('stream') || '').trim();
     const WS = 'ws://' + (location.hostname || 'localhost') + ':3001';
+    const HTTP_BASE = 'http://' + (location.hostname || 'localhost') + ':3000';
     const $ = (id) => document.getElementById(id);
     $('station').textContent = STREAM || 'STATION';
 
@@ -64,8 +65,15 @@
       bar.classList.add('show');
     }
 
-    function connect() {
-      const ws = new WebSocket(WS);
+    // The bridge requires a token when LAN-exposed (WS_HOST != loopback) — fetched once from the
+    // HTTP API this page was loaded from and cached for reconnects; a no-op on the default loopback bridge.
+    let _wsToken = null;
+    async function connect() {
+      if (!_wsToken) {
+        try { _wsToken = (await (await fetch(HTTP_BASE + '/api/ws-token')).json()).token || ''; }
+        catch (e) { _wsToken = ''; }
+      }
+      const ws = new WebSocket(WS + (_wsToken ? ('?token=' + encodeURIComponent(_wsToken)) : ''));
       ws.onopen = () => ws.send(JSON.stringify({ type: 'request_state' }));
       ws.onmessage = ({ data }) => { let m; try { m = JSON.parse(data); } catch { return; } if (m.type === 'full_state') render(m.data); };
       ws.onclose = () => setTimeout(connect, 800);

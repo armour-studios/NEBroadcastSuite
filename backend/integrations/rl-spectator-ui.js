@@ -13,11 +13,16 @@ const DEFAULTS = {
   gapMs: 250,
   focusWindow: true,
   focusDelayMs: 500,
-  matchDelayMs: 2800,
+  matchDelayMs: 1500,   // delay after the kickoff before the single hide press (tunable in the UI)
   hotkey: 'F9'
 };
 
-let lastAutoGameNumber = null;
+// Auto-hide state, reset each kickoff (resetAutoTracking). The key is a TOGGLE, so we press it AT
+// MOST ONCE per kickoff — no retries: each blind press risks flipping the UI the wrong way, and if
+// one press doesn't land the producer can hide it by hand. _done = we've pressed (or a manual hide
+// landed) this kickoff; _pending = a press is scheduled/in-flight.
+let _done = false;
+let _pending = false;
 
 function mergeConfig(cfg) {
   return { ...DEFAULTS, ...(cfg || {}) };
@@ -116,25 +121,40 @@ function runHideNativeUi(cfg) {
   });
 }
 
+// Called once at kickoff. Presses the hide key a SINGLE time (after matchDelayMs) and then never
+// again this kickoff — success or failure. resetAutoTracking() is called at each kickoff so every
+// game re-hides (RL re-shows its UI when gameplay restarts).
 function scheduleAutoHide(gameNumber, cfg, onResult) {
   const merged = mergeConfig(cfg);
   if (!merged.enabled || !merged.autoOnMatch) return false;
-  if (gameNumber != null && lastAutoGameNumber === gameNumber) return false;
+  if (_done || _pending) return false;
 
+  _pending = true;
   const delay = Math.max(500, Number(merged.matchDelayMs) || 2800);
   setTimeout(() => {
+    // The key is a TOGGLE. If the UI is already believed hidden by the time this fires — e.g. the
+    // producer hit the manual hide during the delay window (markHidden) — pressing it again would
+    // toggle the UI BACK ON. So bail: never press when we think it's already gone.
+    if (_done) { _pending = false; return; }
     runHideNativeUi(merged).then((result) => {
-      if (result.ok && gameNumber != null) lastAutoGameNumber = gameNumber;
+      _pending = false;
+      _done = true;   // one shot per kickoff — whether it landed or not, don't press the toggle again
       if (typeof onResult === 'function') onResult(result);
     });
   }, delay);
-
-  if (gameNumber != null) lastAutoGameNumber = gameNumber;
   return true;
 }
 
+// The manual hide (app button / in-game hotkey routed through the app) landed — record that the UI is
+// hidden so the auto path won't fire the toggle again and flip it back on.
+function markHidden() {
+  _done = true;
+  _pending = false;
+}
+
 function resetAutoTracking() {
-  lastAutoGameNumber = null;
+  _done = false;
+  _pending = false;
 }
 
 module.exports = {
@@ -142,5 +162,6 @@ module.exports = {
   mergeConfig,
   runHideNativeUi,
   scheduleAutoHide,
-  resetAutoTracking
+  resetAutoTracking,
+  markHidden
 };

@@ -18,7 +18,7 @@
     { target: '.sidebar-nav', placement: 'right', title: 'The left sidebar — your pages',
       body: "Everything lives here. The top group are the pages you run a show from; the lower group are setup and tools. We'll visit each one." },
     { target: '#qrail', tab: 'principal', title: 'The right rail — quick actions',
-      body: "This rail rides along on every page. Its icon tabs open quick panels: QUICK (scene cuts + put-on-air), Rundown, the start.gg queue, overlay toggles, graphic triggers, Flows, Replay, Talent cams and Twitch chat — so you never leave the page you're on to run the show. Drag its edge to resize it." },
+      body: "This rail rides along on every page. Its icon tabs open quick panels: QUICK (scene cuts + put-on-air), Rundown, the start.gg queue, overlay toggles, Triggers, Flows, Replay, Talent cams, NEURAL AI (Shield + auto-director), Notes, Stream info and Twitch chat — so you never leave the page you're on to run the show. Drag its edge to resize it." },
     { target: '#qk-put', tab: 'principal',
       run: function () { var t = document.querySelector('.qrail-tab[data-qtab="quick"]'); if (t) t.click(); },
       title: 'Put-on-air chips',
@@ -31,8 +31,8 @@
       body: "Name your broadcast, then link a tournament (start.gg, Challonge or NXGEN). The ACTIVE event drives everything downstream — the bracket, standings, the stream queue and the scores ticker all follow it automatically." },
     { target: '[data-dash-id="teams"]', tab: 'principal', title: 'Match — teams & score',
       body: "Set the two teams, logos, colors, series score and rosters. This drives the scoreboard and every team-aware overlay — the lineup card, matchup, winner screen. The gear opens match settings: series format, team records, scene automation." },
-    { target: '[data-dash-id="obs"]', tab: 'principal', title: 'OBS & going live',
-      body: "Connect OBS here, then cut scenes and go live. The app follows OBS so overlays and automation stay in sync with what's on air. Prefer vMix? The suite can drive that instead — pick your switcher in Integrations." },
+    { target: '[data-dash-id="deck"]', tab: 'principal', title: 'Cutting scenes & going live',
+      body: "The Deck widget cuts your mapped scenes right from the dashboard, with preview and hotkeys. Connect your switcher first — Integrations ▸ Video Switcher, OBS or vMix (pick one, they're a clean either/or) — then this grid drives it live and stays in sync with whatever's actually on air." },
     { target: '#dash-customize-btn', tab: 'principal', title: 'Make it yours',
       body: "Click Customize to rearrange widgets, change columns, or add/remove cards — build the cockpit that fits how you produce." },
 
@@ -79,10 +79,10 @@
     // ── Talent ──
     { target: '#tab-equipos', tab: 'equipos', placement: 'right', title: 'Talent — teams & on-air crew',
       body: "Everyone in front of the camera. Teams (with CSV import and JSON backup), casters and their desk lineup, guests — and private VDO.Ninja camera rooms with per-person join links and QR codes. No pasting URLs around." },
-    { target: '#tab-equipos-content .ev-subnav, #tab-equipos-content .cf-subnav', tab: 'equipos', title: 'Talent sub-tabs',
-      body: "Teams \u00B7 Player Rooms \u00B7 Casters \u00B7 Observers \u00B7 Guests. The Director Control Center moves people between rooms live, and Listen-In lets you hear any room with captions." },
+    { target: '#talent-page-nav', tab: 'equipos', title: 'Talent sub-tabs',
+      body: "Teams and Crew. Crew filters down to Casters \u00B7 Hosts \u00B7 Guests \u00B7 Observers \u2014 each with a private VDO.Ninja camera room, a join link and a QR code. No pasting URLs around." },
 
-    { target: '#dcc-monitor-view',
+    { target: '#dcc-monitor-view', tab: 'principal',
       run: function () { var t = document.querySelector('.qrail-tab[data-qtab="talent"]'); if (t) t.click(); },
       title: 'Talent Monitor & Director Control Center',
       body: "The rail's Talent tab monitors every camera room from any page. Pop it out into the full Director Control Center to move casters and players between rooms live, cue interviews, and listen in on any room without putting it on air." },
@@ -91,7 +91,7 @@
     { target: '#tab-events', tab: 'events', placement: 'right', title: 'ESPORTS — tournaments & leagues',
       body: "The competitive side. Pull a bracket and it adapts to any scale — phases and pools are selectable, swiss stages render as a records ladder, and you can search a team by name to jump straight to their pool." },
     { target: '#ev-subnav', tab: 'events', title: 'ESPORTS sub-tabs',
-      body: "Tournaments \u00B7 Leagues \u00B7 My Events \u00B7 Seeding \u00B7 Spotlight. Seeding verifies player ranks against rl6mans and start.gg profiles; Spotlight builds a teams-to-watch overlay from starred teams." },
+      body: "Tournaments \u00B7 Leagues \u00B7 My Events \u00B7 Seeding. Seeding verifies player ranks against rl6mans and start.gg profiles and auto-orders your roster by rank." },
 
     // ── Assets ──
     { target: '#tab-media', tab: 'media', placement: 'right', title: 'Assets — media, overlays & profiles',
@@ -103,7 +103,7 @@
     { target: '#tab-stats', tab: 'stats', placement: 'right', title: 'Analytics — measure the show',
       body: "Data on every broadcast, plus the player/team stats database." },
     { target: '#stats-subnav', tab: 'stats', title: 'Analytics sub-tabs',
-      body: "Overview \u00B7 Broadcasts \u00B7 Audience (live Twitch followers, subs, clips) \u00B7 Event (import a tournament's full history from start.gg) \u00B7 Players \u00B7 Teams \u00B7 Proof of Play for per-sponsor on-screen exposure reports." },
+      body: "Overview \u00B7 Tournaments (import a tournament's full history from start.gg) \u00B7 Teams \u00B7 Players \u00B7 Broadcasts \u00B7 Audience (live Twitch followers, subs, clips) \u00B7 Sponsors \u00B7 Reports for per-sponsor on-screen exposure proof." },
 
     // ── Integrations ──
     { target: '#int-store-grid', tab: 'integrations', placement: 'right', title: 'Integrations — the app store',

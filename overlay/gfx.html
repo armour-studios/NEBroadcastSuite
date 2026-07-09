@@ -81,6 +81,10 @@
     <iframe src="bracket.html" title="Bracket"></iframe>
   </div>
 
+  <div class="gfx-layer" id="layer-credits">
+    <iframe src="stream-credits.html" title="Stream Credits"></iframe>
+  </div>
+
   <script>
     const LAYER_MAP = {
       break:     'layer-break',
@@ -95,6 +99,7 @@
       standings: 'layer-standings',
       schedule:  'layer-schedule',
       bracket:   'layer-bracket',
+      credits:   'layer-credits',
     };
 
     let currentScene = null;
@@ -108,9 +113,16 @@
       });
     }
 
-    function connect() {
+    // The bridge requires a token when LAN-exposed (WS_HOST != loopback) — fetched once from the
+    // HTTP API this page was loaded from and cached for reconnects; a no-op on the default loopback bridge.
+    let _wsToken = null;
+    async function connect() {
       const host = location.hostname || 'localhost';
-      const ws = new WebSocket('ws://' + host + ':3001');
+      if (!_wsToken) {
+        try { _wsToken = (await (await fetch('http://' + host + ':3000/api/ws-token')).json()).token || ''; }
+        catch (e) { _wsToken = ''; }
+      }
+      const ws = new WebSocket('ws://' + host + ':3001' + (_wsToken ? ('?token=' + encodeURIComponent(_wsToken)) : ''));
 
       ws.onopen = () => ws.send(JSON.stringify({ type: 'request_state', role: 'overlay' }));
 

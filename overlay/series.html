@@ -65,6 +65,7 @@
   <script src="scene-base.js"></script>
   <script>
     const WS = 'ws://' + (location.hostname || 'localhost') + ':3001';
+    const HTTP_BASE = 'http://' + (location.hostname || 'localhost') + ':3000';
     const $ = (id) => document.getElementById(id);
     const FORMAT_MAPS = { bo1: 1, bo3: 3, bo5: 5, bo7: 7 };
 
@@ -126,8 +127,15 @@
       $('wrap').classList.toggle('show', (m.seriesVisible !== false) && (total > 0 || data.gfxActive === 'series'));
     }
 
-    function connect() {
-      const ws = new WebSocket(WS);
+    // The bridge requires a token when LAN-exposed (WS_HOST != loopback) — fetched once from the
+    // HTTP API this page was loaded from and cached for reconnects; a no-op on the default loopback bridge.
+    let _wsToken = null;
+    async function connect() {
+      if (!_wsToken) {
+        try { _wsToken = (await (await fetch(HTTP_BASE + '/api/ws-token')).json()).token || ''; }
+        catch (e) { _wsToken = ''; }
+      }
+      const ws = new WebSocket(WS + (_wsToken ? ('?token=' + encodeURIComponent(_wsToken)) : ''));
       ws.onopen = () => ws.send(JSON.stringify({ type: 'request_state' }));
       ws.onmessage = ({ data }) => { let m; try { m = JSON.parse(data); } catch { return; } if (m.type === 'full_state') { SceneBase.applySceneConfig('series', m.data); render(m.data); } };
       ws.onclose = () => setTimeout(connect, 800);

@@ -77,6 +77,9 @@
     .map-card .img { position: absolute; inset: 0; background-size: cover; background-position: center; }
     .map-card .shade { position: absolute; inset: 0; background: linear-gradient(180deg, rgba(0,0,0,.55) 0%, rgba(0,0,0,.05) 30%, rgba(0,0,0,.15) 60%, rgba(0,0,0,.85) 100%); }
     .map-card .mode { position: absolute; top: 18px; left: 0; right: 0; text-align: center; font-family: 'Rajdhani', var(--main-font); font-weight: 600; font-size: 1.3em; color: #dfe4ea; letter-spacing: 0.18em; }
+    .map-card .mode.mode-icon { display: flex; align-items: center; justify-content: center; gap: 8px; }
+    .map-card .mode.mode-icon img { height: 26px; width: 26px; object-fit: contain; filter: drop-shadow(0 2px 6px rgba(0,0,0,.6)); }
+    .map-card .mode.mode-icon span { font-size: .82em; }
     .map-card .name { position: absolute; bottom: 96px; left: 0; right: 0; text-align: center; font-family: 'Rajdhani', var(--main-font); font-weight: 700; font-size: 2.3em; color: #fff; text-transform: uppercase; }
     .map-card .chip {
       /* Full-width ribbon across the bottom of the map card (was a floating centered pill). */
@@ -149,6 +152,30 @@
     const titleEl = document.getElementById('veto-title');
     const rowEl   = document.getElementById('veto-row');
     let _sig = '';
+
+    // Overwatch game-mode icons — m.mode carries the pool entry's type (Control/Hybrid/Escort/
+    // Push/Flashpoint/Clash). Other games' mode strings (e.g. CS2) have no matching icon, so the
+    // label just falls back to text, same as before.
+    const MODE_IMG = {
+      control: '/assets/overwatch/modes/Control.webp', hybrid: '/assets/overwatch/modes/Hybrid.webp',
+      escort: '/assets/overwatch/modes/Escort.webp', push: '/assets/overwatch/modes/Push.webp',
+      flashpoint: '/assets/overwatch/modes/Flashpoint.webp', clash: '/assets/overwatch/modes/Clash.webp',
+      assault: '/assets/overwatch/modes/Assault.webp'
+    };
+    function buildModeEl(modeText) {
+      const mode = document.createElement('div'); mode.className = 'mode';
+      const icon = MODE_IMG[(modeText || '').toLowerCase().trim()];
+      if (icon) {
+        mode.classList.add('mode-icon');
+        const img = document.createElement('img'); img.src = icon; img.alt = '';
+        img.onerror = () => { img.remove(); mode.classList.remove('mode-icon'); mode.textContent = (modeText || '').toUpperCase(); };
+        const span = document.createElement('span'); span.textContent = modeText.toUpperCase();
+        mode.appendChild(img); mode.appendChild(span);
+      } else {
+        mode.textContent = (modeText || '').toUpperCase();
+      }
+      return mode;
+    }
 
     function teamFor(by, data) {
       if (by === 'a') return SceneBase.teamSide(data, 'blue');
@@ -245,7 +272,7 @@
         if (m.image) img.style.backgroundImage = `url('${m.image}')`;
         else img.style.background = 'radial-gradient(circle at 50% 30%, color-mix(in srgb, var(--accent) 22%, #14161c), #0a0b0f)';
         const shade = document.createElement('div'); shade.className = 'shade';
-        const mode = document.createElement('div'); mode.className = 'mode'; mode.textContent = (m.mode || '').toUpperCase();
+        const mode = buildModeEl(m.mode);
         const name = document.createElement('div'); name.className = 'name'; name.textContent = (m.name || 'TBA').toUpperCase();
 
         card.appendChild(img); card.appendChild(shade); card.appendChild(mode); card.appendChild(name);

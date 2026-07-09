@@ -3,7 +3,7 @@
   "DesktopAudioDevice1": {
     "prev_ver": 536936450,
     "name": "Desktop Audio",
-    "uuid": "35268ab3-1c7a-4d11-a8f9-dc3d935f9614",
+    "uuid": "f0e882b7-cf0d-4587-ba00-40518e34dbd4",
     "id": "wasapi_output_capture",
     "versioned_id": "wasapi_output_capture",
     "settings": {
@@ -34,7 +34,7 @@
   "AuxAudioDevice1": {
     "prev_ver": 536936450,
     "name": "Mic/Aux",
-    "uuid": "8e20b0db-a4c9-43d5-a930-a39fcfc01409",
+    "uuid": "f2610a4c-118c-4cce-bda4-f777cc0b189d",
     "id": "wasapi_input_capture",
     "versioned_id": "wasapi_input_capture",
     "settings": {
@@ -68,34 +68,10 @@
       "name": "═══  PRE-GAME  ═══"
     },
     {
-      "name": "Away / Standby"
-    },
-    {
-      "name": "Break (Countdown)"
+      "name": "Intermission"
     },
     {
       "name": "Matchup"
-    },
-    {
-      "name": "Team 1 Intro"
-    },
-    {
-      "name": "Team 2 Intro"
-    },
-    {
-      "name": "Map Veto"
-    },
-    {
-      "name": "Draft"
-    },
-    {
-      "name": "Upcoming"
-    },
-    {
-      "name": "Standings"
-    },
-    {
-      "name": "Bracket"
     },
     {
       "name": "Desk Show"
@@ -146,18 +122,6 @@
       "name": "VS / Head-to-Head"
     },
     {
-      "name": "═══  POST-GAME  ═══"
-    },
-    {
-      "name": "Post-Game (Winner)"
-    },
-    {
-      "name": "Team 1 Win"
-    },
-    {
-      "name": "Team 2 Win"
-    },
-    {
       "name": "═══  UTILITY  ═══"
     },
     {
@@ -176,8 +140,8 @@
       "name": "=> Player Cam"
     }
   ],
-  "current_scene": "In Game",
-  "current_program_scene": "In Game",
+  "current_scene": "Intermission",
+  "current_program_scene": "Intermission",
   "current_transition": "Fade",
   "transition_duration": 300,
   "transitions": [
@@ -216,7 +180,7 @@
     {
       "prev_ver": 536936450,
       "name": "Background Loop",
-      "uuid": "4b262a31-20d2-4aa3-8c22-ccd760e7d12d",
+      "uuid": "ee1d0c9f-9582-48bf-8b93-2af80f8e1e78",
       "id": "ffmpeg_source",
       "versioned_id": "ffmpeg_source",
       "settings": {
@@ -257,7 +221,7 @@
     {
       "prev_ver": 536936450,
       "name": "Game Capture",
-      "uuid": "e34fa345-767e-4be9-aaee-46bdeaaeec48",
+      "uuid": "38c076e2-e8a7-4d1b-bf98-b89a2e4d82d5",
       "id": "game_capture",
       "versioned_id": "game_capture",
       "settings": {
@@ -292,7 +256,7 @@
     {
       "prev_ver": 536936450,
       "name": "[CAM] Host (slot 3)",
-      "uuid": "530ee85d-c220-4803-bd6d-ab32c2908cda",
+      "uuid": "5d69fd24-3db7-411f-a700-6c168c947e1b",
       "id": "browser_source",
       "versioned_id": "browser_source",
       "settings": {
@@ -330,7 +294,7 @@
     {
       "prev_ver": 536936450,
       "name": "[CAM] Caster 1 (slot 1)",
-      "uuid": "3488f878-a353-4d1e-9224-2abfc6cea7b1",
+      "uuid": "a595fef5-39f4-407a-9499-8599599b8851",
       "id": "browser_source",
       "versioned_id": "browser_source",
       "settings": {
@@ -368,7 +332,7 @@
     {
       "prev_ver": 536936450,
       "name": "[CAM] Caster 2 (slot 2)",
-      "uuid": "ee627cc5-3fcf-4d1a-b407-09128d74087c",
+      "uuid": "51d28a6a-9c0e-4702-996a-db50a70c36f6",
       "id": "browser_source",
       "versioned_id": "browser_source",
       "settings": {
@@ -406,7 +370,7 @@
     {
       "prev_ver": 536936450,
       "name": "[CAM] Caster 4 (slot 4)",
-      "uuid": "d542afd1-aedd-4ca5-9a0d-6100463ebcd8",
+      "uuid": "168fad1d-1304-45b6-92c5-2eacda2adb6f",
       "id": "browser_source",
       "versioned_id": "browser_source",
       "settings": {
@@ -444,7 +408,7 @@
     {
       "prev_ver": 536936450,
       "name": "[CAM] Player (slot 5)",
-      "uuid": "12e0c13e-b821-4409-904a-31dec5775cd1",
+      "uuid": "3fae9389-d13d-4bac-84ba-ebf57aec2b61",
       "id": "browser_source",
       "versioned_id": "browser_source",
       "settings": {
@@ -481,8 +445,45 @@
     },
     {
       "prev_ver": 536936450,
+      "name": "[GFX] Live Graphics (Push Live)",
+      "uuid": "e2737f9e-cd96-46f5-bc8d-a154b1bafe78",
+      "id": "browser_source",
+      "versioned_id": "browser_source",
+      "settings": {
+        "url": "http://localhost:3000/gfx.html",
+        "width": 1920,
+        "height": 1080,
+        "restart_when_active": false,
+        "shutdown": false,
+        "css": "body { background: rgba(0,0,0,0); margin: 0; overflow: hidden; }"
+      },
+      "mixers": 0,
+      "sync": 0,
+      "flags": 0,
+      "volume": 1,
+      "balance": 0.5,
+      "enabled": true,
+      "muted": false,
+      "push-to-mute": false,
+      "push-to-mute-delay": 0,
+      "push-to-talk": false,
+      "push-to-talk-delay": 0,
+      "hotkeys": {
+        "libobs.mute": [],
+        "libobs.unmute": [],
+        "libobs.push-to-mute": [],
+        "libobs.push-to-talk": [],
+        "ObsBrowser.Refresh": []
+      },
+      "deinterlace_mode": 0,
+      "deinterlace_field_order": 0,
+      "monitoring_type": 0,
+      "private_settings": {}
+    },
+    {
+      "prev_ver": 536936450,
       "name": "[GFX] RL HUD",
-      "uuid": "662ecd0e-4dff-4249-b972-59c25fa5d89d",
+      "uuid": "c6b3efe9-8602-4f36-ae6d-5770f2a1ab0d",
       "id": "browser_source",
       "versioned_id": "browser_source",
       "settings": {
@@ -519,7 +520,7 @@
     {
       "prev_ver": 536936450,
       "name": "[GFX] CS2 HUD",
-      "uuid": "e922e0ea-745e-4c16-8138-c0f44f565c78",
+      "uuid": "f324a389-8dad-4eeb-aa32-fdfa7c2f4d1a",
       "id": "browser_source",
       "versioned_id": "browser_source",
       "settings": {
@@ -556,7 +557,7 @@
     {
       "prev_ver": 536936450,
       "name": "[GFX] Valorant HUD",
-      "uuid": "43a115f9-55e6-49c8-9632-4d12e1ca6436",
+      "uuid": "d6574003-d0a5-48b1-89eb-6e43c0938643",
       "id": "browser_source",
       "versioned_id": "browser_source",
       "settings": {
@@ -593,7 +594,7 @@
     {
       "prev_ver": 536936450,
       "name": "[GFX] LoL HUD",
-      "uuid": "123d04ce-4943-4bdd-b2b5-f112cf24e7c5",
+      "uuid": "67485c61-eacb-49e3-b3fe-90cc9471bd94",
       "id": "browser_source",
       "versioned_id": "browser_source",
       "settings": {
@@ -630,7 +631,7 @@
     {
       "prev_ver": 536936450,
       "name": "[GFX] Overwatch HUD",
-      "uuid": "1b6b5d64-2062-4a6b-8e5d-738154e8e2a6",
+      "uuid": "2de13351-0100-40e9-8142-f580819aa3d3",
       "id": "browser_source",
       "versioned_id": "browser_source",
       "settings": {
@@ -667,7 +668,7 @@
     {
       "prev_ver": 536936450,
       "name": "[GFX] Marvel Rivals HUD",
-      "uuid": "04ea9efa-d75b-4aab-b638-12fe54df8bcd",
+      "uuid": "103e543e-8704-4558-93e2-b26c4ae60387",
       "id": "browser_source",
       "versioned_id": "browser_source",
       "settings": {
@@ -704,7 +705,7 @@
     {
       "prev_ver": 536936450,
       "name": "[GFX] SingleCam",
-      "uuid": "0260f1d0-a533-49d1-97ce-2b972faffa24",
+      "uuid": "b8870afb-13b0-458f-acae-9629074938be",
       "id": "browser_source",
       "versioned_id": "browser_source",
       "settings": {
@@ -741,7 +742,7 @@
     {
       "prev_ver": 536936450,
       "name": "[GFX] Duo Row",
-      "uuid": "408e2813-e527-43ec-b43f-f26233ccefb5",
+      "uuid": "e12b94ef-aa0f-42a2-91b7-80fed5aee530",
       "id": "browser_source",
       "versioned_id": "browser_source",
       "settings": {
@@ -778,7 +779,7 @@
     {
       "prev_ver": 536936450,
       "name": "[GFX] Trio Row",
-      "uuid": "67c0f5c5-aade-4bac-ae30-1e5f55d45571",
+      "uuid": "12edbdab-f7b1-4204-acca-4fe149114d46",
       "id": "browser_source",
       "versioned_id": "browser_source",
       "settings": {
@@ -815,7 +816,7 @@
     {
       "prev_ver": 536936450,
       "name": "[GFX] Duo SingleCam",
-      "uuid": "3f3cd737-0f2d-4390-94cb-d87872af7065",
+      "uuid": "63eb5483-f523-4da5-950c-3756b9d9a529",
       "id": "browser_source",
       "versioned_id": "browser_source",
       "settings": {
@@ -852,7 +853,7 @@
     {
       "prev_ver": 536936450,
       "name": "[GFX] Analyst Desk",
-      "uuid": "a77e3f60-231c-48f2-acef-59a1a42d763d",
+      "uuid": "74aa52ef-26c5-4c89-8ef4-aa019bf23e98",
       "id": "browser_source",
       "versioned_id": "browser_source",
       "settings": {
@@ -889,7 +890,7 @@
     {
       "prev_ver": 536936450,
       "name": "[GFX] Quad Desk",
-      "uuid": "c991c396-31cf-4d27-9033-7cf56fcca530",
+      "uuid": "1b781b8c-414d-496b-ac1d-8c41061cd166",
       "id": "browser_source",
       "versioned_id": "browser_source",
       "settings": {
@@ -926,7 +927,7 @@
     {
       "prev_ver": 536936450,
       "name": "[GFX] Spotlight Desk",
-      "uuid": "e40e125f-94f1-4265-9d1f-c3bbdf68ff95",
+      "uuid": "c6debdfe-d018-494b-8fe1-5476e0c9ff87",
       "id": "browser_source",
       "versioned_id": "browser_source",
       "settings": {
@@ -963,7 +964,7 @@
     {
       "prev_ver": 536936450,
       "name": "[GFX] Interview",
-      "uuid": "9539ef0d-5e19-4c83-a665-c8eb480f79df",
+      "uuid": "699a6fe3-d6ab-46f5-a4e1-822dae2bf413",
       "id": "browser_source",
       "versioned_id": "browser_source",
       "settings": {
@@ -1000,7 +1001,7 @@
     {
       "prev_ver": 536936450,
       "name": "[GFX] Interview Desk",
-      "uuid": "5f94afcc-ac8f-432e-a078-7aed90d0e2aa",
+      "uuid": "a8bfddff-cf86-4b2b-ba91-6153d6a8fe1e",
       "id": "browser_source",
       "versioned_id": "browser_source",
       "settings": {
@@ -1037,7 +1038,7 @@
     {
       "prev_ver": 536936450,
       "name": "[GFX] Desk Show",
-      "uuid": "2711d6c1-1aca-4157-97ee-8c2704dca481",
+      "uuid": "8d0f2956-26d0-411e-adb9-e0ee28fafb69",
       "id": "browser_source",
       "versioned_id": "browser_source",
       "settings": {
@@ -1074,7 +1075,7 @@
     {
       "prev_ver": 536936450,
       "name": "[GFX] Matchup",
-      "uuid": "d4255900-fd95-4683-941f-a26384222c75",
+      "uuid": "14a69736-f3ef-4094-baba-51f9575df0c0",
       "id": "browser_source",
       "versioned_id": "browser_source",
       "settings": {
@@ -1111,7 +1112,7 @@
     {
       "prev_ver": 536936450,
       "name": "[GFX] Cam PIP",
-      "uuid": "259caa5e-9f2b-4956-84aa-0bbaa18b7c1d",
+      "uuid": "f1235a4c-e8c0-4b03-a375-4fc1cb4491c9",
       "id": "browser_source",
       "versioned_id": "browser_source",
       "settings": {
@@ -1148,7 +1149,7 @@
     {
       "prev_ver": 536936450,
       "name": "[GFX] Talent Bar",
-      "uuid": "d5b48c09-0b47-4e99-86da-ec4b2747f3b8",
+      "uuid": "5de5b678-d796-4f61-97ef-92abaf4157e3",
       "id": "browser_source",
       "versioned_id": "browser_source",
       "settings": {
@@ -1184,8 +1185,8 @@
     },
     {
       "prev_ver": 536936450,
-      "name": "[GFX] Away Screen",
-      "uuid": "f257cfd6-d943-4cb1-9743-171879daadc3",
+      "name": "[GFX] Intermission",
+      "uuid": "bb934846-e714-4d85-9e9a-507c62de705a",
       "id": "browser_source",
       "versioned_id": "browser_source",
       "settings": {
@@ -1221,386 +1222,16 @@
     },
     {
       "prev_ver": 536936450,
-      "name": "[GFX] Countdown",
-      "uuid": "38ab9731-0d2f-489a-ac00-bd069d5baaea",
+      "name": "[GFX] Countdown Clock Only",
+      "uuid": "4e0ab3fd-11d5-48df-9641-7eaed50cbc1d",
       "id": "browser_source",
       "versioned_id": "browser_source",
       "settings": {
-        "url": "http://localhost:3000/countdown.html",
+        "url": "http://localhost:3000/countdown.html?timer=1",
         "width": 1920,
         "height": 1080,
         "restart_when_active": true,
         "shutdown": true,
-        "css": "body { background: rgba(0,0,0,0); margin: 0; overflow: hidden; }"
-      },
-      "mixers": 0,
-      "sync": 0,
-      "flags": 0,
-      "volume": 1,
-      "balance": 0.5,
-      "enabled": true,
-      "muted": false,
-      "push-to-mute": false,
-      "push-to-mute-delay": 0,
-      "push-to-talk": false,
-      "push-to-talk-delay": 0,
-      "hotkeys": {
-        "libobs.mute": [],
-        "libobs.unmute": [],
-        "libobs.push-to-mute": [],
-        "libobs.push-to-talk": [],
-        "ObsBrowser.Refresh": []
-      },
-      "deinterlace_mode": 0,
-      "deinterlace_field_order": 0,
-      "monitoring_type": 0,
-      "private_settings": {}
-    },
-    {
-      "prev_ver": 536936450,
-      "name": "[GFX] Winner",
-      "uuid": "15193c85-2f57-4f26-beb9-f1bda5c5a94e",
-      "id": "browser_source",
-      "versioned_id": "browser_source",
-      "settings": {
-        "url": "http://localhost:3000/winner.html",
-        "width": 1920,
-        "height": 1080,
-        "restart_when_active": true,
-        "shutdown": true,
-        "css": "body { background: rgba(0,0,0,0); margin: 0; overflow: hidden; }"
-      },
-      "mixers": 0,
-      "sync": 0,
-      "flags": 0,
-      "volume": 1,
-      "balance": 0.5,
-      "enabled": true,
-      "muted": false,
-      "push-to-mute": false,
-      "push-to-mute-delay": 0,
-      "push-to-talk": false,
-      "push-to-talk-delay": 0,
-      "hotkeys": {
-        "libobs.mute": [],
-        "libobs.unmute": [],
-        "libobs.push-to-mute": [],
-        "libobs.push-to-talk": [],
-        "ObsBrowser.Refresh": []
-      },
-      "deinterlace_mode": 0,
-      "deinterlace_field_order": 0,
-      "monitoring_type": 0,
-      "private_settings": {}
-    },
-    {
-      "prev_ver": 536936450,
-      "name": "[GFX] Team 1 Winner",
-      "uuid": "6750aa6f-e4a4-4b6c-90bd-6b654c63359f",
-      "id": "browser_source",
-      "versioned_id": "browser_source",
-      "settings": {
-        "url": "http://localhost:3000/winner.html?side=blue",
-        "width": 1920,
-        "height": 1080,
-        "restart_when_active": true,
-        "shutdown": true,
-        "css": "body { background: rgba(0,0,0,0); margin: 0; overflow: hidden; }"
-      },
-      "mixers": 0,
-      "sync": 0,
-      "flags": 0,
-      "volume": 1,
-      "balance": 0.5,
-      "enabled": true,
-      "muted": false,
-      "push-to-mute": false,
-      "push-to-mute-delay": 0,
-      "push-to-talk": false,
-      "push-to-talk-delay": 0,
-      "hotkeys": {
-        "libobs.mute": [],
-        "libobs.unmute": [],
-        "libobs.push-to-mute": [],
-        "libobs.push-to-talk": [],
-        "ObsBrowser.Refresh": []
-      },
-      "deinterlace_mode": 0,
-      "deinterlace_field_order": 0,
-      "monitoring_type": 0,
-      "private_settings": {}
-    },
-    {
-      "prev_ver": 536936450,
-      "name": "[GFX] Team 2 Winner",
-      "uuid": "7f448069-1476-4b4e-85c7-6aed45abefe5",
-      "id": "browser_source",
-      "versioned_id": "browser_source",
-      "settings": {
-        "url": "http://localhost:3000/winner.html?side=orange",
-        "width": 1920,
-        "height": 1080,
-        "restart_when_active": true,
-        "shutdown": true,
-        "css": "body { background: rgba(0,0,0,0); margin: 0; overflow: hidden; }"
-      },
-      "mixers": 0,
-      "sync": 0,
-      "flags": 0,
-      "volume": 1,
-      "balance": 0.5,
-      "enabled": true,
-      "muted": false,
-      "push-to-mute": false,
-      "push-to-mute-delay": 0,
-      "push-to-talk": false,
-      "push-to-talk-delay": 0,
-      "hotkeys": {
-        "libobs.mute": [],
-        "libobs.unmute": [],
-        "libobs.push-to-mute": [],
-        "libobs.push-to-talk": [],
-        "ObsBrowser.Refresh": []
-      },
-      "deinterlace_mode": 0,
-      "deinterlace_field_order": 0,
-      "monitoring_type": 0,
-      "private_settings": {}
-    },
-    {
-      "prev_ver": 536936450,
-      "name": "[GFX] Team 1 Intro",
-      "uuid": "95a293ad-0b7e-405b-aaab-8770ff584aca",
-      "id": "browser_source",
-      "versioned_id": "browser_source",
-      "settings": {
-        "url": "http://localhost:3000/intro.html?side=blue",
-        "width": 1920,
-        "height": 1080,
-        "restart_when_active": true,
-        "shutdown": true,
-        "css": "body { background: rgba(0,0,0,0); margin: 0; overflow: hidden; }"
-      },
-      "mixers": 0,
-      "sync": 0,
-      "flags": 0,
-      "volume": 1,
-      "balance": 0.5,
-      "enabled": true,
-      "muted": false,
-      "push-to-mute": false,
-      "push-to-mute-delay": 0,
-      "push-to-talk": false,
-      "push-to-talk-delay": 0,
-      "hotkeys": {
-        "libobs.mute": [],
-        "libobs.unmute": [],
-        "libobs.push-to-mute": [],
-        "libobs.push-to-talk": [],
-        "ObsBrowser.Refresh": []
-      },
-      "deinterlace_mode": 0,
-      "deinterlace_field_order": 0,
-      "monitoring_type": 0,
-      "private_settings": {}
-    },
-    {
-      "prev_ver": 536936450,
-      "name": "[GFX] Team 2 Intro",
-      "uuid": "18ba35c8-b7cc-40b6-9684-ac278534bc9b",
-      "id": "browser_source",
-      "versioned_id": "browser_source",
-      "settings": {
-        "url": "http://localhost:3000/intro.html?side=orange",
-        "width": 1920,
-        "height": 1080,
-        "restart_when_active": true,
-        "shutdown": true,
-        "css": "body { background: rgba(0,0,0,0); margin: 0; overflow: hidden; }"
-      },
-      "mixers": 0,
-      "sync": 0,
-      "flags": 0,
-      "volume": 1,
-      "balance": 0.5,
-      "enabled": true,
-      "muted": false,
-      "push-to-mute": false,
-      "push-to-mute-delay": 0,
-      "push-to-talk": false,
-      "push-to-talk-delay": 0,
-      "hotkeys": {
-        "libobs.mute": [],
-        "libobs.unmute": [],
-        "libobs.push-to-mute": [],
-        "libobs.push-to-talk": [],
-        "ObsBrowser.Refresh": []
-      },
-      "deinterlace_mode": 0,
-      "deinterlace_field_order": 0,
-      "monitoring_type": 0,
-      "private_settings": {}
-    },
-    {
-      "prev_ver": 536936450,
-      "name": "[GFX] Map Veto",
-      "uuid": "9553aba4-e8d5-443d-862b-98dea777ce40",
-      "id": "browser_source",
-      "versioned_id": "browser_source",
-      "settings": {
-        "url": "http://localhost:3000/mapscreen.html",
-        "width": 1920,
-        "height": 1080,
-        "restart_when_active": true,
-        "shutdown": true,
-        "css": "body { background: rgba(0,0,0,0); margin: 0; overflow: hidden; }"
-      },
-      "mixers": 0,
-      "sync": 0,
-      "flags": 0,
-      "volume": 1,
-      "balance": 0.5,
-      "enabled": true,
-      "muted": false,
-      "push-to-mute": false,
-      "push-to-mute-delay": 0,
-      "push-to-talk": false,
-      "push-to-talk-delay": 0,
-      "hotkeys": {
-        "libobs.mute": [],
-        "libobs.unmute": [],
-        "libobs.push-to-mute": [],
-        "libobs.push-to-talk": [],
-        "ObsBrowser.Refresh": []
-      },
-      "deinterlace_mode": 0,
-      "deinterlace_field_order": 0,
-      "monitoring_type": 0,
-      "private_settings": {}
-    },
-    {
-      "prev_ver": 536936450,
-      "name": "[GFX] Draft",
-      "uuid": "8e01d8e2-8f5d-442e-8c94-f77029023e5f",
-      "id": "browser_source",
-      "versioned_id": "browser_source",
-      "settings": {
-        "url": "http://localhost:3000/draft.html",
-        "width": 1920,
-        "height": 1080,
-        "restart_when_active": false,
-        "shutdown": false,
-        "css": "body { background: rgba(0,0,0,0); margin: 0; overflow: hidden; }"
-      },
-      "mixers": 0,
-      "sync": 0,
-      "flags": 0,
-      "volume": 1,
-      "balance": 0.5,
-      "enabled": true,
-      "muted": false,
-      "push-to-mute": false,
-      "push-to-mute-delay": 0,
-      "push-to-talk": false,
-      "push-to-talk-delay": 0,
-      "hotkeys": {
-        "libobs.mute": [],
-        "libobs.unmute": [],
-        "libobs.push-to-mute": [],
-        "libobs.push-to-talk": [],
-        "ObsBrowser.Refresh": []
-      },
-      "deinterlace_mode": 0,
-      "deinterlace_field_order": 0,
-      "monitoring_type": 0,
-      "private_settings": {}
-    },
-    {
-      "prev_ver": 536936450,
-      "name": "[GFX] Bracket",
-      "uuid": "7ffeb35b-b6b8-477c-bc2d-fc496b3c9003",
-      "id": "browser_source",
-      "versioned_id": "browser_source",
-      "settings": {
-        "url": "http://localhost:3000/bracket.html",
-        "width": 1920,
-        "height": 1080,
-        "restart_when_active": false,
-        "shutdown": false,
-        "css": "body { background: rgba(0,0,0,0); margin: 0; overflow: hidden; }"
-      },
-      "mixers": 0,
-      "sync": 0,
-      "flags": 0,
-      "volume": 1,
-      "balance": 0.5,
-      "enabled": true,
-      "muted": false,
-      "push-to-mute": false,
-      "push-to-mute-delay": 0,
-      "push-to-talk": false,
-      "push-to-talk-delay": 0,
-      "hotkeys": {
-        "libobs.mute": [],
-        "libobs.unmute": [],
-        "libobs.push-to-mute": [],
-        "libobs.push-to-talk": [],
-        "ObsBrowser.Refresh": []
-      },
-      "deinterlace_mode": 0,
-      "deinterlace_field_order": 0,
-      "monitoring_type": 0,
-      "private_settings": {}
-    },
-    {
-      "prev_ver": 536936450,
-      "name": "[GFX] Upcoming",
-      "uuid": "4ab80044-15dc-4f02-896c-a06e1b5e8239",
-      "id": "browser_source",
-      "versioned_id": "browser_source",
-      "settings": {
-        "url": "http://localhost:3000/schedule.html",
-        "width": 1920,
-        "height": 1080,
-        "restart_when_active": false,
-        "shutdown": false,
-        "css": "body { background: rgba(0,0,0,0); margin: 0; overflow: hidden; }"
-      },
-      "mixers": 0,
-      "sync": 0,
-      "flags": 0,
-      "volume": 1,
-      "balance": 0.5,
-      "enabled": true,
-      "muted": false,
-      "push-to-mute": false,
-      "push-to-mute-delay": 0,
-      "push-to-talk": false,
-      "push-to-talk-delay": 0,
-      "hotkeys": {
-        "libobs.mute": [],
-        "libobs.unmute": [],
-        "libobs.push-to-mute": [],
-        "libobs.push-to-talk": [],
-        "ObsBrowser.Refresh": []
-      },
-      "deinterlace_mode": 0,
-      "deinterlace_field_order": 0,
-      "monitoring_type": 0,
-      "private_settings": {}
-    },
-    {
-      "prev_ver": 536936450,
-      "name": "[GFX] Standings",
-      "uuid": "333bcc3f-13ae-4a87-924b-0cce9880d5a9",
-      "id": "browser_source",
-      "versioned_id": "browser_source",
-      "settings": {
-        "url": "http://localhost:3000/standings.html",
-        "width": 1920,
-        "height": 1080,
-        "restart_when_active": false,
-        "shutdown": false,
         "css": "body { background: rgba(0,0,0,0); margin: 0; overflow: hidden; }"
       },
       "mixers": 0,
@@ -1629,7 +1260,7 @@
     {
       "prev_ver": 536936450,
       "name": "[GFX] Replay",
-      "uuid": "daf5a0a5-f707-40cf-b00b-994d3cbb289f",
+      "uuid": "fda5cb32-087c-4646-8ebd-33c8d2fc9f50",
       "id": "browser_source",
       "versioned_id": "browser_source",
       "settings": {
@@ -1666,7 +1297,7 @@
     {
       "prev_ver": 536936450,
       "name": "[GFX] Transition",
-      "uuid": "8e44a99a-f7a4-4173-a956-6f482967880d",
+      "uuid": "21754119-2748-4037-8f57-82ecae58c8cb",
       "id": "browser_source",
       "versioned_id": "browser_source",
       "settings": {
@@ -1703,7 +1334,7 @@
     {
       "prev_ver": 536936450,
       "name": "[GFX] Ticker",
-      "uuid": "7337e3df-1f8f-4975-8da8-530169a8d280",
+      "uuid": "b819f911-976d-44b0-bccf-8be5f24fe38d",
       "id": "browser_source",
       "versioned_id": "browser_source",
       "settings": {
@@ -1740,7 +1371,7 @@
     {
       "prev_ver": 536936450,
       "name": "[GFX] Sponsor Rail",
-      "uuid": "e24a08ff-8f69-4a5a-bca3-903138bf0114",
+      "uuid": "1cdc6be8-0557-48aa-a3ca-353c44fe2733",
       "id": "browser_source",
       "versioned_id": "browser_source",
       "settings": {
@@ -1777,7 +1408,7 @@
     {
       "prev_ver": 536936450,
       "name": "[GFX] Sponsor Banner",
-      "uuid": "ab9f93f1-a5a9-4662-b19a-b3d5c72c70d4",
+      "uuid": "f7a13636-d924-4cfb-838d-fa83b2bc3ca2",
       "id": "browser_source",
       "versioned_id": "browser_source",
       "settings": {
@@ -1814,7 +1445,7 @@
     {
       "prev_ver": 536936450,
       "name": "[GFX] Listen-In Captions",
-      "uuid": "e570a0ad-7a9d-409c-a81b-2038d90c01b3",
+      "uuid": "a2bced43-d46b-4c43-8702-a8b46b380156",
       "id": "browser_source",
       "versioned_id": "browser_source",
       "settings": {
@@ -1851,7 +1482,7 @@
     {
       "prev_ver": 536936450,
       "name": "[GFX] Interviewee Cam",
-      "uuid": "391bd08e-a306-40bf-a814-05101bae3dd6",
+      "uuid": "eb4b4f8f-f28f-4c3f-b4cd-2b43c4ffd4c8",
       "id": "browser_source",
       "versioned_id": "browser_source",
       "settings": {
@@ -1888,7 +1519,7 @@
     {
       "prev_ver": 536936450,
       "name": "═══  PRE-GAME  ═══",
-      "uuid": "fde0ab77-2b54-4181-8192-a7beb9ec61b1",
+      "uuid": "15b915d7-5224-4917-b608-17690599bc60",
       "id": "scene",
       "versioned_id": "scene",
       "settings": {
@@ -1922,17 +1553,17 @@
     },
     {
       "prev_ver": 536936450,
-      "name": "Away / Standby",
-      "uuid": "617fd6f9-e236-42bc-8f2b-39cff6e7f6d0",
+      "name": "Intermission",
+      "uuid": "ed73fbbf-887d-4cd3-b753-7ac66a8e4526",
       "id": "scene",
       "versioned_id": "scene",
       "settings": {
         "custom_size": false,
-        "id_counter": 3,
+        "id_counter": 6,
         "items": [
           {
             "name": "Background Loop",
-            "source_uuid": "4b262a31-20d2-4aa3-8c22-ccd760e7d12d",
+            "source_uuid": "ee1d0c9f-9582-48bf-8b93-2af80f8e1e78",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -1977,8 +1608,8 @@
             }
           },
           {
-            "name": "[GFX] Away Screen",
-            "source_uuid": "f257cfd6-d943-4cb1-9743-171879daadc3",
+            "name": "[GFX] Intermission",
+            "source_uuid": "bb934846-e714-4d85-9e9a-507c62de705a",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -1995,6 +1626,144 @@
             "crop_right": 0,
             "crop_bottom": 0,
             "id": 2,
+            "group_item_backup": false,
+            "pos": {
+              "x": 0,
+              "y": 0
+            },
+            "scale": {
+              "x": 1,
+              "y": 1
+            },
+            "bounds": {
+              "x": 1920,
+              "y": 1080
+            },
+            "scale_filter": "disable",
+            "blend_method": "default",
+            "blend_type": "normal",
+            "show_transition": {
+              "duration": 0
+            },
+            "hide_transition": {
+              "duration": 0
+            },
+            "private_settings": {
+              "color": "",
+              "color-preset": 7
+            }
+          },
+          {
+            "name": "[GFX] Live Graphics (Push Live)",
+            "source_uuid": "e2737f9e-cd96-46f5-bc8d-a154b1bafe78",
+            "visible": true,
+            "locked": true,
+            "rot": 0,
+            "scale_ref": {
+              "x": 1920,
+              "y": 1080
+            },
+            "align": 5,
+            "bounds_type": 2,
+            "bounds_align": 0,
+            "bounds_crop": false,
+            "crop_left": 0,
+            "crop_top": 0,
+            "crop_right": 0,
+            "crop_bottom": 0,
+            "id": 3,
+            "group_item_backup": false,
+            "pos": {
+              "x": 0,
+              "y": 0
+            },
+            "scale": {
+              "x": 1,
+              "y": 1
+            },
+            "bounds": {
+              "x": 1920,
+              "y": 1080
+            },
+            "scale_filter": "disable",
+            "blend_method": "default",
+            "blend_type": "normal",
+            "show_transition": {
+              "duration": 0
+            },
+            "hide_transition": {
+              "duration": 0
+            },
+            "private_settings": {
+              "color": "",
+              "color-preset": 7
+            }
+          },
+          {
+            "name": "[GFX] Ticker",
+            "source_uuid": "b819f911-976d-44b0-bccf-8be5f24fe38d",
+            "visible": true,
+            "locked": true,
+            "rot": 0,
+            "scale_ref": {
+              "x": 1920,
+              "y": 1080
+            },
+            "align": 5,
+            "bounds_type": 2,
+            "bounds_align": 0,
+            "bounds_crop": false,
+            "crop_left": 0,
+            "crop_top": 0,
+            "crop_right": 0,
+            "crop_bottom": 0,
+            "id": 4,
+            "group_item_backup": false,
+            "pos": {
+              "x": 0,
+              "y": 0
+            },
+            "scale": {
+              "x": 1,
+              "y": 1
+            },
+            "bounds": {
+              "x": 1920,
+              "y": 1080
+            },
+            "scale_filter": "disable",
+            "blend_method": "default",
+            "blend_type": "normal",
+            "show_transition": {
+              "duration": 0
+            },
+            "hide_transition": {
+              "duration": 0
+            },
+            "private_settings": {
+              "color": "",
+              "color-preset": 7
+            }
+          },
+          {
+            "name": "[GFX] Sponsor Rail",
+            "source_uuid": "1cdc6be8-0557-48aa-a3ca-353c44fe2733",
+            "visible": true,
+            "locked": true,
+            "rot": 0,
+            "scale_ref": {
+              "x": 1920,
+              "y": 1080
+            },
+            "align": 5,
+            "bounds_type": 2,
+            "bounds_align": 0,
+            "bounds_crop": false,
+            "crop_left": 0,
+            "crop_top": 0,
+            "crop_right": 0,
+            "crop_bottom": 0,
+            "id": 5,
             "group_item_backup": false,
             "pos": {
               "x": 0,
@@ -2040,139 +1809,13 @@
         "libobs.show_scene_item.1": [],
         "libobs.hide_scene_item.1": [],
         "libobs.show_scene_item.2": [],
-        "libobs.hide_scene_item.2": []
-      },
-      "deinterlace_mode": 0,
-      "deinterlace_field_order": 0,
-      "monitoring_type": 0,
-      "private_settings": {
-        "show_in_multiview": true,
-        "transition_duration": 500
-      },
-      "canvas_uuid": "6c69626f-6273-4c00-9d88-c5136d61696e",
-      "color": 3208970239
-    },
-    {
-      "prev_ver": 536936450,
-      "name": "Break (Countdown)",
-      "uuid": "a5ef8239-76cd-430f-9ddc-8207514088e3",
-      "id": "scene",
-      "versioned_id": "scene",
-      "settings": {
-        "custom_size": false,
-        "id_counter": 3,
-        "items": [
-          {
-            "name": "Background Loop",
-            "source_uuid": "4b262a31-20d2-4aa3-8c22-ccd760e7d12d",
-            "visible": true,
-            "locked": true,
-            "rot": 0,
-            "scale_ref": {
-              "x": 1920,
-              "y": 1080
-            },
-            "align": 5,
-            "bounds_type": 0,
-            "bounds_align": 0,
-            "bounds_crop": false,
-            "crop_left": 0,
-            "crop_top": 0,
-            "crop_right": 0,
-            "crop_bottom": 0,
-            "id": 1,
-            "group_item_backup": false,
-            "pos": {
-              "x": 0,
-              "y": 0
-            },
-            "scale": {
-              "x": 1,
-              "y": 1
-            },
-            "bounds": {
-              "x": 0,
-              "y": 0
-            },
-            "scale_filter": "disable",
-            "blend_method": "default",
-            "blend_type": "normal",
-            "show_transition": {
-              "duration": 0
-            },
-            "hide_transition": {
-              "duration": 0
-            },
-            "private_settings": {
-              "color": "",
-              "color-preset": 5
-            }
-          },
-          {
-            "name": "[GFX] Countdown",
-            "source_uuid": "38ab9731-0d2f-489a-ac00-bd069d5baaea",
-            "visible": true,
-            "locked": true,
-            "rot": 0,
-            "scale_ref": {
-              "x": 1920,
-              "y": 1080
-            },
-            "align": 5,
-            "bounds_type": 2,
-            "bounds_align": 0,
-            "bounds_crop": false,
-            "crop_left": 0,
-            "crop_top": 0,
-            "crop_right": 0,
-            "crop_bottom": 0,
-            "id": 2,
-            "group_item_backup": false,
-            "pos": {
-              "x": 0,
-              "y": 0
-            },
-            "scale": {
-              "x": 1,
-              "y": 1
-            },
-            "bounds": {
-              "x": 1920,
-              "y": 1080
-            },
-            "scale_filter": "disable",
-            "blend_method": "default",
-            "blend_type": "normal",
-            "show_transition": {
-              "duration": 0
-            },
-            "hide_transition": {
-              "duration": 0
-            },
-            "private_settings": {
-              "color": "",
-              "color-preset": 7
-            }
-          }
-        ]
-      },
-      "mixers": 0,
-      "sync": 0,
-      "flags": 0,
-      "volume": 1,
-      "balance": 0.5,
-      "enabled": true,
-      "muted": false,
-      "push-to-mute": false,
-      "push-to-mute-delay": 0,
-      "push-to-talk": false,
-      "push-to-talk-delay": 0,
-      "hotkeys": {
-        "OBSBasic.SelectScene": [],
-        "libobs.show_scene_item.1": [],
-        "libobs.hide_scene_item.1": [],
-        "libobs.show_scene_item.2": [],
-        "libobs.hide_scene_item.2": []
+        "libobs.hide_scene_item.2": [],
+        "libobs.show_scene_item.3": [],
+        "libobs.hide_scene_item.3": [],
+        "libobs.show_scene_item.4": [],
+        "libobs.hide_scene_item.4": [],
+        "libobs.show_scene_item.5": [],
+        "libobs.hide_scene_item.5": []
       },
       "deinterlace_mode": 0,
       "deinterlace_field_order": 0,
@@ -2187,16 +1830,16 @@
     {
       "prev_ver": 536936450,
       "name": "Matchup",
-      "uuid": "c4a364c9-7701-4274-bf00-bec88aaac8c4",
+      "uuid": "6dff9a28-9023-4edd-a284-40fc20ce2673",
       "id": "scene",
       "versioned_id": "scene",
       "settings": {
         "custom_size": false,
-        "id_counter": 4,
+        "id_counter": 5,
         "items": [
           {
             "name": "Background Loop",
-            "source_uuid": "4b262a31-20d2-4aa3-8c22-ccd760e7d12d",
+            "source_uuid": "ee1d0c9f-9582-48bf-8b93-2af80f8e1e78",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -2242,7 +1885,7 @@
           },
           {
             "name": "[GFX] Matchup",
-            "source_uuid": "d4255900-fd95-4683-941f-a26384222c75",
+            "source_uuid": "14a69736-f3ef-4094-baba-51f9575df0c0",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -2287,9 +1930,9 @@
             }
           },
           {
-            "name": "[GFX] Transition",
-            "source_uuid": "8e44a99a-f7a4-4173-a956-6f482967880d",
-            "visible": false,
+            "name": "[GFX] Live Graphics (Push Live)",
+            "source_uuid": "e2737f9e-cd96-46f5-bc8d-a154b1bafe78",
+            "visible": true,
             "locked": true,
             "rot": 0,
             "scale_ref": {
@@ -2305,6 +1948,52 @@
             "crop_right": 0,
             "crop_bottom": 0,
             "id": 3,
+            "group_item_backup": false,
+            "pos": {
+              "x": 0,
+              "y": 0
+            },
+            "scale": {
+              "x": 1,
+              "y": 1
+            },
+            "bounds": {
+              "x": 1920,
+              "y": 1080
+            },
+            "scale_filter": "disable",
+            "blend_method": "default",
+            "blend_type": "normal",
+            "show_transition": {
+              "duration": 0
+            },
+            "hide_transition": {
+              "duration": 0
+            },
+            "private_settings": {
+              "color": "",
+              "color-preset": 7
+            }
+          },
+          {
+            "name": "[GFX] Transition",
+            "source_uuid": "21754119-2748-4037-8f57-82ecae58c8cb",
+            "visible": false,
+            "locked": true,
+            "rot": 0,
+            "scale_ref": {
+              "x": 1920,
+              "y": 1080
+            },
+            "align": 5,
+            "bounds_type": 2,
+            "bounds_align": 0,
+            "bounds_crop": false,
+            "crop_left": 0,
+            "crop_top": 0,
+            "crop_right": 0,
+            "crop_bottom": 0,
+            "id": 4,
             "group_item_backup": false,
             "pos": {
               "x": 0,
@@ -2352,931 +2041,9 @@
         "libobs.show_scene_item.2": [],
         "libobs.hide_scene_item.2": [],
         "libobs.show_scene_item.3": [],
-        "libobs.hide_scene_item.3": []
-      },
-      "deinterlace_mode": 0,
-      "deinterlace_field_order": 0,
-      "monitoring_type": 0,
-      "private_settings": {
-        "show_in_multiview": true,
-        "transition_duration": 300
-      },
-      "canvas_uuid": "6c69626f-6273-4c00-9d88-c5136d61696e",
-      "color": 3208970239
-    },
-    {
-      "prev_ver": 536936450,
-      "name": "Team 1 Intro",
-      "uuid": "73bcd695-211f-4e0d-944f-03ebc79c5421",
-      "id": "scene",
-      "versioned_id": "scene",
-      "settings": {
-        "custom_size": false,
-        "id_counter": 3,
-        "items": [
-          {
-            "name": "Background Loop",
-            "source_uuid": "4b262a31-20d2-4aa3-8c22-ccd760e7d12d",
-            "visible": true,
-            "locked": true,
-            "rot": 0,
-            "scale_ref": {
-              "x": 1920,
-              "y": 1080
-            },
-            "align": 5,
-            "bounds_type": 0,
-            "bounds_align": 0,
-            "bounds_crop": false,
-            "crop_left": 0,
-            "crop_top": 0,
-            "crop_right": 0,
-            "crop_bottom": 0,
-            "id": 1,
-            "group_item_backup": false,
-            "pos": {
-              "x": 0,
-              "y": 0
-            },
-            "scale": {
-              "x": 1,
-              "y": 1
-            },
-            "bounds": {
-              "x": 0,
-              "y": 0
-            },
-            "scale_filter": "disable",
-            "blend_method": "default",
-            "blend_type": "normal",
-            "show_transition": {
-              "duration": 0
-            },
-            "hide_transition": {
-              "duration": 0
-            },
-            "private_settings": {
-              "color": "",
-              "color-preset": 5
-            }
-          },
-          {
-            "name": "[GFX] Team 1 Intro",
-            "source_uuid": "95a293ad-0b7e-405b-aaab-8770ff584aca",
-            "visible": true,
-            "locked": true,
-            "rot": 0,
-            "scale_ref": {
-              "x": 1920,
-              "y": 1080
-            },
-            "align": 5,
-            "bounds_type": 2,
-            "bounds_align": 0,
-            "bounds_crop": false,
-            "crop_left": 0,
-            "crop_top": 0,
-            "crop_right": 0,
-            "crop_bottom": 0,
-            "id": 2,
-            "group_item_backup": false,
-            "pos": {
-              "x": 0,
-              "y": 0
-            },
-            "scale": {
-              "x": 1,
-              "y": 1
-            },
-            "bounds": {
-              "x": 1920,
-              "y": 1080
-            },
-            "scale_filter": "disable",
-            "blend_method": "default",
-            "blend_type": "normal",
-            "show_transition": {
-              "duration": 0
-            },
-            "hide_transition": {
-              "duration": 0
-            },
-            "private_settings": {
-              "color": "",
-              "color-preset": 7
-            }
-          }
-        ]
-      },
-      "mixers": 0,
-      "sync": 0,
-      "flags": 0,
-      "volume": 1,
-      "balance": 0.5,
-      "enabled": true,
-      "muted": false,
-      "push-to-mute": false,
-      "push-to-mute-delay": 0,
-      "push-to-talk": false,
-      "push-to-talk-delay": 0,
-      "hotkeys": {
-        "OBSBasic.SelectScene": [],
-        "libobs.show_scene_item.1": [],
-        "libobs.hide_scene_item.1": [],
-        "libobs.show_scene_item.2": [],
-        "libobs.hide_scene_item.2": []
-      },
-      "deinterlace_mode": 0,
-      "deinterlace_field_order": 0,
-      "monitoring_type": 0,
-      "private_settings": {
-        "show_in_multiview": false,
-        "transition_duration": 500
-      },
-      "canvas_uuid": "6c69626f-6273-4c00-9d88-c5136d61696e",
-      "color": 3208970239
-    },
-    {
-      "prev_ver": 536936450,
-      "name": "Team 2 Intro",
-      "uuid": "606d871a-2212-4e53-aaba-37582c992b2b",
-      "id": "scene",
-      "versioned_id": "scene",
-      "settings": {
-        "custom_size": false,
-        "id_counter": 3,
-        "items": [
-          {
-            "name": "Background Loop",
-            "source_uuid": "4b262a31-20d2-4aa3-8c22-ccd760e7d12d",
-            "visible": true,
-            "locked": true,
-            "rot": 0,
-            "scale_ref": {
-              "x": 1920,
-              "y": 1080
-            },
-            "align": 5,
-            "bounds_type": 0,
-            "bounds_align": 0,
-            "bounds_crop": false,
-            "crop_left": 0,
-            "crop_top": 0,
-            "crop_right": 0,
-            "crop_bottom": 0,
-            "id": 1,
-            "group_item_backup": false,
-            "pos": {
-              "x": 0,
-              "y": 0
-            },
-            "scale": {
-              "x": 1,
-              "y": 1
-            },
-            "bounds": {
-              "x": 0,
-              "y": 0
-            },
-            "scale_filter": "disable",
-            "blend_method": "default",
-            "blend_type": "normal",
-            "show_transition": {
-              "duration": 0
-            },
-            "hide_transition": {
-              "duration": 0
-            },
-            "private_settings": {
-              "color": "",
-              "color-preset": 5
-            }
-          },
-          {
-            "name": "[GFX] Team 2 Intro",
-            "source_uuid": "18ba35c8-b7cc-40b6-9684-ac278534bc9b",
-            "visible": true,
-            "locked": true,
-            "rot": 0,
-            "scale_ref": {
-              "x": 1920,
-              "y": 1080
-            },
-            "align": 5,
-            "bounds_type": 2,
-            "bounds_align": 0,
-            "bounds_crop": false,
-            "crop_left": 0,
-            "crop_top": 0,
-            "crop_right": 0,
-            "crop_bottom": 0,
-            "id": 2,
-            "group_item_backup": false,
-            "pos": {
-              "x": 0,
-              "y": 0
-            },
-            "scale": {
-              "x": 1,
-              "y": 1
-            },
-            "bounds": {
-              "x": 1920,
-              "y": 1080
-            },
-            "scale_filter": "disable",
-            "blend_method": "default",
-            "blend_type": "normal",
-            "show_transition": {
-              "duration": 0
-            },
-            "hide_transition": {
-              "duration": 0
-            },
-            "private_settings": {
-              "color": "",
-              "color-preset": 7
-            }
-          }
-        ]
-      },
-      "mixers": 0,
-      "sync": 0,
-      "flags": 0,
-      "volume": 1,
-      "balance": 0.5,
-      "enabled": true,
-      "muted": false,
-      "push-to-mute": false,
-      "push-to-mute-delay": 0,
-      "push-to-talk": false,
-      "push-to-talk-delay": 0,
-      "hotkeys": {
-        "OBSBasic.SelectScene": [],
-        "libobs.show_scene_item.1": [],
-        "libobs.hide_scene_item.1": [],
-        "libobs.show_scene_item.2": [],
-        "libobs.hide_scene_item.2": []
-      },
-      "deinterlace_mode": 0,
-      "deinterlace_field_order": 0,
-      "monitoring_type": 0,
-      "private_settings": {
-        "show_in_multiview": false,
-        "transition_duration": 500
-      },
-      "canvas_uuid": "6c69626f-6273-4c00-9d88-c5136d61696e",
-      "color": 3208970239
-    },
-    {
-      "prev_ver": 536936450,
-      "name": "Map Veto",
-      "uuid": "30d861d6-3787-4444-9e50-044baaed2361",
-      "id": "scene",
-      "versioned_id": "scene",
-      "settings": {
-        "custom_size": false,
-        "id_counter": 3,
-        "items": [
-          {
-            "name": "Background Loop",
-            "source_uuid": "4b262a31-20d2-4aa3-8c22-ccd760e7d12d",
-            "visible": true,
-            "locked": true,
-            "rot": 0,
-            "scale_ref": {
-              "x": 1920,
-              "y": 1080
-            },
-            "align": 5,
-            "bounds_type": 0,
-            "bounds_align": 0,
-            "bounds_crop": false,
-            "crop_left": 0,
-            "crop_top": 0,
-            "crop_right": 0,
-            "crop_bottom": 0,
-            "id": 1,
-            "group_item_backup": false,
-            "pos": {
-              "x": 0,
-              "y": 0
-            },
-            "scale": {
-              "x": 1,
-              "y": 1
-            },
-            "bounds": {
-              "x": 0,
-              "y": 0
-            },
-            "scale_filter": "disable",
-            "blend_method": "default",
-            "blend_type": "normal",
-            "show_transition": {
-              "duration": 0
-            },
-            "hide_transition": {
-              "duration": 0
-            },
-            "private_settings": {
-              "color": "",
-              "color-preset": 5
-            }
-          },
-          {
-            "name": "[GFX] Map Veto",
-            "source_uuid": "9553aba4-e8d5-443d-862b-98dea777ce40",
-            "visible": true,
-            "locked": true,
-            "rot": 0,
-            "scale_ref": {
-              "x": 1920,
-              "y": 1080
-            },
-            "align": 5,
-            "bounds_type": 2,
-            "bounds_align": 0,
-            "bounds_crop": false,
-            "crop_left": 0,
-            "crop_top": 0,
-            "crop_right": 0,
-            "crop_bottom": 0,
-            "id": 2,
-            "group_item_backup": false,
-            "pos": {
-              "x": 0,
-              "y": 0
-            },
-            "scale": {
-              "x": 1,
-              "y": 1
-            },
-            "bounds": {
-              "x": 1920,
-              "y": 1080
-            },
-            "scale_filter": "disable",
-            "blend_method": "default",
-            "blend_type": "normal",
-            "show_transition": {
-              "duration": 0
-            },
-            "hide_transition": {
-              "duration": 0
-            },
-            "private_settings": {
-              "color": "",
-              "color-preset": 7
-            }
-          }
-        ]
-      },
-      "mixers": 0,
-      "sync": 0,
-      "flags": 0,
-      "volume": 1,
-      "balance": 0.5,
-      "enabled": true,
-      "muted": false,
-      "push-to-mute": false,
-      "push-to-mute-delay": 0,
-      "push-to-talk": false,
-      "push-to-talk-delay": 0,
-      "hotkeys": {
-        "OBSBasic.SelectScene": [],
-        "libobs.show_scene_item.1": [],
-        "libobs.hide_scene_item.1": [],
-        "libobs.show_scene_item.2": [],
-        "libobs.hide_scene_item.2": []
-      },
-      "deinterlace_mode": 0,
-      "deinterlace_field_order": 0,
-      "monitoring_type": 0,
-      "private_settings": {
-        "show_in_multiview": true,
-        "transition_duration": 500
-      },
-      "canvas_uuid": "6c69626f-6273-4c00-9d88-c5136d61696e",
-      "color": 3208970239
-    },
-    {
-      "prev_ver": 536936450,
-      "name": "Draft",
-      "uuid": "78d00f0c-176b-4802-8b6a-2ddd7558bb48",
-      "id": "scene",
-      "versioned_id": "scene",
-      "settings": {
-        "custom_size": false,
-        "id_counter": 3,
-        "items": [
-          {
-            "name": "Background Loop",
-            "source_uuid": "4b262a31-20d2-4aa3-8c22-ccd760e7d12d",
-            "visible": true,
-            "locked": true,
-            "rot": 0,
-            "scale_ref": {
-              "x": 1920,
-              "y": 1080
-            },
-            "align": 5,
-            "bounds_type": 0,
-            "bounds_align": 0,
-            "bounds_crop": false,
-            "crop_left": 0,
-            "crop_top": 0,
-            "crop_right": 0,
-            "crop_bottom": 0,
-            "id": 1,
-            "group_item_backup": false,
-            "pos": {
-              "x": 0,
-              "y": 0
-            },
-            "scale": {
-              "x": 1,
-              "y": 1
-            },
-            "bounds": {
-              "x": 0,
-              "y": 0
-            },
-            "scale_filter": "disable",
-            "blend_method": "default",
-            "blend_type": "normal",
-            "show_transition": {
-              "duration": 0
-            },
-            "hide_transition": {
-              "duration": 0
-            },
-            "private_settings": {
-              "color": "",
-              "color-preset": 5
-            }
-          },
-          {
-            "name": "[GFX] Draft",
-            "source_uuid": "8e01d8e2-8f5d-442e-8c94-f77029023e5f",
-            "visible": true,
-            "locked": true,
-            "rot": 0,
-            "scale_ref": {
-              "x": 1920,
-              "y": 1080
-            },
-            "align": 5,
-            "bounds_type": 2,
-            "bounds_align": 0,
-            "bounds_crop": false,
-            "crop_left": 0,
-            "crop_top": 0,
-            "crop_right": 0,
-            "crop_bottom": 0,
-            "id": 2,
-            "group_item_backup": false,
-            "pos": {
-              "x": 0,
-              "y": 0
-            },
-            "scale": {
-              "x": 1,
-              "y": 1
-            },
-            "bounds": {
-              "x": 1920,
-              "y": 1080
-            },
-            "scale_filter": "disable",
-            "blend_method": "default",
-            "blend_type": "normal",
-            "show_transition": {
-              "duration": 0
-            },
-            "hide_transition": {
-              "duration": 0
-            },
-            "private_settings": {
-              "color": "",
-              "color-preset": 7
-            }
-          }
-        ]
-      },
-      "mixers": 0,
-      "sync": 0,
-      "flags": 0,
-      "volume": 1,
-      "balance": 0.5,
-      "enabled": true,
-      "muted": false,
-      "push-to-mute": false,
-      "push-to-mute-delay": 0,
-      "push-to-talk": false,
-      "push-to-talk-delay": 0,
-      "hotkeys": {
-        "OBSBasic.SelectScene": [],
-        "libobs.show_scene_item.1": [],
-        "libobs.hide_scene_item.1": [],
-        "libobs.show_scene_item.2": [],
-        "libobs.hide_scene_item.2": []
-      },
-      "deinterlace_mode": 0,
-      "deinterlace_field_order": 0,
-      "monitoring_type": 0,
-      "private_settings": {
-        "show_in_multiview": true,
-        "transition_duration": 300
-      },
-      "canvas_uuid": "6c69626f-6273-4c00-9d88-c5136d61696e",
-      "color": 3208970239
-    },
-    {
-      "prev_ver": 536936450,
-      "name": "Upcoming",
-      "uuid": "adf3ac7d-f71e-4ef1-a904-09d48b02a77f",
-      "id": "scene",
-      "versioned_id": "scene",
-      "settings": {
-        "custom_size": false,
-        "id_counter": 3,
-        "items": [
-          {
-            "name": "Background Loop",
-            "source_uuid": "4b262a31-20d2-4aa3-8c22-ccd760e7d12d",
-            "visible": true,
-            "locked": true,
-            "rot": 0,
-            "scale_ref": {
-              "x": 1920,
-              "y": 1080
-            },
-            "align": 5,
-            "bounds_type": 0,
-            "bounds_align": 0,
-            "bounds_crop": false,
-            "crop_left": 0,
-            "crop_top": 0,
-            "crop_right": 0,
-            "crop_bottom": 0,
-            "id": 1,
-            "group_item_backup": false,
-            "pos": {
-              "x": 0,
-              "y": 0
-            },
-            "scale": {
-              "x": 1,
-              "y": 1
-            },
-            "bounds": {
-              "x": 0,
-              "y": 0
-            },
-            "scale_filter": "disable",
-            "blend_method": "default",
-            "blend_type": "normal",
-            "show_transition": {
-              "duration": 0
-            },
-            "hide_transition": {
-              "duration": 0
-            },
-            "private_settings": {
-              "color": "",
-              "color-preset": 5
-            }
-          },
-          {
-            "name": "[GFX] Upcoming",
-            "source_uuid": "4ab80044-15dc-4f02-896c-a06e1b5e8239",
-            "visible": true,
-            "locked": true,
-            "rot": 0,
-            "scale_ref": {
-              "x": 1920,
-              "y": 1080
-            },
-            "align": 5,
-            "bounds_type": 2,
-            "bounds_align": 0,
-            "bounds_crop": false,
-            "crop_left": 0,
-            "crop_top": 0,
-            "crop_right": 0,
-            "crop_bottom": 0,
-            "id": 2,
-            "group_item_backup": false,
-            "pos": {
-              "x": 0,
-              "y": 0
-            },
-            "scale": {
-              "x": 1,
-              "y": 1
-            },
-            "bounds": {
-              "x": 1920,
-              "y": 1080
-            },
-            "scale_filter": "disable",
-            "blend_method": "default",
-            "blend_type": "normal",
-            "show_transition": {
-              "duration": 0
-            },
-            "hide_transition": {
-              "duration": 0
-            },
-            "private_settings": {
-              "color": "",
-              "color-preset": 7
-            }
-          }
-        ]
-      },
-      "mixers": 0,
-      "sync": 0,
-      "flags": 0,
-      "volume": 1,
-      "balance": 0.5,
-      "enabled": true,
-      "muted": false,
-      "push-to-mute": false,
-      "push-to-mute-delay": 0,
-      "push-to-talk": false,
-      "push-to-talk-delay": 0,
-      "hotkeys": {
-        "OBSBasic.SelectScene": [],
-        "libobs.show_scene_item.1": [],
-        "libobs.hide_scene_item.1": [],
-        "libobs.show_scene_item.2": [],
-        "libobs.hide_scene_item.2": []
-      },
-      "deinterlace_mode": 0,
-      "deinterlace_field_order": 0,
-      "monitoring_type": 0,
-      "private_settings": {
-        "show_in_multiview": true,
-        "transition_duration": 300
-      },
-      "canvas_uuid": "6c69626f-6273-4c00-9d88-c5136d61696e",
-      "color": 3208970239
-    },
-    {
-      "prev_ver": 536936450,
-      "name": "Standings",
-      "uuid": "98ece1c0-7201-4bc3-9bdd-a22f2d8852b1",
-      "id": "scene",
-      "versioned_id": "scene",
-      "settings": {
-        "custom_size": false,
-        "id_counter": 3,
-        "items": [
-          {
-            "name": "Background Loop",
-            "source_uuid": "4b262a31-20d2-4aa3-8c22-ccd760e7d12d",
-            "visible": true,
-            "locked": true,
-            "rot": 0,
-            "scale_ref": {
-              "x": 1920,
-              "y": 1080
-            },
-            "align": 5,
-            "bounds_type": 0,
-            "bounds_align": 0,
-            "bounds_crop": false,
-            "crop_left": 0,
-            "crop_top": 0,
-            "crop_right": 0,
-            "crop_bottom": 0,
-            "id": 1,
-            "group_item_backup": false,
-            "pos": {
-              "x": 0,
-              "y": 0
-            },
-            "scale": {
-              "x": 1,
-              "y": 1
-            },
-            "bounds": {
-              "x": 0,
-              "y": 0
-            },
-            "scale_filter": "disable",
-            "blend_method": "default",
-            "blend_type": "normal",
-            "show_transition": {
-              "duration": 0
-            },
-            "hide_transition": {
-              "duration": 0
-            },
-            "private_settings": {
-              "color": "",
-              "color-preset": 5
-            }
-          },
-          {
-            "name": "[GFX] Standings",
-            "source_uuid": "333bcc3f-13ae-4a87-924b-0cce9880d5a9",
-            "visible": true,
-            "locked": true,
-            "rot": 0,
-            "scale_ref": {
-              "x": 1920,
-              "y": 1080
-            },
-            "align": 5,
-            "bounds_type": 2,
-            "bounds_align": 0,
-            "bounds_crop": false,
-            "crop_left": 0,
-            "crop_top": 0,
-            "crop_right": 0,
-            "crop_bottom": 0,
-            "id": 2,
-            "group_item_backup": false,
-            "pos": {
-              "x": 0,
-              "y": 0
-            },
-            "scale": {
-              "x": 1,
-              "y": 1
-            },
-            "bounds": {
-              "x": 1920,
-              "y": 1080
-            },
-            "scale_filter": "disable",
-            "blend_method": "default",
-            "blend_type": "normal",
-            "show_transition": {
-              "duration": 0
-            },
-            "hide_transition": {
-              "duration": 0
-            },
-            "private_settings": {
-              "color": "",
-              "color-preset": 7
-            }
-          }
-        ]
-      },
-      "mixers": 0,
-      "sync": 0,
-      "flags": 0,
-      "volume": 1,
-      "balance": 0.5,
-      "enabled": true,
-      "muted": false,
-      "push-to-mute": false,
-      "push-to-mute-delay": 0,
-      "push-to-talk": false,
-      "push-to-talk-delay": 0,
-      "hotkeys": {
-        "OBSBasic.SelectScene": [],
-        "libobs.show_scene_item.1": [],
-        "libobs.hide_scene_item.1": [],
-        "libobs.show_scene_item.2": [],
-        "libobs.hide_scene_item.2": []
-      },
-      "deinterlace_mode": 0,
-      "deinterlace_field_order": 0,
-      "monitoring_type": 0,
-      "private_settings": {
-        "show_in_multiview": true,
-        "transition_duration": 300
-      },
-      "canvas_uuid": "6c69626f-6273-4c00-9d88-c5136d61696e",
-      "color": 3208970239
-    },
-    {
-      "prev_ver": 536936450,
-      "name": "Bracket",
-      "uuid": "33d9f443-b897-4828-a480-e530117b7516",
-      "id": "scene",
-      "versioned_id": "scene",
-      "settings": {
-        "custom_size": false,
-        "id_counter": 3,
-        "items": [
-          {
-            "name": "Background Loop",
-            "source_uuid": "4b262a31-20d2-4aa3-8c22-ccd760e7d12d",
-            "visible": true,
-            "locked": true,
-            "rot": 0,
-            "scale_ref": {
-              "x": 1920,
-              "y": 1080
-            },
-            "align": 5,
-            "bounds_type": 0,
-            "bounds_align": 0,
-            "bounds_crop": false,
-            "crop_left": 0,
-            "crop_top": 0,
-            "crop_right": 0,
-            "crop_bottom": 0,
-            "id": 1,
-            "group_item_backup": false,
-            "pos": {
-              "x": 0,
-              "y": 0
-            },
-            "scale": {
-              "x": 1,
-              "y": 1
-            },
-            "bounds": {
-              "x": 0,
-              "y": 0
-            },
-            "scale_filter": "disable",
-            "blend_method": "default",
-            "blend_type": "normal",
-            "show_transition": {
-              "duration": 0
-            },
-            "hide_transition": {
-              "duration": 0
-            },
-            "private_settings": {
-              "color": "",
-              "color-preset": 5
-            }
-          },
-          {
-            "name": "[GFX] Bracket",
-            "source_uuid": "7ffeb35b-b6b8-477c-bc2d-fc496b3c9003",
-            "visible": true,
-            "locked": true,
-            "rot": 0,
-            "scale_ref": {
-              "x": 1920,
-              "y": 1080
-            },
-            "align": 5,
-            "bounds_type": 2,
-            "bounds_align": 0,
-            "bounds_crop": false,
-            "crop_left": 0,
-            "crop_top": 0,
-            "crop_right": 0,
-            "crop_bottom": 0,
-            "id": 2,
-            "group_item_backup": false,
-            "pos": {
-              "x": 0,
-              "y": 0
-            },
-            "scale": {
-              "x": 1,
-              "y": 1
-            },
-            "bounds": {
-              "x": 1920,
-              "y": 1080
-            },
-            "scale_filter": "disable",
-            "blend_method": "default",
-            "blend_type": "normal",
-            "show_transition": {
-              "duration": 0
-            },
-            "hide_transition": {
-              "duration": 0
-            },
-            "private_settings": {
-              "color": "",
-              "color-preset": 7
-            }
-          }
-        ]
-      },
-      "mixers": 0,
-      "sync": 0,
-      "flags": 0,
-      "volume": 1,
-      "balance": 0.5,
-      "enabled": true,
-      "muted": false,
-      "push-to-mute": false,
-      "push-to-mute-delay": 0,
-      "push-to-talk": false,
-      "push-to-talk-delay": 0,
-      "hotkeys": {
-        "OBSBasic.SelectScene": [],
-        "libobs.show_scene_item.1": [],
-        "libobs.hide_scene_item.1": [],
-        "libobs.show_scene_item.2": [],
-        "libobs.hide_scene_item.2": []
+        "libobs.hide_scene_item.3": [],
+        "libobs.show_scene_item.4": [],
+        "libobs.hide_scene_item.4": []
       },
       "deinterlace_mode": 0,
       "deinterlace_field_order": 0,
@@ -3291,16 +2058,16 @@
     {
       "prev_ver": 536936450,
       "name": "Desk Show",
-      "uuid": "3652c07e-3a65-4a5d-8363-803b722beacc",
+      "uuid": "d418adda-6248-4295-85e4-de8c0be07fbf",
       "id": "scene",
       "versioned_id": "scene",
       "settings": {
         "custom_size": false,
-        "id_counter": 6,
+        "id_counter": 7,
         "items": [
           {
             "name": "Background Loop",
-            "source_uuid": "4b262a31-20d2-4aa3-8c22-ccd760e7d12d",
+            "source_uuid": "ee1d0c9f-9582-48bf-8b93-2af80f8e1e78",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -3346,7 +2113,7 @@
           },
           {
             "name": "=> Caster 1 Cam",
-            "source_uuid": "0f497cb8-50e3-4a90-83a7-eae45754e886",
+            "source_uuid": "f0510289-459d-463e-a391-31adbed8fc6a",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -3392,7 +2159,7 @@
           },
           {
             "name": "=> Caster 2 Cam",
-            "source_uuid": "98984bcd-86af-44d1-af75-a8fbeaceb66d",
+            "source_uuid": "8aec6c29-c53c-46fb-9ab7-b260cfc139dd",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -3438,7 +2205,7 @@
           },
           {
             "name": "[GFX] Desk Show",
-            "source_uuid": "2711d6c1-1aca-4157-97ee-8c2704dca481",
+            "source_uuid": "8d0f2956-26d0-411e-adb9-e0ee28fafb69",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -3483,9 +2250,9 @@
             }
           },
           {
-            "name": "[GFX] Transition",
-            "source_uuid": "8e44a99a-f7a4-4173-a956-6f482967880d",
-            "visible": false,
+            "name": "[GFX] Live Graphics (Push Live)",
+            "source_uuid": "e2737f9e-cd96-46f5-bc8d-a154b1bafe78",
+            "visible": true,
             "locked": true,
             "rot": 0,
             "scale_ref": {
@@ -3501,6 +2268,52 @@
             "crop_right": 0,
             "crop_bottom": 0,
             "id": 5,
+            "group_item_backup": false,
+            "pos": {
+              "x": 0,
+              "y": 0
+            },
+            "scale": {
+              "x": 1,
+              "y": 1
+            },
+            "bounds": {
+              "x": 1920,
+              "y": 1080
+            },
+            "scale_filter": "disable",
+            "blend_method": "default",
+            "blend_type": "normal",
+            "show_transition": {
+              "duration": 0
+            },
+            "hide_transition": {
+              "duration": 0
+            },
+            "private_settings": {
+              "color": "",
+              "color-preset": 7
+            }
+          },
+          {
+            "name": "[GFX] Transition",
+            "source_uuid": "21754119-2748-4037-8f57-82ecae58c8cb",
+            "visible": false,
+            "locked": true,
+            "rot": 0,
+            "scale_ref": {
+              "x": 1920,
+              "y": 1080
+            },
+            "align": 5,
+            "bounds_type": 2,
+            "bounds_align": 0,
+            "bounds_crop": false,
+            "crop_left": 0,
+            "crop_top": 0,
+            "crop_right": 0,
+            "crop_bottom": 0,
+            "id": 6,
             "group_item_backup": false,
             "pos": {
               "x": 0,
@@ -3552,7 +2365,9 @@
         "libobs.show_scene_item.4": [],
         "libobs.hide_scene_item.4": [],
         "libobs.show_scene_item.5": [],
-        "libobs.hide_scene_item.5": []
+        "libobs.hide_scene_item.5": [],
+        "libobs.show_scene_item.6": [],
+        "libobs.hide_scene_item.6": []
       },
       "deinterlace_mode": 0,
       "deinterlace_field_order": 0,
@@ -3567,7 +2382,7 @@
     {
       "prev_ver": 536936450,
       "name": "═══  GAMEPLAY  ═══",
-      "uuid": "6d847d02-739a-46b9-9a12-8c1a65ba95ac",
+      "uuid": "b74de01f-0253-4315-b5a6-a555f17442be",
       "id": "scene",
       "versioned_id": "scene",
       "settings": {
@@ -3602,16 +2417,16 @@
     {
       "prev_ver": 536936450,
       "name": "In Game",
-      "uuid": "e8a57481-eb15-4a40-a52b-cc7ebccc0f5b",
+      "uuid": "c84bc3c6-11ea-49e4-9e3e-170460162984",
       "id": "scene",
       "versioned_id": "scene",
       "settings": {
         "custom_size": false,
-        "id_counter": 8,
+        "id_counter": 11,
         "items": [
           {
             "name": "Game Capture",
-            "source_uuid": "e34fa345-767e-4be9-aaee-46bdeaaeec48",
+            "source_uuid": "38c076e2-e8a7-4d1b-bf98-b89a2e4d82d5",
             "visible": true,
             "locked": false,
             "rot": 0,
@@ -3654,7 +2469,7 @@
           },
           {
             "name": "[GFX] RL HUD",
-            "source_uuid": "662ecd0e-4dff-4249-b972-59c25fa5d89d",
+            "source_uuid": "c6b3efe9-8602-4f36-ae6d-5770f2a1ab0d",
             "visible": true,
             "locked": false,
             "rot": 0,
@@ -3697,7 +2512,7 @@
           },
           {
             "name": "[GFX] CS2 HUD",
-            "source_uuid": "e922e0ea-745e-4c16-8138-c0f44f565c78",
+            "source_uuid": "f324a389-8dad-4eeb-aa32-fdfa7c2f4d1a",
             "visible": false,
             "locked": false,
             "rot": 0,
@@ -3740,7 +2555,7 @@
           },
           {
             "name": "[GFX] Valorant HUD",
-            "source_uuid": "43a115f9-55e6-49c8-9632-4d12e1ca6436",
+            "source_uuid": "d6574003-d0a5-48b1-89eb-6e43c0938643",
             "visible": false,
             "locked": false,
             "rot": 0,
@@ -3783,7 +2598,7 @@
           },
           {
             "name": "[GFX] LoL HUD",
-            "source_uuid": "123d04ce-4943-4bdd-b2b5-f112cf24e7c5",
+            "source_uuid": "67485c61-eacb-49e3-b3fe-90cc9471bd94",
             "visible": false,
             "locked": false,
             "rot": 0,
@@ -3826,7 +2641,7 @@
           },
           {
             "name": "[GFX] Overwatch HUD",
-            "source_uuid": "1b6b5d64-2062-4a6b-8e5d-738154e8e2a6",
+            "source_uuid": "2de13351-0100-40e9-8142-f580819aa3d3",
             "visible": false,
             "locked": false,
             "rot": 0,
@@ -3869,7 +2684,7 @@
           },
           {
             "name": "[GFX] Marvel Rivals HUD",
-            "source_uuid": "04ea9efa-d75b-4aab-b638-12fe54df8bcd",
+            "source_uuid": "103e543e-8704-4558-93e2-b26c4ae60387",
             "visible": false,
             "locked": false,
             "rot": 0,
@@ -3909,6 +2724,144 @@
               "duration": 300
             },
             "private_settings": {}
+          },
+          {
+            "name": "[GFX] Live Graphics (Push Live)",
+            "source_uuid": "e2737f9e-cd96-46f5-bc8d-a154b1bafe78",
+            "visible": true,
+            "locked": true,
+            "rot": 0,
+            "scale_ref": {
+              "x": 1920,
+              "y": 1080
+            },
+            "align": 5,
+            "bounds_type": 2,
+            "bounds_align": 0,
+            "bounds_crop": false,
+            "crop_left": 0,
+            "crop_top": 0,
+            "crop_right": 0,
+            "crop_bottom": 0,
+            "id": 8,
+            "group_item_backup": false,
+            "pos": {
+              "x": 0,
+              "y": 0
+            },
+            "scale": {
+              "x": 1,
+              "y": 1
+            },
+            "bounds": {
+              "x": 1920,
+              "y": 1080
+            },
+            "scale_filter": "disable",
+            "blend_method": "default",
+            "blend_type": "normal",
+            "show_transition": {
+              "duration": 0
+            },
+            "hide_transition": {
+              "duration": 0
+            },
+            "private_settings": {
+              "color": "",
+              "color-preset": 7
+            }
+          },
+          {
+            "name": "[GFX] Ticker",
+            "source_uuid": "b819f911-976d-44b0-bccf-8be5f24fe38d",
+            "visible": true,
+            "locked": true,
+            "rot": 0,
+            "scale_ref": {
+              "x": 1920,
+              "y": 1080
+            },
+            "align": 5,
+            "bounds_type": 0,
+            "bounds_align": 0,
+            "bounds_crop": false,
+            "crop_left": 0,
+            "crop_top": 0,
+            "crop_right": 0,
+            "crop_bottom": 0,
+            "id": 9,
+            "group_item_backup": false,
+            "pos": {
+              "x": 0,
+              "y": 0
+            },
+            "scale": {
+              "x": 1,
+              "y": 1
+            },
+            "bounds": {
+              "x": 0,
+              "y": 0
+            },
+            "scale_filter": "disable",
+            "blend_method": "default",
+            "blend_type": "normal",
+            "show_transition": {
+              "duration": 0
+            },
+            "hide_transition": {
+              "duration": 0
+            },
+            "private_settings": {
+              "color": "",
+              "color-preset": 7
+            }
+          },
+          {
+            "name": "[GFX] Sponsor Rail",
+            "source_uuid": "1cdc6be8-0557-48aa-a3ca-353c44fe2733",
+            "visible": true,
+            "locked": true,
+            "rot": 0,
+            "scale_ref": {
+              "x": 1920,
+              "y": 1080
+            },
+            "align": 5,
+            "bounds_type": 0,
+            "bounds_align": 0,
+            "bounds_crop": false,
+            "crop_left": 0,
+            "crop_top": 0,
+            "crop_right": 0,
+            "crop_bottom": 0,
+            "id": 10,
+            "group_item_backup": false,
+            "pos": {
+              "x": 0,
+              "y": 0
+            },
+            "scale": {
+              "x": 1,
+              "y": 1
+            },
+            "bounds": {
+              "x": 0,
+              "y": 0
+            },
+            "scale_filter": "disable",
+            "blend_method": "default",
+            "blend_type": "normal",
+            "show_transition": {
+              "duration": 0
+            },
+            "hide_transition": {
+              "duration": 0
+            },
+            "private_settings": {
+              "color": "",
+              "color-preset": 7
+            }
           }
         ]
       },
@@ -3938,7 +2891,13 @@
         "libobs.show_scene_item.6": [],
         "libobs.hide_scene_item.6": [],
         "libobs.show_scene_item.7": [],
-        "libobs.hide_scene_item.7": []
+        "libobs.hide_scene_item.7": [],
+        "libobs.show_scene_item.8": [],
+        "libobs.hide_scene_item.8": [],
+        "libobs.show_scene_item.9": [],
+        "libobs.hide_scene_item.9": [],
+        "libobs.show_scene_item.10": [],
+        "libobs.hide_scene_item.10": []
       },
       "deinterlace_mode": 0,
       "deinterlace_field_order": 0,
@@ -3953,16 +2912,16 @@
     {
       "prev_ver": 536936450,
       "name": "In Game — Cam PIP",
-      "uuid": "34f58733-9c4d-4d11-8c95-07770743822d",
+      "uuid": "cb0f96dd-6859-4b1f-99a7-fb16788d8168",
       "id": "scene",
       "versioned_id": "scene",
       "settings": {
         "custom_size": false,
-        "id_counter": 9,
+        "id_counter": 10,
         "items": [
           {
             "name": "Game Capture",
-            "source_uuid": "e34fa345-767e-4be9-aaee-46bdeaaeec48",
+            "source_uuid": "38c076e2-e8a7-4d1b-bf98-b89a2e4d82d5",
             "visible": true,
             "locked": false,
             "rot": 0,
@@ -4005,7 +2964,7 @@
           },
           {
             "name": "[GFX] RL HUD",
-            "source_uuid": "662ecd0e-4dff-4249-b972-59c25fa5d89d",
+            "source_uuid": "c6b3efe9-8602-4f36-ae6d-5770f2a1ab0d",
             "visible": true,
             "locked": false,
             "rot": 0,
@@ -4048,7 +3007,7 @@
           },
           {
             "name": "[GFX] CS2 HUD",
-            "source_uuid": "e922e0ea-745e-4c16-8138-c0f44f565c78",
+            "source_uuid": "f324a389-8dad-4eeb-aa32-fdfa7c2f4d1a",
             "visible": false,
             "locked": false,
             "rot": 0,
@@ -4091,7 +3050,7 @@
           },
           {
             "name": "[GFX] Valorant HUD",
-            "source_uuid": "43a115f9-55e6-49c8-9632-4d12e1ca6436",
+            "source_uuid": "d6574003-d0a5-48b1-89eb-6e43c0938643",
             "visible": false,
             "locked": false,
             "rot": 0,
@@ -4134,7 +3093,7 @@
           },
           {
             "name": "[GFX] LoL HUD",
-            "source_uuid": "123d04ce-4943-4bdd-b2b5-f112cf24e7c5",
+            "source_uuid": "67485c61-eacb-49e3-b3fe-90cc9471bd94",
             "visible": false,
             "locked": false,
             "rot": 0,
@@ -4177,7 +3136,7 @@
           },
           {
             "name": "[GFX] Overwatch HUD",
-            "source_uuid": "1b6b5d64-2062-4a6b-8e5d-738154e8e2a6",
+            "source_uuid": "2de13351-0100-40e9-8142-f580819aa3d3",
             "visible": false,
             "locked": false,
             "rot": 0,
@@ -4220,7 +3179,7 @@
           },
           {
             "name": "[GFX] Marvel Rivals HUD",
-            "source_uuid": "04ea9efa-d75b-4aab-b638-12fe54df8bcd",
+            "source_uuid": "103e543e-8704-4558-93e2-b26c4ae60387",
             "visible": false,
             "locked": false,
             "rot": 0,
@@ -4262,8 +3221,54 @@
             "private_settings": {}
           },
           {
+            "name": "[GFX] Live Graphics (Push Live)",
+            "source_uuid": "e2737f9e-cd96-46f5-bc8d-a154b1bafe78",
+            "visible": true,
+            "locked": true,
+            "rot": 0,
+            "scale_ref": {
+              "x": 1920,
+              "y": 1080
+            },
+            "align": 5,
+            "bounds_type": 2,
+            "bounds_align": 0,
+            "bounds_crop": false,
+            "crop_left": 0,
+            "crop_top": 0,
+            "crop_right": 0,
+            "crop_bottom": 0,
+            "id": 8,
+            "group_item_backup": false,
+            "pos": {
+              "x": 0,
+              "y": 0
+            },
+            "scale": {
+              "x": 1,
+              "y": 1
+            },
+            "bounds": {
+              "x": 1920,
+              "y": 1080
+            },
+            "scale_filter": "disable",
+            "blend_method": "default",
+            "blend_type": "normal",
+            "show_transition": {
+              "duration": 0
+            },
+            "hide_transition": {
+              "duration": 0
+            },
+            "private_settings": {
+              "color": "",
+              "color-preset": 7
+            }
+          },
+          {
             "name": "[GFX] Cam PIP",
-            "source_uuid": "259caa5e-9f2b-4956-84aa-0bbaa18b7c1d",
+            "source_uuid": "f1235a4c-e8c0-4b03-a375-4fc1cb4491c9",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -4279,7 +3284,7 @@
             "crop_top": 0,
             "crop_right": 0,
             "crop_bottom": 0,
-            "id": 8,
+            "id": 9,
             "group_item_backup": false,
             "pos": {
               "x": 0,
@@ -4337,7 +3342,9 @@
         "libobs.show_scene_item.7": [],
         "libobs.hide_scene_item.7": [],
         "libobs.show_scene_item.8": [],
-        "libobs.hide_scene_item.8": []
+        "libobs.hide_scene_item.8": [],
+        "libobs.show_scene_item.9": [],
+        "libobs.hide_scene_item.9": []
       },
       "deinterlace_mode": 0,
       "deinterlace_field_order": 0,
@@ -4352,16 +3359,16 @@
     {
       "prev_ver": 536936450,
       "name": "In Game — Talent Bar",
-      "uuid": "bb968b7c-9049-44ac-8d61-d7cdc008aaec",
+      "uuid": "4b84e19c-4373-46b3-aa79-f84315dcbb95",
       "id": "scene",
       "versioned_id": "scene",
       "settings": {
         "custom_size": false,
-        "id_counter": 9,
+        "id_counter": 10,
         "items": [
           {
             "name": "Game Capture",
-            "source_uuid": "e34fa345-767e-4be9-aaee-46bdeaaeec48",
+            "source_uuid": "38c076e2-e8a7-4d1b-bf98-b89a2e4d82d5",
             "visible": true,
             "locked": false,
             "rot": 0,
@@ -4404,7 +3411,7 @@
           },
           {
             "name": "[GFX] RL HUD",
-            "source_uuid": "662ecd0e-4dff-4249-b972-59c25fa5d89d",
+            "source_uuid": "c6b3efe9-8602-4f36-ae6d-5770f2a1ab0d",
             "visible": true,
             "locked": false,
             "rot": 0,
@@ -4447,7 +3454,7 @@
           },
           {
             "name": "[GFX] CS2 HUD",
-            "source_uuid": "e922e0ea-745e-4c16-8138-c0f44f565c78",
+            "source_uuid": "f324a389-8dad-4eeb-aa32-fdfa7c2f4d1a",
             "visible": false,
             "locked": false,
             "rot": 0,
@@ -4490,7 +3497,7 @@
           },
           {
             "name": "[GFX] Valorant HUD",
-            "source_uuid": "43a115f9-55e6-49c8-9632-4d12e1ca6436",
+            "source_uuid": "d6574003-d0a5-48b1-89eb-6e43c0938643",
             "visible": false,
             "locked": false,
             "rot": 0,
@@ -4533,7 +3540,7 @@
           },
           {
             "name": "[GFX] LoL HUD",
-            "source_uuid": "123d04ce-4943-4bdd-b2b5-f112cf24e7c5",
+            "source_uuid": "67485c61-eacb-49e3-b3fe-90cc9471bd94",
             "visible": false,
             "locked": false,
             "rot": 0,
@@ -4576,7 +3583,7 @@
           },
           {
             "name": "[GFX] Overwatch HUD",
-            "source_uuid": "1b6b5d64-2062-4a6b-8e5d-738154e8e2a6",
+            "source_uuid": "2de13351-0100-40e9-8142-f580819aa3d3",
             "visible": false,
             "locked": false,
             "rot": 0,
@@ -4619,7 +3626,7 @@
           },
           {
             "name": "[GFX] Marvel Rivals HUD",
-            "source_uuid": "04ea9efa-d75b-4aab-b638-12fe54df8bcd",
+            "source_uuid": "103e543e-8704-4558-93e2-b26c4ae60387",
             "visible": false,
             "locked": false,
             "rot": 0,
@@ -4661,8 +3668,54 @@
             "private_settings": {}
           },
           {
+            "name": "[GFX] Live Graphics (Push Live)",
+            "source_uuid": "e2737f9e-cd96-46f5-bc8d-a154b1bafe78",
+            "visible": true,
+            "locked": true,
+            "rot": 0,
+            "scale_ref": {
+              "x": 1920,
+              "y": 1080
+            },
+            "align": 5,
+            "bounds_type": 2,
+            "bounds_align": 0,
+            "bounds_crop": false,
+            "crop_left": 0,
+            "crop_top": 0,
+            "crop_right": 0,
+            "crop_bottom": 0,
+            "id": 8,
+            "group_item_backup": false,
+            "pos": {
+              "x": 0,
+              "y": 0
+            },
+            "scale": {
+              "x": 1,
+              "y": 1
+            },
+            "bounds": {
+              "x": 1920,
+              "y": 1080
+            },
+            "scale_filter": "disable",
+            "blend_method": "default",
+            "blend_type": "normal",
+            "show_transition": {
+              "duration": 0
+            },
+            "hide_transition": {
+              "duration": 0
+            },
+            "private_settings": {
+              "color": "",
+              "color-preset": 7
+            }
+          },
+          {
             "name": "[GFX] Talent Bar",
-            "source_uuid": "d5b48c09-0b47-4e99-86da-ec4b2747f3b8",
+            "source_uuid": "5de5b678-d796-4f61-97ef-92abaf4157e3",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -4678,7 +3731,7 @@
             "crop_top": 0,
             "crop_right": 0,
             "crop_bottom": 0,
-            "id": 8,
+            "id": 9,
             "group_item_backup": false,
             "pos": {
               "x": 0,
@@ -4736,7 +3789,9 @@
         "libobs.show_scene_item.7": [],
         "libobs.hide_scene_item.7": [],
         "libobs.show_scene_item.8": [],
-        "libobs.hide_scene_item.8": []
+        "libobs.hide_scene_item.8": [],
+        "libobs.show_scene_item.9": [],
+        "libobs.hide_scene_item.9": []
       },
       "deinterlace_mode": 0,
       "deinterlace_field_order": 0,
@@ -4751,16 +3806,16 @@
     {
       "prev_ver": 536936450,
       "name": "Replay",
-      "uuid": "dd41fed7-e731-4cf6-8442-c4d7ed566eb2",
+      "uuid": "7f6c8e87-c0e1-4ac8-810f-ad05e086be54",
       "id": "scene",
       "versioned_id": "scene",
       "settings": {
         "custom_size": false,
-        "id_counter": 3,
+        "id_counter": 4,
         "items": [
           {
             "name": "Background Loop",
-            "source_uuid": "4b262a31-20d2-4aa3-8c22-ccd760e7d12d",
+            "source_uuid": "ee1d0c9f-9582-48bf-8b93-2af80f8e1e78",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -4806,7 +3861,7 @@
           },
           {
             "name": "[GFX] Replay",
-            "source_uuid": "daf5a0a5-f707-40cf-b00b-994d3cbb289f",
+            "source_uuid": "fda5cb32-087c-4646-8ebd-33c8d2fc9f50",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -4823,6 +3878,52 @@
             "crop_right": 0,
             "crop_bottom": 0,
             "id": 2,
+            "group_item_backup": false,
+            "pos": {
+              "x": 0,
+              "y": 0
+            },
+            "scale": {
+              "x": 1,
+              "y": 1
+            },
+            "bounds": {
+              "x": 1920,
+              "y": 1080
+            },
+            "scale_filter": "disable",
+            "blend_method": "default",
+            "blend_type": "normal",
+            "show_transition": {
+              "duration": 0
+            },
+            "hide_transition": {
+              "duration": 0
+            },
+            "private_settings": {
+              "color": "",
+              "color-preset": 7
+            }
+          },
+          {
+            "name": "[GFX] Live Graphics (Push Live)",
+            "source_uuid": "e2737f9e-cd96-46f5-bc8d-a154b1bafe78",
+            "visible": true,
+            "locked": true,
+            "rot": 0,
+            "scale_ref": {
+              "x": 1920,
+              "y": 1080
+            },
+            "align": 5,
+            "bounds_type": 2,
+            "bounds_align": 0,
+            "bounds_crop": false,
+            "crop_left": 0,
+            "crop_top": 0,
+            "crop_right": 0,
+            "crop_bottom": 0,
+            "id": 3,
             "group_item_backup": false,
             "pos": {
               "x": 0,
@@ -4868,7 +3969,9 @@
         "libobs.show_scene_item.1": [],
         "libobs.hide_scene_item.1": [],
         "libobs.show_scene_item.2": [],
-        "libobs.hide_scene_item.2": []
+        "libobs.hide_scene_item.2": [],
+        "libobs.show_scene_item.3": [],
+        "libobs.hide_scene_item.3": []
       },
       "deinterlace_mode": 0,
       "deinterlace_field_order": 0,
@@ -4883,7 +3986,7 @@
     {
       "prev_ver": 536936450,
       "name": "═══  DESK  ═══",
-      "uuid": "f5ec691b-f93f-497c-8800-cf40cf6de671",
+      "uuid": "a1da68b4-ab62-4275-8d25-021c8f7e62b7",
       "id": "scene",
       "versioned_id": "scene",
       "settings": {
@@ -4918,16 +4021,16 @@
     {
       "prev_ver": 536936450,
       "name": "SingleCam",
-      "uuid": "c852b0fe-9eae-4544-bcf6-75ef1f04350a",
+      "uuid": "c6ed58b3-b3ae-4328-9084-f5f86e1da02e",
       "id": "scene",
       "versioned_id": "scene",
       "settings": {
         "custom_size": false,
-        "id_counter": 5,
+        "id_counter": 6,
         "items": [
           {
             "name": "Background Loop",
-            "source_uuid": "4b262a31-20d2-4aa3-8c22-ccd760e7d12d",
+            "source_uuid": "ee1d0c9f-9582-48bf-8b93-2af80f8e1e78",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -4973,7 +4076,7 @@
           },
           {
             "name": "=> Caster 1 Cam",
-            "source_uuid": "0f497cb8-50e3-4a90-83a7-eae45754e886",
+            "source_uuid": "f0510289-459d-463e-a391-31adbed8fc6a",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -5019,7 +4122,7 @@
           },
           {
             "name": "[GFX] SingleCam",
-            "source_uuid": "0260f1d0-a533-49d1-97ce-2b972faffa24",
+            "source_uuid": "b8870afb-13b0-458f-acae-9629074938be",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -5064,9 +4167,9 @@
             }
           },
           {
-            "name": "[GFX] Transition",
-            "source_uuid": "8e44a99a-f7a4-4173-a956-6f482967880d",
-            "visible": false,
+            "name": "[GFX] Live Graphics (Push Live)",
+            "source_uuid": "e2737f9e-cd96-46f5-bc8d-a154b1bafe78",
+            "visible": true,
             "locked": true,
             "rot": 0,
             "scale_ref": {
@@ -5106,240 +4209,12 @@
             },
             "private_settings": {
               "color": "",
-              "color-preset": 6
-            }
-          }
-        ]
-      },
-      "mixers": 0,
-      "sync": 0,
-      "flags": 0,
-      "volume": 1,
-      "balance": 0.5,
-      "enabled": true,
-      "muted": false,
-      "push-to-mute": false,
-      "push-to-mute-delay": 0,
-      "push-to-talk": false,
-      "push-to-talk-delay": 0,
-      "hotkeys": {
-        "OBSBasic.SelectScene": [],
-        "libobs.show_scene_item.1": [],
-        "libobs.hide_scene_item.1": [],
-        "libobs.show_scene_item.2": [],
-        "libobs.hide_scene_item.2": [],
-        "libobs.show_scene_item.3": [],
-        "libobs.hide_scene_item.3": [],
-        "libobs.show_scene_item.4": [],
-        "libobs.hide_scene_item.4": []
-      },
-      "deinterlace_mode": 0,
-      "deinterlace_field_order": 0,
-      "monitoring_type": 0,
-      "private_settings": {
-        "show_in_multiview": true,
-        "transition_duration": 300
-      },
-      "canvas_uuid": "6c69626f-6273-4c00-9d88-c5136d61696e",
-      "color": 3208970052
-    },
-    {
-      "prev_ver": 536936450,
-      "name": "DuoCam Row",
-      "uuid": "832f201d-2d92-46c8-a244-f351ec93f4f4",
-      "id": "scene",
-      "versioned_id": "scene",
-      "settings": {
-        "custom_size": false,
-        "id_counter": 6,
-        "items": [
-          {
-            "name": "Background Loop",
-            "source_uuid": "4b262a31-20d2-4aa3-8c22-ccd760e7d12d",
-            "visible": true,
-            "locked": true,
-            "rot": 0,
-            "scale_ref": {
-              "x": 1920,
-              "y": 1080
-            },
-            "align": 5,
-            "bounds_type": 0,
-            "bounds_align": 0,
-            "bounds_crop": false,
-            "crop_left": 0,
-            "crop_top": 0,
-            "crop_right": 0,
-            "crop_bottom": 0,
-            "id": 1,
-            "group_item_backup": false,
-            "pos": {
-              "x": 0,
-              "y": 0
-            },
-            "scale": {
-              "x": 1,
-              "y": 1
-            },
-            "bounds": {
-              "x": 0,
-              "y": 0
-            },
-            "scale_filter": "disable",
-            "blend_method": "default",
-            "blend_type": "normal",
-            "show_transition": {
-              "duration": 0
-            },
-            "hide_transition": {
-              "duration": 0
-            },
-            "private_settings": {
-              "color": "",
-              "color-preset": 5
-            }
-          },
-          {
-            "name": "=> Caster 1 Cam",
-            "source_uuid": "0f497cb8-50e3-4a90-83a7-eae45754e886",
-            "visible": true,
-            "locked": true,
-            "rot": 0,
-            "scale_ref": {
-              "x": 1920,
-              "y": 1080
-            },
-            "align": 5,
-            "bounds_type": 3,
-            "bounds_align": 0,
-            "bounds_crop": false,
-            "crop_left": 0,
-            "crop_top": 0,
-            "crop_right": 0,
-            "crop_bottom": 0,
-            "id": 2,
-            "group_item_backup": false,
-            "pos": {
-              "x": 24,
-              "y": 252
-            },
-            "scale": {
-              "x": 1,
-              "y": 1
-            },
-            "bounds": {
-              "x": 928,
-              "y": 522
-            },
-            "scale_filter": "disable",
-            "blend_method": "default",
-            "blend_type": "normal",
-            "show_transition": {
-              "duration": 0
-            },
-            "hide_transition": {
-              "duration": 0
-            },
-            "private_settings": {
-              "color": "",
-              "color-preset": 4
-            }
-          },
-          {
-            "name": "=> Caster 2 Cam",
-            "source_uuid": "98984bcd-86af-44d1-af75-a8fbeaceb66d",
-            "visible": true,
-            "locked": true,
-            "rot": 0,
-            "scale_ref": {
-              "x": 1920,
-              "y": 1080
-            },
-            "align": 5,
-            "bounds_type": 3,
-            "bounds_align": 0,
-            "bounds_crop": false,
-            "crop_left": 0,
-            "crop_top": 0,
-            "crop_right": 0,
-            "crop_bottom": 0,
-            "id": 3,
-            "group_item_backup": false,
-            "pos": {
-              "x": 968,
-              "y": 252
-            },
-            "scale": {
-              "x": 1,
-              "y": 1
-            },
-            "bounds": {
-              "x": 928,
-              "y": 522
-            },
-            "scale_filter": "disable",
-            "blend_method": "default",
-            "blend_type": "normal",
-            "show_transition": {
-              "duration": 0
-            },
-            "hide_transition": {
-              "duration": 0
-            },
-            "private_settings": {
-              "color": "",
-              "color-preset": 4
-            }
-          },
-          {
-            "name": "[GFX] Duo Row",
-            "source_uuid": "408e2813-e527-43ec-b43f-f26233ccefb5",
-            "visible": true,
-            "locked": true,
-            "rot": 0,
-            "scale_ref": {
-              "x": 1920,
-              "y": 1080
-            },
-            "align": 5,
-            "bounds_type": 0,
-            "bounds_align": 0,
-            "bounds_crop": false,
-            "crop_left": 0,
-            "crop_top": 0,
-            "crop_right": 0,
-            "crop_bottom": 0,
-            "id": 4,
-            "group_item_backup": false,
-            "pos": {
-              "x": 0,
-              "y": 0
-            },
-            "scale": {
-              "x": 1,
-              "y": 1
-            },
-            "bounds": {
-              "x": 0,
-              "y": 0
-            },
-            "scale_filter": "disable",
-            "blend_method": "default",
-            "blend_type": "normal",
-            "show_transition": {
-              "duration": 0
-            },
-            "hide_transition": {
-              "duration": 0
-            },
-            "private_settings": {
-              "color": "",
               "color-preset": 7
             }
           },
           {
             "name": "[GFX] Transition",
-            "source_uuid": "8e44a99a-f7a4-4173-a956-6f482967880d",
+            "source_uuid": "21754119-2748-4037-8f57-82ecae58c8cb",
             "visible": false,
             "locked": true,
             "rot": 0,
@@ -5421,8 +4296,8 @@
     },
     {
       "prev_ver": 536936450,
-      "name": "TrioCam Row",
-      "uuid": "7eb58357-9ba1-4579-a3d2-5b9695845037",
+      "name": "DuoCam Row",
+      "uuid": "f903297b-3ddb-4d85-bcf4-172710d5bfaa",
       "id": "scene",
       "versioned_id": "scene",
       "settings": {
@@ -5431,7 +4306,7 @@
         "items": [
           {
             "name": "Background Loop",
-            "source_uuid": "4b262a31-20d2-4aa3-8c22-ccd760e7d12d",
+            "source_uuid": "ee1d0c9f-9582-48bf-8b93-2af80f8e1e78",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -5477,7 +4352,7 @@
           },
           {
             "name": "=> Caster 1 Cam",
-            "source_uuid": "0f497cb8-50e3-4a90-83a7-eae45754e886",
+            "source_uuid": "f0510289-459d-463e-a391-31adbed8fc6a",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -5496,16 +4371,16 @@
             "id": 2,
             "group_item_backup": false,
             "pos": {
-              "x": 25,
-              "y": 430
+              "x": 24,
+              "y": 252
             },
             "scale": {
               "x": 1,
               "y": 1
             },
             "bounds": {
-              "x": 611,
-              "y": 344
+              "x": 928,
+              "y": 522
             },
             "scale_filter": "disable",
             "blend_method": "default",
@@ -5523,7 +4398,7 @@
           },
           {
             "name": "=> Caster 2 Cam",
-            "source_uuid": "98984bcd-86af-44d1-af75-a8fbeaceb66d",
+            "source_uuid": "8aec6c29-c53c-46fb-9ab7-b260cfc139dd",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -5542,16 +4417,16 @@
             "id": 3,
             "group_item_backup": false,
             "pos": {
-              "x": 654,
-              "y": 430
+              "x": 968,
+              "y": 252
             },
             "scale": {
               "x": 1,
               "y": 1
             },
             "bounds": {
-              "x": 611,
-              "y": 344
+              "x": 928,
+              "y": 522
             },
             "scale_filter": "disable",
             "blend_method": "default",
@@ -5568,54 +4443,8 @@
             }
           },
           {
-            "name": "=> Host Cam",
-            "source_uuid": "386fe953-ff33-44b7-8518-9fe19c3c59c0",
-            "visible": true,
-            "locked": true,
-            "rot": 0,
-            "scale_ref": {
-              "x": 1920,
-              "y": 1080
-            },
-            "align": 5,
-            "bounds_type": 3,
-            "bounds_align": 0,
-            "bounds_crop": false,
-            "crop_left": 0,
-            "crop_top": 0,
-            "crop_right": 0,
-            "crop_bottom": 0,
-            "id": 4,
-            "group_item_backup": false,
-            "pos": {
-              "x": 1284,
-              "y": 430
-            },
-            "scale": {
-              "x": 1,
-              "y": 1
-            },
-            "bounds": {
-              "x": 611,
-              "y": 344
-            },
-            "scale_filter": "disable",
-            "blend_method": "default",
-            "blend_type": "normal",
-            "show_transition": {
-              "duration": 0
-            },
-            "hide_transition": {
-              "duration": 0
-            },
-            "private_settings": {
-              "color": "",
-              "color-preset": 4
-            }
-          },
-          {
-            "name": "[GFX] Trio Row",
-            "source_uuid": "67c0f5c5-aade-4bac-ae30-1e5f55d45571",
+            "name": "[GFX] Duo Row",
+            "source_uuid": "e12b94ef-aa0f-42a2-91b7-80fed5aee530",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -5631,7 +4460,7 @@
             "crop_top": 0,
             "crop_right": 0,
             "crop_bottom": 0,
-            "id": 5,
+            "id": 4,
             "group_item_backup": false,
             "pos": {
               "x": 0,
@@ -5660,8 +4489,54 @@
             }
           },
           {
+            "name": "[GFX] Live Graphics (Push Live)",
+            "source_uuid": "e2737f9e-cd96-46f5-bc8d-a154b1bafe78",
+            "visible": true,
+            "locked": true,
+            "rot": 0,
+            "scale_ref": {
+              "x": 1920,
+              "y": 1080
+            },
+            "align": 5,
+            "bounds_type": 2,
+            "bounds_align": 0,
+            "bounds_crop": false,
+            "crop_left": 0,
+            "crop_top": 0,
+            "crop_right": 0,
+            "crop_bottom": 0,
+            "id": 5,
+            "group_item_backup": false,
+            "pos": {
+              "x": 0,
+              "y": 0
+            },
+            "scale": {
+              "x": 1,
+              "y": 1
+            },
+            "bounds": {
+              "x": 1920,
+              "y": 1080
+            },
+            "scale_filter": "disable",
+            "blend_method": "default",
+            "blend_type": "normal",
+            "show_transition": {
+              "duration": 0
+            },
+            "hide_transition": {
+              "duration": 0
+            },
+            "private_settings": {
+              "color": "",
+              "color-preset": 7
+            }
+          },
+          {
             "name": "[GFX] Transition",
-            "source_uuid": "8e44a99a-f7a4-4173-a956-6f482967880d",
+            "source_uuid": "21754119-2748-4037-8f57-82ecae58c8cb",
             "visible": false,
             "locked": true,
             "rot": 0,
@@ -5745,236 +4620,8 @@
     },
     {
       "prev_ver": 536936450,
-      "name": "Duo SingleCam",
-      "uuid": "29169f2e-4444-4f16-bd7f-c737b44b418e",
-      "id": "scene",
-      "versioned_id": "scene",
-      "settings": {
-        "custom_size": false,
-        "id_counter": 5,
-        "items": [
-          {
-            "name": "Background Loop",
-            "source_uuid": "4b262a31-20d2-4aa3-8c22-ccd760e7d12d",
-            "visible": true,
-            "locked": true,
-            "rot": 0,
-            "scale_ref": {
-              "x": 1920,
-              "y": 1080
-            },
-            "align": 5,
-            "bounds_type": 0,
-            "bounds_align": 0,
-            "bounds_crop": false,
-            "crop_left": 0,
-            "crop_top": 0,
-            "crop_right": 0,
-            "crop_bottom": 0,
-            "id": 1,
-            "group_item_backup": false,
-            "pos": {
-              "x": 0,
-              "y": 0
-            },
-            "scale": {
-              "x": 1,
-              "y": 1
-            },
-            "bounds": {
-              "x": 0,
-              "y": 0
-            },
-            "scale_filter": "disable",
-            "blend_method": "default",
-            "blend_type": "normal",
-            "show_transition": {
-              "duration": 0
-            },
-            "hide_transition": {
-              "duration": 0
-            },
-            "private_settings": {
-              "color": "",
-              "color-preset": 5
-            }
-          },
-          {
-            "name": "=> Caster 1 Cam",
-            "source_uuid": "0f497cb8-50e3-4a90-83a7-eae45754e886",
-            "visible": true,
-            "locked": true,
-            "rot": 0,
-            "scale_ref": {
-              "x": 1920,
-              "y": 1080
-            },
-            "align": 5,
-            "bounds_type": 3,
-            "bounds_align": 0,
-            "bounds_crop": false,
-            "crop_left": 0,
-            "crop_top": 0,
-            "crop_right": 0,
-            "crop_bottom": 0,
-            "id": 2,
-            "group_item_backup": false,
-            "pos": {
-              "x": 361,
-              "y": 236
-            },
-            "scale": {
-              "x": 1,
-              "y": 1
-            },
-            "bounds": {
-              "x": 1198,
-              "y": 674
-            },
-            "scale_filter": "disable",
-            "blend_method": "default",
-            "blend_type": "normal",
-            "show_transition": {
-              "duration": 0
-            },
-            "hide_transition": {
-              "duration": 0
-            },
-            "private_settings": {
-              "color": "",
-              "color-preset": 4
-            }
-          },
-          {
-            "name": "[GFX] Duo SingleCam",
-            "source_uuid": "3f3cd737-0f2d-4390-94cb-d87872af7065",
-            "visible": true,
-            "locked": true,
-            "rot": 0,
-            "scale_ref": {
-              "x": 1920,
-              "y": 1080
-            },
-            "align": 5,
-            "bounds_type": 0,
-            "bounds_align": 0,
-            "bounds_crop": false,
-            "crop_left": 0,
-            "crop_top": 0,
-            "crop_right": 0,
-            "crop_bottom": 0,
-            "id": 3,
-            "group_item_backup": false,
-            "pos": {
-              "x": 0,
-              "y": 0
-            },
-            "scale": {
-              "x": 1,
-              "y": 1
-            },
-            "bounds": {
-              "x": 0,
-              "y": 0
-            },
-            "scale_filter": "disable",
-            "blend_method": "default",
-            "blend_type": "normal",
-            "show_transition": {
-              "duration": 0
-            },
-            "hide_transition": {
-              "duration": 0
-            },
-            "private_settings": {
-              "color": "",
-              "color-preset": 7
-            }
-          },
-          {
-            "name": "[GFX] Transition",
-            "source_uuid": "8e44a99a-f7a4-4173-a956-6f482967880d",
-            "visible": false,
-            "locked": true,
-            "rot": 0,
-            "scale_ref": {
-              "x": 1920,
-              "y": 1080
-            },
-            "align": 5,
-            "bounds_type": 2,
-            "bounds_align": 0,
-            "bounds_crop": false,
-            "crop_left": 0,
-            "crop_top": 0,
-            "crop_right": 0,
-            "crop_bottom": 0,
-            "id": 4,
-            "group_item_backup": false,
-            "pos": {
-              "x": 0,
-              "y": 0
-            },
-            "scale": {
-              "x": 1,
-              "y": 1
-            },
-            "bounds": {
-              "x": 1920,
-              "y": 1080
-            },
-            "scale_filter": "disable",
-            "blend_method": "default",
-            "blend_type": "normal",
-            "show_transition": {
-              "duration": 0
-            },
-            "hide_transition": {
-              "duration": 0
-            },
-            "private_settings": {
-              "color": "",
-              "color-preset": 6
-            }
-          }
-        ]
-      },
-      "mixers": 0,
-      "sync": 0,
-      "flags": 0,
-      "volume": 1,
-      "balance": 0.5,
-      "enabled": true,
-      "muted": false,
-      "push-to-mute": false,
-      "push-to-mute-delay": 0,
-      "push-to-talk": false,
-      "push-to-talk-delay": 0,
-      "hotkeys": {
-        "OBSBasic.SelectScene": [],
-        "libobs.show_scene_item.1": [],
-        "libobs.hide_scene_item.1": [],
-        "libobs.show_scene_item.2": [],
-        "libobs.hide_scene_item.2": [],
-        "libobs.show_scene_item.3": [],
-        "libobs.hide_scene_item.3": [],
-        "libobs.show_scene_item.4": [],
-        "libobs.hide_scene_item.4": []
-      },
-      "deinterlace_mode": 0,
-      "deinterlace_field_order": 0,
-      "monitoring_type": 0,
-      "private_settings": {
-        "show_in_multiview": true,
-        "transition_duration": 300
-      },
-      "canvas_uuid": "6c69626f-6273-4c00-9d88-c5136d61696e",
-      "color": 3208970052
-    },
-    {
-      "prev_ver": 536936450,
-      "name": "Quad Desk",
-      "uuid": "86f54b56-fb67-45a4-9815-b72a6e2493c0",
+      "name": "TrioCam Row",
+      "uuid": "ec46f0b2-6256-4009-94a8-aea27dd5e281",
       "id": "scene",
       "versioned_id": "scene",
       "settings": {
@@ -5983,7 +4630,7 @@
         "items": [
           {
             "name": "Background Loop",
-            "source_uuid": "4b262a31-20d2-4aa3-8c22-ccd760e7d12d",
+            "source_uuid": "ee1d0c9f-9582-48bf-8b93-2af80f8e1e78",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -6029,7 +4676,7 @@
           },
           {
             "name": "=> Caster 1 Cam",
-            "source_uuid": "0f497cb8-50e3-4a90-83a7-eae45754e886",
+            "source_uuid": "f0510289-459d-463e-a391-31adbed8fc6a",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -6048,16 +4695,16 @@
             "id": 2,
             "group_item_backup": false,
             "pos": {
-              "x": 321,
-              "y": 175
+              "x": 25,
+              "y": 430
             },
             "scale": {
               "x": 1,
               "y": 1
             },
             "bounds": {
-              "x": 630,
-              "y": 354
+              "x": 611,
+              "y": 344
             },
             "scale_filter": "disable",
             "blend_method": "default",
@@ -6075,7 +4722,7 @@
           },
           {
             "name": "=> Caster 2 Cam",
-            "source_uuid": "98984bcd-86af-44d1-af75-a8fbeaceb66d",
+            "source_uuid": "8aec6c29-c53c-46fb-9ab7-b260cfc139dd",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -6094,16 +4741,16 @@
             "id": 3,
             "group_item_backup": false,
             "pos": {
-              "x": 969,
-              "y": 175
+              "x": 654,
+              "y": 430
             },
             "scale": {
               "x": 1,
               "y": 1
             },
             "bounds": {
-              "x": 630,
-              "y": 354
+              "x": 611,
+              "y": 344
             },
             "scale_filter": "disable",
             "blend_method": "default",
@@ -6121,7 +4768,7 @@
           },
           {
             "name": "=> Host Cam",
-            "source_uuid": "386fe953-ff33-44b7-8518-9fe19c3c59c0",
+            "source_uuid": "6badb989-24e7-4f34-a0fb-2c4a0af65fe6",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -6140,16 +4787,16 @@
             "id": 4,
             "group_item_backup": false,
             "pos": {
-              "x": 321,
-              "y": 593
+              "x": 1284,
+              "y": 430
             },
             "scale": {
               "x": 1,
               "y": 1
             },
             "bounds": {
-              "x": 630,
-              "y": 354
+              "x": 611,
+              "y": 344
             },
             "scale_filter": "disable",
             "blend_method": "default",
@@ -6166,54 +4813,8 @@
             }
           },
           {
-            "name": "=> Caster 4 Cam",
-            "source_uuid": "d5a6ae23-27ed-4125-934a-13ac7b112412",
-            "visible": true,
-            "locked": true,
-            "rot": 0,
-            "scale_ref": {
-              "x": 1920,
-              "y": 1080
-            },
-            "align": 5,
-            "bounds_type": 3,
-            "bounds_align": 0,
-            "bounds_crop": false,
-            "crop_left": 0,
-            "crop_top": 0,
-            "crop_right": 0,
-            "crop_bottom": 0,
-            "id": 5,
-            "group_item_backup": false,
-            "pos": {
-              "x": 969,
-              "y": 593
-            },
-            "scale": {
-              "x": 1,
-              "y": 1
-            },
-            "bounds": {
-              "x": 630,
-              "y": 354
-            },
-            "scale_filter": "disable",
-            "blend_method": "default",
-            "blend_type": "normal",
-            "show_transition": {
-              "duration": 0
-            },
-            "hide_transition": {
-              "duration": 0
-            },
-            "private_settings": {
-              "color": "",
-              "color-preset": 4
-            }
-          },
-          {
-            "name": "[GFX] Quad Desk",
-            "source_uuid": "c991c396-31cf-4d27-9033-7cf56fcca530",
+            "name": "[GFX] Trio Row",
+            "source_uuid": "12edbdab-f7b1-4204-acca-4fe149114d46",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -6229,7 +4830,7 @@
             "crop_top": 0,
             "crop_right": 0,
             "crop_bottom": 0,
-            "id": 6,
+            "id": 5,
             "group_item_backup": false,
             "pos": {
               "x": 0,
@@ -6258,8 +4859,54 @@
             }
           },
           {
+            "name": "[GFX] Live Graphics (Push Live)",
+            "source_uuid": "e2737f9e-cd96-46f5-bc8d-a154b1bafe78",
+            "visible": true,
+            "locked": true,
+            "rot": 0,
+            "scale_ref": {
+              "x": 1920,
+              "y": 1080
+            },
+            "align": 5,
+            "bounds_type": 2,
+            "bounds_align": 0,
+            "bounds_crop": false,
+            "crop_left": 0,
+            "crop_top": 0,
+            "crop_right": 0,
+            "crop_bottom": 0,
+            "id": 6,
+            "group_item_backup": false,
+            "pos": {
+              "x": 0,
+              "y": 0
+            },
+            "scale": {
+              "x": 1,
+              "y": 1
+            },
+            "bounds": {
+              "x": 1920,
+              "y": 1080
+            },
+            "scale_filter": "disable",
+            "blend_method": "default",
+            "blend_type": "normal",
+            "show_transition": {
+              "duration": 0
+            },
+            "hide_transition": {
+              "duration": 0
+            },
+            "private_settings": {
+              "color": "",
+              "color-preset": 7
+            }
+          },
+          {
             "name": "[GFX] Transition",
-            "source_uuid": "8e44a99a-f7a4-4173-a956-6f482967880d",
+            "source_uuid": "21754119-2748-4037-8f57-82ecae58c8cb",
             "visible": false,
             "locked": true,
             "rot": 0,
@@ -6345,17 +4992,17 @@
     },
     {
       "prev_ver": 536936450,
-      "name": "Analyst Desk",
-      "uuid": "4029697c-413b-4f16-95fd-64cc08763e23",
+      "name": "Duo SingleCam",
+      "uuid": "97fdf2cf-19a9-4f8f-9b3d-b7e2a32fa215",
       "id": "scene",
       "versioned_id": "scene",
       "settings": {
         "custom_size": false,
-        "id_counter": 7,
+        "id_counter": 6,
         "items": [
           {
             "name": "Background Loop",
-            "source_uuid": "4b262a31-20d2-4aa3-8c22-ccd760e7d12d",
+            "source_uuid": "ee1d0c9f-9582-48bf-8b93-2af80f8e1e78",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -6401,7 +5048,703 @@
           },
           {
             "name": "=> Caster 1 Cam",
-            "source_uuid": "0f497cb8-50e3-4a90-83a7-eae45754e886",
+            "source_uuid": "f0510289-459d-463e-a391-31adbed8fc6a",
+            "visible": true,
+            "locked": true,
+            "rot": 0,
+            "scale_ref": {
+              "x": 1920,
+              "y": 1080
+            },
+            "align": 5,
+            "bounds_type": 3,
+            "bounds_align": 0,
+            "bounds_crop": false,
+            "crop_left": 0,
+            "crop_top": 0,
+            "crop_right": 0,
+            "crop_bottom": 0,
+            "id": 2,
+            "group_item_backup": false,
+            "pos": {
+              "x": 361,
+              "y": 236
+            },
+            "scale": {
+              "x": 1,
+              "y": 1
+            },
+            "bounds": {
+              "x": 1198,
+              "y": 674
+            },
+            "scale_filter": "disable",
+            "blend_method": "default",
+            "blend_type": "normal",
+            "show_transition": {
+              "duration": 0
+            },
+            "hide_transition": {
+              "duration": 0
+            },
+            "private_settings": {
+              "color": "",
+              "color-preset": 4
+            }
+          },
+          {
+            "name": "[GFX] Duo SingleCam",
+            "source_uuid": "63eb5483-f523-4da5-950c-3756b9d9a529",
+            "visible": true,
+            "locked": true,
+            "rot": 0,
+            "scale_ref": {
+              "x": 1920,
+              "y": 1080
+            },
+            "align": 5,
+            "bounds_type": 0,
+            "bounds_align": 0,
+            "bounds_crop": false,
+            "crop_left": 0,
+            "crop_top": 0,
+            "crop_right": 0,
+            "crop_bottom": 0,
+            "id": 3,
+            "group_item_backup": false,
+            "pos": {
+              "x": 0,
+              "y": 0
+            },
+            "scale": {
+              "x": 1,
+              "y": 1
+            },
+            "bounds": {
+              "x": 0,
+              "y": 0
+            },
+            "scale_filter": "disable",
+            "blend_method": "default",
+            "blend_type": "normal",
+            "show_transition": {
+              "duration": 0
+            },
+            "hide_transition": {
+              "duration": 0
+            },
+            "private_settings": {
+              "color": "",
+              "color-preset": 7
+            }
+          },
+          {
+            "name": "[GFX] Live Graphics (Push Live)",
+            "source_uuid": "e2737f9e-cd96-46f5-bc8d-a154b1bafe78",
+            "visible": true,
+            "locked": true,
+            "rot": 0,
+            "scale_ref": {
+              "x": 1920,
+              "y": 1080
+            },
+            "align": 5,
+            "bounds_type": 2,
+            "bounds_align": 0,
+            "bounds_crop": false,
+            "crop_left": 0,
+            "crop_top": 0,
+            "crop_right": 0,
+            "crop_bottom": 0,
+            "id": 4,
+            "group_item_backup": false,
+            "pos": {
+              "x": 0,
+              "y": 0
+            },
+            "scale": {
+              "x": 1,
+              "y": 1
+            },
+            "bounds": {
+              "x": 1920,
+              "y": 1080
+            },
+            "scale_filter": "disable",
+            "blend_method": "default",
+            "blend_type": "normal",
+            "show_transition": {
+              "duration": 0
+            },
+            "hide_transition": {
+              "duration": 0
+            },
+            "private_settings": {
+              "color": "",
+              "color-preset": 7
+            }
+          },
+          {
+            "name": "[GFX] Transition",
+            "source_uuid": "21754119-2748-4037-8f57-82ecae58c8cb",
+            "visible": false,
+            "locked": true,
+            "rot": 0,
+            "scale_ref": {
+              "x": 1920,
+              "y": 1080
+            },
+            "align": 5,
+            "bounds_type": 2,
+            "bounds_align": 0,
+            "bounds_crop": false,
+            "crop_left": 0,
+            "crop_top": 0,
+            "crop_right": 0,
+            "crop_bottom": 0,
+            "id": 5,
+            "group_item_backup": false,
+            "pos": {
+              "x": 0,
+              "y": 0
+            },
+            "scale": {
+              "x": 1,
+              "y": 1
+            },
+            "bounds": {
+              "x": 1920,
+              "y": 1080
+            },
+            "scale_filter": "disable",
+            "blend_method": "default",
+            "blend_type": "normal",
+            "show_transition": {
+              "duration": 0
+            },
+            "hide_transition": {
+              "duration": 0
+            },
+            "private_settings": {
+              "color": "",
+              "color-preset": 6
+            }
+          }
+        ]
+      },
+      "mixers": 0,
+      "sync": 0,
+      "flags": 0,
+      "volume": 1,
+      "balance": 0.5,
+      "enabled": true,
+      "muted": false,
+      "push-to-mute": false,
+      "push-to-mute-delay": 0,
+      "push-to-talk": false,
+      "push-to-talk-delay": 0,
+      "hotkeys": {
+        "OBSBasic.SelectScene": [],
+        "libobs.show_scene_item.1": [],
+        "libobs.hide_scene_item.1": [],
+        "libobs.show_scene_item.2": [],
+        "libobs.hide_scene_item.2": [],
+        "libobs.show_scene_item.3": [],
+        "libobs.hide_scene_item.3": [],
+        "libobs.show_scene_item.4": [],
+        "libobs.hide_scene_item.4": [],
+        "libobs.show_scene_item.5": [],
+        "libobs.hide_scene_item.5": []
+      },
+      "deinterlace_mode": 0,
+      "deinterlace_field_order": 0,
+      "monitoring_type": 0,
+      "private_settings": {
+        "show_in_multiview": true,
+        "transition_duration": 300
+      },
+      "canvas_uuid": "6c69626f-6273-4c00-9d88-c5136d61696e",
+      "color": 3208970052
+    },
+    {
+      "prev_ver": 536936450,
+      "name": "Quad Desk",
+      "uuid": "9331ffec-019a-4f18-8365-2e541e67d576",
+      "id": "scene",
+      "versioned_id": "scene",
+      "settings": {
+        "custom_size": false,
+        "id_counter": 9,
+        "items": [
+          {
+            "name": "Background Loop",
+            "source_uuid": "ee1d0c9f-9582-48bf-8b93-2af80f8e1e78",
+            "visible": true,
+            "locked": true,
+            "rot": 0,
+            "scale_ref": {
+              "x": 1920,
+              "y": 1080
+            },
+            "align": 5,
+            "bounds_type": 0,
+            "bounds_align": 0,
+            "bounds_crop": false,
+            "crop_left": 0,
+            "crop_top": 0,
+            "crop_right": 0,
+            "crop_bottom": 0,
+            "id": 1,
+            "group_item_backup": false,
+            "pos": {
+              "x": 0,
+              "y": 0
+            },
+            "scale": {
+              "x": 1,
+              "y": 1
+            },
+            "bounds": {
+              "x": 0,
+              "y": 0
+            },
+            "scale_filter": "disable",
+            "blend_method": "default",
+            "blend_type": "normal",
+            "show_transition": {
+              "duration": 0
+            },
+            "hide_transition": {
+              "duration": 0
+            },
+            "private_settings": {
+              "color": "",
+              "color-preset": 5
+            }
+          },
+          {
+            "name": "=> Caster 1 Cam",
+            "source_uuid": "f0510289-459d-463e-a391-31adbed8fc6a",
+            "visible": true,
+            "locked": true,
+            "rot": 0,
+            "scale_ref": {
+              "x": 1920,
+              "y": 1080
+            },
+            "align": 5,
+            "bounds_type": 3,
+            "bounds_align": 0,
+            "bounds_crop": false,
+            "crop_left": 0,
+            "crop_top": 0,
+            "crop_right": 0,
+            "crop_bottom": 0,
+            "id": 2,
+            "group_item_backup": false,
+            "pos": {
+              "x": 321,
+              "y": 175
+            },
+            "scale": {
+              "x": 1,
+              "y": 1
+            },
+            "bounds": {
+              "x": 630,
+              "y": 354
+            },
+            "scale_filter": "disable",
+            "blend_method": "default",
+            "blend_type": "normal",
+            "show_transition": {
+              "duration": 0
+            },
+            "hide_transition": {
+              "duration": 0
+            },
+            "private_settings": {
+              "color": "",
+              "color-preset": 4
+            }
+          },
+          {
+            "name": "=> Caster 2 Cam",
+            "source_uuid": "8aec6c29-c53c-46fb-9ab7-b260cfc139dd",
+            "visible": true,
+            "locked": true,
+            "rot": 0,
+            "scale_ref": {
+              "x": 1920,
+              "y": 1080
+            },
+            "align": 5,
+            "bounds_type": 3,
+            "bounds_align": 0,
+            "bounds_crop": false,
+            "crop_left": 0,
+            "crop_top": 0,
+            "crop_right": 0,
+            "crop_bottom": 0,
+            "id": 3,
+            "group_item_backup": false,
+            "pos": {
+              "x": 969,
+              "y": 175
+            },
+            "scale": {
+              "x": 1,
+              "y": 1
+            },
+            "bounds": {
+              "x": 630,
+              "y": 354
+            },
+            "scale_filter": "disable",
+            "blend_method": "default",
+            "blend_type": "normal",
+            "show_transition": {
+              "duration": 0
+            },
+            "hide_transition": {
+              "duration": 0
+            },
+            "private_settings": {
+              "color": "",
+              "color-preset": 4
+            }
+          },
+          {
+            "name": "=> Host Cam",
+            "source_uuid": "6badb989-24e7-4f34-a0fb-2c4a0af65fe6",
+            "visible": true,
+            "locked": true,
+            "rot": 0,
+            "scale_ref": {
+              "x": 1920,
+              "y": 1080
+            },
+            "align": 5,
+            "bounds_type": 3,
+            "bounds_align": 0,
+            "bounds_crop": false,
+            "crop_left": 0,
+            "crop_top": 0,
+            "crop_right": 0,
+            "crop_bottom": 0,
+            "id": 4,
+            "group_item_backup": false,
+            "pos": {
+              "x": 321,
+              "y": 593
+            },
+            "scale": {
+              "x": 1,
+              "y": 1
+            },
+            "bounds": {
+              "x": 630,
+              "y": 354
+            },
+            "scale_filter": "disable",
+            "blend_method": "default",
+            "blend_type": "normal",
+            "show_transition": {
+              "duration": 0
+            },
+            "hide_transition": {
+              "duration": 0
+            },
+            "private_settings": {
+              "color": "",
+              "color-preset": 4
+            }
+          },
+          {
+            "name": "=> Caster 4 Cam",
+            "source_uuid": "dba21657-fd08-41c5-8e39-7fac2a13d374",
+            "visible": true,
+            "locked": true,
+            "rot": 0,
+            "scale_ref": {
+              "x": 1920,
+              "y": 1080
+            },
+            "align": 5,
+            "bounds_type": 3,
+            "bounds_align": 0,
+            "bounds_crop": false,
+            "crop_left": 0,
+            "crop_top": 0,
+            "crop_right": 0,
+            "crop_bottom": 0,
+            "id": 5,
+            "group_item_backup": false,
+            "pos": {
+              "x": 969,
+              "y": 593
+            },
+            "scale": {
+              "x": 1,
+              "y": 1
+            },
+            "bounds": {
+              "x": 630,
+              "y": 354
+            },
+            "scale_filter": "disable",
+            "blend_method": "default",
+            "blend_type": "normal",
+            "show_transition": {
+              "duration": 0
+            },
+            "hide_transition": {
+              "duration": 0
+            },
+            "private_settings": {
+              "color": "",
+              "color-preset": 4
+            }
+          },
+          {
+            "name": "[GFX] Quad Desk",
+            "source_uuid": "1b781b8c-414d-496b-ac1d-8c41061cd166",
+            "visible": true,
+            "locked": true,
+            "rot": 0,
+            "scale_ref": {
+              "x": 1920,
+              "y": 1080
+            },
+            "align": 5,
+            "bounds_type": 0,
+            "bounds_align": 0,
+            "bounds_crop": false,
+            "crop_left": 0,
+            "crop_top": 0,
+            "crop_right": 0,
+            "crop_bottom": 0,
+            "id": 6,
+            "group_item_backup": false,
+            "pos": {
+              "x": 0,
+              "y": 0
+            },
+            "scale": {
+              "x": 1,
+              "y": 1
+            },
+            "bounds": {
+              "x": 0,
+              "y": 0
+            },
+            "scale_filter": "disable",
+            "blend_method": "default",
+            "blend_type": "normal",
+            "show_transition": {
+              "duration": 0
+            },
+            "hide_transition": {
+              "duration": 0
+            },
+            "private_settings": {
+              "color": "",
+              "color-preset": 7
+            }
+          },
+          {
+            "name": "[GFX] Live Graphics (Push Live)",
+            "source_uuid": "e2737f9e-cd96-46f5-bc8d-a154b1bafe78",
+            "visible": true,
+            "locked": true,
+            "rot": 0,
+            "scale_ref": {
+              "x": 1920,
+              "y": 1080
+            },
+            "align": 5,
+            "bounds_type": 2,
+            "bounds_align": 0,
+            "bounds_crop": false,
+            "crop_left": 0,
+            "crop_top": 0,
+            "crop_right": 0,
+            "crop_bottom": 0,
+            "id": 7,
+            "group_item_backup": false,
+            "pos": {
+              "x": 0,
+              "y": 0
+            },
+            "scale": {
+              "x": 1,
+              "y": 1
+            },
+            "bounds": {
+              "x": 1920,
+              "y": 1080
+            },
+            "scale_filter": "disable",
+            "blend_method": "default",
+            "blend_type": "normal",
+            "show_transition": {
+              "duration": 0
+            },
+            "hide_transition": {
+              "duration": 0
+            },
+            "private_settings": {
+              "color": "",
+              "color-preset": 7
+            }
+          },
+          {
+            "name": "[GFX] Transition",
+            "source_uuid": "21754119-2748-4037-8f57-82ecae58c8cb",
+            "visible": false,
+            "locked": true,
+            "rot": 0,
+            "scale_ref": {
+              "x": 1920,
+              "y": 1080
+            },
+            "align": 5,
+            "bounds_type": 2,
+            "bounds_align": 0,
+            "bounds_crop": false,
+            "crop_left": 0,
+            "crop_top": 0,
+            "crop_right": 0,
+            "crop_bottom": 0,
+            "id": 8,
+            "group_item_backup": false,
+            "pos": {
+              "x": 0,
+              "y": 0
+            },
+            "scale": {
+              "x": 1,
+              "y": 1
+            },
+            "bounds": {
+              "x": 1920,
+              "y": 1080
+            },
+            "scale_filter": "disable",
+            "blend_method": "default",
+            "blend_type": "normal",
+            "show_transition": {
+              "duration": 0
+            },
+            "hide_transition": {
+              "duration": 0
+            },
+            "private_settings": {
+              "color": "",
+              "color-preset": 6
+            }
+          }
+        ]
+      },
+      "mixers": 0,
+      "sync": 0,
+      "flags": 0,
+      "volume": 1,
+      "balance": 0.5,
+      "enabled": true,
+      "muted": false,
+      "push-to-mute": false,
+      "push-to-mute-delay": 0,
+      "push-to-talk": false,
+      "push-to-talk-delay": 0,
+      "hotkeys": {
+        "OBSBasic.SelectScene": [],
+        "libobs.show_scene_item.1": [],
+        "libobs.hide_scene_item.1": [],
+        "libobs.show_scene_item.2": [],
+        "libobs.hide_scene_item.2": [],
+        "libobs.show_scene_item.3": [],
+        "libobs.hide_scene_item.3": [],
+        "libobs.show_scene_item.4": [],
+        "libobs.hide_scene_item.4": [],
+        "libobs.show_scene_item.5": [],
+        "libobs.hide_scene_item.5": [],
+        "libobs.show_scene_item.6": [],
+        "libobs.hide_scene_item.6": [],
+        "libobs.show_scene_item.7": [],
+        "libobs.hide_scene_item.7": [],
+        "libobs.show_scene_item.8": [],
+        "libobs.hide_scene_item.8": []
+      },
+      "deinterlace_mode": 0,
+      "deinterlace_field_order": 0,
+      "monitoring_type": 0,
+      "private_settings": {
+        "show_in_multiview": true,
+        "transition_duration": 300
+      },
+      "canvas_uuid": "6c69626f-6273-4c00-9d88-c5136d61696e",
+      "color": 3208970052
+    },
+    {
+      "prev_ver": 536936450,
+      "name": "Analyst Desk",
+      "uuid": "5afae33e-acd2-4757-a1f4-a0f44f41e485",
+      "id": "scene",
+      "versioned_id": "scene",
+      "settings": {
+        "custom_size": false,
+        "id_counter": 8,
+        "items": [
+          {
+            "name": "Background Loop",
+            "source_uuid": "ee1d0c9f-9582-48bf-8b93-2af80f8e1e78",
+            "visible": true,
+            "locked": true,
+            "rot": 0,
+            "scale_ref": {
+              "x": 1920,
+              "y": 1080
+            },
+            "align": 5,
+            "bounds_type": 0,
+            "bounds_align": 0,
+            "bounds_crop": false,
+            "crop_left": 0,
+            "crop_top": 0,
+            "crop_right": 0,
+            "crop_bottom": 0,
+            "id": 1,
+            "group_item_backup": false,
+            "pos": {
+              "x": 0,
+              "y": 0
+            },
+            "scale": {
+              "x": 1,
+              "y": 1
+            },
+            "bounds": {
+              "x": 0,
+              "y": 0
+            },
+            "scale_filter": "disable",
+            "blend_method": "default",
+            "blend_type": "normal",
+            "show_transition": {
+              "duration": 0
+            },
+            "hide_transition": {
+              "duration": 0
+            },
+            "private_settings": {
+              "color": "",
+              "color-preset": 5
+            }
+          },
+          {
+            "name": "=> Caster 1 Cam",
+            "source_uuid": "f0510289-459d-463e-a391-31adbed8fc6a",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -6447,7 +5790,7 @@
           },
           {
             "name": "=> Caster 2 Cam",
-            "source_uuid": "98984bcd-86af-44d1-af75-a8fbeaceb66d",
+            "source_uuid": "8aec6c29-c53c-46fb-9ab7-b260cfc139dd",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -6493,7 +5836,7 @@
           },
           {
             "name": "=> Host Cam",
-            "source_uuid": "386fe953-ff33-44b7-8518-9fe19c3c59c0",
+            "source_uuid": "6badb989-24e7-4f34-a0fb-2c4a0af65fe6",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -6539,7 +5882,7 @@
           },
           {
             "name": "[GFX] Analyst Desk",
-            "source_uuid": "a77e3f60-231c-48f2-acef-59a1a42d763d",
+            "source_uuid": "74aa52ef-26c5-4c89-8ef4-aa019bf23e98",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -6584,8 +5927,380 @@
             }
           },
           {
+            "name": "[GFX] Live Graphics (Push Live)",
+            "source_uuid": "e2737f9e-cd96-46f5-bc8d-a154b1bafe78",
+            "visible": true,
+            "locked": true,
+            "rot": 0,
+            "scale_ref": {
+              "x": 1920,
+              "y": 1080
+            },
+            "align": 5,
+            "bounds_type": 2,
+            "bounds_align": 0,
+            "bounds_crop": false,
+            "crop_left": 0,
+            "crop_top": 0,
+            "crop_right": 0,
+            "crop_bottom": 0,
+            "id": 6,
+            "group_item_backup": false,
+            "pos": {
+              "x": 0,
+              "y": 0
+            },
+            "scale": {
+              "x": 1,
+              "y": 1
+            },
+            "bounds": {
+              "x": 1920,
+              "y": 1080
+            },
+            "scale_filter": "disable",
+            "blend_method": "default",
+            "blend_type": "normal",
+            "show_transition": {
+              "duration": 0
+            },
+            "hide_transition": {
+              "duration": 0
+            },
+            "private_settings": {
+              "color": "",
+              "color-preset": 7
+            }
+          },
+          {
             "name": "[GFX] Transition",
-            "source_uuid": "8e44a99a-f7a4-4173-a956-6f482967880d",
+            "source_uuid": "21754119-2748-4037-8f57-82ecae58c8cb",
+            "visible": false,
+            "locked": true,
+            "rot": 0,
+            "scale_ref": {
+              "x": 1920,
+              "y": 1080
+            },
+            "align": 5,
+            "bounds_type": 2,
+            "bounds_align": 0,
+            "bounds_crop": false,
+            "crop_left": 0,
+            "crop_top": 0,
+            "crop_right": 0,
+            "crop_bottom": 0,
+            "id": 7,
+            "group_item_backup": false,
+            "pos": {
+              "x": 0,
+              "y": 0
+            },
+            "scale": {
+              "x": 1,
+              "y": 1
+            },
+            "bounds": {
+              "x": 1920,
+              "y": 1080
+            },
+            "scale_filter": "disable",
+            "blend_method": "default",
+            "blend_type": "normal",
+            "show_transition": {
+              "duration": 0
+            },
+            "hide_transition": {
+              "duration": 0
+            },
+            "private_settings": {
+              "color": "",
+              "color-preset": 6
+            }
+          }
+        ]
+      },
+      "mixers": 0,
+      "sync": 0,
+      "flags": 0,
+      "volume": 1,
+      "balance": 0.5,
+      "enabled": true,
+      "muted": false,
+      "push-to-mute": false,
+      "push-to-mute-delay": 0,
+      "push-to-talk": false,
+      "push-to-talk-delay": 0,
+      "hotkeys": {
+        "OBSBasic.SelectScene": [],
+        "libobs.show_scene_item.1": [],
+        "libobs.hide_scene_item.1": [],
+        "libobs.show_scene_item.2": [],
+        "libobs.hide_scene_item.2": [],
+        "libobs.show_scene_item.3": [],
+        "libobs.hide_scene_item.3": [],
+        "libobs.show_scene_item.4": [],
+        "libobs.hide_scene_item.4": [],
+        "libobs.show_scene_item.5": [],
+        "libobs.hide_scene_item.5": [],
+        "libobs.show_scene_item.6": [],
+        "libobs.hide_scene_item.6": [],
+        "libobs.show_scene_item.7": [],
+        "libobs.hide_scene_item.7": []
+      },
+      "deinterlace_mode": 0,
+      "deinterlace_field_order": 0,
+      "monitoring_type": 0,
+      "private_settings": {
+        "show_in_multiview": true,
+        "transition_duration": 300
+      },
+      "canvas_uuid": "6c69626f-6273-4c00-9d88-c5136d61696e",
+      "color": 3208970052
+    },
+    {
+      "prev_ver": 536936450,
+      "name": "Spotlight Desk",
+      "uuid": "487d1364-495d-4064-acfd-1f2eb324e5f9",
+      "id": "scene",
+      "versioned_id": "scene",
+      "settings": {
+        "custom_size": false,
+        "id_counter": 7,
+        "items": [
+          {
+            "name": "Background Loop",
+            "source_uuid": "ee1d0c9f-9582-48bf-8b93-2af80f8e1e78",
+            "visible": true,
+            "locked": true,
+            "rot": 0,
+            "scale_ref": {
+              "x": 1920,
+              "y": 1080
+            },
+            "align": 5,
+            "bounds_type": 0,
+            "bounds_align": 0,
+            "bounds_crop": false,
+            "crop_left": 0,
+            "crop_top": 0,
+            "crop_right": 0,
+            "crop_bottom": 0,
+            "id": 1,
+            "group_item_backup": false,
+            "pos": {
+              "x": 0,
+              "y": 0
+            },
+            "scale": {
+              "x": 1,
+              "y": 1
+            },
+            "bounds": {
+              "x": 0,
+              "y": 0
+            },
+            "scale_filter": "disable",
+            "blend_method": "default",
+            "blend_type": "normal",
+            "show_transition": {
+              "duration": 0
+            },
+            "hide_transition": {
+              "duration": 0
+            },
+            "private_settings": {
+              "color": "",
+              "color-preset": 5
+            }
+          },
+          {
+            "name": "=> Caster 1 Cam",
+            "source_uuid": "f0510289-459d-463e-a391-31adbed8fc6a",
+            "visible": true,
+            "locked": true,
+            "rot": 0,
+            "scale_ref": {
+              "x": 1920,
+              "y": 1080
+            },
+            "align": 5,
+            "bounds_type": 3,
+            "bounds_align": 0,
+            "bounds_crop": false,
+            "crop_left": 0,
+            "crop_top": 0,
+            "crop_right": 0,
+            "crop_bottom": 0,
+            "id": 2,
+            "group_item_backup": false,
+            "pos": {
+              "x": 27,
+              "y": 107
+            },
+            "scale": {
+              "x": 1,
+              "y": 1
+            },
+            "bounds": {
+              "x": 498,
+              "y": 280
+            },
+            "scale_filter": "disable",
+            "blend_method": "default",
+            "blend_type": "normal",
+            "show_transition": {
+              "duration": 0
+            },
+            "hide_transition": {
+              "duration": 0
+            },
+            "private_settings": {
+              "color": "",
+              "color-preset": 4
+            }
+          },
+          {
+            "name": "=> Player Cam",
+            "source_uuid": "185f35a1-354c-43f3-92d0-fae12bdd4810",
+            "visible": true,
+            "locked": true,
+            "rot": 0,
+            "scale_ref": {
+              "x": 1920,
+              "y": 1080
+            },
+            "align": 5,
+            "bounds_type": 3,
+            "bounds_align": 0,
+            "bounds_crop": false,
+            "crop_left": 0,
+            "crop_top": 0,
+            "crop_right": 0,
+            "crop_bottom": 0,
+            "id": 3,
+            "group_item_backup": false,
+            "pos": {
+              "x": 547,
+              "y": 107
+            },
+            "scale": {
+              "x": 1,
+              "y": 1
+            },
+            "bounds": {
+              "x": 1346,
+              "y": 757
+            },
+            "scale_filter": "disable",
+            "blend_method": "default",
+            "blend_type": "normal",
+            "show_transition": {
+              "duration": 0
+            },
+            "hide_transition": {
+              "duration": 0
+            },
+            "private_settings": {
+              "color": "",
+              "color-preset": 4
+            }
+          },
+          {
+            "name": "[GFX] Spotlight Desk",
+            "source_uuid": "c6debdfe-d018-494b-8fe1-5476e0c9ff87",
+            "visible": true,
+            "locked": true,
+            "rot": 0,
+            "scale_ref": {
+              "x": 1920,
+              "y": 1080
+            },
+            "align": 5,
+            "bounds_type": 0,
+            "bounds_align": 0,
+            "bounds_crop": false,
+            "crop_left": 0,
+            "crop_top": 0,
+            "crop_right": 0,
+            "crop_bottom": 0,
+            "id": 4,
+            "group_item_backup": false,
+            "pos": {
+              "x": 0,
+              "y": 0
+            },
+            "scale": {
+              "x": 1,
+              "y": 1
+            },
+            "bounds": {
+              "x": 0,
+              "y": 0
+            },
+            "scale_filter": "disable",
+            "blend_method": "default",
+            "blend_type": "normal",
+            "show_transition": {
+              "duration": 0
+            },
+            "hide_transition": {
+              "duration": 0
+            },
+            "private_settings": {
+              "color": "",
+              "color-preset": 7
+            }
+          },
+          {
+            "name": "[GFX] Live Graphics (Push Live)",
+            "source_uuid": "e2737f9e-cd96-46f5-bc8d-a154b1bafe78",
+            "visible": true,
+            "locked": true,
+            "rot": 0,
+            "scale_ref": {
+              "x": 1920,
+              "y": 1080
+            },
+            "align": 5,
+            "bounds_type": 2,
+            "bounds_align": 0,
+            "bounds_crop": false,
+            "crop_left": 0,
+            "crop_top": 0,
+            "crop_right": 0,
+            "crop_bottom": 0,
+            "id": 5,
+            "group_item_backup": false,
+            "pos": {
+              "x": 0,
+              "y": 0
+            },
+            "scale": {
+              "x": 1,
+              "y": 1
+            },
+            "bounds": {
+              "x": 1920,
+              "y": 1080
+            },
+            "scale_filter": "disable",
+            "blend_method": "default",
+            "blend_type": "normal",
+            "show_transition": {
+              "duration": 0
+            },
+            "hide_transition": {
+              "duration": 0
+            },
+            "private_settings": {
+              "color": "",
+              "color-preset": 7
+            }
+          },
+          {
+            "name": "[GFX] Transition",
+            "source_uuid": "21754119-2748-4037-8f57-82ecae58c8cb",
             "visible": false,
             "locked": true,
             "rot": 0,
@@ -6669,293 +6384,17 @@
     },
     {
       "prev_ver": 536936450,
-      "name": "Spotlight Desk",
-      "uuid": "1d59ec88-841b-4193-b9a7-f2f6d768184d",
-      "id": "scene",
-      "versioned_id": "scene",
-      "settings": {
-        "custom_size": false,
-        "id_counter": 6,
-        "items": [
-          {
-            "name": "Background Loop",
-            "source_uuid": "4b262a31-20d2-4aa3-8c22-ccd760e7d12d",
-            "visible": true,
-            "locked": true,
-            "rot": 0,
-            "scale_ref": {
-              "x": 1920,
-              "y": 1080
-            },
-            "align": 5,
-            "bounds_type": 0,
-            "bounds_align": 0,
-            "bounds_crop": false,
-            "crop_left": 0,
-            "crop_top": 0,
-            "crop_right": 0,
-            "crop_bottom": 0,
-            "id": 1,
-            "group_item_backup": false,
-            "pos": {
-              "x": 0,
-              "y": 0
-            },
-            "scale": {
-              "x": 1,
-              "y": 1
-            },
-            "bounds": {
-              "x": 0,
-              "y": 0
-            },
-            "scale_filter": "disable",
-            "blend_method": "default",
-            "blend_type": "normal",
-            "show_transition": {
-              "duration": 0
-            },
-            "hide_transition": {
-              "duration": 0
-            },
-            "private_settings": {
-              "color": "",
-              "color-preset": 5
-            }
-          },
-          {
-            "name": "=> Caster 1 Cam",
-            "source_uuid": "0f497cb8-50e3-4a90-83a7-eae45754e886",
-            "visible": true,
-            "locked": true,
-            "rot": 0,
-            "scale_ref": {
-              "x": 1920,
-              "y": 1080
-            },
-            "align": 5,
-            "bounds_type": 3,
-            "bounds_align": 0,
-            "bounds_crop": false,
-            "crop_left": 0,
-            "crop_top": 0,
-            "crop_right": 0,
-            "crop_bottom": 0,
-            "id": 2,
-            "group_item_backup": false,
-            "pos": {
-              "x": 27,
-              "y": 107
-            },
-            "scale": {
-              "x": 1,
-              "y": 1
-            },
-            "bounds": {
-              "x": 498,
-              "y": 280
-            },
-            "scale_filter": "disable",
-            "blend_method": "default",
-            "blend_type": "normal",
-            "show_transition": {
-              "duration": 0
-            },
-            "hide_transition": {
-              "duration": 0
-            },
-            "private_settings": {
-              "color": "",
-              "color-preset": 4
-            }
-          },
-          {
-            "name": "=> Player Cam",
-            "source_uuid": "ffdddbe1-ece0-4cb7-b42c-b8d0fcfe1b63",
-            "visible": true,
-            "locked": true,
-            "rot": 0,
-            "scale_ref": {
-              "x": 1920,
-              "y": 1080
-            },
-            "align": 5,
-            "bounds_type": 3,
-            "bounds_align": 0,
-            "bounds_crop": false,
-            "crop_left": 0,
-            "crop_top": 0,
-            "crop_right": 0,
-            "crop_bottom": 0,
-            "id": 3,
-            "group_item_backup": false,
-            "pos": {
-              "x": 547,
-              "y": 107
-            },
-            "scale": {
-              "x": 1,
-              "y": 1
-            },
-            "bounds": {
-              "x": 1346,
-              "y": 757
-            },
-            "scale_filter": "disable",
-            "blend_method": "default",
-            "blend_type": "normal",
-            "show_transition": {
-              "duration": 0
-            },
-            "hide_transition": {
-              "duration": 0
-            },
-            "private_settings": {
-              "color": "",
-              "color-preset": 4
-            }
-          },
-          {
-            "name": "[GFX] Spotlight Desk",
-            "source_uuid": "e40e125f-94f1-4265-9d1f-c3bbdf68ff95",
-            "visible": true,
-            "locked": true,
-            "rot": 0,
-            "scale_ref": {
-              "x": 1920,
-              "y": 1080
-            },
-            "align": 5,
-            "bounds_type": 0,
-            "bounds_align": 0,
-            "bounds_crop": false,
-            "crop_left": 0,
-            "crop_top": 0,
-            "crop_right": 0,
-            "crop_bottom": 0,
-            "id": 4,
-            "group_item_backup": false,
-            "pos": {
-              "x": 0,
-              "y": 0
-            },
-            "scale": {
-              "x": 1,
-              "y": 1
-            },
-            "bounds": {
-              "x": 0,
-              "y": 0
-            },
-            "scale_filter": "disable",
-            "blend_method": "default",
-            "blend_type": "normal",
-            "show_transition": {
-              "duration": 0
-            },
-            "hide_transition": {
-              "duration": 0
-            },
-            "private_settings": {
-              "color": "",
-              "color-preset": 7
-            }
-          },
-          {
-            "name": "[GFX] Transition",
-            "source_uuid": "8e44a99a-f7a4-4173-a956-6f482967880d",
-            "visible": false,
-            "locked": true,
-            "rot": 0,
-            "scale_ref": {
-              "x": 1920,
-              "y": 1080
-            },
-            "align": 5,
-            "bounds_type": 2,
-            "bounds_align": 0,
-            "bounds_crop": false,
-            "crop_left": 0,
-            "crop_top": 0,
-            "crop_right": 0,
-            "crop_bottom": 0,
-            "id": 5,
-            "group_item_backup": false,
-            "pos": {
-              "x": 0,
-              "y": 0
-            },
-            "scale": {
-              "x": 1,
-              "y": 1
-            },
-            "bounds": {
-              "x": 1920,
-              "y": 1080
-            },
-            "scale_filter": "disable",
-            "blend_method": "default",
-            "blend_type": "normal",
-            "show_transition": {
-              "duration": 0
-            },
-            "hide_transition": {
-              "duration": 0
-            },
-            "private_settings": {
-              "color": "",
-              "color-preset": 6
-            }
-          }
-        ]
-      },
-      "mixers": 0,
-      "sync": 0,
-      "flags": 0,
-      "volume": 1,
-      "balance": 0.5,
-      "enabled": true,
-      "muted": false,
-      "push-to-mute": false,
-      "push-to-mute-delay": 0,
-      "push-to-talk": false,
-      "push-to-talk-delay": 0,
-      "hotkeys": {
-        "OBSBasic.SelectScene": [],
-        "libobs.show_scene_item.1": [],
-        "libobs.hide_scene_item.1": [],
-        "libobs.show_scene_item.2": [],
-        "libobs.hide_scene_item.2": [],
-        "libobs.show_scene_item.3": [],
-        "libobs.hide_scene_item.3": [],
-        "libobs.show_scene_item.4": [],
-        "libobs.hide_scene_item.4": [],
-        "libobs.show_scene_item.5": [],
-        "libobs.hide_scene_item.5": []
-      },
-      "deinterlace_mode": 0,
-      "deinterlace_field_order": 0,
-      "monitoring_type": 0,
-      "private_settings": {
-        "show_in_multiview": true,
-        "transition_duration": 300
-      },
-      "canvas_uuid": "6c69626f-6273-4c00-9d88-c5136d61696e",
-      "color": 3208970052
-    },
-    {
-      "prev_ver": 536936450,
       "name": "Interview Desk",
-      "uuid": "d226285c-2bb3-45f7-bcb6-5e786662a751",
+      "uuid": "36cddeb6-ed03-4e23-8302-56a1008b52f2",
       "id": "scene",
       "versioned_id": "scene",
       "settings": {
         "custom_size": false,
-        "id_counter": 6,
+        "id_counter": 7,
         "items": [
           {
             "name": "Background Loop",
-            "source_uuid": "4b262a31-20d2-4aa3-8c22-ccd760e7d12d",
+            "source_uuid": "ee1d0c9f-9582-48bf-8b93-2af80f8e1e78",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -7001,7 +6440,7 @@
           },
           {
             "name": "=> Caster 1 Cam",
-            "source_uuid": "0f497cb8-50e3-4a90-83a7-eae45754e886",
+            "source_uuid": "f0510289-459d-463e-a391-31adbed8fc6a",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -7047,7 +6486,7 @@
           },
           {
             "name": "=> Player Cam",
-            "source_uuid": "ffdddbe1-ece0-4cb7-b42c-b8d0fcfe1b63",
+            "source_uuid": "185f35a1-354c-43f3-92d0-fae12bdd4810",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -7093,7 +6532,7 @@
           },
           {
             "name": "[GFX] Interview Desk",
-            "source_uuid": "5f94afcc-ac8f-432e-a078-7aed90d0e2aa",
+            "source_uuid": "a8bfddff-cf86-4b2b-ba91-6153d6a8fe1e",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -7138,9 +6577,9 @@
             }
           },
           {
-            "name": "[GFX] Transition",
-            "source_uuid": "8e44a99a-f7a4-4173-a956-6f482967880d",
-            "visible": false,
+            "name": "[GFX] Live Graphics (Push Live)",
+            "source_uuid": "e2737f9e-cd96-46f5-bc8d-a154b1bafe78",
+            "visible": true,
             "locked": true,
             "rot": 0,
             "scale_ref": {
@@ -7156,6 +6595,52 @@
             "crop_right": 0,
             "crop_bottom": 0,
             "id": 5,
+            "group_item_backup": false,
+            "pos": {
+              "x": 0,
+              "y": 0
+            },
+            "scale": {
+              "x": 1,
+              "y": 1
+            },
+            "bounds": {
+              "x": 1920,
+              "y": 1080
+            },
+            "scale_filter": "disable",
+            "blend_method": "default",
+            "blend_type": "normal",
+            "show_transition": {
+              "duration": 0
+            },
+            "hide_transition": {
+              "duration": 0
+            },
+            "private_settings": {
+              "color": "",
+              "color-preset": 7
+            }
+          },
+          {
+            "name": "[GFX] Transition",
+            "source_uuid": "21754119-2748-4037-8f57-82ecae58c8cb",
+            "visible": false,
+            "locked": true,
+            "rot": 0,
+            "scale_ref": {
+              "x": 1920,
+              "y": 1080
+            },
+            "align": 5,
+            "bounds_type": 2,
+            "bounds_align": 0,
+            "bounds_crop": false,
+            "crop_left": 0,
+            "crop_top": 0,
+            "crop_right": 0,
+            "crop_bottom": 0,
+            "id": 6,
             "group_item_backup": false,
             "pos": {
               "x": 0,
@@ -7207,7 +6692,9 @@
         "libobs.show_scene_item.4": [],
         "libobs.hide_scene_item.4": [],
         "libobs.show_scene_item.5": [],
-        "libobs.hide_scene_item.5": []
+        "libobs.hide_scene_item.5": [],
+        "libobs.show_scene_item.6": [],
+        "libobs.hide_scene_item.6": []
       },
       "deinterlace_mode": 0,
       "deinterlace_field_order": 0,
@@ -7222,16 +6709,16 @@
     {
       "prev_ver": 536936450,
       "name": "VS / Head-to-Head",
-      "uuid": "07121eff-5451-4445-9886-7987b93e7cb1",
+      "uuid": "729e4be3-3f1a-4f0f-8f20-be72c68598f9",
       "id": "scene",
       "versioned_id": "scene",
       "settings": {
         "custom_size": false,
-        "id_counter": 6,
+        "id_counter": 7,
         "items": [
           {
             "name": "Background Loop",
-            "source_uuid": "4b262a31-20d2-4aa3-8c22-ccd760e7d12d",
+            "source_uuid": "ee1d0c9f-9582-48bf-8b93-2af80f8e1e78",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -7277,7 +6764,7 @@
           },
           {
             "name": "=> Caster 1 Cam",
-            "source_uuid": "0f497cb8-50e3-4a90-83a7-eae45754e886",
+            "source_uuid": "f0510289-459d-463e-a391-31adbed8fc6a",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -7323,7 +6810,7 @@
           },
           {
             "name": "=> Caster 2 Cam",
-            "source_uuid": "98984bcd-86af-44d1-af75-a8fbeaceb66d",
+            "source_uuid": "8aec6c29-c53c-46fb-9ab7-b260cfc139dd",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -7369,7 +6856,7 @@
           },
           {
             "name": "[GFX] Interview",
-            "source_uuid": "9539ef0d-5e19-4c83-a665-c8eb480f79df",
+            "source_uuid": "699a6fe3-d6ab-46f5-a4e1-822dae2bf413",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -7414,9 +6901,9 @@
             }
           },
           {
-            "name": "[GFX] Transition",
-            "source_uuid": "8e44a99a-f7a4-4173-a956-6f482967880d",
-            "visible": false,
+            "name": "[GFX] Live Graphics (Push Live)",
+            "source_uuid": "e2737f9e-cd96-46f5-bc8d-a154b1bafe78",
+            "visible": true,
             "locked": true,
             "rot": 0,
             "scale_ref": {
@@ -7432,6 +6919,52 @@
             "crop_right": 0,
             "crop_bottom": 0,
             "id": 5,
+            "group_item_backup": false,
+            "pos": {
+              "x": 0,
+              "y": 0
+            },
+            "scale": {
+              "x": 1,
+              "y": 1
+            },
+            "bounds": {
+              "x": 1920,
+              "y": 1080
+            },
+            "scale_filter": "disable",
+            "blend_method": "default",
+            "blend_type": "normal",
+            "show_transition": {
+              "duration": 0
+            },
+            "hide_transition": {
+              "duration": 0
+            },
+            "private_settings": {
+              "color": "",
+              "color-preset": 7
+            }
+          },
+          {
+            "name": "[GFX] Transition",
+            "source_uuid": "21754119-2748-4037-8f57-82ecae58c8cb",
+            "visible": false,
+            "locked": true,
+            "rot": 0,
+            "scale_ref": {
+              "x": 1920,
+              "y": 1080
+            },
+            "align": 5,
+            "bounds_type": 2,
+            "bounds_align": 0,
+            "bounds_crop": false,
+            "crop_left": 0,
+            "crop_top": 0,
+            "crop_right": 0,
+            "crop_bottom": 0,
+            "id": 6,
             "group_item_backup": false,
             "pos": {
               "x": 0,
@@ -7483,7 +7016,9 @@
         "libobs.show_scene_item.4": [],
         "libobs.hide_scene_item.4": [],
         "libobs.show_scene_item.5": [],
-        "libobs.hide_scene_item.5": []
+        "libobs.hide_scene_item.5": [],
+        "libobs.show_scene_item.6": [],
+        "libobs.hide_scene_item.6": []
       },
       "deinterlace_mode": 0,
       "deinterlace_field_order": 0,
@@ -7497,439 +7032,8 @@
     },
     {
       "prev_ver": 536936450,
-      "name": "═══  POST-GAME  ═══",
-      "uuid": "58179c1d-4acf-48df-b539-a12703a57e2d",
-      "id": "scene",
-      "versioned_id": "scene",
-      "settings": {
-        "custom_size": false,
-        "id_counter": 1,
-        "items": []
-      },
-      "mixers": 0,
-      "sync": 0,
-      "flags": 0,
-      "volume": 1,
-      "balance": 0.5,
-      "enabled": true,
-      "muted": false,
-      "push-to-mute": false,
-      "push-to-mute-delay": 0,
-      "push-to-talk": false,
-      "push-to-talk-delay": 0,
-      "hotkeys": {
-        "OBSBasic.SelectScene": []
-      },
-      "deinterlace_mode": 0,
-      "deinterlace_field_order": 0,
-      "monitoring_type": 0,
-      "private_settings": {
-        "show_in_multiview": false,
-        "transition_duration": 300
-      },
-      "canvas_uuid": "6c69626f-6273-4c00-9d88-c5136d61696e",
-      "color": 3221225267
-    },
-    {
-      "prev_ver": 536936450,
-      "name": "Post-Game (Winner)",
-      "uuid": "1cf02e0c-f664-4dac-93e7-fecd2f24efdd",
-      "id": "scene",
-      "versioned_id": "scene",
-      "settings": {
-        "custom_size": false,
-        "id_counter": 3,
-        "items": [
-          {
-            "name": "Background Loop",
-            "source_uuid": "4b262a31-20d2-4aa3-8c22-ccd760e7d12d",
-            "visible": true,
-            "locked": true,
-            "rot": 0,
-            "scale_ref": {
-              "x": 1920,
-              "y": 1080
-            },
-            "align": 5,
-            "bounds_type": 0,
-            "bounds_align": 0,
-            "bounds_crop": false,
-            "crop_left": 0,
-            "crop_top": 0,
-            "crop_right": 0,
-            "crop_bottom": 0,
-            "id": 1,
-            "group_item_backup": false,
-            "pos": {
-              "x": 0,
-              "y": 0
-            },
-            "scale": {
-              "x": 1,
-              "y": 1
-            },
-            "bounds": {
-              "x": 0,
-              "y": 0
-            },
-            "scale_filter": "disable",
-            "blend_method": "default",
-            "blend_type": "normal",
-            "show_transition": {
-              "duration": 0
-            },
-            "hide_transition": {
-              "duration": 0
-            },
-            "private_settings": {
-              "color": "",
-              "color-preset": 5
-            }
-          },
-          {
-            "name": "[GFX] Winner",
-            "source_uuid": "15193c85-2f57-4f26-beb9-f1bda5c5a94e",
-            "visible": true,
-            "locked": true,
-            "rot": 0,
-            "scale_ref": {
-              "x": 1920,
-              "y": 1080
-            },
-            "align": 5,
-            "bounds_type": 2,
-            "bounds_align": 0,
-            "bounds_crop": false,
-            "crop_left": 0,
-            "crop_top": 0,
-            "crop_right": 0,
-            "crop_bottom": 0,
-            "id": 2,
-            "group_item_backup": false,
-            "pos": {
-              "x": 0,
-              "y": 0
-            },
-            "scale": {
-              "x": 1,
-              "y": 1
-            },
-            "bounds": {
-              "x": 1920,
-              "y": 1080
-            },
-            "scale_filter": "disable",
-            "blend_method": "default",
-            "blend_type": "normal",
-            "show_transition": {
-              "duration": 0
-            },
-            "hide_transition": {
-              "duration": 0
-            },
-            "private_settings": {
-              "color": "",
-              "color-preset": 7
-            }
-          }
-        ]
-      },
-      "mixers": 0,
-      "sync": 0,
-      "flags": 0,
-      "volume": 1,
-      "balance": 0.5,
-      "enabled": true,
-      "muted": false,
-      "push-to-mute": false,
-      "push-to-mute-delay": 0,
-      "push-to-talk": false,
-      "push-to-talk-delay": 0,
-      "hotkeys": {
-        "OBSBasic.SelectScene": [],
-        "libobs.show_scene_item.1": [],
-        "libobs.hide_scene_item.1": [],
-        "libobs.show_scene_item.2": [],
-        "libobs.hide_scene_item.2": []
-      },
-      "deinterlace_mode": 0,
-      "deinterlace_field_order": 0,
-      "monitoring_type": 0,
-      "private_settings": {
-        "show_in_multiview": true,
-        "transition_duration": 500
-      },
-      "canvas_uuid": "6c69626f-6273-4c00-9d88-c5136d61696e",
-      "color": 3221225267
-    },
-    {
-      "prev_ver": 536936450,
-      "name": "Team 1 Win",
-      "uuid": "8bce19bd-6818-4b41-96fd-c23eff603b07",
-      "id": "scene",
-      "versioned_id": "scene",
-      "settings": {
-        "custom_size": false,
-        "id_counter": 3,
-        "items": [
-          {
-            "name": "Background Loop",
-            "source_uuid": "4b262a31-20d2-4aa3-8c22-ccd760e7d12d",
-            "visible": true,
-            "locked": true,
-            "rot": 0,
-            "scale_ref": {
-              "x": 1920,
-              "y": 1080
-            },
-            "align": 5,
-            "bounds_type": 0,
-            "bounds_align": 0,
-            "bounds_crop": false,
-            "crop_left": 0,
-            "crop_top": 0,
-            "crop_right": 0,
-            "crop_bottom": 0,
-            "id": 1,
-            "group_item_backup": false,
-            "pos": {
-              "x": 0,
-              "y": 0
-            },
-            "scale": {
-              "x": 1,
-              "y": 1
-            },
-            "bounds": {
-              "x": 0,
-              "y": 0
-            },
-            "scale_filter": "disable",
-            "blend_method": "default",
-            "blend_type": "normal",
-            "show_transition": {
-              "duration": 0
-            },
-            "hide_transition": {
-              "duration": 0
-            },
-            "private_settings": {
-              "color": "",
-              "color-preset": 5
-            }
-          },
-          {
-            "name": "[GFX] Team 1 Winner",
-            "source_uuid": "6750aa6f-e4a4-4b6c-90bd-6b654c63359f",
-            "visible": true,
-            "locked": true,
-            "rot": 0,
-            "scale_ref": {
-              "x": 1920,
-              "y": 1080
-            },
-            "align": 5,
-            "bounds_type": 2,
-            "bounds_align": 0,
-            "bounds_crop": false,
-            "crop_left": 0,
-            "crop_top": 0,
-            "crop_right": 0,
-            "crop_bottom": 0,
-            "id": 2,
-            "group_item_backup": false,
-            "pos": {
-              "x": 0,
-              "y": 0
-            },
-            "scale": {
-              "x": 1,
-              "y": 1
-            },
-            "bounds": {
-              "x": 1920,
-              "y": 1080
-            },
-            "scale_filter": "disable",
-            "blend_method": "default",
-            "blend_type": "normal",
-            "show_transition": {
-              "duration": 0
-            },
-            "hide_transition": {
-              "duration": 0
-            },
-            "private_settings": {
-              "color": "",
-              "color-preset": 7
-            }
-          }
-        ]
-      },
-      "mixers": 0,
-      "sync": 0,
-      "flags": 0,
-      "volume": 1,
-      "balance": 0.5,
-      "enabled": true,
-      "muted": false,
-      "push-to-mute": false,
-      "push-to-mute-delay": 0,
-      "push-to-talk": false,
-      "push-to-talk-delay": 0,
-      "hotkeys": {
-        "OBSBasic.SelectScene": [],
-        "libobs.show_scene_item.1": [],
-        "libobs.hide_scene_item.1": [],
-        "libobs.show_scene_item.2": [],
-        "libobs.hide_scene_item.2": []
-      },
-      "deinterlace_mode": 0,
-      "deinterlace_field_order": 0,
-      "monitoring_type": 0,
-      "private_settings": {
-        "show_in_multiview": true,
-        "transition_duration": 500
-      },
-      "canvas_uuid": "6c69626f-6273-4c00-9d88-c5136d61696e",
-      "color": 3221225267
-    },
-    {
-      "prev_ver": 536936450,
-      "name": "Team 2 Win",
-      "uuid": "a49a6e5c-64c7-40e6-9c1d-da7fa0b02e8d",
-      "id": "scene",
-      "versioned_id": "scene",
-      "settings": {
-        "custom_size": false,
-        "id_counter": 3,
-        "items": [
-          {
-            "name": "Background Loop",
-            "source_uuid": "4b262a31-20d2-4aa3-8c22-ccd760e7d12d",
-            "visible": true,
-            "locked": true,
-            "rot": 0,
-            "scale_ref": {
-              "x": 1920,
-              "y": 1080
-            },
-            "align": 5,
-            "bounds_type": 0,
-            "bounds_align": 0,
-            "bounds_crop": false,
-            "crop_left": 0,
-            "crop_top": 0,
-            "crop_right": 0,
-            "crop_bottom": 0,
-            "id": 1,
-            "group_item_backup": false,
-            "pos": {
-              "x": 0,
-              "y": 0
-            },
-            "scale": {
-              "x": 1,
-              "y": 1
-            },
-            "bounds": {
-              "x": 0,
-              "y": 0
-            },
-            "scale_filter": "disable",
-            "blend_method": "default",
-            "blend_type": "normal",
-            "show_transition": {
-              "duration": 0
-            },
-            "hide_transition": {
-              "duration": 0
-            },
-            "private_settings": {
-              "color": "",
-              "color-preset": 5
-            }
-          },
-          {
-            "name": "[GFX] Team 2 Winner",
-            "source_uuid": "7f448069-1476-4b4e-85c7-6aed45abefe5",
-            "visible": true,
-            "locked": true,
-            "rot": 0,
-            "scale_ref": {
-              "x": 1920,
-              "y": 1080
-            },
-            "align": 5,
-            "bounds_type": 2,
-            "bounds_align": 0,
-            "bounds_crop": false,
-            "crop_left": 0,
-            "crop_top": 0,
-            "crop_right": 0,
-            "crop_bottom": 0,
-            "id": 2,
-            "group_item_backup": false,
-            "pos": {
-              "x": 0,
-              "y": 0
-            },
-            "scale": {
-              "x": 1,
-              "y": 1
-            },
-            "bounds": {
-              "x": 1920,
-              "y": 1080
-            },
-            "scale_filter": "disable",
-            "blend_method": "default",
-            "blend_type": "normal",
-            "show_transition": {
-              "duration": 0
-            },
-            "hide_transition": {
-              "duration": 0
-            },
-            "private_settings": {
-              "color": "",
-              "color-preset": 7
-            }
-          }
-        ]
-      },
-      "mixers": 0,
-      "sync": 0,
-      "flags": 0,
-      "volume": 1,
-      "balance": 0.5,
-      "enabled": true,
-      "muted": false,
-      "push-to-mute": false,
-      "push-to-mute-delay": 0,
-      "push-to-talk": false,
-      "push-to-talk-delay": 0,
-      "hotkeys": {
-        "OBSBasic.SelectScene": [],
-        "libobs.show_scene_item.1": [],
-        "libobs.hide_scene_item.1": [],
-        "libobs.show_scene_item.2": [],
-        "libobs.hide_scene_item.2": []
-      },
-      "deinterlace_mode": 0,
-      "deinterlace_field_order": 0,
-      "monitoring_type": 0,
-      "private_settings": {
-        "show_in_multiview": true,
-        "transition_duration": 500
-      },
-      "canvas_uuid": "6c69626f-6273-4c00-9d88-c5136d61696e",
-      "color": 3221225267
-    },
-    {
-      "prev_ver": 536936450,
       "name": "═══  UTILITY  ═══",
-      "uuid": "55d1c9dc-0eee-411e-8bac-49997160e679",
+      "uuid": "fe37943b-6b47-4cd8-aee3-7084393231e6",
       "id": "scene",
       "versioned_id": "scene",
       "settings": {
@@ -7964,7 +7068,7 @@
     {
       "prev_ver": 536936450,
       "name": "=> Host Cam",
-      "uuid": "386fe953-ff33-44b7-8518-9fe19c3c59c0",
+      "uuid": "6badb989-24e7-4f34-a0fb-2c4a0af65fe6",
       "id": "scene",
       "versioned_id": "scene",
       "settings": {
@@ -7973,7 +7077,7 @@
         "items": [
           {
             "name": "[CAM] Host (slot 3)",
-            "source_uuid": "530ee85d-c220-4803-bd6d-ab32c2908cda",
+            "source_uuid": "5d69fd24-3db7-411f-a700-6c168c947e1b",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -8045,7 +7149,7 @@
     {
       "prev_ver": 536936450,
       "name": "=> Caster 1 Cam",
-      "uuid": "0f497cb8-50e3-4a90-83a7-eae45754e886",
+      "uuid": "f0510289-459d-463e-a391-31adbed8fc6a",
       "id": "scene",
       "versioned_id": "scene",
       "settings": {
@@ -8054,7 +7158,7 @@
         "items": [
           {
             "name": "[CAM] Caster 1 (slot 1)",
-            "source_uuid": "3488f878-a353-4d1e-9224-2abfc6cea7b1",
+            "source_uuid": "a595fef5-39f4-407a-9499-8599599b8851",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -8126,7 +7230,7 @@
     {
       "prev_ver": 536936450,
       "name": "=> Caster 2 Cam",
-      "uuid": "98984bcd-86af-44d1-af75-a8fbeaceb66d",
+      "uuid": "8aec6c29-c53c-46fb-9ab7-b260cfc139dd",
       "id": "scene",
       "versioned_id": "scene",
       "settings": {
@@ -8135,7 +7239,7 @@
         "items": [
           {
             "name": "[CAM] Caster 2 (slot 2)",
-            "source_uuid": "ee627cc5-3fcf-4d1a-b407-09128d74087c",
+            "source_uuid": "51d28a6a-9c0e-4702-996a-db50a70c36f6",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -8207,7 +7311,7 @@
     {
       "prev_ver": 536936450,
       "name": "=> Caster 4 Cam",
-      "uuid": "d5a6ae23-27ed-4125-934a-13ac7b112412",
+      "uuid": "dba21657-fd08-41c5-8e39-7fac2a13d374",
       "id": "scene",
       "versioned_id": "scene",
       "settings": {
@@ -8216,7 +7320,7 @@
         "items": [
           {
             "name": "[CAM] Caster 4 (slot 4)",
-            "source_uuid": "d542afd1-aedd-4ca5-9a0d-6100463ebcd8",
+            "source_uuid": "168fad1d-1304-45b6-92c5-2eacda2adb6f",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -8288,7 +7392,7 @@
     {
       "prev_ver": 536936450,
       "name": "=> Player Cam",
-      "uuid": "ffdddbe1-ece0-4cb7-b42c-b8d0fcfe1b63",
+      "uuid": "185f35a1-354c-43f3-92d0-fae12bdd4810",
       "id": "scene",
       "versioned_id": "scene",
       "settings": {
@@ -8297,7 +7401,7 @@
         "items": [
           {
             "name": "[CAM] Player (slot 5)",
-            "source_uuid": "12e0c13e-b821-4409-904a-31dec5775cd1",
+            "source_uuid": "3fae9389-d13d-4bac-84ba-ebf57aec2b61",
             "visible": true,
             "locked": true,
             "rot": 0,

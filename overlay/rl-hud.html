@@ -1139,6 +1139,7 @@ img{display:block;}
              assists, saves, shots, demos, boost, isDemolished, primaryid, isPrimary }
    ═══════════════════════════════════════════════════════════════════════════ */
 const WS_URL = 'ws://' + (location.hostname || 'localhost') + ':3001';   // host-aware: works when the source is loaded from another machine via http://<host>:3000
+const HTTP_BASE = 'http://' + (location.hostname || 'localhost') + ':3000';
 // Team colors — defaults; overridden live by the app's per-team color (teams.*.color).
 let BLUE = '#2f8dff', ORANGE = '#ff7a33';
 const teamOf = p => (Number(p.team) === 1 ? 1 : 0);   // robust: tolerate "1"/1/null
@@ -2410,8 +2411,15 @@ function dispatch(msg){
 }
 
 /* ── websocket ────────────────────────────────────────────────────────────── */
-function connect(){
-  const ws=new WebSocket(WS_URL);
+// The bridge requires a token when LAN-exposed (WS_HOST != loopback) — fetched once from the
+// HTTP API this page was loaded from and cached for reconnects; a no-op on the default loopback bridge.
+let _wsToken=null;
+async function connect(){
+  if (!_wsToken) {
+    try { _wsToken=(await (await fetch(HTTP_BASE + '/api/ws-token')).json()).token||''; }
+    catch(e){ _wsToken=''; }
+  }
+  const ws=new WebSocket(WS_URL + (_wsToken ? ('?token=' + encodeURIComponent(_wsToken)) : ''));
   ws.onopen=()=>{ try{ ws.send(JSON.stringify({type:'register',role:'overlay',page:location.pathname})); }catch(e){} ws.send(JSON.stringify({type:'request_state'})); };
   ws.onmessage=({data})=>{ let msg; try{ msg=JSON.parse(data); }catch{ return; } dispatch(msg); };
   ws.onclose=()=>setTimeout(connect,800);

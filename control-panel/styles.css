@@ -5816,8 +5816,16 @@ span.lg-pl-role { color: var(--muted); }
 .tb-ad-btn:hover { background: #20242d; }
 .tb-ad-btn.tb-ad-play { background: #9147ff; border-color: #9147ff; color: #fff; }
 .tb-ad-btn.tb-ad-play:hover { background: #7d31e8; }
-/* frameless-window drag region punch-through: these are clickable, not window-drag handles */
-.tb-clickable, .tb-ad-area, .tb-ad-area * { -webkit-app-region: no-drag; }
+/* frameless-window drag region punch-through: these are clickable, not window-drag handles.
+   Scoped to the actual clickable stat + the dropdown menu (an interactive overlay) — NOT the
+   whole .tb-ad-area wrapper, which just hugs them tightly anyway and was stealing drag surface
+   from the label/whitespace around them for no reason. */
+.tb-clickable, .tb-ad-menu, .tb-ad-menu * { -webkit-app-region: no-drag; }
+/* Header-wide: drag from anywhere except an actual control — buttons/selects/inputs/links only.
+   Higher-specificity compound selectors, so this wins over the blanket ".prod-header * { drag }"
+   rule below regardless of source order. */
+.prod-header button, .prod-header select, .prod-header input, .prod-header a,
+.prod-header [role="button"] { -webkit-app-region: no-drag; }
 
 /* ── Pre-flight "Go Live" checklist — status checkmark next to the conn bars ── */
 .golive-area { position: relative; display: inline-flex; align-items: center; -webkit-app-region: no-drag; }
@@ -6268,8 +6276,10 @@ body.popout-qrail .qrail-popout-strip { display: none !important; }
 /* ── Discord user area ────────────────────────────────────────────────────── */
 .discord-user-area {
   position: relative; display: inline-flex; align-items: center;
-  -webkit-app-region: no-drag;
+  /* No wrapper-level no-drag here — the login/avatar buttons already opt out via the generic
+     ".prod-header button" rule; the open dropdown is its own no-drag block below. */
 }
+.discord-dropdown, .discord-dropdown * { -webkit-app-region: no-drag; }
 .discord-login-btn {
   display: inline-flex; align-items: center; gap: 6px;
   padding: 0 10px; height: 30px; border-radius: 8px; cursor: pointer;
@@ -6317,7 +6327,10 @@ body.popout-qrail .qrail-popout-strip { display: none !important; }
 .ddd-item-danger:hover { background: rgba(245,101,101,.12); }
 
 /* ── Notification bell ───────────────────────────────────────────────────── */
-.notif-area { position: relative; display: inline-flex; align-items: center; -webkit-app-region: no-drag; }
+/* No wrapper-level no-drag — the bell button opts out via the generic ".prod-header button"
+   rule; the open notification panel is its own no-drag block below. */
+.notif-area { position: relative; display: inline-flex; align-items: center; }
+.notif-dropdown, .notif-dropdown * { -webkit-app-region: no-drag; }
 .notif-btn {
   position: relative; display: inline-flex; align-items: center; justify-content: center;
   width: 30px; height: 30px; border-radius: 8px; cursor: pointer; padding: 0;
@@ -7596,22 +7609,42 @@ tr.lg2-drag-over { outline: 2px solid var(--accent, #4a9eff); outline-offset: -1
    interactive controls are explicitly set back to no-drag (higher specificity wins there). */
 .prod-header { -webkit-app-region: drag; padding-right: 144px; user-select: none; }
 .prod-header * { -webkit-app-region: drag; }
+/* Denylist scoped to ACTUAL controls (and the popups they open), not their wrapper rows — a
+   wrapper like .prod-timer or .conn-signal hugs its own label/whitespace too, and marking the
+   whole wrapper no-drag was quietly eating most of the bar's drag surface. This block is the
+   real, later-loaded source of truth (kept last on purpose) — narrowing it here is what
+   actually matters; anything upstream in the file is redundant with this. */
 .prod-header a, .prod-header a *,
 .prod-header button, .prod-header button *,
 .prod-header select, .prod-header input, .prod-header textarea,
 .prod-header label, .prod-header label *,
-.prod-header .topbar-iconbtn, .prod-header .topbar-iconbtn *,
-.prod-header .prod-timer, .prod-header .prod-timer *,
-.prod-header .conn-signal, .prod-header .conn-signal *,
-.prod-header .tb-conn, .prod-header .tb-conn *,
+.prod-header [role="button"], .prod-header [role="button"] *,
 .prod-header .tb-clickable, .prod-header .tb-clickable *,
-.prod-header .tb-ad-area, .prod-header .tb-ad-area *,
-.prod-header .golive-area, .prod-header .golive-area *,
-.prod-header .notif-area, .prod-header .notif-area *,
-.prod-header .discord-user-area, .prod-header .discord-user-area *,
+.prod-header .tb-ad-menu, .prod-header .tb-ad-menu *,
 .prod-header .game-dd-menu, .prod-header .game-dd-menu *,
+.prod-header .discord-dropdown, .prod-header .discord-dropdown *,
+.prod-header .notif-dropdown, .prod-header .notif-dropdown *,
+/* Electron quirk: -webkit-app-region: drag elements suppress normal mouseenter/mouseleave —
+   the connection-signal tooltip is opened/closed by exactly those JS listeners, so it silently
+   stopped working once this became a drag region. Status bars need real hover, not a drag handle. */
+.prod-header .conn-signal, .prod-header .conn-signal *,
 .prod-header #brand-icon-btn { -webkit-app-region: no-drag; }
+#conn-tooltip, #conn-tooltip * { -webkit-app-region: no-drag; }
 .prod-header .prod-header-label { -webkit-app-region: drag; }
+/* Explicit reinforcement for the brand wordmark + event name/logo pill — plain <img>/<span>s,
+   not covered by any rule above, but calling them out by name/id here removes any doubt. */
+.prod-header .prod-header-brand, .prod-header .prod-header-brand *,
+.prod-header .brand-wordmark,
+.prod-header #ck-chip-event, .prod-header #ck-chip-event *,
+.prod-header #ck-chip-event-logo, .prod-header #ck-chip-event-text { -webkit-app-region: drag; }
+/* Below max size, the header content packs tighter (responsive padding/wrapping) and can eat
+   up most of the gap between elements, so hunting for a gap to grab gets unreliable. A thin,
+   ALWAYS-empty strip pinned to the very top edge — independent of how the rest reflows — gives a
+   guaranteed, known drag spot at any window size. Kept short so it never overlaps real content. */
+.prod-header::before {
+  content: ''; position: absolute; top: 0; left: 0; right: 144px; height: 6px;
+  -webkit-app-region: drag; z-index: 50;
+}
 
 /* ── Transient toasts (showToast) — immediate confirmations; the notification bell keeps history ── */
 #toast-stack {
@@ -7822,6 +7855,17 @@ tr.lg2-drag-over { outline: 2px solid var(--accent, #4a9eff); outline-offset: -1
 .td-chip:hover { color: var(--text); }
 .td-chip.is-active { color: var(--ok); background: rgba(34,197,94,.1); border-color: rgba(34,197,94,.4); }
 .td-chip-flag { width: 16px; height: 11px; object-fit: cover; border-radius: 2px; flex-shrink: 0; box-shadow: 0 0 0 1px rgba(0,0,0,.35); }
+.td-chip-x { margin-left: 4px; opacity: .45; font-weight: 800; line-height: 1; }
+.td-chip:hover .td-chip-x { opacity: 1; color: var(--danger-2); }
+/* Support-crew chips (Show Deck + DCC) — name · role · remove */
+.dcc-support-list { display: flex; flex-wrap: wrap; gap: 6px; }
+.dcc-support-chip { display: inline-flex; align-items: center; gap: 8px; padding: 4px 4px 4px 12px; border-radius: 999px;
+  background: var(--white-a04); border: 1px solid var(--border); }
+.dcc-support-chip .nm { font-size: 11px; font-weight: 700; color: var(--text); }
+.dcc-support-chip .rl { font-size: 9px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.dcc-support-chip .rm { background: none; border: none; cursor: pointer; color: var(--muted); font-size: 15px; line-height: 1; padding: 0 5px; }
+.dcc-support-chip .rm:hover { color: var(--danger-2); }
+.dcc-support-empty { font-size: 11px; color: var(--muted); font-style: italic; }
 
 /* Saved shifts */
 .td-shifts { display: flex; flex-direction: column; gap: 8px; padding-top: 12px; border-top: 1px solid var(--white-a06); }

@@ -1,15 +1,27 @@
 /**
- * NE Broadcast Suite — OBS Scene Collection Generator v3
+ * NE Broadcast Suite — OBS Scene Collection Generator v4
  *
- * Generates the downloadable OBS scene collection that mirrors the suite's overlay set:
- *   • Pre-game / break — Away, Countdown, Map Veto, Draft, Matchup, Team Intros,
- *     Upcoming, Standings, Bracket
+ * Generates the downloadable OBS scene collection that mirrors the suite's overlay set. A
+ * plug-and-play starter template — a brand-new user imports this and everything the app can
+ * push (break screens, standings, bracket, veto, draft, winner, intros, ticker…) already works
+ * with zero manual "add a browser source for X" setup.
+ *
+ *   • [GFX] Live Graphics (Push Live) — ONE dedicated source for gfx.html, the control panel's
+ *     Graphics ▸ Push Live target. It already contains break/countdown, winner, team intro,
+ *     ticker, series score, matchup, map veto, champion draft, spotlight, standings, schedule
+ *     and bracket internally and switches between them live — so it's layered onto every scene
+ *     below instead of each of those needing its own OBS scene. This is the fix for the #1
+ *     onboarding gap: previously NONE of that system was wired into the template at all.
+ *   • Pre-game / break — Intermission (the old Away/Standby + Break/Countdown, which pointed at
+ *     the same file, merged into one), Matchup, Desk Show
  *   • Live — In Game (Game Capture + per-game HUD stack: RL / CS2 / Valorant / Overwatch /
- *     Marvel Rivals), In Game — Cam PIP, In Game — Talent Bar, Replay
+ *     Marvel Rivals) + ticker/sponsor rail, In Game — Cam PIP, In Game — Talent Bar, Replay
  *   • Desk / casters — SingleCam, DuoCam Row, TrioCam Row, Quad Desk, Analyst Desk,
- *     Duo SingleCam, Spotlight Desk, Interview, Post-Game (Winner)
- *   • Utility — => Host/Caster 1/2/4 Cam framing scenes (one VDO.ninja feed each)
- *   • Draggable add-ons (sources only) — Sponsor Banner, Listen-In Captions, Interviewee Cam
+ *     Duo SingleCam, Spotlight Desk, Interview Desk, VS / Head-to-Head
+ *   • Utility — => Host/Caster 1/2/4/Player Cam framing scenes (one VDO.ninja feed each)
+ *   • Draggable add-ons (sources only) — Ticker, Sponsor Rail, Sponsor Banner, Countdown Clock
+ *     Only (just the digits, no title/message — for a custom scene), Listen-In Captions,
+ *     Interviewee Cam
  *
  * CAMERA MODEL (the "holes" in the desk overlays):
  *   combined  (DEFAULT) — each desk overlay embeds the caster cams itself from the
@@ -240,19 +252,23 @@ function generateSceneCollection({
   const gfxCampip    = makeBrowser('[GFX] Cam PIP',        '/campip.html');
   const gfxTalentbar = makeBrowser('[GFX] Talent Bar',     '/talentbar.html');
 
+  // ── Live Graphics Hub — THE dedicated source for everything driven by the control panel's
+  // Graphics ▸ Push Live system (break/countdown, winner, team intro, ticker, series score,
+  // matchup, map veto, champion draft, spotlight, standings, schedule, bracket — gfx.html loads
+  // all of these internally and switches which one shows). One persistent layer, added to
+  // every production scene below — a producer never has to add or hunt down a separate OBS
+  // scene per graphic; whatever they push live in the app just appears, transparent otherwise.
+  const gfxHub = makeBrowser('[GFX] Live Graphics (Push Live)', '/gfx.html');
+
   // ── Full-screen graphic sources ────────────────────────────────────────────
-  const gfxAway        = makeBrowser('[GFX] Away Screen',    '/countdown.html',               { restart: true, shutdown: true });
-  const gfxCountdown   = makeBrowser('[GFX] Countdown',      '/countdown.html',               { restart: true, shutdown: true });
-  const gfxWinner      = makeBrowser('[GFX] Winner',         '/winner.html',                  { restart: true, shutdown: true });
-  const gfxWinTeam1    = makeBrowser('[GFX] Team 1 Winner',  '/winner.html?side=blue',        { restart: true, shutdown: true });
-  const gfxWinTeam2    = makeBrowser('[GFX] Team 2 Winner',  '/winner.html?side=orange',      { restart: true, shutdown: true });
-  const gfxTeam1       = makeBrowser('[GFX] Team 1 Intro',   '/intro.html?side=blue',         { restart: true, shutdown: true });
-  const gfxTeam2       = makeBrowser('[GFX] Team 2 Intro',   '/intro.html?side=orange',       { restart: true, shutdown: true });
-  const gfxMapVeto    = makeBrowser('[GFX] Map Veto',        '/mapscreen.html',         { restart: true, shutdown: true });
-  const gfxDraft      = makeBrowser('[GFX] Draft',           '/draft.html');
-  const gfxBracket    = makeBrowser('[GFX] Bracket',         '/bracket.html');
-  const gfxUpcoming   = makeBrowser('[GFX] Upcoming',        '/schedule.html');
-  const gfxStandings  = makeBrowser('[GFX] Standings',       '/standings.html');
+  // Away/Standby and Break (Countdown) used to be two near-duplicate scenes pointed at the same
+  // file — consolidated into one Intermission scene below. Winner, Team Intro, Map Veto, Draft,
+  // Standings, Bracket and Upcoming no longer need their own browser source at all — gfxHub
+  // above already covers them; push the one you want from the Graphics control panel.
+  const gfxIntermission = makeBrowser('[GFX] Intermission',         '/countdown.html',         { restart: true, shutdown: true });
+  // ?timer=1 — the same countdown.html with just the clock digits (no title/message chrome), for
+  // producers who want to drop a bare countdown onto a scene they've built themselves.
+  const gfxClockOnly    = makeBrowser('[GFX] Countdown Clock Only', '/countdown.html?timer=1', { restart: true, shutdown: true });
   const gfxReplay     = makeBrowser('[GFX] Replay',          '/replay.html',            { restart: true, shutdown: true });
   const gfxTransition = makeBrowser('[GFX] Transition',      '/transitionbgg.html',     { restart: true, shutdown: true });
 
@@ -281,39 +297,48 @@ function generateSceneCollection({
   const scenePlayerCam  = camScene('=> Player Cam',   vdoPlayer);
 
   // ── Generic helpers ─────────────────────────────────────────────────────────
-  // Full-screen graphic over the looping background.
-  function simpleScene(sceneName, gfxSrc, transMs, multiview = true, color = 0) {
+  // Full-screen graphic over the looping background. gfxHub always rides on top so whatever's
+  // pushed live from the Graphics control panel shows here too, above the scene's own graphic —
+  // `extras` (ticker/sponsor rail, etc.) sit above that, topmost.
+  function simpleScene(sceneName, gfxSrc, transMs, multiview = true, color = 0, extras = []) {
     const il = itemList();
     il.add(bgLoop.name,  bgLoop.uuid,  { ...FULL,         colorPreset: 5 });
-    il.add(gfxSrc.name,  gfxSrc.uuid,  { ...FULL_STRETCH, colorPreset: 7 });
+    if (gfxSrc) il.add(gfxSrc.name,  gfxSrc.uuid,  { ...FULL_STRETCH, colorPreset: 7 });
+    il.add(gfxHub.name, gfxHub.uuid, { ...FULL_STRETCH, colorPreset: 7 });
+    extras.forEach(x => il.add(x.name, x.uuid, { ...FULL_STRETCH, colorPreset: 7 }));
     return makeScene(sceneName, il.get(), { transitionMs: transMs, showInMultiview: multiview, color });
   }
 
-  // Caster desk: background → cam utility scenes (behind holes) → overlay graphic → transition.
-  // The overlay HTML runs with ?cams=off so its cam holes are transparent; the utility scenes
-  // show through. Users can swap the browser source in any => Cam scene for Discord, NDI, etc.
-  function deskScene(sceneName, gfxSrc, addCams, color = 0) {
+  // Caster desk: background → cam utility scenes (behind holes) → overlay graphic → gfxHub
+  // (Push Live graphics) → extras → transition. The overlay HTML runs with ?cams=off so its cam
+  // holes are transparent; the utility scenes show through. Users can swap the browser source in
+  // any => Cam scene for Discord, NDI, etc.
+  function deskScene(sceneName, gfxSrc, addCams, color = 0, extras = []) {
     const il = itemList();
     il.add(bgLoop.name, bgLoop.uuid, { ...FULL, colorPreset: 5 });
     if (addCams) addCams(il);
     il.add(gfxSrc.name, gfxSrc.uuid, { ...FULL, colorPreset: 7 });
+    il.add(gfxHub.name, gfxHub.uuid, { ...FULL_STRETCH, colorPreset: 7 });
+    extras.forEach(x => il.add(x.name, x.uuid, { ...FULL_STRETCH, colorPreset: 7 }));
     il.add(gfxTransition.name, gfxTransition.uuid, { ...FULL_STRETCH, visible: false, colorPreset: 6 });
     return makeScene(sceneName, il.get(), { transitionMs: 300, color });
   }
 
-  // Gameplay scene: Game Capture on the bottom, a stack of game HUDs (only `active` shown),
-  // plus optional extra overlay layers (PIP cams / talent bar) on top.
+  // Gameplay scene: Game Capture on the bottom, a stack of game HUDs (only `active` shown), then
+  // gfxHub (Push Live graphics), then optional extra overlay layers (PIP cams / talent bar /
+  // ticker / sponsor rail) on top.
   function gameScene(sceneName, activeHud, extras = []) {
     const huds = [gfxRlHud, gfxCs2Hud, gfxValHud, gfxLolHud, gfxOwHud, gfxMrHud];
     const il = itemList();
     il.add(gameCapture.name, gameCapture.uuid, { locked: false, ...FULL });
     huds.forEach(h => il.add(h.name, h.uuid, { locked: false, visible: h === activeHud, ...FULL, showMs: 300, hideMs: 300 }));
+    il.add(gfxHub.name, gfxHub.uuid, { ...FULL_STRETCH, colorPreset: 7 });
     extras.forEach(x => il.add(x.name, x.uuid, { ...FULL, colorPreset: 7 }));
     return makeScene(sceneName, il.get(), { transitionMs: 500 });
   }
 
   // ── Gameplay scenes ──────────────────────────────────────────────────────
-  const sceneInGame   = gameScene('In Game', gfxRlHud);                    // un-hide your game's HUD
+  const sceneInGame   = gameScene('In Game', gfxRlHud, [gfxTicker, gfxSponsorRail]);   // un-hide your game's HUD
   const scenePipCams  = gameScene('In Game — Cam PIP', gfxRlHud, [gfxCampip]);
   const sceneTalent   = gameScene('In Game — Talent Bar', gfxRlHud, [gfxTalentbar]);
   const sceneReplay   = simpleScene('Replay', gfxReplay, 500, false, SCENE_COLORS.gameplay);
@@ -412,42 +437,26 @@ function generateSceneCollection({
     il.add(sceneCaster2Cam.name, sceneCaster2Cam.uuid, frame(808, 23, 767, 868));
   }, SCENE_COLORS.pregame);
 
-  // ── Pre-game / break / standalone graphic scenes ──────────────────────────
-  const sceneAway      = simpleScene('Away / Standby',     gfxAway,      500, true,  SCENE_COLORS.pregame);
-  const sceneCountdown = simpleScene('Break (Countdown)',  gfxCountdown, 300, true,  SCENE_COLORS.pregame);
-  const sceneMapVeto   = simpleScene('Map Veto',           gfxMapVeto,   500, true,  SCENE_COLORS.pregame);
-  const sceneDraft     = simpleScene('Draft',              gfxDraft,     300, true,  SCENE_COLORS.pregame);
-  const sceneTeam1     = simpleScene('Team 1 Intro',       gfxTeam1,     500, false, SCENE_COLORS.pregame);
-  const sceneTeam2     = simpleScene('Team 2 Intro',       gfxTeam2,     500, false, SCENE_COLORS.pregame);
-  const sceneUpcoming  = simpleScene('Upcoming',           gfxUpcoming,  300, true,  SCENE_COLORS.pregame);
-  const sceneStandings = simpleScene('Standings',          gfxStandings, 300, true,  SCENE_COLORS.pregame);
-  const sceneBracket   = simpleScene('Bracket',            gfxBracket,   300, true,  SCENE_COLORS.pregame);
-  // Post-game winner scenes — side param pre-selects which team side winner.html highlights.
-  const sceneWinner    = simpleScene('Post-Game (Winner)', gfxWinner,    500, true,  SCENE_COLORS.postgame);
-  const sceneTeam1Win  = simpleScene('Team 1 Win',         gfxWinTeam1,  500, true,  SCENE_COLORS.postgame);
-  const sceneTeam2Win  = simpleScene('Team 2 Win',         gfxWinTeam2,  500, true,  SCENE_COLORS.postgame);
+  // ── Pre-game / break scene ─────────────────────────────────────────────────
+  // ONE Intermission scene replaces the old Away/Standby + Break (Countdown) pair (both pointed
+  // at the same file anyway) AND every other former standalone graphic scene — Team Intro, Map
+  // Veto, Draft, Upcoming, Standings, Bracket, Winner — since gfxHub (layered right on this
+  // scene by simpleScene()) already shows all of those; pick one from the Graphics control
+  // panel's Push Live instead of hopping OBS scenes. Ticker + sponsor rail ride along here too.
+  const sceneIntermission = simpleScene('Intermission', gfxIntermission, 300, true, SCENE_COLORS.pregame, [gfxTicker, gfxSponsorRail]);
 
   // Category dividers — blank separator scenes that group the list in OBS (no scene folders in OBS).
   const dividerPre      = makeScene('═══  PRE-GAME  ═══',   [], { showInMultiview: false, color: SCENE_COLORS.pregame  });
   const dividerLive     = makeScene('═══  GAMEPLAY  ═══',   [], { showInMultiview: false, color: SCENE_COLORS.gameplay });
   const dividerDesk     = makeScene('═══  DESK  ═══',       [], { showInMultiview: false, color: SCENE_COLORS.desk     });
-  const dividerPostGame = makeScene('═══  POST-GAME  ═══',  [], { showInMultiview: false, color: SCENE_COLORS.postgame });
   const dividerUtil     = makeScene('═══  UTILITY  ═══',    [], { showInMultiview: false, color: SCENE_COLORS.utility  });
 
   // ── Scene order ────────────────────────────────────────────────────────────
   const allScenes = [
-    // Pre-game / break / graphics
+    // Pre-game / break — Push Live from the Graphics control panel drives the actual content
     dividerPre,
-    sceneAway,
-    sceneCountdown,
+    sceneIntermission,
     sceneMatchup,
-    sceneTeam1,
-    sceneTeam2,
-    sceneMapVeto,
-    sceneDraft,
-    sceneUpcoming,
-    sceneStandings,
-    sceneBracket,
     scenePreshow,
     // Live gameplay
     dividerLive,
@@ -466,11 +475,6 @@ function generateSceneCollection({
     sceneSpotlight,
     sceneInterviewDesk,
     sceneInterview,
-    // Post-game
-    dividerPostGame,
-    sceneWinner,
-    sceneTeam1Win,
-    sceneTeam2Win,
     // Utility — cam framing scenes
     dividerUtil,
     sceneHostCam,
@@ -484,11 +488,11 @@ function generateSceneCollection({
   const sharedSources = [
     bgLoop, gameCapture,
     vdoHost, vdoCaster1, vdoCaster2, vdoCaster4, vdoPlayer,
+    gfxHub,
     gfxRlHud, gfxCs2Hud, gfxValHud, gfxLolHud, gfxOwHud, gfxMrHud,
     gfxSingle, gfxDuoRow, gfxTrioRow, gfxDuoSingle, gfxAnalyst, gfxQuad, gfxSpotlight, gfxInterview, gfxInterviewDesk, gfxPreshow,
     gfxMatchup, gfxCampip, gfxTalentbar,
-    gfxAway, gfxCountdown, gfxWinner, gfxWinTeam1, gfxWinTeam2, gfxTeam1, gfxTeam2,
-    gfxMapVeto, gfxDraft, gfxBracket, gfxUpcoming, gfxStandings, gfxReplay, gfxTransition,
+    gfxIntermission, gfxClockOnly, gfxReplay, gfxTransition,
     gfxTicker, gfxSponsorRail, gfxSponsor, gfxListenIn, gfxIntCam,
   ];
 
@@ -509,8 +513,8 @@ function generateSceneCollection({
     AuxAudioDevice1:     audioCap('Mic/Aux',        'wasapi_input_capture'),
     groups: [],
     scene_order: allScenes.map(s => ({ name: s.name })),
-    current_scene:         'In Game',
-    current_program_scene: 'In Game',
+    current_scene:         'Intermission',
+    current_program_scene: 'Intermission',
     current_transition:    'Fade',
     transition_duration:   300,
     transitions: [

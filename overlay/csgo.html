@@ -1925,8 +1925,15 @@ function render(cs){
 // last-seen values forward so light broadcasts don't wipe the sponsor rail/banner mid-show
 // (same contract scene-base.js implements for base scenes; pattern from rl-hud.html).
 const _lib = { brand: null, banner: null };
-function connect(){
-  const sock = new WebSocket('ws://' + (location.hostname || 'localhost') + ':3001');
+// The bridge requires a token when LAN-exposed (WS_HOST != loopback) — fetched once from the
+// HTTP API this page was loaded from and cached for reconnects; a no-op on the default loopback bridge.
+let _wsToken = null;
+async function connect(){
+  if (!_wsToken) {
+    try { _wsToken = (await (await fetch('http://' + (location.hostname || 'localhost') + ':3000/api/ws-token')).json()).token || ''; }
+    catch (e) { _wsToken = ''; }
+  }
+  const sock = new WebSocket('ws://' + (location.hostname || 'localhost') + ':3001' + (_wsToken ? ('?token=' + encodeURIComponent(_wsToken)) : ''));
   sock.onopen = () => sock.send(JSON.stringify({ type: 'request_state' }));
   sock.onmessage = ({ data }) => {
     let msg; try { msg = JSON.parse(data); } catch { return; }

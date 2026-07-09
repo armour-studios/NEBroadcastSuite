@@ -47,20 +47,10 @@ html, body {
   position: absolute; inset: 0;
   display: flex; align-items: center; justify-content: center;
   padding: 48px 76px 78px;
-  background:
-    radial-gradient(ellipse 80% 55% at 50% -6%, color-mix(in srgb, var(--accent) 26%, transparent) 0%, rgba(0,0,0,0) 55%),
-    radial-gradient(ellipse 55% 45% at 100% 108%, color-mix(in srgb, var(--accent-2) 13%, transparent) 0%, rgba(0,0,0,0) 55%),
-    linear-gradient(180deg, #090b10 0%, #0d1017 55%, #090b10 100%);
   opacity: 0; transform: scale(1.015);
   transition: opacity 0.55s ease, transform 0.55s ease;
 }
 .st-stage.show { opacity: 1; transform: scale(1); }
-.st-stage::before {
-  content: ''; position: absolute; inset: 0; pointer-events: none;
-  background-image: repeating-linear-gradient(120deg, rgba(255,255,255,0.015) 0 2px, transparent 2px 52px);
-  -webkit-mask-image: radial-gradient(120% 90% at 50% 35%, #000 0%, transparent 82%);
-  mask-image: radial-gradient(120% 90% at 50% 35%, #000 0%, transparent 82%);
-}
 
 /* ── Scale wrapper — natural size, scaled to fill ── */
 .st-scale { display: flex; flex-direction: column; align-items: center; gap: 30px;
@@ -83,14 +73,14 @@ html, body {
   /* Whole event name, never truncated — wraps to two lines; fit() rescales if it grows */
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
 }
-.st-subtitle { font-size: 21px; font-weight: 600; letter-spacing: 1px; color: #97a0b4; }
+.st-subtitle { font-size: 21px; font-weight: 600; letter-spacing: 1px; color: rgba(255,255,255,.85); }
 .st-subtitle:empty { display: none; }
 .st-count { flex: 0 0 auto; display: flex; align-items: baseline; gap: 10px; line-height: 1; }
 .st-count b {
   font-family: var(--disp); font-size: 64px; font-weight: 700;
   background: linear-gradient(180deg, #fff, #b9c2d6); -webkit-background-clip: text; background-clip: text; color: transparent;
 }
-.st-count span { font-size: 13px; font-weight: 800; letter-spacing: 3px; text-transform: uppercase; color: #6a7080; }
+.st-count span { font-size: 13px; font-weight: 800; letter-spacing: 3px; text-transform: uppercase; color: rgba(255,255,255,.7); }
 .st-count:empty { display: none; }
 
 /* ── Podium: 2nd | 1st | 3rd ── */
@@ -112,8 +102,8 @@ html, body {
 .st-ped-record { display: flex; align-items: baseline; gap: 12px; }
 .st-ped-wl { font-family: var(--disp); font-size: 30px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .st-ped-wl .w { color: #6ff0a8; } .st-ped-wl .l { color: #f39191; }
-.st-ped-wl .sep { color: #5c6474; font-size: .8em; padding: 0 2px; }
-.st-ped-sub { font-size: 11px; font-weight: 800; letter-spacing: 2.4px; text-transform: uppercase; color: #6a7080; }
+.st-ped-wl .sep { color: rgba(255,255,255,.55); font-size: .8em; padding: 0 2px; }
+.st-ped-sub { font-size: 11px; font-weight: 800; letter-spacing: 2.4px; text-transform: uppercase; color: rgba(255,255,255,.7); }
 .st-ped-pts { font-family: var(--disp); font-size: 30px; font-weight: 700;
   background: linear-gradient(160deg, #ffe9a8, var(--gold)); -webkit-background-clip: text; background-clip: text; color: transparent;
   filter: drop-shadow(0 2px 6px rgba(245,201,68,0.3)); }
@@ -164,7 +154,7 @@ html, body {
   opacity: 1 !important; transform: none !important; overflow: visible;
 }
 .st-head::before { display: none; }
-.st-head > div { font-size: 12px; font-weight: 800; letter-spacing: 2.2px; text-transform: uppercase; color: #5c6474; }
+.st-head > div { font-size: 12px; font-weight: 800; letter-spacing: 2.2px; text-transform: uppercase; color: rgba(255,255,255,.75); }
 
 .st-col-rank { display: flex; align-items: center; justify-content: center; }
 .st-badge {
@@ -187,15 +177,15 @@ html, body {
   background: linear-gradient(160deg, #ffe9a8, var(--gold)); -webkit-background-clip: text; background-clip: text; color: transparent;
   filter: drop-shadow(0 2px 6px rgba(245,201,68,0.3));
 }
-.st-head .st-col-stat { color: #5c6474; font-size: 12px; }
-.st-col-grouplbl { display: block; font-size: 9px; font-weight: 700; letter-spacing: .12em; color: #5c6474; opacity: .8; margin-bottom: 1px; }
+.st-head .st-col-stat { color: rgba(255,255,255,.75); font-size: 12px; }
+.st-col-grouplbl { display: block; font-size: 9px; font-weight: 700; letter-spacing: .12em; color: rgba(255,255,255,.65); opacity: .8; margin-bottom: 1px; }
 
 /* "+N more" footnote when the field is bigger than the board */
 .st-more { font-size: 15px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase;
-  color: #5c6474; text-align: center; padding-top: 2px; }
+  color: rgba(255,255,255,.7); text-align: center; padding-top: 2px; }
 
 /* ── Empty ── */
-.st-empty { font-size: 30px; font-weight: 600; color: rgba(255,255,255,0.22); text-align: center; }
+.st-empty { font-size: 30px; font-weight: 600; color: rgba(255,255,255,.85); text-align: center; }
 
 /* ── Sponsor rail ── */
 .st-sponsors { position: absolute; bottom: 24px; left: 50%; transform: translateX(-50%);
@@ -390,9 +380,17 @@ html, body {
     const sponsors = ((brand.deskSponsors || []).length ? brand.deskSponsors : (anyTagged ? [] : (brand.sponsors || [])))
       .filter((s) => s && s.logo);
 
-    const sig = JSON.stringify({ rows, title, subtitle, showRecord, hasPoints, hasGames, accent, accent2,
+    // Signature from ONLY the fields the board renders. start.gg-sourced rows come straight from
+    // bracket.standings, which carry churning extras (seeds, entrant ids, per-fetch data) beyond
+    // what we display — stringifying whole row objects flipped the sig on every ~20s fetch and tore
+    // the board down + replayed every slide-in. Project to displayed fields so it only rebuilds when
+    // something visible actually changes. (`lm` still catches logos that backfill from a later fetch.)
+    const rowSig = rows.map((r) => [
+      r.name, r.placement, r.wins, r.losses, r.points, r.gameWins, r.gameLosses, r.color, r.played, (r.logo ? 1 : 0)
+    ].join('')).join('');
+    const sig = JSON.stringify({ rowSig, title, subtitle, showRecord, hasPoints, hasGames, accent, accent2,
       bl: brandLogo.slice(0, 40), f: data.fontFamily || '', sp: sponsors.map((s) => s.logo && s.logo.slice(0, 40)),
-      lm: Object.keys(maps.logos).length });   // logo sources arriving later (start.gg fetch) re-render
+      lm: Object.keys(maps.logos).length });
     if (sig === _sig) return;
     _sig = sig;
 

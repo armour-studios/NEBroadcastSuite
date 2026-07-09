@@ -40,33 +40,34 @@ const MAP_POOLS = {
     { id: 'smashville', name: 'Smashville', image: '' }
   ],
   // Overwatch 2 — OWCS 2025 competitive map pool. type field drives the center display in overwatch.html.
+  // Map images sourced from Liquipedia (liquipedia.net/overwatch/Maps) and hosted locally.
   overwatch: [
     // Control
-    { id: 'ilios',               name: 'Ilios',                type: 'Control',   image: '' },
-    { id: 'lijiang',             name: 'Lijiang Tower',        type: 'Control',   image: '' },
-    { id: 'oasis',               name: 'Oasis',                type: 'Control',   image: '' },
-    { id: 'nepal',               name: 'Nepal',                type: 'Control',   image: '' },
-    { id: 'samoa',               name: 'Samoa',                type: 'Control',   image: '' },
-    { id: 'antarctic-peninsula', name: 'Antarctic Peninsula',  type: 'Control',   image: '' },
+    { id: 'ilios',               name: 'Ilios',                type: 'Control',   image: '/assets/overwatch/maps/ilios.jpg' },
+    { id: 'lijiang',             name: 'Lijiang Tower',        type: 'Control',   image: '/assets/overwatch/maps/lijiang.jpg' },
+    { id: 'oasis',               name: 'Oasis',                type: 'Control',   image: '/assets/overwatch/maps/oasis.jpg' },
+    { id: 'nepal',               name: 'Nepal',                type: 'Control',   image: '/assets/overwatch/maps/nepal.jpg' },
+    { id: 'samoa',               name: 'Samoa',                type: 'Control',   image: '/assets/overwatch/maps/samoa.jpg' },
+    { id: 'antarctic-peninsula', name: 'Antarctic Peninsula',  type: 'Control',   image: '/assets/overwatch/maps/antarctic-peninsula.jpg' },
     // Hybrid
-    { id: 'kings-row',           name: "King's Row",           type: 'Hybrid',    image: '' },
-    { id: 'numbani',             name: 'Numbani',              type: 'Hybrid',    image: '' },
-    { id: 'midtown',             name: 'Midtown',              type: 'Hybrid',    image: '' },
-    { id: 'paraiso',             name: 'Paraíso',              type: 'Hybrid',    image: '' },
-    { id: 'blizzard-world',      name: 'Blizzard World',       type: 'Hybrid',    image: '' },
+    { id: 'kings-row',           name: "King's Row",           type: 'Hybrid',    image: '/assets/overwatch/maps/kings-row.jpg' },
+    { id: 'numbani',             name: 'Numbani',              type: 'Hybrid',    image: '/assets/overwatch/maps/numbani.jpg' },
+    { id: 'midtown',             name: 'Midtown',              type: 'Hybrid',    image: '/assets/overwatch/maps/midtown.jpg' },
+    { id: 'paraiso',             name: 'Paraíso',              type: 'Hybrid',    image: '/assets/overwatch/maps/paraiso.png' },
+    { id: 'blizzard-world',      name: 'Blizzard World',       type: 'Hybrid',    image: '/assets/overwatch/maps/blizzard-world.jpg' },
     // Escort
-    { id: 'dorado',              name: 'Dorado',               type: 'Escort',    image: '' },
-    { id: 'circuit-royal',       name: 'Circuit Royal',        type: 'Escort',    image: '' },
-    { id: 'havana',              name: 'Havana',               type: 'Escort',    image: '' },
-    { id: 'junkertown',          name: 'Junkertown',           type: 'Escort',    image: '' },
+    { id: 'dorado',              name: 'Dorado',               type: 'Escort',    image: '/assets/overwatch/maps/dorado.jpg' },
+    { id: 'circuit-royal',       name: 'Circuit Royal',        type: 'Escort',    image: '/assets/overwatch/maps/circuit-royal.png' },
+    { id: 'havana',              name: 'Havana',               type: 'Escort',    image: '/assets/overwatch/maps/havana.jpg' },
+    { id: 'junkertown',          name: 'Junkertown',           type: 'Escort',    image: '/assets/overwatch/maps/junkertown.jpg' },
     // Push
-    { id: 'new-queen-street',    name: 'New Queen Street',     type: 'Push',      image: '' },
-    { id: 'esperanca',           name: 'Esperança',            type: 'Push',      image: '' },
-    { id: 'colosseo',            name: 'Colosseo',             type: 'Push',      image: '' },
-    { id: 'runasapi',            name: 'Runasapi',             type: 'Push',      image: '' },
+    { id: 'new-queen-street',    name: 'New Queen Street',     type: 'Push',      image: '/assets/overwatch/maps/new-queen-street.jpg' },
+    { id: 'esperanca',           name: 'Esperança',            type: 'Push',      image: '/assets/overwatch/maps/esperanca.jpg' },
+    { id: 'colosseo',            name: 'Colosseo',             type: 'Push',      image: '/assets/overwatch/maps/colosseo.jpg' },
+    { id: 'runasapi',            name: 'Runasapi',             type: 'Push',      image: '/assets/overwatch/maps/runasapi.jpg' },
     // Flashpoint
-    { id: 'suravasa',            name: 'Suravasa',             type: 'Flashpoint', image: '' },
-    { id: 'new-junk-city',       name: 'New Junk City',        type: 'Flashpoint', image: '' }
+    { id: 'suravasa',            name: 'Suravasa',             type: 'Flashpoint', image: '/assets/overwatch/maps/suravasa.jpg' },
+    { id: 'new-junk-city',       name: 'New Junk City',        type: 'Flashpoint', image: '/assets/overwatch/maps/new-junk-city.jpg' }
   ],
   // Marvel Rivals — convergence/domination map pool (names approximate; edit as the pool rotates).
   'marvel-rivals': [

@@ -360,6 +360,7 @@ function setupPopoutHandler() {
       equipos: 'Teams', facecams: 'Camera Feeds', brands: 'Brands',
       media: 'Media', integrations: 'Integrations', stats: 'Stats',
       ajustes: 'Settings', roles: 'Roles', triggers: 'Triggers', timer: 'Countdown Timer', match: 'Match — Teams',
+      graphics: 'Graphics',
     };
     const label = labels[page] || page;
     // The timer pop-out is a small, draggable utility window sized to the timer panel; everything

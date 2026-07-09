@@ -1,8 +1,10 @@
 ﻿/* ─── Standalone caster scene — connects to the WS bridge on :3001 ────────── */
 
 const WS_URL = 'ws://' + (location.hostname || 'localhost') + ':3001';   // host-aware: works when the source is loaded from another machine via http://<host>:3000
+const HTTP_BASE = 'http://' + (location.hostname || 'localhost') + ':3000';
 
 let ws;
+let _wsToken = null;
 let currentState = {};
 let _lastCasterSig = '';
 
@@ -106,8 +108,14 @@ function applyFullState(data) {
   renderCasters(data.casters);
 }
 
-function connect() {
-  ws = new WebSocket(WS_URL);
+// The bridge requires a token when LAN-exposed (WS_HOST != loopback) — fetched once from the
+// HTTP API this page was loaded from and cached for reconnects; a no-op on the default loopback bridge.
+async function connect() {
+  if (!_wsToken) {
+    try { _wsToken = (await (await fetch(HTTP_BASE + '/api/ws-token')).json()).token || ''; }
+    catch (e) { _wsToken = ''; }
+  }
+  ws = new WebSocket(WS_URL + (_wsToken ? ('?token=' + encodeURIComponent(_wsToken)) : ''));
 
   ws.onopen = () => ws.send(JSON.stringify({ type: 'request_state' }));
 

@@ -1,6 +1,7 @@
 /* ─── Overlay logic — connects to WS bridge on :3001 ────────────────────── */
 
 const WS_URL = 'ws://' + (location.hostname || 'localhost') + ':3001';   // host-aware: works when the source is loaded from another machine via http://<host>:3000
+const HTTP_BASE = 'http://' + (location.hostname || 'localhost') + ':3000';
 const BLUE   = '#055fdb';
 const ORANGE = '#e97139';
 
@@ -678,8 +679,16 @@ function renderScoreboard(playerCache, data) {
 }
 
 // ── WebSocket ─────────────────────────────────────────────────────────────
-function connect() {
-  ws = new WebSocket(WS_URL);
+// The bridge requires a token when LAN-exposed (WS_HOST != loopback) — fetched once from
+// the HTTP API this page was loaded from and cached for reconnects. No-op (empty token) when
+// the bridge is loopback-only, which is the default and doesn't check it.
+let _wsToken = null;
+async function connect() {
+  if (!_wsToken) {
+    try { _wsToken = (await (await fetch(HTTP_BASE + '/api/ws-token')).json()).token || ''; }
+    catch (e) { _wsToken = ''; }
+  }
+  ws = new WebSocket(WS_URL + (_wsToken ? ('?token=' + encodeURIComponent(_wsToken)) : ''));
 
   ws.onopen = () => {
     // Identify as a live overlay browser source (feeds the pre-flight "overlays reachable" check).

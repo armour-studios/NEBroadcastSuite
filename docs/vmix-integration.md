@@ -141,17 +141,79 @@ switcher.getState()                  // normalized {active, preview, overlays, s
 
 ---
 
-## 5. Phased build plan
+## 5. Phased build plan — status as of 2026-07-08 (code-verified, not aspirational)
 
-| Phase | Scope | Delivers |
+Phase 1 turned out to deliver more than originally scoped — the switcher abstraction from §4 is
+**built**, not just planned:
+
+| Phase | Scope | Status |
 |---|---|---|
-| **1 — Connect & switch** ✅ **BUILT** | `backend/vmix.js` HTTP client + XML poll (1.5s); `state.vmix` + `state.switcher.target`; Settings → vMix section (host/port/enable/Test + live status) + OBS↔vMix backend toggle; `set_vmix_settings`/`set_switcher_target`/`vmix_call`/`vmix_test_connection` handlers; **Flow vMix actions** (vmix_cut/overlay/stream/record/replay/set_text/function). Overlays run as vMix Web Browser inputs. | Producer connects vMix, sees live tally/inputs, and Flows can fire vMix triggers |
-| **2 — Overlays, transitions, stream/record** | OverlayInput channels for the "Put On Air" cockpit; transition picker; stream (multi-dest) + record buttons | Trigger graphics + go-live parity, natively |
-| **3 — Tally & audio** | TCP tally → on-air indicators + cockpit NOW sync; audio volume/mute/bus from Talent mixer | Real feedback loop + audio control |
-| **4 — Instant replay, PTZ, multiview** | Drive vMix replay marks (RL goals → slow-mo angles), PTZ presets, PiP layers, optional `SetText` to GT titles | vMix's premium sports/production features |
+| **1 — Connect & switch** | `backend/vmix.js` HTTP client + XML poll (1.5s); `state.vmix` + `state.switcher.target`; Settings → vMix section + OBS↔vMix toggle; `set_vmix_settings`/`set_switcher_target`/`vmix_call`/`vmix_test_connection`; Flow vMix actions (vmix_cut/overlay/stream/record/replay/set_text/function). Overlays run as vMix Web Browser inputs. | ✅ **BUILT** |
+| **1.5 — Switcher abstraction** | `switcherCut/SetPreview/Take/Stream/Record/Ftb/Replay/AudioSet()` (server.js:7736-7828) dispatch to OBS or vMix per `state.switcher.target`. Switcher page UI (`renderSwitcher()`, app.js:13494+) is genuinely backend-aware — status, source grid, VU-meter mixer all branch on `data.vmix`. Live `vmix-meters` push (~2fps, server.js:7719-7729). | ✅ **BUILT** (not in the original plan — found during a 2026-07-08 code audit) |
+| **2 — Route every producer action through the switcher** | See §5a — ~10 call sites still call `obsClient` directly and silently no-op when vMix is active. | ⏳ **NOT STARTED** |
+| **3 — Tally & OverlayInput cockpit wiring** | TCP tally (`SUBSCRIBE TALLY`/`ACTS`, port 8099); OverlayInput channels driven by the "Put On Air" cockpit chips, not just manual Flow actions. | ⏳ **NOT STARTED** |
+| **4 — Instant replay, PTZ, multiview, vMix preset generator** | Goal-triggered replay marks + camera angles/slow-mo; PTZ presets; PiP layers; a `.vmix`/Web-Browser-input generator (parity with `obs/build-scene-collection.js`). | ⏳ **NOT STARTED** |
 
-**Start with Phase 1** — it's low-risk (HTTP GET + XML, no new deps for control; TCP only in Phase 3),
-proves the switcher abstraction, and immediately makes the whole existing overlay suite usable in vMix.
+### 5a. Phase 2 — close the "silently does nothing on vMix" gap
+
+These call sites bypass the switcher and hit `obsClient` directly — on a vMix setup they no-op with
+no error, which is the worst failure mode (looks broken, not obviously OBS-only):
+
+- `startCommercial()` / `endCommercial()` — server.js:7565, 7573 → route through `switcherCut()`.
+- WS `case 'obs_save_replay'` — server.js:12759-12777 → add the vMix branch (`switcherReplay()` already
+  exists and does this correctly for the Switcher page; this WS case just needs to call it instead of
+  `obsClient` directly).
+- Replay "push to program" (the REPLAYS page's scene auto-switch) — server.js:12831 → `switcherCut()`.
+- Flow action types `obs_scene`, `obs_scene_previous`, `obs_save_replay`, `obs_start_stream`,
+  `obs_stop_stream`, `obs_start_record`, `obs_stop_record`, `obs_start_replay_buf`,
+  `obs_stop_replay_buf` — server.js:7070-7088, 7298-7315 → route through `switcher*()`. (Flow already
+  has separate `vmix_*` action types as a workaround; once these route through the switcher, a Flow
+  author no longer has to pick the right action type per backend — `obs_scene` and `vmix_cut` converge,
+  and the `vmix_*` types can eventually be deprecated in favor of the OBS-named ones working on both.)
+- Automated cuts — `obsSwitch()` (server.js:7657, game-event auto-switch), `obsSwitchSceneName()`
+  (server.js:7673, countdown auto-cut), `rlSwitchScene()` (server.js:7854-7867, RL kickoff/post-game),
+  `obsAutoReplay()` (server.js:7924-7929, RL-goal auto-replay) — all OBS-only today. Route through the
+  switcher too, **and carry the existing `aiShielded()`/`OBS_AUTO_SWITCH_DISABLED` checks with them** —
+  these are automation entry points, not producer clicks, so the shield must gate the vMix path exactly
+  like it gates OBS today. (The switcher functions themselves — `switcherCut` etc. — correctly have NO
+  shield check, because their only current caller, `case 'obs_switch_scene'`, is a manual producer
+  action; that's by design, not a gap. The gap is that automated callers don't route through the
+  switcher yet, so vMix gets no automation at all right now, shielded or not.)
+
+### 5b. Phase 3 — tally + cockpit overlay wiring
+
+- **TCP tally**: new `backend/vmix-tally.js` (or extend `backend/vmix.js`) — raw `net.Socket` to
+  `state.vmix.host:8099`, send `SUBSCRIBE TALLY\r\n` + `SUBSCRIBE ACTS\r\n` on connect, parse the
+  push lines, reconnect-with-backoff on drop (mirror the pattern `backend/integrations/obs-client.js`
+  already uses for its own reconnect logic). Feed into `state.vmix.tally = { program:[...], preview:[...] }`
+  and broadcast only on change (same signature-diff pattern `pollVmix()` already uses, server.js:7708-7716).
+- **Cockpit OverlayInput wiring**: the "Put On Air" chips (control panel cockpit) currently only flip
+  `state.*.visible` for HTML-overlay scenes (backend-agnostic, since overlays are Browser Sources on
+  both backends per §1). Add a per-chip optional `vmixOverlayChannel: 1-4` mapping so that when
+  `state.switcher.target === 'vmix'`, toggling the chip ALSO fires `OverlayInput{N}{In|Out}` — giving
+  vMix's native down-without-a-scene-change behavior instead of relying purely on the Browser Source's
+  own visibility state.
+
+### 5c. Phase 4 — replay/PTZ/multiview/preset-generator
+
+- **Goal-triggered instant replay**: extend `obsAutoReplay()`'s call site (wherever RL goal detection
+  fires it) to also call, on the vMix path, `ReplayMarkIn`→`ReplayPlayEventToOutput` with a configurable
+  camera-angle (`ReplaySelectChannel{1-8}`) and speed (`ReplayChangeSpeed`) — confirm exact function
+  names against the user's vMix version first (they drift v24→v29, per §6).
+- **PTZ presets**: new Settings sub-panel (camera list + preset recall), `PTZLoadVirtualInput`/
+  `PTZCreatePreset` wired to a new WS handler + Flow action type.
+- **Multiview/PiP**: `SetMultiViewOverlay`/`SetLayer`/Fly params, likely surfaced as a "camera layout"
+  picker mirroring however OBS-side camera-layout scenes are chosen today (check `control-panel/app.js`'s
+  existing camera-layout UI for the pattern to reuse rather than building a parallel one).
+- **vMix preset generator**: `obs/build-vmix-preset.js` alongside `obs/build-scene-collection.js` —
+  emit an import list (or `.vmix` XML) that adds every overlay HTML page as a Web Browser input, named
+  to match the OBS scene-collection's scene names (`switcherCut()` already matches vMix inputs by title
+  against the same names, per §2/§4, so a matching preset needs zero extra mapping to work).
+
+**Sequencing**: 5a first — it's pure plumbing (no new vMix functions, just redirecting existing calls
+through functions that already exist), closes the worst failure mode, and de-risks everything after it
+by proving the switcher pattern end-to-end. 5b and 5c can be built independently of each other once 5a
+lands.
 
 ---
 
@@ -163,4 +225,9 @@ proves the switcher abstraction, and immediately makes the whole existing overla
   Replay/Audio-bus names against the [reference](https://vmixapi.com/) before wiring Phase 3–4.
 - vMix is **Windows-only** and paid (HD/4K/Pro tiers gate inputs, replay cameras, NDI). OBS stays the free
   default backend; vMix is the selectable "pro venue" alternative — a producer commits to one per setup.
-- The AI-Shield / `OBS_AUTO_SWITCH_DISABLED` kill-switch model must extend to vMix too (no un-armed auto-cuts).
+- **AI-Shield status (corrected 2026-07-08):** manual producer actions (`switcherCut()` and friends,
+  fired from `obs_switch_scene`/the Switcher page) intentionally have no shield check — same as a
+  producer clicking a scene button in OBS today. The actual gap is narrower: the four *automated*
+  cut sources (`obsSwitch`, `obsSwitchSceneName`, `rlSwitchScene`, `obsAutoReplay`) already check
+  `aiShielded()`/`OBS_AUTO_SWITCH_DISABLED` but are OBS-only — see §5a. When they're routed through the
+  switcher, that check must travel with them so vMix automation can't become a backdoor around the shield.

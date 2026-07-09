@@ -47,13 +47,22 @@ const VALORANT = [
   ['pick', 1], ['pick', 0], ['pick', 1], ['pick', 0], ['pick', 1]
 ];
 
-// Hero shooters (OW / Marvel Rivals): alternating hero bans only, 2 per team.
+// Marvel Rivals: alternating hero bans only, 2 per team.
 const HERO_BANS_2 = [['ban', 0], ['ban', 1], ['ban', 0], ['ban', 1]];
+
+// Overwatch 2: 4 hero bans in SNAKE order (not straight alternating) — Team A bans,
+// Team B bans, Team B bans again, Team A bans again. Mirrors the in-client weighted-vote
+// ban resolution (each player ranks 3 heroes worth 7/5/3 votes; the 4 highest-voted
+// picks lock in this A-B-B-A order, skipping any hero that would break the 2-per-role
+// ban cap). We don't simulate the vote itself here — the producer enters the resolved
+// ban — but we do enforce the role cap in draftAction() via roleLimitOk() below.
+// Picking is simultaneous with no fixed order, so the format only carries bans.
+const OW_HERO_BANS = [['ban', 0], ['ban', 1], ['ban', 1], ['ban', 0]];
 
 const DRAFT_FORMATS = {
   league:          LOL,
   dota2:           DOTA2,
-  overwatch:       HERO_BANS_2,
+  overwatch:       OW_HERO_BANS,
   'marvel-rivals': HERO_BANS_2,
   valorant:        VALORANT,
   'mobile-legends': ML_DRAFT,
@@ -104,10 +113,35 @@ try {
   }));
 } catch (e) { LOL_ROSTER = []; }
 
+// Overwatch role by portrait id — drives the front-panel role filter chips and the
+// 2-per-role ban cap enforced in roleLimitOk() below.
+const OW_ROLES = {
+  dva: 'Tank', doomfist: 'Tank', hazard: 'Tank', 'junker-queen': 'Tank', mauga: 'Tank',
+  orisa: 'Tank', ramattra: 'Tank', reinhardt: 'Tank', roadhog: 'Tank', sigma: 'Tank',
+  winston: 'Tank', 'wrecking-ball': 'Tank', zarya: 'Tank',
+  ashe: 'Damage', bastion: 'Damage', cassidy: 'Damage', echo: 'Damage', freja: 'Damage',
+  genji: 'Damage', hanzo: 'Damage', junkrat: 'Damage', mei: 'Damage', pharah: 'Damage',
+  reaper: 'Damage', sojourn: 'Damage', 'soldier-76': 'Damage', sombra: 'Damage',
+  symmetra: 'Damage', torbjorn: 'Damage', tracer: 'Damage', venture: 'Damage', widowmaker: 'Damage',
+  ana: 'Support', baptiste: 'Support', brigitte: 'Support', illari: 'Support', juno: 'Support',
+  kiriko: 'Support', lifeweaver: 'Support', lucio: 'Support', mercy: 'Support', moira: 'Support',
+  zenyatta: 'Support'
+};
+
+function rosterFromDirWithRoles(rel, urlBase, roleMap) {
+  return idsFromDir(rel)
+    .map((id) => ({ id, name: NAME_OVERRIDES[id] || titleCase(id), image: urlBase + id + '.png', role: (roleMap && roleMap[id]) || '' }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
 const ROSTERS = {
   league:           LOL_ROSTER,
   dota2:            rosterFromDir('assets/heroes/dota2',          '/assets/heroes/dota2/'),
-  overwatch:        rosterFromDir('assets/heroes/overwatch',      '/assets/heroes/overwatch/'),
+  // Use the CLEAN, canonical OW hero portraits (assets/overwatch/heroes) — the same folder the
+  // Overwatch overlay + hero-ban manager use. assets/heroes/overwatch was polluted with wrong-game
+  // heroes (anran/domina/jetpack-cat…) and mangled names (l-cio/torbj-rn), so the draft board showed
+  // bogus/missing characters.
+  overwatch:        rosterFromDirWithRoles('assets/overwatch/heroes', '/assets/overwatch/heroes/', OW_ROLES),
   'marvel-rivals':  rosterFromDir('assets/heroes/marvel-rivals',  '/assets/heroes/marvel-rivals/'),
   valorant:         rosterFromDir('assets/heroes/valorant',       '/assets/heroes/valorant/'),
   'mobile-legends': [],   // no portrait folder yet — falls back to text-only
@@ -116,9 +150,14 @@ const ROSTERS = {
 
 // name (case-insensitive) → image, per game, for stamping picks/bans with a portrait.
 const _imgIndex = {};
+// name (case-insensitive) → role, per game (only populated where ROSTERS carries a role).
+const _roleIndex = {};
 for (const g of Object.keys(ROSTERS)) {
-  _imgIndex[g] = {};
-  for (const c of ROSTERS[g]) _imgIndex[g][c.name.toLowerCase()] = c.image;
+  _imgIndex[g] = {}; _roleIndex[g] = {};
+  for (const c of ROSTERS[g]) {
+    _imgIndex[g][c.name.toLowerCase()] = c.image;
+    if (c.role) _roleIndex[g][c.name.toLowerCase()] = c.role;
+  }
 }
 
 function draftGames() { return Object.keys(DRAFT_FORMATS); }
@@ -126,6 +165,17 @@ function hasDraft(game) { return !!DRAFT_FORMATS[game]; }
 function roster(game) { return ROSTERS[game] || []; }
 function champions(game) { return (ROSTERS[game] || []).map((c) => c.name); }
 function imageFor(game, name) { return (_imgIndex[game] || {})[(name || '').toString().toLowerCase()] || ''; }
+function roleFor(game, name) { return (_roleIndex[game] || {})[(name || '').toString().toLowerCase()] || ''; }
+
+// Overwatch ban rule: no more than 2 bans of the same role among the bans resolved so far.
+// Non-Overwatch games (and unrecognized heroes) are always allowed.
+function roleLimitOk(game, ops, name) {
+  if (game !== 'overwatch') return true;
+  const role = roleFor(game, name);
+  if (!role) return true;
+  const count = (ops || []).filter((o) => o.action === 'ban' && roleFor(game, o.name) === role).length;
+  return count < 2;
+}
 
 function buildDraft(game) {
   return (DRAFT_FORMATS[game] || []).map((s) => ({ action: s[0], teamIdx: s[1] }));
@@ -137,5 +187,5 @@ function resolveSide(teamIdx, teamStart) {
 
 module.exports = {
   DRAFT_FORMATS, ROSTERS,
-  draftGames, hasDraft, roster, champions, imageFor, buildDraft, resolveSide
+  draftGames, hasDraft, roster, champions, imageFor, roleFor, roleLimitOk, buildDraft, resolveSide
 };

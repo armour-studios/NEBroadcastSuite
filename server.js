@@ -235,9 +235,12 @@ let state = {
   colorMode: 'team',        // 'team' | 'brand' | 'default'
   sceneBg: {},              // live bg fill per overlay path, keyed by pathname
   banner: { visible: false, images: [], captions: [], interval: 10, slant: 'right', header: '' },
-  // Stream-credits extras: producer-added "credit sponsors" — a dedicated big call-out section in
-  // the end-of-stream roll, separate from the brand-kit sponsor bar. [{ name, logo, tier }]
-  credits: { sponsors: [], talent: [] },   // talent: manual {name,role} credits (other-shift crew)
+  // Stream Credits scrolling roll (overlay/stream-credits.html) — a gfx.html Push Live scene like any
+  // other; the overlay has no visibility gate of its own, so `visible` is the only thing that decides
+  // whether it's showing. Extras: producer-added "credit sponsors" — a dedicated big call-out section
+  // in the roll, separate from the brand-kit sponsor bar [{name,logo,tier}]; talent = manual
+  // {name,role} credits (other-shift crew). (Single source of truth — must not be redefined below.)
+  credits: { visible: false, sponsors: [], talent: [], endText: '' },   // endText: big end-card text after the roll ('' → "Thanks For Watching")
   casters: { visible: true, showCountry: false, nameMode: 'gamertag', showRoles: { host: '', observer: '' }, shifts: [], list: [], lowerThird: '', library: [], vdo: { room: '', password: '' }, guestsVdo: { room: '', password: '' }, observersVdo: { room: '', password: '' }, rooms: [], lineup: [], activeLayout: '', interview: { room: '', password: '' }, apiKey: '', interviewee: null, playerCam: null, deskRoomId: '', slotLabels: { 1: 'Caster 1', 2: 'Caster 2', 3: 'Caster 3', 4: 'Caster 4', 5: 'Player' } },   // list = on-air slots; showCountry = render each caster's country on the desk; library = saved casters/guests/observers (by kind); vdo/guestsVdo/observersVdo = the three shared group rooms; rooms = named VDO rooms; lineup = this-show active assignments; apiKey = director IFrame-API key; interviewee = spotlight-desk right cam; playerCam = slot-5 player feed ({camUrl,name,playerId}); deskRoomId = which named room is the interview/desk room
   // VDO.Ninja talent workflow. Global config (server-side, replaces the old localStorage settings);
   // per-team rooms/passwords live on teams.x.vdo, per-player IDs on the player objects.
@@ -283,15 +286,13 @@ let state = {
   // Keyed by gameId → [{ id, name, path }]
   customOverlayLayouts: {},
   // Champion/hero draft board (LoL etc.). sequence/ops drive the live pick-ban.
-  draft: { visible: false, title: '', game: '', teamStart: 'a', sequence: [], ops: [], turn: null, complete: false,
+  draft: { visible: false, title: '', subtitle: '', game: '', teamStart: 'a', owBanCount: 4, sequence: [], ops: [], turn: null, complete: false,
+    // owBanCount: Overwatch total hero bans (2 = one per team, 4 = two per team). Producer-set.
     // LoL champ-select automation — fills the board live from the League Client (LCU).
     auto: { enabled: false, status: 'off', statusDetail: '', lockfilePath: '' } },
   // Team-lineup / player-intro card scene. side = which team to feature ('blue'|'orange'); style = card variant.
   intro: { visible: false, side: 'blue', title: '', style: 1, showFooter: false },
-  // Stream Credits scrolling roll (overlay/stream-credits.html) — a gfx.html Push Live scene like
-  // any other; the overlay itself has no visibility gate of its own, so this flag is the only
-  // thing that decides whether it's showing.
-  credits: { visible: false },
+  // (state.credits defined once near the top of this state object — sponsors/talent/visible together.)
   // Overtime ad slot — sellable sponsor slot shown on the overlay during OT.
   overtime: { label: 'OVERTIME', logo: null, bg: '#e0202a', color: '#ffffff' },
   // Replay ad slot. logo = sponsor on the goal swipe; outroLogo = logo on the after-replay swipe
@@ -2137,7 +2138,9 @@ function loadState() {
         state.flows = saved.flows;
       }
       if (Array.isArray(saved.crew)) {
-        state.crew = saved.crew;
+        // workedEvent is new — backfill from active so anyone already on shift stays creditable
+        // instead of silently vanishing from credits the moment this field starts being read.
+        state.crew = saved.crew.map((c) => (c && typeof c.workedEvent !== 'boolean') ? { ...c, workedEvent: !!c.active } : c);
       }
       if (Array.isArray(saved.adProofSessions)) {
         state.adProofSessions = saved.adProofSessions;
@@ -6725,7 +6728,7 @@ function rebuildVetoBoard() {
     if (op) { action = op.action; by = op.by; }
     else if (complete) { action = 'decider'; by = ''; }       // leftover map(s) = decider
     return {
-      _id: m.id, name: m.name, mode: '', image: m.image || '',
+      _id: m.id, name: m.name, mode: m.type || '', image: m.image || '',
       action, by,
       winner: prev.winner || '', score: { a: Number(prev.score?.a) || 0, b: Number(prev.score?.b) || 0 }
     };
@@ -6801,17 +6804,43 @@ function rebuildDraftTurn() {
   d.turn = next ? { team: next.by, action: next.action } : null;
   d.complete = (d.ops || []).length >= d.sequence.length;
 }
-function draftStart({ game, teamStart, title }) {
+function draftStart({ game, teamStart, title, subtitle, owBanCount }) {
   const g = draftData.hasDraft(game) ? game : (draftData.hasDraft(state.activeGame) ? state.activeGame : 'league');
   if (!draftData.hasDraft(g)) throw new Error('No draft format defined for ' + g);
-  const ts = teamStart === 'b' ? 'b' : 'a';
-  const seq = draftData.buildDraft(g).map(s => ({ action: s.action, by: draftData.resolveSide(s.teamIdx, ts) }));
+  const ts = teamStart === 'b' ? 'b' : (teamStart === 'a' ? 'a' : ((state.draft && state.draft.teamStart) || 'a'));
+  // Overwatch ban count is configurable: 2 (one per team) or 4 (two per team, snake A-B-B-A).
+  let owCount = Number(owBanCount) || (state.draft && state.draft.owBanCount) || 4;
+  owCount = owCount <= 2 ? 2 : 4;
+  const steps = g === 'overwatch'
+    ? (owCount === 2 ? [{ action: 'ban', teamIdx: 0 }, { action: 'ban', teamIdx: 1 }]
+                     : [{ action: 'ban', teamIdx: 0 }, { action: 'ban', teamIdx: 1 }, { action: 'ban', teamIdx: 1 }, { action: 'ban', teamIdx: 0 }])
+    : draftData.buildDraft(g);
+  const seq = steps.map(s => ({ action: s.action, by: draftData.resolveSide(s.teamIdx, ts) }));
   state.draft = {
     visible: !!(state.draft && state.draft.visible),
-    title: typeof title === 'string' ? title : (state.draft && state.draft.title) || '',
-    game: g, teamStart: ts, sequence: seq, ops: [], turn: null, complete: false
+    title:    typeof title === 'string'    ? title    : (state.draft && state.draft.title)    || '',
+    subtitle: typeof subtitle === 'string' ? subtitle : (state.draft && state.draft.subtitle) || '',
+    game: g, teamStart: ts, owBanCount: owCount, sequence: seq, ops: [], turn: null, complete: false,
+    auto: (state.draft && state.draft.auto) || { enabled: false, status: 'off', statusDetail: '', lockfilePath: '' }
   };
   rebuildDraftTurn();
+}
+// The in-game HUD overlay (overlay/overwatch.html) shows hero bans from state.owMatch.bansByMap,
+// NOT from state.draft — a separate, older per-map ban tracker. Mirror every Overwatch draft ban
+// into it (keyed to the current map, side, and ban slot) so bans made from the Draft panel actually
+// show up on the broadcast HUD, matching which team banned which hero.
+function setOwBanSlot(side, slot, hero, role) {
+  if (slot > 1) return; // OW_HERO_BANS caps each side at 2 bans — nothing to mirror past that
+  const mapIdx = Math.max(0, ((state.game && state.game.number) || 1) - 1);
+  const bansByMap = [...(state.owMatch.bansByMap || [])];
+  while (bansByMap.length <= mapIdx) bansByMap.push({});
+  const entry = { ...(bansByMap[mapIdx] || {}) };
+  const prevArr = Array.isArray(entry[side]) ? entry[side] : [];
+  const arr = [prevArr[0] || { hero: '', role: '' }, prevArr[1] || { hero: '', role: '' }];
+  arr[slot] = { hero: hero || '', role: role || '' };
+  entry[side] = arr;
+  bansByMap[mapIdx] = entry;
+  state.owMatch = { ...state.owMatch, bansByMap };
 }
 function draftAction(name) {
   const d = state.draft;
@@ -6820,11 +6849,39 @@ function draftAction(name) {
   const champ = (name || '').toString().slice(0, 40).trim();
   if (!champ) return;
   const step = d.sequence[d.ops.length];
-  d.ops.push({ name: champ, action: step.action, by: step.by, image: draftData.imageFor(d.game, champ) });
+  if (step.action === 'ban' && !draftData.roleLimitOk(d.game, d.ops, champ)) {
+    const role = draftData.roleFor(d.game, champ);
+    throw new Error(`Role limit reached — 2 ${role} heroes are already banned`);
+  }
+  const role = draftData.roleFor(d.game, champ);
+  const priorBans = d.ops.filter((o) => o.by === step.by && o.action === 'ban').length;
+  d.ops.push({ name: champ, action: step.action, by: step.by, image: draftData.imageFor(d.game, champ), role });
   rebuildDraftTurn();
+  if (d.game === 'overwatch' && step.action === 'ban') setOwBanSlot(step.by, priorBans, champ, role);
 }
-function draftUndo() { const d = state.draft; if (d && d.ops && d.ops.length) { d.ops.pop(); rebuildDraftTurn(); } }
-function draftReset() { const d = state.draft; if (d) { d.ops = []; rebuildDraftTurn(); } }
+function draftUndo() {
+  const d = state.draft;
+  if (d && d.ops && d.ops.length) {
+    const removed = d.ops.pop();
+    if (d.game === 'overwatch' && removed.action === 'ban') {
+      const priorBans = d.ops.filter((o) => o.by === removed.by && o.action === 'ban').length;
+      setOwBanSlot(removed.by, priorBans, '', '');
+    }
+    rebuildDraftTurn();
+  }
+}
+function draftReset() {
+  const d = state.draft;
+  if (d) {
+    if (d.game === 'overwatch') {
+      const mapIdx = Math.max(0, ((state.game && state.game.number) || 1) - 1);
+      const bansByMap = [...(state.owMatch.bansByMap || [])];
+      if (bansByMap[mapIdx]) { bansByMap[mapIdx] = {}; state.owMatch = { ...state.owMatch, bansByMap }; }
+    }
+    d.ops = [];
+    rebuildDraftTurn();
+  }
+}
 
 // ── LoL champ-select automation: poll the League Client and mirror the live draft ──────────
 let _lolDraftStop = null;
@@ -9435,14 +9492,33 @@ registerWsHandlers({
   draft_start(msg, ws) {
     try {
       const d = msg.data || {};
-      draftStart({ game: d.game, teamStart: d.teamStart, title: d.title });
+      draftStart({ game: d.game, teamStart: d.teamStart, title: d.title, subtitle: d.subtitle, owBanCount: d.owBanCount });
       if (typeof d.visible === 'boolean') state.draft.visible = d.visible;
       saveAppState(); broadcastFullState();
     } catch (e) {
-      ws.send(JSON.stringify({ type: 'csgo-result', data: { ok: false, message: e.message } }));
+      ws.send(JSON.stringify({ type: 'draft-result', data: { ok: false, message: e.message } }));
     }
   },
-  draft_action(msg)  { draftAction((msg.data && msg.data.name) || ''); saveAppState(); broadcastFullState(); },
+  // Live-edit the draft scene's title / subtext, and the which-team-starts preference — no restart.
+  // (teamStart only re-shapes the order at the NEXT draft_start; stored here so the front UI owns it.)
+  set_draft_meta(msg) {
+    if (!state.draft) return;
+    const d = msg.data || {};
+    if (typeof d.title === 'string')    state.draft.title    = d.title.slice(0, 80);
+    if (typeof d.subtitle === 'string') state.draft.subtitle = d.subtitle.slice(0, 120);
+    if (d.teamStart === 'a' || d.teamStart === 'b') state.draft.teamStart = d.teamStart;
+    // Overwatch ban-count preference — stored now, applied on the next draftStart (rebuilds the sequence).
+    if (d.owBanCount != null) state.draft.owBanCount = Number(d.owBanCount) <= 2 ? 2 : 4;
+    saveAppState(); broadcastFullState();
+  },
+  draft_action(msg, ws) {
+    try {
+      draftAction((msg.data && msg.data.name) || '');
+      saveAppState(); broadcastFullState();
+    } catch (e) {
+      ws.send(JSON.stringify({ type: 'draft-result', data: { ok: false, message: e.message } }));
+    }
+  },
   draft_undo()       { draftUndo();  saveAppState(); broadcastFullState(); },
   draft_reset()      { draftReset(); saveAppState(); broadcastFullState(); },
   draft_visible(msg) { if (state.draft) state.draft.visible = !!(msg.data && msg.data.visible); saveAppState(); broadcastFullState(); }
@@ -9450,7 +9526,31 @@ registerWsHandlers({
 
 // ── Stream Credits (overlay/stream-credits.html) — plain visibility, Push Live like any other gfx.html scene ──
 registerWsHandlers({
-  set_credits(msg) { if (state.credits) state.credits.visible = !!(msg.data && msg.data.visible); saveAppState(); broadcastFullState(); }
+  // Single source of truth for the Stream Credits state (this registry entry shadows any switch-case
+  // 'set_credits'). Every field is updated ONLY when present, so editing sponsors/talent/endText never
+  // clobbers visibility (a bare set_credits used to force visible=false and drop the roll off-air).
+  set_credits(msg) {
+    const d = msg.data || {};
+    if (!state.credits) state.credits = { visible: false, sponsors: [], talent: [], endText: '' };
+    if (typeof d.visible === 'boolean') state.credits.visible = d.visible;
+    if (typeof d.endText === 'string') state.credits.endText = d.endText.slice(0, 80);
+    if (Array.isArray(d.talent)) {
+      // Manual talent credits — crew from other shifts who still deserve the roll.
+      state.credits.talent = d.talent.filter((t) => t && t.name).slice(0, 40).map((t) => ({
+        name: (t.name || '').toString().slice(0, 60),
+        role: (t.role || '').toString().slice(0, 60),
+        group: ['casters', 'hosts', 'production', 'operations', 'observers'].includes(t.group) ? t.group : ''
+      }));
+    }
+    if (Array.isArray(d.sponsors)) {
+      state.credits.sponsors = d.sponsors.filter((s) => s && (s.name || s.logo)).slice(0, 40).map((s) => ({
+        name: (s.name || '').toString().slice(0, 60),
+        logo: (s.logo || '').toString().slice(0, 500000),
+        tier: (s.tier || '').toString().slice(0, 40)
+      }));
+    }
+    saveAppState(); broadcastFullState();
+  }
 });
 
 // ── Overwatch 2 series scoreboard handlers ──
@@ -10486,6 +10586,10 @@ function handleControlMessage(msg, ws) {
       const snapshot = {
         id: Math.random().toString(36).slice(2, 11),
         name,
+        // Tag with whatever event is live right now (if any) so the credits screen can pull
+        // "everyone scheduled for event X" by filtering saved shifts on this field.
+        eventSlug: (state.activeEvent && state.activeEvent.slug) || '',
+        eventName: (state.activeEvent && state.activeEvent.name) || '',
         slots: { 1: slotName(1), 2: slotName(2), 3: slotName(3), 4: slotName(4) },
         host: (state.casters.showRoles && state.casters.showRoles.host) || '',
         observer: (state.casters.showRoles && state.casters.showRoles.observer) || '',
@@ -10527,7 +10631,12 @@ function handleControlMessage(msg, ws) {
       state.casters.lineup = lineup;
       state.casters.showRoles = { host: shift.host || '', observer: shift.observer || '' };
       const activeSet = new Set((shift.active || []).map((n) => (n || '').toLowerCase()));
-      (state.crew || []).forEach((c) => { if (c) c.active = activeSet.has((c.name || '').toLowerCase()); });
+      (state.crew || []).forEach((c) => {
+        if (!c) return;
+        c.active = activeSet.has((c.name || '').toLowerCase());
+        if (c.active) c.workedEvent = true;   // same rule as update_crew_member: going active always marks worked
+      });
+      state.casters.activeShiftId = shift.id;   // so the Show Deck can show which preset is currently loaded
       // Display options saved with the shift (older snapshots without them leave settings alone).
       if (typeof shift.showCountry === 'boolean') state.casters.showCountry = shift.showCountry;
       if (shift.nameMode === 'name' || shift.nameMode === 'gamertag') state.casters.nameMode = shift.nameMode;
@@ -10538,17 +10647,23 @@ function handleControlMessage(msg, ws) {
     }
     case 'delete_shift': {
       if (Array.isArray(state.casters.shifts)) {
-        state.casters.shifts = state.casters.shifts.filter((s) => s.id !== (msg.data && msg.data.id));
+        const id = msg.data && msg.data.id;
+        state.casters.shifts = state.casters.shifts.filter((s) => s.id !== id);
+        if (state.casters.activeShiftId === id) state.casters.activeShiftId = '';
         saveAppState();
         broadcastFullState();
       }
       break;
     }
     case 'clear_shift': {
-      // Empty the desk slots, show roles and every on-shift mark (saved shifts are untouched).
+      // Empty the desk slots, show roles and every on-shift mark (saved presets are untouched).
+      // Everyone currently on shift did their dues → lock in their credit (workedEvent) BEFORE we
+      // clear the active marks, so a Clear between shifts never drops anyone from the credits.
+      (state.crew || []).forEach((c) => { if (c && c.active) c.workedEvent = true; });
       state.casters.lineup = (state.casters.lineup || []).filter((e) => !(Number(e.slot) >= 1 && Number(e.slot) <= 4));
       state.casters.list = [];
       state.casters.showRoles = { host: '', observer: '' };
+      state.casters.activeShiftId = '';
       (state.crew || []).forEach((c) => { if (c) c.active = false; });
       saveAppState();
       broadcastFullState();
@@ -10649,6 +10764,14 @@ function handleControlMessage(msg, ws) {
           if (occ) { if (oldSlot) occ.slot = oldSlot; else state.casters.lineup = lineup.filter((x) => x !== occ); }
         }
         if (!state.casters.lineup.length) state.casters.list = [];   // resolveLineupToList no-ops on empty
+        // A caster placed on the desk (slot 1-4) is clearly working this event — mark the matching
+        // crew record on-shift + worked so the On shift / Worked-this-event lists and the credits pick
+        // them up without a second click. Pulling them off (slot 0) leaves workedEvent so they stay credited.
+        if (slot >= 1 && Array.isArray(state.crew)) {
+          const nm = (d.name || '').toLowerCase(), hd = (d.handle || '').toLowerCase();
+          const cm = state.crew.find((c) => c && (((c.name || '').toLowerCase() === nm && nm) || (hd && (c.handle || '').toLowerCase() === hd)));
+          if (cm) { cm.active = true; cm.workedEvent = true; }
+        }
       }
       resolveLineupToList();   // re-join so name/handle/social edits propagate to overlay immediately
       saveAppState();
@@ -10677,7 +10800,9 @@ function handleControlMessage(msg, ws) {
       if (!d.name) break;
       if (!Array.isArray(state.crew)) state.crew = [];
       const id = Math.random().toString(36).slice(2, 11);
-      state.crew.push({ id, name: d.name, handle: d.handle || '', role: d.role || '', group: d.group || 'casters', social: d.social || 'none', socialHandle: d.socialHandle || '', defaultCam: d.defaultCam || '', country: d.country || '', paypal: d.paypal || '', notes: d.notes || '', active: !!d.active });
+      // workedEvent: broader than active (on shift RIGHT NOW) — sticks once true so credits can
+      // still find someone whose shift already ended, without having to keep them "active."
+      state.crew.push({ id, name: d.name, handle: d.handle || '', role: d.role || '', group: d.group || 'casters', social: d.social || 'none', socialHandle: d.socialHandle || '', defaultCam: d.defaultCam || '', country: d.country || '', paypal: d.paypal || '', notes: d.notes || '', active: !!d.active, workedEvent: !!d.active });
       saveAppState();
       broadcastFullState();
       break;
@@ -10688,7 +10813,14 @@ function handleControlMessage(msg, ws) {
       const idx = state.crew.findIndex((c) => c.id === d.id);
       if (idx !== -1) {
         const cur = state.crew[idx];
-        state.crew[idx] = { ...cur, name: d.name || cur.name, handle: d.handle ?? cur.handle, role: d.role ?? cur.role, group: d.group || cur.group, social: d.social || cur.social, socialHandle: d.socialHandle ?? cur.socialHandle, defaultCam: d.defaultCam ?? cur.defaultCam ?? '', country: d.country ?? cur.country ?? '', paypal: d.paypal ?? cur.paypal ?? '', notes: d.notes ?? cur.notes ?? '', active: (typeof d.active === 'boolean') ? d.active : !!cur.active };
+        const nextActive = (typeof d.active === 'boolean') ? d.active : !!cur.active;
+        // Going active always marks workedEvent (they're clearly working this event); going
+        // inactive does NOT clear it — that's the whole point, so off-shift crew who worked
+        // earlier stay creditable. An explicit d.workedEvent (the Show Deck's manual toggle) wins.
+        const nextWorked = (typeof d.workedEvent === 'boolean') ? d.workedEvent : (nextActive || !!cur.workedEvent);
+        // group: honour an EXPLICIT string (including '' — the "remove from Support Crew" signal),
+        // otherwise keep the current group. `d.group || cur.group` swallowed '' and re-pinned them.
+        state.crew[idx] = { ...cur, name: d.name || cur.name, handle: d.handle ?? cur.handle, role: d.role ?? cur.role, group: (typeof d.group === 'string') ? d.group : cur.group, social: d.social || cur.social, socialHandle: d.socialHandle ?? cur.socialHandle, defaultCam: d.defaultCam ?? cur.defaultCam ?? '', country: d.country ?? cur.country ?? '', paypal: d.paypal ?? cur.paypal ?? '', notes: d.notes ?? cur.notes ?? '', active: nextActive, workedEvent: nextWorked };
         // Crew ↔ caster-library ↔ on-air slots are twins linked by name/handle (see
         // delete_crew_member). Without this sync, editing a crew profile left STALE copies
         // in the library and on the desk — the overlay kept the old gamertag forever.
@@ -10931,6 +11063,17 @@ function handleControlMessage(msg, ws) {
           state.teams.orange.color = dc.b;
         }
         if (directorEngine) directorEngine.reset();
+        // Map Pool and Draft are keyed to the OLD game's pool/roster (map ids, hero rosters,
+        // ban formats) — leaving them as-is showed stale maps/heroes from the previous game
+        // (or Overwatch's ban board hanging around after switching away from Overwatch). Reset
+        // both to their clean not-started shape so the next Start Veto / Start Draft builds
+        // fresh from the NEW game's pool.
+        if (prev !== g) {
+          state.veto = { visible: false, title: '', maps: [] };
+          state.draft = { visible: false, title: '', subtitle: '', game: '', teamStart: 'a', owBanCount: 4,
+            sequence: [], ops: [], turn: null, complete: false,
+            auto: (state.draft && state.draft.auto) || { enabled: false, status: 'off', statusDetail: '', lockfilePath: '' } };
+        }
         // Stop data connections for the previous game
         if (prev === 'rocket-league' && g !== 'rocket-league') disconnectRL();
         if (prev === 'valorant' && g !== 'valorant') stopValorantPolling();
@@ -12917,34 +13060,7 @@ function handleControlMessage(msg, ws) {
     }
 
     // Stream-credits "credit sponsors" — the dedicated big call-out list in the end roll.
-    case 'set_credits': {
-      const d = msg.data || {};
-      if (Array.isArray(d.talent)) {
-        // Manual talent credits — crew from other shifts who still deserve the roll.
-        state.credits.talent = d.talent
-          .filter((t) => t && t.name)
-          .slice(0, 40)
-          .map((t) => ({
-            name: (t.name || '').toString().slice(0, 60),
-            role: (t.role || '').toString().slice(0, 60),
-            // Talent-bar bucket: hosts renders under the "Talent" label on the overlay.
-            group: ['casters', 'hosts', 'production', 'observers'].includes(t.group) ? t.group : ''
-          }));
-      }
-      if (Array.isArray(d.sponsors)) {
-        state.credits.sponsors = d.sponsors
-          .filter((s) => s && (s.name || s.logo))
-          .slice(0, 40)
-          .map((s) => ({
-            name: (s.name || '').toString().slice(0, 60),
-            logo: (s.logo || '').toString().slice(0, 500000),
-            tier: (s.tier || '').toString().slice(0, 40)
-          }));
-      }
-      saveAppState();
-      broadcastFullState();
-      break;
-    }
+    // (set_credits is handled by the registry entry above — it shadows any case here.)
 
     // ── OBS WebSocket ────────────────────────────────────────────────────
     case 'set_obs_settings': {
@@ -13307,6 +13423,29 @@ function handleControlMessage(msg, ws) {
     case 'set_gfx_active': {
       const scene = (msg.data && msg.data.scene) || null;
       state.gfxActive = scene && typeof scene === 'string' ? scene : null;
+      // Single-select for the exclusive punch-up graphics. gfx.html only ever RENDERS one layer
+      // (state.gfxActive), but each graphic also carries its own .visible flag, and the various push
+      // surfaces (qrail Put-On-Air, deck, flows, main Push Live) set/clear only their own flag — so
+      // several graphics could read "on air" (green) at once even though just one is showing. Mirror
+      // .visible to gfxActive here, in the ONE place every push routes through: the active layer's
+      // flag on, all other exclusive layers off. Persistent overlays (Ticker, Sponsor, Casters/Desk,
+      // Teams-to-Watch) are deliberately NOT in this map — they're meant to stack alongside a graphic.
+      const GFX_EXCLUSIVE_VISIBLE = {
+        break: 'breakScreen', winner: 'winner', intro: 'intro', veto: 'veto', draft: 'draft',
+        bracket: 'bracket', schedule: 'upcoming', upcoming: 'upcoming', standings: 'standings', credits: 'credits'
+        // matchup has no independent .visible flag (it's active purely via gfxActive) — nothing to clear.
+        // The spotlight/watchlist/teamSpotlight family is deliberately left out: the gfx key 'spotlight'
+        // is wired to watchlist.visible in one surface and spotlight.visible in another, so auto-clearing
+        // by key could hide the one that's actually live. They're niche and stay independent.
+      };
+      const activeObj = GFX_EXCLUSIVE_VISIBLE[state.gfxActive] || null;
+      Object.keys(GFX_EXCLUSIVE_VISIBLE).forEach((k) => {
+        const objName = GFX_EXCLUSIVE_VISIBLE[k];
+        if (objName === activeObj) return;                       // leave the now-active layer alone
+        const o = state[objName];
+        if (o && typeof o === 'object' && o.visible) o.visible = false;
+      });
+      if (activeObj && state[activeObj] && typeof state[activeObj] === 'object') state[activeObj].visible = true;
       broadcastFullState();
       break;
     }

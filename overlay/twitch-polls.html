@@ -246,8 +246,15 @@
   let lastPoll       = null;
 
   // ── WebSocket ────────────────────────────────────────────────────────────────
-  function connect() {
-    const ws = new WebSocket('ws://' + (location.hostname || 'localhost') + ':3001');
+  // The bridge requires a token when LAN-exposed (WS_HOST != loopback) — fetched once from the
+  // HTTP API this page was loaded from and cached for reconnects; a no-op on the default loopback bridge.
+  let _wsToken = null;
+  async function connect() {
+    if (!_wsToken) {
+      try { _wsToken = (await (await fetch('http://' + (location.hostname || 'localhost') + ':3000/api/ws-token')).json()).token || ''; }
+      catch (e) { _wsToken = ''; }
+    }
+    const ws = new WebSocket('ws://' + (location.hostname || 'localhost') + ':3001' + (_wsToken ? ('?token=' + encodeURIComponent(_wsToken)) : ''));
     ws.onopen    = () => ws.send(JSON.stringify({ type: 'request_state' }));
     ws.onmessage = ({ data }) => {
       try {

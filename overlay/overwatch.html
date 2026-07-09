@@ -312,7 +312,16 @@ function applyBan(pId,imgId,iconId,name){
   }
 }
 
-function getBanNames(bansByMap,idx,side){
+// Reads bans straight off the LIVE state.draft when it's the active Overwatch draft (always
+// current — nothing to fall out of sync), falling back to the older per-map owMatch.bansByMap
+// tracker only when no draft is running (e.g. bans entered via the old hero-ban-manager panel).
+function getBanNames(state,idx,side){
+  const draft=state.draft;
+  if(draft && draft.game==='overwatch' && Array.isArray(draft.ops)){
+    const bans=draft.ops.filter(function(o){ return o.by===side && o.action==='ban'; });
+    return [bans[0]&&bans[0].name||'', bans[1]&&bans[1].name||''];
+  }
+  const bansByMap=Array.isArray(state.owMatch&&state.owMatch.bansByMap)?state.owMatch.bansByMap:[];
   const entry=(Array.isArray(bansByMap)?bansByMap[idx]:null)||{};
   const v=entry[side];
   if(Array.isArray(v)) return [v[0]&&v[0].hero||'', v[1]&&v[1].hero||''];
@@ -320,8 +329,8 @@ function getBanNames(bansByMap,idx,side){
   return ['',''];
 }
 
-function applyTeamBans(team, bansByMap, idx){
-  const names=getBanNames(bansByMap,idx,team);
+function applyTeamBans(team, state, idx){
+  const names=getBanNames(state,idx,team);
   applyBan('ow-ban-portrait-'+team+'0','ow-ban-img-'+team+'0','ow-ban-icon-'+team+'0',names[0]);
   applyBan('ow-ban-portrait-'+team+'1','ow-ban-img-'+team+'1','ow-ban-icon-'+team+'1',names[1]);
 }
@@ -476,12 +485,13 @@ function render(state){
   buildHistory('ow-history-b',series.orange||0,winsNeeded);
   buildHistoryBar('ow-hist-cards',hist,tA,tB,ow.gameMode||'escort',ow.showMapLabels!==false);
 
-  // Bans — match-global (index 0); portrait col shows/hides as a unit
-  const bans=Array.isArray(ow.bansByMap)?ow.bansByMap:[];
-  applyTeamBans('a',bans,0);
-  applyTeamBans('b',bans,0);
-  const banEntry=bans[0]||{};
-  const hasBans=!!(banEntry.a||banEntry.b);
+  // Bans — per the CURRENT map (mirrors _owCurMapIdx in the control panel: game.number-1),
+  // not always map 1 — otherwise a later game keeps showing game 1's bans forever. Prefers the
+  // live Draft panel (state.draft) when that's what's actually running — see getBanNames().
+  applyTeamBans('a',state,curIdx);
+  applyTeamBans('b',state,curIdx);
+  const namesA=getBanNames(state,curIdx,'a'), namesB=getBanNames(state,curIdx,'b');
+  const hasBans=!!(namesA[0]||namesA[1]||namesB[0]||namesB[1]);
   const bColA=document.getElementById('ow-bans-col-a');
   const bColB=document.getElementById('ow-bans-col-b');
   if(bColA) bColA.classList.toggle('has-bans',hasBans);

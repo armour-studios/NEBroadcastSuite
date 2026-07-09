@@ -81,6 +81,36 @@
     /* Active slot pulse (whose turn it is) */
     .active { animation:dpulse 1.15s ease-in-out infinite; }
     @keyframes dpulse { 0%,100% { box-shadow:0 0 0 0 rgba(255,255,255,0); } 50% { box-shadow:0 0 0 3px rgba(255,255,255,.85); } }
+
+    /* ── Ban-only clean layout (Overwatch / Marvel Rivals — a few bans, no picks) ──
+       Vertically & horizontally centred; adapts to 2 bans (1 per team) or 4 (2 per team). */
+    #draft-stage.ban-mode { justify-content:center; }
+    #draft-stage.ban-mode .d-head { margin-top:0; }
+    #draft-stage.ban-mode .d-phase { margin-top:14px; }
+    .d-cols.ban-only { justify-content:center; margin-top:44px; }
+    .d-banboard { display:flex; align-items:center; justify-content:center; gap:clamp(56px, 7vw, 128px); }
+    .d-bo-team { display:flex; flex-direction:column; align-items:center; gap:16px; max-width:660px; }
+    .d-bo-logo { height:112px; max-width:230px; object-fit:contain; filter:drop-shadow(0 6px 20px rgba(0,0,0,.55)); }
+    .d-bo-name { font-weight:700; font-size:2.7em; text-transform:uppercase; letter-spacing:.03em; line-height:1;
+      text-align:center; text-shadow:0 3px 16px rgba(0,0,0,.6); }
+    .d-bo-tag { font-size:.62em; font-weight:700; letter-spacing:.34em; color:#8a919c; text-transform:uppercase; margin-top:2px; }
+    .d-bo-bans { display:flex; gap:26px; margin-top:10px; }
+    .d-bo-ban { width:200px; height:200px; border-radius:18px; overflow:hidden; position:relative; flex-shrink:0;
+      background:var(--scene-bg,#171b22); border:2px solid rgba(255,255,255,.12); box-shadow:0 14px 38px rgba(0,0,0,.5); }
+    .d-bo-bans.solo .d-bo-ban { width:250px; height:250px; }
+    .d-bo-ban img { width:100%; height:100%; object-fit:cover; object-position:center 20%; filter:grayscale(1) brightness(.5); }
+    .d-bo-ban::after { content:''; position:absolute; left:14px; right:14px; top:50%; height:7px; border-radius:4px; background:#ff4d57;
+      transform:rotate(-20deg) translateY(-50%); box-shadow:0 0 14px rgba(255,77,87,.9); opacity:0; }
+    .d-bo-ban.filled::after { opacity:1; }
+    .d-bo-ban-name { position:absolute; left:0; right:0; bottom:10px; text-align:center; font-weight:700; font-size:1.15em; color:#fff;
+      text-transform:uppercase; letter-spacing:.02em; text-shadow:0 2px 10px rgba(0,0,0,.9); padding:0 8px; }
+    .d-bo-ban.empty { background:rgba(255,255,255,.03); border-style:dashed; box-shadow:none; }
+    .d-bo-ban.empty .d-bo-ban-name { color:#4a5162; font-size:.95em; letter-spacing:.14em; }
+    .d-bo-ban.active { border-color:rgba(255,255,255,.95); }
+    .d-bo-mid { display:flex; flex-direction:column; align-items:center; gap:14px; align-self:center; }
+    .d-bo-vs { font-weight:800; font-size:2.9em; color:rgba(255,255,255,.34); letter-spacing:.14em; }
+    .d-bo-score { font-weight:700; font-size:2em; color:#fff; padding:5px 20px; border-radius:10px;
+      background:rgba(12,16,24,.72); border:1px solid rgba(255,255,255,.14); font-variant-numeric:tabular-nums; }
   </style>
 </head>
 <body>
@@ -167,6 +197,47 @@
       return col;
     }
 
+    // Clean centred layout for ban-only games (Overwatch, Marvel Rivals): two team groups of
+    // large banned-hero tiles flanking a VS / series score — no empty pick columns to fill the screen.
+    function buildBanBoard(data, d) {
+      const board = document.createElement('div'); board.className = 'd-banboard';
+      const group = (side) => {
+        const t = SceneBase.teamSide(data, side === 'a' ? 'blue' : 'orange');
+        const nBans = countsFor(d.sequence, side).bans;
+        const bans = (d.ops || []).filter((o) => o.by === side && o.action === 'ban');
+        const isTurn = !!(d.turn && d.turn.team === side && d.turn.action === 'ban');
+        const g = document.createElement('div'); g.className = 'd-bo-team';
+        if (t.customLogo) { const lg = document.createElement('img'); lg.className = 'd-bo-logo'; lg.src = t.customLogo; lg.alt = ''; g.appendChild(lg); }
+        const nm = document.createElement('div'); nm.className = 'd-bo-name';
+        nm.textContent = t.name || (side === 'a' ? 'BLUE' : 'RED'); nm.style.color = t.color; g.appendChild(nm);
+        const tag = document.createElement('div'); tag.className = 'd-bo-tag';
+        tag.textContent = nBans === 1 ? 'HERO BAN' : 'HERO BANS'; g.appendChild(tag);
+        const row = document.createElement('div'); row.className = 'd-bo-bans' + (nBans === 1 ? ' solo' : '');
+        for (let i = 0; i < nBans; i++) {
+          const op = bans[i];
+          const b = document.createElement('div'); b.className = 'd-bo-ban' + (op ? ' filled' : ' empty');
+          if (op) b.style.borderColor = t.color;
+          if (op && op.image) { const im = document.createElement('img'); im.src = op.image; im.alt = op.name; b.appendChild(im); }
+          const bn = document.createElement('div'); bn.className = 'd-bo-ban-name';
+          bn.textContent = op ? op.name : (isTurn && i === bans.length ? 'Banning…' : 'Ban ' + (i + 1));
+          b.appendChild(bn);
+          if (!op && isTurn && i === bans.length) b.classList.add('active');
+          row.appendChild(b);
+        }
+        g.appendChild(row);
+        return g;
+      };
+      const mid = document.createElement('div'); mid.className = 'd-bo-mid';
+      const vs = document.createElement('div'); vs.className = 'd-bo-vs'; vs.textContent = 'VS'; mid.appendChild(vs);
+      const sa = data && data.match && data.match.score && data.match.score.a;
+      const sb = data && data.match && data.match.score && data.match.score.b;
+      if (typeof sa === 'number' && typeof sb === 'number') {
+        const sc = document.createElement('div'); sc.className = 'd-bo-score'; sc.textContent = sa + ' – ' + sb; mid.appendChild(sc);
+      }
+      board.appendChild(group('a')); board.appendChild(mid); board.appendChild(group('b'));
+      return board;
+    }
+
     function setPhase(d, data) {
       const pill = document.getElementById('d-phase-pill');
       const dot = document.getElementById('d-phase-dot');
@@ -192,14 +263,18 @@
     function render(data) {
       const d = data.draft || {};
       _lastDraft = d;
-      stage.classList.add('show');
+      // Nothing pushed live yet (or the board was reset/cleared) — hide the whole stage instead
+      // of showing an empty/stale board of heroes.
+      const visible = d.visible !== false && Array.isArray(d.sequence) && d.sequence.length > 0;
+      stage.classList.toggle('show', visible);
+      if (!visible) { _sig = ''; return; }
 
       // Timer: reset the countdown whenever the turn advances.
       const turnKey = (d.ops ? d.ops.length : 0) + ':' + (d.turn ? d.turn.team + d.turn.action : 'none');
       _timerGame = !!(d.turn && !d.complete);
       if (turnKey !== _turnKey) { _turnKey = turnKey; _deadline = Date.now() + PER_PICK_SECONDS * 1000; }
 
-      const sig = JSON.stringify({ ops: d.ops, turn: d.turn, t: d.title, seq: d.sequence,
+      const sig = JSON.stringify({ ops: d.ops, turn: d.turn, t: d.title, sub: d.subtitle, seq: d.sequence,
         c: [data.teams?.blue?.color, data.teams?.orange?.color, data.teams?.blue?.name, data.teams?.orange?.name],
         sc: data?.match?.score });
       if (sig === _sig) { tickTimer(d); return; }
@@ -208,13 +283,27 @@
       document.documentElement.style.setProperty('--accent', SceneBase.brandAccent(data));
       document.getElementById('d-title').textContent = (d.title || 'CHAMPION DRAFT').toUpperCase();
       const blue = SceneBase.teamSide(data, 'blue'), orange = SceneBase.teamSide(data, 'orange');
-      document.getElementById('d-sub').textContent = (blue.name || 'BLUE') + '  ·  ' + (orange.name || 'RED');
+      // Ban-only games (Overwatch / Marvel Rivals) get the clean centred ban board; everything with
+      // picks (LoL / Dota / Valorant) keeps the two-column pick-ban layout.
+      const banOnly = !(d.sequence || []).some((s) => s.action === 'pick');
+      // Custom subtext when set. Ban-only boards show the team names on the board itself, so we skip
+      // the "BLUE · RED" fallback line (no bullet); pick/ban layouts keep it.
+      document.getElementById('d-sub').textContent = (d.subtitle && d.subtitle.trim())
+        ? d.subtitle.trim()
+        : (banOnly ? '' : ((blue.name || 'BLUE') + '  ·  ' + (orange.name || 'RED')));
       setPhase(d, data);
       tickTimer(d);
+
       const cols = document.querySelector('.d-cols');
-      const newA = buildCol('a', data, d); newA.id = 'col-a';
-      const newB = buildCol('b', data, d); newB.id = 'col-b';
-      cols.replaceChildren(newA, newB);
+      cols.classList.toggle('ban-only', banOnly);
+      stage.classList.toggle('ban-mode', banOnly);
+      if (banOnly) {
+        cols.replaceChildren(buildBanBoard(data, d));
+      } else {
+        const newA = buildCol('a', data, d); newA.id = 'col-a';
+        const newB = buildCol('b', data, d); newB.id = 'col-b';
+        cols.replaceChildren(newA, newB);
+      }
     }
 
     SceneBase.connect((data) => { SceneBase.applySceneConfig('draft', data); render(data); });
@@ -223,18 +312,15 @@
     if (EMBED || location.protocol === 'file:') {
       render({ teams: { blue: { name: 'FROST', color: '#3b82f6' }, orange: { name: 'EMBER', color: '#f97316' } },
         match: { score: { a: 1, b: 0 } },
-        draft: { visible: true, title: 'Grand Final — Draft', game: 'league', teamStart: 'a', complete: false,
-          turn: { team: 'b', action: 'pick' },
+        // Overwatch-style ban board (2 bans per team). Change owBanCount/sequence length to preview the 2-ban layout.
+        draft: { visible: true, title: 'Grand Final — Hero Bans', game: 'overwatch', teamStart: 'a', complete: false, owBanCount: 4,
+          turn: { team: 'b', action: 'ban' },
           sequence: [
-            { action: 'ban', by: 'a' }, { action: 'ban', by: 'b' }, { action: 'ban', by: 'a' }, { action: 'ban', by: 'b' }, { action: 'ban', by: 'a' }, { action: 'ban', by: 'b' },
-            { action: 'pick', by: 'a' }, { action: 'pick', by: 'b' }, { action: 'pick', by: 'b' }, { action: 'pick', by: 'a' }, { action: 'pick', by: 'a' }, { action: 'pick', by: 'b' }
+            { action: 'ban', by: 'a' }, { action: 'ban', by: 'b' }, { action: 'ban', by: 'b' }, { action: 'ban', by: 'a' }
           ],
           ops: [
-            { name: 'Aatrox', action: 'ban', by: 'a', image: '/assets/lol/Aatrox.jpg' },
-            { name: 'Ahri', action: 'ban', by: 'b', image: '/assets/lol/Ahri.jpg' },
-            { name: 'Jax', action: 'ban', by: 'a', image: '/assets/lol/Jax.jpg' },
-            { name: 'Lee Sin', action: 'pick', by: 'a', image: '/assets/lol/LeeSin.jpg' },
-            { name: 'Jinx', action: 'pick', by: 'b', image: '/assets/lol/Jinx.jpg' }
+            { name: 'Sombra', action: 'ban', by: 'a', image: '/assets/overwatch/heroes/sombra.png' },
+            { name: 'Widowmaker', action: 'ban', by: 'b', image: '/assets/overwatch/heroes/widowmaker.png' }
           ] } });
     }
   })();

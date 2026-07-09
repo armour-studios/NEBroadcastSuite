@@ -1011,11 +1011,14 @@ const VAL_LOGO_FALLBACK = 'data:image/svg+xml,' + encodeURIComponent(
 function agentIconUrl(agent)    { return `/assets/valorant/agents/${agent}/${agent}_icon.webp`; }
 function abilityIconUrl(agent, slot) { return `/assets/valorant/agents/${agent}/ability_${slot}.webp`; }
 function weaponIconUrl(weapon)  { return `/assets/valorant/game_icons/${weapon}.webp`; }
-function spikeCdnUrl(red)       { return `${CDN}/${red ? 'spike_red' : 'spike_white'}.png`; }
-function spikeCarrierIconUrl()  { return `${CDN}/game_icons/spike.webp`; }
-function creditsIconUrl()       { return `${CDN}/game_icons/credits.webp`; }
-function diamondIconUrl()       { return `${CDN}/diamond-solid.svg`; }
-function ultBorderUrl()         { return `${CDN}/ultimage-charged-border.svg`; }
+// Bundled locally under /assets/valorant (was fetched live from jsdelivr on every load —
+// broke this scene at any offline/no-internet venue). Agent/ability/weapon art below still
+// isn't bundled and keeps its CDN fallback; these five small UI icons now are.
+function spikeCdnUrl(red)       { return `/assets/valorant/${red ? 'spike_red' : 'spike_white'}.png`; }
+function spikeCarrierIconUrl()  { return `/assets/valorant/game_icons/spike.webp`; }
+function creditsIconUrl()       { return `/assets/valorant/game_icons/credits.webp`; }
+function diamondIconUrl()       { return `/assets/valorant/diamond-solid.svg`; }
+function ultBorderUrl()         { return `/assets/valorant/ultimage-charged-border.svg`; }
 
 // Fallback: try CDN after local miss
 function withCdnFallback(img, localSrc, cdnPath, svgFallback) {
@@ -1836,8 +1839,15 @@ function applyBrand(data) {
 // Brand kit rides broadcasts only when it changes — carry the last-seen value forward so
 // light broadcasts don't wipe the sponsor rail mid-show (pattern from rl-hud.html/scene-base).
 const _lib = { brand: null };
-function connect() {
-  const sock = new WebSocket('ws://' + (location.hostname || 'localhost') + ':3001');
+// The bridge requires a token when LAN-exposed (WS_HOST != loopback) — fetched once from the
+// HTTP API this page was loaded from and cached for reconnects; a no-op on the default loopback bridge.
+let _wsToken = null;
+async function connect() {
+  if (!_wsToken) {
+    try { _wsToken = (await (await fetch('http://' + (location.hostname || 'localhost') + ':3000/api/ws-token')).json()).token || ''; }
+    catch (e) { _wsToken = ''; }
+  }
+  const sock = new WebSocket('ws://' + (location.hostname || 'localhost') + ':3001' + (_wsToken ? ('?token=' + encodeURIComponent(_wsToken)) : ''));
   sock.onopen  = () => sock.send(JSON.stringify({ type: 'request_state' }));
   sock.onmessage = ({ data }) => {
     let msg; try { msg = JSON.parse(data); } catch { return; }

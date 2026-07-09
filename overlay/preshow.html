@@ -130,6 +130,22 @@
       aspect-ratio: 16 / 9; border: 0;
     }
 
+    /* Caster prediction badge — corner sticker over the cam, set from the Desk Show settings
+       panel (Graphics ▸ Desk Show ▸ Caster Predictions). Hidden until a pick is made. */
+    .cam-pick {
+      position: absolute; top: 10px; right: 10px; z-index: 3;
+      display: flex; align-items: center; gap: 7px;
+      padding: 5px 11px 5px 9px; border-radius: 7px;
+      background: rgba(10,12,16,.82); border: 1px solid rgba(255,255,255,.14);
+      box-shadow: 0 4px 14px rgba(0,0,0,.4);
+      opacity: 0; transform: translateY(-6px);
+      transition: opacity .3s ease, transform .3s ease;
+    }
+    .cam-pick.show { opacity: 1; transform: none; }
+    .cam-pick-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; background: #fff; }
+    .cam-pick-lbl { font-size: 9px; font-weight: 900; letter-spacing: .14em; text-transform: uppercase; color: rgba(255,255,255,.55); }
+    .cam-pick-team { font-size: 13px; font-weight: 800; letter-spacing: .01em; text-transform: uppercase; color: #fff; white-space: nowrap; max-width: 160px; overflow: hidden; text-overflow: ellipsis; }
+
     .cam-plate {
       display: flex;
       align-items: center;
@@ -423,7 +439,9 @@
       for (let i = 1; i <= CAM_COUNT; i++) {
         const card = document.createElement('div');
         card.className = 'cam-card';
-        card.innerHTML = `<div id="hole${i}" class="cam-hole"></div>
+        card.innerHTML = `<div id="hole${i}" class="cam-hole">
+            <div id="pick${i}" class="cam-pick"><span id="pickdot${i}" class="cam-pick-dot"></span><span class="cam-pick-lbl">Picks</span><span id="pickteam${i}" class="cam-pick-team"></span></div>
+          </div>
           <div class="cam-plate">
             <span id="staffname${i}" class="cam-name">—</span>
             <span id="socials${i}" class="cam-handle" style="display:none"></span>
@@ -617,6 +635,26 @@
       el('pf-headline').textContent = (pre.headline || '').toString().toUpperCase();
     }
 
+    // Caster prediction badges — corner sticker on each cam box, set from the control panel's
+    // Desk Show settings (Caster Predictions). predictions[i] = '' | 'blue' | 'orange' for slot i+1.
+    function renderPredictions(data) {
+      const pre = data.preshow || {};
+      const predictions = Array.isArray(pre.predictions) ? pre.predictions : [];
+      const blue = SceneBase.teamSide(data, 'blue');
+      const orange = SceneBase.teamSide(data, 'orange');
+      for (let i = 0; i < CAM_COUNT; i++) {
+        const slot = i + 1;
+        const badge = el('pick' + slot);
+        if (!badge) continue;
+        const pick = predictions[i];
+        if (pick !== 'blue' && pick !== 'orange') { badge.classList.remove('show'); continue; }
+        const t = pick === 'blue' ? blue : orange;
+        el('pickteam' + slot).textContent = (t.name || (pick === 'blue' ? 'Blue' : 'Orange')).toUpperCase();
+        el('pickdot' + slot).style.background = t.color || (pick === 'blue' ? '#055fdb' : '#e97139');
+        badge.classList.add('show');
+      }
+    }
+
     function render(data) {
       data = data || {};
       applyBrandTheme(data);
@@ -626,6 +664,7 @@
 
       renderCasters(casters);
       renderCasterText(casters);
+      renderPredictions(data);
       renderTopics(data);
       renderMatchup(data);
       renderKickoff(data);
@@ -666,7 +705,8 @@
             { text: 'Sunday predictions', sceneName: '' },
             { text: 'Kickoff', sceneName: '' }
           ],
-          activeTopicIndex: 1
+          activeTopicIndex: 1,
+          predictions: ['blue', '']
         },
         scoreboardAd: {
           logo: 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="140" height="46"><rect width="140" height="46" rx="4" fill="#1a1d24"/><text x="70" y="30" font-size="16" fill="#e8eaf0" text-anchor="middle" font-family="Arial" font-weight="bold">STORE</text></svg>')
