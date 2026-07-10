@@ -2,7 +2,7 @@
 
 **Status:** draft v1 · **Client:** NE Broadcast Suite (Electron desktop, by Armour Studios) · **Backend:** Nameless platform (`BROADCAST_REMOTE_URL`, e.g. `https://namelessesports.com`)
 
-> **Deployment decision (2026-07-10):** the backend serves from the existing Nameless website project, additionally reachable at **https://studios.namelessesports.com** (Vercel domain alias on the same deployment). The future web app lives on that subdomain; its Discord redirect will be `https://studios.namelessesports.com/api/oauth/discord/callback`. The desktop app keeps `http://localhost:3000/api/oauth/discord/callback`.
+> **Deployment decision (2026-07-10):** the backend serves from the existing Nameless website project, additionally reachable at **https://studio.namelessesports.com** (Vercel domain alias on the same deployment). The future web app lives on that subdomain; its Discord redirect will be `https://studio.namelessesports.com/api/oauth/discord/callback`. The desktop app keeps `http://localhost:3000/api/oauth/discord/callback`.
 
 ## Why this exists
 
