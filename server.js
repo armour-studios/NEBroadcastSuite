@@ -12617,6 +12617,22 @@ function handleControlMessage(msg, ws) {
       break;
     }
 
+    // Fully disconnect start.gg — clear the saved API token and turn the integration off. The normal
+    // settings save treats an empty token as "keep current" (so re-saving other fields never wipes it),
+    // so this explicit action is the only way to actually remove the token.
+    case 'startgg_disconnect': {
+      startggApiToken = '';
+      state.startgg.enabled = false;
+      state.startgg.connected = false;
+      state.startgg.queueEnabled = false;
+      state.startgg.lastError = '';
+      if (typeof setStartggQueuePolling === 'function') setStartggQueuePolling(false);
+      saveAppState();
+      broadcastFullState();
+      applyStartggAutomation();
+      break;
+    }
+
     case 'startgg_test_connection': {
       (async () => {
         try {
@@ -12787,6 +12803,14 @@ function handleControlMessage(msg, ws) {
 
     case 'clear_active_event': {
       state.activeEvent = { platform: null, slug: '', name: '', gameName: '', numEntrants: 0, format: '', url: '', loadedAt: null };
+      // Clearing the event clears its DOWNSTREAM feeds too — the stream queue kept
+      // polling and repopulating boards after the event was supposedly gone.
+      state.startgg.queue = [];
+      state.startgg.eventSlug = '';
+      state.startgg.selectedEvent = null;
+      state.startgg.matchFeed = [];
+      if (state.ticker.source === 'startgg') state.ticker.feed = [];
+      setStartggQueuePolling(false);   // stops the poll timer + persists queueEnabled=false
       saveAppState();
       broadcastFullState();
       break;
@@ -15724,6 +15748,10 @@ function startHttpServer(baseDir) {
       }
 
       const existingSggIds = new Set((lg.schedule || []).map(m => m.sggSetId).filter(Boolean));
+      // Content fallback so matches added BEFORE sggSetId was reliably stored (or any that lost it)
+      // still dedup — a given matchup in a given week is unique in league play.
+      const contentKey = (a, b, wk) => `${String(a || '').toLowerCase().trim()}|${String(b || '').toLowerCase().trim()}|${String(wk || '')}`;
+      const existingContent = new Set((lg.schedule || []).map(m => contentKey(m.sggTeamA, m.sggTeamB, m.week)));
       let imported = 0, skipped = 0;
 
       for (const tournament of leagueInfo.tournaments) {
@@ -15747,6 +15775,8 @@ function startHttpServer(baseDir) {
             const entA = slots[0] && slots[0].entrant;
             const entB = slots[1] && slots[1].entrant;
             if (!entA || !entB) continue;
+            const cKey = contentKey(entA.name, entB.name, week);
+            if (existingContent.has(cKey)) { skipped++; continue; }   // same matchup+week already present
 
             // Parse score from displayScore e.g. "TEAM A 2 - TEAM B 1"
             let scoreA = null, scoreB = null;
@@ -15768,6 +15798,7 @@ function startHttpServer(baseDir) {
               result: { scoreA, scoreB }
             });
             existingSggIds.add(String(set.id));
+            existingContent.add(cKey);
             imported++;
           }
         }
@@ -15780,7 +15811,10 @@ function startHttpServer(baseDir) {
       if (imported > 0) lgRecalcServer(lg);
       saveAppState();
       broadcastFullState();
-      res.json({ ok: true, imported, skipped, leagueName: leagueInfo.name, tournaments: leagueInfo.tournaments.length });
+      // Return the updated league so the client can refresh its authoritative copy (schedule +
+      // sggSetIds + standings). Without this the client keeps a stale copy — its next set_leagues save
+      // wipes the imported matches, so the next sync's dedup set is empty and re-imports everything.
+      res.json({ ok: true, imported, skipped, leagueName: leagueInfo.name, tournaments: leagueInfo.tournaments.length, league: lg });
     } catch (err) {
       console.error('[league-sync]', err.message);
       res.status(502).json({ error: err.message });
