@@ -197,8 +197,8 @@ function updateTrayEncode(progress) {
 // off to the (already loaded, hidden) control panel via POST /api/launcher/launch.
 function createLauncherWindow() {
   const launcher = new BrowserWindow({
-    width: 400,
-    height: 520,
+    width: 440,
+    height: 360,
     frame: false,
     show: false,
     resizable: false,
