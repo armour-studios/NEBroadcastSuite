@@ -4501,22 +4501,31 @@ let _authInitialized = false;     // true after first state arrival — guards b
 // they must NEVER show the auth gate, or it flashes on every pop-out.
 const _isPopout = new URLSearchParams(location.search).has('page');
 
-// Set false so anyone can use the app without signing in with Discord. The Discord login
-// button stays available in the header as an OPTIONAL action (enables roles + cloud profile
-// sync). Set true to restore the blocking "Sign in with Discord to continue" login wall.
-const REQUIRE_DISCORD_LOGIN = false;
+// Require Discord sign-in: the studio is gated behind the login/loading screen until the user is
+// signed in. Set false to make login optional (the header chip still offers it).
+const REQUIRE_DISCORD_LOGIN = true;
 
-// Auth gate starts hidden (display:none in HTML). We reveal it only if the user is NOT
-// logged in — this way already-logged-in users never see it flash at startup.
-// Fallback: if the fetch fails or times out, show the gate so users can still log in.
+// Swap the gate between its LOGIN (logo + Discord button) and LOADING (logo + spinner) sub-screens.
+function authGateMode(mode, msg) {
+  const login = el('auth-gate-login'), loading = el('auth-gate-loading');
+  if (login) login.style.display = mode === 'loading' ? 'none' : '';
+  if (loading) loading.style.display = mode === 'loading' ? '' : 'none';
+  if (mode === 'loading' && msg) { const m = el('auth-gate-loading-msg'); if (m) m.textContent = msg; }
+}
+
+// On launch show the gate in LOADING right away so a not-signed-in user never sees the app flash,
+// then resolve the session: signed in → applyDiscordState reveals the app; not signed in → switch to
+// the login screen. If the status check fails, fall back to the login screen so they can still sign in.
 (function checkDiscordSession() {
   if (_isPopout || !REQUIRE_DISCORD_LOGIN) return;   // pop-out, or login-optional build → never gate
-  const showGate = () => { const g = el('auth-gate'); if (g && g.style.display === 'none') g.style.display = ''; };
-  const fallback = setTimeout(showGate, 3000);
+  const gate = el('auth-gate');
+  if (gate) { gate.style.display = ''; authGateMode('loading', 'Loading…'); }
+  const toLogin = () => authGateMode('login');
+  const fallback = setTimeout(toLogin, 3500);
   fetch('http://localhost:3000/api/oauth/discord/status')
     .then(r => r.json())
-    .then(d => { clearTimeout(fallback); if (!d.connected) showGate(); })
-    .catch(() => { clearTimeout(fallback); showGate(); });
+    .then(d => { clearTimeout(fallback); if (!d.connected) toLogin(); })   // signed in → gate hides via applyDiscordState
+    .catch(() => { clearTimeout(fallback); toLogin(); });
 })();
 
 function applyDiscordState(discord) {
@@ -4530,20 +4539,26 @@ function applyDiscordState(discord) {
       gate.style.display = 'none';   // pop-out windows never gate (inherit the main session)
     } else if (loggedIn && gate.style.display !== 'none') {
       if (!_authInitialized) {
-        // App opened while already logged in — skip animation entirely
+        // App opened while already logged in — the loading screen was the transition; reveal the app.
         gate.style.display = 'none';
+        authGateMode('login');
       } else {
-        // User just logged in this session — play bloom
-        gate.classList.add('gate-expanding');
-        setTimeout(() => gate.classList.add('gate-hiding'), 200);
+        // User just signed in this session → brief "Loading your studio…", then bloom into the app.
+        authGateMode('loading', 'Loading your studio…');
         setTimeout(() => {
-          gate.style.display = 'none';
-          gate.classList.remove('gate-expanding', 'gate-hiding');
-        }, 600);
+          gate.classList.add('gate-expanding');
+          setTimeout(() => gate.classList.add('gate-hiding'), 200);
+          setTimeout(() => {
+            gate.style.display = 'none';
+            gate.classList.remove('gate-expanding', 'gate-hiding');
+            authGateMode('login');
+          }, 600);
+        }, 1000);
       }
     } else if (!loggedIn) {
       gate.classList.remove('gate-expanding', 'gate-hiding');
-      gate.style.display = REQUIRE_DISCORD_LOGIN ? '' : 'none';
+      if (REQUIRE_DISCORD_LOGIN) { gate.style.display = ''; authGateMode('login'); }
+      else gate.style.display = 'none';
     }
   }
   _authInitialized = true;
@@ -4614,9 +4629,49 @@ async function discordLogin() {
     } else {
       window.open(data.url, '_blank');
     }
+    pollDiscordLogin();   // don't rely on a single WS broadcast — poll status until the server confirms
   } catch (err) {
     showToast('Could not start Discord login: ' + err.message, '#c53030', 5000);
   }
+}
+
+// After starting OAuth, poll the server for the resulting session so the app signs in the moment
+// the callback completes — even if the one-shot WS broadcast is missed (auth happened in a separate
+// window/browser, WS was mid-reconnect, etc.). Stops on success or after ~3 min.
+let _discordPollTimer = null;
+// Auth errors from the Nameless backend can point at the studio site ("apply at
+// https://studio.namelessesports.com") — render those URLs as real links. Everything
+// is escaped first; target=_blank routes through the window-open handler, which
+// opens the system browser.
+function linkifyAuthMsg(text) {
+  const esc = String(text || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  return esc.replace(/https:\/\/[^\s<>"]*[^\s<>".,)!?]/g, (url) =>
+    `<a href="${url}" target="_blank" rel="noopener" style="color:#7dd3fc; text-decoration:underline;">${url.replace(/^https:\/\//, '')}</a>`);
+}
+function pollDiscordLogin() {
+  if (_discordPollTimer) return;
+  const startedAt = Date.now();
+  const backToLogin = (note) => {   // return the gate to the login screen (so the user can retry)
+    if (typeof authGateMode === 'function') authGateMode('login');
+    const n = el('auth-gate-note'); if (n && note) n.innerHTML = linkifyAuthMsg(note);
+  };
+  _discordPollTimer = setInterval(async () => {
+    if (Date.now() - startedAt > 180000) { clearInterval(_discordPollTimer); _discordPollTimer = null; backToLogin('Login timed out — try again.'); return; }
+    try {
+      const s = await (await fetch(`${DISCORD_API_BASE}/api/oauth/discord/status`)).json();
+      if (s && s.connected) {
+        clearInterval(_discordPollTimer); _discordPollTimer = null;
+        if (currentState) currentState.discord = { ...(currentState.discord || {}), ...s };
+        applyDiscordState(s);
+        showToast('Signed in as ' + (s.globalName || s.username || 'Discord user'), '#22c55e');
+      } else if (s && s.lastError) {
+        // The callback ran but the code exchange failed — stop polling, say why, back to login.
+        clearInterval(_discordPollTimer); _discordPollTimer = null;
+        showToast('Discord login failed: ' + s.lastError, '#c53030', 8000);
+        backToLogin(s.lastError);
+      }
+    } catch (e) { /* server momentarily unreachable — keep polling */ }
+  }, 1500);
 }
 
 async function discordLogout() {
@@ -4631,9 +4686,11 @@ async function discordLogout() {
 // Auth gate button
 el('auth-gate-btn')?.addEventListener('click', async () => {
   const note = el('auth-gate-note');
-  if (note) note.textContent = 'Opening Discord…';
+  if (note) note.textContent = '';
   await discordLogin();
-  if (note) note.textContent = 'Complete login in the browser window that opened.';
+  // Show the loading spinner while the browser window completes the login; applyDiscordState swaps to
+  // "Loading your studio…" on success, and pollDiscordLogin flips back to the login screen if it fails.
+  authGateMode('loading', 'Waiting for Discord… finish in the window that opened.');
 });
 
 // Dropdown toggle
@@ -4671,6 +4728,8 @@ el('cloud-login-btn')?.addEventListener('click', () => {
   const email = (el('cloud-login-email')?.value || '').trim();
   const pass = el('cloud-login-pass')?.value || '';
   if (!email || !pass) { showToast('Enter your email and password.', '#fbbf24'); return; }
+  const st = el('cloud-login-status');
+  if (st) { st.style.display = ''; st.style.color = 'var(--muted)'; st.textContent = 'Signing in…'; }
   send('cloud_email_login', { email, password: pass });
 });
 el('cloud-login-pass')?.addEventListener('keydown', (e) => { if (e.key === 'Enter') el('cloud-login-btn')?.click(); });
@@ -24626,6 +24685,17 @@ async function connect() {
     } else if (msg.type === 'import-export-result') {
       el('import-export-result').textContent = msg.data.message;
       el('import-export-result').style.color = msg.data.result ? 'green' : 'red';
+    } else if (msg.type === 'cloud-email-login') {
+      // Email sign-in result — show it under the form (linkified: denials point at the
+      // studio site to apply/sign) and toast it.
+      const st = el('cloud-login-status');
+      if (st) {
+        st.style.display = '';
+        st.style.color = msg.data.ok ? '#9ae6b4' : '#f87171';
+        st.innerHTML = linkifyAuthMsg(msg.data.message || (msg.data.ok ? 'Signed in.' : 'Login failed.'));
+      }
+      showToast(msg.data.message || (msg.data.ok ? 'Signed in.' : 'Login failed.'), msg.data.ok ? '#22c55e' : '#c53030', msg.data.ok ? 3500 : 8000);
+      if (msg.data.ok) { const p = el('cloud-login-pass'); if (p) p.value = ''; }
     } else if (msg.type === 'cloud_status') {
       applyCloudStatus(msg.data);
     } else if (msg.type === 'cloud_profiles') {
