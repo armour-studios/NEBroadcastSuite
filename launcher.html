@@ -27,8 +27,8 @@
   .close-btn:hover { background: rgba(255,255,255,.08); color: #fff; }
 
   .wrap {
-    display: flex; flex-direction: column; align-items: center;
-    height: 100%; padding: 22px 32px 48px; gap: 9px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    height: 100%; padding: 12px 32px 44px; gap: 9px;   /* bottom pad clears the updates footer */
   }
 
   .logo {
@@ -146,7 +146,8 @@
         <input type="password" id="pass" placeholder="Password" autocomplete="current-password">
         <button type="submit" class="email-btn">Sign in with email</button>
       </form>
-      <button class="email-toggle" id="email-toggle">Use email instead</button>
+      <!-- Email login parked for now — Discord only. Remove display:none to re-enable. -->
+      <button class="email-toggle" id="email-toggle" style="display:none;">Use email instead</button>
       <div class="note" id="login-note"></div>
     </div>
 
