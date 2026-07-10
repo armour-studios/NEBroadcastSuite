@@ -75,6 +75,7 @@
     "files": [
       "main.js",
       "server.js",
+      "launcher.html",
       ".env.production",
       "backend/**/*",
       "obs/**/*",

@@ -766,7 +766,8 @@ let state = {
     globalName: '',
     avatarUrl: '',
     accessToken: '',
-    refreshToken: ''
+    refreshToken: '',
+    lastError: ''   // why the last OAuth attempt failed (surfaced in the panel + login poll)
   },
 
   // ─── Flows (production automation) ─────────────────────────────────────────
@@ -785,6 +786,7 @@ let _directorRecShownAt = 0;     // when the current primary rec was first emitt
 let _lastRecTargetId = null;     // de-dupe the shadow recommendation stream
 let overlayEditor = null;
 let onEncodeProgressCallback = null;
+let _launcherLaunchCb = null;   // main.js: swap the launcher window for the studio window
 let onRlSpectatorUiHotkeyChange = null;
 let lastGenericDirectorFeed = 0;
 
@@ -2907,7 +2909,8 @@ function buildLiveState() {
     username: state.discord.username,
     discriminator: state.discord.discriminator,
     globalName: state.discord.globalName,
-    avatarUrl: state.discord.avatarUrl
+    avatarUrl: state.discord.avatarUrl,
+    lastError: state.discord.lastError || ''
   };
   // Effective side colours for the active mode — overlays read teams.x.color; the control
   // panel can still see each team's own colour via teams.x.ownColor.
@@ -3185,19 +3188,42 @@ function autoPickLatestCompletedWeek(lg) {
   return completed[completed.length - 1];
 }
 
-// Server-side standings recalc — mirrors client-side lgComputeStandingsFromSchedule.
+// Resolve a schedule match's series score (games won per side) + real per-side totals — mirrors
+// client-side lgMatchTally. When a per-game breakdown (m.games) is provided, the series score is
+// derived by counting games won and totals are summed from the individual game scores; otherwise
+// both come directly from the single result.scoreA/scoreB entry (the breakdown is optional).
+function srvLgMatchTally(m) {
+  const r = m.result || {};
+  const hasGames = Array.isArray(m.games) && m.games.length > 0;
+  if (hasGames) {
+    let sa = 0, sb = 0, totA = 0, totB = 0;
+    for (const g of m.games) {
+      const ga = Number(g.scoreA) || 0, gb = Number(g.scoreB) || 0;
+      totA += ga; totB += gb;
+      if (ga > gb) sa++; else if (gb > ga) sb++;
+    }
+    return { sa, sb, totA, totB };
+  }
+  const sa = Number(r.scoreA) || 0, sb = Number(r.scoreB) || 0;
+  return { sa, sb, totA: sa, totB: sb };
+}
+
+// Server-side standings recalc — mirrors client-side lgComputeStandingsFromSchedule/lgAggregateFromSchedule.
 function lgRecalcServer(lg) {
   const sc = lg.scoring || {};
-  const ptWin = sc.win ?? 3, ptLoss = sc.loss ?? 0, ptDraw = sc.draw ?? 1;
+  const ptWin = sc.win ?? 3, ptLoss = sc.loss ?? 0, ptDraw = sc.draw ?? 1, ptOtw = sc.otw ?? ptWin;
   const map = {};
   (lg.teams || []).forEach(tm => { map[tm.id] = { teamId: tm.id, w: 0, l: 0, t: 0, gf: 0, ga: 0, pts: 0 }; });
   for (const m of (lg.schedule || [])) {
-    const r = m.result; if (!r || r.scoreA == null || r.scoreB == null) continue;
+    const r = m.result;
+    const hasGames = Array.isArray(m.games) && m.games.length > 0;
+    if (!hasGames && (!r || r.scoreA == null || r.scoreB == null)) continue;
     const a = map[m.teamA], b = map[m.teamB]; if (!a || !b) continue;
-    const sa = Number(r.scoreA) || 0, sb = Number(r.scoreB) || 0;
-    a.gf += sa; a.ga += sb; b.gf += sb; b.ga += sa;
-    if (sa > sb) { a.w++; a.pts += ptWin; b.l++; b.pts += ptLoss; }
-    else if (sb > sa) { b.w++; b.pts += ptWin; a.l++; a.pts += ptLoss; }
+    const { sa, sb, totA, totB } = srvLgMatchTally(m);
+    a.gf += totA; a.ga += totB; b.gf += totB; b.ga += totA;
+    const winPts = (r && r.ot) ? ptOtw : ptWin;
+    if (sa > sb) { a.w++; a.pts += winPts; b.l++; b.pts += ptLoss; }
+    else if (sb > sa) { b.w++; b.pts += winPts; a.l++; a.pts += ptLoss; }
     else { a.t++; a.pts += ptDraw; b.t++; b.pts += ptDraw; }
   }
   lg.standings = Object.values(map);
@@ -3244,6 +3270,7 @@ function migrateLeague(lg) {
   if (!Array.isArray(lg.schedule)) lg.schedule = [];
   if (!Array.isArray(lg.seasonHistory)) lg.seasonHistory = [];
   lg.teams.forEach((tm) => { if (tm && !tm.id) tm.id = srvLgUid('tm'); });
+  lg.schedule.forEach((m) => { if (m && !Array.isArray(m.games)) m.games = []; });
   return capLeagueLogo(lg);
 }
 
@@ -16993,14 +17020,31 @@ function startHttpServer(baseDir) {
       username: state.discord.username,
       discriminator: state.discord.discriminator,
       globalName: state.discord.globalName,
-      avatarUrl: state.discord.avatarUrl
+      avatarUrl: state.discord.avatarUrl,
+      lastError: state.discord.lastError || ''
     });
+  });
+
+  // POST /api/launcher/launch - the launcher window finished auth + its load animation;
+  // main.js swaps it for the studio window via the registered callback.
+  app.post('/api/launcher/launch', (req, res) => {
+    try {
+      if (typeof _launcherLaunchCb === 'function') _launcherLaunchCb();
+      res.json({ ok: true });
+    } catch (e) {
+      res.status(500).json({ error: (e && e.message) || 'launch failed' });
+    }
   });
 
   // POST /api/oauth/discord/init - Returns the Discord OAuth URL for the client to open
   app.post('/api/oauth/discord/init', (req, res) => {
     if (!DISCORD_CLIENT_ID) {
       return res.status(500).json({ error: 'DISCORD_CLIENT_ID not configured — add it to .env.local' });
+    }
+    // The callback can only exchange the code if it has a secret (local mode) or a backend to do it.
+    // Fail HERE with a clear message instead of opening an OAuth flow that dead-ends at the callback.
+    if (!cloud.configured() && !(process.env.DISCORD_CLIENT_SECRET || '')) {
+      return res.status(500).json({ error: 'Discord login can\'t finish: add DISCORD_CLIENT_SECRET to .env.local (Discord Developer Portal → your app → OAuth2 → Client Secret), or set BROADCAST_REMOTE_URL to use the Nameless backend. Then relaunch.' });
     }
     const stateParam = Math.random().toString(36).substring(2, 18);
     const _crypto = require('crypto');
@@ -17031,10 +17075,28 @@ function startHttpServer(baseDir) {
 
     const _sess = stateParam ? oauthSessions.get(stateParam) : null;
     const codeVerifier = _sess && _sess.codeVerifier;
-    const useBackend = cloud.configured();
     const DISCORD_CLIENT_SECRET = process.env.DISCORD_CLIENT_SECRET || '';
+    // Prefer the LOCAL direct exchange whenever a client secret is present (dev machines): it's
+    // registered for the localhost redirect and doesn't depend on the Nameless backend being
+    // deployed/ready. BROADCAST_REMOTE_URL DEFAULTS to namelessesports.com (so cloud.configured() is
+    // always true), which was silently routing local dev logins through a backend still being built —
+    // that's where the 400 came from. Only use the backend when there's no local secret (production).
+    // Set DISCORD_USE_BACKEND=1 to FORCE the backend path with a secret still present — this exercises
+    // the exact production flow (POST namelessesports.com/api/auth/discord) so you can verify it.
+    const forceBackend = process.env.DISCORD_USE_BACKEND === '1';
+    const useBackend = cloud.configured() && (forceBackend || !DISCORD_CLIENT_SECRET);
     if (!useBackend && !DISCORD_CLIENT_SECRET) {
       return res.status(500).send('Discord login is not configured — no backend (BROADCAST_REMOTE_URL) and no DISCORD_CLIENT_SECRET.');
+    }
+    // The login used PKCE (code_challenge), so the token exchange REQUIRES the matching code_verifier
+    // we stashed at init. It lives in memory, so it's gone if the server restarted (or nodemon reloaded
+    // it) between clicking Sign in and returning here → Discord replies 400 invalid_grant. Detect that
+    // and say so plainly instead of a cryptic 400.
+    if (!codeVerifier) {
+      state.discord.connected = false;
+      state.discord.lastError = 'Login session expired (the app restarted mid-login) — just click Sign in with Discord again.';
+      try { broadcast(bridgeClients, { type: 'full_state', data: buildLiveState() }); } catch (e) {}
+      return res.status(400).send(state.discord.lastError);
     }
 
     try {
@@ -17082,6 +17144,7 @@ function startHttpServer(baseDir) {
       state.discord.avatarUrl    = avatarUrl;
       state.discord.accessToken  = accessToken;
       state.discord.refreshToken = refreshToken;
+      state.discord.lastError    = '';
 
       saveDiscordUser();
 
@@ -17107,8 +17170,18 @@ function startHttpServer(baseDir) {
 
       res.send(`<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><title>NE Broadcast Suite</title><style>*{box-sizing:border-box;margin:0;padding:0}html,body{height:100%;background:#111318;color:#e8eaf0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;display:flex;align-items:center;justify-content:center}.card{background:#1a1d24;border:1px solid #2a2e3a;border-radius:16px;padding:40px 36px;text-align:center;width:320px;animation:fadeIn .3s ease-out}.logo{width:36px;height:36px;object-fit:contain;margin-bottom:20px;opacity:.85}.check-ring{width:64px;height:64px;border-radius:50%;background:rgba(88,101,242,.12);border:2px solid rgba(88,101,242,.35);display:flex;align-items:center;justify-content:center;margin:0 auto 20px}.avatar{width:56px;height:56px;border-radius:50%;border:2px solid #5865f2;margin-bottom:12px}.name{font-size:18px;font-weight:600;margin-bottom:4px}.handle{font-size:13px;color:#6b7280;}@keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}</style></head><body><div class="card"><img src="/assets/images/small.png" class="logo" alt="NE Broadcast Suite"><div class="check-ring"><svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="#5865f2" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></div><img src="${avatarUrl}" class="avatar" alt=""><div class="name">${u.global_name || u.username}</div><div class="handle">@${u.username}</div></div></body></html>`);
     } catch (err) {
-      console.error('[Discord OAuth]', err.response?.data || err.message);
-      res.status(500).send('Discord authentication failed — check server logs');
+      // Surface the ACTUAL Discord error (redirect_uri_mismatch / invalid_client / invalid_grant …)
+      // both to the terminal AND into state so the panel/login-poll can show why it failed.
+      const d = err.response && err.response.data;
+      // Surface the REAL Discord error: prefer error_description/error, else the raw body, else message.
+      const reason = (d && (d.error_description || d.error))
+        || (d && typeof d === 'object' ? JSON.stringify(d).slice(0, 180) : (typeof d === 'string' ? d : ''))
+        || err.message || 'Discord authentication failed';
+      console.error('[Discord OAuth] token exchange failed:', err.response ? err.response.status : '', d || err.message);
+      state.discord.connected = false;
+      state.discord.lastError = String(reason).slice(0, 220);
+      try { broadcast(bridgeClients, { type: 'full_state', data: buildLiveState() }); } catch (e) {}
+      res.status(500).send(`Discord authentication failed: ${reason} — check the terminal for details.`);
     }
   });
 
@@ -19657,6 +19730,12 @@ module.exports.broadcastCrashAlert = function (message) {
 
 module.exports.setEncodeProgressCallback = function (cb) {
   onEncodeProgressCallback = cb;
+};
+
+// Launcher window handoff: main.js registers how to swap launcher → studio window;
+// the launcher page POSTs /api/launcher/launch when auth + load animation are done.
+module.exports.setLauncherLaunchCallback = function (cb) {
+  _launcherLaunchCb = cb;
 };
 
 module.exports.setRlSpectatorUiHotkeyChangeCallback = function (cb) {

@@ -24,6 +24,7 @@ try {
 
 let server;
 let controlPanel;
+let launcherWin = null;   // small pre-auth launcher window (branding + login + updates)
 let tray = null;
 let encodeTrayTitle = 'NE Broadcast Suite';
 let rlUiHotkeyRegistered = null;
@@ -189,6 +190,30 @@ function updateTrayEncode(progress) {
     encodeTrayTitle = 'NE Broadcast Suite';
     tray.setToolTip(encodeTrayTitle);
   }
+}
+
+// Small launcher window — the app's front door. Branding + Discord/email login +
+// Check for Updates. Authenticated users get the 5s load animation, then it hands
+// off to the (already loaded, hidden) control panel via POST /api/launcher/launch.
+function createLauncherWindow() {
+  const launcher = new BrowserWindow({
+    width: 400,
+    height: 520,
+    frame: false,
+    show: false,
+    resizable: false,
+    center: true,
+    backgroundColor: '#0b0c0f',
+    webPreferences: { nodeIntegration: false, contextIsolation: true }
+  });
+  // "Sign in with Discord" and studio-site links open in the system browser.
+  launcher.webContents.setWindowOpenHandler(({ url }) => {
+    if (url.startsWith('http')) require('electron').shell.openExternal(url);
+    return { action: 'deny' };
+  });
+  launcher.loadFile(path.join(__dirname, 'launcher.html'));
+  launcher.once('ready-to-show', () => launcher.show());
+  return launcher;
 }
 
 function createControlPanel() {
@@ -496,8 +521,10 @@ function setupApp() {
     console.log('[APP] App ready event fired');
     setupUserDataFolder();
 
-    // No separate splash window: the panel's auth gate IS the splash (branding +
-    // scan bar + Check for Updates), so open the main window on its first paint.
+    // The small launcher window is the front door (branding + login + update check).
+    // The control panel loads hidden behind it and is only shown when the launcher
+    // says so — after the session is authenticated and its load animation played.
+    const launcher = launcherWin = createLauncherWindow();
     createControlPanel();
     setupPopoutHandler();
     createTray();
@@ -511,15 +538,19 @@ function setupApp() {
         controlPanel.show();
         controlPanel.focus();
       }
+      try { if (!launcher.isDestroyed()) launcher.close(); } catch (_) {}
     };
-    controlPanel.once('ready-to-show', showMain);
-    // Hard safety: show the panel after 15s even if ready-to-show never fires.
-    setTimeout(showMain, 15000);
+    // Closing the launcher without signing in = quitting the app (standard launcher behavior).
+    launcher.on('closed', () => { launcherWin = null; if (!_shown) app.quit(); });
 
     try {
-      // Load server AFTER the window exists so startup I/O doesn't block the splash paint.
+      // Load server AFTER the window exists so startup I/O doesn't block the launcher paint.
       server = require('./server');
       server.start(__dirname);
+      // The launcher POSTs /api/launcher/launch when it's time to swap to the studio.
+      if (typeof server.setLauncherLaunchCallback === 'function') {
+        server.setLauncherLaunchCallback(showMain);
+      }
     } catch (e) {
       // A startup throw here used to die silently (blank window, no backend). Surface it.
       const msg = (e && e.stack) ? e.stack : String(e);
@@ -569,7 +600,11 @@ if (!gotSingleInstanceLock) {
   app.quit();
 } else {
   app.on('second-instance', () => {
-    if (controlPanel) {
+    // During the launcher phase the control panel exists but is hidden (pre-auth) —
+    // focus the launcher instead of revealing the un-authenticated studio window.
+    if (launcherWin && !launcherWin.isDestroyed()) {
+      launcherWin.focus();
+    } else if (controlPanel) {
       if (controlPanel.isMinimized()) controlPanel.restore();
       controlPanel.show();
       controlPanel.focus();
