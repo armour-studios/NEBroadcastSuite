@@ -6436,6 +6436,16 @@ body.popout-qrail .qrail-popout-strip { display: none !important; }
   background: linear-gradient(90deg, transparent, #4aa3ff 40%, #6caaff 60%, transparent);
   animation: agScan 1.6s cubic-bezier(.4,0,.6,1) infinite; }
 @keyframes agScan { 0% { transform: translateX(-100%); } 100% { transform: translateX(386%); } }
+/* License acceptance inside the gate (first sign-in after approval) */
+.auth-gate-card.contract-mode { width: 580px; }
+.gate-lic-box { width: 100%; max-height: 300px; overflow-y: auto; text-align: left;
+  background: rgba(255,255,255,.03); border: 1px solid rgba(255,255,255,.1); border-radius: 9px;
+  padding: 12px 14px; font-size: 11px; line-height: 1.55; color: rgba(255,255,255,.72);
+  user-select: text; }
+.gate-lic-box h3 { font-size: 11px; color: #fff; margin: 10px 0 4px; }
+.gate-lic-box p { margin: 0 0 6px; }
+.gate-lic-row { display: flex; gap: 6px; width: 100%; }
+.gate-lic-row input { flex: 1; }
 .auth-gate-btn {
   display: inline-flex; align-items: center; gap: 9px;
   margin-top: 6px; padding: 0 24px; height: 40px; border-radius: 9px;
@@ -7342,8 +7352,17 @@ body.sides-swapped .qrail-head { flex-direction: row-reverse; }
   -webkit-app-region: no-drag;
   overflow: hidden;
   user-select: none;
-  resize: both; overflow: hidden; min-width: 320px; min-height: 220px; max-width: 1600px; max-height: 940px;
+  /* Resize is handled by the 3 custom handles below (left/right/bottom), not native CSS resize —
+     they all only ever adjust width; height always follows via .obs-prev-body's aspect-ratio:16/9
+     (below), so the feed can be grabbed from any of those 3 sides and never drags out of 16:9. */
+  resize: none; min-width: 320px; max-width: 1600px;
 }
+.obs-prev-resize { position: absolute; z-index: 1; }
+.obs-prev-resize-l, .obs-prev-resize-r { top: 0; bottom: 0; width: 6px; cursor: ew-resize; }
+.obs-prev-resize-l { left: 0; }
+.obs-prev-resize-r { right: 0; }
+.obs-prev-resize-b { left: 0; right: 0; bottom: 0; height: 6px; cursor: ns-resize; }
+.obs-prev-resize:hover, .obs-prev-resize.is-dragging { background: rgba(255,255,255,.12); }
 .obs-prev-header {
   display: flex; align-items: center; gap: 6px;
   padding: 6px 8px;

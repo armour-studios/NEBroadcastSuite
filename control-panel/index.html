@@ -32,6 +32,16 @@
       <p class="auth-gate-sub" id="auth-gate-loading-msg">Loading&hellip;</p>
       <div class="gate-scan-track"><div class="gate-scan"></div></div>
     </div>
+    <!-- CONTRACT state — approved but the license isn't signed yet: review + e-sign here -->
+    <div id="auth-gate-contract" class="auth-gate-mode" style="display:none;">
+      <p class="auth-gate-sub" id="gate-lic-title" style="font-weight:700; color:#fff;">License Agreement</p>
+      <div class="gate-lic-box" id="gate-lic-box"></div>
+      <div class="gate-lic-row">
+        <input type="text" id="gate-lic-name" class="input-text" placeholder="Type your full legal name to sign" autocomplete="name">
+        <button type="button" class="btn btn-primary" id="gate-lic-accept">Accept</button>
+      </div>
+      <p class="auth-gate-note" id="gate-lic-note"></p>
+    </div>
     <div class="auth-gate-footer">
       <button class="auth-gate-upd-btn" id="auth-gate-upd-btn" onclick="gateCheckUpdates()">
         <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-4.5"/></svg>
@@ -9520,6 +9530,11 @@ PacketSendRate=10</pre>
     <video id="obs-prev-video" class="obs-prev-img" autoplay muted playsinline></video>
     <div class="obs-prev-msg" id="obs-prev-msg">Starting Virtual Camera...</div>
   </div>
+  <!-- Drag any of these to resize — width is the only dimension ever set directly; height always
+       follows via .obs-prev-body's aspect-ratio:16/9, so the feed can never be dragged out of ratio. -->
+  <div class="obs-prev-resize obs-prev-resize-l" id="obs-prev-resize-l" title="Drag to resize"></div>
+  <div class="obs-prev-resize obs-prev-resize-r" id="obs-prev-resize-r" title="Drag to resize"></div>
+  <div class="obs-prev-resize obs-prev-resize-b" id="obs-prev-resize-b" title="Drag to resize"></div>
 </div>
 <!-- ── Challonge Link Modal ───────────────────────────────────────────────── -->
 <div id="ev-chal-link-modal" class="seed-csv-backdrop" hidden>

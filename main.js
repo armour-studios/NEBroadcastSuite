@@ -551,6 +551,14 @@ function setupApp() {
       if (typeof server.setLauncherLaunchCallback === 'function') {
         server.setLauncherLaunchCallback(showMain);
       }
+      // The launcher asks for a bigger window when showing the license agreement.
+      if (typeof server.setLauncherResizeCallback === 'function') {
+        server.setLauncherResizeCallback((w, h) => {
+          if (launcherWin && !launcherWin.isDestroyed()) {
+            try { launcherWin.setSize(w, h); launcherWin.center(); } catch (_) {}
+          }
+        });
+      }
     } catch (e) {
       // A startup throw here used to die silently (blank window, no backend). Surface it.
       const msg = (e && e.stack) ? e.stack : String(e);

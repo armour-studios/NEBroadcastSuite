@@ -4505,15 +4505,64 @@ const _isPopout = new URLSearchParams(location.search).has('page');
 // signed in. Set false to make login optional (the header chip still offers it).
 const REQUIRE_DISCORD_LOGIN = true;
 
-// Swap the gate between its LOGIN (logo + Discord button) and LOADING (splash: breathing
-// logo + scan bar) sub-screens. The gate root's ag-loading class drives the animations.
+// Swap the gate between LOGIN (logo + Discord button), LOADING (splash: breathing logo +
+// scan bar) and CONTRACT (license e-sign) sub-screens. ag-loading drives the animations.
 function authGateMode(mode, msg) {
-  const login = el('auth-gate-login'), loading = el('auth-gate-loading');
-  if (login) login.style.display = mode === 'loading' ? 'none' : '';
+  const login = el('auth-gate-login'), loading = el('auth-gate-loading'), contract = el('auth-gate-contract');
+  if (login) login.style.display = mode === 'login' ? '' : 'none';
   if (loading) loading.style.display = mode === 'loading' ? '' : 'none';
-  const gate = el('auth-gate'); if (gate) gate.classList.toggle('ag-loading', mode === 'loading');
+  if (contract) contract.style.display = mode === 'contract' ? '' : 'none';
+  const gate = el('auth-gate');
+  if (gate) {
+    gate.classList.toggle('ag-loading', mode === 'loading');
+    const card = gate.querySelector('.auth-gate-card');
+    if (card) card.classList.toggle('contract-mode', mode === 'contract');
+  }
   if (mode === 'loading' && msg) { const m = el('auth-gate-loading-msg'); if (m) m.textContent = msg; }
 }
+
+// First sign-in after approval: the backend wants the license signed — show it in the gate.
+function gateEnterContract() {
+  fetch(`${DISCORD_API_BASE}/api/cloud/contract`)
+    .then(r => r.json())
+    .then(d => {
+      if (!d || !d.pending) { authGateMode('login'); return; }
+      const lic = d.license || {};
+      const title = el('gate-lic-title'); if (title) title.textContent = lic.title || 'License Agreement';
+      const box = el('gate-lic-box');
+      if (box) {
+        box.textContent = '';
+        if (lic.preamble) { const p = document.createElement('p'); p.textContent = lic.preamble; box.appendChild(p); }
+        (lic.sections || []).forEach(sec => {
+          const h = document.createElement('h3'); h.textContent = sec.title; box.appendChild(h);
+          (sec.clauses || []).forEach(c => { const cp = document.createElement('p'); cp.textContent = c; box.appendChild(cp); });
+        });
+      }
+      const n = el('gate-lic-note'); if (n) n.textContent = '';
+      authGateMode('contract');
+    })
+    .catch(() => authGateMode('login'));
+}
+el('gate-lic-accept')?.addEventListener('click', async () => {
+  const name = (el('gate-lic-name')?.value || '').trim();
+  const n = el('gate-lic-note');
+  if (name.length < 3) { if (n) { n.style.color = '#f87171'; n.textContent = 'Type your full legal name to sign the agreement.'; } return; }
+  const btn = el('gate-lic-accept'); if (btn) btn.disabled = true;
+  if (n) { n.style.color = ''; n.textContent = 'Recording your signature…'; }
+  try {
+    const r = await fetch(`${DISCORD_API_BASE}/api/cloud/contract/accept`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ signatureName: name })
+    });
+    const d = await r.json();
+    if (d && d.ok) {
+      // Signed in — the full_state broadcast takes it from here (load animation + bloom).
+      authGateMode('loading', 'Loading your studio…');
+    } else if (n) { n.style.color = '#f87171'; n.textContent = (d && d.message) || 'Could not record the signature — try again.'; }
+  } catch (e) {
+    if (n) { n.style.color = '#f87171'; n.textContent = 'Could not reach the app server — try again.'; }
+  } finally { if (btn) btn.disabled = false; }
+});
 
 // Splash-style reveal: hold the loading screen so the scan animation reads, then bloom into the app.
 // Re-entrant-safe: every full_state broadcast lands here while the gate is still visible.
@@ -4686,6 +4735,11 @@ function pollDiscordLogin() {
         if (currentState) currentState.discord = { ...(currentState.discord || {}), ...s };
         applyDiscordState(s);
         showToast('Signed in as ' + (s.globalName || s.username || 'Discord user'), '#22c55e');
+      } else if (s && s.needsContract) {
+        // Approved, license unsigned — collect the e-signature right here in the gate.
+        clearInterval(_discordPollTimer); _discordPollTimer = null;
+        const gate = el('auth-gate'); if (gate) gate.style.display = '';
+        gateEnterContract();
       } else if (s && s.lastError) {
         // The callback ran but the code exchange failed — stop polling, say why, back to login.
         clearInterval(_discordPollTimer); _discordPollTimer = null;
@@ -18596,7 +18650,9 @@ function applyDirectorState(d) {
   const altList = el('director-alternates');
   const alts = d.alternates || [];
   if (altWrap) altWrap.style.display = alts.length ? '' : 'none';
-  if (altList) {
+  const _altSig = alts.map((a, i) => i + ':' + a.name + ':' + (a.confidence || 0) + ':' + (a.reason || a.type) + ':' + ((a.target && a.target.id) || '')).join('|');
+  if (altList && altList.dataset.sig !== _altSig) {
+    altList.dataset.sig = _altSig;
     altList.innerHTML = alts.map((a, i) =>
       `<div class="director-alt-item" data-alt-idx="${i}" data-target-id="${(a.target && a.target.id) || ''}">
         <span><strong>${a.name}</strong> — ${a.reason || a.type}</span>
@@ -18618,6 +18674,9 @@ function applyDirectorState(d) {
   const feed = el('director-feed');
   if (feed) {
     const items = (d.feed || []).slice(0, 20);
+    const _feedSig = items.map((f) => (f.id || '') + ':' + f.type + ':' + (f.target || '') + ':' + (f.reason || '') + ':' + (f.gameTime || '')).join('|');
+    if (feed.dataset.sig !== _feedSig) {
+    feed.dataset.sig = _feedSig;
     feed.innerHTML = items.length ? items.map((f) => {
       const time = f.gameTime || (f.ts ? new Date(f.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '');
       return `<div class="director-feed-item" data-feed-id="${f.id || ''}" title="Save replay clip + train AI on this moment">
@@ -18635,6 +18694,7 @@ function applyDirectorState(d) {
         if (st) { st.textContent = 'Saving replay clip from feed…'; st.style.color = 'var(--muted)'; }
       });
     });
+    }
   }
 
   const autoSw = el('check-director-autoswitch');
@@ -22806,6 +22866,12 @@ function applyClipsState(c) {
   const montageListEl = el('montage-list');
   if (montageListEl) {
     const exps = (c.montages || []).filter((m) => m.outputPath);   // only encoded exports
+    // Signature-guard: this rebuild fires on every full_state broadcast, but the encoded-export
+    // list rarely changes. Skip the innerHTML + listener re-attach unless the exports actually differ
+    // (id/name/clip-count/output-path — the last so a re-encode refreshes the click-handler closures).
+    const _mSig = exps.map((m) => m.id + ':' + (m.name || '') + ':' + ((m.clipIds || []).length) + ':' + (m.outputPath || '')).join('|');
+    if (montageListEl.dataset.sig !== _mSig) {
+    montageListEl.dataset.sig = _mSig;
     montageListEl.classList.toggle('empty', !exps.length);
     montageListEl.innerHTML = exps.length ? exps.map((m) => {
       const n = (m.clipIds || []).length;
@@ -22837,6 +22903,7 @@ function applyClipsState(c) {
         if (ok) send('montage_delete_export', { montageId: btn.dataset.mid });
       });
     });
+    }
   }
 
   renderPlaylistPane(c);
@@ -23640,6 +23707,7 @@ function applyEncodeProgress(enc) {
   }
 }
 
+let _twStreamSig = '';   // connection signature so we only re-fetch stream/chat state on (re)connect
 function applyTwitchState(twitch) {
   if (!twitch) return;
 
@@ -23715,12 +23783,21 @@ function applyTwitchState(twitch) {
       if (sidebarChatLoading) { sidebarChatLoading.style.display = 'inline'; sidebarChatLoading.textContent = 'Connecting to chat…'; sidebarChatLoading.style.color = '#888'; }
     }
 
-    // Stream state — fetch and populate
-    fetchAndRenderStreamState();
-    startStreamStatePolling();
-    loadChatAutomations();
-    updateChatStatus();
+    // Stream state — fetch and populate. These three are NETWORK calls (HTTP GETs to the
+    // local server); firing them on EVERY full_state broadcast hammered the server during
+    // live shows (full_state fires constantly). Run the one-shot fetches only when the
+    // connection is newly established/changed — the polling interval below keeps stream
+    // state fresh thereafter, and the sidebar chat status is already synced from state above.
+    const _twSig = (twitch.displayName || '') + '|' + (twitch.channelId || '');
+    if (_twStreamSig !== _twSig) {
+      _twStreamSig = _twSig;
+      fetchAndRenderStreamState();
+      loadChatAutomations();
+      updateChatStatus();
+    }
+    startStreamStatePolling();   // idempotent — guards its own interval
   } else {
+    _twStreamSig = '';   // reset so a reconnect re-fires the one-shot fetches
     // Not connected
     if (statusEl) statusEl.innerHTML = '<svg viewBox="0 0 24 24" width="9" height="9" style="vertical-align:middle"><circle cx="12" cy="12" r="12" fill="#f56565"/></svg> Not Connected';
     if (loginPanel) loginPanel.style.display = 'block';

@@ -39,9 +39,24 @@ function _client(auth = true) {
   return axios.create({ baseURL: BASE, timeout: 12000, headers });
 }
 function _err(e) {
-  const data = e && e.response && e.response.data;
-  if (data && data.error && data.error.message) return new Error(data.error.message);
-  return new Error((e && e.message) || 'Cloud request failed');
+  const resp = e && e.response;
+  const data = resp && resp.data;
+  // Preserve the backend's ACTUAL error + HTTP status so callers can see WHY. A bare axios
+  // "Request failed with status code 400" is useless for debugging the /api/auth/* routes; dig the
+  // real message out of whatever shape the backend returned (nested error, OAuth-style, plain string).
+  let msg = '';
+  if (data) {
+    if (typeof data === 'string') msg = data;
+    else if (data.error && data.error.message) msg = data.error.message;
+    else if (data.error_description) msg = data.error_description;
+    else if (typeof data.error === 'string') msg = data.error;
+    else if (data.message) msg = data.message;
+    else { try { msg = JSON.stringify(data).slice(0, 220); } catch (_) {} }
+  }
+  if (!msg) msg = (e && e.message) || 'Cloud request failed';
+  const err = new Error(resp ? `${msg} (HTTP ${resp.status})` : msg);
+  if (resp) { err.status = resp.status; err.data = data; }
+  return err;
 }
 function _setSession(d) {
   session = {
@@ -64,6 +79,13 @@ async function loginWithDiscord({ code, codeVerifier, redirectUri }) {
 async function loginWithEmail({ email, password }) {
   _require();
   try { const { data } = await _client(false).post('/api/auth/broadcast-login', { email, password }); _setSession(data); return data; }
+  catch (e) { throw _err(e); }
+}
+// First sign-in after approval: the backend refused login with a contract token +
+// license text; posting the typed legal-name signature completes the sign-in.
+async function acceptContract({ token, signatureName }) {
+  _require();
+  try { const { data } = await _client(false).post('/api/auth/contract-accept', { token, signatureName }); _setSession(data); return data; }
   catch (e) { throw _err(e); }
 }
 async function refreshSession() {
@@ -94,6 +116,6 @@ async function shareProfile(id, scope, role) { _require(); try { const { data } 
 module.exports = {
   init, configured, authed, getSession, clearSession,
   loginWithDiscord,
-  loginWithEmail, refreshSession, linkTwitch, me,
+  loginWithEmail, acceptContract, refreshSession, linkTwitch, me,
   listProfiles, getProfile, saveProfile, deleteProfile, shareProfile
 };

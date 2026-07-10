@@ -49,9 +49,36 @@
 
   /* ── Modes ── */
   .mode { display: none; flex-direction: column; align-items: center; gap: 10px; width: 100%; margin-top: 4px; }
-  body.is-boot    #mode-boot,
-  body.is-login   #mode-login,
-  body.is-loading #mode-loading { display: flex; }
+  body.is-boot     #mode-boot,
+  body.is-login    #mode-login,
+  body.is-contract #mode-contract,
+  body.is-loading  #mode-loading { display: flex; }
+  body.is-contract .wrap { justify-content: flex-start; padding-top: 18px; }
+  body.is-contract .logo { width: 34px; height: 34px; }
+
+  /* ── License agreement (first sign-in after approval) ── */
+  .lic-head { font-size: 12px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: #c5c8d0; text-align: center; }
+  .lic-box {
+    width: 100%; flex: 1; min-height: 120px; overflow-y: auto; text-align: left;
+    background: rgba(255,255,255,.03); border: 1px solid rgba(255,255,255,.1); border-radius: 9px;
+    padding: 12px 14px; font-size: 11px; line-height: 1.55; color: rgba(255,255,255,.72);
+    -webkit-app-region: no-drag; user-select: text; -webkit-user-select: text;
+  }
+  .lic-box h3 { font-size: 11px; color: #fff; margin: 10px 0 4px; }
+  .lic-box p { margin-bottom: 6px; }
+  .lic-row { display: flex; gap: 6px; width: 100%; }
+  .lic-row input {
+    flex: 1; height: 34px; padding: 0 10px; border-radius: 7px; font-family: inherit; font-size: 12px;
+    background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.12); color: #fff; outline: none;
+  }
+  .lic-row input:focus { border-color: rgba(88,101,242,.6); }
+  .lic-accept {
+    height: 34px; padding: 0 18px; border-radius: 7px; border: none; cursor: pointer;
+    background: #5865f2; color: #fff; font-size: 12px; font-weight: 700; font-family: inherit;
+  }
+  .lic-accept:hover { background: #6a76f4; }
+  .lic-accept:disabled { opacity: .55; cursor: default; }
+  #mode-contract { flex: 1; min-height: 0; }
 
   .status-msg { font-size: 12px; color: rgba(255,255,255,.45); text-align: center; min-height: 16px; }
 
@@ -151,6 +178,18 @@
       <div class="note" id="login-note"></div>
     </div>
 
+    <!-- CONTRACT: approved, license not signed yet — review + e-sign right here -->
+    <div class="mode" id="mode-contract">
+      <div class="lic-head" id="lic-title">License Agreement</div>
+      <div class="lic-box" id="lic-box"></div>
+      <div class="lic-row">
+        <input type="text" id="lic-name" placeholder="Type your full legal name to sign" autocomplete="name">
+        <button class="lic-accept" id="lic-accept">Accept</button>
+      </div>
+      <div class="note" id="lic-note"></div>
+      <button class="email-toggle" id="lic-back">Back to sign-in</button>
+    </div>
+
     <!-- LOADING: authenticated — play the load animation, then launch the studio -->
     <div class="mode" id="mode-loading">
       <div class="status-msg" id="loading-msg">Loading your studio&hellip;</div>
@@ -224,15 +263,80 @@
     }, LOAD_MS);
   }
 
+  // ── License agreement (approved, unsigned) — shown right in the launcher ──
+  function resizeWin(w, h) {
+    fetch(API + '/api/launcher/resize', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ width: w, height: h })
+    }).catch(function () {});
+  }
+  function enterContract() {
+    if (mode === 'contract') return;
+    fetch(API + '/api/cloud/contract')
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (!d || !d.pending) return;
+        var lic = d.license || {};
+        el('lic-title').textContent = lic.title || 'License Agreement';
+        var box = el('lic-box');
+        box.textContent = '';
+        if (lic.preamble) { var p = document.createElement('p'); p.textContent = lic.preamble; box.appendChild(p); }
+        (lic.sections || []).forEach(function (sec) {
+          var h = document.createElement('h3'); h.textContent = sec.title; box.appendChild(h);
+          (sec.clauses || []).forEach(function (c) { var cp = document.createElement('p'); cp.textContent = c; box.appendChild(cp); });
+        });
+        el('lic-note').textContent = '';
+        el('lic-name').value = '';
+        oauthInFlight = false;
+        var b = el('btn-discord'); if (b) b.disabled = false;
+        resizeWin(640, 640);
+        setMode('contract');
+      })
+      .catch(function () {});
+  }
+  el('lic-back').addEventListener('click', function () {
+    resizeWin(440, 360);
+    setMode('login');
+    setTimeout(poll, 400);
+  });
+  el('lic-accept').addEventListener('click', function () {
+    var name = (el('lic-name').value || '').trim();
+    var noteEl = el('lic-note');
+    if (name.length < 3) { noteEl.className = 'note'; noteEl.textContent = 'Type your full legal name to sign the agreement.'; return; }
+    el('lic-accept').disabled = true;
+    noteEl.className = 'note ok'; noteEl.textContent = 'Recording your signature…';
+    fetch(API + '/api/cloud/contract/accept', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ signatureName: name })
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        el('lic-accept').disabled = false;
+        if (d && d.ok) {
+          resizeWin(440, 360);
+          startLoadAndLaunch();   // signed in — play the load animation and open the studio
+        } else {
+          noteEl.className = 'note';
+          noteEl.textContent = (d && d.message) || 'Could not record the signature — try again.';
+        }
+      })
+      .catch(function () {
+        el('lic-accept').disabled = false;
+        noteEl.className = 'note';
+        noteEl.textContent = 'Could not reach the app server — try again.';
+      });
+  });
+
   // ── Session poll: waits for the local server to come up, then resolves auth ──
   var firstResolve = true;
   function poll() {
-    if (launched) return;
+    if (launched || mode === 'contract') return;
     fetch(API + '/api/oauth/discord/status')
       .then(function (r) { return r.json(); })
       .then(function (s) {
-        if (launched) return;
+        if (launched || mode === 'contract') return;
         if (s && s.connected) { startLoadAndLaunch(); return; }
+        if (s && s.needsContract) { enterContract(); setTimeout(poll, 1200); return; }
         if (firstResolve) {
           firstResolve = false;
           setMode('login');

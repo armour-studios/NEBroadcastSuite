@@ -787,6 +787,10 @@ let _lastRecTargetId = null;     // de-dupe the shadow recommendation stream
 let overlayEditor = null;
 let onEncodeProgressCallback = null;
 let _launcherLaunchCb = null;   // main.js: swap the launcher window for the studio window
+let _launcherResizeCb = null;   // main.js: resize the launcher window (license view needs room)
+// First sign-in after approval: the backend refused login pending the license signature.
+// Holds { token, license: {version,title,preamble,sections} } until accepted or logout.
+let _pendingContract = null;
 let onRlSpectatorUiHotkeyChange = null;
 let lastGenericDirectorFeed = 0;
 
@@ -1191,6 +1195,7 @@ function forceCloudSignOut(message) {
   state.discord.accessToken   = '';
   state.discord.refreshToken  = '';
   state.discord.lastError     = message || 'Your Broadcast Studio access was revoked — contact an admin.';
+  _pendingContract = null;
   saveDiscordUser();
   try { broadcast(bridgeClients, { type: 'full_state', data: buildLiveState() }); } catch (_) {}
   console.log('[Cloud] Forced sign-out:', state.discord.lastError);
@@ -17062,8 +17067,53 @@ function startHttpServer(baseDir) {
       discriminator: state.discord.discriminator,
       globalName: state.discord.globalName,
       avatarUrl: state.discord.avatarUrl,
+      needsContract: !!_pendingContract,   // approved but license unsigned — accept in-app
       lastError: state.discord.lastError || ''
     });
+  });
+
+  // ── In-app license acceptance (first sign-in after approval) ────────────────
+  // GET returns the license text the backend sent with the refused login;
+  // POST forwards the typed legal-name signature and completes the sign-in.
+  app.get('/api/cloud/contract', (req, res) => {
+    if (!_pendingContract) return res.json({ pending: false });
+    res.json({ pending: true, license: _pendingContract.license || null });
+  });
+
+  app.post('/api/cloud/contract/accept', async (req, res) => {
+    if (!_pendingContract) return res.status(400).json({ ok: false, message: 'No agreement is waiting — sign in first.' });
+    const signatureName = String((req.body && req.body.signatureName) || '').trim();
+    if (signatureName.length < 3) return res.status(400).json({ ok: false, message: 'Type your full legal name to sign the agreement.' });
+    try {
+      const data = await cloud.acceptContract({ token: _pendingContract.token, signatureName });
+      const cu = (data && data.user) || {};
+      state.discord.connected     = true;
+      state.discord.userId        = cu.discordId || '';
+      state.discord.username      = cu.username || '';
+      state.discord.discriminator = cu.discriminator || '0';
+      state.discord.globalName    = cu.globalName || cu.username || '';
+      state.discord.avatarUrl     = cu.avatarUrl || 'https://cdn.discordapp.com/embed/avatars/0.png';
+      state.discord.lastError     = '';
+      _pendingContract = null;
+      saveDiscordUser();
+      broadcast(bridgeClients, { type: 'full_state', data: buildLiveState() });
+      console.log('[Cloud] License accepted, signed in as', state.discord.username);
+      res.json({ ok: true });
+    } catch (e) {
+      // Expired token → make them sign in again (which issues a fresh one).
+      if (e && e.status === 401) _pendingContract = null;
+      res.status(400).json({ ok: false, message: (e && e.message) || 'Could not record the signature.' });
+    }
+  });
+
+  // POST /api/launcher/resize - the launcher asks for more room (license view)
+  app.post('/api/launcher/resize', (req, res) => {
+    const w = Math.max(360, Math.min(900, Number(req.body && req.body.width) || 0));
+    const h = Math.max(240, Math.min(800, Number(req.body && req.body.height) || 0));
+    try {
+      if (typeof _launcherResizeCb === 'function' && w && h) _launcherResizeCb(w, h);
+      res.json({ ok: true });
+    } catch (e) { res.status(500).json({ ok: false, message: e.message }); }
   });
 
   // POST /api/launcher/launch - the launcher window finished auth + its load animation;
@@ -17186,6 +17236,7 @@ function startHttpServer(baseDir) {
       state.discord.accessToken  = accessToken;
       state.discord.refreshToken = refreshToken;
       state.discord.lastError    = '';
+      _pendingContract = null;
 
       saveDiscordUser();
 
@@ -17211,6 +17262,18 @@ function startHttpServer(baseDir) {
 
       res.send(`<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><title>NE Broadcast Suite</title><style>*{box-sizing:border-box;margin:0;padding:0}html,body{height:100%;background:#111318;color:#e8eaf0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;display:flex;align-items:center;justify-content:center}.card{background:#1a1d24;border:1px solid #2a2e3a;border-radius:16px;padding:40px 36px;text-align:center;width:320px;animation:fadeIn .3s ease-out}.logo{width:36px;height:36px;object-fit:contain;margin-bottom:20px;opacity:.85}.check-ring{width:64px;height:64px;border-radius:50%;background:rgba(88,101,242,.12);border:2px solid rgba(88,101,242,.35);display:flex;align-items:center;justify-content:center;margin:0 auto 20px}.avatar{width:56px;height:56px;border-radius:50%;border:2px solid #5865f2;margin-bottom:12px}.name{font-size:18px;font-weight:600;margin-bottom:4px}.handle{font-size:13px;color:#6b7280;}@keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}</style></head><body><div class="card"><img src="/assets/images/small.png" class="logo" alt="NE Broadcast Suite"><div class="check-ring"><svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="#5865f2" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></div><img src="${avatarUrl}" class="avatar" alt=""><div class="name">${u.global_name || u.username}</div><div class="handle">@${u.username}</div></div></body></html>`);
     } catch (err) {
+      // Approved but the license isn't signed yet — the backend sent the agreement
+      // (token + text). Stash it; the launcher / auth gate shows it for acceptance.
+      const cd = err && err.data;
+      if (err && err.status === 403 && cd && cd.error && cd.error.code === 'unsigned' && cd.contract) {
+        _pendingContract = cd.contract;
+        state.discord.connected = false;
+        state.discord.lastError = '';
+        try { broadcast(bridgeClients, { type: 'full_state', data: buildLiveState() }); } catch (e) {}
+        if (stateParam) oauthSessions.delete(stateParam);
+        console.log('[Discord] Signed in but license unsigned — awaiting in-app acceptance.');
+        return res.send(`<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><title>NE Broadcast Suite</title><style>*{box-sizing:border-box;margin:0;padding:0}html,body{height:100%;background:#111318;color:#e8eaf0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;display:flex;align-items:center;justify-content:center}.card{background:#1a1d24;border:1px solid #2a2e3a;border-radius:16px;padding:40px 36px;text-align:center;width:340px}.t{font-size:16px;font-weight:700;margin-bottom:8px}.s{font-size:13px;color:#9aa0ae;line-height:1.5}</style></head><body><div class="card"><div class="t">One more step</div><div class="s">You're approved — return to the NE Broadcast Suite app to review and sign the license agreement.</div></div></body></html>`);
+      }
       // Surface the ACTUAL Discord error (redirect_uri_mismatch / invalid_client / invalid_grant …)
       // both to the terminal AND into state so the panel/login-poll can show why it failed.
       const d = err.response && err.response.data;
@@ -17236,6 +17299,7 @@ function startHttpServer(baseDir) {
     state.discord.avatarUrl    = '';
     state.discord.accessToken  = '';
     state.discord.refreshToken = '';
+    _pendingContract = null;
     saveDiscordUser();
     broadcast(bridgeClients, { type: 'full_state', data: buildLiveState() });
     console.log('[Discord] Logged out');
@@ -19782,6 +19846,10 @@ module.exports.setEncodeProgressCallback = function (cb) {
 // the launcher page POSTs /api/launcher/launch when auth + load animation are done.
 module.exports.setLauncherLaunchCallback = function (cb) {
   _launcherLaunchCb = cb;
+};
+
+module.exports.setLauncherResizeCallback = function (cb) {
+  _launcherResizeCb = cb;
 };
 
 module.exports.setRlSpectatorUiHotkeyChangeCallback = function (cb) {
