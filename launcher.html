@@ -200,9 +200,27 @@
     launched = true;
     setMode('loading', 'Loading your studio…');
     setTimeout(function () {
-      fetch(API + '/api/launcher/launch', { method: 'POST' }).catch(function () {
-        // Server hiccup — the main process failsafe will still show the app.
-      });
+      // Final gate: the server re-validates cloud access shortly after boot — if this
+      // user was revoked while the load animation played, bounce to login with the reason.
+      fetch(API + '/api/oauth/discord/status')
+        .then(function (r) { return r.json(); })
+        .then(function (s) {
+          if (s && !s.connected) {
+            launched = false;
+            oauthInFlight = false;
+            var b = el('btn-discord'); if (b) b.disabled = false;
+            setMode('login');
+            if (s.lastError) note(s.lastError);
+            lastSeenError = s.lastError || '';
+            setTimeout(poll, 1200);
+            return;
+          }
+          fetch(API + '/api/launcher/launch', { method: 'POST' }).catch(function () {});
+        })
+        .catch(function () {
+          // Status check failed (server busy) — launch anyway; the in-app gate still guards.
+          fetch(API + '/api/launcher/launch', { method: 'POST' }).catch(function () {});
+        });
     }, LOAD_MS);
   }
 

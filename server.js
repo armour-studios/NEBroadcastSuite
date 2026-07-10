@@ -1178,6 +1178,47 @@ function saveDiscordUser(sync = false) {
   }
 }
 
+// ── Cloud access enforcement — force sign-out for THIS user only when the backend
+// definitively refuses them (access revoked / rejected / session invalid). ──────────
+function forceCloudSignOut(message) {
+  try { cloud.clearSession(); } catch (_) {}
+  state.discord.connected     = false;
+  state.discord.userId        = '';
+  state.discord.username      = '';
+  state.discord.discriminator = '';
+  state.discord.globalName    = '';
+  state.discord.avatarUrl     = '';
+  state.discord.accessToken   = '';
+  state.discord.refreshToken  = '';
+  state.discord.lastError     = message || 'Your Broadcast Studio access was revoked — contact an admin.';
+  saveDiscordUser();
+  try { broadcast(bridgeClients, { type: 'full_state', data: buildLiveState() }); } catch (_) {}
+  console.log('[Cloud] Forced sign-out:', state.discord.lastError);
+}
+
+// The Nameless backend re-checks the studio access gate on every token refresh:
+//   403 → access revoked/rejected/unsigned (the response says exactly why)
+//   401 → refresh token invalid or expired
+// Anything else (network down, server 5xx, no cloud session at all) is IGNORED —
+// an active user must never get signed out because of a wifi blip or an outage.
+async function validateCloudSession(trigger) {
+  if (!cloud.configured() || !state.discord.connected) return;
+  try {
+    await cloud.refreshSession();
+  } catch (e) {
+    if (e && (e.status === 403 || e.status === 401)) {
+      const backendMsg = (e.data && e.data.error && e.data.error.message) || e.message || '';
+      forceCloudSignOut(
+        e.status === 403 ? backendMsg : 'Your session expired — sign in again.'
+      );
+    } else if (e && /No refresh token/i.test(e.message || '')) {
+      // Local-dev Discord login (no cloud session) — nothing to enforce.
+    } else {
+      console.warn(`[Cloud] Session check (${trigger}) inconclusive — keeping the user signed in:`, (e && e.message) || e);
+    }
+  }
+}
+
 function loadDiscordUser() {
   try {
     if (fs.existsSync(discordDataFile)) {
@@ -18100,6 +18141,11 @@ module.exports.start = function(baseDir) {
   if (state.draft && state.draft.auto && state.draft.auto.enabled) { try { startLolDraftAuto(); } catch (e) {} }
   // Nameless cloud client — dormant unless BROADCAST_REMOTE_URL is configured.
   try { cloud.init({ baseUrl: BROADCAST_REMOTE_URL, dataDir, appVersion }); } catch (e) { console.warn('[Cloud] init skipped:', e.message); }
+  // Access enforcement: re-validate the cloud session shortly after boot (catches a
+  // revoked user relaunching, during the launcher's load) and every 10 minutes while
+  // running. Signs out ONLY on a definitive backend refusal — see validateCloudSession.
+  setTimeout(() => { validateCloudSession('boot'); }, 2500);
+  setInterval(() => { validateCloudSession('periodic'); }, 10 * 60 * 1000);
 
   // Initialize Twitch integration if API token is configured
   if (state.twitch.apiToken) {

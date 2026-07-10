@@ -4573,7 +4573,13 @@ function applyDiscordState(discord) {
       }
     } else if (!loggedIn) {
       gate.classList.remove('gate-expanding', 'gate-hiding');
-      if (REQUIRE_DISCORD_LOGIN) { gate.style.display = ''; authGateMode('login'); }
+      if (REQUIRE_DISCORD_LOGIN) {
+        gate.style.display = '';
+        authGateMode('login');
+        // Forced sign-out (e.g. access revoked server-side) — show the reason, linkified.
+        const n = el('auth-gate-note');
+        if (n && discord.lastError) n.innerHTML = linkifyAuthMsg(discord.lastError);
+      }
       else gate.style.display = 'none';
     }
   }
