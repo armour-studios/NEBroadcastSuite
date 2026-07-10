@@ -191,23 +191,6 @@ function updateTrayEncode(progress) {
   }
 }
 
-function createSplashWindow() {
-  const splash = new BrowserWindow({
-    width: 400,
-    height: 240,
-    frame: false,
-    show: false,
-    resizable: false,
-    center: true,
-    backgroundColor: '#0b0c0f',
-    skipTaskbar: true,
-    webPreferences: { nodeIntegration: false, contextIsolation: true }
-  });
-  splash.loadFile(path.join(__dirname, 'splash.html'));
-  splash.once('ready-to-show', () => splash.show());
-  return splash;
-}
-
 function createControlPanel() {
   // The window is frameless (titleBarStyle:'hidden') and the menu bar is hidden below, but
   // Electron's default application menu still exists underneath and registers its own
@@ -238,14 +221,31 @@ function createControlPanel() {
   controlPanel.loadFile(path.join(__dirname, 'control-panel', 'index.html'));
   controlPanel.setMenuBarVisibility(false);
 
-  // Auto-open DevTools on launch (detached) — but ONLY on the developer's own machine, never in
-  // a build shipped to end users. .env.local is the existing dev-vs-production signal server.js
-  // already uses (see its dotenv.config path above) and it's scrubbed out of white-label/public
-  // builds, so its presence here is a reliable "this is a dev machine" check. Checked directly via
-  // fs rather than process.env because server.js (which loads the .env file) isn't required until
-  // after this window is created, so its dotenv config hasn't run yet at this point.
-  if (fs.existsSync(path.join(__dirname, '.env.local'))) {
-    controlPanel.webContents.openDevTools({ mode: 'detach' });
+  // Auto-open the dev console on launch (detached) for the DEVELOPER only — never in a build shipped
+  // to end users. Enabled when ANY dev signal is present:
+  //   • !app.isPackaged      → running from source (`electron .` / npm start) = a dev run
+  //   • NE_DEVTOOLS=1        → explicit override (e.g. to debug a packaged build)
+  //   • .env.local exists    → the dev-vs-production marker server.js uses; scrubbed from public/
+  //                            white-label builds, so its presence is a reliable "dev machine" check.
+  // A shipped end-user build is packaged + has no .env.local + no override → stays closed.
+  // (Checked via fs, not process.env, because server.js's dotenv hasn't run yet at this point.)
+  const devConsole = !app.isPackaged
+    || process.env.NE_DEVTOOLS === '1'
+    || fs.existsSync(path.join(__dirname, '.env.local'));
+  if (devConsole) {
+    console.log('[NE] Dev console enabled — opening DevTools.');
+    // Open once the page has loaded AND the window is on-screen. Opening it here (right after
+    // loadFile, while the window is still show:false and the page hasn't loaded) could get swallowed,
+    // and a detached DevTools window can also open hidden behind the main one — so wait for
+    // ready-to-show, then open + focus so it's actually visible.
+    const openDevConsole = () => {
+      try {
+        if (!controlPanel.webContents.isDevToolsOpened()) controlPanel.webContents.openDevTools({ mode: 'detach' });
+        const dt = controlPanel.webContents.devToolsWebContents;
+        if (dt) dt.focus();
+      } catch (e) { console.warn('[NE] openDevTools failed:', e && e.message); }
+    };
+    controlPanel.once('ready-to-show', () => setTimeout(openDevConsole, 300));
   }
 
   // F12 / Ctrl+Shift+I → toggle DevTools; Ctrl+R / Ctrl+Shift+R → reload. Removing the default
@@ -254,7 +254,7 @@ function createControlPanel() {
   controlPanel.webContents.on('before-input-event', (event, input) => {
     if (input.type !== 'keyDown') return;
     const devToolsKey = input.key === 'F12' ||
-      (input.key === 'I' && input.control && input.shift);
+      ((input.key === 'I' || input.key === 'i') && input.control && input.shift);
     if (devToolsKey) {
       if (controlPanel.webContents.isDevToolsOpened()) {
         controlPanel.webContents.closeDevTools();
@@ -274,8 +274,14 @@ function createControlPanel() {
   // from their embedded iframes repeat every ~300ms and bury our own error output).
   controlPanel.webContents.on('console-message', (_ev, level, message, line, sourceId) => {
     if (level < 2) return; // 0=verbose 1=info 2=warning 3=error
-    const isVdoNoise = (message && message.includes('postMessage') && message.includes('sequence')) ||
-      (sourceId && (sourceId.includes('webrtc.js') || sourceId.includes('?director=') || sourceId.includes('?room=')));
+    const msg = message || '', src = sourceId || '';
+    const isVdoNoise =
+      (msg.includes('postMessage') && msg.includes('sequence')) ||
+      msg.includes('remoteInterfaceAPI') ||
+      src.includes('vdo.ninja') ||
+      src.includes('webrtc.js') ||
+      /[?&]ver=\d+/.test(src) ||   // VDO cache-bust query on its bundled scripts
+      src.includes('?director=') || src.includes('?room=') || src.includes('?push=') || src.includes('?view=');
     if (isVdoNoise) return;
     const tag = level === 3 ? 'ERR' : 'WARN';
     console.error(`[renderer:${tag}] ${message}${sourceId ? ` (${sourceId}:${line})` : ''}`);
@@ -490,29 +496,25 @@ function setupApp() {
     console.log('[APP] App ready event fired');
     setupUserDataFolder();
 
-    // Show splash immediately, then load the main panel hidden in the background.
-    const splash = createSplashWindow();
+    // No separate splash window: the panel's auth gate IS the splash (branding +
+    // scan bar + Check for Updates), so open the main window on its first paint.
     createControlPanel();
     setupPopoutHandler();
     createTray();
 
-    // Transition from splash to main panel. Both conditions must be met:
-    //   1. The main panel has finished its first paint (ready-to-show)
-    //   2. At least 5 seconds have elapsed so the splash animation plays fully
-    let _panelReady = false;
-    let _timerDone  = false;
+    let _shown = false;
     const showMain = () => {
-      if (!_panelReady || !_timerDone) return;
-      try { if (!splash.isDestroyed()) splash.close(); } catch (_) {}
+      if (_shown) return;
+      _shown = true;
       if (controlPanel && !controlPanel.isDestroyed()) {
+        try { controlPanel.maximize(); } catch (_) {}   // open the studio maximized (full screen)
         controlPanel.show();
         controlPanel.focus();
       }
     };
-    controlPanel.once('ready-to-show', () => { _panelReady = true; showMain(); });
-    setTimeout(() => { _timerDone = true; showMain(); }, 5000);
-    // Hard safety: give up and show the panel after 15s regardless.
-    setTimeout(() => { _timerDone = true; _panelReady = true; showMain(); }, 15000);
+    controlPanel.once('ready-to-show', showMain);
+    // Hard safety: show the panel after 15s even if ready-to-show never fires.
+    setTimeout(showMain, 15000);
 
     try {
       // Load server AFTER the window exists so startup I/O doesn't block the splash paint.

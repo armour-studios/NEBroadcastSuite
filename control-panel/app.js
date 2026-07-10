@@ -4505,19 +4505,43 @@ const _isPopout = new URLSearchParams(location.search).has('page');
 // signed in. Set false to make login optional (the header chip still offers it).
 const REQUIRE_DISCORD_LOGIN = true;
 
-// Swap the gate between its LOGIN (logo + Discord button) and LOADING (logo + spinner) sub-screens.
+// Swap the gate between its LOGIN (logo + Discord button) and LOADING (splash: breathing
+// logo + scan bar) sub-screens. The gate root's ag-loading class drives the animations.
 function authGateMode(mode, msg) {
   const login = el('auth-gate-login'), loading = el('auth-gate-loading');
   if (login) login.style.display = mode === 'loading' ? 'none' : '';
   if (loading) loading.style.display = mode === 'loading' ? '' : 'none';
+  const gate = el('auth-gate'); if (gate) gate.classList.toggle('ag-loading', mode === 'loading');
   if (mode === 'loading' && msg) { const m = el('auth-gate-loading-msg'); if (m) m.textContent = msg; }
 }
 
-// On launch show the gate in LOADING right away so a not-signed-in user never sees the app flash,
-// then resolve the session: signed in → applyDiscordState reveals the app; not signed in → switch to
-// the login screen. If the status check fails, fall back to the login screen so they can still sign in.
+// Splash-style reveal: hold the loading screen so the scan animation reads, then bloom into the app.
+// Re-entrant-safe: every full_state broadcast lands here while the gate is still visible.
+function gateBloomOut(gate, holdMs) {
+  if (gate._blooming) return;
+  gate._blooming = true;
+  setTimeout(() => {
+    gate.classList.add('gate-expanding');
+    setTimeout(() => gate.classList.add('gate-hiding'), 200);
+    setTimeout(() => {
+      gate.style.display = 'none';
+      gate.classList.remove('gate-expanding', 'gate-hiding');
+      gate._blooming = false;
+      authGateMode('login');
+    }, 600);
+  }, holdMs);
+}
+
+// The gate is visible (LOADING) from the very first paint — it IS the splash screen now
+// (the old splash.html window is gone). Resolve the session: signed in → applyDiscordState
+// blooms into the app; not signed in → switch to the login screen. If the status check
+// fails, fall back to the login screen so they can still sign in.
 (function checkDiscordSession() {
-  if (_isPopout || !REQUIRE_DISCORD_LOGIN) return;   // pop-out, or login-optional build → never gate
+  if (_isPopout || !REQUIRE_DISCORD_LOGIN) {
+    // Pop-out, or login-optional build → never gate (markup defaults visible; hide it now).
+    const g = el('auth-gate'); if (g) g.style.display = 'none';
+    return;
+  }
   const gate = el('auth-gate');
   if (gate) { gate.style.display = ''; authGateMode('loading', 'Loading…'); }
   const toLogin = () => authGateMode('login');
@@ -4539,21 +4563,13 @@ function applyDiscordState(discord) {
       gate.style.display = 'none';   // pop-out windows never gate (inherit the main session)
     } else if (loggedIn && gate.style.display !== 'none') {
       if (!_authInitialized) {
-        // App opened while already logged in — the loading screen was the transition; reveal the app.
-        gate.style.display = 'none';
-        authGateMode('login');
+        // App opened while already signed in — let the splash animation play a beat, then bloom.
+        authGateMode('loading', 'Loading your studio…');
+        gateBloomOut(gate, 900);
       } else {
         // User just signed in this session → brief "Loading your studio…", then bloom into the app.
         authGateMode('loading', 'Loading your studio…');
-        setTimeout(() => {
-          gate.classList.add('gate-expanding');
-          setTimeout(() => gate.classList.add('gate-hiding'), 200);
-          setTimeout(() => {
-            gate.style.display = 'none';
-            gate.classList.remove('gate-expanding', 'gate-hiding');
-            authGateMode('login');
-          }, 600);
-        }, 1000);
+        gateBloomOut(gate, 1400);
       }
     } else if (!loggedIn) {
       gate.classList.remove('gate-expanding', 'gate-hiding');

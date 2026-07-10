@@ -6420,6 +6420,22 @@ body.popout-qrail .qrail-popout-strip { display: none !important; }
 .auth-gate-logo { width: 52px; height: 52px; object-fit: contain; margin-bottom: 2px; }
 .auth-gate-title { font-size: 18px; font-weight: 800; color: #fff; margin: 0; letter-spacing: -.01em; }
 .auth-gate-sub { font-size: 13px; color: rgba(255,255,255,.45); margin: 0; }
+/* Login / loading state swap inside the gate */
+.auth-gate-mode { display: flex; flex-direction: column; align-items: center; gap: 8px; width: 100%; }
+.auth-gate-spinner { width: 34px; height: 34px; margin: 6px 0 2px; border-radius: 50%;
+  border: 3px solid rgba(88,101,242,.25); border-top-color: #5865f2; animation: agSpin .8s linear infinite; }
+@keyframes agSpin { to { transform: rotate(360deg); } }
+/* Splash branding (moved here from the old splash.html window) */
+.auth-gate-tag { font-size: 10px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase;
+  color: rgba(255,255,255,.28); margin-top: -4px; }
+.auth-gate.ag-loading .auth-gate-logo { animation: agBreathe 3s ease-in-out .4s infinite; }
+@keyframes agBreathe { 0%, 100% { opacity: .88; transform: scale(1); } 50% { opacity: 1; transform: scale(1.035); } }
+.gate-scan-track { width: 100%; height: 2px; margin-top: 12px; border-radius: 2px;
+  background: rgba(255,255,255,.06); overflow: hidden; }
+.gate-scan { height: 100%; width: 35%;
+  background: linear-gradient(90deg, transparent, #4aa3ff 40%, #6caaff 60%, transparent);
+  animation: agScan 1.6s cubic-bezier(.4,0,.6,1) infinite; }
+@keyframes agScan { 0% { transform: translateX(-100%); } 100% { transform: translateX(386%); } }
 .auth-gate-btn {
   display: inline-flex; align-items: center; gap: 9px;
   margin-top: 6px; padding: 0 24px; height: 40px; border-radius: 9px;
