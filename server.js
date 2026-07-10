@@ -580,10 +580,13 @@ let state = {
   // in buildLiveState() into a tiny teamRecords:{blue,orange} blob — see resolveTeamRecords().
   //   metric: 'season' | 'week' | 'pts' | 'place' | 'record-pts'
   //   source: 'stats' (in-app leagues) | 'startgg' (tournament platform) | 'manual' (per-team below)
-  //   manual: per-side W/L (+ optional pts/place) the producer sets in each team box
+  //   manualByName: per-TEAM W/L (+ optional pts/place) keyed by lowercased team name, so a hand-set
+  //     record is tied to the team PROFILE — it follows the team across side swaps and reassignments.
+  //     (Legacy `manual: {blue,orange}` is migrated into this on load.)
   teamRecord: {
     enabled: false, metric: 'season', source: 'stats', leagueId: '',   // leagueId = chosen in-app league for the 'stats' source ('' = auto-pick)
-    manual: { blue: { w: 0, l: 0, pts: null, place: null }, orange: { w: 0, l: 0, pts: null, place: null } }
+    manual: { blue: { w: 0, l: 0, pts: null, place: null }, orange: { w: 0, l: 0, pts: null, place: null } },
+    manualByName: {}
   },
   // When on, team names reported by the live game (CS2 GSI / RL Stats API) are matched to the
   // saved-teams library and applied to Blue/Orange (name + logo + colour). Generic names ignored.
@@ -1764,6 +1767,18 @@ function loadState() {
       if (saved.speedUnit === 'mph' || saved.speedUnit === 'kmh') state.speedUnit = saved.speedUnit;
       if (saved.dateFormat === 'us' || saved.dateFormat === 'intl') state.dateFormat = saved.dateFormat;
       if (saved.teamRecord && typeof saved.teamRecord === 'object') state.teamRecord = { ...state.teamRecord, ...saved.teamRecord };
+      // Migrate legacy side-keyed manual records → keyed by team name (best-effort: use whichever
+      // teams were on Blue/Orange at save time). Runs once — skipped if manualByName already has data.
+      if (state.teamRecord && (!state.teamRecord.manualByName || !Object.keys(state.teamRecord.manualByName).length)) {
+        state.teamRecord.manualByName = {};
+        const legacy = state.teamRecord.manual || {};
+        const savedTeams = saved.teams || {};
+        ['blue', 'orange'].forEach((side) => {
+          const nm = ((savedTeams[side] && savedTeams[side].name) || '').trim().toLowerCase();
+          const rec = legacy[side];
+          if (nm && rec && (rec.w || rec.l || rec.pts != null || rec.place != null)) state.teamRecord.manualByName[nm] = { ...rec };
+        });
+      }
       if (typeof saved.autoTeamsFromGame === 'boolean') state.autoTeamsFromGame = saved.autoTeamsFromGame;
       if (saved.leagueStandings && typeof saved.leagueStandings === 'object') state.leagueStandings = { ...state.leagueStandings, ...saved.leagueStandings };
       if (saved.fontFamily) state.fontFamily = saved.fontFamily;
@@ -2758,7 +2773,10 @@ function resolveTeamRecords() {
   const numOrNull = (v) => (v == null || v === '' || isNaN(v)) ? null : Number(v);
   const recFor = (side, name) => {
     if (source === 'manual') {
-      const m = (tr.manual && tr.manual[side]) || {};
+      // Keyed by team NAME so the record is tied to the team profile and follows it across swaps.
+      // Fallback: legacy side-keyed records (entered before the name-keyed store existed) — the
+      // load-time migration ran before teams were restored and copied nothing, leaving them orphaned.
+      const m = (tr.manualByName && tr.manualByName[(name || '').trim().toLowerCase()]) || (tr.manual && tr.manual[side]) || {};
       const w = numOrNull(m.w), l = numOrNull(m.l);
       return { seasonW: w, seasonL: l, weekW: w, weekL: l, pts: numOrNull(m.pts), place: numOrNull(m.place) };
     }
@@ -10031,17 +10049,21 @@ function handleControlMessage(msg, ws) {
       break;
     }
 
-    // Per-team manual record (W-L, optional pts/place) edited in the team boxes.
+    // Per-team manual record (W-L, optional pts/place) edited in the team boxes. Stored keyed by the
+    // team NAME currently on that side, so the record is tied to the team profile — it follows the
+    // team across side swaps and reassignments instead of staying pinned to Blue/Orange.
     case 'set_team_record_manual': {
       const d = msg.data || {};
       const side = d.side === 'orange' ? 'orange' : (d.side === 'blue' ? 'blue' : null);
       if (!side) break;
-      if (!state.teamRecord.manual) state.teamRecord.manual = { blue: {}, orange: {} };
-      const m = state.teamRecord.manual[side] || {};
+      const key = ((state.teams[side] && state.teams[side].name) || '').trim().toLowerCase();
+      if (!key) break;   // no team on that side — nothing to key the record to
+      if (!state.teamRecord.manualByName) state.teamRecord.manualByName = {};
+      const m = { ...(state.teamRecord.manualByName[key] || {}) };
       ['w', 'l', 'pts', 'place'].forEach((k) => {
         if (k in d) { const v = d[k]; m[k] = (v === '' || v == null) ? (k === 'w' || k === 'l' ? 0 : null) : Math.max(0, parseInt(v, 10) || 0); }
       });
-      state.teamRecord.manual[side] = m;
+      state.teamRecord.manualByName[key] = m;
       saveAppState();
       broadcastFullState();
       break;
@@ -12557,15 +12579,8 @@ function handleControlMessage(msg, ws) {
       state.series.blue = state.series.orange;
       state.series.orange = tempSeries;
 
-      // Swap the MANUAL team records too — auto-resolved records (stats/league sources)
-      // follow the team name, but hand-entered W/L (+pts/place) is keyed by SIDE and was
-      // staying put when the teams crossed over.
-      if (state.teamRecord && state.teamRecord.manual) {
-        const tr = state.teamRecord.manual;
-        const tmpRec = tr.blue;
-        tr.blue = tr.orange;
-        tr.orange = tmpRec;
-      }
+      // Team records need no swapping now: both auto (stats/startgg) and manual (manualByName) are
+      // keyed by team NAME, so they follow the team across the swap automatically.
 
       saveAppState();
       broadcastFullState();
