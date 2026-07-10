@@ -3294,11 +3294,18 @@ function _returnGraphicsToProd() {
     const n = _schMatches.length;
     if (countEl) countEl.textContent = n ? n + ' match' + (n > 1 ? 'es' : '') : '';
     if (emptyEl) emptyEl.style.display = n ? 'none' : '';
+    const _teamLogo = (() => {
+      const map = {};
+      ((currentState && currentState.savedTeams) || []).forEach((t) => { if (t && t.name) map[t.name.toLowerCase()] = t.logo || ''; });
+      ((currentState && currentState.startgg && currentState.startgg.eventTeams) || []).forEach((t) => { if (t && t.name && !map[t.name.toLowerCase()]) map[t.name.toLowerCase()] = t.logo || ''; });
+      return (nm) => map[(nm || '').toLowerCase()] || '';
+    })();
     _schMatches.forEach((m, i) => {
       const esc = (s) => (s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      const logoImg = (nm) => { const l = _teamLogo(nm); return l ? `<img class="gfx-sch-list-logo" src="${esc(l)}" alt="" onerror="this.style.display='none'">` : ''; };
       const row = document.createElement('div'); row.className = 'gfx-sch-list-row';
       row.innerHTML =
-        `<div class="gfx-sch-list-teams"><span class="gfx-sch-list-team">${esc(m.teamA || 'TBD')}</span><span class="gfx-sch-vs">vs</span><span class="gfx-sch-list-team">${esc(m.teamB || 'TBD')}</span></div>`
+        `<div class="gfx-sch-list-teams"><span class="gfx-sch-list-team">${logoImg(m.teamA)}${esc(m.teamA || 'TBD')}</span><span class="gfx-sch-vs">vs</span><span class="gfx-sch-list-team">${logoImg(m.teamB)}${esc(m.teamB || 'TBD')}</span></div>`
         + `<div class="gfx-sch-list-meta">`
         + (m.round ? `<span class="gfx-sch-round">${esc(m.round)}</span>` : '')
         + ((m.date || m.time) ? `<span class="gfx-sch-list-when">${esc([m.date, m.time].filter(Boolean).join(' · '))}</span>` : '')
@@ -3595,7 +3602,7 @@ function _returnGraphicsToProd() {
       time: schFmtTime(el('gfx-sch-ftime')?.value || ''),
       stream: !!(el('gfx-sch-fstream')?.checked)
     });
-    ['gfx-sch-fa', 'gfx-sch-fb', 'gfx-sch-fround', 'gfx-sch-fdate', 'gfx-sch-ftime'].forEach((id) => { const e = el(id); if (e) e.value = ''; });
+    ['gfx-sch-fa', 'gfx-sch-fb', 'gfx-sch-fround', 'gfx-sch-fdate', 'gfx-sch-ftime'].forEach((id) => { const e = el(id); if (e) { e.value = ''; if (e._btLoad) e._btLoad(); } });
     const fs = el('gfx-sch-fstream'); if (fs) fs.checked = false;
     schRenderList(); schAutoSave();
   });
@@ -14943,6 +14950,13 @@ el('ptp-show')?.addEventListener('click', () => {
   });
 });
 el('ptp-hide')?.addEventListener('click', () => send('set_break', { visible: false }));
+// After-countdown scene/playlist dropdowns apply IMMEDIATELY — they were only read by the
+// Show button, and every broadcast re-synced them back to the stored value, so picking a
+// scene mid-countdown silently reverted and the cut never happened. The server preserves
+// the rest of the break state and reschedules the auto-switch on every set_break.
+[['ptp-break-thenscene', 'thenScene'], ['select-break-thenscene', 'thenScene'], ['ck-break-thenscene', 'thenScene'], ['ptp-break-playout', 'thenPlayout']].forEach(([id, key]) => {
+  el(id)?.addEventListener('change', function () { send('set_break', { [key]: this.value || '' }); });
+});
 el('ptimer-open')?.addEventListener('click', () => {
   const pop = el('ptimer-pop');
   const btn = el('ptimer-open');
@@ -26111,4 +26125,89 @@ el('btn-chat-send')?.addEventListener('click', async () => {
     });
   });
 })();
+
+// ── Bounded 12-hour time picker ──────────────────────────────────────────────
+// Replaces a native <input type="time"> — whose spinner scroll-WRAPS forever (past 12h / 59m and
+// back to the start), which the producer hit as "endless scrolling" — with hour(1-12)/minute(00-59)/
+// AM-PM selects that stop at the ends. The original input is KEPT (hidden) as the value holder in
+// "HH:MM" (24h), so every existing `.value` read/write still works; changing a select writes it back
+// and fires a 'change' event. Call `input._btLoad()` after setting `.value` programmatically to
+// refresh the selects.
+window.mountBoundedTime = function mountBoundedTime(input) {
+  if (!input || input.dataset.btMounted) return;
+  input.dataset.btMounted = '1';
+  input.type = 'hidden';
+  const mk = (cls, w, html) => { const s = document.createElement('select'); s.className = 'input-select ' + cls; s.style.cssText = 'width:' + w + 'px;font-size:11px;padding:2px 4px;'; s.innerHTML = html; return s; };
+  const hSel  = mk('bt-h', 52, '<option value="">Hr</option>'  + Array.from({ length: 12 }, (_, i) => `<option>${i + 1}</option>`).join(''));
+  const mSel  = mk('bt-m', 58, '<option value="">Min</option>' + Array.from({ length: 60 }, (_, i) => `<option>${String(i).padStart(2, '0')}</option>`).join(''));
+  const apSel = mk('bt-ap', 52, '<option>AM</option><option>PM</option>');
+  const wrap = document.createElement('span'); wrap.className = 'bt-wrap'; wrap.style.cssText = 'display:inline-flex;gap:3px;align-items:center;';
+  wrap.append(hSel, mSel, apSel);
+  input.parentNode.insertBefore(wrap, input.nextSibling);
+  const load = () => {
+    const x = /^(\d{1,2}):(\d{2})/.exec(input.value || '');
+    if (x) { let hh = +x[1]; apSel.value = hh >= 12 ? 'PM' : 'AM'; hSel.value = String(hh % 12 || 12); mSel.value = x[2]; }
+    else { hSel.value = ''; mSel.value = ''; apSel.value = 'PM'; }
+  };
+  const save = () => {
+    if (!hSel.value) input.value = '';
+    else { let hh = parseInt(hSel.value, 10) % 12; if (apSel.value === 'PM') hh += 12; input.value = String(hh).padStart(2, '0') + ':' + (mSel.value || '00'); }
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+  };
+  [hSel, mSel, apSel].forEach((s) => s.addEventListener('change', save));
+  input._btLoad = load;
+  load();
+};
+// Mount it on the schedule "add a match" time fields (leagues + graphics schedule).
+['gfx-sch-ftime', 'lg-sch-time'].forEach((id) => { const i = el(id); if (i) window.mountBoundedTime(i); });
+
+// ── Team search with logos ───────────────────────────────────────────────────
+// Replaces a plain <datalist> team input (text only) with a typeahead that shows each team's LOGO
+// next to its name. The input is kept as the value holder, so `.value` reads/writes and clearing
+// still work; picking an item sets the name and fires change/input events.
+window.mountTeamTypeahead = function mountTeamTypeahead(input) {
+  if (!input || input.dataset.ttMounted) return;
+  input.dataset.ttMounted = '1';
+  input.removeAttribute('list');   // drop the native (logo-less) datalist
+  const wrap = document.createElement('span');
+  wrap.className = 'team-logo-wrap';
+  wrap.style.cssText = 'display:inline-flex;position:relative;' + (input.style.flex ? 'flex:' + input.style.flex + ';' : '') + (input.style.minWidth ? 'min-width:' + input.style.minWidth + ';' : '');
+  input.parentNode.insertBefore(wrap, input);
+  wrap.appendChild(input);
+  input.style.flex = ''; input.style.minWidth = ''; input.style.width = '100%';
+  const dd = document.createElement('div'); dd.className = 'team-logo-dd'; dd.style.display = 'none';
+  wrap.appendChild(dd);
+  const e2 = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  const teams = () => {
+    const seen = new Set(), out = [];
+    const add = (n, logo) => { const k = (n || '').toLowerCase(); if (!n || seen.has(k)) return; seen.add(k); out.push({ name: n, logo: logo || '' }); };
+    ((currentState && currentState.savedTeams) || []).forEach((t) => t && t.name && add(t.name, t.logo));
+    ((currentState && currentState.startgg && currentState.startgg.eventTeams) || []).forEach((t) => t && t.name && add(t.name, t.logo));
+    return out;
+  };
+  const render = () => {
+    const q = input.value.trim().toLowerCase();
+    const list = teams().filter((o) => !q || o.name.toLowerCase().includes(q)).slice(0, 40);
+    if (!list.length) { dd.style.display = 'none'; return; }
+    dd.innerHTML = list.map((o) => `<div class="team-logo-item" data-name="${e2(o.name)}">`
+      + (o.logo ? `<img src="${e2(o.logo)}" alt="" onerror="this.style.display='none'">` : '<span class="team-logo-ph"></span>')
+      + `<span>${e2(o.name)}</span></div>`).join('');
+    dd.style.display = 'block';
+  };
+  input.addEventListener('focus', render);
+  input.addEventListener('input', render);
+  input.addEventListener('blur', () => setTimeout(() => { dd.style.display = 'none'; }, 180));
+  dd.addEventListener('mousedown', (e) => {
+    const it = e.target.closest('[data-name]'); if (!it) return;
+    e.preventDefault();
+    input.value = it.dataset.name; dd.style.display = 'none';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+};
+// Schedule add-match team fields (front card + pop-out manual/team tabs) — show logos while searching.
+['gfx-sch-add-a', 'gfx-sch-add-b', 'gfx-sch-fa', 'gfx-sch-fb', 'gfx-sch-team-name'].forEach((id) => { const i = el(id); if (i) window.mountTeamTypeahead(i); });
+
+// "Open full board" on the Schedule front card → the roomy pop-out with the full match list.
+el('btn-sch-front-open')?.addEventListener('click', () => { if (window._gfxOpenPopout) window._gfxOpenPopout('schedule'); });
 
