@@ -143,9 +143,9 @@ const GENERIC_OVERLAY_LAYOUTS = [
 ];
 
 const GAMES = {
-  'rocket-league': { id: 'rocket-league', name: 'Rocket League', overlay: '/',          format: 'duo',   teamLabels: { a: 'Blue', b: 'Orange' },           rosterSize: 3, logo: 'games/rocketleague.svg',  features: ['boost', 'stats-api', 'director'],   themes: [] },
-  'csgo':          { id: 'csgo',          name: 'CS2 / CS:GO',   overlay: '/csgo.html', format: 'team5', teamLabels: { a: 'CT', b: 'T' },                  rosterSize: 5, logo: 'games/cs2.svg',           features: ['gsi', 'radar', 'vetoes', 'director'], themes: [] },
-  'valorant':      { id: 'valorant',      name: 'Valorant',      overlay: '',           format: 'team5', teamLabels: { a: 'Attackers', b: 'Defenders' },   rosterSize: 5, logo: 'games/valorant.svg',      features: ['vetoes', 'agents', 'director'],     themes: [] },
+  'rocket-league': { id: 'rocket-league', name: 'Rocket League', overlay: '/',          format: 'duo',   teamLabels: { a: 'Blue', b: 'Orange' },           rosterSize: 3, logo: 'games/rocketleague.svg',  features: ['boost', 'stats-api', 'director'],   themes: [], statLabel: 'Goals',  statAbbr: 'G' },
+  'csgo':          { id: 'csgo',          name: 'CS2 / CS:GO',   overlay: '/csgo.html', format: 'team5', teamLabels: { a: 'CT', b: 'T' },                  rosterSize: 5, logo: 'games/cs2.svg',           features: ['gsi', 'radar', 'vetoes', 'director'], themes: [], statLabel: 'Rounds', statAbbr: 'R' },
+  'valorant':      { id: 'valorant',      name: 'Valorant',      overlay: '',           format: 'team5', teamLabels: { a: 'Attackers', b: 'Defenders' },   rosterSize: 5, logo: 'games/valorant.svg',      features: ['vetoes', 'agents', 'director'],     themes: [], statLabel: 'Rounds', statAbbr: 'R' },
   'league':        { id: 'league',        name: 'League of Legends', overlay: '/lol-hud.html', format: 'team5', teamLabels: { a: 'Blue', b: 'Red' },         rosterSize: 5, logo: 'games/lol.svg',           features: ['draft', 'live-data', 'director'],    themes: [] },
   'dota2':         { id: 'dota2',         name: 'Dota 2',        overlay: '',           format: 'team5', teamLabels: { a: 'Radiant', b: 'Dire' },          rosterSize: 5, logo: 'games/dota2.svg',         features: ['draft'],                themes: [] },
   'overwatch':     { id: 'overwatch',     name: 'Overwatch 2',   overlay: '/overwatch.html', format: 'team5', teamLabels: { a: 'Defenders', b: 'Attackers' }, rosterSize: 5, logo: 'games/overwatch2.png',    features: ['heroes', 'vetoes', 'draft'], themes: [] },
@@ -397,7 +397,7 @@ let state = {
   //   { <gamertag>: { gamerTag, startggSlug, startggPlayerId, sixmans:{name,elo,rank,region,platform}, updatedAt } }
   playerProfiles: {},
   game:    { blueScore: 0, orangeScore: 0, time: 300, isOT: false, number: 1 },
-  gameTeams: { blue: '', orange: '' },
+  gameTeams: { blue: '', orange: '', blueColor: '', orangeColor: '' },   // *Color = live in-game paint colours (RL Stats API ColorPrimary)
   players: [],          // active players (from last UpdateState)
   playerCache: {},      // all players seen (keyed by name) — for scoreboard
   currentGoal: null,    // { scorer, assister, speed, team }
@@ -585,6 +585,7 @@ let state = {
   //     (Legacy `manual: {blue,orange}` is migrated into this on load.)
   teamRecord: {
     enabled: false, metric: 'season', source: 'stats', leagueId: '',   // leagueId = chosen in-app league for the 'stats' source ('' = auto-pick)
+    week: '',   // 'stats' source only — which lg.schedule week feeds weekW/weekL ('' = auto: latest fully-completed week)
     manual: { blue: { w: 0, l: 0, pts: null, place: null }, orange: { w: 0, l: 0, pts: null, place: null } },
     manualByName: {}
   },
@@ -596,7 +597,7 @@ let state = {
   // start.gg League aggregates many tournaments into one season with league points; we read
   // Standing.totalPoints + placement per entrant. This is the authoritative source for the
   // overlay's season points/placement (teamRecord); W/L still comes from in-app leagues.
-  leagueStandings: {
+  startggLeagueStandings: {
     slug: '',          // start.gg league slug or full URL (normalized on fetch)
     name: '',          // resolved league name
     fetchedAt: null,
@@ -1025,7 +1026,8 @@ function applyProfileBundle(bundle, options) {
     savePresets(); parts.push(`${d.presets.length} presets`);
   }
   if (want('leagues') && Array.isArray(d.leagues)) {
-    state.leagues = mergeAtTop(state.leagues || [], d.leagues, (a, b) => (a.id && a.id === b.id) || a.name === b.name);
+    const migrated = d.leagues.map(migrateLeague);
+    state.leagues = mergeAtTop(state.leagues || [], migrated, (a, b) => (a.id && a.id === b.id) || a.name === b.name);
     leaguesVer++;
     parts.push(`${d.leagues.length} leagues`);
   }
@@ -1695,6 +1697,12 @@ function effectiveTeamColors() {
     const c = gameDefaultColors(state.activeGame);
     return { blue: c.a, orange: c.b };
   }
+  if (mode === 'game') {
+    // In-game (RL private-match paint) colours reported live by the Stats API — fall back to the
+    // team's own colour for a side the feed hasn't sent a colour for yet.
+    const g = state.gameTeams || {};
+    return { blue: g.blueColor || state.teams.blue.color, orange: g.orangeColor || state.teams.orange.color };
+  }
   return { blue: state.teams.blue.color, orange: state.teams.orange.color };
 }
 
@@ -1707,7 +1715,7 @@ function capturePreset() {
     gameLabel: state.gameLabel,
     roundLabel: state.roundLabel,
     teamRecord: state.teamRecord,
-    leagueStandings: state.leagueStandings,
+    startggLeagueStandings: state.startggLeagueStandings,
     speedUnit: state.speedUnit,
     fontFamily: state.fontFamily,
     bestOf: state.bestOf,
@@ -1729,7 +1737,7 @@ function applyPreset(cfg) {
   if (typeof cfg.roundLabel === 'string') state.roundLabel = cfg.roundLabel;
   if (cfg.speedUnit === 'mph' || cfg.speedUnit === 'kmh') state.speedUnit = cfg.speedUnit;
   if (cfg.teamRecord && typeof cfg.teamRecord === 'object') state.teamRecord = { ...state.teamRecord, ...cfg.teamRecord };
-  if (cfg.leagueStandings && typeof cfg.leagueStandings === 'object') state.leagueStandings = { ...state.leagueStandings, ...cfg.leagueStandings };
+  if (cfg.startggLeagueStandings && typeof cfg.startggLeagueStandings === 'object') state.startggLeagueStandings = { ...state.startggLeagueStandings, ...cfg.startggLeagueStandings };
   if (typeof cfg.fontFamily === 'string') state.fontFamily = cfg.fontFamily;
   if (cfg.bestOf) state.bestOf = cfg.bestOf;
   if (typeof cfg.facecamsEnabled === 'boolean') state.facecamsEnabled = cfg.facecamsEnabled;
@@ -1753,7 +1761,7 @@ function loadState() {
       if (typeof saved.activeBrandKitId === 'string') state.activeBrandKitId = saved.activeBrandKitId;
       if (typeof saved.useBrandColors === 'boolean') state.useBrandColors = saved.useBrandColors;
       // Colour mode: prefer the explicit field; migrate from the old useBrandColors flag otherwise.
-      if (saved.colorMode === 'team' || saved.colorMode === 'brand' || saved.colorMode === 'default') {
+      if (saved.colorMode === 'team' || saved.colorMode === 'brand' || saved.colorMode === 'default' || saved.colorMode === 'game') {
         state.colorMode = saved.colorMode;
       } else if (typeof saved.useBrandColors === 'boolean') {
         state.colorMode = saved.useBrandColors ? 'brand' : 'team';
@@ -1767,20 +1775,14 @@ function loadState() {
       if (saved.speedUnit === 'mph' || saved.speedUnit === 'kmh') state.speedUnit = saved.speedUnit;
       if (saved.dateFormat === 'us' || saved.dateFormat === 'intl') state.dateFormat = saved.dateFormat;
       if (saved.teamRecord && typeof saved.teamRecord === 'object') state.teamRecord = { ...state.teamRecord, ...saved.teamRecord };
-      // Migrate legacy side-keyed manual records → keyed by team name (best-effort: use whichever
-      // teams were on Blue/Orange at save time). Runs once — skipped if manualByName already has data.
-      if (state.teamRecord && (!state.teamRecord.manualByName || !Object.keys(state.teamRecord.manualByName).length)) {
-        state.teamRecord.manualByName = {};
-        const legacy = state.teamRecord.manual || {};
-        const savedTeams = saved.teams || {};
-        ['blue', 'orange'].forEach((side) => {
-          const nm = ((savedTeams[side] && savedTeams[side].name) || '').trim().toLowerCase();
-          const rec = legacy[side];
-          if (nm && rec && (rec.w || rec.l || rec.pts != null || rec.place != null)) state.teamRecord.manualByName[nm] = { ...rec };
-        });
-      }
+      // (Legacy manual-record migration runs AFTER state.teams is restored below — see migrateTeamRecordManual.)
       if (typeof saved.autoTeamsFromGame === 'boolean') state.autoTeamsFromGame = saved.autoTeamsFromGame;
-      if (saved.leagueStandings && typeof saved.leagueStandings === 'object') state.leagueStandings = { ...state.leagueStandings, ...saved.leagueStandings };
+      if (saved.startggLeagueStandings && typeof saved.startggLeagueStandings === 'object') {
+        state.startggLeagueStandings = { ...state.startggLeagueStandings, ...saved.startggLeagueStandings };
+      } else if (saved.leagueStandings && typeof saved.leagueStandings === 'object') {
+        // Migration shim: older state.json files still use the pre-rename key.
+        state.startggLeagueStandings = { ...state.startggLeagueStandings, ...saved.leagueStandings };
+      }
       if (saved.fontFamily) state.fontFamily = saved.fontFamily;
       // One-time migration: if saved font is still the old generic default, promote to brand font.
       if (state.fontFamily === 'Bourgeois') state.fontFamily = 'Industry';
@@ -1966,6 +1968,20 @@ function loadState() {
         if (state.teams.blue && !state.teams.blue.color) state.teams.blue.color = '#055fdb';
         if (state.teams.orange && !state.teams.orange.color) state.teams.orange.color = '#e97139';
       }
+      // Migrate legacy side-keyed manual team records → keyed by team name, using the NOW-restored
+      // teams (must run after state.teams is set above, or it copies nothing and records orphan).
+      // Idempotent + self-healing: only fills a team's key when unset, so real edits are never lost.
+      if (state.teamRecord) {
+        if (!state.teamRecord.manualByName) state.teamRecord.manualByName = {};
+        const legacy = state.teamRecord.manual || {};
+        ['blue', 'orange'].forEach((side) => {
+          const nm = ((state.teams[side] && state.teams[side].name) || '').trim().toLowerCase();
+          const rec = legacy[side];
+          if (nm && !state.teamRecord.manualByName[nm] && rec && (rec.w || rec.l || rec.pts != null || rec.place != null)) {
+            state.teamRecord.manualByName[nm] = { ...rec };
+          }
+        });
+      }
       if (saved.series) state.series = saved.series;
       if (saved.match && typeof saved.match === 'object') {
         state.match = {
@@ -1975,7 +1991,7 @@ function loadState() {
           seriesVisible: typeof saved.match.seriesVisible === 'boolean' ? saved.match.seriesVisible : true
         };
       }
-      if (Array.isArray(saved.leagues)) state.leagues = saved.leagues;
+      if (Array.isArray(saved.leagues)) state.leagues = saved.leagues.map(migrateLeague);
       if (Array.isArray(saved.myEvents)) state.myEvents = saved.myEvents;
       if (saved.game && typeof saved.game.number === 'number') {
         state.game.number = saved.game.number;
@@ -2216,7 +2232,7 @@ function _saveAppStateNow(sync = false) {
       speedUnit: state.speedUnit,
       teamRecord: state.teamRecord,
       autoTeamsFromGame: state.autoTeamsFromGame,
-      leagueStandings: state.leagueStandings,
+      startggLeagueStandings: state.startggLeagueStandings,
       fontFamily: state.fontFamily,
       facecamsEnabled: state.facecamsEnabled,
       replayCams: state.replayCams,
@@ -2727,6 +2743,24 @@ function resolveOneTeamRecord(name, source) {
         const idx = ranked.findIndex((s) => s.teamId === team.id);
         if (idx >= 0) out.place = idx + 1;
       } else { out.seasonW = 0; out.seasonL = 0; out.pts = 0; }
+      // "This week" W/L, from the same in-app league's schedule — mirrors what the 'startgg'
+      // source already provides via the live event standings, just sourced from lg.schedule instead.
+      const weekSel = (state.teamRecord && state.teamRecord.week) || '';
+      const targetWeek = weekSel || autoPickLatestCompletedWeek(lg);
+      if (targetWeek) {
+        const wkMatches = (lg.schedule || []).filter((m) =>
+          String(m.week || '') === String(targetWeek) &&
+          (m.teamA === team.id || m.teamB === team.id) &&
+          m.result && m.result.scoreA != null && m.result.scoreB != null);
+        let ww = 0, wl = 0;
+        for (const m of wkMatches) {
+          const isA = m.teamA === team.id;
+          const mine = isA ? m.result.scoreA : m.result.scoreB;
+          const theirs = isA ? m.result.scoreB : m.result.scoreA;
+          if (mine > theirs) ww++; else if (theirs > mine) wl++;
+        }
+        out.weekW = ww; out.weekL = wl;
+      }
       break;
     }
   }
@@ -2734,7 +2768,7 @@ function resolveOneTeamRecord(name, source) {
   // Tournament platform (start.gg): LEAGUE standings → season points + placement, and the
   // live start.gg event standings → "this week" W/L (computed from played sets).
   if (src === 'startgg') {
-    const lt = ((state.leagueStandings && state.leagueStandings.teams) || [])
+    const lt = ((state.startggLeagueStandings && state.startggLeagueStandings.teams) || [])
       .find((t) => String(t.name || '').trim().toLowerCase() === key);
     if (lt) { if (lt.points != null) out.pts = lt.points; if (lt.place != null) out.place = lt.place; }
     const wk = (state.bracket && Array.isArray(state.bracket.standings) ? state.bracket.standings : [])
@@ -2773,10 +2807,10 @@ function resolveTeamRecords() {
   const numOrNull = (v) => (v == null || v === '' || isNaN(v)) ? null : Number(v);
   const recFor = (side, name) => {
     if (source === 'manual') {
-      // Keyed by team NAME so the record is tied to the team profile and follows it across swaps.
-      // Fallback: legacy side-keyed records (entered before the name-keyed store existed) — the
-      // load-time migration ran before teams were restored and copied nothing, leaving them orphaned.
-      const m = (tr.manualByName && tr.manualByName[(name || '').trim().toLowerCase()]) || (tr.manual && tr.manual[side]) || {};
+      // Keyed by team NAME ONLY, so the record is tied to the team profile and follows it across side
+      // swaps/reassignments. (NO side-keyed fallback — that pinned records to Blue/Orange and was
+      // exactly why they didn't switch. Legacy records are migrated to manualByName once on load.)
+      const m = (tr.manualByName && tr.manualByName[(name || '').trim().toLowerCase()]) || {};
       const w = numOrNull(m.w), l = numOrNull(m.l);
       return { seasonW: w, seasonL: l, weekW: w, weekL: l, pts: numOrNull(m.pts), place: numOrNull(m.place) };
     }
@@ -2834,7 +2868,7 @@ const BROADCAST_TIERS = {
   spectatedPlayer: 'live', rlConnected: 'live', rlSpectatorUi: 'live', startgg: 'live',
   challonge: 'live', nxgen: 'live', activeEvent: 'live', obs: 'live', vmix: 'live',
   switcher: 'live', commercial: 'live', upcoming: 'live', standings: 'live', teamRecord: 'live',
-  autoTeamsFromGame: 'live', leagueStandings: 'live', gfxActive: 'live', watchlist: 'live',
+  autoTeamsFromGame: 'live', startggLeagueStandings: 'live', gfxActive: 'live', watchlist: 'live',
   teamSpotlight: 'live', director: 'live', ai: 'live', encode: 'live', twitch: 'live',
   discord: 'live', flows: 'live', flowVars: 'live',
   // runtime-added state keys (mirrored in libraryData where noted)
@@ -3139,6 +3173,18 @@ async function fetchTournamentSets(tournamentSlug) {
   return { id: t.id, name: t.name || '', startAt: t.startAt || null, events: (t.events || []).filter(Boolean) };
 }
 
+// Highest schedule week where every match has a recorded result — used as the default "this week"
+// for team-record weekW/weekL when the producer hasn't picked an explicit week.
+function autoPickLatestCompletedWeek(lg) {
+  const sched = (lg && lg.schedule) || [];
+  const weeks = [...new Set(sched.map((m) => String(m.week || '')).filter(Boolean))];
+  const completed = weeks.filter((wk) =>
+    sched.filter((m) => String(m.week || '') === wk).every((m) => m.result && m.result.scoreA != null && m.result.scoreB != null));
+  if (!completed.length) return '';
+  completed.sort((a, b) => (parseInt(a, 10) || 0) - (parseInt(b, 10) || 0));
+  return completed[completed.length - 1];
+}
+
 // Server-side standings recalc — mirrors client-side lgComputeStandingsFromSchedule.
 function lgRecalcServer(lg) {
   const sc = lg.scoring || {};
@@ -3159,6 +3205,47 @@ function lgRecalcServer(lg) {
 
 let _srvLgUidC = Date.now();
 function srvLgUid(prefix) { return prefix + '-' + (++_srvLgUidC).toString(36); }
+
+// Reject oversized base64 logos (league or per-team) rather than silently persisting/broadcasting
+// them — leagues is a 'library' broadcast tier item re-sent on every leaguesVer bump, and giant
+// embedded images here previously cost hundreds of KB per broadcast before tiering existed.
+const LEAGUE_LOGO_MAX_BYTES = 500 * 1024;
+function _capLogoField(obj, key) {
+  const v = obj && obj[key];
+  if (typeof v !== 'string' || !v.startsWith('data:')) return;
+  const approxBytes = Math.floor(v.length * 0.75); // base64 payload is ~4/3 the decoded byte size
+  if (approxBytes > LEAGUE_LOGO_MAX_BYTES) {
+    obj[key] = null;
+    obj._logoWarning = 'Logo removed — file was too large (' + Math.round(approxBytes / 1024) + 'KB, max ' + Math.round(LEAGUE_LOGO_MAX_BYTES / 1024) + 'KB).';
+  }
+}
+function capLeagueLogo(lg) {
+  _capLogoField(lg, 'logo');
+  (lg.teams || []).forEach((tm) => _capLogoField(tm, 'logo'));
+  return lg;
+}
+
+// Backfill defaults for fields added to the league shape over time, so every league object is
+// fully-formed regardless of when/how it entered state (disk load, profile import, set_leagues).
+// Idempotent — safe to call repeatedly on an already-migrated league.
+function migrateLeague(lg) {
+  if (!lg || typeof lg !== 'object') return lg;
+  if (!lg.id) lg.id = srvLgUid('lg');
+  if (!lg.status) lg.status = 'active';
+  if (!lg.type) lg.type = 'team';
+  lg.scoring = { win: 3, loss: 0, draw: 1, otw: 2, ...(lg.scoring && typeof lg.scoring === 'object' ? lg.scoring : {}) };
+  if (!lg.tiebreak) lg.tiebreak = 'gd';
+  if (typeof lg.starterCount !== 'number') lg.starterCount = 3;
+  if (typeof lg.playoffN !== 'number') lg.playoffN = 4;
+  if (typeof lg.abbr !== 'string') lg.abbr = '';
+  if (!Array.isArray(lg.teams)) lg.teams = [];
+  if (!Array.isArray(lg.freeAgents)) lg.freeAgents = [];
+  if (!Array.isArray(lg.standings)) lg.standings = [];
+  if (!Array.isArray(lg.schedule)) lg.schedule = [];
+  if (!Array.isArray(lg.seasonHistory)) lg.seasonHistory = [];
+  lg.teams.forEach((tm) => { if (tm && !tm.id) tm.id = srvLgUid('tm'); });
+  return capLeagueLogo(lg);
+}
 
 async function testStartGgConnection() {
   if (!startggApiToken) {
@@ -5525,6 +5612,8 @@ async function fetchBracket(rawSlug) {
 // ISO 3166-1 alpha-2 lookup for the most common esports countries.
 const _COUNTRY_CODES = {
   'united states': 'us', 'usa': 'us', 'united states of america': 'us', 'america': 'us',
+  'united states minor outlying islands': 'um', 'u.s. minor outlying islands': 'um',
+  'puerto rico': 'pr', 'guam': 'gu', 'u.s. virgin islands': 'vi', 'united states virgin islands': 'vi', 'american samoa': 'as',
   'canada': 'ca', 'united kingdom': 'gb', 'uk': 'gb', 'great britain': 'gb',
   'england': 'gb', 'scotland': 'gb', 'wales': 'gb', 'northern ireland': 'gb',
   'ireland': 'ie', 'republic of ireland': 'ie',
@@ -8573,6 +8662,19 @@ function handleClock(data) {
   });
 }
 
+// Normalise an RL Stats API team colour to a #rrggbb hex. Handles "0000FF", "#0000FF", "0x0000FF",
+// 8-digit ARGB/RGBA (drops alpha), 3-digit shorthand, and a raw 24-bit number. Returns '' if unknown.
+function normRlColor(v) {
+  if (v == null) return '';
+  if (typeof v === 'number' && isFinite(v)) { const h = (v >>> 0).toString(16).padStart(6, '0'); return '#' + h.slice(-6); }
+  let s = String(v).trim(); if (!s) return '';
+  s = s.replace(/^0x/i, '').replace(/^#/, '');
+  if (/^[0-9a-f]{8}$/i.test(s)) s = s.slice(-6);            // ARGB/RGBA → drop alpha
+  if (/^[0-9a-f]{6}$/i.test(s)) return '#' + s.toLowerCase();
+  if (/^[0-9a-f]{3}$/i.test(s)) return '#' + s.split('').map((c) => c + c).join('').toLowerCase();
+  return '';
+}
+let _rlTeamColorLogged = false;   // one-shot diagnostic so we can confirm the live feed's colour field/format
 function handleUpdateState(data) {
   const game = data.Game || data.game || {};
   const players = data.Players || data.players || [];
@@ -8596,17 +8698,30 @@ function handleUpdateState(data) {
   const teams = game.Teams || game.teams || [];
   if (teams.length >= 2) {
     teams.forEach(t => {
+      // Private-match paint colours reported by the RL Stats API (ColorPrimary; other field
+      // names/formats tolerated). Kept in gameTeams.*Color for the "Game colours" mode.
+      const col = normRlColor(t.ColorPrimary ?? t.colorPrimary ?? t.color_primary ?? t.Color ?? t.color);
       if ((t.TeamNum === 0 || t.teamNum === 0)) {
         state.game.blueScore   = t.Score ?? t.score ?? 0;
         state.gameTeams.blue   = t.Name || t.name || 'BLUE';
+        if (col) state.gameTeams.blueColor = col;
         if (state.autoTeamsFromGame) applyGameTeamName('blue', t.Name || t.name);
       }
       if ((t.TeamNum === 1 || t.teamNum === 1)) {
         state.game.orangeScore = t.Score ?? t.score ?? 0;
         state.gameTeams.orange = t.Name || t.name || 'ORANGE';
+        if (col) state.gameTeams.orangeColor = col;
         if (state.autoTeamsFromGame) applyGameTeamName('orange', t.Name || t.name);
       }
     });
+    // One-shot diagnostic: confirm the live feed's colour field name + format so "Game colours" mode
+    // can be verified. Shows the team object's keys + the raw ColorPrimary + what we parsed.
+    if (!_rlTeamColorLogged && teams[0]) {
+      _rlTeamColorLogged = true;
+      console.log('[RL] Team colours — keys:', Object.keys(teams[0]).join(','),
+        '| raw ColorPrimary=', JSON.stringify(teams[0].ColorPrimary ?? teams[0].colorPrimary ?? teams[0].color_primary ?? null),
+        '| parsed blue=', state.gameTeams.blueColor || '(none)', 'orange=', state.gameTeams.orangeColor || '(none)');
+    }
   } else {
     if ('BlueScore'   in game) state.game.blueScore   = game.BlueScore;
     if ('OrangeScore' in game) state.game.orangeScore = game.OrangeScore;
@@ -10044,6 +10159,7 @@ function handleControlMessage(msg, ws) {
       }
       if (typeof d.source === 'string' && ['stats', 'startgg', 'manual'].includes(d.source)) state.teamRecord.source = d.source;
       if ('leagueId' in d) state.teamRecord.leagueId = (d.leagueId == null ? '' : String(d.leagueId));
+      if ('week' in d) state.teamRecord.week = (d.week == null ? '' : String(d.week));
       saveAppState();
       broadcastFullState();
       break;
@@ -11359,7 +11475,7 @@ function handleControlMessage(msg, ws) {
     // team/brand/default each keep their own colours; this only picks the active one.
     case 'set_color_mode': {
       const m = msg.data?.mode;
-      if (m === 'team' || m === 'brand' || m === 'default') {
+      if (m === 'team' || m === 'brand' || m === 'default' || m === 'game') {
         state.colorMode = m;
         state.useBrandColors = (m === 'brand');   // keep the legacy flag in sync
         saveAppState();
@@ -11510,9 +11626,29 @@ function handleControlMessage(msg, ws) {
       }
       break;
 
-    // Leagues are control-panel-authoritative: the editor pushes the whole list.
+    // Leagues are control-panel-authoritative: the editor pushes the whole list. Validate/normalize
+    // every incoming league (migrate to the current shape, cap oversized logos, dedupe ids) rather
+    // than trusting the payload verbatim — this is the single write path for the whole feature.
     case 'set_leagues': {
-      if (Array.isArray(msg.data && msg.data.leagues)) { state.leagues = msg.data.leagues; leaguesVer++; }
+      const incoming = msg.data && msg.data.leagues;
+      if (Array.isArray(incoming)) {
+        const LEAGUES_MAX = 200;
+        const capped = incoming.length > LEAGUES_MAX ? incoming.slice(0, LEAGUES_MAX) : incoming;
+        if (incoming.length > LEAGUES_MAX) {
+          console.warn(`[leagues] set_leagues payload had ${incoming.length} leagues — truncated to ${LEAGUES_MAX}.`);
+        }
+        const seenIds = new Set();
+        const cleaned = [];
+        for (const raw of capped) {
+          if (!raw || typeof raw !== 'object') continue;
+          const lg = migrateLeague(raw);
+          if (seenIds.has(lg.id)) { console.warn(`[leagues] dropped duplicate league id "${lg.id}" in set_leagues payload.`); continue; }
+          seenIds.add(lg.id);
+          cleaned.push(lg);
+        }
+        state.leagues = cleaned;
+        leaguesVer++;
+      }
       saveAppState();
       broadcastFullState();
       break;
@@ -11773,6 +11909,26 @@ function handleControlMessage(msg, ws) {
         };
       } else {
         savedTeams.push({ name, logo: logo || null, color: color || null, players: players || [], ...(favorite !== undefined && { favorite }) });
+      }
+
+      // Explicit rename (oldName present, differs from the new name): cascade into every league
+      // team-reference ({id, teamName}) that pointed at the old name, so leagues stay linked
+      // instead of silently falling into lgResolveTeam's "unlinked" fallback. Also move any manual
+      // team-record, which is deliberately keyed by team name so it "follows the team."
+      if (oldName && _tn(oldName) !== _tn(name) && Array.isArray(state.leagues) && state.leagues.length) {
+        let leaguesTouched = false;
+        for (const lg of state.leagues) {
+          for (const t of (lg.teams || [])) {
+            if (t && t.teamName != null && _tn(t.teamName) === _tn(oldName)) { t.teamName = name; leaguesTouched = true; }
+          }
+        }
+        if (leaguesTouched) leaguesVer++;
+        const mb = state.teamRecord && state.teamRecord.manualByName;
+        if (mb && Object.prototype.hasOwnProperty.call(mb, _tn(oldName))) {
+          mb[_tn(name)] = mb[_tn(oldName)];
+          delete mb[_tn(oldName)];
+        }
+        if (leaguesTouched) saveAppState();
       }
 
       saveTeams();
@@ -12825,6 +12981,28 @@ function handleControlMessage(msg, ws) {
       if (state.challonge.autoFollow) setActivePlatform('challonge');   // silence start.gg / NXGEN follow
       saveAppState();
       broadcastFullState();
+      break;
+    }
+
+    case 'cloud_email_login': {
+      (async () => {
+        try {
+          const d = msg.data || {};
+          const data = await cloud.loginWithEmail({ email: (d.email || '').trim(), password: d.password || '' });
+          const cu = (data && data.user) || {};
+          state.discord.connected = true;
+          state.discord.userId = cu.discordId || '';
+          state.discord.username = cu.username || (d.email || '').split('@')[0];
+          state.discord.discriminator = '0';
+          state.discord.globalName = cu.globalName || cu.username || (d.email || '').split('@')[0];
+          state.discord.avatarUrl = cu.avatarUrl || 'https://cdn.discordapp.com/embed/avatars/0.png';
+          saveDiscordUser();
+          broadcastFullState();
+          ws.send(JSON.stringify({ type: 'cloud-email-login', data: { ok: true, message: 'Signed in as ' + state.discord.globalName } }));
+        } catch (e) {
+          ws.send(JSON.stringify({ type: 'cloud-email-login', data: { ok: false, message: (e && e.message) || 'Login failed' } }));
+        }
+      })();
       break;
     }
 
@@ -15706,11 +15884,11 @@ function startHttpServer(baseDir) {
   // Pull season standings (placement + league points) from a start.gg LEAGUE and store them
   // so the overlay team-record feature can show authoritative season points/placement.
   app.post('/api/startgg/league-standings', async (req, res) => {
-    const slug = (req.body && req.body.slug) || state.leagueStandings.slug || '';
+    const slug = (req.body && req.body.slug) || state.startggLeagueStandings.slug || '';
     if (!slug) return res.status(400).json({ error: 'League slug or URL required' });
     try {
       const { name, teams } = await fetchLeagueStandings(slug);
-      state.leagueStandings = {
+      state.startggLeagueStandings = {
         slug: normalizeLeagueSlug(slug), name, teams,
         fetchedAt: Date.now(), lastError: null
       };
@@ -15718,8 +15896,8 @@ function startHttpServer(baseDir) {
       broadcastFullState();
       res.json({ ok: true, name, count: teams.length, teams });
     } catch (err) {
-      state.leagueStandings.lastError = err.message;
-      state.leagueStandings.slug = normalizeLeagueSlug(slug);
+      state.startggLeagueStandings.lastError = err.message;
+      state.startggLeagueStandings.slug = normalizeLeagueSlug(slug);
       saveAppState();
       broadcastFullState();
       res.status(502).json({ error: err.message });
@@ -16833,7 +17011,7 @@ function startHttpServer(baseDir) {
       client_id: DISCORD_CLIENT_ID,
       redirect_uri: DISCORD_REDIRECT_URI,
       response_type: 'code',
-      scope: 'identify',
+      scope: 'identify email',   // email lets the Nameless backend link the same site account
       state: stateParam,
       code_challenge: codeChallenge,
       code_challenge_method: 'S256'

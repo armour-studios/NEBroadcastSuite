@@ -61,6 +61,11 @@ async function loginWithDiscord({ code, codeVerifier, redirectUri }) {
   try { const { data } = await _client(false).post('/api/auth/discord', { code, codeVerifier, redirectUri }); _setSession(data); return data; }
   catch (e) { throw _err(e); }
 }
+async function loginWithEmail({ email, password }) {
+  _require();
+  try { const { data } = await _client(false).post('/api/auth/broadcast-login', { email, password }); _setSession(data); return data; }
+  catch (e) { throw _err(e); }
+}
 async function refreshSession() {
   _require(); if (!session.refreshToken) throw new Error('No refresh token.');
   try { const { data } = await _client(false).post('/api/auth/session/refresh', { refreshToken: session.refreshToken }); _setSession(data); return data; }
@@ -88,6 +93,7 @@ async function shareProfile(id, scope, role) { _require(); try { const { data } 
 
 module.exports = {
   init, configured, authed, getSession, clearSession,
-  loginWithDiscord, refreshSession, linkTwitch, me,
+  loginWithDiscord,
+  loginWithEmail, refreshSession, linkTwitch, me,
   listProfiles, getProfile, saveProfile, deleteProfile, shareProfile
 };

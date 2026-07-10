@@ -3208,6 +3208,9 @@ function _returnGraphicsToProd() {
       : (lg.teams || []).slice().sort((a, b) => ((byId[b.id] || {}).pts || 0) - ((byId[a.id] || {}).pts || 0));
     return ordered.map((tm, i) => { const s = byId[tm.id] || {}; const r = lgResolveTeam(tm); return { placement: i + 1, name: r.name || 'Team', logo: r.logo || null, wins: s.w || 0, losses: s.l || 0, points: s.pts || 0 }; });
   }
+  // Exposed globally so the legacy Standings pop-out (outside this closure) can reuse the same
+  // row-building logic instead of keeping its own near-duplicate (standingsRowsFromLeague, removed).
+  window.buildLeagueStandingsRows = buildLeagueStandingsRows;
   function buildStandingsPayload() {
     const common = gfxStdCommon();
     const src = document.querySelector('#gfx-std-src .gfx-src-tab.is-on')?.dataset.stdsrc || 'league';
@@ -3271,6 +3274,16 @@ function _returnGraphicsToProd() {
   // then driven locally. Auto-saved to server via set_upcoming on every change.
   let _schMatches = [];
   let _schInitialized = false;
+  // Set after a "Pull from league" — {leagueId, week, sig, pulledAt}. Lets us detect when the
+  // source league's schedule changes after the one-shot pull, without reactively re-binding
+  // state.upcoming to state.leagues (which would silently clobber hand-edited pulled rows).
+  let _schPullMeta = null;
+  function _schLeagueSig(lg, week) {
+    if (!lg) return '';
+    let sched = lg.schedule || [];
+    sched = week ? sched.filter((m) => String(m.week || '') === week) : sched.filter((m) => !m.result || m.result.scoreA == null);
+    return sched.map((m) => `${m.id}:${m.result ? m.result.scoreA : ''}:${m.result ? m.result.scoreB : ''}`).join('|');
+  }
 
   function schFmtDate(v) {
     const s = (v || '').trim(); const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
@@ -3476,18 +3489,12 @@ function _returnGraphicsToProd() {
     const sg = (state && state.startgg) || {};
     const queue = sg.queue || [];
     const connected = !!sg.connected;
+    const rc = el('gfx-sch-showresults'); if (rc && document.activeElement !== rc) rc.checked = !!(state && state.upcoming && state.upcoming.showResults);
     // Sync league dropdown
-    const lgSel = el('gfx-sch-league');
-    if (lgSel) {
-      const leagues = (state && state.leagues) || [];
-      const sig = leagues.map((l) => l.id + ':' + (l.name || '')).join('|');
-      if (lgSel.dataset.sig !== sig && document.activeElement !== lgSel) {
-        lgSel.dataset.sig = sig;
-        const prev = lgSel.value;
-        lgSel.innerHTML = '<option value="">League…</option>' + leagues.map((l) => `<option value="${l.id}">${(l.name || 'League').replace(/</g, '&lt;')}</option>`).join('');
-        if (prev) lgSel.value = prev;
-      }
+    if (typeof lgPopulateLeagueSelect === 'function') {
+      lgPopulateLeagueSelect(el('gfx-sch-league'), (state && state.leagues) || [], { placeholder: 'League…' });
     }
+    gfxCheckScheduleStale(state);
     const up = (state && state.upcoming) || {};
     const raw = up.layout || 'cards';
     const lay = (raw === 'board' || raw === 'dual') ? 'board' : 'cards';
@@ -3557,6 +3564,8 @@ function _returnGraphicsToProd() {
     const pv = el('gfx-pv-schedule');
     if (pv) pv.src = (window.SCENE_BASE_URL || 'http://localhost:3000') + '/schedule.html?preview=1&layout=' + lay;
   });
+  // Keep finished matches on the board (with their final series score)
+  el('gfx-sch-showresults')?.addEventListener('change', function () { send('set_upcoming', { showResults: this.checked }); });
 
   // Source tab toggle
   el('gfx-sch-tab-auto')?.addEventListener('click', () => {
@@ -3651,6 +3660,7 @@ function _returnGraphicsToProd() {
     if (!sched.length) { if (st) { st.textContent = week ? `No matches in week ${week}.` : 'No upcoming matches in that league.'; setTimeout(() => { st.textContent = ''; }, 2500); } return; }
     const lgTeamName = (id) => { const tm = (lg.teams || []).find((t) => t.id === id); return tm ? lgResolveTeam(tm).name : (id || ''); };
     sched.forEach((m) => _schMatches.push({
+      srcMatchId: m.id,
       round: m.week ? ('Week ' + m.week) : (lg.name || ''),
       teamA: lgTeamName(m.teamA), teamB: lgTeamName(m.teamB),
       date: m.date || '', time: m.time || '', week: m.week || '', stream: false,
@@ -3661,9 +3671,57 @@ function _returnGraphicsToProd() {
       const lay = el('gfx-sch-layout'); if (lay) lay.value = 'dual';
       const ttl = el('gfx-front-sch-title'); if (ttl) ttl.value = 'WEEK ' + week;
     }
+    _schPullMeta = { leagueId: id, week, sig: _schLeagueSig(lg, week), pulledAt: Date.now() };
+    gfxHideScheduleStaleBanner();
     schRenderList(); schAutoSave();
     if (st) { st.textContent = `Added ${sched.length} match${sched.length !== 1 ? 'es' : ''}${week ? ' from week ' + week : ''}.`; setTimeout(() => { st.textContent = ''; }, 2500); }
   });
+
+  // Re-pull after the stale banner fires: append only matches not already pulled (matched by the
+  // source league row's own id), so hand-edits to already-pulled rows survive. Score corrections on
+  // an already-pulled row are NOT picked up this way — re-pull won't overwrite an existing row.
+  function gfxRepullLeagueSchedule() {
+    const meta = _schPullMeta; if (!meta) return;
+    const lg = (currentState.leagues || []).find((l) => String(l.id) === String(meta.leagueId));
+    const st = el('gfx-sch-status');
+    if (!lg) { gfxHideScheduleStaleBanner(); return; }
+    let sched = lg.schedule || [];
+    sched = meta.week ? sched.filter((m) => String(m.week || '') === meta.week) : sched.filter((m) => !m.result || m.result.scoreA == null);
+    const existingIds = new Set(_schMatches.map((m) => m.srcMatchId).filter(Boolean));
+    const fresh = sched.filter((m) => !existingIds.has(m.id)).slice(0, 12);
+    const lgTeamName = (id) => { const tm = (lg.teams || []).find((t) => t.id === id); return tm ? lgResolveTeam(tm).name : (id || ''); };
+    fresh.forEach((m) => _schMatches.push({
+      srcMatchId: m.id,
+      round: m.week ? ('Week ' + m.week) : (lg.name || ''),
+      teamA: lgTeamName(m.teamA), teamB: lgTeamName(m.teamB),
+      date: m.date || '', time: m.time || '', week: m.week || '', stream: false,
+      scoreA: m.result && m.result.scoreA != null ? m.result.scoreA : null,
+      scoreB: m.result && m.result.scoreB != null ? m.result.scoreB : null
+    }));
+    _schPullMeta = { ...meta, sig: _schLeagueSig(lg, meta.week), pulledAt: Date.now() };
+    gfxHideScheduleStaleBanner();
+    schRenderList(); schAutoSave();
+    if (st) { st.textContent = fresh.length ? `Added ${fresh.length} new match${fresh.length !== 1 ? 'es' : ''}.` : 'No new matches — existing rows kept as-is.'; setTimeout(() => { st.textContent = ''; }, 2500); }
+  }
+
+  function gfxHideScheduleStaleBanner() {
+    const banner = el('gfx-sch-stale-banner'); if (banner) { banner.style.display = 'none'; banner.innerHTML = ''; }
+  }
+
+  // Called on every state update (from gfxRenderScheduleQueue) — compares the source league's
+  // current schedule signature against the one captured at pull time; does NOT reactively re-bind
+  // state.upcoming (that would silently clobber hand-edits to already-pulled rows).
+  function gfxCheckScheduleStale(state) {
+    const banner = el('gfx-sch-stale-banner'); if (!banner) return;
+    if (!_schPullMeta) { gfxHideScheduleStaleBanner(); return; }
+    const lg = ((state && state.leagues) || []).find((l) => String(l.id) === String(_schPullMeta.leagueId));
+    if (!lg) { gfxHideScheduleStaleBanner(); return; }
+    const curSig = _schLeagueSig(lg, _schPullMeta.week);
+    if (curSig === _schPullMeta.sig) { gfxHideScheduleStaleBanner(); return; }
+    banner.style.cssText = 'display:flex;align-items:center;gap:8px;margin-top:6px;padding:6px 10px;border-radius:8px;background:rgba(201,138,31,.12);border:1px solid rgba(201,138,31,.35);color:#c98a1f;font-size:11px;font-weight:600;';
+    banner.innerHTML = `<span style="flex:1;">Schedule updated in ${String(lg.name || 'league').replace(/</g, '&lt;')} since last pull.</span><button class="btn btn-ghost btn-xs" id="gfx-sch-restale-btn" type="button">Re-pull</button>`;
+    el('gfx-sch-restale-btn')?.addEventListener('click', gfxRepullLeagueSchedule);
+  }
 
   // Expose refresh hooks called from applyState
   window._gfxRefreshSeriesControls = function (state) {
@@ -3724,15 +3782,7 @@ function _returnGraphicsToProd() {
 
   window._gfxRefreshStandingsLeagues = function (state) {
     const sel = el('gfx-std-league'); if (!sel) return;
-    const prev = sel.value;
-    const leagues = (state && state.leagues) || [];
-    sel.innerHTML = '<option value="">Select league…</option>';
-    leagues.forEach((lg) => {
-      const opt = document.createElement('option');
-      opt.value = lg.id; opt.textContent = lg.name || lg.id;
-      if (lg.id === prev) opt.selected = true;
-      sel.appendChild(opt);
-    });
+    if (typeof lgPopulateLeagueSelect === 'function') lgPopulateLeagueSelect(sel, (state && state.leagues) || []);
     gfxRefreshStandingsPreview();
     gfxRefreshSgStandingsPreview();
   };
@@ -3870,15 +3920,7 @@ function _returnGraphicsToProd() {
 
     window._gfxRefreshBracketLeagues = function (state) {
       const sel = el('gfx-bkt-league'); if (!sel) return;
-      const prev = sel.value;
-      const leagues = (state && state.leagues) || [];
-      sel.innerHTML = '<option value="">Select league…</option>';
-      leagues.forEach((lg) => {
-        const opt = document.createElement('option');
-        opt.value = lg.id; opt.textContent = lg.name || lg.id;
-        if (lg.id === prev) opt.selected = true;
-        sel.appendChild(opt);
-      });
+      if (typeof lgPopulateLeagueSelect === 'function') lgPopulateLeagueSelect(sel, (state && state.leagues) || []);
     };
 
     // Tournament Organizer — status line reflects whichever platform the Dashboard has active,
@@ -4516,7 +4558,8 @@ function applyDiscordState(discord) {
   const logoutSep = el('ddd-sep-logout');
   const logoutBtn = el('ddd-logout');
 
-  if (loginBtn) loginBtn.style.display  = 'none';   // Discord login hidden for now — top-bar Settings button replaces it
+  // Logged out → show the Discord login chip (with the Discord logo); logged in → show the avatar.
+  if (loginBtn) loginBtn.style.display  = loggedIn ? 'none' : '';
   if (avatarBtn) avatarBtn.style.display = loggedIn ? '' : 'none';
 
   if (loggedIn) {
@@ -4623,6 +4666,14 @@ el('ddd-logout')?.addEventListener('click', discordLogout);
 
 // Roles page login button mirrors header login
 el('roles-discord-login-btn')?.addEventListener('click', discordLogin);
+// Website email/password login — same shared Nameless account database.
+el('cloud-login-btn')?.addEventListener('click', () => {
+  const email = (el('cloud-login-email')?.value || '').trim();
+  const pass = el('cloud-login-pass')?.value || '';
+  if (!email || !pass) { showToast('Enter your email and password.', '#fbbf24'); return; }
+  send('cloud_email_login', { email, password: pass });
+});
+el('cloud-login-pass')?.addEventListener('keydown', (e) => { if (e.key === 'Enter') el('cloud-login-btn')?.click(); });
 
 // ── Roles / Teams ─────────────────────────────────────────────────────────────
 
@@ -8361,8 +8412,9 @@ wireScorecard('scorecard-teams', 'teams');
     if (e.target.id === 'chk-team-record') send('set_team_record_settings', { enabled: e.target.checked });
     if (e.target.id === 'sel-team-record-metric') send('set_team_record_settings', { metric: e.target.value });
     if (e.target.id === 'sel-team-record-league') send('set_team_record_settings', { leagueId: e.target.value });
+    if (e.target.id === 'sel-team-record-week') send('set_team_record_settings', { week: e.target.value });
   });
-  el('btn-pull-league')?.addEventListener('click', () => pullLeagueStandings('input-league-slug', 'league-pull-status'));
+  el('btn-pull-league')?.addEventListener('click', () => pullStartggLeagueStandings('input-league-slug', 'league-pull-status'));
 })();
 
 // Green "connected & working" outline on the Match-settings auto controls so producers know they'll do
@@ -8387,7 +8439,7 @@ function updateMspConnectedState(data) {
 
 // Shared start.gg League standings pull — used by both the Dashboard match gear popover and the
 // Rocket League section in Integrations (mirrored controls, suffixed -int).
-async function pullLeagueStandings(slugId, statusId) {
+async function pullStartggLeagueStandings(slugId, statusId) {
   const slug = (el(slugId)?.value || '').trim();
   const status = el(statusId);
   if (!slug) { if (status) status.textContent = 'Enter a start.gg league URL or slug first.'; return; }
@@ -8409,7 +8461,8 @@ document.querySelectorAll('#tr-source-seg .seg-btn').forEach((b) => {
   b.addEventListener('click', () => send('set_team_record_settings', { source: b.dataset.src }));
 });
 // Per-team record inputs (W-L + optional points) in the Match — Teams team boxes.
-// Source-aware: Manual writes to state.teamRecord.manual; In-app writes back to the linked league.
+// Source-aware: Manual writes to state.teamRecord.manualByName (keyed by the team on that side, so it
+// stays tied to the team profile); In-app writes back to the linked league.
 ['blue', 'orange'].forEach((side) => {
   const push = () => {
     const w = el('tr-w-' + side)?.value, l = el('tr-l-' + side)?.value, pts = el('tr-pts-' + side)?.value;
@@ -8460,7 +8513,7 @@ function syncSeriesDeskUI(data) {
   updateMspConnectedState(data);
   const atg = el('chk-auto-teams-game'); if (atg && document.activeElement !== atg) atg.checked = !!data.autoTeamsFromGame;
   const tr = data.teamRecord || {};
-  const ls = data.leagueStandings || {};
+  const ls = data.startggLeagueStandings || {};
   const trSource = tr.source || 'stats';
   const chk = el('chk-team-record'); if (chk && document.activeElement !== chk) chk.checked = !!tr.enabled;
   const selM = el('sel-team-record-metric'); if (selM && document.activeElement !== selM) selM.value = tr.metric || 'season';
@@ -8482,7 +8535,7 @@ function syncSeriesDeskUI(data) {
       if (!slugIn.value) slugIn.value = wantSlug;
       if (_autoLeaguePullSlug !== wantSlug) {
         _autoLeaguePullSlug = wantSlug;
-        pullLeagueStandings('input-league-slug', 'league-pull-status');
+        pullStartggLeagueStandings('input-league-slug', 'league-pull-status');
       }
     }
   }
@@ -8492,27 +8545,35 @@ function syncSeriesDeskUI(data) {
   const manHint = el('tr-manual-hint'); if (manHint) manHint.style.display = trSource === 'manual' ? '' : 'none';
   const statsHint = el('tr-stats-hint'); if (statsHint) statsHint.style.display = (trSource === 'stats' && tr.leagueId) ? '' : 'none';
   // In-app league dropdown — keep options in sync with the leagues, reflect the chosen id.
-  const lgSel = el('sel-team-record-league');
-  if (lgSel) {
-    const leagues = data.leagues || [];
-    const sig = leagues.map((l) => l.id + ':' + (l.name || '')).join('|');
-    if (lgSel.dataset.sig !== sig && document.activeElement !== lgSel) {
-      lgSel.dataset.sig = sig;
-      lgSel.innerHTML = '<option value="">Auto (best match)</option>' + leagues.map((l) => `<option value="${l.id}">${(l.name || 'League').replace(/</g, '&lt;')}</option>`).join('');
+  if (typeof lgPopulateLeagueSelect === 'function') {
+    lgPopulateLeagueSelect(el('sel-team-record-league'), data.leagues || [], { placeholder: 'Auto (best match)', value: tr.leagueId || '' });
+  }
+  // "This week" source week — options come from the chosen league's own schedule weeks (same
+  // pattern as Graphics ▸ Schedule's week filter, gfxFillScheduleWeeks).
+  const wkSel = el('sel-team-record-week');
+  if (wkSel && document.activeElement !== wkSel) {
+    const lgForWeek = (data.leagues || []).find((l) => String(l.id) === String(tr.leagueId || '')) ||
+      (!tr.leagueId ? (data.leagues || []).find((l) => l.game === data.activeGame) : null);
+    const weeks = [...new Set(((lgForWeek && lgForWeek.schedule) || []).map((m) => String(m.week || '')).filter(Boolean))]
+      .sort((a, b) => (parseInt(a, 10) || 0) - (parseInt(b, 10) || 0));
+    const sig = weeks.join('|');
+    if (wkSel.dataset.sig !== sig) {
+      wkSel.dataset.sig = sig;
+      wkSel.innerHTML = '<option value="">Auto (latest completed week)</option>' + weeks.map((w) => `<option value="${w}">Week ${w}</option>`).join('');
     }
-    if (document.activeElement !== lgSel) lgSel.value = tr.leagueId || '';
+    wkSel.value = (tr.week && weeks.includes(tr.week)) ? tr.week : '';
   }
   // Per-team record rows — shown when Team Record is on AND (Manual, or In-app with a linked league).
-  // Manual prefills from state.teamRecord.manual; In-app prefills from the resolved league record.
-  const manual = tr.manual || {};
+  // Both prefill from the resolved per-side records (teamRecords.rawBlue/rawOrange) — manual is keyed
+  // by team name server-side, so the box always shows the record for the team now on that side.
   const tRec = data.teamRecords || {};
   const editable = tr.enabled && (trSource === 'manual' || (trSource === 'stats' && tr.leagueId));
   ['blue', 'orange'].forEach((side) => {
     const row = el('team-record-row-' + side);
     if (row) row.style.display = editable ? '' : 'none';
-    const src = (trSource === 'stats' && tr.leagueId)
-      ? (side === 'blue' ? (tRec.rawBlue || {}) : (tRec.rawOrange || {}))
-      : (manual[side] || {});
+    // Both manual (keyed by team name) and in-app-league records resolve per side into rawBlue/rawOrange,
+    // so the box shows the record for whichever team is currently on that side.
+    const src = side === 'blue' ? (tRec.rawBlue || {}) : (tRec.rawOrange || {});
     const setv = (id, v) => { const e = el(id); if (e && document.activeElement !== e) e.value = (v == null ? '' : v); };
     setv('tr-w-' + side, src.w); setv('tr-l-' + side, src.l); setv('tr-pts-' + side, src.pts);
   });
@@ -8585,7 +8646,8 @@ function renderColorMode() {
     if (c) {
       c.disabled = lock; c.style.opacity = lock ? '0.45' : '1';
       c.title = mode === 'brand' ? 'Team colour (overlay using brand colour — see swatch →)'
-              : mode === 'default' ? 'Team colour (overlay using game defaults — see swatch →)' : '';
+              : mode === 'default' ? 'Team colour (overlay using game defaults — see swatch →)'
+              : mode === 'game' ? 'Team colour (overlay using the live in-game paint colours — see swatch →)' : '';
     }
     if (sw) {
       var effColor = teams[side] && teams[side].color;
@@ -8600,7 +8662,7 @@ function renderColorMode() {
   });
 }
 function setColorMode(mode) {
-  if (mode !== 'team' && mode !== 'brand' && mode !== 'default') return;
+  if (mode !== 'team' && mode !== 'brand' && mode !== 'default' && mode !== 'game') return;
   send('set_color_mode', { mode });
   if (currentState) currentState.colorMode = mode;   // optimistic so the segment reflects instantly
   renderColorMode();
@@ -16473,33 +16535,12 @@ function applyStandingsState(data) {
     renderStandingsRowList();
   }
   // Keep the league source dropdown in sync with available leagues
-  const lgSel = el('standings-league-src');
-  if (lgSel && document.activeElement !== lgSel) {
-    const cur = lgSel.value;
-    const leagues = (currentState && currentState.leagues) || [];
-    lgSel.innerHTML = leagues.length
-      ? leagues.map(l => `<option value="${l.id}">${_stEsc(l.name || 'League')}</option>`).join('')
-      : '<option value="">No leagues yet</option>';
-    if (cur && leagues.some(l => String(l.id) === String(cur))) lgSel.value = cur;
+  if (typeof lgPopulateLeagueSelect === 'function') {
+    lgPopulateLeagueSelect(el('standings-league-src'), (currentState && currentState.leagues) || [], { placeholder: null, emptyPlaceholder: 'No leagues yet' });
   }
 }
 
 function _stEsc(s) { return esc(s); }   // legacy alias — canonical esc() lives at the top of the file
-
-// Build editable standings rows from an in-app league (mirrors lg-push-standings).
-function standingsRowsFromLeague(lg) {
-  if (!lg) return [];
-  const byId = {}; (lg.standings || []).forEach((s) => { byId[s.teamId] = s; });
-  const teamsById = {}; (lg.teams || []).forEach(t => { teamsById[t.id] = t; });
-  const ordered = (lg.standings && lg.standings.length)
-    ? lg.standings.map(s => teamsById[s.teamId]).filter(Boolean)
-    : (lg.teams || []).slice().sort((a, b) => ((byId[b.id] || {}).pts || 0) - ((byId[a.id] || {}).pts || 0));
-  return ordered.map((tm, i) => {
-    const s = byId[tm.id] || {};
-    const r = (typeof lgResolveTeam === 'function') ? lgResolveTeam(tm) : { name: tm.teamName, logo: tm.logo };
-    return { placement: i + 1, name: r.name || tm.teamName || 'Team', logo: r.logo || null, wins: s.w || 0, losses: s.l || 0, points: s.pts || 0 };
-  });
-}
 
 // Build editable standings rows from the loaded start.gg event / bracket.
 function standingsRowsFromBracket() {
@@ -16549,7 +16590,7 @@ el('btn-standings-load-league')?.addEventListener('click', () => {
   const lg = ((currentState && currentState.leagues) || []).find(l => String(l.id) === String(id));
   const st = el('standings-status');
   if (!lg) { if (st) { st.textContent = 'Pick a league first.'; st.style.color = '#f0a5a5'; } return; }
-  const rows = standingsRowsFromLeague(lg);
+  const rows = (typeof window.buildLeagueStandingsRows === 'function') ? (window.buildLeagueStandingsRows(lg.id) || []) : [];
   if (!rows.length) { if (st) { st.textContent = 'That league has no teams / standings yet.'; st.style.color = '#f0a5a5'; } return; }
   _standingsRows = rows;
   renderStandingsRowList();

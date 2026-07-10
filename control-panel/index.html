@@ -8325,6 +8325,13 @@ PacketSendRate=10</pre>
     <h3>Sign in with Discord to manage roles</h3>
     <p>Your Discord account links you to your production team and lets collaborators identify you.</p>
     <button class="btn btn-primary roles-discord-login-btn" id="roles-discord-login-btn">Sign in with Discord</button>
+    <div style="display:flex; align-items:center; gap:8px; margin:10px 0 4px;"><span style="flex:1; height:1px; background:var(--border);"></span><span style="font-size:10px; color:var(--muted); letter-spacing:.1em;">OR NAMELESS ACCOUNT</span><span style="flex:1; height:1px; background:var(--border);"></span></div>
+    <div style="display:flex; flex-direction:column; gap:6px; max-width:320px;">
+      <input type="email" id="cloud-login-email" class="input-text" placeholder="Email (namelessesports.com account)" autocomplete="username">
+      <input type="password" id="cloud-login-pass" class="input-text" placeholder="Password" autocomplete="current-password">
+      <button type="button" class="btn btn-secondary" id="cloud-login-btn">Sign in with email</button>
+      <p class="field-hint" style="margin:0;">Same account as the website. 2FA-enabled accounts: use Discord sign-in.</p>
+    </div>
   </div>
 
   <!-- Roles content (shown when logged in) -->
