@@ -563,6 +563,7 @@ let state = {
     // 'event' = follow the stream queue (marked-as-stream matches + a couple non-stream upcoming);
     // 'team' = the searched team's own matches. Set by which Stream Queue tab / fetch is used.
     source: 'event',
+    showResults: false,   // keep FINISHED matches on the board with their final series score (else hidden)
     matches: []   // manual entries/overrides: [{id,round,teamA,teamB,teamALogo,teamBLogo,date,time,stream,scoreA,scoreB,week,note}]
   },
   standings: {
@@ -9852,6 +9853,7 @@ registerWsHandlers({
     if (typeof p.title === 'string') state.upcoming.title = p.title;
     if (typeof p.eyebrow === 'string') state.upcoming.eyebrow = p.eyebrow;
     if (['cards', 'board', 'single', 'dual'].includes(p.layout)) state.upcoming.layout = p.layout;
+    if (typeof p.showResults === 'boolean') state.upcoming.showResults = p.showResults;
     if (Array.isArray(p.matches)) state.upcoming.matches = p.matches;
     saveAppState();
     broadcastFullState();
@@ -12554,6 +12556,16 @@ function handleControlMessage(msg, ws) {
       const tempSeries = state.series.blue;
       state.series.blue = state.series.orange;
       state.series.orange = tempSeries;
+
+      // Swap the MANUAL team records too — auto-resolved records (stats/league sources)
+      // follow the team name, but hand-entered W/L (+pts/place) is keyed by SIDE and was
+      // staying put when the teams crossed over.
+      if (state.teamRecord && state.teamRecord.manual) {
+        const tr = state.teamRecord.manual;
+        const tmpRec = tr.blue;
+        tr.blue = tr.orange;
+        tr.orange = tmpRec;
+      }
 
       saveAppState();
       broadcastFullState();
