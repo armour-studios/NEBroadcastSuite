@@ -2,6 +2,8 @@
 
 **Status:** draft v1 · **Client:** NE Broadcast Suite (Electron desktop, by Armour Studios) · **Backend:** Nameless platform (`BROADCAST_REMOTE_URL`, e.g. `https://namelessesports.com`)
 
+> **Deployment decision (2026-07-10):** the backend serves from the existing Nameless website project, additionally reachable at **https://studios.namelessesports.com** (Vercel domain alias on the same deployment). The future web app lives on that subdomain; its Discord redirect will be `https://studios.namelessesports.com/api/oauth/discord/callback`. The desktop app keeps `http://localhost:3000/api/oauth/discord/callback`.
+
 ## Why this exists
 
 Today the desktop app ships `.env.local` inside the installer, which leaks the **Twitch client secret**, **Discord client secret**, and **broadcast API key** to every user. This contract moves all secret-bearing operations **server-side onto the Nameless backend**, so the desktop app only ever holds:
