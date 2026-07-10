@@ -2231,10 +2231,22 @@ body.popout-match #btn-mt-popout { display: none; }
 .pv-sample input { accent-color: var(--cp-accent); }
 .pv-btn { background: transparent; border: 1px solid var(--border); color: var(--text); border-radius: 6px; width: 28px; height: 28px; cursor: pointer; flex: 0 0 auto; }
 .pv-btn:hover { background: var(--white-a06); }
+/* Team search typeahead with logos (schedule add-match) */
+.team-logo-wrap { position: relative; }
+.team-logo-dd { position: absolute; top: calc(100% + 3px); left: 0; right: 0; z-index: 60; max-height: 250px; overflow-y: auto;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 12px 30px rgba(0,0,0,.5); padding: 4px; }
+.team-logo-item { display: flex; align-items: center; gap: 9px; padding: 5px 8px; border-radius: 6px; cursor: pointer; font-size: 12px; color: var(--text); }
+.team-logo-item:hover { background: var(--white-a06); }
+.team-logo-item img { width: 22px; height: 22px; object-fit: contain; flex: 0 0 auto; }
+.team-logo-ph { width: 22px; height: 22px; border-radius: 4px; background: var(--white-a06); flex: 0 0 auto; }
+.pv-btn-wide { width: auto; padding: 0 9px; font-size: 11px; font-weight: 700; letter-spacing: .02em; }
+.pv-btn-wide.on { background: color-mix(in srgb, var(--cp-accent) 22%, transparent); border-color: var(--cp-accent); color: #fff; }
+/* Drag the bottom-right corner to resize (16:9 kept via aspect-ratio); the size button still cycles presets. */
 .pv-stage { position: relative; overflow: hidden; background: #000;
-  width: var(--pv-w, 480px); height: calc(var(--pv-w, 480px) * 9 / 16); }
+  width: var(--pv-w, 480px); aspect-ratio: 16 / 9; resize: horizontal; min-width: 320px; max-width: 1400px; }
 .pv-stage iframe { position: absolute; top: 0; left: 0; width: 1920px; height: 1080px; border: 0;
   transform: scale(calc(var(--pv-w, 480px) / 1920)); transform-origin: top left; }
+.pv-obs-video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #000; }
 
 /* ─── AI Director ───────────────────────────────────────────────────────── */
 .section-desc { font-size: 12px; color: var(--muted); margin-bottom: 12px; }
@@ -5784,7 +5796,8 @@ span.lg-pl-role { color: var(--muted); }
 /* Schedule match list items */
 .gfx-sch-list-row { display:flex; align-items:center; gap:6px; padding:5px 8px; background:var(--surface2); border:1px solid var(--border); border-radius:6px; margin-bottom:4px; min-width:0; }
 .gfx-sch-list-teams { display:flex; align-items:center; gap:4px; flex:1; min-width:0; font-size:12px; font-weight:700; overflow:hidden; }
-.gfx-sch-list-team { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:90px; }
+.gfx-sch-list-team { display:inline-flex; align-items:center; gap:6px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:90px; }
+.gfx-sch-list-logo { width:20px; height:20px; object-fit:contain; flex:0 0 auto; }
 .gfx-sch-list-meta { display:flex; align-items:center; gap:5px; flex-shrink:0; }
 .gfx-sch-list-when { font-size:10px; color:var(--muted); white-space:nowrap; }
 .gfx-sch-list-badge { font-size:9px; font-weight:800; letter-spacing:.05em; background:#22e07a; color:#04130a; border-radius:999px; padding:2px 6px; white-space:nowrap; }
@@ -7313,6 +7326,7 @@ body.sides-swapped .qrail-head { flex-direction: row-reverse; }
   -webkit-app-region: no-drag;
   overflow: hidden;
   user-select: none;
+  resize: both; overflow: hidden; min-width: 320px; min-height: 220px; max-width: 1600px; max-height: 940px;
 }
 .obs-prev-header {
   display: flex; align-items: center; gap: 6px;

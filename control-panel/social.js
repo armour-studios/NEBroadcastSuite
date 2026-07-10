@@ -543,7 +543,7 @@ async function _cancelSocialPost(id) {
 
     // ── State ──
     let active  = false;
-    let mode    = 'cam';          // 'cam' | 'scr'
+    let mode    = 'cam';          // cam-only: SCR (screenshot polling) removed from this panel
     let paused  = false;
     let pending = false;
     let timer   = null;
@@ -565,14 +565,13 @@ async function _cancelSocialPost(id) {
     }
 
     function setMode(m) {
-      mode = m;
-      modeCam.classList.toggle('active', m === 'cam');
-      modeScr.classList.toggle('active', m === 'scr');
-      fpsBtn.style.display  = m === 'scr' ? '' : 'none';
-      pauseBtn.style.display = m === 'scr' ? '' : 'none';
-      img.style.display   = m === 'scr' ? '' : 'none';
-      video.style.display = m === 'cam' ? '' : 'none';
-      localStorage.setItem('ne_obs_prev_mode', m);
+      mode = 'cam';   // cam-only now
+      modeCam.classList.add('active');
+      if (modeScr) modeScr.style.display = 'none';
+      fpsBtn.style.display = 'none';
+      pauseBtn.style.display = 'none';
+      img.style.display = 'none';
+      video.style.display = '';
     }
 
     // ── Screenshot mode ──
@@ -604,7 +603,9 @@ async function _cancelSocialPost(id) {
 
     // ── Camera mode ──
     async function startCam() {
-      setMsg('Looking for OBS Virtual Camera...');
+      setMsg('Starting OBS Virtual Camera...');
+      // Auto-start the Virtual Camera when it's off — no more manual Tools menu trip.
+      try { if (typeof send === 'function') send('obs_virtualcam', { on: true }); } catch (e) {}
       try {
         // First enumerate to see if labels are available
         let devices = await navigator.mediaDevices.enumerateDevices();
@@ -619,7 +620,13 @@ async function _cancelSocialPost(id) {
         }
 
         if (!obsDevice) {
-          setMsg('OBS Virtual Camera not found.\nEnable it in OBS → Tools → Start Virtual Camera, then switch back to CAM mode.');
+          // The vcam we just started needs a moment to register as a device.
+          await new Promise(r => setTimeout(r, 1200));
+          devices = await navigator.mediaDevices.enumerateDevices();
+          obsDevice = devices.find(d => d.kind === 'videoinput' && /obs/i.test(d.label));
+        }
+        if (!obsDevice) {
+          setMsg('OBS Virtual Camera not found — is OBS connected? (It is auto-started when available; click CAM to retry.)');
           return;
         }
 
@@ -660,13 +667,8 @@ async function _cancelSocialPost(id) {
       btn.classList.add('active');
       fpsBtn.textContent = FPS_LBLS[fpsIdx];
       frameCount = 0; frameTs = Date.now();
-      if (mode === 'cam') {
-        startCam();
-      } else {
-        setMsg('Connecting...');
-        scrNext();
-        startFpsMeter();
-      }
+      setMode('cam');
+      startCam();
     }
 
     function close() {
@@ -710,8 +712,8 @@ async function _cancelSocialPost(id) {
     btn.addEventListener('click', () => { if (active) close(); else open(); });
     closeBtn.addEventListener('click', close);
     pauseBtn.addEventListener('click', togglePause);
-    modeCam.addEventListener('click', () => switchMode('cam'));
-    modeScr.addEventListener('click', () => switchMode('scr'));
+    modeCam.addEventListener('click', () => { stopCam(); startCam(); });   // retry
+    if (modeScr) modeScr.style.display = 'none';
 
     // FPS button cycles through fps options (screenshot mode only)
     fpsBtn.addEventListener('click', () => {
