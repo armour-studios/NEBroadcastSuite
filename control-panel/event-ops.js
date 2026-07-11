@@ -16,6 +16,8 @@
   const eoOps = () => (window.currentState && currentState.eventOps) || { rows: [], seeds: [] };
   let _eoTeam = '';       // selected team (bracket path + card highlight)
   let _eoSearch = '';
+  let _eoSort = 'team';   // team | seed | players
+  let _eoFilter = 'all';  // all | noemail | nochallonge
   let _eoPhaseId = '';    // bracket explorer phase/pool selection
   let _eoPoolId = '';
 
@@ -139,14 +141,23 @@
     }
     const seeds = seedByName();
     let teams = groupTeams(rows);
-    // Auto-sorted alphabetically by team — the seed table below keeps the seed order.
-    teams.sort((a, b) => a.team.localeCompare(b.team, undefined, { sensitivity: 'base', numeric: true }));
+
+    // Sift: free-text search + missing-data filters.
     const q = _eoSearch.trim().toLowerCase();
     if (q) {
       teams = teams.filter((t) =>
         t.team.toLowerCase().includes(q) ||
         t.players.some((p) => (p.player + ' ' + p.email + ' ' + p.challonge).toLowerCase().includes(q)));
     }
+    if (_eoFilter === 'noemail') teams = teams.filter((t) => t.players.some((p) => !p.email));
+    if (_eoFilter === 'nochallonge') teams = teams.filter((t) => t.players.some((p) => !p.challonge));
+
+    // Sort: team A–Z, start.gg seed, or roster size.
+    const seedOf = (t) => { const s = seeds.get(t.team.toLowerCase()); return s != null ? s : 9999; };
+    if (_eoSort === 'seed') teams.sort((a, b) => seedOf(a) - seedOf(b) || a.team.localeCompare(b.team));
+    else if (_eoSort === 'players') teams.sort((a, b) => b.players.length - a.players.length || a.team.localeCompare(b.team));
+    else teams.sort((a, b) => a.team.localeCompare(b.team, undefined, { sensitivity: 'base', numeric: true }));
+
     const emails = rows.filter((r) => r.email);
     const challonges = rows.filter((r) => r.challonge);
 
@@ -160,38 +171,47 @@
     const controls = `
       <div class="eo-controls">
         <input type="text" id="eo-search" class="input-text" placeholder="Search team, player, email, challonge…" value="${eoEsc(_eoSearch)}">
+        <select class="input-select eo-ctl-sel" id="eo-sort" title="Sort teams">
+          <option value="team"${_eoSort === 'team' ? ' selected' : ''}>Sort: Team A–Z</option>
+          <option value="seed"${_eoSort === 'seed' ? ' selected' : ''}>Sort: Seed</option>
+          <option value="players"${_eoSort === 'players' ? ' selected' : ''}>Sort: Most players</option>
+        </select>
+        <select class="input-select eo-ctl-sel" id="eo-filter" title="Filter teams">
+          <option value="all"${_eoFilter === 'all' ? ' selected' : ''}>All teams</option>
+          <option value="noemail"${_eoFilter === 'noemail' ? ' selected' : ''}>Missing emails</option>
+          <option value="nochallonge"${_eoFilter === 'nochallonge' ? ' selected' : ''}>Missing challonge</option>
+        </select>
         <button class="btn btn-secondary btn-sm" id="eo-copy-emails" title="Every email in the roster, one per line">Copy all emails</button>
         <button class="btn btn-secondary btn-sm" id="eo-copy-challonge" title="Every Challonge username, one per line">Copy all Challonge</button>
       </div>`;
-    // One aligned table for the whole roster: a header row per team, its players
-    // directly underneath — columns line up across every team.
-    const body = teams.map((t) => {
+
+    // One block per team, whitespace between blocks:
+    //   TEAM NAME — SEED X
+    //   Player 1  GAMERTAG   EMAIL   CHALLONGE
+    const blocks = teams.map((t) => {
       const seed = seeds.get(t.team.toLowerCase());
       const sel = _eoTeam && _eoTeam.toLowerCase() === t.team.toLowerCase();
-      const teamRow = `
-        <tr class="eo-roster-team${sel ? ' sel' : ''}" data-eo-team="${eoEsc(t.team)}">
-          <td colspan="3">
-            <div class="eo-roster-team-inner">
-              ${seed != null ? `<span class="eo-seed" title="start.gg seed">#${seed}</span>` : ''}
-              <span class="eo-roster-team-name">${eoEsc(t.team)}</span>
-              <span class="eo-team-n">${t.players.length} player${t.players.length === 1 ? '' : 's'}</span>
-              <button class="btn btn-ghost btn-sm eo-copy-team" data-team="${eoEsc(t.team)}" title="Copy this team's emails">Copy emails</button>
-            </div>
-          </td>
-        </tr>`;
-      const playerRows = t.players.map((p) => `
-        <tr class="eo-roster-player">
-          <td class="eo-p-name">${eoEsc(p.player) || '<span class="eo-dim">—</span>'}</td>
-          <td class="eo-p-mail">${p.email ? eoEsc(p.email) : '<span class="eo-miss">no email</span>'}</td>
-          <td class="eo-p-ch">${p.challonge ? eoEsc(p.challonge) : '<span class="eo-miss">no challonge</span>'}</td>
-        </tr>`).join('');
-      return teamRow + playerRows;
+      return `
+        <div class="eo-block${sel ? ' sel' : ''}">
+          <div class="eo-block-head" data-eo-team="${eoEsc(t.team)}">
+            <span class="eo-block-title">${eoEsc(t.team)}</span>
+            <span class="eo-block-seed">${seed != null ? '— SEED ' + seed : ''}</span>
+            <span class="eo-team-n">${t.players.length} player${t.players.length === 1 ? '' : 's'}</span>
+            <button class="btn btn-ghost btn-sm eo-copy-team" data-team="${eoEsc(t.team)}" title="Copy this team's emails">Copy emails</button>
+          </div>
+          ${t.players.map((p, i) => `
+            <div class="eo-block-player">
+              <span class="eo-p-idx">Player ${i + 1}</span>
+              <span class="eo-p-name">${eoEsc(p.player) || '<span class="eo-dim">—</span>'}</span>
+              <span class="eo-p-mail">${p.email ? eoEsc(p.email) : '<span class="eo-miss">no email</span>'}</span>
+              <span class="eo-p-ch">${p.challonge ? eoEsc(p.challonge) : '<span class="eo-miss">no challonge</span>'}</span>
+            </div>`).join('')}
+        </div>`;
     }).join('');
-    host.innerHTML = chips + controls + (teams.length ? `
-      <table class="eo-roster">
-        <thead><tr><th>Player</th><th>Email</th><th>Challonge</th></tr></thead>
-        <tbody>${body}</tbody>
-      </table>` : '<div class="eo-empty">Nothing matches the search.</div>');
+    host.innerHTML = chips + controls +
+      (teams.length ? `<div class="eo-blocks">${blocks}</div>` : '<div class="eo-empty">Nothing matches this search/filter.</div>');
+    el('eo-sort')?.addEventListener('change', function () { _eoSort = this.value; eoRenderDash(); });
+    el('eo-filter')?.addEventListener('change', function () { _eoFilter = this.value; eoRenderDash(); });
 
     const search = el('eo-search');
     search?.addEventListener('input', () => { _eoSearch = search.value; eoRenderDash(); });
@@ -205,7 +225,7 @@
       if (!list.length) { showToast('No emails on this team.', '#fbbf24'); return; }
       eoCopy(list.join('\n'), list.length + ' emails (' + b.dataset.team + ')');
     }));
-    host.querySelectorAll('.eo-roster-team').forEach((c) => c.addEventListener('click', () => {
+    host.querySelectorAll('.eo-block-head').forEach((c) => c.addEventListener('click', () => {
       eoSelectTeam(c.dataset.eoTeam === _eoTeam ? '' : c.dataset.eoTeam);
     }));
   }
