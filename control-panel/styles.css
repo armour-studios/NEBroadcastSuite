@@ -7509,6 +7509,8 @@ tr.lg2-drag-over { outline: 2px solid var(--accent, #4a9eff); outline-offset: -1
 .eo-block-player { display: grid; grid-template-columns: 74px 1.1fr 1.6fr 1fr; gap: 12px; align-items: baseline; padding: 6px 14px; font-size: 12.5px; border-top: 1px solid var(--border); }
 .eo-block-player:hover { background: rgba(255,255,255,.02); }
 .eo-p-idx { color: var(--muted); font-size: 10.5px; text-transform: uppercase; letter-spacing: .06em; white-space: nowrap; }
+.eo-flag { display: inline-block; padding: 0 5px; border-radius: 5px; border: 1px solid var(--border); color: var(--muted); font-size: 9.5px; font-weight: 800; vertical-align: 1px; }
+.eo-flag.cap { border-color: rgba(245,158,11,.55); color: #fbbf24; }
 .eo-p-name { font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; user-select: text; }
 .eo-p-mail { color: var(--fg, #dfe3ee); opacity: .85; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; user-select: text; }
 .eo-p-ch { color: #93c5fd; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; user-select: text; }

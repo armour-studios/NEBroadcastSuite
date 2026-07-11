@@ -7020,8 +7020,10 @@ function rebuildVetoBoard() {
 }
 
 function vetoStart({ game, bestOf, teamStart, title }) {
-  const g = vetoData.hasVeto(game) ? game : (vetoData.hasVeto(state.activeGame) ? state.activeGame : 'csgo');
-  const pool = vetoData.mapPool(g);
+  const pools = vetoData.mergedMapPools(state.gameConfigs);   // built-in + active Game Config maps
+  const hasPool = (id) => (pools[id] || []).length > 0;
+  const g = hasPool(game) ? game : (hasPool(state.activeGame) ? state.activeGame : 'csgo');
+  const pool = pools[g] || [];
   if (!pool.length) throw new Error('No map pool defined for ' + g);
   const bo = [1, 3, 5, 7].includes(Number(bestOf)) ? Number(bestOf) : 1;
   const ts = teamStart === 'b' ? 'b' : 'a';
@@ -7128,13 +7130,13 @@ function draftAction(name) {
   const champ = (name || '').toString().slice(0, 40).trim();
   if (!champ) return;
   const step = d.sequence[d.ops.length];
-  if (step.action === 'ban' && !draftData.roleLimitOk(d.game, d.ops, champ)) {
-    const role = draftData.roleFor(d.game, champ);
+  if (step.action === 'ban' && !draftData.roleLimitOk(d.game, d.ops, champ, state.gameConfigs)) {
+    const role = draftData.roleFor(d.game, champ, state.gameConfigs);
     throw new Error(`Role limit reached — 2 ${role} heroes are already banned`);
   }
-  const role = draftData.roleFor(d.game, champ);
+  const role = draftData.roleFor(d.game, champ, state.gameConfigs);
   const priorBans = d.ops.filter((o) => o.by === step.by && o.action === 'ban').length;
-  d.ops.push({ name: champ, action: step.action, by: step.by, image: draftData.imageFor(d.game, champ), role });
+  d.ops.push({ name: champ, action: step.action, by: step.by, image: draftData.imageFor(d.game, champ, state.gameConfigs), role });
   rebuildDraftTurn();
   if (d.game === 'overwatch' && step.action === 'ban') setOwBanSlot(step.by, priorBans, champ, role);
 }
@@ -9830,7 +9832,8 @@ registerWsHandlers({
       team: clean(r.team, 120),
       player: clean(r.player, 120),
       email: clean(r.email, 200),
-      challonge: clean(r.challonge, 120)
+      challonge: clean(r.challonge, 200),
+      flags: clean(r.flags, 40)   // CAPTAIN / ALTERNATE from start.gg member flags
     })).filter((r) => r.team || r.player);
     state.eventOps = {
       ...state.eventOps,
@@ -10715,6 +10718,64 @@ function handleControlMessage(msg, ws) {
         state.customOverlayLayouts = custom;
       }
       saveAppState(); broadcastFullState();
+      break;
+    }
+
+    // ── Game Config Builder — one active config per game, extending an EXISTING built-in game
+    // (maps/roles/characters). Bundle is built entirely client-side (like the League Editor holds
+    // lgLeagues locally); these handlers only fire on Export/Import/Reset. ────────────────────────
+    case 'export_game_config': {
+      const d = msg.data || {};
+      const bundle = d.bundle;
+      if (!bundle || typeof bundle !== 'object' || !GAMES[bundle.game]) {
+        sendImportExportResult(ws, false, 'Nothing to export — pick a valid game first.', 'game-config');
+        break;
+      }
+      const zip = new AdmZip();
+      const manifest = extractAssetsToZip(bundle, zip);
+      zip.addFile('manifest.json', Buffer.from(JSON.stringify(manifest, null, 2)));
+      dialog.showSaveDialog({
+        title: 'Export Game Config',
+        defaultPath: (bundle.configId || bundle.game || 'game-config') + '.zip',
+        filters: [{ name: 'NE Game Config', extensions: ['zip'] }]
+      }).then(({ canceled, filePath }) => {
+        if (canceled || !filePath) { sendImportExportResult(ws, false, 'Export cancelled.', 'game-config'); return; }
+        try { zip.writeZip(filePath); sendImportExportResult(ws, true, 'Game config exported.', 'game-config'); }
+        catch (e) { sendImportExportResult(ws, false, 'Export failed: ' + e.message, 'game-config'); }
+      });
+      break;
+    }
+    case 'import_game_config': {
+      (async () => {
+        try {
+          const r = await dialog.showOpenDialog({
+            title: 'Import Game Config',
+            filters: [{ name: 'NE Game Config', extensions: ['zip'] }],
+            properties: ['openFile']
+          });
+          if (r.canceled || !r.filePaths || !r.filePaths[0]) { sendImportExportResult(ws, false, 'Import cancelled.', 'game-config'); return; }
+          const zip = new AdmZip(await fsp.readFile(r.filePaths[0]));
+          const manifestEntry = zip.getEntry('manifest.json');
+          if (!manifestEntry) throw new Error('Not a valid Game Config file (missing manifest.json).');
+          const bundle = inflateAssetsFromZip(JSON.parse(manifestEntry.getData().toString('utf8')), zip);
+          if (bundle.format !== 'ne-game-config') throw new Error('Not a valid Game Config file.');
+          if (!GAMES[bundle.game]) throw new Error(`"${bundle.game}" isn't one of this app's built-in games — Game Configs can only extend an existing game.`);
+          state.gameConfigs = { ...(state.gameConfigs || {}), [bundle.game]: bundle };
+          saveAppState(); broadcastFullState();
+          sendImportExportResult(ws, true, `Game config loaded for ${GAMES[bundle.game].name}.`, 'game-config');
+        } catch (e) {
+          sendImportExportResult(ws, false, 'Import failed: ' + e.message, 'game-config');
+        }
+      })();
+      break;
+    }
+    case 'clear_game_config': {
+      const gameId = String((msg.data && msg.data.gameId) || '');
+      if (!state.gameConfigs || !state.gameConfigs[gameId]) break;
+      state.gameConfigs = { ...state.gameConfigs };
+      delete state.gameConfigs[gameId];
+      saveAppState(); broadcastFullState();
+      sendImportExportResult(ws, true, `Reset ${(GAMES[gameId] && GAMES[gameId].name) || gameId} to built-in content.`, 'game-config');
       break;
     }
 
@@ -14660,10 +14721,10 @@ function handleControlMessage(msg, ws) {
   }
 }
 
-function sendImportExportResult(ws, result, message) {
+function sendImportExportResult(ws, result, message, context) {
   ws.send(JSON.stringify({
     type: 'import-export-result',
-    data: { result, message }
+    data: { result, message, context: context || 'profile' }
   }));
 }
 

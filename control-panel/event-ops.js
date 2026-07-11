@@ -49,11 +49,16 @@
 
   // Header auto-guess: start.gg attendee exports name these differently per event
   // (custom registration fields carry whatever label the TO typed), so match loosely.
+  // Team lives in TWO columns on team events: "<event> Completed Team" (registered as a
+  // full squad) and "<event> Incomplete Teams" ("ACCEPTED: <team>" once filled) — a row
+  // has one, the other, or neither (free agent).
   const GUESS = {
-    team:      [/^entrant/i, /team/i, /squad/i],
-    player:    [/gamer.?tag/i, /^tag$/i, /player/i, /^name$/i, /^attendee/i],
-    email:     [/e-?mail/i],
-    challonge: [/challonge/i]
+    team:      [/completed team/i, /^entrant/i, /^team$/i, /squad/i],
+    team2:     [/incomplete team/i],
+    player:    [/^gamer.?tag$/i, /gamer.?tag/i, /^tag$/i, /player/i, /^name$/i, /^attendee/i],
+    email:     [/^e-?mail$/i, /e-?mail/i],
+    challonge: [/challonge.*(url|profile)/i, /(url|profile).*challonge/i, /challonge(?!.*register)/i, /challonge/i],
+    flags:     [/member\s*flags/i, /\bflags\b/i]
   };
   function guessCol(headers, key) {
     for (const re of GUESS[key]) {
@@ -61,6 +66,30 @@
       if (i !== -1) return i;
     }
     return -1;
+  }
+
+  // "ACCEPTED: Cyclone Esports" → "Cyclone Esports" (start.gg prefixes the roster status).
+  const cleanTeam = (v) => String(v || '').trim().replace(/^(accepted|pending|invited|waitlisted|declined)\s*:\s*/i, '').trim();
+  // Challonge answers are a mess of profile URLs (challonge.com/users/x, regional /es/ /fr/
+  // subpaths, league subdomains) and bare usernames — extract the username when it's a
+  // challonge URL, otherwise show what they typed so junk answers are visible.
+  function cleanChallonge(v) {
+    v = String(v || '').trim();
+    if (!v || /^x$/i.test(v)) return '';
+    const m = v.match(/challonge\.com\/(?:[a-z]{2}(?:-[a-z]{2})?\/)?users\/([^\/?#\s]+)/i);
+    if (m) { try { return decodeURIComponent(m[1]); } catch (_) { return m[1]; } }
+    return v;
+  }
+  // Shared by the live preview and the import so what you see is exactly what lands.
+  function deriveRow(r, idx) {
+    const pick = (k) => (idx[k] >= 0 ? (r[idx[k]] || '').toString().trim() : '');
+    return {
+      team: cleanTeam(pick('team')) || cleanTeam(pick('team2')),
+      player: pick('player'),
+      email: pick('email'),
+      challonge: cleanChallonge(pick('challonge')),
+      flags: pick('flags').toUpperCase()
+    };
   }
 
   function eoRenderMapBox() {
@@ -73,7 +102,8 @@
       .concat(headers.map((h, i) =>
         `<option value="${i}"${i === sel ? ' selected' : ''}>${eoEsc(h) || '(column ' + (i + 1) + ')'} · ${distinct[i]} unique</option>`)).join('');
     const fields = [
-      ['team', 'Team name'], ['player', 'Player / gamertag'], ['email', 'Email'], ['challonge', 'Challonge username']
+      ['team', 'Team name'], ['team2', 'Team name (2nd column)'], ['player', 'Player / gamertag'],
+      ['email', 'Email'], ['challonge', 'Challonge username'], ['flags', 'Captain/role flags']
     ];
     // Header guess first; if no header matches for TEAM, fall back to the most
     // repeated text column (a team column has ~rows/teamSize distinct values).
@@ -92,45 +122,43 @@
             <select class="input-select" id="eo-map-${k}">${opts(k === 'team' ? teamGuess : guessCol(headers, k))}</select>
           </label>`).join('')}
       </div>
+      <p class="field-hint" style="margin:0 0 8px;">start.gg team events split the team across two columns — "…Completed Team" and "…Incomplete Teams" ("ACCEPTED: name"). Map both; the status prefix is stripped automatically, players with neither become Free Agents.</p>
       <div class="eo-map-summary" id="eo-map-summary"></div>
       <div class="eo-map-preview" id="eo-map-preview"></div>
       <div style="display:flex; gap:8px; margin-top:10px;">
         <button class="btn btn-primary btn-sm" id="eo-map-import">Import ${rows.length} rows</button>
         <button class="btn btn-ghost btn-sm" id="eo-map-cancel">Cancel</button>
       </div>`;
+    const readIdx = () => { const idx = {}; fields.forEach(([k]) => { idx[k] = Number(el('eo-map-' + k)?.value); }); return idx; };
     const preview = () => {
-      const idx = {}; fields.forEach(([k]) => { idx[k] = Number(el('eo-map-' + k)?.value); });
+      const idx = readIdx();
+      const derived = rows.map((r) => deriveRow(r, idx));
       // Live outcome: exactly how the dashboard will group this mapping.
-      const teamsN = idx.team >= 0
-        ? new Set(rows.map((r) => (r[idx.team] || '').toString().trim().toLowerCase()).filter(Boolean)).size
-        : 0;
+      const teamsN = new Set(derived.map((d) => d.team.toLowerCase()).filter(Boolean)).size;
+      const freeN = derived.filter((d) => !d.team && d.player).length;
       const sm = el('eo-map-summary');
       if (sm) {
-        if (idx.team < 0) {
-          sm.innerHTML = '<span class="eo-miss">No team column selected — every player will land in one "(No team)" group. Pick the column that repeats per team (start.gg usually calls it "Entrant").</span>';
+        if (idx.team < 0 && idx.team2 < 0) {
+          sm.innerHTML = '<span class="eo-miss">No team column selected — everyone will land in one Free Agents group. Map the "…Completed Team" and "…Incomplete Teams" columns.</span>';
         } else if (teamsN <= 1 && rows.length > 4) {
-          sm.innerHTML = `<span class="eo-miss">This mapping creates only ${teamsN || 1} team from ${rows.length} rows — that column doesn't look like the team name. Pick one with a few dozen unique values.</span>`;
+          sm.innerHTML = `<span class="eo-miss">This mapping creates only ${teamsN || 1} team from ${rows.length} rows — those columns don't look like team names.</span>`;
         } else {
-          sm.innerHTML = `<span class="eo-ok">This mapping creates ${teamsN} teams · ${rows.length} players.</span>`;
+          sm.innerHTML = `<span class="eo-ok">This mapping creates ${teamsN} teams · ${rows.length} players${freeN ? ` · ${freeN} free agents` : ''}.</span>`;
         }
       }
-      const head = '<tr>' + fields.map(([, l]) => `<th>${l}</th>`).join('') + '</tr>';
-      const body = rows.slice(0, 4).map((r) =>
-        '<tr>' + fields.map(([k]) => `<td>${idx[k] >= 0 ? eoEsc(r[idx[k]]) : '<span class="eo-dim">—</span>'}</td>`).join('') + '</tr>').join('');
+      const cols = [['team', 'Team (derived)'], ['player', 'Player'], ['email', 'Email'], ['challonge', 'Challonge'], ['flags', 'Flags']];
+      const head = '<tr>' + cols.map(([, l]) => `<th>${l}</th>`).join('') + '</tr>';
+      const body = derived.slice(0, 5).map((d) =>
+        '<tr>' + cols.map(([k]) => `<td>${d[k] ? eoEsc(d[k]) : '<span class="eo-dim">—</span>'}</td>`).join('') + '</tr>').join('');
       const pv = el('eo-map-preview'); if (pv) pv.innerHTML = `<table class="eo-table">${head}${body}</table>`;
     };
     fields.forEach(([k]) => el('eo-map-' + k)?.addEventListener('change', preview));
     preview();
     el('eo-map-cancel')?.addEventListener('click', () => { _eoCsv = null; box.style.display = 'none'; box.innerHTML = ''; });
     el('eo-map-import')?.addEventListener('click', () => {
-      const idx = {}; fields.forEach(([k]) => { idx[k] = Number(el('eo-map-' + k)?.value); });
-      if (idx.team < 0 && idx.player < 0) { showToast('Map at least the team or player column.', '#fbbf24'); return; }
-      const out = rows.map((r) => ({
-        team: idx.team >= 0 ? (r[idx.team] || '').toString().trim() : '',
-        player: idx.player >= 0 ? (r[idx.player] || '').toString().trim() : '',
-        email: idx.email >= 0 ? (r[idx.email] || '').toString().trim() : '',
-        challonge: idx.challonge >= 0 ? (r[idx.challonge] || '').toString().trim() : ''
-      })).filter((r) => r.team || r.player);
+      const idx = readIdx();
+      if (idx.team < 0 && idx.team2 < 0 && idx.player < 0) { showToast('Map at least the team or player column.', '#fbbf24'); return; }
+      const out = rows.map((r) => deriveRow(r, idx)).filter((r) => r.team || r.player);
       send('set_event_ops', { rows: out, eventSlug: (currentState?.startgg?.eventSlug || '') });
       _eoCsv = null; box.style.display = 'none'; box.innerHTML = '';
       showToast('Imported ' + out.length + ' roster rows.', '#22c55e');
@@ -148,14 +176,17 @@
     (eoOps().seeds || []).forEach((s) => m.set((s.name || '').toLowerCase(), s.seed));
     return m;
   }
+  const FREE_AGENTS = 'Free Agents';
   function groupTeams(rows) {
     const m = new Map();
     rows.forEach((r) => {
-      const key = (r.team || '(No team)').trim() || '(No team)';
+      const key = (r.team || FREE_AGENTS).trim() || FREE_AGENTS;
       if (!m.has(key)) m.set(key, []);
       m.get(key).push(r);
     });
-    return [...m.entries()].map(([team, players]) => ({ team, players }));
+    // Captains first inside each team, then keep CSV order.
+    const rank = (p) => (/captain/i.test(p.flags || '') ? 0 : /alternate|sub/i.test(p.flags || '') ? 2 : 1);
+    return [...m.entries()].map(([team, players]) => ({ team, players: players.slice().sort((a, b) => rank(a) - rank(b)) }));
   }
 
   function eoRenderDash() {
@@ -236,7 +267,7 @@
           ${t.players.map((p, i) => `
             <div class="eo-block-player">
               <span class="eo-p-idx">Player ${i + 1}</span>
-              <span class="eo-p-name">${eoEsc(p.player) || '<span class="eo-dim">—</span>'}</span>
+              <span class="eo-p-name">${eoEsc(p.player) || '<span class="eo-dim">—</span>'}${/captain/i.test(p.flags || '') ? ' <span class="eo-flag cap">C</span>' : ''}${/alternate|sub/i.test(p.flags || '') ? ' <span class="eo-flag">ALT</span>' : ''}</span>
               <span class="eo-p-mail">${p.email ? eoEsc(p.email) : '<span class="eo-miss">no email</span>'}</span>
               <span class="eo-p-ch">${p.challonge ? eoEsc(p.challonge) : '<span class="eo-miss">no challonge</span>'}</span>
             </div>`).join('')}
