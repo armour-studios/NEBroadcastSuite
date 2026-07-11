@@ -415,15 +415,17 @@ el('btn-teams-use-current-event')?.addEventListener('click', () => {
 // ── Events sub-nav (start.gg | Leagues) ───────────────────────────────────
 function evShowSubtab(t) {
   document.querySelectorAll('#ev-subnav .ev-subnav-btn').forEach((x) => x.classList.toggle('active', x.dataset.evtab === t));
-  const sg = el('ev-startgg-panel'), lg = el('ev-leagues-panel'), me = el('ev-myevents-panel'), sd = el('ev-seeding-panel');
+  const sg = el('ev-startgg-panel'), lg = el('ev-leagues-panel'), me = el('ev-myevents-panel'), sd = el('ev-seeding-panel'), eo = el('ev-eventops-panel');
   if (sg) sg.style.display = t === 'startgg' ? '' : 'none';
   if (lg) lg.style.display = t === 'leagues' ? '' : 'none';
   if (me) me.style.display = t === 'myevents' ? '' : 'none';
   if (sd) sd.style.display = t === 'seeding' ? '' : 'none';
+  if (eo) eo.style.display = t === 'eventops' ? '' : 'none';
   if (t === 'leagues') lgRender();
   if (t === 'myevents') { renderMyEvents(); evRefreshAllOnOpen(); }
   // Land on the event picker; openSeedingStudio() re-shows the studio right after when seeding a specific event.
   if (t === 'seeding') { seedShowStudio(false); renderSeedPicker(); evRefreshAllOnOpen(); }
+  if (t === 'eventops' && typeof window.eventOpsRender === 'function') window.eventOpsRender();
   try { localStorage.setItem('ev_active_subtab', t); } catch (_) {}
 }
 document.querySelectorAll('#ev-subnav .ev-subnav-btn').forEach((b) => b.addEventListener('click', function () { evShowSubtab(this.dataset.evtab); }));

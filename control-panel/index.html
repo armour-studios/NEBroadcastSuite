@@ -3756,6 +3756,7 @@
     <button type="button" class="ev-subnav-btn" data-evtab="leagues">Leagues</button>
     <button type="button" class="ev-subnav-btn" data-evtab="myevents">My Events</button>
     <button type="button" class="ev-subnav-btn" data-evtab="seeding">Seeding</button>
+    <button type="button" class="ev-subnav-btn" data-evtab="eventops">Event Ops</button>
   </div>
 
   <div id="ev-startgg-panel">
@@ -4296,6 +4297,56 @@
   </div>
 
   <!-- ── SEEDING — its own tab: pick a saved event, then seed it ── -->
+  <!-- ── EVENT OPS — start.gg → Challonge workbench: CSV roster dashboard, true seeding, bracket path explorer ── -->
+  <div id="ev-eventops-panel" style="display:none;">
+
+    <section class="section">
+      <div class="ev-head">
+        <div>
+          <h3 class="section-title" style="margin:0;">Roster Dashboard</h3>
+          <p class="section-desc" style="margin:4px 0 0;">Import the start.gg attendee CSV (Tournament admin ▸ Attendees ▸ export) to get every team's players, emails and Challonge usernames in one place — everything you need to add participants to the assigned teams on Challonge.</p>
+        </div>
+        <div class="ev-head-actions" style="display:flex; gap:8px; align-items:center;">
+          <input type="file" id="eo-csv-file" accept=".csv,text/csv" style="display:none;">
+          <button class="btn btn-primary btn-sm" id="eo-csv-pick">Import start.gg CSV</button>
+          <button class="btn btn-ghost btn-sm" id="eo-clear" title="Clear the imported roster" style="display:none;">Clear</button>
+        </div>
+      </div>
+      <!-- Column mapping (appears after a file loads) -->
+      <div id="eo-map-box" class="eo-map-box" style="display:none;"></div>
+      <div id="eo-dash"></div>
+    </section>
+
+    <section class="section">
+      <div class="ev-head">
+        <div>
+          <h3 class="section-title" style="margin:0;">start.gg Seeding</h3>
+          <p class="section-desc" style="margin:4px 0 0;">True bracket seeds (<code>initialSeedNum</code>) straight from the start.gg API — recreate this exact order on Challonge so byes land identically.</p>
+        </div>
+        <div class="ev-head-actions" style="display:flex; gap:8px; align-items:center;">
+          <input type="text" id="eo-seed-slug" class="input-text" placeholder="start.gg event URL or slug" style="width:280px; font-size:12px;">
+          <button class="btn btn-secondary btn-sm" id="eo-seed-pull">Pull seeding</button>
+        </div>
+      </div>
+      <div class="field-hint" id="eo-seed-status" style="margin:0 0 8px;"></div>
+      <div id="eo-seeds"></div>
+    </section>
+
+    <section class="section">
+      <div class="ev-head">
+        <div>
+          <h3 class="section-title" style="margin:0;">Bracket Explorer</h3>
+          <p class="section-desc" style="margin:4px 0 0;">The full start.gg bracket with every score. Click any team to trace their entire path — round by round, phase by phase — while you mirror results into Challonge.</p>
+        </div>
+        <div class="ev-head-actions">
+          <button class="btn btn-ghost btn-sm" id="eo-goto-bracket">Load / link a bracket…</button>
+        </div>
+      </div>
+      <div id="eo-bracket"></div>
+    </section>
+
+  </div>
+
   <div id="ev-seeding-panel" style="display:none;">
     <section class="section">
       <div id="seed-pick">
@@ -8290,7 +8341,7 @@ PacketSendRate=10</pre>
 
   <section class="section">
     <h3 class="section-title">Producer Profile</h3>
-    <p class="section-desc" style="margin-bottom:12px; max-width:680px;">Share your whole setup with staff — <strong>teams, brand kits, facecams, presets, leagues, casters, and your look/overlay settings</strong> — as one portable file. <strong>No passwords or tokens are ever included</strong>, so it's safe to send. Importing <em>merges</em> your libraries (nothing is deleted) and optionally applies the shared look. A good bridge until cloud sync is live.</p>
+    <p class="section-desc" style="margin-bottom:12px; max-width:680px;">Share your whole setup with staff — <strong>teams, brand kits, facecams, presets, leagues, casters, and your look/overlay settings</strong> — as one portable <strong>.zip</strong> file (images and data packaged together). <strong>No passwords or tokens are ever included</strong>, so it's safe to send. Importing <em>merges</em> your libraries (nothing is deleted) and optionally applies the shared look. A good bridge until cloud sync is live.</p>
     <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
       <button class="btn btn-primary btn-sm" id="btn-export-profile">⤓ Export profile</button>
       <button class="btn btn-secondary btn-sm" id="btn-import-profile">⤒ Import profile</button>
@@ -8307,16 +8358,6 @@ PacketSendRate=10</pre>
       </div>
       <div id="cloud-profiles-list" style="margin-top:12px;"></div>
     </div>
-
-    <details style="margin-top:14px;">
-      <summary style="cursor:pointer; color:var(--muted); font-size:12px;">Legacy export — teams + facecams only (.zip)</summary>
-      <div style="display:flex; align-items:center; gap:12px; margin-top:10px;">
-        <label for="btn-import-data" class="btn btn-ghost btn-sm" style="cursor:pointer;">Import .zip</label>
-        <input type="file" id="btn-import-data" accept=".zip" style="display:none;">
-        <label for="btn-export-data" class="btn btn-ghost btn-sm" style="cursor:pointer;">Export .zip</label>
-        <button id="btn-export-data" style="display:none;"></button>
-      </div>
-    </details>
   </section>
 
   
@@ -9717,6 +9758,7 @@ PacketSendRate=10</pre>
 <script src="seeding-spotlight.js"></script>
 <script src="leagues.js"></script>
 <script src="events.js"></script>
+<script src="event-ops.js"></script>
 <script src="bracket-builder.js"></script>
 <script src="camera-feeds.js"></script>
 <script src="tour.js"></script>

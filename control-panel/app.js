@@ -9472,20 +9472,7 @@ el('input-banner-image')?.addEventListener('change', async (e) => {
   e.target.value = '';
 });
 
-// ── Import and Export Data ───────────────────────────────────────────────────────
-el('btn-export-data')?.addEventListener('click', () => {
-  send('export_data');
-});
-
-el('btn-import-data')?.addEventListener('change', () => {
-  const file = el('btn-import-data').files[0];
-  if (!file) return;
-  const filePath = file.path;
-  send('import_data', { path: filePath });
-  el('btn-import-data').value = '';
-});
-
-// ── Producer profile (portable, secret-free) ────────────────────────────────
+// ── Producer profile (portable .zip, secret-free) — the one consolidated export/import ──────
 el('btn-export-profile')?.addEventListener('click', () => send('export_profile'));
 el('btn-import-profile')?.addEventListener('click', () => {
   const applySettings = el('chk-import-settings')?.checked !== false;
@@ -21886,11 +21873,11 @@ function renderCreditSponsors(data) {
   });
 }
 el('cs-logo-btn')?.addEventListener('click', () => el('cs-logo-file')?.click());
-el('cs-logo-file')?.addEventListener('change', function () {
+el('cs-logo-file')?.addEventListener('change', async function () {
   const f = this.files && this.files[0]; if (!f) return;
-  const reader = new FileReader();
-  reader.onload = () => { _csPendingLogo = reader.result || ''; const n = el('cs-logo-name'); if (n) n.textContent = f.name; };
-  reader.readAsDataURL(f);
+  // Optimize (downscale + WebP) — this logo rides the live credits broadcast, so keep it tiny.
+  try { _csPendingLogo = (await fileToBase64(f)) || ''; } catch (_) { _csPendingLogo = ''; }
+  const n = el('cs-logo-name'); if (n) n.textContent = f.name;
 });
 el('cs-add')?.addEventListener('click', () => {
   const name = (el('cs-name')?.value || '').trim();
@@ -23617,11 +23604,10 @@ el('rp-transition')?.addEventListener('change', function () {
   const mId = el('select-montage-edit')?.value;
   if (mId) send('montage_settings', { montageId: mId, transition: { type: this.value } });
 });
-el('rp-translogo-file')?.addEventListener('change', function () {
+el('rp-translogo-file')?.addEventListener('change', async function () {
   const f = this.files && this.files[0]; if (!f || !f.type.startsWith('image/')) return;
-  const reader = new FileReader();
-  reader.onload = () => { _transitionLogo = reader.result; updateTransLogoRow(); };
-  reader.readAsDataURL(f);
+  try { _transitionLogo = await fileToBase64(f); } catch (_) {}
+  updateTransLogoRow();
 });
 el('rp-clear-playlist')?.addEventListener('click', () => {
   const mId = el('select-montage-edit')?.value;
@@ -24698,6 +24684,7 @@ async function connect() {
       _r('applyTwitchState',   () => applyTwitchState(msg.data.twitch));
       _r('applyReplayMonitors',() => applyReplayMonitors(msg.data.replay));
       _r('applyDiscordState',  () => applyDiscordState(msg.data.discord));
+      _r('eventOps',           () => { if (typeof window.eventOpsOnState === 'function') window.eventOpsOnState(); });
     } else if (msg.type === 'twitch_stream_state') {
       onTwitchStreamState(msg);
     } else if (msg.type === 'director_update') {
@@ -24795,6 +24782,8 @@ async function connect() {
       }
       showToast(msg.data.message || (msg.data.ok ? 'Signed in.' : 'Login failed.'), msg.data.ok ? '#22c55e' : '#c53030', msg.data.ok ? 3500 : 8000);
       if (msg.data.ok) { const p = el('cloud-login-pass'); if (p) p.value = ''; }
+    } else if (msg.type === 'eventops-result') {
+      if (typeof window.eventOpsResult === 'function') window.eventOpsResult(msg.data);
     } else if (msg.type === 'cloud_status') {
       applyCloudStatus(msg.data);
     } else if (msg.type === 'cloud_profiles') {

@@ -285,6 +285,12 @@ let state = {
   // User-defined overlay URLs shown alongside the built-in ones in the layout dropdown.
   // Keyed by gameId → [{ id, name, path }]
   customOverlayLayouts: {},
+  // One active Game Config per game (maps/roles/characters extending an EXISTING built-in game —
+  // see gameConfigMapsFor/gameConfigCharactersFor in backend/veto.js and backend/draft.js, and
+  // rolesForActiveGame() client-side). Keyed by gameId → the imported bundle, or absent = pure
+  // built-in. Importing REPLACES a game's slot; the bundle's own maps/characters/roles still merge
+  // by id onto the built-in tables at read time, so an import doesn't need to re-list everything.
+  gameConfigs: {},
   // Champion/hero draft board (LoL etc.). sequence/ops drive the live pick-ban.
   draft: { visible: false, title: '', subtitle: '', game: '', teamStart: 'a', owBanCount: 4, sequence: [], ops: [], turn: null, complete: false,
     // owBanCount: Overwatch total hero bans (2 = one per team, 4 = two per team). Producer-set.
@@ -391,6 +397,12 @@ let state = {
   // { id, tournamentSlug, eventSlug, name, tournamentName, game, numEntrants, startAt, addedAt,
   //   seeding: { entrants:[{entrantId,name,seedNum,players:[{gamerTag,rankField,rankValue}]}], fieldMap:{} } }
   myEvents: [],
+  // Event Ops (ESPORTS ▸ Event Ops) — the start.gg → Challonge mirroring workbench.
+  // rows: the imported start.gg attendee CSV, one row per player, grouped by team in the UI:
+  //   [{ team, player, email, challonge }]
+  // seeds: TRUE start.gg bracket seeds (initialSeedNum) [{ seed, name }] — the order to
+  // recreate in Challonge so byes land identically.
+  eventOps: { rows: [], seeds: [], eventSlug: '', importedAt: 0, seededAt: 0 },
   // Per-player profile registry keyed by lowercased gamertag. Auto-linked: start.gg
   // (slug/playerId) on every roster pull, 6mans (rl6mans name/elo/rank/region) on rank
   // verify. Read by the seeding page, team editor and Match-Teams panel to show links.
@@ -964,6 +976,65 @@ function persistRosterToLibrary(side) {
   });
   if (t.logo && !saved.logo) saved.logo = t.logo;
   saveTeams();
+}
+
+// ─── Shared zip-bundle asset helpers ────────────────────────────────────────
+// Generic, schema-agnostic: any exported bundle (Producer Profile, Game Config, ...) can be
+// packaged as a zip without hand-listing which fields are images. Every base64 image data-URI
+// found anywhere in the object tree becomes a real file inside the zip; the in-memory/JS shape
+// (base64 data URIs) never changes for any existing consumer — the zip is purely a transport format.
+const ZIP_ASSET_DATA_URI_RE = /^data:image\/([a-zA-Z0-9+.-]+);base64,([\s\S]+)$/;
+const ZIP_ASSET_PREFIX = 'zipasset:';
+const ZIP_ASSET_MIME_EXT = { jpeg: 'jpg', 'svg+xml': 'svg' };
+
+// Deep-clones obj; every base64 image data-URI string found anywhere in the tree is decoded to a
+// Buffer, added to the zip at assets/img-<n>.<ext>, and replaced in the clone with a
+// 'zipasset:assets/img-<n>.<ext>' sentinel string. Returns the clone (safe to JSON.stringify as
+// manifest.json) — never mutates obj or the zip's caller-visible state beyond the added entries.
+function extractAssetsToZip(obj, zip) {
+  let counter = 0;
+  const walk = (v) => {
+    if (typeof v === 'string') {
+      const m = v.match(ZIP_ASSET_DATA_URI_RE);
+      if (!m) return v;
+      const mime = m[1].toLowerCase();
+      const ext = ZIP_ASSET_MIME_EXT[mime] || mime.replace(/[^a-z0-9]/g, '') || 'bin';
+      const rel = `assets/img-${++counter}.${ext}`;
+      zip.addFile(rel, Buffer.from(m[2], 'base64'));
+      return ZIP_ASSET_PREFIX + rel;
+    }
+    if (Array.isArray(v)) return v.map(walk);
+    if (v && typeof v === 'object') {
+      const out = {};
+      for (const k of Object.keys(v)) out[k] = walk(v[k]);
+      return out;
+    }
+    return v;
+  };
+  return walk(obj);
+}
+
+// Inverse of extractAssetsToZip: deep-clones obj (a parsed manifest.json), replaces every
+// 'zipasset:...' sentinel with the re-encoded data: URI read from that path in the zip.
+function inflateAssetsFromZip(obj, zip) {
+  const walk = (v) => {
+    if (typeof v === 'string' && v.startsWith(ZIP_ASSET_PREFIX)) {
+      const rel = v.slice(ZIP_ASSET_PREFIX.length);
+      const entry = zip.getEntry(rel);
+      if (!entry) return v;   // missing asset — leave the sentinel rather than fabricate an image
+      const ext = (rel.split('.').pop() || '').toLowerCase();
+      const mime = ext === 'jpg' ? 'jpeg' : (ext === 'svg' ? 'svg+xml' : ext) || 'png';
+      return `data:image/${mime};base64,${entry.getData().toString('base64')}`;
+    }
+    if (Array.isArray(v)) return v.map(walk);
+    if (v && typeof v === 'object') {
+      const out = {};
+      for (const k of Object.keys(v)) out[k] = walk(v[k]);
+      return out;
+    }
+    return v;
+  };
+  return walk(obj);
 }
 
 // ─── Producer profile export / import ──────────────────────────────────────
@@ -2009,6 +2080,9 @@ function loadState() {
       if (saved.customOverlayLayouts && typeof saved.customOverlayLayouts === 'object') {
         state.customOverlayLayouts = saved.customOverlayLayouts;
       }
+      if (saved.gameConfigs && typeof saved.gameConfigs === 'object') {
+        state.gameConfigs = saved.gameConfigs;
+      }
       if (saved.bestOf) state.bestOf = saved.bestOf;
       if (saved.teams) {
         state.teams = saved.teams;
@@ -2041,6 +2115,15 @@ function loadState() {
       }
       if (Array.isArray(saved.leagues)) state.leagues = saved.leagues.map(migrateLeague);
       if (Array.isArray(saved.myEvents)) state.myEvents = saved.myEvents;
+      if (saved.eventOps && typeof saved.eventOps === 'object') {
+        state.eventOps = {
+          rows: Array.isArray(saved.eventOps.rows) ? saved.eventOps.rows : [],
+          seeds: Array.isArray(saved.eventOps.seeds) ? saved.eventOps.seeds : [],
+          eventSlug: saved.eventOps.eventSlug || '',
+          importedAt: saved.eventOps.importedAt || 0,
+          seededAt: saved.eventOps.seededAt || 0
+        };
+      }
       if (saved.game && typeof saved.game.number === 'number') {
         state.game.number = saved.game.number;
       }
@@ -2313,12 +2396,14 @@ function _saveAppStateNow(sync = false) {
       owMatch: { visible: !!state.owMatch.visible, format: state.owMatch.format, currentMapIdx: state.owMatch.currentMapIdx, bansByMap: state.owMatch.bansByMap, attackSide: state.owMatch.attackSide || null, showAttack: !!state.owMatch.showAttack, gameMode: state.owMatch.gameMode || 'escort', showMapLabels: state.owMatch.showMapLabels !== false, mapWinners: Array.isArray(state.owMatch.mapWinners) ? state.owMatch.mapWinners : [], mapModes: Array.isArray(state.owMatch.mapModes) ? state.owMatch.mapModes : [] },
       mrMatch: (function(){ const m=state.mrMatch||{}; return { visible: m.visible !== false, format: m.format || 'BO5', bansByMap: m.bansByMap || [], gameMode: m.gameMode || 'convergence', showMapLabels: m.showMapLabels !== false, mapWinners: Array.isArray(m.mapWinners)?m.mapWinners:[], mapModes: Array.isArray(m.mapModes)?m.mapModes:[], gepData: m.gepData||null }; })(),
       customOverlayLayouts: state.customOverlayLayouts || {},
+      gameConfigs: state.gameConfigs || {},
       bestOf: state.bestOf,
       teams: state.teams,
       series: state.series,
       match: state.match,
       leagues: state.leagues,
       myEvents: state.myEvents,
+      eventOps: state.eventOps,
       game: { number: state.game.number },
       startgg: state.startgg,
       startggApiToken: encryptSecret(startggApiToken),
@@ -2902,7 +2987,7 @@ function buildSceneConfig() {
 const BROADCAST_TIERS = {
   // heavy libraries → libraryData()
   bracket: 'library', replay: 'library', playerProfiles: 'library',
-  leagues: 'library', clips: 'library', brand: 'library',
+  leagues: 'library', clips: 'library', brand: 'library', eventOps: 'library',
   // server-only (overlays get the derived sceneConfig instead)
   scenePresets: 'local',
   // live production/scoreboard state (from the state literal)
@@ -2912,7 +2997,7 @@ const BROADCAST_TIERS = {
   replayCams: 'live', activeBrandKitId: 'live', useBrandColors: 'live', colorMode: 'live',
   sceneBg: 'live', banner: 'live', casters: 'live', vdo: 'live', listenIn: 'live', credits: 'live',
   breakScreen: 'live', ticker: 'live', adProofSessions: 'live', spotlight: 'live', winner: 'live',
-  veto: 'live', owMatch: 'live', mrMatch: 'live', customOverlayLayouts: 'live', draft: 'live',
+  veto: 'live', owMatch: 'live', mrMatch: 'live', customOverlayLayouts: 'live', gameConfigs: 'live', draft: 'live',
   intro: 'live', overtime: 'live', scoreboardAd: 'live', background: 'live', deskFooter: 'live',
   preshow: 'live', csgo: 'live', valorant: 'live', lol: 'live', bestOf: 'live', teams: 'live',
   teamPlayers: 'live', series: 'live', match: 'live', myEvents: 'live', game: 'live',
@@ -2991,7 +3076,8 @@ function buildLiveState() {
       return out;
     })(),
     customOverlayLayouts: state.customOverlayLayouts || {},
-    vetoPools: vetoData.MAP_POOLS,   // per-game map pools for the veto manager
+    gameConfigs: state.gameConfigs || {},
+    vetoPools: vetoData.mergedMapPools(state.gameConfigs),   // per-game map pools, built-in + active Game Config merged by id
     vetoMeta: vetoData.VETO_META,    // per-game terminology (map/stage, Ban/Strike)
     draftGames: draftData.draftGames(),   // games with a champion-draft format
     theme: state.themesByGame[state.activeGame] || migrateThemeId(state.activeGame, 'default'),
@@ -3023,6 +3109,7 @@ let playerProfilesVer = 0;
 // their base64 payloads per broadcast.
 let leaguesVer = 0;
 let clipsVer = 0;
+let eventOpsVer = 0;   // bumped on Event Ops roster/seed mutations (library-tier re-send)
 function upsertPlayerProfile(gamerTag, patch) {
   const key = (gamerTag || '').trim().toLowerCase();
   if (!key || !patch) return;
@@ -3071,12 +3158,13 @@ function libraryData() {
     replay: state.replay,     // replay-monitor thumbnails — backfilled by the replays page
     crew: state.crew || [],   // unified crew profiles (hosts/guests/casters/observers)
     leagues: state.leagues || [],   // league rosters/standings (base64 team logos) — control panel only
-    clips: state.clips || null      // clip/playlist library metadata — control panel only (live pushes go via clips_update)
+    clips: state.clips || null,     // clip/playlist library metadata — control panel only (live pushes go via clips_update)
+    eventOps: state.eventOps || { rows: [], seeds: [] }   // Event Ops CSV roster + true seeds — control panel only
   };
 }
 // Static config that never changes after startup → sent on connect only.
 function staticData() {
-  return { draftRosters: draftData.ROSTERS };   // per-game champion/hero rosters (id/name/portrait)
+  return { draftRosters: draftData.mergedRosters(state.gameConfigs) };   // per-game champion/hero rosters (id/name/portrait), built-in + active Game Config merged by id
 }
 // Cheap signature (no base64 stringify — only lengths/counts) to detect library changes between
 // broadcasts. Captures team name/colour/logo/roster and brand name/colours/logo/sponsors/banners.
@@ -3104,7 +3192,7 @@ function librarySig() {
   const extra = '|ab:' + (state.activeBrandKitId || '') + '|bv:' + (state.banner.visible ? 1 : 0) + '|bi:' + bn
     + '|brk:' + lite(state.bracket) + '|rpl:' + lite(state.replay) + '|crew:' + (state.crew || []).length
     + '|pp:' + playerProfilesVer + '|bk:' + brandKitsVer + '|st:' + savedTeamsVer
-    + '|lgv:' + leaguesVer + '|clv:' + clipsVer
+    + '|lgv:' + leaguesVer + '|clv:' + clipsVer + '|eov:' + eventOpsVer
     // Global accent fallback lives in library brand now (stripped from live) — re-send on change.
     + '|gac:' + ((state.brand && state.brand.color) || '') + ':' + ((state.brand && state.brand.accent) || '')
     + '|sp:' + (sp.bgImageUrl ? sp.bgImageUrl.length : 0) + ':' + (sp.presentedByEnabled ? 1 : 0) + ':' + (sp.bgStyle || '');
@@ -4993,7 +5081,7 @@ async function fetchAllSets(client, slug, perPage = 32, maxPages = 63) {
 // reliable substitute: it can drift from what start.gg really used (manual reseeds, edits after the
 // seeding studio snapshot, etc.), which silently produces a DIFFERENT bye/bracket shape when used to
 // seed a mirrored bracket elsewhere (e.g. Challonge). Returns { name.toLowerCase() -> seedNum }.
-async function fetchEntrantTrueSeeds(eventSlug) {
+async function fetchEntrantSeedList(eventSlug) {
   if (!startggApiToken) throw new Error('start.gg API token required (set it in Settings)');
   const client = createStartGgClient(startggApiToken);
   const query = `
@@ -5006,18 +5094,24 @@ async function fetchEntrantTrueSeeds(eventSlug) {
       }
     }`;
   let page = 1, totalPages = 1;
-  const map = {};
+  const list = [];
   do {
     if (page > 1) await new Promise((r) => setTimeout(r, 350));   // stagger for start.gg rate limits
     const res = await startggRequestWithBackoff(client, query, { slug: eventSlug, perPage: 75, page });
     const ev = res && res.event;
     if (!ev) throw new Error('Event not found — check the slug/URL and your token');
     ((ev.entrants && ev.entrants.nodes) || []).forEach((n) => {
-      if (n.name && n.initialSeedNum != null) map[n.name.toLowerCase()] = n.initialSeedNum;
+      if (n.name && n.initialSeedNum != null) list.push({ seed: n.initialSeedNum, name: n.name });
     });
     totalPages = (ev.entrants && ev.entrants.pageInfo && ev.entrants.pageInfo.totalPages) || 1;
     page++;
   } while (page <= totalPages && page <= 16);
+  return list.sort((a, b) => a.seed - b.seed);
+}
+async function fetchEntrantTrueSeeds(eventSlug) {
+  const list = await fetchEntrantSeedList(eventSlug);
+  const map = {};
+  list.forEach((e) => { map[e.name.toLowerCase()] = e.seed; });
   return map;
 }
 
@@ -9727,6 +9821,47 @@ registerWsHandlers({
     if (d.owBanCount != null) state.draft.owBanCount = Number(d.owBanCount) <= 2 ? 2 : 4;
     saveAppState(); broadcastFullState();
   },
+  // ── Event Ops (ESPORTS ▸ Event Ops): CSV roster store + true-seed pull ──────
+  // Client-authoritative full replace, like set_leagues — the panel owns the parsed CSV.
+  set_event_ops(msg) {
+    const d = msg.data || {};
+    const clean = (v, max) => String(v == null ? '' : v).trim().slice(0, max);
+    const rows = (Array.isArray(d.rows) ? d.rows : []).slice(0, 3000).map((r) => ({
+      team: clean(r.team, 120),
+      player: clean(r.player, 120),
+      email: clean(r.email, 200),
+      challonge: clean(r.challonge, 120)
+    })).filter((r) => r.team || r.player);
+    state.eventOps = {
+      ...state.eventOps,
+      rows,
+      eventSlug: typeof d.eventSlug === 'string' ? d.eventSlug.trim().slice(0, 200) : (state.eventOps.eventSlug || ''),
+      importedAt: rows.length ? Date.now() : 0
+    };
+    eventOpsVer++;
+    saveAppState(); broadcastFullState();
+  },
+  eventops_fetch_seeds(msg, ws) {
+    const reply = (ok, message, count) => {
+      try { ws.send(JSON.stringify({ type: 'eventops-result', data: { ok, message, count: count || 0 } })); } catch (_) {}
+    };
+    // Accept a full start.gg URL or a bare event slug; fall back to the linked bracket/event.
+    let slug = String((msg.data && msg.data.slug) || '').trim()
+      .replace(/^https?:\/\/(www\.)?start\.gg\//i, '').replace(/\/+$/, '');
+    if (!slug) slug = state.bracket.eventSlug || state.startgg.eventSlug || '';
+    if (!slug) return reply(false, 'No start.gg event — paste an event slug/URL or link a bracket first.');
+    (async () => {
+      try {
+        const seeds = await fetchEntrantSeedList(slug);
+        state.eventOps = { ...state.eventOps, seeds, eventSlug: slug, seededAt: Date.now() };
+        eventOpsVer++;
+        saveAppState(); broadcastFullState();
+        reply(true, `Pulled ${seeds.length} seeds from start.gg.`, seeds.length);
+      } catch (e) {
+        reply(false, (e && e.message) || 'Seed fetch failed.');
+      }
+    })();
+  },
   draft_action(msg, ws) {
     try {
       draftAction((msg.data && msg.data.name) || '');
@@ -12647,87 +12782,22 @@ function handleControlMessage(msg, ws) {
       break;
     }
     
-    case 'import_data': {
-      (async () => {
-        const { path } = msg.data || {};
-        if (!path) return;
-        try {
-          const zipBuffer = await fsp.readFile(path);
-          const zip = new AdmZip(zipBuffer);;
-          const facecamsEntry  = zip.getEntry("facecams.json");
-          const teamsEntry = zip.getEntry("teams.json");
-
-          if (!facecamsEntry || !teamsEntry) {
-            sendImportExportResult(ws, false, 'Zip file is missing required files.');
-            return;
-          }
-          const facecams = JSON.parse(facecamsEntry.getData().toString("utf8"));
-          const teams = JSON.parse(teamsEntry.getData().toString("utf8"));
-
-          if (Array.isArray(facecams)) {
-            savedFacecams = mergeAtTop(
-              savedFacecams,
-              facecams,
-              (a, b) => a.platform === b.platform && a.platformId === b.platformId
-            );
-            await saveFacecams();
-          } else {
-            sendImportExportResult(ws, false, 'facecams.json is not valid.');
-          }
-          if (Array.isArray(teams)) {
-            savedTeams = mergeAtTop(
-              savedTeams,
-              teams,
-              (a, b) => a.name === b.name && a.logo === b.logo
-            );
-            await saveTeams();
-          } else {
-            sendImportExportResult(ws, false, 'teams.json is not valid.');
-          }
-
-          sendImportExportResult(ws, true, 'Data imported successfully.');
-          broadcastFullState();
-        } catch (err) {
-          
-          sendImportExportResult(ws, false, 'Error importing data: ' + err.message);
-        }
-      })();
-      break;
-    }
-
-    case 'export_data': {
-      const zip = new AdmZip();
-      zip.addLocalFile(teamsFile);
-      zip.addLocalFile(facecamsFile);
-
-      dialog.showSaveDialog({
-        title: 'Export Data',
-        defaultPath: 'NE-Broadcast-Suite-Settings.zip',
-        filters: [
-          { name: 'Zip Files', extensions: ['zip'] }
-        ]
-      }).then(({ canceled, filePath }) => {
-        if (canceled || !filePath) {
-          sendImportExportResult(ws, false, 'Export cancelled.');
-          return;
-        }
-
-        zip.writeZip(filePath);
-        sendImportExportResult(ws, true, 'Data exported successfully.');
-      });
-      break;
-    }
-
-    // ── Producer profile (portable .json — teams/brands/facecams/presets/leagues/casters/settings) ──
+    // ── Producer profile (portable .zip — teams/brands/facecams/presets/leagues/casters/settings) ──
+    // The one consolidated export/import for everything non-game-specific. Packaged as a zip
+    // (manifest.json + real image files under assets/) via extractAssetsToZip/inflateAssetsFromZip
+    // so images and data travel together in one shareable file — supersedes the old separate
+    // teams+facecams-only export_data/import_data zip, which has been retired.
     case 'export_profile': {
-      const profile = buildProfileBundle();
+      const zip = new AdmZip();
+      const manifest = extractAssetsToZip(buildProfileBundle(), zip);
+      zip.addFile('manifest.json', Buffer.from(JSON.stringify(manifest, null, 2)));
       dialog.showSaveDialog({
         title: 'Export Producer Profile',
-        defaultPath: 'NE-Broadcast-Profile.json',
-        filters: [{ name: 'NE Broadcast Profile', extensions: ['json'] }]
-      }).then(async ({ canceled, filePath }) => {
+        defaultPath: 'NE-Broadcast-Profile.zip',
+        filters: [{ name: 'NE Broadcast Profile', extensions: ['zip'] }]
+      }).then(({ canceled, filePath }) => {
         if (canceled || !filePath) { sendImportExportResult(ws, false, 'Export cancelled.'); return; }
-        try { await fsp.writeFile(filePath, JSON.stringify(profile, null, 2)); sendImportExportResult(ws, true, 'Profile exported — safe to share (no passwords or tokens included).'); }
+        try { zip.writeZip(filePath); sendImportExportResult(ws, true, 'Profile exported — safe to share (no passwords or tokens included).'); }
         catch (e) { sendImportExportResult(ws, false, 'Export failed: ' + e.message); }
       });
       break;
@@ -12739,14 +12809,24 @@ function handleControlMessage(msg, ws) {
           if (!filePath) {
             const r = await dialog.showOpenDialog({
               title: 'Import Producer Profile',
-              filters: [{ name: 'NE Broadcast Profile', extensions: ['json'] }],
+              filters: [{ name: 'NE Broadcast Profile', extensions: ['zip', 'json'] }],
               properties: ['openFile']
             });
             if (r.canceled || !r.filePaths || !r.filePaths[0]) { sendImportExportResult(ws, false, 'Import cancelled.'); return; }
             filePath = r.filePaths[0];
           }
-          const raw = await fsp.readFile(filePath, 'utf8');
-          const summary = applyProfileBundle(JSON.parse(raw), msg.data && msg.data.options);
+          const raw = await fsp.readFile(filePath);
+          let bundle;
+          if (filePath.toLowerCase().endsWith('.json')) {
+            // Legacy pre-zip export — plain JSON with images already inline as base64.
+            bundle = JSON.parse(raw.toString('utf8'));
+          } else {
+            const zip = new AdmZip(raw);
+            const manifestEntry = zip.getEntry('manifest.json');
+            if (!manifestEntry) throw new Error('Not a valid NE Broadcast Profile file (missing manifest.json).');
+            bundle = inflateAssetsFromZip(JSON.parse(manifestEntry.getData().toString('utf8')), zip);
+          }
+          const summary = applyProfileBundle(bundle, msg.data && msg.data.options);
           sendImportExportResult(ws, true, summary + '.');
           broadcastFullState();
         } catch (e) {
