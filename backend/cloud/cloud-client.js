@@ -54,8 +54,10 @@ function _err(e) {
     else { try { msg = JSON.stringify(data).slice(0, 220); } catch (_) {} }
   }
   if (!msg) msg = (e && e.message) || 'Cloud request failed';
-  const err = new Error(resp ? `${msg} (HTTP ${resp.status})` : msg);
-  if (resp) { err.status = resp.status; err.data = data; }
+  // The message is USER-FACING (login screens, toasts) — keep it clean. The HTTP
+  // status stays on err.status for callers and goes to the terminal for debugging.
+  const err = new Error(msg);
+  if (resp) { err.status = resp.status; err.data = data; console.warn(`[Cloud] HTTP ${resp.status}:`, msg); }
   return err;
 }
 function _setSession(d) {
