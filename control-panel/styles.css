@@ -7478,19 +7478,23 @@ tr.lg2-drag-over { outline: 2px solid var(--accent, #4a9eff); outline-offset: -1
 .eo-chipbtn.active { background: var(--cp-accent, #7c3aed); border-color: transparent; color: #fff; }
 .eo-controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 10px 0; }
 .eo-controls .input-text { flex: 1; min-width: 220px; font-size: 12px; }
-/* Team cards */
-.eo-team-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 10px; }
-.eo-team-card { border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; background: rgba(255,255,255,.02); cursor: pointer; transition: border-color .15s; }
-.eo-team-card:hover { border-color: rgba(255,255,255,.22); }
-.eo-team-card.sel { border-color: var(--cp-accent, #7c3aed); box-shadow: 0 0 0 1px var(--cp-accent, #7c3aed); }
-.eo-team-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+/* Roster table — one aligned table, a header row per team, players underneath */
 .eo-seed { flex-shrink: 0; padding: 1px 7px; border-radius: 6px; background: rgba(124,58,237,.18); border: 1px solid rgba(124,58,237,.4); color: #c4b5fd; font-size: 11px; font-weight: 800; }
-.eo-team-name { font-weight: 800; font-size: 13px; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .eo-team-n { color: var(--muted); font-size: 11px; }
-.eo-players { display: flex; flex-direction: column; gap: 3px; }
-.eo-player { display: grid; grid-template-columns: 1fr 1.4fr .9fr; gap: 8px; font-size: 11.5px; align-items: baseline; }
-.eo-p-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.eo-p-mail { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; user-select: text; }
+.eo-roster { width: 100%; border-collapse: collapse; font-size: 12px; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+.eo-roster thead th { text-align: left; padding: 7px 12px; font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); background: rgba(255,255,255,.03); border-bottom: 1px solid var(--border); }
+.eo-roster thead th:nth-child(1) { width: 26%; }
+.eo-roster thead th:nth-child(2) { width: 44%; }
+.eo-roster td { padding: 5px 12px; border-bottom: 1px solid var(--border); }
+.eo-roster tr:last-child td { border-bottom: none; }
+.eo-roster-team td { background: rgba(124,58,237,.08); border-top: 1px solid var(--border); padding: 6px 12px; cursor: pointer; }
+.eo-roster-team:hover td { background: rgba(124,58,237,.14); }
+.eo-roster-team.sel td { background: rgba(124,58,237,.22); box-shadow: inset 3px 0 0 var(--cp-accent, #7c3aed); }
+.eo-roster-team-inner { display: flex; align-items: center; gap: 10px; }
+.eo-roster-team-name { font-weight: 800; font-size: 13px; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.eo-roster-player:hover td { background: rgba(255,255,255,.02); }
+.eo-p-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 0; }
+.eo-p-mail { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; user-select: text; max-width: 0; }
 .eo-p-ch { color: #93c5fd; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; user-select: text; }
 /* Seed table */
 .eo-seed-table { max-width: 640px; }
