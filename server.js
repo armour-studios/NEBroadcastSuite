@@ -3610,34 +3610,68 @@ function rebuildCombinedPlayers() {
 
 function mapStartggSetToFeedItem(set, extra) {
   const slots = (set && set.slots) || [];
-  const scoreA = slots[0]?.standing?.stats?.score?.value;
-  const scoreB = slots[1]?.standing?.stats?.score?.value;
+  const vA = slots[0]?.standing?.stats?.score?.value;
+  const vB = slots[1]?.standing?.stats?.score?.value;
+  let scoreA = typeof vA === 'number' && vA >= 0 ? vA : (typeof set.scoreA === 'number' && set.scoreA >= 0 ? set.scoreA : null);
+  let scoreB = typeof vB === 'number' && vB >= 0 ? vB : (typeof set.scoreB === 'number' && set.scoreB >= 0 ? set.scoreB : null);
   const st = Number(set.state);
   let status = 'upcoming';
   if (extra?.live || st === 2) status = 'live';
   else if (st === 3) status = 'done';
+  const teamA = (set.teamA || slots[0]?.entrant?.name || 'TBD').toString();
+  const teamB = (set.teamB || slots[1]?.entrant?.name || 'TBD').toString();
+  // start.gg quirks the standing scores can't express on their own:
+  //   -1 = DQ/forfeit; null + a winnerId = reported winner-only. displayScore
+  //   ("Team A 2 - Team B 1" or "DQ") is the reliable human-entered fallback.
+  const ds = (set.displayScore || '').toString().trim();
+  const dq = vA === -1 || vB === -1 || /^dq$/i.test(ds);
+  let winSide = null;
+  const winnerId = set.winnerId != null ? String(set.winnerId) : '';
+  if (winnerId) {
+    if (String(slots[0]?.entrant?.id || '') === winnerId) winSide = 'a';
+    else if (String(slots[1]?.entrant?.id || '') === winnerId) winSide = 'b';
+  }
+  if (status === 'done' && !dq && (scoreA == null || scoreB == null) && ds && ds !== 'DQ') {
+    // Parse "Name A 2 - Name B 1" (names may contain anything; scores are the
+    // final digit runs on each side of the last " - ").
+    const m = ds.match(/(\d+)\s+-\s+.*?(\d+)$/) || ds.match(/(\d+)\s*-\s*(?:.*\s)?(\d+)$/);
+    if (m) { scoreA = Number(m[1]); scoreB = Number(m[2]); }
+  }
   return {
     setId: String(set.id || set.setId || ''),
     round: (set.fullRoundText || set.round || '').toString(),
-    teamA: (set.teamA || slots[0]?.entrant?.name || 'TBD').toString(),
-    teamB: (set.teamB || slots[1]?.entrant?.name || 'TBD').toString(),
-    scoreA: typeof scoreA === 'number' && scoreA >= 0 ? scoreA : (typeof set.scoreA === 'number' ? set.scoreA : null),
-    scoreB: typeof scoreB === 'number' && scoreB >= 0 ? scoreB : (typeof set.scoreB === 'number' ? set.scoreB : null),
+    teamA, teamB,
+    scoreA, scoreB,
+    dq,
+    winSide,
     status,
     stream: (extra?.stream || set.stream || '').toString(),
     // Logo URLs (from the start.gg name->logo map — kept tiny, no base64 in the broadcast).
-    logoA: state.startgg.logoMap[(set.teamA || slots[0]?.entrant?.name || '').toString().trim().toLowerCase()] || '',
-    logoB: state.startgg.logoMap[(set.teamB || slots[1]?.entrant?.name || '').toString().trim().toLowerCase()] || ''
+    logoA: state.startgg.logoMap[teamA.trim().toLowerCase()] || '',
+    logoB: state.startgg.logoMap[teamB.trim().toLowerCase()] || ''
   };
 }
 
 // Format the start.gg match feed into ticker scorelines: "LIVE   Team A  2-1  Team B".
+// start.gg has no mid-set scores until games are reported, so a scoreless live set reads
+// "A vs B" instead of a fake 0-0; DQ/forfeit finals read W-DQ instead of 0-0.
 function formatTickerFeed(feed) {
   return (feed || []).filter((m) => m && (m.status === 'live' || m.status === 'done')).map((m) => {
-    const status = m.status === 'live' ? 'LIVE' : 'FINAL';
-    const a = (typeof m.scoreA === 'number') ? m.scoreA : 0;
-    const b = (typeof m.scoreB === 'number') ? m.scoreB : 0;
-    return status + '   ' + m.teamA + '  ' + a + '-' + b + '  ' + m.teamB;
+    const a = (typeof m.scoreA === 'number') ? m.scoreA : null;
+    const b = (typeof m.scoreB === 'number') ? m.scoreB : null;
+    if (m.status === 'live') {
+      const mid = (a || b) ? `  ${a || 0}-${b || 0}  ` : '  vs  ';
+      return 'LIVE   ' + m.teamA + mid + m.teamB;
+    }
+    if (m.dq) {
+      const mid = m.winSide === 'b' ? '  DQ-W  ' : m.winSide === 'a' ? '  W-DQ  ' : '  DQ  ';
+      return 'FINAL   ' + m.teamA + mid + m.teamB;
+    }
+    if (a == null && b == null && m.winSide) {
+      const mid = m.winSide === 'a' ? '  W-L  ' : '  L-W  ';   // winner-only report, no game scores
+      return 'FINAL   ' + m.teamA + mid + m.teamB;
+    }
+    return 'FINAL   ' + m.teamA + '  ' + (a || 0) + '-' + (b || 0) + '  ' + m.teamB;
   });
 }
 // The start.gg set currently being streamed (manual selection or auto-follow), resolved to its
@@ -3751,6 +3785,8 @@ async function fetchRecentEventSets(client, eventSlug) {
       id
       fullRoundText
       state
+      winnerId
+      displayScore
       slots {
         entrant { id name }
         standing { stats { score { value } } }
@@ -3799,6 +3835,8 @@ async function fetchStreamQueue(tournamentSlug) {
             id
             fullRoundText
             state
+            winnerId
+            displayScore
             slots {
               entrant { id name team { images { url type } } }
               standing { stats { score { value } } }
@@ -3848,6 +3886,8 @@ async function fetchStreamQueue(tournamentSlug) {
         logoB: logoForTeamName(teamB),
         scoreA: typeof scoreA === 'number' && scoreA >= 0 ? scoreA : null,
         scoreB: typeof scoreB === 'number' && scoreB >= 0 ? scoreB : null,
+        winnerId: set.winnerId != null ? set.winnerId : null,
+        displayScore: set.displayScore || null,
         slots: set.slots,
         live: idx === 0                   // first in a stream's queue = currently on stream
       });
