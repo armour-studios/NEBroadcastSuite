@@ -66,20 +66,33 @@
   function eoRenderMapBox() {
     const box = el('eo-map-box'); if (!box || !_eoCsv) return;
     const { headers, rows } = _eoCsv;
+    // Distinct non-empty values per column — the fastest way to SEE which column is
+    // the team (repeats, few distinct) vs per-player data (mostly unique).
+    const distinct = headers.map((_, i) => new Set(rows.map((r) => (r[i] || '').toString().trim().toLowerCase()).filter(Boolean)).size);
     const opts = (sel) => ['<option value="-1">— none —</option>']
-      .concat(headers.map((h, i) => `<option value="${i}"${i === sel ? ' selected' : ''}>${eoEsc(h) || '(column ' + (i + 1) + ')'}</option>`)).join('');
+      .concat(headers.map((h, i) =>
+        `<option value="${i}"${i === sel ? ' selected' : ''}>${eoEsc(h) || '(column ' + (i + 1) + ')'} · ${distinct[i]} unique</option>`)).join('');
     const fields = [
       ['team', 'Team name'], ['player', 'Player / gamertag'], ['email', 'Email'], ['challonge', 'Challonge username']
     ];
+    // Header guess first; if no header matches for TEAM, fall back to the most
+    // repeated text column (a team column has ~rows/teamSize distinct values).
+    let teamGuess = guessCol(headers, 'team');
+    if (teamGuess < 0 && rows.length > 4) {
+      let best = -1, bestN = Infinity;
+      distinct.forEach((n, i) => { if (n >= 2 && n < rows.length * 0.8 && n < bestN) { best = i; bestN = n; } });
+      teamGuess = best;
+    }
     box.style.display = '';
     box.innerHTML = `
       <div class="eo-map-grid">
         ${fields.map(([k, label]) => `
           <label class="eo-map-field">
             <span>${label}</span>
-            <select class="input-select" id="eo-map-${k}">${opts(guessCol(headers, k))}</select>
+            <select class="input-select" id="eo-map-${k}">${opts(k === 'team' ? teamGuess : guessCol(headers, k))}</select>
           </label>`).join('')}
       </div>
+      <div class="eo-map-summary" id="eo-map-summary"></div>
       <div class="eo-map-preview" id="eo-map-preview"></div>
       <div style="display:flex; gap:8px; margin-top:10px;">
         <button class="btn btn-primary btn-sm" id="eo-map-import">Import ${rows.length} rows</button>
@@ -87,6 +100,20 @@
       </div>`;
     const preview = () => {
       const idx = {}; fields.forEach(([k]) => { idx[k] = Number(el('eo-map-' + k)?.value); });
+      // Live outcome: exactly how the dashboard will group this mapping.
+      const teamsN = idx.team >= 0
+        ? new Set(rows.map((r) => (r[idx.team] || '').toString().trim().toLowerCase()).filter(Boolean)).size
+        : 0;
+      const sm = el('eo-map-summary');
+      if (sm) {
+        if (idx.team < 0) {
+          sm.innerHTML = '<span class="eo-miss">No team column selected — every player will land in one "(No team)" group. Pick the column that repeats per team (start.gg usually calls it "Entrant").</span>';
+        } else if (teamsN <= 1 && rows.length > 4) {
+          sm.innerHTML = `<span class="eo-miss">This mapping creates only ${teamsN || 1} team from ${rows.length} rows — that column doesn't look like the team name. Pick one with a few dozen unique values.</span>`;
+        } else {
+          sm.innerHTML = `<span class="eo-ok">This mapping creates ${teamsN} teams · ${rows.length} players.</span>`;
+        }
+      }
       const head = '<tr>' + fields.map(([, l]) => `<th>${l}</th>`).join('') + '</tr>';
       const body = rows.slice(0, 4).map((r) =>
         '<tr>' + fields.map(([k]) => `<td>${idx[k] >= 0 ? eoEsc(r[idx[k]]) : '<span class="eo-dim">—</span>'}</td>`).join('') + '</tr>').join('');
@@ -161,7 +188,14 @@
     const emails = rows.filter((r) => r.email);
     const challonges = rows.filter((r) => r.challonge);
 
+    // Imported with no/bad team column → one giant "(No team)" group. Say so instead
+    // of letting it look like the dashboard only supports one team.
+    const totalTeams = groupTeams(rows).length;
+    const badGrouping = totalTeams <= 1 && rows.length > 4
+      ? `<div class="eo-empty" style="border-color:rgba(245,158,11,.5); color:#fbbf24; margin-bottom:10px;">All ${rows.length} players are in one group — the CSV import needs the TEAM column mapped. Click <strong>Import start.gg CSV</strong> again and pick the column that repeats per team (start.gg calls it "Entrant").</div>`
+      : '';
     const chips = `
+      ${badGrouping}
       <div class="eo-chips">
         <span class="eo-chip">${groupTeams(rows).length} teams</span>
         <span class="eo-chip">${rows.length} players</span>
