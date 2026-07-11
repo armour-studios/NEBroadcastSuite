@@ -398,11 +398,11 @@ let state = {
   //   seeding: { entrants:[{entrantId,name,seedNum,players:[{gamerTag,rankField,rankValue}]}], fieldMap:{} } }
   myEvents: [],
   // Event Ops (ESPORTS ▸ Event Ops) — the start.gg → Challonge mirroring workbench.
-  // rows: the imported start.gg attendee CSV, one row per player, grouped by team in the UI:
-  //   [{ team, player, email, challonge }]
+  // headers/rows: the FULL imported spreadsheet (every column, rows as string arrays);
+  // roleMap: which column index means team/team2/player/email/challonge/flags (-1 = none);
   // seeds: TRUE start.gg bracket seeds (initialSeedNum) [{ seed, name }] — the order to
   // recreate in Challonge so byes land identically.
-  eventOps: { rows: [], seeds: [], eventSlug: '', importedAt: 0, seededAt: 0 },
+  eventOps: { headers: [], rows: [], roleMap: {}, seeds: [], eventSlug: '', importedAt: 0, seededAt: 0 },
   // Per-player profile registry keyed by lowercased gamertag. Auto-linked: start.gg
   // (slug/playerId) on every roster pull, 6mans (rl6mans name/elo/rank/region) on rank
   // verify. Read by the seeding page, team editor and Match-Teams panel to show links.
@@ -2116,8 +2116,13 @@ function loadState() {
       if (Array.isArray(saved.leagues)) state.leagues = saved.leagues.map(migrateLeague);
       if (Array.isArray(saved.myEvents)) state.myEvents = saved.myEvents;
       if (saved.eventOps && typeof saved.eventOps === 'object') {
+        // Rows saved by the first release were objects ({team,player,…}); the store is
+        // now the full spreadsheet (headers + string-array rows). Drop the legacy shape.
+        const legacy = Array.isArray(saved.eventOps.rows) && saved.eventOps.rows.some((r) => r && !Array.isArray(r));
         state.eventOps = {
-          rows: Array.isArray(saved.eventOps.rows) ? saved.eventOps.rows : [],
+          headers: Array.isArray(saved.eventOps.headers) ? saved.eventOps.headers : [],
+          rows: (!legacy && Array.isArray(saved.eventOps.rows)) ? saved.eventOps.rows : [],
+          roleMap: (saved.eventOps.roleMap && typeof saved.eventOps.roleMap === 'object') ? saved.eventOps.roleMap : {},
           seeds: Array.isArray(saved.eventOps.seeds) ? saved.eventOps.seeds : [],
           eventSlug: saved.eventOps.eventSlug || '',
           importedAt: saved.eventOps.importedAt || 0,
@@ -9823,21 +9828,27 @@ registerWsHandlers({
     if (d.owBanCount != null) state.draft.owBanCount = Number(d.owBanCount) <= 2 ? 2 : 4;
     saveAppState(); broadcastFullState();
   },
-  // ── Event Ops (ESPORTS ▸ Event Ops): CSV roster store + true-seed pull ──────
-  // Client-authoritative full replace, like set_leagues — the panel owns the parsed CSV.
+  // ── Event Ops (ESPORTS ▸ Event Ops): universal CSV table store + true-seed pull ──
+  // Client-authoritative full replace, like set_leagues. The FULL spreadsheet is kept
+  // (every header + every cell) so the panel can offer a sortable/filterable table of
+  // ANY export; roleMap marks which columns mean team/player/email/challonge/flags
+  // for the grouped-by-team view and the Challonge copy helpers.
   set_event_ops(msg) {
     const d = msg.data || {};
     const clean = (v, max) => String(v == null ? '' : v).trim().slice(0, max);
-    const rows = (Array.isArray(d.rows) ? d.rows : []).slice(0, 3000).map((r) => ({
-      team: clean(r.team, 120),
-      player: clean(r.player, 120),
-      email: clean(r.email, 200),
-      challonge: clean(r.challonge, 200),
-      flags: clean(r.flags, 40)   // CAPTAIN / ALTERNATE from start.gg member flags
-    })).filter((r) => r.team || r.player);
+    const headers = (Array.isArray(d.headers) ? d.headers : []).slice(0, 80).map((h) => clean(h, 100));
+    const rows = (Array.isArray(d.rows) ? d.rows : []).slice(0, 3000)
+      .map((r) => (Array.isArray(r) ? r.slice(0, Math.max(headers.length, 1)).map((c) => clean(c, 300)) : null))
+      .filter((r) => r && r.some((c) => c));
+    const rm = (d.roleMap && typeof d.roleMap === 'object') ? d.roleMap : {};
+    const roleMap = {};
+    ['team', 'team2', 'player', 'email', 'challonge', 'flags'].forEach((k) => {
+      const n = Number(rm[k]);
+      roleMap[k] = Number.isInteger(n) && n >= 0 && n < headers.length ? n : -1;
+    });
     state.eventOps = {
       ...state.eventOps,
-      rows,
+      headers, rows, roleMap,
       eventSlug: typeof d.eventSlug === 'string' ? d.eventSlug.trim().slice(0, 200) : (state.eventOps.eventSlug || ''),
       importedAt: rows.length ? Date.now() : 0
     };

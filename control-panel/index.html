@@ -4133,6 +4133,7 @@
         <div class="seed-tab-bar" id="seed-tabs">
           <button class="seed-tab active" id="seed-tab-verified">Verified</button>
           <button class="seed-tab" id="seed-tab-unverified">Unverified</button>
+          <button class="seed-tab" id="seed-tab-incomplete" title="Teams with fewer players than the game's roster size — held out of seeding until their rosters fill in">Incomplete</button>
         </div>
 
         <div id="seed-verified-panel">
@@ -4147,6 +4148,13 @@
               <button class="btn btn-secondary btn-sm seed-sb-btn" id="seed-load-startgg" title="Pull all teams + players from the tournament platform — preserves any ranks already entered">↻ Pull from Platform</button>
               <button class="btn btn-ghost btn-sm seed-sb-btn" id="seed-import-csv" title="Import player ranks from a CSV file">Import CSV</button>
               <input type="file" id="seed-csv-file" accept=".csv,text/csv" style="display:none;">
+            </div>
+
+            <div class="seed-sb-sec">
+              <div class="seed-sb-hd">Auto-Resolve</div>
+              <span class="seed-sb-lbl">One click cascades every player's rank through the fast sources best-first — verified 6mans, your manual/CSV ranks, then event-placement correlation — tagging each with a source and confidence. tracker.gg stays on the Unverified tab for stragglers.</span>
+              <button class="btn btn-primary btn-sm seed-sb-btn" id="seed-auto-resolve" title="Resolve every player's rank from all fast sources, tagging each with a source + confidence">Auto-resolve ranks</button>
+              <span class="seed-sb-lbl" id="seed-resolve-summary" style="display:none;"></span>
             </div>
 
             <div class="seed-sb-sec">
@@ -4213,8 +4221,8 @@
           <aside class="seed-sidebar seed-unv-sidebar">
             <div class="seed-sb-sec">
               <div class="seed-sb-hd">Auto Rank Lookup</div>
-              <span class="seed-sb-lbl">Looks up every unranked player automatically — rl6mans.com by gamertag first, then tracker.gg as a fallback (via their Epic name). Confident results auto-fill the rank; the rest are left for manual entry.</span>
-              <button class="btn btn-secondary btn-sm seed-sb-btn" id="seed-unv-lookup-all" title="Auto-look-up every unranked player: rl6mans first, then tracker.gg">Lookup All</button>
+              <span class="seed-sb-lbl">Looks up every unranked player automatically — rl6mans.com by gamertag first, then <b>tracker.gg</b> as a fallback using their start.gg-linked Epic/Steam account. Confident results auto-fill the rank; the rest are left for manual entry (each player also has its own tracker.gg <b>Rank</b> button below).</span>
+              <button class="btn btn-secondary btn-sm seed-sb-btn" id="seed-unv-lookup-all" title="Auto-look-up every unranked player: rl6mans by gamertag, then tracker.gg via their start.gg Epic/Steam account">Lookup All (rl6mans + tracker.gg)</button>
               <span class="seed-sb-lbl" id="seed-unv-lookup-status" style="display:none;"></span>
             </div>
             <div class="seed-sb-sec">
@@ -4230,6 +4238,11 @@
           <div class="seed-main-col">
             <div id="seed-unv-list"></div>
           </div>
+        </div>
+
+        <!-- Incomplete rosters — fewer players than the game's roster size; held out of seeding -->
+        <div id="seed-incomplete-panel" style="display:none; padding:12px;">
+          <div id="seed-incomplete-list" class="seed-list"></div>
         </div>
 
         <!-- CSV column-mapping modal — shown when a CSV is uploaded -->
@@ -4303,13 +4316,13 @@
     <section class="section">
       <div class="ev-head">
         <div>
-          <h3 class="section-title" style="margin:0;">Roster Dashboard</h3>
-          <p class="section-desc" style="margin:4px 0 0;">Import the start.gg attendee CSV (Tournament admin ▸ Attendees ▸ export) to get every team's players, emails and Challonge usernames in one place — everything you need to add participants to the assigned teams on Challonge.</p>
+          <h3 class="section-title" style="margin:0;">Data Table</h3>
+          <p class="section-desc" style="margin:4px 0 0;">Import any spreadsheet CSV (start.gg attendees, sign-up sheets…) — every column is kept. Sort, search, show/hide columns and copy anything out for Challonge; the <strong>By team</strong> view groups players under their team with emails and Challonge usernames.</p>
         </div>
         <div class="ev-head-actions" style="display:flex; gap:8px; align-items:center;">
           <input type="file" id="eo-csv-file" accept=".csv,text/csv" style="display:none;">
-          <button class="btn btn-primary btn-sm" id="eo-csv-pick">Import start.gg CSV</button>
-          <button class="btn btn-ghost btn-sm" id="eo-clear" title="Clear the imported roster" style="display:none;">Clear</button>
+          <button class="btn btn-primary btn-sm" id="eo-csv-pick">Import CSV</button>
+          <button class="btn btn-ghost btn-sm" id="eo-clear" title="Clear the imported spreadsheet" style="display:none;">Clear</button>
         </div>
       </div>
       <!-- Column mapping (appears after a file loads) -->
@@ -6081,11 +6094,17 @@
     <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:12px; margin-top:12px;">
       <div class="field-row" style="margin-bottom:0;">
         <label class="field-label" for="input-brand-color">Primary color</label>
-        <input type="color" id="input-brand-color" class="input-text" value="#055fdb" style="height:38px; padding:2px;">
+        <div style="display:flex; gap:6px;">
+          <input type="color" id="input-brand-color" class="input-text" value="#055fdb" style="height:38px; padding:2px; width:46px; flex:0 0 46px;">
+          <input type="text" id="input-brand-color-hex" class="input-text" value="#055fdb" spellcheck="false" placeholder="#055fdb" title="Paste any color: #fff, 055fdb, #055fdbff, rgb(5,95,219), hsl(...)" style="flex:1; min-width:0; height:38px;">
+        </div>
       </div>
       <div class="field-row" style="margin-bottom:0;">
         <label class="field-label" for="input-brand-accent">Accent color</label>
-        <input type="color" id="input-brand-accent" class="input-text" value="#e97139" style="height:38px; padding:2px;">
+        <div style="display:flex; gap:6px;">
+          <input type="color" id="input-brand-accent" class="input-text" value="#e97139" style="height:38px; padding:2px; width:46px; flex:0 0 46px;">
+          <input type="text" id="input-brand-accent-hex" class="input-text" value="#e97139" spellcheck="false" placeholder="#e97139" title="Paste any color: #fff, e97139, #e97139ff, rgb(233,113,57), hsl(...)" style="flex:1; min-width:0; height:38px;">
+        </div>
       </div>
       <div class="field-row" style="margin-bottom:0;">
         <label class="field-label" for="input-brand-interval">Sponsor rotate (s)</label>
@@ -8239,6 +8258,84 @@ PacketSendRate=10</pre>
     </div>
   </section>
 
+  <section class="section" id="section-game-config">
+    <h3 class="section-title">Game Config Builder</h3>
+    <p class="section-desc">Build a bundle of maps, roles, and characters that extends an existing game — for when a new hero or map releases and you don't want to wait on an app update. Export it to share, or import one someone else built. One active config per game; anything you add here is merged alongside the built-in content, not a replacement for it.</p>
+
+    <div style="display:grid; grid-template-columns:160px 1fr 1fr 1fr; gap:8px; margin-bottom:10px; align-items:end;">
+      <div class="field-row" style="margin:0;">
+        <label class="field-label" for="gc-game">Game</label>
+        <select id="gc-game" class="input-select"></select>
+      </div>
+      <div class="field-row" style="margin:0;">
+        <label class="field-label" for="gc-author">Author</label>
+        <input type="text" id="gc-author" class="input-text" placeholder="Your name">
+      </div>
+      <div class="field-row" style="margin:0;">
+        <label class="field-label" for="gc-version">Game Version</label>
+        <input type="text" id="gc-version" class="input-text" placeholder="e.g. Season 10">
+      </div>
+      <div class="field-row" style="margin:0;">
+        <label class="field-label" for="gc-config-id">Config ID</label>
+        <input type="text" id="gc-config-id" class="input-text" placeholder="e.g. johndoe.overwatch-s10">
+      </div>
+    </div>
+
+    <p class="section-desc" id="gc-status-line" style="margin-bottom:10px;"></p>
+
+    <nav class="lg2-tabs gc-tabs" id="gc-tabs">
+      <button type="button" class="lg2-tab active" data-tab="maps">Maps <span class="gc-tab-badge" id="gc-badge-maps">0</span></button>
+      <button type="button" class="lg2-tab" data-tab="modes">Modes <span class="gc-tab-badge" id="gc-badge-modes">0</span></button>
+      <button type="button" class="lg2-tab" data-tab="roles">Roles <span class="gc-tab-badge" id="gc-badge-roles">0</span></button>
+      <button type="button" class="lg2-tab" data-tab="characters">Characters <span class="gc-tab-badge" id="gc-badge-characters">0</span></button>
+    </nav>
+
+    <div class="gc-panel" id="gc-panel-maps">
+      <div class="gc-dropzone" id="gc-dropzone-maps">
+        <div class="gc-dropzone-hint">
+          <span>Drag &amp; drop map images here, or</span>
+          <button class="btn btn-secondary btn-sm" id="gc-add-map" type="button">+ Add Map</button>
+        </div>
+      </div>
+      <div id="gc-list-maps"></div>
+    </div>
+
+    <div class="gc-panel" id="gc-panel-modes" style="display:none;">
+      <div style="display:flex; gap:8px; margin-bottom:10px;">
+        <input type="text" id="gc-mode-name" class="input-text" style="flex:1;" placeholder="Mode name (e.g. Hardpoint)">
+        <input type="text" id="gc-mode-desc" class="input-text" style="flex:2;" placeholder="Description (optional)">
+        <button class="btn btn-primary btn-sm" id="gc-add-mode" type="button">Add</button>
+      </div>
+      <p class="section-desc" style="margin-bottom:10px;">Reference only for now — not yet wired into any game logic.</p>
+      <div id="gc-list-modes"></div>
+    </div>
+
+    <div class="gc-panel" id="gc-panel-roles" style="display:none;">
+      <div style="display:flex; gap:8px; margin-bottom:10px;">
+        <input type="text" id="gc-role-name" class="input-text" style="flex:1;" placeholder="Role name (e.g. Flex)">
+        <button class="btn btn-primary btn-sm" id="gc-add-role" type="button">Add</button>
+      </div>
+      <div id="gc-list-roles"></div>
+    </div>
+
+    <div class="gc-panel" id="gc-panel-characters" style="display:none;">
+      <div class="gc-dropzone" id="gc-dropzone-characters">
+        <div class="gc-dropzone-hint">
+          <span>Drag &amp; drop character portraits here, or</span>
+          <button class="btn btn-secondary btn-sm" id="gc-add-character" type="button">+ Add Character</button>
+        </div>
+      </div>
+      <div id="gc-list-characters"></div>
+    </div>
+
+    <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-top:14px; padding-top:14px; border-top:1px solid var(--border);">
+      <button class="btn btn-primary btn-sm" id="btn-gc-export">⤓ Export / Save</button>
+      <button class="btn btn-secondary btn-sm" id="btn-gc-import">⤒ Import Game Config</button>
+      <button class="btn btn-ghost btn-sm" id="btn-gc-reset" style="display:none;">Reset to built-in</button>
+    </div>
+    <div id="gc-result" style="margin-top:10px; font-size:13px;"></div>
+  </section>
+
   <section class="section">
     <h3 class="section-title">Config Presets</h3>
     <p class="section-desc">
@@ -9755,8 +9852,10 @@ PacketSendRate=10</pre>
 <script src="app.js"></script>
 <script src="social.js"></script>
 <script src="stats-analytics.js"></script>
+<script src="seed-resolve-core.js"></script>
 <script src="seeding-spotlight.js"></script>
 <script src="leagues.js"></script>
+<script src="gameconfig.js"></script>
 <script src="events.js"></script>
 <script src="event-ops.js"></script>
 <script src="bracket-builder.js"></script>

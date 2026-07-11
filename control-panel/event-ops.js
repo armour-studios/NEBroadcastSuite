@@ -1,25 +1,42 @@
 // ── EVENT OPS (ESPORTS ▸ Event Ops) ──────────────────────────────────────────
-// The start.gg → Challonge mirroring workbench:
-//   1. Import the start.gg attendee CSV → roster dashboard (team, players, emails,
-//      Challonge usernames) with copy helpers for populating Challonge teams.
-//   2. Pull TRUE bracket seeds (initialSeedNum) from the start.gg API — the exact
-//      order to recreate on Challonge so byes land identically.
-//   3. Bracket explorer: the full imported start.gg bracket with scores; click a
-//      team to trace its whole path (every set, every phase) while copying results.
-// Depends on globals from earlier scripts: el(), send(), currentState, showToast(),
-// csvParse() (seeding-spotlight.js). State lives in state.eventOps (library tier).
+// A universal spreadsheet workbench for tournament ops (start.gg → Challonge):
+//   1. Import ANY CSV — every column is kept. Work through it in a clean TABLE
+//      (pick columns, click headers to sort, search, copy as TSV / per column),
+//      or flip to a BY-TEAM view grouped from the columns you marked.
+//   2. Pull TRUE bracket seeds (initialSeedNum) from the start.gg API.
+//   3. Bracket explorer: the imported start.gg bracket with scores; click a
+//      team to trace its whole path (every set, every phase).
+// Data lives in state.eventOps (full headers+rows+roleMap, library tier) AND is
+// mirrored to localStorage so the table works even if the app server predates
+// the feature. Depends on globals: el(), send(), currentState, showToast(),
+// csvParse() (seeding-spotlight.js).
 
 (function () {
   'use strict';
 
   const eoEsc = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-  const eoOps = () => (window.currentState && currentState.eventOps) || { rows: [], seeds: [] };
-  let _eoTeam = '';       // selected team (bracket path + card highlight)
+  const LS_DATA = 'ne_eventops_data_v1';
+  const LS_COLS = 'ne_eventops_cols_v1';
+  let _eoTeam = '';        // selected team (bracket path highlight)
   let _eoSearch = '';
-  let _eoSort = 'team';   // team | seed | players
-  let _eoFilter = 'all';  // all | noemail | nochallonge
-  let _eoPhaseId = '';    // bracket explorer phase/pool selection
+  let _eoView = 'table';   // table | team
+  let _eoSort = { col: -1, dir: 1 };
+  let _eoVisible = null;   // Set of visible column indices (persisted per header signature)
+  let _eoPhaseId = '';
   let _eoPoolId = '';
+
+  // ── Data source: server state, falling back to the local mirror ────────────
+  function eoData() {
+    const s = (window.currentState && currentState.eventOps) || {};
+    if (Array.isArray(s.headers) && s.headers.length && Array.isArray(s.rows)) {
+      return { headers: s.headers, rows: s.rows, roleMap: s.roleMap || {}, seeds: s.seeds || [], eventSlug: s.eventSlug || '', local: false };
+    }
+    try {
+      const l = JSON.parse(localStorage.getItem(LS_DATA) || 'null');
+      if (l && Array.isArray(l.headers) && l.headers.length) return { ...l, seeds: (s.seeds || l.seeds || []), local: true };
+    } catch (_) {}
+    return { headers: [], rows: [], roleMap: {}, seeds: (s.seeds || []), eventSlug: s.eventSlug || '', local: false };
+  }
 
   function eoCopy(text, label) {
     navigator.clipboard.writeText(text).then(
@@ -28,7 +45,7 @@
     );
   }
 
-  // ── CSV import with column mapping ─────────────────────────────────────────
+  // ── CSV import ──────────────────────────────────────────────────────────────
   let _eoCsv = null;   // { headers, rows } while the mapping box is open
 
   el('eo-csv-pick')?.addEventListener('click', () => el('eo-csv-file')?.click());
@@ -47,11 +64,8 @@
     reader.readAsText(f);
   });
 
-  // Header auto-guess: start.gg attendee exports name these differently per event
-  // (custom registration fields carry whatever label the TO typed), so match loosely.
-  // Team lives in TWO columns on team events: "<event> Completed Team" (registered as a
-  // full squad) and "<event> Incomplete Teams" ("ACCEPTED: <team>" once filled) — a row
-  // has one, the other, or neither (free agent).
+  // Role auto-guess — powers the by-team view and Challonge copies. The TABLE always
+  // keeps every column regardless; roles are optional helpers, not a filter.
   const GUESS = {
     team:      [/completed team/i, /^entrant/i, /^team$/i, /squad/i],
     team2:     [/incomplete team/i],
@@ -70,9 +84,8 @@
 
   // "ACCEPTED: Cyclone Esports" → "Cyclone Esports" (start.gg prefixes the roster status).
   const cleanTeam = (v) => String(v || '').trim().replace(/^(accepted|pending|invited|waitlisted|declined)\s*:\s*/i, '').trim();
-  // Challonge answers are a mess of profile URLs (challonge.com/users/x, regional /es/ /fr/
-  // subpaths, league subdomains) and bare usernames — extract the username when it's a
-  // challonge URL, otherwise show what they typed so junk answers are visible.
+  // Challonge answers are a mess of profile URLs and bare usernames — extract the
+  // username when it's a challonge URL, otherwise show what they typed.
   function cleanChallonge(v) {
     v = String(v || '').trim();
     if (!v || /^x$/i.test(v)) return '';
@@ -80,7 +93,6 @@
     if (m) { try { return decodeURIComponent(m[1]); } catch (_) { return m[1]; } }
     return v;
   }
-  // Shared by the live preview and the import so what you see is exactly what lands.
   function deriveRow(r, idx) {
     const pick = (k) => (idx[k] >= 0 ? (r[idx[k]] || '').toString().trim() : '');
     return {
@@ -95,8 +107,6 @@
   function eoRenderMapBox() {
     const box = el('eo-map-box'); if (!box || !_eoCsv) return;
     const { headers, rows } = _eoCsv;
-    // Distinct non-empty values per column — the fastest way to SEE which column is
-    // the team (repeats, few distinct) vs per-player data (mostly unique).
     const distinct = headers.map((_, i) => new Set(rows.map((r) => (r[i] || '').toString().trim().toLowerCase()).filter(Boolean)).size);
     const opts = (sel) => ['<option value="-1">— none —</option>']
       .concat(headers.map((h, i) =>
@@ -105,8 +115,6 @@
       ['team', 'Team name'], ['team2', 'Team name (2nd column)'], ['player', 'Player / gamertag'],
       ['email', 'Email'], ['challonge', 'Challonge username'], ['flags', 'Captain/role flags']
     ];
-    // Header guess first; if no header matches for TEAM, fall back to the most
-    // repeated text column (a team column has ~rows/teamSize distinct values).
     let teamGuess = guessCol(headers, 'team');
     if (teamGuess < 0 && rows.length > 4) {
       let best = -1, bestN = Infinity;
@@ -115,6 +123,7 @@
     }
     box.style.display = '';
     box.innerHTML = `
+      <p class="field-hint" style="margin:0 0 8px;">Every column is imported — the table lets you show/hide any of them. These picks just power the <strong>By team</strong> view and the Challonge copy buttons.</p>
       <div class="eo-map-grid">
         ${fields.map(([k, label]) => `
           <label class="eo-map-field">
@@ -122,145 +131,240 @@
             <select class="input-select" id="eo-map-${k}">${opts(k === 'team' ? teamGuess : guessCol(headers, k))}</select>
           </label>`).join('')}
       </div>
-      <p class="field-hint" style="margin:0 0 8px;">start.gg team events split the team across two columns — "…Completed Team" and "…Incomplete Teams" ("ACCEPTED: name"). Map both; the status prefix is stripped automatically, players with neither become Free Agents.</p>
       <div class="eo-map-summary" id="eo-map-summary"></div>
-      <div class="eo-map-preview" id="eo-map-preview"></div>
       <div style="display:flex; gap:8px; margin-top:10px;">
         <button class="btn btn-primary btn-sm" id="eo-map-import">Import ${rows.length} rows</button>
         <button class="btn btn-ghost btn-sm" id="eo-map-cancel">Cancel</button>
       </div>`;
     const readIdx = () => { const idx = {}; fields.forEach(([k]) => { idx[k] = Number(el('eo-map-' + k)?.value); }); return idx; };
-    const preview = () => {
+    const summary = () => {
       const idx = readIdx();
       const derived = rows.map((r) => deriveRow(r, idx));
-      // Live outcome: exactly how the dashboard will group this mapping.
       const teamsN = new Set(derived.map((d) => d.team.toLowerCase()).filter(Boolean)).size;
       const freeN = derived.filter((d) => !d.team && d.player).length;
       const sm = el('eo-map-summary');
-      if (sm) {
-        if (idx.team < 0 && idx.team2 < 0) {
-          sm.innerHTML = '<span class="eo-miss">No team column selected — everyone will land in one Free Agents group. Map the "…Completed Team" and "…Incomplete Teams" columns.</span>';
-        } else if (teamsN <= 1 && rows.length > 4) {
-          sm.innerHTML = `<span class="eo-miss">This mapping creates only ${teamsN || 1} team from ${rows.length} rows — those columns don't look like team names.</span>`;
-        } else {
-          sm.innerHTML = `<span class="eo-ok">This mapping creates ${teamsN} teams · ${rows.length} players${freeN ? ` · ${freeN} free agents` : ''}.</span>`;
-        }
+      if (!sm) return;
+      if (idx.team < 0 && idx.team2 < 0) {
+        sm.innerHTML = '<span class="eo-miss">No team columns picked — the By-team view will show everyone as Free Agents (the table works regardless).</span>';
+      } else {
+        sm.innerHTML = `<span class="eo-ok">By-team view: ${teamsN} teams · ${rows.length} players${freeN ? ` · ${freeN} free agents` : ''}.</span>`;
       }
-      const cols = [['team', 'Team (derived)'], ['player', 'Player'], ['email', 'Email'], ['challonge', 'Challonge'], ['flags', 'Flags']];
-      const head = '<tr>' + cols.map(([, l]) => `<th>${l}</th>`).join('') + '</tr>';
-      const body = derived.slice(0, 5).map((d) =>
-        '<tr>' + cols.map(([k]) => `<td>${d[k] ? eoEsc(d[k]) : '<span class="eo-dim">—</span>'}</td>`).join('') + '</tr>').join('');
-      const pv = el('eo-map-preview'); if (pv) pv.innerHTML = `<table class="eo-table">${head}${body}</table>`;
     };
-    fields.forEach(([k]) => el('eo-map-' + k)?.addEventListener('change', preview));
-    preview();
+    fields.forEach(([k]) => el('eo-map-' + k)?.addEventListener('change', summary));
+    summary();
     el('eo-map-cancel')?.addEventListener('click', () => { _eoCsv = null; box.style.display = 'none'; box.innerHTML = ''; });
     el('eo-map-import')?.addEventListener('click', () => {
       const idx = readIdx();
-      if (idx.team < 0 && idx.team2 < 0 && idx.player < 0) { showToast('Map at least the team or player column.', '#fbbf24'); return; }
-      const out = rows.map((r) => deriveRow(r, idx)).filter((r) => r.team || r.player);
-      send('set_event_ops', { rows: out, eventSlug: (currentState?.startgg?.eventSlug || '') });
+      const payload = {
+        headers,
+        rows: rows.map((r) => headers.map((_, i) => (r[i] || '').toString())),
+        roleMap: idx,
+        eventSlug: (currentState?.startgg?.eventSlug || '')
+      };
+      // Local mirror FIRST — the dashboard works even if the app server predates this feature.
+      try { localStorage.setItem(LS_DATA, JSON.stringify(payload)); } catch (_) {}
+      send('set_event_ops', payload);
       _eoCsv = null; box.style.display = 'none'; box.innerHTML = '';
-      showToast('Imported ' + out.length + ' roster rows.', '#22c55e');
-      // Stale-server guard: set_event_ops shipped with this feature — an app instance
-      // launched before it silently drops the message and the dashboard stays empty.
-      setTimeout(() => {
-        if (((eoOps().rows) || []).length !== out.length) {
-          showToast('The import did not reach the app server — RELAUNCH the app (Event Ops is new), then import again.', '#c53030', 12000);
-        }
-      }, 2500);
+      _eoVisible = null; _eoSort = { col: -1, dir: 1 };
+      showToast('Imported ' + payload.rows.length + ' rows · ' + headers.length + ' columns.', '#22c55e');
+      eoRenderDash();
     });
   }
 
   el('eo-clear')?.addEventListener('click', () => {
-    if (!confirm('Clear the imported roster? (The CSV file itself is untouched.)')) return;
-    send('set_event_ops', { rows: [] });
+    if (!confirm('Clear the imported spreadsheet? (The CSV file itself is untouched.)')) return;
+    try { localStorage.removeItem(LS_DATA); } catch (_) {}
+    send('set_event_ops', { headers: [], rows: [], roleMap: {} });
+    eoRenderDash();
   });
 
-  // ── Roster dashboard ────────────────────────────────────────────────────────
-  function seedByName() {
-    const m = new Map();
-    (eoOps().seeds || []).forEach((s) => m.set((s.name || '').toLowerCase(), s.seed));
-    return m;
+  // ── Column visibility (persisted per header signature) ─────────────────────
+  function colSig(headers) { return headers.join('').slice(0, 400); }
+  function loadVisible(headers, roleMap) {
+    if (_eoVisible) return _eoVisible;
+    try {
+      const store = JSON.parse(localStorage.getItem(LS_COLS) || '{}');
+      const saved = store[colSig(headers)];
+      if (Array.isArray(saved)) { _eoVisible = new Set(saved.filter((i) => i >= 0 && i < headers.length)); return _eoVisible; }
+    } catch (_) {}
+    // Default: the role-mapped columns in a sensible order; else the first 8.
+    const roles = ['team', 'team2', 'player', 'email', 'challonge', 'flags']
+      .map((k) => Number(roleMap[k])).filter((i) => Number.isInteger(i) && i >= 0);
+    _eoVisible = new Set(roles.length ? roles : headers.map((_, i) => i).slice(0, 8));
+    return _eoVisible;
   }
+  function saveVisible(headers) {
+    try {
+      const store = JSON.parse(localStorage.getItem(LS_COLS) || '{}');
+      store[colSig(headers)] = [..._eoVisible];
+      localStorage.setItem(LS_COLS, JSON.stringify(store));
+    } catch (_) {}
+  }
+
+  // ── Dashboard ───────────────────────────────────────────────────────────────
   const FREE_AGENTS = 'Free Agents';
-  function groupTeams(rows) {
+  function groupTeams(data) {
+    const idx = data.roleMap || {};
     const m = new Map();
-    rows.forEach((r) => {
-      const key = (r.team || FREE_AGENTS).trim() || FREE_AGENTS;
+    data.rows.forEach((r) => {
+      const d = deriveRow(r, idx);
+      if (!d.team && !d.player) return;
+      const key = d.team || FREE_AGENTS;
       if (!m.has(key)) m.set(key, []);
-      m.get(key).push(r);
+      m.get(key).push(d);
     });
-    // Captains first inside each team, then keep CSV order.
     const rank = (p) => (/captain/i.test(p.flags || '') ? 0 : /alternate|sub/i.test(p.flags || '') ? 2 : 1);
     return [...m.entries()].map(([team, players]) => ({ team, players: players.slice().sort((a, b) => rank(a) - rank(b)) }));
+  }
+  function seedByName() {
+    const m = new Map();
+    (eoData().seeds || []).forEach((s) => m.set((s.name || '').toLowerCase(), s.seed));
+    return m;
   }
 
   function eoRenderDash() {
     const host = el('eo-dash'); if (!host) return;
-    const rows = eoOps().rows || [];
-    const clearBtn = el('eo-clear'); if (clearBtn) clearBtn.style.display = rows.length ? '' : 'none';
-    if (!rows.length) {
-      host.innerHTML = '<div class="eo-empty">No roster imported yet — export the attendee CSV from start.gg and click <strong>Import start.gg CSV</strong>.</div>';
+    const data = eoData();
+    const clearBtn = el('eo-clear'); if (clearBtn) clearBtn.style.display = data.rows.length ? '' : 'none';
+    if (!data.rows.length) {
+      host.innerHTML = '<div class="eo-empty">No spreadsheet imported yet — export the attendee CSV from start.gg (or any CSV) and click <strong>Import CSV</strong>.</div>';
       return;
     }
-    const seeds = seedByName();
-    let teams = groupTeams(rows);
+    const localNote = data.local
+      ? '<div class="eo-empty" style="border-color:rgba(245,158,11,.5); color:#fbbf24; margin-bottom:10px;">Showing this browser\'s local copy — the app server hasn\'t stored it (relaunch the app, then re-import to sync it).</div>'
+      : '';
+    const viewBtns = `
+      <div class="eo-controls" style="margin-top:0;">
+        <div class="eo-chips" style="margin:0;">
+          <button class="eo-chipbtn${_eoView === 'table' ? ' active' : ''}" id="eo-view-table">Table</button>
+          <button class="eo-chipbtn${_eoView === 'team' ? ' active' : ''}" id="eo-view-team">By team</button>
+        </div>
+        <input type="text" id="eo-search" class="input-text" placeholder="Search everything…" value="${eoEsc(_eoSearch)}">
+        <span class="eo-team-n">${data.rows.length} rows · ${data.headers.length} columns</span>
+      </div>`;
+    host.innerHTML = localNote + viewBtns + `<div id="eo-body"></div>`;
+    el('eo-view-table')?.addEventListener('click', () => { _eoView = 'table'; eoRenderDash(); });
+    el('eo-view-team')?.addEventListener('click', () => { _eoView = 'team'; eoRenderDash(); });
+    const search = el('eo-search');
+    search?.addEventListener('input', () => { _eoSearch = search.value; eoRenderBody(); });
+    eoRenderBody();
+    if (_eoSearch && search) { search.focus(); search.setSelectionRange(search.value.length, search.value.length); }
+  }
 
-    // Sift: free-text search + missing-data filters.
+  function eoRenderBody() {
+    const body = el('eo-body'); if (!body) return;
+    const data = eoData();
+    if (_eoView === 'team') renderTeamView(body, data);
+    else renderTableView(body, data);
+  }
+
+  // ── TABLE view: every column, pick/sort/filter/copy ─────────────────────────
+  function renderTableView(body, data) {
+    const { headers, rows } = data;
+    const visible = loadVisible(headers, data.roleMap || {});
+    const cols = headers.map((h, i) => ({ h, i })).filter((c) => visible.has(c.i));
+
+    const q = _eoSearch.trim().toLowerCase();
+    let view = rows.map((r, ri) => ({ r, ri }));
+    if (q) view = view.filter((x) => cols.some((c) => (x.r[c.i] || '').toString().toLowerCase().includes(q)));
+    if (_eoSort.col >= 0) {
+      const ci = _eoSort.col, dir = _eoSort.dir;
+      view.sort((a, b) => {
+        const av = (a.r[ci] || '').toString(), bv = (b.r[ci] || '').toString();
+        const an = parseFloat(av), bn = parseFloat(bv);
+        if (!isNaN(an) && !isNaN(bn) && /^-?[\d.,]+$/.test(av.trim()) && /^-?[\d.,]+$/.test(bv.trim())) return (an - bn) * dir;
+        if (!av && bv) return 1;      // empties always sink
+        if (av && !bv) return -1;
+        return av.localeCompare(bv, undefined, { sensitivity: 'base', numeric: true }) * dir;
+      });
+    }
+
+    const picker = `
+      <details class="eo-colpick">
+        <summary>Columns (${cols.length}/${headers.length})</summary>
+        <div class="eo-colpick-list">
+          ${headers.map((h, i) => `
+            <label><input type="checkbox" data-eo-col="${i}"${visible.has(i) ? ' checked' : ''}> ${eoEsc(h) || '(column ' + (i + 1) + ')'}</label>`).join('')}
+          <div style="display:flex; gap:6px; margin-top:6px;">
+            <button class="btn btn-ghost btn-sm" id="eo-cols-all">All</button>
+            <button class="btn btn-ghost btn-sm" id="eo-cols-none">None</button>
+          </div>
+        </div>
+      </details>`;
+    const controls = `
+      <div class="eo-controls" style="margin-top:0;">
+        ${picker}
+        <button class="btn btn-secondary btn-sm" id="eo-copy-tsv" title="Visible columns and filtered rows, tab-separated — pastes into Challonge notes, Sheets or Excel">Copy table</button>
+        <span class="eo-team-n">${view.length}${q ? ' matching' : ''} rows</span>
+      </div>`;
+
+    const thead = '<tr>' + cols.map((c) => {
+      const active = _eoSort.col === c.i;
+      return `<th data-eo-sort="${c.i}" title="Click to sort">
+        <span class="eo-th-label">${eoEsc(c.h) || '(col ' + (c.i + 1) + ')'}</span>
+        <span class="eo-th-dir">${active ? (_eoSort.dir > 0 ? '▲' : '▼') : ''}</span>
+        <button class="eo-th-copy" data-eo-colcopy="${c.i}" title="Copy this column (filtered rows, one per line)">⧉</button>
+      </th>`;
+    }).join('') + '</tr>';
+    const tbody = view.map((x) =>
+      '<tr>' + cols.map((c) => `<td>${eoEsc(x.r[c.i])}</td>`).join('') + '</tr>').join('');
+
+    body.innerHTML = controls + `
+      <div class="eo-tablewrap">
+        <table class="eo-grid"><thead>${thead}</thead><tbody>${tbody || ''}</tbody></table>
+        ${view.length ? '' : '<div class="eo-empty" style="border:none;">Nothing matches the search.</div>'}
+      </div>`;
+
+    body.querySelectorAll('[data-eo-col]').forEach((cb) => cb.addEventListener('change', () => {
+      const i = Number(cb.dataset.eoCol);
+      if (cb.checked) _eoVisible.add(i); else _eoVisible.delete(i);
+      saveVisible(headers); eoRenderBody();
+    }));
+    el('eo-cols-all')?.addEventListener('click', () => { _eoVisible = new Set(headers.map((_, i) => i)); saveVisible(headers); eoRenderBody(); });
+    el('eo-cols-none')?.addEventListener('click', () => { _eoVisible = new Set(); saveVisible(headers); eoRenderBody(); });
+    body.querySelectorAll('[data-eo-sort]').forEach((th) => th.addEventListener('click', (ev) => {
+      if (ev.target.closest('.eo-th-copy')) return;
+      const i = Number(th.dataset.eoSort);
+      _eoSort = { col: i, dir: _eoSort.col === i ? -_eoSort.dir : 1 };
+      eoRenderBody();
+    }));
+    body.querySelectorAll('[data-eo-colcopy]').forEach((b) => b.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      const i = Number(b.dataset.eoColcopy);
+      const vals = view.map((x) => (x.r[i] || '').toString()).filter(Boolean);
+      if (!vals.length) { showToast('Column is empty (in the filtered rows).', '#fbbf24'); return; }
+      eoCopy(vals.join('\n'), vals.length + ' × ' + (headers[i] || 'column'));
+    }));
+    el('eo-copy-tsv')?.addEventListener('click', () => {
+      const tsv = [cols.map((c) => c.h).join('\t')]
+        .concat(view.map((x) => cols.map((c) => (x.r[c.i] || '').toString().replace(/[\t\r\n]+/g, ' ')).join('\t')))
+        .join('\n');
+      eoCopy(tsv, 'table (' + view.length + ' rows × ' + cols.length + ' cols)');
+    });
+  }
+
+  // ── BY-TEAM view (role-mapped grouping + Challonge copy helpers) ────────────
+  function renderTeamView(body, data) {
+    const seeds = seedByName();
+    let teams = groupTeams(data);
+    teams.sort((a, b) => a.team.localeCompare(b.team, undefined, { sensitivity: 'base', numeric: true }));
     const q = _eoSearch.trim().toLowerCase();
     if (q) {
       teams = teams.filter((t) =>
         t.team.toLowerCase().includes(q) ||
         t.players.some((p) => (p.player + ' ' + p.email + ' ' + p.challonge).toLowerCase().includes(q)));
     }
-    if (_eoFilter === 'noemail') teams = teams.filter((t) => t.players.some((p) => !p.email));
-    if (_eoFilter === 'nochallonge') teams = teams.filter((t) => t.players.some((p) => !p.challonge));
-
-    // Sort: team A–Z, start.gg seed, or roster size.
-    const seedOf = (t) => { const s = seeds.get(t.team.toLowerCase()); return s != null ? s : 9999; };
-    if (_eoSort === 'seed') teams.sort((a, b) => seedOf(a) - seedOf(b) || a.team.localeCompare(b.team));
-    else if (_eoSort === 'players') teams.sort((a, b) => b.players.length - a.players.length || a.team.localeCompare(b.team));
-    else teams.sort((a, b) => a.team.localeCompare(b.team, undefined, { sensitivity: 'base', numeric: true }));
-
-    const emails = rows.filter((r) => r.email);
-    const challonges = rows.filter((r) => r.challonge);
-
-    // Imported with no/bad team column → one giant "(No team)" group. Say so instead
-    // of letting it look like the dashboard only supports one team.
-    const totalTeams = groupTeams(rows).length;
-    const badGrouping = totalTeams <= 1 && rows.length > 4
-      ? `<div class="eo-empty" style="border-color:rgba(245,158,11,.5); color:#fbbf24; margin-bottom:10px;">All ${rows.length} players are in one group — the CSV import needs the TEAM column mapped. Click <strong>Import start.gg CSV</strong> again and pick the column that repeats per team (start.gg calls it "Entrant").</div>`
-      : '';
-    const chips = `
-      ${badGrouping}
-      <div class="eo-chips">
-        <span class="eo-chip">${groupTeams(rows).length} teams</span>
-        <span class="eo-chip">${rows.length} players</span>
-        <span class="eo-chip${emails.length < rows.length ? ' warn' : ''}">${emails.length}/${rows.length} emails</span>
-        <span class="eo-chip${challonges.length < rows.length ? ' warn' : ''}">${challonges.length}/${rows.length} challonge</span>
-      </div>`;
+    const teamBlockText = (t) => {
+      const seed = seeds.get(t.team.toLowerCase());
+      return t.team.toUpperCase() + (seed != null ? ' — SEED ' + seed : '') + '\n'
+        + t.players.map((p) => [p.player, p.email, p.challonge].map((v) => v || '-').join('\t')).join('\n');
+    };
     const controls = `
-      <div class="eo-controls">
-        <input type="text" id="eo-search" class="input-text" placeholder="Search team, player, email, challonge…" value="${eoEsc(_eoSearch)}">
-        <select class="input-select eo-ctl-sel" id="eo-sort" title="Sort teams">
-          <option value="team"${_eoSort === 'team' ? ' selected' : ''}>Sort: Team A–Z</option>
-          <option value="seed"${_eoSort === 'seed' ? ' selected' : ''}>Sort: Seed</option>
-          <option value="players"${_eoSort === 'players' ? ' selected' : ''}>Sort: Most players</option>
-        </select>
-        <select class="input-select eo-ctl-sel" id="eo-filter" title="Filter teams">
-          <option value="all"${_eoFilter === 'all' ? ' selected' : ''}>All teams</option>
-          <option value="noemail"${_eoFilter === 'noemail' ? ' selected' : ''}>Missing emails</option>
-          <option value="nochallonge"${_eoFilter === 'nochallonge' ? ' selected' : ''}>Missing challonge</option>
-        </select>
-        <button class="btn btn-secondary btn-sm" id="eo-copy-emails" title="Every email in the roster, one per line">Copy all emails</button>
-        <button class="btn btn-secondary btn-sm" id="eo-copy-challonge" title="Every Challonge username, one per line">Copy all Challonge</button>
-        <button class="btn btn-secondary btn-sm" id="eo-copy-roster" title="The whole roster as text — team blocks with player, email and challonge per line (tab-separated, pastes into sheets too)">Copy full roster</button>
+      <div class="eo-controls" style="margin-top:0;">
+        <button class="btn btn-secondary btn-sm" id="eo-copy-emails">Copy all emails</button>
+        <button class="btn btn-secondary btn-sm" id="eo-copy-challonge">Copy all Challonge</button>
+        <button class="btn btn-secondary btn-sm" id="eo-copy-roster" title="Every team block as text — tab-separated player / email / challonge lines">Copy full roster</button>
       </div>`;
-
-    // One block per team, whitespace between blocks:
-    //   TEAM NAME — SEED X
-    //   Player 1  GAMERTAG   EMAIL   CHALLONGE
     const blocks = teams.map((t) => {
       const seed = seeds.get(t.team.toLowerCase());
       const sel = _eoTeam && _eoTeam.toLowerCase() === t.team.toLowerCase();
@@ -270,9 +374,9 @@
             <span class="eo-block-title">${eoEsc(t.team)}</span>
             <span class="eo-block-seed">${seed != null ? '— SEED ' + seed : ''}</span>
             <span class="eo-team-n">${t.players.length} player${t.players.length === 1 ? '' : 's'}</span>
-            <button class="btn btn-ghost btn-sm eo-copy-team" data-team="${eoEsc(t.team)}" data-what="emails" title="This team's emails, one per line">emails</button>
-            <button class="btn btn-ghost btn-sm eo-copy-team" data-team="${eoEsc(t.team)}" data-what="challonge" title="This team's Challonge usernames, one per line — paste into Challonge's add-participants box">challonge</button>
-            <button class="btn btn-ghost btn-sm eo-copy-team" data-team="${eoEsc(t.team)}" data-what="block" title="The whole team block as text: name + player / email / challonge lines">copy team</button>
+            <button class="btn btn-ghost btn-sm eo-copy-team" data-team="${eoEsc(t.team)}" data-what="emails">emails</button>
+            <button class="btn btn-ghost btn-sm eo-copy-team" data-team="${eoEsc(t.team)}" data-what="challonge">challonge</button>
+            <button class="btn btn-ghost btn-sm eo-copy-team" data-team="${eoEsc(t.team)}" data-what="block">copy team</button>
           </div>
           ${t.players.map((p, i) => `
             <div class="eo-block-player">
@@ -283,30 +387,24 @@
             </div>`).join('')}
         </div>`;
     }).join('');
-    host.innerHTML = chips + controls +
-      (teams.length ? `<div class="eo-blocks">${blocks}</div>` : '<div class="eo-empty">Nothing matches this search/filter.</div>');
-    el('eo-sort')?.addEventListener('change', function () { _eoSort = this.value; eoRenderDash(); });
-    el('eo-filter')?.addEventListener('change', function () { _eoFilter = this.value; eoRenderDash(); });
+    body.innerHTML = controls + (teams.length
+      ? `<div class="eo-blocks">${blocks}</div>`
+      : '<div class="eo-empty">Nothing matches — or no team columns were mapped on import (the Table view always works).</div>');
 
-    const search = el('eo-search');
-    search?.addEventListener('input', () => { _eoSearch = search.value; eoRenderDash(); });
-    if (q && search) { search.focus(); search.setSelectionRange(search.value.length, search.value.length); }
-    // Text dump of a team, Challonge-entry friendly: header line, then one
-    // tab-separated line per player (player, email, challonge).
-    const teamBlockText = (t) => {
-      const seed = seeds.get(t.team.toLowerCase());
-      return t.team.toUpperCase() + (seed != null ? ' — SEED ' + seed : '') + '\n'
-        + t.players.map((p) => [p.player, p.email, p.challonge].map((v) => v || '-').join('\t')).join('\n');
-    };
-    el('eo-copy-emails')?.addEventListener('click', () => eoCopy(emails.map((r) => r.email).join('\n'), emails.length + ' emails'));
-    el('eo-copy-challonge')?.addEventListener('click', () => eoCopy(challonges.map((r) => r.challonge).join('\n'), challonges.length + ' Challonge usernames'));
-    el('eo-copy-roster')?.addEventListener('click', () => {
-      const all = groupTeams(rows);
-      eoCopy(all.map(teamBlockText).join('\n\n'), 'full roster (' + all.length + ' teams)');
+    const allRows = groupTeams(data);
+    const flat = allRows.flatMap((t) => t.players);
+    el('eo-copy-emails')?.addEventListener('click', () => {
+      const list = flat.map((p) => p.email).filter(Boolean);
+      eoCopy(list.join('\n'), list.length + ' emails');
     });
-    host.querySelectorAll('.eo-copy-team').forEach((b) => b.addEventListener('click', (ev) => {
+    el('eo-copy-challonge')?.addEventListener('click', () => {
+      const list = flat.map((p) => p.challonge).filter(Boolean);
+      eoCopy(list.join('\n'), list.length + ' Challonge usernames');
+    });
+    el('eo-copy-roster')?.addEventListener('click', () => eoCopy(allRows.map(teamBlockText).join('\n\n'), 'full roster (' + allRows.length + ' teams)'));
+    body.querySelectorAll('.eo-copy-team').forEach((b) => b.addEventListener('click', (ev) => {
       ev.stopPropagation();
-      const t = groupTeams(rows).find((x) => x.team === b.dataset.team);
+      const t = allRows.find((x) => x.team === b.dataset.team);
       if (!t) return;
       const what = b.dataset.what;
       if (what === 'block') { eoCopy(teamBlockText(t), t.team + ' (full block)'); return; }
@@ -315,7 +413,8 @@
       if (!list.length) { showToast('No ' + (key === 'email' ? 'emails' : 'Challonge usernames') + ' on this team.', '#fbbf24'); return; }
       eoCopy(list.join('\n'), list.length + ' ' + (key === 'email' ? 'emails' : 'Challonge usernames') + ' (' + t.team + ')');
     }));
-    host.querySelectorAll('.eo-block-head').forEach((c) => c.addEventListener('click', () => {
+    body.querySelectorAll('.eo-block-head').forEach((c) => c.addEventListener('click', (ev) => {
+      if (ev.target.closest('.eo-copy-team')) return;
       eoSelectTeam(c.dataset.eoTeam === _eoTeam ? '' : c.dataset.eoTeam);
     }));
   }
@@ -325,8 +424,18 @@
     const st = el('eo-seed-status');
     if (st) { st.textContent = 'Pulling seeds from start.gg…'; st.style.color = 'var(--muted)'; }
     send('eventops_fetch_seeds', { slug: (el('eo-seed-slug')?.value || '').trim() });
+    // Stale-server guard: no reply within 6s = the running app predates this feature.
+    clearTimeout(eoSeedGuard);
+    eoSeedGuard = setTimeout(() => {
+      if (st && st.textContent.startsWith('Pulling')) {
+        st.textContent = 'No reply from the app server — relaunch the app (Event Ops is new), then try again.';
+        st.style.color = '#f56565';
+      }
+    }, 6000);
   });
+  let eoSeedGuard = null;
   window.eventOpsResult = function (d) {
+    clearTimeout(eoSeedGuard);
     const st = el('eo-seed-status');
     if (st) { st.textContent = d.message || ''; st.style.color = d.ok ? '#9ae6b4' : '#f56565'; }
     if (!d.ok) showToast(d.message || 'Seed fetch failed.', '#c53030', 6000);
@@ -334,14 +443,14 @@
 
   function eoRenderSeeds() {
     const host = el('eo-seeds'); if (!host) return;
-    const ops = eoOps();
+    const data = eoData();
     const slugInp = el('eo-seed-slug');
     if (slugInp && !slugInp.value && document.activeElement !== slugInp) {
-      slugInp.value = ops.eventSlug || currentState?.bracket?.eventSlug || currentState?.startgg?.eventSlug || '';
+      slugInp.value = data.eventSlug || currentState?.bracket?.eventSlug || currentState?.startgg?.eventSlug || '';
     }
-    const seeds = ops.seeds || [];
-    if (!seeds.length) { host.innerHTML = '<div class="eo-empty">No seeds pulled yet.</div>'; return; }
-    const rosterTeams = new Set(groupTeams(ops.rows || []).map((t) => t.team.toLowerCase()));
+    const seeds = data.seeds || [];
+    if (!seeds.length) { host.innerHTML = '<div class="eo-empty">No seeds pulled yet — optional; used for the SEED badges in the By-team view and to mirror seeding on Challonge.</div>'; return; }
+    const rosterTeams = new Set(groupTeams(data).map((t) => t.team.toLowerCase()));
     const rowsHtml = seeds.map((s) => `
       <tr class="eo-seed-row${_eoTeam && _eoTeam.toLowerCase() === s.name.toLowerCase() ? ' sel' : ''}" data-eo-team="${eoEsc(s.name)}">
         <td class="eo-seed-num">${s.seed}</td>
@@ -367,7 +476,6 @@
   });
 
   function bands(container) {
-    // A pool/phase's round bands in play order; swiss/RR events carry `schedule` instead.
     const out = [];
     (container.winners || []).forEach((r) => out.push({ band: 'Winners', ...r }));
     (container.losers || []).forEach((r) => out.push({ band: 'Losers', ...r }));
@@ -376,7 +484,6 @@
     return out;
   }
 
-  // Every set a team plays, across every phase and pool, in display order.
   function teamPath(name) {
     const br = currentState?.bracket || {};
     const low = (name || '').toLowerCase();
@@ -429,7 +536,6 @@
     const poolChips = pools.length > 1 ? pools.map((p) =>
       `<button class="eo-chipbtn sm${p.id === pool.id ? ' active' : ''}" data-eo-pool="${eoEsc(p.id)}">${eoEsc(p.name)}</button>`).join('') : '';
 
-    // Path panel for the selected team
     let pathHtml = '';
     if (_eoTeam) {
       const p = teamPath(_eoTeam);
@@ -455,7 +561,6 @@
         </div>`;
     }
 
-    // Bracket grid: one column per round
     const low = _eoTeam.toLowerCase();
     const roundCols = bands(pool).map((round) => `
       <div class="eo-round">
@@ -495,12 +600,9 @@
   window.eventOpsRender = function () {
     eoRenderDash(); eoRenderSeeds(); eoRenderBracket();
   };
-  // full_state hook — only re-render while the tab is visible (renders are cheap but
-  // full_state arrives constantly; skip the work when the panel is hidden).
   window.eventOpsOnState = function () {
     const panel = el('ev-eventops-panel');
     if (!panel || panel.style.display === 'none') return;
-    // Don't rebuild under the producer's cursor mid-keystroke.
     const a = document.activeElement;
     if (a && (a.id === 'eo-search' || a.id === 'eo-seed-slug')) return;
     window.eventOpsRender();
