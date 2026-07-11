@@ -2724,7 +2724,11 @@ function buildCasterObsUrl(caster) {
 }
 
 function broadcast(clients, msg) {
-  const str = JSON.stringify(msg);
+  broadcastRaw(clients, JSON.stringify(msg));
+}
+// Send an already-serialized message string (lets callers stringify once and reuse it, e.g. the
+// live-payload dedup in _flushFullState).
+function broadcastRaw(clients, str) {
   clients.forEach(ws => {
     if (ws.readyState === WebSocket.OPEN) ws.send(str);
   });
@@ -9601,6 +9605,7 @@ function startBridgeServer() {
     ws.isAlive = true;
     ws._role = 'unknown';   // set via a 'register' message: 'overlay' (browser source) | 'control' (panel)
     ws._page = '';          // overlay page path (e.g. /ticker.html) — drives the pre-flight "overlays reachable" check
+    ws._imgvault = false;   // set true via 'imgvault_ready' — opt into compact @img: image refs
     ws.on('pong', () => { ws.isAlive = true; });
     // Send full state immediately on connect
     ws.send(JSON.stringify(getFullState()));
@@ -11287,7 +11292,12 @@ function handleControlMessage(msg, ws) {
         // fresh from the NEW game's pool.
         if (prev !== g) {
           state.veto = { visible: false, title: '', maps: [] };
-          state.draft = { visible: false, title: '', subtitle: '', game: '', teamStart: 'a', owBanCount: 4,
+          // Board content resets (old game's pool/roster), but PRODUCER PREFERENCES survive:
+          // teamStart and the Overwatch ban count are settings, not board state — resetting
+          // owBanCount to 4 here silently undid "one ban per team" every time the game switched.
+          state.draft = { visible: false, title: '', subtitle: '',
+            game: '', teamStart: (state.draft && state.draft.teamStart) || 'a',
+            owBanCount: (state.draft && state.draft.owBanCount) || 4,
             sequence: [], ops: [], turn: null, complete: false,
             auto: (state.draft && state.draft.auto) || { enabled: false, status: 'off', statusDetail: '', lockfilePath: '' } };
         }
@@ -12796,6 +12806,10 @@ function handleControlMessage(msg, ws) {
       if (ws._role === 'overlay' || was === 'overlay') maybeBroadcastOverlayCount();
       break;
     }
+
+    // Client (overlay/sticky-logos.js) can restore vaulted "@img:<hash>" image refs → opt it into the
+    // compact broadcast variant. Purely additive: without this the client always gets whole images.
+    case 'imgvault_ready': { ws._imgvault = true; break; }
 
     case 'swap_teams': {
       // Swap names/logos
@@ -14581,12 +14595,40 @@ function mergeAtTop(savedArray, importedArray, isSameItem) {
   return [...filteredNew, ...savedArray];
 }
 
-let _bcTimer = null, _bcPending = false, _lastLibSig = '';
+// Image vault: repeat base64 images (team/standings/ad logos) are the bulk of the live payload but
+// almost never change. Clients that sent `imgvault_ready` (overlay/sticky-logos.js) cache each image
+// the first time they see it and thereafter accept a compact "@img:<hash>" reference. This strips the
+// bytes off every subsequent broadcast for those clients — big win for remote overlays. Legacy clients
+// (no script / didn't opt in) get the untouched payload, so nothing regresses.
+const _imgSent = new Set();
+function _imgHash(s) { let h = 5381; for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0; return (h >>> 0).toString(36) + '.' + s.length; }
+function _vaultImages(str) {
+  return str.replace(/"data:image\/[a-z0-9.+-]+;base64,[A-Za-z0-9+/=]{1024,}"/g, (m) => {
+    const val = m.slice(1, -1);
+    const h = _imgHash(val);
+    if (_imgSent.has(h)) return '"@img:' + h + '"';
+    _imgSent.add(h);            // first sight → send whole so capable clients cache it
+    return m;
+  });
+}
+let _bcTimer = null, _bcPending = false, _lastLibSig = '', _lastMsgStr = '';
 function _flushFullState() {
   const data = buildLiveState();
   const sig = librarySig();
-  if (sig !== _lastLibSig) { _lastLibSig = sig; Object.assign(data, libraryData()); }   // include library only when it changed
-  broadcast(bridgeClients, { type: 'full_state', data });
+  const libChanged = (sig !== _lastLibSig);
+  if (libChanged) { _lastLibSig = sig; Object.assign(data, libraryData()); }   // library only when it changed
+  // Serialize ONCE. Skip byte-identical re-sends (a mutation that didn't change anything live — only a
+  // library/local key moved, or an identical value was written). New clients get their own snapshot via
+  // the connection handler, so deduping the throttled path never starves them.
+  const realStr = JSON.stringify({ type: 'full_state', data });
+  if (realStr === _lastMsgStr) { feedDirectorBroadcast(); return; }
+  _lastMsgStr = realStr;
+  // Build the vaulted variant once, only if some connected client can use it.
+  let vaultStr = null;
+  for (const ws of bridgeClients) { if (ws._imgvault) { vaultStr = _vaultImages(realStr); break; } }
+  for (const ws of bridgeClients) {
+    if (ws.readyState === WebSocket.OPEN) ws.send(ws._imgvault && vaultStr ? vaultStr : realStr);
+  }
   feedDirectorBroadcast();
 }
 // Coalesce bursts: broadcast immediately (leading edge), then at most once per 40ms. Collapses
@@ -14607,6 +14649,32 @@ function startHttpServer(baseDir) {
   const overlayDir = path.join(baseDir, 'overlay');
   const overridesDir = path.join(dataDir, 'overlay-overrides');
   overlayEditor = createOverlayEditor({ overlayDir, overridesDir });
+
+  // Inject the sticky-logos client as the first <head> script of EVERY served overlay page, so remote
+  // overlays opt into compact @img: image refs (see overlay/sticky-logos.js) with zero per-file edits.
+  // Covers user overrides and base overlays; on any read error it falls through to normal serving.
+  const _stickyTag = '<script src="/sticky-logos.js"></script>';
+  const _resolveOverlayHtml = (reqPath) => {
+    const ov = overlayEditor.resolveFileForRequest(reqPath);
+    if (ov) return ov;
+    const rel = (reqPath === '/' ? '' : reqPath.replace(/^\/+/, ''));
+    if (!rel || !/\.html$/i.test(rel)) return null;
+    const full = path.join(overlayDir, rel);
+    if (!full.startsWith(overlayDir)) return null;   // path-traversal guard
+    return fs.existsSync(full) ? full : null;
+  };
+  app.get(/^\/([^?]*\.html)?$/i, (req, res, next) => {
+    const file = _resolveOverlayHtml(req.path);
+    if (!file || !/\.html$/i.test(file)) return next();
+    fs.readFile(file, 'utf8', (err, html) => {
+      if (err) return next();
+      const out = html.indexOf('sticky-logos.js') >= 0 ? html
+        : (/<head[^>]*>/i.test(html) ? html.replace(/<head[^>]*>/i, (h) => h + '\n  ' + _stickyTag)
+                                     : _stickyTag + '\n' + html);
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+      res.type('html').send(out);
+    });
+  });
 
   // Custom overlay files (user HTML overrides) before static fallback
   app.get(/^\/[^?]*\.(html|css|js)$/i, (req, res, next) => {
