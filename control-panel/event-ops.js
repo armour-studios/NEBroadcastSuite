@@ -162,6 +162,13 @@
       send('set_event_ops', { rows: out, eventSlug: (currentState?.startgg?.eventSlug || '') });
       _eoCsv = null; box.style.display = 'none'; box.innerHTML = '';
       showToast('Imported ' + out.length + ' roster rows.', '#22c55e');
+      // Stale-server guard: set_event_ops shipped with this feature — an app instance
+      // launched before it silently drops the message and the dashboard stays empty.
+      setTimeout(() => {
+        if (((eoOps().rows) || []).length !== out.length) {
+          showToast('The import did not reach the app server — RELAUNCH the app (Event Ops is new), then import again.', '#c53030', 12000);
+        }
+      }, 2500);
     });
   }
 
@@ -248,6 +255,7 @@
         </select>
         <button class="btn btn-secondary btn-sm" id="eo-copy-emails" title="Every email in the roster, one per line">Copy all emails</button>
         <button class="btn btn-secondary btn-sm" id="eo-copy-challonge" title="Every Challonge username, one per line">Copy all Challonge</button>
+        <button class="btn btn-secondary btn-sm" id="eo-copy-roster" title="The whole roster as text — team blocks with player, email and challonge per line (tab-separated, pastes into sheets too)">Copy full roster</button>
       </div>`;
 
     // One block per team, whitespace between blocks:
@@ -262,7 +270,9 @@
             <span class="eo-block-title">${eoEsc(t.team)}</span>
             <span class="eo-block-seed">${seed != null ? '— SEED ' + seed : ''}</span>
             <span class="eo-team-n">${t.players.length} player${t.players.length === 1 ? '' : 's'}</span>
-            <button class="btn btn-ghost btn-sm eo-copy-team" data-team="${eoEsc(t.team)}" title="Copy this team's emails">Copy emails</button>
+            <button class="btn btn-ghost btn-sm eo-copy-team" data-team="${eoEsc(t.team)}" data-what="emails" title="This team's emails, one per line">emails</button>
+            <button class="btn btn-ghost btn-sm eo-copy-team" data-team="${eoEsc(t.team)}" data-what="challonge" title="This team's Challonge usernames, one per line — paste into Challonge's add-participants box">challonge</button>
+            <button class="btn btn-ghost btn-sm eo-copy-team" data-team="${eoEsc(t.team)}" data-what="block" title="The whole team block as text: name + player / email / challonge lines">copy team</button>
           </div>
           ${t.players.map((p, i) => `
             <div class="eo-block-player">
@@ -281,14 +291,29 @@
     const search = el('eo-search');
     search?.addEventListener('input', () => { _eoSearch = search.value; eoRenderDash(); });
     if (q && search) { search.focus(); search.setSelectionRange(search.value.length, search.value.length); }
+    // Text dump of a team, Challonge-entry friendly: header line, then one
+    // tab-separated line per player (player, email, challonge).
+    const teamBlockText = (t) => {
+      const seed = seeds.get(t.team.toLowerCase());
+      return t.team.toUpperCase() + (seed != null ? ' — SEED ' + seed : '') + '\n'
+        + t.players.map((p) => [p.player, p.email, p.challonge].map((v) => v || '-').join('\t')).join('\n');
+    };
     el('eo-copy-emails')?.addEventListener('click', () => eoCopy(emails.map((r) => r.email).join('\n'), emails.length + ' emails'));
     el('eo-copy-challonge')?.addEventListener('click', () => eoCopy(challonges.map((r) => r.challonge).join('\n'), challonges.length + ' Challonge usernames'));
+    el('eo-copy-roster')?.addEventListener('click', () => {
+      const all = groupTeams(rows);
+      eoCopy(all.map(teamBlockText).join('\n\n'), 'full roster (' + all.length + ' teams)');
+    });
     host.querySelectorAll('.eo-copy-team').forEach((b) => b.addEventListener('click', (ev) => {
       ev.stopPropagation();
       const t = groupTeams(rows).find((x) => x.team === b.dataset.team);
-      const list = (t ? t.players.filter((p) => p.email).map((p) => p.email) : []);
-      if (!list.length) { showToast('No emails on this team.', '#fbbf24'); return; }
-      eoCopy(list.join('\n'), list.length + ' emails (' + b.dataset.team + ')');
+      if (!t) return;
+      const what = b.dataset.what;
+      if (what === 'block') { eoCopy(teamBlockText(t), t.team + ' (full block)'); return; }
+      const key = what === 'challonge' ? 'challonge' : 'email';
+      const list = t.players.map((p) => p[key]).filter(Boolean);
+      if (!list.length) { showToast('No ' + (key === 'email' ? 'emails' : 'Challonge usernames') + ' on this team.', '#fbbf24'); return; }
+      eoCopy(list.join('\n'), list.length + ' ' + (key === 'email' ? 'emails' : 'Challonge usernames') + ' (' + t.team + ')');
     }));
     host.querySelectorAll('.eo-block-head').forEach((c) => c.addEventListener('click', () => {
       eoSelectTeam(c.dataset.eoTeam === _eoTeam ? '' : c.dataset.eoTeam);
