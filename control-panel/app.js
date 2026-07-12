@@ -700,7 +700,11 @@ async function _pcamVdoLinks(force) {
   } catch (e) { _pcamVdoCache = null; }
   return _pcamVdoCache;
 }
-// Every linkable cam feed: match-team players (VDO room feeds), team library, crew cams.
+// Website-hosted camera-session feeds (masked VDO links from studio.namelessesports.com/cameras/[token]).
+// Populated async via the cloud_list_camera_feeds WS round-trip (see applyCloudStatus + the
+// 'cloud_camera_feeds' message handler below) since only server.js holds cloud credentials.
+let _pcamCloudFeedsCache = [];
+// Every linkable cam feed: match-team players (VDO room feeds), team library, crew cams, cloud feeds.
 function _pcamSources(vdo) {
   const out = [], seen = new Set();
   const push = (person, label, url, group) => {
@@ -717,6 +721,8 @@ function _pcamSources(vdo) {
     push(p.name, `${p.name} — ${t.name}`, p.obsUrl, 'Team library')));
   ((currentState?.casters?.library) || []).forEach((c) =>
     push(c.name || c.handle, `${c.name || c.handle} — crew`, c.vdoOverride || c.camUrl, 'Crew'));
+  (_pcamCloudFeedsCache || []).forEach((f) =>
+    push(f.personName, `${f.personName}${f.teamName ? ' — ' + f.teamName : ''} (cloud)`, f.obsViewUrl, 'Cloud cameras'));
   return out;
 }
 // In-game names: live RL feed → live CS2 feed → match rosters as a fallback.
@@ -4490,6 +4496,7 @@ el('qrail-return')?.addEventListener('click', () => window.close());
 
 // Header Settings gear → open the Settings tab (its sidebar nav item is hidden).
 el('btn-header-settings')?.addEventListener('click', () => document.getElementById('tab-ajustes')?.click());
+el('topbar-update-chip')?.addEventListener('click', () => document.getElementById('tab-ajustes')?.click());
 
 // ── Discord OAuth & Roles ─────────────────────────────────────────────────────
 
@@ -5175,9 +5182,17 @@ function renderUpdateStatus(s) {
   if (bCheck) bCheck.disabled = false;
   if (notes) { notes.style.display = 'none'; notes.textContent = ''; }
   const msg = (t, color) => { if (status) { status.textContent = t; status.style.color = color || 'var(--muted)'; } };
-  // Show pink dot on settings gear (and in dropdown) whenever there's an actionable update
+  // Actionable update → show the topbar chip (the gear icon is hidden now) + dropdown dot
   const hasBadge = s.state === 'available' || s.state === 'downloading' || s.state === 'downloaded';
   show(badge, hasBadge);
+  const chip = el('topbar-update-chip'), chipTxt = el('topbar-update-txt');
+  if (chip) {
+    chip.style.display = hasBadge ? '' : 'none';
+    if (chipTxt) chipTxt.textContent =
+      s.state === 'downloading' ? ('Downloading ' + (s.percent || 0) + '%')
+      : s.state === 'downloaded' ? 'Update ready — restart'
+      : 'Update available';
+  }
   const dddBadge = el('upd-badge-ddd');
   if (dddBadge) dddBadge.style.display = hasBadge ? '' : 'none';
   switch (s.state) {
@@ -9634,6 +9649,7 @@ function applyCloudStatus(s) {
   const canManage = isOrg && (s.role === 'owner' || s.role === 'admin');
   if (seatsBlock) seatsBlock.style.display = canManage ? '' : 'none';
   if (canManage) send('cloud_list_org_seats', { orgId: s.workspaceId });
+  if (isOrg) send('cloud_list_camera_feeds', { orgId: s.workspaceId });
 }
 
 const ORG_SEAT_ROLES = ['owner', 'admin', 'producer', 'operator', 'talent', 'analyst'];
@@ -24976,6 +24992,9 @@ async function connect() {
       send('cloud_list_profiles');   // refresh the list after a push
     } else if (msg.type === 'cloud_org_seats') {
       renderOrgSeats(msg.data);
+    } else if (msg.type === 'cloud_camera_feeds') {
+      _pcamCloudFeedsCache = (msg.data && msg.data.ok && Array.isArray(msg.data.feeds)) ? msg.data.feeds : [];
+      renderPlayerCamMounts();
     } else if (msg.type === 'startgg-result') {
       ['startgg-result', 'sgg-status'].forEach((id) => {
         const r = el(id);

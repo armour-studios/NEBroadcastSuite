@@ -7578,6 +7578,16 @@ tr.lg2-drag-over { outline: 2px solid var(--accent, #4a9eff); outline-offset: -1
 .eo-path-score { font-weight: 700; text-align: center; }
 .eo-path-opp { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+/* Topbar update chip — visible only when an update is available/downloading/ready */
+.topbar-update-chip { display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 12px;
+  border-radius: 999px; border: 1px solid color-mix(in srgb, var(--cp-accent, #ec4899) 55%, transparent);
+  background: color-mix(in srgb, var(--cp-accent, #ec4899) 14%, transparent);
+  color: var(--text, #fff); font-size: 11px; font-weight: 800; font-family: inherit; cursor: pointer;
+  letter-spacing: .02em; white-space: nowrap; }
+.topbar-update-chip:hover { background: color-mix(in srgb, var(--cp-accent, #ec4899) 24%, transparent); }
+.tuc-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--cp-accent, #ec4899);
+  box-shadow: 0 0 6px var(--cp-accent, #ec4899); flex-shrink: 0; }
+
 /* Performance modes — freeze cosmetic paint (during matches, lean mode, or the
    standalone Reduce-animations setting) */
 body.perf-noanim *, body.perf-noanim *::before, body.perf-noanim *::after { animation-play-state: paused !important; }
