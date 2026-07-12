@@ -22,6 +22,7 @@
   let _eoView = 'table';   // table | team
   let _eoSort = { col: -1, dir: 1 };
   let _eoVisible = null;   // Set of visible column indices (persisted per header signature)
+  let _eoSeedAuto = false;   // one auto seed-pull attempt per session
   let _eoPhaseId = '';
   let _eoPoolId = '';
 
@@ -328,6 +329,7 @@
       <div class="eo-controls" style="margin-top:0;">
         ${picker}
         <button class="btn btn-secondary btn-sm" id="eo-copy-tsv" title="Visible columns and filtered rows, tab-separated — pastes into Challonge notes, Sheets or Excel">Copy table</button>
+        ${model.hasSeeds ? '' : `<button class="btn btn-ghost btn-sm" id="eo-pull-seeds-inline" title="Seeding is not in the CSV — it comes from the start.gg API and fills the Seed column">Fill Seed column from start.gg</button>`}
         <span class="eo-team-n">${view.length}${q ? ' matching' : ''} rows</span>
       </div>`;
 
@@ -368,6 +370,13 @@
       if (!vals.length) { showToast('Column is empty (in the filtered rows).', '#fbbf24'); return; }
       eoCopy(vals.join('\n'), vals.length + ' × ' + (headers[i] || 'column'));
     }));
+    el('eo-pull-seeds-inline')?.addEventListener('click', () => {
+      const d = eoData();
+      const slug = d.eventSlug || currentState?.bracket?.eventSlug || currentState?.startgg?.eventSlug || '';
+      if (!slug) { showToast('No start.gg event linked — paste the event slug in the seeding section below.', '#fbbf24'); return; }
+      showToast('Pulling seeds from start.gg…', '#22c55e');
+      send('eventops_fetch_seeds', { slug });
+    });
     el('eo-copy-tsv')?.addEventListener('click', () => {
       const tsv = [cols.map((c) => c.h).join('\t')]
         .concat(view.map((x) => cols.map((c) => (x.r[c.i] || '').toString().replace(/[\t\r\n]+/g, ' ')).join('\t')))
@@ -631,6 +640,13 @@
 
   // ── Render entry points ─────────────────────────────────────────────────────
   window.eventOpsRender = function () {
+    // The CSV never carries seeding — it comes from the start.gg API. Pull it
+    // automatically the first time the tab opens with a linked event + imported rows.
+    if (!_eoSeedAuto) {
+      const d = eoData();
+      const slug = d.eventSlug || currentState?.bracket?.eventSlug || currentState?.startgg?.eventSlug || '';
+      if (!(d.seeds || []).length && slug && d.rows.length) { _eoSeedAuto = true; send('eventops_fetch_seeds', { slug }); }
+    }
     eoRenderDash(); eoRenderSeeds(); eoRenderBracket();
   };
   window.eventOpsOnState = function () {
