@@ -2243,12 +2243,13 @@ function _returnGraphicsToProd() {
   function refreshTopBar(key) {
     const meta = SCENE_META[key] || { name: key, link: '' };
     const base = window.SCENE_BASE_URL || 'http://localhost:3000';
-    const nameEl = el('gfx-active-name'), linkEl = el('gfx-active-link'), sceneLink = el('gfx-active-scene-link');
+    const nameEl = el('gfx-active-name'), linkEl = el('gfx-active-link');
     if (nameEl) nameEl.textContent = meta.name || key;
-    if (linkEl) { linkEl.href = base + '/gfx.html'; linkEl.textContent = 'gfx.html ↗'; }
-    if (sceneLink) {
-      if (meta.link) { sceneLink.href = base + '/' + meta.link; sceneLink.textContent = meta.link; sceneLink.style.display = ''; }
-      else sceneLink.style.display = 'none';
+    // The ⓘ chip: the ONE OBS browser source URL, surfaced on hover (each scene's own overlay
+    // URL sits in the scene header next to its ON/OFF AIR pill — not up here).
+    if (linkEl) {
+      linkEl.href = base + '/gfx.html';
+      linkEl.title = 'OBS browser source: ' + base + '/gfx.html — one source carries every pushed graphic. Click to open.';
     }
     // Top bar Push to Live — the sole way to change what's live. Standalone scenes (not a
     // gfx.html layer) get a relabeled button that cuts the switcher straight to their OBS scene.
@@ -2496,7 +2497,7 @@ function _returnGraphicsToProd() {
       const rows = s.rows || [];
       const cnt = el('gfx-front-std-count'); if (cnt) cnt.textContent = rows.length ? (rows.length + (rows.length === 1 ? ' team' : ' teams')) : '';
       if (!rows.length) {
-        body.innerHTML = '<p class="gfx-fp-empty">No rows yet — pick a league / tournament above, or add rows in More settings.</p>';
+        body.innerHTML = '<p class="gfx-fp-empty">No rows yet — pick a league / tournament above, or add rows in the Full Board.</p>';
       } else {
         const showRec = s.showRecord !== false;
         body.innerHTML = rows.slice(0, 24).map((r, i) => {
@@ -2575,7 +2576,7 @@ function _returnGraphicsToProd() {
   });
 
   // Inline quick-edit controls on the Standings / Schedule front cards — write straight to state
-  // (title/subtitle/showRecord all take live effect), so producers don't open "More settings" for
+  // (title/subtitle/showRecord all take live effect), so producers don't open the Full Board for
   // the common tweaks. Deep source/rows/layout config still lives in the pop-out.
   // Standings front-panel source chips — proxy-click the pop-out's real source tabs so the
   // existing load/apply wiring stays the single implementation.
@@ -2599,13 +2600,18 @@ function _returnGraphicsToProd() {
   el('gfx-front-sch-push')?.addEventListener('click', () => el('btn-gfx-schedule-push')?.click());
   el('gfx-front-sch-clear')?.addEventListener('click', () => el('btn-gfx-schedule-clear')?.click());
 
-  // Open/close a scene's pop-out editor (Bracket, Spotlight, and — once converted — Standings,
-  // Schedule, Map Pool, Draft). The modal id convention is #gfx-popout-<key>.
+  // Open/close a scene's FULL BOARD (Bracket, Spotlight, Standings, Schedule, Map Pool, Draft).
+  // No longer a floating modal — the board docks full-width below the hub (#gfx-popout-<key>)
+  // and we scroll it into view; only one board is open at a time.
   function openGfxPopout(key) {
     const modal = el('gfx-popout-' + key); if (!modal) return;
+    document.querySelectorAll('.gfx-fullboard').forEach((m) => { if (m !== modal) m.style.display = 'none'; });
     modal.style.display = 'flex';
     runSceneSideEffects(key);
-    requestAnimationFrame(() => requestAnimationFrame(fitScenePreviews));
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      fitScenePreviews();
+      try { modal.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch (_) {}
+    }));
   }
   function closeGfxPopout(key) {
     const modal = el('gfx-popout-' + key); if (modal) modal.style.display = 'none';
@@ -2619,9 +2625,8 @@ function _returnGraphicsToProd() {
   // Generic wiring for every pop-out present in the DOM: close (× button or backdrop click),
   // Push Live / Clear / Apply footer buttons reuse the exact same SCENE_META-driven actions as
   // the main top bar so there's only one push/clear/apply implementation in the whole hub.
-  document.querySelectorAll('.mp-modal[id^="gfx-popout-"]').forEach((modal) => {
+  document.querySelectorAll('.gfx-fullboard[id^="gfx-popout-"]').forEach((modal) => {
     const key = modal.id.replace('gfx-popout-', '');
-    modal.addEventListener('click', (e) => { if (e.target === modal) closeGfxPopout(key); });
     modal.querySelectorAll('[data-popout-close]').forEach((b) => b.addEventListener('click', () => closeGfxPopout(key)));
     modal.querySelectorAll('[data-popout-push]').forEach((b) => b.addEventListener('click', () => doPush(key)));
     modal.querySelectorAll('[data-popout-clear]').forEach((b) => b.addEventListener('click', () => {
@@ -2689,18 +2694,20 @@ function _returnGraphicsToProd() {
       if (summary) {
         summary.style.display = '';
         summary.querySelectorAll('.gfx-front-panel[data-frontkey]').forEach((p) => { p.style.display = (p.dataset.frontkey === key) ? '' : 'none'; });
-        // Spotlight's and Schedule's front cards ARE the whole feature (add, edit,
-        // reorder, layout live inline) — their pop-outs only confused things.
-        // Draft has its own "Open full board" button (front-card markup, next to the
-        // Overwatch ban board) — the generic More-settings button would just be a duplicate.
-        const moreBtn = el('gfx-popout-summary-open');
-        if (moreBtn) moreBtn.style.display = (key === 'spotlight' || key === 'schedule' || key === 'draft' || key === 'veto') ? 'none' : '';
       }
       renderPopoutSummary(key);
     } else {
       if (summary) summary.style.display = 'none';
       document.querySelectorAll('.gfx-scene-panel').forEach((p) => { p.style.display = (p.dataset.gfxpanel === key) ? '' : 'none'; });
     }
+    // Universal Full Board button (under the preview): one button, one place, for every scene
+    // whose deep editor lives on the docked board. Spotlight/Schedule edit fully inline (their
+    // front cards ARE the whole feature) so the board adds nothing there. Switching scenes also
+    // closes any open board so a stale editor never lingers under the wrong scene.
+    const FULLBOARD_SCENES = ['bracket', 'standings', 'veto', 'draft'];
+    const fbBtn = el('gfx-popout-summary-open');
+    if (fbBtn) fbBtn.style.display = FULLBOARD_SCENES.includes(key) && el('gfx-popout-' + key) ? '' : 'none';
+    document.querySelectorAll('.gfx-fullboard').forEach((m) => { m.style.display = 'none'; });
     // Refresh data pickers so they always show current state when navigated to.
     if (key === 'matchup' && typeof window._gfxRefreshMatchupPickers === 'function') window._gfxRefreshMatchupPickers(currentState);
     if (key === 'winner'  && typeof window._gfxRefreshWinnerPicker   === 'function') window._gfxRefreshWinnerPicker(currentState);
@@ -3402,7 +3409,7 @@ function _returnGraphicsToProd() {
   }
 
   // Editable match preview ON the Schedule front card (remove / reorder inline — no need to open
-  // "More settings"). Renders from _schMatches (the single source of truth) and drives the same save.
+  // the Full Board). Renders from _schMatches (the single source of truth) and drives the same save.
   function schFrontRender() {
     const body = el('gfx-front-schedule-body'); if (!body) return;
     // Pause rebuilds only while a row FIELD is being typed in — a clicked button
@@ -3963,7 +3970,7 @@ function _returnGraphicsToProd() {
       if (typeof bbGenerate === 'function') bbGenerate();
       if (typeof bbSendPhases === 'function') bbSendPhases();   // persist as manual mode
       if (statusEl) statusEl.textContent = `Built an empty ${size}-team ${fmt} bracket — opening editor…`;
-      el('gfx-popout-summary-open')?.click();   // open "More settings" (the full builder)
+      el('gfx-popout-summary-open')?.click();   // open the Full Board (the full builder)
     });
 
     // League — fully front-facing: pick a league, the rows flow through the same set_standings
@@ -16692,7 +16699,7 @@ wireBracketPhasePool();
 
 // ── Bracket mini control center (Graphics hub front panel) ──────────────────
 // Live status + clickable phase/pool/view chips right on the scene's front panel, so
-// switching what's on the overlay never requires opening "More settings". Sends the
+// switching what's on the overlay never requires opening the Full Board. Sends the
 // same WS messages as the full editor; renders from state on every broadcast.
 function renderBracketCC(bracket) {
   const cc = el('gfx-bkt-cc'); if (!cc) return;

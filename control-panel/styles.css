@@ -6914,7 +6914,9 @@ body.sides-swapped .qrail-head { flex-direction: row-reverse; }
 .gfx-top-scene, .gfx-top-live { display:flex; align-items:center; gap:8px; min-width:0; flex-shrink:1; }
 .gfx-top-scene-lbl { font-size:9px; font-weight:900; letter-spacing:.1em; text-transform:uppercase; color:var(--muted); flex-shrink:0; }
 .gfx-top-scene-name, .gfx-top-live-name { font-size:13px; font-weight:800; color:var(--text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0; }
-.gfx-top-links { display:inline-flex; align-items:center; gap:6px; flex-shrink:0; }
+/* ⓘ chip — hover for the ONE OBS browser source URL (gfx.html); click opens it. */
+.gfx-top-info { display:inline-flex; align-items:center; justify-content:center; width:16px; height:16px; border-radius:50%; border:1px solid var(--border); color:var(--muted); font-size:10px; font-weight:800; font-style:italic; font-family:Georgia,'Times New Roman',serif; text-decoration:none; flex-shrink:0; cursor:help; }
+.gfx-top-info:hover { color:var(--text); border-color:var(--text); }
 .gfx-top-live { padding-left:14px; border-left:1px solid var(--border); }
 .gfx-top-live-name { color:var(--ok-2); }
 .gfx-top-scene-link { font-size:10px; opacity:.6; white-space:nowrap; flex-shrink:0; }
@@ -6962,6 +6964,16 @@ body.sides-swapped .qrail-head { flex-direction: row-reverse; }
 .gfx-scene-head-name { font-family:'Rajdhani','Inter',sans-serif; font-weight:700; font-size:17px; letter-spacing:.05em; text-transform:uppercase; color:var(--text); flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .gfx-live-badge--sm { font-size:10px; }
 .gfx-scene-head-link { font-size:11px; white-space:nowrap; }
+/* Preview footer — the once-dead space under the preview now hosts the universal Full Board
+   trigger (one button, one place, every scene that has a deep editor). */
+.gfx-preview-foot { display:flex; align-items:center; justify-content:center; padding-top:10px; }
+.gfx-fullboard-btn { width:100%; font-weight:800; letter-spacing:.03em; border:1px dashed var(--border); }
+.gfx-fullboard-btn:hover { border-style:solid; }
+/* FULL BOARD — the six deep editors, docked full-width below the hub instead of floating
+   modals (JS toggles display none/flex; only one open at a time). */
+.gfx-fullboard { flex-direction:column; margin-top:14px; }
+.gfx-fullboard .gfx-popout-box { width:100%; height:auto; max-height:none; box-shadow:none; border-radius:12px; }
+.gfx-fullboard .gfx-popout-body { overflow:visible; }
 /* This whole group (auto-cut toggle + scene select + OFF AIR/LIVE pill + Clear All + Push Live)
    must always render as one unbroken line — never wrap or drop to a second row. The scene-name
    labels to its left shrink/ellipsis first to make room. */

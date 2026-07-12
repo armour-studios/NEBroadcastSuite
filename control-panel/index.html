@@ -4633,10 +4633,9 @@
         <div class="gfx-top-scene">
           <span class="gfx-top-scene-lbl">Editing</span>
           <span class="gfx-top-scene-name" id="gfx-active-name">Break / Starting Soon</span>
-          <span class="gfx-top-links">
-            <a class="gfx-top-scene-link overlay-link" id="gfx-active-link" href="http://localhost:3000/gfx.html" target="_blank" title="The one browser source that carries every pushed graphic">gfx.html ↗</a>
-            <a class="gfx-top-scene-link gfx-top-scene-sub" id="gfx-active-scene-link" href="http://localhost:3000/countdown.html" target="_blank" title="This scene's own standalone overlay URL">countdown.html</a>
-          </span>
+          <!-- ⓘ = the ONE OBS browser source (gfx.html). Each scene's own overlay URL lives in
+               the scene header next to its ON/OFF AIR pill instead. -->
+          <a class="gfx-top-info" id="gfx-active-link" href="http://localhost:3000/gfx.html" target="_blank" title="OBS browser source: http://localhost:3000/gfx.html — one source carries every pushed graphic. Click to open.">i</a>
         </div>
         <div class="gfx-top-live">
           <span class="gfx-top-scene-lbl">Live</span>
@@ -4724,6 +4723,12 @@
              changes. Position/size never changes regardless of the settings column's content. -->
         <div class="gfx-fixed-preview">
           <div class="live-pv"><iframe id="gfx-fixed-preview-iframe" src="http://localhost:3000/countdown.html?preview=1" title="Scene preview"></iframe></div>
+          <!-- Universal Full Board trigger — lives in the otherwise-dead space under the preview.
+               Opens the scene's full editor DOCKED below the hub (no more floating modal);
+               hidden by show()/refresh for scenes without a board. -->
+          <div class="gfx-preview-foot">
+            <button type="button" class="btn btn-ghost btn-sm gfx-fullboard-btn" id="gfx-popout-summary-open" title="Expand this scene's full editor across the whole panel below">Open Full Board</button>
+          </div>
         </div>
 
         <div class="gfx-settings-col" id="gfx-settings-col">
@@ -4755,7 +4760,7 @@
 
             <!-- BRACKET — guided source switcher: one clean place to pick a platform (start.gg /
                  Challonge / NXGEN) or build a custom bracket, then switch phase/pool/view below.
-                 Deep editing (full builder grid, match picker) lives under "More settings". -->
+                 Deep editing (full builder grid, match picker) lives under the Full Board. -->
             <div class="gfx-front-panel" data-frontkey="bracket" id="gfx-front-bracket" style="display:none;">
 
               <!-- Mini control center — live status + clickable stage/view chips. What's on the
@@ -4865,12 +4870,12 @@
                 <div style="margin-top:8px; display:flex; gap:8px; flex-wrap:wrap;">
                   <button class="btn btn-blue btn-sm" id="gfx-bkt-mbuild">Build &amp; open editor</button>
                 </div>
-                <p class="field-hint" style="margin:6px 0 0;">Creates an empty bracket you fill in the full editor (More settings). Nothing external overwrites a custom bracket.</p>
+                <p class="field-hint" style="margin:6px 0 0;">Creates an empty bracket you fill in the full editor (the Full Board). Nothing external overwrites a custom bracket.</p>
                 <p id="gfx-bkt-m-status" class="sps-desc" style="margin-top:4px;"></p>
               </div>
             </div>
 
-            <!-- STANDINGS — quick inline controls; deep source/rows config lives under "More settings". -->
+            <!-- STANDINGS — quick inline controls; deep source/rows config lives under the Full Board. -->
             <div class="gfx-front-panel gfx-fp" data-frontkey="standings" id="gfx-front-standings" style="display:none;">
               <!-- Mini control center: pick the rows source right here (proxies the pop-out's
                    source tabs, so all existing load/apply wiring is reused untouched). -->
@@ -4880,7 +4885,7 @@
                   <button type="button" class="gfx-src-tab" data-fstdsrc="league" title="Rows from an in-app league">League</button>
                   <button type="button" class="gfx-src-tab" data-fstdsrc="startgg" title="Rows from the loaded tournament event / bracket">Tournament</button>
                   <button type="button" class="gfx-src-tab" data-fstdsrc="bracket" title="Rows from a phase/pool of the loaded bracket">Bracket phase</button>
-                  <button type="button" class="gfx-src-tab" data-fstdsrc="manual" title="Hand-entered rows (edit in More settings)">Manual</button>
+                  <button type="button" class="gfx-src-tab" data-fstdsrc="manual" title="Hand-entered rows (edit in the Full Board)">Manual</button>
                 </div>
               </div>
               <div id="gfx-std-league-select-wrap">
@@ -4928,7 +4933,7 @@
               </div>
             </div>
 
-            <!-- SCHEDULE — quick inline title + Pull Queue; deep source/layout config under "More settings". -->
+            <!-- SCHEDULE — quick inline title + Pull Queue; deep source/layout config under the Full Board. -->
             <div class="gfx-front-panel gfx-fp" data-frontkey="schedule" id="gfx-front-schedule" style="display:none;">
               <div class="gfx-fp-field">
                 <label class="gfx-fp-lbl" for="gfx-front-sch-title">Title</label>
@@ -4939,7 +4944,7 @@
                 <input type="text" id="gfx-front-sch-eyebrow" class="input-text" placeholder="ON DECK" maxlength="40" title="The small line above the title on the overlay">
               </div>
               <!-- The most common action — pulling matches from the active tournament/league — lives
-                   right here; manual add, team search, and layout choice stay in "More settings". -->
+                   right here; manual add, team search, and layout choice stay in the Full Board. -->
               <div class="gfx-fp-field">
                 <span class="gfx-fp-lbl">Pull matches</span>
                 <div class="gfx-fp-pull">
@@ -5076,7 +5081,6 @@
               <p id="wl-empty-msg" class="sps-empty">No teams featured yet.</p>
             </div>
 
-            <button type="button" class="btn btn-ghost btn-sm gfx-popout-summary-btn" id="gfx-popout-summary-open">More settings…</button>
           </div>
 
           <!-- BREAK -->
@@ -5352,7 +5356,7 @@
 
     <!-- BRACKET pop-out — the builder needs the whole panel; no side preview column (the
          injected bracket-live-preview inside is its own full-width, collapsible preview). -->
-    <div class="mp-modal" id="gfx-popout-bracket" style="display:none;">
+    <div class="gfx-fullboard" id="gfx-popout-bracket" style="display:none;">
       <div class="gfx-popout-box">
         <div class="mp-head">
           <h3>Bracket</h3>
@@ -5376,7 +5380,7 @@
     </div>
 
     <!-- SPOTLIGHT pop-out -->
-    <div class="mp-modal" id="gfx-popout-spotlight" style="display:none;">
+    <div class="gfx-fullboard" id="gfx-popout-spotlight" style="display:none;">
       <div class="gfx-popout-box">
         <div class="mp-head">
           <h3>Spotlight</h3>
@@ -5398,7 +5402,7 @@
     </div>
 
     <!-- STANDINGS pop-out -->
-    <div class="mp-modal" id="gfx-popout-standings" style="display:none;">
+    <div class="gfx-fullboard" id="gfx-popout-standings" style="display:none;">
       <div class="gfx-popout-box">
         <div class="mp-head">
           <h3>Standings</h3>
@@ -5463,7 +5467,7 @@
     </div>
 
     <!-- SCHEDULE pop-out -->
-    <div class="mp-modal" id="gfx-popout-schedule" style="display:none;">
+    <div class="gfx-fullboard" id="gfx-popout-schedule" style="display:none;">
       <div class="gfx-popout-box">
         <div class="mp-head">
           <h3>Schedule</h3>
@@ -5508,7 +5512,7 @@
                   <p id="gfx-sch-no-queue" class="sps-empty" style="display:none;">No queue — connect a tournament platform in Settings.</p>
                   <!-- Pull actions moved to the front card (Graphics ▸ Schedule) — the on-stream /
                        next-up read-outs above are the detail view; pulling itself doesn't need
-                       "More settings" open. -->
+                       the Full Board open. -->
                 </div>
               </div>
               <!-- Manual add form -->
@@ -5564,7 +5568,7 @@
     </div>
 
     <!-- MAP POOL pop-out — Guided Veto (relocated from Dashboard) + Quick Map Pool (manual form) -->
-    <div class="mp-modal" id="gfx-popout-veto" style="display:none;">
+    <div class="gfx-fullboard" id="gfx-popout-veto" style="display:none;">
       <div class="gfx-popout-box">
         <div class="mp-head">
           <h3>Map Pool</h3>
@@ -5662,7 +5666,7 @@
     </div>
 
     <!-- DRAFT pop-out — relocated from Dashboard → Draft -->
-    <div class="mp-modal" id="gfx-popout-draft" style="display:none;">
+    <div class="gfx-fullboard" id="gfx-popout-draft" style="display:none;">
       <div class="gfx-popout-box">
         <div class="mp-head">
           <h3>Draft</h3>
