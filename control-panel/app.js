@@ -769,7 +769,16 @@ function renderCfStations() {
     const f = feeds[Number(btn.dataset.idx)];
     if (!f) return;
     const id = 'cs_' + Math.random().toString(36).slice(2, 11);
-    send('save_caster_to_library', { id, name: f.personName, kind: 'caster', camUrl: f.obsViewUrl });
+    // Auto-link to the crew database: the join page offers crew profiles by name, so a match
+    // here means "that crew member checked in" → put them on shift. No match = a new face →
+    // create their crew profile so credits/Show Deck pick them up without manual entry.
+    const crewList = (currentState && currentState.crew) || [];
+    const nm = (f.personName || '').trim().toLowerCase();
+    const cm = nm ? crewList.find((c) => c && ((c.name || '').toLowerCase() === nm || (c.handle || '').toLowerCase() === nm)) : null;
+    if (cm) send('update_crew_member', { id: cm.id, active: true });
+    else if (nm) send('add_crew_member', { name: f.personName.trim(), group: 'casters', active: true });
+    send('save_caster_to_library', { id, name: f.personName, kind: 'caster', camUrl: f.obsViewUrl,
+      ...(cm ? { social: cm.social, socialHandle: cm.socialHandle, country: cm.country } : {}) });
     // Only auto-assign the lineup slot when it's free — never bump whoever's already on air.
     const targetSlot = (Number(f.idx) || 0) + 1;
     const occupied = lineup.some((l) => l.slot === targetSlot);
@@ -5330,6 +5339,7 @@ function applyPerfMode(data) {
   syncCb('check-perf-always', pm.always);
   syncCb('check-perf-noanim', pm.reduceAnimations);
   syncCb('check-perf-noprev', pm.pausePreviews);
+  syncCb('check-perf-reswarn', pm.resourceWarnings !== false);
   const rate = el('sel-perf-rate');
   if (rate && document.activeElement !== rate) rate.value = pm.broadcastRate || 'smooth';
 
@@ -5373,10 +5383,11 @@ function sendPerfPrefs() {
     always: !!el('check-perf-always')?.checked,
     reduceAnimations: !!el('check-perf-noanim')?.checked,
     pausePreviews: !!el('check-perf-noprev')?.checked,
+    resourceWarnings: !!el('check-perf-reswarn')?.checked,
     broadcastRate: el('sel-perf-rate')?.value || 'smooth'
   });
 }
-['check-perf-mode', 'check-perf-always', 'check-perf-noanim', 'check-perf-noprev', 'sel-perf-rate']
+['check-perf-mode', 'check-perf-always', 'check-perf-noanim', 'check-perf-noprev', 'check-perf-reswarn', 'sel-perf-rate']
   .forEach((id) => el(id)?.addEventListener('change', sendPerfPrefs));
 
 // ── Org-seat role UX: talent/analyst run the app VIEW-ONLY (server enforces it —

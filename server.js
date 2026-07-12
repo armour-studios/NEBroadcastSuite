@@ -220,7 +220,7 @@ let state = {
   // enabled = auto game mode; always = permanent lean mode; reduceAnimations /
   // pausePreviews = independent panel knobs; broadcastRate = smooth|balanced|light
   // (full_state coalesce width). active = a match is live right now.
-  perfMode: { enabled: true, active: false, always: false, reduceAnimations: false, pausePreviews: false, broadcastRate: 'smooth' },
+  perfMode: { enabled: true, active: false, always: false, reduceAnimations: false, pausePreviews: false, broadcastRate: 'smooth', resourceWarnings: true },
   activeGame: 'rocket-league',
   // Pulse multiview: when publish is on (and the cloud is linked), this app heartbeats its live game to
   // the org so it appears on other producers' Pulse scenes. feedViewUrl = this observer's own VDO view
@@ -1891,6 +1891,27 @@ function applyPreset(cfg) {
 const TD_SUPPORT_LABELS = { producer: 'Producer', admin: 'Tournament Admin', coordinator: 'Coordinator', replay: 'Replay Op', stats: 'Statistician', moderator: 'Moderator', graphics: 'Graphics', flex: 'Flex', socials: 'Social' };
 const TD_SUPPORT_GROUPS = Object.keys(TD_SUPPORT_LABELS);
 
+// ── Crew roster mirror → cloud ────────────────────────────────────────────────
+// Debounced push of the crew list (names/handles/countries only — never pay/contact fields) to
+// the org so the website's station join pages can offer "pick your crew profile". Fire-and-
+// forget: any failure just means the join page falls back to a free-text name box.
+let _crewRosterSyncT = null;
+function syncCrewRosterToCloud() {
+  try {
+    if (!cloud.authed()) return;
+    const s = cloud.getSession() || {};
+    const orgId = s.workspaceId;
+    if (!orgId || String(orgId).startsWith('user:')) return;
+    clearTimeout(_crewRosterSyncT);
+    _crewRosterSyncT = setTimeout(() => {
+      const crew = (state.crew || [])
+        .filter((c) => c && c.name)
+        .map((c) => ({ name: c.name, handle: c.handle || '', country: c.country || '', role: c.role || '', group: c.group || '' }));
+      cloud.pushCrewRoster(orgId, crew).catch(() => {});
+    }, 4000);
+  } catch (_) { /* cloud not configured — local-first, never throws */ }
+}
+
 function loadState() {
   try {
     const saved = safeReadJson(stateFile, null);
@@ -2159,6 +2180,7 @@ function loadState() {
         state.perfMode.always = !!sp.always;
         state.perfMode.reduceAnimations = !!sp.reduceAnimations;
         state.perfMode.pausePreviews = !!sp.pausePreviews;
+        state.perfMode.resourceWarnings = sp.resourceWarnings !== false;
         if (['smooth', 'balanced', 'light'].includes(sp.broadcastRate)) state.perfMode.broadcastRate = sp.broadcastRate;
       }
       if (saved.eventOps && typeof saved.eventOps === 'object') {
@@ -8331,21 +8353,6 @@ function obsSwitch(sceneKey) {
   obsClient.switchScene(sceneName);
 }
 
-// Switch OBS to a literal scene name (not one of the mapped keys). Used by the countdown
-// auto-switch, where the producer explicitly picked BOTH the trigger and the destination
-// scene for THIS break — that's a producer-armed cut like rlSwitchScene, so it is exempt
-// from the blanket OBS_AUTO_SWITCH_DISABLED kill switch (which guards game-event automation),
-// while still respecting the OBS connection/enabled state and the AI shield.
-function obsSwitchSceneName(name) {
-  if (aiShielded()) return;
-  if (!obsClient || !state.obs.enabled) return;
-  if (!obsClient.isConnected()) return;
-  const sceneName = (name || '').trim();
-  if (!sceneName) return;
-  console.log(`[OBS] Countdown auto-switch → ${sceneName}`);
-  logAuto('countdown', `Countdown ended — cut to "${sceneName}"`);
-  obsClient.switchScene(sceneName);
-}
 
 // ── vMix control (full alternative backend) ────────────────────────────────────────────────
 // Fire a vMix function via the HTTP API using the configured host/port. No-op unless enabled.
@@ -8554,10 +8561,12 @@ const RL_SCENE_FAIL_MESSAGES = {
   ai_shielded: 'AI director shield is active',
   scene_missing: 'that scene no longer exists in OBS (renamed/deleted) — re-pick it in Match ▸ Teams gear'
 };
+const RL_SCENE_PHASE_LABELS = { kickoff: 'Kickoff', 'post-game': 'Post-game', countdown: 'Countdown' };
 function broadcastRlSceneResult(phase, sceneName, result) {
+  const phaseLabel = RL_SCENE_PHASE_LABELS[phase] || 'Scene';
   const message = result.ok
     ? `Cut to "${sceneName}" (${phase})`
-    : `${phase === 'kickoff' ? 'Kickoff' : 'Post-game'} cut to "${sceneName}" skipped — ${RL_SCENE_FAIL_MESSAGES[result.reason] || result.reason}`;
+    : `${phaseLabel} cut to "${sceneName}" skipped — ${RL_SCENE_FAIL_MESSAGES[result.reason] || result.reason}`;
   logAuto('rl-scene', message);
   // A failed cut here is a real problem the producer should fix (wrong scene name, OBS off, shield) —
   // flag it for the notification bell so it isn't missed with the gear panel closed.
@@ -8599,7 +8608,10 @@ function scheduleBreakAutoSwitch() {
     state.breakScreen.thenScene = '';
     saveAppState();
     broadcastFullState();
-    obsSwitchSceneName(thenScene);
+    // Reuse rlSwitchScene's validation (scene still exists in OBS / OBS connected+enabled / not
+    // AI-shielded) instead of switching blind — this used to fail completely silently, which is
+    // exactly what made "the countdown scene cut isn't working" impossible to diagnose.
+    broadcastRlSceneResult('countdown', thenScene, rlSwitchScene(thenScene, 'countdown'));
   }, delay);
 }
 
@@ -10045,6 +10057,7 @@ registerWsHandlers({
     if ('always' in d) pm.always = !!d.always;
     if ('reduceAnimations' in d) pm.reduceAnimations = !!d.reduceAnimations;
     if ('pausePreviews' in d) pm.pausePreviews = !!d.pausePreviews;
+    if ('resourceWarnings' in d) pm.resourceWarnings = !!d.resourceWarnings;
     if ('broadcastRate' in d && ['smooth', 'balanced', 'light'].includes(d.broadcastRate)) pm.broadcastRate = d.broadcastRate;
     if (pm.enabled === false && pm.active) pm.active = false;
     applyPerfSideEffects();
@@ -11482,6 +11495,7 @@ function handleControlMessage(msg, ws) {
       // still find someone whose shift already ended, without having to keep them "active."
       state.crew.push({ id, name: d.name, handle: d.handle || '', role: d.role || '', group: d.group || 'casters', social: d.social || 'none', socialHandle: d.socialHandle || '', defaultCam: d.defaultCam || '', country: d.country || '', paypal: d.paypal || '', notes: d.notes || '', active: !!d.active, workedEvent: !!d.active });
       saveAppState();
+      syncCrewRosterToCloud();
       broadcastFullState();
       break;
     }
@@ -11521,6 +11535,7 @@ function handleControlMessage(msg, ws) {
         (state.casters.list || []).forEach(syncEntry);
         resolveLineupToList();   // rebuild the on-air slots from the refreshed library
         saveAppState();
+        syncCrewRosterToCloud();
         broadcastFullState();
       }
       break;
@@ -11551,6 +11566,7 @@ function handleControlMessage(msg, ws) {
           }
         }
         saveAppState();
+        syncCrewRosterToCloud();
         broadcastFullState();
       }
       break;
@@ -11570,6 +11586,7 @@ function handleControlMessage(msg, ws) {
       state.crew = [];
       state.casters.support = [];
       saveAppState();
+      syncCrewRosterToCloud();
       broadcastFullState();
       break;
     }
@@ -13269,6 +13286,9 @@ function handleControlMessage(msg, ws) {
           if (!orgId) { ws.send(JSON.stringify({ type: 'cloud_station_feeds', data: { ok: false, message: 'No organization workspace.', feeds: [], shared: [] } })); return; }
           const { feeds, shared } = await cloud.listStationFeeds(orgId);
           ws.send(JSON.stringify({ type: 'cloud_station_feeds', data: { ok: true, feeds, shared } }));
+          // Producer is working with stations → make sure the org's join pages have the current
+          // crew roster to offer, even if no crew edit happened since sign-in.
+          syncCrewRosterToCloud();
         } catch (e) { ws.send(JSON.stringify({ type: 'cloud_station_feeds', data: { ok: false, message: e.message, feeds: [], shared: [] } })); }
       })();
       break;
@@ -18964,12 +18984,19 @@ module.exports.start = function(baseDir) {
 // ─── Resource Watchdog ───────────────────────────────────────────────────────
 const CPU_WARN_PERCENT = 80;
 const RAM_WARN_MB = 1500;
+// Only warn on SUSTAINED pressure, and rarely — otherwise any busy stretch (encode, startup, a brief
+// CPU spike) spammed a fresh notification every 10s. Require several consecutive high samples, then
+// stay quiet for a long cooldown before warning again.
+const WARN_SUSTAIN_SAMPLES = 3;             // ~30s continuously high before the first warning
+const WARN_COOLDOWN_MS = 15 * 60 * 1000;    // at most one warning per 15 minutes
 
 let _watchdogInterval = null;
 
 function startResourceWatchdog() {
   let lastCpu = process.cpuUsage();
   let lastTs = process.hrtime.bigint();
+  let highStreak = 0;
+  let lastWarnAt = 0;
 
   _watchdogInterval = setInterval(() => {
     const now = process.hrtime.bigint();
@@ -18981,13 +19008,15 @@ function startResourceWatchdog() {
     lastCpu = cur;
     lastTs = now;
 
+    if (state.perfMode && state.perfMode.resourceWarnings === false) { highStreak = 0; return; }   // alerts turned off in Settings
     const ramMb = Math.round(process.memoryUsage().rss / 1048576);
-    if (cpuPercent >= CPU_WARN_PERCENT || ramMb >= RAM_WARN_MB) {
-      broadcast(bridgeClients, {
-        type: 'resource_warning',
-        data: { cpu: cpuPercent, ramMb }
-      });
-    }
+    const high = cpuPercent >= CPU_WARN_PERCENT || ramMb >= RAM_WARN_MB;
+    if (!high) { highStreak = 0; return; }   // recovered → reset (a fresh sustained run must build up again)
+    highStreak++;
+    if (highStreak < WARN_SUSTAIN_SAMPLES) return;          // ignore transient spikes
+    if (Date.now() - lastWarnAt < WARN_COOLDOWN_MS) return; // already warned recently
+    lastWarnAt = Date.now();
+    broadcast(bridgeClients, { type: 'resource_warning', data: { cpu: cpuPercent, ramMb } });
   }, 10000);
 }
 

@@ -115,9 +115,39 @@ async function saveProfile(bundle, { id, name } = {}) {
 async function deleteProfile(id) { _require(); try { await _client().delete(`/api/profiles/${encodeURIComponent(id)}`); return true; } catch (e) { throw _err(e); } }
 async function shareProfile(id, scope, role) { _require(); try { const { data } = await _client().post(`/api/profiles/${encodeURIComponent(id)}/share`, { scope, role }); return data; } catch (e) { throw _err(e); } }
 
+// ── Org broadcast seats (licensing — owner/admin only, gated server-side) ──
+// orgId is session.workspaceId when it's a real org (not the synthetic "user:<id>"
+// personal-workspace id a solo producer gets — callers should check for that prefix
+// before showing any seat-management UI).
+async function listOrgSeats(orgId) { _require(); try { const { data } = await _client().get(`/api/orgs/${encodeURIComponent(orgId)}/broadcast-seats`); return data; } catch (e) { throw _err(e); } }
+async function addOrgSeat(orgId, { userId, role }) { _require(); try { const { data } = await _client().post(`/api/orgs/${encodeURIComponent(orgId)}/broadcast-seats`, { userId, role }); return data.seat || data; } catch (e) { throw _err(e); } }
+async function removeOrgSeat(orgId, seatId) { _require(); try { await _client().delete(`/api/orgs/${encodeURIComponent(orgId)}/broadcast-seats/${encodeURIComponent(seatId)}`); return true; } catch (e) { throw _err(e); } }
+
+// ── Camera sessions (website-hosted masked VDO links — see /cameras/[token]) ──
+async function listCameraFeeds(orgId) { _require(); try { const { data } = await _client().get(`/api/orgs/${encodeURIComponent(orgId)}/camera-sessions/active-feeds`); return data.feeds || []; } catch (e) { throw _err(e); } }
+
+// ── Pulse multiview (the org's live games — see overlay/pulse.html) ──────────
+// getMultiview: the CORE producer pulls every observer's live game (scores + feed) for the Pulse scene.
+// publishObservedGame: an OBSERVER's app heartbeats its own game so it shows on other producers' Pulse.
+async function getMultiview(orgId) { _require(); try { const { data } = await _client().get(`/api/orgs/${encodeURIComponent(orgId)}/multiview`); return data.games || []; } catch (e) { throw _err(e); } }
+async function publishObservedGame(orgId, payload) { _require(); try { const { data } = await _client().post(`/api/orgs/${encodeURIComponent(orgId)}/observed-games`, payload || {}); return data; } catch (e) { throw _err(e); } }
+async function stopObservedGame(orgId, key) { _require(); try { const { data } = await _client().post(`/api/orgs/${encodeURIComponent(orgId)}/observed-games`, { stop: true, key }); return data; } catch (e) { throw _err(e); } }
+
+// ── Station feeds (website-hosted caster/observer VDO rooms — see /studio/access/stations) ──
+async function listStationFeeds(orgId) { _require(); try { const { data } = await _client().get(`/api/orgs/${encodeURIComponent(orgId)}/station-feeds`); return { feeds: data.feeds || [], shared: data.shared || [] }; } catch (e) { throw _err(e); } }
+
+// ── Crew roster mirror (names only — no pay/contact fields) so the website's station join
+// pages can offer "pick your crew profile" that auto-links back to this app's crew database. ──
+async function pushCrewRoster(orgId, crew) { _require(); try { const { data } = await _client().put(`/api/orgs/${encodeURIComponent(orgId)}/crew-roster`, { crew }); return data; } catch (e) { throw _err(e); } }
+
 module.exports = {
   init, configured, authed, getSession, clearSession,
   loginWithDiscord,
   loginWithEmail, acceptContract, refreshSession, linkTwitch, me,
-  listProfiles, getProfile, saveProfile, deleteProfile, shareProfile
+  listProfiles, getProfile, saveProfile, deleteProfile, shareProfile,
+  listOrgSeats, addOrgSeat, removeOrgSeat,
+  listCameraFeeds,
+  getMultiview, publishObservedGame, stopObservedGame,
+  listStationFeeds,
+  pushCrewRoster
 };
