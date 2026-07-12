@@ -5237,37 +5237,63 @@ function syncGateUpdateStatus(s) {
 // ── Game performance mode — while an RL match is live the server flags perfMode.active;
 // the panel pauses its own paint load (previews, animations) so borderless gameplay on the
 // same PC stays smooth. Broadcast overlays in OBS are untouched. ──
-let _perfLive = false;
+let _perfShed = false, _perfNoPrev = false;
 function applyPerfMode(data) {
   const pm = (data && data.perfMode) || {};
-  const cb = el('check-perf-mode');
-  if (cb && document.activeElement !== cb) cb.checked = pm.enabled !== false;
-  const on = !!(pm.active && pm.enabled !== false);
-  if (on === _perfLive) return;
-  _perfLive = on;
-  document.body.classList.toggle('perf-live', on);
-  // Shared fixed scene-preview iframe: unload while live (it runs a full overlay page).
-  const pv = el('gfx-fixed-preview-iframe');
-  if (pv) {
-    if (on) { if (pv.src && pv.src !== 'about:blank') pv.dataset.perfSrc = pv.src; pv.src = 'about:blank'; }
-    else if (pv.dataset.perfSrc) { pv.src = pv.dataset.perfSrc; delete pv.dataset.perfSrc; }
-  }
-  // OBS program preview camera: stop decoding while the game is live.
-  const v = el('obs-prev-video');
-  if (v) { try { if (on) v.pause(); else if (v.srcObject) v.play().catch(() => {}); } catch (_) {} }
-  let chip = el('perf-live-chip');
-  if (on) {
-    if (!chip) {
-      chip = document.createElement('div');
-      chip.id = 'perf-live-chip';
-      chip.textContent = 'PERFORMANCE MODE — previews paused while the match is live';
-      document.body.appendChild(chip);
+  // Sync the Settings controls (unless the producer is mid-click on one).
+  const syncCb = (id, val) => { const c = el(id); if (c && document.activeElement !== c) c.checked = !!val; };
+  syncCb('check-perf-mode', pm.enabled !== false);
+  syncCb('check-perf-always', pm.always);
+  syncCb('check-perf-noanim', pm.reduceAnimations);
+  syncCb('check-perf-noprev', pm.pausePreviews);
+  const rate = el('sel-perf-rate');
+  if (rate && document.activeElement !== rate) rate.value = pm.broadcastRate || 'smooth';
+
+  const shed = !!((pm.active && pm.enabled !== false) || pm.always);
+  const noAnim = shed || !!pm.reduceAnimations;
+  const noPrev = shed || !!pm.pausePreviews;
+  document.body.classList.toggle('perf-noanim', noAnim);
+
+  if (noPrev !== _perfNoPrev) {
+    _perfNoPrev = noPrev;
+    // Shared fixed scene-preview iframe: unload (it runs a full overlay page).
+    const pv = el('gfx-fixed-preview-iframe');
+    if (pv) {
+      if (noPrev) { if (pv.src && pv.src !== 'about:blank') pv.dataset.perfSrc = pv.src; pv.src = 'about:blank'; }
+      else if (pv.dataset.perfSrc) { pv.src = pv.dataset.perfSrc; delete pv.dataset.perfSrc; }
     }
-  } else if (chip) chip.remove();
+    // OBS program preview camera: stop decoding.
+    const v = el('obs-prev-video');
+    if (v) { try { if (noPrev) v.pause(); else if (v.srcObject) v.play().catch(() => {}); } catch (_) {} }
+  }
+
+  if (shed !== _perfShed) {
+    _perfShed = shed;
+    document.body.classList.toggle('perf-live', shed);
+    let chip = el('perf-live-chip');
+    if (shed) {
+      if (!chip) {
+        chip = document.createElement('div');
+        chip.id = 'perf-live-chip';
+        document.body.appendChild(chip);
+      }
+      chip.textContent = pm.always
+        ? 'LEAN MODE — app running light (always-on, Settings ▸ Performance)'
+        : 'PERFORMANCE MODE — previews paused while the match is live';
+    } else if (chip) chip.remove();
+  }
 }
-el('check-perf-mode')?.addEventListener('change', function () {
-  send('set_perf_mode', { enabled: this.checked });
-});
+function sendPerfPrefs() {
+  send('set_perf_mode', {
+    enabled: !!el('check-perf-mode')?.checked,
+    always: !!el('check-perf-always')?.checked,
+    reduceAnimations: !!el('check-perf-noanim')?.checked,
+    pausePreviews: !!el('check-perf-noprev')?.checked,
+    broadcastRate: el('sel-perf-rate')?.value || 'smooth'
+  });
+}
+['check-perf-mode', 'check-perf-always', 'check-perf-noanim', 'check-perf-noprev', 'sel-perf-rate']
+  .forEach((id) => el(id)?.addEventListener('change', sendPerfPrefs));
 
 // ── Swap sidebar sides (nav ↔ quick-actions rail), persisted per machine ──
 const SWAP_SIDES_KEY = 'ne_sides_swapped';

@@ -217,7 +217,10 @@ let state = {
   // gameplay stays smooth — panel previews/animations pause, the app's process priority
   // drops below the game's, and full-state broadcasts coalesce wider. Broadcast overlays
   // are untouched. enabled = producer setting (persisted); active = engaged right now.
-  perfMode: { enabled: true, active: false },
+  // enabled = auto game mode; always = permanent lean mode; reduceAnimations /
+  // pausePreviews = independent panel knobs; broadcastRate = smooth|balanced|light
+  // (full_state coalesce width). active = a match is live right now.
+  perfMode: { enabled: true, active: false, always: false, reduceAnimations: false, pausePreviews: false, broadcastRate: 'smooth' },
   activeGame: 'rocket-league',
   themesByGame: { 'rocket-league': 'classic', 'csgo': 'cs2-hud' },
   eventName: '',   // fresh installs start with no preset title — the producer sets their own
@@ -1309,8 +1312,12 @@ function loadDiscordUser() {
       if (data.discriminator) state.discord.discriminator = data.discriminator;
       if (data.globalName)   state.discord.globalName   = data.globalName;
       if (data.avatarUrl)    state.discord.avatarUrl    = data.avatarUrl;
-      if (data.accessToken)  { state.discord.accessToken = decryptSecret(data.accessToken); state.discord.connected = true; }
+      if (data.accessToken)  state.discord.accessToken  = decryptSecret(data.accessToken);
       if (data.refreshToken) state.discord.refreshToken = decryptSecret(data.refreshToken);
+      // Backend-mode logins never hold a local Discord accessToken (the Nameless backend
+      // keeps it), so a saved user IS a signed-in user. If the cloud session is actually
+      // dead/revoked, validateCloudSession('boot') force-signs-out with the real reason.
+      if (data.userId) state.discord.connected = true;
       console.log('[Discord] User loaded', data.username ? `(${data.username})` : '');
     }
   } catch (err) {
@@ -2120,7 +2127,14 @@ function loadState() {
       }
       if (Array.isArray(saved.leagues)) state.leagues = saved.leagues.map(migrateLeague);
       if (Array.isArray(saved.myEvents)) state.myEvents = saved.myEvents;
-      if (saved.perfMode && typeof saved.perfMode === 'object') state.perfMode.enabled = saved.perfMode.enabled !== false;
+      if (saved.perfMode && typeof saved.perfMode === 'object') {
+        const sp = saved.perfMode;
+        state.perfMode.enabled = sp.enabled !== false;
+        state.perfMode.always = !!sp.always;
+        state.perfMode.reduceAnimations = !!sp.reduceAnimations;
+        state.perfMode.pausePreviews = !!sp.pausePreviews;
+        if (['smooth', 'balanced', 'light'].includes(sp.broadcastRate)) state.perfMode.broadcastRate = sp.broadcastRate;
+      }
       if (saved.eventOps && typeof saved.eventOps === 'object') {
         // Rows saved by the first release were objects ({team,player,…}); the store is
         // now the full spreadsheet (headers + string-array rows). Drop the legacy shape.
@@ -2373,7 +2387,10 @@ function _saveAppStateNow(sync = false) {
       roundLabel: state.roundLabel,
       speedUnit: state.speedUnit,
       teamRecord: state.teamRecord,
-      perfMode: { enabled: !state.perfMode || state.perfMode.enabled !== false },
+      perfMode: (function () { const pm = state.perfMode || {}; return {
+        enabled: pm.enabled !== false, always: !!pm.always,
+        reduceAnimations: !!pm.reduceAnimations, pausePreviews: !!pm.pausePreviews,
+        broadcastRate: pm.broadcastRate || 'smooth' }; })(),
       autoTeamsFromGame: state.autoTeamsFromGame,
       startggLeagueStandings: state.startggLeagueStandings,
       fontFamily: state.fontFamily,
@@ -8564,14 +8581,27 @@ function disconnectRL() {
 // ── Game performance mode (see state.perfMode) ──────────────────────────────
 // Engaged at the RL kickoff, released at match end / RL disconnect. main.js registers
 // the priority callback (drops every app process below-normal while the game is live).
-let _perfPriorityCb = null;
+let _perfPriorityCb = null, _lastShed = null;
+// Load is shed while a match is live (auto mode) OR permanently (always-on lean mode).
+function perfShedActive() { const pm = state.perfMode || {}; return !!((pm.active && pm.enabled !== false) || pm.always); }
+function perfCoalesceMs() {
+  const pm = state.perfMode || {};
+  if (perfShedActive()) return 250;
+  return pm.broadcastRate === 'light' ? 250 : pm.broadcastRate === 'balanced' ? 120 : 40;
+}
+function applyPerfSideEffects() {
+  const shed = perfShedActive();
+  if (shed === _lastShed) return;
+  _lastShed = shed;
+  try { if (typeof _perfPriorityCb === 'function') _perfPriorityCb(shed); } catch (e) { console.warn('[Perf] priority change failed:', e.message); }
+  console.log('[Perf] load shedding', shed ? 'ON' : 'off');
+}
 function setPerfActive(on) {
   const pm = state.perfMode || (state.perfMode = { enabled: true, active: false });
   const want = !!on && pm.enabled !== false;
   if (!!pm.active === want) return;
   pm.active = want;
-  try { if (typeof _perfPriorityCb === 'function') _perfPriorityCb(want); } catch (e) { console.warn('[Perf] priority change failed:', e.message); }
-  console.log('[Perf] game performance mode', want ? 'ON (match live)' : 'off');
+  applyPerfSideEffects();
   broadcastFullState();
 }
 
@@ -9892,11 +9922,19 @@ registerWsHandlers({
     if (d.owBanCount != null) state.draft.owBanCount = Number(d.owBanCount) <= 2 ? 2 : 4;
     saveAppState(); broadcastFullState();
   },
-  // Game performance mode preference (Settings ▸ Performance).
+  // Performance preferences (Settings ▸ Performance) — every knob is wired:
+  // enabled (auto game mode), always (permanent lean), reduceAnimations,
+  // pausePreviews (panel-side), broadcastRate (coalesce width).
   set_perf_mode(msg) {
     const pm = state.perfMode || (state.perfMode = { enabled: true, active: false });
-    pm.enabled = !!(msg.data && msg.data.enabled);
-    if (!pm.enabled) setPerfActive(false);
+    const d = msg.data || {};
+    if ('enabled' in d) pm.enabled = !!d.enabled;
+    if ('always' in d) pm.always = !!d.always;
+    if ('reduceAnimations' in d) pm.reduceAnimations = !!d.reduceAnimations;
+    if ('pausePreviews' in d) pm.pausePreviews = !!d.pausePreviews;
+    if ('broadcastRate' in d && ['smooth', 'balanced', 'light'].includes(d.broadcastRate)) pm.broadcastRate = d.broadcastRate;
+    if (pm.enabled === false && pm.active) pm.active = false;
+    applyPerfSideEffects();
     saveAppState(); broadcastFullState();
   },
   // ── Event Ops (ESPORTS ▸ Event Ops): universal CSV table store + true-seed pull ──
@@ -14905,9 +14943,10 @@ function broadcastFullState() {
   _bcTimer = setTimeout(() => {
     _bcTimer = null;
     if (_bcPending) { _bcPending = false; broadcastFullState(); }
-    // Wider coalescing while a match is live — less main-process stringify/send churn
-    // competing with the game. (RL tick data rides the tiny state_update channel anyway.)
-  }, (state.perfMode && state.perfMode.active) ? 250 : 40);
+    // Coalesce width follows the Performance settings: wider while a match is live /
+    // lean mode, and the producer's chosen overlay update rate otherwise. (RL tick
+    // data rides the tiny state_update channel and is never delayed by this.)
+  }, perfCoalesceMs());
 }
 
 // ─── HTTP Server (port 3000) — serves overlay ────────────────────────────────

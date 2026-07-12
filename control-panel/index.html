@@ -8202,9 +8202,30 @@ PacketSendRate=10</pre>
 
   <section class="section">
     <h3 class="section-title">Performance</h3>
-    <label class="qt-toggle" style="width:100%; max-width:420px;" title="While a Rocket League match is live: panel previews pause, animations freeze, broadcasts coalesce wider and the app lowers its own process priority so borderless gameplay stays smooth. Broadcast overlays in OBS are unaffected.">
-      <span>Game performance mode <span style="color:var(--muted); font-weight:400;">— shed app load while a match is live</span></span>
+    <p class="section-desc" style="margin:0 0 10px;">Fine-tune how much the app works in the background. Broadcast overlays in OBS are never affected — these only reduce the control panel's own load.</p>
+    <label class="qt-toggle" style="width:100%; max-width:520px;" title="While a Rocket League match is live: panel previews pause, animations freeze, broadcasts coalesce wider and the app lowers its own process priority so borderless gameplay stays smooth.">
+      <span>Game performance mode <span style="color:var(--muted); font-weight:400;">— shed app load automatically while a match is live</span></span>
       <label class="switch"><input type="checkbox" id="check-perf-mode" checked><span class="slider"></span></label>
+    </label>
+    <label class="qt-toggle" style="width:100%; max-width:520px;" title="Run the same load-shedding permanently, not just during matches — for lower-end production PCs.">
+      <span>Always-on lean mode <span style="color:var(--muted); font-weight:400;">— run light all the time (low-end PCs)</span></span>
+      <label class="switch"><input type="checkbox" id="check-perf-always"><span class="slider"></span></label>
+    </label>
+    <label class="qt-toggle" style="width:100%; max-width:520px;" title="Freeze the panel's cosmetic animations (scan bars, pulses, gradients) permanently.">
+      <span>Reduce animations <span style="color:var(--muted); font-weight:400;">— freeze cosmetic motion in the panel</span></span>
+      <label class="switch"><input type="checkbox" id="check-perf-noanim"><span class="slider"></span></label>
+    </label>
+    <label class="qt-toggle" style="width:100%; max-width:520px;" title="Keep the live scene preview and OBS program preview paused until you turn this off — they are the panel's heaviest elements.">
+      <span>Keep previews paused <span style="color:var(--muted); font-weight:400;">— scene &amp; OBS previews stay off</span></span>
+      <label class="switch"><input type="checkbox" id="check-perf-noprev"><span class="slider"></span></label>
+    </label>
+    <label class="qt-toggle" style="width:100%; max-width:520px;" title="How often non-game state updates are pushed to the panel and overlays. Live game data (scores, clock, boost) always streams at full rate regardless.">
+      <span>Update rate <span style="color:var(--muted); font-weight:400;">— non-game state push cadence</span></span>
+      <select id="sel-perf-rate" class="input-select" style="width:150px; font-size:12px;">
+        <option value="smooth">Smooth (default)</option>
+        <option value="balanced">Balanced</option>
+        <option value="light">Light</option>
+      </select>
     </label>
   </section>
 
