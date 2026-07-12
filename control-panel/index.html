@@ -2427,33 +2427,42 @@
         <button type="button" class="btn btn-ghost btn-sm" id="td-add-crew" title="Add a new crew member without leaving the Show Deck">+ Add Crew</button>
       </div>
     </div>
+    <div class="td-presets-row">
+      <span class="td-roster-lbl" title="Save &amp; re-apply a whole desk setup in one click">Presets</span>
+      <div class="td-shift-chips" id="td-shift-chips"></div>
+      <div class="td-shift-actions">
+        <button type="button" class="btn btn-ghost btn-sm" id="td-shift-save" title="Save the current allocation (slots, roles, on-shift marks, display options) as a named preset">Save preset</button>
+        <button type="button" class="btn btn-ghost btn-sm" id="td-shift-clear" style="color:var(--danger-2);" title="Clear the desk slots, roles and on-shift marks — everyone stays credited; presets are untouched">Clear</button>
+      </div>
+    </div>
     <div class="td-section">
       <span class="td-roster-lbl">Desk lineup</span>
       <div class="td-slots" id="td-slots"></div>
     </div>
     <datalist id="td-crew-dl"></datalist>
-    <div class="td-section">
-      <span class="td-roster-lbl">Current shift <span class="td-lbl-hint">who's working right now — drives the desk &amp; auto-credits them</span></span>
+    <div class="td-cols">
+    <div class="td-section td-col" title="Who's working right now — drives the desk and auto-credits them">
+      <span class="td-roster-lbl">Current shift</span>
       <div style="display:flex; gap:6px; margin:2px 0 8px;">
         <input type="text" id="td-onshift-search" class="input-text td-sel" list="td-crew-dl" placeholder="Search crew to start their shift…" autocomplete="off" style="flex:1; min-width:0;">
         <button type="button" class="btn btn-ghost btn-sm" id="td-onshift-add" style="flex-shrink:0;">Start shift</button>
       </div>
       <div class="td-roster-chips" id="td-roster-chips"></div>
     </div>
-    <div class="td-section">
-      <span class="td-roster-lbl">Earlier shifts &amp; credits <span class="td-lbl-hint">casters &amp; crew from other shifts of this broadcast — credited alongside the current shift; survives Clear, click &times; to remove</span></span>
+    <div class="td-section td-col" title="Casters &amp; crew from other shifts of this broadcast — credited alongside the current shift; survives Clear, click × to remove">
+      <span class="td-roster-lbl">Earlier shifts &amp; credits</span>
       <div style="display:flex; gap:6px; margin:2px 0 8px;">
         <input type="text" id="td-worked-search" class="input-text td-sel" list="td-crew-dl" placeholder="Search crew to credit…" autocomplete="off" style="flex:1; min-width:0;">
         <button type="button" class="btn btn-ghost btn-sm" id="td-worked-add" style="flex-shrink:0;">Add credit</button>
       </div>
       <div class="td-roster-chips" id="td-worked-chips"></div>
     </div>
-    <div class="td-section">
-      <span class="td-roster-lbl">Support crew <span class="td-lbl-hint">producers, tournament ops, flex &amp; socials — no camera, but credited</span></span>
-      <div style="display:flex; gap:6px; margin:2px 0 8px;">
-        <input type="text" id="td-support-search" class="input-text td-sel" list="td-support-dl" placeholder="Search existing crew…" autocomplete="off" style="flex:1; min-width:0;">
+    <div class="td-section td-col" title="Producers, tournament ops, flex &amp; socials — no camera, but credited">
+      <span class="td-roster-lbl">Support crew</span>
+      <div style="display:flex; flex-wrap:wrap; gap:6px; margin:2px 0 8px;">
+        <input type="text" id="td-support-search" class="input-text td-sel" list="td-support-dl" placeholder="Search existing crew…" autocomplete="off" style="flex:1 1 100%; min-width:0;">
         <datalist id="td-support-dl"></datalist>
-        <select id="td-support-role-sel" class="input-select" title="Which support / tournament-ops role to file them under" style="flex:0 0 150px;">
+        <select id="td-support-role-sel" class="input-select" title="Which support / tournament-ops role to file them under" style="flex:1; min-width:0; font-size:12px;">
           <option value="producer">Producer</option>
           <option value="admin">Tournament Admin</option>
           <option value="coordinator">Coordinator</option>
@@ -2468,16 +2477,7 @@
       </div>
       <div class="dcc-support-list" id="td-support-list"></div>
     </div>
-    <div class="td-shifts">
-      <div class="td-shift-head">
-        <span class="td-roster-lbl">Presets <span class="td-lbl-hint">save &amp; re-apply a whole desk setup in one click</span></span>
-        <div class="td-shift-actions">
-          <button type="button" class="btn btn-ghost btn-sm" id="td-shift-save" title="Save the current allocation (slots, roles, on-shift marks, display options) as a named preset">Save preset</button>
-          <button type="button" class="btn btn-ghost btn-sm" id="td-shift-clear" style="color:var(--danger-2);" title="Clear the desk slots, roles and on-shift marks — everyone stays credited in Worked this event; presets are untouched">Clear</button>
-        </div>
-      </div>
-      <div class="td-shift-chips" id="td-shift-chips"></div>
-    </div>
+    </div><!-- /td-cols -->
   </div>
   </div><!-- /talent-showdeck-home -->
 
@@ -8453,7 +8453,34 @@ PacketSendRate=10</pre>
         <button class="btn btn-primary btn-sm" id="btn-cloud-push"><svg class="svg-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/></svg> Sync to cloud</button>
         <button class="btn btn-secondary btn-sm" id="btn-cloud-refresh">Refresh list</button>
       </div>
+      <p class="section-desc" id="cloud-workspace-line" style="margin-top:8px;"></p>
       <div id="cloud-profiles-list" style="margin-top:12px;"></div>
+
+      <!-- Org broadcast-seat licensing — only shown to owner/admin of a real org workspace -->
+      <div id="org-seats-block" style="display:none; margin-top:16px; padding-top:14px; border-top:1px solid var(--border);">
+        <h4 class="section-title" style="font-size:13px;">Broadcast Suite Producers</h4>
+        <p class="section-desc" id="org-seats-limit"></p>
+        <div style="display:grid; grid-template-columns:1fr 140px auto; gap:8px; margin:10px 0; align-items:end;">
+          <div class="field-row" style="margin:0;">
+            <label class="field-label" for="org-seat-userid">Nameless user id</label>
+            <input type="text" id="org-seat-userid" class="input-text" placeholder="Paste the producer's user id">
+          </div>
+          <div class="field-row" style="margin:0;">
+            <label class="field-label" for="org-seat-role">Role</label>
+            <select id="org-seat-role" class="input-select">
+              <option value="owner">Owner</option>
+              <option value="admin">Admin</option>
+              <option value="producer" selected>Producer</option>
+              <option value="operator">Operator</option>
+              <option value="talent">Talent</option>
+              <option value="analyst">Analyst</option>
+            </select>
+          </div>
+          <button class="btn btn-primary" id="btn-org-seat-add" style="height:36px;">Add</button>
+        </div>
+        <div id="org-seats-list"></div>
+        <div id="org-seats-result" style="margin-top:8px; font-size:13px;"></div>
+      </div>
     </div>
   </section>
 

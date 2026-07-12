@@ -5552,9 +5552,13 @@ span.lg-pl-role { color: var(--muted); }
 .seed-tv { flex: 0 0 auto; font-size: 13px; font-weight: 900; font-variant-numeric: tabular-nums; color: #fff; background: var(--cp-accent); border-radius: 7px; padding: 2px 9px; min-width: 30px; text-align: center; }
 .seed-tv.seed-tv-empty { background: transparent; color: var(--muted); border: 1px dashed var(--border); }
 .seed-perf-badge { flex: 0 0 auto; font-size: 10px; font-weight: 700; color: #63b3ed; background: rgba(66,153,225,0.12); border: 1px solid rgba(66,153,225,0.25); border-radius: 5px; padding: 2px 6px; white-space: nowrap; }
-.seed-players-wrap { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 6px; margin-top: 9px; }
-.seed-player { display: flex; align-items: center; gap: 8px; background: var(--surface); border: 1px solid var(--border); border-radius: 7px; padding: 4px 6px 4px 9px; }
-.seed-ptag { flex: 1; min-width: 0; font-size: 12px; font-weight: 600; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.seed-players-wrap { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 6px; margin-top: 9px; }
+/* Two-row cell: gamertag + chips on top, rank input full-width below — so the name never gets
+   squeezed to nothing by the profile/confidence chips in a narrow column. */
+.seed-player { display: flex; flex-direction: column; align-items: stretch; gap: 5px; background: var(--surface); border: 1px solid var(--border); border-radius: 7px; padding: 6px 8px; }
+.seed-player-id { display: flex; align-items: center; gap: 5px; min-width: 0; }
+.seed-ptag { flex: 1 1 auto; min-width: 40px; font-size: 12px; font-weight: 600; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.seed-player .seed-prank { flex: 0 0 auto; width: 100%; }
 .seed-prank { flex: 0 0 92px; font-size: 12px; padding: 4px 7px; cursor: text; }
 /* Rank-alert animations — flags ranks that warrant a double-check before finalising seeds */
 @keyframes seed-flag-pulse {
@@ -8050,6 +8054,14 @@ tr.lg2-drag-over { outline: 2px solid var(--accent, #4a9eff); outline-offset: -1
   font-size: 13px; line-height: 1; color: var(--muted); padding: 4px 8px 4px 2px;
 }
 .td-shift-chip .td-shift-del:hover { color: var(--danger-2); }
+/* Streamlined deck: presets as one slim strip under the header… */
+.td-presets-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 2px 0 10px; border-bottom: 1px solid var(--white-a06); }
+.td-presets-row .td-shift-chips { flex: 1; min-width: 0; }
+.td-presets-row .td-shift-actions { margin-left: auto; flex-shrink: 0; }
+/* …and the three people lists (current shift / earlier credits / support) side by side. */
+.td-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
+.td-col { background: var(--white-a03); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; align-content: start; }
 
 /* Team-dependent put-on-air chips: who this chip fires for (Line-up, Winner) */
 .qk-chip-team { display:inline-block; margin-left:7px; padding:1px 7px; border-radius:999px;
