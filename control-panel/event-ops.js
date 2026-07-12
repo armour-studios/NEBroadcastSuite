@@ -179,7 +179,32 @@
   });
 
   // ── Column visibility (persisted per header signature) ─────────────────────
-  function colSig(headers) { return headers.join('').slice(0, 400); }
+  // Virtual table model: derived columns pinned before the raw CSV columns.
+  // [Seed, Team, Challonge] are computed from the role mapping + pulled seeds —
+  // clean values with short headers, ahead of whatever raw columns are shown.
+  const VIRTUAL = 3;
+  function buildModel(data) {
+    const idx = data.roleMap || {};
+    const seeds = seedByName();
+    const headers = ['Seed', 'Team', 'Challonge', ...data.headers];
+    const rows = data.rows.map((r) => {
+      const d = deriveRow(r, idx);
+      const seed = d.team ? seeds.get(d.team.toLowerCase()) : undefined;
+      return [seed != null ? String(seed) : '', d.team, d.challonge, ...r];
+    });
+    return { headers, rows, hasSeeds: (data.seeds || []).length > 0 };
+  }
+  // Raw start.gg headers can be monsters ("[$100] Nameless Weekly ... Completed Team") —
+  // show a readable tail, keep the full name in the tooltip.
+  function shortHeader(h) {
+    let x = String(h || '').replace(/^\[[^\]]*\]\s*/, '');
+    const m = x.match(/(completed team|incomplete teams?|member flags)$/i);
+    if (m) x = m[1];
+    if (x.length > 30) x = '…' + x.slice(-28);
+    return x;
+  }
+
+  function colSig(headers) { return headers.join('').slice(0, 400); }
   function loadVisible(headers, roleMap) {
     if (_eoVisible) return _eoVisible;
     try {
@@ -187,10 +212,15 @@
       const saved = store[colSig(headers)];
       if (Array.isArray(saved)) { _eoVisible = new Set(saved.filter((i) => i >= 0 && i < headers.length)); return _eoVisible; }
     } catch (_) {}
-    // Default: the role-mapped columns in a sensible order; else the first 8.
-    const roles = ['team', 'team2', 'player', 'email', 'challonge', 'flags']
-      .map((k) => Number(roleMap[k])).filter((i) => Number.isInteger(i) && i >= 0);
-    _eoVisible = new Set(roles.length ? roles : headers.map((_, i) => i).slice(0, 8));
+    // Default: the derived columns + the useful raw ones (player/email/flags).
+    // The raw team/challonge columns stay hidden — their DERIVED versions are cleaner.
+    const def = [0, 1, 2];
+    ['player', 'email', 'flags'].forEach((k) => {
+      const i = Number(roleMap[k]);
+      if (Number.isInteger(i) && i >= 0) def.push(i + VIRTUAL);
+    });
+    if (def.length === 3) headers.slice(VIRTUAL).forEach((_, i) => { if (def.length < 9) def.push(i + VIRTUAL); });
+    _eoVisible = new Set(def);
     return _eoVisible;
   }
   function saveVisible(headers) {
@@ -260,7 +290,10 @@
 
   // ── TABLE view: every column, pick/sort/filter/copy ─────────────────────────
   function renderTableView(body, data) {
-    const { headers, rows } = data;
+    const model = buildModel(data);
+    const { headers, rows } = model;
+    // First render after seeds are pulled: default to seed order (the Challonge entry order).
+    if (_eoSort.col === -1 && model.hasSeeds) _eoSort = { col: 0, dir: 1 };
     const visible = loadVisible(headers, data.roleMap || {});
     const cols = headers.map((h, i) => ({ h, i })).filter((c) => visible.has(c.i));
 
@@ -300,8 +333,8 @@
 
     const thead = '<tr>' + cols.map((c) => {
       const active = _eoSort.col === c.i;
-      return `<th data-eo-sort="${c.i}" title="Click to sort">
-        <span class="eo-th-label">${eoEsc(c.h) || '(col ' + (c.i + 1) + ')'}</span>
+      return `<th data-eo-sort="${c.i}" title="${eoEsc(c.h)} — click to sort">
+        <span class="eo-th-label">${eoEsc(shortHeader(c.h)) || '(col ' + (c.i + 1) + ')'}</span>
         <span class="eo-th-dir">${active ? (_eoSort.dir > 0 ? '▲' : '▼') : ''}</span>
         <button class="eo-th-copy" data-eo-colcopy="${c.i}" title="Copy this column (filtered rows, one per line)">⧉</button>
       </th>`;
