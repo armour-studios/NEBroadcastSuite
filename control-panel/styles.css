@@ -6908,18 +6908,60 @@ body.sides-swapped .qrail-head { flex-direction: row-reverse; }
 .gfx-onair { margin-bottom:14px; }
 /* Unified Graphics Hub card — flex column so top bar spans full width */
 .gfx-top { display:flex; flex-direction:column; background:var(--surface); border:1px solid var(--border); border-radius:10px; overflow:hidden; }
-/* Top bar: title | editing scene + links | live-on-gfx.html scene | status pill + Clear All + Push
-   Live. "Editing" and "Live" are deliberately distinct fields — selecting a scene never changes
-   what's on air, only Push Live does. */
-.gfx-top-bar { display:flex; align-items:center; gap:16px; padding:10px 16px; border-bottom:1px solid var(--border); background:var(--surface2); flex-shrink:0; flex-wrap:nowrap; overflow-x:auto; overflow-y:hidden; }
-.gfx-top-title { font-size:13px; font-weight:900; letter-spacing:.08em; text-transform:uppercase; color:var(--text); flex-shrink:0; padding-right:16px; border-right:1px solid var(--border); }
+/* Top bar: EDITING cluster | LIVE cluster | actions. "Editing" and "Live" are deliberately
+   distinct fields — selecting a scene never changes what's on air, only Push Live does. */
+.gfx-top-bar { display:flex; align-items:center; gap:14px; padding:9px 14px; border-bottom:1px solid var(--border); background:var(--surface2); flex-shrink:0; flex-wrap:nowrap; overflow-x:auto; overflow-y:hidden; }
 .gfx-top-scene, .gfx-top-live { display:flex; align-items:center; gap:8px; min-width:0; flex-shrink:1; }
 .gfx-top-scene-lbl { font-size:9px; font-weight:900; letter-spacing:.1em; text-transform:uppercase; color:var(--muted); flex-shrink:0; }
-.gfx-top-scene-name, .gfx-top-live-name { font-size:12px; font-weight:700; color:var(--text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0; }
-.gfx-top-live { padding-left:16px; border-left:1px solid var(--border); }
+.gfx-top-scene-name, .gfx-top-live-name { font-size:13px; font-weight:800; color:var(--text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0; }
+.gfx-top-links { display:inline-flex; align-items:center; gap:6px; flex-shrink:0; }
+.gfx-top-live { padding-left:14px; border-left:1px solid var(--border); }
 .gfx-top-live-name { color:var(--ok-2); }
 .gfx-top-scene-link { font-size:10px; opacity:.6; white-space:nowrap; flex-shrink:0; }
 .gfx-top-scene-link:hover { opacity:1; }
+/* Auto-cut controls read as ONE bordered unit instead of a loose toggle + select. */
+.gfx-autocut-group { display:flex; align-items:center; gap:8px; padding:2px 8px; border:1px solid var(--border); border-radius:8px; background:var(--surface); flex-shrink:0; }
+.gfx-autocut-group .qt-toggle { border:none; background:none; padding:2px 0; }
+/* OBS program chip (JS only toggles display + warn colors). */
+.gfx-obs-chip { font-size:11px; font-weight:700; letter-spacing:.04em; padding:4px 10px; border-radius:999px; border:1px solid var(--border); color:var(--muted); white-space:nowrap; max-width:230px; overflow:hidden; text-overflow:ellipsis; }
+
+/* ── GFX unification layer ──────────────────────────────────────────────────
+   One field language for every scene panel AND every gfx pop-out, replacing the
+   per-scene mix of inline styles / field-row / gfx-ctrl-row / sps-desc looks.
+   data-gfx utilities replace the two flex patterns that were inlined 50+ times. */
+#prod-graphics-tab [data-gfx="grow"], .gfx-popout-box [data-gfx="grow"] { flex:1; min-width:0; }
+#prod-graphics-tab [data-gfx="fix"],  .gfx-popout-box [data-gfx="fix"]  { flex-shrink:0; }
+#prod-graphics-tab [data-gfx="fixnw"],.gfx-popout-box [data-gfx="fixnw"]{ flex-shrink:0; white-space:nowrap; }
+/* Inputs: one compact size everywhere (the 14px page default reads oversized in the
+   dense settings column; several scenes were hand-tuning it inline to 11/12px). */
+.gfx-settings-col .input-text, .gfx-settings-col .input-select,
+.gfx-popout-box   .input-text, .gfx-popout-box   .input-select {
+  font-size:12px; padding:6px 10px; border-radius:8px; min-height:30px;
+}
+.gfx-settings-col textarea.input-text, .gfx-popout-box textarea.input-text { min-height:56px; }
+/* Labels: field-label and gfx-fp-lbl were two different voices — same voice now. */
+.gfx-settings-col .field-label, .gfx-popout-box .field-label,
+.gfx-settings-col .gfx-fp-lbl,  .gfx-popout-box .gfx-fp-lbl {
+  font-size:10px; font-weight:800; letter-spacing:.08em; text-transform:uppercase; color:var(--muted);
+}
+/* Hints: field-hint and sps-desc unified. */
+.gfx-settings-col .field-hint, .gfx-popout-box .field-hint,
+.gfx-settings-col .sps-desc,   .gfx-popout-box .sps-desc {
+  font-size:11px; color:var(--muted); line-height:1.5;
+}
+/* Rows: consistent rhythm between stacked fields and inline control rows. */
+.gfx-settings-col .field-row, .gfx-popout-box .field-row { margin-bottom:10px; gap:4px; }
+.gfx-settings-col .gfx-ctrl-row, .gfx-popout-box .gfx-ctrl-row { margin-bottom:8px; }
+.gfx-settings-col .gfx-ctrl-row .field-label, .gfx-popout-box .gfx-ctrl-row .field-label { min-width:86px; }
+/* Toggles + small buttons on the same 12px scale as the inputs. */
+.gfx-settings-col .qt-toggle, .gfx-popout-box .qt-toggle { font-size:12px; }
+.gfx-settings-col .btn-sm, .gfx-popout-box .btn-sm { font-size:11px; padding:5px 11px; }
+.gfx-settings-col .btn-xs, .gfx-popout-box .btn-xs { font-size:10px; }
+/* Uniform scene header — identical frame on every scene (name · on-air state · overlay link). */
+.gfx-scene-head { display:flex; align-items:center; gap:10px; padding-bottom:10px; margin-bottom:12px; border-bottom:1px solid var(--border); }
+.gfx-scene-head-name { font-family:'Rajdhani','Inter',sans-serif; font-weight:700; font-size:17px; letter-spacing:.05em; text-transform:uppercase; color:var(--text); flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.gfx-live-badge--sm { font-size:10px; }
+.gfx-scene-head-link { font-size:11px; white-space:nowrap; }
 /* This whole group (auto-cut toggle + scene select + OFF AIR/LIVE pill + Clear All + Push Live)
    must always render as one unbroken line — never wrap or drop to a second row. The scene-name
    labels to its left shrink/ellipsis first to make room. */

@@ -4625,32 +4625,35 @@
     <!-- Unified Graphics Hub: full-width top bar + nav/preview/settings body below -->
     <div class="gfx-top">
 
-      <!-- Top bar: title | editing scene | live-on-gfx.html scene | status pill + Clear All + Push
-           Live. Push Live is the ONLY place that changes what's live — pushing hides every other
-           scene on gfx.html and shows this one (each scene's own standalone overlay URL is
-           unaffected either way). "Editing" and "Live" can differ — that's the point. -->
+      <!-- Top bar: EDITING cluster | LIVE cluster | actions. Push Live is the ONLY place that
+           changes what's live — pushing hides every other scene on gfx.html and shows this one
+           (each scene's own standalone overlay URL is unaffected either way). "Editing" and
+           "Live" can differ — that's the point. -->
       <div class="gfx-top-bar">
-        <span class="gfx-top-title">GRAPHICS CONTROL PANEL</span>
         <div class="gfx-top-scene">
           <span class="gfx-top-scene-lbl">Editing</span>
           <span class="gfx-top-scene-name" id="gfx-active-name">Break / Starting Soon</span>
-          <a class="gfx-top-scene-link overlay-link" id="gfx-active-link" href="http://localhost:3000/gfx.html" target="_blank">gfx.html ↗</a>
-          <a class="gfx-top-scene-link gfx-top-scene-sub" id="gfx-active-scene-link" href="http://localhost:3000/countdown.html" target="_blank">countdown.html</a>
+          <span class="gfx-top-links">
+            <a class="gfx-top-scene-link overlay-link" id="gfx-active-link" href="http://localhost:3000/gfx.html" target="_blank" title="The one browser source that carries every pushed graphic">gfx.html ↗</a>
+            <a class="gfx-top-scene-link gfx-top-scene-sub" id="gfx-active-scene-link" href="http://localhost:3000/countdown.html" target="_blank" title="This scene's own standalone overlay URL">countdown.html</a>
+          </span>
         </div>
         <div class="gfx-top-live">
-          <span class="gfx-top-scene-lbl">Live on gfx.html</span>
+          <span class="gfx-top-scene-lbl">Live</span>
           <span class="gfx-top-live-name" id="gfx-live-name">Nothing</span>
+          <span class="gfx-live-badge is-off" id="gfx-live-badge">OFF AIR</span>
         </div>
         <div class="gfx-top-actions">
-          <!-- Auto-cut OBS: when armed, Push Live also switches OBS to the chosen scene so the graphic
-               and the OBS scene holding it go live together. -->
-          <label class="qt-toggle gfx-autocut-toggle" title="When you Push Live, also cut OBS to the chosen scene">
-            <span>Auto-cut OBS</span>
-            <span class="switch"><input type="checkbox" id="gfx-autocut-on"><span class="slider"></span></span>
-          </label>
-          <select id="gfx-autocut-scene" class="input-select gfx-autocut-scene" title="OBS scene to cut to when a graphic goes live"><option value="">— scene —</option></select>
-          <span id="gfx-obs-chip" style="display:none; font-size:11px; font-weight:700; letter-spacing:.04em; padding:4px 10px; border-radius:999px; border:1px solid var(--border,#2e3340); color:var(--muted); white-space:nowrap; max-width:230px; overflow:hidden; text-overflow:ellipsis;" title="Current OBS program scene"></span>
-          <span class="gfx-live-badge is-off" id="gfx-live-badge">OFF AIR</span>
+          <!-- Auto-cut OBS: when armed, Push Live also switches OBS to the chosen scene so the
+               graphic and the OBS scene holding it go live together. -->
+          <div class="gfx-autocut-group" title="When you Push Live, also cut OBS to the chosen scene">
+            <label class="qt-toggle gfx-autocut-toggle">
+              <span>Auto-cut OBS</span>
+              <span class="switch"><input type="checkbox" id="gfx-autocut-on"><span class="slider"></span></span>
+            </label>
+            <select id="gfx-autocut-scene" class="input-select gfx-autocut-scene" title="OBS scene to cut to when a graphic goes live"><option value="">— scene —</option></select>
+          </div>
+          <span id="gfx-obs-chip" class="gfx-obs-chip" style="display:none;" title="Current OBS program scene"></span>
           <button class="gfx-btn-clear" id="gfx-top-clear" title="Clear all GFX overlays">Clear All</button>
           <!-- delegation target kept for Queue (rundown) -->
           <button class="btn btn-ghost btn-sm" id="gfx-top-queue" style="display:none;"></button>
@@ -4726,10 +4729,10 @@
         <div class="gfx-settings-col" id="gfx-settings-col">
           <!-- Uniform scene header — identical anatomy on every scene (name · on-air state ·
                overlay link) so navigating scene to scene always lands on the same frame. -->
-          <div id="gfx-scene-head" style="display:flex; align-items:center; gap:10px; padding-bottom:10px; margin-bottom:12px; border-bottom:1px solid var(--border);">
-            <span id="gfx-scene-head-name" style="font-family:'Rajdhani','Inter',sans-serif; font-weight:700; font-size:17px; letter-spacing:.05em; text-transform:uppercase; color:var(--text,#e8eaf0); flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">Scene</span>
-            <span id="gfx-scene-head-live" class="gfx-live-badge is-off" style="font-size:10px;">OFF AIR</span>
-            <a id="gfx-scene-head-link" href="#" target="_blank" class="overlay-link" style="font-size:11px; white-space:nowrap;">overlay ↗</a>
+          <div id="gfx-scene-head" class="gfx-scene-head">
+            <span id="gfx-scene-head-name" class="gfx-scene-head-name">Scene</span>
+            <span id="gfx-scene-head-live" class="gfx-live-badge gfx-live-badge--sm is-off">OFF AIR</span>
+            <a id="gfx-scene-head-link" href="#" target="_blank" class="overlay-link gfx-scene-head-link">overlay ↗</a>
           </div>
 
           <!-- Map Pool / Series mode toggle — they're the same underlying pick/ban data
@@ -4780,7 +4783,7 @@
               </div>
 
               <div class="gfx-ctrl-row" style="margin-top:12px; border-top:1px solid var(--border); padding-top:10px;">
-                <span class="field-label" style="flex-shrink:0;">Source</span>
+                <span class="field-label" data-gfx="fix">Source</span>
                 <div class="gfx-src-tabs" id="gfx-bkt-srctabs">
                   <button type="button" class="gfx-src-tab" data-bktsrc="league" title="Standings from an in-app league">League</button>
                   <button type="button" class="gfx-src-tab is-on" data-bktsrc="organizer" title="Follows the active event in the Dashboard">Tournament Organizer</button>
@@ -4791,16 +4794,16 @@
               <!-- League — fully front-facing, no pop-out needed. -->
               <div class="gfx-bkt-srcwrap" data-bktwrap="league" style="display:none;">
                 <div class="gfx-ctrl-row" style="margin-top:2px;">
-                  <label class="field-label" style="flex-shrink:0;" for="gfx-bkt-league">League</label>
-                  <select id="gfx-bkt-league" class="input-select" style="flex:1; min-width:0;"><option value="">Select league…</option></select>
+                  <label class="field-label" data-gfx="fix" for="gfx-bkt-league">League</label>
+                  <select id="gfx-bkt-league" class="input-select" data-gfx="grow"><option value="">Select league…</option></select>
                 </div>
                 <div class="gfx-ctrl-row">
-                  <label class="field-label" style="flex-shrink:0;" for="gfx-bkt-title">Title</label>
-                  <input type="text" id="gfx-bkt-title" class="input-text" placeholder="e.g. WEEK 6 STANDINGS" style="flex:1; min-width:0;">
+                  <label class="field-label" data-gfx="fix" for="gfx-bkt-title">Title</label>
+                  <input type="text" id="gfx-bkt-title" class="input-text" placeholder="e.g. WEEK 6 STANDINGS" data-gfx="grow">
                 </div>
                 <div class="gfx-ctrl-row">
-                  <label class="field-label" style="flex-shrink:0;" for="gfx-bkt-subtitle">Subtitle</label>
-                  <input type="text" id="gfx-bkt-subtitle" class="input-text" placeholder="optional" style="flex:1; min-width:0;">
+                  <label class="field-label" data-gfx="fix" for="gfx-bkt-subtitle">Subtitle</label>
+                  <input type="text" id="gfx-bkt-subtitle" class="input-text" placeholder="optional" data-gfx="grow">
                 </div>
                 <label class="qt-toggle" style="margin-top:6px;"><span>Show Win/Loss</span><span class="switch"><input type="checkbox" id="gfx-bkt-showrecord" checked><span class="slider"></span></span></label>
               </div>
@@ -4815,16 +4818,16 @@
                   <div style="margin-top:10px; display:flex; flex-direction:column; gap:12px;">
                     <div>
                       <div class="gfx-ctrl-row" style="margin-top:2px;">
-                        <label class="field-label" style="flex-shrink:0; white-space:nowrap;" for="gfx-bkt-slug">start.gg URL / Slug</label>
-                        <input type="text" id="gfx-bkt-slug" class="input-text" placeholder="tournament/slug/event/slug" style="flex:1; min-width:0;">
+                        <label class="field-label" data-gfx="fixnw" for="gfx-bkt-slug">start.gg URL / Slug</label>
+                        <input type="text" id="gfx-bkt-slug" class="input-text" placeholder="tournament/slug/event/slug" data-gfx="grow">
                       </div>
                       <div style="margin-top:8px;"><button class="btn btn-blue btn-sm" id="gfx-bkt-fetch">Import from start.gg</button></div>
                       <p id="gfx-bkt-sg-status" class="sps-desc" style="margin-top:6px;"></p>
                     </div>
                     <div>
                       <div class="gfx-ctrl-row" style="margin-top:2px;">
-                        <label class="field-label" style="flex-shrink:0; white-space:nowrap;" for="gfx-bkt-ch-slug">Challonge URL / Slug</label>
-                        <input type="text" id="gfx-bkt-ch-slug" class="input-text" placeholder="challonge.com/xxxxx  or  xxxxx" style="flex:1; min-width:0;">
+                        <label class="field-label" data-gfx="fixnw" for="gfx-bkt-ch-slug">Challonge URL / Slug</label>
+                        <input type="text" id="gfx-bkt-ch-slug" class="input-text" placeholder="challonge.com/xxxxx  or  xxxxx" data-gfx="grow">
                       </div>
                       <div style="margin-top:8px;"><button class="btn btn-blue btn-sm" id="gfx-bkt-ch-fetch">Import from Challonge</button></div>
                       <p class="field-hint" style="margin:6px 0 0;">Needs your Challonge API key in Settings. Auto-syncs scores live.</p>
@@ -4832,8 +4835,8 @@
                     </div>
                     <div>
                       <div class="gfx-ctrl-row" style="margin-top:2px;">
-                        <label class="field-label" style="flex-shrink:0; white-space:nowrap;" for="gfx-bkt-nx-slug">NXGEN Event Slug</label>
-                        <input type="text" id="gfx-bkt-nx-slug" class="input-text" placeholder="nxgen event slug" style="flex:1; min-width:0;">
+                        <label class="field-label" data-gfx="fixnw" for="gfx-bkt-nx-slug">NXGEN Event Slug</label>
+                        <input type="text" id="gfx-bkt-nx-slug" class="input-text" placeholder="nxgen event slug" data-gfx="grow">
                       </div>
                       <div style="margin-top:8px;"><button class="btn btn-blue btn-sm" id="gfx-bkt-nx-fetch">Import from NXGEN</button></div>
                       <p id="gfx-bkt-nx-status" class="sps-desc" style="margin-top:6px;"></p>
@@ -4845,7 +4848,7 @@
               <!-- Manual -->
               <div class="gfx-bkt-srcwrap" data-bktwrap="manual" style="display:none;">
                 <div class="gfx-ctrl-row" style="margin-top:2px;">
-                  <span class="field-label" style="flex-shrink:0;">Format</span>
+                  <span class="field-label" data-gfx="fix">Format</span>
                   <div class="gfx-src-tabs" id="gfx-bkt-mformat">
                     <button type="button" class="gfx-src-tab is-on" data-mfmt="single">Single Elim</button>
                     <button type="button" class="gfx-src-tab" data-mfmt="double">Double Elim</button>
@@ -4854,7 +4857,7 @@
                   </div>
                 </div>
                 <div class="gfx-ctrl-row">
-                  <label class="field-label" style="flex-shrink:0;" for="gfx-bkt-msize">Teams</label>
+                  <label class="field-label" data-gfx="fix" for="gfx-bkt-msize">Teams</label>
                   <select id="gfx-bkt-msize" class="input-select" style="max-width:120px;">
                     <option>4</option><option>6</option><option selected>8</option><option>12</option><option>16</option><option>24</option><option>32</option>
                   </select>
@@ -4872,7 +4875,7 @@
               <!-- Mini control center: pick the rows source right here (proxies the pop-out's
                    source tabs, so all existing load/apply wiring is reused untouched). -->
               <div class="gfx-ctrl-row">
-                <span class="field-label" style="flex-shrink:0;">Source</span>
+                <span class="field-label" data-gfx="fix">Source</span>
                 <div class="gfx-src-tabs" id="gfx-front-std-src">
                   <button type="button" class="gfx-src-tab" data-fstdsrc="league" title="Rows from an in-app league">League</button>
                   <button type="button" class="gfx-src-tab" data-fstdsrc="startgg" title="Rows from the loaded tournament event / bracket">Tournament</button>
@@ -4882,34 +4885,34 @@
               </div>
               <div id="gfx-std-league-select-wrap">
                 <div class="gfx-ctrl-row">
-                  <label class="field-label" style="flex-shrink:0;" for="gfx-std-league">League</label>
-                  <select id="gfx-std-league" class="input-select" style="flex:1; min-width:0;"><option value="">Select league…</option></select>
+                  <label class="field-label" data-gfx="fix" for="gfx-std-league">League</label>
+                  <select id="gfx-std-league" class="input-select" data-gfx="grow"><option value="">Select league…</option></select>
                 </div>
               </div>
               <div id="gfx-std-sg-select-wrap" style="display:none;">
                 <div class="gfx-ctrl-row">
-                  <label class="field-label" style="flex-shrink:0;" for="gfx-std-sg-event">Event</label>
-                  <select id="gfx-std-sg-event" class="input-select" style="flex:1; min-width:0;"><option value="">Select event…</option></select>
+                  <label class="field-label" data-gfx="fix" for="gfx-std-sg-event">Event</label>
+                  <select id="gfx-std-sg-event" class="input-select" data-gfx="grow"><option value="">Select event…</option></select>
                 </div>
               </div>
               <div id="gfx-std-bkt-select-wrap" style="display:none;">
                 <div class="gfx-ctrl-row">
-                  <label class="field-label" style="flex-shrink:0;" for="gfx-std-bkt-phase">Phase</label>
-                  <select id="gfx-std-bkt-phase" class="input-select" style="flex:1; min-width:0;"><option value="">Select phase…</option></select>
+                  <label class="field-label" data-gfx="fix" for="gfx-std-bkt-phase">Phase</label>
+                  <select id="gfx-std-bkt-phase" class="input-select" data-gfx="grow"><option value="">Select phase…</option></select>
                 </div>
                 <div class="gfx-ctrl-row" id="gfx-std-bkt-pool-row" style="display:none;">
-                  <label class="field-label" style="flex-shrink:0;" for="gfx-std-bkt-pool">Pool</label>
-                  <select id="gfx-std-bkt-pool" class="input-select" style="flex:1; min-width:0;"><option value="">Select pool…</option></select>
+                  <label class="field-label" data-gfx="fix" for="gfx-std-bkt-pool">Pool</label>
+                  <select id="gfx-std-bkt-pool" class="input-select" data-gfx="grow"><option value="">Select pool…</option></select>
                 </div>
                 <p class="field-hint" style="margin:4px 0 0;">Pulls that phase's standings table (Pool Play / Swiss / Round Robin). Push to snapshot it — it won't auto-follow later changes to the bracket.</p>
               </div>
               <div class="gfx-ctrl-row">
-                <label class="field-label" style="flex-shrink:0;" for="gfx-front-std-title">Title</label>
-                <input type="text" id="gfx-front-std-title" class="input-text" placeholder="STANDINGS" style="flex:1; min-width:0;">
+                <label class="field-label" data-gfx="fix" for="gfx-front-std-title">Title</label>
+                <input type="text" id="gfx-front-std-title" class="input-text" placeholder="STANDINGS" data-gfx="grow">
               </div>
               <div class="gfx-ctrl-row">
-                <label class="field-label" style="flex-shrink:0;" for="gfx-front-std-subtitle">Subtitle</label>
-                <input type="text" id="gfx-front-std-subtitle" class="input-text" placeholder="e.g. Week 4 · Group A" style="flex:1; min-width:0;">
+                <label class="field-label" data-gfx="fix" for="gfx-front-std-subtitle">Subtitle</label>
+                <input type="text" id="gfx-front-std-subtitle" class="input-text" placeholder="e.g. Week 4 · Group A" data-gfx="grow">
               </div>
               <label class="gfx-fp-toggle">
                 <span class="gfx-fp-lbl">Show Win / Loss</span>
@@ -4958,7 +4961,7 @@
                   <select id="gfx-sch-add-h" class="input-select" title="Hour" style="flex:0 0 58px;"></select>
                   <select id="gfx-sch-add-m" class="input-select" title="Minutes" style="flex:0 0 58px;"></select>
                   <select id="gfx-sch-add-ap" class="input-select" title="AM / PM" style="flex:0 0 62px;"><option>AM</option><option selected>PM</option></select>
-                  <button type="button" class="btn btn-secondary btn-sm" id="gfx-sch-add-front" style="flex-shrink:0;">Add</button>
+                  <button type="button" class="btn btn-secondary btn-sm" id="gfx-sch-add-front" data-gfx="fix">Add</button>
                 </div>
                 <datalist id="gfx-sch-teamlist"></datalist>
               </div>
@@ -4978,11 +4981,11 @@
             <div class="gfx-front-panel" data-frontkey="veto" id="gfx-front-veto" style="display:none;">
               <p class="field-hint" style="margin:0 0 10px;">A faster alternative to the guided veto — type in the final map list and scores directly. Uses the active game's map pool. Changes here save automatically.</p>
               <div class="gfx-ctrl-row">
-                <label class="field-label" style="flex-shrink:0;" for="mp-title">Title</label>
-                <input type="text" id="mp-title" class="input-text" placeholder="MAP POOL" style="flex:1; min-width:0;">
+                <label class="field-label" data-gfx="fix" for="mp-title">Title</label>
+                <input type="text" id="mp-title" class="input-text" placeholder="MAP POOL" data-gfx="grow">
               </div>
               <div class="gfx-ctrl-row">
-                <label class="field-label" style="flex-shrink:0;" for="mp-bestof">Best of</label>
+                <label class="field-label" data-gfx="fix" for="mp-bestof">Best of</label>
                 <select id="mp-bestof" class="input-select" style="max-width:110px;">
                   <option value="1">Bo1</option>
                   <option value="3">Bo3</option>
@@ -4993,7 +4996,7 @@
               </div>
               <div class="gfx-ctrl-row" style="justify-content:space-between; align-items:center;">
                 <span class="field-hint" id="mp-team-key" style="margin:0;"></span>
-                <button type="button" class="btn btn-secondary btn-sm" id="mp-from-series" title="Fill maps and scores from the series editor on Match — Teams" style="flex-shrink:0;">Fill from Series</button>
+                <button type="button" class="btn btn-secondary btn-sm" id="mp-from-series" title="Fill maps and scores from the series editor on Match — Teams" data-gfx="fix">Fill from Series</button>
               </div>
               <div id="mp-slots" class="mp-slots"></div>
               <div style="margin-top:8px;">
@@ -5002,7 +5005,7 @@
 
               <div style="margin-top:16px; padding-top:14px; border-top:1px solid var(--border);">
                 <div class="gfx-ctrl-row" style="margin-bottom:0;">
-                  <span class="field-label" style="flex-shrink:0;">Series overlay</span>
+                  <span class="field-label" data-gfx="fix">Series overlay</span>
                   <span class="sps-desc" id="mp-series-link-status" style="margin:0;"></span>
                 </div>
                 <p class="field-hint" style="margin:6px 0 0;">The compact lower-third companion — auto-shows these picks once any are made. Switch to the <strong>Series Score</strong> mode above to edit its format/stage or use it standalone before any maps are picked.</p>
@@ -5021,7 +5024,7 @@
                 <input id="draft-front-subtitle" class="input-text" placeholder="Subtext (e.g. BEST OF 5)" style="font-size:12px;">
                 <!-- Overwatch only: how many hero bans total (applies on the next Start Draft). -->
                 <div id="draft-front-owbans-row" style="display:none;align-items:center;gap:8px;">
-                  <span class="field-label" style="flex-shrink:0;">Hero bans</span>
+                  <span class="field-label" data-gfx="fix">Hero bans</span>
                   <select id="draft-front-owbans" class="input-select" style="flex:1;font-size:12px;">
                     <option value="4">4 — two per team</option>
                     <option value="2">2 — one per team</option>
@@ -5161,7 +5164,7 @@
                 <label class="field-label">Pull an event's whole crew from Show Deck shifts</label>
                 <div style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
                   <select id="credits-shift-event" class="input-select" style="flex:1; min-width:180px;"><option value="">Choose an event…</option></select>
-                  <button type="button" class="btn btn-secondary btn-sm" id="credits-pull-shifts" style="flex-shrink:0;">Pull crew</button>
+                  <button type="button" class="btn btn-secondary btn-sm" id="credits-pull-shifts" data-gfx="fix">Pull crew</button>
                 </div>
                 <p class="field-hint" style="margin:4px 0 0;">Saved shifts on the Show Deck are tagged with whichever event was live when you saved them. Pick one here to add everyone from its saved shifts — cams, host/observer, and any crew marked on-shift (producers, admins, socials included) — to the credits list above in one go.</p>
               </div>
@@ -5238,8 +5241,8 @@
 
               <!-- Headline -->
               <div class="gfx-ctrl-row">
-                <label class="field-label" style="flex-shrink:0;" for="preshow-headline">Headline</label>
-                <input type="text" id="preshow-headline" class="input-text" placeholder="e.g. THE LAST PLAYER TO QUALIFY" maxlength="140" style="flex:1; min-width:0;">
+                <label class="field-label" data-gfx="fix" for="preshow-headline">Headline</label>
+                <input type="text" id="preshow-headline" class="input-text" placeholder="e.g. THE LAST PLAYER TO QUALIFY" maxlength="140" data-gfx="grow">
               </div>
 
               <!-- Topics -->
@@ -5252,8 +5255,8 @@
 
               <!-- Return-to scene -->
               <div class="ps-return">
-                <label class="field-label" style="flex-shrink:0;" for="preshow-home-scene" title="What Return cuts back to — usually the Desk Show OBS scene">Return-to</label>
-                <select id="preshow-home-scene" class="input-select" style="flex:1; min-width:0;"><option value="">— None —</option></select>
+                <label class="field-label" data-gfx="fix" for="preshow-home-scene" title="What Return cuts back to — usually the Desk Show OBS scene">Return-to</label>
+                <select id="preshow-home-scene" class="input-select" data-gfx="grow"><option value="">— None —</option></select>
                 <button class="btn btn-secondary btn-sm" id="btn-preshow-return" type="button" title="Cut OBS back to the Return-to scene">↩ Return</button>
               </div>
 
@@ -5275,7 +5278,7 @@
               <p class="field-hint" style="margin:0 0 8px;">The compact "lower third" companion to the Map Pool board — safe to keep on screen during live play or over a caster shot. Automatically shows the maps &amp; scores you enter on the <strong>Map Pool</strong> scene once any are picked.</p>
               <!-- Format -->
               <div class="gfx-ctrl-row">
-                <span class="field-label" style="flex-shrink:0;">Format</span>
+                <span class="field-label" data-gfx="fix">Format</span>
                 <div class="gfx-pill-group" id="gfx-ser-format">
                   <button class="gfx-pill" data-bo="1">Bo1</button>
                   <button class="gfx-pill" data-bo="3">Bo3</button>
@@ -5285,8 +5288,8 @@
               </div>
               <!-- Stage -->
               <div class="gfx-ctrl-row">
-                <label class="field-label" style="flex-shrink:0;" for="gfx-ser-division">Stage</label>
-                <input type="text" id="gfx-ser-division" class="input-text" placeholder="Grand Finals…" style="flex:1; min-width:0;">
+                <label class="field-label" data-gfx="fix" for="gfx-ser-division">Stage</label>
+                <input type="text" id="gfx-ser-division" class="input-text" placeholder="Grand Finals…" data-gfx="grow">
               </div>
               <!-- Map-by-map grid (JS-rendered from state.match.maps) -->
               <div class="gfx-ser-map-head">
@@ -5314,12 +5317,12 @@
           <div class="gfx-scene-panel" data-gfxpanel="matchup" style="display:none;">
             <div class="gfx-scene-body" id="gfx-matchup-body">
               <div class="gfx-ctrl-row">
-                <label class="field-label" style="flex-shrink:0;" for="gfx-mu-blue">Team A</label>
-                <select id="gfx-mu-blue" class="input-select" style="flex:1; min-width:0;"><option value="">Select team…</option></select>
+                <label class="field-label" data-gfx="fix" for="gfx-mu-blue">Team A</label>
+                <select id="gfx-mu-blue" class="input-select" data-gfx="grow"><option value="">Select team…</option></select>
               </div>
               <div class="gfx-ctrl-row">
-                <label class="field-label" style="flex-shrink:0;" for="gfx-mu-orange">Team B</label>
-                <select id="gfx-mu-orange" class="input-select" style="flex:1; min-width:0;"><option value="">Select team…</option></select>
+                <label class="field-label" data-gfx="fix" for="gfx-mu-orange">Team B</label>
+                <select id="gfx-mu-orange" class="input-select" data-gfx="grow"><option value="">Select team…</option></select>
               </div>
               <div style="display:flex; gap:8px; margin-top:2px;">
                 <button class="btn btn-primary btn-sm" id="gfx-mu-apply">Set Teams</button>
@@ -5416,7 +5419,7 @@
                    card only (Graphics ▸ Standings) — single source of truth, no more duplicate
                    fields to fall out of sync. This column is just source + manual row tools now. -->
               <div class="gfx-ctrl-row">
-                <span class="field-label" style="flex-shrink:0;">Source</span>
+                <span class="field-label" data-gfx="fix">Source</span>
               </div>
               <div class="gfx-src-tabs gfx-src-tabs--stack" id="gfx-std-src">
                 <button type="button" class="gfx-src-tab is-on" data-stdsrc="league">League</button>
@@ -5479,8 +5482,8 @@
               <!-- Title now lives on the front card only (Graphics ▸ Schedule) — single source of
                    truth for Push/Apply/Save. -->
               <div class="gfx-ctrl-row">
-                <label class="field-label" style="flex-shrink:0;" for="gfx-sch-layout">Layout</label>
-                <select id="gfx-sch-layout" class="input-select" style="flex:1; min-width:0;">
+                <label class="field-label" data-gfx="fix" for="gfx-sch-layout">Layout</label>
+                <select id="gfx-sch-layout" class="input-select" data-gfx="grow">
                   <option value="cards">1 Column</option>
                   <option value="board">2 Columns</option>
                 </select>
@@ -5511,9 +5514,9 @@
               <!-- Manual add form -->
               <div id="gfx-sch-manual-wrap" style="display:none;">
                 <div style="display:flex; gap:6px; align-items:center;">
-                  <input type="text" id="gfx-sch-fa" class="input-text" placeholder="Team A" list="saved-teams-datalist" autocomplete="off" style="flex:1; min-width:0; font-size:11px;">
+                  <input type="text" id="gfx-sch-fa" class="input-text" placeholder="Team A" list="saved-teams-datalist" autocomplete="off" data-gfx="grow">
                   <span style="color:var(--muted); font-size:11px; flex-shrink:0;">vs</span>
-                  <input type="text" id="gfx-sch-fb" class="input-text" placeholder="Team B" list="saved-teams-datalist" autocomplete="off" style="flex:1; min-width:0; font-size:11px;">
+                  <input type="text" id="gfx-sch-fb" class="input-text" placeholder="Team B" list="saved-teams-datalist" autocomplete="off" data-gfx="grow">
                 </div>
                 <div style="display:flex; gap:6px; align-items:center; margin-top:5px; flex-wrap:wrap;">
                   <input type="text" id="gfx-sch-fround" class="input-text" placeholder="Round / Label" style="flex:1; min-width:80px; font-size:11px;">
@@ -5523,15 +5526,15 @@
                     <span>Stream</span>
                     <span class="switch"><input type="checkbox" id="gfx-sch-fstream"><span class="slider"></span></span>
                   </label>
-                  <button class="btn btn-primary btn-sm" id="gfx-sch-add" style="flex-shrink:0;">+ Add</button>
+                  <button class="btn btn-primary btn-sm" id="gfx-sch-add" data-gfx="fix">+ Add</button>
                 </div>
               </div>
               <!-- Team search panel -->
               <div id="gfx-sch-team-wrap" style="display:none;">
                 <input type="text" id="gfx-sch-team-slug" class="input-text" placeholder="Tournament URL or slug" autocomplete="off" style="width:100%; font-size:11px; box-sizing:border-box;">
                 <div style="display:flex; gap:6px; align-items:center; margin-top:5px;">
-                  <input type="text" id="gfx-sch-team-name" class="input-text" placeholder="Team name" list="saved-teams-datalist" autocomplete="off" style="flex:1; min-width:0; font-size:11px;">
-                  <button class="btn btn-primary btn-sm" id="gfx-sch-team-load" style="flex-shrink:0;">Search</button>
+                  <input type="text" id="gfx-sch-team-name" class="input-text" placeholder="Team name" list="saved-teams-datalist" autocomplete="off" data-gfx="grow">
+                  <button class="btn btn-primary btn-sm" id="gfx-sch-team-load" data-gfx="fix">Search</button>
                 </div>
                 <p id="gfx-sch-team-status" class="sps-desc" style="margin-top:4px;"></p>
                 <div id="gfx-sch-team-results" style="display:none; margin-top:4px;">
