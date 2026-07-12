@@ -3020,7 +3020,7 @@ const BROADCAST_TIERS = {
   // server-only (overlays get the derived sceneConfig instead)
   scenePresets: 'local',
   // live production/scoreboard state (from the state literal)
-  version: 'live', view: 'live', rlHudHidden: 'live', perfMode: 'live', activeGame: 'live', themesByGame: 'live',
+  version: 'live', view: 'live', rlHudHidden: 'live', perfMode: 'live', cloudRole: 'live', activeGame: 'live', themesByGame: 'live',
   eventName: 'live', gameLabel: 'live', roundLabel: 'live', speedUnit: 'live', fontFamily: 'live',
   clock24h: 'live', showSeries: 'live', defaultBestOf: 'live', facecamsEnabled: 'live',
   replayCams: 'live', activeBrandKitId: 'live', useBrandColors: 'live', colorMode: 'live',
@@ -3089,6 +3089,7 @@ function buildLiveState() {
       orange: { ...state.teams.orange, color: eff.orange, ownColor: state.teams.orange.color }
     },
     colorMode: state.colorMode || 'team',
+    cloudRole: currentCloudRole(),   // org-seat role (null = local/full access) — drives view-only UX
     startgg: publicStartgg,
     challonge: publicChallonge,
     nxgen: publicNxgen,
@@ -9809,6 +9810,11 @@ function startBridgeServer() {
     ws.on('message', (raw) => {
       let msg = null;
       try { msg = JSON.parse(raw.toString()); } catch (e) { return; }   // malformed frame — drop quietly
+      const _role = currentCloudRole();
+      if (msg && msg.type && !wsRoleAllows(msg.type, _role)) {
+        try { ws.send(JSON.stringify({ type: 'perm-denied', data: { type: msg.type, role: _role } })); } catch (e) {}
+        return;
+      }
       try {
         handleControlMessage(msg, ws);
       } catch (e) {
@@ -9843,6 +9849,25 @@ function startBridgeServer() {
 // through to the legacy switch. Migrate cases group-by-group — veto_*/draft_* are the
 // template: move the case body verbatim into registerWsHandlers({ type(msg, ws) {…} })
 // and delete the case. Handler crashes are caught + logged by the ws.on('message') wrapper.
+// ── Org-seat role enforcement ────────────────────────────────────────────────
+// The cloud session's role comes from the producer's org SEAT (Licenses & Seats
+// on the studio site). owner/admin/producer = full control. operator = full
+// production but no credential/token mutations. talent/analyst = VIEW-ONLY (the
+// app is their monitor + camera, not a control surface). Local sign-ins without
+// a cloud session carry no role → never gated, so the local-first app can't be
+// locked out by an outage.
+const WS_VIEW_SAFE = new Set([
+  'request_state', 'check_for_update', 'install_update', 'cloud_status'
+]);
+function wsRoleAllows(type, role) {
+  if (!role || role === 'owner' || role === 'admin' || role === 'producer') return true;
+  if (role === 'operator') return !/token|api_?key|secret|license/i.test(type);
+  return WS_VIEW_SAFE.has(type);   // talent / analyst
+}
+function currentCloudRole() {
+  try { const s = cloud.getSession(); return (s.authed && s.role) ? String(s.role) : null; } catch (_) { return null; }
+}
+
 const WS_HANDLERS = Object.create(null);
 function registerWsHandlers(map) {
   for (const k of Object.keys(map)) {
@@ -13089,6 +13114,21 @@ function handleControlMessage(msg, ws) {
           await cloud.removeOrgSeat(d.orgId, d.seatId);
           sendImportExportResult(ws, true, 'Seat revoked.', 'org-seats');
         } catch (e) { sendImportExportResult(ws, false, 'Revoke seat failed: ' + e.message, 'org-seats'); }
+      })();
+      break;
+    }
+
+    // Website-hosted camera-session feeds (masked VDO join links, see /cameras/[token]
+    // on the website) — thin passthrough so _pcamSources() can add them as a facecam group.
+    case 'cloud_list_camera_feeds': {
+      (async () => {
+        try {
+          if (!cloud.authed()) { ws.send(JSON.stringify({ type: 'cloud_camera_feeds', data: { ok: false, message: 'Sign in to the cloud first.', feeds: [] } })); return; }
+          const orgId = msg.data && msg.data.orgId;
+          if (!orgId) { ws.send(JSON.stringify({ type: 'cloud_camera_feeds', data: { ok: false, message: 'No organization workspace.', feeds: [] } })); return; }
+          const feeds = await cloud.listCameraFeeds(orgId);
+          ws.send(JSON.stringify({ type: 'cloud_camera_feeds', data: { ok: true, feeds } }));
+        } catch (e) { ws.send(JSON.stringify({ type: 'cloud_camera_feeds', data: { ok: false, message: e.message, feeds: [] } })); }
       })();
       break;
     }

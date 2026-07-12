@@ -5310,6 +5310,32 @@ function sendPerfPrefs() {
 ['check-perf-mode', 'check-perf-always', 'check-perf-noanim', 'check-perf-noprev', 'sel-perf-rate']
   .forEach((id) => el(id)?.addEventListener('change', sendPerfPrefs));
 
+// ── Org-seat role UX: talent/analyst run the app VIEW-ONLY (server enforces it —
+// every mutating control message is rejected); this just makes it visible and
+// hides the two pages that are all credentials (Settings / Integrations). ──
+let _cloudRoleShown = null;
+function applyCloudRole(role) {
+  role = role || null;
+  if (role === _cloudRoleShown) return;
+  _cloudRoleShown = role;
+  const viewOnly = role === 'talent' || role === 'analyst';
+  document.body.classList.toggle('role-viewonly', viewOnly);
+  let chip = el('role-chip');
+  if (role && role !== 'owner' && role !== 'admin' && role !== 'producer') {
+    if (!chip) {
+      chip = document.createElement('span');
+      chip.id = 'role-chip';
+      const host = el('discord-user-area');
+      if (host && host.parentNode) host.parentNode.insertBefore(chip, host);
+      else document.querySelector('.topbar-right')?.appendChild(chip);
+    }
+    chip.textContent = viewOnly ? ('VIEW-ONLY · ' + role.toUpperCase()) : role.toUpperCase();
+    chip.title = viewOnly
+      ? 'Your org seat role is ' + role + ' — the app is read-only for you (scores, scenes and settings are producer-controlled).'
+      : 'Your org seat role is ' + role + ' — credential and license settings are locked.';
+  } else if (chip) { chip.remove(); }
+}
+
 // ── Swap sidebar sides (nav ↔ quick-actions rail), persisted per machine ──
 const SWAP_SIDES_KEY = 'ne_sides_swapped';
 function applySwapSides(on) {
@@ -24875,6 +24901,7 @@ async function connect() {
       _r('applyDiscordState',  () => applyDiscordState(msg.data.discord));
       _r('eventOps',           () => { if (typeof window.eventOpsOnState === 'function') window.eventOpsOnState(); });
       _r('perfMode',           () => applyPerfMode(msg.data));
+      _r('cloudRole',          () => applyCloudRole(msg.data.cloudRole));
     } else if (msg.type === 'twitch_stream_state') {
       onTwitchStreamState(msg);
     } else if (msg.type === 'director_update') {
@@ -24982,6 +25009,9 @@ async function connect() {
       }
       showToast(msg.data.message || (msg.data.ok ? 'Signed in.' : 'Login failed.'), msg.data.ok ? '#22c55e' : '#c53030', msg.data.ok ? 3500 : 8000);
       if (msg.data.ok) { const p = el('cloud-login-pass'); if (p) p.value = ''; }
+    } else if (msg.type === 'perm-denied') {
+      const r = (msg.data && msg.data.role) || 'your seat role';
+      showToast('Not allowed: ' + ((msg.data && msg.data.type) || 'action') + ' — ' + r + ' seats are ' + (r === 'operator' ? 'blocked from credential changes' : 'view-only') + '. Ask your org\'s producer/admin.', '#c53030', 6000);
     } else if (msg.type === 'eventops-result') {
       if (typeof window.eventOpsResult === 'function') window.eventOpsResult(msg.data);
     } else if (msg.type === 'cloud_status') {

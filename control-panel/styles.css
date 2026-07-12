@@ -7578,6 +7578,12 @@ tr.lg2-drag-over { outline: 2px solid var(--accent, #4a9eff); outline-offset: -1
 .eo-path-score { font-weight: 700; text-align: center; }
 .eo-path-opp { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+/* Org-seat role chip + view-only mode (server rejects mutations; this is the visible half) */
+#role-chip { display: inline-flex; align-items: center; height: 26px; padding: 0 10px; border-radius: 999px;
+  border: 1px solid rgba(245,158,11,.5); background: rgba(245,158,11,.12); color: #fbbf24;
+  font-size: 9.5px; font-weight: 800; letter-spacing: .08em; white-space: nowrap; }
+body.role-viewonly #tab-ajustes, body.role-viewonly #tab-integrations { display: none !important; }
+
 /* Topbar update chip — visible only when an update is available/downloading/ready */
 .topbar-update-chip { display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 12px;
   border-radius: 999px; border: 1px solid color-mix(in srgb, var(--cp-accent, #ec4899) 55%, transparent);
