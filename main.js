@@ -559,6 +559,19 @@ function setupApp() {
           }
         });
       }
+      // Game performance mode: while an RL match is live, drop every app process
+      // (main + renderers + GPU helper) below-normal so the game wins scheduling;
+      // restore normal priority when the match ends.
+      if (typeof server.setPerfPriorityCallback === 'function') {
+        const os = require('os');
+        server.setPerfPriorityCallback((on) => {
+          const prio = on ? os.constants.priority.PRIORITY_BELOW_NORMAL : os.constants.priority.PRIORITY_NORMAL;
+          const pids = [process.pid, ...app.getAppMetrics().map((m) => m.pid)];
+          let ok = 0;
+          pids.forEach((pid) => { try { os.setPriority(pid, prio); ok++; } catch (_) {} });
+          console.log(`[Perf] ${on ? 'lowered' : 'restored'} priority on ${ok}/${pids.length} app processes`);
+        });
+      }
     } catch (e) {
       // A startup throw here used to die silently (blank window, no backend). Surface it.
       const msg = (e && e.stack) ? e.stack : String(e);

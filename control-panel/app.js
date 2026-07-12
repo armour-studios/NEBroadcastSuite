@@ -5234,6 +5234,41 @@ function syncGateUpdateStatus(s) {
   }
 }
 
+// ── Game performance mode — while an RL match is live the server flags perfMode.active;
+// the panel pauses its own paint load (previews, animations) so borderless gameplay on the
+// same PC stays smooth. Broadcast overlays in OBS are untouched. ──
+let _perfLive = false;
+function applyPerfMode(data) {
+  const pm = (data && data.perfMode) || {};
+  const cb = el('check-perf-mode');
+  if (cb && document.activeElement !== cb) cb.checked = pm.enabled !== false;
+  const on = !!(pm.active && pm.enabled !== false);
+  if (on === _perfLive) return;
+  _perfLive = on;
+  document.body.classList.toggle('perf-live', on);
+  // Shared fixed scene-preview iframe: unload while live (it runs a full overlay page).
+  const pv = el('gfx-fixed-preview-iframe');
+  if (pv) {
+    if (on) { if (pv.src && pv.src !== 'about:blank') pv.dataset.perfSrc = pv.src; pv.src = 'about:blank'; }
+    else if (pv.dataset.perfSrc) { pv.src = pv.dataset.perfSrc; delete pv.dataset.perfSrc; }
+  }
+  // OBS program preview camera: stop decoding while the game is live.
+  const v = el('obs-prev-video');
+  if (v) { try { if (on) v.pause(); else if (v.srcObject) v.play().catch(() => {}); } catch (_) {} }
+  let chip = el('perf-live-chip');
+  if (on) {
+    if (!chip) {
+      chip = document.createElement('div');
+      chip.id = 'perf-live-chip';
+      chip.textContent = 'PERFORMANCE MODE — previews paused while the match is live';
+      document.body.appendChild(chip);
+    }
+  } else if (chip) chip.remove();
+}
+el('check-perf-mode')?.addEventListener('change', function () {
+  send('set_perf_mode', { enabled: this.checked });
+});
+
 // ── Swap sidebar sides (nav ↔ quick-actions rail), persisted per machine ──
 const SWAP_SIDES_KEY = 'ne_sides_swapped';
 function applySwapSides(on) {
@@ -6012,6 +6047,7 @@ function applyState(data) {
   if (typeof window._gfxRefreshBracketLeagues === 'function') window._gfxRefreshBracketLeagues(data);
   if (typeof window._gfxRefreshBracketOrgStatus === 'function') window._gfxRefreshBracketOrgStatus(data);
   if (typeof window._gfxRefreshScheduleQueue === 'function') window._gfxRefreshScheduleQueue(data);
+  if (typeof window._gcRefresh === 'function') window._gcRefresh(data);
   updateFacecamTeamHeaders(teams, data);
   if (typeof applyCommercialState === 'function') applyCommercialState(data);
   if (typeof lgHydrate === 'function') lgHydrate(data.leagues);
@@ -6475,7 +6511,17 @@ const ROLES_BY_GAME = {
   'honor-of-kings':['Clear', 'Mid', 'Farm', 'Roam', 'Support'],
   cod:             ['Slayer', 'Objective', 'Anchor', 'Flex', 'IGL']
 };
-function rolesForActiveGame() { return ROLES_BY_GAME[currentState.activeGame] || []; }
+// Extends (never replaces) the built-in role list with any roles added via an active Game Config
+// for this game (currentState.gameConfigs, keyed by gameId) — dedupe-append, same "extend the
+// built-in baseline" spirit as the server-side map/character merges.
+function rolesForActiveGame() {
+  const built = ROLES_BY_GAME[currentState.activeGame] || [];
+  const cfg = (currentState.gameConfigs || {})[currentState.activeGame];
+  const extra = (cfg && Array.isArray(cfg.roles)) ? cfg.roles : [];
+  if (!extra.length) return built;
+  const seen = new Set(built.map((r) => r.toLowerCase()));
+  return built.concat(extra.filter((r) => r && !seen.has(String(r).toLowerCase())));
+}
 
 // A role control: a dropdown of the game's preset roles (+ a Custom… → free-text), or a plain
 // text field for games with no fixed roles. onPick(value) fires when the role changes.
@@ -7991,6 +8037,46 @@ function updateFacecamTeamHeaders(teams, data) {
     });
   });
 }
+// Normalize any pasteable color string to '#rrggbb' (lowercase), or null if unparseable.
+// Accepts: #rgb / #rgba / #rrggbb / #rrggbbaa (with or without '#', '0x' prefix ok — alpha is
+// dropped), rgb()/rgba()/hsl()/hsla() notation and CSS named colors (parsed by Chromium).
+function normalizeAnyColor(input) {
+  let v = String(input || '').trim();
+  if (!v) return null;
+  const bare = v.replace(/^0x/i, '');
+  if (/^([0-9a-f]{3}|[0-9a-f]{4}|[0-9a-f]{6}|[0-9a-f]{8})$/i.test(bare)) v = '#' + bare;
+  let m = /^#([0-9a-f])([0-9a-f])([0-9a-f])[0-9a-f]?$/i.exec(v);
+  if (m) return ('#' + m[1] + m[1] + m[2] + m[2] + m[3] + m[3]).toLowerCase();
+  m = /^#([0-9a-f]{6})(?:[0-9a-f]{2})?$/i.exec(v);
+  if (m) return ('#' + m[1]).toLowerCase();
+  if (typeof CSS === 'undefined' || !CSS.supports('color', v)) return null;
+  const probe = document.createElement('canvas').getContext('2d');
+  probe.fillStyle = v;
+  const out = probe.fillStyle; // Chromium serializes to '#rrggbb' or 'rgba(r, g, b, a)'
+  if (/^#[0-9a-f]{6}$/i.test(out)) return out.toLowerCase();
+  m = /^rgba?\((\d+),\s*(\d+),\s*(\d+)/.exec(out);
+  if (m) {
+    const h = (n) => Number(n).toString(16).padStart(2, '0');
+    return '#' + h(m[1]) + h(m[2]) + h(m[3]);
+  }
+  return null;
+}
+
+// Pair a native color picker with a free-text hex field: picker edits mirror into the text
+// field; typing/pasting any color style into the text field updates the picker once it parses.
+function wireColorHexPair(pickId, hexId) {
+  const pick = el(pickId), hex = el(hexId);
+  if (!pick || !hex) return;
+  pick.addEventListener('input', () => { hex.value = pick.value; hex.style.borderColor = ''; });
+  const apply = () => {
+    const norm = normalizeAnyColor(hex.value);
+    if (norm) { pick.value = norm; hex.value = norm; hex.style.borderColor = ''; }
+    else if (hex.value.trim()) { hex.style.borderColor = '#ef4444'; }
+  };
+  hex.addEventListener('change', apply);
+  hex.addEventListener('paste', () => setTimeout(apply, 0));
+}
+
 // Pick black or white text for a given hex background.
 function contrastText(hex) {
   const m = /^#?([0-9a-f]{6})$/i.exec((hex || '').trim());
@@ -9402,8 +9488,9 @@ el('settings-accent')?.addEventListener('change', function () {
   send('set_global_accent', { color: this.value });
 });
 el('settings-accent-hex')?.addEventListener('change', function () {
-  const v = this.value.trim();
-  if (/^#[0-9a-fA-F]{6}$/.test(v)) {
+  const v = normalizeAnyColor(this.value);
+  if (v) {
+    this.value = v;
     const pick = el('settings-accent'); if (pick) pick.value = v;
     send('set_global_accent', { color: v });
   }
@@ -9504,7 +9591,52 @@ function applyCloudStatus(s) {
   if (push) push.disabled = !s.authed;
   if (refresh) refresh.disabled = !s.authed;
   if (s.authed) send('cloud_list_profiles');
+
+  // ── Org workspace / broadcast-seat licensing ── workspaceId is a real Organization
+  // id when the account has an active seat, or the synthetic "user:<id>" personal
+  // workspace otherwise — only real orgs get the seat-management panel.
+  window._cloudWorkspaceId = s.workspaceId || null;
+  window._cloudRole = s.role || null;
+  const isOrg = !!(s.workspaceId && !String(s.workspaceId).startsWith('user:'));
+  const wsLine = el('cloud-workspace-line');
+  if (wsLine) {
+    wsLine.textContent = s.authed
+      ? (isOrg ? `Workspace: ${s.workspaceId} · Role: ${s.role}` : 'Personal workspace (not in an organization)')
+      : '';
+  }
+  const seatsBlock = el('org-seats-block');
+  const canManage = isOrg && (s.role === 'owner' || s.role === 'admin');
+  if (seatsBlock) seatsBlock.style.display = canManage ? '' : 'none';
+  if (canManage) send('cloud_list_org_seats', { orgId: s.workspaceId });
 }
+
+const ORG_SEAT_ROLES = ['owner', 'admin', 'producer', 'operator', 'talent', 'analyst'];
+function renderOrgSeats(d) {
+  const wrap = el('org-seats-list'); if (!wrap) return;
+  const esc = (x) => String(x == null ? '' : x).replace(/[&<>"]/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
+  if (!d || !d.ok) { wrap.innerHTML = `<div class="section-desc">${d && d.message ? esc(d.message) : 'Could not load seats.'}</div>`; return; }
+  const seats = d.seats || [];
+  const limitLine = el('org-seats-limit');
+  if (limitLine) limitLine.textContent = d.seatLimit != null ? `${d.seatsUsed ?? seats.length} / ${d.seatLimit} seats used` : 'Broadcast licensing not enabled for this org.';
+  wrap.innerHTML = seats.length
+    ? seats.map((seat) => `<div class="preset-item">
+        <span class="preset-name">${esc((seat.user && (seat.user.name || seat.user.username)) || seat.userId)} — ${esc(seat.role)}</span>
+        <div class="preset-actions"><button class="btn btn-danger btn-xs org-seat-remove" data-id="${esc(seat.id)}">Remove</button></div>
+      </div>`).join('')
+    : '<div class="section-desc">No producers added yet.</div>';
+  wrap.querySelectorAll('.org-seat-remove').forEach((b) => b.addEventListener('click', () => {
+    if (!window._cloudWorkspaceId) return;
+    send('cloud_remove_org_seat', { orgId: window._cloudWorkspaceId, seatId: b.dataset.id });
+  }));
+}
+el('btn-org-seat-add')?.addEventListener('click', () => {
+  if (!window._cloudWorkspaceId) return;
+  const userId = (el('org-seat-userid')?.value || '').trim();
+  const role = el('org-seat-role')?.value || 'producer';
+  if (!userId) { const r = el('org-seats-result'); if (r) { r.textContent = 'Enter the producer’s Nameless user id.'; r.style.color = 'red'; } return; }
+  send('cloud_add_org_seat', { orgId: window._cloudWorkspaceId, userId, role });
+  el('org-seat-userid').value = '';
+});
 function renderCloudProfiles(d) {
   const wrap = el('cloud-profiles-list'); if (!wrap) return;
   if (!d || !d.ok) { wrap.innerHTML = `<div class="section-desc">${(d && d.message) ? String(d.message).replace(/</g,'&lt;') : 'Cloud unavailable.'}</div>`; return; }
@@ -16512,6 +16644,11 @@ function applyBracketState(data) {
 
   renderBracketPhasePool(bracket);
   renderBracketModeBar(bracket);
+  // Reflect the active team focus in the FIND inputs so it's visible + clearable. A Team-queue search
+  // (or a FIND) sets startgg.focusTeam and zooms the bracket to that team; without this the FIND box
+  // looked empty while the bracket stayed stuck on the team, with no obvious way to clear it.
+  const _ft = (currentState.startgg && currentState.startgg.focusTeam) || '';
+  ['bracket-team-search', 'gfx-bkt-cc-search'].forEach((id) => { const x = el(id); if (x && document.activeElement !== x && (x.value || '') !== _ft) x.value = _ft; });
   populateMatchPicker(bracket.matches);
 
   const statusEl = el('bracket-status');
@@ -17295,6 +17432,16 @@ el('btn-refresh-obs-collections')?.addEventListener('click', () =>
 el('btn-refresh-obs-profiles')?.addEventListener('click', () =>
   populateBrandObsSelects(el('select-brand-obs-collection')?.value || '', el('select-brand-obs-profile')?.value || ''));
 
+// Set a brand color picker + its paired hex text field together. Stored kit colors may be any
+// pasteable style (older kits, hand-edited state) — normalize for the picker, which only takes #rrggbb.
+function setBrandColorField(pickId, value) {
+  const norm = normalizeAnyColor(value) || '#000000';
+  const pick = el(pickId); if (pick) pick.value = norm;
+  const hex = el(pickId + '-hex'); if (hex) { hex.value = norm; hex.style.borderColor = ''; }
+}
+wireColorHexPair('input-brand-color', 'input-brand-color-hex');
+wireColorHexPair('input-brand-accent', 'input-brand-accent-hex');
+
 function resetBrandForm() {
   editingBrandId = null;
   editingBrandThemes = {};
@@ -17306,8 +17453,8 @@ function resetBrandForm() {
   editingActivePackageId = pkg.id;
   el('brand-editor-title').textContent = 'New Brand Kit';
   el('input-brand-name').value = '';
-  el('input-brand-color').value = '#055fdb';
-  el('input-brand-accent').value = '#e97139';
+  setBrandColorField('input-brand-color', '#055fdb');
+  setBrandColorField('input-brand-accent', '#e97139');
   el('input-brand-logo').value = '';
   el('input-sponsor-name').value = '';
   el('input-sponsor-logo').value = '';
@@ -17700,8 +17847,8 @@ function loadBrandIntoForm(k) {
   editingPackageId = editingActivePackageId;
   el('brand-editor-title').textContent = 'Edit: ' + k.name;
   el('input-brand-name').value = k.name || '';
-  el('input-brand-color').value = k.color || '#055fdb';
-  el('input-brand-accent').value = k.accent || '#e97139';
+  setBrandColorField('input-brand-color', k.color || '#055fdb');
+  setBrandColorField('input-brand-accent', k.accent || '#e97139');
   setBrandLogoPreview(pendingBrandLogo);
   populateBrandDesign();
   loadPackageIntoEditor(brandPackages.find((p) => p.id === editingPackageId));
@@ -17820,8 +17967,8 @@ function saveBrandKitFromEditor(activate) {
     id: editingBrandId || undefined,
     name,
     logo: pendingBrandLogo || null,
-    color: el('input-brand-color').value,
-    accent: el('input-brand-accent').value,
+    color: normalizeAnyColor(el('input-brand-color-hex')?.value) || el('input-brand-color').value,
+    accent: normalizeAnyColor(el('input-brand-accent-hex')?.value) || el('input-brand-accent').value,
     themes: editingBrandThemes,
     packages: brandPackages,
     activePackageId: editingActivePackageId,
@@ -24685,6 +24832,7 @@ async function connect() {
       _r('applyReplayMonitors',() => applyReplayMonitors(msg.data.replay));
       _r('applyDiscordState',  () => applyDiscordState(msg.data.discord));
       _r('eventOps',           () => { if (typeof window.eventOpsOnState === 'function') window.eventOpsOnState(); });
+      _r('perfMode',           () => applyPerfMode(msg.data));
     } else if (msg.type === 'twitch_stream_state') {
       onTwitchStreamState(msg);
     } else if (msg.type === 'director_update') {
@@ -24769,8 +24917,18 @@ async function connect() {
         rlIcon.classList.toggle('connected', msg.data.connected);
       }
     } else if (msg.type === 'import-export-result') {
-      el('import-export-result').textContent = msg.data.message;
-      el('import-export-result').style.color = msg.data.result ? 'green' : 'red';
+      // Game Config uses the same generic result channel as Producer Profile (sendImportExportResult
+      // server-side) — route by the context field so each feature's own status line updates, not both.
+      if (msg.data.context === 'game-config' && typeof window._gcHandleImportExportResult === 'function') {
+        window._gcHandleImportExportResult(msg.data.message, msg.data.result);
+      } else if (msg.data.context === 'org-seats') {
+        const r = el('org-seats-result');
+        if (r) { r.textContent = msg.data.message || ''; r.style.color = msg.data.result ? 'green' : 'red'; }
+        if (msg.data.result && window._cloudWorkspaceId) send('cloud_list_org_seats', { orgId: window._cloudWorkspaceId });
+      } else {
+        el('import-export-result').textContent = msg.data.message;
+        el('import-export-result').style.color = msg.data.result ? 'green' : 'red';
+      }
     } else if (msg.type === 'cloud-email-login') {
       // Email sign-in result — show it under the form (linkified: denials point at the
       // studio site to apply/sign) and toast it.
@@ -24790,6 +24948,8 @@ async function connect() {
       renderCloudProfiles(msg.data);
     } else if (msg.type === 'cloud_profile_saved') {
       send('cloud_list_profiles');   // refresh the list after a push
+    } else if (msg.type === 'cloud_org_seats') {
+      renderOrgSeats(msg.data);
     } else if (msg.type === 'startgg-result') {
       ['startgg-result', 'sgg-status'].forEach((id) => {
         const r = el(id);

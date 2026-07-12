@@ -213,6 +213,11 @@ let state = {
   version: appVersion,
   view: 'hud',              // 'hud' | 'scoreboard' | 'goal'
   rlHudHidden: false,       // manual "hide UI" — blanks the live RL HUD overlay for a clean feed (not persisted)
+  // Game performance mode: while an RL match is LIVE the app sheds load so borderless
+  // gameplay stays smooth — panel previews/animations pause, the app's process priority
+  // drops below the game's, and full-state broadcasts coalesce wider. Broadcast overlays
+  // are untouched. enabled = producer setting (persisted); active = engaged right now.
+  perfMode: { enabled: true, active: false },
   activeGame: 'rocket-league',
   themesByGame: { 'rocket-league': 'classic', 'csgo': 'cs2-hud' },
   eventName: '',   // fresh installs start with no preset title — the producer sets their own
@@ -2115,6 +2120,7 @@ function loadState() {
       }
       if (Array.isArray(saved.leagues)) state.leagues = saved.leagues.map(migrateLeague);
       if (Array.isArray(saved.myEvents)) state.myEvents = saved.myEvents;
+      if (saved.perfMode && typeof saved.perfMode === 'object') state.perfMode.enabled = saved.perfMode.enabled !== false;
       if (saved.eventOps && typeof saved.eventOps === 'object') {
         // Rows saved by the first release were objects ({team,player,…}); the store is
         // now the full spreadsheet (headers + string-array rows). Drop the legacy shape.
@@ -2367,6 +2373,7 @@ function _saveAppStateNow(sync = false) {
       roundLabel: state.roundLabel,
       speedUnit: state.speedUnit,
       teamRecord: state.teamRecord,
+      perfMode: { enabled: !state.perfMode || state.perfMode.enabled !== false },
       autoTeamsFromGame: state.autoTeamsFromGame,
       startggLeagueStandings: state.startggLeagueStandings,
       fontFamily: state.fontFamily,
@@ -2996,7 +3003,7 @@ const BROADCAST_TIERS = {
   // server-only (overlays get the derived sceneConfig instead)
   scenePresets: 'local',
   // live production/scoreboard state (from the state literal)
-  version: 'live', view: 'live', rlHudHidden: 'live', activeGame: 'live', themesByGame: 'live',
+  version: 'live', view: 'live', rlHudHidden: 'live', perfMode: 'live', activeGame: 'live', themesByGame: 'live',
   eventName: 'live', gameLabel: 'live', roundLabel: 'live', speedUnit: 'live', fontFamily: 'live',
   clock24h: 'live', showSeries: 'live', defaultBestOf: 'live', facecamsEnabled: 'live',
   replayCams: 'live', activeBrandKitId: 'live', useBrandColors: 'live', colorMode: 'live',
@@ -8551,6 +8558,21 @@ function disconnectRL() {
   if (rlReconnectTimer) { clearTimeout(rlReconnectTimer); rlReconnectTimer = null; }
   if (rlSocket) { try { rlSocket.destroy(); } catch (e) {} rlSocket = null; }
   if (state.rlConnected) { state.rlConnected = false; broadcast(bridgeClients, { type: 'rl_status', data: { connected: false } }); }
+  setPerfActive(false);
+}
+
+// ── Game performance mode (see state.perfMode) ──────────────────────────────
+// Engaged at the RL kickoff, released at match end / RL disconnect. main.js registers
+// the priority callback (drops every app process below-normal while the game is live).
+let _perfPriorityCb = null;
+function setPerfActive(on) {
+  const pm = state.perfMode || (state.perfMode = { enabled: true, active: false });
+  const want = !!on && pm.enabled !== false;
+  if (!!pm.active === want) return;
+  pm.active = want;
+  try { if (typeof _perfPriorityCb === 'function') _perfPriorityCb(want); } catch (e) { console.warn('[Perf] priority change failed:', e.message); }
+  console.log('[Perf] game performance mode', want ? 'ON (match live)' : 'off');
+  broadcastFullState();
 }
 
 function connectToRL() {
@@ -8760,6 +8782,7 @@ function fireOvertime() {
 // parked in post-game waiting for it. Called from the kickoff countdown (primary) and the first
 // live clock tick (fallback, in case the API build doesn't emit countdown events).
 function returnToInGameForKickoff() {
+  setPerfActive(true);   // a match is live — shed app load until it ends (no-op if disabled)
   if (!state.awaitingKickoff) return;
   flowBus.emit('rl_round_started', {});
   state.awaitingKickoff = false;
@@ -9287,6 +9310,7 @@ function explainTwitchApiError(e) {
 }
 
 function handleMatchEnded(data) {
+  setPerfActive(false);     // match over — restore previews/animations/priority
   resetOvertimeTrigger();   // game over — clear the OT latch so the next game can trigger its own
   state.awaitingKickoff = true;   // we're in post-game — return to the in-game overlay on the next kickoff (clock_started)
   // Stats: finalize this game before series scores are updated
@@ -9866,6 +9890,13 @@ registerWsHandlers({
     if (d.teamStart === 'a' || d.teamStart === 'b') state.draft.teamStart = d.teamStart;
     // Overwatch ban-count preference — stored now, applied on the next draftStart (rebuilds the sequence).
     if (d.owBanCount != null) state.draft.owBanCount = Number(d.owBanCount) <= 2 ? 2 : 4;
+    saveAppState(); broadcastFullState();
+  },
+  // Game performance mode preference (Settings ▸ Performance).
+  set_perf_mode(msg) {
+    const pm = state.perfMode || (state.perfMode = { enabled: true, active: false });
+    pm.enabled = !!(msg.data && msg.data.enabled);
+    if (!pm.enabled) setPerfActive(false);
     saveAppState(); broadcastFullState();
   },
   // ── Event Ops (ESPORTS ▸ Event Ops): universal CSV table store + true-seed pull ──
@@ -12985,6 +13016,45 @@ function handleControlMessage(msg, ws) {
       break;
     }
 
+    // ── Org broadcast-seat management (licensing) — owner/admin only, server-side
+    // gated by the backend's canManageStaff() check; these are thin passthroughs. ──
+    case 'cloud_list_org_seats': {
+      (async () => {
+        try {
+          if (!cloud.authed()) { ws.send(JSON.stringify({ type: 'cloud_org_seats', data: { ok: false, message: 'Sign in to the cloud first.', seats: [] } })); return; }
+          const orgId = msg.data && msg.data.orgId;
+          if (!orgId) { ws.send(JSON.stringify({ type: 'cloud_org_seats', data: { ok: false, message: 'No organization workspace.', seats: [] } })); return; }
+          const res = await cloud.listOrgSeats(orgId);
+          ws.send(JSON.stringify({ type: 'cloud_org_seats', data: { ok: true, ...res } }));
+        } catch (e) { ws.send(JSON.stringify({ type: 'cloud_org_seats', data: { ok: false, message: e.message, seats: [] } })); }
+      })();
+      break;
+    }
+    case 'cloud_add_org_seat': {
+      (async () => {
+        try {
+          if (!cloud.authed()) { sendImportExportResult(ws, false, 'Sign in to the cloud first.', 'org-seats'); return; }
+          const d = msg.data || {};
+          if (!d.orgId || !d.userId || !d.role) { sendImportExportResult(ws, false, 'orgId, userId, and role are required.', 'org-seats'); return; }
+          await cloud.addOrgSeat(d.orgId, { userId: d.userId, role: d.role });
+          sendImportExportResult(ws, true, 'Seat granted.', 'org-seats');
+        } catch (e) { sendImportExportResult(ws, false, 'Add seat failed: ' + e.message, 'org-seats'); }
+      })();
+      break;
+    }
+    case 'cloud_remove_org_seat': {
+      (async () => {
+        try {
+          if (!cloud.authed()) { sendImportExportResult(ws, false, 'Sign in to the cloud first.', 'org-seats'); return; }
+          const d = msg.data || {};
+          if (!d.orgId || !d.seatId) { sendImportExportResult(ws, false, 'orgId and seatId are required.', 'org-seats'); return; }
+          await cloud.removeOrgSeat(d.orgId, d.seatId);
+          sendImportExportResult(ws, true, 'Seat revoked.', 'org-seats');
+        } catch (e) { sendImportExportResult(ws, false, 'Revoke seat failed: ' + e.message, 'org-seats'); }
+      })();
+      break;
+    }
+
     case 'request_state':
       ws.send(JSON.stringify(getFullState()));
       break;
@@ -13174,6 +13244,9 @@ function handleControlMessage(msg, ws) {
       // team → clear until a team search populates it (so stale event extras don't show as "team").
       // manual → detached from start.gg entirely; the poll never touches the board (Clear uses this).
       state.upcoming.matches = (mode === 'event') ? buildEventUpcomingExtras(state.startgg.queue, []) : [];
+      // Leaving team mode drops the single-team focus so the bracket overlay shows the FULL event again
+      // (a team search sets startgg.focusTeam; nothing cleared it, so the bracket stayed stuck on that team).
+      if (mode !== 'team') state.startgg.focusTeam = '';
       saveAppState();
       broadcastFullState();
       break;
@@ -14832,7 +14905,9 @@ function broadcastFullState() {
   _bcTimer = setTimeout(() => {
     _bcTimer = null;
     if (_bcPending) { _bcPending = false; broadcastFullState(); }
-  }, 40);
+    // Wider coalescing while a match is live — less main-process stringify/send churn
+    // competing with the game. (RL tick data rides the tiny state_update channel anyway.)
+  }, (state.perfMode && state.perfMode.active) ? 250 : 40);
 }
 
 // ─── HTTP Server (port 3000) — serves overlay ────────────────────────────────
@@ -20110,6 +20185,11 @@ module.exports.setLauncherLaunchCallback = function (cb) {
 
 module.exports.setLauncherResizeCallback = function (cb) {
   _launcherResizeCb = cb;
+};
+
+// Game performance mode: main.js lowers/restores every app process's priority here.
+module.exports.setPerfPriorityCallback = function (cb) {
+  _perfPriorityCb = cb;
 };
 
 module.exports.setRlSpectatorUiHotkeyChangeCallback = function (cb) {
