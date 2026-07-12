@@ -358,7 +358,8 @@ function placeShowDeck(tab) {
     const byId = {}; lib.forEach((l) => { if (l && l.id) byId[l.id] = l; });
     const slotName = (n) => { const e = lineup.find((x) => Number(x.slot) === n); const p = e && byId[e.libraryId]; return (p && p.name) || ''; };
     const shifts = (data.casters && data.casters.shifts) || [];
-    const sig = JSON.stringify({ c: crew.map((c) => [c.id, c.name, c.handle, c.group, !!c.active, !!c.workedEvent, c.country || '']), s: [1, 2, 3, 4].map(slotName), r: roles, l: labels, sh: shifts.map((s) => s.id + s.name) });
+    const supportList = (data.casters && Array.isArray(data.casters.support)) ? data.casters.support : [];
+    const sig = JSON.stringify({ c: crew.map((c) => [c.id, c.name, c.handle, c.group, !!c.active, !!c.workedEvent, c.country || '']), s: [1, 2, 3, 4].map(slotName), r: roles, l: labels, sh: shifts.map((s) => s.id + s.name), sup: supportList.map((s) => s.crewId + (s.role || '')) });
     if (sig === window._tdSig) return;
     window._tdSig = sig;
     const disp = (c) => c.handle || c.name;   // gamertag-first, matching the desk
@@ -433,16 +434,18 @@ function placeShowDeck(tab) {
         ? worked.map((c) => memberChip(c, 'data-worked-rm')).join('')
         : '<span class="field-hint" style="margin:0;">No one credited yet — anyone on shift or on the desk is added automatically.</span>';
     }
-    // Support crew — producers / tournament-ops / socials (no camera slot). Shown here so they get
-    // credited too; searching + assigning reclassifies an EXISTING crew member's group.
+    // Support crew — producers / tournament-ops / socials (no camera slot). EVENT-scoped
+    // (state.casters.support): adding/removing here only changes tonight's deck — the crew
+    // record and its group on the Crew page are never touched.
     const supportWrap = el('td-support-list');
     if (supportWrap) {
-      const support = crew.filter((c) => TD_SUPPORT_GROUPS.includes(c.group));
-      supportWrap.innerHTML = support.length ? support.map((c) =>
+      const crewById = {}; crew.forEach((c) => { if (c && c.id) crewById[c.id] = c; });
+      const support = supportList.map((s) => ({ s, c: crewById[s.crewId] })).filter((x) => x.c);
+      supportWrap.innerHTML = support.length ? support.map(({ s, c }) =>
         `<span class="dcc-support-chip" data-id="${esc(c.id)}">`
         + `<span class="nm">${esc(disp(c))}</span>`
-        + `<span class="rl">${esc(c.role || TD_SUPPORT_LABEL[c.group] || '')}</span>`
-        + `<button type="button" class="rm" data-support-rm="${esc(c.id)}" title="Remove from support crew">&times;</button></span>`
+        + `<span class="rl">${esc(s.role || c.role || TD_SUPPORT_LABEL[c.group] || '')}</span>`
+        + `<button type="button" class="rm" data-support-rm="${esc(c.id)}" title="Remove from tonight's support crew — their profile stays in Crew">&times;</button></span>`
       ).join('') : '<span class="dcc-support-empty">No producers, ops or socials added yet.</span>';
     }
     // Shared crew datalist for the On shift / Worked / Support search boxes.
@@ -514,23 +517,23 @@ function placeShowDeck(tab) {
     const m = _tdFindCrew(typed);
     if (!m) { showToast(`No crew member named "${typed}" — use + Add Crew to create them first.`, '#fbbf24'); return; }
     const group = el('td-support-role-sel')?.value || 'producer';
-    // Support crew worked the event → credit them (workedEvent), same as anyone on the desk.
-    send('update_crew_member', { id: m.id, group, workedEvent: true });
+    // Event-scoped add: lands on tonight's deck (and credits them via workedEvent server-side)
+    // WITHOUT touching the crew record's group — the deck is per-show, the Crew page is forever.
+    send('td_support_add', { crewId: m.id, role: TD_SUPPORT_LABEL[group] || group });
     if (inp) inp.value = '';
     showToast(`${m.handle || m.name} added to support crew`, '#22c55e');
   });
   el('td-support-list')?.addEventListener('click', (e) => {
     const btn = e.target.closest('[data-support-rm]'); if (!btn) return;
-    // Un-assign from Support Crew, don't delete — the Show Deck is per-event, the crew record
-    // (and their credit history) needs to survive to the next one.
-    send('update_crew_member', { id: btn.dataset.supportRm, group: '' });
+    // Deck-only removal — the crew record (group, credit history, everything) is untouched.
+    send('td_support_remove', { crewId: btn.dataset.supportRm });
   });
   el('td-shift-save')?.addEventListener('click', async () => {
     const name = await customPrompt('Save preset', 'Name this desk preset — saves the current slots, roles, on-shift marks and display options so you can re-apply them in one click.', '', 'Save');
     if (name) send('save_shift', { name });
   });
   el('td-shift-clear')?.addEventListener('click', async () => {
-    if (await appConfirm('Clear the desk slots, show roles and on-shift marks? Everyone stays in "Worked this event" so they keep their credit. Saved presets are untouched.', 'Clear')) send('clear_shift');
+    if (await appConfirm('Clear the whole Show Deck — desk slots, show roles, current shift, credits and support crew? Nobody is deleted: every crew profile stays in Crew, and saved presets are untouched.', 'Clear')) send('clear_shift');
   });
 
   // Group filter pills → sync hidden select + re-render
@@ -724,6 +727,65 @@ function _pcamSources(vdo) {
   (_pcamCloudFeedsCache || []).forEach((f) =>
     push(f.personName, `${f.personName}${f.teamName ? ' — ' + f.teamName : ''} (cloud)`, f.obsViewUrl, 'Cloud cameras'));
   return out;
+}
+
+// Website-hosted Stations caster/observer feeds (see /studio/access/stations). Populated async via
+// the cloud_list_station_feeds WS round-trip (see applyCloudStatus + the 'cloud_station_feeds'
+// message handler below). A caster feed becomes a normal Caster Library entry with one click,
+// landing in the SAME numbered slot they claimed on the website — openCrewDialog's existing slot
+// picker handles everything else from there, exactly like a manually-added caster.
+let _cfStationsCache = [];
+function renderCfStations() {
+  const section = el('cf-stations-section');
+  const wrap = el('cf-stations-list');
+  const status = el('cf-stations-status');
+  if (!section || !wrap) return;
+  const feeds = _cfStationsCache || [];
+  section.style.display = feeds.length ? '' : 'none';
+  if (!feeds.length) { wrap.innerHTML = ''; if (status) status.textContent = ''; return; }
+
+  const lib = (currentState && currentState.casters && currentState.casters.library) || [];
+  const lineup = (currentState && currentState.casters && currentState.casters.lineup) || [];
+  const slotLabels = (currentState && currentState.casters && currentState.casters.slotLabels) || {};
+  const inLibrary = (url) => lib.some((c) => (c.camUrl || c.vdoOverride) === url);
+
+  wrap.innerHTML = feeds.map((f, i) => {
+    const already = inLibrary(f.obsViewUrl);
+    const kindLabel = f.kind === 'caster' ? 'Caster' : 'Observer';
+    return `<div class="pcam-row" style="display:flex;align-items:center;gap:10px;padding:3px 0;">
+      <span style="flex:0 0 auto;font-size:9px;font-weight:800;letter-spacing:.08em;color:#8b5cf6;text-transform:uppercase;">${tlEsc(kindLabel)}</span>
+      <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;font-weight:700;color:#e8eaf0;" title="${tlEsc(f.stationName)} — ${tlEsc(f.roomName)}">${tlEsc(f.personName)}
+        <span style="margin-left:6px;font-size:10px;font-weight:500;color:#9090a8;">${tlEsc(f.stationName)}</span>
+      </span>
+      ${f.kind === 'caster'
+        ? (already
+            ? '<span style="font-size:10px;font-weight:700;color:#22c55e;">In library</span>'
+            : `<button class="btn btn-secondary btn-xs cf-station-add-caster" data-idx="${i}">+ Add to Caster Library</button>`)
+        : `<button class="btn btn-secondary btn-xs cf-station-copy" data-idx="${i}">Copy OBS URL</button>`}
+    </div>`;
+  }).join('');
+
+  wrap.querySelectorAll('.cf-station-add-caster').forEach((btn) => btn.addEventListener('click', () => {
+    const f = feeds[Number(btn.dataset.idx)];
+    if (!f) return;
+    const id = 'cs_' + Math.random().toString(36).slice(2, 11);
+    send('save_caster_to_library', { id, name: f.personName, kind: 'caster', camUrl: f.obsViewUrl });
+    // Only auto-assign the lineup slot when it's free — never bump whoever's already on air.
+    const targetSlot = (Number(f.idx) || 0) + 1;
+    const occupied = lineup.some((l) => l.slot === targetSlot);
+    if (!occupied && targetSlot >= 1 && targetSlot <= 4) {
+      const newLineup = lineup.map((x) => ({ ...x }));
+      newLineup.push({ libraryId: id, slot: targetSlot, roomId: '', streamId: id });
+      send('set_caster_lineup', { lineup: newLineup });
+      showToast(`Added ${f.personName} — on air as ${slotLabels[targetSlot] || ('Caster ' + targetSlot)}.`, '#22c55e', 3000);
+    } else {
+      showToast(`Added ${f.personName} to the Caster Library — assign a slot from Camera Feeds → Talent Rooms.`, '#22c55e', 3800);
+    }
+  }));
+  wrap.querySelectorAll('.cf-station-copy').forEach((btn) => btn.addEventListener('click', () => {
+    const f = feeds[Number(btn.dataset.idx)];
+    if (f && navigator.clipboard) navigator.clipboard.writeText(f.obsViewUrl).then(() => showToast('OBS URL copied.', '#22c55e', 2000));
+  }));
 }
 // In-game names: live RL feed → live CS2 feed → match rosters as a fallback.
 function _pcamRows() {
@@ -8104,9 +8166,23 @@ function updateFacecamTeamHeaders(teams, data) {
     });
   });
 }
+function hslToHexColor(h, s, l) {
+  h = ((h % 360) + 360) % 360;
+  s = Math.min(100, Math.max(0, s)) / 100;
+  l = Math.min(100, Math.max(0, l)) / 100;
+  const a = s * Math.min(l, 1 - l);
+  const f = (n) => {
+    const k = (n + h / 30) % 12;
+    const c = l - a * Math.max(-1, Math.min(k - 3, Math.min(9 - k, 1)));
+    return Math.round(c * 255).toString(16).padStart(2, '0');
+  };
+  return '#' + f(0) + f(8) + f(4);
+}
+
 // Normalize any pasteable color string to '#rrggbb' (lowercase), or null if unparseable.
 // Accepts: #rgb / #rgba / #rrggbb / #rrggbbaa (with or without '#', '0x' prefix ok — alpha is
-// dropped), rgb()/rgba()/hsl()/hsla() notation and CSS named colors (parsed by Chromium).
+// dropped); rgb()/hsl() notation with or without the wrapper — bare "205, 92, 92" triplets are
+// read as RGB, "0, 53%, 58%" or an hsl prefix as HSL; plus CSS named colors (parsed by Chromium).
 function normalizeAnyColor(input) {
   let v = String(input || '').trim();
   if (!v) return null;
@@ -8116,6 +8192,21 @@ function normalizeAnyColor(input) {
   if (m) return ('#' + m[1] + m[1] + m[2] + m[2] + m[3] + m[3]).toLowerCase();
   m = /^#([0-9a-f]{6})(?:[0-9a-f]{2})?$/i.exec(v);
   if (m) return ('#' + m[1]).toLowerCase();
+  // Number triplets, wrapped or bare, comma/space/slash separated, optional trailing alpha
+  // (dropped): "rgb(205, 92, 92)", "205, 92, 92", "hsl 0 53 58", "0, 53%, 58%".
+  m = /^(rgba?|hsla?)?[\s:(]*(-?[\d.]+)(%?)[,\s/]+(-?[\d.]+)(%?)[,\s/]+(-?[\d.]+)(%?)(?:[,\s/]+[\d.]+%?)?[\s)]*$/i.exec(v);
+  if (m) {
+    const kind = (m[1] || '').toLowerCase();
+    const n1 = parseFloat(m[2]), n2 = parseFloat(m[4]), n3 = parseFloat(m[6]);
+    // No prefix + % on saturation/lightness reads as HSL; a bare all-number triplet is RGB.
+    if (kind.startsWith('hsl') || (!kind && (m[5] === '%' || m[7] === '%'))) return hslToHexColor(n1, n2, n3);
+    const c1 = m[3] === '%' ? n1 * 2.55 : n1, c2 = m[5] === '%' ? n2 * 2.55 : n2, c3 = m[7] === '%' ? n3 * 2.55 : n3;
+    if ([c1, c2, c3].every((n) => n >= 0 && n <= 255)) {
+      const h = (n) => Math.round(n).toString(16).padStart(2, '0');
+      return '#' + h(c1) + h(c2) + h(c3);
+    }
+    return null;
+  }
   if (typeof CSS === 'undefined' || !CSS.supports('color', v)) return null;
   const probe = document.createElement('canvas').getContext('2d');
   probe.fillStyle = v;
@@ -9265,7 +9356,11 @@ function teLoad(team) {
       const reg = (currentState.playerProfiles || {})[(p.name || '').trim().toLowerCase()] || {};
       const startgg = p.startgg || (reg.startggSlug ? 'https://www.start.gg/' + String(reg.startggSlug).replace(/^\/+/, '') : '');
       const sixmans = p.sixmans || ((reg.sixmans && reg.sixmans.name) ? reg.sixmans.name : '');
+      // Spread p FIRST: fields this editor doesn't know about (platform/platformId, camera
+      // and VDO assignments from match-side saves, info, …) must round-trip untouched —
+      // rebuilding from a fixed field list silently stripped them on every edit+save.
       return {
+        ...p,
         id: p.id || teUid(),
         name: p.name || '',
         role: p.role || '',
@@ -9325,7 +9420,7 @@ el('te-save')?.addEventListener('click', () => {
     logo: teModel.logo || null,
     color: teModel.color || null,
     favorite: teModel.favorite || false,
-    players: teModel.players.map((p) => ({ id: p.id, name: (p.name || '').trim(), realName: (p.realName || '').trim(), info: (p.info || '').trim(), role: (p.role || '').trim(), country: (p.country || '').toLowerCase(), startgg: (p.startgg || '').trim(), sixmans: (p.sixmans || '').trim(), status: p.status || 'starter', photo: p.photo || '', discord: (p.discord || '').trim(), twitter: (p.twitter || '').trim(), twitch: (p.twitch || '').trim(), instagram: (p.instagram || '').trim(), tiktok: (p.tiktok || '').trim(), youtube: (p.youtube || '').trim() })).filter((p) => p.name)
+    players: teModel.players.map((p) => ({ ...p, id: p.id, name: (p.name || '').trim(), realName: (p.realName || '').trim(), info: (p.info || '').trim(), role: (p.role || '').trim(), country: (p.country || '').toLowerCase(), startgg: (p.startgg || '').trim(), sixmans: (p.sixmans || '').trim(), status: p.status || 'starter', photo: p.photo || '', discord: (p.discord || '').trim(), twitter: (p.twitter || '').trim(), twitch: (p.twitch || '').trim(), instagram: (p.instagram || '').trim(), tiktok: (p.tiktok || '').trim(), youtube: (p.youtube || '').trim() })).filter((p) => p.name)
   });
   teModel.oldName = name;
   if (el('te-title')) el('te-title').textContent = 'Edit Team';
@@ -9676,6 +9771,7 @@ function applyCloudStatus(s) {
   if (seatsBlock) seatsBlock.style.display = canManage ? '' : 'none';
   if (canManage) send('cloud_list_org_seats', { orgId: s.workspaceId });
   if (isOrg) send('cloud_list_camera_feeds', { orgId: s.workspaceId });
+  if (isOrg) send('cloud_list_station_feeds', { orgId: s.workspaceId });
 }
 
 const ORG_SEAT_ROLES = ['owner', 'admin', 'producer', 'operator', 'talent', 'analyst'];
@@ -18356,6 +18452,19 @@ function wireRlSceneAuto() {
   }
   const hide = el('chk-rl-hide-ui');
   if (hide && !hide._rlWired) { hide._rlWired = true; hide.addEventListener('change', function () { send('set_rl_hide_ui', { hidden: this.checked }); }); }
+  // Stats-screen skin (show/hide the stat table + pick the design) — applies to the scoreboard scene.
+  ['chk-rl-stats-show', 'sel-rl-stats-design'].forEach(function (id) {
+    const e = el(id);
+    if (e && !e._rlWired) {
+      e._rlWired = true;
+      e.addEventListener('change', function () {
+        send('set_rl_stats_screen', {
+          showStats: !!(el('chk-rl-stats-show') && el('chk-rl-stats-show').checked),
+          design: (el('sel-rl-stats-design') || {}).value || 'default'
+        });
+      });
+    }
+  });
 }
 function applyRlSceneAuto(data) {
   wireRlSceneAuto();   // idempotent — the panel elements exist after DOM load (relocated, not recreated)
@@ -18374,6 +18483,9 @@ function applyRlSceneAuto(data) {
   const pEn = el('chk-rl-postgame'); if (pEn) pEn.checked = !!pg.enabled;
   const pd = el('inp-rl-postgame-delay'); if (pd && document.activeElement !== pd) pd.value = pg.delaySec || 20;
   const hEn = el('chk-rl-hide-ui'); if (hEn && document.activeElement !== hEn) hEn.checked = !!(data && data.rlHudHidden);
+  const ss = (data && data.rlStatsScreen) || {};
+  const ssShow = el('chk-rl-stats-show'); if (ssShow && document.activeElement !== ssShow) ssShow.checked = ss.showStats !== false;
+  const ssDes = el('sel-rl-stats-design'); if (ssDes && document.activeElement !== ssDes) ssDes.value = ss.design || 'default';
 }
 
 const SCENE_CONTROL_MOMENTS = [
@@ -24891,7 +25003,7 @@ async function connect() {
       _r('renderUpNext',       () => renderUpNext(msg.data));
       _r('renderPlayerCams',   () => renderPlayerCams(msg.data));
       _r('renderStreamQueue',  () => renderStreamQueue(msg.data));
-      _r('renderCfStations',   () => renderCfStations(msg.data));
+      _r('renderCfStations',   () => renderCfStations());
       _r('renderQrailBufferStatus', () => { if (typeof renderQrailBufferStatus === 'function') renderQrailBufferStatus(msg.data); });
       _r('applyDirectorState', () => applyDirectorState(msg.data.director));
       _r('applyClipsState',    () => applyClipsState(msg.data.clips));
@@ -25025,6 +25137,9 @@ async function connect() {
     } else if (msg.type === 'cloud_camera_feeds') {
       _pcamCloudFeedsCache = (msg.data && msg.data.ok && Array.isArray(msg.data.feeds)) ? msg.data.feeds : [];
       renderPlayerCamMounts();
+    } else if (msg.type === 'cloud_station_feeds') {
+      _cfStationsCache = (msg.data && msg.data.ok && Array.isArray(msg.data.feeds)) ? msg.data.feeds : [];
+      renderCfStations();
     } else if (msg.type === 'startgg-result') {
       ['startgg-result', 'sgg-status'].forEach((id) => {
         const r = el(id);

@@ -222,6 +222,10 @@ let state = {
   // (full_state coalesce width). active = a match is live right now.
   perfMode: { enabled: true, active: false, always: false, reduceAnimations: false, pausePreviews: false, broadcastRate: 'smooth' },
   activeGame: 'rocket-league',
+  // Pulse multiview: when publish is on (and the cloud is linked), this app heartbeats its live game to
+  // the org so it appears on other producers' Pulse scenes. feedViewUrl = this observer's own VDO view
+  // URL others pull for the featured video (optional — without it the tile is scores-only).
+  pulse: { publish: false, feedViewUrl: '' },
   themesByGame: { 'rocket-league': 'classic', 'csgo': 'cs2-hud' },
   eventName: '',   // fresh installs start with no preset title — the producer sets their own
   gameLabel: '',   // custom "GAME x | BEST OF x" override (e.g. "UPCOMING MATCH"); '' = auto
@@ -249,7 +253,7 @@ let state = {
   // in the roll, separate from the brand-kit sponsor bar [{name,logo,tier}]; talent = manual
   // {name,role} credits (other-shift crew). (Single source of truth — must not be redefined below.)
   credits: { visible: false, sponsors: [], talent: [], endText: '' },   // endText: big end-card text after the roll ('' → "Thanks For Watching")
-  casters: { visible: true, showCountry: false, nameMode: 'gamertag', showRoles: { host: '', observer: '' }, shifts: [], list: [], lowerThird: '', library: [], vdo: { room: '', password: '' }, guestsVdo: { room: '', password: '' }, observersVdo: { room: '', password: '' }, rooms: [], lineup: [], activeLayout: '', interview: { room: '', password: '' }, apiKey: '', interviewee: null, playerCam: null, deskRoomId: '', slotLabels: { 1: 'Caster 1', 2: 'Caster 2', 3: 'Caster 3', 4: 'Caster 4', 5: 'Player' } },   // list = on-air slots; showCountry = render each caster's country on the desk; library = saved casters/guests/observers (by kind); vdo/guestsVdo/observersVdo = the three shared group rooms; rooms = named VDO rooms; lineup = this-show active assignments; apiKey = director IFrame-API key; interviewee = spotlight-desk right cam; playerCam = slot-5 player feed ({camUrl,name,playerId}); deskRoomId = which named room is the interview/desk room
+  casters: { visible: true, showCountry: false, nameMode: 'gamertag', showRoles: { host: '', observer: '' }, shifts: [], activeShiftId: '', support: [], list: [], lowerThird: '', library: [], vdo: { room: '', password: '' }, guestsVdo: { room: '', password: '' }, observersVdo: { room: '', password: '' }, rooms: [], lineup: [], activeLayout: '', interview: { room: '', password: '' }, apiKey: '', interviewee: null, playerCam: null, deskRoomId: '', slotLabels: { 1: 'Caster 1', 2: 'Caster 2', 3: 'Caster 3', 4: 'Caster 4', 5: 'Player' } },   // list = on-air slots; showCountry = render each caster's country on the desk; library = saved casters/guests/observers (by kind); vdo/guestsVdo/observersVdo = the three shared group rooms; rooms = named VDO rooms; lineup = this-show active assignments; apiKey = director IFrame-API key; interviewee = spotlight-desk right cam; playerCam = slot-5 player feed ({camUrl,name,playerId}); deskRoomId = which named room is the interview/desk room
   // VDO.Ninja talent workflow. Global config (server-side, replaces the old localStorage settings);
   // per-team rooms/passwords live on teams.x.vdo, per-player IDs on the player objects.
   vdo: {
@@ -316,6 +320,9 @@ let state = {
   replay: { label: 'REPLAY', logo: null, outroLogo: null, colorMode: 'team', skin: null },
   // Scoreboard ad slot — sponsor logo + uploadable scene background on the scorecard.
   scoreboardAd: { label: 'PRESENTED BY', logo: null, background: null },
+  // Post-game stats screen skin (RL scoreboard). showStats=false shows a clean FINAL-only board;
+  // design picks the look of the per-team stat table: default | glass | block | radar.
+  rlStatsScreen: { showStats: true, design: 'default' },
   // OBS background browser source (background.html). type: 'solid'|'gradient'|'image'.
   background: { type: 'gradient', color1: '#07090f', color2: '#0c1220', angle: 135, imageUrl: '' },
   // Desk footer logos — manual Dashboard override. When non-empty these replace the active
@@ -1076,6 +1083,7 @@ function buildProfileBundle() {
         overtime:             s.overtime,
         replay:               s.replay,
         scoreboardAd:         s.scoreboardAd,
+        rlStatsScreen:        s.rlStatsScreen,
         deskFooter:           s.deskFooter,
         vdo:                  s.vdo,
         preshow:              s.preshow,   // Desk Show headline/topics + saved topic presets
@@ -1123,7 +1131,7 @@ function applyProfileBundle(bundle, options) {
   }
   if (want('settings') && d.settings && typeof d.settings === 'object') {
     const v = d.settings;
-    ['fontFamily', 'colorMode', 'activeBrandKitId', 'bestOf', 'banner', 'ticker', 'overtime', 'replay', 'scoreboardAd', 'deskFooter', 'preshow', 'vdo', 'customOverlayLayouts']
+    ['fontFamily', 'colorMode', 'activeBrandKitId', 'bestOf', 'banner', 'ticker', 'overtime', 'replay', 'scoreboardAd', 'rlStatsScreen', 'deskFooter', 'preshow', 'vdo', 'customOverlayLayouts']
       .forEach((k) => { if (v[k] !== undefined) state[k] = v[k]; });
     if (v.themesByGame && typeof v.themesByGame === 'object') state.themesByGame = { ...state.themesByGame, ...v.themesByGame };
     state.useBrandColors = (state.colorMode === 'brand');
@@ -1877,6 +1885,12 @@ function applyPreset(cfg) {
   if (cfg.casters && typeof cfg.casters === 'object') state.casters = cfg.casters;
 }
 
+// Show Deck support / tournament-ops roles. Kept in sync with control-panel TD_SUPPORT_LABEL +
+// the #td-support-role-sel options — used only to migrate the legacy group-based support column
+// into the event-scoped state.casters.support list.
+const TD_SUPPORT_LABELS = { producer: 'Producer', admin: 'Tournament Admin', coordinator: 'Coordinator', replay: 'Replay Op', stats: 'Statistician', moderator: 'Moderator', graphics: 'Graphics', flex: 'Flex', socials: 'Social' };
+const TD_SUPPORT_GROUPS = Object.keys(TD_SUPPORT_LABELS);
+
 function loadState() {
   try {
     const saved = safeReadJson(stateFile, null);
@@ -1944,6 +1958,10 @@ function loadState() {
             ? { host: saved.casters.showRoles.host || '', observer: saved.casters.showRoles.observer || '' }
             : { host: '', observer: '' },
           shifts: Array.isArray(saved.casters.shifts) ? saved.casters.shifts : [],
+          activeShiftId: typeof saved.casters.activeShiftId === 'string' ? saved.casters.activeShiftId : '',
+          // Show Deck support crew — EVENT-scoped [{crewId, role}] so deck add/remove never
+          // rewrites the crew record's durable group. Non-array → migrated from crew groups below.
+          support: Array.isArray(saved.casters.support) ? saved.casters.support : null,
           lowerThird: typeof saved.casters.lowerThird === 'string' ? saved.casters.lowerThird : '',
           list: Array.isArray(saved.casters.list) ? saved.casters.list : [],
           library: Array.isArray(saved.casters.library) ? saved.casters.library : [],
@@ -1997,6 +2015,13 @@ function loadState() {
           label: typeof saved.scoreboardAd.label === 'string' ? saved.scoreboardAd.label : 'PRESENTED BY',
           logo: saved.scoreboardAd.logo || null,
           background: saved.scoreboardAd.background || null
+        };
+      }
+      if (saved.rlStatsScreen && typeof saved.rlStatsScreen === 'object') {
+        const RL_STATS_DESIGNS = ['default', 'glass', 'block', 'radar'];
+        state.rlStatsScreen = {
+          showStats: saved.rlStatsScreen.showStats !== false,
+          design: RL_STATS_DESIGNS.includes(saved.rlStatsScreen.design) ? saved.rlStatsScreen.design : 'default'
         };
       }
       if (saved.deskFooter && Array.isArray(saved.deskFooter.logos)) {
@@ -2117,6 +2142,7 @@ function loadState() {
         });
       }
       if (saved.series) state.series = saved.series;
+      if (saved.pulse && typeof saved.pulse === 'object') state.pulse = { publish: !!saved.pulse.publish, feedViewUrl: String(saved.pulse.feedViewUrl || '') };
       if (saved.match && typeof saved.match === 'object') {
         state.match = {
           format: saved.match.format || '',
@@ -2330,6 +2356,13 @@ function loadState() {
         // instead of silently vanishing from credits the moment this field starts being read.
         state.crew = saved.crew.map((c) => (c && typeof c.workedEvent !== 'boolean') ? { ...c, workedEvent: !!c.active } : c);
       }
+      // One-time migration: the Show Deck support column used to be "crew whose group is a support
+      // role" — seed the new event-scoped list from that so nobody's chip disappears on update.
+      if (!Array.isArray(state.casters.support)) {
+        state.casters.support = (state.crew || [])
+          .filter((c) => c && TD_SUPPORT_GROUPS.includes(c.group))
+          .map((c) => ({ crewId: c.id, role: c.role || TD_SUPPORT_LABELS[c.group] || '' }));
+      }
       if (Array.isArray(saved.adProofSessions)) {
         state.adProofSessions = saved.adProofSessions;
       }
@@ -2429,6 +2462,7 @@ function _saveAppStateNow(sync = false) {
       bestOf: state.bestOf,
       teams: state.teams,
       series: state.series,
+      pulse: state.pulse,
       match: state.match,
       leagues: state.leagues,
       myEvents: state.myEvents,
@@ -3027,7 +3061,7 @@ const BROADCAST_TIERS = {
   sceneBg: 'live', banner: 'live', casters: 'live', vdo: 'live', listenIn: 'live', credits: 'live',
   breakScreen: 'live', ticker: 'live', adProofSessions: 'live', spotlight: 'live', winner: 'live',
   veto: 'live', owMatch: 'live', mrMatch: 'live', customOverlayLayouts: 'live', gameConfigs: 'live', draft: 'live',
-  intro: 'live', overtime: 'live', scoreboardAd: 'live', background: 'live', deskFooter: 'live',
+  intro: 'live', overtime: 'live', scoreboardAd: 'live', rlStatsScreen: 'live', background: 'live', deskFooter: 'live',
   preshow: 'live', csgo: 'live', valorant: 'live', lol: 'live', bestOf: 'live', teams: 'live',
   teamPlayers: 'live', series: 'live', match: 'live', myEvents: 'live', game: 'live',
   gameTeams: 'live', players: 'live', playerCache: 'live', currentGoal: 'live',
@@ -3154,6 +3188,15 @@ function upsertPlayerProfile(gamerTag, patch) {
   if (patch.countryCode) next.countryCode = String(patch.countryCode).slice(0, 4).toLowerCase();
   if (patch.image) next.image = String(patch.image).slice(0, 400);   // start.gg profile image URL
   if (patch.realName) next.realName = String(patch.realName).slice(0, 160); // start.gg display/legal name
+  // Producer-verified tracker.gg account (platform + username) — start.gg rarely gives us the connected
+  // account, so once someone corrects/confirms the handle we remember it here keyed on gamerTag and
+  // prefill it on future events instead of falling back to the tournament gamerTag.
+  if (patch.tracker && patch.tracker.username) {
+    next.tracker = {
+      platform: String(patch.tracker.platform || 'epic').slice(0, 20).toLowerCase(),
+      username: String(patch.tracker.username).slice(0, 80)
+    };
+  }
   if (patch.sixmans) {
     const s = patch.sixmans;
     next.sixmans = {
@@ -5292,6 +5335,15 @@ async function fetchEventSeeding(apiToken, eventSlugRaw) {
     page++;
   } while (page <= totalPages && page <= 16);
   all.sort((a, b) => (a.seedNum || 99999) - (b.seedNum || 99999));
+  // Diagnostic: how often did start.gg actually hand us a connected Epic/Steam account vs. leaving us
+  // to fall back to the tournament gamerTag for tracker.gg? Connected accounts are privacy-gated on
+  // start.gg (typically only the token owner's own are returned), so this is usually near-zero — which
+  // is exactly why tracker.gg-by-gamertag misses (the gamerTag often isn't the Epic username).
+  const _players = all.flatMap((e) => e.players || []);
+  const _epic = _players.filter((p) => p.epic).length;
+  const _steam = _players.filter((p) => p.steam).length;
+  const _anyAuth = _players.filter((p) => p.epic || p.steam || (p.alts && p.alts.length)).length;
+  console.log(`[start.gg seeding] ${_players.length} players — connected accounts from start.gg: epic=${_epic}, steam=${_steam}, any=${_anyAuth} (withAuth=${withAuth}). The rest fall back to gamerTag for tracker.gg.`);
   return { eventName: evName, eventSlug: slug, image: evImage, entrants: all };
 }
 
@@ -8679,6 +8731,10 @@ function scheduleRLReconnect() {
 /** Tracks RL clock/scores between packets for kickoff + goal inference. */
 const rlGameTrack = { gameTime: null, blueScore: 0, orangeScore: 0 };
 
+// True once the observer is spectating a lobby (live players present). Drives the "hide RL's native
+// UI the moment spectating begins" behaviour — see handleUpdateState. Re-armed each match.
+let _rlSpectatingActive = false;
+
 function resetRlGameTrack() {
   rlGameTrack.gameTime = state.game?.time ?? 300;
   rlGameTrack.blueScore = state.game?.blueScore ?? 0;
@@ -8947,9 +9003,25 @@ function normRlColor(v) {
   return '';
 }
 let _rlTeamColorLogged = false;   // one-shot diagnostic so we can confirm the live feed's colour field/format
+let _rlPacketShapeLogged = false; // one-shot diagnostic: dump the FULL key set the RL Stats API sends
 function handleUpdateState(data) {
   const game = data.Game || data.game || {};
   const players = data.Players || data.players || [];
+
+  // One-shot: dump the complete shape of a live RL Stats API packet so we know EXACTLY which
+  // per-player + game fields are available (drives which stats the stats screen can show — no
+  // guessing). Logs top-level keys and one level of nesting (Location/Stats/etc.).
+  if (!_rlPacketShapeLogged && players[0]) {
+    _rlPacketShapeLogged = true;
+    const p0 = players[0];
+    console.log('[RL] Packet shape — PLAYER keys:', Object.keys(p0).join(','));
+    Object.keys(p0).forEach((k) => {
+      const v = p0[k];
+      if (v && typeof v === 'object') console.log('[RL]   player.' + k + ' →', Object.keys(v).join(',') || '(empty obj)');
+    });
+    console.log('[RL] Packet shape — GAME keys:', Object.keys(game).join(','));
+    console.log('[RL] Packet shape — sample PLAYER JSON:', JSON.stringify(p0).slice(0, 900));
+  }
   const prevTime = (typeof state.game.time === 'number') ? state.game.time : null;
 
   // Update game clock — official RL Stats API field is Game.TimeSeconds (legacy aliases kept).
@@ -9040,6 +9112,20 @@ function handleUpdateState(data) {
   normalised.forEach(p => {
     state.playerCache[p.name] = { ...p };
   });
+
+  // Spectating just began — the observer joined the lobby and players are now present. Hide RL's
+  // native spectator UI NOW (before kickoff), not only at the kickoff, so the pre-kickoff "choose
+  // teams" wait isn't broadcast with RL's own UI on screen. Latched so the toggle isn't spammed;
+  // re-armed each match (handleMatchCreated) and when players clear. The kickoff still re-hides —
+  // RL re-shows its UI when gameplay actually starts (see returnToInGameForKickoff).
+  const nowSpectating = normalised.length > 0;
+  if (nowSpectating && !_rlSpectatingActive) {
+    _rlSpectatingActive = true;
+    rlSpectatorUi.resetAutoTracking();   // clear any prior press-window so this early hide can fire
+    scheduleRlHideNativeUi(state.game.number);
+  } else if (!nowSpectating && _rlSpectatingActive) {
+    _rlSpectatingActive = false;
+  }
 
   // Detect the spectated/observed player. The official RL Stats API does NOT expose a reliable target
   // name; instead, SPECTATOR-only fields (e.g. Boost) are present ONLY for the player the observer
@@ -9621,6 +9707,7 @@ function handleMatchCreated(data) {
   state.playerCache = {};
   state.inReplay   = false;
   state.currentGoal = null;
+  _rlSpectatingActive = false;   // re-arm the "hide native UI on spectate" latch for this new lobby
   resetRlGameTrack();
   saveAppState();
   if (!holdBoard) {
@@ -9707,8 +9794,9 @@ function handleMatchCreated(data) {
   // NOTE: do NOT switch OBS to the in-game scene here. A new match is created during the "choose
   // teams" phase — nobody needs to see the RL overlay yet. We bring up the in-game scene at the
   // KICKOFF (handleCountdownBegin), or the first live clock tick as a fallback. See awaitingKickoff.
-  // The native-UI auto-hide is likewise deferred to the kickoff (returnToInGameForKickoff) — pressing
-  // it here during "choose teams" was too early; RL re-shows its UI when gameplay actually starts.
+  // The native-UI auto-hide, however, now fires as soon as the observer is spectating (first
+  // UpdateState with players, handleUpdateState) so the pre-kickoff lobby wait isn't broadcast with
+  // RL's UI showing; the kickoff re-hides since RL re-shows its UI when gameplay actually starts.
 
   // Stats: lazy-create a match record the first time a game starts in a series.
   // Link to the start.gg set being streamed (manual setId OR the auto-followed one) so the live
@@ -11219,17 +11307,44 @@ function handleControlMessage(msg, ws) {
       break;
     }
     case 'clear_shift': {
-      // Empty the desk slots, show roles and every on-shift mark (saved presets are untouched).
-      // Everyone currently on shift did their dues → lock in their credit (workedEvent) BEFORE we
-      // clear the active marks, so a Clear between shifts never drops anyone from the credits.
-      (state.crew || []).forEach((c) => { if (c && c.active) c.workedEvent = true; });
+      // Reset EVERY field on the Show Deck for a fresh show: desk slots, show roles, on-shift
+      // marks, the credits list (workedEvent) and the support-crew column. Nothing is DELETED —
+      // every crew record (and its group on the Crew page) survives, and saved presets are
+      // untouched; the deck just starts empty.
       state.casters.lineup = (state.casters.lineup || []).filter((e) => !(Number(e.slot) >= 1 && Number(e.slot) <= 4));
       state.casters.list = [];
       state.casters.showRoles = { host: '', observer: '' };
       state.casters.activeShiftId = '';
-      (state.crew || []).forEach((c) => { if (c) c.active = false; });
+      state.casters.support = [];
+      (state.crew || []).forEach((c) => { if (c) { c.active = false; c.workedEvent = false; } });
       saveAppState();
       broadcastFullState();
+      break;
+    }
+
+    // Show Deck support column — EVENT-scoped assignments [{crewId, role}]. Deliberately does NOT
+    // touch crew.group: the deck is per-show, the crew record's group is their durable category on
+    // the Crew page. Adding credits them (workedEvent); removing only takes the chip off the deck.
+    case 'td_support_add': {
+      const d = msg.data || {};
+      const c = (state.crew || []).find((x) => x && x.id === d.crewId);
+      if (!c) break;
+      if (!Array.isArray(state.casters.support)) state.casters.support = [];
+      const role = String(d.role || '').slice(0, 40);
+      const cur = state.casters.support.find((s) => s && s.crewId === c.id);
+      if (cur) { if (role) cur.role = role; }
+      else state.casters.support.push({ crewId: c.id, role });
+      c.workedEvent = true;
+      saveAppState();
+      broadcastFullState();
+      break;
+    }
+    case 'td_support_remove': {
+      if (Array.isArray(state.casters.support)) {
+        state.casters.support = state.casters.support.filter((s) => s && s.crewId !== (msg.data && msg.data.crewId));
+        saveAppState();
+        broadcastFullState();
+      }
       break;
     }
 
@@ -11414,6 +11529,9 @@ function handleControlMessage(msg, ws) {
       if (Array.isArray(state.crew)) {
         const member = state.crew.find((c) => c.id === msg.data?.id);
         state.crew = state.crew.filter((c) => c.id !== msg.data?.id);
+        if (Array.isArray(state.casters.support)) {
+          state.casters.support = state.casters.support.filter((s) => s && s.crewId !== msg.data?.id);
+        }
         // Crew + caster-library are twins linked by name/handle: purge the library entry and
         // free any desk-lineup slot it held, or a "deleted" caster stays on the desk overlay.
         if (member && Array.isArray(state.casters.library)) {
@@ -11450,6 +11568,7 @@ function handleControlMessage(msg, ws) {
 
     case 'delete_all_crew': {
       state.crew = [];
+      state.casters.support = [];
       saveAppState();
       broadcastFullState();
       break;
@@ -12193,7 +12312,8 @@ function handleControlMessage(msg, ws) {
         const patch = {};
         if (p.startggSlug) patch.startggSlug = p.startggSlug;
         if (p.sixmans && (p.sixmans.name || p.sixmans.elo != null)) patch.sixmans = p.sixmans;
-        if (patch.startggSlug || patch.sixmans) upsertPlayerProfile(p.gamerTag, patch);
+        if (p.tracker && p.tracker.username) patch.tracker = p.tracker;
+        if (patch.startggSlug || patch.sixmans || patch.tracker) upsertPlayerProfile(p.gamerTag, patch);
       });
       saveAppState();
       broadcastFullState();
@@ -12311,6 +12431,10 @@ function handleControlMessage(msg, ws) {
       const { name, logo, oldName, color } = msg.data;
       const players = Array.isArray(msg.data.players) ? msg.data.players : null;
       const favorite = typeof msg.data.favorite === 'boolean' ? msg.data.favorite : undefined;
+      // abbr: honour whenever the key is present (including null/'' = deliberately cleared);
+      // it was silently dropped before, so the editor's Abbreviation field never saved.
+      const hasAbbr = Object.prototype.hasOwnProperty.call(msg.data, 'abbr');
+      const abbr = hasAbbr ? (String(msg.data.abbr || '').trim().toUpperCase().slice(0, 6) || null) : undefined;
       // Match the library entry by NORMALIZED name (trim + case-insensitive) so a quick-save of a
       // match team (whose name the panel uppercases) UPDATES the existing "Team Alpha" instead of
       // spawning a duplicate "TEAM ALPHA". Only an explicit rename (oldName present) changes the
@@ -12327,12 +12451,13 @@ function handleControlMessage(msg, ws) {
           name: oldName ? name : (prev.name || name),
           logo: logo !== undefined ? logo : prev.logo,
           color: color !== undefined ? color : prev.color,
+          ...(hasAbbr && { abbr }),
           // Preserve the existing roster unless an explicit players array was sent.
           players: players !== null ? players : (prev.players || []),
           ...(favorite !== undefined && { favorite })
         };
       } else {
-        savedTeams.push({ name, logo: logo || null, color: color || null, players: players || [], ...(favorite !== undefined && { favorite }) });
+        savedTeams.push({ name, logo: logo || null, color: color || null, ...(hasAbbr && { abbr }), players: players || [], ...(favorite !== undefined && { favorite }) });
       }
 
       // Explicit rename (oldName present, differs from the new name): cascade into every league
@@ -13133,6 +13258,22 @@ function handleControlMessage(msg, ws) {
       break;
     }
 
+    // Website-hosted Stations caster/observer VDO feeds (see /studio/access/stations on the
+    // website) — thin passthrough so Camera Feeds can list them and the caster lineup can pull
+    // caster-kind ones into the library, same pattern as cloud_list_camera_feeds above.
+    case 'cloud_list_station_feeds': {
+      (async () => {
+        try {
+          if (!cloud.authed()) { ws.send(JSON.stringify({ type: 'cloud_station_feeds', data: { ok: false, message: 'Sign in to the cloud first.', feeds: [], shared: [] } })); return; }
+          const orgId = msg.data && msg.data.orgId;
+          if (!orgId) { ws.send(JSON.stringify({ type: 'cloud_station_feeds', data: { ok: false, message: 'No organization workspace.', feeds: [], shared: [] } })); return; }
+          const { feeds, shared } = await cloud.listStationFeeds(orgId);
+          ws.send(JSON.stringify({ type: 'cloud_station_feeds', data: { ok: true, feeds, shared } }));
+        } catch (e) { ws.send(JSON.stringify({ type: 'cloud_station_feeds', data: { ok: false, message: e.message, feeds: [], shared: [] } })); }
+      })();
+      break;
+    }
+
     case 'request_state':
       ws.send(JSON.stringify(getFullState()));
       break;
@@ -13706,6 +13847,20 @@ function handleControlMessage(msg, ws) {
           transition: typeof p.postGame.transition === 'string' ? p.postGame.transition.trim() : ''
         };
       }
+      saveAppState();
+      broadcastFullState();
+      break;
+    }
+
+    // Post-game stats screen skin (RL scoreboard) — show/hide the stat table + pick its design.
+    case 'set_rl_stats_screen': {
+      const p = msg.data || {};
+      const DESIGNS = ['default', 'glass', 'block', 'radar'];
+      const cur = state.rlStatsScreen || { showStats: true, design: 'default' };
+      state.rlStatsScreen = {
+        showStats: typeof p.showStats === 'boolean' ? p.showStats : cur.showStats,
+        design: DESIGNS.includes(p.design) ? p.design : cur.design
+      };
       saveAppState();
       broadcastFullState();
       break;
@@ -16179,6 +16334,56 @@ function startHttpServer(baseDir) {
     res.json({ token: wsAuthToken });
   });
 
+  // ── Pulse multiview ───────────────────────────────────────────────────────
+  // overlay/pulse.html (a same-origin browser source) fetches this; we proxy the org's live games
+  // from the cloud using THIS app's stored session, so no credentials ever ride the browser source.
+  // Any failure / unlinked app returns an empty list → pulse.html falls back to its demo slate.
+  function pulseOrgId() {
+    const s = cloud.getSession();
+    if (!cloud.authed() || !s.workspaceId || String(s.workspaceId).startsWith('user:')) return null;
+    return s.workspaceId;
+  }
+  app.get('/api/multiview', async (req, res) => {
+    const orgId = pulseOrgId();
+    if (!orgId) return res.json({ games: [] });
+    try { res.json({ games: await cloud.getMultiview(orgId) }); }
+    catch (e) { res.json({ games: [] }); }
+  });
+
+  // Heartbeat: publish THIS app's live game so it shows on other producers' Pulse. Opt-in
+  // (state.pulse.publish) + only when the cloud is linked — otherwise a no-op. Stops publishing (and
+  // clears the row) when disabled. The teams come from the shared library, the score/clock from live
+  // state, so an observer keys in nothing beyond flipping the toggle.
+  const PULSE_UNIT = { 'rocket-league': 'g', 'csgo': 'rd', 'valorant': 'rd', 'rainbow6': 'rd', 'cod': 'rd', 'overwatch': 'pt', 'marvel-rivals': 'pt', 'league': 'pt', 'dota2': 'pt', 'mobile-legends': 'pt', 'honor-of-kings': 'pt' };
+  let _pulseWasPublishing = false;
+  setInterval(async () => {
+    const orgId = pulseOrgId();
+    const on = !!(state.pulse && state.pulse.publish) && !!orgId;
+    if (!on) {
+      if (_pulseWasPublishing && orgId) { try { await cloud.stopObservedGame(orgId); } catch (e) { /* ignore */ } }
+      _pulseWasPublishing = false;
+      return;
+    }
+    try {
+      const g = GAMES[state.activeGame] || {};
+      const blue = (state.teams && state.teams.blue) || {}, orange = (state.teams && state.teams.orange) || {};
+      const live = state.game || {};
+      const feedUrl = (state.pulse.feedViewUrl || '').trim();
+      await cloud.publishObservedGame(orgId, {
+        game: g.name || state.activeGame,
+        teams: {
+          a: { name: blue.name || 'Team A', logo: blue.logo || null, color: blue.color || null, score: Number(live.blueScore || 0) },
+          b: { name: orange.name || 'Team B', logo: orange.logo || null, color: orange.color || null, score: Number(live.orangeScore || 0) }
+        },
+        clock: Number(live.time || 0),
+        status: (state.roundLabel || (state.series ? `Series ${state.series.blue}-${state.series.orange}` : '') || '').toString().slice(0, 60),
+        unit: PULSE_UNIT[state.activeGame] || 'score',
+        feed: feedUrl ? { viewUrl: feedUrl } : undefined
+      });
+      _pulseWasPublishing = true;
+    } catch (e) { /* transient — try again next tick */ }
+  }, 3000);
+
   // ── Media library ─────────────────────────────────────────────────────────
   // Browsable image store under <dataDir>/media, served at /data/media/<...>.
   // Reusable picker source for Brands, Teams, Scenes. Local album = filesystem;
@@ -16812,10 +17017,11 @@ function startHttpServer(baseDir) {
     const username = (req.body?.username || '').toString().trim();
     if (!platform || !username) return res.status(400).json({ error: 'platform and username required' });
     const validPlatforms = ['epic', 'steam', 'psn', 'xbl', 'switch'];
-    if (!validPlatforms.includes(platform)) return res.status(400).json({ found: false, error: 'bad_platform', platform });
+    const isAuto = platform === 'auto';   // try the handle across all platforms, first hit wins
+    if (!isAuto && !validPlatforms.includes(platform)) return res.status(400).json({ found: false, error: 'bad_platform', platform });
     try {
       const trackergg = require('./backend/trackergg');
-      const result = await trackergg.lookup(platform, username);
+      const result = isAuto ? await trackergg.lookupAny(username) : await trackergg.lookup(platform, username);
       res.json(result);
     } catch (err) {
       console.error('[trackergg/lookup]', err.message);
@@ -17705,6 +17911,9 @@ function startHttpServer(baseDir) {
 
   // POST /api/oauth/discord/logout - Clear Discord session
   app.post('/api/oauth/discord/logout', (req, res) => {
+    // Also drop the cloud session — otherwise a logout leaves a live 30-day
+    // refresh token sitting in cloud-session.json on disk.
+    try { cloud.clearSession(); } catch (_) {}
     state.discord.connected    = false;
     state.discord.userId       = '';
     state.discord.username     = '';

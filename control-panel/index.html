@@ -945,6 +945,17 @@
             <div class="msp-btns"><button class="btn btn-ghost btn-sm" id="btn-rl-clear-board" type="button">Clear Scoreboard Now</button></div>
             <label class="msp-toggle" style="margin-top:8px;"><input type="checkbox" id="chk-rl-hide-ui"> Hide UI <span class="msp-hint">(clean feed — blanks the HUD overlay)</span></label>
           </div>
+          <div class="msp-rl-cell">
+            <p class="msp-label">Stats Screen <span class="msp-hint">(scoreboard scene)</span></p>
+            <label class="msp-toggle"><input type="checkbox" id="chk-rl-stats-show" checked> Show player stats on the board</label>
+            <select id="sel-rl-stats-design" class="input-text msp-input" style="margin-top:6px;">
+              <option value="default">Default — floating table</option>
+              <option value="glass">Glass — frosted, team-lit</option>
+              <option value="block">Block Grid — boxed cells</option>
+              <option value="radar">Radar — team comparison</option>
+            </select>
+            <p class="msp-hint">Score · Goals · Assists · Saves · Shots · Demos</p>
+          </div>
         </div>
         <p class="msp-hint" id="rl-scene-auto-status" style="margin-top:8px;"></p>
       </div>
@@ -2110,6 +2121,20 @@
       <p class="msp-hint" id="cf-rooms-status" style="margin-top:6px;"></p>
     </section>
 
+    <!-- Cloud Stations — caster/observer feeds connected via the website's Stations pages
+         (studio.namelessesports.com/access/stations). Casters can be pulled straight into the
+         Caster Library below with the right slot pre-assigned; observer feeds are view-only. -->
+    <section class="section" id="cf-stations-section" style="display:none;">
+      <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:14px; flex-wrap:wrap; margin-bottom:6px;">
+        <div>
+          <h3 class="section-title" style="margin-bottom:4px;">Cloud Stations</h3>
+          <p class="section-desc" style="margin:0; max-width:680px;">Casters and observers who connected through a <strong>Stations</strong> link on the website. Add a caster feed to your Caster Library to put them on air — matching the slot they claimed on the website.</p>
+        </div>
+      </div>
+      <div id="cf-stations-list" class="cf-rooms-list" style="display:flex; flex-direction:column; gap:6px;"></div>
+      <p class="msp-hint" id="cf-stations-status" style="margin-top:6px;"></p>
+    </section>
+
     <section class="section">
       <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:14px; flex-wrap:wrap; margin-bottom:6px;">
         <div>
@@ -2436,7 +2461,7 @@
       <div class="td-shift-chips" id="td-shift-chips"></div>
       <div class="td-shift-actions">
         <button type="button" class="btn btn-ghost btn-sm" id="td-shift-save" title="Save the current allocation (slots, roles, on-shift marks, display options) as a named preset">Save preset</button>
-        <button type="button" class="btn btn-ghost btn-sm" id="td-shift-clear" style="color:var(--danger-2);" title="Clear the desk slots, roles and on-shift marks — everyone stays credited; presets are untouched">Clear</button>
+        <button type="button" class="btn btn-ghost btn-sm" id="td-shift-clear" style="color:var(--danger-2);" title="Reset every Show Deck field — slots, roles, shift, credits and support crew. Nobody is deleted from Crew; presets are untouched">Clear</button>
       </div>
     </div>
     <div class="td-section">
@@ -2453,7 +2478,7 @@
       </div>
       <div class="td-roster-chips" id="td-roster-chips"></div>
     </div>
-    <div class="td-section td-col" title="Casters &amp; crew from other shifts of this broadcast — credited alongside the current shift; survives Clear, click × to remove">
+    <div class="td-section td-col" title="Casters &amp; crew from other shifts of this broadcast — credited alongside the current shift; click × to remove from the credits (their Crew profile is never deleted)">
       <span class="td-roster-lbl">Earlier shifts &amp; credits</span>
       <div style="display:flex; gap:6px; margin:2px 0 8px;">
         <input type="text" id="td-worked-search" class="input-text td-sel" list="td-crew-dl" placeholder="Search crew to credit…" autocomplete="off" style="flex:1; min-width:0;">
@@ -6100,14 +6125,14 @@
         <label class="field-label" for="input-brand-color">Primary color</label>
         <div style="display:flex; gap:6px;">
           <input type="color" id="input-brand-color" class="input-text" value="#055fdb" style="height:38px; padding:2px; width:46px; flex:0 0 46px;">
-          <input type="text" id="input-brand-color-hex" class="input-text" value="#055fdb" spellcheck="false" placeholder="#055fdb" title="Paste any color: #fff, 055fdb, #055fdbff, rgb(5,95,219), hsl(...)" style="flex:1; min-width:0; height:38px;">
+          <input type="text" id="input-brand-color-hex" class="input-text" value="#055fdb" spellcheck="false" placeholder="#055fdb" title="Paste any color: #fff, 055fdb, #055fdbff, 5, 95, 219 (RGB), rgb(5,95,219), hsl 214 96% 44%, dodgerblue" style="flex:1; min-width:0; height:38px;">
         </div>
       </div>
       <div class="field-row" style="margin-bottom:0;">
         <label class="field-label" for="input-brand-accent">Accent color</label>
         <div style="display:flex; gap:6px;">
           <input type="color" id="input-brand-accent" class="input-text" value="#e97139" style="height:38px; padding:2px; width:46px; flex:0 0 46px;">
-          <input type="text" id="input-brand-accent-hex" class="input-text" value="#e97139" spellcheck="false" placeholder="#e97139" title="Paste any color: #fff, e97139, #e97139ff, rgb(233,113,57), hsl(...)" style="flex:1; min-width:0; height:38px;">
+          <input type="text" id="input-brand-accent-hex" class="input-text" value="#e97139" spellcheck="false" placeholder="#e97139" title="Paste any color: #fff, e97139, #e97139ff, 233, 113, 57 (RGB), rgb(233,113,57), hsl 19 80% 57%, coral" style="flex:1; min-width:0; height:38px;">
         </div>
       </div>
       <div class="field-row" style="margin-bottom:0;">
