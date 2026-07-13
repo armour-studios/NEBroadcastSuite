@@ -2055,6 +2055,46 @@ async function stationAutoSync() {
 }
 setInterval(stationAutoSync, 20000);
 
+// ── Camera check-ins → facecams, automatically ───────────────────────────────
+// A player who picked their IN-GAME player on the website camera page arrives with ingameName —
+// map their feed straight into savedFacecams (keyed by in-game name) so RL/CS2 facecam overlays
+// follow them with zero producer clicks. The producer's hand still wins: an existing facecam
+// entry with a link is NEVER overwritten (set it in Match — Teams ▸ player Edit as always).
+let _cameraSyncBusy = false;
+async function cameraFacecamAutoSync() {
+  if (_cameraSyncBusy) return;
+  try {
+    if (state.casters && state.casters.autoFillFromStations === false) return;   // same master switch
+    if (!cloud || typeof cloud.authed !== 'function' || !cloud.authed()) return;
+    const s = cloud.getSession() || {};
+    const orgId = s.workspaceId;
+    if (!orgId || String(orgId).startsWith('user:')) return;
+    _cameraSyncBusy = true;
+    const feeds = await cloud.listCameraFeeds(orgId);
+    let changed = false;
+    for (const f of (feeds || [])) {
+      const gn = (f && f.ingameName ? String(f.ingameName) : '').trim();
+      if (!gn || !f.obsViewUrl) continue;
+      const idx = savedFacecams.findIndex((fc) => fc && fc.name === gn);
+      if (idx >= 0) {
+        if (savedFacecams[idx].link) continue;   // producer's mapping wins
+        savedFacecams[idx] = { ...savedFacecams[idx], link: f.obsViewUrl };
+        changed = true;
+      } else {
+        savedFacecams.push({ name: gn, platform: '', platformId: '', link: f.obsViewUrl, nickname: (f.personName || gn) });
+        changed = true;
+      }
+    }
+    if (changed) {
+      saveFacecams();
+      broadcastFullState();
+      console.log('[Cameras] Auto-mapped facecams from camera check-ins');
+    }
+  } catch (_) { /* transient — next poll retries */ }
+  finally { _cameraSyncBusy = false; }
+}
+setInterval(cameraFacecamAutoSync, 20000);
+
 // ── Org Library sync (teams / brand kits / facecams / casters) ────────────────
 // PUSH: debounced upload of THIS app's own library as the producer's workspace-shared profile, so
 // every org-mate's app can pull it. Fire-and-forget; only runs when signed into a real org and the
@@ -2155,6 +2195,18 @@ async function pullOrgLibrary() {
 setInterval(() => { pullOrgLibrary().catch(() => {}); }, 60000);
 setTimeout(() => { pullOrgLibrary().catch(() => {}); }, 8000);   // initial pull once the session has loaded
 
+// ── In-app Stations manager: re-fetch the org's full nested station list and push it to the panel.
+// Called after every station/room/slot mutation so the manager UI always reflects the website state.
+async function sendStationsFull(ws, msg) {
+  try {
+    if (!cloud.authed()) { ws.send(JSON.stringify({ type: 'cloud_stations_full', data: { ok: false, message: 'Sign in to the cloud first.', stations: [] } })); return; }
+    const orgId = (cloud.getSession() || {}).workspaceId;
+    if (!orgId || String(orgId).startsWith('user:')) { ws.send(JSON.stringify({ type: 'cloud_stations_full', data: { ok: false, message: 'Stations need an organization workspace.', stations: [] } })); return; }
+    const res = await cloud.listStationsFull(orgId);
+    ws.send(JSON.stringify({ type: 'cloud_stations_full', data: { ok: true, ...res } }));
+  } catch (e) { ws.send(JSON.stringify({ type: 'cloud_stations_full', data: { ok: false, message: e.message, stations: [] } })); }
+}
+
 // ── Show-state heartbeat → the casters' show bar ─────────────────────────────
 // Publishes a tiny, secret-free snapshot (event/round, team names + scores, break countdown,
 // on-air graphic) to the org so the website's station join pages can show casters what the
@@ -2169,13 +2221,23 @@ function buildShowStateForCloud() {
     .map((p) => ({ name: (p && p.name ? String(p.name) : '').trim() }))
     .filter((p) => p.name)
     .slice(0, 12);
+  // LIVE in-game lists per side (RL: team 0=blue/1=orange; CS2: CT=a/T=b) — the join page's
+  // "which in-game player are you" step, which drives facecam auto-mapping back here.
+  const rl = Array.isArray(state.players) ? state.players : [];
+  const cs = (state.csgo && Array.isArray(state.csgo.players)) ? state.csgo.players : [];
+  const ingameFor = (side) => {
+    const list = rl.length
+      ? rl.filter((p) => p && (side === 'a' ? Number(p.team) === 0 : Number(p.team) === 1))
+      : cs.filter((p) => p && (side === 'a' ? p.team === 'CT' : p.team === 'T'));
+    return list.map((p) => ({ name: (p.name ? String(p.name) : '').trim() })).filter((p) => p.name).slice(0, 8);
+  };
   return {
     eventName: state.eventName || '',
     roundLabel: state.roundLabel || '',
     gameLabel: state.gameLabel || '',
     teams: {
-      a: { name: b.name || '', score: Number(b.score) || 0, players: roster(b) },
-      b: { name: o.name || '', score: Number(o.score) || 0, players: roster(o) }
+      a: { name: b.name || '', score: Number(b.score) || 0, players: roster(b), ingame: ingameFor('a') },
+      b: { name: o.name || '', score: Number(o.score) || 0, players: roster(o), ingame: ingameFor('b') }
     },
     bestOf: state.bestOf || null,
     gfxActive: state.gfxActive || '',
@@ -14031,6 +14093,131 @@ function handleControlMessage(msg, ws) {
           sendImportExportResult(ws, true, 'Talent invite link ready.', 'invite');
           ws.send(JSON.stringify({ type: 'cloud_invite_created', data: { ok: true, kind: 'talent', url: invite.url, token: invite.token, expiresAt: invite.expiresAt, role: d.role || 'talent' } }));
         } catch (e) { sendImportExportResult(ws, false, 'Link failed: ' + e.message, 'invite'); }
+      })();
+      break;
+    }
+
+    // ── Stations manager (full CRUD on the org's website stations) ────────────
+    // Each mutation runs the website route via cloud-client, toasts, then re-pushes the full nested
+    // list so the panel re-renders. orgId comes from the session; the panel never sends it.
+    case 'cloud_stations_full': {
+      (async () => { await sendStationsFull(ws, msg); })();
+      break;
+    }
+    case 'cloud_station_create': {
+      (async () => {
+        try {
+          if (!cloud.authed()) { sendImportExportResult(ws, false, 'Sign in to the cloud first.', 'station'); return; }
+          const orgId = (cloud.getSession() || {}).workspaceId;
+          if (!orgId || String(orgId).startsWith('user:')) { sendImportExportResult(ws, false, 'Stations need an organization workspace.', 'station'); return; }
+          await cloud.createStation(orgId, { name: (msg.data && msg.data.name) || 'Untitled station' });
+          sendImportExportResult(ws, true, 'Station created.', 'station');
+          await sendStationsFull(ws, msg);
+        } catch (e) { sendImportExportResult(ws, false, 'Create failed: ' + e.message, 'station'); }
+      })();
+      break;
+    }
+    case 'cloud_station_patch': {
+      (async () => {
+        try {
+          if (!cloud.authed()) { sendImportExportResult(ws, false, 'Sign in to the cloud first.', 'station'); return; }
+          const orgId = (cloud.getSession() || {}).workspaceId; const d = msg.data || {};
+          if (!d.stationId) { sendImportExportResult(ws, false, 'stationId required.', 'station'); return; }
+          await cloud.patchStation(orgId, d.stationId, d.patch || {});
+          sendImportExportResult(ws, true, 'Station updated.', 'station');
+          await sendStationsFull(ws, msg);
+        } catch (e) { sendImportExportResult(ws, false, 'Update failed: ' + e.message, 'station'); }
+      })();
+      break;
+    }
+    case 'cloud_station_delete': {
+      (async () => {
+        try {
+          if (!cloud.authed()) { sendImportExportResult(ws, false, 'Sign in to the cloud first.', 'station'); return; }
+          const orgId = (cloud.getSession() || {}).workspaceId; const d = msg.data || {};
+          if (!d.stationId) { sendImportExportResult(ws, false, 'stationId required.', 'station'); return; }
+          await cloud.deleteStation(orgId, d.stationId);
+          sendImportExportResult(ws, true, 'Station deleted.', 'station');
+          await sendStationsFull(ws, msg);
+        } catch (e) { sendImportExportResult(ws, false, 'Delete failed: ' + e.message, 'station'); }
+      })();
+      break;
+    }
+    case 'cloud_room_create': {
+      (async () => {
+        try {
+          if (!cloud.authed()) { sendImportExportResult(ws, false, 'Sign in to the cloud first.', 'station'); return; }
+          const orgId = (cloud.getSession() || {}).workspaceId; const d = msg.data || {};
+          if (!d.stationId) { sendImportExportResult(ws, false, 'stationId required.', 'station'); return; }
+          await cloud.createStationRoom(orgId, d.stationId, { kind: d.kind === 'observer' ? 'observer' : 'caster', name: d.name, slotCount: d.slotCount });
+          sendImportExportResult(ws, true, (d.kind === 'observer' ? 'Observer' : 'Caster') + ' room added.', 'station');
+          await sendStationsFull(ws, msg);
+        } catch (e) { sendImportExportResult(ws, false, 'Add room failed: ' + e.message, 'station'); }
+      })();
+      break;
+    }
+    case 'cloud_room_patch': {
+      (async () => {
+        try {
+          if (!cloud.authed()) { sendImportExportResult(ws, false, 'Sign in to the cloud first.', 'station'); return; }
+          const orgId = (cloud.getSession() || {}).workspaceId; const d = msg.data || {};
+          if (!d.stationId || !d.roomId) { sendImportExportResult(ws, false, 'stationId and roomId required.', 'station'); return; }
+          await cloud.patchRoom(orgId, d.stationId, d.roomId, d.patch || {});
+          sendImportExportResult(ws, true, 'Room updated.', 'station');
+          await sendStationsFull(ws, msg);
+        } catch (e) { sendImportExportResult(ws, false, 'Update failed: ' + e.message, 'station'); }
+      })();
+      break;
+    }
+    case 'cloud_room_delete': {
+      (async () => {
+        try {
+          if (!cloud.authed()) { sendImportExportResult(ws, false, 'Sign in to the cloud first.', 'station'); return; }
+          const orgId = (cloud.getSession() || {}).workspaceId; const d = msg.data || {};
+          if (!d.stationId || !d.roomId) { sendImportExportResult(ws, false, 'stationId and roomId required.', 'station'); return; }
+          await cloud.deleteRoom(orgId, d.stationId, d.roomId);
+          sendImportExportResult(ws, true, 'Room deleted.', 'station');
+          await sendStationsFull(ws, msg);
+        } catch (e) { sendImportExportResult(ws, false, 'Delete failed: ' + e.message, 'station'); }
+      })();
+      break;
+    }
+    case 'cloud_slot_add': {
+      (async () => {
+        try {
+          if (!cloud.authed()) { sendImportExportResult(ws, false, 'Sign in to the cloud first.', 'station'); return; }
+          const orgId = (cloud.getSession() || {}).workspaceId; const d = msg.data || {};
+          if (!d.stationId || !d.roomId) { sendImportExportResult(ws, false, 'stationId and roomId required.', 'station'); return; }
+          await cloud.addRoomSlot(orgId, d.stationId, d.roomId);
+          sendImportExportResult(ws, true, 'Slot added.', 'station');
+          await sendStationsFull(ws, msg);
+        } catch (e) { sendImportExportResult(ws, false, 'Add slot failed: ' + e.message, 'station'); }
+      })();
+      break;
+    }
+    case 'cloud_slot_patch': {
+      (async () => {
+        try {
+          if (!cloud.authed()) { sendImportExportResult(ws, false, 'Sign in to the cloud first.', 'station'); return; }
+          const orgId = (cloud.getSession() || {}).workspaceId; const d = msg.data || {};
+          if (!d.stationId || !d.roomId || !d.slotId) { sendImportExportResult(ws, false, 'stationId, roomId and slotId required.', 'station'); return; }
+          await cloud.patchRoomSlot(orgId, d.stationId, d.roomId, d.slotId, d.patch || {});
+          sendImportExportResult(ws, true, 'Placement updated.', 'station');
+          await sendStationsFull(ws, msg);
+        } catch (e) { sendImportExportResult(ws, false, 'Update failed: ' + e.message, 'station'); }
+      })();
+      break;
+    }
+    case 'cloud_slot_delete': {
+      (async () => {
+        try {
+          if (!cloud.authed()) { sendImportExportResult(ws, false, 'Sign in to the cloud first.', 'station'); return; }
+          const orgId = (cloud.getSession() || {}).workspaceId; const d = msg.data || {};
+          if (!d.stationId || !d.roomId || !d.slotId) { sendImportExportResult(ws, false, 'stationId, roomId and slotId required.', 'station'); return; }
+          await cloud.deleteRoomSlot(orgId, d.stationId, d.roomId, d.slotId);
+          sendImportExportResult(ws, true, 'Placement removed.', 'station');
+          await sendStationsFull(ws, msg);
+        } catch (e) { sendImportExportResult(ws, false, 'Remove failed: ' + e.message, 'station'); }
       })();
       break;
     }
