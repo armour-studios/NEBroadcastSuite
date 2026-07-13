@@ -4,6 +4,10 @@
 
 > **Deployment decision (2026-07-10):** the backend serves from the existing Nameless website project, additionally reachable at **https://studio.namelessesports.com** (Vercel domain alias on the same deployment). The future web app lives on that subdomain; its Discord redirect will be `https://studio.namelessesports.com/api/oauth/discord/callback`. The desktop app keeps `http://localhost:3000/api/oauth/discord/callback`.
 
+> **Twitch update (2026-07-12):** §3's Twitch endpoints are now LIVE too (`app/api/auth/twitch` + `app/api/auth/twitch/refresh`). The app's Twitch connect uses the authorization-CODE flow through the backend whenever the cloud session is signed in — tokens come back WITH a refresh token that rotates server-side, so they no longer expire mid-show; implicit grant remains only as the no-cloud fallback. Requires `BROADCAST_TWITCH_CLIENT_ID`/`BROADCAST_TWITCH_CLIENT_SECRET` on Vercel.
+
+> **Implementation status (2026-07-11):** §3's auth endpoints are LIVE (`app/api/auth/discord`, `app/api/auth/broadcast-login`, `app/api/auth/contract-accept`, `app/api/auth/session/refresh` in the website repo) — built directly against the site's own Prisma/Postgres `User`/`Organization`/`BroadcastSeat` tables, with stateless HMAC session tokens (not a JWT library) via `app/api/auth/_broadcast/session.ts`. §4 (profile sync as its own resource) and `GET /api/me` are NOT built yet — profiles are still local-only. §5's "workspace" is the site's real `Organization` model, not a new table — see §5a below for what's actually live (org broadcast-seat licensing). `docs/cloud-backend-reference.md`'s standalone-Postgres-service sketch is superseded by this reality; treat this file as authoritative.
+
 ## Why this exists
 
 Today the desktop app ships `.env.local` inside the installer, which leaks the **Twitch client secret**, **Discord client secret**, and **broadcast API key** to every user. This contract moves all secret-bearing operations **server-side onto the Nameless backend**, so the desktop app only ever holds:
@@ -112,10 +116,22 @@ Concurrency: include `rev` (monotonic). `PUT` with a stale `rev` → `409 confli
 
 Matches the cloud-ready data model already scaffolded in the app (`uid · workspace_id · owner_id · created_at · updated_at · rev · deleted_at`).
 
-- **Workspace** = an org/team (e.g. a tournament organizer). A user can belong to several.
-- **Roles** (per workspace): `owner`, `admin`, `producer`, `operator`, `talent`, `analyst`. The backend enforces; the client mirrors with a `can()` gate.
-- **Sharing scopes:** `private` (owner only), `workspace` (all members per role), `link` (anyone with the token, read-only by default).
+- **Workspace** = a real Nameless `Organization` — **not** a new table. A user with no active broadcast seat in any org gets a **personal workspace** instead: a synthetic id `user:<userId>`, role `owner`. This is the fallback every solo producer already had before org licensing existed — nothing changes for them.
+- **Roles** (per workspace): `owner`, `admin`, `producer`, `operator`, `talent`, `analyst`. The backend enforces; the client mirrors with a `can()` gate (not yet built client-side — role is currently only *displayed*, not enforced in the UI).
+- **Sharing scopes:** `private` (owner only), `workspace` (all members per role), `link` (anyone with the token, read-only by default). Not yet implemented — `/api/profiles/:id/share` remains speculative (see §4 status note above).
 - Future resources beyond profiles (brand kits, teams, VDO rooms) reuse the same `/api/<resource>` + share shape.
+
+### 5a. Broadcast-seat licensing (org-scoped, LIVE)
+
+An org's purchased seat count (`Organization.broadcastSeatLimit`, manually set for now — no Stripe-quantity wiring yet) caps how many producers can hold an active `BroadcastSeat` (`{orgId, userId, role, activatedAt, revokedAt}`) at once. Holding an active seat is what makes `checkStudioAccess()` resolve a real org workspace/role instead of the personal-workspace fallback above. Management endpoints (Bearer session required, `owner`-level `StaffRole` on the org — reuses the site's existing `canManageStaff()`, not a new permission system):
+
+| Method & path | Purpose | Body | Returns |
+|---|---|---|---|
+| `GET /api/orgs/:orgId/broadcast-seats` | List active seats + limit/usage | — | `{ "seats": [Seat], "seatLimit": number\|null, "seatsUsed": number }` |
+| `POST /api/orgs/:orgId/broadcast-seats` | Grant/re-activate a seat | `{ "userId": "string", "role": "owner"\|"admin"\|"producer"\|"operator"\|"talent"\|"analyst" }` | `{ "seat": Seat }` (`409` if at `seatLimit`) |
+| `DELETE /api/orgs/:orgId/broadcast-seats/:seatId` | Revoke (not a hard delete — history stays queryable) | — | `{ "ok": true, "seat": Seat }` |
+
+Revoking a seat is graceful: the affected producer's *next* login or refresh (refresh runs every ~10min while the app is open) just falls back to their personal workspace — never a hard login failure. Client surface: `cloud-client.js`'s `listOrgSeats/addOrgSeat/removeOrgSeat` (§7), a minimal owner/admin-only add/remove list in the control panel's Settings ▸ Cloud sync section — no per-role UI permission gating inside the app yet (deferred).
 
 ---
 
@@ -131,9 +147,9 @@ Matches the cloud-ready data model already scaffolded in the app (`uid · worksp
 
 ---
 
-## 7. Client surface (already implemented, dormant)
+## 7. Client surface (auth + profiles implemented; §5a live too)
 
-`backend/cloud/cloud-client.js` implements the client half: `loginWithDiscord`, `linkTwitch`, `me`, `listProfiles`, `getProfile`, `saveProfile`, `deleteProfile`, session persistence, graceful no-op when `BROADCAST_REMOTE_URL` is unset. Server WS messages (dormant until configured): `cloud_status`, `cloud_list_profiles`, `cloud_push_profile`, `cloud_pull_profile`.
+`backend/cloud/cloud-client.js` implements the client half: `loginWithDiscord`, `loginWithEmail`, `acceptContract`, `refreshSession`, `linkTwitch`, `me` (note: `me()` calls `GET /api/me`, which per §4's status note isn't built server-side yet — will 404 until it lands), `listProfiles`, `getProfile`, `saveProfile`, `deleteProfile`, `shareProfile`, and (§5a) `listOrgSeats`, `addOrgSeat`, `removeOrgSeat` — session persistence, graceful no-op when `BROADCAST_REMOTE_URL` is unset. Server WS messages (dormant until configured): `cloud_status`, `cloud_list_profiles`, `cloud_push_profile`, `cloud_pull_profile`, `cloud_list_org_seats`, `cloud_add_org_seat`, `cloud_remove_org_seat`.
 
 ---
 

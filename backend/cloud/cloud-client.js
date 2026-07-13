@@ -100,6 +100,14 @@ async function linkTwitch({ code, codeVerifier, redirectUri }) {
   try { const { data } = await _client().post('/api/auth/twitch', { code, codeVerifier, redirectUri }); return data; }
   catch (e) { throw _err(e); }
 }
+// Rotate the user-scoped Twitch tokens via the backend (it holds the client secret —
+// confidential Twitch apps can't refresh without it, which is why implicit-grant tokens
+// used to just die). Same response shape as linkTwitch.
+async function refreshTwitch(refreshToken) {
+  _require();
+  try { const { data } = await _client().post('/api/auth/twitch/refresh', { refreshToken }); return data; }
+  catch (e) { throw _err(e); }
+}
 async function me() { _require(); try { const { data } = await _client().get('/api/me'); return data; } catch (e) { throw _err(e); } }
 
 // ── Profiles (store/share the secret-free bundle) ──────────────────────────
@@ -143,7 +151,7 @@ async function pushCrewRoster(orgId, crew) { _require(); try { const { data } = 
 module.exports = {
   init, configured, authed, getSession, clearSession,
   loginWithDiscord,
-  loginWithEmail, acceptContract, refreshSession, linkTwitch, me,
+  loginWithEmail, acceptContract, refreshSession, linkTwitch, refreshTwitch, me,
   listProfiles, getProfile, saveProfile, deleteProfile, shareProfile,
   listOrgSeats, addOrgSeat, removeOrgSeat,
   listCameraFeeds,

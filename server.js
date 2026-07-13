@@ -507,6 +507,8 @@ let state = {
     postGame: { enabled: false, scene: '', delaySec: 20, transition: '' },  // RL: after the post-game scoreboard shows for delaySec, cut to this scene
     availableScenes: [],
     availableTransitions: [],
+    audioInputs: [],     // [{ name, muted, volumeDb }] — live mixer inventory for the on-air audio pills
+    sources: [],         // [{ scene, source, enabled }] — scene items for the source show/hide pills
     currentScene: '',    // live OBS PROGRAM scene = what viewers see (authoritative "on air")
     currentPreviewScene: '',  // Studio Mode preview scene (the Switcher page's "next")
     studioMode: false,        // OBS Studio Mode on/off (needed for preview/program + TAKE)
@@ -1167,17 +1169,34 @@ function saveTwitchData(sync = false) {
 
 async function refreshTwitchToken() {
   if (!state.twitch.refreshToken) throw new Error('No refresh token stored — please reconnect');
-  const params = {
-    client_id: TWITCH_CLIENT_ID,
-    grant_type: 'refresh_token',
-    refresh_token: state.twitch.refreshToken
-  };
-  // Client secret is optional for public clients; include it when available
-  const secret = process.env.TWITCH_CLIENT_SECRET;
-  if (secret) params.client_secret = secret;
-
-  const r = await axios.post('https://id.twitch.tv/oauth2/token', null, { params });
-  const { access_token, refresh_token } = r.data;
+  let access_token, refresh_token;
+  // Backend-first: the cloud holds the Twitch client secret (contract §3), so a signed-in app
+  // refreshes through it — the installer never ships the secret. Falls back to the legacy
+  // direct exchange (dev machines with a local .env.local secret) if the cloud path fails.
+  let refreshed = false;
+  try {
+    if (cloud && typeof cloud.authed === 'function' && cloud.authed() && typeof cloud.refreshTwitch === 'function') {
+      const d = await cloud.refreshTwitch(state.twitch.refreshToken);
+      access_token = d.accessToken;
+      refresh_token = d.refreshToken || '';
+      refreshed = !!access_token;
+    }
+  } catch (e) {
+    console.warn('[Twitch] Backend refresh failed, trying direct:', e.message);
+  }
+  if (!refreshed) {
+    const params = {
+      client_id: TWITCH_CLIENT_ID,
+      grant_type: 'refresh_token',
+      refresh_token: state.twitch.refreshToken
+    };
+    // Client secret is optional for public clients; include it when available
+    const secret = process.env.TWITCH_CLIENT_SECRET;
+    if (secret) params.client_secret = secret;
+    const r = await axios.post('https://id.twitch.tv/oauth2/token', null, { params });
+    access_token = r.data.access_token;
+    refresh_token = r.data.refresh_token;
+  }
   state.twitch.apiToken = access_token;
   if (refresh_token) state.twitch.refreshToken = refresh_token;
   if (twitchClient) twitchClient.updateToken(access_token);
@@ -8209,6 +8228,7 @@ function setupObsClient() {
     // Live mirror of the connected OBS profile's scene collection.
     onSceneListChange: (scenes) => {
       state.obs.availableScenes = filterSwitchableScenes(scenes);
+      refreshObsSources().then(broadcastFullState).catch(() => {});   // scene items changed with the list
       broadcastFullState();
     },
     // A media (commercial video) finished — auto-cut back to program if enabled.
@@ -8220,9 +8240,18 @@ function setupObsClient() {
       flowBus.emit('obs_media_started', { inputName: inputName || '' });
     },
     onInputMuteChanged: ({ inputName, muted }) => {
+      const inp = (state.obs.audioInputs || []).find((i) => i.name === inputName);
+      if (inp) { inp.muted = !!muted; broadcastFullState(); }
+      else refreshObsAudio().then(broadcastFullState).catch(() => {});   // input we hadn't inventoried yet
       flowBus.emit(muted ? 'obs_input_muted' : 'obs_input_unmuted', { inputName });
     },
+    onInputVolumeChanged: ({ inputName, volumeDb }) => {
+      const inp = (state.obs.audioInputs || []).find((i) => i.name === inputName);
+      if (inp) { inp.volumeDb = Math.round((volumeDb || 0) * 10) / 10; broadcastObsVolume(); }
+    },
     onSourceVisibilityChanged: ({ sceneName, sourceName, enabled }) => {
+      const src = (state.obs.sources || []).find((s) => s.scene === sceneName && s.source === sourceName);
+      if (src) { src.enabled = !!enabled; broadcastFullState(); }
       flowBus.emit(enabled ? 'obs_source_shown' : 'obs_source_hidden', { sceneName, sourceName });
     },
     onStreamStateChanged: ({ active, state: s }) => {
@@ -8287,6 +8316,7 @@ async function _doConnectObs() {
     await obsClient.connect({ url: state.obs.url, password: obsPassword });
     state.obs.availableScenes = filterSwitchableScenes(await obsClient.getScenes());
     state.obs.availableTransitions = await obsClient.getTransitions();
+    await refreshObsInventory();   // mixer + scene items for the on-air audio/source pills
     state.obs.lastError = null;
     try {
       state.obs.replayBufferActive = await obsClient.isReplayBufferActive();
@@ -8311,6 +8341,53 @@ function filterSwitchableScenes(scenes) {
   return (Array.isArray(scenes) ? scenes : []).filter((s) => !/^═/.test(s) && !/^=>/.test(s));
 }
 
+// ── OBS mixer + scene-item inventory (for the on-air audio/source control pills) ──
+// Live snapshot in state.obs.audioInputs / state.obs.sources; kept fresh by connect + OBS events.
+async function refreshObsAudio() {
+  if (!obsClient || !obsClient.isConnected()) { state.obs.audioInputs = []; return; }
+  try {
+    const list = await obsClient.call('GetInputList');
+    const out = [];
+    for (const inp of ((list && list.inputs) || [])) {
+      const name = inp.inputName;
+      try {
+        const vol = await obsClient.call('GetInputVolume', { inputName: name });
+        const mute = await obsClient.call('GetInputMute', { inputName: name });
+        out.push({ name, muted: !!(mute && mute.inputMuted), volumeDb: (vol && typeof vol.inputVolumeDb === 'number') ? Math.round(vol.inputVolumeDb * 10) / 10 : 0 });
+      } catch (e) { /* input has no audio track — skip it */ }
+    }
+    state.obs.audioInputs = out;
+  } catch (e) { /* keep last-known on a transient error */ }
+}
+const OBS_SOURCES_CAP = 300;   // guard against a pathological scene collection
+async function refreshObsSources() {
+  if (!obsClient || !obsClient.isConnected()) { state.obs.sources = []; return; }
+  try {
+    const out = [];
+    for (const scene of (state.obs.availableScenes || [])) {
+      if (out.length >= OBS_SOURCES_CAP) break;
+      try {
+        const r = await obsClient.call('GetSceneItemList', { sceneName: scene });
+        for (const it of ((r && r.sceneItems) || [])) {
+          if (!it.sourceName) continue;
+          out.push({ scene, source: it.sourceName, enabled: !!it.sceneItemEnabled });
+          if (out.length >= OBS_SOURCES_CAP) break;
+        }
+      } catch (e) { /* scene vanished mid-refresh */ }
+    }
+    state.obs.sources = out;
+  } catch (e) { /* keep last-known */ }
+}
+async function refreshObsInventory() { await refreshObsAudio(); await refreshObsSources(); }
+
+// Volume events fire rapidly while a fader is dragged — coalesce the broadcasts.
+let _obsVolTimer = null, _obsVolPending = false;
+function broadcastObsVolume() {
+  if (_obsVolTimer) { _obsVolPending = true; return; }
+  broadcastFullState();
+  _obsVolTimer = setTimeout(() => { _obsVolTimer = null; if (_obsVolPending) { _obsVolPending = false; broadcastFullState(); } }, 150);
+}
+
 // ── Unified automation activity log ─────────────────────────────────────────
 // One timeline of every action AUTOMATION took (RL cuts, countdown handoffs, flow fires,
 // flow scene switches) so producers can always answer "why did the scene just change?".
@@ -8327,6 +8404,8 @@ async function disconnectObs() {
   state.obs.connected = false;
   state.obs.availableScenes = [];
   state.obs.availableTransitions = [];
+  state.obs.audioInputs = [];
+  state.obs.sources = [];
   broadcastFullState();
 }
 
@@ -17517,20 +17596,36 @@ function startHttpServer(baseDir) {
   // Store OAuth sessions in memory (expires after 15 minutes)
   const oauthSessions = new Map();
 
-  // POST /api/oauth/twitch/init - Create a new OAuth session
-  app.post('/api/oauth/twitch/init', (req, res) => {
+  // POST /api/oauth/twitch/init - Create a new OAuth session and build the authorize URL.
+  // Cloud signed-in → authorization-CODE flow (the backend holds the client secret and hands
+  // back tokens WITH a refresh token — no more implicit-grant tokens dying mid-show).
+  // No cloud → the legacy implicit-grant URL, exactly as before (local-first, additive).
+  app.post('/api/oauth/twitch/init', express.json({ limit: '16kb' }), (req, res) => {
     try {
       const sessionId = Math.random().toString(36).substring(2, 15);
       const expiresAt = Date.now() + 15 * 60 * 1000; // 15 minutes
+      const scopes = (Array.isArray(req.body && req.body.scopes) ? req.body.scopes : [])
+        .filter((s) => typeof s === 'string' && /^[a-z_:.]+$/.test(s)).slice(0, 64);
+      const useCodeFlow = !!(cloud && typeof cloud.authed === 'function' && cloud.authed());
 
       oauthSessions.set(sessionId, {
         state: sessionId,
         accessToken: null,
+        mode: useCodeFlow ? 'code' : 'token',
         expiresAt
       });
 
-      console.log('[OAuth] Session created:', sessionId);
-      res.json({ sessionId });
+      const redirectUri = 'http://localhost:3000/api/oauth/twitch/callback';
+      const authUrl = 'https://id.twitch.tv/oauth2/authorize'
+        + `?client_id=${encodeURIComponent(TWITCH_CLIENT_ID)}`
+        + `&redirect_uri=${encodeURIComponent(redirectUri)}`
+        + `&response_type=${useCodeFlow ? 'code' : 'token'}`
+        + (scopes.length ? `&scope=${scopes.map(encodeURIComponent).join('%20')}` : '')
+        + `&state=${encodeURIComponent(sessionId)}`
+        + '&force_verify=true';
+
+      console.log('[OAuth] Session created:', sessionId, '· flow:', useCodeFlow ? 'code (backend exchange)' : 'implicit');
+      res.json({ sessionId, authUrl, mode: useCodeFlow ? 'code' : 'token' });
     } catch (err) {
       console.error('[OAuth Init]', err);
       res.status(500).json({ error: 'Failed to create OAuth session' });
@@ -17584,13 +17679,50 @@ function startHttpServer(baseDir) {
     }
   });
 
-  // GET /api/oauth/twitch/callback - OAuth redirect target (Implicit grant flow).
-  // This is a public desktop client with NO client secret, so we request response_type=token.
-  // Twitch returns the access token in the URL fragment (#access_token=...), which the browser
-  // never sends to the server. We return a page that reads the fragment and POSTs the token to
-  // /api/oauth/twitch/apply-token, which validates it and wires up the Twitch clients.
-  app.get('/api/oauth/twitch/callback', (req, res) => {
+  // Minimal result page for the CODE-flow callback (exchange already done server-side —
+  // no fragment dance needed). Same look as the implicit page below.
+  function twitchResultPage(ok, loginOrMsg) {
+    const badge = ok ? '✓' : '✕';
+    const cls = ok ? 'ok' : 'err';
+    const title = ok ? 'Twitch Connected!' : 'Connection failed';
+    const body = ok
+      ? `<div class="username">${String(loginOrMsg || '').replace(/[<>&"]/g, '')}</div><div class="message">You can close this window — the app is connected.</div>`
+      : `<div class="message">${String(loginOrMsg || 'Could not connect to Twitch. Close this window and try again.').replace(/[<>&"]/g, '')}</div>`;
+    return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><title>${title}</title><style>
+      *{margin:0;padding:0;box-sizing:border-box}body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);display:flex;justify-content:center;align-items:center;min-height:100vh}
+      .container{background:#fff;border-radius:16px;padding:48px;text-align:center;box-shadow:0 20px 60px rgba(0,0,0,.3);max-width:420px}
+      .badge{width:80px;height:80px;margin:0 auto 24px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:44px;color:#fff}
+      .badge.ok{background:#10b981}.badge.err{background:#ef4444}
+      h1{color:#1f2937;font-size:26px;margin-bottom:12px}.username{color:#9146FF;font-size:20px;font-weight:600;margin-bottom:20px}.message{color:#6b7280;font-size:15px;line-height:1.5}
+    </style></head><body><div class="container"><div class="badge ${cls}">${badge}</div><h1>${title}</h1>${body}</div>
+    ${ok ? '<script>setTimeout(function(){ try { window.close(); } catch(e){} }, 2500);</script>' : ''}</body></html>`;
+  }
+
+  // GET /api/oauth/twitch/callback - OAuth redirect target.
+  // CODE flow (?code= present, cloud signed-in): exchange the code via the backend — the
+  // secret lives there, and the tokens come back WITH a refresh token.
+  // IMPLICIT flow (legacy, no cloud): Twitch returns the token in the URL fragment, which the
+  // page below reads and POSTs to /api/oauth/twitch/apply-token.
+  app.get('/api/oauth/twitch/callback', async (req, res) => {
     const { error, error_description } = req.query;
+    const code = typeof req.query.code === 'string' ? req.query.code : '';
+    const cbState = typeof req.query.state === 'string' ? req.query.state : '';
+    if (code) {
+      res.set('Content-Type', 'text/html');
+      try {
+        // State must match a session we minted (CSRF guard); temp- prefixed panel fallbacks pass too.
+        const sess = oauthSessions.get(cbState);
+        if (!sess && !cbState.startsWith('temp-')) throw new Error('Unknown or expired sign-in session — start the connect again.');
+        const d = await cloud.linkTwitch({ code, redirectUri: 'http://localhost:3000/api/oauth/twitch/callback' });
+        const user = await applyTwitchAccessToken(d.accessToken, d.refreshToken || '');
+        if (sess) sess.accessToken = d.accessToken;   // existing pollers resolve
+        res.send(twitchResultPage(true, user.login));
+      } catch (e) {
+        console.error('[OAuth Callback] code exchange failed:', e.message);
+        res.send(twitchResultPage(false, e.message));
+      }
+      return;
+    }
     res.set('Content-Type', 'text/html');
     res.send(`<!DOCTYPE html>
 <html lang="en">

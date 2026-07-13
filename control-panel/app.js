@@ -5469,8 +5469,24 @@ function bbActionInfo(p) {
     const live = !!(currentState[g.state] && currentState[g.state].visible);
     return { label: BB_TRIGGER_LABELS[p.k] || p.k, live, run: () => send(g.msg, live ? { visible: false } : g.show()) };
   }
+  // OBS audio input — pill lights when MUTED (danger). Wheel/long-press rides volume (see the toolbar).
+  if (p.t === 'audio') {
+    const inp = (obs.audioInputs || []).find((i) => i.name === p.k); if (!inp) return null;
+    return { label: p.k, live: !!inp.muted, kind: 'audio', inputName: p.k, volumeDb: inp.volumeDb,
+      run: () => send(inp.muted ? 'obs_input_unmute' : 'obs_input_mute', { inputName: p.k }) };
+  }
+  // OBS source (scene item) — k = "<scene><source>". Pill lights when SHOWN.
+  if (p.t === 'source') {
+    const i = String(p.k).indexOf(''); if (i < 0) return null;
+    const scene = p.k.slice(0, i), source = p.k.slice(i + 1);
+    const src = (obs.sources || []).find((s) => s.scene === scene && s.source === source); if (!src) return null;
+    return { label: source, live: !!src.enabled, kind: 'source', scene, source,
+      run: () => send(src.enabled ? 'obs_source_hide' : 'obs_source_show', { scene, source }) };
+  }
   return null;
 }
+// Encode / decode a source pin key (scene + source item).
+function bbSourceKey(scene, source) { return scene + '' + source; }
 function bbRenderCustomizeList() {
   const list = el('bb-cz-list'); if (!list) return;
   const obs = currentState.obs || {};
@@ -25482,11 +25498,9 @@ const TWITCH_SCOPES = [
 
 el('btn-twitch-login')?.addEventListener('click', () => {
   try {
-    // Use a temporary session ID immediately - don't wait for server init
+    // Legacy implicit-grant URL — only used if the server init call fails entirely.
     const sessionId = 'temp-' + Math.random().toString(36).substring(7);
-
-    // Build Twitch auth URL
-    const authUrl = `https://id.twitch.tv/oauth2/authorize?` +
+    const legacyUrl = `https://id.twitch.tv/oauth2/authorize?` +
       `client_id=${TWITCH_CLIENT_ID}&` +
       `redirect_uri=${encodeURIComponent(TWITCH_REDIRECT_URI)}&` +
       `response_type=token&` +
@@ -25494,15 +25508,19 @@ el('btn-twitch-login')?.addEventListener('click', () => {
       `state=${sessionId}&` +
       `force_verify=true`;
 
-    // Open Twitch login window IMMEDIATELY
-    const oauthWindow = window.open(authUrl, 'twitch_oauth', 'width=600,height=700');
-
-    // Initialize session in the background (fire and forget)
+    // Open the window IMMEDIATELY (popup blockers only allow synchronous opens), then point it
+    // at the server-built authorize URL: code flow via the cloud backend when signed in (tokens
+    // come back WITH a refresh token — no more mid-show expiry), legacy implicit otherwise.
+    const oauthWindow = window.open('', 'twitch_oauth', 'width=600,height=700');
     fetch(`${OAUTH_BASE_URL}/api/oauth/twitch/init`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' }
-    }).then(r => r.json()).then(() => {}).catch(err => {
-      console.warn('[OAuth] Persistent session init failed, continuing with temp session:', err.message);
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ scopes: TWITCH_SCOPES })
+    }).then(r => r.json()).then((d) => {
+      if (oauthWindow && !oauthWindow.closed) oauthWindow.location = (d && d.authUrl) ? d.authUrl : legacyUrl;
+    }).catch(err => {
+      console.warn('[OAuth] Init failed, using legacy implicit URL:', err.message);
+      if (oauthWindow && !oauthWindow.closed) oauthWindow.location = legacyUrl;
     });
 
     // Step 4: Check if window opened successfully
