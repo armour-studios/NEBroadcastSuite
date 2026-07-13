@@ -1971,26 +1971,29 @@ async function stationAutoSync() {
     const orgId = s.workspaceId;
     if (!orgId || String(orgId).startsWith('user:')) return;
     _stationSyncBusy = true;
-    const { feeds } = await cloud.listStationFeeds(orgId);
+    const [{ feeds }, liveStations] = await Promise.all([
+      cloud.listStationFeeds(orgId),
+      cloud.listStations(orgId).catch(() => null),
+    ]);
     // Station binding: with several desks running, only THIS app's bound station may fill the
     // desk — otherwise two stations' "Caster 1"s race for slot 1. '' = follow all (single-desk orgs).
     let bind = (state.casters && state.casters.stationId) || '';
+    const activeStations = (liveStations || []).filter((st) => st && st.status === 'active');
     // STALE binding self-heal: stations get deleted/recreated during setup; a binding pointing
     // at a dead station filtered EVERY feed out and auto-fill died silently ("casters stopped
-    // landing on the overlays"). If the bound station no longer exists, clear the binding and
-    // fall back to all stations.
-    if (bind) {
-      try {
-        const live = await cloud.listStations(orgId);
-        if (!live.some((st) => st && st.id === bind && st.status === 'active')) {
-          console.warn('[Stations] Bound station no longer exists — reverting to All stations');
-          state.casters.stationId = '';
-          bind = '';
-          saveAppState();
-          broadcastFullState();
-        }
-      } catch (_) { /* can't verify right now — keep the binding, try next pass */ }
+    // landing on the overlays"). If the bound station no longer exists, clear the binding.
+    if (bind && liveStations && !activeStations.some((st) => st.id === bind)) {
+      console.warn('[Stations] Bound station no longer exists — clearing the binding');
+      state.casters.stationId = '';
+      bind = '';
+      saveAppState();
+      broadcastFullState();
     }
+    // ISOLATION: several stations active but this app is UNBOUND → do nothing rather than pull
+    // every desk's casters into one app (two producers' "Caster 1"s would fight). The panel's
+    // Cloud Stations section tells the producer to pick their station; a single active station
+    // auto-follows as before.
+    if (!bind && activeStations.length > 1) return;
     const casters = (feeds || []).filter((f) => f && f.kind === 'caster' && f.obsViewUrl && (!bind || f.stationId === bind));
     if (!casters.length) return;
     // Live feed URLs — used below to displace STALE auto-created occupants (a recreated room
@@ -2037,6 +2040,21 @@ async function stationAutoSync() {
         state.casters.library.push(entry);
         changed = true;
       } else if (key) {
+        // TAKE-OVER: web slots keep their stream id, so when a DIFFERENT person claims the same
+        // placement the feed URL matches the previous occupant's auto entry — the video changed
+        // but the desk kept the old name/socials. Re-identify auto-managed (cs_) entries to the
+        // new person; manual entries are never renamed.
+        const entryKeys = [entry.name, entry.handle].map((v) => (v || '').toLowerCase()).filter(Boolean);
+        if (String(entry.id || '').startsWith('cs_') && !entryKeys.includes(key)) {
+          const twin = (state.crew || []).find((c) => c && ((c.name || '').toLowerCase() === key || (c.handle || '').toLowerCase() === key)) || null;
+          entry.name = nm;
+          entry.handle = '';
+          entry.socialHandle = (twin && twin.socialHandle) || '';
+          entry.social = (twin && twin.social) || 'none';
+          entry.country = (twin && twin.country) || '';
+          changed = true;
+          console.log('[Stations] Web slot take-over — desk entry re-identified to', nm);
+        }
         // Adopted or URL-matched entry: still mark the crew twin on shift for the Show Deck.
         const cm = (state.crew || []).find((c) => c && ((c.name || '').toLowerCase() === key || (c.handle || '').toLowerCase() === key));
         if (cm && (!cm.active || !cm.workedEvent)) { cm.active = true; cm.workedEvent = true; changed = true; }
@@ -2270,6 +2288,9 @@ function buildShowStateForCloud() {
     return list.map((p) => ({ name: (p.name ? String(p.name) : '').trim() })).filter((p) => p.name).slice(0, 8);
   };
   return {
+    // Which website station THIS producer's app is bound to — join pages under that station
+    // prefer this row, so two concurrent producers' shows never bleed into each other's pages.
+    stationId: (state.casters && state.casters.stationId) || '',
     eventName: state.eventName || '',
     roundLabel: state.roundLabel || '',
     gameLabel: state.gameLabel || '',

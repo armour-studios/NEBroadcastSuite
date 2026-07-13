@@ -803,12 +803,17 @@ function renderCfStations() {
   // Show for any org-connected app (even with zero feeds) so the "+ … link" generators are reachable.
   const isOrgConnected = !!(window._cloudWorkspaceId && !String(window._cloudWorkspaceId).startsWith('user:'));
   section.style.display = (feeds.length || binding || isOrgConnected || (window._cfStationsIndex || []).length) ? '' : 'none';
+  // Unbound + several active stations = auto-fill deliberately paused (isolation between desks).
+  const multiUnbound = !binding && (window._cfStationsIndex || []).length > 1;
   if (!feeds.length) {
     wrap.innerHTML = detailHtml;
     _wireCopyLinks();
-    if (status) status.textContent = binding ? 'No one from this station has checked in yet — feeds appear here (and auto-fill the desk) as casters claim their slots.' : '';
+    if (status) status.textContent = multiUnbound
+      ? 'Multiple stations are active in your org — pick which station THIS app follows (Station picker above). Auto-fill is paused until you choose, so desks never interfere.'
+      : (binding ? 'No one from this station has checked in yet — feeds appear here (and auto-fill the desk) as casters claim their slots.' : '');
     return;
   }
+  if (status && multiUnbound) status.textContent = 'Multiple stations are active — pick which station THIS app follows (Station picker above). Auto-fill is paused until you choose.';
 
   const lib = (currentState && currentState.casters && currentState.casters.library) || [];
   const lineup = (currentState && currentState.casters && currentState.casters.lineup) || [];
@@ -6909,6 +6914,44 @@ function buildHeroControl(hero, onPick) {
   });
 }
 
+// Live in-game names on one side (RL: team 0=blue/1=orange; CS2: CT=blue/T=orange — same
+// convention as the server's show-state builder).
+function _liveIngameNames(side) {
+  const rl = Array.isArray(currentState.players) ? currentState.players : [];
+  const cs = (currentState.csgo && Array.isArray(currentState.csgo.players)) ? currentState.csgo.players : [];
+  const list = rl.length
+    ? rl.filter((p) => p && (side === 'blue' ? Number(p.team) === 0 : Number(p.team) === 1))
+    : cs.filter((p) => p && (side === 'blue' ? p.team === 'CT' : p.team === 'T'));
+  return list.map((p) => (p.name ? String(p.name) : '').trim()).filter(Boolean);
+}
+// Options for a roster player's Camera picker. The IN-GAME players on that side lead the list —
+// picking one keys the player's cam by their in-game name, which is exactly how the HUD overlays
+// resolve facecams — followed by the saved facecam library for everything else. assignedCamera
+// stores the facecam NAME either way; an in-game pick with no cam linked yet says so and gets its
+// feed via In-Game Player Cams (or the website join page's auto-mapping) without re-assigning here.
+function playerCameraOptions(side, current) {
+  const cams = currentState.facecams || currentState.savedFacecams || [];
+  const live = _liveIngameNames(side);
+  const camByName = new Map(cams.map((c) => [c.name, c]));
+  const opts = ['<option value="">No camera</option>'];
+  if (live.length) {
+    opts.push('<optgroup label="In-game — this team">' + live.map((n) => {
+      const fc = camByName.get(n);
+      return `<option value="${tlEsc(n)}"${n === current ? ' selected' : ''}>${tlEsc(n)}${fc ? '' : ' — no cam linked yet'}</option>`;
+    }).join('') + '</optgroup>');
+  }
+  const rest = cams.filter((c) => !live.includes(c.name));
+  if (rest.length) {
+    opts.push(`<optgroup label="${live.length ? 'Saved cameras' : 'Cameras'}">` + rest.map((c) =>
+      `<option value="${tlEsc(c.name)}"${c.name === current ? ' selected' : ''}>${tlEsc(c.nickname || c.name)}</option>`).join('') + '</optgroup>');
+  }
+  // An assignment pointing at a deleted cam stays visible/selectable instead of silently clearing.
+  if (current && !live.includes(current) && !camByName.has(current)) {
+    opts.push(`<option value="${tlEsc(current)}" selected>${tlEsc(current)} (cam deleted)</option>`);
+  }
+  return opts.join('');
+}
+
 // Inline roster on the Match team card — view + rename + add/remove. Renaming here flows
 // to the overlay players and the facecam rows (server edit_player keeps savedTeams in sync).
 // (Named distinctly from the Teams-page `renderTeamPlayers` to avoid the hoisting collision.)
@@ -6917,7 +6960,7 @@ function renderMatchPlayers(side, players) {
   if (!wrap) return;
   players = Array.isArray(players) ? players : [];
   const cams = currentState.facecams || currentState.savedFacecams || [];
-  const camKey = cams.map(c => c.name).join(',');
+  const camKey = cams.map(c => c.name).join(',') + '|' + _liveIngameNames(side).join(',');
   const gameId = currentState.activeGame;
   const gameCfg = (currentState.games && currentState.games[gameId]) || null;
   const heroFeatures = ['heroes', 'agents', 'operators', 'legends', 'draft'];
@@ -7048,7 +7091,7 @@ function renderMatchPlayers(side, players) {
     };
 
     const cam = document.createElement('select'); cam.className = 'input-select';
-    cam.innerHTML = '<option value="">No camera</option>' + cams.map(c => `<option value="${c.name}">${c.nickname || c.name}</option>`).join('');
+    cam.innerHTML = playerCameraOptions(side, p.assignedCamera || '');
     cam.value = p.assignedCamera || '';
     cam.addEventListener('change', () => { if (p.id) send('edit_player', { side, playerId: p.id, playerData: { assignedCamera: cam.value || null } }); });
     rightCol.appendChild(mkField('Camera', cam));
@@ -9443,11 +9486,25 @@ function teRenderPlayers() {
     // Toggle popup open/close
     const openPopup = () => {
       wrap.querySelectorAll('.te-player-row.te-editing').forEach(r => {
-        if (r !== row) { r.classList.remove('te-editing'); const eb = r.querySelector('.te-edit-btn'); if (eb) eb.textContent = 'Edit'; }
+        if (r !== row) { r.classList.remove('te-editing'); const eb = r.querySelector('.te-edit-btn'); if (eb) eb.textContent = 'Edit'; const op = r.querySelector('.te-edit-popup'); if (op) op.removeAttribute('style'); }
       });
+      // Position as a fixed overlay so it escapes the editor's overflow scroll container —
+      // the CSS default (absolute, below the row) left the popup clipped/off-screen for rows
+      // near the bottom until you scrolled. Same flip-above/clamp logic as the match panel.
+      const rect = row.getBoundingClientRect();
+      const popW = Math.max(rect.width, 440);
+      const leftPx = Math.max(8, Math.min(rect.left, window.innerWidth - popW - 8));
+      popup.style.cssText = `display:block;position:fixed;left:${leftPx}px;width:${popW}px;z-index:9999;visibility:hidden;top:0;`;
       row.classList.add('te-editing'); editBtn.textContent = 'Done';
+      const margin = 8, vh = window.innerHeight, popH = popup.offsetHeight || 360;
+      const below = rect.bottom + 4, above = rect.top - popH - 4;
+      const topPx = (below + popH + margin <= vh) ? below
+        : (above >= margin) ? above
+        : Math.max(margin, vh - popH - margin);
+      popup.style.top = topPx + 'px';
+      popup.style.visibility = '';
     };
-    const closePopup = () => { row.classList.remove('te-editing'); editBtn.textContent = 'Edit'; };
+    const closePopup = () => { row.classList.remove('te-editing'); popup.removeAttribute('style'); editBtn.textContent = 'Edit'; };
     editBtn.addEventListener('click', () => row.classList.contains('te-editing') ? closePopup() : openPopup());
     hdrClose.addEventListener('click', closePopup);
 
@@ -9456,12 +9513,26 @@ function teRenderPlayers() {
 
   // Close any open popup when clicking outside
   if (!wrap._outsideHandler) {
+    const closeAllTe = () => {
+      wrap.querySelectorAll('.te-player-row.te-editing').forEach(r => {
+        r.classList.remove('te-editing');
+        const eb = r.querySelector('.te-edit-btn'); if (eb) eb.textContent = 'Edit';
+        const op = r.querySelector('.te-edit-popup'); if (op) op.removeAttribute('style');
+      });
+    };
     wrap._outsideHandler = (e) => {
       wrap.querySelectorAll('.te-player-row.te-editing').forEach(r => {
-        if (!r.contains(e.target)) { r.classList.remove('te-editing'); const eb = r.querySelector('.te-edit-btn'); if (eb) eb.textContent = 'Edit'; }
+        if (!r.contains(e.target)) closeAllTe();
       });
     };
     document.addEventListener('click', wrap._outsideHandler);
+    // A fixed-position popup would drift away from its row when the list scrolls — close it.
+    // Capture-phase so it fires for ANY scrollable ancestor (scroll events don't bubble);
+    // scrolls that originate inside the popup itself are ignored.
+    document.addEventListener('scroll', (e) => {
+      if (e.target instanceof Element && e.target.closest('.te-edit-popup')) return;
+      closeAllTe();
+    }, { capture: true, passive: true });
   }
 }
 // Thematic logo placeholder (no white box): a dashed, team-coloured tile with the team's
@@ -9595,11 +9666,12 @@ function openPlayerModal(side, playerId = null) {
   el('player-name').value = player?.name || '';
   el('player-platform').value = player?.platform || 'steam';
   el('player-platform-id').value = player?.platformId || '';
-  el('player-camera').value = player?.assignedCamera || '';
   el('player-create-camera').checked = false;
   el('player-new-camera-form').style.display = 'none';
 
-  syncPlayerCameraDropdown();
+  // Build the options BEFORE applying the value — a <select> silently drops a value
+  // whose option doesn't exist yet.
+  syncPlayerCameraDropdown(player?.assignedCamera || '');
   modal.classList.add('show');
 }
 
@@ -9610,17 +9682,11 @@ function closePlayerModal() {
   editingPlayerSide = null;
 }
 
-function syncPlayerCameraDropdown() {
+function syncPlayerCameraDropdown(desired) {
   const select = el('player-camera');
   if (!select) return;
-  const currentValue = select.value;
-  select.innerHTML = '<option value="">-- No Camera --</option>';
-  (currentState.facecams || currentState.savedFacecams || []).forEach(fc => {
-    const opt = document.createElement('option');
-    opt.value = fc.name;
-    opt.textContent = `${fc.nickname || fc.name}`;
-    select.appendChild(opt);
-  });
+  const currentValue = desired !== undefined ? desired : select.value;
+  select.innerHTML = playerCameraOptions(editingPlayerSide || 'blue', currentValue);
   select.value = currentValue;
 }
 
@@ -9931,6 +9997,11 @@ function applyCloudStatus(s) {
   if (libBlock) libBlock.style.display = isOrg ? '' : 'none';
   if (invBlock) invBlock.style.display = isOrg ? '' : 'none';
   if (isOrg) renderOrgLibraryStatus();
+
+  // Stations sub-tab on the Cameras page — only meaningful for a real org. Refresh it if it's open.
+  const stTab = el('cf-tab-stations');
+  if (stTab) stTab.style.display = isOrg ? '' : 'none';
+  if (isOrg && el('cf-panel-stations') && el('cf-panel-stations').classList.contains('active') && typeof cfLoadStations === 'function') cfLoadStations();
 
   // Leagues website sync — org-scoped only (CompeteLeague requires an orgId); hidden entirely
   // for a solo/personal workspace rather than letting a producer hit a 403.
@@ -15213,25 +15284,55 @@ function qkRenderPut() {
       ? !!(currentState && currentState.obs && currentState.obs.currentScene === it.k)
       : _qkIsLive(it.item);
     chip.classList.toggle('on', on);
-    // Team-dependent chips (Line-up, Winner) show WHO they'll fire for.
+    // Team-dependent chips (Line-up, Winner) get a team-colored dot mirroring the target set in the
+    // Team-graphics bar above — the full name lives there, so the chip only needs a colour cue.
     if (it.item && it.item.sideSel) {
       const side = (el(it.item.sideSel)?.value === 'orange') ? 'orange' : 'blue';
       const t = (currentState && currentState.teams && currentState.teams[side]) || {};
-      const name = (t.name || side).toString();
+      const color = t.color || (side === 'blue' ? '#3b82f6' : '#e97139');
       let badge = chip.querySelector('.qk-chip-team');
       if (!badge) {
         badge = document.createElement('span');
         badge.className = 'qk-chip-team';
-        badge.title = 'This chip fires for the selected team — change it in the gear options';
-        chip.querySelector('.qk-chip-main')?.appendChild(badge);
+        chip.appendChild(badge);
       }
-      const short = name.length > 12 ? name.slice(0, 11) + '…' : name;
-      if (badge.textContent !== short) badge.textContent = short;
-      badge.style.color = t.color || (side === 'blue' ? '#3b82f6' : '#e97139');
-      badge.style.borderColor = 'color-mix(in srgb, ' + (t.color || (side === 'blue' ? '#3b82f6' : '#e97139')) + ' 55%, transparent)';
+      badge.title = (t.name || (side === 'blue' ? 'Blue' : 'Orange')) + ' — set the team in the bar above';
+      badge.style.background = color;
     }
   });
+  qkRenderTeamTarget();
 }
+// ── Team-graphics target bar (drives Winner + Line-up side at once) ─────────────
+const QK_TEAM_MSG = { winner: 'set_winner', intro: 'set_intro' };
+function qkRenderTeamTarget() {
+  const bar = el('qk-teamtarget'); if (!bar) return;
+  const teams = (currentState && currentState.teams) || {};
+  const cur = (el('ck-winner-side') && el('ck-winner-side').value === 'orange') ? 'orange' : 'blue';
+  ['blue', 'orange'].forEach((side) => {
+    const btn = bar.querySelector(`[data-ttside="${side}"]`); if (!btn) return;
+    const t = teams[side] || {};
+    const color = t.color || (side === 'blue' ? '#3b82f6' : '#e97139');
+    const name = (t.name || (side === 'blue' ? 'Blue' : 'Orange')).toString();
+    const nameEl = btn.querySelector('.qk-tt-name'); if (nameEl && nameEl.textContent !== name) nameEl.textContent = name;
+    const dot = btn.querySelector('.qk-tt-dot'); if (dot) dot.style.background = color;
+    btn.style.setProperty('--tt-color', color);
+    btn.classList.toggle('active', side === cur);
+  });
+}
+// Set which side the team graphics fill; re-fire any that are already live so on-air updates instantly.
+function qkSetTeamTarget(side) {
+  side = side === 'orange' ? 'orange' : 'blue';
+  ['ck-winner-side', 'ck-intro-side'].forEach((id) => { const s = el(id); if (s) s.value = side; });
+  QK_PUT.filter((it) => it.sideSel).forEach((it) => {
+    if (_qkIsLive(it) && QK_TEAM_MSG[it.trig]) send(QK_TEAM_MSG[it.trig], { visible: true, side });
+  });
+  qkRenderTeamTarget();
+  qkRenderPut();
+}
+el('qk-teamtarget')?.addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-ttside]'); if (!btn) return;
+  qkSetTeamTarget(btn.dataset.ttside);
+});
 el('qk-put-reorder')?.addEventListener('click', (e) => {
   e.preventDefault();
   _qkEdit = !_qkEdit;
@@ -20976,6 +21077,17 @@ function fitLivePreviews() { document.querySelectorAll('.live-pv iframe').forEac
 window.addEventListener('resize', () => { clearTimeout(window.__lpvTimer); window.__lpvTimer = setTimeout(fitLivePreviews, 120); });
 ['deck-pv-frame', 'gfx-pv-frame'].forEach((id) => { const fr = el(id); if (fr) fr.addEventListener('load', () => fitLivePreview(fr)); });
 setTimeout(fitLivePreviews, 250);
+// The graphics hub uses CSS container queries — its columns relayout when the qrail expands/collapses
+// WITHOUT firing window.resize, which would leave the preview iframe scaled to a stale width. Observe
+// the preview box so it always re-fits to its actual size. (ResizeObserver: modern Electron/Chromium.)
+try {
+  if (typeof ResizeObserver === 'function') {
+    const _gfxPvRO = new ResizeObserver(() => { clearTimeout(window.__gfxLpvTimer); window.__gfxLpvTimer = setTimeout(fitLivePreviews, 60); });
+    const _obsPvBoxes = () => document.querySelectorAll('.gfx-fixed-preview .live-pv, .gfx-preview .live-pv').forEach((b) => { if (b && !b.__roBound) { b.__roBound = true; _gfxPvRO.observe(b); } });
+    _obsPvBoxes();
+    setTimeout(_obsPvBoxes, 1200);   // catch preview boxes created after first paint (borrowed panels)
+  }
+} catch (_) { /* ResizeObserver unavailable — window.resize + _pdShow still cover the common cases */ }
 
 
 
@@ -25524,6 +25636,8 @@ async function connect() {
       } else if (msg.data.context === 'org-library') {
         if (typeof showToast === 'function') showToast(msg.data.message || '', msg.data.result ? '#22c55e' : '#c53030', msg.data.result ? 3000 : 6000);
         if (typeof renderOrgLibraryStatus === 'function') renderOrgLibraryStatus();
+      } else if (msg.data.context === 'station') {
+        if (typeof showToast === 'function') showToast(msg.data.message || '', msg.data.result ? '#22c55e' : '#c53030', msg.data.result ? 2600 : 6000);
       } else if (el('import-export-result')) {
         el('import-export-result').textContent = msg.data.message;
         el('import-export-result').style.color = msg.data.result ? 'green' : 'red';
@@ -25564,6 +25678,8 @@ async function connect() {
       window._cfStationsIndex = (msg.data && msg.data.ok && Array.isArray(msg.data.stations)) ? msg.data.stations : [];
       window._cfStationDetail = (msg.data && msg.data.ok && msg.data.detail) ? msg.data.detail : null;
       renderCfStations();
+    } else if (msg.type === 'cloud_stations_full') {
+      if (typeof cfApplyStationsFull === 'function') cfApplyStationsFull(msg.data);
     } else if (msg.type === 'cloud_leagues') {
       if (typeof lgRenderCloudList === 'function') lgRenderCloudList((msg.data && msg.data.ok && Array.isArray(msg.data.leagues)) ? msg.data.leagues : []);
     } else if (msg.type === 'startgg-result') {
