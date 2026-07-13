@@ -740,6 +740,12 @@ function renderCfStations() {
   const wrap = el('cf-stations-list');
   const status = el('cf-stations-status');
   if (!section || !wrap) return;
+  // Auto-fill toggle mirrors server state (default on; wired once).
+  const af = el('cf-stations-autofill');
+  if (af) {
+    af.checked = !(currentState && currentState.casters && currentState.casters.autoFillFromStations === false);
+    if (!af._wired) { af._wired = true; af.addEventListener('change', () => send('set_station_autofill', { on: af.checked })); }
+  }
   const feeds = _cfStationsCache || [];
   section.style.display = feeds.length ? '' : 'none';
   if (!feeds.length) { wrap.innerHTML = ''; if (status) status.textContent = ''; return; }
@@ -5277,7 +5283,7 @@ function renderUpdateStatus(s) {
     case 'checking': msg('Checking for updates…'); if (bCheck) bCheck.disabled = true; break;
     case 'up-to-date': msg("You're on the latest version.", 'var(--good,#48bb78)'); break;
     case 'available':
-      msg('Update available: v' + s.version + ' — downloading…', 'var(--cp-accent,#ec4899)');
+      msg('Update available: v' + s.version + ' — downloading…', 'var(--cp-accent,#7C3AED)');
       if (bCheck) bCheck.disabled = true;
       if (notes && s.notes) { notes.textContent = s.notes; notes.style.display = ''; }
       break;
@@ -5475,18 +5481,19 @@ function bbActionInfo(p) {
     return { label: p.k, live: !!inp.muted, kind: 'audio', inputName: p.k, volumeDb: inp.volumeDb,
       run: () => send(inp.muted ? 'obs_input_unmute' : 'obs_input_mute', { inputName: p.k }) };
   }
-  // OBS source (scene item) — k = "<scene><source>". Pill lights when SHOWN.
+  // OBS source (scene item) — k is a base64 [scene, source] pair. Pill lights when SHOWN.
   if (p.t === 'source') {
-    const i = String(p.k).indexOf(''); if (i < 0) return null;
-    const scene = p.k.slice(0, i), source = p.k.slice(i + 1);
+    const parsed = bbSourceParse(p.k); if (!parsed) return null;
+    const { scene, source } = parsed;
     const src = (obs.sources || []).find((s) => s.scene === scene && s.source === source); if (!src) return null;
     return { label: source, live: !!src.enabled, kind: 'source', scene, source,
       run: () => send(src.enabled ? 'obs_source_hide' : 'obs_source_show', { scene, source }) };
   }
   return null;
 }
-// Encode / decode a source pin key (scene + source item).
-function bbSourceKey(scene, source) { return scene + '' + source; }
+// Source pin key = base64 of [scene, source] — collision-free + safe in data attributes / localStorage.
+function bbSourceKey(scene, source) { try { return btoa(unescape(encodeURIComponent(JSON.stringify([scene, source])))); } catch { return ''; } }
+function bbSourceParse(k) { try { const a = JSON.parse(decodeURIComponent(escape(atob(String(k))))); return Array.isArray(a) ? { scene: a[0], source: a[1] } : null; } catch { return null; } }
 function bbRenderCustomizeList() {
   const list = el('bb-cz-list'); if (!list) return;
   const obs = currentState.obs || {};
@@ -5512,8 +5519,15 @@ function bbRenderCustomizeList() {
   const sceneChips = scenes.filter(hit).map((s) => chip('scene', s, s, 'film', { pinned: bbIsPinned('scene', s) || mapped.has(s), locked: mapped.has(s), live: (obs.currentScene || '') === s })).join('');
   const ovChips = ov.filter((o) => hit(o.label)).map((o) => chip('overlay', o.key, o.label, ico[o.key] || 'sparkles', { pinned: bbIsPinned('overlay', o.key), live: !!getPath(currentState, o.path) })).join('');
   const trChips = tr.filter((g) => hit(BB_TRIGGER_LABELS[g.state] || g.state)).map((g) => chip('trigger', g.state, BB_TRIGGER_LABELS[g.state] || g.state, 'zap', { pinned: bbIsPinned('trigger', g.state), live: !!(currentState[g.state] && currentState[g.state].visible) })).join('');
+  // OBS audio inputs (pin = a mute+volume pill) and scene sources (pin = a show/hide pill).
+  const auds = Array.isArray(obs.audioInputs) ? obs.audioInputs : [];
+  const srcs = Array.isArray(obs.sources) ? obs.sources : [];
+  const audChips = auds.filter((a) => hit(a.name)).map((a) => chip('audio', a.name, a.name, 'volume', { pinned: bbIsPinned('audio', a.name), live: !!a.muted })).join('');
+  const srcChips = srcs.filter((s) => hit(s.source) || hit(s.scene)).map((s) => { const k = bbSourceKey(s.scene, s.source); return chip('source', k, s.source + '  ·  ' + s.scene, 'layers', { pinned: bbIsPinned('source', k), live: !!s.enabled }); }).join('');
   list.innerHTML = grp('OBS Scenes', scenes.length, sceneChips, obs.connected ? 'No scenes in OBS.' : 'Connect OBS to list scenes.')
-    + grp('Overlays', ov.length, ovChips) + grp('Triggers', tr.length, trChips);
+    + grp('Overlays', ov.length, ovChips) + grp('Triggers', tr.length, trChips)
+    + grp('Audio', auds.length, audChips, obs.connected ? 'No audio inputs in OBS.' : 'Connect OBS to list audio.')
+    + grp('Sources', srcs.length, srcChips, obs.connected ? 'No sources in OBS.' : 'Connect OBS to list sources.');
   const pc = el('bb-cz-pincount'); if (pc) { const n = bbPinned().length; pc.textContent = n ? n + ' pinned' : ''; }
   list.querySelectorAll('.bb-cz-chip:not(.is-locked)').forEach((c) => c.addEventListener('click', () => {
     bbTogglePin(c.dataset.t, c.dataset.k, !bbIsPinned(c.dataset.t, c.dataset.k));
@@ -8865,7 +8879,7 @@ async function pullStartggLeagueStandings(slugId, statusId) {
     if (!r.ok) throw new Error(d.error || 'Failed');
     if (status) status.textContent = `Pulled ${d.count} teams${d.name ? ' from ' + d.name : ''}.`;
   } catch (err) {
-    if (status) status.textContent = 'Error: ' + err.message;
+    if (status) status.textContent = friendlyError(err);
   }
 }
 
@@ -9806,6 +9820,13 @@ function applyCloudStatus(s) {
   if (canManage) send('cloud_list_org_seats', { orgId: s.workspaceId });
   if (isOrg) send('cloud_list_camera_feeds', { orgId: s.workspaceId });
   if (isOrg) send('cloud_list_station_feeds', { orgId: s.workspaceId });
+
+  // Leagues website sync — org-scoped only (CompeteLeague requires an orgId); hidden entirely
+  // for a solo/personal workspace rather than letting a producer hit a 403.
+  const lgSyncGroup = el('lg-cloud-sync-group'), lgBrowseBtn = el('lg-cloud-browse-toggle');
+  if (lgSyncGroup) lgSyncGroup.style.display = isOrg ? '' : 'none';
+  if (lgBrowseBtn) lgBrowseBtn.style.display = isOrg ? '' : 'none';
+  if (isOrg) send('cloud_list_leagues', { orgId: s.workspaceId });
 }
 
 const ORG_SEAT_ROLES = ['owner', 'admin', 'producer', 'operator', 'talent', 'analyst'];
@@ -10009,7 +10030,7 @@ function renderChallongeQueue(queue) {
   if (empty) empty.style.display = open.length ? 'none' : '';
   list.innerHTML = open.map((m) =>
     `<div class="challonge-queue-row" style="display:flex; align-items:center; gap:8px; padding:5px 8px; border-radius:6px; background:rgba(255,255,255,.04); border:1px solid ${m.live ? 'rgba(236,72,153,.3)' : 'var(--border)'};">
-      ${m.live ? '<span style="font-size:10px; font-weight:700; color:#ec4899; flex-shrink:0;">LIVE</span>' : `<span style="font-size:10px; color:var(--muted); flex-shrink:0;">${m.identifier || 'M'}</span>`}
+      ${m.live ? '<span style="font-size:10px; font-weight:700; color:#7C3AED; flex-shrink:0;">LIVE</span>' : `<span style="font-size:10px; color:var(--muted); flex-shrink:0;">${m.identifier || 'M'}</span>`}
       <span style="flex:1; font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${(m.teamA || 'TBD').replace(/</g,'&lt;')} <span style="color:var(--muted);">vs</span> ${(m.teamB || 'TBD').replace(/</g,'&lt;')}</span>
       <button class="btn btn-ghost btn-xs challonge-sync-btn" data-match-id="${m.matchId}" data-team-a="${(m.teamA||'').replace(/"/g,'&quot;')}" data-team-b="${(m.teamB||'').replace(/"/g,'&quot;')}" data-logo-a="${(m.logoA||'').replace(/"/g,'&quot;')}" data-logo-b="${(m.logoB||'').replace(/"/g,'&quot;')}" title="Set as current match (Blue vs Orange)">Set Live</button>
     </div>`
@@ -10151,7 +10172,7 @@ function renderNxgenQueueInSettings(queue) {
   if (empty) empty.style.display = open.length ? 'none' : '';
   list.innerHTML = open.map((m) =>
     `<div style="display:flex; align-items:center; gap:8px; padding:5px 8px; border-radius:6px; background:rgba(255,255,255,.04); border:1px solid ${m.live ? 'rgba(236,72,153,.3)' : 'var(--border)'};">
-      ${m.live ? '<span style="font-size:10px; font-weight:700; color:#ec4899; flex-shrink:0;">LIVE</span>' : `<span style="font-size:10px; color:var(--muted); flex-shrink:0;">R${m.round || '?'}</span>`}
+      ${m.live ? '<span style="font-size:10px; font-weight:700; color:#7C3AED; flex-shrink:0;">LIVE</span>' : `<span style="font-size:10px; color:var(--muted); flex-shrink:0;">R${m.round || '?'}</span>`}
       <span style="flex:1; font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(m.teamA || 'TBD')} <span style="color:var(--muted);">vs</span> ${escapeHtml(m.teamB || 'TBD')}</span>
       <button class="btn btn-ghost btn-xs nxgen-set-live-btn" data-team-a="${(m.teamA||'').replace(/"/g,'&quot;')}" data-team-b="${(m.teamB||'').replace(/"/g,'&quot;')}" data-logo-a="${(m.logoA||'').replace(/"/g,'&quot;')}" data-logo-b="${(m.logoB||'').replace(/"/g,'&quot;')}" title="Set as current match">Set Live</button>
     </div>`
@@ -10193,7 +10214,7 @@ function renderDashNxgenQueue(queue, fetchedAt) {
       const row = document.createElement('div');
       row.style.cssText = `display:flex; align-items:center; gap:8px; padding:4px 6px; border-radius:5px; background:rgba(255,255,255,.04); margin-bottom:4px; border:1px solid ${m.live ? 'rgba(236,72,153,.3)' : 'var(--border)'};`;
       row.innerHTML = `
-        ${m.live ? '<span style="font-size:9px; font-weight:700; color:#ec4899; flex-shrink:0;">LIVE</span>' : `<span style="font-size:9px; color:var(--muted); flex-shrink:0;">R${m.round || '?'}</span>`}
+        ${m.live ? '<span style="font-size:9px; font-weight:700; color:#7C3AED; flex-shrink:0;">LIVE</span>' : `<span style="font-size:9px; color:var(--muted); flex-shrink:0;">R${m.round || '?'}</span>`}
         <span style="flex:1; font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(m.teamA || 'TBD')} <span style="color:var(--muted);">vs</span> ${escapeHtml(m.teamB || 'TBD')}</span>
         <button class="btn btn-ghost btn-xs nxgen-dash-set-live" style="flex-shrink:0;">Set Live</button>`;
       row.querySelector('.nxgen-dash-set-live').addEventListener('click', () => {
@@ -11640,7 +11661,7 @@ function renderDashChallongeQueue(queue, fetchedAt) {
       const row = document.createElement('div');
       row.style.cssText = `display:flex; align-items:center; gap:8px; padding:4px 6px; border-radius:5px; background:rgba(255,255,255,.04); margin-bottom:4px; border:1px solid ${m.live ? 'rgba(236,72,153,.3)' : 'var(--border)'};`;
       row.innerHTML = `
-        ${m.live ? '<span style="font-size:9px; font-weight:700; color:#ec4899; flex-shrink:0;">LIVE</span>' : `<span style="font-size:9px; color:var(--muted); flex-shrink:0;">${escapeHtml(m.identifier || 'M')}</span>`}
+        ${m.live ? '<span style="font-size:9px; font-weight:700; color:#7C3AED; flex-shrink:0;">LIVE</span>' : `<span style="font-size:9px; color:var(--muted); flex-shrink:0;">${escapeHtml(m.identifier || 'M')}</span>`}
         <span style="flex:1; font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(m.teamA || 'TBD')} <span style="color:var(--muted);">vs</span> ${escapeHtml(m.teamB || 'TBD')}</span>
         <button class="btn btn-ghost btn-xs chal-dash-set-live" style="flex-shrink:0;">Set Live</button>`;
       row.querySelector('.chal-dash-set-live').addEventListener('click', () => {
@@ -14507,6 +14528,51 @@ function renderDashMiniPanels(data) {
 }
 
 // ── Global quick-action toolbar (fixed bottom bar) ──────────────────────────
+// ── OBS audio volume ride — shared by the on-air pills AND the Production Deck tiles ──
+function obsVolNow(inputName) { const inp = ((currentState.obs && currentState.obs.audioInputs) || []).find((i) => i.name === inputName); return inp ? (inp.volumeDb || 0) : 0; }
+let _obsVolSendT = null, _obsVolSendAt = 0;
+function obsSetVolume(inputName, db) {
+  db = Math.max(-60, Math.min(0, Math.round(db)));
+  const inp = ((currentState.obs && currentState.obs.audioInputs) || []).find((i) => i.name === inputName);
+  if (inp) inp.volumeDb = db;   // optimistic — the server echoes back via InputVolumeChanged
+  const fire = () => { _obsVolSendAt = Date.now(); send('obs_set_volume', { inputName, volumeDb: db }); };
+  const now = Date.now();
+  if (now - _obsVolSendAt > 80) fire();
+  else { clearTimeout(_obsVolSendT); _obsVolSendT = setTimeout(fire, 80); }
+  return db;
+}
+let _obsVolPop = null;
+function closeObsVolPop() { if (_obsVolPop) { _obsVolPop.remove(); _obsVolPop = null; document.removeEventListener('pointerdown', _obsVolPopAway, true); } }
+function _obsVolPopAway(e) { if (_obsVolPop && !_obsVolPop.contains(e.target)) closeObsVolPop(); }
+function obsVolPopover(inputName, anchor) {
+  closeObsVolPop();
+  const pop = document.createElement('div'); pop.className = 'qt-vol-pop';
+  const db = obsVolNow(inputName);
+  pop.innerHTML = `<span class="qt-vol-name"></span><input type="range" min="-60" max="0" step="1" value="${db}"><span class="qt-vol-db"></span>`;
+  pop.querySelector('.qt-vol-name').textContent = inputName;
+  pop.querySelector('.qt-vol-db').textContent = db + ' dB';
+  document.body.appendChild(pop);
+  const r = anchor.getBoundingClientRect();
+  pop.style.left = Math.max(8, Math.min(window.innerWidth - pop.offsetWidth - 8, r.left)) + 'px';
+  pop.style.top = Math.max(8, r.top - pop.offsetHeight - 8) + 'px';
+  const range = pop.querySelector('input'), dbl = pop.querySelector('.qt-vol-db');
+  range.addEventListener('input', () => { dbl.textContent = obsSetVolume(inputName, Number(range.value)) + ' dB'; });
+  range.addEventListener('wheel', (e) => { e.preventDefault(); range.value = String(obsSetVolume(inputName, Number(range.value) + (e.deltaY < 0 ? 3 : -3))); dbl.textContent = range.value + ' dB'; }, { passive: false });
+  requestAnimationFrame(() => range.focus());
+  _obsVolPop = pop;
+  setTimeout(() => document.addEventListener('pointerdown', _obsVolPopAway, true), 0);
+}
+// Wire wheel + right-click + long-press volume onto any audio button/tile (click stays = mute).
+function attachAudioVolume(btn, inputName) {
+  btn.addEventListener('wheel', (e) => { e.preventDefault(); obsSetVolume(inputName, obsVolNow(inputName) + (e.deltaY < 0 ? 3 : -3)); }, { passive: false });
+  btn.addEventListener('contextmenu', (e) => { e.preventDefault(); obsVolPopover(inputName, btn); });
+  let lpT = null, lpFired = false;
+  btn.addEventListener('pointerdown', (e) => { if (e.button !== 0) return; lpFired = false; lpT = setTimeout(() => { lpFired = true; obsVolPopover(inputName, btn); }, 450); });
+  const cancel = () => { if (lpT) { clearTimeout(lpT); lpT = null; } };
+  btn.addEventListener('pointerup', cancel); btn.addEventListener('pointerleave', cancel);
+  btn.addEventListener('click', (e) => { if (lpFired) { e.stopImmediatePropagation(); e.preventDefault(); lpFired = false; } }, true);
+}
+
 let _qtSceneSig = '';
 function renderQuickToolbar(data) {
   const obs = data.obs || {};
@@ -14550,6 +14616,13 @@ function renderQuickToolbar(data) {
         if (p.t === 'trigger' && !info.live && typeof bbHasTriggerConfig === 'function' && bbHasTriggerConfig(p.k)) { bbOpenTriggerConfig(p.k, b); return; }
         const fresh = bbActionInfo(p); if (fresh) fresh.run();
       });
+      // Audio pill: mute on click; wheel / right-click / long-press rides volume.
+      if (info.kind === 'audio') {
+        b.title = `${info.label}  ·  ${info.live ? 'MUTED' : (info.volumeDb ?? 0) + ' dB'}  ·  click = mute · wheel / right-click = volume`;
+        attachAudioVolume(b, info.inputName);
+      } else if (info.kind === 'source') {
+        b.title = `Show / hide "${info.label}"  ·  ${info.live ? 'shown' : 'hidden'}  ·  drag to reorder`;
+      }
       return b;
     };
     // One unified, reorderable button list: mapped OBS moments + pins, deduped by resolved identity.
@@ -19206,7 +19279,7 @@ async function scanStagingArea(quiet = false) {
     }
     scanOk = true;
   } catch (err) {
-    if (statusEl) { statusEl.textContent = 'Scan failed: ' + err.message; statusEl.style.color = '#f56565'; }
+    if (statusEl) { statusEl.textContent = 'Scan failed — ' + friendlyError(err); statusEl.style.color = '#f56565'; }
   } finally {
     _stagingLoading = false;
     if (btn) btn.textContent = 'Refresh';
@@ -19608,7 +19681,7 @@ function renderPlaylistPane(c) {
     const outPt = clip.trimOut != null ? clip.trimOut : (clip.duration || 0);
     const len   = clip.trimOut != null ? clip.trimOut - inPt : (clip.duration || 0);
     const splitInfo = clip.trimOut != null || inPt > 0
-      ? `<span style="color:var(--cp-accent,#ec4899)">${fmtTime(inPt)} → ${fmtTime(outPt)}</span> · ${fmtTime(len)}`
+      ? `<span style="color:var(--cp-accent,#7C3AED)">${fmtTime(inPt)} → ${fmtTime(outPt)}</span> · ${fmtTime(len)}`
       : fmtTime(len) || '—';
     const plUrl = clipUrl(clip);
     return `<div class="rp-pl-item" data-clip-id="${clip.id}">
@@ -20199,34 +20272,66 @@ function deckFire(b) {
     const g = (typeof GOLIVE_TRIGGERS !== 'undefined' ? GOLIVE_TRIGGERS : []).find((t) => t.state === b.target);
     if (g) { const live = !!(currentState[g.state] && currentState[g.state].visible); send(g.msg, live ? { visible: false } : g.show()); }
   } else if (b.type === 'view') { send(b.target === 'scoreboard' ? 'force_scoreboard' : 'force_hud'); }
+  else if (b.type === 'audio') { const inp = ((currentState.obs && currentState.obs.audioInputs) || []).find((i) => i.name === b.target); send(inp && inp.muted ? 'obs_input_unmute' : 'obs_input_mute', { inputName: b.target }); }
+  else if (b.type === 'source') { const parsed = bbSourceParse(b.target); if (parsed) { const src = ((currentState.obs && currentState.obs.sources) || []).find((s) => s.scene === parsed.scene && s.source === parsed.source); send(src && src.enabled ? 'obs_source_hide' : 'obs_source_show', { scene: parsed.scene, source: parsed.source }); } }
   else if (b.type === 'playout') { if (typeof playMontageById === 'function') playMontageById(b.target); }
   else if (b.type === 'flow') { const f = (currentState.flows || []).find((x) => x.id === b.target); if (f && typeof flowFire === 'function') flowFire(f); }
   else if (b.type === 'countdown') { send('set_break', { visible: true, seconds: Math.max(1, b.hold || 60), title: b.label || 'STARTING SOON' }); }
 }
 
-const DECK_ICONS = { scene: '\u25A6', trigger: '✦', view: '▣', playout: '▶', flow: '⚡', countdown: '⏱' };
+const DECK_ICONS = { scene: '▦', trigger: '✦', view: '▣', audio: '♪', source: '▥', playout: '▶', flow: '⚡', countdown: '⏱' };
 function deckTargetLabel(b) {
   if (b.type === 'scene') return b.target || '(no scene)';
   if (b.type === 'trigger') { const m = (typeof BB_TRIGGER_LABELS !== 'undefined' && BB_TRIGGER_LABELS[b.target]) || b.target; return m; }
   if (b.type === 'view') return b.target === 'scoreboard' ? 'Scoreboard' : 'HUD';
+  if (b.type === 'audio') return b.target || '(no input)';
+  if (b.type === 'source') { const q = bbSourceParse(b.target); return q ? q.source : '(no source)'; }
   if (b.type === 'playout') { const m = (currentState.clips?.montages || []).find((x) => x.id === b.target); return m ? m.name : '(playlist)'; }
   if (b.type === 'flow') { const f = (currentState.flows || []).find((x) => x.id === b.target); return f ? (f.name || 'Flow') : '(flow)'; }
   if (b.type === 'countdown') return (b.hold || 60) + 's countdown';
   return '';
 }
 function deckAutoLabel(type, target, hold) {
-  return deckTargetLabel({ type, target, hold }) || ({ scene: 'Scene', trigger: 'Trigger', view: 'View', playout: 'Playlist', flow: 'Flow', countdown: 'Countdown' }[type] || 'Button');
+  return deckTargetLabel({ type, target, hold }) || ({ scene: 'Scene', trigger: 'Trigger', view: 'View', audio: 'Audio', source: 'Source', playout: 'Playlist', flow: 'Flow', countdown: 'Countdown' }[type] || 'Button');
 }
 
+// Live-state class for a deck tile: scene/source/trigger 'on' (lit), audio 'muted' (danger).
+function deckLiveClass(b) {
+  const obs = currentState.obs || {};
+  if (b.type === 'scene') return (obs.currentScene && obs.currentScene === b.target) ? 'on' : '';
+  if (b.type === 'source') { const q = bbSourceParse(b.target); const x = q && (obs.sources || []).find((y) => y.scene === q.scene && y.source === q.source); return x && x.enabled ? 'on' : ''; }
+  if (b.type === 'audio') { const a = (obs.audioInputs || []).find((y) => y.name === b.target); return a && a.muted ? 'muted' : ''; }
+  if (b.type === 'trigger') return (currentState[b.target] && currentState[b.target].visible) ? 'on' : '';
+  return '';
+}
+// Per-tick refresh of deck live lighting without rebuilding the grid.
+function refreshDeckLive() {
+  if (typeof _deck === 'undefined' || !_deck) return;
+  ['prod-deck-grid', 'dash-deck-grid'].forEach((gid) => {
+    const g = el(gid); if (!g) return;
+    (_deck.buttons || []).forEach((b) => {
+      const t = g.querySelector('.deck-tile[data-id="' + b.id + '"]'); if (!t) return;
+      const c = deckLiveClass(b);
+      t.classList.toggle('deck-on', c === 'on');
+      t.classList.toggle('deck-muted', c === 'muted');
+    });
+  });
+}
 function renderDeck() {
   const grid = el('prod-deck-grid'); if (!grid) return;
   grid.style.setProperty('--deck-cols', _deck.cols || 4);
   grid.classList.toggle('deck-editing', _deckEdit);
   const mkTile = (b, edit) => {
     const accent = b.color ? ` style="--tile-accent:${dEsc(b.color)}"` : '';
-    return `<div class="deck-tile" data-id="${dEsc(b.id)}"${accent}${edit ? ' draggable="true"' : ''}>`
+    const lc = deckLiveClass(b), liveCls = lc === 'on' ? ' deck-on' : lc === 'muted' ? ' deck-muted' : '';
+    // Only show the sub-line when it adds information — hide it when it just repeats the label
+    // (e.g. a "HUD" button targeting the "HUD" scene printed "HUD / HUD").
+    const lbl = b.label || deckAutoLabel(b.type, b.target, b.hold);
+    const sub = deckTargetLabel(b);
+    const subHtml = (sub && sub.toLowerCase() !== String(lbl).toLowerCase()) ? `<span class="deck-tile-sub">${dEsc(sub)}</span>` : '';
+    return `<div class="deck-tile${liveCls}" data-id="${dEsc(b.id)}"${accent}${edit ? ' draggable="true"' : ''}>`
       + `<span class="deck-tile-ico">${DECK_ICONS[b.type] || '•'}</span>`
-      + `<span class="deck-tile-body"><span class="deck-tile-label">${dEsc(b.label || deckAutoLabel(b.type, b.target, b.hold))}</span><span class="deck-tile-sub">${dEsc(deckTargetLabel(b))}</span></span>`
+      + `<span class="deck-tile-body"><span class="deck-tile-label">${dEsc(lbl)}</span>${subHtml}</span>`
       + (b.hotkey ? `<span class="deck-tile-key">${dEsc(b.hotkey)}</span>` : '')
       + (edit ? `<button class="deck-tile-del" title="Remove">✕</button>` : '')
       + `</div>`;
@@ -20240,6 +20345,9 @@ function renderDeck() {
   }
   const empty = el('deck-empty'); if (empty) empty.style.display = (_deck.buttons || []).length ? 'none' : '';
   const cols = el('deck-cols'); if (cols) cols.value = String(_deck.cols || 4);
+  // Audio tiles get the wheel / right-click / long-press volume ride (click still = mute via deckFire).
+  const attachDeckVol = (g) => { if (!g) return; (_deck.buttons || []).forEach((b) => { if (b.type !== 'audio' || !b.target) return; const t = g.querySelector('.deck-tile[data-id="' + b.id + '"]'); if (t) attachAudioVolume(t, b.target); }); };
+  attachDeckVol(grid); attachDeckVol(dashGrid);
 }
 
 // Build the Target field for the editor (a select, or a seconds input for countdowns).
@@ -20247,6 +20355,8 @@ function deckTargetOptions(type) {
   if (type === 'scene') return ((currentState.obs && currentState.obs.availableScenes) || []).map((s) => [s, s]);
   if (type === 'trigger') return (typeof GOLIVE_TRIGGERS !== 'undefined' ? GOLIVE_TRIGGERS : []).map((t) => [t.state, (typeof BB_TRIGGER_LABELS !== 'undefined' && BB_TRIGGER_LABELS[t.state]) || t.state]);
   if (type === 'view') return [['hud', 'HUD'], ['scoreboard', 'Scoreboard']];
+  if (type === 'audio') return ((currentState.obs && currentState.obs.audioInputs) || []).map((a) => [a.name, a.name]);
+  if (type === 'source') return ((currentState.obs && currentState.obs.sources) || []).map((s) => [bbSourceKey(s.scene, s.source), s.source + '  ·  ' + s.scene]);
   if (type === 'playout') return (currentState.clips?.montages || []).map((m) => [m.id, m.name || 'Playlist']);
   if (type === 'flow') return (currentState.flows || []).map((f) => [f.id, f.name || 'Flow']);
   return [];
@@ -23094,7 +23204,7 @@ function stopReplayCountdown() {
 // time labelled AD (playlist) or REPLAY (single clip) instead of the producer "Start" countdown.
 function setTopbarReplay(remaining, isAd) {
   _topbarReplay = true;
-  const d = el('ptimer-display'); if (d) { d.textContent = fmtClock(remaining); d.style.color = remaining <= 5 ? '#f56565' : '#ec4899'; }
+  const d = el('ptimer-display'); if (d) { d.textContent = fmtClock(remaining); d.style.color = remaining <= 5 ? '#f56565' : '#7C3AED'; }
   const t = el('ptimer-toggle'); if (t) t.textContent = isAd ? 'AD' : 'REPLAY';
   const box = el('prod-timer'); if (box) { box.classList.add('replay-air'); box.classList.remove('running', 'ending'); }
 }
@@ -24954,6 +25064,19 @@ function confirmQueuePush() {
 // Transient toast + notification bell. The bell keeps the permanent history; the toast is the
 // immediate on-screen confirmation (success/error feedback was invisible when everything went
 // bell-only). Click a toast to dismiss it early.
+// Turn a raw thrown error into human, actionable copy — a bare "Failed to fetch" tells a producer
+// nothing. Falls back to the original message for anything we don't have a friendlier line for.
+function friendlyError(e) {
+  const m = String((e && (e.message || e.error)) || e || '');
+  if (/failed to fetch|networkerror|load failed|err_connection|fetch failed|ecconnrefused|econnrefused/i.test(m)) return "Couldn't reach the service — check your connection, or that the app / OBS is running.";
+  if (/abort|timeout|timed out/i.test(m)) return 'That took too long — try again.';
+  if (/\b401\b|unauthor/i.test(m)) return 'Not signed in — sign in and try again.';
+  if (/\b403\b|forbidden/i.test(m)) return "You don't have permission for that.";
+  if (/\b404\b|not found/i.test(m)) return "Couldn't find that — it may have been removed.";
+  return m || 'Something went wrong.';
+}
+window.friendlyError = friendlyError;
+
 function showToast(message, bg, autoDismissMs) {
   try { addNotification(message, bg); } catch (_) {}
   try {
@@ -25026,6 +25149,7 @@ async function connect() {
       _r('renderScenePresets', () => renderScenePresets(msg.data));
       _r('renderWhatsArmed',   () => renderWhatsArmed(msg.data));
       _r('renderQuickToolbar',   () => renderQuickToolbar(msg.data));
+      _r('refreshDeckLive',      () => { if (typeof refreshDeckLive === 'function') refreshDeckLive(); });
       _r('renderDashMiniPanels', () => renderDashMiniPanels(msg.data));
       _r('renderQrailScenes',    () => renderQrailScenes(msg.data));
       _r('renderQuickPanel',     () => renderQuickPanel(msg.data));
@@ -25140,6 +25264,10 @@ async function connect() {
         const r = el('org-seats-result');
         if (r) { r.textContent = msg.data.message || ''; r.style.color = msg.data.result ? 'green' : 'red'; }
         if (msg.data.result && window._cloudWorkspaceId) send('cloud_list_org_seats', { orgId: window._cloudWorkspaceId });
+      } else if (msg.data.context === 'league') {
+        if (typeof lgStatus === 'function') lgStatus(msg.data.message || '', msg.data.result);
+        if (typeof lgRenderCloudSyncStatus === 'function') lgRenderCloudSyncStatus();
+        if (msg.data.result && window._cloudWorkspaceId) send('cloud_list_leagues', { orgId: window._cloudWorkspaceId });
       } else {
         el('import-export-result').textContent = msg.data.message;
         el('import-export-result').style.color = msg.data.result ? 'green' : 'red';
@@ -25174,6 +25302,8 @@ async function connect() {
     } else if (msg.type === 'cloud_station_feeds') {
       _cfStationsCache = (msg.data && msg.data.ok && Array.isArray(msg.data.feeds)) ? msg.data.feeds : [];
       renderCfStations();
+    } else if (msg.type === 'cloud_leagues') {
+      if (typeof lgRenderCloudList === 'function') lgRenderCloudList((msg.data && msg.data.ok && Array.isArray(msg.data.leagues)) ? msg.data.leagues : []);
     } else if (msg.type === 'startgg-result') {
       ['startgg-result', 'sgg-status'].forEach((id) => {
         const r = el(id);
@@ -25615,7 +25745,7 @@ el('btn-twitch-token-manual')?.addEventListener('click', () => {
       send('request_state');
     }
   })
-  .catch(e => showToast('Error: ' + e.message, '#ef4444'));
+  .catch(e => showToast(friendlyError(e), '#ef4444'));
 });
 
 el('btn-twitch-test')?.addEventListener('click', () => {
@@ -25861,7 +25991,7 @@ el('btn-spin-wheel')?.addEventListener('click', () => {
         showToast('Spinning!', '#22c55e');
       }
     })
-    .catch(e => showToast('Error: ' + e.message, '#ef4444'));
+    .catch(e => showToast(friendlyError(e), '#ef4444'));
   });
 });
 
@@ -25881,7 +26011,7 @@ el('btn-clear-wheel')?.addEventListener('click', () => {
         showToast('Participants cleared!', '#22c55e');
       }
     })
-    .catch(e => showToast('Error: ' + e.message, '#ef4444'));
+    .catch(e => showToast(friendlyError(e), '#ef4444'));
   });
 });
 
@@ -26181,7 +26311,7 @@ el('btn-start-minigame')?.addEventListener('click', () => {
     if (data.error) showToast('Error: ' + data.error, '#ef4444');
     else showToast('Game started! Chat announcement sent.', '#4ade80');
   })
-  .catch(e => showToast('Error: ' + e.message, '#ef4444'));
+  .catch(e => showToast(friendlyError(e), '#ef4444'));
 });
 
 el('btn-minigame-end')?.addEventListener('click', () => {

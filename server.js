@@ -1931,6 +1931,74 @@ function syncCrewRosterToCloud() {
   } catch (_) { /* cloud not configured — local-first, never throws */ }
 }
 
+// ── Station check-ins → the desk, automatically ──────────────────────────────
+// Polls the org's website stations and fills claimed CASTER feeds straight into the caster
+// library + desk lineup (web slot N → desk slot N, never bumping an occupied slot) and links/
+// creates the crew record — so a caster clicking a join link shows up in the browser sources
+// and overlays with zero producer clicks. Additive only: a caster leaving never yanks anyone
+// off air. Toggleable via casters.autoFillFromStations (default ON when cloud-linked).
+let _stationSyncBusy = false;
+async function stationAutoSync() {
+  if (_stationSyncBusy) return;
+  try {
+    if (state.casters && state.casters.autoFillFromStations === false) return;
+    if (!cloud || typeof cloud.authed !== 'function' || !cloud.authed()) return;
+    const s = cloud.getSession() || {};
+    const orgId = s.workspaceId;
+    if (!orgId || String(orgId).startsWith('user:')) return;
+    _stationSyncBusy = true;
+    const { feeds } = await cloud.listStationFeeds(orgId);
+    const casters = (feeds || []).filter((f) => f && f.kind === 'caster' && f.obsViewUrl);
+    if (!casters.length) return;
+    if (!Array.isArray(state.casters.library)) state.casters.library = [];
+    if (!Array.isArray(state.casters.lineup)) state.casters.lineup = [];
+    let changed = false;
+    for (const f of casters) {
+      let entry = state.casters.library.find((c) => c && (c.camUrl === f.obsViewUrl || c.vdoOverride === f.obsViewUrl));
+      if (!entry) {
+        // Crew twin: the join page offers crew profiles by name, so a name match means that
+        // crew member checked in (mark on shift); an unknown name gets a fresh crew profile.
+        const nm = (f.personName || '').trim();
+        const key = nm.toLowerCase();
+        if (!Array.isArray(state.crew)) state.crew = [];
+        let cm = key ? state.crew.find((c) => c && ((c.name || '').toLowerCase() === key || (c.handle || '').toLowerCase() === key)) : null;
+        if (!cm && nm) {
+          cm = { id: Math.random().toString(36).slice(2, 11), name: nm, handle: '', role: '', group: 'casters', social: 'none', socialHandle: '', defaultCam: '', country: '', paypal: '', notes: '', active: true, workedEvent: true };
+          state.crew.push(cm);
+        } else if (cm) { cm.active = true; cm.workedEvent = true; }
+        entry = {
+          id: 'cs_' + Math.random().toString(36).slice(2, 11),
+          name: nm || 'Caster', handle: '', role: '',
+          camUrl: f.obsViewUrl,
+          social: (cm && cm.social) || 'none',
+          socialHandle: (cm && cm.socialHandle) || '',
+          country: (cm && cm.country) || '',
+          kind: 'caster'
+        };
+        state.casters.library.push(entry);
+        changed = true;
+      }
+      const targetSlot = (Number(f.idx) || 0) + 1;
+      if (targetSlot >= 1 && targetSlot <= 4) {
+        const inLineup = state.casters.lineup.some((l) => l && l.libraryId === entry.id);
+        const occupied = state.casters.lineup.some((l) => l && Number(l.slot) === targetSlot);
+        if (!inLineup && !occupied) {
+          state.casters.lineup.push({ libraryId: entry.id, slot: targetSlot, roomId: '', streamId: entry.id });
+          changed = true;
+        }
+      }
+    }
+    if (changed) {
+      resolveLineupToList();
+      saveAppState();
+      broadcastFullState();
+      console.log('[Stations] Auto-filled the desk from station check-ins');
+    }
+  } catch (_) { /* transient cloud errors — next poll retries */ }
+  finally { _stationSyncBusy = false; }
+}
+setInterval(stationAutoSync, 20000);
+
 function loadState() {
   try {
     const saved = safeReadJson(stateFile, null);
@@ -2002,6 +2070,8 @@ function loadState() {
           // Show Deck support crew — EVENT-scoped [{crewId, role}] so deck add/remove never
           // rewrites the crew record's durable group. Non-array → migrated from crew groups below.
           support: Array.isArray(saved.casters.support) ? saved.casters.support : null,
+          // Website station check-ins auto-fill the desk (default ON; only an explicit off sticks).
+          autoFillFromStations: saved.casters.autoFillFromStations !== false,
           lowerThird: typeof saved.casters.lowerThird === 'string' ? saved.casters.lowerThird : '',
           list: Array.isArray(saved.casters.list) ? saved.casters.list : [],
           library: Array.isArray(saved.casters.library) ? saved.casters.library : [],
@@ -11564,6 +11634,15 @@ function handleControlMessage(msg, ws) {
         saveAppState();
         broadcastFullState();
       }
+      break;
+    }
+
+    // Website station check-ins → desk auto-fill toggle (see stationAutoSync).
+    case 'set_station_autofill': {
+      state.casters.autoFillFromStations = !!(msg.data && msg.data.on);
+      saveAppState();
+      broadcastFullState();
+      if (state.casters.autoFillFromStations) stationAutoSync();
       break;
     }
 

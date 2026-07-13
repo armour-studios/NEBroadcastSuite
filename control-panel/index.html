@@ -3,8 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <title>NE | Broadcast Suite</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
+<!-- Self-hosted (assets/fonts/*.woff2 already ships with the app, see overlay/fonts.css for the
+     same pattern) — a CDN font load here would break at an offline LAN venue with no internet,
+     the exact P1 already flagged for the overlay scenes. -->
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -172,7 +173,7 @@
       <button class="topbar-iconbtn" id="btn-obs-preview" title="OBS Program Preview">
         <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
       </button>
-      <button class="topbar-iconbtn" id="btn-header-settings" title="Settings" style="position:relative; display:none;"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg><span id="upd-badge" style="display:none;position:absolute;top:5px;right:5px;width:8px;height:8px;border-radius:50%;background:var(--cp-accent,#ec4899);border:2px solid var(--bg,#111318);"></span></button>
+      <button class="topbar-iconbtn" id="btn-header-settings" title="Settings" style="position:relative; display:none;"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg><span id="upd-badge" style="display:none;position:absolute;top:5px;right:5px;width:8px;height:8px;border-radius:50%;background:var(--cp-accent,#7C3AED);border:2px solid var(--bg,#111318);"></span></button>
       <!-- Account profile — deliberately the LAST item, far right next to the window controls -->
       <!-- Discord user menu — login button when logged out, avatar + dropdown when logged in -->
       <div class="discord-user-area" id="discord-user-area">
@@ -198,7 +199,7 @@
           <button class="ddd-item" id="ddd-settings">
             <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
             Settings
-            <span id="upd-badge-ddd" style="display:none;width:7px;height:7px;border-radius:50%;background:var(--cp-accent,#ec4899);margin-left:auto;flex-shrink:0;"></span>
+            <span id="upd-badge-ddd" style="display:none;width:7px;height:7px;border-radius:50%;background:var(--cp-accent,#7C3AED);margin-left:auto;flex-shrink:0;"></span>
           </button>
           <button class="ddd-item" id="ddd-bug">
             <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m8 2 1.88 1.88M14.12 3.88 16 2M9 7.13v-1a3.003 3.003 0 1 1 6 0v1"/><path d="M12 20c-3.3 0-6-2.7-6-6v-3a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v3c0 3.3-2.7 6-6 6"/><path d="M12 20v-9"/></svg>
@@ -2128,8 +2129,12 @@
       <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:14px; flex-wrap:wrap; margin-bottom:6px;">
         <div>
           <h3 class="section-title" style="margin-bottom:4px;">Cloud Stations</h3>
-          <p class="section-desc" style="margin:0; max-width:680px;">Casters and observers who connected through a <strong>Stations</strong> link on the website. Add a caster feed to your Caster Library to put them on air — matching the slot they claimed on the website.</p>
+          <p class="section-desc" style="margin:0; max-width:680px;">Casters and observers who connected through a <strong>Stations</strong> link on the website. With auto-fill on, a caster checking in on the website lands in your Caster Library, desk slot and overlays automatically — matching the slot they claimed.</p>
         </div>
+        <label class="qt-toggle" title="Every ~20s: claimed website casters are added to the Caster Library, their crew profile linked or created, and their claimed slot filled on the desk (never bumping an occupied slot)">
+          <span>Auto-fill desk</span>
+          <span class="switch"><input type="checkbox" id="cf-stations-autofill" checked><span class="slider"></span></span>
+        </label>
       </div>
       <div id="cf-stations-list" class="cf-rooms-list" style="display:flex; flex-direction:column; gap:6px;"></div>
       <p class="msp-hint" id="cf-stations-status" style="margin-top:6px;"></p>
@@ -3105,10 +3110,10 @@
         <div id="rp-encode-progress" style="display:none;flex-direction:column;gap:3px;margin-top:6px;">
           <div style="display:flex;justify-content:space-between;align-items:center;">
             <span id="rp-encode-label" style="font-size:11px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:70%;">Encoding…</span>
-            <span id="rp-encode-pct" style="font-size:11px;font-weight:700;color:var(--cp-accent,#ec4899);">0%</span>
+            <span id="rp-encode-pct" style="font-size:11px;font-weight:700;color:var(--cp-accent,#7C3AED);">0%</span>
           </div>
           <div style="height:5px;background:var(--surface2);border-radius:3px;overflow:hidden;">
-            <div id="rp-encode-fill" style="height:100%;width:0%;background:var(--cp-accent,#ec4899);border-radius:3px;transition:width 0.3s;"></div>
+            <div id="rp-encode-fill" style="height:100%;width:0%;background:var(--cp-accent,#7C3AED);border-radius:3px;transition:width 0.3s;"></div>
           </div>
         </div>
 
@@ -3878,8 +3883,17 @@
         <div class="lg-topbar-actions">
           <input type="text" id="lg-startgg-slug" class="input-text" placeholder="start.gg URL or slug…" style="font-size:12px;width:190px;">
           <button class="btn btn-secondary btn-sm" id="lg-startgg-import">Import from Platform</button>
+          <button class="btn btn-secondary btn-sm" id="lg-cloud-browse-toggle" type="button" style="display:none;">Website Leagues</button>
           <button class="btn btn-primary btn-sm" id="lg-new">+ New League</button>
         </div>
+      </div>
+      <!-- Leagues created on the website for this org (see CompeteLeague) — pull one in to manage
+           it here. Kept as a sibling of #lg-list, not nested inside it, since lgRenderList()
+           overwrites #lg-list's innerHTML wholesale. -->
+      <div id="lg-cloud-panel" style="display:none; padding:10px 0; border-bottom:1px solid var(--border);">
+        <p class="field-label" style="font-size:11px; color:var(--muted); font-weight:600; margin:0 0 8px;">Leagues created on the website for this org — pull one in to manage it here.</p>
+        <div id="lg-cloud-list"></div>
+        <p id="lg-cloud-status" class="field-label" style="font-size:11px; color:var(--muted); margin:6px 0 0;"></p>
       </div>
       <div class="lg-body">
         <aside class="lg-sidebar" id="lg-list"></aside>
@@ -4064,6 +4078,15 @@
                     <button class="btn btn-secondary btn-sm" id="lg-archive-season" type="button">Archive Season</button>
                   </div>
                   <div id="lg-season-history"></div>
+                </div>
+                <div class="lg2-settings-group" id="lg-cloud-sync-group" style="display:none;">
+                  <h4 class="lg2-settings-heading">Website Sync</h4>
+                  <p class="field-label" style="font-size:11px; color:var(--muted); font-weight:600; margin:0 0 8px;">Push this league to your organization's website so producers there can see and edit it too. Pulling never overwrites your local edits; pushing overwrites the website's copy of this league's config.</p>
+                  <div class="lg2-settings-row">
+                    <label class="field-label"></label>
+                    <button class="btn btn-secondary btn-sm" id="lg-cloud-push" type="button">Sync to Website</button>
+                  </div>
+                  <p class="field-label" id="lg-cloud-sync-status" style="font-size:11px; color:var(--muted); font-weight:600; margin:4px 0 0;"></p>
                 </div>
               </div>
             </div>
@@ -8255,6 +8278,10 @@ PacketSendRate=10</pre>
       <span>Keep previews paused <span style="color:var(--muted); font-weight:400;">— scene &amp; OBS previews stay off</span></span>
       <label class="switch"><input type="checkbox" id="check-perf-noprev"><span class="slider"></span></label>
     </label>
+    <label class="qt-toggle" style="width:100%; max-width:520px;" title="Show a notification when the app uses sustained high CPU or RAM. Turn off if the alerts are noisy on your machine.">
+      <span>Resource usage alerts <span style="color:var(--muted); font-weight:400;">— warn on sustained high CPU / RAM</span></span>
+      <label class="switch"><input type="checkbox" id="check-perf-reswarn" checked><span class="slider"></span></label>
+    </label>
     <label class="qt-toggle" style="width:100%; max-width:520px;" title="How often non-game state updates are pushed to the panel and overlays. Live game data (scores, clock, boost) always streams at full rate regardless.">
       <span>Update rate <span style="color:var(--muted); font-weight:400;">— non-game state push cadence</span></span>
       <select id="sel-perf-rate" class="input-select" style="width:150px; font-size:12px;">
@@ -9634,7 +9661,7 @@ PacketSendRate=10</pre>
     .stg-header { display:flex; align-items:center; gap:7px; padding:10px 12px 9px; border-bottom:1px solid var(--border); }
     .stg-seg { display:flex; background:var(--surface2); border-radius:7px; padding:2px; gap:1px; flex-shrink:0; }
     .stg-seg-btn { background:none; border:none; padding:3px 11px; font-size:11px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:var(--muted); cursor:pointer; border-radius:5px; transition:background .15s,color .15s; white-space:nowrap; }
-    .stg-seg-btn.active { background:#ec4899; color:#fff; }
+    .stg-seg-btn.active { background:#7C3AED; color:#fff; }
     .stg-search { flex:1; min-width:0; font-size:12px; padding:4px 9px; height:28px; }
     .stg-filters { display:flex; gap:4px; padding:7px 12px 6px; border-bottom:1px solid var(--border); flex-wrap:wrap; }
     .dcc-stab-pane { display:flex; flex-direction:column; }
@@ -9712,6 +9739,8 @@ PacketSendRate=10</pre>
         <option value="scene">Cut to scene</option>
         <option value="trigger">Trigger graphic</option>
         <option value="view">Overlay view</option>
+        <option value="audio">Toggle audio mute</option>
+        <option value="source">Show / hide source</option>
         <option value="playout">Play playlist</option>
         <option value="flow">Run flow</option>
         <option value="countdown">Countdown</option>
