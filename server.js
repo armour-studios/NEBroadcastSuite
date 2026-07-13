@@ -3098,18 +3098,23 @@ function casterAudioOverride(caster) {
 // Matching is deliberately generous (library name/handle vs crew name/handle/socialHandle,
 // case-insensitive): producers rename the library card (e.g. to the gamertag itself) and a
 // strict name==name join silently loses the person.
-function crewGamertagFor(profOrName) {
-  if (!Array.isArray(state.crew) || !state.crew.length) return '';
+// The crew twin for a library profile — matched by name/handle/social handle. The crew
+// profile is the canonical person record (gamertag, social, country live there).
+function crewTwinFor(profOrName) {
+  if (!Array.isArray(state.crew) || !state.crew.length) return null;
   const prof = (profOrName && typeof profOrName === 'object') ? profOrName : { name: profOrName };
   const keys = [prof.name, prof.handle, prof.socialHandle]
     .map((v) => (v || '').toString().trim().toLowerCase()).filter(Boolean);
-  if (!keys.length) return '';
-  const hit = state.crew.find((c) => {
+  if (!keys.length) return null;
+  return state.crew.find((c) => {
     if (!c) return false;
     const own = [c.name, c.handle, c.socialHandle]
       .map((v) => (v || '').toString().trim().toLowerCase()).filter(Boolean);
     return own.some((o) => keys.includes(o));
-  });
+  }) || null;
+}
+function crewGamertagFor(profOrName) {
+  const hit = crewTwinFor(profOrName);
   return ((hit && hit.handle) || '').toString().trim();
 }
 
@@ -3129,14 +3134,19 @@ function resolveLineupToList() {
     // (prof.camUrl / vdoOverride, pasted in the DCC) → the auto-generated room feed. A pasted link
     // must WIN over the generated room so producers can point a caster at any third-party feed.
     const customLink = (entry.customCamUrl || prof.vdoOverride || prof.camUrl || '').toString().trim();
+    // Nameplate fields fall back to the CREW twin: the crew profile is where producers keep
+    // gamertag/social/country (Show Deck / Crew page). Auto-filled station check-ins create
+    // thin library entries — without this fallback their overlay nameplate showed a bare name
+    // (or nothing) even though the crew profile had the full identity.
+    const twin = crewTwinFor(prof) || {};
     return {
       id: prof.id || ('lineup_' + (entry.slot || (i + 1))),
-      name: prof.name || '',
+      name: prof.name || twin.name || '',
       handle: prof.handle || '',
       gamertag: crewGamertagFor(prof),         // desk display name (crew Handle/Gamertag field)
-      socialHandle: prof.socialHandle || prof.handle || '',   // @-line username
-      social: prof.social || 'none',
-      country: prof.country || '',
+      socialHandle: prof.socialHandle || prof.handle || twin.socialHandle || '',   // @-line username
+      social: (prof.social && prof.social !== 'none') ? prof.social : (twin.social || 'none'),
+      country: prof.country || twin.country || '',
       slot: Number(entry.slot) || (i + 1),
       streamId: sid,
       room: vdo ? vdo.room : '',
