@@ -253,7 +253,7 @@ let state = {
   // in the roll, separate from the brand-kit sponsor bar [{name,logo,tier}]; talent = manual
   // {name,role} credits (other-shift crew). (Single source of truth — must not be redefined below.)
   credits: { visible: false, sponsors: [], talent: [], endText: '' },   // endText: big end-card text after the roll ('' → "Thanks For Watching")
-  casters: { visible: true, showCountry: false, nameMode: 'gamertag', showRoles: { host: '', observer: '' }, shifts: [], activeShiftId: '', support: [], list: [], lowerThird: '', library: [], vdo: { room: '', password: '' }, guestsVdo: { room: '', password: '' }, observersVdo: { room: '', password: '' }, rooms: [], lineup: [], activeLayout: '', interview: { room: '', password: '' }, apiKey: '', interviewee: null, playerCam: null, deskRoomId: '', slotLabels: { 1: 'Caster 1', 2: 'Caster 2', 3: 'Caster 3', 4: 'Caster 4', 5: 'Player' } },   // list = on-air slots; showCountry = render each caster's country on the desk; library = saved casters/guests/observers (by kind); vdo/guestsVdo/observersVdo = the three shared group rooms; rooms = named VDO rooms; lineup = this-show active assignments; apiKey = director IFrame-API key; interviewee = spotlight-desk right cam; playerCam = slot-5 player feed ({camUrl,name,playerId}); deskRoomId = which named room is the interview/desk room
+  casters: { visible: true, showCountry: false, nameMode: 'gamertag', showRoles: { host: '', observer: '' }, shifts: [], activeShiftId: '', support: [], stationId: '', list: [], lowerThird: '', library: [], vdo: { room: '', password: '' }, guestsVdo: { room: '', password: '' }, observersVdo: { room: '', password: '' }, rooms: [], lineup: [], activeLayout: '', interview: { room: '', password: '' }, apiKey: '', interviewee: null, playerCam: null, deskRoomId: '', slotLabels: { 1: 'Caster 1', 2: 'Caster 2', 3: 'Caster 3', 4: 'Caster 4', 5: 'Player' } },   // list = on-air slots; showCountry = render each caster's country on the desk; library = saved casters/guests/observers (by kind); vdo/guestsVdo/observersVdo = the three shared group rooms; rooms = named VDO rooms; lineup = this-show active assignments; apiKey = director IFrame-API key; interviewee = spotlight-desk right cam; playerCam = slot-5 player feed ({camUrl,name,playerId}); deskRoomId = which named room is the interview/desk room
   // VDO.Ninja talent workflow. Global config (server-side, replaces the old localStorage settings);
   // per-team rooms/passwords live on teams.x.vdo, per-player IDs on the player objects.
   vdo: {
@@ -1948,7 +1948,10 @@ async function stationAutoSync() {
     if (!orgId || String(orgId).startsWith('user:')) return;
     _stationSyncBusy = true;
     const { feeds } = await cloud.listStationFeeds(orgId);
-    const casters = (feeds || []).filter((f) => f && f.kind === 'caster' && f.obsViewUrl);
+    // Station binding: with several desks running, only THIS app's bound station may fill the
+    // desk — otherwise two stations' "Caster 1"s race for slot 1. '' = follow all (single-desk orgs).
+    const bind = (state.casters && state.casters.stationId) || '';
+    const casters = (feeds || []).filter((f) => f && f.kind === 'caster' && f.obsViewUrl && (!bind || f.stationId === bind));
     if (!casters.length) return;
     if (!Array.isArray(state.casters.library)) state.casters.library = [];
     if (!Array.isArray(state.casters.lineup)) state.casters.lineup = [];
@@ -2117,6 +2120,10 @@ function loadState() {
           support: Array.isArray(saved.casters.support) ? saved.casters.support : null,
           // Website station check-ins auto-fill the desk (default ON; only an explicit off sticks).
           autoFillFromStations: saved.casters.autoFillFromStations !== false,
+          // Which website STATION this app follows ('' = all of the org's stations). With several
+          // desks running, each producer binds their app to their own station so two different
+          // "Caster 1"s never fight over the same desk slot.
+          stationId: typeof saved.casters.stationId === 'string' ? saved.casters.stationId : '',
           lowerThird: typeof saved.casters.lowerThird === 'string' ? saved.casters.lowerThird : '',
           list: Array.isArray(saved.casters.list) ? saved.casters.list : [],
           library: Array.isArray(saved.casters.library) ? saved.casters.library : [],
@@ -3580,7 +3587,7 @@ function lgRecalcServer(lg) {
   const sc = lg.scoring || {};
   const ptWin = sc.win ?? 3, ptLoss = sc.loss ?? 0, ptDraw = sc.draw ?? 1, ptOtw = sc.otw ?? ptWin;
   const map = {};
-  (lg.teams || []).forEach(tm => { map[tm.id] = { teamId: tm.id, w: 0, l: 0, t: 0, gf: 0, ga: 0, pts: 0 }; });
+  (lg.teams || []).forEach(tm => { map[tm.id] = { teamId: tm.id, w: 0, l: 0, t: 0, gf: 0, ga: 0, pts: 0, subW: 0, subL: 0 }; });
   for (const m of (lg.schedule || [])) {
     const r = m.result;
     const hasGames = Array.isArray(m.games) && m.games.length > 0;
@@ -3588,6 +3595,7 @@ function lgRecalcServer(lg) {
     const a = map[m.teamA], b = map[m.teamB]; if (!a || !b) continue;
     const { sa, sb, totA, totB } = srvLgMatchTally(m);
     a.gf += totA; a.ga += totB; b.gf += totB; b.ga += totA;
+    a.subW += sa; a.subL += sb; b.subW += sb; b.subL += sa;   // games/maps won across the series
     const winPts = (r && r.ot) ? ptOtw : ptWin;
     if (sa > sb) { a.w++; a.pts += winPts; b.l++; b.pts += ptLoss; }
     else if (sb > sa) { b.w++; b.pts += winPts; a.l++; a.pts += ptLoss; }
@@ -3636,6 +3644,7 @@ function migrateLeague(lg) {
   if (!Array.isArray(lg.standings)) lg.standings = [];
   if (!Array.isArray(lg.schedule)) lg.schedule = [];
   if (!Array.isArray(lg.seasonHistory)) lg.seasonHistory = [];
+  if (!lg.stats || typeof lg.stats !== 'object' || Array.isArray(lg.stats)) lg.stats = {};   // per-team in-game stats (Stats tab)
   // Website sync (opt-in, per league) — absent/empty means never pushed, zero cloud footprint.
   if (typeof lg.cloudLeagueId !== 'string') lg.cloudLeagueId = '';
   lg.teams.forEach((tm) => { if (tm && !tm.id) tm.id = srvLgUid('tm'); });
@@ -10781,6 +10790,7 @@ registerWsHandlers({
     if (typeof p.subtitle === 'string') state.standings.subtitle = p.subtitle;
     if (typeof p.showRecord === 'boolean') state.standings.showRecord = p.showRecord;
     if (typeof p.source === 'string') state.standings.source = p.source;
+    if (typeof p.gamesLabel === 'string') state.standings.gamesLabel = p.gamesLabel;   // "Games" / "Maps" for the game-aware column
     if (Array.isArray(p.rows)) state.standings.rows = p.rows;
     saveAppState();
     broadcastFullState();
@@ -11688,6 +11698,29 @@ function handleControlMessage(msg, ws) {
       saveAppState();
       broadcastFullState();
       if (state.casters.autoFillFromStations) stationAutoSync();
+      break;
+    }
+
+    // Bind THIS app to one website station ('' = all) — see stationAutoSync.
+    case 'set_station_binding': {
+      state.casters.stationId = typeof (msg.data && msg.data.stationId) === 'string' ? msg.data.stationId : '';
+      saveAppState();
+      broadcastFullState();
+      stationAutoSync();
+      break;
+    }
+
+    // Station list for the binding picker (Camera Feeds ▸ Cloud Stations).
+    case 'cloud_list_stations': {
+      (async () => {
+        try {
+          if (!cloud.authed()) { ws.send(JSON.stringify({ type: 'cloud_stations', data: { ok: false, stations: [] } })); return; }
+          const orgId = msg.data && msg.data.orgId;
+          if (!orgId) { ws.send(JSON.stringify({ type: 'cloud_stations', data: { ok: false, stations: [] } })); return; }
+          const stations = await cloud.listStations(orgId);
+          ws.send(JSON.stringify({ type: 'cloud_stations', data: { ok: true, stations: stations.filter((s) => s.status === 'active') } }));
+        } catch (e) { ws.send(JSON.stringify({ type: 'cloud_stations', data: { ok: false, stations: [], message: e.message } })); }
+      })();
       break;
     }
 
@@ -13547,6 +13580,25 @@ function handleControlMessage(msg, ws) {
           sendImportExportResult(ws, true, summary + ' (from cloud).');
           broadcastFullState();
         } catch (e) { sendImportExportResult(ws, false, 'Cloud load failed: ' + e.message); }
+      })();
+      break;
+    }
+    // Share/unshare a pushed profile (teams, brand kits, presets, etc.) with the producer's
+    // whole broadcast org — cloud.shareProfile already existed (built for the website's own
+    // "Share with my team" toggle) but was never wired to a WS handler, so the desktop app had
+    // no way to do this itself; a producer had to go to the website separately.
+    case 'cloud_share_profile': {
+      (async () => {
+        try {
+          if (!cloud.authed()) { sendImportExportResult(ws, false, 'Sign in to the cloud first.', 'profile-share'); return; }
+          const id = msg.data && msg.data.id;
+          const scope = (msg.data && msg.data.scope === 'workspace') ? 'workspace' : 'private';
+          if (!id) { sendImportExportResult(ws, false, 'Sync to cloud first, then share.', 'profile-share'); return; }
+          const res = await cloud.shareProfile(id, scope);
+          sendImportExportResult(ws, true, scope === 'workspace' ? 'Shared with your organization.' : 'No longer shared with your organization.', 'profile-share');
+          ws.send(JSON.stringify({ type: 'cloud_profile_shared', data: res }));
+          ws.send(JSON.stringify({ type: 'cloud_profiles', data: { ok: true, profiles: await cloud.listProfiles() } }));
+        } catch (e) { sendImportExportResult(ws, false, 'Share failed: ' + e.message, 'profile-share'); }
       })();
       break;
     }

@@ -143,6 +143,14 @@ async function stopObservedGame(orgId, key) { _require(); try { const { data } =
 
 // ── Station feeds (website-hosted caster/observer VDO rooms — see /studio/access/stations) ──
 async function listStationFeeds(orgId) { _require(); try { const { data } = await _client().get(`/api/orgs/${encodeURIComponent(orgId)}/station-feeds`); return { feeds: data.feeds || [], shared: data.shared || [] }; } catch (e) { throw _err(e); } }
+// Light station list for the app's station-binding picker (id/name/status only).
+async function listStations(orgId) {
+  _require();
+  try {
+    const { data } = await _client().get(`/api/orgs/${encodeURIComponent(orgId)}/stations`);
+    return (data.stations || []).map((s) => ({ id: s.id, name: s.name, status: s.status }));
+  } catch (e) { throw _err(e); }
+}
 
 // ── Crew roster mirror (names only — no pay/contact fields) so the website's station join
 // pages can offer "pick your crew profile" that auto-links back to this app's crew database. ──
@@ -168,6 +176,7 @@ module.exports = {
   listCameraFeeds,
   getMultiview, publishObservedGame, stopObservedGame,
   listStationFeeds,
+  listStations,
   pushCrewRoster,
   pushShowState,
   pushLeague, listCloudLeagues, pullLeague

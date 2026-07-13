@@ -2131,10 +2131,18 @@
           <h3 class="section-title" style="margin-bottom:4px;">Cloud Stations</h3>
           <p class="section-desc" style="margin:0; max-width:680px;">Casters and observers who connected through a <strong>Stations</strong> link on the website. With auto-fill on, a caster checking in on the website lands in your Caster Library, desk slot and overlays automatically — matching the slot they claimed.</p>
         </div>
-        <label class="qt-toggle" title="Every ~20s: claimed website casters are added to the Caster Library, their crew profile linked or created, and their claimed slot filled on the desk (never bumping an occupied slot)">
-          <span>Auto-fill desk</span>
-          <span class="switch"><input type="checkbox" id="cf-stations-autofill" checked><span class="slider"></span></span>
-        </label>
+        <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+          <label style="display:flex; align-items:center; gap:6px;" title="Which website station THIS app follows — with several desks running, each producer binds their app to their own station so its caster check-ins fill this desk (and only this desk)">
+            <span class="field-label" style="margin:0;">Station</span>
+            <select id="cf-stations-binding" class="input-select" style="width:auto; min-width:150px; font-size:12px;">
+              <option value="">All stations</option>
+            </select>
+          </label>
+          <label class="qt-toggle" title="Every ~20s: claimed website casters are added to the Caster Library, their crew profile linked or created, and their claimed slot filled on the desk (never bumping an occupied slot)">
+            <span>Auto-fill desk</span>
+            <span class="switch"><input type="checkbox" id="cf-stations-autofill" checked><span class="slider"></span></span>
+          </label>
+        </div>
       </div>
       <div id="cf-stations-list" class="cf-rooms-list" style="display:flex; flex-direction:column; gap:6px;"></div>
       <p class="msp-hint" id="cf-stations-status" style="margin-top:6px;"></p>
@@ -2387,7 +2395,7 @@
     .dcc-team-actions { display:flex; align-items:center; gap:5px; flex-shrink:0; }
     .dcc-load-btn { padding:3px 9px; border-radius:5px; border:1px solid var(--border); background:var(--surface2); color:var(--text); font-size:11px; font-weight:600; cursor:pointer; transition:background .15s; }
     .dcc-load-btn:hover { background:var(--surface3); }
-    .dcc-load-btn.dcc-load-active { border-color:var(--primary,#3b82f6); color:var(--primary,#3b82f6); }
+    .dcc-load-btn.dcc-load-active { border-color:var(--primary,#7C3AED); color:var(--primary,#7C3AED); }
     .dcc-team-roster { display:flex; flex-direction:column; gap:2px; padding:8px 14px 10px; }
     .dcc-team-player { display:flex; align-items:center; gap:8px; padding:2px 0; }
     .dcc-team-player-name { font-size:12px; }
@@ -3933,6 +3941,7 @@
               <button class="lg2-tab" data-tab="roster">Roster</button>
               <button class="lg2-tab" data-tab="standings">Standings</button>
               <button class="lg2-tab" data-tab="schedule">Schedule</button>
+              <button class="lg2-tab" data-tab="stats">Stats</button>
               <button class="lg2-tab" data-tab="settings">Settings</button>
             </nav>
             <!-- Overview -->
@@ -4017,6 +4026,16 @@
               <div id="lg2-schedule"></div>
             </div>
             <!-- Settings -->
+            <!-- Stats — series / game / in-game stat tiers per team -->
+            <div class="lg2-panel" id="lg2-panel-stats" style="display:none;">
+              <div class="lg2-stats-head">
+                <span class="lg2-stats-title">Team Stats</span>
+                <div class="lg2-stats-actions">
+                  <button class="btn btn-ghost btn-sm" id="lg-stats-recalc" title="Refresh the Series &amp; Game columns from the schedule">Recalculate</button>
+                </div>
+              </div>
+              <div id="lg2-stats"></div>
+            </div>
             <div class="lg2-panel" id="lg2-panel-settings" style="display:none;">
               <div class="lg2-settings-cols">
                 <div class="lg2-settings-group">

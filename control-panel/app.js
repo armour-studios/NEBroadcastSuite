@@ -746,9 +746,29 @@ function renderCfStations() {
     af.checked = !(currentState && currentState.casters && currentState.casters.autoFillFromStations === false);
     if (!af._wired) { af._wired = true; af.addEventListener('change', () => send('set_station_autofill', { on: af.checked })); }
   }
-  const feeds = _cfStationsCache || [];
-  section.style.display = feeds.length ? '' : 'none';
-  if (!feeds.length) { wrap.innerHTML = ''; if (status) status.textContent = ''; return; }
+  // Station binding picker — which website station THIS app follows ('' = all).
+  const bindSel = el('cf-stations-binding');
+  const binding = (currentState && currentState.casters && currentState.casters.stationId) || '';
+  if (bindSel) {
+    const stations = window._cfStationsIndex || [];
+    const opts = ['<option value="">All stations</option>']
+      .concat(stations.map((s) => `<option value="${tlEsc(s.id)}"${s.id === binding ? ' selected' : ''}>${tlEsc(s.name)}</option>`));
+    // Keep an unknown-but-bound station selectable so the choice is visible even before the list loads.
+    if (binding && !stations.some((s) => s.id === binding)) opts.push(`<option value="${tlEsc(binding)}" selected>(bound station)</option>`);
+    bindSel.innerHTML = opts.join('');
+    bindSel.value = binding;
+    if (!bindSel._wired) { bindSel._wired = true; bindSel.addEventListener('change', () => send('set_station_binding', { stationId: bindSel.value })); }
+  }
+  // Bound station → only ITS feeds show/fill here; the section stays visible while bound
+  // (even with zero feeds yet) so the binding is never invisible.
+  const allFeeds = _cfStationsCache || [];
+  const feeds = binding ? allFeeds.filter((f) => f && f.stationId === binding) : allFeeds;
+  section.style.display = (feeds.length || binding || (window._cfStationsIndex || []).length) ? '' : 'none';
+  if (!feeds.length) {
+    wrap.innerHTML = '';
+    if (status) status.textContent = binding ? 'No one from this station has checked in yet — feeds appear here (and auto-fill the desk) as casters claim their slots.' : '';
+    return;
+  }
 
   const lib = (currentState && currentState.casters && currentState.casters.library) || [];
   const lineup = (currentState && currentState.casters && currentState.casters.lineup) || [];
@@ -9820,6 +9840,7 @@ function applyCloudStatus(s) {
   if (canManage) send('cloud_list_org_seats', { orgId: s.workspaceId });
   if (isOrg) send('cloud_list_camera_feeds', { orgId: s.workspaceId });
   if (isOrg) send('cloud_list_station_feeds', { orgId: s.workspaceId });
+  if (isOrg) send('cloud_list_stations', { orgId: s.workspaceId });   // station-binding picker
 
   // Leagues website sync — org-scoped only (CompeteLeague requires an orgId); hidden entirely
   // for a solo/personal workspace rather than letting a producer hit a 403.
@@ -9861,13 +9882,26 @@ function renderCloudProfiles(d) {
   if (!d || !d.ok) { wrap.innerHTML = `<div class="section-desc">${(d && d.message) ? String(d.message).replace(/</g,'&lt;') : 'Cloud unavailable.'}</div>`; return; }
   const esc = (x) => String(x == null ? '' : x).replace(/[&<>"]/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
   const list = d.profiles || [];
+  // Org-share toggle: only meaningful for your OWN profiles (mine !== false), and only in an
+  // org workspace — a solo/personal workspace has no team to share with.
+  const isOrg = !!(window._cloudWorkspaceId && !String(window._cloudWorkspaceId).startsWith('user:'));
   wrap.innerHTML = list.length
-    ? list.map((p) => `<div class="cloud-prof-row">
+    ? list.map((p) => {
+        const shared = p.scope === 'workspace';
+        const shareBtn = (p.mine !== false && isOrg)
+          ? `<button class="btn btn-xs cloud-share-toggle ${shared ? 'btn-secondary' : 'btn-primary'}" data-id="${esc(p.id)}" data-scope="${shared ? 'private' : 'workspace'}" title="${shared ? 'Stop sharing this with your organization' : 'Share teams, brand kits & more in this profile with your organization'}">${shared ? 'Shared ✓' : 'Share with org'}</button>`
+          : '';
+        return `<div class="cloud-prof-row">
         <span class="cloud-prof-name">${esc(p.name) || '(unnamed)'}</span>
         <span class="cloud-prof-meta">${p.updatedAt ? new Date(p.updatedAt).toLocaleDateString() : ''}${p.scope ? ' · ' + esc(p.scope) : ''}</span>
+        ${shareBtn}
         <button class="btn btn-secondary btn-xs cloud-load" data-id="${esc(p.id)}" title="Merge this profile in">Load</button>
-      </div>`).join('')
+      </div>`;
+      }).join('')
     : '<div class="section-desc">No cloud profiles yet — “Sync to cloud” to save your first.</div>';
+  wrap.querySelectorAll('.cloud-share-toggle').forEach((btn) => btn.addEventListener('click', () => {
+    send('cloud_share_profile', { id: btn.dataset.id, scope: btn.dataset.scope });
+  }));
 }
 
 
@@ -25268,6 +25302,8 @@ async function connect() {
         if (typeof lgStatus === 'function') lgStatus(msg.data.message || '', msg.data.result);
         if (typeof lgRenderCloudSyncStatus === 'function') lgRenderCloudSyncStatus();
         if (msg.data.result && window._cloudWorkspaceId) send('cloud_list_leagues', { orgId: window._cloudWorkspaceId });
+      } else if (msg.data.context === 'profile-share') {
+        if (typeof showToast === 'function') showToast(msg.data.message || '', msg.data.result ? '#22c55e' : '#c53030', msg.data.result ? 2800 : 6000);
       } else {
         el('import-export-result').textContent = msg.data.message;
         el('import-export-result').style.color = msg.data.result ? 'green' : 'red';
@@ -25301,6 +25337,9 @@ async function connect() {
       renderPlayerCamMounts();
     } else if (msg.type === 'cloud_station_feeds') {
       _cfStationsCache = (msg.data && msg.data.ok && Array.isArray(msg.data.feeds)) ? msg.data.feeds : [];
+      renderCfStations();
+    } else if (msg.type === 'cloud_stations') {
+      window._cfStationsIndex = (msg.data && msg.data.ok && Array.isArray(msg.data.stations)) ? msg.data.stations : [];
       renderCfStations();
     } else if (msg.type === 'cloud_leagues') {
       if (typeof lgRenderCloudList === 'function') lgRenderCloudList((msg.data && msg.data.ok && Array.isArray(msg.data.leagues)) ? msg.data.leagues : []);
