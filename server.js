@@ -1974,9 +1974,29 @@ async function stationAutoSync() {
     const { feeds } = await cloud.listStationFeeds(orgId);
     // Station binding: with several desks running, only THIS app's bound station may fill the
     // desk — otherwise two stations' "Caster 1"s race for slot 1. '' = follow all (single-desk orgs).
-    const bind = (state.casters && state.casters.stationId) || '';
+    let bind = (state.casters && state.casters.stationId) || '';
+    // STALE binding self-heal: stations get deleted/recreated during setup; a binding pointing
+    // at a dead station filtered EVERY feed out and auto-fill died silently ("casters stopped
+    // landing on the overlays"). If the bound station no longer exists, clear the binding and
+    // fall back to all stations.
+    if (bind) {
+      try {
+        const live = await cloud.listStations(orgId);
+        if (!live.some((st) => st && st.id === bind && st.status === 'active')) {
+          console.warn('[Stations] Bound station no longer exists — reverting to All stations');
+          state.casters.stationId = '';
+          bind = '';
+          saveAppState();
+          broadcastFullState();
+        }
+      } catch (_) { /* can't verify right now — keep the binding, try next pass */ }
+    }
     const casters = (feeds || []).filter((f) => f && f.kind === 'caster' && f.obsViewUrl && (!bind || f.stationId === bind));
     if (!casters.length) return;
+    // Live feed URLs — used below to displace STALE auto-created occupants (a recreated room
+    // mints new view URLs; the old auto-entry kept the desk slot with a dead feed, blocking
+    // the fresh check-in from ever reaching the overlay).
+    const liveUrls = new Set((feeds || []).map((f) => f && f.obsViewUrl).filter(Boolean));
     if (!Array.isArray(state.casters.library)) state.casters.library = [];
     if (!Array.isArray(state.casters.lineup)) state.casters.lineup = [];
     let changed = false;
@@ -2037,6 +2057,21 @@ async function stationAutoSync() {
       const targetSlot = (Number(f.idx) || 0) + 1;
       if (targetSlot >= 1 && targetSlot <= 4) {
         const inLineup = state.casters.lineup.some((l) => l && l.libraryId === entry.id);
+        // Displace a STALE auto-created occupant: an entry we auto-added earlier whose station
+        // view URL is no longer among the live feeds (room was recreated → dead feed holding
+        // the slot). Manual assignments (non-cs_ ids or non-station URLs) are never touched.
+        const occupant = state.casters.lineup.find((l) => l && Number(l.slot) === targetSlot);
+        if (occupant && occupant.libraryId !== entry.id) {
+          const occEntry = state.casters.library.find((c) => c && c.id === occupant.libraryId);
+          const occUrl = (occEntry && occEntry.camUrl) || '';
+          const isStaleAuto = occEntry && String(occEntry.id || '').startsWith('cs_')
+            && /vdo\.ninja\/\?/.test(occUrl) && occUrl.includes('view=') && !liveUrls.has(occUrl);
+          if (isStaleAuto) {
+            state.casters.lineup = state.casters.lineup.filter((l) => l !== occupant);
+            changed = true;
+            console.log('[Stations] Displaced stale auto-filled occupant from desk slot', targetSlot);
+          }
+        }
         const occupied = state.casters.lineup.some((l) => l && Number(l.slot) === targetSlot);
         if (!inLineup && !occupied) {
           state.casters.lineup.push({ libraryId: entry.id, slot: targetSlot, roomId: '', streamId: entry.id });
@@ -16808,7 +16843,7 @@ function startHttpServer(baseDir) {
     res.json({ ok: true });
   });
 
-  // ── In-app bug report → Discord webhook + GitHub Issues ──────────────────────
+  // ── In-app bug report → Discord webhook + GitHub Issues + website ticket ─────
   // This route is registered before the global express.json() below, so it needs
   // its own body parser — otherwise req.body is empty and reports look blank.
   // GITHUB_TOKEN is a dev-only secret (like BUG_REPORT_WEBHOOK) — NOT in gen-prod-env.js's
@@ -16819,7 +16854,7 @@ function startHttpServer(baseDir) {
     const hook = process.env.BUG_REPORT_WEBHOOK || '';
     const ghToken = process.env.GITHUB_TOKEN || '';
     const ghRepo = process.env.GITHUB_REPO || 'armour-studios/NEBroadcastSuite';
-    if (!hook && !ghToken) return res.status(503).json({ ok: false, message: 'No bug-report destination configured (set BUG_REPORT_WEBHOOK and/or GITHUB_TOKEN in .env.local).' });
+    if (!hook && !ghToken && !cloud.authed()) return res.status(503).json({ ok: false, message: 'No bug-report destination configured (set BUG_REPORT_WEBHOOK and/or GITHUB_TOKEN in .env.local, or sign in to the cloud).' });
     const b = req.body || {};
     const isFeature = b.type === 'feature';
     const title = String(b.title || '').trim().slice(0, 256);
@@ -16909,7 +16944,7 @@ function startHttpServer(baseDir) {
       ...(discordFiles.length ? { attachments: discordFiles.map((f) => ({ id: f.id, filename: f.filename })) } : {})
     };
 
-    const result = { discordOk: false, githubOk: false, githubUrl: null, errors: [] };
+    const result = { discordOk: false, githubOk: false, websiteOk: false, githubUrl: null, errors: [] };
 
     // Use axios (Node 16 in Electron has no global fetch). 8s timeout so a slow/unreachable
     // Discord can't hang the request. Discord returns 204 on success → axios resolves on 2xx.
@@ -16981,8 +17016,47 @@ function startHttpServer(baseDir) {
       }
     }
 
-    if (result.discordOk || result.githubOk) {
-      res.json({ ok: true, discordOk: result.discordOk, githubOk: result.githubOk, githubUrl: result.githubUrl, message: result.errors.join(' ') || undefined });
+    // Website ticket — files the report on the producer's own website account (visible on
+    // /access/bugs with staff status/notes), Bearer-authed through the cloud session. The
+    // website enforces minimum title/description lengths for its own form; pad here so a
+    // terse-but-valid in-app report is never bounced. Skipped (with a note) when the
+    // producer isn't signed in to the cloud — Discord/GitHub still get their copies.
+    if (cloud.authed()) {
+      try {
+        const AREA_MAP = {
+          'Overlays / HUD': 'overlays', 'OBS / Scenes': 'obs-integration', 'Video Editor': 'editor',
+          'Camera Feeds': 'talent', 'Bracket / Events': 'esports', 'Teams / Players': 'esports',
+          'Stats': 'esports', 'start.gg': 'esports', 'Dashboard': 'editor', 'UI / Layout': 'editor'
+        };
+        let webTitle = ((isFeature ? '[Feature request] ' : '') + (title || (isFeature ? 'Feature request' : 'Bug report'))).slice(0, 200);
+        if (webTitle.trim().length < 5) webTitle = (isFeature ? 'Feature request: ' : 'Bug report: ') + webTitle;
+        const webDesc = [
+          description || '(no details provided)',
+          '',
+          '---',
+          b.reporter ? `Reporter: ${b.reporter}` : '',
+          ctx.page ? `Page: ${ctx.page}` : '',
+          ctx.game ? `Game: ${ctx.game}` : '',
+          imgBuf ? 'A screenshot was attached to the Discord copy of this report.' : '',
+          `Submitted from ${(ctx.app || 'NE Broadcast Suite')} v${appVersion}`
+        ].filter(Boolean).join('\n').slice(0, 5000);
+        await cloud.submitBugReport({
+          title: webTitle,
+          description: webDesc,
+          severity: isFeature ? 'low' : severity,
+          area: AREA_MAP[b.category] || (b.category ? 'other' : null),
+          appVersion: String(appVersion || '')
+        });
+        result.websiteOk = true;
+      } catch (e) {
+        result.errors.push(`Website: ${e.message || 'could not file the report'}.`);
+      }
+    } else {
+      result.errors.push('Website: not signed in to the cloud, so no ticket was filed on your site account.');
+    }
+
+    if (result.discordOk || result.githubOk || result.websiteOk) {
+      res.json({ ok: true, discordOk: result.discordOk, githubOk: result.githubOk, websiteOk: result.websiteOk, githubUrl: result.githubUrl, message: result.errors.join(' ') || undefined });
     } else {
       res.status(502).json({ ok: false, message: result.errors.join(' ') || 'Failed to send report.' });
     }
