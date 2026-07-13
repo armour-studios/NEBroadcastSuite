@@ -359,7 +359,8 @@ function placeShowDeck(tab) {
     const slotName = (n) => { const e = lineup.find((x) => Number(x.slot) === n); const p = e && byId[e.libraryId]; return (p && p.name) || ''; };
     const shifts = (data.casters && data.casters.shifts) || [];
     const supportList = (data.casters && Array.isArray(data.casters.support)) ? data.casters.support : [];
-    const sig = JSON.stringify({ c: crew.map((c) => [c.id, c.name, c.handle, c.group, !!c.active, !!c.workedEvent, c.country || '']), s: [1, 2, 3, 4].map(slotName), r: roles, l: labels, sh: shifts.map((s) => s.id + s.name), sup: supportList.map((s) => s.crewId + (s.role || '')) });
+    const stationRooms = (window._cfStationDetail && window._cfStationDetail.rooms) || [];
+    const sig = JSON.stringify({ c: crew.map((c) => [c.id, c.name, c.handle, c.group, !!c.active, !!c.workedEvent, c.country || '']), s: [1, 2, 3, 4].map(slotName), r: roles, l: labels, sh: shifts.map((s) => s.id + s.name), sup: supportList.map((s) => s.crewId + (s.role || '')), rm: stationRooms.map((r) => r.id + r.connected + '/' + r.slots) });
     if (sig === window._tdSig) return;
     window._tdSig = sig;
     const disp = (c) => c.handle || c.name;   // gamertag-first, matching the desk
@@ -450,6 +451,38 @@ function placeShowDeck(tab) {
     }
     // Shared crew datalist for the On shift / Worked / Support search boxes.
     ['td-crew-dl', 'td-support-dl'].forEach((id) => { const dl = el(id); if (dl) dl.innerHTML = crew.map((c) => `<option value="${esc(disp(c))}">`).join(''); });
+    // Website station rooms — the deck IS the director surface now (DCC merged in): monitor &
+    // adjust the room the casters actually joined, copy its invite, jump into talkback. The
+    // monitor iframe is lazy (only loads when toggled) and survives re-renders via its src.
+    const roomsSection = el('td-station-rooms');
+    const roomsList = el('td-station-rooms-list');
+    if (roomsSection && roomsList) {
+      roomsSection.style.display = stationRooms.length ? '' : 'none';
+      const detailName = (window._cfStationDetail && window._cfStationDetail.stationName) || '';
+      roomsList.innerHTML = stationRooms.map((r, i) =>
+        `<span class="td-chip" style="display:inline-flex; align-items:center; gap:6px;" title="${tlEsc(detailName)} — ${tlEsc(r.name)}">
+          <span style="font-size:9px; font-weight:800; letter-spacing:.06em; text-transform:uppercase; color:${r.kind === 'observer' ? '#2dd4bf' : '#8b5cf6'};">${r.kind === 'observer' ? 'OBS' : 'CAST'}</span>
+          <span style="font-weight:700;">${tlEsc(r.name)}</span>
+          <span style="color:${r.connected ? '#22c55e' : 'var(--muted)'}; font-size:11px;">${r.connected}/${r.slots}</span>
+          <button type="button" class="btn btn-ghost btn-xs td-room-monitor" data-ri="${i}" title="Open the director console for this room — mute, adjust and manage everyone in it">Monitor</button>
+          <button type="button" class="btn btn-ghost btn-xs td-room-invite" data-ri="${i}" title="Copy the check-in link">Invite</button>
+          <a class="btn btn-ghost btn-xs" href="${tlEsc(r.talkbackUrl)}" target="_blank" rel="noreferrer" title="Join this room yourself (talkback) — no placement taken">Talk</a>
+        </span>`).join('');
+      roomsList.querySelectorAll('.td-room-monitor').forEach((btn) => btn.addEventListener('click', () => {
+        const r = stationRooms[Number(btn.dataset.ri)]; if (!r || !r.monitorUrl) return;
+        const wrapEl = el('td-station-monitor-wrap'); const frame = el('td-station-monitor');
+        if (!wrapEl || !frame) return;
+        if (wrapEl.style.display !== 'none' && frame.dataset.roomId === r.id) {
+          wrapEl.style.display = 'none'; frame.src = 'about:blank'; frame.dataset.roomId = '';
+        } else {
+          frame.src = r.monitorUrl; frame.dataset.roomId = r.id; wrapEl.style.display = '';
+        }
+      }));
+      roomsList.querySelectorAll('.td-room-invite').forEach((btn) => btn.addEventListener('click', () => {
+        const r = stationRooms[Number(btn.dataset.ri)];
+        if (r && navigator.clipboard) navigator.clipboard.writeText(r.inviteUrl).then(() => showToast('Invite link copied.', '#22c55e', 2000));
+      }));
+    }
     // Saved shifts — click applies (slots + roles + on-shift marks + display options), × deletes.
     const shiftWrap = el('td-shift-chips');
     if (shiftWrap) {
@@ -25678,6 +25711,8 @@ async function connect() {
       window._cfStationsIndex = (msg.data && msg.data.ok && Array.isArray(msg.data.stations)) ? msg.data.stations : [];
       window._cfStationDetail = (msg.data && msg.data.ok && msg.data.detail) ? msg.data.detail : null;
       renderCfStations();
+      // The Show Deck renders the bound station's rooms (monitor/invite/talkback) — refresh it.
+      if (typeof window.renderTalentDeck === 'function' && typeof currentState !== 'undefined' && currentState) window.renderTalentDeck(currentState);
     } else if (msg.type === 'cloud_stations_full') {
       if (typeof cfApplyStationsFull === 'function') cfApplyStationsFull(msg.data);
     } else if (msg.type === 'cloud_leagues') {

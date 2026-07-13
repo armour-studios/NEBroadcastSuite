@@ -2074,29 +2074,32 @@ async function stationAutoSync() {
       }
       const targetSlot = (Number(f.idx) || 0) + 1;
       if (targetSlot >= 1 && targetSlot <= 4) {
-        const inLineup = state.casters.lineup.some((l) => l && l.libraryId === entry.id);
-        // Displace a STALE auto-created occupant: an entry we auto-added earlier whose station
-        // view URL is no longer among the live feeds (room was recreated → dead feed holding
-        // the slot). Manual assignments (non-cs_ ids or non-station URLs) are never touched.
-        const occupant = state.casters.lineup.find((l) => l && Number(l.slot) === targetSlot);
-        if (occupant && occupant.libraryId !== entry.id) {
+        // THE WEB PLACEMENT IS AUTHORITATIVE for auto-managed casters: whoever the website says
+        // is Caster N sits in desk slot N — take-overs switch, placement moves follow. Only a
+        // MANUAL occupant (an entry the producer created themselves — non-cs_ id) holds a slot
+        // against the web; ghosts (no library entry) and any auto (cs_) occupant are displaced.
+        const occupant = state.casters.lineup.find((l) => l && Number(l.slot) === targetSlot && l.libraryId !== entry.id);
+        if (occupant) {
           const occEntry = state.casters.library.find((c) => c && c.id === occupant.libraryId);
-          const occUrl = (occEntry && occEntry.camUrl) || '';
-          // Stale = an auto-created entry whose station feed is dead, OR a GHOST — a lineup
-          // ref whose library entry no longer exists at all (deleted caster). Ghosts rendered
-          // as an empty nameless slot with a dead room URL and blocked the slot forever.
-          const isStaleAuto = !occEntry || (String(occEntry.id || '').startsWith('cs_')
-            && /vdo\.ninja\/\?/.test(occUrl) && occUrl.includes('view=') && !liveUrls.has(occUrl));
-          if (isStaleAuto) {
+          const occAuto = !occEntry || String(occEntry.id || '').startsWith('cs_');
+          if (occAuto) {
             state.casters.lineup = state.casters.lineup.filter((l) => l !== occupant);
             changed = true;
-            console.log('[Stations] Displaced ' + (occEntry ? 'stale auto-filled' : 'GHOST') + ' occupant from desk slot', targetSlot);
+            console.log('[Stations] Desk slot ' + targetSlot + ': displaced ' + (occEntry ? ('auto occupant "' + (occEntry.name || '?') + '"') : 'GHOST') + ' — web says ' + (entry.name || '?'));
           }
         }
-        const occupied = state.casters.lineup.some((l) => l && Number(l.slot) === targetSlot);
-        if (!inLineup && !occupied) {
-          state.casters.lineup.push({ libraryId: entry.id, slot: targetSlot, roomId: '', streamId: entry.id });
-          changed = true;
+        const blocked = state.casters.lineup.some((l) => l && Number(l.slot) === targetSlot && l.libraryId !== entry.id);
+        if (!blocked) {
+          const mine = state.casters.lineup.find((l) => l && l.libraryId === entry.id);
+          if (mine) {
+            if (Number(mine.slot) !== targetSlot) {
+              mine.slot = targetSlot;   // caster switched placements on the web — follow them
+              changed = true;
+            }
+          } else {
+            state.casters.lineup.push({ libraryId: entry.id, slot: targetSlot, roomId: '', streamId: entry.id });
+            changed = true;
+          }
         }
       }
     }
@@ -12042,6 +12045,9 @@ function handleControlMessage(msg, ws) {
                   connected: (r.slots || []).filter((x) => x && x.enabled && x.connectedAt).length,
                   inviteUrl: `${SITE}/station/${r.shareToken}`,
                   talkbackUrl: `${SITE}/station/${r.shareToken}?producer=1`,
+                  // Director console for the WEBSITE's shared room — lets the app's Show Deck
+                  // monitor and adjust (mute/kick/volume) the room the casters actually joined.
+                  monitorUrl: r.roomBase ? `https://vdo.ninja/?director=${encodeURIComponent(r.roomBase)}${r.password ? `#p=${encodeURIComponent(r.password)}` : ''}` : '',
                 })),
                 cameras: (d.cameraSessions || []).filter((c) => c && c.status === 'active').map((c) => ({
                   id: c.id, name: c.name,

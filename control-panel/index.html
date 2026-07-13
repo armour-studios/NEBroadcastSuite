@@ -132,6 +132,11 @@
       <!-- GFX + ARMED pills removed from the topbar (user request) — the same info lives in
            the Graphics hub header and the What's Armed panel; their app.js renderers are
            null-guarded so nothing else changes. -->
+      <!-- Organization indicator — the one place in the topbar that says "you're connected to
+           a team" at a glance. Hidden for solo/personal workspaces (nothing to show). Clicking
+           it jumps to Settings ▸ Organization, the single place every org feature is reachable
+           from — teams/leagues/cameras/stations sync all live behind this one entry point. -->
+      <span class="stat-pill" id="ck-chip-org" style="display:none; cursor:pointer;" title="Click to open Organization settings">ORG: —</span>
       <span class="tb-divider"></span>
       <div class="tb-group tb-prod">
         <div class="prod-timer top-timer" id="prod-timer" title="Producer segment timer — drives the countdown overlay">
@@ -255,7 +260,7 @@
       <button class="tab-btn nav-item" data-tab="events" id="tab-events">
         <span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/></svg></span><span class="nav-label">ESPORTS</span></button>
       <button class="tab-btn nav-item" data-tab="replays" id="tab-replays">
-        <span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/><polygon points="10 8 16 12 10 16 10 8" fill="currentColor" stroke="none"/></svg></span><span class="nav-label">Editor</span></button>
+        <span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/><polygon points="10 8 16 12 10 16 10 8" fill="currentColor" stroke="none"/></svg></span><span class="nav-label">Video Editor</span></button>
       <button class="tab-btn nav-item" data-tab="social" id="tab-social" style="display:none;">
         <span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg></span><span class="nav-label">Social</span></button>
 
@@ -1075,6 +1080,7 @@
       <h3 class="section-title" style="margin-bottom:0;">Series</h3>
       <div style="display:flex; align-items:center; gap:14px;">
         <span id="series-summary" class="sr-summary"></span>
+        <button class="btn btn-secondary btn-xs" data-inv-ctx="match" title="One link both teams use to join the match room (players connect their own cameras) — copies to clipboard">+ Team join link</button>
         <label class="qt-toggle" title="Show or hide the series tracker overlay in OBS"><span>Show overlay</span><span class="switch"><input type="checkbox" id="check-series-visible"><span class="slider"></span></span></label>
         <a href="http://localhost:3000/series.html" target="_blank" class="overlay-link" style="font-size:12px;">Series overlay ↗</a>
       </div>
@@ -1851,13 +1857,14 @@
 
 <!-- ════════════════════════════════════════════ TAB: FACE CAMS ═══ -->
 <div id="tab-facecams-content" class="tab-content">
-  <div class="page-head"><h1>Camera Feeds</h1><p>Player, caster and gameplay video feeds (VDO.ninja) routed into your OBS scenes — assign cams, set rooms, request screenshares.</p></div>
+  <div class="page-head"><h1>Camera Feeds</h1><p>Player, caster and gameplay video feeds (VDO.ninja) routed into your OBS scenes — assign cams, set rooms, request screenshares. Rosters, crew roles and casters themselves are managed on the <strong>Talent</strong> page (sidebar) — this page is just their cameras.</p></div>
   <div class="cf-subnav" id="cf-subnav">
     <!-- Players sub-tab retired: player cam assignment lives natively in Match — Teams
          (gear ▸ In-Game Player Cams) and the Talent Monitor's Players tab — the same shared
          panel. The hidden button + panel markup stay so legacy render functions are safe. -->
     <button type="button" class="cf-tab" data-cf="players" style="display:none;">Players</button>
     <button type="button" class="cf-tab active" data-cf="talent">Talent Rooms</button>
+    <button type="button" class="cf-tab" data-cf="stations" id="cf-tab-stations" style="display:none;">Stations</button>
     <button type="button" class="cf-tab" data-cf="gameplay">Gameplay</button>
     <button type="button" class="btn btn-ghost btn-sm" id="cf-goto-vdo-settings" style="margin-left:auto;" title="VDO.ninja settings now live in the Integrations page"><svg class="svg-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg> VDO Settings ↗</button>
   </div>
@@ -2125,27 +2132,33 @@
     <!-- Cloud Stations — caster/observer feeds connected via the website's Stations pages
          (studio.namelessesports.com/access/stations). Casters can be pulled straight into the
          Caster Library below with the right slot pre-assigned; observer feeds are view-only. -->
-    <section class="section" id="cf-stations-section" style="display:none;">
+    <section class="section" id="cf-cloudstations-section" style="display:none;">
       <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:14px; flex-wrap:wrap; margin-bottom:6px;">
         <div>
           <h3 class="section-title" style="margin-bottom:4px;">Cloud Stations</h3>
-          <p class="section-desc" style="margin:0; max-width:680px;">Casters and observers who connected through a <strong>Stations</strong> link on the website. With auto-fill on, a caster checking in on the website lands in your Caster Library, desk slot and overlays automatically — matching the slot they claimed.</p>
+          <p class="section-desc" style="margin:0 0 8px; max-width:680px;">Casters and observers who connected through a <strong>Stations</strong> link on the website. With auto-fill on, a caster checking in on the website lands in your Caster Library, desk slot and overlays automatically — matching the slot they claimed.</p>
+          <!-- Generate a website invite link right here — copies to clipboard, no website login needed. -->
+          <div style="display:flex; gap:6px; flex-wrap:wrap;">
+            <button class="btn btn-secondary btn-xs" data-inv-ctx="caster">+ Caster room link</button>
+            <button class="btn btn-secondary btn-xs" data-inv-ctx="observer">+ Observer feeds link</button>
+            <button class="btn btn-secondary btn-xs" data-inv-ctx="camera">+ Camera assignments link</button>
+          </div>
         </div>
         <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
           <label style="display:flex; align-items:center; gap:6px;" title="Which website station THIS app follows — with several desks running, each producer binds their app to their own station so its caster check-ins fill this desk (and only this desk)">
             <span class="field-label" style="margin:0;">Station</span>
-            <select id="cf-stations-binding" class="input-select" style="width:auto; min-width:150px; font-size:12px;">
+            <select id="cf-cloudstations-binding" class="input-select" style="width:auto; min-width:150px; font-size:12px;">
               <option value="">All stations</option>
             </select>
           </label>
           <label class="qt-toggle" title="Every ~20s: claimed website casters are added to the Caster Library, their crew profile linked or created, and their claimed slot filled on the desk (never bumping an occupied slot)">
             <span>Auto-fill desk</span>
-            <span class="switch"><input type="checkbox" id="cf-stations-autofill" checked><span class="slider"></span></span>
+            <span class="switch"><input type="checkbox" id="cf-cloudstations-autofill" checked><span class="slider"></span></span>
           </label>
         </div>
       </div>
-      <div id="cf-stations-list" class="cf-rooms-list" style="display:flex; flex-direction:column; gap:6px;"></div>
-      <p class="msp-hint" id="cf-stations-status" style="margin-top:6px;"></p>
+      <div id="cf-cloudstations-list" class="cf-rooms-list" style="display:flex; flex-direction:column; gap:6px;"></div>
+      <p class="msp-hint" id="cf-cloudstations-status" style="margin-top:6px;"></p>
     </section>
 
     <section class="section">
@@ -2186,6 +2199,25 @@
       </div>
     </section>
   </div><!-- /cf-panel-talent -->
+
+  <!-- ───────────── STATIONS (org broadcast desks — managed from the app) ───────────── -->
+  <div class="cf-panel" id="cf-panel-stations">
+    <section class="section">
+      <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:14px; flex-wrap:wrap; margin-bottom:6px;">
+        <div>
+          <h3 class="section-title" style="margin-bottom:4px;">Stations</h3>
+          <p class="section-desc" style="margin:0; max-width:720px;">Your organization's broadcast desks, live from the website — no need to open it. Each station holds <strong>caster</strong> and <strong>observer</strong> rooms; each room has placement slots your talent claim with a <strong>join link</strong>. Create, rename, and manage everything here; changes save straight to the org.</p>
+        </div>
+        <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+          <span class="stat-pill" id="cf-stations-cap"></span>
+          <button class="btn btn-secondary btn-sm" id="cf-stations-refresh" title="Reload stations from the website"><svg class="svg-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M3 21v-5h5"/></svg> Refresh</button>
+          <button class="btn btn-primary btn-sm" id="cf-stations-new" title="Create a new broadcast desk">+ New station</button>
+        </div>
+      </div>
+      <div id="cf-stations-list" class="cf-stations-list"></div>
+      <p class="msp-hint" id="cf-stations-status" style="margin-top:8px;"></p>
+    </section>
+  </div><!-- /cf-panel-stations -->
 
   <!-- ───────────── GAMEPLAY ───────────── -->
   <div class="cf-panel" id="cf-panel-gameplay">
@@ -2301,8 +2333,18 @@
     .tc-card-body { display:flex; align-items:center; gap:10px; padding:12px; flex:1; min-width:0; }
     .tc-card-logo { width:38px; height:38px; object-fit:contain; border-radius:5px; flex-shrink:0; }
     .tc-card-info { flex:1; min-width:0; }
-    .tc-card-name { font-size:13px; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; color:var(--text); }
+    .tc-card-name { font-size:13px; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; color:var(--text); display:flex; align-items:center; gap:6px; }
     .tc-card-meta { font-size:11px; color:var(--muted); margin-top:2px; }
+    /* From-organization teams: subtle accent + a small ORG badge so they read as a separate category. */
+    .tc-card.is-org { border-color:rgba(88,101,242,.5); }
+    .tc-card.is-org .tc-card-accent { background:linear-gradient(90deg,#5865f2,var(--team-accent,#5865f2)); }
+    .tc-org-badge { flex:0 0 auto; font-size:9px; font-weight:800; letter-spacing:.06em; padding:1px 5px; border-radius:4px; background:rgba(88,101,242,.18); color:#aab4ff; border:1px solid rgba(88,101,242,.4); }
+    .preset-item.brand-kit-item.is-org { border-left:2px solid rgba(88,101,242,.6); }
+    /* Origin filter chips (All / My teams / From organization) */
+    .origin-chips { display:flex; gap:6px; flex-wrap:wrap; }
+    .origin-chip { padding:4px 12px; font-size:12px; border-radius:999px; border:1px solid var(--border); background:transparent; color:var(--muted); cursor:pointer; transition:all .12s; }
+    .origin-chip:hover { color:var(--text); border-color:var(--text); }
+    .origin-chip.active { background:var(--accent,#e83a8b); border-color:var(--accent,#e83a8b); color:#fff; }
     .tc-card-footer { display:flex; border-top:1px solid var(--border); }
     .tc-card-footer button { flex:1; padding:7px 4px; background:none; border:none; border-right:1px solid var(--border); cursor:pointer; color:var(--muted); font-size:14px; line-height:1; transition:color .12s,background .12s; }
     .tc-card-footer button:last-child { border-right:none; }
@@ -2477,6 +2519,17 @@
         <button type="button" class="btn btn-ghost btn-sm" id="td-shift-clear" style="color:var(--danger-2);" title="Reset every Show Deck field — slots, roles, shift, credits and support crew. Nobody is deleted from Crew; presets are untouched">Clear</button>
       </div>
     </div>
+    <!-- Website station rooms — the deck IS the director surface: monitor & adjust the VDO room
+         the casters actually joined (website-made), copy its invite, or jump into talkback.
+         Hidden until the app is cloud-bound to a station with rooms. -->
+    <div class="td-section" id="td-station-rooms" style="display:none;">
+      <span class="td-roster-lbl">Station rooms</span>
+      <div id="td-station-rooms-list" style="display:flex; flex-wrap:wrap; gap:6px; margin:2px 0 4px;"></div>
+      <div id="td-station-monitor-wrap" style="display:none; margin-top:6px;">
+        <iframe id="td-station-monitor" allow="camera; microphone; autoplay; fullscreen; display-capture; speaker-selection" style="width:100%; height:320px; border:1px solid var(--border); border-radius:10px; background:#000;" title="Station room monitor"></iframe>
+      </div>
+    </div>
+
     <div class="td-section">
       <span class="td-roster-lbl">Desk lineup</span>
       <div class="td-slots" id="td-slots"></div>
@@ -2537,6 +2590,12 @@
       <input type="text" id="teams-search" class="input-text" placeholder="Search teams…" style="flex:1; min-width:0;">
       <button class="btn btn-ghost btn-sm" id="btn-sort-teams-abc" style="white-space:nowrap;">Sort A–Z</button>
       <button class="btn btn-ghost btn-sm" id="btn-delete-all-teams" style="white-space:nowrap; color:#f56565;" title="Delete all non-favorited teams">Delete All</button>
+    </div>
+    <!-- Origin filter — only shown once the organization has shared teams into this app. -->
+    <div id="teams-origin-chips" class="origin-chips" style="display:none; margin-bottom:12px;">
+      <button type="button" class="origin-chip active" data-teamorigin="all">All</button>
+      <button type="button" class="origin-chip" data-teamorigin="mine">My teams</button>
+      <button type="button" class="origin-chip" data-teamorigin="org">From organization</button>
     </div>
     <div id="teams-list" class="teams-grid">
       <p class="empty-msg" id="teams-empty">No saved teams yet. Click "+ New Team" or import from start.gg.</p>
@@ -2943,7 +3002,7 @@
 
 <!-- ════════════════════════════════════════════ TAB: REPLAYS ═══ -->
 <div id="tab-replays-content" class="tab-content">
-  <div class="page-head"><h1>Editor</h1><p>Capture highlights from the OBS replay buffer, trim them, build montages &amp; playlists (commercials/intros/outros), and play them to air with audio.</p></div>
+  <div class="page-head"><h1>Video Editor</h1><p>Capture highlights from the OBS replay buffer, trim them, build montages &amp; playlists (commercials/intros/outros), and play them to air with audio.</p></div>
 
   <!-- Sub-tab bar -->
   <div class="ev-subnav" id="rp-subnav">
@@ -3891,7 +3950,7 @@
         <div class="lg-topbar-actions">
           <input type="text" id="lg-startgg-slug" class="input-text" placeholder="start.gg URL or slug…" style="font-size:12px;width:190px;">
           <button class="btn btn-secondary btn-sm" id="lg-startgg-import">Import from Platform</button>
-          <button class="btn btn-secondary btn-sm" id="lg-cloud-browse-toggle" type="button" style="display:none;">Website Leagues</button>
+          <button class="btn btn-secondary btn-sm" id="lg-cloud-browse-toggle" type="button" style="display:none;">Organization Leagues</button>
           <button class="btn btn-primary btn-sm" id="lg-new">+ New League</button>
         </div>
       </div>
@@ -4031,7 +4090,9 @@
               <div class="lg2-stats-head">
                 <span class="lg2-stats-title">Team Stats</span>
                 <div class="lg2-stats-actions">
+                  <a class="overlay-link" href="http://localhost:3000/league-stats.html" target="_blank" style="font-size:11px;margin-right:6px;">league-stats.html &#8599;</a>
                   <button class="btn btn-ghost btn-sm" id="lg-stats-recalc" title="Refresh the Series &amp; Game columns from the schedule">Recalculate</button>
+                  <button class="btn btn-primary btn-sm" id="lg-stats-push" title="Push this season stats board to the league-stats overlay">Push to Overlay</button>
                 </div>
               </div>
               <div id="lg2-stats"></div>
@@ -4099,11 +4160,11 @@
                   <div id="lg-season-history"></div>
                 </div>
                 <div class="lg2-settings-group" id="lg-cloud-sync-group" style="display:none;">
-                  <h4 class="lg2-settings-heading">Website Sync</h4>
+                  <h4 class="lg2-settings-heading">Organization Sync</h4>
                   <p class="field-label" style="font-size:11px; color:var(--muted); font-weight:600; margin:0 0 8px;">Push this league to your organization's website so producers there can see and edit it too. Pulling never overwrites your local edits; pushing overwrites the website's copy of this league's config.</p>
                   <div class="lg2-settings-row">
                     <label class="field-label"></label>
-                    <button class="btn btn-secondary btn-sm" id="lg-cloud-push" type="button">Sync to Website</button>
+                    <button class="btn btn-secondary btn-sm" id="lg-cloud-push" type="button">Sync to Organization</button>
                   </div>
                   <p class="field-label" id="lg-cloud-sync-status" style="font-size:11px; color:var(--muted); font-weight:600; margin:4px 0 0;"></p>
                 </div>
@@ -4128,6 +4189,18 @@
           <div class="ev-head-actions">
             <button class="btn btn-primary btn-sm" id="me-add-btn" type="button">+ Add Event</button>
           </div>
+        </div>
+        <!-- Event-day checklist: not a wizard, just the right order for the two easily-confused
+             import actions on each card below (Set live vs. Pre-load teams do different things)
+             plus a pointer to the two other things a new event needs before air. -->
+        <div class="ed-checklist-card">
+          <h4 class="section-title" style="font-size:11px; margin-bottom:6px;">Event day checklist</h4>
+          <ol class="ed-checklist">
+            <li><b>Activate</b> — click <b>Set live</b> on your event below. That alone imports its teams, bracket and queue for the broadcast.</li>
+            <li><b>Import teams</b> <i>(optional)</i> — <b>Pre-load teams</b> also saves them to your permanent Team library, separate from the broadcast import above. Skip it if you only need this event for tonight.</li>
+            <li><b>Casters</b> — assign your desk on the <a href="#" id="ed-checklist-talent">Talent</a> page.</li>
+            <li><b>Branding</b> — apply your kit on the <a href="#" id="ed-checklist-brand">Profiles</a> page.</li>
+          </ol>
         </div>
         <!-- Manual event — not backed by start.gg/Challonge/NXGEN (a LAN, a one-off, anything not
              tracked on a platform). No "Set live"/auto-import; just a reference to seed by hand. -->
@@ -8557,8 +8630,12 @@ PacketSendRate=10</pre>
     </div>
     <div id="import-export-result" style="margin-top: 14px; font-size: 14px;"></div>
 
-    <!-- Cloud sync (Nameless backend) — only shown when BROADCAST_REMOTE_URL is configured -->
+    <!-- Cloud sync (Nameless backend) — only shown when BROADCAST_REMOTE_URL is configured.
+         "Organization" is the one word for this concept everywhere in the app — this used to
+         be a mix of cloud/workspace/website/team across different features. -->
     <div id="cloud-sync-block" style="display:none; margin-top:16px; padding-top:14px; border-top:1px solid var(--border);">
+      <h3 class="section-title" style="margin-bottom:4px;">Organization</h3>
+      <p class="section-desc" style="margin-bottom:10px; max-width:680px;">Sign in to sync your profile to the cloud, and — if you're part of an organization — share teams, leagues, and camera feeds with the rest of your producers. Camera Feeds and Leagues each have their own organization-sync controls once you're signed in.</p>
       <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
         <span class="stat-pill" id="cloud-status-pill">Cloud: offline</span>
         <button class="btn btn-primary btn-sm" id="btn-cloud-push"><svg class="svg-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/></svg> Sync to cloud</button>
@@ -8567,9 +8644,38 @@ PacketSendRate=10</pre>
       <p class="section-desc" id="cloud-workspace-line" style="margin-top:8px;"></p>
       <div id="cloud-profiles-list" style="margin-top:12px;"></div>
 
+      <!-- Org Library: two-way team/brand-kit sync across the organization. Only shown when signed
+           into a real org workspace (not a solo/personal account). -->
+      <div id="org-library-block" style="display:none; margin-top:16px; padding-top:14px; border-top:1px solid var(--border);">
+        <h4 class="section-title" style="font-size:13px; margin-bottom:4px;">Organization Library</h4>
+        <p class="section-desc" style="margin-bottom:10px; max-width:680px;">Your teams, brand kits, facecams and casters sync to the whole organization automatically. Everyone's shared items show up under a <strong>From organization</strong> category — searchable everywhere in the app, kept separate from the ones you make locally.</p>
+        <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+          <label class="switch" title="Auto-share your library with the organization"><input type="checkbox" id="check-org-autosync" checked><span class="slider"></span></label>
+          <span style="font-size:13px;">Auto-sync with organization</span>
+          <button class="btn btn-secondary btn-sm" id="btn-org-lib-pull">Pull now</button>
+          <button class="btn btn-secondary btn-sm" id="btn-org-lib-push">Share my library</button>
+        </div>
+        <p class="section-desc" id="org-library-status" style="margin-top:8px;"></p>
+      </div>
+
+      <!-- Invite links: mint the website's shareable links straight from the app so producers never
+           have to open the website. Only shown for a real org workspace. -->
+      <div id="org-invites-block" style="display:none; margin-top:16px; padding-top:14px; border-top:1px solid var(--border);">
+        <h4 class="section-title" style="font-size:13px; margin-bottom:4px;">Invite Links</h4>
+        <p class="section-desc" style="margin-bottom:10px; max-width:680px;">Generate a share link for your teams, casters and camera ops. Each opens a branded join page on the website — send the link, no website login needed on their end or yours.</p>
+        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+          <button class="btn btn-secondary btn-sm" id="btn-inv-match" data-inv="match">Team match link</button>
+          <button class="btn btn-secondary btn-sm" id="btn-inv-caster" data-inv="caster">Caster room</button>
+          <button class="btn btn-secondary btn-sm" id="btn-inv-observer" data-inv="observer">Observer feeds</button>
+          <button class="btn btn-secondary btn-sm" id="btn-inv-camera" data-inv="camera">Camera assignments</button>
+          <button class="btn btn-secondary btn-sm" id="btn-inv-talent" data-inv="talent">Talent invite</button>
+        </div>
+        <div id="cloud-invite-result" style="margin-top:12px;"></div>
+      </div>
+
       <!-- Org broadcast-seat licensing — only shown to owner/admin of a real org workspace -->
       <div id="org-seats-block" style="display:none; margin-top:16px; padding-top:14px; border-top:1px solid var(--border);">
-        <h4 class="section-title" style="font-size:13px;">Broadcast Suite Producers</h4>
+        <h4 class="section-title" style="font-size:13px;">Organization Members</h4>
         <p class="section-desc" id="org-seats-limit"></p>
         <div style="display:grid; grid-template-columns:1fr 140px auto; gap:8px; margin:10px 0; align-items:end;">
           <div class="field-row" style="margin:0;">
@@ -8770,6 +8876,15 @@ PacketSendRate=10</pre>
              gear opens its options (title/timer/side). "reorder" drags chips into any order. -->
         <div class="qrail-group qk-grp">
           <div class="qrail-label">Put On Air <span class="qrail-sub"><a href="#" id="qk-put-reorder" title="Drag chips into a custom order">reorder</a> &middot; <a href="#" id="qk-clear-all" title="Clear every on-air graphic">clear all</a></span></div>
+          <!-- Team target bar — which side the team graphics (Winner, Line-up) fill in. Sets both
+               side pickers at once; a colored dot on each team chip mirrors the choice. -->
+          <div class="qk-teamtarget" id="qk-teamtarget">
+            <span class="qk-tt-lbl" title="Which team the team-specific graphics (Winner, Line-up) fill in">Team graphics fill</span>
+            <div class="qk-tt-seg">
+              <button type="button" class="qk-tt-btn" data-ttside="blue"><span class="qk-tt-dot"></span><span class="qk-tt-name">Blue</span></button>
+              <button type="button" class="qk-tt-btn" data-ttside="orange"><span class="qk-tt-dot"></span><span class="qk-tt-name">Orange</span></button>
+            </div>
+          </div>
           <div class="qk-put" id="qk-put"></div>
         </div>
 
@@ -8825,7 +8940,7 @@ PacketSendRate=10</pre>
         </div>
       </div>
 
-      <!-- ── REPLAY: buffer status/toggle + save + latest clips to air (settings live on the REPLAYS page) ── -->
+      <!-- ── REPLAY: buffer status/toggle + save + latest clips to air (settings live on the Video Editor page) ── -->
       <div class="qrail-panel" data-qpanel="replay">
         <div class="qrail-group">
           <div class="qrail-label">Replay Buffer <span class="dmobs-pill" id="qr-buffer-pill">Buffer Off</span></div>
@@ -8844,7 +8959,7 @@ PacketSendRate=10</pre>
           </div>
           <div class="qr-sub" data-qrsub="clips">
             <div id="qr-clip-list" class="qr-clip-list"></div>
-            <div class="field-hint" style="margin:0;">Scene, transition and return-scene settings come from the REPLAYS page. Edit opens the full Video Editor in a popup for quick trims before pushing live.</div>
+            <div class="field-hint" style="margin:0;">Scene, transition and return-scene settings come from the Video Editor page. Edit opens the full Video Editor in a popup for quick trims before pushing live.</div>
           </div>
           <div class="qr-sub" data-qrsub="twitch" style="display:none;">
             <div class="qt-act"><button type="button" class="btn btn-secondary btn-sm" id="qr-tw-load">Load Twitch clips</button></div>
@@ -8853,7 +8968,7 @@ PacketSendRate=10</pre>
           </div>
           <div class="qr-sub" data-qrsub="playlists" style="display:none;">
             <div id="qr-pl-list" class="qr-clip-list"></div>
-            <div class="field-hint" style="margin:0;">Build and encode playlists on the REPLAYS page; Ready playlists play on the program bus.</div>
+            <div class="field-hint" style="margin:0;">Build and encode playlists on the Video Editor page; Ready playlists play on the program bus.</div>
           </div>
         </div>
       </div>
@@ -9354,7 +9469,7 @@ PacketSendRate=10</pre>
           <select id="bug-category" class="input-select">
             <option value="">— Pick area —</option>
             <option>Dashboard</option><option>Overlays / HUD</option><option>OBS / Scenes</option>
-            <option>Replays</option><option>Camera Feeds</option><option>Bracket / Events</option>
+            <option>Video Editor</option><option>Camera Feeds</option><option>Bracket / Events</option>
             <option>Teams / Players</option><option>Stats</option><option>start.gg</option>
             <option>Twitch</option><option>UI / Layout</option><option>Other</option>
           </select>
@@ -9432,10 +9547,10 @@ PacketSendRate=10</pre>
   </div>
 </div>
 
-<!-- Quick-edit popup: the Video Editor pane (#clip-preview-card, defined inside the REPLAYS tab)
+<!-- Quick-edit popup: the Video Editor pane (#clip-preview-card, defined inside the Video Editor tab)
      gets physically relocated in here on open and returned on close — see qrOpenClipEditor/
      qrCloseClipEditor in app.js. Lives at the top level (NOT inside #tab-replays-content, which
-     is `display:none` whenever the REPLAYS tab isn't active) so the quickbar's REPLAY panel can
+     is `display:none` whenever the Video Editor tab isn't active) so the quickbar's REPLAY panel can
      open it from any tab. -->
 <div class="mp-modal" id="qr-edit-modal" style="display:none;">
   <div class="gfx-popout-box">
