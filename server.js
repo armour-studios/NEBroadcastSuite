@@ -2163,13 +2163,19 @@ function buildShowStateForCloud() {
   const b = (state.teams && state.teams.blue) || {};
   const o = (state.teams && state.teams.orange) || {};
   const br = state.breakScreen || {};
+  // Rosters ride along (names only) so the website's PLAYER join pages can offer
+  // "which team are you on → which player are you" straight from the ACTIVE match.
+  const roster = (t) => (Array.isArray(t.players) ? t.players : [])
+    .map((p) => ({ name: (p && p.name ? String(p.name) : '').trim() }))
+    .filter((p) => p.name)
+    .slice(0, 12);
   return {
     eventName: state.eventName || '',
     roundLabel: state.roundLabel || '',
     gameLabel: state.gameLabel || '',
     teams: {
-      a: { name: b.name || '', score: Number(b.score) || 0 },
-      b: { name: o.name || '', score: Number(o.score) || 0 }
+      a: { name: b.name || '', score: Number(b.score) || 0, players: roster(b) },
+      b: { name: o.name || '', score: Number(o.score) || 0, players: roster(o) }
     },
     bestOf: state.bestOf || null,
     gfxActive: state.gfxActive || '',
