@@ -1957,12 +1957,24 @@ async function stationAutoSync() {
     if (!Array.isArray(state.casters.lineup)) state.casters.lineup = [];
     let changed = false;
     for (const f of casters) {
+      const nm = (f.personName || '').trim();
+      const key = nm.toLowerCase();
       let entry = state.casters.library.find((c) => c && (c.camUrl === f.obsViewUrl || c.vdoOverride === f.obsViewUrl));
+      if (!entry && key) {
+        // SAME PERSON already in the library (added via Crew/DCC/Show Deck)? Adopt that entry
+        // and point it at the station feed instead of creating a name-twin — duplicates made
+        // the Show Deck/DCC (which resolve by NAME) and auto-fill (which resolved by URL)
+        // fight over two records of one caster, and castercam went dark whenever the twin
+        // without the feed URL won a slot. An explicit vdoOverride still wins untouched.
+        entry = state.casters.library.find((c) => c && ((c.name || '').toLowerCase() === key || (c.handle || '').toLowerCase() === key));
+        if (entry && !entry.vdoOverride && entry.camUrl !== f.obsViewUrl) {
+          entry.camUrl = f.obsViewUrl;
+          changed = true;
+        }
+      }
       if (!entry) {
         // Crew twin: the join page offers crew profiles by name, so a name match means that
         // crew member checked in (mark on shift); an unknown name gets a fresh crew profile.
-        const nm = (f.personName || '').trim();
-        const key = nm.toLowerCase();
         if (!Array.isArray(state.crew)) state.crew = [];
         let cm = key ? state.crew.find((c) => c && ((c.name || '').toLowerCase() === key || (c.handle || '').toLowerCase() === key)) : null;
         if (!cm && nm) {
@@ -1980,6 +1992,23 @@ async function stationAutoSync() {
         };
         state.casters.library.push(entry);
         changed = true;
+      } else if (key) {
+        // Adopted or URL-matched entry: still mark the crew twin on shift for the Show Deck.
+        const cm = (state.crew || []).find((c) => c && ((c.name || '').toLowerCase() === key || (c.handle || '').toLowerCase() === key));
+        if (cm && (!cm.active || !cm.workedEvent)) { cm.active = true; cm.workedEvent = true; changed = true; }
+      }
+      // Heal twins earlier passes already created (same person, auto-created cs_ id, same feed):
+      // merge them into the surviving entry and re-point any desk slots they held.
+      if (key) {
+        const twinIds = new Set(state.casters.library
+          .filter((c) => c && c !== entry && String(c.id || '').startsWith('cs_')
+            && (c.name || '').toLowerCase() === key && c.camUrl === f.obsViewUrl)
+          .map((c) => c.id));
+        if (twinIds.size) {
+          state.casters.library = state.casters.library.filter((c) => !twinIds.has(c.id));
+          (state.casters.lineup || []).forEach((l) => { if (l && twinIds.has(l.libraryId)) { l.libraryId = entry.id; l.streamId = entry.id; } });
+          changed = true;
+        }
       }
       const targetSlot = (Number(f.idx) || 0) + 1;
       if (targetSlot >= 1 && targetSlot <= 4) {
