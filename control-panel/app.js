@@ -68,34 +68,25 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     // pane while Production is active, then returned so they stay in the customize system.
     if (tab === 'produccion') _returnGraphicsToProd();
     else _borrowGraphicsToDash();
-    // Show Deck: one element shared between the Talent page and the Dashboard (above the Talent
-    // Monitor). Lend it to the grid on the Dashboard, return it to the Talent page otherwise.
+    // Show Deck: one element, canonical home is the DCC's Show Deck tab (inside the Talent
+    // Monitor widget); it's only lent out to the Talent page. See placeShowDeck.
     placeShowDeck(tab);
   });
 });
 
-// The Show Deck (#talent-deck) is a dashboard widget (id 'showdeck') AND the Talent page's allocation
-// strip. Those pages are never visible together, so the single element is moved: into #dash-grid when
-// the Dashboard (principal) is open — ordered above the Talent Monitor via the widget config — and back
-// to #talent-showdeck-home on the Talent page (or any other tab) so that page keeps it.
+// The Show Deck (#talent-deck) is the DCC's main page (Show Deck tab) AND the Talent page's
+// allocation strip. Its canonical home is INSIDE the DCC (#dcc-showdeck-home) — the DCC widget sits
+// in the dashboard grid, so the deck rides along there; it is only lent out to the Talent page
+// (#talent-showdeck-home). It is deliberately NOT its own dashboard widget anymore: when it was, it
+// rendered as a standalone grid section AND the DCC's Show Deck tab claimed it, and the deck
+// visibly jumped between the two homes depending on which code path last ran.
 function placeShowDeck(tab) {
   const sd = el('talent-deck'); if (!sd) return;
-  if (tab === 'principal') {
-    const g = el('dash-grid');
-    if (g && sd.parentElement !== g) g.appendChild(sd);
-    if (typeof applyDashLayout === 'function') applyDashLayout();
-  } else if (tab === 'facecams') {
-    // Camera Feeds: the deck IS the DCC's main page (Show Deck tab) — lend it there.
-    const dccHome = el('dcc-showdeck-home');
-    if (dccHome && sd.parentElement !== dccHome) dccHome.appendChild(sd);
-    sd.style.display = ''; sd.style.order = '';
-  } else {
-    const home = el('talent-showdeck-home');
-    if (home && sd.parentElement !== home) home.appendChild(sd);
-    // Dashboard customize can hide/reorder the widget via inline styles — clear them so the Talent
-    // page always shows the deck in its normal spot regardless of the dashboard toggle.
-    sd.style.display = ''; sd.style.order = '';
-  }
+  const home = (tab === 'principal' || tab === 'facecams') ? el('dcc-showdeck-home') : el('talent-showdeck-home');
+  if (home && sd.parentElement !== home) home.appendChild(sd);
+  // The retired 'showdeck' dashboard widget could have stamped hide/reorder inline styles — clear
+  // them so the deck always shows in whichever home it's parked in.
+  sd.style.display = ''; sd.style.order = '';
 }
 
 // ── DCC: Director Control Center — flat nav (Monitor | Players | Hosts | Teams+OOS) ──
@@ -4533,8 +4524,8 @@ if (_popoutPage === 'triggers') {
       if (wasScenes && typeof window._assetsShow === 'function') window._assetsShow('overlays');
       if (wasBrands && typeof window._assetsShow === 'function') window._assetsShow('profiles');
     } else if (typeof placeShowDeck === 'function') {
-      // Dashboard is the active tab on load but no tab-button click fires for it — lend the Show
-      // Deck into the grid now so it shows above the Talent Monitor on first paint.
+      // Dashboard is the active tab on load but no tab-button click fires for it — park the Show
+      // Deck in the DCC's Show Deck tab now so it's there on first paint.
       placeShowDeck('principal');
     }
   });
@@ -14496,8 +14487,10 @@ const DASH_WIDGETS = [
   { id: 'graphics', title: 'Graphics',       icon: 'sparkles',   desc: 'Full graphics hub — scenes, preview and settings',  sel: '[data-dash-id="graphics"]', defaultOn: true,  span: 'full', fixedSpan: 'full' },
   { id: 'onair',    title: 'On Air',         icon: 'zap',        desc: 'Quick-toggle card grid for all overlays',           sel: '[data-dash-id="onair"]',    defaultOn: false, span: 'full' },
   { id: 'adslots',  title: 'Ad Slots',       icon: 'film',       desc: 'Sponsor ad slots and commercial break controls',    sel: '[data-dash-id="adslots"]',  defaultOn: true,  span: 'full' },
-  { id: 'showdeck', title: 'Show Deck',      icon: 'mic',        desc: "Tonight's desk lineup — caster slots, on-shift crew, saved shifts (shared with the Talent page)", sel: '[data-dash-id="showdeck"]', defaultOn: true,  span: 'full', fixedSpan: 'full' },
-  { id: 'director', title: 'Talent Monitor', icon: 'zap',        desc: 'Live VDO talent monitor — rooms, transfers, staging (the AI director lives in Production, NEURAL AI)', sel: '[data-dash-id="director"]', defaultOn: true,  span: 'full' },
+  // 'showdeck' retired as a standalone widget — the Show Deck lives INSIDE the Talent Monitor
+  // (DCC ▸ Show Deck tab) now; see placeShowDeck. Old saved configs may still carry a 'showdeck'
+  // panel entry; getDashPanel() returns undefined for it and applyDashLayout skips it.
+  { id: 'director', title: 'Talent Monitor', icon: 'zap',        desc: 'Live VDO talent monitor — Show Deck lineup, players, room monitoring (the AI director lives in Production, NEURAL AI)', sel: '[data-dash-id="director"]', defaultOn: true,  span: 'full' },
   { id: 'series',   title: 'Series',         icon: 'trophy',     desc: 'Best-of series scoreboard and match history',     sel: '[data-dash-id="series"]',   defaultOn: false, span: '1'    },
   { id: 'talent',   title: 'Talent',         icon: 'mic',        desc: 'On-air talent, camera feeds and VDO rooms',      sel: '[data-dash-id="talent"]',   defaultOn: false, span: '1'    },
   { id: 'casters',  title: 'Caster Desk',    icon: 'headphones', desc: 'Caster names, social handles and desk layout',   sel: '[data-dash-id="casters"]',  defaultOn: false, span: '1'    },
@@ -14539,17 +14532,6 @@ function applyDashLayout() {
       cfg.panels.splice(oi, 0, gp);
     }
     cfg._gfxMigrated = true;
-    setDashCfg(cfg);
-  }
-  // One-time: drop the new Show Deck widget in right above the Talent Monitor for existing users
-  // (fresh configs already get it in order from DASH_WIDGETS).
-  if (!cfg._showdeckMigrated) {
-    if (!cfg.panels.find((p) => p.id === 'showdeck')) {
-      const di = cfg.panels.findIndex((p) => p.id === 'director');
-      const entry = { id: 'showdeck', on: true, span: 'full' };
-      if (di >= 0) cfg.panels.splice(di, 0, entry); else cfg.panels.push(entry);
-    }
-    cfg._showdeckMigrated = true;
     setDashCfg(cfg);
   }
 

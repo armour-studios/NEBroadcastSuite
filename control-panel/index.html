@@ -1654,8 +1654,8 @@
       <!-- ════ DATABASE MODE ════ -->
       <div id="dcc-database-view" style="display:none;">
 
-        <!-- SHOW DECK pane — the deck element (#talent-deck) is moved in here while the Camera
-             Feeds page is open (see placeShowDeck): allocation, station-room monitors and shift
+        <!-- SHOW DECK pane — the deck element's (#talent-deck) canonical home (see placeShowDeck;
+             only the Talent page borrows it away): allocation, station-room monitors and shift
              credits, all as the DCC's main page. -->
         <div class="dcc-db-pane" id="dcc-db-showdeck" data-role="showdeck" style="display:none;">
           <div id="dcc-showdeck-home"></div>
@@ -2499,12 +2499,13 @@
     </div>
   </div>
 
-  <!-- ── Show Deck: tonight's allocation — visible on every Talent sub-tab AND lent to the Dashboard
-       above the Talent Monitor (data-dash-id="showdeck"; the single element is moved between here and
-       #dash-grid on page switch — see placeShowDeck). Caster slots drive the desk lineup + DCC;
-       Host/Observer are show roles; On-shift chips mark who is actively working right now. ── -->
+  <!-- ── Show Deck: tonight's allocation — visible on every Talent sub-tab; its canonical home is
+       the DCC's Show Deck tab (#dcc-showdeck-home inside the Talent Monitor widget) and it is lent
+       back here while the Talent page is open (see placeShowDeck; it is NOT a dashboard widget of
+       its own). Caster slots drive the desk lineup + DCC; Host/Observer are show roles; On-shift
+       chips mark who is actively working right now. ── -->
   <div id="talent-showdeck-home">
-  <div class="talent-deck" id="talent-deck" data-dash-id="showdeck" data-dash-span="full">
+  <div class="talent-deck" id="talent-deck">
     <div class="td-head">
       <div class="td-head-titles">
         <span class="td-title">Show Deck</span>
