@@ -2064,12 +2064,15 @@ async function stationAutoSync() {
         if (occupant && occupant.libraryId !== entry.id) {
           const occEntry = state.casters.library.find((c) => c && c.id === occupant.libraryId);
           const occUrl = (occEntry && occEntry.camUrl) || '';
-          const isStaleAuto = occEntry && String(occEntry.id || '').startsWith('cs_')
-            && /vdo\.ninja\/\?/.test(occUrl) && occUrl.includes('view=') && !liveUrls.has(occUrl);
+          // Stale = an auto-created entry whose station feed is dead, OR a GHOST — a lineup
+          // ref whose library entry no longer exists at all (deleted caster). Ghosts rendered
+          // as an empty nameless slot with a dead room URL and blocked the slot forever.
+          const isStaleAuto = !occEntry || (String(occEntry.id || '').startsWith('cs_')
+            && /vdo\.ninja\/\?/.test(occUrl) && occUrl.includes('view=') && !liveUrls.has(occUrl));
           if (isStaleAuto) {
             state.casters.lineup = state.casters.lineup.filter((l) => l !== occupant);
             changed = true;
-            console.log('[Stations] Displaced stale auto-filled occupant from desk slot', targetSlot);
+            console.log('[Stations] Displaced ' + (occEntry ? 'stale auto-filled' : 'GHOST') + ' occupant from desk slot', targetSlot);
           }
         }
         const occupied = state.casters.lineup.some((l) => l && Number(l.slot) === targetSlot);
@@ -12139,8 +12142,16 @@ function handleControlMessage(msg, ws) {
     }
     case 'delete_caster_from_library': {
       if (Array.isArray(state.casters.library)) {
-        state.casters.library = state.casters.library.filter((c) => c.id !== msg.data?.id);
-        resolveLineupToList();   // remove stale list entries for deleted caster
+        const deadId = msg.data?.id;
+        state.casters.library = state.casters.library.filter((c) => c.id !== deadId);
+        // Purge the desk-lineup ref too — a lineup entry pointing at a deleted library id was
+        // a GHOST: it rendered an empty nameless slot with a dead room URL and permanently
+        // blocked that slot against station auto-fill.
+        if (Array.isArray(state.casters.lineup)) {
+          state.casters.lineup = state.casters.lineup.filter((l) => !l || l.libraryId !== deadId);
+        }
+        if ((state.casters.lineup || []).length) resolveLineupToList();
+        else state.casters.list = [];
         saveAppState();
         broadcastFullState();
       }
