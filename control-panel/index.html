@@ -1585,11 +1585,11 @@
 
       <!-- Tab bar -->
       <div class="dcc-bar">
-        <button class="dcc-role-tab active" data-dcrole="monitor">Monitor</button>
+        <!-- Show Deck IS the DCC's main page; Hosts/Lobby/Staging retired (the website invite
+             system + crew database replaced them — their panes remain in the DOM, unreachable). -->
+        <button class="dcc-role-tab active" data-dcrole="showdeck">Show Deck</button>
         <button class="dcc-role-tab" data-dcrole="players">Players</button>
-        <button class="dcc-role-tab" data-dcrole="hosts">Hosts</button>
-        <button class="dcc-role-tab" data-dcrole="lobby">Lobby</button>
-        <button class="dcc-role-tab" data-dcrole="staging">Staging</button>
+        <button class="dcc-role-tab" data-dcrole="monitor">Monitor</button>
         <div class="dcc-bar-gap"></div>
         <span class="dcc-bar-title"><span class="dcc-mon-dot" id="dcc-mon-status-dot" title="Monitoring status"></span>Talent Monitor</span>
         <button class="dcc-bar-icon-btn" id="dcc-refresh-btn" title="Refresh talent and connection status">
@@ -1602,6 +1602,10 @@
 
       <!-- ════ MONITOR MODE ════ -->
       <div class="dcc-monitor" id="dcc-monitor-view">
+        <!-- WEBSITE station rooms — director consoles for the rooms casters actually joined via
+             the invite system. Rendered by renderDccStationMonitors when the app is bound to a
+             station; the legacy own-room monitors below remain for non-station workflows. -->
+        <div id="dcc-station-monitors" style="display:none;"></div>
 
         <!-- Left: VDO audio + video console -->
         <div class="dcc-vdo-col">
@@ -1651,6 +1655,13 @@
 
       <!-- ════ DATABASE MODE ════ -->
       <div id="dcc-database-view" style="display:none;">
+
+        <!-- SHOW DECK pane — the deck element (#talent-deck) is moved in here while the Camera
+             Feeds page is open (see placeShowDeck): allocation, station-room monitors and shift
+             credits, all as the DCC's main page. -->
+        <div class="dcc-db-pane" id="dcc-db-showdeck" data-role="showdeck" style="display:none;">
+          <div id="dcc-showdeck-home"></div>
+        </div>
 
         <!-- PLAYERS pane: active team players only -->
         <div class="dcc-db-pane active" id="dcc-db-players" data-role="players">
