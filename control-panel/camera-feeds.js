@@ -3,7 +3,7 @@
    Match Control team cards, listen-in pill, VDO.ninja settings + view/push
    link builders, talent group cards, gameplay screenshare + stream stations).
    Extracted verbatim from app.js (2026-07). Loads after app.js; inbound calls
-   (cfShowSubtab/cfUpdateListenPill/cfLoadGroups/cfLoadTalent/renderCfStations/
+   (cfShowSubtab/cfUpdateListenPill/cfLoadGroups/cfLoadTalent/renderCfStreamStations/
    …) are all runtime, typeof-guarded at the prominent sites. tlEsc stays in
    app.js (shared alias used by app.js + seeding-spotlight.js). */
 
@@ -16,7 +16,8 @@ function cfShowSubtab(cf) {
   document.querySelectorAll('#cf-subnav .cf-tab').forEach((b) => b.classList.toggle('active', b.dataset.cf === cf));
   document.querySelectorAll('#tab-facecams-content .cf-panel').forEach((p) => p.classList.toggle('active', p.id === 'cf-panel-' + cf));
   if (cf === 'talent') cfLoadTalent();
-  if (cf === 'gameplay') { renderCfShares(); renderCfStations(currentState); }
+  if (cf === 'gameplay') { renderCfShares(); renderCfStreamStations(currentState); }
+  if (cf === 'stations') cfLoadStations();
   try { localStorage.setItem('cf_active_subtab', cf); } catch (_) {}
 }
 document.querySelectorAll('#cf-subnav .cf-tab').forEach((btn) => {
@@ -279,6 +280,19 @@ function cfDirectorConsoles() {
   [['casters', 'HOSTS', '#e83a8b'], ['observers', 'OBSERVERS', '#2dd4bf'], ['guests', 'LOBBY', '#a855f7']].forEach(([k, label, color]) => {
     const g = G[k];
     if (g && g.room && g.directorUrl) out.push({ key: k, label, color, room: g.room, url: g.directorUrl, kind: 'group' });
+  });
+  // WEBSITE station rooms — the rooms the invite system actually fills. First-class console
+  // tabs (full-width, same top toggles, same talent sidebar) pointed at the bound station.
+  const stRooms = (window._cfStationDetail && window._cfStationDetail.rooms) || [];
+  stRooms.forEach((r) => {
+    if (r && r.monitorUrl) out.push({
+      key: 'station_' + r.id,
+      label: (r.name || (r.kind === 'observer' ? 'Observer feeds' : 'Caster room')).toUpperCase(),
+      color: r.kind === 'observer' ? '#2dd4bf' : '#8b5cf6',
+      room: 'st_' + r.id,
+      url: r.monitorUrl,
+      kind: 'station'
+    });
   });
   // Deduplicate by room ID — casterRoom and groups.casters often share the same VDO room.
   const seen = new Set();
@@ -1565,8 +1579,12 @@ el('cf-share-create')?.addEventListener('click', () => {
 
 // ── Gameplay: stream stations (start.gg) + station mini-HUD links ──
 let _cfStationsSig = '';
-function renderCfStations(data) {
+// start.gg STREAM stations (gameplay subtab). Renamed from renderCfStations to avoid colliding with
+// app.js's renderCfStations (the website-Stations → Caster Library bridge, a different feature that
+// the render loop calls no-arg — the collision crashed on `data.startgg` when called without data).
+function renderCfStreamStations(data) {
   const wrap = el('cf-stations'); if (!wrap) return;
+  data = data || (typeof currentState !== 'undefined' ? currentState : null) || {};
   const sg = data.startgg || {};
   const streams = sg.streams || [];
   const queue = sg.queue || [];
@@ -1599,4 +1617,120 @@ function renderCfStations(data) {
 
 cfLoadVdoSettings();
 renderCfShares();
+
+// ══════════════ Stations manager — org broadcast desks, full CRUD from the app ══════════════
+// Data comes from cloud_stations_full (the website's GET /stations, rooms→slots nested). Every
+// mutation is a fire-and-forget WS message; the server re-fetches + re-pushes the list, so the UI
+// always mirrors the org. Renames/toggles commit on blur (change event); Enter blurs.
+let _cfStationsFull = null;
+function cfLoadStations() {
+  const wrap = el('cf-stations-list'); if (!wrap) return;
+  const isOrg = !!(window._cloudWorkspaceId && !String(window._cloudWorkspaceId).startsWith('user:'));
+  if (!isOrg) { wrap.innerHTML = '<p class="section-desc">Sign in to your organization (Settings ▸ Organization) to manage stations.</p>'; const cap = el('cf-stations-cap'); if (cap) cap.style.display = 'none'; return; }
+  if (!_cfStationsFull) wrap.innerHTML = '<p class="section-desc">Loading stations…</p>';
+  send('cloud_stations_full');
+}
+function cfApplyStationsFull(d) {
+  const wrap = el('cf-stations-list'); if (!wrap) return;
+  const status = el('cf-stations-status');
+  if (!d || !d.ok) { wrap.innerHTML = `<p class="section-desc">${tlEsc((d && d.message) || 'Could not load stations.')}</p>`; return; }
+  _cfStationsFull = d.stations || [];
+  const cap = el('cf-stations-cap');
+  if (cap) { if (d.seatCap != null) { cap.textContent = `${d.activeCount != null ? d.activeCount : 0} / ${d.seatCap} desks active`; cap.style.display = ''; } else cap.style.display = 'none'; }
+  if (!_cfStationsFull.length) { wrap.innerHTML = '<p class="section-desc">No stations yet. Click <strong>+ New station</strong> to create your first broadcast desk.</p>'; if (status) status.textContent = ''; return; }
+  wrap.innerHTML = _cfStationsFull.map(cfStationCard).join('');
+  if (status) status.textContent = '';
+}
+function cfFindRoom(stationId, roomId) { const s = (_cfStationsFull || []).find((x) => x.id === stationId); return s && (s.rooms || []).find((r) => r.id === roomId); }
+function cfStationCopy(text, btn) {
+  if (!text) { showToast('No link available yet — the website mints it when the room is created.', '#c53030', 4000); return; }
+  try { navigator.clipboard.writeText(text); } catch (_) {}
+  const t = btn.textContent; btn.textContent = 'Copied'; setTimeout(() => { btn.textContent = t; }, 1200);
+  showToast('Link copied: ' + text, '#22c55e', 4000);
+}
+function cfStationCard(s) {
+  const active = s.status === 'active';
+  const rooms = (s.rooms || []).map(cfRoomBlock).join('');
+  const nRooms = (s.rooms || []).length;
+  return `<div class="cf-station-mgr ${active ? 'is-active' : 'is-closed'}" data-st="${tlEsc(s.id)}">
+    <div class="cf-stm-head">
+      <span class="cf-stm-dot" title="${active ? 'Active' : 'Closed'}"></span>
+      <input class="cf-stm-name input-text" value="${tlEsc(s.name || '')}" data-act="station-name" placeholder="Station name" spellcheck="false">
+      <span class="cf-stm-meta">${nRooms} room${nRooms === 1 ? '' : 's'}</span>
+      <div class="cf-stm-tools">
+        <label class="qt-toggle cf-stm-active" title="Active desks count against your organization's seat cap"><span>${active ? 'Active' : 'Closed'}</span><span class="switch"><input type="checkbox" data-act="station-active" ${active ? 'checked' : ''}><span class="slider"></span></span></label>
+        <button class="btn btn-ghost btn-xs" data-act="room-add" data-kind="caster">+ Caster room</button>
+        <button class="btn btn-ghost btn-xs" data-act="room-add" data-kind="observer">+ Observer room</button>
+        <button class="btn btn-ghost btn-xs cf-danger" data-act="station-del" title="Delete this station">Delete</button>
+      </div>
+    </div>
+    <div class="cf-stm-rooms">${rooms || '<p class="section-desc" style="margin:6px 0 0;">No rooms yet — add a caster or observer room.</p>'}</div>
+  </div>`;
+}
+function cfRoomBlock(r) {
+  const kind = r.kind === 'observer' ? 'observer' : 'caster';
+  const slots = (r.slots || []).map((sl) => cfSlotRow(sl)).join('');
+  const nSlots = (r.slots || []).length;
+  return `<div class="cf-rm" data-rm="${tlEsc(r.id)}" data-kind="${kind}">
+    <div class="cf-rm-head">
+      <span class="cf-rm-badge ${kind}">${kind === 'observer' ? 'OBSERVER' : 'CASTER'}</span>
+      <input class="cf-rm-name input-text" value="${tlEsc(r.name || '')}" data-act="room-name" placeholder="Room name" spellcheck="false">
+      <span class="cf-rm-meta">${nSlots} slot${nSlots === 1 ? '' : 's'}</span>
+      <button class="btn btn-ghost btn-xs" data-act="room-copy" title="Copy the join link your talent open to claim a slot">Copy invite</button>
+      ${kind === 'observer' ? `<label class="qt-toggle cf-rm-share" title="Let other producers in the org pull these observer feeds"><span>Share to org</span><span class="switch"><input type="checkbox" data-act="room-share" ${r.shareToOrg ? 'checked' : ''}><span class="slider"></span></span></label>` : ''}
+      <button class="btn btn-ghost btn-xs" data-act="slot-add" title="Add a placement slot">+ Slot</button>
+      <button class="btn btn-ghost btn-xs cf-danger" data-act="room-del" title="Delete this room">Delete</button>
+    </div>
+    <div class="cf-rm-slots">${slots || '<span class="section-desc" style="padding:4px 0;">No slots — add one for a caster/observer to claim.</span>'}</div>
+  </div>`;
+}
+function cfSlotRow(sl) {
+  const who = sl.assignedName || sl.claimedLabel || '';
+  const on = sl.enabled !== false;
+  const connected = !!(sl.connected || sl.claimedLabel || sl.claimedById);
+  const num = (sl.idx != null ? sl.idx + 1 : '') || sl.label || '';
+  return `<div class="cf-slot ${on ? '' : 'is-off'} ${connected ? 'is-live' : ''}" data-slot="${tlEsc(sl.id)}">
+    <span class="cf-slot-idx" title="${tlEsc(sl.label || '')}">${tlEsc(String(num))}</span>
+    <input class="cf-slot-name input-text" value="${tlEsc(who)}" data-act="slot-name" placeholder="${tlEsc(sl.label || 'Unassigned')}" spellcheck="false">
+    ${connected ? '<span class="cf-slot-live" title="Someone is connected on this placement">LIVE</span>' : ''}
+    <label class="cf-slot-en" title="${on ? 'Enabled' : 'Disabled'}"><span class="switch sw-xs"><input type="checkbox" data-act="slot-enabled" ${on ? 'checked' : ''}><span class="slider"></span></span></label>
+    <button class="cf-ico-btn" data-act="slot-copy" title="Copy this placement's join link">\u{1F517}</button>
+    <button class="cf-ico-btn cf-danger" data-act="slot-del" title="Remove this slot">×</button>
+  </div>`;
+}
+el('cf-stations-refresh')?.addEventListener('click', () => cfLoadStations());
+el('cf-stations-new')?.addEventListener('click', () => send('cloud_station_create', { name: 'New station' }));
+el('cf-stations-list')?.addEventListener('click', async (e) => {
+  const btn = e.target.closest('button[data-act]'); if (!btn) return;
+  const act = btn.dataset.act;
+  const stationId = btn.closest('[data-st]') && btn.closest('[data-st]').dataset.st;
+  const roomId = btn.closest('[data-rm]') && btn.closest('[data-rm]').dataset.rm;
+  const slotId = btn.closest('[data-slot]') && btn.closest('[data-slot]').dataset.slot;
+  if (act === 'station-del') { if (await appConfirm('Delete this station and all its rooms? Any join links for it stop working immediately.', 'Delete Station', true)) send('cloud_station_delete', { stationId }); return; }
+  if (act === 'room-add') { send('cloud_room_create', { stationId, kind: btn.dataset.kind }); return; }
+  if (act === 'room-del') { if (await appConfirm('Delete this room and its placement slots?', 'Delete Room', true)) send('cloud_room_delete', { stationId, roomId }); return; }
+  if (act === 'room-copy') { const r = cfFindRoom(stationId, roomId); cfStationCopy(r && r.url, btn); return; }
+  if (act === 'slot-add') { send('cloud_slot_add', { stationId, roomId }); return; }
+  if (act === 'slot-del') { send('cloud_slot_delete', { stationId, roomId, slotId }); return; }
+  if (act === 'slot-copy') { const r = cfFindRoom(stationId, roomId); const sl = r && (r.slots || []).find((x) => x.id === slotId); cfStationCopy((sl && sl.customJoinUrl) || (r && r.url), btn); return; }
+});
+el('cf-stations-list')?.addEventListener('change', (e) => {
+  const ctl = e.target.closest('[data-act]'); if (!ctl) return;
+  const act = ctl.dataset.act;
+  const stationId = ctl.closest('[data-st]') && ctl.closest('[data-st]').dataset.st;
+  const roomId = ctl.closest('[data-rm]') && ctl.closest('[data-rm]').dataset.rm;
+  const slotId = ctl.closest('[data-slot]') && ctl.closest('[data-slot]').dataset.slot;
+  if (act === 'station-name') { const v = ctl.value.trim(); if (v) send('cloud_station_patch', { stationId, patch: { name: v } }); return; }
+  if (act === 'station-active') { send('cloud_station_patch', { stationId, patch: { status: ctl.checked ? 'active' : 'closed' } }); return; }
+  if (act === 'room-name') { send('cloud_room_patch', { stationId, roomId, patch: { name: ctl.value.trim() } }); return; }
+  if (act === 'room-share') { send('cloud_room_patch', { stationId, roomId, patch: { shareToOrg: ctl.checked } }); return; }
+  if (act === 'slot-name') { send('cloud_slot_patch', { stationId, roomId, slotId, patch: { assignedName: ctl.value.trim() } }); return; }
+  if (act === 'slot-enabled') { send('cloud_slot_patch', { stationId, roomId, slotId, patch: { enabled: ctl.checked } }); return; }
+});
+el('cf-stations-list')?.addEventListener('keydown', (e) => {
+  if (e.target.matches && e.target.matches('input.input-text')) {
+    if (e.key === 'Enter') { e.preventDefault(); e.target.blur(); }
+    else if (e.key === 'Escape') { cfLoadStations(); }
+  }
+});
 

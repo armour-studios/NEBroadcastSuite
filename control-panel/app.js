@@ -74,37 +74,6 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
   });
 });
 
-// WEBSITE station-room director consoles inside the DCC Monitor tab — monitoring the rooms the
-// invite system actually fills. active=false unloads the iframes (WebRTC consoles are not free).
-function renderDccStationMonitors(active) {
-  const wrap = el('dcc-station-monitors'); if (!wrap) return;
-  const rooms = ((window._cfStationDetail && window._cfStationDetail.rooms) || []).filter((r) => r && r.monitorUrl);
-  if (!active || !rooms.length) {
-    wrap.style.display = 'none';
-    wrap.querySelectorAll('iframe').forEach((f) => { f.src = 'about:blank'; });
-    return;
-  }
-  const name = (window._cfStationDetail && window._cfStationDetail.stationName) || 'Station';
-  const sig = rooms.map((r) => r.id).join('|');
-  if (wrap.dataset.sig !== sig) {
-    wrap.dataset.sig = sig;
-    wrap.innerHTML = rooms.map((r) => `
-      <div style="margin-bottom:12px;">
-        <div style="display:flex; align-items:center; gap:8px; margin-bottom:4px;">
-          <span style="font-size:10px; font-weight:800; letter-spacing:.08em; text-transform:uppercase; color:${r.kind === 'observer' ? '#2dd4bf' : '#8b5cf6'};">${r.kind === 'observer' ? 'Observer' : 'Casters'}</span>
-          <span style="font-size:12px; font-weight:700; color:var(--text);">${tlEsc(name)} — ${tlEsc(r.name)}</span>
-          <span style="font-size:11px; color:var(--muted);">${r.connected}/${r.slots} connected</span>
-        </div>
-        <iframe data-room="${tlEsc(r.id)}" allow="camera; microphone; autoplay; fullscreen; display-capture; speaker-selection" style="width:100%; height:300px; border:1px solid var(--border); border-radius:10px; background:#000;" title="${tlEsc(r.name)} monitor"></iframe>
-      </div>`).join('');
-  }
-  wrap.style.display = '';
-  rooms.forEach((r) => {
-    const f = wrap.querySelector(`iframe[data-room="${r.id}"]`);
-    if (f && (!f.src || f.src === 'about:blank')) f.src = r.monitorUrl;
-  });
-}
-
 // The Show Deck (#talent-deck) is a dashboard widget (id 'showdeck') AND the Talent page's allocation
 // strip. Those pages are never visible together, so the single element is moved: into #dash-grid when
 // the Dashboard (principal) is open — ordered above the Talent Monitor via the widget config — and back
@@ -184,9 +153,9 @@ function placeShowDeck(tab) {
     if (databaseView) databaseView.style.display = isMonitor ? 'none' : '';
     if (isMonitor) {
       if (typeof cfTalentAutoOpen === 'function') cfTalentAutoOpen();
-      if (typeof renderDccStationMonitors === 'function') renderDccStationMonitors(true);
+      // Website station rooms mount as console tabs — pick up any that appeared since.
+      if (typeof cfSyncDirectorConsoles === 'function') cfSyncDirectorConsoles();
     } else {
-      if (typeof renderDccStationMonitors === 'function') renderDccStationMonitors(false);   // unload consoles
       dbPanes.forEach((p) => {
         const show = p.dataset.role === r;
         p.classList.toggle('active', show);
@@ -25758,9 +25727,8 @@ async function connect() {
       renderCfStations();
       // The Show Deck renders the bound station's rooms (monitor/invite/talkback) — refresh it.
       if (typeof window.renderTalentDeck === 'function' && typeof currentState !== 'undefined' && currentState) window.renderTalentDeck(currentState);
-      // DCC Monitor tab shows the website rooms' director consoles — refresh when visible.
-      const _mv = el('dcc-monitor-view');
-      if (typeof renderDccStationMonitors === 'function') renderDccStationMonitors(!!(_mv && _mv.offsetParent));
+      // Website rooms are console tabs in the DCC Monitor — mount any that just appeared.
+      if (typeof cfSyncDirectorConsoles === 'function') cfSyncDirectorConsoles();
     } else if (msg.type === 'cloud_stations_full') {
       if (typeof cfApplyStationsFull === 'function') cfApplyStationsFull(msg.data);
     } else if (msg.type === 'cloud_leagues') {
