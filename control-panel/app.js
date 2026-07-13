@@ -736,18 +736,18 @@ function _pcamSources(vdo) {
 // picker handles everything else from there, exactly like a manually-added caster.
 let _cfStationsCache = [];
 function renderCfStations() {
-  const section = el('cf-stations-section');
-  const wrap = el('cf-stations-list');
-  const status = el('cf-stations-status');
+  const section = el('cf-cloudstations-section');
+  const wrap = el('cf-cloudstations-list');
+  const status = el('cf-cloudstations-status');
   if (!section || !wrap) return;
   // Auto-fill toggle mirrors server state (default on; wired once).
-  const af = el('cf-stations-autofill');
+  const af = el('cf-cloudstations-autofill');
   if (af) {
     af.checked = !(currentState && currentState.casters && currentState.casters.autoFillFromStations === false);
     if (!af._wired) { af._wired = true; af.addEventListener('change', () => send('set_station_autofill', { on: af.checked })); }
   }
   // Station binding picker — which website station THIS app follows ('' = all).
-  const bindSel = el('cf-stations-binding');
+  const bindSel = el('cf-cloudstations-binding');
   const binding = (currentState && currentState.casters && currentState.casters.stationId) || '';
   if (bindSel) {
     const stations = window._cfStationsIndex || [];
@@ -757,15 +757,55 @@ function renderCfStations() {
     if (binding && !stations.some((s) => s.id === binding)) opts.push(`<option value="${tlEsc(binding)}" selected>(bound station)</option>`);
     bindSel.innerHTML = opts.join('');
     bindSel.value = binding;
-    if (!bindSel._wired) { bindSel._wired = true; bindSel.addEventListener('change', () => send('set_station_binding', { stationId: bindSel.value })); }
+    if (!bindSel._wired) {
+      bindSel._wired = true;
+      bindSel.addEventListener('change', () => {
+        send('set_station_binding', { stationId: bindSel.value });
+        // Refresh the invite-link cockpit for the newly bound station.
+        if (window._cloudWorkspaceId) setTimeout(() => send('cloud_list_stations', { orgId: window._cloudWorkspaceId }), 400);
+      });
+    }
   }
+  // The bound station's invite-link cockpit — caster/observer room invites, producer talkback,
+  // player-camera links and team-match links, all copyable HERE (no website tab mid-show).
+  const detail = window._cfStationDetail || null;
+  const _kindColor = { observer: '#2dd4bf', camera: '#f59e0b', match: '#60a5fa' };
+  const _linkRow = (kind, badge, name, sub, buttons) =>
+    `<div class="pcam-row" style="display:flex;align-items:center;gap:10px;padding:3px 0;">
+      <span style="flex:0 0 auto;font-size:9px;font-weight:800;letter-spacing:.08em;color:${_kindColor[kind] || '#8b5cf6'};text-transform:uppercase;">${tlEsc(badge)}</span>
+      <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;font-weight:700;color:#e8eaf0;">${tlEsc(name)}
+        ${sub ? `<span style="margin-left:6px;font-size:10px;font-weight:500;color:#9090a8;">${tlEsc(sub)}</span>` : ''}
+      </span>${buttons}</div>`;
+  const _copyBtn = (url, label, title) => `<button class="btn btn-secondary btn-xs cf-station-copylink" data-url="${tlEsc(url)}" title="${tlEsc(title || url)}">${tlEsc(label)}</button>`;
+  let detailHtml = '';
+  if (detail) {
+    const rows = [];
+    (detail.rooms || []).forEach((r) => rows.push(_linkRow(r.kind, r.kind === 'observer' ? 'Observer' : 'Casters', r.name, `${r.connected}/${r.slots} connected`,
+      _copyBtn(r.inviteUrl, 'Copy invite', 'The one link casters/observers use to check in')
+      + (r.kind === 'caster' ? ' ' + _copyBtn(r.talkbackUrl, 'Talkback', 'Join this room yourself without taking a placement') : ''))));
+    (detail.cameras || []).forEach((c) => rows.push(_linkRow('camera', 'Players', c.name, `${c.slots} slots`,
+      _copyBtn(c.shareUrl, 'Copy player link', 'Players claim their camera slot on this link'))));
+    (detail.matches || []).forEach((m) => rows.push(_linkRow('match', 'Match', m.label, '',
+      _copyBtn(m.joinUrl, 'Copy join', 'One link for both teams') + ' ' + _copyBtn(m.matchUrl, 'Monitor', 'Producer monitor + slot assignments'))));
+    if (rows.length) {
+      detailHtml = `<div style="margin-bottom:8px;">
+        <div style="font-size:10px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:#9090a8;margin-bottom:2px;">${tlEsc(detail.stationName || 'Station')} — invite links</div>
+        ${rows.join('')}</div>`;
+    }
+  }
+  const _wireCopyLinks = () => wrap.querySelectorAll('.cf-station-copylink').forEach((btn) => btn.addEventListener('click', () => {
+    if (navigator.clipboard) navigator.clipboard.writeText(btn.dataset.url).then(() => showToast('Link copied.', '#22c55e', 2000));
+  }));
   // Bound station → only ITS feeds show/fill here; the section stays visible while bound
   // (even with zero feeds yet) so the binding is never invisible.
   const allFeeds = _cfStationsCache || [];
   const feeds = binding ? allFeeds.filter((f) => f && f.stationId === binding) : allFeeds;
-  section.style.display = (feeds.length || binding || (window._cfStationsIndex || []).length) ? '' : 'none';
+  // Show for any org-connected app (even with zero feeds) so the "+ … link" generators are reachable.
+  const isOrgConnected = !!(window._cloudWorkspaceId && !String(window._cloudWorkspaceId).startsWith('user:'));
+  section.style.display = (feeds.length || binding || isOrgConnected || (window._cfStationsIndex || []).length) ? '' : 'none';
   if (!feeds.length) {
-    wrap.innerHTML = '';
+    wrap.innerHTML = detailHtml;
+    _wireCopyLinks();
     if (status) status.textContent = binding ? 'No one from this station has checked in yet — feeds appear here (and auto-fill the desk) as casters claim their slots.' : '';
     return;
   }
@@ -775,7 +815,7 @@ function renderCfStations() {
   const slotLabels = (currentState && currentState.casters && currentState.casters.slotLabels) || {};
   const inLibrary = (url) => lib.some((c) => (c.camUrl || c.vdoOverride) === url);
 
-  wrap.innerHTML = feeds.map((f, i) => {
+  wrap.innerHTML = detailHtml + feeds.map((f, i) => {
     const already = inLibrary(f.obsViewUrl);
     const kindLabel = f.kind === 'caster' ? 'Caster' : 'Observer';
     return `<div class="pcam-row" style="display:flex;align-items:center;gap:10px;padding:3px 0;">
@@ -791,9 +831,20 @@ function renderCfStations() {
     </div>`;
   }).join('');
 
-  wrap.querySelectorAll('.cf-station-add-caster').forEach((btn) => btn.addEventListener('click', () => {
+  wrap.querySelectorAll('.cf-station-add-caster').forEach((btn) => btn.addEventListener('click', async () => {
     const f = feeds[Number(btn.dataset.idx)];
     if (!f) return;
+    // Only offer to auto-assign the lineup slot when it's free — never bump whoever's already
+    // on air. Going live is the one part of this action that needs an explicit yes: adding to
+    // the library is just data entry, but this slot being free means clicking through puts
+    // someone on the broadcast immediately with no other cue that just happened.
+    const targetSlot = (Number(f.idx) || 0) + 1;
+    const occupied = lineup.some((l) => l.slot === targetSlot);
+    const canGoLive = !occupied && targetSlot >= 1 && targetSlot <= 4;
+    if (canGoLive) {
+      const ok = await appConfirm(`Put ${f.personName} on air now as ${slotLabels[targetSlot] || ('Caster ' + targetSlot)}?`, 'Go Live', false);
+      if (!ok) return;
+    }
     const id = 'cs_' + Math.random().toString(36).slice(2, 11);
     // Auto-link to the crew database: the join page offers crew profiles by name, so a match
     // here means "that crew member checked in" → put them on shift. No match = a new face →
@@ -805,10 +856,7 @@ function renderCfStations() {
     else if (nm) send('add_crew_member', { name: f.personName.trim(), group: 'casters', active: true });
     send('save_caster_to_library', { id, name: f.personName, kind: 'caster', camUrl: f.obsViewUrl,
       ...(cm ? { social: cm.social, socialHandle: cm.socialHandle, country: cm.country } : {}) });
-    // Only auto-assign the lineup slot when it's free — never bump whoever's already on air.
-    const targetSlot = (Number(f.idx) || 0) + 1;
-    const occupied = lineup.some((l) => l.slot === targetSlot);
-    if (!occupied && targetSlot >= 1 && targetSlot <= 4) {
+    if (canGoLive) {
       const newLineup = lineup.map((x) => ({ ...x }));
       newLineup.push({ libraryId: id, slot: targetSlot, roomId: '', streamId: id });
       send('set_caster_lineup', { lineup: newLineup });
@@ -821,6 +869,7 @@ function renderCfStations() {
     const f = feeds[Number(btn.dataset.idx)];
     if (f && navigator.clipboard) navigator.clipboard.writeText(f.obsViewUrl).then(() => showToast('OBS URL copied.', '#22c55e', 2000));
   }));
+  _wireCopyLinks();
 }
 // In-game names: live RL feed → live CS2 feed → match rosters as a fallback.
 function _pcamRows() {
@@ -4222,8 +4271,9 @@ function _returnGraphicsToProd() {
   const aiTab = qtab('ai'), flowsTab0 = qtab('flows');
   if (aiTab) { const adot = document.getElementById('qrail-ai-dot'); if (adot && flowsTab0) flowsTab0.appendChild(adot); aiTab.remove(); }
 
-  // 7) Final 6-tab identity: AIR · NEXT · TALENT · AUTO · STREAM · NOTES.
-  //    Icon-only strip; each tab gets a floating label pill (shown on hover / when active).
+  // 7) Final tab identity: AIR · NEXT · TALENT · AUTO · REPLAY · STREAM · NOTES.
+  //    Icon strip; each tab gets a persistent caption under its icon (not hover-only —
+  //    icon-only nav was confusing for new users).
   const setLabel = (t, txt, title) => {
     const b = qtab(t); if (!b) return;
     let l = b.querySelector('.qrail-tab-label');
@@ -4234,6 +4284,7 @@ function _returnGraphicsToProd() {
   setLabel('ros',    'Next',   'Next — run of show & stream queue');
   setLabel('talent', 'Talent', 'Talent — cams, listen-in & interviews');
   setLabel('flows',  'Auto',   'Auto — flows & Neural AI director');
+  setLabel('replay', 'Replay', 'Replay — save the buffer & push clips to air');
   setLabel('twitch', 'Stream', 'Stream — title, chat, activity & predictions');
   setLabel('notes',  'Notes',  'Notes — producer notes');
 
@@ -4456,7 +4507,7 @@ function setQrailExpandedW(px, persist) {
 function qrailCollapse() {
   const shell = el('app-shell');
   shell.classList.add('qrail-collapsed');
-  document.documentElement.style.setProperty('--qrail-w', '52px');
+  document.documentElement.style.setProperty('--qrail-w', '58px');
   // Clear active tab highlight — no panel is open.
   document.querySelectorAll('#qrail-tabs .qrail-tab').forEach((b) => b.classList.remove('active'));
 }
@@ -4906,7 +4957,10 @@ el('ddd-roles')?.addEventListener('click', () => {
   toggleDiscordDropdown(false);
   document.getElementById('tab-roles')?.click();
 });
-el('ddd-logout')?.addEventListener('click', discordLogout);
+el('ddd-logout')?.addEventListener('click', async () => {
+  const ok = await appConfirm('Sign out of Discord? Signing back in is required before the app is usable again, including mid-broadcast.', 'Sign Out');
+  if (ok) discordLogout();
+});
 
 // Roles page login button mirrors header login
 el('roles-discord-login-btn')?.addEventListener('click', discordLogin);
@@ -6289,6 +6343,7 @@ function applyState(data) {
   // Saved teams dropdowns + list (picker = saved library + seeded start.gg event teams)
   populateSavedTeamsDropdowns();
   renderTeamsList(data.savedTeams || []);
+  if (typeof renderOrgLibraryStatus === 'function' && el('org-library-block') && el('org-library-block').style.display !== 'none') renderOrgLibraryStatus();
 
   // start.gg event teams (transient — inside Import modal)
   renderStartggTeams(data.startgg?.eventTeams || [], data.startgg?.selectedEvent || null);
@@ -7630,7 +7685,7 @@ function renderTeamsList(teams) {
   // Only rebuild the DOM when the data actually changes — this list can hold hundreds of
   // start.gg-imported teams, and rebuilding it on every full_state was the freeze. Use a CHEAP
   // Include favorite in the signature so cards re-render when fav status changes.
-  const sig = teams.map((t) => (t.name || '') + '|' + (t.logo ? t.logo.length : 0) + '|' + (t.favorite ? '1' : '0') + '|' + (t.color || '') + '|' + (t.players || []).length).join('~');
+  const sig = teams.map((t) => (t.name || '') + '|' + (t.logo ? t.logo.length : 0) + '|' + (t.favorite ? '1' : '0') + '|' + (t.color || '') + '|' + (t._org ? 'o' : '') + '|' + (t.players || []).length).join('~');
   if (sig === _teamsListSig) return;
   _teamsListSig = sig;
 
@@ -7639,9 +7694,11 @@ function renderTeamsList(teams) {
   const frag = document.createDocumentFragment();
   teams.forEach((t) => {
     const card = document.createElement('div');
-    card.className = 'tc-card' + (t.favorite ? ' is-fav' : '');
+    card.className = 'tc-card' + (t.favorite ? ' is-fav' : '') + (t._org ? ' is-org' : '');
     card.dataset.name = t.name;
-    card.dataset.search = (t.name || '').toLowerCase();
+    card.dataset.origin = t._org ? 'org' : 'mine';
+    // Include the org owner in the search text so "From organization" teams surface by their producer too.
+    card.dataset.search = ((t.name || '') + ' ' + (t._org ? ('org ' + (t._orgOwner || '')) : '')).toLowerCase();
     card.style.setProperty('--team-accent', t.color || '#055fdb');
 
     const accent = document.createElement('div'); accent.className = 'tc-card-accent';
@@ -7649,44 +7706,70 @@ function renderTeamsList(teams) {
     const logo = document.createElement('img'); logo.className = 'tc-card-logo'; logo.loading = 'lazy'; logo.src = t.logo || teePlaceholder(t.name, t.color);
     const info = document.createElement('div'); info.className = 'tc-card-info';
     const nameEl = document.createElement('div'); nameEl.className = 'tc-card-name'; nameEl.textContent = t.name;
+    if (t._org) { const b = document.createElement('span'); b.className = 'tc-org-badge'; b.textContent = 'ORG'; b.title = 'From organization' + (t._orgOwner ? ' · ' + t._orgOwner : ''); nameEl.appendChild(b); }
     const meta = document.createElement('div'); meta.className = 'tc-card-meta';
     const np = (t.players || []).filter((p) => p && (p.name || '').trim()).length;
-    meta.textContent = np ? np + (np === 1 ? ' player' : ' players') : 'No roster';
+    meta.textContent = (t._org ? 'From ' + (t._orgOwner || 'organization') + ' · ' : '') + (np ? np + (np === 1 ? ' player' : ' players') : 'No roster');
     info.append(nameEl, meta);
     body.append(logo, info);
 
     const footer = document.createElement('div'); footer.className = 'tc-card-footer';
     const favBtn = document.createElement('button'); favBtn.className = 'tc-fav' + (t.favorite ? ' is-fav' : ''); favBtn.title = t.favorite ? 'Unfavorite' : 'Favorite'; favBtn.textContent = '★';
     favBtn.addEventListener('click', (e) => { e.stopPropagation(); toggleTeamFavorite(t); });
-    const editBtn = document.createElement('button'); editBtn.className = 'tc-edit'; editBtn.title = 'Edit team'; editBtn.textContent = 'Edit';
-    editBtn.addEventListener('click', (e) => { e.stopPropagation(); startEditTeam(t); });
-    const delBtn = document.createElement('button'); delBtn.className = 'tc-del'; delBtn.title = t.favorite ? 'Favorited — cannot delete' : 'Delete team'; delBtn.textContent = 'Del';
-    if (t.favorite) delBtn.disabled = true;
-    delBtn.addEventListener('click', (e) => { e.stopPropagation(); if (!t.favorite) deleteTeam(t.name); });
-    footer.append(favBtn, editBtn, delBtn);
+    if (t._org) {
+      // Org teams are read-only mirrors: you can adopt one into your own library (editing it saves a
+      // local copy the next pull won't wipe), but you can't delete another producer's team here.
+      const adoptBtn = document.createElement('button'); adoptBtn.className = 'tc-edit'; adoptBtn.title = 'Copy into my teams (makes it editable and yours)'; adoptBtn.textContent = 'Add to mine';
+      adoptBtn.addEventListener('click', (e) => { e.stopPropagation(); send('save_team', { oldName: '', name: t.name, color: t.color || '', logo: t.logo || '', players: t.players || [] }); showToast('“' + t.name + '” copied into your teams.', '#22c55e', 2500); });
+      footer.append(favBtn, adoptBtn);
+    } else {
+      const editBtn = document.createElement('button'); editBtn.className = 'tc-edit'; editBtn.title = 'Edit team'; editBtn.textContent = 'Edit';
+      editBtn.addEventListener('click', (e) => { e.stopPropagation(); startEditTeam(t); });
+      const delBtn = document.createElement('button'); delBtn.className = 'tc-del'; delBtn.title = t.favorite ? 'Favorited — cannot delete' : 'Delete team'; delBtn.textContent = 'Del';
+      if (t.favorite) delBtn.disabled = true;
+      delBtn.addEventListener('click', (e) => { e.stopPropagation(); if (!t.favorite) deleteTeam(t.name); });
+      footer.append(favBtn, editBtn, delBtn);
+    }
 
     card.append(accent, body, footer);
-    card.addEventListener('click', () => startEditTeam(t));
+    card.addEventListener('click', () => { if (t._org) return; startEditTeam(t); });
     frag.appendChild(card);
   });
   list.appendChild(frag);
   applyTeamsFilter();
 }
 
-// Keyword filter over the saved-teams list (pure show/hide — no re-render).
+// Keyword filter over the saved-teams list (pure show/hide — no re-render). Also honors the
+// origin chip (all / mine / org) so the From-organization teams can be shown on their own.
+let _teamsOriginFilter = 'all';
 function applyTeamsFilter() {
   const list = el('teams-list'); if (!list) return;
   const q = (el('teams-search')?.value || '').trim().toLowerCase();
   const items = list.querySelectorAll('.tc-card');
-  let shown = 0;
-  items.forEach((item) => { const m = !q || (item.dataset.search || '').includes(q); item.style.display = m ? '' : 'none'; if (m) shown++; });
+  let shown = 0, orgCount = 0;
+  items.forEach((item) => {
+    const isOrg = item.dataset.origin === 'org';
+    if (isOrg) orgCount++;
+    const originOk = _teamsOriginFilter === 'all' || (_teamsOriginFilter === 'org' ? isOrg : !isOrg);
+    const m = originOk && (!q || (item.dataset.search || '').includes(q));
+    item.style.display = m ? '' : 'none'; if (m) shown++;
+  });
+  // The origin chips only make sense once org teams exist — keep the row hidden for solo producers.
+  const chips = el('teams-origin-chips'); if (chips) chips.style.display = orgCount ? '' : 'none';
   const empty = el('teams-empty');
   if (empty) {
     if (items.length === 0) { empty.textContent = 'No saved teams yet — click “+ New Team” to add one, or import from start.gg.'; empty.style.display = ''; }
-    else if (q && shown === 0) { empty.textContent = 'No teams match your search.'; empty.style.display = ''; }
+    else if (shown === 0) { empty.textContent = q ? 'No teams match your search.' : 'No teams in this view.'; empty.style.display = ''; }
     else { empty.style.display = 'none'; }
   }
 }
+// Origin chip clicks (delegated; the chip row is injected next to the search box in index.html).
+document.getElementById('teams-origin-chips')?.addEventListener('click', (e) => {
+  const chip = e.target.closest('[data-teamorigin]'); if (!chip) return;
+  _teamsOriginFilter = chip.dataset.teamorigin || 'all';
+  document.querySelectorAll('#teams-origin-chips [data-teamorigin]').forEach((c) => c.classList.toggle('active', c === chip));
+  applyTeamsFilter();
+});
 el('teams-search')?.addEventListener('input', applyTeamsFilter);
 
 let _sggTeamsSig = '';
@@ -9831,7 +9914,7 @@ function applyCloudStatus(s) {
   const wsLine = el('cloud-workspace-line');
   if (wsLine) {
     wsLine.textContent = s.authed
-      ? (isOrg ? `Workspace: ${s.workspaceId} · Role: ${s.role}` : 'Personal workspace (not in an organization)')
+      ? (isOrg ? `Workspace: ${s.orgName || s.workspaceId} · Role: ${s.role}` : 'Personal workspace (not in an organization)')
       : '';
   }
   const seatsBlock = el('org-seats-block');
@@ -9840,7 +9923,14 @@ function applyCloudStatus(s) {
   if (canManage) send('cloud_list_org_seats', { orgId: s.workspaceId });
   if (isOrg) send('cloud_list_camera_feeds', { orgId: s.workspaceId });
   if (isOrg) send('cloud_list_station_feeds', { orgId: s.workspaceId });
-  if (isOrg) send('cloud_list_stations', { orgId: s.workspaceId });   // station-binding picker
+  if (isOrg) send('cloud_list_stations', { orgId: s.workspaceId });   // station-binding picker + invite links
+  window._cloudWorkspaceId = isOrg ? s.workspaceId : '';              // for re-requests (binding change)
+
+  // Org Library sync + Invite Links — real-org only (both need a workspace to share into / mint from).
+  const libBlock = el('org-library-block'), invBlock = el('org-invites-block');
+  if (libBlock) libBlock.style.display = isOrg ? '' : 'none';
+  if (invBlock) invBlock.style.display = isOrg ? '' : 'none';
+  if (isOrg) renderOrgLibraryStatus();
 
   // Leagues website sync — org-scoped only (CompeteLeague requires an orgId); hidden entirely
   // for a solo/personal workspace rather than letting a producer hit a 403.
@@ -9848,6 +9938,105 @@ function applyCloudStatus(s) {
   if (lgSyncGroup) lgSyncGroup.style.display = isOrg ? '' : 'none';
   if (lgBrowseBtn) lgBrowseBtn.style.display = isOrg ? '' : 'none';
   if (isOrg) send('cloud_list_leagues', { orgId: s.workspaceId });
+
+  // Topbar organization indicator — the one always-visible cue that org-shared features
+  // (teams/leagues/cameras/stations) exist at all. Solo producers see nothing extra.
+  const orgChip = el('ck-chip-org');
+  if (orgChip) {
+    orgChip.style.display = isOrg ? '' : 'none';
+    // orgName needs a website redeploy to show up — fall back to the raw workspace id
+    // for anyone still on an older cached session so the chip never renders blank. The name
+    // lives in its own inner span so the CSS ellipsis-truncation has a box to apply to.
+    if (isOrg) orgChip.innerHTML = 'ORG: <span class="ck-org-name">' + esc(s.orgName || (s.workspaceId || '').slice(0, 18)) + '</span>';
+  }
+}
+el('ck-chip-org')?.addEventListener('click', () => {
+  document.getElementById('tab-ajustes')?.click();
+  setTimeout(() => el('cloud-sync-block')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 60);
+});
+
+// ── Org Library sync controls ──────────────────────────────────────────────
+function renderOrgLibraryStatus() {
+  const line = el('org-library-status'); if (!line) return;
+  const o = (currentState && currentState.orgLibrary) || {};
+  const chk = el('check-org-autosync'); if (chk) chk.checked = o.autoSync !== false;
+  const teams = (currentState && currentState.savedTeams) || [];
+  const orgTeams = Array.isArray(teams) ? teams.filter((t) => t && t._org).length : 0;
+  const when = o.lastPull ? new Date(o.lastPull).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : null;
+  line.textContent = o.autoSync === false
+    ? 'Auto-sync is off — your library stays on this machine. Use the buttons to share or pull manually.'
+    : `Syncing automatically.${orgTeams ? ` ${orgTeams} team${orgTeams === 1 ? '' : 's'} from your organization available.` : ''}${when ? ` Last pulled ${when}.` : ''}`;
+}
+el('check-org-autosync')?.addEventListener('change', (e) => send('cloud_set_autosync', { on: !!e.target.checked }));
+el('btn-org-lib-pull')?.addEventListener('click', () => send('cloud_pull_org_library'));
+el('btn-org-lib-push')?.addEventListener('click', () => send('cloud_push_org_library'));
+
+// ── Invite-link generators ─────────────────────────────────────────────────
+// Each button asks the server to mint the matching website link; the reply lands in
+// cloud_invite_created → renderInviteResult(). Team-match pulls the two live match teams.
+let _lastInviteContextual = false;
+function requestInvite(kind, extra, opts) {
+  const map = {
+    match: 'cloud_create_match',
+    caster: 'cloud_create_room',
+    observer: 'cloud_create_room',
+    camera: 'cloud_create_camera_session',
+    talent: 'cloud_create_talent_invite'
+  };
+  const type = map[kind]; if (!type) return;
+  // Team-match + talent links only need an approved producer account; caster/observer/camera rooms
+  // are org-scoped tooling and need a real organization workspace.
+  const isOrg = !!(window._cloudWorkspaceId && !String(window._cloudWorkspaceId).startsWith('user:'));
+  const needsOrg = (kind === 'caster' || kind === 'observer' || kind === 'camera');
+  if (needsOrg && !isOrg) { showToast('Sign in to your organization (Settings ▸ Organization) to create caster, observer or camera links.', '#c53030', 5000); return; }
+  _lastInviteContextual = !!(opts && opts.contextual);
+  const data = Object.assign({}, extra);
+  if (kind === 'caster') data.kind = 'caster';
+  if (kind === 'observer') data.kind = 'observer';
+  const res = el('cloud-invite-result');
+  if (res && !_lastInviteContextual) res.innerHTML = '<div class="section-desc">Generating link…</div>';
+  if (_lastInviteContextual) showToast('Generating link…', '#3b82f6', 1500);
+  send(type, data);
+}
+document.querySelectorAll('#org-invites-block [data-inv]').forEach((b) => {
+  b.addEventListener('click', () => requestInvite(b.dataset.inv));
+});
+// Contextual "+ … link" buttons anywhere in the app (Camera Feeds, Series, …) — auto-copy + toast.
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('[data-inv-ctx]'); if (!b) return;
+  requestInvite(b.dataset.invCtx, {}, { contextual: true });
+});
+function renderInviteResult(d) {
+  // Contextual buttons (Casters / Camera Feeds / Series) auto-copy the link and toast — no panel needed.
+  if (_lastInviteContextual && d && d.ok && d.url) {
+    _lastInviteContextual = false;
+    (async () => { try { await navigator.clipboard.writeText(d.url); showToast('Link copied to clipboard: ' + d.url, '#22c55e', 5000); } catch (_) { showToast('Link ready: ' + d.url, '#22c55e', 6000); } })();
+  }
+  const wrap = el('cloud-invite-result'); if (!wrap) return;
+  if (!d || !d.ok || !d.url) { wrap.innerHTML = `<div class="section-desc" style="color:var(--danger);">${(d && d.message) || 'Could not create the link.'}</div>`; return; }
+  const esc = (x) => String(x == null ? '' : x).replace(/[&<>"]/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
+  const titles = { match: `Team match — ${d.teamA || 'Team A'} vs ${d.teamB || 'Team B'}`, room: d.roomKind === 'observer' ? 'Observer feeds room' : 'Caster room', camera: 'Camera assignments', talent: 'Talent invite' };
+  const title = titles[d.kind] || 'Invite link';
+  const meta = [];
+  if (d.slots) meta.push(`${d.slots} slot${d.slots === 1 ? '' : 's'}`);
+  if (d.expiresAt) meta.push('expires ' + new Date(d.expiresAt).toLocaleDateString());
+  wrap.innerHTML = `
+    <div class="preset-item" style="flex-direction:column; align-items:stretch; gap:8px;">
+      <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap;">
+        <span class="preset-name">${esc(title)}</span>
+        ${meta.length ? `<span class="section-desc" style="margin:0;">${esc(meta.join(' · '))}</span>` : ''}
+      </div>
+      <input type="text" class="input-text" id="cloud-invite-url" readonly value="${esc(d.url)}" onclick="this.select()" style="font-size:12px;">
+      <div style="display:flex; gap:8px; flex-wrap:wrap;">
+        <button class="btn btn-primary btn-sm" id="cloud-invite-copy">Copy link</button>
+        <button class="btn btn-secondary btn-sm" id="cloud-invite-open">Open</button>
+      </div>
+    </div>`;
+  el('cloud-invite-copy')?.addEventListener('click', async () => {
+    try { await navigator.clipboard.writeText(d.url); } catch (_) { const i = el('cloud-invite-url'); if (i) { i.select(); document.execCommand('copy'); } }
+    const b = el('cloud-invite-copy'); if (b) { b.textContent = 'Copied'; setTimeout(() => { b.textContent = 'Copy link'; }, 1500); }
+  });
+  el('cloud-invite-open')?.addEventListener('click', () => { try { window.open(d.url, '_blank'); } catch (_) {} });
 }
 
 const ORG_SEAT_ROLES = ['owner', 'admin', 'producer', 'operator', 'talent', 'analyst'];
@@ -9859,13 +10048,18 @@ function renderOrgSeats(d) {
   const limitLine = el('org-seats-limit');
   if (limitLine) limitLine.textContent = d.seatLimit != null ? `${d.seatsUsed ?? seats.length} / ${d.seatLimit} seats used` : 'Broadcast licensing not enabled for this org.';
   wrap.innerHTML = seats.length
-    ? seats.map((seat) => `<div class="preset-item">
-        <span class="preset-name">${esc((seat.user && (seat.user.name || seat.user.username)) || seat.userId)} — ${esc(seat.role)}</span>
-        <div class="preset-actions"><button class="btn btn-danger btn-xs org-seat-remove" data-id="${esc(seat.id)}">Remove</button></div>
-      </div>`).join('')
+    ? seats.map((seat) => {
+        const name = (seat.user && (seat.user.name || seat.user.username)) || seat.userId;
+        return `<div class="preset-item">
+        <span class="preset-name">${esc(name)} — ${esc(seat.role)}</span>
+        <div class="preset-actions"><button class="btn btn-danger btn-xs org-seat-remove" data-id="${esc(seat.id)}" data-name="${esc(name)}">Remove</button></div>
+      </div>`;
+      }).join('')
     : '<div class="section-desc">No producers added yet.</div>';
-  wrap.querySelectorAll('.org-seat-remove').forEach((b) => b.addEventListener('click', () => {
+  wrap.querySelectorAll('.org-seat-remove').forEach((b) => b.addEventListener('click', async () => {
     if (!window._cloudWorkspaceId) return;
+    const ok = await appConfirm(`Revoke ${b.dataset.name}'s seat? They'll lose access to this organization's broadcast tools immediately.`, 'Revoke Seat');
+    if (!ok) return;
     send('cloud_remove_org_seat', { orgId: window._cloudWorkspaceId, seatId: b.dataset.id });
   }));
 }
@@ -9899,7 +10093,12 @@ function renderCloudProfiles(d) {
       </div>`;
       }).join('')
     : '<div class="section-desc">No cloud profiles yet — “Sync to cloud” to save your first.</div>';
-  wrap.querySelectorAll('.cloud-share-toggle').forEach((btn) => btn.addEventListener('click', () => {
+  wrap.querySelectorAll('.cloud-share-toggle').forEach((btn) => btn.addEventListener('click', async () => {
+    // Only the sharing direction needs a yes — turning sharing OFF only reduces exposure.
+    if (btn.dataset.scope === 'workspace') {
+      const ok = await appConfirm('Share this profile — teams, brand kits, presets, casters and more — with everyone in your organization?', 'Share with Org', false);
+      if (!ok) return;
+    }
     send('cloud_share_profile', { id: btn.dataset.id, scope: btn.dataset.scope });
   }));
 }
@@ -13906,7 +14105,22 @@ function renderGoLive(data) {
   const count = el('gl-live-count');
   if (count) count.textContent = liveCount ? `${liveCount} live` : '';
   const dot = el('qrail-golive-dot');
-  if (dot) dot.classList.toggle('on', liveCount > 0);   // live indicator on the Go Live rail tab
+  // Surface the on-air summary (every overlay, not just the trigger-bar subset) on the AIR tab's
+  // dot — a count badge when more than one thing is live, a hover tooltip either way. Not a second
+  // topbar pill: a prior GFX topbar pill was intentionally removed per user request, and this
+  // doesn't reopen that — it lives on the rail tab itself.
+  const summary = (typeof onAirSummary === 'function') ? onAirSummary(data) : null;
+  const anyLive = liveCount > 0 || (summary && summary.count > 0);
+  if (dot) {
+    dot.classList.toggle('on', anyLive);
+    dot.classList.toggle('has-count', !!(summary && summary.count > 1));
+    dot.textContent = (summary && summary.count > 1) ? String(summary.count) : '';
+    if (summary) dot.title = summary.label;
+  }
+  if (summary) {
+    const airTab = document.querySelector('.qrail-tab[data-qtab="quick"]');
+    if (airTab) airTab.title = 'Air — scenes, overlays & triggers · ' + summary.label;
+  }
   const view = data.view || 'hud';
   document.querySelectorAll('#gl-view-seg .gl-seg-btn').forEach((b) => {
     b.classList.toggle('active', b.dataset.view === view);
@@ -17972,7 +18186,7 @@ function renderBrands(data) {
     const isActive = k.id === data.activeBrandKitId;
     const nSp = (kitActivePackage(k).sponsors || []).length;
     const nPkg = (k.packages || []).length || 1;
-    const item = document.createElement('div'); item.className = 'preset-item brand-kit-item';
+    const item = document.createElement('div'); item.className = 'preset-item brand-kit-item' + (k._org ? ' is-org' : '');
     // Left: brand logo + name, with sponsors (and a package quick-switch) on a second line.
     const main = document.createElement('div'); main.className = 'brand-kit-main';
     const logo = document.createElement('div'); logo.className = 'brand-kit-logo';
@@ -17982,6 +18196,7 @@ function renderBrands(data) {
     const nameLine = document.createElement('div'); nameLine.className = 'brand-kit-name';
     nameLine.textContent = (isActive ? '● ' : '') + k.name
       + `  ·  ${nPkg} package${nPkg === 1 ? '' : 's'} · ${nSp} sponsor${nSp === 1 ? '' : 's'}`;
+    if (k._org) { const b = document.createElement('span'); b.className = 'tc-org-badge'; b.style.marginLeft = '6px'; b.textContent = 'ORG'; b.title = 'From organization' + (k._orgOwner ? ' · ' + k._orgOwner : ''); nameLine.appendChild(b); }
     const subLine = document.createElement('div'); subLine.className = 'brand-kit-sub';
     const sponsors = (kitActivePackage(k).sponsors || []);
     if (sponsors.length) {
@@ -25304,7 +25519,12 @@ async function connect() {
         if (msg.data.result && window._cloudWorkspaceId) send('cloud_list_leagues', { orgId: window._cloudWorkspaceId });
       } else if (msg.data.context === 'profile-share') {
         if (typeof showToast === 'function') showToast(msg.data.message || '', msg.data.result ? '#22c55e' : '#c53030', msg.data.result ? 2800 : 6000);
-      } else {
+      } else if (msg.data.context === 'invite') {
+        if (typeof showToast === 'function') showToast(msg.data.message || '', msg.data.result ? '#22c55e' : '#c53030', msg.data.result ? 2800 : 6000);
+      } else if (msg.data.context === 'org-library') {
+        if (typeof showToast === 'function') showToast(msg.data.message || '', msg.data.result ? '#22c55e' : '#c53030', msg.data.result ? 3000 : 6000);
+        if (typeof renderOrgLibraryStatus === 'function') renderOrgLibraryStatus();
+      } else if (el('import-export-result')) {
         el('import-export-result').textContent = msg.data.message;
         el('import-export-result').style.color = msg.data.result ? 'green' : 'red';
       }
@@ -25330,6 +25550,8 @@ async function connect() {
       renderCloudProfiles(msg.data);
     } else if (msg.type === 'cloud_profile_saved') {
       send('cloud_list_profiles');   // refresh the list after a push
+    } else if (msg.type === 'cloud_invite_created') {
+      renderInviteResult(msg.data);
     } else if (msg.type === 'cloud_org_seats') {
       renderOrgSeats(msg.data);
     } else if (msg.type === 'cloud_camera_feeds') {
@@ -25340,6 +25562,7 @@ async function connect() {
       renderCfStations();
     } else if (msg.type === 'cloud_stations') {
       window._cfStationsIndex = (msg.data && msg.data.ok && Array.isArray(msg.data.stations)) ? msg.data.stations : [];
+      window._cfStationDetail = (msg.data && msg.data.ok && msg.data.detail) ? msg.data.detail : null;
       renderCfStations();
     } else if (msg.type === 'cloud_leagues') {
       if (typeof lgRenderCloudList === 'function') lgRenderCloudList((msg.data && msg.data.ok && Array.isArray(msg.data.leagues)) ? msg.data.leagues : []);
@@ -25820,7 +26043,9 @@ el('btn-twitch-test')?.addEventListener('click', () => {
     .finally(() => { btn.disabled = false; btn.textContent = 'Test Connection'; });
 });
 
-el('btn-twitch-logout')?.addEventListener('click', () => {
+el('btn-twitch-logout')?.addEventListener('click', async () => {
+  const ok = await appConfirm('Disconnect Twitch? Chat, predictions, and EventSub alerts stop working immediately — reconnecting mid-broadcast means re-authorizing from scratch.', 'Disconnect');
+  if (!ok) return;
   fetch('http://localhost:3000/api/twitch/disconnect', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

@@ -221,6 +221,10 @@ let state = {
   // pausePreviews = independent panel knobs; broadcastRate = smooth|balanced|light
   // (full_state coalesce width). active = a match is live right now.
   perfMode: { enabled: true, active: false, always: false, reduceAnimations: false, pausePreviews: false, broadcastRate: 'smooth', resourceWarnings: true },
+  // Org Library sync — two-way share of teams/brand kits/facecams/casters across the org. This app
+  // auto-pushes its OWN items up (as the producer's workspace-shared profile) and auto-pulls org-mates'
+  // shared items down, tagged _org so they sit in their own "From organization" category everywhere.
+  orgLibrary: { autoSync: true, profileId: null, lastPush: 0, lastPull: 0 },
   activeGame: 'rocket-league',
   // Pulse multiview: when publish is on (and the cloud is linked), this app heartbeats its live game to
   // the org so it appears on other producers' Pulse scenes. feedViewUrl = this observer's own VDO view
@@ -603,6 +607,16 @@ let state = {
     source: 'auto',   // 'auto' (bracket/start.gg) | 'league' | 'startgg-league' | 'manual' — informational; rows always win
     rows: []      // manual override: [{placement,name,logo,wins,losses,points}]
   },
+  // Dedicated league season-stats board (overlay/league-stats.html) — pushed from the Leagues ▸ Stats
+  // tab. columns describe the grouped table (Series / Games / In-game tiers); rows carry each team's
+  // values keyed by column key. Distinct from `standings` (the podium leaderboard).
+  leagueStats: {
+    visible: false,
+    title: '',
+    subtitle: '',
+    columns: [],  // [{ key, label, group }]
+    rows: []      // [{ name, logo, color, values:{ <key>:number } }]
+  },
   // Season / league record shown under each team name on the top scorebar overlay.
   // Source priority: per-team manual league standings (W/L/PTS) for season + points +
   // placement; live start.gg event standings for "this week" W/L. Resolved per-broadcast
@@ -943,6 +957,7 @@ function loadTeams() {
 function saveTeams() {
   savedTeamsVer++;
   try { safeWriteJson(teamsFile, savedTeams); } catch (e) { console.error('Error saving teams:', e); }
+  if (typeof syncProfileToCloud === 'function') syncProfileToCloud();
 }
 
 function loadFacecams() {
@@ -951,6 +966,7 @@ function loadFacecams() {
 
 function saveFacecams() {
   try { safeWriteJson(facecamsFile, savedFacecams); } catch (e) { console.error('Error saving facecams:', e); }
+  if (typeof syncProfileToCloud === 'function') syncProfileToCloud();
 }
 
 function loadPresets() {
@@ -969,6 +985,7 @@ function loadBrandKits() {
 function saveBrandKits() {
   brandKitsVer++;   // any persisted brand-kit change forces a library re-broadcast (see brandKitsVer)
   try { safeWriteJson(brandsFile, savedBrandKits); } catch (e) { console.error('Error saving brand kits:', e); }
+  if (typeof syncProfileToCloud === 'function') syncProfileToCloud();
 }
 
 // Mirror a match team's roster into the saved-team library so roster edits made in the Match — Teams
@@ -1060,6 +1077,10 @@ function inflateAssetsFromZip(obj, zip) {
 // can be shared with staff before cloud sync exists. Deliberately EXCLUDES secrets
 // and machine-specific state: no Twitch/Discord/OBS tokens or passwords, no live
 // scores, no local file paths. Sharing a profile never leaks credentials.
+// Items pulled FROM the org are tagged _org — never re-export them (they belong to their author's
+// profile and come back on the next pull; including them here would grow every profile without bound
+// and create a push↔pull loop).
+function _own(arr) { return (Array.isArray(arr) ? arr : []).filter((x) => !x || !x._org); }
 function buildProfileBundle() {
   const s = state;
   return {
@@ -1068,12 +1089,12 @@ function buildProfileBundle() {
     app: 'NE Broadcast Suite',
     exportedAt: Date.now(),
     data: {
-      teams:          savedTeams,
-      brandKits:      savedBrandKits,
-      facecams:       savedFacecams,
+      teams:          _own(savedTeams),
+      brandKits:      _own(savedBrandKits),
+      facecams:       _own(savedFacecams),
       presets:        savedPresets,
       leagues:        s.leagues || [],
-      castersLibrary: (s.casters && s.casters.library) || [],
+      castersLibrary: _own((s.casters && s.casters.library) || []),
       settings: {
         fontFamily:           s.fontFamily,
         themesByGame:         s.themesByGame,
@@ -1316,6 +1337,9 @@ async function validateCloudSession(trigger) {
   if (!cloud.configured() || !state.discord.connected) return;
   try {
     await cloud.refreshSession();
+    // Session confirmed live → keep the cloud copy of the producer's library current. Covers every
+    // sign-in method (Discord, email, contract) on boot/periodic without a per-path hook.
+    if (cloud.authed()) { syncProfileToCloud(); if (trigger !== 'periodic') pullOrgLibrary().catch(() => {}); }
   } catch (e) {
     if (e && (e.status === 403 || e.status === 401)) {
       const backendMsg = (e.data && e.data.error && e.data.error.message) || e.message || '';
@@ -2031,6 +2055,106 @@ async function stationAutoSync() {
 }
 setInterval(stationAutoSync, 20000);
 
+// ── Org Library sync (teams / brand kits / facecams / casters) ────────────────
+// PUSH: debounced upload of THIS app's own library as the producer's workspace-shared profile, so
+// every org-mate's app can pull it. Fire-and-forget; only runs when signed into a real org and the
+// autoSync toggle is on. See buildProfileBundle() (_own filter) + orgLibrary state.
+let _orgPushT = null;
+function syncProfileToCloud() {
+  try {
+    if (!state.orgLibrary || state.orgLibrary.autoSync === false) return;
+    if (!cloud.authed()) return;   // push for ANY signed-in user (this fills their OWN Team Library on
+                                   // the website); org sharing below is the only org-gated part.
+    clearTimeout(_orgPushT);
+    _orgPushT = setTimeout(() => { pushProfileNow().catch(() => {}); }, 4000);
+  } catch (_) { /* cloud not configured */ }
+}
+// Immediate (un-debounced) push — used by syncProfileToCloud's timer, the initial startup/sign-in
+// push, and the manual "Share my library" button. Saves the producer's own library to their default
+// cloud profile (which is exactly what the website Team Library page renders) and, when they're in a
+// real org, shares it to the workspace so org-mates can pull it.
+async function pushProfileNow() {
+  if (!cloud.authed()) return { ok: false, message: 'Not signed in.' };
+  const s = cloud.getSession() || {};
+  const orgId = s.workspaceId;
+  const isOrg = !!(orgId && !String(orgId).startsWith('user:'));
+  const saved = await cloud.saveProfile(buildProfileBundle(), { id: state.orgLibrary.profileId || undefined });
+  if (saved && saved.id) {
+    const firstShare = state.orgLibrary.profileId !== saved.id;
+    state.orgLibrary.profileId = saved.id;
+    state.orgLibrary.lastPush = Date.now();
+    if (isOrg && firstShare) await cloud.shareProfile(saved.id, 'workspace').catch(() => {});   // make it org-visible (idempotent)
+    saveAppState();
+  }
+  return { ok: true, isOrg };
+}
+// Initial push once the session has loaded — so a producer's EXISTING teams reach the website without
+// having to edit one first (the on-change trigger only fires on a fresh save). Fire-and-forget.
+setTimeout(() => { syncProfileToCloud(); }, 6000);
+
+// PULL: fold every org-mate's workspace-shared library into ours, TAGGED _org so it lands in the
+// "From organization" category (searchable everywhere, never re-pushed as ours). Rebuilds the whole
+// _org-tagged subset each run — additive to local items, never clobbers a same-named local one.
+let _orgPullBusy = false;
+let _orgLibSig = '';
+async function pullOrgLibrary() {
+  if (_orgPullBusy) return { changed: false };
+  try {
+    if (!cloud.authed()) return { changed: false };
+    const s = cloud.getSession() || {};
+    const orgId = s.workspaceId;
+    if (!orgId || String(orgId).startsWith('user:')) return { changed: false };
+    _orgPullBusy = true;
+    const profiles = await cloud.listProfiles();
+    const mates = (profiles || []).filter((p) => p && p.mine === false);
+    const bundles = [];
+    for (const p of mates) {
+      try { const full = await cloud.getProfile(p.id); bundles.push({ owner: p.ownerName || 'A producer', data: (full.bundle || full || {}).data || {} }); } catch (_) { /* skip unreadable */ }
+    }
+    // Drop the previous org-tagged set; local (untagged) items always win on name/id collision.
+    savedTeams     = savedTeams.filter((t) => !t || !t._org);
+    savedBrandKits = savedBrandKits.filter((k) => !k || !k._org);
+    savedFacecams  = savedFacecams.filter((f) => !f || !f._org);
+    if (!Array.isArray(state.casters.library)) state.casters.library = [];
+    state.casters.library = state.casters.library.filter((c) => !c || !c._org);
+    const teamKey = (t) => (t.name || '').trim().toLowerCase();
+    const kitKey  = (k) => String(k.id || k.name || '').toLowerCase();
+    const faceKey = (f) => `${f.platform || ''}:${f.platformId || ''}`;
+    const castKey = (c) => String(c.id || c.name || '').toLowerCase();
+    const seenTeam = new Set(savedTeams.map(teamKey).filter(Boolean));
+    const seenKit  = new Set(savedBrandKits.map(kitKey).filter(Boolean));
+    const seenFace = new Set(savedFacecams.map(faceKey));
+    const seenCast = new Set(state.casters.library.map(castKey).filter(Boolean));
+    for (const { owner, data } of bundles) {
+      (data.teams || []).forEach((t) => { const k = teamKey(t); if (!k || seenTeam.has(k)) return; seenTeam.add(k); savedTeams.push({ ...t, _org: true, _orgOwner: owner }); });
+      (data.brandKits || []).forEach((x) => { const k = kitKey(x); if (!k || seenKit.has(k)) return; seenKit.add(k); savedBrandKits.push({ ...x, _org: true, _orgOwner: owner }); });
+      (data.facecams || []).forEach((f) => { const k = faceKey(f); if (seenFace.has(k)) return; seenFace.add(k); savedFacecams.push({ ...f, _org: true, _orgOwner: owner }); });
+      (data.castersLibrary || []).forEach((c) => { const k = castKey(c); if (!k || seenCast.has(k)) return; seenCast.add(k); state.casters.library.push({ ...c, _org: true, _orgOwner: owner }); });
+    }
+    savedBrandKits.forEach(ensureKitPackages);
+    state.orgLibrary.lastPull = Date.now();
+    // Only persist + re-broadcast when the org-tagged set actually changed — otherwise the 60s poll
+    // would fire a full library-tier broadcast every tick (base64 logos are heavy — see perf notes).
+    const orgTeams = savedTeams.filter((t) => t._org);
+    const orgKits = savedBrandKits.filter((k) => k._org);
+    const sig = JSON.stringify([
+      orgTeams.map((t) => (t.name || '') + ':' + (t._orgOwner || '') + ':' + (t.logo ? t.logo.length : 0) + ':' + (t.players || []).length),
+      orgKits.map((k) => (k.name || k.id || '') + ':' + (k._orgOwner || '')),
+      savedFacecams.filter((f) => f._org).map((f) => faceKey(f))
+    ]);
+    if (sig !== _orgLibSig) {
+      _orgLibSig = sig;
+      savedTeamsVer++; brandKitsVer++;
+      try { safeWriteJson(teamsFile, savedTeams); safeWriteJson(brandsFile, savedBrandKits); safeWriteJson(facecamsFile, savedFacecams); } catch (_) {}
+      broadcastFullState();
+    }
+    return { changed: true, orgTeams: orgTeams.length, orgKits: orgKits.length };
+  } catch (e) { return { changed: false, error: e.message }; }
+  finally { _orgPullBusy = false; }
+}
+setInterval(() => { pullOrgLibrary().catch(() => {}); }, 60000);
+setTimeout(() => { pullOrgLibrary().catch(() => {}); }, 8000);   // initial pull once the session has loaded
+
 // ── Show-state heartbeat → the casters' show bar ─────────────────────────────
 // Publishes a tiny, secret-free snapshot (event/round, team names + scores, break countdown,
 // on-air graphic) to the org so the website's station join pages can show casters what the
@@ -2353,6 +2477,10 @@ function loadState() {
         state.perfMode.resourceWarnings = sp.resourceWarnings !== false;
         if (['smooth', 'balanced', 'light'].includes(sp.broadcastRate)) state.perfMode.broadcastRate = sp.broadcastRate;
       }
+      if (saved.orgLibrary && typeof saved.orgLibrary === 'object') {
+        state.orgLibrary.autoSync = saved.orgLibrary.autoSync !== false;
+        if (saved.orgLibrary.profileId) state.orgLibrary.profileId = saved.orgLibrary.profileId;
+      }
       if (saved.eventOps && typeof saved.eventOps === 'object') {
         // Rows saved by the first release were objects ({team,player,…}); the store is
         // now the full spreadsheet (headers + string-array rows). Drop the legacy shape.
@@ -2616,6 +2744,7 @@ function _saveAppStateNow(sync = false) {
         enabled: pm.enabled !== false, always: !!pm.always,
         reduceAnimations: !!pm.reduceAnimations, pausePreviews: !!pm.pausePreviews,
         broadcastRate: pm.broadcastRate || 'smooth' }; })(),
+      orgLibrary: (function () { const o = state.orgLibrary || {}; return { autoSync: o.autoSync !== false, profileId: o.profileId || null }; })(),
       autoTeamsFromGame: state.autoTeamsFromGame,
       startggLeagueStandings: state.startggLeagueStandings,
       fontFamily: state.fontFamily,
@@ -3246,7 +3375,7 @@ const BROADCAST_TIERS = {
   // server-only (overlays get the derived sceneConfig instead)
   scenePresets: 'local',
   // live production/scoreboard state (from the state literal)
-  version: 'live', view: 'live', rlHudHidden: 'live', perfMode: 'live', cloudRole: 'live', activeGame: 'live', themesByGame: 'live',
+  version: 'live', view: 'live', rlHudHidden: 'live', perfMode: 'live', orgLibrary: 'live', cloudRole: 'live', activeGame: 'live', themesByGame: 'live',
   eventName: 'live', gameLabel: 'live', roundLabel: 'live', speedUnit: 'live', fontFamily: 'live',
   clock24h: 'live', showSeries: 'live', defaultBestOf: 'live', facecamsEnabled: 'live',
   replayCams: 'live', activeBrandKitId: 'live', useBrandColors: 'live', colorMode: 'live',
@@ -3259,7 +3388,7 @@ const BROADCAST_TIERS = {
   gameTeams: 'live', players: 'live', playerCache: 'live', currentGoal: 'live',
   spectatedPlayer: 'live', rlConnected: 'live', rlSpectatorUi: 'live', startgg: 'live',
   challonge: 'live', nxgen: 'live', activeEvent: 'live', obs: 'live', vmix: 'live',
-  switcher: 'live', commercial: 'live', upcoming: 'live', standings: 'live', teamRecord: 'live',
+  switcher: 'live', commercial: 'live', upcoming: 'live', standings: 'live', leagueStats: 'live', teamRecord: 'live',
   autoTeamsFromGame: 'live', startggLeagueStandings: 'live', gfxActive: 'live', watchlist: 'live',
   teamSpotlight: 'live', director: 'live', ai: 'live', encode: 'live', twitch: 'live',
   discord: 'live', flows: 'live', flowVars: 'live',
@@ -10823,6 +10952,16 @@ registerWsHandlers({
     if (Array.isArray(p.rows)) state.standings.rows = p.rows;
     saveAppState();
     broadcastFullState();
+  },
+  set_league_stats(msg) {
+    const p = msg.data || {};
+    if (typeof p.visible === 'boolean') state.leagueStats.visible = p.visible;
+    if (typeof p.title === 'string') state.leagueStats.title = p.title;
+    if (typeof p.subtitle === 'string') state.leagueStats.subtitle = p.subtitle;
+    if (Array.isArray(p.columns)) state.leagueStats.columns = p.columns.slice(0, 24);
+    if (Array.isArray(p.rows)) state.leagueStats.rows = p.rows.slice(0, 40);
+    saveAppState();
+    broadcastFullState();
   }
 });
 
@@ -11739,15 +11878,49 @@ function handleControlMessage(msg, ws) {
       break;
     }
 
-    // Station list for the binding picker (Camera Feeds ▸ Cloud Stations).
+    // Station list for the binding picker (Camera Feeds ▸ Cloud Stations) — plus the FULL
+    // cockpit for the bound (or only) station, with all its invite links pre-built, so the
+    // producer can hand out caster/observer/player/match links without opening the website.
     case 'cloud_list_stations': {
       (async () => {
         try {
           if (!cloud.authed()) { ws.send(JSON.stringify({ type: 'cloud_stations', data: { ok: false, stations: [] } })); return; }
           const orgId = msg.data && msg.data.orgId;
           if (!orgId) { ws.send(JSON.stringify({ type: 'cloud_stations', data: { ok: false, stations: [] } })); return; }
-          const stations = await cloud.listStations(orgId);
-          ws.send(JSON.stringify({ type: 'cloud_stations', data: { ok: true, stations: stations.filter((s) => s.status === 'active') } }));
+          const all = await cloud.listStations(orgId);
+          const stations = all.filter((s) => s.status === 'active');
+          const SITE = (process.env.BROADCAST_REMOTE_URL || 'https://studio.namelessesports.com').replace(/\/+$/, '');
+          const detailId = (state.casters && state.casters.stationId) || (stations.length === 1 ? stations[0].id : '');
+          let detail = null;
+          if (detailId && stations.some((s) => s.id === detailId)) {
+            try {
+              const d = await cloud.getStation(orgId, detailId);
+              const st = d.station || {};
+              detail = {
+                stationId: detailId,
+                stationName: st.name || '',
+                rooms: (st.rooms || []).filter((r) => r && r.status === 'active').map((r) => ({
+                  id: r.id, kind: r.kind, name: r.name,
+                  slots: (r.slots || []).length,
+                  connected: (r.slots || []).filter((x) => x && x.enabled && x.connectedAt).length,
+                  inviteUrl: `${SITE}/station/${r.shareToken}`,
+                  talkbackUrl: `${SITE}/station/${r.shareToken}?producer=1`,
+                })),
+                cameras: (d.cameraSessions || []).filter((c) => c && c.status === 'active').map((c) => ({
+                  id: c.id, name: c.name,
+                  slots: (c._count && c._count.slots) || 0,
+                  shareUrl: `${SITE}/cameras/${c.shareToken}`,
+                })),
+                matches: (d.matches || []).map((m) => ({
+                  id: m.id,
+                  label: `${(m.teamA && m.teamA.name) || 'Team A'} vs ${(m.teamB && m.teamB.name) || 'Team B'}`,
+                  joinUrl: `${SITE}/join/${m.id}`,
+                  matchUrl: `${SITE}/match/${m.id}`,
+                })),
+              };
+            } catch (_) { /* detail is a nicety — the list alone still renders */ }
+          }
+          ws.send(JSON.stringify({ type: 'cloud_stations', data: { ok: true, stations, detail } }));
         } catch (e) { ws.send(JSON.stringify({ type: 'cloud_stations', data: { ok: false, stations: [], message: e.message } })); }
       })();
       break;
@@ -12300,6 +12473,8 @@ function handleControlMessage(msg, ws) {
       if (existing) {
         Object.assign(existing, entry);
         PACKAGE_FIELDS.forEach((f) => delete existing[f]);   // strip any legacy top-level duplicates
+        // Editing a From-organization kit adopts it as your own (the next org pull won't wipe it).
+        delete existing._org; delete existing._orgOwner;
       } else savedBrandKits.push(entry);
       saveBrandKits();
       // "Save & Activate" — put the saved profile on air in the same action (covers new kits
@@ -12863,7 +13038,10 @@ function handleControlMessage(msg, ws) {
           ...(hasAbbr && { abbr }),
           // Preserve the existing roster unless an explicit players array was sent.
           players: players !== null ? players : (prev.players || []),
-          ...(favorite !== undefined && { favorite })
+          ...(favorite !== undefined && { favorite }),
+          // Saving/editing a From-organization team ADOPTS it as your own — drop the org tag so the
+          // next org pull won't wipe your edits (a local same-named team wins over the org copy).
+          _org: undefined, _orgOwner: undefined
         };
       } else {
         savedTeams.push({ name, logo: logo || null, color: color || null, ...(hasAbbr && { abbr }), players: players || [], ...(favorite !== undefined && { favorite }) });
@@ -13752,6 +13930,105 @@ function handleControlMessage(msg, ws) {
       break;
     }
 
+    // ── Org Library two-way sync controls ────────────────────────────────────
+    case 'cloud_set_autosync': {
+      state.orgLibrary.autoSync = !!(msg.data && msg.data.on);
+      saveAppState();
+      broadcastFullState();
+      if (state.orgLibrary.autoSync) syncProfileToCloud();
+      break;
+    }
+    case 'cloud_pull_org_library': {   // manual "pull now" (the interval already runs every 60s)
+      (async () => {
+        try {
+          if (!cloud.authed()) { sendImportExportResult(ws, false, 'Sign in to the cloud first.', 'org-library'); return; }
+          const res = await pullOrgLibrary();
+          if (res.error) { sendImportExportResult(ws, false, 'Pull failed: ' + res.error, 'org-library'); return; }
+          sendImportExportResult(ws, true, `Org library synced — ${res.orgTeams || 0} teams, ${res.orgKits || 0} brand kits from your organization.`, 'org-library');
+        } catch (e) { sendImportExportResult(ws, false, 'Pull failed: ' + e.message, 'org-library'); }
+      })();
+      break;
+    }
+    case 'cloud_push_org_library': {   // manual "share my library now"
+      (async () => {
+        try {
+          if (!cloud.authed()) { sendImportExportResult(ws, false, 'Sign in to the cloud first.', 'org-library'); return; }
+          const res = await pushProfileNow();
+          broadcastFullState();
+          sendImportExportResult(ws, true, res.isOrg ? 'Your teams & brand kits are shared with the organization.' : 'Your teams & brand kits are synced to the cloud (join an organization to share them with other producers).', 'org-library');
+        } catch (e) { sendImportExportResult(ws, false, 'Push failed: ' + e.message, 'org-library'); }
+      })();
+      break;
+    }
+
+    // ── In-app invite-link minting (the website's create routes, driven from the app) ─────
+    // Every handler needs a real org workspace; each replies with a `cloud_invite_created` carrying
+    // the ready-to-share public URL so the panel can show it with copy + QR.
+    case 'cloud_create_room': {   // caster or observer room → /station/<shareToken>
+      (async () => {
+        try {
+          if (!cloud.authed()) { sendImportExportResult(ws, false, 'Sign in to the cloud first.', 'invite'); return; }
+          const s = cloud.getSession() || {};
+          const orgId = s.workspaceId;
+          if (!orgId || String(orgId).startsWith('user:')) { sendImportExportResult(ws, false, 'Invite links need an organization workspace.', 'invite'); return; }
+          const d = msg.data || {};
+          const kind = d.kind === 'observer' ? 'observer' : 'caster';
+          const station = await cloud.ensureStation(orgId, d.stationName);
+          if (!station || !station.id) { sendImportExportResult(ws, false, 'Could not resolve a station for the room.', 'invite'); return; }
+          const room = await cloud.createStationRoom(orgId, station.id, { kind, name: d.name, slotCount: d.slotCount });
+          sendImportExportResult(ws, true, (kind === 'caster' ? 'Caster room' : 'Observer feeds') + ' link ready.', 'invite');
+          ws.send(JSON.stringify({ type: 'cloud_invite_created', data: { ok: true, kind: 'room', roomKind: kind, url: room.url, name: room.name || '', shareToken: room.shareToken, slots: (room.slots || []).length } }));
+        } catch (e) { sendImportExportResult(ws, false, 'Link failed: ' + e.message, 'invite'); }
+      })();
+      break;
+    }
+    case 'cloud_create_camera_session': {   // 11 masked camera slots → /cameras/<shareToken>
+      (async () => {
+        try {
+          if (!cloud.authed()) { sendImportExportResult(ws, false, 'Sign in to the cloud first.', 'invite'); return; }
+          const s = cloud.getSession() || {};
+          const orgId = s.workspaceId;
+          if (!orgId || String(orgId).startsWith('user:')) { sendImportExportResult(ws, false, 'Invite links need an organization workspace.', 'invite'); return; }
+          const d = msg.data || {};
+          const session = await cloud.createCameraSession(orgId, { name: d.name || state.eventName || 'Camera assignments', startggSlug: d.startggSlug });
+          sendImportExportResult(ws, true, 'Camera-assignment link ready.', 'invite');
+          ws.send(JSON.stringify({ type: 'cloud_invite_created', data: { ok: true, kind: 'camera', url: session.url, name: session.name || '', shareToken: session.shareToken, slots: (session.slots || []).length } }));
+        } catch (e) { sendImportExportResult(ws, false, 'Link failed: ' + e.message, 'invite'); }
+      })();
+      break;
+    }
+    case 'cloud_create_match': {   // one link both teams use → /join/<id>
+      (async () => {
+        try {
+          if (!cloud.authed()) { sendImportExportResult(ws, false, 'Sign in to the cloud first.', 'invite'); return; }
+          const d = msg.data || {};
+          const pick = (t, fallback) => {
+            if (t && (t.name || t.players)) return { name: t.name || fallback, logo: t.logo || null, color: t.color || null, players: Array.isArray(t.players) ? t.players.map((p) => ({ name: p.name || p.gamertag || '' })).filter((p) => p.name) : [] };
+            return { name: fallback, logo: null, color: null, players: [] };
+          };
+          const teamA = pick(d.teamA || (state.teams && state.teams.blue), 'Team A');
+          const teamB = pick(d.teamB || (state.teams && state.teams.orange), 'Team B');
+          const match = await cloud.createMatch({ teamA, teamB, game: d.game || state.activeGame || '' });
+          sendImportExportResult(ws, true, 'Team match join link ready — one link for both teams.', 'invite');
+          ws.send(JSON.stringify({ type: 'cloud_invite_created', data: { ok: true, kind: 'match', url: match.url, matchUrl: match.matchUrl, id: match.id, expiresAt: match.expiresAt, teamA: teamA.name, teamB: teamB.name } }));
+        } catch (e) { sendImportExportResult(ws, false, 'Link failed: ' + e.message, 'invite'); }
+      })();
+      break;
+    }
+    case 'cloud_create_talent_invite': {   // single branded talent/guest link → /talent/<token>
+      (async () => {
+        try {
+          if (!cloud.authed()) { sendImportExportResult(ws, false, 'Sign in to the cloud first.', 'invite'); return; }
+          const d = msg.data || {};
+          const room = d.room || ('ne' + vdoRandom(9));
+          const invite = await cloud.createTalentInvite({ room, role: d.role || 'talent', roomTitle: d.roomTitle || state.eventName || '', name: d.name || '', teamLabel: d.teamLabel || '', ttlHours: d.ttlHours });
+          sendImportExportResult(ws, true, 'Talent invite link ready.', 'invite');
+          ws.send(JSON.stringify({ type: 'cloud_invite_created', data: { ok: true, kind: 'talent', url: invite.url, token: invite.token, expiresAt: invite.expiresAt, role: d.role || 'talent' } }));
+        } catch (e) { sendImportExportResult(ws, false, 'Link failed: ' + e.message, 'invite'); }
+      })();
+      break;
+    }
+
     case 'request_state':
       ws.send(JSON.stringify(getFullState()));
       break;
@@ -14047,6 +14324,7 @@ function handleControlMessage(msg, ws) {
           state.discord.avatarUrl = cu.avatarUrl || 'https://cdn.discordapp.com/embed/avatars/0.png';
           saveDiscordUser();
           broadcastFullState();
+          setTimeout(() => { syncProfileToCloud(); pullOrgLibrary().catch(() => {}); }, 1500);   // sync existing library up + pull org library down on sign-in
           ws.send(JSON.stringify({ type: 'cloud-email-login', data: { ok: true, message: 'Signed in as ' + state.discord.globalName } }));
         } catch (e) {
           ws.send(JSON.stringify({ type: 'cloud-email-login', data: { ok: false, message: (e && e.message) || 'Login failed' } }));

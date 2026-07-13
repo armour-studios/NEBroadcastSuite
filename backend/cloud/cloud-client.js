@@ -16,7 +16,7 @@ const path = require('path');
 let BASE = '';            // BROADCAST_REMOTE_URL (no trailing slash)
 let APP_VERSION = '0.0.0';
 let sessionFile = null;
-let session = { token: '', refreshToken: '', user: null, workspaceId: null, role: null, expiresAt: 0 };
+let session = { token: '', refreshToken: '', user: null, workspaceId: null, role: null, orgName: null, expiresAt: 0 };
 
 function init({ baseUrl, dataDir, appVersion } = {}) {
   BASE = (baseUrl || '').trim().replace(/\/+$/, '');
@@ -26,11 +26,11 @@ function init({ baseUrl, dataDir, appVersion } = {}) {
 
 function configured() { return !!BASE; }
 function authed() { return configured() && !!session.token && (!session.expiresAt || session.expiresAt > Date.now()); }
-function getSession() { return { user: session.user, workspaceId: session.workspaceId, role: session.role, authed: authed(), configured: configured() }; }
+function getSession() { return { user: session.user, workspaceId: session.workspaceId, role: session.role, orgName: session.orgName, authed: authed(), configured: configured() }; }
 
 function _load() { try { if (sessionFile && fs.existsSync(sessionFile)) session = { ...session, ...JSON.parse(fs.readFileSync(sessionFile, 'utf8')) }; } catch (e) { /* ignore */ } }
 function _save() { try { if (sessionFile) fs.writeFileSync(sessionFile, JSON.stringify(session)); } catch (e) { /* ignore */ } }
-function clearSession() { session = { token: '', refreshToken: '', user: null, workspaceId: null, role: null, expiresAt: 0 }; _save(); }
+function clearSession() { session = { token: '', refreshToken: '', user: null, workspaceId: null, role: null, orgName: null, expiresAt: 0 }; _save(); }
 
 function _require() { if (!configured()) throw new Error('Cloud backend not configured (set BROADCAST_REMOTE_URL).'); }
 function _client(auth = true) {
@@ -67,6 +67,7 @@ function _setSession(d) {
     user: d.user || session.user,
     workspaceId: d.workspaceId != null ? d.workspaceId : session.workspaceId,
     role: d.role != null ? d.role : session.role,
+    orgName: d.orgName != null ? d.orgName : session.orgName,
     expiresAt: d.expiresAt || 0
   };
   _save();
@@ -151,6 +152,15 @@ async function listStations(orgId) {
     return (data.stations || []).map((s) => ({ id: s.id, name: s.name, status: s.status }));
   } catch (e) { throw _err(e); }
 }
+// Full station cockpit payload (rooms + slots, team matches, player-camera sessions) — the
+// app renders it with copyable invite links so producers never need the website open mid-show.
+async function getStation(orgId, stationId) {
+  _require();
+  try {
+    const { data } = await _client().get(`/api/orgs/${encodeURIComponent(orgId)}/stations/${encodeURIComponent(stationId)}`);
+    return { station: data.station || null, matches: data.matches || [], cameraSessions: data.cameraSessions || [] };
+  } catch (e) { throw _err(e); }
+}
 
 // ── Crew roster mirror (names only — no pay/contact fields) so the website's station join
 // pages can offer "pick your crew profile" that auto-links back to this app's crew database. ──
@@ -167,6 +177,59 @@ async function pushLeague(orgId, league) { _require(); try { const { data } = aw
 async function listCloudLeagues(orgId) { _require(); try { const { data } = await _client().get(`/api/orgs/${encodeURIComponent(orgId)}/leagues`); return data.leagues || []; } catch (e) { throw _err(e); } }
 async function pullLeague(orgId, leagueId) { _require(); try { const { data } = await _client().get(`/api/orgs/${encodeURIComponent(orgId)}/leagues/${encodeURIComponent(leagueId)}`); return data.league || data; } catch (e) { throw _err(e); } }
 
+// ── Invite-link minting (so producers never have to open the website) ─────────
+// Every create route below authenticates via the website's resolveApiActor() Bearer path — the
+// SAME token this client already sends — gated by canManageBroadcastTooling / checkStudioAccess.
+// The website mints the tokens; we compose the public URL from BASE (namelessesports.com by default).
+function publicUrl(p) { const rel = String(p || ''); return rel.startsWith('http') ? rel : `${BASE}${rel.startsWith('/') ? '' : '/'}${rel}`; }
+
+// A station is the parent of caster/observer rooms. Producers usually have one desk; ensureStation
+// reuses the first active station or creates one so the room-invite flow is a single click.
+async function createStation(orgId, { name } = {}) { _require(); try { const { data } = await _client().post(`/api/orgs/${encodeURIComponent(orgId)}/stations`, { name }); return data.station || data; } catch (e) { throw _err(e); } }
+async function ensureStation(orgId, name) {
+  _require();
+  const list = await listStations(orgId);
+  const active = (list || []).find((s) => s.status === 'active') || (list || [])[0];
+  if (active) return active;
+  return createStation(orgId, { name: name || 'Main Station' });
+}
+// kind: 'caster' (talkback room, casters claim slots) | 'observer' (shared observer feeds). Returns
+// the room incl. shareToken → the public join page is /station/<shareToken>.
+async function createStationRoom(orgId, stationId, { kind = 'caster', name, slotCount } = {}) {
+  _require();
+  try {
+    const { data } = await _client().post(`/api/orgs/${encodeURIComponent(orgId)}/stations/${encodeURIComponent(stationId)}/rooms`, { kind, name, slotCount });
+    const room = data.room || data;
+    return { ...room, url: room && room.shareToken ? publicUrl(`/station/${room.shareToken}`) : '' };
+  } catch (e) { throw _err(e); }
+}
+// Camera-assignment session: 11 masked VDO slots. Returns shareToken → /cameras/<shareToken>.
+async function createCameraSession(orgId, { name, startggSlug, stationId } = {}) {
+  _require();
+  try {
+    const { data } = await _client().post(`/api/orgs/${encodeURIComponent(orgId)}/camera-sessions`, { name, startggSlug, stationId });
+    const session = data.session || data;
+    return { ...session, url: session && session.shareToken ? publicUrl(`/cameras/${session.shareToken}`) : '' };
+  } catch (e) { throw _err(e); }
+}
+// One producer link both teams use: /join/<id> → team → player → in-game → team VDO room.
+// teamA/teamB = { name, logo, color, players:[{name,...}] }.
+async function createMatch({ teamA, teamB, game, password, roomBase, stationId } = {}) {
+  _require();
+  try {
+    const { data } = await _client().post('/api/matches', { teamA, teamB, game, password, roomBase, stationId });
+    return { ...data, url: data && data.joinUrl ? publicUrl(data.joinUrl) : '', matchUrl: data && data.matchUrl ? publicUrl(data.matchUrl) : '' };
+  } catch (e) { throw _err(e); }
+}
+// A single branded talent/observer join link (/talent/<token>) — for a caster or guest you invite ad hoc.
+async function createTalentInvite({ room, role, roomTitle, name, password, teamLabel, ttlHours } = {}) {
+  _require();
+  try {
+    const { data } = await _client().post('/api/talent-invites', { room, role, roomTitle, name, password, teamLabel, ttlHours });
+    return { ...data, url: data && data.url ? publicUrl(data.url) : '' };
+  } catch (e) { throw _err(e); }
+}
+
 module.exports = {
   init, configured, authed, getSession, clearSession,
   loginWithDiscord,
@@ -177,7 +240,10 @@ module.exports = {
   getMultiview, publishObservedGame, stopObservedGame,
   listStationFeeds,
   listStations,
+  getStation,
   pushCrewRoster,
   pushShowState,
-  pushLeague, listCloudLeagues, pullLeague
+  pushLeague, listCloudLeagues, pullLeague,
+  publicUrl,
+  createStation, ensureStation, createStationRoom, createCameraSession, createMatch, createTalentInvite
 };
