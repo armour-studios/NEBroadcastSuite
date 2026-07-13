@@ -2690,7 +2690,7 @@ function buildCasterJoinUrlFromVdo(caster, vdo) {
   const sid = vdoSlug(caster.streamId || caster.handle || caster.name || 'caster');
   const lang = state.vdo?.lang || 'en-US';
   const extra = state.vdo?.pushParams ? '&' + String(state.vdo.pushParams).replace(/^&+/, '') : '';
-  return `${vdoBase()}/?room=${vdo.room}&push=${sid}&transcribe=${lang}&webcam&autostart${extra}#p=${vdo.password}`;
+  return `${vdoBase()}/?room=${vdo.room}&push=${sid}&transcribe=${lang}&webcam${extra}#p=${vdo.password}`;
 }
 function buildCasterObsUrlFromVdo(caster, vdo) {
   if (!vdo || !vdo.room || !vdo.password) return caster.camUrl || '';
@@ -2823,7 +2823,7 @@ function buildTalentJoinUrl(team, player) {
   const sid = playerStreamId(player);
   const extra = state.vdo?.pushParams ? '&' + String(state.vdo.pushParams).replace(/^&+/, '') : '';
   const lang = state.vdo?.lang || 'en-US';
-  return `${vdoBase()}/?room=${vdo.room}&push=${sid}&transcribe=${lang}&webcam&autostart${extra}#p=${vdo.password}`;
+  return `${vdoBase()}/?room=${vdo.room}&push=${sid}&transcribe=${lang}&webcam${extra}#p=${vdo.password}`;
 }
 // OBS feed (solo view of one player) — for a dedicated browser source per gamertag.
 function buildObsViewUrl(team, player) {
@@ -2843,7 +2843,7 @@ function buildPlayerInterviewJoinUrl(player) {
   const sid = playerStreamId(player);
   const lang = state.vdo?.lang || 'en-US';
   const extra = state.vdo?.pushParams ? '&' + String(state.vdo.pushParams).replace(/^&+/, '') : '';
-  return `${vdoBase()}/?room=${vdo.room}&push=${sid}&transcribe=${lang}&webcam&autostart${extra}#p=${vdo.password}`;
+  return `${vdoBase()}/?room=${vdo.room}&push=${sid}&transcribe=${lang}&webcam${extra}#p=${vdo.password}`;
 }
 function buildPlayerInterviewViewUrl(player) {
   const vdo = deskRoomVdo();
@@ -2901,7 +2901,7 @@ function buildCasterJoinUrl(caster) {
   const sid = vdoSlug(caster.streamId || caster.handle || caster.name || 'caster');
   const lang = state.vdo?.lang || 'en-US';
   const extra = state.vdo?.pushParams ? '&' + String(state.vdo.pushParams).replace(/^&+/, '') : '';
-  return `${vdoBase()}/?room=${vdo.room}&push=${sid}&transcribe=${lang}&webcam&autostart${extra}#p=${vdo.password}`;
+  return `${vdoBase()}/?room=${vdo.room}&push=${sid}&transcribe=${lang}&webcam${extra}#p=${vdo.password}`;
 }
 // Caster OBS feed — solo view of one caster from the shared caster room.
 function buildCasterObsUrl(caster) {
@@ -3521,9 +3521,136 @@ function migrateLeague(lg) {
   if (!Array.isArray(lg.standings)) lg.standings = [];
   if (!Array.isArray(lg.schedule)) lg.schedule = [];
   if (!Array.isArray(lg.seasonHistory)) lg.seasonHistory = [];
+  // Website sync (opt-in, per league) — absent/empty means never pushed, zero cloud footprint.
+  if (typeof lg.cloudLeagueId !== 'string') lg.cloudLeagueId = '';
   lg.teams.forEach((tm) => { if (tm && !tm.id) tm.id = srvLgUid('tm'); });
   lg.schedule.forEach((m) => { if (m && !Array.isArray(m.games)) m.games = []; });
   return capLeagueLogo(lg);
+}
+
+// ── Website league sync (bidirectional, opt-in per league — see CompeteLeague on the website) ──
+// Shapes a local league into the website's push payload. Team/match ids travel as externalId so
+// a later push/pull recognizes "this is the same team/match" without adopting cloud-generated ids.
+function buildLeaguePushPayload(lg) {
+  const teams = (lg.teams || []).map((t) => ({
+    externalId: t.id,
+    name: (t.teamName || t.name || '').toString().slice(0, 80),
+    seed: typeof t.seed === 'number' ? t.seed : null,
+    wins: typeof t.wins === 'number' ? t.wins : 0,
+    losses: typeof t.losses === 'number' ? t.losses : 0,
+    draws: typeof t.draws === 'number' ? t.draws : 0,
+    points: typeof t.points === 'number' ? t.points : 0,
+    status: t.status || 'active',
+  }));
+  const matches = (lg.schedule || []).map((m) => {
+    const wk = parseInt(m.week, 10);
+    return {
+      externalId: m.id,
+      teamAExternalId: m.teamA,
+      teamBExternalId: m.teamB,
+      format: m.format || null,
+      week: isNaN(wk) ? null : wk,
+      scoreA: m.result && typeof m.result.scoreA === 'number' ? m.result.scoreA : null,
+      scoreB: m.result && typeof m.result.scoreB === 'number' ? m.result.scoreB : null,
+      status: (m.result && (m.result.scoreA != null || m.result.scoreB != null)) ? 'completed' : 'scheduled',
+      games: Array.isArray(m.games) ? m.games : [],
+    };
+  });
+  // The app's status vocabulary (active/offseason/playoffs/complete) is richer than the
+  // website's (upcoming/active/completed) — collapse lossily on push; the app stays authoritative.
+  const status = lg.status === 'complete' ? 'completed' : (lg.status === 'upcoming' ? 'upcoming' : 'active');
+  return {
+    externalId: lg.id,
+    name: lg.name || 'Untitled League',
+    game: lg.game || null,
+    status,
+    scoring: lg.scoring || {},
+    tiebreak: lg.tiebreak || 'gd',
+    starterCount: typeof lg.starterCount === 'number' ? lg.starterCount : 3,
+    playoffN: typeof lg.playoffN === 'number' ? lg.playoffN : 4,
+    abbr: lg.abbr || '',
+    teams, matches,
+  };
+}
+
+function cloudTeamToLocal(ct) {
+  return {
+    id: ct.externalId || srvLgUid('tm'),
+    teamName: ct.name || '',
+    seed: typeof ct.seed === 'number' ? ct.seed : null,
+    wins: ct.wins || 0, losses: ct.losses || 0, draws: ct.draws || 0, points: ct.points || 0,
+    status: ct.status || 'active',
+  };
+}
+function cloudMatchToLocal(cm, teamIdByCloudId) {
+  return {
+    id: cm.externalId || srvLgUid('m'),
+    teamA: teamIdByCloudId.get(cm.teamAId) || cm.teamAId,
+    teamB: teamIdByCloudId.get(cm.teamBId) || cm.teamBId,
+    format: cm.format || 'BO3',
+    week: cm.week != null ? String(cm.week) : '',
+    date: '', time: '',
+    result: { scoreA: cm.scoreA ?? null, scoreB: cm.scoreB ?? null, ot: false },
+    games: Array.isArray(cm.games) ? cm.games : [],
+  };
+}
+// A brand-new local league from a website-authored CompeteLeague this app has never seen.
+function cloudLeagueToLocal(cloudLg) {
+  const teamIdByCloudId = new Map();
+  const teams = (cloudLg.teams || []).map((t) => {
+    const local = cloudTeamToLocal(t);
+    teamIdByCloudId.set(t.id, local.id);
+    return local;
+  });
+  const schedule = (cloudLg.matches || []).map((m) => cloudMatchToLocal(m, teamIdByCloudId));
+  return {
+    id: cloudLg.externalId || srvLgUid('lg'),
+    name: cloudLg.name || 'Untitled League',
+    status: cloudLg.status === 'completed' ? 'complete' : (cloudLg.status || 'active'),
+    type: 'team',
+    scoring: (cloudLg.scoring && typeof cloudLg.scoring === 'object') ? cloudLg.scoring : undefined,
+    tiebreak: cloudLg.tiebreak || 'gd',
+    starterCount: cloudLg.starterCount, playoffN: cloudLg.playoffN, abbr: cloudLg.abbr || '',
+    teams, schedule,
+  };
+}
+// Pull a website league into the local leagues array — non-destructive, mergeAtTop philosophy:
+// an already-linked local league only gains teams/matches it doesn't already have (matched by
+// externalId, else name); existing local rows are never overwritten. A genuinely new
+// website-authored league (no local link) is added as a brand-new local league.
+function mergePulledLeague(cloudLg) {
+  if (!cloudLg || !cloudLg.id) return '0 leagues pulled';
+  if (!Array.isArray(state.leagues)) state.leagues = [];
+  const existing = state.leagues.find((l) => l.cloudLeagueId === cloudLg.id || (cloudLg.externalId && l.id === cloudLg.externalId));
+  if (existing) {
+    existing.teams = existing.teams || [];
+    existing.schedule = existing.schedule || [];
+    const teamIdByCloudId = new Map();
+    let addedTeams = 0, addedMatches = 0;
+    (cloudLg.teams || []).forEach((ct) => {
+      const already = existing.teams.find((t) => t.id === ct.externalId || (t.teamName || t.name) === ct.name);
+      if (already) { teamIdByCloudId.set(ct.id, already.id); return; }
+      const local = cloudTeamToLocal(ct);
+      existing.teams.push(local);
+      teamIdByCloudId.set(ct.id, local.id);
+      addedTeams++;
+    });
+    (cloudLg.matches || []).forEach((cm) => {
+      if (existing.schedule.some((m) => m.id === cm.externalId)) return;
+      existing.schedule.push(cloudMatchToLocal(cm, teamIdByCloudId));
+      addedMatches++;
+    });
+    existing.cloudLeagueId = existing.cloudLeagueId || cloudLg.id;
+    leaguesVer++;
+    saveAppState();
+    return `Updated "${existing.name}" (+${addedTeams} teams, +${addedMatches} matches)`;
+  }
+  const fresh = migrateLeague(cloudLeagueToLocal(cloudLg));
+  fresh.cloudLeagueId = cloudLg.id;
+  state.leagues = mergeAtTop(state.leagues, [fresh], (a, b) => a.id === b.id);
+  leaguesVer++;
+  saveAppState();
+  return `Pulled "${fresh.name}" as a new league`;
 }
 
 async function testStartGgConnection() {
@@ -11711,7 +11838,7 @@ function handleControlMessage(msg, ws) {
       const streamId = vdoSlug(member.handle || member.name || entry.crewId);
       const lang = state.vdo?.lang || 'en-US';
       entry.streamId = streamId; entry.vdoRoom = grm.room; entry.vdoPassword = grm.password;
-      entry.joinUrl = `${vdoBase()}/?room=${grm.room}&push=${streamId}&transcribe=${lang}&webcam&autostart#p=${grm.password}`;
+      entry.joinUrl = `${vdoBase()}/?room=${grm.room}&push=${streamId}&transcribe=${lang}&webcam#p=${grm.password}`;
       entry.viewUrl = `${vdoBase()}/?room=${grm.room}&view=${streamId}&solo#p=${grm.password}`;
       saveAppState(); broadcastFullState(); break;
     }
@@ -11729,7 +11856,7 @@ function handleControlMessage(msg, ws) {
         const member = (state.crew || []).find((c) => c.id === entry.crewId) || {};
         const streamId = vdoSlug(member.handle || member.name || entry.crewId);
         entry.streamId = streamId; entry.vdoRoom = grm.room; entry.vdoPassword = grm.password;
-        entry.joinUrl = `${vdoBase()}/?room=${grm.room}&push=${streamId}&transcribe=${lang}&webcam&autostart#p=${grm.password}`;
+        entry.joinUrl = `${vdoBase()}/?room=${grm.room}&push=${streamId}&transcribe=${lang}&webcam#p=${grm.password}`;
         entry.viewUrl = `${vdoBase()}/?room=${grm.room}&view=${streamId}&solo#p=${grm.password}`;
       });
       saveAppState(); broadcastFullState(); break;
@@ -13369,6 +13496,53 @@ function handleControlMessage(msg, ws) {
           // crew roster to offer, even if no crew edit happened since sign-in.
           syncCrewRosterToCloud();
         } catch (e) { ws.send(JSON.stringify({ type: 'cloud_station_feeds', data: { ok: false, message: e.message, feeds: [], shared: [] } })); }
+      })();
+      break;
+    }
+
+    // Website league sync (bidirectional, opt-in per league — see CompeteLeague on the website).
+    // Push is producer-triggered and full-replace (mirrors saveProfile's id-absent/id-present
+    // branch); pull is additive/non-destructive (mergePulledLeague, mergeAtTop philosophy).
+    case 'cloud_push_league': {
+      (async () => {
+        try {
+          if (!cloud.authed()) { sendImportExportResult(ws, false, cloud.configured() ? 'Sign in to the cloud first.' : 'Cloud sync not available yet.', 'league'); return; }
+          const orgId = msg.data && msg.data.orgId;
+          const leagueId = msg.data && msg.data.leagueId;
+          if (!orgId) { sendImportExportResult(ws, false, 'No organization workspace — leagues can only sync from an org.', 'league'); return; }
+          const lg = (state.leagues || []).find((l) => l.id === leagueId);
+          if (!lg) { sendImportExportResult(ws, false, 'League not found.', 'league'); return; }
+          const saved = await cloud.pushLeague(orgId, buildLeaguePushPayload(lg));
+          if (saved && saved.id) { lg.cloudLeagueId = saved.id; leaguesVer++; saveAppState(); broadcastFullState(); }
+          sendImportExportResult(ws, true, `"${lg.name}" synced to the website.`, 'league');
+        } catch (e) { sendImportExportResult(ws, false, 'Sync failed: ' + e.message, 'league'); }
+      })();
+      break;
+    }
+    case 'cloud_list_leagues': {
+      (async () => {
+        try {
+          if (!cloud.authed()) { ws.send(JSON.stringify({ type: 'cloud_leagues', data: { ok: false, message: 'Sign in to the cloud first.', leagues: [] } })); return; }
+          const orgId = msg.data && msg.data.orgId;
+          if (!orgId) { ws.send(JSON.stringify({ type: 'cloud_leagues', data: { ok: false, message: 'No organization workspace.', leagues: [] } })); return; }
+          const leagues = await cloud.listCloudLeagues(orgId);
+          ws.send(JSON.stringify({ type: 'cloud_leagues', data: { ok: true, leagues } }));
+        } catch (e) { ws.send(JSON.stringify({ type: 'cloud_leagues', data: { ok: false, message: e.message, leagues: [] } })); }
+      })();
+      break;
+    }
+    case 'cloud_pull_league': {
+      (async () => {
+        try {
+          if (!cloud.authed()) { sendImportExportResult(ws, false, 'Sign in to the cloud first.', 'league'); return; }
+          const orgId = msg.data && msg.data.orgId;
+          const leagueId = msg.data && msg.data.leagueId;
+          if (!orgId || !leagueId) { sendImportExportResult(ws, false, 'orgId and leagueId are required.', 'league'); return; }
+          const cloudLg = await cloud.pullLeague(orgId, leagueId);
+          const summary = mergePulledLeague(cloudLg);
+          sendImportExportResult(ws, true, summary + ' (from the website).', 'league');
+          broadcastFullState();
+        } catch (e) { sendImportExportResult(ws, false, 'Pull failed: ' + e.message, 'league'); }
       })();
       break;
     }
