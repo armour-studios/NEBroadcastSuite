@@ -1999,6 +1999,51 @@ async function stationAutoSync() {
 }
 setInterval(stationAutoSync, 20000);
 
+// ── Show-state heartbeat → the casters' show bar ─────────────────────────────
+// Publishes a tiny, secret-free snapshot (event/round, team names + scores, break countdown,
+// on-air graphic) to the org so the website's station join pages can show casters what the
+// producer sees. Change-detected: quiet shows cost one keepalive per few minutes.
+function buildShowStateForCloud() {
+  const b = (state.teams && state.teams.blue) || {};
+  const o = (state.teams && state.teams.orange) || {};
+  const br = state.breakScreen || {};
+  return {
+    eventName: state.eventName || '',
+    roundLabel: state.roundLabel || '',
+    gameLabel: state.gameLabel || '',
+    teams: {
+      a: { name: b.name || '', score: Number(b.score) || 0 },
+      b: { name: o.name || '', score: Number(o.score) || 0 }
+    },
+    bestOf: state.bestOf || null,
+    gfxActive: state.gfxActive || '',
+    countdown: (br.visible && br.endsAt) ? { endsAt: Number(br.endsAt) || null, title: br.title || 'Starting soon' } : null
+  };
+}
+let _showStatePrev = '';
+let _showStateLastPush = 0;
+let _showStateBusy = false;
+async function showStateHeartbeat() {
+  if (_showStateBusy) return;
+  try {
+    if (!cloud || typeof cloud.authed !== 'function' || !cloud.authed()) return;
+    const s = cloud.getSession() || {};
+    const orgId = s.workspaceId;
+    if (!orgId || String(orgId).startsWith('user:')) return;
+    const data = buildShowStateForCloud();
+    const sig = JSON.stringify(data);
+    const now = Date.now();
+    // Push on change, or every 3 min as a keepalive (readers treat >10 min as stale).
+    if (sig === _showStatePrev && (now - _showStateLastPush) < 180000) return;
+    _showStateBusy = true;
+    await cloud.pushShowState(orgId, data);
+    _showStatePrev = sig;
+    _showStateLastPush = now;
+  } catch (_) { /* transient — next beat retries */ }
+  finally { _showStateBusy = false; }
+}
+setInterval(showStateHeartbeat, 12000);
+
 function loadState() {
   try {
     const saved = safeReadJson(stateFile, null);

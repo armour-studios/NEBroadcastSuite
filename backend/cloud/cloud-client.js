@@ -148,6 +148,17 @@ async function listStationFeeds(orgId) { _require(); try { const { data } = awai
 // pages can offer "pick your crew profile" that auto-links back to this app's crew database. ──
 async function pushCrewRoster(orgId, crew) { _require(); try { const { data } = await _client().put(`/api/orgs/${encodeURIComponent(orgId)}/crew-roster`, { crew }); return data; } catch (e) { throw _err(e); } }
 
+// ── Show-state heartbeat: event/round, score, break countdown, on-air graphic — rendered as
+// the casters' show bar on the website's station join pages. Small + secret-free. ──
+async function pushShowState(orgId, data) { _require(); try { const { data: d } = await _client().put(`/api/orgs/${encodeURIComponent(orgId)}/show-state`, { data }); return d; } catch (e) { throw _err(e); } }
+
+// ── Leagues (bidirectional sync with the website's CompeteLeague — opt-in, per league) ──
+// pushLeague: create-or-update-by-externalId (the app's local league id). listCloudLeagues:
+// discovery for the "pull a website league in" UI. pullLeague: full detail for one league.
+async function pushLeague(orgId, league) { _require(); try { const { data } = await _client().post(`/api/orgs/${encodeURIComponent(orgId)}/leagues`, league); return data.league || data; } catch (e) { throw _err(e); } }
+async function listCloudLeagues(orgId) { _require(); try { const { data } = await _client().get(`/api/orgs/${encodeURIComponent(orgId)}/leagues`); return data.leagues || []; } catch (e) { throw _err(e); } }
+async function pullLeague(orgId, leagueId) { _require(); try { const { data } = await _client().get(`/api/orgs/${encodeURIComponent(orgId)}/leagues/${encodeURIComponent(leagueId)}`); return data.league || data; } catch (e) { throw _err(e); } }
+
 module.exports = {
   init, configured, authed, getSession, clearSession,
   loginWithDiscord,
@@ -157,5 +168,7 @@ module.exports = {
   listCameraFeeds,
   getMultiview, publishObservedGame, stopObservedGame,
   listStationFeeds,
-  pushCrewRoster
+  pushCrewRoster,
+  pushShowState,
+  pushLeague, listCloudLeagues, pullLeague
 };
