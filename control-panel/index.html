@@ -5940,6 +5940,17 @@
         <button class="btn btn-secondary btn-sm" id="rd-stop">Stop</button>
       </div>
     </div>
+    <!-- Rundown library: several named rundowns, one active; export bundles referenced flows -->
+    <div id="rd-books" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:8px;">
+      <select id="rd-picker" class="input-select" style="max-width:240px;" title="Active rundown"></select>
+      <button class="btn btn-ghost btn-sm" id="rd-book-new" title="Create a new empty rundown">+ New</button>
+      <button class="btn btn-ghost btn-sm" id="rd-book-rename" title="Rename this rundown">Rename</button>
+      <button class="btn btn-ghost btn-sm" id="rd-book-dup" title="Duplicate this rundown">Duplicate</button>
+      <button class="btn btn-ghost btn-sm" id="rd-book-export" title="Export this rundown as JSON (includes the flows it references)">&#x2191; Export</button>
+      <button class="btn btn-ghost btn-sm" id="rd-book-import" title="Import a rundown JSON (adds it as a new rundown)">&#x2193; Import</button>
+      <button class="btn btn-ghost btn-sm" id="rd-book-delete" style="color:#f56565;" title="Delete this rundown">Delete</button>
+      <input type="file" id="rd-import-file" class="input-file-hidden" accept=".json">
+    </div>
     <div id="rd-status" style="font-size:12px;color:var(--muted);margin-bottom:8px;"></div>
     <div id="rd-list" style="display:flex;flex-direction:column;gap:4px;margin-bottom:10px;"></div>
     <div id="rd-add" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;padding-top:10px;border-top:1px solid var(--border);">

@@ -21131,10 +21131,26 @@ function rdFlows() { return (_flows && _flows.length) ? _flows : ((typeof curren
 // An ordered list of segments the producer steps through. Each segment fires an action
 // (scene cut / trigger / countdown / playlist / overlay view / manual hold). Timed segments
 // (hold > 0) auto-advance; hold = 0 waits for the Advance button. Stored client-side.
-const RD_KEY = 'ne_rundown_v1';
-let _rdSegs = (() => { try { return JSON.parse(localStorage.getItem(RD_KEY) || '[]'); } catch { return []; } })();
+const RD_KEY  = 'ne_rundown_v1';   // legacy single-rundown key — migrated into RDS_KEY on first load
+const RDS_KEY = 'ne_rundowns_v1';  // { activeId, rundowns: [{ id, name, segs }] }
+let _rdStore = (() => {
+  try {
+    const s = JSON.parse(localStorage.getItem(RDS_KEY));
+    if (s && Array.isArray(s.rundowns) && s.rundowns.length) return s;
+  } catch {}
+  let legacy = [];
+  try { legacy = JSON.parse(localStorage.getItem(RD_KEY) || '[]'); } catch {}
+  const first = { id: 'rd_' + Math.random().toString(36).slice(2, 8), name: 'Main Show', segs: Array.isArray(legacy) ? legacy : [] };
+  return { activeId: first.id, rundowns: [first] };
+})();
+function rdActive() {
+  let r = _rdStore.rundowns.find((x) => x.id === _rdStore.activeId);
+  if (!r) { r = _rdStore.rundowns[0]; _rdStore.activeId = r.id; }
+  return r;
+}
+let _rdSegs = rdActive().segs;
 let _rdRunning = false, _rdIdx = -1, _rdTimer = null;
-function rdSave() { try { localStorage.setItem(RD_KEY, JSON.stringify(_rdSegs)); } catch {} }
+function rdSave() { rdActive().segs = _rdSegs; try { localStorage.setItem(RDS_KEY, JSON.stringify(_rdStore)); } catch {} }
 const RD_TRIGGERS = [['breakScreen', 'Countdown'], ['winner', 'Winner'], ['intro', 'Line-up'], ['spotlight', 'Spotlight'], ['veto', 'Map Veto']];
 function rdTargetLabel(seg) {
   if (seg.type === 'scene') return seg.target || '(no scene)';
@@ -21248,6 +21264,92 @@ el('rd-add-btn')?.addEventListener('click', () => {
 el('rd-start')?.addEventListener('click', rdStart);
 el('rd-next')?.addEventListener('click', rdNext);
 el('rd-stop')?.addEventListener('click', rdStop);
+
+// ── Multiple rundowns: picker, manage, import/export ─────────────────────────
+function renderRdPicker() {
+  const sel = el('rd-picker'); if (!sel) return;
+  sel.innerHTML = _rdStore.rundowns.map((r) =>
+    `<option value="${poEsc(r.id)}"${r.id === _rdStore.activeId ? ' selected' : ''}>${poEsc(r.name || 'Untitled')} (${(r.segs || []).length})</option>`).join('');
+}
+function rdSwitchTo(id) {
+  if (!_rdStore.rundowns.find((r) => r.id === id)) return;
+  rdStop();                       // never leave a running rundown pointing at swapped-out segments
+  _rdStore.activeId = id;
+  _rdSegs = rdActive().segs;
+  rdSave(); renderRdPicker(); renderRundown();
+}
+el('rd-picker')?.addEventListener('change', function () { rdSwitchTo(this.value); });
+el('rd-book-new')?.addEventListener('click', async () => {
+  const name = await nePrompt('Name for the new rundown:', 'New Rundown'); if (!name) return;
+  const r = { id: 'rd_' + Math.random().toString(36).slice(2, 8), name, segs: [] };
+  _rdStore.rundowns.push(r); rdSwitchTo(r.id);
+});
+el('rd-book-rename')?.addEventListener('click', async () => {
+  const r = rdActive();
+  const name = await nePrompt('Rename rundown:', r.name); if (!name) return;
+  r.name = name; rdSave(); renderRdPicker();
+});
+el('rd-book-dup')?.addEventListener('click', () => {
+  const src = rdActive();
+  const r = {
+    id: 'rd_' + Math.random().toString(36).slice(2, 8), name: (src.name || 'Rundown') + ' (copy)',
+    segs: (src.segs || []).map((s) => ({ ...s, id: 'sg_' + Math.random().toString(36).slice(2, 8) })),
+  };
+  _rdStore.rundowns.push(r); rdSwitchTo(r.id);
+});
+el('rd-book-delete')?.addEventListener('click', () => {
+  const r = rdActive();
+  if (!confirm('Delete rundown "' + (r.name || 'Untitled') + '" (' + (r.segs || []).length + ' segments)? This cannot be undone.')) return;
+  _rdStore.rundowns = _rdStore.rundowns.filter((x) => x.id !== r.id);
+  if (!_rdStore.rundowns.length) _rdStore.rundowns.push({ id: 'rd_' + Math.random().toString(36).slice(2, 8), name: 'Main Show', segs: [] });
+  rdSwitchTo(_rdStore.rundowns[0].id);
+});
+// Export carries the flow definitions the rundown references, so it's portable to another
+// producer's machine — import re-creates any of those flows that don't exist there yet.
+el('rd-book-export')?.addEventListener('click', () => {
+  const r = rdActive();
+  const flowIds = [...new Set((r.segs || []).filter((s) => s.type === 'flow' && s.target).map((s) => s.target))];
+  const payload = {
+    format: 'ne-rundown', version: 1, name: r.name || 'Rundown',
+    segs: r.segs || [], flows: rdFlows().filter((f) => flowIds.includes(f.id)),
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = (payload.name).replace(/[^a-z0-9_-]/gi, '_') + '.rundown.json';
+  a.click();
+  URL.revokeObjectURL(a.href);
+});
+el('rd-book-import')?.addEventListener('click', () => el('rd-import-file')?.click());
+el('rd-import-file')?.addEventListener('change', function () {
+  const file = this.files && this.files[0]; this.value = '';
+  if (!file) return;
+  const fr = new FileReader();
+  fr.onload = () => {
+    try {
+      const d = JSON.parse(fr.result);
+      const rawSegs = Array.isArray(d) ? d : (Array.isArray(d.segs) ? d.segs : null);
+      if (!rawSegs) { alert('Not a rundown file — expected { name, segs[] } or a plain segment array.'); return; }
+      const segs = rawSegs.filter((s) => s && typeof s === 'object' && s.type).map((s) => ({
+        id: 'sg_' + Math.random().toString(36).slice(2, 8),
+        type: String(s.type), target: String(s.target || ''),
+        hold: Math.max(0, parseInt(s.hold, 10) || 0), label: String(s.label || ''),
+      }));
+      const have = new Set(rdFlows().map((f) => f.id));
+      let flowsAdded = 0;
+      (Array.isArray(d.flows) ? d.flows : []).forEach((f) => {
+        if (f && f.id && f.name && Array.isArray(f.actions) && !have.has(f.id)) { send('save_flow', f); flowsAdded++; }
+      });
+      const name = String((d && d.name) || file.name.replace(/\.rundown\.json$|\.json$/i, '')) || 'Imported rundown';
+      const r = { id: 'rd_' + Math.random().toString(36).slice(2, 8), name, segs };
+      _rdStore.rundowns.push(r); rdSwitchTo(r.id);
+      if (typeof showToast === 'function') showToast('Imported "' + name + '" — ' + segs.length + ' segments' + (flowsAdded ? ', ' + flowsAdded + ' flows' : ''), '#48bb78', 2600);
+    } catch (e) { alert('Could not read that file: ' + e.message); }
+  };
+  fr.readAsText(file);
+});
+
+renderRdPicker();
 renderRdAddTarget();
 renderRundown();
 
