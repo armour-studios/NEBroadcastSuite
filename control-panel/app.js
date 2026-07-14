@@ -345,16 +345,21 @@ function placeShowDeck(tab) {
   // ── Show Deck: per-slot talent allocation strip (Talent page, all sub-tabs) ────────────
   // Caster slots go through save_caster_to_library's deskSlot (same swap/bump plumbing the
   // Casters lineup uses, so the desk + DCC follow automatically); Host/Observer are show
-  // roles; the On-shift chips toggle crew.active — many casters a night, few active a shift.
-  // Support / tournament-operations roles (crew.group values) — no camera slot, but they worked the
+  // roles. "Current shift" is the desk lineup itself — no separate manual on-shift list —
+  // crew.active/workedEvent are set automatically by the desk-slot and show-role handlers
+  // server-side (save_caster_to_library / set_show_roles) purely so credits (workedEvent
+  // sticks even after someone rolls off) and Save Preset (active = who's on the desk right
+  // now) keep working; nothing here reads or renders them directly any more.
+  // Off-Air Event Staff — anyone credited who isn't in the desk lineup: producers, tournament ops,
+  // socials, or a caster who isn't on the live desk right now. No camera slot, but they worked the
   // event so they're credited. Keep in sync with the #td-support-role-sel options in index.html.
-  const TD_SUPPORT_LABEL = { producer: 'Producer', admin: 'Tournament Admin', coordinator: 'Coordinator', replay: 'Replay Op', stats: 'Statistician', moderator: 'Moderator', graphics: 'Graphics', flex: 'Flex', socials: 'Social' };
+  const TD_SUPPORT_LABEL = { caster: 'Caster', producer: 'Producer', admin: 'Tournament Admin', coordinator: 'Coordinator', replay: 'Replay Op', stats: 'Statistician', moderator: 'Moderator', graphics: 'Graphics', flex: 'Flex', socials: 'Social' };
   const TD_SUPPORT_GROUPS = Object.keys(TD_SUPPORT_LABEL);
   window._tdSig = '';
   window.renderTalentDeck = function renderTalentDeck(data) {
-    const wrap = el('td-slots'); const roster = el('td-roster-chips');
-    if (!wrap || !roster || !data) return;
-    if (typeof _editingInside === 'function' && (_editingInside(wrap) || _editingInside(roster))) return;
+    const wrap = el('td-slots');
+    if (!wrap || !data) return;
+    if (typeof _editingInside === 'function' && _editingInside(wrap)) return;
     const crew = data.crew || [];
     const lib = (data.casters && data.casters.library) || [];
     const lineup = (data.casters && data.casters.lineup) || [];
@@ -365,7 +370,7 @@ function placeShowDeck(tab) {
     const shifts = (data.casters && data.casters.shifts) || [];
     const supportList = (data.casters && Array.isArray(data.casters.support)) ? data.casters.support : [];
     const stationRooms = (window._cfStationDetail && window._cfStationDetail.rooms) || [];
-    const sig = JSON.stringify({ c: crew.map((c) => [c.id, c.name, c.handle, c.group, !!c.active, !!c.workedEvent, c.country || '']), s: [1, 2, 3, 4].map(slotName), r: roles, l: labels, sh: shifts.map((s) => s.id + s.name), sup: supportList.map((s) => s.crewId + (s.role || '')), rm: stationRooms.map((r) => r.id + r.connected + '/' + r.slots) });
+    const sig = JSON.stringify({ c: crew.map((c) => [c.id, c.name, c.handle, c.group, c.country || '']), s: [1, 2, 3, 4].map(slotName), r: roles, l: labels, sh: shifts.map((s) => s.id + s.name), sup: supportList.map((s) => s.crewId + (s.role || '')), rm: stationRooms.map((r) => r.id + r.connected + '/' + r.slots) });
     if (sig === window._tdSig) return;
     window._tdSig = sig;
     const disp = (c) => c.handle || c.name;   // gamertag-first, matching the desk
@@ -417,30 +422,7 @@ function placeShowDeck(tab) {
     };
     el('td-host')?.addEventListener('change', sendRoles);
     el('td-obs')?.addEventListener('change', sendRoles);
-    const flag = (typeof flagSrc === 'function') ? flagSrc : () => '';
-    // A removable member chip (flag + name + ×) shared by On shift and Worked this event.
-    const memberChip = (c, rmAttr) => {
-      const cc = (c.country || '').toLowerCase();
-      const cn = (typeof countryName === 'function' && c.country) ? countryName(c.country) : '';
-      return `<button type="button" class="td-chip is-active" ${rmAttr}="${esc(c.id)}" title="${esc(cn ? disp(c) + ' · ' + cn : disp(c))} — click to remove">`
-        + (cc ? `<img class="td-chip-flag" src="${esc(flag(cc))}" alt="" onerror="this.remove()">` : '')
-        + `<span>${esc(disp(c))}</span><span class="td-chip-x">&times;</span></button>`;
-    };
-    // On shift = who's working RIGHT NOW (active). Only these show here; search above to add someone.
-    const onNow = crew.filter((c) => c.active);
-    roster.innerHTML = onNow.length
-      ? onNow.map((c) => memberChip(c, 'data-onshift-rm')).join('')
-      : '<span class="field-hint" style="margin:0;">No one on the current shift — search above to add them.</span>';
-    // Worked this event = the credit pool. Anyone put on shift or on the desk lands here automatically
-    // and STAYS after a Clear, so everyone who did their dues gets credited. Search above to add others.
-    const workedWrap = el('td-worked-chips');
-    if (workedWrap) {
-      const worked = crew.filter((c) => c.workedEvent);
-      workedWrap.innerHTML = worked.length
-        ? worked.map((c) => memberChip(c, 'data-worked-rm')).join('')
-        : '<span class="field-hint" style="margin:0;">No one credited yet — anyone on shift or on the desk is added automatically.</span>';
-    }
-    // Support crew — producers / tournament-ops / socials (no camera slot). EVENT-scoped
+    // Off-Air Event Staff — producers / tournament-ops / socials / off-desk casters. EVENT-scoped
     // (state.casters.support): adding/removing here only changes tonight's deck — the crew
     // record and its group on the Crew page are never touched.
     const supportWrap = el('td-support-list');
@@ -451,11 +433,11 @@ function placeShowDeck(tab) {
         `<span class="dcc-support-chip" data-id="${esc(c.id)}">`
         + `<span class="nm">${esc(disp(c))}</span>`
         + `<span class="rl">${esc(s.role || c.role || TD_SUPPORT_LABEL[c.group] || '')}</span>`
-        + `<button type="button" class="rm" data-support-rm="${esc(c.id)}" title="Remove from tonight's support crew — their profile stays in Crew">&times;</button></span>`
-      ).join('') : '<span class="dcc-support-empty">No producers, ops or socials added yet.</span>';
+        + `<button type="button" class="rm" data-support-rm="${esc(c.id)}" title="Remove from the credits screen — their profile stays in Crew">&times;</button></span>`
+      ).join('') : '<span class="dcc-support-empty">No off-air staff added yet.</span>';
     }
     // Shared crew datalist for the On shift / Worked / Support search boxes.
-    ['td-crew-dl', 'td-support-dl'].forEach((id) => { const dl = el(id); if (dl) dl.innerHTML = crew.map((c) => `<option value="${esc(disp(c))}">`).join(''); });
+    { const dl = el('td-support-dl'); if (dl) dl.innerHTML = crew.map((c) => `<option value="${esc(disp(c))}">`).join(''); }
     // Website station rooms — the deck IS the director surface now (DCC merged in): monitor &
     // adjust the room the casters actually joined, copy its invite, jump into talkback. The
     // monitor iframe is lazy (only loads when toggled) and survives re-renders via its src.
@@ -512,43 +494,13 @@ function placeShowDeck(tab) {
     }
   };
   el('td-add-crew')?.addEventListener('click', () => { if (typeof window.openCrewAdd === 'function') window.openCrewAdd(); });
-  // Resolve a typed name/handle to a crew member (shared by the On shift / Worked / Support adders).
+  // Resolve a typed name/handle to a crew member (shared by the Support adder).
   const _tdFindCrew = (typed) => {
     const q = (typed || '').trim().toLowerCase(); if (!q) return null;
     const list = (currentState && currentState.crew) || [];
     const d = (c) => c.handle || c.name;
     return list.find((c) => d(c).toLowerCase() === q) || list.find((c) => (c.name || '').toLowerCase() === q) || null;
   };
-  // On shift: put an existing crew member on shift (also flags them worked → credited).
-  const _tdAddOnShift = () => {
-    const inp = el('td-onshift-search'); const m = _tdFindCrew(inp?.value);
-    if (!m) { showToast('Search for an existing crew member first (+ Add Crew to create one).', '#fbbf24'); return; }
-    send('update_crew_member', { id: m.id, active: true });
-    if (inp) inp.value = '';
-    showToast(`${m.handle || m.name} on shift`, '#22c55e');
-  };
-  el('td-onshift-add')?.addEventListener('click', _tdAddOnShift);
-  el('td-onshift-search')?.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); _tdAddOnShift(); } });
-  el('td-roster-chips')?.addEventListener('click', (e) => {
-    const btn = e.target.closest('[data-onshift-rm]'); if (!btn) return;
-    // Off shift — keep workedEvent so they stay credited (that's the whole point of the Worked list).
-    send('update_crew_member', { id: btn.dataset.onshiftRm, active: false });
-  });
-  // Worked this event: manually credit someone who isn't on the desk (guest, fill-in, etc.).
-  const _tdAddWorked = () => {
-    const inp = el('td-worked-search'); const m = _tdFindCrew(inp?.value);
-    if (!m) { showToast('Search for an existing crew member first (+ Add Crew to create one).', '#fbbf24'); return; }
-    send('update_crew_member', { id: m.id, workedEvent: true });
-    if (inp) inp.value = '';
-    showToast(`${m.handle || m.name} added to the credits`, '#22c55e');
-  };
-  el('td-worked-add')?.addEventListener('click', _tdAddWorked);
-  el('td-worked-search')?.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); _tdAddWorked(); } });
-  el('td-worked-chips')?.addEventListener('click', (e) => {
-    const btn = e.target.closest('[data-worked-rm]'); if (!btn) return;
-    // Remove from credits entirely (also takes them off shift so the two lists can't disagree).
-    send('update_crew_member', { id: btn.dataset.workedRm, workedEvent: false, active: false });
-  });
   el('td-support-assign')?.addEventListener('click', () => {
     const inp = el('td-support-search'); const typed = (inp?.value || '').trim();
     if (!typed) { showToast('Search for an existing crew member first.', '#fbbf24'); return; }
@@ -559,7 +511,7 @@ function placeShowDeck(tab) {
     // WITHOUT touching the crew record's group — the deck is per-show, the Crew page is forever.
     send('td_support_add', { crewId: m.id, role: TD_SUPPORT_LABEL[group] || group });
     if (inp) inp.value = '';
-    showToast(`${m.handle || m.name} added to support crew`, '#22c55e');
+    showToast(`${m.handle || m.name} added to the credits screen`, '#22c55e');
   });
   el('td-support-list')?.addEventListener('click', (e) => {
     const btn = e.target.closest('[data-support-rm]'); if (!btn) return;
@@ -571,7 +523,7 @@ function placeShowDeck(tab) {
     if (name) send('save_shift', { name });
   });
   el('td-shift-clear')?.addEventListener('click', async () => {
-    if (await appConfirm('Clear the whole Show Deck — desk slots, show roles, current shift, credits and support crew? Nobody is deleted: every crew profile stays in Crew, and saved presets are untouched.', 'Clear')) send('clear_shift');
+    if (await appConfirm('Clear the whole Show Deck — desk slots, show roles, credits and off-air event staff? Nobody is deleted: every crew profile stays in Crew, and saved presets are untouched.', 'Clear')) send('clear_shift');
   });
 
   // Group filter pills → sync hidden select + re-render
@@ -2568,11 +2520,11 @@ function _returnGraphicsToProd() {
   el('gfx-foot-push')?.addEventListener('click', () => applyScene(currentKey));
   el('gfx-foot-queue')?.addEventListener('click', () => el('gfx-top-queue')?.click());
 
-  // Dynamic preview scaling — scales the single shared fixed-preview iframe (and any currently
-  // open pop-out's own embedded preview, once pop-outs exist) to fit its container.
+  // Dynamic preview scaling — scales any open pop-out's own embedded preview and the floating
+  // OBS Program panel's GFX-mode iframe to fit their container.
   function fitScenePreviews() {
     let anyMissed = false;
-    document.querySelectorAll('.gfx-fixed-preview .live-pv, .gfx-popout-box .live-pv').forEach(function(wrap) {
+    document.querySelectorAll('.gfx-popout-box .live-pv, .obs-prev-gfx .live-pv').forEach(function(wrap) {
       const iframe = wrap.querySelector('iframe');
       if (!iframe) return;
       const w = wrap.offsetWidth, h = wrap.offsetHeight || wrap.clientHeight;
@@ -2583,6 +2535,7 @@ function _returnGraphicsToProd() {
     });
     if (anyMissed) setTimeout(fitScenePreviews, 120);
   }
+  window._fitScenePreviews = fitScenePreviews;
 
   // Scene-specific side effects that must fire whenever a scene becomes the active one — whether
   // that's by inline selection or by opening its pop-out. Kept as one function so both paths stay
@@ -2749,6 +2702,9 @@ function _returnGraphicsToProd() {
   // while a pop-out scene is the current selection but its editor isn't open.
   window._gfxRefreshPopoutSummary = () => { if (SCENE_META[currentKey] && SCENE_META[currentKey].popout) renderPopoutSummary(currentKey); };
   el('gfx-popout-summary-open')?.addEventListener('click', () => openGfxPopout(currentKey));
+  // "Pop out preview" — opens the floating, draggable, resizable OBS Program panel already
+  // switched to its GFX tab (mirrors whatever scene is currently selected here).
+  el('gfx-preview-popout')?.addEventListener('click', () => { if (typeof window._obsPreviewOpenGfx === 'function') window._obsPreviewOpenGfx(); });
   // Generic wiring for every pop-out present in the DOM: close (× button or backdrop click),
   // Push Live / Clear / Apply footer buttons reuse the exact same SCENE_META-driven actions as
   // the main top bar so there's only one push/clear/apply implementation in the whole hub.
@@ -2771,20 +2727,24 @@ function _returnGraphicsToProd() {
     });
   });
 
-  // Point the shared preview iframe at a scene's standalone overlay (?preview=1). `force` re-sets
-  // the src even when the attribute already matches — needed after the graphics hub is re-parented
-  // (borrowed to the Dashboard / returned), because moving an <iframe> reloads it while the src
-  // attribute still reads the right URL, leaving the preview stuck on the previous scene (e.g.
-  // break's "STARTING SOON") until you navigated away and back.
-  function gfxApplyPreview(key, force) {
-    const previewIframe = el('gfx-fixed-preview-iframe');
-    if (!previewIframe || !SCENE_META[key] || !SCENE_META[key].link) return;
-    const base = window.SCENE_BASE_URL || 'http://localhost:3000';
-    const newSrc = base + '/' + SCENE_META[key].link + '?preview=1';
-    if (force || previewIframe.getAttribute('src') !== newSrc) previewIframe.src = newSrc;
+  // Points the floating OBS Program panel's GFX mode at a scene's standalone overlay (?preview=1)
+  // — the inline preview column this used to also drive was removed once GFX mode covered the
+  // same job. `force` is kept for callers still passing it (harmless no-op now: there's no longer
+  // a second, re-parented iframe that needs a forced reload to un-stick).
+  function gfxApplyPreview(key) {
+    if (!SCENE_META[key] || !SCENE_META[key].link) return;
+    if (typeof window._obsPrevSyncGfx === 'function') window._obsPrevSyncGfx();
   }
-  // Re-point the preview at the current scene after a DOM re-parent reloaded the iframe.
-  window._gfxReapplyPreview = () => { if (currentKey) gfxApplyPreview(currentKey, true); };
+  // Re-sync the floating GFX preview after a DOM re-parent (Dashboard borrow/return) — the hub's
+  // own DOM moved, so anything driven by scene-selection needs re-poking to notice.
+  window._gfxReapplyPreview = () => { if (currentKey) gfxApplyPreview(currentKey); };
+  // The URL for whatever scene is currently being edited — used by the floating OBS Program
+  // panel's GFX mode (a separate iframe, not the same DOM node as the inline preview above).
+  window._gfxCurrentPreviewUrl = () => {
+    if (!currentKey || !SCENE_META[currentKey] || !SCENE_META[currentKey].link) return '';
+    const base = window.SCENE_BASE_URL || 'http://localhost:3000';
+    return base + '/' + SCENE_META[currentKey].link + '?preview=1';
+  };
 
   // Tab switching.
   const ALIAS = { scenes: 'break', lower: 'spotlight', manual: 'bracket', upcoming: 'schedule', brackets: 'bracket' };
@@ -2797,8 +2757,7 @@ function _returnGraphicsToProd() {
     currentKey = key;
     const navHighlightKey = (key === 'series') ? 'veto' : key;
     btns.forEach((b) => b.classList.toggle('active', b.dataset.gfxscene === navHighlightKey));
-    // Swap the single shared fixed-preview iframe to this scene's own standalone overlay page —
-    // happens regardless of inline vs. pop-out, so you can glance at any scene without opening it.
+    // Keep the floating OBS Program panel's GFX mode pointed at this scene, in case it's open.
     gfxApplyPreview(key);
     refreshTopBar(key);
     // Map Pool / Series mode toggle — visible only for these two scenes; reuses show() itself
@@ -4367,7 +4326,7 @@ document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && document
 const PAGE_LABELS = {
   principal: 'Dashboard', events: 'Esports', produccion: 'Production',
   director: 'Director', replays: 'Video Editor', scenes: 'Overlays',
-  equipos: 'Talent', facecams: 'Camera Feeds', brands: 'Profiles',
+  equipos: 'Talent', facecams: 'Cameras', brands: 'Profiles',
   media: 'Assets', integrations: 'Integrations', stats: 'Analytics',
   ajustes: 'Settings', roles: 'Roles', switcher: 'Switcher',
   graphics: 'Graphics',
@@ -4497,11 +4456,12 @@ if (_popoutPage === 'triggers') {
     _pb.removeAttribute('hidden');
   }
   // Activate the target tab after all listeners are set up. Merged pages redirect to their host.
+  // Cameras (facecams) is its own sidebar page again — no equipos redirect (that sent the
+  // Cameras pop-out to the Talent page); its tab click restores the active cf sub-tab itself.
   requestAnimationFrame(() => {
-    const target = _popoutPage === 'facecams' ? 'equipos' : ((_popoutPage === 'director' || _popoutPage === 'graphics') ? 'produccion' : ((_popoutPage === 'scenes' || _popoutPage === 'brands') ? 'media' : _popoutPage));
+    const target = (_popoutPage === 'director' || _popoutPage === 'graphics') ? 'produccion' : ((_popoutPage === 'scenes' || _popoutPage === 'brands') ? 'media' : _popoutPage);
     const btn = document.querySelector('.tab-btn[data-tab="' + target + '"]');
     if (btn) btn.click();
-    if (_popoutPage === 'facecams' && typeof window._ttShow === 'function') window._ttShow('cameras');
     if (_popoutPage === 'director' && typeof window._pdShow === 'function') window._pdShow('director');
     if (_popoutPage === 'graphics' && typeof window._pdShow === 'function') window._pdShow('graphics');
     if (_popoutPage === 'scenes' && typeof window._assetsShow === 'function') window._assetsShow('overlays');
@@ -5473,8 +5433,9 @@ function applyPerfMode(data) {
 
   if (noPrev !== _perfNoPrev) {
     _perfNoPrev = noPrev;
-    // Shared fixed scene-preview iframe: unload (it runs a full overlay page).
-    const pv = el('gfx-fixed-preview-iframe');
+    // Floating OBS panel's GFX-mode iframe: unload (it runs a full overlay page) — the inline
+    // scene preview this used to also target was removed once GFX mode covered that job.
+    const pv = el('obs-prev-gfx-iframe');
     if (pv) {
       if (noPrev) { if (pv.src && pv.src !== 'about:blank') pv.dataset.perfSrc = pv.src; pv.src = 'about:blank'; }
       else if (pv.dataset.perfSrc) { pv.src = pv.dataset.perfSrc; delete pv.dataset.perfSrc; }
@@ -9997,6 +9958,12 @@ setTimeout(cloudRequestStatus, 1500);
 
 function applyCloudStatus(s) {
   s = s || {};
+  // Snapshot the PREVIOUS workspace before anything below overwrites it, so a real org switch
+  // (including dropping to a personal workspace, or signing out) can be detected below and the
+  // stale-org caches cleared — they're otherwise only ever overwritten by a fresh response, never
+  // reset, so a revoked seat or a workspace change can leave the old org's camera/station data
+  // sitting in state indefinitely with nothing to trigger a re-render.
+  const prevWorkspaceId = window._cloudWorkspaceId || '';
   const block = el('cloud-sync-block'); if (block) block.style.display = s.configured ? '' : 'none';
   const pill = el('cloud-status-pill');
   if (pill) {
@@ -10029,6 +9996,16 @@ function applyCloudStatus(s) {
   if (isOrg) send('cloud_list_station_feeds', { orgId: s.workspaceId });
   if (isOrg) send('cloud_list_stations', { orgId: s.workspaceId });   // station-binding picker + invite links
   window._cloudWorkspaceId = isOrg ? s.workspaceId : '';              // for re-requests (binding change)
+
+  // Workspace actually changed (org→org, org→personal, or personal→org) — drop the previous
+  // org's cached camera/station data instead of leaving it to linger until (if ever) fresh data
+  // happens to arrive. The sends above already re-request current data when isOrg is true.
+  if (window._cloudWorkspaceId !== prevWorkspaceId) {
+    _pcamCloudFeedsCache = [];
+    _cfStationsCache = [];
+    window._cfStationsIndex = [];
+    if (typeof renderCfStations === 'function') renderCfStations();
+  }
 
   // Org Library sync + Invite Links — real-org only (both need a workspace to share into / mint from).
   const libBlock = el('org-library-block'), invBlock = el('org-invites-block');
@@ -13567,7 +13544,6 @@ function buildOnAirGrid() {
 
 let _sceneFilterGroup = 'all';   // active category chip
 let _sceneFilterText = '';       // search box text (lowercased)
-let _sceneViewMode = 'grid';     // 'grid' or 'list'
 
 const SCENE_DEFAULT_ASPECT = '1920 × 1080';
 
@@ -13600,36 +13576,9 @@ function mergeSceneGroups(discovered) {
   return groups;
 }
 
-// Compact list-view row for a scene — no thumbnail, just name + description + actions.
-function buildSceneRow(it, groupName) {
-  const base = SCENE_BASE_URL + it.path;
-  const row = document.createElement('div');
-  row.className = 'scene-row';
-  row.dataset.search = (it.name + ' ' + (it.desc || '') + ' ' + groupName).toLowerCase();
-  row.dataset.live = it.live || '';
-  row.innerHTML = `
-    <div class="scene-row-info">
-      <div class="scene-row-name">${it.name}</div>
-    </div>
-    <div class="scene-row-desc">${it.desc || ''}</div>
-    <div class="scene-row-acts">
-      <button class="btn btn-primary btn-xs sr-open">Open</button>
-      <button class="btn btn-ghost btn-xs sr-copy">Copy</button>
-      <span class="scene-onair-pill sr-air" hidden>ON AIR</span>
-    </div>`;
-  row.querySelector('.sr-open').addEventListener('click', () => window.open(base, '_blank'));
-  const copyBtn = row.querySelector('.sr-copy');
-  copyBtn.addEventListener('click', (e) => {
-    e.stopPropagation();
-    const done = () => { copyBtn.textContent = 'Copied!'; setTimeout(() => { copyBtn.textContent = 'Copy'; }, 1200); };
-    if (navigator.clipboard) navigator.clipboard.writeText(base).then(done).catch(() => prompt('Copy URL:', base));
-    else prompt('Copy URL:', base);
-  });
-  return row;
-}
-
-// One scene card: thumbnail (+ aspect badge + on-air pill), actions, and a
-// per-graphic background-fill settings panel (colour + opacity %, off by default).
+// One scene card: preview thumbnail only — name caption + hover icon actions
+// (open / copy / settings) live ON the thumbnail; the per-graphic background-fill
+// settings panel (colour + opacity %, off by default) drops below it when opened.
 function buildSceneCard(it, groupName) {
   const base = SCENE_BASE_URL + it.path;
   const aspect = it.aspect || SCENE_DEFAULT_ASPECT;
@@ -13644,17 +13593,16 @@ function buildSceneCard(it, groupName) {
   card.className = 'scene-card';
   card.dataset.search = (it.name + ' ' + (it.desc || '') + ' ' + groupName).toLowerCase();
   card.dataset.live = it.live || '';
+  const tip = String(it.desc || it.name).replace(/"/g, '&quot;');
   card.innerHTML = `
-    <div class="scene-thumb"><iframe class="scene-thumb-frame" loading="lazy" scrolling="no" data-nw="${nativeW}" data-nh="${nativeH}" data-src="${thumbUrl()}"></iframe><span class="scene-thumb-block"></span><span class="scene-onair-pill" hidden>ON AIR</span><span class="scene-aspect">${aspect}</span></div>
-    <div class="scene-card-body">
-      <div class="scene-card-name">${it.name}</div>
-      ${it.desc ? `<div class="scene-card-desc">${it.desc}</div>` : ''}
-      <div class="scene-card-acts">
-        <button class="btn btn-primary btn-xs ss-open">Open</button>
-        <button class="btn btn-secondary btn-xs ss-copy">Copy</button>
-        <button class="btn btn-ghost btn-xs ss-settings" title="Settings">${svgIcon('gear')} Settings</button>
+    <div class="scene-thumb" title="${tip}"><iframe class="scene-thumb-frame" loading="lazy" scrolling="no" data-nw="${nativeW}" data-nh="${nativeH}" data-src="${thumbUrl()}"></iframe><span class="scene-thumb-block"></span><span class="scene-onair-pill" hidden>ON AIR</span><span class="scene-aspect">${aspect}</span><span class="scene-thumb-name">${it.name}</span>
+      <div class="scene-thumb-acts">
+        <button class="scene-thumb-btn ss-open" title="Open in new window">${svgIcon('external')}</button>
+        <button class="scene-thumb-btn ss-copy" title="Copy browser-source URL">${svgIcon('copy')}</button>
+        <button class="scene-thumb-btn ss-settings" title="Settings">${svgIcon('gear')}</button>
       </div>
-      <div class="scene-bg-panel" hidden>
+    </div>
+    <div class="scene-bg-panel" hidden>
         <button class="btn btn-secondary btn-xs ss-edit scene-set-edit">Edit HTML</button>
         <label class="scene-bg-toggle"><input type="checkbox" class="ss-bg-on"><span>Background fill</span></label>
         <div class="scene-bg-controls">
@@ -13690,14 +13638,14 @@ function buildSceneCard(it, groupName) {
   colorIn.addEventListener('input', () => { bg.color = colorIn.value; persist(); });
   opIn.addEventListener('input', () => { bg.op = parseInt(opIn.value, 10); opVal.textContent = bg.op + '%'; persist(); });
 
-  card.querySelector('.ss-open').addEventListener('click', () => window.open(liveUrl(), '_blank'));
+  card.querySelector('.ss-open').addEventListener('click', (e) => { e.stopPropagation(); window.open(liveUrl(), '_blank'); });
   card.querySelector('.ss-edit').addEventListener('click', () => openSceneEditor(it.path, it.name));
   card.querySelector('.scene-thumb').addEventListener('click', () => window.open(fullPrev(), '_blank'));
   const copyBtn = card.querySelector('.ss-copy');
   copyBtn.addEventListener('click', (e) => {
     e.stopPropagation();
     const url = liveUrl();
-    const done = () => { copyBtn.textContent = 'Copied!'; setTimeout(() => { copyBtn.textContent = 'Copy'; }, 1200); };
+    const done = () => { copyBtn.innerHTML = svgIcon('check'); copyBtn.classList.add('ok'); setTimeout(() => { copyBtn.innerHTML = svgIcon('copy'); copyBtn.classList.remove('ok'); }, 1200); };
     if (navigator.clipboard) navigator.clipboard.writeText(url).then(done).catch(() => prompt('Copy URL:', url));
     else prompt('Copy URL:', url);
   });
@@ -13714,7 +13662,7 @@ async function buildSceneSourceList() {
   const groups = mergeSceneGroups(discovered);
   const totalScenes = groups.reduce((n, g) => n + g.items.length, 0);
 
-  // ── Top bar: search + grid/list toggle ──────────────────────────────────
+  // ── Top bar: search ───────────────────────────────────────────────────────
   const topbar = document.createElement('div');
   topbar.className = 'scene-topbar';
   topbar.innerHTML = `
@@ -13722,10 +13670,6 @@ async function buildSceneSourceList() {
       <span class="scene-search-ico">${svgIcon('search')}</span>
       <input type="text" id="scene-search-input" placeholder="Search ${totalScenes} overlays…" autocomplete="off" spellcheck="false">
       <button class="scene-search-clear" id="scene-search-clear" title="Clear" hidden>×</button>
-    </div>
-    <div class="scene-view-toggle">
-      <button class="scene-vtog${_sceneViewMode === 'grid' ? ' active' : ''}" data-mode="grid" title="Grid view">${svgIcon('grid')}</button>
-      <button class="scene-vtog${_sceneViewMode === 'list' ? ' active' : ''}" data-mode="list" title="List view">${svgIcon('list')}</button>
     </div>`;
   wrap.appendChild(topbar);
 
@@ -13762,7 +13706,7 @@ async function buildSceneSourceList() {
   nav.appendChild(navSep);
   groups.forEach((g) => nav.appendChild(mkNavItem(g.group, g.group, svgIcon(g.icon), g.items.length)));
 
-  // ── Groups: grid cards + list rows ────────────────────────────────────────
+  // ── Groups: grid of preview cards ─────────────────────────────────────────
   groups.forEach((g) => {
     const section = document.createElement('div');
     section.className = 'scene-group';
@@ -13773,16 +13717,8 @@ async function buildSceneSourceList() {
     section.appendChild(head);
     const grid = document.createElement('div');
     grid.className = 'scene-card-grid';
-    grid.hidden = _sceneViewMode !== 'grid';
-    const listWrap = document.createElement('div');
-    listWrap.className = 'scene-row-list';
-    listWrap.hidden = _sceneViewMode !== 'list';
-    g.items.forEach((it) => {
-      grid.appendChild(buildSceneCard(it, g.group));
-      listWrap.appendChild(buildSceneRow(it, g.group));
-    });
+    g.items.forEach((it) => grid.appendChild(buildSceneCard(it, g.group)));
     section.appendChild(grid);
-    section.appendChild(listWrap);
     main.appendChild(section);
   });
 
@@ -13796,27 +13732,8 @@ async function buildSceneSourceList() {
   });
   clearBtn.addEventListener('click', () => { search.value = ''; _sceneFilterText = ''; clearBtn.hidden = true; applySceneFilter(); });
 
-  // ── View toggle ───────────────────────────────────────────────────────────
-  topbar.querySelectorAll('.scene-vtog').forEach((b) => {
-    b.addEventListener('click', () => {
-      _sceneViewMode = b.dataset.mode;
-      topbar.querySelectorAll('.scene-vtog').forEach((x) => x.classList.toggle('active', x.dataset.mode === _sceneViewMode));
-      applySceneViewMode();
-      applySceneFilter();
-      if (_sceneViewMode === 'grid' && typeof loadScenePreviews === 'function') loadScenePreviews();
-      else if (typeof unloadScenePreviews === 'function') unloadScenePreviews();
-    });
-  });
-
   refreshSceneOnAir(currentState);
   if (el('tab-media-content')?.classList.contains('active') && _assetsTab === 'overlays' && typeof loadScenePreviews === 'function') loadScenePreviews();
-}
-
-// Show/hide grid cards or list rows to match active sidebar group + search text.
-function applySceneViewMode() {
-  const isGrid = _sceneViewMode === 'grid';
-  document.querySelectorAll('.scene-card-grid').forEach((g) => { g.hidden = !isGrid; });
-  document.querySelectorAll('.scene-row-list').forEach((l) => { l.hidden = isGrid; });
 }
 
 function applySceneFilter() {
@@ -13824,15 +13741,10 @@ function applySceneFilter() {
   if (!wrap) return;
   document.querySelectorAll('#scene-nav .scene-nav-item').forEach((b) =>
     b.classList.toggle('active', b.dataset.group === _sceneFilterGroup));
-  // When a keyword search is active, flatten the group sections into one dense grid/list
+  // When a keyword search is active, flatten the group sections into one dense grid
   // (CSS .searching) so matches don't scatter across stacked headers → far less scrolling.
   const area = el('scene-groups-area');
-  if (area) {
-    area.classList.toggle('searching', !!_sceneFilterText);
-    area.classList.toggle('grid-view', _sceneViewMode === 'grid');
-    area.classList.toggle('list-view', _sceneViewMode !== 'grid');
-  }
-  const isGrid = _sceneViewMode === 'grid';
+  if (area) area.classList.toggle('searching', !!_sceneFilterText);
   let totalShown = 0;
   wrap.querySelectorAll('.scene-group').forEach((section) => {
     const groupName = section.dataset.group;
@@ -13844,7 +13756,7 @@ function applySceneFilter() {
       else if (_sceneFilterGroup !== 'all') matchGroup = groupName === _sceneFilterGroup;
       return matchText && matchGroup;
     };
-    section.querySelectorAll(isGrid ? '.scene-card' : '.scene-row').forEach((item) => {
+    section.querySelectorAll('.scene-card').forEach((item) => {
       const show = matchItem(item);
       item.style.display = show ? '' : 'none';
       if (show) shown++;
@@ -13878,14 +13790,6 @@ function refreshSceneOnAir(state) {
     const pill = card.querySelector('.scene-onair-pill');
     if (pill) pill.hidden = !on;
     if (on) liveCount++;
-  });
-  wrap.querySelectorAll('.scene-row').forEach((row) => {
-    const key = row.dataset.live;
-    let on = false;
-    if (key && key !== 'always') on = !!getPath(state || {}, key);
-    row.classList.toggle('is-onair', on);
-    const pill = row.querySelector('.sr-air');
-    if (pill) pill.hidden = !on;
   });
   const navOnAir = el('scene-nav-onair');
   if (navOnAir) { const c = navOnAir.querySelector('.scene-nav-count'); if (c) c.textContent = liveCount; }
@@ -15300,7 +15204,10 @@ function qkRenderPut() {
         if (item.gfx) { _qkGfxToggle(item.gfx); return; }
         if (item.ov) { const info = bbActionInfo({ t: 'overlay', k: item.ov }); if (info) info.run(); return; }
         // trigger: if it has options and isn't live yet, open the config gear to set them first
-        if (item.cfg && !_qkIsLive(item) && typeof bbOpenTriggerConfig === 'function') { bbOpenTriggerConfig(item.trig, chip); return; }
+        // Team graphics (Winner, Line-up) have their side chosen by the Team-graphics bar, so a click
+        // FIRES them for that team directly. Only config-only chips (Break: title/timer) open the gear
+        // first; the per-chip gear button still overrides a team pill's side.
+        if (item.cfg && !item.sideSel && !_qkIsLive(item) && typeof bbOpenTriggerConfig === 'function') { bbOpenTriggerConfig(item.trig, chip); return; }
         el(item.toggle)?.click();
       });
       const gear = chip.querySelector('.qk-chip-gear');
@@ -15343,7 +15250,12 @@ function qkRenderTeamTarget() {
     const color = t.color || (side === 'blue' ? '#3b82f6' : '#e97139');
     const name = (t.name || (side === 'blue' ? 'Blue' : 'Orange')).toString();
     const nameEl = btn.querySelector('.qk-tt-name'); if (nameEl && nameEl.textContent !== name) nameEl.textContent = name;
-    const dot = btn.querySelector('.qk-tt-dot'); if (dot) dot.style.background = color;
+    // Team logo when we have one (falls back to the colour dot otherwise) so producers recognize the
+    // team at a glance instead of reading a truncated name in the narrow rail.
+    const logo = btn.querySelector('.qk-tt-logo'), dot = btn.querySelector('.qk-tt-dot');
+    const src = t.logo || '';
+    if (logo) { if (src) { if (logo.getAttribute('src') !== src) logo.src = src; logo.style.display = ''; } else { logo.style.display = 'none'; logo.removeAttribute('src'); } }
+    if (dot) { dot.style.background = color; dot.style.display = src ? 'none' : ''; }
     btn.style.setProperty('--tt-color', color);
     btn.classList.toggle('active', side === cur);
   });
@@ -15401,51 +15313,72 @@ function renderQuickPanel(data) {
       nowEl.textContent = (obs.connected && obs.currentScene) ? obs.currentScene : '—';
     }
   }
-  // NEXT is the rundown, full stop: it names the next phase of the run of show and the button
-  // advances to it (Start from the top when idle). With no rundown built it invites the
-  // producer to build one — the old queue/Put-Up-Next fallback is gone (the queue lives on the
-  // NEXT rail tab; the Up Next screen is still reachable from the Break chip below).
-  const nextEl = el('qk-next');
-  const putBtn = el('qk-put-upnext');
-  if (nextEl) {
-    const segs = (typeof _rdSegs !== 'undefined' && Array.isArray(_rdSegs)) ? _rdSegs : [];
-    if (segs.length) {
-      const running = (typeof _rdRunning !== 'undefined') && _rdRunning;
-      const nextIdx = running ? _rdIdx + 1 : 0;
-      const seg = segs[nextIdx];
-      const segName = seg ? (seg.label || (typeof rdTargetLabel === 'function' ? rdTargetLabel(seg) : '') || 'Segment') : '';
-      nextEl.textContent = seg ? `${segName} (${nextIdx + 1}/${segs.length})` : 'End of rundown';
-      if (putBtn) {
-        putBtn.dataset.mode = 'rundown';
-        putBtn.textContent = !running ? 'Start ▸' : (seg ? 'Go ▸' : 'End ▸');
-        putBtn.title = !running ? 'Start the run of show from the top'
-          : (seg ? 'Advance the run of show to this segment' : 'Finish the run of show');
-      }
+  // The live graphic punched up on stream (shown next to the OBS scene) — "what's on stream" is
+  // the scene PLUS whatever graphic is live over it.
+  const gfxEl = el('qk-now-gfx');
+  if (gfxEl) {
+    const g = (data.gfxActive && typeof data.gfxActive === 'string') ? data.gfxActive : '';
+    const nice = g ? (({ break: 'Break', winner: 'Winner', intro: 'Line-up', matchup: 'Matchup', veto: 'Map Pool', bracket: 'Bracket', standings: 'Standings', schedule: 'Schedule', spotlight: 'Spotlight', credits: 'Credits' })[g] || g) : '';
+    if (nice) { gfxEl.textContent = nice; gfxEl.style.display = ''; } else { gfxEl.style.display = 'none'; }
+  }
+  // Run of Show cockpit — the production phase controller: what phase we're on, next, and back.
+  const S = (typeof rdSummary === 'function') ? rdSummary() : null;
+  const posEl = el('qk-ros-pos'), curEl = el('qk-ros-cur-lbl'), hintEl = el('qk-ros-nexthint');
+  const backBtn = el('qk-ros-back'), goBtn = el('qk-ros-fwd');
+  if (S) {
+    if (!S.hasSegs) {
+      if (posEl) posEl.textContent = '';
+      if (curEl) curEl.textContent = 'No rundown built';
+      if (hintEl) hintEl.textContent = 'Build tonight’s run of show';
+      if (backBtn) backBtn.disabled = true;
+      if (goBtn) { goBtn.textContent = 'Build'; goBtn.dataset.mode = 'build'; goBtn.classList.remove('is-run'); }
+    } else if (!S.running) {
+      if (posEl) posEl.textContent = `0 / ${S.total}`;
+      if (curEl) curEl.textContent = 'Ready to start';
+      if (hintEl) hintEl.textContent = S.next ? `First: ${S.next}` : '';
+      if (backBtn) backBtn.disabled = true;
+      if (goBtn) { goBtn.textContent = 'Start'; goBtn.dataset.mode = 'run'; goBtn.classList.add('is-run'); }
     } else {
-      nextEl.textContent = 'No rundown built';
-      if (putBtn) {
-        putBtn.dataset.mode = 'build';
-        putBtn.textContent = 'Build ▸';
-        putBtn.title = 'Open the Run of Show to build tonight’s rundown';
-      }
+      if (posEl) posEl.textContent = `${S.pos} / ${S.total}`;
+      if (curEl) curEl.textContent = S.current || 'Segment';
+      if (hintEl) hintEl.textContent = S.atEnd ? 'Last phase — Finish to end' : (S.next ? `Next: ${S.next}` : '');
+      if (backBtn) backBtn.disabled = !S.hasPrev;
+      if (goBtn) { goBtn.textContent = S.atEnd ? 'Finish' : 'Go'; goBtn.dataset.mode = 'run'; goBtn.classList.add('is-run'); }
     }
   }
   // Put-on-air chips (graphics + every real OBS scene, deduped, drag-reorderable) — see qkRenderPut.
   qkRenderPut();
 }
-// Static cockpit actions.
-el('qk-clear-all')?.addEventListener('click', (e) => { e.preventDefault(); el('gfx-top-clear')?.click(); });
-el('qk-put-upnext')?.addEventListener('click', () => {
-  const btn = el('qk-put-upnext');
-  if (btn && btn.dataset.mode === 'build') {
-    // No rundown yet — jump the producer to the Run of Show rail tab to build one.
-    document.querySelector('.qrail-tab[data-qtab="ros"]')?.click();
-    return;
-  }
-  // Rundown mode: Start ▸ from idle, Go ▸ to advance, End ▸ finishes (rdNext handles all three).
-  if (typeof rdNext === 'function') rdNext();
+// Rundown phase summary for the cockpit (current/next/prev labels + position) — mirrors the
+// section-skipping logic in rdPublishStatus so external Stream-Deck keys and this panel agree.
+function rdSummary() {
+  const segs = (typeof _rdSegs !== 'undefined' && Array.isArray(_rdSegs)) ? _rdSegs : [];
+  const running = (typeof _rdRunning !== 'undefined') && _rdRunning;
+  const idx = (typeof _rdIdx !== 'undefined') ? _rdIdx : -1;
+  const lbl = (i) => (i >= 0 && i < segs.length && segs[i]) ? (segs[i].label || (typeof rdTargetLabel === 'function' ? rdTargetLabel(segs[i]) : '') || 'Segment') : '';
+  const fwd = (from) => { let i = from; while (i < segs.length && segs[i] && segs[i].type === 'section') i++; return i < segs.length ? i : -1; };
+  const back = (from) => { let i = from; while (i >= 0 && segs[i] && segs[i].type === 'section') i--; return i; };
+  const real = (upTo) => segs.slice(0, upTo).filter((s) => s && s.type !== 'section').length;
+  const nextIdx = running ? fwd(idx + 1) : fwd(0);
+  const prevIdx = running ? back(idx - 1) : -1;
+  return {
+    hasSegs: segs.length > 0, running,
+    pos: running ? real(idx + 1) : 0, total: real(segs.length),
+    current: running ? lbl(idx) : '', next: nextIdx >= 0 ? lbl(nextIdx) : '', prev: prevIdx >= 0 ? lbl(prevIdx) : '',
+    hasPrev: prevIdx >= 0, atEnd: running && nextIdx < 0,
+  };
+}
+// Cockpit run-of-show controls.
+el('qk-ros-back')?.addEventListener('click', () => { if (typeof rdPrev === 'function') rdPrev(); renderQuickPanel(currentState); });
+el('qk-ros-fwd')?.addEventListener('click', () => {
+  const btn = el('qk-ros-fwd');
+  if (btn && btn.dataset.mode === 'build') { document.querySelector('.qrail-tab[data-qtab="ros"]')?.click(); return; }
+  if (typeof rdNext === 'function') rdNext();   // Start from idle, advance while running, finish at the end
   renderQuickPanel(currentState);
 });
+el('qk-ros-edit')?.addEventListener('click', (e) => { e.preventDefault(); document.querySelector('.qrail-tab[data-qtab="ros"]')?.click(); });
+// Static cockpit actions. (The run-of-show back/advance/edit buttons are wired above, next to rdSummary.)
+el('qk-clear-all')?.addEventListener('click', (e) => { e.preventDefault(); el('gfx-top-clear')?.click(); });
 
 // ── Switcher page: program/preview + take + multiview + audio (backend-routed) ──
 let _swWatch = false, _swShotTimer = null, _swObsAudio = [], _swGridSig = '', _swGridCursor = 0;
@@ -15577,7 +15510,10 @@ function renderSwDock(data) {
         if (e.target.closest('.sw-dock-gear')) { if (typeof bbOpenTriggerConfig === 'function') bbOpenTriggerConfig(item.trig, chip); return; }
         if (item.gfx) { _qkGfxToggle(item.gfx); return; }
         if (item.ov) { const info = bbActionInfo({ t: 'overlay', k: item.ov }); if (info) info.run(); return; }
-        if (item.cfg && !_qkIsLive(item) && typeof bbOpenTriggerConfig === 'function') { bbOpenTriggerConfig(item.trig, chip); return; }
+        // Team graphics (Winner, Line-up) have their side chosen by the Team-graphics bar, so a click
+        // FIRES them for that team directly. Only config-only chips (Break: title/timer) open the gear
+        // first; the per-chip gear button still overrides a team pill's side.
+        if (item.cfg && !item.sideSel && !_qkIsLive(item) && typeof bbOpenTriggerConfig === 'function') { bbOpenTriggerConfig(item.trig, chip); return; }
         el(item.toggle)?.click();
       });
       wrap.appendChild(chip);
@@ -16353,8 +16289,7 @@ function renderPlayerCams(data) {
   });
 }
 document.querySelectorAll('.js-goto-facecams').forEach((b) => b.addEventListener('click', () => {
-  document.querySelector('.tab-btn[data-tab="equipos"]')?.click();
-  if (typeof window._ttShow === 'function') window._ttShow('cameras');
+  document.querySelector('.tab-btn[data-tab="facecams"]')?.click();
 }));
 document.querySelectorAll('.js-goto-scenes').forEach((b) => b.addEventListener('click', () => {
   document.querySelector('.tab-btn[data-tab="media"]')?.click();
@@ -16589,14 +16524,14 @@ function renderPreshowGfxPanel(data) {
     }
   }
 
-  // Caster Predictions — one row per desk cam slot (1/2); NOTE: this must stay ABOVE the topics
-  // sig-check/early-return below, or a prediction click (which doesn't touch topics) would never
-  // get reflected here on its own broadcast.
+  // Caster Predictions — one row per desk cam slot (1/2). Each caster predicts the WHOLE
+  // tournament's winner, so the pick is searched from the full team library (savedTeams), not
+  // limited to whichever two teams the current match happens to be. NOTE: this must stay ABOVE
+  // the topics sig-check/early-return below, or a prediction click (which doesn't touch topics)
+  // would never get reflected here on its own broadcast.
   const predWrap = el('preshow-predictions');
   if (predWrap) {
     const predictions = [0, 1].map((i) => (Array.isArray(pre.predictions) && pre.predictions[i]) || '');
-    const blue = (data.teams && data.teams.blue) || {};
-    const orange = (data.teams && data.teams.orange) || {};
     const casters = (data.casters && Array.isArray(data.casters.list)) ? data.casters.list : [];
     const anySlotted = casters.some((c) => c && Number(c.slot) >= 1);
     const casterAt = (n) => {
@@ -16604,22 +16539,34 @@ function renderPreshowGfxPanel(data) {
       if (hit) return hit;
       return anySlotted ? null : (casters[n - 1] || null);
     };
-    const predSig = JSON.stringify(predictions) + '::' + (blue.name || '') + '::' + (orange.name || '') + '::'
+    const predSig = JSON.stringify(predictions) + '::'
       + casters.map((c) => (c && c.slot) + ':' + (c && c.name)).join(',');
-    if (predWrap.dataset.sig !== predSig) {
+    // Don't rebuild while a caster's search box is mid-type — that'd yank focus and lose the query.
+    const predFocused = document.activeElement;
+    const predTyping = !!(predFocused && predFocused.classList && predFocused.classList.contains('ps-pred-search') && predWrap.contains(predFocused));
+    if (predWrap.dataset.sig !== predSig && !predTyping) {
       predWrap.dataset.sig = predSig;
-      const blueName = blue.name || 'Blue', orangeName = orange.name || 'Orange';
       predWrap.innerHTML = [1, 2].map((slot) => {
         const c = casterAt(slot);
         const nameHtml = c ? esc(c.name || ('Caster ' + slot)) : `<span class="ps-pred-empty">Slot ${slot} — unassigned</span>`;
         const pick = predictions[slot - 1];
+        const pickArea = pick
+          ? `<div class="ps-pred-chip">`
+            + `<img class="ps-pred-chip-logo" src="${esc(pick.logo || gameLogo())}" alt="" onerror="this.style.visibility='hidden'">`
+            + `<span class="ps-pred-chip-name">${esc((pick.name || '').toUpperCase())}</span>`
+            + `<button type="button" class="ps-pred-chip-clear" data-slot="${slot}" title="Clear pick">✕</button>`
+            + `</div>`
+          : `<div class="team-typeahead ps-pred-typeahead">`
+            + `<input type="text" class="input-text ps-pred-search" data-slot="${slot}" placeholder="Search teams — who wins the tournament?" autocomplete="off">`
+            + `<div class="team-dd ps-pred-dd" data-slot="${slot}" role="listbox"></div>`
+            + `</div>`;
         return `<div class="ps-pred-row" data-slot="${slot}">`
           + `<span class="ps-pred-name">${nameHtml}</span>`
-          + `<div class="ps-pred-picks">`
-          + `<button type="button" class="ps-pred-pick${pick === 'blue' ? ' is-picked-a' : ''}" data-side="blue" title="Pick ${esc(blueName)}">${esc(blueName)}</button>`
-          + `<button type="button" class="ps-pred-pick${pick === 'orange' ? ' is-picked-b' : ''}" data-side="orange" title="Pick ${esc(orangeName)}">${esc(orangeName)}</button>`
-          + `</div></div>`;
+          + `<div class="ps-pred-pickarea">${pickArea}</div>`
+          + `</div>`;
       }).join('');
+      // (Re)wire the search box for whichever slot doesn't have a pick yet.
+      [1, 2].forEach((slot) => { if (!predictions[slot - 1]) wirePreshowPredictionSearch(slot); });
     }
   }
 
@@ -16700,14 +16647,72 @@ el('preshow-headline')?.addEventListener('input', function () {
 el('preshow-home-scene')?.addEventListener('change', function () {
   send('set_preshow', { homeScene: this.value });
 });
-// Caster Predictions — click a team to pick it; click the already-picked team again to clear.
+// Caster Predictions — search-and-pick ANY team from the library (tournament-winner pick, not
+// tied to the active match). Same logo-capable typeahead pattern as Match > Teams
+// (setupTeamTypeahead) and Spotlight's add-team search (setupSpotlightTeamSearch).
+function wirePreshowPredictionSearch(slot) {
+  const input = psPredInput(slot);
+  const dd = psPredDd(slot);
+  if (!input || !dd) return;
+  let items = [], active = -1, open = false;
+  const close = () => { dd.classList.remove('show'); open = false; active = -1; };
+  const position = () => {
+    const r = input.getBoundingClientRect();
+    dd.style.left = r.left + 'px'; dd.style.width = r.width + 'px';
+    const below = window.innerHeight - r.bottom;
+    if (below < 220 && r.top > below) { dd.style.top = 'auto'; dd.style.bottom = (window.innerHeight - r.top + 4) + 'px'; }
+    else { dd.style.bottom = 'auto'; dd.style.top = (r.bottom + 4) + 'px'; }
+  };
+  const candidates = (q) => {
+    q = (q || '').trim().toLowerCase();
+    const list = currentState.savedTeams || [];
+    return (q ? list.filter((t) => (t.name || '').toLowerCase().includes(q)) : list).slice(0, 60);
+  };
+  const render = () => {
+    if (!items.length) {
+      dd.innerHTML = `<div class="team-dd-empty">${(currentState.savedTeams || []).length ? 'No matching teams' : 'No saved teams yet — add them on the Teams page'}</div>`;
+      position(); dd.classList.add('show'); open = true; return;
+    }
+    dd.innerHTML = items.map((t, i) => {
+      const logo = t.logo || gameLogo();
+      const nm = esc((t.name || '').toUpperCase());
+      return `<div class="team-dd-item${i === active ? ' active' : ''}" data-i="${i}" role="option">`
+        + `<img class="team-dd-logo${t.logo ? '' : ' game-logo-white'}" src="${logo}" alt="" onerror="this.style.visibility='hidden'">`
+        + `<span class="team-dd-name">${nm}</span></div>`;
+    }).join('');
+    position(); dd.classList.add('show'); open = true;
+    const act = dd.querySelector('.team-dd-item.active'); if (act) act.scrollIntoView({ block: 'nearest' });
+  };
+  const refresh = () => { items = candidates(input.value); active = -1; render(); };
+  const pick = (t) => {
+    if (!t) return;
+    const cur = [0, 1].map((i) => (Array.isArray(currentState.preshow?.predictions) && currentState.preshow.predictions[i]) || '');
+    cur[slot - 1] = { name: t.name, logo: t.logo || '' };
+    send('set_preshow', { predictions: cur });
+  };
+  input.addEventListener('focus', refresh);
+  input.addEventListener('input', refresh);
+  input.addEventListener('keydown', (e) => {
+    if (!open && e.key === 'ArrowDown') { refresh(); return; }
+    if (!open) return;
+    if (e.key === 'ArrowDown') { e.preventDefault(); active = Math.min(items.length - 1, active + 1); render(); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); active = Math.max(0, active - 1); render(); }
+    else if (e.key === 'Enter') { e.preventDefault(); if (active >= 0 && items[active]) pick(items[active]); else if (items.length === 1) pick(items[0]); }
+    else if (e.key === 'Escape') { close(); }
+  });
+  dd.addEventListener('mousedown', (e) => { const it = e.target.closest('.team-dd-item'); if (!it) return; e.preventDefault(); pick(items[Number(it.dataset.i)]); });
+  input.addEventListener('blur', () => setTimeout(close, 150));
+  window.addEventListener('scroll', () => { if (open) position(); }, true);
+  window.addEventListener('resize', () => { if (open) close(); });
+}
+function psPredInput(slot) { return document.querySelector('#preshow-predictions .ps-pred-search[data-slot="' + slot + '"]'); }
+function psPredDd(slot) { return document.querySelector('#preshow-predictions .ps-pred-dd[data-slot="' + slot + '"]'); }
+// Clear ✕ on a made pick.
 el('preshow-predictions')?.addEventListener('click', (e) => {
-  const btn = e.target.closest('.ps-pred-pick'); if (!btn) return;
-  const row = btn.closest('.ps-pred-row');
-  const slot = row ? +row.dataset.slot : 0; if (!slot) return;
-  const side = btn.dataset.side;
+  const clearBtn = e.target.closest('.ps-pred-chip-clear'); if (!clearBtn) return;
+  const slot = +clearBtn.dataset.slot; if (!slot) return;
   const cur = [0, 1].map((i) => (Array.isArray(currentState.preshow?.predictions) && currentState.preshow.predictions[i]) || '');
-  cur[slot - 1] = (cur[slot - 1] === side) ? '' : side;
+  cur[slot - 1] = '';
   send('set_preshow', { predictions: cur });
 });
 el('btn-preshow-clear-picks')?.addEventListener('click', () => send('set_preshow', { predictions: ['', ''] }));
@@ -17603,6 +17608,25 @@ function applyProductionState(data) {
     } else {
       statusEl.textContent = 'Break is hidden.';
       statusEl.style.color = 'var(--muted)';
+    }
+  }
+  // Reconcile the producer timer widget (topbar/sidebar) from server state. It's normally a
+  // self-contained local counter (_timer) that this widget's own Start/±/reset controls drive —
+  // but a Flow's "Start countdown timer" action (or any other client) sets state.breakScreen
+  // directly on the server, which this widget otherwise never learns about, so it looked frozen
+  // even though the real overlay (which reads breakScreen.endsAt independently) was counting down fine.
+  if (!_timerEditing) {
+    if (brk.visible && brk.endsAt) {
+      const remaining = Math.max(0, Math.round((brk.endsAt - Date.now()) / 1000));
+      _timer.secs = remaining;
+      _timer.base = remaining;
+      if (!_timer.running) { _timer.running = true; if (!_timer.handle) _timer.handle = setInterval(tickTimer, 1000); }
+      paintTimer();
+    } else if (brk.frozenSeconds != null && _timer.secs !== brk.frozenSeconds) {
+      _timer.secs = brk.frozenSeconds;
+      _timer.base = brk.frozenSeconds;
+      if (_timer.running) { _timer.running = false; if (_timer.handle) { clearInterval(_timer.handle); _timer.handle = null; } }
+      paintTimer();
     }
   }
 
@@ -19206,7 +19230,7 @@ el('btn-vmix-test')?.addEventListener('click', () => {
 document.querySelectorAll('#switcher-target-seg .seg-btn').forEach((b) => b.addEventListener('click', () => send('set_switcher_target', { target: b.dataset.target })));
 
 // ── Integrations page — pill subnav (Video Switcher / Cameras / Games & GSI / Tournament Platforms / Twitch) ──
-const INT_TABS = ['store', 'switcher', 'cameras', 'games', 'tournaments', 'twitch'];
+const INT_TABS = ['store', 'switcher', 'streamdeck', 'cameras', 'games', 'tournaments', 'twitch'];
 let _intTab = 'store';
 function _intShowTab(which) {
   _intTab = INT_TABS.includes(which) ? which : 'store';
@@ -19214,6 +19238,7 @@ function _intShowTab(which) {
   const panels = {
     store: [el('integration-store')],
     switcher: [el('integration-obs')],
+    streamdeck: [el('integration-streamdeck')],
     cameras: [el('integration-vdo')],
     games: [el('integration-games')],
     tournaments: [el('integration-startgg')],
@@ -19228,7 +19253,7 @@ function _intShowTab(which) {
   const backbar = el('int-backbar');
   if (backbar) {
     backbar.style.display = _intTab === 'store' ? 'none' : 'flex';
-    const titles = { switcher: 'Video Switcher', cameras: 'Cameras',
+    const titles = { switcher: 'Video Switcher', cameras: 'Cameras', streamdeck: 'Elgato Stream Deck',
       games: 'Games & GSI', tournaments: 'Tournament Platforms', twitch: 'Twitch' };
     const t = el('int-backbar-title');
     if (t) t.textContent = (typeof INT_APP_NAMES !== 'undefined' && INT_APP_NAMES[_intAppFilter]) || titles[_intTab] || '';
@@ -19313,8 +19338,12 @@ function renderIntegrationStore(data) {
   on += set('rl',  data.rlConnected ? 'on' : 'off', data.rlConnected ? 'Connected' : 'Waiting for game') ? 1 : 0;
   on += set('cs2', (data.csgo && data.csgo.connected) ? 'on' : 'off',
                    (data.csgo && data.csgo.connected) ? 'Connected' : 'Waiting for game') ? 1 : 0;
+  const sd = !!(data.streamdeck && data.streamdeck.connected);
+  on += set('streamdeck', sd ? 'on' : 'off', sd ? 'Connected' : 'Not installed') ? 1 : 0;
+  const sdStatus = el('streamdeck-conn-status');
+  if (sdStatus) sdStatus.textContent = sd ? 'Plugin connected — keys are live.' : 'Plugin not connected.';
   const count = el('int-strip-count');
-  if (count) count.textContent = on + ' of 8';
+  if (count) count.textContent = on + ' of 9';
 }
 
 function applyVmixState(data) {
@@ -21106,13 +21135,14 @@ function fitLivePreviews() { document.querySelectorAll('.live-pv iframe').forEac
 window.addEventListener('resize', () => { clearTimeout(window.__lpvTimer); window.__lpvTimer = setTimeout(fitLivePreviews, 120); });
 ['deck-pv-frame', 'gfx-pv-frame'].forEach((id) => { const fr = el(id); if (fr) fr.addEventListener('load', () => fitLivePreview(fr)); });
 setTimeout(fitLivePreviews, 250);
-// The graphics hub uses CSS container queries — its columns relayout when the qrail expands/collapses
-// WITHOUT firing window.resize, which would leave the preview iframe scaled to a stale width. Observe
-// the preview box so it always re-fits to its actual size. (ResizeObserver: modern Electron/Chromium.)
+// Live-preview boxes can resize without a window.resize firing — the graphics hub's own columns
+// relayout when the qrail expands/collapses, and the floating OBS Program panel is user-resizable
+// via drag handles. Observe both so their iframes always re-fit instead of scaling stale.
+// (ResizeObserver: modern Electron/Chromium.)
 try {
   if (typeof ResizeObserver === 'function') {
     const _gfxPvRO = new ResizeObserver(() => { clearTimeout(window.__gfxLpvTimer); window.__gfxLpvTimer = setTimeout(fitLivePreviews, 60); });
-    const _obsPvBoxes = () => document.querySelectorAll('.gfx-fixed-preview .live-pv, .gfx-preview .live-pv').forEach((b) => { if (b && !b.__roBound) { b.__roBound = true; _gfxPvRO.observe(b); } });
+    const _obsPvBoxes = () => document.querySelectorAll('.gfx-popout-box .live-pv, .obs-prev-gfx .live-pv').forEach((b) => { if (b && !b.__roBound) { b.__roBound = true; _gfxPvRO.observe(b); } });
     _obsPvBoxes();
     setTimeout(_obsPvBoxes, 1200);   // catch preview boxes created after first paint (borrowed panels)
   }
@@ -21163,6 +21193,44 @@ function rdTargetLabel(seg) {
   return seg.label || 'Hold';
 }
 const RD_TYPE_LABEL = { scene: 'CUT', trigger: 'TRIG', countdown: 'TIMER', playout: 'PLAY', flow: 'FLOW', view: 'VIEW', manual: 'HOLD', section: 'SECTION' };
+const RD_GFX_LABEL = { break: 'Break', winner: 'Winner', intro: 'Line-up', matchup: 'Matchup', veto: 'Map Pool', bracket: 'Bracket', standings: 'Standings', schedule: 'Schedule', spotlight: 'Spotlight', credits: 'Credits' };
+// The full-width live driver at the top of Production ▸ Run of Show — ON STREAM + phase controller.
+function rdRenderDriver() {
+  const driver = el('rd-driver'); if (!driver) return;
+  const nowEl = el('rd-now'), gfxEl = el('rd-now-gfx');
+  if (nowEl) { const obs = (currentState && currentState.obs) || {}; nowEl.textContent = (obs.connected && obs.currentScene) ? obs.currentScene : '—'; }
+  if (gfxEl) {
+    const g = (currentState && typeof currentState.gfxActive === 'string') ? currentState.gfxActive : '';
+    const nice = g ? (RD_GFX_LABEL[g] || g) : '';
+    if (nice) { gfxEl.textContent = nice; gfxEl.style.display = ''; } else { gfxEl.style.display = 'none'; }
+  }
+  const S = (typeof rdSummary === 'function') ? rdSummary() : null; if (!S) return;
+  driver.classList.toggle('is-live', S.running);
+  const posEl = el('rd-driver-pos'), curEl = el('rd-driver-cur'), nextEl = el('rd-driver-next');
+  const backBtn = el('rd-driver-back'), goBtn = el('rd-driver-go'), stopBtn = el('rd-driver-stop');
+  const set = (e, t) => { if (e) e.textContent = t; };
+  if (!S.hasSegs) {
+    set(posEl, ''); set(curEl, 'No segments yet'); set(nextEl, 'Add scenes, triggers, countdowns below');
+    if (backBtn) backBtn.disabled = true;
+    if (goBtn) { goBtn.textContent = 'Start'; goBtn.disabled = true; }
+    if (stopBtn) stopBtn.style.display = 'none';
+  } else if (!S.running) {
+    set(posEl, `0 / ${S.total}`); set(curEl, 'Ready to start'); set(nextEl, S.next ? `First: ${S.next}` : '');
+    if (backBtn) backBtn.disabled = true;
+    if (goBtn) { goBtn.textContent = 'Start'; goBtn.disabled = false; }
+    if (stopBtn) stopBtn.style.display = 'none';
+  } else {
+    set(posEl, `Phase ${S.pos} / ${S.total}`); set(curEl, S.current || 'Segment');
+    set(nextEl, S.atEnd ? 'Last phase' : (S.next ? `Next: ${S.next}` : ''));
+    if (backBtn) backBtn.disabled = !S.hasPrev;
+    if (goBtn) { goBtn.textContent = S.atEnd ? 'Finish' : 'Advance'; goBtn.disabled = false; }
+    if (stopBtn) stopBtn.style.display = '';
+  }
+}
+// Driver controls (Production ▸ Run of Show).
+el('rd-driver-back')?.addEventListener('click', () => { if (typeof rdPrev === 'function') rdPrev(); });
+el('rd-driver-go')?.addEventListener('click', () => { if (typeof rdNext === 'function') rdNext(); });
+el('rd-driver-stop')?.addEventListener('click', () => { if (typeof rdStop === 'function') rdStop(); });
 // Target <select> for a segment type — shared by the add form and the per-row inline editor.
 // 'playout' segments run via playMontageById(seg.target), which looks up clips.montages — the
 // picker must list the SAME id space, not the old (dead) state.playouts.
@@ -21189,14 +21257,12 @@ function renderRdAddTarget() {
 // Segment types offered by the inline editor (same set as the add form's dropdown).
 const RD_EDIT_TYPES = [['scene', 'Cut to scene'], ['trigger', 'Trigger graphic'], ['countdown', 'Countdown'], ['playout', 'Play playlist'], ['flow', 'Run flow'], ['view', 'Overlay view'], ['manual', 'Manual hold / note'], ['section', 'Section header']];
 function renderRundown() {
+  if (typeof rdPublishStatus === 'function') { try { rdPublishStatus(); } catch {} }
   const list = el('rd-list'); if (!list) return;
   // An open inline editor being typed in must survive the auto-refresh pipeline's re-renders.
   if (_rdEditIdx >= 0 && list.contains(document.activeElement) && /^(INPUT|SELECT)$/.test(document.activeElement.tagName)) return;
-  const status = el('rd-status');
-  if (status) {
-    if (_rdRunning && _rdSegs[_rdIdx]) status.innerHTML = `<span style="color:var(--good,#48bb78);font-weight:700;">● RUNNING</span> — segment ${_rdIdx + 1}/${_rdSegs.length}: ${poEsc(_rdSegs[_rdIdx].label || rdTargetLabel(_rdSegs[_rdIdx]))}`;
-    else status.textContent = _rdSegs.length ? `${_rdSegs.length} segment${_rdSegs.length === 1 ? '' : 's'} — idle` : 'No segments yet — add scene cuts, triggers, countdowns and playlists below.';
-  }
+  rdRenderDriver();   // the live driver (ON STREAM + phase controller) supersedes the old status line
+  const status = el('rd-status'); if (status) status.style.display = 'none';
   list.innerHTML = '';
   _rdSegs.forEach((seg, i) => {
     const row = document.createElement('div');
@@ -21232,26 +21298,26 @@ function renderRundown() {
     }
     if (isSection) {
       // Section header — an organizational divider, never executed (the runner skips over it).
-      row.style.cssText = 'display:flex;align-items:center;gap:9px;padding:10px 10px 4px;margin-top:' + (i === 0 ? '0' : '6px') + ';border-bottom:2px solid var(--cp-accent);background:transparent;';
-      row.innerHTML = `<span style="flex:1;font-size:11px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;color:#c4b5fd;">${poEsc(seg.label || 'Section')}</span>`;
+      row.className = 'rd-section';
+      row.innerHTML = `<span class="rd-section-lbl">${poEsc(seg.label || 'Section')}</span><div class="rd-section-line"></div><span class="rd-row-acts"></span>`;
     } else {
-    row.style.cssText = 'display:flex;align-items:center;gap:9px;padding:7px 10px;border:1px solid ' + (cur ? 'var(--cp-accent)' : 'var(--border)') + ';border-radius:7px;background:' + (cur ? 'rgba(124,58,237,.12)' : 'var(--surface2)') + ';';
-    row.innerHTML = `<span style="font-size:11px;color:var(--muted);width:22px;flex:0 0 auto;">${i + 1}</span>
-      <span style="font-size:9px;font-weight:800;letter-spacing:.06em;padding:2px 6px;border-radius:4px;background:rgba(255,255,255,.08);color:#c4b5fd;flex:0 0 auto;">${RD_TYPE_LABEL[seg.type] || seg.type}</span>
-      <span style="flex:1;font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${poEsc(seg.label || rdTargetLabel(seg))}<span style="color:var(--muted);font-size:11px;"> · ${poEsc(rdTargetLabel(seg))}${seg.hold ? ' · auto ' + seg.hold + 's' : ''}</span></span>`;
+      const bdg = RD_BADGE[seg.type] || { color: '#c4b5fd', bg: 'rgba(196,181,253,.12)' };
+      const detail = seg.label ? rdTargetLabel(seg) : '';   // sub-line only when a custom label hides the target
+      row.className = 'rd-row' + (cur ? ' rd-cur' : '');
+      row.innerHTML = `<span class="rd-row-num">${i + 1}</span>`
+        + `<span class="rd-row-badge" style="color:${bdg.color};background:${bdg.bg};">${RD_TYPE_LABEL[seg.type] || seg.type}</span>`
+        + (cur ? '<span class="rd-row-live">LIVE</span>' : '')
+        + `<span class="rd-row-body"><span class="rd-row-label">${poEsc(seg.label || rdTargetLabel(seg))}</span>${detail ? `<span class="rd-row-sub">${poEsc(detail)}</span>` : ''}</span>`
+        + (seg.hold ? `<span class="rd-row-hold">auto ${seg.hold}s</span>` : '')
+        + '<span class="rd-row-acts"></span>';
     }
-    const go = document.createElement('button'); go.className = 'btn btn-ghost btn-xs'; go.textContent = '▶'; go.title = 'Run this segment now';
-    go.addEventListener('click', () => { _rdRunning = true; _rdIdx = i; rdRunCurrent(); });
-    if (isSection) go.style.display = 'none';
-    const ed = document.createElement('button'); ed.className = 'btn btn-ghost btn-xs'; ed.textContent = '✎'; ed.title = 'Edit this segment';
-    ed.addEventListener('click', () => { _rdEditIdx = i; renderRundown(); const inp = el('rd-list')?.querySelector('.rde-label'); if (inp) inp.focus(); });
-    const up = document.createElement('button'); up.className = 'btn btn-ghost btn-xs'; up.textContent = '↑'; up.disabled = i === 0;
-    up.addEventListener('click', () => { [_rdSegs[i - 1], _rdSegs[i]] = [_rdSegs[i], _rdSegs[i - 1]]; _rdEditIdx = -1; rdSave(); renderRundown(); });
-    const dn = document.createElement('button'); dn.className = 'btn btn-ghost btn-xs'; dn.textContent = '↓'; dn.disabled = i === _rdSegs.length - 1;
-    dn.addEventListener('click', () => { [_rdSegs[i + 1], _rdSegs[i]] = [_rdSegs[i], _rdSegs[i + 1]]; _rdEditIdx = -1; rdSave(); renderRundown(); });
-    const rm = document.createElement('button'); rm.className = 'btn btn-ghost btn-xs'; rm.textContent = '✕'; rm.style.color = '#f56565';
-    rm.addEventListener('click', () => { _rdSegs.splice(i, 1); if (_rdEditIdx === i) _rdEditIdx = -1; rdSave(); renderRundown(); });
-    [go, ed, up, dn, rm].forEach((b) => row.appendChild(b));
+    const acts = row.querySelector('.rd-row-acts');
+    const mkAct = (txt, title, cls, onClick, disabled) => { const bt = document.createElement('button'); bt.className = 'rd-act' + (cls ? ' ' + cls : ''); bt.textContent = txt; bt.title = title; if (disabled) bt.disabled = true; bt.addEventListener('click', onClick); return bt; };
+    if (!isSection) acts.appendChild(mkAct('▶', 'Run this segment now', 'rd-act-go', () => { _rdRunning = true; _rdIdx = i; rdRunCurrent(); }));
+    acts.appendChild(mkAct('✎', 'Edit this segment', '', () => { _rdEditIdx = i; renderRundown(); const inp = el('rd-list')?.querySelector('.rde-label'); if (inp) inp.focus(); }));
+    acts.appendChild(mkAct('↑', 'Move up', '', () => { [_rdSegs[i - 1], _rdSegs[i]] = [_rdSegs[i], _rdSegs[i - 1]]; _rdEditIdx = -1; rdSave(); renderRundown(); }, i === 0));
+    acts.appendChild(mkAct('↓', 'Move down', '', () => { [_rdSegs[i + 1], _rdSegs[i]] = [_rdSegs[i], _rdSegs[i + 1]]; _rdEditIdx = -1; rdSave(); renderRundown(); }, i === _rdSegs.length - 1));
+    acts.appendChild(mkAct('✕', 'Remove segment', 'rd-act-del', () => { _rdSegs.splice(i, 1); if (_rdEditIdx === i) _rdEditIdx = -1; rdSave(); renderRundown(); }));
     list.appendChild(row);
   });
   if (typeof renderQros === 'function') renderQros();   // keep the rail Run-of-Show panel in sync
@@ -21288,7 +21354,45 @@ function rdNext() {
   if (_rdIdx + 1 >= _rdSegs.length) { rdStop(); return; }
   _rdIdx++; rdRunCurrent();
 }
+// Step back to the previous real segment (section headers are skipped backwards —
+// rdRunCurrent only skips them forwards, which would bounce us to where we were).
+function rdPrev() {
+  if (!_rdRunning) return;
+  clearTimeout(_rdTimer); _rdTimer = null;
+  let i = _rdIdx - 1;
+  while (i >= 0 && _rdSegs[i] && _rdSegs[i].type === 'section') i--;
+  if (i < 0) return;
+  _rdIdx = i; rdRunCurrent();
+}
 function rdStop() { _rdRunning = false; _rdIdx = -1; clearTimeout(_rdTimer); _rdTimer = null; renderRundown(); if (typeof renderQros === 'function') renderQros(); }
+
+// ── Run of Show status → server (state.rundownStatus) ──────────────────────
+// The runner lives in this panel; external controllers (Stream Deck plugin) can't
+// see localStorage. Publish a tiny label snapshot whenever it changes so their keys
+// can display current/next, and let them drive the runner via 'rundown_control'
+// (relayed back to us by the server). Signature-deduped: renderRundown() calls this
+// on every repaint and full_state must never echo into another publish.
+let _rdStatusSig = '';
+function rdPublishStatus() {
+  const lbl = (i) => (i >= 0 && i < _rdSegs.length && _rdSegs[i]) ? (_rdSegs[i].label || rdTargetLabel(_rdSegs[i])) : '';
+  const fwd = (from) => { let i = from; while (i < _rdSegs.length && _rdSegs[i] && _rdSegs[i].type === 'section') i++; return i < _rdSegs.length ? i : -1; };
+  const back = (from) => { let i = from; while (i >= 0 && _rdSegs[i] && _rdSegs[i].type === 'section') i--; return i; };
+  const real = (upTo) => _rdSegs.slice(0, upTo).filter((s) => s && s.type !== 'section').length;
+  const st = {
+    running: !!_rdRunning,
+    pos: _rdRunning ? real(_rdIdx + 1) : 0,
+    total: real(_rdSegs.length),
+    current: _rdRunning ? lbl(_rdIdx) : '',
+    next: lbl(_rdRunning ? fwd(_rdIdx + 1) : fwd(0)),
+    prev: _rdRunning ? lbl(back(_rdIdx - 1)) : ''
+  };
+  const sig = JSON.stringify(st);
+  if (sig === _rdStatusSig) return;
+  _rdStatusSig = sig;
+  send('set_rundown_status', st);
+}
+// First publish after boot, once the bridge socket has had time to open.
+setTimeout(() => { try { rdPublishStatus(); } catch {} }, 2500);
 el('rd-add-type')?.addEventListener('change', renderRdAddTarget);
 el('rd-add-btn')?.addEventListener('click', () => {
   const type = el('rd-add-type')?.value || 'scene';
@@ -21390,7 +21494,13 @@ el('rd-import-file')?.addEventListener('change', function () {
 
 renderRdPicker();
 renderRdAddTarget();
-renderRundown();
+// Deferred: renderRundown() calls renderQros(), which reads RD_BADGE — a const declared ~1600
+// lines further down. Calling it eagerly here (before that line has run) throws a TDZ
+// ReferenceError that's UNCAUGHT (not inside any try/catch), which halts the rest of this
+// script's top-level execution — including the _wsToken declaration and the connect() call at
+// the very bottom, so the WebSocket never even opens and the Discord gate spins forever.
+// setTimeout(0) defers this first paint until after the whole script has finished running.
+setTimeout(renderRundown, 0);
 
 // ── Flows: server-backed if-this-then-that automation ──────────────────────
 // _flows is declared above. All persistence goes through the server (save_flow /
@@ -21408,13 +21518,22 @@ const FLOW_TRIGGER_GROUPS = [
     ['rl_overtime',         'Overtime starts'],
     ['rl_replay_start',     'Replay starts'],
     ['rl_replay_end',       'Replay ends'],
+    ['rl_match_created',    'New match created'],
+    ['rl_demo',             'Player demolishes'],
+    ['rl_save',             'Player saves'],
   ]},
   { label: 'CS2', items: [
-    ['cs2_round_start',     'Round starts'],
-    ['cs2_round_end',       'Round ends'],
-    ['cs2_bomb_planted',    'Bomb planted'],
-    ['cs2_half_time',       'Halftime'],
-    ['cs2_match_ended',     'Match ended'],
+    ['cs2_round_start',       'Round starts'],
+    ['cs2_round_end',         'Round ends'],
+    ['cs2_bomb_planted',      'Bomb planted'],
+    ['cs2_bomb_defused',      'Bomb defused'],
+    ['cs2_bomb_exploded',     'Bomb explodes'],
+    ['cs2_half_time',         'Halftime'],
+    ['cs2_match_ended',       'Match ended'],
+    ['cs2_kill',              'Player gets a kill'],
+    ['cs2_headshot_kill',     'Player gets a headshot kill'],
+    ['cs2_ace',               'Player gets an ace (5 kills)'],
+    ['cs2_clutch_situation',  'Clutch situation (1vX)'],
   ]},
   { label: 'Overwatch', items: [
     ['ow_match_start',      'Match starts'],
@@ -21457,6 +21576,8 @@ const FLOW_TRIGGER_GROUPS = [
     ['twitch_follow',          'New follower'],
     ['twitch_channel_points',  'Channel points redeemed'],
     ['twitch_hype_train',      'Hype Train starts'],
+    ['twitch_poll_end',        'Poll ends'],
+    ['twitch_ad_break',        'Ad break starts'],
     ['twitch_chat_command',    'Chat command (!command)'],
   ]},
   { label: 'In-App / Timer', items: [
@@ -21468,6 +21589,14 @@ const FLOW_TRIGGER_GROUPS = [
     ['timer_interval',  'Every N seconds (interval)'],
     ['time_of_day',     'At a specific time (daily)'],
     ['cron_schedule',   'Cron schedule (advanced)'],
+  ]},
+  { label: 'System', items: [
+    ['process_started',      'A program starts running'],
+    ['process_stopped',      'A program stops running'],
+    ['system_became_idle',   'No producer input for N minutes'],
+    ['system_became_active', 'Producer input resumes'],
+    ['window_focused',       'A window becomes focused'],
+    ['window_unfocused',     'A window loses focus'],
   ]},
   { label: 'Manual', items: [
     ['manual', 'Manual / button'],
@@ -21498,6 +21627,25 @@ function flowTriggerParamsHtml(trig) {
       </select>`;
     case 'cs2_round_end':
       return `<select class="ft-param input-select" data-k="winner" style="width:100px;"><option value="any"${(!p.winner||p.winner==='any')?' selected':''}>Either</option><option value="CT"${p.winner==='CT'?' selected':''}>CT</option><option value="T"${p.winner==='T'?' selected':''}>T</option></select>`;
+    case 'rl_demo':
+    case 'rl_save':
+      return `<select class="ft-param input-select" data-k="team" style="width:110px;">
+        <option value="any"${(!p.team||p.team==='any')?' selected':''}>Either team</option>
+        <option value="blue"${p.team==='blue'?' selected':''}>Blue team</option>
+        <option value="orange"${p.team==='orange'?' selected':''}>Orange team</option>
+      </select>`;
+    case 'cs2_kill':
+    case 'cs2_headshot_kill':
+    case 'cs2_ace':
+      return `<select class="ft-param input-select" data-k="team" style="width:100px;"><option value="any"${(!p.team||p.team==='any')?' selected':''}>Either side</option><option value="CT"${p.team==='CT'?' selected':''}>CT</option><option value="T"${p.team==='T'?' selected':''}>T</option></select>`;
+    case 'process_started':
+    case 'process_stopped':
+      return `<input type="text" class="ft-param input-text" data-k="processName" placeholder="e.g. RocketLeague.exe" value="${poEsc(p.processName||'')}" style="width:180px;" title="Checked roughly every 3 seconds — not instant">`;
+    case 'system_became_idle':
+      return `<input type="number" class="ft-param input-text" data-k="minutes" min="1" max="600" value="${p.minutes||5}" style="width:64px;"> <span style="font-size:11px;color:var(--muted);">minutes with no mouse/keyboard input</span>`;
+    case 'window_focused':
+    case 'window_unfocused':
+      return `<input type="text" class="ft-param input-text" data-k="titleContains" placeholder="e.g. OBS Studio" value="${poEsc(p.titleContains||'')}" style="width:180px;" title="Checked roughly every 5 seconds — not instant"> <span style="font-size:11px;color:var(--muted);">window title contains…</span>`;
     case 'obs_scene_changed':
       return (() => { const scenes=(currentState.obs&&currentState.obs.availableScenes)||[]; return `<select class="ft-param input-select" data-k="scene" style="width:160px;"><option value="">Any scene</option>${scenes.map(s=>`<option value="${poEsc(s)}"${p.scene===s?' selected':''}>${poEsc(s)}</option>`).join('')}</select>`; })();
     case 'obs_scene_dwell':
@@ -21536,6 +21684,22 @@ function flowTriggerParamsHtml(trig) {
       return '';
   }
 }
+
+// On-demand punch-up graphics a Flow can push live — the exclusive set gfx.html single-selects
+// (mirrors server.js's GFX_EXCLUSIVE_VISIBLE key set, plus 'matchup' which has no .visible flag
+// of its own). 'break'/'winner' are deliberately left out here — overlay_break_show/
+// overlay_countdown_start and overlay_winner already cover those with richer, purpose-built params.
+const FLOW_GFX_KEYS = [
+  ['intro',     'Line-up / Intro'],
+  ['matchup',   'Matchup'],
+  ['veto',      'Map Veto'],
+  ['draft',     'Draft / Pick-Ban'],
+  ['bracket',   'Bracket'],
+  ['schedule',  'Schedule / Upcoming'],
+  ['standings', 'Standings'],
+  ['credits',   'Stream Credits'],
+];
+const FLOW_GFX_LABEL = Object.fromEntries(FLOW_GFX_KEYS);
 
 // ── Action catalogue ────────────────────────────────────────────────────────
 const FLOW_ACTION_GROUPS = [
@@ -21596,8 +21760,11 @@ const FLOW_ACTION_GROUPS = [
     ['overlay_casters_show', 'Show casters overlay'],
     ['overlay_casters_hide', 'Hide casters overlay'],
     ['overlay_winner',       'Show winner graphic'],
+    ['overlay_winner_hide',  'Hide winner graphic'],
     ['overlay_sponsor_show', 'Show sponsor banner'],
     ['overlay_sponsor_hide', 'Hide sponsor banner'],
+    ['gfx_trigger',          'Push graphic live…'],
+    ['gfx_hide',             'Hide on-air graphic'],
     ['overlay_reload',       'Reload all overlays'],
   ]},
   { label: 'Match / Series', items: [
@@ -21655,6 +21822,8 @@ function flowActionLabel(a) {
     case 'set_round_label': return p.text ? ('Round: "' + p.text.slice(0, 24) + '"') : 'Clear round label';
     case 'set_match_label': return p.text ? ('Match label: "' + p.text.slice(0, 22) + '"') : 'Auto match label';
     case 'overlay_winner': return 'Winner: ' + (p.side === 'blue' ? 'Blue' : p.side === 'orange' ? 'Orange' : 'series winner');
+    case 'gfx_trigger': return 'Push graphic: ' + (FLOW_GFX_LABEL[p.key] || p.key || '?');
+    case 'gfx_hide': return 'Hide on-air graphic';
     case 'match_set_series_score': return `Series: Blue ${p.blue ?? '?'} – Orange ${p.orange ?? '?'}`;
     case 'twitch_prediction_create': return 'Create prediction: "' + (p.title || 'Who wins?').slice(0, 20) + '"';
     case 'twitch_prediction_resolve': return 'Resolve → outcome #' + ((p.outcomeIndex || 0) + 1);
@@ -21706,7 +21875,7 @@ function flowActionParamsHtml(a) {
     case 'wait':
       return `<input type="number" class="fa-param input-text" data-k="ms" min="0" value="${p.ms||1000}" style="width:80px;"> <span style="font-size:11px;color:var(--muted);">ms</span>`;
     case 'obs_scene':
-      return `<select class="fa-param input-select" data-k="scene" style="width:170px;">${scenes.map(s=>`<option value="${poEsc(s)}"${p.scene===s?' selected':''}>${poEsc(s)}</option>`).join('')||'<option value="">(OBS offline)</option>'}</select>`;
+      return `<select class="fa-param input-select" data-k="scene" style="width:170px;">${scenes.length ? '<option value="">— pick a scene —</option>'+scenes.map(s=>`<option value="${poEsc(s)}"${p.scene===s?' selected':''}>${poEsc(s)}</option>`).join('') : '<option value="">(OBS offline — reopen once connected)</option>'}</select>`;
     case 'vmix_cut': {
       const trans = ['Cut','Fade','Merge','Wipe','Slide','Fly','CrossZoom','Cube','CubeZoom','Stinger1','Stinger2','Stinger3','Stinger4'];
       return `<input type="text" class="fa-param input-text" data-k="input" placeholder="input # / name / GUID" value="${poEsc(p.input||'')}" style="width:150px;">
@@ -21748,6 +21917,8 @@ function flowActionParamsHtml(a) {
     case 'overlay_winner':
       return `<select class="fa-param input-select" data-k="side" style="width:150px;" title="Auto uses the winner from the trigger (e.g. Series Ended) — pick a side to force it"><option value="auto"${(!p.side||p.side==='auto')?' selected':''}>Auto (series winner)</option><option value="blue"${p.side==='blue'?' selected':''}>Blue</option><option value="orange"${p.side==='orange'?' selected':''}>Orange</option></select>
         <input type="text" class="fa-param input-text" data-k="name" placeholder="name (auto if blank)" value="${poEsc(p.name||'')}" style="width:120px;">`;
+    case 'gfx_trigger':
+      return `<select class="fa-param input-select" data-k="key" style="width:170px;" title="Shows whatever content is already configured for this graphic — set it up on the Graphics tab first"><option value=""${!p.key?' selected':''}>— pick a graphic —</option>${FLOW_GFX_KEYS.map(([k,l])=>`<option value="${k}"${p.key===k?' selected':''}>${poEsc(l)}</option>`).join('')}</select>`;
     case 'twitch_prediction_create':
       return `<input type="text" class="fa-param input-text" data-k="title" placeholder="Who will win?" value="${poEsc(p.title||'')}" style="width:130px;">
         <input type="text" class="fa-param input-text" data-k="outcome1" placeholder="Option 1" value="${poEsc(p.outcome1||'')}" style="width:90px;">
@@ -21863,9 +22034,19 @@ const FLOW_CONDITION_GROUPS = [
   { label: 'Variables / Flow', items: [
     ['if_variable',        'Variable value is…'],
     ['if_flow_last_fired', 'Flow fired within last…'],
+    ['flow_is_enabled',    'Another flow is enabled'],
   ]},
   { label: 'Match / Series (extended)', items: [
     ['if_match_point', 'Team is on match point'],
+  ]},
+  { label: 'System', items: [
+    ['system_idle_for',    'No producer input for at least…'],
+    ['process_running',    'A program is running'],
+    ['window_is_focused',  'A window is currently focused'],
+  ]},
+  { label: 'Audio', items: [
+    ['audio_level_above', 'Audio level above…'],
+    ['audio_level_below', 'Audio level below…'],
   ]},
 ];
 const FLOW_COND_LABEL = Object.fromEntries(FLOW_CONDITION_GROUPS.flatMap(g => g.items));
@@ -21928,6 +22109,22 @@ function flowConditionParamsHtml(cond) {
         <option value="blue"${p.team==='blue'?' selected':''}>Blue team</option>
         <option value="orange"${p.team==='orange'?' selected':''}>Orange team</option>
       </select>`;
+    case 'flow_is_enabled': {
+      const fls = _flows || [];
+      const fopts = fls.map(f => `<option value="${poEsc(f.id)}"${p.flowId===f.id?' selected':''}>${poEsc(f.name||f.id)}</option>`).join('');
+      return `<select class="fc-param input-select" data-k="flowId" style="width:180px;"><option value="">— pick flow —</option>${fopts}</select>`;
+    }
+    case 'system_idle_for':
+      return `<input type="number" class="fc-param input-text" data-k="minutes" min="1" max="600" value="${p.minutes||5}" style="width:64px;"> <span style="font-size:11px;color:var(--muted);">minutes</span>`;
+    case 'process_running':
+      return `<input type="text" class="fc-param input-text" data-k="processName" placeholder="e.g. RocketLeague.exe" value="${poEsc(p.processName||'')}" style="width:180px;" title="Checked roughly every 3 seconds — not instant">`;
+    case 'window_is_focused':
+      return `<input type="text" class="fc-param input-text" data-k="titleContains" placeholder="e.g. OBS Studio" value="${poEsc(p.titleContains||'')}" style="width:180px;" title="Checked roughly every 5 seconds — not instant">`;
+    case 'audio_level_above':
+    case 'audio_level_below':
+      return `<input type="text" class="fc-param input-text" data-k="sourceName" placeholder="audio source name" value="${poEsc(p.sourceName||'')}" style="width:160px;">
+        <input type="number" class="fc-param input-text" data-k="thresholdDb" value="${p.thresholdDb ?? -30}" style="width:60px;" title="dB — 0 is loudest, more negative is quieter"> <span style="font-size:11px;color:var(--muted);">dB for</span>
+        <input type="number" class="fc-param input-text" data-k="seconds" min="1" max="60" value="${p.seconds||3}" style="width:52px;"> <span style="font-size:11px;color:var(--muted);">sec straight</span>`;
     default:
       return '';
   }
@@ -22017,6 +22214,11 @@ function renderFlows() {
 
     const card = document.createElement('div');
     card.className = 'flow-card' + (isOn ? '' : ' flow-card-off');
+    card.dataset.search = [
+      f.name, f.notes,
+      ...triggers.map(t => FLOW_TRIG_LABEL[t.type] || t.type),
+      ...actions.map(a => flowActionLabel(a)),
+    ].filter(Boolean).join(' ').toLowerCase();
     card.innerHTML = `
       <div class="flow-card-top">
         <span class="flow-card-name">${poEsc(f.name||'Unnamed')}</span>
@@ -22052,28 +22254,50 @@ function renderFlows() {
     });
     list.appendChild(card);
   });
+  applyFlowsFilter();
+}
+
+// Keyword filter over the rendered flow cards (pure show/hide, mirrors applyTeamsFilter).
+function applyFlowsFilter() {
+  const list = el('flow-list'); if (!list) return;
+  const q = (el('flow-search')?.value || '').trim().toLowerCase();
+  const cards = list.querySelectorAll('.flow-card');
+  let shown = 0;
+  cards.forEach((card) => {
+    const m = !q || (card.dataset.search || '').includes(q);
+    card.style.display = m ? '' : 'none'; if (m) shown++;
+  });
+  const empty = el('flow-search-empty');
+  if (empty) empty.style.display = (q && cards.length && shown === 0) ? '' : 'none';
+}
+el('flow-search')?.addEventListener('input', applyFlowsFilter);
+
+// Coerce a flow (possibly a legacy shape from an old export/save) into the current shape.
+// Shared by the editor (openFlowEditor) and bulk import (which saves straight through without
+// ever opening the editor, so it can't rely on the editor to do this normalization for it).
+function normalizeFlowShape(f) {
+  const d = JSON.parse(JSON.stringify(f));
+  if (!d.triggers && d.trigger) {
+    d.triggers = [{ id: 'tr0', type: d.trigger.type||'manual', params: {} }];
+    delete d.trigger;
+  }
+  if (!d.triggers) d.triggers = [];
+  d.actions = (d.actions||[]).map(a => {
+    if (a.params) return a;
+    if (a.type === 'scene') return { id: 'ac_'+Math.random().toString(36).slice(2,7), type: 'obs_scene', params: { scene: a.scene||'' } };
+    if (a.type === 'wait') return { id: 'ac_'+Math.random().toString(36).slice(2,7), type: 'wait', params: { ms: (a.seconds||1)*1000 } };
+    return { id: 'ac_'+Math.random().toString(36).slice(2,7), type: a.type, params: {} };
+  });
+  if (!d.conditions) d.conditions = [];
+  if (d.repeatCount == null) d.repeatCount = 1;
+  if (d.repeatDelay == null) d.repeatDelay = 0;
+  return d;
 }
 
 function openFlowEditor(f) {
-  if (f) {
-    _flowDraft = JSON.parse(JSON.stringify(f));
-    if (!_flowDraft.triggers && _flowDraft.trigger) {
-      _flowDraft.triggers = [{ id: 'tr0', type: _flowDraft.trigger.type||'manual', params: {} }];
-      delete _flowDraft.trigger;
-    }
-    if (!_flowDraft.triggers) _flowDraft.triggers = [];
-    _flowDraft.actions = (_flowDraft.actions||[]).map(a => {
-      if (a.params) return a;
-      if (a.type === 'scene') return { id: 'ac_'+Math.random().toString(36).slice(2,7), type: 'obs_scene', params: { scene: a.scene||'' } };
-      if (a.type === 'wait') return { id: 'ac_'+Math.random().toString(36).slice(2,7), type: 'wait', params: { ms: (a.seconds||1)*1000 } };
-      return { id: 'ac_'+Math.random().toString(36).slice(2,7), type: a.type, params: {} };
-    });
-  } else {
-    _flowDraft = { id: 'fl_'+Math.random().toString(36).slice(2,9), name: '', enabled: true, triggerMode: 'any', triggers: [], conditions: [], actions: [], cooldown: 0, repeatCount: 1, repeatDelay: 0 };
-  }
-  if (!_flowDraft.conditions) _flowDraft.conditions = [];
-  if (_flowDraft.repeatCount == null) _flowDraft.repeatCount = 1;
-  if (_flowDraft.repeatDelay == null) _flowDraft.repeatDelay = 0;
+  _flowDraft = f
+    ? normalizeFlowShape(f)
+    : { id: 'fl_'+Math.random().toString(36).slice(2,9), name: '', enabled: true, triggerMode: 'any', triggers: [], conditions: [], actions: [], cooldown: 0, repeatCount: 1, repeatDelay: 0 };
   renderFlowEditor();
 }
 
@@ -22095,6 +22319,7 @@ function renderFlowEditor() {
 
   // ── Trigger rows ──────────────────────────────────────────────────────────
   const triggersHtml = (d.triggers||[]).map((t, i) => {
+    const isFirst = i === 0, isLast = i === d.triggers.length - 1;
     const seqLabel = isSeq ? (i === 0 ? 'WHEN' : 'THEN') : (i === 0 ? 'IF' : 'OR');
     const timeoutRow = (isSeq && i > 0)
       ? `<div class="fe-timeout-row"><span class="fe-muted">wait up to</span>
@@ -22105,7 +22330,12 @@ function renderFlowEditor() {
       <span class="fe-step-lbl" style="color:${_flowTrigColor(t.type)};">${seqLabel}</span>
       <select class="ft-type input-select fe-sel" data-i="${i}">${_flowTrigOptGroups(t.type)}</select>
       <div class="fe-inline-params">${flowTriggerParamsHtml(t)}</div>
-      <button class="fe-rm-btn ft-rm" data-i="${i}" title="Remove trigger">✕</button>
+      <div class="fe-row-ctrl">
+        <button class="ft-up fe-ctrl-btn" data-i="${i}" ${isFirst?'disabled':''} title="Move up">↑</button>
+        <button class="ft-dn fe-ctrl-btn" data-i="${i}" ${isLast?'disabled':''} title="Move down">↓</button>
+        <button class="ft-dup fe-ctrl-btn" data-i="${i}" title="Duplicate trigger">⧉</button>
+        <button class="fe-rm-btn ft-rm" data-i="${i}" title="Remove trigger">✕</button>
+      </div>
     </div>`;
   }).join('') || '<div class="fe-empty">No triggers — add one below to define when this flow fires.</div>';
 
@@ -22128,20 +22358,27 @@ function renderFlowEditor() {
       <div class="fe-act-ctrl">
         <button class="fa-up fe-ctrl-btn" data-i="${i}" ${isFirst?'disabled':''} title="Move up">↑</button>
         <button class="fa-dn fe-ctrl-btn" data-i="${i}" ${isLast?'disabled':''} title="Move down">↓</button>
+        <button class="fa-dup fe-ctrl-btn" data-i="${i}" title="Duplicate action">⧉</button>
         <button class="fa-rm fe-rm-btn" data-i="${i}" title="Remove action">✕</button>
       </div>
     </div>`;
   }).join('') || '<div class="fe-empty">No actions yet — pick one from the dropdown below.</div>';
 
   // ── Condition rows (AND guards) ───────────────────────────────────────────
-  const conditionsHtml = (d.conditions||[]).map((c, i) =>
-    `<div class="fe-cond-row" data-i="${i}">
+  const conditionsHtml = (d.conditions||[]).map((c, i) => {
+    const isFirst = i === 0, isLast = i === d.conditions.length - 1;
+    return `<div class="fe-cond-row" data-i="${i}">
       <span class="fe-step-lbl" style="color:#34d399;">${i===0?'IF':'AND'}</span>
       <select class="fc-type input-select fe-sel" data-i="${i}">${_flowCondOptGroups(c.type)}</select>
       <div class="fe-inline-params">${flowConditionParamsHtml(c)}</div>
-      <button class="fe-rm-btn fc-rm" data-i="${i}" title="Remove condition">✕</button>
-    </div>`
-  ).join('') || '<div class="fe-empty" style="font-size:11px;color:var(--muted);padding:8px 0;">No conditions — flow fires on any matching trigger.</div>';
+      <div class="fe-row-ctrl">
+        <button class="fc-up fe-ctrl-btn" data-i="${i}" ${isFirst?'disabled':''} title="Move up">↑</button>
+        <button class="fc-dn fe-ctrl-btn" data-i="${i}" ${isLast?'disabled':''} title="Move down">↓</button>
+        <button class="fc-dup fe-ctrl-btn" data-i="${i}" title="Duplicate condition">⧉</button>
+        <button class="fe-rm-btn fc-rm" data-i="${i}" title="Remove condition">✕</button>
+      </div>
+    </div>`;
+  }).join('') || '<div class="fe-empty" style="font-size:11px;color:var(--muted);padding:8px 0;">No conditions — flow fires on any matching trigger.</div>';
 
   // ── Modal scaffold ────────────────────────────────────────────────────────
   const modal = document.createElement('div');
@@ -22324,8 +22561,63 @@ function renderFlowEditor() {
     });
   });
 
+  modal.querySelectorAll('.fa-dup').forEach(btn => {
+    btn.addEventListener('click', function() {
+      const i = +this.dataset.i;
+      const copy = { ...JSON.parse(JSON.stringify(d.actions[i])), id: 'ac_'+Math.random().toString(36).slice(2,7) };
+      d.actions.splice(i+1, 0, copy);
+      renderFlowEditor();
+    });
+  });
+
   modal.querySelectorAll('.fa-rm').forEach(btn => {
     btn.addEventListener('click', function() { d.actions.splice(+this.dataset.i,1); renderFlowEditor(); });
+  });
+
+  modal.querySelectorAll('.ft-up').forEach(btn => {
+    btn.addEventListener('click', function() {
+      const i = +this.dataset.i;
+      if (i > 0) { [d.triggers[i-1], d.triggers[i]] = [d.triggers[i], d.triggers[i-1]]; renderFlowEditor(); }
+    });
+  });
+
+  modal.querySelectorAll('.ft-dn').forEach(btn => {
+    btn.addEventListener('click', function() {
+      const i = +this.dataset.i;
+      if (i < d.triggers.length-1) { [d.triggers[i+1], d.triggers[i]] = [d.triggers[i], d.triggers[i+1]]; renderFlowEditor(); }
+    });
+  });
+
+  modal.querySelectorAll('.ft-dup').forEach(btn => {
+    btn.addEventListener('click', function() {
+      const i = +this.dataset.i;
+      const copy = { ...JSON.parse(JSON.stringify(d.triggers[i])), id: 'tr_'+Math.random().toString(36).slice(2,7) };
+      d.triggers.splice(i+1, 0, copy);
+      renderFlowEditor();
+    });
+  });
+
+  modal.querySelectorAll('.fc-up').forEach(btn => {
+    btn.addEventListener('click', function() {
+      const i = +this.dataset.i;
+      if (i > 0) { [d.conditions[i-1], d.conditions[i]] = [d.conditions[i], d.conditions[i-1]]; renderFlowEditor(); }
+    });
+  });
+
+  modal.querySelectorAll('.fc-dn').forEach(btn => {
+    btn.addEventListener('click', function() {
+      const i = +this.dataset.i;
+      if (i < d.conditions.length-1) { [d.conditions[i+1], d.conditions[i]] = [d.conditions[i], d.conditions[i+1]]; renderFlowEditor(); }
+    });
+  });
+
+  modal.querySelectorAll('.fc-dup').forEach(btn => {
+    btn.addEventListener('click', function() {
+      const i = +this.dataset.i;
+      const copy = { ...JSON.parse(JSON.stringify(d.conditions[i])), id: 'co_'+Math.random().toString(36).slice(2,7) };
+      d.conditions.splice(i+1, 0, copy);
+      renderFlowEditor();
+    });
   });
 
   feid('fe-save').addEventListener('click', () => {
@@ -22361,6 +22653,19 @@ function downloadFlowJson(f) {
   a.click();
   URL.revokeObjectURL(a.href);
 }
+
+function downloadAllFlowsJson() {
+  if (!_flows.length) { if (typeof showToast === 'function') showToast('No flows to export', '#f59e0b', 1800); return; }
+  const json = JSON.stringify(_flows, null, 2);
+  const blob = new Blob([json], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'flows-all-' + new Date().toISOString().slice(0, 10) + '.json';
+  a.click();
+  URL.revokeObjectURL(a.href);
+  if (typeof showToast === 'function') showToast('Exported ' + _flows.length + ' flow' + (_flows.length===1?'':'s'), '#10b981', 1800);
+}
+el('flow-export-all')?.addEventListener('click', downloadAllFlowsJson);
 
 function flowDryRun(f) {
   send('flow_dry_run', { id: f.id });
@@ -22496,12 +22801,20 @@ el('flow-import-input')?.addEventListener('change', function() {
   reader.onload = (ev) => {
     try {
       const data = JSON.parse(ev.target.result);
-      const flows = Array.isArray(data) ? data : [data];
-      flows.forEach(f => {
-        if (!f || typeof f !== 'object' || !f.triggers) return;
-        f.id = 'fl_' + Math.random().toString(36).slice(2, 9);
-        openFlowEditor(f);
-      });
+      const raw = Array.isArray(data) ? data : [data];
+      const flows = raw.filter(f => f && typeof f === 'object' && f.triggers);
+      if (!flows.length) { if (typeof showToast === 'function') showToast('Invalid flow JSON', '#f56565', 2000); return; }
+      flows.forEach(f => { f.id = 'fl_' + Math.random().toString(36).slice(2, 9); });
+      if (flows.length === 1) {
+        // A single flow — open it in the editor so the producer can review/rename before it's saved.
+        openFlowEditor(flows[0]);
+      } else {
+        // Bulk import — opening each in the modal one after another only ever leaves the LAST one
+        // visible (openFlowEditor replaces the single shared draft/modal each time), silently
+        // discarding the rest with no save and no way to recover them. Save them straight through instead.
+        flows.forEach(f => send('save_flow', normalizeFlowShape(f)));
+        if (typeof showToast === 'function') showToast('Imported ' + flows.length + ' flows', '#10b981', 2000);
+      }
     } catch { if (typeof showToast === 'function') showToast('Invalid flow JSON', '#f56565', 2000); }
   };
   reader.readAsText(file);
@@ -22920,23 +23233,63 @@ el('credits-endtext')?.addEventListener('input', function () {
 });
 
 // ── Qrail panels: Run of Show · Flows · Talent (the live command rail) ─────
+// Badge colors per segment type
+const RD_BADGE = {
+  section:   { color: '#a78bfa', bg: 'rgba(167,139,250,.15)' },
+  manual:    { color: '#fbbf24', bg: 'rgba(251,191,36,.14)' },
+  flow:      { color: '#22d3ee', bg: 'rgba(34,211,238,.14)' },
+  trigger:   { color: '#4ade80', bg: 'rgba(74,222,128,.14)' },
+  scene:     { color: '#60a5fa', bg: 'rgba(96,165,250,.14)' },
+  playout:   { color: '#f472b6', bg: 'rgba(244,114,182,.14)' },
+  view:      { color: '#34d399', bg: 'rgba(52,211,153,.14)' },
+  countdown: { color: '#fb923c', bg: 'rgba(251,146,60,.14)' },
+};
 function renderQros() {
   const list = el('qros-list'); if (!list) return;
   const st = el('qros-status');
+  const cancelBtn = el('qros-cancel');
+  const curSeg = _rdRunning && _rdSegs[_rdIdx];
+  // Status line
   if (st) {
-    if (_rdRunning && _rdSegs[_rdIdx]) st.innerHTML = `<span style="color:var(--good,#48bb78);font-weight:700;">● ${_rdIdx + 1}/${_rdSegs.length}</span> ${poEsc(_rdSegs[_rdIdx].label || rdTargetLabel(_rdSegs[_rdIdx]))}`;
-    else st.textContent = _rdSegs.length ? `${_rdSegs.length} segment${_rdSegs.length === 1 ? '' : 's'} — idle` : 'No segments — build it on Production.';
+    if (curSeg) {
+      const holdIcon = _rdTimer ? ' <span style="color:#fb923c;font-size:10px;" title="Auto-advancing…">&#8987;</span>' : '';
+      st.innerHTML = `<span style="color:#48bb78;font-weight:700;">&#9679; ${_rdIdx + 1}/${_rdSegs.length}</span>&nbsp;${poEsc(curSeg.label || rdTargetLabel(curSeg))}${holdIcon}`;
+    } else {
+      st.textContent = _rdSegs.length ? `${_rdSegs.length} segments — idle` : 'No segments — build on Production.';
+    }
   }
+  // Cancel button: only visible while a hold-timer countdown is running
+  if (cancelBtn) cancelBtn.style.display = (_rdRunning && _rdTimer) ? '' : 'none';
   const dot = el('qrail-ros-dot'); if (dot) dot.style.display = _rdRunning ? '' : 'none';
+
   list.innerHTML = '';
   _rdSegs.forEach((seg, i) => {
     const cur = _rdRunning && i === _rdIdx;
-    const row = document.createElement('button');
-    row.style.cssText = 'display:flex;align-items:center;gap:7px;width:100%;text-align:left;padding:6px 8px;border:1px solid ' + (cur ? 'var(--cp-accent)' : 'var(--border)') + ';border-radius:6px;background:' + (cur ? 'rgba(124,58,237,.14)' : 'var(--surface2)') + ';color:var(--text);cursor:pointer;';
-    row.innerHTML = `<span style="font-size:10px;color:var(--muted);">${i + 1}</span><span style="font-size:8px;font-weight:800;padding:1px 5px;border-radius:3px;background:rgba(255,255,255,.08);color:#c4b5fd;">${RD_TYPE_LABEL[seg.type] || seg.type}</span><span style="flex:1;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${poEsc(seg.label || rdTargetLabel(seg))}</span>`;
-    row.addEventListener('click', () => { _rdRunning = true; _rdIdx = i; rdRunCurrent(); });
-    list.appendChild(row);
+    const badge = RD_BADGE[seg.type] || { color: '#c4b5fd', bg: 'rgba(196,181,253,.12)' };
+    const typeLabel = RD_TYPE_LABEL[seg.type] || seg.type;
+    const segLabel = poEsc(seg.label || rdTargetLabel(seg));
+
+    if (seg.type === 'section') {
+      const hdr = document.createElement('div');
+      hdr.className = 'qros-section-hdr';
+      hdr.innerHTML = `<span class="qros-section-label">${segLabel}</span><div class="qros-section-line"></div><span style="font-size:9px;color:var(--muted);">${i + 1}</span>`;
+      list.appendChild(hdr);
+    } else {
+      const row = document.createElement('button');
+      row.className = 'qros-row' + (cur ? ' qros-cur' : '');
+      row.innerHTML = `<span class="qros-num">${i + 1}</span>`
+        + `<span class="qros-badge" style="color:${badge.color};background:${badge.bg};">${typeLabel}</span>`
+        + `<span class="qros-seg-label">${segLabel}</span>`
+        + (cur && _rdTimer ? '<span class="qros-hold-dot" title="Auto-advancing…">&#8987;</span>' : '');
+      row.addEventListener('click', () => { _rdRunning = true; _rdIdx = i; clearTimeout(_rdTimer); _rdTimer = null; rdRunCurrent(); });
+      list.appendChild(row);
+    }
   });
+}
+function rdCancelHold() {
+  clearTimeout(_rdTimer); _rdTimer = null;
+  renderRundown();
+  if (typeof renderQros === 'function') renderQros();
 }
 function renderQflows() {
   const list = el('qflows-list'); if (!list) return;
@@ -23249,6 +23602,7 @@ function renderQrailLive() { renderQros(); renderQflows(); renderQtalent(); }
 el('qros-start')?.addEventListener('click', () => { rdStart(); renderQros(); });
 el('qros-next')?.addEventListener('click', () => { rdNext(); renderQros(); });
 el('qros-stop')?.addEventListener('click', () => { rdStop(); renderQros(); });
+el('qros-cancel')?.addEventListener('click', rdCancelHold);
 document.querySelectorAll('.js-goto-ros, .js-goto-flows').forEach((a) => a.addEventListener('click', (e) => { e.preventDefault(); document.querySelector('.tab-btn[data-tab="produccion"]')?.click(); }));
 document.querySelectorAll('.js-goto-dashboard').forEach((a) => a.addEventListener('click', (e) => { e.preventDefault(); document.querySelector('.tab-btn[data-tab="principal"]')?.click(); }));
 
@@ -25720,6 +26074,14 @@ async function connect() {
       _r('eventOps',           () => { if (typeof window.eventOpsOnState === 'function') window.eventOpsOnState(); });
       _r('perfMode',           () => applyPerfMode(msg.data));
       _r('cloudRole',          () => applyCloudRole(msg.data.cloudRole));
+    } else if (msg.type === 'rundown_control') {
+      // External Run of Show control (Stream Deck plugin) — the server relays these
+      // to us because the rundown runner lives in this panel, not on the server.
+      const op = msg.data && msg.data.op;
+      if (op === 'next') rdNext();
+      else if (op === 'prev') rdPrev();
+      else if (op === 'run') { if (_rdRunning) rdRunCurrent(); else rdStart(); }
+      else if (op === 'stop') rdStop();
     } else if (msg.type === 'twitch_stream_state') {
       onTwitchStreamState(msg);
     } else if (msg.type === 'director_update') {
@@ -25984,6 +26346,16 @@ async function connect() {
       if (st) {
         st.textContent = (msg.data.auto ? 'Auto: ' : '') + (msg.data.message || '');
         st.style.color = msg.data.ok ? '#9ae6b4' : '#f56565';
+      }
+      // Auto presses happen while the producer is watching the show, not the Settings page —
+      // surface the outcome as a toast so a silent failure is never silent again. (The server only
+      // reports the FINAL auto result: one success, or one give-up after its retry window — plus
+      // one 'scheduled' notice when the spectate trigger latches, so trigger vs press is testable.)
+      if (msg.data.auto) {
+        if (msg.data.scheduled) showToast('Spectate detected — hiding the Rocket League UI…', undefined, 4000);
+        else showToast(msg.data.ok ? 'Rocket League native UI hidden automatically.'
+          : ('RL auto-hide could not press the key: ' + (msg.data.message || 'unknown') + ' — use Hide native UI now or the hotkey.'),
+          msg.data.ok ? undefined : '#c53030', msg.data.ok ? 5000 : 12000);
       }
     } else if (msg.type === 'rl-scene-result') {
       const st = el('rl-scene-auto-status');

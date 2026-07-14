@@ -4,9 +4,9 @@
   "meta": {
     "name": "NE Broadcast Suite Relay",
     "author": "Armour Studios",
-    "version": "0.1.0",
+    "version": "0.2.0",
     "minimum-overwolf-version": "0.240.0",
-    "description": "Relays Overwatch live game data to NE Broadcast Suite",
+    "description": "Relays Overwatch and Marvel Rivals live game data to NE Broadcast Suite",
     "icon": "icon.png"
   },
   "permissions": [
@@ -26,7 +26,8 @@
     "game_targeting": {
       "type": "dedicated",
       "game_ids": [
-        10844
+        10844,
+        24890
       ]
     },
     "launch_events": [
@@ -34,7 +35,8 @@
         "event": "GameLaunch",
         "event_data": {
           "game_ids": [
-            10844
+            10844,
+            24890
           ]
         },
         "start_minimized": true

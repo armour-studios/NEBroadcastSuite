@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <script src="sdpi-components.js"></script>
+</head>
+<body>
+  <sdpi-item label="Operation">
+    <sdpi-select setting="op" default="start">
+      <option value="start">Start countdown</option>
+      <option value="pause">Pause / resume</option>
+      <option value="stop">Stop countdown</option>
+      <option value="reset">Reset countdown</option>
+      <option value="visibility">Toggle visibility</option>
+      <option value="add">Add time</option>
+      <option value="sub">Subtract time</option>
+      <option value="headline">Set headline</option>
+      <option value="cycle">Cycle headlines</option>
+    </sdpi-select>
+  </sdpi-item>
+  <sdpi-item label="Duration">
+    <sdpi-textfield setting="seconds" placeholder="5:00 or 300 or 5m - for Start / Reset"></sdpi-textfield>
+  </sdpi-item>
+  <sdpi-item label="Amount">
+    <sdpi-textfield setting="amount" placeholder="0:30 or 30 - for Add / Subtract"></sdpi-textfield>
+  </sdpi-item>
+  <sdpi-item label="Headline">
+    <sdpi-select setting="title" default="STARTING SOON">
+      <option value="STARTING SOON">STARTING SOON</option>
+      <option value="BE RIGHT BACK">BE RIGHT BACK</option>
+      <option value="UP NEXT">UP NEXT</option>
+      <option value="TECHNICAL DIFFICULTIES">TECHNICAL DIFFICULTIES</option>
+      <option value="custom">Custom...</option>
+    </sdpi-select>
+  </sdpi-item>
+  <sdpi-item label="Custom text">
+    <sdpi-textfield setting="customTitle" placeholder="Only used with Custom"></sdpi-textfield>
+  </sdpi-item>
+</body>
+</html>

@@ -536,14 +536,19 @@ async function _cancelSocialPost(id) {
     const sceneEl  = document.getElementById('obs-prev-scene');
     const pauseBtn = document.getElementById('obs-prev-pause');
     const closeBtn = document.getElementById('obs-prev-close');
+    const minBtn   = document.getElementById('obs-prev-min');
     const dragHdr  = document.getElementById('obs-prev-drag');
     const modeCam  = document.getElementById('obs-prev-mode-cam');
     const modeScr  = document.getElementById('obs-prev-mode-scr');
+    const modeGfx  = document.getElementById('obs-prev-mode-gfx');
+    const gfxWrap  = document.getElementById('obs-prev-gfx');
+    const gfxIframe = document.getElementById('obs-prev-gfx-iframe');
     if (!panel || !btn) return;
 
     // ── State ──
-    let active  = false;
-    let mode    = 'cam';          // cam-only: SCR (screenshot polling) removed from this panel
+    let active     = false;
+    let minimized  = false;
+    let mode    = 'cam';          // 'cam' | 'gfx' — SCR (screenshot polling) was removed from this panel
     let paused  = false;
     let pending = false;
     let timer   = null;
@@ -564,15 +569,46 @@ async function _cancelSocialPost(id) {
       msg.classList.toggle('hidden', !text);
     }
 
+    function setMinimized(val) {
+      minimized = val;
+      panel.classList.toggle('minimized', minimized);
+      if (minBtn) minBtn.title = minimized ? 'Restore (or double-click header)' : 'Minimize (or double-click header)';
+    }
+
     function setMode(m) {
-      mode = 'cam';   // cam-only now
-      modeCam.classList.add('active');
+      mode = (m === 'gfx') ? 'gfx' : 'cam';
+      modeCam.classList.toggle('active', mode === 'cam');
+      if (modeGfx) modeGfx.classList.toggle('active', mode === 'gfx');
       if (modeScr) modeScr.style.display = 'none';
       fpsBtn.style.display = 'none';
       pauseBtn.style.display = 'none';
       img.style.display = 'none';
-      video.style.display = '';
+      video.style.display = (mode === 'cam') ? '' : 'none';
+      if (gfxWrap) gfxWrap.style.display = (mode === 'gfx') ? '' : 'none';
     }
+
+    // ── GFX mode: mirrors whatever scene is currently being edited in the Graphics hub.
+    // Reuses the SAME scaling technique as the inline preview (fitScenePreviews() picks up any
+    // .live-pv-wrapped iframe automatically) rather than a second bespoke sizing scheme. ──
+    function syncGfxPreview() {
+      if (!gfxIframe || typeof window._gfxCurrentPreviewUrl !== 'function') return;
+      const url = window._gfxCurrentPreviewUrl();
+      if (url && gfxIframe.getAttribute('src') !== url) gfxIframe.src = url;
+      if (typeof window._fitScenePreviews === 'function') window._fitScenePreviews();
+    }
+    function startGfx() {
+      syncGfxPreview();
+      setMsg(gfxIframe && gfxIframe.getAttribute('src') ? '' : 'Open the Graphics hub and pick a scene to preview it here.');
+    }
+    function stopGfx() {
+      if (gfxIframe) gfxIframe.removeAttribute('src');
+    }
+    // Called by the Graphics hub (gfxApplyPreview) every time the edited scene changes, so this
+    // stays live even while it's not the active mode — flipping to GFX later shows the right scene
+    // immediately instead of a stale one from whenever GFX was last active.
+    window._obsPrevSyncGfx = syncGfxPreview;
+    // Entry point for the Graphics hub's own "Pop out preview" button.
+    window._obsPreviewOpenGfx = () => { if (active) switchMode('gfx'); else open('gfx'); };
 
     // ── Screenshot mode ──
     async function scrNext() {
@@ -661,20 +697,24 @@ async function _cancelSocialPost(id) {
     }
 
     // ── Open / close ──
-    function open() {
+    // preferMode lets a caller (the Graphics hub's "Pop out preview" button) open straight into
+    // GFX regardless of whichever mode was last used — otherwise reopens on the persisted mode.
+    function open(preferMode) {
       active = true;
       panel.style.display = '';
       btn.classList.add('active');
       fpsBtn.textContent = FPS_LBLS[fpsIdx];
       frameCount = 0; frameTs = Date.now();
-      setMode('cam');
-      startCam();
+      const m = preferMode || mode;
+      setMode(m);
+      if (m === 'gfx') startGfx(); else startCam();
     }
 
     function close() {
       active = false;
+      setMinimized(false);
       clearTimeout(timer); clearInterval(fpsTimer);
-      stopCam();
+      stopCam(); stopGfx();
       panel.style.display = 'none';
       btn.classList.remove('active');
       img.src = '';
@@ -683,21 +723,19 @@ async function _cancelSocialPost(id) {
     }
 
     function switchMode(m) {
-      if (m === mode) return;
-      // Stop whichever is running
+      if (m === mode) {
+        if (m === 'cam') { stopCam(); if (active) startCam(); }   // re-click CAM = retry
+        else if (m === 'gfx') syncGfxPreview();                    // re-click GFX = re-sync now
+        return;
+      }
       if (mode === 'cam') stopCam();
-      if (mode === 'scr') { clearTimeout(timer); clearInterval(fpsTimer); paused = false; }
+      if (mode === 'gfx') stopGfx();
       setMode(m);
       if (active) {
         frameCount = 0; frameTs = Date.now();
-        if (m === 'cam') {
-          startCam();
-        } else {
-          setMsg('Connecting...');
-          scrNext();
-          startFpsMeter();
-        }
+        if (m === 'cam') startCam(); else if (m === 'gfx') startGfx();
       }
+      try { localStorage.setItem('ne_obs_prev_mode', m); } catch (_) {}
     }
 
     function togglePause() {
@@ -712,7 +750,14 @@ async function _cancelSocialPost(id) {
     btn.addEventListener('click', () => { if (active) close(); else open(); });
     closeBtn.addEventListener('click', close);
     pauseBtn.addEventListener('click', togglePause);
-    modeCam.addEventListener('click', () => { stopCam(); startCam(); });   // retry
+    if (minBtn) minBtn.addEventListener('click', () => setMinimized(!minimized));
+    // Double-click anywhere on the header (not on buttons/tabs) toggles minimize
+    dragHdr.addEventListener('dblclick', (e) => {
+      if (e.target.closest('.obs-prev-btn, .obs-prev-modetab, .obs-prev-modetabs')) return;
+      setMinimized(!minimized);
+    });
+    modeCam.addEventListener('click', () => switchMode('cam'));
+    if (modeGfx) modeGfx.addEventListener('click', () => switchMode('gfx'));
     if (modeScr) modeScr.style.display = 'none';
 
     // FPS button cycles through fps options (screenshot mode only)
@@ -745,6 +790,48 @@ async function _cancelSocialPost(id) {
       document.addEventListener('mousemove', onMove);
       document.addEventListener('mouseup', onUp);
     });
+
+    // ── Resizable from the left, right, or bottom edge ──
+    // Only ever adjusts width — height always follows via .obs-prev-body's own aspect-ratio:16/9,
+    // so the feed can be grabbed from any of these 3 sides and can never be dragged out of 16:9.
+    // Dragging the bottom edge maps its vertical delta to an equivalent width change (16/9 ratio)
+    // so "make it bigger by pulling down" still works, just via width under the hood.
+    const RESIZE_MIN = 320, RESIZE_MAX = 1600;
+    function initResizeHandle(handle, edge) {
+      if (!handle) return;
+      handle.addEventListener('mousedown', (e) => {
+        e.preventDefault(); e.stopPropagation();
+        const rect = panel.getBoundingClientRect();
+        const startX = e.clientX, startY = e.clientY, startW = rect.width;
+        // Pin the panel to its current on-screen position via explicit left/top, then only the
+        // dragged edge's side is left free to move — works regardless of whether the panel is
+        // still at its default right/bottom-anchored spot or was already dragged elsewhere.
+        panel.style.left = rect.left + 'px';
+        panel.style.top = rect.top + 'px';
+        panel.style.right = 'auto';
+        panel.style.bottom = 'auto';
+        handle.classList.add('is-dragging');
+        function onMove(ev) {
+          let newW = startW;
+          if (edge === 'l') newW = startW + (startX - ev.clientX);
+          else if (edge === 'r') newW = startW + (ev.clientX - startX);
+          else if (edge === 'b') newW = startW + (ev.clientY - startY) * (16 / 9);
+          newW = Math.max(RESIZE_MIN, Math.min(RESIZE_MAX, newW));
+          panel.style.width = newW + 'px';
+          if (edge === 'l') panel.style.left = (rect.right - newW) + 'px';   // keep right edge fixed
+        }
+        function onUp() {
+          handle.classList.remove('is-dragging');
+          document.removeEventListener('mousemove', onMove);
+          document.removeEventListener('mouseup', onUp);
+        }
+        document.addEventListener('mousemove', onMove);
+        document.addEventListener('mouseup', onUp);
+      });
+    }
+    initResizeHandle(document.getElementById('obs-prev-resize-l'), 'l');
+    initResizeHandle(document.getElementById('obs-prev-resize-r'), 'r');
+    initResizeHandle(document.getElementById('obs-prev-resize-b'), 'b');
 
     // ── Scene label (updated from full_state) ──
     window._obsPreviewUpdateScene = (sceneName) => {

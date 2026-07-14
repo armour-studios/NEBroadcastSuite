@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <script src="sdpi-components.js"></script>
+</head>
+<body>
+  <sdpi-item label="Time format">
+    <sdpi-select setting="format" default="auto">
+      <option value="auto">Auto (m:ss, hours when needed)</option>
+      <option value="hms">hh:mm:ss</option>
+      <option value="ms">mm:ss</option>
+    </sdpi-select>
+  </sdpi-item>
+  <sdpi-item label="On press">
+    <sdpi-select setting="press" default="pause">
+      <option value="pause">Pause / resume the countdown</option>
+      <option value="title">Set the break headline</option>
+      <option value="cycle">Cycle the headlines</option>
+      <option value="none">Nothing (display only)</option>
+    </sdpi-select>
+  </sdpi-item>
+  <sdpi-item label="Headline">
+    <sdpi-select setting="title" default="STARTING SOON">
+      <option value="STARTING SOON">STARTING SOON</option>
+      <option value="BE RIGHT BACK">BE RIGHT BACK</option>
+      <option value="UP NEXT">UP NEXT</option>
+      <option value="TECHNICAL DIFFICULTIES">TECHNICAL DIFFICULTIES</option>
+      <option value="custom">Custom...</option>
+    </sdpi-select>
+  </sdpi-item>
+  <sdpi-item label="Custom text">
+    <sdpi-textfield setting="customTitle" placeholder="Only used with Custom"></sdpi-textfield>
+  </sdpi-item>
+</body>
+</html>

@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<!--
+  league-stats.html — dedicated SEASON STATS board. Renders state.leagueStats (pushed from the
+  Leagues ▸ Stats tab): a grouped table of teams × stats across three tiers — SERIES (match W-L),
+  GAMES/MAPS (record + score), and IN-GAME (the game's own stats). Reuses scene-base.js (WS connect,
+  brand colour/logo, sponsor rail) + a fit()-to-16:9 scale, matching standings.html's conventions.
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1920">
+<title>NE Broadcast Suite — League Stats</title>
+<style>
+  :root { --accent: #e83a8b; --accent-2: #a855f7; --main-font: 'Bourgeois', 'Inter', sans-serif; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 1920px; height: 1080px; overflow: hidden; background: transparent; font-family: var(--main-font); }
+  .ls-stage {
+    position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 30px; padding: 24px 76px 0;
+    background:
+      radial-gradient(1200px 700px at 50% -8%, rgba(255,255,255,.05), transparent 60%),
+      radial-gradient(1000px 600px at 12% 108%, color-mix(in srgb, var(--accent) 22%, transparent), transparent 60%),
+      linear-gradient(180deg, #0a0b10, #05060a);
+    opacity: 0; transition: opacity .45s ease;
+  }
+  .ls-stage.show { opacity: 1; }
+  .ls-scale { transform-origin: center center; display: flex; flex-direction: column; gap: 26px; align-items: stretch; }
+
+  /* Header */
+  .ls-header { display: flex; align-items: center; gap: 22px; }
+  .ls-brand { height: 76px; max-width: 300px; object-fit: contain; filter: drop-shadow(0 4px 14px rgba(0,0,0,.5)); }
+  .ls-headtext { display: flex; flex-direction: column; gap: 4px; }
+  .ls-eyebrow { font-size: 15px; font-weight: 800; letter-spacing: .34em; text-transform: uppercase; color: var(--accent); }
+  .ls-title { font-size: 52px; font-weight: 900; letter-spacing: .01em; line-height: .98; color: #fff; text-transform: uppercase; }
+  .ls-subtitle { font-size: 19px; font-weight: 600; color: #aeb4c4; letter-spacing: .02em; }
+  .ls-count { margin-left: auto; display: flex; flex-direction: column; align-items: center; line-height: 1;
+    padding: 12px 20px; border-radius: 14px; background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.08); }
+  .ls-count b { font-size: 30px; font-weight: 900; color: #fff; }
+  .ls-count span { font-size: 11px; font-weight: 800; letter-spacing: .18em; text-transform: uppercase; color: #7a8296; margin-top: 4px; }
+
+  /* Table */
+  .ls-table { border-collapse: separate; border-spacing: 0; background: rgba(12,14,20,.72); border: 1px solid rgba(255,255,255,.08);
+    border-radius: 18px; overflow: hidden; backdrop-filter: blur(3px); box-shadow: 0 30px 80px -30px rgba(0,0,0,.8); }
+  .ls-table th, .ls-table td { font-variant-numeric: tabular-nums; text-align: center; white-space: nowrap; }
+  .ls-grouprow th { padding: 14px 16px 8px; font-size: 14px; font-weight: 900; letter-spacing: .16em; text-transform: uppercase; }
+  .ls-grp { border-bottom: 3px solid currentColor; }
+  .ls-grp-0 { color: #8792a8; }
+  .ls-grp-1 { color: var(--accent); }
+  .ls-grp-2 { color: var(--accent-2); }
+  .ls-colrow th { padding: 8px 16px 12px; font-size: 15px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; color: #8b93a6;
+    border-bottom: 1px solid rgba(255,255,255,.1); }
+  .ls-th-team { text-align: left !important; }
+  .ls-table tbody td { padding: 13px 16px; font-size: 24px; font-weight: 700; color: #e9edf6; border-bottom: 1px solid rgba(255,255,255,.05); }
+  .ls-table tbody tr:last-child td { border-bottom: none; }
+  .ls-table tbody tr:nth-child(even) td { background: rgba(255,255,255,.018); }
+  .ls-td-team { text-align: left !important; position: relative; padding-left: 26px !important; }
+  .ls-td-team::before { content: ''; position: absolute; left: 0; top: 12px; bottom: 12px; width: 5px; border-radius: 3px; background: var(--row, var(--accent)); }
+  .ls-td-team { display: flex; align-items: center; gap: 14px; }
+  .ls-logo { width: 42px; height: 42px; object-fit: contain; border-radius: 8px; flex: 0 0 auto; }
+  .ls-name { font-size: 25px; font-weight: 800; color: #fff; letter-spacing: .01em; }
+
+  .ls-empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #6a7080; font-size: 22px; }
+
+  /* Sponsor rail (bottom) — same shape as standings.html */
+  .ls-sponsors { position: absolute; left: 0; right: 0; bottom: 26px; display: flex; align-items: center; justify-content: center; gap: 26px; }
+  .ls-sponsors.is-empty { display: none; }
+  .ls-sponsors-lbl { font-size: 11px; font-weight: 800; letter-spacing: .24em; text-transform: uppercase; color: #6a7080; }
+  .ls-sponsor { height: 30px; max-width: 122px; object-fit: contain; opacity: .88; filter: drop-shadow(0 2px 6px rgba(0,0,0,.4)); }
+</style>
+</head>
+<body>
+
+<div id="ls-stage" class="ls-stage">
+  <div class="ls-scale" id="ls-scale">
+    <div class="ls-header">
+      <img class="ls-brand" id="ls-brand" alt="" style="display:none;">
+      <div class="ls-headtext">
+        <div class="ls-eyebrow">Season Stats</div>
+        <div class="ls-title" id="ls-title">SEASON STATS</div>
+        <div class="ls-subtitle" id="ls-subtitle" style="display:none;"></div>
+      </div>
+      <div class="ls-count" id="ls-count"></div>
+    </div>
+    <table class="ls-table" id="ls-table"></table>
+  </div>
+  <div class="ls-empty" id="ls-empty" style="display:none;">No stats pushed yet — open Leagues ▸ Stats and hit Push to Overlay.</div>
+  <div class="ls-sponsors is-empty" id="ls-sponsors"></div>
+</div>
+
+<script src="scene-base.js"></script>
+<script>
+(function () {
+  function el(id) { return document.getElementById(id); }
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+  function svgFallback(letter, color) {
+    return 'data:image/svg+xml;utf8,' + encodeURIComponent(
+      `<svg xmlns="http://www.w3.org/2000/svg" width="120" height="120"><rect width="120" height="120" rx="18" fill="${color}"/><text x="60" y="82" font-size="64" fill="#fff" text-anchor="middle" font-family="Arial,sans-serif" font-weight="bold">${letter}</text></svg>`);
+  }
+
+  function fit() {
+    const scale = el('ls-scale'); if (!scale) return;
+    scale.style.transform = 'scale(1)';
+    const availW = 1920 - 140, availH = 1080 - 48 - 78;   // stage padding + sponsor rail
+    const w = Math.max(scale.offsetWidth, scale.scrollWidth) || 1;
+    const h = Math.max(scale.offsetHeight, scale.scrollHeight) || 1;
+    const s = Math.min(availW / w, availH / h, 1.1);
+    scale.style.transform = `scale(${s})`;
+  }
+
+  let _sig = '';
+  function render(data) {
+    const stage = el('ls-stage'); if (!stage) return;
+    // Real server state always carries a leagueStats object; the standalone demo doesn't — hold hidden.
+    if (!data.leagueStats && !SceneBase.preview) { stage.classList.remove('show'); return; }
+    const ls = data.leagueStats || {};
+    stage.classList.add('show');
+
+    const accent = SceneBase.brandColor(data) || '#e83a8b';
+    const accent2 = SceneBase.brandAccent(data) || accent;
+    const title = (ls.title || 'SEASON STATS').toString().toUpperCase();
+    const subtitle = (ls.subtitle || '').toString();
+    const columns = Array.isArray(ls.columns) ? ls.columns : [];
+    const rows = Array.isArray(ls.rows) ? ls.rows : [];
+    const brandLogo = SceneBase.brandLogo(data) || '';
+
+    const brand = data.brand || {};
+    const anyTagged = (brand.deskSponsors || []).length || (brand.railSponsors || []).length || (brand.bannerSponsors || []).length;
+    const sponsors = ((brand.deskSponsors || []).length ? brand.deskSponsors : (anyTagged ? [] : (brand.sponsors || []))).filter((s) => s && s.logo);
+
+    const sig = JSON.stringify({
+      title, subtitle, accent, accent2, bl: brandLogo.slice(0, 40), f: data.fontFamily || '',
+      cols: columns.map((c) => (c.key || '') + (c.label || '') + (c.group || '')).join('|'),
+      rws: rows.map((r) => (r.name || '') + '|' + (r.color || '') + '|' + (r.logo ? 1 : 0) + '|' + JSON.stringify(r.values || {})).join('~'),
+      sp: sponsors.map((s) => s.logo && s.logo.slice(0, 40))
+    });
+    if (sig === _sig) return;
+    _sig = sig;
+
+    const root = document.documentElement.style;
+    root.setProperty('--accent', accent);
+    root.setProperty('--accent-2', accent2);
+    if (data.fontFamily) root.setProperty('--main-font', `'${data.fontFamily}', 'Bourgeois', 'Inter', sans-serif`);
+    el('ls-title').textContent = title;
+    const subEl = el('ls-subtitle'); subEl.textContent = subtitle; subEl.style.display = subtitle ? '' : 'none';
+
+    const brandEl = el('ls-brand');
+    if (brandLogo) { if (brandEl.getAttribute('src') !== brandLogo) brandEl.src = brandLogo; brandEl.style.display = ''; }
+    else brandEl.style.display = 'none';
+
+    const sp = el('ls-sponsors');
+    sp.innerHTML = sponsors.length ? '<span class="ls-sponsors-lbl">Presented by</span>' + sponsors.map((s) => `<img class="ls-sponsor" src="${s.logo}" alt="">`).join('') : '';
+    sp.classList.toggle('is-empty', !sponsors.length);
+
+    const table = el('ls-table'), empty = el('ls-empty');
+    if (!columns.length || !rows.length) {
+      table.innerHTML = ''; el('ls-count').innerHTML = ''; empty.style.display = ''; return;
+    }
+    empty.style.display = 'none';
+    el('ls-count').innerHTML = `<b>${rows.length}</b><span>Teams</span>`;
+
+    // Group consecutive columns sharing a group label into spanning header cells.
+    const groups = [];
+    columns.forEach((c) => {
+      const g = c.group || '';
+      const last = groups[groups.length - 1];
+      if (last && last.group === g) last.span++; else groups.push({ group: g, span: 1 });
+    });
+    const groupHtml = '<th class="ls-th-team"></th>' + groups.map((g, i) => `<th class="ls-grp ls-grp-${i % 3}" colspan="${g.span}">${esc(g.group)}</th>`).join('');
+    const colHtml = '<th class="ls-th-team">Team</th>' + columns.map((c) => `<th title="${esc(c.label)}">${esc(c.label)}</th>`).join('');
+    const bodyHtml = rows.map((r) => {
+      const color = r.color || accent;
+      const logo = r.logo || svgFallback((r.name || '?').charAt(0).toUpperCase(), color);
+      const cells = columns.map((c) => { const v = r.values && r.values[c.key]; return `<td>${v == null || v === '' ? '—' : esc(v)}</td>`; }).join('');
+      return `<tr style="--row:${esc(color)}"><td class="ls-td-team"><img class="ls-logo" src="${logo}" alt=""><span class="ls-name">${esc(r.name || 'TBD')}</span></td>${cells}</tr>`;
+    }).join('');
+    table.innerHTML = `<thead><tr class="ls-grouprow">${groupHtml}</tr><tr class="ls-colrow">${colHtml}</tr></thead><tbody>${bodyHtml}</tbody>`;
+
+    requestAnimationFrame(fit);
+  }
+
+  if (location.protocol === 'file:') {
+    render({
+      leagueStats: {
+        title: 'Rocket Rush — Season 2', subtitle: 'Week 4 · Rocket League',
+        columns: [
+          { key: 'w', label: 'W', group: 'Series' }, { key: 'l', label: 'L', group: 'Series' },
+          { key: 'gw', label: 'Won', group: 'Games' }, { key: 'gl', label: 'Lost', group: 'Games' },
+          { key: 'gf', label: 'For', group: 'Games' }, { key: 'ga', label: 'Against', group: 'Games' },
+          { key: 'goals', label: 'Goals', group: 'In-game' }, { key: 'assists', label: 'Assists', group: 'In-game' },
+          { key: 'saves', label: 'Saves', group: 'In-game' }, { key: 'shots', label: 'Shots', group: 'In-game' }
+        ],
+        rows: [
+          { name: 'Velocity Gaming', color: '#3b82f6', values: { w: 8, l: 1, gw: 25, gl: 9, gf: 82, ga: 41, goals: 82, assists: 44, saves: 61, shots: 190 } },
+          { name: 'Team Apex', color: '#f97316', values: { w: 7, l: 2, gw: 22, gl: 12, gf: 74, ga: 52, goals: 74, assists: 38, saves: 70, shots: 176 } },
+          { name: 'Nova Collective', color: '#a855f7', values: { w: 6, l: 3, gw: 20, gl: 13, gf: 66, ga: 55, goals: 66, assists: 31, saves: 66, shots: 168 } },
+          { name: 'Iron Wolves', color: '#22c55e', values: { w: 4, l: 5, gw: 16, gl: 17, gf: 58, ga: 63, goals: 58, assists: 27, saves: 72, shots: 155 } },
+          { name: 'Phantom Squad', color: '#ef4444', values: { w: 2, l: 7, gw: 11, gl: 21, gf: 44, ga: 78, goals: 44, assists: 19, saves: 80, shots: 133 } }
+        ]
+      }
+    });
+  } else {
+    SceneBase.connect(render);
+  }
+})();
+</script>
+</body>
+</html>

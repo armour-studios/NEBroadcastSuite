@@ -103,11 +103,21 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
   background: linear-gradient(180deg, rgba(20,23,32,.97) 0%, rgba(12,14,20,.97) 100%);
   box-shadow: 0 4px 16px rgba(0,0,0,.5); }
 .bk-match.is-final { border-color: rgba(255,214,107,.4); box-shadow: 0 0 0 1px rgba(255,214,107,.15), 0 6px 24px rgba(0,0,0,.55); }
-.bk-match.live { border-color: var(--accent); box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 30%, transparent), 0 4px 20px rgba(0,0,0,.5); }
+/* Live match — unmistakable red + white outline (box-shadow renders outside overflow:hidden, so it's
+   never clipped) with a gentle pulse. The LIVE tag sits ABOVE the card via .bk-match-wrap. */
+.bk-match.live { border-color: #ff3b46; box-shadow: 0 0 0 2px #fff, 0 0 0 4px #ff3b46, 0 0 14px 2px rgba(255,59,70,.5), 0 4px 20px rgba(0,0,0,.5); animation: bkLivePulse 1.8s ease-in-out infinite; }
+@keyframes bkLivePulse {
+  0%, 100% { box-shadow: 0 0 0 2px #fff, 0 0 0 4px #ff3b46, 0 0 10px 1px rgba(255,59,70,.4), 0 4px 20px rgba(0,0,0,.5); }
+  50%      { box-shadow: 0 0 0 2px #fff, 0 0 0 4px #ff3b46, 0 0 20px 4px rgba(255,59,70,.75), 0 4px 20px rgba(0,0,0,.5); }
+}
 .bk-match.upcoming { opacity: .72; }
 .bk-match.upcoming .bk-score { color: rgba(255,255,255,.25); }
-.bk-match.live::after { content: 'LIVE'; position: absolute; top: -9px; right: 8px; font-family: var(--disp); font-weight: 800;
-  font-size: 10px; letter-spacing: .12em; color: #fff; background: #ff3b46; border-radius: 999px; padding: 2px 8px; box-shadow: 0 0 10px rgba(255,59,70,.55); }
+/* Wrapper only around a LIVE match so the tag can sit above the card (which clips with overflow:hidden). */
+.bk-match-wrap { position: relative; width: 100%; }
+.bk-live-tag { position: absolute; top: -11px; left: 50%; transform: translateX(-50%); z-index: 3; white-space: nowrap;
+  font-family: var(--disp); font-weight: 800; font-size: 10px; letter-spacing: .14em; color: #fff;
+  background: #ff3b46; border: 1.5px solid #fff; border-radius: 999px; padding: 2px 11px;
+  box-shadow: 0 2px 8px rgba(0,0,0,.55), 0 0 12px rgba(255,59,70,.6); }
 
 /* ── Slot (one team row) ── */
 .bk-slot { display: flex; align-items: center; gap: 10px; padding: 0 12px 0 0; height: 50px; position: relative; }
@@ -551,7 +561,17 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
     m.appendChild(buildSlot(b));
     if (set.fromB) { const fb = document.createElement('div'); fb.className = 'bk-origin'; fb.textContent = set.fromB; m.appendChild(fb); }
     if (set.toNext) { const ex = document.createElement('div'); ex.className = 'bk-exit'; ex.textContent = set.toNext; m.appendChild(ex); }
-    return m;
+    if (!inPlay) return m;
+    // Live match: wrap so the LIVE tag sits ABOVE the card (the card clips with overflow:hidden).
+    // The wrapper is transparent to the layout — connectors/on-path/fit all query .bk-match by class.
+    const wrap = document.createElement('div');
+    wrap.className = 'bk-match-wrap';
+    wrap.appendChild(m);
+    const tag = document.createElement('div');
+    tag.className = 'bk-live-tag';
+    tag.textContent = 'LIVE';
+    wrap.appendChild(tag);
+    return wrap;
   }
 
   function buildColumn(round, isFinal) {

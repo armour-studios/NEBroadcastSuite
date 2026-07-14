@@ -75,6 +75,12 @@ html,body{width:1920px;height:1080px;overflow:hidden;background:transparent;
 }
 .ow-panel.right .ow-team-bottom{justify-content:flex-start;}
 
+/* Season / league record (toggle in control panel) */
+.ow-team-record{font-size:12px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;
+  color:rgba(255,255,255,.75);text-align:right;}
+.ow-panel.right .ow-team-record{text-align:left;}
+.ow-team-record.hidden{display:none;}
+
 /* ── Team name ─────────────────────────────────────────────────────── */
 .ow-team-name{
   font-size:22px;font-weight:800;text-transform:uppercase;letter-spacing:.3px;
@@ -219,6 +225,7 @@ html,body{width:1920px;height:1080px;overflow:hidden;background:transparent;
         <div class="ow-map-history" id="ow-history-a"></div>
         <div class="ow-role-icon" id="ow-role-a"></div>
       </div>
+      <div class="ow-team-record hidden" id="ow-record-a"></div>
     </div>
     <div class="ow-logo-wrap"><img id="ow-logo-a" src="" alt="" onerror="this.src='/assets/games/overwatch2.png'"></div>
     <div class="ow-panel-sep"></div>
@@ -262,6 +269,7 @@ html,body{width:1920px;height:1080px;overflow:hidden;background:transparent;
         <div class="ow-map-history" id="ow-history-b"></div>
         <div class="ow-role-icon" id="ow-role-b"></div>
       </div>
+      <div class="ow-team-record hidden" id="ow-record-b"></div>
     </div>
     <div class="ow-logo-wrap"><img id="ow-logo-b" src="" alt="" onerror="this.src='/assets/games/overwatch2.png'"></div>
     <div class="ow-panel-sep"></div>
@@ -453,6 +461,10 @@ function render(state){
   const tA=teams.blue||{}, tB=teams.orange||{};
   setText('ow-name-a',(tA.name||'TEAM A').toUpperCase());
   setText('ow-name-b',(tB.name||'TEAM B').toUpperCase());
+  const tr=state.teamRecords||{}, trOn=!!tr.enabled;
+  const recA=document.getElementById('ow-record-a'), recB=document.getElementById('ow-record-b');
+  if(recA){ const show=trOn&&tr.blue; recA.textContent=show?tr.blue:''; recA.classList.toggle('hidden',!show); }
+  if(recB){ const show=trOn&&tr.orange; recB.textContent=show?tr.orange:''; recB.classList.toggle('hidden',!show); }
   const OW_FALLBACK='/assets/games/overwatch2.png';
   setSrc('ow-logo-a',tA.logo||OW_FALLBACK); setSrc('ow-logo-b',tB.logo||OW_FALLBACK);
   setStyle('ow-accent-a','background',tA.color||'#4dc4ff');

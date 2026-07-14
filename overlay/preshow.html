@@ -636,21 +636,20 @@
     }
 
     // Caster prediction badges — corner sticker on each cam box, set from the control panel's
-    // Desk Show settings (Caster Predictions). predictions[i] = '' | 'blue' | 'orange' for slot i+1.
+    // Desk Show settings (Caster Predictions). Each pick is who that caster thinks wins the whole
+    // TOURNAMENT — any team from the library, not one of the two teams in the active match — so
+    // predictions[i] is '' or a snapshotted { name, logo } (see server.js sanitizePreshowPick).
     function renderPredictions(data) {
       const pre = data.preshow || {};
       const predictions = Array.isArray(pre.predictions) ? pre.predictions : [];
-      const blue = SceneBase.teamSide(data, 'blue');
-      const orange = SceneBase.teamSide(data, 'orange');
       for (let i = 0; i < CAM_COUNT; i++) {
         const slot = i + 1;
         const badge = el('pick' + slot);
         if (!badge) continue;
         const pick = predictions[i];
-        if (pick !== 'blue' && pick !== 'orange') { badge.classList.remove('show'); continue; }
-        const t = pick === 'blue' ? blue : orange;
-        el('pickteam' + slot).textContent = (t.name || (pick === 'blue' ? 'Blue' : 'Orange')).toUpperCase();
-        el('pickdot' + slot).style.background = t.color || (pick === 'blue' ? '#055fdb' : '#e97139');
+        if (!pick || !pick.name) { badge.classList.remove('show'); continue; }
+        el('pickteam' + slot).textContent = pick.name.toUpperCase();
+        el('pickdot' + slot).style.background = 'var(--duo-accent, #7C3AED)';
         badge.classList.add('show');
       }
     }
@@ -706,7 +705,7 @@
             { text: 'Kickoff', sceneName: '' }
           ],
           activeTopicIndex: 1,
-          predictions: ['blue', '']
+          predictions: [{ name: 'Villainous', logo: '' }, '']
         },
         scoreboardAd: {
           logo: 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="140" height="46"><rect width="140" height="46" rx="4" fill="#1a1d24"/><text x="70" y="30" font-size="16" fill="#e8eaf0" text-anchor="middle" font-family="Arial" font-weight="bold">STORE</text></svg>')

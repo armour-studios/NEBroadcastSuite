@@ -109,6 +109,11 @@ body { width: 1920px; height: 1080px; overflow: hidden; background: transparent;
 /* ON AIR badge (above the card) */
 .sch-onair { display: inline-flex; align-items: center; gap: 5px; align-self: flex-start; background: #22e07a; color: #04130a; border-radius: 999px; padding: 3px 12px; font-family: var(--disp); font-size: 13px; font-weight: 800; letter-spacing: .1em; line-height: 1; }
 .sch-onair .pdot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; animation: pulse 1.4s ease-in-out infinite; }
+/* finished match kept on the board: final series score + FINAL tag, loser dimmed */
+.sch-score { font-family: var(--disp); font-size: 34px; font-weight: 900; letter-spacing: .04em; color: #fff; text-shadow: 0 1px 4px rgba(0,0,0,.85); line-height: 1; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.sch-final { display: inline-flex; align-items: center; align-self: flex-start; background: rgba(255,255,255,.15); color: rgba(255,255,255,.92); border-radius: 999px; padding: 3px 12px; font-family: var(--disp); font-size: 13px; font-weight: 800; letter-spacing: .12em; line-height: 1; }
+.sch-entry.sch-done { opacity: .94; }
+.sch-side.sch-lose { opacity: .44; }
 @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .3; } }
 
 .sch-empty { font-family: var(--disp); font-weight: 600; font-size: 28px; letter-spacing: .08em; color: rgba(255,255,255,.2); text-transform: uppercase; }
@@ -174,17 +179,21 @@ body { width: 1920px; height: 1080px; overflow: hidden; background: transparent;
     var wrap = document.createElement('div');
     wrap.className = 'sch-entry-wrap';
 
-    // Meta row: ON AIR badge + date, centered above the card
+    // Meta row: ON AIR / FINAL badge + date, centered above the card
     var when = whenText(m);
-    if ((m.live || m.stream) || when) {
+    var isFinal = !!(m.done && !m.live);
+    if ((m.live || m.stream) || when || isFinal) {
       var meta = document.createElement('div'); meta.className = 'sch-entry-meta';
-      if (m.live || m.stream) {
+      if (isFinal) {
+        var fin = document.createElement('div'); fin.className = 'sch-final'; fin.textContent = 'FINAL';
+        meta.appendChild(fin);
+      } else if (m.live || m.stream) {
         var badge = document.createElement('div'); badge.className = 'sch-onair';
         var dot = document.createElement('span'); dot.className = 'pdot'; badge.appendChild(dot);
         badge.appendChild(document.createTextNode(m.live ? 'LIVE' : 'ON AIR'));
         meta.appendChild(badge);
       }
-      if (when) {
+      if (when && !isFinal) {   // finished matches read FINAL, not a scheduled time
         var dt = document.createElement('span'); dt.className = 'sch-meta-date'; dt.textContent = when;
         meta.appendChild(dt);
       }
@@ -192,7 +201,7 @@ body { width: 1920px; height: 1080px; overflow: hidden; background: transparent;
     }
 
     var entry = document.createElement('div');
-    entry.className = 'sch-entry';
+    entry.className = 'sch-entry' + (isFinal ? ' sch-done' : '');
     entry.style.animationDelay = (0.07 + idx * 0.09) + 's';
 
     var colA = colorFor(m.teamA, accentA, maps);
@@ -209,10 +218,17 @@ body { width: 1920px; height: 1080px; overflow: hidden; background: transparent;
     var nameA = document.createElement('span'); nameA.className = 'sch-name'; nameA.textContent = m.teamA || 'TBD';
     sideA.appendChild(imgA); sideA.appendChild(nameA);
 
-    // Center
+    // Center — final series score for a completed match, otherwise VS
+    var hasScore = isFinal && m.scoreA != null && m.scoreB != null;
     var center = document.createElement('div'); center.className = 'sch-center';
-    var vs = document.createElement('span'); vs.className = 'sch-vs'; vs.textContent = 'VS';
-    center.appendChild(vs);
+    if (hasScore) {
+      var sc = document.createElement('span'); sc.className = 'sch-score';
+      sc.textContent = m.scoreA + ' – ' + m.scoreB;
+      center.appendChild(sc);
+    } else {
+      var vs = document.createElement('span'); vs.className = 'sch-vs'; vs.textContent = 'VS';
+      center.appendChild(vs);
+    }
 
     // Side B
     var sideB = document.createElement('div'); sideB.className = 'sch-side b';
@@ -223,33 +239,42 @@ body { width: 1920px; height: 1080px; overflow: hidden; background: transparent;
     imgB.onerror = function () { this.style.visibility = 'hidden'; };
     sideB.appendChild(nameB); sideB.appendChild(imgB);
 
+    // Highlight the winner + dim the loser on a finished match
+    if (hasScore && m.scoreA !== m.scoreB) {
+      (m.scoreA > m.scoreB ? sideA : sideB).classList.add('sch-win');
+      (m.scoreA > m.scoreB ? sideB : sideA).classList.add('sch-lose');
+    }
+
     entry.appendChild(sideA); entry.appendChild(center); entry.appendChild(sideB);
     wrap.appendChild(entry);
     return wrap;
   }
 
-  function buildMatches(queue, manual, maps, source) {
+  function _num(v) { return (typeof v === 'number' && isFinite(v)) ? v : (v != null && v !== '' && !isNaN(+v) ? +v : null); }
+  function buildMatches(queue, manual, maps, source, showResults) {
     // TEAM mode: the board follows the searched team's own matches only — ignore the stream queue.
     if (source === 'team') {
       var tm = (manual || []).filter(function (m) {
         var s = typeof m.state === 'number' ? m.state : 2;
-        return s !== 3;   // hide completed
+        return s !== 3 || showResults;   // hide completed unless "keep finished (with score)" is on
       }).map(function (m) {
+        var s = typeof m.state === 'number' ? m.state : 2;
         return { setId: m.setId, round: m.round || '', teamA: m.teamA || 'TBD', teamB: m.teamB || 'TBD',
           logoA: logoFor(m.teamA, m.teamALogo || m.logoA, maps), logoB: logoFor(m.teamB, m.teamBLogo || m.logoB, maps),
-          stream: !!(m.stream), live: !!(m.state === 2 || m.live),
+          stream: !!(m.stream), live: !!(m.state === 2 || m.live), done: s === 3, scoreA: _num(m.scoreA), scoreB: _num(m.scoreB),
           date: m.date || '', time: m.time || '', scheduledTime: m.scheduledTime || '' };
       });
-      tm.sort(function (a, b) { return (b.live ? 1 : 0) - (a.live ? 1 : 0); });
+      tm.sort(function (a, b) { return (b.live ? 1 : 0) - (a.live ? 1 : 0) || (a.done ? 1 : 0) - (b.done ? 1 : 0); });
       return tm.slice(0, 12);
     }
     var auto = (queue || []).filter(function (m) {
       var s = typeof m.state === 'number' ? m.state : (m.status === 'upcoming' ? 1 : (m.status === 'done' ? 3 : 2));
-      return s === 1 || s === 2;
+      return s === 1 || s === 2 || (showResults && s === 3);
     }).map(function (m) {
+      var s = typeof m.state === 'number' ? m.state : (m.status === 'done' ? 3 : (m.status === 'upcoming' ? 1 : 2));
       return { setId: m.setId, round: m.round || '', teamA: m.teamA || 'TBD', teamB: m.teamB || 'TBD',
         logoA: logoFor(m.teamA, m.logoA, maps), logoB: logoFor(m.teamB, m.logoB, maps),
-        stream: !!(m.stream), live: !!(m.state === 2 || m.live),
+        stream: !!(m.stream), live: !!(m.state === 2 || m.live), done: s === 3, scoreA: _num(m.scoreA), scoreB: _num(m.scoreB),
         date: m.date || '', time: m.time || '', scheduledTime: '' };
     });
     var overrideMap = {}, appends = [];
@@ -257,7 +282,8 @@ body { width: 1920px; height: 1080px; overflow: hidden; background: transparent;
       if (m.setId) { overrideMap[m.setId] = m; }
       else appends.push({ round: m.round || '', teamA: m.teamA || 'TBD', teamB: m.teamB || 'TBD',
         logoA: logoFor(m.teamA, m.teamALogo || m.logoA, maps), logoB: logoFor(m.teamB, m.teamBLogo || m.logoB, maps),
-        stream: !!(m.stream), live: false, date: m.date || '', time: m.time || '', scheduledTime: m.scheduledTime || '' });
+        stream: !!(m.stream), live: false, done: (m.state === 3), scoreA: _num(m.scoreA), scoreB: _num(m.scoreB),
+        date: m.date || '', time: m.time || '', scheduledTime: m.scheduledTime || '' });
     });
     var merged = auto.map(function (m) {
       var ov = overrideMap[m.setId]; if (!ov) return m;
@@ -304,7 +330,7 @@ body { width: 1920px; height: 1080px; overflow: hidden; background: transparent;
 
     var raw = LAYOUT_QP || up.layout || 'cards';
     var isDual = raw === 'board' || raw === 'dual';
-    var all = buildMatches((data.startgg || {}).queue, up.matches, mapsData, up.source);
+    var all = buildMatches((data.startgg || {}).queue, up.matches, mapsData, up.source, !!up.showResults);
     // Brand colors are baked into each card (--col-a/--col-b at build time), and the
     // brand payload can arrive AFTER the first paint (it rides the on-change library
     // tier) — without the accents in the sig the cards kept default colors until the

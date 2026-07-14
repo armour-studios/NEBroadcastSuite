@@ -1,0 +1,31 @@
+{
+  "name": "ne-broadcast-streamdeck",
+  "version": "0.1.0",
+  "description": "Elgato Stream Deck plugin for NE Broadcast Suite",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "build": "rollup -c",
+    "watch": "rollup -c -w --watch.onEnd=\"streamdeck restart com.armour-studios.ne-broadcast\"",
+    "icons": "node gen-icons.mjs",
+    "validate": "streamdeck validate com.armour-studios.ne-broadcast.sdPlugin",
+    "pack": "streamdeck pack com.armour-studios.ne-broadcast.sdPlugin -o dist -f && node rename-dist.mjs"
+  },
+  "dependencies": {
+    "@elgato/streamdeck": "^2.1.0",
+    "ws": "^8.19.0"
+  },
+  "devDependencies": {
+    "@elgato/cli": "^1.7.4",
+    "@rollup/plugin-commonjs": "^28.0.0",
+    "@rollup/plugin-node-resolve": "^16.0.0",
+    "@rollup/plugin-terser": "^0.4.4",
+    "@rollup/plugin-typescript": "^12.1.0",
+    "@tsconfig/node20": "^20.1.4",
+    "@types/node": "^20.14.0",
+    "@types/ws": "^8.5.12",
+    "rollup": "^4.22.0",
+    "tslib": "^2.7.0",
+    "typescript": "^5.6.0"
+  }
+}

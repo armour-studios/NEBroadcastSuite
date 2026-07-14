@@ -61,6 +61,11 @@
   .tb-gold .est { color: var(--dim); font-weight: 600; font-size: 10px; margin-left: 2px; vertical-align: 1px; }
   .tb-gold .ocr { color: var(--blue); font-weight: 700; font-size: 10px; margin-left: 2px; vertical-align: 1px; }
   .tb-drakes { display: flex; gap: 4px; margin-top: 2px; min-height: 16px; }
+  /* Season / league record — compact, sits beside the team name so it doesn't add a 4th row */
+  .tb-name-row { display: flex; align-items: baseline; gap: 8px; }
+  .tb-team.right .tb-name-row { flex-direction: row-reverse; }
+  .tb-record { font-size: 12px; font-weight: 700; letter-spacing: .04em; color: var(--dim); text-transform: uppercase; }
+  .tb-record.hidden { display: none; }
   .tb-team.right .tb-drakes { flex-direction: row-reverse; }
   .drake-pip { width: 18px; height: 18px; border-radius: 50%; background: rgba(0,0,0,.35);
     display:flex; align-items:center; justify-content:center; border: 1px solid var(--line); }
@@ -182,7 +187,7 @@
   <div id="topbar">
     <div class="tb-logo-wrap left"><img class="tb-logo" id="bl-logo" alt=""></div>
     <div class="tb-team left">
-      <span class="tb-name" id="bl-name">BLUE TEAM</span>
+      <div class="tb-name-row"><span class="tb-name" id="bl-name">BLUE TEAM</span><span class="tb-record hidden" id="bl-record"></span></div>
       <div class="tb-row2"><div class="tb-objrow" id="bl-obj"></div><span class="tb-gold" id="bl-gold">0</span></div>
       <div class="tb-drakes" id="bl-drakes"></div>
     </div>
@@ -198,7 +203,7 @@
       </div>
     </div>
     <div class="tb-team right">
-      <span class="tb-name" id="rd-name">RED TEAM</span>
+      <div class="tb-name-row"><span class="tb-name" id="rd-name">RED TEAM</span><span class="tb-record hidden" id="rd-record"></span></div>
       <div class="tb-row2"><div class="tb-objrow" id="rd-obj"></div><span class="tb-gold" id="rd-gold">0</span></div>
       <div class="tb-drakes" id="rd-drakes"></div>
     </div>
@@ -288,6 +293,7 @@ function fmtGold(g){ g=g||0; return g>=1000?(g/1000).toFixed(1)+'k':String(Math.
 function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 
 let appTeams = { blue: {}, orange: {} };
+let appTeamRecords = { enabled: false, blue: '', orange: '' };
 let lolState = null;
 let hudModePref = 'auto';
 
@@ -299,6 +305,12 @@ function render(l) {
 
   $('bl-name').textContent = blueTeam.name || 'BLUE TEAM';
   $('rd-name').textContent = redTeam.name || 'RED TEAM';
+  const trOn = !!(appTeamRecords && appTeamRecords.enabled);
+  const blRecShow = trOn && appTeamRecords.blue, rdRecShow = trOn && appTeamRecords.orange;
+  $('bl-record').textContent = blRecShow ? appTeamRecords.blue : '';
+  $('bl-record').classList.toggle('hidden', !blRecShow);
+  $('rd-record').textContent = rdRecShow ? appTeamRecords.orange : '';
+  $('rd-record').classList.toggle('hidden', !rdRecShow);
   $('bl-logo').style.display = blueTeam.logo ? 'block' : 'none';
   $('rd-logo').style.display = redTeam.logo ? 'block' : 'none';
   if (blueTeam.logo) $('bl-logo').src = blueTeam.logo;
@@ -415,6 +427,7 @@ async function connect(){
     if (msg.type==='full_state'){
       const d=msg.data; applyBrand(d);
       appTeams={ blue:(d.teams&&d.teams.blue)||{}, orange:(d.teams&&d.teams.orange)||{} };
+      appTeamRecords = d.teamRecords || { enabled: false, blue: '', orange: '' };
       if (d.lol&&typeof d.lol.hudMode==='string') hudModePref=d.lol.hudMode;
       lolState=d.lol||null;
       $('offline').classList.toggle('hidden', !!(lolState&&lolState.connected));

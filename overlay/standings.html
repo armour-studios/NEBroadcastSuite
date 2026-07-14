@@ -264,7 +264,7 @@ html, body {
     ped.style.setProperty('--ped-accent', t.color);
     const w = entry.wins ?? '–', l = entry.losses ?? '–';
     const games = (entry.gameWins != null || entry.gameLosses != null)
-      ? `<span class="st-ped-sub">Games ${entry.gameWins ?? 0}-${entry.gameLosses ?? 0}</span>` : '';
+      ? `<span class="st-ped-sub">${stGamesLabel} ${entry.gameWins ?? 0}-${entry.gameLosses ?? 0}</span>` : '';
     const pts = (hasPoints && entry.points != null) ? `<span class="st-ped-pts">${esc(entry.points)}</span>` : '';
     ped.innerHTML = `
       <div class="st-ped-team">
@@ -291,12 +291,13 @@ html, body {
     if (hasPoints)  cols += ' 104px';
     return cols;
   }
+  let stGamesLabel = 'Games';   // "Games" (RL/MOBA) or "Maps" (CS2/Valorant) — set per push from gamesLabel
   function buildHead(showRecord, hasGames, hasPoints) {
     const row = document.createElement('div');
     row.className = 'st-row st-head';
     let html = `<div class="st-col-rank">#</div><div class="st-col-logo"></div><div class="st-col-name">Team</div>`;
     if (showRecord) html += `<div class="st-col-stat" title="Set wins"><span class="st-col-grouplbl">Set</span>W</div><div class="st-col-stat" title="Set losses"><span class="st-col-grouplbl">Set</span>L</div>`;
-    if (hasGames)   html += `<div class="st-col-stat">Games</div>`;
+    if (hasGames)   html += `<div class="st-col-stat">${stGamesLabel}</div>`;
     if (hasPoints)  html += `<div class="st-col-stat">PTS</div>`;
     row.innerHTML = html;
     return row;
@@ -372,6 +373,7 @@ html, body {
     const showRecord = stState.showRecord !== false && rows.some(r => r.wins != null || r.losses != null);
     const hasPoints = rows.some(r => r.points != null);
     const hasGames = rows.some(r => r.gameWins != null || r.gameLosses != null);
+    stGamesLabel = (stState.gamesLabel || 'Games').toString();
     const brandLogo = SceneBase.brandLogo(data) || '';
 
     // Sponsor rail — active brand kit, desk placement first (same rule as intro.html).

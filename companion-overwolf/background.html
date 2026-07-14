@@ -1,36 +1,109 @@
 <!DOCTYPE html>
 <html>
-<!-- NE Broadcast Suite — Overwolf relay for Overwatch (game id 10844).
+<!-- NE Broadcast Suite — Overwolf GEP relay for Overwatch (game id 10844) and
+     Marvel Rivals (game id 24890).
      Load as an unpacked extension in the Overwolf client on the PC running the game:
      Overwolf settings > About > Development options > Load unpacked extension.
-     Set SUITE_URL below to the PC running NE Broadcast Suite. -->
+     Set SUITE_BASE below to the PC running NE Broadcast Suite.
+     NOTE (Marvel Rivals): GEP reads the LOCAL client, so this PC must be in the
+     match (player or coach seat). ult_charge is teammates-only per NetEase policy. -->
 <head><meta charset="utf-8"><title>NE Relay</title></head>
 <body>
 <script>
 // Where NE Broadcast Suite is running (port 3000). localhost if it's the same PC.
-var SUITE_URL = 'http://localhost:3000/api/ow-gep';
+var SUITE_BASE = 'http://localhost:3000';
 
-var FEATURES = ['gep_internal', 'game_info', 'match_info', 'kill', 'death', 'assist', 'roster'];
-var stateBuf = { roster: {}, map: null, game_mode: null, game_state: null, match_outcome: null };
+// Per-game relay config, keyed by Overwolf game class id.
+var GAMES = {
+  10844: {  // Overwatch
+    url: SUITE_BASE + '/api/ow-gep',
+    features: ['gep_internal', 'game_info', 'match_info', 'kill', 'death', 'assist', 'roster']
+  },
+  24890: {  // Marvel Rivals
+    url: SUITE_BASE + '/api/mr-gep',
+    features: ['gep_internal', 'match_info', 'game_info']
+  }
+};
+
+var activeGame = null;      // class id of the running game (key into GAMES)
 var pendingEvents = [];
 var dirty = false;
 
+function freshBuf() {
+  return { roster: {}, map: null, game_mode: null, game_type: null, game_state: null,
+           match_id: null, scene: null, match_outcome: null,
+           banned_characters: [], selected_character: null,
+           player_stats: null, objective_progress: null };
+}
+var stateBuf = freshBuf();
+
+// GEP delivers most structured values as JSON strings — decode when they look like JSON.
+function parseMaybeJson(v) {
+  if (typeof v !== 'string') return v;
+  var s = v.trim();
+  if (s && (s[0] === '{' || s[0] === '[')) { try { return JSON.parse(s); } catch (e) {} }
+  return v;
+}
+
 function post() {
-  if (!dirty && !pendingEvents.length) return;
+  if (!activeGame || (!dirty && !pendingEvents.length)) return;
   var roster = Object.keys(stateBuf.roster).map(function (k) { return stateBuf.roster[k]; });
-  var body = { roster: roster, map: stateBuf.map, game_mode: stateBuf.game_mode,
-    game_state: stateBuf.game_state, match_outcome: stateBuf.match_outcome, events: pendingEvents };
+  var body;
+  if (activeGame === 10844) {
+    body = { roster: roster, map: stateBuf.map, game_mode: stateBuf.game_mode,
+      game_state: stateBuf.game_state, match_outcome: stateBuf.match_outcome, events: pendingEvents };
+  } else {
+    body = { roster: roster, map: stateBuf.map, game_mode: stateBuf.game_mode,
+      game_type: stateBuf.game_type, match_id: stateBuf.match_id, scene: stateBuf.scene,
+      match_outcome: stateBuf.match_outcome, banned_characters: stateBuf.banned_characters,
+      selected_character: stateBuf.selected_character, player_stats: stateBuf.player_stats,
+      objective_progress: stateBuf.objective_progress, events: pendingEvents };
+  }
   pendingEvents = []; dirty = false;
   try {
-    fetch(SUITE_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+    fetch(GAMES[activeGame].url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
       .catch(function () {});
   } catch (e) {}
 }
 setInterval(post, 1500);   // steady relay cadence; events also ride the next tick
 
+function takeRosterKey(k, v) {
+  var p = parseMaybeJson(v);
+  if (p && typeof p === 'object' && (p.player_name || p.hero_name || p.name || p.character_name)) {
+    stateBuf.roster[k] = p; dirty = true;
+  }
+}
+
 function onInfo(info) {
   try {
     var d = info && (info.info || info);
+    if (activeGame === 24890) {
+      // Marvel Rivals: everything rides under match_info / game_info.
+      var mi = d.match_info || {};
+      Object.keys(mi).forEach(function (k) {
+        if (/^roster_\d+$/.test(k)) return takeRosterKey(k, mi[k]);
+        var v = mi[k];
+        switch (k) {
+          case 'map':               stateBuf.map = String(v); dirty = true; break;
+          case 'game_mode':         stateBuf.game_mode = String(v); dirty = true; break;
+          case 'game_type':         stateBuf.game_type = String(v); dirty = true; break;
+          case 'match_id':          stateBuf.match_id = String(v); dirty = true; break;
+          case 'match_outcome':     stateBuf.match_outcome = String(v); dirty = true; break;
+          case 'banned_characters': {
+            var bans = parseMaybeJson(v);
+            if (bans) { stateBuf.banned_characters = Array.isArray(bans) ? bans : [bans]; dirty = true; }
+            break;
+          }
+          case 'selected_character': stateBuf.selected_character = parseMaybeJson(v); dirty = true; break;
+          case 'player_stats':       stateBuf.player_stats = parseMaybeJson(v); dirty = true; break;
+          case 'objective_progress': stateBuf.objective_progress = parseMaybeJson(v); dirty = true; break;
+          // ability_cooldown_X / additional_ability_cd_X are local-player-only — not relayed.
+        }
+      });
+      if (d.game_info && d.game_info.scene) { stateBuf.scene = String(d.game_info.scene); dirty = true; }
+      return;
+    }
+    // Overwatch (original behaviour)
     if (d.match_info) {
       if (d.match_info.map) { stateBuf.map = String(d.match_info.map); dirty = true; }
       if (d.match_info.match_outcome) { stateBuf.match_outcome = String(d.match_info.match_outcome); dirty = true; }
@@ -41,12 +114,7 @@ function onInfo(info) {
     }
     if (d.roster) {
       // roster arrives as roster_0..roster_11 keys holding JSON strings
-      Object.keys(d.roster).forEach(function (k) {
-        try {
-          var p = typeof d.roster[k] === 'string' ? JSON.parse(d.roster[k]) : d.roster[k];
-          if (p && (p.player_name || p.hero_name)) { stateBuf.roster[k] = p; dirty = true; }
-        } catch (e) {}
-      });
+      Object.keys(d.roster).forEach(function (k) { takeRosterKey(k, d.roster[k]); });
     }
   } catch (e) {}
 }
@@ -57,25 +125,41 @@ function onEvents(e) {
       var n = String(ev.name || '').toLowerCase();
       if (['match_start', 'match_end', 'round_start', 'round_end'].indexOf(n) > -1) {
         if (n === 'match_start' || n === 'round_start') stateBuf.match_outcome = null;
-        if (n === 'match_end' || n === 'match_start') stateBuf.roster = {};   // fresh lobby next map
+        if (n === 'match_end' || n === 'match_start') {   // fresh lobby next map
+          stateBuf.roster = {};
+          // bans are drafted pre-map (BEFORE match_start fires) — only clear once the map ends
+          if (n === 'match_end') stateBuf.banned_characters = [];
+        }
         pendingEvents.push(n); dirty = true;
+      } else if (n === 'kill_feed' && activeGame === 24890) {
+        var kf = parseMaybeJson(ev.data) || {};
+        pendingEvents.push({ name: 'kill_feed', data: { attacker: kf.attacker || null, victim: kf.victim || null } });
+        dirty = true;
       }
+      // kill/death/assist counters are local-player-only — not relayed.
     });
   } catch (e2) {}
 }
 
 function setFeatures() {
-  overwolf.games.events.setRequiredFeatures(FEATURES, function (r) {
+  if (!activeGame) return;
+  overwolf.games.events.setRequiredFeatures(GAMES[activeGame].features, function (r) {
     if (!r || r.status !== 'success') setTimeout(setFeatures, 3000);   // game still loading — retry
   });
 }
 
+function detectGame(gi) {
+  if (!gi || !gi.isRunning) return;
+  var classId = Math.floor(gi.id / 10);
+  if (!GAMES[classId]) return;
+  if (activeGame !== classId) { activeGame = classId; stateBuf = freshBuf(); pendingEvents = []; }
+  setFeatures();
+}
+
 overwolf.games.events.onInfoUpdates2.addListener(onInfo);
 overwolf.games.events.onNewEvents.addListener(onEvents);
-overwolf.games.onGameInfoUpdated.addListener(function (u) {
-  if (u && u.gameInfo && u.gameInfo.isRunning && Math.floor(u.gameInfo.id / 10) === 10844) setFeatures();
-});
-overwolf.games.getRunningGameInfo(function (g) { if (g && g.isRunning) setFeatures(); });
+overwolf.games.onGameInfoUpdated.addListener(function (u) { detectGame(u && u.gameInfo); });
+overwolf.games.getRunningGameInfo(function (g) { detectGame(g); });
 </script>
 </body>
 </html>

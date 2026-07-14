@@ -388,7 +388,7 @@ function setupPopoutHandler() {
     const labels = {
       principal: 'Dashboard', events: 'Events', produccion: 'Production',
       director: 'Director', replays: 'Replays', scenes: 'Scenes',
-      equipos: 'Teams', facecams: 'Camera Feeds', brands: 'Brands',
+      equipos: 'Talent', facecams: 'Cameras', brands: 'Brands',
       media: 'Media', integrations: 'Integrations', stats: 'Stats',
       ajustes: 'Settings', roles: 'Roles', triggers: 'Triggers', timer: 'Countdown Timer', match: 'Match — Teams',
       graphics: 'Graphics',

@@ -16,7 +16,11 @@ const CDN_BASE = 'https://rivalskins.com/wp-content/uploads/marvel-assets/ui/her
 // Most follow the standard slug; overrides listed where they differ.
 const HEROES = [
   // Vanguard
+  { name: 'Angela',           slug: 'angela' },
   { name: 'Captain America',  slug: 'captain-america' },
+  { name: 'Devil Dinosaur',   slug: 'devil-dinosaur', alt: 'devil_dinosaur' },
+  { name: 'Rogue',            slug: 'rogue' },
+  { name: 'The Thing',        slug: 'the-thing', alt: 'thing' },
   { name: 'Doctor Strange',   slug: 'doctor-strange' },
   { name: 'Emma Frost',       slug: 'emma-frost' },
   { name: 'Groot',            slug: 'groot' },
@@ -27,7 +31,15 @@ const HEROES = [
   { name: 'Thor',             slug: 'thor' },
   { name: 'Venom',            slug: 'venom' },
   // Duelist
+  { name: 'Black Cat',        slug: 'black-cat', alt: 'black_cat' },  // role unverified — likely Strategist, confirm vs marvelrivals.com/heroes
   { name: 'Black Panther',    slug: 'black-panther' },
+  { name: 'Blade',            slug: 'blade' },
+  { name: 'Cyclops',          slug: 'cyclops' },
+  { name: 'Daredevil',        slug: 'daredevil' },
+  { name: 'Elsa Bloodstone',  slug: 'elsa-bloodstone', alt: 'elsa_bloodstone' },
+  { name: 'Gambit',           slug: 'gambit' },
+  { name: 'Phoenix',          slug: 'phoenix' },
+  { name: 'White Fox',        slug: 'white-fox', alt: 'white_fox' },  // role unverified — likely Strategist, confirm vs marvelrivals.com/heroes
   { name: 'Black Widow',      slug: 'black-widow' },
   { name: 'Hawkeye',          slug: 'hawkeye' },
   { name: 'Hela',             slug: 'hela' },
@@ -48,6 +60,8 @@ const HEROES = [
   { name: 'Wolverine',        slug: 'wolverine' },
   // Strategist
   { name: 'Adam Warlock',     slug: 'adam-warlock' },
+  { name: 'Jubilee',          slug: 'jubilee' },
+  { name: 'Ultron',           slug: 'ultron' },
   { name: 'Cloak & Dagger',   slug: 'cloak-and-dagger', alt: 'cloak-dagger' },
   { name: 'Invisible Woman',  slug: 'invisible-woman' },
   { name: 'Jeff the Land Shark', slug: 'jeff-the-land-shark', alt: 'jeff' },
@@ -55,6 +69,8 @@ const HEROES = [
   { name: 'Luna Snow',        slug: 'luna-snow' },
   { name: 'Mantis',           slug: 'mantis' },
   { name: 'Rocket Raccoon',   slug: 'rocket-raccoon' },
+  // Multi-Role (Deadpool has separate Vanguard/Duelist/Strategist variants in-game)
+  { name: 'Deadpool',         slug: 'deadpool' },
 ];
 
 function localSlug(displayName) {

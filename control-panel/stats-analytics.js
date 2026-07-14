@@ -316,6 +316,7 @@ function statsShowTab(tab) {
   let _socCustomBgUrl = '';         // data URL string (for server save)
   let _socPresentedByEnabled = true;
   let _socBgStyle = 'auto';         // 'auto' (team colours) | 'dark' (clean) | 'spotlight' — used when no custom image
+  let _socCardStyle = 'broadcast';  // 'broadcast' (scene-style, team colours) | 'poster' (brand-gradient event poster)
   function socGetPlatform() { return SOC_PLATFORMS[_socPlatform] || SOC_PLATFORMS.instagram; }
 
   function socResizeCanvas(id) {
@@ -708,6 +709,254 @@ function statsShowTab(tab) {
     ctx.fillStyle = seam; ctx.fillRect(W / 2 - off * 1.6, headerH, off * 3.2, H - headerH - footerH);
   }
 
+  // ── Poster card style ──────────────────────────────────────────────
+  // Event-poster look: near-black textured stage, warm brand-gradient glow, corner brackets,
+  // top-left event logotype, rounded team tiles with gradient nameplates, gradient VS centre and a
+  // bottom-right PRESENTED BY sponsor row. Colours come from the brand kit (color → accent), not the
+  // teams, so every card in a campaign reads as one family.
+
+  function socPosterColors() {
+    const b = currentState.brand || {};
+    const ok = (c) => typeof c === 'string' && /^#[0-9a-fA-F]{6}$/.test(c);
+    return [ok(b.color) ? b.color : '#f7a531', ok(b.accent) ? b.accent : '#ef5878'];
+  }
+
+  function socPosterGrad(ctx, x0, y0, x1, y1, c1, c2) {
+    const g = ctx.createLinearGradient(x0, y0, x1, y1);
+    g.addColorStop(0, c1); g.addColorStop(1, c2);
+    return g;
+  }
+
+  function socPosterBg(ctx, W, H, c1, c2) {
+    if (_socCustomBg) {
+      const sc = Math.max(W / _socCustomBg.width, H / _socCustomBg.height);
+      ctx.drawImage(_socCustomBg, (W - _socCustomBg.width * sc) / 2, (H - _socCustomBg.height * sc) / 2,
+        _socCustomBg.width * sc, _socCustomBg.height * sc);
+      ctx.fillStyle = 'rgba(8,8,10,0.72)'; ctx.fillRect(0, 0, W, H);
+    } else {
+      ctx.fillStyle = '#101013'; ctx.fillRect(0, 0, W, H);
+    }
+    // Fine dot grid, slightly stronger than the broadcast style — the poster reads as printed texture.
+    const sp = Math.round(Math.min(W, H) / 30);
+    ctx.fillStyle = 'rgba(255,255,255,0.022)';
+    for (let x = sp * 0.5; x < W; x += sp)
+      for (let y = sp * 0.5; y < H; y += sp) { ctx.beginPath(); ctx.arc(x, y, 1.2, 0, Math.PI * 2); ctx.fill(); }
+    // Warm centre glow — wide brand-colour wash with a hotter core, sitting behind the VS zone.
+    const cy = H * 0.5;
+    const glow = ctx.createRadialGradient(W / 2, cy, 0, W / 2, cy, Math.max(W, H) * 0.42);
+    glow.addColorStop(0, c1 + '4d'); glow.addColorStop(0.45, c1 + '1f'); glow.addColorStop(1, 'transparent');
+    ctx.fillStyle = glow; ctx.fillRect(0, 0, W, H);
+    const core = ctx.createRadialGradient(W / 2, cy, 0, W / 2, cy, Math.min(W, H) * 0.16);
+    core.addColorStop(0, c2 + '38'); core.addColorStop(1, 'transparent');
+    ctx.fillStyle = core; ctx.fillRect(0, 0, W, H);
+  }
+
+  // L-shaped bracket accents in opposite corners (top-right + bottom-left), brand gradient.
+  function socPosterCorners(ctx, W, H, c1, c2, s) {
+    const inset = Math.round(20 * s), len = Math.round(150 * s), lw = Math.max(2, Math.round(3 * s));
+    const sq = Math.round(9 * s);
+    ctx.save();
+    ctx.lineWidth = lw;
+    // top-right
+    ctx.strokeStyle = socPosterGrad(ctx, W - inset - len, inset, W - inset, inset + len, c1, c2);
+    ctx.beginPath();
+    ctx.moveTo(W - inset - len, inset); ctx.lineTo(W - inset, inset); ctx.lineTo(W - inset, inset + len);
+    ctx.stroke();
+    ctx.strokeRect(W - inset - len - sq * 2.4, inset - sq / 2, sq, sq);
+    ctx.fillStyle = c2;
+    ctx.fillRect(W - inset + lw / 2 - sq * 0.7, inset + len + sq * 1.4, sq * 0.7, sq * 0.7);
+    // bottom-left (mirrored)
+    ctx.strokeStyle = socPosterGrad(ctx, inset, H - inset - len, inset + len, H - inset, c1, c2);
+    ctx.beginPath();
+    ctx.moveTo(inset + len, H - inset); ctx.lineTo(inset, H - inset); ctx.lineTo(inset, H - inset - len);
+    ctx.stroke();
+    ctx.strokeStyle = socPosterGrad(ctx, inset, H - inset, inset + len + sq * 2.4, H - inset, c1, c2);
+    ctx.strokeRect(inset + len + sq * 1.4, H - inset - sq / 2, sq, sq);
+    ctx.fillStyle = c1;
+    ctx.fillRect(inset - lw / 2, H - inset - len - sq * 2.1, sq * 0.7, sq * 0.7);
+    ctx.restore();
+  }
+
+  // Top-left brand logo + event logotype. First word takes the gradient, the rest stays white —
+  // the "TENAX SERIES" treatment.
+  function socPosterHeader(ctx, W, brandImg, eventName, c1, c2, s) {
+    const pad = Math.round(34 * s), box = Math.round(56 * s);
+    let x = pad;
+    const cy = pad + box / 2;
+    if (brandImg) {
+      const sc = Math.min(box / brandImg.width, box / brandImg.height);
+      ctx.drawImage(brandImg, x + (box - brandImg.width * sc) / 2, pad + (box - brandImg.height * sc) / 2,
+        brandImg.width * sc, brandImg.height * sc);
+      x += box + Math.round(16 * s);
+    }
+    const name = (eventName || '').toUpperCase().trim();
+    if (!name) return;
+    const words = name.split(/\s+/);
+    const first = words.shift(), rest = words.join(' ');
+    ctx.save();
+    ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+    let fs = Math.round(34 * s);
+    ctx.font = `800 ${fs}px "Rajdhani", sans-serif`;
+    while (ctx.measureText(name + ' ').width > W * 0.62 - x && fs > 15) { fs -= 2; ctx.font = `800 ${fs}px "Rajdhani", sans-serif`; }
+    const fw = ctx.measureText(first).width;
+    ctx.fillStyle = socPosterGrad(ctx, x, cy, x + fw, cy + fs * 0.4, c1, c2);
+    ctx.fillText(first, x, cy);
+    if (rest) { ctx.fillStyle = '#f2f3f5'; ctx.fillText(' ' + rest, x + fw, cy); }
+    ctx.restore();
+  }
+
+  // Rounded team tile: dark panel with the crest large in the middle and a gradient nameplate bar
+  // along the bottom (dark text). Big radius on the top-left/bottom-right corners only. Returns the
+  // full tile height so callers can stack around it.
+  function socPosterTile(ctx, x, y, w, img, name, c1, c2, abbr) {
+    const plate = Math.round(w * 0.185);
+    const h = w + plate;
+    const rBig = Math.round(w * 0.16), rSm = Math.round(w * 0.03);
+    ctx.save();
+    ctx.beginPath(); ctx.roundRect(x, y, w, h, [rBig, rSm, rBig, rSm]);
+    // Panel surface + soft drop shadow so the tile lifts off the glow.
+    ctx.shadowColor = 'rgba(0,0,0,0.55)'; ctx.shadowBlur = Math.round(w * 0.07); ctx.shadowOffsetY = Math.round(w * 0.015);
+    ctx.fillStyle = socPosterGrad(ctx, x, y, x, y + h, '#26262c', '#161619');
+    ctx.fill();
+    ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0; ctx.shadowOffsetY = 0;
+    ctx.clip();
+    // Crest — large, centred in the square area above the plate.
+    if (img) {
+      const pad = w * 0.14;
+      const sc = Math.min((w - pad * 2) / img.width, (w - plate * 0.4 - pad * 2) / img.height);
+      ctx.drawImage(img, x + (w - img.width * sc) / 2, y + (w - plate * 0.4 - img.height * sc) / 2 + plate * 0.1,
+        img.width * sc, img.height * sc);
+    } else {
+      const a = abbr || '?';
+      ctx.font = `800 ${Math.round(w * (a.length <= 2 ? 0.4 : 0.26))}px "Rajdhani", sans-serif`;
+      ctx.fillStyle = 'rgba(255,255,255,0.85)'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(a, x + w / 2, y + (w - plate * 0.2) / 2);
+    }
+    // Gradient nameplate with dark text.
+    ctx.fillStyle = socPosterGrad(ctx, x, y + h - plate, x + w, y + h, c1, c2);
+    ctx.fillRect(x, y + h - plate, w, plate);
+    const disp = (name || 'TBD').toUpperCase().slice(0, 24);
+    let fs = Math.round(plate * 0.44);
+    ctx.font = `800 ${fs}px "Rajdhani", sans-serif`;
+    while (ctx.measureText(disp).width > w * 0.88 && fs > 12) { fs -= 1; ctx.font = `800 ${fs}px "Rajdhani", sans-serif`; }
+    ctx.fillStyle = '#141216'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(disp, x + w / 2, y + h - plate / 2 + fs * 0.05);
+    ctx.restore();
+    // Hairline edge so the panel doesn't melt into the background.
+    ctx.save();
+    ctx.strokeStyle = 'rgba(255,255,255,0.09)'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.roundRect(x + 0.5, y + 0.5, w - 1, h - 1, [rBig, rSm, rBig, rSm]); ctx.stroke();
+    ctx.restore();
+    return h;
+  }
+
+  // Centre stack: small gradient context label ("WEEK 1" / "FINAL SCORE") over a big gradient
+  // headline ("VS" or the series score).
+  function socPosterCenter(ctx, cx, cy, label, big, c1, c2, s) {
+    ctx.save();
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    if (label) {
+      const fs = Math.round(30 * s);
+      ctx.font = `800 ${fs}px "Rajdhani", sans-serif`;
+      const lw2 = ctx.measureText(label).width / 2;
+      ctx.fillStyle = socPosterGrad(ctx, cx - lw2, cy - Math.round(52 * s), cx + lw2, cy - Math.round(20 * s), c1, c2);
+      ctx.fillText(label, cx, cy - Math.round(36 * s));
+    }
+    if (big) {
+      const fs = Math.round(86 * s);
+      ctx.font = `800 ${fs}px "Rajdhani", sans-serif`;
+      ctx.shadowColor = c1 + '66'; ctx.shadowBlur = Math.round(26 * s);
+      ctx.fillStyle = socPosterGrad(ctx, cx, cy + Math.round(4 * s), cx, cy + Math.round(4 * s) + fs * 0.8, c1, c2);
+      ctx.fillText(big, cx, cy + Math.round(34 * s));
+    }
+    ctx.restore();
+  }
+
+  // Bottom-right "PRESENTED BY:" + sponsor logo row; stream link tucked bottom-left to balance it.
+  function socPosterFooter(ctx, W, H, link, railImgs, s) {
+    const pad = Math.round(38 * s), maxH = Math.round(30 * s), gap = Math.round(20 * s);
+    const imgs = (_socPresentedByEnabled ? (railImgs || []) : []).filter(Boolean).slice(0, 5);
+    const baseY = H - pad - maxH;
+    if (imgs.length) {
+      ctx.save();
+      let x = W - pad;
+      for (let i = imgs.length - 1; i >= 0; i--) {
+        const img = imgs[i];
+        const iw = Math.round(img.width * (maxH / img.height));
+        ctx.globalAlpha = 0.9;
+        ctx.drawImage(img, x - iw, baseY, iw, maxH);
+        x -= iw + gap;
+      }
+      ctx.globalAlpha = 1;
+      ctx.font = `700 ${Math.round(13 * s)}px "Rajdhani", sans-serif`;
+      ctx.fillStyle = 'rgba(255,255,255,0.55)';
+      ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+      ctx.fillText('PRESENTED BY:', x - Math.round(4 * s), baseY + maxH / 2);
+      ctx.restore();
+    }
+    if (link) {
+      ctx.save();
+      ctx.font = `600 ${Math.round(15 * s)}px "Rajdhani", sans-serif`;
+      ctx.fillStyle = 'rgba(255,255,255,0.38)';
+      ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+      ctx.fillText(link, pad + Math.round(14 * s), baseY + maxH / 2);
+      ctx.restore();
+    }
+  }
+
+  // Poster matchup/result — one function for both cards: pass scores (sA/sB) for the result card,
+  // nulls for the pre-match card.
+  function socPosterVersus(ctx, o) {
+    const { W, H, layout, tA, tB, round, iA, iB, brandImg, railImgs, event, link, sA, sB } = o;
+    const [c1, c2] = socPosterColors();
+    const isResult = sA !== null && sA !== undefined && sB !== null && sB !== undefined;
+    const winA = isResult && Number(sA) > Number(sB);
+    const winB = isResult && Number(sB) > Number(sA);
+    const label = isResult ? 'FINAL SCORE' : (round || '').toUpperCase();
+    const big = isResult ? `${sA} - ${sB}` : 'VS';
+    socPosterBg(ctx, W, H, c1, c2);
+
+    if (layout === 'vertical') {
+      const s = W / 1080;
+      socPosterCorners(ctx, W, H, c1, c2, s);
+      socPosterHeader(ctx, W, brandImg, event, c1, c2, s * 1.25);
+      const tw = Math.round(W * 0.46);
+      const cyA = H * 0.30, cyB = H * 0.70, th = tw * 1.185;
+      socPosterTile(ctx, W / 2 - tw / 2, cyA - th / 2, tw, iA, tA, c1, c2, socGetAbbr(tA));
+      socPosterTile(ctx, W / 2 - tw / 2, cyB - th / 2, tw, iB, tB, c1, c2, socGetAbbr(tB));
+      // Badges sit on the OUTWARD side of each tile (above A, below B) so the FINAL SCORE centre
+      // stack between the tiles stays clear.
+      if (winA) socDrawWinnerBadge(ctx, W / 2, cyA - th / 2 - Math.round(48 * s), s);
+      if (winB) socDrawWinnerBadge(ctx, W / 2, cyB + th / 2 + Math.round(16 * s), s);
+      socPosterCenter(ctx, W / 2, H * 0.5, label, big, c1, c2, s * 1.15);
+      socPosterFooter(ctx, W, H, link, railImgs, s);
+    } else if (layout === 'landscape') {
+      const hs = H / 675;
+      socPosterCorners(ctx, W, H, c1, c2, hs);
+      socPosterHeader(ctx, W, brandImg, event, c1, c2, hs);
+      const tw = Math.round(W * 0.235);
+      const ty = H * 0.28, th = tw * 1.185;
+      socPosterTile(ctx, W * 0.285 - tw / 2, ty, tw, iA, tA, c1, c2, socGetAbbr(tA));
+      socPosterTile(ctx, W * 0.715 - tw / 2, ty, tw, iB, tB, c1, c2, socGetAbbr(tB));
+      if (winA) socDrawWinnerBadge(ctx, W * 0.285, ty + th + Math.round(12 * hs), hs * 0.88);
+      if (winB) socDrawWinnerBadge(ctx, W * 0.715, ty + th + Math.round(12 * hs), hs * 0.88);
+      socPosterCenter(ctx, W / 2, ty + th * 0.48, label, big, c1, c2, hs);
+      socPosterFooter(ctx, W, H, link, railImgs, hs);
+    } else {
+      const s = W / 1080;
+      socPosterCorners(ctx, W, H, c1, c2, s);
+      socPosterHeader(ctx, W, brandImg, event, c1, c2, s);
+      const tw = Math.round(W * 0.31);
+      const ty = H * 0.315, th = tw * 1.185;
+      socPosterTile(ctx, W * 0.235 - tw / 2, ty, tw, iA, tA, c1, c2, socGetAbbr(tA));
+      socPosterTile(ctx, W * 0.765 - tw / 2, ty, tw, iB, tB, c1, c2, socGetAbbr(tB));
+      if (winA) socDrawWinnerBadge(ctx, W * 0.235, ty + th + Math.round(16 * s), s);
+      if (winB) socDrawWinnerBadge(ctx, W * 0.765, ty + th + Math.round(16 * s), s);
+      socPosterCenter(ctx, W / 2, ty + th * 0.48, label, big, c1, c2, s);
+      socPosterFooter(ctx, W, H, link, railImgs, s);
+    }
+  }
+
   // ── Queue state ────────────────────────────────────────────────────
   let _socQueueIdx = 0;
 
@@ -752,12 +1001,14 @@ function statsShowTab(tab) {
     const bgClear      = el('soc-bg-clear');
     const bgFilename   = el('soc-bg-filename');
     const bgStyle      = el('soc-bg-style');
+    const cardStyle    = el('soc-card-style');
     const presChk      = el('soc-presented-toggle');
 
     function sendPreset() {
       sendWS({ type: 'set_brand_social_preset', data: {
         bgImageUrl: _socCustomBgUrl,
         bgStyle: _socBgStyle,
+        cardStyle: _socCardStyle,
         presentedByEnabled: _socPresentedByEnabled,
       }});
     }
@@ -812,6 +1063,15 @@ function statsShowTab(tab) {
       });
     }
 
+    if (cardStyle) {
+      cardStyle.value = _socCardStyle;
+      cardStyle.addEventListener('change', () => {
+        _socCardStyle = cardStyle.value || 'broadcast';
+        sendPreset();
+        socRefreshAll();
+      });
+    }
+
     if (presChk) {
       presChk.addEventListener('change', () => {
         _socPresentedByEnabled = presChk.checked;
@@ -832,6 +1092,10 @@ function statsShowTab(tab) {
       if (preset.bgStyle) {
         _socBgStyle = preset.bgStyle;
         if (bgStyle) bgStyle.value = _socBgStyle;
+      }
+      if (preset.cardStyle) {
+        _socCardStyle = preset.cardStyle;
+        if (cardStyle) cardStyle.value = _socCardStyle;
       }
       const savedUrl = preset.bgImageUrl || '';
       if (savedUrl && savedUrl !== _socCustomBgUrl) {
@@ -870,6 +1134,10 @@ function statsShowTab(tab) {
       loadImg(socLogoUrl(tA)), loadImg(socLogoUrl(tB)), socLoadBrandAssets(),
     ]);
     _socDrawW = W; _socPairA = tA; _socPairB = tB; _socPairFs = 0;  // one shared name size for this pair
+    if (_socCardStyle === 'poster') {
+      socPosterVersus(ctx, { W, H, layout, tA, tB, round, iA, iB, brandImg, railImgs, event, link, sA: null, sB: null });
+      return;
+    }
     socDrawBg(ctx, W, H, colA, colB);
 
     if (layout === 'vertical') {
@@ -948,6 +1216,10 @@ function statsShowTab(tab) {
       loadImg(socLogoUrl(tA)), loadImg(socLogoUrl(tB)), socLoadBrandAssets(),
     ]);
     _socDrawW = W; _socPairA = tA; _socPairB = tB; _socPairFs = 0;  // one shared name size for this pair
+    if (_socCardStyle === 'poster') {
+      socPosterVersus(ctx, { W, H, layout, tA, tB, round: '', iA, iB, brandImg, railImgs, event, link, sA, sB });
+      return;
+    }
     socDrawBg(ctx, W, H, colA, colB);
 
     if (layout === 'vertical') {
@@ -1025,25 +1297,34 @@ function statsShowTab(tab) {
     const link   = socTwitchLink();
     const s      = Math.min(W / 1080, H / 1080);
     const { brandImg, presentedByImg, railImgs } = await socLoadBrandAssets();
-    socDrawBg(ctx, W, H, null, null);
-    socTopBar(ctx, W, '#4f46e5', '#9333ea', s);
-    socDrawPresentedBy(ctx, W, 0, presentedByImg, s);
+    const poster = _socCardStyle === 'poster';
+    const [pc1, pc2] = socPosterColors();
+    if (poster) {
+      socPosterBg(ctx, W, H, pc1, pc2);
+      socPosterCorners(ctx, W, H, pc1, pc2, s);
+      socPosterHeader(ctx, W, brandImg, event || (b.type ? b.type.replace(/_/g, ' ') : 'BRACKET'), pc1, pc2, s);
+    } else {
+      socDrawBg(ctx, W, H, null, null);
+      socTopBar(ctx, W, '#4f46e5', '#9333ea', s);
+      socDrawPresentedBy(ctx, W, 0, presentedByImg, s);
+      socDrawHeader(ctx, W, Math.round(54 * s), Math.round(86 * s), event,
+        b.type ? b.type.replace(/_/g, ' ').toUpperCase() : 'BRACKET', '#5b21b6', s);
+    }
     const headerH = Math.round(100 * s);
-    socDrawHeader(ctx, W, Math.round(54 * s), Math.round(86 * s), event,
-      b.type ? b.type.replace(/_/g, ' ').toUpperCase() : 'BRACKET', '#5b21b6', s);
     if (!rounds.length) {
       ctx.save();
       ctx.font = `600 ${Math.round(24 * s)}px "Rajdhani", sans-serif`;
       ctx.fillStyle = 'rgba(255,255,255,0.16)'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       ctx.fillText('No bracket loaded', W / 2, H / 2); ctx.restore();
-      socFooter(ctx, W, H, link, s, brandImg, railImgs); return;
+      if (poster) socPosterFooter(ctx, W, H, link, railImgs, s); else socFooter(ctx, W, H, link, s, brandImg, railImgs);
+      return;
     }
     const maxCols = layout === 'vertical' ? 2 : layout === 'landscape' ? 5 : 4;
     const show = rounds.slice(-maxCols);
     const PAD = Math.round(24 * s), GAP = Math.round(8 * s);
     const colW = (W - PAD * 2 - GAP * (show.length - 1)) / show.length;
     const startY = headerH + Math.round(4 * s), endY = H - Math.round(88 * s);
-    const accents = ['#6366f1', '#7c3aed', '#9333ea', '#a855f7', '#c026d3'];
+    const accents = poster ? [pc1, pc2, pc1, pc2, pc1] : ['#6366f1', '#7c3aed', '#9333ea', '#a855f7', '#c026d3'];
     show.forEach((round, ri) => {
       const rx  = PAD + ri * (colW + GAP);
       const rcx = rx + colW / 2;
@@ -1095,7 +1376,7 @@ function statsShowTab(tab) {
         ctx.restore();
       });
     });
-    socFooter(ctx, W, H, link, s, brandImg, railImgs);
+    if (poster) socPosterFooter(ctx, W, H, link, railImgs, s); else socFooter(ctx, W, H, link, s, brandImg, railImgs);
   }
 
   function socRefreshAll() {

@@ -164,16 +164,57 @@ function draftGames() { return Object.keys(DRAFT_FORMATS); }
 function hasDraft(game) { return !!DRAFT_FORMATS[game]; }
 function roster(game) { return ROSTERS[game] || []; }
 function champions(game) { return (ROSTERS[game] || []).map((c) => c.name); }
-function imageFor(game, name) { return (_imgIndex[game] || {})[(name || '').toString().toLowerCase()] || ''; }
-function roleFor(game, name) { return (_roleIndex[game] || {})[(name || '').toString().toLowerCase()] || ''; }
+
+// Merge each game's built-in roster with its active Game Config's characters (state.gameConfigs,
+// keyed by gameId), by id — new ids append after the built-ins, matching ids override that one
+// entry. Mirrors backend/veto.js's mergedMapPools.
+function mergedRosters(gameConfigs) {
+  const cfgs = gameConfigs || {};
+  const gameIds = new Set([...Object.keys(ROSTERS), ...Object.keys(cfgs)]);
+  const out = {};
+  gameIds.forEach((game) => {
+    const built = ROSTERS[game] || [];
+    const custom = (cfgs[game] && Array.isArray(cfgs[game].characters)) ? cfgs[game].characters : [];
+    if (!custom.length) { out[game] = built; return; }
+    const byId = {};
+    built.forEach((c) => { byId[c.id] = c; });
+    custom.forEach((c) => { if (c && c.id) byId[c.id] = { ...byId[c.id], ...c }; });
+    out[game] = Object.values(byId);
+  });
+  return out;
+}
+// name (case-insensitive) → {image, role} for a game's active Game Config characters, if any.
+function _customLookup(game, gameConfigs) {
+  const chars = (gameConfigs && gameConfigs[game] && Array.isArray(gameConfigs[game].characters)) ? gameConfigs[game].characters : [];
+  const img = {}, role = {};
+  chars.forEach((c) => {
+    if (!c || !c.name) return;
+    const key = c.name.toLowerCase();
+    if (c.image) img[key] = c.image;
+    if (c.role) role[key] = c.role;
+  });
+  return { img, role };
+}
+// gameConfigs param is optional — pass state.gameConfigs to also resolve custom Game Config
+// characters (checked first so a config can override a built-in hero's image/role too).
+function imageFor(game, name, gameConfigs) {
+  const key = (name || '').toString().toLowerCase();
+  if (gameConfigs) { const { img } = _customLookup(game, gameConfigs); if (img[key]) return img[key]; }
+  return (_imgIndex[game] || {})[key] || '';
+}
+function roleFor(game, name, gameConfigs) {
+  const key = (name || '').toString().toLowerCase();
+  if (gameConfigs) { const { role } = _customLookup(game, gameConfigs); if (role[key]) return role[key]; }
+  return (_roleIndex[game] || {})[key] || '';
+}
 
 // Overwatch ban rule: no more than 2 bans of the same role among the bans resolved so far.
 // Non-Overwatch games (and unrecognized heroes) are always allowed.
-function roleLimitOk(game, ops, name) {
+function roleLimitOk(game, ops, name, gameConfigs) {
   if (game !== 'overwatch') return true;
-  const role = roleFor(game, name);
+  const role = roleFor(game, name, gameConfigs);
   if (!role) return true;
-  const count = (ops || []).filter((o) => o.action === 'ban' && roleFor(game, o.name) === role).length;
+  const count = (ops || []).filter((o) => o.action === 'ban' && roleFor(game, o.name, gameConfigs) === role).length;
   return count < 2;
 }
 
@@ -187,5 +228,5 @@ function resolveSide(teamIdx, teamStart) {
 
 module.exports = {
   DRAFT_FORMATS, ROSTERS,
-  draftGames, hasDraft, roster, champions, imageFor, roleFor, roleLimitOk, buildDraft, resolveSide
+  draftGames, hasDraft, roster, champions, mergedRosters, imageFor, roleFor, roleLimitOk, buildDraft, resolveSide
 };

@@ -210,6 +210,8 @@
 
     .mu-player-real { font-size: 13px; font-weight: 500; letter-spacing: .04em;
       color: rgba(255,255,255,.55); text-transform: none; line-height: 1.1; margin-top: 1px; }
+    .mu-player-custom { font-size: 12px; font-weight: 600; letter-spacing: .04em;
+      color: rgba(255,255,255,.45); text-transform: none; font-style: italic; line-height: 1.1; margin-top: 1px; }
     .mu-player {
       font-size: 22px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase;
       color: #fff; line-height: 1.45;
@@ -470,6 +472,13 @@
           r.className = 'mu-player-real';
           r.textContent = real;
           d.appendChild(r);
+        }
+        const custom = (p.customField || '').toString().trim();
+        if (custom) {
+          const c = document.createElement('div');
+          c.className = 'mu-player-custom';
+          c.textContent = custom;
+          d.appendChild(c);
         }
         container.appendChild(d);
       });

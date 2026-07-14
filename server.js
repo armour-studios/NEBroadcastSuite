@@ -10,7 +10,7 @@ const FormData = require('form-data');
 const fsp = require('fs/promises');
 const os = require('os');
 const AdmZip = require('adm-zip');
-const { dialog, app: _electronApp, safeStorage } = require('electron');
+const { dialog, app: _electronApp, safeStorage, powerMonitor } = require('electron');
 const { EventEmitter } = require('events');
 const IS_DEV = () => _electronApp && !_electronApp.isPackaged;
 const { createStartGgClient } = require('./backend/integrations/startgg-client');
@@ -1379,6 +1379,16 @@ function loadDiscordUser() {
 // Where a sponsor logo can be displayed. Each brand sponsor carries a `placements`
 // map of these flags, set with checkmarks in the brand editor.
 const SPONSOR_SPOTS = ['title', 'rail', 'desk', 'overtime', 'replayGoal', 'replayOutro', 'scoreboard', 'banner', 'ticker'];
+// A desk caster's tournament-winner pick — ANY team from the library (state.savedTeams), not
+// tied to whichever two teams the current match happens to be. Snapshotted at pick time (name +
+// logo), same "don't just store a pointer that can go stale" convention as MatchSession's team
+// snapshots, so the badge on the overlay still renders correctly if that team is later renamed
+// or removed from the library.
+function sanitizePreshowPick(v) {
+  if (!v || typeof v !== 'object' || typeof v.name !== 'string' || !v.name.trim()) return '';
+  return { name: v.name.trim().slice(0, 80), logo: typeof v.logo === 'string' ? v.logo.slice(0, 500000) : null };
+}
+
 function sanitizePlacements(p) {
   // No placements (legacy sponsor saved before this feature) → show on rail + caster desk,
   // matching the old "every sponsor shows on the rail/desk" behaviour.
@@ -2006,6 +2016,10 @@ async function stationAutoSync() {
     for (const f of casters) {
       const nm = (f.personName || '').trim();
       const key = nm.toLowerCase();
+      // Self-entered on-air profile from the join page (new casters with no crew profile yet) —
+      // { realName, country, social, socialHandle }. Fills the desk nameplate + crew twin so the
+      // overlays show their info. Producer edits downstream always win; nm is treated as the gamertag.
+      const prof = (f.profile && typeof f.profile === 'object') ? f.profile : null;
       let entry = state.casters.library.find((c) => c && (c.camUrl === f.obsViewUrl || c.vdoOverride === f.obsViewUrl));
       if (!entry && key) {
         // SAME PERSON already in the library (added via Crew/DCC/Show Deck)? Adopt that entry
@@ -2025,16 +2039,28 @@ async function stationAutoSync() {
         if (!Array.isArray(state.crew)) state.crew = [];
         let cm = key ? state.crew.find((c) => c && ((c.name || '').toLowerCase() === key || (c.handle || '').toLowerCase() === key)) : null;
         if (!cm && nm) {
-          cm = { id: Math.random().toString(36).slice(2, 11), name: nm, handle: '', role: '', group: 'casters', social: 'none', socialHandle: '', defaultCam: '', country: '', paypal: '', notes: '', active: true, workedEvent: true };
+          // New self-serve caster: gamertag → handle, self-entered real name → name (falls back to
+          // gamertag), socials/country from their profile so the overlays aren't blank.
+          cm = { id: Math.random().toString(36).slice(2, 11), name: (prof && prof.realName) || nm, handle: prof ? nm : '', role: '', group: 'casters', social: (prof && prof.social) || 'none', socialHandle: (prof && prof.socialHandle) || '', defaultCam: '', country: (prof && prof.country) || '', paypal: '', notes: '', active: true, workedEvent: true };
           state.crew.push(cm);
-        } else if (cm) { cm.active = true; cm.workedEvent = true; }
+        } else if (cm) {
+          cm.active = true; cm.workedEvent = true;
+          // A returning caster who self-filled backfills BLANKS on their crew twin — never overwrites
+          // anything the producer already set.
+          if (prof) {
+            if (prof.socialHandle && !cm.socialHandle) cm.socialHandle = prof.socialHandle;
+            if (prof.social && (!cm.social || cm.social === 'none')) cm.social = prof.social;
+            if (prof.country && !cm.country) cm.country = prof.country;
+            if (prof.realName && (!cm.name || cm.name.toLowerCase() === key)) cm.name = prof.realName;
+          }
+        }
         entry = {
           id: 'cs_' + Math.random().toString(36).slice(2, 11),
-          name: nm || 'Caster', handle: '', role: '',
+          name: (cm && cm.name) || (prof && prof.realName) || nm || 'Caster', handle: (cm && cm.handle) || (prof ? nm : ''), role: '',
           camUrl: f.obsViewUrl,
-          social: (cm && cm.social) || 'none',
-          socialHandle: (cm && cm.socialHandle) || '',
-          country: (cm && cm.country) || '',
+          social: (cm && cm.social) || (prof && prof.social) || 'none',
+          socialHandle: (cm && cm.socialHandle) || (prof && prof.socialHandle) || '',
+          country: (cm && cm.country) || (prof && prof.country) || '',
           kind: 'caster'
         };
         state.casters.library.push(entry);
@@ -2047,11 +2073,11 @@ async function stationAutoSync() {
         const entryKeys = [entry.name, entry.handle].map((v) => (v || '').toLowerCase()).filter(Boolean);
         if (String(entry.id || '').startsWith('cs_') && !entryKeys.includes(key)) {
           const twin = (state.crew || []).find((c) => c && ((c.name || '').toLowerCase() === key || (c.handle || '').toLowerCase() === key)) || null;
-          entry.name = nm;
-          entry.handle = '';
-          entry.socialHandle = (twin && twin.socialHandle) || '';
-          entry.social = (twin && twin.social) || 'none';
-          entry.country = (twin && twin.country) || '';
+          entry.name = (twin && twin.name) || (prof && prof.realName) || nm;
+          entry.handle = (twin && twin.handle) || (prof ? nm : '');
+          entry.socialHandle = (twin && twin.socialHandle) || (prof && prof.socialHandle) || '';
+          entry.social = (twin && twin.social) || (prof && prof.social) || 'none';
+          entry.country = (twin && twin.country) || (prof && prof.country) || '';
           changed = true;
           console.log('[Stations] Web slot take-over — desk entry re-identified to', nm);
         }
@@ -2484,7 +2510,7 @@ function loadState() {
           activeTopicIndex: Math.max(0, parseInt(saved.preshow.activeTopicIndex, 10) || 0),
           homeScene: typeof saved.preshow.homeScene === 'string' ? saved.preshow.homeScene : '',
           predictions: Array.isArray(saved.preshow.predictions)
-            ? [0, 1].map((i) => (['blue', 'orange'].includes(saved.preshow.predictions[i]) ? saved.preshow.predictions[i] : ''))
+            ? [0, 1].map((i) => sanitizePreshowPick(saved.preshow.predictions[i]))
             : ['', '']
           // headline/topics restored above are transient — syncActivePreshowTopics() (called once
           // brand kits finish loading) overwrites them from the active package right after boot.
@@ -3378,7 +3404,7 @@ function maybeBroadcastOverlayCount() {
 function resolveOneTeamRecord(name, source) {
   const key = String(name == null ? '' : name).trim().toLowerCase();
   if (!key) return null;
-  const out = { seasonW: null, seasonL: null, pts: null, place: null, weekW: null, weekL: null };
+  const out = { seasonW: null, seasonL: null, pts: null, place: null, weekW: null, weekL: null, gamesW: null, gamesL: null };
   const src = source || 'stats';
 
   // In-app manual league standings → season W/L, points, placement. Prefer a league for the
@@ -3399,11 +3425,13 @@ function resolveOneTeamRecord(name, source) {
         out.seasonW = st.w || 0;
         out.seasonL = st.l || 0;
         out.pts = st.pts || 0;
+        out.gamesW = st.subW || 0;
+        out.gamesL = st.subL || 0;
         const ranked = (lg.standings || []).slice().sort((a, b) =>
           (b.pts || 0) - (a.pts || 0) || ((b.w || 0) - (b.l || 0)) - ((a.w || 0) - (a.l || 0)));
         const idx = ranked.findIndex((s) => s.teamId === team.id);
         if (idx >= 0) out.place = idx + 1;
-      } else { out.seasonW = 0; out.seasonL = 0; out.pts = 0; }
+      } else { out.seasonW = 0; out.seasonL = 0; out.pts = 0; out.gamesW = 0; out.gamesL = 0; }
       // "This week" W/L, from the same in-app league's schedule — mirrors what the 'startgg'
       // source already provides via the live event standings, just sourced from lg.schedule instead.
       const weekSel = (state.teamRecord && state.teamRecord.week) || '';
@@ -3449,13 +3477,15 @@ function formatTeamRecord(rec, metric) {
   const week = (rec.weekW != null) ? `${rec.weekW}-${rec.weekL}` : '';
   const pts = (rec.pts != null) ? `${rec.pts} PTS` : '';
   const place = (rec.place != null) ? `#${rec.place}` : '';
+  const games = (rec.gamesW != null) ? `${rec.gamesW}-${rec.gamesL}` : '';
   switch (metric) {
-    case 'week':  return week;
-    case 'pts':   return pts;
-    case 'place': return place;
+    case 'week':   return week;
+    case 'pts':    return pts;
+    case 'place':  return place;
+    case 'games':  return games;
     case 'record-pts': return [season, pts].filter(Boolean).join(dot);
     case 'season':
-    default:      return season;
+    default:       return season;
   }
 }
 
@@ -3619,6 +3649,7 @@ function buildLiveState() {
     showRoster: state.showRoster || [],
     background: state.background,
     overlays: overlayClientInfo(),   // live overlay browser-source count for the pre-flight checklist
+    streamdeck: { connected: Array.from(bridgeClients || []).some((c) => c._client === 'streamdeck') },
     sceneConfig: buildSceneConfig()  // active preset config per scene, applied by SceneBase.applySceneConfig
   });
 }
@@ -3880,12 +3911,12 @@ function srvLgMatchTally(m) {
   return { sa, sb, totA: sa, totB: sb };
 }
 
-// Server-side standings recalc — mirrors client-side lgComputeStandingsFromSchedule/lgAggregateFromSchedule.
+// Server-side standings recalc — mirrors client-side lgAggregateFromSchedule.
 function lgRecalcServer(lg) {
   const sc = lg.scoring || {};
   const ptWin = sc.win ?? 3, ptLoss = sc.loss ?? 0, ptDraw = sc.draw ?? 1, ptOtw = sc.otw ?? ptWin;
   const map = {};
-  (lg.teams || []).forEach(tm => { map[tm.id] = { teamId: tm.id, w: 0, l: 0, t: 0, gf: 0, ga: 0, pts: 0, subW: 0, subL: 0 }; });
+  (lg.teams || []).forEach(tm => { map[tm.id] = { teamId: tm.id, w: 0, l: 0, t: 0, gf: 0, ga: 0, pts: 0, subW: 0, subL: 0, form: [], h2h: {} }; });
   for (const m of (lg.schedule || [])) {
     const r = m.result;
     const hasGames = Array.isArray(m.games) && m.games.length > 0;
@@ -3893,13 +3924,41 @@ function lgRecalcServer(lg) {
     const a = map[m.teamA], b = map[m.teamB]; if (!a || !b) continue;
     const { sa, sb, totA, totB } = srvLgMatchTally(m);
     a.gf += totA; a.ga += totB; b.gf += totB; b.ga += totA;
-    a.subW += sa; a.subL += sb; b.subW += sb; b.subL += sa;   // games/maps won across the series
+    a.subW += sa; a.subL += sb; b.subW += sb; b.subL += sa;
     const winPts = (r && r.ot) ? ptOtw : ptWin;
-    if (sa > sb) { a.w++; a.pts += winPts; b.l++; b.pts += ptLoss; }
-    else if (sb > sa) { b.w++; b.pts += winPts; a.l++; a.pts += ptLoss; }
-    else { a.t++; a.pts += ptDraw; b.t++; b.pts += ptDraw; }
+    if (sa > sb) {
+      a.w++; a.pts += winPts; a.form.push('W'); a.h2h[m.teamB] = (a.h2h[m.teamB] || 0) + 1;
+      b.l++; b.pts += ptLoss; b.form.push('L');
+    } else if (sb > sa) {
+      b.w++; b.pts += winPts; b.form.push('W'); b.h2h[m.teamA] = (b.h2h[m.teamA] || 0) + 1;
+      a.l++; a.pts += ptLoss; a.form.push('L');
+    } else {
+      a.t++; a.pts += ptDraw; a.form.push('D');
+      b.t++; b.pts += ptDraw; b.form.push('D');
+    }
   }
-  lg.standings = Object.values(map);
+  const calcStreak = (form) => {
+    if (!form.length) return '';
+    const last = form[form.length - 1]; let n = 0;
+    for (let i = form.length - 1; i >= 0 && form[i] === last; i--) n++;
+    return last + n;
+  };
+  const tb = lg.tiebreak || 'gd';
+  const standings = Object.values(map).map((s) => ({
+    teamId: s.teamId, w: s.w, l: s.l, t: s.t, gf: s.gf, ga: s.ga, pts: s.pts,
+    subW: s.subW, subL: s.subL, form: s.form.slice(-5), streak: calcStreak(s.form), h2h: s.h2h
+  }));
+  standings.sort((a, b) => {
+    if (b.pts !== a.pts) return b.pts - a.pts;
+    if (tb === 'h2h') {
+      const ah = (a.h2h && a.h2h[b.teamId]) || 0, bh = (b.h2h && b.h2h[a.teamId]) || 0;
+      if (ah !== bh) return bh - ah;
+    }
+    const gdDiff = ((b.gf - b.ga) - (a.gf - a.ga));
+    if (gdDiff !== 0) return gdDiff;
+    return b.gf - a.gf;
+  });
+  lg.standings = standings;
 }
 
 let _srvLgUidC = Date.now();
@@ -7434,6 +7493,11 @@ function updateKillfeed(players) {
       const dk = (p.roundKills || 0) - (pp.roundKills || 0);
       const dhs = (p.roundHs || 0) - (pp.roundHs || 0);
       for (let i = 0; i < dk; i++) kills.push({ p, hs: i < dhs });   // mark the headshot frags first
+      // cs2_ace — fires once, the tick a player's round kill count crosses into a 5-kill round
+      // (a multi-kill tick can jump straight from e.g. 3 to 5, so check the boundary, not ===5).
+      if ((pp.roundKills || 0) < 5 && (p.roundKills || 0) >= 5) {
+        flowBus.emit('cs2_ace', { player: p.name, team: p.team });
+      }
     });
 
     if (victims.length || kills.length) {
@@ -7445,6 +7509,11 @@ function updateKillfeed(players) {
       };
       kills.forEach(k => {
         const v = pickVictim(k.p.team);
+        flowBus.emit('cs2_kill', {
+          killer: k.p.name, killerTeam: k.p.team, victim: v ? v.name : '',
+          victimTeam: v ? v.team : '', weapon: k.p.weapon || '', headshot: !!k.hs
+        });
+        if (k.hs) flowBus.emit('cs2_headshot_kill', { killer: k.p.name, killerTeam: k.p.team, victim: v ? v.name : '' });
         state.csgo.killfeed.push({
           killer: k.p.name, killerTeam: k.p.team, weapon: k.p.weapon || '',
           hs: !!k.hs, victim: v ? v.name : '', victimTeam: v ? v.team : '', ts: now
@@ -7683,15 +7752,47 @@ function handleGsi(payload) {
   if (state.activeGame === 'csgo') {
     const _cs2Rp = (state.csgo.round && state.csgo.round.phase) || '';
     if (_cs2Rp !== _csgoLastRoundPhase) {
-      if (_cs2Rp === 'live' && (_csgoLastRoundPhase === 'freezetime' || _csgoLastRoundPhase === ''))
+      if (_cs2Rp === 'live' && (_csgoLastRoundPhase === 'freezetime' || _csgoLastRoundPhase === '')) {
         flowBus.emit('cs2_round_start', { round: state.csgo.round && state.csgo.round.number });
-      if (_cs2Rp === 'over')
-        flowBus.emit('cs2_round_end', { winner: state.csgo.round && state.csgo.round.winTeam, round: state.csgo.round && state.csgo.round.number });
+        _cs2ClutchFired = false;   // re-arm the once-per-round clutch check for the new round
+      }
+      if (_cs2Rp === 'over') {
+        // Enrich with the round's win method (elimination/bomb/defuse/time) if roundHistory has
+        // already parsed it by this tick — falls back to '' if it lands a tick later.
+        const _rh = (state.csgo.roundHistory || []).find(r => r.round === (state.csgo.round && state.csgo.round.number));
+        flowBus.emit('cs2_round_end', {
+          winner: state.csgo.round && state.csgo.round.winTeam,
+          round: state.csgo.round && state.csgo.round.number,
+          method: _rh ? _rh.method : ''
+        });
+      }
       _csgoLastRoundPhase = _cs2Rp;
     }
+
+    // cs2_clutch_situation — fires once per round, the moment one team drops to exactly one
+    // player alive while the OTHER team still has 2+ (a genuine 1vX clutch, not just the last
+    // 1v1 duel of an ordinary round). Gated to a live round so warmup/freezetime alive-counts
+    // (often stale/zero) can't false-positive.
+    if (_cs2Rp === 'live' && !_cs2ClutchFired) {
+      const csgoPlayers = state.csgo.players || [];
+      const ctAlive = csgoPlayers.filter(p => p.team === 'CT' && p.alive).length;
+      const tAlive  = csgoPlayers.filter(p => p.team === 'T'  && p.alive).length;
+      if ((ctAlive === 1 && tAlive >= 2) || (tAlive === 1 && ctAlive >= 2)) {
+        const clutchTeam = ctAlive === 1 ? 'CT' : 'T';
+        const lone = csgoPlayers.find(p => p.alive && p.team === clutchTeam);
+        flowBus.emit('cs2_clutch_situation', {
+          team: clutchTeam, player: lone ? lone.name : '', vsAlive: clutchTeam === 'CT' ? tAlive : ctAlive
+        });
+        _cs2ClutchFired = true;
+      }
+    }
+
     const _cs2Bomb = (state.csgo.bomb && state.csgo.bomb.state) || '';
-    if (_cs2Bomb === 'planted' && _csgoLastBombState !== 'planted')
-      flowBus.emit('cs2_bomb_planted', { round: state.csgo.round && state.csgo.round.number });
+    if (_cs2Bomb !== _csgoLastBombState) {
+      if (_cs2Bomb === 'planted')  flowBus.emit('cs2_bomb_planted',  { round: state.csgo.round && state.csgo.round.number });
+      if (_cs2Bomb === 'defused')  flowBus.emit('cs2_bomb_defused',  { round: state.csgo.round && state.csgo.round.number });
+      if (_cs2Bomb === 'exploded') flowBus.emit('cs2_bomb_exploded', { round: state.csgo.round && state.csgo.round.number });
+    }
     _csgoLastBombState = _cs2Bomb;
   }
 }
@@ -7999,8 +8100,10 @@ const _flowFireLog   = {};  // { [flowId]: number[] } — last 20 fire timestamp
 const FLOW_TRIGGER_TYPES = [
   // Rocket League
   'rl_goal', 'rl_round_started', 'rl_match_ended', 'rl_overtime', 'rl_replay_start', 'rl_replay_end',
+  'rl_match_created', 'rl_demo', 'rl_save',
   // CS2
   'cs2_round_start', 'cs2_round_end', 'cs2_bomb_planted', 'cs2_half_time', 'cs2_match_ended',
+  'cs2_kill', 'cs2_headshot_kill', 'cs2_ace', 'cs2_bomb_defused', 'cs2_bomb_exploded', 'cs2_clutch_situation',
   // Overwatch (Overwolf GEP relay)
   'ow_match_start', 'ow_round_start', 'ow_round_end', 'ow_match_end',
   // Marvel Rivals (Overwolf GEP relay)
@@ -8016,6 +8119,9 @@ const FLOW_TRIGGER_TYPES = [
   'timer_countdown_end', 'break_shown', 'break_hidden',
   // Scheduled
   'time_of_day',
+  // System (producer-machine state — Advanced-Scene-Switcher-style triggers)
+  'process_started', 'process_stopped', 'system_became_idle', 'system_became_active',
+  'window_focused', 'window_unfocused',
   // Manual
   'manual'
 ];
@@ -8097,6 +8203,199 @@ function _syncFlowIntervals() {
   }
   // Re-arm scene-dwell timers against the current program scene (flow edits change eligibility).
   if (typeof armSceneDwellFlows === 'function') armSceneDwellFlows(state.obs.currentScene || '');
+  // System-state watch-lists (process detection, idle detection, audio-level conditions) — only
+  // poll/track for names/thresholds actually referenced by an enabled flow, and stop entirely
+  // once none are.
+  _syncProcessWatchList();
+  _syncIdleWatchList();
+  _syncAudioWatchList();
+  _syncWindowWatchList();
+}
+
+// ── Audio-level conditions (audio_level_above/audio_level_below) ──────────────────────────────
+// obs-client.js's onVolumeMeters delivers ~10 samples/sec per active input once subscribed
+// (InputVolumeMeters is opt-in — see obs-client.js's connect() eventSubscriptions). Kept as a
+// bounded rolling buffer per watched source so "has it been above/below X for the last N
+// seconds" can be answered without re-querying OBS at condition-eval time.
+const _audioLevelHistory = new Map();   // sourceName -> [{db, ts}], trimmed to the last 60s
+const _audioWatchList = new Set();      // sourceNames referenced by an enabled flow's audio condition
+function _syncAudioWatchList() {
+  const names = new Set();
+  for (const flow of (state.flows || [])) {
+    if (!flow.enabled) continue;
+    for (const c of (flow.conditions || []))
+      if ((c.type === 'audio_level_above' || c.type === 'audio_level_below') && c.params && c.params.sourceName)
+        names.add(c.params.sourceName);
+  }
+  _audioWatchList.clear();
+  names.forEach(n => _audioWatchList.add(n));
+  for (const k of Array.from(_audioLevelHistory.keys())) if (!_audioWatchList.has(k)) _audioLevelHistory.delete(k);
+}
+function _onObsVolumeMeters(inputs) {
+  if (_audioWatchList.size === 0) return;
+  const now = Date.now();
+  for (const inp of inputs || []) {
+    if (!inp || !_audioWatchList.has(inp.inputName)) continue;
+    // inputLevelsMul: per-channel [levelMul, levelPeakMul, levelInputPeakMul] linear multipliers
+    // (obs-websocket 5.x protocol) — use the peak of whichever channel is loudest this sample.
+    const chans = inp.inputLevelsMul || [];
+    let peakMul = 0;
+    for (const c of chans) if (c && c[1] > peakMul) peakMul = c[1];
+    const db = peakMul > 0 ? 20 * Math.log10(peakMul) : -100;
+    const buf = _audioLevelHistory.get(inp.inputName) || [];
+    buf.push({ db, ts: now });
+    while (buf.length && now - buf[0].ts > 60000) buf.shift();
+    _audioLevelHistory.set(inp.inputName, buf);
+  }
+}
+
+// ── Process detection (process_started/process_stopped triggers, process_running condition) ──
+// PowerShell Get-Process, never wmic — wmic is removed on newer Windows 11 builds and has already
+// caused a crash elsewhere in this app (backend/clips/montage-encoder.js). One spawn per poll
+// checks every running process regardless of watch-list size (the spawn itself, ~150-400ms,
+// dominates the cost — a name-filtered query wouldn't meaningfully speed this up).
+const _processWatchList = new Set();       // normalized names (lowercase, no .exe)
+const _processRunningState = new Map();    // name -> bool, last known state
+let _processPollTimer = null;
+function _normalizeProcessName(n) { return (n || '').trim().toLowerCase().replace(/\.exe$/, ''); }
+function _syncProcessWatchList() {
+  const names = new Set();
+  for (const flow of (state.flows || [])) {
+    if (!flow.enabled) continue;
+    for (const t of (flow.triggers || []))
+      if ((t.type === 'process_started' || t.type === 'process_stopped') && t.params && t.params.processName)
+        names.add(_normalizeProcessName(t.params.processName));
+    for (const c of (flow.conditions || []))
+      if (c.type === 'process_running' && c.params && c.params.processName)
+        names.add(_normalizeProcessName(c.params.processName));
+  }
+  _processWatchList.clear();
+  names.forEach(n => _processWatchList.add(n));
+  if (_processWatchList.size === 0) {
+    if (_processPollTimer) { clearInterval(_processPollTimer); _processPollTimer = null; }
+    return;
+  }
+  if (!_processPollTimer) _processPollTimer = setInterval(_pollProcesses, 3000);
+}
+function _pollProcesses() {
+  if (_processWatchList.size === 0) return;
+  require('child_process').exec(
+    'powershell -NoProfile -Command "Get-Process | Select-Object -ExpandProperty ProcessName"',
+    { windowsHide: true, timeout: 5000 },
+    (err, stdout) => {
+      if (err) return;   // transient failure (PowerShell busy, etc.) — next poll retries; avoid log spam
+      const running = new Set(String(stdout).split(/\r?\n/).map(s => s.trim().toLowerCase()).filter(Boolean));
+      for (const name of _processWatchList) {
+        const now = running.has(name);
+        const was = _processRunningState.get(name) || false;
+        if (now && !was) flowBus.emit('process_started', { processName: name });
+        if (!now && was) flowBus.emit('process_stopped', { processName: name });
+        _processRunningState.set(name, now);
+      }
+    }
+  );
+}
+
+// ── Idle detection (system_became_idle/system_became_active triggers, system_idle_for condition) ──
+// powerMonitor.getSystemIdleTime() is Electron-built-in — no new dependency, no subprocess.
+const _idleCrossed = new Map();   // minutes threshold -> bool (currently considered idle at that threshold)
+let _idlePollTimer = null;
+function _syncIdleWatchList() {
+  const thresholds = new Set();
+  for (const flow of (state.flows || [])) {
+    if (!flow.enabled) continue;
+    for (const t of (flow.triggers || []))
+      if (t.type === 'system_became_idle') thresholds.add(Math.max(1, Number((t.params || {}).minutes) || 5));
+  }
+  if (thresholds.size === 0) {
+    if (_idlePollTimer) { clearInterval(_idlePollTimer); _idlePollTimer = null; }
+    return;
+  }
+  if (!_idlePollTimer) _idlePollTimer = setInterval(_pollIdle, 5000);
+}
+function _pollIdle() {
+  const idleSec = powerMonitor.getSystemIdleTime();
+  for (const flow of (state.flows || [])) {
+    if (!flow.enabled) continue;
+    for (const t of (flow.triggers || [])) {
+      if (t.type !== 'system_became_idle') continue;
+      const mins = Math.max(1, Number((t.params || {}).minutes) || 5);
+      const isIdleNow = idleSec >= mins * 60;
+      const wasIdle = _idleCrossed.get(mins) || false;
+      if (isIdleNow && !wasIdle) flowBus.emit('system_became_idle', { minutes: mins });
+      if (!isIdleNow && wasIdle) flowBus.emit('system_became_active', { minutes: mins });
+      _idleCrossed.set(mins, isIdleNow);
+    }
+  }
+}
+
+// ── Window focus detection (window_focused/window_unfocused triggers, window_is_focused condition) ──
+// GetForegroundWindow via a PowerShell Add-Type P/Invoke — no new npm dependency, avoids an
+// Electron-ABI-sensitive native module (e.g. active-win). Add-Type's C# compile makes each call
+// ~1.2s (vs ~150-400ms for the plain Get-Process poll above), so this polls on a longer 5s interval
+// with an in-flight guard to avoid a slow call backing up behind the next tick.
+const _windowWatchList = new Set();        // normalized (lowercase) titleContains substrings
+const _windowMatchState = new Map();       // titleContains substring -> bool, last known match state
+let _windowPollTimer = null;
+let _windowPollInFlight = false;
+let _lastFocusedWindowTitle = '';          // cache read by the window_is_focused condition
+const _WINDOW_FOCUS_SCRIPT = `
+Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+public class Win32Focus {
+  [DllImport("user32.dll")]
+  public static extern IntPtr GetForegroundWindow();
+  [DllImport("user32.dll", CharSet=CharSet.Auto)]
+  public static extern int GetWindowText(IntPtr hWnd, System.Text.StringBuilder text, int count);
+}
+"@
+$hwnd = [Win32Focus]::GetForegroundWindow()
+$sb = New-Object System.Text.StringBuilder 256
+[Win32Focus]::GetWindowText($hwnd, $sb, 256) | Out-Null
+$sb.ToString()
+`;
+function _syncWindowWatchList() {
+  const titles = new Set();
+  for (const flow of (state.flows || [])) {
+    if (!flow.enabled) continue;
+    for (const t of (flow.triggers || []))
+      if ((t.type === 'window_focused' || t.type === 'window_unfocused') && t.params && t.params.titleContains)
+        titles.add(t.params.titleContains.trim().toLowerCase());
+    for (const c of (flow.conditions || []))
+      if (c.type === 'window_is_focused' && c.params && c.params.titleContains)
+        titles.add(c.params.titleContains.trim().toLowerCase());
+  }
+  _windowWatchList.clear();
+  titles.forEach(t => _windowWatchList.add(t));
+  for (const k of Array.from(_windowMatchState.keys())) if (!_windowWatchList.has(k)) _windowMatchState.delete(k);
+  if (_windowWatchList.size === 0) {
+    if (_windowPollTimer) { clearInterval(_windowPollTimer); _windowPollTimer = null; }
+    return;
+  }
+  if (!_windowPollTimer) _windowPollTimer = setInterval(_pollWindowFocus, 5000);
+}
+function _pollWindowFocus() {
+  if (_windowWatchList.size === 0 || _windowPollInFlight) return;
+  _windowPollInFlight = true;
+  require('child_process').execFile(
+    'powershell.exe', ['-NoProfile', '-Command', _WINDOW_FOCUS_SCRIPT],
+    { windowsHide: true, timeout: 5000 },
+    (err, stdout) => {
+      _windowPollInFlight = false;
+      if (err) return;   // transient failure (PowerShell busy, etc.) — next poll retries; avoid log spam
+      const title = String(stdout || '').trim();
+      _lastFocusedWindowTitle = title;
+      const lower = title.toLowerCase();
+      for (const needle of _windowWatchList) {
+        const now = lower.includes(needle);
+        const was = _windowMatchState.get(needle) || false;
+        if (now && !was) flowBus.emit('window_focused', { title, titleContains: needle });
+        if (!now && was) flowBus.emit('window_unfocused', { title, titleContains: needle });
+        _windowMatchState.set(needle, now);
+      }
+    }
+  );
 }
 
 function _onFlowTrigger(type, data) {
@@ -8117,13 +8416,30 @@ function _triggerMatches(trigger, type, data, flow) {
   if (trigger.type !== type) return false;
   const p = trigger.params || {};
   switch (type) {
-    case 'rl_goal': {
+    case 'rl_goal':
+    case 'rl_demo':
+    case 'rl_save': {
       const team = p.team || 'any';
       if (team === 'any') return true;
       return (team === 'blue' && data.team === 0) || (team === 'orange' && data.team === 1);
     }
     case 'cs2_round_end':
       return !p.winner || p.winner === 'any' || data.winner === p.winner;
+    case 'cs2_kill':
+    case 'cs2_headshot_kill':
+    case 'cs2_ace': {
+      const team = p.team || 'any';
+      if (team === 'any') return true;
+      return (data.killerTeam || data.team) === team;
+    }
+    case 'process_started':
+    case 'process_stopped':
+      return !p.processName || p.processName.trim().toLowerCase().replace(/\.exe$/, '') === (data.processName || '');
+    case 'system_became_idle':
+      return !p.minutes || Number(p.minutes) === data.minutes;
+    case 'window_focused':
+    case 'window_unfocused':
+      return !p.titleContains || (data.title || '').toLowerCase().includes(p.titleContains.trim().toLowerCase());
     case 'twitch_channel_points':
       return !p.rewardTitle || (data.reward || '').toLowerCase().includes(p.rewardTitle.toLowerCase());
     case 'twitch_raid':
@@ -8229,6 +8545,29 @@ function _evalCondition(cond) {
       const last = _flowLastFired[p.flowId];
       if (!last) return false;
       return (Date.now() - last) <= Number(p.maxAgoMs);
+    }
+    case 'flow_is_enabled': {
+      if (!p.flowId) return true;
+      const f = (state.flows || []).find(f => f.id === p.flowId);
+      return !!(f && f.enabled);
+    }
+    case 'system_idle_for':
+      return !p.minutes || powerMonitor.getSystemIdleTime() >= Number(p.minutes) * 60;
+    case 'process_running':
+      return !p.processName || !!_processRunningState.get(_normalizeProcessName(p.processName));
+    case 'window_is_focused':
+      return !p.titleContains || _lastFocusedWindowTitle.toLowerCase().includes(p.titleContains.trim().toLowerCase());
+    case 'audio_level_above':
+    case 'audio_level_below': {
+      if (!p.sourceName || p.thresholdDb == null || !p.seconds) return true;
+      const buf = _audioLevelHistory.get(p.sourceName) || [];
+      const windowStart = Date.now() - Number(p.seconds) * 1000;
+      if (!buf.length || buf[0].ts > windowStart) return false;   // not enough history yet to prove it
+      const inWindow = buf.filter(s => s.ts >= windowStart);
+      const threshold = Number(p.thresholdDb);
+      return cond.type === 'audio_level_above'
+        ? inWindow.every(s => s.db >= threshold)
+        : inWindow.every(s => s.db <= threshold);
     }
     case 'if_match_point': {
       const half = Math.ceil((state.bestOf || 5) / 2);
@@ -8338,9 +8677,12 @@ async function _executeFlowAction(action, ctx) {
     case 'obs_scene':
       // AI Shield promises to pause ALL scene automation — flows included.
       if (aiShielded()) { logAuto('flow', `Flow scene cut to "${p.scene}" BLOCKED — AI shield engaged`); break; }
-      if (obsClient && obsClient.isConnected() && p.scene) {
+      if (!p.scene) { logAuto('flow', 'Flow "Cut to scene" action has no scene selected — skipped'); break; }
+      if (obsClient && obsClient.isConnected()) {
         logAuto('flow', `Flow cut to "${p.scene.trim()}"`);
         obsClient.switchScene(p.scene.trim());
+      } else {
+        logAuto('flow', `Flow cut to "${p.scene.trim()}" skipped — OBS not connected`);
       }
       break;
     // Switch back to whatever scene was on program before the last cut (ASS-style "previous scene").
@@ -8490,6 +8832,24 @@ async function _executeFlowAction(action, ctx) {
     case 'overlay_winner_hide':
       state.winner = { ...state.winner, visible: false };
       broadcastFullState();
+      break;
+    case 'gfx_trigger': {
+      // Push one of the on-demand punch-up graphics (line-up, veto, draft, bracket, schedule,
+      // standings, credits, matchup) live through the SAME exclusivity path the Graphics hub uses —
+      // whatever content is already configured for that graphic (team names, veto state, bracket
+      // view, etc.) is what shows; this only handles visibility + on-air exclusivity, matching what
+      // the producer already set up earlier. Chain a "Cut to scene" action after this (with a short
+      // delay if you want the entrance animation to play first) to also switch OBS.
+      if (aiShielded()) { logAuto('flow', `Flow graphic trigger "${p.key}" BLOCKED — AI shield engaged`); break; }
+      if (!p.key) { logAuto('flow', 'Flow "Push graphic live" action has no graphic selected — skipped'); break; }
+      setGfxActive(p.key);
+      logAuto('flow', `Flow pushed graphic "${p.key}" live`);
+      break;
+    }
+    case 'gfx_hide':
+      if (aiShielded()) { logAuto('flow', 'Flow "Hide on-air graphic" BLOCKED — AI shield engaged'); break; }
+      setGfxActive(null);
+      logAuto('flow', 'Flow hid the on-air graphic');
       break;
     case 'overlay_reload':
       broadcast(bridgeClients, { type: 'reload' });
@@ -8826,7 +9186,8 @@ function setupObsClient() {
     onReplayBufferStateChanged: ({ active }) => {
       state.obs.replayBufferActive = active;
       broadcastFullState();
-    }
+    },
+    onVolumeMeters: _onObsVolumeMeters,
   });
 }
 
@@ -8951,6 +9312,34 @@ function logAuto(kind, message) {
   if (_autoLog.length > 50) _autoLog.length = 50;
 }
 
+// Unified graphics overlay (gfx.html) active-scene switch — the ONE place every "push a graphic
+// live" surface should route through (qrail Put-On-Air, deck, main Push Live, and now Flows).
+// gfx.html only ever renders one layer (state.gfxActive), but each graphic also carries its own
+// .visible flag, so this mirrors .visible to gfxActive: the active layer's flag on, every other
+// EXCLUSIVE layer's flag off. Persistent overlays (Ticker, Sponsor, Casters/Desk, Teams-to-Watch)
+// are deliberately not in this map — they're meant to stack alongside a punch-up graphic.
+// Extracted from the 'set_gfx_active' WS case so a Flow action can call it directly server-side.
+const GFX_EXCLUSIVE_VISIBLE = {
+  break: 'breakScreen', winner: 'winner', intro: 'intro', veto: 'veto', draft: 'draft',
+  bracket: 'bracket', schedule: 'upcoming', upcoming: 'upcoming', standings: 'standings', credits: 'credits'
+  // matchup has no independent .visible flag (it's active purely via gfxActive) — nothing to clear.
+  // The spotlight/watchlist/teamSpotlight family is deliberately left out: the gfx key 'spotlight'
+  // is wired to watchlist.visible in one surface and spotlight.visible in another, so auto-clearing
+  // by key could hide the one that's actually live. They're niche and stay independent.
+};
+function setGfxActive(scene) {
+  state.gfxActive = scene && typeof scene === 'string' ? scene : null;
+  const activeObj = GFX_EXCLUSIVE_VISIBLE[state.gfxActive] || null;
+  Object.keys(GFX_EXCLUSIVE_VISIBLE).forEach((k) => {
+    const objName = GFX_EXCLUSIVE_VISIBLE[k];
+    if (objName === activeObj) return;                       // leave the now-active layer alone
+    const o = state[objName];
+    if (o && typeof o === 'object' && o.visible) o.visible = false;
+  });
+  if (activeObj && state[activeObj] && typeof state[activeObj] === 'object') state[activeObj].visible = true;
+  broadcastFullState();
+}
+
 async function disconnectObs() {
   if (!obsClient) return;
   try { await obsClient.disconnect(); } catch (e) { /* ignore */ }
@@ -8965,6 +9354,7 @@ async function disconnectObs() {
 let _csgoLastMapPhase = '';
 let _csgoLastRoundPhase = '';
 let _csgoLastBombState = '';
+let _cs2ClutchFired = false;   // re-armed each round (see handleGsi) so cs2_clutch_situation fires once per round
 
 // Switch OBS to the scene mapped to a broadcast moment, if auto-switch is on.
 // TEMPORARY: all automatic OBS scene switching is disabled (per request). The app performs NO
@@ -9378,6 +9768,17 @@ const rlGameTrack = { gameTime: null, blueScore: 0, orangeScore: 0 };
 // True once the observer is spectating a lobby (live players present). Drives the "hide RL's native
 // UI the moment spectating begins" behaviour — see handleUpdateState. Re-armed each match.
 let _rlSpectatingActive = false;
+// Camera Target.TeamNum from the previous UpdateState. The official Stats API has no spectator
+// flag, but on the exact packet where the LOCAL user switches from a team to spectator, the camera
+// target is themselves with TeamNum 255 (the spectator "team") — verified by live capture 2026-07.
+// The rising edge into >=2 is the only mid-match "I just entered spectate" signal the feed carries.
+let _rlPrevTargetTeam = 0;
+
+// Previous tick's per-player saves/demos, keyed by player name — the RL Stats API has no discrete
+// "save happened"/"demo happened" event, only cumulative counters, so rl_save/rl_demo flow triggers
+// are synthesized by diffing this against each new tick (see handleUpdateState). Reset every match
+// (handleMatchCreated) so a fresh game never diffs against the previous game's counts.
+let _rlPrevPlayerStats = {};   // { [playerName]: { saves, demos } }
 
 function resetRlGameTrack() {
   rlGameTrack.gameTime = state.game?.time ?? 300;
@@ -9551,11 +9952,9 @@ function returnToInGameForKickoff() {
   const kt = state.obs.kickoff;
   if (kt && kt.enabled && kt.scene) broadcastRlSceneResult('kickoff', kt.scene, rlSwitchScene(kt.scene, 'kickoff', kt.transition));   // opt-in RL kickoff cut (bypasses the disabled global auto-switch)
   else obsSwitch('inGame');   // the RL overlay scene comes up at kickoff, not during "choose teams"
-  // Hide RL's native UI NOW that gameplay is starting (this is the consistent moment). Reset first so
-  // every game re-hides — RL re-shows its UI at each kickoff; the per-packet path then retries if the
-  // press fails. matchDelayMs still applies so RL has settled into play before the key is sent.
-  rlSpectatorUi.resetAutoTracking();
-  scheduleRlHideNativeUi(state.game.number);
+  // NO auto-hide here: the native-UI hide fires when the observer JOINS SPECTATE (players appear in
+  // handleUpdateState), not at kickoff. The UI is already hidden by kickoff, and since the key is a
+  // toggle a kickoff press flipped it back ON. The latch re-arms per game via handleMatchCreated.
 }
 // Kickoff fallback for stats APIs that don't emit clock_started / countdown events: when we're
 // awaiting kickoff and the MATCH clock is running DOWN near 5:00 (>= 150s — so the separate ~60s
@@ -9750,6 +10149,24 @@ function handleUpdateState(data) {
     } : null
   }));
 
+  // rl_save / rl_demo — the RL Stats API has no discrete event for either, only the cumulative
+  // saves/demos counters above, so synthesize one flow-trigger emit per increment by diffing
+  // against last tick's snapshot (_rlPrevPlayerStats). Must run BEFORE state.players is
+  // overwritten below — that reassignment is what makes "last tick's snapshot" unavailable
+  // afterward, which is why this can't just read the outgoing state.players instead.
+  normalised.forEach(p => {
+    const prev = _rlPrevPlayerStats[p.name];
+    if (prev) {
+      const dSaves = Math.max(0, (p.saves || 0) - (prev.saves || 0));
+      for (let i = 0; i < dSaves; i++) flowBus.emit('rl_save', { player: p.name, team: p.team });
+      const dDemos = Math.max(0, (p.demos || 0) - (prev.demos || 0));
+      for (let i = 0; i < dDemos; i++) flowBus.emit('rl_demo', { player: p.name, team: p.team });
+    }
+    // No `else` emit on first sighting — a reconnect/observer-target switch would otherwise
+    // read as a burst of saves/demos that didn't actually just happen.
+    _rlPrevPlayerStats[p.name] = { saves: p.saves || 0, demos: p.demos || 0 };
+  });
+
   state.players = normalised;
 
   // Update playerCache (persist players across game/disconnect)
@@ -9758,18 +10175,34 @@ function handleUpdateState(data) {
   });
 
   // Spectating just began — the observer joined the lobby and players are now present. Hide RL's
-  // native spectator UI NOW (before kickoff), not only at the kickoff, so the pre-kickoff "choose
-  // teams" wait isn't broadcast with RL's own UI on screen. Latched so the toggle isn't spammed;
-  // re-armed each match (handleMatchCreated) and when players clear. The kickoff still re-hides —
-  // RL re-shows its UI when gameplay actually starts (see returnToInGameForKickoff).
+  // native spectator UI NOW, so the pre-kickoff "choose teams" wait isn't broadcast with RL's own
+  // UI on screen. This is the ONLY auto-hide moment — kickoff never presses (the key is a toggle;
+  // pressing again at kickoff flipped the already-hidden UI back on). Latched so the toggle isn't
+  // spammed; re-armed each match (handleMatchCreated) and when players clear.
   const nowSpectating = normalised.length > 0;
   if (nowSpectating && !_rlSpectatingActive) {
     _rlSpectatingActive = true;
-    rlSpectatorUi.resetAutoTracking();   // clear any prior press-window so this early hide can fire
+    // NO resetAutoTracking() here — handleMatchCreated is the only re-arm. If the latch re-fires
+    // mid-game (players flickered empty for a packet), the one-press guard must still hold, or the
+    // toggle key would flip the already-hidden UI back on.
+    console.log('[RL UI] Spectate detected (players=' + normalised.length + ') — scheduling native-UI hide.');
     scheduleRlHideNativeUi(state.game.number);
   } else if (!nowSpectating && _rlSpectatingActive) {
     _rlSpectatingActive = false;
   }
+
+  // Mid-match spectate RE-ENTRY (observer toggled team → spectator): on that exact packet the
+  // camera Target is the local user with TeamNum 255 — the spectator "team". RL re-shows its
+  // native UI on re-entry, so this rising edge DOES re-arm the one-press guard and presses again.
+  // Players merely joining/leaving the roster never trip this (their TeamNum stays 0/1).
+  const rawTarget = (game.bHasTarget !== false && game.Target && typeof game.Target === 'object') ? game.Target : null;
+  const targetTeam = rawTarget ? Number(rawTarget.TeamNum ?? rawTarget.teamNum ?? 0) : 0;
+  if (targetTeam >= 2 && _rlPrevTargetTeam < 2) {
+    console.log('[RL UI] Spectate re-entry detected (camera target "' + (rawTarget.Name || rawTarget.name || '?') + '" moved to spectator team ' + targetTeam + ') — re-arming auto-hide.');
+    rlSpectatorUi.resetAutoTracking();
+    scheduleRlHideNativeUi(state.game.number);
+  }
+  _rlPrevTargetTeam = targetTeam;
 
   // Detect the spectated/observed player. The official RL Stats API does NOT expose a reliable target
   // name; instead, SPECTATOR-only fields (e.g. Boost) are present ONLY for the player the observer
@@ -10351,7 +10784,13 @@ function handleMatchCreated(data) {
   state.playerCache = {};
   state.inReplay   = false;
   state.currentGoal = null;
+  _rlPrevPlayerStats = {};   // fresh match — don't diff demo/save counts against the last game's players
+  flowBus.emit('rl_match_created', {});
   _rlSpectatingActive = false;   // re-arm the "hide native UI on spectate" latch for this new lobby
+  // Single authoritative re-arm for the auto-hide press: ONLY a genuinely new game clears the
+  // one-press-per-game guard. The latch site must NOT reset it — the key is a toggle, and a
+  // players-flicker re-arming mid-game would fire a second press that flips the UI back ON.
+  rlSpectatorUi.resetAutoTracking();
   resetRlGameTrack();
   saveAppState();
   if (!holdBoard) {
@@ -10466,8 +10905,11 @@ function handleMatchCreated(data) {
 }
 
 function scheduleRlHideNativeUi(gameNumber) {
-  if (state.activeGame !== 'rocket-league') return;
-  rlSpectatorUi.scheduleAutoHide(gameNumber, state.rlSpectatorUi, (result) => {
+  if (state.activeGame !== 'rocket-league') {
+    console.log('[RL UI] Auto-hide skipped — active game is "' + state.activeGame + '", not rocket-league.');
+    return;
+  }
+  const scheduled = rlSpectatorUi.scheduleAutoHide(gameNumber, state.rlSpectatorUi, (result) => {
     broadcast(bridgeClients, {
       type: 'rl-ui-result',
       data: {
@@ -10479,6 +10921,14 @@ function scheduleRlHideNativeUi(gameNumber) {
       }
     });
   });
+  // Tell the producer the TRIGGER fired, separately from the press result — makes "the trigger
+  // never latched" vs "the press failed" distinguishable from the control panel while testing.
+  if (scheduled) {
+    broadcast(bridgeClients, {
+      type: 'rl-ui-result',
+      data: { ok: true, scheduled: true, auto: true, message: 'Spectate detected — hiding the native UI…' }
+    });
+  }
 }
 
 async function triggerRlHideNativeUi() {
@@ -10527,6 +10977,18 @@ function startBridgeServer() {
       cb(false, 401, 'Unauthorized');
     }
   });
+  // Same bind-failure gap as the HTTP server above — a port conflict here otherwise leaves the
+  // control panel with no live-state connection at all (every WS-dependent screen hangs loading).
+  bridgeWss.on('error', (err) => {
+    console.error('[Bridge] WS server error:', err);
+    if (err && err.code === 'EADDRINUSE') {
+      dialog.showErrorBox(
+        'NE Broadcast Suite — Port already in use',
+        `Port ${WS_PORT} is already being used by another program on this PC, so the app's live-update bridge can't start.\n\nClose whatever else is using port ${WS_PORT} (check Task Manager, or run "netstat -ano | findstr :${WS_PORT}" in a command prompt) and relaunch NE Broadcast Suite.`
+      );
+      _electronApp.quit();
+    }
+  });
 
   bridgeWss.on('connection', (ws) => {
     bridgeClients.add(ws);
@@ -10556,8 +11018,8 @@ function startBridgeServer() {
       }
     });
 
-    ws.on('close', () => { const was = ws._role; bridgeClients.delete(ws); if (was === 'overlay') maybeBroadcastOverlayCount(); });
-    ws.on('error', () => { const was = ws._role; bridgeClients.delete(ws); if (was === 'overlay') maybeBroadcastOverlayCount(); });
+    ws.on('close', () => { const was = ws._role; const wasSd = ws._client === 'streamdeck'; bridgeClients.delete(ws); if (was === 'overlay') maybeBroadcastOverlayCount(); if (wasSd) broadcastFullState(); });
+    ws.on('error', () => { const was = ws._role; const wasSd = ws._client === 'streamdeck'; bridgeClients.delete(ws); if (was === 'overlay') maybeBroadcastOverlayCount(); if (wasSd) broadcastFullState(); });
   });
 
   // Heartbeat: ping every client; drop any that didn't pong since last round. This evicts
@@ -11259,7 +11721,7 @@ function handleControlMessage(msg, ws) {
       const d = msg.data || {};
       if (typeof d.enabled === 'boolean') state.teamRecord.enabled = d.enabled;
       if (typeof d.metric === 'string') {
-        const allowed = ['season', 'week', 'pts', 'place', 'record-pts'];
+        const allowed = ['season', 'week', 'pts', 'place', 'record-pts', 'games'];
         if (allowed.includes(d.metric)) state.teamRecord.metric = d.metric;
       }
       if (typeof d.source === 'string' && ['stats', 'startgg', 'manual'].includes(d.source)) state.teamRecord.source = d.source;
@@ -11448,7 +11910,7 @@ function handleControlMessage(msg, ws) {
         : cur.topics;
       const headline = typeof p.headline === 'string' ? p.headline.slice(0, 140) : (cur.headline ?? '');
       const predictions = Array.isArray(p.predictions)
-        ? [0, 1].map((i) => (['blue', 'orange'].includes(p.predictions[i]) ? p.predictions[i] : ''))
+        ? [0, 1].map((i) => sanitizePreshowPick(p.predictions[i]))
         : (Array.isArray(cur.predictions) ? cur.predictions : ['', '']);
       state.preshow = {
         headline, topics,
@@ -12078,8 +12540,30 @@ function handleControlMessage(msg, ws) {
     case 'set_show_roles': {
       const d = msg.data || {};
       if (!state.casters.showRoles) state.casters.showRoles = { host: '', observer: '' };
-      if (typeof d.host === 'string') state.casters.showRoles.host = d.host.slice(0, 60);
-      if (typeof d.observer === 'string') state.casters.showRoles.observer = d.observer.slice(0, 60);
+      // Same "current shift IS the lineup" auto-linkage as caster desk slots (see
+      // save_caster_to_library's deskSlot handling) — a host/observer had no equivalent before,
+      // so they'd never get auto-credited without someone manually adding them elsewhere.
+      const findCrew = (nameOrHandle) => {
+        const q = (nameOrHandle || '').trim().toLowerCase();
+        if (!q || !Array.isArray(state.crew)) return null;
+        return state.crew.find((c) => c && ((c.name || '').toLowerCase() === q || (c.handle || '').toLowerCase() === q)) || null;
+      };
+      if (typeof d.host === 'string') {
+        const nextHost = d.host.slice(0, 60);
+        if (nextHost !== state.casters.showRoles.host) {
+          const prev = findCrew(state.casters.showRoles.host); if (prev) prev.active = false;
+          const next = findCrew(nextHost); if (next) { next.active = true; next.workedEvent = true; }
+          state.casters.showRoles.host = nextHost;
+        }
+      }
+      if (typeof d.observer === 'string') {
+        const nextObs = d.observer.slice(0, 60);
+        if (nextObs !== state.casters.showRoles.observer) {
+          const prev = findCrew(state.casters.showRoles.observer); if (prev) prev.active = false;
+          const next = findCrew(nextObs); if (next) { next.active = true; next.workedEvent = true; }
+          state.casters.showRoles.observer = nextObs;
+        }
+      }
       saveAppState();
       broadcastFullState();
       break;
@@ -12156,24 +12640,39 @@ function handleControlMessage(msg, ws) {
         const slot = Math.max(0, Math.min(4, parseInt(d.deskSlot, 10) || 0));
         if (!Array.isArray(state.casters.lineup)) state.casters.lineup = [];
         let lineup = state.casters.lineup;
+        let bumpedOffLibId = null;   // fully removed from the desk this call (not just moved slots)
         if (slot === 0) {
           state.casters.lineup = lineup.filter((x) => x.libraryId !== libId);
+          bumpedOffLibId = libId;
         } else {
           const occ = lineup.find((x) => Number(x.slot) === slot && x.libraryId !== libId);
           const mine = lineup.find((x) => x.libraryId === libId);
           const oldSlot = mine ? Number(mine.slot) : 0;
           if (mine) mine.slot = slot;
           else lineup.push({ libraryId: libId, slot, roomId: '', streamId: libId });
-          if (occ) { if (oldSlot) occ.slot = oldSlot; else state.casters.lineup = lineup.filter((x) => x !== occ); }
+          if (occ) {
+            if (oldSlot) occ.slot = oldSlot;
+            else { state.casters.lineup = lineup.filter((x) => x !== occ); bumpedOffLibId = occ.libraryId; }
+          }
         }
         if (!state.casters.lineup.length) state.casters.list = [];   // resolveLineupToList no-ops on empty
-        // A caster placed on the desk (slot 1-4) is clearly working this event — mark the matching
-        // crew record on-shift + worked so the On shift / Worked-this-event lists and the credits pick
-        // them up without a second click. Pulling them off (slot 0) leaves workedEvent so they stay credited.
+        // "Current shift" IS the desk lineup — no separate manual on-shift toggle. A caster placed
+        // on the desk (slot 1-4) is clearly working this event, so mark the matching crew record
+        // active + worked so credits pick them up without a second click. Taking someone off the
+        // desk (explicit pull-off, or bumped out by a swap with nowhere to fall back to) rolls them
+        // off-shift too — but workedEvent is left alone so earlier-shift crew stay credited.
         if (slot >= 1 && Array.isArray(state.crew)) {
           const nm = (d.name || '').toLowerCase(), hd = (d.handle || '').toLowerCase();
           const cm = state.crew.find((c) => c && (((c.name || '').toLowerCase() === nm && nm) || (hd && (c.handle || '').toLowerCase() === hd)));
           if (cm) { cm.active = true; cm.workedEvent = true; }
+        }
+        if (bumpedOffLibId && Array.isArray(state.crew)) {
+          const offEntry = state.casters.library.find((c) => c.id === bumpedOffLibId);
+          if (offEntry) {
+            const nm = (offEntry.name || '').toLowerCase(), hd = (offEntry.handle || '').toLowerCase();
+            const cm = state.crew.find((c) => c && (((c.name || '').toLowerCase() === nm && nm) || (hd && (c.handle || '').toLowerCase() === hd)));
+            if (cm) cm.active = false;
+          }
         }
       }
       resolveLineupToList();   // re-join so name/handle/social edits propagate to overlay immediately
@@ -12824,6 +13323,7 @@ function handleControlMessage(msg, ws) {
       const p = msg.data || {};
       if (typeof p.bgImageUrl === 'string') target.bgImageUrl = p.bgImageUrl.slice(0, 5000000);
       if (typeof p.bgStyle === 'string' && ['auto', 'dark', 'spotlight'].includes(p.bgStyle)) target.bgStyle = p.bgStyle;
+      if (typeof p.cardStyle === 'string' && ['broadcast', 'poster'].includes(p.cardStyle)) target.cardStyle = p.cardStyle;
       if (typeof p.presentedByEnabled === 'boolean') target.presentedByEnabled = p.presentedByEnabled;
       saveAppState();
       broadcastFullState();
@@ -12964,7 +13464,7 @@ function handleControlMessage(msg, ws) {
             name: (msg.data && msg.data.name || '').toString().slice(0, 80) || 'Start.gg League',
             game: state.activeGame, type: 'team', season: '', salaryCap: 0,
             teams, freeAgents: [],
-            standings: teams.map((t) => ({ teamId: t.id, w: 0, l: 0, pts: 0 })),
+            standings: teams.map((t) => ({ teamId: t.id, w: 0, l: 0, t: 0, gf: 0, ga: 0, pts: 0, subW: 0, subL: 0 })),
             schedule: [], source: { startgg: evSlug }
           };
           if (!Array.isArray(state.leagues)) state.leagues = [];
@@ -14319,7 +14819,11 @@ function handleControlMessage(msg, ws) {
       const was = ws._role;
       ws._role = (msg.role === 'overlay' || msg.role === 'control') ? msg.role : 'unknown';
       ws._page = (typeof msg.page === 'string') ? msg.page.slice(0, 120) : '';
+      // Optional client tag (e.g. 'streamdeck') — the Integrations page shows a live
+      // "Connected" chip for the Stream Deck plugin off this.
+      ws._client = (typeof msg.client === 'string') ? msg.client.slice(0, 40) : '';
       if (ws._role === 'overlay' || was === 'overlay') maybeBroadcastOverlayCount();
+      if (ws._client === 'streamdeck') broadcastFullState();
       break;
     }
 
@@ -15294,36 +15798,34 @@ function handleControlMessage(msg, ws) {
       break;
     }
 
+    // ── Run of Show bridge ──────────────────────────────────────────────
+    // The rundown runner lives in the CONTROL PANEL (localStorage), not here. The panel
+    // publishes a tiny label snapshot so external controllers (Stream Deck plugin) can
+    // display current/next on their keys...
+    case 'set_rundown_status': {
+      const d = msg.data || {};
+      state.rundownStatus = {
+        running: !!d.running,
+        pos: Math.max(0, parseInt(d.pos, 10) || 0),
+        total: Math.max(0, parseInt(d.total, 10) || 0),
+        current: (d.current || '').toString().slice(0, 60),
+        next: (d.next || '').toString().slice(0, 60),
+        prev: (d.prev || '').toString().slice(0, 60)
+      };
+      broadcastFullState();
+      break;
+    }
+    // ...and controllers drive the runner with ops we relay straight back to the panel.
+    case 'rundown_control': {
+      broadcast(bridgeClients, { type: 'rundown_control', data: msg.data || {} });
+      break;
+    }
+
     // (set_upcoming / set_standings migrated to the WS_HANDLERS registry above handleControlMessage)
 
     // ── Unified graphics overlay (gfx.html) active scene ─────────────────
     case 'set_gfx_active': {
-      const scene = (msg.data && msg.data.scene) || null;
-      state.gfxActive = scene && typeof scene === 'string' ? scene : null;
-      // Single-select for the exclusive punch-up graphics. gfx.html only ever RENDERS one layer
-      // (state.gfxActive), but each graphic also carries its own .visible flag, and the various push
-      // surfaces (qrail Put-On-Air, deck, flows, main Push Live) set/clear only their own flag — so
-      // several graphics could read "on air" (green) at once even though just one is showing. Mirror
-      // .visible to gfxActive here, in the ONE place every push routes through: the active layer's
-      // flag on, all other exclusive layers off. Persistent overlays (Ticker, Sponsor, Casters/Desk,
-      // Teams-to-Watch) are deliberately NOT in this map — they're meant to stack alongside a graphic.
-      const GFX_EXCLUSIVE_VISIBLE = {
-        break: 'breakScreen', winner: 'winner', intro: 'intro', veto: 'veto', draft: 'draft',
-        bracket: 'bracket', schedule: 'upcoming', upcoming: 'upcoming', standings: 'standings', credits: 'credits'
-        // matchup has no independent .visible flag (it's active purely via gfxActive) — nothing to clear.
-        // The spotlight/watchlist/teamSpotlight family is deliberately left out: the gfx key 'spotlight'
-        // is wired to watchlist.visible in one surface and spotlight.visible in another, so auto-clearing
-        // by key could hide the one that's actually live. They're niche and stay independent.
-      };
-      const activeObj = GFX_EXCLUSIVE_VISIBLE[state.gfxActive] || null;
-      Object.keys(GFX_EXCLUSIVE_VISIBLE).forEach((k) => {
-        const objName = GFX_EXCLUSIVE_VISIBLE[k];
-        if (objName === activeObj) return;                       // leave the now-active layer alone
-        const o = state[objName];
-        if (o && typeof o === 'object' && o.visible) o.visible = false;
-      });
-      if (activeObj && state[activeObj] && typeof state[activeObj] === 'object') state[activeObj].visible = true;
-      broadcastFullState();
+      setGfxActive((msg.data && msg.data.scene) || null);
       break;
     }
 
@@ -17407,6 +17909,20 @@ function startHttpServer(baseDir) {
   // it's to keep a bare port-scan of :3001 from getting in when WS_HOST=0.0.0.0 is set.
   app.get('/api/ws-token', (req, res) => {
     res.json({ token: wsAuthToken });
+  });
+
+  // ── Elgato Stream Deck plugin download (Integrations page) ────────────────
+  // The packed .streamDeckPlugin ships inside the app (streamdeck-plugin/dist);
+  // producers download it here and double-click to install into the Stream Deck app.
+  app.get('/api/integrations/streamdeck-plugin', (req, res) => {
+    const file = 'nebroadcaststudio.streamDeckPlugin';
+    const p = path.join(__dirname, 'streamdeck-plugin', 'dist', file);
+    fs.readFile(p, (err, buf) => {
+      if (err) { res.status(404).json({ error: 'Stream Deck plugin package not found in this build.' }); return; }
+      res.setHeader('Content-Type', 'application/octet-stream');
+      res.setHeader('Content-Disposition', `attachment; filename="${file}"`);
+      res.send(buf);
+    });
   });
 
   // ── Pulse multiview ───────────────────────────────────────────────────────
@@ -19883,6 +20399,21 @@ function startHttpServer(baseDir) {
 
   httpServer = app.listen(HTTP_PORT, '127.0.0.1', () => {
     console.log(`[HTTP] Overlay at http://localhost:${HTTP_PORT}`);
+  });
+  // Without this, a bind failure (almost always EADDRINUSE — some other program already has the
+  // port) is an unhandled 'error' event: it lands in the process-level uncaughtException handler
+  // (writes to crash.log) and the app just keeps running with no working local server — login,
+  // overlays and every WS-dependent feature hang forever with zero feedback to the user. Fail
+  // loud and quit instead of leaving a silently-broken app open.
+  httpServer.on('error', (err) => {
+    console.error('[HTTP] Server error:', err);
+    if (err && err.code === 'EADDRINUSE') {
+      dialog.showErrorBox(
+        'NE Broadcast Suite — Port already in use',
+        `Port ${HTTP_PORT} is already being used by another program on this PC, so the app can't start its local server — this is what login and every overlay depend on.\n\nClose whatever else is using port ${HTTP_PORT} (check Task Manager, or run "netstat -ano | findstr :${HTTP_PORT}" in a command prompt) and relaunch NE Broadcast Suite.`
+      );
+      _electronApp.quit();
+    }
   });
   httpServer.keepAliveTimeout = 2000;
   httpServer.headersTimeout = 3000;

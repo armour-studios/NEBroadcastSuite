@@ -1,0 +1,107 @@
+import { EventEmitter } from "node:events";
+import WebSocket from "ws";
+import streamDeck from "@elgato/streamdeck";
+
+const logger = streamDeck.logger.createScope("suite");
+
+/** Loose view of the suite's full_state payload — we only read a handful of fields. */
+export type SuiteState = Record<string, any>;
+
+/**
+ * The single WebSocket to the NE Broadcast Suite control bridge (ws://127.0.0.1:3001).
+ * Every action fires through send() and re-renders off the merged state cache; the
+ * server pushes a full snapshot on connect, then light live-tier frames on change.
+ */
+class SuiteConnection extends EventEmitter {
+  #ws: WebSocket | null = null;
+  #state: SuiteState = {};
+  #connected = false;
+  #attempt = 0;
+  #timer: NodeJS.Timeout | null = null;
+  #renderTimer: NodeJS.Timeout | null = null;
+  readonly url = "ws://127.0.0.1:3001";
+
+  get connected(): boolean { return this.#connected; }
+  get state(): SuiteState { return this.#state; }
+
+  start(): void { this.#open(); }
+
+  /** Reset backoff and retry now — wired to applicationDidLaunch / systemDidWakeUp. */
+  kick(): void {
+    this.#attempt = 0;
+    if (!this.#connected) {
+      if (this.#timer) { clearTimeout(this.#timer); this.#timer = null; }
+      this.#reconnectSoon(250);
+    }
+  }
+
+  send(type: string, data: Record<string, unknown> = {}): boolean {
+    if (!this.#connected || !this.#ws) return false;
+    try {
+      this.#ws.send(JSON.stringify({ type, data }));
+      return true;
+    } catch (e) {
+      logger.warn(`send ${type} failed: ${(e as Error).message}`);
+      return false;
+    }
+  }
+
+  #open(): void {
+    if (this.#ws) { try { this.#ws.terminate(); } catch { /* already dead */ } }
+    const ws = new WebSocket(this.url);
+    this.#ws = ws;
+
+    ws.on("open", () => {
+      if (this.#ws !== ws) return;
+      this.#connected = true;
+      this.#attempt = 0;
+      logger.info(`connected to ${this.url}`);
+      // Identify ourselves — register uses TOP-LEVEL fields (not the {type,data}
+      // envelope); the suite's Integrations page lights its Stream Deck chip off this.
+      try { ws.send(JSON.stringify({ type: "register", role: "control", client: "streamdeck" })); } catch { /* next state push covers it */ }
+      this.#emitChange();
+    });
+
+    ws.on("message", (buf) => {
+      if (this.#ws !== ws) return;
+      let msg: any;
+      try { msg = JSON.parse(buf.toString()); } catch { return; }
+      if (!msg || typeof msg !== "object" || !msg.data) return;
+      // full_state = snapshot or light live tier; state_update = lean game tick.
+      // Both merge shallowly — light frames omit library keys, the cache keeps them.
+      if (msg.type === "full_state" || msg.type === "state_update") {
+        Object.assign(this.#state, msg.data);
+        this.#emitChange();
+      }
+    });
+
+    const drop = () => {
+      if (this.#ws !== ws) return;
+      const was = this.#connected;
+      this.#connected = false;
+      this.#ws = null;
+      if (was) { logger.info("disconnected"); this.#emitChange(); }
+      this.#reconnectSoon();
+    };
+    ws.on("close", drop);
+    ws.on("error", (e) => { logger.debug(`ws error: ${e.message}`); drop(); });
+  }
+
+  #reconnectSoon(ms?: number): void {
+    if (this.#timer) return;
+    const delay = ms ?? Math.min(5000, 1000 * 2 ** Math.min(this.#attempt++, 3));
+    this.#timer = setTimeout(() => { this.#timer = null; this.#open(); }, delay);
+  }
+
+  /** Debounce renders: full_state bursts coalesce at ~40ms server-side, and Stream Deck
+   *  caps key image updates at 10/sec — 150ms keeps every key comfortably under it. */
+  #emitChange(): void {
+    if (this.#renderTimer) return;
+    this.#renderTimer = setTimeout(() => {
+      this.#renderTimer = null;
+      this.emit("change");
+    }, 150);
+  }
+}
+
+export const suite = new SuiteConnection();

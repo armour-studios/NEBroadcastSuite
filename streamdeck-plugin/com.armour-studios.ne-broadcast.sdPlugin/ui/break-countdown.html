@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <script src="sdpi-components.js"></script>
+</head>
+<body>
+  <sdpi-item label="Duration">
+    <sdpi-textfield setting="seconds" placeholder="5:00 or 300 or 5m"></sdpi-textfield>
+  </sdpi-item>
+  <sdpi-item label="Title">
+    <sdpi-textfield setting="title" placeholder="STARTING SOON"></sdpi-textfield>
+  </sdpi-item>
+  <sdpi-item label="Cut to scene">
+    <sdpi-select setting="cutScene" datasource="getScenes" hot-reload placeholder="No scene change"></sdpi-select>
+  </sdpi-item>
+  <sdpi-item label="On hide">
+    <sdpi-checkbox setting="returnPrev" label="Return to the previous scene"></sdpi-checkbox>
+  </sdpi-item>
+</body>
+</html>

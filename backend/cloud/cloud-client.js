@@ -230,8 +230,43 @@ async function createTalentInvite({ room, role, roomTitle, name, password, teamL
   } catch (e) { throw _err(e); }
 }
 
+// ── Full station management (the in-app Stations manager) ─────────────────────
+// listStationsFull returns the org's stations with rooms→slots nested (GET /stations already
+// includes them), each room decorated with its public /station/<shareToken> join URL so the panel
+// can render + copy links without a per-room round-trip. The patch/delete/slot methods below wrap
+// the website's CRUD routes 1:1 — all Bearer-authed via resolveApiActor, gated by canManageBroadcastTooling.
+function _decorateStation(s) {
+  return {
+    ...s,
+    rooms: (s.rooms || []).map((r) => ({ ...r, url: r.shareToken ? publicUrl(`/station/${r.shareToken}`) : '' }))
+  };
+}
+async function listStationsFull(orgId) {
+  _require();
+  try {
+    const { data } = await _client().get(`/api/orgs/${encodeURIComponent(orgId)}/stations`);
+    return { stations: (data.stations || []).map(_decorateStation), seatCap: data.seatCap ?? null, activeCount: data.activeCount ?? null };
+  } catch (e) { throw _err(e); }
+}
+async function patchStation(orgId, stationId, patch) { _require(); try { const { data } = await _client().patch(`/api/orgs/${encodeURIComponent(orgId)}/stations/${encodeURIComponent(stationId)}`, patch || {}); return data.station || data; } catch (e) { throw _err(e); } }
+async function deleteStation(orgId, stationId) { _require(); try { await _client().delete(`/api/orgs/${encodeURIComponent(orgId)}/stations/${encodeURIComponent(stationId)}`); return true; } catch (e) { throw _err(e); } }
+async function patchRoom(orgId, stationId, roomId, patch) { _require(); try { const { data } = await _client().patch(`/api/orgs/${encodeURIComponent(orgId)}/stations/${encodeURIComponent(stationId)}/rooms/${encodeURIComponent(roomId)}`, patch || {}); return data.room || data; } catch (e) { throw _err(e); } }
+async function deleteRoom(orgId, stationId, roomId) { _require(); try { await _client().delete(`/api/orgs/${encodeURIComponent(orgId)}/stations/${encodeURIComponent(stationId)}/rooms/${encodeURIComponent(roomId)}`); return true; } catch (e) { throw _err(e); } }
+async function addRoomSlot(orgId, stationId, roomId) { _require(); try { const { data } = await _client().post(`/api/orgs/${encodeURIComponent(orgId)}/stations/${encodeURIComponent(stationId)}/rooms/${encodeURIComponent(roomId)}/slots`, {}); return data.slot || data; } catch (e) { throw _err(e); } }
+async function patchRoomSlot(orgId, stationId, roomId, slotId, patch) { _require(); try { const { data } = await _client().patch(`/api/orgs/${encodeURIComponent(orgId)}/stations/${encodeURIComponent(stationId)}/rooms/${encodeURIComponent(roomId)}/slots/${encodeURIComponent(slotId)}`, patch || {}); return data.slot || data; } catch (e) { throw _err(e); } }
+async function deleteRoomSlot(orgId, stationId, roomId, slotId) { _require(); try { await _client().delete(`/api/orgs/${encodeURIComponent(orgId)}/stations/${encodeURIComponent(stationId)}/rooms/${encodeURIComponent(roomId)}/slots/${encodeURIComponent(slotId)}`); return true; } catch (e) { throw _err(e); } }
+
+// ── Bug reports ────────────────────────────────────────────────────────────────
+// Files the in-app report on the producer's website account too (shows on /access/bugs
+// with staff status/notes) — the Discord/GitHub copies are sent separately by server.js.
+async function submitBugReport({ title, description, severity, area, appVersion } = {}) {
+  _require();
+  try { const { data } = await _client().post('/api/studio/bugs', { title, description, severity, area, appVersion }); return data.report || data; } catch (e) { throw _err(e); }
+}
+
 module.exports = {
   init, configured, authed, getSession, clearSession,
+  submitBugReport,
   loginWithDiscord,
   loginWithEmail, acceptContract, refreshSession, linkTwitch, refreshTwitch, me,
   listProfiles, getProfile, saveProfile, deleteProfile, shareProfile,
@@ -245,5 +280,6 @@ module.exports = {
   pushShowState,
   pushLeague, listCloudLeagues, pullLeague,
   publicUrl,
-  createStation, ensureStation, createStationRoom, createCameraSession, createMatch, createTalentInvite
+  createStation, ensureStation, createStationRoom, createCameraSession, createMatch, createTalentInvite,
+  listStationsFull, patchStation, deleteStation, patchRoom, deleteRoom, addRoomSlot, patchRoomSlot, deleteRoomSlot
 };

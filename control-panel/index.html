@@ -922,6 +922,7 @@
           <option value="pts">Points</option>
           <option value="place">Placement (#)</option>
           <option value="record-pts">Record + points</option>
+          <option value="games">Games W-L</option>
         </select>
         <p class="msp-hint" id="tr-manual-hint" style="display:none;">Enter each team's W-L in the team boxes below.</p>
         <p class="msp-hint" id="tr-stats-hint" style="display:none;">Edit record in team boxes — updates the league live.</p>
@@ -2526,7 +2527,7 @@
       <div class="td-shift-chips" id="td-shift-chips"></div>
       <div class="td-shift-actions">
         <button type="button" class="btn btn-ghost btn-sm" id="td-shift-save" title="Save the current allocation (slots, roles, on-shift marks, display options) as a named preset">Save preset</button>
-        <button type="button" class="btn btn-ghost btn-sm" id="td-shift-clear" style="color:var(--danger-2);" title="Reset every Show Deck field — slots, roles, shift, credits and support crew. Nobody is deleted from Crew; presets are untouched">Clear</button>
+        <button type="button" class="btn btn-ghost btn-sm" id="td-shift-clear" style="color:var(--danger-2);" title="Reset every Show Deck field — slots, roles, credits and off-air event staff. Nobody is deleted from Crew; presets are untouched">Clear</button>
       </div>
     </div>
     <!-- Website station rooms — the deck IS the director surface: monitor & adjust the VDO room
@@ -2544,30 +2545,15 @@
       <span class="td-roster-lbl">Desk lineup</span>
       <div class="td-slots" id="td-slots"></div>
     </div>
-    <datalist id="td-crew-dl"></datalist>
     <div class="td-cols">
-    <div class="td-section td-col" title="Who's working right now — drives the desk and auto-credits them">
-      <span class="td-roster-lbl">Current shift</span>
-      <div style="display:flex; gap:6px; margin:2px 0 8px;">
-        <input type="text" id="td-onshift-search" class="input-text td-sel" list="td-crew-dl" placeholder="Search crew to start their shift…" autocomplete="off" style="flex:1; min-width:0;">
-        <button type="button" class="btn btn-ghost btn-sm" id="td-onshift-add" style="flex-shrink:0;">Start shift</button>
-      </div>
-      <div class="td-roster-chips" id="td-roster-chips"></div>
-    </div>
-    <div class="td-section td-col" title="Casters &amp; crew from other shifts of this broadcast — credited alongside the current shift; click × to remove from the credits (their Crew profile is never deleted)">
-      <span class="td-roster-lbl">Earlier shifts &amp; credits</span>
-      <div style="display:flex; gap:6px; margin:2px 0 8px;">
-        <input type="text" id="td-worked-search" class="input-text td-sel" list="td-crew-dl" placeholder="Search crew to credit…" autocomplete="off" style="flex:1; min-width:0;">
-        <button type="button" class="btn btn-ghost btn-sm" id="td-worked-add" style="flex-shrink:0;">Add credit</button>
-      </div>
-      <div class="td-roster-chips" id="td-worked-chips"></div>
-    </div>
-    <div class="td-section td-col" title="Producers, tournament ops, flex &amp; socials — no camera, but credited">
-      <span class="td-roster-lbl">Support crew</span>
+    <div class="td-section td-col" title="Anyone credited who isn't in tonight's desk lineup — producers, tournament ops, flex, socials, or a caster who isn't on the live desk right now. Feeds the credits screen.">
+      <span class="td-roster-lbl">Off-Air Event Staff</span>
+      <p class="field-hint" style="margin:2px 0 6px;">Everyone added here shows up on the end-of-stream credits screen, same as the desk lineup. Use this for anyone working the event who isn't currently on camera — including a caster who isn't on the live desk.</p>
       <div style="display:flex; flex-wrap:wrap; gap:6px; margin:2px 0 8px;">
         <input type="text" id="td-support-search" class="input-text td-sel" list="td-support-dl" placeholder="Search existing crew…" autocomplete="off" style="flex:1 1 100%; min-width:0;">
         <datalist id="td-support-dl"></datalist>
-        <select id="td-support-role-sel" class="input-select" title="Which support / tournament-ops role to file them under" style="flex:1; min-width:0; font-size:12px;">
+        <select id="td-support-role-sel" class="input-select" title="Which role to file them under" style="flex:1; min-width:0; font-size:12px;">
+          <option value="caster">Caster</option>
           <option value="producer">Producer</option>
           <option value="admin">Tournament Admin</option>
           <option value="coordinator">Coordinator</option>
@@ -3316,6 +3302,14 @@
 
       <!-- Social card preset settings panel -->
       <div id="soc-preset-panel" class="soc-preset-panel" style="display:none;">
+        <div class="soc-preset-row">
+          <span class="field-label" style="min-width:120px;">Card Style</span>
+          <select id="soc-card-style" class="input-text" style="max-width:190px;flex:0 0 auto;">
+            <option value="broadcast">Broadcast (team colors)</option>
+            <option value="poster">Event Poster (brand gradient)</option>
+          </select>
+          <span class="soc-preset-hint">Poster styles every card from the Brand Kit color &amp; accent</span>
+        </div>
         <div class="soc-preset-row">
           <span class="field-label" style="min-width:120px;">Background Style</span>
           <select id="soc-bg-style" class="input-text" style="max-width:190px;flex:0 0 auto;">
@@ -4844,25 +4838,19 @@
           </div>
         </nav>
 
-        <!-- Fixed preview column — one shared iframe, swapped by src as the sidenav selection
-             changes. Position/size never changes regardless of the settings column's content. -->
-        <div class="gfx-fixed-preview">
-          <div class="live-pv"><iframe id="gfx-fixed-preview-iframe" src="http://localhost:3000/countdown.html?preview=1" title="Scene preview"></iframe></div>
-          <!-- Universal Full Board trigger — lives in the otherwise-dead space under the preview.
-               Opens the scene's full editor DOCKED below the hub (no more floating modal);
-               hidden by show()/refresh for scenes without a board. -->
-          <div class="gfx-preview-foot">
-            <button type="button" class="btn btn-ghost btn-sm gfx-fullboard-btn" id="gfx-popout-summary-open" title="Expand this scene's full editor across the whole panel below">Open Full Board</button>
-          </div>
-        </div>
-
         <div class="gfx-settings-col" id="gfx-settings-col">
           <!-- Uniform scene header — identical anatomy on every scene (name · on-air state ·
-               overlay link) so navigating scene to scene always lands on the same frame. -->
+               overlay link · full-board/preview actions) so navigating scene to scene always
+               lands on the same frame. The inline preview iframe that used to sit beside the
+               scene list is gone — GFX mode on the floating OBS Program panel covers that job
+               now (see "Pop out preview" below and social.js's _initObsPreview). -->
           <div id="gfx-scene-head" class="gfx-scene-head">
             <span id="gfx-scene-head-name" class="gfx-scene-head-name">Scene</span>
             <span id="gfx-scene-head-live" class="gfx-live-badge gfx-live-badge--sm is-off">OFF AIR</span>
             <a id="gfx-scene-head-link" href="#" target="_blank" class="overlay-link gfx-scene-head-link">overlay ↗</a>
+            <!-- Universal Full Board trigger; hidden by show()/refresh for scenes without a board. -->
+            <button type="button" class="btn btn-ghost btn-sm gfx-fullboard-btn" id="gfx-popout-summary-open" title="Expand this scene's full editor across the whole panel below">Open Full Board</button>
+            <button type="button" class="btn btn-ghost btn-sm" id="gfx-preview-popout" title="Live-preview this scene in a movable, resizable window">⧉ Preview</button>
           </div>
 
           <!-- Map Pool / Series mode toggle — they're the same underlying pick/ban data
@@ -5288,7 +5276,7 @@
             <button id="btn-queue-credits" style="display:none;"></button>
             <div class="gfx-scene-body">
               <p class="field-hint" style="margin:0;">Scrolling shoutout of follows, subs, cheers and raids from this stream — pulled automatically from your Twitch activity. The current caster lineup and crew are credited automatically.</p>
-              <!-- Extra talent credits moved to the Show Deck (Current shift / Earlier shifts & credits) -->
+              <!-- Extra talent credits are driven by the Show Deck's desk lineup + off-air event staff (auto-credited) -->
               <div class="field-row" style="margin-top:14px; padding-top:12px; border-top:1px solid var(--border);">
                 <label class="field-label">Pull an event's whole crew from Show Deck shifts</label>
                 <div style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
@@ -5394,7 +5382,7 @@
                 <span class="field-label" style="margin:0;">Caster Predictions</span>
                 <button class="btn btn-ghost btn-sm" id="btn-preshow-clear-picks" type="button" title="Clear both picks">Clear picks</button>
               </div>
-              <p class="field-hint" style="margin:0 0 8px;">Who each desk caster thinks wins this match — click again to clear. Shown as a small badge on their cam box.</p>
+              <p class="field-hint" style="margin:0 0 8px;">Who each desk caster thinks wins the whole tournament — search any team from your library, not just today's two. Shown as a small badge on their cam box.</p>
               <div id="preshow-predictions" class="ps-predictions"></div>
 
               <p class="field-hint" style="margin:12px 0 0; padding-top:12px; border-top:1px solid var(--border);">Caster boxes show each caster's assigned cam — set it in <strong>Camera Feeds ▸ Hosts</strong> / the Director Control Center. Run the source with <code>?cams=off</code> to layer your own OBS "Caster" scenes behind the boxes.</p>
@@ -5929,17 +5917,37 @@
 
   <div id="prod-rundown-content" style="display:none">
   <section class="section" id="rundown-section">
-    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:8px;">
-      <div>
-        <h3 class="section-title" style="margin:0 0 2px;">Run of Show</h3>
-        <p class="section-desc" style="margin:0;max-width:720px;">Sequence your broadcast — hit <strong>Start</strong>, then <strong>Advance</strong> through each segment (timed segments auto-advance). Pop out this page to drive it from a second monitor.</p>
+    <div style="margin-bottom:12px;">
+      <h3 class="section-title" style="margin:0 0 2px;">Run of Show</h3>
+      <p class="section-desc" style="margin:0;max-width:720px;">Sequence your broadcast, then drive it live — <strong>Start</strong>, <strong>Advance</strong> or step <strong>Back</strong> through each phase (timed segments auto-advance). Pop out this page to run it from a second monitor.</p>
+    </div>
+
+    <!-- Live driver: what's on stream + the phase controller (back / current / advance / stop). -->
+    <div class="rd-driver" id="rd-driver">
+      <div class="rd-driver-os">
+        <span class="qk-os-tag">ON STREAM</span>
+        <span class="rd-driver-scene" id="rd-now">—</span>
+        <span class="rd-driver-gfx" id="rd-now-gfx" style="display:none;"></span>
       </div>
-      <div style="display:flex;gap:6px;flex-wrap:wrap;">
-        <button class="btn btn-primary btn-sm" id="rd-start">▶ Start</button>
-        <button class="btn btn-warning btn-sm" id="rd-next">Advance ▶▶</button>
-        <button class="btn btn-secondary btn-sm" id="rd-stop">Stop</button>
+      <div class="rd-driver-nav">
+        <button class="rd-driver-arrow" id="rd-driver-back" title="Back to the previous phase" disabled>
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+          <span>Back</span>
+        </button>
+        <div class="rd-driver-cur">
+          <div class="rd-driver-meta">
+            <span class="rd-driver-pos" id="rd-driver-pos"></span>
+            <span class="rd-driver-next" id="rd-driver-next"></span>
+          </div>
+          <span class="rd-driver-cur-lbl" id="rd-driver-cur">Not started</span>
+        </div>
+        <button class="rd-driver-go" id="rd-driver-go">Start</button>
+        <button class="rd-driver-stop" id="rd-driver-stop" style="display:none;" title="Stop the run of show">Stop</button>
       </div>
     </div>
+
+    <!-- Legacy control ids kept (hidden) so any old wiring / pop-out references stay harmless. -->
+    <span style="display:none;"><button id="rd-start"></button><button id="rd-next"></button><button id="rd-stop"></button></span>
     <!-- Rundown library: several named rundowns, one active; export bundles referenced flows -->
     <div id="rd-books" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:8px;">
       <select id="rd-picker" class="input-select" style="max-width:240px;" title="Active rundown"></select>
@@ -5979,13 +5987,15 @@
         <h3 class="section-title" style="margin:0 0 2px;">Flows</h3>
         <p class="section-desc" style="margin:0;max-width:720px;">Automations — <strong>when</strong> something happens, <strong>do</strong> a sequence of actions (cut scenes, trigger graphics, push playlists, post chat…). Fire them manually, on game events, countdowns, scene changes and more. Run of Show segments can trigger a Flow too.</p>
       </div>
-      <div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">
+      <div style="display:flex;align-items:center;gap:6px;flex-shrink:0;flex-wrap:wrap;">
+        <input type="text" id="flow-search" class="input-text" placeholder="Search flows…" style="width:150px;">
         <button class="btn btn-primary btn-sm" id="flow-new">+ New flow</button>
         <button class="btn btn-ghost btn-sm" id="flow-templates" title="Start from a template">Templates</button>
-        <label class="btn btn-ghost btn-sm" title="Import flow JSON" style="cursor:pointer;">
+        <label class="btn btn-ghost btn-sm" title="Import flow JSON (one flow, or an array to bulk-import)" style="cursor:pointer;">
           Import
           <input type="file" id="flow-import-input" accept=".json" style="display:none;">
         </label>
+        <button class="btn btn-ghost btn-sm" id="flow-export-all" title="Export every flow as one JSON file">Export all</button>
       </div>
     </div>
     <div id="flow-vars-panel" style="display:none;margin-bottom:12px;padding:8px 10px;background:rgba(52,211,153,.06);border:1px solid rgba(52,211,153,.2);border-radius:6px;">
@@ -5996,6 +6006,7 @@
       <div id="flow-vars-list" style="display:flex;flex-wrap:wrap;gap:5px;"></div>
     </div>
     <div id="flow-list" style="display:flex;flex-direction:column;gap:6px;"></div>
+    <div id="flow-search-empty" style="display:none;padding:20px 14px;text-align:center;font-size:12px;color:var(--muted);">No flows match your search.</div>
     <div id="flow-editor" style="display:none;margin-top:12px;"></div>
   </section>
   </div><!-- /prod-flows-content -->
@@ -6579,6 +6590,14 @@
           <div class="int-card-tag">Full OBS alternative — cuts, overlays, streaming and instant replay via the HTTP API.</div>
         </div>
         <span class="int-card-status" data-st="off">Not set up</span>
+      </div>
+      <div class="int-card" data-card="streamdeck" data-goto="streamdeck">
+        <div class="int-card-logo">SD</div>
+        <div class="int-card-body">
+          <div class="int-card-name">Elgato Stream Deck</div>
+          <div class="int-card-tag">Physical keys for scores, graphics, countdowns and your run of show — with live key faces.</div>
+        </div>
+        <span class="int-card-status" data-st="off">Not installed</span>
       </div>
       <div class="int-card" data-card="twitch" data-goto="twitch">
         <div class="int-card-logo has-img"><img src="../assets/platforms/twitch-icon.svg" alt=""></div>
@@ -7627,7 +7646,7 @@ PacketSendRate=10</pre>
           <div><label class="field-label" for="input-rl-ui-key">Key</label><input type="text" id="input-rl-ui-key" class="input-text" value="h" maxlength="8"></div>
           <div><label class="field-label" for="input-rl-ui-presses">Presses</label><input type="number" id="input-rl-ui-presses" class="input-text" value="2" min="1" max="4"></div>
           <div><label class="field-label" for="input-rl-ui-gap">Gap (ms)</label><input type="number" id="input-rl-ui-gap" class="input-text" value="250" min="50" max="2000" step="50"></div>
-          <div><label class="field-label" for="input-rl-ui-delay" title="How long after the kickoff before the hide key is pressed — lower = triggers earlier (min 0.5s)">Hide delay (s)</label><input type="number" id="input-rl-ui-delay" class="input-text" value="1.5" min="0.5" max="10" step="0.5"></div>
+          <div><label class="field-label" for="input-rl-ui-delay" title="How long after you join spectate before the hide key is pressed — lower = triggers earlier (min 0.5s)">Hide delay (s)</label><input type="number" id="input-rl-ui-delay" class="input-text" value="1.5" min="0.5" max="10" step="0.5"></div>
           <div><label class="field-label" for="input-rl-ui-hotkey">Global hotkey</label><input type="text" id="input-rl-ui-hotkey" class="input-text" value="F9" placeholder="F9"></div>
         </div>
         <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
@@ -7660,6 +7679,31 @@ PacketSendRate=10</pre>
       <!-- Team Record moved to the game-agnostic Match — Teams panel (gear → Team Record), since it applies to every game. -->
     </section>
   </div>
+  </div>
+
+  <!-- ELGATO STREAM DECK -->
+  <div id="integration-streamdeck" class="integration-panel" style="display:none;">
+    <section class="section">
+      <h3 class="section-title">Elgato Stream Deck</h3>
+      <p class="field-hint" style="max-width:720px;">
+        The official NE Broadcast Suite plugin turns a Stream Deck into a broadcast control surface:
+        live score keys in team colors, graphics that light up while on air, a ticking countdown clock,
+        run-of-show navigation, audio mutes, replays and more. Keys connect to this app automatically —
+        no setup beyond installing the plugin.
+      </p>
+      <div style="display:flex; align-items:center; gap:12px; margin:14px 0;">
+        <!-- target=_blank routes through main.js setWindowOpenHandler -> system browser,
+             which downloads the file with normal browser UX (panel window never navigates). -->
+        <a class="btn btn-primary" href="http://localhost:3000/api/integrations/streamdeck-plugin" target="_blank" rel="noopener">Download plugin</a>
+        <span id="streamdeck-conn-status" class="field-hint" style="margin:0;">Plugin not connected.</span>
+      </div>
+      <div class="field-hint" style="max-width:720px;">
+        <strong>Install:</strong> 1) Install the Elgato Stream Deck app (6.9 or newer) from elgato.com.
+        2) Download the plugin above and double-click the file — Stream Deck installs it.
+        3) Drag actions from the "NE Broadcast Suite" category onto your keys. Dropdowns fill with
+        your real scenes, flows and teams while this app is running.
+      </div>
+    </section>
   </div>
 
   <!-- OBS / SWITCHER -->
@@ -8881,16 +8925,29 @@ PacketSendRate=10</pre>
       <!-- ── QUICK: producer cockpit — now/next, put-on-air chips (with gear), program cuts ── -->
       <div class="qrail-panel active" data-qpanel="quick">
 
-        <!-- Now / Next -->
-        <div class="qk-nownext" id="qk-nownext">
-          <div class="qk-nn-row">
-            <span class="qk-nn-tag qk-nn-live">NOW</span>
-            <span class="qk-nn-val" id="qk-now">—</span>
+        <!-- Producer cockpit: ON STREAM (what's live) + a Run-of-Show phase controller (back / current / next). -->
+        <div class="qk-cockpit" id="qk-cockpit">
+          <!-- ON STREAM — the live program scene + any punched-up graphic -->
+          <div class="qk-os-row">
+            <span class="qk-os-tag">ON STREAM</span>
+            <span class="qk-os-scene" id="qk-now">—</span>
+            <span class="qk-os-gfx" id="qk-now-gfx" style="display:none;"></span>
           </div>
-          <div class="qk-nn-row">
-            <span class="qk-nn-tag">NEXT</span>
-            <span class="qk-nn-val qk-nn-next" id="qk-next">—</span>
-            <button class="qk-nn-put" id="qk-put-upnext" title="Put the Up Next screen on air (set title + timer)">Put ▸</button>
+          <!-- RUN OF SHOW — what phase we're on, with back + advance -->
+          <div class="qk-ros-head">
+            <span class="qk-ros-title">Run of Show</span>
+            <span class="qk-ros-pos" id="qk-ros-pos"></span>
+            <a href="#" class="qk-ros-edit" id="qk-ros-edit" title="Open the Run of Show to edit tonight's rundown">edit</a>
+          </div>
+          <div class="qk-ros-nav">
+            <button class="qk-ros-arrow" id="qk-ros-back" title="Back to the previous phase" disabled>
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+            </button>
+            <div class="qk-ros-cur">
+              <span class="qk-ros-cur-lbl" id="qk-ros-cur-lbl">Not started</span>
+              <span class="qk-ros-nexthint" id="qk-ros-nexthint"></span>
+            </div>
+            <button class="qk-ros-go" id="qk-ros-fwd" title="Advance the run of show">Start</button>
           </div>
         </div>
 
@@ -8898,13 +8955,24 @@ PacketSendRate=10</pre>
              gear opens its options (title/timer/side). "reorder" drags chips into any order. -->
         <div class="qrail-group qk-grp">
           <div class="qrail-label">Put On Air <span class="qrail-sub"><a href="#" id="qk-put-reorder" title="Drag chips into a custom order">reorder</a> &middot; <a href="#" id="qk-clear-all" title="Clear every on-air graphic">clear all</a></span></div>
-          <!-- Team target bar — which side the team graphics (Winner, Line-up) fill in. Sets both
-               side pickers at once; a colored dot on each team chip mirrors the choice. -->
+          <!-- Team target bar — the team that Winner / Line-up (and other team graphics) fill in for.
+               Click a team to select it; the team pills below then fire for it. The per-pill gear
+               still overrides one graphic. Sets both side pickers (ck-winner-side/ck-intro-side) at once. -->
           <div class="qk-teamtarget" id="qk-teamtarget">
-            <span class="qk-tt-lbl" title="Which team the team-specific graphics (Winner, Line-up) fill in">Team graphics fill</span>
+            <span class="qk-tt-lbl" title="Winner, Line-up and other team graphics fill in for the selected team">Team graphics fill for</span>
             <div class="qk-tt-seg">
-              <button type="button" class="qk-tt-btn" data-ttside="blue"><span class="qk-tt-dot"></span><span class="qk-tt-name">Blue</span></button>
-              <button type="button" class="qk-tt-btn" data-ttside="orange"><span class="qk-tt-dot"></span><span class="qk-tt-name">Orange</span></button>
+              <button type="button" class="qk-tt-btn" data-ttside="blue">
+                <img class="qk-tt-logo" id="qk-tt-logo-blue" alt="" style="display:none;">
+                <span class="qk-tt-dot"></span>
+                <span class="qk-tt-name">Blue</span>
+                <svg class="qk-tt-check" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+              </button>
+              <button type="button" class="qk-tt-btn" data-ttside="orange">
+                <img class="qk-tt-logo" id="qk-tt-logo-orange" alt="" style="display:none;">
+                <span class="qk-tt-dot"></span>
+                <span class="qk-tt-name">Orange</span>
+                <svg class="qk-tt-check" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+              </button>
             </div>
           </div>
           <div class="qk-put" id="qk-put"></div>
@@ -8921,13 +8989,14 @@ PacketSendRate=10</pre>
       <div class="qrail-panel" data-qpanel="ros">
         <div class="qrail-group">
           <div class="qrail-label">Run of Show <span class="qrail-sub"><a href="#" class="js-goto-ros" style="font-weight:600;color:var(--cp-accent);text-decoration:none;">edit ↗</a></span></div>
-          <div id="qros-status" style="font-size:12px;color:var(--muted);margin-bottom:8px;"></div>
-          <div style="display:flex;gap:6px;margin-bottom:10px;">
-            <button class="btn btn-primary btn-sm" id="qros-start" style="flex:1;">▶ Start</button>
-            <button class="btn btn-warning btn-sm" id="qros-next" style="flex:1;">Advance ▶▶</button>
+          <div id="qros-status" class="qros-status"></div>
+          <div class="qros-btns">
+            <button class="btn btn-primary btn-sm" id="qros-start" style="flex:1;">&#9654; Start</button>
+            <button class="btn btn-warning btn-sm" id="qros-next" style="flex:1;">Advance &#9658;&#9658;</button>
+            <button class="btn btn-danger btn-sm" id="qros-cancel" style="display:none;" title="Cancel auto-advance — stay on current segment">Cancel</button>
             <button class="btn btn-secondary btn-sm" id="qros-stop">Stop</button>
           </div>
-          <div id="qros-list" style="display:flex;flex-direction:column;gap:3px;"></div>
+          <div id="qros-list" class="qros-list"></div>
         </div>
       </div>
 
@@ -9935,14 +10004,21 @@ PacketSendRate=10</pre>
     <span class="obs-prev-scene" id="obs-prev-scene"></span>
     <div class="obs-prev-modetabs">
       <button class="obs-prev-modetab active" id="obs-prev-mode-cam" title="Live via the OBS Virtual Camera (auto-started)">CAM</button>
+      <button class="obs-prev-modetab" id="obs-prev-mode-gfx" title="The scene you're currently editing in Graphics">GFX</button>
     </div>
     <button class="obs-prev-btn obs-prev-fps-btn" id="obs-prev-fps" title="Click to change capture rate" style="display:none">10 fps</button>
     <button class="obs-prev-btn" id="obs-prev-pause" title="Pause/resume" style="display:none">&#9646;&#9646;</button>
+    <button class="obs-prev-btn obs-prev-min-btn" id="obs-prev-min" title="Minimize (or double-click header)">&#9660;</button>
     <button class="obs-prev-btn" id="obs-prev-close" title="Close">&#10005;</button>
   </div>
   <div class="obs-prev-body">
     <img id="obs-prev-img" class="obs-prev-img" src="" alt="" style="display:none">
     <video id="obs-prev-video" class="obs-prev-img" autoplay muted playsinline></video>
+    <!-- GFX mode: the same "shared iframe scaled by fitScenePreviews()" pattern the inline Graphics
+         hub preview uses — .live-pv is the required wrapper class for that scaler to pick it up. -->
+    <div class="obs-prev-gfx" id="obs-prev-gfx" style="display:none;">
+      <div class="live-pv"><iframe id="obs-prev-gfx-iframe" title="Graphics scene preview"></iframe></div>
+    </div>
     <div class="obs-prev-msg" id="obs-prev-msg">Starting Virtual Camera...</div>
   </div>
   <!-- Drag any of these to resize — width is the only dimension ever set directly; height always

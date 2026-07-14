@@ -1,4 +1,4 @@
-const { OBSWebSocket } = require('obs-websocket-js');
+const { OBSWebSocket, EventSubscription } = require('obs-websocket-js');
 
 /**
  * Thin wrapper around obs-websocket-js (v5 / OBS 28+ WebSocket 5 protocol).
@@ -17,7 +17,9 @@ function createObsClient({
   onReplayBufferSaved,
   onReplayBufferStateChanged,
   onInputMuteChanged,
+  onInputVolumeChanged,
   onSourceVisibilityChanged,
+  onVolumeMeters,
 } = {}) {
   const obs = new OBSWebSocket();
 
@@ -63,6 +65,18 @@ function createObsClient({
   // Audio input mute state changed — covers any input in the mixer.
   obs.on('InputMuteStateChanged', (d) => {
     if (onInputMuteChanged) onInputMuteChanged({ inputName: (d && d.inputName) || '', muted: !!(d && d.inputMuted) });
+  });
+
+  // Audio input volume changed (someone rode a fader in OBS, or we set it) — keep the pills in sync.
+  obs.on('InputVolumeChanged', (d) => {
+    if (onInputVolumeChanged) onInputVolumeChanged({ inputName: (d && d.inputName) || '', volumeDb: (d && typeof d.inputVolumeDb === 'number') ? d.inputVolumeDb : 0 });
+  });
+
+  // Real-time audio meter levels — a high-volume event category (~10/sec per active input), only
+  // delivered when explicitly OR'd into eventSubscriptions on connect() below. Feeds the
+  // audio_level_above/audio_level_below flow conditions.
+  obs.on('InputVolumeMeters', (d) => {
+    if (onVolumeMeters) onVolumeMeters((d && d.inputs) || []);
   });
 
   // Scene item (source) visibility toggled — resolve sceneItemId → sourceName via WS call.
@@ -147,7 +161,11 @@ function createObsClient({
 
     try {
       const auth = cfg.password ? cfg.password : undefined;
-      await obs.connect(normalizeUrl(cfg.url), auth);
+      // EventSubscription.All doesn't include the high-volume InputVolumeMeters category —
+      // OR it in explicitly or audio-level flow conditions silently never see any data.
+      await obs.connect(normalizeUrl(cfg.url), auth, {
+        eventSubscriptions: EventSubscription.All | EventSubscription.InputVolumeMeters
+      });
       connecting = false;
       connected = true;
       lastError = null;

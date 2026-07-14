@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <script src="sdpi-components.js"></script>
+</head>
+<body>
+  <sdpi-item label="Command">
+    <sdpi-select setting="command" default="reset_series">
+      <option value="reset_series">Reset series to 0-0</option>
+      <option value="swap_teams">Swap teams</option>
+      <option value="game_plus">Game number +1</option>
+      <option value="game_minus">Game number -1</option>
+      <option value="clear_scoreboard">Clear scoreboard</option>
+    </sdpi-select>
+  </sdpi-item>
+  <sdpi-item label="Safety">
+    <sdpi-checkbox setting="hold" default="true" label="Hold key to fire reset/clear (prevents stray taps)"></sdpi-checkbox>
+  </sdpi-item>
+</body>
+</html>

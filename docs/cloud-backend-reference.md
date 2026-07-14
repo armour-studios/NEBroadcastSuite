@@ -1,5 +1,7 @@
 # Cloud Backend — Reference Implementation (Postgres)
 
+> **⚠️ SUPERSEDED (2026-07-11):** this file is an early illustrative sketch (standalone Express + `jsonwebtoken` + a dedicated `workspaces`/`workspace_members` schema) written before it was decided the backend would live directly on the Nameless website's own Next.js/Prisma stack. **It does not reflect what's actually deployed.** The real implementation uses Prisma against the site's existing `User`/`Organization`/`BroadcastSeat` tables, stateless HMAC session tokens (not `jsonwebtoken`), and no separate `workspaces` table — "workspace" is the real `Organization` model. **See [`cloud-backend-contract.md`](./cloud-backend-contract.md) for what's actually live**, especially its §3 (auth) and §5a (org broadcast-seat licensing). This file is kept for historical context only.
+
 Companion to [`cloud-backend-contract.md`](./cloud-backend-contract.md). This is **backend** code for the Nameless API that lives at `BROADCAST_REMOTE_URL` — it is **not** part of the desktop app. The desktop app only makes HTTPS calls to these routes; **the routes are what read/write your Postgres database.** The app never connects to Postgres directly.
 
 > Data path: **NE Broadcast Suite (desktop)** → HTTPS `BROADCAST_REMOTE_URL/api/...` → **this Express/Node service** → **Postgres**.

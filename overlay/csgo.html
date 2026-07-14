@@ -83,6 +83,11 @@
   .cs-series .sdot { width: 9px; height: 9px; border-radius: 50%; background: rgba(255,255,255,0.16); transition: background 0.2s; }
   .cs-series.ct .sdot.won { background: var(--ct); box-shadow: 0 0 6px rgba(106,168,230,0.7); }
   .cs-series.t  .sdot.won { background: var(--t);  box-shadow: 0 0 6px rgba(224,179,90,0.7); }
+  /* Season / league record beside the series pips (toggle in control panel) */
+  .cs-record { font-weight: 600; font-size: 11px; letter-spacing: .04em; line-height: 1;
+    text-transform: uppercase; color: rgba(255,255,255,.85); white-space: nowrap;
+    text-shadow: 0 1px 3px rgba(0,0,0,.7); }
+  .cs-record.hidden { display: none; }
   .team .sc { font-weight: 700; font-size: 40px; font-variant-numeric: tabular-nums; min-width: 46px; text-align: center; }
   .team.t-ct .sc { color: var(--ct); text-shadow: 0 0 20px rgba(106,168,230,0.45); }
   .team.t-t .sc  { color: var(--t);  text-shadow: 0 0 20px rgba(224,179,90,0.45); }
@@ -670,6 +675,7 @@
         <div class="team-mid">
           <span class="nm" id="ct-name">TEAM A</span>
           <div class="cs-series ct" id="series-ct"></div>
+          <span id="ct-record" class="cs-record hidden"></span>
         </div>
         <span class="sc" id="ct-score">0</span>
         <div class="fuse" id="fuse-ct"></div>
@@ -702,6 +708,7 @@
         <div class="team-mid">
           <span class="nm" id="t-name">TEAM B</span>
           <div class="cs-series t" id="series-t"></div>
+          <span id="t-record" class="cs-record hidden"></span>
         </div>
         <img id="t-logo" class="tlogo" alt="">
         <div class="fuse" id="fuse-t"></div>
@@ -995,6 +1002,19 @@ function mapLabel(n){
 }
 
 let appTeams = { blue: { name: 'TEAM A', logo: null }, orange: { name: 'TEAM B', logo: null } };
+let appTeamRecords = { enabled: false, blue: '', orange: '' };
+
+// Season / league record line beside the series pips. Server resolves the string per the
+// producer-chosen metric (season W-L / week / points / placement); empty = hide.
+function renderTeamRecords(tr){
+  const on = !!(tr && tr.enabled);
+  [['ct-record', tr && tr.blue], ['t-record', tr && tr.orange]].forEach(([id, txt]) => {
+    const e = document.getElementById(id); if (!e) return;
+    const show = on && txt;
+    e.textContent = show ? txt : '';
+    e.classList.toggle('hidden', !show);
+  });
+}
 const CS_LOGO_FALLBACK = '/assets/games/cs2.svg';   // shown when a team has no logo set
 let eventName = '';
 let bestOf = 5;   // series format (Bo-N), set from the control panel via full_state
@@ -1956,6 +1976,8 @@ async function connect(){
       const tC  = (teams.orange && teams.orange.color) || '#e0b35a';
       document.documentElement.style.setProperty('--ct', ctC);
       document.documentElement.style.setProperty('--t', tC);
+      appTeamRecords = d.teamRecords || { enabled: false, blue: '', orange: '' };
+      renderTeamRecords(appTeamRecords);
       brand = d.brand || null;   // null when no client kit is active → rail hides
       applyBrand();
       renderBanner(d.banner);    // bottom-right sponsor banner (producer-controlled)

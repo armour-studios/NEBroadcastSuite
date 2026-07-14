@@ -13,14 +13,14 @@ const DEFAULTS = {
   gapMs: 250,
   focusWindow: true,
   focusDelayMs: 500,
-  matchDelayMs: 1500,   // delay after the kickoff before the single hide press (tunable in the UI)
+  matchDelayMs: 1500,   // delay after joining spectate before the single hide press (tunable in the UI)
   hotkey: 'F9'
 };
 
-// Auto-hide state, reset each kickoff (resetAutoTracking). The key is a TOGGLE, so we press it AT
-// MOST ONCE per kickoff — no retries: each blind press risks flipping the UI the wrong way, and if
-// one press doesn't land the producer can hide it by hand. _done = we've pressed (or a manual hide
-// landed) this kickoff; _pending = a press is scheduled/in-flight.
+// Auto-hide state, reset when the observer joins spectate on a fresh lobby (resetAutoTracking).
+// The key is a TOGGLE, so we press it AT MOST ONCE per spectate-join — no retries: each blind press
+// risks flipping the UI the wrong way, and if one press doesn't land the producer can hide it by
+// hand. _done = we've pressed (or a manual hide landed) this game; _pending = scheduled/in-flight.
 let _done = false;
 let _pending = false;
 
@@ -121,27 +121,61 @@ function runHideNativeUi(cfg) {
   });
 }
 
-// Called once at kickoff. Presses the hide key a SINGLE time (after matchDelayMs) and then never
-// again this kickoff — success or failure. resetAutoTracking() is called at each kickoff so every
-// game re-hides (RL re-shows its UI when gameplay restarts).
+// Called once when the observer joins spectate (players appear in the lobby). The key is a TOGGLE,
+// so a KEYSTROKE is sent at most once per game — but a failed attempt (RL not found / couldn't be
+// brought to the foreground, e.g. the producer is tabbed into the control panel or OBS at join)
+// sends NO keystroke, so retrying it is safe. Keep retrying every RETRY_MS until the press actually
+// lands, the producer hides manually (markHidden), or a new game resets tracking (_gen kills stale
+// retry loops after resetAutoTracking).
+const RETRY_MS = 3000;
+const MAX_ATTEMPTS = 60;   // ≈3 minutes, then give up — the manual button / hotkey remains
+let _gen = 0;
+
 function scheduleAutoHide(gameNumber, cfg, onResult) {
   const merged = mergeConfig(cfg);
-  if (!merged.enabled || !merged.autoOnMatch) return false;
-  if (_done || _pending) return false;
+  if (!merged.enabled || !merged.autoOnMatch) {
+    console.log('[RL UI] Auto-hide skipped — ' + (!merged.enabled ? 'hide is disabled' : '"Auto on new game" is off') + ' in Settings.');
+    return false;
+  }
+  if (_done || _pending) {
+    console.log('[RL UI] Auto-hide skipped — already ' + (_pending ? 'scheduled' : 'pressed') + ' this game.');
+    return false;
+  }
 
   _pending = true;
+  const myGen = _gen;
   const delay = Math.max(500, Number(merged.matchDelayMs) || 2800);
-  setTimeout(() => {
-    // The key is a TOGGLE. If the UI is already believed hidden by the time this fires — e.g. the
-    // producer hit the manual hide during the delay window (markHidden) — pressing it again would
-    // toggle the UI BACK ON. So bail: never press when we think it's already gone.
+  let attempts = 0;
+  console.log('[RL UI] Auto-hide scheduled — pressing "' + merged.key + '" x' + merged.presses + ' in ' + delay + 'ms.');
+  const attempt = () => {
+    // Never press when the UI is already believed hidden (manual hide landed → markHidden), and
+    // die silently if a new game reset tracking while we were waiting.
+    if (myGen !== _gen) return;
     if (_done) { _pending = false; return; }
+    attempts++;
     runHideNativeUi(merged).then((result) => {
-      _pending = false;
-      _done = true;   // one shot per kickoff — whether it landed or not, don't press the toggle again
-      if (typeof onResult === 'function') onResult(result);
+      if (myGen !== _gen) return;
+      if (_done) { _pending = false; return; }
+      if (result.ok) {
+        _pending = false;
+        _done = true;   // keystroke went out — the toggle must not fire again this game
+        console.log('[RL UI] Auto-hide press sent (attempt ' + attempts + ').');
+        if (typeof onResult === 'function') onResult(result);
+        return;
+      }
+      // No keystroke was sent (RL missing / not focusable) — safe to try again.
+      if (attempts < MAX_ATTEMPTS) {
+        console.log('[RL UI] Auto-hide attempt ' + attempts + ' failed (' + (result.reason || 'unknown') + ') — retrying in ' + (RETRY_MS / 1000) + 's.');
+        setTimeout(attempt, RETRY_MS);
+      } else {
+        _pending = false;
+        _done = true;
+        console.log('[RL UI] Auto-hide gave up after ' + attempts + ' attempts (' + (result.reason || 'unknown') + ').');
+        if (typeof onResult === 'function') onResult(result);
+      }
     });
-  }, delay);
+  };
+  setTimeout(attempt, delay);
   return true;
 }
 
@@ -155,6 +189,7 @@ function markHidden() {
 function resetAutoTracking() {
   _done = false;
   _pending = false;
+  _gen++;   // invalidate any in-flight retry loop from the previous game
 }
 
 module.exports = {

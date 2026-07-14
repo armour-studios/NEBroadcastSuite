@@ -387,9 +387,9 @@ img{display:block;}
 /* name strip — solid team colour, name (left) + score; right pad clears the circle */
 .card-head{position:relative;display:flex;align-items:center;gap:12px;height:40px;padding:0 74px 0 32px;
   background:var(--spec-color);box-shadow:inset 0 1px 0 rgba(255,255,255,.16),inset 0 -2px 7px rgba(0,0,0,.28);}
-.cname{flex:1;min-width:0;font-size:22px;font-weight:800;letter-spacing:.01em;color:#fff;text-transform:uppercase;
-  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-shadow:0 1px 3px rgba(0,0,0,.35);}
-.head-score{display:flex;align-items:baseline;gap:7px;flex:none;color:#fff;}
+.cname{flex:1;min-width:0;font-size:22px;font-weight:800;letter-spacing:.01em;color:var(--spec-text,#fff);text-transform:uppercase;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.head-score{display:flex;align-items:baseline;gap:7px;flex:none;color:var(--spec-text,#fff);}
 .head-score .hs-lbl{font-size:9px;font-weight:700;letter-spacing:.16em;opacity:.82;text-transform:uppercase;}
 .head-score .hs-val{font-size:21px;font-weight:900;font-variant-numeric:tabular-nums;}
 .hs-val.bump{animation:pop .42s ease;}
@@ -552,17 +552,17 @@ img{display:block;}
 
 /* ───── REPLAY TRANSITION — dark panel swipes IN (sponsor visible), holds, swipes OUT ──── */
 .replay-wipe{position:absolute;top:0;bottom:0;left:-16%;right:-16%;z-index:80;pointer-events:none;overflow:hidden;
-  --rp-dur:2.4s;display:flex;align-items:center;justify-content:center;
+  --rp-dur:2.6s;display:flex;align-items:center;justify-content:center;
   /* soft team-colour glow over a dark panel — depth without the per-frame cost of a striped texture */
   background:
     radial-gradient(140% 140% at 30% 50%,color-mix(in srgb,var(--replay-color,#fff) 17%,transparent) 0%,transparent 60%),
     linear-gradient(120deg,rgba(8,11,18,.965) 0%,rgba(14,20,32,.98) 55%,rgba(8,11,18,.965) 100%);
   transform:translateX(-130%) skewX(-8deg);will-change:transform;backface-visibility:hidden;}
-.replay-wipe.logo-only{--rp-dur:1.4s;}   /* the after-replay outro is quicker */
-/* snappy in/out — fast transit, long hold, punchy easing */
-.replay-wipe.play{animation:replaySwipe var(--rp-dur) cubic-bezier(.85,0,.15,1);}
-@keyframes replaySwipe{0%{transform:translateX(-130%) skewX(-8deg);}13%{transform:translateX(0) skewX(-8deg);}
-  85%{transform:translateX(0) skewX(-8deg);}100%{transform:translateX(130%) skewX(-8deg);}}
+.replay-wipe.logo-only{--rp-dur:1.6s;}   /* the after-replay outro is quicker */
+/* smooth in/out — softened transit + easing (was a hard whip), long hold */
+.replay-wipe.play{animation:replaySwipe var(--rp-dur) cubic-bezier(.5,.04,.28,1);}
+@keyframes replaySwipe{0%{transform:translateX(-130%) skewX(-8deg);}17%{transform:translateX(0) skewX(-8deg);}
+  81%{transform:translateX(0) skewX(-8deg);}100%{transform:translateX(130%) skewX(-8deg);}}
 /* diagonal ACCENT SPEED-LINES on the trailing side (replaces the old thin vertical bar) */
 .replay-wipe::after{content:'';position:absolute;top:-6%;bottom:-6%;right:4%;width:38%;z-index:2;pointer-events:none;
   background:repeating-linear-gradient(96deg,color-mix(in srgb,var(--replay-color,#fff) 82%,transparent) 0 6px,transparent 6px 40px);
@@ -710,6 +710,38 @@ img{display:block;}
 .sb-cell{font-size:18px;font-weight:700;font-variant-numeric:tabular-nums;text-align:center;color:#cfd6e6;}
 .sb-cell.score{font-weight:900;color:#fff;}
 .sb-prow.mvp .sb-cell.score{color:var(--gold);}
+
+/* ── STATS-SCREEN DESIGN SKINS (producer-selectable at the scoreboard scene) ──
+   All skins reuse the same .sb-teamsec table markup — only the look changes — except RADAR,
+   which swaps the tables for a twin-polygon comparison (renderStatRadar). sb-nostats hides the
+   whole stat board for a clean FINAL-only card. Base (.sb-d-default) is the existing look. */
+.sb.sb-nostats .sb-board{display:none;}
+
+/* GLASS — frosted, aurora-lit cards with a neon team-accent glow */
+.sb-d-glass .sb-teamsec{background:linear-gradient(160deg,rgba(255,255,255,.10),rgba(255,255,255,.015));
+  backdrop-filter:blur(18px) saturate(1.25);-webkit-backdrop-filter:blur(18px) saturate(1.25);
+  border-color:rgba(255,255,255,.14);box-shadow:0 22px 56px rgba(0,0,0,.5),0 0 46px -14px var(--row-accent,#5a6478);}
+.sb-d-glass .sb-teamhead{background:linear-gradient(90deg,rgba(255,255,255,.10),rgba(255,255,255,.02));border-bottom-color:rgba(255,255,255,.12);}
+.sb-d-glass .sb-teamhead::before{width:6px;box-shadow:0 0 18px var(--row-accent,#5a6478);}
+.sb-d-glass .sb-prow{border-bottom-color:rgba(255,255,255,.07);}
+.sb-d-glass .sb-cell.score{text-shadow:0 0 16px var(--row-accent,#5a6478);}
+
+/* BLOCK GRID — every statistic in its own boxed cell */
+.sb-d-block .sb-grid{grid-template-columns:1fr repeat(6,90px);}
+.sb-d-block .sb-prow{padding:7px 26px;height:auto;border-bottom:none;}
+.sb-d-block .sb-teamhead{padding:0 26px;}
+.sb-d-block .sb-cell{margin:0 4px;height:40px;background:rgba(255,255,255,.05);border:1px solid var(--hair);
+  border-radius:9px;display:flex;align-items:center;justify-content:center;}
+.sb-d-block .sb-cell.score{background:rgba(255,206,77,.09);border-color:rgba(255,206,77,.28);}
+.sb-d-block .sb-prow.mvp .sb-cell.score{background:var(--gold);border-color:var(--gold);color:#1a1205;}
+
+/* RADAR — twin polygons overlay each team's stat shape (renderStatRadar builds the SVG) */
+.sb-radar{display:flex;flex-direction:column;align-items:center;gap:16px;padding:4px 0 2px;}
+.sb-radar-chart svg{width:min(560px,58vh);height:auto;overflow:visible;display:block;}
+.sb-radar-legend{display:flex;gap:46px;align-items:center;}
+.sb-rl-item{display:flex;align-items:center;gap:12px;font-size:21px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;color:#e6ebf5;}
+.sb-rl-item.win{color:var(--gold);}
+.sb-rl-sw{width:26px;height:8px;border-radius:4px;flex:none;}
 
 /* sponsor slot */
 .sb-sponsor{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;}
@@ -1143,6 +1175,15 @@ const HTTP_BASE = 'http://' + (location.hostname || 'localhost') + ':3000';
 // Team colors — defaults; overridden live by the app's per-team color (teams.*.color).
 let BLUE = '#2f8dff', ORANGE = '#ff7a33';
 const teamOf = p => (Number(p.team) === 1 ? 1 : 0);   // robust: tolerate "1"/1/null
+// Readable ink for text sitting ON a team-colour fill: dark ink on light colours (white/yellow),
+// white ink on dark/saturated ones. Keeps the spectated player's name legible when a team is white.
+function inkFor(col){
+  const h=(col||'').trim().replace(/^#/,''); let r,g,b;
+  if(/^[0-9a-f]{3}$/i.test(h)){ r=parseInt(h[0]+h[0],16); g=parseInt(h[1]+h[1],16); b=parseInt(h[2]+h[2],16); }
+  else if(/^[0-9a-f]{6}$/i.test(h)){ r=parseInt(h.slice(0,2),16); g=parseInt(h.slice(2,4),16); b=parseInt(h.slice(4,6),16); }
+  else { const m=(col||'').match(/(\d+)[,\s]+(\d+)[,\s]+(\d+)/); if(!m) return '#fff'; r=+m[1]; g=+m[2]; b=+m[3]; }
+  return ((0.2126*r+0.7152*g+0.0722*b)/255) > 0.6 ? '#0b0e16' : '#fff';   // >0.6 = light fill → dark ink
+}
 
 // Drive the overlay's team colors from the colors set in the app/control panel.
 function applyTeamColors(teams){
@@ -1496,6 +1537,7 @@ function renderStatcard(players, spectated, facecams){
   const side=teamOf(p);
   const color = document.documentElement.classList.contains('brazil-mode') ? '#0b3aa0' : (side===0?BLUE:ORANGE);
   document.documentElement.style.setProperty('--spec-color', color);
+  document.documentElement.style.setProperty('--spec-text', inkFor(color));   // dark ink on a white/light team colour
   setText('cname', p.name);
   setStat('st-score', p.score); setStat('st-goals', p.goals);
   setStat('st-assists', p.assists); setStat('st-saves', p.saves); setStat('st-shots', p.shots);
@@ -1951,9 +1993,23 @@ function renderScoreboard(playerCache, state, series){
   const _raf=(typeof window!=='undefined' && window.requestAnimationFrame) ? window.requestAnimationFrame : (f=>setTimeout(f,32));
   _raf(function(){ fitName('sb-name-a', nameA, 44, 22); fitName('sb-name-b', nameB, 44, 22); fitName('wi-name', winnerName, 84, 30); });
 
-  // stats board grouped by team
+  // stats board — producer-selectable design skin + optional show/hide (the "stats screen" toggle
+  // at the scoreboard scene). Default/Glass/Block reuse the team tables; Radar swaps in a twin-polygon
+  // comparison. sb-nostats hides the whole board for a clean FINAL-only card.
+  const ss = state.rlStatsScreen || {};
+  const design = ['default','glass','block','radar'].includes(ss.design) ? ss.design : 'default';
+  const showStats = ss.showStats !== false;
+  const sbEl = el('sb');
+  if(sbEl){
+    sbEl.classList.remove('sb-d-default','sb-d-glass','sb-d-block','sb-d-radar');
+    sbEl.classList.add('sb-d-'+design);
+    sbEl.classList.toggle('sb-nostats', !showStats);
+  }
   const body=el('sb-body'); if(body){ body.innerHTML='';
-    group(nameA, logoA, A, aWon, 'var(--blue)'); group(nameB, logoB, B, bWon, 'var(--orange)');
+    if(showStats){
+      if(design==='radar') renderStatRadar(body, {nameA, nameB, A, B, aWon, bWon});
+      else { group(nameA, logoA, A, aWon, 'var(--blue)'); group(nameB, logoB, B, bWon, 'var(--orange)'); }
+    }
   }
   function group(name, logo, list, won, accent){
     const sec=document.createElement('div'); sec.className='sb-teamsec'+(won?' win':'');
@@ -2005,6 +2061,53 @@ function renderScoreboard(playerCache, state, series){
     if(bg){ bgEl.style.backgroundImage='url("'+bg+'")'; bgEl.classList.remove('hidden'); }
     else { bgEl.style.backgroundImage=''; bgEl.classList.add('hidden'); }
   }
+}
+
+/* RADAR stats-screen skin: twin polygons comparing each team's TOTALS across the 6 core stats.
+   Each axis is normalised to its own max across both teams, so a big-magnitude stat (Score) doesn't
+   swamp the shape — the polygon reads as "who won each category and by how much". */
+function renderStatRadar(body, o){
+  const { nameA, nameB, A, B, aWon, bWon } = o;
+  const totals = list => SB_STATS.map(s => list.reduce((sum,p)=>sum+(Number(p[s])||0), 0));
+  const TA = totals(A), TB = totals(B);
+  const css  = getComputedStyle(document.documentElement);
+  const colA = (css.getPropertyValue('--blue')   || '#2f8dff').trim();
+  const colB = (css.getPropertyValue('--orange') || '#ff7a33').trim();
+  const gold = (css.getPropertyValue('--gold')   || '#ffce4d').trim();
+  const n = SB_STATS.length, CX = 280, CY = 270, R = 185, RINGS = 4;
+  const pt = (r, i) => { const a = (-90 + i*360/n) * Math.PI/180; return [CX + r*Math.cos(a), CY + r*Math.sin(a)]; };
+  const ptsOf = (r) => SB_STATS.map((_,i)=>pt(r,i).map(v=>v.toFixed(1)).join(',')).join(' ');
+
+  let grid = '';
+  for(let g=1; g<=RINGS; g++) grid += `<polygon points="${ptsOf(R*g/RINGS)}" fill="none" stroke="rgba(255,255,255,${g===RINGS?0.22:0.10})" stroke-width="1"/>`;
+  let spokes = '', labels = '';
+  SB_STATS.forEach((s,i)=>{
+    const [ex,ey] = pt(R,i);
+    spokes += `<line x1="${CX}" y1="${CY}" x2="${ex.toFixed(1)}" y2="${ey.toFixed(1)}" stroke="rgba(255,255,255,.10)" stroke-width="1"/>`;
+    const [lx,ly] = pt(R+26,i);
+    const anchor = Math.abs(lx-CX)<6 ? 'middle' : (lx>CX ? 'start' : 'end');
+    labels += `<text x="${lx.toFixed(1)}" y="${(ly+5).toFixed(1)}" text-anchor="${anchor}" fill="#cfd6e6" font-size="15" font-weight="700" letter-spacing="1">${SB_LABELS[i].toUpperCase()}</text>`;
+  });
+  const dataPts = vals => vals.map((v,i)=>{ const mx = Math.max(TA[i],TB[i],1); return pt(R*(v/mx),i).map(x=>x.toFixed(1)).join(','); }).join(' ');
+  const dots = (vals,col) => vals.map((v,i)=>{ const mx = Math.max(TA[i],TB[i],1); const [x,y]=pt(R*(v/mx),i); return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="3.6" fill="${col}"/>`; }).join('');
+
+  const svg = `<svg viewBox="0 0 560 540" role="img" aria-label="team stat comparison">`
+    + grid + spokes
+    + `<polygon points="${dataPts(TB)}" fill="${colB}" fill-opacity="0.16" stroke="${colB}" stroke-width="2.5" stroke-linejoin="round"/>`
+    + `<polygon points="${dataPts(TA)}" fill="${colA}" fill-opacity="0.16" stroke="${colA}" stroke-width="2.5" stroke-linejoin="round"/>`
+    + dots(TB,colB) + dots(TA,colA) + labels + `</svg>`;
+
+  const wrap = document.createElement('div'); wrap.className = 'sb-radar';
+  const chart = document.createElement('div'); chart.className = 'sb-radar-chart'; chart.innerHTML = svg;
+  const legend = document.createElement('div'); legend.className = 'sb-radar-legend';
+  [[nameA,aWon,colA],[nameB,bWon,colB]].forEach(([nm,won,col])=>{
+    const it = document.createElement('div'); it.className = 'sb-rl-item' + (won?' win':'');
+    const sw = document.createElement('span'); sw.className = 'sb-rl-sw'; sw.style.background = won ? gold : col;
+    it.appendChild(sw); it.appendChild(document.createTextNode(nm || ''));
+    legend.appendChild(it);
+  });
+  wrap.appendChild(chart); wrap.appendChild(legend);
+  body.appendChild(wrap);
 }
 
 /* ── WINNER intro → scorecard ─────────────────────────────────────────────── */

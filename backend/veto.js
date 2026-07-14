@@ -69,12 +69,24 @@ const MAP_POOLS = {
     { id: 'suravasa',            name: 'Suravasa',             type: 'Flashpoint', image: '/assets/overwatch/maps/suravasa.jpg' },
     { id: 'new-junk-city',       name: 'New Junk City',        type: 'Flashpoint', image: '/assets/overwatch/maps/new-junk-city.jpg' }
   ],
-  // Marvel Rivals — convergence/domination map pool (names approximate; edit as the pool rotates).
+  // Marvel Rivals — verified Ignite 2026 / MRC S7 competitive pool (14 maps, syncs with the
+  // in-game Competitive pool each season — see docs/marvel-rivals-production.md). Map 1 of a
+  // series is always Domination. Images best-effort from assets/maps/marvel-rivals/.
   'marvel-rivals': [
-    { id: 'yggsgard', name: 'Yggsgard', image: '' },      { id: 'tokyo-2099', name: 'Tokyo 2099', image: '' },
-    { id: 'klyntar', name: 'Klyntar', image: '' },        { id: 'wakanda', name: 'Empire of Wakanda', image: '' },
-    { id: 'hydra-base', name: 'Hydra Charteris Base', image: '' }, { id: 'spider-islands', name: 'Spider-Islands', image: '' },
-    { id: 'hells-heaven', name: "Hell's Heaven", image: '' }
+    { id: 'birnin-tchalla',    name: "Birnin T'Challa",        type: 'Domination',  image: '/assets/maps/marvel-rivals/birnin-tchaka.png' },
+    { id: 'hells-heaven',      name: "Hell's Heaven",          type: 'Domination',  image: '/assets/maps/marvel-rivals/hydra-charteris-base.png' },
+    { id: 'krakoa',            name: 'Krakoa',                 type: 'Domination',  image: '/assets/maps/marvel-rivals/krakoa-grove.png' },
+    { id: 'celestial-husk',    name: 'Celestial Husk',         type: 'Domination',  image: '' },
+    { id: 'yggdrasill-path',   name: 'Yggdrasill Path',        type: 'Convoy',      image: '/assets/maps/marvel-rivals/yggsgard.png' },
+    { id: 'spider-islands',    name: 'Spider-Islands',         type: 'Convoy',      image: '/assets/maps/marvel-rivals/klyntar-spider-islands.png' },
+    { id: 'midtown',           name: 'Midtown',                type: 'Convoy',      image: '/assets/maps/marvel-rivals/midtown.png' },
+    { id: 'arakko',            name: 'Arakko',                 type: 'Convoy',      image: '/assets/maps/marvel-rivals/hellfire-gala-arakko.png' },
+    { id: 'museum-of-contemplation', name: 'Museum of Contemplation', type: 'Convoy', image: '' },
+    { id: 'hall-of-djalia',    name: 'Hall of Djalia',         type: 'Convergence', image: '/assets/maps/marvel-rivals/hall-of-djalia.png' },
+    { id: 'symbiotic-surface', name: 'Symbiotic Surface',      type: 'Convergence', image: '' },
+    { id: 'central-park',      name: 'Central Park',           type: 'Convergence', image: '/assets/maps/marvel-rivals/central-park.png' },
+    { id: 'heart-of-heaven',   name: 'Heart of Heaven',        type: 'Convergence', image: '' },
+    { id: 'shin-shibuya',      name: 'Shin-Shibuya',           type: 'Convergence', image: '/assets/maps/marvel-rivals/shin-shibuya.png' }
   ],
   // Rocket League — arenas are cosmetic (no real competitive veto); included so the app can
   // show/select an arena on the board if a tournament chooses to.
@@ -132,6 +144,26 @@ function mapPool(game) {
 function hasVeto(game) { return (MAP_POOLS[game] || []).length > 0; }
 function vetoGames() { return Object.keys(MAP_POOLS); }
 
+// Merge each game's built-in map pool with its active Game Config's maps (state.gameConfigs,
+// keyed by gameId), by id — new ids append after the built-ins, matching ids override that one
+// entry. A game with a config but no built-in pool at all (e.g. dota2) is still included, so
+// importing a config can enable veto for a game that previously had none.
+function mergedMapPools(gameConfigs) {
+  const cfgs = gameConfigs || {};
+  const gameIds = new Set([...Object.keys(MAP_POOLS), ...Object.keys(cfgs)]);
+  const out = {};
+  gameIds.forEach((game) => {
+    const built = mapPool(game);
+    const custom = (cfgs[game] && Array.isArray(cfgs[game].maps)) ? cfgs[game].maps : [];
+    if (!custom.length) { out[game] = built; return; }
+    const byId = {};
+    built.forEach((m) => { byId[m.id] = m; });
+    custom.forEach((m) => { if (m && m.id) byId[m.id] = { ...byId[m.id], ...m }; });
+    out[game] = Object.values(byId);
+  });
+  return out;
+}
+
 // Resolve the manual ban/pick steps for a game + best-of, sized to the pool.
 // Falls back to a generic "alternate bans down to N maps" order for any game/size.
 function buildSequence(game, bestOf, poolSize) {
@@ -152,4 +184,4 @@ function resolveSide(teamIdx, teamStart) {
   return teamIdx === 0 ? (teamStart || 'a') : other;
 }
 
-module.exports = { MAP_POOLS, VETO_FORMATS, VETO_META, getMeta, mapPool, hasVeto, vetoGames, buildSequence, resolveSide };
+module.exports = { MAP_POOLS, VETO_FORMATS, VETO_META, getMeta, mapPool, mergedMapPools, hasVeto, vetoGames, buildSequence, resolveSide };

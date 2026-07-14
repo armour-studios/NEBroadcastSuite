@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <script src="sdpi-components.js"></script>
+</head>
+<body>
+  <sdpi-item label="Button">
+    <sdpi-select setting="mode" default="next">
+      <option value="next">Next segment (starts show if idle)</option>
+      <option value="prev">Go back a segment</option>
+      <option value="current">Current (press re-runs it)</option>
+      <option value="stop">End the show</option>
+    </sdpi-select>
+  </sdpi-item>
+</body>
+</html>

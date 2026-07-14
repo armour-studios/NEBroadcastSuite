@@ -1,0 +1,5 @@
+node_modules/
+com.armour-studios.ne-broadcast.sdPlugin/bin/
+com.armour-studios.ne-broadcast.sdPlugin/logs/
+# dist/ is NOT ignored: the packed .streamDeckPlugin ships inside the app build
+# (package.json "files") and is served from /api/integrations/streamdeck-plugin.

@@ -571,6 +571,16 @@ function meAddResetForm() {
   if (lp) { lp.style.display = 'none'; lp.removeAttribute('src'); }
   if (le) le.style.display = '';
 }
+// Event-day checklist links — jump straight to the Talent / Profiles pages.
+el('ed-checklist-talent')?.addEventListener('click', (e) => {
+  e.preventDefault();
+  document.getElementById('tab-equipos')?.click();
+});
+el('ed-checklist-brand')?.addEventListener('click', (e) => {
+  e.preventDefault();
+  document.getElementById('tab-media')?.click();
+  setTimeout(() => { if (typeof window._assetsShow === 'function') window._assetsShow('profiles'); }, 60);
+});
 el('me-add-btn')?.addEventListener('click', () => {
   const form = el('me-add-form'); if (!form) return;
   const show = form.style.display === 'none';

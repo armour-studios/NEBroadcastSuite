@@ -117,6 +117,22 @@ async function lookup(platform, username) {
   return result;
 }
 
+// Try the SAME handle across several platforms, returning the first that resolves a rank. Used when
+// we only have the tournament gamerTag (start.gg rarely exposes other players' connected accounts) and
+// don't know which platform it belongs to. Stops at the first hit; otherwise returns the last miss.
+const DEFAULT_PLATFORM_ORDER = ['epic', 'psn', 'steam', 'xbl', 'switch'];
+async function lookupAny(username, platforms) {
+  if (!username) return { found: false, error: 'missing_params' };
+  const order = (Array.isArray(platforms) && platforms.length) ? platforms : DEFAULT_PLATFORM_ORDER;
+  let last = null;
+  for (const plt of order) {
+    const r = await lookup(plt, username);
+    if (r && r.found) return r;   // r carries the resolved `platform` so the caller can remember it
+    last = r;
+  }
+  return last || { found: false, error: 'not_found', username };
+}
+
 function invalidate(platform, username) {
   if (platform && username) _cache.delete(`${platform.toLowerCase()}:${username.toLowerCase()}`);
 }
@@ -280,4 +296,4 @@ const EXTRACT_JS = `(function(){
   }
 })()`;
 
-module.exports = { lookup, invalidate, rlTo6mans };
+module.exports = { lookup, lookupAny, invalidate, rlTo6mans };

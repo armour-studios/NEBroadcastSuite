@@ -266,6 +266,12 @@
     .lh-social.tt .icon svg { fill: #9147ff; }
     .lh-social .handle { color: rgba(255,255,255,.65); }
 
+    /* Producer-set custom field — a fun fact, hometown, nickname, whatever they type */
+    .lh-custom-row { display: flex; align-items: center; }
+    .lh-custom-tag { font-size: 13px; font-weight: 600; letter-spacing: .04em;
+      color: rgba(255,255,255,.55); font-style: italic; white-space: nowrap;
+      overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+
     /* Status badge column (col 4) */
     .lh-status-col {
       align-self: stretch;
@@ -689,6 +695,12 @@
           socialsHtml += `</div>`;
         }
 
+        // Producer-set custom field — free text per player (fun fact, hometown, nickname…)
+        const customField = (p.customField || '').toString().trim();
+        const customFieldHtml = customField
+          ? `<div class="lh-custom-row"><span class="lh-custom-tag">${esc(customField)}</span></div>`
+          : '';
+
         // Stat columns (from start.gg historical import)
         const evSt = _evStat((p.gamerTag || p.name || '').toString().trim(), evName);
         const hs = evSt && typeof evSt === 'object' && evSt.games > 0;
@@ -708,6 +720,7 @@
             + realNameHtml
             + countryHtml
             + socialsHtml
+            + customFieldHtml
           + `</div>`
           + `<div class="lh-status-col"><span class="lh-status-badge ${statusClass}">${esc(statusLabel)}</span></div>`
           + sc('col-g',   hs ? evSt.goals   : '—', 'G')

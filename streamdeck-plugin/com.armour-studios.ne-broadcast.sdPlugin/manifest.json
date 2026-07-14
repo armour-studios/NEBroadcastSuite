@@ -1,0 +1,380 @@
+{
+  "$schema": "https://schemas.elgato.com/streamdeck/plugins/manifest.json",
+  "Name": "NE Broadcast Suite",
+  "Version": "1.0.0.0",
+  "Author": "Armour Studios",
+  "Description": "Control NE Broadcast Suite from your Stream Deck: scores, series, graphics, scenes, flows, overlays, audio, replays, ads and Twitch tools.",
+  "Category": "NE Broadcast Suite",
+  "CategoryIcon": "imgs/plugin/category-icon",
+  "Icon": "imgs/plugin/marketplace",
+  "UUID": "com.armour-studios.ne-broadcast",
+  "CodePath": "bin/plugin.js",
+  "SDKVersion": 3,
+  "Software": {
+    "MinimumVersion": "6.9"
+  },
+  "OS": [
+    {
+      "Platform": "windows",
+      "MinimumVersion": "10"
+    }
+  ],
+  "Nodejs": {
+    "Version": "20"
+  },
+  "ApplicationsToMonitor": {
+    "windows": [
+      "NE Broadcast Suite.exe"
+    ]
+  },
+  "Actions": [
+    {
+      "Name": "Score +/-",
+      "UUID": "com.armour-studios.ne-broadcast.adjust-score",
+      "Icon": "imgs/actions/adjust-score/icon",
+      "Tooltip": "Add or remove a series win for a team. The key shows the live score.",
+      "PropertyInspectorPath": "ui/adjust-score.html",
+      "UserTitleEnabled": false,
+      "Controllers": [
+        "Keypad"
+      ],
+      "States": [
+        {
+          "Image": "imgs/actions/adjust-score/key"
+        }
+      ]
+    },
+    {
+      "Name": "Set Score",
+      "UUID": "com.armour-studios.ne-broadcast.set-score",
+      "Icon": "imgs/actions/set-score/icon",
+      "Tooltip": "Set a team's series score to an exact value.",
+      "PropertyInspectorPath": "ui/set-score.html",
+      "UserTitleEnabled": false,
+      "Controllers": [
+        "Keypad"
+      ],
+      "States": [
+        {
+          "Image": "imgs/actions/set-score/key"
+        }
+      ]
+    },
+    {
+      "Name": "Series Control",
+      "UUID": "com.armour-studios.ne-broadcast.series-control",
+      "Icon": "imgs/actions/series-control/icon",
+      "Tooltip": "Reset series, swap teams, bump the game number, or clear the scoreboard. Reset/clear require a hold.",
+      "PropertyInspectorPath": "ui/series-control.html",
+      "UserTitleEnabled": false,
+      "Controllers": [
+        "Keypad"
+      ],
+      "States": [
+        {
+          "Image": "imgs/actions/series-control/key"
+        }
+      ]
+    },
+    {
+      "Name": "Select Team",
+      "UUID": "com.armour-studios.ne-broadcast.select-team",
+      "Icon": "imgs/actions/select-team/icon",
+      "Tooltip": "Put a saved team (name, logo, colour, roster) on the blue or orange side.",
+      "PropertyInspectorPath": "ui/select-team.html",
+      "UserTitleEnabled": false,
+      "Controllers": [
+        "Keypad"
+      ],
+      "States": [
+        {
+          "Image": "imgs/actions/select-team/key"
+        }
+      ]
+    },
+    {
+      "Name": "Graphic On Air",
+      "UUID": "com.armour-studios.ne-broadcast.gfx-onair",
+      "Icon": "imgs/actions/gfx-onair/icon",
+      "Tooltip": "Toggle a broadcast graphic on/off air, with optional scene autocut.",
+      "PropertyInspectorPath": "ui/gfx-onair.html",
+      "UserTitleEnabled": false,
+      "Controllers": [
+        "Keypad"
+      ],
+      "States": [
+        {
+          "Image": "imgs/actions/gfx-onair/key"
+        }
+      ]
+    },
+    {
+      "Name": "Clear Graphics",
+      "UUID": "com.armour-studios.ne-broadcast.clear-gfx",
+      "Icon": "imgs/actions/clear-gfx/icon",
+      "Tooltip": "Take every full-screen graphic off air.",
+      "UserTitleEnabled": false,
+      "Controllers": [
+        "Keypad"
+      ],
+      "States": [
+        {
+          "Image": "imgs/actions/clear-gfx/key"
+        }
+      ]
+    },
+    {
+      "Name": "Desk Topic",
+      "UUID": "com.armour-studios.ne-broadcast.desk-topic",
+      "Icon": "imgs/actions/desk-topic/icon",
+      "Tooltip": "Step the Desk Show topics rail (next/previous). Cuts to the topic's scene when one is set. The key shows the current topic.",
+      "PropertyInspectorPath": "ui/desk-topic.html",
+      "UserTitleEnabled": false,
+      "Controllers": [
+        "Keypad"
+      ],
+      "States": [
+        {
+          "Image": "imgs/actions/desk-topic/key"
+        }
+      ]
+    },
+    {
+      "Name": "Overlay Toggle",
+      "UUID": "com.armour-studios.ne-broadcast.overlay-toggle",
+      "Icon": "imgs/actions/overlay-toggle/icon",
+      "Tooltip": "Toggle a stacking overlay: ticker, casters/desk, sponsor banner, player or team spotlight.",
+      "PropertyInspectorPath": "ui/overlay-toggle.html",
+      "UserTitleEnabled": false,
+      "Controllers": [
+        "Keypad"
+      ],
+      "States": [
+        {
+          "Image": "imgs/actions/overlay-toggle/key"
+        }
+      ]
+    },
+    {
+      "Name": "Switch Scene",
+      "UUID": "com.armour-studios.ne-broadcast.switch-scene",
+      "Icon": "imgs/actions/switch-scene/icon",
+      "Tooltip": "Cut the program to an OBS or vMix scene. Lights up while the scene is live.",
+      "PropertyInspectorPath": "ui/switch-scene.html",
+      "UserTitleEnabled": false,
+      "Controllers": [
+        "Keypad"
+      ],
+      "States": [
+        {
+          "Image": "imgs/actions/switch-scene/key"
+        }
+      ]
+    },
+    {
+      "Name": "Fire Flow",
+      "UUID": "com.armour-studios.ne-broadcast.fire-flow",
+      "Icon": "imgs/actions/fire-flow/icon",
+      "Tooltip": "Run a manual Flow from Production.",
+      "PropertyInspectorPath": "ui/fire-flow.html",
+      "UserTitleEnabled": false,
+      "Controllers": [
+        "Keypad"
+      ],
+      "States": [
+        {
+          "Image": "imgs/actions/fire-flow/key"
+        }
+      ]
+    },
+    {
+      "Name": "Break Countdown",
+      "UUID": "com.armour-studios.ne-broadcast.break-countdown",
+      "Icon": "imgs/actions/break-countdown/icon",
+      "Tooltip": "Toggle the break countdown. The key becomes a live clock while it runs.",
+      "PropertyInspectorPath": "ui/break-countdown.html",
+      "UserTitleEnabled": false,
+      "Controllers": [
+        "Keypad"
+      ],
+      "States": [
+        {
+          "Image": "imgs/actions/break-countdown/key"
+        }
+      ]
+    },
+    {
+      "Name": "Run of Show",
+      "UUID": "com.armour-studios.ne-broadcast.run-of-show",
+      "Icon": "imgs/actions/run-of-show/icon",
+      "Tooltip": "Navigate the Rundown: next, back, re-run current, or end the show. Keys show the segment names.",
+      "PropertyInspectorPath": "ui/run-of-show.html",
+      "UserTitleEnabled": false,
+      "Controllers": [
+        "Keypad"
+      ],
+      "States": [
+        {
+          "Image": "imgs/actions/run-of-show/key"
+        }
+      ]
+    },
+    {
+      "Name": "Countdown Controls",
+      "UUID": "com.armour-studios.ne-broadcast.countdown-controls",
+      "Icon": "imgs/actions/countdown-controls/icon",
+      "Tooltip": "All countdown operations: start, pause, stop, reset, visibility, add/subtract time, headlines.",
+      "PropertyInspectorPath": "ui/countdown-controls.html",
+      "UserTitleEnabled": false,
+      "Controllers": [
+        "Keypad"
+      ],
+      "States": [
+        {
+          "Image": "imgs/actions/countdown-controls/key"
+        }
+      ]
+    },
+    {
+      "Name": "Countdown Clock",
+      "UUID": "com.armour-studios.ne-broadcast.countdown-clock",
+      "Icon": "imgs/actions/countdown-clock/icon",
+      "Tooltip": "Live countdown display, ticking every second. Press to pause or resume the timer.",
+      "PropertyInspectorPath": "ui/countdown-clock.html",
+      "UserTitleEnabled": false,
+      "Controllers": [
+        "Keypad"
+      ],
+      "States": [
+        {
+          "Image": "imgs/actions/countdown-clock/key"
+        }
+      ]
+    },
+    {
+      "Name": "Audio Mute",
+      "UUID": "com.armour-studios.ne-broadcast.audio-mute",
+      "Icon": "imgs/actions/audio-mute/icon",
+      "Tooltip": "Mute or unmute an OBS audio input. Lights red while muted.",
+      "PropertyInspectorPath": "ui/audio-mute.html",
+      "UserTitleEnabled": false,
+      "Controllers": [
+        "Keypad"
+      ],
+      "States": [
+        {
+          "Image": "imgs/actions/audio-mute/key"
+        }
+      ]
+    },
+    {
+      "Name": "Source Toggle",
+      "UUID": "com.armour-studios.ne-broadcast.source-toggle",
+      "Icon": "imgs/actions/source-toggle/icon",
+      "Tooltip": "Show or hide an OBS source. Lights up while visible.",
+      "PropertyInspectorPath": "ui/source-toggle.html",
+      "UserTitleEnabled": false,
+      "Controllers": [
+        "Keypad"
+      ],
+      "States": [
+        {
+          "Image": "imgs/actions/source-toggle/key"
+        }
+      ]
+    },
+    {
+      "Name": "HUD / Scoreboard",
+      "UUID": "com.armour-studios.ne-broadcast.view-force",
+      "Icon": "imgs/actions/view-force/icon",
+      "Tooltip": "Force the in-game overlay to the HUD or the scoreboard view.",
+      "PropertyInspectorPath": "ui/view-force.html",
+      "UserTitleEnabled": false,
+      "Controllers": [
+        "Keypad"
+      ],
+      "States": [
+        {
+          "Image": "imgs/actions/view-force/key"
+        }
+      ]
+    },
+    {
+      "Name": "Save Replay",
+      "UUID": "com.armour-studios.ne-broadcast.save-replay",
+      "Icon": "imgs/actions/save-replay/icon",
+      "Tooltip": "Save the OBS replay buffer clip.",
+      "UserTitleEnabled": false,
+      "Controllers": [
+        "Keypad"
+      ],
+      "States": [
+        {
+          "Image": "imgs/actions/save-replay/key"
+        }
+      ]
+    },
+    {
+      "Name": "Replay Buffer",
+      "UUID": "com.armour-studios.ne-broadcast.replay-buffer",
+      "Icon": "imgs/actions/replay-buffer/icon",
+      "Tooltip": "Start or stop the OBS replay buffer. Lights up while recording.",
+      "UserTitleEnabled": false,
+      "Controllers": [
+        "Keypad"
+      ],
+      "States": [
+        {
+          "Image": "imgs/actions/replay-buffer/key"
+        }
+      ]
+    },
+    {
+      "Name": "Ad Break",
+      "UUID": "com.armour-studios.ne-broadcast.ad-break",
+      "Icon": "imgs/actions/ad-break/icon",
+      "Tooltip": "Start (hold) or end (tap) a commercial break. The suite returns to the scene it left.",
+      "PropertyInspectorPath": "ui/ad-break.html",
+      "UserTitleEnabled": false,
+      "Controllers": [
+        "Keypad"
+      ],
+      "States": [
+        {
+          "Image": "imgs/actions/ad-break/key"
+        }
+      ]
+    },
+    {
+      "Name": "Twitch Clip",
+      "UUID": "com.armour-studios.ne-broadcast.twitch-clip",
+      "Icon": "imgs/actions/twitch-clip/icon",
+      "Tooltip": "Create a Twitch clip and save the OBS replay buffer in one press.",
+      "UserTitleEnabled": false,
+      "Controllers": [
+        "Keypad"
+      ],
+      "States": [
+        {
+          "Image": "imgs/actions/twitch-clip/key"
+        }
+      ]
+    },
+    {
+      "Name": "Stream Marker",
+      "UUID": "com.armour-studios.ne-broadcast.twitch-marker",
+      "Icon": "imgs/actions/twitch-marker/icon",
+      "Tooltip": "Drop a stream marker on the Twitch VOD.",
+      "PropertyInspectorPath": "ui/twitch-marker.html",
+      "UserTitleEnabled": false,
+      "Controllers": [
+        "Keypad"
+      ],
+      "States": [
+        {
+          "Image": "imgs/actions/twitch-marker/key"
+        }
+      ]
+    }
+  ]
+}

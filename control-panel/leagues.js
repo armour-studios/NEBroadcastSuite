@@ -36,7 +36,35 @@ function lgGameOptions(sel) {
 function lgNewPlayer() { return { id: lgUid('pl'), name: '', role: '', salary: 0, stats: '' }; }
 function lgNewTeam() { return { id: lgUid('tm'), name: '', logo: null, players: [] }; }
 function lgNewLeague() {
-  return { id: lgUid('lg'), name: 'New League', game: currentState.activeGame || '', type: 'team', season: '', salaryCap: 0, starterCount: 3, logo: null, abbr: '', status: 'active', teams: [], freeAgents: [], standings: [], schedule: [], scoring: { win: 3, loss: 0, draw: 1, otw: 2 }, playoffN: 4, tiebreak: 'gd', startggSource: '', linkedEventId: '' };
+  return { id: lgUid('lg'), name: 'New League', game: currentState.activeGame || '', type: 'team', season: '', salaryCap: 0, starterCount: 3, logo: null, abbr: '', status: 'active', teams: [], freeAgents: [], standings: [], schedule: [], seasonHistory: [], scoring: { win: 3, loss: 0, draw: 1, otw: 2 }, playoffN: 4, tiebreak: 'gd', startggSource: '', linkedEventId: '' };
+}
+
+// Shared league-<select> populator, used everywhere a producer picks an in-app league (Team Record
+// settings, Graphics ▸ Standings/Bracket/Schedule, legacy Standings pop-out). Signature-diffs against
+// a data-sig attribute so it's a no-op (and never clobbers mid-edit) when the league list hasn't
+// actually changed, and always skips while the element itself has focus.
+// opts.placeholder: leading empty-value option text ('Select league…' default; pass null to omit it
+//   entirely when the list is non-empty). opts.emptyPlaceholder: placeholder text used only when the
+//   list is empty (falls back to opts.placeholder). opts.value: if provided, force the select's value
+//   to this after (re)building — for callers where an external state field is authoritative; omit to
+//   just preserve whatever was already selected.
+function lgPopulateLeagueSelect(selectEl, leagues, opts) {
+  if (!selectEl || document.activeElement === selectEl) return;
+  opts = opts || {};
+  const list = leagues || [];
+  const hasPlaceholder = list.length ? (opts.placeholder !== null) : true;
+  const placeholderText = list.length
+    ? (opts.placeholder != null ? opts.placeholder : 'Select league…')
+    : (opts.emptyPlaceholder != null ? opts.emptyPlaceholder : (opts.placeholder != null ? opts.placeholder : 'Select league…'));
+  const sig = list.map((l) => l.id + ':' + (l.name || '')).join('|') + '::' + (hasPlaceholder ? placeholderText : '');
+  if (selectEl.dataset.sig !== sig) {
+    selectEl.dataset.sig = sig;
+    const prev = selectEl.value;
+    const optsHtml = list.map((l) => `<option value="${l.id}">${String(l.name || 'League').replace(/</g, '&lt;')}</option>`).join('');
+    selectEl.innerHTML = hasPlaceholder ? (`<option value="">${placeholderText}</option>` + optsHtml) : optsHtml;
+    if (prev && list.some((l) => String(l.id) === String(prev))) selectEl.value = prev;
+  }
+  if (opts.value !== undefined) selectEl.value = opts.value || '';
 }
 
 function lgRenderList() {
@@ -69,8 +97,8 @@ function lgRenderList() {
 // name/logo/roster live from currentState.savedTeams. Legacy embedded teams fall back to their
 // own data and are flagged "unlinked" so they can be re-added from the library.
 function lgResolveTeam(tm) {
-  const key = (tm && (tm.teamName || tm.name)) || '';
-  const saved = (currentState.savedTeams || []).find((s) => (s.name || '') === key);
+  const key = ((tm && (tm.teamName || tm.name)) || '').trim().toLowerCase();
+  const saved = (currentState.savedTeams || []).find((s) => (s.name || '').trim().toLowerCase() === key);
   if (saved) return { name: saved.name, logo: saved.logo || null, players: saved.players || [], linked: true };
   return { name: (tm && (tm.name || tm.teamName)) || 'Team', logo: (tm && tm.logo) || null, players: (tm && tm.players) || [], linked: false };
 }
@@ -207,6 +235,17 @@ function lgRenderStandingsTab() {
   const playoffN = lg.playoffN || 4;
   const esc = (s) => String(s == null ? '' : s).replace(/</g, '&lt;');
 
+  const banner = el('lg-drift-banner');
+  if (banner) {
+    const drift = lgStandingsDrift(lg);
+    if (!drift.inSync) {
+      banner.style.cssText = 'display:flex;align-items:center;gap:8px;margin-bottom:10px;padding:8px 12px;border-radius:8px;background:rgba(201,138,31,.12);border:1px solid rgba(201,138,31,.35);color:#c98a1f;font-size:12px;font-weight:600;';
+      banner.textContent = `Standings differ from schedule results (${drift.diffCount} team${drift.diffCount === 1 ? '' : 's'}) — Recalculate to sync.`;
+    } else {
+      banner.style.display = 'none'; banner.textContent = '';
+    }
+  }
+
   // Cap display
   const capEl = el('lg-cap-used');
   if (capEl) {
@@ -227,28 +266,39 @@ function lgRenderStandingsTab() {
   const rankedIds = new Set(ranked.map(s => s.teamId));
   const unranked = (lg.teams || []).filter(tm => !rankedIds.has(tm.id));
   const rows = [
-    ...ranked.map(s => { const tm = teamsMap[s.teamId]; return { teamId: tm.id, teamName: lgResolveTeam(tm).name, w: s.w || 0, l: s.l || 0, t: s.t || 0, gf: s.gf || 0, ga: s.ga || 0, pts: s.pts || 0, form: s.form || [], streak: s.streak || '' }; }),
-    ...unranked.map(tm => ({ teamId: tm.id, teamName: lgResolveTeam(tm).name, w: 0, l: 0, t: 0, gf: 0, ga: 0, pts: 0, form: [], streak: '' }))
+    ...ranked.map(s => { const tm = teamsMap[s.teamId]; return { teamId: tm.id, teamName: lgResolveTeam(tm).name, w: s.w || 0, l: s.l || 0, t: s.t || 0, gf: s.gf || 0, ga: s.ga || 0, pts: s.pts || 0, subW: s.subW || 0, subL: s.subL || 0, form: s.form || [], streak: s.streak || '' }; }),
+    ...unranked.map(tm => ({ teamId: tm.id, teamName: lgResolveTeam(tm).name, w: 0, l: 0, t: 0, gf: 0, ga: 0, pts: 0, subW: 0, subL: 0, form: [], streak: '' }))
   ];
 
   if (!rows.length) { wrap.innerHTML = '<div class="lg-empty">Add teams to track standings.</div>'; return; }
   const formDots = (form) => form.map(f => `<span class="lg2-fd lg2-fd-${f.toLowerCase()}">${f}</span>`).join('');
-  wrap.innerHTML = `<table class="lg2-st-table">
-    <thead><tr><th class="lg2-drag-th"></th><th>#</th><th>Team</th><th>W</th><th>L</th><th>T</th><th>GF</th><th>GA</th><th>GD</th><th>Pts</th><th>Form</th><th>Str</th></tr></thead>
-    <tbody>${rows.map((r, i) => `<tr data-tid="${r.teamId}" draggable="true">
-      <td class="lg2-drag-cell"><span class="lg2-drag-handle" title="Drag to reorder"></span></td>
-      <td class="lg2-pos">${i < playoffN ? '<span class="lg2-playoff-dot" title="Playoff spot"></span>' : ''}${i + 1}</td>
-      <td>${esc(r.teamName)}</td>
-      <td><input type="number" class="input-text lg2-st-inp" data-tid="${r.teamId}" data-key="w" value="${r.w}" min="0"></td>
-      <td><input type="number" class="input-text lg2-st-inp" data-tid="${r.teamId}" data-key="l" value="${r.l}" min="0"></td>
-      <td><input type="number" class="input-text lg2-st-inp" data-tid="${r.teamId}" data-key="t" value="${r.t}" min="0"></td>
-      <td><input type="number" class="input-text lg2-st-inp" data-tid="${r.teamId}" data-key="gf" value="${r.gf}" min="0"></td>
-      <td><input type="number" class="input-text lg2-st-inp" data-tid="${r.teamId}" data-key="ga" value="${r.ga}" min="0"></td>
-      <td>${r.gf - r.ga >= 0 ? '+' : ''}${r.gf - r.ga}</td>
-      <td><input type="number" class="input-text lg2-st-inp" data-tid="${r.teamId}" data-key="pts" value="${r.pts}"></td>
-      <td class="lg2-form-cell">${formDots(r.form)}</td>
-      <td class="lg2-streak">${esc(r.streak)}</td>
-    </tr>`).join('')}</tbody></table>`;
+  // Game-aware columns: always W/L (+ T when the league has draws), then a Games/Maps won-lost cell
+  // for series (best-of-N) games, then the unit For/Against/Diff (Goals / Rounds) when the game has a
+  // numeric score, then Pts / Form / Str. Everything is computed from the schedule via lgGameStats.
+  const gs = lgGameStats(lg.game);
+  const u = gs.unit, uAbbr = u ? (u.abbr || (u.noun || 'S').charAt(0)) : '';
+  // Series games (best-of-N) don't tie — only show T if ties actually exist; generic/soccer leagues
+  // show T whenever draw points are configured.
+  const showDraw = rows.some(r => (r.t || 0) > 0) || (!gs.series && lg.scoring && lg.scoring.draw != null && Number(lg.scoring.draw) !== 0);
+  // Plain-English headers — no cryptic GF/GA/GD/Str abbreviations. Series W-L is the match record;
+  // the sub column is the game/map record within series; For/Against/Diff use the game's own noun.
+  let head = '<th class="lg2-drag-th"></th><th>#</th><th>Team</th><th title="Series (matches) won">W</th><th title="Series (matches) lost">L</th>';
+  if (showDraw) head += '<th title="Series tied">T</th>';
+  if (gs.sub) head += `<th title="${esc(gs.sub.noun)} won within series">${esc(gs.sub.abbr)}W</th><th title="${esc(gs.sub.noun)} lost within series">${esc(gs.sub.abbr)}L</th>`;
+  if (u) head += `<th title="${esc(u.noun)} scored">For</th><th title="${esc(u.noun)} conceded">Against</th><th title="${esc(u.noun)} difference">Diff</th>`;
+  head += '<th>Pts</th><th>Form</th><th title="Current win/loss streak">Streak</th>';
+  const numInp = (r, key, min) => `<td><input type="number" class="input-text lg2-st-inp" data-tid="${r.teamId}" data-key="${key}" value="${r[key]}"${min != null ? ` min="${min}"` : ''}></td>`;
+  const body = rows.map((r, i) => {
+    let c = `<td class="lg2-drag-cell"><span class="lg2-drag-handle" title="Drag to reorder"></span></td>`
+      + `<td class="lg2-pos">${i < playoffN ? '<span class="lg2-playoff-dot" title="Playoff spot"></span>' : ''}${i + 1}</td>`
+      + `<td>${esc(r.teamName)}</td>` + numInp(r, 'w', 0) + numInp(r, 'l', 0);
+    if (showDraw) c += numInp(r, 't', 0);
+    if (gs.sub) c += numInp(r, 'subW', 0) + numInp(r, 'subL', 0);
+    if (u) c += numInp(r, 'gf', 0) + numInp(r, 'ga', 0) + `<td>${(r.gf - r.ga) >= 0 ? '+' : ''}${r.gf - r.ga}</td>`;
+    c += numInp(r, 'pts') + `<td class="lg2-form-cell">${formDots(r.form)}</td><td class="lg2-streak">${esc(r.streak)}</td>`;
+    return `<tr data-tid="${r.teamId}" draggable="true">${c}</tr>`;
+  }).join('');
+  wrap.innerHTML = `<div class="lg2-st-scroll"><table class="lg2-st-table"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
 
   // Drag-to-reorder rows
   let dragTid = null;
@@ -286,22 +336,49 @@ function lgRenderStandingsTab() {
   }));
 }
 
-function lgComputeStandingsFromSchedule() {
-  const lg = lgActive(); if (!lg) return;
+// Resolve a schedule match's series score (games won per side) + real per-side totals. When a
+// per-game breakdown (m.games) is provided, the series score is derived by counting games won
+// and totals are summed from the individual game scores; otherwise both come directly from the
+// single result.scoreA/scoreB entry (today's behavior, unchanged) — the per-game breakdown is
+// strictly optional, so leagues that don't use it see no change at all.
+function lgMatchTally(m) {
+  const r = m.result || {};
+  const hasGames = Array.isArray(m.games) && m.games.length > 0;
+  if (hasGames) {
+    let sa = 0, sb = 0, totA = 0, totB = 0;
+    for (const g of m.games) {
+      const ga = Number(g.scoreA) || 0, gb = Number(g.scoreB) || 0;
+      totA += ga; totB += gb;
+      if (ga > gb) sa++; else if (gb > ga) sb++;
+    }
+    return { sa, sb, totA, totB, hasGames: true };
+  }
+  const sa = Number(r.scoreA) || 0, sb = Number(r.scoreB) || 0;
+  return { sa, sb, totA: sa, totB: sb, hasGames: false };
+}
+
+// Pure schedule → standings aggregation. Shared by lgComputeStandingsFromSchedule (which persists
+// the result to lg.standings) and lgStandingsDrift (which only compares against what's stored,
+// without mutating anything) — avoids a third copy of this logic alongside server.js's lgRecalcServer.
+function lgAggregateFromSchedule(lg) {
   const sc = lg.scoring || {};
-  const ptsWin = sc.win ?? 3, ptsLoss = sc.loss ?? 0, ptsDraw = sc.draw ?? 1;
+  const ptsWin = sc.win ?? 3, ptsLoss = sc.loss ?? 0, ptsDraw = sc.draw ?? 1, ptsOtw = sc.otw ?? ptsWin;
   const map = {};
-  (lg.teams || []).forEach((tm) => { map[tm.id] = { teamId: tm.id, w: 0, l: 0, t: 0, gf: 0, ga: 0, pts: 0, form: [], h2h: {} }; });
+  (lg.teams || []).forEach((tm) => { map[tm.id] = { teamId: tm.id, w: 0, l: 0, t: 0, gf: 0, ga: 0, pts: 0, subW: 0, subL: 0, form: [], h2h: {} }; });
   for (const m of (lg.schedule || [])) {
-    const r = m.result; if (!r || r.scoreA == null || r.scoreB == null) continue;
+    const r = m.result;
+    const hasGames = Array.isArray(m.games) && m.games.length > 0;
+    if (!hasGames && (!r || r.scoreA == null || r.scoreB == null)) continue;
     const a = map[m.teamA], b = map[m.teamB]; if (!a || !b) continue;
-    const sa = Number(r.scoreA) || 0, sb = Number(r.scoreB) || 0;
-    a.gf += sa; a.ga += sb; b.gf += sb; b.ga += sa;
+    const { sa, sb, totA, totB } = lgMatchTally(m);
+    a.gf += totA; a.ga += totB; b.gf += totB; b.ga += totA;
+    a.subW += sa; a.subL += sb; b.subW += sb; b.subL += sa;   // games/maps won across the series
+    const winPts = (r && r.ot) ? ptsOtw : ptsWin;
     if (sa > sb) {
-      a.w++; a.pts += ptsWin; a.form.push('W'); a.h2h[m.teamB] = (a.h2h[m.teamB] || 0) + 1;
+      a.w++; a.pts += winPts; a.form.push('W'); a.h2h[m.teamB] = (a.h2h[m.teamB] || 0) + 1;
       b.l++; b.pts += ptsLoss; b.form.push('L');
     } else if (sb > sa) {
-      b.w++; b.pts += ptsWin; b.form.push('W'); b.h2h[m.teamA] = (b.h2h[m.teamA] || 0) + 1;
+      b.w++; b.pts += winPts; b.form.push('W'); b.h2h[m.teamA] = (b.h2h[m.teamA] || 0) + 1;
       a.l++; a.pts += ptsLoss; a.form.push('L');
     } else {
       a.t++; a.pts += ptsDraw; a.form.push('D');
@@ -315,11 +392,11 @@ function lgComputeStandingsFromSchedule() {
     for (let i = form.length - 1; i >= 0 && form[i] === last; i--) n++;
     return last + n;
   };
-  lg.standings = Object.values(map).map((s) => ({
-    teamId: s.teamId, w: s.w, l: s.l, t: s.t, gf: s.gf, ga: s.ga, pts: s.pts,
+  const standings = Object.values(map).map((s) => ({
+    teamId: s.teamId, w: s.w, l: s.l, t: s.t, gf: s.gf, ga: s.ga, pts: s.pts, subW: s.subW, subL: s.subL,
     form: s.form.slice(-5), streak: calcStreak(s.form), h2h: s.h2h
   }));
-  lg.standings.sort((a, b) => {
+  standings.sort((a, b) => {
     if (b.pts !== a.pts) return b.pts - a.pts;
     if (tb === 'h2h') {
       const ah = (a.h2h && a.h2h[b.teamId]) || 0, bh = (b.h2h && b.h2h[a.teamId]) || 0;
@@ -329,8 +406,142 @@ function lgComputeStandingsFromSchedule() {
     if (gdDiff !== 0) return gdDiff;
     return b.gf - a.gf;
   });
+  return standings;
+}
+
+// ── Game-aware standings profile ──────────────────────────────────────────────
+// What a "map/game" is called for series-based (best-of-N) games — drives a Games/Maps W-L column
+// distinct from the series (match) W-L. Games not listed have no sub-unit (single-game or FFA/BR).
+const LG_SUB_UNIT = {
+  'rocket-league': { noun: 'Games', abbr: 'Gm' },
+  'csgo':          { noun: 'Maps',  abbr: 'Mp' },
+  'valorant':      { noun: 'Maps',  abbr: 'Mp' },
+  'rainbow6':      { noun: 'Maps',  abbr: 'Mp' },
+  'overwatch':     { noun: 'Maps',  abbr: 'Mp' },
+  'cod':           { noun: 'Maps',  abbr: 'Mp' },
+  'marvel-rivals': { noun: 'Maps',  abbr: 'Mp' },
+  'league':        { noun: 'Games', abbr: 'Gm' },
+  'dota2':         { noun: 'Games', abbr: 'Gm' },
+  'smash':         { noun: 'Games', abbr: 'Gm' },
+  'mobile-legends':{ noun: 'Games', abbr: 'Gm' },
+  'honor-of-kings':{ noun: 'Games', abbr: 'Gm' }
+};
+// Games where the numeric For/Against "unit" score is meaningful (goals/rounds). MOBAs and BR games
+// have no simple per-game score, so their For/Against/Diff columns are hidden rather than shown as 0.
+const LG_UNIT_GAMES = new Set(['rocket-league', 'csgo', 'valorant', 'rainbow6', 'overwatch', 'cod', 'eafc']);
+function lgGameStats(gameId) {
+  const g = (currentState.games || {})[gameId] || {};
+  const sub = LG_SUB_UNIT[gameId] || null;
+  const unit = LG_UNIT_GAMES.has(gameId) ? { noun: g.statLabel || 'Score', abbr: g.statAbbr || '' } : null;
+  return { series: !!sub, sub, unit };
+}
+// For/against/diff labels — kept for the overlay push; derives from the game's unit vocabulary.
+function lgStatLabels(lg) {
+  const u = lgGameStats(lg && lg.game).unit || { noun: 'Score', abbr: '' };
+  const abbr = u.abbr || null, noun = u.noun;
+  return {
+    forAbbr: abbr ? abbr + 'F' : 'For', againstAbbr: abbr ? abbr + 'A' : 'Against', diffAbbr: abbr ? abbr + 'D' : 'Diff',
+    forFull: noun + ' For', againstFull: noun + ' Against', diffFull: noun + ' Diff'
+  };
+}
+
+// ── In-game stat sets (Stats tab) ─────────────────────────────────────────────
+// Plain-English stat labels per game — NO cryptic abbreviations (no ADR/KOST/GPM). These are the
+// detailed per-team totals tracked on top of the series + game record. Games not listed show only
+// the series/game tiers. Stored per team in lg.stats[teamId] keyed by a slug of the label.
+const LG_STAT_SETS = {
+  'rocket-league': ['Goals', 'Assists', 'Saves', 'Shots', 'MVPs', 'Demos'],
+  'csgo':          ['Kills', 'Deaths', 'Assists', 'Damage', 'Headshots'],
+  'valorant':      ['Kills', 'Deaths', 'Assists', 'Damage', 'First Bloods'],
+  'rainbow6':      ['Kills', 'Deaths', 'Assists', 'Plants', 'Defuses'],
+  'overwatch':     ['Eliminations', 'Deaths', 'Assists', 'Damage', 'Healing'],
+  'cod':           ['Kills', 'Deaths', 'Assists', 'Damage', 'Objectives'],
+  'marvel-rivals': ['Final Hits', 'Deaths', 'Assists', 'Damage', 'Healing'],
+  'league':        ['Kills', 'Deaths', 'Assists', 'CS', 'Gold'],
+  'dota2':         ['Kills', 'Deaths', 'Assists', 'Last Hits', 'Net Worth'],
+  'mobile-legends':['Kills', 'Deaths', 'Assists', 'Gold', 'Damage'],
+  'honor-of-kings':['Kills', 'Deaths', 'Assists', 'Gold', 'Damage'],
+  'smash':         ['Wins', 'KOs', 'Falls', 'Self-destructs'],
+  'eafc':          ['Goals', 'Assists', 'Shots', 'Possession %']
+};
+function lgStatKey(label) { return String(label).toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, ''); }
+
+// Stats tab — three clearly-labelled tiers per team: SERIES (match W-L, read-only), GAME/MAP record +
+// score (read-only, from the schedule), and IN-GAME totals (editable). Recalculate refreshes the first
+// two tiers from the schedule; in-game numbers are entered by the producer.
+function lgRenderStatsTab() {
+  const wrap = el('lg2-stats'); const lg = lgActive(); if (!wrap || !lg) return;
+  lg.stats = lg.stats || {};
+  const esc = (s) => String(s == null ? '' : s).replace(/</g, '&lt;');
+  const teams = lg.teams || [];
+  if (!teams.length) { wrap.innerHTML = '<div class="lg-empty">Add teams to the league to track stats.</div>'; return; }
+  const gs = lgGameStats(lg.game);
+  const unit = gs.unit;
+  const inSet = LG_STAT_SETS[lg.game] || [];
+  const byId = {}; (lg.standings || []).forEach((s) => { byId[s.teamId] = s; });
+  const gameLbl = gs.sub ? gs.sub.noun : 'Games';
+  const gameCols = 2 + (unit ? 2 : 0);
+
+  const groupRow = `<tr class="lg2-stat-grouprow">`
+    + `<th></th>`
+    + `<th class="lg2-stat-group lg2-stat-g-series" colspan="2">Series</th>`
+    + `<th class="lg2-stat-group lg2-stat-g-game" colspan="${gameCols}">${esc(gameLbl)}</th>`
+    + (inSet.length ? `<th class="lg2-stat-group lg2-stat-g-ingame" colspan="${inSet.length}">In-game</th>` : '')
+    + `</tr>`;
+  const headRow = `<tr>`
+    + `<th class="lg2-stat-team">Team</th>`
+    + `<th title="Series (matches) won">W</th><th title="Series (matches) lost">L</th>`
+    + `<th title="${esc(gameLbl)} won">Won</th><th title="${esc(gameLbl)} lost">Lost</th>`
+    + (unit ? `<th title="${esc(unit.noun)} scored">For</th><th title="${esc(unit.noun)} conceded">Against</th>` : '')
+    + inSet.map((s) => `<th title="${esc(s)}">${esc(s)}</th>`).join('')
+    + `</tr>`;
+  const ro = (v) => `<td class="lg2-stat-ro">${v || 0}</td>`;
+  const body = teams.map((tm) => {
+    const r = lgResolveTeam(tm); const s = byId[tm.id] || {}; const ts = lg.stats[tm.id] || {};
+    let c = `<td class="lg2-stat-team">${esc(r.name || tm.teamName || 'Team')}</td>`
+      + ro(s.w) + ro(s.l) + ro(s.subW) + ro(s.subL) + (unit ? ro(s.gf) + ro(s.ga) : '')
+      + inSet.map((label) => { const k = lgStatKey(label); const v = ts[k]; return `<td><input type="number" class="input-text lg2-stat-inp" data-tid="${tm.id}" data-key="${k}" value="${v == null ? '' : v}" placeholder="0" min="0"></td>`; }).join('');
+    return `<tr>${c}</tr>`;
+  }).join('');
+  const note = inSet.length ? '' : `<div class="lg2-stat-note">Detailed in-game stats for ${esc((currentState.games[lg.game] || {}).name || lg.game || 'this game')} aren't set up yet — showing the series &amp; game record.</div>`;
+  wrap.innerHTML = `<div class="lg2-st-scroll"><table class="lg2-st-table lg2-stat-table"><thead>${groupRow}${headRow}</thead><tbody>${body}</tbody></table></div>${note}`;
+
+  wrap.querySelectorAll('.lg2-stat-inp').forEach((inp) => inp.addEventListener('change', () => {
+    const tid = inp.dataset.tid, key = inp.dataset.key;
+    lg.stats[tid] = lg.stats[tid] || {};
+    if (inp.value === '') delete lg.stats[tid][key]; else lg.stats[tid][key] = Number(inp.value) || 0;
+    lgSave();
+  }));
+}
+
+function lgComputeStandingsFromSchedule() {
+  const lg = lgActive(); if (!lg) return;
+  const completed = (lg.schedule || []).filter(m => m.result && (m.result.scoreA != null || m.result.scoreB != null));
+  if (!completed.length) {
+    lgStatus('No completed matches in schedule — add results first, then recalculate.', false);
+    return;
+  }
+  lg.standings = lgAggregateFromSchedule(lg);
   lgRenderStandingsTab(); lgSave();
   lgStatus('Standings recalculated from schedule.', true);
+}
+
+// Diff the stored standings against a fresh schedule-based recompute, WITHOUT mutating anything —
+// lets the Standings tab warn before a hand-edit is silently blown away by Recalculate.
+function lgStandingsDrift(lg) {
+  if (!lg || !(lg.schedule || []).length) return { inSync: true, diffCount: 0 };
+  const fresh = lgAggregateFromSchedule(lg);
+  const freshById = {}; fresh.forEach((s) => { freshById[s.teamId] = s; });
+  const storedById = {}; (lg.standings || []).forEach((s) => { storedById[s.teamId] = s; });
+  const keys = ['w', 'l', 't', 'gf', 'ga', 'pts', 'subW', 'subL'];
+  const ids = new Set([...Object.keys(freshById), ...Object.keys(storedById)]);
+  let diffCount = 0;
+  ids.forEach((id) => {
+    const f = freshById[id] || { w: 0, l: 0, t: 0, gf: 0, ga: 0, pts: 0 };
+    const s = storedById[id] || { w: 0, l: 0, t: 0, gf: 0, ga: 0, pts: 0 };
+    if (keys.some((k) => (f[k] || 0) !== (s[k] || 0))) diffCount++;
+  });
+  return { inSync: diffCount === 0, diffCount };
 }
 
 // ── schedule tab ──────────────────────────────────────────────────────────
@@ -343,6 +554,10 @@ function lgPopulateScheduleSelects() {
   const sa = el('lg-sch-a'), sb = el('lg-sch-b');
   if (sa) sa.innerHTML = opts(sa.value); if (sb) sb.innerHTML = opts(sb.value);
 }
+// Match ids whose per-game breakdown panel is currently expanded in the Schedule tab — pure UI
+// state, not saved to the league, so it just needs to survive re-renders within this session.
+const _lgExpandedGames = new Set();
+
 function lgRenderScheduleTab() {
   const lg = lgActive(); const wrap = el('lg2-schedule'); if (!wrap || !lg) return;
   lgPopulateScheduleSelects();
@@ -360,24 +575,61 @@ function lgRenderScheduleTab() {
         const hasResult = r.scoreA != null && r.scoreB != null;
         const winner = hasResult ? (Number(r.scoreA) > Number(r.scoreB) ? 'A' : Number(r.scoreB) > Number(r.scoreA) ? 'B' : 'draw') : null;
         const aName = teamName(m.teamA, m.sggTeamA), bName = teamName(m.teamB, m.sggTeamB);
+        // Imported (start.gg-synced) rows can fail to fuzzy-match onto a league team — teamA/teamB
+        // stays null while the raw platform name survives in sggTeamA/sggTeamB. Unmatched rows are
+        // silently excluded from standings recalculation, so surface a picker rather than hiding it.
+        const aUnmatched = !m.teamA && m.sggTeamA;
+        const bUnmatched = !m.teamB && m.sggTeamB;
+        const unmatchedOpts = (raw) => '<option value="">Unmatched — pick a team…</option>' + (lg.teams || []).map((tm) =>
+          `<option value="${tm.id}">${esc(lgResolveTeam(tm).name)}</option>`).join('') +
+          (raw ? `<option value="" disabled>(start.gg: ${esc(raw)})</option>` : '');
         const dtStr = [m.date, m.time].filter(Boolean).map(esc).join(' · ');
+        // Per-game breakdown is optional — a match with 0 games keeps today's single-number series
+        // entry; once at least 1 game is logged, the series score is derived from the games below
+        // (real per-game totals also then feed GF/GA in standings instead of the series tally).
+        const hasGames = Array.isArray(m.games) && m.games.length > 0;
+        const tally = lgMatchTally(m);
+        const expanded = _lgExpandedGames.has(m.id);
+        const gamesRows = expanded ? `
+          <div class="lg2-match-games" style="display:flex;flex-direction:column;gap:4px;margin-top:6px;padding:8px;background:rgba(255,255,255,.03);border-radius:6px;">
+            ${(m.games || []).map((g, gi) => `
+              <div class="lg2-game-row" style="display:flex;align-items:center;gap:6px;">
+                <span style="color:var(--muted);font-size:11px;min-width:24px;">G${gi + 1}</span>
+                <input type="number" class="input-text lg2-game-a" data-mid="${m.id}" data-gi="${gi}" value="${g.scoreA ?? ''}" min="0" placeholder="—" style="width:64px;">
+                <span style="color:var(--muted);">:</span>
+                <input type="number" class="input-text lg2-game-b" data-mid="${m.id}" data-gi="${gi}" value="${g.scoreB ?? ''}" min="0" placeholder="—" style="width:64px;">
+                <button class="lg-del lg2-game-del" data-mid="${m.id}" data-gi="${gi}" title="Remove game">×</button>
+              </div>`).join('')}
+            <button class="btn btn-ghost btn-xs lg2-game-add" data-mid="${m.id}" style="align-self:flex-start;">+ Add Game</button>
+          </div>` : '';
         return `<div class="lg2-match-item" data-mid="${m.id}">
           <div class="lg2-match-row">
             <div class="lg2-match-teams">
-              <span${winner === 'A' ? ' style="font-weight:900"' : winner === 'B' ? ' style="color:var(--muted)"' : ''}>${esc(aName)}</span>
+              ${aUnmatched
+                ? `<select class="input-text lg2-unmatched-sel" data-mid="${m.id}" data-side="A" style="border-color:var(--warn,#c98a1f);color:var(--warn,#c98a1f);max-width:180px;">${unmatchedOpts(m.sggTeamA)}</select>`
+                : `<span${winner === 'A' ? ' style="font-weight:900"' : winner === 'B' ? ' style="color:var(--muted)"' : ''}>${esc(aName)}</span>`}
               <span style="color:var(--muted);margin:0 6px;">vs</span>
-              <span${winner === 'B' ? ' style="font-weight:900"' : winner === 'A' ? ' style="color:var(--muted)"' : ''}>${esc(bName)}</span>
+              ${bUnmatched
+                ? `<select class="input-text lg2-unmatched-sel" data-mid="${m.id}" data-side="B" style="border-color:var(--warn,#c98a1f);color:var(--warn,#c98a1f);max-width:180px;">${unmatchedOpts(m.sggTeamB)}</select>`
+                : `<span${winner === 'B' ? ' style="font-weight:900"' : winner === 'A' ? ' style="color:var(--muted)"' : ''}>${esc(bName)}</span>`}
             </div>
             <span class="lg2-match-fmt">${esc(m.format || 'BO3')}</span>
             ${dtStr ? `<span class="lg2-match-date">${dtStr}</span>` : ''}
             <div class="lg2-match-score">
-              <input type="number" class="input-text lg2-score-a" data-mid="${m.id}" value="${r.scoreA ?? ''}" placeholder="—" min="0">
-              <span style="color:var(--muted);font-weight:700;">:</span>
-              <input type="number" class="input-text lg2-score-b" data-mid="${m.id}" value="${r.scoreB ?? ''}" placeholder="—" min="0">
+              ${hasGames
+                ? `<span class="lg2-series-derived" title="Derived from ${m.games.length} game(s) below" style="font-weight:800;">${tally.sa}–${tally.sb}</span>`
+                : `<input type="number" class="input-text lg2-score-a" data-mid="${m.id}" value="${r.scoreA ?? ''}" placeholder="—" min="0">
+                   <span style="color:var(--muted);font-weight:700;">:</span>
+                   <input type="number" class="input-text lg2-score-b" data-mid="${m.id}" value="${r.scoreB ?? ''}" placeholder="—" min="0">`}
+              <label class="lg2-ot-chk" title="This result went to overtime" style="display:flex;align-items:center;gap:3px;font-size:11px;color:var(--muted);">
+                <input type="checkbox" class="lg2-ot-inp" data-mid="${m.id}" ${r.ot ? 'checked' : ''}>OT
+              </label>
             </div>
+            <button class="btn btn-ghost btn-xs lg2-match-games-toggle" data-mid="${m.id}">${hasGames ? `Games (${m.games.length})` : '+ Games'}</button>
             <button class="btn btn-ghost btn-xs lg2-match-live" data-mid="${m.id}">Go Live</button>
             <button class="lg-del lg2-match-del" data-mid="${m.id}" title="Remove">×</button>
           </div>
+          ${gamesRows}
           <div class="lg2-match-extra">
             <input type="text" class="input-text lg2-match-notes-inp" data-mid="${m.id}" value="${esc(m.notes || '')}" placeholder="Notes…">
             <input type="url" class="input-text lg2-match-vod-inp" data-mid="${m.id}" value="${esc(m.vod || '')}" placeholder="VOD link…">
@@ -392,10 +644,54 @@ function lgRenderScheduleTab() {
     m.result = m.result || {};
     m.result.scoreA = ia && ia.value !== '' ? Number(ia.value) : null;
     m.result.scoreB = ib && ib.value !== '' ? Number(ib.value) : null;
+    const hasResult = m.result.scoreA != null && m.result.scoreB != null;
+    if (hasResult) lg.standings = lgAggregateFromSchedule(lg);
     lgSave(); lgRenderScheduleTab();
+    if (hasResult && _lgActiveTab === 'standings') lgRenderStandingsTab();
   };
   wrap.querySelectorAll('.lg2-score-a, .lg2-score-b').forEach((inp) => inp.addEventListener('change', () => saveScore(inp.dataset.mid)));
-  wrap.querySelectorAll('.lg2-match-del').forEach((b) => b.addEventListener('click', () => { lg.schedule = (lg.schedule || []).filter((m) => m.id !== b.dataset.mid); lgRenderScheduleTab(); lgSave(); }));
+  wrap.querySelectorAll('.lg2-ot-inp').forEach((inp) => inp.addEventListener('change', () => {
+    const m = (lg.schedule || []).find((x) => x.id === inp.dataset.mid); if (!m) return;
+    m.result = m.result || {}; m.result.ot = inp.checked; lgSave();
+  }));
+  wrap.querySelectorAll('.lg2-match-games-toggle').forEach((b) => b.addEventListener('click', () => {
+    const mid = b.dataset.mid;
+    if (_lgExpandedGames.has(mid)) _lgExpandedGames.delete(mid); else _lgExpandedGames.add(mid);
+    lgRenderScheduleTab();
+  }));
+  wrap.querySelectorAll('.lg2-game-add').forEach((b) => b.addEventListener('click', () => {
+    const m = (lg.schedule || []).find((x) => x.id === b.dataset.mid); if (!m) return;
+    m.games = m.games || []; m.games.push({ scoreA: null, scoreB: null });
+    _lgExpandedGames.add(m.id);
+    lgSave(); lgRenderScheduleTab();
+  }));
+  wrap.querySelectorAll('.lg2-game-del').forEach((b) => b.addEventListener('click', () => {
+    const m = (lg.schedule || []).find((x) => x.id === b.dataset.mid); if (!m) return;
+    m.games = (m.games || []).filter((_, i) => String(i) !== b.dataset.gi);
+    lgSave(); lgRenderScheduleTab();
+  }));
+  wrap.querySelectorAll('.lg2-game-a, .lg2-game-b').forEach((inp) => inp.addEventListener('change', () => {
+    const m = (lg.schedule || []).find((x) => x.id === inp.dataset.mid); if (!m || !Array.isArray(m.games)) return;
+    const g = m.games[Number(inp.dataset.gi)]; if (!g) return;
+    const v = inp.value !== '' ? Number(inp.value) : null;
+    if (inp.classList.contains('lg2-game-a')) g.scoreA = v; else g.scoreB = v;
+    lg.standings = lgAggregateFromSchedule(lg);
+    lgSave(); lgRenderScheduleTab();
+    if (_lgActiveTab === 'standings') lgRenderStandingsTab();
+  }));
+  wrap.querySelectorAll('.lg2-unmatched-sel').forEach((sel) => sel.addEventListener('change', () => {
+    if (!sel.value) return;
+    const m = (lg.schedule || []).find((x) => x.id === sel.dataset.mid); if (!m) return;
+    if (sel.dataset.side === 'A') m.teamA = sel.value; else m.teamB = sel.value;
+    lgSave(); lgRenderScheduleTab(); lgRenderStandingsTab();
+    lgStatus('Match linked — Recalculate standings to include it.', true);
+  }));
+  wrap.querySelectorAll('.lg2-match-del').forEach((b) => b.addEventListener('click', () => {
+    lg.schedule = (lg.schedule || []).filter((m) => m.id !== b.dataset.mid);
+    lg.standings = lgAggregateFromSchedule(lg);
+    lgRenderScheduleTab(); lgSave();
+    if (_lgActiveTab === 'standings') lgRenderStandingsTab();
+  }));
   wrap.querySelectorAll('.lg2-match-live').forEach((b) => b.addEventListener('click', () => {
     const m = (lg.schedule || []).find((x) => x.id === b.dataset.mid); if (!m) return;
     const ta = (lg.teams || []).find((t) => t.id === m.teamA), tb = (lg.teams || []).find((t) => t.id === m.teamB);
@@ -424,7 +720,7 @@ function lgAddMatch() {
   const date = el('lg-sch-date')?.value || '';
   const time = el('lg-sch-time')?.value || '';
   lg.schedule = lg.schedule || [];
-  lg.schedule.push({ id: lgUid('m'), teamA: a, teamB: b, format: fmt, week, date, time, result: { scoreA: null, scoreB: null } });
+  lg.schedule.push({ id: lgUid('m'), teamA: a, teamB: b, format: fmt, week, date, time, result: { scoreA: null, scoreB: null, ot: false }, games: [] });
   lgRenderScheduleTab(); lgSave();
 }
 // Circle-method round-robin: returns array of rounds, each round = array of [teamA, teamB] pairs.
@@ -464,7 +760,7 @@ function lgGenerateRoundRobin() {
       const key = [ta.id, tb.id].sort().join('|');
       if (!existing.has(key)) {
         lg.schedule = lg.schedule || [];
-        lg.schedule.push({ id: lgUid('m'), teamA: ta.id, teamB: tb.id, format: fmt, week, date: '', result: { scoreA: null, scoreB: null } });
+        lg.schedule.push({ id: lgUid('m'), teamA: ta.id, teamB: tb.id, format: fmt, week, date: '', result: { scoreA: null, scoreB: null, ot: false }, games: [] });
         existing.add(key); added++;
       }
     });
@@ -488,7 +784,7 @@ function lgGenerateDoubleRoundRobin() {
     round.forEach(([ta, tb]) => {
       if (!existing.has(`${ta.id}|${tb.id}`)) {
         lg.schedule = lg.schedule || [];
-        lg.schedule.push({ id: lgUid('m'), teamA: ta.id, teamB: tb.id, format: fmt, week, date: '', result: { scoreA: null, scoreB: null } });
+        lg.schedule.push({ id: lgUid('m'), teamA: ta.id, teamB: tb.id, format: fmt, week, date: '', result: { scoreA: null, scoreB: null, ot: false }, games: [] });
         existing.add(`${ta.id}|${tb.id}`); added++;
       }
     });
@@ -498,7 +794,7 @@ function lgGenerateDoubleRoundRobin() {
     round.forEach(([ta, tb]) => {
       if (!existing.has(`${tb.id}|${ta.id}`)) {
         lg.schedule = lg.schedule || [];
-        lg.schedule.push({ id: lgUid('m'), teamA: tb.id, teamB: ta.id, format: fmt, week, date: '', result: { scoreA: null, scoreB: null } });
+        lg.schedule.push({ id: lgUid('m'), teamA: tb.id, teamB: ta.id, format: fmt, week, date: '', result: { scoreA: null, scoreB: null, ot: false }, games: [] });
         existing.add(`${tb.id}|${ta.id}`); added++;
       }
     });
@@ -550,7 +846,147 @@ function lgRenderSettingsTab() {
   const setV = (id, v) => { const e = el(id); if (e && document.activeElement !== e) e.value = v; };
   setV('lg-pts-win', sc.win ?? 3); setV('lg-pts-loss', sc.loss ?? 0); setV('lg-pts-draw', sc.draw ?? 1); setV('lg-pts-otw', sc.otw ?? 2);
   setV('lg-playoff-n', lg.playoffN || 4);
-  const tbEl = el('lg-tiebreak'); if (tbEl) tbEl.value = lg.tiebreak || 'gd';
+  const tbEl = el('lg-tiebreak');
+  if (tbEl) {
+    const lbl = lgStatLabels(lg);
+    const optGd = tbEl.querySelector('option[value="gd"]'); if (optGd) optGd.textContent = lbl.diffFull;
+    const optGf = tbEl.querySelector('option[value="gf"]'); if (optGf) optGf.textContent = lbl.forFull;
+    tbEl.value = lg.tiebreak || 'gd';
+  }
+  lgRenderSeasonHistory();
+  lgRenderCloudSyncStatus();
+}
+
+// ── website sync (bidirectional, opt-in per league — see CompeteLeague on the website) ──
+function lgRenderCloudSyncStatus() {
+  const lg = lgActive();
+  const status = el('lg-cloud-sync-status');
+  if (!status) return;
+  status.textContent = !lg ? '' : (lg.cloudLeagueId ? 'Synced to the website.' : 'Not synced — click "Sync to Website" to push this league.');
+}
+el('lg-cloud-push')?.addEventListener('click', async () => {
+  const lg = lgActive(); if (!lg) return;
+  if (!window._cloudWorkspaceId) { lgStatus('Sign in to the cloud (Settings) first.', false); return; }
+  // Only the first push creates the website's copy — every push after that OVERWRITES it, so
+  // that's the moment that needs an explicit yes, not the harmless first-time case.
+  if (lg.cloudLeagueId) {
+    const ok = await appConfirm(`Sync "${lg.name}" to the website? This overwrites the website's copy of this league's scoring/teams/schedule with what's here — any edits made there since the last sync will be lost.`, 'Sync & Overwrite');
+    if (!ok) return;
+  }
+  send('cloud_push_league', { orgId: window._cloudWorkspaceId, leagueId: lg.id });
+});
+
+// Leagues created on the website for this org — discovery list + "Pull in" action.
+function lgRenderCloudList(leagues) {
+  const wrap = el('lg-cloud-list'); if (!wrap) return;
+  const esc = (x) => String(x == null ? '' : x).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  if (!leagues || !leagues.length) {
+    wrap.innerHTML = '<div class="field-label" style="font-size:11px;color:var(--muted);">No leagues on the website yet.</div>';
+    return;
+  }
+  wrap.innerHTML = leagues.map((l) => `<div class="preset-item" style="display:flex;align-items:center;gap:10px;">
+      <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;font-weight:700;color:#e8eaf0;">${esc(l.name)}
+        <span style="margin-left:6px;font-size:10px;font-weight:500;color:#9090a8;">${(l._count && l._count.teams) || 0} teams &middot; ${(l._count && l._count.matches) || 0} matches</span>
+      </span>
+      <button class="btn btn-secondary btn-xs lg-cloud-pull-btn" data-id="${esc(l.id)}">Pull in</button>
+    </div>`).join('');
+  wrap.querySelectorAll('.lg-cloud-pull-btn').forEach((btn) => btn.addEventListener('click', () => {
+    if (!window._cloudWorkspaceId) return;
+    send('cloud_pull_league', { orgId: window._cloudWorkspaceId, leagueId: btn.dataset.id });
+  }));
+}
+window.lgRenderCloudList = lgRenderCloudList;
+el('lg-cloud-browse-toggle')?.addEventListener('click', () => {
+  const panel = el('lg-cloud-panel'); if (!panel) return;
+  const opening = panel.style.display === 'none';
+  panel.style.display = opening ? '' : 'none';
+  if (opening && window._cloudWorkspaceId) send('cloud_list_leagues', { orgId: window._cloudWorkspaceId });
+});
+
+// ── season archive ──────────────────────────────────────────────────────────
+// Snapshot the current schedule/standings/settings into lg.seasonHistory, then reset the live
+// league for a fresh season. Archived team refs store only {id, teamName} — never embedded
+// logo/roster blobs — so archiving never multiplies the base64-logo broadcast cost (leagues is a
+// 'library'-tier item re-sent on every leaguesVer bump).
+function lgArchiveSeason() {
+  const lg = lgActive(); if (!lg) return;
+  if (!(lg.schedule || []).length && !(lg.standings || []).length) {
+    lgStatus('Nothing to archive yet — add a schedule or standings first.', false);
+    return;
+  }
+  appConfirm(`Archive "${lg.season || 'this season'}"? The schedule and standings will be snapshotted, then cleared for a new season. Roster carries over.`, 'Archive').then((ok) => {
+    if (!ok) return;
+    lg.seasonHistory = lg.seasonHistory || [];
+    lg.seasonHistory.push({
+      id: lgUid('szn'),
+      season: lg.season || '',
+      archivedAt: Date.now(),
+      scoring: { ...(lg.scoring || {}) },
+      tiebreak: lg.tiebreak || 'gd',
+      playoffN: lg.playoffN || 4,
+      starterCount: lg.starterCount || 3,
+      teams: (lg.teams || []).map((t) => ({ id: t.id, teamName: t.teamName || t.name || '' })),
+      standings: (lg.standings || []).map((s) => ({ ...s })),
+      schedule: (lg.schedule || []).map((m) => ({ ...m, result: m.result ? { ...m.result } : m.result }))
+    });
+    lg.schedule = [];
+    lg.standings = [];
+    lg.status = 'active';
+    lg.season = '';
+    lgRenderOverview(); lgRenderStandingsTab(); lgRenderScheduleTab(); lgRenderSettingsTab(); lgSave();
+    lgStatus('Season archived. Schedule/standings cleared — roster kept.', true);
+  });
+}
+
+// Restore an archived season back to live — the CURRENT live season is pushed onto seasonHistory
+// first (nothing is lost), then the archived snapshot's teams/standings/schedule/settings replace it.
+function lgRestoreSeason(seasonHistoryId) {
+  const lg = lgActive(); if (!lg) return;
+  const snap = (lg.seasonHistory || []).find((s) => s.id === seasonHistoryId);
+  if (!snap) return;
+  appConfirm(`Restore "${snap.season || 'this archived season'}"? Your current in-progress season will be archived first, then replaced with the archived one.`, 'Restore').then((ok) => {
+    if (!ok) return;
+    lg.seasonHistory = lg.seasonHistory || [];
+    lg.seasonHistory.push({
+      id: lgUid('szn'),
+      season: lg.season || '',
+      archivedAt: Date.now(),
+      scoring: { ...(lg.scoring || {}) },
+      tiebreak: lg.tiebreak || 'gd',
+      playoffN: lg.playoffN || 4,
+      starterCount: lg.starterCount || 3,
+      teams: (lg.teams || []).map((t) => ({ id: t.id, teamName: t.teamName || t.name || '' })),
+      standings: (lg.standings || []).map((s) => ({ ...s })),
+      schedule: (lg.schedule || []).map((m) => ({ ...m, result: m.result ? { ...m.result } : m.result }))
+    });
+    lg.seasonHistory = lg.seasonHistory.filter((s) => s.id !== seasonHistoryId);
+    lg.teams = snap.teams.map((t) => ({ id: t.id, teamName: t.teamName }));
+    lg.standings = (snap.standings || []).map((s) => ({ ...s }));
+    lg.schedule = (snap.schedule || []).map((m) => ({ ...m, result: m.result ? { ...m.result } : m.result }));
+    lg.season = snap.season || '';
+    lg.scoring = { ...(snap.scoring || {}) };
+    lg.tiebreak = snap.tiebreak || 'gd';
+    lg.playoffN = snap.playoffN || 4;
+    lg.starterCount = snap.starterCount || 3;
+    lgRenderOverview(); lgRenderTeams(); lgRenderStandingsTab(); lgRenderScheduleTab(); lgRenderSettingsTab(); lgSave();
+    lgStatus('Archived season restored to live.', true);
+  });
+}
+
+function lgRenderSeasonHistory() {
+  const wrap = el('lg-season-history'); const lg = lgActive(); if (!wrap || !lg) return;
+  const esc = (s) => String(s == null ? '' : s).replace(/</g, '&lt;');
+  const history = (lg.seasonHistory || []).slice().sort((a, b) => (b.archivedAt || 0) - (a.archivedAt || 0));
+  if (!history.length) { wrap.innerHTML = '<div class="lg-empty" style="font-size:12px;">No archived seasons yet.</div>'; return; }
+  wrap.innerHTML = history.map((s) => `
+    <div class="lg2-season-row" data-sid="${s.id}" style="display:flex;align-items:center;gap:10px;padding:6px 0;border-top:1px solid var(--border-soft,rgba(255,255,255,.08));">
+      <div style="flex:1;min-width:0;">
+        <div style="font-weight:700;font-size:12px;">${esc(s.season || 'Untitled season')}</div>
+        <div style="font-size:11px;color:var(--muted);">${new Date(s.archivedAt).toLocaleDateString()} · ${(s.teams || []).length} teams · ${(s.schedule || []).length} matches</div>
+      </div>
+      <button class="btn btn-ghost btn-xs lg2-season-restore" data-sid="${s.id}" type="button">Restore</button>
+    </div>`).join('');
+  wrap.querySelectorAll('.lg2-season-restore').forEach((b) => b.addEventListener('click', () => lgRestoreSeason(b.dataset.sid)));
 }
 
 // ── overview tab ──────────────────────────────────────────────────────────
@@ -609,6 +1045,7 @@ function lgRenderOverview() {
   let leader = null, topPts = -1;
   for (const tm of (lg.teams || [])) { const pts = (byId[tm.id] || {}).pts || 0; if (pts > topPts) { topPts = pts; leader = lgResolveTeam(tm).name; } }
   if (el('lg2-stat-leader')) el('lg2-stat-leader').textContent = ((lg.standings || []).length && leader) ? leader : '—';
+  if (el('lg2-stat-seasons')) el('lg2-stat-seasons').textContent = (lg.seasonHistory || []).length;
   lgRenderMatchup(); lgRenderRecentResults(); lgRenderNextMatches();
 }
 
@@ -616,13 +1053,14 @@ function lgRenderOverview() {
 function lgSwitchTab(name) {
   _lgActiveTab = name;
   document.querySelectorAll('#lg2-tabs .lg2-tab').forEach((b) => b.classList.toggle('active', b.dataset.tab === name));
-  ['overview', 'roster', 'standings', 'schedule', 'settings'].forEach((t) => {
+  ['overview', 'roster', 'standings', 'schedule', 'stats', 'settings'].forEach((t) => {
     const p = el('lg2-panel-' + t); if (p) p.style.display = t === name ? '' : 'none';
   });
   if (name === 'overview') lgRenderOverview();
   else if (name === 'roster') { lgRenderTeams(); lgRenderFreeAgents(); }
   else if (name === 'standings') lgRenderStandingsTab();
   else if (name === 'schedule') lgRenderScheduleTab();
+  else if (name === 'stats') lgRenderStatsTab();
   else if (name === 'settings') lgRenderSettingsTab();
 }
 
@@ -678,6 +1116,7 @@ el('lg-startgg-import')?.addEventListener('click', () => {
   lgStatus('Importing league from start.gg (teams + rosters)…');
 });
 el('lg-delete')?.addEventListener('click', () => { const lg = lgActive(); if (!lg) return; appConfirm('Delete this league?', 'Delete').then(ok => { if (!ok) return; lgLeagues = lgLeagues.filter((l) => l.id !== lg.id); lgActiveId = null; lgRender(); lgSave(); }); });
+el('lg-archive-season')?.addEventListener('click', () => lgArchiveSeason());
 el('lg-name')?.addEventListener('input', function () { const lg = lgActive(); if (lg) { lg.name = this.value; lgRenderList(); lgSave(); lgUpdateBanner(); } });
 el('lg-type')?.addEventListener('change', function () { const lg = lgActive(); if (lg) { lg.type = this.value; document.querySelectorAll('.lg-salary-field').forEach((e) => { e.style.display = this.value === 'salary' ? '' : 'none'; }); lgRenderTeams(); lgRenderList(); lgSave(); lgUpdateBanner(); } });
 el('lg-game')?.addEventListener('change', function () { const lg = lgActive(); if (lg) { lg.game = this.value; lgSave(); lgUpdateBanner(); } });
@@ -742,6 +1181,22 @@ el('lg-sgg-sync')?.addEventListener('click', () => {
   fetch('http://localhost:3000/api/startgg/league-sync', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ leagueId: lg.id }) })
     .then(r => r.json()).then(data => {
       if (data.error) { lgStatus('Sync failed: ' + data.error, false); return; }
+      // Adopt the server's post-sync league so our authoritative copy keeps the imported matches +
+      // their sggSetIds. Otherwise our stale copy's next save wipes them and the next sync re-imports
+      // everything (the dedup keys off schedule[].sggSetId).
+      if (data.league && data.league.id) {
+        const local = lgLeagues.find((l) => l.id === data.league.id);
+        if (local) {
+          // Adopt only what the sync changed, so any unsaved local edits (name/teams/etc.) survive.
+          local.schedule = Array.isArray(data.league.schedule) ? data.league.schedule : local.schedule;
+          local.standings = Array.isArray(data.league.standings) ? data.league.standings : local.standings;
+          local.startggSource = data.league.startggSource || local.startggSource;
+          local.sggSyncedAt = data.league.sggSyncedAt;
+          local.sggLeagueName = data.league.sggLeagueName || local.sggLeagueName;
+          _lgSig = '';
+          lgRender();
+        }
+      }
       lgStatus(`Synced "${data.leagueName}": ${data.imported} new matches, ${data.skipped} already present.`, true);
     }).catch(err => lgStatus('Sync error: ' + err.message, false));
 });
@@ -763,6 +1218,31 @@ el('lg-playoff-n')?.addEventListener('change', function () { const lg = lgActive
 el('lg-tiebreak')?.addEventListener('change', function () { const lg = lgActive(); if (lg) { lg.tiebreak = this.value; lgSave(); } });
 el('lg-manage-teams')?.addEventListener('click', () => { document.querySelector('.tab-btn[data-tab="equipos"]')?.click(); });
 el('lg-recalc')?.addEventListener('click', lgComputeStandingsFromSchedule);
+el('lg-stats-recalc')?.addEventListener('click', () => { lgComputeStandingsFromSchedule(); lgRenderStatsTab(); });
+// Push the season stats board (same three tiers as the Stats tab) to the league-stats overlay.
+el('lg-stats-push')?.addEventListener('click', () => {
+  const lg = lgActive(); if (!lg) return;
+  lg.stats = lg.stats || {};
+  const gs = lgGameStats(lg.game), unit = gs.unit, inSet = LG_STAT_SETS[lg.game] || [];
+  const gameLbl = gs.sub ? gs.sub.noun : 'Games';
+  const byId = {}; (lg.standings || []).forEach((s) => { byId[s.teamId] = s; });
+  const columns = [
+    { key: 'w', label: 'W', group: 'Series' }, { key: 'l', label: 'L', group: 'Series' },
+    { key: 'gw', label: 'Won', group: gameLbl }, { key: 'gl', label: 'Lost', group: gameLbl },
+    ...(unit ? [{ key: 'gf', label: 'For', group: gameLbl }, { key: 'ga', label: 'Against', group: gameLbl }] : []),
+    ...inSet.map((s) => ({ key: lgStatKey(s), label: s, group: 'In-game' }))
+  ];
+  const rows = (lg.teams || []).map((tm) => {
+    const s = byId[tm.id] || {}, ts = lg.stats[tm.id] || {}, r = lgResolveTeam(tm);
+    const values = { w: s.w || 0, l: s.l || 0, gw: s.subW || 0, gl: s.subL || 0 };
+    if (unit) { values.gf = s.gf || 0; values.ga = s.ga || 0; }
+    inSet.forEach((label) => { const k = lgStatKey(label); values[k] = ts[k] || 0; });
+    return { name: r.name || tm.teamName || 'Team', logo: r.logo || null, color: tm.color || null, values };
+  });
+  const title = [lg.name, lg.season].filter(Boolean).join(' — ');
+  send('set_league_stats', { visible: true, title: title || 'Season Stats', columns, rows });
+  lgStatus('Season stats pushed to the league-stats overlay.', true);
+});
 el('lg-add-match')?.addEventListener('click', lgAddMatch);
 el('lg-gen-rr')?.addEventListener('click', lgGenerateRoundRobin);
 el('lg-gen-drr')?.addEventListener('click', lgGenerateDoubleRoundRobin);
@@ -821,15 +1301,18 @@ el('lg-mu-go')?.addEventListener('click', () => {
   const a = el('lg-mu-home')?.value, b = el('lg-mu-away')?.value;
   if (!a || !b) { lgStatus('Pick both teams for the matchup.', false); return; }
   if (a === b) { lgStatus('Pick two different teams.', false); return; }
-  const ta = findTeam(a), tb = findTeam(b);
-  send('set_team', { side: 'blue',   name: a, logo: (ta && ta.logo) || null, color: (ta && ta.color) || undefined, players: (ta && ta.players) || [] });
-  send('set_team', { side: 'orange', name: b, logo: (tb && tb.logo) || null, color: (tb && tb.color) || undefined, players: (tb && tb.players) || [] });
+  const tmo = (lg.teams || []).find((t) => lgResolveTeam(t).name === a);
+  const tmob = (lg.teams || []).find((t) => lgResolveTeam(t).name === b);
+  const ra = lgResolveTeam(tmo || { name: a });
+  const rb = lgResolveTeam(tmob || { name: b });
+  send('set_team', { side: 'blue',   name: ra.name, logo: ra.logo || null, color: (tmo && tmo.color) || undefined, players: ra.players.map((p) => ({ name: p.name, role: p.role })) });
+  send('set_team', { side: 'orange', name: rb.name, logo: rb.logo || null, color: (tmob && tmob.color) || undefined, players: rb.players.map((p) => ({ name: p.name, role: p.role })) });
   send('reset_series');
   if (el('lg-mu-title')?.checked) {
     const title = [lg.name, lg.season].filter(Boolean).join(' — ');
     if (title) send('set_event_name', { name: title.toUpperCase() });
   }
-  lgStatus(`${a} vs ${b} pushed live.`, true);
+  lgStatus(`${ra.name} vs ${rb.name} pushed live.`, true);
 });
 el('lg-add-fa')?.addEventListener('click', () => { const lg = lgActive(); if (lg) { lg.freeAgents.push(lgNewPlayer()); lgRenderFreeAgents(); lgSave(); } });
 el('lg-push-standings')?.addEventListener('click', () => {
@@ -840,13 +1323,16 @@ el('lg-push-standings')?.addEventListener('click', () => {
   const ordered = (lg.standings && lg.standings.length)
     ? lg.standings.map(s => teamsById[s.teamId]).filter(Boolean)
     : (lg.teams || []).slice().sort((a, b) => ((byId[b.id] || {}).pts || 0) - ((byId[a.id] || {}).pts || 0));
+  const gs = lgGameStats(lg.game);
+  // gameWins/gameLosses are the field names standings.html already reads to show its Games/Maps column;
+  // gamesLabel lets that column read "Maps" for CS2/Valorant instead of always "Games".
   const rows = ordered.map((tm, i) => {
     const s = byId[tm.id] || {};
     const r = lgResolveTeam(tm);
-    return { placement: i + 1, name: r.name || tm.teamName || 'Team', logo: r.logo || null, wins: s.w || 0, losses: s.l || 0, points: s.pts || 0 };
+    return { placement: i + 1, name: r.name || tm.teamName || 'Team', logo: r.logo || null, wins: s.w || 0, losses: s.l || 0, points: s.pts || 0, gameWins: s.subW || 0, gameLosses: s.subL || 0 };
   });
   const title = [lg.name, lg.season].filter(Boolean).join(' — ');
-  send('set_standings', { visible: true, title: title || 'Standings', rows });
+  send('set_standings', { visible: true, title: title || 'Standings', rows, gamesLabel: gs.sub ? gs.sub.noun : '' });
   lgStatus('Standings pushed to the standings overlay.', true);
 });
 

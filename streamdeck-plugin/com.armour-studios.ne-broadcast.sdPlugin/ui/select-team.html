@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <script src="sdpi-components.js"></script>
+</head>
+<body>
+  <sdpi-item label="Saved team">
+    <sdpi-select setting="team" datasource="getTeams" hot-reload loading="Loading team library..." placeholder="Pick a team"></sdpi-select>
+  </sdpi-item>
+  <sdpi-item label="Put on side">
+    <sdpi-select setting="side" datasource="getSides" hot-reload loading="Connecting to suite..." placeholder="Pick a side"></sdpi-select>
+  </sdpi-item>
+</body>
+</html>

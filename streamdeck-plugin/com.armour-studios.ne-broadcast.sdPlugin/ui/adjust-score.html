@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <script src="sdpi-components.js"></script>
+</head>
+<body>
+  <sdpi-item label="Team">
+    <sdpi-select setting="side" datasource="getSides" hot-reload loading="Connecting to suite..." placeholder="Pick a side"></sdpi-select>
+  </sdpi-item>
+  <sdpi-item label="Change">
+    <sdpi-select setting="delta" default="1">
+      <option value="1">+1 (add a win)</option>
+      <option value="-1">-1 (remove a win)</option>
+    </sdpi-select>
+  </sdpi-item>
+</body>
+</html>
