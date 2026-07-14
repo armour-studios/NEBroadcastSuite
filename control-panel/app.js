@@ -21123,6 +21123,9 @@ try {
 // Flows data — synced from server state (state.flows). Kept as a module-level var so
 // rundown "Run flow" segments can reference it without a full state lookup.
 let _flows = [];
+// _flows is only assigned inside renderFlows() (i.e. once the Flows tab has rendered) — rundown
+// segments must not depend on the producer having visited that tab, so they read through this.
+function rdFlows() { return (_flows && _flows.length) ? _flows : ((typeof currentState !== 'undefined' && currentState && currentState.flows) || []); }
 
 // ── Run of Show (rundown) ─────────────────────────────────────────────────
 // An ordered list of segments the producer steps through. Each segment fires an action
@@ -21137,7 +21140,7 @@ function rdTargetLabel(seg) {
   if (seg.type === 'scene') return seg.target || '(no scene)';
   if (seg.type === 'trigger') return (RD_TRIGGERS.find((t) => t[0] === seg.target) || [, seg.target])[1];
   if (seg.type === 'playout') { const p = (currentState.clips?.montages || []).find((x) => x.id === seg.target); return p ? p.name : '(playlist)'; }
-  if (seg.type === 'flow') { const f = (_flows || []).find((x) => x.id === seg.target); return f ? f.name : '(flow)'; }
+  if (seg.type === 'flow') { const f = rdFlows().find((x) => x.id === seg.target); return f ? f.name : '(flow)'; }
   if (seg.type === 'view') return seg.target === 'scoreboard' ? 'Scoreboard' : 'HUD';
   if (seg.type === 'countdown') return (seg.hold || 0) + 's countdown';
   return seg.label || 'Hold';
@@ -21157,7 +21160,7 @@ function renderRdAddTarget() {
   if (type === 'scene') wrap.innerHTML = `<select id="rd-add-target" class="input-select" style="max-width:220px;">${scenes.map((s) => opt(s, s)).join('') || '<option value="">(OBS not connected)</option>'}</select>`;
   else if (type === 'trigger') wrap.innerHTML = `<select id="rd-add-target" class="input-select" style="max-width:180px;">${RD_TRIGGERS.map((t) => opt(t[0], t[1])).join('')}</select>`;
   else if (type === 'playout') wrap.innerHTML = `<select id="rd-add-target" class="input-select" style="max-width:220px;">${playouts.map((p) => opt(p.id, p.name)).join('') || '<option value="">(no playlists)</option>'}</select>`;
-  else if (type === 'flow') wrap.innerHTML = `<select id="rd-add-target" class="input-select" style="max-width:220px;">${(_flows || []).map((f) => opt(f.id, f.name)).join('') || '<option value="">(no flows)</option>'}</select>`;
+  else if (type === 'flow') wrap.innerHTML = `<select id="rd-add-target" class="input-select" style="max-width:220px;">${rdFlows().map((f) => opt(f.id, f.name)).join('') || '<option value="">(no flows)</option>'}</select>`;
   else if (type === 'view') wrap.innerHTML = `<select id="rd-add-target" class="input-select" style="max-width:160px;">${opt('hud', 'HUD')}${opt('scoreboard', 'Scoreboard')}</select>`;
   else wrap.innerHTML = '';   // countdown uses hold as seconds; manual has no target
   const sel = el('rd-add-target'); if (sel && prev) sel.value = prev;
@@ -21198,7 +21201,7 @@ function rdRunSegment(seg) {
   else if (seg.type === 'trigger') { const g = (typeof GOLIVE_TRIGGERS !== 'undefined' ? GOLIVE_TRIGGERS : []).find((t) => t.state === seg.target); if (g) send(g.msg, g.show()); }
   else if (seg.type === 'countdown') { send('set_break', { visible: true, seconds: Math.max(1, seg.hold || 60), title: (seg.label || 'STARTING SOON') }); }
   else if (seg.type === 'playout') { playMontageById(seg.target); }
-  else if (seg.type === 'flow') { const f = (_flows || []).find((x) => x.id === seg.target); if (f && typeof flowFire === 'function') flowFire(f); }
+  else if (seg.type === 'flow') { const f = rdFlows().find((x) => x.id === seg.target); if (f && typeof flowFire === 'function') flowFire(f); }
   else if (seg.type === 'view') { send(seg.target === 'scoreboard' ? 'force_scoreboard' : 'force_hud'); }
   // manual: nothing — just a hold point.
 }
