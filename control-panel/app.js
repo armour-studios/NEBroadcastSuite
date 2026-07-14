@@ -21143,9 +21143,10 @@ function rdTargetLabel(seg) {
   if (seg.type === 'flow') { const f = rdFlows().find((x) => x.id === seg.target); return f ? f.name : '(flow)'; }
   if (seg.type === 'view') return seg.target === 'scoreboard' ? 'Scoreboard' : 'HUD';
   if (seg.type === 'countdown') return (seg.hold || 0) + 's countdown';
+  if (seg.type === 'section') return seg.label || 'Section';
   return seg.label || 'Hold';
 }
-const RD_TYPE_LABEL = { scene: 'CUT', trigger: 'TRIG', countdown: 'TIMER', playout: 'PLAY', flow: 'FLOW', view: 'VIEW', manual: 'HOLD' };
+const RD_TYPE_LABEL = { scene: 'CUT', trigger: 'TRIG', countdown: 'TIMER', playout: 'PLAY', flow: 'FLOW', view: 'VIEW', manual: 'HOLD', section: 'SECTION' };
 function renderRdAddTarget() {
   const wrap = el('rd-add-target-wrap'); if (!wrap) return;
   const existing = el('rd-add-target');
@@ -21176,12 +21177,20 @@ function renderRundown() {
   _rdSegs.forEach((seg, i) => {
     const row = document.createElement('div');
     const cur = _rdRunning && i === _rdIdx;
+    const isSection = seg.type === 'section';
+    if (isSection) {
+      // Section header — an organizational divider, never executed (the runner skips over it).
+      row.style.cssText = 'display:flex;align-items:center;gap:9px;padding:10px 10px 4px;margin-top:' + (i === 0 ? '0' : '6px') + ';border-bottom:2px solid var(--cp-accent);background:transparent;';
+      row.innerHTML = `<span style="flex:1;font-size:11px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;color:#c4b5fd;">${poEsc(seg.label || 'Section')}</span>`;
+    } else {
     row.style.cssText = 'display:flex;align-items:center;gap:9px;padding:7px 10px;border:1px solid ' + (cur ? 'var(--cp-accent)' : 'var(--border)') + ';border-radius:7px;background:' + (cur ? 'rgba(124,58,237,.12)' : 'var(--surface2)') + ';';
     row.innerHTML = `<span style="font-size:11px;color:var(--muted);width:22px;flex:0 0 auto;">${i + 1}</span>
       <span style="font-size:9px;font-weight:800;letter-spacing:.06em;padding:2px 6px;border-radius:4px;background:rgba(255,255,255,.08);color:#c4b5fd;flex:0 0 auto;">${RD_TYPE_LABEL[seg.type] || seg.type}</span>
       <span style="flex:1;font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${poEsc(seg.label || rdTargetLabel(seg))}<span style="color:var(--muted);font-size:11px;"> · ${poEsc(rdTargetLabel(seg))}${seg.hold ? ' · auto ' + seg.hold + 's' : ''}</span></span>`;
+    }
     const go = document.createElement('button'); go.className = 'btn btn-ghost btn-xs'; go.textContent = '▶'; go.title = 'Run this segment now';
     go.addEventListener('click', () => { _rdRunning = true; _rdIdx = i; rdRunCurrent(); });
+    if (isSection) go.style.display = 'none';
     const up = document.createElement('button'); up.className = 'btn btn-ghost btn-xs'; up.textContent = '↑'; up.disabled = i === 0;
     up.addEventListener('click', () => { [_rdSegs[i - 1], _rdSegs[i]] = [_rdSegs[i], _rdSegs[i - 1]]; rdSave(); renderRundown(); });
     const dn = document.createElement('button'); dn.className = 'btn btn-ghost btn-xs'; dn.textContent = '↓'; dn.disabled = i === _rdSegs.length - 1;
@@ -21209,6 +21218,11 @@ function rdRunCurrent() {
   clearTimeout(_rdTimer); _rdTimer = null;
   const seg = _rdSegs[_rdIdx];
   if (!seg) { rdStop(); return; }
+  // Section headers are dividers, not segments — running lands on the next real segment.
+  if (seg.type === 'section') {
+    if (_rdIdx + 1 >= _rdSegs.length) { rdStop(); } else { _rdIdx++; rdRunCurrent(); }
+    return;
+  }
   rdRunSegment(seg);
   renderRundown();
   if (seg.hold > 0) _rdTimer = setTimeout(() => rdNext(), seg.hold * 1000);

@@ -8108,12 +8108,12 @@ function _onFlowTrigger(type, data) {
     if (flow.triggerMode === 'sequence') {
       _handleSequenceTrigger(flow, type, data);
     } else {
-      if (triggers.some(t => _triggerMatches(t, type, data))) _fireFlow(flow, data);
+      if (triggers.some(t => _triggerMatches(t, type, data, flow))) _fireFlow(flow, data);
     }
   }
 }
 
-function _triggerMatches(trigger, type, data) {
+function _triggerMatches(trigger, type, data, flow) {
   if (trigger.type !== type) return false;
   const p = trigger.params || {};
   switch (type) {
@@ -8154,7 +8154,11 @@ function _triggerMatches(trigger, type, data) {
     case 'twitch_chat_command':
       return !p.command || data.command === p.command.toLowerCase().replace(/^!/, '');
     case 'manual':
-      return !p.flowId || p.flowId === data.flowId;
+      // A manual trigger belongs to ITS OWN flow: fire_flow_manual for flow X must only fire X.
+      // A bare params ({}) used to match EVERY manual emission — with several manual flows saved,
+      // running any one of them ran them all (last break-screen action won, ad reads spammed chat).
+      // params.flowId stays as an explicit override for "also fire me when flow Y is run manually".
+      return data.flowId === (p.flowId || (flow && flow.id));
     default:
       return true;
   }
@@ -8244,7 +8248,7 @@ function _handleSequenceTrigger(flow, type, data) {
   const seq = _flowSeqState[flow.id] || { step: 0, timeoutHandle: null };
   const triggers = flow.triggers || [];
   const current = triggers[seq.step];
-  if (!current || !_triggerMatches(current, type, data)) return;
+  if (!current || !_triggerMatches(current, type, data, flow)) return;
 
   if (seq.timeoutHandle) { clearTimeout(seq.timeoutHandle); seq.timeoutHandle = null; }
 
