@@ -21149,7 +21149,7 @@ function rdActive() {
   return r;
 }
 let _rdSegs = rdActive().segs;
-let _rdRunning = false, _rdIdx = -1, _rdTimer = null;
+let _rdRunning = false, _rdIdx = -1, _rdTimer = null, _rdEditIdx = -1;
 function rdSave() { rdActive().segs = _rdSegs; try { localStorage.setItem(RDS_KEY, JSON.stringify(_rdStore)); } catch {} }
 const RD_TRIGGERS = [['breakScreen', 'Countdown'], ['winner', 'Winner'], ['intro', 'Line-up'], ['spotlight', 'Spotlight'], ['veto', 'Map Veto']];
 function rdTargetLabel(seg) {
@@ -21163,27 +21163,35 @@ function rdTargetLabel(seg) {
   return seg.label || 'Hold';
 }
 const RD_TYPE_LABEL = { scene: 'CUT', trigger: 'TRIG', countdown: 'TIMER', playout: 'PLAY', flow: 'FLOW', view: 'VIEW', manual: 'HOLD', section: 'SECTION' };
+// Target <select> for a segment type — shared by the add form and the per-row inline editor.
+// 'playout' segments run via playMontageById(seg.target), which looks up clips.montages — the
+// picker must list the SAME id space, not the old (dead) state.playouts.
+function rdTargetSelectHtml(type, selected, idAttr) {
+  const scenes = (currentState.obs && currentState.obs.availableScenes) || [];
+  const playouts = (currentState.clips && currentState.clips.montages) || [];
+  const idH = idAttr ? ` id="${idAttr}"` : '';
+  const opt = (v, l) => `<option value="${poEsc(v)}"${selected === v ? ' selected' : ''}>${poEsc(l)}</option>`;
+  if (type === 'scene') return `<select${idH} class="rd-target-sel input-select" style="max-width:220px;">${scenes.map((s) => opt(s, s)).join('') || '<option value="">(OBS not connected)</option>'}</select>`;
+  if (type === 'trigger') return `<select${idH} class="rd-target-sel input-select" style="max-width:180px;">${RD_TRIGGERS.map((t) => opt(t[0], t[1])).join('')}</select>`;
+  if (type === 'playout') return `<select${idH} class="rd-target-sel input-select" style="max-width:220px;">${playouts.map((p) => opt(p.id, p.name)).join('') || '<option value="">(no playlists)</option>'}</select>`;
+  if (type === 'flow') return `<select${idH} class="rd-target-sel input-select" style="max-width:220px;">${rdFlows().map((f) => opt(f.id, f.name)).join('') || '<option value="">(no flows)</option>'}</select>`;
+  if (type === 'view') return `<select${idH} class="rd-target-sel input-select" style="max-width:160px;">${opt('hud', 'HUD')}${opt('scoreboard', 'Scoreboard')}</select>`;
+  return '';   // countdown uses hold as seconds; manual/section have no target
+}
 function renderRdAddTarget() {
   const wrap = el('rd-add-target-wrap'); if (!wrap) return;
   const existing = el('rd-add-target');
   if (existing && document.activeElement === existing) return;   // don't clobber a live selection
   const prev = existing ? existing.value : '';
   const type = el('rd-add-type')?.value || 'scene';
-  const scenes = (currentState.obs && currentState.obs.availableScenes) || [];
-  // 'playout' segments run via playMontageById(seg.target), which looks up clips.montages — the
-  // picker must list the SAME id space, not the old (dead) state.playouts.
-  const playouts = (currentState.clips && currentState.clips.montages) || [];
-  const opt = (v, l) => `<option value="${poEsc(v)}">${poEsc(l)}</option>`;
-  if (type === 'scene') wrap.innerHTML = `<select id="rd-add-target" class="input-select" style="max-width:220px;">${scenes.map((s) => opt(s, s)).join('') || '<option value="">(OBS not connected)</option>'}</select>`;
-  else if (type === 'trigger') wrap.innerHTML = `<select id="rd-add-target" class="input-select" style="max-width:180px;">${RD_TRIGGERS.map((t) => opt(t[0], t[1])).join('')}</select>`;
-  else if (type === 'playout') wrap.innerHTML = `<select id="rd-add-target" class="input-select" style="max-width:220px;">${playouts.map((p) => opt(p.id, p.name)).join('') || '<option value="">(no playlists)</option>'}</select>`;
-  else if (type === 'flow') wrap.innerHTML = `<select id="rd-add-target" class="input-select" style="max-width:220px;">${rdFlows().map((f) => opt(f.id, f.name)).join('') || '<option value="">(no flows)</option>'}</select>`;
-  else if (type === 'view') wrap.innerHTML = `<select id="rd-add-target" class="input-select" style="max-width:160px;">${opt('hud', 'HUD')}${opt('scoreboard', 'Scoreboard')}</select>`;
-  else wrap.innerHTML = '';   // countdown uses hold as seconds; manual has no target
-  const sel = el('rd-add-target'); if (sel && prev) sel.value = prev;
+  wrap.innerHTML = rdTargetSelectHtml(type, prev, 'rd-add-target');
 }
+// Segment types offered by the inline editor (same set as the add form's dropdown).
+const RD_EDIT_TYPES = [['scene', 'Cut to scene'], ['trigger', 'Trigger graphic'], ['countdown', 'Countdown'], ['playout', 'Play playlist'], ['flow', 'Run flow'], ['view', 'Overlay view'], ['manual', 'Manual hold / note'], ['section', 'Section header']];
 function renderRundown() {
   const list = el('rd-list'); if (!list) return;
+  // An open inline editor being typed in must survive the auto-refresh pipeline's re-renders.
+  if (_rdEditIdx >= 0 && list.contains(document.activeElement) && /^(INPUT|SELECT)$/.test(document.activeElement.tagName)) return;
   const status = el('rd-status');
   if (status) {
     if (_rdRunning && _rdSegs[_rdIdx]) status.innerHTML = `<span style="color:var(--good,#48bb78);font-weight:700;">● RUNNING</span> — segment ${_rdIdx + 1}/${_rdSegs.length}: ${poEsc(_rdSegs[_rdIdx].label || rdTargetLabel(_rdSegs[_rdIdx]))}`;
@@ -21194,6 +21202,34 @@ function renderRundown() {
     const row = document.createElement('div');
     const cur = _rdRunning && i === _rdIdx;
     const isSection = seg.type === 'section';
+    // ── Inline editor for the segment being edited ──
+    if (i === _rdEditIdx) {
+      row.style.cssText = 'display:flex;flex-direction:column;gap:6px;padding:8px 10px;border:1px solid var(--cp-accent);border-radius:7px;background:rgba(124,58,237,.08);';
+      row.innerHTML = `<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
+          <select class="rde-type input-select" style="max-width:170px;">${RD_EDIT_TYPES.map(([v, l]) => `<option value="${v}"${seg.type === v ? ' selected' : ''}>${l}</option>`).join('')}</select>
+          <span class="rde-target-wrap">${rdTargetSelectHtml(seg.type, seg.target)}</span>
+          <label style="font-size:12px;display:flex;align-items:center;gap:5px;" title="Auto-advance after this many seconds (0 = wait for Advance)">hold <input type="number" class="rde-hold input-text" min="0" max="3600" value="${seg.hold || 0}" style="width:62px;"> s</label>
+        </div>
+        <div style="display:flex;gap:6px;align-items:center;">
+          <input type="text" class="rde-label input-text" placeholder="Label (optional)" value="${poEsc(seg.label || '')}" style="flex:1;min-width:120px;">
+          <button type="button" class="btn btn-primary btn-xs rde-save">Save</button>
+          <button type="button" class="btn btn-ghost btn-xs rde-cancel">Cancel</button>
+        </div>`;
+      row.querySelector('.rde-type').addEventListener('change', function () {
+        row.querySelector('.rde-target-wrap').innerHTML = rdTargetSelectHtml(this.value, seg.target);
+      });
+      row.querySelector('.rde-save').addEventListener('click', () => {
+        const tsel = row.querySelector('.rde-target-wrap select');
+        seg.type = row.querySelector('.rde-type').value;
+        seg.target = tsel ? tsel.value : '';
+        seg.hold = Math.max(0, parseInt(row.querySelector('.rde-hold').value, 10) || 0);
+        seg.label = row.querySelector('.rde-label').value.trim();
+        _rdEditIdx = -1; rdSave(); renderRundown();
+      });
+      row.querySelector('.rde-cancel').addEventListener('click', () => { _rdEditIdx = -1; renderRundown(); });
+      list.appendChild(row);
+      return;
+    }
     if (isSection) {
       // Section header — an organizational divider, never executed (the runner skips over it).
       row.style.cssText = 'display:flex;align-items:center;gap:9px;padding:10px 10px 4px;margin-top:' + (i === 0 ? '0' : '6px') + ';border-bottom:2px solid var(--cp-accent);background:transparent;';
@@ -21207,13 +21243,15 @@ function renderRundown() {
     const go = document.createElement('button'); go.className = 'btn btn-ghost btn-xs'; go.textContent = '▶'; go.title = 'Run this segment now';
     go.addEventListener('click', () => { _rdRunning = true; _rdIdx = i; rdRunCurrent(); });
     if (isSection) go.style.display = 'none';
+    const ed = document.createElement('button'); ed.className = 'btn btn-ghost btn-xs'; ed.textContent = '✎'; ed.title = 'Edit this segment';
+    ed.addEventListener('click', () => { _rdEditIdx = i; renderRundown(); const inp = el('rd-list')?.querySelector('.rde-label'); if (inp) inp.focus(); });
     const up = document.createElement('button'); up.className = 'btn btn-ghost btn-xs'; up.textContent = '↑'; up.disabled = i === 0;
-    up.addEventListener('click', () => { [_rdSegs[i - 1], _rdSegs[i]] = [_rdSegs[i], _rdSegs[i - 1]]; rdSave(); renderRundown(); });
+    up.addEventListener('click', () => { [_rdSegs[i - 1], _rdSegs[i]] = [_rdSegs[i], _rdSegs[i - 1]]; _rdEditIdx = -1; rdSave(); renderRundown(); });
     const dn = document.createElement('button'); dn.className = 'btn btn-ghost btn-xs'; dn.textContent = '↓'; dn.disabled = i === _rdSegs.length - 1;
-    dn.addEventListener('click', () => { [_rdSegs[i + 1], _rdSegs[i]] = [_rdSegs[i], _rdSegs[i + 1]]; rdSave(); renderRundown(); });
+    dn.addEventListener('click', () => { [_rdSegs[i + 1], _rdSegs[i]] = [_rdSegs[i], _rdSegs[i + 1]]; _rdEditIdx = -1; rdSave(); renderRundown(); });
     const rm = document.createElement('button'); rm.className = 'btn btn-ghost btn-xs'; rm.textContent = '✕'; rm.style.color = '#f56565';
-    rm.addEventListener('click', () => { _rdSegs.splice(i, 1); rdSave(); renderRundown(); });
-    [go, up, dn, rm].forEach((b) => row.appendChild(b));
+    rm.addEventListener('click', () => { _rdSegs.splice(i, 1); if (_rdEditIdx === i) _rdEditIdx = -1; rdSave(); renderRundown(); });
+    [go, ed, up, dn, rm].forEach((b) => row.appendChild(b));
     list.appendChild(row);
   });
   if (typeof renderQros === 'function') renderQros();   // keep the rail Run-of-Show panel in sync
@@ -21274,6 +21312,7 @@ function renderRdPicker() {
 function rdSwitchTo(id) {
   if (!_rdStore.rundowns.find((r) => r.id === id)) return;
   rdStop();                       // never leave a running rundown pointing at swapped-out segments
+  _rdEditIdx = -1;                // an open inline editor is index-bound to the OLD rundown
   _rdStore.activeId = id;
   _rdSegs = rdActive().segs;
   rdSave(); renderRdPicker(); renderRundown();
