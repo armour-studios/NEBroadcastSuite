@@ -15,6 +15,8 @@ const { EventEmitter } = require('events');
 const IS_DEV = () => _electronApp && !_electronApp.isPackaged;
 const { createStartGgClient } = require('./backend/integrations/startgg-client');
 const { createChallongeClient } = require('./backend/integrations/challonge-client');
+const { createBallchasingClient } = require('./backend/integrations/ballchasing-client');
+const { createBallchasingWatcher } = require('./backend/integrations/ballchasing-watcher');
 const { getNxgenEvents, getNxgenEventLive, getNxgenLeaderboard } = require('./backend/nxgen');
 const { createDirectorEngine } = require('./backend/director');
 const cloud = require('./backend/cloud/cloud-client');   // Nameless cloud (dormant until BROADCAST_REMOTE_URL set)
@@ -99,6 +101,7 @@ let wsAuthToken = '';   // shared secret required on every WS bridge connection 
 let startggApiToken = '';
 let challongeApiKey = '';
 let nxgenApiKey = '';
+let ballchasingApiKey = '';
 let _startggImportRunning = false;   // guards the historical start.gg importer
 let _twitchStatsCache = null;        // { at, data } — short cache for GET /api/twitch/stats
 let _twitchTokenInvalid = false;     // true once Twitch returns 401 → stop retry storms until reconnect
@@ -461,6 +464,14 @@ let state = {
     logoMap: {},           // lowercased entrant name -> logo URL (so queue/upcoming/bracket can show logos)
     pendingEvents: []      // [{ slug, name, numEntrants }] when a tournament has >1 event (panel shows a picker)
   },
+  // ballchasing.com — Rocket League replay stats, feeding the League feature's Ballchasing tab.
+  // The API key itself lives in the module-level `ballchasingApiKey` var (like startggApiToken),
+  // never here — this is just the one global setting (auto-upload) that isn't per-league.
+  ballchasing: {
+    connected: false,
+    lastError: null,
+    autoUpload: { enabled: false, folder: '', activeLeagueId: '' }
+  },
   challonge: {
     enabled: false,
     tournamentSlug: '',    // e.g. "my-tournament" or "subdomain-tournament"
@@ -616,6 +627,16 @@ let state = {
     subtitle: '',
     columns: [],  // [{ key, label, group }]
     rows: []      // [{ name, logo, color, values:{ <key>:number } }]
+  },
+  // Ballchasing per-player leaderboard board — same generic {columns,rows} shape as leagueStats,
+  // kept as its own overlay/state pair so the team board and the leaderboard can run as two
+  // independent OBS sources at once.
+  leagueLeaderboard: {
+    visible: false,
+    title: '',
+    subtitle: '',
+    columns: [],
+    rows: []
   },
   // Season / league record shown under each team name on the top scorebar overlay.
   // Source priority: per-team manual league standings (W/L/PTS) for season + points +
@@ -2705,6 +2726,12 @@ function loadState() {
       if (typeof saved.nxgenApiKey === 'string') {
         nxgenApiKey = decryptSecret(saved.nxgenApiKey);
       }
+      if (saved.ballchasing && typeof saved.ballchasing === 'object') {
+        state.ballchasing = { ...state.ballchasing, ...saved.ballchasing };
+      }
+      if (typeof saved.ballchasingApiKey === 'string') {
+        ballchasingApiKey = decryptSecret(saved.ballchasingApiKey);
+      }
       if (saved.activeEvent && typeof saved.activeEvent === 'object') {
         state.activeEvent = { ...state.activeEvent, ...saved.activeEvent };
       }
@@ -2951,6 +2978,8 @@ function _saveAppStateNow(sync = false) {
       challongeApiKey: encryptSecret(challongeApiKey),
       nxgen: { enabled: state.nxgen.enabled, eventSlug: state.nxgen.eventSlug, selectedEvent: state.nxgen.selectedEvent, logoMap: state.nxgen.logoMap, autoFollow: state.nxgen.autoFollow },
       nxgenApiKey: encryptSecret(nxgenApiKey),
+      ballchasing: state.ballchasing,
+      ballchasingApiKey: encryptSecret(ballchasingApiKey),
       activeEvent: state.activeEvent,
       obs: {
         enabled: state.obs.enabled,
@@ -3553,12 +3582,12 @@ const BROADCAST_TIERS = {
   breakScreen: 'live', ticker: 'live', adProofSessions: 'live', spotlight: 'live', winner: 'live',
   veto: 'live', owMatch: 'live', mrMatch: 'live', customOverlayLayouts: 'live', gameConfigs: 'live', draft: 'live',
   intro: 'live', overtime: 'live', scoreboardAd: 'live', rlStatsScreen: 'live', background: 'live', deskFooter: 'live',
-  preshow: 'live', csgo: 'live', valorant: 'live', lol: 'live', bestOf: 'live', teams: 'live',
-  teamPlayers: 'live', series: 'live', match: 'live', myEvents: 'live', game: 'live',
+  preshow: 'live', csgo: 'live', valorant: 'live', lol: 'live', apex: 'live', bestOf: 'live', teams: 'live',
+  teamPlayers: 'live', series: 'live', activePlayer: 'live', match: 'live', myEvents: 'live', game: 'live',
   gameTeams: 'live', players: 'live', playerCache: 'live', currentGoal: 'live',
   spectatedPlayer: 'live', rlConnected: 'live', rlSpectatorUi: 'live', startgg: 'live',
   challonge: 'live', nxgen: 'live', activeEvent: 'live', obs: 'live', vmix: 'live',
-  switcher: 'live', commercial: 'live', upcoming: 'live', standings: 'live', leagueStats: 'live', teamRecord: 'live',
+  switcher: 'live', commercial: 'live', upcoming: 'live', standings: 'live', leagueStats: 'live', leagueLeaderboard: 'live', ballchasing: 'live', teamRecord: 'live',
   autoTeamsFromGame: 'live', startggLeagueStandings: 'live', gfxActive: 'live', watchlist: 'live',
   teamSpotlight: 'live', director: 'live', ai: 'live', encode: 'live', twitch: 'live',
   discord: 'live', flows: 'live', flowVars: 'live',
@@ -3591,6 +3620,7 @@ function buildLiveState() {
   const publicStartgg = { ...state.startgg, hasToken: !!startggApiToken };
   const publicChallonge = { ...state.challonge, hasKey: !!challongeApiKey };
   const publicNxgen = { ...state.nxgen, hasKey: !!nxgenApiKey };
+  const publicBallchasing = { ...state.ballchasing, hasKey: !!ballchasingApiKey };
   const publicObs = { ...state.obs, hasPassword: !!obsPassword };
   const publicDiscord = {
     connected: state.discord.connected,
@@ -3618,6 +3648,7 @@ function buildLiveState() {
     startgg: publicStartgg,
     challonge: publicChallonge,
     nxgen: publicNxgen,
+    ballchasing: publicBallchasing,
     activeEvent: state.activeEvent,
     obs: publicObs,
     discord: publicDiscord,
@@ -4002,11 +4033,141 @@ function migrateLeague(lg) {
   if (!Array.isArray(lg.schedule)) lg.schedule = [];
   if (!Array.isArray(lg.seasonHistory)) lg.seasonHistory = [];
   if (!lg.stats || typeof lg.stats !== 'object' || Array.isArray(lg.stats)) lg.stats = {};   // per-team in-game stats (Stats tab)
+  // Ballchasing.com — Rocket League replay stats (Ballchasing tab). A SEPARATE sink from lg.stats
+  // above: never overwrites the producer's manual entry. lg.ballchasing.groupId links this league
+  // to one ballchasing.com group (created via the API — the producer never visits ballchasing.com).
+  if (!lg.ballchasing || typeof lg.ballchasing !== 'object' || Array.isArray(lg.ballchasing)) {
+    lg.ballchasing = { groupId: '', groupUrl: '', enabledAt: 0, playerLinks: [], pendingReplays: [], lastSyncedAt: null, lastRefreshNote: '' };
+  }
+  if (!Array.isArray(lg.ballchasing.playerLinks)) lg.ballchasing.playerLinks = [];
+  if (!Array.isArray(lg.ballchasing.pendingReplays)) lg.ballchasing.pendingReplays = [];
+  if (!lg.ballchasingStats || typeof lg.ballchasingStats !== 'object' || Array.isArray(lg.ballchasingStats)) lg.ballchasingStats = {};    // per-team, same shape as lg.stats
+  if (!lg.ballchasingPlayers || typeof lg.ballchasingPlayers !== 'object' || Array.isArray(lg.ballchasingPlayers)) lg.ballchasingPlayers = {};  // per-player leaderboard, keyed "platform:id"
   // Website sync (opt-in, per league) — absent/empty means never pushed, zero cloud footprint.
   if (typeof lg.cloudLeagueId !== 'string') lg.cloudLeagueId = '';
   lg.teams.forEach((tm) => { if (tm && !tm.id) tm.id = srvLgUid('tm'); });
   lg.schedule.forEach((m) => { if (m && !Array.isArray(m.games)) m.games = []; });
   return capLeagueLogo(lg);
+}
+
+// ── Ballchasing group → league stats aggregation ─────────────────────────────
+// Turns a ballchasing.com group's cumulative stats (client.getGroup) into the league's
+// ballchasingStats (per-team) + ballchasingPlayers (per-player leaderboard). This is a SEPARATE sink
+// from lg.stats — it never touches the producer's manual entry (see migrateLeague's note).
+let _bcGroupShapeLogged = false;
+function _bcNorm(s) { return String(s == null ? '' : s).trim().toLowerCase().replace(/[^a-z0-9]/g, ''); }
+// A league team's roster gamertags (resolved through savedTeams, since lg.teams are name refs).
+function srvLgTeamRoster(tm) {
+  const nm = _bcNorm(tm && (tm.teamName || tm.name));
+  if (!nm) return [];
+  const saved = savedTeams.find((s) => _bcNorm(s.name) === nm);
+  const players = (saved && Array.isArray(saved.players) ? saved.players : (tm && Array.isArray(tm.players) ? tm.players : []));
+  return players.map((p) => _bcNorm(typeof p === 'string' ? p : (p && (p.name || p.gamerTag || p.gamertag)))).filter(Boolean);
+}
+// Defensive extraction — ballchasing nests the numbers under cumulative.core / cumulative.demo, but
+// builds/plans vary, so fall back through game_average and a flat shape. Unknown → 0.
+function _bcCore(p) {
+  const cum = (p && (p.cumulative || p.stats)) || {};
+  const core = cum.core || (p && p.game_average && p.game_average.core) || cum || {};
+  const demo = cum.demo || (p && p.game_average && p.game_average.demo) || {};
+  const n = (v) => (Number.isFinite(Number(v)) ? Math.round(Number(v) * 100) / 100 : 0);
+  return {
+    games: n(cum.games != null ? cum.games : p && p.games),
+    wins: n(cum.wins != null ? cum.wins : p && p.wins),
+    goals: n(core.goals), assists: n(core.assists), saves: n(core.saves), shots: n(core.shots),
+    score: n(core.score), mvps: n(core.mvp != null ? core.mvp : core.mvps),
+    demos: n(demo.inflicted != null ? demo.inflicted : (core.demos != null ? core.demos : 0)),
+    shootingPct: n(core.shooting_percentage != null ? core.shooting_percentage : core.shootingPercentage)
+  };
+}
+function bcAggregateGroupIntoLeague(lg, group) {
+  if (!group || typeof group !== 'object') return { players: 0, teamsMatched: 0, unassigned: 0 };
+  if (!_bcGroupShapeLogged) {   // one-time real-shape reveal, mirrors _rlPacketShapeLogged
+    _bcGroupShapeLogged = true;
+    try { console.log('[Ballchasing] group shape sample:', JSON.stringify(group).slice(0, 1200)); } catch (_) {}
+  }
+  const groupPlayers = Array.isArray(group.players) ? group.players : [];
+  const teams = (lg.teams || []);
+  // Pre-index each league team's roster gamertags for fast player→team assignment.
+  const rosters = teams.map((tm) => ({ id: tm.id, set: new Set(srvLgTeamRoster(tm)) }));
+  const manualLinks = {};   // bcKey -> teamId, from lg.ballchasing.playerLinks (producer overrides)
+  (lg.ballchasing.playerLinks || []).forEach((lk) => { if (lk && lk.bcKey && lk.teamId) manualLinks[lk.bcKey] = lk.teamId; });
+
+  const players = {};                 // "platform:id" -> leaderboard row
+  const teamStats = {};               // teamId -> summed core stats
+  const autoLinks = [];
+  let matchedTeams = new Set(), unassigned = 0;
+
+  groupPlayers.forEach((p) => {
+    const key = `${p.platform || 'unknown'}:${p.id || _bcNorm(p.name)}`;
+    const core = _bcCore(p);
+    const nm = _bcNorm(p.name);
+    // Assign to a league team: manual link wins, else roster gamertag match.
+    let teamId = manualLinks[key] || '';
+    if (!teamId) { const hit = rosters.find((r) => r.set.has(nm)); if (hit) teamId = hit.id; }
+    if (teamId) { matchedTeams.add(teamId); } else { unassigned++; }
+    autoLinks.push({ bcKey: key, bcName: p.name || '', teamId });
+    const teamRef = teamId ? teams.find((t) => t.id === teamId) : null;
+    const teamName = teamRef ? (teamRef.teamName || teamRef.name || '') : '';
+    players[key] = {
+      name: p.name || 'Player', platform: p.platform || '', id: p.id || '',
+      teamId, teamName: teamName || '',
+      games: core.games, wins: core.wins, goals: core.goals, assists: core.assists,
+      saves: core.saves, shots: core.shots, score: core.score, mvps: core.mvps, demos: core.demos,
+      shootingPct: core.shootingPct
+    };
+    if (teamId) {
+      const t = teamStats[teamId] || (teamStats[teamId] = { goals: 0, assists: 0, saves: 0, shots: 0, mvps: 0, demos: 0, score: 0 });
+      t.goals += core.goals; t.assists += core.assists; t.saves += core.saves;
+      t.shots += core.shots; t.mvps += core.mvps; t.demos += core.demos; t.score += core.score;
+    }
+  });
+
+  lg.ballchasingStats = teamStats;
+  lg.ballchasingPlayers = players;
+  lg.ballchasing.playerLinks = autoLinks;   // persisted so a future manual-override UI can edit them
+  lg.ballchasing.lastSyncedAt = Date.now();
+  lg.ballchasing.lastRefreshNote = `Synced ${groupPlayers.length} player${groupPlayers.length === 1 ? '' : 's'} across ${matchedTeams.size} team${matchedTeams.size === 1 ? '' : 's'}` + (unassigned ? ` (${unassigned} unmatched — check gamertags)` : '');
+  return { players: groupPlayers.length, teamsMatched: matchedTeams.size, unassigned };
+}
+
+// Upload a batch of .replay files into a league's ballchasing group. Shared by the manual-upload WS
+// handler and the auto-upload folder watcher. Returns a {ok,dup,fail} tally; records each replay id
+// into lg.ballchasing.pendingReplays (a 409 = already uploaded still yields the existing id).
+async function bcUploadReplays(lg, paths) {
+  const client = createBallchasingClient(ballchasingApiKey);
+  let ok = 0, dup = 0, fail = 0;
+  for (const fp of paths) {
+    try {
+      const res = await client.uploadReplay(fp, lg.ballchasing.groupId);
+      const rid = res && res.data && res.data.id;
+      if (rid && !lg.ballchasing.pendingReplays.includes(rid)) lg.ballchasing.pendingReplays.push(rid);
+      if (res && res.status === 409) dup++; else ok++;
+    } catch (e) { fail++; console.warn('[Ballchasing] upload', fp, e.message); }
+  }
+  return { ok, dup, fail };
+}
+
+// ── Auto-upload folder watcher (opt-in) ──────────────────────────────────────
+// A single watcher instance; syncBallchasingAutoUpload() starts/stops it to match
+// state.ballchasing.autoUpload. Each newly-appeared .replay is uploaded into the CURRENTLY-active
+// league's group (state.ballchasing.autoUpload.activeLeagueId).
+let _bcWatcher = null;
+async function _bcAutoUploadOne(absPath) {
+  if (!ballchasingApiKey) return;
+  const au = state.ballchasing.autoUpload || {};
+  const lg = (state.leagues || []).find((l) => l.id === au.activeLeagueId);
+  if (!lg || !lg.ballchasing || !lg.ballchasing.groupId) { logAuto('ballchasing', 'Auto-upload skipped — no active league with a group.'); return; }
+  await bcUploadReplays(lg, [absPath]);
+  leaguesVer++;
+  saveAppState();
+  broadcastFullState();
+}
+function syncBallchasingAutoUpload() {
+  const au = state.ballchasing.autoUpload || {};
+  if (!_bcWatcher) _bcWatcher = createBallchasingWatcher({ onUpload: _bcAutoUploadOne, log: (m) => logAuto('ballchasing', m) });
+  if (au.enabled && au.folder && ballchasingApiKey) _bcWatcher.start(au.folder);
+  else _bcWatcher.stop();
 }
 
 // ── Website league sync (bidirectional, opt-in per league — see CompeteLeague on the website) ──
@@ -14585,6 +14746,104 @@ function handleControlMessage(msg, ws) {
       break;
     }
 
+    // ── Ballchasing.com — per-league group creation (the producer never visits ballchasing.com;
+    // this is the one and only step that talks to their site, and it's fully automatic). ──
+    // Idempotent: a league that already has a groupId just gets a friendly "already enabled"
+    // reply instead of creating an orphaned second group on double-click.
+    case 'ballchasing_enable_group': {
+      (async () => {
+        const leagueId = msg.data && msg.data.leagueId;
+        const lg = (state.leagues || []).find((l) => l.id === leagueId);
+        if (!lg) { ws.send(JSON.stringify({ type: 'ballchasing-result', data: { ok: false, message: 'League not found.' } })); return; }
+        if (lg.ballchasing.groupId) { ws.send(JSON.stringify({ type: 'ballchasing-result', data: { ok: true, message: 'Ballchasing is already enabled for this league.' } })); return; }
+        if (!ballchasingApiKey) { ws.send(JSON.stringify({ type: 'ballchasing-result', data: { ok: false, message: 'Save your ballchasing.com API key in Settings first.' } })); return; }
+        try {
+          const client = createBallchasingClient(ballchasingApiKey);
+          const name = `${lg.name || 'League'} — ${lg.season || 'Season'}`.slice(0, 100);
+          // by-id: stable across in-game name changes. by-player-clusters: tolerant of a mid-season
+          // roster substitute (by-distinct-players would silently start a "new team" the moment one
+          // player changes, corrupting cumulative stats).
+          const res = await client.createGroup(name, 'by-id', 'by-player-clusters');
+          const groupId = res.data && res.data.id;
+          if (!groupId) throw new Error('Ballchasing did not return a group id.');
+          lg.ballchasing.groupId = groupId;
+          lg.ballchasing.groupUrl = `https://ballchasing.com/group/${groupId}`;   // human-facing page — NOT res.data.link, which is the API endpoint
+          lg.ballchasing.enabledAt = Date.now();
+          leaguesVer++;
+          saveAppState();
+          broadcastFullState();
+          ws.send(JSON.stringify({ type: 'ballchasing-result', data: { ok: true, message: `Ballchasing enabled for "${lg.name}".` } }));
+        } catch (e) {
+          ws.send(JSON.stringify({ type: 'ballchasing-result', data: { ok: false, message: e.message } }));
+        }
+      })();
+      break;
+    }
+
+    // Upload one or more .replay files into a league's ballchasing group. The producer picks files
+    // (the client opens a dialog and sends absolute paths) — nothing on ballchasing.com to touch.
+    case 'ballchasing_upload_replays': {
+      (async () => {
+        const leagueId = msg.data && msg.data.leagueId;
+        const paths = Array.isArray(msg.data && msg.data.paths) ? msg.data.paths : [];
+        const lg = (state.leagues || []).find((l) => l.id === leagueId);
+        if (!lg) { ws.send(JSON.stringify({ type: 'ballchasing-result', data: { ok: false, message: 'League not found.' } })); return; }
+        if (!lg.ballchasing.groupId) { ws.send(JSON.stringify({ type: 'ballchasing-result', data: { ok: false, message: 'Enable Ballchasing for this league first.' } })); return; }
+        if (!ballchasingApiKey) { ws.send(JSON.stringify({ type: 'ballchasing-result', data: { ok: false, message: 'Save your ballchasing.com API key in Settings first.' } })); return; }
+        if (!paths.length) { ws.send(JSON.stringify({ type: 'ballchasing-result', data: { ok: false, message: 'No replay files selected.' } })); return; }
+        const { ok, dup, fail } = await bcUploadReplays(lg, paths);
+        leaguesVer++;
+        saveAppState();
+        broadcastFullState();
+        const parts = [];
+        if (ok) parts.push(`${ok} uploaded`);
+        if (dup) parts.push(`${dup} already there`);
+        if (fail) parts.push(`${fail} failed`);
+        ws.send(JSON.stringify({ type: 'ballchasing-result', data: { ok: fail === 0, message: (parts.join(', ') || 'Nothing to upload') + '. Ballchasing is processing — hit Refresh Stats in a moment.' } }));
+      })();
+      break;
+    }
+
+    // Pull the group's cumulative stats and fold them into the league's ballchasing sink
+    // (per-team + per-player leaderboard). Never touches lg.stats (manual entry).
+    case 'ballchasing_refresh_stats': {
+      (async () => {
+        const leagueId = msg.data && msg.data.leagueId;
+        const lg = (state.leagues || []).find((l) => l.id === leagueId);
+        if (!lg) { ws.send(JSON.stringify({ type: 'ballchasing-result', data: { ok: false, message: 'League not found.' } })); return; }
+        if (!lg.ballchasing.groupId) { ws.send(JSON.stringify({ type: 'ballchasing-result', data: { ok: false, message: 'Enable Ballchasing for this league first.' } })); return; }
+        if (!ballchasingApiKey) { ws.send(JSON.stringify({ type: 'ballchasing-result', data: { ok: false, message: 'Save your ballchasing.com API key in Settings first.' } })); return; }
+        try {
+          const client = createBallchasingClient(ballchasingApiKey);
+          const res = await client.getGroup(lg.ballchasing.groupId);
+          const summary = bcAggregateGroupIntoLeague(lg, res.data || {});
+          lg.ballchasing.pendingReplays = [];   // a successful refresh means the group has processed them
+          leaguesVer++;
+          saveAppState();
+          broadcastFullState();
+          ws.send(JSON.stringify({ type: 'ballchasing-result', data: { ok: true, message: lg.ballchasing.lastRefreshNote || `Refreshed ${summary.players} players.` } }));
+        } catch (e) {
+          ws.send(JSON.stringify({ type: 'ballchasing-result', data: { ok: false, message: e.message } }));
+        }
+      })();
+      break;
+    }
+
+    // Player-leaderboard overlay board (state.leagueLeaderboard) — same generic columns/rows shape as
+    // set_league_stats, but its own overlay + state slot so team stats and the leaderboard can run
+    // as two independent OBS sources at once.
+    case 'set_league_leaderboard': {
+      const p = msg.data || {};
+      if (typeof p.visible === 'boolean') state.leagueLeaderboard.visible = p.visible;
+      if (typeof p.title === 'string') state.leagueLeaderboard.title = p.title.slice(0, 80);
+      if (typeof p.subtitle === 'string') state.leagueLeaderboard.subtitle = p.subtitle.slice(0, 120);
+      if (Array.isArray(p.columns)) state.leagueLeaderboard.columns = p.columns.slice(0, 16);
+      if (Array.isArray(p.rows)) state.leagueLeaderboard.rows = p.rows.slice(0, 30);
+      saveAppState();
+      broadcastFullState();
+      break;
+    }
+
     // ── Org Library two-way sync controls ────────────────────────────────────
     case 'cloud_set_autosync': {
       state.orgLibrary.autoSync = !!(msg.data && msg.data.on);
@@ -14960,6 +15219,81 @@ function handleControlMessage(msg, ws) {
           }));
         }
       })();
+      break;
+    }
+
+    // ── Ballchasing.com (Rocket League replay stats) ──────────────────────────
+    // Same save/test/disconnect shape as start.gg above: an empty apiKey on save means "keep
+    // current" (so re-saving other ballchasing settings never wipes it) — disconnect is the only
+    // path that actually clears it.
+    case 'set_ballchasing_settings': {
+      const payload = msg.data || {};
+      if (typeof payload.apiKey === 'string' && payload.apiKey.trim()) {
+        ballchasingApiKey = payload.apiKey.trim();
+      }
+      saveAppState();
+      broadcastFullState();
+      break;
+    }
+
+    case 'ballchasing_disconnect': {
+      ballchasingApiKey = '';
+      state.ballchasing.connected = false;
+      state.ballchasing.lastError = null;
+      saveAppState();
+      broadcastFullState();
+      break;
+    }
+
+    case 'ballchasing_test_connection': {
+      (async () => {
+        try {
+          if (!ballchasingApiKey) throw new Error('No API key saved. Enter and save your key first.');
+          const client = createBallchasingClient(ballchasingApiKey);
+          await client.ping();
+          state.ballchasing.connected = true;
+          state.ballchasing.lastError = null;
+          saveAppState();
+          broadcastFullState();
+          ws.send(JSON.stringify({ type: 'ballchasing-result', data: { ok: true, message: '✓ Connected to ballchasing.com' } }));
+        } catch (e) {
+          state.ballchasing.connected = false;
+          state.ballchasing.lastError = e.message;
+          saveAppState();
+          broadcastFullState();
+          ws.send(JSON.stringify({ type: 'ballchasing-result', data: { ok: false, message: e.message } }));
+        }
+      })();
+      break;
+    }
+
+    // Opt-in local-folder auto-upload — off by default (see ballchasing-watcher.js). Starting/
+    // stopping the actual watcher happens in syncBallchasingAutoUpload(), called here.
+    case 'set_ballchasing_autoupload': {
+      const p = msg.data || {};
+      state.ballchasing.autoUpload = {
+        enabled: !!p.enabled,
+        folder: typeof p.folder === 'string' ? p.folder.trim() : (state.ballchasing.autoUpload.folder || ''),
+        activeLeagueId: typeof p.activeLeagueId === 'string' ? p.activeLeagueId : (state.ballchasing.autoUpload.activeLeagueId || '')
+      };
+      saveAppState();
+      broadcastFullState();
+      if (typeof syncBallchasingAutoUpload === 'function') syncBallchasingAutoUpload();
+      break;
+    }
+
+    case 'ballchasing_pick_autoupload_folder': {
+      dialog.showOpenDialog({
+        title: 'Select Rocket League Replay Folder',
+        properties: ['openDirectory'],
+        defaultPath: (state.ballchasing.autoUpload && state.ballchasing.autoUpload.folder) || undefined
+      }).then(({ canceled, filePaths }) => {
+        if (canceled || !filePaths || !filePaths[0]) return;
+        state.ballchasing.autoUpload.folder = filePaths[0];
+        saveAppState();
+        broadcastFullState();
+        if (typeof syncBallchasingAutoUpload === 'function') syncBallchasingAutoUpload();
+      }).catch(() => {});
       break;
     }
 
@@ -20483,6 +20817,8 @@ module.exports.start = function(baseDir) {
   loadTwitchData();
   loadDiscordUser();
   initFlowEngine();
+  // Resume Ballchasing auto-upload folder watching if it was left enabled.
+  try { syncBallchasingAutoUpload(); } catch (e) { console.warn('[Ballchasing] auto-upload resume skipped:', e.message); }
   // Resume LoL champ-select automation if it was left on.
   if (state.draft && state.draft.auto && state.draft.auto.enabled) { try { startLolDraftAuto(); } catch (e) {} }
   // Nameless cloud client — dormant unless BROADCAST_REMOTE_URL is configured.

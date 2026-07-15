@@ -514,6 +514,161 @@ function lgRenderStatsTab() {
   }));
 }
 
+// ── Ballchasing.com tab — group status, replay upload, stats refresh. A SEPARATE data sink from
+// lg.stats (the manual tab above): this never overwrites what a producer typed in by hand. ──
+function lgRenderBallchasingTab() {
+  const lg = lgActive(); if (!lg) return;
+  const bc = lg.ballchasing || {};
+  const esc = (s) => String(s == null ? '' : s).replace(/</g, '&lt;');
+
+  const pill = el('lg-bc-connected-pill');
+  const desc = el('lg-bc-status-desc');
+  const enableBtn = el('lg-bc-enable');
+  const groupLink = el('lg-bc-group-link');
+  const uploadSection = el('lg-bc-upload-section');
+  const refreshSection = el('lg-bc-refresh-section');
+
+  const hasGroup = !!bc.groupId;
+  if (pill) pill.style.display = hasGroup ? '' : 'none';
+  if (enableBtn) { enableBtn.style.display = hasGroup ? 'none' : ''; }
+  if (groupLink) {
+    if (hasGroup) { groupLink.style.display = ''; groupLink.href = bc.groupUrl || `https://ballchasing.com/group/${bc.groupId}`; }
+    else groupLink.style.display = 'none';
+  }
+  if (desc) {
+    desc.textContent = hasGroup
+      ? 'Ballchasing is set up for this league — upload replays below and refresh stats any time.'
+      : 'This league has no Ballchasing group yet — click Enable to create one (nothing to set up on ballchasing.com itself).';
+  }
+  if (uploadSection) uploadSection.style.display = hasGroup ? '' : 'none';
+  if (refreshSection) refreshSection.style.display = hasGroup ? '' : 'none';
+
+  const pendingChip = el('lg-bc-pending-chip');
+  if (pendingChip) {
+    const n = (bc.pendingReplays || []).length;
+    pendingChip.textContent = n ? `${n} replay${n === 1 ? '' : 's'} processing…` : '';
+  }
+
+  const refreshNote = el('lg-bc-refresh-note');
+  if (refreshNote) {
+    refreshNote.textContent = bc.lastRefreshNote || (bc.lastSyncedAt ? `Last refreshed ${new Date(bc.lastSyncedAt).toLocaleString()}` : 'Never refreshed yet.');
+  }
+
+  lgRenderBallchasingTeamStats(lg, esc);
+  lgRenderBallchasingLeaderboard(lg, esc);
+
+  // Global auto-upload settings (state.ballchasing.autoUpload) reflected into this league's tab.
+  const au = (currentState.ballchasing && currentState.ballchasing.autoUpload) || {};
+  const autoToggle = el('lg-bc-auto-toggle'), autoBox = el('lg-bc-auto-box'), autoPath = el('lg-bc-auto-folder-path');
+  if (autoToggle && document.activeElement !== autoToggle) autoToggle.checked = !!au.enabled;
+  if (autoBox) autoBox.style.display = au.enabled ? 'flex' : 'none';
+  if (autoPath) autoPath.textContent = au.folder ? (au.folder + (au.activeLeagueId === lg.id ? '' : '  — active league: another')) : 'No folder chosen yet.';
+}
+
+// Read-only preview of lg.ballchasingPlayers (the per-player leaderboard sink), sorted by score.
+function lgRenderBallchasingLeaderboard(lg, esc) {
+  const wrap = el('lg-bc-player-links'); if (!wrap) return;
+  const players = Object.values(lg.ballchasingPlayers || {});
+  if (!players.length) { wrap.innerHTML = ''; return; }
+  const rows = players.slice().sort((a, b) => (b.score || 0) - (a.score || 0)).slice(0, 12);
+  const cols = [['games', 'GP'], ['goals', 'G'], ['assists', 'A'], ['saves', 'Sv'], ['shots', 'Sh'], ['mvps', 'MVP']];
+  const head = `<tr><th class="lg2-stat-team">#</th><th class="lg2-stat-team">Player</th><th class="lg2-stat-team">Team</th>${cols.map((c) => `<th>${c[1]}</th>`).join('')}</tr>`;
+  const body = rows.map((p, i) => `<tr><td class="lg2-stat-ro">${i + 1}</td><td class="lg2-stat-team">${esc(p.name || 'Player')}</td><td class="lg2-stat-team" style="color:${p.teamId ? '#c4b5fd' : '#f0a860'}">${esc(p.teamName || '— unmatched')}</td>${cols.map((c) => `<td class="lg2-stat-ro">${p[c[0]] || 0}</td>`).join('')}</tr>`).join('');
+  wrap.innerHTML = `<div style="margin-top:10px;"><div class="sr-summary" style="margin-bottom:4px;">Player leaderboard preview (top 12 by score)</div><div class="lg2-st-scroll"><table class="lg2-st-table lg2-stat-table"><thead>${head}</thead><tbody>${body}</tbody></table></div></div>`;
+}
+
+// Read-only preview of lg.ballchasingStats (the auto-populated sink), same column shape as the
+// manual Stats tab's In-game tier so producers can compare the two at a glance.
+function lgRenderBallchasingTeamStats(lg, esc) {
+  const wrap = el('lg-bc-team-stats'); if (!wrap) return;
+  const teams = lg.teams || [];
+  const bs = lg.ballchasingStats || {};
+  if (!teams.length || !Object.keys(bs).length) {
+    wrap.innerHTML = '<div class="lg-empty">No Ballchasing stats yet — upload replays, then Refresh Stats.</div>';
+    return;
+  }
+  const cols = ['goals', 'assists', 'saves', 'shots', 'mvps', 'demos'];
+  const labels = { goals: 'Goals', assists: 'Assists', saves: 'Saves', shots: 'Shots', mvps: 'MVPs', demos: 'Demos' };
+  const head = `<tr><th class="lg2-stat-team">Team</th>${cols.map((c) => `<th>${labels[c]}</th>`).join('')}</tr>`;
+  const body = teams.map((tm) => {
+    const r = lgResolveTeam(tm); const s = bs[tm.id] || {};
+    return `<tr><td class="lg2-stat-team">${esc(r.name || tm.teamName || 'Team')}</td>${cols.map((c) => `<td class="lg2-stat-ro">${s[c] || 0}</td>`).join('')}</tr>`;
+  }).join('');
+  wrap.innerHTML = `<div class="lg2-st-scroll"><table class="lg2-st-table lg2-stat-table"><thead>${head}</thead><tbody>${body}</tbody></table></div>`;
+}
+
+el('lg-bc-enable')?.addEventListener('click', () => {
+  const lg = lgActive(); if (!lg) return;
+  send('ballchasing_enable_group', { leagueId: lg.id });
+});
+
+// Upload: an Electron <input type=file> exposes each File's absolute .path — send those to the
+// server, which streams them to ballchasing (no server-side file dialog needed).
+el('lg-bc-upload')?.addEventListener('click', () => el('lg-bc-upload-file')?.click());
+el('lg-bc-upload-file')?.addEventListener('change', function () {
+  const lg = lgActive(); const paths = [...(this.files || [])].map((f) => f.path).filter(Boolean);
+  this.value = '';
+  if (!lg || !paths.length) return;
+  const r = el('lg-bc-result'); if (r) { r.style.color = 'var(--muted)'; r.textContent = `Uploading ${paths.length} replay${paths.length === 1 ? '' : 's'}…`; }
+  send('ballchasing_upload_replays', { leagueId: lg.id, paths });
+});
+
+el('lg-bc-refresh')?.addEventListener('click', () => {
+  const lg = lgActive(); if (!lg) return;
+  const r = el('lg-bc-result'); if (r) { r.style.color = 'var(--muted)'; r.textContent = 'Refreshing stats from ballchasing…'; }
+  send('ballchasing_refresh_stats', { leagueId: lg.id });
+});
+
+// Push team totals to the league-stats overlay (reuses set_league_stats — same overlay as the
+// manual Stats tab, but sourced from the ballchasing sink).
+el('lg-bc-push-stats')?.addEventListener('click', () => {
+  const lg = lgActive(); if (!lg) return;
+  const bs = lg.ballchasingStats || {};
+  if (!Object.keys(bs).length) { lgStatus('No Ballchasing team stats yet — Refresh Stats first.', false); return; }
+  const cols = [['goals', 'Goals'], ['assists', 'Assists'], ['saves', 'Saves'], ['shots', 'Shots'], ['mvps', 'MVPs'], ['demos', 'Demos']];
+  const columns = cols.map((c) => ({ key: c[0], label: c[1], group: 'Ballchasing' }));
+  const rows = (lg.teams || []).filter((tm) => bs[tm.id]).map((tm) => {
+    const s = bs[tm.id] || {}, rt = lgResolveTeam(tm);
+    const values = {}; cols.forEach((c) => { values[c[0]] = s[c[0]] || 0; });
+    return { name: rt.name || tm.teamName || 'Team', logo: rt.logo || null, color: tm.color || null, values };
+  });
+  const title = [lg.name, lg.season].filter(Boolean).join(' — ');
+  send('set_league_stats', { visible: true, title: title || 'Team Stats', subtitle: 'via ballchasing.com', columns, rows });
+  lgStatus('Ballchasing team stats pushed to the league-stats overlay.', true);
+});
+
+// Push the per-player leaderboard to its own overlay (state.leagueLeaderboard).
+el('lg-bc-push-leaderboard')?.addEventListener('click', () => {
+  const lg = lgActive(); if (!lg) return;
+  const players = Object.values(lg.ballchasingPlayers || {});
+  if (!players.length) { lgStatus('No Ballchasing player stats yet — Refresh Stats first.', false); return; }
+  const cols = [['games', 'GP'], ['goals', 'Goals'], ['assists', 'Assists'], ['saves', 'Saves'], ['shots', 'Shots'], ['mvps', 'MVPs']];
+  const columns = cols.map((c) => ({ key: c[0], label: c[1] }));
+  const rows = players.slice().sort((a, b) => (b.score || 0) - (a.score || 0)).slice(0, 20).map((p) => {
+    const values = {}; cols.forEach((c) => { values[c[0]] = p[c[0]] || 0; });
+    return { name: p.name || 'Player', team: p.teamName || '', values };
+  });
+  const title = [lg.name, lg.season].filter(Boolean).join(' — ');
+  send('set_league_leaderboard', { visible: true, title: title || 'Player Leaderboard', subtitle: 'via ballchasing.com', columns, rows });
+  lgStatus('Player leaderboard pushed to the league-leaderboard overlay.', true);
+});
+
+// Auto-upload folder watcher (global setting; the active league is the one currently open).
+el('lg-bc-auto-toggle')?.addEventListener('change', function () {
+  const lg = lgActive();
+  const au = (currentState.ballchasing && currentState.ballchasing.autoUpload) || {};
+  send('set_ballchasing_autoupload', { enabled: this.checked, folder: au.folder || '', activeLeagueId: lg ? lg.id : (au.activeLeagueId || '') });
+});
+el('lg-bc-auto-folder')?.addEventListener('click', () => send('ballchasing_pick_autoupload_folder', {}));
+
+window._handleBallchasingLeagueResult = function (data) {
+  const r = el('lg-bc-result');
+  if (r) {
+    r.style.color = data.ok ? '#86efac' : '#f87171';
+    r.textContent = data.message || '';
+  }
+};
+
 function lgComputeStandingsFromSchedule() {
   const lg = lgActive(); if (!lg) return;
   const completed = (lg.schedule || []).filter(m => m.result && (m.result.scoreA != null || m.result.scoreB != null));
@@ -1053,7 +1208,7 @@ function lgRenderOverview() {
 function lgSwitchTab(name) {
   _lgActiveTab = name;
   document.querySelectorAll('#lg2-tabs .lg2-tab').forEach((b) => b.classList.toggle('active', b.dataset.tab === name));
-  ['overview', 'roster', 'standings', 'schedule', 'stats', 'settings'].forEach((t) => {
+  ['overview', 'roster', 'standings', 'schedule', 'stats', 'ballchasing', 'settings'].forEach((t) => {
     const p = el('lg2-panel-' + t); if (p) p.style.display = t === name ? '' : 'none';
   });
   if (name === 'overview') lgRenderOverview();
@@ -1061,6 +1216,7 @@ function lgSwitchTab(name) {
   else if (name === 'standings') lgRenderStandingsTab();
   else if (name === 'schedule') lgRenderScheduleTab();
   else if (name === 'stats') lgRenderStatsTab();
+  else if (name === 'ballchasing') lgRenderBallchasingTab();
   else if (name === 'settings') lgRenderSettingsTab();
 }
 
@@ -1078,6 +1234,14 @@ function lgUpdateBanner() {
   if (imgEl && phEl) {
     if (lg.logo) { imgEl.src = lg.logo; imgEl.style.display = ''; phEl.style.display = 'none'; }
     else { imgEl.style.display = 'none'; phEl.style.display = ''; const ph = el('lg2-logo-abbr-ph'); if (ph) ph.textContent = lg.abbr || (lg.name || 'LOGO').slice(0, 4).toUpperCase(); }
+  }
+  // Ballchasing only applies to Rocket League — hide the tab entirely for every other game,
+  // and bounce off it if it was active when the producer switched leagues/games.
+  const bcTab = el('lg2-tab-ballchasing');
+  if (bcTab) {
+    const showBc = lg.game === 'rocket-league';
+    bcTab.style.display = showBc ? '' : 'none';
+    if (!showBc && _lgActiveTab === 'ballchasing') lgSwitchTab('overview');
   }
   // Chips
   const chips = el('lg2-banner-chips'); if (!chips) return;

@@ -6635,6 +6635,8 @@ function applyState(data) {
   if (typeof renderChallongeSettings === 'function') renderChallongeSettings(data);
   // NXGEN settings
   if (typeof renderNxgenSettings === 'function') renderNxgenSettings(data);
+  // Ballchasing settings
+  if (typeof renderBallchasingSettings === 'function') renderBallchasingSettings(data);
 }
 
 function getStartggPayload() {
@@ -10471,6 +10473,121 @@ function renderNxgenSettings(data) {
     resultEl.style.color = '#f87171'; resultEl.textContent = nx.lastError;
   }
 }
+
+// ── Ballchasing.com (Rocket League replay stats) — Settings panel ──────────
+function renderBallchasingSettings(data) {
+  const b = data.ballchasing || {};
+  const keyInp = el('input-ballchasing-key');
+  const indicator = el('ballchasing-key-indicator');
+  const changeBtn = el('btn-ballchasing-change-key');
+  const disconnectBtn = el('btn-ballchasing-disconnect');
+  const resultEl = el('ballchasing-result');
+
+  if (keyInp) {
+    if (b.hasKey && !keyInp.value) {
+      keyInp.readOnly = true; keyInp.value = ''; keyInp.placeholder = '••••••••••••••••••••';
+      keyInp.style.opacity = '0.5'; keyInp.style.cursor = 'default';
+      if (changeBtn) changeBtn.style.display = '';
+      if (disconnectBtn) disconnectBtn.style.display = '';
+      if (indicator) indicator.style.display = b.connected ? '' : 'none';
+    } else if (!b.hasKey) {
+      keyInp.readOnly = false; keyInp.style.opacity = ''; keyInp.style.cursor = '';
+      keyInp.placeholder = 'Paste your ballchasing.com API key';
+      if (changeBtn) changeBtn.style.display = 'none';
+      if (disconnectBtn) disconnectBtn.style.display = 'none';
+      if (indicator) indicator.style.display = 'none';
+    }
+  }
+
+  if (resultEl && b.lastError && !resultEl._userMsg) {
+    resultEl.style.color = '#f56565'; resultEl.textContent = 'Last error: ' + b.lastError;
+  }
+
+  const au = b.autoUpload || {};
+  const autoCb = el('check-ballchasing-autoupload');
+  const autoOpts = el('ballchasing-autoupload-opts');
+  const folderInp = el('input-ballchasing-folder');
+  const leagueSel = el('select-ballchasing-autoleague');
+  if (autoCb && document.activeElement !== autoCb) autoCb.checked = !!au.enabled;
+  if (autoOpts) autoOpts.style.display = au.enabled ? 'flex' : 'none';
+  if (folderInp && document.activeElement !== folderInp) folderInp.value = au.folder || '';
+  if (leagueSel && document.activeElement !== leagueSel) {
+    const rlLeagues = (data.leagues || []).filter((lg) => lg.game === 'rocket-league' && lg.ballchasing && lg.ballchasing.groupId);
+    leagueSel.innerHTML = '<option value="">— pick a league with Ballchasing enabled —</option>'
+      + rlLeagues.map((lg) => `<option value="${escapeHtml(lg.id)}"${au.activeLeagueId === lg.id ? ' selected' : ''}>${escapeHtml(lg.name || 'Unnamed league')}</option>`).join('');
+  }
+}
+
+window._handleBallchasingResult = function (data) {
+  const r = el('ballchasing-result');
+  if (r) {
+    r._userMsg = true;
+    r.style.color = data.ok ? '#86efac' : '#f87171';
+    r.textContent = data.message || '';
+    setTimeout(() => { r._userMsg = false; }, 5000);
+  }
+};
+
+el('btn-ballchasing-save')?.addEventListener('click', () => {
+  const key = el('input-ballchasing-key')?.value.trim() || '';
+  send('set_ballchasing_settings', { apiKey: key });
+  if (key) showToast('Ballchasing key saved.', '#22c55e');
+});
+
+el('btn-ballchasing-test')?.addEventListener('click', () => {
+  const key = el('input-ballchasing-key')?.value.trim() || '';
+  if (key) send('set_ballchasing_settings', { apiKey: key });
+  send('ballchasing_test_connection');
+});
+
+el('btn-ballchasing-change-key')?.addEventListener('click', () => {
+  const keyEl = el('input-ballchasing-key');
+  const changeBtn = el('btn-ballchasing-change-key');
+  const indicator = el('ballchasing-key-indicator');
+  if (!keyEl) return;
+  keyEl.readOnly = false; keyEl.value = ''; keyEl.placeholder = 'Paste your new ballchasing.com API key';
+  keyEl.style.opacity = ''; keyEl.style.cursor = '';
+  if (changeBtn) changeBtn.style.display = 'none';
+  if (indicator) indicator.style.display = 'none';
+  keyEl.focus();
+});
+
+el('btn-ballchasing-disconnect')?.addEventListener('click', () => {
+  appConfirm(
+    'Disconnect ballchasing.com? This removes the saved API key. Any leagues with Ballchasing enabled keep their group link — reconnect by pasting a key again.',
+    'Disconnect', true
+  ).then((confirmed) => {
+    if (!confirmed) return;
+    send('ballchasing_disconnect', {});
+    const keyEl = el('input-ballchasing-key');
+    if (keyEl) { keyEl.readOnly = false; keyEl.value = ''; keyEl.style.opacity = ''; keyEl.style.cursor = ''; keyEl.placeholder = 'Paste your ballchasing.com API key'; }
+    ['btn-ballchasing-change-key', 'btn-ballchasing-disconnect', 'ballchasing-key-indicator'].forEach((id) => { const e = el(id); if (e) e.style.display = 'none'; });
+    showToast('Ballchasing disconnected.', '#22c55e');
+  });
+});
+
+el('check-ballchasing-autoupload')?.addEventListener('change', function () {
+  const folder = el('input-ballchasing-folder')?.value.trim() || '';
+  const activeLeagueId = el('select-ballchasing-autoleague')?.value || '';
+  send('set_ballchasing_autoupload', { enabled: this.checked, folder, activeLeagueId });
+});
+el('input-ballchasing-folder')?.addEventListener('change', function () {
+  send('set_ballchasing_autoupload', {
+    enabled: !!el('check-ballchasing-autoupload')?.checked,
+    folder: this.value.trim(),
+    activeLeagueId: el('select-ballchasing-autoleague')?.value || ''
+  });
+});
+el('select-ballchasing-autoleague')?.addEventListener('change', function () {
+  send('set_ballchasing_autoupload', {
+    enabled: !!el('check-ballchasing-autoupload')?.checked,
+    folder: el('input-ballchasing-folder')?.value.trim() || '',
+    activeLeagueId: this.value
+  });
+});
+el('btn-ballchasing-browse-folder')?.addEventListener('click', () => {
+  send('ballchasing_pick_autoupload_folder', {});
+});
 
 function renderNxgenTeams(teams) {
   const list = el('nxgen-teams-list'); if (!list) return;
@@ -26285,6 +26402,11 @@ async function connect() {
       if (typeof window._handleChallongeResult === 'function') window._handleChallongeResult(msg.data);
     } else if (msg.type === 'nxgen-result') {
       if (typeof window._handleNxgenResult === 'function') window._handleNxgenResult(msg.data);
+    } else if (msg.type === 'ballchasing-result') {
+      // Two independent result boxes can show this — the Settings panel's connection test, and a
+      // specific league's Ballchasing tab (Enable/Upload/Refresh) — update whichever is present.
+      if (typeof window._handleBallchasingResult === 'function') window._handleBallchasingResult(msg.data);
+      if (typeof window._handleBallchasingLeagueResult === 'function') window._handleBallchasingLeagueResult(msg.data);
     } else if (msg.type === 'link-result') {
       const d = msg.data || {};
       const logEl = el('ev-sync-log');

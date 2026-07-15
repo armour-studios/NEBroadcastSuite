@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<!--
+  league-leaderboard.html — dedicated PLAYER LEADERBOARD board. Renders state.leagueLeaderboard
+  (pushed from Leagues ▸ Ballchasing ▸ Push Leaderboard): a ranked table of players × stats sourced
+  from ballchasing.com replay data. Own overlay + state slot so it can run alongside the team-stats
+  board (league-stats.html) as two independent OBS sources. Reuses scene-base.js + a fit()-to-16:9
+  scale, matching league-stats.html's conventions.
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1920">
+<title>NE Broadcast Suite — League Leaderboard</title>
+<style>
+  :root { --accent: #e83a8b; --accent-2: #a855f7; --main-font: 'Bourgeois', 'Inter', sans-serif; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 1920px; height: 1080px; overflow: hidden; background: transparent; font-family: var(--main-font); }
+  .lb-stage {
+    position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 30px; padding: 24px 76px 0;
+    background:
+      radial-gradient(1200px 700px at 50% -8%, rgba(255,255,255,.05), transparent 60%),
+      radial-gradient(1000px 600px at 88% 108%, color-mix(in srgb, var(--accent-2) 22%, transparent), transparent 60%),
+      linear-gradient(180deg, #0a0b10, #05060a);
+    opacity: 0; transition: opacity .45s ease;
+  }
+  .lb-stage.show { opacity: 1; }
+  .lb-scale { transform-origin: center center; display: flex; flex-direction: column; gap: 26px; align-items: stretch; }
+
+  .lb-header { display: flex; align-items: center; gap: 22px; }
+  .lb-brand { height: 76px; max-width: 300px; object-fit: contain; filter: drop-shadow(0 4px 14px rgba(0,0,0,.5)); }
+  .lb-headtext { display: flex; flex-direction: column; gap: 4px; }
+  .lb-eyebrow { font-size: 15px; font-weight: 800; letter-spacing: .34em; text-transform: uppercase; color: var(--accent); }
+  .lb-title { font-size: 52px; font-weight: 900; letter-spacing: .01em; line-height: .98; color: #fff; text-transform: uppercase; }
+  .lb-subtitle { font-size: 19px; font-weight: 600; color: #aeb4c4; letter-spacing: .02em; }
+  .lb-count { margin-left: auto; display: flex; flex-direction: column; align-items: center; line-height: 1;
+    padding: 12px 20px; border-radius: 14px; background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.08); }
+  .lb-count b { font-size: 30px; font-weight: 900; color: #fff; }
+  .lb-count span { font-size: 11px; font-weight: 800; letter-spacing: .18em; text-transform: uppercase; color: #7a8296; margin-top: 4px; }
+
+  .lb-table { border-collapse: separate; border-spacing: 0; background: rgba(12,14,20,.72); border: 1px solid rgba(255,255,255,.08);
+    border-radius: 18px; overflow: hidden; backdrop-filter: blur(3px); box-shadow: 0 30px 80px -30px rgba(0,0,0,.8); }
+  .lb-table th, .lb-table td { font-variant-numeric: tabular-nums; text-align: center; white-space: nowrap; }
+  .lb-colrow th { padding: 14px 18px; font-size: 15px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; color: #8b93a6;
+    border-bottom: 1px solid rgba(255,255,255,.1); }
+  .lb-th-rank { width: 64px; }
+  .lb-th-player { text-align: left !important; }
+  .lb-table tbody td { padding: 12px 18px; font-size: 24px; font-weight: 700; color: #e9edf6; border-bottom: 1px solid rgba(255,255,255,.05); }
+  .lb-table tbody tr:last-child td { border-bottom: none; }
+  .lb-table tbody tr:nth-child(even) td { background: rgba(255,255,255,.018); }
+  .lb-rank { font-size: 26px; font-weight: 900; color: #6d768c; }
+  .lb-r1 .lb-rank { color: #ffd54a; } .lb-r2 .lb-rank { color: #cfd6e4; } .lb-r3 .lb-rank { color: #e39a5a; }
+  .lb-td-player { text-align: left !important; position: relative; padding-left: 26px !important; }
+  .lb-td-player::before { content: ''; position: absolute; left: 0; top: 10px; bottom: 10px; width: 5px; border-radius: 3px; background: var(--row, var(--accent)); }
+  .lb-player-cell { display: flex; flex-direction: column; gap: 2px; align-items: flex-start; }
+  .lb-name { font-size: 25px; font-weight: 800; color: #fff; letter-spacing: .01em; }
+  .lb-team { font-size: 14px; font-weight: 700; color: #8b93a6; letter-spacing: .04em; text-transform: uppercase; }
+  .lb-empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #6a7080; font-size: 22px; }
+
+  .lb-sponsors { position: absolute; left: 0; right: 0; bottom: 26px; display: flex; align-items: center; justify-content: center; gap: 26px; }
+  .lb-sponsors.is-empty { display: none; }
+  .lb-sponsors-lbl { font-size: 11px; font-weight: 800; letter-spacing: .24em; text-transform: uppercase; color: #6a7080; }
+  .lb-sponsor { height: 30px; max-width: 122px; object-fit: contain; opacity: .88; filter: drop-shadow(0 2px 6px rgba(0,0,0,.4)); }
+</style>
+</head>
+<body>
+
+<div id="lb-stage" class="lb-stage">
+  <div class="lb-scale" id="lb-scale">
+    <div class="lb-header">
+      <img class="lb-brand" id="lb-brand" alt="" style="display:none;">
+      <div class="lb-headtext">
+        <div class="lb-eyebrow">Player Leaderboard</div>
+        <div class="lb-title" id="lb-title">LEADERBOARD</div>
+        <div class="lb-subtitle" id="lb-subtitle" style="display:none;"></div>
+      </div>
+      <div class="lb-count" id="lb-count"></div>
+    </div>
+    <table class="lb-table" id="lb-table"></table>
+  </div>
+  <div class="lb-empty" id="lb-empty" style="display:none;">No leaderboard pushed yet — open Leagues ▸ Ballchasing and hit Push Leaderboard.</div>
+  <div class="lb-sponsors is-empty" id="lb-sponsors"></div>
+</div>
+
+<script src="scene-base.js"></script>
+<script>
+(function () {
+  function el(id) { return document.getElementById(id); }
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+
+  function fit() {
+    const scale = el('lb-scale'); if (!scale) return;
+    scale.style.transform = 'scale(1)';
+    const availW = 1920 - 140, availH = 1080 - 48 - 78;
+    const w = Math.max(scale.offsetWidth, scale.scrollWidth) || 1;
+    const h = Math.max(scale.offsetHeight, scale.scrollHeight) || 1;
+    const s = Math.min(availW / w, availH / h, 1.1);
+    scale.style.transform = `scale(${s})`;
+  }
+
+  let _sig = '';
+  function render(data) {
+    const stage = el('lb-stage'); if (!stage) return;
+    if (!data.leagueLeaderboard && !SceneBase.preview) { stage.classList.remove('show'); return; }
+    const lb = data.leagueLeaderboard || {};
+    stage.classList.add('show');
+
+    const accent = SceneBase.brandColor(data) || '#e83a8b';
+    const accent2 = SceneBase.brandAccent(data) || accent;
+    const title = (lb.title || 'LEADERBOARD').toString().toUpperCase();
+    const subtitle = (lb.subtitle || '').toString();
+    const columns = Array.isArray(lb.columns) ? lb.columns : [];
+    const rows = Array.isArray(lb.rows) ? lb.rows : [];
+    const brandLogo = SceneBase.brandLogo(data) || '';
+
+    const brand = data.brand || {};
+    const anyTagged = (brand.deskSponsors || []).length || (brand.railSponsors || []).length || (brand.bannerSponsors || []).length;
+    const sponsors = ((brand.deskSponsors || []).length ? brand.deskSponsors : (anyTagged ? [] : (brand.sponsors || []))).filter((s) => s && s.logo);
+
+    const sig = JSON.stringify({
+      title, subtitle, accent, accent2, bl: brandLogo.slice(0, 40), f: data.fontFamily || '',
+      cols: columns.map((c) => (c.key || '') + (c.label || '')).join('|'),
+      rws: rows.map((r) => (r.name || '') + '|' + (r.team || '') + '|' + (r.color || '') + '|' + JSON.stringify(r.values || {})).join('~'),
+      sp: sponsors.map((s) => s.logo && s.logo.slice(0, 40))
+    });
+    if (sig === _sig) return;
+    _sig = sig;
+
+    const root = document.documentElement.style;
+    root.setProperty('--accent', accent);
+    root.setProperty('--accent-2', accent2);
+    if (data.fontFamily) root.setProperty('--main-font', `'${data.fontFamily}', 'Bourgeois', 'Inter', sans-serif`);
+    el('lb-title').textContent = title;
+    const subEl = el('lb-subtitle'); subEl.textContent = subtitle; subEl.style.display = subtitle ? '' : 'none';
+
+    const brandEl = el('lb-brand');
+    if (brandLogo) { if (brandEl.getAttribute('src') !== brandLogo) brandEl.src = brandLogo; brandEl.style.display = ''; }
+    else brandEl.style.display = 'none';
+
+    const sp = el('lb-sponsors');
+    sp.innerHTML = sponsors.length ? '<span class="lb-sponsors-lbl">Presented by</span>' + sponsors.map((s) => `<img class="lb-sponsor" src="${s.logo}" alt="">`).join('') : '';
+    sp.classList.toggle('is-empty', !sponsors.length);
+
+    const table = el('lb-table'), empty = el('lb-empty');
+    if (!columns.length || !rows.length) {
+      table.innerHTML = ''; el('lb-count').innerHTML = ''; empty.style.display = ''; return;
+    }
+    empty.style.display = 'none';
+    el('lb-count').innerHTML = `<b>${rows.length}</b><span>Players</span>`;
+
+    const colHtml = '<th class="lb-th-rank">#</th><th class="lb-th-player">Player</th>' + columns.map((c) => `<th title="${esc(c.label)}">${esc(c.label)}</th>`).join('');
+    const bodyHtml = rows.map((r, i) => {
+      const color = r.color || (i === 0 ? accent : accent2);
+      const cells = columns.map((c) => { const v = r.values && r.values[c.key]; return `<td>${v == null || v === '' ? '—' : esc(v)}</td>`; }).join('');
+      const teamLine = r.team ? `<span class="lb-team">${esc(r.team)}</span>` : '';
+      return `<tr class="lb-r${i + 1}" style="--row:${esc(color)}"><td><span class="lb-rank">${i + 1}</span></td><td class="lb-td-player"><span class="lb-player-cell"><span class="lb-name">${esc(r.name || 'Player')}</span>${teamLine}</span></td>${cells}</tr>`;
+    }).join('');
+    table.innerHTML = `<thead><tr class="lb-colrow">${colHtml}</tr></thead><tbody>${bodyHtml}</tbody>`;
+
+    requestAnimationFrame(fit);
+  }
+
+  if (location.protocol === 'file:') {
+    render({
+      leagueLeaderboard: {
+        title: 'Rocket Rush — Season 2', subtitle: 'via ballchasing.com',
+        columns: [
+          { key: 'games', label: 'GP' }, { key: 'goals', label: 'Goals' }, { key: 'assists', label: 'Assists' },
+          { key: 'saves', label: 'Saves' }, { key: 'shots', label: 'Shots' }, { key: 'mvps', label: 'MVPs' }
+        ],
+        rows: [
+          { name: 'Jonzey', team: 'Velocity Gaming', values: { games: 27, goals: 41, assists: 22, saves: 30, shots: 96, mvps: 9 } },
+          { name: 'BigFroFella', team: 'Team Apex', values: { games: 27, goals: 38, assists: 25, saves: 34, shots: 90, mvps: 7 } },
+          { name: 'Hyper', team: 'Nova Collective', values: { games: 24, goals: 33, assists: 19, saves: 28, shots: 84, mvps: 6 } },
+          { name: 'Sporty', team: 'Iron Wolves', values: { games: 24, goals: 26, assists: 27, saves: 31, shots: 77, mvps: 4 } },
+          { name: 'Christian', team: 'Phantom Squad', values: { games: 21, goals: 22, assists: 14, saves: 25, shots: 70, mvps: 3 } }
+        ]
+      }
+    });
+  } else {
+    SceneBase.connect(render);
+  }
+})();
+</script>
+</body>
+</html>
