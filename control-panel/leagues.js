@@ -1302,18 +1302,109 @@ function lgRenderNextMatches() {
     send('reset_series'); lgStatus(`${ra.name} vs ${rb.name} pushed live.`, true);
   }));
 }
+// ── Overview cockpit ─────────────────────────────────────────────────────────
+const LG_OV_KEY = 'ne_lg_overview_v1';
+function lgOvPrefs() { try { return Object.assign({ density: 'comfortable', hidden: [] }, JSON.parse(localStorage.getItem(LG_OV_KEY) || '{}')); } catch { return { density: 'comfortable', hidden: [] }; } }
+function lgOvSavePrefs(p) { try { localStorage.setItem(LG_OV_KEY, JSON.stringify(p)); } catch {} }
+const LG_OV_CARDS = [['standings', 'Standings'], ['broadcast', 'Broadcast'], ['leaders', 'Leaders'], ['thisweek', 'This Week']];
+
+function lgApplyOvLayout() {
+  const p = lgOvPrefs();
+  const panel = el('lg2-panel-overview');
+  if (panel) panel.classList.toggle('lgov-compact', p.density === 'compact');
+  document.querySelectorAll('#lgov-density .seg-btn').forEach((b) => b.classList.toggle('active', b.dataset.d === p.density));
+  LG_OV_CARDS.forEach(([id]) => { const c = document.querySelector(`.lgov-card[data-card="${id}"]`); if (c) c.style.display = p.hidden.includes(id) ? 'none' : ''; });
+  const tg = el('lgov-card-toggles');
+  if (tg) {
+    tg.innerHTML = LG_OV_CARDS.map(([id, lbl]) => `<button type="button" class="lgov-card-tg${p.hidden.includes(id) ? '' : ' on'}" data-card="${id}">${lbl}</button>`).join('');
+    tg.querySelectorAll('.lgov-card-tg').forEach((b) => b.addEventListener('click', () => {
+      const pr = lgOvPrefs(); const id = b.dataset.card;
+      pr.hidden = pr.hidden.includes(id) ? pr.hidden.filter((x) => x !== id) : [...pr.hidden, id];
+      lgOvSavePrefs(pr); lgApplyOvLayout();
+    }));
+  }
+}
+
+// Compact standings snapshot with a playoff cut-line — the landing view of the table.
+function lgRenderStandingsSnap() {
+  const wrap = el('lgov-standings-snap'); const lg = lgActive(); if (!wrap || !lg) return;
+  const esc = (s) => String(s == null ? '' : s).replace(/</g, '&lt;');
+  const topN = parseInt((el('lgov-topn') || {}).value, 10); const limit = topN > 0 ? topN : 999;
+  const playoffN = lg.playoffN || 0;
+  const byId = {}; (lg.standings || []).forEach((s) => { byId[s.teamId] = s; });
+  const teamsById = {}; (lg.teams || []).forEach((t) => { teamsById[t.id] = t; });
+  const ordered = (lg.standings && lg.standings.length)
+    ? lg.standings.map((s) => teamsById[s.teamId]).filter(Boolean)
+    : (lg.teams || []).slice().sort((a, b) => ((byId[b.id] || {}).pts || 0) - ((byId[a.id] || {}).pts || 0));
+  if (!ordered.length) { wrap.innerHTML = '<div class="lg-empty">Add teams to see standings.</div>'; return; }
+  const gs = lgGameStats(lg.game);
+  const rows = ordered.slice(0, limit).map((tm, i) => {
+    const s = byId[tm.id] || {}; const r = lgResolveTeam(tm);
+    const form = (s.form || []).slice(-5).map((f) => `<span class="lg2-fd lg2-fd-${String(f).toLowerCase()}">${esc(f)}</span>`).join('');
+    const cut = playoffN && i === playoffN ? ' lgov-snap-cut' : '';
+    return `<tr class="lgov-snap-row${cut}">
+      <td class="lgov-snap-pos">${playoffN && i < playoffN ? '<span class="lg2-playoff-dot" title="Playoff spot"></span>' : ''}${i + 1}</td>
+      <td class="lgov-snap-team"><img class="lgov-snap-logo" src="${r.logo || gameLogo()}" onerror="this.style.visibility='hidden'"><span>${esc(r.name || tm.teamName || 'Team')}</span></td>
+      <td class="lgov-snap-rec">${s.w || 0}<span class="lgov-snap-dim">-</span>${s.l || 0}${s.t ? '<span class="lgov-snap-dim">-</span>' + s.t : ''}</td>
+      <td class="lgov-snap-pts">${s.pts || 0}</td>
+      <td class="lgov-snap-form">${form}</td>
+    </tr>`;
+  }).join('');
+  wrap.innerHTML = `<table class="lgov-snap-table"><thead><tr><th>#</th><th class="lgov-snap-team">Team</th><th title="Series record">W-L</th><th>Pts</th><th>Form</th></tr></thead><tbody>${rows}</tbody></table>`
+    + (topN > 0 && ordered.length > topN ? `<div class="lgov-snap-more">+${ordered.length - topN} more · <span class="lgov-link" id="lgov-snap-viewall">view full</span></div>` : '');
+  const va = el('lgov-snap-viewall'); if (va) va.addEventListener('click', () => lgSwitchTab('standings'));
+}
+
+// Leaders card — top scorer / most saves / MVP from the Ballchasing sync, plus the points leader.
+function lgRenderLeaders() {
+  const wrap = el('lgov-leaders'); const lg = lgActive(); if (!wrap || !lg) return;
+  const esc = (s) => String(s == null ? '' : s).replace(/</g, '&lt;');
+  const players = Object.values(lg.ballchasingPlayers || {});
+  const chips = [];
+  const byId = {}; (lg.standings || []).forEach((s) => { byId[s.teamId] = s; });
+  const ordered = (lg.standings || []).map((s) => ({ tm: (lg.teams || []).find((t) => t.id === s.teamId), s })).filter((x) => x.tm);
+  if (ordered.length) { const top = ordered[0]; chips.push(['Points leader', lgResolveTeam(top.tm).name, `${top.s.pts || 0} pts`]); }
+  if (players.length) {
+    const top = (k) => players.slice().sort((a, b) => (b[k] || 0) - (a[k] || 0))[0];
+    const g = top('goals'), sv = top('saves'), mv = top('mvps');
+    if (g && g.goals) chips.push(['Top scorer', g.name, `${g.goals} goals`, g.teamName]);
+    if (sv && sv.saves) chips.push(['Most saves', sv.name, `${sv.saves} saves`, sv.teamName]);
+    if (mv && mv.mvps) chips.push(['Most MVPs', mv.name, `${mv.mvps} MVP`, mv.teamName]);
+  }
+  if (!chips.length) { wrap.innerHTML = '<div class="lg-empty">Leaders appear once results and Ballchasing stats are in.</div>'; return; }
+  wrap.innerHTML = chips.map(([lbl, name, val, sub]) => `<div class="lgov-leader">
+    <div class="lgov-leader-lbl">${esc(lbl)}</div>
+    <div class="lgov-leader-name">${esc(name)}</div>
+    <div class="lgov-leader-val">${esc(val)}${sub ? ` <span class="lgov-leader-sub">${esc(sub)}</span>` : ''}</div>
+  </div>`).join('');
+}
+
 function lgRenderOverview() {
   const lg = lgActive(); if (!lg) return;
   const schedule = lg.schedule || [];
   const played = schedule.filter((m) => m.result && m.result.scoreA != null).length;
+  const total = schedule.length;
   if (el('lg2-stat-teams')) el('lg2-stat-teams').textContent = (lg.teams || []).length;
   if (el('lg2-stat-played')) el('lg2-stat-played').textContent = played;
-  if (el('lg2-stat-remaining')) el('lg2-stat-remaining').textContent = schedule.length - played;
+  if (el('lg2-stat-total')) el('lg2-stat-total').textContent = total;
+  if (el('lg2-stat-remaining')) el('lg2-stat-remaining').textContent = total - played;
+  if (el('lgov-progress-fill')) el('lgov-progress-fill').style.width = (total ? Math.round((played / total) * 100) : 0) + '%';
   const byId = {}; (lg.standings || []).forEach((s) => { byId[s.teamId] = s; });
   let leader = null, topPts = -1;
   for (const tm of (lg.teams || [])) { const pts = (byId[tm.id] || {}).pts || 0; if (pts > topPts) { topPts = pts; leader = lgResolveTeam(tm).name; } }
   if (el('lg2-stat-leader')) el('lg2-stat-leader').textContent = ((lg.standings || []).length && leader) ? leader : '—';
   if (el('lg2-stat-seasons')) el('lg2-stat-seasons').textContent = (lg.seasonHistory || []).length;
+  // Health chip: standings drift vs schedule.
+  const health = el('lgov-health');
+  if (health) {
+    const drift = (typeof lgStandingsDrift === 'function') ? lgStandingsDrift(lg) : { inSync: true };
+    if (!total) { health.className = 'lgov-health lgov-health-idle'; health.textContent = 'No matches scheduled yet'; }
+    else if (!drift.inSync) { health.className = 'lgov-health lgov-health-warn'; health.textContent = `Standings differ from results (${drift.diffCount}) — recalc in Standings`; }
+    else if (played < total) { health.className = 'lgov-health lgov-health-ok'; health.textContent = `${total - played} match${total - played === 1 ? '' : 'es'} left to play`; }
+    else { health.className = 'lgov-health lgov-health-ok'; health.textContent = 'Season complete — all matches played'; }
+  }
+  lgApplyOvLayout();
+  lgRenderStandingsSnap(); lgRenderLeaders();
   lgRenderMatchup(); lgRenderRecentResults(); lgRenderNextMatches();
 }
 
@@ -1526,6 +1617,16 @@ el('lg-gen-drr')?.addEventListener('click', lgGenerateDoubleRoundRobin);
 el('lg2-tabs')?.addEventListener('click', (e) => { const tab = e.target.closest('.lg2-tab'); if (tab) lgSwitchTab(tab.dataset.tab); });
 el('lg-roster-seg')?.addEventListener('click', (e) => { const b = e.target.closest('.seg-btn'); if (b) lgSetRosterView(b.dataset.rv); });
 el('lg-players-search')?.addEventListener('input', () => lgRenderRosterPlayers());
+// Overview cockpit controls
+el('lgov-density')?.addEventListener('click', (e) => { const b = e.target.closest('.seg-btn'); if (!b) return; const p = lgOvPrefs(); p.density = b.dataset.d; lgOvSavePrefs(p); lgApplyOvLayout(); });
+el('lgov-topn')?.addEventListener('change', () => lgRenderStandingsSnap());
+el('lgov-view-standings')?.addEventListener('click', () => lgSwitchTab('standings'));
+el('lgov-push-standings')?.addEventListener('click', () => { const n = parseInt((el('lgov-topn') || {}).value, 10) || 0; lgPushStandingsToOverlay(n); });
+el('lgov-push-standings2')?.addEventListener('click', () => { const n = parseInt((el('lgov-topn') || {}).value, 10) || 0; lgPushStandingsToOverlay(n); });
+el('lgov-push-schedule')?.addEventListener('click', () => lgPushScheduleToOverlay());
+el('lgov-push-stats')?.addEventListener('click', () => { const b = el('lg-stats-push'); if (b) b.click(); else lgStatus('Open the Stats tab once to push team stats.', false); });
+el('lgov-push-leaderboard')?.addEventListener('click', () => { const b = el('lg-bc-push-leaderboard'); if (b && el('lg2-tab-ballchasing') && el('lg2-tab-ballchasing').style.display !== 'none') b.click(); else lgStatus('Player leaderboard needs Rocket League + a Ballchasing refresh.', false); });
+el('lgov-clear-overlays')?.addEventListener('click', () => lgClearOverlays());
 
 // Logo + name search typeahead for adding teams from the central library (reuses the .team-dd look).
 function setupLeagueTeamSearch() {
@@ -1594,26 +1695,56 @@ el('lg-mu-go')?.addEventListener('click', () => {
   lgStatus(`${ra.name} vs ${rb.name} pushed live.`, true);
 });
 el('lg-add-fa')?.addEventListener('click', () => { const lg = lgActive(); if (lg) { lg.freeAgents.push(lgNewPlayer()); lgRenderFreeAgents(); lgSave(); } });
-el('lg-push-standings')?.addEventListener('click', () => {
+// Shared standings push — used by the Standings tab button AND the Overview cockpit. topN limits
+// the pushed rows (0 = all).
+function lgPushStandingsToOverlay(topN) {
   const lg = lgActive(); if (!lg) return;
   const byId = {}; (lg.standings || []).forEach((s) => { byId[s.teamId] = s; });
   const teamsById = {}; (lg.teams || []).forEach(t => { teamsById[t.id] = t; });
-  // Use the stored standings order (which the tab preserves via drag); fall back to pts sort
   const ordered = (lg.standings && lg.standings.length)
     ? lg.standings.map(s => teamsById[s.teamId]).filter(Boolean)
     : (lg.teams || []).slice().sort((a, b) => ((byId[b.id] || {}).pts || 0) - ((byId[a.id] || {}).pts || 0));
   const gs = lgGameStats(lg.game);
-  // gameWins/gameLosses are the field names standings.html already reads to show its Games/Maps column;
-  // gamesLabel lets that column read "Maps" for CS2/Valorant instead of always "Games".
-  const rows = ordered.map((tm, i) => {
+  let rows = ordered.map((tm, i) => {
     const s = byId[tm.id] || {};
     const r = lgResolveTeam(tm);
     return { placement: i + 1, name: r.name || tm.teamName || 'Team', logo: r.logo || null, wins: s.w || 0, losses: s.l || 0, points: s.pts || 0, gameWins: s.subW || 0, gameLosses: s.subL || 0 };
   });
+  if (topN > 0) rows = rows.slice(0, topN);
   const title = [lg.name, lg.season].filter(Boolean).join(' — ');
   send('set_standings', { visible: true, title: title || 'Standings', rows, gamesLabel: gs.sub ? gs.sub.noun : '' });
-  lgStatus('Standings pushed to the standings overlay.', true);
-});
+  lgStatus(`Standings pushed to the standings overlay${topN > 0 ? ` (top ${topN})` : ''}.`, true);
+}
+el('lg-push-standings')?.addEventListener('click', () => lgPushStandingsToOverlay(0));
+
+// Push the league's fixtures to the schedule overlay (state.upcoming) — the schedule overlay merges
+// these with the start.gg queue, so a league's own weekly matches can now drive it.
+function lgPushScheduleToOverlay() {
+  const lg = lgActive(); if (!lg) return;
+  const teamName = (id) => { const tm = (lg.teams || []).find((t) => t.id === id); return tm ? lgResolveTeam(tm).name : ''; };
+  const teamLogo = (id) => { const tm = (lg.teams || []).find((t) => t.id === id); return tm ? (lgResolveTeam(tm).logo || null) : null; };
+  const matches = (lg.schedule || []).slice(0, 12).map((m) => {
+    const done = m.result && m.result.scoreA != null && m.result.scoreB != null;
+    return {
+      id: m.id, round: m.week ? ('Week ' + m.week) : '', teamA: teamName(m.teamA) || m.sggTeamA || 'TBD', teamB: teamName(m.teamB) || m.sggTeamB || 'TBD',
+      teamALogo: teamLogo(m.teamA), teamBLogo: teamLogo(m.teamB), date: m.date || '', time: m.time || '',
+      scoreA: done ? Number(m.result.scoreA) : null, scoreB: done ? Number(m.result.scoreB) : null
+    };
+  });
+  if (!matches.length) { lgStatus('No matches in the schedule to push.', false); return; }
+  const title = [lg.name, lg.season].filter(Boolean).join(' — ');
+  send('set_upcoming', { visible: true, title: title || 'Schedule', source: 'league', showResults: true, matches });
+  lgStatus('League schedule pushed to the schedule overlay.', true);
+}
+
+// Hide every league-driven overlay in one click (end-of-segment reset).
+function lgClearOverlays() {
+  send('set_standings', { visible: false });
+  send('set_league_stats', { visible: false });
+  send('set_league_leaderboard', { visible: false });
+  send('set_upcoming', { visible: false });
+  lgStatus('League overlays cleared.', true);
+}
 
 function evSetMode(label) { const m = el('ev-mode'); if (m) m.textContent = label || ''; }
 // Global search of ANY start.gg tournament (not just yours).

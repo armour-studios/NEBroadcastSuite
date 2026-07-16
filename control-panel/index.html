@@ -4008,32 +4008,80 @@
               <button class="lg2-tab" data-tab="ballchasing" id="lg2-tab-ballchasing" style="display:none;" title="Rocket League only">Ballchasing</button>
               <button class="lg2-tab" data-tab="settings">Settings</button>
             </nav>
-            <!-- Overview -->
-            <div class="lg2-panel" id="lg2-panel-overview">
-              <div class="lg2-stat-grid">
+            <!-- Overview — league operations cockpit -->
+            <div class="lg2-panel lgov" id="lg2-panel-overview">
+              <!-- KPI strip -->
+              <div class="lgov-kpis">
                 <div class="lg2-stat"><div class="lg2-stat-val" id="lg2-stat-teams">0</div><div class="lg2-stat-lbl">Teams</div></div>
-                <div class="lg2-stat"><div class="lg2-stat-val" id="lg2-stat-played">0</div><div class="lg2-stat-lbl">Played</div></div>
-                <div class="lg2-stat"><div class="lg2-stat-val" id="lg2-stat-remaining">0</div><div class="lg2-stat-lbl">Remaining</div></div>
-                <div class="lg2-stat"><div class="lg2-stat-val" id="lg2-stat-leader">—</div><div class="lg2-stat-lbl">Leader</div></div>
-                <div class="lg2-stat"><div class="lg2-stat-val" id="lg2-stat-seasons">0</div><div class="lg2-stat-lbl">Archived Seasons</div></div>
-              </div>
-              <div class="lg-section lg-golive-section" id="lg-golive-section">
-                <div class="lg-section-head"><h4>Go Live</h4><span class="sr-summary">Push a league matchup to the overlays</span></div>
-                <div class="lg-matchup">
-                  <select id="lg-mu-home" class="input-select" title="Home / Blue"></select>
-                  <span class="lg-vs">vs</span>
-                  <select id="lg-mu-away" class="input-select" title="Away / Orange"></select>
-                  <button class="btn btn-primary btn-sm" id="lg-mu-go"><svg class="svg-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z"/></svg> Go Live</button>
-                  <label class="qt-toggle" style="font-size:12px;" title="Also set the event title to this league + season"><span>Set title</span><span class="switch"><input type="checkbox" id="lg-mu-title" checked><span class="slider"></span></span></label>
+                <div class="lg2-stat lgov-kpi-progress">
+                  <div class="lg2-stat-val"><span id="lg2-stat-played">0</span><span class="lgov-kpi-sub">/ <span id="lg2-stat-total">0</span></span></div>
+                  <div class="lg2-stat-lbl">Matches played</div>
+                  <div class="lgov-progress"><div class="lgov-progress-fill" id="lgov-progress-fill" style="width:0%"></div></div>
                 </div>
+                <div class="lg2-stat"><div class="lg2-stat-val" id="lg2-stat-remaining">0</div><div class="lg2-stat-lbl">Remaining</div></div>
+                <div class="lg2-stat"><div class="lg2-stat-val lgov-leader-val" id="lg2-stat-leader">—</div><div class="lg2-stat-lbl">Leader</div></div>
+                <div class="lg2-stat"><div class="lg2-stat-val" id="lg2-stat-seasons">0</div><div class="lg2-stat-lbl">Archived seasons</div></div>
+                <div class="lgov-health" id="lgov-health"></div>
               </div>
-              <div class="lg-section">
-                <div class="lg-section-head"><h4>Recent Results</h4></div>
-                <div id="lg2-recent"></div>
+              <!-- Layout toolbar -->
+              <div class="lgov-toolbar">
+                <div class="sw-seg lgov-density-seg" id="lgov-density">
+                  <button type="button" class="seg-btn active" data-d="comfortable">Comfortable</button>
+                  <button type="button" class="seg-btn" data-d="compact">Compact</button>
+                </div>
+                <span class="lgov-toolbar-sep"></span>
+                <span class="lgov-toolbar-lbl">Cards:</span>
+                <div class="lgov-card-toggles" id="lgov-card-toggles"></div>
               </div>
-              <div class="lg-section">
-                <div class="lg-section-head"><h4>Next Matches</h4></div>
-                <div id="lg2-next"></div>
+              <!-- Cockpit grid -->
+              <div class="lgov-grid" id="lgov-grid">
+                <!-- Standings snapshot -->
+                <div class="lgov-card lgov-card-standings" data-card="standings">
+                  <div class="lgov-card-head">
+                    <h4>Standings</h4>
+                    <div class="lgov-card-actions">
+                      <label class="lgov-mini-opt" title="How many teams the snapshot + push includes">Top
+                        <select id="lgov-topn" class="input-select">
+                          <option value="0">All</option><option value="4">4</option><option value="6">6</option><option value="8" selected>8</option><option value="10">10</option>
+                        </select>
+                      </label>
+                      <button class="btn btn-ghost btn-xs" id="lgov-view-standings" title="Open the full Standings tab">Full &#8594;</button>
+                      <button class="btn btn-primary btn-xs" id="lgov-push-standings" title="Push the standings overlay">Push</button>
+                    </div>
+                  </div>
+                  <div id="lgov-standings-snap"></div>
+                </div>
+                <!-- Broadcast panel -->
+                <div class="lgov-card lgov-card-broadcast" data-card="broadcast">
+                  <div class="lgov-card-head"><h4>Broadcast</h4><span class="sr-summary">Push league data to the overlays</span></div>
+                  <div class="lgov-matchup">
+                    <select id="lg-mu-home" class="input-select" title="Home / Blue"></select>
+                    <span class="lg-vs">vs</span>
+                    <select id="lg-mu-away" class="input-select" title="Away / Orange"></select>
+                    <button class="btn btn-primary btn-sm" id="lg-mu-go"><svg class="svg-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z"/></svg> Go Live</button>
+                    <label class="qt-toggle" style="font-size:12px;" title="Also set the event title to this league + season"><span>Set title</span><span class="switch"><input type="checkbox" id="lg-mu-title" checked><span class="slider"></span></span></label>
+                  </div>
+                  <div class="lgov-push-grid">
+                    <button class="btn btn-secondary btn-sm lgov-push-btn" id="lgov-push-standings2"><span class="lgov-push-t">Standings</span><span class="lgov-push-s">Leaderboard table</span></button>
+                    <button class="btn btn-secondary btn-sm lgov-push-btn" id="lgov-push-schedule"><span class="lgov-push-t">Schedule</span><span class="lgov-push-s">Weekly fixtures</span></button>
+                    <button class="btn btn-secondary btn-sm lgov-push-btn" id="lgov-push-stats"><span class="lgov-push-t">Team Stats</span><span class="lgov-push-s">Season stat board</span></button>
+                    <button class="btn btn-secondary btn-sm lgov-push-btn" id="lgov-push-leaderboard"><span class="lgov-push-t">Players</span><span class="lgov-push-s">Player leaderboard</span></button>
+                  </div>
+                  <button class="btn btn-ghost btn-sm lgov-clear-btn" id="lgov-clear-overlays">Clear all league overlays</button>
+                </div>
+                <!-- Leaders -->
+                <div class="lgov-card lgov-card-leaders" data-card="leaders">
+                  <div class="lgov-card-head"><h4>Leaders</h4></div>
+                  <div id="lgov-leaders"></div>
+                </div>
+                <!-- This week -->
+                <div class="lgov-card lgov-card-thisweek" data-card="thisweek">
+                  <div class="lgov-card-head"><h4>This Week</h4></div>
+                  <div class="lgov-week-cols">
+                    <div class="lgov-week-col"><h5 class="lgov-week-h">Next up</h5><div id="lg2-next"></div></div>
+                    <div class="lgov-week-col"><h5 class="lgov-week-h">Recent results</h5><div id="lg2-recent"></div></div>
+                  </div>
+                </div>
               </div>
             </div>
             <!-- Roster -->

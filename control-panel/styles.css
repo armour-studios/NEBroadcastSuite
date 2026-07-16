@@ -4720,6 +4720,79 @@ span.lg-pl-role { color: var(--muted); }
 .lg2-stat-val { font-size:22px; font-weight:900; color:var(--text); line-height:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .lg2-stat-lbl { font-size:10.5px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); font-weight:600; }
 
+/* ─── League Overview cockpit ─────────────────────────────────────────────── */
+.lgov-kpis { display:grid; grid-template-columns:repeat(5,1fr) auto; gap:10px; margin-bottom:14px; align-items:stretch; }
+@media (max-width:1100px){ .lgov-kpis{ grid-template-columns:repeat(3,1fr); } .lgov-health{ grid-column:1/-1; } }
+.lgov-kpi-sub { font-size:14px; font-weight:700; color:var(--muted); margin-left:3px; }
+.lgov-kpi-progress .lg2-stat-val { display:flex; align-items:baseline; }
+.lgov-progress { height:5px; border-radius:3px; background:var(--white-a08,rgba(255,255,255,.08)); overflow:hidden; margin-top:7px; }
+.lgov-progress-fill { height:100%; background:linear-gradient(90deg,var(--cp-accent),#a855f7); border-radius:3px; transition:width .4s ease; }
+.lgov-leader-val { font-size:16px; }
+.lgov-health { display:flex; align-items:center; padding:10px 16px; border-radius:10px; font-size:12px; font-weight:600; letter-spacing:.01em; min-width:180px; }
+.lgov-health-ok   { background:rgba(72,187,120,.1);  border:1px solid rgba(72,187,120,.3);  color:#48bb78; }
+.lgov-health-warn { background:rgba(201,138,31,.12); border:1px solid rgba(201,138,31,.35); color:#e0a94a; }
+.lgov-health-idle { background:var(--surface2); border:1px solid var(--border); color:var(--muted); }
+/* Layout toolbar */
+.lgov-toolbar { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:14px; padding-bottom:12px; border-bottom:1px solid var(--border); }
+.lgov-density-seg .seg-btn { padding:4px 12px; }
+.lgov-toolbar-sep { width:1px; height:18px; background:var(--border); }
+.lgov-toolbar-lbl { font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); }
+.lgov-card-toggles { display:flex; gap:5px; flex-wrap:wrap; }
+.lgov-card-tg { background:var(--surface2); border:1px solid var(--border); color:var(--muted); border-radius:20px; padding:3px 11px; font-size:11px; font-weight:700; cursor:pointer; transition:all .12s; }
+.lgov-card-tg.on { background:rgba(124,58,237,.14); border-color:rgba(124,58,237,.4); color:#c4b5fd; }
+/* Cockpit grid */
+.lgov-grid { display:grid; grid-template-columns:1.4fr 1fr; gap:12px; align-items:start; }
+@media (max-width:1000px){ .lgov-grid{ grid-template-columns:1fr; } }
+.lgov-card { background:var(--surface2); border:1px solid var(--border); border-radius:12px; padding:14px 16px; }
+.lgov-card-thisweek { grid-column:1/-1; }
+.lgov-card-head { display:flex; align-items:center; gap:10px; margin-bottom:12px; }
+.lgov-card-head h4 { margin:0; font-size:13px; font-weight:800; text-transform:uppercase; letter-spacing:.04em; color:var(--text); }
+.lgov-card-head .sr-summary { font-size:11px; }
+.lgov-card-actions { margin-left:auto; display:flex; align-items:center; gap:7px; }
+.lgov-mini-opt { font-size:11px; color:var(--muted); font-weight:600; display:flex; align-items:center; gap:4px; }
+.lgov-mini-opt .input-select { padding:2px 6px; font-size:11px; width:auto; }
+.lgov-link { color:var(--cp-accent); cursor:pointer; font-weight:700; }
+.lgov-link:hover { text-decoration:underline; }
+/* Standings snapshot table */
+.lgov-snap-table { width:100%; border-collapse:collapse; font-variant-numeric:tabular-nums; }
+.lgov-snap-table th { font-size:10px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); font-weight:700; text-align:center; padding:0 8px 7px; }
+.lgov-snap-table th.lgov-snap-team { text-align:left; }
+.lgov-snap-row td { padding:7px 8px; font-size:13px; border-top:1px solid var(--border); text-align:center; }
+.lgov-snap-pos { width:34px; color:var(--muted); font-weight:700; }
+.lgov-snap-team { text-align:left !important; }
+.lgov-snap-team span { vertical-align:middle; font-weight:700; }
+.lgov-snap-logo { width:20px; height:20px; object-fit:contain; border-radius:4px; vertical-align:middle; margin-right:8px; }
+.lgov-snap-rec { font-weight:700; }
+.lgov-snap-dim { color:var(--muted); margin:0 1px; }
+.lgov-snap-pts { font-weight:900; color:#c4b5fd; }
+.lgov-snap-form { white-space:nowrap; }
+.lgov-snap-row.lgov-snap-cut td { border-top:2px solid rgba(245,158,11,.5); }
+.lgov-snap-more { margin-top:8px; font-size:11px; color:var(--muted); }
+/* Broadcast panel */
+.lgov-matchup { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:12px; padding-bottom:12px; border-bottom:1px solid var(--border); }
+.lgov-matchup .input-select { min-width:110px; flex:1 1 110px; max-width:170px; }
+.lgov-push-grid { display:grid; grid-template-columns:1fr 1fr; gap:7px; }
+.lgov-push-btn { display:flex; flex-direction:column; align-items:flex-start; gap:1px; text-align:left; padding:9px 12px; height:auto; }
+.lgov-push-t { font-size:12.5px; font-weight:800; }
+.lgov-push-s { font-size:10px; color:var(--muted); font-weight:500; }
+.lgov-clear-btn { width:100%; margin-top:8px; }
+/* Leaders */
+#lgov-leaders { display:flex; flex-direction:column; gap:8px; }
+.lgov-leader { display:flex; flex-direction:column; gap:1px; padding:8px 11px; background:var(--surface3,var(--white-a08)); border-radius:8px; border-left:3px solid var(--cp-accent); }
+.lgov-leader-lbl { font-size:9.5px; text-transform:uppercase; letter-spacing:.08em; color:var(--muted); font-weight:800; }
+.lgov-leader-name { font-size:15px; font-weight:800; color:var(--text); }
+.lgov-leader-val { font-size:12px; color:#c4b5fd; font-weight:700; }
+.lgov-leader-sub { color:var(--muted); font-weight:500; }
+/* This week */
+.lgov-week-cols { display:grid; grid-template-columns:1fr 1fr; gap:18px; }
+@media (max-width:700px){ .lgov-week-cols{ grid-template-columns:1fr; } }
+.lgov-week-h { margin:0 0 8px; font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); font-weight:700; }
+/* Compact density */
+.lgov-compact .lgov-card { padding:10px 12px; }
+.lgov-compact .lgov-snap-row td { padding:4px 8px; font-size:12px; }
+.lgov-compact .lg2-stat { padding:8px 11px; }
+.lgov-compact .lgov-card-head { margin-bottom:8px; }
+
 /* ─── Game Config Builder ────────────────────────────────────────────────── */
 .gc-tabs { margin-bottom: 14px; }
 .gc-tab-badge { display:inline-block; min-width:16px; margin-left:5px; padding:1px 5px; border-radius:999px;
