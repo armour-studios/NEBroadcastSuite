@@ -144,6 +144,15 @@ function lgRenderMatchup() {
   home.innerHTML = opts(ph); away.innerHTML = opts(pa);
   const sec = el('lg-golive-section'); if (sec) sec.style.display = teams.length >= 2 ? '' : 'none';
 }
+// Normalize a name/gamertag for matching (mirrors the server's _bcNorm).
+function lgNorm(s) { return String(s == null ? '' : s).trim().toLowerCase().replace(/[^a-z0-9]/g, ''); }
+// A normalized-name → ballchasing-player-stats index for the active league (empty until a refresh).
+function lgBcByName(lg) {
+  const out = {};
+  Object.values((lg && lg.ballchasingPlayers) || {}).forEach((p) => { const k = lgNorm(p.name); if (k) out[k] = p; });
+  return out;
+}
+
 function lgRenderTeams() {
   const wrap = el('lg-teams'); const lg = lgActive(); if (!wrap || !lg) return;
   lgRenderMatchup();
@@ -151,36 +160,50 @@ function lgRenderTeams() {
   const cap = lg.salaryCap || 0;
   const starterCount = lg.starterCount || 3;
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const stById = {}; (lg.standings || []).forEach((s) => { stById[s.teamId] = s; });
+  const bcByName = lgBcByName(lg);
+  const hasBc = Object.keys(bcByName).length > 0;
   wrap.innerHTML = (lg.teams || []).map((tm) => {
     const r = lgResolveTeam(tm);
+    const roster = r.players || [];
     let starterUsed = 0, starterIdx = 0;
-    const players = (r.players || []).map((p) => {
+    const players = roster.map((p) => {
       const pid = p.id || p.name || '';
       const sal = (tm.salaries && tm.salaries[pid] != null) ? tm.salaries[pid] : (p.salary || 0);
       const isStarter = starterIdx < starterCount; starterIdx++;
       if (isSalary && isStarter) starterUsed += Number(sal) || 0;
       const role = esc(p.role);
+      const isCap = tm.captain && lgNorm(tm.captain) === lgNorm(p.name);
+      const bc = bcByName[lgNorm(p.name)];
+      const statChips = bc ? `<span class="lg-pl-stats" title="Ballchasing: ${bc.games || 0} games">
+        <span class="lg-pl-stat"><b>${bc.goals || 0}</b>G</span><span class="lg-pl-stat"><b>${bc.assists || 0}</b>A</span><span class="lg-pl-stat"><b>${bc.saves || 0}</b>Sv</span></span>` : '';
       return `<div class="lg-player">
+        <button class="lg-cap-star${isCap ? ' on' : ''}" data-tid="${esc(tm.id)}" data-pname="${esc(p.name)}" title="${isCap ? 'Captain' : 'Set as captain'}">★</button>
         <span class="lg-pl-name">${esc(p.name) || '—'}</span>
         ${role ? `<span class="lg-pl-role">${role}</span>` : ''}
         ${!isStarter && isSalary ? '<span class="lg-pl-role" style="color:var(--muted);font-style:italic;">Sub</span>' : ''}
+        ${statChips}
         ${isSalary ? `<input type="number" class="input-text lg-pl-salary" data-tid="${esc(tm.id)}" data-pid="${esc(pid)}" value="${Number(sal) || 0}" placeholder="Rating" style="width:82px;" title="${isStarter ? 'Counts toward cap' : 'Sub — excluded from cap'}">` : ''}
       </div>`;
-    }).join('') || '<div class="lg-empty" style="padding:4px 0;">No players in the library for this team.</div>';
+    }).join('') || '<div class="lg-empty" style="padding:4px 0;">No players in the library — use Manage teams to add a roster.</div>';
     const pct = cap > 0 ? Math.min((starterUsed / cap) * 100, 110) : 0;
     const over = cap > 0 && starterUsed > cap;
     const capBar = isSalary && cap > 0 ? `<div class="lg2-cap-bar-wrap">
       <div class="lg2-cap-label"><span>Rating used (starters)</span><span>${starterUsed} / ${cap}${over ? ' ⚠ over' : ''}</span></div>
       <div class="lg2-cap-bar"><div class="lg2-cap-bar-fill${over ? ' over' : ''}" style="width:${Math.min(pct,100)}%"></div></div>
     </div>` : '';
+    const st = stById[tm.id];
+    const recChip = st ? `<span class="lg-team-rec" title="Series record">${st.w || 0}&#8211;${st.l || 0}${st.t ? '&#8211;' + st.t : ''}</span>` : '';
+    const cntChip = `<span class="lg-team-count" title="Roster size">${roster.length} player${roster.length === 1 ? '' : 's'}</span>`;
     return `<div class="lg-team" data-tid="${tm.id}">
       <div class="lg-team-head">
         <img class="lg-team-logo${r.logo ? '' : ' game-logo-white'}" src="${r.logo || gameLogo()}" alt="" onerror="this.onerror=null;this.src='../assets/rl.png';">
         <span class="lg-team-name">${esc(r.name)}</span>
+        ${recChip}${cntChip}
         ${r.linked ? '' : '<span class="lg-unlinked" title="Not in the team library">unlinked</span>'}
-        <button class="btn btn-ghost btn-xs lg-team-live" data-tid="${tm.id}" data-side="blue">→ Blue</button>
-        <button class="btn btn-ghost btn-xs lg-team-live" data-tid="${tm.id}" data-side="orange">→ Orange</button>
-        <button class="lg-del lg-team-del" data-tid="${tm.id}" title="Remove from league">×</button>
+        <button class="btn btn-ghost btn-xs lg-team-live" data-tid="${tm.id}" data-side="blue">&#8594; Blue</button>
+        <button class="btn btn-ghost btn-xs lg-team-live" data-tid="${tm.id}" data-side="orange">&#8594; Orange</button>
+        <button class="lg-del lg-team-del" data-tid="${tm.id}" title="Remove from league">&#215;</button>
       </div>
       ${capBar}
       <div class="lg2-team-meta">
@@ -191,6 +214,13 @@ function lgRenderTeams() {
     </div>`;
   }).join('') || '<div class="lg-empty">No teams yet — add from your team library above.</div>';
 
+  lgRenderRosterCounts(lg, hasBc);
+
+  wrap.querySelectorAll('.lg-cap-star').forEach((b) => b.addEventListener('click', () => {
+    const tm = lg.teams.find((t) => t.id === b.dataset.tid); if (!tm) return;
+    tm.captain = (tm.captain && lgNorm(tm.captain) === lgNorm(b.dataset.pname)) ? '' : b.dataset.pname;   // toggle
+    lgSave(); lgRenderTeams();
+  }));
   wrap.querySelectorAll('.lg-pl-salary').forEach((inp) => inp.addEventListener('change', () => {
     const tm = lg.teams.find((t) => t.id === inp.dataset.tid); if (!tm) return;
     tm.salaries = tm.salaries || {};
@@ -228,6 +258,89 @@ function lgRenderFreeAgents() {
   const bind = (cls, key, num) => wrap.querySelectorAll(cls).forEach((inp) => inp.addEventListener('change', () => { const p = lg.freeAgents.find((x) => x.id === inp.dataset.pid); if (p) { p[key] = num ? (Number(inp.value) || 0) : inp.value.trim(); lgSave(); } }));
   bind('.lg-fa-name', 'name'); bind('.lg-fa-role', 'role'); bind('.lg-fa-salary', 'salary', true); bind('.lg-fa-stats', 'stats');
   wrap.querySelectorAll('.lg-fa-del').forEach((b) => b.addEventListener('click', () => { lg.freeAgents = lg.freeAgents.filter((p) => p.id !== b.dataset.pid); lgRenderFreeAgents(); lgSave(); }));
+}
+
+// ── Roster sub-views (Teams | Players) ───────────────────────────────────────
+let _lgRosterView = 'teams';
+let _lgPlayerSort = { key: 'goals', dir: -1 };   // default: most goals first
+
+function lgRenderRosterCounts(lg, hasBc) {
+  const el0 = el('lg-roster-counts');
+  if (el0) {
+    const teams = (lg.teams || []).length;
+    const players = (lg.teams || []).reduce((n, tm) => n + ((lgResolveTeam(tm).players || []).length), 0);
+    el0.textContent = `${teams} team${teams === 1 ? '' : 's'} · ${players} player${players === 1 ? '' : 's'}`;
+  }
+  const note = el('lg-players-src-note');
+  if (note) note.textContent = hasBc ? 'Stats via ballchasing.com' : (lg.game === 'rocket-league' ? 'Enable Ballchasing + Refresh Stats to populate' : 'Player stats populate for Rocket League (Ballchasing)');
+}
+
+// Assemble a league-wide player list: every rostered player across teams, each joined to its
+// ballchasing stats by normalized name (0s when unmatched). Captains are flagged.
+function lgLeaguePlayers(lg) {
+  const bcByName = lgBcByName(lg);
+  const rows = [];
+  (lg.teams || []).forEach((tm) => {
+    const r = lgResolveTeam(tm);
+    (r.players || []).forEach((p) => {
+      const bc = bcByName[lgNorm(p.name)] || {};
+      rows.push({
+        name: p.name || '—', role: p.role || '', team: r.name || tm.teamName || 'Team', teamId: tm.id,
+        captain: !!(tm.captain && lgNorm(tm.captain) === lgNorm(p.name)),
+        games: bc.games || 0, goals: bc.goals || 0, assists: bc.assists || 0,
+        saves: bc.saves || 0, shots: bc.shots || 0, mvps: bc.mvps || 0, score: bc.score || 0,
+        matched: !!bcByName[lgNorm(p.name)]
+      });
+    });
+  });
+  return rows;
+}
+
+function lgRenderRosterPlayers() {
+  const wrap = el('lg-roster-players'); const lg = lgActive(); if (!wrap || !lg) return;
+  const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  let rows = lgLeaguePlayers(lg);
+  const q = lgNorm((el('lg-players-search') || {}).value || '');
+  if (q) rows = rows.filter((r) => lgNorm(r.name).includes(q) || lgNorm(r.team).includes(q));
+  if (!rows.length) { wrap.innerHTML = '<div class="lg-empty">No players yet — add teams with rosters in the Teams view.</div>'; return; }
+  const s = _lgPlayerSort;
+  const sortKey = s.key;
+  rows.sort((a, b) => {
+    if (sortKey === 'name' || sortKey === 'team') return String(a[sortKey]).localeCompare(String(b[sortKey])) * s.dir;
+    return ((a[sortKey] || 0) - (b[sortKey] || 0)) * s.dir;
+  });
+  // Rocket-League stat columns; for non-RL leagues only name/team/role show (stats stay 0/hidden).
+  const isRL = lg.game === 'rocket-league';
+  const statCols = isRL ? [['games', 'GP'], ['goals', 'G'], ['assists', 'A'], ['saves', 'Sv'], ['shots', 'Sh'], ['mvps', 'MVP']] : [];
+  const arrow = (k) => sortKey === k ? (s.dir < 0 ? ' ▾' : ' ▴') : '';
+  const th = (k, lbl, cls) => `<th class="lg-pt-sort${cls || ''}" data-sk="${k}">${esc(lbl)}${arrow(k)}</th>`;
+  const head = '<th class="lg-pt-rank">#</th>' + th('name', 'Player', ' lg-pt-l') + th('team', 'Team', ' lg-pt-l') + statCols.map((c) => th(c[0], c[1])).join('');
+  const body = rows.map((r, i) => {
+    const cells = statCols.map((c) => `<td class="${sortKey === c[0] ? 'lg-pt-hot' : ''}">${r[c[0]] || 0}</td>`).join('');
+    return `<tr>
+      <td class="lg-pt-rank">${i + 1}</td>
+      <td class="lg-pt-l"><span class="lg-pt-name">${r.captain ? '<span class="lg-pt-cap" title="Captain">★</span>' : ''}${esc(r.name)}</span>${r.role ? `<span class="lg-pt-role">${esc(r.role)}</span>` : ''}</td>
+      <td class="lg-pt-l lg-pt-team">${esc(r.team)}</td>
+      ${cells}
+    </tr>`;
+  }).join('');
+  wrap.innerHTML = `<div class="lg2-st-scroll"><table class="lg2-st-table lg-players-table"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
+  wrap.querySelectorAll('.lg-pt-sort').forEach((h) => h.addEventListener('click', () => {
+    const k = h.dataset.sk;
+    if (_lgPlayerSort.key === k) _lgPlayerSort.dir *= -1;
+    else _lgPlayerSort = { key: k, dir: (k === 'name' || k === 'team') ? 1 : -1 };
+    lgRenderRosterPlayers();
+  }));
+}
+
+function lgSetRosterView(v) {
+  _lgRosterView = (v === 'players') ? 'players' : 'teams';
+  document.querySelectorAll('#lg-roster-seg .seg-btn').forEach((b) => b.classList.toggle('active', b.dataset.rv === _lgRosterView));
+  const tv = el('lg-roster-teams-view'), pv = el('lg-roster-players-view');
+  if (tv) tv.style.display = _lgRosterView === 'teams' ? '' : 'none';
+  if (pv) pv.style.display = _lgRosterView === 'players' ? '' : 'none';
+  if (_lgRosterView === 'players') lgRenderRosterPlayers();
+  else { lgRenderTeams(); lgRenderFreeAgents(); }
 }
 // ── enhanced standings (W/L/T/GF/GA/PTS) ─────────────────────────────────
 function lgRenderStandingsTab() {
@@ -1212,7 +1325,7 @@ function lgSwitchTab(name) {
     const p = el('lg2-panel-' + t); if (p) p.style.display = t === name ? '' : 'none';
   });
   if (name === 'overview') lgRenderOverview();
-  else if (name === 'roster') { lgRenderTeams(); lgRenderFreeAgents(); }
+  else if (name === 'roster') lgSetRosterView(_lgRosterView);
   else if (name === 'standings') lgRenderStandingsTab();
   else if (name === 'schedule') lgRenderScheduleTab();
   else if (name === 'stats') lgRenderStatsTab();
@@ -1411,6 +1524,8 @@ el('lg-add-match')?.addEventListener('click', lgAddMatch);
 el('lg-gen-rr')?.addEventListener('click', lgGenerateRoundRobin);
 el('lg-gen-drr')?.addEventListener('click', lgGenerateDoubleRoundRobin);
 el('lg2-tabs')?.addEventListener('click', (e) => { const tab = e.target.closest('.lg2-tab'); if (tab) lgSwitchTab(tab.dataset.tab); });
+el('lg-roster-seg')?.addEventListener('click', (e) => { const b = e.target.closest('.seg-btn'); if (b) lgSetRosterView(b.dataset.rv); });
+el('lg-players-search')?.addEventListener('input', () => lgRenderRosterPlayers());
 
 // Logo + name search typeahead for adding teams from the central library (reuses the .team-dd look).
 function setupLeagueTeamSearch() {

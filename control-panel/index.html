@@ -4038,21 +4038,44 @@
             </div>
             <!-- Roster -->
             <div class="lg2-panel" id="lg2-panel-roster" style="display:none;">
-              <div class="lg-section">
-                <div class="lg-section-head"><h4>Teams</h4>
-                  <div class="lg-add-team-row">
-                    <div class="lg-search-wrap">
-                      <input type="text" id="lg-team-search" class="input-text" placeholder="Search team library to add…" autocomplete="off" spellcheck="false">
-                      <div id="lg-team-dd" class="team-dd"></div>
-                    </div>
-                    <button class="btn btn-ghost btn-sm" id="lg-manage-teams" title="Create or edit teams in the central library">Manage teams</button>
-                  </div>
+              <div class="lg-roster-bar">
+                <div class="sw-seg lg-roster-seg" id="lg-roster-seg">
+                  <button type="button" class="seg-btn active" data-rv="teams">Teams</button>
+                  <button type="button" class="seg-btn" data-rv="players">Players</button>
                 </div>
-                <div id="lg-teams"></div>
+                <span class="lg-roster-counts" id="lg-roster-counts"></span>
               </div>
-              <div class="lg-section lg-fa-section" id="lg-fa-section" style="display:none;">
-                <div class="lg-section-head"><h4>Free agents</h4><button class="btn btn-secondary btn-sm" id="lg-add-fa">+ Add free agent</button></div>
-                <div id="lg-freeagents"></div>
+              <!-- Teams sub-view -->
+              <div id="lg-roster-teams-view">
+                <div class="lg-section">
+                  <div class="lg-section-head"><h4>Teams</h4>
+                    <div class="lg-add-team-row">
+                      <div class="lg-search-wrap">
+                        <input type="text" id="lg-team-search" class="input-text" placeholder="Search team library to add…" autocomplete="off" spellcheck="false">
+                        <div id="lg-team-dd" class="team-dd"></div>
+                      </div>
+                      <button class="btn btn-ghost btn-sm" id="lg-manage-teams" title="Create or edit teams in the central library">Manage teams</button>
+                    </div>
+                  </div>
+                  <div id="lg-teams" class="lg-teams-grid"></div>
+                </div>
+                <div class="lg-section lg-fa-section" id="lg-fa-section" style="display:none;">
+                  <div class="lg-section-head"><h4>Free agents</h4><button class="btn btn-secondary btn-sm" id="lg-add-fa">+ Add free agent</button></div>
+                  <div id="lg-freeagents"></div>
+                </div>
+              </div>
+              <!-- Players sub-view: league-wide player leaderboard (stats fold in from the Ballchasing sync) -->
+              <div id="lg-roster-players-view" style="display:none;">
+                <div class="lg-section">
+                  <div class="lg-section-head">
+                    <h4>Players</h4>
+                    <div style="display:flex;gap:8px;align-items:center;">
+                      <input type="text" id="lg-players-search" class="input-text" placeholder="Filter players / teams…" style="font-size:12px;width:180px;">
+                      <span class="sr-summary" id="lg-players-src-note"></span>
+                    </div>
+                  </div>
+                  <div id="lg-roster-players"></div>
+                </div>
               </div>
             </div>
             <!-- Standings -->
