@@ -4128,14 +4128,23 @@
             </div>
             <!-- Standings -->
             <div class="lg2-panel" id="lg2-panel-standings" style="display:none;">
-              <div class="lg-section-head" style="margin-bottom:12px;">
+              <div class="lg-section-head lg2-st-head" style="margin-bottom:12px;">
                 <h4 style="margin:0;font-size:13px;font-weight:800;text-transform:uppercase;">Standings</h4>
-                <div style="display:flex;gap:8px;align-items:center;">
+                <div class="lg2-st-actions">
                   <span class="sr-summary" id="lg-cap-used"></span>
+                  <button class="btn btn-ghost btn-sm" id="lg-st-divisions" title="Group the table into divisions / conferences">Divisions</button>
+                  <div class="sw-seg lg2-st-density-seg" id="lg-st-density">
+                    <button type="button" class="seg-btn active" data-d="comfortable" title="Comfortable rows">&#9776;</button>
+                    <button type="button" class="seg-btn" data-d="compact" title="Compact rows">&#8801;</button>
+                  </div>
+                  <label class="lgov-mini-opt" title="How many teams the Push includes">Push top
+                    <select id="lg-st-topn" class="input-select"><option value="0">All</option><option value="4">4</option><option value="6">6</option><option value="8">8</option><option value="10">10</option></select>
+                  </label>
                   <button class="btn btn-ghost btn-sm" id="lg-recalc">Recalculate</button>
-                  <button class="btn btn-ghost btn-sm" id="lg-push-standings">Push to Overlay</button>
+                  <button class="btn btn-primary btn-sm" id="lg-push-standings">Push</button>
                 </div>
               </div>
+              <div id="lg-st-divmgr" class="lg2-divmgr" style="display:none;"></div>
               <div id="lg-drift-banner" class="lg2-drift-banner" style="display:none;"></div>
               <div id="lg-standings"></div>
             </div>

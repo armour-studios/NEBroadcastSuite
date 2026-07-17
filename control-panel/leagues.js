@@ -343,10 +343,62 @@ function lgSetRosterView(v) {
   else { lgRenderTeams(); lgRenderFreeAgents(); }
 }
 // ── enhanced standings (W/L/T/GF/GA/PTS) ─────────────────────────────────
+const LG_ST_KEY = 'ne_lg_standings_v1';
+function lgStPrefs() { try { return Object.assign({ density: 'comfortable' }, JSON.parse(localStorage.getItem(LG_ST_KEY) || '{}')); } catch { return { density: 'comfortable' }; } }
+function lgStSavePrefs(p) { try { localStorage.setItem(LG_ST_KEY, JSON.stringify(p)); } catch {} }
+let _lgStSort = { key: '', dir: -1 };   // '' = manual (drag/recalc) order
+
+// Ensure every team has a standings row (so sort/reorder covers unranked teams too).
+function lgStEnsureRows(lg) {
+  lg.standings = lg.standings || [];
+  (lg.teams || []).forEach((tm) => { if (!lg.standings.find((s) => s.teamId === tm.id)) lg.standings.push({ teamId: tm.id, w: 0, l: 0, t: 0, gf: 0, ga: 0, pts: 0 }); });
+}
+function lgStSortBy(key) {
+  const lg = lgActive(); if (!lg) return;
+  const dir = (_lgStSort.key === key) ? -_lgStSort.dir : (key === 'teamName' ? 1 : -1);
+  _lgStSort = { key, dir };
+  lgStEnsureRows(lg);
+  const nameOf = (s) => { const tm = (lg.teams || []).find((t) => t.id === s.teamId); return tm ? lgResolveTeam(tm).name : ''; };
+  const val = (s) => key === 'diff' ? ((s.gf || 0) - (s.ga || 0)) : (s[key] || 0);
+  lg.standings.sort((a, b) => key === 'teamName' ? nameOf(a).localeCompare(nameOf(b)) * dir : (val(a) - val(b)) * dir);
+  lgSave(); lgRenderStandingsTab();
+}
+
+// Divisions / conferences — a client-side grouping layer over the flat standings. Stored on the
+// league (lg.divisions + per-team tm.divisionId); the server preserves unknown league fields through
+// set_leagues, so this needs no server change. Empty = one ungrouped table (unchanged behaviour).
+function lgDivisions(lg) { return Array.isArray(lg && lg.divisions) ? lg.divisions : []; }
+function lgTeamDivId(lg, teamId) { const tm = (lg.teams || []).find((t) => t.id === teamId); return (tm && tm.divisionId) || ''; }
+function lgRenderDivMgr() {
+  const box = el('lg-st-divmgr'); const lg = lgActive(); if (!box || !lg) return;
+  const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const divs = lgDivisions(lg);
+  box.innerHTML = `<div class="lg2-divmgr-inner">
+    <div class="lg2-divmgr-list">${divs.map((d) => `<span class="lg2-divmgr-chip"><input class="lg2-div-rename" data-did="${esc(d.id)}" value="${esc(d.name)}"><button class="lg2-div-rm" data-did="${esc(d.id)}" title="Remove division">&#215;</button></span>`).join('') || '<span class="sr-summary">No divisions yet — add one to group the table.</span>'}</div>
+    <div class="lg2-divmgr-add"><input id="lg-div-new" class="input-text" placeholder="New division name (e.g. East)" style="width:200px;"><button class="btn btn-secondary btn-sm" id="lg-div-add">+ Add</button></div>
+  </div>`;
+  el('lg-div-add')?.addEventListener('click', () => {
+    const name = (el('lg-div-new')?.value || '').trim(); if (!name) return;
+    lg.divisions = lgDivisions(lg).concat([{ id: 'dv_' + Math.random().toString(36).slice(2, 8), name }]);
+    lgSave(); lgRenderDivMgr(); lgRenderStandingsTab();
+  });
+  box.querySelectorAll('.lg2-div-rename').forEach((inp) => inp.addEventListener('change', () => {
+    const d = lgDivisions(lg).find((x) => x.id === inp.dataset.did); if (d) { d.name = inp.value.trim() || d.name; lgSave(); lgRenderStandingsTab(); }
+  }));
+  box.querySelectorAll('.lg2-div-rm').forEach((b) => b.addEventListener('click', () => {
+    lg.divisions = lgDivisions(lg).filter((x) => x.id !== b.dataset.did);
+    (lg.teams || []).forEach((tm) => { if (tm.divisionId === b.dataset.did) tm.divisionId = ''; });
+    lgSave(); lgRenderDivMgr(); lgRenderStandingsTab();
+  }));
+}
+
 function lgRenderStandingsTab() {
   const wrap = el('lg-standings'); const lg = lgActive(); if (!wrap || !lg) return;
   const playoffN = lg.playoffN || 4;
   const esc = (s) => String(s == null ? '' : s).replace(/</g, '&lt;');
+  const panel = el('lg2-panel-standings');
+  if (panel) panel.classList.toggle('lg2-st-compact', lgStPrefs().density === 'compact');
+  document.querySelectorAll('#lg-st-density .seg-btn').forEach((b) => b.classList.toggle('active', b.dataset.d === lgStPrefs().density));
 
   const banner = el('lg-drift-banner');
   if (banner) {
@@ -385,33 +437,51 @@ function lgRenderStandingsTab() {
 
   if (!rows.length) { wrap.innerHTML = '<div class="lg-empty">Add teams to track standings.</div>'; return; }
   const formDots = (form) => form.map(f => `<span class="lg2-fd lg2-fd-${f.toLowerCase()}">${f}</span>`).join('');
-  // Game-aware columns: always W/L (+ T when the league has draws), then a Games/Maps won-lost cell
-  // for series (best-of-N) games, then the unit For/Against/Diff (Goals / Rounds) when the game has a
-  // numeric score, then Pts / Form / Str. Everything is computed from the schedule via lgGameStats.
   const gs = lgGameStats(lg.game);
-  const u = gs.unit, uAbbr = u ? (u.abbr || (u.noun || 'S').charAt(0)) : '';
-  // Series games (best-of-N) don't tie — only show T if ties actually exist; generic/soccer leagues
-  // show T whenever draw points are configured.
+  const u = gs.unit;
   const showDraw = rows.some(r => (r.t || 0) > 0) || (!gs.series && lg.scoring && lg.scoring.draw != null && Number(lg.scoring.draw) !== 0);
-  // Plain-English headers — no cryptic GF/GA/GD/Str abbreviations. Series W-L is the match record;
-  // the sub column is the game/map record within series; For/Against/Diff use the game's own noun.
-  let head = '<th class="lg2-drag-th"></th><th>#</th><th>Team</th><th title="Series (matches) won">W</th><th title="Series (matches) lost">L</th>';
-  if (showDraw) head += '<th title="Series tied">T</th>';
-  if (gs.sub) head += `<th title="${esc(gs.sub.noun)} won within series">${esc(gs.sub.abbr)}W</th><th title="${esc(gs.sub.noun)} lost within series">${esc(gs.sub.abbr)}L</th>`;
-  if (u) head += `<th title="${esc(u.noun)} scored">For</th><th title="${esc(u.noun)} conceded">Against</th><th title="${esc(u.noun)} difference">Diff</th>`;
-  head += '<th>Pts</th><th>Form</th><th title="Current win/loss streak">Streak</th>';
+  const divs = lgDivisions(lg);
+  const hasDivs = divs.length > 0;
+  // Sortable header cell: clicking a stat column sorts lg.standings by it (arrow shows active key/dir).
+  const sortArrow = (k) => _lgStSort.key === k ? (_lgStSort.dir < 0 ? ' ▾' : ' ▴') : '';
+  const sTh = (k, lbl, title) => `<th class="lg2-st-sort" data-sk="${k}"${title ? ` title="${title}"` : ''}>${lbl}${sortArrow(k)}</th>`;
+  let head = '<th class="lg2-drag-th"></th><th>#</th>' + sTh('teamName', 'Team') + sTh('w', 'W', 'Series won') + sTh('l', 'L', 'Series lost');
+  if (showDraw) head += sTh('t', 'T', 'Series tied');
+  if (gs.sub) head += sTh('subW', esc(gs.sub.abbr) + 'W', esc(gs.sub.noun) + ' won') + sTh('subL', esc(gs.sub.abbr) + 'L', esc(gs.sub.noun) + ' lost');
+  if (u) head += sTh('gf', 'For', esc(u.noun) + ' scored') + sTh('ga', 'Against', esc(u.noun) + ' conceded') + sTh('diff', 'Diff', esc(u.noun) + ' difference');
+  head += sTh('pts', 'Pts') + '<th>Form</th><th title="Current win/loss streak">Streak</th>';
+  if (hasDivs) head += '<th title="Division">Div</th>';
   const numInp = (r, key, min) => `<td><input type="number" class="input-text lg2-st-inp" data-tid="${r.teamId}" data-key="${key}" value="${r[key]}"${min != null ? ` min="${min}"` : ''}></td>`;
-  const body = rows.map((r, i) => {
+  const divSel = (r) => hasDivs ? `<td><select class="input-select lg2-st-div" data-tid="${r.teamId}"><option value="">—</option>${divs.map((d) => `<option value="${esc(d.id)}"${lgTeamDivId(lg, r.teamId) === d.id ? ' selected' : ''}>${esc(d.name)}</option>`).join('')}</select></td>` : '';
+  // One team-row; rank is passed in so divisions can rank within each group. Playoff zone = rank ≤ N.
+  const rowHtml = (r, rank) => {
+    const zone = rank <= playoffN ? ' lg2-st-playoff' : '';
+    const cut = rank === playoffN ? ' lg2-st-cut' : '';
     let c = `<td class="lg2-drag-cell"><span class="lg2-drag-handle" title="Drag to reorder"></span></td>`
-      + `<td class="lg2-pos">${i < playoffN ? '<span class="lg2-playoff-dot" title="Playoff spot"></span>' : ''}${i + 1}</td>`
+      + `<td class="lg2-pos">${rank <= playoffN ? '<span class="lg2-playoff-dot" title="Playoff spot"></span>' : ''}${rank}</td>`
       + `<td>${esc(r.teamName)}</td>` + numInp(r, 'w', 0) + numInp(r, 'l', 0);
     if (showDraw) c += numInp(r, 't', 0);
     if (gs.sub) c += numInp(r, 'subW', 0) + numInp(r, 'subL', 0);
     if (u) c += numInp(r, 'gf', 0) + numInp(r, 'ga', 0) + `<td>${(r.gf - r.ga) >= 0 ? '+' : ''}${r.gf - r.ga}</td>`;
-    c += numInp(r, 'pts') + `<td class="lg2-form-cell">${formDots(r.form)}</td><td class="lg2-streak">${esc(r.streak)}</td>`;
-    return `<tr data-tid="${r.teamId}" draggable="true">${c}</tr>`;
-  }).join('');
-  wrap.innerHTML = `<div class="lg2-st-scroll"><table class="lg2-st-table"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
+    c += numInp(r, 'pts') + `<td class="lg2-form-cell">${formDots(r.form)}</td><td class="lg2-streak">${esc(r.streak)}</td>` + divSel(r);
+    return `<tr data-tid="${r.teamId}" draggable="true" class="lg2-st-row${zone}${cut}">${c}</tr>`;
+  };
+  const tableFor = (groupRows) => `<div class="lg2-st-scroll"><table class="lg2-st-table"><thead><tr>${head}</tr></thead><tbody>${groupRows.map((r, i) => rowHtml(r, i + 1)).join('')}</tbody></table></div>`;
+  if (hasDivs) {
+    const groups = divs.map((d) => ({ name: d.name, rows: rows.filter((r) => lgTeamDivId(lg, r.teamId) === d.id) }));
+    const un = rows.filter((r) => !divs.find((d) => d.id === lgTeamDivId(lg, r.teamId)));
+    if (un.length) groups.push({ name: 'Unassigned', rows: un });
+    wrap.innerHTML = groups.map((g) => `<div class="lg2-div-group"><div class="lg2-div-head">${esc(g.name)}<span class="lg2-div-count">${g.rows.length}</span></div>${g.rows.length ? tableFor(g.rows) : '<div class="lg-empty" style="padding:6px 0;">No teams in this division.</div>'}</div>`).join('');
+  } else {
+    wrap.innerHTML = tableFor(rows);
+  }
+
+  // Sortable headers
+  wrap.querySelectorAll('.lg2-st-sort').forEach((h) => h.addEventListener('click', () => lgStSortBy(h.dataset.sk)));
+  // Division assignment
+  wrap.querySelectorAll('.lg2-st-div').forEach((sel) => sel.addEventListener('change', () => {
+    const tm = (lg.teams || []).find((t) => t.id === sel.dataset.tid); if (tm) { tm.divisionId = sel.value; lgSave(); lgRenderStandingsTab(); }
+  }));
 
   // Drag-to-reorder rows
   let dragTid = null;
@@ -1715,7 +1785,9 @@ function lgPushStandingsToOverlay(topN) {
   send('set_standings', { visible: true, title: title || 'Standings', rows, gamesLabel: gs.sub ? gs.sub.noun : '' });
   lgStatus(`Standings pushed to the standings overlay${topN > 0 ? ` (top ${topN})` : ''}.`, true);
 }
-el('lg-push-standings')?.addEventListener('click', () => lgPushStandingsToOverlay(0));
+el('lg-push-standings')?.addEventListener('click', () => lgPushStandingsToOverlay(parseInt((el('lg-st-topn') || {}).value, 10) || 0));
+el('lg-st-divisions')?.addEventListener('click', () => { const b = el('lg-st-divmgr'); if (!b) return; const show = b.style.display === 'none'; b.style.display = show ? '' : 'none'; if (show) lgRenderDivMgr(); });
+el('lg-st-density')?.addEventListener('click', (e) => { const b = e.target.closest('.seg-btn'); if (!b) return; const p = lgStPrefs(); p.density = b.dataset.d; lgStSavePrefs(p); lgRenderStandingsTab(); });
 
 // Push the league's fixtures to the schedule overlay (state.upcoming) — the schedule overlay merges
 // these with the start.gg queue, so a league's own weekly matches can now drive it.

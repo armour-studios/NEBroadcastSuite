@@ -4822,6 +4822,33 @@ span.lg-pl-role { color: var(--muted); }
 .lg2-st-scroll { overflow-x:auto; }
 .lg2-st-table td.lg2-sub-rec { font-variant-numeric:tabular-nums; font-weight:700; white-space:nowrap; color:var(--fg,#e8eaf0); }
 .lg2-st-table td.lg2-sub-rec .lg2-sub-dash { color:var(--muted); margin:0 1px; }
+/* Standings redesign: toolbar, sortable headers, playoff zones, density, divisions */
+.lg2-st-head .lg2-st-actions { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+.lg2-st-density-seg .seg-btn { padding:4px 10px; font-size:13px; line-height:1; }
+.lg2-st-table th.lg2-st-sort { cursor:pointer; user-select:none; white-space:nowrap; transition:color .12s; }
+.lg2-st-table th.lg2-st-sort:hover { color:var(--text); }
+.lg2-st-row.lg2-st-playoff td { background:rgba(72,187,120,.055); }
+.lg2-st-row.lg2-st-playoff td.lg2-pos { box-shadow:inset 3px 0 0 rgba(72,187,120,.55); }
+.lg2-st-row.lg2-st-cut td { border-bottom:2px solid rgba(245,158,11,.5); }
+.lg2-st-table td .lg2-st-div { width:auto; min-width:96px; padding:3px 5px; font-size:11.5px; text-align:left; }
+/* Compact density */
+.lg2-st-compact .lg2-st-table td { padding:2px 8px; font-size:12px; }
+.lg2-st-compact .lg2-st-table td .input-text { padding:1px 4px; font-size:11px; }
+.lg2-st-compact .lg2-st-table th { padding:3px 8px 5px; }
+/* Division groups */
+.lg2-div-group { margin-bottom:16px; }
+.lg2-div-head { display:flex; align-items:center; gap:8px; font-size:12px; font-weight:800; text-transform:uppercase; letter-spacing:.06em; color:#c4b5fd; padding:4px 2px 7px; border-bottom:2px solid rgba(124,58,237,.35); margin-bottom:4px; }
+.lg2-div-count { font-size:10px; font-weight:700; color:var(--muted); background:var(--white-a08,rgba(255,255,255,.08)); border-radius:10px; padding:1px 7px; }
+/* Divisions manager */
+.lg2-divmgr { background:var(--surface2); border:1px solid var(--border); border-radius:10px; padding:12px 14px; margin-bottom:12px; }
+.lg2-divmgr-inner { display:flex; flex-direction:column; gap:10px; }
+.lg2-divmgr-list { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+.lg2-divmgr-chip { display:inline-flex; align-items:center; gap:2px; background:rgba(124,58,237,.12); border:1px solid rgba(124,58,237,.3); border-radius:8px; padding:2px 4px 2px 8px; }
+.lg2-div-rename { background:transparent; border:none; color:var(--text); font-size:12px; font-weight:700; width:100px; padding:2px 3px; }
+.lg2-div-rename:focus { outline:none; background:var(--surface); border-radius:4px; }
+.lg2-div-rm { background:none; border:none; color:var(--muted); cursor:pointer; font-size:15px; line-height:1; padding:0 4px; }
+.lg2-div-rm:hover { color:#f56565; }
+.lg2-divmgr-add { display:flex; gap:8px; align-items:center; }
 /* Stats tab — three colour-chunked tiers (Series / Game-Map / In-game). */
 .lg2-stats-head { display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; gap:10px; }
 .lg2-stats-title { font-size:13px; font-weight:800; text-transform:uppercase; letter-spacing:.05em; }
