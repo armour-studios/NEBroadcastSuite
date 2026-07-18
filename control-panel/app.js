@@ -17059,12 +17059,14 @@ function applyTickerState(data) {
   const srcEl = el('select-ticker-source');
   if (srcEl && document.activeElement !== srcEl) srcEl.value = ticker.source || 'manual';
   const isSgg = ticker.source === 'startgg';
-  const msgRow = el('ticker-msg-row'); if (msgRow) msgRow.style.opacity = isSgg ? '.55' : '';
+  // Promo lines are usable in BOTH modes now: the whole ticker in manual mode, and interleaved
+  // between the live scores in start.gg mode (so a short match feed isn't the only thing looping).
+  const msgRow = el('ticker-msg-row'); if (msgRow) msgRow.style.opacity = '';
   const msgEl = el('input-ticker-messages');
   if (msgEl) {
-    msgEl.disabled = isSgg;
-    msgEl.placeholder = isSgg ? 'Auto-filled from start.gg live scores…' : 'Powered by ACME Energy';
-    if (document.activeElement !== msgEl) msgEl.value = (isSgg ? (ticker.feed || []) : (ticker.messages || [])).join('\n');
+    msgEl.disabled = false;
+    msgEl.placeholder = isSgg ? 'Optional promo lines shown between the live scores…' : 'Powered by ACME Energy';
+    if (document.activeElement !== msgEl) msgEl.value = (ticker.messages || []).join('\n');
   }
   const speedEl = el('input-ticker-speed');
   if (speedEl && document.activeElement !== speedEl) {

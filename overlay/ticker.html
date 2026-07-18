@@ -107,10 +107,13 @@
     var bar = el('ticker'), track = el('ticker-track');
     var isStartgg = t.source === 'startgg';
     var matches = isStartgg ? ((data && data.startgg && data.startgg.matchFeed) || []).filter(function (m) { return m && (m.status === 'live' || m.status === 'done'); }) : [];
-    var messages = isStartgg ? [] : ((t.messages || []).filter(Boolean));
+    // Manual promo lines are shown in BOTH modes: they're the whole ticker in manual mode, and they
+    // interleave between the live scores in start.gg mode so a short match feed (which otherwise
+    // loops the same few teams over and over) reads with more variety.
+    var messages = (t.messages || []).filter(Boolean);
     if (SceneBase.preview || EMBED) {
       if (isStartgg && !matches.length) matches = DEMO_MATCHES;
-      if (!isStartgg && !messages.length) messages = DEMO_MSGS;
+      if (!messages.length) messages = DEMO_MSGS;
     }
     var sponsor = (data && data.brand && data.brand.spots && data.brand.spots.ticker) || t.sponsor || '';
     var count = isStartgg ? matches.length : messages.length;
@@ -125,18 +128,15 @@
     if (sig === _sig) return;
     _sig = sig;
 
+    function addSep() { var sep = document.createElement('span'); sep.className = 'tk-sep'; track.appendChild(sep); }
+    function addMsg(msg) { var span = document.createElement('span'); span.className = 'ticker-segment'; span.textContent = msg; track.appendChild(span); addSep(); }
     track.innerHTML = '';
     for (var copy = 0; copy < 2; copy++) {
       if (isStartgg) {
-        matches.forEach(function (m) {
-          track.appendChild(buildMatch(m));
-          var sep = document.createElement('span'); sep.className = 'tk-sep'; track.appendChild(sep);
-        });
+        matches.forEach(function (m) { track.appendChild(buildMatch(m)); addSep(); });
+        messages.forEach(addMsg);   // promo lines interleaved after the scores
       } else {
-        messages.forEach(function (msg) {
-          var span = document.createElement('span'); span.className = 'ticker-segment'; span.textContent = msg; track.appendChild(span);
-          var sep = document.createElement('span'); sep.className = 'tk-sep'; track.appendChild(sep);
-        });
+        messages.forEach(addMsg);
       }
     }
     track.style.animationDuration = speed + 's';
