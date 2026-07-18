@@ -1096,6 +1096,7 @@ function lgRenderScheduleTab() {
               </label>
             </div>
             <button class="btn btn-ghost btn-xs lg2-match-games-toggle" data-mid="${m.id}">${hasGames ? `Games (${m.games.length})` : '+ Games'}</button>
+            ${(function () { const cap = (currentState && currentState.leagueCapture) || {}; const armed = cap.active && cap.matchId === m.id; return `<button class="btn btn-ghost btn-xs lg2-match-record${armed ? ' armed' : ''}" data-mid="${m.id}" title="Record the spectated result of this match into the league">${armed ? '● Recording' : 'Record'}</button>`; })()}
             <button class="btn btn-ghost btn-xs lg2-match-live" data-mid="${m.id}">Go Live</button>
             <button class="lg-del lg2-match-del" data-mid="${m.id}" title="Remove">×</button>
           </div>
@@ -1171,14 +1172,41 @@ function lgRenderScheduleTab() {
     send('set_team', { side: 'orange', name: rb.name, logo: rb.logo || null, players: rb.players.map((p) => ({ name: p.name, role: p.role })) });
     send('reset_series'); lgStatus(`${ra.name} vs ${rb.name} pushed live.`, true);
   }));
+  wrap.querySelectorAll('.lg2-match-record').forEach((b) => b.addEventListener('click', () => {
+    const cap = (currentState && currentState.leagueCapture) || {};
+    if (cap.active && cap.matchId === b.dataset.mid) { send('league_capture_stop', {}); return; }   // toggle off
+    const m = (lg.schedule || []).find((x) => x.id === b.dataset.mid); if (!m) return;
+    if (!m.teamA || !m.teamB) { lgStatus('Both teams must be assigned before recording.', false); return; }
+    send('league_capture_arm', { leagueId: lg.id, matchId: m.id });
+    lgStatus('Armed — the next spectated series records into this match (saves when it clinches).', true);
+  }));
   wrap.querySelectorAll('.lg2-match-notes-inp').forEach(inp => inp.addEventListener('change', () => {
     const m = (lg.schedule || []).find(x => x.id === inp.dataset.mid); if (!m) return;
     m.notes = inp.value.trim(); lgSave();
   }));
+  lgRenderCaptureBar();
   wrap.querySelectorAll('.lg2-match-vod-inp').forEach(inp => inp.addEventListener('change', () => {
     const m = (lg.schedule || []).find(x => x.id === inp.dataset.mid); if (!m) return;
     m.vod = inp.value.trim(); lgSave();
   }));
+}
+// Live status of the producer-armed spectated-match capture (state.leagueCapture). Re-rendered on
+// every full_state (see app.js hook) so it ticks up as games finish.
+function lgRenderCaptureBar() {
+  const bar = el('lg-capture-bar'); if (!bar) return;
+  const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const cap = (currentState && currentState.leagueCapture) || {};
+  if (!cap.active) { bar.style.display = 'none'; bar.innerHTML = ''; return; }
+  const games = cap.games || [];
+  const sa = games.filter((g) => g.scoreA > g.scoreB).length;
+  const sb = games.filter((g) => g.scoreB > g.scoreA).length;
+  bar.style.display = '';
+  bar.innerHTML = `<span class="lg-cap-dot"></span>
+    <span class="lg-cap-txt"><strong>Recording spectated match</strong> — ${esc(cap.teamA)} <b>${sa}</b>&ndash;<b>${sb}</b> ${esc(cap.teamB)} · Bo${cap.bestOf} · game ${games.length + 1} <span class="lg-cap-hint">saves automatically when the series clinches</span></span>
+    <button class="btn btn-primary btn-xs" id="lg-cap-save" title="Write the current games into the match now">Save now</button>
+    <button class="btn btn-ghost btn-xs" id="lg-cap-stop" title="Stop recording without saving">Stop</button>`;
+  el('lg-cap-save')?.addEventListener('click', () => send('league_capture_save', {}));
+  el('lg-cap-stop')?.addEventListener('click', () => send('league_capture_stop', {}));
 }
 function lgAddMatch() {
   const lg = lgActive(); if (!lg) return;

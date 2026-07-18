@@ -6306,6 +6306,7 @@ function applyState(data) {
   updateFacecamTeamHeaders(teams, data);
   if (typeof applyCommercialState === 'function') applyCommercialState(data);
   if (typeof lgHydrate === 'function') lgHydrate(data.leagues);
+  if (typeof lgRenderCaptureBar === 'function') lgRenderCaptureBar();   // live spectated-capture status
   if (typeof renderMyEvents === 'function') renderMyEvents();
   // Reflect central team-library changes (new/renamed teams, logos) in the open leagues view.
   if (typeof lgRenderMatchup === 'function') {

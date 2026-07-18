@@ -628,6 +628,11 @@ let state = {
     columns: [],  // [{ key, label, group }]
     rows: []      // [{ name, logo, color, values:{ <key>:number } }]
   },
+  // Producer-armed capture of a SPECTATED match's result into a league fixture. While active, each
+  // finished game's score is appended to games[] (mapped so A = the fixture's teamA regardless of
+  // which live side that is); when the series clinches (or the producer saves) it writes the series
+  // score + per-game breakdown into the league match and recalculates standings. Runtime-only.
+  leagueCapture: { active: false, leagueId: '', matchId: '', aSide: 'blue', teamA: '', teamB: '', bestOf: 5, games: [], startedAt: 0, lastNote: '' },
   // Ballchasing per-player leaderboard board — same generic {columns,rows} shape as leagueStats,
   // kept as its own overlay/state pair so the team board and the leaderboard can run as two
   // independent OBS sources at once.
@@ -3583,11 +3588,11 @@ const BROADCAST_TIERS = {
   veto: 'live', owMatch: 'live', mrMatch: 'live', customOverlayLayouts: 'live', gameConfigs: 'live', draft: 'live',
   intro: 'live', overtime: 'live', scoreboardAd: 'live', rlStatsScreen: 'live', background: 'live', deskFooter: 'live',
   preshow: 'live', csgo: 'live', valorant: 'live', lol: 'live', apex: 'live', bestOf: 'live', teams: 'live',
-  teamPlayers: 'live', series: 'live', activePlayer: 'live', match: 'live', myEvents: 'live', game: 'live',
+  teamPlayers: 'live', series: 'live', activePlayer: 'live', smash: 'live', match: 'live', myEvents: 'live', game: 'live',
   gameTeams: 'live', players: 'live', playerCache: 'live', currentGoal: 'live',
   spectatedPlayer: 'live', rlConnected: 'live', rlSpectatorUi: 'live', startgg: 'live',
   challonge: 'live', nxgen: 'live', activeEvent: 'live', obs: 'live', vmix: 'live',
-  switcher: 'live', commercial: 'live', upcoming: 'live', standings: 'live', leagueStats: 'live', leagueLeaderboard: 'live', ballchasing: 'live', teamRecord: 'live',
+  switcher: 'live', commercial: 'live', upcoming: 'live', standings: 'live', leagueStats: 'live', leagueLeaderboard: 'live', leagueCapture: 'live', ballchasing: 'live', teamRecord: 'live',
   autoTeamsFromGame: 'live', startggLeagueStandings: 'live', gfxActive: 'live', watchlist: 'live',
   teamSpotlight: 'live', director: 'live', ai: 'live', encode: 'live', twitch: 'live',
   discord: 'live', flows: 'live', flowVars: 'live',
@@ -3990,6 +3995,39 @@ function lgRecalcServer(lg) {
     return b.gf - a.gf;
   });
   lg.standings = standings;
+}
+
+// ── Spectated-match capture (producer-armed) ─────────────────────────────────
+// Append one finished game's score to the armed capture, mapping the live blue/orange scores onto
+// the fixture's A/B orientation. Clinches → finalize automatically.
+function lgCaptureAppendGame(blue, orange) {
+  const cap = state.leagueCapture; if (!cap.active) return;
+  const a = cap.aSide === 'orange' ? orange : blue;
+  const b = cap.aSide === 'orange' ? blue : orange;
+  cap.games.push({ scoreA: Number(a) || 0, scoreB: Number(b) || 0 });
+  const sa = cap.games.filter((g) => g.scoreA > g.scoreB).length;
+  const sb = cap.games.filter((g) => g.scoreB > g.scoreA).length;
+  cap.lastNote = `Recording ${cap.teamA} vs ${cap.teamB}: ${sa}-${sb} (game ${cap.games.length})`;
+  const need = Math.floor((cap.bestOf || 5) / 2) + 1;
+  if (sa >= need || sb >= need) lgCaptureFinalize('series clinched');
+}
+// Write the captured games + derived series score into the league fixture, recalc standings, disarm.
+function lgCaptureFinalize(reason) {
+  const cap = state.leagueCapture; if (!cap.active) return;
+  const lg = (state.leagues || []).find((l) => l.id === cap.leagueId);
+  const m = lg && (lg.schedule || []).find((x) => x.id === cap.matchId);
+  if (lg && m && cap.games.length) {
+    m.games = cap.games.map((g) => ({ scoreA: g.scoreA, scoreB: g.scoreB }));
+    const sa = cap.games.filter((g) => g.scoreA > g.scoreB).length;
+    const sb = cap.games.filter((g) => g.scoreB > g.scoreA).length;
+    m.result = { scoreA: sa, scoreB: sb, ot: false };
+    lgRecalcServer(lg);
+    leaguesVer++;
+    logAuto('league', `Captured ${cap.teamA} ${sa}-${sb} ${cap.teamB} into "${lg.name}" (${reason}).`);
+  }
+  state.leagueCapture = { active: false, leagueId: '', matchId: '', aSide: 'blue', teamA: '', teamB: '', bestOf: 5, games: [], startedAt: 0, lastNote: '' };
+  saveAppState();
+  broadcastFullState();
 }
 
 let _srvLgUidC = Date.now();
@@ -10697,6 +10735,11 @@ function handleMatchEnded(data) {
   // Auto-advance the current game to (games played + 1).
   state.game.number = Math.max(1, Math.min(state.bestOf, (state.series.blue || 0) + (state.series.orange || 0) + 1));
 
+  // Producer-armed league capture: record this finished game's score into the armed fixture.
+  if (state.leagueCapture && state.leagueCapture.active) {
+    try { lgCaptureAppendGame(state.game.blueScore, state.game.orangeScore); } catch (e) { console.warn('[LeagueCapture]', e.message); }
+  }
+
   // Auto-prediction: resolve by score immediately at game end
   if (_scoreWinnerSide && state.twitch.connected && predictionManager && state.twitch.predictions.settings.autoCreate) {
     const current = state.twitch.predictions.current;
@@ -13591,7 +13634,48 @@ function handleControlMessage(msg, ws) {
         }
         state.leagues = cleaned;
         leaguesVer++;
+        // Self-heal: if the armed capture points at a league/match that no longer exists, disarm.
+        const cap = state.leagueCapture;
+        if (cap && cap.active) {
+          const lg = cleaned.find((l) => l.id === cap.leagueId);
+          if (!lg || !(lg.schedule || []).some((m) => m.id === cap.matchId)) {
+            state.leagueCapture = { active: false, leagueId: '', matchId: '', aSide: 'blue', teamA: '', teamB: '', bestOf: 5, games: [], startedAt: 0, lastNote: '' };
+          }
+        }
       }
+      saveAppState();
+      broadcastFullState();
+      break;
+    }
+
+    // ── Spectated-match → league capture (producer-armed) ────────────────────
+    // Arm: record the NEXT spectated series into a specific league fixture. aSide maps the live blue/
+    // orange scores onto the fixture's A/B by matching the current on-air team names (default blue=A).
+    case 'league_capture_arm': {
+      const d = msg.data || {};
+      const lg = (state.leagues || []).find((l) => l.id === d.leagueId);
+      const m = lg && (lg.schedule || []).find((x) => x.id === d.matchId);
+      if (!lg || !m) { break; }
+      const nm = (s) => String(s == null ? '' : s).toLowerCase().replace(/[^a-z0-9]/g, '');
+      const teamName = (id, raw) => { const tm = (lg.teams || []).find((t) => t.id === id); return tm ? (tm.teamName || tm.name || '') : (raw || ''); };
+      const aName = teamName(m.teamA, m.sggTeamA), bName = teamName(m.teamB, m.sggTeamB);
+      // Map live sides to A/B: if the ORANGE on-air team matches fixture A (or blue matches B), flip.
+      const blueNm = nm(state.teams.blue && state.teams.blue.name), orangeNm = nm(state.teams.orange && state.teams.orange.name);
+      let aSide = 'blue';
+      if ((orangeNm && orangeNm === nm(aName)) || (blueNm && blueNm === nm(bName))) aSide = 'orange';
+      state.leagueCapture = {
+        active: true, leagueId: lg.id, matchId: m.id, aSide,
+        teamA: aName || 'Team A', teamB: bName || 'Team B', bestOf: state.bestOf || Number((m.format || 'BO5').replace(/\D/g, '')) || 5,
+        games: [], startedAt: Date.now(),
+        lastNote: `Armed — recording into ${aName} vs ${bName}. Finish the games; it saves when the series clinches.`
+      };
+      saveAppState();
+      broadcastFullState();
+      break;
+    }
+    case 'league_capture_save': { lgCaptureFinalize('saved by producer'); break; }
+    case 'league_capture_stop': {
+      state.leagueCapture = { active: false, leagueId: '', matchId: '', aSide: 'blue', teamA: '', teamB: '', bestOf: 5, games: [], startedAt: 0, lastNote: '' };
       saveAppState();
       broadcastFullState();
       break;
