@@ -64,7 +64,11 @@ function seedCalibrateMidpoints() {
 // Blend a player's estimates → seedMMR + display tier + dominant source/confidence + breakdown tooltip.
 function blendMMRToPlayer(p) {
   const C = window.SeedResolveCore; if (!C || !p) return;
-  const b = C.blendEstimates(p.estimates || [], { k: 2 });
+  // k=5 sharpens the confidence weighting so the highest-accuracy source strongly dominates: a
+  // verified rl6mans exact ELO (conf ~98) outweighs a placement guess (~50) by (98/50)^5 ≈ 25×, so
+  // weak sources nudge the seed by only a few ELO instead of dragging it a full tier. Near-peer
+  // sources still blend meaningfully — it's dominant, not absolute.
+  const b = C.blendEstimates(p.estimates || [], { k: 5 });
   if (b.mmr == null) { p.seedMMR = null; p.rankValue = null; p.rank = ''; p.source = ''; p.confidence = 0; p.sourceDetail = ''; return; }
   p.seedMMR = b.mmr; p.rankValue = b.mmr;
   p.rank = seedMMRToTier(b.mmr) || '';
@@ -80,6 +84,12 @@ function blendMMRToPlayer(p) {
 function seedApplyEstimate(p, est) {
   if (!p || !est || !Number.isFinite(est.mmr) || !(est.confidence > 0)) return false;
   if (!Array.isArray(p.estimates)) p.estimates = [];
+  // 6mans-verified authority (rl6mans exact ELO is the gold standard): a verified 6mans always beats
+  // tracker.gg, which is a fallback only. So skip a tracker estimate when a verified 6mans exists,
+  // and when a verified 6mans arrives, evict any tracker estimate that was already blended in.
+  const hasVerified6m = p.estimates.some((e) => e.source === 'sixmans' && e.exactElo > 0);
+  if (est.source === 'tracker' && hasVerified6m) return false;
+  if (est.source === 'sixmans' && est.exactElo > 0) p.estimates = p.estimates.filter((e) => e.source !== 'tracker');
   const i = p.estimates.findIndex((e) => e.source === est.source);
   if (i >= 0) p.estimates[i] = est; else p.estimates.push(est);
   blendMMRToPlayer(p);
@@ -549,7 +559,7 @@ function seedRenderUnverified() {
       if (statusEl) { statusEl.style.display = ''; statusEl.textContent = `rl6mans 0 / ${targets.length}`; }
       let d1 = 0;
       for (const t of targets) {
-        try { if (apply(t, _6mUseRank(await _6mansLookupPlayer(t.ti, t.pi, t.name)), 'sixmans', 95, 'rl6mans.com — Lookup All')) got6m++; } catch (_) {}
+        try { if (apply(t, _6mUseRank(await _6mansLookupPlayer(t.ti, t.pi, t.name)), 'sixmans', 98, 'rl6mans.com — Lookup All')) got6m++; } catch (_) {}
         d1++;
         this.textContent = `rl6mans ${d1}/${targets.length}`;
         if (statusEl) statusEl.textContent = `rl6mans ${d1} / ${targets.length}`;
@@ -1321,7 +1331,7 @@ async function seedAutoResolve() {
     _seedRows.forEach((row, ti) => (row.players || []).forEach((p, pi) => {
       if (hasSixmans(p)) return;                                    // already have a 6mans reading
       const reg = registry[(p.gamerTag || '').trim().toLowerCase()];
-      if (reg && reg.sixmans && reg.sixmans.rank) seedApplySixmans(p, { rank: reg.sixmans.rank, elo: reg.sixmans.elo || 0 }, 90, 'rl6mans registry' + (reg.sixmans.elo ? ' · ' + reg.sixmans.elo + ' ELO' : ''));
+      if (reg && reg.sixmans && reg.sixmans.rank) seedApplySixmans(p, { rank: reg.sixmans.rank, elo: reg.sixmans.elo || 0 }, reg.sixmans.elo > 0 ? 96 : 92, 'rl6mans registry' + (reg.sixmans.elo ? ' · ' + reg.sixmans.elo + ' ELO' : ''));
       else if (p.gamerTag) need.push({ ti, pi, name: p.gamerTag, alts: [p.epic, ...(p.alts || [])].filter(Boolean) });
     }));
     const BATCH = 12;
@@ -1338,7 +1348,7 @@ async function seedAutoResolve() {
           if (!rr.match || rr.confidence !== 'exact') return;
           const c = chunk.find((x) => (x.name || '').toLowerCase() === (rr.input || '').toLowerCase());
           const p = c && _seedRows[c.ti] && _seedRows[c.ti].players[c.pi];
-          if (p) seedApplySixmans(p, rr.match, 95, 'rl6mans.com verified' + (rr.match.elo > 0 ? ' · ' + rr.match.elo + ' ELO' : ''));
+          if (p) seedApplySixmans(p, rr.match, 98, 'rl6mans.com verified' + (rr.match.elo > 0 ? ' · ' + rr.match.elo + ' ELO' : ''));
         });
       } catch (_) {}
     }
@@ -2277,7 +2287,7 @@ function applyVerifyChanges() {
     p.player.elo = p.webElo || null;
     p.player.tier = p.webRank || '';
     if (seedIsMMR()) {
-      seedApplySixmans(p.player, { rank: p.webRank, elo: p.webElo || 0 }, 95, 'rl6mans.com — verified' + (p.webElo > 0 ? ' · ' + p.webElo + ' ELO' : ''));
+      seedApplySixmans(p.player, { rank: p.webRank, elo: p.webElo || 0 }, 98, 'rl6mans.com — verified' + (p.webElo > 0 ? ' · ' + p.webElo + ' ELO' : ''));
     } else if (p.webElo > 0) {
       p.player.rank = String(p.webElo); p.player.rankValue = p.webElo;
       seedTagSource(p.player, 'sixmans', 95, 'rl6mans.com — verified · ' + p.webElo + ' ELO');

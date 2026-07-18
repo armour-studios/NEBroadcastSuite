@@ -11,9 +11,11 @@
 
   function clamp(x, lo, hi) { return x < lo ? lo : x > hi ? hi : x; }
 
-  // Confidence each source is worth (0-100). Higher always wins in resolveApply().
+  // Confidence each source is worth (0-100). Higher always wins in resolveApply(). rl6mans VERIFIED
+  // (exact ELO) is the gold standard and sits clearly above everything, incl. tracker.gg — which is
+  // a fallback only when there's no verified 6mans (see seedApplyEstimate's tracker gate).
   const SRC_CONF = {
-    sixmans: 95, sixmansRegistry: 90,   // rl6mans.com profile exact match
+    sixmans: 98, sixmansRegistry: 92,   // rl6mans.com verified — exact ELO (98) / remembered account (92)
     tracker: 92, trackerDom: 80,        // tracker.gg (raw MMR vs DOM-only fallback)
     manual: 60,                         // hand / CSV entered, unverified
     teammate: 15,                       // average of resolved teammates
