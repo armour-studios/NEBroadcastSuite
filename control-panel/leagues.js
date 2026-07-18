@@ -519,6 +519,138 @@ function lgRenderStandingsTab() {
   }));
 }
 
+// ── Playoff bracket (single-elimination, seeded from standings) ──────────────
+// Stored client-side on lg.bracket (the server preserves unknown league fields), and pushed to the
+// SAME bracket.html overlay the manual Bracket Builder uses (set_bracket_phases). rounds[] mirror
+// the builder's shape: [{ name, sets:[{ a:{name,score,seed}, b:{...} }] }].
+function lgBracketModel(lg) {
+  if (!lg.bracket || typeof lg.bracket !== 'object') lg.bracket = { type: 'single', size: 8, rounds: [], seededAt: 0 };
+  if (!Array.isArray(lg.bracket.rounds)) lg.bracket.rounds = [];
+  return lg.bracket;
+}
+// Standard bracket seeding order for n slots (n a power of 2): [1,8,4,5,2,7,3,6] for 8, so the top
+// seed always meets the lowest and the bracket halves are balanced.
+function lgSeedSlots(n) {
+  let arr = [1, 2];
+  while (arr.length < n) { const m = arr.length * 2 + 1; const out = []; arr.forEach((s) => { out.push(s); out.push(m - s); }); arr = out; }
+  return arr;
+}
+function lgBracketRoundName(idx, total) {
+  const fromEnd = total - idx;
+  if (fromEnd === 1) return 'Final';
+  if (fromEnd === 2) return 'Semifinals';
+  if (fromEnd === 3) return 'Quarterfinals';
+  return 'Round ' + (idx + 1);
+}
+function lgBracketWinnerOf(set) {
+  const an = set.a.name, bn = set.b.name;
+  if (an && lgIsBye(bn)) return 'a';
+  if (bn && lgIsBye(an)) return 'b';
+  const sa = Number(set.a.score) || 0, sb = Number(set.b.score) || 0;
+  if (sa === sb) return '';
+  return sa > sb ? 'a' : 'b';
+}
+function lgIsBye(name) { return !name || name === '(bye)'; }
+function lgBracketGenerate() {
+  const lg = lgActive(); if (!lg) return;
+  const bk = lgBracketModel(lg);
+  const size = Math.max(2, parseInt((el('lg-bkt-size') || {}).value, 10) || 8);
+  // Seed order = current standings order (fall back to teams order). Resolve display names.
+  const teamsById = {}; (lg.teams || []).forEach((t) => { teamsById[t.id] = t; });
+  const ordered = (lg.standings && lg.standings.length)
+    ? lg.standings.map((s) => teamsById[s.teamId]).filter(Boolean)
+    : (lg.teams || []).slice();
+  if (ordered.length < 2) { lgStatus('Add at least 2 teams (and standings) before generating a bracket.', false); return; }
+  const seeds = ordered.slice(0, size).map((tm) => lgResolveTeam(tm).name || tm.teamName || 'Team');
+  const slotOrder = lgSeedSlots(size);   // seed positions in slot order
+  const slots = slotOrder.map((seed) => seeds[seed - 1] || '(bye)');
+  const roundCount = Math.round(Math.log2(size));
+  const rounds = [];
+  // Round 1 from the seeded slots.
+  const r1 = [];
+  for (let i = 0; i < slots.length; i += 2) r1.push({ a: { name: slots[i], score: 0 }, b: { name: slots[i + 1], score: 0 } });
+  rounds.push({ name: lgBracketRoundName(0, roundCount), sets: r1 });
+  // Empty later rounds.
+  for (let r = 1; r < roundCount; r++) {
+    const n = r1.length >> r;
+    rounds.push({ name: lgBracketRoundName(r, roundCount), sets: Array.from({ length: n }, () => ({ a: { name: '', score: 0 }, b: { name: '', score: 0 } })) });
+  }
+  bk.type = 'single'; bk.size = size; bk.rounds = rounds; bk.seededAt = Date.now();
+  // Auto-advance any first-round byes so the producer starts on real matchups.
+  rounds[0].sets.forEach((set, si) => { const w = lgBracketWinnerOf(set); if (w && (lgIsBye(set.a.name) || lgIsBye(set.b.name))) lgBracketAdvanceInto(bk, 0, si, w); });
+  lgSave(); lgRenderBracketTab();
+  lgStatus(`Seeded a ${size}-team single-elimination bracket from standings.`, true);
+}
+// Place a set's winner into the correct slot of the next round (no re-render/save — caller does).
+function lgBracketAdvanceInto(bk, ri, si, w) {
+  const rounds = bk.rounds; if (ri >= rounds.length - 1) return;
+  const winnerName = w === 'a' ? rounds[ri].sets[si].a.name : rounds[ri].sets[si].b.name;
+  const next = rounds[ri + 1].sets[Math.floor(si / 2)]; if (!next) return;
+  const slot = si % 2 === 0 ? 'a' : 'b';
+  next[slot].name = winnerName;
+}
+function lgBracketAdvance(ri, si) {
+  const lg = lgActive(); if (!lg) return; const bk = lgBracketModel(lg);
+  const w = lgBracketWinnerOf(bk.rounds[ri].sets[si]);
+  if (!w) { lgStatus('Enter a winning score first (scores can\'t be tied).', false); return; }
+  lgBracketAdvanceInto(bk, ri, si, w);
+  lgSave(); lgRenderBracketTab();
+}
+function lgRenderBracketTab() {
+  const board = el('lg-bkt-board'); const lg = lgActive(); if (!board || !lg) return;
+  const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const bk = lgBracketModel(lg);
+  if (!bk.rounds.length) {
+    board.innerHTML = '<div class="lg-empty">No bracket yet — pick a size and hit <strong>Generate from standings</strong> to seed the playoffs, then push it to the bracket overlay.</div>';
+    return;
+  }
+  const champ = (() => { const lastR = bk.rounds[bk.rounds.length - 1]; if (!lastR || !lastR.sets[0]) return ''; const w = lgBracketWinnerOf(lastR.sets[0]); return w ? (w === 'a' ? lastR.sets[0].a.name : lastR.sets[0].b.name) : ''; })();
+  const cols = bk.rounds.map((round, ri) => {
+    const sets = round.sets.map((set, si) => {
+      const w = lgBracketWinnerOf(set);
+      const side = (slot) => {
+        const nm = set[slot].name; const bye = lgIsBye(nm);
+        return `<div class="lg-bkt-side${w === slot ? ' win' : ''}${bye ? ' bye' : ''}">
+          <span class="lg-bkt-tname">${bye ? '(bye)' : esc(nm) || 'TBD'}</span>
+          <input type="number" class="input-text lg-bkt-score" data-ri="${ri}" data-si="${si}" data-slot="${slot}" value="${Number(set[slot].score) || 0}"${bye ? ' disabled' : ''}>
+        </div>`;
+      };
+      const canAdv = ri < bk.rounds.length - 1 && !!w;
+      return `<div class="lg-bkt-set">${side('a')}${side('b')}
+        ${ri < bk.rounds.length - 1 ? `<button class="lg-bkt-adv${canAdv ? '' : ' dim'}" data-ri="${ri}" data-si="${si}" title="Advance the winner">${canAdv ? 'Advance →' : ''}</button>` : ''}
+      </div>`;
+    }).join('');
+    return `<div class="lg-bkt-col"><div class="lg-bkt-round">${esc(round.name)}</div>${sets}</div>`;
+  }).join('');
+  board.innerHTML = `${champ ? `<div class="lg-bkt-champ">Champion: <strong>${esc(champ)}</strong></div>` : ''}<div class="lg-bkt-scroll"><div class="lg-bkt-cols">${cols}</div></div>`;
+  board.querySelectorAll('.lg-bkt-score').forEach((inp) => inp.addEventListener('change', () => {
+    bk.rounds[+inp.dataset.ri].sets[+inp.dataset.si][inp.dataset.slot].score = Number(inp.value) || 0;
+    lgSave(); lgRenderBracketTab();
+  }));
+  board.querySelectorAll('.lg-bkt-adv').forEach((b) => b.addEventListener('click', () => { if (!b.classList.contains('dim')) lgBracketAdvance(+b.dataset.ri, +b.dataset.si); }));
+}
+// Push the league bracket to bracket.html (same set_bracket_phases shape as the manual builder).
+function lgBracketPush(visible) {
+  const lg = lgActive(); if (!lg) return; const bk = lgBracketModel(lg);
+  if (!bk.rounds.length) { lgStatus('Generate a bracket first.', false); return; }
+  const logoByName = {}; (lg.teams || []).forEach((tm) => { const r = lgResolveTeam(tm); if (r.name && r.logo) logoByName[r.name] = r.logo; });
+  const winners = bk.rounds.map((round, ri) => ({
+    name: round.name, round: ri + 1,
+    sets: round.sets.map((set) => {
+      const w = lgBracketWinnerOf(set);
+      return { a: { name: lgIsBye(set.a.name) ? 'BYE' : (set.a.name || 'TBD'), score: Number(set.a.score) || 0, winner: w === 'a' },
+               b: { name: lgIsBye(set.b.name) ? 'BYE' : (set.b.name || 'TBD'), score: Number(set.b.score) || 0, winner: w === 'b' } };
+    })
+  }));
+  const teams = Object.keys(logoByName).map((name) => ({ name, logo: logoByName[name] }));
+  const title = [lg.name, lg.season].filter(Boolean).join(' — ') || 'Playoffs';
+  send('set_bracket_phases', {
+    phases: [{ id: 'lgph_' + lg.id, name: 'Playoffs', type: 'SINGLE_ELIMINATION', winners, losers: [], finals: [], standings: [], schedule: [], roster: [] }],
+    activePhaseId: 'lgph_' + lg.id, title, teams, visible: visible !== false
+  });
+  lgStatus(visible === false ? 'Bracket overlay hidden.' : 'Bracket pushed to the bracket overlay.', true);
+}
+
 // Resolve a schedule match's series score (games won per side) + real per-side totals. When a
 // per-game breakdown (m.games) is provided, the series score is derived by counting games won
 // and totals are summed from the individual game scores; otherwise both come directly from the
@@ -1482,13 +1614,14 @@ function lgRenderOverview() {
 function lgSwitchTab(name) {
   _lgActiveTab = name;
   document.querySelectorAll('#lg2-tabs .lg2-tab').forEach((b) => b.classList.toggle('active', b.dataset.tab === name));
-  ['overview', 'roster', 'standings', 'schedule', 'stats', 'ballchasing', 'settings'].forEach((t) => {
+  ['overview', 'roster', 'standings', 'schedule', 'bracket', 'stats', 'ballchasing', 'settings'].forEach((t) => {
     const p = el('lg2-panel-' + t); if (p) p.style.display = t === name ? '' : 'none';
   });
   if (name === 'overview') lgRenderOverview();
   else if (name === 'roster') lgSetRosterView(_lgRosterView);
   else if (name === 'standings') lgRenderStandingsTab();
   else if (name === 'schedule') lgRenderScheduleTab();
+  else if (name === 'bracket') lgRenderBracketTab();
   else if (name === 'stats') lgRenderStatsTab();
   else if (name === 'ballchasing') lgRenderBallchasingTab();
   else if (name === 'settings') lgRenderSettingsTab();
@@ -1787,6 +1920,9 @@ function lgPushStandingsToOverlay(topN) {
 }
 el('lg-push-standings')?.addEventListener('click', () => lgPushStandingsToOverlay(parseInt((el('lg-st-topn') || {}).value, 10) || 0));
 el('lg-st-divisions')?.addEventListener('click', () => { const b = el('lg-st-divmgr'); if (!b) return; const show = b.style.display === 'none'; b.style.display = show ? '' : 'none'; if (show) lgRenderDivMgr(); });
+el('lg-bkt-generate')?.addEventListener('click', lgBracketGenerate);
+el('lg-bkt-push')?.addEventListener('click', () => lgBracketPush(true));
+el('lg-bkt-hide')?.addEventListener('click', () => lgBracketPush(false));
 el('lg-st-density')?.addEventListener('click', (e) => { const b = e.target.closest('.seg-btn'); if (!b) return; const p = lgStPrefs(); p.density = b.dataset.d; lgStSavePrefs(p); lgRenderStandingsTab(); });
 
 // Push the league's fixtures to the schedule overlay (state.upcoming) — the schedule overlay merges
