@@ -28,6 +28,13 @@
   .ticker-track { display: inline-flex; align-items: center; white-space: nowrap; animation: ticker-scroll linear infinite;
     padding-left: 28px; position: relative; font-size: 23px; font-weight: 700; line-height: 1; }
   @keyframes ticker-scroll { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+  /* Reveal wrapper — a one-shot slide-in played whenever the ticker's teams/messages change, so new
+     content slides in instead of popping in place. Separate element from .ticker-track so its
+     translateY reveal never collides with the track's continuous translateX scroll. */
+  .ticker-reveal { display: inline-flex; align-items: center; height: 100%; will-change: transform, opacity; }
+  .ticker-reveal.tk-in { animation: tickerReveal .5s cubic-bezier(.16,.84,.24,1) both; }
+  @keyframes tickerReveal { from { opacity: 0; transform: translateY(70%); } to { opacity: 1; transform: translateY(0); } }
+  @media (prefers-reduced-motion: reduce) { .ticker-reveal.tk-in { animation: none; } }
   /* Match scoreline: [LIVE|FINAL] [logoA] TEAM A  s - s  TEAM B [logoB] */
   .tk-match { display: inline-flex; align-items: center; gap: 12px; }
   .tk-stat { display: inline-flex; align-items: center; gap: 7px; letter-spacing: 2px; border-radius: 4px; padding: 2px 8px; }
@@ -58,7 +65,7 @@
 <body>
   <div id="ticker" class="ticker hidden">
     <img class="ticker-sponsor" id="ticker-sponsor" alt="">
-    <div class="ticker-mask"><div id="ticker-track" class="ticker-track"></div></div>
+    <div class="ticker-mask"><div id="ticker-reveal" class="ticker-reveal"><div id="ticker-track" class="ticker-track"></div></div></div>
   </div>
 <script src="scene-base.js"></script>
 <script>
@@ -67,6 +74,7 @@
   var EMBED = SceneBase.qp('embed') === '1';
   if (EMBED) document.documentElement.classList.add('tk-embed');
   var _sig = '';
+  var _structSig = '';
 
   var DEMO_MATCHES = [
     { status: 'live', teamA: 'Sentinels', teamB: 'Cloud9', scoreA: 2, scoreB: 1, logoA: '', logoB: '' },
@@ -127,6 +135,11 @@
     var sig = JSON.stringify({ s: isStartgg, m: matches, x: messages, sp: sponsor, speed: speed });
     if (sig === _sig) return;
     _sig = sig;
+    // Structure sig EXCLUDES the live score digits: the slide-in reveal fires when the set of
+    // teams/messages changes (e.g. a match's full teams appear), not on every score tick.
+    var structSig = JSON.stringify({ s: isStartgg, m: matches.map(function (m) { return [m.status, m.teamA, m.teamB]; }), x: messages, sp: sponsor });
+    var structChanged = structSig !== _structSig;
+    _structSig = structSig;
 
     function addSep() { var sep = document.createElement('span'); sep.className = 'tk-sep'; track.appendChild(sep); }
     function addMsg(msg) { var span = document.createElement('span'); span.className = 'ticker-segment'; span.textContent = msg; track.appendChild(span); addSep(); }
@@ -140,6 +153,11 @@
       }
     }
     track.style.animationDuration = speed + 's';
+
+    // Slide the ticker text in when its teams/messages changed (restart the one-shot reveal via a
+    // forced reflow), instead of letting the new content pop in place.
+    var reveal = el('ticker-reveal');
+    if (reveal && structChanged) { reveal.classList.remove('tk-in'); void reveal.offsetWidth; reveal.classList.add('tk-in'); }
   }
   SceneBase.connect(render);
 })();
