@@ -5757,6 +5757,8 @@ el('bb-trigger-go')?.addEventListener('click', () => {
     if (inp.dataset.kind === 'time') { const s = parseTimeInput(inp.value); if (s != null) setTimerSecs(s); }
     else { const tgt = el(inp.dataset.target); if (tgt) tgt.value = inp.value; }
   });
+  // Choosing a team in the Winner gear is a deliberate override — stop auto-pointing at the leader.
+  if (stateKey === 'winner') window._qkWinnerAuto = false;
   // Feed the gfx.html layer too — this path only sent the trigger message, so gear
   // chips (Line-up, Break, Winner) showed on standalone pages but never on the
   // unified gfx.html source. Mirrors the plain toggle path exactly.
@@ -15367,6 +15369,9 @@ function qkRenderTeamTarget() {
   const series = (currentState && currentState.series) || {};
   if (((Number(series.blue) || 0) + (Number(series.orange) || 0)) === 0) window._qkWinnerAuto = true;
   const lead = ((window._qkWinnerAuto !== false) && window._winnerLeadingSide) ? window._winnerLeadingSide(currentState) : '';
+  // Write the leader into ck-winner-side so EVERY winner UI reflects the champion — the chip, the
+  // gear popover's Team field (cloned from this select), and any re-fire — instead of prompting.
+  if (lead) { const ws = el('ck-winner-side'); if (ws && ws.value !== lead) ws.value = lead; }
   const cur = lead || ((el('ck-winner-side') && el('ck-winner-side').value === 'orange') ? 'orange' : 'blue');
   ['blue', 'orange'].forEach((side) => {
     const btn = bar.querySelector(`[data-ttside="${side}"]`); if (!btn) return;
