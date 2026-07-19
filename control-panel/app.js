@@ -14173,7 +14173,7 @@ document.querySelectorAll('.js-cut-all').forEach((btn) => {
 const GOLIVE_TRIGGERS = [
   { toggle: 'ck-break-toggle',    state: 'breakScreen', sceneKey: 'break',    msg: 'set_break',    show: () => startBreakFromRail() },
   { toggle: 'ck-matchup-toggle',  state: 'matchup',     sceneKey: 'matchup',  pushOnly: true },
-  { toggle: 'ck-winner-toggle',   state: 'winner',      sceneKey: 'winner',   msg: 'set_winner',   show: () => ({ visible: true, side: el('ck-winner-side')?.value || 'blue' }) },
+  { toggle: 'ck-winner-toggle',   state: 'winner',      sceneKey: 'winner',   msg: 'set_winner',   show: () => ({ visible: true, side: ((window._qkWinnerAuto !== false) && window._winnerLeadingSide && window._winnerLeadingSide(currentState)) || el('ck-winner-side')?.value || 'blue' }) },
   { toggle: 'ck-intro-toggle',    state: 'intro',       sceneKey: 'intro',    msg: 'set_intro',    show: () => ({ visible: true, side: el('ck-intro-side')?.value || 'blue' }) },
   { toggle: 'ck-veto-toggle',     state: 'veto',        sceneKey: 'veto',     msg: 'set_veto',     show: () => ({ visible: true }) },
   { toggle: 'ck-spotlight-toggle',state: 'watchlist',   sceneKey: 'spotlight',msg: 'set_watchlist',show: () => ({ visible: true }) },
@@ -15361,7 +15361,13 @@ const QK_TEAM_MSG = { winner: 'set_winner', intro: 'set_intro' };
 function qkRenderTeamTarget() {
   const bar = el('qk-teamtarget'); if (!bar) return;
   const teams = (currentState && currentState.teams) || {};
-  const cur = (el('ck-winner-side') && el('ck-winner-side').value === 'orange') ? 'orange' : 'blue';
+  // The Winner side auto-points at the series leader (same as the Graphics ▸ Winner card) until the
+  // producer picks a team by hand; re-armed on a fresh match. This only steers the Winner graphic —
+  // the Line-up side is unaffected.
+  const series = (currentState && currentState.series) || {};
+  if (((Number(series.blue) || 0) + (Number(series.orange) || 0)) === 0) window._qkWinnerAuto = true;
+  const lead = ((window._qkWinnerAuto !== false) && window._winnerLeadingSide) ? window._winnerLeadingSide(currentState) : '';
+  const cur = lead || ((el('ck-winner-side') && el('ck-winner-side').value === 'orange') ? 'orange' : 'blue');
   ['blue', 'orange'].forEach((side) => {
     const btn = bar.querySelector(`[data-ttside="${side}"]`); if (!btn) return;
     const t = teams[side] || {};
@@ -15381,6 +15387,7 @@ function qkRenderTeamTarget() {
 // Set which side the team graphics fill; re-fire any that are already live so on-air updates instantly.
 function qkSetTeamTarget(side) {
   side = side === 'orange' ? 'orange' : 'blue';
+  window._qkWinnerAuto = false;   // explicit producer pick — stop auto-pointing the Winner at the series leader
   ['ck-winner-side', 'ck-intro-side'].forEach((id) => { const s = el(id); if (s) s.value = side; });
   QK_PUT.filter((it) => it.sideSel).forEach((it) => {
     if (_qkIsLive(it) && QK_TEAM_MSG[it.trig]) send(QK_TEAM_MSG[it.trig], { visible: true, side });
