@@ -45,11 +45,16 @@ export class GfxOnAir extends SuiteKeyAction<Settings> {
       if (g.msg) {
         const payload: Record<string, unknown> = { visible: true };
         if (g.side) {
-          // Winner auto-decides the team: "auto" (or an unset side) sends 'auto' and the server
-          // resolves the series leader. Other side graphics (Line-up) still need an explicit side.
-          const isWinner = g.msg === "set_winner";
-          payload.side = (isWinner && (s.side === "auto" || !s.side)) ? "auto"
-            : (s.side === "orange" ? "orange" : "blue");
+          if (g.msg === "set_winner") {
+            // The Winner graphic ALWAYS shows whoever is winning the series (from Match — Teams), so
+            // one button is always right — no per-side buttons, no team setup. We resolve the leader
+            // from live state here (a tie falls back to the button's side / blue).
+            const b = Number(suite.state.series?.blue) || 0;
+            const o = Number(suite.state.series?.orange) || 0;
+            payload.side = b > o ? "blue" : o > b ? "orange" : (s.side === "orange" ? "orange" : "blue");
+          } else {
+            payload.side = s.side === "orange" ? "orange" : "blue";   // Line-up uses the chosen side
+          }
         }
         await this.fire(ev.action, g.msg, payload);
       }
