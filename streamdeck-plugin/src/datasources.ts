@@ -47,6 +47,8 @@ export function datasource(event: string, state: SuiteState): Array<Item | ItemG
       const blue = state.teams?.blue?.name || "Blue";
       const orange = state.teams?.orange?.name || "Orange";
       return [
+        // Winner only: auto-picks whichever team is leading the series (the server resolves it).
+        { label: "Auto — winning team (Winner)", value: "auto" },
         { label: `Blue side (${blue})`, value: "blue" },
         { label: `Orange side (${orange})`, value: "orange" }
       ];

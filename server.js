@@ -11652,12 +11652,24 @@ registerWsHandlers({
   set_winner(msg) {
     const w = msg.data || {};
     const cur = state.winner || {};
+    let side = ('side' in w) ? (w.side || '') : (cur.side ?? '');
+    // 'auto' resolves to the side leading the series, so a Stream Deck button / flow / any caller can
+    // fire the winner WITHOUT pre-picking a team (mirrors the control panel's auto-winner).
+    if (side === 'auto') {
+      side = state.series.blue > state.series.orange ? 'blue'
+           : state.series.orange > state.series.blue ? 'orange'
+           : (cur.side || 'blue');
+    }
+    // Fired by SIDE without a name (Stream Deck / toggle / 'auto'): clear name/logo/colour so the
+    // overlay resolves the champion fresh from that team — winner.html prefers an explicit name over
+    // the side, so a leftover name from a previous winner would otherwise show the wrong team.
+    const sideFired = ('side' in w) && (side === 'blue' || side === 'orange') && typeof w.name !== 'string';
     state.winner = {
       visible: ('visible' in w) ? !!w.visible : !!cur.visible,
-      side: ('side' in w) ? (w.side || '') : (cur.side ?? ''),
-      name: typeof w.name === 'string' ? w.name : (cur.name ?? ''),
-      logo: ('logo' in w) ? (w.logo || null) : (cur.logo ?? null),
-      color: ('color' in w) ? (w.color || '') : (cur.color ?? ''),
+      side,
+      name: typeof w.name === 'string' ? w.name : (sideFired ? '' : (cur.name ?? '')),
+      logo: ('logo' in w) ? (w.logo || null) : (sideFired ? null : (cur.logo ?? null)),
+      color: ('color' in w) ? (w.color || '') : (sideFired ? '' : (cur.color ?? '')),
       subtitle: typeof w.subtitle === 'string' ? w.subtitle : (cur.subtitle ?? '')
     };
     saveAppState();

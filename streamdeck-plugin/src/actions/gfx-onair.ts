@@ -44,7 +44,13 @@ export class GfxOnAir extends SuiteKeyAction<Settings> {
     } else {
       if (g.msg) {
         const payload: Record<string, unknown> = { visible: true };
-        if (g.side) payload.side = s.side === "orange" ? "orange" : "blue";
+        if (g.side) {
+          // Winner auto-decides the team: "auto" (or an unset side) sends 'auto' and the server
+          // resolves the series leader. Other side graphics (Line-up) still need an explicit side.
+          const isWinner = g.msg === "set_winner";
+          payload.side = (isWinner && (s.side === "auto" || !s.side)) ? "auto"
+            : (s.side === "orange" ? "orange" : "blue");
+        }
         await this.fire(ev.action, g.msg, payload);
       }
       await this.fire(ev.action, "set_gfx_active", { scene: g.key });
