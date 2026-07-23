@@ -42,7 +42,7 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
 .bk-eyebrow { font-family: var(--disp); font-weight: 700; font-size: 12px; letter-spacing: .42em; text-transform: uppercase;
   color: var(--accent); text-align: right; }
 .bk-title { font-family: var(--disp); font-weight: 700; font-size: 34px; line-height: 1; letter-spacing: .02em; text-transform: uppercase; color: #fff;
-  text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 760px; }
+  text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 980px; }
 .bk-subtitle { font-family: var(--body); font-weight: 600; font-size: 15px; color: rgba(255,255,255,.85); text-align: right;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 760px; }
 .bk-subtitle:empty { display: none; }
@@ -74,7 +74,7 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
 .bk-rounds { position: relative; display: flex; align-items: stretch; gap: 32px; width: 100%; }
 
 /* ── Butterfly (full double-elim): WB left → GF center ← LB right ── */
-.bk-scale.butterfly { flex-direction: row; height: 920px; }
+.bk-scale.butterfly { flex-direction: row; height: 880px; }
 .bk-scale.butterfly .bk-section { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .bk-scale.butterfly .bk-section .bk-rounds { flex: 1; min-height: 0; }
 .bk-scale.butterfly .bk-section.losers .bk-rounds { flex-direction: row-reverse; }
@@ -96,6 +96,10 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
   color: #fff; text-align: center; margin-bottom: 10px; height: 16px; }
 .bk-round.is-final .bk-round-name { color: rgba(255,214,107,.7); }
 .bk-matches { display: flex; flex-direction: column; justify-content: space-around; gap: 10px; flex: 1; min-height: 0; }
+/* Tree-accurate layout: each match is placed at its real bracket row (see layoutRounds).
+   Height is set inline; the whole board is then scaled to the canvas by fit(). */
+.bk-matches.bk-matches-abs { display: block; position: relative; flex: 0 0 auto; gap: 0; }
+.bk-matches.bk-matches-abs > * { position: absolute; left: 0; right: 0; transform: translateY(-50%); }
 
 /* ── Match card ── */
 .bk-match { position: relative; width: 100%; border-radius: 6px; overflow: hidden;
@@ -136,6 +140,16 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
 .bk-name .bk-short { display: none; }
 .bk-name .bk-full  { display: inline; }
 /* Abbreviation mode: swap logo → badge, full name → short */
+/* Hide logos (producer toggle / ?logos=0) — names only, and the slot reclaims the logo's space
+   so the name gets the full card width instead of leaving an empty square. */
+.bk-nologo .bk-logo,
+.bk-nologo .bk-logo-ph,
+.bk-nologo .bk-logo-badge,
+.bk-nologo .bk-st-logo,
+.bk-nologo .bk-mx-logo,
+.bk-nologo .bk-lad-logo,
+.bk-nologo .bk-run-logo { display: none !important; }
+.bk-nologo .bk-slot { padding-left: 12px; }
 .bk-abbrev .bk-logo        { display: none; }
 .bk-abbrev .bk-logo-ph     { display: none; }
 .bk-abbrev .bk-logo-badge  { display: flex; }
@@ -439,6 +453,47 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
         + '</div></div>';
     }).join('');
   }
+  // ── Focus-team name resolution ───────────────────────────────────────────────
+  // "TARNISHED" used to substring-match every Tarnished Academy team, so a team's record
+  // overlay merged six teams' runs into one. Resolve the typed text to ONE team first —
+  // exact name wins over a prefix, prefix over a word match, word over a loose substring,
+  // shortest name breaking ties — then match that team exactly everywhere.
+  function bkNorm(s) { return String(s == null ? '' : s).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim(); }
+
+  function bkNameScore(name, q) {
+    const n = bkNorm(name);
+    if (!n || !q) return -1;
+    if (n === q) return 100;
+    if (n.startsWith(q + ' ')) return 70;
+    if ((' ' + n + ' ').indexOf(' ' + q + ' ') >= 0) return 50;
+    if (n.indexOf(q) >= 0) return 30;
+    return -1;
+  }
+
+  // Every team name that appears anywhere in this bracket.
+  function bkAllNames(b) {
+    const out = [];
+    const push = (n) => { if (n && n !== 'TBD') out.push(n); };
+    [].concat(b.winners || [], b.losers || [], b.finals || [], b.schedule || []).forEach((r) =>
+      (r.sets || []).forEach((s) => { push(s.a && s.a.name); push(s.b && s.b.name); }));
+    (b.standings || []).forEach((s) => push(s.name));
+    (b.roster || []).forEach(push);
+    ((b.matrix && b.matrix.teams) || []).forEach((t) => push(t.name));
+    return out;
+  }
+
+  function bkResolveFocus(b, raw) {
+    const q = bkNorm(raw);
+    if (!q) return '';
+    let best = '', bestScore = -1;
+    bkAllNames(b).forEach((n) => {
+      const sc = bkNameScore(n, q);
+      if (sc < 0) return;
+      if (sc > bestScore || (sc === bestScore && n.length < best.length)) { best = n; bestScore = sc; }
+    });
+    return best || raw;   // no candidate (data not loaded yet) → keep what the producer typed
+  }
+
   function renderTeamRun(b, fn, data) {
     // Collect the team's sets per band, in round order (chronological within each bracket).
     let total = 0, wins = 0, teamName = '';
@@ -447,8 +502,10 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
       (rounds || []).forEach(function (round) {
         (round.sets || []).forEach(function (set) {
           const a = set.a || {}, o = set.b || {};
-          const hitA = a.name && a.name !== 'TBD' && a.name.toLowerCase().includes(fn);
-          const hitB = o.name && o.name !== 'TBD' && o.name.toLowerCase().includes(fn);
+          // fn is an ALREADY-RESOLVED team name (see bkResolveFocus) — compare exactly, so
+          // "Tarnished" no longer drags in "Tarnished Academy A/B/E".
+          const hitA = a.name && a.name !== 'TBD' && bkNorm(a.name) === fn;
+          const hitB = o.name && o.name !== 'TBD' && bkNorm(o.name) === fn;
           if (!hitA && !hitB) return;
           teamName = teamName || (hitA ? a.name : o.name);
           total++;
@@ -580,9 +637,128 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
     const name = document.createElement('div'); name.className = 'bk-round-name'; name.textContent = round.name || '';
     col.appendChild(name);
     const matches = document.createElement('div'); matches.className = 'bk-matches';
-    (round.sets || []).forEach((set) => matches.appendChild(buildMatch(set, isFinal)));
+    (round.sets || []).forEach((set) => {
+      const node = buildMatch(set, isFinal);
+      // Identity + parent links travel with the DOM so both the row layout and the
+      // connectors can follow the REAL bracket tree instead of guessing from indexes.
+      if (set.id != null) node.dataset.sid = String(set.id);
+      if ((set.prereq || []).length) node.dataset.prereq = set.prereq.join(',');
+      matches.appendChild(node);
+    });
     col.appendChild(matches);
     return col;
+  }
+
+  // start.gg mints set ids in bracket-draw order, so sorting a round by id reproduces exactly the
+  // order start.gg's own bracket page shows. The server does this too, but doing it here as well
+  // means the overlay is right even against bracket data that was imported by an older build.
+  // Manual-builder sets carry no id at all — those rounds are left exactly as authored.
+  function bkOrderBand(band) {
+    return (band || []).map((r) => {
+      const sets = r.sets || [];
+      if (sets.length < 2 || !sets.every((s) => s && Number.isFinite(Number(s.id)))) return r;
+      const sorted = sets.slice().sort((a, x) => Number(a.id) - Number(x.id));
+      return Object.assign({}, r, { sets: sorted });
+    });
+  }
+
+  // ── Tree-accurate vertical layout ────────────────────────────────────────────
+  // Evenly spacing each column only works when every round is exactly half the previous
+  // one. Real start.gg brackets aren't: byes make Round 1 a 2-set column feeding a 16-set
+  // Round 2, and losers drop rounds stay the same width. Spacing those evenly put matches
+  // nowhere near their feeders, which reads as teams sitting in the wrong branch.
+  //
+  // So: pick the widest round as the base grid (rows 0..n-1), carry rows FORWARD as the mean
+  // of each set's feeder rows, and BACKWARD as the mean of the rows of the sets it feeds.
+  // Every match then sits exactly where start.gg draws it.
+  var BK_ROW_H = 62;   // px per bracket row at scale 1; fit() scales the result to the canvas
+
+  function layoutRounds(rounds, colEls) {
+    const idx = new Map();     // setId -> [roundIndex, setIndex]
+    rounds.forEach((r, ri) => (r.sets || []).forEach((s, si) => { if (s.id != null) idx.set(String(s.id), [ri, si]); }));
+    const rows = rounds.map((r) => new Array((r.sets || []).length).fill(null));
+
+    let base = 0;
+    rounds.forEach((r, ri) => { if ((r.sets || []).length > (rounds[base].sets || []).length) base = ri; });
+    const span = (rounds[base].sets || []).length;
+    if (!span) return;
+    rows[base] = rounds[base].sets.map((s, i) => i);
+
+    // Any row we couldn't derive (clipped feeders, partial data) gets spread evenly so the
+    // column still reads top-to-bottom instead of collapsing onto row 0.
+    const fillGaps = (arr) => {
+      const n = arr.length;
+      if (!n) return;
+      if (arr.every((v) => v == null)) { for (let i = 0; i < n; i++) arr[i] = (i + 0.5) * span / n - 0.5; return; }
+      for (let i = 0; i < n; i++) {
+        if (arr[i] != null) continue;
+        let p = i - 1; while (p >= 0 && arr[p] == null) p--;
+        let q = i + 1; while (q < n && arr[q] == null) q++;
+        if (p >= 0 && q < n) arr[i] = arr[p] + (arr[q] - arr[p]) * (i - p) / (q - p);
+        else if (p >= 0) arr[i] = arr[p] + (i - p);
+        else arr[i] = arr[q] - (q - i);
+      }
+    };
+
+    const mean = (a) => a.reduce((x, y) => x + y, 0) / a.length;
+    for (let ri = base + 1; ri < rounds.length; ri++) {
+      rounds[ri].sets.forEach((s, i) => {
+        const fr = (s.prereq || []).map((id) => idx.get(String(id)))
+          .filter((p) => p && p[0] < ri && rows[p[0]][p[1]] != null).map((p) => rows[p[0]][p[1]]);
+        rows[ri][i] = fr.length ? mean(fr) : null;
+      });
+      fillGaps(rows[ri]);
+    }
+    for (let ri = base - 1; ri >= 0; ri--) {
+      const kids = new Map();
+      for (let rj = ri + 1; rj < rounds.length; rj++) {
+        rounds[rj].sets.forEach((s, i) => (s.prereq || []).forEach((p) => {
+          if (rows[rj][i] == null) return;
+          const k = String(p);
+          if (!kids.has(k)) kids.set(k, []);
+          kids.get(k).push(rows[rj][i]);
+        }));
+      }
+      rounds[ri].sets.forEach((s, i) => {
+        const c = s.id != null ? kids.get(String(s.id)) : null;
+        rows[ri][i] = (c && c.length) ? mean(c) : null;
+      });
+      fillGaps(rows[ri]);
+    }
+
+    const lo = Math.min.apply(null, rows.map((r) => Math.min.apply(null, r.length ? r : [0])));
+    const hi = Math.max.apply(null, rows.map((r) => Math.max.apply(null, r.length ? r : [0])));
+    colEls.forEach((col, ri) => {
+      const wrap = col.querySelector('.bk-matches');
+      if (!wrap) return;
+      wrap.classList.add('bk-matches-abs');
+      wrap.dataset.bkRows = String(hi - lo + 1);
+      Array.prototype.slice.call(wrap.children).forEach((node, i) => {
+        const row = rows[ri][i];
+        if (row != null) node.dataset.bkRow = String(row - lo);
+      });
+    });
+  }
+
+  // Rows are laid out in units; the pixel height of a unit can only be known once the cards are
+  // in the document (a card grows with origin/exit pills, and the live card wears a LIVE tag).
+  // One row height per SECTION so every column of a bracket stays on the same grid.
+  function applyRowGeometry(root) {
+    root.querySelectorAll('.bk-section').forEach((sec) => {
+      const wraps = Array.prototype.slice.call(sec.querySelectorAll('.bk-matches-abs'));
+      if (!wraps.length) return;
+      let tallest = 0;
+      sec.querySelectorAll('.bk-match').forEach((m) => { tallest = Math.max(tallest, m.offsetHeight); });
+      const rowH = Math.max(BK_ROW_H, tallest + 10);
+      wraps.forEach((wrap) => {
+        const rows = Number(wrap.dataset.bkRows) || 1;
+        wrap.style.height = (rows * rowH) + 'px';
+        Array.prototype.slice.call(wrap.children).forEach((node) => {
+          const row = Number(node.dataset.bkRow);
+          if (Number.isFinite(row)) node.style.top = ((row + 0.5) * rowH) + 'px';
+        });
+      });
+    });
   }
 
   // Grand Finals center piece for butterfly layout.
@@ -604,7 +780,9 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
     if (label) { const l = document.createElement('div'); l.className = 'bk-section-label'; l.textContent = label; section.appendChild(l); }
     const band = document.createElement('div'); band.className = 'bk-rounds';
     const svg = document.createElementNS(SVGNS, 'svg'); svg.setAttribute('class', 'bk-connectors'); band.appendChild(svg);
-    rounds.forEach((r, i) => band.appendChild(buildColumn(r, finalsStart != null && i >= finalsStart)));
+    const cols = rounds.map((r, i) => buildColumn(r, finalsStart != null && i >= finalsStart));
+    cols.forEach((c) => band.appendChild(c));
+    layoutRounds(rounds, cols);
     section.appendChild(band);
     return section;
   }
@@ -620,6 +798,34 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
     svg.setAttribute('width', base.width); svg.setAttribute('height', base.height);
     svg.setAttribute('viewBox', '0 0 ' + base.width + ' ' + base.height);
     const isRev = getComputedStyle(band).flexDirection === 'row-reverse';
+    const rectOf = (node) => (node.querySelector('.bk-match') || node).getBoundingClientRect();
+    const elbow = (pr, cr) => {
+      const px = (isRev ? pr.left : pr.right) - base.left;
+      const py = pr.top - base.top + pr.height / 2;
+      const cx = (isRev ? cr.right : cr.left) - base.left;
+      const cy = cr.top - base.top + cr.height / 2;
+      const midX = px + (cx - px) / 2;
+      const path = document.createElementNS(SVGNS, 'path');
+      path.setAttribute('d', 'M ' + px + ' ' + py + ' H ' + midX + ' V ' + cy + ' H ' + cx);
+      svg.appendChild(path);
+    };
+
+    // Exact links: every set carries the ids of the sets that feed it, so draw the real tree.
+    const byId = new Map();
+    band.querySelectorAll('[data-sid]').forEach((n) => byId.set(n.dataset.sid, n));
+    let drewExact = false;
+    band.querySelectorAll('[data-prereq]').forEach((child) => {
+      const cr = rectOf(child);
+      child.dataset.prereq.split(',').forEach((pid) => {
+        const p = byId.get(pid);
+        if (!p || p === child) return;
+        elbow(rectOf(p), cr);
+        drewExact = true;
+      });
+    });
+    if (drewExact) return;
+
+    // Fallback (manual brackets with no set ids): pair adjacent columns by index.
     const cols = Array.prototype.slice.call(band.querySelectorAll('.bk-round'));
     for (let c = 1; c < cols.length; c++) {
       const parents = Array.prototype.slice.call(cols[c - 1].querySelectorAll('.bk-match'));
@@ -843,6 +1049,15 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
     scaleEl.style.transform = 'scale(' + s + ')';
   }
 
+  // Shrink the event title's font until it fits its max-width, so a long name (e.g. "[$100] NAMELESS
+  // WEEKLY ROCKET RUSH SEASON 2 - WEEK 5") isn't clipped with an ellipsis.
+  function fitBktTitle() {
+    var t = el('bk-title'); if (!t) return;
+    t.style.fontSize = '';   // reset to the CSS default (34px)
+    var s = 34, guard = 0;
+    while (t.scrollWidth > t.clientWidth + 1 && s > 17 && guard++ < 40) { s -= 1; t.style.fontSize = s + 'px'; }
+  }
+
   // ── Team-run zoom: after fit(), magnify the focused team's branch so every opponent name
   // reads on screen — a camera move into their path. Animates on focus change / clear;
   // subsequent re-renders with the same focus re-apply the frame without re-animating.
@@ -920,13 +1135,29 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
   const _BQ = new URLSearchParams(location.search);
   const URL_PART = _BQ.get('part');       // null unless overridden per source
   const URL_ROUNDS = _BQ.get('rounds');   // null unless overridden per source
+  const URL_LOGOS = _BQ.get('logos');     // 'logos=0' hides team logos on this source only
   function render(data) {
     const b = data.bracket || {};
     const stage = el('bk-stage'), scaleEl = el('bk-scale'), emptyEl = el('bk-empty');
     stage.classList.add('show');
 
-    const winners = b.winners || [], losers = b.losers || [], finals = b.finals || [], schedule = b.schedule || [];
+    let winners = bkOrderBand(b.winners), losers = bkOrderBand(b.losers), finals = bkOrderBand(b.finals);
+    const schedule = b.schedule || [];
+    // Producer display filters (Bracket panel): data stays intact, we just hide rounds at render time.
+    // 1) Ignore the grand-final RESET match (start.gg labels it "Grand Final Reset").
+    if (b.ignoreReset) finals = finals.filter((r) => !/reset/i.test(r.name || ''));
+    // 2) Hide the first N rounds so a wide bracket shows the later rounds bigger — capped to keep at
+    //    least the final round of each bracket so it can never blank the overlay.
+    const _ignoreN = Math.max(0, parseInt(b.ignoreRounds, 10) || 0);
+    if (_ignoreN > 0) {
+      winners = winners.slice(Math.min(_ignoreN, Math.max(0, winners.length - 1)));
+      losers = losers.slice(Math.min(_ignoreN, Math.max(0, losers.length - 1)));
+    }
     const matrix = (b.matrix && b.matrix.teams && b.matrix.teams.length) ? b.matrix : null;
+    // 3) Names only — no logos or initial badges. Producer toggle, overridable per browser
+    //    source with ?logos=0 / ?logos=1 (same pattern as ?part / ?rounds).
+    const hideLogos = URL_LOGOS != null ? /^(0|off|false|no)$/i.test(URL_LOGOS) : !!b.hideLogos;
+    el('bk-scale').classList.toggle('bk-nologo', hideLogos);
 
     // Effective view: URL override > state-driven view — but NEVER a view this bracket has no
     // data for (a stale saved "matrix" on an elim bracket used to blank the whole overlay).
@@ -951,7 +1182,10 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
     const isElim = winners.length || losers.length || finals.length;
     const hasData = isElim || schedule.length || standings.length || !!matrix;
 
-    const focusTeam = (data.startgg && data.startgg.focusTeam) || '';
+    // Resolve the producer's typed text to exactly ONE team in this bracket before anything
+    // matches on it (see bkResolveFocus) — a bare "Tarnished" must not light up every
+    // Tarnished Academy squad.
+    const focusTeam = bkResolveFocus(b, (data.startgg && data.startgg.focusTeam) || '');
     // The on-air pair (Match — Teams / bracket "Go Live" / auto-follow): the set whose teams
     // are currently on the scoreboard gets the LIVE badge — a real signal, unlike scores.
     _livePair = [
@@ -960,7 +1194,7 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
     ].filter(Boolean).sort().join('|');
     const sig = JSON.stringify({ t: b.title, sub: b.subtitle, sr: b.showRecord, ty: b.type, w: winners, l: losers, f: finals, sc: schedule, s: standings, mx: matrix,
       ph: phases.map((p) => p.id + p.name), ap: b.activePhaseId, pl: pools.map((p) => p.id + p.name), apl: b.activePoolId,
-      lg: logoByName, vw: view, rn: ROUNDS_N, ft: focusTeam, lp: _livePair,
+      lg: logoByName, vw: view, rn: ROUNDS_N, ft: focusTeam, lp: _livePair, nl: hideLogos,
       bl: ((data.brand && data.brand.logo) || '').slice(0, 48) });
     if (sig === _sig) return;
     _sig = sig;
@@ -970,6 +1204,10 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
 
     el('bk-title').textContent = (b.title || '').toUpperCase();
     el('bk-subtitle').textContent = b.subtitle || '';
+    // shrink-to-fit so a long event title isn't clipped with an ellipsis. Re-run after the display
+    // font loads (it's wider than the fallback, so an early fit can under-shrink → clip).
+    fitBktTitle();
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(fitBktTitle);
     // Brand kit logo beside the event title (hidden when no kit / no logo).
     const brandLogo = el('bk-brand-logo');
     if (brandLogo) {
@@ -992,7 +1230,7 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
     // Focused team + elimination data → dedicated tournament-run view instead of the bracket.
     let runMode = false;
     if (focusTeam && isElim) {
-      const run = renderTeamRun(b, focusTeam.toLowerCase(), data);
+      const run = renderTeamRun(b, bkNorm(focusTeam), data);
       if (run) {
         runMode = true;
         scaleEl.classList.remove('butterfly'); scaleEl.classList.remove('bk-abbrev');
@@ -1096,23 +1334,28 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
       // Connectors belong to ELIMINATION bands only (.bk-section wraps those). The schedule
       // view reuses .bk-rounds for its columns — drawing elbows between swiss/RR rounds
       // painted meaningless progression lines all over pool play.
+      applyRowGeometry(scaleEl);   // cards are in the document now → real row height
       scaleEl.querySelectorAll('.bk-section .bk-rounds').forEach(drawConnectors);
       fit(!runMode && isElim && SHOW_W && SHOW_L && ROUNDS_N === 0);
       // Run mode IS the focus presentation — no dimming or camera zoom on top of it.
       if (focusTeam && !runMode) {
-        var fn = focusTeam.toLowerCase();
+        var fn = bkNorm(focusTeam);
+        var slotName = function (nameEl) {
+          var full = nameEl.querySelector('.bk-full');
+          return bkNorm(full ? full.textContent : nameEl.textContent);
+        };
         // Team-run focus: light the team's slot in every match they appear in, mark those
         // matches on-path (everything else recedes — see .bk-focus-mode CSS), then ZOOM the
         // camera into the union of those matches so every opponent name reads on screen.
         scaleEl.classList.add('bk-focus-mode');
         scaleEl.querySelectorAll('.bk-name').forEach(function(nameEl) {
           var slot = nameEl.closest('.bk-slot');
-          if (slot) slot.classList.toggle('focused', nameEl.textContent.toLowerCase().includes(fn));
+          if (slot) slot.classList.toggle('focused', slotName(nameEl) === fn);
         });
         var pathEls = [];
         scaleEl.querySelectorAll('.bk-match').forEach(function(m) {
           var onPath = Array.prototype.some.call(m.querySelectorAll('.bk-name'), function(n) {
-            return n.textContent.toLowerCase().includes(fn);
+            return slotName(n) === fn;
           });
           m.classList.toggle('on-path', onPath);
           if (onPath) pathEls.push(m);

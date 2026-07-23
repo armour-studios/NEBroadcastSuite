@@ -259,14 +259,24 @@ async function deleteRoomSlot(orgId, stationId, roomId, slotId) { _require(); tr
 // ── Bug reports ────────────────────────────────────────────────────────────────
 // Files the in-app report on the producer's website account too (shows on /access/bugs
 // with staff status/notes) — the Discord/GitHub copies are sent separately by server.js.
-async function submitBugReport({ title, description, severity, area, appVersion } = {}) {
+async function submitBugReport({ title, description, severity, area, appVersion, consoleLog } = {}) {
   _require();
-  try { const { data } = await _client().post('/api/studio/bugs', { title, description, severity, area, appVersion }); return data.report || data; } catch (e) { throw _err(e); }
+  try { const { data } = await _client().post('/api/studio/bugs', { title, description, severity, area, appVersion, consoleLog }); return data.report || data; } catch (e) { throw _err(e); }
+}
+
+// ── AI Producer telemetry (Phase 2) ──────────────────────────────────────────
+// Uploads a batch of already-recorded local Decision Records (backend/telemetry/recorder.js)
+// to the shared training dataset. Opt-in — only called when the producer has explicitly
+// enabled upload (see server.js's telemetryAutoSync).
+async function uploadTelemetryBatch(records) {
+  _require();
+  try { const { data } = await _client().post('/api/telemetry/batch', { records }); return data; } catch (e) { throw _err(e); }
 }
 
 module.exports = {
   init, configured, authed, getSession, clearSession,
   submitBugReport,
+  uploadTelemetryBatch,
   loginWithDiscord,
   loginWithEmail, acceptContract, refreshSession, linkTwitch, refreshTwitch, me,
   listProfiles, getProfile, saveProfile, deleteProfile, shareProfile,

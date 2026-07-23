@@ -1,0 +1,473 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1920">
+<title>NE Broadcast Suite — Apex Legends HUD</title>
+<link rel="stylesheet" href="/fonts.css">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --main-font: 'Rajdhani', 'Montserrat', sans-serif;
+    --accent: #da2c38;      /* Apex red — overridden by brand blue team colour */
+    --accent-2:#f5a623;
+    --panel:  rgba(10, 12, 16, 0.86);
+    --panel-2:rgba(14, 17, 23, 0.94);
+    --line:   rgba(255,255,255,0.12);
+    --txt:    #f2f5f8;
+    --dim:    #9aa7b4;
+    --alive:  #5ad17f;
+    --dead:   #6a747f;
+  }
+  html, body {
+    width: 1920px; height: 1080px; overflow: hidden; background: transparent;
+    font-family: var(--main-font); -webkit-font-smoothing: antialiased; color: var(--txt);
+  }
+  .hidden { display: none !important; }
+  img { display: block; }
+  .clip { text-transform: uppercase; letter-spacing: .5px; }
+
+  /* ══════════════════ TOP: match / ring state bar ══════════════════ */
+  /* Thin ALGS-style ticker: brand block + rotating team cells + squads-remaining. */
+  #topbar {
+    position: absolute; top: 0; left: 0; width: 100%; height: 40px; z-index: 30;
+    display: flex; align-items: stretch; background: var(--panel-2);
+    border-bottom: 2px solid var(--accent); filter: drop-shadow(0 4px 12px rgba(0,0,0,.45));
+    transition: transform .45s cubic-bezier(.4,1.2,.5,1), opacity .35s ease;
+  }
+  #topbar.off { transform: translateY(-100%); opacity: 0; }
+  .tk-brand { display: flex; align-items: center; gap: 10px; padding: 0 20px 0 14px; background: linear-gradient(90deg, #f0f2f4, #dfe3e7);
+    color: #10151c; clip-path: polygon(0 0, 100% 0, calc(100% - 12px) 100%, 0 100%); }
+  .tk-logo { height: 23px; max-width: 84px; object-fit: contain; }
+  .tk-brandtext { display: flex; flex-direction: column; line-height: 1; }
+  .tk-ev { font-size: 14px; font-weight: 800; letter-spacing: .3px; white-space: nowrap; }
+  .tk-match { font-size: 9px; font-weight: 700; color: #4a525c; letter-spacing: .5px; margin-top: 2px; }
+  .tk-teams { flex: 1; display: flex; align-items: stretch; overflow: hidden; margin-left: -12px;  /* tuck first cell under the brand slant */
+    transition: opacity .28s ease; }   /* smooth crossfade on page rotation */
+  .tk-cell { display: flex; align-items: center; gap: 7px; padding: 0 12px 0 0; position: relative; z-index: 0; min-width: 0;
+    border-right: 1px solid rgba(255,255,255,.06); }
+  /* spectated squad — SLANTED gray highlight; extends right (under the next rank) so it reads
+     as filling all the way to the next team. Content stays light on the gray. */
+  .tk-cell.spot::before { content: ''; position: absolute; inset: 0 -16px 0 -2px; z-index: -1;
+    background: linear-gradient(180deg, #565d68 0%, #3a404a 100%);
+    box-shadow: inset 0 -3px 0 var(--accent-2);
+    clip-path: polygon(12px 0, 100% 0, calc(100% - 12px) 100%, 0 100%); }
+  .tk-cell.elim { opacity: .4; }
+  /* rank block fills the full height of the bar; all the same brand colour; parallelogram slant matches the brand block (12px) */
+  .tk-rank { align-self: stretch; display: flex; align-items: center; justify-content: center; min-width: 40px; padding: 0 13px; margin-right: 7px;
+    font-size: 15px; font-weight: 800; color: #fff; background: var(--accent); font-variant-numeric: tabular-nums;
+    clip-path: polygon(12px 0, 100% 0, calc(100% - 12px) 100%, 0 100%); }
+  .tk-tlogo { width: 22px; height: 22px; object-fit: contain; flex: 0 0 22px; }
+  .tk-tlogo.ph { display: flex; align-items: center; justify-content: center; border-radius: 4px; font-size: 9px; font-weight: 800; color: #fff; }
+  /* three squad-member status bars (one per player) — turn red when a player is down/dead */
+  .tk-pbars { display: inline-flex; flex-direction: column; gap: 2px; justify-content: center; }
+  .tk-pbar { width: 14px; height: 3px; border-radius: 1px; background: #e2e7ec; transition: background .2s; }
+  .tk-pbar.down { background: #e23b3b; }
+  .tk-pbar.off { background: #454c55; }
+  .tk-tag { font-size: 15px; font-weight: 800; letter-spacing: .3px; white-space: nowrap; }
+  .tk-pts { font-size: 15px; font-weight: 800; color: var(--accent-2); font-variant-numeric: tabular-nums; margin-left: 2px; }
+  .tk-remain { display: flex; align-items: center; gap: 7px; padding: 0 16px; background: rgba(0,0,0,.28);
+    clip-path: polygon(14px 0, 100% 0, 100% 100%, 0 100%); }
+  .tk-remain b { font-size: 20px; font-weight: 800; color: var(--accent); font-variant-numeric: tabular-nums; }
+  .tk-remain small { font-size: 9px; font-weight: 700; color: var(--dim); letter-spacing: 1px; }
+
+  /* ══════════════════ RIGHT: squad standings ══════════════════ */
+  #standings {
+    position: absolute; top: 88px; right: 24px; width: 300px; z-index: 20;
+    background: rgba(9, 12, 17, 0.52); border: 1px solid var(--line); border-radius: 10px;
+    overflow: hidden; filter: drop-shadow(0 8px 20px rgba(0,0,0,.5));
+    transition: transform .4s ease, opacity .35s ease;
+  }
+  #standings.off { transform: translateX(120%); opacity: 0; }
+  .st-head { display: flex; align-items: center; justify-content: space-between;
+    padding: 9px 14px; background: rgba(14, 17, 23, 0.6); border-bottom: 2px solid var(--accent); }
+  .st-title { font-size: 14px; font-weight: 800; letter-spacing: .5px; text-transform: uppercase; }
+  .st-alive { font-size: 12px; color: var(--dim); font-weight: 700; }
+  .st-alive b { color: var(--alive); }
+  .st-rows { max-height: 660px; overflow: hidden; }
+  .st-row { display: flex; align-items: center; gap: 8px; padding: 7px 12px; border-bottom: 1px solid rgba(255,255,255,.05);
+    transition: background .2s; }
+  .st-row.dead { opacity: .45; }
+  .st-row.spot { background: rgba(218,44,56,.16); }
+  .st-rank { width: 22px; font-size: 15px; font-weight: 800; color: var(--dim); text-align: center; font-variant-numeric: tabular-nums; }
+  .st-row.dead .st-rank { color: var(--dead); }
+  .st-name { flex: 1; font-size: 14px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .st-bars { margin: 0 4px; }   /* three-bar squad indicator (shares .tk-pbar styling) */
+  .st-kills { width: 30px; text-align: right; font-size: 14px; font-weight: 800; color: var(--accent-2); font-variant-numeric: tabular-nums; }
+  .st-kills svg { width: 11px; height: 11px; vertical-align: -1px; opacity: .7; }
+
+  /* ══════════════════ BOTTOM-LEFT: spectated TEAM lower third (seed · logo · name · kills) ══════════════════ */
+  #specteam {
+    position: absolute; left: 30px; bottom: 340px; height: 56px; z-index: 25;
+    display: flex; align-items: stretch; background: var(--panel-2);
+    border-radius: 8px; overflow: hidden; filter: drop-shadow(0 10px 26px rgba(0,0,0,.6));
+    transition: transform .45s cubic-bezier(.4,1.2,.5,1), opacity .3s ease;
+  }
+  #specteam.off { transform: translateX(-130%); opacity: 0; }
+  /* slanted brand-coloured seed/rank tab */
+  .sp-rank { display: flex; align-items: center; justify-content: center; min-width: 56px; padding: 0 22px 0 16px;
+    background: var(--accent); color: #fff; font-size: 26px; font-weight: 800; font-variant-numeric: tabular-nums;
+    clip-path: polygon(0 0, 100% 0, calc(100% - 14px) 100%, 0 100%); }
+  /* team identity block */
+  .sp-id { display: flex; align-items: center; gap: 13px; padding: 0 26px 0 8px; margin-left: -8px;
+    background: linear-gradient(90deg, rgba(255,255,255,.06), rgba(255,255,255,0)); }
+  .sp-logo { width: 40px; height: 40px; object-fit: contain; filter: drop-shadow(0 2px 5px rgba(0,0,0,.5)); }
+  .sp-name { font-size: 25px; font-weight: 800; letter-spacing: .4px; white-space: nowrap; text-transform: uppercase; }
+  .sp-kills { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 0 20px;
+    border-left: 1px solid rgba(255,255,255,.07); background: rgba(0,0,0,.24); }
+  .sp-kills b { font-size: 25px; font-weight: 800; color: var(--accent-2); line-height: 1; font-variant-numeric: tabular-nums; }
+  .sp-kills small { font-size: 8px; font-weight: 700; color: var(--dim); letter-spacing: 1.5px; margin-top: 2px; }
+
+  /* ══════════════════ BOTTOM-RIGHT: kill feed ══════════════════ */
+  #killfeed {
+    position: absolute; right: 24px; bottom: 150px; width: 340px; z-index: 22;
+    display: flex; flex-direction: column; gap: 6px; align-items: flex-end;
+  }
+  .kf-row { display: flex; align-items: center; gap: 8px; max-width: 100%;
+    background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--accent);
+    border-radius: 6px; padding: 6px 11px; font-size: 13px; font-weight: 700;
+    animation: kfIn .3s ease; filter: drop-shadow(0 4px 10px rgba(0,0,0,.4)); }
+  @keyframes kfIn { from { transform: translateX(30px); opacity: 0; } to { transform: none; opacity: 1; } }
+  .kf-a { color: var(--txt); }
+  .kf-w { color: var(--dim); font-size: 11px; font-weight: 600; }
+  .kf-arrow { color: var(--accent); font-weight: 800; }
+  .kf-v { color: var(--dim); text-decoration: line-through; }
+  .kf-row.down { border-left-color: var(--accent-2); opacity: .82; }
+
+  /* ══════════════════ BOTTOM-LEFT: thin sponsor bar, flush to the corner ══════════════════ */
+  #sponsorrail {
+    position: absolute; left: 0; bottom: 0; z-index: 24;
+    display: flex; flex-direction: row; align-items: center; gap: 12px;
+    height: 30px; padding: 0 18px 0 30px;
+    background: linear-gradient(180deg, rgba(20,23,31,.9), rgba(11,13,19,.94));
+    border-top: 1px solid var(--line); border-right: 1px solid var(--line);
+    border-radius: 0 8px 0 0; box-shadow: 0 -2px 14px rgba(0,0,0,.4);
+    transition: opacity .3s ease;
+  }
+  #sponsorrail.off { opacity: 0; pointer-events: none; }
+  .sr-label { font-size: 9px; font-weight: 700; letter-spacing: 2px; color: var(--dim); text-transform: uppercase; }
+  .sr-slot { display: flex; align-items: center; justify-content: center; gap: 18px; min-width: 90px; height: 22px; }
+  .sr-logo { max-height: 22px; max-width: 150px; object-fit: contain; animation: srFade .8s ease; }
+  .sr-name { font-size: 15px; font-weight: 800; letter-spacing: 1px; color: #e8ebf0; animation: srFade .8s ease; }
+  @keyframes srFade { from { opacity: 0; } to { opacity: 1; } }
+
+  /* offline / demo chrome */
+  #offline { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
+    color: var(--dim); font-size: 15px; font-weight: 700; letter-spacing: 1px;
+    background: var(--panel); padding: 12px 22px; border-radius: 8px; border: 1px solid var(--line); }
+  #devbar { position: absolute; bottom: 8px; left: 50%; transform: translateX(-50%); z-index: 99; display: flex; gap: 6px; }
+  #devbar button { font: 600 12px var(--main-font); background: #1a1f27; color: #cfd8e2;
+    border: 1px solid #2c333d; border-radius: 5px; padding: 5px 10px; cursor: pointer; }
+  #devbar button:hover { background: #232a34; }
+  body.live #devbar { display: none; }
+</style>
+</head>
+<body>
+  <div id="offline">APEX LIVEAPI — WAITING FOR GAME</div>
+
+  <div id="topbar" class="off">
+    <div class="tk-brand">
+      <img id="tkLogo" class="tk-logo" alt="" onerror="this.style.display='none'">
+      <div class="tk-brandtext"><div class="tk-ev" id="tkEv">APEX LEGENDS</div><div class="tk-match" id="tkMatch"></div></div>
+    </div>
+    <div class="tk-teams" id="tkTeams"></div>
+    <div class="tk-remain"><b id="tkAlive">—</b><small>SQUADS<br>LEFT</small></div>
+  </div>
+
+  <div id="standings" class="off">
+    <div class="st-head">
+      <span class="st-title">Standings</span>
+      <span class="st-alive"><b id="stAlive">0</b> / <span id="stTotal">0</span> squads</span>
+    </div>
+    <div class="st-rows" id="stRows"></div>
+  </div>
+
+  <div id="specteam" class="off">
+    <div class="sp-rank" id="spRank">#1</div>
+    <div class="sp-id"><img class="sp-logo" id="spLogo" alt="" onerror="this.remove()"><span class="sp-name" id="spName">TEAM</span></div>
+    <div class="sp-kills"><b id="spKills">0</b><small>KILLS</small></div>
+  </div>
+
+  <div id="killfeed"></div>
+
+  <div id="sponsorrail" class="off">
+    <div class="sr-slot" id="srSlot"></div>
+  </div>
+
+  <div id="devbar">
+    <button onclick="toggleDemo()">Demo</button>
+    <button onclick="stepDemo()">Step</button>
+  </div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const KILL_SVG = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2 4 6v6c0 5 3.4 8.3 8 10 4.6-1.7 8-5 8-10V6l-8-4z"/></svg>';
+
+// Legend portraits are optional local assets; missing ones just hide gracefully.
+function legendImg(name){ return name ? ('/assets/heroes/apex/' + String(name).toLowerCase().replace(/[^a-z0-9]/g,'') + '.png') : ''; }
+
+let devState = null, _autoDemo = false;
+let brand = null, savedTeams = [], teamMap = {}, _realEvent = null, appEventName = '', appRoundLabel = '';
+
+// Team identity (logo/tag/colour) resolved client-side from the team library — same as the observer.
+const PALETTE = ['#3fb6c8','#5a6cf0','#8a4fd0','#c94fa0','#d0524f','#d98a3f','#c8c23f','#7fb84f','#4fb87a','#4f95b8',
+                 '#b85fd0','#d05f7a','#d07a4f','#b8a84f','#6fb84f','#4fb8a0','#4f78d0','#9a4fd0','#d04f9a','#8a8f99'];
+const normName = (s) => String(s || '').trim().toLowerCase().replace(/\s+/g,' ');
+function deriveTag(name){
+  const w = String(name || '').trim().split(/\s+/).filter(Boolean);
+  if (!w.length) return '?';
+  return (w.length >= 2 ? w.map(x => x[0]).join('') : w[0]).slice(0,4).toUpperCase();
+}
+function resolveTeam(row, rank){
+  let st = null;
+  const ov = teamMap[row.key];
+  if (ov) st = savedTeams.find(t => normName(t.name) === normName(ov));
+  if (!st) st = savedTeams.find(t => normName(t.name) === normName(row.name));
+  if (!st) st = savedTeams.find(t => normName(t.name) === row.key);
+  return { logo: st && st.logo, tag: (st && (st.abbrev || st.tag)) || deriveTag((st && st.name) || row.name), color: (st && st.color) || PALETTE[(rank-1) % PALETTE.length] };
+}
+
+function applyBrand(d){
+  const root = document.documentElement; root.dataset.theme = d.theme || 'default';
+  if (d.fontFamily) root.style.setProperty('--main-font', `'${d.fontFamily}', sans-serif`);
+  brand = d.brand || brand;
+  // Ticker accent matches the brand colour (falls back to the blue-team colour).
+  const bt = (d.teams && d.teams.blue) || {};
+  const accent = (brand && brand.color) || bt.color;
+  if (accent) root.style.setProperty('--accent', accent);
+  if (brand && brand.font) root.style.setProperty('--main-font', `'${brand.font}', sans-serif`);
+  if (Array.isArray(d.savedTeams)) savedTeams = d.savedTeams;
+  if (d.apex && d.apex.teamMap) teamMap = d.apex.teamMap;
+  if (d.apex && d.apex.event) _realEvent = d.apex.event;
+  if (d.eventName != null) appEventName = d.eventName;    // the app's global Event Name
+  if (d.roundLabel != null) appRoundLabel = d.roundLabel; // the app's Round / Stage label
+  renderSponsors(brand);
+}
+
+// ── Sponsor rail (bottom-left) — cycles the brand kit's rail sponsors ─────────
+let _srTimer = null;
+function renderSponsors(b){
+  const rail = $('sponsorrail'); if (!rail) return;
+  const list = (b && b.railSponsors && b.railSponsors.length) ? b.railSponsors
+             : (b && b.sponsors ? b.sponsors.filter(s => s && (s.logo || s.name)) : []);
+  if (!list.length) { rail.classList.add('off'); if (_srTimer) { clearInterval(_srTimer); _srTimer = null; } return; }
+  rail.classList.remove('off');
+  if (_srTimer) { clearInterval(_srTimer); _srTimer = null; }
+  const slot = $('srSlot'); if (!slot) return;
+  const cell = (sp) => sp && sp.logo
+    ? '<img class="sr-logo" src="' + esc(sp.logo) + '" alt="">'
+    : '<span class="sr-name">' + esc((sp && sp.name) || '') + '</span>';
+  // Brand-kit setting decides: 'static' shows ALL sponsors in a row; otherwise rotate one at a time.
+  if (b && b.sponsorMode === 'static') {
+    slot.innerHTML = list.map(cell).join('');
+  } else {
+    let i = 0;
+    const show = () => { slot.innerHTML = cell(list[i % list.length]); i++; };
+    show();
+    if (list.length > 1) _srTimer = setInterval(show, Math.max(3, (b && b.sponsorInterval) || 6) * 1000);
+  }
+}
+
+// Rotating team ticker — pages through the standings a few teams at a time (ALGS style).
+// The rotation timer is independent of data ticks so frequent updates don't reset it.
+const TK_PAGE = 8, TK_MS = 5000;
+let _tkPage = 0, _tkTimer = null, _tkStandings = [], _tkSpot = -1;
+function renderTicker(a){
+  _tkStandings = (a.standings || []).slice(0, 20);
+  _tkSpot = a.observed ? a.observed.teamId : -1;
+  const pages = Math.max(1, Math.ceil(_tkStandings.length / TK_PAGE));
+  if (_tkPage >= pages) _tkPage = 0;
+  paintTickerPage(false);   // data tick: refresh content in place, NO fade
+  if (pages > 1) { if (!_tkTimer) _tkTimer = setInterval(tkAdvance, TK_MS); }
+  else if (_tkTimer) { clearInterval(_tkTimer); _tkTimer = null; }
+}
+let _tkFading = false;
+function tkAdvance(){
+  const pages = Math.max(1, Math.ceil(_tkStandings.length / TK_PAGE));
+  if (pages <= 1 || _tkFading) return;
+  const teams = $('tkTeams');
+  _tkFading = true;
+  teams.style.opacity = '0';                    // fade current page out
+  setTimeout(() => {
+    _tkPage = (_tkPage + 1) % pages;
+    paintTickerPage(false);                     // swap while invisible
+    teams.style.opacity = '1';                  // fade new page in
+    _tkFading = false;
+  }, 280);
+}
+function paintTickerPage(animate){
+  const start = _tkPage * TK_PAGE;
+  const cells = _tkStandings.slice(start, start + TK_PAGE);
+  $('tkTeams').innerHTML = cells.map((r, k) => {
+    const id = resolveTeam(r, r.rank || (start + k + 1));
+    // Real logo from the Teams library only — no placeholder box (keeps the tag clean).
+    const logo = id.logo ? '<img class="tk-tlogo" src="' + esc(id.logo) + '" alt="" onerror="this.remove()">' : '';
+    const elim = r.inGame && !r.alive;
+    // Three squad-member bars — one per player, red when that player is down (whole squad red if eliminated).
+    const pl = r.players || [];
+    const bars = [0,1,2].map(i => {
+      const p = pl[i];
+      const cls = elim ? ' down' : (!p ? ' off' : ((p.down || (p.hp != null && p.hp <= 0)) ? ' down' : ''));
+      return '<span class="tk-pbar' + cls + '"></span>';
+    }).join('');
+    const kills = r.liveKills != null ? r.liveKills : (r.kills || 0);   // per-team kill count (this game)
+    return '<div class="tk-cell' + (elim ? ' elim' : '') + (r.teamId === _tkSpot ? ' spot' : '') + '">' +
+      '<span class="tk-rank">#' + (r.rank || (start + k + 1)) + '</span>' +
+      logo + '<span class="tk-pbars">' + bars + '</span><span class="tk-tag">' + esc(id.tag) + '</span>' +
+      '<span class="tk-pts">' + kills + '</span>' +
+    '</div>';
+  }).join('');
+}
+
+function render(a){
+  if (!a) return;
+  // Show whenever there's a live connection OR standings data (stays up between games / pre-game).
+  const shown = !!(a.connected || (a.standings && a.standings.length));
+  $('offline').classList.toggle('hidden', shown);
+
+  // ── ALGS ticker top bar ──
+  $('topbar').classList.toggle('off', !shown);
+  // Event text = Apex title override, else the app's global Event Name, else brand name.
+  const ev = (_realEvent && (_realEvent.title || _realEvent.split || _realEvent.match)) ? _realEvent : (a.event || {});
+  $('tkEv').textContent = ev.title || appEventName || (brand && brand.name) || 'APEX LEGENDS';
+  // Subtext = ROUND / STAGE (app round label, or the Apex split) · MATCH LABEL.
+  const roundStage = appRoundLabel || ev.split || '';
+  const matchLabel = ev.match || (a.gameNumber ? ('GAME ' + a.gameNumber) : '');
+  $('tkMatch').textContent = [roundStage, matchLabel].filter(Boolean).join('  ·  ');
+  const logo = $('tkLogo'); if (brand && brand.logo) { logo.style.display = ''; logo.src = brand.logo; } else logo.style.display = 'none';
+  $('tkAlive').textContent = a.squadsAlive != null ? a.squadsAlive : '—';
+  renderTicker(a);
+
+  // ── standings ──
+  const rows = a.standings || [];
+  $('standings').classList.toggle('off', !(shown && rows.length));
+  $('stAlive').textContent = a.squadsAlive || 0;
+  $('stTotal').textContent = a.squadsTotal || 0;
+  const spotTeam = a.observed ? a.observed.teamId : -1;
+  $('stRows').innerHTML = rows.slice(0, 20).map((sq, i) => {
+    const rank = sq.rank || (sq.alive ? (i + 1) : (sq.gamePlacement || sq.placement || '—'));
+    const kills = sq.liveKills != null ? sq.liveKills : (sq.kills || 0);
+    // Three-bar squad indicator (same format as the topbar): red when a player is down, all red if eliminated.
+    const pl = sq.players || [];
+    const bars = [0,1,2].map(j => {
+      const p = pl[j];
+      const cls = !sq.alive ? ' down' : (!p ? ' off' : ((p.down || (p.hp != null && p.hp <= 0)) ? ' down' : ''));
+      return '<span class="tk-pbar' + cls + '"></span>';
+    }).join('');
+    return '<div class="st-row' + (sq.alive ? '' : ' dead') + (sq.teamId === spotTeam ? ' spot' : '') + '">' +
+      '<span class="st-rank">' + (sq.alive ? '#' + rank : rank) + '</span>' +
+      '<span class="st-name">' + esc(sq.name) + '</span>' +
+      '<span class="tk-pbars st-bars">' + bars + '</span>' +
+      '<span class="st-kills">' + KILL_SVG + ' ' + kills + '</span>' +
+    '</div>';
+  }).join('');
+
+  // ── spectated TEAM thin bar (bottom-left) ──
+  const o = a.observed;
+  $('specteam').classList.toggle('off', !(shown && o));
+  if (o){
+    const teamRow = rows.find(r => r.teamId === o.teamId) || {};
+    const id = resolveTeam({ key: normName(o.squadName || o.name || ''), name: o.squadName || '' }, teamRow.rank || 1);
+    $('spRank').textContent = '#' + (teamRow.rank || '—');
+    const lg = $('spLogo'); if (id.logo) { lg.style.display = ''; lg.src = id.logo; } else lg.style.display = 'none';
+    $('spName').textContent = o.squadName || id.tag || '—';
+    $('spKills').textContent = teamRow.liveKills != null ? teamRow.liveKills : (o.kills || 0);
+  }
+
+  // ── kill feed ──
+  const kf = (a.killfeed || []).slice(-6);
+  $('killfeed').innerHTML = kf.map(k =>
+    '<div class="kf-row' + (k.down ? ' down' : '') + '">' +
+      '<span class="kf-a">' + esc(k.attacker || '?') + '</span>' +
+      (k.weapon ? '<span class="kf-w">' + esc(k.weapon) + '</span>' : '') +
+      '<span class="kf-arrow">' + (k.down ? '▸' : '✕') + '</span>' +
+      '<span class="kf-v">' + esc(k.victim || '?') + '</span>' +
+    '</div>'
+  ).join('');
+}
+
+// ── WebSocket bridge (same pattern as the LoL HUD) ────────────────────────────
+let _wsToken = null;
+async function connect(){
+  if (_wsToken === null){
+    try { _wsToken = (await (await fetch('http://' + (location.hostname || 'localhost') + ':3000/api/ws-token')).json()).token || ''; }
+    catch(e){ _wsToken = ''; }
+  }
+  const sock = new WebSocket('ws://' + (location.hostname || 'localhost') + ':3001' + (_wsToken ? ('?token=' + encodeURIComponent(_wsToken)) : ''));
+  sock.onopen = () => sock.send(JSON.stringify({ type: 'request_state' }));
+  sock.onmessage = ({ data }) => {
+    let msg; try { msg = JSON.parse(data); } catch { return; }
+    if (msg.type === 'full_state'){
+      applyBrand(msg.data);   // captures brand, savedTeams, teamMap, real event
+      // If we're showing a preview, rebuild it now that real teams/logos/event have arrived.
+      if (devState && (IS_DEMO || _autoDemo)) { devState = demoBase(); render(devState); }
+      else if (msg.data.apex) maybeRenderReal(msg.data.apex);
+    } else if (msg.type === 'apex_update'){
+      maybeRenderReal(msg.data);
+    }
+  };
+  sock.onclose = () => setTimeout(connect, 800);
+  sock.onerror = () => { try { sock.close(); } catch {} };
+}
+connect();
+
+// Real data replaces the auto-preview once a live connection/standings arrive; a manual Demo is left alone.
+let lastApex = null;
+function maybeRenderReal(a){
+  lastApex = a;
+  if (a && a.teamMap) teamMap = a.teamMap;
+  if (a && a.event) _realEvent = a.event;
+  const hasReal = a && (a.connected || (a.standings && a.standings.length));
+  if (_autoDemo && hasReal){ devState = null; _autoDemo = false; }
+  if (!devState) render(a);
+}
+
+// ── Demo (dev only; hidden when body.live) ────────────────────────────────────
+function demoBase(){
+  const squads = [];
+  // Preview with the producer's REAL teams (so their logos show); fall back to sample tags.
+  const fallback = ['NRG','TSM','FURIA','C9','FNATIC','100T','DZ','SR','OXG','E8','GG','LG','XSET','COL','FLUX','ROC','ALL','SSG','MST','KC'];
+  const names = [];
+  for (let i = 0; i < 20; i++) names.push((savedTeams[i] && savedTeams[i].name) || fallback[i]);
+  for (let i = 0; i < 20; i++){
+    const alive = i < 12;
+    squads.push({ teamId: i+1, name: names[i], rank: i+1, seriesPoints: Math.max(0, 42 - i*2 + (i%3)), inGame: true,
+      kills: alive ? Math.floor(Math.random()*8) : Math.floor(Math.random()*5), liveKills: alive ? Math.floor(Math.random()*8) : 0,
+      alive, placement: alive ? 0 : (20 - i + 1),
+      players: [0,1,2].map(j => ({ name: names[i]+'_'+(j+1), legend: ['Wraith','Bloodhound','Gibraltar','Octane','Bangalore'][(i+j)%5], kills: 0, hp: (alive && !(j===2 && i%3===0)) ? (j===0?100:60) : 0, down: !(alive && !(j===2 && i%3===0)), maxHp: 100, shield: alive?50:0 })) });
+  }
+  return {
+    connected: true, matchState: 'live', map: "World's Edge", playlist: 'ALGS',
+    // No hardcoded title — the ticker uses the in-app configured event (or the brand name).
+    event: (_realEvent && (_realEvent.title || _realEvent.split || _realEvent.match)) ? _realEvent : { split: 'SPLIT 1 PLAYOFFS', match: 'MATCH 1' },
+    ring: { stage: 3, shrinking: true }, squadsAlive: 12, squadsTotal: 20,
+    observed: { name: 'Sweet', legend: 'Wraith', teamId: 1, squadName: names[0], kills: 4, hp: 74, maxHp: 100, shield: 45, maxShield: 50,
+      squad: [ { name:'Sweet', legend:'Wraith', hp:74, maxHp:100 }, { name:'Gild', legend:'Gibraltar', hp:100, maxHp:100 }, { name:'Nafen', legend:'Octane', hp:0, maxHp:100 } ] },
+    standings: squads,
+    killfeed: [ { attacker:'ImperialHal', weapon:'R-301', victim:'Zer0', down:false },
+                { attacker:'Sweet', weapon:'Wingman', victim:'Verhulst', down:true } ],
+  };
+}
+function toggleDemo(){ _autoDemo = false; if (devState){ devState = null; } else { devState = demoBase(); render(devState); } }
+function stepDemo(){ if (!devState) devState = demoBase(); const s = devState;
+  s.observed.kills++; s.observed.hp = Math.max(0, s.observed.hp - 12);
+  s.killfeed.push({ attacker: s.observed.name, weapon: 'Flatline', victim: 'RND_'+Math.floor(Math.random()*99), down: Math.random()>.5 });
+  if (s.killfeed.length > 6) s.killfeed.shift();
+  const t1 = s.standings.find(r => r.teamId === 1); if (t1) t1.liveKills = (t1.liveKills||0) + 1;
+  render(s);
+}
+
+// ?live=1 = clean production; ?demo=1 = OBS preview (populated demo, no dev toolbar)
+const _params = new URLSearchParams(location.search);
+const IS_LIVE = _params.get('live') === '1';
+const IS_DEMO = _params.get('demo') === '1';
+if (IS_LIVE || IS_DEMO) document.body.classList.add('live');
+if (IS_DEMO) { devState = demoBase(); _autoDemo = false; render(devState); }
+// Direct browser preview (bare URL): auto-load demo if no real Apex data arrives shortly.
+else if (!IS_LIVE) setTimeout(() => {
+  if (!devState && !(lastApex && (lastApex.connected || (lastApex.standings && lastApex.standings.length)))) { devState = demoBase(); _autoDemo = true; render(devState); }
+}, 1500);
+</script>
+</body>
+</html>

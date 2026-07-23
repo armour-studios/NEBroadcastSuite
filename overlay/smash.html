@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<!--
+  smash.html — Super Smash Bros. scoreboard overlay (platform-fighter 1v1).
+  Driven by full_state via scene-base.js (:3001 bridge), same as every other scene:
+    teams.blue/orange  → the two players (active roster member's gamertag + country flag) + accent colour
+    series.blue/orange → set score (games won)
+    smash.blue/orange  → { stocks, character } — lives remaining this game + fighter name (Match ▸ Teams ▸ Smash)
+    smash.startStocks  → starting stock count = how many pips render
+    eventName / roundLabel / gameLabel → centre text
+    activePlayer.{blue,orange} → which roster member shows (multi-entrant teams)
+  Stocks are MANUAL (Smash Ultimate has no easy live feed). Generic pips + fighter NAME only — no
+  Nintendo art (drop in licensed stock icons later by pointing .pip at an <img>).
+  Query params:  ?title=off hides the event label · ?side test only via ?preview=1
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <link rel="stylesheet" href="/fonts.css">
+  <style>
+    :root {
+      --a: #2a7fff;      /* player 1 accent (blue side)   */
+      --b: #e0383e;      /* player 2 accent (orange side) */
+      --bar-bg: rgba(9, 11, 18, .93);
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      width: 1920px; height: 1080px; overflow: hidden; background: transparent;
+      font-family: 'Rajdhani', 'Inter', system-ui, sans-serif;
+      -webkit-font-smoothing: antialiased; text-transform: uppercase;
+    }
+
+    /* ── Stage: top-centre scoreboard ── */
+    .sb {
+      position: absolute; top: 24px; left: 50%; transform: translateX(-50%);
+      display: grid; grid-template-columns: 1fr auto 1fr; align-items: stretch;
+      width: 1500px; height: 92px;
+      opacity: 0; transition: opacity .5s ease;
+      filter: drop-shadow(0 10px 26px rgba(0,0,0,.55));
+    }
+    .sb.show { opacity: 1; }
+
+    /* ── Player panel ── */
+    .p {
+      position: relative; display: flex; align-items: center; gap: 16px;
+      background: var(--bar-bg); overflow: hidden;
+      border-top: 3px solid var(--pc);
+    }
+    .p--a { --pc: var(--a); border-radius: 8px 0 0 8px; padding: 0 18px 0 22px; }
+    .p--b { --pc: var(--b); border-radius: 0 8px 8px 0; padding: 0 22px 0 18px; flex-direction: row-reverse; }
+    /* colour wash from the accent edge inward */
+    .p::before {
+      content: ''; position: absolute; inset: 0; z-index: 0; pointer-events: none;
+      background: linear-gradient(90deg, color-mix(in srgb, var(--pc) 55%, transparent), transparent 62%);
+    }
+    .p--b::before { background: linear-gradient(270deg, color-mix(in srgb, var(--pc) 55%, transparent), transparent 62%); }
+    .p > * { position: relative; z-index: 1; }
+
+    .flag {
+      width: 46px; height: 34px; object-fit: cover; border-radius: 3px; flex: 0 0 auto;
+      box-shadow: 0 1px 4px rgba(0,0,0,.5); background: rgba(255,255,255,.06);
+    }
+    .flag.is-hidden { display: none; }
+
+    .id { display: flex; flex-direction: column; justify-content: center; gap: 3px; min-width: 0; flex: 1 1 auto; }
+    .p--b .id { align-items: flex-end; }
+    .name {
+      font-size: 34px; font-weight: 700; letter-spacing: .01em; line-height: 1; color: #fff;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 460px;
+      text-shadow: 0 2px 6px rgba(0,0,0,.6);
+    }
+    .sub { display: flex; align-items: center; gap: 12px; height: 18px; }
+    .p--b .sub { flex-direction: row-reverse; }
+    .char {
+      font-size: 15px; font-weight: 600; letter-spacing: .1em;
+      color: color-mix(in srgb, var(--pc) 30%, #ffffff);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 220px;
+    }
+    .char:empty { display: none; }
+
+    /* ── Stock pips ── */
+    .stocks { display: flex; align-items: center; gap: 6px; }
+    .pip {
+      width: 13px; height: 13px; border-radius: 50%;
+      background: var(--pc); box-shadow: 0 0 8px color-mix(in srgb, var(--pc) 70%, transparent);
+      transition: opacity .25s ease, transform .25s ease;
+    }
+    .pip.lost { opacity: .18; background: #fff; box-shadow: none; transform: scale(.82); }
+
+    /* score number tucked at the inner edge */
+    .pscore {
+      font-size: 40px; font-weight: 800; color: #fff; line-height: 1; flex: 0 0 auto;
+      min-width: 34px; text-align: center; text-shadow: 0 2px 8px rgba(0,0,0,.7);
+    }
+
+    /* ── Centre pillar ── */
+    .mid {
+      display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+      background: rgba(5, 7, 12, .96); padding: 0 30px; min-width: 260px;
+      border-left: 1px solid rgba(255,255,255,.08); border-right: 1px solid rgba(255,255,255,.08);
+    }
+    .mid-logo { height: 34px; max-width: 150px; object-fit: contain; margin-bottom: 2px; }
+    .mid-logo.is-hidden { display: none; }
+    .mid-event { font-size: 17px; font-weight: 800; letter-spacing: .16em; color: #fff; line-height: 1; text-align: center; }
+    .mid-event.is-hidden { display: none; }
+    .mid-sub { font-size: 12px; font-weight: 700; letter-spacing: .2em; color: rgba(255,255,255,.5); line-height: 1; text-align: center; }
+    .mid-sub.is-hidden { display: none; }
+
+    /* preview badge (?preview=1) handled by scene-base */
+  </style>
+</head>
+<body>
+  <div class="sb" id="sb">
+    <div class="p p--a">
+      <img class="flag is-hidden" id="flagA" alt="">
+      <div class="id">
+        <div class="name" id="nameA">PLAYER 1</div>
+        <div class="sub"><span class="char" id="charA"></span><span class="stocks" id="stocksA"></span></div>
+      </div>
+      <div class="pscore" id="scoreA">0</div>
+    </div>
+
+    <div class="mid">
+      <img class="mid-logo is-hidden" id="midLogo" alt="">
+      <div class="mid-event" id="midEvent">SMASH</div>
+      <div class="mid-sub" id="midSub"></div>
+    </div>
+
+    <div class="p p--b">
+      <img class="flag is-hidden" id="flagB" alt="">
+      <div class="id">
+        <div class="name" id="nameB">PLAYER 2</div>
+        <div class="sub"><span class="char" id="charB"></span><span class="stocks" id="stocksB"></span></div>
+      </div>
+      <div class="pscore" id="scoreB">0</div>
+    </div>
+  </div>
+
+  <script src="/scene-base.js"></script>
+  <script>
+    const FLAG_BASE = '/fgc/static/flags/flags/1x1/';
+    const QP = new URLSearchParams(location.search);
+    const el = (id) => document.getElementById(id);
+
+    function str(v) { return (v == null ? '' : String(v)).trim(); }
+    function firstNonEmpty() { for (const v of arguments) { const s = str(v); if (s) return s; } return ''; }
+
+    // Active roster member for a side (activePlayer[side] = player id; else first).
+    function activePlayer(team, activeId) {
+      const roster = (team && Array.isArray(team.players)) ? team.players : [];
+      if (activeId) { const hit = roster.find((p) => p && String(p.id) === String(activeId)); if (hit) return hit; }
+      return roster[0] || null;
+    }
+    function countryCode(p) {
+      return firstNonEmpty(p && p.country, p && p.countryCode).toLowerCase();
+    }
+
+    function renderSide(suffix, team, smashSide, seriesScore, activeId, startStocks) {
+      team = team || {}; smashSide = smashSide || {};
+      const p = activePlayer(team, activeId);
+      const name = firstNonEmpty(p && (p.gamertag || p.name), team.name) || ('PLAYER ' + (suffix === 'A' ? '1' : '2'));
+      el('name' + suffix).textContent = name;
+      el('score' + suffix).textContent = String(Number(seriesScore) || 0);
+      // fighter name
+      el('char' + suffix).textContent = str(smashSide.character);
+      // flag
+      const cc = p ? countryCode(p) : '';
+      const flag = el('flag' + suffix);
+      if (cc) { flag.src = FLAG_BASE + cc + '.svg'; flag.classList.remove('is-hidden'); }
+      else flag.classList.add('is-hidden');
+      // stock pips: startStocks pips, first `stocks` are filled, rest lost
+      const total = Math.max(1, Math.min(9, Number(startStocks) || 3));
+      const left = Math.max(0, Math.min(total, Number(smashSide.stocks)));
+      const wrap = el('stocks' + suffix);
+      const want = total;
+      // rebuild only if pip count changed
+      if (wrap.childElementCount !== want) {
+        wrap.innerHTML = '';
+        for (let i = 0; i < want; i++) { const d = document.createElement('span'); d.className = 'pip'; wrap.appendChild(d); }
+      }
+      [].forEach.call(wrap.children, (pip, i) => pip.classList.toggle('lost', i >= left));
+    }
+
+    function render(data) {
+      data = data || {};
+      const teams = data.teams || {};
+      const series = data.series || {};
+      const smash = data.smash || { blue: {}, orange: {}, startStocks: 3 };
+      const active = data.activePlayer || {};
+
+      // per-side accent = effective team colour (respects the Match ▸ Teams colour mode)
+      const cA = str(teams.blue && teams.blue.color) || '#2a7fff';
+      const cB = str(teams.orange && teams.orange.color) || '#e0383e';
+      document.documentElement.style.setProperty('--a', cA);
+      document.documentElement.style.setProperty('--b', cB);
+
+      renderSide('A', teams.blue, smash.blue, series.blue, active.blue, smash.startStocks);
+      renderSide('B', teams.orange, smash.orange, series.orange, active.orange, smash.startStocks);
+
+      // centre: brand logo + event + round·label
+      const brand = data.brand || {};
+      const logo = str(brand.logo);
+      const midLogo = el('midLogo');
+      if (logo) { midLogo.src = logo; midLogo.classList.remove('is-hidden'); }
+      else midLogo.classList.add('is-hidden');
+
+      const titleOff = QP.get('title') === 'off';
+      const event = str(data.eventName);
+      const midEvent = el('midEvent');
+      midEvent.textContent = event || 'SMASH';
+      midEvent.classList.toggle('is-hidden', titleOff);
+
+      const round = firstNonEmpty(data.roundLabel, data.match && data.match.division);
+      const label = firstNonEmpty(data.gameLabel, (Number(data.bestOf) > 0 ? ('BO' + data.bestOf) : ''));
+      const sub = [round, label].filter(Boolean).join('  ·  ');
+      const midSub = el('midSub');
+      midSub.textContent = sub;
+      midSub.classList.toggle('is-hidden', !sub);
+
+      el('sb').classList.add('show');
+    }
+
+    if (typeof SceneBase !== 'undefined') {
+      if (SceneBase.preview) {
+        render({
+          teams: { blue: { name: 'MANG0', color: '#2a7fff', players: [{ gamertag: 'MANG0', country: 'us' }] },
+                   orange: { name: 'ZAIN', color: '#e0383e', players: [{ gamertag: 'ZAIN', country: 'us' }] } },
+          series: { blue: 2, orange: 1 }, bestOf: 5,
+          smash: { startStocks: 3, blue: { stocks: 3, character: 'Falco' }, orange: { stocks: 2, character: 'Marth' } },
+          eventName: 'GENESIS', roundLabel: 'GRAND FINAL', gameLabel: 'BO5', brand: { logo: '' }
+        });
+      } else {
+        SceneBase.connect((data) => { SceneBase.applySceneConfig('smash', data); render(data); });
+      }
+    }
+  </script>
+</body>
+</html>

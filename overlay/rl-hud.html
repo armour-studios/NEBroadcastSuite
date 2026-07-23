@@ -48,13 +48,19 @@ body.ui-hidden #players-orange,
 body.ui-hidden #br,
 body.ui-hidden #tk,
 body.ui-hidden #sponsor{display:none !important;}
+/* Post-game board active → blank the live HUD chrome so the board is the ONLY thing on screen. Without
+   this, when the scoreboard is routed to the separate ?only=scoreboard source (body.sb-external hides
+   only the inline #sb), the main HUD's live scorebar stayed up and sat on top of / beside the scorecard
+   — a double layer. Applies in every mode (inline board is opaque, so hiding the chrome under it is a
+   no-op there). #sb is intentionally NOT in this list. */
+body.on-board :is(#scorebar,#event-name,#game-sub,#ot-subbar,#ot-swipe,#players-blue,#players-orange,#br,#tk,#sponsor){display:none !important;}
 img{display:block;}
 
 /* ───────────────────── TOP SCOREBOARD (CS2 header style) ─────────────────── */
 /* ported from overlay/csgo.html — event title bar + topbar with team logo/name/
    chip/score, center timer block, and team-color accent bars along the bottom. */
 .scorebar{
-  position:absolute;top:18px;left:50%;transform:translateX(-50%);    /* pushed down to seat the slanted event banner */
+  position:absolute;top:26px;left:50%;transform:translateX(-50%);    /* dropped so it seats lower, under the event banner (was 18px) */
   background:linear-gradient(180deg,var(--panel-1),var(--panel-2));
   border:1px solid rgba(255,255,255,.12);border-top:none;border-radius:0 0 14px 14px;
   overflow:hidden;box-shadow:0 12px 34px rgba(0,0,0,.55);
@@ -62,21 +68,25 @@ img{display:block;}
 }
 @keyframes headIn{from{opacity:0;transform:translateX(-50%) translateY(-18px);}}
 
-/* animated white light that traces the SILHOUETTE of the whole top cluster (event title +
-   scorebar + GAME tab). The path is computed at runtime from the live element sizes — see
-   drawHeaderOutline(). Top-level SVG so it isn't clipped by the scorebar. */
-#header-outline{position:absolute;top:0;left:0;width:1920px;height:210px;z-index:42;pointer-events:none;overflow:visible;}
-#header-outline path{fill:none;vector-effect:non-scaling-stroke;}
-#header-outline .hb-base{stroke:rgba(255,255,255,.10);stroke-width:1.5;}
-#header-outline .hb-beam{stroke:#fff;stroke-width:2;stroke-linecap:round;
-  stroke-dasharray:15 85;filter:drop-shadow(0 0 5px rgba(255,255,255,.9));
-  animation:headBeam 6.5s linear infinite;}
-@keyframes headBeam{ to{stroke-dashoffset:-100;} }   /* continuous lap around the WHOLE silhouette */
+/* Per-side team-colour gradient wash on the scorebar — REPLACES the old animated white light that
+   traced the top cluster. The blue side fades in --blue from its outer edge, the orange side fades
+   in --orange from its outer edge. Set as the .team background so it sits under the logo/name/score
+   and over the scorebar panel; --blue/--orange are each team's live colour. */
+.team.blue{background:linear-gradient(90deg, color-mix(in srgb, var(--blue) 40%, transparent) 0%,
+  color-mix(in srgb, var(--blue) 12%, transparent) 46%, transparent 84%);}
+/* orange is a warmer/brighter hue than blue, so it "glows" more at the same opacity — dial it back so
+   the two sides read at a balanced intensity. */
+.team.orange{background:linear-gradient(270deg, color-mix(in srgb, var(--orange) 28%, transparent) 0%,
+  color-mix(in srgb, var(--orange) 8%, transparent) 46%, transparent 84%);}
 
 /* slanted event banner — seats ON TOP of the bar, angled top corners over the feed */
 .event-name{
-  position:absolute;top:0;left:50%;transform:translateX(-50%);z-index:41;
-  max-width:1080px;padding:5px 66px 5px;line-height:1;
+  position:absolute;top:0;left:50%;transform:translateX(-50%);z-index:41;box-sizing:border-box;
+  /* width is set in JS (fitEventName) to match the scorebar beneath it so the two line up as one
+     uniform stacked unit; box-sizing:border-box so that width includes the padding. */
+  /* line-height must clear the uppercase caps: with line-height:1 + top:0 the letter tops were sliced
+     off by overflow:hidden. Extra top padding + a taller line box give the caps room. */
+  max-width:1080px;padding:8px 66px 5px;line-height:1.25;
   /* OPAQUE panel (not the .96 var) so where it seats on the scorebar the two don't stack into a darker
      band; short height so it only just meets the bar's top instead of clipping deep into it. */
   background:linear-gradient(180deg,rgb(20,23,31),rgb(11,13,19));
@@ -133,15 +143,22 @@ img{display:block;}
 .pip{width:20px;height:7px;border-radius:4px;background:rgba(255,255,255,.30);
   box-shadow:inset 0 0 0 1px rgba(255,255,255,.28), 0 1px 2px rgba(0,0,0,.5);
   transition:background .35s,box-shadow .35s;}
+/* fill AND glow both follow the themed team colour (--blue/--orange, resolved from team/brand/etc mode)
+   — the glow was hardcoded to the in-game blue/orange, so pills kept an in-game halo regardless of theme. */
 .pip.win-blue{background:var(--blue);
-  box-shadow:inset 0 0 0 1px rgba(0,0,0,.35), 0 0 11px rgba(47,141,255,.9);}
+  box-shadow:inset 0 0 0 1px rgba(0,0,0,.35), 0 0 11px color-mix(in srgb, var(--blue) 88%, transparent);}
 .pip.win-orange{background:var(--orange);
-  box-shadow:inset 0 0 0 1px rgba(0,0,0,.35), 0 0 11px rgba(255,122,51,.9);}
+  box-shadow:inset 0 0 0 1px rgba(0,0,0,.35), 0 0 11px color-mix(in srgb, var(--orange) 88%, transparent);}
 
 .score{font-weight:700;font-size:40px;font-variant-numeric:tabular-nums;min-width:46px;
   text-align:center;flex-shrink:0;transition:transform .2s;}
-.score.blue{color:var(--blue);text-shadow:0 0 20px rgba(47,141,255,.45);}
-.score.orange{color:var(--orange);text-shadow:0 0 20px rgba(255,122,51,.45);}
+/* No coloured glow behind the score — it was a hardcoded blue/orange that clashed with custom team
+   colours. The thin white outline below gives the number definition on any background / any colour. */
+.score.blue{color:var(--blue);}
+.score.orange{color:var(--orange);}
+/* thin white outline on the big team scores — paint-order:stroke keeps the stroke OUTSIDE the glyph so
+   the team-colour fill stays full-weight (no thinning); the outer ~1px of the 2px stroke reads as the edge. */
+.score.blue,.score.orange{-webkit-text-stroke:1.25px #fff;paint-order:stroke;}
 .score.bump{animation:pop .42s ease;}
 @keyframes pop{0%{transform:scale(1);}42%{transform:scale(1.3);}100%{transform:scale(1);}}
 
@@ -152,7 +169,8 @@ img{display:block;}
 /* OVERTIME: the timer box goes red with white text */
 .center.ot{background:var(--ot-bg,#e0202a);box-shadow:inset 0 2px 0 rgba(255,255,255,.16),inset 0 -3px 9px rgba(0,0,0,.3);}
 .ot-badge{display:none;}
-.timer{font-weight:800;font-size:32px;font-variant-numeric:tabular-nums;line-height:1;letter-spacing:.01em;}
+.timer{font-weight:800;font-size:32px;font-variant-numeric:tabular-nums;line-height:1;letter-spacing:.01em;
+  position:relative;top:-4px;}   /* lifted a touch in the centre column (sponsor logo is pinned below) */
 .timer.ot{color:#fff;text-shadow:0 1px 4px rgba(0,0,0,.5);}
 
 /* GAME n of X — neutral sub-tab that HANGS BELOW the center timer */
@@ -255,15 +273,17 @@ img{display:block;}
 .pc.blue .pc-card::before{background:var(--blue);}
 .pc.orange .pc-card::before{background:var(--orange);}
 /* observed player: lift + inner team-color ring + colour glow (inset works w/ clip) */
-.pc-card.spectated{transform:scale(1.04);
-  box-shadow:inset 0 0 0 2px var(--pc-spec,#fff),inset 0 0 20px -5px var(--pc-glow,transparent);
-  filter:drop-shadow(0 0 8px var(--pc-glow,transparent));}
-/* traveling-light SILHOUETTE around the spectated card is an SVG beam (#spec-outline), traced in JS */
-#spec-outline{position:absolute;top:0;left:0;width:1920px;height:1080px;z-index:46;pointer-events:none;overflow:visible;}
-#spec-outline path{fill:none;vector-effect:non-scaling-stroke;}
-#spec-outline .hb-base{stroke:var(--spec-color,#2f8dff);opacity:.32;stroke-width:2;}
-#spec-outline .hb-beam{stroke:#fff;stroke-width:2.5;stroke-linecap:round;stroke-dasharray:13 87;
-  filter:drop-shadow(0 0 6px var(--spec-color,#2f8dff));animation:headBeam 3s linear infinite;}
+/* observed player: the SPECTATED side statcard is highlighted with a team-colour GRADIENT sweep from
+   its team-accent (outer) edge, plus a slight lift and a soft team-colour rim. This REPLACES the old
+   animated silhouette outline (#spec-outline), which has been removed. */
+.pc-card.spectated{transform:scale(1.05);
+  box-shadow:inset 0 0 0 1.5px color-mix(in srgb, var(--pc-spec,#fff) 62%, transparent),0 5px 20px -7px var(--pc-glow,rgba(0,0,0,.45));}
+.pc-card.spectated::after{content:'';position:absolute;inset:0;z-index:0;pointer-events:none;
+  background:linear-gradient(100deg, color-mix(in srgb, var(--pc-glow,#2f8dff) 58%, transparent) 0%,
+    color-mix(in srgb, var(--pc-glow,#2f8dff) 20%, transparent) 44%, transparent 78%);}
+.col.right .pc-card.spectated::after,.rc-team.right .pc-card.spectated::after{
+  background:linear-gradient(260deg, color-mix(in srgb, var(--pc-glow,#2f8dff) 58%, transparent) 0%,
+    color-mix(in srgb, var(--pc-glow,#2f8dff) 20%, transparent) 44%, transparent 78%);}
 .pc-card.demolished{opacity:.62;filter:grayscale(.7);}   /* dimmed + desaturated while the player is out */
 
 /* body — line1: name, line2: stat icons */
@@ -551,41 +571,60 @@ img{display:block;}
 .goal-assist{font-size:14px;letter-spacing:.16em;color:var(--muted);margin-top:7px;text-transform:uppercase;}
 
 /* ───── REPLAY TRANSITION — dark panel swipes IN (sponsor visible), holds, swipes OUT ──── */
+/* The frame is now STATIC — the moving wall is the shutter bars below. */
 .replay-wipe{position:absolute;top:0;bottom:0;left:-16%;right:-16%;z-index:80;pointer-events:none;overflow:hidden;
-  --rp-dur:2.6s;display:flex;align-items:center;justify-content:center;
-  /* soft team-colour glow over a dark panel — depth without the per-frame cost of a striped texture */
-  background:
-    radial-gradient(140% 140% at 30% 50%,color-mix(in srgb,var(--replay-color,#fff) 17%,transparent) 0%,transparent 60%),
-    linear-gradient(120deg,rgba(8,11,18,.965) 0%,rgba(14,20,32,.98) 55%,rgba(8,11,18,.965) 100%);
-  transform:translateX(-130%) skewX(-8deg);will-change:transform;backface-visibility:hidden;}
-.replay-wipe.logo-only{--rp-dur:1.6s;}   /* the after-replay outro is quicker */
-/* smooth in/out — softened transit + easing (was a hard whip), long hold */
-.replay-wipe.play{animation:replaySwipe var(--rp-dur) cubic-bezier(.5,.04,.28,1);}
-@keyframes replaySwipe{0%{transform:translateX(-130%) skewX(-8deg);}17%{transform:translateX(0) skewX(-8deg);}
-  81%{transform:translateX(0) skewX(-8deg);}100%{transform:translateX(130%) skewX(-8deg);}}
-/* diagonal ACCENT SPEED-LINES on the trailing side (replaces the old thin vertical bar) */
-.replay-wipe::after{content:'';position:absolute;top:-6%;bottom:-6%;right:4%;width:38%;z-index:2;pointer-events:none;
-  background:repeating-linear-gradient(96deg,color-mix(in srgb,var(--replay-color,#fff) 82%,transparent) 0 6px,transparent 6px 40px);
-  -webkit-mask:linear-gradient(90deg,transparent,#000 82%);mask:linear-gradient(90deg,transparent,#000 82%);
-  filter:drop-shadow(0 0 9px var(--replay-color,#fff));opacity:.82;}
-/* energetic light-streak that sweeps across right after the panel covers */
+  --rp-dur:2.6s;display:flex;align-items:center;justify-content:center;}
+.replay-wipe.logo-only{--rp-dur:1.9s;}   /* the after-replay outro — a touch longer than the intro sweep */
+
+/* ── SHUTTER SLAM ─────────────────────────────────────────────────────────────
+   Five angled bars sweep in staggered from ALTERNATING sides, snap together into one solid wall (the
+   lockup punches in on the slam), hold, then peel out in sequence. Because the frame no longer slides
+   off-screen, the scrim + brand skin are veiled separately (rwVeil) instead of riding a moving panel. */
+.rw-bars{position:absolute;inset:0;z-index:0;pointer-events:none;}
+.rw-bars i{position:absolute;left:-30%;right:-30%;height:21%;display:block;   /* 21% = 1% overlap, no seams */
+  background:linear-gradient(100deg,rgb(8,11,18) 0%,rgb(14,20,32) 55%,rgb(8,11,18) 100%);
+  transform:translateX(var(--from)) skewX(-8deg);will-change:transform;backface-visibility:hidden;}
+.rw-bars i:nth-child(1){top:0;   --from:-140%; --to:140%;}
+.rw-bars i:nth-child(2){top:20%; --from:140%;  --to:-140%;}
+.rw-bars i:nth-child(3){top:40%; --from:-140%; --to:140%;}
+.rw-bars i:nth-child(4){top:60%; --from:140%;  --to:-140%;}
+.rw-bars i:nth-child(5){top:80%; --from:-140%; --to:140%;}
+/* bright leading-edge accent in the team colour — the signature of the slam */
+.rw-bars i::after{content:'';position:absolute;top:0;bottom:0;width:4px;
+  background:var(--replay-color,#fff);box-shadow:0 0 20px var(--replay-color,#fff);opacity:.92;}
+.rw-bars i:nth-child(odd)::after{right:0;}    /* travelling right → leading edge is the right side */
+.rw-bars i:nth-child(even)::after{left:0;}
+.replay-wipe.play .rw-bars i{animation:rwBar var(--rp-dur) cubic-bezier(.5,.04,.28,1) both;}
+.replay-wipe.play .rw-bars i:nth-child(2){animation-delay:45ms;}
+.replay-wipe.play .rw-bars i:nth-child(3){animation-delay:90ms;}
+.replay-wipe.play .rw-bars i:nth-child(4){animation-delay:135ms;}
+.replay-wipe.play .rw-bars i:nth-child(5){animation-delay:180ms;}
+@keyframes rwBar{0%{transform:translateX(var(--from)) skewX(-8deg);}
+  20%{transform:translateX(0) skewX(-8deg);}
+  80%{transform:translateX(0) skewX(-8deg);}
+  100%{transform:translateX(var(--to)) skewX(-8deg);}}
+/* scrim + brand skin ride the cover window (the frame no longer moves off-screen) */
+@keyframes rwVeil{0%,14%{opacity:0;}26%{opacity:1;}76%{opacity:1;}90%,100%{opacity:0;}}
+.replay-wipe.play .replay-scrim,.replay-wipe.play .replay-skin{animation:rwVeil var(--rp-dur) linear both;}
+/* energetic light-streak that sweeps across once the wall is solid */
 .replay-wipe::before{content:'';position:absolute;top:-10%;bottom:-10%;left:-30%;width:24%;z-index:3;pointer-events:none;
   background:linear-gradient(100deg,transparent 0%,rgba(255,255,255,.20) 46%,rgba(255,255,255,.32) 54%,transparent 100%);opacity:0;}
 .replay-wipe.play::before{animation:rpStreak var(--rp-dur) ease;}
-@keyframes rpStreak{0%,13%{opacity:0;left:-30%;}19%{opacity:.9;}40%{opacity:.9;left:120%;}44%,100%{opacity:0;left:120%;}}
+@keyframes rpStreak{0%,28%{opacity:0;left:-30%;}34%{opacity:.9;}56%{opacity:.9;left:120%;}62%,100%{opacity:0;left:120%;}}
 
 /* optional brand skin: full-frame image layered ABOVE everything else so a border/frame image sits
    over the whole transition (edges frame it; text/logo show through its transparent centre).
    Counter-skewed + sized to the 1920×1080 stage so it stays upright and fills the frame. */
 .replay-skin{position:absolute;top:50%;left:50%;width:1920px;height:1080px;
-  transform:translate(-50%,-50%) skewX(8deg);object-fit:cover;z-index:6;pointer-events:none;}
+  transform:translate(-50%,-50%);object-fit:cover;z-index:6;pointer-events:none;opacity:0;}
 .replay-skin.hidden{display:none;}
 /* scrim: darkens the centre over the skin so the outline REPLAY text reads on ANY background
    (incl. a light/white skin) while the skin's edges still show. */
-.replay-scrim{position:absolute;inset:0;z-index:1;pointer-events:none;
+.replay-scrim{position:absolute;inset:0;z-index:1;pointer-events:none;opacity:0;
   background:radial-gradient(58% 86% at 50% 50%,rgba(4,6,10,.66) 0%,rgba(4,6,10,.3) 48%,transparent 74%);}
 /* content (counter-skewed so it stays upright): sponsor logo ABOVE the word + chevrons */
-.replay-stack{position:relative;z-index:4;display:flex;flex-direction:column;align-items:center;gap:24px;transform:skewX(8deg);}
+/* upright: the frame is no longer skewed (the BARS carry the angle), so no counter-skew here */
+.replay-stack{position:relative;z-index:4;display:flex;flex-direction:column;align-items:center;gap:24px;}
 .replay-logo{max-height:128px;max-width:600px;object-fit:contain;opacity:0;filter:drop-shadow(0 6px 18px rgba(0,0,0,.6));}
 .replay-chevrons{display:flex;gap:9px;opacity:0;}
 .replay-chevrons i{width:0;height:0;border-style:solid;border-width:11px 0 11px 18px;
@@ -600,14 +639,15 @@ img{display:block;}
   background:var(--replay-color,#fff);box-shadow:0 0 18px var(--replay-color,#fff);transform:scaleX(0);transform-origin:left;}
 /* content fades in once the panel covers, holds longer, fades before it swipes away */
 .replay-wipe.play .replay-text{animation:rpTextPunch var(--rp-dur) cubic-bezier(.2,.9,.25,1);}   /* SNAP in with a scale punch */
-.replay-wipe.play .replay-stack{animation:rpStackShake .5s cubic-bezier(.36,.07,.19,.97) .12s;}   /* quick impact shake */
+.replay-wipe.play .replay-stack{animation:rpStackShake .5s cubic-bezier(.36,.07,.19,.97) calc(var(--rp-dur) * .28);}   /* impact shake ON the slam */
 .replay-wipe.play .replay-logo{animation:rpContent var(--rp-dur) ease .06s backwards;}
 .replay-wipe.play .replay-chevrons{animation:rpContent var(--rp-dur) ease backwards;}
 .replay-wipe.play .replay-text::after{animation:replayUnderline var(--rp-dur) cubic-bezier(.3,.6,.15,1);}
-@keyframes rpContent{0%,11%{opacity:0;}21%{opacity:1;}78%{opacity:1;}88%,100%{opacity:0;}}
-@keyframes rpTextPunch{0%,9%{opacity:0;transform:scale(1.4);}15%{opacity:1;transform:scale(.98);}19%{transform:scale(1.03);}24%{transform:scale(1);}82%{opacity:1;transform:scale(1);}90%,100%{opacity:0;transform:scale(1.08);}}
-@keyframes rpStackShake{0%,100%{transform:skewX(8deg) translate(0,0);}15%{transform:skewX(8deg) translate(-4px,3px);}35%{transform:skewX(8deg) translate(4px,-2px);}55%{transform:skewX(8deg) translate(-3px,2px);}75%{transform:skewX(8deg) translate(2px,-1px);}}
-@keyframes replayUnderline{0%,16%{transform:scaleX(0);}30%{transform:scaleX(1);}76%{transform:scaleX(1);}100%{transform:scaleX(1);}}
+/* content timing tracks the SHUTTER cover window: last bar lands ~30%, first bar leaves ~80% */
+@keyframes rpContent{0%,20%{opacity:0;}32%{opacity:1;}74%{opacity:1;}84%,100%{opacity:0;}}
+@keyframes rpTextPunch{0%,18%{opacity:0;transform:scale(1.4);}26%{opacity:1;transform:scale(.98);}30%{transform:scale(1.03);}35%{transform:scale(1);}76%{opacity:1;transform:scale(1);}86%,100%{opacity:0;transform:scale(1.08);}}
+@keyframes rpStackShake{0%,100%{transform:translate(0,0);}15%{transform:translate(-4px,3px);}35%{transform:translate(4px,-2px);}55%{transform:translate(-3px,2px);}75%{transform:translate(2px,-1px);}}
+@keyframes replayUnderline{0%,28%{transform:scaleX(0);}42%{transform:scaleX(1);}76%{transform:scaleX(1);}100%{transform:scaleX(1);}}
 /* small SCORING-TEAM logo beneath the REPLAY word (full swipe only; brand logo as fallback) */
 .replay-team-logo{max-height:90px;max-width:230px;object-fit:contain;opacity:0;margin-top:8px;filter:drop-shadow(0 5px 14px rgba(0,0,0,.55));}
 .replay-team-logo.hidden{display:none;}
@@ -615,6 +655,11 @@ img{display:block;}
 /* after-replay outro: brand/custom logo ONLY (no REPLAY text, chevrons, or team logo) */
 .replay-wipe.logo-only .replay-text,.replay-wipe.logo-only .replay-chevrons,.replay-wipe.logo-only .replay-team-logo{display:none;}
 .replay-wipe.logo-only .replay-logo{max-height:340px;max-width:1000px;}   /* bigger logo on the outro */
+/* the outro's sponsor "replay background" skin (e.g. Trolli) reads better DARKER — a heavier, more
+   even scrim across the whole frame (vs the goal swipe's centre-only darkening) so the background
+   isn't washed out and the logo pops. (Producer feedback: "replay background… opacity darker".) */
+.replay-wipe.logo-only .replay-scrim{
+  background:radial-gradient(85% 105% at 50% 50%,rgba(2,4,8,.86) 0%,rgba(2,4,8,.74) 52%,rgba(2,4,8,.52) 100%);}
 
 /* persistent REPLAY tag — TOP-LEFT corner bug, team-color/B&W accent */
 .replay-tag{position:absolute;top:28px;left:40px;z-index:55;display:flex;align-items:center;gap:11px;
@@ -631,6 +676,11 @@ img{display:block;}
 /* ── END-OF-MATCH SCORECARD — clean monochrome, gold winner/MVP accents ───── */
 .sb{position:absolute;inset:0;z-index:70;display:flex;flex-direction:column;align-items:center;justify-content:center;
   background:radial-gradient(circle at 50% 18%, rgba(20,24,34,.99), rgba(4,6,10,1));opacity:0;}
+/* Dedicated SCOREBOARD-ONLY browser source (rl-hud.html?only=scoreboard): show ONLY the post-game
+   board (#sb is full-frame inset:0), hiding all other HUD chrome. Nothing shows until a post-game. */
+html.sb-only body > *:not(#sb){display:none !important;}
+/* Scoreboard routed to that separate source → the MAIN HUD suppresses its own inline board. */
+body.sb-external #sb{display:none !important;}
 .sb:not(.hidden){animation:sbIn .45s ease forwards;}
 @keyframes sbIn{from{opacity:0;}to{opacity:1;}}
 /* optional uploaded scene background (with a legibility scrim) */
@@ -913,16 +963,8 @@ img{display:block;}
   <!-- OVERTIME swipe — a red wall sweeps across the scorebar (over the team names), holds OVERTIME, sweeps off -->
   <div id="ot-swipe" class="ot-swipe hidden"><div class="ots-inner"><span id="ot-swipe-text" class="ot-swipe-text">OVERTIME</span><img id="ot-swipe-logo" class="ot-swipe-logo hidden" alt=""></div></div>
 </div>
-<!-- animated light tracing the silhouette of the whole top cluster (event title + scorebar + GAME tab); path built in JS -->
-<svg id="header-outline" viewBox="0 0 1920 210" preserveAspectRatio="none" aria-hidden="true">
-  <path class="hb-base" pathLength="100"></path>
-  <path class="hb-beam" pathLength="100"></path>
-</svg>
-<!-- animated light tracing the SPECTATED player's sidebar card; path tracks the live card in JS -->
-<svg id="spec-outline" viewBox="0 0 1920 1080" preserveAspectRatio="none" aria-hidden="true">
-  <path class="hb-base" pathLength="100"></path>
-  <path class="hb-beam" pathLength="100"></path>
-</svg>
+<!-- (top-cluster highlight is now a per-side team-colour gradient on the scorebar — no SVG outline) -->
+<!-- (spectated-card highlight is now a CSS gradient on .pc-card.spectated — no SVG outline) -->
 <!-- slanted event banner — seats on top of the bar -->
 <div id="event-name" class="event-name">ROCKET LEAGUE TOURNAMENT</div>
 <!-- title-sponsor logo — floats (transparent) in the seam between the scorebar and the GAME label so it
@@ -1008,6 +1050,8 @@ img{display:block;}
 
 <!-- REPLAY TRANSITION — full-screen, plays once when the goal replay starts -->
 <div id="replay-wipe" class="replay-wipe hidden">
+  <!-- shutter-slam bars: sweep in staggered from alternating sides, snap solid, peel out in sequence -->
+  <div class="rw-bars" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
   <img id="replay-skin" class="replay-skin hidden" alt="">
   <div class="replay-scrim"></div>
   <div class="replay-stack">
@@ -1070,7 +1114,7 @@ img{display:block;}
         <div class="sb-scores">
           <span id="sb-num-a" class="sb-num">0</span>
           <div class="sb-mid">
-            <span class="sb-dash">FINAL</span>
+            <span id="sb-dash" class="sb-dash">FINAL</span>
             <span id="sb-series" class="sb-series"></span>
           </div>
           <span id="sb-num-b" class="sb-num">0</span>
@@ -1172,6 +1216,9 @@ img{display:block;}
    ═══════════════════════════════════════════════════════════════════════════ */
 const WS_URL = 'ws://' + (location.hostname || 'localhost') + ':3001';   // host-aware: works when the source is loaded from another machine via http://<host>:3000
 const HTTP_BASE = 'http://' + (location.hostname || 'localhost') + ':3000';
+// Dedicated scoreboard-only browser source: rl-hud.html?only=scoreboard shows ONLY the post-game board.
+const SB_ONLY = /[?&]only=(scoreboard|sb)\b/i.test(location.search);
+if (SB_ONLY) document.documentElement.classList.add('sb-only');
 // Team colors — defaults; overridden live by the app's per-team color (teams.*.color).
 let BLUE = '#2f8dff', ORANGE = '#ff7a33';
 const teamOf = p => (Number(p.team) === 1 ? 1 : 0);   // robust: tolerate "1"/1/null
@@ -1218,6 +1265,11 @@ function fitName(id, val, max=26, min=13){
 function fitEventName(text){
   const e=el('event-name'); if(!e) return;
   if(text!=null) e.textContent = text;
+  // Match the banner's width to the scorebar beneath it so the two line up as one uniform stacked unit
+  // (otherwise the banner sizes to its own text and overhangs/underhangs the bar). Then shrink the text
+  // to fit that width below.
+  const sb=el('scorebar');
+  if(sb && sb.offsetWidth) e.style.width = sb.offsetWidth + 'px';
   e.style.fontSize=''; e.style.letterSpacing='';     // reset to the CSS defaults (13px / 3px)
   if(!e.clientWidth || !e.textContent) return;        // not measurable yet (hidden/empty) — re-fit later
   let s=13, guard=0;
@@ -1566,7 +1618,10 @@ function renderSponsorRail(brand){
   _sponsorHasContent = sp.length>0;
   if(!sp.length){ _srSig=''; syncSponsorToStatcard(); return; }
   syncSponsorToStatcard();
-  setText('sr-label', brand.sponsorLabel||'PARTNERS');
+  // Explicit empty brand-kit label hides the heading; only a MISSING label defaults to 'PARTNERS'.
+  const _srLabel = brand.sponsorLabel==null ? 'PARTNERS' : String(brand.sponsorLabel).trim();
+  setText('sr-label', _srLabel);
+  const _srLblEl = el('sr-label'); if(_srLblEl) _srLblEl.style.display = _srLabel ? '' : 'none';
   const slot=el('sr-slot'); if(!slot) return;
   const one=(s)=>{ s=s||{}; if(s.logo){ const i=document.createElement('img'); i.className='sr-logo'; i.src=s.logo; i.alt=s.name||''; return i; }
     const t=document.createElement('span'); t.className='sr-name'; t.textContent=s.name||''; return t; };
@@ -1745,9 +1800,17 @@ function showReplay(mode){
   const w=el('replay-wipe'); if(!w) return;
   const logoOnly = mode==='logo';
   w.classList.toggle('logo-only', logoOnly);
-  // logo source: full → replay sponsor, else brand-kit logo; outro → dedicated outro logo, else sponsor, else brand-kit
+  // logo source: full → replay sponsor, else brand-kit logo.
+  // OUTRO → the dedicated outro logo; but only FALL BACK to the generic sponsor/brand logo when there
+  // is NO skin. A branded full-frame "replay background" skin already carries the sponsor mark, so the
+  // fallback rendered it TWICE (producer: "sometimes the outro shows two logos" — intermittent because
+  // state.replay is library-tier, so the skin isn't always backfilled). An explicit outroLogo still
+  // wins, which keeps frame-style skins (transparent centre) working as before.
   const rp=currentState.replay||{}, brandLogo=currentState.brand && currentState.brand.logo;
-  const logo = logoOnly ? (rp.outroLogo || rp.logo || brandLogo || null) : (rp.logo || brandLogo || null);
+  const hasSkin = !!rp.skin;
+  const logo = logoOnly
+    ? (rp.outroLogo || (hasSkin ? null : (rp.logo || brandLogo || null)))
+    : (rp.logo || brandLogo || null);
   const im=el('replay-logo');
   if(im){ if(logo){ im.src=logo; im.classList.remove('hidden'); } else im.classList.add('hidden'); }
   // optional full-frame brand skin behind the transition content (the swipe's background)
@@ -1764,9 +1827,11 @@ function showReplay(mode){
       if(tlogo){ tl.src=tlogo; tl.classList.remove('hidden'); } else { tl.removeAttribute('src'); tl.classList.add('hidden'); }
     }
   }
-  if(logoOnly && !logo) return;   // no logo to show on the outro → skip it entirely
+  if(logoOnly && !logo && !hasSkin) return;   // nothing at all to show on the outro → skip it entirely
   w.classList.remove('hidden','play'); void w.offsetWidth; w.classList.add('play');
-  clearTimeout(replayTimer); replayTimer=setTimeout(()=>{ w.classList.add('hidden'); w.classList.remove('play'); }, logoOnly?1500:2500);
+  // hide AFTER the sweep finishes — must clear --rp-dur PLUS the shutter stagger (last bar is +180ms),
+  // else the final bars get cut off mid-flight.
+  clearTimeout(replayTimer); replayTimer=setTimeout(()=>{ w.classList.add('hidden'); w.classList.remove('play'); }, logoOnly?2150:2850);
 }
 // hideReplay must NOT interrupt an in-flight swipe — it self-completes via its own timer
 function hideReplay(){ clearTimeout(goalRevealTimer); }
@@ -1783,12 +1848,41 @@ let hudArmed=true, prevGameTime=null, hudRearmSafety=null, kickoffHold=false, ki
 // replay starts (RL cuts to the replay ~2.5–3s after a goal). It also fires automatically the
 // moment the replay actually begins, so it can never end up landing late.
 const GOAL_TO_REPLAY_MS  = 1200;
-// TRANSITION 2 (logo outro) is NOT on a fixed timer — it fires when the replay actually ENDS
-// (view_change hud → endGoalCycle), i.e. after the goal is re-scored in the replay and just
-// before the kickoff. See endGoalCycle.
+// TRANSITION 2 (logo outro) — EVENT-DRIVEN, never predicted.
+//
+// A goal replay is NOT a fixed length: it runs ~9–14s depending on the pacing of the build-up to the
+// goal (producer, 2026-07-23). So the end CANNOT be predicted from an average — scheduling the outro
+// at "measured − lead" fires it mid-replay on a long one (a 14s replay with a 10.4s average = ~4.6s
+// early). That was the real source of the inconsistent timing.
+//
+// Order of preference, all real signals:
+//   1. GoalReplayWillEnd  → the API's own "this replay is ending" cue. The ONLY thing that knows when
+//                           THIS replay ends, so it's the primary trigger (dispatch 'replay_will_end').
+//   2. GoalReplayEnd      → endGoalCycle fires the outro if the will-end cue never arrived.
+//   3. REPLAY_MAX_MS      → last-resort safety below, set BEYOND the longest plausible replay so it can
+//                           never cut into one still playing; only fires if both events go missing.
+const REPLAY_MAX_MS = 15000;
+// GoalReplayWillEnd fires when the goal goes IN during the replay — not when the replay is about to
+// end. RL still plays a couple of seconds of celebration/aftermath after that before cutting back, so
+// firing on the cue put the outro right on the re-scored goal. Wait this long after the cue so the
+// wipe lands on the actual cut instead. Single tunable: raise it to sit later, lower it to sit earlier.
+const REPLAY_WILLEND_DELAY_MS = 1800;
+let replayStartAt = 0, outroSchedTimer = null;
+function scheduleReplayOutro(){
+  clearTimeout(outroSchedTimer);
+  outroSchedTimer = setTimeout(playReplayOutro, REPLAY_MAX_MS);   // safety net only — see above
+}
+// The will-end cue arrived → hold for the celebration beat, THEN play the outro. Supersedes the safety
+// net. ReplayEnd (endGoalCycle) clears this and fires immediately if the replay ends sooner.
+function scheduleOutroAfterWillEnd(){
+  if(!goalCycleActive || outroPlayed || brazilGoal) return;
+  clearTimeout(outroSchedTimer);
+  outroSchedTimer = setTimeout(playReplayOutro, REPLAY_WILLEND_DELAY_MS);
+}
 function goalEvent(side){
   if(goalCycleActive || Date.now()-lastSwipeAt<4000) return;   // already firing for this goal
   goalCycleActive=true; outroPlayed=false; replayStarted=false; introPlayed=false;
+  clearTimeout(outroSchedTimer); replayStartAt=0;   // reset the synthesized-outro schedule for this goal
   brazilGoal = isBrazilGoal(side);   // a 7-1 goal plays ONLY the Brazil flag swipe (normal swipe + outro suppressed)
   // safety: if the ReplayEnd signal is ever missed, force the end sequence after 15s
   clearTimeout(goalCycleTimer); goalCycleTimer=setTimeout(endGoalCycle, 15000);
@@ -1805,7 +1899,10 @@ function fireIntroSwipe(){
   else showReplay('full');
 }
 function endGoalCycle(toScoreboard){   // replay ENDED → clear the HUD until play resumes
-  clearTimeout(goalCycleTimer); clearTimeout(replayOutroTimer);
+  clearTimeout(goalCycleTimer); clearTimeout(replayOutroTimer); clearTimeout(outroSchedTimer);
+  // No length calibration any more — replays vary ~9-14s, so an average can't time the outro (see
+  // TRANSITION 2 above). The server still measures the span for diagnostics only.
+  replayStartAt = 0;
   goalCycleActive=false;
   hideReplayLowerThird();
   hideReplayCams();
@@ -1816,6 +1913,15 @@ function endGoalCycle(toScoreboard){   // replay ENDED → clear the HUD until p
     if(!outroPlayed && !brazilGoal && !toScoreboard){ outroPlayed=true; showReplay('logo'); }
     if(!toScoreboard) hudClearForKickoff();   // keep sidebars + statcard hidden until the ball is touched
   }
+}
+// TRANSITION 2 played EARLY, on the RL 'replay will end' cue (server → 'replay_will_end'), so the
+// wipe masks the cut back to gameplay instead of colliding with the kickoff countdown. Marks
+// outroPlayed so the later endGoalCycle (on replay end / kickoff) won't fire a second outro. A
+// Brazil goal shows only the flag swipe, never this outro.
+function playReplayOutro(){
+  if(!goalCycleActive || outroPlayed || brazilGoal) return;
+  outroPlayed=true;
+  showReplay('logo');
 }
 // ── live HUD (sidebars + bottom statcard) show/hide around a replay ───────────
 function hudHideForReplay(){   // replay started → hide the live HUD, leaving ONLY the replay lower third
@@ -1836,6 +1942,11 @@ function hudClearForKickoff(){ // replay ended → everything stays hidden until
 function hudShow(){            // ball touched + spectating → animate the sidebars + statcard back in
   clearTimeout(hudRearmSafety);
   hudArmed=true; kickoffHold=false;
+  // safety net: live play has resumed (kickoff). The synthesized outro normally finishes well before
+  // this, but if a wipe is somehow still on screen, cancel its schedule and snap it away so it can
+  // never bleed onto the kickoff.
+  clearTimeout(outroSchedTimer);
+  const w=el('replay-wipe'); if(w && w.classList.contains('play')){ clearTimeout(replayTimer); w.classList.add('hidden'); w.classList.remove('play'); }
   el('players-blue').classList.remove('r-hide'); el('players-orange').classList.remove('r-hide');
   el('br').classList.remove('r-hide');
   syncSponsorToStatcard();
@@ -1914,6 +2025,11 @@ function pad2(n){ return String(n).padStart(2,'0'); }
 
 function renderWinner(w, teams){
   const scene=el('winner'); if(!scene) return;
+  // The WINNER scene is DISABLED on the RL HUD — the dedicated winner push graphic (overlay/winner.html)
+  // owns this now, so the producer's winner trigger drives that graphic ONLY and never covers the live
+  // RL HUD. Keep it permanently hidden regardless of state.winner.visible. (Mirrors renderIntro above,
+  // also disabled here.) To re-enable, delete the next two lines.
+  scene.classList.remove('show'); scene.classList.add('hidden'); return;
   w=w||{}; teams=teams||{};
   const visible=!!w.visible;
   scene.classList.toggle('show', visible);
@@ -1954,11 +2070,21 @@ function renderIntro(intro, teams, players){
   });
 }
 
+/* Did the producer just change the stats screen (show/hide or design skin)? Used to let a full_state
+   re-render a board that's already on air — every other full_state must leave it alone. */
+let _ssSig='';
+function _ssSigChanged(data){
+  const ss=(data&&data.rlStatsScreen)||{};
+  const sig=(ss.showStats===false?'off':'on')+'|'+(ss.design||'default');
+  if(sig===_ssSig) return false;
+  _ssSig=sig; return true;
+}
+
 /* ── end-of-match scorecard (clean, grouped by team, gold winner/MVP) ──────── */
 const SB_STATS=['score','goals','assists','saves','shots','demos'];
 const SB_LABELS=['Score','Goals','Assists','Saves','Shots','Demos'];   // column headers per team table
 const CROWN='<svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 8l4 4 5-7 5 7 4-4-1.5 11h-15z"/></svg>';
-function renderScoreboard(playerCache, state, series){
+function renderScoreboard(playerCache, state, series, isLive){
   state=state||{}; const teams=state.teams||{}; const game=state.game||{};
   const ser=series||state.series||{blue:0,orange:0};
   const all=Object.values(playerCache||{});
@@ -1968,7 +2094,10 @@ function renderScoreboard(playerCache, state, series){
   const nameA=teamDisplay(teams.blue?.name), nameB=teamDisplay(teams.orange?.name);
   const logoA=teams.blue?.logo || '/assets/rl.png', logoB=teams.orange?.logo || '/assets/rl.png';
   const bs=game.blueScore ?? 0, os=game.orangeScore ?? 0;
-  const aWon = bs>os, bWon = os>bs;
+  // LIVE (running scoreboard on the ?only=scoreboard source) vs FINAL (post-game). No winner/gold
+  // highlight while live — there's no winner yet; the label reads LIVE and flips to FINAL at game end.
+  setText('sb-dash', isLive ? 'LIVE' : 'FINAL');
+  const aWon = !isLive && bs>os, bWon = !isLive && os>bs;
 
   // broadcaster / brand-kit logo at the top (hidden when no brand logo is set)
   const topLogo = state.brand && state.brand.logo;
@@ -2051,7 +2180,9 @@ function renderScoreboard(playerCache, state, series){
     const list=(brand.railSponsors||brand.sponsors||[]).filter(s=>s&&s.logo);
     rail.innerHTML='';
     if(list.length){
-      const lbl=document.createElement('span'); lbl.className='sb-rail-lbl'; lbl.textContent=brand.sponsorLabel||'PARTNERS'; rail.appendChild(lbl);
+      // Explicit empty brand-kit label → no heading span; only a MISSING label defaults to 'PARTNERS'.
+      const _sbLbl = brand.sponsorLabel==null ? 'PARTNERS' : String(brand.sponsorLabel).trim();
+      if(_sbLbl){ const lbl=document.createElement('span'); lbl.className='sb-rail-lbl'; lbl.textContent=_sbLbl; rail.appendChild(lbl); }
       list.forEach(s=>{ const i=document.createElement('img'); i.className='sb-rail-logo'; i.src=s.logo; i.alt=s.name||''; rail.appendChild(i); });
       rail.classList.remove('empty');
     } else rail.classList.add('empty');
@@ -2128,13 +2259,16 @@ function showView(name){
   // NOT on a short fixed timer, so it can stay up through a long "who plays next" decision. The brief
   // lock below only protects the WINNER intro from a stray early update.
   if(sbLocked && name!=='scoreboard') return;
-  el('sb').classList.toggle('hidden', name!=='scoreboard');
+  el('sb').classList.toggle('hidden', !SB_ONLY && name!=='scoreboard');   // separate scoreboard source keeps the board up always
+  document.body.classList.toggle('on-board', name==='scoreboard');   // blank the live HUD chrome while the post-game board is up (see .on-board CSS)
   if(activeView==='goal' && name!=='goal') endGoalCycle(name==='scoreboard');   // replay ended → outro (skipped when the game is over)
   if(name==='goal'){
     el('replay-tag').classList.remove('hidden');     // sponsor bug for the whole replay
     // entering the replay → hide the live HUD, show the scorer LT + (optional) all-player cam grid
     if(activeView!=='goal'){ replayStarted=true; hudHideForReplay(); showReplayLowerThird(); showReplayCams();
       clearTimeout(introTimer); fireIntroSwipe();   // make sure TRANSITION 1 has shown by the time the replay starts
+      replayStartAt=Date.now();                     // start the clock for the synthesized outro cue
+      if(!brazilGoal) scheduleReplayOutro();         // fire the outro at a consistent point before the kickoff
     }
   } else if(name==='scoreboard'){
     if(activeView!=='scoreboard'){                    // first entry only → don't re-lock on repeat updates
@@ -2156,6 +2290,9 @@ function showView(name){
 
 /* ── apply state ──────────────────────────────────────────────────────────── */
 function applyFullState(data){
+  // Run FIRST and unconditionally so the signature is primed during play — otherwise the first
+  // post-game full_state would read as "changed" and re-render the board over the winner intro.
+  const ssChanged = _ssSigChanged(data);
   // Light broadcasts omit the heavy library blobs (brand kit / banners) — they're only re-sent when
   // they actually change (see server _flushFullState). Carry them forward so a plain state update
   // doesn't wipe the brand logo (which the scorecard, replay LT and statcard all read from here).
@@ -2169,6 +2306,9 @@ function applyFullState(data){
   }
   currentState=data;
   document.body.classList.toggle('ui-hidden', !!data.rlHudHidden);   // manual "Hide UI" → clean feed
+  // MAIN HUD hides its inline board when the producer routes it to the separate ?only=scoreboard source.
+  // (The scoreboard-only source itself ignores this — it must always show the board.)
+  if(!SB_ONLY && data.rlScoreboardSeparate!=null) document.body.classList.toggle('sb-external', !!data.rlScoreboardSeparate);
   if(data.fontFamily) document.documentElement.style.setProperty('--main-font', `'${data.fontFamily}', sans-serif`);
   if(data.brand){
     if(data.brand.color)  document.documentElement.style.setProperty('--accent', data.brand.color);
@@ -2211,7 +2351,23 @@ function applyFullState(data){
   // driving the board (activeView!=='scoreboard'): during the normal end-of-match flow the view_change
   // handler renders + plays the WINNER intro, and a follow-up full_state must not re-render over it
   // (that flashed the board before the winner and clobbered the brand logo).
-  if((data.view||'hud')==='scoreboard' && activeView!=='scoreboard'){
+  if(SB_ONLY){
+    // Separate ?only=scoreboard source: ALWAYS show the board. LIVE (running current scores/series/
+    // stats) during play, flipping to FINAL from the frozen post-game snapshot when the server holds
+    // view==='scoreboard'. Live score/stat ticks between full_states come via applyStateUpdate below.
+    const isFinal=(data.view||'hud')==='scoreboard';
+    const sbd=data.scoreboard;
+    if(isFinal && sbd && sbd.players && sbd.players.length){
+      const pc={}; sbd.players.forEach(p=>{ if(p&&p.name) pc[p.name]=p; });
+      renderScoreboard(pc, Object.assign({}, data, {game:Object.assign({}, data.game||{}, {blueScore:sbd.blueScore, orangeScore:sbd.orangeScore})}), sbd.series||data.series, false);
+    } else {
+      renderScoreboard((data.playerCache && Object.keys(data.playerCache).length) ? data.playerCache : {}, data, data.series, !isFinal);
+    }
+  } else if((data.view||'hud')==='scoreboard' && (activeView!=='scoreboard' || ssChanged)){
+    // activeView!=='scoreboard' is the reload/reconnect case above. The second condition is the
+    // producer changing the stats screen (show/hide or design) WHILE the board is already on air:
+    // without it the guard swallowed the change and the setting looked broken. Gated on the
+    // rlStatsScreen signature so an ordinary full_state tick still can't re-render over the winner.
     const sbd=data.scoreboard;
     if(sbd && sbd.players && sbd.players.length){
       const pc={}; sbd.players.forEach(p=>{ if(p&&p.name) pc[p.name]=p; });
@@ -2226,85 +2382,16 @@ function applyFullState(data){
   scheduleSpecOutline();     // roster/spectated may have changed → re-trace the spectated outline
 }
 
-/* ── animated header outline: traces the silhouette of event title + scorebar + GAME tab ──── */
-let _hoRaf=0;
-function scheduleHeaderOutline(){
-  if(_hoRaf) return;
-  const raf=(typeof window!=='undefined' && window.requestAnimationFrame) ? window.requestAnimationFrame : function(f){return setTimeout(f,16);};
-  _hoRaf=raf(function(){ _hoRaf=0; try{ drawHeaderOutline(); }catch(e){} });
-}
-function drawHeaderOutline(){
-  const svg=el('header-outline'); if(!svg) return;
-  const base=svg.querySelector('.hb-base'), beam=svg.querySelector('.hb-beam'), sb=el('scorebar');
-  if(!base||!beam||!sb) return;
-  const vis=(n)=> !!(n && n.offsetWidth>0 && !(n.classList && n.classList.contains('hidden')));
-  const f=(n)=> (Math.round(n*10)/10);
-  const CX=960, SL=34;                                   // stage centre x; event-banner slant inset
-  const sw=sb.offsetWidth, sh=sb.offsetHeight, sTop=sb.offsetTop||18;
-  const sLeft=CX-sw/2, sRight=CX+sw/2, sBot=sTop+sh, r=Math.min(14, sw/2, sh/2);
-  let d='M '+f(sLeft)+' '+f(sTop);
-  // bump UP and around the event-title banner (slanted), if it's showing
-  const ev=el('event-name');
-  if(vis(ev) && (ev.textContent||'').trim()!==''){
-    const ew=ev.offsetWidth, eh=ev.offsetHeight||28, eL=CX-ew/2, eR=CX+ew/2, eTL=eL+SL, eTR=eR-SL;
-    const k=Math.max(0,Math.min(1, sTop/eh));
-    const Lx=Math.max(sLeft, eTL-SL*k), Rx=Math.min(sRight, eTR+SL*k);
-    d+=' L '+f(Lx)+' '+f(sTop)+' L '+f(eTL)+' 0 L '+f(eTR)+' 0 L '+f(Rx)+' '+f(sTop);
-  }
-  d+=' L '+f(sRight)+' '+f(sTop)
-   + ' L '+f(sRight)+' '+f(sBot-r)+' Q '+f(sRight)+' '+f(sBot)+' '+f(sRight-r)+' '+f(sBot);
-  // dip DOWN and around the GAME tab (or the OT card if OT is showing)
-  const gs=el('game-sub'), ots=el('ot-subbar'), g=vis(gs)?gs:(vis(ots)?ots:null);
-  if(g){
-    const gw=g.offsetWidth, gh=g.offsetHeight, gL=CX-gw/2, gR=CX+gw/2, gB=(g.offsetTop||sBot)+gh;
-    const gsl=Math.min(15, gw/2);   // slant inset — matches the card's clip-path so the beam follows the slanted edges
-    d+=' L '+f(gR)+' '+f(sBot)
-     + ' L '+f(gR-gsl)+' '+f(gB)
-     + ' L '+f(gL+gsl)+' '+f(gB)
-     + ' L '+f(gL)+' '+f(sBot);
-  }
-  d+=' L '+f(sLeft+r)+' '+f(sBot)+' Q '+f(sLeft)+' '+f(sBot)+' '+f(sLeft)+' '+f(sBot-r)+' Z';
-  base.setAttribute('d', d); beam.setAttribute('d', d);
-}
-if(typeof window!=='undefined') window.addEventListener('load', scheduleHeaderOutline);
+/* Top-cluster highlight is now a per-side team-colour GRADIENT on the scorebar (see the stylesheet).
+   The old animated header outline (#header-outline) was removed. scheduleHeaderOutline() is kept as a
+   NO-OP so its existing call sites (event/team-name width changes, OT) stay harmless. */
+function scheduleHeaderOutline(){}
 
-/* ── animated traveling-light outline around the SPECTATED player's sidebar card ──── */
-let _soRaf=0, _soT=0, _soLastSpec=null;
-function scheduleSpecOutline(){
-  const raf=(typeof window!=='undefined' && window.requestAnimationFrame) ? window.requestAnimationFrame : function(fn){return setTimeout(fn,16);};
-  if(!_soRaf) _soRaf=raf(function(){ _soRaf=0; try{ drawSpecOutline(); }catch(e){} });
-  clearTimeout(_soT); _soT=setTimeout(function(){ try{ drawSpecOutline(); }catch(e){} }, 240);  // redraw after the spectated card's scale-in settles
-}
-function drawSpecOutline(){
-  const svg=el('spec-outline'); if(!svg) return;
-  const base=svg.querySelector('.hb-base'), beam=svg.querySelector('.hb-beam');
-  if(!base||!beam) return;
-  const clear=function(){ base.removeAttribute('d'); beam.removeAttribute('d'); };
-  if(activeView==='goal'){ clear(); return; }            // HUD (and sidebars) hidden during the replay
-  const card=document.querySelector('.pc-card.spectated');
-  if(!card || !card.offsetWidth){ clear(); return; }
-  // A demolished / just-hit spectated player is "out" — drop the active glow. (It would also mis-trace
-  // the shaking + dimmed card during the demolition jolt.)
-  if(card.classList.contains('demolished') || card.classList.contains('demo-hit')){ clear(); return; }
-  const r=card.getBoundingClientRect(), sr=svg.getBoundingClientRect();
-  if(!r || r.width<2 || !sr.width || !sr.height){ clear(); return; }
-  // Map the card's VIEWPORT rect into the SVG's own 1920×1080 user space. Doing it relative to the
-  // SVG's measured box (not raw viewport px) keeps the outline aligned no matter what size the overlay
-  // is actually rendered at — preview windows, the /live.html iframe, or OBS source scaling.
-  const kx=1920/sr.width, ky=1080/sr.height;
-  const x=(r.left-sr.left)*kx, y=(r.top-sr.top)*ky, w=r.width*kx, h=r.height*ky;
-  if(x+w<0 || x>1920){ clear(); return; }                              // off-screen / slid out
-  const sl=12*(card.offsetWidth ? (w/card.offsetWidth) : 1);            // inner-edge slant (matches the card clip-path), scaled to the 1.04× spectated size
-  const isRight=!!(card.closest('.col.right')||card.closest('.rc-team.right'));
-  const f=function(n){ return Math.round(n*10)/10; };
-  let d;
-  if(isRight)   // inner (LEFT) edge slants: bottom-left pulled inward
-    d='M '+f(x)+' '+f(y)+' L '+f(x+w)+' '+f(y)+' L '+f(x+w)+' '+f(y+h)+' L '+f(x+sl)+' '+f(y+h)+' Z';
-  else          // inner (RIGHT) edge slants: bottom-right pulled inward
-    d='M '+f(x)+' '+f(y)+' L '+f(x+w)+' '+f(y)+' L '+f(x+w-sl)+' '+f(y+h)+' L '+f(x)+' '+f(y+h)+' Z';
-  base.setAttribute('d', d); beam.setAttribute('d', d);
-}
-if(typeof window!=='undefined') window.addEventListener('load', scheduleSpecOutline);
+/* Spectated-player highlight is now a CSS GRADIENT on .pc-card.spectated (see the stylesheet). The
+   old animated SVG silhouette outline (#spec-outline) was removed. scheduleSpecOutline() is kept as a
+   NO-OP so its existing call sites (spectated-changed / demo flip / view change) stay harmless. */
+let _soLastSpec=null;
+function scheduleSpecOutline(){}
 
 let prevBlue=null, prevOrange=null;
 function applyGame(game, bestOf, fmt){
@@ -2476,6 +2563,12 @@ function applyStateUpdate(d){
   syncFacecams(players, cams);
   renderPlayers(players, d.spectatedPlayer);
   renderStatcard(players, d.spectatedPlayer, cams);
+  // Separate scoreboard source: tick the LIVE board on each partial update (scores/stats) while the
+  // game is in play (not while the FINAL post-game board is held).
+  if(SB_ONLY && currentState.view!=='scoreboard'){
+    const pc={}; (players||[]).forEach(p=>{ if(p&&p.name) pc[p.name]=p; });
+    renderScoreboard(pc, currentState, currentState.series, true);
+  }
 }
 
 /* ── message dispatch (shared by the WS feed and the dev toolbar) ──────────── */
@@ -2485,6 +2578,13 @@ function dispatch(msg){
     case 'state_update': applyStateUpdate(msg.data); break;
     case 'goal_scored':   // ball in the net — the TRUE goal moment (before the replay)
       goalEvent(teamOf(msg.data||{}));
+      break;
+    case 'replay_will_end':
+      // PRIMARY outro anchor. Replays vary ~9-14s, so this cue is the only thing that knows where THIS
+      // replay is — a predicted time fires mid-replay on a long one. But the cue lands on the re-scored
+      // goal, so hold REPLAY_WILLEND_DELAY_MS for the celebration beat before playing the outro.
+      // endGoalCycle (ReplayEnd) is the fallback; the outroPlayed guard means whichever lands first wins.
+      scheduleOutroAfterWillEnd();
       break;
     case 'view_change':
       // replay START only shows the persistent tag — the swipe already fired at the goal
@@ -2506,7 +2606,7 @@ function dispatch(msg){
       hideReplayLowerThird(); hideReplayCams();   // hide the replay LT + cam grid
       prevGameTime=null; hudShow();   // a new game shows the HUD straight away
       endBrazil();   // reset the 7×1 easter egg + theme wash
-      unlockScoreboard(); el('sb').classList.add('hidden');
+      unlockScoreboard(); if(!SB_ONLY) el('sb').classList.add('hidden');   // separate scoreboard source stays up (flips back to LIVE)
       el('ot-subbar').classList.add('hidden'); el('ot-swipe').classList.add('hidden'); el('game-sub').classList.remove('hidden');
       el('replay-tag').classList.add('hidden'); el('replay-wipe').classList.add('hidden'); el('sb').classList.remove('intro');
       break;
@@ -2591,7 +2691,8 @@ const DEV_ACTIONS = {
             goalCycleActive=false; lastSwipeAt=0; goalEvent(DEV._goal.team||0);
             clearTimeout(DEV._rt); DEV._rt=setTimeout(()=>{
               dispatch({type:'view_change',data:{view:'goal',goal:DEV._goal}});
-              setTimeout(()=>dispatch({type:'view_change',data:{view:'hud'}}),5000);   // replay end → outro
+              setTimeout(()=>dispatch({type:'replay_will_end',data:{}}),4200);         // 'replay will end' → outro wipe fires HERE (masks the cut)
+              setTimeout(()=>dispatch({type:'view_change',data:{view:'hud'}}),5000);   // replay actually ends → back to HUD/kickoff
             }, 3500); },
   'ot-on'(){ DEV.game.isOT=true;  devStateUpdate(); },
   'ot-off'(){ DEV.game.isOT=false; devStateUpdate(); },

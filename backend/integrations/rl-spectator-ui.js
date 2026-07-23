@@ -43,18 +43,41 @@ function buildScript(cfg) {
   // a beat. When the observer already has RL focused (the common case, incl. the in-game
   // F9 hotkey) this block is a no-op, so there's no hitch at all.
   //
-  // $result tracks what actually happened (found/focused) so the caller can tell the difference
-  // between "worked" and "silently did nothing".
+  // CRITICAL: never trust SetForegroundWindow's RETURN value. Windows' foreground-lock lets a
+  // background process's SetForegroundWindow return $true WITHOUT actually focusing the window,
+  // so the keystrokes injected into whoever really had focus (the control panel / OBS) while the
+  // toast falsely reported success. We instead re-read GetForegroundWindow to confirm RL genuinely
+  // came up; if the plain call was blocked, we AttachThreadInput to both the current foreground
+  // thread and RL's thread (which lifts the lock for one call) and try again. $result.focused is
+  // set ONLY when RL is verified foreground — so a real failure returns focused=false, the caller's
+  // retry loop keeps trying, and the producer sees an honest "couldn't focus RL" instead of a lie.
   const focusBlock = cfg.focusWindow ? `
 $proc = Get-Process -Name 'RocketLeague' -ErrorAction SilentlyContinue | Select-Object -First 1
 if ($proc) {
   $result.found = $true
-  if ($proc.MainWindowHandle -ne 0) {
-    if ([RLNative]::GetForegroundWindow() -eq $proc.MainWindowHandle) {
+  $h = $proc.MainWindowHandle
+  if ($h -ne 0) {
+    if ([RLNative]::GetForegroundWindow() -eq $h) {
       $result.focused = $true
     } else {
-      $result.focused = [bool]([RLNative]::SetForegroundWindow($proc.MainWindowHandle))
-      if ($result.focused) { Start-Sleep -Milliseconds ${focusDelay} }
+      [void][RLNative]::SetForegroundWindow($h)
+      Start-Sleep -Milliseconds ${focusDelay}
+      if ([RLNative]::GetForegroundWindow() -eq $h) {
+        $result.focused = $true
+      } else {
+        $fg = [RLNative]::GetForegroundWindow()
+        $me = [RLNative]::GetCurrentThreadId()
+        $fgPid = 0; $fgThread = [RLNative]::GetWindowThreadProcessId($fg, [ref]$fgPid)
+        $tgPid = 0; $tgThread = [RLNative]::GetWindowThreadProcessId($h, [ref]$tgPid)
+        [void][RLNative]::AttachThreadInput($me, $fgThread, $true)
+        [void][RLNative]::AttachThreadInput($me, $tgThread, $true)
+        [void][RLNative]::BringWindowToTop($h)
+        [void][RLNative]::SetForegroundWindow($h)
+        [void][RLNative]::AttachThreadInput($me, $fgThread, $false)
+        [void][RLNative]::AttachThreadInput($me, $tgThread, $false)
+        Start-Sleep -Milliseconds ${focusDelay}
+        $result.focused = ([RLNative]::GetForegroundWindow() -eq $h)
+      }
     }
   }
 }
@@ -79,6 +102,10 @@ public class RLNative {
   [DllImport("user32.dll")] public static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, UIntPtr dwExtraInfo);
   [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
   [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+  [DllImport("user32.dll")] public static extern bool BringWindowToTop(IntPtr hWnd);
+  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+  [DllImport("user32.dll")] public static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
+  [DllImport("kernel32.dll")] public static extern uint GetCurrentThreadId();
 }
 "@
 $result = @{ found = $false; focused = $false; sent = $false }
@@ -192,11 +219,22 @@ function resetAutoTracking() {
   _gen++;   // invalidate any in-flight retry loop from the previous game
 }
 
+// Press ONE arbitrary key into the Rocket League window (single tap). Reuses the same window-focus +
+// keybd_event path as the native-UI hide, so it inherits the focus handling and Windows-only guard.
+// Used by auto-spectate to send the observer's player-select key (e.g. a number 1-6). Independent of
+// the hide toggle state (does not touch _done/_pending).
+function pressKey(key, cfg) {
+  const k = String(key == null ? '' : key).trim().charAt(0);
+  if (!k) return Promise.resolve({ ok: false, reason: 'no_key' });
+  return runHideNativeUi(mergeConfig({ ...(cfg || {}), key: k, presses: 1, enabled: true, autoOnMatch: true }));
+}
+
 module.exports = {
   DEFAULTS,
   mergeConfig,
   runHideNativeUi,
   scheduleAutoHide,
   resetAutoTracking,
-  markHidden
+  markHidden,
+  pressKey
 };

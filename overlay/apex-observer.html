@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1920">
+<title>NE Broadcast Suite — Apex Observer</title>
+<link rel="stylesheet" href="/fonts.css">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --main-font: 'Rajdhani', 'Montserrat', sans-serif;
+    --accent: #da2c38;
+    --ink:    #0c0f14;
+    --panel:  rgba(12, 15, 20, 0.92);
+    --panel-2:rgba(18, 22, 29, 0.96);
+    --line:   rgba(255,255,255,0.09);
+    --txt:    #f2f5f8;
+    --dim:    #93a0ad;
+    --alive:  #dfe6ee;
+    --down:   #5a636d;
+  }
+  html, body { width: 1920px; height: 1080px; overflow: hidden; background: transparent;
+    font-family: var(--main-font); color: var(--txt); -webkit-font-smoothing: antialiased; }
+  .hidden { display: none !important; }
+  img { display: block; }
+  .up { text-transform: uppercase; }
+
+  /* ─────────── TOP-LEFT: event + map badge ─────────── */
+  #brand { position: absolute; top: 0; left: 0; z-index: 30; display: flex; flex-direction: column;
+    width: 300px; filter: drop-shadow(0 6px 16px rgba(0,0,0,.5)); }
+  .br-top { display: flex; align-items: center; gap: 10px; height: 46px; padding: 0 16px;
+    background: linear-gradient(90deg, #e7e9ec, #cfd3d8); color: #10151c; clip-path: polygon(0 0, 100% 0, 92% 100%, 0 100%); }
+  .br-title { font-size: 17px; font-weight: 800; letter-spacing: .3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .br-split { font-size: 11px; font-weight: 700; color: #4a525c; }
+  .br-map { display: flex; align-items: center; gap: 12px; height: 62px; padding: 0 16px; background: var(--panel-2);
+    border-left: 4px solid var(--accent); }
+  .br-map-thumb { width: 46px; height: 46px; border-radius: 6px; object-fit: cover; background: rgba(255,255,255,.06); border: 1px solid var(--line); }
+  .br-map-k { font-size: 10px; color: var(--dim); font-weight: 700; letter-spacing: 1.5px; }
+  .br-map-v { font-size: 20px; font-weight: 800; line-height: 1; }
+
+  /* ─────────── TOP-RIGHT: players / squads remaining ─────────── */
+  #counters { position: absolute; top: 0; right: 0; z-index: 30; display: flex; flex-direction: column;
+    width: 300px; align-items: flex-end; filter: drop-shadow(0 6px 16px rgba(0,0,0,.5)); }
+  .ct-players { display: flex; align-items: baseline; gap: 10px; justify-content: flex-end; width: 100%;
+    height: 46px; padding: 0 18px; background: linear-gradient(270deg, #e7e9ec, #cfd3d8); color: #10151c;
+    clip-path: polygon(8% 0, 100% 0, 100% 100%, 0 100%); }
+  .ct-players .n { font-size: 26px; font-weight: 800; line-height: 1; }
+  .ct-players .l { font-size: 12px; font-weight: 700; color: #4a525c; letter-spacing: 1px; }
+  .ct-squads { display: flex; align-items: baseline; gap: 10px; justify-content: flex-end; width: 100%;
+    height: 62px; padding: 0 18px; background: var(--panel-2); border-right: 4px solid var(--accent); }
+  .ct-squads .n { font-size: 30px; font-weight: 800; line-height: 1; color: var(--accent); }
+  .ct-squads .l { font-size: 12px; font-weight: 700; color: var(--dim); letter-spacing: 1px; }
+
+  /* ─────────── SIDE STANDINGS PANELS ─────────── */
+  .side { position: absolute; top: 118px; width: 322px; z-index: 20;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 8px; overflow: hidden;
+    filter: drop-shadow(0 8px 22px rgba(0,0,0,.55)); }
+  #sideL { left: 20px; } #sideR { right: 20px; }
+  .side-head { display: grid; grid-template-columns: 30px 1fr 118px 46px; align-items: center;
+    padding: 6px 10px; background: var(--panel-2); border-bottom: 2px solid var(--accent);
+    font-size: 10px; font-weight: 800; color: var(--dim); letter-spacing: 1px; }
+  .side-head .r { text-align: right; }
+  .row { display: grid; grid-template-columns: 30px 1fr 118px 46px; align-items: center;
+    height: 46px; padding: 0 10px; border-bottom: 1px solid rgba(255,255,255,.05); transition: background .2s; }
+  .row.spot { background: rgba(218,44,56,.14); }
+  .row.elim { opacity: .5; }
+  .rk { font-size: 17px; font-weight: 800; text-align: center; font-variant-numeric: tabular-nums;
+    border-radius: 4px; padding: 3px 0; color: #fff; }
+  .team { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .team-logo { width: 26px; height: 26px; object-fit: contain; flex: 0 0 26px; }
+  .team-logo.ph { display: flex; align-items: center; justify-content: center; border-radius: 5px;
+    font-size: 10px; font-weight: 800; color: #fff; }
+  .team-tag { font-size: 16px; font-weight: 800; letter-spacing: .3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .players { display: flex; gap: 4px; justify-content: flex-start; }
+  .pl { width: 32px; height: 32px; border-radius: 5px; object-fit: cover; background: #1b2029;
+    border: 1px solid var(--line); }
+  .pl.ph { display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 800; color: var(--dim); }
+  .pl.down { filter: grayscale(1) brightness(.5); }
+  .pts { font-size: 18px; font-weight: 800; text-align: right; font-variant-numeric: tabular-nums; }
+
+  #offline { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
+    color: var(--dim); font-size: 15px; font-weight: 700; letter-spacing: 1px; background: var(--panel);
+    padding: 12px 22px; border-radius: 8px; border: 1px solid var(--line); }
+  #devbar { position: absolute; bottom: 8px; left: 50%; transform: translateX(-50%); z-index: 99; display: flex; gap: 6px; }
+  #devbar button { font: 600 12px var(--main-font); background: #1a1f27; color: #cfd8e2; border: 1px solid #2c333d;
+    border-radius: 5px; padding: 5px 10px; cursor: pointer; }
+  body.live #devbar { display: none; }
+</style>
+</head>
+<body>
+  <div id="offline">APEX OBSERVER — WAITING FOR GAME</div>
+
+  <div id="brand" class="hidden">
+    <div class="br-top"><div><div class="br-title" id="brTitle">EVENT</div><div class="br-split" id="brSplit"></div></div></div>
+    <div class="br-map"><img class="br-map-thumb" id="brThumb" alt="" onerror="this.style.display='none'">
+      <div><div class="br-map-k up">Map</div><div class="br-map-v" id="brMap">—</div></div></div>
+  </div>
+
+  <div id="counters" class="hidden">
+    <div class="ct-players"><span class="n" id="ctPlayers">0</span><span class="l up">Players</span></div>
+    <div class="ct-squads"><span class="n" id="ctSquads">0</span><span class="l up">Squads Remaining</span></div>
+  </div>
+
+  <div class="side hidden" id="sideL">
+    <div class="side-head"><span>#</span><span>Team</span><span>Players</span><span class="r">Pts</span></div>
+    <div id="rowsL"></div>
+  </div>
+  <div class="side hidden" id="sideR">
+    <div class="side-head"><span>#</span><span>Team</span><span>Players</span><span class="r">Pts</span></div>
+    <div id="rowsR"></div>
+  </div>
+
+  <div id="devbar"><button onclick="toggleDemo()">Demo</button><button onclick="stepDemo()">+Kill</button><button onclick="endGameDemo()">End game</button></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const legendImg = (n) => n ? ('/assets/heroes/apex/' + String(n).toLowerCase().replace(/[^a-z0-9]/g,'') + '.png') : '';
+// Stable per-rank fallback palette (used when a team has no colour set).
+const PALETTE = ['#3fb6c8','#5a6cf0','#8a4fd0','#c94fa0','#d0524f','#d98a3f','#c8c23f','#7fb84f','#4fb87a','#4f95b8',
+                 '#b85fd0','#d05f7a','#d07a4f','#b8a84f','#6fb84f','#4fb8a0','#4f78d0','#9a4fd0','#d04f9a','#8a8f99'];
+
+let savedTeams = [], brand = null, _realEvent = null;
+const normName = (s) => String(s || '').trim().toLowerCase().replace(/\s+/g,' ');
+let teamMap = {};   // liveKey -> saved team name
+
+// Resolve a standings row to broadcast identity {logo, tag, color} from the team library.
+function deriveTag(name) {
+  const words = String(name || '').trim().split(/\s+/).filter(Boolean);
+  if (!words.length) return '?';
+  if (words.length >= 2) return words.map(w => w[0]).join('').slice(0,4).toUpperCase();
+  return words[0].slice(0,4).toUpperCase();
+}
+function resolveTeam(row, rank) {
+  let st = null;
+  const override = teamMap[row.key];
+  if (override) st = savedTeams.find(t => normName(t.name) === normName(override));
+  if (!st) st = savedTeams.find(t => normName(t.name) === normName(row.name));
+  if (!st) st = savedTeams.find(t => normName(t.name) === row.key);
+  const tag = (st && (st.abbrev || st.tag)) || deriveTag((st && st.name) || row.name);
+  const color = (st && st.color) || PALETTE[(rank - 1) % PALETTE.length];
+  return { logo: st && st.logo, tag, color };
+}
+
+function rowHtml(row, rank, spotTeamId, roster) {
+  const id = resolveTeam(row, rank);
+  // Real logo from the Teams library only — no placeholder box (keeps the tag clean).
+  const logo = id.logo ? '<img class="team-logo" src="' + esc(id.logo) + '" alt="" onerror="this.remove()">' : '';
+  const players = [];
+  for (let i = 0; i < roster; i++) {
+    const p = row.players[i];
+    if (p && p.legend) players.push('<img class="pl' + (p.down ? ' down' : '') + '" src="' + legendImg(p.legend) + '" alt="" title="' + esc(p.name||'') + '" onerror="this.classList.add(\'ph\');this.removeAttribute(\'src\');this.textContent=\'' + esc((p.legend||'?')[0]) + '\'">');
+    else if (p) players.push('<span class="pl ph' + (p.down ? ' down' : '') + '">' + esc((p.name||'?')[0]) + '</span>');
+    else players.push('<span class="pl ph"></span>');
+  }
+  const elim = row.inGame && !row.alive;
+  return '<div class="row' + (elim ? ' elim' : '') + (row.teamId === spotTeamId ? ' spot' : '') + '">' +
+    '<span class="rk" style="background:' + id.color + '">' + rank + '</span>' +
+    '<span class="team">' + logo + '<span class="team-tag">' + esc(id.tag) + '</span></span>' +
+    '<span class="players">' + players.join('') + '</span>' +
+    '<span class="pts">' + (row.seriesPoints || 0) + '</span>' +
+  '</div>';
+}
+
+let apex = null;
+function render(a) {
+  apex = a; if (!a) return;
+  // Show the overlay whenever there's anything to show — a live connection OR standings/series
+  // data (so it stays up between games and during the pre-game lobby, like the ALGS broadcast).
+  const on = !!(a.connected || (a.standings && a.standings.length) || (a.games && a.games.length));
+  $('offline').classList.toggle('hidden', on);
+  ['brand','counters','sideL','sideR'].forEach(id => $(id).classList.toggle('hidden', !on));
+  if (!on) return;
+
+  // brand + map — prefer the in-app configured event over anything in the payload/demo.
+  const ev = (_realEvent && (_realEvent.title || _realEvent.split || _realEvent.match)) ? _realEvent : (a.event || {});
+  $('brTitle').textContent = ev.title || (brand && brand.name) || 'APEX LEGENDS';
+  $('brSplit').textContent = [ev.split, ev.match || (a.gameNumber ? ('GAME ' + a.gameNumber) : '')].filter(Boolean).join('  ·  ');
+  $('brMap').textContent = a.map || '—';
+  const thumb = $('brThumb'); if (a.map) { thumb.style.display = ''; thumb.src = '/assets/maps/apex/' + a.map.toLowerCase().replace(/[^a-z0-9]/g,'') + '.jpg'; } else thumb.style.display = 'none';
+
+  // counters
+  $('ctPlayers').textContent = a.playersAlive != null ? a.playersAlive : '—';
+  $('ctSquads').textContent = a.squadsAlive != null ? a.squadsAlive : '—';
+
+  // standings split into two columns of 10
+  const roster = 3;
+  const spot = a.observed ? a.observed.teamId : -1;
+  const rows = (a.standings || []).slice(0, 20);
+  $('rowsL').innerHTML = rows.slice(0, 10).map((r, i) => rowHtml(r, i + 1, spot, roster)).join('');
+  $('rowsR').innerHTML = rows.slice(10, 20).map((r, i) => rowHtml(r, i + 11, spot, roster)).join('');
+}
+
+// ── WebSocket bridge ─────────────────────────────────────────────────────────
+let _wsToken = null;
+async function connect() {
+  if (_wsToken === null) {
+    try { _wsToken = (await (await fetch('http://' + (location.hostname || 'localhost') + ':3000/api/ws-token')).json()).token || ''; }
+    catch (e) { _wsToken = ''; }
+  }
+  const sock = new WebSocket('ws://' + (location.hostname || 'localhost') + ':3001' + (_wsToken ? ('?token=' + encodeURIComponent(_wsToken)) : ''));
+  sock.onopen = () => sock.send(JSON.stringify({ type: 'request_state' }));
+  sock.onmessage = ({ data }) => {
+    let msg; try { msg = JSON.parse(data); } catch { return; }
+    if (msg.type === 'full_state') {
+      const d = msg.data;
+      if (Array.isArray(d.savedTeams)) savedTeams = d.savedTeams;
+      if (d.brand) brand = d.brand;
+      if (d.apex && d.apex.event) _realEvent = d.apex.event;
+      if (d.teams && d.teams.blue && d.teams.blue.color) document.documentElement.style.setProperty('--accent', d.teams.blue.color);
+      if (d.apex) teamMap = d.apex.teamMap || {};
+      // Refresh a running preview now that real teams/logos/event have arrived.
+      if (devState && (IS_DEMO || _autoDemo)) { devState = demo(); render(devState); }
+      else if (d.apex) maybeRenderReal(d.apex);
+    } else if (msg.type === 'apex_update') {
+      teamMap = msg.data.teamMap || teamMap;
+      if (msg.data.event) _realEvent = msg.data.event;
+      maybeRenderReal(msg.data);
+    }
+  };
+  sock.onclose = () => setTimeout(connect, 800);
+  sock.onerror = () => { try { sock.close(); } catch {} };
+}
+connect();
+
+// ── Demo ─────────────────────────────────────────────────────────────────────
+let devState = null, _autoDemo = false;
+// Real data replaces the auto-preview the moment a live connection or standings arrive;
+// a manually-toggled Demo (via the button) is left alone.
+function maybeRenderReal(a) {
+  const hasReal = a && (a.connected || (a.standings && a.standings.length) || (a.games && a.games.length));
+  if (_autoDemo && hasReal) { devState = null; _autoDemo = false; }
+  if (!devState) render(a);
+}
+function demo() {
+  // Preview with the producer's REAL teams (so their logos show); fall back to sample tags.
+  const fallback = ['GK','RRQ','FLCN','UNL','ELTE','E36','NMSS','ZETA','RC','AG','TL','VSN','ALL','SBUL','WOL','NIP','ZEDI','SEN','FFUC','FUR'];
+  const names = []; for (let i = 0; i < 20; i++) names.push((savedTeams[i] && savedTeams[i].name) || fallback[i]);
+  const legends = ['Wraith','Bloodhound','Gibraltar','Octane','Bangalore','Catalyst','Lifeline','Horizon','Valkyrie','Seer'];
+  const standings = names.map((t, i) => ({
+    key: normName(t), name: t, teamId: i + 1, seriesPoints: Math.max(0, 40 - i * 2 + (i % 3)), seriesKills: Math.max(0, 12 - i),
+    alive: i < 12, inGame: true, gamePlacement: i < 12 ? 0 : (20 - i + 1),
+    players: [0,1,2].map(j => ({ name: t + '_' + (j+1), legend: legends[(i + j) % legends.length], hp: (i < 12 && j < 2) ? 100 : 0, down: !(i < 12 && j < 2) }))
+  })).sort((a,b) => b.seriesPoints - a.seriesPoints);
+  return { connected: true, matchState: 'live', map: 'Storm Point', gameNumber: 3,
+    event: (_realEvent && (_realEvent.title || _realEvent.split || _realEvent.match)) ? _realEvent : { split: 'SPLIT 1 PLAYOFFS', match: 'MATCH 1' },
+    playersAlive: 33, squadsAlive: 12, squadsTotal: 20, observed: { teamId: 5 }, standings };
+}
+function toggleDemo(){ devState = devState ? null : demo(); _autoDemo = false; render(devState || apex); }
+function stepDemo(){ if(!devState) devState = demo(); devState.standings[0].seriesPoints++; devState.standings.sort((a,b)=>b.seriesPoints-a.seriesPoints); render(devState); }
+function endGameDemo(){ if(!devState) devState = demo(); devState.matchState='postmatch'; devState.squadsAlive=1; devState.playersAlive=3; render(devState); }
+
+const _params = new URLSearchParams(location.search);
+const IS_LIVE = _params.get('live') === '1';
+const IS_DEMO = _params.get('demo') === '1';   // OBS preview: populated demo, no dev toolbar, never overridden
+if (IS_LIVE || IS_DEMO) document.body.classList.add('live');
+if (IS_DEMO) { devState = demo(); _autoDemo = false; render(devState); }
+// Direct browser preview (bare URL): if no real Apex data arrives shortly, auto-load the demo
+// so the overlay is visible immediately. Real data always wins the moment it appears.
+else if (!IS_LIVE) setTimeout(() => {
+  if (!devState && !(apex && (apex.connected || (apex.standings && apex.standings.length)))) { devState = demo(); _autoDemo = true; render(devState); }
+}, 1500);
+</script>
+</body>
+</html>

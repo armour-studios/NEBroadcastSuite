@@ -16,6 +16,7 @@ const path = require('path');
 function createBallchasingWatcher({ onUpload, log } = {}) {
   let watcher = null;
   let watchedFolder = '';
+  let retryTimer = null;
   const seen = new Set();          // absolute paths already uploaded (or in flight) this session
   const settleTimers = new Map();  // path -> timeout while we wait for the file to stop growing
 
@@ -46,6 +47,25 @@ function createBallchasingWatcher({ onUpload, log } = {}) {
     settleTimers.set(abs, setTimeout(check, 1200));
   }
 
+  // A failed upload (missing API key, no active league yet, a real network/API error) calls
+  // seen.delete(abs) so the file is retry-eligible again — but nothing GUARANTEES fs.watch fires
+  // another event for a file already sitting on disk, so without this it could stay eligible
+  // forever and never actually get a second attempt. Periodically re-scan for anything not in
+  // `seen` and give it another try — cheap (a single readdir) and catches both retry-eligible
+  // failures and any watch event the OS/OneDrive sync ever silently dropped.
+  const RETRY_SWEEP_MS = 60000;
+  function sweep() {
+    if (!watchedFolder) return;
+    let files;
+    try { files = fs.readdirSync(watchedFolder); } catch { return; }
+    files.forEach((f) => {
+      if (!isReplay(f)) return;
+      const abs = path.join(watchedFolder, f);
+      if (seen.has(abs) || settleTimers.has(abs)) return;
+      settleThenUpload(abs);
+    });
+  }
+
   function start(folder) {
     stop();
     if (!folder) return false;
@@ -63,6 +83,8 @@ function createBallchasingWatcher({ onUpload, log } = {}) {
         if (seen.has(abs) || settleTimers.has(abs)) return;
         settleThenUpload(abs);
       });
+      retryTimer = setInterval(sweep, RETRY_SWEEP_MS);
+      if (retryTimer.unref) retryTimer.unref();
       note('Auto-upload watching: ' + folder);
       return true;
     } catch (e) { note('Auto-upload watch failed: ' + (e && e.message)); return false; }
@@ -70,6 +92,7 @@ function createBallchasingWatcher({ onUpload, log } = {}) {
 
   function stop() {
     if (watcher) { try { watcher.close(); } catch {} watcher = null; }
+    if (retryTimer) { clearInterval(retryTimer); retryTimer = null; }
     settleTimers.forEach((t) => clearTimeout(t));
     settleTimers.clear();
     watchedFolder = '';

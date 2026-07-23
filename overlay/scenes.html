@@ -109,6 +109,17 @@
         { name: 'Series Scoreboard', path: '/series.html', desc: 'Standalone series / match scoreboard banner.', live: null },
         { name: 'Mini Station', path: '/ministation.html', desc: 'Compact mini-HUD for secondary broadcast stations or split-screen.', live: null },
         { name: 'Director Preview', path: '/director-preview.html', desc: 'Producer-only director bug — add ?director=1 to activate.', live: null },
+        { name: 'Smash Scoreboard', path: '/smash.html', desc: 'Super Smash Bros. 1v1 — players, flags, fighters, stocks (lives) + set score.', live: 'always' },
+        { name: 'Smash Team Scoreboard', path: '/smash-team.html', desc: 'Super Smash Bros. crew battle — teams, logos, aggregate team stocks + set score / Best-of.', live: 'always' },
+      ]},
+      { group: 'Fighting Games (FGC)', items: [
+        { name: 'Tekken 8 Scoreboard (Blue)', path: '/fgc/tekken8-blue/template.html', desc: 'FGCaster lower-third fed by Match ▸ Teams (player names, series score, casters).', live: 'always' },
+        { name: 'Tekken 8 Scoreboard (Red)', path: '/fgc/tekken8-red/template.html', desc: 'Red variant of the Tekken 8 scoreboard.', live: 'always' },
+        { name: 'Street Fighter 6 Scoreboard', path: '/fgc/sf6/template.html', desc: 'SF6-styled 1v1 scoreboard — names, clan tags, series score, casters.', live: 'always' },
+        { name: 'Guilty Gear Strive Scoreboard', path: '/fgc/ggstrive/template.html', desc: 'Guilty Gear -Strive- styled 1v1 scoreboard.', live: 'always' },
+        { name: '2XKO Scoreboard (tag)', path: '/fgc/2xko/template.html', desc: '2XKO tag scoreboard — two players per side (first two roster slots).', live: 'always' },
+        { name: 'Generic FGC Scoreboard', path: '/fgc/default/template.html', desc: 'Game-agnostic FGC lower-third for any 1v1 fighting game.', live: 'always' },
+        { name: 'Generic FGC Scoreboard (image)', path: '/fgc/default-img/template.html', desc: 'Image-based variant of the generic FGC scoreboard.', live: 'always' },
       ]},
       { group: 'Casters & Desk', items: [
         { name: 'Casters (grid)', path: '/casters.html', desc: 'Up to 4 commentators — auto-sized cam holes + name plates.', live: 'casters.visible' },

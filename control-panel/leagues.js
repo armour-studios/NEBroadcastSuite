@@ -10,23 +10,52 @@ let lgActiveId = null;
 let _lgSaveTimer = null;
 let _lgSig = '';
 let _lgActiveTab = 'overview';
+// A server-side update (spectated-match auto-capture finalizing, a Ballchasing refresh
+// completing, etc.) that arrived while a field in the Leagues panel had focus and couldn't be
+// applied (see lgHydrate below). Left set until focus actually clears the panel — lgSave() checks
+// it so the pending 400ms debounced save can't fire with our now-stale local copy and silently
+// overwrite whatever the server just computed, which is exactly what used to happen.
+let _lgHydratePending = null;
 const lgUid = (p) => (p || 'id') + Math.random().toString(36).slice(2, 9);
 
 function lgActive() { return lgLeagues.find((l) => l.id === lgActiveId) || null; }
 function lgStatus(msg, ok) { const s = el('lg-status'); if (s) { s.textContent = msg || ''; s.style.color = ok === false ? '#f56565' : (ok ? 'var(--good,#48bb78)' : 'var(--muted)'); } }
-function lgSave() { clearTimeout(_lgSaveTimer); _lgSaveTimer = setTimeout(() => send('set_leagues', { leagues: lgLeagues }), 400); }
+function lgSave() {
+  clearTimeout(_lgSaveTimer);
+  _lgSaveTimer = setTimeout(() => {
+    if (_lgHydratePending) { lgSave(); return; }   // still stale relative to a pending server update — retry later
+    send('set_leagues', { leagues: lgLeagues });
+  }, 400);
+}
 
 function lgHydrate(leagues) {
   const incoming = Array.isArray(leagues) ? leagues : [];
   const sig = JSON.stringify(incoming);
-  if (sig === _lgSig) return;                       // no change
+  if (sig === _lgSig) { _lgHydratePending = null; return; }   // no change — nothing pending either
   const panel = el('ev-leagues-panel');
-  if (panel && panel.contains(document.activeElement)) return;   // don't clobber active edits
+  if (panel && panel.contains(document.activeElement)) {
+    _lgHydratePending = incoming;   // don't clobber active edits — apply once focus clears (below)
+    return;
+  }
+  _lgHydratePending = null;
   _lgSig = sig;
   lgLeagues = incoming;
   if (lgActiveId && !lgLeagues.some((l) => l.id === lgActiveId)) lgActiveId = null;
   if (el('ev-leagues-panel') && el('ev-leagues-panel').style.display !== 'none') lgRender();
 }
+// Once focus actually leaves the Leagues panel, apply whatever server update was left pending —
+// otherwise it stayed invisible forever, and the producer's own next edit could still overwrite it.
+document.addEventListener('focusout', () => {
+  if (!_lgHydratePending) return;
+  setTimeout(() => {   // let the new focus target (if any) settle before re-checking
+    if (!_lgHydratePending) return;
+    const panel = el('ev-leagues-panel');
+    if (panel && panel.contains(document.activeElement)) return;   // focus moved to another field in the same panel
+    const pending = _lgHydratePending;
+    _lgHydratePending = null;
+    lgHydrate(pending);
+  }, 0);
+});
 function lgGameOptions(sel) {
   const games = currentState.games || {};
   const cur = sel.value;
@@ -153,6 +182,19 @@ function lgBcByName(lg) {
   return out;
 }
 
+// Rank of each team by its position in lg.standings (the table's own order). Teams that have no
+// standings row yet rank after everyone who does, so a fresh league still renders sensible cards.
+function lgRankMap(lg) {
+  const out = {}; let n = 0;
+  (lg.standings || []).forEach((s) => { if ((lg.teams || []).some((t) => t.id === s.teamId)) out[s.teamId] = ++n; });
+  (lg.teams || []).forEach((t) => { if (!out[t.id]) out[t.id] = ++n; });
+  return out;
+}
+function lgDivName(lg, teamId) {
+  const d = lgDivisions(lg).find((x) => x.id === lgTeamDivId(lg, teamId));
+  return d ? d.name : '';
+}
+
 function lgRenderTeams() {
   const wrap = el('lg-teams'); const lg = lgActive(); if (!wrap || !lg) return;
   lgRenderMatchup();
@@ -163,6 +205,9 @@ function lgRenderTeams() {
   const stById = {}; (lg.standings || []).forEach((s) => { stById[s.teamId] = s; });
   const bcByName = lgBcByName(lg);
   const hasBc = Object.keys(bcByName).length > 0;
+  const ranks = lgRankMap(lg);
+  const gs = lgGameStats(lg.game);
+  const playoffN = lg.playoffN || 0;
   wrap.innerHTML = (lg.teams || []).map((tm) => {
     const r = lgResolveTeam(tm);
     const roster = r.players || [];
@@ -192,19 +237,36 @@ function lgRenderTeams() {
       <div class="lg2-cap-label"><span>Rating used (starters)</span><span>${starterUsed} / ${cap}${over ? ' ⚠ over' : ''}</span></div>
       <div class="lg2-cap-bar"><div class="lg2-cap-bar-fill${over ? ' over' : ''}" style="width:${Math.min(pct,100)}%"></div></div>
     </div>` : '';
-    const st = stById[tm.id];
-    const recChip = st ? `<span class="lg-team-rec" title="Series record">${st.w || 0}&#8211;${st.l || 0}${st.t ? '&#8211;' + st.t : ''}</span>` : '';
-    const cntChip = `<span class="lg-team-count" title="Roster size">${roster.length} player${roster.length === 1 ? '' : 's'}</span>`;
+    const st = stById[tm.id] || {};
+    const rank = ranks[tm.id] || 0;
+    const inPlayoff = playoffN > 0 && rank <= playoffN;
+    const diff = (st.gf || 0) - (st.ga || 0);
+    const form = (st.form || []).slice(-5).map((f) => `<span class="lg2-fd lg2-fd-${String(f).toLowerCase()}">${esc(f)}</span>`).join('');
+    const divName = lgDivName(lg, tm.id);
+    // Neutral league-management stat strip: rank, record, points, differential, streak, form.
+    // Deliberately carries NO side colour — which team is blue/orange is a per-match broadcast
+    // decision made on the Overview → Broadcast card, not a property of the team.
+    const statStrip = `<div class="lg-team-stats">
+      <div class="lg-tstat"><span class="lg-tstat-v">${st.w || 0}<span class="lg-tstat-dash">-</span>${st.l || 0}${st.t ? '<span class="lg-tstat-dash">-</span>' + st.t : ''}</span><span class="lg-tstat-l">Record</span></div>
+      <div class="lg-tstat"><span class="lg-tstat-v">${st.pts || 0}</span><span class="lg-tstat-l">Points</span></div>
+      ${gs.sub ? `<div class="lg-tstat"><span class="lg-tstat-v">${st.subW || 0}<span class="lg-tstat-dash">-</span>${st.subL || 0}</span><span class="lg-tstat-l">${esc(gs.sub.noun)}</span></div>` : ''}
+      ${gs.unit ? `<div class="lg-tstat"><span class="lg-tstat-v ${diff > 0 ? 'pos' : diff < 0 ? 'neg' : ''}">${diff > 0 ? '+' : ''}${diff}</span><span class="lg-tstat-l">Diff</span></div>` : ''}
+      <div class="lg-tstat"><span class="lg-tstat-v">${esc(st.streak || '—')}</span><span class="lg-tstat-l">Streak</span></div>
+      <div class="lg-tstat lg-tstat-form"><span class="lg-tstat-v">${form || '<span class="lg-tstat-dash">—</span>'}</span><span class="lg-tstat-l">Last 5</span></div>
+    </div>`;
     return `<div class="lg-team" data-tid="${tm.id}">
       <div class="lg-team-head">
+        <span class="lg-team-rank${inPlayoff ? ' in-playoff' : ''}" title="${inPlayoff ? 'Playoff position' : 'League position'}">${rank || '—'}</span>
         <img class="lg-team-logo${r.logo ? '' : ' game-logo-white'}" src="${r.logo || gameLogo()}" alt="" onerror="this.onerror=null;this.src='../assets/rl.png';">
-        <span class="lg-team-name">${esc(r.name)}</span>
-        ${recChip}${cntChip}
+        <div class="lg-team-idbox">
+          <span class="lg-team-name">${esc(r.name)}</span>
+          <span class="lg-team-sub">${[divName && esc(divName), `${roster.length} player${roster.length === 1 ? '' : 's'}`, tm.franchiseOwner ? esc(tm.franchiseOwner) : ''].filter(Boolean).join(' · ')}</span>
+        </div>
         ${r.linked ? '' : '<span class="lg-unlinked" title="Not in the team library">unlinked</span>'}
-        <button class="btn btn-ghost btn-xs lg-team-live" data-tid="${tm.id}" data-side="blue">&#8594; Blue</button>
-        <button class="btn btn-ghost btn-xs lg-team-live" data-tid="${tm.id}" data-side="orange">&#8594; Orange</button>
+        <button class="btn btn-ghost btn-xs lg-team-detail" data-tid="${tm.id}" title="Open the full team profile">Details</button>
         <button class="lg-del lg-team-del" data-tid="${tm.id}" title="Remove from league">&#215;</button>
       </div>
+      ${statStrip}
       ${capBar}
       <div class="lg2-team-meta">
         <input type="text" class="input-text lg2-abbr-team-inp lg2-team-abbr" data-tid="${tm.id}" value="${esc(tm.abbr || '')}" placeholder="Abbr" title="Team abbreviation (e.g. BDG)">
@@ -236,12 +298,107 @@ function lgRenderTeams() {
     tm.franchiseOwner = inp.value.trim(); lgSave();
   }));
   wrap.querySelectorAll('.lg-team-del').forEach((b) => b.addEventListener('click', () => { lg.teams = lg.teams.filter((t) => t.id !== b.dataset.tid); lgRenderTeams(); lgRenderStandingsTab(); lgSave(); }));
-  wrap.querySelectorAll('.lg-team-live').forEach((b) => b.addEventListener('click', () => {
-    const tm = lg.teams.find((t) => t.id === b.dataset.tid); if (!tm) return;
-    const r = lgResolveTeam(tm);
-    send('set_team', { side: b.dataset.side, name: r.name || 'Team', logo: r.logo || null, players: (r.players || []).map((p) => ({ name: p.name, role: p.role })) });
-    lgStatus(`${r.name || 'Team'} → ${b.dataset.side}.`, true);
-  }));
+  wrap.querySelectorAll('.lg-team-detail').forEach((b) => b.addEventListener('click', () => lgOpenTeamDetail(b.dataset.tid)));
+}
+
+// ── Team detail drawer ───────────────────────────────────────────────────────
+// A team's full league profile in one place: position + record, season stat totals, the roster
+// with per-player numbers, this team's fixtures (played and upcoming) and its head-to-head record
+// against everyone else. Read-only by design — editing still happens on the tab that owns the data.
+function lgOpenTeamDetail(teamId) {
+  const lg = lgActive(); if (!lg) return;
+  const tm = (lg.teams || []).find((t) => t.id === teamId); if (!tm) return;
+  const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const r = lgResolveTeam(tm);
+  const st = (lg.standings || []).find((s) => s.teamId === teamId) || {};
+  const ranks = lgRankMap(lg);
+  const gs = lgGameStats(lg.game);
+  const nameOf = (id) => { const t = (lg.teams || []).find((x) => x.id === id); return t ? lgResolveTeam(t).name : 'TBD'; };
+  const logoOf = (id) => { const t = (lg.teams || []).find((x) => x.id === id); return (t && lgResolveTeam(t).logo) || ''; };
+
+  // Fixtures involving this team, split by whether a result has been entered.
+  const mine = (lg.schedule || []).filter((m) => m.teamA === teamId || m.teamB === teamId);
+  const h2h = {};   // opponentId -> { w, l, t }
+  const fixtureRow = (m) => {
+    const home = m.teamA === teamId;
+    const oppId = home ? m.teamB : m.teamA;
+    const played = (Array.isArray(m.games) && m.games.length) || (m.result && m.result.scoreA != null && m.result.scoreB != null);
+    if (!played) {
+      return `<div class="lgtd-fix"><span class="lgtd-fix-wk">${m.week ? 'Wk ' + esc(m.week) : '—'}</span>
+        <img class="lgtd-fix-logo" src="${logoOf(oppId) || gameLogo()}" onerror="this.style.visibility='hidden'">
+        <span class="lgtd-fix-opp">${esc(nameOf(oppId))}</span>
+        <span class="lgtd-fix-when">${esc([m.date, m.time].filter(Boolean).join(' ')) || 'Unscheduled'}</span></div>`;
+    }
+    const { sa, sb } = lgMatchTally(m);
+    const mineScore = home ? sa : sb, theirs = home ? sb : sa;
+    const res = mineScore > theirs ? 'w' : mineScore < theirs ? 'l' : 'd';
+    const hh = h2h[oppId] = h2h[oppId] || { w: 0, l: 0, t: 0 };
+    if (res === 'w') hh.w++; else if (res === 'l') hh.l++; else hh.t++;
+    return `<div class="lgtd-fix lgtd-fix-done"><span class="lgtd-fix-wk">${m.week ? 'Wk ' + esc(m.week) : '—'}</span>
+      <img class="lgtd-fix-logo" src="${logoOf(oppId) || gameLogo()}" onerror="this.style.visibility='hidden'">
+      <span class="lgtd-fix-opp">${esc(nameOf(oppId))}</span>
+      <span class="lgtd-fix-score lgtd-${res}">${mineScore}<span class="lg-tstat-dash">-</span>${theirs}</span></div>`;
+  };
+  const playedRows = mine.filter((m) => (Array.isArray(m.games) && m.games.length) || (m.result && m.result.scoreA != null)).map(fixtureRow).join('');
+  const upcomingRows = mine.filter((m) => !((Array.isArray(m.games) && m.games.length) || (m.result && m.result.scoreA != null))).map(fixtureRow).join('');
+  const h2hRows = Object.entries(h2h).map(([oid, v]) => `<div class="lgtd-h2h"><span class="lgtd-h2h-opp">${esc(nameOf(oid))}</span><span class="lgtd-h2h-rec">${v.w}<span class="lg-tstat-dash">-</span>${v.l}${v.t ? '<span class="lg-tstat-dash">-</span>' + v.t : ''}</span></div>`).join('');
+
+  // Roster with whatever per-player stats we have (Ballchasing sync, when it's populated).
+  const bcByName = lgBcByName(lg);
+  const rosterRows = (r.players || []).map((p) => {
+    const bc = bcByName[lgNorm(p.name)] || null;
+    const isCap = tm.captain && lgNorm(tm.captain) === lgNorm(p.name);
+    return `<div class="lgtd-pl">
+      <span class="lgtd-pl-name">${isCap ? '<span class="lg-players-table lg-pt-cap" style="color:#f5b942">&#9733;</span> ' : ''}${esc(p.name) || '—'}</span>
+      <span class="lgtd-pl-role">${esc(p.role || '')}</span>
+      ${bc ? `<span class="lgtd-pl-stats"><b>${bc.goals || 0}</b>G <b>${bc.assists || 0}</b>A <b>${bc.saves || 0}</b>Sv <b>${bc.mvps || 0}</b>MVP</span>` : '<span class="lgtd-pl-stats lgtd-dim">no stats</span>'}
+    </div>`;
+  }).join('') || '<div class="lg-empty" style="padding:8px 0;">No roster in the team library.</div>';
+
+  // Season in-game totals a producer entered on the Stats tab.
+  const inSet = LG_STAT_SETS[lg.game] || [];
+  const ts = (lg.stats || {})[teamId] || {};
+  const statTiles = inSet.map((label) => `<div class="lgtd-tile"><span class="lgtd-tile-v">${ts[lgStatKey(label)] ?? '—'}</span><span class="lgtd-tile-l">${esc(label)}</span></div>`).join('');
+
+  const diff = (st.gf || 0) - (st.ga || 0);
+  const head = `<div class="lgtd-head">
+    <img class="lgtd-logo" src="${r.logo || gameLogo()}" onerror="this.style.visibility='hidden'">
+    <div class="lgtd-head-id">
+      <div class="lgtd-name">${esc(r.name)}${tm.abbr ? `<span class="lgtd-abbr">${esc(tm.abbr)}</span>` : ''}</div>
+      <div class="lgtd-sub">${[lgDivName(lg, teamId), tm.franchiseOwner, lg.season].filter(Boolean).map(esc).join(' · ') || esc(lg.name || '')}</div>
+    </div>
+    <div class="lgtd-rank"><span class="lgtd-rank-v">#${ranks[teamId] || '—'}</span><span class="lgtd-rank-l">in league</span></div>
+  </div>
+  <div class="lgtd-kpis">
+    <div class="lgtd-kpi"><span class="lgtd-kpi-v">${st.w || 0}<span class="lg-tstat-dash">-</span>${st.l || 0}${st.t ? '<span class="lg-tstat-dash">-</span>' + st.t : ''}</span><span class="lgtd-kpi-l">Series</span></div>
+    <div class="lgtd-kpi"><span class="lgtd-kpi-v">${st.pts || 0}</span><span class="lgtd-kpi-l">Points</span></div>
+    ${gs.sub ? `<div class="lgtd-kpi"><span class="lgtd-kpi-v">${st.subW || 0}<span class="lg-tstat-dash">-</span>${st.subL || 0}</span><span class="lgtd-kpi-l">${esc(gs.sub.noun)}</span></div>` : ''}
+    ${gs.unit ? `<div class="lgtd-kpi"><span class="lgtd-kpi-v ${diff > 0 ? 'pos' : diff < 0 ? 'neg' : ''}">${diff > 0 ? '+' : ''}${diff}</span><span class="lgtd-kpi-l">${esc(gs.unit.noun)} diff</span></div>` : ''}
+    <div class="lgtd-kpi"><span class="lgtd-kpi-v">${esc(st.streak || '—')}</span><span class="lgtd-kpi-l">Streak</span></div>
+  </div>`;
+
+  const body = `${head}
+  <div class="lgtd-cols">
+    <section class="lgtd-sec"><h5>Roster</h5>${rosterRows}</section>
+    <section class="lgtd-sec"><h5>Results</h5>${playedRows || '<div class="lg-empty" style="padding:8px 0;">No results yet.</div>'}</section>
+    <section class="lgtd-sec"><h5>Upcoming</h5>${upcomingRows || '<div class="lg-empty" style="padding:8px 0;">Nothing scheduled.</div>'}</section>
+    <section class="lgtd-sec"><h5>Head to head</h5>${h2hRows || '<div class="lg-empty" style="padding:8px 0;">No completed matchups yet.</div>'}</section>
+    ${statTiles ? `<section class="lgtd-sec lgtd-sec-wide"><h5>Season totals</h5><div class="lgtd-tiles">${statTiles}</div></section>` : ''}
+  </div>`;
+
+  let box = el('lg-team-detail-modal');
+  if (!box) {
+    box = document.createElement('div');
+    box.id = 'lg-team-detail-modal';
+    box.className = 'modal-container lgtd-modal';
+    document.body.appendChild(box);
+    box.addEventListener('click', (e) => { if (e.target === box || e.target.closest('.lgtd-close')) box.classList.remove('active'); });
+  }
+  box.innerHTML = `<div class="modal-box lgtd-box">
+    <div class="modal-header"><span>Team profile</span><button class="modal-close lgtd-close" type="button">&#215;</button></div>
+    <div class="modal-body lgtd-body">${body}</div>
+  </div>`;
+  box.classList.add('active');
 }
 function lgRenderFreeAgents() {
   const sec = el('lg-fa-section'); const wrap = el('lg-freeagents'); const lg = lgActive(); if (!sec || !wrap || !lg) return;
@@ -346,21 +503,73 @@ function lgSetRosterView(v) {
 const LG_ST_KEY = 'ne_lg_standings_v1';
 function lgStPrefs() { try { return Object.assign({ density: 'comfortable' }, JSON.parse(localStorage.getItem(LG_ST_KEY) || '{}')); } catch { return { density: 'comfortable' }; } }
 function lgStSavePrefs(p) { try { localStorage.setItem(LG_ST_KEY, JSON.stringify(p)); } catch {} }
-let _lgStSort = { key: '', dir: -1 };   // '' = manual (drag/recalc) order
+// Sort state — '' = manual (drag) order, 'auto' = the league's own rules (points + tiebreak), or any
+// stat key. Remembered in prefs so Recalculate and the column headers keep honouring the producer's
+// chosen ordering instead of silently snapping back to points every time.
+let _lgStSort = (() => { const p = lgStPrefs(); return { key: p.sortKey || '', dir: p.sortDir === 1 ? 1 : -1 }; })();
+function lgStSaveSort() { const p = lgStPrefs(); p.sortKey = _lgStSort.key; p.sortDir = _lgStSort.dir; lgStSavePrefs(p); }
+
+// Metrics the Sort-by dropdown offers. The clickable column headers use the same keys/values, so the
+// two surfaces are always describing the same ordering.
+const LG_SORT_METRICS = [
+  { key: 'auto',     label: 'League rules (Pts + tiebreak)' },
+  { key: 'w',        label: 'Wins' },
+  { key: 'l',        label: 'Losses' },
+  { key: 't',        label: 'Draws' },
+  { key: 'winpct',   label: 'Win %' },
+  { key: 'pts',      label: 'Points' },
+  { key: 'subW',     label: 'Games won',  needsSub: true },
+  { key: 'subL',     label: 'Games lost', needsSub: true },
+  { key: 'diff',     label: 'Difference', needsUnit: true },
+  { key: 'gf',       label: 'For',        needsUnit: true },
+  { key: 'ga',       label: 'Against',    needsUnit: true },
+  { key: 'streak',   label: 'Streak' },
+  { key: 'teamName', label: 'Team name' },
+  { key: '',         label: 'Manual (drag order)' },
+];
+// Keys where "best" means lowest, so a fresh click/pick starts ascending.
+const LG_SORT_ASC = new Set(['teamName', 'l', 'ga', 'subL']);
+function lgStStreakVal(s) {
+  const st = String(s.streak || ''); const n = Number(st.slice(1)) || 0;
+  return st[0] === 'W' ? n : st[0] === 'L' ? -n : 0;
+}
+function lgStSortValue(s, key) {
+  if (key === 'diff') return (s.gf || 0) - (s.ga || 0);
+  if (key === 'winpct') { const g = (s.w || 0) + (s.l || 0) + (s.t || 0); return g ? ((s.w || 0) + (s.t || 0) * 0.5) / g : 0; }
+  if (key === 'streak') return lgStStreakVal(s);
+  return s[key] || 0;
+}
+function lgStSortLabel() {
+  const m = LG_SORT_METRICS.find((x) => x.key === _lgStSort.key);
+  return m ? m.label : 'League rules (Pts + tiebreak)';
+}
 
 // Ensure every team has a standings row (so sort/reorder covers unranked teams too).
 function lgStEnsureRows(lg) {
   lg.standings = lg.standings || [];
   (lg.teams || []).forEach((tm) => { if (!lg.standings.find((s) => s.teamId === tm.id)) lg.standings.push({ teamId: tm.id, w: 0, l: 0, t: 0, gf: 0, ga: 0, pts: 0 }); });
 }
-function lgStSortBy(key) {
-  const lg = lgActive(); if (!lg) return;
-  const dir = (_lgStSort.key === key) ? -_lgStSort.dir : (key === 'teamName' ? 1 : -1);
-  _lgStSort = { key, dir };
+// Reorder lg.standings by the current sort. Returns false when the table is in manual order (nothing
+// to do) so callers can word their status message honestly. Does NOT save or re-render.
+function lgStApplySort(lg) {
+  const { key, dir } = _lgStSort;
+  if (!lg || !key) return false;
   lgStEnsureRows(lg);
+  if (key === 'auto') { lgSortManualStandings(lg); return true; }   // points, then the league tiebreak
   const nameOf = (s) => { const tm = (lg.teams || []).find((t) => t.id === s.teamId); return tm ? lgResolveTeam(tm).name : ''; };
-  const val = (s) => key === 'diff' ? ((s.gf || 0) - (s.ga || 0)) : (s[key] || 0);
-  lg.standings.sort((a, b) => key === 'teamName' ? nameOf(a).localeCompare(nameOf(b)) * dir : (val(a) - val(b)) * dir);
+  lg.standings.sort((a, b) => key === 'teamName'
+    ? nameOf(a).localeCompare(nameOf(b)) * dir
+    : (lgStSortValue(a, key) - lgStSortValue(b, key)) * dir);
+  return true;
+}
+function lgStSortBy(key, keepDir) {
+  const lg = lgActive(); if (!lg) return;
+  const dir = keepDir ? _lgStSort.dir
+    : (_lgStSort.key === key) ? -_lgStSort.dir
+    : (LG_SORT_ASC.has(key) ? 1 : -1);
+  _lgStSort = { key, dir };
+  lgStSaveSort();
+  lgStApplySort(lg);
   lgSave(); lgRenderStandingsTab();
 }
 
@@ -392,6 +601,50 @@ function lgRenderDivMgr() {
   }));
 }
 
+// ── Standings source mode ────────────────────────────────────────────────────
+// 'schedule' — the table is derived from results on the Schedule tab (Recalculate rebuilds it).
+// 'manual'   — the table IS the record. Nothing has to exist on the schedule; points derive from
+//              the scoring rules as you type W/L/T, and the drift banner + Recalculate stand down
+//              so a hand-kept table is never second-guessed or overwritten.
+// Existing leagues default to 'schedule', so nothing changes for anyone already using it that way.
+function lgStandingsMode(lg) { return (lg && lg.standingsMode === 'manual') ? 'manual' : 'schedule'; }
+function lgStandingsRow(lg, teamId) {
+  lg.standings = lg.standings || [];
+  let s = lg.standings.find((x) => x.teamId === teamId);
+  if (!s) { s = { teamId, w: 0, l: 0, t: 0, gf: 0, ga: 0, pts: 0, subW: 0, subL: 0, form: [], streak: '' }; lg.standings.push(s); }
+  return s;
+}
+// Points from the league's own scoring rules. Skipped when the producer has typed a points value by
+// hand (ptsLocked) — an override should survive the next W/L edit rather than being stomped.
+function lgApplyScoring(lg, s) {
+  if (s.ptsLocked) return s.pts || 0;
+  const sc = lg.scoring || {};
+  const ptsWin = sc.win ?? 3, ptsLoss = sc.loss ?? 0, ptsDraw = sc.draw ?? 1, ptsOtw = sc.otw ?? ptsWin;
+  s.pts = (s.w || 0) * ptsWin + (s.otw || 0) * (ptsOtw - ptsWin) + (s.t || 0) * ptsDraw + (s.l || 0) * ptsLoss;
+  return s.pts;
+}
+function lgRecalcStreak(s) {
+  const f = s.form || [];
+  if (!f.length) { s.streak = ''; return; }
+  const last = f[f.length - 1]; let n = 0;
+  for (let i = f.length - 1; i >= 0 && f[i] === last; i--) n++;
+  s.streak = last + n;
+}
+// Order a manual table the same way the schedule aggregation does, so both modes rank identically.
+function lgSortManualStandings(lg) {
+  const tb = lg.tiebreak || 'gd';
+  (lg.standings || []).sort((a, b) => {
+    if ((b.pts || 0) !== (a.pts || 0)) return (b.pts || 0) - (a.pts || 0);
+    if (tb === 'h2h') {
+      const ah = (a.h2h && a.h2h[b.teamId]) || 0, bh = (b.h2h && b.h2h[a.teamId]) || 0;
+      if (ah !== bh) return bh - ah;
+    }
+    const gd = ((b.gf || 0) - (b.ga || 0)) - ((a.gf || 0) - (a.ga || 0));
+    if (gd !== 0) return gd;
+    return (b.gf || 0) - (a.gf || 0);
+  });
+}
+
 function lgRenderStandingsTab() {
   const wrap = el('lg-standings'); const lg = lgActive(); if (!wrap || !lg) return;
   const playoffN = lg.playoffN || 4;
@@ -400,8 +653,50 @@ function lgRenderStandingsTab() {
   if (panel) panel.classList.toggle('lg2-st-compact', lgStPrefs().density === 'compact');
   document.querySelectorAll('#lg-st-density .seg-btn').forEach((b) => b.classList.toggle('active', b.dataset.d === lgStPrefs().density));
 
+  const mode = lgStandingsMode(lg);
+  const manual = mode === 'manual';
+  document.querySelectorAll('#lg-st-source .seg-btn').forEach((b) => b.classList.toggle('active', b.dataset.src === mode));
+  const srcNote = el('lg-st-source-note');
+  if (srcNote) srcNote.textContent = manual
+    ? 'The table is the record — type it in, or log results below. Points follow your scoring rules automatically.'
+    : 'Enter results on the Schedule tab, then Recalculate. Switch to Manual to type the table directly.';
+  const qr = el('lg-quick-result'); if (qr) qr.style.display = manual ? '' : 'none';
+  if (manual) lgRenderQuickResult();
+  const recalcBtn = el('lg-recalc');
+  if (recalcBtn) {
+    recalcBtn.disabled = manual;
+    recalcBtn.title = manual
+      ? 'Disabled in Manual mode — recalculating would overwrite the table you typed with the schedule.'
+      : 'Rebuild the table from the results on the Schedule tab';
+  }
+
+  // Sort-by control. Labels follow the game (Games/Maps, Goals/Rounds), and options that make no
+  // sense for this game (no sub-unit, no score unit) are left out rather than sorting by zeroes.
+  const sortSel = el('lg-st-sortby');
+  if (sortSel) {
+    const sortGs = lgGameStats(lg.game);
+    sortSel.innerHTML = LG_SORT_METRICS
+      .filter((m) => (!m.needsSub || sortGs.sub) && (!m.needsUnit || sortGs.unit))
+      .map((m) => {
+        let lbl = m.label;
+        if (sortGs.sub && (m.key === 'subW' || m.key === 'subL')) lbl = sortGs.sub.noun + (m.key === 'subW' ? ' won' : ' lost');
+        if (sortGs.unit && (m.key === 'gf' || m.key === 'ga')) lbl = sortGs.unit.noun + ' ' + (m.key === 'gf' ? 'for' : 'against');
+        return `<option value="${m.key}"${m.key === _lgStSort.key ? ' selected' : ''}>${esc(lbl)}</option>`;
+      }).join('');
+  }
+  const sortDirBtn = el('lg-st-sortdir');
+  if (sortDirBtn) {
+    const manualOrder = !_lgStSort.key;
+    sortDirBtn.disabled = manualOrder || _lgStSort.key === 'auto';
+    sortDirBtn.textContent = _lgStSort.dir < 0 ? '↓' : '↑';
+    sortDirBtn.title = sortDirBtn.disabled
+      ? 'Direction is fixed for this ordering'
+      : (_lgStSort.dir < 0 ? 'Highest first — click for lowest first' : 'Lowest first — click for highest first');
+  }
+
   const banner = el('lg-drift-banner');
-  if (banner) {
+  if (banner && manual) { banner.style.display = 'none'; banner.textContent = ''; }
+  else if (banner) {
     const drift = lgStandingsDrift(lg);
     if (!drift.inSync) {
       banner.style.cssText = 'display:flex;align-items:center;gap:8px;margin-bottom:10px;padding:8px 12px;border-radius:8px;background:rgba(201,138,31,.12);border:1px solid rgba(201,138,31,.35);color:#c98a1f;font-size:12px;font-weight:600;';
@@ -431,7 +726,7 @@ function lgRenderStandingsTab() {
   const rankedIds = new Set(ranked.map(s => s.teamId));
   const unranked = (lg.teams || []).filter(tm => !rankedIds.has(tm.id));
   const rows = [
-    ...ranked.map(s => { const tm = teamsMap[s.teamId]; return { teamId: tm.id, teamName: lgResolveTeam(tm).name, w: s.w || 0, l: s.l || 0, t: s.t || 0, gf: s.gf || 0, ga: s.ga || 0, pts: s.pts || 0, subW: s.subW || 0, subL: s.subL || 0, form: s.form || [], streak: s.streak || '' }; }),
+    ...ranked.map(s => { const tm = teamsMap[s.teamId]; return { teamId: tm.id, teamName: lgResolveTeam(tm).name, w: s.w || 0, l: s.l || 0, t: s.t || 0, gf: s.gf || 0, ga: s.ga || 0, pts: s.pts || 0, subW: s.subW || 0, subL: s.subL || 0, form: s.form || [], streak: s.streak || '', ptsLocked: !!s.ptsLocked }; }),
     ...unranked.map(tm => ({ teamId: tm.id, teamName: lgResolveTeam(tm).name, w: 0, l: 0, t: 0, gf: 0, ga: 0, pts: 0, subW: 0, subL: 0, form: [], streak: '' }))
   ];
 
@@ -463,7 +758,12 @@ function lgRenderStandingsTab() {
     if (showDraw) c += numInp(r, 't', 0);
     if (gs.sub) c += numInp(r, 'subW', 0) + numInp(r, 'subL', 0);
     if (u) c += numInp(r, 'gf', 0) + numInp(r, 'ga', 0) + `<td>${(r.gf - r.ga) >= 0 ? '+' : ''}${r.gf - r.ga}</td>`;
-    c += numInp(r, 'pts') + `<td class="lg2-form-cell">${formDots(r.form)}</td><td class="lg2-streak">${esc(r.streak)}</td>` + divSel(r);
+    // In manual mode points normally derive from the scoring rules; a typed value pins the cell
+    // (marked with a dot) until it's cleared, which hands the column back to the rules.
+    const ptsCell = manual
+      ? `<td><input type="number" class="input-text lg2-st-inp lg2-st-pts${r.ptsLocked ? ' pinned' : ''}" data-tid="${r.teamId}" data-key="pts" value="${r.pts}" title="${r.ptsLocked ? 'Overridden by hand — clear the field to go back to the scoring rules' : 'Derived from your scoring rules — type a value to override'}"></td>`
+      : numInp(r, 'pts');
+    c += ptsCell + `<td class="lg2-form-cell">${formDots(r.form)}</td><td class="lg2-streak">${esc(r.streak)}</td>` + divSel(r);
     return `<tr data-tid="${r.teamId}" draggable="true" class="lg2-st-row${zone}${cut}">${c}</tr>`;
   };
   const tableFor = (groupRows) => `<div class="lg2-st-scroll"><table class="lg2-st-table"><thead><tr>${head}</tr></thead><tbody>${groupRows.map((r, i) => rowHtml(r, i + 1)).join('')}</tbody></table></div>`;
@@ -507,17 +807,114 @@ function lgRenderStandingsTab() {
       if (from === -1 || to === -1) return;
       const [item] = lg.standings.splice(from, 1);
       lg.standings.splice(to, 0, item);
+      // A hand-dragged order IS the order — drop back to manual so the next Recalculate doesn't
+      // quietly re-sort it out from under the producer.
+      _lgStSort = { key: '', dir: _lgStSort.dir }; lgStSaveSort();
       lgRenderStandingsTab(); lgSave();
     });
   });
 
   wrap.querySelectorAll('.lg2-st-inp').forEach((inp) => inp.addEventListener('change', () => {
-    let s = (lg.standings || []).find((x) => x.teamId === inp.dataset.tid);
-    if (!s) { s = { teamId: inp.dataset.tid, w: 0, l: 0, t: 0, gf: 0, ga: 0, pts: 0 }; lg.standings = lg.standings || []; lg.standings.push(s); }
-    s[inp.dataset.key] = Number(inp.value) || 0;
+    const s = lgStandingsRow(lg, inp.dataset.tid);
+    const key = inp.dataset.key;
+    // Typing a points value is an explicit override; typing W/L/T re-derives points from the
+    // scoring rules so a manual table never needs the points column filled in by hand.
+    // Clearing the points field releases the override and hands the column back to the rules.
+    if (key === 'pts' && manual && inp.value.trim() === '') {
+      delete s.ptsLocked; lgApplyScoring(lg, s);
+    } else {
+      s[key] = Number(inp.value) || 0;
+      if (key === 'pts' && manual) s.ptsLocked = true;
+      else if (manual && (key === 'w' || key === 'l' || key === 't')) lgApplyScoring(lg, s);
+    }
     lgSave();
+    if (manual) { lgRenderStandingsTab(); lgRenderTeams(); }
   }));
 }
+
+// Manual mode: log a result that never went near the schedule. Applies to BOTH teams at once —
+// record, for/against, points, last-5 form and streak — which is the whole point of the shortcut.
+let _lgQrUndo = null;   // { leagueId, rows:[{teamId, snap}] } — one level of undo, enough to fix a typo
+function lgRenderQuickResult() {
+  const lg = lgActive(); if (!lg) return;
+  const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const opts = (lg.teams || []).map((tm) => `<option value="${esc(tm.id)}">${esc(lgResolveTeam(tm).name)}</option>`).join('');
+  const a = el('lg-qr-a'), b = el('lg-qr-b');
+  [a, b].forEach((sel, i) => {
+    if (!sel) return;
+    const keep = sel.value;
+    sel.innerHTML = '<option value="">— Team —</option>' + opts;
+    if (keep && (lg.teams || []).some((t) => t.id === keep)) sel.value = keep;
+    else if ((lg.teams || [])[i]) sel.value = (lg.teams || [])[i].id;
+  });
+  const undo = el('lg-qr-undo'); if (undo) undo.disabled = !(_lgQrUndo && _lgQrUndo.leagueId === lg.id);
+  const note = el('lg-qr-note');
+  if (note) note.textContent = (lg.teams || []).length < 2 ? 'Add at least two teams first.' : '';
+}
+el('lg-qr-add')?.addEventListener('click', () => {
+  const lg = lgActive(); if (!lg) return;
+  const ta = (el('lg-qr-a') || {}).value, tb = (el('lg-qr-b') || {}).value;
+  if (!ta || !tb) { lgStatus('Pick both teams first.', false); return; }
+  if (ta === tb) { lgStatus('Pick two different teams.', false); return; }
+  const sa = Number((el('lg-qr-sa') || {}).value), sb = Number((el('lg-qr-sb') || {}).value);
+  if (!Number.isFinite(sa) || !Number.isFinite(sb) || (el('lg-qr-sa').value === '' && el('lg-qr-sb').value === '')) {
+    lgStatus('Enter a score for both teams.', false); return;
+  }
+  const ot = !!(el('lg-qr-ot') || {}).checked;
+  const rowA = lgStandingsRow(lg, ta), rowB = lgStandingsRow(lg, tb);
+  _lgQrUndo = { leagueId: lg.id, rows: [{ teamId: ta, snap: JSON.parse(JSON.stringify(rowA)) }, { teamId: tb, snap: JSON.parse(JSON.stringify(rowB)) }] };
+  const apply = (s, mine, theirs) => {
+    s.gf = (s.gf || 0) + mine; s.ga = (s.ga || 0) + theirs;
+    s.form = (s.form || []).concat([mine > theirs ? 'W' : mine < theirs ? 'L' : 'D']).slice(-5);
+    if (mine > theirs) { s.w = (s.w || 0) + 1; if (ot) s.otw = (s.otw || 0) + 1; }
+    else if (mine < theirs) s.l = (s.l || 0) + 1;
+    else s.t = (s.t || 0) + 1;
+    lgRecalcStreak(s); lgApplyScoring(lg, s);
+  };
+  apply(rowA, sa, sb); apply(rowB, sb, sa);
+  // Head-to-head, so the h2h tiebreak keeps working for hand-kept tables too.
+  if (sa !== sb) { const win = sa > sb ? rowA : rowB, lose = sa > sb ? rowB : rowA; win.h2h = win.h2h || {}; win.h2h[lose.teamId] = (win.h2h[lose.teamId] || 0) + 1; }
+  lgSortManualStandings(lg); lgSave();
+  lgRenderStandingsTab(); lgRenderTeams();
+  const nm = (id) => { const t = (lg.teams || []).find((x) => x.id === id); return t ? lgResolveTeam(t).name : 'Team'; };
+  lgStatus(`Logged ${nm(ta)} ${sa}-${sb} ${nm(tb)}.`, true);
+  const ea = el('lg-qr-sa'), eb = el('lg-qr-sb'), eo = el('lg-qr-ot');
+  if (ea) ea.value = ''; if (eb) eb.value = ''; if (eo) eo.checked = false;
+});
+el('lg-qr-undo')?.addEventListener('click', () => {
+  const lg = lgActive(); if (!lg || !_lgQrUndo || _lgQrUndo.leagueId !== lg.id) return;
+  _lgQrUndo.rows.forEach(({ teamId, snap }) => {
+    const i = (lg.standings || []).findIndex((x) => x.teamId === teamId);
+    if (i >= 0) lg.standings[i] = snap;
+  });
+  _lgQrUndo = null;
+  lgSortManualStandings(lg); lgSave(); lgRenderStandingsTab(); lgRenderTeams();
+  lgStatus('Last logged result undone.', true);
+});
+// Sort-by dropdown + direction toggle. Both just drive lgStSortBy, which is the same path the
+// clickable column headers use, so the arrow in the header always matches the dropdown.
+el('lg-st-sortby')?.addEventListener('change', function () {
+  lgStSortBy(this.value);
+  lgStatus(this.value ? `Standings sorted by ${lgStSortLabel()}.` : 'Standings back to manual order — drag rows to arrange them.', true);
+});
+el('lg-st-sortdir')?.addEventListener('click', () => {
+  if (!_lgStSort.key || _lgStSort.key === 'auto') return;
+  _lgStSort = { key: _lgStSort.key, dir: -_lgStSort.dir };
+  lgStSortBy(_lgStSort.key, true);
+});
+
+// Switching source mode. Going manual seeds a row for every team so the table is immediately
+// typeable, and carries over whatever the schedule had already produced rather than starting at 0.
+el('lg-st-source')?.addEventListener('click', (e) => {
+  const b = e.target.closest('.seg-btn'); if (!b) return;
+  const lg = lgActive(); if (!lg) return;
+  lg.standingsMode = b.dataset.src === 'manual' ? 'manual' : 'schedule';
+  if (lg.standingsMode === 'manual') (lg.teams || []).forEach((tm) => lgStandingsRow(lg, tm.id));
+  lgSave(); lgRenderStandingsTab(); lgRenderTeams();
+  lgStatus(lg.standingsMode === 'manual'
+    ? 'Manual standings — type the table directly; the schedule no longer overwrites it.'
+    : 'Standings now follow the schedule — use Recalculate to rebuild from results.', true);
+});
 
 // ── Playoff bracket (single-elimination, seeded from standings) ──────────────
 // Stored client-side on lg.bracket (the server preserves unknown league fields), and pushed to the
@@ -829,6 +1226,153 @@ function lgRenderStatsTab() {
   }));
 }
 
+// ── Power rankings ────────────────────────────────────────────────────────────
+// Standings answer "who has the most points"; rankings answer "who is playing best right now".
+// The rating blends four normalised components so a 6-2 team that has beaten the top of the table
+// outranks a 6-2 team that farmed the bottom, and a cold streak actually costs you position:
+//   win%  (35) · points per match (20) · unit differential per match (20) · recent form (15)
+//   · strength of schedule — mean opponent points-per-match (10)
+// Teams with no completed matches score 0 and sort last. A producer can pin a team to a fixed
+// position (lg.rankPins) when the eye test beats the maths — pins survive every recompute.
+const LG_RANK_W = { win: 35, ppm: 20, diff: 20, form: 15, sos: 10 };
+function lgPowerRankings(lg) {
+  const st = {}; (lg.standings || []).forEach((s) => { st[s.teamId] = s; });
+  const teams = (lg.teams || []);
+  // Per-team played counts and opponent lists, straight from the schedule.
+  const opp = {}; const played = {};
+  teams.forEach((t) => { opp[t.id] = []; played[t.id] = 0; });
+  (lg.schedule || []).forEach((m) => {
+    const done = (Array.isArray(m.games) && m.games.length) || (m.result && m.result.scoreA != null && m.result.scoreB != null);
+    if (!done || !opp[m.teamA] || !opp[m.teamB]) return;
+    opp[m.teamA].push(m.teamB); opp[m.teamB].push(m.teamA);
+    played[m.teamA]++; played[m.teamB]++;
+  });
+  // Matches played is whichever is larger: fixtures found on the schedule, or the team's own W-L-T.
+  // A hand-kept table has no schedule rows at all, and must still rank properly.
+  teams.forEach((tm) => {
+    const s = st[tm.id] || {};
+    played[tm.id] = Math.max(played[tm.id] || 0, (s.w || 0) + (s.l || 0) + (s.t || 0));
+  });
+  const ppmOf = (tid) => { const s = st[tid] || {}; const n = played[tid] || 0; return n ? (s.pts || 0) / n : 0; };
+  const raw = teams.map((tm) => {
+    const s = st[tm.id] || {};
+    const n = played[tm.id] || 0;
+    const w = s.w || 0, l = s.l || 0, t = s.t || 0;
+    const decided = w + l + t;
+    const winPct = decided ? (w + t * 0.5) / decided : 0;
+    const ppm = ppmOf(tm.id);
+    const diffPm = n ? ((s.gf || 0) - (s.ga || 0)) / n : 0;
+    // Recent form: last 5 results, most recent weighted heaviest (5x down to 1x).
+    const f = (s.form || []).slice(-5);
+    let fNum = 0, fDen = 0;
+    f.forEach((res, i) => { const wt = i + 1; fDen += wt; fNum += wt * (res === 'W' ? 1 : res === 'D' ? 0.5 : 0); });
+    const form = fDen ? fNum / fDen : 0;
+    const sos = opp[tm.id].length ? opp[tm.id].reduce((a, o) => a + ppmOf(o), 0) / opp[tm.id].length : 0;
+    return { teamId: tm.id, name: lgResolveTeam(tm).name, logo: lgResolveTeam(tm).logo || null, n, winPct, ppm, diffPm, form, sos, rec: `${w}-${l}${t ? '-' + t : ''}` };
+  });
+  // Normalise each component to 0..1 across the league before weighting, so the rating is
+  // comparable regardless of the game's scoring scale.
+  const norm = (key) => {
+    const vals = raw.filter((r) => r.n > 0).map((r) => r[key]);
+    const lo = Math.min(...vals, 0), hi = Math.max(...vals, 0);
+    return (v) => (hi === lo ? (hi === 0 ? 0 : 1) : (v - lo) / (hi - lo));
+  };
+  const nPpm = norm('ppm'), nDiff = norm('diffPm'), nSos = norm('sos');
+  raw.forEach((r) => {
+    r.rating = r.n === 0 ? 0 : Math.round(
+      LG_RANK_W.win * r.winPct + LG_RANK_W.ppm * nPpm(r.ppm) + LG_RANK_W.diff * nDiff(r.diffPm)
+      + LG_RANK_W.form * r.form + LG_RANK_W.sos * nSos(r.sos)
+    );
+  });
+  raw.sort((a, b) => b.rating - a.rating || b.winPct - a.winPct || a.name.localeCompare(b.name));
+  // Apply producer pins: a pinned team is lifted out and re-inserted at its 1-based slot.
+  const pins = lg.rankPins || {};
+  const pinned = raw.filter((r) => pins[r.teamId]).sort((a, b) => pins[a.teamId] - pins[b.teamId]);
+  if (pinned.length) {
+    const rest = raw.filter((r) => !pins[r.teamId]);
+    pinned.forEach((p) => rest.splice(Math.max(0, Math.min(rest.length, pins[p.teamId] - 1)), 0, p));
+    rest.forEach((r, i) => { r.rank = i + 1; r.pinned = !!pins[r.teamId]; });
+    return rest;
+  }
+  raw.forEach((r, i) => { r.rank = i + 1; });
+  return raw;
+}
+
+function lgRenderRankingsTab() {
+  const wrap = el('lg-rank-board'); const lg = lgActive(); if (!wrap || !lg) return;
+  const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const rows = lgPowerRankings(lg);
+  const note = el('lg-rank-note');
+  if (!rows.length) { wrap.innerHTML = '<div class="lg-empty">Add teams to build power rankings.</div>'; if (note) note.textContent = ''; return; }
+  // Movement is measured against the last snapshot the producer took, not against the standings —
+  // that's what makes "up 3 this week" mean something on air.
+  const snap = lg.rankSnapshot || null;
+  const prev = {}; if (snap && Array.isArray(snap.order)) snap.order.forEach((tid, i) => { prev[tid] = i + 1; });
+  if (note) note.textContent = snap ? `Movement since ${new Date(snap.at).toLocaleDateString()} — ${snap.label || 'last snapshot'}` : 'Take a snapshot to start tracking week-over-week movement.';
+  const moveCell = (r) => {
+    if (!snap || prev[r.teamId] == null) return '<span class="lgrk-move lgrk-move-new">NEW</span>';
+    const d = prev[r.teamId] - r.rank;
+    if (d === 0) return '<span class="lgrk-move lgrk-move-flat">&#8211;</span>';
+    return `<span class="lgrk-move lgrk-move-${d > 0 ? 'up' : 'down'}">${d > 0 ? '&#9650;' : '&#9660;'}${Math.abs(d)}</span>`;
+  };
+  const pins = lg.rankPins || {};
+  wrap.innerHTML = `<div class="lg2-st-scroll"><table class="lg2-st-table lgrk-table">
+    <thead><tr><th>#</th><th></th><th class="lgrk-th-team">Team</th><th title="Series record">Rec</th>
+      <th title="Composite power rating out of 100">Rating</th><th title="Share of series won">Win%</th>
+      <th title="Average league points per match">PPM</th><th title="Average unit differential per match">Diff/M</th>
+      <th title="Weighted last-5 form">Form</th><th title="Strength of schedule — mean opponent points per match">SOS</th>
+      <th title="Pin this team to a fixed position">Pin</th></tr></thead>
+    <tbody>${rows.map((r) => `<tr class="lgrk-row${r.pinned ? ' lgrk-pinned' : ''}">
+      <td class="lg2-pos">${r.rank}</td>
+      <td class="lgrk-move-cell">${moveCell(r)}</td>
+      <td class="lgrk-team"><img class="lgov-snap-logo" src="${r.logo || gameLogo()}" onerror="this.style.visibility='hidden'"><span>${esc(r.name)}</span></td>
+      <td class="lgrk-rec">${esc(r.rec)}</td>
+      <td class="lgrk-rating"><span class="lgrk-bar"><span class="lgrk-bar-fill" style="width:${Math.max(2, r.rating)}%"></span></span><b>${r.rating}</b></td>
+      <td>${r.n ? Math.round(r.winPct * 100) + '%' : '—'}</td>
+      <td>${r.n ? r.ppm.toFixed(2) : '—'}</td>
+      <td>${r.n ? (r.diffPm > 0 ? '+' : '') + r.diffPm.toFixed(1) : '—'}</td>
+      <td>${r.n ? Math.round(r.form * 100) + '%' : '—'}</td>
+      <td>${r.n ? r.sos.toFixed(2) : '—'}</td>
+      <td><input type="number" class="input-text lgrk-pin" data-tid="${r.teamId}" min="1" max="${rows.length}" value="${pins[r.teamId] || ''}" placeholder="—" title="Force this team to a position"></td>
+    </tr>`).join('')}</tbody></table></div>`;
+  wrap.querySelectorAll('.lgrk-pin').forEach((inp) => inp.addEventListener('change', () => {
+    lg.rankPins = lg.rankPins || {};
+    const v = parseInt(inp.value, 10);
+    if (!v || v < 1) delete lg.rankPins[inp.dataset.tid]; else lg.rankPins[inp.dataset.tid] = v;
+    lgSave(); lgRenderRankingsTab();
+  }));
+}
+
+el('lg-rank-snapshot')?.addEventListener('click', () => {
+  const lg = lgActive(); if (!lg) return;
+  const rows = lgPowerRankings(lg);
+  if (!rows.length) { lgStatus('Nothing to snapshot yet.', false); return; }
+  lg.rankSnapshot = { at: Date.now(), label: (el('lg-rank-label')?.value || '').trim(), order: rows.map((r) => r.teamId) };
+  lgSave(); lgRenderRankingsTab();
+  lgStatus('Rankings snapshot taken — movement now measures from here.', true);
+});
+el('lg-rank-clear-pins')?.addEventListener('click', () => {
+  const lg = lgActive(); if (!lg) return;
+  lg.rankPins = {}; lgSave(); lgRenderRankingsTab(); lgStatus('Manual pins cleared.', true);
+});
+// Rankings ride the standings overlay: same table shape, different title and ordering, so no new
+// browser source is needed on the producer's OBS scene.
+function lgPushRankingsToOverlay(topN) {
+  const lg = lgActive(); if (!lg) return;
+  let rows = lgPowerRankings(lg);
+  if (!rows.length) { lgStatus('No rankings to push.', false); return; }
+  if (topN > 0) rows = rows.slice(0, topN);
+  const st = {}; (lg.standings || []).forEach((s) => { st[s.teamId] = s; });
+  send('set_standings', {
+    visible: true,
+    title: [lg.abbr || lg.name, 'Power Rankings'].filter(Boolean).join(' '),
+    gamesLabel: '',
+    rows: rows.map((r) => { const s = st[r.teamId] || {}; return { placement: r.rank, name: r.name, logo: r.logo, wins: s.w || 0, losses: s.l || 0, points: r.rating, gameWins: s.subW || 0, gameLosses: s.subL || 0 }; })
+  });
+  lgStatus(`Power rankings pushed to the standings overlay${topN > 0 ? ` (top ${topN})` : ''}.`, true);
+}
+el('lg-rank-push')?.addEventListener('click', () => lgPushRankingsToOverlay(parseInt((el('lg-rank-topn') || {}).value, 10) || 0));
+
 // ── Ballchasing.com tab — group status, replay upload, stats refresh. A SEPARATE data sink from
 // lg.stats (the manual tab above): this never overwrites what a producer typed in by hand. ──
 function lgRenderBallchasingTab() {
@@ -986,14 +1530,30 @@ window._handleBallchasingLeagueResult = function (data) {
 
 function lgComputeStandingsFromSchedule() {
   const lg = lgActive(); if (!lg) return;
-  const completed = (lg.schedule || []).filter(m => m.result && (m.result.scoreA != null || m.result.scoreB != null));
-  if (!completed.length) {
-    lgStatus('No completed matches in schedule — add results first, then recalculate.', false);
+  // In manual mode the table is the record — rebuilding from the schedule would silently erase
+  // every off-schedule result the producer entered by hand.
+  if (lgStandingsMode(lg) === 'manual') {
+    lgStatus('Standings are set to Manual — switch the source to "From schedule" first if you want to rebuild from fixtures.', false);
     return;
   }
-  lg.standings = lgAggregateFromSchedule(lg);
+  const completed = (lg.schedule || []).filter(m => m.result && (m.result.scoreA != null || m.result.scoreB != null));
+  if (!completed.length) {
+    // Nothing to aggregate — but still do the half of the job that CAN be done (seed a row per team
+    // and apply the chosen ordering) rather than dead-ending on an error.
+    lgStEnsureRows(lg);
+    const sorted = lgStApplySort(lg);
+    lgSave(); lgRenderStandingsTab();
+    lgStatus(sorted
+      ? `No completed matches in the schedule yet — table re-sorted by ${lgStSortLabel()}. Add results to fill in the numbers.`
+      : 'No completed matches in schedule — add results first, then recalculate.', false);
+    return;
+  }
+  lg.standings = lgAggregateFromSchedule(lg);   // comes back in league-rules order
+  lgStApplySort(lg);                            // ...then honour the producer's chosen metric
   lgRenderStandingsTab(); lgSave();
-  lgStatus('Standings recalculated from schedule.', true);
+  lgStatus(_lgStSort.key && _lgStSort.key !== 'auto'
+    ? `Standings recalculated from schedule, sorted by ${lgStSortLabel()}.`
+    : 'Standings recalculated from schedule.', true);
 }
 
 // Diff the stored standings against a fresh schedule-based recompute, WITHOUT mutating anything —
@@ -1168,8 +1728,8 @@ function lgRenderScheduleTab() {
     const ta = (lg.teams || []).find((t) => t.id === m.teamA), tb = (lg.teams || []).find((t) => t.id === m.teamB);
     if (!ta || !tb) { lgStatus('Add both teams to the Roster tab first.', false); return; }
     const ra = lgResolveTeam(ta), rb = lgResolveTeam(tb);
-    send('set_team', { side: 'blue',   name: ra.name, logo: ra.logo || null, players: ra.players.map((p) => ({ name: p.name, role: p.role })) });
-    send('set_team', { side: 'orange', name: rb.name, logo: rb.logo || null, players: rb.players.map((p) => ({ name: p.name, role: p.role })) });
+    send('set_team', { side: 'blue',   name: ra.name, logo: ra.logo || null, players: ra.players });
+    send('set_team', { side: 'orange', name: rb.name, logo: rb.logo || null, players: rb.players });
     send('reset_series'); lgStatus(`${ra.name} vs ${rb.name} pushed live.`, true);
   }));
   wrap.querySelectorAll('.lg2-match-record').forEach((b) => b.addEventListener('click', () => {
@@ -1425,15 +1985,42 @@ function lgArchiveSeason() {
       starterCount: lg.starterCount || 3,
       teams: (lg.teams || []).map((t) => ({ id: t.id, teamName: t.teamName || t.name || '' })),
       standings: (lg.standings || []).map((s) => ({ ...s })),
-      schedule: (lg.schedule || []).map((m) => ({ ...m, result: m.result ? { ...m.result } : m.result }))
+      schedule: (lg.schedule || []).map((m) => ({ ...m, result: m.result ? { ...m.result } : m.result })),
+      ballchasing: lgSnapshotBallchasing(lg),
+      // Manual in-game Stats-tab totals (per team) also carry no season boundary of their own —
+      // team ids persist across archive ("roster carries over"), so without this a returning
+      // team's new-season Stats tab silently started from LAST season's cumulative numbers
+      // instead of zero, and there was nowhere to recover the old totals from either.
+      stats: JSON.parse(JSON.stringify(lg.stats || {}))
     });
     lg.schedule = [];
     lg.standings = [];
     lg.status = 'active';
     lg.season = '';
-    lgRenderOverview(); lgRenderStandingsTab(); lgRenderScheduleTab(); lgRenderSettingsTab(); lgSave();
+    lg.stats = {};
+    lgResetBallchasing(lg);
+    lgRenderOverview(); lgRenderStandingsTab(); lgRenderScheduleTab(); lgRenderSettingsTab(); lgRenderStatsTab(); lgSave();
     lgStatus('Season archived. Schedule/standings cleared — roster kept.', true);
   });
+}
+
+// Ballchasing has no season boundary of its own (a group is just an ever-growing bucket of replays),
+// so an archive/restore must explicitly snapshot + reset it — otherwise leaving groupId wired up would
+// silently blend next season's replays into a group still tagged with last season's stats. Snapshot
+// only if licensing was ever enabled (groupId set); a league that never touched Ballchasing gets null.
+function lgSnapshotBallchasing(lg) {
+  if (!lg.ballchasing || !lg.ballchasing.groupId) return null;
+  return {
+    groupId: lg.ballchasing.groupId,
+    groupUrl: lg.ballchasing.groupUrl || '',
+    ballchasingStats: JSON.parse(JSON.stringify(lg.ballchasingStats || {})),
+    ballchasingPlayers: JSON.parse(JSON.stringify(lg.ballchasingPlayers || {}))
+  };
+}
+function lgResetBallchasing(lg) {
+  lg.ballchasing = { groupId: '', groupUrl: '', enabledAt: 0, playerLinks: [], pendingReplays: [], mvpCounts: {}, processedReplayIds: [], lastSyncedAt: null, lastRefreshNote: '' };
+  lg.ballchasingStats = {};
+  lg.ballchasingPlayers = {};
 }
 
 // Restore an archived season back to live — the CURRENT live season is pushed onto seasonHistory
@@ -1455,7 +2042,9 @@ function lgRestoreSeason(seasonHistoryId) {
       starterCount: lg.starterCount || 3,
       teams: (lg.teams || []).map((t) => ({ id: t.id, teamName: t.teamName || t.name || '' })),
       standings: (lg.standings || []).map((s) => ({ ...s })),
-      schedule: (lg.schedule || []).map((m) => ({ ...m, result: m.result ? { ...m.result } : m.result }))
+      schedule: (lg.schedule || []).map((m) => ({ ...m, result: m.result ? { ...m.result } : m.result })),
+      ballchasing: lgSnapshotBallchasing(lg),
+      stats: JSON.parse(JSON.stringify(lg.stats || {}))
     });
     lg.seasonHistory = lg.seasonHistory.filter((s) => s.id !== seasonHistoryId);
     lg.teams = snap.teams.map((t) => ({ id: t.id, teamName: t.teamName }));
@@ -1466,7 +2055,19 @@ function lgRestoreSeason(seasonHistoryId) {
     lg.tiebreak = snap.tiebreak || 'gd';
     lg.playoffN = snap.playoffN || 4;
     lg.starterCount = snap.starterCount || 3;
-    lgRenderOverview(); lgRenderTeams(); lgRenderStandingsTab(); lgRenderScheduleTab(); lgRenderSettingsTab(); lgSave();
+    // Restore that season's own manual Stats-tab totals instead of leaving the just-archived
+    // current season's numbers attached to the restored one.
+    lg.stats = JSON.parse(JSON.stringify(snap.stats || {}));
+    // Restore that season's own Ballchasing snapshot (if it had one) instead of leaving the
+    // just-archived current season's group/stats misattributed to the restored season.
+    if (snap.ballchasing && snap.ballchasing.groupId) {
+      lg.ballchasing = { groupId: snap.ballchasing.groupId, groupUrl: snap.ballchasing.groupUrl || '', enabledAt: 0, playerLinks: [], pendingReplays: [], mvpCounts: {}, processedReplayIds: [], lastSyncedAt: null, lastRefreshNote: '' };
+      lg.ballchasingStats = JSON.parse(JSON.stringify(snap.ballchasing.ballchasingStats || {}));
+      lg.ballchasingPlayers = JSON.parse(JSON.stringify(snap.ballchasing.ballchasingPlayers || {}));
+    } else {
+      lgResetBallchasing(lg);
+    }
+    lgRenderOverview(); lgRenderTeams(); lgRenderStandingsTab(); lgRenderScheduleTab(); lgRenderSettingsTab(); lgRenderStatsTab(); lgSave();
     lgStatus('Archived season restored to live.', true);
   });
 }
@@ -1527,8 +2128,8 @@ function lgRenderNextMatches() {
     const ta = (lg.teams || []).find((t) => t.id === m.teamA), tb = (lg.teams || []).find((t) => t.id === m.teamB);
     if (!ta || !tb) { lgStatus('Add both teams to the Roster tab first.', false); return; }
     const ra = lgResolveTeam(ta), rb = lgResolveTeam(tb);
-    send('set_team', { side: 'blue',   name: ra.name, logo: ra.logo || null, players: (ra.players || []).map((p) => ({ name: p.name, role: p.role })) });
-    send('set_team', { side: 'orange', name: rb.name, logo: rb.logo || null, players: (rb.players || []).map((p) => ({ name: p.name, role: p.role })) });
+    send('set_team', { side: 'blue',   name: ra.name, logo: ra.logo || null, players: (ra.players || []) });
+    send('set_team', { side: 'orange', name: rb.name, logo: rb.logo || null, players: (rb.players || []) });
     send('reset_series'); lgStatus(`${ra.name} vs ${rb.name} pushed live.`, true);
   }));
 }
@@ -1609,6 +2210,49 @@ function lgRenderLeaders() {
   </div>`).join('');
 }
 
+// ── Broadcast card — the league's graphics rack ──────────────────────────────
+// One row per league-driven overlay: what it shows, whether it's currently on air, and its own
+// Push / Hide. Standings and Power Rankings deliberately share the standings browser source (same
+// table shape), so the on-air pill names whichever was pushed last rather than lighting both.
+let _lgStandingsFeed = 'standings';   // 'standings' | 'rankings' — which one last went up
+function lgBroadcastRows() {
+  const s = currentState || {};
+  const up = s.upcoming || {}, stn = s.standings || {}, lst = s.leagueStats || {}, lb = s.leagueLeaderboard || {};
+  return [
+    { key: 'standings', title: 'Standings', sub: 'League table with form', live: !!stn.visible && _lgStandingsFeed === 'standings',
+      push: () => lgPushStandingsToOverlay(parseInt((el('lgov-topn') || {}).value, 10) || 0), hide: () => send('set_standings', { visible: false }) },
+    { key: 'rankings', title: 'Power Rankings', sub: 'Computed form-weighted order', live: !!stn.visible && _lgStandingsFeed === 'rankings',
+      push: () => lgPushRankingsToOverlay(parseInt((el('lgov-topn') || {}).value, 10) || 0), hide: () => send('set_standings', { visible: false }) },
+    { key: 'schedule', title: 'Schedule', sub: 'Weekly fixtures and results', live: !!up.visible && up.source === 'league',
+      push: () => lgPushScheduleToOverlay(), hide: () => send('set_upcoming', { visible: false }) },
+    { key: 'stats', title: 'Team Stats', sub: 'Season stat board', live: !!lst.visible,
+      push: () => { const b = el('lg-stats-push'); if (b) b.click(); else lgStatus('Open the Stats tab once to push team stats.', false); }, hide: () => send('set_league_stats', { visible: false }) },
+    { key: 'leaderboard', title: 'Player Leaderboard', sub: 'Top players by stat', live: !!lb.visible,
+      push: () => { const b = el('lg-bc-push-leaderboard'); const tab = el('lg2-tab-ballchasing'); if (b && tab && tab.style.display !== 'none') b.click(); else lgStatus('Player leaderboard needs Rocket League + a Ballchasing refresh.', false); }, hide: () => send('set_league_leaderboard', { visible: false }) }
+  ];
+}
+function lgRenderBroadcastCard() {
+  const wrap = el('lgov-gfx-rack'); if (!wrap) return;
+  const rows = lgBroadcastRows();
+  wrap.innerHTML = rows.map((r) => `<div class="lgov-gfx${r.live ? ' on-air' : ''}" data-k="${r.key}">
+    <span class="lgov-gfx-dot"></span>
+    <span class="lgov-gfx-txt"><b>${r.title}</b><i>${r.sub}</i></span>
+    ${r.live ? '<span class="lgov-gfx-live">ON AIR</span>' : ''}
+    <button class="btn btn-ghost btn-xs lgov-gfx-hide" data-k="${r.key}" title="Hide this graphic">Hide</button>
+    <button class="btn btn-primary btn-xs lgov-gfx-push" data-k="${r.key}">Push</button>
+  </div>`).join('');
+  const byKey = Object.fromEntries(rows.map((r) => [r.key, r]));
+  wrap.querySelectorAll('.lgov-gfx-push').forEach((b) => b.addEventListener('click', () => {
+    const r = byKey[b.dataset.k]; if (!r) return;
+    if (r.key === 'standings' || r.key === 'rankings') _lgStandingsFeed = r.key;
+    r.push(); setTimeout(lgRenderBroadcastCard, 120);
+  }));
+  wrap.querySelectorAll('.lgov-gfx-hide').forEach((b) => b.addEventListener('click', () => {
+    const r = byKey[b.dataset.k]; if (!r) return;
+    r.hide(); lgStatus(`${r.title} hidden.`, true); setTimeout(lgRenderBroadcastCard, 120);
+  }));
+}
+
 function lgRenderOverview() {
   const lg = lgActive(); if (!lg) return;
   const schedule = lg.schedule || [];
@@ -1634,7 +2278,7 @@ function lgRenderOverview() {
     else { health.className = 'lgov-health lgov-health-ok'; health.textContent = 'Season complete — all matches played'; }
   }
   lgApplyOvLayout();
-  lgRenderStandingsSnap(); lgRenderLeaders();
+  lgRenderStandingsSnap(); lgRenderLeaders(); lgRenderBroadcastCard();
   lgRenderMatchup(); lgRenderRecentResults(); lgRenderNextMatches();
 }
 
@@ -1642,12 +2286,13 @@ function lgRenderOverview() {
 function lgSwitchTab(name) {
   _lgActiveTab = name;
   document.querySelectorAll('#lg2-tabs .lg2-tab').forEach((b) => b.classList.toggle('active', b.dataset.tab === name));
-  ['overview', 'roster', 'standings', 'schedule', 'bracket', 'stats', 'ballchasing', 'settings'].forEach((t) => {
+  ['overview', 'roster', 'standings', 'rankings', 'schedule', 'bracket', 'stats', 'ballchasing', 'settings'].forEach((t) => {
     const p = el('lg2-panel-' + t); if (p) p.style.display = t === name ? '' : 'none';
   });
   if (name === 'overview') lgRenderOverview();
   else if (name === 'roster') lgSetRosterView(_lgRosterView);
   else if (name === 'standings') lgRenderStandingsTab();
+  else if (name === 'rankings') lgRenderRankingsTab();
   else if (name === 'schedule') lgRenderScheduleTab();
   else if (name === 'bracket') lgRenderBracketTab();
   else if (name === 'stats') lgRenderStatsTab();
@@ -1714,7 +2359,16 @@ el('lg-startgg-import')?.addEventListener('click', () => {
   send('create_league_from_startgg', { input });
   lgStatus('Importing league from start.gg (teams + rosters)…');
 });
-el('lg-delete')?.addEventListener('click', () => { const lg = lgActive(); if (!lg) return; appConfirm('Delete this league?', 'Delete').then(ok => { if (!ok) return; lgLeagues = lgLeagues.filter((l) => l.id !== lg.id); lgActiveId = null; lgRender(); lgSave(); }); });
+// Delete now lives in Settings ▸ Danger Zone rather than beside the league name in the banner.
+function lgDeleteActiveLeague() {
+  const lg = lgActive(); if (!lg) return;
+  appConfirm(`Delete "${lg.name || 'this league'}"? Its schedule, standings, stats and archived seasons go with it.`, 'Delete').then((ok) => {
+    if (!ok) return;
+    lgLeagues = lgLeagues.filter((l) => l.id !== lg.id); lgActiveId = null; lgRender(); lgSave();
+  });
+}
+el('lg-delete')?.addEventListener('click', lgDeleteActiveLeague);
+el('lg-delete-settings')?.addEventListener('click', lgDeleteActiveLeague);
 el('lg-archive-season')?.addEventListener('click', () => lgArchiveSeason());
 el('lg-name')?.addEventListener('input', function () { const lg = lgActive(); if (lg) { lg.name = this.value; lgRenderList(); lgSave(); lgUpdateBanner(); } });
 el('lg-type')?.addEventListener('change', function () { const lg = lgActive(); if (lg) { lg.type = this.value; document.querySelectorAll('.lg-salary-field').forEach((e) => { e.style.display = this.value === 'salary' ? '' : 'none'; }); lgRenderTeams(); lgRenderList(); lgSave(); lgUpdateBanner(); } });
@@ -1853,11 +2507,9 @@ el('lgov-density')?.addEventListener('click', (e) => { const b = e.target.closes
 el('lgov-topn')?.addEventListener('change', () => lgRenderStandingsSnap());
 el('lgov-view-standings')?.addEventListener('click', () => lgSwitchTab('standings'));
 el('lgov-push-standings')?.addEventListener('click', () => { const n = parseInt((el('lgov-topn') || {}).value, 10) || 0; lgPushStandingsToOverlay(n); });
-el('lgov-push-standings2')?.addEventListener('click', () => { const n = parseInt((el('lgov-topn') || {}).value, 10) || 0; lgPushStandingsToOverlay(n); });
-el('lgov-push-schedule')?.addEventListener('click', () => lgPushScheduleToOverlay());
-el('lgov-push-stats')?.addEventListener('click', () => { const b = el('lg-stats-push'); if (b) b.click(); else lgStatus('Open the Stats tab once to push team stats.', false); });
-el('lgov-push-leaderboard')?.addEventListener('click', () => { const b = el('lg-bc-push-leaderboard'); if (b && el('lg2-tab-ballchasing') && el('lg2-tab-ballchasing').style.display !== 'none') b.click(); else lgStatus('Player leaderboard needs Rocket League + a Ballchasing refresh.', false); });
-el('lgov-clear-overlays')?.addEventListener('click', () => lgClearOverlays());
+// The individual pushes now live on the graphics rack (lgRenderBroadcastCard) so each one can
+// carry its own on-air state and Hide — only the blanket clear stays a plain button here.
+el('lgov-clear-overlays')?.addEventListener('click', () => { lgClearOverlays(); lgRenderBroadcastCard(); });
 
 // Logo + name search typeahead for adding teams from the central library (reuses the .team-dd look).
 function setupLeagueTeamSearch() {
@@ -1916,8 +2568,8 @@ el('lg-mu-go')?.addEventListener('click', () => {
   const tmob = (lg.teams || []).find((t) => lgResolveTeam(t).name === b);
   const ra = lgResolveTeam(tmo || { name: a });
   const rb = lgResolveTeam(tmob || { name: b });
-  send('set_team', { side: 'blue',   name: ra.name, logo: ra.logo || null, color: (tmo && tmo.color) || undefined, players: ra.players.map((p) => ({ name: p.name, role: p.role })) });
-  send('set_team', { side: 'orange', name: rb.name, logo: rb.logo || null, color: (tmob && tmob.color) || undefined, players: rb.players.map((p) => ({ name: p.name, role: p.role })) });
+  send('set_team', { side: 'blue',   name: ra.name, logo: ra.logo || null, color: (tmo && tmo.color) || undefined, players: ra.players });
+  send('set_team', { side: 'orange', name: rb.name, logo: rb.logo || null, color: (tmob && tmob.color) || undefined, players: rb.players });
   send('reset_series');
   if (el('lg-mu-title')?.checked) {
     const title = [lg.name, lg.season].filter(Boolean).join(' — ');

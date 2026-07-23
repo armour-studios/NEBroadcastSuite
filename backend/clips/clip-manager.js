@@ -5,6 +5,11 @@ const fsp = require('fs/promises');
 const CAPTURE_COOLDOWN_MS = 3000;
 const CAPTURE_COOLDOWN_FORCE_MS = 800;
 
+// Two-stage video pipeline: 'replays' is the raw capture pool (auto-saves, instant-replay-to-air),
+// 'highlights' is the curated shelf you promote keepers up into and build the stream reel from.
+const FOLDERS = ['replays', 'highlights'];
+const normFolder = (v) => (FOLDERS.includes(v) ? v : 'replays');
+
 /**
  * Clip library + auto-capture from OBS replay buffer.
  */
@@ -32,6 +37,10 @@ function createClipManager({ dataDir, getObsClient, onUpdate, onCapture }) {
         library = Array.isArray(saved.library) ? saved.library : [];
         montages = Array.isArray(saved.montages) ? saved.montages : [];
         if (saved.settings) settings = { ...settings, ...saved.settings };
+        // Migrate pre-folder libraries: raw clips default to the capture pool; a playlist seeds
+        // its folder from its template (a highlights-template reel belongs on the Highlights shelf).
+        library.forEach((c) => { if (c && !c.folder) c.folder = 'replays'; });
+        montages.forEach((m) => { if (m && !m.folder) m.folder = (m.template === 'highlights') ? 'highlights' : 'replays'; });
       }
     } catch (e) {
       library = [];
@@ -104,6 +113,7 @@ function createClipManager({ dataDir, getObsClient, onUpdate, onCapture }) {
       game: meta.game || '',
       player: meta.player || '',
       reason: meta.reason || '',
+      folder: 'replays',                           // new captures land in the raw pool; promote → highlights
       createdAt: Date.now(),
       duration: meta.duration || null,
       inMontage: false,
@@ -219,6 +229,7 @@ function createClipManager({ dataDir, getObsClient, onUpdate, onCapture }) {
       game: meta.game,
       player: meta.player || '',
       reason: meta.reason || '',
+      folder: 'replays',
       createdAt: Date.now(),
       pendingFile: true,
       inMontage: false,
@@ -241,10 +252,12 @@ function createClipManager({ dataDir, getObsClient, onUpdate, onCapture }) {
     const idx = library.findIndex((c) => c.id === id);
     if (idx < 0) return false;
     const clip = library[idx];
-    if (clip.path && fs.existsSync(clip.path)) {
+    library.splice(idx, 1);
+    // copyClip() can leave two library rows pointing at the same file (a Replays copy and a
+    // Highlights copy of one capture) — only unlink the file once nothing else references it.
+    if (clip.path && !library.some((c) => c.path === clip.path) && fs.existsSync(clip.path)) {
       try { fs.unlinkSync(clip.path); } catch (e) { /* ignore */ }
     }
-    library.splice(idx, 1);
     save();
     return true;
   }
@@ -266,21 +279,53 @@ function createClipManager({ dataDir, getObsClient, onUpdate, onCapture }) {
         .map((m) => ({ videoTime: m.videoTime, label: String(m.label || '').slice(0, 60) })).slice(0, 50);
     }
     if ('note' in patch) clip.note = String(patch.note || '');
+    if ('folder' in patch) clip.folder = normFolder(patch.folder);
     save();
     return true;
   }
 
-  function createMontage({ name, clipIds, template }) {
+  // Move a clip between the Replays pool and the Highlights shelf. A clip has ONE home folder;
+  // moving it only changes which list it shows under — it stays in any playlist it was already
+  // dropped on (playlists reference clips by id, independent of folder), so promoting a keeper
+  // mid-show never rips it out of a reel that's already built.
+  function setClipFolder(id, folder) {
+    const clip = library.find((c) => c.id === id);
+    if (!clip) return false;
+    clip.folder = normFolder(folder);
+    save();
+    return true;
+  }
+
+  // Copy a clip onto the OTHER shelf — unlike setClipFolder (a move), the clip keeps its spot on
+  // its current shelf too, so a per-game replay can also live in the event's Highlights pool without
+  // vanishing from Replays. The new row shares the same file on disk (removeClip's shared-path guard
+  // keeps that safe); everything else (trims/tags/markers) is cloned so an edit doesn't leak between
+  // the two copies.
+  function copyClip(id, folder) {
+    const clip = library.find((c) => c.id === id);
+    if (!clip) return null;
+    const copy = { ...clip, id: `clip_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`, folder: normFolder(folder), createdAt: Date.now() };
+    library.unshift(copy);
+    if (library.length > 500) library.length = 500;
+    save();
+    return copy;
+  }
+
+  function createMontage({ name, clipIds, template, folder }) {
     const clips = clipIds.map((id) => library.find((c) => c.id === id)).filter(Boolean);
+    const fold = normFolder(folder);
     const montage = {
       id: `montage_${Date.now()}`,
       name: name || 'Highlight Reel',
       clipIds: clips.map((c) => c.id),
       template: template || 'highlights',
+      folder: fold,
       createdAt: Date.now(),
       status: 'draft',
       programScene: '',                          // OBS scene this playlist plays in (live playout)
-      transition: { type: 'cut', stinger: '' }   // between-clip transition: cut|fade|dip|logo|stinger
+      // Highlights reels sting into air by default (the polished stream package); the raw Replays
+      // pool cuts straight in (instant-replay speed matters more than a transition).
+      transition: { type: fold === 'highlights' ? 'stinger' : 'cut', stinger: '' }
     };
     montages.unshift(montage);
     save();
@@ -292,6 +337,7 @@ function createClipManager({ dataDir, getObsClient, onUpdate, onCapture }) {
     const m = montages.find((x) => x.id === montageId);
     if (!m || !opts || typeof opts !== 'object') return false;
     if (typeof opts.programScene === 'string') m.programScene = opts.programScene.slice(0, 200);
+    if (opts.folder != null) m.folder = normFolder(opts.folder);
     if (typeof opts.kind === 'string') m.kind = ['replay', 'ad', ''].includes(opts.kind) ? opts.kind : '';
     if (typeof opts.loop === 'boolean') m.loop = opts.loop;
     if (typeof opts.returnEnabled === 'boolean') m.returnEnabled = opts.returnEnabled;
@@ -324,6 +370,70 @@ function createClipManager({ dataDir, getObsClient, onUpdate, onCapture }) {
     }
     save();
     return true;
+  }
+
+  // Copy every reel on one shelf to the other (non-destructive bulk promote). Clips are shared
+  // library items referenced by id, so this clones only the playlist entries — no video file is
+  // duplicated on disk. The copy is a fresh DRAFT (its own id, no stale export).
+  function copyMontagesToFolder(fromFolder, toFolder) {
+    const from = normFolder(fromFolder);
+    const to = normFolder(toFolder);
+    if (from === to) return 0;
+    const src = montages.filter((m) => (m.folder || 'replays') === from);
+    let n = 0;
+    src.forEach((m, i) => {
+      const t = m.transition || {};
+      montages.unshift({
+        id: `montage_${Date.now()}_${i}`,
+        name: m.name,
+        clipIds: [...(m.clipIds || [])],
+        template: m.template || 'highlights',
+        folder: to,
+        createdAt: Date.now(),
+        status: 'draft',
+        programScene: m.programScene || '',
+        transition: { type: t.type || (to === 'highlights' ? 'stinger' : 'cut'), stinger: t.stinger || '' }
+      });
+      n++;
+    });
+    if (n) save();
+    return n;
+  }
+
+  // Empty a clip pool — remove every library clip on that shelf. Mirrors clearFolder's file-safety
+  // rule (below) but at the clip level: a file is only unlinked once no remaining library row (on
+  // EITHER shelf) still references it, so clearing Replays can never break a clip that was also
+  // copied to Highlights.
+  function clearClipsFolder(folder) {
+    const f = normFolder(folder);
+    const keep = library.filter((c) => (c.folder || 'replays') !== f);
+    const removed = library.filter((c) => (c.folder || 'replays') === f);
+    library = keep;
+    let n = 0;
+    removed.forEach((clip) => {
+      if (clip.path && !library.some((c) => c.path === clip.path) && fs.existsSync(clip.path)) {
+        try { fs.unlinkSync(clip.path); } catch (e) { /* ignore */ }
+      }
+      n++;
+    });
+    if (n) save();
+    return n;
+  }
+
+  // Empty a shelf — remove all its reels (and any encoded export files). Clips stay in the library.
+  function clearFolder(folder) {
+    const f = normFolder(folder);
+    const keep = [];
+    let n = 0;
+    montages.forEach((m) => {
+      if ((m.folder || 'replays') === f) {
+        if (m.outputPath) { try { fs.unlinkSync(m.outputPath); } catch (e) { /* ignore */ } }
+        n++;
+      } else keep.push(m);
+    });
+    montages = keep;
+    if (n) save();
+    return n;
   }
 
   function renameMontage(montageId, name) {
@@ -398,6 +508,11 @@ function createClipManager({ dataDir, getObsClient, onUpdate, onCapture }) {
     setSettings,
     removeClip,
     updateClip,
+    setClipFolder,
+    copyClip,
+    clearClipsFolder,
+    copyMontagesToFolder,
+    clearFolder,
     createMontage,
     setMontageSettings,
     reorderMontage,

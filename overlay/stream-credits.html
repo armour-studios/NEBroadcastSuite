@@ -23,6 +23,8 @@
       font-size: 46px; font-weight: 800; letter-spacing: 2px; text-transform: uppercase;
       background: linear-gradient(135deg, #fff 30%, #b89eff 100%);
       -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+      /* fit-to-screen: keep the title on one line and let fitHeaderTitle() shrink the font to fit */
+      white-space: nowrap; max-width: 1760px; margin: 0 auto;
     }
 
     /* ── Talent bar (fixed, below header) ───────────────── */
@@ -592,6 +594,20 @@ function maybeRender() {
   const sig = contentSig(); if (sig !== _sig) { _sig = sig; render(); }
 }
 
+// Shrink the event title's font-size until it fits on one line inside the header, so a long event
+// name isn't clipped or pushed off-screen. (Producer feedback: "Credit event title fit to screen.")
+const HDR_TITLE_MAX_PX = 46, HDR_TITLE_MIN_PX = 20;
+function fitHeaderTitle(el) {
+  if (!el) return;
+  el.style.fontSize = HDR_TITLE_MAX_PX + 'px';
+  // scrollWidth > clientWidth means it's overflowing its max-width box → step down until it fits.
+  let px = HDR_TITLE_MAX_PX;
+  while (px > HDR_TITLE_MIN_PX && el.scrollWidth > el.clientWidth) {
+    px -= 1;
+    el.style.fontSize = px + 'px';
+  }
+}
+
 /* ── Scroll animation ───────────────────────────────────────── */
 let _scrollY = 0, _scrollDir = 1, _pauseUntil = 0, _lastTs = null;
 function _viewportH() { return viewport.clientHeight || 700; }
@@ -647,7 +663,7 @@ async function connectWS() {
       if (nowOn && !window._wasOn) { _scrollY = 0; _scrollDir = 1; _pauseUntil = Date.now() + PAUSE_MS; if (typeof track !== 'undefined' && track) track.style.transform = 'translateY(0)'; if (typeof hideEndCard === 'function') hideEndCard(); else document.querySelectorAll('.end-card, #end-card, .cr-endcard').forEach((e2) => e2.classList.remove('show')); }
       if (d.credits !== undefined || d.gfxActive !== undefined) window._wasOn = nowOn;
       const title = d.twitch?.channelInfo?.title || d.event?.title || d.eventName;
-      if (title) document.getElementById('header-title').textContent = title;
+      if (title) { const _ht = document.getElementById('header-title'); _ht.textContent = title; fitHeaderTitle(_ht); }
       maybeRender();
     }
   });

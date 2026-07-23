@@ -1758,11 +1758,14 @@ function renderSponsors(){
   const sp = (brand && (brand.railSponsors || brand.sponsors)) || [];
   if (!sp.length){ rail.classList.add('hidden'); lastSponsorSig = ''; return; }
   rail.classList.remove('hidden');
-  el('sp-label').textContent = (brand.sponsorLabel || 'PARTNERS');
+  // Explicit empty brand-kit label hides the heading; only a MISSING label defaults to 'PARTNERS'.
+  const spLabel = brand.sponsorLabel == null ? 'PARTNERS' : String(brand.sponsorLabel).trim();
+  el('sp-label').textContent = spLabel;
+  el('sp-label').style.display = spLabel ? '' : 'none';
   if (sponsorIdx >= sp.length) sponsorIdx = 0;
   const s = sp[sponsorIdx] || {};
   // Only touch the DOM (and replay the fade) when the shown sponsor changes — kills the per-update flicker.
-  const sig = (brand.sponsorLabel || 'PARTNERS') + '|' + (s.logo || s.name || '');
+  const sig = spLabel + '|' + (s.logo || s.name || '');
   if (sig === lastSponsorSig) return;
   lastSponsorSig = sig;
   const slot = el('sp-slot'); slot.innerHTML = '';

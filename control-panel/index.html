@@ -482,7 +482,7 @@
           <circle cx="8.5" cy="8.5" r="5.5"/><line x1="13" y1="13" x2="17" y2="17"/>
         </svg>
         <input type="text" id="sgg-event-search" class="ev-search-input"
-               placeholder="Search your tournaments, or paste a tournament link…">
+               placeholder="Search start.gg by name, or paste a tournament link…">
         <button class="ev-search-clear" id="ev-search-clear" title="Clear" style="display:none;">✕</button>
       </div>
       <div id="dash-sgg-tournament-results" class="ev-dropdown" style="display:none;"></div>
@@ -562,7 +562,7 @@
       </div>
       <!-- Queue panel -->
       <div id="sgg-queue-wrap">
-        <div style="display:flex; gap:8px;">
+        <div style="display:flex; gap:8px;" id="sgg-slug-row">
           <input type="text" id="sgg-tournament" class="input-text" placeholder="tournament slug or URL" style="flex:1;">
           <button class="btn btn-secondary btn-sm" id="sgg-load" style="white-space:nowrap;">Load Queue</button>
         </div>
@@ -930,41 +930,94 @@
 
       <!-- RL Scene Automation — full-width strip, shown only for Rocket League -->
       <div class="msp-col msp-rl-strip" id="msp-rl-scenes" style="display:none;">
+        <!-- Organised as the game's own timeline: 1 kickoff → 2 match end / scoreboard → 3 back to
+             the show. Cells sit in flex rows so a 2-cell stage fills the width (no orphan gap). -->
         <div class="msp-rl-grid">
-          <div class="msp-rl-cell">
-            <p class="msp-label">Kickoff <span class="msp-hint">(OBS · Rocket League)</span></p>
-            <label class="msp-toggle"><input type="checkbox" id="chk-rl-kickoff"> Cut to scene at kickoff</label>
-            <select id="sel-rl-kickoff-scene" class="input-text msp-input"><option value="">— None —</option></select>
-          </div>
-          <div class="msp-rl-cell">
-            <p class="msp-label">After Scoreboard</p>
-            <label class="msp-toggle"><input type="checkbox" id="chk-rl-postgame"> Cut to scene after scoreboard</label>
-            <div class="msp-btns" style="align-items:center; gap:8px; flex-wrap:nowrap;">
-              <input type="number" id="inp-rl-postgame-delay" class="input-text msp-input" style="width:60px;" min="1" max="120" value="20">
-              <span class="msp-hint" style="white-space:nowrap;">sec then</span>
-              <select id="sel-rl-postgame-scene" class="input-text msp-input" style="flex:1; min-width:0;"><option value="">— None —</option></select>
+
+          <!-- ── 1 · KICKOFF ─────────────────────────────────────── -->
+          <div class="msp-rl-section-hd"><span class="msp-rl-step">1</span> Kickoff <span class="msp-rl-when">when the game starts</span></div>
+          <div class="msp-rl-row">
+            <div class="msp-rl-cell">
+              <p class="msp-label">Scene cut</p>
+              <label class="msp-toggle"><input type="checkbox" id="chk-rl-kickoff"> Cut to scene at kickoff</label>
+              <select id="sel-rl-kickoff-scene" class="input-text msp-input"><option value="">— None —</option></select>
             </div>
-            <p class="msp-hint" id="rl-scenes-hint">Needs OBS connected (Settings ▸ OBS). Scene list comes from OBS.</p>
+            <div class="msp-rl-cell">
+              <p class="msp-label">Spectator UI</p>
+              <label class="msp-toggle"><input type="checkbox" id="chk-gear-autohide"> Auto-hide RL's native UI on spectate</label>
+              <div class="msp-btns">
+                <button class="btn btn-ghost btn-sm" id="btn-gear-autohide-now" type="button">Hide native UI now</button>
+                <span class="msp-hint">Key / delay: Settings ▸ Rocket League</span>
+              </div>
+            </div>
+            <div class="msp-rl-cell">
+              <p class="msp-label">Auto-Spectate <span class="msp-hint">(follow the ball)</span></p>
+              <label class="msp-toggle" title="Presses the observer number keys in RL to follow whoever touched the ball"><input type="checkbox" id="chk-autospec-enabled"> Follow the ball-carrier</label>
+              <div class="msp-rl-inline">
+                <input type="number" id="inp-autospec-debounce" class="input-text msp-input" min="400" max="8000" step="100" value="1500">
+                <span class="msp-hint">ms min between switches</span>
+              </div>
+              <p class="msp-hint" id="autospec-hint">Needs number keys 1-6 bound to the player cams in RL (blue 1-3, orange 4-6). Blocked by the AI shield.</p>
+            </div>
           </div>
-          <div class="msp-rl-cell">
-            <p class="msp-label">Post-game Scoreboard</p>
-            <p class="msp-hint">Board holds until next kickoff — drop it early.</p>
-            <div class="msp-btns"><button class="btn btn-ghost btn-sm" id="btn-rl-clear-board" type="button">Clear Scoreboard Now</button></div>
-            <label class="msp-toggle" style="margin-top:8px;"><input type="checkbox" id="chk-rl-hide-ui"> Hide UI <span class="msp-hint">(clean feed — blanks the HUD overlay)</span></label>
+
+          <!-- ── 2 · MATCH END ───────────────────────────────────── -->
+          <!-- The two post-game cuts confuse producers because their names don't say which setup
+               each belongs to. "Cut to a scene at match end" only makes sense when the board is its
+               OWN OBS source (you have to cut to the scene that holds it); the delayed cut in stage
+               3 is the one you use when the board draws inside the RL HUD overlay. So the board's
+               location is now the FIRST choice here and each cut says which setup it serves. -->
+          <div class="msp-rl-section-hd"><span class="msp-rl-step">2</span> Match end — scoreboard <span class="msp-rl-when">the board holds until the next kickoff</span></div>
+          <div class="msp-rl-row">
+            <div class="msp-rl-cell">
+              <p class="msp-label">Where the board lives</p>
+              <div class="seg msp-seg" id="rl-sb-loc-seg">
+                <button type="button" class="seg-btn" data-sbloc="hud" title="The board draws inside the RL HUD overlay, on top of whatever scene the game is on">In the RL HUD</button>
+                <button type="button" class="seg-btn" data-sbloc="source" title="The board is its own OBS browser source (rl-hud.html?only=scoreboard) that you cut to">Own OBS source</button>
+              </div>
+              <p class="msp-hint" id="rl-sb-loc-hint-hud">Board draws over the game scene — no cut needed at match end. Use stage 3 to drop it and cut away.</p>
+              <p class="msp-hint" id="rl-sb-loc-hint-source" style="display:none;">Add <code>rl-hud.html?only=scoreboard</code> as its own OBS source (the HUD then hides its inline board), then cut to the scene holding it →</p>
+              <div class="msp-btns"><button class="btn btn-ghost btn-sm" id="btn-rl-clear-board" type="button">Clear Scoreboard Now</button></div>
+            </div>
+            <div class="msp-rl-cell">
+              <p class="msp-label">Cut to the board scene <span class="msp-hint">(own-source setup)</span></p>
+              <label class="msp-toggle"><input type="checkbox" id="chk-rl-sbscene"> Cut to a scene at match end</label>
+              <select id="sel-rl-sbscene" class="input-text msp-input"><option value="">— None —</option></select>
+              <p class="msp-hint">Fires the moment the game ends — point it at the scene that holds your scoreboard source.</p>
+            </div>
+            <div class="msp-rl-cell">
+              <p class="msp-label">Player stats <span class="msp-hint">(on the board)</span></p>
+              <label class="msp-toggle"><input type="checkbox" id="chk-rl-stats-show" checked> Show player stats on the board</label>
+              <select id="sel-rl-stats-design" class="input-text msp-input">
+                <option value="default">Default — floating table</option>
+                <option value="glass">Glass — frosted, team-lit</option>
+                <option value="block">Block Grid — boxed cells</option>
+                <option value="radar">Radar — team comparison</option>
+              </select>
+              <p class="msp-hint">Score · Goals · Assists · Saves · Shots · Demos — needs the RL Stats API connected.</p>
+            </div>
           </div>
-          <div class="msp-rl-cell">
-            <p class="msp-label">Stats Screen <span class="msp-hint">(scoreboard scene)</span></p>
-            <label class="msp-toggle"><input type="checkbox" id="chk-rl-stats-show" checked> Show player stats on the board</label>
-            <select id="sel-rl-stats-design" class="input-text msp-input" style="margin-top:6px;">
-              <option value="default">Default — floating table</option>
-              <option value="glass">Glass — frosted, team-lit</option>
-              <option value="block">Block Grid — boxed cells</option>
-              <option value="radar">Radar — team comparison</option>
-            </select>
-            <p class="msp-hint">Score · Goals · Assists · Saves · Shots · Demos</p>
+
+          <!-- ── 3 · AFTER THE SCOREBOARD ────────────────────────── -->
+          <div class="msp-rl-section-hd"><span class="msp-rl-step">3</span> After the scoreboard <span class="msp-rl-when">drop the board, back to the show</span></div>
+          <div class="msp-rl-row">
+            <div class="msp-rl-cell">
+              <label class="msp-toggle"><input type="checkbox" id="chk-rl-postgame"> Cut to scene after scoreboard</label>
+              <div class="msp-rl-inline">
+                <span class="msp-hint">hold for</span>
+                <input type="number" id="inp-rl-postgame-delay" class="input-text msp-input" min="1" max="120" value="20">
+                <span class="msp-hint">sec, then cut to</span>
+                <select id="sel-rl-postgame-scene" class="input-text msp-input"><option value="">— None —</option></select>
+              </div>
+              <p class="msp-hint">The board comes down and OBS cuts here — this is the one you want when the board lives in the RL HUD. Skip it and the board holds until the next kickoff.</p>
+            </div>
           </div>
+
         </div>
-        <p class="msp-hint" id="rl-scene-auto-status" style="margin-top:8px;"></p>
+        <div class="msp-rl-foot">
+          <p class="msp-hint" id="rl-scenes-hint">Every scene list comes from OBS — connect it in Settings ▸ OBS.</p>
+          <p class="msp-hint" id="rl-scene-auto-status"></p>
+        </div>
       </div>
 
       <!-- In-Game Player Cams — map live in-game names to a person's cam feed (HUD facecams) -->
@@ -976,6 +1029,97 @@
         </div>
         <div id="msp-playercams-rows" class="playercams-rows"></div>
         <p class="msp-hint" id="msp-playercams-status"></p>
+      </div>
+
+      <!-- Super Smash Bros. — stocks + fighter per player (shown only for Smash) -->
+      <div class="msp-col msp-rl-strip" id="msp-smash" style="display:none;">
+        <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:8px;">
+          <p class="msp-label" style="flex:1; margin:0;">Smash <span class="msp-hint">(feeds the Smash Scoreboard overlays)</span></p>
+          <div class="seg" id="smash-mode-seg">
+            <button class="seg-btn active" data-smash-mode="singles" type="button" title="1v1 — one player + fighter per side (smash.html)">1v1 Singles</button>
+            <button class="seg-btn" data-smash-mode="team" type="button" title="Crew battle — aggregate team stocks (smash-team.html)">Team / Crew</button>
+          </div>
+          <label class="msp-toggle" style="gap:6px;">Start stocks
+            <select id="smash-start-stocks" class="input-text msp-input" style="width:56px;">
+              <option>1</option><option>2</option><option selected>3</option><option>4</option><option>5</option>
+            </select>
+          </label>
+          <button class="btn btn-ghost btn-sm" id="btn-smash-reset" type="button" title="Reset stocks to the starting count (new game)">Reset stocks</button>
+        </div>
+
+        <!-- 1v1 singles: one player + fighter per side -->
+        <div id="msp-smash-singles">
+          <div class="msp-rl-grid">
+            <div class="msp-rl-cell">
+              <p class="msp-label" id="smash-label-blue">Player 1</p>
+              <div class="smash-stock-row">
+                <button class="btn btn-ghost btn-sm smash-stock-btn" data-smash-side="blue" data-smash-delta="-1" type="button">−</button>
+                <span class="smash-stock-val" id="smash-stocks-blue">3</span>
+                <button class="btn btn-ghost btn-sm smash-stock-btn" data-smash-side="blue" data-smash-delta="1" type="button">+</button>
+                <span class="msp-hint">stocks</span>
+              </div>
+              <input type="text" id="smash-char-blue" class="input-text msp-input" list="smash-fighters" placeholder="Fighter (e.g. Fox)" style="margin-top:6px;">
+            </div>
+            <div class="msp-rl-cell">
+              <p class="msp-label" id="smash-label-orange">Player 2</p>
+              <div class="smash-stock-row">
+                <button class="btn btn-ghost btn-sm smash-stock-btn" data-smash-side="orange" data-smash-delta="-1" type="button">−</button>
+                <span class="smash-stock-val" id="smash-stocks-orange">3</span>
+                <button class="btn btn-ghost btn-sm smash-stock-btn" data-smash-side="orange" data-smash-delta="1" type="button">+</button>
+                <span class="msp-hint">stocks</span>
+              </div>
+              <input type="text" id="smash-char-orange" class="input-text msp-input" list="smash-fighters" placeholder="Fighter (e.g. Marth)" style="margin-top:6px;">
+            </div>
+          </div>
+        </div>
+
+        <!-- Team / crew battle: per-player stock pips → aggregate team total -->
+        <div id="msp-smash-team" style="display:none;">
+          <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:8px;">
+            <label class="msp-toggle" style="gap:6px;">Players/team
+              <select id="smash-crew-size" class="input-text msp-input" style="width:56px;">
+                <option>1</option><option>2</option><option>3</option><option selected>4</option><option>5</option><option>6</option><option>7</option><option>8</option>
+              </select>
+            </label>
+            <label class="msp-toggle" style="gap:6px;">Best of
+              <select id="smash-best-of" class="input-text msp-input" style="width:56px;">
+                <option value="1">1</option><option value="3" selected>3</option><option value="5">5</option><option value="7">7</option>
+              </select>
+            </label>
+            <span style="flex:1"></span>
+            <button class="btn btn-ghost btn-sm" id="btn-smash-swap" type="button" title="Swap the two teams' sides">Swap sides</button>
+            <button class="btn btn-ghost btn-sm" id="btn-smash-reset-series" type="button" title="Reset the set score to 0–0">Reset series</button>
+          </div>
+          <div class="msp-rl-grid">
+            <div class="msp-rl-cell">
+              <div class="smash-crew-hd">
+                <span class="msp-label" id="smash-team-label-blue" style="flex:1;margin:0;">Blue</span>
+                <span class="smash-score-ctl">
+                  <button class="btn btn-ghost btn-sm" data-smash-series="blue" data-smash-delta="-1" type="button">−</button>
+                  <span class="smash-stock-val" id="smash-series-blue">0</span>
+                  <button class="btn btn-ghost btn-sm" data-smash-series="blue" data-smash-delta="1" type="button">+</button>
+                  <span class="msp-hint">score</span>
+                </span>
+              </div>
+              <div class="smash-crew" id="smash-crew-blue"></div>
+              <div class="smash-crew-total"><span id="smash-crew-total-blue">0</span> <span class="msp-hint">team stocks</span></div>
+            </div>
+            <div class="msp-rl-cell">
+              <div class="smash-crew-hd">
+                <span class="msp-label" id="smash-team-label-orange" style="flex:1;margin:0;">Orange</span>
+                <span class="smash-score-ctl">
+                  <button class="btn btn-ghost btn-sm" data-smash-series="orange" data-smash-delta="-1" type="button">−</button>
+                  <span class="smash-stock-val" id="smash-series-orange">0</span>
+                  <button class="btn btn-ghost btn-sm" data-smash-series="orange" data-smash-delta="1" type="button">+</button>
+                  <span class="msp-hint">score</span>
+                </span>
+              </div>
+              <div class="smash-crew" id="smash-crew-orange"></div>
+              <div class="smash-crew-total"><span id="smash-crew-total-orange">0</span> <span class="msp-hint">team stocks</span></div>
+            </div>
+          </div>
+        </div>
+        <datalist id="smash-fighters"></datalist>
       </div>
 
     </div>
@@ -2500,12 +2644,11 @@
     </div>
   </div>
 
-  <!-- ── Show Deck: tonight's allocation — visible on every Talent sub-tab; its canonical home is
-       the DCC's Show Deck tab (#dcc-showdeck-home inside the Talent Monitor widget) and it is lent
-       back here while the Talent page is open (see placeShowDeck; it is NOT a dashboard widget of
-       its own). Caster slots drive the desk lineup + DCC; Host/Observer are show roles; On-shift
-       chips mark who is actively working right now. ── -->
-  <div id="talent-showdeck-home">
+  <!-- ── Show Deck: tonight's allocation. It lives ONLY on the Dashboard now (the DCC's Show Deck
+       tab, #dcc-showdeck-home) — placeShowDeck moves the markup below out of here on load and it is
+       never lent back, so this wrapper stays empty/hidden. Caster slots drive the desk lineup +
+       DCC; Host/Observer are show roles; On-shift chips mark who is actively working right now. ── -->
+  <div id="talent-showdeck-home" style="display:none;">
   <div class="talent-deck" id="talent-deck">
     <div class="td-head">
       <div class="td-head-titles">
@@ -2643,7 +2786,6 @@
     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
       <h3 class="section-title" style="margin-bottom: 0;">Crew <span id="crew-count" style="color:var(--muted); font-weight:400; font-size:13px;"></span></h3>
       <div style="display:flex; gap:8px; align-items:center;">
-        <span class="field-hint" style="margin:0 4px 0 0;">Gamertag &amp; country desk options are on the Show Deck above.</span>
         <button class="btn btn-ghost btn-sm" id="crew-sort-btn" style="white-space:nowrap;">Sort A-Z</button>
         <button class="btn btn-ghost btn-sm" id="crew-delete-all-btn" style="white-space:nowrap; color:#f56565;" title="Delete all crew members">Delete All</button>
       </div>
@@ -2966,13 +3108,18 @@
     <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex:0 0 auto;color:var(--accent);"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
     <div class="neural-training-text">
       <span class="neural-card-label" style="margin:0;">Training Data</span>
-      <span class="neural-training-desc">Logs your Accept / Decline / Lock decisions locally so the AI learns your style. Nothing is uploaded.</span>
+      <span class="neural-training-desc">Logs your Accept / Decline / Lock decisions locally so the AI learns your style. Stays on this PC unless you turn on upload below.</span>
     </div>
     <label class="qt-toggle" style="flex:0 0 auto;">
       <span>Record decisions</span>
       <label class="switch"><input type="checkbox" id="ai-telemetry-toggle"><span class="slider"></span></label>
     </label>
     <div class="ai-telemetry-status" id="ai-telemetry-status"></div>
+    <label class="qt-toggle" style="flex:0 0 auto;">
+      <span>Upload to shared AI training</span>
+      <label class="switch"><input type="checkbox" id="ai-telemetry-upload-toggle" disabled><span class="slider"></span></label>
+    </label>
+    <div class="ai-telemetry-status" id="ai-telemetry-upload-status" title="Requires signing in to your Nameless account. Uploads a shared, pseudonymous training dataset — decisions and game context only, no audio/video."></div>
   </div>
 
   <!-- ── What's Armed — every automation that can act on its own, plus what actually fired ── -->
@@ -3068,9 +3215,6 @@
 
       <!-- On-air: send to Preview / Program + the playout controls (moved here from the old top bar) -->
       <div class="rp-onair">
-        <div class="rp-onair-loop">
-          <label class="qt-toggle" style="margin:0;" title="Loop whatever's on air — the clip or the playlist"><span>Loop</span><span class="switch"><input type="checkbox" id="rp-loop"><span class="slider"></span></span></label>
-        </div>
         <div class="rp-onair-send">
           <button class="btn btn-warning btn-sm" id="rp-to-preview" title="Cue to the Preview bus (an OBS preview source) without going live">Preview</button>
           <button class="btn btn-danger btn-sm" id="rp-to-program" title="Send this clip live to the Program output">To Air</button>
@@ -3079,6 +3223,7 @@
         <div class="rp-onair-prog">
           <label class="field-label" style="margin:0;" for="rp-program-scene">Scene</label>
           <select id="rp-program-scene" class="input-select" style="flex:0 1 200px;min-width:120px;padding:5px 8px;font-size:12px;" title="When you send a clip or playlist To Air, OBS switches to this scene automatically"><option value="">none</option></select>
+          <label class="qt-toggle" style="margin:0;" title="Loop whatever's on air — the clip or the playlist"><span>Loop</span><span class="switch"><input type="checkbox" id="rp-loop"><span class="slider"></span></span></label>
           <label class="qt-toggle" style="margin:0;" title="When a replay finishes (and isn't looping), switch OBS back to the scene that was live before"><span>Return</span><span class="switch"><input type="checkbox" id="rp-return-scene" checked><span class="slider"></span></span></label>
         </div>
         <span id="rp-screen-status" class="director-status-line" style="margin:0;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"></span>
@@ -3151,115 +3296,184 @@
       </div>
     </section>
 
-    <!-- ── Pane 3: Playlist ── -->
+    <!-- ── Pane 3: Replays / Highlights clip pool + Playlists ── -->
     <section class="rp-pane" style="display:flex;flex-direction:column;gap:0;padding:0;overflow:hidden;">
 
-      <!-- Playlist header -->
+      <!-- Pool header -->
       <div class="rp-staging-hdr">
         <div style="display:flex;align-items:center;gap:8px;">
           <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><line x1="2" y1="4" x2="11" y2="4"/><line x1="2" y1="8" x2="11" y2="8"/><line x1="2" y1="12" x2="8" y2="12"/><path d="M13 6v6l4-3z" fill="currentColor" stroke="none"/></svg>
-          <span class="rp-staging-title">Playlists</span>
-        </div>
-        <button class="btn btn-ghost btn-xs" id="rp-new-playlist" title="Create a new empty playlist">+ New</button>
-      </div>
-
-      <div style="padding:8px 12px 0;">
-        <!-- Top actions: play live / stop / encode -->
-        <div class="rp-pl-top-actions">
-          <button class="btn btn-danger btn-sm" id="rp-pl-stop" style="display:none;" title="Stop the live playlist and return">Stop</button>
-          <button class="btn btn-warning btn-sm" id="rp-playlist-push-live" title="Play this playlist's clips back-to-back on air (in its scene, with the chosen transition)">▶ Play live</button>
-          <button class="btn btn-primary btn-sm" id="rp-process" title="Encode the playlist to a single video file">Encode</button>
-        </div>
-        <div id="rp-encode-progress" style="display:none;flex-direction:column;gap:3px;margin-top:6px;">
-          <div style="display:flex;justify-content:space-between;align-items:center;">
-            <span id="rp-encode-label" style="font-size:11px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:70%;">Encoding…</span>
-            <span id="rp-encode-pct" style="font-size:11px;font-weight:700;color:var(--cp-accent,#7C3AED);">0%</span>
-          </div>
-          <div style="height:5px;background:var(--surface2);border-radius:3px;overflow:hidden;">
-            <div id="rp-encode-fill" style="height:100%;width:0%;background:var(--cp-accent,#7C3AED);border-radius:3px;transition:width 0.3s;"></div>
-          </div>
-        </div>
-
-        <!-- vertical playlist picker -->
-        <div id="rp-playlist-list" class="rp-pl-listv"></div>
-        <select id="select-montage-edit" style="display:none;"><option value="">— New playlist —</option></select>
-
-        <!-- Selected-playlist settings: name / tag / scene / upload, grouped in one card -->
-        <div id="rp-pl-name-row" class="rp-pl-config">
-          <div class="rp-pl-config-name">
-            <input type="text" id="rp-playlist-name" class="input-text" placeholder="Playlist name…">
-            <button class="btn btn-secondary btn-sm" id="rp-rename-playlist" title="Save name">Rename</button>
-            <button class="btn btn-ghost btn-sm" id="rp-clear-playlist" title="Remove all clips from this playlist">Clear</button>
-          </div>
-          <div id="rp-pl-status" style="font-size:11px;color:var(--muted);margin:2px 0 8px;"></div>
-          <div id="rp-pl-live-row" class="rp-pl-config-grid" style="display:none;">
-            <label class="rp-pl-config-label">Tag</label>
-            <select id="rp-pl-kind" class="input-select" title="Mark this playlist so the on-air top-bar timer shows REPLAY or AD">
-              <option value="ad">AD</option>
-              <option value="replay">REPLAY</option>
-              <option value="">None</option>
-            </select>
-            <label class="rp-pl-config-label">Plays in</label>
-            <select id="rp-pl-scene" class="input-select" title="OBS scene this playlist plays in — switching to it in OBS auto-starts the playlist">
-              <option value="">Global Program scene</option>
-            </select>
-            <label class="rp-pl-config-label">After</label>
-            <div style="display:flex;gap:10px;align-items:center;">
-              <label class="qt-toggle" style="margin:0;" title="Loop this playlist continuously — it repeats until you press Stop"><span>Loop</span><span class="switch"><input type="checkbox" id="rp-pl-loop"><span class="slider"></span></span></label>
-              <label class="qt-toggle" style="margin:0;" title="When the playlist finishes, switch OBS back to the scene that was live before"><span>Return</span><span class="switch"><input type="checkbox" id="rp-pl-return" checked><span class="slider"></span></span></label>
-            </div>
-            <button class="btn btn-secondary btn-sm rp-pl-config-upload" id="rp-pl-upload" title="Add video files from your computer to this playlist">+ Upload videos</button>
-            <input type="file" id="rp-pl-upload-input" accept="video/*,.mp4,.mov,.mkv,.webm,.avi" multiple class="input-file-hidden">
-          </div>
-
-          <!-- Transition — the most-changed per-playlist control, promoted out of the editor's gear modal -->
-          <div id="rp-pl-trans-row" style="display:none;margin-top:8px;">
-            <div class="rp-pl-set-row">
-              <label class="rp-mini-label" for="rp-transition">Transition</label>
-              <select id="rp-transition" class="input-select" style="flex:1;" title="Transition between clips (live + encode)"><option value="cut">Cut</option><option value="fade">Fade</option><option value="logo">Logo</option><option value="stinger">Stinger…</option></select>
-            </div>
-            <div id="rp-translogo-row" style="display:none;gap:8px;align-items:center;margin-top:8px;">
-              <img id="rp-translogo-preview" alt="" style="width:34px;height:34px;object-fit:contain;border-radius:5px;background:var(--surface2);border:1px solid var(--border);">
-              <input type="file" id="rp-translogo-file" accept="image/*" class="input-file-hidden">
-              <label for="rp-translogo-file" class="btn btn-secondary btn-xs">Choose logo…</label>
-              <span style="font-size:11px;color:var(--muted);flex:1;">Defaults to the active brand logo</span>
-            </div>
-            <div id="rp-stinger-row" style="display:none;gap:8px;align-items:center;margin-top:8px;">
-              <input type="file" id="rp-stinger-file" accept="video/*,.webm,.mp4,.mov" class="input-file-hidden">
-              <label for="rp-stinger-file" class="btn btn-secondary btn-xs">Choose stinger…</label>
-              <span id="rp-stinger-name" style="font-size:11px;color:var(--muted);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">A short .webm/.mp4 played between clips</span>
-            </div>
-          </div>
-
-          <!-- Encode options — set-once technicals, collapsed by default so they don't crowd the timeline -->
-          <div id="rp-pl-encode-opts" style="display:none;margin-top:8px;">
-            <button type="button" class="rp-pl-encode-opts-toggle" id="rp-pl-encode-opts-toggle">
-              <span id="rp-pl-encode-opts-chev">&#9656;</span> Encode options
-            </button>
-            <div class="rp-pl-set-row" id="rp-pl-encode-opts-body" style="display:none;margin-top:6px;">
-              <label class="rp-mini-label" for="rp-format">Format</label>
-              <select id="rp-format" class="input-select" title="Output format"><option value=".mp4">.mp4</option><option value=".mov">.mov</option><option value=".webm">.webm</option></select>
-              <label class="rp-mini-label" for="rp-quality">Quality</label>
-              <select id="rp-quality" class="input-select" title="Quality"><option value="low">Low</option><option value="medium" selected>Med</option><option value="high">High</option></select>
-              <label class="qt-toggle" style="font-size:11px;" title="Use GPU (NVENC) encoder"><span>GPU</span><span class="switch"><input type="checkbox" id="rp-gpu"><span class="slider"></span></span></label>
-            </div>
-          </div>
-
-          <!-- OBS browser source URL for this playlist -->
-          <div id="rp-pl-url-row" style="display:none;margin-top:8px;padding:7px 10px;background:var(--surface3,#1a1d24);border-radius:8px;border:1px solid var(--border);">
-            <div style="font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-bottom:5px;">OBS Browser Source (shared)</div>
-            <div style="display:flex;align-items:center;gap:6px;">
-              <input type="text" id="rp-pl-url-text" readonly style="flex:1;font-size:11px;font-family:monospace;background:var(--surface2,#13151b);border:1px solid var(--border);border-radius:5px;padding:4px 8px;color:var(--text-muted);min-width:0;cursor:text;">
-              <button class="btn btn-secondary btn-sm" id="rp-pl-url-copy" title="Copy URL to clipboard">Copy</button>
-            </div>
-            <div style="font-size:10px;color:var(--muted);margin-top:4px;">Add this <strong>once</strong> as a Browser Source in OBS. Every single clip and playlist plays through this one source — the playlist just cuts to its chosen scene. Only one thing plays at a time.</div>
-          </div>
+          <span class="rp-staging-title">Clip Pool</span>
         </div>
       </div>
 
-      <!-- Selected playlist items — drag to reorder (scrollable) -->
-      <div id="montage-timeline" class="rp-playlist-items" style="flex:1;overflow-y:auto;padding:6px 10px 0;min-height:60px;"></div>
-      <div class="rp-pl-total" id="rp-pl-total" style="padding:4px 12px;"></div>
+      <!-- Two-shelf toggle: Replays = raw capture pool (instant-replay clips during the match),
+           Highlights = curated pool you promote keepers into and build the event reel from. -->
+      <div class="rp-folder-tabs" id="rp-folder-tabs">
+        <button type="button" class="rp-folder-tab active" data-folder="replays" title="Raw clips — instant replays during the match">Replays<span class="rp-folder-live" data-folder-live="replays"></span></button>
+        <button type="button" class="rp-folder-tab" data-folder="highlights" title="Curated clips — the pool you build the event reel from">Highlights<span class="rp-folder-live" data-folder-live="highlights"></span></button>
+      </div>
+
+      <!-- Always visible (not selection-gated) — governs EVERY pool push, single or bulk: each row's
+           own To Air button AND the bulk bar's To Air below both read this. Logo picker appears only
+           when Logo is chosen; falls back to the active brand logo when nothing's picked. -->
+      <div class="rp-pool-transition-row" id="rp-pool-transition-row">
+        <label class="rp-mini-label" for="rp-pool-transition">Transition</label>
+        <select id="rp-pool-transition" class="input-select rp-pool-transition-sel" title="How a clip eases in when pushed live from this pool — single To Air or bulk">
+          <option value="cut">Cut</option>
+          <option value="fade" selected>Fade</option>
+          <option value="logo">Logo</option>
+        </select>
+        <div id="rp-pool-translogo-row" style="display:none;gap:6px;align-items:center;">
+          <img id="rp-pool-translogo-preview" alt="" style="width:26px;height:26px;object-fit:contain;border-radius:5px;background:var(--surface2);border:1px solid var(--border);">
+          <input type="file" id="rp-pool-translogo-file" accept="image/*" class="input-file-hidden">
+          <label for="rp-pool-translogo-file" class="btn btn-secondary btn-xs">Choose logo&hellip;</label>
+        </div>
+      </div>
+
+      <!-- Multi-select bulk-action bar (shown when clips are checked) — grouped live/organize/
+           destructive, left to right. -->
+      <div id="rp-pool-bulk" class="rp-pool-bulk" style="display:none;">
+        <div class="rp-pool-bulk-row">
+          <span id="rp-pool-bulk-count" class="rp-pool-bulk-count"></span>
+          <button class="btn btn-danger btn-sm" id="rp-pool-bulk-air" title="Play the selected clips back-to-back on air, in the order checked — no playlist or encode needed">&#9654; To Air</button>
+          <button class="btn btn-ghost btn-sm" id="rp-pool-bulk-copy" title="Copy the selected clips onto the other shelf (originals stay)">Copy &rarr; Highlights</button>
+          <button class="btn btn-primary btn-sm" id="rp-pool-bulk-makepl" title="Encode the selected clips into one playlist — a separate step from just being in the pool">Make Playlist</button>
+          <span style="flex:1"></span>
+          <button class="btn btn-ghost btn-xs" id="rp-pool-bulk-clearsel" title="Deselect all">Deselect</button>
+          <button class="btn btn-danger btn-xs" id="rp-pool-bulk-del" title="Delete the selected clips">Delete selected</button>
+        </div>
+      </div>
+
+      <!-- Shelf-level pool action: empty this pool entirely. -->
+      <div class="rp-shelf-actions" id="rp-pool-shelf-actions">
+        <button class="btn btn-ghost btn-xs" id="rp-clear-pool" title="Remove all clips from this pool">Clear pool</button>
+      </div>
+
+      <!-- Clip pool grid — click a clip to load it in the Video Editor (trim + To Air/Preview work
+           on it directly, no playlist needed). Card styling matches Staging's list. -->
+      <div id="rp-clip-pool" class="rp-clip-pool"></div>
+
+      <!-- Playlists — a separate, secondary feature: multi-select clips above and "Make Playlist" to
+           combine them into one encoded video. Collapsed by default so the pool stays primary. -->
+      <div class="rp-pl-section" id="rp-pl-section">
+        <button type="button" class="rp-pl-section-toggle" id="rp-pl-section-toggle">
+          <span id="rp-pl-section-chev">&#9656;</span> Playlists on this shelf
+        </button>
+        <div id="rp-pl-section-body" style="display:none;">
+
+          <div class="rp-staging-hdr">
+            <div style="display:flex;align-items:center;gap:8px;">
+              <span class="rp-staging-title">Playlists</span>
+            </div>
+            <button class="btn btn-ghost btn-xs" id="rp-new-playlist" title="Create a new empty playlist">+ New</button>
+            <button class="btn btn-ghost btn-xs" id="rp-folder-playlist" title="Build a new playlist from every video in a folder (imported in name order)">+ Folder</button>
+          </div>
+          <!-- Bulk shelf actions: copy this shelf's PLAYLISTS to the other (non-destructive), or clear them. -->
+          <div class="rp-shelf-actions" id="rp-shelf-actions">
+            <button class="btn btn-ghost btn-xs" id="rp-copy-shelf" title="Copy every playlist on this shelf onto the other shelf (originals stay)">Copy playlists &rarr; Highlights</button>
+            <button class="btn btn-ghost btn-xs" id="rp-clear-shelf" title="Remove all playlists from this shelf (clips stay in your pool)">Clear playlists</button>
+          </div>
+
+          <div style="padding:8px 12px 0;">
+            <!-- Top actions: play live / stop / encode -->
+            <div class="rp-pl-top-actions">
+              <button class="btn btn-danger btn-sm" id="rp-pl-stop" style="display:none;" title="Stop the live playlist and return">Stop</button>
+              <button class="btn btn-warning btn-sm" id="rp-playlist-push-live" title="Play this playlist's clips back-to-back on air (in its scene, with the chosen transition)">▶ Play live</button>
+              <button class="btn btn-primary btn-sm" id="rp-process" title="Encode the playlist to a single video file">Encode</button>
+            </div>
+            <div id="rp-encode-progress" style="display:none;flex-direction:column;gap:3px;margin-top:6px;">
+              <div style="display:flex;justify-content:space-between;align-items:center;">
+                <span id="rp-encode-label" style="font-size:11px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:70%;">Encoding…</span>
+                <span id="rp-encode-pct" style="font-size:11px;font-weight:700;color:var(--cp-accent,#7C3AED);">0%</span>
+              </div>
+              <div style="height:5px;background:var(--surface2);border-radius:3px;overflow:hidden;">
+                <div id="rp-encode-fill" style="height:100%;width:0%;background:var(--cp-accent,#7C3AED);border-radius:3px;transition:width 0.3s;"></div>
+              </div>
+            </div>
+
+            <!-- vertical playlist picker -->
+            <div id="rp-playlist-list" class="rp-pl-listv"></div>
+            <select id="select-montage-edit" style="display:none;"><option value="">— New playlist —</option></select>
+
+            <!-- Selected-playlist settings: name / tag / scene / upload, grouped in one card -->
+            <div id="rp-pl-name-row" class="rp-pl-config">
+              <div class="rp-pl-config-name">
+                <input type="text" id="rp-playlist-name" class="input-text" placeholder="Playlist name…">
+                <button class="btn btn-secondary btn-sm" id="rp-rename-playlist" title="Save name">Rename</button>
+                <button class="btn btn-ghost btn-sm" id="rp-clear-playlist" title="Remove all clips from this playlist">Clear</button>
+              </div>
+              <div id="rp-pl-status" style="font-size:11px;color:var(--muted);margin:2px 0 8px;"></div>
+              <div id="rp-pl-live-row" class="rp-pl-config-grid" style="display:none;">
+                <label class="rp-pl-config-label">Tag</label>
+                <select id="rp-pl-kind" class="input-select" title="Mark this playlist so the on-air top-bar timer shows REPLAY or AD">
+                  <option value="ad">AD</option>
+                  <option value="replay">REPLAY</option>
+                  <option value="">None</option>
+                </select>
+                <label class="rp-pl-config-label">Plays in</label>
+                <select id="rp-pl-scene" class="input-select" title="OBS scene this playlist plays in — switching to it in OBS auto-starts the playlist">
+                  <option value="">Global Program scene</option>
+                </select>
+                <label class="rp-pl-config-label">After</label>
+                <div style="display:flex;gap:10px;align-items:center;">
+                  <label class="qt-toggle" style="margin:0;" title="Loop this playlist continuously — it repeats until you press Stop"><span>Loop</span><span class="switch"><input type="checkbox" id="rp-pl-loop"><span class="slider"></span></span></label>
+                  <label class="qt-toggle" style="margin:0;" title="When the playlist finishes, switch OBS back to the scene that was live before"><span>Return</span><span class="switch"><input type="checkbox" id="rp-pl-return" checked><span class="slider"></span></span></label>
+                </div>
+                <button class="btn btn-secondary btn-sm rp-pl-config-upload" id="rp-pl-upload" title="Add video files from your computer to this playlist">+ Upload videos</button>
+                <input type="file" id="rp-pl-upload-input" accept="video/*,.mp4,.mov,.mkv,.webm,.avi" multiple class="input-file-hidden">
+              </div>
+
+              <!-- Transition — the most-changed per-playlist control, promoted out of the editor's gear modal -->
+              <div id="rp-pl-trans-row" style="display:none;margin-top:8px;">
+                <div class="rp-pl-set-row">
+                  <label class="rp-mini-label" for="rp-transition">Transition</label>
+                  <select id="rp-transition" class="input-select" style="flex:1;" title="Transition between clips (live + encode)"><option value="cut">Cut</option><option value="fade">Fade</option><option value="logo">Logo</option><option value="stinger">Stinger…</option></select>
+                </div>
+                <div id="rp-translogo-row" style="display:none;gap:8px;align-items:center;margin-top:8px;">
+                  <img id="rp-translogo-preview" alt="" style="width:34px;height:34px;object-fit:contain;border-radius:5px;background:var(--surface2);border:1px solid var(--border);">
+                  <input type="file" id="rp-translogo-file" accept="image/*" class="input-file-hidden">
+                  <label for="rp-translogo-file" class="btn btn-secondary btn-xs">Choose logo…</label>
+                  <span style="font-size:11px;color:var(--muted);flex:1;">Defaults to the active brand logo</span>
+                </div>
+                <div id="rp-stinger-row" style="display:none;gap:8px;align-items:center;margin-top:8px;">
+                  <input type="file" id="rp-stinger-file" accept="video/*,.webm,.mp4,.mov" class="input-file-hidden">
+                  <label for="rp-stinger-file" class="btn btn-secondary btn-xs">Choose stinger…</label>
+                  <span id="rp-stinger-name" style="font-size:11px;color:var(--muted);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">A short .webm/.mp4 played between clips</span>
+                </div>
+              </div>
+
+              <!-- Encode options — set-once technicals, collapsed by default so they don't crowd the timeline -->
+              <div id="rp-pl-encode-opts" style="display:none;margin-top:8px;">
+                <button type="button" class="rp-pl-encode-opts-toggle" id="rp-pl-encode-opts-toggle">
+                  <span id="rp-pl-encode-opts-chev">&#9656;</span> Encode options
+                </button>
+                <div class="rp-pl-set-row" id="rp-pl-encode-opts-body" style="display:none;margin-top:6px;">
+                  <label class="rp-mini-label" for="rp-format">Format</label>
+                  <select id="rp-format" class="input-select" title="Output format"><option value=".mp4">.mp4</option><option value=".mov">.mov</option><option value=".webm">.webm</option></select>
+                  <label class="rp-mini-label" for="rp-quality">Quality</label>
+                  <select id="rp-quality" class="input-select" title="Quality"><option value="low">Low</option><option value="medium" selected>Med</option><option value="high">High</option></select>
+                  <label class="qt-toggle" style="font-size:11px;" title="Use GPU (NVENC) encoder"><span>GPU</span><span class="switch"><input type="checkbox" id="rp-gpu"><span class="slider"></span></span></label>
+                </div>
+              </div>
+
+              <!-- OBS browser source URL for this playlist -->
+              <div id="rp-pl-url-row" style="display:none;margin-top:8px;padding:7px 10px;background:var(--surface3,#1a1d24);border-radius:8px;border:1px solid var(--border);">
+                <div style="font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-bottom:5px;">OBS Browser Source (shared)</div>
+                <div style="display:flex;align-items:center;gap:6px;">
+                  <input type="text" id="rp-pl-url-text" readonly style="flex:1;font-size:11px;font-family:monospace;background:var(--surface2,#13151b);border:1px solid var(--border);border-radius:5px;padding:4px 8px;color:var(--text-muted);min-width:0;cursor:text;">
+                  <button class="btn btn-secondary btn-sm" id="rp-pl-url-copy" title="Copy URL to clipboard">Copy</button>
+                </div>
+                <div style="font-size:10px;color:var(--muted);margin-top:4px;">Add this <strong>once</strong> as a Browser Source in OBS. Every single clip and playlist plays through this one source — the playlist just cuts to its chosen scene. Only one thing plays at a time.</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Selected playlist items — drag to reorder (scrollable) -->
+          <div id="montage-timeline" class="rp-playlist-items" style="overflow-y:auto;padding:6px 10px 0;min-height:60px;max-height:220px;"></div>
+          <div class="rp-pl-total" id="rp-pl-total" style="padding:4px 12px;"></div>
+        </div>
+      </div>
     </section>
   </div>
 
@@ -3995,7 +4209,6 @@
                   <option value="playoffs">Playoffs</option>
                   <option value="complete">Complete</option>
                 </select>
-                <button class="btn btn-danger btn-sm" id="lg-delete">Delete</button>
               </div>
             </div>
             <!-- Tab bar -->
@@ -4003,6 +4216,7 @@
               <button class="lg2-tab active" data-tab="overview">Overview</button>
               <button class="lg2-tab" data-tab="roster">Roster</button>
               <button class="lg2-tab" data-tab="standings">Standings</button>
+              <button class="lg2-tab" data-tab="rankings">Rankings</button>
               <button class="lg2-tab" data-tab="schedule">Schedule</button>
               <button class="lg2-tab" data-tab="bracket">Bracket</button>
               <button class="lg2-tab" data-tab="stats">Stats</button>
@@ -4062,12 +4276,9 @@
                     <button class="btn btn-primary btn-sm" id="lg-mu-go"><svg class="svg-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z"/></svg> Go Live</button>
                     <label class="qt-toggle" style="font-size:12px;" title="Also set the event title to this league + season"><span>Set title</span><span class="switch"><input type="checkbox" id="lg-mu-title" checked><span class="slider"></span></span></label>
                   </div>
-                  <div class="lgov-push-grid">
-                    <button class="btn btn-secondary btn-sm lgov-push-btn" id="lgov-push-standings2"><span class="lgov-push-t">Standings</span><span class="lgov-push-s">Leaderboard table</span></button>
-                    <button class="btn btn-secondary btn-sm lgov-push-btn" id="lgov-push-schedule"><span class="lgov-push-t">Schedule</span><span class="lgov-push-s">Weekly fixtures</span></button>
-                    <button class="btn btn-secondary btn-sm lgov-push-btn" id="lgov-push-stats"><span class="lgov-push-t">Team Stats</span><span class="lgov-push-s">Season stat board</span></button>
-                    <button class="btn btn-secondary btn-sm lgov-push-btn" id="lgov-push-leaderboard"><span class="lgov-push-t">Players</span><span class="lgov-push-s">Player leaderboard</span></button>
-                  </div>
+                  <!-- Graphics rack: one row per league overlay with its own on-air state + Push/Hide.
+                       Rendered by lgRenderBroadcastCard() so the ON AIR pills follow live state. -->
+                  <div class="lgov-gfx-rack" id="lgov-gfx-rack"></div>
                   <button class="btn btn-ghost btn-sm lgov-clear-btn" id="lgov-clear-overlays">Clear all league overlays</button>
                 </div>
                 <!-- Leaders -->
@@ -4141,13 +4352,59 @@
                   <label class="lgov-mini-opt" title="How many teams the Push includes">Push top
                     <select id="lg-st-topn" class="input-select"><option value="0">All</option><option value="4">4</option><option value="6">6</option><option value="8">8</option><option value="10">10</option></select>
                   </label>
+                  <label class="lgov-mini-opt" title="How the table is ordered — Recalculate and the column headers both follow this">Sort by
+                    <select id="lg-st-sortby" class="input-select"></select>
+                  </label>
+                  <button class="btn btn-ghost btn-sm lg2-st-dirbtn" id="lg-st-sortdir" title="Reverse the sort direction">&#8595;</button>
                   <button class="btn btn-ghost btn-sm" id="lg-recalc">Recalculate</button>
                   <button class="btn btn-primary btn-sm" id="lg-push-standings">Push</button>
                 </div>
               </div>
+              <!-- Where the table's numbers come from. Manual mode makes the table itself the source
+                   of truth so a league whose matches never hit the schedule works with zero extra work. -->
+              <div class="lg2-src-bar">
+                <span class="lg2-src-lbl">Source</span>
+                <div class="sw-seg lg2-src-seg" id="lg-st-source">
+                  <button type="button" class="seg-btn" data-src="schedule" title="Standings are computed from results entered on the Schedule tab">From schedule</button>
+                  <button type="button" class="seg-btn" data-src="manual" title="Type the table directly — nothing needs to be on the schedule">Manual entry</button>
+                </div>
+                <span class="sr-summary lg2-src-note" id="lg-st-source-note"></span>
+              </div>
+              <!-- Manual mode: log an off-schedule result straight into the table. Updates both teams'
+                   record, score for/against, points, form and streak in one action. -->
+              <div class="lg2-quick-result" id="lg-quick-result" style="display:none;">
+                <span class="lg2-qr-lbl">Log a result</span>
+                <select id="lg-qr-a" class="input-select"></select>
+                <input type="number" id="lg-qr-sa" class="input-text lg2-qr-score" min="0" placeholder="0">
+                <span class="lg-vs">vs</span>
+                <input type="number" id="lg-qr-sb" class="input-text lg2-qr-score" min="0" placeholder="0">
+                <select id="lg-qr-b" class="input-select"></select>
+                <label class="lg2-qr-ot" title="Award the OT-win points instead of the regulation win points"><input type="checkbox" id="lg-qr-ot"> OT</label>
+                <button class="btn btn-primary btn-sm" id="lg-qr-add">Add</button>
+                <button class="btn btn-ghost btn-sm" id="lg-qr-undo" title="Undo the last logged result" disabled>Undo</button>
+                <span class="sr-summary" id="lg-qr-note"></span>
+              </div>
               <div id="lg-st-divmgr" class="lg2-divmgr" style="display:none;"></div>
               <div id="lg-drift-banner" class="lg2-drift-banner" style="display:none;"></div>
               <div id="lg-standings"></div>
+            </div>
+            <!-- Rankings — computed power rankings (form-weighted), separate from the points table -->
+            <div class="lg2-panel" id="lg2-panel-rankings" style="display:none;">
+              <div class="lg-section-head lg2-st-head" style="margin-bottom:6px;">
+                <h4 style="margin:0;font-size:13px;font-weight:800;text-transform:uppercase;">Power Rankings</h4>
+                <div class="lg2-st-actions">
+                  <input type="text" id="lg-rank-label" class="input-text" placeholder="Snapshot label (e.g. Week 5)" style="font-size:12px;width:180px;">
+                  <button class="btn btn-ghost btn-sm" id="lg-rank-snapshot" title="Freeze today's order so next week's movement arrows have something to compare against">Take Snapshot</button>
+                  <button class="btn btn-ghost btn-sm" id="lg-rank-clear-pins" title="Remove every manual position pin">Clear Pins</button>
+                  <label class="lgov-mini-opt" title="How many teams the Push includes">Push top
+                    <select id="lg-rank-topn" class="input-select"><option value="0">All</option><option value="4">4</option><option value="5">5</option><option value="8">8</option><option value="10">10</option></select>
+                  </label>
+                  <button class="btn btn-primary btn-sm" id="lg-rank-push" title="Push these rankings to the standings overlay">Push</button>
+                </div>
+              </div>
+              <p class="sr-summary lgrk-note" id="lg-rank-note"></p>
+              <p class="sr-summary lgrk-formula">Rating blends win rate (35), points per match (20), differential per match (20), weighted last-5 form (15) and strength of schedule (10). Pin a team to override the maths.</p>
+              <div id="lg-rank-board"></div>
             </div>
             <!-- Schedule -->
             <div class="lg2-panel" id="lg2-panel-schedule" style="display:none;">
@@ -4255,17 +4512,38 @@
             </div>
             <div class="lg2-panel" id="lg2-panel-settings" style="display:none;">
               <div class="lg2-settings-cols">
+                <!-- Format: what kind of competition this is. Changing Type reveals the salary fields. -->
                 <div class="lg2-settings-group">
-                  <h4 class="lg2-settings-heading">League Info</h4>
+                  <div class="lg2-sg-head"><h4 class="lg2-settings-heading">Format</h4><p class="lg2-sg-desc">What kind of competition this is. Drives which columns the standings, stats and rankings tables show.</p></div>
                   <div class="lg2-settings-row"><label class="field-label">Type</label><select id="lg-type" class="input-select"><option value="team">Team-based</option><option value="freeagent">Free agent pool</option><option value="salary">Salary / Rating cap</option></select></div>
                   <div class="lg2-settings-row"><label class="field-label">Game</label><select id="lg-game" class="input-select"></select></div>
                   <div class="lg2-settings-row"><label class="field-label">Season</label><input type="text" id="lg-season" class="input-text" placeholder="e.g. 2026 Spring" style="width:160px;"></div>
                   <div class="lg2-settings-row lg-salary-field" style="display:none;">
                     <label class="field-label">Rating cap</label>
                     <input type="number" id="lg-cap" class="input-text" min="0" style="width:100px;">
-                    <span class="field-label" style="font-size:11px;color:var(--muted);">per team</span>
+                    <span class="lg2-sg-hint">per team</span>
                   </div>
-                  <div class="lg2-settings-row lg-salary-field" style="display:none;"><label class="field-label">Starters (cap applies to)</label><input type="number" id="lg-starter-count" class="input-text" min="1" max="10" value="3" style="width:60px;"></div>
+                  <div class="lg2-settings-row lg-salary-field" style="display:none;"><label class="field-label">Starters</label><input type="number" id="lg-starter-count" class="input-text" min="1" max="10" value="3" style="width:60px;"><span class="lg2-sg-hint">the cap applies to these</span></div>
+                </div>
+                <!-- Scoring: how a result becomes league points. -->
+                <div class="lg2-settings-group">
+                  <div class="lg2-sg-head"><h4 class="lg2-settings-heading">Scoring</h4><p class="lg2-sg-desc">Points awarded per result. Recalculate on the Standings tab re-applies these to every match already played.</p></div>
+                  <div class="lg2-sg-grid">
+                    <label class="lg2-sg-num"><span>Win</span><input type="number" id="lg-pts-win" class="input-text" min="0"></label>
+                    <label class="lg2-sg-num"><span>OT Win</span><input type="number" id="lg-pts-otw" class="input-text" min="0"></label>
+                    <label class="lg2-sg-num"><span>Draw</span><input type="number" id="lg-pts-draw" class="input-text" min="0"></label>
+                    <label class="lg2-sg-num"><span>Loss</span><input type="number" id="lg-pts-loss" class="input-text" min="0"></label>
+                  </div>
+                </div>
+                <!-- Playoffs: the cut line drawn on every table + card. -->
+                <div class="lg2-settings-group">
+                  <div class="lg2-sg-head"><h4 class="lg2-settings-heading">Playoffs &amp; Tiebreaks</h4><p class="lg2-sg-desc">The qualifying cut is drawn on the standings table, the overview snapshot and each team card.</p></div>
+                  <div class="lg2-settings-row"><label class="field-label">Top N qualify</label><input type="number" id="lg-playoff-n" class="input-text" min="1" style="width:80px;"></div>
+                  <div class="lg2-settings-row"><label class="field-label">Tiebreaker</label><select id="lg-tiebreak" class="input-select" style="width:150px;"><option value="gd">Goal difference</option><option value="gf">Goals for</option><option value="h2h">Head-to-head</option></select></div>
+                </div>
+                <!-- Integrations: every external source that can feed this league. -->
+                <div class="lg2-settings-group lg2-sg-wide">
+                  <div class="lg2-sg-head"><h4 class="lg2-settings-heading">Data Sources</h4><p class="lg2-sg-desc">Where this league's teams and results can come from, beyond what you enter by hand.</p></div>
                   <div class="lg2-settings-row">
                     <label class="field-label">Start.gg league</label>
                     <div class="lg-sgg-src-wrap">
@@ -4275,54 +4553,31 @@
                         <div id="lg-sgg-dd" class="team-dd" style="display:none;"></div>
                       </div>
                     </div>
-                  </div>
-                  <div class="lg2-settings-row">
-                    <label class="field-label"></label>
                     <button class="btn btn-secondary btn-sm" id="lg-sgg-sync">Sync from Platform</button>
                     <span class="lg-sgg-sync-ts" id="lg-sgg-sync-ts"></span>
                   </div>
-                </div>
-                <div class="lg2-settings-group">
-                  <h4 class="lg2-settings-heading">Linked Event <span class="field-label" style="font-size:11px; color:var(--muted); font-weight:600;">(optional — for a league scoped to just one of your saved events)</span></h4>
                   <div class="lg2-settings-row">
-                    <label class="field-label">Event</label>
+                    <label class="field-label">Saved event</label>
                     <select id="lg-linked-event" class="input-select" style="width:190px;"><option value="">— None —</option></select>
+                    <button class="btn btn-secondary btn-sm" id="lg-import-event-teams" type="button">Import Teams</button>
                   </div>
-                  <div class="lg2-settings-row">
-                    <label class="field-label"></label>
-                    <button class="btn btn-secondary btn-sm" id="lg-import-event-teams" type="button">Import Teams from Event</button>
-                  </div>
-                  <p class="field-label" id="lg-linked-event-status" style="font-size:11px; color:var(--muted); font-weight:600; margin:4px 0 0;"></p>
+                  <p class="lg2-sg-note" id="lg-linked-event-status"></p>
                 </div>
+                <!-- Season lifecycle. -->
                 <div class="lg2-settings-group">
-                  <h4 class="lg2-settings-heading">Point System</h4>
-                  <div class="lg2-settings-row"><label class="field-label">Win</label><input type="number" id="lg-pts-win" class="input-text" min="0" style="width:80px;"></div>
-                  <div class="lg2-settings-row"><label class="field-label">Loss</label><input type="number" id="lg-pts-loss" class="input-text" min="0" style="width:80px;"></div>
-                  <div class="lg2-settings-row"><label class="field-label">Draw</label><input type="number" id="lg-pts-draw" class="input-text" min="0" style="width:80px;"></div>
-                  <div class="lg2-settings-row"><label class="field-label">OT Win</label><input type="number" id="lg-pts-otw" class="input-text" min="0" style="width:80px;"></div>
-                </div>
-                <div class="lg2-settings-group">
-                  <h4 class="lg2-settings-heading">Playoff Settings</h4>
-                  <div class="lg2-settings-row"><label class="field-label">Top N qualify</label><input type="number" id="lg-playoff-n" class="input-text" min="1" style="width:80px;"></div>
-                  <div class="lg2-settings-row"><label class="field-label">Tiebreaker</label><select id="lg-tiebreak" class="input-select" style="width:150px;"><option value="gd">Goal difference</option><option value="gf">Goals for</option><option value="h2h">Head-to-head</option></select></div>
-                </div>
-                <div class="lg2-settings-group">
-                  <h4 class="lg2-settings-heading">Season Archive</h4>
-                  <p class="field-label" style="font-size:11px; color:var(--muted); font-weight:600; margin:0 0 8px;">Snapshot the current schedule + standings, then start a fresh season with the same roster.</p>
-                  <div class="lg2-settings-row">
-                    <label class="field-label"></label>
-                    <button class="btn btn-secondary btn-sm" id="lg-archive-season" type="button">Archive Season</button>
-                  </div>
+                  <div class="lg2-sg-head"><h4 class="lg2-settings-heading">Season Archive</h4><p class="lg2-sg-desc">Snapshot the current schedule and standings, then start fresh with the same roster. Archived seasons can be restored.</p></div>
+                  <div class="lg2-settings-row"><button class="btn btn-secondary btn-sm" id="lg-archive-season" type="button">Archive Season</button></div>
                   <div id="lg-season-history"></div>
                 </div>
                 <div class="lg2-settings-group" id="lg-cloud-sync-group" style="display:none;">
-                  <h4 class="lg2-settings-heading">Organization Sync</h4>
-                  <p class="field-label" style="font-size:11px; color:var(--muted); font-weight:600; margin:0 0 8px;">Push this league to your organization's website so producers there can see and edit it too. Pulling never overwrites your local edits; pushing overwrites the website's copy of this league's config.</p>
-                  <div class="lg2-settings-row">
-                    <label class="field-label"></label>
-                    <button class="btn btn-secondary btn-sm" id="lg-cloud-push" type="button">Sync to Organization</button>
-                  </div>
-                  <p class="field-label" id="lg-cloud-sync-status" style="font-size:11px; color:var(--muted); font-weight:600; margin:4px 0 0;"></p>
+                  <div class="lg2-sg-head"><h4 class="lg2-settings-heading">Organization Sync</h4><p class="lg2-sg-desc">Publish this league to your organization's website so other producers can see and edit it. Pulling never overwrites your local edits; pushing overwrites the website's copy.</p></div>
+                  <div class="lg2-settings-row"><button class="btn btn-secondary btn-sm" id="lg-cloud-push" type="button">Sync to Organization</button></div>
+                  <p class="lg2-sg-note" id="lg-cloud-sync-status"></p>
+                </div>
+                <!-- Destructive actions, kept out of the banner so they can't be hit in a hurry. -->
+                <div class="lg2-settings-group lg2-sg-danger lg2-sg-wide">
+                  <div class="lg2-sg-head"><h4 class="lg2-settings-heading">Danger Zone</h4><p class="lg2-sg-desc">Deleting removes this league, its schedule, standings, stats and archived seasons from the app. Overlays already on air are unaffected until you clear them.</p></div>
+                  <div class="lg2-settings-row"><button class="btn btn-danger btn-sm" id="lg-delete-settings" type="button">Delete this league</button></div>
                 </div>
               </div>
             </div>
@@ -5046,9 +5301,18 @@
                 </div>
                 <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap; margin-top:6px;">
                   <span class="bk-views-lbl">Find</span>
-                  <input type="text" id="gfx-bkt-cc-search" class="input-text" placeholder="team name" style="flex:1; min-width:120px; max-width:240px; font-size:12px;">
+                  <input type="text" id="gfx-bkt-cc-search" class="input-text" placeholder="team name" style="flex:1; min-width:120px; max-width:none; font-size:12px;">
                   <button type="button" class="btn btn-ghost btn-xs" id="gfx-bkt-cc-find">Find</button>
                   <button type="button" class="btn btn-ghost btn-xs" id="gfx-bkt-cc-clearfocus" title="Clear the bracket highlight">Clear</button>
+                </div>
+                <!-- Bracket display filters — shown for ALL sources (dropping early rounds is the main
+                     lever to make a wide/tall bracket bigger, not squeezed). -->
+                <div style="display:flex; align-items:center; gap:14px; flex-wrap:wrap; margin-top:8px;">
+                  <span class="bk-views-lbl">Trim</span>
+                  <label class="qt-toggle" title="Hide the grand-final RESET match (double-elim)"><span>Hide GF reset</span><span class="switch"><input type="checkbox" id="gfx-bkt-ignore-reset"><span class="slider"></span></span></label>
+                  <label class="field-label" data-gfx="fix" for="gfx-bkt-ignore-rounds" style="margin:0;">Hide first rounds</label>
+                  <input type="number" id="gfx-bkt-ignore-rounds" class="input-text" min="0" max="12" value="0" style="width:60px; font-size:12px;" title="Drop the first N round columns so the later rounds show bigger (0 = show all)">
+                  <label class="qt-toggle" title="Show team names only — no logos or initial badges"><span>Hide logos</span><span class="switch"><input type="checkbox" id="gfx-bkt-hide-logos"><span class="slider"></span></span></label>
                 </div>
               </div>
 
@@ -5148,8 +5412,7 @@
                 <span class="field-label" data-gfx="fix">Source</span>
                 <div class="gfx-src-tabs" id="gfx-front-std-src">
                   <button type="button" class="gfx-src-tab" data-fstdsrc="league" title="Rows from an in-app league">League</button>
-                  <button type="button" class="gfx-src-tab" data-fstdsrc="startgg" title="Rows from the loaded tournament event / bracket">Tournament</button>
-                  <button type="button" class="gfx-src-tab" data-fstdsrc="bracket" title="Rows from a phase/pool of the loaded bracket">Bracket phase</button>
+                  <button type="button" class="gfx-src-tab" data-fstdsrc="tournament" title="Live standings from the connected event — start.gg, Challonge or NXGEN. Defaults to the phase/pool that's live on the Bracket scene.">Tournament</button>
                   <button type="button" class="gfx-src-tab" data-fstdsrc="manual" title="Hand-entered rows (edit in the Full Board)">Manual</button>
                 </div>
               </div>
@@ -5692,8 +5955,7 @@
               </div>
               <div class="gfx-src-tabs gfx-src-tabs--stack" id="gfx-std-src">
                 <button type="button" class="gfx-src-tab is-on" data-stdsrc="league">League</button>
-                <button type="button" class="gfx-src-tab" data-stdsrc="startgg">Tournament</button>
-                <button type="button" class="gfx-src-tab" data-stdsrc="bracket">Bracket phase</button>
+                <button type="button" class="gfx-src-tab" data-stdsrc="tournament" title="Live standings from the connected event — start.gg, Challonge or NXGEN. Uses the phase/pool that's live on the Bracket scene unless you pick another below.">Tournament</button>
                 <button type="button" class="gfx-src-tab" data-stdsrc="manual">Manual</button>
               </div>
               <div id="gfx-std-manual-actions-wrap" style="display:none;">
@@ -6544,7 +6806,7 @@
     </div>
 
     <h4 style="margin:20px 0 4px; font-size:13px; color:#e0e0e0; border-top:1px solid rgba(255,255,255,0.08); padding-top:16px;">OBS Integration</h4>
-    <p style="font-size:11px; color:var(--muted); margin:0 0 10px;">Auto-switches OBS to these when this brand kit is activated. Requires OBS to be connected.</p>
+    <p style="font-size:11px; color:var(--muted); margin:0 0 10px;">Optional. Leave as <em>— None —</em> to keep your own OBS untouched. These only take effect if you enable <strong>Settings ▸ OBS ▸ "Let brand kits switch my OBS profile / scene collection"</strong> (off by default), so your OBS profile stays yours unless you opt in.</p>
     <div style="display:flex; gap:12px; flex-wrap:wrap;">
       <div style="flex:1; min-width:160px;">
         <label class="field-label" for="select-brand-obs-collection" style="display:block; margin-bottom:4px;">Scene Collection</label>
@@ -6873,6 +7135,43 @@
           <button class="btn btn-secondary" id="btn-twitch-logout" style="flex: 2; height: 40px; font-weight: 600;">Disconnect</button>
         </div>
         <div id="twitch-test-result" style="display:none; margin-top: 8px; font-size: 12px; padding: 6px 10px; border-radius: 6px;"></div>
+      </div>
+    </section>
+
+    <!-- Built-in info commands the bot answers in chat automatically -->
+    <section class="section">
+      <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+        <div style="flex:1; min-width:200px;">
+          <h3 class="section-title" style="margin:0;">Chat commands</h3>
+          <p class="field-hint" style="margin-top:4px;">Viewers type these in chat and the bot replies with live info — no setup per show. Needs chat connected.</p>
+        </div>
+        <label class="qt-toggle" style="margin:0;" title="Answer the built-in commands in chat"><span>Enabled</span><span class="switch"><input type="checkbox" id="chk-chatcmd-enabled" checked><span class="slider"></span></span></label>
+      </div>
+
+      <div class="cc-cmd-list">
+        <div class="cc-cmd">
+          <code class="cc-cmd-name">!bracket</code>
+          <div class="cc-cmd-body">
+            <div class="cc-cmd-src">Link to the active event (start.gg / Challonge / NXGEN)</div>
+            <div class="cc-cmd-preview" id="cc-preview-bracket">—</div>
+          </div>
+        </div>
+        <div class="cc-cmd">
+          <code class="cc-cmd-name">!discord</code>
+          <div class="cc-cmd-body">
+            <div class="cc-cmd-src">
+              <input type="text" id="input-chatcmd-discord" class="input-text" placeholder="https://discord.gg/…" style="width:100%; max-width:340px; font-size:12px; padding:5px 9px;">
+            </div>
+            <div class="cc-cmd-preview" id="cc-preview-discord">—</div>
+          </div>
+        </div>
+        <div class="cc-cmd">
+          <code class="cc-cmd-name">!casters</code>
+          <div class="cc-cmd-body">
+            <div class="cc-cmd-src">Whoever is on the Show Deck line-up right now</div>
+            <div class="cc-cmd-preview" id="cc-preview-casters">—</div>
+          </div>
+        </div>
       </div>
     </section>
 
@@ -7495,6 +7794,66 @@
       </div>
     </section>
 
+    <!-- Google Sheets -->
+    <section class="section" style="margin-bottom:0;">
+      <div style="display:flex; align-items:center; gap:10px; margin-bottom:10px;">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18M15 3v18"/></svg>
+        <h3 class="section-title" style="margin:0;">Google Sheets</h3>
+        <span id="sheets-conn-badge" style="display:none; padding:3px 10px; background:rgba(74,222,128,.2); border:1px solid #4ade80; border-radius:4px; font-size:11px; color:#86efac; white-space:nowrap;">
+          <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle"><polyline points="20 6 9 17 4 12"/></svg> Connected
+        </span>
+      </div>
+      <div style="display:flex; flex-direction:column; gap:12px; background:rgba(255,255,255,0.05); padding:15px; border-radius:8px;">
+        <div style="display:flex; align-items:center; gap:15px;">
+          <label for="check-sheets-enabled" style="font-weight:600; color:#e0e0e0; cursor:pointer;">Enable Google Sheets sync</label>
+          <input type="checkbox" id="check-sheets-enabled" style="width:18px; height:18px; cursor:pointer; accent-color:#055fdb;">
+        </div>
+        <div class="field-row" style="margin-bottom:0;">
+          <label class="field-label" for="input-sheets-sa">Service-account key (JSON)</label>
+          <textarea id="input-sheets-sa" class="input-text" rows="3" placeholder="Paste the whole service-account JSON key here…" style="font-family:monospace; font-size:11px; resize:vertical;"></textarea>
+          <details class="int-keyhelp"><summary>How do I set this up? (one-time, ~5 min)</summary><div class="int-keyhelp-body"><ol>
+            <li>In <a href="https://console.cloud.google.com/" target="_blank" rel="noopener">Google Cloud Console</a>, create a project and <b>enable the Google Sheets API</b>.</li>
+            <li>Create a <b>Service Account</b> → open its <b>Keys</b> tab → <b>Add key → Create new key → JSON</b>. Download the file.</li>
+            <li>Paste the whole JSON here and Save. Then <b>share your spreadsheet</b> (Editor access) with the service-account email shown below.</li>
+          </ol></div></details>
+          <p class="field-hint" id="sheets-sa-email" style="margin:4px 0 0;"></p>
+        </div>
+        <div class="field-row" style="margin-bottom:0;">
+          <label class="field-label" for="input-sheets-url">Google Sheet URL</label>
+          <input type="text" id="input-sheets-url" class="input-text" placeholder="https://docs.google.com/spreadsheets/d/…">
+        </div>
+        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+          <button class="btn btn-secondary" id="btn-sheets-save">Save Settings</button>
+          <button class="btn btn-primary" id="btn-sheets-connect">Connect / Test</button>
+          <button class="btn btn-blue" id="btn-sheets-sync">Sync now</button>
+        </div>
+        <div id="sheets-result" style="font-size:13px; color:var(--muted);"></div>
+        <div style="display:flex; flex-direction:column; gap:8px; border-top:1px solid var(--border); padding-top:12px;">
+          <p class="field-hint" style="margin:0 0 2px;">For each data type: pick a worksheet tab + a direction. The first row of each tab must be column headers — Teams: <code>Team, Logo, Color, Player 1, Player 2…</code>; Schedule: <code>Team A, Team B, Round, Date, Time, Stream</code>; Standings: <code>Place, Team, Wins, Losses, Points</code>.</p>
+          <div class="field-row" style="margin-bottom:0; align-items:center; gap:8px;">
+            <label class="field-label" style="min-width:80px; margin:0;">Teams</label>
+            <select id="sheets-tab-teams" class="input-select" style="flex:1;" data-sheets-map="teams"><option value="">— tab —</option></select>
+            <select id="sheets-dir-teams" class="input-select" style="width:130px;" data-sheets-map="teams"><option value="off">Off</option><option value="import">Import (←app)</option><option value="export">Export (app→)</option><option value="both">Two-way ↔</option></select>
+          </div>
+          <div class="field-row" style="margin-bottom:0; align-items:center; gap:8px;">
+            <label class="field-label" style="min-width:80px; margin:0;">Schedule</label>
+            <select id="sheets-tab-schedule" class="input-select" style="flex:1;" data-sheets-map="schedule"><option value="">— tab —</option></select>
+            <select id="sheets-dir-schedule" class="input-select" style="width:130px;" data-sheets-map="schedule"><option value="off">Off</option><option value="import">Import (←app)</option><option value="export">Export (app→)</option><option value="both">Two-way ↔</option></select>
+          </div>
+          <div class="field-row" style="margin-bottom:0; align-items:center; gap:8px;">
+            <label class="field-label" style="min-width:80px; margin:0;">Standings</label>
+            <select id="sheets-tab-standings" class="input-select" style="flex:1;" data-sheets-map="standings"><option value="">— tab —</option></select>
+            <select id="sheets-dir-standings" class="input-select" style="width:130px;" data-sheets-map="standings"><option value="off">Off</option><option value="import">Import (←app)</option><option value="export">Export (app→)</option><option value="both">Two-way ↔</option></select>
+          </div>
+        </div>
+        <div class="field-row" style="margin-bottom:0; align-items:center; gap:8px;">
+          <label class="field-label" for="input-sheets-autosync" style="margin:0;">Auto-sync every</label>
+          <input type="number" id="input-sheets-autosync" class="input-text" min="0" max="3600" value="0" style="width:80px;">
+          <span class="field-hint" style="margin:0;">seconds (0 = manual only; minimum 10)</span>
+        </div>
+      </div>
+    </section>
+
     <!-- NXGEN -->
     <section class="section" style="margin-bottom:0;">
       <div style="display:flex; align-items:center; gap:10px; margin-bottom:10px;">
@@ -7587,6 +7946,10 @@
     <button class="game-tab-btn" data-game="rl">
       <img src="../assets/games/rocketleague.svg" alt="Rocket League" class="game-tab-logo">
       <span class="game-tab-name">Rocket League</span>
+    </button>
+    <button class="game-tab-btn" data-game="apex">
+      <img src="../assets/games/apex.svg" alt="Apex Legends" class="game-tab-logo">
+      <span class="game-tab-name">Apex</span>
     </button>
   </div>
   <div class="game-section active" id="games-section-cs2">
@@ -7746,6 +8109,118 @@
           Live read — <span id="lol-ocr-read" style="color:#e0e0e0; font-weight:700;">—</span>.
           Tune the boxes until these match the on-screen gold. Windows-only; needs the <code>tesseract.js</code> package.
         </p>
+      </div>
+    </section>
+  </div>
+  <div class="game-section" id="games-section-apex">
+  <section class="section">
+      <h3 class="section-title">Apex Legends — LiveAPI</h3>
+      <p style="font-size:12px; color:var(--muted); margin-bottom:12px;">
+        Drives the automated Apex broadcast HUD (<a href="http://localhost:3000/apex.html?live=1" target="_blank" class="overlay-link" style="font-weight:600;">localhost:3000/apex.html</a>)
+        from Apex's official <strong>LiveAPI</strong>. Unlike the other games, <strong>Apex connects out to us</strong>:
+        BroadcastStudio hosts a WebSocket server (<code id="apex-ws-addr">ws://127.0.0.1:7777</code>) and the game streams
+        live match events into it — spectated player, squad standings, kill feed and ring state. Runs on the
+        <strong>observer/spectator PC</strong> that's in the match.
+      </p>
+      <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:14px;">
+        <span id="apex-conn" class="prod-chip">Apex: waiting</span>
+        <span id="apex-server-chip" class="prod-chip">Server: stopped</span>
+      </div>
+
+      <div style="background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:14px 16px; font-size:12px; color:var(--muted); line-height:1.8;">
+        <strong style="color:#e0e0e0; display:block; margin-bottom:8px;">Setup — pick ONE of these on the Apex PC</strong>
+
+        <div style="margin-bottom:12px;">
+          <strong style="color:#e0e0e0;">Option A — config.json (recommended):</strong>
+          writes the LiveAPI config into Apex's Saved Games folder for you.
+          <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin:8px 0;">
+            <button type="button" class="btn btn-secondary btn-sm" id="apex-write-config">Write config.json</button>
+            <span id="apex-config-status" class="field-hint" style="margin:0;"></span>
+          </div>
+          <span style="color:#7a8090; display:block;">Target: <code id="apex-config-path">%USERPROFILE%\Saved Games\Respawn\Apex\assets\temp\live_api\config.json</code>
+          (only works if run on the same PC as Apex). Then fully <strong>restart Apex</strong>.</span>
+        </div>
+
+        <div style="padding-top:10px; border-top:1px solid rgba(255,255,255,0.07);">
+          <strong style="color:#e0e0e0;">Option B — launch options:</strong>
+          add this to Apex in Steam/EA (Properties → Launch Options), then restart Apex.
+          <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin:8px 0;">
+            <code id="apex-launch" style="flex:1; min-width:280px; padding:8px 10px; background:#0c0e14; border:1px solid rgba(255,255,255,.08); border-radius:6px; color:#cfd6e4; overflow-x:auto; white-space:nowrap;">+cl_liveapi_enabled 1 +cl_liveapi_ws_servers "ws://127.0.0.1:7777" +cl_liveapi_use_protobuf 0</code>
+            <button type="button" class="btn btn-secondary btn-sm" id="apex-copy-launch">Copy</button>
+          </div>
+        </div>
+
+        <div style="margin-top:10px; padding-top:10px; border-top:1px solid rgba(255,255,255,0.07);">
+          <strong style="color:#e0e0e0;">Then, in BroadcastStudio:</strong>
+          <ol style="margin:6px 0 0; padding-left:18px;">
+            <li>Set the active game to <strong>Apex Legends</strong> on the Dashboard — that starts the WebSocket server.</li>
+            <li>Launch/spectate the match in Apex — it connects automatically (the status chip turns green).</li>
+          </ol>
+        </div>
+
+        <div style="margin-top:10px; padding-top:10px; border-top:1px solid rgba(255,255,255,0.07); color:#7a8090;">
+          <strong style="color:#9aa0b0;">Notes:</strong>
+          We force <strong>JSON</strong> (<code>cl_liveapi_use_protobuf 0</code>) so no protobuf tooling is needed.
+          If the studio and Apex are on <strong>different PCs</strong>, replace <code>127.0.0.1</code> with this machine's LAN IP in the launch options.
+          Best observer signal is the currently-spectated player, so drive it from the in-game <strong>observer/spectator</strong> view.
+        </div>
+      </div>
+    </section>
+
+    <!-- ALGS scoring + series -->
+    <section class="section">
+      <h3 class="section-title">Apex — Scoring &amp; Series</h3>
+      <p style="font-size:12px; color:var(--muted); margin-bottom:12px;">
+        Points on the observer overlay = <strong>placement points</strong> (by finishing position) + <strong>kill points</strong>, accumulated across
+        every game of the series. Defaults are the current ALGS table. Edit and Save to change how PTS is calculated.
+      </p>
+      <div style="display:flex; align-items:flex-end; gap:16px; flex-wrap:wrap; margin-bottom:10px;">
+        <div>
+          <label class="field-label" style="display:block; margin-bottom:6px;">Placement points (1st → 20th)</label>
+          <div id="apex-place-grid" style="display:grid; grid-template-columns:repeat(10, 1fr); gap:5px; max-width:640px;"></div>
+        </div>
+        <div>
+          <label class="field-label" style="display:block; margin-bottom:6px;">Kill points</label>
+          <input type="number" id="apex-kill-pts" class="input-text" value="1" min="0" step="1" style="width:80px;">
+        </div>
+      </div>
+      <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+        <button type="button" class="btn btn-secondary btn-sm" id="apex-save-scoring">Save scoring</button>
+        <button type="button" class="btn btn-secondary btn-sm" id="apex-reset-scoring">Reset to ALGS default</button>
+        <span id="apex-scoring-status" class="field-hint" style="margin:0;"></span>
+      </div>
+
+      <div style="margin-top:16px; padding-top:14px; border-top:1px solid rgba(255,255,255,.08);">
+        <label class="field-label" style="display:block; margin-bottom:6px;">Broadcast branding (top-left of observer overlay)</label>
+        <div style="display:flex; gap:10px; flex-wrap:wrap;">
+          <input type="text" id="apex-ev-title" class="input-text" placeholder="Event title (e.g. EWC)" style="width:200px;">
+          <input type="text" id="apex-ev-split" class="input-text" placeholder="Split / stage (e.g. SPLIT 1 PLAYOFFS)" style="width:240px;">
+          <input type="text" id="apex-ev-match" class="input-text" placeholder="Match label (e.g. MATCH 1)" style="width:160px;">
+          <button type="button" class="btn btn-secondary btn-sm" id="apex-save-event">Save</button>
+        </div>
+      </div>
+
+      <div style="margin-top:16px; padding-top:14px; border-top:1px solid rgba(255,255,255,.08);">
+        <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; margin-bottom:8px;">
+          <h4 class="section-title" style="font-size:13px; margin:0;">Series games</h4>
+          <div style="display:flex; gap:8px;">
+            <button type="button" class="btn btn-secondary btn-sm" id="apex-finalize-game" title="Snapshot the current game if the match-end event was missed">Finalize current game</button>
+            <button type="button" class="btn btn-secondary btn-sm" id="apex-reset-series" style="color:#f5a3a3;">Reset series</button>
+          </div>
+        </div>
+        <div id="apex-games-list" style="font-size:12px; color:var(--muted);">No games recorded yet.</div>
+      </div>
+    </section>
+
+    <!-- Team identity mapping -->
+    <section class="section">
+      <h3 class="section-title">Apex — Team Identity</h3>
+      <p style="font-size:12px; color:var(--muted); margin-bottom:12px;">
+        Logos, tags and colours on the overlay come from your <strong>Teams library</strong>, auto-matched to the team names Apex reports.
+        When a name doesn't match, bind it here. Teams below are the squads seen in the current/last lobby.
+      </p>
+      <div id="apex-teammap" style="display:flex; flex-direction:column; gap:6px;">
+        <p class="field-hint" style="margin:0;">Set the active game to Apex and start a lobby — the squads will appear here to map.</p>
       </div>
     </section>
   </div>
@@ -8040,10 +8515,18 @@ PacketSendRate=10</pre>
           <span style="font-size: 11px; color: var(--muted);">(requires OBS Replay Buffer running)</span>
         </div>
 
-        <div style="display: none; align-items: center; gap: 12px; flex-wrap: wrap;">
-          <label for="input-obs-postgame-casters" style="font-weight: 600; color: #e0e0e0;">After post-game, auto-switch to Casters in</label>
+        <div style="display: flex; align-items: center; gap: 15px;">
+          <label for="check-obs-allow-kit-switch" style="font-weight: 600; color: #e0e0e0; cursor: pointer;">Let brand kits switch my OBS profile / scene collection</label>
+          <input type="checkbox" id="check-obs-allow-kit-switch" style="width: 18px; height: 18px; cursor: pointer; accent-color: #055fdb;">
+          <span style="font-size: 11px; color: var(--muted);">Off by default — your OBS profile stays yours. Only turn this on if you want activating a brand kit to change OBS.</span>
+        </div>
+
+        <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 12px;">
+          <label for="select-obs-scene-casters" style="font-weight: 600; color: #e0e0e0;">After post-game, auto-cut to Cams/Casters</label>
+          <select id="select-obs-scene-casters" class="input-select" data-scene-key="casters" style="min-width:150px;"><option value="">— scene —</option></select>
+          <label for="input-obs-postgame-casters" style="color: #e0e0e0;">in</label>
           <input type="number" id="input-obs-postgame-casters" min="0" max="120" step="1" value="0" style="width: 70px;" class="input-text">
-          <span style="font-size: 12px; color: var(--muted);">seconds (0 = off) — RL match end → Post-Game scoreboard → Casters</span>
+          <span style="font-size: 12px; color: var(--muted);">seconds (0 = off). RL match end → Post-Game board → your Cams scene. Test the OBS connection first to load your scene list. If the RL gear ▸ Scene Automation post-game scene is set, it takes precedence.</span>
         </div>
 
         <!-- Kickoff scene automation lives in Production ▸ Match — Teams (gear ▸ Scene Automation)
@@ -8079,10 +8562,8 @@ PacketSendRate=10</pre>
               <label class="field-label" for="select-obs-scene-commercial">Commercial</label>
               <select id="select-obs-scene-commercial" class="input-select" data-scene-key="commercial"><option value="">— None —</option></select>
             </div>
-            <div class="field-row" style="margin-bottom: 0;">
-              <label class="field-label" for="select-obs-scene-casters">Casters</label>
-              <select id="select-obs-scene-casters" class="input-select" data-scene-key="casters"><option value="">— None —</option></select>
-            </div>
+            <!-- Casters scene picker relocated to the visible "auto-cut to Cams/Casters" row above
+                 (same id select-obs-scene-casters, still populated + saved by OBS_SCENE_KEYS). -->
             <div class="field-row" style="margin-bottom: 0;">
               <label class="field-label" for="select-obs-scene-bracket">Bracket</label>
               <select id="select-obs-scene-bracket" class="input-select" data-scene-key="bracket"><option value="">— None —</option></select>
@@ -8675,6 +9156,9 @@ PacketSendRate=10</pre>
         </a>
         <a href="http://localhost:3000/rl-hud.html" target="_blank" class="overlay-link" style="font-weight:600;">
           localhost:3000/rl-hud.html <span style="color:var(--muted); font-weight:400;">— React style (boost + statcard, bottom-right)</span>
+        </a>
+        <a href="http://localhost:3000/rl-hud.html?only=scoreboard" target="_blank" class="overlay-link" style="font-weight:600;">
+          localhost:3000/rl-hud.html?only=scoreboard <span style="color:var(--muted); font-weight:400;">— Post-game scoreboard ONLY (dedicated source; pair with "Scoreboard on separate source")</span>
         </a>
       </div>
     </div>
@@ -9619,6 +10103,39 @@ PacketSendRate=10</pre>
             </div>
           </div>
 
+          <div style="display:flex; align-items:center; gap:6px; margin-bottom:6px;">
+            <div id="chat-filter-chips" style="display:flex; gap:3px; flex:none; flex-wrap:wrap;">
+              <button type="button" class="btn btn-ghost btn-sm" data-cf="all" style="padding:2px 7px; font-size:10px;">ALL</button>
+              <button type="button" class="btn btn-ghost btn-sm" data-cf="twitch" style="padding:2px 7px; font-size:10px;">TWITCH</button>
+              <button type="button" class="btn btn-ghost btn-sm" data-cf="youtube" style="padding:2px 7px; font-size:10px;">YOUTUBE</button>
+              <button type="button" class="btn btn-ghost btn-sm" data-cf="kick" style="padding:2px 7px; font-size:10px;">KICK</button>
+              <button type="button" class="btn btn-ghost btn-sm" data-cf="discord" style="padding:2px 7px; font-size:10px;">DISCORD</button>
+              <button type="button" id="chat-sources-btn" class="btn btn-ghost btn-sm" title="Connect chat sources" style="padding:2px 8px; font-size:11px;">+</button>
+            </div>
+            <span class="field-hint" style="margin:0; flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" id="chat-feature-status">Click a message to feature it on stream.</span>
+            <select id="chat-feature-dur" class="input-text" style="width:auto; font-size:11px; padding:2px 6px;" title="How long a featured message stays on stream">
+              <option value="15">15s</option>
+              <option value="30" selected>30s</option>
+              <option value="60">60s</option>
+              <option value="0">Until cleared</option>
+            </select>
+            <button id="chat-feature-clear" class="btn btn-ghost btn-sm" style="display:none;">Clear</button>
+          </div>
+          <div id="chat-sources-panel" style="display:none; margin-bottom:8px; padding:10px; background:rgba(0,0,0,0.28); border:1px solid rgba(255,255,255,0.1); border-radius:6px;">
+            <div style="font-size:11px; font-weight:700; letter-spacing:.05em; color:var(--muted); margin-bottom:8px;">CHAT SOURCES</div>
+            <div style="font-size:11px; color:var(--muted); margin-bottom:3px;">Twitch &amp; YouTube connect in Settings. Add more here:</div>
+            <label style="font-size:11px; display:block; margin:8px 0 3px;">Kick channel <span id="kick-conn-badge" style="color:#4ade80; display:none;">● live</span></label>
+            <input id="mc-kick-channel" class="input-text" style="font-size:12px;" placeholder="your-kick-username">
+            <label style="font-size:11px; display:block; margin:10px 0 3px;">Discord channel ID <span id="discord-conn-badge" style="color:#4ade80; display:none;">● live</span></label>
+            <input id="mc-discord-channel" class="input-text" style="font-size:12px;" placeholder="Right-click a channel → Copy Channel ID">
+            <label style="font-size:11px; display:block; margin:10px 0 3px;">Discord bot token</label>
+            <input id="mc-discord-token" type="password" class="input-text" style="font-size:12px;" placeholder="Bot token (Message Content Intent ON)">
+            <div style="font-size:10px; color:var(--muted); margin-top:4px; line-height:1.4;">Developer Portal → your app → Bot → Reset Token, and enable “Message Content Intent”. Invite the bot to your server.</div>
+            <div style="display:flex; gap:6px; margin-top:10px;">
+              <button id="mc-save" class="btn btn-primary btn-sm" style="flex:1;">Save &amp; connect</button>
+              <button id="mc-close" class="btn btn-ghost btn-sm">Close</button>
+            </div>
+          </div>
           <div id="twitch-chat" style="height: 560px; background: rgba(0,0,0,0.3); border-radius: 6px; overflow-y: auto; padding: 8px; border: 1px solid rgba(255,255,255,0.1); display: flex; flex-direction: column;">
             <div data-placeholder style="color: #888; font-size: 12px; text-align: center; margin: auto;">Chat messages will appear here</div>
           </div>

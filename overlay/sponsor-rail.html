@@ -263,11 +263,13 @@
       const maxLogos = parseInt(QP.get('maxLogos') || '0', 10);
       const align    = QP.get('align') || 'center';
 
-      // Label: shown by default; ?label=off/0 hides it
+      // Label: shown by default; ?label=off/0 hides it; an explicit EMPTY brand-kit label also hides
+      // it (only a MISSING label falls back to 'PARTNERS').
       const qLabel      = QP.get('label');
-      const doShowLabel = qLabel !== 'off' && qLabel !== '0';
+      const label       = b.sponsorLabel == null ? 'PARTNERS' : String(b.sponsorLabel).trim();
+      const doShowLabel = qLabel !== 'off' && qLabel !== '0' && label !== '';
       rail.classList.toggle('show-label', doShowLabel);
-      labelEl.textContent = b.sponsorLabel || 'PARTNERS';
+      labelEl.textContent = label;
 
       // Visibility
       const visible = SceneBase.standalone || sponsors.length > 0;

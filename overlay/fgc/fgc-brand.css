@@ -1,0 +1,58 @@
+/* fgc-brand.css — brand-colour override for the ported FGC scoreboard skins.
+ *
+ * Loaded AFTER each skin's template.css. It is INERT until fgc-adapter.js adds the
+ * `.fgc-brand` class to <html> and sets --brand-p1 / --brand-p2 (the two sides' effective
+ * colours). The adapter only does that when the suite's colour mode is Team / Brand / In-Game;
+ * in "Default" mode it removes the class, so each skin's own theme colours (Tekken red/blue,
+ * SF6 yellow, GG pink, …) — defined in template.css — win untouched. That's how the existing
+ * Match ▸ Teams colour segment doubles as the FGC "use default game colours" option.
+ *
+ * All six SVG skins share these element ids, so one sheet covers every skin. The image-based
+ * "default-img" skin has no SVG colour vars and is unaffected (it keeps its fixed art).
+ *
+ * Specificity: `:root.fgc-brand #id …` (1,2,0) beats the skin's plain `#id` (1,0,0), and this
+ * sheet is linked after template.css — so the override wins whenever the class is present.
+ * color-mix() is already used elsewhere in the suite (matchup.html), so CEF supports it.
+ */
+
+/* Richer ramp: the leading edge catches light, the body stays saturated, and the trailing edge
+   (under the score cap) deepens toward a near-black navy. The shade hex values are precomputed in
+   fgc-adapter.js (--pN-hi / --pN-d1 / --pN-d2 / --pN-stroke) so this sheet carries CONCRETE colours
+   and never color-mix() — color-mix isn't supported in older CEF (some OBS builds), where a
+   color-mix declaration is dropped and the skin falls back to its DEFAULT colour (e.g. SF6 pink). */
+
+/* ── Player 1 side ───────────────────────────────────────────── */
+:root.fgc-brand #linear-gradient-p1-noimg,
+:root.fgc-brand #linear-gradient-p1-full {
+  --gradient-stop-1: var(--p1-hi);
+  --gradient-stop-2: var(--brand-p1);
+  --gradient-stop-3: var(--p1-d1);
+  --gradient-stop-4: var(--p1-d2);
+}
+:root.fgc-brand #P1_bg_stroke_noimg polygon,
+:root.fgc-brand #P1_diag_noimg line,
+:root.fgc-brand #P1_vert_noimg line,
+:root.fgc-brand #P1_bg_stroke polygon,
+:root.fgc-brand #P1_diag line,
+:root.fgc-brand #P1_vert line {
+  stroke: var(--p1-stroke);
+}
+:root.fgc-brand #coloredGlow_p1 { --glow-color: var(--brand-p1); --glow-opacity: 0.55; }
+
+/* ── Player 2 side ───────────────────────────────────────────── */
+:root.fgc-brand #linear-gradient-p2-noimg,
+:root.fgc-brand #linear-gradient-p2-full {
+  --gradient-stop-1: var(--p2-hi);
+  --gradient-stop-2: var(--brand-p2);
+  --gradient-stop-3: var(--p2-d1);
+  --gradient-stop-4: var(--p2-d2);
+}
+:root.fgc-brand #P2_bg_stroke_noimg polygon,
+:root.fgc-brand #P2_diag_noimg line,
+:root.fgc-brand #P2_vert_noimg line,
+:root.fgc-brand #P2_bg_stroke polygon,
+:root.fgc-brand #P2_diag line,
+:root.fgc-brand #P2_vert line {
+  stroke: var(--p2-stroke);
+}
+:root.fgc-brand #coloredGlow_p2 { --glow-color: var(--brand-p2); --glow-opacity: 0.55; }

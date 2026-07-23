@@ -1394,14 +1394,17 @@ html, body {
 .ev-search-clear:hover { color: #e7eaf0; }
 .ev-dropdown, .ev-dropdown-list {
   margin-top: 5px; border: 1px solid var(--border); border-radius: 8px;
-  background: #0d0f17; max-height: 260px; overflow-y: auto;
+  background: #0d0f17; max-height: 380px; overflow-y: auto;
   box-shadow: 0 10px 28px rgba(0,0,0,0.45); position: relative; z-index: 20;
 }
 .ev-dropdown-section-hdr {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 8px;
   padding: 7px 12px 5px; font-size: 10px; font-weight: 700; letter-spacing: 0.06em;
   text-transform: uppercase; color: var(--muted);
   border-bottom: 1px solid var(--white-a05);
+  position: sticky; top: 0; background: #0d0f17; z-index: 1;
 }
+.ev-hdr-note { font-weight: 600; letter-spacing: 0; text-transform: none; opacity: .75; }
 .ev-dropdown-row {
   display: flex; align-items: center; gap: 10px; padding: 8px 12px;
   cursor: pointer; border-bottom: 1px solid var(--white-a04);
@@ -1431,6 +1434,32 @@ html, body {
 .ev-dropdown-msg {
   padding: 14px 12px; text-align: center; font-size: 12px; color: var(--muted);
 }
+/* Keyboard-highlighted row (↑/↓ in the search box) */
+.ev-dropdown-row.is-active { background: rgba(124,58,237,0.2); box-shadow: inset 2px 0 0 #7C3AED; }
+.ev-hi { color: #c4b5fd; }
+.ev-dropdown-badge.is-live { background: rgba(239,68,68,0.16); color: #f87171; }
+.ev-dropdown-badge.is-soon { background: rgba(59,130,246,0.16); color: #93c5fd; }
+.ev-dropdown-badge.is-load { background: rgba(124,58,237,0.18); color: #c4b5fd; }
+/* Inline "show this tournament's events" toggle */
+.ev-row-exp {
+  flex-shrink: 0; background: var(--white-a05); border: 1px solid var(--border); color: var(--muted);
+  border-radius: 5px; padding: 3px 7px; font-size: 10px; font-weight: 700; cursor: pointer;
+}
+.ev-row-exp:hover { color: #e7eaf0; border-color: #7C3AED; }
+.ev-row-exp.is-open { background: rgba(124,58,237,0.2); color: #c4b5fd; border-color: rgba(124,58,237,0.5); }
+.ev-sub-row { padding-left: 34px; background: rgba(255,255,255,0.015); }
+.ev-sub-row .ev-dropdown-name { font-size: 12px; font-weight: 500; }
+.ev-dropdown-foot {
+  padding: 6px 12px; font-size: 10px; color: var(--muted); text-align: center;
+  border-top: 1px solid var(--white-a05); background: rgba(255,255,255,0.02);
+  position: sticky; bottom: 0;
+}
+.ev-mini-spin {
+  display: inline-block; width: 11px; height: 11px; vertical-align: -1px; margin-right: 5px;
+  border: 2px solid var(--white-a05); border-top-color: #7C3AED; border-radius: 50%;
+  animation: evSpin .7s linear infinite;
+}
+@keyframes evSpin { to { transform: rotate(360deg); } }
 .ev-selected-pill {
   display: flex; align-items: center; gap: 8px; margin-top: 8px;
   background: rgba(16,185,129,0.08); border: 1px solid rgba(16,185,129,0.25);
@@ -2650,13 +2679,33 @@ body.popout-match #btn-mt-popout { display: none; }
 .msp-rl-strip {
   grid-column: 1 / -1; border-right: none; border-top: 1px solid var(--border); padding: 0;
 }
-.msp-rl-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
-.msp-rl-cell { padding: 10px 13px; display: flex; flex-direction: column; gap: 6px; }
+.msp-rl-grid { display: block; }
+/* Stages stack; each stage's cells share one flex row, so a 2-cell stage fills the full width
+   instead of leaving an empty third column (the old fixed 3-col grid did that). */
+.msp-rl-row { display: flex; align-items: stretch; flex-wrap: wrap; }
+.msp-rl-cell { flex: 1 1 240px; min-width: 0; padding: 10px 13px; display: flex; flex-direction: column; gap: 6px; }
 .msp-rl-cell:not(:last-child) { border-right: 1px solid var(--border); }
+/* Stage headers (1 Kickoff / 2 Match end / 3 After the scoreboard) — numbered so the panel reads
+   as the match's own timeline. */
+.msp-rl-section-hd { font-size: 10px; font-weight: 800; letter-spacing: .16em;
+  text-transform: uppercase; color: var(--muted); padding: 9px 13px 3px; border-top: 1px solid var(--border);
+  display: flex; align-items: center; gap: 8px; }
+.msp-rl-section-hd:first-child { border-top: none; }
+.msp-rl-section-hd::after { content: ''; flex: 1; height: 1px; background: var(--border); }
+.msp-rl-step { display: inline-flex; align-items: center; justify-content: center; width: 15px; height: 15px;
+  border-radius: 50%; background: var(--border); color: var(--text); font-size: 9px; letter-spacing: 0; }
+.msp-rl-when { font-weight: 600; letter-spacing: .04em; text-transform: none; opacity: .75; }
+/* Inline "hold for [n] sec, then cut to [scene]" sentence */
+.msp-rl-inline { display: flex; align-items: center; gap: 7px; flex-wrap: nowrap; }
+.msp-rl-inline .msp-hint { white-space: nowrap; }
+.msp-rl-inline input[type="number"] { width: 68px; flex: none; text-align: center; }
+.msp-rl-inline select { flex: 1; min-width: 0; }
+.msp-rl-foot { display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  padding: 8px 13px; border-top: 1px solid var(--border); }
 @media (max-width: 720px) {
   .match-settings-panel { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .msp-col:nth-child(2) { border-right: none; }
-  .msp-rl-grid { grid-template-columns: 1fr; }
+  .msp-rl-row { display: block; }
   .msp-rl-cell:not(:last-child) { border-right: none; border-bottom: 1px solid var(--border); }
 }
 @media (max-width: 480px) {
@@ -2667,8 +2716,21 @@ body.popout-match #btn-mt-popout { display: none; }
 .msp-label { margin: 0; font-size: 10px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
 .msp-hint { font-weight: 400; opacity: .55; text-transform: none; letter-spacing: 0; font-size: 10px; }
 .msp-input { width: 100%; font-size: 12.5px; }
-.msp-toggle { display: flex; align-items: center; gap: 7px; font-size: 12px; font-weight: 600; cursor: pointer; }
-.msp-toggle input { cursor: pointer; }
+.msp-toggle { display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 600; cursor: pointer; }
+/* Render the native checkbox as a toggle SWITCH (no markup change needed — matches the .switch look). */
+.msp-toggle input[type="checkbox"] {
+  appearance: none; -webkit-appearance: none; margin: 0; flex: 0 0 auto; cursor: pointer;
+  position: relative; width: 34px; height: 19px; border-radius: 999px; background: #3a3f4b;
+  transition: background .18s;
+}
+.msp-toggle input[type="checkbox"]::before {
+  content: ''; position: absolute; top: 2px; left: 2px; width: 15px; height: 15px; border-radius: 50%;
+  background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.35); transition: transform .18s;
+}
+.msp-toggle input[type="checkbox"]:checked { background: var(--ok, #22c55e); }
+.msp-toggle input[type="checkbox"]:checked::before { transform: translateX(15px); }
+.msp-toggle input[type="checkbox"]:focus-visible { outline: 2px solid var(--cp-accent, #7c3aed); outline-offset: 2px; }
+.msp-toggle input:not([type="checkbox"]) { cursor: pointer; }
 .msp-btns { display: flex; gap: 6px; flex-wrap: wrap; }
 #btn-match-settings { display: flex; align-items: center; gap: 5px; }
 .msp-col-wide { flex: 1.4; }
@@ -3847,6 +3909,9 @@ input:-webkit-autofill:active {
 .rp-vi-act:hover { background: var(--white-a08); color: #cdd2dd; }
 .rp-sc-addpl { color: var(--cp-accent); }
 .rp-sc-addpl:hover { background: color-mix(in srgb, var(--cp-accent) 16%, transparent); color: var(--cp-accent); }
+/* Clip pool's direct one-click "To Air" — red like every other on-air control in this app. */
+.rp-pool-air { color: var(--danger-2, #f56565); }
+.rp-pool-air:hover { background: rgba(245,101,101,.16); color: var(--danger-2, #f56565); }
 .rp-empty { color: var(--muted); font-size: 12px; padding: 16px 8px; text-align: center; }
 
 /* Editor pane */
@@ -4058,6 +4123,54 @@ input:-webkit-autofill:active {
 .rp-pl-badge--error    { color: var(--danger-2); background: rgba(245,101,101,.14); }
 .rp-pl-badge--live     { color: var(--danger-2); background: rgba(245,101,101,.16); animation: rp-pl-pulse 1.1s ease-in-out infinite; }
 @keyframes rp-pl-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .55; } }
+
+/* Two-shelf toggle (Replays | Highlights) — scopes the playlist list + the editor's Add-to target. */
+.rp-folder-tabs { display: flex; gap: 2px; margin: 8px 12px 0; padding: 2px; border-radius: 9px;
+  background: var(--surface2); border: 1px solid var(--border); }
+.rp-folder-tab { flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  padding: 6px 8px; border: 0; border-radius: 7px; background: transparent; color: var(--muted);
+  font-size: 11.5px; font-weight: 800; letter-spacing: .02em; cursor: pointer; transition: background .12s, color .12s; }
+.rp-folder-tab:hover { color: var(--text); }
+.rp-folder-tab.active { background: var(--cp-accent, #7C3AED); color: #fff; }
+/* On-air dot on a shelf tab — lit red when that shelf's reel is live. */
+.rp-folder-live { width: 7px; height: 7px; border-radius: 50%; background: transparent; flex: 0 0 auto; transition: background .12s; }
+.rp-folder-live.on { background: var(--danger-2, #f56565); box-shadow: 0 0 0 3px rgba(245,101,101,.22); animation: rp-pl-pulse 1.1s ease-in-out infinite; }
+
+/* Bulk shelf actions (copy this shelf's reels to the other / clear the shelf). */
+.rp-shelf-actions { display: flex; gap: 6px; margin: 6px 12px 0; }
+.rp-shelf-actions .btn { flex: 1; }
+.rp-shelf-actions .btn:disabled { opacity: .4; cursor: default; }
+
+/* ── Clip pool grid (Replays / Highlights) — the primary, no-playlist-required clip list ────────
+   Deliberately reuses Staging's card look (.rp-stage-card/.rp-sc-*) so the pool reads as the same
+   kind of list, not a different widget — .rp-pool-item is only an identity hook for the JS. */
+.rp-clip-pool { flex: 1 1 auto; overflow-y: auto; padding: 4px 5px; display: flex; flex-direction: column; gap: 1px; min-height: 80px; }
+
+/* Always-visible transition control for pool pushes (single To Air + bulk To Air) — not gated on a
+   selection, since the per-row To Air button needs it just as much as the bulk bar does. */
+.rp-pool-transition-row { display: flex; align-items: center; gap: 6px; padding: 6px 12px; flex-wrap: wrap; }
+.rp-pool-transition-sel { width: auto; min-width: 84px; padding: 4px 7px; font-size: 11.5px; }
+
+/* Multi-select bulk bar — grouped actions, shown only once at least one clip is checked. */
+.rp-pool-bulk { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; background: rgba(6,182,212,0.10); border-bottom: 1px solid var(--border); }
+.rp-pool-bulk-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.rp-pool-bulk-count { font-size: 12px; font-weight: 700; color: var(--text); white-space: nowrap; margin-right: 2px; }
+
+/* Playlists — collapsed secondary section beneath the pool. */
+.rp-pl-section { border-top: 1px solid var(--border); flex: 0 0 auto; }
+.rp-pl-section-toggle {
+  display: flex; align-items: center; gap: 6px; width: 100%; text-align: left;
+  padding: 8px 12px; background: transparent; border: 0; color: var(--muted);
+  font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; cursor: pointer;
+}
+.rp-pl-section-toggle:hover { color: var(--text); }
+
+/* Move-reel-to-other-shelf button on a playlist row — appears on hover like the delete affordance. */
+.rp-pl-row-move { flex: 0 0 auto; background: transparent; border: 1px solid var(--border); color: var(--muted);
+  cursor: pointer; font-size: 10px; font-weight: 700; line-height: 1; padding: 3px 7px; border-radius: 5px;
+  white-space: nowrap; opacity: 0; transition: opacity .12s, color .12s, border-color .12s, background .12s; }
+.rp-pl-row:hover .rp-pl-row-move { opacity: 1; }
+.rp-pl-row-move:hover { color: var(--text); border-color: var(--cp-accent, #7C3AED); background: rgba(124,58,237,.12); }
 
 .rp-pl-thumb {
   width: 52px; height: 34px; flex: 0 0 52px; border-radius: 5px;
@@ -4825,6 +4938,8 @@ span.lg-pl-role { color: var(--muted); }
 /* Standings redesign: toolbar, sortable headers, playoff zones, density, divisions */
 .lg2-st-head .lg2-st-actions { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
 .lg2-st-density-seg .seg-btn { padding:4px 10px; font-size:13px; line-height:1; }
+.lg2-st-dirbtn { min-width:28px; padding-left:8px; padding-right:8px; font-weight:800; line-height:1; }
+.lg2-st-dirbtn:disabled { opacity:.4; cursor:default; }
 .lg2-st-table th.lg2-st-sort { cursor:pointer; user-select:none; white-space:nowrap; transition:color .12s; }
 .lg2-st-table th.lg2-st-sort:hover { color:var(--text); }
 .lg2-st-row.lg2-st-playoff td { background:rgba(72,187,120,.055); }
@@ -4907,6 +5022,140 @@ span.lg-pl-role { color: var(--muted); }
 .lg2-settings-row { display:flex; align-items:center; justify-content:space-between; gap:8px 10px; min-width:0; flex-wrap:wrap; }
 .lg2-settings-row > .input-text, .lg2-settings-row > .input-select { flex:1 1 130px; }
 .lg2-settings-row .field-label { font-size:12px; color:var(--muted); margin:0; white-space:nowrap; }
+/* Settings cards carry a heading + a sentence of context so a producer never has to guess what a
+   field feeds. Wider tracks than the old 210px so those sentences don't ladder into one word a line. */
+.lg2-settings-cols { grid-template-columns:repeat(auto-fill,minmax(300px,1fr)); gap:14px; align-items:start; }
+.lg2-sg-wide { grid-column:1 / -1; }
+.lg2-sg-head { display:flex; flex-direction:column; gap:5px; padding-bottom:10px; border-bottom:1px solid var(--border); }
+.lg2-sg-desc { margin:0; font-size:11.5px; line-height:1.45; color:var(--muted); font-weight:500; }
+.lg2-sg-note { margin:2px 0 0; font-size:11px; line-height:1.45; color:var(--muted); font-weight:500; }
+.lg2-sg-note:empty { display:none; }
+.lg2-sg-hint { font-size:11px; color:var(--muted); font-weight:500; }
+/* Scoring reads as a set of four equal knobs, not four unrelated rows. */
+.lg2-sg-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(78px,1fr)); gap:8px; }
+.lg2-sg-num { display:flex; flex-direction:column; gap:4px; min-width:0; }
+.lg2-sg-num > span { font-size:10px; font-weight:800; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); }
+.lg2-sg-num .input-text { width:100%; text-align:center; font-size:14px; font-weight:800; padding:6px 4px; }
+.lg2-sg-danger { border-color:rgba(224,90,107,.35); background:rgba(224,90,107,.05); }
+.lg2-sg-danger .lg2-settings-heading { color:#e05a6b; }
+.lg2-sg-danger .lg2-sg-head { border-bottom-color:rgba(224,90,107,.25); }
+
+/* ════════════════════ League — team cards (side-agnostic) ══════════════════════════════════ */
+/* These cards are league administration, not a match. They intentionally carry NO blue/orange:
+   which team is which side is decided per-match on Overview ▸ Broadcast. */
+.lg-team { padding:0; overflow:hidden; transition:border-color .14s, transform .14s; }
+.lg-team:hover { border-color:var(--cp-accent); }
+.lg-team-head { padding:11px 12px; gap:9px; border-bottom:1px solid var(--border); flex-wrap:nowrap; }
+.lg-team-rank { flex:0 0 auto; min-width:24px; height:24px; padding:0 6px; border-radius:6px; display:inline-flex; align-items:center; justify-content:center;
+  font-size:12px; font-weight:900; color:var(--muted); background:var(--surface3,var(--white-a08)); }
+.lg-team-rank.in-playoff { color:#fff; background:var(--cp-accent); }
+.lg-team-idbox { flex:1; min-width:0; display:flex; flex-direction:column; gap:1px; }
+.lg-team-name { font-weight:800; font-size:13.5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.lg-team-sub { font-size:10.5px; color:var(--muted); font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.lg-team-detail { flex:0 0 auto; }
+/* Stat strip: the numbers that actually matter on a league page. */
+.lg-team-stats { display:grid; grid-template-columns:repeat(auto-fit,minmax(52px,1fr)); gap:1px; background:var(--border); border-bottom:1px solid var(--border); }
+.lg-tstat { background:var(--surface2); padding:7px 4px; display:flex; flex-direction:column; align-items:center; gap:2px; min-width:0; }
+.lg-tstat-v { font-size:13px; font-weight:800; color:var(--text); line-height:1.1; white-space:nowrap; }
+.lg-tstat-v.pos { color:var(--ok,#48bb78); } .lg-tstat-v.neg { color:var(--danger,#e05a6b); }
+.lg-tstat-l { font-size:9px; font-weight:700; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); }
+.lg-tstat-dash { color:var(--muted); font-weight:600; margin:0 1px; }
+.lg-tstat-form .lg-tstat-v { display:flex; gap:2px; }
+.lg-tstat-form .lg2-fd { width:13px; height:13px; line-height:13px; font-size:8px; margin:0; }
+.lg-team .lg2-team-meta, .lg-team .lg-players, .lg-team .lg2-cap-bar-wrap { margin-left:12px; margin-right:12px; }
+.lg-team .lg2-team-meta { border-top:none; padding-top:10px; margin-top:0; }
+.lg-team .lg-players { padding-bottom:11px; }
+
+/* ════════════════════ League — team detail drawer ══════════════════════════════════════════ */
+.lgtd-modal .modal-box { max-width:960px; max-height:88vh; display:flex; flex-direction:column; }
+.lgtd-body { padding:0; overflow:auto; }
+.lgtd-head { display:flex; align-items:center; gap:14px; padding:18px 20px 14px; border-bottom:1px solid var(--border); }
+.lgtd-logo { width:56px; height:56px; object-fit:contain; border-radius:10px; flex:0 0 auto; background:var(--surface2); padding:4px; }
+.lgtd-head-id { flex:1; min-width:0; }
+.lgtd-name { font-size:19px; font-weight:900; display:flex; align-items:center; gap:9px; }
+.lgtd-abbr { font-size:11px; font-weight:900; letter-spacing:.06em; color:var(--cp-accent); background:rgba(124,58,237,.14); border-radius:5px; padding:2px 7px; }
+.lgtd-sub { font-size:11.5px; color:var(--muted); font-weight:600; margin-top:3px; }
+.lgtd-rank { text-align:right; flex:0 0 auto; }
+.lgtd-rank-v { display:block; font-size:26px; font-weight:900; line-height:1; color:var(--cp-accent); }
+.lgtd-rank-l { font-size:10px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); font-weight:700; }
+.lgtd-kpis { display:grid; grid-template-columns:repeat(auto-fit,minmax(88px,1fr)); gap:1px; background:var(--border); border-bottom:1px solid var(--border); }
+.lgtd-kpi { background:var(--surface); padding:11px 8px; display:flex; flex-direction:column; align-items:center; gap:3px; }
+.lgtd-kpi-v { font-size:17px; font-weight:900; line-height:1; }
+.lgtd-kpi-v.pos { color:var(--ok,#48bb78); } .lgtd-kpi-v.neg { color:var(--danger,#e05a6b); }
+.lgtd-kpi-l { font-size:9.5px; font-weight:700; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); }
+.lgtd-cols { display:grid; grid-template-columns:repeat(auto-fit,minmax(250px,1fr)); gap:16px; padding:18px 20px 22px; }
+.lgtd-sec { min-width:0; }
+.lgtd-sec-wide { grid-column:1 / -1; }
+.lgtd-sec h5 { margin:0 0 9px; font-size:10.5px; font-weight:800; text-transform:uppercase; letter-spacing:.06em; color:var(--cp-accent); }
+.lgtd-pl { display:flex; align-items:center; gap:8px; padding:5px 0; border-bottom:1px solid var(--border); font-size:12px; }
+.lgtd-pl:last-child { border-bottom:none; }
+.lgtd-pl-name { flex:1; min-width:0; font-weight:700; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.lgtd-pl-role { font-size:10px; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); }
+.lgtd-pl-stats { font-size:10.5px; color:var(--muted); white-space:nowrap; }
+.lgtd-pl-stats b { color:var(--text); font-weight:800; }
+.lgtd-dim { opacity:.55; font-style:italic; }
+.lgtd-fix { display:flex; align-items:center; gap:8px; padding:5px 0; border-bottom:1px solid var(--border); font-size:12px; }
+.lgtd-fix:last-child { border-bottom:none; }
+.lgtd-fix-wk { font-size:10px; font-weight:800; text-transform:uppercase; color:var(--muted); flex:0 0 42px; }
+.lgtd-fix-logo { width:18px; height:18px; object-fit:contain; border-radius:4px; flex:0 0 auto; }
+.lgtd-fix-opp { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.lgtd-fix-when { font-size:10.5px; color:var(--muted); white-space:nowrap; }
+.lgtd-fix-score { font-weight:900; font-size:12.5px; white-space:nowrap; }
+.lgtd-fix-score.lgtd-w { color:var(--ok,#48bb78); } .lgtd-fix-score.lgtd-l { color:var(--danger,#e05a6b); } .lgtd-fix-score.lgtd-d { color:#f59e0b; }
+.lgtd-h2h { display:flex; justify-content:space-between; gap:10px; padding:5px 0; border-bottom:1px solid var(--border); font-size:12px; }
+.lgtd-h2h:last-child { border-bottom:none; }
+.lgtd-h2h-opp { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.lgtd-h2h-rec { font-weight:800; white-space:nowrap; }
+.lgtd-tiles { display:grid; grid-template-columns:repeat(auto-fit,minmax(90px,1fr)); gap:8px; }
+.lgtd-tile { background:var(--surface2); border:1px solid var(--border); border-radius:8px; padding:10px 8px; text-align:center; }
+.lgtd-tile-v { display:block; font-size:17px; font-weight:900; line-height:1; }
+.lgtd-tile-l { display:block; margin-top:4px; font-size:9.5px; font-weight:700; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); }
+
+/* ════════════════════ League — standings source + quick result entry ═══════════════════════ */
+.lg2-src-bar { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:10px; }
+.lg2-src-lbl { font-size:10px; font-weight:800; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); }
+.lg2-src-seg .seg-btn { padding:4px 12px; font-size:11.5px; }
+.lg2-src-note { flex:1; min-width:180px; font-size:11px; line-height:1.4; }
+/* Log an off-schedule result straight into the table — the whole point being that a league whose
+   matches never get scheduled still gets form, streak and points without any extra bookkeeping. */
+.lg2-quick-result { display:flex; align-items:center; gap:7px; flex-wrap:wrap; margin-bottom:12px;
+  padding:10px 12px; border-radius:9px; background:rgba(124,58,237,.06); border:1px solid var(--border); }
+.lg2-qr-lbl { font-size:10px; font-weight:800; text-transform:uppercase; letter-spacing:.06em; color:var(--cp-accent); }
+.lg2-quick-result .input-select { min-width:130px; max-width:190px; flex:1 1 130px; font-size:12px; }
+.lg2-qr-score { width:52px; text-align:center; font-size:14px; font-weight:800; padding:5px 4px; }
+.lg2-qr-ot { display:flex; align-items:center; gap:4px; font-size:11px; font-weight:700; color:var(--muted); white-space:nowrap; }
+#lg-recalc:disabled { opacity:.45; cursor:not-allowed; }
+/* A hand-pinned points value, distinct from one the scoring rules derived. */
+.lg2-st-pts.pinned { border-color:var(--cp-accent); box-shadow:inset 2px 0 0 var(--cp-accent); }
+
+/* ════════════════════ League — power rankings ══════════════════════════════════════════════ */
+.lgrk-note { margin:0 0 2px; }
+.lgrk-formula { margin:0 0 12px; opacity:.7; line-height:1.5; }
+.lgrk-table th.lgrk-th-team { text-align:left; }
+.lgrk-team { display:flex; align-items:center; gap:8px; font-weight:700; text-align:left; }
+.lgrk-rec { color:var(--muted); font-weight:700; white-space:nowrap; }
+.lgrk-rating { white-space:nowrap; }
+.lgrk-rating b { font-weight:900; margin-left:7px; }
+.lgrk-bar { display:inline-block; width:54px; height:5px; border-radius:3px; background:var(--border); overflow:hidden; vertical-align:middle; }
+.lgrk-bar-fill { display:block; height:100%; border-radius:3px; background:var(--cp-accent); }
+.lgrk-move-cell { width:44px; }
+.lgrk-move { font-size:10.5px; font-weight:900; letter-spacing:.02em; }
+.lgrk-move-up { color:var(--ok,#48bb78); } .lgrk-move-down { color:var(--danger,#e05a6b); }
+.lgrk-move-flat { color:var(--muted); } .lgrk-move-new { color:#f59e0b; font-size:9px; }
+.lgrk-pin { width:52px; text-align:center; padding:3px 4px; font-size:11px; }
+.lgrk-pinned { background:rgba(124,58,237,.07); }
+
+/* ════════════════════ League — broadcast graphics rack ═════════════════════════════════════ */
+.lgov-gfx-rack { display:flex; flex-direction:column; gap:5px; }
+.lgov-gfx { display:flex; align-items:center; gap:9px; padding:8px 10px; border-radius:8px; background:var(--surface2); border:1px solid var(--border); }
+.lgov-gfx.on-air { border-color:rgba(72,187,120,.5); background:rgba(72,187,120,.07); }
+.lgov-gfx-dot { width:7px; height:7px; border-radius:50%; flex:0 0 auto; background:var(--border); }
+.lgov-gfx.on-air .lgov-gfx-dot { background:var(--ok,#48bb78); box-shadow:0 0 7px rgba(72,187,120,.8); }
+.lgov-gfx-txt { flex:1; min-width:0; display:flex; flex-direction:column; gap:1px; }
+.lgov-gfx-txt b { font-size:12.5px; font-weight:800; }
+.lgov-gfx-txt i { font-size:10px; font-style:normal; color:var(--muted); font-weight:500; }
+.lgov-gfx-live { font-size:9px; font-weight:900; letter-spacing:.07em; color:var(--ok,#48bb78); flex:0 0 auto; }
+.lgov-gfx-hide, .lgov-gfx-push { flex:0 0 auto; }
 
 /* ════════════════════════════ Page headers (purpose at a glance) ════════════════════════════ */
 /* Pages no longer show a title/description header — the active sidebar item names the page,
@@ -6090,6 +6339,10 @@ span.lg-pl-role { color: var(--muted); }
 .gfx-src-tab.is-on { background:var(--cp-accent); color:#fff; }
 .gfx-src-tabs--stack { display:flex; flex-direction:column; align-self:stretch; }
 .gfx-src-tabs--stack .gfx-src-tab { text-align:left; padding:7px 10px; }
+/* Bracket front panel — let the Find + Source rows span the full settings column instead of
+   clustering in a narrow left strip (producer: "bracket options can be full width in its column"). */
+#gfx-bkt-srctabs { display:flex; flex:1; min-width:0; }
+#gfx-bkt-srctabs .gfx-src-tab { flex:1; text-align:center; padding:5px 8px; }
 
 /* Standings pop-out: config on the left (fixed width), live rows/preview on the right */
 .gfx-std-layout { display:grid; grid-template-columns:220px 1fr; gap:22px; align-items:start; }
@@ -7192,6 +7445,71 @@ body.sides-swapped .qrail-head { flex-direction: row-reverse; }
 .tp-status.sub     { background: rgba(246,173,85,.15);  color: #f6ad55; border-color: rgba(246,173,85,.28); }
 .tp-status:hover   { filter: brightness(1.15); }
 
+/* On-Air active-player selector (FGC 1v1 — which roster member shows on the scoreboard) */
+.tp-onair {
+  font-size: 10px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase;
+  padding: 3px 8px; border-radius: 4px; cursor: pointer; flex-shrink: 0;
+  border: 1px solid rgba(255,255,255,.14); background: rgba(255,255,255,.04);
+  color: var(--muted); line-height: 1.4; white-space: nowrap;
+}
+.tp-onair:hover { filter: brightness(1.2); border-color: rgba(255,255,255,.25); }
+.tp-onair.active {
+  background: rgba(239,68,68,.18); color: #f87171; border-color: rgba(239,68,68,.45);
+  box-shadow: 0 0 0 1px rgba(239,68,68,.25), 0 0 10px rgba(239,68,68,.25);
+}
+.tp-onair.active::before {
+  content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: #f87171; margin-right: 5px; vertical-align: middle;
+  box-shadow: 0 0 6px #f87171;
+}
+
+/* Smash stock stepper (Match ▸ Teams gear ▸ Smash) */
+.smash-stock-row { display: flex; align-items: center; gap: 8px; }
+.smash-stock-btn {
+  width: 28px; height: 28px; padding: 0; font-size: 18px; font-weight: 800; line-height: 1;
+  display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;
+}
+.smash-stock-val {
+  min-width: 30px; text-align: center; font-size: 20px; font-weight: 800; color: #e6ebff;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Smash team / crew battle — per-player stock pips → aggregate team total */
+.smash-crew-hd { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
+.smash-score-ctl { display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.smash-score-ctl .smash-stock-val { font-size: 16px; min-width: 22px; }
+.smash-crew { display: flex; flex-direction: column; gap: 5px; }
+.smash-crew-row { display: flex; align-items: center; gap: 6px; }
+.smash-crew-pn { font-size: 11px; font-weight: 700; color: var(--muted); width: 22px; flex-shrink: 0; }
+.smash-pip {
+  width: 16px; height: 16px; border-radius: 50%; cursor: pointer; flex-shrink: 0;
+  background: var(--cp-accent, #7C3AED); box-shadow: 0 0 6px rgba(124,58,237,.5);
+  transition: opacity .15s, transform .15s, background .15s;
+}
+.smash-pip:hover { transform: scale(1.14); }
+.smash-pip.lost { background: #4a5069; box-shadow: none; opacity: .5; }
+.smash-crew-total { margin-top: 5px; font-size: 15px; font-weight: 800; color: #e6ebff; }
+.smash-crew-total .msp-hint { font-weight: 600; }
+
+/* Built-in chat commands (!bracket / !discord / !casters) */
+.cc-cmd-list { display: flex; flex-direction: column; gap: 8px; margin-top: 14px; }
+.cc-cmd {
+  display: flex; align-items: flex-start; gap: 12px; padding: 10px 12px;
+  background: var(--surface2); border: 1px solid var(--border); border-radius: 9px;
+}
+.cc-cmd-name {
+  flex: 0 0 auto; min-width: 78px; font-size: 12px; font-weight: 800; color: #9146ff;
+  background: rgba(145,70,255,.12); border: 1px solid rgba(145,70,255,.3);
+  padding: 3px 8px; border-radius: 6px; font-family: ui-monospace, Menlo, Consolas, monospace;
+}
+.cc-cmd-body { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 5px; }
+.cc-cmd-src { font-size: 11px; color: var(--muted); }
+.cc-cmd-preview {
+  font-size: 11.5px; color: #cbd5e1; background: rgba(255,255,255,.04);
+  border-left: 2px solid var(--cp-accent, #7C3AED); padding: 4px 8px; border-radius: 0 5px 5px 0;
+  word-break: break-word;
+}
+
 /* Twitch embed — chat mode toggle buttons */
 .embed-mode-btn { font-size: 11px; padding: 5px 4px; text-align: center; transition: background .15s, color .15s, border-color .15s; }
 .embed-mode-btn.mode-active { background: rgba(145,70,255,0.22); color: #9146ff; border-color: rgba(145,70,255,0.5); }
@@ -7475,6 +7793,13 @@ body.sides-swapped .qrail-head { flex-direction: row-reverse; }
   padding:2px; margin:-2px; }
 .gfx-fp-prow { display:flex; align-items:center; gap:10px; padding:8px 11px; background:var(--surface2);
   border:1px solid var(--border); border-radius:9px; font-size:12px; }
+/* Drag-to-reorder (schedule front card) */
+.gfx-fp-grip { flex:0 0 auto; cursor:grab; color:var(--muted); opacity:.55; font-weight:900; letter-spacing:-2px;
+  user-select:none; line-height:1; padding:0 1px; }
+.gfx-fp-grip:hover { opacity:.9; }
+.gfx-fp-prow.gfx-fp-dragging { opacity:.45; }
+.gfx-fp-prow.gfx-fp-drop-before { box-shadow: inset 0 3px 0 var(--cp-accent, #7c3aed); }
+.gfx-fp-prow.gfx-fp-drop-after  { box-shadow: inset 0 -3px 0 var(--cp-accent, #7c3aed); }
 .gfx-fp-prow .rk { font-weight:900; color:var(--muted); min-width:20px; text-align:center; font-variant-numeric:tabular-nums; }
 .gfx-fp-prow .logo { width:22px; height:22px; object-fit:contain; flex-shrink:0; border-radius:4px; }
 .gfx-fp-prow .nm { font-weight:700; flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }

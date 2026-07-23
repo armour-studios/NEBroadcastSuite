@@ -77,6 +77,11 @@ function createTelemetryRecorder({ dataDir, appVersion = '', getContext, getIden
     flushTimer = setTimeout(flush, 1500);
   }
 
+  // Generous cap on how much a failed-write retry can accumulate — a transient failure (disk
+  // full, folder briefly unavailable) should never lose data, but an outage nobody notices for a
+  // very long time shouldn't grow this unboundedly in memory either. Far above any realistic
+  // burst at normal event rates.
+  const MAX_BUFFERED_RECORDS = 5000;
   function flush() {
     flushTimer = null;
     if (writing || !buffer.length) return;
@@ -85,7 +90,14 @@ function createTelemetryRecorder({ dataDir, appVersion = '', getContext, getIden
     const lines = batch.map((r) => JSON.stringify(r)).join('\n') + '\n';
     fs.appendFile(fileForNow(), lines, (err) => {
       writing = false;
-      if (err) console.error('[Telemetry] append failed:', err.message);
+      if (err) {
+        console.error('[Telemetry] append failed:', err.message);
+        // Put the batch back instead of dropping it — this used to silently and permanently lose
+        // every decision recorded during any write failure. Re-prepend so order is preserved once
+        // writes resume; trim from the front if a long-running outage piles up past the cap.
+        buffer.unshift(...batch);
+        if (buffer.length > MAX_BUFFERED_RECORDS) buffer.splice(0, buffer.length - MAX_BUFFERED_RECORDS);
+      }
       if (buffer.length) scheduleFlush();
     });
   }

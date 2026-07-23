@@ -506,11 +506,15 @@
         ev: evName,
         hd: ((data.eventName || '') + '|' + (SceneBase.brandLogo(data) || '').slice(0, 48)),
         ser: (data.series ? (data.series.blue || 0) + '-' + (data.series.orange || 0) : '') + ':' + ((data.match || {}).seriesVisible !== false),
-        fmt: ((data.match || {}).format || ''),
+        // bestOf rides the sig too — the Format row derives its NUMBER from it, so without this
+        // the card would keep a stale "BO3" after the producer changed best-of in Match ▸ Teams.
+        fmt: ((data.match || {}).format || '') + ':' + (data.bestOf || ''),
         ttl: intro.title || '',
         rnd: (pairMatch && pairMatch.round) || '',
         opp: (opp.name || '') + '|' + ((opp.customLogo || opp.logo || '')).slice(0, 40),
         bst: bst ? `${bst.wins||0}-${bst.losses||0}:${bst.placement||0}` : '',
+        // league fallback rides the sig too, else the card keeps a stale/blank record row
+        lgs: (() => { const g = (data.leagueStandings || {})[side]; return g ? `${g.w||0}-${g.l||0}:${g.place||0}` : ''; })(),
         evL: evLoaded });
       if (sig === _sig) return;
       _sig = sig;
@@ -546,12 +550,18 @@
       const sb = Number(ser.blue) || 0, so = Number(ser.orange) || 0;
       const serMine = side === 'blue' ? sb : so, serTheirs = side === 'blue' ? so : sb;
       const fmt = ((data.match || {}).format || '').trim();
-      const fmtN = (() => { const m = fmt.match(/(\d+)/); return m ? parseInt(m[1], 10) : 0; })();
+      // The series LENGTH is owned by Match ▸ Teams (state.bestOf) — every best-of control writes it
+      // (Scorecard radio, Map Pool, Format dropdown). match.format only decides whether this row is
+      // shown at all, so deriving the number from bestOf means the card can't drift from what the
+      // producer set, whichever control they used. Falls back to the format string if bestOf is unset.
+      const fmtN = Number(data.bestOf) > 0
+        ? Number(data.bestOf)
+        : (() => { const m = fmt.match(/(\d+)/); return m ? parseInt(m[1], 10) : 0; })();
       const winsNeeded = fmtN ? Math.floor(fmtN / 2) + 1 : 0;
       const serOn = (data.match || {}).seriesVisible !== false && (sb + so) > 0
         && (!fmtN || (sb + so) <= fmtN);
       if (serOn) ts.push(row('Series', `${serMine} – ${serTheirs}`, 'hero'));
-      if (fmt) ts.push(row('Format', esc(fmt.toUpperCase())));
+      if (fmt) ts.push(row('Format', fmtN ? 'BO' + fmtN : esc(fmt.toUpperCase())));
       // Next Game only when it provably exists: format known, series undecided,
       // and the game number fits the format — never "Game 7" in a BO5.
       const nextGame = sb + so + 1;
@@ -570,9 +580,17 @@
           el('lh-sub').textContent = autoTitle.toUpperCase();
         }
       }
+      // Prefer THIS event's standing (start.gg / Challonge / NXGEN / manual bracket). Producers who
+      // don't run a bracket platform at all have no standings, so fall back to the in-app league
+      // (ESPORTS ▸ Leagues), resolved server-side into data.leagueStandings. Labels differ so a
+      // season-long league record is never mistaken for a run in tonight's event.
+      const lgSt = (data.leagueStandings || {})[side] || null;
       if (bst && (bst.wins != null || bst.losses != null)) {
         ts.push(row('Event Record', `${bst.wins || 0} – ${bst.losses || 0}`));
         if (bst.placement) ts.push(row('Seed', '#' + bst.placement));
+      } else if (lgSt && (lgSt.w != null || lgSt.l != null || lgSt.place != null)) {
+        if (lgSt.w != null || lgSt.l != null) ts.push(row('League Record', `${lgSt.w || 0} – ${lgSt.l || 0}`));
+        if (lgSt.place) ts.push(row('League Place', '#' + lgSt.place));
       }
       if (record) ts.push(row('Season', esc(record)));
       const cc = teamCountry(players, data);

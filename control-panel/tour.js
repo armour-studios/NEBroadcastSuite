@@ -34,7 +34,7 @@
     { target: '[data-dash-id="deck"]', tab: 'principal', title: 'Cutting scenes & going live',
       body: "The Deck widget cuts your mapped scenes right from the dashboard, with preview and hotkeys. Connect your switcher first — Integrations ▸ Video Switcher, OBS or vMix (pick one, they're a clean either/or) — then this grid drives it live and stays in sync with whatever's actually on air." },
     { target: '#dcc-showdeck-home', tab: 'principal', title: 'Show Deck — your on-air talent',
-      body: "The Director Control Center's home tab: who's on camera right now. Put hosts and casters on deck, watch their cams, and swap the on-air lineup live. It's one shared panel — the same deck follows you to the Talent page." },
+      body: "The Director Control Center's home tab: who's on camera right now. Put hosts and casters on deck, watch their cams, and swap the on-air lineup live." },
     { target: '#dash-customize-btn', tab: 'principal', title: 'Make it yours',
       body: "Click Customize to rearrange widgets, change columns, or add/remove cards — build the cockpit that fits how you produce." },
 

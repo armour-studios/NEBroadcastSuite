@@ -34,7 +34,11 @@ function __pushConsoleEntry(level, args) {
   console[level] = function (...args) { __pushConsoleEntry(level, args); orig.apply(console, args); };
 });
 window.addEventListener('error', (e) => {
-  __pushConsoleEntry('error', [`Uncaught: ${e.message} (${e.filename}:${e.lineno}:${e.colno})`]);
+  // Include e.error.stack when present: for a "Maximum call stack size exceeded" overflow the message
+  // alone is useless — the STACK names the recursing function (the actual bug). Truncated so a deep
+  // repeating stack can't blow out the console buffer.
+  const stack = (e.error && e.error.stack) ? ('\n' + String(e.error.stack).slice(0, 4000)) : '';
+  __pushConsoleEntry('error', [`Uncaught: ${e.message} (${e.filename}:${e.lineno}:${e.colno})${stack}`]);
 });
 window.addEventListener('unhandledrejection', (e) => {
   const r = e.reason;

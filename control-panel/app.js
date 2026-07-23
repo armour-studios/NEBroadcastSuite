@@ -68,21 +68,21 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     // pane while Production is active, then returned so they stay in the customize system.
     if (tab === 'produccion') _returnGraphicsToProd();
     else _borrowGraphicsToDash();
-    // Show Deck: one element, canonical home is the DCC's Show Deck tab (inside the Talent
-    // Monitor widget); it's only lent out to the Talent page. See placeShowDeck.
+    // Show Deck: one element, home is the DCC's Show Deck tab (inside the Talent Monitor widget)
+    // on the Dashboard — it no longer appears on the Talent page. See placeShowDeck.
     placeShowDeck(tab);
   });
 });
 
-// The Show Deck (#talent-deck) is the DCC's main page (Show Deck tab) AND the Talent page's
-// allocation strip. Its canonical home is INSIDE the DCC (#dcc-showdeck-home) — the DCC widget sits
-// in the dashboard grid, so the deck rides along there; it is only lent out to the Talent page
-// (#talent-showdeck-home). It is deliberately NOT its own dashboard widget anymore: when it was, it
-// rendered as a standalone grid section AND the DCC's Show Deck tab claimed it, and the deck
-// visibly jumped between the two homes depending on which code path last ran.
-function placeShowDeck(tab) {
+// The Show Deck (#talent-deck) lives ONLY in the DCC's Show Deck tab (#dcc-showdeck-home) — the DCC
+// widget sits in the dashboard grid, so the deck rides along there. It used to be lent out to the
+// Talent page too (#talent-showdeck-home, now an empty placeholder), but the producer wants it on
+// the dashboard alone. It is deliberately NOT its own dashboard widget: when it was, it rendered as
+// a standalone grid section AND the DCC's Show Deck tab claimed it, and the deck visibly jumped
+// between the two homes depending on which code path last ran.
+function placeShowDeck(_tab) {
   const sd = el('talent-deck'); if (!sd) return;
-  const home = (tab === 'principal' || tab === 'facecams') ? el('dcc-showdeck-home') : el('talent-showdeck-home');
+  const home = el('dcc-showdeck-home');
   if (home && sd.parentElement !== home) home.appendChild(sd);
   // The retired 'showdeck' dashboard widget could have stamped hide/reorder inline styles — clear
   // them so the deck always shows in whichever home it's parked in.
@@ -205,9 +205,16 @@ function placeShowDeck(tab) {
   function showPage(page) {
     nav.querySelectorAll('.talent-page-btn').forEach((b) => b.classList.toggle('active', b.dataset.talentpage === page));
     Object.entries(panels).forEach(([k, p]) => { if (p) p.style.display = k === page ? '' : 'none'; });
-    const acts = document.getElementById('talent-topbar-teams-actions');
-    if (acts) acts.style.display = page === 'teams' ? '' : 'none';
+    // Exactly ONE action group ever sits in the topbar. The Event group (Save All / Clear)
+    // belongs to the Teams > Event sub-tab only — it used to stay behind on the Crew page
+    // (nothing hid it here), and with two groups both claiming margin-left:auto the first
+    // one landed stranded in the middle of the bar.
+    const acts     = document.getElementById('talent-topbar-teams-actions');
+    const evActs   = document.getElementById('talent-topbar-event-actions');
     const crewActs = document.getElementById('talent-topbar-crew-actions');
+    const onEventTab = !!document.querySelector('#teams-sub-nav .talent-page-btn.active[data-teamstab="event"]');
+    if (acts)     acts.style.display     = (page === 'teams' && !onEventTab) ? '' : 'none';
+    if (evActs)   evActs.style.display   = (page === 'teams' &&  onEventTab) ? '' : 'none';
     if (crewActs) crewActs.style.display = page === 'crew' ? '' : 'none';
     if (page === 'crew') renderCrewList();
     try { localStorage.setItem('talent_active_page', page); } catch (_) {}
@@ -2570,8 +2577,8 @@ function _returnGraphicsToProd() {
       const sEl = el('gfx-front-std-subtitle'); if (sEl && document.activeElement !== sEl) sEl.value = s.subtitle || '';
       const rEl = el('gfx-front-std-showrecord'); if (rEl && document.activeElement !== rEl) rEl.checked = s.showRecord !== false;
       const srcBtn = document.querySelector('#gfx-std-src .gfx-std-src-tab.is-on, #gfx-std-src .gfx-src-tab.is-on');
-      // Mirror the pop-out's active source onto the front-panel chips.
-      const srcKey = srcBtn ? srcBtn.dataset.stdsrc : 'league';
+      // Mirror the pop-out's active source onto the front-panel chips (legacy names → 'tournament').
+      const srcKey = gfxStdNormSrc(srcBtn ? srcBtn.dataset.stdsrc : 'league');
       document.querySelectorAll('#gfx-front-std-src .gfx-src-tab').forEach((t) => t.classList.toggle('is-on', t.dataset.fstdsrc === srcKey));
       // Live preview of the standings rows currently on air.
       const rows = s.rows || [];
@@ -3154,6 +3161,8 @@ function _returnGraphicsToProd() {
     el(id)?.addEventListener('input', doWinnerPreview);
     el(id)?.addEventListener('change', doWinnerPreview);
   });
+  // Once the producer types their own subtitle, stop auto-suggesting the series score into it.
+  el('input-winner-subtitle')?.addEventListener('input', () => { if (window._winnerAuto) window._winnerAuto.subTouched = true; });
 
   const doIntroPreview = debounce(() => {
     if (typeof send !== 'function') return;
@@ -3295,15 +3304,22 @@ function _returnGraphicsToProd() {
   el('gfx-mu-swap')?.addEventListener('click', () => send('swap_teams', {}));
 
   // ── Standings panel ──────────────────────────────────────────────────────
-  function gfxStdSrc(src) {
+  // Legacy source values: 'startgg' (seeding-only, all zeros) and 'bracket' (phase/pool) were merged
+  // into one 'tournament' source, so map anything saved under the old names onto it.
+  function gfxStdNormSrc(src) {
+    return (src === 'startgg' || src === 'bracket') ? 'tournament' : (src || 'league');
+  }
+  function gfxStdSrc(rawSrc) {
+    const src = gfxStdNormSrc(rawSrc);
     el('gfx-std-league-wrap').style.display  = src === 'league' ? '' : 'none';
-    el('gfx-std-sg-wrap').style.display      = src === 'startgg' ? '' : 'none';
+    el('gfx-std-sg-wrap').style.display      = 'none';   // old seeding-only pane, folded into Tournament
     el('gfx-std-manual-wrap').style.display  = src === 'manual' ? '' : 'none';
     // Side-column config that goes with each source (split out of the old single stacked column
     // so the pop-out can show config + live rows side by side).
     const leagueSel = el('gfx-std-league-select-wrap'); if (leagueSel) leagueSel.style.display = src === 'league' ? '' : 'none';
-    const sgSel = el('gfx-std-sg-select-wrap'); if (sgSel) sgSel.style.display = src === 'startgg' ? '' : 'none';
-    const bktSel = el('gfx-std-bkt-select-wrap'); if (bktSel) bktSel.style.display = src === 'bracket' ? '' : 'none';
+    const sgSel = el('gfx-std-sg-select-wrap'); if (sgSel) sgSel.style.display = 'none';
+    // Phase/pool pickers are an OPTIONAL override under Tournament — blank means "follow the live one".
+    const bktSel = el('gfx-std-bkt-select-wrap'); if (bktSel) bktSel.style.display = src === 'tournament' ? '' : 'none';
     const manualActions = el('gfx-std-manual-actions-wrap'); if (manualActions) manualActions.style.display = src === 'manual' ? '' : 'none';
     document.querySelectorAll('#gfx-std-src .gfx-src-tab').forEach((b) => b.classList.toggle('is-on', b.dataset.stdsrc === src));
   }
@@ -3379,22 +3395,31 @@ function _returnGraphicsToProd() {
       const rows = buildLeagueStandingsRows(el('gfx-std-league')?.value);
       if (!rows) return { ok: false, err: 'Select a league first.' };
       return { ok: true, payload: { ...common, source: 'league', rows }, msg: 'from league' };
-    } else if (src === 'startgg') {
+    } else if (src === 'tournament') {
+      // ONE tournament source. state.bracket is populated by whichever platform is connected —
+      // start.gg, Challonge or NXGEN all feed it — so this works for any of them with no extra
+      // picker. Defaults to the phase/pool that's LIVE on the Bracket scene, so it "just works"
+      // when an event is connected; the phase/pool selects below are an optional override.
+      const bk = (currentState && currentState.bracket) || {};
+      const phases = bk.phases || [];
+      const phaseId = el('gfx-std-bkt-phase')?.value || bk.activePhaseId || '';
+      const ph = phases.find((p) => p.id === phaseId) || phases[0] || null;
+      const poolId = el('gfx-std-bkt-pool')?.value || (ph && ph.id === bk.activePhaseId ? bk.activePoolId : '') || '';
+      const pool = (ph && poolId && Array.isArray(ph.pools)) ? ph.pools.find((pl) => pl.id === poolId) : null;
+      // Prefer pool → phase → the top-level mirror (which syncActiveBracketPhase keeps pointed at
+      // the live phase/pool, and is what a single-phase event has).
+      let rowsSrc = (pool && pool.standings) || (ph && ph.standings) || bk.standings || [];
+      if (rowsSrc.length) {
+        const rows = rowsSrc.map((r, i) => ({ ...r, placement: r.placement || i + 1 }));
+        const where = ph ? ((ph.name || 'phase') + (pool ? ' · ' + (pool.name || 'pool') : '')) : 'event';
+        return { ok: true, payload: { ...common, source: 'bracket-phase', rows }, msg: 'from ' + where };
+      }
+      // No results yet (bracket loaded but nothing played) — fall back to the seeding list so the
+      // graphic isn't empty, and SAY it's seeding rather than passing zeros off as standings.
       const teams = ((currentState && currentState.startgg) || {}).eventTeams || [];
-      if (!teams.length) return { ok: false, err: 'No start.gg event loaded.' };
+      if (!teams.length) return { ok: false, err: 'No tournament event connected — load one on the Bracket scene.' };
       const rows = teams.map((tm, i) => ({ placement: i + 1, name: tm.name || 'Team', logo: tm.logo || null, wins: 0, losses: 0, points: 0 }));
-      return { ok: true, payload: { ...common, source: 'startgg-league', rows }, msg: 'from start.gg seeding' };
-    } else if (src === 'bracket') {
-      const phaseId = el('gfx-std-bkt-phase')?.value;
-      const phases = (currentState && currentState.bracket && currentState.bracket.phases) || [];
-      const ph = phases.find((p) => p.id === phaseId);
-      if (!ph) return { ok: false, err: 'Select a bracket phase first.' };
-      const poolId = el('gfx-std-bkt-pool')?.value;
-      const pool = poolId && Array.isArray(ph.pools) ? ph.pools.find((pl) => pl.id === poolId) : null;
-      const source = (pool ? pool.standings : ph.standings) || [];
-      if (!source.length) return { ok: false, err: 'That phase/pool has no standings table yet.' };
-      const rows = source.map((r, i) => ({ ...r, placement: r.placement || i + 1 }));
-      return { ok: true, payload: { ...common, source: 'bracket-phase', rows }, msg: 'from ' + (ph.name || 'phase') + (pool ? ' · ' + (pool.name || 'pool') : '') };
+      return { ok: true, payload: { ...common, source: 'startgg-league', rows }, msg: 'from SEEDING (no results played yet)' };
     }
     return { ok: true, payload: { ...common, source: 'manual' }, msg: '' };
   }
@@ -3435,6 +3460,7 @@ function _returnGraphicsToProd() {
   // then driven locally. Auto-saved to server via set_upcoming on every change.
   let _schMatches = [];
   let _schInitialized = false;
+  let _schDragFrom = -1;   // index being dragged in the front-card schedule list (drag-to-reorder)
   // Set after a "Pull from league" — {leagueId, week, sig, pulledAt}. Lets us detect when the
   // source league's schedule changes after the one-shot pull, without reactively re-binding
   // state.upcoming to state.leagues (which would silently clobber hand-edited pulled rows).
@@ -3518,7 +3544,7 @@ function _returnGraphicsToProd() {
       const a = esc(m.teamA || 'TBD'), b = esc(m.teamB || 'TBD');
       const live = '';
       const rowEl = document.createElement('div'); rowEl.className = 'gfx-fp-prow';
-      rowEl.innerHTML = `${rd}<span class="tm" title="${a} vs ${b}">${a}<span class="vs">vs</span>${b}</span>`
+      rowEl.innerHTML = `<span class="gfx-fp-grip" title="Drag to reorder" aria-hidden="true">&#8942;&#8942;</span>${rd}<span class="tm" title="${a} vs ${b}">${a}<span class="vs">vs</span>${b}</span>`
         + `<input type="date" class="input-text gfx-fp-date" value="${esc(/^\d{4}-\d{2}-\d{2}$/.test(m.date || '') ? m.date : '')}" title="Match date — edits save automatically" style="width:118px; flex:0 0 auto; font-size:11px; padding:2px 4px;">`
         + '<select class="input-select gfx-fp-th" title="Hour" style="width:46px; flex:0 0 auto; font-size:11px; padding:2px 2px;"></select>'
         + '<select class="input-select gfx-fp-tm" title="Minutes" style="width:52px; flex:0 0 auto; font-size:11px; padding:2px 2px;"></select>'
@@ -3547,6 +3573,41 @@ function _returnGraphicsToProd() {
         const t = _schMatches[i]; _schMatches[i] = _schMatches[j]; _schMatches[j] = t;
         schRenderList(); schAutoSave();
       }));
+      // Drag-to-reorder. The whole row is draggable, but a drag that STARTS inside an input/select/
+      // button is cancelled so those stay clickable — grab the grip (or the team text) to reorder.
+      rowEl.draggable = true;
+      rowEl.dataset.idx = i;
+      rowEl.addEventListener('dragstart', (e) => {
+        if (e.target.closest('input, select, button')) { e.preventDefault(); return; }
+        _schDragFrom = i;
+        rowEl.classList.add('gfx-fp-dragging');
+        e.dataTransfer.effectAllowed = 'move';
+        try { e.dataTransfer.setData('text/plain', String(i)); } catch (_) {}
+      });
+      const clearDropMarks = () => body.querySelectorAll('.gfx-fp-drop-before, .gfx-fp-drop-after')
+        .forEach((x) => x.classList.remove('gfx-fp-drop-before', 'gfx-fp-drop-after'));
+      rowEl.addEventListener('dragend', () => { rowEl.classList.remove('gfx-fp-dragging'); clearDropMarks(); _schDragFrom = -1; });
+      rowEl.addEventListener('dragover', (e) => {
+        if (_schDragFrom < 0 || _schDragFrom === i) return;
+        e.preventDefault(); e.dataTransfer.dropEffect = 'move';
+        const r = rowEl.getBoundingClientRect();
+        const after = (e.clientY - r.top) > r.height / 2;
+        clearDropMarks();
+        rowEl.classList.add(after ? 'gfx-fp-drop-after' : 'gfx-fp-drop-before');
+      });
+      rowEl.addEventListener('drop', (e) => {
+        if (_schDragFrom < 0) return;
+        e.preventDefault();
+        const from = _schDragFrom; _schDragFrom = -1;
+        const r = rowEl.getBoundingClientRect();
+        const after = (e.clientY - r.top) > r.height / 2;
+        let to = i + (after ? 1 : 0);
+        if (from === to || from === to - 1) { clearDropMarks(); return; }   // no-op drop in place
+        const item = _schMatches.splice(from, 1)[0];
+        if (from < to) to -= 1;                                             // account for the removal shift
+        _schMatches.splice(to, 0, item);
+        schRenderList(); schAutoSave();
+      });
       body.appendChild(rowEl);
     });
   }
@@ -3918,6 +3979,27 @@ function _returnGraphicsToProd() {
     });
   };
 
+  // Winner-screen auto-suggest helpers. Attached to window so both the picker (this scope) and
+  // winnerPayload (top level) share them. _winnerAuto tracks whether the producer has overridden the
+  // auto-picked side / typed their own subtitle, so we stop suggesting once they take control.
+  window._winnerAuto = window._winnerAuto || { sideManual: false, subTouched: false, lastScore: '' };
+  window._winnerLeadingSide = function (state) {
+    const s = (state && state.series) || {};
+    const b = Number(s.blue) || 0, o = Number(s.orange) || 0;
+    if (b === o) return '';                 // tie / no games played → don't guess a winner
+    return b > o ? 'blue' : 'orange';
+  };
+  window._winnerSeriesScore = function (state, sideVal) {
+    const s = (state && state.series) || {};
+    const b = Number(s.blue) || 0, o = Number(s.orange) || 0;
+    if (b + o <= 0) return '';
+    let hi, lo;
+    if (sideVal === 'blue') { hi = b; lo = o; }
+    else if (sideVal === 'orange') { hi = o; lo = b; }
+    else { hi = Math.max(b, o); lo = Math.min(b, o); }   // custom/saved winner → winner's (higher) score first
+    return hi + '–' + lo;              // en-dash
+  };
+
   window._gfxRefreshWinnerPicker = function (state) {
     const sel = el('select-winner-side'); if (!sel) return;
     const teams  = (state && state.savedTeams) || [];
@@ -3936,6 +4018,28 @@ function _returnGraphicsToProd() {
     sel.appendChild(mkOpt('__custom__', '— Custom name… —'));
     // Restore previous selection if it still makes sense
     if (prev && Array.from(sel.options).some((o) => o.value === prev)) sel.value = prev;
+    // Auto-suggest: KNOW THE WINNER from the live series score (the leading side) and SUGGEST the
+    // series score as the subtitle — until the producer overrides either.
+    const auto = window._winnerAuto;
+    const seriesTotal = ((state && state.series && Number(state.series.blue)) || 0)
+                      + ((state && state.series && Number(state.series.orange)) || 0);
+    if (seriesTotal === 0) { auto.sideManual = false; auto.subTouched = false; auto.lastScore = ''; }  // fresh match → re-arm
+    if (!auto.sideManual) {
+      const lead = window._winnerLeadingSide(state);
+      if (lead && Array.from(sel.options).some((o) => o.value === lead)) sel.value = lead;
+    }
+    const subEl = el('input-winner-subtitle');
+    const score = window._winnerSeriesScore(state, sel.value);
+    if (subEl) {
+      subEl.placeholder = score || '2025 Spring Champions';
+      // Keep the suggestion in sync while it's still ours (empty, or the score we last filled) and the
+      // producer isn't typing in it. Once they type their own subtitle, subTouched stops us.
+      if (score && !auto.subTouched && document.activeElement !== subEl &&
+          (!subEl.value.trim() || subEl.value === auto.lastScore)) {
+        subEl.value = score;
+        auto.lastScore = score;
+      }
+    }
     // Show/hide custom name row
     const row = el('winner-custom-row');
     if (row) row.style.display = (sel.value === '__custom__') ? '' : 'none';
@@ -4074,6 +4178,9 @@ function _returnGraphicsToProd() {
     el('gfx-bkt-title')?.addEventListener('input', function () { send('set_bracket_settings', { title: this.value }); });
     el('gfx-bkt-subtitle')?.addEventListener('input', function () { send('set_bracket_settings', { subtitle: this.value }); });
     el('gfx-bkt-showrecord')?.addEventListener('change', function () { send('set_bracket_settings', { showRecord: this.checked }); });
+    el('gfx-bkt-ignore-reset')?.addEventListener('change', function () { send('set_bracket_settings', { ignoreReset: this.checked }); });
+    el('gfx-bkt-ignore-rounds')?.addEventListener('change', function () { send('set_bracket_settings', { ignoreRounds: Math.max(0, Math.min(12, parseInt(this.value, 10) || 0)) }); });
+    el('gfx-bkt-hide-logos')?.addEventListener('change', function () { send('set_bracket_settings', { hideLogos: this.checked }); });
     document.querySelector('#gfx-bkt-srctabs [data-bktsrc="league"]')?.addEventListener('click', () => {
       send('set_bracket_settings', { view: 'standings' });
       bktPushLeagueRows();
@@ -6531,6 +6638,7 @@ function applyState(data) {
   applyCsgoState(data);
   applyValorantState(data);
   applyLolState(data);
+  applyApexState(data);
 
   // OBS settings
   applyObsState(data);
@@ -6729,6 +6837,10 @@ function findTeam(name) {
   if (!n) return null;
   return allMatchTeams().find(t => (t.name || '').toLowerCase() === n) || null;
 }
+// TBD / TBA is a first-class PLACEHOLDER, not a team: it never has to exist in the library, and
+// applying it wipes the side clean (no inherited logo, roster or colour from whoever was there).
+// Producers type it constantly while a bracket is still resolving.
+function isTbdName(name) { return /^(tbd|tba)$/i.test((name || '').trim()); }
 
 function populateSavedTeamsDropdowns() {
   const teams = allMatchTeams();
@@ -6973,7 +7085,8 @@ function renderMatchPlayers(side, players) {
   const sig = JSON.stringify(players.map(p => {
     const r = _profiles[(p.name || '').trim().toLowerCase()] || {};
     return [p.id, p.name, p.realName || '', p.assignedCamera || '', p.hero || '', p.role || '', p.country || '', p.info || '', p.startgg || '', p.sixmans || '', r.startggSlug || '', (r.sixmans && r.sixmans.name) || '', p.status || '', p.photo ? '1' : '0', r.image ? '1' : '0', p.twitter || '', p.twitch || '', p.discord || '', p.instagram || '', p.tiktok || '', p.youtube || '', r.twitter || '', r.twitch || ''];
-  })) + '|' + camKey + '|' + usesHeroes + '|' + currentState.activeGame;
+  })) + '|' + camKey + '|' + usesHeroes + '|' + currentState.activeGame
+      + '|active:' + ((currentState.activePlayer && currentState.activePlayer[side]) || '');
   if (wrap.dataset.sig === sig) return;
   if (wrap.classList.contains('tp-removing')) return;
   if (wrap.contains(document.activeElement)) return;
@@ -6984,6 +7097,14 @@ function renderMatchPlayers(side, players) {
     wrap.innerHTML = '<div class="tp-empty">No players yet — pick a team or add one.</div>';
     return;
   }
+
+  // FGC / 1v1: let the producer pick which roster member is the one shown on the scoreboard.
+  // Only meaningful for head-to-head games with more than one player on the side.
+  const isFgc = !!(gameCfg && (gameCfg.format === '1v1' || (gameCfg.features || []).includes('fgc')));
+  const showOnAir = isFgc && players.length > 1;
+  const _activeId = (currentState.activePlayer && currentState.activePlayer[side]) || '';
+  // Effective active = explicit selection, else the first player (what the overlay defaults to).
+  const effectiveActiveId = _activeId || (players[0] && String(players[0].id)) || '';
 
   players.forEach((p) => {
     const r = _profiles[(p.name || '').trim().toLowerCase()] || {};
@@ -7016,6 +7137,20 @@ function renderMatchPlayers(side, players) {
       if (p.id) send('edit_player', { side, playerId: p.id, playerData: { status: next } });
     });
     bar.appendChild(statusBtn);
+
+    // On-Air selector — which roster member is the active competitor on the FGC scoreboard.
+    if (showOnAir) {
+      const isActive = String(p.id) === String(effectiveActiveId);
+      const onAir = document.createElement('button');
+      onAir.className = 'tp-onair' + (isActive ? ' active' : '');
+      onAir.textContent = isActive ? 'On Air' : 'Set Live';
+      onAir.title = isActive ? 'This player is shown on the scoreboard' : 'Show this player on the scoreboard';
+      onAir.addEventListener('click', () => {
+        if (!p.id || String(p.id) === String(effectiveActiveId)) return;
+        send('set_active_player', { side, playerId: p.id });
+      });
+      bar.appendChild(onAir);
+    }
 
     // Social icons — player fields + registry fallbacks
     const socWrap = document.createElement('div'); socWrap.className = 'tp-bar-socials';
@@ -7712,6 +7847,7 @@ function updateTeamSavedBadge(side) {
   const name = input.value.trim();
   const t = name ? findTeam(name) : null;
   if (!name) { badge.textContent = ''; badge.className = 'team-saved-badge'; }
+  else if (isTbdName(name)) { badge.textContent = 'Placeholder'; badge.className = 'team-saved-badge is-event'; }
   else if (t && t.source === 'saved') { badge.textContent = '✓ Saved'; badge.className = 'team-saved-badge is-saved'; }
   else if (t && t.source === 'event') { badge.textContent = 'Event'; badge.className = 'team-saved-badge is-event'; }
   else { badge.textContent = 'Not saved'; badge.className = 'team-saved-badge is-unsaved'; }
@@ -7912,14 +8048,8 @@ function renderStartggTeams(teams = [], selectedEvent = null) {
     applyBlue.textContent = 'Blue';
     applyBlue.title = 'Apply to Blue team on Dashboard';
     applyBlue.addEventListener('click', () => {
-      send('set_team', { side: 'blue', name: t.name, logo: t.logo || null, color: t.color || undefined });
-      // Also push players if present
-      if (t.players && t.players.length) {
-        // crude: overwrite current blue players (client will reflect)
-        currentState.teams = currentState.teams || {};
-        currentState.teams.blue = currentState.teams.blue || {};
-        currentState.teams.blue.players = JSON.parse(JSON.stringify(t.players));
-      }
+      // Send the team's roster (empty included) so a rosterless team clears the previous players.
+      send('set_team', { side: 'blue', name: t.name, logo: t.logo || null, color: t.color || undefined, players: t.players || [] });
     });
 
     const applyOrange = document.createElement('button');
@@ -7927,12 +8057,7 @@ function renderStartggTeams(teams = [], selectedEvent = null) {
     applyOrange.textContent = 'Orange';
     applyOrange.title = 'Apply to Orange team on Dashboard';
     applyOrange.addEventListener('click', () => {
-      send('set_team', { side: 'orange', name: t.name, logo: t.logo || null, color: t.color || undefined });
-      if (t.players && t.players.length) {
-        currentState.teams = currentState.teams || {};
-        currentState.teams.orange = currentState.teams.orange || {};
-        currentState.teams.orange.players = JSON.parse(JSON.stringify(t.players));
-      }
+      send('set_team', { side: 'orange', name: t.name, logo: t.logo || null, color: t.color || undefined, players: t.players || [] });
     });
 
     const saveBtn = document.createElement('button');
@@ -7977,8 +8102,20 @@ function renderEventTeamsPanel(data) {
   const nxgenTeams = (data.nxgen?.eventTeams    || []).map(t => ({ ...t, _plat: 'nxgen' }));
   const all = [...sggTeams, ...challTeams, ...nxgenTeams];
 
+  // A card's logo/color prefer the matching Team Library entry (if the producer has edited+saved
+  // this event team) over the raw import — editing a team writes to savedTeams only (save_team/
+  // save_startgg_team never touch startgg.eventTeams itself), so without this the grid would keep
+  // showing the original unedited import forever, and the signature below wouldn't even notice a
+  // savedTeams-only change happened.
+  const _tn = (s) => (s || '').trim().toLowerCase();
+  const savedByName = {};
+  (data.savedTeams || []).forEach(s => { if (s && s.name) savedByName[_tn(s.name)] = s; });
+
   const evName = data.startgg?.selectedEvent?.name || data.startgg?.selectedEvent?.tournamentName || '';
-  const sig = evName + '::' + all.map(t => t.name + '|' + (t.logo ? t.logo.length : 0) + '|' + t._plat).join('~');
+  const sig = evName + '::' + all.map(t => {
+    const saved = savedByName[_tn(t.name)];
+    return t.name + '|' + (t.logo ? t.logo.length : 0) + '|' + (saved && saved.logo ? saved.logo.length : 0) + '|' + t._plat;
+  }).join('~');
   if (sig === _eventTeamsSig) return;
   _eventTeamsSig = sig;
 
@@ -7999,15 +8136,19 @@ function renderEventTeamsPanel(data) {
 
   const frag = document.createDocumentFragment();
   all.forEach(t => {
+    const existingSaved = savedByName[_tn(t.name)];
+    const dispLogo = (existingSaved && existingSaved.logo) || t.logo;
+    const dispColor = (existingSaved && existingSaved.color) || t.color;
+
     const card = document.createElement('div');
     card.className = 'tc-card';
     card.dataset.search = (t.name || '').toLowerCase();
-    card.style.setProperty('--team-accent', t.color || '#3b82f6');
+    card.style.setProperty('--team-accent', dispColor || '#3b82f6');
 
     const accent = document.createElement('div'); accent.className = 'tc-card-accent';
     const body   = document.createElement('div'); body.className   = 'tc-card-body';
     const logo   = document.createElement('img'); logo.className   = 'tc-card-logo'; logo.loading = 'lazy';
-    logo.src = t.logo || teePlaceholder(t.name, t.color);
+    logo.src = dispLogo || teePlaceholder(t.name, dispColor);
     const info   = document.createElement('div'); info.className   = 'tc-card-info';
     const nameEl = document.createElement('div'); nameEl.className = 'tc-card-name'; nameEl.textContent = t.name;
     const meta   = document.createElement('div'); meta.className   = 'tc-card-meta';
@@ -8022,13 +8163,14 @@ function renderEventTeamsPanel(data) {
     editBtn.className = 'tc-edit tc-edit-primary'; editBtn.title = 'Edit players and data'; editBtn.textContent = 'Edit';
     editBtn.addEventListener('click', e => {
       e.stopPropagation();
-      const existingSaved = (currentState.savedTeams || []).find(s => s.name === t.name);
+      // Prefer the saved team's own data — a previous edit+save only wrote to savedTeams (never
+      // back onto the raw import), so re-loading from `t` here would silently discard it.
       teLoad({
-        oldName: existingSaved ? t.name : null,
+        oldName: existingSaved ? existingSaved.name : null,
         name: t.name,
-        logo: t.logo || null,
-        color: t.color || '#055fdb',
-        players: (t.players || []).map(p => ({ ...p, photo: p.photo || p.image || '' }))
+        logo: dispLogo || null,
+        color: dispColor || '#055fdb',
+        players: (existingSaved && existingSaved.players && existingSaved.players.length ? existingSaved.players : (t.players || [])).map(p => ({ ...p, photo: p.photo || p.image || '' }))
       });
       openTeamEditor();
     });
@@ -8040,7 +8182,15 @@ function renderEventTeamsPanel(data) {
       if (t._plat === 'start.gg') {
         send('save_startgg_team', { name: t.name });
       } else {
-        send('save_team', { name: t.name, logo: t.logo || null, color: t.color || '#055fdb', players: t.players || [] });
+        // Challonge/NXGEN event-team objects never carry a players field — sending players:[]
+        // unconditionally told the server "here's the new roster: empty", wiping out whatever
+        // full roster (photos, camera slots, socials) was already saved for this team. Only
+        // include players when there's an actual roster to apply; omitting the key lets the
+        // server's own "preserve existing roster unless an explicit array was sent" fallback do
+        // the right thing (matches how save_startgg_team already handles this).
+        const payload = { name: t.name, logo: t.logo || null, color: t.color || '#055fdb' };
+        if (t.players && t.players.length) payload.players = t.players;
+        send('save_team', payload);
       }
       saveBtn.textContent = 'Saved!';
       setTimeout(() => { saveBtn.textContent = 'Save'; }, 2000);
@@ -8081,8 +8231,10 @@ function switchTeamsTab(tab) {
   const eventActions = el('talent-topbar-event-actions');
   if (savedPanel) savedPanel.style.display = tab === 'saved' ? '' : 'none';
   if (eventPanel) eventPanel.style.display = tab === 'event'  ? '' : 'none';
-  if (savedActions) savedActions.style.display = tab === 'saved' ? '' : 'none';
-  if (eventActions) eventActions.style.display = tab === 'event'  ? '' : 'none';
+  // Never light up a Teams action group while the Crew page is the one on screen.
+  const onTeamsPage = (el('talent-panel-teams')?.style.display !== 'none');
+  if (savedActions) savedActions.style.display = (onTeamsPage && tab === 'saved') ? '' : 'none';
+  if (eventActions) eventActions.style.display = (onTeamsPage && tab === 'event') ? '' : 'none';
   document.querySelectorAll('#teams-sub-nav .talent-page-btn').forEach(b => {
     b.classList.toggle('active', b.dataset.teamstab === tab);
   });
@@ -8223,8 +8375,26 @@ function startEditTeam(t) {
   el('te-name')?.focus();
 }
 
+// delete_team has no cascade server-side (deleting a Team Library entry doesn't touch anything
+// that references it by name) — a league roster, Teams to Watch, or Team Spotlight pointing at a
+// deleted team just silently freezes on its last-known copy with no indication the link broke.
+// Rather than force a cascade (deleting a library entry shouldn't reach into an active league's
+// roster mid-season), at least warn the producer what's still pointing at it before they confirm.
+function teamReferenceWarning(name) {
+  const tn = (s) => (s || '').trim().toLowerCase();
+  const target = tn(name);
+  const refs = [];
+  (currentState.leagues || []).forEach((lg) => {
+    if ((lg.teams || []).some((t) => tn(t.teamName) === target)) refs.push(`league "${lg.name || 'Unnamed'}"`);
+  });
+  if ((currentState.watchlist?.teams || []).some((t) => tn(t.name) === target)) refs.push('Teams to Watch');
+  if (tn(currentState.teamSpotlight?.name) === target) refs.push('Team Spotlight');
+  if (!refs.length) return '';
+  return ` This team is still referenced by ${refs.join(', ')} — deleting it will leave those pointing at a stale, un-updatable copy.`;
+}
+
 async function deleteTeam(name) {
-  const ok = await customConfirm('Delete Team', `Are you sure you want to delete the team "${name}"?`, 'Delete');
+  const ok = await customConfirm('Delete Team', `Are you sure you want to delete the team "${name}"?${teamReferenceWarning(name)}`, 'Delete');
   if (ok) send('delete_team', { name });
 }
 
@@ -8245,7 +8415,9 @@ function toggleTeamFavorite(t) {
 el('btn-delete-all-teams')?.addEventListener('click', async () => {
   const toDelete = (currentState.savedTeams || []).filter((t) => !t.favorite);
   if (!toDelete.length) { showToast('No non-favorited teams to delete.'); return; }
-  const ok = await customConfirm('Delete All Teams', `Delete ${toDelete.length} non-favorited team${toDelete.length !== 1 ? 's' : ''}? Favorited teams are kept. This cannot be undone.`, 'Delete All');
+  const referenced = toDelete.filter((t) => teamReferenceWarning(t.name));
+  const refWarning = referenced.length ? ` ${referenced.length} of these are still referenced by a league, Teams to Watch, or Team Spotlight and will leave those pointing at a stale copy.` : '';
+  const ok = await customConfirm('Delete All Teams', `Delete ${toDelete.length} non-favorited team${toDelete.length !== 1 ? 's' : ''}? Favorited teams are kept. This cannot be undone.${refWarning}`, 'Delete All');
   if (!ok) return;
   toDelete.forEach((t) => send('delete_team', { name: t.name }));
 });
@@ -8335,7 +8507,7 @@ el('tm-save')?.addEventListener('click', () => {
 });
 el('tm-delete')?.addEventListener('click', async () => {
   if (!tmModel || !tmModel.oldName) { tmShowEditor(false); tmModel = null; return; }
-  const ok = await customConfirm('Delete Team', `Delete "${tmModel.oldName}"?`, 'Delete');
+  const ok = await customConfirm('Delete Team', `Delete "${tmModel.oldName}"?${teamReferenceWarning(tmModel.oldName)}`, 'Delete');
   if (ok) { send('delete_team', { name: tmModel.oldName }); tmShowEditor(false); tmModel = null; el('tm-team-select').value = ''; }
 });
 
@@ -8733,10 +8905,24 @@ el('input-logo-orange')?.addEventListener('change', e => { handleLogoInput('oran
 function applyTeam(side) {
   const name = el(`input-name-${side}`).value.trim().toUpperCase();
   if (!name) return;
+  // Placeholder: clear the side outright — logo, roster and saved colour all belong to the team
+  // that WAS here, and carrying them into "TBD" is what made the placeholder look broken on air.
+  if (isTbdName(name)) {
+    if (side === 'blue') pendingLogoBlue = null; else pendingLogoOrange = null;
+    setSideLogo(side, null);
+    // Back to the side's default colour too — a placeholder wearing the last team's brand colour
+    // is the same stale-identity problem as the logo.
+    const defColor = side === 'blue' ? '#055fdb' : '#e97139';
+    const colorEl = el(`input-color-${side}`); if (colorEl) colorEl.value = defColor;
+    send('set_team', { side, name, logo: null, players: [], color: defColor });
+    return;
+  }
   const t = findTeam(name);
   const logo = (side === 'blue' ? pendingLogoBlue : pendingLogoOrange) || (t && t.logo) || null;
   const payload = { side, name, logo };
-  if (t && Array.isArray(t.players) && t.players.length) payload.players = t.players;
+  // Picking a saved/event team makes its roster THE side's roster — even an empty one.
+  // (A rosterless team like JONZEY must clear the previous team's players, not inherit them.)
+  if (t) payload.players = Array.isArray(t.players) ? t.players : [];
   if (t && t.color) payload.color = t.color;   // carry the saved team's own colour → Team colour-mode
   send('set_team', payload);
 }
@@ -8757,6 +8943,9 @@ el('btn-apply-orange')?.addEventListener('click', () => applyTeam('orange'));
   // auto-load that team's logo so picking from the autocomplete fills the card.
   el(`input-name-${side}`).addEventListener('input', function () {
     updateTeamSavedBadge(side);
+    // TBD has no library entry to match — apply it directly (same as an exact team match) so
+    // picking it from the dropdown clears the side immediately, no Apply click needed.
+    if (isTbdName(this.value)) { applyTeam(side); return; }
     const t = findTeam(this.value);
     if (t) {
       if (side === 'blue') { pendingLogoBlue = t.logo; setSideLogo('blue', t.logo); }
@@ -8779,10 +8968,16 @@ function setupTeamTypeahead(side) {
   let active = -1;
   let open = false;
 
+  // TBD rides at the top of the list as a synthetic entry so the placeholder is always one click
+  // away — it's deliberately NOT in the team library, so a plain filter would show "no matches"
+  // and leave the producer thinking the name isn't allowed.
+  const TBD_ITEM = { name: 'TBD', logo: null, color: null, players: [], source: 'tbd' };
   const filtered = (q) => {
     q = (q || '').trim().toLowerCase();
     const list = allMatchTeams();
-    return (q ? list.filter((t) => (t.name || '').toLowerCase().includes(q)) : list).slice(0, 60);
+    const out = (q ? list.filter((t) => (t.name || '').toLowerCase().includes(q)) : list).slice(0, 60);
+    if (!q || 'tbd'.startsWith(q) || 'tba'.startsWith(q)) out.unshift(TBD_ITEM);
+    return out;
   };
   const close = () => { dd.classList.remove('show'); open = false; active = -1; };
   const position = () => {
@@ -8799,7 +8994,8 @@ function setupTeamTypeahead(side) {
     dd.innerHTML = items.map((t, i) => {
       const logo = t.logo || gameLogo();
       const nm = (t.name || '').toUpperCase().replace(/</g, '&lt;');
-      const tag = t.source === 'event' ? '<span class="team-dd-tag">EVENT</span>' : '';
+      const tag = t.source === 'event' ? '<span class="team-dd-tag">EVENT</span>'
+        : t.source === 'tbd' ? '<span class="team-dd-tag">PLACEHOLDER</span>' : '';
       return `<div class="team-dd-item${i === active ? ' active' : ''}" data-i="${i}" role="option">
         <img class="team-dd-logo${t.logo ? '' : ' game-logo-white'}" src="${logo}" alt="" onerror="this.style.visibility='hidden'">
         <span class="team-dd-name">${nm}</span>${tag}</div>`;
@@ -8862,12 +9058,14 @@ el('btn-quick-save-blue')?.addEventListener('click', () => {
   // matches the library case-insensitively, so this keeps a picked "Team Alpha" from duplicating.
   const name = el('input-name-blue').value.trim();
   if (!name) { showToast('Enter team name.', '#ef4444'); return; }
+  if (isTbdName(name)) { showToast('TBD is a placeholder — nothing to save.', '#fbbf24'); return; }
   send('save_team', { name, logo: pendingLogoBlue || null, color: teamOwnColor('blue') });
 });
 
 el('btn-quick-save-orange')?.addEventListener('click', () => {
   const name = el('input-name-orange').value.trim();
   if (!name) { showToast('Enter team name.', '#ef4444'); return; }
+  if (isTbdName(name)) { showToast('TBD is a placeholder — nothing to save.', '#fbbf24'); return; }
   send('save_team', { name, logo: pendingLogoOrange || null, color: teamOwnColor('orange') });
 });
 
@@ -9981,6 +10179,9 @@ function applyCloudStatus(s) {
   if (refresh) refresh.disabled = !s.authed;
   if (s.authed) send('cloud_list_profiles');
 
+  const tup = el('ai-telemetry-upload-toggle');
+  if (tup) tup.disabled = !s.authed;
+
   // ── Org workspace / broadcast-seat licensing ── workspaceId is a real Organization
   // id when the account has an active seat, or the synthetic "user:<id>" personal
   // workspace otherwise — only real orgs get the seat-management panel.
@@ -10429,6 +10630,65 @@ el('btn-nxgen-change-key')?.addEventListener('click', () => {
   if (btn) btn.style.display = 'none';
   inp.focus();
 });
+
+// ── Google Sheets integration (Settings ▸ Integrations) ─────────────────────────
+function getSheetsPayload() {
+  const p = {
+    enabled: !!(el('check-sheets-enabled')?.checked),
+    sheetUrl: (el('input-sheets-url')?.value || '').trim(),
+    autoSyncSec: Math.max(0, parseInt(el('input-sheets-autosync')?.value, 10) || 0),
+    maps: {}
+  };
+  ['teams', 'schedule', 'standings'].forEach((k) => {
+    p.maps[k] = { tab: el('sheets-tab-' + k)?.value || '', direction: el('sheets-dir-' + k)?.value || 'off' };
+  });
+  const sa = (el('input-sheets-sa')?.value || '').trim();
+  if (sa) p.serviceAccount = sa;   // only send the key when the producer pasted a new one
+  return p;
+}
+function _sheetsSaveThen(extraType, statusMsg) {
+  send('set_sheets_config', getSheetsPayload());
+  const saEl = el('input-sheets-sa'); if (saEl) saEl.value = '';   // never keep the key sitting in the field
+  if (extraType) send(extraType);
+  const r = el('sheets-result'); if (r) { r.style.color = 'var(--muted)'; r.textContent = statusMsg; }
+}
+el('btn-sheets-save')?.addEventListener('click', () => _sheetsSaveThen(null, 'Saved.'));
+el('btn-sheets-connect')?.addEventListener('click', () => _sheetsSaveThen('sheets_connect', 'Connecting…'));
+el('btn-sheets-sync')?.addEventListener('click', () => _sheetsSaveThen('sheets_sync', 'Syncing…'));
+
+function syncSheetsUi(data) {
+  const s = (data && data.sheets) || {};
+  const cb = el('check-sheets-enabled'); if (!cb) return;
+  if (document.activeElement !== cb) cb.checked = !!s.enabled;
+  const url = el('input-sheets-url'); if (url && document.activeElement !== url) url.value = s.sheetUrl || '';
+  const as = el('input-sheets-autosync'); if (as && document.activeElement !== as) as.value = s.autoSyncSec || 0;
+  const tabs = Array.isArray(s.tabs) ? s.tabs : [];
+  ['teams', 'schedule', 'standings'].forEach((k) => {
+    const tsel = el('sheets-tab-' + k);
+    const cur = (s.maps && s.maps[k] && s.maps[k].tab) || '';
+    if (tsel && document.activeElement !== tsel) {
+      const sig = JSON.stringify(tabs) + '|' + cur;
+      if (tsel.dataset.sig !== sig) {
+        tsel.dataset.sig = sig;
+        const esc = (t) => String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+        let opts = '<option value="">— tab —</option>' + tabs.map((t) => '<option value="' + esc(t) + '"' + (t === cur ? ' selected' : '') + '>' + esc(t) + '</option>').join('');
+        if (cur && !tabs.includes(cur)) opts += '<option value="' + esc(cur) + '" selected>' + esc(cur) + ' (not found)</option>';
+        tsel.innerHTML = opts;
+      }
+    }
+    const dsel = el('sheets-dir-' + k);
+    if (dsel && document.activeElement !== dsel) dsel.value = (s.maps && s.maps[k] && s.maps[k].direction) || 'off';
+  });
+  const badge = el('sheets-conn-badge'); if (badge) badge.style.display = s.connected ? '' : 'none';
+  const email = el('sheets-sa-email');
+  if (email) email.textContent = s.hasKey
+    ? (s.saEmail ? ('Share your sheet (Editor) with: ' + s.saEmail) : 'Service-account key set.')
+    : 'No service-account key yet — paste one above and Save.';
+  const saField = el('input-sheets-sa');
+  if (saField) saField.placeholder = s.hasKey ? 'Key saved. Paste a new JSON key here only to replace it.' : 'Paste the whole service-account JSON key here…';
+  const lm = el('sheets-result');
+  if (lm && !lm.textContent && s.lastSyncMsg) { lm.style.color = 'var(--muted)'; lm.textContent = s.lastSyncMsg; }
+}
 
 el('btn-nxgen-import-teams')?.addEventListener('click', () => {
   send('nxgen_import_teams');
@@ -11324,16 +11584,6 @@ function looksLikeStartggLink(s) {
   return /start\.gg\//i.test(s) || /(^|\/)tournament\//i.test(s);
 }
 
-// Render a one-click "Load this start.gg link" row in the search dropdown.
-function evShowLinkRow(v, resultsDiv) {
-  const box = resultsDiv || el('dash-sgg-tournament-results');
-  if (!box) return;
-  if (el('ev-search-clear')) el('ev-search-clear').style.display = 'block';
-  box.innerHTML = `<div class="ev-dropdown-row ev-link-load"><div class="ev-dropdown-info"><div class="ev-dropdown-name">Load this start.gg link</div><div class="ev-dropdown-meta">${v.replace(/</g, '&lt;').slice(0, 70)}</div></div><span class="ev-dropdown-badge">↵ Enter</span></div>`;
-  box.style.display = 'block';
-  box.querySelector('.ev-link-load').addEventListener('click', () => { box.style.display = 'none'; loadStartggEvent(v); });
-}
-
 let _evSelectedSlug = '';   // slug of the tournament chosen from the dashboard picker
 
 // One-click "Load Event": resolve a tournament/event link or slug, import teams (→ library
@@ -11495,6 +11745,13 @@ function importStartggTeam(teamData) {
 // ── Dashboard: start.gg Event / Tournament picker wiring ─────────────────────
 let _evMyTourneys = null;   // cached admin tournament list; null = not yet fetched
 let _evSearchTimer = null;
+// Global (all of start.gg) search results for the CURRENT query — searched automatically
+// as you type, so a producer never has to guess that Enter means "search wider".
+let _evGlobal = { q: '', rows: [], loading: false, err: '' };
+let _evAbort = null;        // AbortController for the in-flight global search
+let _evNavIdx = -1;         // keyboard-highlighted row
+let _evActs = [];           // one activate-fn per navigable row, in render order
+let _evExpanded = '';       // slug of the tournament whose events are expanded inline
 
 function wireSggEventPicker() {
   const searchInput = el('sgg-event-search');
@@ -11502,80 +11759,55 @@ function wireSggEventPicker() {
   const clearBtn    = el('ev-search-clear');
 
   if (searchInput && resultsDiv) {
-    // Auto-load admin tournaments on first focus
-    searchInput.addEventListener('focus', async () => {
-      if (!currentState.startgg?.hasToken) {
-        resultsDiv.innerHTML = '<div class="ev-dropdown-msg" style="color:#f59e0b;"><svg class="svg-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg> Add a start.gg API token in Settings → Integrations first.</div>';
-        resultsDiv.style.display = 'block';
-        return;
-      }
-      if (_evMyTourneys !== null) {
-        renderEvDropdownResults(_evMyTourneys, searchInput.value.trim().toLowerCase());
-        resultsDiv.style.display = 'block';
-        return;
-      }
-      resultsDiv.innerHTML = '<div class="ev-dropdown-msg">Loading your start.gg tournaments…</div>';
-      resultsDiv.style.display = 'block';
-      const token = (el('input-startgg-token')?.value.trim()) || currentState.startgg?.apiToken || '';
-      try {
-        const resp = await fetch('http://localhost:3000/api/startgg/my-tournaments', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ apiToken: token })
-        });
-        const data = await resp.json();
-        _evMyTourneys = resp.ok ? (data.tournaments || []) : [];
-        renderEvDropdownResults(_evMyTourneys, searchInput.value.trim().toLowerCase());
-      } catch (err) {
-        _evMyTourneys = [];
-        resultsDiv.innerHTML = `<div class="ev-dropdown-msg" style="color:#ef4444;">Error: ${err.message}</div>`;
-      }
-    });
+    searchInput.addEventListener('focus', () => evOpenDropdown());
 
-    // Live filter — but if the text is a pasted start.gg link, offer a one-click load
-    // instead of filtering the tournament list (fires on paste too via 'input').
     searchInput.addEventListener('input', () => {
       const q = searchInput.value.trim();
       if (clearBtn) clearBtn.style.display = q ? 'block' : 'none';
-      clearTimeout(_evSearchTimer);
       if (looksLikeStartggLink(q)) {
         _evSelectedSlug = '';
         const pill = el('dash-selected-sgg-event'); if (pill) pill.style.display = 'none';
-        evShowLinkRow(q, resultsDiv);
-        return;
       }
-      _evSearchTimer = setTimeout(() => {
-        if (_evMyTourneys !== null) {
-          renderEvDropdownResults(_evMyTourneys, q.toLowerCase());
-          resultsDiv.style.display = 'block';
-        }
-      }, 60);
+      // The old global results belong to the old query — drop them so nothing stale shows.
+      if (_evGlobal.q && _evGlobal.q !== q.toLowerCase()) _evGlobal = { q: '', rows: [], loading: false, err: '' };
+      _evNavIdx = -1;
+      _evExpanded = '';
+      evRenderDropdown();
+      clearTimeout(_evSearchTimer);
+      if (!looksLikeStartggLink(q) && q.length >= 3 && currentState.startgg?.hasToken) {
+        _evSearchTimer = setTimeout(() => evFetchGlobal(q), 350);
+      }
     });
 
-    // Enter → if it's a pasted start.gg link/slug, load the event directly;
-    // otherwise fall back to a global start.gg search.
-    searchInput.addEventListener('keydown', async (e) => {
-      if (e.key === 'Escape') { resultsDiv.style.display = 'none'; return; }
+    // Keyboard: ↑/↓ walk every row (including expanded events), Enter activates the
+    // highlighted one, Enter with nothing highlighted searches all of start.gg now.
+    searchInput.addEventListener('keydown', (e) => {
+      const open = resultsDiv.style.display !== 'none';
+      if (e.key === 'Escape') { resultsDiv.style.display = 'none'; _evNavIdx = -1; return; }
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        if (!open) { evOpenDropdown(); return; }
+        if (!_evActs.length) return;
+        e.preventDefault();
+        _evNavIdx = (_evNavIdx + (e.key === 'ArrowDown' ? 1 : -1) + _evActs.length) % _evActs.length;
+        evPaintActive();
+        return;
+      }
       if (e.key !== 'Enter') return;
+      if (_evNavIdx >= 0 && _evActs[_evNavIdx]) { e.preventDefault(); _evActs[_evNavIdx](); return; }
       const q = searchInput.value.trim();
       if (!q || !currentState.startgg?.hasToken) return;
       if (looksLikeStartggLink(q)) { resultsDiv.style.display = 'none'; loadStartggEvent(q); return; }
-      resultsDiv.innerHTML = '<div class="ev-dropdown-msg">Searching all of start.gg…</div>';
-      resultsDiv.style.display = 'block';
-      await searchTournamentsInto(q, resultsDiv);
+      clearTimeout(_evSearchTimer);
+      evFetchGlobal(q);
     });
-
 
     // X button clears the input and resets dropdown
     if (clearBtn) clearBtn.addEventListener('click', () => {
       searchInput.value = '';
       clearBtn.style.display = 'none';
-      if (_evMyTourneys !== null) {
-        renderEvDropdownResults(_evMyTourneys, '');
-        resultsDiv.style.display = 'block';
-      } else {
-        resultsDiv.style.display = 'none';
-      }
+      _evGlobal = { q: '', rows: [], loading: false, err: '' };
+      _evNavIdx = -1; _evExpanded = '';
+      evRenderDropdown();
       searchInput.focus();
     });
 
@@ -11628,64 +11860,341 @@ function wireSggEventPicker() {
   });
 }
 
-function renderEvDropdownResults(tournaments, filterQuery) {
-  const container = el('dash-sgg-tournament-results');
-  if (!container) return;
+// ── start.gg picker engine ───────────────────────────────────────────────────
+// One dropdown, three sections (Recent · your tournaments · all of start.gg), ranked by
+// relevance + how close the tournament is to NOW, keyboard-navigable, with each tournament's
+// events expandable inline so you can load the exact event in one click.
+const EV_RECENT_KEY = 'ne_sgg_recent_v1';
 
-  const nowSec = Date.now() / 1000;
-  const sorted = [...tournaments].sort((a, b) => {
-    const aUp = (a.startAt || 0) >= nowSec;
-    const bUp = (b.startAt || 0) >= nowSec;
-    if (aUp && !bUp) return -1;
-    if (!aUp && bUp) return 1;
-    if (aUp && bUp) return (a.startAt || 0) - (b.startAt || 0); // nearest upcoming first
-    return (b.startAt || 0) - (a.startAt || 0);                  // most recent past first
+function evRecents() {
+  try { const a = JSON.parse(localStorage.getItem(EV_RECENT_KEY) || '[]'); return Array.isArray(a) ? a : []; }
+  catch { return []; }
+}
+function evPushRecent(t) {
+  if (!t || !t.slug) return;
+  const list = evRecents().filter(r => r.slug !== t.slug);
+  list.unshift({
+    slug: t.slug, name: t.name || t.slug, image: t.image || '',
+    startAt: t.startAt || 0, endAt: t.endAt || 0,
+    events: (t.events || []).slice(0, 20), eventCount: t.eventCount || (t.events || []).length
   });
+  try { localStorage.setItem(EV_RECENT_KEY, JSON.stringify(list.slice(0, 6))); } catch { /* quota */ }
+}
 
-  const filtered = filterQuery
-    ? sorted.filter(t =>
-        t.name.toLowerCase().includes(filterQuery) ||
-        (t.slug || '').toLowerCase().includes(filterQuery))
-    : sorted;
+// When a tournament is, in words a producer thinks in.
+function evWhen(t) {
+  const now = Date.now() / 1000;
+  const s = t.startAt || 0;
+  const e = t.endAt || (s ? s + 86400 : 0);
+  if (!s) return { label: 'Date TBA', badge: '', cls: '' };
+  if (s <= now && now <= e) return { label: 'Happening now', badge: 'LIVE', cls: 'is-live' };
+  const d = new Date(s * 1000);
+  const sameYear = d.getFullYear() === new Date().getFullYear();
+  const dstr = d.toLocaleDateString(undefined, sameYear ? { month: 'short', day: 'numeric' } : { month: 'short', day: 'numeric', year: 'numeric' });
+  if (s > now) {
+    const days = Math.round((s - now) / 86400);
+    const label = days <= 0 ? `Today ${d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`
+      : days === 1 ? 'Tomorrow' : days < 14 ? `in ${days} days` : dstr;
+    return { label, badge: days <= 7 ? 'SOON' : '', cls: 'is-soon' };
+  }
+  const ago = Math.round((now - s) / 86400);
+  return { label: ago <= 1 ? 'Yesterday' : ago < 14 ? `${ago} days ago` : dstr, badge: '', cls: 'is-past' };
+}
 
-  if (!filtered.length) {
-    container.innerHTML = filterQuery
-      ? `<div class="ev-dropdown-msg">No match for "<strong>${filterQuery}</strong>" — press Enter to search all tournaments</div>`
-      : '<div class="ev-dropdown-msg">No admin tournaments found. Press Enter to search.</div>';
+// Relevance: how well the name matches, then how close to now (live > soon > recent past).
+function evScore(t, q) {
+  const n = (t.name || '').toLowerCase();
+  const s = (t.slug || '').toLowerCase();
+  let score = 0;
+  if (q) {
+    const esc = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    if (n.startsWith(q)) score = 100;
+    else if (new RegExp('\\b' + esc).test(n)) score = 80;
+    else if (n.includes(q)) score = 60;
+    else if (s.includes(q)) score = 40;
+    else if ((t.games || []).some(g => (g || '').toLowerCase().includes(q))) score = 20;
+    else return -1;
+  }
+  const now = Date.now() / 1000;
+  const st = t.startAt || 0;
+  const en = t.endAt || (st ? st + 86400 : 0);
+  if (st && st <= now && now <= en) score += 30;
+  else if (st > now) score += 20 - Math.min(19, (st - now) / 86400 / 14);
+  else if (st) score += Math.max(0, 10 - (now - st) / 86400 / 30);
+  return score;
+}
+function evRank(list, q) {
+  return list.map(t => ({ t, s: evScore(t, q) })).filter(x => x.s >= 0)
+    .sort((a, b) => b.s - a.s).map(x => x.t);
+}
+
+// Bold the matched run inside a name.
+function evHi(name, q) {
+  const safe = esc(name || '');
+  if (!q) return safe;
+  const i = (name || '').toLowerCase().indexOf(q);
+  if (i < 0) return safe;
+  return esc(name.slice(0, i)) + '<span class="ev-hi">' + esc(name.slice(i, i + q.length)) + '</span>' + esc(name.slice(i + q.length));
+}
+
+function evLogoHtml(t) {
+  const url = t.image || t.images?.[0]?.url || '';
+  return url
+    ? `<img class="ev-dropdown-logo" src="${esc(url)}" alt="" onerror="this.style.display='none'">`
+    : `<div class="ev-dropdown-logo-ph"><svg viewBox="0 0 20 20" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M10 2L3 7v11h5v-5h4v5h5V7L10 2z"/></svg></div>`;
+}
+
+async function evEnsureMyTourneys() {
+  if (_evMyTourneys !== null) return _evMyTourneys;
+  const token = (el('input-startgg-token')?.value.trim()) || currentState.startgg?.apiToken || '';
+  try {
+    const resp = await fetch('http://localhost:3000/api/startgg/my-tournaments', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ apiToken: token })
+    });
+    const data = await resp.json();
+    _evMyTourneys = resp.ok ? (data.tournaments || []) : [];
+  } catch {
+    _evMyTourneys = [];
+  }
+  return _evMyTourneys;
+}
+
+function evOpenDropdown() {
+  const box = el('dash-sgg-tournament-results');
+  if (!box) return;
+  box.style.display = 'block';
+  evRenderDropdown();
+  if (_evMyTourneys === null && currentState.startgg?.hasToken) {
+    evEnsureMyTourneys().then(() => evRenderDropdown());
+  }
+}
+
+// Search all of start.gg for the current query (debounced from typing, or forced with Enter).
+async function evFetchGlobal(query) {
+  const q = (query || '').trim();
+  if (q.length < 2 || !currentState.startgg?.hasToken) return;
+  if (_evAbort) _evAbort.abort();
+  const ctl = new AbortController();
+  _evAbort = ctl;
+  _evGlobal = { q: q.toLowerCase(), rows: [], loading: true, err: '' };
+  evRenderDropdown();
+  const token = (el('input-startgg-token')?.value.trim()) || currentState.startgg?.apiToken || '';
+  try {
+    const resp = await fetch('http://localhost:3000/api/startgg/search-tournaments', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query: q, apiToken: token }), signal: ctl.signal
+    });
+    const data = await resp.json();
+    if (ctl !== _evAbort) return;                       // a newer search already started
+    if (!resp.ok) throw new Error(data.error || 'Search failed');
+    _evGlobal = { q: q.toLowerCase(), rows: data.tournaments || [], loading: false, err: '' };
+  } catch (err) {
+    if (err.name === 'AbortError' || ctl !== _evAbort) return;
+    _evGlobal = { q: q.toLowerCase(), rows: [], loading: false, err: err.message || 'Search failed' };
+  }
+  evRenderDropdown();
+}
+
+function evPaintActive() {
+  const box = el('dash-sgg-tournament-results');
+  if (!box) return;
+  box.querySelectorAll('.ev-nav').forEach((r) => {
+    const on = Number(r.dataset.evIdx) === _evNavIdx;
+    r.classList.toggle('is-active', on);
+    if (on) r.scrollIntoView({ block: 'nearest' });
+  });
+}
+
+function evPickTournament(t) {
+  const input = el('sgg-event-search');
+  if (input) input.value = t.name || t.slug || '';
+  if (el('ev-search-clear')) el('ev-search-clear').style.display = 'block';
+  const box = el('dash-sgg-tournament-results'); if (box) box.style.display = 'none';
+  _evNavIdx = -1;
+  evPushRecent(t);
+  const evs = (t.events || []).filter(e => e && e.slug);
+  // Single-event tournament: skip the "pick an event" step entirely.
+  if (evs.length === 1) {
+    _evSelectedSlug = t.slug || '';
+    loadStartggEvent(evs[0].slug, t.name);
+    return;
+  }
+  selectStartggTournament(t, true);
+}
+
+function evPickEvent(t, ev) {
+  const input = el('sgg-event-search');
+  if (input) input.value = `${t.name} — ${ev.name || 'Event'}`;
+  if (el('ev-search-clear')) el('ev-search-clear').style.display = 'block';
+  const box = el('dash-sgg-tournament-results'); if (box) box.style.display = 'none';
+  _evNavIdx = -1;
+  evPushRecent(t);
+  _evSelectedSlug = t.slug || '';
+  loadStartggEvent(ev.slug || t.slug, `${t.name} — ${ev.name || 'Event'}`);
+}
+
+function evSectionHdr(text, note) {
+  const h = document.createElement('div');
+  h.className = 'ev-dropdown-section-hdr';
+  h.innerHTML = `<span>${esc(text)}</span>${note ? `<span class="ev-hdr-note">${esc(note)}</span>` : ''}`;
+  return h;
+}
+
+// Build one tournament row (+ its expanded event sub-rows) into `box`.
+function evAppendTournament(box, t, q, badge) {
+  const when = evWhen(t);
+  const evs = (t.events || []).filter(Boolean);
+  const row = document.createElement('div');
+  row.className = 'ev-dropdown-row ev-nav';
+  row.dataset.evIdx = _evActs.length;
+  const meta = [
+    when.label,
+    t.numAttendees ? `${t.numAttendees} entrants` : '',
+    evs.length ? `${evs.length} event${evs.length > 1 ? 's' : ''}` : '',
+    (t.games || []).slice(0, 2).join(', '),
+    [t.city, t.countryCode].filter(Boolean).join(', ')
+  ].filter(Boolean).slice(0, 4).join(' · ');
+  const expanded = _evExpanded === t.slug;
+  row.innerHTML = `${evLogoHtml(t)}
+    <div class="ev-dropdown-info">
+      <div class="ev-dropdown-name">${evHi(t.name || t.slug, q)}</div>
+      <div class="ev-dropdown-meta">${esc(meta)}</div>
+    </div>
+    ${when.badge ? `<span class="ev-dropdown-badge ${when.cls}">${when.badge}</span>` : ''}
+    ${badge ? `<span class="ev-dropdown-badge">${esc(badge)}</span>` : ''}
+    ${evs.length > 1 ? `<button type="button" class="ev-row-exp${expanded ? ' is-open' : ''}" title="${expanded ? 'Hide' : 'Show'} events">${evs.length} ▾</button>` : ''}`;
+  row.addEventListener('click', () => evPickTournament(t));
+  _evActs.push(() => evPickTournament(t));
+  const expBtn = row.querySelector('.ev-row-exp');
+  if (expBtn) expBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    _evExpanded = expanded ? '' : t.slug;
+    _evNavIdx = -1;
+    evRenderDropdown();
+  });
+  box.appendChild(row);
+
+  if (expanded) {
+    evs.forEach((ev) => {
+      const sub = document.createElement('div');
+      sub.className = 'ev-dropdown-row ev-sub-row ev-nav';
+      sub.dataset.evIdx = _evActs.length;
+      const emeta = [ev.game, ev.numEntrants ? `${ev.numEntrants} entrants` : '', ev.state === 'ACTIVE' ? 'in progress' : ''].filter(Boolean).join(' · ');
+      sub.innerHTML = `<div class="ev-dropdown-info">
+          <div class="ev-dropdown-name">${esc(ev.name || 'Event')}</div>
+          <div class="ev-dropdown-meta">${esc(emeta)}</div>
+        </div>
+        <span class="ev-dropdown-badge is-load">Load</span>`;
+      sub.addEventListener('click', (e) => { e.stopPropagation(); evPickEvent(t, ev); });
+      _evActs.push(() => evPickEvent(t, ev));
+      box.appendChild(sub);
+    });
+  }
+}
+
+function evRenderDropdown() {
+  const box = el('dash-sgg-tournament-results');
+  const input = el('sgg-event-search');
+  if (!box || !input) return;
+  const raw = input.value.trim();
+  const q = raw.toLowerCase();
+  _evActs = [];
+  box.innerHTML = '';
+
+  if (!currentState.startgg?.hasToken) {
+    box.innerHTML = '<div class="ev-dropdown-msg" style="color:#f59e0b;"><svg class="svg-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg> Add a start.gg API token in Settings → Integrations first.</div>';
+    box.style.display = 'block';
     return;
   }
 
-  container.innerHTML = '';
-  if (!filterQuery) {
-    const hdr = document.createElement('div');
-    hdr.className = 'ev-dropdown-section-hdr';
-    hdr.textContent = 'My Admin Tournaments';
-    container.appendChild(hdr);
+  // A pasted link/slug is unambiguous — offer the one-click load and nothing else.
+  if (looksLikeStartggLink(raw)) {
+    const row = document.createElement('div');
+    row.className = 'ev-dropdown-row ev-nav ev-link-load';
+    row.dataset.evIdx = 0;
+    row.innerHTML = `<div class="ev-dropdown-logo-ph"><svg viewBox="0 0 20 20" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M8 12a3 3 0 0 0 4.2 0l2.3-2.3a3 3 0 0 0-4.2-4.2l-1 1"/><path d="M12 8a3 3 0 0 0-4.2 0L5.5 10.3a3 3 0 0 0 4.2 4.2l1-1"/></svg></div>
+      <div class="ev-dropdown-info">
+        <div class="ev-dropdown-name">Load this start.gg link</div>
+        <div class="ev-dropdown-meta">${esc(raw.slice(0, 70))}</div>
+      </div>
+      <span class="ev-dropdown-badge">↵ Enter</span>`;
+    row.addEventListener('click', () => { box.style.display = 'none'; loadStartggEvent(raw); });
+    _evActs.push(() => { box.style.display = 'none'; loadStartggEvent(raw); });
+    box.appendChild(row);
+    box.style.display = 'block';
+    evPaintActive();
+    return;
   }
 
-  filtered.forEach(t => {
-    const row = document.createElement('div');
-    row.className = 'ev-dropdown-row';
-    const date = t.startAt ? new Date(t.startAt * 1000).toLocaleDateString() : '';
-    const logoUrl = t.images?.[0]?.url || t.image || '';
-    const logoHtml = logoUrl
-      ? `<img class="ev-dropdown-logo" src="${logoUrl}" alt="" onerror="this.style.display='none'">`
-      : `<div class="ev-dropdown-logo-ph"><svg viewBox="0 0 20 20" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M10 2L3 7v11h5v-5h4v5h5V7L10 2z"/></svg></div>`;
-    row.innerHTML = `${logoHtml}
-      <div class="ev-dropdown-info">
-        <div class="ev-dropdown-name">${t.name}</div>
-        <div class="ev-dropdown-meta">${[date, t.slug].filter(Boolean).join(' · ')}</div>
-      </div>
-      <span class="ev-dropdown-badge">Admin</span>`;
-    row.addEventListener('click', () => {
-      const searchInput = el('sgg-event-search');
-      if (searchInput) searchInput.value = t.name;
-      if (el('ev-search-clear')) el('ev-search-clear').style.display = 'block';
-      container.style.display = 'none';
-      selectStartggTournament(t, true);
-    });
-    container.appendChild(row);
-  });
+  const shown = new Set();
+  let rowCount = 0;
+
+  // 1) Recently loaded — the fastest path back to the event you ran an hour ago.
+  const recents = evRank(evRecents(), q).slice(0, q ? 3 : 4);
+  if (recents.length) {
+    box.appendChild(evSectionHdr('Recent'));
+    recents.forEach(t => { shown.add(t.slug); rowCount++; evAppendTournament(box, t, q, ''); });
+  }
+
+  // 2) Your own tournaments.
+  if (_evMyTourneys === null) {
+    const msg = document.createElement('div');
+    msg.className = 'ev-dropdown-msg';
+    msg.textContent = 'Loading your start.gg tournaments…';
+    box.appendChild(msg);
+  } else {
+    const mine = evRank(_evMyTourneys.filter(t => !shown.has(t.slug)), q).slice(0, q ? 6 : 12);
+    if (mine.length) {
+      box.appendChild(evSectionHdr('Your tournaments'));
+      mine.forEach(t => { shown.add(t.slug); rowCount++; evAppendTournament(box, t, q, 'Admin'); });
+    }
+  }
+
+  // 3) Everything else on start.gg — searched automatically as you type.
+  if (q.length >= 3) {
+    if (_evGlobal.loading) {
+      box.appendChild(evSectionHdr('All of start.gg'));
+      const msg = document.createElement('div');
+      msg.className = 'ev-dropdown-msg';
+      msg.innerHTML = '<span class="ev-mini-spin"></span> Searching start.gg…';
+      box.appendChild(msg);
+    } else if (_evGlobal.q === q && _evGlobal.err) {
+      box.appendChild(evSectionHdr('All of start.gg'));
+      const msg = document.createElement('div');
+      msg.className = 'ev-dropdown-msg';
+      msg.style.color = '#ef4444';
+      msg.textContent = _evGlobal.err;
+      box.appendChild(msg);
+    } else if (_evGlobal.q === q) {
+      const global = evRank(_evGlobal.rows.filter(t => !shown.has(t.slug)), q).slice(0, 15);
+      if (global.length) {
+        box.appendChild(evSectionHdr('All of start.gg', `${global.length} found`));
+        global.forEach(t => { shown.add(t.slug); rowCount++; evAppendTournament(box, t, q, ''); });
+      } else if (!rowCount) {
+        const msg = document.createElement('div');
+        msg.className = 'ev-dropdown-msg';
+        msg.innerHTML = `Nothing on start.gg matches “${esc(raw)}”. Paste the tournament link instead.`;
+        box.appendChild(msg);
+      }
+    }
+  } else if (!rowCount) {
+    const msg = document.createElement('div');
+    msg.className = 'ev-dropdown-msg';
+    msg.textContent = q ? 'Keep typing to search all of start.gg…' : 'No tournaments on your account yet — type a name, or paste a tournament link.';
+    box.appendChild(msg);
+  }
+
+  if (rowCount) {
+    const foot = document.createElement('div');
+    foot.className = 'ev-dropdown-foot';
+    foot.textContent = '↑↓ navigate · Enter load · ▾ pick an event · Esc close';
+    box.appendChild(foot);
+  }
+
+  if (_evNavIdx >= _evActs.length) _evNavIdx = -1;
+  box.style.display = 'block';
+  evPaintActive();
 }
 
 // Fetch and display "My Admin Tournaments" into a results container
@@ -11729,59 +12238,6 @@ async function showMyTournaments(container) {
     });
   } catch (err) {
     container.innerHTML = `<div style="color:#ef4444;font-size:12px">Error: ${err.message}</div>`;
-  }
-}
-
-// Generic search tournaments into container (global start.gg search, shared by dashboard + Events tab)
-async function searchTournamentsInto(query, container) {
-  if (!container) return;
-  if (!currentState.startgg?.hasToken) {
-    container.innerHTML = '<div class="ev-dropdown-msg" style="color:#f59e0b;"><svg class="svg-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg> Add API token in Settings → Integrations first.</div>';
-    return;
-  }
-  container.innerHTML = '<div class="ev-dropdown-msg">Searching…</div>';
-  const token = (el('input-startgg-token')?.value.trim()) || currentState.startgg?.apiToken || '';
-  try {
-    const resp = await fetch('http://localhost:3000/api/startgg/search-tournaments', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query, apiToken: token })
-    });
-    const data = await resp.json();
-    if (!resp.ok) throw new Error(data.error);
-    container.innerHTML = '';
-    if (!data.tournaments || !data.tournaments.length) {
-      container.innerHTML = '<div class="ev-dropdown-msg">No results found.</div>';
-      return;
-    }
-    const hdr = document.createElement('div');
-    hdr.className = 'ev-dropdown-section-hdr';
-    hdr.textContent = `Search results for "${query}"`;
-    container.appendChild(hdr);
-    data.tournaments.forEach(t => {
-      const row = document.createElement('div');
-      row.className = 'ev-dropdown-row';
-      const date = t.startAt ? new Date(t.startAt * 1000).toLocaleDateString() : '';
-      const logoUrl = t.image || '';
-      const logoHtml = logoUrl
-        ? `<img class="ev-dropdown-logo" src="${logoUrl}" alt="" onerror="this.style.display='none'">`
-        : `<div class="ev-dropdown-logo-ph"><svg viewBox="0 0 20 20" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M10 2L3 7v11h5v-5h4v5h5V7L10 2z"/></svg></div>`;
-      row.innerHTML = `${logoHtml}
-        <div class="ev-dropdown-info">
-          <div class="ev-dropdown-name">${t.name}</div>
-          <div class="ev-dropdown-meta">${[date, t.slug].filter(Boolean).join(' · ')}</div>
-        </div>`;
-      row.addEventListener('click', () => {
-        const searchInput = el('sgg-event-search');
-        if (searchInput) searchInput.value = t.name;
-        if (el('ev-search-clear')) el('ev-search-clear').style.display = 'block';
-        container.style.display = 'none';
-        selectStartggTournament(t, true);
-      });
-      container.appendChild(row);
-    });
-  } catch (err) {
-    container.innerHTML = `<div class="ev-dropdown-msg" style="color:#ef4444;">Error: ${err.message}</div>`;
   }
 }
 
@@ -12438,18 +12894,25 @@ el('btn-hide-break')?.addEventListener('click', () => {
 
 // ── Production: Winner / Post-match ─────────────────────────────────────────
 el('select-winner-side')?.addEventListener('change', function() {
+  if (window._winnerAuto) window._winnerAuto.sideManual = true;   // producer chose a side → stop auto-picking the winner
   const row = el('winner-custom-row');
   if (row) row.style.display = this.value === '__custom__' ? '' : 'none';
   doWinnerPreview && doWinnerPreview();
 });
 function winnerPayload(visible) {
   const sel = el('select-winner-side')?.value || 'blue';
-  const subtitle = (el('input-winner-subtitle')?.value || '').trim();
-  if (sel === 'blue' || sel === 'orange') return { visible, side: sel, name: '', subtitle };
+  const isSide = sel === 'blue' || sel === 'orange';
+  // Fall back to the auto-suggested series score if the producer left the subtitle empty.
+  const subtitle = (el('input-winner-subtitle')?.value || '').trim()
+    || (window._winnerSeriesScore ? window._winnerSeriesScore(currentState, isSide ? sel : '') : '');
+  if (isSide) return { visible, side: sel, name: '', subtitle };
   return { visible, side: '', name: _winnerNameFromSel(sel), subtitle };
 }
 el('btn-show-winner')?.addEventListener('click', () => send('set_winner', winnerPayload(true)));
-el('btn-hide-winner')?.addEventListener('click', () => send('set_winner', { visible: false }));
+el('btn-hide-winner')?.addEventListener('click', () => {
+  if (window._winnerAuto) window._winnerAuto = { sideManual: false, subTouched: false, lastScore: '' };   // re-arm for next match
+  send('set_winner', { visible: false });
+});
 
 // ── Production: Stream Credits — no config, just visibility ─────────────────
 el('btn-show-credits')?.addEventListener('click', () => send('set_credits', { visible: true }));
@@ -13558,6 +14021,8 @@ function svgIcon(key, cls) {
 const SCENE_SOURCES = [
   { group: 'In-Game HUD', icon: 'gamepad', items: [
     { name: 'Main Overlay (RL)', path: '/', live: 'always', desc: 'Scoreboard, goal replays, post-match stats, ticker, spotlight.' },
+    { name: 'Smash Scoreboard', path: '/smash.html', live: 'always', desc: 'Super Smash Bros. 1v1 — players, flags, fighters, stocks (lives) + set score. Stocks/characters set in Match ▸ Teams ▸ Smash.' },
+    { name: 'Smash Team Scoreboard', path: '/smash-team.html', live: 'always', desc: 'Super Smash Bros. crew battle — teams, logos, aggregate team stocks + set score / Best-of. Team mode in Match ▸ Teams ▸ Smash.' },
     { name: 'RL HUD (Modern)', path: '/rl-hud.html', live: 'always', desc: 'Modern Rocket League scorebar + boost/stat HUD.' },
     { name: 'Live HUD (auto-game)', path: '/live.html', live: 'always', desc: 'Unified HUD that follows whichever game is active.' },
     { name: 'CS2 / CS:GO HUD', path: '/csgo.html', live: 'always', desc: 'GSI scorebar, players, radar, bomb, economy.' },
@@ -13565,10 +14030,21 @@ const SCENE_SOURCES = [
     { name: 'Overwatch 2 HUD', path: '/overwatch.html', live: 'always', desc: 'Hero line-up, objective + score HUD.' },
     { name: 'Marvel Rivals HUD', path: '/marvel-rivals.html', live: 'always', desc: 'Hero roster + objective scorebar.' },
     { name: 'LoL HUD', path: '/lol-hud.html', live: 'always', desc: 'Team gold estimate + player loadouts, auto champ-select fill.' },
+    { name: 'Apex Observer', path: '/apex-observer.html?live=1', live: 'always', desc: 'ALGS-style full-observer: side standings (rank/logo/legends/pts), map badge, squads/players remaining. LiveAPI + scoring.' },
+    { name: 'Apex HUD', path: '/apex.html?live=1', live: 'always', desc: 'Apex spectated-player card, kill feed + squad standings from LiveAPI.' },
     { name: 'Overwatch HUD', path: '/ow-hud.html', live: 'owMatch.visible', desc: 'In-game HUD from the Overwolf relay — live heroes, K/D/A, damage & healing per player.' },
     { name: 'Series Scoreboard', path: '/series.html', live: 'always', desc: 'Standalone series / match scoreboard banner.' },
     { name: 'Mini Station', path: '/ministation.html', live: 'always', desc: 'Compact mini-HUD for split-screen / B-feeds.' },
     { name: 'Director Preview', path: '/director-preview.html', live: 'always', desc: 'Producer-only director bug — add ?director=1.' },
+  ]},
+  { group: 'Fighting Games (FGC)', icon: 'gamepad', items: [
+    { name: 'Tekken 8 Scoreboard (Blue)', path: '/fgc/tekken8-blue/template.html', live: 'always', desc: 'FGCaster lower-third — fed by Match ▸ Teams (player names, series score, casters).' },
+    { name: 'Tekken 8 Scoreboard (Red)', path: '/fgc/tekken8-red/template.html', live: 'always', desc: 'Red variant of the Tekken 8 scoreboard.' },
+    { name: 'Street Fighter 6 Scoreboard', path: '/fgc/sf6/template.html', live: 'always', desc: 'SF6-styled 1v1 scoreboard — names, clan tags, series score, casters.' },
+    { name: 'Guilty Gear Strive Scoreboard', path: '/fgc/ggstrive/template.html', live: 'always', desc: 'Guilty Gear -Strive- styled 1v1 scoreboard.' },
+    { name: '2XKO Scoreboard (tag)', path: '/fgc/2xko/template.html', live: 'always', desc: '2XKO tag scoreboard — two players per side (first two roster slots).' },
+    { name: 'Generic FGC Scoreboard', path: '/fgc/default/template.html', live: 'always', desc: 'Game-agnostic FGC lower-third for any 1v1 fighting game.' },
+    { name: 'Generic FGC Scoreboard (image)', path: '/fgc/default-img/template.html', live: 'always', desc: 'Image-based variant of the generic FGC scoreboard.' },
   ]},
   { group: 'Casters & Desk', icon: 'mic', items: [
     { name: 'Casters (grid)', path: '/casters.html', live: 'casters.visible', desc: 'Up to 4 commentators — auto cam holes + name plates.' },
@@ -13585,6 +14061,7 @@ const SCENE_SOURCES = [
     { name: 'Player Spotlight Desk', path: '/spotlightdesk.html', live: 'casters.visible', desc: 'Analyst cam + featured player card with live stats.' },
     { name: 'Vertical (9:16)', path: '/vertical.html', live: 'casters.visible', desc: 'Vertical co-stream — set the OBS source to 1080×1920.', aspect: '1080 × 1920' },
     { name: 'Listen In (player mic + captions)', path: '/listen-in.html', live: 'listenIn.active', desc: 'Live team/player mic + captions on stream (VDO).' },
+    { name: 'Chat Highlight (lower third)', path: '/chat-highlight.html', live: 'chatHighlight.visible', desc: 'Featured chat message — click any message in the rail’s Twitch chat to put it on stream.' },
   ]},
   { group: 'Pre / Post / Breaks', icon: 'clock', items: [
     { name: '★ Trigger Graphics (all-in-one)', path: '/triggers.html', live: null, desc: 'ONE source for every triggered graphic — countdown, winner, intro, veto, draft, bracket, upcoming, standings. Add it to any scene; the qrail Triggers/Overlays buttons pop the right one over it.' },
@@ -13656,8 +14133,13 @@ function buildOnAirGrid() {
       </div>
       <label class="switch"><input type="checkbox" id="air-${s.key}"><span class="slider"></span></label>`;
     grid.appendChild(card);
+    // Route through the SAME push routine as the Production ▸ Graphics On-air board: these
+    // switches used to send a bare visibility flag, which never set the gfx.html layer, never
+    // cleared the graphic already live, and never cut OBS — so flipping one here looked like
+    // nothing happened. The switch is a view of the shared state, not its own control path.
     card.querySelector('#air-' + s.key).addEventListener('change', function () {
-      send(s.msg, { visible: this.checked });
+      onairPut(s, onairIsOn(s, currentState));     // pass the CURRENT state — onairPut flips it
+                                                   // (it repaints the grid from the updated state)
     });
   });
 }
@@ -14151,13 +14633,13 @@ function renderWhatsArmed(data) {
   }
 }
 
-function applyScenesCockpit(data) {
-  renderCockpitStatus(data);
-  renderWatchlistInfo(data);
+// Paint the On-Air Elements grid from state. Uses onairIsOn (not a raw path read) so Matchup —
+// whose "path" is the shared gfxActive string — doesn't read as SHOWN whenever ANY graphic is live.
+function syncOnAirGrid(data) {
   ONAIR_SCENES.forEach((s) => {
-    const on = !!getPath(data, s.path);
+    const on = (typeof onairIsOn === 'function') ? onairIsOn(s, data) : !!getPath(data, s.path);
     const cb = el('air-' + s.key);
-    if (cb && document.activeElement !== cb) cb.checked = on;
+    if (cb) cb.checked = on;
     const card = el('air-card-' + s.key);
     if (card) card.classList.toggle('live', on);
     const st = el('air-state-' + s.key);
@@ -14165,8 +14647,21 @@ function applyScenesCockpit(data) {
   });
 }
 
+function applyScenesCockpit(data) {
+  renderCockpitStatus(data);
+  renderWatchlistInfo(data);
+  syncOnAirGrid(data);
+}
+
 document.querySelectorAll('.js-cut-all').forEach((btn) => {
-  btn.addEventListener('click', () => ONAIR_SCENES.forEach((s) => send(s.msg, { visible: false })));
+  btn.addEventListener('click', () => {
+    ONAIR_SCENES.forEach((s) => send(s.msg, s.hideData || { visible: false }));
+    // Drop the gfx.html layer too — hiding every overlay flag while gfxActive still named one left
+    // the top bar (and the boards) reading ON AIR for a graphic nothing was showing anymore.
+    send('set_gfx_active', { scene: null });
+    if (currentState) currentState.gfxActive = null;
+    if (typeof window._gfxRefreshTopBar === 'function') window._gfxRefreshTopBar();
+  });
 });
 
 // ── "Go Live" triggers — one toggle per graphic that reflects what's ON AIR ──
@@ -15890,7 +16385,10 @@ el('notes-text')?.addEventListener('input', function () {
 
 // ── Producer segment timer — also drives the overlay countdown (countdown.html)
 //    and the sidebar Break countdown display (ck-break-time) shows it live. ──
-const _timer = { secs: 300, base: 300, running: false, handle: null };
+// endsAt (epoch ms) = the live break-countdown target. When set, the widget DERIVES its remaining
+// from wall-clock time (like the overlay) instead of decrementing a local counter — so a throttled
+// background setInterval (control-panel window not focused) can't drift from the overlay's countdown.
+const _timer = { secs: 300, base: 300, running: false, handle: null, endsAt: null };
 let _timerEditing = false;
 // Break/countdown payload that mirrors the timer's value AND running state.
 function breakPayloadFromTimer(extra) {
@@ -15935,16 +16433,25 @@ function paintTimer() {
 }
 function tickTimer() {
   if (!_timer.running) return;
-  _timer.secs = Math.max(0, _timer.secs - 1);
-  if (_timer.secs === 0) { _timer.running = false; clearInterval(_timer.handle); _timer.handle = null; }
+  if (_timer.endsAt) {
+    // Wall-clock authoritative (matches overlay/countdown.html's round((endsAt-now)/1000)), so even
+    // if this interval is throttled while the window is in the background, the number stays correct.
+    _timer.secs = Math.max(0, Math.round((_timer.endsAt - Date.now()) / 1000));
+    if (_timer.secs === 0) { _timer.running = false; _timer.endsAt = null; clearInterval(_timer.handle); _timer.handle = null; }
+  } else {
+    _timer.secs = Math.max(0, _timer.secs - 1);
+    if (_timer.secs === 0) { _timer.running = false; clearInterval(_timer.handle); _timer.handle = null; }
+  }
   paintTimer();
 }
 function adjustTimer(delta) {                 // ±seconds; works running or stopped
+  _timer.endsAt = null;                       // manual override → local value until the server round-trips a fresh endsAt
   _timer.secs = Math.max(0, Math.min(99 * 60 + 59, _timer.secs + delta));
   if (!_timer.running) _timer.base = _timer.secs;
   paintTimer(); syncTimerToOverlay();
 }
 function setTimerSecs(secs) {
+  _timer.endsAt = null;                       // manual set → local value until the server round-trips a fresh endsAt
   _timer.secs = Math.max(0, Math.min(99 * 60 + 59, Math.round(secs)));
   _timer.base = _timer.secs;
   if (_timer.running) { _timer.running = false; clearInterval(_timer.handle); _timer.handle = null; }
@@ -16074,6 +16581,10 @@ function attachTimerEdit(displayEl) {
 attachTimerEdit(el('ptimer-display'));
 attachTimerEdit(el('ck-break-time'));
 paintTimer();
+// When a minimized/background window regains focus, its throttled tick may be up to a tick stale —
+// recompute the endsAt-derived countdown immediately so it snaps to the correct time on return.
+document.addEventListener('visibilitychange', () => { if (!document.hidden && _timer.running && _timer.endsAt) tickTimer(); });
+window.addEventListener('focus', () => { if (_timer.running && _timer.endsAt) tickTimer(); });
 
 // ── Commercial: cut to the dedicated Commercial OBS scene (no overlay graphic),
 //    auto-returning to program when the ad video ends. Click again to return now.
@@ -16443,6 +16954,10 @@ function renderStreamQueue(data) {
   // so hide it (leaving just Auto-follow). Still shown pre-connection as an escape hatch.
   const qToggle = el('sgg-queue-toggle');
   if (qToggle) qToggle.style.display = sg.connected ? 'none' : '';
+  // Same for the slug box + Load Queue button: once connected the slug is already known and
+  // the queue refreshes on its own, so the row is dead space. Shown again if we disconnect.
+  const slugRow = el('sgg-slug-row');
+  if (slugRow) slugRow.style.display = sg.connected ? 'none' : 'flex';
   const status = el('sgg-status');
   if (status) {
     if (sg.connected && sg.queueFetchedAt) {
@@ -17411,6 +17926,12 @@ function applyBracketState(data) {
   if (bktSubEl && document.activeElement !== bktSubEl) bktSubEl.value = bracket.subtitle || '';
   const bktRecEl = el('gfx-bkt-showrecord');
   if (bktRecEl && document.activeElement !== bktRecEl) bktRecEl.checked = bracket.showRecord !== false;
+  const bktResEl = el('gfx-bkt-ignore-reset');
+  if (bktResEl && document.activeElement !== bktResEl) bktResEl.checked = !!bracket.ignoreReset;
+  const bktIgnEl = el('gfx-bkt-ignore-rounds');
+  if (bktIgnEl && document.activeElement !== bktIgnEl) bktIgnEl.value = bracket.ignoreRounds || 0;
+  const bktLogoEl = el('gfx-bkt-hide-logos');
+  if (bktLogoEl && document.activeElement !== bktLogoEl) bktLogoEl.checked = !!bracket.hideLogos;
 
   // Reflect the active bracket view on the chips — and hide the chips whose view has no
   // data for this bracket (clicking Matrix on an elim bracket just blanks the overlay).
@@ -17749,15 +18270,24 @@ function applyProductionState(data) {
   // even though the real overlay (which reads breakScreen.endsAt independently) was counting down fine.
   if (!_timerEditing) {
     if (brk.visible && brk.endsAt) {
+      // Mirror the server's wall-clock target so the widget derives its remaining exactly like the
+      // overlay (throttle-proof) instead of drifting on a local counter.
+      _timer.endsAt = brk.endsAt;
       const remaining = Math.max(0, Math.round((brk.endsAt - Date.now()) / 1000));
       _timer.secs = remaining;
       _timer.base = remaining;
       if (!_timer.running) { _timer.running = true; if (!_timer.handle) _timer.handle = setInterval(tickTimer, 1000); }
       paintTimer();
-    } else if (brk.frozenSeconds != null && _timer.secs !== brk.frozenSeconds) {
+    } else if (brk.frozenSeconds != null && (_timer.secs !== brk.frozenSeconds || _timer.endsAt)) {
+      _timer.endsAt = null;                     // paused/frozen → no live target
       _timer.secs = brk.frozenSeconds;
       _timer.base = brk.frozenSeconds;
       if (_timer.running) { _timer.running = false; if (_timer.handle) { clearInterval(_timer.handle); _timer.handle = null; } }
+      paintTimer();
+    } else if (!brk.visible && _timer.endsAt) {
+      // Break was hidden (by any client/flow) → stop mirroring the now-gone countdown.
+      _timer.endsAt = null;
+      _timer.running = false; if (_timer.handle) { clearInterval(_timer.handle); _timer.handle = null; }
       paintTimer();
     }
   }
@@ -18111,7 +18641,10 @@ function newBrandPackage(name) {
 function flushEditorToPackage() {
   const pkg = brandPackages.find((p) => p.id === editingPackageId);
   if (!pkg) return;
-  pkg.sponsorLabel = (el('input-brand-sponsor-label').value || 'PARTNERS').trim();
+  // Empty is allowed and meaningful: a cleared label renders NO rail heading (overlays hide it).
+  // We store exactly what's typed (trimmed) — the 'PARTNERS' default only seeds a brand-new package
+  // (newBrandPackage), so clearing the field and saving persists '' rather than snapping back.
+  pkg.sponsorLabel = el('input-brand-sponsor-label').value.trim();
   pkg.sponsorInterval = Number(el('input-brand-interval').value) || 6;
   pkg.sponsorMode = el('select-brand-sponsor-mode')?.value === 'static' ? 'static' : 'cycle';
   pkg.sponsors = brandSponsors;
@@ -18638,7 +19171,7 @@ function loadBrandIntoForm(k) {
   brandPackages = src.map((p) => ({
     id: p.id || ('p' + Math.random().toString(36).slice(2, 9)),
     name: p.name || 'Main',
-    sponsorLabel: p.sponsorLabel || 'PARTNERS',
+    sponsorLabel: p.sponsorLabel != null ? p.sponsorLabel : 'PARTNERS',   // preserve an explicit '' (no heading); default only when unset
     sponsorInterval: p.sponsorInterval || 6,
     sponsorMode: p.sponsorMode === 'static' ? 'static' : 'cycle',
     sponsors: (p.sponsors || []).map((s) => ({ ...s, placements: { ...(s.placements || {}) } })),
@@ -18867,6 +19400,7 @@ function applyRlSpectatorUi(data) {
     if (n && document.activeElement !== n && val != null) n.value = val;
   };
   setChk('check-rl-ui-hide-enabled', ui.enabled !== false);
+  setChk('chk-gear-autohide', ui.enabled !== false);   // gear-panel mirror
   setChk('check-rl-ui-auto-match', ui.autoOnMatch !== false);
   setChk('check-rl-ui-focus', ui.focusWindow !== false);
   setVal('input-rl-ui-key', ui.key || 'h');
@@ -18911,6 +19445,9 @@ el('btn-rl-ui-hide-now')?.addEventListener('click', () => {
   const st = el('rl-ui-hide-status');
   if (st) st.textContent = 'Sending to Rocket League…';
 });
+// Match ▸ Teams gear mirror of the auto-hide-native-UI enable + "hide now" (same state/messages).
+el('chk-gear-autohide')?.addEventListener('change', function() { sendRlSpectatorUiPatch({ enabled: this.checked }); });
+el('btn-gear-autohide-now')?.addEventListener('click', () => send('rl_hide_native_ui'));
 // Copy the DefaultStatsAPI.ini contents to the clipboard for the RL Stats API setup.
 el('btn-rl-copy-ini')?.addEventListener('click', async () => {
   const txt = (el('rl-ini-text')?.textContent || '').trim();
@@ -18954,6 +19491,150 @@ function applyLolState(data) {
   if (r.blue) { setReg('lol-ocr-bx', r.blue.x); setReg('lol-ocr-by', r.blue.y); setReg('lol-ocr-bw', r.blue.w); setReg('lol-ocr-bh', r.blue.h); }
   if (r.red)  { setReg('lol-ocr-rx', r.red.x);  setReg('lol-ocr-ry', r.red.y);  setReg('lol-ocr-rw', r.red.w);  setReg('lol-ocr-rh', r.red.h); }
   lolOcrStatus(ocr.status || 'off', ocr.statusDetail || '', ocr.lastBlue, ocr.lastRed, ocr.available);
+}
+
+// Apex LiveAPI — connection + server status chips + scoring/teams/series panels.
+let _apexSavedTeams = [];
+function applyApexState(data) {
+  const apex = data.apex || {};
+  if (Array.isArray(data.savedTeams)) _apexSavedTeams = data.savedTeams;
+  const conn = el('apex-conn');
+  if (conn) {
+    const connected = !!apex.connected;
+    conn.textContent = connected ? 'Apex: connected' : 'Apex: waiting';
+    conn.className = 'prod-chip' + (connected ? ' ok' : '');
+  }
+  const srv = el('apex-server-chip');
+  if (srv) {
+    const running = (data.activeGame || '') === 'apex';
+    srv.textContent = running ? ('Server: on :' + (apex.port || 7777)) : 'Server: stopped';
+    srv.className = 'prod-chip' + (running ? ' ok' : '');
+  }
+  // Scoring table — only overwrite inputs when the user isn't editing them.
+  const sc = apex.scoring;
+  if (sc && Array.isArray(sc.placementPoints)) {
+    apexBuildPlaceGrid(sc.placementPoints);
+    const kp = el('apex-kill-pts'); if (kp && document.activeElement !== kp) kp.value = sc.killPoints != null ? sc.killPoints : 1;
+  }
+  // Event branding
+  const ev = apex.event || {};
+  [['apex-ev-title','title'],['apex-ev-split','split'],['apex-ev-match','match']].forEach(([id,k]) => {
+    const e = el(id); if (e && document.activeElement !== e) e.value = ev[k] || '';
+  });
+  // Series game list
+  apexRenderGames(apex.games || []);
+  // Team identity mapping rows (from the current standings)
+  apexRenderTeamMap(apex.standings || [], apex.teamMap || {});
+}
+
+let _apexPlaceGridBuilt = false;
+function apexBuildPlaceGrid(points) {
+  const grid = el('apex-place-grid'); if (!grid) return;
+  if (!_apexPlaceGridBuilt) {
+    grid.innerHTML = points.map((v, i) =>
+      '<label style="font-size:10px;color:var(--muted);text-align:center;">' + (i + 1) +
+      '<input type="number" class="input-text apex-pp" data-i="' + i + '" value="' + v + '" min="0" step="1" style="width:100%;padding:4px;text-align:center;"></label>'
+    ).join('');
+    _apexPlaceGridBuilt = true;
+  } else if (document.activeElement && document.activeElement.classList && document.activeElement.classList.contains('apex-pp')) {
+    return; // don't clobber mid-edit
+  } else {
+    grid.querySelectorAll('.apex-pp').forEach((inp) => { const i = +inp.dataset.i; if (points[i] != null) inp.value = points[i]; });
+  }
+}
+
+function apexRenderGames(games) {
+  const box = el('apex-games-list'); if (!box) return;
+  if (!games.length) { box.textContent = 'No games recorded yet.'; return; }
+  box.innerHTML = games.map((g, i) => {
+    const win = (g.results || []).slice().sort((a, b) => (a.placement || 99) - (b.placement || 99))[0];
+    return '<div style="display:flex;align-items:center;gap:10px;padding:5px 0;border-bottom:1px solid rgba(255,255,255,.06);">' +
+      '<strong style="color:#e0e0e0;">Game ' + g.n + '</strong>' +
+      '<span>' + (g.map || '') + '</span>' +
+      '<span style="color:#86efac;">Winner: ' + (win ? (win.name || '') : '—') + '</span>' +
+      '<button class="btn btn-secondary btn-sm apex-rm-game" data-i="' + i + '" style="margin-left:auto;">Remove</button>' +
+    '</div>';
+  }).join('');
+  box.querySelectorAll('.apex-rm-game').forEach((b) => b.addEventListener('click', () => send('apex_remove_game', { index: +b.dataset.i })));
+}
+
+function apexRenderTeamMap(standings, teamMap) {
+  const box = el('apex-teammap'); if (!box) return;
+  if (!standings.length) { box.innerHTML = '<p class="field-hint" style="margin:0;">Set the active game to Apex and start a lobby — the squads will appear here to map.</p>'; return; }
+  const norm = (s) => String(s || '').trim().toLowerCase();
+  const opts = ['<option value="">— auto-match —</option>'].concat(
+    _apexSavedTeams.map((t) => '<option value="' + encodeURIComponent(t.name) + '">' + (t.name || '') + '</option>')
+  ).join('');
+  box.innerHTML = standings.slice(0, 20).map((r) => {
+    const bound = teamMap[r.key] || '';
+    const auto = _apexSavedTeams.find((t) => norm(t.name) === norm(r.name));
+    const status = bound ? 'bound' : (auto ? 'auto: ' + auto.name : 'no match');
+    return '<div style="display:flex;align-items:center;gap:10px;">' +
+      '<span style="width:150px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + (r.name || r.key) + '</span>' +
+      '<select class="input-select apex-tm" data-key="' + encodeURIComponent(r.key) + '" style="width:220px;">' + opts + '</select>' +
+      '<span class="field-hint" style="margin:0;color:' + (bound || auto ? '#86efac' : '#f5a3a3') + ';">' + status + '</span>' +
+    '</div>';
+  }).join('');
+  box.querySelectorAll('.apex-tm').forEach((sel) => {
+    const key = decodeURIComponent(sel.dataset.key);
+    if (teamMap[key]) sel.value = encodeURIComponent(teamMap[key]);
+    sel.addEventListener('change', () => send('apex_set_teammap', { key, savedName: sel.value ? decodeURIComponent(sel.value) : '' }));
+  });
+}
+
+function wireApexScoring() {
+  const saveSc = el('apex-save-scoring');
+  if (saveSc) saveSc.addEventListener('click', () => {
+    const placementPoints = Array.from(document.querySelectorAll('#apex-place-grid .apex-pp')).sort((a, b) => a.dataset.i - b.dataset.i).map((i) => +i.value || 0);
+    const killPoints = +(el('apex-kill-pts') || {}).value || 0;
+    send('apex_set_scoring', { placementPoints, killPoints });
+    const st = el('apex-scoring-status'); if (st) { st.textContent = 'Saved.'; st.style.color = '#86efac'; setTimeout(() => st.textContent = '', 1500); }
+  });
+  const resetSc = el('apex-reset-scoring');
+  if (resetSc) resetSc.addEventListener('click', () => {
+    send('apex_set_scoring', { placementPoints: [12,9,7,5,4,3,3,2,2,2,1,1,1,1,1,0,0,0,0,0], killPoints: 1 });
+    _apexPlaceGridBuilt = false;
+  });
+  const saveEv = el('apex-save-event');
+  if (saveEv) saveEv.addEventListener('click', () => send('apex_set_event', {
+    title: (el('apex-ev-title') || {}).value || '', split: (el('apex-ev-split') || {}).value || '', match: (el('apex-ev-match') || {}).value || ''
+  }));
+  const fin = el('apex-finalize-game'); if (fin) fin.addEventListener('click', () => send('apex_finalize_game', {}));
+  const rs = el('apex-reset-series'); if (rs) rs.addEventListener('click', () => { if (confirm('Reset the whole series? All recorded games and points will be cleared.')) send('apex_reset_series', {}); });
+}
+
+// Fetch the LiveAPI details once (launch string + config path) and fill the setup card.
+let _apexSetupLoaded = false;
+async function loadApexSetup() {
+  if (_apexSetupLoaded) return; _apexSetupLoaded = true;
+  try {
+    const r = await fetch('http://localhost:3000/api/apex/liveapi');
+    const d = await r.json();
+    const launch = el('apex-launch'); if (launch && d.launchOptions) launch.textContent = d.launchOptions;
+    const pathEl = el('apex-config-path'); if (pathEl && d.configPath) pathEl.textContent = d.configPath;
+    const addr = el('apex-ws-addr'); if (addr && d.port) addr.textContent = 'ws://127.0.0.1:' + d.port;
+  } catch (e) { /* server not up yet — chips still work off state */ }
+}
+
+function wireApexSetup() {
+  const writeBtn = el('apex-write-config');
+  if (writeBtn) writeBtn.addEventListener('click', async () => {
+    const status = el('apex-config-status');
+    if (status) { status.textContent = 'Writing…'; status.style.color = ''; }
+    try {
+      const r = await fetch('http://localhost:3000/api/apex/liveapi/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+      const d = await r.json();
+      if (d.ok) { if (status) { status.textContent = 'Wrote ' + d.file + ' — restart Apex.'; status.style.color = '#86efac'; } }
+      else { if (status) { status.textContent = 'Failed: ' + (d.error || 'unknown') + ' (use Option B instead)'; status.style.color = '#f5a3a3'; } }
+    } catch (e) {
+      if (status) { status.textContent = 'Failed: ' + e.message + ' (use Option B instead)'; status.style.color = '#f5a3a3'; }
+    }
+  });
+  const copyBtn = el('apex-copy-launch');
+  if (copyBtn) copyBtn.addEventListener('click', async () => {
+    const txt = (el('apex-launch') || {}).textContent || '';
+    try { await navigator.clipboard.writeText(txt); copyBtn.textContent = 'Copied'; setTimeout(() => copyBtn.textContent = 'Copy', 1200); } catch (e) {}
+  });
 }
 
 function lolOcrStatus(status, detail, lastBlue, lastRed) {
@@ -19021,6 +19702,7 @@ function getObsPayload() {
     })(),
     autoSwitch: !!el('check-obs-autoswitch')?.checked,
     autoReplayOnGoal: !!el('check-obs-autoreplay')?.checked,
+    allowKitObsSwitch: !!el('check-obs-allow-kit-switch')?.checked,
     postGameToCastersSec: Math.max(0, parseInt(el('input-obs-postgame-casters')?.value, 10) || 0),
     // Kickoff scene automation is NOT included here — it's owned exclusively by
     // sendRlSceneAuto()/set_rl_scene_automation (Match — Teams gear panel) now. This payload used
@@ -19072,6 +19754,10 @@ function sendRlSceneAuto() {
       enabled: !!(el('chk-rl-kickoff') && el('chk-rl-kickoff').checked),
       scene: (el('sel-rl-kickoff-scene') || {}).value || ''
     },
+    scoreboardScene: {
+      enabled: !!(el('chk-rl-sbscene') && el('chk-rl-sbscene').checked),
+      scene: (el('sel-rl-sbscene') || {}).value || ''
+    },
     postGame: {
       enabled: !!(el('chk-rl-postgame') && el('chk-rl-postgame').checked),
       scene: (el('sel-rl-postgame-scene') || {}).value || '',
@@ -19080,7 +19766,7 @@ function sendRlSceneAuto() {
   });
 }
 function wireRlSceneAuto() {
-  ['chk-rl-kickoff', 'sel-rl-kickoff-scene', 'chk-rl-postgame', 'sel-rl-postgame-scene', 'inp-rl-postgame-delay'].forEach(function (id) {
+  ['chk-rl-kickoff', 'sel-rl-kickoff-scene', 'chk-rl-sbscene', 'sel-rl-sbscene', 'chk-rl-postgame', 'sel-rl-postgame-scene', 'inp-rl-postgame-delay'].forEach(function (id) {
     const e = el(id);
     if (e && !e._rlWired) { e._rlWired = true; e.addEventListener('change', sendRlSceneAuto); }
   });
@@ -19094,6 +19780,38 @@ function wireRlSceneAuto() {
   }
   const hide = el('chk-rl-hide-ui');
   if (hide && !hide._rlWired) { hide._rlWired = true; hide.addEventListener('change', function () { send('set_rl_hide_ui', { hidden: this.checked }); }); }
+  const specOutline = el('chk-rl-spec-outline');
+  if (specOutline && !specOutline._rlWired) { specOutline._rlWired = true; specOutline.addEventListener('change', function () { send('set_rl_spec_outline', { on: this.checked }); }); }
+  // Where the board lives — segmented (RL HUD overlay vs its own OBS source). Same state as the old
+  // "Board on a separate source" checkbox (rlScoreboardSeparate); as a two-way choice it also tells
+  // the producer which of the two post-game cuts belongs to their setup.
+  const locSeg = el('rl-sb-loc-seg');
+  if (locSeg && !locSeg._rlWired) {
+    locSeg._rlWired = true;
+    locSeg.querySelectorAll('.seg-btn').forEach(function (b) {
+      b.addEventListener('click', function () {
+        const separate = b.dataset.sbloc === 'source';
+        setRlSbLocSeg(separate);
+        send('set_rl_scoreboard_separate', { separate: separate });
+      });
+    });
+  }
+  // Auto-spectate (follow the ball): enable the feature + ARM the live camera keypresses.
+  // ONE toggle. The old split (enabled + a separate ARM) had no useful middle state — "enabled but
+  // not armed" did literally nothing, so it just gave the feature a way to silently not work. The AI
+  // shield is the global kill switch; a per-feature arm was redundant.
+  ['chk-autospec-enabled', 'inp-autospec-debounce'].forEach(function (id) {
+    const e = el(id);
+    if (e && !e._asWired) {
+      e._asWired = true;
+      e.addEventListener('change', function () {
+        send('set_auto_spectate', {
+          enabled: !!(el('chk-autospec-enabled') && el('chk-autospec-enabled').checked),
+          debounceMs: Number((el('inp-autospec-debounce') || {}).value) || 1500
+        });
+      });
+    }
+  });
   // Stats-screen skin (show/hide the stat table + pick the design) — applies to the scoreboard scene.
   ['chk-rl-stats-show', 'sel-rl-stats-design'].forEach(function (id) {
     const e = el(id);
@@ -19108,23 +19826,228 @@ function wireRlSceneAuto() {
     }
   });
 }
+// ── Smash controls (Match ▸ Teams gear ▸ Smash strip) — stocks + fighters, shown only for Smash ──
+let _smashWired = false;
+// Ultimate fighter names for the datalist (factual labels; producers can type any name).
+const SMASH_FIGHTERS = ['Mario','Donkey Kong','Link','Samus','Dark Samus','Yoshi','Kirby','Fox','Pikachu','Luigi','Ness','Captain Falcon','Jigglypuff','Peach','Daisy','Bowser','Ice Climbers','Sheik','Zelda','Dr. Mario','Pichu','Falco','Marth','Lucina','Young Link','Ganondorf','Mewtwo','Roy','Chrom','Mr. Game & Watch','Meta Knight','Pit','Dark Pit','Zero Suit Samus','Wario','Snake','Ike','Pokemon Trainer','Diddy Kong','Lucas','Sonic','King Dedede','Olimar','Lucario','R.O.B.','Toon Link','Wolf','Villager','Mega Man','Wii Fit Trainer','Rosalina & Luma','Little Mac','Greninja','Mii Fighter','Palutena','Pac-Man','Robin','Shulk','Bowser Jr.','Duck Hunt','Ryu','Ken','Cloud','Corrin','Bayonetta','Inkling','Ridley','Simon','Richter','King K. Rool','Isabelle','Incineroar','Piranha Plant','Joker','Hero','Banjo & Kazooie','Terry','Byleth','Min Min','Steve','Sephiroth','Pyra','Mythra','Kazuya','Sora'];
+function wireSmashControls() {
+  if (_smashWired) return; _smashWired = true;
+  const dl = el('smash-fighters');
+  if (dl && !dl.childElementCount) dl.innerHTML = SMASH_FIGHTERS.map((n) => `<option value="${tlEsc(n)}"></option>`).join('');
+  document.querySelectorAll('.smash-stock-btn').forEach((btn) => {
+    btn.addEventListener('click', () => send('smash_stock_delta', { side: btn.dataset.smashSide, delta: parseInt(btn.dataset.smashDelta, 10) }));
+  });
+  ['blue', 'orange'].forEach((side) => {
+    const ci = el('smash-char-' + side);
+    if (ci) ci.addEventListener('change', () => send('set_smash_character', { side, character: ci.value.trim() }));
+  });
+  const ss = el('smash-start-stocks');
+  if (ss) ss.addEventListener('change', () => send('set_smash_start_stocks', { value: parseInt(ss.value, 10) }));
+  const rb = el('btn-smash-reset');
+  if (rb) rb.addEventListener('click', () => send('reset_smash_stocks', {}));
+  // Mode toggle (1v1 singles ↔ team crew).
+  document.querySelectorAll('#smash-mode-seg .seg-btn').forEach((btn) => {
+    btn.addEventListener('click', () => send('set_smash_mode', { mode: btn.dataset.smashMode }));
+  });
+  // Team-mode controls.
+  const cs = el('smash-crew-size');
+  if (cs) cs.addEventListener('change', () => send('set_smash_crew_size', { value: parseInt(cs.value, 10) }));
+  const bo = el('smash-best-of');
+  if (bo) bo.addEventListener('change', () => send('set_best_of', { value: parseInt(bo.value, 10) }));
+  const sw = el('btn-smash-swap');
+  if (sw) sw.addEventListener('click', () => send('swap_teams', {}));
+  const rs = el('btn-smash-reset-series');
+  if (rs) rs.addEventListener('click', () => send('reset_series', {}));
+  document.querySelectorAll('[data-smash-series]').forEach((btn) => {
+    btn.addEventListener('click', () => send('adjust_series', { side: btn.dataset.smashSeries, delta: parseInt(btn.dataset.smashDelta, 10) }));
+  });
+  // Per-player crew pips (event-delegated — the pip rows are re-rendered on every state update).
+  ['blue', 'orange'].forEach((side) => {
+    const wrap = el('smash-crew-' + side);
+    if (wrap) wrap.addEventListener('click', (e) => {
+      const pip = e.target.closest('.smash-pip'); if (!pip) return;
+      const i = parseInt(pip.dataset.pi, 10);
+      const cur = parseInt(pip.parentElement.dataset.stocks, 10) || 0;
+      // Click the topmost filled pip → drop a stock; click any other pip → fill up to it.
+      const value = (cur === i + 1) ? i : (i + 1);
+      send('set_smash_player_stock', { side, index: parseInt(pip.parentElement.dataset.pidx, 10), value });
+    });
+  });
+}
+function applySmashControls(data) {
+  wireSmashControls();
+  const strip = el('msp-smash');
+  if (strip) strip.style.display = (data && data.activeGame === 'smash') ? '' : 'none';
+  if (!data || data.activeGame !== 'smash') return;
+  const sm = data.smash || {};
+  const mode = sm.mode === 'team' ? 'team' : 'singles';
+  const ss = el('smash-start-stocks'); if (ss && document.activeElement !== ss) ss.value = String(sm.startStocks || 3);
+  // Mode toggle + which sub-panel shows.
+  document.querySelectorAll('#smash-mode-seg .seg-btn').forEach((b) => b.classList.toggle('active', b.dataset.smashMode === mode));
+  const singlesEl = el('msp-smash-singles'); if (singlesEl) singlesEl.style.display = mode === 'team' ? 'none' : '';
+  const teamEl = el('msp-smash-team'); if (teamEl) teamEl.style.display = mode === 'team' ? '' : 'none';
+
+  // label each side by the actual player name so the two cells are unambiguous
+  const nm = (side) => { const t = (data.teams && data.teams[side]) || {}; const p = (t.players || [])[0]; return (p && (p.gamertag || p.name)) || t.name || ''; };
+  const lb = el('smash-label-blue'); if (lb) lb.textContent = nm('blue') || 'Player 1';
+  const lo = el('smash-label-orange'); if (lo) lo.textContent = nm('orange') || 'Player 2';
+  ['blue', 'orange'].forEach((side) => {
+    const s = sm[side] || {};
+    const sv = el('smash-stocks-' + side); if (sv) sv.textContent = String(s.stocks != null ? s.stocks : 3);
+    const ci = el('smash-char-' + side); if (ci && document.activeElement !== ci) ci.value = s.character || '';
+  });
+
+  if (mode === 'team') {
+    const cs = el('smash-crew-size'); if (cs && document.activeElement !== cs) cs.value = String(sm.crewSize || 4);
+    const bo = el('smash-best-of'); if (bo && document.activeElement !== bo) bo.value = String(data.bestOf || 3);
+    const start = Math.max(1, Math.min(9, Number(sm.startStocks) || 3));
+    const series = data.series || {};
+    ['blue', 'orange'].forEach((side) => {
+      const t = (data.teams && data.teams[side]) || {};
+      const tl = el('smash-team-label-' + side); if (tl) tl.textContent = t.name || (side === 'blue' ? 'Blue' : 'Orange');
+      const sc = el('smash-series-' + side); if (sc) sc.textContent = String(Number(series[side]) || 0);
+      const players = Array.isArray((sm[side] || {}).players) ? sm[side].players : [];
+      const total = players.reduce((a, n) => a + Math.max(0, Number(n) || 0), 0);
+      const tot = el('smash-crew-total-' + side); if (tot) tot.textContent = String(total);
+      const wrap = el('smash-crew-' + side);
+      if (wrap) {
+        // Signature-gate the rebuild so clicking a pip mid-drag doesn't fight a re-render.
+        const sig = players.join(',') + '|' + start;
+        if (wrap.dataset.sig !== sig) {
+          wrap.dataset.sig = sig;
+          wrap.innerHTML = players.map((rem, pi) => {
+            const left = Math.max(0, Math.min(start, Number(rem) || 0));
+            const pips = Array.from({ length: start }, (_, i) =>
+              `<span class="smash-pip${i < left ? '' : ' lost'}" data-pi="${i}"></span>`).join('');
+            return `<div class="smash-crew-row" data-pidx="${pi}" data-stocks="${left}"><span class="smash-crew-pn">P${pi + 1}</span>${pips}</div>`;
+          }).join('');
+        }
+      }
+    });
+  }
+}
+
+// ── Built-in chat commands (!bracket / !discord / !casters) ───────────────────
+// The preview mirrors server.js chatCommandReply() so the producer sees the EXACT line the bot
+// will post — keep the two in step if either changes.
+let _chatCmdWired = false;
+function wireChatCommands() {
+  if (_chatCmdWired) return; _chatCmdWired = true;
+  const en = el('chk-chatcmd-enabled');
+  if (en) en.addEventListener('change', () => send('set_chat_commands', { enabled: en.checked }));
+  const dc = el('input-chatcmd-discord');
+  if (dc) dc.addEventListener('change', () => send('set_chat_commands', { discord: dc.value.trim() }));
+}
+function chatCommandPreview(kind, data) {
+  data = data || {};
+  if (kind === 'bracket') {
+    const ev = data.activeEvent || {};
+    const sg = data.startgg || {};
+    let url = String(ev.url || '').trim() || (sg.eventSlug ? 'https://www.start.gg/' + sg.eventSlug : '');
+    if (!url) return 'No bracket linked yet.';
+    // Deep-link to the live bracket (phase + pool) — mirrors server.js chatCommandReply().
+    const bk = data.bracket || {};
+    const isStartgg = ev.platform === 'startgg' || (!ev.platform && !!sg.eventSlug);
+    if (isStartgg && !/\/brackets\//.test(url)) {
+      const phaseId = String(bk.activePhaseId || '').replace(/^p/, '');
+      const poolId  = String(bk.activePoolId || '');
+      if (/^\d+$/.test(phaseId) && /^\d+$/.test(poolId)) url += `/brackets/${phaseId}/${poolId}`;
+    }
+    const name = String(ev.name || '').trim();
+    return name ? `${name} bracket: ${url}` : `Bracket: ${url}`;
+  }
+  if (kind === 'discord') {
+    const link = String((data.chatCommands && data.chatCommands.discord) || '').trim();
+    return link ? `Join the Discord: ${link}` : 'No Discord link set yet.';
+  }
+  if (kind === 'casters') {
+    // Mirrors server.js casterSocialText() / chatCommandReply('casters').
+    const SOC = {
+      x: (v) => 'x.com/' + v.replace(/^@/, ''),          twitter: (v) => 'x.com/' + v.replace(/^@/, ''),
+      twitch: (v) => 'twitch.tv/' + v.replace(/^@/, ''), youtube: (v) => 'youtube.com/@' + v.replace(/^@/, ''),
+      instagram: (v) => 'instagram.com/' + v.replace(/^@/, ''), tiktok: (v) => 'tiktok.com/@' + v.replace(/^@/, ''),
+      facebook: (v) => 'facebook.com/' + v.replace(/^@/, ''),   kick: (v) => 'kick.com/' + v.replace(/^@/, '')
+    };
+    const socText = (c) => {
+      const raw = String((c && (c.socialHandle || c.handle)) || '').trim();
+      if (!raw) return '';
+      if (/^https?:\/\//i.test(raw)) return raw.replace(/^https?:\/\//i, '');
+      const fn = SOC[String((c && c.social) || '').toLowerCase()];
+      if (fn) return fn(raw);
+      return raw.startsWith('@') ? raw : '@' + raw;
+    };
+    const parts = ((data.casters && data.casters.list) || [])
+      .slice()
+      .sort((a, b) => (Number(a.slot) || 99) - (Number(b.slot) || 99))
+      .map((c) => {
+        const nm = String((c && (c.gamertag || c.name)) || '').trim();
+        if (!nm) return '';
+        const soc = socText(c);
+        return soc ? `${nm} — ${soc}` : nm;
+      })
+      .filter(Boolean);
+    if (!parts.length) return 'No casters on the desk right now.';
+    return parts.join('  ·  ');
+  }
+  return '';
+}
+function applyChatCommands(data) {
+  wireChatCommands();
+  const cc = (data && data.chatCommands) || {};
+  const en = el('chk-chatcmd-enabled');
+  if (en && document.activeElement !== en) en.checked = cc.enabled !== false;
+  const dc = el('input-chatcmd-discord');
+  if (dc && document.activeElement !== dc) dc.value = cc.discord || '';
+  ['bracket', 'discord', 'casters'].forEach((k) => {
+    const p = el('cc-preview-' + k);
+    if (p) p.textContent = chatCommandPreview(k, data);
+  });
+}
+
+// Light up the "Where the board lives" segment + swap its explanatory hint. separate=true means the
+// board is its own OBS source (rl-hud.html?only=scoreboard) and the HUD hides its inline board.
+function setRlSbLocSeg(separate) {
+  const seg = el('rl-sb-loc-seg'); if (!seg) return;
+  seg.querySelectorAll('.seg-btn').forEach(function (b) {
+    b.classList.toggle('active', (b.dataset.sbloc === 'source') === !!separate);
+  });
+  const hh = el('rl-sb-loc-hint-hud'), hs = el('rl-sb-loc-hint-source');
+  if (hh) hh.style.display = separate ? 'none' : '';
+  if (hs) hs.style.display = separate ? '' : 'none';
+}
+
 function applyRlSceneAuto(data) {
   wireRlSceneAuto();   // idempotent — the panel elements exist after DOM load (relocated, not recreated)
   const sec = el('msp-rl-scenes');
   if (sec) sec.style.display = (data && data.activeGame === 'rocket-league') ? '' : 'none';
   const obs = (data && data.obs) || {};
-  const ko = obs.kickoff || {}, pg = obs.postGame || {};
+  const ko = obs.kickoff || {}, pg = obs.postGame || {}, sbsc = obs.scoreboardScene || {};
   // Only rebuild the scene <select>s when the live list / saved scene changes (don't wipe an open dropdown).
-  const sig = JSON.stringify({ a: obs.availableScenes || [], k: ko.scene || '', p: pg.scene || '' });
+  const sig = JSON.stringify({ a: obs.availableScenes || [], k: ko.scene || '', p: pg.scene || '', s: sbsc.scene || '' });
   if (sig !== _lastRlSceneSig) {
     _lastRlSceneSig = sig;
     fillObsSceneSelect(el('sel-rl-kickoff-scene'), obs.availableScenes || [], ko.scene || '');
+    fillObsSceneSelect(el('sel-rl-sbscene'), obs.availableScenes || [], sbsc.scene || '');
     fillObsSceneSelect(el('sel-rl-postgame-scene'), obs.availableScenes || [], pg.scene || '');
   }
   const kEn = el('chk-rl-kickoff'); if (kEn) kEn.checked = !!ko.enabled;
+  const sbscEn = el('chk-rl-sbscene'); if (sbscEn && document.activeElement !== sbscEn) sbscEn.checked = !!sbsc.enabled;
   const pEn = el('chk-rl-postgame'); if (pEn) pEn.checked = !!pg.enabled;
   const pd = el('inp-rl-postgame-delay'); if (pd && document.activeElement !== pd) pd.value = pg.delaySec || 20;
   const hEn = el('chk-rl-hide-ui'); if (hEn && document.activeElement !== hEn) hEn.checked = !!(data && data.rlHudHidden);
+  const soEn = el('chk-rl-spec-outline'); if (soEn && document.activeElement !== soEn) soEn.checked = (data && data.rlSpecOutline) !== false;
+  setRlSbLocSeg(!!(data && data.rlScoreboardSeparate));
+  const as = (data && data.autoSpectate) || {};
+  const asEn = el('chk-autospec-enabled'); if (asEn && document.activeElement !== asEn) asEn.checked = !!as.enabled;
+  const asDb = el('inp-autospec-debounce'); if (asDb && document.activeElement !== asDb) asDb.value = as.debounceMs || 1500;
+  // Confirm it's actually firing once it's on, so "is this working?" is answerable at a glance.
+  const asHint = el('autospec-hint');
+  if (asHint) {
+    if (!asHint.dataset.def) asHint.dataset.def = asHint.textContent;
+    asHint.textContent = (as.enabled && as.lastPlayer)
+      ? `Last switch: ${as.lastPlayer} (key "${as.lastKey}")`
+      : asHint.dataset.def;
+  }
   const ss = (data && data.rlStatsScreen) || {};
   const ssShow = el('chk-rl-stats-show'); if (ssShow && document.activeElement !== ssShow) ssShow.checked = ss.showStats !== false;
   const ssDes = el('sel-rl-stats-design'); if (ssDes && document.activeElement !== ssDes) ssDes.value = ss.design || 'default';
@@ -19242,6 +20165,8 @@ function applyObsState(data) {
 
   const cbReplay = el('check-obs-autoreplay');
   if (cbReplay) cbReplay.checked = !!obs.autoReplayOnGoal;
+  const cbKitSwitch = el('check-obs-allow-kit-switch');
+  if (cbKitSwitch && document.activeElement !== cbKitSwitch) cbKitSwitch.checked = !!obs.allowKitObsSwitch;
   const cbComm = el('check-commercial-auto-return');
   if (cbComm) cbComm.checked = obs.commercialAutoReturn !== false;
   const pgc = el('input-obs-postgame-casters');
@@ -19273,6 +20198,10 @@ function applyObsState(data) {
 
   populateObsSceneSelects(obs.availableScenes || [], obs.scenes || {}, (obs.kickoff && obs.kickoff.scene) || '');
   applyRlSceneAuto(data);   // RL-only kickoff/post-game scene automation in the Match ▸ Teams gear panel
+  if (typeof syncSheetsUi === 'function') syncSheetsUi(data);   // Google Sheets integration settings
+  if (typeof syncCreditsShiftEventSelect === 'function') syncCreditsShiftEventSelect();   // credits event picker
+  applySmashControls(data); // Smash-only stocks + fighters strip
+  applyChatCommands(data);  // !bracket / !discord / !casters config + live reply preview
   if (typeof syncReplayProgramScene === 'function') syncReplayProgramScene(obs);
   if (typeof syncGfxAutocutScene === 'function') syncGfxAutocutScene(obs);
 
@@ -19890,8 +20819,8 @@ function renderStagingList() {
         <div class="rp-sc-meta">${mb} MB${when ? ' · ' + when : ''}${f.imported ? ' <span class="rp-sc-lib-badge">IN LIB</span>' : ''}</div>
       </div>
       <div class="rp-sc-acts">
-        <button class="rp-vi-act rp-sc-addpl" title="${f.imported ? 'Add to playlist' : 'Import &amp; add to playlist'}">
-          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6" x2="14" y2="6"/><line x1="3" y1="12" x2="14" y2="12"/><line x1="3" y1="18" x2="11" y2="18"/><line x1="18" y1="9" x2="18" y2="15"/><line x1="15" y1="12" x2="21" y2="12"/></svg>
+        <button class="rp-vi-act rp-sc-addpl" title="${f.imported ? 'Already in your library — check the Replays/Highlights pool' : 'Import into the Replays pool'}">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="12" x2="18" y2="12"/><polyline points="12 6 18 12 12 18"/></svg>
         </button>
         <button class="rp-vi-act rp-sc-ren" title="Rename file">
           <svg viewBox="0 0 16 16" width="12" height="12" fill="currentColor"><path d="M12.146.146a.5.5 0 0 1 .708 0l3 3a.5.5 0 0 1 0 .708l-10 10a.5.5 0 0 1-.168.11l-5 2a.5.5 0 0 1-.65-.65l2-5a.5.5 0 0 1 .11-.168zM11.207 2.5 13.5 4.793 14.793 3.5 12.5 1.207zm1.586 3L10.5 3.207 4 9.707V10h.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.5h.293zm-9.761 5.175-.106.106-1.528 3.821 3.821-1.528.106-.106A.5.5 0 0 1 5 12.5V12h-.5a.5.5 0 0 1-.5-.5V11h-.5a.5.5 0 0 1-.468-.325"/></svg>
@@ -19967,7 +20896,7 @@ function renderStagingList() {
 
     card.querySelector('.rp-sc-addpl')?.addEventListener('click', e => {
       e.stopPropagation();
-      addStagingClipToPlaylist(f, e.currentTarget);
+      addStagingClipToReplays(f, e.currentTarget);
     });
 
     card.querySelector('.rp-sc-del')?.addEventListener('click', async e => {
@@ -20035,27 +20964,99 @@ el('rp-stage-bulk-del')?.addEventListener('click', async () => {
 });
 
 let _pendingNewMontage = false;
+// Active shelf on the Replays page: 'replays' (raw capture pool) or 'highlights' (curated reels).
+// Scopes the playlist list + which folder new/edited reels are sent to.
+let _rpFolder = 'replays';
 
-async function addStagingClipToPlaylist(f, btn) {
+// Move a whole reel between shelves (the promote-the-reel action on a playlist row).
+function rpMoveMontageFolder(montageId, folder) {
+  send('montage_settings', { montageId, folder });
+}
+
+// Arm a reel for instant go-live: warm its FIRST clip (server transcodes + overlays pre-buffer it),
+// so a later Play Live hits air with no prep beat. No encode — playout streams clip-by-clip.
+function rpArmMontage(m) {
+  if (!m || !(m.clipIds || []).length) return;
+  const lib = (currentState.clips && currentState.clips.library) || [];
+  const first = lib.find((cl) => cl.id === m.clipIds[0]);
+  const url = first && (typeof clipUrl === 'function' ? clipUrl(first) : '');
+  if (url) send('replay_arm', { bus: 'program', url });
+}
+
+// Keep the bulk shelf-action buttons in step with the active shelf: the Copy label names the OTHER
+// shelf, and both disable when the current shelf has no reels.
+function rpUpdateShelfActions() {
+  const otherLabel = _rpFolder === 'highlights' ? 'Replays' : 'Highlights';
+  const all = (currentState.clips && currentState.clips.montages) || [];
+  const count = all.filter((x) => (x.folder || 'replays') === _rpFolder).length;
+  const copyBtn = el('rp-copy-shelf');
+  const clearBtn = el('rp-clear-shelf');
+  if (copyBtn) { copyBtn.innerHTML = `Copy all &rarr; ${otherLabel}`; copyBtn.disabled = !count; }
+  if (clearBtn) clearBtn.disabled = !count;
+}
+el('rp-copy-shelf')?.addEventListener('click', () => {
+  const other = _rpFolder === 'highlights' ? 'replays' : 'highlights';
+  send('montage_copy_shelf', { from: _rpFolder, to: other });
+});
+el('rp-clear-shelf')?.addEventListener('click', async () => {
+  const all = (currentState.clips && currentState.clips.montages) || [];
+  const count = all.filter((x) => (x.folder || 'replays') === _rpFolder).length;
+  if (!count) return;
+  const label = _rpFolder === 'highlights' ? 'Highlights' : 'Replays';
+  const ok = await customConfirm('Clear shelf', `Remove all ${count} reel${count === 1 ? '' : 's'} from ${label}? Clips stay in your library.`, 'Clear');
+  if (ok) send('montage_clear_shelf', { folder: _rpFolder });
+});
+
+// Wire the Replays/Highlights shelf toggle once. Flipping it re-scopes the playlist pane.
+(function wireRpFolderTabs() {
+  const tabs = document.getElementById('rp-folder-tabs');
+  if (!tabs) return;
+  tabs.addEventListener('click', (e) => {
+    const btn = e.target.closest('.rp-folder-tab');
+    if (!btn) return;
+    const f = btn.dataset.folder === 'highlights' ? 'highlights' : 'replays';
+    if (f === _rpFolder) return;
+    _rpFolder = f;
+    tabs.querySelectorAll('.rp-folder-tab').forEach((b) => b.classList.toggle('active', b.dataset.folder === f));
+    // Leaving the current shelf — drop the selection so the pane opens fresh on the new shelf.
+    const selEdit = el('select-montage-edit'); if (selEdit) selEdit.value = '';
+    const selAdd = el('rp-add-to-playlist-sel'); if (selAdd) selAdd.value = '';
+    _plCollapsed = false;
+    rpUpdateShelfActions();
+    if (currentState.clips) { renderClipPool(currentState.clips); renderPlaylistPane(currentState.clips); }
+  });
+})();
+
+// Import a raw staging file into the clip library (lands in the Replays pool — new imports always
+// default to folder:'replays'). Shared by the staging card's own "→ Replays" action and by the
+// Video Editor's "+ Add to playlist" button, which still needs an import-then-add in one step.
+async function importStagingFile(f) {
+  const resp = await fetch('http://localhost:3000/api/clips/import-file', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ filePath: f.path, label: cleanFileName(f.name) })
+  });
+  const data = await resp.json();
+  if (!resp.ok) throw new Error(data.message || 'Import failed');
+  f.imported = true; f.importedId = data.clip?.id || null;
+  renderStagingList();
+  return data.clip || null;
+}
+
+async function addStagingClipToReplays(f, btn) {
+  // New captures already default to folder:'replays' on import — the clip pool grid picks it up
+  // automatically, no playlist required. Already-imported files are already sitting in a pool.
   if (f.imported && f.importedId) {
-    const clip = (currentState.clips?.library || []).find(cl => cl.id === f.importedId);
-    if (clip) { addClipToPlaylist(clip, currentState.clips); return; }
+    const statusEl = el('clips-status');
+    if (statusEl) { statusEl.textContent = 'Already in your library — check the Replays/Highlights pool.'; statusEl.style.color = 'var(--muted)'; }
+    return;
   }
   if (btn) { btn.disabled = true; btn.textContent = '…'; }
   const statusEl = el('clips-status');
   try {
-    const resp = await fetch('http://localhost:3000/api/clips/import-file', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ filePath: f.path, label: cleanFileName(f.name) })
-    });
-    const data = await resp.json();
-    if (!resp.ok) throw new Error(data.message || 'Import failed');
-    f.imported = true; f.importedId = data.clip?.id || null;
-    if (data.clip) addClipToPlaylist(data.clip, currentState.clips);
-    renderStagingList();
-    if (statusEl) { statusEl.textContent = `Imported: ${cleanFileName(f.name)}`; statusEl.style.color = 'var(--good,#48bb78)'; }
+    await importStagingFile(f);
+    if (statusEl) { statusEl.textContent = `Added to Replays: ${cleanFileName(f.name)}`; statusEl.style.color = 'var(--good,#48bb78)'; }
   } catch (err) {
-    if (btn) { btn.disabled = false; btn.textContent = '+ PL'; }
+    if (btn) { btn.disabled = false; btn.textContent = '→'; }
     if (statusEl) { statusEl.textContent = 'Import failed: ' + err.message; statusEl.style.color = '#f56565'; }
   }
 }
@@ -20094,7 +21095,18 @@ function renderPlaylistPane(c) {
   const timeline = el('montage-timeline');
   const totalEl  = el('rp-pl-total');
   if (!selEdit || !timeline) return;
-  const montages = c.montages || [];
+  // Scope everything below to the active shelf (Replays vs Highlights). A reel with no folder is
+  // treated as a raw replay (matches the backend migration default).
+  const allMontages = c.montages || [];
+  const montages = allMontages.filter((x) => (x.folder || 'replays') === _rpFolder);
+  // Light the shelf tab whose reel is currently on air.
+  const liveFolder = _plLiveActive ? ((allMontages.find((x) => x.id === _plLiveMontageId) || {}).folder || 'replays') : null;
+  document.querySelectorAll('#rp-folder-tabs .rp-folder-live').forEach((dot) => {
+    dot.classList.toggle('on', _plLiveActive && dot.dataset.folderLive === liveFolder);
+  });
+  rpUpdateShelfActions();
+  // If the selected reel lives on the OTHER shelf (e.g. just moved, or a stale selection), drop it.
+  if (selEdit.value && !montages.some((x) => x.id === selEdit.value)) selEdit.value = '';
   const prevId = selEdit.value;
   const opts = '<option value="">— New playlist —</option>' +
     montages.map((m) => `<option value="${m.id}">${m.name}</option>`).join('');
@@ -20116,24 +21128,34 @@ function renderPlaylistPane(c) {
   const listV = el('rp-playlist-list');
   if (listV) {
     const encodeActive = c.encode && c.encode.active;
+    const encodeQueue = (c.encode && c.encode.queue) || [];
     // Badge label already varies with everything that should invalidate the cached render (clip
     // count via EMPTY, encode %, ready/draft, live attribution) — include it in sig so state
     // transitions actually repaint instead of getting stuck on a stale badge.
-    const sig = JSON.stringify(montages.map((x) => [x.id, x.name, (x.clipIds || []).length, montageBadgeInfo(x, encodeActive).label])) + '|' + mId;
+    const sig = JSON.stringify(montages.map((x) => [x.id, x.name, (x.clipIds || []).length, montageBadgeInfo(x, encodeActive, encodeQueue).label])) + '|' + mId + '|' + _rpFolder;
+    const otherFolder = _rpFolder === 'highlights' ? 'replays' : 'highlights';
+    const moveLabel = _rpFolder === 'highlights' ? 'Replays' : 'Highlights';
     if (listV.dataset.sig !== sig) {
       listV.dataset.sig = sig;
       listV.innerHTML = montages.length ? montages.map((x) => {
         const n = (x.clipIds || []).length;
         const isActive = x.id === mId;
-        const badge = montageBadgeInfo(x, encodeActive);
+        const badge = montageBadgeInfo(x, encodeActive, encodeQueue);
         return `<div class="rp-pl-row${isActive ? ' active' : ''}${isActive && _plCollapsed ? ' collapsed' : ''}" data-mid="${x.id}">
           <span class="rp-pl-row-chev">&#9660;</span>
           <span class="rp-pl-row-name">${(x.name || 'Playlist').replace(/</g, '&lt;')}</span>
           <span class="rp-pl-row-count">${n} clip${n === 1 ? '' : 's'}</span>
           <span class="rp-pl-badge rp-pl-badge--${badge.cls}">${badge.label}</span>
+          <button class="rp-pl-row-move" data-mid="${x.id}" title="Move this reel to ${moveLabel}">&rarr; ${moveLabel}</button>
           <button class="rp-pl-row-del" data-mid="${x.id}" title="Delete this playlist">✕</button>
         </div>`;
-      }).join('') : '<div class="rp-empty" style="padding:12px 6px;">No playlists yet — hit <b>+ New</b> or add a clip from the editor.</div>';
+      }).join('') : `<div class="rp-empty" style="padding:12px 6px;">No ${_rpFolder === 'highlights' ? 'highlight reels' : 'replay reels'} yet — hit <b>+ New</b>${_rpFolder === 'highlights' ? ' or move a reel over from Replays' : ' or add a clip from the editor'}.</div>`;
+      listV.querySelectorAll('.rp-pl-row-move').forEach((btn) => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          rpMoveMontageFolder(btn.dataset.mid, otherFolder);
+        });
+      });
       listV.querySelectorAll('.rp-pl-row').forEach((row) => {
         row.addEventListener('click', (e) => {
           if (e.target.closest('.rp-pl-row-del')) return;
@@ -20154,6 +21176,8 @@ function renderPlaylistPane(c) {
           _plCollapsed = false;
           selEdit.value = row.dataset.mid;
           if (selAdd) selAdd.value = row.dataset.mid;
+          // Pre-warm this reel's first clip so a subsequent Play Live is instant (stinger covers the cut).
+          rpArmMontage(montages.find((x) => x.id === row.dataset.mid));
           renderPlaylistPane(currentState.clips || {});
         });
       });
@@ -20170,10 +21194,11 @@ function renderPlaylistPane(c) {
     }
   }
   const show = m && !_plCollapsed;
+  if (show) rpSetPlaylistsSectionExpanded(true);
   const nameRow = el('rp-pl-name-row');
   if (nameRow) nameRow.style.display = show ? '' : 'none';
   const statusLine = el('rp-pl-status');
-  if (statusLine) statusLine.textContent = (show && m) ? montageStatusLine(m, c.encode && c.encode.active) : '';
+  if (statusLine) statusLine.textContent = (show && m) ? montageStatusLine(m, c.encode && c.encode.active, c.encode && c.encode.queue) : '';
   const liveRow = el('rp-pl-live-row');
   if (liveRow) liveRow.style.display = show ? 'grid' : 'none';
   const transRow = el('rp-pl-trans-row');
@@ -20272,6 +21297,207 @@ function renderPlaylistPane(c) {
   }
 }
 
+// Expand/collapse the "Playlists on this shelf" section — collapsed by default so the clip pool
+// (below) stays the primary view; auto-expands once a playlist is actually selected.
+function rpSetPlaylistsSectionExpanded(expanded) {
+  const body = el('rp-pl-section-body');
+  const chev = el('rp-pl-section-chev');
+  if (body) body.style.display = expanded ? '' : 'none';
+  if (chev) chev.innerHTML = expanded ? '&#9662;' : '&#9656;';
+}
+el('rp-pl-section-toggle')?.addEventListener('click', () => {
+  const body = el('rp-pl-section-body');
+  rpSetPlaylistsSectionExpanded(!body || body.style.display === 'none');
+});
+
+// ── Clip pool grid (Replays / Highlights) ──────────────────────────────────
+// The primary way a clip gets organized: it lands here straight from capture/import, no playlist
+// wrapper required. Multi-select feeds "Make Playlist" (a deliberate, separate action) which combines
+// several pool clips into one encoded video via the existing montage/playlist pipeline below.
+let _poolSelected = new Set();
+
+function rpUpdatePoolBulkBar() {
+  const bar = el('rp-pool-bulk');
+  if (!bar) return;
+  bar.style.display = _poolSelected.size ? 'flex' : 'none';
+  const count = el('rp-pool-bulk-count');
+  if (count) count.textContent = `${_poolSelected.size} selected`;
+  const copyBtn = el('rp-pool-bulk-copy');
+  if (copyBtn) copyBtn.innerHTML = `Copy &rarr; ${_rpFolder === 'highlights' ? 'Replays' : 'Highlights'}`;
+}
+
+// Transition for pushing pool clips live (per-row single To Air + the bulk bar's To Air) — a separate,
+// always-visible control from the Playlists section's own #rp-transition, so picking a transition for
+// an instant pool push never silently rewrites a saved playlist's transition setting.
+function poolTransitionOpts() {
+  const transition = el('rp-pool-transition')?.value || 'fade';
+  const transitionLogo = transition === 'logo'
+    ? (_transitionLogo || (currentState.brand && currentState.brand.logo) || '')
+    : '';
+  return { transition, transitionLogo };
+}
+
+function renderClipPool(c) {
+  const grid = el('rp-clip-pool');
+  if (!grid) return;
+  const lib = (c && c.library) || [];
+  const clips = lib.filter((cl) => (cl.folder || 'replays') === _rpFolder);
+  // Drop selections that fell off this shelf (copied away, deleted, or a shelf switch).
+  const validIds = new Set(clips.map((cl) => cl.id));
+  let selChanged = false;
+  [..._poolSelected].forEach((id) => { if (!validIds.has(id)) { _poolSelected.delete(id); selChanged = true; } });
+  const clearBtn = el('rp-clear-pool');
+  if (clearBtn) clearBtn.disabled = !clips.length;
+
+  const sig = JSON.stringify(clips.map((cl) => [cl.id, cl.name, cl.trimIn, cl.trimOut, cl.duration])) + '|' + _rpFolder + '|' + [..._poolSelected].sort().join(',') + '|' + (selectedClipId || '');
+  if (grid.dataset.sig === sig) { if (selChanged) rpUpdatePoolBulkBar(); return; }
+  grid.dataset.sig = sig;
+
+  const otherFolder = _rpFolder === 'highlights' ? 'replays' : 'highlights';
+  const otherLabel = _rpFolder === 'highlights' ? 'Replays' : 'Highlights';
+  // Card markup mirrors renderStagingList()'s .rp-stage-card exactly (thumb/body/actions classes)
+  // so the pool reads as the same kind of list as Staging, not a different widget.
+  grid.innerHTML = clips.length ? clips.map((clip) => {
+    const dur = clip.trimOut != null ? clip.trimOut - (clip.trimIn || 0) : (clip.duration || 0);
+    const when = clip.createdAt ? new Date(clip.createdAt).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
+    const name = (clip.name || 'Clip').replace(/</g, '&lt;');
+    const checked = _poolSelected.has(clip.id) ? ' checked' : '';
+    return `<div class="rp-stage-card rp-pool-item${_poolSelected.has(clip.id) ? ' checked' : ''}${selectedClipId === clip.id ? ' active' : ''}" data-cid="${clip.id}">
+      <label class="rp-sc-check" title="Select"><input type="checkbox"${checked}></label>
+      <div class="rp-sc-thumb">
+        <svg class="rp-sc-thumb-icon" viewBox="0 0 24 24" width="18" height="18" fill="rgba(255,255,255,0.25)"><path d="M8 5v14l11-7z"/></svg>
+        <img class="rp-sc-thumb-img" alt="" loading="lazy" src="${thumbUrl(clip.path)}">
+      </div>
+      <div class="rp-sc-body">
+        <div class="rp-sc-name" title="${(clip.name || 'Clip').replace(/"/g, '&quot;')}">${name}</div>
+        <div class="rp-sc-meta">${dur ? fmtTime(dur) : '—'}${when ? ' · ' + when : ''}</div>
+      </div>
+      <div class="rp-sc-acts">
+        <button class="rp-vi-act rp-pool-air" data-cid="${clip.id}" title="To Air — play this clip live right now">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+        </button>
+        <button class="rp-vi-act rp-pool-copy" data-cid="${clip.id}" title="Copy to ${otherLabel}">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="12" x2="18" y2="12"/><polyline points="12 6 18 12 12 18"/></svg>
+        </button>
+        <button class="rp-vi-del rp-pool-del" data-cid="${clip.id}" title="Delete clip">
+          <svg viewBox="0 0 16 16" width="13" height="13" fill="currentColor"><path d="M6.5 1h3a.5.5 0 0 1 .5.5v1H6v-1a.5.5 0 0 1 .5-.5M11 2.5v-1A1.5 1.5 0 0 0 9.5 0h-3A1.5 1.5 0 0 0 5 1.5v1H1.5a.5.5 0 0 0 0 1h.538l.853 10.66A2 2 0 0 0 4.885 16h6.23a2 2 0 0 0 1.994-1.84l.853-10.66h.538a.5.5 0 0 0 0-1zm1.958 1-.846 10.58a1 1 0 0 1-.997.92h-6.23a1 1 0 0 1-.997-.92L3.042 3.5zm-7.487 1a.5.5 0 0 1 .528.47l.5 8.5a.5.5 0 0 1-.998.06L5 5.03a.5.5 0 0 1 .47-.53zm5.058 0a.5.5 0 0 1 .47.53l-.5 8.5a.5.5 0 1 1-.998-.06l.5-8.5a.5.5 0 0 1 .528-.47M8 4.5a.5.5 0 0 1 .5.5v8.5a.5.5 0 0 1-1 0V5a.5.5 0 0 1 .5-.5"/></svg>
+        </button>
+      </div>
+    </div>`;
+  }).join('') : `<div class="rp-empty" style="padding:16px 12px;">No clips in ${_rpFolder === 'highlights' ? 'Highlights' : 'Replays'} yet — capture one, or load a staging file into the editor and Save edit.</div>`;
+
+  grid.querySelectorAll('.rp-sc-thumb-img').forEach((img) => {
+    img.addEventListener('load', () => img.classList.add('loaded'));
+    img.addEventListener('error', () => img.remove());
+  });
+
+  grid.querySelectorAll('.rp-pool-item').forEach((row) => {
+    row.addEventListener('click', (e) => {
+      if (e.target.closest('.rp-sc-check') || e.target.closest('.rp-pool-air') || e.target.closest('.rp-pool-copy') || e.target.closest('.rp-pool-del')) return;
+      const clip = clips.find((cl) => cl.id === row.dataset.cid);
+      if (clip) loadClipPreview(clip);
+    });
+    row.querySelector('.rp-sc-check input')?.addEventListener('change', function () {
+      if (this.checked) _poolSelected.add(row.dataset.cid); else _poolSelected.delete(row.dataset.cid);
+      row.classList.toggle('checked', this.checked);
+      rpUpdatePoolBulkBar();
+    });
+    // One-click instant replay: load it (so trims/scene/loop apply) and send straight to Program —
+    // no editor round-trip, no playlist. Uses the pool's own transition picker (not the Playlists
+    // section's #rp-transition, so this never rewrites a saved playlist's transition as a side effect).
+    row.querySelector('.rp-pool-air')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const clip = clips.find((cl) => cl.id === row.dataset.cid);
+      if (!clip) return;
+      loadClipPreview(clip);
+      sendToScreen('program', poolTransitionOpts());
+    });
+    row.querySelector('.rp-pool-copy')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      send('clip_copy_folder', { id: row.dataset.cid, folder: otherFolder });
+      showToast('Copied to ' + otherLabel + '.', '#22c55e', 2200);
+    });
+    row.querySelector('.rp-pool-del')?.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const clip = clips.find((cl) => cl.id === row.dataset.cid);
+      const ok = await customConfirm('Delete Clip', `Delete "${clip ? clip.name : 'this clip'}"? This also removes it from any playlist using it.`, 'Delete');
+      if (!ok) return;
+      _poolSelected.delete(row.dataset.cid);
+      send('clip_remove', { id: row.dataset.cid });
+    });
+  });
+
+  rpUpdatePoolBulkBar();
+}
+
+el('rp-pool-bulk-clearsel')?.addEventListener('click', () => {
+  _poolSelected.clear();
+  if (currentState.clips) renderClipPool(currentState.clips);
+});
+el('rp-pool-bulk-copy')?.addEventListener('click', () => {
+  const other = _rpFolder === 'highlights' ? 'replays' : 'highlights';
+  const n = _poolSelected.size;
+  _poolSelected.forEach((id) => send('clip_copy_folder', { id, folder: other }));
+  showToast(`Copied ${n} clip${n === 1 ? '' : 's'} to ${other === 'highlights' ? 'Highlights' : 'Replays'}.`, '#22c55e', 2200);
+});
+// Play the checked pool clips back-to-back on air right now — the same per-clip, no-encode-required
+// engine playMontageById() drives for a saved playlist (_plLiveItems/playNextLive/advancePlaylist
+// below), just seeded from an ad-hoc selection instead of a persisted montage.clipIds.
+el('rp-pool-bulk-air')?.addEventListener('click', () => {
+  if (!_poolSelected.size) return;
+  const lib = (currentState.clips && currentState.clips.library) || [];
+  const ids = [..._poolSelected];
+  _plLiveItems = ids.map((id) => lib.find((cl) => cl.id === id)).filter(Boolean).map(clipToLiveItem);
+  if (!_plLiveItems.length) return;
+  const programScene = (el('rp-program-scene')?.value || '').trim();
+  if (!programScene) showToast('No OBS scene selected — pick a scene in the Video Editor\'s On-Air row so OBS switches to the replay-player source.', '#fbbf24', 5000);
+  _plLoop = !!el('rp-loop')?.checked;
+  _plReturnScene = '';
+  _plScene = programScene;
+  // The pool's own transition picker (not the Playlists section's) — playNextLive() already preloads
+  // each next clip's url via its nextUrl hint, so combined with a real transition (not a hard cut)
+  // the advance between clips reads as a proper cut/fade/logo instead of a black-screen gap.
+  _plTransition = { type: poolTransitionOpts().transition };
+  _plKind = 'replay';
+  stopOtherProgramSources('program');
+  _plBus = 'program';
+  _plEncodedMode = false;
+  _plLiveMontageId = null;
+  beginReplayProgram(_plScene || undefined);
+  _plLiveActive = true;
+  if (typeof updatePlaylistLiveBtns === 'function') updatePlaylistLiveBtns();
+  _plLiveIdx = 0; playNextLive();
+});
+el('rp-pool-bulk-makepl')?.addEventListener('click', async () => {
+  if (!_poolSelected.size) return;
+  const preset = 'Playlist ' + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const name = await customPrompt('New playlist', `Combine ${_poolSelected.size} selected clip${_poolSelected.size === 1 ? '' : 's'} into a playlist`, preset, 'Create');
+  if (!name) return;
+  _pendingNewMontage = true;
+  send('montage_create', { name, clipIds: [..._poolSelected], template: el('select-montage-template')?.value || 'highlights', folder: _rpFolder });
+  _poolSelected.clear();
+  rpSetPlaylistsSectionExpanded(true);   // surface the new playlist immediately
+});
+el('rp-pool-bulk-del')?.addEventListener('click', async () => {
+  const n = _poolSelected.size;
+  if (!n) return;
+  const ok = await customConfirm('Delete Clips', `Delete ${n} selected clip${n === 1 ? '' : 's'}? This also removes them from any playlist using them.`, 'Delete');
+  if (!ok) return;
+  const ids = [..._poolSelected];
+  _poolSelected.clear();
+  ids.forEach((id) => send('clip_remove', { id }));
+});
+el('rp-clear-pool')?.addEventListener('click', async () => {
+  const lib = (currentState.clips && currentState.clips.library) || [];
+  const count = lib.filter((cl) => (cl.folder || 'replays') === _rpFolder).length;
+  if (!count) return;
+  const label = _rpFolder === 'highlights' ? 'Highlights' : 'Replays';
+  const ok = await customConfirm('Clear Pool', `Remove all ${count} clip${count === 1 ? '' : 's'} from ${label}? This also removes them from any playlist using them.`, 'Clear');
+  if (!ok) return;
+  _poolSelected.clear();
+  send('clip_clear_folder', { folder: _rpFolder });
+});
+
 async function addClipToPlaylist(clip, c) {
   const sel = el('rp-add-to-playlist-sel') || el('select-montage-edit');
   const mId = sel?.value;
@@ -20287,7 +21513,7 @@ async function addClipToPlaylist(clip, c) {
     const name = await customPrompt('New playlist', 'Name this playlist', preset, 'Create');
     if (!name) return;   // cancelled
     _pendingNewMontage = true;
-    send('montage_create', { name, clipIds: [clip.id], template: el('select-montage-template')?.value || 'highlights' });
+    send('montage_create', { name, clipIds: [clip.id], template: el('select-montage-template')?.value || 'highlights', folder: _rpFolder });
   }
 }
 
@@ -20320,6 +21546,9 @@ let _plReturnEnabled = true;  // switch back to the origin scene when the playli
 let _plReturnScene = '';      // explicit OBS scene to cut to when the playlist finishes
 let _plAdvanceTimer = null;
 let _plBus = 'program';       // active WS bus: 'program' | 'preview' | 'pl_<id>'
+// Set right when a "To Preview" send goes out, so an immediate "Take" click isn't spuriously
+// rejected while waiting on the server's replay_play echo to update currentState.replay.preview.
+let _previewSentAt = 0;
 // true when the live push is ONE already-encoded file (transitions baked in server-side) rather
 // than the per-clip playback that advancePlaylist()/_plLiveItems/_plLiveIdx drive — those are only
 // ever populated by the per-clip automation path (playMontageById), so replay_ended for an
@@ -20332,6 +21561,7 @@ let _plEncodedMode = false;
 let _plLiveMontageId = null;
 let _plCollapsed = false;     // whether the selected playlist's content pane is collapsed
 let _plPendingEncodeAndPlay = null;  // montageId waiting for encode to finish before playing
+let _lastNotifiedEncodeError = null;  // dedupe key so a repeated failed-job broadcast doesn't re-toast
 // Normalize a clip-library clip into a live playout item.
 function clipToLiveItem(clip) {
   return { url: clipUrl(clip), name: clip.name || 'Clip', trimIn: clip.trimIn || 0, trimOut: clip.trimOut ?? undefined, duration: clip.duration };
@@ -20506,10 +21736,16 @@ function playlistTransitionOpts() {
 function playNextLive() {
   const item = _plLiveItems[_plLiveIdx]; if (!item) return;
   const url = item.url; if (!url) { _plLiveIdx++; playNextLive(); return; }
+  // Preload hint: the NEXT clip's url (wraps to item 0 when looping) so the server can pre-transcode it
+  // and the overlay can buffer it WHILE this one plays — making the advance seamless (no cold-load gap).
+  let nextItem = _plLiveItems[_plLiveIdx + 1];
+  if (!nextItem && _plLoop) nextItem = _plLiveItems[0];
+  let nextUrl = (nextItem && nextItem.url) || '';
+  if (nextUrl === url) nextUrl = '';   // single-clip loop → nothing new to warm
   const t = playlistTransitionOpts();   // ease between items (cut / fade / logo / stinger) on the overlay
   send('replay_play', { bus: _plBus, url, name: item.name || 'Clip', loop: false,
     trimIn: item.trimIn || 0, trimOut: item.trimOut ?? undefined, scene: _plScene || undefined,
-    transition: t.transition, transitionLogo: t.transitionLogo, stinger: t.stinger });
+    transition: t.transition, transitionLogo: t.transitionLogo, stinger: t.stinger, nextUrl });
   const st = el('rp-screen-status');
   if (st) { st.textContent = `ON AIR [${_plLiveIdx + 1}/${_plLiveItems.length}] ${item.name || 'Clip'}`; st.title = st.textContent; st.style.color = 'var(--good, #48bb78)'; }
   // Safety-net timer: fires if the overlay's 'replay_ended' event is somehow missed.
@@ -21125,6 +22361,37 @@ el('credits-pull-shifts')?.addEventListener('click', () => {
   send('set_credits', { talent: [...cur, ...added] });
   showToast(`Added ${added.length} crew member${added.length === 1 ? '' : 's'} from that event to the credits.`, '#22c55e');
 });
+
+// Populate the credits panel's event picker from saved Show-Deck shifts AND surface the currently
+// LINKED start.gg/tournament event (auto-selected) — so the credits panel reflects the live event.
+// (The dropdown used to never get populated, so the linked event never showed up here.)
+function syncCreditsShiftEventSelect() {
+  const sel = el('credits-shift-event'); if (!sel) return;
+  const s = currentState || {};
+  const shifts = (s.casters && s.casters.shifts) || [];
+  const active = s.activeEvent || {};
+  const names = {};   // eventSlug -> friendly name
+  let hasNone = false;
+  shifts.forEach((sh) => {
+    if (sh && sh.eventSlug) { if (!names[sh.eventSlug]) names[sh.eventSlug] = sh.eventName || sh.eventSlug; }
+    else if (sh) hasNone = true;
+  });
+  // The currently-linked event — surface it even if no shifts are saved under it yet.
+  const activeSlug = active.slug || (s.startgg && s.startgg.eventSlug) || '';
+  if (activeSlug) names[activeSlug] = active.name || (s.startgg && s.startgg.selectedEvent && s.startgg.selectedEvent.name) || activeSlug;
+  const esc = (x) => String(x).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+  const slugs = Object.keys(names);
+  const opts = ['<option value="">Choose an event…</option>'];
+  slugs.forEach((slug) => opts.push('<option value="' + esc(slug) + '">' + esc(names[slug] + (slug === activeSlug ? '  •  linked' : '')) + '</option>'));
+  if (hasNone) opts.push('<option value="__none__">Shifts with no event</option>');
+  const html = opts.join('');
+  if (sel.dataset.sig === html) return;
+  const prev = sel.value;
+  sel.dataset.sig = html;
+  sel.innerHTML = html;
+  if (prev && (slugs.includes(prev) || prev === '__none__')) sel.value = prev;   // keep the producer's choice
+  else if (activeSlug) sel.value = activeSlug;                                    // default to the linked event
+}
 // Punch-up graphics: only one of these can be live at a time — showing one auto-hides whichever
 // other one is live. Casters, Ticker, Sponsor Banner and Teams to Watch are NOT in this set — they
 // run as independent, persistent overlays alongside whatever punch-up graphic is showing.
@@ -21139,6 +22406,57 @@ function onairShow(s) { const trig = onairTrig(s.key); if (trig) send(trig.msg, 
 // Resolve whether a scene is currently on — prefers a custom check() over the dot-path, so scenes
 // like Matchup (detected via gfxActive, not a dedicated .visible flag) work correctly.
 function onairIsOn(s, state) { return s.check ? s.check(state) : !!gfxPathVal(state, s.path); }
+// Auto-cut OBS — the Graphics top bar's armed "cut to this scene when a graphic goes live" switch.
+// Push Live, the Go-Live triggers and the trigger gear all fire this; every on-air surface has to,
+// or a graphic pushed from one board goes live on gfx.html while OBS stays on the previous scene.
+function gfxAutocutOBS() {
+  if (!el('gfx-autocut-on')?.checked) return;
+  const sc = (el('gfx-autocut-scene')?.value || '').trim();
+  if (sc) send('obs_switch_scene', { sceneName: sc });
+}
+// THE single "put this graphic on air / take it off" routine. Shared by the Production ▸ Graphics
+// On-air board and the rail's On-Air Elements grid so those two surfaces can never disagree with
+// each other or with Graphics ▸ Push Live: same exclusivity, same gfxActive layer, same OBS cut.
+// `on` = the graphic's CURRENT state (true → this call takes it off air).
+function onairPut(s, on) {
+  if (!s) return;
+  const key = s.key;
+  if (!on && GFX_ONAIR_EXCLUSIVE.has(key)) {
+    // Turning a punch-up graphic ON — hide every OTHER punch-up graphic that's currently live.
+    // Every send() below is paired with an immediate optimistic update to currentState (not just
+    // fire-and-forget) — these boards are built for rapid clicking mid-show, and without this a
+    // second click before the server's broadcast round-trip landed would read stale "not live yet"
+    // state for the previous graphic and skip hiding it, leaving more than one marked live at once.
+    (window.ONAIR_SCENES || []).forEach((other) => {
+      if (other.key === key || !GFX_ONAIR_EXCLUSIVE.has(other.key)) return;
+      if (onairIsOn(other, currentState)) { onairHide(other); if (!other.check) gfxSetPathVal(currentState, other.path, false); }
+    });
+    const liveScene = currentState && currentState.gfxActive;
+    if (liveScene && liveScene !== key) {
+      const sm = (typeof window._gfxSceneMeta !== 'undefined') ? window._gfxSceneMeta : {};
+      const pm = sm[liveScene]; if (pm) el(pm.clearId || ('btn-hide-' + liveScene))?.click();
+    }
+    const gfxKey = GFX_ONAIR_SCENE_KEY[key] || key;
+    send('set_gfx_active', { scene: gfxKey });
+    if (currentState) currentState.gfxActive = gfxKey;
+  } else if (on && GFX_ONAIR_EXCLUSIVE.has(key)) {
+    const liveScene = currentState && currentState.gfxActive;
+    const gfxKey = GFX_ONAIR_SCENE_KEY[key] || key;
+    if (liveScene === gfxKey) { send('set_gfx_active', { scene: null }); if (currentState) currentState.gfxActive = null; }
+  }
+  if (on) onairHide(s); else onairShow(s);
+  // Scenes with a custom check() (matchup: on === gfxActive === 'matchup') don't have a real
+  // independent .visible path — s.path there is just 'gfxActive', already correctly updated
+  // above; writing through it here would clobber that string with a stray boolean.
+  if (!s.check) gfxSetPathVal(currentState, s.path, !on);
+  // Going on air also cuts the switcher when auto-cut is armed — this is what makes the board
+  // "transition the scene" instead of only flipping a flag gfx.html may not even be on screen for.
+  if (!on && GFX_ONAIR_EXCLUSIVE.has(key)) gfxAutocutOBS();
+  if (typeof renderGraphicsBoard === 'function') renderGraphicsBoard();
+  if (typeof syncOnAirGrid === 'function') syncOnAirGrid(currentState || {});
+  if (typeof window._gfxRefreshTopBar === 'function') window._gfxRefreshTopBar();
+}
+window._onairPut = onairPut;
 
 // Every real OBS scene, merged with the graphics (ONAIR_SCENES) list and deduped by name —
 // shared by anything that wants a "push a graphic OR cut an OBS scene" combined list. An OBS
@@ -21194,37 +22512,7 @@ el('prod-graphics-board')?.addEventListener('click', (e) => {
   const btn = e.target.closest('.gfx-toggle'); if (!btn) return;
   const key = btn.closest('.gfx-card')?.dataset.key;
   const s = (window.ONAIR_SCENES || []).find((x) => x.key === key); if (!s) return;
-  const on = onairIsOn(s, currentState);
-  if (!on && GFX_ONAIR_EXCLUSIVE.has(key)) {
-    // Turning a punch-up graphic ON — hide every OTHER punch-up graphic that's currently live.
-    // Every send() below is paired with an immediate optimistic update to currentState (not just
-    // fire-and-forget) — this board is built for rapid clicking mid-show, and without this a
-    // second click before the server's broadcast round-trip landed would read stale "not live yet"
-    // state for the previous graphic and skip hiding it, leaving more than one marked live at once.
-    (window.ONAIR_SCENES || []).forEach((other) => {
-      if (other.key === key || !GFX_ONAIR_EXCLUSIVE.has(other.key)) return;
-      if (onairIsOn(other, currentState)) { onairHide(other); if (!other.check) gfxSetPathVal(currentState, other.path, false); }
-    });
-    const liveScene = currentState && currentState.gfxActive;
-    if (liveScene && liveScene !== key) {
-      const sm = (typeof window._gfxSceneMeta !== 'undefined') ? window._gfxSceneMeta : {};
-      const pm = sm[liveScene]; if (pm) el(pm.clearId || ('btn-hide-' + liveScene))?.click();
-    }
-    const gfxKey = GFX_ONAIR_SCENE_KEY[key] || key;
-    send('set_gfx_active', { scene: gfxKey });
-    if (currentState) currentState.gfxActive = gfxKey;
-  } else if (on && GFX_ONAIR_EXCLUSIVE.has(key)) {
-    const liveScene = currentState && currentState.gfxActive;
-    const gfxKey = GFX_ONAIR_SCENE_KEY[key] || key;
-    if (liveScene === gfxKey) { send('set_gfx_active', { scene: null }); if (currentState) currentState.gfxActive = null; }
-  }
-  if (on) onairHide(s); else onairShow(s);
-  // Scenes with a custom check() (matchup: on === gfxActive === 'matchup') don't have a real
-  // independent .visible path — s.path there is just 'gfxActive', already correctly updated
-  // above; writing through it here would clobber that string with a stray boolean.
-  if (!s.check) gfxSetPathVal(currentState, s.path, !on);
-  renderGraphicsBoard();
-  if (typeof window._gfxRefreshTopBar === 'function') window._gfxRefreshTopBar();
+  onairPut(s, onairIsOn(s, currentState));
 });
 // Reorder mode — drag-and-drop, mirrors the Deck grid's edit/drag pattern.
 el('onair-edit-toggle')?.addEventListener('click', function () {
@@ -21649,6 +22937,7 @@ const FLOW_TRIGGER_GROUPS = [
     ['rl_match_ended',      'Match ended'],
     ['rl_overtime',         'Overtime starts'],
     ['rl_replay_start',     'Replay starts'],
+    ['rl_replay_will_end',  'Replay will end (transition back)'],
     ['rl_replay_end',       'Replay ends'],
     ['rl_match_created',    'New match created'],
     ['rl_demo',             'Player demolishes'],
@@ -24398,6 +25687,7 @@ function applyClipsState(c) {
     }
   }
 
+  renderClipPool(c);
   renderPlaylistPane(c);
   // Keep social clip-prep dropdowns in sync when the library updates
   if (el('soc-panel-clipprep') && el('soc-panel-clipprep').style.display !== 'none') {
@@ -24415,7 +25705,14 @@ function clipUrl(clip) {
   if (clip._url) return clip._url;
   if (clip.rawPath) return fileUrl(clip.rawPath);
   if (!clip.path) return '';
-  return 'http://localhost:3000/data/clips/' + clip.path.split(/[\\/]/).pop();
+  const base = 'http://localhost:3000/data/clips/' + clip.path.split(/[\\/]/).pop();
+  // A Highlights copy of a Replays clip (or vice versa — clip_copy_folder, see the clip pool) shares
+  // the exact same underlying file/URL by design (no video is ever duplicated on disk). But
+  // replay-player.html treats an unchanged URL as "already showing this, just resume" and skips the
+  // reload/transition entirely (see its `sameUrl && wasLive` check) — so pushing a copy right after
+  // its original silently produced no fade/cut at all. Tag the clip's own id on so two DIFFERENT
+  // clip records never collide into one "same thing" URL; express.static ignores the query string.
+  return clip.id ? base + '?cid=' + encodeURIComponent(clip.id) : base;
 }
 
 function updateTrimBar() {
@@ -24642,24 +25939,30 @@ function montageUrl(m) {
 // need to encode first, and is this the thing currently on air?" `encodeActive` is c.encode?.active
 // (already carries montageId — see montage-encoder.js summarize()), so this can attribute an
 // in-progress encode to the exact row it belongs to, not just show a global spinner.
-function montageBadgeInfo(m, encodeActive) {
+function montageBadgeInfo(m, encodeActive, encodeQueue) {
   if (!(m.clipIds || []).length) return { cls: 'empty', label: 'EMPTY' };
   if (_plLiveActive && _plLiveMontageId === m.id) return { cls: 'live', label: '● LIVE' };
   if (encodeActive && encodeActive.montageId === m.id && (encodeActive.status === 'encoding' || encodeActive.status === 'queued')) {
     return { cls: 'encoding', label: 'ENCODING ' + (encodeActive.progress || 0) + '%' };
+  }
+  // Enqueued but not yet the active job — enqueueMontage() marks the montage 'encoding' the moment
+  // it's queued (so Play Live knows not to re-encode it), but without this check it'd fall through
+  // to DRAFT here since it's neither the active job nor already exported.
+  if ((encodeQueue || []).some((j) => j.montageId === m.id && j.status === 'queued')) {
+    return { cls: 'encoding', label: 'QUEUED' };
   }
   if (m.status === 'error') return { cls: 'error', label: 'ERROR' };
   if (montageUrl(m)) return { cls: 'ready', label: 'READY' };
   return { cls: 'draft', label: 'DRAFT' };
 }
 // Fuller status line for the expanded card — same inputs, more words (bus/scene detail on LIVE).
-function montageStatusLine(m, encodeActive) {
-  const b = montageBadgeInfo(m, encodeActive);
+function montageStatusLine(m, encodeActive, encodeQueue) {
+  const b = montageBadgeInfo(m, encodeActive, encodeQueue);
   if (b.cls === 'live') {
     const via = _plEncodedMode ? ('file · bus ' + _plBus) : 'per-clip · program bus';
     return 'LIVE · ' + via + (_plScene ? (' · scene ' + _plScene) : '');
   }
-  if (b.cls === 'encoding') return b.label + '…';
+  if (b.cls === 'encoding') return b.label === 'QUEUED' ? 'Queued — waiting on another encode to finish' : b.label + '…';
   if (b.cls === 'ready') return 'Encoded — Play Live plays the file instantly';
   if (b.cls === 'error') return 'Last encode failed — try again';
   if (b.cls === 'empty') return 'No clips yet';
@@ -24727,7 +26030,7 @@ el('gfx-autocut-scene')?.addEventListener('change', function () {
   });
 })();
 
-function sendToScreen(bus) {
+function sendToScreen(bus, transitionOverride) {
   const sel = currentEditorClip();
   if (!sel || !sel.url) {
     const st = el('rp-screen-status'); if (st) { st.textContent = 'Load a clip first.'; st.style.color = '#f56565'; }
@@ -24739,8 +26042,10 @@ function sendToScreen(bus) {
     stopOtherProgramSources('program');   // don't let a running playlist fight this single clip
     if (!programScene) showToast('No OBS scene selected — pick a scene next to "To Air" so OBS switches to the replay-player source.', '#fbbf24', 5000);
     beginReplayProgram();
+  } else if (bus === 'preview') {
+    _previewSentAt = Date.now();
   }
-  const t = liveTransitionOpts();
+  const t = transitionOverride || liveTransitionOpts();
   send('replay_play', {
     bus, url: sel.url, name: sel.name, loop,
     trimIn: _previewClip.trimIn || 0,
@@ -25021,8 +26326,13 @@ function rpClearProgram() {
 el('rp-screen-clear')?.addEventListener('click', rpClearProgram);
 el('rp-screen-open')?.addEventListener('click', () => window.open('http://localhost:3000/replay-player.html', '_blank', 'noopener'));
 function takeToProgram() {
-  // Nothing cued? Tell the producer instead of taking black to air.
-  if (!(currentState.replay && currentState.replay.preview && currentState.replay.preview.playing && currentState.replay.preview.url)) {
+  // Nothing cued? Tell the producer instead of taking black to air. currentState.replay.preview is
+  // a replica that only updates once the server's replay_play echo arrives — a Take clicked right
+  // after "To Preview" can beat that echo, so also trust a just-sent preview for a short grace
+  // window (the server's own state.replay.preview, which replay_take actually reads, is already
+  // set synchronously by the time the send above completes).
+  const recentPreviewSend = Date.now() - _previewSentAt < 4000;
+  if (!recentPreviewSend && !(currentState.replay && currentState.replay.preview && currentState.replay.preview.playing && currentState.replay.preview.url)) {
     const st = el('rp-screen-status'); if (st) { st.textContent = 'Nothing in Preview to take.'; st.style.color = '#f56565'; }
     return;
   }
@@ -25050,7 +26360,18 @@ el('rp-save-playlist')?.addEventListener('click', async () => {
   // If this is a raw staging file (no library ID), import it first
   if (!_previewClip.id && _previewClip.rawPath) {
     const stagingFile = _stagingFiles.find(f => f.path === _previewClip.rawPath);
-    if (stagingFile) { await addStagingClipToPlaylist(stagingFile, null); return; }
+    if (stagingFile) {
+      const st = el('clips-status');
+      try {
+        const clip = stagingFile.imported && stagingFile.importedId
+          ? (currentState.clips?.library || []).find((cl) => cl.id === stagingFile.importedId)
+          : await importStagingFile(stagingFile);
+        if (clip) addClipToPlaylist(clip, currentState.clips);
+      } catch (err) {
+        if (st) { st.textContent = 'Import failed: ' + err.message; st.style.color = '#f56565'; }
+      }
+      return;
+    }
   }
   const clip = (currentState.clips?.library || []).find((x) => x.id === _previewClip.id) || _previewClip;
   addClipToPlaylist(clip, currentState.clips);
@@ -25060,7 +26381,14 @@ el('rp-new-playlist')?.addEventListener('click', async () => {
   const name = await customPrompt('New playlist', 'Name this playlist', 'Playlist ' + n, 'Create');
   if (!name) return;
   _pendingNewMontage = true;   // auto-select the new playlist when it comes back
-  send('montage_create', { name, clipIds: [], template: el('select-montage-template')?.value || 'highlights' });
+  send('montage_create', { name, clipIds: [], template: el('select-montage-template')?.value || 'highlights', folder: _rpFolder });
+});
+// Build a playlist from a whole FOLDER of clips — the server opens a folder picker, imports every
+// video (name order), and drops them into a new playlist. Auto-selects it when it comes back.
+el('rp-folder-playlist')?.addEventListener('click', () => {
+  _pendingNewMontage = true;
+  send('montage_from_folder', { template: el('select-montage-template')?.value || 'highlights', folder: _rpFolder });
+  if (typeof showToast === 'function') showToast('Pick a folder of clips…', '#7c3aed');
 });
 el('rp-rename-playlist')?.addEventListener('click', () => {
   const mId = el('select-montage-edit')?.value; if (!mId) return;
@@ -25092,16 +26420,23 @@ el('rp-process')?.addEventListener('click', () => {
     }
   });
 });
-// Logo-transition picker (shown only when transition = Logo).
+// Logo-transition picker — ONE shared image (_transitionLogo) with two entry points: the Playlists
+// section's own row (#rp-translogo-*, persists onto the selected playlist) and the pool's always-
+// visible row (#rp-pool-translogo-*, drives single/bulk pool pushes). Picking a logo from either
+// updates the same variable, so both previews stay in sync with whichever was chosen last.
 let _transitionLogo = null;
+function refreshTransitionLogoPreviews() {
+  const src = _transitionLogo || (currentState.brand && currentState.brand.logo) || '';
+  const prev = el('rp-translogo-preview'); if (prev) prev.src = src;
+  const poolPrev = el('rp-pool-translogo-preview'); if (poolPrev) poolPrev.src = src;
+}
 function updateTransLogoRow() {
   const sel = el('rp-transition'); const type = (sel && sel.value) || 'cut';
   const row = el('rp-translogo-row');
   if (row) row.style.display = type === 'logo' ? 'flex' : 'none';
   const stRow = el('rp-stinger-row');
   if (stRow) stRow.style.display = type === 'stinger' ? 'flex' : 'none';
-  const prev = el('rp-translogo-preview');
-  if (prev) prev.src = _transitionLogo || (currentState.brand && currentState.brand.logo) || '';
+  refreshTransitionLogoPreviews();
 }
 el('rp-transition')?.addEventListener('change', function () {
   updateTransLogoRow();
@@ -25109,6 +26444,19 @@ el('rp-transition')?.addEventListener('change', function () {
   const mId = el('select-montage-edit')?.value;
   if (mId) send('montage_settings', { montageId: mId, transition: { type: this.value } });
 });
+function updatePoolTransLogoRow() {
+  const type = el('rp-pool-transition')?.value || 'fade';
+  const row = el('rp-pool-translogo-row');
+  if (row) row.style.display = type === 'logo' ? 'flex' : 'none';
+  refreshTransitionLogoPreviews();
+}
+el('rp-pool-transition')?.addEventListener('change', updatePoolTransLogoRow);
+el('rp-pool-translogo-file')?.addEventListener('change', async function () {
+  const f = this.files && this.files[0]; if (!f || !f.type.startsWith('image/')) return;
+  try { _transitionLogo = await fileToBase64(f); } catch (_) {}
+  refreshTransitionLogoPreviews();
+});
+updatePoolTransLogoRow();   // initial state on load (select defaults to 'fade' — row starts hidden)
 el('rp-translogo-file')?.addEventListener('change', async function () {
   const f = this.files && this.files[0]; if (!f || !f.type.startsWith('image/')) return;
   try { _transitionLogo = await fileToBase64(f); } catch (_) {}
@@ -25132,8 +26480,25 @@ function applyEncodeProgress(enc) {
   const active = enc && enc.active;
   const isEncoding = active && (active.status === 'encoding' || active.status === 'queued');
   const isDone     = active && active.status === 'done';
+  const isError    = active && active.status === 'error';
   const pct  = isEncoding ? (active.progress || 0) : isDone ? 100 : 0;
   const name = isDone ? '✓ Done' : (active?.name || 'Encoding…');
+
+  // Surface encode failures immediately — an 'error' status fell through every isEncoding/isDone
+  // branch below, so the progress bar just silently vanished (Process button re-enabling) with no
+  // indication anything went wrong, and the real ffmpeg error message was discarded entirely,
+  // never reaching the UI at all — only visible later via the playlist row's own badge, and only
+  // if the producer happened to still be looking at that specific row. De-duped per job so
+  // repeated state broadcasts for the same still-failed job don't spam the toast.
+  if (isError) {
+    const errKey = (active.montageId || '') + '|' + (active.error || '');
+    if (_lastNotifiedEncodeError !== errKey) {
+      _lastNotifiedEncodeError = errKey;
+      showToast(`Encode failed${active.name ? ' — "' + active.name + '"' : ''}: ${active.error || 'unknown error'}`, '#f56565', 8000);
+    }
+  } else if (active) {
+    _lastNotifiedEncodeError = null;
+  }
 
   // Global header bar
   const wrap  = el('qt-encode-wrap');
@@ -25170,8 +26535,13 @@ function applyEncodeProgress(enc) {
     }
   }
 
-  // Auto-play the encoded file if "Play Live" triggered the encode.
-  if (isDone && _plPendingEncodeAndPlay) {
+  // Auto-play the encoded file if "Play Live" triggered the encode. Must be THIS specific
+  // montage's completion, not just any completion — the encoder processes one job at a time, so
+  // clicking Play Live on playlist A while playlist B (queued earlier, e.g. via a manual Process)
+  // is still encoding meant B's completion satisfied this check first: it consumed/cleared the
+  // flag with a misleading "click Play Live again" toast, and A's own later completion then found
+  // nothing pending and never auto-aired at all.
+  if (isDone && _plPendingEncodeAndPlay && active.montageId === _plPendingEncodeAndPlay) {
     const pendingId = _plPendingEncodeAndPlay;
     _plPendingEncodeAndPlay = null;
     setTimeout(() => {
@@ -25887,12 +27257,27 @@ function renderAiPage(data) {
   // Clip controls
   const cm = el('ai-clip-mode'); if (cm && document.activeElement !== cm) cm.value = clips.captureMode || 'auto';
 
-  // Telemetry
+  // Telemetry — local recording
   const tt = el('ai-telemetry-toggle');
   const tEnabled = ai.telemetry ? ai.telemetry.enabled !== false : true;
   if (tt && document.activeElement !== tt) tt.checked = tEnabled;
   const ts = el('ai-telemetry-status');
   if (ts) ts.textContent = tEnabled ? 'Recording locally — decisions saved to this PC for training.' : 'Paused — no training data is being recorded.';
+
+  // Telemetry — cloud upload (separate opt-in; only meaningful once cloud-authed, see applyCloudStatus)
+  const tut = el('ai-telemetry-upload-toggle');
+  const tuEnabled = !!(ai.telemetry && ai.telemetry.uploadEnabled);
+  if (tut && document.activeElement !== tut) tut.checked = tuEnabled;
+  const tus = el('ai-telemetry-upload-status');
+  if (tus) {
+    const t = ai.telemetry || {};
+    tus.textContent = !tuEnabled ? 'Not uploading — stays on this PC.'
+      : t.lastUploadAt ? `Uploaded ${t.lastUploadCount || 0} records so far · last synced ${Math.max(0, Math.round((Date.now() - t.lastUploadAt) / 60000))}m ago`
+      : 'Upload enabled — waiting for the next sync.';
+  }
+  // cloud_status is only requested at boot + on visiting Settings — request it once here too so the
+  // upload toggle's disabled state isn't stale if this page renders first.
+  if (!window._aiCloudStatusRequested) { window._aiCloudStatusRequested = true; if (typeof cloudRequestStatus === 'function') cloudRequestStatus(); }
 }
 
 el('ai-shield-toggle')?.addEventListener('click', () => {
@@ -25906,6 +27291,7 @@ el('ai-dir-sens')?.addEventListener('input', function () {
 el('ai-dir-sens')?.addEventListener('change', function () { send('set_director', { sensitivity: Number(this.value) / 100 }); });
 el('ai-clip-mode')?.addEventListener('change', function () { send('set_clips', { captureMode: this.value }); });
 el('ai-telemetry-toggle')?.addEventListener('change', function () { send('set_telemetry', { enabled: this.checked }); });
+el('ai-telemetry-upload-toggle')?.addEventListener('change', function () { send('set_telemetry_upload', { enabled: this.checked }); });
 el('ai-open-director')?.addEventListener('click', (e) => {
   e.preventDefault();
   document.querySelector('[data-tab="produccion"]')?.click();
@@ -25948,7 +27334,7 @@ el('btn-montage-create')?.addEventListener('click', () => {
   const tpl = el('select-montage-template')?.value || 'highlights';
   const tplNames = { highlights: 'Highlights', brb: 'BRB Reel', postgame: 'Post-Game' };
   const name = (tplNames[tpl] || 'Reel') + ' ' + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  send('montage_create', { name, clipIds: ids, template: tpl });
+  send('montage_create', { name, clipIds: ids, template: tpl, folder: _rpFolder });
   selectedClipIds.clear();
 });
 
@@ -26206,6 +27592,10 @@ async function connect() {
       _r('eventOps',           () => { if (typeof window.eventOpsOnState === 'function') window.eventOpsOnState(); });
       _r('perfMode',           () => applyPerfMode(msg.data));
       _r('cloudRole',          () => applyCloudRole(msg.data.cloudRole));
+      _r('chatHighlight',      () => renderChatHighlight(msg.data));
+      _r('multichatConfig',    () => renderMultichatConfig(msg.data));
+      // Backfill the multichat feed once per session, after the first snapshot lands.
+      if (!window._chatLogRequested) { window._chatLogRequested = true; send('request_chat_log'); }
     } else if (msg.type === 'rundown_control') {
       // External Run of Show control (Stream Deck plugin) — the server relays these
       // to us because the rundown runner lives in this panel, not on the server.
@@ -26223,8 +27613,8 @@ async function connect() {
     } else if (msg.type === 'clips_update') {
       currentState.clips = msg.data;
       applyClipsState(msg.data);
-      if (typeof renderQrailReplay === 'function') _r('renderQrailReplay', () => renderQrailReplay(currentState));
-      if (typeof renderQrailPlaylists === 'function') _r('renderQrailPlaylists', () => renderQrailPlaylists(currentState));
+      if (typeof renderQrailReplay === 'function') { try { renderQrailReplay(currentState); } catch (e) { console.error('[render:renderQrailReplay]', e); } }
+      if (typeof renderQrailPlaylists === 'function') { try { renderQrailPlaylists(currentState); } catch (e) { console.error('[render:renderQrailPlaylists]', e); } }
     } else if (msg.type === 'replay_progress') {
       // The on-air player reports its position → drive the time-remaining readout, but ONLY while
       // the control panel has actually sent something to air. Otherwise a player source still loaded
@@ -26259,6 +27649,8 @@ async function connect() {
       if (s && el('draft-game')?.value === 'league') { const d = msg.data || {}; s.textContent = d.status === 'off' ? '' : draftAutoStatusText(d.status, d.detail); }
     } else if (msg.type === 'lol_update') {
       applyLolState({ lol: msg.data });    // keep the League connection chip live at the poll rate
+    } else if (msg.type === 'apex_update') {
+      applyApexState({ apex: msg.data, activeGame: 'apex' });    // keep the Apex chip live between full_states
     } else if (msg.type === 'lol_ocr_status') {
       lolOcrStatus(msg.status, msg.detail, msg.lastBlue, msg.lastRed);
     } else if (msg.type === 'startgg_import') {
@@ -26441,6 +27833,10 @@ async function connect() {
         const elx = el(id);
         if (elx) { elx.textContent = msg.data.message || ''; elx.style.color = color; }
       });
+    } else if (msg.type === 'sheets-result') {
+      const r = el('sheets-result');
+      if (r) { r.textContent = msg.data.message || ''; r.style.color = msg.data.ok ? '#9ae6b4' : '#f56565'; }
+      if (msg.data.notify && typeof showToast === 'function') showToast(msg.data.message || '', msg.data.ok ? '#22c55e' : '#f56565');
     } else if (msg.type === 'vmix-result') {
       const elx = el('vmix-result');
       if (elx) { elx.textContent = msg.data.message || ''; elx.style.color = msg.data.ok ? '#9ae6b4' : '#f56565'; }
@@ -26566,7 +27962,16 @@ async function connect() {
       if (typeof renderUpdateStatus === 'function') renderUpdateStatus(msg.data);
       if (msg.data && msg.data.state === 'downloaded') showToast(`Update v${msg.data.version} ready — install it in Settings → Software Updates.`, '#7c3aed', 0);
     } else if (msg.type === 'twitch_chat_message') {
-      addChatMessage(msg.data.username, msg.data.message, msg.data.color || '');
+      addChatMessage(msg.data.username, msg.data.message, msg.data.color || '', 'twitch');
+    } else if (msg.type === 'youtube_chat_message') {
+      addChatMessage(msg.data.username, msg.data.message, msg.data.color || '', 'youtube');
+    } else if (msg.type === 'kick_chat_message') {
+      addChatMessage(msg.data.username, msg.data.message, msg.data.color || '', 'kick');
+    } else if (msg.type === 'discord_chat_message') {
+      addChatMessage(msg.data.username, msg.data.message, msg.data.color || '', 'discord');
+    } else if (msg.type === 'chat_log') {
+      // One-shot backfill after (re)connect — seeds the multichat feed with recent history.
+      (msg.data && msg.data.messages || []).forEach((m) => addChatMessage(m.user, m.text, m.color || '', m.platform || 'twitch'));
     } else if (msg.type === 'twitch_chat_connected') {
       const st = el('chat-connection-status');
       const ld = el('chat-loading');
@@ -26644,8 +28049,11 @@ document.querySelectorAll('.game-tab-btn').forEach(btn => {
     const g = btn.dataset.game;
     document.querySelectorAll('.game-tab-btn').forEach(b => b.classList.toggle('active', b === btn));
     document.querySelectorAll('.game-section').forEach(s => s.classList.toggle('active', s.id === 'games-section-' + g));
+    if (g === 'apex') loadApexSetup();
   });
 });
+wireApexSetup();
+wireApexScoring();
 
 // League in-game HUD — teamfight transition mode (full | auto | minimal).
 document.querySelectorAll('#lol-hud-mode .seg-btn').forEach(btn => {
@@ -27499,7 +28907,12 @@ const chatMessages = [];
 const maxChatMessages = 100;
 
 // Function to add message to chat
-function addChatMessage(username, message, color = '') {
+// Platform dot colors for the multichat feed (panel-only — the on-stream lower
+// third is deliberately platform-unbranded).
+const CHAT_PLATFORM_DOT = { twitch: '#9146ff', youtube: '#ff4d4d', kick: '#53fc18', discord: '#5865f2' };
+let _chatFilter = (() => { try { return localStorage.getItem('ne_chat_filter') || 'all'; } catch { return 'all'; } })();
+
+function addChatMessage(username, message, color = '', platform = 'twitch') {
   const chatEl = el('twitch-chat');
   if (!chatEl) return;
 
@@ -27514,12 +28927,116 @@ function addChatMessage(username, message, color = '') {
   }
 
   const nameColor = color || '#9146ff';
+  const dot = CHAT_PLATFORM_DOT[platform] || '#8b93a7';
   const msgEl = document.createElement('div');
-  msgEl.style.cssText = 'padding:5px 6px; border-bottom:1px solid rgba(255,255,255,0.04); font-size:12px; word-wrap:break-word; line-height:1.4;';
-  msgEl.innerHTML = `<span style="color:${nameColor}; font-weight:700;">${escapeHtml(username)}</span><span style="color:rgba(255,255,255,0.4);">: </span><span style="color:#ddd;">${escapeHtml(message)}</span>`;
+  msgEl.style.cssText = 'padding:5px 6px; border-bottom:1px solid rgba(255,255,255,0.04); font-size:12px; word-wrap:break-word; line-height:1.4; cursor:pointer; border-radius:4px; border-left:2px solid transparent;';
+  msgEl.innerHTML = `<span style="display:inline-block; width:6px; height:6px; border-radius:50%; background:${dot}; margin-right:5px; vertical-align:1px;" title="${esc(platform)}"></span>`
+    + `<span style="color:${nameColor}; font-weight:700;">${escapeHtml(username)}</span><span style="color:rgba(255,255,255,0.4);">: </span><span style="color:#ddd;">${escapeHtml(message)}</span>`;
+  // Multichat click-to-feature: clicking a row puts it on stream as a lower third
+  // (overlay/chat-highlight.html); clicking the featured row again clears it.
+  msgEl.dataset.chatUser = username;
+  msgEl.dataset.chatText = message;
+  msgEl.dataset.chatPlatform = platform;
+  msgEl.title = 'Feature this message on stream';
+  if (_chatFilter !== 'all' && platform !== _chatFilter) msgEl.style.display = 'none';
+  msgEl.addEventListener('mouseenter', () => { if (!msgEl.dataset.featured) msgEl.style.background = 'rgba(255,255,255,0.06)'; });
+  msgEl.addEventListener('mouseleave', () => { if (!msgEl.dataset.featured) msgEl.style.background = ''; });
+  msgEl.addEventListener('click', () => featureChatMessage({ user: username, text: message, color, platform }));
 
   chatEl.appendChild(msgEl);
   chatEl.scrollTop = chatEl.scrollHeight;
+}
+
+// ── Multichat platform filter chips (All / Twitch / YouTube) ──
+function applyChatFilter() {
+  const chatEl = el('twitch-chat');
+  if (chatEl) {
+    chatEl.querySelectorAll('[data-chat-platform]').forEach((row) => {
+      row.style.display = (_chatFilter === 'all' || row.dataset.chatPlatform === _chatFilter) ? '' : 'none';
+    });
+    chatEl.scrollTop = chatEl.scrollHeight;
+  }
+  document.querySelectorAll('#chat-filter-chips [data-cf]').forEach((b) => {
+    const on = b.dataset.cf === _chatFilter;
+    b.style.background = on ? 'rgba(124,92,255,0.25)' : '';
+    b.style.color = on ? '#c4b5fd' : '';
+  });
+}
+document.querySelectorAll('#chat-filter-chips [data-cf]').forEach((b) => {
+  b.addEventListener('click', () => {
+    _chatFilter = b.dataset.cf;
+    try { localStorage.setItem('ne_chat_filter', _chatFilter); } catch {}
+    applyChatFilter();
+  });
+});
+applyChatFilter();
+
+// ── Chat sources config popover (Kick channel + Discord bot/channel) ──
+el('chat-sources-btn')?.addEventListener('click', () => {
+  const p = el('chat-sources-panel'); if (!p) return;
+  p.style.display = p.style.display === 'none' ? '' : 'none';
+});
+el('mc-close')?.addEventListener('click', () => { const p = el('chat-sources-panel'); if (p) p.style.display = 'none'; });
+el('mc-save')?.addEventListener('click', () => {
+  const payload = {
+    kickChannel: (el('mc-kick-channel')?.value || '').trim(),
+    discordChannelId: (el('mc-discord-channel')?.value || '').trim()
+  };
+  // Only send the token when the field holds a real value (not the •••• masked placeholder).
+  const tok = (el('mc-discord-token')?.value || '');
+  if (tok && tok !== '•••') payload.discordBotToken = tok;
+  send('set_multichat_settings', payload);
+  const p = el('chat-sources-panel'); if (p) p.style.display = 'none';
+});
+// Reflect saved config + live connection state (token itself never leaves the server).
+function renderMultichatConfig(data) {
+  const mc = data.multichat || {};
+  const kick = el('mc-kick-channel'), dch = el('mc-discord-channel'), tok = el('mc-discord-token');
+  if (kick && document.activeElement !== kick) kick.value = mc.kickChannel || '';
+  if (dch && document.activeElement !== dch) dch.value = mc.discordChannelId || '';
+  if (tok && document.activeElement !== tok && !tok.value && mc.hasDiscordToken) tok.value = '•••';
+  const kb = el('kick-conn-badge'); if (kb) kb.style.display = mc.kickConnected ? '' : 'none';
+  const db = el('discord-conn-badge'); if (db) db.style.display = mc.discordConnected ? '' : 'none';
+}
+
+// ── Multichat → stream: feature / clear a chat message lower third ──
+function featureChatMessage(m) {
+  const cur = currentState.chatHighlight;
+  if (cur && cur.visible && cur.user === m.user && cur.text === m.text) {
+    send('set_chat_highlight', { visible: false });   // same row again = take it down
+    return;
+  }
+  const dur = parseInt(el('chat-feature-dur')?.value, 10);
+  send('set_chat_highlight', {
+    visible: true, platform: m.platform || 'twitch',
+    user: m.user, text: m.text, color: m.color || '',
+    duration: isNaN(dur) ? 30 : dur
+  });
+}
+el('chat-feature-clear')?.addEventListener('click', () => send('set_chat_highlight', { visible: false }));
+el('chat-feature-dur')?.addEventListener('change', function () { try { localStorage.setItem('ne_chat_feature_dur', this.value); } catch {} });
+try { const v = localStorage.getItem('ne_chat_feature_dur'); if (v !== null && el('chat-feature-dur')) el('chat-feature-dur').value = v; } catch {}
+
+// Reflect the live featured message in the rail: status bar + highlighted feed row.
+function renderChatHighlight(data) {
+  const ch = data.chatHighlight || {};
+  const status = el('chat-feature-status');
+  const clearBtn = el('chat-feature-clear');
+  if (status) {
+    status.textContent = ch.visible
+      ? `ON STREAM — ${ch.user}: ${ch.text}`
+      : 'Click a message to feature it on stream.';
+    status.style.color = ch.visible ? '#4ade80' : '';
+  }
+  if (clearBtn) clearBtn.style.display = ch.visible ? '' : 'none';
+  const chatEl = el('twitch-chat');
+  if (chatEl) {
+    chatEl.querySelectorAll('[data-chat-user]').forEach((row) => {
+      const on = !!ch.visible && row.dataset.chatUser === ch.user && row.dataset.chatText === ch.text;
+      if (on) { row.dataset.featured = '1'; row.style.background = 'rgba(74,222,128,0.10)'; row.style.borderLeft = '2px solid #4ade80'; }
+      else { delete row.dataset.featured; row.style.background = ''; row.style.borderLeft = '2px solid transparent'; }
+    });
+  }
 }
 
 // Function to escape HTML

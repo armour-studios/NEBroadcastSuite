@@ -1,0 +1,188 @@
+/* fgc-redesign.css — modern visual refresh for the ported FGC scoreboards.
+ *
+ * SHAPE-PRESERVING by design: it changes only surfaces, depth, colour finish and type —
+ * never geometry or element positions — so the overlay still fits the exact same footprint
+ * in OBS/the UI. Linked LAST (after template.css and fgc-brand.css) so its polish wins while
+ * the per-side brand colours from fgc-brand.css still flow through the plaque gradients.
+ *
+ * Applies to every SVG skin (they share ids); the image-based default-img skin ignores the
+ * SVG-targeted rules and just picks up the type/shadow tweaks.
+ */
+
+/* ── Plaque depth ───────────────────────────────────────────────
+   Replace the flat 0.2rem black halo with a layered soft drop + a hairline top light,
+   so the plaques sit ABOVE the feed instead of pasted onto it. */
+.playerPlaque,
+#p1BGpartial, #p1BGfull, #p2BGpartial, #p2BGfull,
+#team1BG, #team1BGFull, #team2BG, #team2BGFull {
+  filter: drop-shadow(0 8px 18px rgba(0, 0, 0, .5))
+          drop-shadow(0 1px 0 rgba(255, 255, 255, .07));
+}
+
+/* ── ALL CAPS ────────────────────────────────────────────────────
+   Broadcast text is uppercase everywhere — names, org/team, casters, event/round/type. */
+#nameBlockP1, #nameBlockP2, #team1Name, #team2Name,
+#stageText, #topText, #matchTypeText,
+#caster1Display, #caster2Display, .casterText, .name {
+  text-transform: uppercase;
+}
+
+/* ── Player names ───────────────────────────────────────────────
+   Drop the crude 9-direction black outline for a single clean depth shadow; tighten tracking
+   and firm up the weight so names read crisply at broadcast distance. */
+#nameBlockP1, #nameBlockP2 {
+  text-shadow: 0 2px 7px rgba(0, 0, 0, .78), 0 0 1px rgba(0, 0, 0, .95) !important;
+  letter-spacing: .012em;
+}
+.name { font-weight: 700; }
+/* The clan/name divider — softer than pure white so it reads as a separator, not a character. */
+#separator1, #separator2, #separator1-1, #separator2-2 { opacity: .5; font-weight: 400; }
+
+/* ── Scores — the focal point ───────────────────────────────────
+   Heavier + a controlled shadow so the number reads instantly against the deepened cap. */
+#player1Score, #player2Score {
+  font-weight: 800;
+  text-shadow: 0 2px 9px rgba(0, 0, 0, .8), 0 0 2px rgba(0, 0, 0, .95) !important;
+}
+
+/* ── Centre info bar ────────────────────────────────────────────
+   Deep navy instead of flat black, a whisper-thin top keyline, and a clear text hierarchy:
+   event name bright and open, round label + match type as quieter tracked labels. */
+#topRowBody {
+  fill: #0b0e17 !important;
+  opacity: .97 !important;
+  stroke: rgba(255, 255, 255, .10) !important;
+  stroke-width: 1px !important;
+}
+#topRowShadow { opacity: .45 !important; }
+#topText     { color: #ffffff; letter-spacing: .06em; }
+#stageText   { color: rgba(255, 255, 255, .90); letter-spacing: .16em; }
+#matchTypeText { color: rgba(255, 255, 255, .70); letter-spacing: .16em; }
+
+/* ── Casters bar — match the centre bar's finish ────────────────── */
+#castersBody {
+  fill: #0b0e17 !important;
+  opacity: .97 !important;
+  stroke: rgba(255, 255, 255, .10) !important;
+  stroke-width: 1px !important;
+}
+#castersShadow { opacity: .45 !important; }
+#caster1Display, #caster2Display { letter-spacing: .04em; }
+
+/* Bigger caster type + icon — a single short name looked tiny in the wide bar. */
+.commentators { font-size: 21px !important; gap: 9px !important; }
+#caster1Display, #caster2Display, .casterText { font-size: 21px !important; }
+.casterIcon { width: 22px !important; height: 22px !important; }
+
+/* Entrance was "weird": the bar slid up while the caster text was held hidden, then the name
+   popped in a beat later (the template gates the text behind the slide). Give the whole caster row
+   — bar + text — ONE clean quick fade instead of the slide, so it reads as a single smooth reveal.
+   fade-in still fires animationend, so the template's "entrance finished → start cycle" hook is
+   unaffected. Higher specificity + !important beats the skin's `body.anim-start [data-anim="up"]`. */
+body.anim-start #castersBG[data-anim],
+body.anim-start #casterContainer[data-anim] {
+  animation: fade-in 320ms ease-out both !important;
+}
+
+/* ── Team plaque (secondary line) ───────────────────────────────── */
+#T1_noimg_bg, #T1_full_bg, #T2_noimg_bg, #T2_full_bg {
+  fill: #0b0e17 !important;
+  opacity: .95 !important;
+}
+/* The team-row score is the TEAM RECORD (a "W-L" / "12 PTS" string set by fgc-adapter.js), not
+   the big single-digit set score — so force a compact fixed size (beats the template's inline
+   auto-fit) that keeps multi-character records on one line, and read it as a quieter label. */
+/* Team-record cap: keep each skin's NATIVE box width (it's tuned to the plaque's diagonal cap —
+   forcing it wider pushed the record off-centre, e.g. straddling the diagonal on SF6). Just make
+   the record read clearly and stay CENTRED both ways: flex-centre it and let a wider "W-L" overflow
+   the tiny cap symmetrically rather than clip or shift. */
+#team1Score, #team2Score {
+  display: inline-flex !important; align-items: center !important; justify-content: center !important;
+  /* Sized to FIT a "W-L" inside the native score cap so it stays centred without overflowing into
+     the team name (skins with gap:0) or straddling the diagonal (SF6). The single-digit player score
+     up top keeps the skin's big font — this only affects the team-record cap on the team row. */
+  font-size: 15px !important;
+  font-weight: 800;
+  letter-spacing: 0;
+  color: rgba(255, 255, 255, .95);
+  white-space: nowrap;
+  overflow: visible !important;
+  line-height: 1 !important;
+}
+
+/* ── Centre info block: EVENT NAME on top, ROUND/STAGE + MATCH LABEL on a secondary line ────
+   The three infoBars (stage · event · type) sit in one flex row; wrap it and force the event to a
+   full-width first line so stage + match label drop beneath it as one centred subtitle. Each text
+   element is flex-centred so it sits in the VERTICAL middle of its box (some skins top-align). */
+.centerPanel { justify-content: center !important; gap: 0 !important; }
+.infoRow { flex-wrap: wrap !important; align-items: center !important; align-content: center !important; row-gap: 0 !important; column-gap: 0 !important; }
+#topText, #stageText, #matchTypeText {
+  display: flex !important; align-items: center !important; justify-content: center !important;
+  padding-top: 0 !important; padding-bottom: 0 !important;
+}
+#topText {
+  order: -1 !important; flex: 0 0 100% !important; width: 100% !important;
+  height: 22px !important; font-weight: 800; font-size: 18px !important; line-height: 1 !important;
+}
+/* Brand logo, left of the event name (adapter sets --fgc-brand-logo + .fgc-has-logo). It's a
+   ::before so the template's `#topText.textContent = event` doesn't wipe it; #topText is a centred
+   flex row, so logo + event name sit centred together as a group. */
+:root.fgc-has-logo #topText::before {
+  content: ''; flex: 0 0 auto; width: 24px; height: 24px; margin-right: 10px;
+  background: var(--fgc-brand-logo) center / contain no-repeat;
+}
+#stageText, #matchTypeText {
+  order: 0; height: 15px !important; font-size: 11px !important;
+  opacity: .82; letter-spacing: .1em; width: auto !important; max-width: 250px; white-space: nowrap;
+}
+/* Round/stage · match-label separator, only when BOTH are present. */
+#stageText:not(:empty) + #topText + #matchTypeText:not(:empty)::before {
+  content: '·'; opacity: .5; margin: 0 10px; font-weight: 700;
+}
+#matchTypeText:not(:empty) { margin-left: 12px; }
+
+/* ── Sponsor rail (injected by fgc-adapter.js, bottom edge, under the casters) ──── */
+.fgc-sponsor-rail {
+  position: fixed; left: 50%; bottom: 10px; transform: translateX(-50%);
+  height: 44px; box-sizing: border-box;
+  display: none; align-items: center; gap: 26px;
+  padding: 0 24px; border-radius: 10px;
+  background: rgba(11, 14, 23, .92);
+  border: 1px solid rgba(255, 255, 255, .08);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, .45);
+  z-index: 60; pointer-events: none;
+}
+.fgc-sponsor-rail.show { display: flex; }
+/* Casters live at the very bottom edge — when the sponsor rail is present, lift the WHOLE caster
+   row so the rail sits cleanly UNDER it. The row is two separate elements: the dark bar (#castersBG,
+   in a bottom:0 wrapper) and the text (#casterContainer, top-positioned). Both must move up by the
+   same amount or the text floats off its bar. Use margins (NOT transform — the row's entrance
+   animation drives transform, so overriding it would stall/hide the casters). */
+:root.fgc-has-sponsors #casterContainer { margin-top: -56px !important; }
+:root.fgc-has-sponsors #castersBG { margin-bottom: 56px !important; }
+
+/* ── Single caster (flagged by fgc-adapter.js) ───────────────────────────────────
+   The templates always render two name slots (#caster1Display · icons · #caster2Display).
+   With one caster the second slot is empty but still ~130px wide, leaving the lone name
+   pushed left of centre with dead space beside it. Collapse the empty slot, make the wrapper
+   a tight flex row, and reorder so the mic (and every social icon) sits to the LEFT of the
+   single name — the whole pair centred as one unit. */
+:root.fgc-single-caster #casterCycleWrapper {
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+:root.fgc-single-caster #caster2Display { display: none !important; }
+:root.fgc-single-caster #casterCycleWrapper .casterIcon { order: 0; margin: 0; }
+:root.fgc-single-caster #caster1Display { order: 1; width: auto !important; }
+.fgc-spon-label {
+  font: 800 11px/1 'Rajdhani', 'Inter', system-ui, sans-serif;
+  letter-spacing: .2em; text-transform: uppercase; color: rgba(255, 255, 255, .55);
+  flex: 0 0 auto;
+}
+.fgc-spon-sep { width: 1px; height: 18px; background: rgba(255, 255, 255, .16); flex: 0 0 auto; }
+.fgc-spon-logo {
+  height: 26px !important; width: auto; max-width: 130px; object-fit: contain; flex: 0 0 auto;
+  filter: drop-shadow(0 1px 4px rgba(0, 0, 0, .4));
+}

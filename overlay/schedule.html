@@ -59,8 +59,14 @@ body { width: 1920px; height: 1080px; overflow: hidden; background: transparent;
 }
 .sch-stage.show .sch-entry { animation: entryIn .6s cubic-bezier(.16,.84,.24,1) both; }
 /* Re-renders (poll updates shifting times/scores) update IN PLACE — only the first
-   paint animates, so the date/time line stops endlessly sliding back in. */
-.sch-list[data-animated] .sch-entry { animation: none !important; }
+   paint animates, so the date/time line stops endlessly sliding back in. Every render fully
+   rebuilds the list (innerHTML = ''), so a match added AFTER the first paint is a brand-new
+   .sch-entry that gets caught by this same "don't animate" rule — opacity is only ever set to 1
+   by the entryIn animation's own end-state, so without an explicit opacity here that new card
+   went from "no slide-in" to "invisible forever" (only its date/badge meta row, a separate
+   sibling element, isn't affected and kept showing). Skip the slide but still show the card.
+*/
+.sch-list[data-animated] .sch-entry { animation: none !important; opacity: 1; }
 @keyframes entryIn { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
 /* top hairline */
 .sch-entry::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 1px; background: linear-gradient(90deg, transparent 4%, rgba(255,255,255,.28) 50%, transparent 96%); z-index: 3; pointer-events: none; }

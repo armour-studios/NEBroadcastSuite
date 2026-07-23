@@ -21,14 +21,26 @@
 -->
 <style>
   html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: transparent; }
-  #stage { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: #000; }
+  #stage { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    background: #000; transition: background .32s ease; }
   #stage.idle { background: transparent; }
+  /* Logo dip: a brand-tinted vignette instead of flat black — --brand-tint/--brand-accent are set
+     from full_state's brand color so this reads as an actual "sting" instead of a plain fade-to-black. */
+  #stage.logo-dip { background: radial-gradient(circle at 50% 50%, var(--brand-tint, rgba(124,58,237,.30)) 0%, #000 68%); }
   video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #000;
     opacity: 0; transition: opacity .26s ease; }
   video.show { opacity: 1; }
-  #logo { position: absolute; max-width: 42%; max-height: 42%; object-fit: contain; opacity: 0;
-    transition: opacity .26s ease; pointer-events: none; filter: drop-shadow(0 6px 26px rgba(0,0,0,.6)); }
-  #logo.show { opacity: 1; }
+  /* Logo card: scale + fade with a slight overshoot (a broadcast "sting" ease, not a plain cross-fade),
+     plus an accent underline that draws in beneath it. */
+  #logo-wrap { position: absolute; display: flex; flex-direction: column; align-items: center; gap: 16px;
+    opacity: 0; transform: scale(.82); pointer-events: none;
+    transition: opacity .32s cubic-bezier(.34,1.56,.64,1), transform .32s cubic-bezier(.34,1.56,.64,1); }
+  #logo-wrap.show { opacity: 1; transform: scale(1); }
+  #logo { max-width: 38vw; max-height: 30vh; object-fit: contain;
+    filter: drop-shadow(0 10px 34px rgba(0,0,0,.6)); }
+  #logo-bar { width: 0; height: 3px; border-radius: 2px; background: var(--brand-accent, #7C3AED);
+    box-shadow: 0 0 14px 1px var(--brand-accent, #7C3AED); transition: width .3s ease .1s; }
+  #logo-wrap.show #logo-bar { width: 110px; }
   /* Stinger transition video — covers the screen while the clip swaps underneath. */
   #stinger { object-fit: cover; z-index: 5; transition: opacity .1s ease; }
   #label { position: absolute; left: 28px; bottom: 24px; font-family: 'Rajdhani', system-ui, sans-serif;
@@ -42,9 +54,12 @@
     <video id="vid" playsinline></video>
     <video id="vid2" playsinline></video>
     <video id="stinger" playsinline></video>
-    <img id="logo" alt="">
+    <div id="logo-wrap"><img id="logo" alt=""><div id="logo-bar"></div></div>
     <div id="label"></div>
   </div>
+  <!-- Hidden preloader: buffers the NEXT playlist clip while the current one plays, so the advance
+       starts from a warm cache/decode instead of a cold fetch. Never shown or played. -->
+  <video id="preload" muted playsinline preload="auto" style="position:absolute;width:1px;height:1px;opacity:0;pointer-events:none;left:-9999px;"></video>
 
   <script>
     const WS = 'ws://' + (location.hostname || 'localhost') + ':3001';
@@ -59,8 +74,17 @@
       : (_QP.get('bus') === 'preview' ? 'preview' : 'program');
     const stage = document.getElementById('stage');
     const stinger = document.getElementById('stinger');
+    const logoWrap = document.getElementById('logo-wrap');
     const logo = document.getElementById('logo');
     const label = document.getElementById('label');
+    const preloadEl = document.getElementById('preload');
+    let _preloadedUrl = '';
+    // Buffer the next playlist clip in a hidden element so its eventual play() starts warm, not cold.
+    function preloadNext(url) {
+      if (!url || url === _preloadedUrl) return;
+      _preloadedUrl = url;
+      try { preloadEl.src = url; preloadEl.load(); } catch (e) {}
+    }
     // Two stacked <video> elements so a 'fade' transition can be a true crossfade — the incoming
     // clip dissolves directly over the outgoing one — instead of dipping through black between
     // them. `activeVideo` is whichever is currently on screen; `idleVideo` is the other one,
@@ -148,6 +172,24 @@
       }
     }
 
+    // Smoothly ramp a <video>'s audio volume to `to` over `ms`. A per-element generation id cancels
+    // an in-flight ramp when a newer one starts on the same element, so a fade-out and fade-under-the
+    // -stinger fade-in can't fight each other on the same tag.
+    function fadeVolume(v, to, ms) {
+      if (!v) return;
+      const gen = (v._fadeGen = (v._fadeGen || 0) + 1);
+      try { if (v.muted) v.muted = false; } catch (e) {}
+      const from = (typeof v.volume === 'number') ? v.volume : 1;
+      const start = performance.now();
+      const step = (now) => {
+        if (v._fadeGen !== gen) return;               // a newer fade took over this element
+        const t = ms > 0 ? Math.min(1, (now - start) / ms) : 1;
+        try { v.volume = Math.max(0, Math.min(1, from + (to - from) * t)); } catch (e) {}
+        if (t < 1) requestAnimationFrame(step);
+      };
+      requestAnimationFrame(step);
+    }
+
     async function play(url, name, loop, transition, logoUrl, trimIn, trimOut, stingerUrl) {
       if (!url) { stop(); return; }
       curIn = (typeof trimIn === 'number' && trimIn > 0) ? trimIn : 0;
@@ -172,7 +214,18 @@
       if (transition === 'stinger' && stingerUrl) {
         const tok = ++transToken;
         let swapped = false;
-        const doSwap = () => { if (!swapped && tok === transToken) { swapped = true; loadInto(activeVideo, url); } };
+        // Audio CROSSFADE under the stinger: fade the outgoing clip's audio OUT as the sting covers,
+        // then fade the incoming clip's audio IN after the mid-point swap — instead of a hard cut.
+        // (Producer feedback: "stinger audio fade out, fade in - crossfade".)
+        if (wasLive) fadeVolume(activeVideo, 0, 550);
+        const doSwap = () => {
+          if (!swapped && tok === transToken) {
+            swapped = true;
+            loadInto(activeVideo, url);
+            activeVideo.volume = 0;
+            fadeVolume(activeVideo, 1, 550);
+          }
+        };
         const onTime = () => { if (stinger.duration && stinger.currentTime >= stinger.duration * 0.5) doSwap(); };
         const cleanup = () => {
           stinger.removeEventListener('timeupdate', onTime);
@@ -219,16 +272,22 @@
         return;
       }
 
-      // Logo: dip the outgoing clip to black, flash a logo card, then ease the new clip up.
+      // Logo: dip to a brand-tinted vignette, sting the logo in (scale + accent underline), then
+      // ease the new clip up. #stage.logo-dip / --brand-tint / --brand-accent are set from the
+      // brand color cached off full_state (see handleBrand below) so this reads as an actual on-
+      // brand sting instead of a plain fade to black.
       const tok = ++transToken;
       activeVideo.classList.remove('show');
-      if (logoUrl) { logo.src = logoUrl; logo.classList.add('show'); }
-      await wait(270);
+      stage.classList.add('logo-dip');
+      if (logoUrl) { logo.src = logoUrl; logoWrap.classList.add('show'); }
+      await wait(340);
       if (tok !== transToken) return;            // a newer play() took over
       loadInto(activeVideo, url, true);           // load next, held at opacity 0
       await waitReady(activeVideo);
       if (tok !== transToken) return;
-      await wait(220); logo.classList.remove('show');
+      await wait(260);
+      logoWrap.classList.remove('show');
+      stage.classList.remove('logo-dip');
       activeVideo.classList.add('show');
     }
 
@@ -242,7 +301,8 @@
         v.load();
         v.classList.remove('show');
       });
-      logo.classList.remove('show');
+      logoWrap.classList.remove('show');
+      stage.classList.remove('logo-dip');
       label.classList.remove('show');
       // Delay idle (transparent background) until after the opacity fade completes — otherwise
       // the black stage disappears while the video is still fading, revealing OBS sources underneath.
@@ -262,16 +322,36 @@
     wireVideoEvents(activeVideo);
     wireVideoEvents(idleVideo);
 
-    // The server strips the heavy replay blob (base64 logos/thumbnails) from most broadcasts and
-    // only re-sends it on change — backfill from the last full payload so a light broadcast that
-    // omits `replay` doesn't get read as "stop".
+    // Brand-tinted logo-dip background + accent underline (see #stage.logo-dip / --brand-accent).
+    // Falls back to the app's own default accent purple when no brand kit/color is configured.
+    function hexToRgba(hex, alpha) {
+      const h = (hex || '').trim().replace('#', '');
+      if (!/^[0-9a-fA-F]{6}$/.test(h)) return null;
+      const r = parseInt(h.slice(0, 2), 16), g = parseInt(h.slice(2, 4), 16), b = parseInt(h.slice(4, 6), 16);
+      return `rgba(${r},${g},${b},${alpha})`;
+    }
+    function applyBrandColors(brand) {
+      const accent = (brand && (brand.accent || brand.color)) || '';
+      if (!accent) return;
+      stage.style.setProperty('--brand-accent', accent);
+      const tint = hexToRgba(accent, 0.32);
+      if (tint) stage.style.setProperty('--brand-tint', tint);
+    }
+
+    // The server strips heavy blobs (base64 logos/thumbnails) from most broadcasts and only re-sends
+    // them on change — backfill from the last full payload so a light broadcast that omits `replay`/
+    // `brand` doesn't get read as "stop" / "no brand configured".
     let _replayCache = null;
+    let _brandCache = null;
     function handle(m) {
-      if (m.type === 'replay_play') { const d = m.data || {}; if ((d.bus || 'program') === BUS) play(d.url, d.name, d.loop, d.transition, d.transitionLogo, d.trimIn, d.trimOut, d.stinger); }
+      if (m.type === 'replay_play') { const d = m.data || {}; if ((d.bus || 'program') === BUS) { play(d.url, d.name, d.loop, d.transition, d.transitionLogo, d.trimIn, d.trimOut, d.stinger); preloadNext(d.nextUrl); } }
+      else if (m.type === 'replay_preload') { const d = m.data || {}; if ((d.bus || 'program') === BUS) preloadNext(d.url); }
       else if (m.type === 'replay_stop') { const d = m.data || {}; if ((d.bus || 'program') === BUS) stop(); }
       else if (m.type === 'full_state') {
         if (m.data && m.data.replay !== undefined) _replayCache = m.data.replay;
         else if (m.data) m.data.replay = _replayCache;
+        if (m.data && m.data.brand !== undefined) _brandCache = m.data.brand;
+        applyBrandColors(_brandCache);
         const r = m.data && m.data.replay && m.data.replay[BUS];
         if (r && r.playing && r.url) play(r.url, r.name, r.loop, r.transition, '', r.trimIn, r.trimOut);
         else stop();

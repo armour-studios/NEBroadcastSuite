@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<!--
+  smash-team.html — Super Smash Bros. TEAM / crew-battle scoreboard (lower third).
+  Driven by full_state via scene-base.js (:3001 bridge), same as every other scene:
+    teams.blue/orange  → the two teams (name + logo) + accent colour
+    series.blue/orange → set score (games won) · bestOf → "Best of N"
+    smash.blue/orange.players[] → per-player stocks remaining; the bar shows the TEAM TOTAL (sum)
+    smash.startStocks  → starting stock count (per player) — used only as a fallback total
+  Team stocks are MANUAL (Smash Ultimate has no live feed) — driven from Match ▸ Teams ▸ Smash.
+  This is the crew/team format (aggregate team stocks). For 1v1 singles use smash.html.
+  Query params:  ?title=off hides the Best-of centre label
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <link rel="stylesheet" href="/fonts.css">
+  <style>
+    :root {
+      --a: #b81e2b;      /* team 1 accent (blue side)   */
+      --b: #1f6fd0;      /* team 2 accent (orange side) */
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      width: 1920px; height: 1080px; overflow: hidden; background: transparent;
+      font-family: 'Rajdhani', 'Inter', system-ui, sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* ── Stage: horizontal lower-third bar ── */
+    .sb {
+      position: absolute; top: 40px; left: 50%; transform: translateX(-50%);
+      display: grid; grid-template-columns: 1fr auto 1fr; align-items: stretch;
+      width: 1560px; height: 96px;
+      opacity: 0; transition: opacity .5s ease;
+      filter: drop-shadow(0 12px 30px rgba(0,0,0,.6));
+    }
+    .sb.show { opacity: 1; }
+
+    /* ── Team panel ── */
+    .p { position: relative; display: flex; align-items: stretch; overflow: hidden; }
+    .p--a { border-radius: 8px 0 0 8px; }
+    .p--b { border-radius: 0 8px 8px 0; flex-direction: row-reverse; }
+
+    /* team logo square at the OUTER edge */
+    .logo {
+      width: 96px; height: 96px; flex: 0 0 auto; object-fit: contain; padding: 8px;
+      background: color-mix(in srgb, var(--pc) 35%, #05070c);
+    }
+    .logo.is-hidden { display: none; }
+
+    /* stacked rows: name+score (accent) over stocks-total (dark) */
+    .id { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
+    .row {
+      display: flex; align-items: center; gap: 14px; height: 50%;
+      padding: 0 20px; min-width: 0;
+    }
+    .p--b .row { flex-direction: row-reverse; }
+
+    /* top row — team name + set score, on the accent colour */
+    .row-name { background: var(--pc); }
+    .name {
+      flex: 1 1 auto; min-width: 0; color: #fff; font-weight: 700; font-size: 27px;
+      letter-spacing: .01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      text-shadow: 0 1px 3px rgba(0,0,0,.45);
+    }
+    .p--a .name { text-align: right; }
+    .p--b .name { text-align: left; }
+    .score {
+      flex: 0 0 auto; min-width: 40px; text-align: center; color: #fff;
+      font-weight: 800; font-size: 32px; line-height: 1; text-shadow: 0 1px 4px rgba(0,0,0,.6);
+    }
+
+    /* bottom row — "Stocks" + team total, on a darkened shade of the accent */
+    .row-stock { background: color-mix(in srgb, var(--pc) 34%, #12101c); }
+    .stock-lbl {
+      flex: 1 1 auto; min-width: 0; color: rgba(255,255,255,.82);
+      font-weight: 700; font-size: 19px; letter-spacing: .12em; text-transform: uppercase;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .p--a .stock-lbl { text-align: right; }
+    .p--b .stock-lbl { text-align: left; }
+    .stock-num {
+      flex: 0 0 auto; min-width: 40px; text-align: center; color: #fff;
+      font-weight: 800; font-size: 27px; line-height: 1;
+    }
+
+    /* ── Centre pillar ── */
+    .mid {
+      display: flex; align-items: center; justify-content: center; gap: 16px;
+      background: rgba(6, 8, 14, .96); padding: 0 26px; min-width: 240px;
+      border-left: 1px solid rgba(255,255,255,.08); border-right: 1px solid rgba(255,255,255,.08);
+    }
+    .mid-logo { height: 56px; max-width: 66px; object-fit: contain; }
+    .mid-logo.is-hidden { display: none; }
+    .mid-bo {
+      color: #fff; font-weight: 800; font-size: 21px; letter-spacing: .1em; text-transform: uppercase;
+      white-space: nowrap; text-align: center;
+    }
+    .mid-bo.is-hidden { display: none; }
+  </style>
+</head>
+<body>
+  <div class="sb" id="sb">
+    <div class="p p--a" style="--pc: var(--a);">
+      <img class="logo is-hidden" id="logoA" alt="">
+      <div class="id">
+        <div class="row row-name"><span class="name" id="nameA">TEAM 1</span><span class="score" id="scoreA">0</span></div>
+        <div class="row row-stock"><span class="stock-lbl" id="lblA">Stocks</span><span class="stock-num" id="stockA">0</span></div>
+      </div>
+    </div>
+
+    <div class="mid">
+      <img class="mid-logo is-hidden" id="midLogo" alt="">
+      <div class="mid-bo" id="midBo">BEST OF 3</div>
+    </div>
+
+    <div class="p p--b" style="--pc: var(--b);">
+      <img class="logo is-hidden" id="logoB" alt="">
+      <div class="id">
+        <div class="row row-name"><span class="name" id="nameB">TEAM 2</span><span class="score" id="scoreB">0</span></div>
+        <div class="row row-stock"><span class="stock-lbl" id="lblB">Stocks</span><span class="stock-num" id="stockB">0</span></div>
+      </div>
+    </div>
+  </div>
+
+  <script src="/scene-base.js"></script>
+  <script>
+    const QP = new URLSearchParams(location.search);
+    const el = (id) => document.getElementById(id);
+    const str = (v) => (v == null ? '' : String(v)).trim();
+
+    // Team total stocks = sum of the crew's per-player stocks; fall back to a single side.stocks
+    // value (× nothing) if no players array is present yet.
+    function teamStocks(smashSide, startStocks) {
+      smashSide = smashSide || {};
+      if (Array.isArray(smashSide.players) && smashSide.players.length) {
+        return smashSide.players.reduce((a, n) => a + Math.max(0, Number(n) || 0), 0);
+      }
+      return Math.max(0, Number(smashSide.stocks) || 0);
+    }
+
+    function renderSide(suffix, team, smashSide, seriesScore, startStocks) {
+      team = team || {};
+      el('name' + suffix).textContent = str(team.name) || ('TEAM ' + (suffix === 'A' ? '1' : '2'));
+      el('score' + suffix).textContent = String(Number(seriesScore) || 0);
+      el('stock' + suffix).textContent = String(teamStocks(smashSide, startStocks));
+      const logo = str(team.logo);
+      const img = el('logo' + suffix);
+      if (logo) { img.src = logo; img.classList.remove('is-hidden'); }
+      else img.classList.add('is-hidden');
+    }
+
+    function render(data) {
+      data = data || {};
+      const teams = data.teams || {};
+      const series = data.series || {};
+      const smash = data.smash || { blue: {}, orange: {}, startStocks: 3 };
+
+      const cA = str(teams.blue && teams.blue.color) || '#b81e2b';
+      const cB = str(teams.orange && teams.orange.color) || '#1f6fd0';
+      document.documentElement.style.setProperty('--a', cA);
+      document.documentElement.style.setProperty('--b', cB);
+
+      renderSide('A', teams.blue, smash.blue, series.blue, smash.startStocks);
+      renderSide('B', teams.orange, smash.orange, series.orange, smash.startStocks);
+
+      // centre: brand logo + Best-of
+      const brand = data.brand || {};
+      const logo = str(brand.logo);
+      const midLogo = el('midLogo');
+      if (logo) { midLogo.src = logo; midLogo.classList.remove('is-hidden'); }
+      else midLogo.classList.add('is-hidden');
+
+      const bo = Number(data.bestOf) > 0 ? ('Best of ' + data.bestOf) : '';
+      const midBo = el('midBo');
+      midBo.textContent = bo;
+      midBo.classList.toggle('is-hidden', !bo || QP.get('title') === 'off');
+
+      el('sb').classList.add('show');
+    }
+
+    if (typeof SceneBase !== 'undefined') {
+      if (SceneBase.preview) {
+        render({
+          teams: { blue: { name: 'Pittsburgh Job Corps', color: '#b81e2b', logo: '' },
+                   orange: { name: 'Potomac Panthers', color: '#1f6fd0', logo: '' } },
+          series: { blue: 1, orange: 0 }, bestOf: 3,
+          smash: { startStocks: 3, blue: { players: [3, 3, 3, 3] }, orange: { players: [3, 3, 3, 3] } },
+          brand: { logo: '' }
+        });
+      } else {
+        SceneBase.connect((data) => { SceneBase.applySceneConfig('smash-team', data); render(data); });
+      }
+    }
+  </script>
+</body>
+</html>
