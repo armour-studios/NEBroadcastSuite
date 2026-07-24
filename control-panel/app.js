@@ -27606,6 +27606,14 @@ async function connect() {
       else if (op === 'stop') rdStop();
     } else if (msg.type === 'twitch_stream_state') {
       onTwitchStreamState(msg);
+    } else if (msg.type === 'client_log') {
+      // Main-process diagnostics (e.g. a state-serialization stack-overflow — see server.js's
+      // _logSerializeFailure) relayed into the renderer's own console so core.js's console
+      // capture picks it up automatically — otherwise a producer's bug report would never carry
+      // the one piece of information (the repeating stack frame) that actually explains it.
+      const d = msg.data || {};
+      const level = ['log', 'warn', 'error', 'info', 'debug'].includes(d.level) ? d.level : 'error';
+      console[level]('[main]', d.text || '');
     } else if (msg.type === 'director_update') {
       if (!currentState.director) currentState.director = {};
       Object.assign(currentState.director, msg.data);

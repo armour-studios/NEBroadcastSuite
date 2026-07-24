@@ -6419,11 +6419,18 @@ function startMyEventsAutoSync() {
 }
 
 // ─── Start.gg bracket ────────────────────────────────────────────────────────
+// Strip ALL whitespace, not just leading/trailing — a slug/URL never legitimately contains a space,
+// but a paste from a webpage/Discord/PDF selection can easily carry one in the MIDDLE (a wrapped
+// line, a stray character next to a link). A plain .trim() leaves that untouched, and the slug regexes
+// below stop matching right at it with no error — the paste just silently "doesn't work".
+function _stripStartggWhitespace(input) {
+  return (input || '').replace(/\s+/g, '');
+}
 function parseEventSlug(input) {
-  const s = (input || '').trim();
+  const s = _stripStartggWhitespace(input);
   if (!s) return '';
   // Accept a full start.gg URL or a bare slug
-  const m = s.match(/tournament\/[^/\s]+\/event\/[^/?#\s]+/i);
+  const m = s.match(/tournament\/[^/]+\/event\/[^/?#]+/i);
   return m ? m[0] : s;
 }
 
@@ -6431,14 +6438,14 @@ function parseEventSlug(input) {
 // a full event URL (.../tournament/x/event/y), a bare "tournament/x" slug, or a plain slug.
 // Returns { tournamentSlug, eventSlug } (eventSlug = full "tournament/x/event/y" path or '').
 function parseStartggInput(input) {
-  const s = (input || '').trim().replace(/^https?:\/\/(www\.)?start\.gg\//i, '');
+  const s = _stripStartggWhitespace(input).replace(/^https?:\/\/(www\.)?start\.gg\//i, '');
   if (!s) return { tournamentSlug: '', eventSlug: '' };
-  const ev = s.match(/tournament\/([^/\s?#]+)\/event\/([^/?#\s]+)/i);
+  const ev = s.match(/tournament\/([^/?#]+)\/event\/([^/?#]+)/i);
   if (ev) return { tournamentSlug: ev[1], eventSlug: `tournament/${ev[1]}/event/${ev[2]}` };
-  const t = s.match(/tournament\/([^/\s?#]+)/i);
+  const t = s.match(/tournament\/([^/?#]+)/i);
   if (t) return { tournamentSlug: t[1], eventSlug: '' };
   // Bare token — assume it's a tournament slug.
-  return { tournamentSlug: s.split(/[/?#\s]/)[0], eventSlug: '' };
+  return { tournamentSlug: s.split(/[/?#]/)[0], eventSlug: '' };
 }
 
 // Maintain the lowercased name→logo map from a list of Start.gg entrants so the
@@ -18222,6 +18229,11 @@ function handleControlMessage(msg, ws) {
             }
           }));
         } catch (e) {
+          // "Maximum call stack size exceeded" here means a runaway recursive function or a
+          // pathologically deep chain in the freshly-fetched bracket — unlike the broadcast/save
+          // paths (_flushFullState/_saveAppStateNow), nothing upstream of this catch logs it, so a
+          // producer just sees the raw error with no trace to debug from. Capture the stack now.
+          if (e && /call stack/i.test(e.message || '')) _logSerializeFailure(`load_event: ${e.message}`, e);
           state.bracket.lastError = e.message;
           broadcastFullState();
           ws.send(JSON.stringify({ type: 'event-result', data: { ok: false, message: e.message } }));
@@ -18256,6 +18268,9 @@ function handleControlMessage(msg, ws) {
             }));
           }
         } catch (e) {
+          // See the load_event catch above — capture the actual runaway-recursion stack now,
+          // instead of only relaying the bare "Maximum call stack size exceeded" text to the panel.
+          if (e && /call stack/i.test(e.message || '')) _logSerializeFailure(`load_startgg_url: ${e.message}`, e);
           state.startgg.lastError = e.message;
           broadcastFullState();
           ws.send(JSON.stringify({ type: 'event-result', data: { ok: false, message: e.message } }));
@@ -18291,6 +18306,9 @@ function handleControlMessage(msg, ws) {
             }
           }));
         } catch (e) {
+          // See the load_event catch above — capture the actual runaway-recursion stack now,
+          // instead of only relaying the bare "Maximum call stack size exceeded" text to the panel.
+          if (e && /call stack/i.test(e.message || '')) _logSerializeFailure(`activate_startgg_event: ${e.message}`, e);
           state.startgg.lastError = e.message;
           broadcastFullState();
           ws.send(JSON.stringify({ type: 'event-result', data: { ok: false, message: e.message } }));
@@ -18310,6 +18328,7 @@ function handleControlMessage(msg, ws) {
             data: { ok: true, message: `Imported ${r.teams} team(s), ${r.players} player(s) to your library (${r.teamsAdded} new).` }
           }));
         } catch (e) {
+          if (e && /call stack/i.test(e.message || '')) _logSerializeFailure(`import_startgg_teams: ${e.message}`, e);
           ws.send(JSON.stringify({ type: 'event-result', data: { ok: false, message: e.message } }));
         }
       })();
@@ -18839,14 +18858,35 @@ function mergeAtTop(savedArray, importedArray, isSameItem) {
 // (no script / didn't opt in) get the untouched payload, so nothing regresses.
 const _imgSent = new Set();
 function _imgHash(s) { let h = 5381; for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0; return (h >>> 0).toString(36) + '.' + s.length; }
+// A manual scan instead of one regex over the whole payload — the previous version matched
+// [A-Za-z0-9+/=]{1024,}" directly against each base64 run, and a full-resolution logo can run
+// 100k+ characters. That unbounded quantifier is exactly what threw "Maximum call stack size
+// exceeded" from INSIDE V8's own regex engine (crash.log showed `at String.replace`, not our code)
+// on two separate real broadcasts — neither one related to start.gg; one came from an OBS source
+// visibility change. indexOf() has no equivalent risk: base64 never contains an unescaped '"', so
+// the first quote after the "data:image/...;base64, prefix IS the payload's real end — no
+// backtracking, and no regex ever runs over the (huge) payload itself.
 function _vaultImages(str) {
-  return str.replace(/"data:image\/[a-z0-9.+-]+;base64,[A-Za-z0-9+/=]{1024,}"/g, (m) => {
-    const val = m.slice(1, -1);
+  const PREFIX_RE = /"data:image\/[a-z0-9.+-]+;base64,/gi;   // matches only the short prefix, never the payload
+  let out = '';
+  let lastIndex = 0;
+  let m;
+  while ((m = PREFIX_RE.exec(str))) {
+    const dataStart = m.index + m[0].length;
+    const endQuote = str.indexOf('"', dataStart);
+    if (endQuote === -1) { PREFIX_RE.lastIndex = dataStart; continue; }   // malformed/truncated — leave it, keep scanning
+    const b64 = str.slice(dataStart, endQuote);
+    if (b64.length < 1024) { PREFIX_RE.lastIndex = endQuote + 1; continue; }   // too small to bother vaulting
+    out += str.slice(lastIndex, m.index);
+    const val = m[0].slice(1) + b64;   // same string the old regex hashed: data:image/...;base64,XXXX (no quotes)
     const h = _imgHash(val);
-    if (_imgSent.has(h)) return '"@img:' + h + '"';
-    _imgSent.add(h);            // first sight → send whole so capable clients cache it
-    return m;
-  });
+    if (_imgSent.has(h)) out += '"@img:' + h + '"';
+    else { _imgSent.add(h); out += '"' + val + '"'; }
+    lastIndex = endQuote + 1;
+    PREFIX_RE.lastIndex = lastIndex;
+  }
+  out += str.slice(lastIndex);
+  return out;
 }
 // Diagnostic — only ever runs AFTER JSON.stringify has already thrown, so its O(n) cost is moot.
 // Locates the first circular reference or pathologically deep chain in `root` and returns a
@@ -18878,6 +18918,11 @@ function _diagnoseSerialization(root) {
 // The STACK TRACE is the prize: "Maximum call stack size exceeded" is a runaway *recursive function*
 // (JSON.stringify itself tolerates 500k-deep and reports circular refs with a different message), so
 // e.stack names the frame that's repeating — the actual bug. `where` is a secondary data-path signal.
+//
+// ALSO relayed to the renderer's own console buffer (client_log, below) — this runs in the Electron
+// MAIN process, a separate JS context the in-app bug reporter's console capture (core.js) can never
+// see on its own, so without this relay the exact diagnostic a producer's bug report most needs
+// (the repeating stack frame) would sit in crash.log forever, unattached to the report they file.
 function _logSerializeFailure(text, err) {
   console.error('[state] serialization failed:', text);
   const stack = (err && err.stack) ? String(err.stack).slice(0, 4000) : '(no stack)';
@@ -18886,6 +18931,7 @@ function _logSerializeFailure(text, err) {
     fs.mkdirSync(path.dirname(logPath), { recursive: true });
     fs.appendFileSync(logPath, `[${new Date().toISOString()}] state serialize FAILED: ${text}\n  STACK: ${stack}\n`);
   } catch (_) { /* logging must never throw */ }
+  try { broadcast(bridgeClients, { type: 'client_log', data: { level: 'error', text: `[state] serialization failed: ${text}\n${stack}` } }); } catch (_) {}
 }
 let _bcTimer = null, _bcPending = false, _lastLibSig = '', _lastMsgStr = '';
 function _flushFullState() {
@@ -18913,9 +18959,16 @@ function _flushFullState() {
   }
   if (realStr === _lastMsgStr) { feedDirectorBroadcast(); return; }
   _lastMsgStr = realStr;
-  // Build the vaulted variant once, only if some connected client can use it.
+  // Build the vaulted variant once, only if some connected client can use it. Belt-and-suspenders:
+  // vaulting is a bandwidth optimization, never something worth crashing the broadcast over — if it
+  // ever throws for any reason, log it and fall through to sending every client the untouched string.
   let vaultStr = null;
-  for (const ws of bridgeClients) { if (ws._imgvault) { vaultStr = _vaultImages(realStr); break; } }
+  for (const ws of bridgeClients) {
+    if (ws._imgvault) {
+      try { vaultStr = _vaultImages(realStr); } catch (e) { _logSerializeFailure(`_vaultImages: ${e.message}`, e); }
+      break;
+    }
+  }
   for (const ws of bridgeClients) {
     if (ws.readyState === WebSocket.OPEN) ws.send(ws._imgvault && vaultStr ? vaultStr : realStr);
   }
