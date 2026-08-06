@@ -89,13 +89,43 @@ const MAP_POOLS = {
     { id: 'shin-shibuya',      name: 'Shin-Shibuya',           type: 'Convergence', image: '/assets/maps/marvel-rivals/shin-shibuya.png' }
   ],
   // Rocket League — arenas are cosmetic (no real competitive veto); included so the app can
-  // show/select an arena on the board if a tournament chooses to.
+  // show/select an arena on the board if a tournament chooses to. type is the GAME MODE played
+  // on it: every arena ships as Soccar and the producer can switch any row to Hoops/Dropshot/
+  // Snow Day/Rumble/Heatseeker (see MODE_OPTIONS) — RL mode is chosen per game, not baked into
+  // the arena. Only arenas with real art in assets/rocket-league/maps are listed.
   'rocket-league': [
-    { id: 'dfh-stadium', name: 'DFH Stadium', image: '/assets/rocket-league/maps/dfh-stadium.jpg' },     { id: 'mannfield', name: 'Mannfield', image: '/assets/rocket-league/maps/mannfield.jpg' },
-    { id: 'champions-field', name: 'Champions Field', image: '/assets/rocket-league/maps/champions-field.jpg' }, { id: 'neo-tokyo', name: 'Neo Tokyo', image: '/assets/rocket-league/maps/neo-tokyo.jpg' },
-    { id: 'beckwith-park', name: 'Beckwith Park', image: '/assets/rocket-league/maps/beckwith-park.jpg' },  { id: 'urban-central', name: 'Urban Central', image: '/assets/rocket-league/maps/urban-central.jpg' },
-    { id: 'utopia-coliseum', name: 'Utopia Coliseum', image: '/assets/rocket-league/maps/utopia-coliseum.jpg' }, { id: 'salty-shores', name: 'Salty Shores', image: '/assets/rocket-league/maps/salty-shores.jpg' }
+    { id: 'dfh-stadium', name: 'DFH Stadium', type: 'Soccar', image: '/assets/rocket-league/maps/dfh-stadium.jpg' },
+    { id: 'mannfield', name: 'Mannfield', type: 'Soccar', image: '/assets/rocket-league/maps/mannfield.jpg' },
+    { id: 'champions-field', name: 'Champions Field', type: 'Soccar', image: '/assets/rocket-league/maps/champions-field.jpg' },
+    { id: 'neo-tokyo', name: 'Neo Tokyo', type: 'Soccar', image: '/assets/rocket-league/maps/neo-tokyo.jpg' },
+    { id: 'beckwith-park', name: 'Beckwith Park', type: 'Soccar', image: '/assets/rocket-league/maps/beckwith-park.jpg' },
+    { id: 'urban-central', name: 'Urban Central', type: 'Soccar', image: '/assets/rocket-league/maps/urban-central.jpg' },
+    { id: 'utopia-coliseum', name: 'Utopia Coliseum', type: 'Soccar', image: '/assets/rocket-league/maps/utopia-coliseum.jpg' },
+    { id: 'salty-shores', name: 'Salty Shores', type: 'Soccar', image: '/assets/rocket-league/maps/salty-shores.jpg' },
+    { id: 'aquadome', name: 'AquaDome', type: 'Soccar', image: '/assets/rocket-league/maps/aquadome.jpg' },
+    { id: 'wasteland', name: 'Wasteland', type: 'Soccar', image: '/assets/rocket-league/maps/wasteland.jpg' },
+    { id: 'farmstead', name: 'Farmstead', type: 'Soccar', image: '/assets/rocket-league/maps/farmstead.jpg' },
+    { id: 'forbidden-temple', name: 'Forbidden Temple', type: 'Soccar', image: '/assets/rocket-league/maps/forbidden-temple.jpg' },
+    { id: 'neon-fields', name: 'Neon Fields', type: 'Soccar', image: '/assets/rocket-league/maps/neon-fields.jpg' },
+    { id: 'starbase-arc', name: 'Starbase ARC', type: 'Soccar', image: '/assets/rocket-league/maps/starbase-arc.jpg' },
+    { id: 'deadeye-canyon', name: 'Deadeye Canyon', type: 'Soccar', image: '/assets/rocket-league/maps/deadeye-canyon.jpg' },
+    { id: 'drift-woods', name: 'Drift Woods', type: 'Soccar', image: '/assets/rocket-league/maps/drift-woods.jpg' },
+    { id: 'estadio-vida', name: 'Estadio Vida', type: 'Soccar', image: '/assets/rocket-league/maps/estadio-vida.jpg' },
+    { id: 'futura-garden', name: 'Futura Garden', type: 'Soccar', image: '/assets/rocket-league/maps/futura-garden.jpg' },
+    { id: 'parc-de-paris', name: 'Parc de Paris', type: 'Soccar', image: '/assets/rocket-league/maps/parc-de-paris.jpg' },
+    { id: 'rivals-arena', name: 'Rivals Arena', type: 'Soccar', image: '/assets/rocket-league/maps/rivals-arena.jpg' },
+    { id: 'sovereign-heights', name: 'Sovereign Heights', type: 'Soccar', image: '/assets/rocket-league/maps/sovereign-heights.jpg' },
+    { id: 'boostfield-mall', name: 'Boostfield Mall', type: 'Soccar', image: '/assets/rocket-league/maps/boostfield-mall.jpg' }
   ]
+};
+
+// Game modes selectable per map row (VETO_META.modes, broadcast to the control panel). A game
+// absent here just gets no mode dropdown. Icons for these live at /assets/<game>/modes/ and are
+// resolved by slug in the overlay + panel (mapscreen.html MODE_IMG).
+const MODE_OPTIONS = {
+  overwatch:       ['Control', 'Hybrid', 'Escort', 'Push', 'Flashpoint', 'Clash', 'Assault'],
+  'marvel-rivals': ['Domination', 'Convoy', 'Convergence'],
+  'rocket-league': ['Soccar', 'Hoops', 'Dropshot', 'Snow Day', 'Rumble', 'Heatseeker', 'Spike Rush']
 };
 
 // Per-game terminology so the UI/board read correctly per selection type.
@@ -103,9 +133,9 @@ const VETO_META = {
   csgo:            { kind: 'map',   banWord: 'Ban',    unit: 'map' },
   valorant:        { kind: 'map',   banWord: 'Ban',    unit: 'map' },
   rainbow6:        { kind: 'map',   banWord: 'Ban',    unit: 'map' },
-  overwatch:       { kind: 'map',   banWord: 'Ban',    unit: 'map', hasBans: true },
-  'marvel-rivals': { kind: 'map',   banWord: 'Ban',    unit: 'map' },
-  'rocket-league': { kind: 'arena', banWord: 'Ban',    unit: 'arena' },
+  overwatch:       { kind: 'map',   banWord: 'Ban',    unit: 'map', hasBans: true, modes: MODE_OPTIONS.overwatch },
+  'marvel-rivals': { kind: 'map',   banWord: 'Ban',    unit: 'map', modes: MODE_OPTIONS['marvel-rivals'] },
+  'rocket-league': { kind: 'arena', banWord: 'Ban',    unit: 'arena', modes: MODE_OPTIONS['rocket-league'] },
   smash:           { kind: 'stage', banWord: 'Strike', unit: 'stage' }
 };
 function getMeta(game) { return VETO_META[game] || { kind: 'map', banWord: 'Ban', unit: 'map' }; }
@@ -184,4 +214,4 @@ function resolveSide(teamIdx, teamStart) {
   return teamIdx === 0 ? (teamStart || 'a') : other;
 }
 
-module.exports = { MAP_POOLS, VETO_FORMATS, VETO_META, getMeta, mapPool, mergedMapPools, hasVeto, vetoGames, buildSequence, resolveSide };
+module.exports = { MAP_POOLS, MODE_OPTIONS, VETO_FORMATS, VETO_META, getMeta, mapPool, mergedMapPools, hasVeto, vetoGames, buildSequence, resolveSide };

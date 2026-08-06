@@ -25,23 +25,37 @@ let _active = 0;
 const _queue = [];
 
 // ── RL competitive rank → 6mans tier ─────────────────────────────────────────
+// The 6mans ladder is NOT a relabelling of the RL ladder — it starts at Diamond and only its bottom
+// five letters correspond to an RL rank at all:
+//   H  Diamond I – Diamond III        (the floor of 6mans)
+//   E  Champion I – Champion II
+//   D  Champion III – Grand Champion I
+//   C  Grand Champion II – Grand Champion III
+//   B  high Grand Champion III – SSL
+//   B+ / A / X / S   earned by ELO promotion out of B / B+ / A (X is also near-pro / RLCS-bubble,
+//                    S is top professional) — NO RL rank maps here.
+// So a tracker.gg standard rank can never justify B+ or above; the ceiling this table can hand out is
+// B, and anything above that has to come from a verified rl6mans ELO. Getting this wrong inflates a
+// seed badly — the previous table put Champion II on A, four tiers too high.
 const RL_TO_6MANS = {
-  'Supersonic Legend':  'S',
-  'Grand Champion III': 'S',
-  'Grand Champion II':  'X',
-  'Grand Champion I':   'X',
-  'Champion III':       'A',
-  'Champion II':        'A',
-  'Champion I':         'B+',
-  'Diamond III':        'B',
-  'Diamond II':         'C',
-  'Diamond I':          'C',
-  'Platinum III':       'D',
-  'Platinum II':        'D',
-  'Platinum I':         'D',
-  'Gold III':           'E',
-  'Gold II':            'E',
-  'Gold I':             'E',
+  'Supersonic Legend':  'B',
+  'Grand Champion III': 'C',   // "high GC3" is B, but tracker's tier alone can't tell high from low — stay conservative
+  'Grand Champion II':  'C',
+  'Grand Champion I':   'D',
+  'Champion III':       'D',
+  'Champion II':        'E',
+  'Champion I':         'E',
+  'Diamond III':        'H',
+  'Diamond II':         'H',
+  'Diamond I':          'H',
+  // Below Diamond is beneath the 6mans floor. Pin to H rather than dropping the player: H is the lowest
+  // bucket, so it can't inflate anyone, and it still sorts them under everyone with a real tier.
+  'Platinum III':       'H',
+  'Platinum II':        'H',
+  'Platinum I':         'H',
+  'Gold III':           'H',
+  'Gold II':            'H',
+  'Gold I':             'H',
   'Silver III':         'H',
   'Silver II':          'H',
   'Silver I':           'H',

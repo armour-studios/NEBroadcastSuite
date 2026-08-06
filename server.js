@@ -17,6 +17,7 @@ const { createStartGgClient } = require('./backend/integrations/startgg-client')
 const { createChallongeClient } = require('./backend/integrations/challonge-client');
 const { createBallchasingClient } = require('./backend/integrations/ballchasing-client');
 const { createBallchasingWatcher } = require('./backend/integrations/ballchasing-watcher');
+const { scanAndRenameReplays } = require('./backend/integrations/replay-renamer');
 const { getNxgenEvents, getNxgenEventLive, getNxgenLeaderboard } = require('./backend/nxgen');
 const { createDirectorEngine } = require('./backend/director');
 const cloud = require('./backend/cloud/cloud-client');   // Nameless cloud (dormant until BROADCAST_REMOTE_URL set)
@@ -29,7 +30,8 @@ const sheets = require('./backend/sheets');   // Google Sheets two-way integrati
 const { createOverlayEditor } = require('./backend/scenes/overlay-editor');
 const { createYouTubeChat } = require('./backend/youtube-chat');   // multichat source #2 (rides the Social YouTube OAuth)
 const { createKickChat } = require('./backend/kick-chat');         // multichat source #3 (public Kick Pusher ws)
-const { createDiscordChat } = require('./backend/discord-chat');   // multichat source #4 (Discord bot gateway)
+const { createDiscordChat, fetchChannelMessages: fetchDiscordMessages } = require('./backend/discord-chat');   // multichat source #4 (Discord bot gateway)
+const questionStore = require('./backend/questions');             // Q&A mailbag store (sources, dedupe, keyword capture)
 const vetoData = require('./backend/veto');
 const draftData = require('./backend/draft');
 const vmix = require('./backend/vmix');   // vMix HTTP control — the full alternative to OBS (docs/vmix-integration.md)
@@ -44,6 +46,12 @@ const twitchStats = require('./backend/twitch-stats');
 const rl6mans   = require('./backend/rl6mans');
 const playerDb   = require('./backend/player-db');
 
+// Measured 6mans tier→ELO ladder (see /api/rl6mans/tier-ladder). Held here so it survives across
+// requests and is restored from disk at startup. The fallback is only used to fill tiers the
+// leaderboards are too thin to measure (S and X list almost nobody).
+let _tierLadderCache = null;
+const SIXMANS_TIER_FALLBACK = [100, 250, 400, 550, 700, 850, 1050, 1300, 1600];   // H E D C B B+ A X S
+
 const { generateSceneCollection } = require('./obs/build-scene-collection');
 
 // OBS integration is optional — never let a missing/broken package crash the app.
@@ -55,29 +63,147 @@ try {
 }
 let obsClient = null;
 let obsPassword = '';
+// Video file of the OBS stinger transition the REPLAYS page last inspected (obs_transition_info).
+// Served by /api/obs/transition-stinger so the replay player can run the same sting between clips.
+let obsStingerFile = '';
+// Map a replay URL back to the file on disk. TWO shapes reach us and only one used to be handled:
+//   /api/clips/file?path=<abs>   — staging files and already-prepared transcodes
+//   /data/clips/<name>           — IMPORTED LIBRARY CLIPS, served straight off the static /data mount
+// Because only the first form was recognised, no library clip ever went through prepareForAir: a
+// clip the browser source can't decode (OBS records HEVC/MKV by default) was pushed to air raw and
+// played as a black frame, while the transition around it worked fine.
+function replayUrlToPath(rawUrl) {
+  const m = /^(.*?)\/api\/clips\/file\?(?:.*&)?path=([^&]+)/.exec(rawUrl);
+  if (m) { try { return { origin: m[1], file: decodeURIComponent(m[2]), kind: 'api' }; } catch (e) { return null; } }
+  // Exports (/data/clips/exports/…) are already normal encodes — the [^/?#]+ keeps them out.
+  const s = /^(.*?)\/data\/clips\/([^/?#]+)(?:[?#].*)?$/.exec(rawUrl);
+  if (s && clipSystem) {
+    try {
+      const f = path.join(clipSystem.manager.getClipsDir(), decodeURIComponent(s[2]));
+      return fs.existsSync(f) ? { origin: s[1], file: f, kind: 'static' } : null;
+    } catch (e) { return null; }
+  }
+  return null;
+}
+// Will this URL be transcoded before air? Staging pushes (the /api/clips/file route) always were —
+// that's the existing B-frame/High-Profile lag fix and it stays. Library clips served off /data are
+// only prepared when the browser genuinely can't decode them, so a normal instant replay still goes
+// to air immediately instead of waiting on ffmpeg.
+async function willAirPrep(resolved) {
+  if (!resolved || !clipSystem) return false;
+  if (resolved.kind === 'api') return true;
+  try { return await needsAirPrep(resolved.file); } catch (e) { return false; }
+}
+// Does this file need transcoding before a browser source can show it? Containers/codecs Chromium
+// decodes natively go to air untouched (an instant replay shouldn't wait on ffmpeg); anything else
+// — HEVC, MKV, MOV/ProRes, MPEG-2 … — is prepared first. Cached per file identity, so the probe
+// runs once per clip.
+const _airPrepNeed = new Map();
+async function needsAirPrep(file) {
+  let key;
+  try { const st = fs.statSync(file); key = file + ':' + st.mtimeMs + ':' + st.size; }
+  catch (e) { return false; }
+  if (_airPrepNeed.has(key)) return _airPrepNeed.get(key);
+  let need;
+  const ext = path.extname(file).toLowerCase();
+  if (!['.mp4', '.m4v', '.webm'].includes(ext)) {
+    need = true;
+  } else {
+    const info = await probeVideoInfo(file);
+    // Unknown codec (probe failed) → leave it alone rather than transcoding every clip on a machine
+    // without ffprobe; the common case is already-fine H.264.
+    need = info.codec ? !['h264', 'avc1', 'vp8', 'vp9', 'av1'].includes(info.codec) : false;
+  }
+  _airPrepNeed.set(key, need);
+  return need;
+}
+// Resolve the URL a browser source should actually play: the original when it's already decodable,
+// otherwise the cached baseline-H.264 transcode. Never rejects — air always gets something.
+async function airPlayableUrl(rawUrl) {
+  const r = replayUrlToPath(rawUrl);
+  if (!r || !clipSystem) return rawUrl;
+  try {
+    if (!(await willAirPrep(r))) return rawUrl;
+    const prepared = await clipSystem.prepareForAir(r.file);
+    if (!prepared || prepared === r.file) return rawUrl;
+    return `${r.origin}/api/clips/file?path=${encodeURIComponent(prepared)}`;
+  } catch (e) { return rawUrl; }
+}
+
+// Duration (ms) + frame rate of a video via ffprobe; zeroes if it can't be read. Best-effort and
+// time-boxed — used for stinger files, whose containers often omit the duration the browser would
+// otherwise rely on, and whose fps converts a frames-based OBS transition point into milliseconds.
+function probeVideoInfo(file) {
+  return new Promise((resolve) => {
+    let ff = 'ffmpeg';
+    try { ff = (clipSystem && clipSystem.encoder && clipSystem.encoder.ffmpegPath && clipSystem.encoder.ffmpegPath()) || 'ffmpeg'; } catch (e) {}
+    const ffprobe = (ff !== 'ffmpeg') ? ff.replace(/ffmpeg(\.exe)?$/i, 'ffprobe$1') : 'ffprobe';
+    let out = '', done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      // Lines: codec_name ("hevc"), avg_frame_rate ("30000/1001"), duration in seconds ("1.234").
+      const lines = out.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+      const rate = lines.find((l) => l.includes('/')) || '';
+      const [n, d] = rate.split('/').map(Number);
+      const fps = (n && d) ? (n / d) : 0;
+      const secs = lines.filter((l) => !l.includes('/')).map(parseFloat).find((v) => !isNaN(v) && v > 0) || 0;
+      const codec = lines.find((l) => !l.includes('/') && isNaN(parseFloat(l))) || '';
+      resolve({ durationMs: Math.round(secs * 1000), fps, codec: codec.toLowerCase() });
+    };
+    try {
+      const { spawn } = require('child_process');
+      const p = spawn(ffprobe, ['-v', 'error', '-select_streams', 'v:0',
+        '-show_entries', 'stream=codec_name,avg_frame_rate', '-show_entries', 'format=duration',
+        '-of', 'default=noprint_wrappers=1:nokey=1', file], { windowsHide: true });
+      p.stdout.on('data', (d) => { out += d.toString(); });
+      p.on('close', finish);
+      p.on('error', finish);
+      setTimeout(() => { try { p.kill(); } catch (e) {} finish(); }, 4000);
+    } catch (e) { finish(); }
+  });
+}
 
 // Twitch integration
 const { registerTwitchWebhooks } = require('./backend/integrations/twitch-webhooks');
 const { TwitchClient } = require('./backend/integrations/twitch-client');
 const { SocialPublisher } = require('./backend/social-publisher');
+const { SocialWeekly }    = require('./backend/social-weekly');
+const SocialNamingCore    = require('./control-panel/social-naming-core');
 const { PredictionManager } = require('./backend/integrations/twitch-predictions');
 const { WheelManager } = require('./backend/integrations/twitch-wheel');
 const { MiniGameManager } = require('./backend/integrations/twitch-minigames');
 const { ChatParser } = require('./backend/integrations/twitch-chat-parser');
+const { MarbleRaceManager } = require('./backend/integrations/marble-race');
+const { fetchTwitchChatters } = require('./backend/twitch-chatters');
 let twitchDataFile = '';
 let discordDataFile = '';
 let twitchClient = null;
 let socialPublisher = null;
+let socialWeekly = null;   // weekly Twitch-clips → YouTube automation (backend/social-weekly.js)
 let youtubeChat = null;   // YouTube Live Chat poller (multichat source #2)
 let kickChat = null;      // Kick Pusher chat (multichat source #3)
 let discordChat = null;   // Discord bot gateway chat (multichat source #4)
 let multichatDataFile = '';   // persisted config: kick channel, discord channel + bot token (encrypted)
+let questionsDataFile = '';   // persisted Q&A mailbag: queued questions + capture settings
 let predictionManager = null;
 let wheelManager = null;
 let _predPollTimer = null;
 let miniGameManager = null;
 let chatParser = null;
 let gameTimers = new Map(); // gameId -> timeout
+let marbleRaceManager = null;   // cross-platform (Twitch+Kick+YouTube) 3D obstacle-course chat game — see backend/integrations/marble-race.js
+// "!play" entry — no arguments, just adds the chatter as a participant. Module-level (not nested
+// inside the chat-connector setup) since TwitchChatManager is a top-level class (handleChatMessage
+// below) that needs to reach this too, alongside the Kick/YouTube onMessage closures — a single
+// shared implementation so all three platforms parse identically.
+function tryEnterMarbleRace(platform, userId, username, message) {
+  const mr = state.marbleRace;
+  if (!marbleRaceManager || !mr || mr.status !== 'entry') return;
+  if (String(message || '').trim().toLowerCase() !== '!play') return;
+  const added = marbleRaceManager.enterParticipant({ platform, userId, username, source: 'chat' });
+  if (added) broadcast(bridgeClients, { type: 'full_state', data: buildLiveState() });
+}
 
 const HTTP_PORT = 3000;
 const WS_PORT = 3001;
@@ -137,7 +263,8 @@ try {
 const OVERLAY_LAYOUTS = {
   'rocket-league': [
     { id: 'classic',   name: 'Classic HUD',   path: '/' },
-    { id: 'lexogrine', name: 'React HUD', path: '/rl-hud.html' }
+    { id: 'lexogrine', name: 'React HUD', path: '/rl-hud.html' },
+    { id: 'player',    name: 'Player HUD (in-game)', path: '/rl-player.html' }
   ],
   'csgo': [
     { id: 'cs2-hud', name: 'CS2 HUD', path: '/csgo.html' }
@@ -544,6 +671,9 @@ let state = {
     queueEnabled: false,   // dashboard toggle — poll stream queue from Settings API config
     lastPushedSetId: null,
     queueFetchedAt: null,
+    roundLabelAuto: false, // state.roundLabel came from a start.gg set (so retuneRoundLabel may re-bind
+                           // it to whoever is on air). False = a producer typed/preset it — hands off.
+    roundLabelSetId: null, // which set that auto label came from
     // New: selected tournament/event for pulling teams/stats (separate from savedTeams)
     selectedEvent: null,   // { tournamentSlug, eventSlug, name, tournamentName }
     eventTeams: [],        // [{ name, logo, players: [{id,name,platform,platformId,assignedCamera}], startggId }]
@@ -556,7 +686,11 @@ let state = {
   ballchasing: {
     connected: false,
     lastError: null,
-    autoUpload: { enabled: false, folder: '', activeLeagueId: '' }
+    autoUpload: { enabled: false, folder: '', activeLeagueId: '' },
+    // Manual batch tool (see replay-renamer.js) — NOT a watcher, no lifecycle to start/stop. A
+    // separate folder from autoUpload's since a producer may want renaming without ever enabling
+    // the continuous watcher.
+    replayRename: { enabled: false, folder: '', activeLeagueId: '' }
   },
   challonge: {
     enabled: false,
@@ -617,6 +751,9 @@ let state = {
     url: '',
     loadedAt: null
   },
+  // The OBS stinger transition the REPLAYS page is set to use, remembered across restarts so the
+  // player can fetch the same sting video for clip-to-clip advances without re-querying OBS first.
+  obsStinger: { name: '', path: '', point: 0, lengthMs: 0 },
   obs: {
     enabled: false,
     connected: false,
@@ -676,10 +813,36 @@ let state = {
   commercial: { active: false, returnScene: '' },
   // Featured chat message lower third (overlay/chat-highlight.html) — click a message
   // in the panel's multichat feed to put it on stream. Runtime-only, tiny live-tier key.
-  chatHighlight: { visible: false, platform: 'twitch', user: '', color: '', text: '', ts: 0 },
+  chatHighlight: { visible: false, platform: 'twitch', user: '', color: '', text: '', kicker: '', ts: 0 },
   // Multichat sources beyond Twitch: Kick (public, just a channel slug) + Discord (bot
   // token + channel). Persisted to multichat-data.json; the token is never in full_state.
   multichat: { kickChannel: '', discordChannelId: '', discordBotToken: '' },
+  // Q&A mailbag — questions pulled from a Discord channel, captured by keyword out of any
+  // chat source, grabbed off a chat row, or typed in with whichever social they came from.
+  // Persisted to questions-data.json; library tier (panel-only, never rides live broadcasts).
+  questions: {
+    list: [],   // see backend/questions.js for the shape
+    settings: {
+      discordChannelId: '',   // dedicated #questions channel (separate from the multichat one)
+      keyword: '!ask',        // prefix that promotes a chat message to a question
+      keywordEnabled: true,
+      duration: 30            // seconds a question stays on air (0 = until cleared)
+    }
+  },
+  // Cross-platform (Twitch+Kick+YouTube) chat game — every viewer's marble races a 3D obstacle
+  // course. A TOP-LEVEL sibling of `twitch` below, not nested inside it, since it's explicitly not
+  // Twitch-specific. Owned/mutated by marbleRaceManager (backend/integrations/marble-race.js).
+  marbleRace: {
+    status: 'idle',            // idle | entry | locked | finished
+    entryEndsAt: null,         // epoch ms — overlays compute their own local countdown, no server ticks
+    autoEnterViewers: false,   // pull the live Twitch chatters list at lock time (Twitch-only — Kick/YouTube have no such API)
+    customViewers: [],         // producer-typed extra names, always entered regardless of platform
+    participants: [],          // [{platform, userId, username, source: 'chat'|'auto'|'custom'}]
+    droppedCount: 0,           // how many entrants were randomly dropped for exceeding the participant cap (never silent)
+    race: null,                // { keyframes, winner, durationMs } — set once, on lock
+    result: null,              // { winnerParticipant } — set once, after the race finishes
+    history: []                // capped ring buffer of recent rounds
+  },
   bracket: {
     visible: false,
     eventSlug: '',
@@ -1362,6 +1525,27 @@ function loadMultichatData() {
   state.multichat.kickChannel = saved.kickChannel || '';
   state.multichat.discordChannelId = saved.discordChannelId || '';
   state.multichat.discordBotToken = saved.discordBotToken ? decryptSecret(saved.discordBotToken) : '';
+}
+
+// Q&A mailbag. Kept in its own file (not state.json) because it churns during a show —
+// every incoming question would otherwise rewrite the whole app state.
+function saveQuestionsData(sync = false) {
+  if (!state.questions || !questionsDataFile) return;
+  try { safeWriteJson(questionsDataFile, state.questions, sync); }
+  catch (err) { console.error('[Questions] save failed:', err.message); }
+}
+function loadQuestionsData() {
+  if (!questionsDataFile) return;
+  const saved = safeReadJson(questionsDataFile, null);
+  if (!saved) return;
+  if (Array.isArray(saved.list)) state.questions.list = saved.list.filter(q => q && q.id && q.text);
+  if (saved.settings) state.questions.settings = { ...state.questions.settings, ...saved.settings };
+}
+// Every mutation goes through here: version bump (so librarySig re-sends the queue), save, push.
+function questionsChanged() {
+  questionsVer++;
+  saveQuestionsData();
+  broadcastFullState();
 }
 
 function saveTwitchData(sync = false) {
@@ -3055,6 +3239,16 @@ function loadState() {
       if (typeof saved.obsPassword === 'string') {
         obsPassword = decryptSecret(saved.obsPassword);
       }
+      // The OBS stinger the REPLAYS page uses between clips — restored so its video is servable
+      // (and its transition point known) from the moment the app starts, without OBS being asked.
+      if (saved.obsStinger && typeof saved.obsStinger === 'object') {
+        state.obsStinger = {
+          name: String(saved.obsStinger.name || ''),
+          path: String(saved.obsStinger.path || ''),
+          point: Number(saved.obsStinger.point) || 0,
+          lengthMs: Number(saved.obsStinger.lengthMs) || 0
+        };
+      }
       if (saved.vmix && typeof saved.vmix === 'object') {
         state.vmix.enabled = !!saved.vmix.enabled;
         if (typeof saved.vmix.host === 'string' && saved.vmix.host.trim()) state.vmix.host = saved.vmix.host.trim();
@@ -3085,6 +3279,15 @@ function loadState() {
           matrix: saved.bracket.matrix || null,
           lastError: null
         };
+        // Self-heal saves made before the NXGEN importer stopped appending: NXGEN and Challonge
+        // are single-phase sources, so any OTHER phase in the list is an orphan from a previously
+        // imported event and would render as a stray phase chip on bracket.html.
+        const soleId = state.bracket.source === 'nxgen' ? 'nxgen-main'
+                     : state.bracket.source === 'challonge' ? 'challonge-main' : '';
+        if (soleId && state.bracket.phases.length > 1 && state.bracket.phases.some((p) => p && p.id === soleId)) {
+          state.bracket.phases = state.bracket.phases.filter((p) => p && p.id === soleId);
+          state.bracket.activePhaseId = soleId;
+        }
       }
       if (saved.upcoming && typeof saved.upcoming === 'object') {
         state.upcoming = { ...state.upcoming, ...saved.upcoming, visible: false, matches: Array.isArray(saved.upcoming.matches) ? saved.upcoming.matches : [] };
@@ -3326,6 +3529,7 @@ function _saveAppStateNow(sync = false) {
         commercialAutoReturn: state.obs.commercialAutoReturn,
         scenes: state.obs.scenes
       },
+      obsStinger: state.obsStinger,
       obsPassword: encryptSecret(obsPassword),
       vmix: { enabled: state.vmix.enabled, host: state.vmix.host, port: state.vmix.port },
       switcher: { target: state.switcher.target },
@@ -4041,6 +4245,8 @@ const BROADCAST_TIERS = {
   // heavy libraries → libraryData()
   bracket: 'library', replay: 'library', playerProfiles: 'library',
   leagues: 'library', clips: 'library', brand: 'library', eventOps: 'library',
+  // Q&A queue: panel-only and it churns while chat is busy — keep it off every live broadcast.
+  questions: 'library',
   // server-only (overlays get the derived sceneConfig instead)
   scenePresets: 'local',
   // live production/scoreboard state (from the state literal)
@@ -4180,6 +4386,7 @@ let playerProfilesVer = 0;
 let leaguesVer = 0;
 let clipsVer = 0;
 let eventOpsVer = 0;   // bumped on Event Ops roster/seed mutations (library-tier re-send)
+let questionsVer = 0;  // bumped on every Q&A queue mutation (library-tier re-send)
 function upsertPlayerProfile(gamerTag, patch) {
   const key = (gamerTag || '').trim().toLowerCase();
   if (!key || !patch) return;
@@ -4238,7 +4445,9 @@ function libraryData() {
     crew: state.crew || [],   // unified crew profiles (hosts/guests/casters/observers)
     leagues: state.leagues || [],   // league rosters/standings (base64 team logos) — control panel only
     clips: state.clips || null,     // clip/playlist library metadata — control panel only (live pushes go via clips_update)
-    eventOps: state.eventOps || { rows: [], seeds: [] }   // Event Ops CSV roster + true seeds — control panel only
+    eventOps: state.eventOps || { rows: [], seeds: [] },   // Event Ops CSV roster + true seeds — control panel only
+    questions: state.questions || { list: [], settings: {} },   // Q&A mailbag — control panel only
+    questionSources: questionStore.SOURCES   // source keys/labels/dots, so the panel picker never drifts from the store
   };
 }
 // Static config that never changes after startup → sent on connect only.
@@ -4271,7 +4480,7 @@ function librarySig() {
   const extra = '|ab:' + (state.activeBrandKitId || '') + '|bv:' + (state.banner.visible ? 1 : 0) + '|bi:' + bn
     + '|brk:' + lite(state.bracket) + '|rpl:' + lite(state.replay) + '|crew:' + (state.crew || []).length
     + '|pp:' + playerProfilesVer + '|bk:' + brandKitsVer + '|st:' + savedTeamsVer
-    + '|lgv:' + leaguesVer + '|clv:' + clipsVer + '|eov:' + eventOpsVer
+    + '|lgv:' + leaguesVer + '|clv:' + clipsVer + '|eov:' + eventOpsVer + '|qv:' + questionsVer
     // Global accent fallback lives in library brand now (stripped from live) — re-send on change.
     + '|gac:' + ((state.brand && state.brand.color) || '') + ':' + ((state.brand && state.brand.accent) || '')
     + '|sp:' + (sp.bgImageUrl ? sp.bgImageUrl.length : 0) + ':' + (sp.presentedByEnabled ? 1 : 0) + ':' + (sp.bgStyle || '');
@@ -4726,20 +4935,32 @@ function bcApplyMvpCounts(lg) {
   });
 }
 
-// Upload a batch of .replay files into a league's ballchasing group. Shared by the manual-upload WS
-// handler and the auto-upload folder watcher. Returns a {ok,dup,fail} tally; records each replay id
-// into lg.ballchasing.pendingReplays (a 409 = already uploaded still yields the existing id).
-async function bcUploadReplays(lg, paths) {
+// Upload a batch of .replay files into a league's ballchasing group, one result per input path.
+// Shared by the manual-upload WS handler, the auto-upload folder watcher, and the replay-rename
+// batch tool. Records each replay id into lg.ballchasing.pendingReplays (a 409 = already uploaded
+// still yields the existing id).
+async function bcUploadReplaysDetailed(lg, paths) {
   const client = createBallchasingClient(ballchasingApiKey);
-  let ok = 0, dup = 0, fail = 0;
+  const results = [];
   for (const fp of paths) {
     try {
       const res = await client.uploadReplay(fp, lg.ballchasing.groupId);
       const rid = res && res.data && res.data.id;
       if (rid && !lg.ballchasing.pendingReplays.includes(rid)) lg.ballchasing.pendingReplays.push(rid);
-      if (res && res.status === 409) dup++; else ok++;
-    } catch (e) { fail++; console.warn('[Ballchasing] upload', fp, e.message); }
+      results.push({ path: fp, ok: true, dup: res && res.status === 409, replayId: rid || null });
+    } catch (e) {
+      console.warn('[Ballchasing] upload', fp, e.message);
+      results.push({ path: fp, ok: false, dup: false, error: e.message });
+    }
   }
+  return results;
+}
+// Thin {ok,dup,fail} tally wrapper over bcUploadReplaysDetailed — kept for the two existing call
+// sites (_bcAutoUploadOne, the ballchasing_upload_replays WS case) so neither has to change.
+async function bcUploadReplays(lg, paths) {
+  const detailed = await bcUploadReplaysDetailed(lg, paths);
+  let ok = 0, dup = 0, fail = 0;
+  detailed.forEach((r) => { if (!r.ok) fail++; else if (r.dup) dup++; else ok++; });
   return { ok, dup, fail };
 }
 
@@ -4748,6 +4969,9 @@ async function bcUploadReplays(lg, paths) {
 // state.ballchasing.autoUpload. Each newly-appeared .replay is uploaded into the CURRENTLY-active
 // league's group (state.ballchasing.autoUpload.activeLeagueId).
 let _bcWatcher = null;
+// Rename-history batch tool's match window — a replay file's mtime must fall within this of a
+// recorded game's ended_at/started_at to be matched. Not producer-tunable in v1.
+const REPLAY_RENAME_TOLERANCE_MS = 10 * 60 * 1000;
 async function _bcAutoUploadOne(absPath) {
   // Every early return here used to resolve silently — the watcher's retry path only fires on a
   // REJECTED promise (see ballchasing-watcher.js's settleThenUpload), so "no key yet" / "no active
@@ -5039,11 +5263,15 @@ async function syncStartGgSet(setId) {
   // so it tracks the teams whenever a set is pushed onto the overlay (auto-follow or manual).
   if (set.fullRoundText) {
     state.roundLabel = String(set.fullRoundText).toUpperCase();
+    state.startgg.roundLabelAuto = true;
+    state.startgg.roundLabelSetId = String(setId);
   } else if (isNewSet) {
     // Advancing to a DIFFERENT set that start.gg gives no round text for → clear the label. Don't
     // inherit the PREVIOUS match's round, which showed e.g. "QUARTERFINALS" while the semifinal
     // teams were already on screen. (A same-set re-push keeps the current label, incl. a manual one.)
     state.roundLabel = '';
+    state.startgg.roundLabelAuto = true;
+    state.startgg.roundLabelSetId = String(setId);
   }
 
   // Auto-apply logos/rosters — the activated event's REAL rosters (eventTeams) first, then
@@ -5371,9 +5599,11 @@ async function fetchStreamQueue(tournamentSlug) {
           sets {
             id
             fullRoundText
+            round
             state
             winnerId
             displayScore
+            phaseGroup { id phase { id phaseOrder } }
             slots {
               entrant { id name team { images { url type } } }
               standing { stats { score { value } } }
@@ -5385,13 +5615,72 @@ async function fetchStreamQueue(tournamentSlug) {
   const res = await client.request(query, { slug: `tournament/${slug}` });
   const sq = res?.tournament?.streamQueue || [];
 
-  // Double-elim play order: Losers Finals must happen before Grand Finals.
-  // start.gg sometimes returns Grand Finals first in the stream queue even when
-  // Losers Finals hasn't been played, so we enforce the correct sequence here.
-  const _deRoundKey = (r) => {
-    const t = (r || '').toLowerCase();
-    if (/grand\s*(final|finals)/.test(t)) return 2;
-    if (/losers?\s*(final|finals)/.test(t) && !/semi/.test(t)) return 1;
+  // start.gg returns a stream queue in bracket-GENERATION order (all winners rounds, then the
+  // named ones, then losers, then grand finals), which reads as scrambled to a producer — e.g.
+  // WR1, WQF, WF, WR2, WR3, WSF, LF, GF. Re-order it into double-elim PLAY order.
+  //
+  // Anchor on start.gg's `round` int (winners 1..N, losers -1..-M, grand finals N+1/N+2), because
+  // fullRoundText alone can't tell you where "Winners Quarter-Final" sits without knowing N.
+  // Losers round L is played right after winners round floor(L/2)+1, which reproduces the real
+  // sequence: W1 · L1 · W2 · L2 · L3 · W3 · L4 · L5 · WF · LF · GF.
+  const _phaseRank = (set) => {
+    const phase = set?.phaseGroup?.phase?.phaseOrder;
+    return Number.isFinite(phase) ? phase : 0;
+  };
+  // Grand Final (and its reset) always CLOSE a bracket — nothing in the phase plays after them,
+  // Losers Final least of all. Treat that as a hard rank rather than something derived from the
+  // round int, so a queue with an odd/pruned round numbering can never float GF above LF.
+  const _isGrand = (set) => /grand\s*final/i.test(String(set?.fullRoundText || ''));
+  // Per-phase anchors: the deepest WINNERS round and the deepest LOSERS round on the queue.
+  // start.gg doesn't always number losers rounds as exactly 2N-2 (partial first rounds and pruned
+  // empty rounds shift it), so a fixed floor(L/2)+1 can land Losers Final in the wrong wave.
+  // Normalising against the deepest losers round pins LF to the winners-final wave, where it plays.
+  const _anchors = new Map();
+  sq.flatMap((q) => q?.sets || []).forEach((set) => {
+    const r = Number(set?.round);
+    if (!Number.isFinite(r) || r === 0 || _isGrand(set)) return;
+    const p = _phaseRank(set);
+    const a = _anchors.get(p) || { wMax: 0, lMax: 0 };
+    if (r > 0) a.wMax = Math.max(a.wMax, r); else a.lMax = Math.max(a.lMax, Math.abs(r));
+    _anchors.set(p, a);
+  });
+  const _playOrderKey = (set) => {
+    const phaseRank = _phaseRank(set);
+    const grand = _isGrand(set) ? 1 : 0;   // 0 = plays inside the bracket, 1 = closes it
+    const r = Number(set?.round);
+    let wave;      // which winners-round "wave" this set plays in
+    let side;      // 0 = winners/finals (plays first in the wave), 1 = losers
+    let within;    // tiebreak inside a wave
+    if (grand) {
+      // GF then GF reset — the round int orders them when present.
+      wave = 0; side = 0;
+      within = Number.isFinite(r) ? r : (/reset/i.test(String(set?.fullRoundText || '')) ? 1 : 0);
+    } else if (Number.isFinite(r) && r !== 0) {
+      if (r > 0) { wave = r; side = 0; within = 0; }
+      else {
+        const a = _anchors.get(phaseRank) || { wMax: 0, lMax: 0 };
+        const l = Math.abs(r);
+        wave = a.lMax ? (Math.floor(l / 2) - Math.floor(a.lMax / 2) + a.wMax) : (Math.floor(l / 2) + 1);
+        side = 1; within = l;
+      }
+    } else {
+      // No round int (manual/partial data) — fall back to the round TEXT. Numbered rounds keep
+      // their number; the named end-of-bracket rounds sort after every numbered one, in the
+      // order quarter → semi → final, with each losers round trailing its winners counterpart.
+      const t = String(set?.fullRoundText || '').toLowerCase();
+      const losers = /^l|losers?/.test(t);
+      const num = (t.match(/round\s*(\d+)/) || [])[1];
+      if (num) { wave = Number(num); side = losers ? 1 : 0; within = Number(num); }
+      else if (/quarter/.test(t)) { wave = 9000; side = losers ? 1 : 0; within = 0; }
+      else if (/semi/.test(t)) { wave = 9001; side = losers ? 1 : 0; within = 0; }
+      else if (/final/.test(t)) { wave = 9002; side = losers ? 1 : 0; within = 0; }
+      else { wave = 9500; side = losers ? 1 : 0; within = 0; }
+    }
+    return [phaseRank, grand, wave, side, within];
+  };
+  const _byPlayOrder = (a, b) => {
+    const ka = _playOrderKey(a); const kb = _playOrderKey(b);
+    for (let i = 0; i < ka.length; i++) { if (ka[i] !== kb[i]) return ka[i] - kb[i]; }
     return 0;
   };
 
@@ -5403,10 +5692,11 @@ async function fetchStreamQueue(tournamentSlug) {
     const sets = q?.sets || [];
     // Capture any team logos start.gg returns directly on the queue entrants.
     indexEntrantLogos(sets.flatMap((set) => (set.slots || []).map((s) => s?.entrant).filter(Boolean)));
-    // Sort within this stream's queue: Losers Finals before Grand Finals;
-    // everything else stays in start.gg's original order (stable sort).
-    const sorted = sets.slice().sort((a, b) => _deRoundKey(a.fullRoundText) - _deRoundKey(b.fullRoundText));
-    sorted.forEach((set, idx) => {
+    // "On stream now" is the HEAD of start.gg's raw queue — capture it before re-ordering, so the
+    // display sort below can never change which set auto-follow pushes on air.
+    const liveSetId = sets.length ? String(sets[0].id) : null;
+    const sorted = sets.slice().sort(_byPlayOrder);
+    sorted.forEach((set) => {
       // Keep slot POSITIONS (slot 0 → A, slot 1 → B) so a not-yet-resolved opponent shows TBD on the
       // correct side instead of the known team shifting across. (Matches syncStartggSet above.)
       const setSlots = set.slots || [];
@@ -5428,7 +5718,7 @@ async function fetchStreamQueue(tournamentSlug) {
         winnerId: set.winnerId != null ? set.winnerId : null,
         displayScore: set.displayScore || null,
         slots: set.slots,
-        live: idx === 0                   // first in a stream's queue = currently on stream
+        live: liveSetId != null && String(set.id) === liveSetId   // head of the raw queue = currently on stream
       });
     });
   });
@@ -6017,6 +6307,9 @@ async function refreshChallongeLive() {
         }
       }
     }
+    // Re-bind an auto round label to whoever is on air now (or clear a stale one from a previous
+    // event/platform). No-op for a hand-typed label.
+    retuneRoundLabel();
     // Refresh bracket scores
     const bd = buildChalongeBracket(tournament, participants, matches);
     const existingPhase = state.bracket.phases.find((p) => p.id === 'challonge-main');
@@ -6178,34 +6471,68 @@ async function syncAllLinkedChallongeTournaments() {
 
 // ─── NXGEN integration ────────────────────────────────────────────────────────
 
-function buildNxgenQueue(participants, matches) {
+// NXGEN puts the participant INLINE on each match — match.participant1 is { id, name }, not the
+// id it was originally read as, so every imported set resolved to TBD/TBD (empty bracket, no
+// teams for the graphics). Accept both shapes, and fall back to the participants list for a logo.
+function nxgenPartMap(participants) {
   const pm = {};
-  participants.forEach(p => { pm[p.id] = p; });
+  (participants || []).forEach(p => { if (p && p.id) pm[p.id] = p; });
+  return pm;
+}
+function nxgenSide(ref, pm) {
+  if (!ref) return { id: null, name: '', logo: null };
+  const isObj = typeof ref === 'object';
+  const id = isObj ? (ref.id || null) : ref;
+  const full = (id && pm[id]) || {};
+  const name = (isObj ? ref.name : '') || full.name || '';
+  // NXGEN participants usually carry no logoUrl at all — fall back to the saved team library so
+  // queue rows, the bracket and the pushed graphics still get a crest.
+  return { id, name, logo: (isObj && ref.logoUrl) || full.logoUrl || logoForTeamName(name) || null };
+}
+const NXGEN_LIVE_STATUSES = ['in-progress', 'in_progress', 'live', 'active', 'ongoing'];
+
+function buildNxgenQueue(participants, matches) {
+  const pm = nxgenPartMap(participants);
   return (matches || [])
     .filter(m => m.status !== 'completed')
     .map(m => {
-      const p1 = pm[m.participant1] || {};
-      const p2 = pm[m.participant2] || {};
+      const p1 = nxgenSide(m.participant1, pm);
+      const p2 = nxgenSide(m.participant2, pm);
       return {
         matchId: m._id,
         round: m.round,
         matchNumber: m.matchNumber,
         teamA: p1.name || 'TBD',
         teamB: p2.name || 'TBD',
-        logoA: p1.logoUrl || null,
-        logoB: p2.logoUrl || null,
+        logoA: p1.logo,
+        logoB: p2.logo,
         scoreA: m.scores ? (m.scores.participant1 ?? null) : null,
         scoreB: m.scores ? (m.scores.participant2 ?? null) : null,
         status: m.status,
-        live: m.status === 'in-progress',
+        live: NXGEN_LIVE_STATUSES.includes(String(m.status || '').toLowerCase()),
         winnerId: m.winnerId || null
       };
     });
 }
 
+// NXGEN gives a flat round NUMBER with no stage text and no winners/losers side. For a clean
+// single-elim halving ladder (…16, 8, 4, 2, 1 matches) the match count names the stage exactly;
+// anything else (double elim, an in-progress/partial ladder) stays "Round N" rather than guessing
+// a stage — a wrong "SEMIFINALS" column on air is worse than an honest round number.
+function nxgenRoundNames(counts, isDouble) {
+  const clean = !isDouble && counts.length > 0 && counts[counts.length - 1] === 1 &&
+    counts.every((c, i) => i === 0 || c === Math.ceil(counts[i - 1] / 2));
+  return counts.map((c, i) => {
+    if (!clean) return 'Round ' + (i + 1);
+    if (c === 1) return 'Final';
+    if (c === 2) return 'Semifinals';
+    if (c === 4) return 'Quarterfinals';
+    return 'Round of ' + (c * 2);
+  });
+}
+
 function buildNxgenBracketData(eventFormat, participants, matches) {
-  const pm = {};
-  participants.forEach(p => { pm[p.id] = p; });
+  const pm = nxgenPartMap(participants);
 
   const byRound = {};
   (matches || []).forEach(m => {
@@ -6213,33 +6540,41 @@ function buildNxgenBracketData(eventFormat, participants, matches) {
     byRound[m.round].push(m);
   });
 
-  const winners = Object.keys(byRound)
-    .map(Number).sort((a, b) => a - b)
-    .map(r => byRound[r].sort((a, b) => (a.matchNumber || 0) - (b.matchNumber || 0)).map(m => {
-      const p1 = pm[m.participant1] || {};
-      const p2 = pm[m.participant2] || {};
+  // The bracket overlay/panel expect rounds as { name, sets: [{ a:{name,score,winner}, b:{…} }] }
+  // (same shape start.gg and Challonge import into) — anything else renders as an empty bracket.
+  const isDouble = (eventFormat || '').toLowerCase().includes('double');
+  const roundKeys = Object.keys(byRound).map(Number).sort((a, b) => a - b);
+  const roundsSorted = roundKeys.map(r => byRound[r].slice().sort((a, b) => (a.matchNumber || 0) - (b.matchNumber || 0)));
+  const names = nxgenRoundNames(roundsSorted.map(ms => ms.length), isDouble);
+  const winners = roundsSorted.map((ms, idx) => ({
+    name: names[idx],
+    round: roundKeys[idx],
+    sets: ms.map(m => {
+      const p1 = nxgenSide(m.participant1, pm);
+      const p2 = nxgenSide(m.participant2, pm);
+      const sc = m.scores || {};
       return {
         id: m._id,
-        teamA: p1.name || 'TBD',
-        teamB: p2.name || 'TBD',
-        logoA: p1.logoUrl || null,
-        logoB: p2.logoUrl || null,
-        scoreA: m.scores ? (m.scores.participant1 ?? null) : null,
-        scoreB: m.scores ? (m.scores.participant2 ?? null) : null,
-        winner: m.winnerId ? (m.winnerId === m.participant1 ? 'teamA' : 'teamB') : null,
+        a: { name: p1.name || 'TBD', score: sc.participant1 ?? 0, winner: !!m.winnerId && !!p1.id && m.winnerId === p1.id, logo: p1.logo },
+        b: { name: p2.name || 'TBD', score: sc.participant2 ?? 0, winner: !!m.winnerId && !!p2.id && m.winnerId === p2.id, logo: p2.logo },
         state: m.status
       };
-    }));
+    })
+  }));
 
   const standings = participants
     .filter(p => p.finalRank)
     .sort((a, b) => (a.finalRank || 99) - (b.finalRank || 99))
     .map(p => ({ placement: p.finalRank, name: p.name, logo: p.logoUrl || null }));
 
-  const roster = participants.map(p => ({ seed: p.seed || 0, name: p.name, logo: p.logoUrl || null }));
+  // roster is a plain list of entrant names (round-robin/swiss views), seeded order.
+  const roster = participants
+    .slice()
+    .sort((a, b) => (a.seed || 99) - (b.seed || 99))
+    .map(p => p.name);
 
   return {
-    type: (eventFormat || '').includes('double') ? 'double' : 'single',
+    type: isDouble ? 'DOUBLE_ELIMINATION' : 'SINGLE_ELIMINATION',
     winners,
     losers: [],
     finals: [],
@@ -6252,19 +6587,26 @@ function buildNxgenBracketData(eventFormat, participants, matches) {
 async function loadNxgenEvent(slug) {
   const { event, participants, matches } = await getNxgenEventLive(nxgenApiKey, slug);
 
-  const logoMap = {};
-  participants.forEach(p => { if (p.name && p.logoUrl) logoMap[p.name.toLowerCase()] = p.logoUrl; });
+  // event.format is the PARTICIPATION format ("team_vs_team") — bracketFormat is the one that
+  // says single/double elimination, so read that first.
+  const bracketFormat = event.bracketFormat || event.format || '';
 
-  const eventTeams = participants.map(p => ({ name: p.name, logo: p.logoUrl || null, nxgenId: p.id }));
+  const logoMap = {};
+  participants.forEach(p => {
+    const logo = p.logoUrl || logoForTeamName(p.name);   // NXGEN rarely ships crests — use ours
+    if (p.name && logo) logoMap[p.name.toLowerCase()] = logo;
+  });
+
+  const eventTeams = participants.map(p => ({ name: p.name, logo: p.logoUrl || logoForTeamName(p.name) || null, nxgenId: p.id }));
   const queue = buildNxgenQueue(participants, matches);
-  const bd = buildNxgenBracketData(event.format || event.bracketFormat, participants, matches);
+  const bd = buildNxgenBracketData(bracketFormat, participants, matches);
 
   state.nxgen.eventSlug = slug;
   state.nxgen.selectedEvent = {
     name: event.name,
     slug: event.slug,
     activity: event.activity || '',
-    format: event.format || event.bracketFormat || '',
+    format: bracketFormat,
     status: event.status || '',
     url: event.streamUrl || `https://www.nxgen.pro/events/${slug}`
   };
@@ -6281,7 +6623,7 @@ async function loadNxgenEvent(slug) {
     name: event.name,
     gameName: event.activity || '',
     numEntrants: participants.length,
-    format: event.format || event.bracketFormat || '',
+    format: bracketFormat,
     url: event.streamUrl || `https://www.nxgen.pro/events/${slug}`,
     loadedAt: new Date().toISOString()
   };
@@ -6298,16 +6640,20 @@ async function loadNxgenEvent(slug) {
     schedule: bd.schedule,
     roster: bd.roster
   };
-  const existingIdx = state.bracket.phases.findIndex(p => p.id === 'nxgen-main');
-  if (existingIdx >= 0) {
-    state.bracket.phases[existingIdx] = phase;
-  } else {
-    state.bracket.phases.push(phase);
-  }
+  // Loading an NXGEN event makes NXGEN the owner of the bracket (setActivePlatform above), so it
+  // REPLACES the phase list — same as the start.gg and Challonge importers. Appending left a
+  // previous platform's phase behind forever ("Weekly Rocket Rush Season 1" sitting next to the
+  // live NXGEN phase), and bracket.html shows phase chips as soon as there's more than one.
+  state.bracket.phases = [phase];
   state.bracket.activePhaseId = 'nxgen-main';
+  state.bracket.title = event.name || 'Bracket';
+  state.bracket.teams = eventTeams.filter(t => t.logo).map(t => ({ name: t.name, logo: t.logo }));
+  state.bracket.matches = [];
   state.bracket.eventSlug = 'nxgen:' + slug;
   state.bracket.mode = 'imported';
   state.bracket.source = 'nxgen';
+  state.bracket.lastFetchAt = Date.now();
+  syncActiveBracketPhase();   // mirror the phase into state.bracket.* — the overlay reads the mirror
 
   return { name: event.name, teamsCount: participants.length, matchesCount: matches.length };
 }
@@ -6333,11 +6679,16 @@ async function refreshNxgenLive() {
         }
       }
     }
+    // Re-bind an auto round label to whoever is on air now (or clear a stale one from a previous
+    // event/platform). No-op for a hand-typed label.
+    retuneRoundLabel();
 
-    const bd = buildNxgenBracketData(event.format || event.bracketFormat, participants, matches);
+    const bd = buildNxgenBracketData(event.bracketFormat || event.format, participants, matches);
     const existingPhase = state.bracket.phases.find(p => p.id === 'nxgen-main');
     if (existingPhase) {
-      Object.assign(existingPhase, { winners: bd.winners, losers: bd.losers, standings: bd.standings });
+      Object.assign(existingPhase, { type: bd.type, winners: bd.winners, losers: bd.losers, finals: bd.finals, standings: bd.standings, roster: bd.roster });
+      state.bracket.lastFetchAt = Date.now();
+      syncActiveBracketPhase();
     }
 
     broadcastFullState();
@@ -6486,6 +6837,58 @@ function applyGameTeamName(side, rawName) {
   if (saved && saved.logo && t.logo !== saved.logo) { t.logo = saved.logo; changed = true; }
   if (saved && saved.color && t.color !== saved.color) { t.color = saved.color; changed = true; }
   return changed;
+}
+
+// The overlay round label is only ever WRITTEN from a pushed start.gg set (syncStartGgSet). The
+// on-air TEAMS, though, change by several other routes — auto-teams-from-game, Autofill from the
+// stream queue, a manual Match-panel pick — and none of them touched the label, so the previous
+// set's round stayed on screen over the new teams (producer saw "WINNERS QUARTER-FINAL" burned over
+// a Winners Round 3 match). Re-bind an auto-derived label to whoever is actually on air: adopt the
+// round of the queued set those two teams are in, and clear it if they're in no queued set at all
+// (an empty label hides the strip — always better than confidently naming the wrong round).
+// A hand-typed label or a preset is left completely alone.
+//
+// This follows whichever platform is ACTIVE (start.gg / Challonge / NXGEN) — reading start.gg's
+// queue while a Challonge/NXGEN event is on air left the previous start.gg event's round burned
+// on the overlay (a stale "SEMIFINALS" that nothing could clear).
+function activePlatformSets() {
+  const p = (state.activeEvent && state.activeEvent.platform) || 'startgg';
+  if (p === 'challonge') return { platform: p, sets: state.challonge.queue || [] };
+  if (p === 'nxgen')     return { platform: p, sets: state.nxgen.queue || [] };
+  return { platform: 'startgg', sets: [...(state.startgg.queue || []), ...(state.startgg.matchFeed || [])] };
+}
+// start.gg carries real round TEXT ("Winners Finals"); Challonge and NXGEN only give a round
+// NUMBER (Challonge negatives = losers side), so label those plainly. A wrong "SEMIFINALS" on
+// air is worse than an honest "ROUND 3".
+function platformRoundLabel(platform, round) {
+  if (round == null || round === '') return '';
+  if (platform === 'startgg') return String(round).toUpperCase();
+  const n = Number(round);
+  if (!Number.isFinite(n) || n === 0) return String(round).toUpperCase();
+  if (platform === 'challonge' && n < 0) return 'LOSERS ROUND ' + Math.abs(n);
+  return 'ROUND ' + Math.abs(n);
+}
+function retuneRoundLabel() {
+  if (!state.startgg.roundLabelAuto) return false;
+  const norm = (s) => String(s == null ? '' : s).trim().toLowerCase();
+  const a = norm(state.teams.blue && state.teams.blue.name);
+  const b = norm(state.teams.orange && state.teams.orange.name);
+  // Half-resolved matchups (TBD opponent) can't identify a set — leave the label as-is.
+  if (!a || !b || a === 'tbd' || b === 'tbd') return false;
+  const { platform, sets } = activePlatformSets();
+  // No queue loaded yet (fresh boot — queues are transient and refetch on the first poll)
+  // means "not found" proves nothing. Never clear a label on absence of evidence.
+  if (!sets.length) return false;
+  const pairIs = (x, y) => {
+    const nx = norm(x); const ny = norm(y);
+    return (nx === a && ny === b) || (nx === b && ny === a);   // side order is a producer choice
+  };
+  const hit = sets.find((s) => pairIs(s.teamA, s.teamB));
+  const next = hit ? platformRoundLabel(platform, hit.round) : '';
+  if (next === (state.roundLabel || '')) return false;
+  state.roundLabel = next;
+  state.startgg.roundLabelSetId = hit ? (hit.setId || hit.matchId || null) : null;
+  return true;
 }
 
 // Turn a flat list of Start.gg sets — all from ONE pool/phaseGroup — into a
@@ -7002,31 +7405,45 @@ async function fetchEventSeeding(apiToken, eventSlugRaw) {
   // Connected accounts (Epic etc.) are a far stronger match key for 6mans rank
   // lookup than the event gamertag. Query them, but fall back gracefully if start.gg
   // rejects/omits the `authorizations` field so the seeding pull never breaks.
-  const buildQuery = (withAuth) => `
+  // teamRosterSize tells us the event's actual format (a 2v2 event reports 2), which the seeding studio
+  // needs so it doesn't hold teams to the game's default squad size. Both it and `authorizations` are
+  // optional extras — if start.gg rejects either, drop that field and retry rather than failing the pull.
+  const buildQuery = (feat) => `
     query EventSeeding($slug: String!, $perPage: Int!, $page: Int!) {
       event(slug: $slug) {
         id name images { type url }
+        ${feat.roster ? 'teamRosterSize { minPlayers maxPlayers }' : ''}
         tournament { images { type url } }
         entrants(query: { perPage: $perPage, page: $page }) {
           pageInfo { totalPages }
-          nodes { id name initialSeedNum participants { gamerTag player { id user { slug name images { url type } ${withAuth ? 'authorizations { type externalUsername }' : ''} } } } }
+          nodes { id name initialSeedNum participants { gamerTag player { id user { slug name images { url type } ${feat.auth ? 'authorizations { type externalUsername }' : ''} } } } }
         }
       }
     }`;
-  let page = 1, totalPages = 1, evName = '', evImage = '', withAuth = true;
+  let page = 1, totalPages = 1, evName = '', evImage = '', evRoster = 0;
+  const feat = { auth: true, roster: true };
   const all = [];
   do {
     if (page > 1) await new Promise((r) => setTimeout(r, 350));   // stagger for start.gg rate limits
+    // Try as-is, then keep dropping one optional field at a time (roster first — it's the cheaper loss)
+    // until the query is accepted or there's nothing left to drop.
     let res;
-    try {
-      res = await client.request(buildQuery(withAuth), { slug, perPage: 75, page });
-    } catch (e) {
-      if (withAuth) { withAuth = false; res = await client.request(buildQuery(false), { slug, perPage: 75, page }); }
-      else throw e;
+    for (;;) {
+      try { res = await client.request(buildQuery(feat), { slug, perPage: 75, page }); break; }
+      catch (e) {
+        if (feat.roster) feat.roster = false;
+        else if (feat.auth) feat.auth = false;
+        else throw e;
+      }
     }
     const ev = res && res.event;
     if (!ev) break;
     evName = ev.name || evName;
+    if (!evRoster && ev.teamRosterSize) {
+      const rs = ev.teamRosterSize;
+      const n = parseInt(rs.maxPlayers || rs.minPlayers, 10);
+      if (n > 0 && n <= 12) evRoster = n;
+    }
     if (!evImage) {
       const pick = (imgs) => (imgs || []).find((i) => i.type === 'profile')?.url || (imgs || []).find((i) => i.type === 'banner')?.url || (imgs && imgs[0] && imgs[0].url) || '';
       evImage = pick(ev.images) || pick(ev.tournament && ev.tournament.images) || '';
@@ -7066,8 +7483,8 @@ async function fetchEventSeeding(apiToken, eventSlugRaw) {
   const _epic = _players.filter((p) => p.epic).length;
   const _steam = _players.filter((p) => p.steam).length;
   const _anyAuth = _players.filter((p) => p.epic || p.steam || (p.alts && p.alts.length)).length;
-  console.log(`[start.gg seeding] ${_players.length} players — connected accounts from start.gg: epic=${_epic}, steam=${_steam}, any=${_anyAuth} (withAuth=${withAuth}). The rest fall back to gamerTag for tracker.gg.`);
-  return { eventName: evName, eventSlug: slug, image: evImage, entrants: all };
+  console.log(`[start.gg seeding] ${_players.length} players — connected accounts from start.gg: epic=${_epic}, steam=${_steam}, any=${_anyAuth} (withAuth=${feat.auth}). The rest fall back to gamerTag for tracker.gg. Event team size: ${evRoster || 'not reported'}.`);
+  return { eventName: evName, eventSlug: slug, image: evImage, rosterSize: evRoster, entrants: all };
 }
 
 // Weighted normalized placement score across recent standings (0–100).
@@ -8730,7 +9147,10 @@ function handleGsi(payload) {
   state.csgo.ct = { ...sideInfo(ctInfo), name: ctInfo.name || 'COUNTER-TERRORISTS' };
   state.csgo.t  = { ...sideInfo(tInfo),  name: tInfo.name  || 'TERRORISTS' };
   // Auto team names → match saved library for logos/colours (CT=Blue side, T=Orange side).
-  if (state.autoTeamsFromGame) { applyGameTeamName('blue', ctInfo.name); applyGameTeamName('orange', tInfo.name); }
+  if (state.autoTeamsFromGame) {
+    applyGameTeamName('blue', ctInfo.name); applyGameTeamName('orange', tInfo.name);
+    retuneRoundLabel();   // teams changed without a set push — don't leave the old round on screen
+  }
   state.csgo.round = {
     number: (typeof map.round === 'number') ? map.round + 1 : (state.csgo.round.number || 0),
     phase: round.phase || map.phase || '',
@@ -9973,6 +10393,8 @@ async function _executeFlowAction(action, ctx) {
       break;
     case 'set_round_label':
       state.roundLabel = (p.text || '').toString();
+      state.startgg.roundLabelAuto = false;   // hand-set — retuneRoundLabel must not overwrite it
+      state.startgg.roundLabelSetId = null;
       saveAppState();
       broadcastFullState();
       break;
@@ -11354,6 +11776,9 @@ function handleUpdateState(data) {
         if (state.autoTeamsFromGame) applyGameTeamName('orange', t.Name || t.name);
       }
     });
+    // Both sides applied — rebind the round label to whoever the game says is on court, so a
+    // stale round from the last pushed set can't sit over a different match.
+    if (state.autoTeamsFromGame) retuneRoundLabel();
     // One-shot diagnostic: confirm the live feed's colour field name + format so "Game colours" mode
     // can be verified. Shows the team object's keys + the raw ColorPrimary + what we parsed.
     if (!_rlTeamColorLogged && teams[0]) {
@@ -13128,6 +13553,8 @@ function handleControlMessage(msg, ws) {
 
     case 'set_round_label':
       state.roundLabel = (typeof msg.data.text === 'string') ? msg.data.text : '';
+      state.startgg.roundLabelAuto = false;   // hand-typed — retuneRoundLabel must not overwrite it
+      state.startgg.roundLabelSetId = null;
       saveAppState();
       broadcastFullState();
       break;
@@ -13207,20 +13634,26 @@ function handleControlMessage(msg, ws) {
     }
 
     case 'use_startgg_round': {
-      // Pull the bracket round (e.g. "Winners Finals") from the active start.gg set, falling back to
-      // whichever set is currently live in the queue/match feed.
+      // "From Platform" — pull the bracket round from the ACTIVE platform (start.gg / Challonge /
+      // NXGEN): the pushed set if there is one, else the teams on air, else whatever is live.
+      const { platform, sets } = activePlatformSets();
       const sg = state.startgg || {};
-      const id = sg.setId || sg.lastPushedSetId || '';
-      let round = '';
-      if (id) {
-        const m = (sg.queue || []).find(x => x.setId === id) || (sg.matchFeed || []).find(x => x.setId === id);
-        if (m && m.round) round = m.round;
+      const id = platform === 'startgg' ? (sg.setId || sg.lastPushedSetId || '') : '';
+      const norm = (s) => String(s == null ? '' : s).trim().toLowerCase();
+      const a = norm(state.teams.blue && state.teams.blue.name);
+      const b = norm(state.teams.orange && state.teams.orange.name);
+      let hit = null;
+      if (id) hit = sets.find(x => String(x.setId) === String(id));
+      if (!hit && a && b && a !== 'tbd' && b !== 'tbd') {
+        hit = sets.find(x => {
+          const nx = norm(x.teamA), ny = norm(x.teamB);
+          return (nx === a && ny === b) || (nx === b && ny === a);
+        });
       }
-      if (!round) {
-        const live = (sg.queue || []).find(x => x.live) || (sg.matchFeed || []).find(x => x.live || x.status === 'in-progress');
-        if (live && live.round) round = live.round;
-      }
-      state.roundLabel = (round || '').toString().toUpperCase();
+      if (!hit) hit = sets.find(x => x.live || x.status === 'in-progress');
+      state.roundLabel = hit ? platformRoundLabel(platform, hit.round) : '';
+      state.startgg.roundLabelAuto = true;    // explicitly pulled from the platform — keep it tracking
+      state.startgg.roundLabelSetId = hit ? (hit.setId || hit.matchId || null) : null;
       saveAppState();
       broadcastFullState();
       break;
@@ -14437,6 +14870,114 @@ function handleControlMessage(msg, ws) {
       break;
     }
 
+    // Inspect an OBS transition so the REPLAYS page can use it for real.
+    // OBS only runs a transition on a SCENE CHANGE — playing the next clip inside one scene isn't
+    // one, which is why "OBS transition" mode could only ever cut between clips. Fix: if the chosen
+    // transition is a stinger, read its video file + transition point straight out of OBS and hand
+    // them to the player, so clip-to-clip uses the SAME sting the scene cut does.
+    // (obs-websocket can only report the settings of the CURRENT transition, so this makes it
+    // current — which is what the mode does at air time anyway.)
+    case 'obs_transition_info': {
+      const want = ((msg.data && msg.data.name) || '').toString().trim();
+      (async () => {
+        const out = { ok: false, name: want, kind: '', hasVideo: false, point: 0, duration: 0, stamp: '', message: '' };
+        try {
+          if (!obsClient || !obsClient.isConnected()) throw new Error('Not connected to OBS');
+          const avail = state.obs.availableTransitions || [];
+          const name = avail.find((t) => t === want) || avail.find((t) => t.toLowerCase() === want.toLowerCase());
+          if (!name) throw new Error('That transition is not in this OBS scene collection');
+          out.name = name;
+          await obsClient.call('SetCurrentSceneTransition', { transitionName: name });
+          const cur = await obsClient.call('GetCurrentSceneTransition');
+          const st = (cur && cur.transitionSettings) || {};
+          out.kind = (cur && cur.transitionKind) || '';
+          out.duration = Number(cur && cur.transitionDuration) || 0;
+          if (/stinger/i.test(out.kind)) {
+            const p = (st.path || '').toString();
+            if (p && fs.existsSync(p)) {
+              obsStingerFile = p;                     // served by /api/obs/transition-stinger
+              out.hasVideo = true;
+              // Transition point, as OBS stores it. Two gotchas: obs-websocket only reports settings
+              // that DIFFER from the defaults (so an untouched point comes back absent, and OBS's own
+              // default is 300ms — not "unset"), and the point can be expressed in frames instead of
+              // ms (tp_type 1), which we can't convert without the file's frame rate — that falls
+              // back to the sting's midpoint.
+              try { out.stamp = String(Math.round(fs.statSync(p).mtimeMs)); } catch (e) {}
+              // True length + frame rate via ffprobe. OBS stingers are usually .webm, and those are
+              // routinely written with no duration in the header — the browser then reports NaN and
+              // can't time the transition itself, so we measure it here and hand the player real
+              // numbers (the fps also converts a frames-based transition point into ms).
+              const probe = await probeVideoInfo(p);
+              out.lengthMs = probe.durationMs;
+              const tpType = Number(st.tp_type) || 0;
+              if (tpType === 1) {
+                const frames = Number(st.transition_point_frame) || 0;
+                out.pointFrames = frames;
+                out.point = (frames && probe.fps) ? Math.round((frames / probe.fps) * 1000) : 0;
+              } else {
+                out.point = (st.transition_point != null) ? (Number(st.transition_point) || 0) : 300;
+              }
+              // Remember it across restarts. Without this the stinger URL only worked in the process
+              // that happened to inspect the transition: after an app restart the route 404s until
+              // the producer re-opens the picker, and the player shows black where the sting should
+              // be. Tiny (a path + two numbers), so it rides in state.
+              state.obsStinger = { name, path: p, point: out.point, lengthMs: out.lengthMs };
+              saveAppState();
+            } else {
+              out.message = p
+                ? 'OBS stinger video not found on disk: ' + p
+                : 'This OBS stinger has no video file set (OBS ▸ Scene Transitions ▸ Properties).';
+            }
+          }
+          out.ok = true;
+        } catch (e) { out.message = (e && e.message) || 'OBS error'; }
+        try { ws.send(JSON.stringify({ type: 'obs-transition-info', data: out })); } catch (e) {}
+      })();
+      break;
+    }
+
+    // Which OBS scenes actually contain the replay-player browser source?
+    // "To Air" cuts OBS to the chosen scene and streams the clip to /replay-player.html — if no
+    // scene holds that source, every step succeeds and the viewer still sees nothing. The REPLAYS
+    // page asks for this so it can say so up front (and offer to add the source) instead of failing
+    // silently. Note: GetSceneItemList doesn't recurse into groups, so a player buried inside a
+    // group reads as "missing" — the panel's warning is dismissible for that case.
+    case 'obs_check_replay_source': {
+      (async () => {
+        const found = [];
+        let ok = false, message = '';
+        try {
+          if (!obsClient || !obsClient.isConnected()) throw new Error('Not connected to OBS');
+          const urlCache = {};
+          for (const scene of (state.obs.availableScenes || [])) {
+            let items = [];
+            try { const r = await obsClient.call('GetSceneItemList', { sceneName: scene }); items = (r && r.sceneItems) || []; }
+            catch (e) { continue; }
+            for (const it of items) {
+              if (it.inputKind !== 'browser_source' || !it.sourceName) continue;
+              if (!(it.sourceName in urlCache)) {
+                let u = '';
+                try {
+                  const s = await obsClient.call('GetInputSettings', { inputName: it.sourceName });
+                  u = ((s && s.inputSettings && s.inputSettings.url) || '').toString();
+                } catch (e) {}
+                urlCache[it.sourceName] = u;
+              }
+              const url = urlCache[it.sourceName];
+              // Only the plain program player counts: ?bus=preview is the staging monitor, and the
+              // legacy ?playlist=<id> sources only receive their own playlist's bus.
+              if (!/replay-player\.html/i.test(url)) continue;
+              if (/[?&]bus=preview/i.test(url) || /[?&]playlist=/i.test(url)) continue;
+              found.push({ scene, source: it.sourceName, enabled: !!it.sceneItemEnabled, url });
+            }
+          }
+          ok = true;
+        } catch (e) { message = (e && e.message) || 'OBS error'; }
+        try { ws.send(JSON.stringify({ type: 'replay-source-scenes', data: { ok, message, scenes: found } })); } catch (e) {}
+      })();
+      break;
+    }
+
     // Per-member audio for a library person (caster/guest/observer) — baked into their group
     // room view URL by buildTalentGroup, and driven by the Director mixer.
     case 'set_library_audio': {
@@ -14845,6 +15386,7 @@ function handleControlMessage(msg, ws) {
           state.activePlayer[msg.data.side] = '';
           rebuildCombinedPlayers();
         }
+        retuneRoundLabel();   // producer swapped a side — the pushed set's round may no longer apply
         saveAppState();
         broadcastFullState();
       }
@@ -14962,6 +15504,15 @@ function handleControlMessage(msg, ws) {
         const c = msg.data.color.trim();
         if (/^#[0-9a-fA-F]{6}$/.test(c)) {
           state.teams[msg.data.side].color = c;
+          // Keep the team LIBRARY in sync too — Schedule/standings/bracket/anything else that
+          // resolves a team's color by NAME reads savedTeams, never the live match sides, so
+          // without this a color picked here only ever showed up on the current match's own
+          // HUD/scoreboard and nowhere else.
+          const teamName = (state.teams[msg.data.side].name || '').trim().toLowerCase();
+          if (teamName) {
+            const saved = savedTeams.find((t) => t && (t.name || '').trim().toLowerCase() === teamName);
+            if (saved && saved.color !== c) { saved.color = c; saveTeams(); }
+          }
           saveAppState();
           broadcastFullState();
         }
@@ -15001,6 +15552,7 @@ function handleControlMessage(msg, ws) {
       assign('blue', set.teamA, set.slots?.[0]?.entrant?.id);
       assign('orange', set.teamB, set.slots?.[1]?.entrant?.id);
       rebuildCombinedPlayers();
+      retuneRoundLabel();   // autofill loads a set's teams but never wrote its round — do that now
       state.startgg.lastError = null;
       saveAppState();
       broadcastFullState();
@@ -15219,6 +15771,10 @@ function handleControlMessage(msg, ws) {
           source: (msg.data.source || 'startgg').toString(),
           rankMode: (msg.data.rankMode || '').toString().slice(0, 24),   // active rank system (game-specific)
           agg: ['best', 'avg', 'sum'].includes(msg.data.agg) ? msg.data.agg : 'best',   // team value method
+          // Players per team. teamSize is the producer's explicit override (0 = auto-derive);
+          // startggRosterSize caches what start.gg reported for the event so a reopened board keeps it.
+          teamSize: Math.max(0, Math.min(7, parseInt(msg.data.teamSize, 10) || 0)),
+          startggRosterSize: Math.max(0, Math.min(7, parseInt(msg.data.startggRosterSize, 10) || 0)),
           savedAt: Date.now(),
           entrants: Array.isArray(msg.data.entrants) ? msg.data.entrants.slice(0, 512).map((x, i) => ({
             entrantId: (x.entrantId || '').toString(),
@@ -15235,6 +15791,30 @@ function handleControlMessage(msg, ws) {
                         })).filter((a) => a.username) : [],
               startggSlug:     p.startggSlug     ? String(p.startggSlug).slice(0, 120)  : null,
               startggPlayerId: p.startggPlayerId ? String(p.startggPlayerId).slice(0, 40) : null,
+              // Rank provenance. The client serialises all of this in seedSave and it used to be
+              // dropped here, so every reopen re-derived a player's rank from the bare rank string and
+              // lost the audit trail (which source, how confident, what the alternatives said).
+              source:       (p.source       || '').toString().slice(0, 24),
+              confidence:   Math.max(0, Math.min(100, parseInt(p.confidence, 10) || 0)),
+              sourceDetail: (p.sourceDetail || '').toString().slice(0, 400),
+              elo:     Number.isFinite(p.elo)     ? p.elo     : null,
+              seedMMR: Number.isFinite(p.seedMMR) ? p.seedMMR : null,
+              estimates: Array.isArray(p.estimates) ? p.estimates.slice(0, 8).map((e) => ({
+                source:     (e && e.source ? e.source : '').toString().slice(0, 24),
+                mmr:        Number.isFinite(e && e.mmr) ? e.mmr : null,
+                confidence: Math.max(0, Math.min(100, parseInt(e && e.confidence, 10) || 0)),
+                tier:       (e && e.tier ? e.tier : '').toString().slice(0, 24) || null,
+                exactElo:   Number.isFinite(e && e.exactElo) ? e.exactElo : null,
+                detail:     (e && e.detail ? e.detail : '').toString().slice(0, 200),
+              })).filter((e) => e.source && e.mmr != null) : null,
+              // The producer's manual override — a decision, not a reading, so it outranks every
+              // source on reload and auto-resolve must not overwrite it.
+              override: (p.override && (p.override.tier || Number.isFinite(p.override.mmr))) ? {
+                tier:      (p.override.tier || '').toString().slice(0, 24),
+                mmr:       Number.isFinite(p.override.mmr)       ? p.override.mmr       : null,
+                rankValue: Number.isFinite(p.override.rankValue) ? p.override.rankValue : null,
+                at:        Number.isFinite(p.override.at)        ? p.override.at        : null,
+              } : null,
             })) : []
           })) : []
         };
@@ -15453,6 +16033,7 @@ function handleControlMessage(msg, ws) {
             youtube: p.youtube || '',
           }));
         }
+        retuneRoundLabel();   // producer swapped a side — the pushed set's round may no longer apply
         saveAppState();
         broadcastFullState();
       }
@@ -15880,7 +16461,7 @@ function handleControlMessage(msg, ws) {
     }
     // Track which caster overlay HTML is the active OBS source.
     case 'set_caster_active_layout': {
-      const VALID_LAYOUTS = new Set(['/casters.html','/singlecam.html','/duorow.html','/triorow.html','/duosinglecam.html','/analystspecial.html','/campip.html','/talentbar.html','/interview.html','/quaddesk.html','/matchup.html','/spotlightdesk.html','/vertical.html']);
+      const VALID_LAYOUTS = new Set(['/casters.html','/singlecam.html','/duorow.html','/duorow-noscore.html','/triorow.html','/duosinglecam.html','/analystspecial.html','/campip.html','/talentbar.html','/interview.html','/quaddesk.html','/quaddesk-noscore.html','/matchup.html','/spotlightdesk.html','/vertical.html','/vertical-casters.html']);
       const path = (msg.data?.path || '').toString().slice(0, 100);
       state.casters.activeLayout = VALID_LAYOUTS.has(path) ? path : '';
       saveAppState();
@@ -16864,6 +17445,84 @@ function handleControlMessage(msg, ws) {
       break;
     }
 
+    // Manual batch tool — no watcher lifecycle to sync, unlike set_ballchasing_autoupload above.
+    case 'set_ballchasing_replayrename': {
+      const p = msg.data || {};
+      state.ballchasing.replayRename = {
+        enabled: !!p.enabled,
+        folder: typeof p.folder === 'string' ? p.folder.trim() : (state.ballchasing.replayRename.folder || ''),
+        activeLeagueId: typeof p.activeLeagueId === 'string' ? p.activeLeagueId : (state.ballchasing.replayRename.activeLeagueId || '')
+      };
+      saveAppState();
+      broadcastFullState();
+      break;
+    }
+
+    case 'ballchasing_pick_replayrename_folder': {
+      dialog.showOpenDialog({
+        title: 'Select Rocket League Replay Folder',
+        properties: ['openDirectory'],
+        defaultPath: (state.ballchasing.replayRename && state.ballchasing.replayRename.folder) || undefined
+      }).then(({ canceled, filePaths }) => {
+        if (canceled || !filePaths || !filePaths[0]) return;
+        state.ballchasing.replayRename.folder = filePaths[0];
+        saveAppState();
+        broadcastFullState();
+      }).catch(() => {});
+      break;
+    }
+
+    // Runs the full scan+rename+upload batch. Async/non-blocking: this app's convention for slow ops
+    // (folder scan + N uploads against ballchasing's rate limit can take a while) is fire-and-push-
+    // later — see startgg_sync_set below for the same ws.send(JSON.stringify(...)) pattern.
+    case 'ballchasing_run_replayrename': {
+      (async () => {
+        const rr = state.ballchasing.replayRename || {};
+        const folder = (rr.folder || '').trim();
+        const lg = (state.leagues || []).find((l) => l.id === rr.activeLeagueId);
+        try {
+          if (!folder) throw new Error('No replay folder configured.');
+          if (!lg || !lg.ballchasing || !lg.ballchasing.groupId) throw new Error('No active league with a Ballchasing group. Pick one above.');
+          if (!ballchasingApiKey) throw new Error('Save your ballchasing.com API key in Settings first.');
+          ws.send(JSON.stringify({ type: 'ballchasing-replayrename-started', data: { folder } }));
+
+          const { renamed, skipped } = await scanAndRenameReplays({
+            folder,
+            findNearestGame: (ts) => stats.findNearestRlGame(ts, REPLAY_RENAME_TOLERANCE_MS),
+            log: (m) => logAuto('ballchasing', m)
+          });
+
+          const uploadByPath = new Map();
+          if (renamed.length) {
+            const detailed = await bcUploadReplaysDetailed(lg, renamed.map((r) => r.absPath));
+            detailed.forEach((d) => uploadByPath.set(d.path, d));
+            leaguesVer++;
+            saveAppState();
+            broadcastFullState();
+          }
+
+          const results = [
+            ...renamed.map((r) => {
+              const u = uploadByPath.get(r.absPath);
+              return {
+                originalName: r.originalName, newName: r.newName, matchedGame: r.matchedGame,
+                uploaded: !!(u && u.ok), duplicate: !!(u && u.dup), error: u && !u.ok ? u.error : null
+              };
+            }),
+            ...skipped.map((s) => ({ originalName: s.originalName, newName: null, matchedGame: null, uploaded: false, error: s.reason }))
+          ];
+          const uploadedCount = results.filter((r) => r.uploaded).length;
+          ws.send(JSON.stringify({ type: 'ballchasing-replayrename-result', data: {
+            ok: true, results,
+            message: `${renamed.length} renamed, ${uploadedCount} uploaded, ${skipped.length} left untouched (no match).`
+          }}));
+        } catch (e) {
+          ws.send(JSON.stringify({ type: 'ballchasing-replayrename-result', data: { ok: false, results: [], message: e.message } }));
+        }
+      })();
+      break;
+    }
+
     case 'startgg_sync_set': {
       (async () => {
         try {
@@ -17595,8 +18254,32 @@ function handleControlMessage(msg, ws) {
       // A manual cut cancels any pending auto post-game→casters or countdown→scene switch.
       if (_postGameTimer) { clearTimeout(_postGameTimer); _postGameTimer = null; }
       clearBreakAutoSwitch();
+      if (!sceneName) break;
+      // Optional: perform this cut with a specific OBS transition (the REPLAYS page's "OBS
+      // transition" mode, incl. an OBS stinger). Armed and AWAITED before the cut — arming from a
+      // separate message would race the switch and land on whatever transition was current.
+      const wantTrans = (msg.data && msg.data.transitionName || '').toString().trim();
+      if (wantTrans && obsClient && obsClient.isConnected()) {
+        (async () => {
+          try {
+            const avail = state.obs.availableTransitions || [];
+            const name = avail.find((t) => t === wantTrans) || avail.find((t) => t.toLowerCase() === wantTrans.toLowerCase());
+            if (name) {
+              await obsClient.call('SetCurrentSceneTransition', { transitionName: name });
+              const dur = Number(msg.data.transitionDurationMs);
+              // Stinger transitions carry their own timing from the OBS profile and reject a
+              // duration — best-effort either way.
+              if (Number.isFinite(dur) && dur > 0) {
+                try { await obsClient.call('SetCurrentSceneTransitionDuration', { transitionDuration: Math.round(dur) }); } catch (e) {}
+              }
+            }
+          } catch (e) { /* fall through to the cut with whatever transition is set */ }
+          switcherCut(sceneName);
+        })();
+        break;
+      }
       // Route through the active backend (OBS scene name or vMix input) — one path, both switchers.
-      if (sceneName) switcherCut(sceneName);
+      switcherCut(sceneName);
       break;
     }
 
@@ -17708,16 +18391,15 @@ function handleControlMessage(msg, ws) {
       const bus = (typeof p.bus === 'string' && p.bus.trim()) ? p.bus.trim() : 'program';
       const rawUrl = typeof p.url === 'string' ? p.url.trim() : '';
       if (!rawUrl || !clipSystem) break;
-      const m = /^(.*)\/api\/clips\/file\?(?:.*&)?path=([^&]+)/.exec(rawUrl);
-      const clipPath = m ? (() => { try { return decodeURIComponent(m[2]); } catch (e) { return null; } })() : null;
-      const emitPreload = (u) => broadcast(bridgeClients, { type: 'replay_preload', data: { bus, url: u } });
-      if (clipPath) {
-        clipSystem.prepareForAir(clipPath)
-          .then((pp) => emitPreload(pp === clipPath ? rawUrl : `${m[1]}/api/clips/file?path=${encodeURIComponent(pp)}`))
-          .catch(() => emitPreload(rawUrl));
-      } else {
-        emitPreload(rawUrl);   // already an export/normal url — just have the overlay buffer it
-      }
+      (async () => {
+        // Tell the panel if this one needs converting first, so its go-live hold can wait it out
+        // instead of timing out and cutting to a player that has nothing yet.
+        const r = replayUrlToPath(rawUrl);
+        if (r && await willAirPrep(r) && !clipSystem.isAirPrepReady(r.file)) {
+          try { ws.send(JSON.stringify({ type: 'replay_preparing', data: { bus } })); } catch (e) {}
+        }
+        broadcast(bridgeClients, { type: 'replay_preload', data: { bus, url: await airPlayableUrl(rawUrl), trimIn: typeof p.trimIn === 'number' ? p.trimIn : 0 } });
+      })();
       break;
     }
 
@@ -17746,22 +18428,25 @@ function handleControlMessage(msg, ws) {
           // forwarded only on this live message (never stored) so no blob enters the broadcast.
           transition: typeof p.transition === 'string' ? p.transition : 'cut'
         };
-        broadcast(bridgeClients, { type: 'replay_play', data: { bus, ...state.replay[bus], transitionLogo: typeof p.transitionLogo === 'string' ? p.transitionLogo : '', stinger: typeof p.stinger === 'string' ? p.stinger : '' } });
+        broadcast(bridgeClients, { type: 'replay_play', data: { bus, ...state.replay[bus],
+          transitionLogo: typeof p.transitionLogo === 'string' ? p.transitionLogo : '',
+          stinger: typeof p.stinger === 'string' ? p.stinger : '',
+          // Where in the stinger the clip underneath swaps (ms; 0 = its midpoint) — same convention
+          // as OBS's own stinger transition point.
+          stingerPoint: typeof p.stingerPoint === 'number' ? p.stingerPoint : 0,
+          // Measured sting length — lets the player time the swap/lift on files whose own header
+          // carries no duration (OBS .webm stingers usually don't).
+          stingerDuration: typeof p.stingerDuration === 'number' ? p.stingerDuration : 0,
+          nextIn: typeof p.nextIn === 'number' ? p.nextIn : 0 } });
         broadcastFullState();
         // Preload the NEXT playlist clip WHILE this one plays: pre-transcode it (warms prepareForAir's
         // cache so its own replay_play is instant) and tell overlays to buffer it — seamless advances.
+        // nextIn rides along so the overlay can park the buffered clip on its in-point.
         if (typeof p.nextUrl === 'string' && p.nextUrl.trim()) {
           const nextRaw = p.nextUrl.trim();
-          const nm = /^(.*)\/api\/clips\/file\?(?:.*&)?path=([^&]+)/.exec(nextRaw);
-          const nextPath = nm ? (() => { try { return decodeURIComponent(nm[2]); } catch (e) { return null; } })() : null;
-          const emitPreload = (u) => broadcast(bridgeClients, { type: 'replay_preload', data: { bus, url: u } });
-          if (nextPath && clipSystem) {
-            clipSystem.prepareForAir(nextPath)
-              .then((pp) => emitPreload(pp === nextPath ? nextRaw : `${nm[1]}/api/clips/file?path=${encodeURIComponent(pp)}`))
-              .catch(() => emitPreload(nextRaw));
-          } else {
-            emitPreload(nextRaw);   // already an export/normal url — just have the overlay buffer it
-          }
+          const nextIn = typeof p.nextIn === 'number' ? p.nextIn : 0;
+          airPlayableUrl(nextRaw).then((u) => broadcast(bridgeClients,
+            { type: 'replay_preload', data: { bus, url: u, trimIn: nextIn } }));
         }
         // User-triggered replay — switch OBS to the target scene.
         // p.scene comes from the "Program scene" dropdown on the Replays page (or per-playlist override).
@@ -17775,22 +18460,21 @@ function handleControlMessage(msg, ws) {
         }
       };
 
-      // Raw replay-buffer/highlight clips are often H.264 High-Profile with heavy B-frame usage —
-      // fine for storage, expensive for OBS's own Browser Source (CEF) to decode in real time
-      // (continuous lag/dropped frames a normal browser tab doesn't show). Transparently swap in a
-      // fast, decode-friendly baseline transcode before going to air — cached by source path, so
-      // repeat pushes of the same clip are instant. Montage exports (a different URL/route, already
-      // a normal CRF encode) skip this; only the raw /api/clips/file route is affected.
-      const clipMatch = /^(.*)\/api\/clips\/file\?(?:.*&)?path=([^&]+)/.exec(rawUrl);
-      const clipPath = clipMatch ? (() => { try { return decodeURIComponent(clipMatch[2]); } catch (e) { return null; } })() : null;
-      if (clipPath && clipSystem) {
-        if (!clipSystem.isAirPrepReady(clipPath)) {
-          ws.send(JSON.stringify({ type: 'replay_preparing', data: { bus } }));
-        }
-        clipSystem.prepareForAir(clipPath).then((preparedPath) => {
-          const url = (preparedPath === clipPath) ? rawUrl : `${clipMatch[1]}/api/clips/file?path=${encodeURIComponent(preparedPath)}`;
-          commit(url);
-        }).catch(() => commit(rawUrl));
+      // Make sure what we hand the browser source is actually decodable there. Two cases:
+      //  • a container/codec CEF can't play at all (OBS records HEVC/MKV by default) — used to reach
+      //    air raw and show a black frame while the transition around it worked;
+      //  • H.264 High-Profile with heavy B-frames — plays, but CEF chews on it (continuous lag).
+      // Both are answered by the cached baseline transcode. Files the browser handles natively go
+      // straight through, so a normal instant replay never waits on ffmpeg. See airPlayableUrl.
+      const resolved = replayUrlToPath(rawUrl);
+      if (resolved && clipSystem) {
+        (async () => {
+          // Only announce "preparing" when we're actually about to transcode and it isn't cached.
+          if (await willAirPrep(resolved) && !clipSystem.isAirPrepReady(resolved.file)) {
+            try { ws.send(JSON.stringify({ type: 'replay_preparing', data: { bus } })); } catch (e) {}
+          }
+          commit(await airPlayableUrl(rawUrl));
+        })().catch(() => commit(rawUrl));
       } else {
         commit(rawUrl);
       }
@@ -17821,6 +18505,7 @@ function handleControlMessage(msg, ws) {
     // time-remaining and return to the prior scene when a replay ends. Pure relay — these
     // are transient and never touch persisted state or full_state.
     case 'replay_progress':
+    case 'replay_armed':      // overlay finished buffering a preloaded clip (go-live waits on this)
     case 'replay_ended': {
       broadcast(bridgeClients, { type: msg.type, data: msg.data || {} });
       break;
@@ -17851,31 +18536,7 @@ function handleControlMessage(msg, ws) {
 
     // ── Multichat: feature a chat message on stream (overlay/chat-highlight.html) ──
     case 'set_chat_highlight': {
-      const d = msg.data || {};
-      if (_chatHighlightTimer) { clearTimeout(_chatHighlightTimer); _chatHighlightTimer = null; }
-      if (d.visible === false) {
-        state.chatHighlight = { ...state.chatHighlight, visible: false };
-      } else {
-        state.chatHighlight = {
-          visible: true,
-          platform: (d.platform || 'twitch').toString().slice(0, 20),
-          user: (d.user || '').toString().slice(0, 60),
-          color: /^#[0-9a-fA-F]{6}$/.test(d.color || '') ? d.color : '',
-          text: (d.text || '').toString().slice(0, 400),
-          ts: Date.now()
-        };
-        // Optional auto-hide; a newer highlight (different ts) cancels the pending one.
-        const dur = Math.max(0, Math.min(300, Number(d.duration) || 0));
-        if (dur > 0) {
-          const shownTs = state.chatHighlight.ts;
-          _chatHighlightTimer = setTimeout(() => {
-            if (state.chatHighlight && state.chatHighlight.visible && state.chatHighlight.ts === shownTs) {
-              state.chatHighlight = { ...state.chatHighlight, visible: false };
-              broadcastFullState();
-            }
-          }, dur * 1000);
-        }
-      }
+      showChatHighlight(msg.data || {});
       broadcastFullState();
       break;
     }
@@ -17905,6 +18566,96 @@ function handleControlMessage(msg, ws) {
       if (kickChanged && kickChat) kickChat.kick();
       if (discordChanged && discordChat) discordChat.kick();
       broadcastFullState();
+      break;
+    }
+
+    // ── Q&A mailbag (backend/questions.js) ───────────────────────────────
+    // Add one question: typed by hand (source = whichever social it came off), or grabbed
+    // off a row in the multichat feed.
+    case 'add_question': {
+      const q = questionStore.addQuestion(state.questions.list, msg.data || {});
+      if (q) questionsChanged();
+      break;
+    }
+    // Edit / re-tag / mark. Only the fields present are touched, so the panel can send a
+    // single-field patch (star, status) without round-tripping the whole question.
+    case 'update_question': {
+      const d = msg.data || {};
+      const q = state.questions.list.find(x => x.id === d.id);
+      if (!q) break;
+      if (typeof d.text === 'string') q.text = d.text.trim().slice(0, 400);
+      if (typeof d.user === 'string') q.user = d.user.trim().slice(0, 60);
+      if (typeof d.source === 'string') q.source = questionStore.normalizeSource(d.source);
+      if (typeof d.sourceLabel === 'string') q.sourceLabel = d.sourceLabel.trim().slice(0, 24);
+      if (typeof d.status === 'string' && ['new', 'asked', 'skipped'].includes(d.status)) q.status = d.status;
+      if (typeof d.star === 'boolean') q.star = d.star;
+      questionsChanged();
+      break;
+    }
+    case 'remove_question': {
+      const i = state.questions.list.findIndex(x => x.id === (msg.data || {}).id);
+      if (i === -1) break;
+      state.questions.list.splice(i, 1);
+      questionsChanged();
+      break;
+    }
+    // scope 'asked' clears the answered/skipped ones (the usual between-segments tidy);
+    // 'all' empties the queue — the panel confirms before sending that.
+    case 'clear_questions': {
+      const scope = ((msg.data || {}).scope === 'all') ? 'all' : 'asked';
+      const before = state.questions.list.length;
+      state.questions.list = scope === 'all' ? [] : state.questions.list.filter(q => q.status === 'new');
+      if (state.questions.list.length !== before) questionsChanged();
+      break;
+    }
+    // Put a queued question on the chat lower third and mark it asked in one step.
+    case 'ask_question': {
+      const d = msg.data || {};
+      const q = state.questions.list.find(x => x.id === d.id);
+      if (!q) break;
+      const dur = (d.duration === undefined) ? state.questions.settings.duration : d.duration;
+      showChatHighlight({
+        visible: true, platform: q.source, user: q.user, text: q.text,
+        kicker: questionStore.kickerFor(q), duration: dur
+      });
+      q.status = 'asked';
+      questionsChanged();   // also broadcasts the highlight
+      break;
+    }
+    case 'set_question_settings': {
+      const d = msg.data || {};
+      const s = state.questions.settings;
+      let discordChanged = false;
+      if (typeof d.discordChannelId === 'string') {
+        const v = d.discordChannelId.trim().replace(/[^0-9]/g, '').slice(0, 40);
+        if (v !== s.discordChannelId) { s.discordChannelId = v; discordChanged = true; }
+      }
+      if (typeof d.keyword === 'string') s.keyword = d.keyword.trim().slice(0, 20);
+      if (typeof d.keywordEnabled === 'boolean') s.keywordEnabled = d.keywordEnabled;
+      if (d.duration !== undefined) s.duration = Math.max(0, Math.min(300, Number(d.duration) || 0));
+      // The questions channel rides the same bot connection as the chat channel.
+      if (discordChanged && discordChat) discordChat.kick();
+      questionsChanged();
+      break;
+    }
+    // Backlog pull: the gateway only delivers what arrives after we connect, so read the
+    // channel's recent history over REST on demand. Reply goes to the asking panel only.
+    case 'pull_discord_questions': {
+      const reply = (ok, text, added) => {
+        try { ws.send(JSON.stringify({ type: 'questions_pull_result', data: { ok, text, added: added || 0 } })); } catch (e) {}
+      };
+      const chan = state.questions.settings.discordChannelId || state.multichat.discordChannelId;
+      fetchDiscordMessages({ botToken: state.multichat.discordBotToken, channelId: chan, limit: (msg.data || {}).limit || 50 })
+        .then((rows) => {
+          let added = 0;
+          for (const r of rows) {
+            if (questionStore.addQuestion(state.questions.list, { ...r, source: 'discord', origin: 'discord' })) added++;
+          }
+          if (added) questionsChanged();
+          reply(true, added ? `Pulled ${added} question${added === 1 ? '' : 's'} from Discord.`
+                            : 'Nothing new — everything in that channel is already queued.', added);
+        })
+        .catch((err) => reply(false, err.message || 'Discord pull failed.'));
       break;
     }
 
@@ -18617,6 +19368,17 @@ function handleControlMessage(msg, ws) {
     case 'clip_copy_folder': {
       if (clipSystem && msg.data?.id && typeof msg.data?.folder === 'string') {
         clipSystem.manager.copyClip(msg.data.id, msg.data.folder);
+        syncClipsState();
+        broadcastClipsUpdate();
+      }
+      break;
+    }
+
+    // Drag-set running order for one clip pool shelf (Replays or Highlights). The pool grid IS the
+    // order "Play all" and reel-building use, so it's producer-arrangeable, not capture-time-fixed.
+    case 'clip_reorder': {
+      if (clipSystem && msg.data?.folder && Array.isArray(msg.data.ids)) {
+        clipSystem.manager.reorderClips(msg.data.folder, msg.data.ids);
         syncClipsState();
         broadcastClipsUpdate();
       }
@@ -20074,6 +20836,49 @@ function startHttpServer(baseDir) {
 
   // Stream a video file from the replay folder (or clips dir) so the panel can
   // preview it and the overlay can play it. Path-restricted; sendFile supports Range.
+  // The OBS stinger transition's own video, so the replay player can run the SAME sting between
+  // clips that OBS runs on a scene cut. The path is never taken from the request — it's whatever
+  // OBS reported for the transition the producer selected (see obs_transition_info), so this can't
+  // be pointed at an arbitrary file.
+  app.get('/api/obs/transition-stinger', (req, res) => {
+    try {
+      // Fall back to the remembered path so this keeps working after a restart (the in-memory
+      // value is only set when the picker was used in THIS process).
+      if (!obsStingerFile && state.obsStinger && state.obsStinger.path) obsStingerFile = state.obsStinger.path;
+      if (!obsStingerFile || !fs.existsSync(obsStingerFile)) return res.status(404).end();
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+      res.sendFile(obsStingerFile);
+    } catch (e) { res.status(500).end(); }
+  });
+
+  // A URL the EDITOR can actually play. OBS records .mkv by default (and .mov/.avi/.ts turn up from
+  // other capture tools) — Chromium can't decode those containers, so the editor's <video> mounted
+  // the file, read its duration, and painted nothing but black. Push-to-air already dodges this by
+  // transcoding through prepareForAir(); this exposes the same cached baseline .mp4 to the panel, so
+  // a clip that plays on air also plays in the editor. Browser-friendly files come straight back.
+  app.get('/api/clips/preview-src', async (req, res) => {
+    try {
+      const abs = path.resolve(String(req.query.path || ''));
+      const folder = state.clips?.replayFolder ? path.resolve(state.clips.replayFolder) : '';
+      const clipsDir = clipSystem ? path.resolve(clipSystem.manager.getClipsDir()) : '';
+      const inside = (root) => root && (abs === root || abs.startsWith(root + path.sep));
+      if (!inside(folder) && !inside(clipsDir)) return res.status(403).json({ ok: false, message: 'Path outside the clip folders' });
+      if (!fs.existsSync(abs)) return res.status(404).json({ ok: false, message: 'File not found' });
+      const fileUrl = (p) => '/api/clips/file?path=' + encodeURIComponent(p);
+      // Codec-aware, not just extension-aware: HEVC inside an .mp4 is just as unplayable as .mkv.
+      if (!(await needsAirPrep(abs))) return res.json({ ok: true, url: fileUrl(abs), prepared: false });
+      if (!clipSystem) return res.json({ ok: false, message: 'Clip system unavailable' });
+      const prepared = await clipSystem.prepareForAir(abs);
+      if (!prepared || prepared === abs) {
+        return res.json({ ok: false, message: 'Could not convert this file for preview (' + path.extname(abs) + ')' });
+      }
+      res.json({ ok: true, url: fileUrl(prepared), prepared: true });
+    } catch (e) {
+      res.status(500).json({ ok: false, message: e.message });
+    }
+  });
+
   app.get('/api/clips/file', (req, res) => {
     try {
       const abs = path.resolve(String(req.query.path || ''));
@@ -20936,6 +21741,30 @@ function startHttpServer(baseDir) {
       res.json({ ok: true, region, names: idx.allPlayers.map((p) => p.name) });
     } catch (err) {
       res.status(500).json({ error: err.message || 'Failed to load names' });
+    }
+  });
+
+  // Measured tier → ELO ladder. Every rl6mans leaderboard page is per-tier and lists each player's
+  // real ELO, so the true ladder is measurable instead of guessed. Feeds the seeding studio's
+  // tier→MMR conversion, which is what puts a tracker.gg rank on the same scale as a verified ELO.
+  // Cached for a day (persisted alongside the profile cache) so it costs nothing on a normal open;
+  // pass refresh:true to re-scrape.
+  app.post('/api/rl6mans/tier-ladder', async (req, res) => {
+    const region = (req.body?.region || 'ALL').toString().toUpperCase().trim();
+    if (region !== 'ALL' && !rl6mans.REGION_LIST.includes(region)) return res.status(400).json({ error: `Unknown region: ${region}` });
+    const refresh = req.body?.refresh === true;
+    const fresh = _tierLadderCache && _tierLadderCache.region === region
+      && (Date.now() - _tierLadderCache.measuredAt) < 24 * 60 * 60 * 1000;
+    if (fresh && !refresh) return res.json({ ok: true, cached: true, ..._tierLadderCache });
+    try {
+      if (refresh) rl6mans.invalidateCache(region);
+      const ladder = await rl6mans.measureTierLadder(region, { defaults: SIXMANS_TIER_FALLBACK });
+      _tierLadderCache = ladder;
+      if (dataDir) fs.writeFile(path.join(dataDir, 'rl6mans-tier-ladder.json'), JSON.stringify(ladder), () => {});
+      res.json({ ok: true, cached: false, ...ladder });
+    } catch (err) {
+      console.error('[rl6mans/tier-ladder]', err.message);
+      res.status(500).json({ error: err.message || 'Failed to measure the tier ladder' });
     }
   });
 
@@ -22383,6 +23212,32 @@ function startHttpServer(baseDir) {
     }
   });
 
+  // Marble Race — cross-platform chat game (everyone's marble races a 3D obstacle course).
+  // Sibling namespace to /api/twitch/minigame/* (not nested under /api/twitch/) since Kick and
+  // YouTube entries flow through this too.
+  app.post('/api/marblerace/start', async (req, res) => {
+    if (!marbleRaceManager) return res.status(400).json({ error: 'Marble race not initialized' });
+    try {
+      const { entryWindowSec, autoEnterViewers, customViewers } = req.body || {};
+      const round = marbleRaceManager.startRound({
+        entryWindowMs: (Number(entryWindowSec) || 30) * 1000,
+        autoEnterViewers: !!autoEnterViewers,
+        customViewers: Array.isArray(customViewers) ? customViewers : []
+      });
+      broadcast(bridgeClients, { type: 'full_state', data: buildLiveState() });
+      res.json({ success: true, marbleRace: round });
+    } catch (err) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  app.post('/api/marblerace/cancel', async (req, res) => {
+    if (!marbleRaceManager) return res.status(400).json({ error: 'Marble race not initialized' });
+    const cancelled = marbleRaceManager.cancel();
+    broadcast(bridgeClients, { type: 'full_state', data: buildLiveState() });
+    res.json({ success: cancelled });
+  });
+
   // Mini-game settings
   app.post('/api/twitch/minigame/settings', async (req, res) => {
     const { enabled, breakScreenGameType, defaultDuration, pointReward } = req.body;
@@ -22790,6 +23645,7 @@ module.exports.start = function(baseDir) {
   twitchDataFile  = path.join(dataDir, 'twitch-data.json');
   discordDataFile = path.join(dataDir, 'discord-user.json');
   multichatDataFile = path.join(dataDir, 'multichat-data.json');
+  questionsDataFile = path.join(dataDir, 'questions-data.json');
   wsTokenFile     = path.join(dataDir, 'ws-token.json');
 
   fs.mkdirSync(dataDir, { recursive: true });
@@ -22797,11 +23653,29 @@ module.exports.start = function(baseDir) {
   stats.init(dataDir);
   analytics.init({ dataDir, getState: () => state, broadcast, bridgeClients });
   playerDb.init(dataDir);
+  // Cross-platform, so instantiated unconditionally (unlike miniGameManager, which is only created
+  // once Twitch connects — see below) — a producer with only Kick or only YouTube connected can still
+  // run a marble race (auto-enter-viewers just won't have anything to pull without Twitch).
+  marbleRaceManager = new MarbleRaceManager(state, {
+    fetchAutoEntrants: async () => {
+      if (!state.twitch.apiToken || !state.twitch.channelId) return { ok: false, error: 'Twitch not connected' };
+      const r = await fetchTwitchChatters({ clientId: TWITCH_CLIENT_ID, accessToken: state.twitch.apiToken, broadcasterId: state.twitch.channelId });
+      if (!r.ok) return r;
+      return { ok: true, entrants: r.chatters.map((c) => ({ platform: 'twitch', userId: c.userId, username: c.username, source: 'auto' })) };
+    }
+  });
 
   // Restore rl6mans profile cache from previous session so re-verification is instant
   try {
     const raw = JSON.parse(fs.readFileSync(path.join(dataDir, 'rl6mans-cache.json'), 'utf8'));
     rl6mans.loadPersistedCache(raw);
+  } catch (_) {}
+
+  // Restore the measured 6mans tier→ELO ladder so the seeding studio opens on real numbers without
+  // re-scraping. Stale entries just mean the next /tier-ladder call re-measures.
+  try {
+    const raw = JSON.parse(fs.readFileSync(path.join(dataDir, 'rl6mans-tier-ladder.json'), 'utf8'));
+    if (raw && Array.isArray(raw.midpoints) && raw.midpoints.length === 9) _tierLadderCache = raw;
   } catch (_) {}
 
   // Seed state.playerProfiles from the persistent player DB — playerDb survives event resets
@@ -22828,6 +23702,45 @@ module.exports.start = function(baseDir) {
     broadcast(bridgeClients, { type: 'social_published', data: post });
   });
 
+  // Weekly clip automation. Everything it needs from the outside world is injected, so the run
+  // logic stays testable without a Twitch token: clip fetching goes through twitchClient, naming
+  // goes through the SAME core the control panel uses (so an unattended run titles clips exactly
+  // the way the producer saw it do on-screen), and results come back out as WS events.
+  socialWeekly = new SocialWeekly({
+    userDataPath: userData,
+    publisher:    socialPublisher,
+    fetchClips: async ({ startedAt, endedAt }) => {
+      if (!twitchClient || !state.twitch || !state.twitch.channelId) {
+        throw new Error('Twitch is not connected — the weekly run has no clip source');
+      }
+      const all = [];
+      let cursor = null;
+      do {
+        const { clips, cursor: next } = await twitchClient.getClips(state.twitch.channelId, { cursor, startedAt, endedAt });
+        all.push(...(clips || []));
+        cursor = next;
+      } while (cursor && all.length < 500);
+      // Resolve category names so {game} works in an unattended run too.
+      try {
+        const ids = [...new Set(all.map(c => c.game_id).filter(Boolean))];
+        if (ids.length) socialWeekly._games = await twitchClient.getGamesByIds(ids);
+      } catch (_) {}
+      return all;
+    },
+    renderNames: (clip, index) => SocialNamingCore.renderNames(
+      clip, index,
+      { eventName: state.eventName, roundLabel: state.roundLabel, activeGame: state.activeGame, teams: state.teams },
+      socialWeekly._games || {},
+      {
+        title:   socialWeekly.config.titleTemplate,
+        desc:    socialWeekly.config.descTemplate,
+        caption: socialWeekly.config.captionTemplate,
+      }
+    ),
+    onEvent: (type, payload) => broadcast(bridgeClients, { type, data: payload }),
+  });
+  socialWeekly.start();
+
   // YouTube Live Chat → the multichat feed. Same pipeline as Twitch IRC: broadcast a
   // per-message frame + append to the rolling _chatLog for panel backfill. Reuses the
   // Social YouTube OAuth client (_ytClient auto-refreshes tokens); idles when not
@@ -22844,6 +23757,10 @@ module.exports.start = function(baseDir) {
       });
       _chatLog.push({ platform: 'youtube', user: m.user, text: m.text, color: m.color, ts: m.ts });
       if (_chatLog.length > 100) _chatLog.shift();
+      captureQuestionFromChat('youtube', m.user, m.text);
+      // No stable user id in YouTube's chat payload — use the (lowercased) username itself as the id;
+      // tryEnterMarbleRace already prefixes it with the platform, so this stays unique per-platform.
+      tryEnterMarbleRace('youtube', String(m.user || '').toLowerCase(), m.user, m.text);
     },
     onStatus: (connected, detail) => {
       console.log(`[yt-chat] ${connected ? 'connected' : 'idle'}${detail ? ' — ' + detail : ''}`);
@@ -22854,21 +23771,37 @@ module.exports.start = function(baseDir) {
 
   // Kick + Discord multichat sources — same message pipeline as Twitch/YouTube.
   loadMultichatData();
+  loadQuestionsData();   // before discordChat: its getConfig reads the questions channel
   kickChat = createKickChat({
     getChannel: () => state.multichat.kickChannel,
     onMessage: (m) => {
       broadcast(bridgeClients, { type: 'kick_chat_message', data: { username: m.user, message: m.text, color: m.color, timestamp: new Date().toISOString() } });
       _chatLog.push({ platform: 'kick', user: m.user, text: m.text, color: m.color, ts: m.ts });
       if (_chatLog.length > 100) _chatLog.shift();
+      captureQuestionFromChat('kick', m.user, m.text);
+      // No stable user id in Kick's chat payload either — same lowercased-username keying as YouTube.
+      tryEnterMarbleRace('kick', String(m.user || '').toLowerCase(), m.user, m.text);
     },
     onStatus: (connected, detail) => { console.log(`[kick-chat] ${connected ? 'connected' : 'idle'}${detail ? ' — ' + detail : ''}`); broadcast(bridgeClients, { type: 'kick_chat_status', data: { connected, detail } }); }
   });
   discordChat = createDiscordChat({
-    getConfig: () => ({ botToken: state.multichat.discordBotToken, channelId: state.multichat.discordChannelId }),
+    getConfig: () => ({
+      botToken: state.multichat.discordBotToken,
+      channelId: state.multichat.discordChannelId,
+      questionChannelId: state.questions.settings.discordChannelId   // dedicated #questions channel
+    }),
     onMessage: (m) => {
+      // The questions channel never enters the chat feed — every message there IS a question.
+      if (m.kind === 'question') {
+        if (questionStore.addQuestion(state.questions.list, { source: 'discord', user: m.user, text: m.text, ts: m.ts, ref: m.ref, origin: 'discord' })) {
+          questionsChanged();
+        }
+        return;
+      }
       broadcast(bridgeClients, { type: 'discord_chat_message', data: { username: m.user, message: m.text, color: m.color, timestamp: new Date().toISOString() } });
       _chatLog.push({ platform: 'discord', user: m.user, text: m.text, color: m.color, ts: m.ts });
       if (_chatLog.length > 100) _chatLog.shift();
+      captureQuestionFromChat('discord', m.user, m.text);
     },
     onStatus: (connected, detail) => { console.log(`[discord-chat] ${connected ? 'connected' : 'idle'}${detail ? ' — ' + detail : ''}`); broadcast(bridgeClients, { type: 'discord_chat_status', data: { connected, detail } }); }
   });
@@ -23923,6 +24856,8 @@ class TwitchChatManager {
       _chatLog.push({ platform: 'twitch', user: username, text: message, color, ts: Date.now() });
       if (_chatLog.length > 100) _chatLog.shift();
 
+      captureQuestionFromChat('twitch', username, message);   // "!ask …" → Q&A queue
+
       // Route to active mini-game
       if (chatParser && miniGameManager?.currentGame?.state === 'active') {
         const userId = tags['user-id'] || match[1];
@@ -23948,6 +24883,10 @@ class TwitchChatManager {
           }
         }
       }
+
+      // Marble Race entry — parallel to the minigame block above, not routed through it (this is
+      // a separate, cross-platform system; see backend/integrations/marble-race.js).
+      tryEnterMarbleRace('twitch', tags['user-id'] || match[1], username, message);
 
       if (message.startsWith('!')) {
         this.handleCommand(match[1], message);
@@ -24057,6 +24996,55 @@ const _chatLog = [];              // rolling multichat history (see handleChatMe
 let _chatHighlightTimer = null;   // pending auto-hide for the featured chat message
 const chatManager = new TwitchChatManager();
 
+/**
+ * Put a message on the chat lower third (overlay/chat-highlight.html), or take it down with
+ * { visible:false }. Shared by set_chat_highlight (a chat row) and ask_question (the Q&A
+ * queue) — the only difference on air is `kicker`, which replaces the "LIVE CHAT" label with
+ * e.g. "QUESTION · INSTAGRAM". Caller broadcasts.
+ */
+function showChatHighlight(d) {
+  if (_chatHighlightTimer) { clearTimeout(_chatHighlightTimer); _chatHighlightTimer = null; }
+  if (d.visible === false) {
+    state.chatHighlight = { ...state.chatHighlight, visible: false };
+    return;
+  }
+  state.chatHighlight = {
+    visible: true,
+    platform: (d.platform || 'twitch').toString().slice(0, 20),
+    user: (d.user || '').toString().slice(0, 60),
+    color: /^#[0-9a-fA-F]{6}$/.test(d.color || '') ? d.color : '',
+    text: (d.text || '').toString().slice(0, 400),
+    kicker: (d.kicker || '').toString().slice(0, 40),   // '' = the overlay's own LIVE CHAT default
+    ts: Date.now()
+  };
+  // Optional auto-hide; a newer highlight (different ts) cancels the pending one.
+  const dur = Math.max(0, Math.min(300, Number(d.duration) || 0));
+  if (dur > 0) {
+    const shownTs = state.chatHighlight.ts;
+    _chatHighlightTimer = setTimeout(() => {
+      if (state.chatHighlight && state.chatHighlight.visible && state.chatHighlight.ts === shownTs) {
+        state.chatHighlight = { ...state.chatHighlight, visible: false };
+        broadcastFullState();
+      }
+    }, dur * 1000);
+  }
+}
+
+/**
+ * Keyword capture: any chat message that opens with the configured prefix ("!ask …") joins
+ * the Q&A queue, tagged with the platform it came from. Called from all four chat pipelines
+ * (Twitch IRC, YouTube, Kick, Discord); a no-op when the keyword is off or doesn't match.
+ */
+function captureQuestionFromChat(platform, user, text) {
+  const s = state.questions && state.questions.settings;
+  if (!s || !s.keywordEnabled) return;
+  const body = questionStore.matchKeyword(text, s.keyword);
+  if (!body) return;
+  if (questionStore.addQuestion(state.questions.list, { source: platform, user, text: body, origin: 'keyword' })) {
+    questionsChanged();
+  }
+}
+
 // ─── EventSub Webhook Endpoints ──────────────────────────────────────────────
 // Registered from inside startHttpServer() via registerTwitchEventSubRoutes(app) — the
 // Express `app` only exists in that scope, so these can't be attached at module top-level.
@@ -24159,9 +25147,15 @@ app.get('/api/twitch/clips', async (req, res) => {
     return res.status(400).json({ error: 'Twitch not connected', clips: [], cursor: null });
   }
   try {
+    // ?days=7 windows the pull to the last N days (Helix wants both ends of the range).
+    const days = parseInt(req.query.days, 10);
+    const win  = days > 0
+      ? { startedAt: new Date(Date.now() - days * 86400000).toISOString(), endedAt: new Date().toISOString() }
+      : {};
     const result = await twitchClient.getClips(state.twitch.channelId, {
       cursor: req.query.cursor,
-      first:  req.query.first || 20
+      first:  req.query.first || 20,
+      ...win
     });
     res.json(result);
   } catch (e) {
@@ -24169,10 +25163,37 @@ app.get('/api/twitch/clips', async (req, res) => {
   }
 });
 
+// GET /api/twitch/games?ids=1,2,3 — resolve category ids to names for the clip auto-namer
+app.get('/api/twitch/games', async (req, res) => {
+  if (!twitchClient) return res.status(400).json({ error: 'Twitch not connected', games: {} });
+  const ids = String(req.query.ids || '').split(',').map(s => s.trim()).filter(Boolean);
+  if (!ids.length) return res.json({ games: {} });
+  try {
+    res.json({ games: await twitchClient.getGamesByIds(ids) });
+  } catch (e) {
+    res.status(500).json({ error: e.message, games: {} });
+  }
+});
+
 // ─── Social Publishing API ─────────────────────────────────────────────────────
 const _socialGuard = (req, res) => {
   if (!socialPublisher) { res.status(503).json({ error: 'Social publisher not initialized yet' }); return false; }
   return true;
+};
+
+// Publishing pushes video onto the ORGANISATION's own channels, so the mutating half of this
+// API is owner/admin-only — the same rule that reveals the sidebar tab. Read-only routes
+// (connections, OAuth, schedule list) stay open: the YouTube token they mint is also what
+// multichat and the Analytics page run on. Same fail-open convention as wsRoleAllows — no
+// cloud session or a personal workspace means no org to answer to, so nothing is gated and a
+// cloud outage can't lock the local-first app out of its own tools.
+const _socialPublishGuard = (req, res) => {
+  let s; try { s = cloud.getSession(); } catch (_) { return true; }
+  if (!s || !s.authed) return true;
+  if (!s.workspaceId || String(s.workspaceId).startsWith('user:')) return true;
+  if (s.role === 'owner' || s.role === 'admin') return true;
+  res.status(403).json({ error: 'Social publishing is restricted to organization owners and admins.' });
+  return false;
 };
 
 // GET /api/social/connections — which platforms are connected/configured
@@ -24236,6 +25257,7 @@ app.post('/api/social/disconnect/:platform', (req, res) => {
 // POST /api/social/clip/download — download a Twitch clip to the local library
 app.post('/api/social/clip/download', async (req, res) => {
   if (!_socialGuard(req, res)) return;
+  if (!_socialPublishGuard(req, res)) return;
   const { clipUrl, thumbnailUrl, title } = req.body || {};
   if (!clipUrl) return res.status(400).json({ error: 'clipUrl required' });
   try {
@@ -24267,6 +25289,7 @@ app.get('/api/social/schedule', (req, res) => {
 // Twitter: pre-upload media now so posting later is just a fast tweet call.
 app.post('/api/social/schedule', async (req, res) => {
   if (!_socialGuard(req, res)) return;
+  if (!_socialPublishGuard(req, res)) return;
   try {
     const body = req.body;
     const post = socialPublisher.addPost(body);
@@ -24309,6 +25332,7 @@ app.post('/api/social/schedule', async (req, res) => {
 // DELETE /api/social/schedule/:id — cancel a scheduled post
 app.delete('/api/social/schedule/:id', (req, res) => {
   if (!_socialGuard(req, res)) return;
+  if (!_socialPublishGuard(req, res)) return;
   const ok = socialPublisher.cancelPost(req.params.id);
   res.json({ ok });
 });
@@ -24316,6 +25340,7 @@ app.delete('/api/social/schedule/:id', (req, res) => {
 // POST /api/social/publish-now — immediate publish (no schedule)
 app.post('/api/social/publish-now', async (req, res) => {
   if (!_socialGuard(req, res)) return;
+  if (!_socialPublishGuard(req, res)) return;
   try {
     // Inject Twitch credentials so the downloader can use authenticated GQL requests
     const post = { ...req.body, _twitchToken: state.twitch?.apiToken, _twitchClientId: TWITCH_CLIENT_ID };
@@ -24324,6 +25349,105 @@ app.post('/api/social/publish-now', async (req, res) => {
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
+});
+
+// GET /api/social/clip/resolve?url= — signed, directly-playable CDN URLs for a Twitch clip.
+// The composer needs a real <video> src to scrub and trim against; a Twitch clip has no local
+// file until publish time, which is why trimming used to be local-clips-only.
+app.get('/api/social/clip/resolve', async (req, res) => {
+  if (!_socialGuard(req, res)) return;
+  const url = String(req.query.url || '');
+  if (!url) return res.status(400).json({ error: 'url required' });
+  try {
+    const slug = socialPublisher._twitchSlug(url);
+    if (!slug) return res.status(400).json({ error: 'Not a recognisable Twitch clip URL' });
+    const urls = await socialPublisher._getTwitchClipUrls(slug);
+    if (!urls.length) return res.status(404).json({ error: 'No playable renditions returned for this clip' });
+    res.json({ urls, url: urls[0] });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/social/pick-bumper — native file picker for an intro/outro bumper.
+// The control panel is a file:// page, so a plain <input type="file"> hands back a sandboxed
+// File with no usable path; ffmpeg needs a real one. server.js runs in the Electron main
+// process, so it can open the dialog directly.
+app.post('/api/social/pick-bumper', async (req, res) => {
+  try {
+    const r = await dialog.showOpenDialog({
+      title: 'Select an intro / outro bumper',
+      properties: ['openFile'],
+      filters: [
+        { name: 'Video or image', extensions: ['mp4', 'mov', 'mkv', 'webm', 'png', 'jpg', 'jpeg', 'webp'] },
+        { name: 'All files', extensions: ['*'] },
+      ],
+    });
+    if (r.canceled || !r.filePaths || !r.filePaths[0]) return res.json({ canceled: true });
+    res.json({ path: r.filePaths[0] });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─── Weekly clip automation ────────────────────────────────────────────────────
+const _weeklyGuard = (req, res) => {
+  if (!socialWeekly) { res.status(503).json({ error: 'Weekly automation not initialized yet' }); return false; }
+  return _socialPublishGuard(req, res);
+};
+
+// GET /api/social/weekly — config + next run + history + anything staged for review
+app.get('/api/social/weekly', (req, res) => {
+  if (!socialWeekly) return res.status(503).json({ error: 'Weekly automation not initialized yet' });
+  res.json(socialWeekly.getStatus());
+});
+
+// POST /api/social/weekly — save config (re-arms the cron)
+app.post('/api/social/weekly', (req, res) => {
+  if (!_weeklyGuard(req, res)) return;
+  try { res.json({ ok: true, status: (socialWeekly.setConfig(req.body || {}), socialWeekly.getStatus()) }); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+// GET /api/social/weekly/preview — dry run: what would the next run pick up right now?
+app.get('/api/social/weekly/preview', async (req, res) => {
+  if (!socialWeekly) return res.status(503).json({ error: 'Weekly automation not initialized yet' });
+  try {
+    const pick = await socialWeekly.pickClips({ includeHandled: req.query.all === '1' });
+    // Preview the auto-names too, so the producer can see a bad template before it ships.
+    res.json({
+      ...pick,
+      picked: pick.picked.map((clip, i) => ({ clip, ...socialWeekly.renderNames(clip, i) })),
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/social/weekly/run — run the job now, off the cron's schedule
+app.post('/api/social/weekly/run', async (req, res) => {
+  if (!_weeklyGuard(req, res)) return;
+  try { res.json({ ok: true, entry: await socialWeekly.run('manual'), status: socialWeekly.getStatus() }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /api/social/weekly/approve — review mode: schedule the staged rows (as edited)
+app.post('/api/social/weekly/approve', async (req, res) => {
+  if (!_weeklyGuard(req, res)) return;
+  try { res.json({ ok: true, ...(await socialWeekly.approveStaged(req.body && req.body.rows)), status: socialWeekly.getStatus() }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /api/social/weekly/discard — drop the staged batch (clips stay eligible next run)
+app.post('/api/social/weekly/discard', (req, res) => {
+  if (!_weeklyGuard(req, res)) return;
+  res.json({ ...socialWeekly.discardStaged(), status: socialWeekly.getStatus() });
+});
+
+// POST /api/social/weekly/forget — un-mark a clip (or all) as already handled
+app.post('/api/social/weekly/forget', (req, res) => {
+  if (!_weeklyGuard(req, res)) return;
+  res.json(socialWeekly.forget(req.body && req.body.clipId));
 });
 
 function _oauthDonePage(platform, success, err) {
@@ -24548,6 +25672,7 @@ module.exports.shutdown = function () {
   if (httpServer) { httpServer.close(() => {}); httpServer = null; }
 
   try { _saveAppStateNow(true); } catch (e) { /* ignore */ }   // sync flush so the write completes before exit
+  try { saveQuestionsData(true); } catch (e) { /* ignore */ }  // Q&A queue lives in its own file
   stats.close();
   playerDb.close();
 };

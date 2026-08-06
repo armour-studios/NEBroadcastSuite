@@ -20,6 +20,8 @@ let _seedSortKey = 'rank';      // current order: rank | league | seed | name
 let _seedTab = 'verified';      // active seeding tab: 'verified' | 'unverified'
 let _seedUnvSort = 'unranked';  // unverified tab sort: 'unranked' | 'name'
 let _seedUnvShowAll = false;    // when true, show all teams including verified ones
+let _seedTeamSize = 0;          // per-event players-per-team override (0 = auto-derive, see seedRosterSize)
+let _seedSizeWhy = '';          // how the auto-derived size was decided, for the sidebar note
 
 // Rank systems per title. kind 'num' = free number (MMR/Premier/Elo); 'tier' = named tiers + division.
 const SEED_RANK_MODES = {
@@ -43,23 +45,123 @@ function seedMode() { return SEED_RANK_MODES[_seedMode] || SEED_RANK_MODES.gener
 function seedIsMMR() { return seedMode().canonical === 'mmr'; }
 let _seedMidpoints = (window.SeedResolveCore ? window.SeedResolveCore.SIXMANS_TIER_DEFAULTS.slice() : [100, 250, 400, 550, 700, 850, 1050, 1300, 1600]);
 let _seedMidpointMeta = null;
+// The base ladder per-event calibration builds on. SIXMANS_TIER_DEFAULTS is a rough hardcoded guess and
+// is badly off the real rl6mans scale (it puts A at 1050 where real players sit far higher), so we
+// replace it with a ladder MEASURED off the rl6mans leaderboards — see seedLoadTierLadder.
+let _seedLadderBase = (window.SeedResolveCore ? window.SeedResolveCore.SIXMANS_TIER_DEFAULTS.slice() : [100, 250, 400, 550, 700, 850, 1050, 1300, 1600]);
+let _seedLadderMeta = null;     // { tiers:[{tier,elo,n,source}], region, players, measuredTiers, measuredAt }
 function seedTierToMMR(tier) { const C = window.SeedResolveCore; return C ? C.mmrFromTier(tier, _seedMidpoints) : null; }
 function seedMMRToTier(mmr) { const C = window.SeedResolveCore; return C ? C.tierFromMMR(mmr, _seedMidpoints) : null; }
+
+// Pull the measured tier→ELO ladder (median real ELO per tier off the rl6mans leaderboards) and adopt
+// it as the base. Server-cached for a day, so this is normally instant; refresh:true re-scrapes.
+// Best-effort — on failure we keep whatever base we already had rather than blocking seeding.
+async function seedLoadTierLadder(refresh) {
+  const btn = el('seed-calibrate-ladder');
+  if (btn) { btn.disabled = true; btn.textContent = refresh ? 'Measuring…' : btn.textContent; }
+  try {
+    const r = await fetch('http://localhost:3000/api/rl6mans/tier-ladder', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ region: el('seed-6mans-region')?.value || 'ALL', refresh: refresh === true }),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok || !Array.isArray(d.midpoints) || d.midpoints.length !== 9) throw new Error(d.error || 'No ladder returned');
+    _seedLadderBase = d.midpoints.slice();
+    _seedLadderMeta = d;
+    // Re-run per-event calibration on the new base so every tier-derived estimate re-values.
+    seedCalibrateMidpoints();
+    seedRecomputeValues();
+    if (_seedRows.length) seedSort(_seedSortKey);
+    seedRenderLadderNote();
+    if (refresh) seedStatus(`✓ 6mans ELO ladder measured from ${d.players} leaderboard players — ${d.measuredTiers}/9 tiers from real data.`, 'ok');
+    return true;
+  } catch (e) {
+    if (refresh) seedStatus(`Couldn't measure the ELO ladder — ${e.message || 'rl6mans unreachable'}. Keeping the current one.`, 'err');
+    console.warn('[seed-ladder]', e);
+    return false;
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Re-measure ELO ladder'; }
+  }
+}
+// Show the ladder in the sidebar so the numbers seeding runs on are never invisible.
+function seedRenderLadderNote() {
+  const note = el('seed-ladder-note'); if (!note) return;
+  if (!_seedLadderMeta) { note.textContent = 'Using the built-in ELO ladder (not measured yet).'; return; }
+  const m = _seedLadderMeta;
+  const ladder = (window.SeedResolveCore ? window.SeedResolveCore.SIXMANS_TIERS : [])
+    .map((t, i) => `${t} ${_seedMidpoints[i]}`).join(' · ');
+  // Be straight about it when the leaderboards yielded no usable ELOs — the ladder is then still the
+  // built-in guess, and only verified players (whose profiles carry an exact ELO) will correct it.
+  note.textContent = m.measuredTiers === 0
+    ? `rl6mans leaderboards returned no ELOs — still on the built-in ladder: ${ladder}`
+    : `Measured off ${m.players} rl6mans players (${m.measuredTiers}/9 tiers real): ${ladder}`;
+}
 // Learn the tier→MMR ladder from this event's rl6mans-exact players (they carry both a tier and a real
-// ELO), then refresh every tier-derived estimate under the new ladder.
+// ELO), then refresh every tier-derived estimate under the new ladder. Falls back per-tier to the
+// measured leaderboard ladder for tiers this event doesn't have enough verified players in.
 function seedCalibrateMidpoints() {
   const C = window.SeedResolveCore; if (!C) return;
   const samples = [];
-  _seedRows.forEach((r) => (r.players || []).forEach((p) => (p.estimates || []).forEach((e) => {
+  seedAllRows().forEach((r) => (r.players || []).forEach((p) => (p.estimates || []).forEach((e) => {
     if (e.source === 'sixmans' && e.exactElo > 0 && e.tier) samples.push({ tier: e.tier, elo: e.exactElo });
   })));
-  const cal = C.calibrateTierMidpoints(samples, C.SIXMANS_TIER_DEFAULTS, { minSamples: 2, minGap: 50 });
+  const cal = C.calibrateTierMidpoints(samples, _seedLadderBase, { minSamples: 2, minGap: 50 });
   _seedMidpoints = cal.midpoints; _seedMidpointMeta = cal.meta;
   // Tier-derived estimates (manual, tracker, tier-only 6mans) were computed with the old ladder — refresh.
-  _seedRows.forEach((r) => (r.players || []).forEach((p) => {
+  seedAllRows().forEach((r) => (r.players || []).forEach((p) => {
     (p.estimates || []).forEach((e) => { if (e.tier && !(e.exactElo > 0)) { const m = seedTierToMMR(e.tier); if (m != null) e.mmr = m; } });
     blendMMRToPlayer(p);
   }));
+  seedRenderLadderNote();
+}
+// ── Manual override ────────────────────────────────────────────────────────
+// A rank the producer typed into a player's box is a DECISION, not another opinion to be averaged.
+// It used to be filed as a 'manual' estimate at 60% confidence and then blended — which meant that on
+// any player who already had a verified rl6mans reading (98%) the blend, sharpened by k=5, weighted the
+// override at (60/98)^5 ≈ 9% and the typed value snapped straight back. It looked like the edit didn't
+// save. It now sets p.override, which wins outright over the blend.
+//
+// The auto blend is still computed and kept on p.auto, so the "why" panel can show what the sources
+// said and what you overrode — and so Revert restores it exactly.
+function seedIsOverridden(p) { return !!(p && p.override && (p.override.tier || Number.isFinite(p.override.mmr))); }
+function seedSetOverride(p, typed) {
+  if (!p) return false;
+  const t = (typed || '').trim();
+  if (!t) { seedClearOverride(p); return false; }
+  if (seedIsMMR()) {
+    // Accept either a tier letter ("B+") or a raw ELO ("1420") — producers use both.
+    const asNum = /^[\d.]+$/.test(t) ? parseFloat(t) : null;
+    const mmr = (asNum != null && asNum > 0) ? asNum : seedTierToMMR(t);
+    if (mmr == null) return false;                       // unparseable — leave the player alone
+    p.override = { tier: asNum != null ? (seedMMRToTier(asNum) || '') : t, mmr, at: Date.now() };
+  } else {
+    const rv = seedRankValue(t, _seedMode);
+    p.override = { tier: t, rankValue: rv, at: Date.now() };
+  }
+  seedApplyPlayerValue(p);
+  return true;
+}
+function seedClearOverride(p) {
+  if (!p) return;
+  delete p.override;
+  seedApplyPlayerValue(p);
+}
+// Resolve a player's EFFECTIVE rank: the override if there is one, else whatever auto worked out.
+// Every write path ends here, so an override can never be silently outvoted.
+function seedApplyPlayerValue(p) {
+  if (!p) return;
+  if (seedIsMMR()) blendMMRToPlayer(p);
+  else {
+    if (seedIsOverridden(p)) {
+      p.rank = p.override.tier || '';
+      p.rankValue = Number.isFinite(p.override.rankValue) ? p.override.rankValue : seedRankValue(p.rank, _seedMode);
+      p.source = 'override'; p.confidence = 100;
+      p.sourceDetail = `You set this to ${p.rank}` + (p.auto && p.auto.rank ? ` · auto said ${p.auto.rank}` : '');
+    } else if (p.auto && p.auto.rank) {
+      p.rank = p.auto.rank; p.rankValue = p.auto.rankValue;
+      p.source = p.auto.source; p.confidence = p.auto.confidence; p.sourceDetail = p.auto.detail || '';
+    }
+  }
 }
 // Blend a player's estimates → seedMMR + display tier + dominant source/confidence + breakdown tooltip.
 function blendMMRToPlayer(p) {
@@ -69,18 +171,32 @@ function blendMMRToPlayer(p) {
   // weak sources nudge the seed by only a few ELO instead of dragging it a full tier. Near-peer
   // sources still blend meaningfully — it's dominant, not absolute.
   const b = C.blendEstimates(p.estimates || [], { k: 5 });
-  if (b.mmr == null) { p.seedMMR = null; p.rankValue = null; p.rank = ''; p.source = ''; p.confidence = 0; p.sourceDetail = ''; return; }
-  p.seedMMR = b.mmr; p.rankValue = b.mmr;
-  p.rank = seedMMRToTier(b.mmr) || '';
-  p.source = b.dominant ? b.dominant.source : '';
-  p.confidence = b.confidence;
+  const lbl = SEED_SRC_SHORT;
+  // What auto thinks, always kept — the override displaces it on screen but never erases it.
+  p.auto = (b.mmr == null) ? null : {
+    mmr: b.mmr, rank: seedMMRToTier(b.mmr) || '',
+    source: b.dominant ? b.dominant.source : '', confidence: b.confidence,
+    detail: (b.breakdown || []).map((e) => `${lbl[e.source] || e.source} ${Math.round(e.mmr)} (${e.confidence}%)`).join(' · ')
+      + ` → blend ${b.mmr}`,
+  };
   const exact = (p.estimates || []).find((e) => e.exactElo > 0);
   p.elo = exact ? exact.exactElo : (p.elo || null);
-  const lbl = { sixmans: '6mans', tracker: 'tracker', manual: 'manual', ourEvents: 'our-events', startgg: 'start.gg', teammate: 'team avg' };
-  p.sourceDetail = (b.breakdown || []).map((e) => `${lbl[e.source] || e.source} ${Math.round(e.mmr)} (${e.confidence}%)`).join(' · ')
-    + ` → blend ${b.mmr} (${p.rank})`;
+
+  if (seedIsOverridden(p)) {
+    p.seedMMR = p.override.mmr; p.rankValue = p.override.mmr;
+    p.rank = p.override.tier || seedMMRToTier(p.override.mmr) || '';
+    p.source = 'override'; p.confidence = 100;
+    p.sourceDetail = `You set this to ${p.rank} (${Math.round(p.override.mmr)})`
+      + (p.auto ? ` · auto said ${p.auto.rank} (${p.auto.mmr})` : '');
+    return;
+  }
+  if (!p.auto) { p.seedMMR = null; p.rankValue = null; p.rank = ''; p.source = ''; p.confidence = 0; p.sourceDetail = ''; return; }
+  p.seedMMR = p.auto.mmr; p.rankValue = p.auto.mmr; p.rank = p.auto.rank;
+  p.source = p.auto.source; p.confidence = p.auto.confidence; p.sourceDetail = p.auto.detail;
 }
 // Upsert one estimate per source and re-blend. THE single write path for MMR-canonical modes.
+// An overridden player still COLLECTS estimates (so the why-panel can show what auto found, and so
+// Revert has something to fall back to) — seedApplyPlayerValue just keeps the override on top.
 function seedApplyEstimate(p, est) {
   if (!p || !est || !Number.isFinite(est.mmr) || !(est.confidence > 0)) return false;
   if (!Array.isArray(p.estimates)) p.estimates = [];
@@ -99,6 +215,19 @@ function seedRemoveEstimate(p, source) {
   if (!p || !Array.isArray(p.estimates)) return;
   p.estimates = p.estimates.filter((e) => e.source !== source);
   blendMMRToPlayer(p);
+}
+// Non-MMR equivalent of seedApplyEstimate: record what auto worked out on p.auto, then let
+// seedApplyPlayerValue decide whether it or the override is what actually shows. Without this an
+// auto pass would overwrite a typed rank the moment it ran.
+function seedResolveApply(p, cand) {
+  const C = window.SeedResolveCore; if (!C || !p || !cand) return false;
+  // Let the core's keep-highest-confidence rule arbitrate between AUTO sources only, on a scratch
+  // object, so an override never takes part in (or is beaten by) that comparison.
+  const scratch = p.auto ? { source: p.auto.source, confidence: p.auto.confidence, rank: p.auto.rank, rankValue: p.auto.rankValue, sourceDetail: p.auto.detail } : {};
+  const applied = C.resolveApply(scratch, cand);
+  if (applied) p.auto = { source: scratch.source, confidence: scratch.confidence, rank: scratch.rank, rankValue: scratch.rankValue, detail: scratch.sourceDetail || cand.detail || '' };
+  seedApplyPlayerValue(p);
+  return applied;
 }
 // Estimate builders from raw lookup results (used by both the unverified-tab buttons and the cascade).
 function seedEst6mans(result, conf, detail) {
@@ -123,6 +252,9 @@ function seedEstManual(tier, detail) {
 // reproduces its value — then re-blend. A leaked numeric "1180" now becomes a legitimate MMR estimate.
 function seedMigratePlayerEstimates(p) {
   if (!p || !seedIsMMR()) return;
+  // An overridden player's displayed rank is the override, NOT a reading to be back-derived into a
+  // fake "manual" estimate — that would turn a decision into a source and let the blend outvote it.
+  if (seedIsOverridden(p)) { blendMMRToPlayer(p); return; }
   if (Array.isArray(p.estimates) && p.estimates.length) { blendMMRToPlayer(p); return; }
   p.estimates = [];
   const rankStr = ('' + (p.rank || '')).trim();
@@ -144,26 +276,70 @@ function isTeamVerified(row) {
   return ps.length > 0 && ps.every((p) => p.rank && p.rank.trim());
 }
 
-// Expected players per team for this event's game — a team below it is "incomplete" and parks on the
-// Incomplete tab instead of the seed board. Pulls the game registry's rosterSize (RL=3, CS2/Val/OW=5,
-// CoD=4…), resolving the game from the event, then falling back to the active seed mode, then to 3.
-function seedRosterSize() {
+// Every team the studio is holding, board + parked, as one list.
+function seedAllRows() { return [..._seedRows, ..._seedIncomplete]; }
+
+// The game registry's nominal roster size (RL=3, CS2/Val/OW=5, CoD=4…), resolved from the event's game
+// and falling back to the active seed mode. This is the game's DEFAULT format, not this event's.
+function seedGameRosterSize() {
   const games = currentState.games || {};
   const g = _seedEvent && _seedEvent.game;
   let gm = (g && games[g]) || null;
   if (!gm && g) { const gk = Object.keys(games).find((k) => k === g || (games[k].name || '').toLowerCase() === String(g).toLowerCase()); gm = gk ? games[gk] : null; }
   if (!gm) { const mg = { 'rl-6mans': 'rocket-league', 'rl-mmr': 'rocket-league', 'rl-tier': 'rocket-league', 'val': 'valorant', 'cs2': 'csgo', 'ow': 'overwatch', 'apex': 'apex' }[_seedMode]; gm = mg ? games[mg] : null; }
   const n = gm && gm.rosterSize;
-  return (typeof n === 'number' && n > 0) ? n : 3;
+  return (typeof n === 'number' && n > 0) ? n : 0;
+}
+// The most common roster length across a team list — the event's real format. A 2v2 Rocket League
+// event reads 2 here, where the game registry would wrongly insist on 3. Ties break high.
+function seedModalRosterSize(rows) {
+  const freq = new Map();
+  (rows || []).forEach((r) => {
+    const n = (r.players || []).length;
+    if (n > 0) freq.set(n, (freq.get(n) || 0) + 1);
+  });
+  if (freq.size === 0) return 0;
+  let best = 0, bestCount = 0;
+  [...freq.entries()].sort((a, b) => a[0] - b[0]).forEach(([n, c]) => { if (c >= bestCount) { best = n; bestCount = c; } });
+  return best;
+}
+// Expected players per team for THIS event — a team below it is "incomplete" and parks on the Incomplete
+// tab instead of the seed board. Resolved best-first:
+//   1. the producer's explicit Team size override (sidebar, saved per event)
+//   2. start.gg's own teamRosterSize for the event (authoritative when the API returns it)
+//   3. the most common roster length in the field — how a 2v2 event is recognised as 2v2
+//   4. the game registry's nominal size, then 3
+// Pass the row set being partitioned so step 3 reads the incoming teams, not the stale buckets.
+function seedRosterSize(rows) {
+  if (_seedTeamSize > 0) { _seedSizeWhy = 'set by you'; return _seedTeamSize; }
+  const sgg = Number((_seedEvent && (_seedEvent.rosterSize || (_seedEvent.seeding || {}).startggRosterSize)) || 0);
+  if (sgg > 0) { _seedSizeWhy = 'from start.gg'; return sgg; }
+  const modal = seedModalRosterSize(rows || seedAllRows());
+  if (modal > 0) { _seedSizeWhy = 'from the field'; return modal; }
+  const gm = seedGameRosterSize();
+  if (gm > 0) { _seedSizeWhy = 'game default'; return gm; }
+  _seedSizeWhy = 'fallback';
+  return 3;
 }
 function isRosterComplete(row) { return (row.players || []).length >= seedRosterSize(); }
 // Split a combined team list into the active seed board (_seedRows, complete) and the parked Incomplete
 // tab (_seedIncomplete), preserving order within each bucket. Call wherever the full team set is (re)built
 // so completed rosters flow onto the board and short rosters stay out of seeding.
 function seedApplyPartition(allRows) {
-  const size = seedRosterSize();
+  const size = seedRosterSize(allRows);
   _seedRows = (allRows || []).filter((r) => (r.players || []).length >= size);
   _seedIncomplete = (allRows || []).filter((r) => (r.players || []).length < size);
+  seedSyncTeamSizeUI();
+}
+// Reflect the resolved team size in the sidebar (the select stays on "Auto" until overridden; the note
+// spells out the number and where it came from, so a parked Incomplete tab is never a mystery).
+function seedSyncTeamSizeUI() {
+  const sel = el('seed-teamsize'); if (sel) sel.value = _seedTeamSize > 0 ? String(_seedTeamSize) : '';
+  const note = el('seed-teamsize-note'); if (!note) return;
+  const size = seedRosterSize();
+  const parked = _seedIncomplete.length;
+  note.textContent = `${size} per team (${_seedSizeWhy})`
+    + (parked ? ` — ${parked} team${parked !== 1 ? 's' : ''} below that are parked on Incomplete.` : '.');
 }
 
 // Tag a player's rank provenance for the confidence chips (see seed-resolve-core.js). Use for direct
@@ -645,14 +821,16 @@ function seedTeamValue(row) {
   }
   return Math.max(...vals);   // best player (default)
 }
-// Re-derive every player's rankValue under the current mode (after a mode change / import).
+// Re-derive every player's rankValue under the current mode (after a mode change / import). Covers the
+// parked Incomplete teams too, so ranks entered there are already valued when their roster fills in.
 function seedRecomputeValues() {
+  const rows = seedAllRows();
   if (seedIsMMR()) {
     // MMR-canonical (RL): the seed value is the blend of estimates, not a re-parse of the display tier.
-    _seedRows.forEach((row) => (row.players || []).forEach((p) => blendMMRToPlayer(p)));
+    rows.forEach((row) => (row.players || []).forEach((p) => blendMMRToPlayer(p)));
     return;
   }
-  _seedRows.forEach((row) => (row.players || []).forEach((p) => { p.rankValue = seedRankValue(p.rank, _seedMode); }));
+  rows.forEach((row) => (row.players || []).forEach((p) => { p.rankValue = seedRankValue(p.rank, _seedMode); }));
 }
 function seedAggLabel() { return _seedAgg === 'sum' ? 'Sum of players' : _seedAgg === 'avg' ? 'Average of players' : 'Best player'; }
 // Update the topbar chip (team/player count) and connection dot.
@@ -806,8 +984,15 @@ function openSeedingStudio(ev) {
   _seedMode = (savedMode && SEED_RANK_MODES[savedMode]) ? savedMode : seedDefaultMode(_seedEvent.game);
   _seedAgg = ['best', 'avg', 'sum'].includes(sd.agg) ? sd.agg : (_seedMode === 'rl-6mans' ? 'avg' : 'best');
   _seedSortKey = 'rank';
+  // Team size: an explicit override the producer saved for this event, else auto-derive per pull.
+  _seedTeamSize = (typeof sd.teamSize === 'number' && sd.teamSize > 0 && sd.teamSize <= 7) ? sd.teamSize : 0;
   seedPopulateModes(); seedPopulateLeagues();
   const am = el('seed-aggmethod'); if (am) am.value = _seedAgg;
+  seedSyncTeamSizeUI();
+  seedRenderLadderNote();
+  // Adopt the measured rl6mans ELO ladder (server-cached, so normally instant). Fire-and-forget: it
+  // re-values and re-sorts the board when it lands, and seeding stays usable if rl6mans is down.
+  if (seedIsMMR()) seedLoadTierLadder(false);
   if (Array.isArray(sd.entrants) && sd.entrants.length) {
     seedApplyPartition(sd.entrants.map((x) => ({
       entrantId: x.entrantId || '', name: x.name || '', seedNum: x.seedNum || null,
@@ -817,6 +1002,8 @@ function openSeedingStudio(ev) {
         startggSlug: p.startggSlug || null, startggPlayerId: p.startggPlayerId || null,
         source: p.source || '', confidence: p.confidence || 0, sourceDetail: p.sourceDetail || '', elo: p.elo || null,
         estimates: Array.isArray(p.estimates) ? p.estimates : null, seedMMR: (typeof p.seedMMR === 'number') ? p.seedMMR : null,
+        // Restore the producer's override so a reopened board still shows their call, not the blend.
+        override: (p.override && (p.override.tier || Number.isFinite(p.override.mmr))) ? { ...p.override } : undefined,
       })),
       leaguePts: null,
     })));
@@ -875,8 +1062,10 @@ async function seedLoadStartgg() {
     if (!r.ok) throw new Error(data.error || `start.gg returned HTTP ${r.status}`);
     const entrants = data.entrants || [];
     if (!entrants.length) throw new Error('No entrants found for this event on start.gg — check the event URL.');
+    // start.gg's own team size for the event, when it reports one — beats guessing from the game registry.
+    if (data.rosterSize > 0) _seedEvent.rosterSize = data.rosterSize;
     // Preserve any ranks already entered (match by entrantId, then player gamertag) — across both buckets.
-    const prev = {}; [..._seedRows, ..._seedIncomplete].forEach((r2) => { if (r2.entrantId) prev[r2.entrantId] = r2; });
+    const prev = {}; seedAllRows().forEach((r2) => { if (r2.entrantId) prev[r2.entrantId] = r2; });
     const rows = entrants.map((e) => {
       const old = prev[e.entrantId];
       const players = (e.players || []).map((p) => {
@@ -886,7 +1075,12 @@ async function seedLoadStartgg() {
           startggSlug: p.startggSlug || null, startggPlayerId: p.startggPlayerId || null,
           // preserve resolution provenance across a re-pull (rank is kept, so keep its source too)
           source: op ? (op.source || '') : '', confidence: op ? (op.confidence || 0) : 0,
-          sourceDetail: op ? (op.sourceDetail || '') : '', elo: op ? (op.elo || null) : null };
+          sourceDetail: op ? (op.sourceDetail || '') : '', elo: op ? (op.elo || null) : null,
+          // …and the full derivation plus the producer's override. Re-pulling the roster from start.gg
+          // must never silently undo a rank decision someone already made.
+          estimates: (op && Array.isArray(op.estimates)) ? op.estimates : null,
+          auto: (op && op.auto) ? op.auto : null,
+          override: (op && seedIsOverridden(op)) ? { ...op.override } : undefined };
       });
       return { entrantId: e.entrantId, name: e.name, seedNum: e.seedNum || null, players, leaguePts: null, perfScore: null };
     });
@@ -894,7 +1088,7 @@ async function seedLoadStartgg() {
     seedApplyPartition(rows);
     seedRecomputeValues();
     if (_seedLeagueId) seedApplyLeague(); else seedRender();
-    const incNote = _seedIncomplete.length ? ` · ${_seedIncomplete.length} incomplete roster(s) parked on the Incomplete tab (need ${seedRosterSize()} players)` : '';
+    const incNote = _seedIncomplete.length ? ` · ${_seedIncomplete.length} roster(s) under ${seedRosterSize()} players parked on the Incomplete tab — change Team size in the sidebar if this event isn't ${seedRosterSize()}v${seedRosterSize()}` : '';
     seedStatus(`✓ Imported ${rows.length} teams · ${totalPlayers} players from start.gg${incNote}. Enter ranks or import a CSV, then Sort by Rank.`, 'ok');
   } catch (e) {
     seedStatus(`Pull failed — ${e.message || 'unknown error'}`, 'err');
@@ -971,8 +1165,122 @@ function seedRankAlertLevel(rank, modeKey) {
 }
 
 // ── Resolution confidence display ──────────────────────────────────────────
-const SEED_SRC_LABEL = { sixmans: '6MANS', tracker: 'TRACKER', manual: 'MANUAL', ourEvents: 'OUR EVENTS', startgg: 'START.GG', teammate: 'TEAM AVG' };
+const SEED_SRC_LABEL = { sixmans: '6MANS', tracker: 'TRACKER', manual: 'MANUAL', ourEvents: 'OUR EVENTS', startgg: 'START.GG', teammate: 'TEAM AVG', override: 'YOUR CALL' };
+const SEED_SRC_SHORT = { sixmans: '6mans', tracker: 'tracker', manual: 'manual', ourEvents: 'our-events', startgg: 'start.gg', teammate: 'team avg', override: 'your call' };
+// Plain-English "where this came from", shown in the why-panel so a producer never has to guess what
+// a source chip means or how far to trust it.
+const SEED_SRC_WHY = {
+  sixmans:   'Verified on rl6mans.com — their real hub ELO. The strongest source there is.',
+  tracker:   'tracker.gg in-game rank, converted to a 6mans tier. A fallback: the RL ladder only maps onto the bottom of the 6mans ladder.',
+  manual:    'A rank you imported (CSV) or that was restored from a saved board.',
+  ourEvents: 'Correlated from how their team placed in our own past events.',
+  startgg:   'Correlated from their recent start.gg placements.',
+  teammate:  'No reading at all for this player — estimated from their teammates. Treat as a placeholder.',
+  override:  'You typed this in. It overrides everything the sources said.',
+};
 function seedConfColor(c) { return c >= 85 ? '#48bb78' : c >= 60 ? '#4299e1' : c >= 40 ? '#d69e2e' : '#718096'; }
+// ── Review queue ───────────────────────────────────────────────────────────
+// Automation is only safe if the things it wasn't sure about surface by themselves. A player needs a
+// human decision when auto resolved them weakly, or leaned on a teammate (no reading of their own),
+// or found nothing at all. An override is by definition already reviewed — it's your call.
+let _seedReviewOnly = false;         // board filter: show only teams containing flagged players
+let _seedReviewThreshold = 70;       // confidence below which a player is flagged
+function seedNeedsReview(p) {
+  if (!p) return false;
+  if (seedIsOverridden(p)) return false;              // you already decided this one
+  if (!p.source || !p.confidence) return true;        // nothing resolved it
+  if (p.source === 'teammate') return true;           // borrowed from teammates — never a real reading
+  return (p.confidence || 0) < _seedReviewThreshold;
+}
+// Counts the SEED BOARD only, not the parked Incomplete teams — those are out of seeding entirely, so
+// including them would show a review backlog the filter can't actually surface.
+function seedReviewCounts() {
+  let total = 0, flagged = 0, overridden = 0;
+  _seedRows.forEach((r) => (r.players || []).forEach((p) => {
+    total++;
+    if (seedIsOverridden(p)) overridden++;
+    else if (seedNeedsReview(p)) flagged++;
+  }));
+  return { total, flagged, overridden, clean: total - flagged - overridden };
+}
+function seedRenderReviewStat() {
+  const box = el('seed-review-stat'); if (!box) return;
+  const c = seedReviewCounts();
+  if (!c.total) { box.innerHTML = '<span class="seed-review-none">No players loaded yet.</span>'; return; }
+  const pct = Math.round((c.clean / c.total) * 100);
+  box.innerHTML = `<div class="seed-review-bar" title="${c.clean} confident · ${c.flagged} need review · ${c.overridden} set by you">`
+    + `<span class="seed-review-ok" style="flex:${c.clean || 0}"></span>`
+    + `<span class="seed-review-warn" style="flex:${c.flagged || 0}"></span>`
+    + `<span class="seed-review-ovr" style="flex:${c.overridden || 0}"></span></div>`
+    + `<div class="seed-review-nums"><b>${c.flagged}</b> need review · ${c.clean} confident (${pct}%)`
+    + (c.overridden ? ` · <span class="seed-review-ovr-txt">${c.overridden} yours</span>` : '') + '</div>';
+  const btn = el('seed-review-toggle');
+  if (btn) {
+    btn.textContent = _seedReviewOnly ? 'Show all teams' : `Show only needs-review${c.flagged ? ` (${c.flagged})` : ''}`;
+    btn.disabled = !c.flagged && !_seedReviewOnly;
+  }
+}
+
+// ── "Why is this player this rank?" ────────────────────────────────────────
+// Automation is only trustworthy if you can audit it. This renders the full derivation for one
+// player: every source that had an opinion, what each one claimed, how much pull it got in the
+// blend, and — when you've overridden it — what auto would have said instead.
+// Keyed by "teamIdx:playerIdx" so a redraw keeps the open panels open.
+const _seedWhyOpen = new Set();
+function seedWhyKey(ti, pi) { return `${ti}:${pi}`; }
+// Share of the blend each estimate actually carried, as a percentage. Mirrors blendEstimates' k=5
+// weighting so the numbers on screen are the real ones, not a re-derivation that could drift.
+function seedEstimateWeights(estimates) {
+  const est = (estimates || []).filter((e) => e && Number.isFinite(e.mmr) && (e.confidence || 0) > 0);
+  const ws = est.map((e) => Math.pow((e.confidence || 0) / 100, 5));
+  const total = ws.reduce((a, b) => a + b, 0);
+  return est.map((e, i) => ({ est: e, weight: total > 0 ? (ws[i] / total) * 100 : 0 }));
+}
+function seedWhyPanel(p, ti, pi) {
+  if (!_seedWhyOpen.has(seedWhyKey(ti, pi))) return '';
+  const esc = (s) => (s || '').toString().replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+  const rows = [];
+
+  if (seedIsOverridden(p)) {
+    const auto = p.auto
+      ? `Auto-resolve says <b>${esc(p.auto.rank)}</b>${seedIsMMR() ? ` (${p.auto.mmr})` : ''} at ${p.auto.confidence}% confidence.`
+      : 'Auto-resolve has nothing for this player.';
+    rows.push(`<div class="seed-why-override"><b>Your override — ${esc(p.rank)}</b>${seedIsMMR() && Number.isFinite(p.override.mmr) ? ` (${Math.round(p.override.mmr)})` : ''}`
+      + `<div class="seed-why-sub">This is what seeds. ${auto}</div>`
+      + `<button class="btn btn-ghost btn-xs seed-why-revert" data-ti="${ti}" data-pi="${pi}">Revert to auto</button></div>`);
+  }
+
+  if (seedIsMMR()) {
+    const weighted = seedEstimateWeights(p.estimates);
+    if (!weighted.length) {
+      rows.push('<div class="seed-why-empty">No source has a reading for this player yet. Run Resolve, or type a rank to set it yourself.</div>');
+    } else {
+      const sorted = weighted.slice().sort((a, b) => b.weight - a.weight);
+      rows.push('<table class="seed-why-tbl"><thead><tr><th>Source</th><th>Says</th><th>Conf</th><th>Pull</th></tr></thead><tbody>'
+        + sorted.map(({ est, weight }) => {
+            const col = seedConfColor(est.confidence);
+            const says = est.exactElo > 0 ? `${est.exactElo} ELO` : `${est.tier ? esc(est.tier) + ' · ' : ''}${Math.round(est.mmr)}`;
+            return `<tr title="${esc(SEED_SRC_WHY[est.source] || '')}${est.detail ? ' — ' + esc(est.detail) : ''}">`
+              + `<td><span class="seed-why-src" style="color:${col}">${esc(SEED_SRC_SHORT[est.source] || est.source)}</span></td>`
+              + `<td>${says}</td><td>${est.confidence}%</td>`
+              + `<td><span class="seed-why-bar"><span style="width:${Math.max(2, Math.round(weight))}%;background:${col}"></span></span>${Math.round(weight)}%</td></tr>`;
+          }).join('')
+        + '</tbody></table>');
+      if (p.auto) rows.push(`<div class="seed-why-sub">Weighted blend → <b>${esc(p.auto.rank)}</b> (${p.auto.mmr}) at ${p.auto.confidence}% confidence. `
+        + `Confidence is sharpened by a power of 5, so the best source dominates rather than being averaged away.</div>`);
+      // The tier letters above are only meaningful against the ladder they were converted through.
+      const tierDerived = weighted.some(({ est }) => est.tier && !(est.exactElo > 0));
+      if (tierDerived && _seedLadderMeta) rows.push(`<div class="seed-why-sub">Tier→ELO via the ${_seedLadderMeta.measuredTiers ? 'measured' : 'built-in'} ladder: `
+        + (window.SeedResolveCore ? window.SeedResolveCore.SIXMANS_TIERS : []).map((t, i) => `${t} ${_seedMidpoints[i]}`).join(' · ') + '</div>');
+    }
+  } else if (p.auto) {
+    rows.push(`<div class="seed-why-sub">Auto-resolve: <b>${esc(p.auto.rank)}</b> from <b>${esc(SEED_SRC_SHORT[p.auto.source] || p.auto.source)}</b> at ${p.auto.confidence}% — ${esc(SEED_SRC_WHY[p.auto.source] || '')}${p.auto.detail ? '<br>' + esc(p.auto.detail) : ''}</div>`);
+  } else {
+    rows.push('<div class="seed-why-empty">No source has a reading for this player yet.</div>');
+  }
+
+  return `<div class="seed-why">${rows.join('')}</div>`;
+}
 // A small "SOURCE · NN%" pill showing how a player's rank was resolved (title = the detail string).
 function seedConfidenceChip(p) {
   if (!p || !p.source || !p.confidence) return '';
@@ -1023,9 +1331,19 @@ function seedRender() {
   seedOrderLabel();
   seedUpdateHeader();
   seedUpdateTabCounts();
+  seedRenderReviewStat();
   list.innerHTML = '';
   if (!_seedRows.length) { list.innerHTML = '<div class="seed-empty">No teams yet — Pull from Platform or Import a CSV.</div>'; return; }
   const esc = (s) => (s || '').toString().replace(/&/g, '&amp;').replace(/</g, '&lt;');
+  // Review filter — hide teams where every player is already settled. Seed numbers still come from
+  // the real board position (seedRenumber ran above), so a filtered view never renumbers anything.
+  const visible = _seedReviewOnly
+    ? _seedRows.map((r, i) => ({ row: r, i })).filter(({ row }) => (row.players || []).some((p) => seedNeedsReview(p)))
+    : _seedRows.map((r, i) => ({ row: r, i }));
+  if (_seedReviewOnly && !visible.length) {
+    list.innerHTML = '<div class="seed-empty">Nothing left to review — every player is either confidently resolved or set by you. Switch back to all teams to see the full board.</div>';
+    return;
+  }
   const mode = seedMode();
   // Typeahead datalist of tier names for tier-based games.
   let listId = '';
@@ -1038,7 +1356,7 @@ function seedRender() {
       : mode.tiers.flatMap((t) => ['III', 'II', 'I'].map((d) => `${t} ${d}`));
     dl.innerHTML = opts.map((o) => `<option value="${esc(o)}">`).join('');
   }
-  _seedRows.forEach((row, i) => {
+  visible.forEach(({ row, i }) => {
     const card = document.createElement('div'); card.className = 'seed-team'; card.draggable = true; card.dataset.idx = i;
     const lpts = row.leaguePts != null ? `<span class="seed-lpts" title="League points (returning team)">${row.leaguePts} pts</span>` : '';
     const disp = seedTeamDisplay(row);
@@ -1057,8 +1375,12 @@ function seedRender() {
           const alertTitle = alert === 'flag-high' ? ' title="High-tier rank — double-check before finalising seeds"'
                            : alert === 'flag'      ? ' title="Mid-tier rank — verify before finalising seeds"'
                            : ' title="Player rank — sets this team\'s seed value"';
-          return `<div class="seed-player"><div class="seed-player-id"><span class="seed-ptag" title="${esc(p.gamerTag)}">${esc(p.gamerTag) || '(player)'}</span>${playerProfileChips(p.gamerTag)}${seedConfidenceChip(p)}</div>`
-            + `<input class="input-text seed-prank${alertClass}" data-pi="${pi}" value="${esc(p.rank)}" placeholder="${esc(mode.ph || 'rank')}"${listId ? ` list="${listId}"` : ''}${alertTitle}></div>`;
+          const ovr = seedIsOverridden(p);
+          const rev = !ovr && seedNeedsReview(p);
+          return `<div class="seed-player${ovr ? ' seed-player-ovr' : ''}${rev ? ' seed-player-review' : ''}"><div class="seed-player-id"><span class="seed-ptag" title="${esc(p.gamerTag)}">${esc(p.gamerTag) || '(player)'}</span>${playerProfileChips(p.gamerTag)}${seedConfidenceChip(p)}`
+            + `<button class="seed-why-btn${_seedWhyOpen.has(seedWhyKey(i, pi)) ? ' open' : ''}" data-ti="${i}" data-pi="${pi}" title="Why is this player this rank? Shows every source, what it claimed, and how much it counted.">why</button></div>`
+            + `<input class="input-text seed-prank${alertClass}${ovr ? ' seed-prank-ovr' : ''}" data-pi="${pi}" value="${esc(p.rank)}" placeholder="${esc(mode.ph || 'rank')}"${listId ? ` list="${listId}"` : ''}${ovr ? ' title="Your override — auto-resolve will not change this. Clear the box to go back to auto."' : alertTitle}>`
+            + seedWhyPanel(p, i, pi) + `</div>`;
         }).join('')
       : '<div class="seed-noplayers">No players listed — Pull from Platform or add a player column to your CSV.</div>';
     card.innerHTML = head + `<div class="seed-players-wrap">${players}</div>`;
@@ -1068,17 +1390,28 @@ function seedRender() {
       inp.addEventListener('change', function () {
         const p = row.players[+this.dataset.pi]; if (!p) return;
         const typed = this.value.trim();
-        if (seedIsMMR()) {
-          const est = seedEstManual(typed);
-          if (est) seedApplyEstimate(p, est); else seedRemoveEstimate(p, 'manual');
-        } else {
-          p.rank = typed; p.rankValue = seedRankValue(p.rank, _seedMode);
-          if (p.rank) seedTagSource(p, 'manual', 60, 'Entered manually'); else seedTagSource(p, '', 0, '');
-        }
+        // Typing in the box is an override, not a vote — see seedSetOverride. Clearing it reverts to auto.
+        if (!typed) { seedClearOverride(p); seedStatus(`${p.gamerTag || 'Player'} reverted to the auto-resolved rank.`); }
+        else if (seedSetOverride(p, typed)) seedStatus(`${p.gamerTag || 'Player'} set to ${p.rank} — your override, locked against auto-resolve. Save to keep it.`, 'ok');
+        else { seedStatus(`"${typed}" isn't a rank this mode understands (${seedMode().ph || 'see the list'}) — not applied.`, 'err'); this.value = p.rank || ''; return; }
         seedRender();   // redraw so the source/confidence chip + team badge update
       });
     });
-    card.addEventListener('dragstart', (e) => { if (e.target.classList && e.target.classList.contains('seed-prank')) { e.preventDefault(); return; } _seedDragIdx = i; card.classList.add('dragging'); });
+    // "why" toggles the derivation panel; the panel's Revert drops the override back to auto.
+    card.querySelectorAll('.seed-why-btn').forEach((b) => b.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const k = seedWhyKey(+b.dataset.ti, +b.dataset.pi);
+      if (_seedWhyOpen.has(k)) _seedWhyOpen.delete(k); else _seedWhyOpen.add(k);
+      seedRender();
+    }));
+    card.querySelectorAll('.seed-why-revert').forEach((b) => b.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const p = (_seedRows[+b.dataset.ti] || {}).players?.[+b.dataset.pi]; if (!p) return;
+      seedClearOverride(p);
+      seedStatus(`${p.gamerTag || 'Player'} back to auto — ${p.rank || 'no reading'}${p.confidence ? ` (${p.confidence}%)` : ''}.`);
+      seedRender();
+    }));
+    card.addEventListener('dragstart', (e) => { if (e.target.classList && (e.target.classList.contains('seed-prank') || e.target.classList.contains('seed-why-btn'))) { e.preventDefault(); return; } _seedDragIdx = i; card.classList.add('dragging'); });
     card.addEventListener('dragend', () => { _seedDragIdx = -1; card.classList.remove('dragging'); });
     card.addEventListener('dragover', (e) => { e.preventDefault(); card.classList.add('drag-over'); });
     card.addEventListener('dragleave', () => card.classList.remove('drag-over'));
@@ -1109,8 +1442,9 @@ function seedRenderIncomplete() {
     return;
   }
   const head = `<div class="seed-status" style="display:block;margin:0 0 8px;line-height:1.55;">`
-    + `These teams have fewer than <b>${size}</b> players on start.gg, so they're held out of seeding. `
+    + `These teams have fewer than <b>${size}</b> players on start.gg (${_seedSizeWhy}), so they're held out of seeding. `
     + `Re-pull once their rosters fill and they move onto the seed board automatically. `
+    + `If this event isn't ${size}v${size}, set <b>Team size</b> in the sidebar and they'll all seed. `
     + `<button class="btn btn-secondary btn-xs" id="seed-inc-repull" title="Pull teams + rosters from start.gg again">↻ Re-pull from start.gg</button></div>`;
   const cards = _seedIncomplete.map((row) => {
     const have = (row.players || []).length;
@@ -1284,7 +1618,7 @@ function seedApplySixmans(p, match, conf, detail) {
     if (tierVal == null || tierVal > maxV) return false;
     rank = match.rank; rankValue = tierVal;
   }
-  const applied = SRC.resolveApply(p, { source: 'sixmans', confidence: conf, rank, rankValue, detail });
+  const applied = seedResolveApply(p, { source: 'sixmans', confidence: conf, rank, rankValue, detail });
   if (applied && match.elo) p.elo = match.elo;
   return applied;
 }
@@ -1297,6 +1631,7 @@ async function seedAutoResolve() {
   if (!_seedRows.length) { seedStatus('No teams to resolve — pull a roster first.', 'err'); return; }
   _autoResolveAbort = false;
   if (btn) { btn.dataset.running = '1'; btn.textContent = 'Cancel'; btn.classList.add('btn-danger'); }
+  _seedReviewOnly = false;   // a fresh run re-evaluates the whole field; don't leave a stale filter on
   const mode = seedMode();
   const numRange = SEED_NUM_RANGE[_seedMode];
   const abort = () => _autoResolveAbort;
@@ -1369,6 +1704,35 @@ async function seedAutoResolve() {
     }
     if (abort()) throw 'abort';
 
+    // Pass D2 — tracker.gg for anyone rl6mans didn't verify. This used to be a separate manual trip to
+    // the Unverified tab; folding it in means one button really does resolve the whole field. It's the
+    // slow pass (~1-2s/player, in-app browser) so it only touches players still without a 6mans
+    // reading, and it's skippable via the sidebar checkbox.
+    const wantTracker = el('seed-resolve-tracker') ? el('seed-resolve-tracker').checked : true;
+    if (wantTracker && seedIsMMR()) {
+      const targets = [];
+      _seedRows.forEach((row, ti) => (row.players || []).forEach((p, pi) => {
+        if (seedIsOverridden(p)) return;                                        // your call — don't spend a lookup
+        if ((p.estimates || []).some((e) => e.source === 'sixmans')) return;     // already has the better source
+        if ((p.estimates || []).some((e) => e.source === 'tracker')) return;     // already tried this run
+        targets.push({ ti, pi, p });
+      }));
+      for (let i = 0; i < targets.length; i++) {
+        if (abort()) throw 'abort';
+        const t = targets[i];
+        seedStatus(`Resolve — tracker.gg ${i + 1}/${targets.length} (${t.p.gamerTag || 'player'})…`);
+        if (btn) btn.textContent = `Cancel · tracker ${i + 1}/${targets.length}`;
+        try {
+          const h = seedTgHandle(t.p);
+          if (!h || !h.username) continue;
+          const data = await _tgLookupByAccount(t.ti, t.pi, h.platform, h.username);
+          const est = seedEstTracker(data, 85, `tracker.gg · ${data && data.tier ? data.tier : 'rank'}`);
+          if (est) seedApplyEstimate(t.p, est);
+        } catch (_) { /* one player failing must never abort the run */ }
+      }
+    }
+    if (abort()) throw 'abort';
+
     // Pass E — placement→value correlation, calibrated from this event's resolved players.
     const seedVal = (p) => seedIsMMR() ? p.seedMMR : p.rankValue;   // the value anchors/blend use
     const anchorsOE = [], anchorsSG = [];
@@ -1390,8 +1754,8 @@ async function seedAutoResolve() {
     } else {
       _seedRows.forEach((row) => (row.players || []).forEach((p) => {
         if ((p.confidence || 0) > 0) return;
-        if (row._teamScore != null) { const c = SRC.correlate(row._teamScore, mode, fitOE, { numRange }); if (c) SRC.resolveApply(p, { source: 'ourEvents', confidence: SRC.sourceConfidence('ourEvents', c.r2, c.inRange), rank: c.rank, rankValue: c.rankValue, detail: `our-events ${Math.round(row._teamScore)}% → ${c.rank}` }); }
-        if ((p.confidence || 0) === 0 && p._startggScore != null) { const c = SRC.correlate(p._startggScore, mode, fitSG, { numRange }); if (c) SRC.resolveApply(p, { source: 'startgg', confidence: SRC.sourceConfidence('startgg', c.r2, c.inRange), rank: c.rank, rankValue: c.rankValue, detail: `start.gg ${Math.round(p._startggScore)} → ${c.rank}` }); }
+        if (row._teamScore != null) { const c = SRC.correlate(row._teamScore, mode, fitOE, { numRange }); if (c) seedResolveApply(p, { source: 'ourEvents', confidence: SRC.sourceConfidence('ourEvents', c.r2, c.inRange), rank: c.rank, rankValue: c.rankValue, detail: `our-events ${Math.round(row._teamScore)}% → ${c.rank}` }); }
+        if ((p.confidence || 0) === 0 && p._startggScore != null) { const c = SRC.correlate(p._startggScore, mode, fitSG, { numRange }); if (c) seedResolveApply(p, { source: 'startgg', confidence: SRC.sourceConfidence('startgg', c.r2, c.inRange), rank: c.rank, rankValue: c.rankValue, detail: `start.gg ${Math.round(p._startggScore)} → ${c.rank}` }); }
       }));
     }
 
@@ -1402,7 +1766,7 @@ async function seedAutoResolve() {
       const avg = resolved.reduce((s, p) => s + seedVal(p), 0) / resolved.length;
       (row.players || []).forEach((p) => {
         if (seedIsMMR()) { if (!(p.estimates && p.estimates.length)) seedApplyEstimate(p, { source: 'teammate', mmr: Math.round(avg), confidence: 15, detail: `avg of ${resolved.length} teammate(s)` }); }
-        else if ((p.confidence || 0) === 0) { const snap = SRC.snapRankValue(avg, mode); if (snap) SRC.resolveApply(p, { source: 'teammate', confidence: 15, rank: snap.rank, rankValue: snap.rankValue, detail: `avg of ${resolved.length} teammate(s)` }); }
+        else if ((p.confidence || 0) === 0) { const snap = SRC.snapRankValue(avg, mode); if (snap) seedResolveApply(p, { source: 'teammate', confidence: 15, rank: snap.rank, rankValue: snap.rankValue, detail: `avg of ${resolved.length} teammate(s)` }); }
       });
     });
 
@@ -1410,14 +1774,15 @@ async function seedAutoResolve() {
     seedSort('rank');
     seedRender();
     if (_seedTab === 'unverified') seedRenderUnverified();
-    const totalP = _seedRows.reduce((s, r) => s + (r.players || []).length, 0);
-    const resolvedP = _seedRows.reduce((s, r) => s + (r.players || []).filter((p) => (p.confidence || 0) > 0).length, 0);
-    seedStatus(`Auto-resolve complete — ${resolvedP}/${totalP} players resolved. Review the source chips; use the Unverified tab's “Lookup All” for tracker.gg on any stragglers.`, 'ok');
+    const c = seedReviewCounts();
+    seedStatus(c.flagged
+      ? `Resolved ${c.clean + c.flagged}/${c.total} players — ${c.flagged} need a decision. Hit "Show only needs-review" in step 3, then type a rank on any of them to override it.`
+      : `Resolved all ${c.total} players confidently${c.overridden ? ` (${c.overridden} were already your call)` : ''}. Click "why" on any player to see how. Save when you're happy.`, 'ok');
   } catch (e) {
     if (e === 'abort') { seedRecomputeValues(); seedSort('rank'); seedRender(); seedStatus('Auto-resolve cancelled — kept everything resolved so far.', 'warn'); }
     else { console.error('[seed-auto-resolve]', e); seedStatus('Auto-resolve error: ' + (e && e.message || e), 'err'); }
   } finally {
-    if (btn) { btn.dataset.running = ''; btn.textContent = 'Auto-resolve ranks'; btn.classList.remove('btn-danger'); }
+    if (btn) { btn.dataset.running = ''; btn.textContent = 'Resolve all ranks'; btn.classList.remove('btn-danger'); }
   }
 }
 
@@ -1430,7 +1795,7 @@ function seedSave() {
   if (!_seedEvent) return;
   // Persist BOTH the seeded board and the parked Incomplete rosters (board first so its order is kept
   // on reload; seedApplyPartition re-derives the buckets from player counts when the studio reopens).
-  const entrants = [..._seedRows, ..._seedIncomplete].map((r) => ({
+  const entrants = seedAllRows().map((r) => ({
     entrantId: r.entrantId || '', name: r.name || '', seedNum: r.seedNum || null,
     players: (r.players || []).map((p) => ({
       gamerTag: p.gamerTag || '', rank: p.rank || '',
@@ -1442,9 +1807,12 @@ function seedSave() {
       // reproduces the exact seed + chips without re-running lookups).
       seedMMR: (typeof p.seedMMR === 'number') ? p.seedMMR : null,
       estimates: Array.isArray(p.estimates) ? p.estimates.map((e) => ({ source: e.source, mmr: e.mmr, confidence: e.confidence, tier: e.tier || null, exactElo: e.exactElo || null, detail: e.detail || '' })) : null,
+      // The producer's own call. Persisted separately from the estimates so it survives a re-pull and
+      // re-resolve — it's a decision, not a reading.
+      override: seedIsOverridden(p) ? { tier: p.override.tier || '', mmr: Number.isFinite(p.override.mmr) ? p.override.mmr : null, rankValue: Number.isFinite(p.override.rankValue) ? p.override.rankValue : null, at: p.override.at || null } : null,
     })),
   }));
-  send('set_event_seeding', { id: _seedEvent.id, source: _seedEvent.seeding?.source || 'startgg', rankMode: _seedMode, agg: _seedAgg, entrants });
+  send('set_event_seeding', { id: _seedEvent.id, source: _seedEvent.seeding?.source || 'startgg', rankMode: _seedMode, agg: _seedAgg, teamSize: _seedTeamSize, startggRosterSize: (_seedEvent.rosterSize || 0), entrants });
   seedStatus(`Saved · ${entrants.length} teams · ${seedMode().label} · ${seedAggLabel()}.`, 'ok');
 }
 async function seedPushStartgg() {
@@ -1553,8 +1921,9 @@ function seedCsvPreview() {
   const rankCol  = parseInt(el('seed-csv-col-rank')?.value  ?? '-1');
   const rows = _pendingCsvRows;
 
-  // BUILD mode — no start.gg roster; echo what the column selections pick up from rows 2–4.
-  if (_seedRows.length === 0) {
+  // BUILD mode — no start.gg roster at all (board AND Incomplete empty); echo what the column
+  // selections pick up from rows 2–4.
+  if (seedAllRows().length === 0) {
     const samples = rows.slice(1, 4).map((r, ri) => {
       const parts = [
         teamCol  >= 0 ? esc((r[teamCol]  || '').toString().trim()) : null,
@@ -1568,10 +1937,10 @@ function seedCsvPreview() {
     return;
   }
 
-  // MERGE mode — build lookup (same logic as seedExecuteCsvImport).
+  // MERGE mode — build lookup (same logic as seedExecuteCsvImport; both buckets, see the note there).
   const byGamer = new Map();
   const byTeamGamer = new Map();
-  _seedRows.forEach((sggRow) => {
+  seedAllRows().forEach((sggRow) => {
     const normTeam = sggRow.name.toLowerCase().replace(/[^a-z0-9]/g, '');
     (sggRow.players || []).forEach((p) => {
       if (!p.gamerTag) return;
@@ -1612,7 +1981,7 @@ function seedCsvPreview() {
 
   if (allMatches.length === 0) {
     // No matches at all — show a comparison so the user understands the mismatch.
-    const sggSample = _seedRows.flatMap((r) => (r.players || []).map((p) => p.gamerTag)).slice(0, 3).join(', ');
+    const sggSample = seedAllRows().flatMap((r) => (r.players || []).map((p) => p.gamerTag)).slice(0, 3).join(', ');
     previewEl.className = 'seed-csv-prev seed-csv-prev-warn';
     previewEl.innerHTML = `
       <span class="seed-csv-prev-lbl">✗ No matches — check column selection</span>
@@ -1711,14 +2080,16 @@ function seedCsvConfirm() {
 // teamCol: CSV column index for the team/squad name (-1 = not provided)
 function seedExecuteCsvImport(rows, teamCol, gamerCol, rankCol) {
   // ── MERGE MODE: roster already loaded from start.gg ─────────────────────
-  if (_seedRows.length > 0) {
+  // Gate and index on BOTH buckets: a team parked on Incomplete still takes ranks, so its players must
+  // be matchable (otherwise their CSV rows come back as "not matched" and the ranks silently vanish).
+  if (seedAllRows().length > 0) {
     if (rankCol < 0) { seedStatus('No rank column selected — re-import and pick one.', 'err'); return; }
 
     // byGamer: gamerTag → player (fuzzy fallback)
     const byGamer = new Map();
     // byTeamGamer: "normTeam|normGamer" → player (precise match when team col is set)
     const byTeamGamer = new Map();
-    _seedRows.forEach((row) => {
+    seedAllRows().forEach((row) => {
       const normTeam = row.name.toLowerCase().replace(/[^a-z0-9]/g, '');
       (row.players || []).forEach((p) => {
         if (!p.gamerTag) return;
@@ -1769,7 +2140,7 @@ function seedExecuteCsvImport(rows, teamCol, gamerCol, rankCol) {
 
     if (notFound.length) {
       const csvSample = notFound.slice(0, 4).join(', ');
-      const sggSample = _seedRows.flatMap((r) => (r.players || []).map((p) => p.gamerTag)).slice(0, 3).join(', ');
+      const sggSample = seedAllRows().flatMap((r) => (r.players || []).map((p) => p.gamerTag)).slice(0, 3).join(', ');
       const all = matched === 0;
       const warn = all
         ? `All ${notFound.length} unmatched — wrong column? CSV: ${csvSample}. start.gg: ${sggSample}…`
@@ -1843,6 +2214,42 @@ el('seed-aggmethod')?.addEventListener('change', function () {
   _seedAgg = this.value; seedRecomputeValues();
   seedSort('rank');
   seedStatus(`Team rank = ${seedAggLabel()} — sorted by rank.`);
+});
+// Team size re-partitions the board against the new expectation — teams that were parked on Incomplete
+// only because the game's default format was bigger than this event's flow straight back onto the board.
+el('seed-teamsize')?.addEventListener('change', function () {
+  const n = parseInt(this.value || '0', 10);
+  _seedTeamSize = (n > 0 && n <= 7) ? n : 0;
+  seedApplyPartition(seedAllRows());
+  seedRecomputeValues();
+  if (_seedLeagueId) seedApplyLeague();
+  seedSort(_seedSortKey);
+  const size = seedRosterSize();
+  seedStatus(`Team size ${size} — ${_seedRows.length} team(s) on the board, ${_seedIncomplete.length} parked on Incomplete.`, 'ok');
+});
+el('seed-calibrate-ladder')?.addEventListener('click', () => seedLoadTierLadder(true));
+// Review controls — the manual-oversight pass over whatever automation wasn't sure about.
+el('seed-review-toggle')?.addEventListener('click', () => {
+  _seedReviewOnly = !_seedReviewOnly;
+  seedRender();
+  const c = seedReviewCounts();
+  seedStatus(_seedReviewOnly
+    ? `Showing only the ${c.flagged} player(s) that need a decision. Type a rank on any of them to override it.`
+    : 'Showing the full board.');
+});
+el('seed-review-threshold')?.addEventListener('change', function () {
+  _seedReviewThreshold = parseInt(this.value, 10) || 70;
+  seedRender();
+  const c = seedReviewCounts();
+  seedStatus(`Flagging anything under ${_seedReviewThreshold > 100 ? 'a verified reading' : _seedReviewThreshold + '%'} — ${c.flagged} player(s) need review.`);
+});
+// Open every flagged player's why-panel at once so the whole review can be audited in one scroll.
+el('seed-review-expand')?.addEventListener('click', () => {
+  const before = _seedWhyOpen.size;
+  _seedRows.forEach((r, ti) => (r.players || []).forEach((p, pi) => { if (seedNeedsReview(p)) _seedWhyOpen.add(seedWhyKey(ti, pi)); }));
+  if (_seedWhyOpen.size === before && before > 0) _seedWhyOpen.clear();   // second click collapses
+  seedRender();
+  seedStatus(_seedWhyOpen.size ? `Explained ${_seedWhyOpen.size} flagged player(s) — click "Explain all flagged" again to collapse.` : 'Collapsed all explanations.');
 });
 el('seed-copy')?.addEventListener('click', seedCopyList);
 el('seed-save')?.addEventListener('click', seedSave);

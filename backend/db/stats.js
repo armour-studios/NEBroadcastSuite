@@ -783,6 +783,37 @@ function getPlayerEventStats(playerName, tournament) {
   return { games, wins, goals, assists, saves, gpg: games ? +(goals / games).toFixed(1) : 0 };
 }
 
+// Find the single closest RL game to a given timestamp (a replay file's mtime) — the only signal
+// the replay-history renamer uses to match a file to a played game (no binary .replay parsing).
+// Deliberately NOT scoped by league/tournament — state.leagues <-> DB.matches only has a loose
+// free-text substring link (see getPlayerEventStats above), and a replay's timestamp is already a
+// precise, strong signal on its own. Cross-event collisions on one PC within toleranceMs are a rare,
+// accepted limitation. Returns null when nothing recorded falls within toleranceMs of timestampMs.
+function findNearestRlGame(timestampMs, toleranceMs) {
+  const DB = _source();
+  let best = null, bestDelta = Infinity;
+  for (const g of DB.games) {
+    if (g.game_type !== 'rl') continue;
+    const t = g.ended_at || g.started_at;
+    if (!t) continue;
+    const delta = Math.abs(t - timestampMs);
+    if (delta > toleranceMs || delta >= bestDelta) continue;
+    bestDelta = delta; best = g;
+  }
+  if (!best) return null;
+  const m = DB.matches.find((r) => r.id === best.match_id);
+  if (!m) return null;   // orphaned game row (parent match deleted) — treat as no match
+  return {
+    matchId: m.id, gameId: best.id, gameNumber: best.game_number,
+    teamA: m.team_a || '', teamB: m.team_b || '',
+    // best.score_a/b is the INDIVIDUAL game's score — what the replay filename wants, not the series tally.
+    scoreA: typeof best.score_a === 'number' ? best.score_a : 0,
+    scoreB: typeof best.score_b === 'number' ? best.score_b : 0,
+    startedAt: best.started_at || m.started_at,
+    deltaMs: bestDelta
+  };
+}
+
 module.exports = {
   init, close,
   startMatch, endMatch,
@@ -795,5 +826,6 @@ module.exports = {
   getPlayerProfile, listPlayers, getPlayerEventStats,
   getMapStats, getPacing, getTournaments, getStartggSetIds,
   getDashboard, getFilterOptions,
+  findNearestRlGame,
   deleteMatch, clearAllMatches, deleteMatchesByTeam, deletePlayerStats
 };

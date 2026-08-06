@@ -100,10 +100,16 @@ class TwitchClient {
     return res.data.data?.[0] || null;
   }
 
-  async getClips(broadcasterId, { cursor, first = 100 } = {}) {
+  // startedAt/endedAt are RFC3339 strings — Helix requires BOTH ends of the window (given only
+  // started_at it returns the following week, which is not what "last 7 days" means to anyone).
+  async getClips(broadcasterId, { cursor, first = 100, startedAt, endedAt } = {}) {
     try {
       const params = { broadcaster_id: broadcasterId, first: Math.min(Number(first) || 100, 100) };
       if (cursor) params.after = cursor;
+      if (startedAt) {
+        params.started_at = startedAt;
+        params.ended_at   = endedAt || new Date().toISOString();
+      }
       const res = await axios.get(`${TWITCH_API_BASE}/clips`, { params, headers: this.headers });
       const clips = (res.data.data || []).map(clip => ({
         ...clip,
@@ -115,6 +121,25 @@ class TwitchClient {
       console.error('[Twitch] getClips error:', err.message);
       return { clips: [], cursor: null };
     }
+  }
+
+  // Resolve Twitch category ids → names. Clips carry only game_id, but the auto-namer wants the
+  // readable category ("Rocket League") for the {game} token. Helix takes up to 100 ids per call.
+  async getGamesByIds(ids = []) {
+    const unique = [...new Set(ids.filter(Boolean).map(String))];
+    const out = {};
+    for (let i = 0; i < unique.length; i += 100) {
+      const batch = unique.slice(i, i + 100);
+      try {
+        const params = new URLSearchParams();
+        batch.forEach(id => params.append('id', id));
+        const res = await axios.get(`${TWITCH_API_BASE}/games?${params.toString()}`, { headers: this.headers });
+        (res.data.data || []).forEach(g => { out[g.id] = g.name; });
+      } catch (err) {
+        console.error('[Twitch] getGamesByIds error:', err.message);
+      }
+    }
+    return out;
   }
 
   async getPrediction(broadcasterId, predictionId) {

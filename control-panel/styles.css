@@ -2970,6 +2970,46 @@ input[type="radio"], input[type="checkbox"] { accent-color: var(--cp-accent); }
 .qrail-scene-btn.live::after { content: 'LIVE'; margin-left: auto; font-size: 9.5px; font-weight: 800; letter-spacing: .08em; color: var(--ok-2); }
 .qrail-scenes-hint { font-size: 12px; color: var(--muted); line-height: 1.5; padding: 4px 2px; }
 
+/* ── Program rail: producer-sorted scene rows (order + hidden set are panel-local) ── */
+/* Header: what's on program reads as a live pill, next to the reorder toggle. */
+.qprog-cur { display: inline-block; max-width: 130px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  vertical-align: bottom; font-size: 10px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.qprog-cur.live { color: var(--ok-2); padding: 1px 7px; border-radius: 999px;
+  background: rgba(34,197,94,.12); box-shadow: inset 0 0 0 1px rgba(74,222,128,.35); }
+#qprog-reorder { margin-left: 8px; font-size: 10px; font-weight: 700; letter-spacing: .04em;
+  color: var(--muted); text-decoration: none; text-transform: none; }
+#qprog-reorder:hover { color: #fff; }
+#qprog-reorder.active { color: var(--cp-accent); }
+
+/* Scene chips reuse .qk-chip / .qk-chip--scene wholesale (see "Put-on-air chips" below) so the
+   Program rail reads as the same control as everything above it: 2-up grid, dot + label, green
+   when it's the one on program. Only the scene-specific bits are overridden here. */
+.qps-grid { margin-top: 2px; }
+/* Specificity note: the .qk-chip--scene rules further down the sheet would otherwise win the tie,
+   so these overrides are qualified by .qps-grid. */
+.qps-grid .qps-chip .qk-chip-main { padding-right: 26px; }
+.qps-grid .qps-chip.qps-nohk .qk-chip-main { padding-right: 8px; }
+.qps-grid .qps-chip .qk-chip-main::after { content: none; }   /* SCN tag: the whole group is scenes */
+/* Hotkey key-cap where the SCN tag used to sit — the number that cuts this scene from anywhere. */
+.qps-hk {
+  position: absolute; right: 5px; top: 50%; transform: translateY(-50%); pointer-events: none;
+  min-width: 15px; padding: 1px 3px; border-radius: 4px; text-align: center;
+  background: rgba(255,255,255,.07); border: 1px solid var(--border);
+  font: 800 9px/1.25 var(--font-mono, ui-monospace, monospace); color: var(--muted);
+}
+.qps-chip.on .qps-hk { color: #fff; border-color: rgba(74,222,128,.45); background: rgba(74,222,128,.16); }
+/* Reorder mode — chips become draggable; the eye stays clickable (unlike the qk gear, which the
+   shared editing rule disables), since hiding a scene IS an edit-mode action. */
+.qps-grid.qps-editing .qps-chip { cursor: grab; outline: 1px dashed rgba(255,255,255,.2); outline-offset: -3px; }
+.qps-grid.qps-editing .qk-chip-main { pointer-events: none; opacity: .55; }
+.qps-grid .qps-chip .qps-eye { width: 26px; }
+.qps-chip.qps-hidden { opacity: .45; }
+.qps-chip.qps-hidden .qk-chip-main { text-decoration: line-through; }
+.qps-chip.qps-drag { opacity: .4; }
+.qps-chip.qps-over { border-color: var(--cp-accent); box-shadow: inset 2px 0 0 var(--cp-accent); }
+.qps-hiddenfoot { font-size: 11px; }
+.qps-hiddenfoot a { color: var(--cp-accent); text-decoration: none; font-weight: 700; }
+
 /* ── Quick panel cockpit ── */
 .qrail-panel[data-qpanel="quick"] .qk-grp { margin-top: 16px; }
 /* Now / Next status card */
@@ -3092,6 +3132,13 @@ input[type="radio"], input[type="checkbox"] { accent-color: var(--cp-accent); }
 /* Put-on-air chips — main puts it live; the gear opens options (title/timer/side). */
 .qk-clear-all, .qrail-sub a#qk-clear-all { color: var(--muted); font-weight: 700; text-decoration: none; }
 .qk-put { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+/* Category headers (Match graphics / Boards / Overlays) break the flat 13-chip wall into scannable
+   clusters — span both grid columns, sit flush against the row above except the very first. */
+.qk-put-cat {
+  grid-column: 1 / -1; font-size: 10px; text-transform: uppercase; letter-spacing: .1em;
+  color: var(--label); font-weight: 800; margin-top: 10px; padding: 0 2px;
+}
+.qk-put-cat:first-child { margin-top: 0; }
 .qk-chip {
   position: relative; display: flex; align-items: stretch; border-radius: 9px; overflow: hidden;
   background: var(--white-a04); border: 1px solid var(--border); transition: background .12s, border-color .12s;
@@ -3872,6 +3919,25 @@ input:-webkit-autofill:active {
 .rp-onair-send { display: flex; gap: 8px; align-items: center; justify-content: center; }
 .rp-onair-send > .btn { flex: 0 1 auto; min-width: 110px; }
 .rp-onair-prog { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; justify-content: center; }
+/* Playout-readiness strip: is the replay-player source actually in the scene we cut to? Amber by
+   default (something to fix before air), green once OBS confirms the source is there and visible. */
+.rp-ready { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: center;
+  padding: 6px 9px; border-radius: 8px; font-size: 11.5px; line-height: 1.35;
+  background: rgba(251,191,36,.10); border: 1px solid rgba(251,191,36,.35); color: #fde68a; }
+.rp-ready.ok { background: rgba(34,197,94,.10); border-color: rgba(74,222,128,.35); color: #bbf7d0; }
+.rp-ready-dot { flex: 0 0 auto; width: 8px; height: 8px; border-radius: 50%; background: #fbbf24; }
+.rp-ready-dot.ok { background: var(--ok-2); box-shadow: 0 0 8px rgba(74,222,128,.7); }
+.rp-ready-text { flex: 1 1 auto; min-width: 0; }
+.rp-ready .btn { flex: 0 0 auto; }
+/* Playlist-preview strip — sits above the player while a whole reel is being watched off air.
+   Deliberately NOT red/on-air coloured: this is a local viewer, not a bus. */
+.rp-plprev-bar { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; padding: 6px 9px;
+  border-radius: 9px; background: rgba(124,58,237,.10); border: 1px solid rgba(124,58,237,.35); }
+.rp-plprev-tag { font-size: 9px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--cp-accent, #7C3AED); flex: 0 0 auto; }
+.rp-plprev-name { font-size: 11px; color: var(--text); white-space: nowrap; overflow: hidden;
+  text-overflow: ellipsis; min-width: 0; }
+.rp-plprev-bar .btn[disabled] { opacity: .35; pointer-events: none; }
 /* Playlist top actions (Play live / Stop / Encode) + settings popover. */
 .rp-pl-top-actions { display: flex; gap: 6px; align-items: center; }
 .rp-pl-top-actions > .btn { flex: 1; }
@@ -3918,6 +3984,25 @@ input:-webkit-autofill:active {
 .rp-player-wrap { background: #000; border-radius: 9px; overflow: hidden; }
 .rp-player-wrap video { width: 100%; max-height: 320px; display: block; background: #000; }
 .rp-player-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin: 10px 0; }
+/* Editor transport bar — replaces the browser's native controls so every clip gets the same player
+   (Chromium swaps in a compact, fullscreen-less bar for anything it hasn't decoded a frame of). */
+.rp-vt { display: flex; align-items: center; gap: 8px; padding: 6px 8px; margin-top: -2px;
+  background: var(--surface2); border: 1px solid var(--border); border-radius: 0 0 8px 8px; }
+.rp-vt-btn { flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center;
+  width: 26px; height: 26px; padding: 0; border: 1px solid var(--border); border-radius: 7px;
+  background: var(--white-a04); color: var(--text); cursor: pointer; transition: background .12s, color .12s; }
+.rp-vt-btn:hover { background: var(--white-a08); color: #fff; }
+.rp-vt-play { background: var(--cp-accent, #7C3AED); border-color: var(--cp-accent, #7C3AED); color: #fff; }
+.rp-vt-play:hover { filter: brightness(1.12); background: var(--cp-accent, #7C3AED); }
+.rp-vt-time { flex: 0 0 auto; font-size: 11px; font-weight: 700; color: var(--muted);
+  font-variant-numeric: tabular-nums; white-space: nowrap; }
+.rp-vt input[type="range"] { -webkit-appearance: none; appearance: none; height: 4px; border-radius: 3px;
+  background: var(--border); outline: none; cursor: pointer; }
+.rp-vt input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; appearance: none;
+  width: 12px; height: 12px; border-radius: 50%; background: var(--cp-accent, #7C3AED);
+  box-shadow: 0 0 0 2px rgba(0,0,0,.35); cursor: pointer; }
+.rp-vt-seek { flex: 1 1 auto; min-width: 60px; }
+.rp-vt-vol { flex: 0 0 auto; width: 64px; }
 .rp-mini-label { font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
 .rp-speed { width: 78px; }
 .rp-trim-mini { font-size: 11px; color: var(--muted); }
@@ -4145,6 +4230,15 @@ input:-webkit-autofill:active {
    Deliberately reuses Staging's card look (.rp-stage-card/.rp-sc-*) so the pool reads as the same
    kind of list, not a different widget — .rp-pool-item is only an identity hook for the JS. */
 .rp-clip-pool { flex: 1 1 auto; overflow-y: auto; padding: 4px 5px; display: flex; flex-direction: column; gap: 1px; min-height: 80px; }
+/* Drag-to-reorder: grip only, so a card click still loads the clip into the editor. Appears on
+   hover like the row's other affordances; the pool order is the running order for Play all. */
+.rp-sc-grip { flex: 0 0 auto; display: flex; align-items: center; justify-content: center; width: 12px;
+  color: var(--muted); cursor: grab; opacity: 0; transition: opacity .12s, color .12s; }
+.rp-stage-card:hover .rp-sc-grip { opacity: .8; }
+.rp-sc-grip:hover { color: #fff; opacity: 1; }
+.rp-sc-grip:active { cursor: grabbing; }
+.rp-pool-item.rp-pool-drag { opacity: .4; }
+.rp-pool-item.rp-pool-over { box-shadow: inset 0 2px 0 var(--cp-accent, #7C3AED); }
 
 /* Always-visible transition control for pool pushes (single To Air + bulk To Air) — not gated on a
    selection, since the per-row To Air button needs it just as much as the bulk bar does. */
@@ -4171,6 +4265,14 @@ input:-webkit-autofill:active {
   white-space: nowrap; opacity: 0; transition: opacity .12s, color .12s, border-color .12s, background .12s; }
 .rp-pl-row:hover .rp-pl-row-move { opacity: 1; }
 .rp-pl-row-move:hover { color: var(--text); border-color: var(--cp-accent, #7C3AED); background: rgba(124,58,237,.12); }
+
+/* Per-row "watch this reel in the editor" button — always visible (unlike move/delete, which are
+   hover-only) because previewing is the everyday action on a playlist row. */
+.rp-pl-row-prev { flex: 0 0 auto; background: transparent; border: 1px solid var(--border); color: var(--muted);
+  cursor: pointer; font-size: 9px; line-height: 1; padding: 4px 6px; border-radius: 5px;
+  transition: color .12s, border-color .12s, background .12s; }
+.rp-pl-row-prev:hover:not([disabled]) { color: var(--text); border-color: var(--cp-accent, #7C3AED); background: rgba(124,58,237,.14); }
+.rp-pl-row-prev[disabled] { opacity: .3; cursor: default; }
 
 .rp-pl-thumb {
   width: 52px; height: 34px; flex: 0 0 52px; border-radius: 5px;
@@ -5546,11 +5648,13 @@ span.lg-pl-role { color: var(--muted); }
 .scene-thumb-name { position: absolute; bottom: 7px; left: 7px; max-width: calc(100% - 96px); font-size: 11px; font-weight: 700;
   color: #eef1f7; background: rgba(0,0,0,.55); border: 1px solid var(--white-a12); border-radius: 5px; padding: 2px 8px;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none; }
-/* Hover icon actions (open / copy / settings), top-right of the thumbnail */
+/* Icon actions (open / copy / settings), top-right of the thumbnail.
+   Always visible — hover-only hid the background-fill gear so well that producers
+   thought the colour/opacity option had been removed. Dimmed at rest, full on hover. */
 .scene-thumb-acts { position: absolute; top: 6px; right: 6px; display: flex; gap: 4px;
-  opacity: 0; transition: opacity .12s; }
+  opacity: .62; transition: opacity .12s; }
 .scene-thumb:hover .scene-thumb-acts, .scene-thumb-acts:focus-within,
-.scene-thumb-acts:has(.ss-settings.on) { opacity: 1; }   /* keep visible while bg-fill is active */
+.scene-thumb-acts:has(.ss-settings.on) { opacity: 1; }   /* full while hovered / bg-fill active */
 .scene-thumb-btn { width: 26px; height: 26px; display: flex; align-items: center; justify-content: center; padding: 0;
   border: 1px solid var(--white-a12); border-radius: 6px; background: rgba(0,0,0,.62); color: #dfe4ee; cursor: pointer;
   font-size: 13px; transition: background .12s, color .12s, border-color .12s; }
@@ -6073,6 +6177,34 @@ span.lg-pl-role { color: var(--muted); }
 .seed-sb-sec:last-child { border-bottom: none; }
 .seed-sb-hd { font-size: 8.5px; font-weight: 800; letter-spacing: .09em; text-transform: uppercase; color: var(--muted); padding-bottom: 2px; }
 .seed-sb-lbl { font-size: 10px; color: var(--muted); line-height: 1.2; }
+/* Numbered workflow steps — the sidebar reads top-to-bottom as the actual job:
+   load -> resolve -> review -> settings -> order. */
+.seed-sb-hd { display: flex; align-items: center; gap: 6px; }
+.seed-sb-step { display: inline-flex; align-items: center; justify-content: center; width: 14px; height: 14px;
+  border-radius: 50%; background: rgba(139,92,246,.18); color: #a78bfa; border: 1px solid rgba(139,92,246,.4);
+  font-size: 8px; font-weight: 800; letter-spacing: 0; flex: 0 0 auto; }
+.seed-sb-check { display: flex; align-items: center; gap: 6px; font-size: 10px; color: var(--muted); cursor: pointer; }
+.seed-sb-check input { margin: 0; cursor: pointer; }
+/* Advanced — collapsed by default; the things you set once, not every event. */
+.seed-sb-adv > summary { cursor: pointer; list-style: none; user-select: none; }
+.seed-sb-adv > summary::-webkit-details-marker { display: none; }
+.seed-sb-adv > summary::after { content: '▸'; margin-left: auto; font-size: 9px; opacity: .7; }
+.seed-sb-adv[open] > summary::after { content: '▾'; }
+.seed-sb-adv[open] { gap: 5px; }
+
+/* Review queue — how much of the field is settled, and how much still wants a human */
+.seed-review-stat { display: flex; flex-direction: column; gap: 4px; }
+.seed-review-bar { display: flex; height: 6px; border-radius: 3px; overflow: hidden; background: rgba(255,255,255,.07); }
+.seed-review-bar > span { display: block; }
+.seed-review-ok   { background: #48bb78; }
+.seed-review-warn { background: #d69e2e; }
+.seed-review-ovr  { background: #a78bfa; }
+.seed-review-nums { font-size: 10px; color: var(--muted); line-height: 1.4; }
+.seed-review-nums b { color: #d69e2e; }
+.seed-review-ovr-txt { color: #a78bfa; }
+.seed-review-none { font-size: 10px; color: var(--muted); font-style: italic; }
+/* A player auto couldn't stand behind — muted amber, quieter than an override */
+.seed-player-review { border-color: rgba(214,158,46,.45); }
 .seed-sb-btn { width: 100%; text-align: left; }
 .seed-sortbtn.is-on, #seed-unv-showall-btn.is-on { background: var(--cp-accent) !important; border-color: var(--cp-accent) !important; color: #fff !important; }
 /* Seeding list */
@@ -6161,6 +6293,35 @@ span.lg-pl-role { color: var(--muted); }
 .seed-prank-flag      { animation: seed-flag-pulse      2.4s ease-in-out infinite; }
 .seed-prank-flag-high { animation: seed-flag-high-pulse 2s   ease-in-out infinite; }
 .seed-noplayers { grid-column: 1 / -1; font-size: 11.5px; font-style: italic; color: var(--muted); padding: 4px 2px; }
+
+/* Manual override — the producer's own call. Deliberately the loudest state on a player card: it is
+   the one rank auto-resolve is not allowed to touch, so it must be obvious at a glance. */
+.seed-player-ovr { border-color: rgba(167,139,250,.55); background: linear-gradient(180deg, rgba(167,139,250,.10), transparent 60%); }
+.seed-prank-ovr { border-color: rgba(167,139,250,.7) !important; color: #c4b5fd; font-weight: 700; }
+
+/* "why" — opens the derivation panel for one player */
+.seed-why-btn { flex: 0 0 auto; background: transparent; border: 1px solid var(--border); color: var(--muted);
+  font-size: 9px; font-weight: 700; letter-spacing: .4px; text-transform: uppercase; padding: 1px 5px;
+  border-radius: 6px; cursor: pointer; line-height: 1.5; }
+.seed-why-btn:hover { color: var(--text); border-color: var(--muted); }
+.seed-why-btn.open { color: #a78bfa; border-color: rgba(167,139,250,.6); background: rgba(167,139,250,.12); }
+.seed-why { margin-top: 4px; padding: 7px 8px; background: rgba(0,0,0,.22); border: 1px solid var(--border);
+  border-radius: 6px; font-size: 10.5px; line-height: 1.5; }
+.seed-why-tbl { width: 100%; border-collapse: collapse; }
+.seed-why-tbl th { text-align: left; font-size: 9px; text-transform: uppercase; letter-spacing: .4px;
+  color: var(--muted); font-weight: 700; padding: 0 6px 3px 0; border-bottom: 1px solid var(--border); }
+.seed-why-tbl td { padding: 3px 6px 3px 0; vertical-align: middle; white-space: nowrap; }
+.seed-why-src { font-weight: 700; text-transform: uppercase; font-size: 9px; letter-spacing: .3px; }
+/* Pull bar — how much each source actually moved the blend */
+.seed-why-bar { display: inline-block; width: 42px; height: 5px; margin-right: 5px; border-radius: 3px;
+  background: rgba(255,255,255,.09); overflow: hidden; vertical-align: middle; }
+.seed-why-bar > span { display: block; height: 100%; border-radius: 3px; }
+.seed-why-sub { margin-top: 5px; color: var(--muted); font-size: 10px; line-height: 1.55; }
+.seed-why-empty { color: var(--muted); font-style: italic; }
+.seed-why-override { padding: 6px 8px; margin-bottom: 6px; border-radius: 5px; color: #ddd6fe;
+  background: rgba(167,139,250,.14); border: 1px solid rgba(167,139,250,.4); }
+.seed-why-override .seed-why-sub { color: rgba(221,214,254,.75); }
+.seed-why-revert { margin-top: 5px; }
 
 /* Events page — hero */
 .ev-detail-section { background: var(--surface); }
@@ -6329,6 +6490,15 @@ span.lg-pl-role { color: var(--muted); }
 .mp-sep { flex:0 0 auto; color:var(--muted); font-weight:700; }
 .mp-slot-rm { flex:0 0 auto; width:24px; height:24px; padding:0; line-height:1; color:#f87171; font-size:15px; }
 .mp-slot-rm:disabled { opacity:.3; cursor:default; }
+/* Mode icon preview sitting between the mode dropdown and the pick dropdown. */
+.mp-mode-icon { flex:0 0 auto; width:20px; height:20px; object-fit:contain; opacity:.85; }
+/* Per-row "clear this map's score" — dim until the row actually has a score. */
+.mp-score-clr { flex:0 0 auto; width:22px; height:22px; padding:0; line-height:1; font-size:11px; font-weight:800; color:var(--muted); }
+.mp-score-clr:disabled { opacity:.25; cursor:default; }
+.mp-auto-lbl { display:inline-flex; align-items:center; gap:5px; font-size:11px; font-weight:700; color:var(--muted); cursor:pointer; white-space:nowrap; }
+.mp-auto-lbl input { accent-color:var(--cp-accent); }
+/* Scores are driven by the series editor while Auto is on — show they're read-only. */
+.mp-slots.is-auto .mp-score-a, .mp-slots.is-auto .mp-score-b { opacity:.65; }
 .gfx-pill-group { display:inline-flex; background:var(--surface2); border:1px solid var(--border); border-radius:8px; padding:2px; gap:2px; }
 .gfx-pill { background:none; border:none; color:var(--muted); font-size:11px; font-weight:800; padding:4px 10px; border-radius:6px; cursor:pointer; white-space:nowrap; letter-spacing:.03em; }
 .gfx-pill:hover { color:var(--text); }
@@ -8328,9 +8498,15 @@ tr.lg2-drag-over { outline: 2px solid var(--accent, #4a9eff); outline-offset: -1
 .eo-p-idx { color: var(--muted); font-size: 10.5px; text-transform: uppercase; letter-spacing: .06em; white-space: nowrap; }
 .eo-flag { display: inline-block; padding: 0 5px; border-radius: 5px; border: 1px solid var(--border); color: var(--muted); font-size: 9.5px; font-weight: 800; vertical-align: 1px; }
 .eo-flag.cap { border-color: rgba(245,158,11,.55); color: #fbbf24; }
+.eo-p-cell { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
 .eo-p-name { font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; user-select: text; }
 .eo-p-mail { color: var(--fg, #dfe3ee); opacity: .85; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; user-select: text; }
 .eo-p-ch { color: #93c5fd; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; user-select: text; }
+/* per-field copy — dim until the row is hovered, so dense rosters stay readable */
+.eo-fcopy { flex: 0 0 auto; padding: 1px 6px; border: 1px solid var(--border); border-radius: 5px; background: transparent; color: var(--muted); font: inherit; font-size: 10px; text-transform: uppercase; letter-spacing: .05em; cursor: pointer; opacity: .3; transition: opacity .12s, color .12s, border-color .12s; }
+.eo-block-player:hover .eo-fcopy { opacity: .8; }
+.eo-fcopy:hover { opacity: 1; color: #c4b5fd; border-color: rgba(124,58,237,.65); background: rgba(124,58,237,.16); }
+.eo-fcopy:focus-visible { opacity: 1; outline: 2px solid rgba(124,58,237,.8); outline-offset: 1px; }
 /* Universal data table (every CSV column; pick / sort / filter / copy) */
 .eo-tablewrap { border: 1px solid var(--border); border-radius: 10px; overflow: auto; max-height: 70vh; background: rgba(0,0,0,.12); }
 .eo-grid { width: 100%; border-collapse: collapse; font-size: 12px; white-space: nowrap; }
@@ -8776,6 +8952,8 @@ body.perf-noanim *, body.perf-noanim *::before, body.perf-noanim *::after {
 .int-card-logo.mono-nxgen { background: linear-gradient(135deg, #7c2d12, #431407); }
 .int-card-logo.mono-vdo   { background: linear-gradient(135deg, #0c4a6e, #082f49); }
 .int-card-logo.mono-rl    { background: linear-gradient(135deg, #1d4ed8, #1e3a8a); }
+.int-card-logo.mono-sheets { background: linear-gradient(135deg, #0f9d58, #0b6e3c); }
+.int-card-logo.mono-marblerace { background: linear-gradient(135deg, #7c3aed, #4c1d95); }
 .int-card-logo.mono-cs2   { background: linear-gradient(135deg, #b45309, #78350f); }
 .int-card-logo.mono-lol   { background: linear-gradient(135deg, #a16207, #713f12); }
 .int-card-body { min-width: 0; flex: 1; padding-right: 4px; }

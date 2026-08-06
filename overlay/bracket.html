@@ -53,7 +53,7 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
 .bk-phases { display: flex; gap: 6px; }
 .bk-phase { font-family: var(--disp); font-weight: 700; font-size: 12px; letter-spacing: .08em; text-transform: uppercase;
   padding: 6px 12px; border-radius: 999px; color: var(--muted); background: var(--panel-1); border: 1px solid var(--hair); }
-.bk-phase.active { color: #fff; background: var(--accent); border-color: transparent; box-shadow: 0 4px 14px rgba(0,0,0,.35); }
+.bk-phase.active { color: var(--on-accent, #fff); background: var(--accent); border-color: transparent; box-shadow: 0 4px 14px rgba(0,0,0,.35); }
 
 /* ── Body / scale ── */
 .bk-body { flex: 1 1 auto; display: flex; align-items: center; justify-content: center; min-height: 0; }
@@ -161,8 +161,8 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
 .bk-slot.winner { background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 10%, transparent) 0%, transparent 70%); }
 .bk-slot.winner .bk-name { color: #fff; font-weight: 700; }
 /* Broadcast-style: the winning score reads as a filled chip so the result is legible at a glance. */
-.bk-slot.winner .bk-score { color: #fff; background: color-mix(in srgb, var(--accent) 82%, #000); border-radius: 5px; padding: 3px 0; box-shadow: 0 2px 8px color-mix(in srgb, var(--accent) 40%, transparent); }
-.bk-section.losers .bk-slot.winner .bk-score { background: color-mix(in srgb, var(--accent-2) 82%, #000); box-shadow: 0 2px 8px color-mix(in srgb, var(--accent-2) 40%, transparent); }
+.bk-slot.winner .bk-score { color: var(--on-accent, #fff); background: color-mix(in srgb, var(--accent) 82%, #000); border-radius: 5px; padding: 3px 0; box-shadow: 0 2px 8px color-mix(in srgb, var(--accent) 40%, transparent); }
+.bk-section.losers .bk-slot.winner .bk-score { color: var(--on-accent-2, #fff); background: color-mix(in srgb, var(--accent-2) 82%, #000); box-shadow: 0 2px 8px color-mix(in srgb, var(--accent-2) 40%, transparent); }
 .bk-slot.loser .bk-name { color: rgba(118,125,140,.6); }
 .bk-slot.loser .bk-logo { opacity: .4; }
 .bk-slot.loser .bk-logo-badge { opacity: .45; }
@@ -1199,8 +1199,13 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
     if (sig === _sig) return;
     _sig = sig;
 
-    document.documentElement.style.setProperty('--accent', SceneBase.brandColor(data));
-    document.documentElement.style.setProperty('--accent-2', SceneBase.brandAccent(data));
+    const _acc = SceneBase.brandColor(data), _acc2 = SceneBase.brandAccent(data);
+    document.documentElement.style.setProperty('--accent', _acc);
+    document.documentElement.style.setProperty('--accent-2', _acc2);
+    // Ink that stays readable on an accent-FILLED pill/chip — a white brand kit was painting
+    // white text on a white fill (the active phase pill and winner scores went blank on air).
+    document.documentElement.style.setProperty('--on-accent', SceneBase.onColor(_acc));
+    document.documentElement.style.setProperty('--on-accent-2', SceneBase.onColor(_acc2));
 
     el('bk-title').textContent = (b.title || '').toUpperCase();
     el('bk-subtitle').textContent = b.subtitle || '';

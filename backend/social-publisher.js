@@ -203,6 +203,7 @@ class SocialPublisher {
   // Twitter media IDs are valid for 24h without being attached to a tweet.
   async prepareTwitterMedia(post) {
     let tmpFile = null;
+    let composeWorkDir = null;
     const ownTmp = post.clipType === 'twitch' && (post.thumbnailUrl || post.clipVideoUrl);
     try {
       if (ownTmp) {
@@ -212,9 +213,27 @@ class SocialPublisher {
         tmpFile = post.clipPath;
       }
       if (!tmpFile) return null;
+
+      // Pre-upload the FINISHED cut, not the raw clip. This used to hand Twitter the untouched
+      // download, so a scheduled tweet quietly shipped without the trim, crop or bumpers the
+      // producer set up — the same post looked different on each platform.
+      let mediaPath = tmpFile;
+      const needsCompose = (post.trimIn > 0.5) || (post.trimOut !== null && post.trimOut !== undefined) ||
+        (post.intro && post.intro.template && post.intro.template !== 'none') ||
+        (post.intro?.introFile) || (post.intro?.outroFile) || (post.intro?.vertical);
+      if (needsCompose) {
+        const compose = await this.encodeCompose(tmpFile, {
+          trimIn:  post.trimIn  || 0,
+          trimOut: post.trimOut || null,
+          intro:   post.intro   || null,
+        });
+        mediaPath = compose.path;
+        if (compose.workDir) composeWorkDir = compose.workDir;
+      }
+
       const client = await this._twClient();
       if (!client) return null;
-      const mediaId = await client.v1.uploadMedia(tmpFile, { mimeType: 'video/mp4', target: 'tweet' });
+      const mediaId = await client.v1.uploadMedia(mediaPath, { mimeType: 'video/mp4', target: 'tweet' });
       console.log('[Social] Twitter media pre-uploaded:', mediaId);
       return mediaId;
     } catch (e) {
@@ -222,6 +241,7 @@ class SocialPublisher {
       return null;
     } finally {
       if (ownTmp && tmpFile) { try { fs.unlinkSync(tmpFile); } catch {} }
+      if (composeWorkDir)    { try { fs.rmSync(composeWorkDir, { recursive: true, force: true }); } catch {} }
     }
   }
 
@@ -516,6 +536,12 @@ class SocialPublisher {
     return 'ffmpeg';
   }
 
+  // Quote a path for use inside an ffmpeg filter argument. The drive-letter colon has
+  // to be escaped even inside the quotes, or the option splitter cuts the path in half.
+  _escFilterPath(p) {
+    return `'${String(p).replace(/\\/g, '/').replace(/:/g, '\\:')}'`;
+  }
+
   // Render a branding card (intro/outro slate) using ffmpeg lavfi.
   // Uses Arial Bold on Windows. Falls back to no fontfile (default ffmpeg font).
   async _generateBrandingCard(outputPath, opts, vertical) {
@@ -528,22 +554,33 @@ class SocialPublisher {
 
     const fontFile = ['C:/Windows/Fonts/arialbd.ttf', 'C:/Windows/Fonts/arial.ttf', 'C:/Windows/Fonts/segoeui.ttf']
       .find(f => fs.existsSync(f)) || '';
-    const fontArg = fontFile ? `:fontfile='${fontFile}'` : '';
-    const safeText = (text || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/:/g, '\\:');
-    const drawBase = `text='${safeText}':fontsize=${fs_size}:fontcolor=white:x=(w-text_w)/2:y=(h-text_h)/2${fontArg}`;
+    const fontArg = fontFile ? `:fontfile=${this._escFilterPath(fontFile)}` : '';
+
+    // Caption goes through textfile= rather than text=: an apostrophe or colon in a
+    // clip title cannot be escaped inside a quoted filter argument without breaking
+    // the filtergraph parse.
+    const cardText = String(text || '').trim();
+    const textArg  = `textfile=${this._escFilterPath(`${outputPath}.txt`)}`;
+    if (cardText) fs.writeFileSync(`${outputPath}.txt`, cardText, 'utf8');
+
+    const drawBase = `${textArg}:fontsize=${fs_size}:fontcolor=white:x=(w-text_w)/2:y=(h-text_h)/2${fontArg}`;
 
     let vfParts;
-    if (template === 'fade') {
+    if (!cardText) {
+      // No caption: plain colour card, no drawtext at all.
+      vfParts = [`fade=t=in:st=0:d=${template === 'fade' ? '0.4' : '0.2'}`];
+    } else if (template === 'fade') {
       const fadeOutSt = (dur - 0.4).toFixed(2);
       vfParts = isOutro
         ? [`drawtext=${drawBase}`, 'fade=t=in:st=0:d=0.4']
         : [`drawtext=${drawBase}`, 'fade=t=in:st=0:d=0.4', `fade=t=out:st=${fadeOutSt}:d=0.4`];
     } else if (template === 'slide') {
       // Text slides up from bottom on intro, slides down on outro
+      // Quote the y expressions: their commas would otherwise split the filterchain.
       const yIn  = `if(lt(t,0.5),h+(h/2-text_h/2-h)*(t/0.5),(h-text_h)/2)`;
       const ejectSt = (dur - 0.5).toFixed(2);
       const yOut = `if(lt(t,${ejectSt}),(h-text_h)/2,(h-text_h)/2+(h/2+text_h/2)*(t-${ejectSt})/0.5)`;
-      const slideDraw = `text='${safeText}':fontsize=${fs_size}:fontcolor=white:x=(w-text_w)/2:y=${isOutro ? yOut : yIn}${fontArg}`;
+      const slideDraw = `${textArg}:fontsize=${fs_size}:fontcolor=white:x=(w-text_w)/2:y='${isOutro ? yOut : yIn}'${fontArg}`;
       vfParts = [`drawtext=${slideDraw}`];
     } else { // clean
       vfParts = [`drawtext=${drawBase}`, 'fade=t=in:st=0:d=0.2'];
@@ -571,15 +608,87 @@ class SocialPublisher {
     });
   }
 
+  // Filtergraph that turns a 16:9 clip into a 1080x1920 vertical frame.
+  //   crop  — fill the frame, keeping only the centre ~31% of the clip width
+  //   blur  — whole clip at 1080x608 over a blurred, zoomed copy of itself
+  //   solid — whole clip at 1080x608 over a flat colour (the branding accent)
+  _verticalVf(intro = {}) {
+    const fit = intro.verticalFit || 'crop';
+    if (fit === 'blur') {
+      return 'split[bg][fg];' +
+             '[bg]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,gblur=sigma=28[bgb];' +
+             '[fg]scale=1080:-2[fgs];' +
+             '[bgb][fgs]overlay=(W-w)/2:(H-h)/2,setsar=1';
+    }
+    if (fit === 'solid') {
+      const bg = (intro.verticalBg || intro.color || '#000000').replace('#', '0x');
+      return `scale=1080:-2,pad=1080:1920:(ow-iw)/2:(oh-ih)/2:color=${bg},setsar=1`;
+    }
+    return 'scale=-1:1920,crop=1080:1920,setsar=1';
+  }
+
+  // True when the file carries at least one audio stream. Concat demuxing with -c copy needs
+  // every segment to have the SAME stream layout, so a silent outro has to get silence bolted on
+  // rather than simply having no audio track.
+  async _hasAudio(p) {
+    const { spawn } = require('child_process');
+    const ffprobe = this._ffmpegBin().replace(/ffmpeg(\.exe)?$/i, 'ffprobe$1');
+    return new Promise(res => {
+      let out = '';
+      const proc = spawn(ffprobe, ['-v', 'error', '-select_streams', 'a', '-show_entries', 'stream=index', '-of', 'csv=p=0', p], { windowsHide: true });
+      proc.stdout.on('data', d => out += d);
+      proc.on('close', () => res(out.trim().length > 0));
+      proc.on('error', () => res(false));
+    });
+  }
+
+  // Re-encode any producer-supplied bumper (MP4/MOV or a still image) to EXACTLY the same
+  // container shape as the rest of the timeline — same pixels, fps, pixel format, and a stereo
+  // 44.1k audio track — so the -c copy concat at the end is valid. Letterboxed rather than
+  // cropped: someone's branded end card should never lose its edges.
+  async _normalizeSegment(src, out, w, h, imageSeconds) {
+    const { spawn } = require('child_process');
+    const ff      = this._ffmpegBin();
+    const isImage = /\.(png|jpe?g|webp|bmp|gif|avif)$/i.test(src);
+    const dur     = Math.min(60, Math.max(0.5, Number(imageSeconds) || 4));
+    const vf      = `scale=${w}:${h}:force_original_aspect_ratio=decrease,pad=${w}:${h}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,fps=30,format=yuv420p`;
+
+    const hasAudio = isImage ? false : await this._hasAudio(src);
+    const args = ['-y'];
+    if (isImage) args.push('-loop', '1', '-t', String(dur), '-i', src);
+    else         args.push('-i', src);
+    if (!hasAudio) args.push('-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=stereo');
+    args.push(
+      '-map', '0:v:0', '-map', hasAudio ? '0:a:0' : '1:a:0',
+      '-vf', vf,
+      ...(isImage ? ['-t', String(dur)] : ['-shortest']),
+      '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '22', '-r', '30',
+      '-c:a', 'aac', '-b:a', '192k', '-ac', '2', '-ar', '44100',
+      out
+    );
+    await new Promise((resolve, reject) => {
+      const p = spawn(ff, args, { windowsHide: true });
+      let errOut = '';
+      p.stderr.on('data', d => errOut += d);
+      p.on('close', code => code === 0 ? resolve() : reject(new Error(`Bumper encode failed (${path.basename(src)}): ${errOut.slice(-400)}`)));
+      p.on('error', e => reject(new Error(`ffmpeg not found (${ff}): ${e.message}`)));
+    });
+  }
+
   // Trim + vertical crop + concat intro/outro. Returns { path, owned, workDir }.
   // owned=false means the original localPath is returned unchanged (no encode needed).
   async encodeCompose(localPath, opts = {}) {
     const { trimIn = 0, trimOut = null, intro = null } = opts;
-    const vertical  = intro?.vertical || false;
-    const needsIntro = intro && intro.template && intro.template !== 'none';
+    const vertical   = intro?.vertical || false;
+    const needsIntro = !!(intro && intro.template && intro.template !== 'none');
+    // A branded outro file stands on its own — it must not require an intro card to be enabled
+    // (the old code gated the outro on needsIntro, so "outro only" was impossible to express).
+    const introFile  = intro?.introFile && fs.existsSync(intro.introFile) ? intro.introFile : null;
+    const outroFile  = intro?.outroFile && fs.existsSync(intro.outroFile) ? intro.outroFile : null;
+    const outroCard  = needsIntro && intro.outro !== false && !outroFile;
 
-    // Quick exit: no trim, no intro, no vertical crop
-    if (!needsIntro && !vertical && (trimIn || 0) < 0.5 && trimOut === null) {
+    // Quick exit: nothing to do to this file at all
+    if (!needsIntro && !introFile && !outroFile && !vertical && (trimIn || 0) < 0.5 && trimOut === null) {
       return { path: localPath, owned: false };
     }
 
@@ -602,33 +711,45 @@ class SocialPublisher {
     const actualIn  = Math.max(0, trimIn || 0);
     const hasTrimOut = trimOut !== null && trimOut < (duration || Infinity) - 0.5;
     const hasTrimIn  = actualIn > 0.5;
-    if (!needsIntro && !vertical && !hasTrimIn && !hasTrimOut) {
+    if (!needsIntro && !introFile && !outroFile && !vertical && !hasTrimIn && !hasTrimOut) {
       return { path: localPath, owned: false };
     }
 
     const workDir = path.join(os.tmpdir(), `ne_social_compose_${Date.now()}`);
     fs.mkdirSync(workDir, { recursive: true });
+    const W = vertical ? 1080 : 1920;
+    const H = vertical ? 1920 : 1080;
 
     try {
       const parts = [];
 
-      // 1. Generate intro card
-      if (needsIntro) {
+      // 1. Intro — a producer's own bumper file wins over the generated card
+      if (introFile) {
+        const p = path.join(workDir, 'intro_file.mp4');
+        await this._normalizeSegment(introFile, p, W, H, intro.introFileDuration);
+        parts.push(p);
+        console.log('[Social] Intro bumper normalised:', path.basename(introFile));
+      } else if (needsIntro) {
         const introPath = path.join(workDir, 'intro.mp4');
         await this._generateBrandingCard(introPath, intro, vertical);
         parts.push(introPath);
         console.log('[Social] Intro card generated');
       }
 
-      // 2. Process main clip (trim + scale)
+      // 2. Process main clip (trim + scale). Padded to EXACTLY WxH at 30fps: the concat demuxer
+      // copies streams, so a clip that came out 1440x1080 (4:3 source) next to a 1920x1080 card
+      // silently produces a broken file. Every segment has to agree.
       const clipPath  = path.join(workDir, 'clip.mp4');
-      const vf        = vertical ? 'scale=-1:1920,crop=1080:1920,setsar=1' : 'scale=-2:1080,setsar=1';
+      const vf        = (vertical
+        ? this._verticalVf(intro)
+        : `scale=${W}:${H}:force_original_aspect_ratio=decrease,pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1`
+      ) + ',fps=30,format=yuv420p';
       const clipArgs  = [
         '-y',
         '-ss', String(actualIn), '-i', localPath,
         ...(hasTrimOut ? ['-t', String(trimOut - actualIn)] : []),
         '-vf', vf,
-        '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '22',
+        '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '22', '-r', '30',
         '-c:a', 'aac', '-b:a', '192k', '-ac', '2', '-ar', '44100',
         clipPath
       ];
@@ -642,8 +763,13 @@ class SocialPublisher {
       parts.push(clipPath);
       console.log('[Social] Clip encoded');
 
-      // 3. Generate outro card
-      if (needsIntro && intro.outro !== false) {
+      // 3. Outro — branded file, else the generated matching card
+      if (outroFile) {
+        const p = path.join(workDir, 'outro_file.mp4');
+        await this._normalizeSegment(outroFile, p, W, H, intro.outroFileDuration);
+        parts.push(p);
+        console.log('[Social] Outro bumper normalised:', path.basename(outroFile));
+      } else if (outroCard) {
         const outroPath = path.join(workDir, 'outro.mp4');
         await this._generateBrandingCard(outroPath, { ...intro, isOutro: true }, vertical);
         parts.push(outroPath);
@@ -680,6 +806,22 @@ class SocialPublisher {
     const results   = { platforms: {} };
     const ownsTmp   = post.clipType === 'twitch' && post.clipVideoUrl;
 
+    // YouTube classifies a Short by aspect ratio and length, not by the #Shorts tag —
+    // a 16:9 upload lands as a regular video no matter what the title says. So a Shorts
+    // post always gets the 9:16 pass, whether or not a branding template asked for it.
+    if (post.isShort || post.intro?.vertical) {
+      post = {
+        ...post,
+        intro: {
+          template: 'none',
+          ...(post.intro || {}),
+          vertical:    true,
+          verticalFit: post.intro?.verticalFit || post.verticalFit || 'crop',
+          verticalBg:  post.intro?.verticalBg  || post.verticalBg  || post.intro?.color || null,
+        }
+      };
+    }
+
     try {
       if (ownsTmp) {
         console.log('[Social] Downloading Twitch clip for publish…');
@@ -693,6 +835,7 @@ class SocialPublisher {
       if (post._localVideoPath) {
         const needsCompose = (post.trimIn > 0.5) || (post.trimOut !== null && post.trimOut !== undefined) ||
           (post.intro && post.intro.template && post.intro.template !== 'none') ||
+          (post.intro?.introFile) || (post.intro?.outroFile) ||   // a bumper file alone is enough
           (post.intro?.vertical);
         if (needsCompose) {
           console.log('[Social] Composing clip…');

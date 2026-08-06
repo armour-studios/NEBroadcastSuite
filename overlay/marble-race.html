@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Marble Race</title>
+  <style>
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: transparent; font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
+      color: #fff; overflow: hidden; width: 1920px; height: 1080px;
+    }
+    #mr-root { display: none; position: absolute; inset: 0; }
+    #mr-root.show { display: block; }
+    #mr-canvas-wrap { position: absolute; inset: 0; }
+    #mr-canvas-wrap canvas { display: block; width: 100%; height: 100%; }
+
+    #mr-side {
+      position: absolute; top: 36px; right: 36px; width: 340px;
+      display: flex; flex-direction: column; gap: 14px;
+      background: linear-gradient(160deg, rgba(13,11,20,.94), rgba(18,14,30,.94));
+      border: 1px solid rgba(78,205,196,.28); border-radius: 18px;
+      box-shadow: 0 0 0 1px rgba(78,205,196,.06), 0 24px 70px rgba(0,0,0,.85);
+      padding: 20px;
+    }
+    #mr-heading { font-size: 18px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; }
+    #mr-status-line { font-size: 13px; color: rgba(255,255,255,.6); margin-top: 2px; }
+
+    #mr-countdown-wrap { display: none; flex-direction: column; align-items: center; gap: 4px; padding: 10px 0; }
+    #mr-countdown-wrap.show { display: flex; }
+    #mr-countdown-label { font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: rgba(255,255,255,.55); }
+    #mr-countdown { font-size: 40px; font-weight: 800; font-variant-numeric: tabular-nums; }
+    #mr-entry-hint { font-size: 12px; color: #4ecdc4; text-align: center; }
+    #mr-entry-count { font-size: 12px; color: rgba(255,255,255,.7); text-align: center; }
+
+    #mr-leaderboard { display: none; flex-direction: column; gap: 6px; }
+    #mr-leaderboard.show { display: flex; }
+    #mr-leaderboard-title { font-size: 11px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: rgba(255,255,255,.55); }
+    .mr-lb-row { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+    .mr-lb-rank { width: 18px; color: rgba(255,255,255,.5); font-variant-numeric: tabular-nums; }
+    .mr-lb-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+    .mr-lb-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+    #mr-results {
+      display: none; flex-direction: column; align-items: center; gap: 6px;
+      padding: 14px; border-radius: 10px; background: rgba(74,222,128,.12);
+      border: 1px solid rgba(74,222,128,.4);
+    }
+    #mr-results.show { display: flex; }
+    #mr-results-title { font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: .06em; color: #4ade80; }
+    #mr-results-winner { font-size: 22px; font-weight: 800; text-align: center; }
+  </style>
+</head>
+<body>
+  <div id="mr-root">
+    <div id="mr-canvas-wrap"></div>
+    <div id="mr-side">
+      <div id="mr-heading">Marble Race</div>
+      <div id="mr-status-line">Waiting for a round…</div>
+      <div id="mr-countdown-wrap">
+        <div id="mr-countdown-label">Entries close in</div>
+        <div id="mr-countdown">--</div>
+        <div id="mr-entry-hint">Type <b>!play</b> in chat to enter</div>
+        <div id="mr-entry-count"></div>
+      </div>
+      <div id="mr-leaderboard">
+        <div id="mr-leaderboard-title">Standings</div>
+        <div id="mr-leaderboard-rows"></div>
+      </div>
+      <div id="mr-results">
+        <div id="mr-results-title">Race Finished</div>
+        <div id="mr-results-winner"></div>
+      </div>
+    </div>
+  </div>
+
+  <script src="scene-base.js"></script>
+  <script type="module">
+    import * as THREE from '/assets/vendor/three.module.min.js';
+
+    function el(id) { return document.getElementById(id); }
+    function esc(s) { return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+
+    // Marble color palette, cycled by marble index — reused across the leaderboard dots and the
+    // 3D marble materials so the two stay visually consistent.
+    const MARBLE_COLORS = [
+      0xFF6B6B, 0x4ECDC4, 0xFFE66D, 0x95E1D3, 0xF38181,
+      0xA8E6CF, 0xFF8B94, 0x7BC8A4, 0xC3A6FF, 0xFFD3A5
+    ];
+    const MARBLE_COLORS_CSS = ['#FF6B6B','#4ECDC4','#FFE66D','#95E1D3','#F38181','#A8E6CF','#FF8B94','#7BC8A4','#C3A6FF','#FFD3A5'];
+
+    // ── Course geometry — MUST mirror backend/integrations/marble-race.js's constants exactly.
+    // Positions are never sent over the wire (only marble x/y/z per keyframe are) — this is pure
+    // decoration whose only job is to visually match what the marbles actually bounced off.
+    const TRACK_WIDTH = 18;
+    const RAMPS = [
+      { zStart: 0,   yStart: 132, zEnd: 60,  yEnd: 102, width: TRACK_WIDTH },
+      { zStart: 60,  yStart: 102, zEnd: 140, yEnd: 62,  width: TRACK_WIDTH },
+      { zStart: 140, yStart: 62,  zEnd: 220, yEnd: 22,  width: TRACK_WIDTH },
+      { zStart: 220, yStart: 22,  zEnd: 260, yEnd: 0,   width: TRACK_WIDTH },
+    ];
+    const FINISH_Z = 250;
+    const RAMP_THICKNESS = 2;
+    const RAIL_HEIGHT = 16;
+
+    function pointOnRamp(r, t) { return { z: r.zStart + (r.zEnd - r.zStart) * t, y: r.yStart + (r.yEnd - r.yStart) * t }; }
+
+    // ── Three.js scene setup ────────────────────────────────────────────────────
+    const wrap = el('mr-canvas-wrap');
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(52, 1920 / 1080, 1, 2000);
+    const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
+    renderer.setSize(1920, 1080);
+    wrap.appendChild(renderer.domElement);
+
+    scene.add(new THREE.AmbientLight(0xffffff, 0.55));
+    const sun = new THREE.DirectionalLight(0xffffff, 0.9);
+    sun.position.set(80, 160, -60);
+    scene.add(sun);
+
+    const rampMat = new THREE.MeshStandardMaterial({ color: 0x2a2440, roughness: 0.8 });
+    const railMat = new THREE.MeshStandardMaterial({ color: 0x4ecdc4, roughness: 0.6, transparent: true, opacity: 0.35 });
+    const bumperMat = new THREE.MeshStandardMaterial({ color: 0xffe66d, roughness: 0.4 });
+    const windmillMat = new THREE.MeshStandardMaterial({ color: 0xff6b6b, roughness: 0.5 });
+    const zigzagMat = new THREE.MeshStandardMaterial({ color: 0x95e1d3, roughness: 0.5 });
+
+    function addRampMesh(r) {
+      const dz = r.zEnd - r.zStart, dy = r.yEnd - r.yStart;
+      const length = Math.hypot(dz, dy);
+      const midZ = (r.zStart + r.zEnd) / 2, midY = (r.yStart + r.yEnd) / 2;
+      const angle = Math.atan2(dy, dz);
+
+      const floor = new THREE.Mesh(new THREE.BoxGeometry(r.width, RAMP_THICKNESS, length), rampMat);
+      floor.position.set(0, midY, midZ);
+      floor.rotation.x = -angle;
+      scene.add(floor);
+
+      [-1, 1].forEach((side) => {
+        const rail = new THREE.Mesh(new THREE.BoxGeometry(1, RAIL_HEIGHT, length), railMat);
+        rail.position.set(side * (r.width / 2), midY, midZ);
+        rail.rotation.x = -angle;
+        scene.add(rail);
+      });
+    }
+    RAMPS.forEach(addRampMesh);
+
+    // Bumper field (ramp 1) — mirrors backend _addBumpers() exactly.
+    (function addBumperMeshes() {
+      const r = RAMPS[0];
+      const rows = 3, perRow = 3;
+      const geo = new THREE.SphereGeometry(0.8, 16, 12);
+      for (let row = 0; row < rows; row++) {
+        const t = (row + 1) / (rows + 1);
+        const p = pointOnRamp(r, t);
+        for (let i = 0; i < perRow; i++) {
+          const x = -r.width / 2 + (i + 0.5) * (r.width / perRow) + (row % 2 === 0 ? 0 : (r.width / perRow) / 2);
+          if (Math.abs(x) > r.width / 2 - 1.5) continue;
+          const m = new THREE.Mesh(geo, bumperMat);
+          m.position.set(x, p.y + 1.2, p.z);
+          scene.add(m);
+        }
+      }
+    })();
+
+    // Windmill paddles (ramp 2) — mirrors backend _addWindmills() exactly, animated live each frame
+    // (purely visual spin — the marbles' actual replayed positions already account for having been
+    // struck by the server-simulated version of this same motion).
+    const windmillMeshes = (function addWindmillMeshes() {
+      const r = RAMPS[1];
+      const count = 4;
+      const meshes = [];
+      for (let i = 0; i < count; i++) {
+        const t = (i + 1) / (count + 1);
+        const p = pointOnRamp(r, t);
+        const armLen = r.width * 0.8;
+        const m = new THREE.Mesh(new THREE.BoxGeometry(armLen, 2, 1.2), windmillMat);
+        m.position.set(0, p.y + 3, p.z);
+        m._angle = 0;
+        m._angularSpeed = (i % 2 === 0 ? 1 : -1) * (1.1 + i * 0.35);
+        scene.add(m);
+        meshes.push(m);
+      }
+      return meshes;
+    })();
+
+    // Zigzag baffles (ramp 3) — mirrors backend _addZigzag() exactly.
+    (function addZigzagMeshes() {
+      const r = RAMPS[2];
+      const count = 5;
+      for (let i = 0; i < count; i++) {
+        const t = (i + 0.5) / count;
+        const p = pointOnRamp(r, t);
+        const side = i % 2 === 0 ? 1 : -1;
+        const len = r.width * 0.7;
+        const m = new THREE.Mesh(new THREE.BoxGeometry(len, 3, 1.2), zigzagMat);
+        m.position.set(side * (r.width * 0.16), p.y + 1.5, p.z);
+        m.rotation.y = side * 0.55;
+        scene.add(m);
+      }
+    })();
+
+    // ── Finish line — a glowing arch + a bright ground stripe at FINISH_Z, so "who's actually won"
+    // reads clearly instead of just inferring it from the marbles stopping somewhere.
+    (function addFinishLine() {
+      const stage = RAMPS[RAMPS.length - 1];
+      const t = Math.max(0, Math.min(1, (FINISH_Z - stage.zStart) / (stage.zEnd - stage.zStart)));
+      const p = pointOnRamp(stage, t);
+      const glowMat = new THREE.MeshStandardMaterial({ color: 0xffe66d, emissive: 0xffe66d, emissiveIntensity: 1.4, roughness: 0.3 });
+
+      // Ground stripe — a thin bright bar laid flat across the track at the finish point.
+      const stripe = new THREE.Mesh(new THREE.BoxGeometry(TRACK_WIDTH, 0.4, 1.4), glowMat);
+      stripe.position.set(0, p.y + 1.3, p.z);
+      scene.add(stripe);
+
+      // Arch — two posts + a crossbar spanning the track, unmistakable even from a distance.
+      const postGeo = new THREE.CylinderGeometry(0.6, 0.6, 14, 10);
+      [-1, 1].forEach((side) => {
+        const post = new THREE.Mesh(postGeo, glowMat);
+        post.position.set(side * (TRACK_WIDTH / 2), p.y + 7, p.z);
+        scene.add(post);
+      });
+      const crossbar = new THREE.Mesh(new THREE.BoxGeometry(TRACK_WIDTH + 1, 1.2, 1.2), glowMat);
+      crossbar.position.set(0, p.y + 14, p.z);
+      scene.add(crossbar);
+
+      const finishLight = new THREE.PointLight(0xffe66d, 2, 60);
+      finishLight.position.set(0, p.y + 10, p.z);
+      scene.add(finishLight);
+    })();
+
+    // ── Marbles ──────────────────────────────────────────────────────────────────
+    let marbleMeshes = [];   // rebuilt whenever a new race payload arrives
+    function buildMarbles(count) {
+      marbleMeshes.forEach((m) => scene.remove(m));
+      marbleMeshes = [];
+      const geo = new THREE.SphereGeometry(1.4, 14, 10);
+      for (let i = 0; i < count; i++) {
+        const mat = new THREE.MeshStandardMaterial({ color: MARBLE_COLORS[i % MARBLE_COLORS.length], roughness: 0.3, metalness: 0.2 });
+        const mesh = new THREE.Mesh(geo, mat);
+        mesh.visible = false;
+        scene.add(mesh);
+        marbleMeshes.push(mesh);
+      }
+    }
+
+    // ── Chase camera — follows behind/above whichever marble currently leads. During entry (no race
+    // yet) it holds a static overview.
+    //
+    // Two smoothing layers, not one: picking the strict highest-z marble every single frame and
+    // handing that STRAIGHT to a position lerp still looks jittery/erratic whenever two marbles are
+    // close — the lerp *target* itself flips between two different x/z positions every frame, so the
+    // camera never settles, it just chases a constantly-relocating point. Fixing that needs hysteresis
+    // on WHICH marble is tracked (only switch when a challenger is ahead by a real margin), independent
+    // of the smoothing on ITS position (the lerp below).
+    const LEADER_SWITCH_MARGIN = 4;   // a challenger must be this far ahead before the camera retargets
+    let trackedLeaderId = null;
+    function pickTrackedLeader(positions) {
+      if (!positions.length) return null;
+      const strictLeader = positions.reduce((best, p) => (p.z > best.z ? p : best), positions[0]);
+      const current = trackedLeaderId != null ? positions.find((p) => p.id === trackedLeaderId) : null;
+      if (!current || strictLeader.z - current.z > LEADER_SWITCH_MARGIN) trackedLeaderId = strictLeader.id;
+      return positions.find((p) => p.id === trackedLeaderId) || strictLeader;
+    }
+
+    const camLookAt = new THREE.Vector3(0, 40, 90);
+    const camPos = new THREE.Vector3(70, 90, -50);
+    camera.position.copy(camPos);
+    camera.lookAt(camLookAt);
+
+    function updateChaseCamera(leaderPos) {
+      const targetLookAt = leaderPos ? new THREE.Vector3(leaderPos.x, leaderPos.y, leaderPos.z) : new THREE.Vector3(0, 50, 100);
+      const targetPos = leaderPos
+        ? new THREE.Vector3(leaderPos.x + 26, leaderPos.y + 22, leaderPos.z - 32)
+        : new THREE.Vector3(80, 110, -60);
+      camLookAt.lerp(targetLookAt, 0.045);
+      camPos.lerp(targetPos, 0.045);
+      camera.position.copy(camPos);
+      camera.lookAt(camLookAt);
+    }
+
+    // ── Race replay — pure interpolation over server-computed keyframes, no physics runs client-side.
+    let raceRaf = null;
+    let currentPositions = [];   // last-drawn positions, kept for the leaderboard between animation frames
+    function stopReplay() { if (raceRaf) { cancelAnimationFrame(raceRaf); raceRaf = null; } }
+    function playReplay(race) {
+      stopReplay();
+      trackedLeaderId = null;   // fresh race — don't carry over a tracked marble id from the last one
+      buildMarbles(race.participantCount || (race.keyframes[0] ? race.keyframes[0].positions.length : 0));
+      const kfs = race.keyframes;
+      if (!kfs || !kfs.length) return;
+      const startTime = performance.now();
+      const tick = (now) => {
+        const elapsed = now - startTime;
+        let i = 0;
+        while (i < kfs.length - 1 && kfs[i + 1].t <= elapsed) i++;
+        const a = kfs[i], b = kfs[Math.min(i + 1, kfs.length - 1)];
+        const span = Math.max(1, b.t - a.t);
+        const frac = Math.max(0, Math.min(1, (elapsed - a.t) / span));
+        currentPositions = a.positions.map((pa) => {
+          const pb = b.positions.find((p) => p.id === pa.id) || pa;
+          return { id: pa.id, x: pa.x + (pb.x - pa.x) * frac, y: pa.y + (pb.y - pa.y) * frac, z: pa.z + (pb.z - pa.z) * frac };
+        });
+        currentPositions.forEach((p) => {
+          const mesh = marbleMeshes[p.id]; if (!mesh) return;
+          mesh.visible = true;
+          mesh.position.set(p.x, p.y, p.z);
+        });
+        const leader = pickTrackedLeader(currentPositions);
+        updateChaseCamera(leader);
+        renderLeaderboard();
+        if (elapsed < kfs[kfs.length - 1].t) raceRaf = requestAnimationFrame(tick);
+      };
+      raceRaf = requestAnimationFrame(tick);
+    }
+
+    function animateIdle() {
+      windmillMeshes.forEach((m) => { m._angle += m._angularSpeed / 60; m.rotation.y = m._angle; });
+      updateChaseCamera(null);
+      renderer.render(scene, camera);
+      requestAnimationFrame(animateIdle);
+    }
+    requestAnimationFrame(function loop() {
+      windmillMeshes.forEach((m) => { m._angle += m._angularSpeed / 60; m.rotation.y = m._angle; });
+      renderer.render(scene, camera);
+      requestAnimationFrame(loop);
+    });
+
+    // ── Leaderboard — ranked live by z-progress (derivable straight from interpolated positions,
+    // no extra data needed from the server).
+    let participantNames = [];   // index-aligned with marble ids for the current race
+    function renderLeaderboard() {
+      const box = el('mr-leaderboard-rows');
+      if (!box || !currentPositions.length) return;
+      const ranked = currentPositions.slice().sort((a, b) => b.z - a.z).slice(0, 10);
+      box.innerHTML = ranked.map((p, i) => {
+        const name = participantNames[p.id] || ('Marble ' + (p.id + 1));
+        const color = MARBLE_COLORS_CSS[p.id % MARBLE_COLORS_CSS.length];
+        return `<div class="mr-lb-row"><span class="mr-lb-rank">${i + 1}</span><span class="mr-lb-dot" style="background:${color}"></span><span class="mr-lb-name">${esc(name)}</span></div>`;
+      }).join('');
+    }
+
+    // ── Entry countdown — same local-timestamp technique as overlay/countdown.html.
+    let entryEndsAt = null;
+    setInterval(() => {
+      if (!entryEndsAt) return;
+      const remaining = Math.max(0, Math.round((entryEndsAt - Date.now()) / 1000));
+      el('mr-countdown').textContent = remaining + 's';
+    }, 250);
+
+    let lastRaceKey = null, lastResultKey = null;
+
+    function render(mr) {
+      const root = el('mr-root');
+      if (!mr || mr.status === 'idle') { root.classList.remove('show'); stopReplay(); return; }
+      root.classList.add('show');
+
+      const cdWrap = el('mr-countdown-wrap');
+      const lb = el('mr-leaderboard');
+      if (mr.status === 'entry') {
+        cdWrap.classList.add('show');
+        lb.classList.remove('show');
+        entryEndsAt = mr.entryEndsAt;
+        el('mr-status-line').textContent = 'Entries open!';
+        el('mr-entry-count').textContent = (mr.participants || []).length + ' entered' + (mr.autoEnterViewers ? ' (+ auto-enter on lock)' : '');
+      } else {
+        cdWrap.classList.remove('show');
+        entryEndsAt = null;
+        el('mr-status-line').textContent = mr.status === 'locked' ? 'Racing…' : (mr.status === 'finished' ? 'Race finished!' : '');
+        if (mr.status === 'locked' || mr.status === 'finished') lb.classList.add('show');
+      }
+
+      participantNames = (mr.participants || []).map((p) => p.username);
+
+      if (mr.race) {
+        const raceKey = mr.race.winner + '|' + mr.race.durationMs + '|' + mr.race.keyframes.length;
+        if (raceKey !== lastRaceKey) { lastRaceKey = raceKey; playReplay(mr.race); }
+      } else if (mr.status !== 'locked') {
+        stopReplay();
+        marbleMeshes.forEach((m) => { m.visible = false; });
+        lastRaceKey = null;
+      }
+
+      const resultsEl = el('mr-results');
+      if (mr.status === 'finished' && mr.result) {
+        const winner = mr.result.winnerParticipant;
+        const resultKey = winner ? (winner.platform + ':' + winner.userId) : 'none';
+        if (resultKey !== lastResultKey) lastResultKey = resultKey;
+        resultsEl.classList.add('show');
+        el('mr-results-winner').textContent = winner ? (winner.username + ' wins!') : 'No entrants this round.';
+      } else {
+        resultsEl.classList.remove('show');
+        lastResultKey = null;
+      }
+    }
+
+    SceneBase.connect((state) => { render(state && state.marbleRace); });
+
+    // DEMO when opened directly without a WS feed
+    if (location.protocol === 'file:') {
+      render({
+        status: 'entry', entryEndsAt: Date.now() + 15000, autoEnterViewers: true,
+        participants: [{ platform: 'twitch', userId: '1', username: 'exampleViewer', source: 'chat' }],
+        race: null, result: null
+      });
+    }
+  </script>
+</body>
+</html>

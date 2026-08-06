@@ -176,7 +176,7 @@ img{display:block;}
 /* GAME n of X — neutral sub-tab that HANGS BELOW the center timer */
 /* GAME n of X sub-card: a connected panel hanging under the timer (label row + optional title-sponsor
    logo beneath), matching the OVERTIME card so the two swap seamlessly. Label-only when no sponsor. */
-.game-sub{position:absolute;top:94px;left:50%;transform:translateX(-50%);z-index:1;
+.game-sub{position:absolute;top:102px;left:50%;transform:translateX(-50%);z-index:1;
   display:flex;flex-direction:column;align-items:center;min-width:120px;max-width:520px;overflow:hidden;
   background:linear-gradient(180deg,var(--panel-1),var(--panel-2));
   /* slanted bottom edges — the vertical mirror of the slanted event banner up top */
@@ -205,13 +205,13 @@ img{display:block;}
 .gs-ot-line2{display:flex;align-items:center;justify-content:center;gap:8px;}
 /* title sponsor — floats in the seam just above the GAME label, over the scorebar's empty lower-centre.
    Transparent (no panel bg) so it never stacks a second layer on the scorebar. */
-.gs-logo{position:absolute;top:73px;left:50%;transform:translateX(-50%);z-index:3;
+.gs-logo{position:absolute;top:80px;left:50%;transform:translateX(-50%);z-index:3;   /* dropped to clear the clock above (was 73) */
   max-height:19px;max-width:150px;object-fit:contain;filter:drop-shadow(0 2px 5px rgba(0,0,0,.55));}
 .gs-logo.hidden{display:none;}
 
 /* OVERTIME card — REPLACES the GAME n of X tab during OT (same spot). A red OVERTIME tab (matching
    the GAME tab's geometry, but red), with the sponsor / AI-trophy logo hanging beneath it in one card. */
-.ot-subbar{position:absolute;top:94px;left:50%;transform:translateX(-50%);z-index:1;
+.ot-subbar{position:absolute;top:102px;left:50%;transform:translateX(-50%);z-index:1;
   display:flex;flex-direction:column;align-items:center;min-width:120px;max-width:240px;overflow:hidden;
   background:linear-gradient(180deg,var(--panel-1),var(--panel-2));
   /* same slanted bottom as the GAME card so the two stay uniform when they swap */
@@ -792,6 +792,38 @@ body.sb-external #sb{display:none !important;}
 .sb-rl-item{display:flex;align-items:center;gap:12px;font-size:21px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;color:#e6ebf5;}
 .sb-rl-item.win{color:var(--gold);}
 .sb-rl-sw{width:26px;height:8px;border-radius:4px;flex:none;}
+
+/* COMPARE — side-by-side player columns with a center team-total comparison bar per stat
+   (renderStatCompare builds the grid; column count follows the actual roster size). */
+.sb-compare{width:100%;display:flex;justify-content:center;}
+.sb-compare-grid{display:grid;gap:8px 10px;align-items:stretch;width:100%;max-width:1600px;}
+.sb-cmp-name{display:flex;align-items:center;justify-content:center;gap:8px;position:relative;
+  height:44px;padding:0 10px;border-radius:9px;background:rgba(255,255,255,.04);border:1px solid var(--hair);
+  font-size:15px;font-weight:800;text-transform:uppercase;color:#dfe5f2;overflow:hidden;}
+.sb-cmp-name span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.sb-cmp-name.empty{background:transparent;border-color:transparent;}
+.sb-cmp-name.side-a{border-color:color-mix(in srgb,var(--blue) 55%,var(--hair));}
+.sb-cmp-name.side-b{border-color:color-mix(in srgb,var(--orange) 55%,var(--hair));}
+.sb-cmp-name.win{border-color:var(--gold);color:var(--gold);box-shadow:0 0 16px -4px var(--gold);}
+.sb-cmp-name.mvp .sb-mvp-ic{width:16px;height:16px;color:var(--gold);flex:none;}
+.sb-cmp-center-head{display:flex;align-items:center;justify-content:center;gap:10px;height:44px;
+  font-size:12px;font-weight:800;letter-spacing:.1em;color:var(--muted);text-transform:uppercase;}
+.sb-cmp-center-head img{width:26px;height:26px;object-fit:contain;flex:none;}
+.sb-cmp-center-head span{max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#dfe5f2;}
+.sb-cmp-center-head b{color:var(--muted);font-weight:700;}
+.sb-cmp-stat{display:flex;align-items:center;justify-content:center;height:40px;border-radius:8px;
+  background:rgba(255,255,255,.05);border:1px solid var(--hair);font-size:17px;font-weight:700;
+  font-variant-numeric:tabular-nums;color:#cfd6e6;}
+.sb-cmp-stat.score{background:rgba(255,206,77,.09);border-color:rgba(255,206,77,.28);color:#fff;font-weight:900;}
+.sb-cmp-center{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;padding:2px 0;}
+.sb-cmp-lbl{font-size:11px;font-weight:800;letter-spacing:.12em;color:var(--muted);text-transform:uppercase;}
+.sb-compare-bar{display:flex;width:100%;height:8px;border-radius:4px;overflow:hidden;background:rgba(255,255,255,.08);}
+.sb-cmp-fill{height:100%;transition:flex-basis .6s ease;}
+.sb-cmp-fill-a{background:linear-gradient(90deg,color-mix(in srgb,var(--blue) 55%,transparent),var(--blue));}
+.sb-cmp-fill-b{background:linear-gradient(270deg,color-mix(in srgb,var(--orange) 55%,transparent),var(--orange));}
+.sb-cmp-totals{display:flex;justify-content:space-between;width:100%;font-size:14px;font-weight:800;font-variant-numeric:tabular-nums;}
+.sb-cmp-total-a{color:var(--blue);}
+.sb-cmp-total-b{color:var(--orange);}
 
 /* sponsor slot */
 .sb-sponsor{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;}
@@ -2124,19 +2156,21 @@ function renderScoreboard(playerCache, state, series, isLive){
 
   // stats board — producer-selectable design skin + optional show/hide (the "stats screen" toggle
   // at the scoreboard scene). Default/Glass/Block reuse the team tables; Radar swaps in a twin-polygon
-  // comparison. sb-nostats hides the whole board for a clean FINAL-only card.
+  // comparison; Compare swaps in side-by-side player columns with a per-stat team-total bar between
+  // them. sb-nostats hides the whole board for a clean FINAL-only card.
   const ss = state.rlStatsScreen || {};
-  const design = ['default','glass','block','radar'].includes(ss.design) ? ss.design : 'default';
+  const design = ['default','glass','block','radar','compare'].includes(ss.design) ? ss.design : 'default';
   const showStats = ss.showStats !== false;
   const sbEl = el('sb');
   if(sbEl){
-    sbEl.classList.remove('sb-d-default','sb-d-glass','sb-d-block','sb-d-radar');
+    sbEl.classList.remove('sb-d-default','sb-d-glass','sb-d-block','sb-d-radar','sb-d-compare');
     sbEl.classList.add('sb-d-'+design);
     sbEl.classList.toggle('sb-nostats', !showStats);
   }
   const body=el('sb-body'); if(body){ body.innerHTML='';
     if(showStats){
       if(design==='radar') renderStatRadar(body, {nameA, nameB, A, B, aWon, bWon});
+      else if(design==='compare') renderStatCompare(body, {nameA, logoA, A, aWon, nameB, logoB, B, bWon, mvp});
       else { group(nameA, logoA, A, aWon, 'var(--blue)'); group(nameB, logoB, B, bWon, 'var(--orange)'); }
     }
   }
@@ -2238,6 +2272,71 @@ function renderStatRadar(body, o){
     legend.appendChild(it);
   });
   wrap.appendChild(chart); wrap.appendChild(legend);
+  body.appendChild(wrap);
+}
+
+/* COMPARE stats-screen skin: teams as side-by-side player columns (not stacked, unlike every other
+   skin) with a center column between them holding one proportional split bar per stat — each team's
+   TOTAL for that stat labeled at the bar's own ends, so "who's winning this category" reads instantly
+   without doing the arithmetic yourself. Column count follows the actual roster size (2v2/3v3/etc),
+   not hardcoded to 3. */
+function renderStatCompare(body, o){
+  const { nameA, logoA, A, aWon, nameB, logoB, B, bWon, mvp } = o;
+  const totals = list => SB_STATS.map(s => list.reduce((sum,p)=>sum+(Number(p[s])||0), 0));
+  const TA = totals(A), TB = totals(B);
+  const n = Math.max(A.length, B.length, 1);
+
+  const wrap = document.createElement('div'); wrap.className = 'sb-compare';
+  const grid = document.createElement('div'); grid.className = 'sb-compare-grid';
+  grid.style.gridTemplateColumns = `repeat(${n},1fr) 240px repeat(${n},1fr)`;
+
+  function playerCell(p, side, won){
+    const c = document.createElement('div'); c.className = 'sb-cmp-name side-'+side + (won?' win':'') + (p && p.name===mvp?' mvp':'');
+    if(!p){ c.classList.add('empty'); return c; }
+    if(p.name===mvp){ const ic=document.createElement('span'); ic.className='sb-mvp-ic'; ic.innerHTML=CROWN; c.appendChild(ic); }
+    const ns=document.createElement('span'); ns.textContent=p.name; c.appendChild(ns);
+    return c;
+  }
+  function statCell(p, stat){
+    const c = document.createElement('div'); c.className = 'sb-cmp-stat' + (stat==='score' ? ' score' : '');
+    c.textContent = p ? (p[stat]||0) : '';
+    return c;
+  }
+
+  // Cells are appended FLAT, directly into the grid, in strict row-major order — CSS Grid's implicit
+  // row-wrapping is what actually lines them up into columns across rows. A per-row wrapper <div>
+  // would each start its own isolated layout and the columns would NOT align between rows.
+  // Header row — one name badge per player column, blank-ish center (event/brand already header the
+  // whole board above — no need to repeat it inside the skin, and no third-party-style "powered by").
+  for(let i=0;i<n;i++) grid.appendChild(playerCell(A[i], 'a', aWon));
+  const centerHead = document.createElement('div'); centerHead.className = 'sb-cmp-center-head';
+  centerHead.innerHTML = `<img src="${logoA||'/assets/rl.png'}" alt=""><span>${nameA||''}</span><b>VS</b><span>${nameB||''}</span><img src="${logoB||'/assets/rl.png'}" alt="">`;
+  grid.appendChild(centerHead);
+  for(let i=0;i<n;i++) grid.appendChild(playerCell(B[i], 'b', bWon));
+
+  // One row per stat: player values on the outside, a team-total comparison bar in the center.
+  SB_STATS.forEach((stat,i)=>{
+    for(let p=0;p<n;p++) grid.appendChild(statCell(A[p], stat));
+
+    const center = document.createElement('div'); center.className = 'sb-cmp-center';
+    const lbl = document.createElement('div'); lbl.className = 'sb-cmp-lbl'; lbl.textContent = SB_LABELS[i];
+    const bar = document.createElement('div'); bar.className = 'sb-compare-bar';
+    const sum = TA[i] + TB[i];
+    const pctA = sum > 0 ? (TA[i] / sum) * 100 : 50;   // both-zero (e.g. no saves yet) → neutral 50/50, never a divide-by-zero blank
+    const fillA = document.createElement('div'); fillA.className = 'sb-cmp-fill sb-cmp-fill-a'; fillA.style.flexBasis = pctA + '%';
+    const fillB = document.createElement('div'); fillB.className = 'sb-cmp-fill sb-cmp-fill-b'; fillB.style.flexBasis = (100-pctA) + '%';
+    bar.appendChild(fillA); bar.appendChild(fillB);
+    const nums = document.createElement('div'); nums.className = 'sb-cmp-totals';
+    const numA = document.createElement('span'); numA.className = 'sb-cmp-total-a'; numA.textContent = TA[i];
+    const numB = document.createElement('span'); numB.className = 'sb-cmp-total-b'; numB.textContent = TB[i];
+    nums.appendChild(numA); nums.appendChild(numB);
+    center.appendChild(lbl); center.appendChild(bar); center.appendChild(nums);
+    grid.appendChild(center);
+
+    for(let p=0;p<n;p++) grid.appendChild(statCell(B[p], stat));
+  });
+
+  wrap.appendChild(grid);
   body.appendChild(wrap);
 }
 

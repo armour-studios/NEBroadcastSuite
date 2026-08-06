@@ -209,12 +209,12 @@ html,body{width:1920px;height:1080px;overflow:hidden;background:transparent;
     <div class="ow-accent" id="ow-accent-a"></div>
     <div class="ow-bans-col" id="ow-bans-col-a">
       <div class="ow-ban-portrait" id="ow-ban-portrait-a0" style="display:none">
-        <img class="ow-ban-img" id="ow-ban-img-a0" src="" alt="" style="display:none"
+        <img class="ow-ban-img" id="ow-ban-img-a0" alt="" style="display:none"
              onerror="this.style.display='none';owShowIcon('ow-ban-icon-a0')">
         <span class="ow-ban-role-icon" id="ow-ban-icon-a0"></span>
       </div>
       <div class="ow-ban-portrait" id="ow-ban-portrait-a1" style="display:none">
-        <img class="ow-ban-img" id="ow-ban-img-a1" src="" alt="" style="display:none"
+        <img class="ow-ban-img" id="ow-ban-img-a1" alt="" style="display:none"
              onerror="this.style.display='none';owShowIcon('ow-ban-icon-a1')">
         <span class="ow-ban-role-icon" id="ow-ban-icon-a1"></span>
       </div>
@@ -253,12 +253,12 @@ html,body{width:1920px;height:1080px;overflow:hidden;background:transparent;
     <div class="ow-accent" id="ow-accent-b"></div>
     <div class="ow-bans-col" id="ow-bans-col-b">
       <div class="ow-ban-portrait" id="ow-ban-portrait-b0" style="display:none">
-        <img class="ow-ban-img" id="ow-ban-img-b0" src="" alt="" style="display:none"
+        <img class="ow-ban-img" id="ow-ban-img-b0" alt="" style="display:none"
              onerror="this.style.display='none';owShowIcon('ow-ban-icon-b0')">
         <span class="ow-ban-role-icon" id="ow-ban-icon-b0"></span>
       </div>
       <div class="ow-ban-portrait" id="ow-ban-portrait-b1" style="display:none">
-        <img class="ow-ban-img" id="ow-ban-img-b1" src="" alt="" style="display:none"
+        <img class="ow-ban-img" id="ow-ban-img-b1" alt="" style="display:none"
              onerror="this.style.display='none';owShowIcon('ow-ban-icon-b1')">
         <span class="ow-ban-role-icon" id="ow-ban-icon-b1"></span>
       </div>
@@ -310,7 +310,9 @@ function applyBan(pId,imgId,iconId,name){
   if(!p) return;
   if(!name){
     p.style.display='none';
-    if(img){img.src='';img.style.display='none';}
+    // removeAttribute, not src='' — an empty src resolves to the document URL and fires
+    // a bogus error event (which is what used to throw before owShowIcon was defined).
+    if(img){img.removeAttribute('src');img.style.display='none';}
     if(icon){icon.innerHTML='';icon.style.opacity='';}
     return;
   }

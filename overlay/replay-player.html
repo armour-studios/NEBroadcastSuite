@@ -24,25 +24,46 @@
   #stage { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
     background: #000; transition: background .32s ease; }
   #stage.idle { background: transparent; }
-  /* Logo dip: a brand-tinted vignette instead of flat black — --brand-tint/--brand-accent are set
-     from full_state's brand color so this reads as an actual "sting" instead of a plain fade-to-black. */
-  #stage.logo-dip { background: radial-gradient(circle at 50% 50%, var(--brand-tint, rgba(124,58,237,.30)) 0%, #000 68%); }
   video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #000;
     opacity: 0; transition: opacity .26s ease; }
   video.show { opacity: 1; }
-  /* Logo card: scale + fade with a slight overshoot (a broadcast "sting" ease, not a plain cross-fade),
-     plus an accent underline that draws in beneath it. */
-  #logo-wrap { position: absolute; display: flex; flex-direction: column; align-items: center; gap: 16px;
-    opacity: 0; transform: scale(.82); pointer-events: none;
-    transition: opacity .32s cubic-bezier(.34,1.56,.64,1), transform .32s cubic-bezier(.34,1.56,.64,1); }
-  #logo-wrap.show { opacity: 1; transform: scale(1); }
-  #logo { max-width: 38vw; max-height: 30vh; object-fit: contain;
-    filter: drop-shadow(0 10px 34px rgba(0,0,0,.6)); }
-  #logo-bar { width: 0; height: 3px; border-radius: 2px; background: var(--brand-accent, #7C3AED);
-    box-shadow: 0 0 14px 1px var(--brand-accent, #7C3AED); transition: width .3s ease .1s; }
-  #logo-wrap.show #logo-bar { width: 110px; }
-  /* Stinger transition video — covers the screen while the clip swaps underneath. */
-  #stinger { object-fit: cover; z-index: 5; transition: opacity .1s ease; }
+  /* A CUT must be a cut. Without this the .26s opacity ease applies to hard cuts too, so going live
+     faded up from black instead of arriving on frame one. */
+  video.no-fade { transition: none; }
+
+  /* ── Logo transition = a branded SWIPE (an HTML stinger), not a dip-to-black with a logo card.
+     A skewed, brand-coloured panel sweeps across the frame, the clip swaps while it covers, then it
+     sweeps off the other side. Colours come from --brand-accent/--brand-tint (set from full_state's
+     brand), so it reads as the show's own sting on any event. ── */
+  #swipe { position: absolute; top: -6%; bottom: -6%; left: -22%; width: 144%;
+    display: flex; align-items: center; justify-content: center; z-index: 4; pointer-events: none;
+    transform: skewX(-11deg) translateX(-125%);
+    background:
+      linear-gradient(100deg, rgba(0,0,0,.55) 0%, transparent 42%),
+      linear-gradient(100deg, var(--brand-accent, #7C3AED) 0%, var(--brand-deep, #2a1063) 78%);
+    box-shadow: 0 0 60px rgba(0,0,0,.55);
+  }
+  /* Leading edge: a bright hairline that arrives just ahead of the panel — the detail that makes a
+     wipe read as broadcast rather than as a div sliding past. */
+  #swipe::after { content: ''; position: absolute; top: 0; bottom: 0; right: -10px; width: 10px;
+    background: linear-gradient(90deg, var(--brand-accent, #7C3AED), #fff);
+    box-shadow: 0 0 26px 4px var(--brand-accent, #7C3AED); opacity: .9; }
+  #swipe.in  { transform: skewX(-11deg) translateX(0);     transition: transform .42s cubic-bezier(.65,0,.35,1); }
+  #swipe.out { transform: skewX(-11deg) translateX(125%);  transition: transform .42s cubic-bezier(.65,0,.35,1); }
+  /* Contents un-skew so the logo stays upright inside the slanted panel. */
+  #swipe-inner { transform: skewX(11deg); display: flex; flex-direction: column; align-items: center; gap: 14px; }
+  #logo { max-width: 34vw; max-height: 28vh; object-fit: contain; filter: drop-shadow(0 10px 30px rgba(0,0,0,.55));
+    opacity: 0; transform: translateX(-26px); transition: opacity .26s ease .08s, transform .26s ease .08s; }
+  #swipe.in #logo { opacity: 1; transform: translateX(0); }
+  #logo-bar { width: 0; height: 3px; border-radius: 2px; background: #fff;
+    box-shadow: 0 0 14px 1px rgba(255,255,255,.8); transition: width .3s ease .14s; }
+  #swipe.in #logo-bar { width: 120px; }
+  /* Stinger transition video — covers the screen while the clip swaps underneath.
+     background MUST be transparent: OBS stingers are usually alpha webm (VP8 with alpha_mode=1),
+     and the generic `video { background:#000 }` above would paint black behind every transparent
+     pixel — so the first ~250ms of a sting that opens transparent read as a black hole on air
+     instead of showing the clip through it, which is what OBS does. */
+  #stinger { object-fit: cover; z-index: 5; transition: opacity .1s ease; background: transparent; }
   #label { position: absolute; left: 28px; bottom: 24px; font-family: 'Rajdhani', system-ui, sans-serif;
     color: #fff; font-size: 22px; letter-spacing: .06em; text-transform: uppercase; text-shadow: 0 2px 8px rgba(0,0,0,.8);
     opacity: 0; transition: opacity .3s; pointer-events: none; }
@@ -54,12 +75,9 @@
     <video id="vid" playsinline></video>
     <video id="vid2" playsinline></video>
     <video id="stinger" playsinline></video>
-    <div id="logo-wrap"><img id="logo" alt=""><div id="logo-bar"></div></div>
+    <div id="swipe"><div id="swipe-inner"><img id="logo" alt=""><div id="logo-bar"></div></div></div>
     <div id="label"></div>
   </div>
-  <!-- Hidden preloader: buffers the NEXT playlist clip while the current one plays, so the advance
-       starts from a warm cache/decode instead of a cold fetch. Never shown or played. -->
-  <video id="preload" muted playsinline preload="auto" style="position:absolute;width:1px;height:1px;opacity:0;pointer-events:none;left:-9999px;"></video>
 
   <script>
     const WS = 'ws://' + (location.hostname || 'localhost') + ':3001';
@@ -74,23 +92,65 @@
       : (_QP.get('bus') === 'preview' ? 'preview' : 'program');
     const stage = document.getElementById('stage');
     const stinger = document.getElementById('stinger');
-    const logoWrap = document.getElementById('logo-wrap');
+    const swipe = document.getElementById('swipe');
     const logo = document.getElementById('logo');
     const label = document.getElementById('label');
-    const preloadEl = document.getElementById('preload');
-    let _preloadedUrl = '';
-    // Buffer the next playlist clip in a hidden element so its eventual play() starts warm, not cold.
-    function preloadNext(url) {
-      if (!url || url === _preloadedUrl) return;
-      _preloadedUrl = url;
-      try { preloadEl.src = url; preloadEl.load(); } catch (e) {}
-    }
     // Two stacked <video> elements so a 'fade' transition can be a true crossfade — the incoming
     // clip dissolves directly over the outgoing one — instead of dipping through black between
     // them. `activeVideo` is whichever is currently on screen; `idleVideo` is the other one,
     // available to preload the next clip into. They swap roles after each crossfade.
     let activeVideo = document.getElementById('vid');
     let idleVideo = document.getElementById('vid2');
+    // Preload: buffer the NEXT clip INTO THE ELEMENT THE NEXT TRANSITION WILL ACTUALLY USE (the idle
+    // one), pre-seeked to its in-point. This used to load into a third hidden <video>, which warmed
+    // nothing that ever went on screen — every advance still cold-loaded into the idle element, which
+    // is why transitions weren't smooth. The element keeps its buffered, decoded, correctly-positioned
+    // frame, so the crossfade starts on the right frame with no fetch and no seek.
+    let _transBusy = false;      // a transition owns the idle element right now — don't clobber it
+    let _pendingWarm = null;     // preload that arrived mid-transition; applied when it finishes
+    function preloadNext(url, inPoint) {
+      if (!url) return;
+      if (_transBusy) { _pendingWarm = { url, inPoint }; return; }
+      const v = idleVideo;
+      if (!v || v === activeVideo) return;
+      if (v.dataset.warmUrl === url) return;                  // already buffered
+      try {
+        v.pause();
+        v.classList.remove('show');
+        v.dataset.warmUrl = url;
+        v.dataset.warmIn = String(inPoint || 0);
+        v.muted = true;                                       // silent while it buffers off screen
+        v.src = url;
+        v.load();
+        const seek = () => { if (inPoint > 0) { try { v.currentTime = inPoint; } catch (e) {} } };
+        if (v.readyState >= 1) seek(); else v.addEventListener('loadedmetadata', seek, { once: true });
+        // Tell the panel when this clip is genuinely ready to show, so a go-live can hold the OBS
+        // scene cut until there's a frame to cut TO — otherwise the transition lands on an empty
+        // player and the first thing on air is black.
+        // Report readiness only — do NOT reveal the buffered element here. A paused <video> paints
+        // nothing in an offscreen-rendered browser (measured: readyState 4, opacity 1, still black),
+        // and an OBS browser source is exactly that, so parking a "first frame" on screen would only
+        // put a black rectangle up early. Buffering is the win; the picture arrives with playback.
+        const ready = () => { if (v.dataset.warmUrl === url) sendWS({ type: 'replay_armed', data: { bus: BUS, url } }); };
+        if (v.readyState >= 2) ready(); else v.addEventListener('loadeddata', ready, { once: true });
+      } catch (e) {}
+    }
+    // Keep the stinger video BUFFERED between uses. It used to be dropped (src removed) after every
+    // transition, so each advance re-fetched and re-decoded it — and since a <video> paints its
+    // black background until the first frame arrives, every transition opened with ~250ms of black
+    // over the outgoing clip. Same file every time, so load it once and rewind it.
+    let _stingerUrl = '';
+    function primeStinger(url) {
+      if (!url || url === _stingerUrl) return;
+      _stingerUrl = url;
+      try { stinger.src = url; stinger.load(); } catch (e) {}
+    }
+    // Called at the end of every transition: release the idle element and apply a preload that was
+    // held back while the transition was mid-flight.
+    function endTransition() {
+      _transBusy = false;
+      if (_pendingWarm) { const p = _pendingWarm; _pendingWarm = null; preloadNext(p.url, p.inPoint); }
+    }
     let ws = null;
     let currentUrl = null;
     let transToken = 0;       // cancels a stale transition if a new play() interrupts it
@@ -150,24 +210,40 @@
       });
     }
 
-    function loadInto(v, url, keepHidden) {
+    // Reveal with no opacity ease (hard cut), restoring the ease afterwards so fades still fade.
+    function showInstant(v) {
+      v.classList.add('no-fade', 'show');
+      requestAnimationFrame(() => requestAnimationFrame(() => v.classList.remove('no-fade')));
+    }
+    function loadInto(v, url, keepHidden, instant) {
       currentUrl = url;
       stage.classList.remove('idle');
       v.loop = false;          // looping is handled manually so it respects the trim range
-      v.src = url;
+      // Warm path: preloadNext already buffered this exact url into this element and parked it on the
+      // in-point — re-assigning .src would throw that away and force a cold reload.
+      const warm = (v.dataset.warmUrl === url && v.readyState >= 2);
+      if (warm) {
+        if (curIn > 0 && Math.abs((v.currentTime || 0) - curIn) > 0.2) { try { v.currentTime = curIn; } catch (e) {} }
+      } else {
+        v.src = url;
+      }
+      v.dataset.warmUrl = '';                                  // consumed either way
       v.muted = false; v.volume = 1;
       // Filename caption intentionally hidden on the program output.
       label.textContent = ''; label.classList.remove('show');
       const p = v.play();
       if (p && p.catch) p.catch(() => { /* autoplay blocked; OBS allows it */ });
       if (!keepHidden) {
-        if (curIn > 0) {
-          // Hold black until we land on the in-point, so frame 0 never flashes.
-          let shown = false; const reveal = () => { if (shown) return; shown = true; requestAnimationFrame(() => v.classList.add('show')); };
-          v.addEventListener('seeked', reveal, { once: true });
-          setTimeout(reveal, 600);
+        const reveal = instant ? () => showInstant(v) : () => requestAnimationFrame(() => v.classList.add('show'));
+        if (curIn > 0 && !(warm && Math.abs((v.currentTime || 0) - curIn) <= 0.2)) {
+          // Hold black until we land on the in-point, so frame 0 never flashes. (A warm element is
+          // already parked there — revealing it immediately, rather than waiting on a 'seeked' that
+          // will never fire, is the difference between an instant cut and a 600ms hole.)
+          let shown = false; const once = () => { if (shown) return; shown = true; reveal(); };
+          v.addEventListener('seeked', once, { once: true });
+          setTimeout(once, 600);
         } else {
-          requestAnimationFrame(() => v.classList.add('show'));
+          reveal();
         }
       }
     }
@@ -190,7 +266,17 @@
       requestAnimationFrame(step);
     }
 
-    async function play(url, name, loop, transition, logoUrl, trimIn, trimOut, stingerUrl) {
+    // Retire the element a transition just replaced. Deliberately delayed past the CSS opacity
+    // transition so the outgoing frame is never yanked mid-dissolve.
+    function retire(outgoing, tok) {
+      if (tok !== transToken) return;   // a newer transition already claimed it
+      outgoing.pause();
+      outgoing.classList.remove('show');
+      outgoing.removeAttribute('src');
+      outgoing.load();
+    }
+
+    async function play(url, name, loop, transition, logoUrl, trimIn, trimOut, stingerUrl, stingerPoint, stingerDuration) {
       if (!url) { stop(); return; }
       curIn = (typeof trimIn === 'number' && trimIn > 0) ? trimIn : 0;
       curOut = (typeof trimOut === 'number' && trimOut > curIn) ? trimOut : null;
@@ -199,6 +285,14 @@
       const sameUrl = url === currentUrl;
       const wasLive = !stage.classList.contains('idle');
       transition = transition || 'cut';
+      // A new play() supersedes any in-flight transition (their token checks make them bail), so the
+      // idle element is ours again — otherwise a transition that never reached its end (a stinger
+      // whose 'ended' never fired, say) would leave preloading blocked for the rest of the show.
+      _transBusy = false;
+      // Can we swap on the pre-buffered element instead of reloading the visible one? That's the
+      // difference between a frame-accurate swap and a black hole while the file loads.
+      const warmReady = idleVideo && idleVideo !== activeVideo
+        && idleVideo.dataset.warmUrl === url && idleVideo.readyState >= 2;
 
       if (sameUrl && wasLive) {   // already up — just make sure it's rolling
         activeVideo.muted = false; activeVideo.volume = 1;
@@ -206,103 +300,190 @@
         return;
       }
 
-      // Hard cut → swap straight in (with a quick fade-up).
-      if (transition === 'cut') { loadInto(activeVideo, url); return; }
+      // Hard cut. With a warm element this is a real cut: bring the already-decoded clip to the
+      // front and show it on the same frame the outgoing one disappears. Cold, it's the old
+      // load-in-place path (a short fade-up while the file opens).
+      if (transition === 'cut') {
+        if (!warmReady) { loadInto(activeVideo, url, false, true); return; }
+        const tok = ++transToken;
+        _transBusy = true;
+        const incoming = idleVideo, outgoing = activeVideo;
+        loadInto(incoming, url, true);
+        bringToFront(incoming, outgoing);
+        activeVideo = incoming; idleVideo = outgoing;
+        showInstant(incoming);
+        outgoing.classList.remove('show');
+        setTimeout(() => { retire(outgoing, tok); endTransition(); }, 60);
+        return;
+      }
 
-      // Stinger: play a short video over the top and swap the clip underneath at its midpoint.
-      // It needs no outgoing clip, so it also works as an intro on the very first clip.
+      // Stinger: play a short video over the top and swap the clip underneath at the transition
+      // point (producer-set, in ms; defaults to the stinger's midpoint — the same convention as
+      // OBS's own stinger transition). It needs no outgoing clip, so it also works as an intro on
+      // the very first clip.
       if (transition === 'stinger' && stingerUrl) {
         const tok = ++transToken;
-        let swapped = false;
+        _transBusy = true;
+        let swapped = false, finished = false;
+        const pointSec = (typeof stingerPoint === 'number' && stingerPoint > 0) ? stingerPoint / 1000 : 0;
+        // WATCHDOG TIMINGS. A stinger must never be able to strand itself on screen, and OBS-authored
+        // .webm stingers routinely ship with NO duration in the header — `stinger.duration` comes back
+        // NaN/Infinity, so a midpoint swap can't be computed and 'ended' may never fire. When that
+        // happened the sting covered the frame and the clip underneath was never revealed. So the swap
+        // and the lift are both driven by timers (the media events, when they do fire, just get there
+        // first): point → swap, known length (or twice the point) → lift.
+        const lenMs = (typeof stingerDuration === 'number' && stingerDuration > 0) ? stingerDuration : 0;
+        const swapAtMs = Math.round((pointSec * 1000) || (lenMs ? lenMs / 2 : 0) || 700);
+        const endAtMs = Math.round(lenMs || (swapAtMs * 2)) + 250;
+        let tSwap = null, tEnd = null;
         // Audio CROSSFADE under the stinger: fade the outgoing clip's audio OUT as the sting covers,
-        // then fade the incoming clip's audio IN after the mid-point swap — instead of a hard cut.
+        // then fade the incoming clip's audio IN after the swap — instead of a hard cut.
         // (Producer feedback: "stinger audio fade out, fade in - crossfade".)
         if (wasLive) fadeVolume(activeVideo, 0, 550);
         const doSwap = () => {
-          if (!swapped && tok === transToken) {
-            swapped = true;
+          if (swapped || tok !== transToken) return;
+          swapped = true;
+          // Swap on the warm element when we have one (the sting hides the swap either way, but a
+          // cold load can outlast the sting and leave the old clip showing when it lifts).
+          if (warmReady && idleVideo !== activeVideo) {
+            const incoming = idleVideo, outgoing = activeVideo;
+            loadInto(incoming, url, true);
+            bringToFront(incoming, outgoing);
+            activeVideo = incoming; idleVideo = outgoing;
+            incoming.classList.add('show');
+            outgoing.classList.remove('show');
+            setTimeout(() => retire(outgoing, tok), 80);
+          } else {
             loadInto(activeVideo, url);
-            activeVideo.volume = 0;
-            fadeVolume(activeVideo, 1, 550);
           }
+          activeVideo.volume = 0;
+          fadeVolume(activeVideo, 1, 550);
         };
-        const onTime = () => { if (stinger.duration && stinger.currentTime >= stinger.duration * 0.5) doSwap(); };
+        const onTime = () => {
+          // Only usable when the file actually declares a length; otherwise the timers own it.
+          const dur = stinger.duration;
+          const at = pointSec || (isFinite(dur) && dur > 0 ? dur * 0.5 : 0);
+          if (at && stinger.currentTime >= at) doSwap();
+        };
         const cleanup = () => {
+          if (finished) return;
+          finished = true;
+          clearTimeout(tSwap); clearTimeout(tEnd);
           stinger.removeEventListener('timeupdate', onTime);
           stinger.removeEventListener('ended', cleanup);
           if (tok !== transToken) return;
-          doSwap();
+          doSwap();                                   // covers a sting that errored before the swap
           stinger.classList.remove('show');
-          setTimeout(() => { try { stinger.pause(); stinger.removeAttribute('src'); stinger.load(); } catch (e) {} }, 300);
+          // Pause and rewind, but KEEP the file buffered — the next transition then opens on frame
+          // one instead of re-downloading it behind a black rectangle.
+          setTimeout(() => { try { stinger.pause(); stinger.currentTime = 0; } catch (e) {} }, 300);
+          endTransition();
         };
-        stinger.onerror = () => { if (tok === transToken) { doSwap(); stinger.classList.remove('show'); } };
+        stinger.onerror = cleanup;                    // unplayable sting → swap now, don't sit on black
         stinger.addEventListener('timeupdate', onTime);
         stinger.addEventListener('ended', cleanup);
-        stinger.src = stingerUrl; stinger.currentTime = 0;
-        stinger.classList.add('show');
-        const sp = stinger.play(); if (sp && sp.catch) sp.catch(() => { doSwap(); stinger.classList.remove('show'); });
+        primeStinger(stingerUrl);                     // usually already buffered from the last sting
+        try { stinger.currentTime = 0; } catch (e) {}
+        // Reveal only once there's a frame to show — an empty <video> is an opaque black rectangle,
+        // and showing it early is what put black on air ahead of the sting. The timers start from
+        // the same moment, so the swap point stays measured against real playback.
+        const startSting = () => {
+          if (tok !== transToken || finished) return;
+          stinger.classList.add('show');
+          tSwap = setTimeout(doSwap, swapAtMs);
+          tEnd = setTimeout(cleanup, endAtMs);
+        };
+        const sp = stinger.play(); if (sp && sp.catch) sp.catch(cleanup);
+        if (stinger.readyState >= 2) startSting();
+        else {
+          stinger.addEventListener('loadeddata', startSting, { once: true });
+          setTimeout(startSting, 350);                // don't stall the cut if it's slow to open
+        }
         return;
       }
+
+      // 'stinger' with no stinger file can't sting. It used to fall through to the LOGO dip below —
+      // so a stinger that was never uploaded (or a `stinger` field the server didn't forward)
+      // silently produced a brand logo card between clips instead of the chosen transition.
+      // Anything that isn't an explicit 'logo' now degrades to the crossfade.
+      if (transition !== 'logo') transition = 'fade';
 
       // Fade / logo need an outgoing clip to ease from; on the very first clip just swap in.
       if (!wasLive) { loadInto(activeVideo, url); return; }
 
       if (transition === 'fade') {
         // True crossfade — dissolve directly into the next clip instead of dipping through black.
-        // Preload the incoming clip into the currently-idle <video> (stacked, opacity 0), then fade
-        // it in ON TOP of the still-fully-visible outgoing clip; the outgoing one never needs its
-        // own opacity touched since the incoming one covers it completely once the fade completes.
+        // The incoming clip goes into the currently-idle <video> (stacked, opacity 0) — already
+        // buffered and parked on its in-point by preloadNext — then fades in ON TOP of the still-
+        // fully-visible outgoing clip; the outgoing one never needs its own opacity touched since
+        // the incoming one covers it completely once the fade completes.
         const tok = ++transToken;
+        _transBusy = true;
         const incoming = idleVideo;
         const outgoing = activeVideo;
         loadInto(incoming, url, true);
-        await waitReady(incoming);
-        if (tok !== transToken) return;            // a newer play() took over
+        if (!warmReady) await waitReady(incoming);   // cold: don't start dissolving into black
+        if (tok !== transToken) { endTransition(); return; }   // a newer play() took over
         bringToFront(incoming, outgoing);
         activeVideo = incoming;                     // progress/trim enforcement now tracks the new clip
         idleVideo = outgoing;
         requestAnimationFrame(() => incoming.classList.add('show'));
         await wait(300);                            // matches the .26s CSS opacity transition + margin
-        if (tok === transToken) {                   // only clean up if a newer transition hasn't already claimed `outgoing`
-          outgoing.pause();
-          outgoing.classList.remove('show');
-          outgoing.removeAttribute('src');
-          outgoing.load();
-        }
+        retire(outgoing, tok);
+        endTransition();
         return;
       }
 
-      // Logo: dip to a brand-tinted vignette, sting the logo in (scale + accent underline), then
-      // ease the new clip up. #stage.logo-dip / --brand-tint / --brand-accent are set from the
-      // brand color cached off full_state (see handleBrand below) so this reads as an actual on-
-      // brand sting instead of a plain fade to black.
+      // Logo: a branded SWIPE — a skewed brand-coloured panel carrying the logo sweeps across the
+      // frame, the clip swaps while it covers, then it sweeps off the far side. Colours come from
+      // the brand cached off full_state (see applyBrandColors), so it's the show's own sting.
+      // (This replaces the old dip-to-black-with-a-logo-card, which read as a gap, not a wipe.)
       const tok = ++transToken;
-      activeVideo.classList.remove('show');
-      stage.classList.add('logo-dip');
-      if (logoUrl) { logo.src = logoUrl; logoWrap.classList.add('show'); }
-      await wait(340);
-      if (tok !== transToken) return;            // a newer play() took over
-      loadInto(activeVideo, url, true);           // load next, held at opacity 0
-      await waitReady(activeVideo);
-      if (tok !== transToken) return;
-      await wait(260);
-      logoWrap.classList.remove('show');
-      stage.classList.remove('logo-dip');
-      activeVideo.classList.add('show');
+      _transBusy = true;
+      if (logoUrl) { logo.src = logoUrl; logo.style.display = ''; } else { logo.removeAttribute('src'); logo.style.display = 'none'; }
+      swipe.classList.remove('out');
+      // Force a reflow so a re-run of the transition animates from the off-screen start position
+      // instead of jumping (the element keeps its transform between stings).
+      void swipe.offsetWidth;
+      swipe.classList.add('in');
+      await wait(430);                            // panel now covers the frame
+      if (tok !== transToken) { endTransition(); return; }   // a newer play() took over
+      // Swap underneath the panel: warm element when we have one, else load in place.
+      if (warmReady && idleVideo !== activeVideo) {
+        const incoming = idleVideo, outgoing = activeVideo;
+        loadInto(incoming, url, true);
+        bringToFront(incoming, outgoing);
+        activeVideo = incoming; idleVideo = outgoing;
+        incoming.classList.add('show');
+        outgoing.classList.remove('show');
+        retire(outgoing, tok);
+      } else {
+        loadInto(activeVideo, url, true);         // load next, held at opacity 0
+        await waitReady(activeVideo);
+        activeVideo.classList.add('show');
+      }
+      if (tok !== transToken) { endTransition(); return; }
+      await wait(140);                            // brief hold on the logo, then reveal
+      swipe.classList.remove('in');
+      swipe.classList.add('out');
+      await wait(440);
+      if (tok === transToken) swipe.classList.remove('out');
+      endTransition();
     }
 
     function stop() {
       const tok = ++transToken;
+      _transBusy = false; _pendingWarm = null;
       currentUrl = null;
       curIn = 0; curOut = null; curLoop = false; endedFired = false;
+      [activeVideo, idleVideo].forEach((v) => { v.dataset.warmUrl = ''; });
       [activeVideo, idleVideo].forEach((v) => {
         v.pause();
         v.removeAttribute('src');
         v.load();
         v.classList.remove('show');
       });
-      logoWrap.classList.remove('show');
-      stage.classList.remove('logo-dip');
+      swipe.classList.remove('in', 'out');
       label.classList.remove('show');
       // Delay idle (transparent background) until after the opacity fade completes — otherwise
       // the black stage disappears while the video is still fading, revealing OBS sources underneath.
@@ -322,7 +503,7 @@
     wireVideoEvents(activeVideo);
     wireVideoEvents(idleVideo);
 
-    // Brand-tinted logo-dip background + accent underline (see #stage.logo-dip / --brand-accent).
+    // Brand colours for the swipe transition (see #swipe / --brand-accent / --brand-deep).
     // Falls back to the app's own default accent purple when no brand kit/color is configured.
     function hexToRgba(hex, alpha) {
       const h = (hex || '').trim().replace('#', '');
@@ -330,12 +511,26 @@
       const r = parseInt(h.slice(0, 2), 16), g = parseInt(h.slice(2, 4), 16), b = parseInt(h.slice(4, 6), 16);
       return `rgba(${r},${g},${b},${alpha})`;
     }
+    // Darken a hex toward black — the swipe panel is a gradient from the brand accent into a deep
+    // version of itself, so a single brand colour still produces a two-tone, on-brand wipe.
+    function hexDarken(hex, factor) {
+      const h = (hex || '').trim().replace('#', '');
+      if (!/^[0-9a-fA-F]{6}$/.test(h)) return null;
+      const p = [0, 2, 4].map((i) => Math.max(0, Math.min(255, Math.round(parseInt(h.slice(i, i + 2), 16) * factor))));
+      return '#' + p.map((n) => n.toString(16).padStart(2, '0')).join('');
+    }
     function applyBrandColors(brand) {
       const accent = (brand && (brand.accent || brand.color)) || '';
       if (!accent) return;
-      stage.style.setProperty('--brand-accent', accent);
-      const tint = hexToRgba(accent, 0.32);
-      if (tint) stage.style.setProperty('--brand-tint', tint);
+      // Set on <html> so both #stage and the swipe panel (a sibling inside it) resolve the same vars.
+      const root = document.documentElement;
+      [root, stage].forEach((n) => {
+        n.style.setProperty('--brand-accent', accent);
+        const tint = hexToRgba(accent, 0.32);
+        if (tint) n.style.setProperty('--brand-tint', tint);
+        const deep = hexDarken(accent, 0.34);
+        if (deep) n.style.setProperty('--brand-deep', deep);
+      });
     }
 
     // The server strips heavy blobs (base64 logos/thumbnails) from most broadcasts and only re-sends
@@ -344,8 +539,14 @@
     let _replayCache = null;
     let _brandCache = null;
     function handle(m) {
-      if (m.type === 'replay_play') { const d = m.data || {}; if ((d.bus || 'program') === BUS) { play(d.url, d.name, d.loop, d.transition, d.transitionLogo, d.trimIn, d.trimOut, d.stinger); preloadNext(d.nextUrl); } }
-      else if (m.type === 'replay_preload') { const d = m.data || {}; if ((d.bus || 'program') === BUS) preloadNext(d.url); }
+      if (m.type === 'replay_play') { const d = m.data || {}; if ((d.bus || 'program') === BUS) {
+        // Buffer the sting while THIS clip plays — the payload carries it even when this particular
+        // cut doesn't use one, so the first advance of a run opens on frame one too.
+        primeStinger(d.stinger);
+        play(d.url, d.name, d.loop, d.transition, d.transitionLogo, d.trimIn, d.trimOut, d.stinger, d.stingerPoint, d.stingerDuration); preloadNext(d.nextUrl, d.nextIn); } }
+      // The server re-emits this once the next clip has been transcode-prepared (its URL can differ
+      // from the hint above), with that clip's in-point so the buffer parks on the right frame.
+      else if (m.type === 'replay_preload') { const d = m.data || {}; if ((d.bus || 'program') === BUS) preloadNext(d.url, d.trimIn); }
       else if (m.type === 'replay_stop') { const d = m.data || {}; if ((d.bus || 'program') === BUS) stop(); }
       else if (m.type === 'full_state') {
         if (m.data && m.data.replay !== undefined) _replayCache = m.data.replay;

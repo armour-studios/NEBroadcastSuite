@@ -311,6 +311,29 @@ function createClipManager({ dataDir, getObsClient, onUpdate, onCapture }) {
     return copy;
   }
 
+  // Producer-set running order for ONE shelf's clips. The pool grid is the running order for
+  // "Play all" and for building a reel, so it has to be arrangeable — capture time is rarely show
+  // order. Only the given folder's rows move: they're rewritten, in the supplied order, into the
+  // slots that folder already occupied in the library, so the other shelf's positions are untouched
+  // and anything omitted (a clip added between render and drop) keeps its place at the end.
+  function reorderClips(folder, ids) {
+    const f = normFolder(folder);
+    const slots = [];
+    library.forEach((c, i) => { if ((c.folder || 'replays') === f) slots.push(i); });
+    if (!slots.length) return false;
+    const mine = slots.map((i) => library[i]);
+    const byId = new Map(mine.map((c) => [c.id, c]));
+    const ordered = [];
+    (Array.isArray(ids) ? ids : []).forEach((id) => {
+      const c = byId.get(id);
+      if (c && !ordered.includes(c)) ordered.push(c);
+    });
+    mine.forEach((c) => { if (!ordered.includes(c)) ordered.push(c); });
+    slots.forEach((slot, n) => { library[slot] = ordered[n]; });
+    save();
+    return true;
+  }
+
   function createMontage({ name, clipIds, template, folder }) {
     const clips = clipIds.map((id) => library.find((c) => c.id === id)).filter(Boolean);
     const fold = normFolder(folder);
@@ -510,6 +533,7 @@ function createClipManager({ dataDir, getObsClient, onUpdate, onCapture }) {
     updateClip,
     setClipFolder,
     copyClip,
+    reorderClips,
     clearClipsFolder,
     copyMontagesToFolder,
     clearFolder,

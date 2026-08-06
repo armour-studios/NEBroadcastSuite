@@ -1,0 +1,570 @@
+<!DOCTYPE html>
+<!--
+  duorow-noscore.html — 2-caster desk scene with NO match scorebar and no "presented by" plate.
+  Same design language and caster slots as duorow.html (which is untouched); built for podcasts,
+  panels and any show that isn't tied to a live match, so nothing here reads teams/series/best-of.
+  Layout: show title (brand logo + event name) on TOP where the scorebar used to be, cams centred
+  below it, lower third at the bottom.
+  Driven by full_state on WS :3001 via SceneBase.connect().
+  ?cams=off  frames-only (composite each cam as its own OBS source over the holes)
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <link rel="stylesheet" href="/fonts.css">
+  <link rel="stylesheet" href="/assets/vendor/fontawesome/css/all.min.css">
+  <style>
+    :root {
+      --duo-bg: #111318;
+      --duo-surface: #1a1d24;
+      --duo-surface2: #20242e;
+      --duo-border: #2e3340;
+      --duo-accent: #e83a8b;
+      --duo-accent2: #8b5cf6;
+      --duo-text: #e8eaf0;
+      --duo-muted: #8b93a8;
+      --team-a: #055fdb;
+      --team-b: #e97139;
+      /* 1920×1080 stage grid */
+      --stage-w: 1920px;
+      --stage-h: 1080px;
+      --pad-x: 24px;
+      --hud-h: 132px;
+      --cam-gap: 16px;
+      --cam-plate-h: 54px;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html, body {
+      width: var(--stage-w); height: var(--stage-h);
+      overflow: hidden;
+      background: transparent;
+      font-family: 'Inter', system-ui, sans-serif;
+      color: var(--duo-text);
+      -webkit-font-smoothing: antialiased;
+    }
+
+    .duo-stage {
+      display: flex;
+      flex-direction: column;
+      width: var(--stage-w);
+      height: var(--stage-h);
+      padding: 14px var(--pad-x) 16px;
+      opacity: 0;
+      transition: opacity 0.35s ease;
+    }
+    .duo-stage.show { opacity: 1; }
+
+    /* The show title sits ABOVE the cams (where the scorebar used to be); the lower third
+       stays at the bottom. Cams take whatever is left and centre in it. */
+    /* Fixed band above the cams; the title plate centres inside it rather than hugging the top
+       edge, so the empty space reads as deliberate framing instead of a gap. */
+    .zone-title {
+      flex: 0 0 236px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .zone-cams {
+      flex: 1 1 0;
+      min-height: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .zone-footer {
+      flex: 0 0 auto;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-start;
+      gap: 12px;
+      padding-top: 18px;
+    }
+
+    /* ── Entry animations (on .show) ───────────────────────────────── */
+    .duo-stage:not(.show) .cam-card,
+    .duo-stage:not(.show) .identity-bar,
+    .duo-stage:not(.show) .deck-strip {
+      opacity: 0;
+    }
+    .duo-stage.show .cam-card:nth-child(1) {
+      animation: camEnterL .75s cubic-bezier(.16,.84,.24,1) .12s forwards;
+    }
+    .duo-stage.show .cam-card:nth-child(2) {
+      animation: camEnterR .75s cubic-bezier(.16,.84,.24,1) .22s forwards;
+    }
+    /* Title now enters from the TOP (it leads the scene), cams follow. */
+    .duo-stage.show .identity-bar {
+      animation: hudEnter .65s cubic-bezier(.16,.84,.24,1) .04s forwards;
+    }
+    .duo-stage.show .deck-strip {
+      animation: stripUp .6s cubic-bezier(.16,.84,.24,1) .46s forwards;
+    }
+    @keyframes hudEnter {
+      from { opacity: 0; transform: translateY(-32px) scale(.94); }
+      to   { opacity: 1; transform: none; }
+    }
+    @keyframes camEnterL {
+      from { opacity: 0; transform: translateX(-48px) scale(.97); }
+      to   { opacity: 1; transform: none; }
+    }
+    @keyframes camEnterR {
+      from { opacity: 0; transform: translateX(48px) scale(.97); }
+      to   { opacity: 1; transform: none; }
+    }
+    @keyframes footerUp {
+      from { opacity: 0; transform: translateY(20px); }
+      to   { opacity: 1; transform: none; }
+    }
+    @keyframes stripUp {
+      from { opacity: 0; transform: translateY(14px); }
+      to   { opacity: 1; transform: none; }
+    }
+
+    /* ── Caster cams (16:9, max width for dual layout on 1920 canvas) ─ */
+    .duo-cams {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: var(--cam-gap);
+      width: 100%;
+    }
+
+    .cam-card {
+      flex: 1 1 0;
+      width: calc((var(--stage-w) - 2 * var(--pad-x) - var(--cam-gap)) / 2);
+      max-width: calc((var(--stage-w) - 2 * var(--pad-x) - var(--cam-gap)) / 2);
+    }
+    .duo-cams[data-count="3"] .cam-card {
+      width: calc((var(--stage-w) - 2 * var(--pad-x) - 2 * var(--cam-gap)) / 3);
+      max-width: calc((var(--stage-w) - 2 * var(--pad-x) - 2 * var(--cam-gap)) / 3);
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      border-radius: 10px;
+      overflow: hidden;
+      border: 1px solid var(--duo-border);
+      background: var(--duo-surface);
+      box-shadow: 0 14px 40px rgba(0,0,0,.45);
+    }
+
+    .cam-card::before {
+      content: '';
+      display: block;
+      height: 2px;
+      flex: 0 0 auto;
+      background: linear-gradient(90deg, transparent, rgba(255,255,255,.14) 20%, rgba(255,255,255,.14) 80%, transparent);
+    }
+
+    .cam-hole {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 16 / 9;
+      flex: 0 0 auto;
+      background: #0d0f14;
+      overflow: hidden;
+    }
+    /* ?cams=off + framing: punch the cam holes transparent so a separate OBS browser source
+       (one per caster = its own audio fader) shows through behind the nameplate frame. */
+    .duo-stage.frames-only .cam-hole { background: transparent; }
+    .duo-stage.frames-only .cam-card { background: transparent; box-shadow: none; border-color: transparent; }
+    .duo-stage.frames-only .cam-card::before { display: none; }
+    .cam-hole iframe {
+      position: absolute; inset: 0;
+      width: 100%; height: 100%;
+      border: 0;
+    }
+
+    .cam-plate {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      height: var(--cam-plate-h);
+      flex: 0 0 var(--cam-plate-h);
+      padding: 0 18px;
+      background: linear-gradient(180deg, var(--duo-surface2), var(--duo-surface));
+      border-top: 1px solid var(--duo-border);
+    }
+
+    .cam-name {
+      font-size: 20px;
+      font-weight: 800;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: #fff;
+    }
+
+    .cam-handle {
+      font-size: 15px;
+      font-weight: 600;
+      color: #9aa3b8;
+      text-transform: none;
+      letter-spacing: 0;
+    }
+
+    .cam-country { display: inline-flex; align-items: center; }
+    .cam-flag {
+      height: 20px;
+      width: auto;
+      display: block;
+      border-radius: 3px;
+      box-shadow: 0 1px 3px rgba(0,0,0,.45);
+    }
+    .cam-handle::before {
+      font-family: 'Font Awesome 6 Brands';
+      font-weight: 400;
+      margin-right: 6px;
+    }
+    .cam-handle.twitch::before { content: "\f1e8"; color: #9146ff; }
+    .cam-handle.youtube::before { content: "\f167"; color: #ff0033; }
+    .cam-handle.x-twitter::before { content: "\e61b"; color: #e8eaf0; }
+    .cam-handle.instagram::before { content: "\f16d"; color: #e1306c; }
+    .cam-handle.tiktok::before { content: "\e07b"; color: #25f4ee; }
+    .cam-handle.discord::before { content: "\f392"; color: #5865f2; }
+    .cam-handle.facebook::before { content: "\f09a"; color: #1877f2; }
+    .cam-handle.kick::before { content: "K"; font-family: 'Inter', sans-serif; font-weight: 900; color: #53fc18; }
+    .cam-handle.link::before { content: "\f0c1"; font-family: 'Font Awesome 6 Free'; font-weight: 900; color: var(--duo-muted); }
+
+    /* ── Footer zone ────────────────────────────────────────────────── */
+    /* Event branding — the only content of .identity-bar (no "presented by" plate here). */
+    .brand-strip {
+      display: flex;
+      align-items: center;
+      gap: 22px;
+    }
+    .brand-strip.is-empty { display: none; }
+
+    /* Identity bar: brand logo + show title on one horizontal line. Sized as the scene's
+       TITLE PLATE (it leads the frame here), not the small footer strip it is on duorow. */
+    .identity-bar {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0;
+      padding: 18px 46px;
+      background: linear-gradient(180deg, rgba(20,23,30,.96), rgba(10,12,16,.98));
+      border: 1px solid rgba(255,255,255,.08);
+      border-radius: 8px;
+      box-shadow: 0 8px 24px rgba(0,0,0,.4), inset 0 1px 0 rgba(255,255,255,.06);
+      position: relative; overflow: hidden;
+    }
+    .identity-bar::before {
+      content: ''; position: absolute; top: 0; left: 12%; right: 12%; height: 1px;
+      background: linear-gradient(90deg, transparent, rgba(255,255,255,.2), transparent);
+      pointer-events: none;
+    }
+    .identity-bar.is-empty { display: none; }
+    .brand-strip-logo {
+      height: 72px;
+      max-width: 260px;
+      object-fit: contain;
+      filter: drop-shadow(0 2px 5px rgba(0,0,0,.35));
+    }
+    .brand-strip-sep {
+      width: 1px;
+      height: 34px;
+      background: rgba(255,255,255,.15);
+    }
+    .brand-strip-event {
+      font-size: 40px;   /* shrink-to-fit in JS (fitShowTitle) — long show names step down, never clip */
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: #d6dbe6;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: min(88vw, 1540px);
+    }
+
+    .deck-strip {
+      width: 100%;
+      max-width: min(900px, calc(var(--stage-w) - 2 * var(--pad-x)));
+      padding: 10px 28px;
+      text-align: center;
+      background: linear-gradient(90deg, transparent, rgba(14,16,22,.92) 12%, rgba(14,16,22,.92) 88%, transparent);
+      border-top: 1px solid rgba(255,255,255,.06);
+      border-bottom: 1px solid rgba(255,255,255,.06);
+      position: relative;
+    }
+    .deck-strip::before,
+    .deck-strip::after {
+      content: '';
+      position: absolute;
+      top: 50%;
+      width: 48px;
+      height: 1px;
+      background: linear-gradient(90deg, transparent, var(--duo-accent));
+      opacity: .5;
+    }
+    .deck-strip::before { left: 12px; }
+    .deck-strip::after  { right: 12px; transform: scaleX(-1); }
+    .deck-strip-text {
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: #c8ced8;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      display: block;
+    }
+    .deck-strip.is-empty { display: none; }
+
+    /* Preview: visible cam placeholders */
+    .preview .cam-hole {
+      background: repeating-linear-gradient(
+        45deg, #181b22, #181b22 16px, #20242e 16px, #20242e 32px
+      );
+    }
+    .preview .cam-hole::after {
+      content: 'CAM';
+      position: absolute; inset: 0;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 28px; font-weight: 800; letter-spacing: 0.3em;
+      color: #4a5162;
+    }
+    .preview .cam-hole iframe { z-index: 1; position: relative; }
+  </style>
+</head>
+<body>
+  <div id="stage" class="duo-stage">
+
+    <div class="zone-title">
+      <div class="identity-bar is-empty" id="identity-bar">
+        <div class="brand-strip is-empty" id="brand-strip">
+          <img id="brand-strip-logo" class="brand-strip-logo" alt="" style="display:none">
+          <span class="brand-strip-sep" id="brand-strip-sep" style="display:none"></span>
+          <span id="brand-strip-event" class="brand-strip-event"></span>
+        </div>
+      </div>
+    </div>
+
+    <div class="zone-cams">
+      <main class="duo-cams" data-count="2"></main>
+    </div>
+
+    <div class="zone-footer">
+      <div class="deck-strip is-empty" id="deck-strip">
+        <span id="tagline" class="deck-strip-text">Live</span>
+      </div>
+    </div>
+
+  </div>
+
+  <script src="scene-base.js"></script>
+  <script>
+    function el(id) { return document.getElementById(id); }
+
+    function applyBrandTheme(data) {
+      const root = document.documentElement;
+      const color = SceneBase.brandColor(data);
+      const accent2 = SceneBase.brandAccent(data);
+      if (color) root.style.setProperty('--duo-accent', color);
+      if (accent2) root.style.setProperty('--duo-accent2', accent2);
+      if (data.fontFamily) {
+        root.style.fontFamily = `'${data.fontFamily}', 'Inter', system-ui, sans-serif`;
+      }
+    }
+
+    let _lastCamUrl = [];
+    let _lastCamCount = 0;
+    // ?cams=off — frames-only: don't embed the webcams here. Add each caster's cam URL as its
+    // OWN OBS browser source (positioned over the boxes) so OBS controls per-caster audio/filters.
+    const NO_CAMS = new URLSearchParams(location.search).get('cams') === 'off';
+    // Frames-only mode → transparent cam holes so OBS cam sources frame in behind the nameplates.
+    if (NO_CAMS) document.getElementById('stage')?.classList.add('frames-only');
+
+    // Count how many slots (1–3) have an explicitly-assigned caster with content.
+    // Falls back to minimum 2 so the layout never collapses.
+    function activeCamCount(casters) {
+      const list = (casters && Array.isArray(casters.list)) ? casters.list : [];
+      let count = 0;
+      for (let i = 1; i <= 2; i++) {
+        const c = list.find(x => Number(x.slot) === i);
+        if (c && (c.name || c.camUrl)) count = i;
+      }
+      return Math.max(2, count);
+    }
+
+    // Rebuild cam cards when the caster count changes. Resets iframe cache.
+    function rebuildCamLayout(count) {
+      if (count === _lastCamCount) return;
+      _lastCamCount = count;
+      _lastCamUrl = new Array(count).fill('');
+      const cams = document.querySelector('.duo-cams');
+      if (!cams) return;
+      cams.setAttribute('data-count', count);
+      cams.innerHTML = '';
+      for (let i = 1; i <= count; i++) {
+        const card = document.createElement('div');
+        card.className = 'cam-card';
+        card.innerHTML = `<div id="hole${i}" class="cam-hole"></div>
+          <div class="cam-plate">
+            <span id="staffname${i}" class="cam-name">—</span>
+            <span id="socials${i}" class="cam-handle" style="display:none"></span>
+            <span id="country${i}" class="cam-country" style="display:none"></span>
+          </div>`;
+        cams.appendChild(card);
+      }
+    }
+
+    function renderCasters(casters) {
+      if (NO_CAMS) return;
+      const count = _lastCamCount || 2;
+      const slots = SceneBase.castersBySlots(casters, count);
+      for (let i = 0; i < count; i++) {
+        const camUrl = ((slots[i] && slots[i].camUrl) || '').trim();
+        if (camUrl === _lastCamUrl[i]) continue;   // per-slot: only the changed cam reloads
+        _lastCamUrl[i] = camUrl;
+        const hole = el('hole' + (i + 1));
+        if (!hole) continue;
+        hole.querySelectorAll('iframe').forEach(f => f.remove());
+        if (camUrl) {
+          const iframe = document.createElement('iframe');
+          iframe.src = camUrl;
+          // autoplay = video+audio play without a click; OBS browser source must have
+          // "Control audio via OBS" enabled for the caster audio to reach the mix.
+          iframe.setAttribute('allow', 'autoplay; encrypted-media; microphone; camera; fullscreen');
+          iframe.referrerPolicy = 'no-referrer';
+          hole.appendChild(iframe);
+        }
+      }
+    }
+
+    function renderCasterText(casters) {
+      const count = _lastCamCount || 2;
+      const slots = SceneBase.castersBySlots(casters, count);
+      for (let i = 0; i < count; i++) {
+        const c = slots[i] || {};
+        const nameEl = el('staffname' + (i + 1));
+        const socEl = el('socials' + (i + 1));
+        if (!nameEl || !socEl) continue;
+        nameEl.textContent = (c.name || '—').toString();
+        const handle = SceneBase.formatCasterHandle(c);
+        const social = (c.social || 'none').toString().toLowerCase();
+        if (handle) {
+          const cls = SceneBase.socialPlatformClass(social);
+          socEl.className = 'cam-handle' + (cls ? ' ' + cls : '');
+          socEl.textContent = handle;
+          socEl.style.display = '';
+        } else {
+          socEl.style.display = 'none';
+        }
+        const ctryEl = el('country' + (i + 1));
+        if (ctryEl) {
+          const code = (c.country || '').toString().trim().toLowerCase();
+          if (casters && casters.showCountry && code) {
+            // Image flag (renders on Windows/OBS, unlike flag emoji). Local bundled SVG first,
+            // flagcdn.com as the fallback until flags are downloaded.
+            ctryEl.innerHTML = '<img class="cam-flag" alt="" src="/assets/flags/' + code + '.svg"'
+              + ' onerror="this.onerror=null;this.src=\'https://flagcdn.com/' + code + '.svg\'">';
+            ctryEl.style.display = '';
+          } else { ctryEl.innerHTML = ''; ctryEl.style.display = 'none'; }
+        }
+      }
+    }
+
+    // The title plate is the biggest type on this scene, so a long show name ("NAMELESS ESPORTS
+    // PODCAST AFTER DARK EPISODE 1") would hit the max-width and ellipsize. Step the size down
+    // until the whole name fits instead — a shrunk title beats a cut-off one.
+    const TITLE_MAX_PX = 40, TITLE_MIN_PX = 20;
+    function fitShowTitle() {
+      const ev = el('brand-strip-event');
+      if (!ev || !ev.textContent) return;
+      let size = TITLE_MAX_PX;
+      ev.style.fontSize = size + 'px';
+      while (size > TITLE_MIN_PX && ev.scrollWidth > ev.clientWidth) {
+        size -= 2;
+        ev.style.fontSize = size + 'px';
+      }
+    }
+
+    // Brand-logo + show-title strip — the whole of the identity bar on this scene (no sponsor
+    // plate: this desk carries the show's own branding only).
+    function renderBrandStrip(data) {
+      const brand = data.brand || {};
+      const wrap = el('brand-strip');
+      const logoEl = el('brand-strip-logo');
+      const sepEl = el('brand-strip-sep');
+      const evEl = el('brand-strip-event');
+      const evName = (data.eventName || '').toString().trim();
+      const hasLogo = !!brand.logo;
+      if (hasLogo) { logoEl.src = brand.logo; logoEl.style.display = ''; } else { logoEl.style.display = 'none'; logoEl.removeAttribute('src'); }
+      evEl.textContent = evName.toUpperCase();
+      sepEl.style.display = (hasLogo && evName) ? '' : 'none';
+      wrap.classList.toggle('is-empty', !hasLogo && !evName);
+      fitShowTitle();
+      // The display font is wider than the fallback, so an early fit can under-shrink — redo it
+      // once the webfont has actually loaded.
+      if (document.fonts && document.fonts.ready) document.fonts.ready.then(fitShowTitle);
+    }
+
+    function syncIdentityBar() {
+      // The bar holds the brand strip alone now — no logo and no title means no bar at all.
+      el('identity-bar').classList.toggle('is-empty', el('brand-strip').classList.contains('is-empty'));
+    }
+
+    function renderDeckStrip(data) {
+      const tag = ((data.casters && data.casters.lowerThird) || '').toString().trim();
+      const strip = el('deck-strip');
+      const tagEl = el('tagline');
+      if (tag) {
+        tagEl.textContent = tag;
+        strip.classList.remove('is-empty');
+      } else {
+        tagEl.textContent = '';
+        strip.classList.add('is-empty');
+      }
+    }
+
+    function render(data) {
+      data = data || {};
+      applyBrandTheme(data);
+
+      const casters = data.casters || {};
+      el('stage').classList.toggle('show', SceneBase.casterStageVisible(casters));
+
+      // Frames-only (separated OBS): lock to this layout's FIXED frame count (Duo = 2) so the
+      // transparent holes line up exactly with the hardcoded OBS cam frames. (In combined mode the
+      // layout can flex with the assigned-caster count.)
+      rebuildCamLayout(NO_CAMS ? 2 : activeCamCount(casters));
+      renderCasters(casters);
+      renderCasterText(casters);
+
+      // No teams / series / best-of and no "presented by" plate here by design — the show title
+      // and lower third come from the brand strip + Lower Third field, so this scene never
+      // touches match state or the sponsor slot.
+      renderBrandStrip(data);
+      syncIdentityBar();
+      renderDeckStrip(data);
+    }
+
+    if (location.protocol === 'file:') {
+      document.documentElement.classList.add('preview');
+      render({
+        casters: {
+          visible: true,
+          showCountry: true,
+          lowerThird: 'Episode 12 — Roster Moves & Mid-Season Power Rankings',
+          list: [
+            { id: 'c1', name: 'Jordan Reyes', handle: 'jreyescasts', camUrl: '', slot: 1, social: 'x', country: 'us' },
+            { id: 'c2', name: 'Mia Tanaka', handle: 'miaplays', camUrl: '', slot: 2, social: 'twitch', country: 'jp' }
+          ]
+        },
+        brand: {
+          logo: 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="90" height="34"><text x="4" y="25" font-size="22" fill="#e8eaf0" font-family="Arial" font-weight="bold">NE</text></svg>')
+        },
+        eventName: 'The Off-Season Show — Episode 12'
+      });
+      el('stage').classList.add('show');
+    } else {
+      SceneBase.connect(data => render(data));
+    }
+  </script>
+</body>
+</html>

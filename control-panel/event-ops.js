@@ -396,6 +396,10 @@
         t.team.toLowerCase().includes(q) ||
         t.players.some((p) => (p.player + ' ' + p.email + ' ' + p.challonge).toLowerCase().includes(q)));
     }
+    // One-click copy for a single cell — omitted entirely when the field is blank.
+    const eoFieldCopy = (val, label) => (val
+      ? `<button class="eo-fcopy" type="button" data-val="${eoEsc(val)}" data-label="${eoEsc(label)}" title="Copy ${eoEsc(label)}" aria-label="Copy ${eoEsc(label)}">copy</button>`
+      : '');
     const teamBlockText = (t) => {
       const seed = seeds.get(t.team.toLowerCase());
       return t.team.toUpperCase() + (seed != null ? ' — SEED ' + seed : '') + '\n'
@@ -423,9 +427,18 @@
           ${t.players.map((p, i) => `
             <div class="eo-block-player">
               <span class="eo-p-idx">Player ${i + 1}</span>
-              <span class="eo-p-name">${eoEsc(p.player) || '<span class="eo-dim">—</span>'}${/captain/i.test(p.flags || '') ? ' <span class="eo-flag cap">C</span>' : ''}${/alternate|sub/i.test(p.flags || '') ? ' <span class="eo-flag">ALT</span>' : ''}</span>
-              <span class="eo-p-mail">${p.email ? eoEsc(p.email) : '<span class="eo-miss">no email</span>'}</span>
-              <span class="eo-p-ch">${p.challonge ? eoEsc(p.challonge) : '<span class="eo-miss">no challonge</span>'}</span>
+              <span class="eo-p-cell">
+                <span class="eo-p-name">${eoEsc(p.player) || '<span class="eo-dim">—</span>'}${/captain/i.test(p.flags || '') ? ' <span class="eo-flag cap">C</span>' : ''}${/alternate|sub/i.test(p.flags || '') ? ' <span class="eo-flag">ALT</span>' : ''}</span>
+                ${eoFieldCopy(p.player, 'name')}
+              </span>
+              <span class="eo-p-cell">
+                <span class="eo-p-mail">${p.email ? eoEsc(p.email) : '<span class="eo-miss">no email</span>'}</span>
+                ${eoFieldCopy(p.email, 'email')}
+              </span>
+              <span class="eo-p-cell">
+                <span class="eo-p-ch">${p.challonge ? eoEsc(p.challonge) : '<span class="eo-miss">no challonge</span>'}</span>
+                ${eoFieldCopy(p.challonge, 'Challonge username')}
+              </span>
             </div>`).join('')}
         </div>`;
     }).join('');
@@ -454,6 +467,10 @@
       const list = t.players.map((p) => p[key]).filter(Boolean);
       if (!list.length) { showToast('No ' + (key === 'email' ? 'emails' : 'Challonge usernames') + ' on this team.', '#fbbf24'); return; }
       eoCopy(list.join('\n'), list.length + ' ' + (key === 'email' ? 'emails' : 'Challonge usernames') + ' (' + t.team + ')');
+    }));
+    body.querySelectorAll('.eo-fcopy').forEach((b) => b.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      eoCopy(b.dataset.val, b.dataset.label);
     }));
     body.querySelectorAll('.eo-block-head').forEach((c) => c.addEventListener('click', (ev) => {
       if (ev.target.closest('.eo-copy-team')) return;

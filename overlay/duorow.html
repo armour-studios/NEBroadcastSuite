@@ -93,11 +93,23 @@
       padding-top: 18px;
     }
 
+    /* Desk footer row: sponsor columns flanking the centred identity bar. */
+    .footer-row {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 22px;
+      width: 100%;
+      padding: 0 90px;
+    }
+    .footer-row > .footer-sponsors { flex: 1 1 0; }
+
     /* ── Entry animations (on .show) ───────────────────────────────── */
     .duo-stage:not(.show) .duo-eventbar,
     .duo-stage:not(.show) .match-hud,
     .duo-stage:not(.show) .cam-card,
     .duo-stage:not(.show) .identity-bar,
+    .duo-stage:not(.show) .footer-sponsors,
     .duo-stage:not(.show) .match-feed,
     .duo-stage:not(.show) .deck-strip,
     .duo-stage:not(.show) .duo-bestof {
@@ -120,6 +132,9 @@
     }
     .duo-stage.show .identity-bar {
       animation: footerUp .65s cubic-bezier(.16,.84,.24,1) .32s forwards;
+    }
+    .duo-stage.show .footer-sponsors {
+      animation: footerUp .65s cubic-bezier(.16,.84,.24,1) .36s forwards;
     }
     .duo-stage.show .match-feed {
       animation: stripUp .6s cubic-bezier(.16,.84,.24,1) .38s forwards;
@@ -708,17 +723,21 @@
     </div>
 
     <div class="zone-footer">
-      <div class="identity-bar is-empty" id="identity-bar">
-        <div class="brand-strip is-empty" id="brand-strip">
-          <img id="brand-strip-logo" class="brand-strip-logo" alt="" style="display:none">
-          <span class="brand-strip-sep" id="brand-strip-sep" style="display:none"></span>
-          <span id="brand-strip-event" class="brand-strip-event"></span>
+      <div class="footer-row">
+        <div class="footer-sponsors footer-sponsors--left" id="sponsors-left"></div>
+        <div class="identity-bar is-empty" id="identity-bar">
+          <div class="brand-strip is-empty" id="brand-strip">
+            <img id="brand-strip-logo" class="brand-strip-logo" alt="" style="display:none">
+            <span class="brand-strip-sep" id="brand-strip-sep" style="display:none"></span>
+            <span id="brand-strip-event" class="brand-strip-event"></span>
+          </div>
+          <span class="ib-mid-sep" id="ib-mid-sep" style="display:none"></span>
+          <div class="presented-by is-empty" id="presented-by">
+            <span class="pb-label" id="pb-label">PRESENTED BY</span>
+            <img id="pb-logo" class="pb-logo" alt="" style="display:none">
+          </div>
         </div>
-        <span class="ib-mid-sep" id="ib-mid-sep" style="display:none"></span>
-        <div class="presented-by is-empty" id="presented-by">
-          <span class="pb-label" id="pb-label">PRESENTED BY</span>
-          <img id="pb-logo" class="pb-logo" alt="" style="display:none">
-        </div>
+        <div class="footer-sponsors footer-sponsors--right" id="sponsors-right"></div>
       </div>
       <div class="deck-strip is-empty" id="deck-strip">
         <span id="tagline" class="deck-strip-text">Live</span>
@@ -855,6 +874,7 @@
       const sponsors = (Array.isArray(deskList) ? deskList : []).filter(s => s && s.logo && !_seen.has(s.logo) && (_seen.add(s.logo), true));
       const left = el('sponsors-left');
       const right = el('sponsors-right');
+      if (!left || !right) return;
       left.innerHTML = '';
       right.innerHTML = '';
 

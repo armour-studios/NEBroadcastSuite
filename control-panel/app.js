@@ -1784,7 +1784,14 @@ function renderDccHostsGrid() {
       const obsPush = e.target.closest('[data-obs-push-url]');
       const obs     = e.target.closest('[data-obs-id]');
       const edit    = e.target.closest('[data-edit-lib]');
-      if (rem)    { send('delete_caster_from_library', { id: rem.dataset.remLib }); setTimeout(refresh, 350); return; }
+      if (rem)    {
+        appConfirm('Remove this crew member from the library?', 'Remove', true).then((ok) => {
+          if (!ok) return;
+          send('delete_caster_from_library', { id: rem.dataset.remLib });
+          setTimeout(refresh, 350);
+        });
+        return;
+      }
       if (regen)  {
         // Resets the ONE shared room for the whole group — anyone already connected with the
         // current link gets silently stranded there (this is how two casters end up unable to
@@ -2936,7 +2943,36 @@ function _returnGraphicsToProd() {
     const game = currentState && currentState.activeGame;
     return (currentState && currentState.vetoPools && currentState.vetoPools[game]) || [];
   }
-  const MP_MODE_OPTIONS = ['Control', 'Hybrid', 'Escort', 'Push', 'Flashpoint', 'Clash', 'Assault'];
+  // Panel runs from file://, so asset paths from the server need an absolute origin.
+  const MP_ASSET_BASE = location.protocol === 'file:' ? 'http://localhost:3000' : '';
+  // Game-mode vocabulary comes from the ACTIVE GAME (backend/veto.js VETO_META.modes — Overwatch
+  // Control/Hybrid/…, Rocket League Soccar/Hoops/Dropshot/Snow Day/Rumble/Heatseeker/Spike Rush),
+  // plus any type already on a pool entry. A game with no modes gets no dropdown at all instead of
+  // the old Overwatch-only list showing up on every game.
+  function mpModeOptions() {
+    const game = currentState && currentState.activeGame;
+    const meta = (currentState && currentState.vetoMeta && currentState.vetoMeta[game]) || {};
+    const out = Array.isArray(meta.modes) ? meta.modes.slice() : [];
+    mpMapPool().forEach((p) => { if (p.type && !out.includes(p.type)) out.push(p.type); });
+    return out;
+  }
+  function mpModeIcon(mode) {
+    const src = (window._vmModeImg || {})[String(mode || '').toLowerCase().trim()];
+    return src ? MP_ASSET_BASE + src : '';
+  }
+  // Map names arriving from the series editor / start.gg rarely match a pool entry character for
+  // character ("DFH" vs "DFH Stadium"), so match loosely before giving up and keeping it as a
+  // free-text row.
+  const mpNorm = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  function mpFindPool(pool, name) {
+    if (!name) return null;
+    const n = mpNorm(name); if (!n) return null;
+    return pool.find((p) => p.name === name)
+        || pool.find((p) => mpNorm(p.name) === n)
+        || pool.find((p) => mpNorm(p.name).startsWith(n) || n.startsWith(mpNorm(p.name)))
+        || null;
+  }
+  const MP_CUSTOM = 'custom:';   // <option> value for a name with no pool match (kept, not dropped)
   function mpMinSlots(bo) { return Math.max(1, Math.ceil((Number(bo) || 5) / 2)); }   // maps needed to CLINCH
   function mpMaxSlots(bo) { return Math.max(1, Number(bo) || 5); }                    // can't exceed the format
   // count omitted → max(existing picks, the format's minimum). Pass it explicitly for Add/Remove/BO-change.
@@ -2955,29 +2991,51 @@ function _returnGraphicsToProd() {
     const _cB = (_tms.orange && _tms.orange.color) || '#e97139';
     const keyEl = el('mp-team-key');
     if (keyEl) keyEl.innerHTML = 'Scores: <b style="color:' + _cA + ';">' + dEsc(_tA) + '</b> left · <b style="color:' + _cB + ';">' + dEsc(_tB) + '</b> right';
+    const modeOpts = mpModeOptions();
+    const auto = mpAutoOn();
+    wrap.classList.toggle('is-auto', auto);
     wrap.innerHTML = '';
     for (let i = 0; i < n; i++) {
       const m = existing[i] || {};
       const row = document.createElement('div'); row.className = 'mp-slot';
       const num = document.createElement('span'); num.className = 'mp-slot-num'; num.textContent = i + 1;
       const sel = document.createElement('select'); sel.className = 'input-select mp-map-select';
+      const curPool = mpFindPool(pool, m.name);
       sel.innerHTML = '<option value="">— Select map —</option>' +
-        pool.map((p) => `<option value="${p.id}"${p.name === m.name ? ' selected' : ''}>${p.name}</option>`).join('');
+        pool.map((p) => `<option value="${p.id}"${curPool && p.id === curPool.id ? ' selected' : ''}>${p.name}</option>`).join('');
+      // A name that matches nothing in the pool (a series/start.gg map name, a custom stage) stays
+      // on the row as its own option instead of silently blanking and being dropped on save.
+      if (!curPool && m.name) {
+        const o = document.createElement('option'); o.value = MP_CUSTOM + m.name; o.textContent = m.name + ' (custom)'; o.selected = true;
+        sel.appendChild(o);
+      }
       // Game mode — defaults to the selected map's pool type but is fully overridable per row
-      // (some maps rotate through more than one mode across a season/patch).
-      const curPool = pool.find((p) => p.name === m.name);
+      // (RL picks the mode per game; some games' maps rotate modes across a season/patch).
       const modeSel = document.createElement('select'); modeSel.className = 'input-select mp-mode-select';
       modeSel.title = 'Game mode for this map';
       modeSel.style.cssText = 'flex:0 0 auto; max-width:118px; font-size:11px;';
       const modeVal = m.mode || (curPool && curPool.type) || '';
       modeSel.innerHTML = '<option value="">Mode: —</option>' +
-        MP_MODE_OPTIONS.map((md) => `<option value="${md}"${md === modeVal ? ' selected' : ''}>${md}</option>`).join('');
+        modeOpts.map((md) => `<option value="${md}"${md === modeVal ? ' selected' : ''}>${md}</option>`).join('');
       if (!modeSel.value && modeVal) { const o = document.createElement('option'); o.value = modeVal; o.textContent = modeVal; o.selected = true; modeSel.appendChild(o); }
+      // No modes for this game and nothing already set → don't show a dead dropdown.
+      if (!modeOpts.length && !modeVal) modeSel.style.display = 'none';
+      // The mode's own logo, so Dropshot/Hoops/Rumble read at a glance and the producer can see
+      // exactly what the overlay will badge the card with.
+      const modeIcon = document.createElement('img'); modeIcon.className = 'mp-mode-icon'; modeIcon.alt = '';
+      const syncModeIcon = () => {
+        const src = mpModeIcon(modeSel.value);
+        if (src) { modeIcon.src = src; modeIcon.title = modeSel.value; modeIcon.style.display = ''; }
+        else { modeIcon.removeAttribute('src'); modeIcon.style.display = 'none'; }
+      };
+      modeIcon.onerror = () => { modeIcon.style.display = 'none'; };
+      modeSel.addEventListener('change', syncModeIcon);
       // Picking a map re-defaults its mode (unless the row already has an explicit override).
       sel.addEventListener('change', () => {
         const p = pool.find((x) => x.id === sel.value);
-        if (p && p.type) modeSel.value = p.type;
+        if (p && p.type) { modeSel.value = p.type; syncModeIcon(); }
       });
+      syncModeIcon();
       const pick = document.createElement('select'); pick.className = 'input-select mp-pick-by';
       pick.title = 'Who picked this map';
       pick.style.cssText = 'flex:0 0 auto; max-width:120px; font-size:11px;';
@@ -2994,11 +3052,27 @@ function _returnGraphicsToProd() {
       scB.min = '0'; scB.placeholder = _tB.slice(0, 6); scB.title = _tB + ' score';
       scB.style.borderBottom = '2px solid ' + _cB;
       scB.value = (m.score && m.score.b) || '';
+      // While Auto is on the series editor owns the numbers — don't let a producer type into a
+      // field the next broadcast will overwrite.
+      if (auto) { scA.readOnly = true; scB.readOnly = true; scA.title += ' (from the series editor)'; scB.title += ' (from the series editor)'; }
+      // Clear just this map's score — back to "not played yet" (chip instead of a result on the
+      // overlay). With Auto on it clears the series editor's row too, or it would come straight back.
+      const clr = document.createElement('button'); clr.type = 'button'; clr.className = 'btn btn-ghost btn-xs mp-score-clr';
+      clr.textContent = '0'; clr.title = 'Clear this map\'s score';
+      clr.disabled = !(scA.value || scB.value);
+      clr.addEventListener('click', () => {
+        scA.value = ''; scB.value = ''; clr.disabled = true;
+        if (mpAutoOn()) mpClearSeriesScores(i);
+        mpSendDebounced();
+      });
+      const refreshClr = () => { clr.disabled = !(scA.value || scB.value); };
+      scA.addEventListener('input', refreshClr); scB.addEventListener('input', refreshClr);
       const rm = document.createElement('button'); rm.type = 'button'; rm.className = 'btn btn-ghost btn-xs mp-slot-rm';
       rm.textContent = '×'; rm.title = 'Remove this map slot'; rm.disabled = n <= 1;
       rm.addEventListener('click', () => { mpRenderSlots(mpBuildMapsPayload(true), n - 1); mpSendDebounced(); });
       [sel, modeSel, pick, scA, scB].forEach((inp) => { inp.addEventListener('input', mpSendDebounced); inp.addEventListener('change', mpSendDebounced); });
-      row.appendChild(num); row.appendChild(sel); row.appendChild(modeSel); row.appendChild(pick); row.appendChild(scA); row.appendChild(sep); row.appendChild(scB); row.appendChild(rm);
+      row.appendChild(num); row.appendChild(sel); row.appendChild(modeSel); row.appendChild(modeIcon); row.appendChild(pick);
+      row.appendChild(scA); row.appendChild(sep); row.appendChild(scB); row.appendChild(clr); row.appendChild(rm);
       wrap.appendChild(row);
     }
     const addBtn = el('mp-add-slot'); if (addBtn) addBtn.style.display = n >= mpMaxSlots(bo) ? 'none' : '';
@@ -3019,6 +3093,17 @@ function _returnGraphicsToProd() {
       // mapscreen overlay shows its "TEAM PICK" / "DECIDER" chips.
       const pk = (row.querySelector('.mp-pick-by') || {}).value || '';
       const modeOverride = (row.querySelector('.mp-mode-select') || {}).value || '';
+      // Free-text row (a map name with no pool entry) — keep the name, no art.
+      const custom = sel.value.startsWith(MP_CUSTOM) ? sel.value.slice(MP_CUSTOM.length) : '';
+      if (!p && custom) {
+        return {
+          name: custom, image: '', mode: modeOverride,
+          action: pk === 'decider' ? 'decider' : 'pick',
+          by: (pk === 'a' || pk === 'b') ? pk : '',
+          winner: (hasScore && sa !== sb) ? (sa > sb ? 'a' : 'b') : '',
+          score: { a: sa, b: sb }
+        };
+      }
       return {
         name: p ? p.name : '', image: p ? (p.image || '') : '', mode: modeOverride || (p ? (p.type || '') : ''),
         action: pk === 'decider' ? 'decider' : 'pick',
@@ -3054,18 +3139,99 @@ function _returnGraphicsToProd() {
   // Populate from current state when the Map Pool tab opens. Best-of drives the MAX/starting
   // count, but the actual slot count shown is whatever's already saved (or that format's minimum
   // if nothing's picked yet) — never force it down to a stale best-of-derived count.
-  // One click pulls the series editor's maps + scores (Match — Teams) into the pool.
-  el('mp-from-series')?.addEventListener('click', () => {
+  // One click pulls the series editor's maps + scores (Match — Teams) into the pool. Existing
+  // pick attribution / mode per slot survives — only the map name and score come across.
+  function mpPullSeries(quiet) {
     const match = (currentState && currentState.match) || {};
-    const maps = Array.isArray(match.maps) ? match.maps.filter((m) => m && m.name) : [];
-    if (!maps.length) { showToast('No maps in the series editor yet — set them in Match — Teams.', '#fbbf24'); return; }
+    const maps = Array.isArray(match.maps) ? match.maps.filter((m) => m && (m.name || m.scoreA || m.scoreB)) : [];
+    if (!maps.length) {
+      if (!quiet) showToast('No maps in the series editor yet — set them in Match — Teams.', '#fbbf24');
+      return 0;
+    }
     const fmtN = parseInt(String(match.format || '').replace(/\D/g, ''), 10);
     const boSel = el('mp-bestof');
     if (boSel && fmtN && [...boSel.options].some((o) => +o.value === fmtN)) boSel.value = String(fmtN);
-    const prefill = maps.map((m) => ({ name: m.name, score: { a: m.scoreA ?? '', b: m.scoreB ?? '' } }));
-    mpRenderSlots(prefill, Math.max(prefill.length, 1));
+    const cur = mpBuildMapsPayload(true);
+    const prefill = maps.map((m, i) => {
+      const keep = cur[i] || {};
+      const a = Math.max(0, Number(m.scoreA) || 0), b = Math.max(0, Number(m.scoreB) || 0);
+      return {
+        name: m.name || keep.name || '', mode: keep.mode || '',
+        action: keep.action || 'pick', by: keep.by || '',
+        winner: (a !== b && (a || b)) ? (a > b ? 'a' : 'b') : '',
+        score: { a, b }
+      };
+    });
+    mpRenderSlots(prefill, Math.max(prefill.length, cur.length, 1));
     mpSendDebounced();
-    showToast('Pulled ' + prefill.length + ' map(s) from the series editor', '#22c55e');
+    return prefill.length;
+  }
+  el('mp-from-series')?.addEventListener('click', () => {
+    const n = mpPullSeries();
+    if (n) showToast('Pulled ' + n + ' map(s) from the series editor', '#22c55e');
+  });
+
+  // ── Auto from Series ──────────────────────────────────────────────────────
+  // Match — Teams is the score of record for the series; with this on, the pool rows mirror it
+  // live (by slot index — map 3 is map 3 whatever it's called) so nobody has to enter a result
+  // twice. Off by default; the choice is remembered.
+  const MP_AUTO_KEY = 'ne_mp_auto_series_v1';
+  function mpAutoOn() { return !!el('mp-auto-series')?.checked; }
+  const autoBox = el('mp-auto-series');
+  if (autoBox) {
+    try { autoBox.checked = localStorage.getItem(MP_AUTO_KEY) === '1'; } catch (e) {}
+    autoBox.addEventListener('change', () => {
+      try { localStorage.setItem(MP_AUTO_KEY, autoBox.checked ? '1' : '0'); } catch (e) {}
+      if (autoBox.checked) mpPullSeries(true);
+      else mpRenderSlots(mpBuildMapsPayload(true));     // re-render to unlock the score fields
+      showToast(autoBox.checked ? 'Scores now follow the series editor' : 'Scores are manual again', '#38bdf8');
+    });
+  }
+  // Merge state.match.maps into the pool rows by index. Returns the merged list + whether
+  // anything actually moved (so we only push to the server on a real change, never in a loop).
+  function mpMergeSeries(maps, data) {
+    const src = ((data && data.match && data.match.maps) || []).filter((m) => m);
+    if (!src.length) return { maps, changed: false };
+    const out = maps.map((m) => ({ ...m, score: { a: (m.score && m.score.a) || 0, b: (m.score && m.score.b) || 0 } }));
+    let changed = false;
+    src.forEach((s, i) => {
+      // A slot with no map name either side is dropped by the send payload — merging it would
+      // mark "changed" on every broadcast and push forever, so skip it entirely.
+      const name = (out[i] && out[i].name) || s.name || '';
+      if (!name) return;
+      if (!out[i]) { out[i] = { name, mode: '', action: 'pick', by: '', winner: '', score: { a: 0, b: 0 } }; changed = true; }
+      const cur = out[i];
+      const a = Math.max(0, Number(s.scoreA) || 0), b = Math.max(0, Number(s.scoreB) || 0);
+      if (!cur.name && s.name) { cur.name = s.name; changed = true; }
+      if (cur.score.a !== a || cur.score.b !== b) { cur.score = { a, b }; changed = true; }
+      const win = (a !== b && (a || b)) ? (a > b ? 'a' : 'b') : '';
+      if ((cur.winner || '') !== win) { cur.winner = win; changed = true; }
+    });
+    return { maps: out, changed };
+  }
+  // Blank one (or every) series-editor row so a cleared score doesn't come straight back from Auto.
+  function mpClearSeriesScores(idx) {
+    const src = ((currentState && currentState.match && currentState.match.maps) || []);
+    if (!src.length) return;
+    send('set_match', {
+      maps: src.map((m, i) => (idx == null || i === idx)
+        ? { name: m.name || '', scoreA: 0, scoreB: 0, played: false }
+        : { name: m.name || '', scoreA: m.scoreA || 0, scoreB: m.scoreB || 0, played: !!m.played })
+    });
+  }
+  // Blank every map's score, keeping the maps, modes and pick attribution.
+  el('mp-clear-scores')?.addEventListener('click', () => {
+    const rows = [...(el('mp-slots')?.querySelectorAll('.mp-slot') || [])];
+    if (!rows.some((r) => r.querySelector('.mp-score-a').value || r.querySelector('.mp-score-b').value)) {
+      showToast('No scores to clear', '#fbbf24'); return;
+    }
+    rows.forEach((r) => {
+      r.querySelector('.mp-score-a').value = ''; r.querySelector('.mp-score-b').value = '';
+      const c = r.querySelector('.mp-score-clr'); if (c) c.disabled = true;
+    });
+    if (mpAutoOn()) mpClearSeriesScores(null);
+    mpSendDebounced();
+    showToast('Cleared every map score', '#22c55e');
   });
 
   function mpSyncFromState(data) {
@@ -3080,7 +3246,12 @@ function _returnGraphicsToProd() {
       // empty slot the producer just added with "+ Add map". Never shrink below the current count.
       const bo = parseInt(boSel?.value, 10) || 5;
       const curCount = el('mp-slots')?.querySelectorAll('.mp-slot').length || 0;
-      mpRenderSlots(maps, Math.max(maps.length, curCount, mpMinSlots(bo)));
+      // Auto from Series: fold the series editor's scores in before rendering, and push the
+      // result on only if it actually differs from what's saved (so this can't loop).
+      let rows = maps, push = false;
+      if (mpAutoOn()) { const merged = mpMergeSeries(maps, data); rows = merged.maps; push = merged.changed; }
+      mpRenderSlots(rows, Math.max(rows.length, curCount, mpMinSlots(bo)));
+      if (push) mpSendDebounced();
     }
     if (typeof window._gfxRefreshVetoSeriesLink === 'function') window._gfxRefreshVetoSeriesLink(data);
   }
@@ -4436,7 +4607,7 @@ const PAGE_LABELS = {
   equipos: 'Talent', facecams: 'Cameras', brands: 'Profiles',
   media: 'Assets', integrations: 'Integrations', stats: 'Analytics',
   ajustes: 'Settings', roles: 'Roles', switcher: 'Switcher',
-  graphics: 'Graphics',
+  graphics: 'Graphics', social: 'Social',
 };
 
 function openPopout(page) {
@@ -4474,6 +4645,26 @@ document.querySelectorAll('.tab-btn[data-tab]').forEach(btn => {
   const rb = document.getElementById('tab-roles');
   if (rb) (rb.closest('.nav-item-wrap') || rb).style.display = 'none';
 })();
+
+// ── Social page gate ────────────────────────────────────────────────────────
+// Social publishes clips to the ORGANISATION's YouTube/X channels, so the sidebar entry is
+// owner/admin-only. Producers, operators, talent, and anyone on a personal workspace never see
+// it. Default is hidden: renderCloudStatus() calls this with the real answer once the cloud
+// session lands, so an offline/unauthenticated launch fails CLOSED rather than open.
+window._socialAllowed = false;
+function applySocialGate(allowed) {
+  window._socialAllowed = !!allowed;
+  const btn = document.getElementById('tab-social');
+  if (!btn) return;
+  btn.style.display = allowed ? '' : 'none';               // clears the markup's inline none
+  const wrap = btn.closest('.nav-item-wrap') || btn;        // hide the pop-out affordance too
+  wrap.style.display = allowed ? '' : 'none';
+  // Access revoked (seat downgraded, signed out, workspace switch) while the page was open.
+  if (!allowed && btn.classList.contains('active')) {
+    document.querySelector('.tab-btn[data-tab="principal"]')?.click();
+  }
+}
+applySocialGate(false);
 
 // Pages no longer carry a header or an inline pop-out button — pop-out lives on the
 // sidebar nav items (hover icon + right-click menu) only.
@@ -4585,6 +4776,10 @@ if (_popoutPage === 'triggers') {
     // but .click() still fires on a hidden element, so a stale saved tab would silently reopen it
     // (and re-arm its OBS Studio-Mode auto-enable) on the next launch without this guard.
     if (saved === 'switcher') saved = 'produccion';
+    // Social is org owner/admin-only and the cloud session hasn't landed yet at this point, so
+    // there's no role to check against — same hidden-button-still-clicks problem as Switcher
+    // above. Fall back to the Dashboard; the producer can re-open Social once the gate reveals it.
+    if (saved === 'social') saved = 'principal';
     if (saved && saved !== 'principal') {
       const btn = document.querySelector('.tab-btn[data-tab="' + saved + '"]');
       if (btn) btn.click();
@@ -6268,7 +6463,7 @@ function applyState(data) {
   // UI always sees a complete state. Mutating `data` in place also feeds the render functions
   // that run after applyState() in the message handler.
   if (data && currentState) {
-    for (const k of ['savedTeams', 'playerProfiles', 'brandKits', 'brandKitsVer', 'draftRosters', 'brand', 'banner', 'mainBanner', 'playouts', 'bracket', 'replay', 'crew', 'leagues', 'clips', 'socialPreset']) {
+    for (const k of ['savedTeams', 'playerProfiles', 'brandKits', 'brandKitsVer', 'draftRosters', 'brand', 'banner', 'mainBanner', 'playouts', 'bracket', 'replay', 'crew', 'leagues', 'clips', 'socialPreset', 'questions', 'questionSources']) {
       if (data[k] === undefined && currentState[k] !== undefined) data[k] = currentState[k];
     }
   }
@@ -6748,6 +6943,8 @@ function applyState(data) {
   if (typeof renderNxgenSettings === 'function') renderNxgenSettings(data);
   // Ballchasing settings
   if (typeof renderBallchasingSettings === 'function') renderBallchasingSettings(data);
+  // Marble Race launcher status
+  if (typeof renderMarbleRaceStatus === 'function') renderMarbleRaceStatus(data.marbleRace);
 }
 
 function getStartggPayload() {
@@ -10197,6 +10394,7 @@ function applyCloudStatus(s) {
   const seatsBlock = el('org-seats-block');
   const canManage = isOrg && (s.role === 'owner' || s.role === 'admin');
   if (seatsBlock) seatsBlock.style.display = canManage ? '' : 'none';
+  applySocialGate(canManage);
   if (canManage) send('cloud_list_org_seats', { orgId: s.workspaceId });
   if (isOrg) send('cloud_list_camera_feeds', { orgId: s.workspaceId });
   if (isOrg) send('cloud_list_station_feeds', { orgId: s.workspaceId });
@@ -10779,6 +10977,20 @@ function renderBallchasingSettings(data) {
     leagueSel.innerHTML = '<option value="">— pick a league with Ballchasing enabled —</option>'
       + rlLeagues.map((lg) => `<option value="${escapeHtml(lg.id)}"${au.activeLeagueId === lg.id ? ' selected' : ''}>${escapeHtml(lg.name || 'Unnamed league')}</option>`).join('');
   }
+
+  const rr = b.replayRename || {};
+  const rrCb = el('check-ballchasing-replayrename');
+  const rrOpts = el('ballchasing-replayrename-opts');
+  const rrFolderInp = el('input-ballchasing-replayrename-folder');
+  const rrLeagueSel = el('select-ballchasing-replayrename-league');
+  if (rrCb && document.activeElement !== rrCb) rrCb.checked = !!rr.enabled;
+  if (rrOpts) rrOpts.style.display = rr.enabled ? 'flex' : 'none';
+  if (rrFolderInp && document.activeElement !== rrFolderInp) rrFolderInp.value = rr.folder || '';
+  if (rrLeagueSel && document.activeElement !== rrLeagueSel) {
+    const rlLeagues = (data.leagues || []).filter((lg) => lg.game === 'rocket-league' && lg.ballchasing && lg.ballchasing.groupId);
+    rrLeagueSel.innerHTML = '<option value="">— pick a league with Ballchasing enabled —</option>'
+      + rlLeagues.map((lg) => `<option value="${escapeHtml(lg.id)}"${rr.activeLeagueId === lg.id ? ' selected' : ''}>${escapeHtml(lg.name || 'Unnamed league')}</option>`).join('');
+  }
 }
 
 window._handleBallchasingResult = function (data) {
@@ -10851,6 +11063,56 @@ el('select-ballchasing-autoleague')?.addEventListener('change', function () {
 el('btn-ballchasing-browse-folder')?.addEventListener('click', () => {
   send('ballchasing_pick_autoupload_folder', {});
 });
+
+el('check-ballchasing-replayrename')?.addEventListener('change', function () {
+  send('set_ballchasing_replayrename', {
+    enabled: this.checked,
+    folder: el('input-ballchasing-replayrename-folder')?.value.trim() || '',
+    activeLeagueId: el('select-ballchasing-replayrename-league')?.value || ''
+  });
+});
+el('input-ballchasing-replayrename-folder')?.addEventListener('change', function () {
+  send('set_ballchasing_replayrename', {
+    enabled: !!el('check-ballchasing-replayrename')?.checked,
+    folder: this.value.trim(),
+    activeLeagueId: el('select-ballchasing-replayrename-league')?.value || ''
+  });
+});
+el('select-ballchasing-replayrename-league')?.addEventListener('change', function () {
+  send('set_ballchasing_replayrename', {
+    enabled: !!el('check-ballchasing-replayrename')?.checked,
+    folder: el('input-ballchasing-replayrename-folder')?.value.trim() || '',
+    activeLeagueId: this.value
+  });
+});
+el('btn-ballchasing-replayrename-browse-folder')?.addEventListener('click', () => {
+  send('ballchasing_pick_replayrename_folder', {});
+});
+el('btn-ballchasing-run-replayrename')?.addEventListener('click', function () {
+  this.disabled = true;
+  const status = el('ballchasing-replayrename-status');
+  if (status) { status.style.color = 'var(--muted)'; status.textContent = 'Scanning…'; }
+  send('ballchasing_run_replayrename', {});
+});
+
+window._handleReplayRenameResult = function (data) {
+  const btn = el('btn-ballchasing-run-replayrename');
+  if (btn) btn.disabled = false;
+  const status = el('ballchasing-replayrename-status');
+  if (status) { status.style.color = data.ok ? '#86efac' : '#f87171'; status.textContent = data.message || ''; }
+  const box = el('ballchasing-replayrename-results');
+  if (!box) return;
+  const rows = data.results || [];
+  box.style.display = rows.length ? '' : 'none';
+  box.innerHTML = rows.map((r) => {
+    const ok = r.uploaded;
+    const color = ok ? '#86efac' : (r.newName ? '#facc15' : '#94a3b8');
+    const detail = r.newName
+      ? `→ ${escapeHtml(r.newName)}${ok ? ' (uploaded)' : r.error ? ` — upload failed: ${escapeHtml(r.error)}` : ''}`
+      : `no match: ${escapeHtml(r.error || 'unknown')}`;
+    return `<div style="padding:2px 0; color:${color};">${escapeHtml(r.originalName)} ${detail}</div>`;
+  }).join('');
+};
 
 function renderNxgenTeams(teams) {
   const list = el('nxgen-teams-list'); if (!list) return;
@@ -12303,7 +12565,18 @@ el('btn-load-event-dash')?.addEventListener('click', () => {
 });
 
 // Unified Clear button
-el('btn-clear-event-dash')?.addEventListener('click', () => {
+// This clears the active event AND wipes the imported start.gg teams (persisted server-side),
+// so a stray click mid-show costs you the whole team list. Name the cost before doing it.
+el('btn-clear-event-dash')?.addEventListener('click', async () => {
+  const n = (((currentState || {}).startgg || {}).eventTeams || []).length;
+  const ok = await appConfirm(
+    n
+      ? `Clear the active event? This also removes the ${n} imported team${n === 1 ? '' : 's'} — you would have to re-import them from start.gg.`
+      : 'Clear the active event?',
+    'Clear event',
+    true
+  );
+  if (!ok) return;
   send('clear_active_event', {});
   clearStartggTeams();
   _evChallongeSlug = '';
@@ -12531,8 +12804,9 @@ function renderNxgenDropdown(events, filterQuery) {
       </div>
       <span class="ev-dropdown-badge" style="background:rgba(0,0,0,.2); color:${sc}; text-transform:capitalize;">${escapeHtml(ev.status || '')}</span>`;
     row.addEventListener('click', () => {
-      searchInput.value = ev.name || ev.slug;
-      if (clearBtn) clearBtn.style.display = 'block';
+      const inp = el('ev-nxgen-search');
+      if (inp) inp.value = ev.name || ev.slug;
+      if (el('ev-nxgen-clear')) el('ev-nxgen-clear').style.display = 'block';
       container.style.display = 'none';
       _evNxgenSlug = ev.slug || '';
       const status = el('ev-load-status');
@@ -12768,7 +13042,11 @@ function renderCasterLibrary(library) {
     const del = document.createElement('button');
     del.textContent = '✕'; del.title = 'Remove from library';
     del.style.cssText = 'border:0; background:none; color:#f56565; cursor:pointer; font-size:13px; padding:0 2px; flex:0 0 auto;';
-    del.addEventListener('click', () => send('delete_caster_from_library', { id: p.id }));
+    del.addEventListener('click', () => {
+      appConfirm(`Remove ${p.name || 'this caster'} from the library?`, 'Remove', true).then((ok) => {
+        if (ok) send('delete_caster_from_library', { id: p.id });
+      });
+    });
 
     row.appendChild(loadBtn);
     row.appendChild(del);
@@ -12974,14 +13252,22 @@ el('btn-veto-reset')?.addEventListener('click', () => {
 el('btn-veto-show')?.addEventListener('click', () => send('veto_visible', { visible: true }));
 el('btn-veto-hide2')?.addEventListener('click', () => send('veto_visible', { visible: false }));
 
-// Overwatch game-mode icons — m.mode carries the pool entry's type (Control/Hybrid/Escort/Push/
-// Flashpoint/Clash). Other games' mode strings have no matching icon, so no badge shows for them.
+// Game-mode icons — m.mode carries the pool entry's type (Overwatch: Control/Hybrid/Escort/Push/
+// Flashpoint/Clash; Rocket League: Soccar/Hoops/Dropshot/Snow Day/Rumble/Heatseeker/Spike Rush).
+// Other games' mode strings have no matching icon, so no badge shows for them.
+// Same table the mapscreen overlay uses (overlay/mapscreen.html MODE_IMG) — keep them in sync.
 const VM_MODE_IMG = {
   control: '/assets/overwatch/modes/Control.webp', hybrid: '/assets/overwatch/modes/Hybrid.webp',
   escort: '/assets/overwatch/modes/Escort.webp', push: '/assets/overwatch/modes/Push.webp',
   flashpoint: '/assets/overwatch/modes/Flashpoint.webp', clash: '/assets/overwatch/modes/Clash.webp',
-  assault: '/assets/overwatch/modes/Assault.webp'
+  assault: '/assets/overwatch/modes/Assault.webp',
+  soccar: '/assets/rocket-league/modes/soccar.svg', hoops: '/assets/rocket-league/modes/hoops.svg',
+  dropshot: '/assets/rocket-league/modes/dropshot.svg', 'snow day': '/assets/rocket-league/modes/snow-day.svg',
+  rumble: '/assets/rocket-league/modes/rumble.svg', heatseeker: '/assets/rocket-league/modes/heatseeker.svg',
+  'spike rush': '/assets/rocket-league/modes/spike-rush.svg'
 };
+// Reachable from the Map Pool editor IIFE (which is defined earlier in the file).
+window._vmModeImg = VM_MODE_IMG;
 
 function renderVetoManager(data) {
   const sel = el('veto-game'); if (!sel) return;
@@ -14050,6 +14336,7 @@ const SCENE_SOURCES = [
     { name: 'Casters (grid)', path: '/casters.html', live: 'casters.visible', desc: 'Up to 4 commentators — auto cam holes + name plates.' },
     { name: 'Single Cam', path: '/singlecam.html', live: 'casters.visible', desc: 'Solo caster — one big cam + scorebar, sponsor under the cam.' },
     { name: 'Duo Row', path: '/duorow.html', live: 'casters.visible', desc: '2 caster cams in a row + scorebar + footer.' },
+    { name: 'Duo Row — No Scorebar', path: '/duorow-noscore.html', live: 'casters.visible', desc: '2 caster cams, no match scorebar — podcasts/panels. Event title + lower third only.' },
     { name: 'Trio Row', path: '/triorow.html', live: 'casters.visible', desc: '3 caster cams in a row + scorebar + footer.' },
     { name: 'Duo (single cam)', path: '/duosinglecam.html', live: 'casters.visible', desc: '2 casters sharing one wide camera.' },
     { name: 'Analyst Desk', path: '/analystspecial.html', live: 'casters.visible', desc: 'Featured host + analyst cams.' },
@@ -14057,9 +14344,11 @@ const SCENE_SOURCES = [
     { name: 'Talent Bar (lower third)', path: '/talentbar.html', live: 'casters.visible', desc: 'Slim bottom strip of caster cams + names over gameplay/replay.' },
     { name: 'Interview / Head-to-head', path: '/interview.html', live: 'casters.visible', desc: 'Two big cams side by side with a VS medallion.' },
     { name: 'Quad Desk (2×2)', path: '/quaddesk.html', live: 'casters.visible', desc: 'Four-person panel — 2×2 framed cams + scorebar.' },
+    { name: 'Quad Desk — No Scorebar', path: '/quaddesk-noscore.html', live: 'casters.visible', desc: 'Four-person panel, no match scorebar — bigger 2×2 cams for podcasts/panels.' },
     { name: 'Desk Show', path: '/preshow.html', live: 'casters.visible', desc: '2 caster cams + discussion-topics rail + kickoff countdown + first-up match-up.' },
     { name: 'Player Spotlight Desk', path: '/spotlightdesk.html', live: 'casters.visible', desc: 'Analyst cam + featured player card with live stats.' },
     { name: 'Vertical (9:16)', path: '/vertical.html', live: 'casters.visible', desc: 'Vertical co-stream — set the OBS source to 1080×1920.', aspect: '1080 × 1920' },
+    { name: 'Vertical Casters (9:16)', path: '/vertical-casters.html', live: 'casters.visible', desc: 'TikTok / Shorts caster desk — cams stacked full-frame, scorebar on top, inside the phone-UI safe area. ?count=1|2|3, ?score=off, ?safe=0, ?guides=1.', aspect: '1080 × 1920' },
     { name: 'Listen In (player mic + captions)', path: '/listen-in.html', live: 'listenIn.active', desc: 'Live team/player mic + captions on stream (VDO).' },
     { name: 'Chat Highlight (lower third)', path: '/chat-highlight.html', live: 'chatHighlight.visible', desc: 'Featured chat message — click any message in the rail’s Twitch chat to put it on stream.' },
   ]},
@@ -14069,6 +14358,7 @@ const SCENE_SOURCES = [
     { name: 'Starting Soon — Timer only', path: '/countdown.html?timer=1', live: 'breakScreen.visible', desc: 'Countdown with no background — overlay on b-roll.' },
     { name: 'Intermission Card', path: '/intermission.html', live: 'breakScreen.visible', desc: 'Centered card: brand logo + event title + countdown. Layer over a map or b-roll in OBS.' },
     { name: 'Intermission — Full Screen', path: '/intermission2.html', live: 'breakScreen.visible', desc: 'RLCS-style full-screen intermission: brand panel, STARTING SOON, giant outline countdown. Layer over b-roll.' },
+    { name: 'Vertical Break (9:16)', path: '/vertical-break.html', live: 'breakScreen.visible', desc: 'TikTok / Shorts break card — brand logo, event title, countdown + message, inside the phone-UI safe area. ?fill=1 for a branded backdrop, ?safe=0, ?guides=1.', aspect: '1080 × 1920' },
     { name: 'Winner', path: '/winner.html', live: 'winner.visible', desc: 'Champion screen — team logo, name, subtitle.' },
     { name: 'Team Line-up', path: '/intro.html', live: 'intro.visible', desc: 'Animated roster cards. Add ?side=blue|orange.' },
     { name: 'Matchup (pre-game)', path: '/matchup.html', live: null, desc: 'Cinematic split-screen — team color washes, large watermark logos, VS pillar, series pips.' },
@@ -14097,6 +14387,7 @@ const SCENE_SOURCES = [
     { name: 'Giveaway Wheel', path: '/twitch-wheel.html', live: null, desc: 'On-screen spin wheel for chat giveaways.' },
     { name: 'Mini-Games', path: '/twitch-minigames.html', live: null, desc: 'Interactive Twitch chat mini-games overlay.' },
     { name: 'Polls', path: '/twitch-polls.html', live: null, desc: 'Channel-point poll tracker overlay.' },
+    { name: 'Marble Race', path: '/marble-race.html', live: null, desc: 'Every viewer\'s marble races a real 3D obstacle course — enter with !play (Twitch, Kick, YouTube).' },
   ]},
   { group: 'Stingers & Transitions', icon: 'sparkles', items: [
     { name: 'Transition (accent)', path: '/transition.html', live: null, desc: 'Brand wipe with centre logo. ?team=blue|orange.' },
@@ -14201,7 +14492,7 @@ function buildSceneCard(it, groupName) {
       <div class="scene-thumb-acts">
         <button class="scene-thumb-btn ss-open" title="Open in new window">${svgIcon('external')}</button>
         <button class="scene-thumb-btn ss-copy" title="Copy browser-source URL">${svgIcon('copy')}</button>
-        <button class="scene-thumb-btn ss-settings" title="Settings">${svgIcon('gear')}</button>
+        <button class="scene-thumb-btn ss-settings" title="Settings — background fill (colour + opacity) and Edit HTML">${svgIcon('gear')}</button>
       </div>
     </div>
     <div class="scene-bg-panel" hidden>
@@ -14674,7 +14965,7 @@ const GOLIVE_TRIGGERS = [
   { toggle: 'ck-intro-toggle',    state: 'intro',       sceneKey: 'intro',    msg: 'set_intro',    show: () => ({ visible: true, side: el('ck-intro-side')?.value || 'blue' }) },
   { toggle: 'ck-veto-toggle',     state: 'veto',        sceneKey: 'veto',     msg: 'set_veto',     show: () => ({ visible: true }) },
   { toggle: 'ck-spotlight-toggle',state: 'watchlist',   sceneKey: 'spotlight',msg: 'set_watchlist',show: () => ({ visible: true }) },
-  { toggle: 'ck-schedule-toggle', state: 'upcoming',    sceneKey: 'schedule', msg: 'set_upcoming', show: () => ({ visible: true }) },
+  { toggle: 'ck-schedule-toggle', state: 'upcoming',    sceneKey: 'upcoming', msg: 'set_upcoming', show: () => ({ visible: true }) },
 ];
 GOLIVE_TRIGGERS.forEach((t) => {
   el(t.toggle)?.addEventListener('click', () => {
@@ -15623,6 +15914,31 @@ el('qt-autoswitch')?.addEventListener('change', function () {
 // Lists EVERY scene in the active OBS scene collection as a one-click program cut,
 // auto-updating whenever you add/rename/swap scenes or collections in OBS itself.
 let _qrailSceneSig = '';
+// ── Program list order + visibility — PANEL ONLY, never touches OBS ────────────
+// Producers cut in show order, which is rarely the order scenes happen to sit in the OBS
+// collection; and a real collection carries staging/nested scenes that never go on air.
+// Both the custom order and the hidden set live in localStorage, so re-sorting the rail
+// leaves the OBS scene collection exactly as it is.
+const PROG_ORDER_KEY = 'ne_prog_order_v1';
+const PROG_HIDE_KEY = 'ne_prog_hidden_v1';
+function progLoadArr(key) { try { const a = JSON.parse(localStorage.getItem(key) || '[]'); return Array.isArray(a) ? a : []; } catch (_) { return []; } }
+let _progOrder = progLoadArr(PROG_ORDER_KEY);
+let _progHidden = new Set(progLoadArr(PROG_HIDE_KEY));
+let _progEdit = false;
+function progSave() {
+  try {
+    localStorage.setItem(PROG_ORDER_KEY, JSON.stringify(_progOrder));
+    localStorage.setItem(PROG_HIDE_KEY, JSON.stringify(Array.from(_progHidden)));
+  } catch (_) {}
+}
+function progSetEdit(on) {
+  _progEdit = !!on;
+  const link = el('qprog-reorder');
+  if (link) { link.textContent = _progEdit ? 'done' : 'reorder'; link.classList.toggle('active', _progEdit); }
+  _qrailSceneSig = '';                       // force a rebuild — edit mode changes every row
+  renderQrailScenes(currentState || {});
+}
+el('qprog-reorder')?.addEventListener('click', (e) => { e.preventDefault(); progSetEdit(!_progEdit); });
 function renderQrailScenes(data) {
   const wrap = el('qrail-scenes'); if (!wrap) return;
   const sub = el('qrail-scenes-sub');
@@ -15662,51 +15978,131 @@ function renderQrailScenes(data) {
   const list = Array.isArray(obs.availableScenes) ? obs.availableScenes : [];
   const connected = !!obs.connected;
   const enabled = !!obs.enabled;
-  // Which scenes are mapped to a moment hotkey (1..9), so we can badge them.
-  const hotkeyByScene = {};
-  SCENE_CONTROL_MOMENTS.forEach((m, i) => { const sn = (obs.scenes || {})[m.key]; if (sn) hotkeyByScene[sn] = i + 1; });
+  const live = connected ? (obs.currentScene || '') : '';
+  // Moment mapping by scene name: the hotkey number (1..9) and the moment's producer-facing
+  // name, so a scene called "IG_final_v3" still reads as "In-Game" on the rail.
+  const momentByScene = {};
+  SCENE_CONTROL_MOMENTS.forEach((m, i) => {
+    const sn = (obs.scenes || {})[m.key];
+    if (sn && !momentByScene[sn]) momentByScene[sn] = { label: m.label, hk: i + 1 };
+  });
   // Header sub shows WHAT'S ON PROGRAM — far more useful mid-show than a scene count.
-  if (sub) sub.textContent = connected ? (obs.currentScene || String(list.length)) : '';
+  if (sub) { sub.textContent = connected ? (live || String(list.length)) : ''; sub.classList.toggle('live', !!live); }
+  const reorderLink = el('qprog-reorder');
+  if (reorderLink) reorderLink.style.display = (enabled && connected && list.length) ? '' : 'none';
 
-  const sig = JSON.stringify({ list, connected, enabled, hk: hotkeyByScene });
+  // Reconcile the saved order against the live scene list: keep the producer's order for scenes
+  // that still exist, append anything new. New scenes sort mapped moments first (their hotkey
+  // order), then whatever order OBS reports — the same default the old two-group rail had.
+  const known = _progOrder.filter((n) => list.includes(n));
+  const fresh = list.filter((n) => !known.includes(n))
+    .sort((a, b) => ((momentByScene[a] ? momentByScene[a].hk : 99) - (momentByScene[b] ? momentByScene[b].hk : 99)));
+  const ordered = known.concat(fresh);
+  if (ordered.length !== _progOrder.length || ordered.some((n, i) => _progOrder[i] !== n)) { _progOrder = ordered; progSave(); }
+  const hiddenCount = ordered.filter((n) => _progHidden.has(n)).length;
+  // Hidden scenes stay visible (dimmed) while reordering so they can be brought back.
+  const shown = _progEdit ? ordered : ordered.filter((n) => !_progHidden.has(n));
+
+  const sig = JSON.stringify({ shown, connected, enabled, edit: _progEdit, hid: Array.from(_progHidden), m: momentByScene, n: list.length });
   if (sig !== _qrailSceneSig) {
     _qrailSceneSig = sig;
     wrap.innerHTML = '';
+    wrap.classList.toggle('qrail-scenes-editing', _progEdit);
     const hint = (t) => { const h = document.createElement('div'); h.className = 'qrail-scenes-hint'; h.textContent = t; wrap.appendChild(h); };
     if (!enabled) hint('OBS off — enable in Settings → OBS');
     else if (!connected) hint('Connecting to OBS… scenes appear here automatically');
     else if (!list.length) hint('No scenes found in this OBS profile');
     else {
-      const sceneBtn = (name, hk, label) => {
+      if (_progEdit) hint('Drag to set your show order; the eye hides a scene from this rail. OBS is not changed.');
+      // Same chip language as the Put On Air rail above (.qk-chip): 2-up grid, dot + label, green
+      // when it's the one on program. Scene chips carry their hotkey number instead of the gear.
+      const grid = document.createElement('div');
+      grid.className = 'qk-put qps-grid' + (_progEdit ? ' qps-editing' : '');
+      shown.forEach((name) => {
+        const mo = momentByScene[name];
+        const isHidden = _progHidden.has(name);
+        const chip = document.createElement('div');
+        chip.className = 'qk-chip qk-chip--scene qps-chip' + (isHidden ? ' qps-hidden' : '');
+        chip.dataset.scene = name;
+        if (_progEdit) chip.draggable = true;
+
         const b = document.createElement('button');
-        b.className = 'qrail-scene-btn';
-        b.dataset.scene = name;
-        b.innerHTML = (hk ? `<kbd class="qt-key">${hk}</kbd>` : '<span class="qt-key qt-key-blank"></span>') +
-          `<span class="qss-name"></span>`;
-        b.querySelector('.qss-name').textContent = label || name;
-        b.title = `Cut program to "${name}"` + (label ? ` (${label} moment · hotkey ${hk})` : '');
-        b.addEventListener('click', () => send('obs_switch_scene', { sceneName: name }));
-        wrap.appendChild(b);
-      };
-      const groupLbl = (t) => { const g = document.createElement('div'); g.className = 'qrail-scenes-hint'; g.style.cssText = 'font-weight:800;letter-spacing:.1em;text-transform:uppercase;font-size:9px;margin:2px 0 4px;'; g.textContent = t; wrap.appendChild(g); };
-      // Mapped broadcast moments first — the cuts you actually make mid-show, with their
-      // hotkey numbers; then the rest of the collection (mapped scenes not repeated).
-      const seen = new Set();
-      const moments = SCENE_CONTROL_MOMENTS
-        .map((m, i) => ({ label: m.label, sn: (obs.scenes || {})[m.key], hk: i + 1 }))
-        .filter((m) => m.sn && list.includes(m.sn) && !seen.has(m.sn) && seen.add(m.sn));
-      if (moments.length) {
-        groupLbl('Moments');
-        moments.forEach((m) => sceneBtn(m.sn, m.hk, m.label));
-        groupLbl('All scenes');
+        b.className = 'qk-chip-main';
+        b.textContent = mo ? mo.label : name;
+        b.title = mo ? `Cut program to "${name}"  ·  ${mo.label} moment · hotkey ${mo.hk}` : `Cut program to "${name}"`;
+        b.addEventListener('click', () => { if (!_progEdit) send('obs_switch_scene', { sceneName: name }); });
+        chip.appendChild(b);
+
+        // Hotkey key-cap (mapped moments only) sits where the SCN tag would — one per chip.
+        if (mo) {
+          const k = document.createElement('kbd');
+          k.className = 'qps-hk';
+          k.textContent = String(mo.hk);
+          chip.appendChild(k);
+        } else {
+          chip.classList.add('qps-nohk');
+        }
+
+        if (_progEdit) {
+          const eye = document.createElement('button');
+          eye.className = 'qk-chip-gear qps-eye';
+          eye.title = isHidden ? 'Show this scene on the rail' : 'Hide this scene from the rail (stays in OBS)';
+          eye.innerHTML = isHidden
+            ? '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><path d="M1 1l22 22"/></svg>'
+            : '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
+          eye.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (_progHidden.has(name)) _progHidden.delete(name); else _progHidden.add(name);
+            progSave(); _qrailSceneSig = ''; renderQrailScenes(currentState || {});
+          });
+          chip.appendChild(eye);
+        }
+        grid.appendChild(chip);
+      });
+      wrap.appendChild(grid);
+      if (!_progEdit && hiddenCount) {
+        const f = document.createElement('div');
+        f.className = 'qrail-scenes-hint qps-hiddenfoot';
+        f.innerHTML = `${hiddenCount} scene${hiddenCount > 1 ? 's' : ''} hidden · <a href="#">show</a>`;
+        f.querySelector('a').addEventListener('click', (e) => { e.preventDefault(); progSetEdit(true); });
+        wrap.appendChild(f);
       }
-      list.filter((n) => !seen.has(n)).forEach((name) => sceneBtn(name, hotkeyByScene[name]));
     }
   }
-  // Highlight the live program scene every tick (no rebuild).
-  const live = connected ? (obs.currentScene || '') : '';
-  wrap.querySelectorAll('.qrail-scene-btn').forEach((b) => b.classList.toggle('live', !!live && b.dataset.scene === live));
+  // Highlight the live program scene every tick (no rebuild) — same green .on as the chips above.
+  wrap.querySelectorAll('.qps-chip').forEach((c) => c.classList.toggle('on', !!live && c.dataset.scene === live));
 }
+// Drag-to-reorder the Program rail (edit mode only) — order is panel-local, OBS untouched.
+(function wireProgDrag() {
+  const wrap = el('qrail-scenes'); if (!wrap) return;
+  let dragName = null;
+  wrap.addEventListener('dragstart', (e) => {
+    const r = e.target.closest('.qps-chip');
+    if (!r || !_progEdit) { e.preventDefault(); return; }
+    dragName = r.dataset.scene; r.classList.add('qps-drag');
+    try { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', dragName); } catch (_) {}
+  });
+  wrap.addEventListener('dragend', () => {
+    wrap.querySelectorAll('.qps-drag, .qps-over').forEach((n) => n.classList.remove('qps-drag', 'qps-over'));
+    dragName = null;
+  });
+  wrap.addEventListener('dragover', (e) => {
+    if (!_progEdit || !dragName) return;
+    e.preventDefault();
+    const r = e.target.closest('.qps-chip');
+    wrap.querySelectorAll('.qps-over').forEach((n) => { if (n !== r) n.classList.remove('qps-over'); });
+    if (r && r.dataset.scene !== dragName) r.classList.add('qps-over');
+  });
+  wrap.addEventListener('drop', (e) => {
+    if (!_progEdit || !dragName) return;
+    e.preventDefault();
+    const tgt = e.target.closest('.qps-chip'); if (!tgt) return;
+    const from = _progOrder.indexOf(dragName), to = _progOrder.indexOf(tgt.dataset.scene);
+    if (from < 0 || to < 0 || from === to) return;
+    const [m] = _progOrder.splice(from, 1); _progOrder.splice(to, 0, m);
+    progSave(); _qrailSceneSig = ''; renderQrailScenes(currentState || {});
+  });
+})();
 
 // ── Quick panel cockpit: Now/Next + "Put On Air" chips (reuse the golive toggles + config gear) ──
 // trig entries drive the existing GOLIVE_TRIGGERS toggle buttons + trigger-config popover; ov
@@ -15758,20 +16154,20 @@ function _qkGfxToggle(key) {
 // Stable id per QK_PUT entry (gfx/ov/trig key — whichever it has) so drag order survives even
 // if the array itself is edited later.
 function qkItemKey(item) { return item.gfx || item.ov || item.trig; }
-// QK_PUT chips PLUS every real OBS scene, deduped by name against the QK_PUT labels — a scene
-// literally named "Bracket" would otherwise sit right next to the "Bracket" graphic chip, two
-// differently-behaving buttons with the same label. (Same merge idea as onairAllItems(), which
-// drives the separate Production ▸ Graphics board — this is its own copy because that board and
-// this rail panel are different surfaces with different chip markup/behavior.)
+// Just the QK_PUT graphic chips — no longer merged with OBS scenes. Scenes used to be appended
+// here too (deduped by name against the graphic labels), but the separate "Program" group below
+// already lists every OBS scene on its own — the merge meant nearly every scene rendered as a
+// clickable button in BOTH groups at once (producer feedback: the rail reads as "overwhelming,
+// too many buttons"). Put On Air is now purely the fixed graphics catalog; Program is the one
+// place for scene cuts.
+function _qkCat(item) {
+  if (item.gfx) return 'layer';
+  if (item.ov) return 'overlay';
+  return 'moment';
+}
+const QK_CAT_LABEL = { moment: 'Match graphics', layer: 'Boards', overlay: 'Overlays' };
 function qkAllItems() {
-  const gfx = QK_PUT.map((item) => ({ id: 'qk:' + qkItemKey(item), t: 'qk', item, label: item.label }));
-  const taken = new Set(gfx.map((it) => it.label.toLowerCase()));
-  const rawScenes = (currentState && currentState.obs && Array.isArray(currentState.obs.availableScenes)) ? currentState.obs.availableScenes : [];
-  const scenes = rawScenes
-    .filter((name) => name && !/^═/.test(name.trim()))   // skip the generated collection's blank divider scenes
-    .filter((name) => !taken.has(name.toLowerCase()))
-    .map((name) => ({ id: 'scene:' + name, t: 'scene', k: name, label: name }));
-  return gfx.concat(scenes);
+  return QK_PUT.map((item) => ({ id: 'qk:' + qkItemKey(item), t: 'qk', item, label: item.label, cat: _qkCat(item) }));
 }
 // Custom chip order — reorderable via the "reorder" link, persisted the same way as the on-air
 // board and Deck grid.
@@ -15795,12 +16191,23 @@ function qkRenderPut() {
   const sig = ordered.map((it) => it.id).join(',') + '|' + _qkEdit;
   if (wrap.dataset.sig !== sig) {
     wrap.dataset.sig = sig;
+    // Category headers (Match graphics / Boards / Overlays) break up the flat chip wall — inserted
+    // wherever the category changes as chips are walked in their current (possibly custom-dragged)
+    // order, so producer reordering never leaves a header pointing at the wrong run of chips. Headers
+    // aren't chips (no data-id), so the drag/drop code below — which only ever targets `.qk-chip` —
+    // treats them as inert: they can't be dragged and dropping onto one is a no-op.
+    let lastCat = null;
     wrap.innerHTML = ordered.map((it) => {
+      let header = '';
+      if (it.cat !== lastCat) {
+        header = `<div class="qk-put-cat">${dEsc(QK_CAT_LABEL[it.cat] || it.cat)}</div>`;
+        lastCat = it.cat;
+      }
       if (it.t === 'scene') {
-        return `<div class="qk-chip qk-chip--scene" data-id="${dEsc(it.id)}"${_qkEdit ? ' draggable="true"' : ''}><button class="qk-chip-main" title="Cut to ${dEsc(it.label)}">${dEsc(it.label)}</button></div>`;
+        return header + `<div class="qk-chip qk-chip--scene" data-id="${dEsc(it.id)}"${_qkEdit ? ' draggable="true"' : ''}><button class="qk-chip-main" title="Cut to ${dEsc(it.label)}">${dEsc(it.label)}</button></div>`;
       }
       const item = it.item;
-      return `<div class="qk-chip" data-id="${dEsc(it.id)}"${_qkEdit ? ' draggable="true"' : ''}>`
+      return header + `<div class="qk-chip" data-id="${dEsc(it.id)}"${_qkEdit ? ' draggable="true"' : ''}>`
         + `<button class="qk-chip-main" title="Put ${dEsc(item.label)} on air">${dEsc(item.label)}</button>`
         + (item.cfg ? `<button class="qk-chip-gear" title="${dEsc(item.label)} options"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>` : '')
         + `</div>`;
@@ -16492,7 +16899,9 @@ el('ptp-hide')?.addEventListener('click', () => send('set_break', { visible: fal
 // Show button, and every broadcast re-synced them back to the stored value, so picking a
 // scene mid-countdown silently reverted and the cut never happened. The server preserves
 // the rest of the break state and reschedules the auto-switch on every set_break.
-[['ptp-break-thenscene', 'thenScene'], ['select-break-thenscene', 'thenScene'], ['ck-break-thenscene', 'thenScene'], ['ptp-break-playout', 'thenPlayout']].forEach(([id, key]) => {
+// Title dropdowns have the exact same bug (reported directly: picking a new title does nothing
+// until "Show countdown" is clicked again) — same fix, same reasoning, just a different field.
+[['ptp-break-thenscene', 'thenScene'], ['select-break-thenscene', 'thenScene'], ['ck-break-thenscene', 'thenScene'], ['ptp-break-playout', 'thenPlayout'], ['ptp-break-title', 'title'], ['ck-break-title', 'title']].forEach(([id, key]) => {
   el(id)?.addEventListener('change', function () { send('set_break', { [key]: this.value || '' }); });
 });
 el('ptimer-open')?.addEventListener('click', () => {
@@ -17083,6 +17492,8 @@ const CASTER_DESK_LAYOUTS = [
   { name: 'Casters (grid)', path: '/casters.html', desc: 'Flexible 1–4 cam grid' },
   { name: 'Single Cam', path: '/singlecam.html', desc: 'Solo caster + scorebar' },
   { name: 'Duo Row', path: '/duorow.html', desc: '2 cams + scorebar' },
+  { name: 'Duo Row — No Scorebar', path: '/duorow-noscore.html', desc: '2 cams, no scorebar (podcast/panel)' },
+  { name: 'Quad Desk — No Scorebar', path: '/quaddesk-noscore.html', desc: '4 cams 2×2, no scorebar (podcast/panel)' },
   { name: 'Desk Show', path: '/preshow.html', desc: '2 cams + topics rail + kickoff countdown' },
   { name: 'Trio Row', path: '/triorow.html', desc: '3 cams + scorebar' },
   { name: 'Duo (single cam)', path: '/duosinglecam.html', desc: '2 casters, 1 cam' },
@@ -20291,6 +20702,10 @@ el('btn-vmix-test')?.addEventListener('click', () => {
 document.querySelectorAll('#switcher-target-seg .seg-btn').forEach((b) => b.addEventListener('click', () => send('set_switcher_target', { target: b.dataset.target })));
 
 // ── Integrations page — pill subnav (Video Switcher / Cameras / Games & GSI / Tournament Platforms / Twitch) ──
+// 'chatgames' (Marble Race) is parked — unlisted from Integrations, implementation intact.
+// To restore: add 'chatgames' back here, re-add the panels/titles entries below, and
+// un-comment the subnav button + store card in index.html (the #integration-chatgames panel
+// itself was left in place, just orphaned).
 const INT_TABS = ['store', 'switcher', 'streamdeck', 'cameras', 'games', 'tournaments', 'twitch'];
 let _intTab = 'store';
 function _intShowTab(which) {
@@ -20304,6 +20719,7 @@ function _intShowTab(which) {
     games: [el('integration-games')],
     tournaments: [el('integration-startgg')],
     twitch: [el('integration-twitch'), el('integration-twitchgames')]
+    // chatgames: [el('integration-chatgames')]   — parked, see INT_TABS above
   };
   Object.entries(panels).forEach(([key, els]) => els.forEach((p) => { if (p) p.style.display = key === _intTab ? '' : 'none'; }));
   // Browse is the landing; every app panel shows a way back.
@@ -20385,6 +20801,7 @@ function renderIntegrationStore(data) {
   };
   const obs = data.obs || {}, vmix = data.vmix || {}, tw = data.twitch || {};
   const sgg = data.startgg || {}, ch = data.challonge || {}, nx = data.nxgen || {};
+  const sh = data.sheets || {};
   let on = 0;
   on += set('obs',   !obs.enabled ? 'off' : obs.connected ? 'on' : 'warn',
                      !obs.enabled ? 'Off' : obs.connected ? 'Connected' : 'Not reachable') ? 1 : 0;
@@ -20396,6 +20813,8 @@ function renderIntegrationStore(data) {
                          ch.hasKey ? (ch.connected ? 'Connected' : 'Key saved') : 'No key') ? 1 : 0;
   on += set('nxgen', nx.hasKey ? (nx.connected ? 'on' : 'warn') : 'off',
                      nx.hasKey ? (nx.connected ? 'Connected' : 'Key saved') : 'No key') ? 1 : 0;
+  on += set('sheets', sh.hasKey ? (sh.connected ? 'on' : 'warn') : 'off',
+                      sh.hasKey ? (sh.connected ? 'Connected' : 'Key saved') : 'No key') ? 1 : 0;
   on += set('rl',  data.rlConnected ? 'on' : 'off', data.rlConnected ? 'Connected' : 'Waiting for game') ? 1 : 0;
   on += set('cs2', (data.csgo && data.csgo.connected) ? 'on' : 'off',
                    (data.csgo && data.csgo.connected) ? 'Connected' : 'Waiting for game') ? 1 : 0;
@@ -20404,7 +20823,7 @@ function renderIntegrationStore(data) {
   const sdStatus = el('streamdeck-conn-status');
   if (sdStatus) sdStatus.textContent = sd ? 'Plugin connected — keys are live.' : 'Plugin not connected.';
   const count = el('int-strip-count');
-  if (count) count.textContent = on + ' of 9';
+  if (count) count.textContent = on + ' of 10';
 }
 
 function applyVmixState(data) {
@@ -21007,24 +21426,67 @@ el('rp-clear-shelf')?.addEventListener('click', async () => {
   if (ok) send('montage_clear_shelf', { folder: _rpFolder });
 });
 
-// Wire the Replays/Highlights shelf toggle once. Flipping it re-scopes the playlist pane.
+// Which of the section's three tabs is showing: the clip pool (for the active shelf) or the
+// playlists built from it. Playlists used to be a collapsed accordion UNDER the pool, which read as
+// a footnote — it's a peer view of the same shelf, so it's a peer tab.
+let _rpPoolView = 'pool';   // 'pool' | 'playlists'
+function rpApplyPoolView() {
+  const playlists = _rpPoolView === 'playlists';
+  // Pool-only chrome. The Transition row governs every push (including playlist playout), so it
+  // stays visible on both tabs.
+  ['rp-pool-bulk', 'rp-pool-shelf-actions', 'rp-clip-pool'].forEach((id) => {
+    const n = el(id); if (!n) return;
+    if (id === 'rp-pool-bulk') { n.style.display = playlists ? 'none' : (_poolSelected.size ? 'flex' : 'none'); return; }
+    n.style.display = playlists ? 'none' : '';
+  });
+  const sec = el('rp-pl-section'); if (sec) sec.style.display = playlists ? '' : 'none';
+  if (playlists) rpSetPlaylistsSectionExpanded(true);
+  const sw = el('rp-pl-shelf-switch');
+  if (sw) sw.innerHTML = (_rpFolder === 'highlights' ? 'Highlights' : 'Replays') + ' shelf &#8646;';
+  const tabs = document.getElementById('rp-folder-tabs');
+  if (tabs) tabs.querySelectorAll('.rp-folder-tab').forEach((b) => {
+    b.classList.toggle('active', b.dataset.view === 'playlists' ? playlists : (!playlists && b.dataset.folder === _rpFolder));
+  });
+}
+// Switch shelf (Replays ⇄ Highlights) — used by the two shelf tabs and by the Playlists tab's own
+// shelf toggle, so both stay in step.
+function rpSetFolder(f) {
+  f = f === 'highlights' ? 'highlights' : 'replays';
+  if (f === _rpFolder) return;
+  _rpFolder = f;
+  // Leaving the current shelf — drop the selection so the pane opens fresh on the new shelf.
+  const selEdit = el('select-montage-edit'); if (selEdit) selEdit.value = '';
+  const selAdd = el('rp-add-to-playlist-sel'); if (selAdd) selAdd.value = '';
+  _plCollapsed = false;
+  rpUpdateShelfActions();
+  if (currentState.clips) { renderClipPool(currentState.clips); renderPlaylistPane(currentState.clips); }
+}
 (function wireRpFolderTabs() {
   const tabs = document.getElementById('rp-folder-tabs');
   if (!tabs) return;
   tabs.addEventListener('click', (e) => {
     const btn = e.target.closest('.rp-folder-tab');
     if (!btn) return;
+    if (btn.dataset.view === 'playlists') {
+      _rpPoolView = 'playlists';
+      rpApplyPoolView();
+      if (currentState.clips) renderPlaylistPane(currentState.clips);
+      return;
+    }
     const f = btn.dataset.folder === 'highlights' ? 'highlights' : 'replays';
-    if (f === _rpFolder) return;
-    _rpFolder = f;
-    tabs.querySelectorAll('.rp-folder-tab').forEach((b) => b.classList.toggle('active', b.dataset.folder === f));
-    // Leaving the current shelf — drop the selection so the pane opens fresh on the new shelf.
-    const selEdit = el('select-montage-edit'); if (selEdit) selEdit.value = '';
-    const selAdd = el('rp-add-to-playlist-sel'); if (selAdd) selAdd.value = '';
-    _plCollapsed = false;
-    rpUpdateShelfActions();
-    if (currentState.clips) { renderClipPool(currentState.clips); renderPlaylistPane(currentState.clips); }
+    const wasPlaylists = _rpPoolView === 'playlists';
+    _rpPoolView = 'pool';
+    rpSetFolder(f);
+    rpApplyPoolView();
+    if (wasPlaylists && currentState.clips) renderClipPool(currentState.clips);
   });
+  el('rp-pl-shelf-switch')?.addEventListener('click', () => {
+    rpSetFolder(_rpFolder === 'highlights' ? 'replays' : 'highlights');
+    rpApplyPoolView();
+  });
+  // Deferred: this runs during top-level script execution, before the `let`s it touches further
+  // down the file have initialised (see the TDZ crash this codebase has hit before).
+  setTimeout(rpApplyPoolView, 0);
 })();
 
 // Import a raw staging file into the clip library (lands in the Replays pool — new imports always
@@ -21086,6 +21548,102 @@ function hideHoverPreview() {
   setTimeout(() => { if (!pop.classList.contains('visible')) pop.style.display = 'none'; }, 130);
 }
 
+// ── Playlist preview (watch a reel in the Video Editor, off air) ───────────
+// "Play live" was the only way to actually SEE a playlist end to end, which meant punching it to
+// air just to check it. This plays the reel locally in #clip-preview-video: clip by clip, honouring
+// each clip's trim, auto-advancing at the out-point. Nothing is sent to any bus.
+let _plPreview = null;         // { montageId, name, clips:[], idx }
+let _plPreviewLoading = false; // guards the loadClipPreview() re-entry below
+
+function rpPreviewClipsFor(m) {
+  const lib = (currentState.clips && currentState.clips.library) || [];
+  return (m.clipIds || []).map((id) => lib.find((cl) => cl.id === id)).filter((cl) => cl && clipUrl(cl));
+}
+
+function rpPreviewPlaylist(montageId) {
+  const all = (currentState.clips && currentState.clips.montages) || [];
+  const m = all.find((x) => x.id === montageId);
+  if (!m) return;
+  const clips = rpPreviewClipsFor(m);
+  const st = el('rp-screen-status');
+  if (!clips.length) {
+    if (st) { st.textContent = 'Nothing to preview — this playlist has no playable clips.'; st.style.color = 'var(--muted)'; }
+    return;
+  }
+  _plPreview = { montageId, name: m.name || 'Playlist', clips, idx: 0 };
+  rpPreviewLoadIdx(0);
+}
+
+function rpPreviewLoadIdx(i) {
+  if (!_plPreview) return;
+  if (i < 0 || i >= _plPreview.clips.length) { rpPreviewStop(true); return; }
+  _plPreview.idx = i;
+  const clip = _plPreview.clips[i];
+  const v = el('clip-preview-video');
+  _plPreviewLoading = true;
+  loadClipPreview(clip);
+  _plPreviewLoading = false;
+  rpPreviewSyncBar();
+  if (!v) return;
+  const start = () => {
+    v.currentTime = clip.trimIn || 0;
+    v.play().catch(() => {});   // autoplay can be refused before any user gesture; the strip still works
+  };
+  if (v.readyState >= 1) start();
+  else v.addEventListener('loadedmetadata', start, { once: true });
+}
+
+function rpPreviewNext() { if (_plPreview) rpPreviewLoadIdx(_plPreview.idx + 1); }
+function rpPreviewPrev() { if (_plPreview) rpPreviewLoadIdx(Math.max(0, _plPreview.idx - 1)); }
+
+// finished=true means we ran off the end of the reel — leave the last frame up rather than yanking it.
+function rpPreviewStop(finished) {
+  if (!_plPreview) { rpPreviewSyncBar(); return; }
+  const v = el('clip-preview-video');
+  if (v && !finished) v.pause();
+  _plPreview = null;
+  rpPreviewSyncBar();
+  const title = el('rp-editor-title'); if (title) title.textContent = 'Video Editor';
+}
+
+function rpPreviewSyncBar() {
+  const bar = el('rp-plprev-bar');
+  if (bar) bar.style.display = _plPreview ? 'flex' : 'none';
+  if (!_plPreview) return;
+  const n = _plPreview.clips.length;
+  const clip = _plPreview.clips[_plPreview.idx] || {};
+  const nameEl = el('rp-plprev-name');
+  if (nameEl) nameEl.textContent = `${_plPreview.name} — ${_plPreview.idx + 1}/${n} · ${clip.name || 'Clip'}`;
+  const prev = el('rp-plprev-prev'); if (prev) prev.disabled = _plPreview.idx <= 0;
+  const next = el('rp-plprev-next'); if (next) next.disabled = _plPreview.idx >= n - 1;
+  const title = el('rp-editor-title'); if (title) title.textContent = 'Playlist Preview';
+}
+
+el('rp-plprev-next')?.addEventListener('click', rpPreviewNext);
+el('rp-plprev-prev')?.addEventListener('click', rpPreviewPrev);
+el('rp-plprev-exit')?.addEventListener('click', () => rpPreviewStop(false));
+
+// Auto-advance: honour the clip's out-point, and fall through on natural end for untrimmed clips.
+(function wirePlaylistPreviewAdvance() {
+  const v = el('clip-preview-video'); if (!v) return;
+  v.addEventListener('timeupdate', () => {
+    if (!_plPreview) return;
+    const clip = _plPreview.clips[_plPreview.idx];
+    if (clip && clip.trimOut != null && v.currentTime >= clip.trimOut - 0.04) rpPreviewNext();
+  });
+  v.addEventListener('ended', () => { if (_plPreview) rpPreviewNext(); });
+})();
+
+// Preview the ENCODED file of a playlist (one continuous video, transitions baked in) — used by the
+// Exports panel, where there are no source clips to walk.
+function rpPreviewExport(m) {
+  const url = montageUrl(m); if (!url) return;
+  rpPreviewStop(false);
+  loadClipPreview({ id: null, name: (m.name || 'Montage') + ' (encoded export)', _url: url, trimIn: 0, trimOut: null });
+  const v = el('clip-preview-video');
+  if (v) v.play().catch(() => {});
+}
+
 // ── Playlist pane ──────────────────────────────────────────────────────────
 let timelineSortable = null;
 
@@ -21100,7 +21658,11 @@ function renderPlaylistPane(c) {
   const allMontages = c.montages || [];
   const montages = allMontages.filter((x) => (x.folder || 'replays') === _rpFolder);
   // Light the shelf tab whose reel is currently on air.
-  const liveFolder = _plLiveActive ? ((allMontages.find((x) => x.id === _plLiveMontageId) || {}).folder || 'replays') : null;
+  // Which shelf the live run belongs to. A POOL run has no montage id, so deriving this from the
+  // playlist list alone fell through to 'replays' — a Highlights pool play lit the Replays tab and
+  // left Highlights dark. _plLiveFolder is set by whoever started the run and wins.
+  const liveFolder = !_plLiveActive ? null
+    : (_plLiveFolder || (allMontages.find((x) => x.id === _plLiveMontageId) || {}).folder || 'replays');
   document.querySelectorAll('#rp-folder-tabs .rp-folder-live').forEach((dot) => {
     dot.classList.toggle('on', _plLiveActive && dot.dataset.folderLive === liveFolder);
   });
@@ -21143,6 +21705,7 @@ function renderPlaylistPane(c) {
         const badge = montageBadgeInfo(x, encodeActive, encodeQueue);
         return `<div class="rp-pl-row${isActive ? ' active' : ''}${isActive && _plCollapsed ? ' collapsed' : ''}" data-mid="${x.id}">
           <span class="rp-pl-row-chev">&#9660;</span>
+          <button class="rp-pl-row-prev" data-mid="${x.id}" title="Watch this playlist in the Video Editor (off air)"${n ? '' : ' disabled'}>&#9654;</button>
           <span class="rp-pl-row-name">${(x.name || 'Playlist').replace(/</g, '&lt;')}</span>
           <span class="rp-pl-row-count">${n} clip${n === 1 ? '' : 's'}</span>
           <span class="rp-pl-badge rp-pl-badge--${badge.cls}">${badge.label}</span>
@@ -21156,9 +21719,17 @@ function renderPlaylistPane(c) {
           rpMoveMontageFolder(btn.dataset.mid, otherFolder);
         });
       });
+      listV.querySelectorAll('.rp-pl-row-prev').forEach((btn) => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const pl = montages.find((x) => x.id === btn.dataset.mid);
+          if (pl && montageUrl(pl)) rpPreviewExport(pl);
+          else rpPreviewPlaylist(btn.dataset.mid);
+        });
+      });
       listV.querySelectorAll('.rp-pl-row').forEach((row) => {
         row.addEventListener('click', (e) => {
-          if (e.target.closest('.rp-pl-row-del')) return;
+          if (e.target.closest('.rp-pl-row-del') || e.target.closest('.rp-pl-row-prev')) return;
           if (row.classList.contains('active')) {
             // Toggle collapse without full re-render
             _plCollapsed = !_plCollapsed;
@@ -21276,11 +21847,16 @@ function renderPlaylistPane(c) {
       send('montage_reorder', { montageId: btn.dataset.mid, clipIds: order });
     });
   });
-  // Click a playlist clip → load it into the editor (with its saved trim) to adjust.
+  // Click a playlist clip → load it into the editor (with its saved trim) to adjust. While this same
+  // reel is being previewed, a click jumps the preview to that clip instead of dropping out of it.
   timeline.querySelectorAll('.rp-pl-item').forEach((item) => {
     item.title = 'Click to open in the editor';
     item.addEventListener('click', (e) => {
       if (e.target.closest('.rp-pl-del')) return;
+      if (_plPreview && _plPreview.montageId === mId) {
+        const i = _plPreview.clips.findIndex((cl) => cl.id === item.dataset.clipId);
+        if (i >= 0) { rpPreviewLoadIdx(i); return; }
+      }
       const clip = clips.find((cl) => cl.id === item.dataset.clipId);
       if (clip) loadClipPreview(clip);
     });
@@ -21319,7 +21895,7 @@ let _poolSelected = new Set();
 function rpUpdatePoolBulkBar() {
   const bar = el('rp-pool-bulk');
   if (!bar) return;
-  bar.style.display = _poolSelected.size ? 'flex' : 'none';
+  bar.style.display = (_poolSelected.size && _rpPoolView !== 'playlists') ? 'flex' : 'none';
   const count = el('rp-pool-bulk-count');
   if (count) count.textContent = `${_poolSelected.size} selected`;
   const copyBtn = el('rp-pool-bulk-copy');
@@ -21330,11 +21906,44 @@ function rpUpdatePoolBulkBar() {
 // always-visible control from the Playlists section's own #rp-transition, so picking a transition for
 // an instant pool push never silently rewrites a saved playlist's transition setting.
 function poolTransitionOpts() {
-  const transition = el('rp-pool-transition')?.value || 'fade';
-  const transitionLogo = transition === 'logo'
+  const mode = el('rp-pool-transition')?.value || 'fade';
+  const transitionLogo = mode === 'logo'
     ? (_transitionLogo || (currentState.brand && currentState.brand.logo) || '')
     : '';
-  return { transition, transitionLogo };
+  if (mode === 'stinger') {
+    // No stinger uploaded yet → a crossfade, not a broken sting. (The overlay can't play a file it
+    // was never given, and silently doing nothing reads as "transitions don't work".)
+    if (!_rpStinger.url) return { transition: 'fade', transitionLogo: '', stinger: '', stingerPoint: 0 };
+    return { transition: 'stinger', transitionLogo: '', stinger: _rpStinger.url, stingerPoint: _rpStinger.point || 0 };
+  }
+  if (mode === 'obs') {
+    const name = el('rp-pool-obstrans')?.value || '';
+    // OBS transition picked but OBS has none to give (not connected / empty list) — crossfade.
+    if (!name) return { transition: 'fade', transitionLogo: '', stinger: '', stingerPoint: 0 };
+    const dur = Number(el('rp-pool-obstrans-dur')?.value) || 0;
+    // OBS runs the transition on the SCENE CUT (obsTransition rides the switch). Between clips
+    // there's no scene change for OBS to transition on — so if the chosen transition is a stinger,
+    // the player runs that same stinger video itself, at OBS's own transition point. Anything else
+    // (fade/wipe/luma) degrades to the player's crossfade rather than a bare cut.
+    const info = (_rpObsTrans.name === name && _rpObsTrans.hasVideo) ? _rpObsTrans : null;
+    if (info) {
+      return { transition: 'stinger', transitionLogo: '', stinger: info.url, stingerPoint: info.point || 0,
+        // Measured length (ffprobe) so the player can time the sting even when the file's own header
+        // has no duration — the usual case for OBS .webm stingers.
+        stingerDuration: info.lengthMs || info.duration || 0,
+        obsTransition: name, obsDuration: dur };
+    }
+    return { transition: 'fade', transitionLogo: '', stinger: '', stingerPoint: 0,
+      obsTransition: name, obsDuration: dur };
+  }
+  return { transition: mode, transitionLogo, stinger: '', stingerPoint: 0 };
+}
+
+// Every clip id on the active shelf, in the order the pool lists them — the running order both
+// "Play all" and "Select all" use.
+function rpPoolClipIds() {
+  const lib = (currentState.clips && currentState.clips.library) || [];
+  return lib.filter((cl) => (cl.folder || 'replays') === _rpFolder).map((cl) => cl.id);
 }
 
 function renderClipPool(c) {
@@ -21348,6 +21957,16 @@ function renderClipPool(c) {
   [..._poolSelected].forEach((id) => { if (!validIds.has(id)) { _poolSelected.delete(id); selChanged = true; } });
   const clearBtn = el('rp-clear-pool');
   if (clearBtn) clearBtn.disabled = !clips.length;
+  const playAllBtn = el('rp-pool-playall');
+  if (playAllBtn) {
+    playAllBtn.disabled = !clips.length;
+    playAllBtn.innerHTML = clips.length ? `&#9654; Play all (${clips.length})` : '&#9654; Play all';
+  }
+  const selAllBtn = el('rp-pool-selectall');
+  if (selAllBtn) {
+    selAllBtn.disabled = !clips.length;
+    selAllBtn.textContent = (clips.length && clips.every((cl) => _poolSelected.has(cl.id))) ? 'Deselect all' : 'Select all';
+  }
 
   const sig = JSON.stringify(clips.map((cl) => [cl.id, cl.name, cl.trimIn, cl.trimOut, cl.duration])) + '|' + _rpFolder + '|' + [..._poolSelected].sort().join(',') + '|' + (selectedClipId || '');
   if (grid.dataset.sig === sig) { if (selChanged) rpUpdatePoolBulkBar(); return; }
@@ -21363,6 +21982,7 @@ function renderClipPool(c) {
     const name = (clip.name || 'Clip').replace(/</g, '&lt;');
     const checked = _poolSelected.has(clip.id) ? ' checked' : '';
     return `<div class="rp-stage-card rp-pool-item${_poolSelected.has(clip.id) ? ' checked' : ''}${selectedClipId === clip.id ? ' active' : ''}" data-cid="${clip.id}">
+      <span class="rp-sc-grip" title="Drag to reorder this pool" draggable="true"><svg viewBox="0 0 16 16" width="11" height="11" fill="currentColor"><circle cx="5" cy="3" r="1.4"/><circle cx="11" cy="3" r="1.4"/><circle cx="5" cy="8" r="1.4"/><circle cx="11" cy="8" r="1.4"/><circle cx="5" cy="13" r="1.4"/><circle cx="11" cy="13" r="1.4"/></svg></span>
       <label class="rp-sc-check" title="Select"><input type="checkbox"${checked}></label>
       <div class="rp-sc-thumb">
         <svg class="rp-sc-thumb-icon" viewBox="0 0 24 24" width="18" height="18" fill="rgba(255,255,255,0.25)"><path d="M8 5v14l11-7z"/></svg>
@@ -21393,7 +22013,7 @@ function renderClipPool(c) {
 
   grid.querySelectorAll('.rp-pool-item').forEach((row) => {
     row.addEventListener('click', (e) => {
-      if (e.target.closest('.rp-sc-check') || e.target.closest('.rp-pool-air') || e.target.closest('.rp-pool-copy') || e.target.closest('.rp-pool-del')) return;
+      if (e.target.closest('.rp-sc-check') || e.target.closest('.rp-pool-air') || e.target.closest('.rp-pool-copy') || e.target.closest('.rp-pool-del') || e.target.closest('.rp-sc-grip')) return;
       const clip = clips.find((cl) => cl.id === row.dataset.cid);
       if (clip) loadClipPreview(clip);
     });
@@ -21430,6 +22050,46 @@ function renderClipPool(c) {
   rpUpdatePoolBulkBar();
 }
 
+// Drag the pool into show order (grip handle only, so a card click still loads the clip). Persisted
+// server-side via clip_reorder — the same order the pool's Play all and Make Playlist then use.
+(function wireClipPoolDrag() {
+  const grid = el('rp-clip-pool'); if (!grid) return;
+  let dragId = null;
+  grid.addEventListener('dragstart', (e) => {
+    const card = e.target.closest('.rp-pool-item');
+    if (!card || !e.target.closest('.rp-sc-grip')) { e.preventDefault(); return; }
+    dragId = card.dataset.cid;
+    card.classList.add('rp-pool-drag');
+    try { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', dragId); } catch (_) {}
+  });
+  grid.addEventListener('dragend', () => {
+    grid.querySelectorAll('.rp-pool-drag, .rp-pool-over').forEach((n) => n.classList.remove('rp-pool-drag', 'rp-pool-over'));
+    dragId = null;
+  });
+  grid.addEventListener('dragover', (e) => {
+    if (!dragId) return;
+    e.preventDefault();
+    const card = e.target.closest('.rp-pool-item');
+    grid.querySelectorAll('.rp-pool-over').forEach((n) => { if (n !== card) n.classList.remove('rp-pool-over'); });
+    if (card && card.dataset.cid !== dragId) card.classList.add('rp-pool-over');
+  });
+  grid.addEventListener('drop', (e) => {
+    if (!dragId) return;
+    e.preventDefault();
+    const card = e.target.closest('.rp-pool-item'); if (!card) return;
+    const ids = rpPoolClipIds();
+    const from = ids.indexOf(dragId), to = ids.indexOf(card.dataset.cid);
+    if (from < 0 || to < 0 || from === to) return;
+    const [m] = ids.splice(from, 1); ids.splice(to, 0, m);
+    // Optimistic local reorder so the grid doesn't snap back while the server round-trips.
+    const lib = (currentState.clips && currentState.clips.library) || [];
+    const pos = []; lib.forEach((c, i) => { if ((c.folder || 'replays') === _rpFolder) pos.push(i); });
+    pos.forEach((slot, n) => { const c = lib.find((x) => x.id === ids[n]); if (c) lib[slot] = c; });
+    send('clip_reorder', { folder: _rpFolder, ids });
+    renderClipPool(currentState.clips);
+  });
+})();
+
 el('rp-pool-bulk-clearsel')?.addEventListener('click', () => {
   _poolSelected.clear();
   if (currentState.clips) renderClipPool(currentState.clips);
@@ -21440,33 +22100,94 @@ el('rp-pool-bulk-copy')?.addEventListener('click', () => {
   _poolSelected.forEach((id) => send('clip_copy_folder', { id, folder: other }));
   showToast(`Copied ${n} clip${n === 1 ? '' : 's'} to ${other === 'highlights' ? 'Highlights' : 'Replays'}.`, '#22c55e', 2200);
 });
-// Play the checked pool clips back-to-back on air right now — the same per-clip, no-encode-required
+// ── Go-live hold: buffer the first clip BEFORE cutting to the replay scene ─────────────────────
+// The scene cut used to fire first and the clip started loading after it, so the OBS transition
+// landed on an empty player and the top of every run was black. This arms the first clip (server
+// prepares it if needed, overlay buffers it) and resolves when the overlay reports a real frame is
+// ready — or on a timeout, so a go-live can never be blocked by a slow file.
+let _armWait = null;
+function rpFinishArm() {
+  if (!_armWait) return;
+  clearTimeout(_armWait.timer);
+  const r = _armWait.resolve;
+  _armWait = null;
+  r();
+}
+// Called from the ws handler when the overlay confirms a buffered clip.
+function rpOnArmed(url) { if (_armWait && (!url || url === _armWait.url || _armWait.anyUrl)) rpFinishArm(); }
+// Called when the server says this clip needs converting first — stretch the hold instead of
+// cutting to black, since that conversion can take tens of seconds on a long file.
+function rpOnArmPreparing() {
+  if (!_armWait) return;
+  clearTimeout(_armWait.timer);
+  _armWait.timer = setTimeout(rpFinishArm, 90000);
+}
+function rpArmFirstClip(url, timeoutMs) {
+  return new Promise((resolve) => {
+    if (!url) return resolve();
+    rpFinishArm();                       // supersede any hold still pending
+    // The overlay reports the PREPARED url, which can differ from the one we sent — accept any
+    // armed report for this hold rather than trying to predict the transcode's filename.
+    _armWait = { url, anyUrl: true, resolve, timer: setTimeout(() => rpFinishArm(), timeoutMs || 4000) };
+    send('replay_arm', { bus: 'program', url });
+  });
+}
+
+// Play a run of pool clips back-to-back on air right now — the same per-clip, no-encode-required
 // engine playMontageById() drives for a saved playlist (_plLiveItems/playNextLive/advancePlaylist
-// below), just seeded from an ad-hoc selection instead of a persisted montage.clipIds.
-el('rp-pool-bulk-air')?.addEventListener('click', () => {
-  if (!_poolSelected.size) return;
+// below), just seeded from an ad-hoc id list instead of a persisted montage.clipIds. Shared by the
+// bulk bar's To Air (checked clips) and the shelf's Play all (the whole pool, in display order).
+async function poolPlayLive(ids) {
   const lib = (currentState.clips && currentState.clips.library) || [];
-  const ids = [..._poolSelected];
-  _plLiveItems = ids.map((id) => lib.find((cl) => cl.id === id)).filter(Boolean).map(clipToLiveItem);
+  _plLiveItems = (ids || []).map((id) => lib.find((cl) => cl.id === id)).filter(Boolean).map(clipToLiveItem);
   if (!_plLiveItems.length) return;
   const programScene = (el('rp-program-scene')?.value || '').trim();
   if (!programScene) showToast('No OBS scene selected — pick a scene in the Video Editor\'s On-Air row so OBS switches to the replay-player source.', '#fbbf24', 5000);
   _plLoop = !!el('rp-loop')?.checked;
   _plReturnScene = '';
   _plScene = programScene;
-  // The pool's own transition picker (not the Playlists section's) — playNextLive() already preloads
-  // each next clip's url via its nextUrl hint, so combined with a real transition (not a hard cut)
-  // the advance between clips reads as a proper cut/fade/logo instead of a black-screen gap.
-  _plTransition = { type: poolTransitionOpts().transition };
+  // The pool's own transition picker (not the Playlists section's) — playNextLive() preloads each
+  // next clip into the element the next transition will actually use, so the advance is a real
+  // cut/fade/logo/stinger instead of a black-screen gap.
+  const _pt = poolTransitionOpts();
+  _plTransition = { type: _pt.transition, stinger: _pt.stinger, stingerPoint: _pt.stingerPoint,
+    obsTransition: _pt.obsTransition, obsDuration: _pt.obsDuration };
   _plKind = 'replay';
+  // In OBS-transition mode the cut onto the replay scene is OBS's sting — don't let the player
+  // play the same sting over the first clip immediately afterwards.
+  _plSkipStingOnce = !!(_plTransition.obsTransition && willObsCutScene(programScene));
   stopOtherProgramSources('program');
   _plBus = 'program';
   _plEncodedMode = false;
   _plLiveMontageId = null;
-  beginReplayProgram(_plScene || undefined);
+  _plLiveFolder = _rpFolder;          // light the shelf this run came from
+  // Buffer clip 1 BEFORE the scene cut — the OBS transition then reveals a frame, not black.
+  await rpArmFirstClip(_plLiveItems[0].url);
+  beginReplayProgram(_plScene || undefined, _plTransition);
   _plLiveActive = true;
   if (typeof updatePlaylistLiveBtns === 'function') updatePlaylistLiveBtns();
+  if (currentState.clips) renderPlaylistPane(currentState.clips);   // light this shelf's live dot now
   _plLiveIdx = 0; playNextLive();
+}
+el('rp-pool-bulk-air')?.addEventListener('click', () => {
+  if (!_poolSelected.size) return;
+  poolPlayLive([..._poolSelected]);            // Set order = the order they were checked
+});
+// Play the WHOLE shelf, in the order it's listed — the "just play everything in here" path that
+// previously required checking every clip first (or building and encoding a playlist).
+el('rp-pool-playall')?.addEventListener('click', () => {
+  const ids = rpPoolClipIds();
+  if (!ids.length) return;
+  poolPlayLive(ids);
+  showToast(`Playing ${ids.length} clip${ids.length === 1 ? '' : 's'} back-to-back.`, '#22c55e', 2600);
+});
+el('rp-pool-stopall')?.addEventListener('click', () => { stopPlayoutLive(); updatePlaylistLiveBtns(); });
+el('rp-pool-selectall')?.addEventListener('click', () => {
+  const ids = rpPoolClipIds();
+  // Toggle: a second click clears, so this one button covers select-all and deselect-all.
+  const all = ids.length && ids.every((id) => _poolSelected.has(id));
+  _poolSelected = new Set(all ? [] : ids);
+  if (currentState.clips) renderClipPool(currentState.clips);
 });
 el('rp-pool-bulk-makepl')?.addEventListener('click', async () => {
   if (!_poolSelected.size) return;
@@ -21476,7 +22197,10 @@ el('rp-pool-bulk-makepl')?.addEventListener('click', async () => {
   _pendingNewMontage = true;
   send('montage_create', { name, clipIds: [..._poolSelected], template: el('select-montage-template')?.value || 'highlights', folder: _rpFolder });
   _poolSelected.clear();
-  rpSetPlaylistsSectionExpanded(true);   // surface the new playlist immediately
+  // Surface the new playlist immediately — it lives on the Playlists tab now.
+  _rpPoolView = 'playlists';
+  rpApplyPoolView();
+  rpSetPlaylistsSectionExpanded(true);
 });
 el('rp-pool-bulk-del')?.addEventListener('click', async () => {
   const n = _poolSelected.size;
@@ -21559,6 +22283,9 @@ let _plEncodedMode = false;
 // endReplayProgram(). Needed because playMontageById() (5 of 6 automation triggers) never
 // otherwise records which montage it's playing per-clip.
 let _plLiveMontageId = null;
+// Shelf ('replays' | 'highlights') the on-air run came from — drives the live dot on the shelf tabs
+// for POOL runs too, which carry no montage id.
+let _plLiveFolder = null;
 let _plCollapsed = false;     // whether the selected playlist's content pane is collapsed
 let _plPendingEncodeAndPlay = null;  // montageId waiting for encode to finish before playing
 let _lastNotifiedEncodeError = null;  // dedupe key so a repeated failed-job broadcast doesn't re-toast
@@ -21621,11 +22348,23 @@ function pushPlaylistLive() {
 function updatePlaylistLiveBtns() {
   const stop = el('rp-pl-stop'), play = el('rp-playlist-push-live');
   if (stop) stop.style.display = _plLiveActive ? '' : 'none';
+  // The pool's own Stop — a Play all / bulk To Air run must be stoppable without expanding the
+  // (collapsed by default) Playlists section to reach its Stop button.
+  const poolStop = el('rp-pool-stopall'), poolPlay = el('rp-pool-playall');
+  if (poolStop) poolStop.style.display = _plLiveActive ? '' : 'none';
+  if (poolPlay) poolPlay.style.display = _plLiveActive ? 'none' : '';
   if (play) {
     const mId = el('select-montage-edit')?.value;
     const m = (currentState.clips?.montages || []).find((x) => x.id === mId);
     const isReady = !!montageUrl(m);
     play.style.display = (!_plLiveActive && isReady) ? '' : 'none';
+  }
+  // Preview needs no encode — it just needs something to play.
+  const prev = el('rp-pl-preview');
+  if (prev) {
+    const mId = el('select-montage-edit')?.value;
+    const m = (currentState.clips?.montages || []).find((x) => x.id === mId);
+    prev.disabled = !m || (!(m.clipIds || []).length && !montageUrl(m));
   }
 }
 el('rp-pl-stop')?.addEventListener('click', () => { stopPlayoutLive(); updatePlaylistLiveBtns(); });
@@ -21694,10 +22433,16 @@ function playMontageById(id, opts) {
   _plBus = 'program';   // automation/flow calls always use the main program bus
   _plEncodedMode = false;
   _plLiveMontageId = id;
-  beginReplayProgram(_plScene || undefined);
-  _plLiveActive = true;
-  if (typeof updatePlaylistLiveBtns === 'function') updatePlaylistLiveBtns();
-  _plLiveIdx = 0; playNextLive();
+  _plLiveFolder = m.folder || 'replays';
+  // Same go-live hold as the pool: buffer the reel's first clip, then cut. Kept off the return path
+  // so automation/flows still get their synchronous "started" answer.
+  rpArmFirstClip(_plLiveItems[0].url).then(() => {
+    beginReplayProgram(_plScene || undefined);
+    _plLiveActive = true;
+    if (typeof updatePlaylistLiveBtns === 'function') updatePlaylistLiveBtns();
+    if (currentState.clips) renderPlaylistPane(currentState.clips);
+    _plLiveIdx = 0; playNextLive();
+  });
   return true;
 }
 function stopPlayoutLive() {
@@ -21723,16 +22468,37 @@ function finishPlayout() {
   _plBus = 'program';
   _plEncodedMode = false;
   _plLiveMontageId = null;
+  _plLiveFolder = null;                 // shelf tabs stop pulsing
   if (typeof updatePlaylistLiveBtns === 'function') updatePlaylistLiveBtns();
+  if (currentState && currentState.clips) renderPlaylistPane(currentState.clips);
 }
 // Transition for the active playlist (per-playlist setting wins; falls back to the global select).
 function playlistTransitionOpts() {
   const tr = _plTransition || {};
   const type = tr.type || (el('rp-transition')?.value) || 'cut';
-  if (type === 'logo') return { transition: 'logo', transitionLogo: _transitionLogo || (currentState.brand && currentState.brand.logo) || '', stinger: '' };
-  if (type === 'stinger') return { transition: 'stinger', transitionLogo: '', stinger: tr.stinger || '' };
-  return { transition: type, transitionLogo: '', stinger: '' };
+  if (type === 'logo') return { transition: 'logo', transitionLogo: _transitionLogo || (currentState.brand && currentState.brand.logo) || '', stinger: '', stingerPoint: 0 };
+  if (type === 'stinger') {
+    // A reel can carry its own stinger; otherwise fall back to the one uploaded on the pool's
+    // Transition row so "Stinger" means something even on a playlist that was never given one.
+    return { transition: 'stinger', transitionLogo: '',
+      stinger: tr.stinger || _rpStinger.url || '',
+      stingerPoint: (tr.stingerPoint != null ? tr.stingerPoint : _rpStinger.point) || 0 };
+  }
+  return { transition: type, transitionLogo: '', stinger: '', stingerPoint: 0 };
 }
+// True when putting the replay scene on air will actually change the OBS scene — i.e. OBS is about
+// to run its own transition. Used to avoid stinging twice in "OBS transition" mode: OBS stings the
+// scene cut, the player stings between clips, and doing both on the same push plays it back to back.
+function willObsCutScene(scene) {
+  scene = (scene || '').trim();
+  const obs = (currentState && currentState.obs) || {};
+  // Only when OBS is actually connected — otherwise no scene change happens, nothing stings the
+  // cut, and suppressing the player's own sting would silently drop the transition entirely.
+  if (!scene || !obs.connected) return false;
+  return (obs.currentScene || '') !== scene;
+}
+let _plSkipStingOnce = false;   // first clip of a run whose scene cut OBS is already stinging
+
 function playNextLive() {
   const item = _plLiveItems[_plLiveIdx]; if (!item) return;
   const url = item.url; if (!url) { _plLiveIdx++; playNextLive(); return; }
@@ -21743,9 +22509,18 @@ function playNextLive() {
   let nextUrl = (nextItem && nextItem.url) || '';
   if (nextUrl === url) nextUrl = '';   // single-clip loop → nothing new to warm
   const t = playlistTransitionOpts();   // ease between items (cut / fade / logo / stinger) on the overlay
+  // OBS is stinging the scene cut for this first clip — the player must not sting it too.
+  const skipSting = _plSkipStingOnce;
+  if (skipSting) _plSkipStingOnce = false;
   send('replay_play', { bus: _plBus, url, name: item.name || 'Clip', loop: false,
     trimIn: item.trimIn || 0, trimOut: item.trimOut ?? undefined, scene: _plScene || undefined,
-    transition: t.transition, transitionLogo: t.transitionLogo, stinger: t.stinger, nextUrl });
+    transition: skipSting ? 'cut' : t.transition, transitionLogo: t.transitionLogo,
+    // The sting travels even on a cut so the player can buffer it during this clip; only the
+    // transition type decides whether it's used.
+    stinger: t.stinger, stingerPoint: t.stingerPoint, stingerDuration: t.stingerDuration || 0,
+    // The next clip's in-point travels with the preload hint so the overlay can buffer it AND park
+    // it on the right frame — an advance then costs neither a fetch nor a seek.
+    nextUrl, nextIn: (nextItem && nextItem.trimIn) || 0 });
   const st = el('rp-screen-status');
   if (st) { st.textContent = `ON AIR [${_plLiveIdx + 1}/${_plLiveItems.length}] ${item.name || 'Clip'}`; st.title = st.textContent; st.style.color = 'var(--good, #48bb78)'; }
   // Safety-net timer: fires if the overlay's 'replay_ended' event is somehow missed.
@@ -21767,6 +22542,15 @@ function advancePlaylist() {
   finishPlayout();
 }
 el('rp-playlist-push-live')?.addEventListener('click', pushPlaylistLive);
+// Watch the selected reel in the editor instead of on air. Encoded reels preview their finished
+// file (transitions baked in); drafts walk their source clips.
+el('rp-pl-preview')?.addEventListener('click', () => {
+  const mId = el('select-montage-edit')?.value;
+  if (!mId) return;
+  const m = (currentState.clips?.montages || []).find((x) => x.id === mId);
+  if (m && montageUrl(m)) rpPreviewExport(m);
+  else rpPreviewPlaylist(mId);
+});
 
 // ── Playlist live controls: OBS-scene binding · video upload · transition · auto-trigger ──
 function syncPlaylistLiveControls(m) {
@@ -25445,22 +26229,38 @@ let _replayOrigin = '';     // the OBS scene that was live before the replay sta
 let _replayActive = false;
 let _replayFallbackTimer = null;   // safety net for the return-to-scene if the player misses 'ended'
 let _lastProgressRx = 0;           // last time the OBS overlay reported playback position
+// Transition for a MANUAL push (editor To Air/Preview, qrail clip push, Take). This is the pool's
+// always-visible Transition control — the one place a producer sets "how clips come on air".
+// (It used to read the Playlists section's #rp-transition, which is a per-playlist saved setting
+// living behind a collapsed section; now that Playlists is its own tab, that control was invisible
+// for anyone pushing single clips.) Saved playlists still use their own transition via
+// playlistTransitionOpts().
 function liveTransitionOpts() {
+  if (el('rp-pool-transition')) return poolTransitionOpts();
   const transition = el('rp-transition')?.value || 'cut';
   const transitionLogo = transition === 'logo'
     ? (_transitionLogo || (currentState.brand && currentState.brand.logo) || '')
     : '';
-  return { transition, transitionLogo };
+  return { transition, transitionLogo, stinger: '', stingerPoint: 0 };
 }
 // Capture the scene we're leaving (once per replay), then switch to the program scene.
-function beginReplayProgram(sceneOverride) {
+// `trans` (optional) is the resolved transition opts: in "OBS transition" mode the cut itself
+// carries the transition name so OBS performs it — armed server-side and awaited before the switch,
+// which is why it rides ON this message rather than being armed by a separate one.
+function beginReplayProgram(sceneOverride, trans) {
   if (!_replayActive) _replayOrigin = (currentState.obs && currentState.obs.currentScene) || '';
   _replayActive = true;
   clearTimeout(_replayFallbackTimer);
   // Cut OBS to the playback scene (the one holding the replay-player browser source): a per-playlist
   // override wins, else the global Program-scene dropdown.
   const scene = (sceneOverride || el('rp-program-scene')?.value || '').trim();
-  if (scene) send('obs_switch_scene', { sceneName: scene });
+  if (!scene) return;
+  const payload = { sceneName: scene };
+  if (trans && trans.obsTransition) {
+    payload.transitionName = trans.obsTransition;
+    payload.transitionDurationMs = trans.obsDuration || 0;
+  }
+  send('obs_switch_scene', payload);
 }
 // Called when a non-looping replay finishes (or air is cleared): go back where we came from.
 function endReplayProgram(silent) {
@@ -25660,6 +26460,7 @@ function applyClipsState(c) {
         <div class="montage-card-name" title="${(m.name || 'Montage').replace(/"/g, '&quot;').replace(/</g, '&lt;')}">${(m.name || 'Montage').replace(/</g, '&lt;')}</div>
         <div class="montage-card-meta">${n} clip${n === 1 ? '' : 's'} &middot; encoded</div>
         <div class="montage-card-actions">
+          <button class="btn btn-secondary btn-sm btn-montage-prev" data-mid="${m.id}" title="Watch this export in the Video Editor (off air)">Preview</button>
           <button class="btn btn-danger btn-sm btn-montage-screen" data-mid="${m.id}" title="Play this export on Program">To air</button>
           <button class="btn btn-secondary btn-sm btn-montage-save" data-mid="${m.id}" title="Save encoded file to disk">Save As&hellip;</button>
           <button class="rp-vi-del btn-montage-delx" data-mid="${m.id}" title="Delete this encoded file (the playlist stays)">&times;</button>
@@ -25673,6 +26474,15 @@ function applyClipsState(c) {
         beginReplayProgram();   // exported montages already have transitions baked in
         send('replay_play', { bus: 'program', url, name: m.name || 'Montage', loop: !!el('rp-loop')?.checked });
         const st = el('rp-screen-status'); if (st) { st.textContent = 'ON AIR: ' + (m.name || 'Montage'); st.style.color = 'var(--good, #48bb78)'; }
+      });
+    });
+    montageListEl.querySelectorAll('.btn-montage-prev').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const m = (c.montages || []).find((x) => x.id === btn.dataset.mid);
+        if (!m) return;
+        // Preview lives in the Editor pane's player — hop back to that sub-tab so it's visible.
+        document.querySelector('#rp-subnav .ev-subnav-btn[data-rpmain="editor"]')?.click();
+        rpPreviewExport(m);
       });
     });
     montageListEl.querySelectorAll('.btn-montage-save').forEach((btn) => {
@@ -25801,7 +26611,102 @@ function initTrimBar() {
   });
 }
 
+// ── Editor transport bar ──────────────────────────────────────────────────
+// One consistent player for every clip. (The native `controls` bar changes shape based on what the
+// browser has decoded — clips that had only loaded metadata got Chromium's compact audio-style bar,
+// which is why the editor looked like it had two different players.)
+function rpVtFmt(s) {
+  s = Math.max(0, Math.floor(Number(s) || 0));
+  return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+}
+function rpVtSync() {
+  const v = el('clip-preview-video'); if (!v) return;
+  const playing = !v.paused && !v.ended;
+  const btn = el('rp-vt-play');
+  if (btn) {
+    btn.querySelector('.rp-vt-i-play').style.display = playing ? 'none' : '';
+    btn.querySelector('.rp-vt-i-pause').style.display = playing ? '' : 'none';
+    btn.setAttribute('aria-label', playing ? 'Pause' : 'Play');
+  }
+  const dur = isFinite(v.duration) ? v.duration : 0;
+  const t = el('rp-vt-time'); if (t) t.textContent = rpVtFmt(v.currentTime) + ' / ' + rpVtFmt(dur);
+  const seek = el('rp-vt-seek');
+  if (seek && document.activeElement !== seek && !seek.dataset.dragging) {
+    seek.value = String(dur > 0 ? Math.round((v.currentTime / dur) * 1000) : 0);
+  }
+  const mute = el('rp-vt-mute');
+  if (mute) {
+    const off = v.muted || v.volume === 0;
+    mute.querySelector('.rp-vt-i-vol').style.display = off ? 'none' : '';
+    mute.querySelector('.rp-vt-i-muted').style.display = off ? '' : 'none';
+  }
+}
+function rpVtTogglePlay() {
+  const v = el('clip-preview-video'); if (!v || !v.src) return;
+  if (v.paused) { const p = v.play(); if (p && p.catch) p.catch(() => {}); } else v.pause();
+}
+(function wireEditorTransport() {
+  const v = el('clip-preview-video'); if (!v) return;
+  ['play', 'pause', 'ended', 'timeupdate', 'loadedmetadata', 'volumechange', 'emptied'].forEach((ev) => v.addEventListener(ev, rpVtSync));
+  el('rp-vt-play')?.addEventListener('click', rpVtTogglePlay);
+  const seek = el('rp-vt-seek');
+  if (seek) {
+    const apply = () => {
+      const dur = isFinite(v.duration) ? v.duration : 0;
+      if (dur > 0) { try { v.currentTime = (Number(seek.value) / 1000) * dur; } catch (_) {} }
+    };
+    seek.addEventListener('pointerdown', () => { seek.dataset.dragging = '1'; });
+    seek.addEventListener('input', apply);
+    seek.addEventListener('change', () => { apply(); delete seek.dataset.dragging; });
+    seek.addEventListener('pointerup', () => { delete seek.dataset.dragging; });
+  }
+  el('rp-vt-mute')?.addEventListener('click', () => { v.muted = !v.muted; rpVtSync(); });
+  const vol = el('rp-vt-vol');
+  if (vol) vol.addEventListener('input', () => { v.volume = Math.max(0, Math.min(1, Number(vol.value) / 100)); v.muted = v.volume === 0; });
+  el('rp-vt-full')?.addEventListener('click', () => {
+    if (document.fullscreenElement) { document.exitFullscreen?.(); return; }
+    (v.requestFullscreen ? v.requestFullscreen() : v.webkitRequestFullscreen?.())?.catch?.(() => {});
+  });
+  rpVtSync();
+})();
+
+// Containers a browser will actually decode. Everything else (.mkv from OBS's default recorder,
+// .mov, .avi, .ts, …) has to go through the server's transcode before the editor can show it.
+const RP_BROWSER_PLAYABLE = /\.(mp4|m4v|webm|ogv|ogg)$/i;
+const _rpPreparedPreview = new Map();   // source path -> playable url (per session; server caches the file)
+async function rpUsePreparedPreview(srcPath, paint) {
+  const v = el('clip-preview-video'); if (!v) return;
+  const nm = el('clip-preview-name');
+  const stillCurrent = () => _previewClip && ((_previewClip.path || _previewClip.rawPath) === srcPath);
+  const apply = (url) => {
+    if (!stillCurrent()) return;               // producer moved on to another clip
+    v.src = url; v.load();
+    if (v.readyState >= 1) paint(); else v.addEventListener('loadedmetadata', paint, { once: true });
+    if (nm) { nm.textContent = _previewClip.name || 'Clip'; nm.style.color = ''; }
+  };
+  const cached = _rpPreparedPreview.get(srcPath);
+  if (cached) { apply(cached); return; }
+  const ext = (srcPath.match(/\.[^.]+$/) || [''])[0].toUpperCase();
+  if (nm) { nm.textContent = `Converting ${ext} for preview… (it plays on air either way)`; nm.style.color = 'var(--muted)'; }
+  try {
+    const r = await fetch('http://localhost:3000/api/clips/preview-src?path=' + encodeURIComponent(srcPath));
+    const d = await r.json();
+    if (!d.ok || !d.url) throw new Error(d.message || 'convert failed');
+    const url = 'http://localhost:3000' + d.url;
+    _rpPreparedPreview.set(srcPath, url);
+    apply(url);
+  } catch (e) {
+    if (stillCurrent() && nm) {
+      nm.textContent = `Can't preview ${ext} in the editor — it still plays on air. (${e.message})`;
+      nm.style.color = '#fbbf24';
+    }
+  }
+}
+
 function loadClipPreview(clip) {
+  // Loading a single clip by hand (pool, staging, timeline row) leaves playlist-preview mode —
+  // unless the preview engine itself is the one advancing to the next clip.
+  if (!_plPreviewLoading && _plPreview) rpPreviewStop(false);
   const url = clipUrl(clip);
   _previewClip = {
     id: clip.id || null,
@@ -25815,7 +26720,37 @@ function loadClipPreview(clip) {
   };
   selectedClipId = clip.id || null;
   const v = el('clip-preview-video');
-  if (v) { v.src = url; v.load(); const sp = el('rp-speed'); v.playbackRate = sp ? Number(sp.value) || 1 : 1; }
+  if (v) {
+    // Show the clip, don't just mount it. The element was preload="metadata", so clicking a card
+    // gave you a black rectangle that knew its duration but had never decoded a frame — it only
+    // appeared once you pressed play. Now: the stored thumbnail is the poster (instant picture),
+    // the file preloads, and we nudge to the in-point so a real frame paints and the producer can
+    // scrub immediately. Playback still waits for the producer — auto-playing audio on every card
+    // click mid-show is not something to do to someone.
+    v.preload = 'auto';
+    const srcPath = clip.path || clip.rawPath || '';
+    const poster = srcPath ? thumbUrl(srcPath) : '';
+    if (poster) v.setAttribute('poster', poster); else v.removeAttribute('poster');
+    const sp = el('rp-speed'); v.playbackRate = sp ? Number(sp.value) || 1 : 1;
+    const startAt = _previewClip.trimIn || 0;
+    const paint = () => {
+      // A tiny offset when there's no in-point: currentTime = 0 is where we already are, so it
+      // wouldn't trigger the seek that forces the decode.
+      try { v.currentTime = startAt > 0 ? startAt : Math.min(0.05, (v.duration || 1) / 2); } catch (_) {}
+    };
+    // Containers Chromium can't decode (OBS records .mkv by DEFAULT) mount and report a duration
+    // but never paint a frame — the clip looks broken in the editor while playing fine on air.
+    // Go straight to the server's prepared .mp4 for those instead of pulling the whole unplayable
+    // file down first.
+    if (srcPath && !RP_BROWSER_PLAYABLE.test(srcPath)) {
+      v.removeAttribute('src'); v.load();
+      rpUsePreparedPreview(srcPath, paint);
+    } else {
+      v.src = url;
+      v.load();
+      if (v.readyState >= 1) paint(); else v.addEventListener('loadedmetadata', paint, { once: true });
+    }
+  }
   const nm = el('clip-preview-name'); if (nm) nm.textContent = clip.name || 'Clip';
   const t = el('rp-title'); if (t) t.value = clip.name || '';
   const d = el('rp-desc'); if (d) d.value = clip.description || clip.note || '';
@@ -25980,21 +26915,110 @@ function replaySwitchProgramScene() {
   const sc = el('rp-program-scene')?.value;
   if (sc) send('obs_switch_scene', { sceneName: sc });
 }
+// Playout-readiness state — declared before its first reader (syncReplayProgramScene) so a render
+// during load can never hit a temporal-dead-zone ReferenceError.
+const RP_PLAYER_SOURCE_NAME = '[NE] Replay Player';
+let _rpPlayerScenes = [];        // [{ scene, source, enabled, url }] — scenes holding the player
+let _rpPlayerChecked = false;    // have we heard back from OBS at least once?
+let _rpPlayerCheckErr = '';
+let _rpPlayerSig = '';           // re-check when OBS connects or the scene list changes
+
 function syncReplayProgramScene(obs) {
   const sel = el('rp-program-scene'); if (!sel) return;
   const scenes = Array.isArray(obs && obs.availableScenes) ? obs.availableScenes : [];
   const saved = (() => { try { return localStorage.getItem(RP_PROGRAM_SCENE_KEY) || ''; } catch { return ''; } })();
   const want = sel.value || saved;
-  const sig = JSON.stringify(scenes);
+  // Ask OBS which scenes hold the player whenever the connection or the scene list changes.
+  const csig = ((obs && obs.connected) ? '1' : '0') + '|' + JSON.stringify(scenes);
+  if (csig !== _rpPlayerSig) {
+    _rpPlayerSig = csig;
+    _rpPlayerChecked = false;
+    if (obs && obs.connected) rpCheckPlayerSource(); else _rpPlayerScenes = [];
+  }
+  // Scenes that hold the replay player are marked "✓ ready" right in the list, so picking a scene
+  // that can actually show a clip doesn't require trial and error on air.
+  const ready = new Set(_rpPlayerScenes.map((s) => s.scene));
+  const sig = JSON.stringify(scenes) + '|' + JSON.stringify([...ready].sort());
   if (sel.dataset.sig !== sig) {
     sel.dataset.sig = sig;
     sel.innerHTML = '<option value="">OBS scene: none</option>' +
-      scenes.map((s) => `<option value="${String(s).replace(/"/g, '&quot;')}">${String(s).replace(/</g, '&lt;')}</option>`).join('');
+      scenes.map((s) => {
+        const v = String(s).replace(/"/g, '&quot;');
+        const t = String(s).replace(/</g, '&lt;') + (ready.has(s) ? '  ✓ ready' : '');
+        return `<option value="${v}">${t}</option>`;
+      }).join('');
   }
   if (want && scenes.includes(want) && document.activeElement !== sel) sel.value = want;
+  rpRenderPlayoutReady();
+  // Keep the OBS-transition picker filled once OBS connects (it's populated from the same state),
+  // and read the selected transition's details the first time we're actually connected.
+  if (el('rp-pool-transition')?.value === 'obs' && typeof rpSyncObsTransitions === 'function') {
+    rpSyncObsTransitions();
+    const nm = el('rp-pool-obstrans')?.value || '';
+    if (nm && _rpObsTrans.name !== nm && obs && obs.connected) rpAskObsTransInfo();
+  }
 }
 el('rp-program-scene')?.addEventListener('change', function () {
   try { localStorage.setItem(RP_PROGRAM_SCENE_KEY, this.value || ''); } catch {}
+  rpRenderPlayoutReady();
+});
+
+// ── Playout readiness: is the replay player actually in the scene we cut to? ───────────────
+// The whole To Air path (single clip, pool Play all, playlist) ends at ONE browser source —
+// /replay-player.html — living in an OBS scene. If that source isn't there, every step still
+// reports success and nothing reaches the stream, which is indistinguishable from "To Air is
+// broken". The server reports which scenes hold it (obs_check_replay_source); this strip says so
+// and can add the source for you.
+let _rpCheckTimer = null;
+function rpCheckPlayerSource() {
+  clearTimeout(_rpCheckTimer);
+  _rpCheckTimer = setTimeout(() => {
+    if (currentState && currentState.obs && currentState.obs.connected) send('obs_check_replay_source', {});
+  }, 250);
+}
+function rpRenderPlayoutReady() {
+  const wrap = el('rp-ready'); if (!wrap) return;
+  const obs = (currentState && currentState.obs) || {};
+  const scene = (el('rp-program-scene')?.value || '').trim();
+  const dot = el('rp-ready-dot'), text = el('rp-ready-text'), fix = el('rp-ready-fix');
+  let level = 'warn', msg = '', showFix = false;
+  if (!obs.enabled) { wrap.style.display = 'none'; return; }
+  wrap.style.display = '';
+  const hit = _rpPlayerScenes.find((s) => s.scene === scene);
+  if (!obs.connected) {
+    msg = 'OBS not connected — clips can\'t reach the stream. Settings → OBS.';
+  } else if (!scene) {
+    msg = _rpPlayerScenes.length
+      ? `Pick a scene above — ${_rpPlayerScenes.map((s) => '"' + s.scene + '"').join(', ')} ${_rpPlayerScenes.length === 1 ? 'has' : 'have'} the replay player.`
+      : 'Pick the OBS scene that shows replays, then add the player source to it.';
+  } else if (!_rpPlayerChecked) {
+    msg = _rpPlayerCheckErr || 'Checking OBS for the replay player…';
+  } else if (!hit) {
+    msg = `"${scene}" has no replay player source — clips will play to nothing.`;
+    showFix = true;
+  } else if (!hit.enabled) {
+    msg = `"${hit.source}" is hidden in "${scene}" — unhide it in OBS or clips won't be visible.`;
+  } else {
+    level = 'ok';
+    msg = `Ready — "${hit.source}" in "${scene}".`;
+  }
+  if (dot) dot.className = 'rp-ready-dot ' + level;
+  if (text) text.textContent = msg;
+  wrap.classList.toggle('ok', level === 'ok');
+  if (fix) fix.style.display = showFix ? '' : 'none';
+}
+el('rp-ready-recheck')?.addEventListener('click', () => { _rpPlayerChecked = false; rpRenderPlayoutReady(); rpCheckPlayerSource(); });
+el('rp-ready-fix')?.addEventListener('click', () => {
+  const scene = (el('rp-program-scene')?.value || '').trim();
+  if (!scene) { showToast('Pick the OBS scene first.', '#fbbf24', 3500); return; }
+  // Same helper LISTEN IN's "Add to OBS" uses: creates the source (audio rerouted + monitored so
+  // clip audio reaches the stream) or retargets it if a source by this name already exists.
+  send('obs_ensure_browser_source', {
+    sceneName: scene,
+    sourceName: RP_PLAYER_SOURCE_NAME,
+    url: (window.SCENE_BASE_URL || 'http://localhost:3000') + '/replay-player.html',
+  });
+  setTimeout(rpCheckPlayerSource, 900);   // let OBS settle, then confirm it landed
 });
 
 // Graphics "Auto-cut OBS" (Production ▸ Graphics ▸ On air): keep the destination-scene dropdown filled
@@ -26038,20 +27062,29 @@ function sendToScreen(bus, transitionOverride) {
   }
   const loop = !!el('rp-loop')?.checked;
   const programScene = (el('rp-program-scene')?.value || '').trim();
+  // Resolved BEFORE the cut: in "OBS transition" mode the transition name travels with the scene
+  // switch (see beginReplayProgram) so OBS is holding it when the cut happens.
+  const t = transitionOverride || liveTransitionOpts();
   if (bus === 'program') {
     stopOtherProgramSources('program');   // don't let a running playlist fight this single clip
     if (!programScene) showToast('No OBS scene selected — pick a scene next to "To Air" so OBS switches to the replay-player source.', '#fbbf24', 5000);
-    beginReplayProgram();
+    beginReplayProgram(undefined, t);
   } else if (bus === 'preview') {
     _previewSentAt = Date.now();
   }
-  const t = transitionOverride || liveTransitionOpts();
+  // If OBS is about to sting the scene cut itself, the player cuts — otherwise the same sting plays
+  // twice in a row (OBS's on the scene change, then the player's over the clip).
+  const obsIsCutting = (bus === 'program' && t.obsTransition && willObsCutScene(programScene));
   send('replay_play', {
     bus, url: sel.url, name: sel.name, loop,
     trimIn: _previewClip.trimIn || 0,
     trimOut: _previewClip.trimOut ?? null,
-    transition: t.transition, transitionLogo: t.transitionLogo,
-    scene: programScene || undefined,
+    transition: obsIsCutting ? 'cut' : t.transition, transitionLogo: t.transitionLogo,
+    stinger: t.stinger || '', stingerPoint: t.stingerPoint || 0,   // sent to buffer, used only on a stinger cut
+    stingerDuration: t.stingerDuration || 0,
+    // In OBS-transition mode the client already cut (with the transition armed); letting the server
+    // fire its own switch too would race that and land the cut on the previous transition.
+    scene: (t.obsTransition ? undefined : (programScene || undefined)),
   });
   const st = el('rp-screen-status');
   if (st) { st.textContent = (bus === 'preview' ? 'Preview: ' : 'ON AIR: ') + sel.name + (loop ? ' (loop)' : ''); st.style.color = bus === 'preview' ? 'var(--muted)' : 'var(--good, #48bb78)'; }
@@ -26444,13 +27477,134 @@ el('rp-transition')?.addEventListener('change', function () {
   const mId = el('select-montage-edit')?.value;
   if (mId) send('montage_settings', { montageId: mId, transition: { type: this.value } });
 });
+// Global stinger for manual pushes (pool To Air / Play all / the editor's To Air). A playlist can
+// still carry its OWN stinger (montage.transition.stinger) which wins for that reel; this is the
+// fallback everything else uses. The video is imported into the managed clip library so the overlay
+// can stream it from the same file server as the clips.
+const RP_STINGER_KEY = 'ne_rp_stinger_v1';
+let _rpStinger = (() => {
+  try { const s = JSON.parse(localStorage.getItem(RP_STINGER_KEY) || '{}'); return { url: s.url || '', name: s.name || '', point: Number(s.point) || 0 }; }
+  catch (_) { return { url: '', name: '', point: 0 }; }
+})();
+function rpSaveStinger() { try { localStorage.setItem(RP_STINGER_KEY, JSON.stringify(_rpStinger)); } catch (_) {} }
+function rpRenderStingerRow() {
+  const nameEl = el('rp-pool-stinger-name');
+  if (nameEl) nameEl.textContent = _rpStinger.url ? (_rpStinger.name || 'Stinger set') + ' ✓' : 'No stinger uploaded';
+  const pt = el('rp-pool-stinger-point');
+  if (pt && document.activeElement !== pt) pt.value = String(_rpStinger.point || 0);
+}
+// What OBS told us about the selected transition: its kind, and — for a stinger — the video file
+// and transition point, so the player can run the same sting between clips (OBS itself only
+// transitions on a scene change). Filled by the obs-transition-info reply.
+let _rpObsTrans = { name: '', kind: '', hasVideo: false, point: 0, url: '', message: '' };
+function rpAskObsTransInfo() {
+  const name = el('rp-pool-obstrans')?.value || '';
+  if (!name) { _rpObsTrans = { name: '', kind: '', hasVideo: false, point: 0, url: '', message: '' }; rpRenderObsTransHint(); return; }
+  rpSeedObsTransFromState(name);   // usable immediately; the OBS query below refreshes it
+  if (!(currentState && currentState.obs && currentState.obs.connected)) { rpRenderObsTransHint(); return; }
+  send('obs_transition_info', { name });
+}
+// The server remembers the last inspected OBS stinger (path/point/length) across restarts, so the
+// transition is armed the moment the page loads instead of only after OBS has been re-queried —
+// otherwise the sting URL 404s on the first advance after a restart and the transition plays black.
+function rpSeedObsTransFromState(name) {
+  const s = (currentState && currentState.obsStinger) || null;
+  if (!s || !s.path || s.name !== name) return false;
+  if (_rpObsTrans.name === name && _rpObsTrans.hasVideo) return true;
+  _rpObsTrans = {
+    name, kind: 'obs_stinger_transition', hasVideo: true,
+    point: Number(s.point) || 0, lengthMs: Number(s.lengthMs) || 0, duration: 0,
+    url: 'http://localhost:3000/api/obs/transition-stinger?v=' + encodeURIComponent(String(s.lengthMs || 1)),
+    message: ''
+  };
+  return true;
+}
+function rpRenderObsTransHint() {
+  const h = el('rp-pool-obstrans-hint'); if (!h) return;
+  const name = el('rp-pool-obstrans')?.value || '';
+  if (!name) { h.textContent = 'Connect OBS to list its transitions.'; h.style.color = 'var(--muted)'; return; }
+  if (_rpObsTrans.name !== name) { h.textContent = 'Reading "' + name + '" from OBS…'; h.style.color = 'var(--muted)'; return; }
+  if (_rpObsTrans.hasVideo) {
+    const len = _rpObsTrans.lengthMs || _rpObsTrans.duration;
+    h.textContent = 'Stinger found — used for the OBS scene cut AND between clips. '
+      + 'Swap at ' + (_rpObsTrans.point ? _rpObsTrans.point + 'ms' : 'midpoint')
+      + (len ? ' of ' + len + 'ms' : '') + ', read from OBS.';
+    h.style.color = 'var(--ok-2)';
+    return;
+  }
+  if (_rpObsTrans.message) { h.textContent = _rpObsTrans.message; h.style.color = '#fbbf24'; return; }
+  h.textContent = `"${name}" is a ${(_rpObsTrans.kind || 'scene').replace(/^obs_|_transition$/g, '') || 'scene'} transition — OBS runs it on the scene cut; clip-to-clip uses a crossfade.`;
+  h.style.color = 'var(--muted)';
+}
+// OBS's own transition list (from the connected scene collection) for "OBS transition" mode.
+function rpSyncObsTransitions() {
+  const sel = el('rp-pool-obstrans'); if (!sel) return;
+  const list = (currentState && currentState.obs && currentState.obs.availableTransitions) || [];
+  const sig = JSON.stringify(list);
+  if (sel.dataset.sig === sig) return;
+  sel.dataset.sig = sig;
+  const saved = (() => { try { return localStorage.getItem('ne_rp_obstrans') || ''; } catch { return ''; } })();
+  sel.innerHTML = list.length
+    ? list.map((t) => `<option value="${String(t).replace(/"/g, '&quot;')}">${String(t).replace(/</g, '&lt;')}</option>`).join('')
+    : '<option value="">No OBS transitions — connect OBS</option>';
+  if (saved && list.includes(saved)) sel.value = saved;
+}
 function updatePoolTransLogoRow() {
   const type = el('rp-pool-transition')?.value || 'fade';
   const row = el('rp-pool-translogo-row');
   if (row) row.style.display = type === 'logo' ? 'flex' : 'none';
+  const stRow = el('rp-pool-stinger-row');
+  if (stRow) stRow.style.display = type === 'stinger' ? 'flex' : 'none';
+  const obsRow = el('rp-pool-obstrans-row');
+  if (obsRow) obsRow.style.display = type === 'obs' ? 'flex' : 'none';
+  if (type === 'stinger') rpRenderStingerRow();
+  if (type === 'obs') { rpSyncObsTransitions(); rpAskObsTransInfo(); }
   refreshTransitionLogoPreviews();
 }
-el('rp-pool-transition')?.addEventListener('change', updatePoolTransLogoRow);
+el('rp-pool-transition')?.addEventListener('change', function () {
+  try { localStorage.setItem('ne_rp_pool_transition', this.value || ''); } catch (_) {}
+  updatePoolTransLogoRow();
+});
+el('rp-pool-stinger-point')?.addEventListener('change', function () {
+  _rpStinger.point = Math.max(0, Number(this.value) || 0);
+  rpSaveStinger();
+});
+el('rp-pool-obstrans')?.addEventListener('change', function () {
+  try { localStorage.setItem('ne_rp_obstrans', this.value || ''); } catch (_) {}
+  rpAskObsTransInfo();   // read its kind + stinger file so clip-to-clip can use the same sting
+});
+el('rp-pool-stinger-clear')?.addEventListener('click', () => {
+  _rpStinger = { url: '', name: '', point: _rpStinger.point || 0 };
+  rpSaveStinger(); rpRenderStingerRow();
+});
+el('rp-pool-stinger-file')?.addEventListener('change', async function () {
+  const f = this.files && this.files[0]; if (!f) return;
+  const nameEl = el('rp-pool-stinger-name'); if (nameEl) nameEl.textContent = 'Uploading stinger…';
+  try {
+    // Same managed-import route the per-playlist stinger uses — Electron gives us a real file path.
+    const r = await fetch('http://localhost:3000/api/clips/import-file', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ filePath: f.path, label: (f.name || 'Stinger').replace(/\.[^.]+$/, '') })
+    });
+    const d = await r.json();
+    if (d.ok && d.clip) {
+      _rpStinger = { url: clipUrl(d.clip), name: f.name || 'Stinger', point: _rpStinger.point || 0 };
+      rpSaveStinger();
+      showToast('Stinger uploaded.', '#22c55e', 2400);
+    } else {
+      showToast('Could not import that stinger video.', '#f56565', 4000);
+    }
+  } catch (e) { showToast('Could not import that stinger video.', '#f56565', 4000); }
+  rpRenderStingerRow();
+  this.value = '';
+});
+// Restore the producer's last transition choice — a stinger you uploaded should still be armed
+// after a reload, not silently reset to Fade.
+(function initPoolTransition() {
+  const sel = el('rp-pool-transition'); if (!sel) return;
+  try { const saved = localStorage.getItem('ne_rp_pool_transition'); if (saved) sel.value = saved; } catch (_) {}
+  rpRenderStingerRow();
+})();
 el('rp-pool-translogo-file')?.addEventListener('change', async function () {
   const f = this.files && this.files[0]; if (!f || !f.type.startsWith('image/')) return;
   try { _transitionLogo = await fileToBase64(f); } catch (_) {}
@@ -27594,6 +28748,7 @@ async function connect() {
       _r('cloudRole',          () => applyCloudRole(msg.data.cloudRole));
       _r('chatHighlight',      () => renderChatHighlight(msg.data));
       _r('multichatConfig',    () => renderMultichatConfig(msg.data));
+      _r('questions',          () => renderQuestions(msg.data));
       // Backfill the multichat feed once per session, after the first snapshot lands.
       if (!window._chatLogRequested) { window._chatLogRequested = true; send('request_chat_log'); }
     } else if (msg.type === 'rundown_control') {
@@ -27821,6 +28976,11 @@ async function connect() {
       // Two independent result boxes can show this — the Settings panel's connection test, and a
       // specific league's Ballchasing tab (Enable/Upload/Refresh) — update whichever is present.
       if (typeof window._handleBallchasingResult === 'function') window._handleBallchasingResult(msg.data);
+    } else if (msg.type === 'ballchasing-replayrename-started') {
+      const status = el('ballchasing-replayrename-status');
+      if (status) { status.style.color = 'var(--muted)'; status.textContent = 'Scanning ' + (msg.data && msg.data.folder ? msg.data.folder : '') + '…'; }
+    } else if (msg.type === 'ballchasing-replayrename-result') {
+      if (typeof window._handleReplayRenameResult === 'function') window._handleReplayRenameResult(msg.data);
       if (typeof window._handleBallchasingLeagueResult === 'function') window._handleBallchasingLeagueResult(msg.data);
     } else if (msg.type === 'link-result') {
       const d = msg.data || {};
@@ -27830,11 +28990,18 @@ async function connect() {
       _showDryRunModal(msg.data);
     } else if (msg.type === 'obs-screenshot') {
       applyObsScreenshot(msg.data);
+    } else if (msg.type === 'replay_armed') {
+      // The overlay has a real frame of the armed clip — release the go-live hold and cut.
+      if (typeof rpOnArmed === 'function') rpOnArmed((msg.data && msg.data.url) || '');
     } else if (msg.type === 'replay_preparing') {
       // Server is running a quick decode-friendly transcode before this clip actually goes to air
       // (only fires when it isn't already cached from a prior push) — let the producer know why
       // there's a brief pause instead of it looking stuck.
-      showToast('Preparing clip for air…', '#fbbf24', 2500);
+      // A format the browser source can't decode (OBS's default HEVC/MKV recording, say) is
+      // converted once and cached — worth saying so, since on a long clip it's tens of seconds.
+      showToast('Converting this clip for air — first push only…', '#fbbf24', 9000);
+      // If a go-live is holding for this clip, wait for the conversion rather than cutting to black.
+      if (typeof rpOnArmPreparing === 'function') rpOnArmPreparing();
     } else if (msg.type === 'obs-result') {
       const color = msg.data.ok ? '#9ae6b4' : '#f56565';
       ['obs-result', 'replay-status'].forEach((id) => {
@@ -27873,6 +29040,30 @@ async function connect() {
       showToast(msg.data.message || 'Auto-follow updated the match.', '#8b5cf6', 6000);
     } else if (msg.type === 'obs-ensure-result') {
       showToast(msg.data.message || (msg.data.ok ? 'Added to OBS.' : 'OBS error'), msg.data.ok ? '#22c55e' : '#c53030', 6000);
+    } else if (msg.type === 'obs-transition-info') {
+      // The selected OBS transition, as OBS describes it. A stinger's own video is served back to
+      // the player (see /api/obs/transition-stinger) so clip-to-clip runs the same sting.
+      const d = msg.data || {};
+      _rpObsTrans = {
+        name: d.name || '', kind: d.kind || '', hasVideo: !!d.hasVideo, point: Number(d.point) || 0,
+        lengthMs: Number(d.lengthMs) || 0, duration: Number(d.duration) || 0,
+        // ?v= stamp busts the browser cache when the producer repoints the stinger in OBS.
+        url: d.hasVideo ? ('http://localhost:3000/api/obs/transition-stinger?v=' + encodeURIComponent(d.stamp || '1')) : '',
+        message: d.message || ''
+      };
+      // Show OBS's own numbers in the row instead of a made-up default — the producer set them there.
+      const durIn = el('rp-pool-obstrans-dur');
+      const obsMs = _rpObsTrans.lengthMs || _rpObsTrans.duration;
+      if (durIn && obsMs && document.activeElement !== durIn) durIn.value = String(obsMs);
+      rpRenderObsTransHint();
+    } else if (msg.type === 'replay-source-scenes') {
+      // Which OBS scenes actually hold the replay player (see obs_check_replay_source).
+      _rpPlayerScenes = Array.isArray(msg.data && msg.data.scenes) ? msg.data.scenes : [];
+      _rpPlayerChecked = !!(msg.data && msg.data.ok);
+      _rpPlayerCheckErr = (msg.data && msg.data.message) || '';
+      const _sel = el('rp-program-scene'); if (_sel) _sel.dataset.sig = '';   // re-mark the ✓ ready options
+      if (currentState && currentState.obs) syncReplayProgramScene(currentState.obs);
+      rpRenderPlayoutReady();
     } else if (msg.type === 'draft-result' && !msg.data.ok) {
       showToast(msg.data.message || 'Draft error', '#c53030', 5000);
     } else if (msg.type === 'twitch_auth_invalid') {
@@ -27956,6 +29147,12 @@ async function connect() {
         resultEl.textContent = msg.data.message || '';
         resultEl.style.color = msg.data.ok ? '#9ae6b4' : '#f56565';
       }
+    } else if (msg.type === 'questions_pull_result') {
+      // Discord backlog pull finished (server → the panel that asked).
+      const fb = el('q-settings-fb');
+      if (fb) { fb.textContent = msg.data.text || ''; fb.style.color = msg.data.ok ? '#4ade80' : '#f87171'; }
+      if (!msg.data.ok) showToast(msg.data.text || 'Discord pull failed.', '#7b2020', 8000);
+      const btn = el('q-pull-btn'); if (btn) btn.disabled = false;
     } else if (msg.type === 'csgo_update') {
       const conn = el('csgo-conn');
       if (conn) {
@@ -28039,6 +29236,16 @@ async function connect() {
       const plat = (msg.data?.platforms || []).join(' + ') || 'social';
       showToast('Published to ' + plat, 'success');
       if (typeof _loadSocialSchedule === 'function') _loadSocialSchedule();   // social.js
+    } else if (msg.type === 'social_weekly_done' || msg.type === 'social_weekly_approved') {
+      // The weekly job fires on its own cron — surface the result even if nobody is on the tab.
+      const e = msg.data?.entry;
+      if (e) {
+        if (e.staged)         showToast(`Weekly run staged ${e.staged} clip(s) for review`);
+        else if (e.scheduled) showToast(`Weekly run scheduled ${e.scheduled} clip(s)`, 'success');
+        else if (e.errors?.length) showToast('Weekly run failed: ' + e.errors[0], 'error');
+      }
+      window.dispatchEvent(new CustomEvent('social-weekly-event'));   // social.js re-reads status
+      if (typeof _loadSocialSchedule === 'function') _loadSocialSchedule();
     }
   };
 
@@ -28835,6 +30042,51 @@ el('btn-minigame-cancel')?.addEventListener('click', () => {
     .catch(e => showToast('Cancel game failed: ' + e.message, '#ef4444'));
 });
 
+// ── Marble Race — cross-platform chat entry game (Twitch+Kick+YouTube, "!play" or auto-enter) ──
+el('btn-start-marblerace')?.addEventListener('click', () => {
+  const customViewers = (el('mr-custom-viewers')?.value || '')
+    .split(/[\n,]/).map((s) => s.trim()).filter(Boolean);
+  const body = {
+    entryWindowSec: parseInt(el('mr-entry-window')?.value, 10) || 30,
+    autoEnterViewers: !!el('mr-auto-enter')?.checked,
+    customViewers
+  };
+  fetch('http://localhost:3000/api/marblerace/start', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  })
+    .then(r => r.json())
+    .then(data => {
+      if (data.error) showToast('Error: ' + data.error, '#ef4444');
+      else showToast('Entries are open!', '#4ade80');
+    })
+    .catch(e => showToast(friendlyError(e), '#ef4444'));
+});
+el('btn-cancel-marblerace')?.addEventListener('click', () => {
+  fetch('http://localhost:3000/api/marblerace/cancel', { method: 'POST' })
+    .then(r => r.json())
+    .then(d => { if (d.error) showToast('Cancel round: ' + d.error, '#ef4444'); })
+    .catch(e => showToast('Cancel round failed: ' + e.message, '#ef4444'));
+});
+function renderMarbleRaceStatus(mr) {
+  const textEl = el('mr-status-text'), detailEl = el('mr-status-detail');
+  if (!textEl || !mr) return;
+  const labels = { idle: 'Idle — no round running', entry: 'Entries open', locked: 'Racing…', finished: 'Finished' };
+  textEl.textContent = labels[mr.status] || mr.status;
+  if (detailEl) {
+    if (mr.status === 'entry') {
+      const remaining = Math.max(0, Math.round(((mr.entryEndsAt || 0) - Date.now()) / 1000));
+      detailEl.textContent = (mr.participants || []).length + ' entered — closes in ' + remaining + 's';
+    } else if (mr.status === 'finished' && mr.result) {
+      const w = mr.result.winnerParticipant;
+      detailEl.textContent = w ? (w.username + ' won!') : 'Nobody entered.';
+      if (mr.droppedCount) detailEl.textContent += ' (' + mr.droppedCount + ' entrant(s) dropped for exceeding the cap)';
+    } else {
+      detailEl.textContent = '';
+    }
+  }
+}
+
 connect();
 
 // (Stats + Analytics domains live in stats-analytics.js)
@@ -28947,8 +30199,23 @@ function addChatMessage(username, message, color = '', platform = 'twitch') {
   msgEl.dataset.chatPlatform = platform;
   msgEl.title = 'Feature this message on stream';
   if (_chatFilter !== 'all' && platform !== _chatFilter) msgEl.style.display = 'none';
-  msgEl.addEventListener('mouseenter', () => { if (!msgEl.dataset.featured) msgEl.style.background = 'rgba(255,255,255,0.06)'; });
-  msgEl.addEventListener('mouseleave', () => { if (!msgEl.dataset.featured) msgEl.style.background = ''; });
+  // Hover affordance: grab a chat message into the Q&A queue instead of featuring it now.
+  const qBtn = document.createElement('button');
+  qBtn.type = 'button';
+  qBtn.className = 'btn btn-ghost btn-sm';
+  qBtn.textContent = '+Q';
+  qBtn.title = 'Send to the Q&A queue';
+  qBtn.style.cssText = 'float:right; margin-left:6px; padding:0 5px; font-size:10px; line-height:15px; opacity:0; transition:opacity .12s;';
+  qBtn.addEventListener('click', (e) => {
+    e.stopPropagation();   // the row itself features the message — this must not do both
+    send('add_question', { source: platform, user: username, text: message, origin: 'chat' });
+    qBtn.textContent = 'Queued';
+    setTimeout(() => { qBtn.textContent = '+Q'; }, 1400);
+  });
+  msgEl.insertBefore(qBtn, msgEl.firstChild);
+
+  msgEl.addEventListener('mouseenter', () => { qBtn.style.opacity = '1'; if (!msgEl.dataset.featured) msgEl.style.background = 'rgba(255,255,255,0.06)'; });
+  msgEl.addEventListener('mouseleave', () => { qBtn.style.opacity = '0'; if (!msgEl.dataset.featured) msgEl.style.background = ''; });
   msgEl.addEventListener('click', () => featureChatMessage({ user: username, text: message, color, platform }));
 
   chatEl.appendChild(msgEl);
@@ -29046,6 +30313,181 @@ function renderChatHighlight(data) {
     });
   }
 }
+
+// ─── Q&A mailbag ────────────────────────────────────────────────────────────
+// The queue itself lives on the server (state.questions, library tier) and is filled from a
+// dedicated Discord channel, a chat keyword, the +Q button on a chat row, or the form below.
+// Asking a question reuses the chat lower third — only the kicker changes (QUESTION · X).
+
+// Fallback for the pre-first-snapshot render; the server ships the real list as questionSources.
+const Q_SOURCES_FALLBACK = [
+  { key: 'discord', label: 'DISCORD', dot: '#5865f2' }, { key: 'twitch', label: 'TWITCH', dot: '#9146ff' },
+  { key: 'youtube', label: 'YOUTUBE', dot: '#ff4d4d' }, { key: 'kick', label: 'KICK', dot: '#53fc18' },
+  { key: 'x', label: 'X', dot: '#e7e9ee' }, { key: 'instagram', label: 'INSTAGRAM', dot: '#e1306c' },
+  { key: 'tiktok', label: 'TIKTOK', dot: '#25f4ee' }, { key: 'facebook', label: 'FACEBOOK', dot: '#1877f2' },
+  { key: 'reddit', label: 'REDDIT', dot: '#ff4500' }, { key: 'email', label: 'EMAIL', dot: '#94a3b8' },
+  { key: 'other', label: 'QUESTION', dot: '#8b93a7' },
+];
+const qSources = () => (currentState && currentState.questionSources) || Q_SOURCES_FALLBACK;
+const qSource = (key) => qSources().find(s => s.key === key) || qSources()[qSources().length - 1];
+let _qFilter = (() => { try { return localStorage.getItem('ne_q_filter') || 'new'; } catch { return 'new'; } })();
+let _qSourcesFilled = false;
+
+// Is this question the one currently on the lower third? (id isn't in chatHighlight — it
+// carries only what the overlay renders — so match on the text/handle pair we put up.)
+function qIsOnAir(q) {
+  const ch = currentState && currentState.chatHighlight;
+  return !!(ch && ch.visible && q && ch.text === q.text && ch.user === q.user);
+}
+
+function renderQuestions(data) {
+  const list = el('q-list');
+  if (!list) return;
+  const qs = (data.questions && data.questions.list) || [];
+  const settings = (data.questions && data.questions.settings) || {};
+
+  // Source picker + settings fields (skip while the producer is typing in one).
+  const sel = el('q-add-source');
+  if (sel && !_qSourcesFilled) {
+    sel.innerHTML = qSources().map(s => `<option value="${esc(s.key)}">${esc(s.key === 'other' ? 'Other' : s.label.charAt(0) + s.label.slice(1).toLowerCase())}</option>`).join('');
+    sel.value = 'x';
+    _qSourcesFilled = true;
+  }
+  const dch = el('q-discord-channel'); if (dch && document.activeElement !== dch) dch.value = settings.discordChannelId || '';
+  const kw = el('q-keyword'); if (kw && document.activeElement !== kw) kw.value = settings.keyword || '';
+  const kon = el('q-keyword-on'); if (kon) kon.checked = settings.keywordEnabled !== false;
+  const dur = el('q-duration'); if (dur && document.activeElement !== dur) dur.value = String(settings.duration == null ? 30 : settings.duration);
+
+  const shown = qs.filter(q => _qFilter === 'all' || (_qFilter === 'new' ? q.status === 'new' : q.status !== 'new'));
+  // Starred first, then oldest-first so the queue reads in the order it arrived.
+  shown.sort((a, b) => (b.star ? 1 : 0) - (a.star ? 1 : 0) || a.ts - b.ts);
+
+  const onAir = qs.find(qIsOnAir);
+  const status = el('q-status');
+  if (status) {
+    const pending = qs.filter(q => q.status === 'new').length;
+    status.textContent = onAir ? `ON STREAM — ${onAir.text}` : (pending ? `${pending} waiting` : 'No questions queued.');
+    status.style.color = onAir ? '#4ade80' : '';
+  }
+  const takedown = el('q-onair-clear'); if (takedown) takedown.style.display = onAir ? '' : 'none';
+
+  document.querySelectorAll('#q-filter-chips [data-qf]').forEach((b) => {
+    const on = b.dataset.qf === _qFilter;
+    b.style.background = on ? 'rgba(124,92,255,0.25)' : '';
+    b.style.color = on ? '#c4b5fd' : '';
+  });
+
+  if (!shown.length) {
+    list.innerHTML = `<div data-placeholder style="color:#888; font-size:12px; text-align:center; padding:20px 10px;">`
+      + (qs.length ? 'Nothing in this view.' : 'Questions appear here — pull them from Discord, capture them with a keyword, or add your own.')
+      + `</div>`;
+    return;
+  }
+
+  list.innerHTML = shown.map((q) => {
+    const src = qSource(q.source);
+    const label = (q.sourceLabel || src.label);
+    const live = qIsOnAir(q);
+    const answered = q.status !== 'new';
+    return `<div data-qid="${esc(q.id)}" style="padding:7px 8px; margin-bottom:4px; border-radius:5px; font-size:12px; line-height:1.4;`
+      + `background:${live ? 'rgba(74,222,128,0.10)' : 'rgba(255,255,255,0.03)'}; border-left:2px solid ${live ? '#4ade80' : src.dot};`
+      + `${answered && !live ? 'opacity:.55;' : ''}">`
+      + `<div style="display:flex; align-items:center; gap:5px; margin-bottom:3px;">`
+        + `<span style="font-size:9px; font-weight:700; letter-spacing:.08em; color:${src.dot};">${esc(label)}</span>`
+        + `<span style="color:#e7e9ee; font-weight:700; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${esc(q.user || '')}</span>`
+        + (q.status === 'asked' ? `<span style="font-size:9px; color:#4ade80;">ASKED</span>` : '')
+        + (q.status === 'skipped' ? `<span style="font-size:9px; color:var(--muted);">SKIPPED</span>` : '')
+        + `<span style="flex:1;"></span>`
+        + `<button class="btn btn-ghost btn-sm" data-qact="star" title="Star" style="padding:1px 5px; font-size:11px; color:${q.star ? '#fbbf24' : 'var(--muted)'};">★</button>`
+      + `</div>`
+      + `<div style="color:#ddd; word-wrap:break-word;">${esc(q.text)}</div>`
+      + `<div style="display:flex; gap:4px; margin-top:5px;">`
+        + `<button class="btn ${live ? 'btn-ghost' : 'btn-primary'} btn-sm" data-qact="${live ? 'takedown' : 'ask'}" style="flex:1; padding:2px 8px; font-size:11px;">${live ? 'Take down' : 'Ask on stream'}</button>`
+        + `<button class="btn btn-ghost btn-sm" data-qact="${answered ? 'requeue' : 'skip'}" style="padding:2px 8px; font-size:11px;">${answered ? 'Re-queue' : 'Skip'}</button>`
+        + `<button class="btn btn-ghost btn-sm" data-qact="del" title="Delete" style="padding:2px 7px; font-size:11px;">✕</button>`
+      + `</div></div>`;
+  }).join('');
+}
+
+// One delegated handler for every row button — rows are re-rendered on each state push.
+el('q-list')?.addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-qact]');
+  const row = e.target.closest('[data-qid]');
+  if (!btn || !row) return;
+  const id = row.dataset.qid;
+  const q = ((currentState.questions && currentState.questions.list) || []).find(x => x.id === id);
+  switch (btn.dataset.qact) {
+    case 'ask': send('ask_question', { id }); break;
+    case 'takedown': send('set_chat_highlight', { visible: false }); break;
+    case 'star': send('update_question', { id, star: !(q && q.star) }); break;
+    case 'skip': send('update_question', { id, status: 'skipped' }); break;
+    case 'requeue': send('update_question', { id, status: 'new' }); break;
+    case 'del': send('remove_question', { id }); break;
+  }
+});
+
+document.querySelectorAll('#q-filter-chips [data-qf]').forEach((b) => {
+  b.addEventListener('click', () => {
+    _qFilter = b.dataset.qf;
+    try { localStorage.setItem('ne_q_filter', _qFilter); } catch {}
+    renderQuestions(currentState || {});
+  });
+});
+
+// Manual entry. 'Other' reveals a free-text label so the on-air kicker can read whatever the
+// question actually came off (a podcast, a forum, the venue floor).
+el('q-add-source')?.addEventListener('change', function () {
+  const lab = el('q-add-label'); if (lab) lab.style.display = this.value === 'other' ? '' : 'none';
+});
+function qAddFromForm() {
+  const text = (el('q-add-text')?.value || '').trim();
+  if (!text) { el('q-add-text')?.focus(); return; }
+  send('add_question', {
+    source: el('q-add-source')?.value || 'other',
+    sourceLabel: (el('q-add-source')?.value === 'other') ? (el('q-add-label')?.value || '') : '',
+    user: (el('q-add-user')?.value || '').trim(),
+    text, origin: 'manual'
+  });
+  if (el('q-add-text')) el('q-add-text').value = '';
+  if (el('q-add-user')) el('q-add-user').value = '';
+  el('q-add-user')?.focus();
+}
+el('q-add-btn')?.addEventListener('click', qAddFromForm);
+el('q-add-text')?.addEventListener('keydown', (e) => { if (e.key === 'Enter') qAddFromForm(); });
+el('q-add-user')?.addEventListener('keydown', (e) => { if (e.key === 'Enter') el('q-add-text')?.focus(); });
+
+el('q-onair-clear')?.addEventListener('click', () => send('set_chat_highlight', { visible: false }));
+el('q-clear-asked')?.addEventListener('click', () => send('clear_questions', { scope: 'asked' }));
+el('q-clear-all')?.addEventListener('click', () => {
+  const n = ((currentState.questions && currentState.questions.list) || []).length;
+  if (!n || confirm(`Delete all ${n} questions, answered or not? This cannot be undone.`)) send('clear_questions', { scope: 'all' });
+});
+
+// ── Question sources popover ──
+el('q-settings-btn')?.addEventListener('click', () => {
+  const p = el('q-settings-panel'); if (!p) return;
+  p.style.display = p.style.display === 'none' ? '' : 'none';
+});
+el('q-settings-close')?.addEventListener('click', () => { const p = el('q-settings-panel'); if (p) p.style.display = 'none'; });
+el('q-settings-save')?.addEventListener('click', () => {
+  send('set_question_settings', {
+    discordChannelId: (el('q-discord-channel')?.value || '').trim(),
+    keyword: (el('q-keyword')?.value || '').trim(),
+    keywordEnabled: !!el('q-keyword-on')?.checked,
+    duration: parseInt(el('q-duration')?.value, 10) || 0
+  });
+  const fb = el('q-settings-fb'); if (fb) { fb.textContent = 'Saved.'; fb.style.color = '#4ade80'; }
+});
+// Backlog pull — the gateway only sees messages posted while we're connected.
+el('q-pull-btn')?.addEventListener('click', function () {
+  const fb = el('q-settings-fb');
+  // Save first so a just-typed channel ID is the one we pull from.
+  send('set_question_settings', { discordChannelId: (el('q-discord-channel')?.value || '').trim() });
+  send('pull_discord_questions', { limit: 50 });
+  this.disabled = true;
+  if (fb) { fb.textContent = 'Pulling…'; fb.style.color = ''; }
+  setTimeout(() => { this.disabled = false; }, 4000);
+});
 
 // Function to escape HTML
 function escapeHtml(text) { return esc(text); }   // legacy alias — canonical esc() lives at the top of the file

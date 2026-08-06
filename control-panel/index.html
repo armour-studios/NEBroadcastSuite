@@ -993,6 +993,7 @@
                 <option value="glass">Glass — frosted, team-lit</option>
                 <option value="block">Block Grid — boxed cells</option>
                 <option value="radar">Radar — team comparison</option>
+                <option value="compare">Compare — team totals with a stat bar</option>
               </select>
               <p class="msp-hint">Score · Goals · Assists · Saves · Shots · Demos — needs the RL Stats API connected.</p>
             </div>
@@ -3227,6 +3228,27 @@
           <label class="qt-toggle" style="margin:0;" title="When a replay finishes (and isn't looping), switch OBS back to the scene that was live before"><span>Return</span><span class="switch"><input type="checkbox" id="rp-return-scene" checked><span class="slider"></span></span></label>
         </div>
         <span id="rp-screen-status" class="director-status-line" style="margin:0;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"></span>
+        <!-- Playout readiness: does the chosen scene actually hold the replay-player browser source?
+             Without it, To Air switches the scene and streams the clip to a source that isn't there —
+             everything "succeeds" and the viewer sees nothing. Checked live against OBS. -->
+        <div class="rp-ready" id="rp-ready" style="display:none;">
+          <span class="rp-ready-dot" id="rp-ready-dot"></span>
+          <span class="rp-ready-text" id="rp-ready-text"></span>
+          <button class="btn btn-primary btn-xs" id="rp-ready-fix" style="display:none;" title="Add the replay-player browser source to the selected scene in OBS">Add player to OBS</button>
+          <button class="btn btn-ghost btn-xs" id="rp-ready-recheck" title="Re-check OBS">Re-check</button>
+        </div>
+      </div>
+
+      <!-- Playlist preview strip — shown while a whole playlist (Replays or Highlights) is being
+           watched in THIS player. Local only: it auto-advances clip to clip using each clip's trim
+           points and never touches the on-air buses. -->
+      <div class="rp-plprev-bar" id="rp-plprev-bar" style="display:none;">
+        <span class="rp-plprev-tag">PREVIEW</span>
+        <span class="rp-plprev-name" id="rp-plprev-name"></span>
+        <span style="flex:1"></span>
+        <button class="btn btn-ghost btn-xs" id="rp-plprev-prev" title="Previous clip">&#8249;</button>
+        <button class="btn btn-ghost btn-xs" id="rp-plprev-next" title="Next clip">&#8250;</button>
+        <button class="btn btn-secondary btn-xs" id="rp-plprev-exit" title="Leave playlist preview (back to single-clip editing)">Exit</button>
       </div>
 
       <!-- Condensed clip metadata (above the video) -->
@@ -3251,9 +3273,28 @@
         </div>
       </div>
 
-      <!-- Video player -->
+      <!-- Video player. Our own transport bar, NOT the browser's `controls`: Chromium renders a
+           different control set depending on whether it has decoded a video frame yet (a big file
+           that has only loaded metadata gets the compact, audio-style bar with no fullscreen
+           button), so the editor appeared to have two different players depending on the clip. -->
       <div class="rp-player-wrap">
-        <video id="clip-preview-video" controls preload="metadata" crossorigin="anonymous"></video>
+        <video id="clip-preview-video" preload="auto" crossorigin="anonymous" playsinline></video>
+      </div>
+      <div class="rp-vt" id="rp-vt">
+        <button class="rp-vt-btn rp-vt-play" id="rp-vt-play" title="Play / pause (Space)" aria-label="Play">
+          <svg class="rp-vt-i-play" viewBox="0 0 24 24" width="15" height="15" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+          <svg class="rp-vt-i-pause" viewBox="0 0 24 24" width="15" height="15" fill="currentColor" style="display:none;"><path d="M6 4h4v16H6zM14 4h4v16h-4z"/></svg>
+        </button>
+        <span class="rp-vt-time" id="rp-vt-time">0:00 / 0:00</span>
+        <input type="range" class="rp-vt-seek" id="rp-vt-seek" min="0" max="1000" value="0" step="1" title="Scrub" aria-label="Seek">
+        <button class="rp-vt-btn" id="rp-vt-mute" title="Mute / unmute" aria-label="Mute">
+          <svg class="rp-vt-i-vol" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" fill="currentColor" stroke="none"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></svg>
+          <svg class="rp-vt-i-muted" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none;"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" fill="currentColor" stroke="none"/><line x1="22" y1="9" x2="16" y2="15"/><line x1="16" y1="9" x2="22" y2="15"/></svg>
+        </button>
+        <input type="range" class="rp-vt-vol" id="rp-vt-vol" min="0" max="100" value="100" step="1" title="Volume" aria-label="Volume">
+        <button class="rp-vt-btn" id="rp-vt-full" title="Fullscreen" aria-label="Fullscreen">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M8 21H5a2 2 0 0 1-2-2v-3M16 21h3a2 2 0 0 0 2-2v-3"/></svg>
+        </button>
       </div>
 
       <!-- Visual trim bar -->
@@ -3312,6 +3353,7 @@
       <div class="rp-folder-tabs" id="rp-folder-tabs">
         <button type="button" class="rp-folder-tab active" data-folder="replays" title="Raw clips — instant replays during the match">Replays<span class="rp-folder-live" data-folder-live="replays"></span></button>
         <button type="button" class="rp-folder-tab" data-folder="highlights" title="Curated clips — the pool you build the event reel from">Highlights<span class="rp-folder-live" data-folder-live="highlights"></span></button>
+        <button type="button" class="rp-folder-tab" data-view="playlists" title="Encoded reels built from this shelf's clips">Playlists</button>
       </div>
 
       <!-- Always visible (not selection-gated) — governs EVERY pool push, single or bulk: each row's
@@ -3319,15 +3361,36 @@
            when Logo is chosen; falls back to the active brand logo when nothing's picked. -->
       <div class="rp-pool-transition-row" id="rp-pool-transition-row">
         <label class="rp-mini-label" for="rp-pool-transition">Transition</label>
-        <select id="rp-pool-transition" class="input-select rp-pool-transition-sel" title="How a clip eases in when pushed live from this pool — single To Air or bulk">
+        <select id="rp-pool-transition" class="input-select rp-pool-transition-sel" title="How a clip eases in when pushed live from this pool — single To Air, bulk, or Play all">
           <option value="cut">Cut</option>
           <option value="fade" selected>Fade</option>
           <option value="logo">Logo</option>
+          <option value="stinger">Stinger video</option>
+          <option value="obs">OBS transition</option>
         </select>
         <div id="rp-pool-translogo-row" style="display:none;gap:6px;align-items:center;">
           <img id="rp-pool-translogo-preview" alt="" style="width:26px;height:26px;object-fit:contain;border-radius:5px;background:var(--surface2);border:1px solid var(--border);">
           <input type="file" id="rp-pool-translogo-file" accept="image/*" class="input-file-hidden">
           <label for="rp-pool-translogo-file" class="btn btn-secondary btn-xs">Choose logo&hellip;</label>
+        </div>
+        <!-- Stinger video: played over the top by the replay player, with the clip underneath
+             swapping at the transition point (ms into the sting; 0 = halfway, OBS's convention). -->
+        <div id="rp-pool-stinger-row" style="display:none;gap:6px;align-items:center;flex-wrap:wrap;width:100%;">
+          <input type="file" id="rp-pool-stinger-file" accept="video/*,.webm,.mp4,.mov" class="input-file-hidden">
+          <label for="rp-pool-stinger-file" class="btn btn-secondary btn-xs">Upload stinger&hellip;</label>
+          <span id="rp-pool-stinger-name" style="font-size:11px;color:var(--muted);flex:1;min-width:80px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">No stinger uploaded</span>
+          <label class="rp-mini-label" for="rp-pool-stinger-point" title="How far into the stinger the clip underneath swaps. 0 = halfway.">Point (ms)</label>
+          <input type="number" id="rp-pool-stinger-point" class="input-text" min="0" step="50" value="0" style="width:78px;padding:4px 6px;font-size:11px;">
+          <button class="btn btn-ghost btn-xs" id="rp-pool-stinger-clear" title="Remove the uploaded stinger">Clear</button>
+        </div>
+        <!-- OBS transition: OBS itself performs the transition (incl. an OBS stinger transition) on
+             the cut TO the replay scene. Clip-to-clip advances happen inside one scene, so they
+             can't use it — that's what the stinger-video option above is for. -->
+        <div id="rp-pool-obstrans-row" style="display:none;gap:6px;align-items:center;flex-wrap:wrap;width:100%;">
+          <select id="rp-pool-obstrans" class="input-select" style="flex:1;min-width:130px;padding:4px 6px;font-size:11px;" title="An OBS transition from your scene collection — armed just before the cut to the replay scene"></select>
+          <label class="rp-mini-label" for="rp-pool-obstrans-dur">Duration (ms)</label>
+          <input type="number" id="rp-pool-obstrans-dur" class="input-text" min="0" step="50" value="500" style="width:78px;padding:4px 6px;font-size:11px;" title="Ignored by OBS stinger transitions — they carry their own timing">
+          <span id="rp-pool-obstrans-hint" style="font-size:10.5px;color:var(--muted);width:100%;line-height:1.35;">Connect OBS to list its transitions.</span>
         </div>
       </div>
 
@@ -3345,8 +3408,12 @@
         </div>
       </div>
 
-      <!-- Shelf-level pool action: empty this pool entirely. -->
+      <!-- Shelf-level pool actions. "Play all" runs the whole shelf back-to-back on air through the
+           same per-clip engine the bulk To Air uses — no playlist, no encode, no multi-select first. -->
       <div class="rp-shelf-actions" id="rp-pool-shelf-actions">
+        <button class="btn btn-danger btn-xs" id="rp-pool-playall" title="Play every clip in this pool back-to-back on air, in the order shown — no playlist or encode needed">&#9654; Play all</button>
+        <button class="btn btn-danger btn-xs" id="rp-pool-stopall" style="display:none;" title="Stop the running sequence and return">&#9632; Stop</button>
+        <button class="btn btn-ghost btn-xs" id="rp-pool-selectall" title="Check every clip in this pool (then use the bulk bar to play a subset, copy, or make a playlist)">Select all</button>
         <button class="btn btn-ghost btn-xs" id="rp-clear-pool" title="Remove all clips from this pool">Clear pool</button>
       </div>
 
@@ -3354,10 +3421,12 @@
            on it directly, no playlist needed). Card styling matches Staging's list. -->
       <div id="rp-clip-pool" class="rp-clip-pool"></div>
 
-      <!-- Playlists — a separate, secondary feature: multi-select clips above and "Make Playlist" to
-           combine them into one encoded video. Collapsed by default so the pool stays primary. -->
+      <!-- Playlists — now the third tab of this section (multi-select clips above and "Make
+           Playlist" to combine them into one encoded video). The old inline collapse toggle is kept
+           in the DOM but hidden: the tab owns the show/hide, and hiding rather than deleting keeps
+           rpSetPlaylistsSectionExpanded (called from a dozen places) working untouched. -->
       <div class="rp-pl-section" id="rp-pl-section">
-        <button type="button" class="rp-pl-section-toggle" id="rp-pl-section-toggle">
+        <button type="button" class="rp-pl-section-toggle" id="rp-pl-section-toggle" style="display:none;">
           <span id="rp-pl-section-chev">&#9656;</span> Playlists on this shelf
         </button>
         <div id="rp-pl-section-body" style="display:none;">
@@ -3365,6 +3434,9 @@
           <div class="rp-staging-hdr">
             <div style="display:flex;align-items:center;gap:8px;">
               <span class="rp-staging-title">Playlists</span>
+              <!-- Which shelf's reels are listed. Playlists belong to a shelf (Replays / Highlights)
+                   exactly as clips do; this flips it without leaving the tab. -->
+              <button type="button" class="btn btn-ghost btn-xs" id="rp-pl-shelf-switch" title="Show the other shelf's playlists">Replays shelf &#8646;</button>
             </div>
             <button class="btn btn-ghost btn-xs" id="rp-new-playlist" title="Create a new empty playlist">+ New</button>
             <button class="btn btn-ghost btn-xs" id="rp-folder-playlist" title="Build a new playlist from every video in a folder (imported in name order)">+ Folder</button>
@@ -3379,6 +3451,7 @@
             <!-- Top actions: play live / stop / encode -->
             <div class="rp-pl-top-actions">
               <button class="btn btn-danger btn-sm" id="rp-pl-stop" style="display:none;" title="Stop the live playlist and return">Stop</button>
+              <button class="btn btn-secondary btn-sm" id="rp-pl-preview" title="Watch this playlist in the Video Editor — its clips play back-to-back locally, nothing goes on air">▶ Preview</button>
               <button class="btn btn-warning btn-sm" id="rp-playlist-push-live" title="Play this playlist's clips back-to-back on air (in its scene, with the chosen transition)">▶ Play live</button>
               <button class="btn btn-primary btn-sm" id="rp-process" title="Encode the playlist to a single video file">Encode</button>
             </div>
@@ -3796,6 +3869,26 @@
   .social-clip-title { font-size:11px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; margin-bottom:3px; }
   .social-clip-meta { font-size:10px; color:var(--muted); display:flex; justify-content:space-between; margin-bottom:5px; }
   .social-clip-creator { font-size:10px; color:var(--muted); margin-bottom:5px; }
+  .social-clip-card.picked { border-color:var(--cp-accent,#7c3aed); box-shadow:0 0 0 1px var(--cp-accent,#7c3aed) inset; }
+  .social-clip-pickwrap { position:relative; }
+  .social-clip-pick { position:absolute; top:6px; left:6px; width:17px; height:17px; accent-color:var(--cp-accent,#7c3aed); cursor:pointer; z-index:2; }
+
+  /* ── Auto Queue ── */
+  .sq-field { margin-bottom:10px; }
+  .sq-field > label { display:block; font-size:11px; color:var(--muted); margin-bottom:4px; }
+  .sq-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; }
+  .sq-tokens { font-size:10px; color:var(--muted); line-height:1.9; }
+  .sq-token { display:inline-block; background:rgba(0,0,0,.3); border:1px solid rgba(255,255,255,.1); border-radius:3px; padding:1px 5px; margin-right:4px; font-family:ui-monospace,Consolas,monospace; cursor:pointer; }
+  .sq-token:hover { border-color:var(--cp-accent,#7c3aed); color:#fff; }
+  .sq-row { display:flex; align-items:flex-start; gap:10px; padding:8px 10px; border:1px solid rgba(255,255,255,.08); border-radius:6px; background:rgba(255,255,255,.03); margin-bottom:5px; }
+  .sq-row.done { border-color:rgba(72,187,120,.35); background:rgba(72,187,120,.06); }
+  .sq-row.failed { border-color:rgba(239,68,68,.35); background:rgba(239,68,68,.06); }
+  .sq-row img { width:76px; aspect-ratio:16/9; object-fit:cover; border-radius:4px; background:#111; flex-shrink:0; }
+  .sq-row-main { flex:1; min-width:0; }
+  .sq-row-when { font-size:10px; color:var(--muted); white-space:nowrap; }
+  .sq-row textarea { width:100%; height:56px; padding:6px; background:rgba(0,0,0,.2); border:1px solid rgba(255,255,255,.1); border-radius:4px; color:#fff; font-size:11px; resize:vertical; box-sizing:border-box; margin-top:5px; }
+  .sq-row summary { font-size:10px; color:var(--muted); cursor:pointer; margin-top:5px; }
+  .sq-status { font-size:10px; white-space:nowrap; }
 
   /* ── Local clips list ── */
   .social-local-row { display:flex; align-items:center; gap:8px; padding:7px 10px; border:1px solid rgba(255,255,255,0.08); border-radius:6px; background:rgba(255,255,255,0.03); margin-bottom:4px; }
@@ -3814,6 +3907,32 @@
   /* ── Branding card ── */
   .branding-tmpl { padding:6px 0; border:1px solid rgba(255,255,255,.1); border-radius:5px; background:rgba(255,255,255,.04); color:rgba(255,255,255,.5); font-size:11px; font-weight:600; cursor:pointer; transition:all .15s; }
   .branding-tmpl.active { border-color:var(--cp-accent,#7c3aed); color:#fff; background:rgba(124,58,237,.15); }
+  .bumper-row { display:flex; align-items:center; gap:6px; margin-bottom:5px; }
+  .bumper-lbl { font-size:11px; color:var(--muted); width:64px; flex-shrink:0; }
+  .bumper-path { flex:1; min-width:0; font-size:11px; direction:rtl; text-align:left; }
+  .bumper-path.set { color:#fff; border-color:rgba(124,58,237,.4); }
+
+  /* ── Weekly automation ── */
+  .wk-card { border:1px solid rgba(255,255,255,.1); border-radius:8px; margin-bottom:12px; overflow:hidden; }
+  .wk-hdr { display:flex; align-items:center; justify-content:space-between; padding:10px 14px; background:rgba(255,255,255,.04); }
+  .wk-body { padding:12px 14px; }
+  .wk-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; }
+  .wk-field { margin-bottom:10px; }
+  .wk-field > label { display:block; font-size:11px; color:var(--muted); margin-bottom:4px; }
+  .wk-mode { display:grid; grid-template-columns:1fr 1fr; gap:6px; }
+  .wk-mode-btn { padding:10px; border:1px solid rgba(255,255,255,.1); border-radius:6px; background:rgba(255,255,255,.04); color:rgba(255,255,255,.55); cursor:pointer; text-align:left; transition:all .15s; }
+  .wk-mode-btn.active { border-color:var(--cp-accent,#7c3aed); background:rgba(124,58,237,.15); color:#fff; }
+  .wk-mode-btn strong { display:block; font-size:12px; margin-bottom:2px; }
+  .wk-mode-btn span { font-size:10px; color:var(--muted); line-height:1.35; }
+  .wk-next { font-size:11px; color:var(--muted); }
+  .wk-next b { color:#fff; font-weight:600; }
+  .wk-hist-row { display:flex; align-items:center; gap:10px; padding:6px 10px; border:1px solid rgba(255,255,255,.07); border-radius:5px; margin-bottom:4px; font-size:11px; }
+  .wk-hist-row .wk-when { color:var(--muted); white-space:nowrap; }
+  .wk-hist-row .wk-what { flex:1; min-width:0; }
+  .wk-pill { font-size:9px; font-weight:700; padding:1px 6px; border-radius:8px; letter-spacing:.5px; }
+  .wk-pill.ok { background:rgba(72,187,120,.18); color:#48bb78; }
+  .wk-pill.warn { background:rgba(234,179,8,.18); color:#eab308; }
+  .wk-pill.bad { background:rgba(239,68,68,.18); color:#ef4444; }
 
   /* ── Calendar ── */
   .cal-grid { display:grid; grid-template-columns:repeat(7,1fr); gap:2px; }
@@ -3857,6 +3976,8 @@
 <div class="social-sub-tabs">
   <button class="social-sub-tab-btn active" data-stab="clips">Clips</button>
   <button class="social-sub-tab-btn" data-stab="composer">Composer</button>
+  <button class="social-sub-tab-btn" data-stab="queue">Auto Queue<span id="social-queue-badge" style="display:none;margin-left:6px;font-size:10px;padding:1px 6px;border-radius:9px;background:var(--cp-accent,#7c3aed);color:#fff;">0</span></button>
+  <button class="social-sub-tab-btn" data-stab="weekly">Weekly<span id="social-weekly-badge" style="display:none;margin-left:6px;font-size:10px;padding:1px 6px;border-radius:9px;background:#eab308;color:#000;">0</span></button>
   <button class="social-sub-tab-btn" data-stab="calendar">Calendar</button>
 </div>
 
@@ -3874,11 +3995,27 @@
     <div class="clip-toolbar">
       <span id="social-twitch-clip-count" style="font-size:11px;color:var(--muted);"></span>
       <div class="clip-toolbar-right">
+        <select id="social-clip-window" class="input-select" style="font-size:11px;padding:3px 8px;height:28px;" title="Only pull clips created in this window">
+          <option value="7">Last 7 days</option>
+          <option value="30">Last 30 days</option>
+          <option value="90">Last 90 days</option>
+          <option value="0" selected>All time</option>
+        </select>
         <select id="social-clip-sort" class="input-select" style="font-size:11px;padding:3px 8px;height:28px;">
           <option value="recent">Most Recent</option>
           <option value="views">Most Viewed</option>
         </select>
         <button id="btn-load-twitch-clips" class="btn btn-ghost btn-xs">Refresh</button>
+      </div>
+    </div>
+    <!-- Bulk selection: tick clips, then push the batch into the Auto Queue for drip scheduling. -->
+    <div class="clip-toolbar" style="margin-bottom:10px;padding:6px 10px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);border-radius:6px;">
+      <span id="social-bulk-count" style="font-size:11px;color:var(--muted);">0 selected</span>
+      <div class="clip-toolbar-right">
+        <button id="btn-clips-select-all" class="btn btn-ghost btn-xs">Select all</button>
+        <button id="btn-clips-select-top" class="btn btn-ghost btn-xs" title="Select the 10 most-viewed clips">Top 10</button>
+        <button id="btn-clips-select-none" class="btn btn-ghost btn-xs">Clear</button>
+        <button id="btn-clips-to-queue" class="btn btn-secondary btn-xs" disabled>Add to Auto Queue</button>
       </div>
     </div>
     <div id="social-twitch-clips-grid" class="social-clip-grid">
@@ -3941,7 +4078,10 @@
       <span id="social-yt-badge" style="font-size:10px;padding:2px 7px;border-radius:10px;background:rgba(255,255,255,.08);color:var(--muted);">Not connected</span>
     </div>
     <div class="social-platform-body" id="social-yt-body">
-      <input type="text" id="social-yt-title" class="input-text" placeholder="Video title" style="width:100%;margin-bottom:8px;">
+      <div style="display:flex;gap:6px;margin-bottom:8px;">
+        <input type="text" id="social-yt-title" class="input-text" placeholder="Video title" style="flex:1;min-width:0;">
+        <button id="btn-yt-autoname" class="btn btn-ghost btn-xs" style="white-space:nowrap;" title="Fill title and description from the Auto Queue naming templates">Auto-name</button>
+      </div>
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
         <span style="font-size:11px;color:var(--muted);">Description</span>
         <button id="btn-yt-save-template" class="btn btn-ghost btn-xs" style="font-size:10px;padding:2px 7px;">Save as template</button>
@@ -3957,8 +4097,16 @@
       </div>
       <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:12px;color:rgba(255,255,255,0.7);">
         <input type="checkbox" id="social-yt-shorts" style="accent-color:#ff4444;">
-        Upload as YouTube Short (#Shorts added automatically)
+        Upload as YouTube Short (crops to 9:16 + adds #Shorts)
       </label>
+      <div id="social-shorts-fit-row" style="display:none;margin-top:8px;">
+        <label class="field-label" style="display:block;margin-bottom:4px;">Vertical framing</label>
+        <select id="social-shorts-fit" class="input-select" style="width:100%;">
+          <option value="crop">Fill — centre crop (zooms in, no bars)</option>
+          <option value="blur">Fit — whole clip over a blurred background</option>
+          <option value="solid">Fit — whole clip over a solid colour</option>
+        </select>
+      </div>
     </div>
   </div>
 
@@ -3991,7 +4139,31 @@
       <span id="social-branding-summary" style="font-size:11px;color:var(--muted);">No intro / outro</span>
     </div>
     <div class="social-platform-body open" id="social-branding-body">
-      <label class="field-label" style="display:block;margin-bottom:6px;">Intro / Outro template</label>
+      <!-- Bumper files come first: a producer with a real branded end card should never have to
+           work out that "template" means the generated text slate. A file always wins over it. -->
+      <label class="field-label" style="display:block;margin-bottom:6px;">Bumper files <span style="font-weight:400;color:var(--muted);">— your own MP4/MOV or a still image</span></label>
+      <div class="bumper-row">
+        <span class="bumper-lbl">Intro</span>
+        <input type="text" id="social-intro-file" class="input-text bumper-path" placeholder="No intro bumper" readonly>
+        <button class="btn btn-ghost btn-xs" data-pick-bumper="social-intro-file">Browse</button>
+        <button class="btn btn-ghost btn-xs" data-clear-bumper="social-intro-file">Clear</button>
+      </div>
+      <div class="bumper-row">
+        <span class="bumper-lbl">Outro</span>
+        <input type="text" id="social-outro-file" class="input-text bumper-path" placeholder="No outro bumper" readonly>
+        <button class="btn btn-ghost btn-xs" data-pick-bumper="social-outro-file">Browse</button>
+        <button class="btn btn-ghost btn-xs" data-clear-bumper="social-outro-file">Clear</button>
+      </div>
+      <div class="bumper-row" id="social-bumper-imgdur-row" style="display:none;">
+        <span class="bumper-lbl">Image hold</span>
+        <input type="number" id="social-bumper-imgdur" class="input-text" value="4" min="1" max="30" step="1" style="width:70px;">
+        <span style="font-size:10px;color:var(--muted);">seconds — only applies to still-image bumpers</span>
+      </div>
+      <div style="font-size:10px;color:var(--muted);margin:2px 0 12px;">
+        Bumpers are re-encoded to match the clip (letterboxed, never cropped) so nothing is cut off.
+      </div>
+
+      <label class="field-label" style="display:block;margin-bottom:6px;">Generated card <span style="font-weight:400;color:var(--muted);">— used only where no bumper file is set</span></label>
       <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:4px;margin-bottom:10px;">
         <button class="branding-tmpl active" data-tmpl="none">None</button>
         <button class="branding-tmpl" data-tmpl="fade">Fade</button>
@@ -4046,6 +4218,331 @@
 
   <button id="btn-social-submit" class="btn btn-primary" style="width:100%;padding:12px;" disabled>Select a platform above</button>
   <div id="social-submit-status" style="font-size:11px;color:var(--muted);text-align:center;margin-top:8px;min-height:16px;white-space:pre-line;"></div>
+</div>
+
+<!-- ── AUTO QUEUE ── -->
+<!-- Bulk pipeline: pick clips on the Clips tab → auto-name them from Twitch + live show state →
+     drip them onto YouTube on a schedule. Every generated title/description stays editable per
+     row before anything is sent. -->
+<div class="social-sub-panel" id="social-panel-queue">
+
+  <div id="social-queue-empty" style="text-align:center;color:var(--muted);font-size:13px;padding:28px 0;">
+    No clips queued. Tick clips on the <strong>Clips</strong> tab, then hit <strong>Add to Auto Queue</strong>.
+  </div>
+
+  <div id="social-queue-body" style="display:none;">
+
+    <!-- Naming templates -->
+    <div class="social-platform-card">
+      <div class="social-platform-hdr">
+        <span style="font-size:13px;font-weight:600;">Auto-naming</span>
+        <span style="font-size:11px;color:var(--muted);">Titles + descriptions built from Twitch &amp; show data</span>
+      </div>
+      <div class="social-platform-body open">
+        <div class="sq-field">
+          <label>Title template</label>
+          <input type="text" id="sq-tmpl-title" class="input-text" style="width:100%;box-sizing:border-box;" placeholder="{clip_title} | {event}">
+        </div>
+        <div class="sq-field">
+          <label>Description template</label>
+          <textarea id="sq-tmpl-desc" style="width:100%;height:88px;padding:8px;background:rgba(0,0,0,.2);border:1px solid rgba(255,255,255,.1);border-radius:4px;color:#fff;font-size:12px;resize:vertical;box-sizing:border-box;"></textarea>
+        </div>
+        <div class="sq-field" id="sq-tw-caption-field" style="display:none;">
+          <label>X / Twitter caption template</label>
+          <textarea id="sq-tmpl-caption" maxlength="280" style="width:100%;height:56px;padding:8px;background:rgba(0,0,0,.2);border:1px solid rgba(255,255,255,.1);border-radius:4px;color:#fff;font-size:12px;resize:vertical;box-sizing:border-box;"></textarea>
+        </div>
+        <div class="sq-tokens" id="sq-token-list" style="margin-bottom:8px;"></div>
+        <div style="display:flex;gap:6px;">
+          <button id="btn-sq-regen" class="btn btn-secondary btn-xs">Apply to all rows</button>
+          <button id="btn-sq-save-tmpl" class="btn btn-ghost btn-xs">Save as default</button>
+        </div>
+        <div style="font-size:10px;color:var(--muted);margin-top:6px;">
+          Empty tokens are dropped and leftover separators cleaned up, so a clip with no team or event
+          still gets a tidy title. YouTube caps titles at 100 characters.
+        </div>
+      </div>
+    </div>
+
+    <!-- Drip schedule -->
+    <div class="social-platform-card">
+      <div class="social-platform-hdr">
+        <span style="font-size:13px;font-weight:600;">Drip schedule</span>
+        <span id="sq-sched-summary" style="font-size:11px;color:var(--muted);"></span>
+      </div>
+      <div class="social-platform-body open">
+        <div class="sq-grid">
+          <div class="sq-field">
+            <label>Start from</label>
+            <input type="datetime-local" id="sq-start" class="input-text" style="width:100%;box-sizing:border-box;">
+          </div>
+          <div class="sq-field">
+            <label>Spacing mode</label>
+            <select id="sq-mode" class="input-select" style="width:100%;">
+              <option value="slots">Daily time slots</option>
+              <option value="interval">Every N hours</option>
+            </select>
+          </div>
+          <div class="sq-field" id="sq-slots-field">
+            <label>Slot times (24h, comma separated)</label>
+            <input type="text" id="sq-slots" class="input-text" value="17:00, 20:00" placeholder="17:00, 20:00" style="width:100%;box-sizing:border-box;">
+          </div>
+          <div class="sq-field" id="sq-interval-field" style="display:none;">
+            <label>Hours between posts</label>
+            <input type="number" id="sq-interval" class="input-text" value="6" min="1" max="168" step="1" style="width:100%;box-sizing:border-box;">
+          </div>
+        </div>
+        <div class="sq-grid">
+          <div class="sq-field">
+            <label>YouTube visibility on release</label>
+            <select id="sq-visibility" class="input-select" style="width:100%;">
+              <option value="public">Public</option>
+              <option value="unlisted">Unlisted</option>
+              <option value="private">Private</option>
+            </select>
+          </div>
+          <div class="sq-field">
+            <label>Platforms</label>
+            <div style="display:flex;gap:12px;padding-top:6px;">
+              <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;">
+                <input type="checkbox" id="sq-plat-youtube" checked style="accent-color:#ff4444;"> YouTube
+              </label>
+              <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;">
+                <input type="checkbox" id="sq-plat-twitter" style="accent-color:#1da1f2;"> X
+              </label>
+            </div>
+          </div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:6px;margin-top:2px;">
+          <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:rgba(255,255,255,.7);cursor:pointer;">
+            <input type="checkbox" id="sq-shorts" style="accent-color:#ff4444;"> Upload as YouTube Shorts (crops to 9:16 + adds #Shorts)
+          </label>
+          <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:rgba(255,255,255,.7);cursor:pointer;">
+            <input type="checkbox" id="sq-vertical" style="accent-color:var(--cp-accent,#7c3aed);"> Crop to vertical 9:16
+          </label>
+          <div id="sq-fit-row" style="display:none;">
+            <label class="field-label" style="display:block;margin-bottom:4px;">Vertical framing</label>
+            <select id="sq-fit" class="input-select" style="width:100%;">
+              <option value="crop">Fill — centre crop (zooms in, no bars)</option>
+              <option value="blur">Fit — whole clip over a blurred background</option>
+              <option value="solid">Fit — whole clip over a solid colour</option>
+            </select>
+          </div>
+        </div>
+        <div style="font-size:10px;color:var(--muted);margin-top:8px;">
+          YouTube schedules natively: each video uploads as soon as you hit Schedule and goes public at its
+          slot. Uploads run one at a time in the background — leave the app open until the list finishes.
+        </div>
+      </div>
+    </div>
+
+    <!-- Rows -->
+    <div style="display:flex;align-items:center;justify-content:space-between;margin:14px 0 8px;">
+      <h3 class="section-title" style="margin:0;">Queue <span id="sq-count" style="font-size:11px;color:var(--muted);font-weight:400;"></span></h3>
+      <button id="btn-sq-clear" class="btn btn-ghost btn-xs">Empty queue</button>
+    </div>
+    <div id="sq-rows"></div>
+
+    <button id="btn-sq-schedule" class="btn btn-primary" style="width:100%;padding:12px;margin-top:12px;">Schedule queue</button>
+    <div id="sq-status" style="font-size:11px;color:var(--muted);text-align:center;margin-top:8px;min-height:16px;white-space:pre-line;"></div>
+  </div>
+</div>
+
+<!-- ── WEEKLY ── -->
+<!-- Runs once a week with nobody watching: pull the last N days of clips, drop anything already
+     handled, auto-name the rest, then either stage them here for approval or schedule them
+     straight onto YouTube across the following days. -->
+<div class="social-sub-panel" id="social-panel-weekly">
+
+  <!-- Staged batch waiting for approval (review mode) -->
+  <div class="wk-card" id="wk-staged-card" style="display:none;border-color:rgba(234,179,8,.35);">
+    <div class="wk-hdr" style="background:rgba(234,179,8,.08);">
+      <span style="font-size:13px;font-weight:600;">Waiting for your approval</span>
+      <span id="wk-staged-count" class="wk-next"></span>
+    </div>
+    <div class="wk-body">
+      <div id="wk-staged-rows"></div>
+      <div style="display:flex;gap:6px;margin-top:10px;">
+        <button id="btn-wk-approve" class="btn btn-primary" style="flex:1;">Schedule these</button>
+        <button id="btn-wk-discard" class="btn btn-ghost">Discard</button>
+      </div>
+      <div style="font-size:10px;color:var(--muted);margin-top:6px;">
+        Discarding leaves these clips eligible — next week's run will offer them again.
+      </div>
+    </div>
+  </div>
+
+  <!-- Master switch + schedule -->
+  <div class="wk-card">
+    <div class="wk-hdr">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;font-weight:600;">
+        <input type="checkbox" id="wk-enabled" style="accent-color:var(--cp-accent,#7c3aed);">
+        Run automatically every week
+      </label>
+      <span id="wk-next-run" class="wk-next"></span>
+    </div>
+    <div class="wk-body">
+      <div class="wk-field">
+        <label>What the run does when it finds clips</label>
+        <div class="wk-mode">
+          <button type="button" class="wk-mode-btn active" data-wkmode="review">
+            <strong>Stage for review</strong>
+            <span>Names and times everything, then waits here. Nothing uploads until you approve.</span>
+          </button>
+          <button type="button" class="wk-mode-btn" data-wkmode="auto">
+            <strong>Schedule automatically</strong>
+            <span>Uploads and schedules unattended. Titles come straight from your templates.</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="wk-grid">
+        <div class="wk-field">
+          <label>Day</label>
+          <select id="wk-day" class="input-select" style="width:100%;">
+            <option value="0">Sunday</option><option value="1">Monday</option>
+            <option value="2">Tuesday</option><option value="3">Wednesday</option>
+            <option value="4">Thursday</option><option value="5">Friday</option>
+            <option value="6">Saturday</option>
+          </select>
+        </div>
+        <div class="wk-field">
+          <label>Time</label>
+          <input type="time" id="wk-time" class="input-text" value="10:00" style="width:100%;box-sizing:border-box;">
+        </div>
+        <div class="wk-field">
+          <label>Look back</label>
+          <select id="wk-lookback" class="input-select" style="width:100%;">
+            <option value="7">Last 7 days</option>
+            <option value="14">Last 14 days</option>
+            <option value="30">Last 30 days</option>
+          </select>
+        </div>
+      </div>
+      <div style="font-size:10px;color:var(--muted);">
+        The app has to be running when the job is due — it's a desktop scheduler, not a cloud one.
+        A missed week is picked up by the next run, since nothing already posted is ever re-posted.
+      </div>
+    </div>
+  </div>
+
+  <!-- Which clips -->
+  <div class="wk-card">
+    <div class="wk-hdr">
+      <span style="font-size:13px;font-weight:600;">Which clips</span>
+      <button id="btn-wk-preview" class="btn btn-ghost btn-xs">Preview picks</button>
+    </div>
+    <div class="wk-body">
+      <div class="wk-grid">
+        <div class="wk-field">
+          <label>Take</label>
+          <select id="wk-sort" class="input-select" style="width:100%;">
+            <option value="views">Most viewed</option>
+            <option value="recent">Most recent</option>
+          </select>
+        </div>
+        <div class="wk-field">
+          <label>How many</label>
+          <input type="number" id="wk-max" class="input-text" value="5" min="1" max="50" style="width:100%;box-sizing:border-box;">
+        </div>
+        <div class="wk-field">
+          <label>Minimum views</label>
+          <input type="number" id="wk-minviews" class="input-text" value="0" min="0" style="width:100%;box-sizing:border-box;">
+        </div>
+      </div>
+      <div id="wk-preview" style="margin-top:4px;"></div>
+      <div style="font-size:10px;color:var(--muted);margin-top:6px;">
+        A clip is only ever taken once. <button type="button" id="btn-wk-forget" class="btn btn-ghost btn-xs" style="font-size:10px;padding:1px 6px;">Reset history</button>
+        <span id="wk-handled-count"></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- How they go out -->
+  <div class="wk-card">
+    <div class="wk-hdr">
+      <span style="font-size:13px;font-weight:600;">How they go out</span>
+      <span id="wk-drip-summary" class="wk-next"></span>
+    </div>
+    <div class="wk-body">
+      <div class="wk-grid">
+        <div class="wk-field">
+          <label>Release times (24h, comma separated)</label>
+          <input type="text" id="wk-slots" class="input-text" value="17:00, 20:00" style="width:100%;box-sizing:border-box;">
+        </div>
+        <div class="wk-field">
+          <label>Wait before the first one</label>
+          <select id="wk-offset" class="input-select" style="width:100%;">
+            <option value="0">No delay</option>
+            <option value="2" selected>2 hours</option>
+            <option value="6">6 hours</option>
+            <option value="24">1 day</option>
+          </select>
+        </div>
+        <div class="wk-field">
+          <label>Visibility on release</label>
+          <select id="wk-visibility" class="input-select" style="width:100%;">
+            <option value="public">Public</option>
+            <option value="unlisted">Unlisted</option>
+            <option value="private">Private</option>
+          </select>
+        </div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:6px;">
+        <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:rgba(255,255,255,.7);cursor:pointer;">
+          <input type="checkbox" id="wk-shorts" style="accent-color:#ff4444;"> Upload as YouTube Shorts (forces the 9:16 pass)
+        </label>
+        <div class="wk-field" id="wk-fit-row" style="display:none;margin:0 0 0 24px;">
+          <label>Vertical framing</label>
+          <select id="wk-fit" class="input-select" style="width:100%;max-width:260px;">
+            <option value="crop">Crop to fill — centre of the frame only</option>
+            <option value="blur">Blurred backdrop — whole frame kept</option>
+            <option value="solid">Solid backdrop — whole frame kept</option>
+          </select>
+        </div>
+      </div>
+
+      <div style="border-top:1px solid rgba(255,255,255,.08);margin:12px 0 10px;"></div>
+      <label class="field-label" style="display:block;margin-bottom:6px;">Bumpers on every clip</label>
+      <div class="bumper-row">
+        <span class="bumper-lbl">Intro</span>
+        <input type="text" id="wk-intro-file" class="input-text bumper-path" placeholder="No intro bumper" readonly>
+        <button class="btn btn-ghost btn-xs" data-pick-bumper="wk-intro-file">Browse</button>
+        <button class="btn btn-ghost btn-xs" data-clear-bumper="wk-intro-file">Clear</button>
+      </div>
+      <div class="bumper-row">
+        <span class="bumper-lbl">Outro</span>
+        <input type="text" id="wk-outro-file" class="input-text bumper-path" placeholder="No outro bumper" readonly>
+        <button class="btn btn-ghost btn-xs" data-pick-bumper="wk-outro-file">Browse</button>
+        <button class="btn btn-ghost btn-xs" data-clear-bumper="wk-outro-file">Clear</button>
+      </div>
+
+      <div style="border-top:1px solid rgba(255,255,255,.08);margin:12px 0 10px;"></div>
+      <div class="wk-field">
+        <label>Title template</label>
+        <input type="text" id="wk-tmpl-title" class="input-text" style="width:100%;box-sizing:border-box;" placeholder="{clip_title} | {event}">
+      </div>
+      <div class="wk-field">
+        <label>Description template</label>
+        <textarea id="wk-tmpl-desc" style="width:100%;height:76px;padding:8px;background:rgba(0,0,0,.2);border:1px solid rgba(255,255,255,.1);border-radius:4px;color:#fff;font-size:12px;resize:vertical;box-sizing:border-box;"></textarea>
+      </div>
+      <div class="sq-tokens" id="wk-token-list"></div>
+      <div style="font-size:10px;color:var(--muted);margin-top:6px;">
+        An unattended run has no match on air, so <code>{event}</code>, <code>{team_a}</code> and
+        <code>{round}</code> will usually be empty — they're dropped cleanly rather than left as gaps.
+      </div>
+    </div>
+  </div>
+
+  <div style="display:flex;gap:6px;">
+    <button id="btn-wk-save" class="btn btn-primary" style="flex:1;padding:11px;">Save automation</button>
+    <button id="btn-wk-run" class="btn btn-secondary" style="padding:11px 16px;">Run now</button>
+  </div>
+  <div id="wk-status" style="font-size:11px;color:var(--muted);text-align:center;margin-top:8px;min-height:16px;white-space:pre-line;"></div>
+
+  <div style="margin-top:18px;">
+    <h3 class="section-title">Recent runs</h3>
+    <div id="wk-history" style="margin-top:8px;"><div style="color:var(--muted);font-size:12px;">No runs yet.</div></div>
+  </div>
 </div>
 
 <!-- ── CALENDAR ── -->
@@ -4699,47 +5196,20 @@
           <aside class="seed-sidebar">
 
             <div class="seed-sb-sec">
-              <div class="seed-sb-hd">Data</div>
-              <button class="btn btn-secondary btn-sm seed-sb-btn" id="seed-load-startgg" title="Pull all teams + players from the tournament platform — preserves any ranks already entered">↻ Pull from Platform</button>
+              <div class="seed-sb-hd"><span class="seed-sb-step">1</span>Load the field</div>
+              <button class="btn btn-secondary btn-sm seed-sb-btn" id="seed-load-startgg" title="Pull all teams + players from the tournament platform — preserves any ranks already entered, including your overrides">↻ Pull from Platform</button>
               <button class="btn btn-ghost btn-sm seed-sb-btn" id="seed-import-csv" title="Import player ranks from a CSV file">Import CSV</button>
               <input type="file" id="seed-csv-file" accept=".csv,text/csv" style="display:none;">
             </div>
 
             <div class="seed-sb-sec">
-              <div class="seed-sb-hd">Auto-Resolve</div>
-              <span class="seed-sb-lbl">One click cascades every player's rank through the fast sources best-first — verified 6mans, your manual/CSV ranks, then event-placement correlation — tagging each with a source and confidence. tracker.gg stays on the Unverified tab for stragglers.</span>
-              <button class="btn btn-primary btn-sm seed-sb-btn" id="seed-auto-resolve" title="Resolve every player's rank from all fast sources, tagging each with a source + confidence">Auto-resolve ranks</button>
+              <div class="seed-sb-hd"><span class="seed-sb-step">2</span>Resolve every rank</div>
+              <span class="seed-sb-lbl">One pass over the whole field, best source first: verified rl6mans, then tracker.gg, then event-placement correlation. Every player ends up tagged with where their rank came from and how confident it is — click <b>why</b> on any player to see the full derivation.</span>
+              <button class="btn btn-primary btn-sm seed-sb-btn" id="seed-auto-resolve" title="Resolve every player's rank from all sources, tagging each with a source + confidence">Resolve all ranks</button>
+              <label class="seed-sb-check" title="tracker.gg is the slow one (about 1-2s per player) but it's the only fallback for players who aren't on rl6mans. Off = fast sources only.">
+                <input type="checkbox" id="seed-resolve-tracker" checked> Include tracker.gg fallback
+              </label>
               <span class="seed-sb-lbl" id="seed-resolve-summary" style="display:none;"></span>
-            </div>
-
-            <div class="seed-sb-sec">
-              <div class="seed-sb-hd">Rank Settings</div>
-              <span class="seed-sb-lbl">Rank system</span>
-              <select id="seed-rankmode" class="input-select seed-sel" title="How player ranks are parsed and sorted"></select>
-              <span class="seed-sb-lbl">Team score</span>
-              <select id="seed-aggmethod" class="input-select seed-sel" title="How a team's seed score is derived from its players' ranks">
-                <option value="best">Best player</option>
-                <option value="avg">Average</option>
-                <option value="sum">Sum</option>
-              </select>
-            </div>
-
-            <div class="seed-sb-sec">
-              <div class="seed-sb-hd">Order</div>
-              <button class="btn btn-primary btn-sm seed-sb-btn seed-sortbtn" id="seed-sort-rank" data-sort="rank" title="Sort all teams by avg player rank — highest first">Sort by Rank</button>
-              <button class="btn btn-ghost btn-sm seed-sb-btn seed-sortbtn" id="seed-sort-seed" data-sort="seed" title="Restore original seed order">Restore Original Order</button>
-              <button class="btn btn-ghost btn-sm seed-sb-btn seed-sortbtn" id="seed-sort-name" data-sort="name" title="Order A to Z by team name">Sort A to Z</button>
-            </div>
-
-            <div class="seed-sb-sec">
-              <div class="seed-sb-hd">League Seeding</div>
-              <select id="seed-league" class="input-select seed-sel" title="Cross-reference a saved league — returning teams seed by their league points"><option value="">No league</option></select>
-              <div id="seed-league-summary" style="display:none; font-size:10px; color:var(--muted); line-height:1.5; padding:4px 0;"></div>
-              <button class="btn btn-ghost btn-sm seed-sb-btn seed-sortbtn" id="seed-sort-league" data-sort="league" title="Returning teams by league points first, then new teams by rank" style="display:none;">Sort by League Points</button>
-            </div>
-
-            <div class="seed-sb-sec">
-              <div class="seed-sb-hd">6mans Verify</div>
               <span class="seed-sb-lbl">Region</span>
               <select id="seed-6mans-region" class="input-select seed-sel" title="Region for the manual-match candidates/autocomplete. Direct profile lookup works across all regions regardless.">
                 <option value="ALL">International (all regions)</option>
@@ -4750,16 +5220,70 @@
                 <option value="ME">ME</option>
                 <option value="ASIA">ASIA</option>
               </select>
-              <button class="btn btn-secondary btn-sm seed-sb-btn" id="seed-verify-6mans" title="Cross-reference players against rl6mans.com leaderboards to verify or fill in ranks">Verify ranks</button>
+              <button class="btn btn-ghost btn-sm seed-sb-btn" id="seed-verify-6mans" title="rl6mans only — re-check every player against rl6mans.com without running the rest of the cascade">rl6mans only</button>
             </div>
 
             <div class="seed-sb-sec">
-              <div class="seed-sb-hd">Event History</div>
-              <span class="seed-sb-lbl">Score teams by past placements</span>
-              <button class="btn btn-secondary btn-sm seed-sb-btn" id="seed-local-btn" title="Score teams by win rate across all imported Rocket Rush events (instant, local data)">Local history</button>
+              <div class="seed-sb-hd"><span class="seed-sb-step">3</span>Review</div>
+              <span class="seed-sb-lbl">Everything auto couldn't stand behind. Type a rank on any player to override it — your call always wins and is never overwritten by a later resolve.</span>
+              <div id="seed-review-stat" class="seed-review-stat"></div>
+              <button class="btn btn-secondary btn-sm seed-sb-btn" id="seed-review-toggle" title="Show only the teams containing players that need a human decision">Show only needs-review</button>
+              <span class="seed-sb-lbl">Flag anything under</span>
+              <select id="seed-review-threshold" class="input-select seed-sel" title="A player resolved below this confidence is flagged for review. Teammate-averaged players are always flagged — they have no reading of their own.">
+                <option value="50">50% confidence</option>
+                <option value="60">60% confidence</option>
+                <option value="70" selected>70% confidence</option>
+                <option value="85">85% confidence</option>
+                <option value="101">Everything — audit the whole field</option>
+              </select>
+              <button class="btn btn-ghost btn-sm seed-sb-btn" id="seed-review-expand" title="Open the why-panel on every flagged player at once so you can audit them in one pass">Explain all flagged</button>
+            </div>
+
+            <div class="seed-sb-sec">
+              <div class="seed-sb-hd"><span class="seed-sb-step">4</span>Seed settings</div>
+              <span class="seed-sb-lbl">Rank system</span>
+              <select id="seed-rankmode" class="input-select seed-sel" title="How player ranks are parsed and sorted"></select>
+              <span class="seed-sb-lbl">Team score</span>
+              <select id="seed-aggmethod" class="input-select seed-sel" title="How a team's seed score is derived from its players' ranks">
+                <option value="best">Best player</option>
+                <option value="avg">Average</option>
+                <option value="sum">Sum</option>
+              </select>
+              <span class="seed-sb-lbl">Team size</span>
+              <select id="seed-teamsize" class="input-select seed-sel" title="Players per team for this event. Teams with fewer park on the Incomplete tab. Auto reads start.gg, then the most common roster size in the field — set it here if a 2v2 or 1v1 event is being read wrong.">
+                <option value="">Auto</option>
+                <option value="1">1v1 — 1 player</option>
+                <option value="2">2v2 — 2 players</option>
+                <option value="3">3v3 — 3 players</option>
+                <option value="4">4v4 — 4 players</option>
+                <option value="5">5v5 — 5 players</option>
+                <option value="6">6v6 — 6 players</option>
+                <option value="7">7v7 — 7 players</option>
+              </select>
+              <span class="seed-sb-lbl" id="seed-teamsize-note"></span>
+            </div>
+
+            <div class="seed-sb-sec">
+              <div class="seed-sb-hd"><span class="seed-sb-step">5</span>Order</div>
+              <button class="btn btn-primary btn-sm seed-sb-btn seed-sortbtn" id="seed-sort-rank" data-sort="rank" title="Sort all teams by avg player rank — highest first">Sort by Rank</button>
+              <button class="btn btn-ghost btn-sm seed-sb-btn seed-sortbtn" id="seed-sort-seed" data-sort="seed" title="Restore original seed order">Restore Original Order</button>
+              <button class="btn btn-ghost btn-sm seed-sb-btn seed-sortbtn" id="seed-sort-name" data-sort="name" title="Order A to Z by team name">Sort A to Z</button>
+              <span class="seed-sb-lbl">League seeding</span>
+              <select id="seed-league" class="input-select seed-sel" title="Cross-reference a saved league — returning teams seed by their league points"><option value="">No league</option></select>
+              <div id="seed-league-summary" style="display:none; font-size:10px; color:var(--muted); line-height:1.5; padding:4px 0;"></div>
+              <button class="btn btn-ghost btn-sm seed-sb-btn seed-sortbtn" id="seed-sort-league" data-sort="league" title="Returning teams by league points first, then new teams by rank" style="display:none;">Sort by League Points</button>
+            </div>
+
+            <details class="seed-sb-sec seed-sb-adv">
+              <summary class="seed-sb-hd">Advanced</summary>
+              <span class="seed-sb-lbl">6mans ELO ladder — what every rank letter converts to. Everything tier-derived (tracker.gg, manual, CSV) runs through this.</span>
+              <span class="seed-sb-lbl" id="seed-ladder-note" style="line-height:1.5;"></span>
+              <button class="btn btn-ghost btn-sm seed-sb-btn" id="seed-calibrate-ladder" title="Re-scrape the rl6mans leaderboards and re-measure what ELO each tier actually sits at.">Re-measure ELO ladder</button>
+              <span class="seed-sb-lbl" style="margin-top:8px;">Tie-breaking by past results</span>
+              <button class="btn btn-ghost btn-sm seed-sb-btn" id="seed-local-btn" title="Score teams by win rate across all imported events (instant, local data)">Local history</button>
               <button class="btn btn-ghost btn-sm seed-sb-btn" id="seed-score-btn" title="Fetch each player's recent tournament placements — all events, weighted by recency (API call)">From Platform</button>
               <button class="btn btn-ghost btn-sm seed-sb-btn" id="seed-sort-perf" title="Sort within each rank tier by performance score — keeps tier order, breaks ties by event results">Sort in Tier</button>
-            </div>
+            </details>
 
           </aside>
 
@@ -5529,7 +6053,13 @@
               </div>
               <div class="gfx-ctrl-row" style="justify-content:space-between; align-items:center;">
                 <span class="field-hint" id="mp-team-key" style="margin:0;"></span>
-                <button type="button" class="btn btn-secondary btn-sm" id="mp-from-series" title="Fill maps and scores from the series editor on Match — Teams" data-gfx="fix">Fill from Series</button>
+                <span style="display:flex; align-items:center; gap:8px;">
+                  <label class="mp-auto-lbl" title="Keep these scores live-synced from the series editor on Match — Teams. Turn off to type scores in by hand.">
+                    <input type="checkbox" id="mp-auto-series"> Auto from Series
+                  </label>
+                  <button type="button" class="btn btn-secondary btn-sm" id="mp-from-series" title="Fill maps and scores from the series editor on Match — Teams" data-gfx="fix">Fill from Series</button>
+                  <button type="button" class="btn btn-ghost btn-sm" id="mp-clear-scores" title="Blank every map's score (keeps the maps and picks)" data-gfx="fix">Clear scores</button>
+                </span>
               </div>
               <div id="mp-slots" class="mp-slots"></div>
               <div style="margin-top:8px;">
@@ -6974,6 +7504,10 @@
     <button type="button" class="ev-subnav-btn" data-inttab="games">Games &amp; GSI</button>
     <button type="button" class="ev-subnav-btn" data-inttab="tournaments">Tournament Platforms</button>
     <button type="button" class="ev-subnav-btn" data-inttab="twitch">Twitch</button>
+    <!-- Marble Race parked — unlisted from Integrations, code kept. Restore this button,
+         the store card and the #integration-chatgames panel together (see INT_TABS in app.js).
+    <button type="button" class="ev-subnav-btn" data-inttab="chatgames">Chat Games</button>
+    -->
   </div>
 
   <!-- Back bar — shown on every app panel; Browse is the only landing view -->
@@ -7045,6 +7579,24 @@
         </div>
         <span class="int-card-status" data-st="off">No key</span>
       </div>
+      <div class="int-card" data-card="sheets" data-goto="tournaments" data-scroll="sheets-conn-badge">
+        <div class="int-card-logo mono-sheets">GS</div>
+        <div class="int-card-body">
+          <div class="int-card-name">Google Sheets</div>
+          <div class="int-card-tag">Two-way sync for teams, schedule and standings.</div>
+        </div>
+        <span class="int-card-status" data-st="off">No key</span>
+      </div>
+      <!-- Marble Race parked — unlisted from Integrations, code kept.
+      <div class="int-card" data-card="marblerace" data-goto="chatgames">
+        <div class="int-card-logo mono-marblerace">MR</div>
+        <div class="int-card-body">
+          <div class="int-card-name">Marble Race</div>
+          <div class="int-card-tag">Every viewer's marble races a real 3D obstacle course — Twitch, Kick and YouTube.</div>
+        </div>
+        <span class="int-card-status" data-st="ready">Built-in</span>
+      </div>
+      -->
       <div class="int-card" data-card="vdo" data-goto="cameras">
         <div class="int-card-logo mono-vdo">VDO</div>
         <div class="int-card-body">
@@ -7624,6 +8176,57 @@
 
       <div style="font-size:11px;color:var(--muted);text-align:center;line-height:1.5;">
         Activity accumulates while Twitch is connected. Add to OBS as browser source (1920×1080, transparent BG).
+      </div>
+    </section>
+  </div>
+
+  <!-- CHAT GAMES — cross-platform (Twitch+Kick+YouTube), not nested under Twitch since it works
+       with just Kick or just YouTube connected too. -->
+  <!-- Marble Race (parked): unlisted from Integrations, implementation left intact. This panel
+       is intentionally orphaned. It stays display:none because 'chatgames' is no longer in
+       INT_TABS and nothing maps to it, so _intShowTab can never reveal it. Left verbatim so
+       restoring the feature is just re-adding the tab wiring in app.js. -->
+  <div id="integration-chatgames" class="integration-panel" style="display:none;">
+    <div class="page-head" style="padding-bottom:0; margin-bottom:16px;">
+      <h1>Chat Games</h1>
+      <p>Cross-platform chat-driven games — viewers on Twitch, Kick and YouTube all play from the same round.</p>
+    </div>
+
+    <section class="section">
+      <h3 class="section-title">Marble Race</h3>
+      <p class="section-desc" style="margin-bottom:12px;">
+        Every viewer's marble races a real 3D physics obstacle course — no betting, just chaos. Enter by typing
+        <code>!play</code> in Twitch, Kick, or YouTube chat. Add <code>marble-race.html</code> as an OBS browser source to show it.
+      </p>
+
+      <div id="mr-status-strip" style="padding:12px; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.1); border-radius:6px; margin-bottom:12px; display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap;">
+        <span id="mr-status-text" style="font-size:13px; font-weight:600;">Idle — no round running</span>
+        <span id="mr-status-detail" style="font-size:12px; color:var(--muted);"></span>
+      </div>
+
+      <div style="padding:12px; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.1); border-radius:6px; margin-bottom:12px;">
+        <div style="font-size:12px; font-weight:700; letter-spacing:0.5px; text-transform:uppercase; color:var(--muted); margin-bottom:10px;">Round Settings</div>
+        <div style="margin-bottom:10px;">
+          <label class="field-label" style="font-size:11px; margin-bottom:4px; display:block;">Entry Window (sec)</label>
+          <input type="number" id="mr-entry-window" class="input-text" value="30" min="10" max="180" style="width:100%;">
+        </div>
+        <label style="display:flex; align-items:center; gap:8px; margin-bottom:10px; cursor:pointer;">
+          <input type="checkbox" id="mr-auto-enter">
+          <span style="font-size:13px; font-weight:600;">Auto-enter every current Twitch viewer</span>
+        </label>
+        <p style="font-size:11px; color:var(--muted); margin:-4px 0 10px;">
+          Pulled from Twitch's live chatter list when entries lock. Kick and YouTube have no such list — those
+          viewers can still join with <code>!play</code> regardless of this toggle.
+        </p>
+        <div>
+          <label class="field-label" style="font-size:11px; margin-bottom:4px; display:block;">Custom Viewers (optional)</label>
+          <textarea id="mr-custom-viewers" class="input-text" rows="2" placeholder="One name per line or comma-separated — for testing or adding specific people" style="width:100%; resize:vertical;"></textarea>
+        </div>
+      </div>
+
+      <div style="display:flex; gap:8px;">
+        <button class="btn btn-primary" id="btn-start-marblerace" style="flex:1;">Start Round</button>
+        <button class="btn btn-secondary" id="btn-cancel-marblerace" style="flex:1;">Cancel Round</button>
       </div>
     </section>
   </div>
@@ -8348,6 +8951,31 @@ PacketSendRate=10</pre>
               <label class="field-label" for="select-ballchasing-autoleague">Upload To</label>
               <select id="select-ballchasing-autoleague" class="input-select" style="max-width:320px;"><option value="">— pick a league with Ballchasing enabled —</option></select>
             </div>
+          </div>
+        </div>
+
+        <div style="margin-top:14px; padding-top:12px; border-top:1px solid rgba(255,255,255,.06);">
+          <label class="qt-toggle" title="Manually rename un-renamed .replay files in a local folder to human-readable names (team + game + score) by matching their timestamp against this app's own recorded game history, then upload them. This is a one-press batch action, not a continuous watcher — run it after you finish producing an event.">
+            <span>Rename Replay History</span>
+            <span class="switch"><input type="checkbox" id="check-ballchasing-replayrename"><span class="slider"></span></span>
+          </label>
+          <div id="ballchasing-replayrename-opts" style="display:none; margin-top:8px; display:flex; flex-direction:column; gap:8px;">
+            <div class="field-row" style="margin-bottom: 0;">
+              <label class="field-label" for="input-ballchasing-replayrename-folder">Replay Folder</label>
+              <div style="display:flex; gap:8px;">
+                <input type="text" id="input-ballchasing-replayrename-folder" class="input-text" placeholder="e.g. C:\Users\you\Documents\My Games\Rocket League\TAGame\Demos" style="flex:1;">
+                <button id="btn-ballchasing-replayrename-browse-folder" class="btn btn-ghost btn-sm">Browse…</button>
+              </div>
+            </div>
+            <div class="field-row" style="margin-bottom: 0;">
+              <label class="field-label" for="select-ballchasing-replayrename-league">Upload To</label>
+              <select id="select-ballchasing-replayrename-league" class="input-select" style="max-width:320px;"><option value="">— pick a league with Ballchasing enabled —</option></select>
+            </div>
+            <div style="display:flex; gap:8px; align-items:center;">
+              <button class="btn btn-primary btn-sm" id="btn-ballchasing-run-replayrename">Rename &amp; Upload History</button>
+              <span id="ballchasing-replayrename-status" style="font-size:12px; color:var(--muted);"></span>
+            </div>
+            <div id="ballchasing-replayrename-results" style="display:none; max-height:220px; overflow-y:auto; border:1px solid rgba(255,255,255,.08); border-radius:6px; padding:6px 8px; font-size:12px;"></div>
           </div>
         </div>
       </div>
@@ -9661,9 +10289,15 @@ PacketSendRate=10</pre>
           <div class="qk-put" id="qk-put"></div>
         </div>
 
-        <!-- Program scene cuts -->
-        <div class="qrail-group qk-grp">
-          <div class="qrail-label">Program <span class="qrail-sub" id="qrail-scenes-sub"></span></div>
+        <!-- Program scene cuts. "reorder" drags scenes into the producer's own show order and
+             hides ones that never go on air — both panel-local, the OBS collection is untouched. -->
+        <div class="qrail-group qk-grp qprog-grp">
+          <div class="qrail-label">Program
+            <span class="qrail-sub">
+              <span class="qprog-cur" id="qrail-scenes-sub"></span>
+              <a href="#" id="qprog-reorder" title="Drag scenes into your own show order and hide the ones you never cut to. Panel only — your OBS scene collection is not changed.">reorder</a>
+            </span>
+          </div>
           <div id="qrail-scenes" class="qrail-scenes"></div>
         </div>
       </div>
@@ -10005,6 +10639,7 @@ PacketSendRate=10</pre>
         <div class="ev-subnav" id="tw-subnav" style="margin-bottom:10px;">
           <button type="button" class="ev-subnav-btn active" data-tw="chat">Chat</button>
           <button type="button" class="ev-subnav-btn" data-tw="activity">Activity</button>
+          <button type="button" class="ev-subnav-btn" data-tw="questions">Q&amp;A</button>
         </div>
 
       <div class="tw-sub" data-twpanel="chat">
@@ -10153,6 +10788,73 @@ PacketSendRate=10</pre>
             <div style="color: #888; font-size: 12px; text-align: center; padding: 20px 10px;">
               Follows, subscriptions, raids, and more appear here
             </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── Q&A: the question mailbag (Discord channel pull, !ask keyword, manual entry) ── -->
+      <div class="tw-sub" data-twpanel="questions" style="display:none;">
+        <div class="qrail-group">
+          <div style="display:flex; align-items:center; gap:6px; margin-bottom:8px;">
+            <div id="q-filter-chips" style="display:flex; gap:3px;">
+              <button type="button" class="btn btn-ghost btn-sm" data-qf="new" style="padding:2px 7px; font-size:10px;">NEW</button>
+              <button type="button" class="btn btn-ghost btn-sm" data-qf="asked" style="padding:2px 7px; font-size:10px;">ASKED</button>
+              <button type="button" class="btn btn-ghost btn-sm" data-qf="all" style="padding:2px 7px; font-size:10px;">ALL</button>
+            </div>
+            <span class="field-hint" style="margin:0; flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" id="q-status">No questions queued.</span>
+            <button id="q-onair-clear" class="btn btn-ghost btn-sm" style="display:none;">Take down</button>
+            <button id="q-settings-btn" class="btn btn-ghost btn-sm" title="Question sources &amp; capture" style="padding:2px 8px; font-size:11px;">Sources</button>
+          </div>
+
+          <!-- Where questions come from -->
+          <div id="q-settings-panel" style="display:none; margin-bottom:8px; padding:10px; background:rgba(0,0,0,0.28); border:1px solid rgba(255,255,255,0.1); border-radius:6px;">
+            <div style="font-size:11px; font-weight:700; letter-spacing:.05em; color:var(--muted); margin-bottom:8px;">QUESTION SOURCES</div>
+            <label style="font-size:11px; display:block; margin:0 0 3px;">Discord questions channel ID</label>
+            <input id="q-discord-channel" class="input-text" style="font-size:12px;" placeholder="Right-click #questions → Copy Channel ID">
+            <div style="font-size:10px; color:var(--muted); margin-top:4px; line-height:1.4;">Every message posted there is queued as a question. Uses the same bot token as Chat Sources (Chat tab → +).</div>
+            <button id="q-pull-btn" class="btn btn-ghost btn-sm" style="margin-top:6px; width:100%;">Pull recent messages</button>
+
+            <label style="font-size:11px; display:flex; align-items:center; gap:8px; margin:12px 0 3px;">
+              <input type="checkbox" id="q-keyword-on" style="margin:0;"> Capture keyword in any chat
+            </label>
+            <input id="q-keyword" class="input-text" style="font-size:12px;" placeholder="!ask" maxlength="20">
+            <div style="font-size:10px; color:var(--muted); margin-top:4px; line-height:1.4;">A Twitch/YouTube/Kick/Discord chat message starting with this joins the queue, tagged with its platform.</div>
+
+            <label style="font-size:11px; display:block; margin:12px 0 3px;">Time on stream</label>
+            <select id="q-duration" class="input-text" style="font-size:12px;">
+              <option value="15">15s</option>
+              <option value="30" selected>30s</option>
+              <option value="60">60s</option>
+              <option value="0">Until cleared</option>
+            </select>
+
+            <div id="q-settings-fb" style="font-size:11px; color:var(--muted); margin-top:8px; min-height:14px;"></div>
+            <div style="display:flex; gap:6px; margin-top:6px;">
+              <button id="q-settings-save" class="btn btn-primary btn-sm" style="flex:1;">Save</button>
+              <button id="q-settings-close" class="btn btn-ghost btn-sm">Close</button>
+            </div>
+          </div>
+
+          <!-- Manual entry — for questions that came off a social with no live feed -->
+          <div style="margin-bottom:8px;">
+            <div style="display:flex; gap:6px;">
+              <select id="q-add-source" class="input-text" style="width:118px; font-size:12px; flex:none;"></select>
+              <input id="q-add-user" class="input-text" style="flex:1; min-width:0; font-size:12px;" placeholder="@handle" maxlength="60">
+              <input id="q-add-label" class="input-text" style="display:none; width:96px; flex:none; font-size:12px;" placeholder="Label" maxlength="24" title="On-air label for this source">
+            </div>
+            <div style="display:flex; gap:6px; margin-top:6px;">
+              <input id="q-add-text" class="input-text" style="flex:1; min-width:0; font-size:12px;" placeholder="Type a question…" maxlength="400">
+              <button id="q-add-btn" class="btn btn-primary btn-sm" style="flex:none;">Add</button>
+            </div>
+          </div>
+
+          <div id="q-list" style="height:430px; background:rgba(0,0,0,0.3); border-radius:6px; overflow-y:auto; padding:6px; border:1px solid rgba(255,255,255,0.1);">
+            <div data-placeholder style="color:#888; font-size:12px; text-align:center; padding:20px 10px;">Questions appear here — pull them from Discord, capture them with a keyword, or add your own.</div>
+          </div>
+
+          <div style="display:flex; gap:6px; margin-top:8px;">
+            <button id="q-clear-asked" class="btn btn-ghost btn-sm" style="flex:1;">Clear answered</button>
+            <button id="q-clear-all" class="btn btn-ghost btn-sm">Clear all</button>
           </div>
         </div>
       </div>
@@ -10919,6 +11621,7 @@ PacketSendRate=10</pre>
      per-domain files — classic scripts share one global scope in load order. -->
 <script src="core.js"></script>
 <script src="app.js"></script>
+<script src="social-naming-core.js"></script>
 <script src="social.js"></script>
 <script src="stats-analytics.js"></script>
 <script src="seed-resolve-core.js"></script>

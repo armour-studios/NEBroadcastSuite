@@ -294,6 +294,94 @@ function invalidateCache(region) {
   else _cache.clear();
 }
 
+// ── measured tier → ELO ladder ─────────────────────────────────────────────
+// The seeding studio needs to know what ELO each 6mans tier actually sits at, so a tier-derived
+// estimate (tracker.gg rank, a manual letter, a CSV) lands on the same scale as a verified exact ELO.
+// Rather than hardcode a guess, measure it: every leaderboard page is per-tier and carries each
+// player's real ELO, so grouping the already-scraped index by tier gives the true ladder.
+//
+// MEDIAN, not mean — a leaderboard tail of 0-ELO/placement entries would drag a mean down hard.
+// Sparse tiers (S and X barely list anyone) fall back to the caller's defaults, and the ladder is
+// forced strictly increasing so it can never invert.
+const LADDER_TIERS = ['H', 'E', 'D', 'C', 'B', 'B+', 'A', 'X', 'S'];   // low → high
+const SLUG_TO_TIER = { S: 'S', X: 'X', A: 'A', BPLUS: 'B+', B: 'B', C: 'C', D: 'D', E: 'E', H: 'H' };
+
+function median(nums) {
+  if (!nums.length) return null;
+  const s = nums.slice().sort((a, b) => a - b);
+  const m = s.length >> 1;
+  return s.length % 2 ? s[m] : Math.round((s[m - 1] + s[m]) / 2);
+}
+
+// → { midpoints:[9], tiers:[{tier, elo, n, source}], region, players, measuredAt }
+async function measureTierLadder(region, opts) {
+  const minSamples = (opts && opts.minSamples) || 3;
+  const minGap = (opts && opts.minGap) || 50;
+  const defaults = (opts && Array.isArray(opts.defaults) && opts.defaults.length === LADDER_TIERS.length)
+    ? opts.defaults : null;
+
+  const idx = await buildIndex(region || 'ALL');
+  const players = (idx && idx.allPlayers) || [];
+
+  // Group real ELOs by tier. p.rank is the leaderboard URL slug the page was scraped from.
+  const byTier = new Map(LADDER_TIERS.map((t) => [t, []]));
+  players.forEach((p) => {
+    const tier = SLUG_TO_TIER[String(p.rank || '').toUpperCase()];
+    if (!tier) return;
+    const elo = Number(p.elo);
+    if (Number.isFinite(elo) && elo > 0) byTier.get(tier).push(elo);
+  });
+
+  const measured = LADDER_TIERS.map((t) => {
+    const vals = byTier.get(t) || [];
+    return { tier: t, n: vals.length, elo: vals.length >= minSamples ? median(vals) : null };
+  });
+
+  // Fill the gaps. Prefer interpolating between measured neighbours (keeps the measured shape); fall
+  // back to the caller's defaults, then to a linear step, so S/X never come back null.
+  const fill = (i) => {
+    let lo = -1, hi = -1;
+    for (let j = i - 1; j >= 0; j--) if (measured[j].elo != null) { lo = j; break; }
+    for (let j = i + 1; j < measured.length; j++) if (measured[j].elo != null) { hi = j; break; }
+    if (lo >= 0 && hi >= 0) {
+      const span = measured[hi].elo - measured[lo].elo;
+      return { elo: Math.round(measured[lo].elo + span * ((i - lo) / (hi - lo))), source: 'interpolated' };
+    }
+    // Extrapolate past the measured end using the average step we did measure.
+    const known = measured.filter((m) => m.elo != null);
+    if (known.length >= 2) {
+      const firstI = measured.findIndex((m) => m.elo != null);
+      const lastI = measured.length - 1 - measured.slice().reverse().findIndex((m) => m.elo != null);
+      const step = (measured[lastI].elo - measured[firstI].elo) / Math.max(1, lastI - firstI);
+      const anchor = i > lastI ? lastI : firstI;
+      return { elo: Math.round(measured[anchor].elo + step * (i - anchor)), source: 'extrapolated' };
+    }
+    if (defaults) return { elo: defaults[i], source: 'default' };
+    return { elo: 100 + i * 150, source: 'default' };
+  };
+
+  const tiers = measured.map((m, i) => m.elo != null
+    ? { tier: m.tier, elo: m.elo, n: m.n, source: 'measured' }
+    : { tier: m.tier, n: m.n, ...fill(i) });
+
+  // Force strictly increasing — a thin tier's median can otherwise land under the tier below it.
+  const midpoints = tiers.map((t) => t.elo);
+  for (let i = 1; i < midpoints.length; i++) {
+    if (midpoints[i] <= midpoints[i - 1]) {
+      midpoints[i] = midpoints[i - 1] + minGap;
+      tiers[i].elo = midpoints[i];
+      if (tiers[i].source === 'measured') tiers[i].source = 'measured (raised)';
+    }
+  }
+
+  const measuredCount = tiers.filter((t) => String(t.source).startsWith('measured')).length;
+  console.log(`[rl6mans] Tier ladder measured from ${region || 'ALL'} (${players.length} players): `
+    + tiers.map((t) => `${t.tier}=${t.elo}${t.source === 'measured' ? `(n=${t.n})` : `[${t.source}]`}`).join(' ')
+    + ` — ${measuredCount}/${LADDER_TIERS.length} tiers from real data`);
+
+  return { midpoints, tiers, region: region || 'ALL', players: players.length, measuredTiers: measuredCount, measuredAt: Date.now() };
+}
+
 // Persist / restore the per-player profile cache across restarts.
 // Entries older than PROFILE_TTL_MS are silently dropped on load.
 function loadPersistedCache(entries) {
@@ -438,4 +526,4 @@ async function lookupPlayers(names, region = 'NA', opts = {}) {
   });
 }
 
-module.exports = { lookupPlayers, fetchProfile, buildIndex, invalidateCache, loadPersistedCache, dumpProfileCache, RANKS, REGION_LIST };
+module.exports = { lookupPlayers, fetchProfile, buildIndex, invalidateCache, loadPersistedCache, dumpProfileCache, measureTierLadder, RANKS, REGION_LIST, LADDER_TIERS };

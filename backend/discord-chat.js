@@ -1,15 +1,19 @@
 'use strict';
 
-/* Discord chat — multichat source #4. Reads messages from ONE Discord text channel
- * via a bot connection to the Discord gateway. The app's existing Discord state is
- * cloud-login IDENTITY (OAuth), NOT a message-reading bot — so this needs its own bot
- * token, which the producer creates once (Discord Developer Portal → New Application →
- * Bot → copy token → enable "Message Content Intent" → invite to their server).
+/* Discord chat — multichat source #4. Reads messages from Discord text channels via a bot
+ * connection to the Discord gateway. The app's existing Discord state is cloud-login
+ * IDENTITY (OAuth), NOT a message-reading bot — so this needs its own bot token, which the
+ * producer creates once (Discord Developer Portal → New Application → Bot → copy token →
+ * enable "Message Content Intent" → invite to their server).
  *
  *   createDiscordChat({ getConfig, onMessage, onStatus })
- *     getConfig() -> { botToken, channelId }   (either empty = idle)
- *     onMessage({ platform:'discord', user, text, color, ts })
+ *     getConfig() -> { botToken, channelId, questionChannelId }   (token/both channels empty = idle)
+ *     onMessage({ platform:'discord', kind:'chat'|'question', user, text, color, ts, ref })
  *     onStatus(connected:boolean, detail:string)
+ *
+ * TWO channels ride ONE gateway connection: the multichat feed channel and (optionally) a
+ * dedicated questions/mailbag channel, tagged apart by `kind`. Discord rate-limits IDENTIFY
+ * hard, so a second socket for the second channel would be the wrong shape.
  *
  * Raw gateway (no discord.js dep). Intents: GUILDS | GUILD_MESSAGES | MESSAGE_CONTENT.
  * Close code 4014 = "disallowed intents" → the Message Content Intent isn't enabled;
@@ -18,6 +22,7 @@
 
 let WebSocket;
 try { WebSocket = require('ws'); } catch (e) { console.warn('[discord-chat] ws not installed'); }
+const https = require('https');
 
 const GATEWAY_URL = 'wss://gateway.discord.gg/?v=10&encoding=json';
 const INTENTS = (1 << 0) | (1 << 9) | (1 << 15);   // GUILDS + GUILD_MESSAGES + MESSAGE_CONTENT
@@ -42,7 +47,8 @@ function createDiscordChat({ getConfig, onMessage, onStatus }) {
     const cfg = getConfig() || {};
     const token = (cfg.botToken || '').trim();
     const channelId = (cfg.channelId || '').trim();
-    if (!token || !channelId) { status(false, 'not configured'); return; }   // idle until set
+    const questionChannelId = (cfg.questionChannelId || '').trim();
+    if (!token || (!channelId && !questionChannelId)) { status(false, 'not configured'); return; }   // idle until set
     curToken = token;
 
     let sock;
@@ -84,12 +90,17 @@ function createDiscordChat({ getConfig, onMessage, onStatus }) {
           if (m.t === 'READY') { status(true, 'connected'); return; }
           if (m.t !== 'MESSAGE_CREATE') return;
           const d = m.d || {};
-          if (d.channel_id !== (getConfig().channelId || '').trim()) return;   // only the watched channel
+          const live = getConfig() || {};
+          // Only the watched channels; the questions channel is tagged so the server can route it.
+          let kind = '';
+          if (d.channel_id === (live.channelId || '').trim()) kind = 'chat';
+          else if (d.channel_id === (live.questionChannelId || '').trim()) kind = 'question';
+          else return;
           if (d.author && d.author.bot) return;                                // skip bots (incl. ourselves)
           const text = (d.content || '').toString().trim();
           if (!text) return;                                                   // embeds/attachments-only
           const user = (d.member && d.member.nick) || (d.author && (d.author.global_name || d.author.username)) || 'Discord user';
-          try { onMessage({ platform: 'discord', user, text, color: '', ts: Date.now() }); } catch (_) {}
+          try { onMessage({ platform: 'discord', kind, user, text, color: '', ts: Date.now(), ref: d.id || '' }); } catch (_) {}
           break;
         }
       }
@@ -124,4 +135,49 @@ function createDiscordChat({ getConfig, onMessage, onStatus }) {
   };
 }
 
-module.exports = { createDiscordChat };
+/**
+ * One-shot REST read of a channel's recent messages — the gateway only ever delivers what
+ * arrives AFTER we connect, so the backlog a community posted overnight needs this. Returns
+ * oldest-first [{ ref, user, text, ts }]; rejects with a producer-readable message.
+ */
+function fetchChannelMessages({ botToken, channelId, limit = 50 }) {
+  return new Promise((resolve, reject) => {
+    const token = (botToken || '').trim();
+    const id = (channelId || '').trim();
+    if (!token) return reject(new Error('No Discord bot token saved.'));
+    if (!/^\d{5,25}$/.test(id)) return reject(new Error('Channel ID must be the numeric ID (right-click the channel → Copy Channel ID).'));
+    const req = https.request({
+      host: 'discord.com',
+      path: `/api/v10/channels/${id}/messages?limit=${Math.max(1, Math.min(100, Number(limit) || 50))}`,
+      method: 'GET',
+      headers: { Authorization: 'Bot ' + token, 'User-Agent': 'ne-broadcast-suite (questions, 1.0)' },
+    }, (res) => {
+      let body = '';
+      res.on('data', (c) => { body += c; });
+      res.on('end', () => {
+        if (res.statusCode === 401) return reject(new Error('Discord rejected the bot token.'));
+        if (res.statusCode === 403) return reject(new Error('The bot cannot read that channel — check its permissions (View Channel + Read Message History).'));
+        if (res.statusCode === 404) return reject(new Error('No such channel — double-check the channel ID.'));
+        if (res.statusCode === 429) return reject(new Error('Discord rate-limited the pull; try again in a moment.'));
+        if (res.statusCode !== 200) return reject(new Error('Discord returned HTTP ' + res.statusCode));
+        let arr;
+        try { arr = JSON.parse(body); } catch { return reject(new Error('Unreadable response from Discord.')); }
+        if (!Array.isArray(arr)) return reject(new Error('Unexpected response from Discord.'));
+        resolve(arr
+          .filter(d => d && !(d.author && d.author.bot) && (d.content || '').trim())
+          .map(d => ({
+            ref: d.id || '',
+            user: (d.member && d.member.nick) || (d.author && (d.author.global_name || d.author.username)) || 'Discord user',
+            text: (d.content || '').toString().trim(),
+            ts: d.timestamp ? Date.parse(d.timestamp) || Date.now() : Date.now(),
+          }))
+          .reverse());   // Discord returns newest-first; queue order should read oldest-first
+      });
+    });
+    req.on('error', (e) => reject(new Error('Could not reach Discord: ' + e.message)));
+    req.setTimeout(10000, () => { req.destroy(new Error('Discord request timed out')); });
+    req.end();
+  });
+}
+
+module.exports = { createDiscordChat, fetchChannelMessages };

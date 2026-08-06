@@ -220,7 +220,7 @@
     return v || fallback;
   }
 
-  const STANDALONE_CASTER_RE = /\/(casters|duorow|triorow|duosinglecam|singlecam|analystspecial|campip|talentbar|interview|quaddesk|spotlightdesk|vertical|preshow)\.html$/i;
+  const STANDALONE_CASTER_RE = /\/(casters|duorow|duorow-noscore|triorow|duosinglecam|singlecam|analystspecial|campip|talentbar|interview|quaddesk|quaddesk-noscore|spotlightdesk|vertical|vertical-casters|preshow)\.html$/i;
   const standaloneCasterScene = STANDALONE_CASTER_RE.test(global.location.pathname);
 
   const SceneBase = {
@@ -239,6 +239,21 @@
     },
     brandLogo(data) {
       return (data && data.brand && data.brand.logo) || null;
+    },
+    /** Text colour that stays legible ON a filled brand colour. A white/pastel kit used to put
+        white text on a white pill (invisible on air); anything mid-to-dark keeps white text, so
+        the default palettes look exactly as before. Accepts #rgb, #rrggbb or rgb()/rgba(). */
+    onColor(color, dark, light) {
+      const c = String(color == null ? '' : color).trim();
+      let r = 0, g = 0, b = 0;
+      let m = c.match(/^#([0-9a-f]{3})$/i);
+      if (m) { r = parseInt(m[1][0] + m[1][0], 16); g = parseInt(m[1][1] + m[1][1], 16); b = parseInt(m[1][2] + m[1][2], 16); }
+      else if ((m = c.match(/^#([0-9a-f]{6})$/i))) { r = parseInt(m[1].slice(0, 2), 16); g = parseInt(m[1].slice(2, 4), 16); b = parseInt(m[1].slice(4, 6), 16); }
+      else if ((m = c.match(/^rgba?\(\s*(\d+)[\s,]+(\d+)[\s,]+(\d+)/i))) { r = +m[1]; g = +m[2]; b = +m[3]; }
+      else return light || '#fff';
+      const lin = (v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
+      const lum = 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+      return lum > 0.45 ? (dark || '#04121f') : (light || '#fff');
     },
     // Resolve one of the configured RL-style team slots into a normalised shape.
     /** Desk display name: the gamertag/handle by default (casters.nameMode 'gamertag'),
