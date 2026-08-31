@@ -12,7 +12,7 @@ let _evTournaments = [];
 let _evFilter = 'upcoming';   // 'upcoming' | 'past' | 'all'
 let _evSearch = '';
 let _evMode = 'mine';         // 'mine' = my admin tournaments | 'search' = global start.gg search
-let _evSource = 'startgg';    // 'startgg' | 'challonge' | 'nxgen' — which platform the grid is showing
+let _evSource = 'startgg';    // 'startgg' | 'challonge' | 'nxgen' | 'faceit' — which platform the grid is showing
 
 function evStatus(msg, kind) {
   const s = el('ev-status'); if (!s) return;
@@ -108,18 +108,44 @@ async function evLoadNxgenTournaments() {
     evStatus(e.message || 'Failed to load. Check your NXGEN API key in Settings.', 'err');
   } finally { if (btn) btn.disabled = false; }
 }
+// FACEIT lists an ORGANISER'S own championships and hubs (set the organiser name in Settings ▸
+// Integrations ▸ FACEIT). There is no "everything I admin" endpoint the way start.gg has one, so
+// without an organiser this grid is empty and the Dashboard's paste-a-link path is the way in.
+async function evLoadFaceitCompetitions() {
+  const btn = el('ev-load'); if (btn) btn.disabled = true;
+  evStatus('Loading your FACEIT competitions…');
+  try {
+    const r = await fetch('http://localhost:3000/api/faceit/my-competitions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.error || ('HTTP ' + r.status));
+    _evTournaments = (data.competitions || []).map((c) => ({
+      platform: 'faceit', slug: c.id, competitionType: c.type || 'championship', name: c.name,
+      startAt: null,
+      numAttendees: c.slots || 0, eventCount: 1, image: c.avatar || '', game: c.game || '',
+    }));
+    evSetMode('FACEIT — my competitions');
+    applyEventsView();
+    evStatus(_evTournaments.length ? ''
+      : (data.needsOrganizer
+        ? 'Add your FACEIT organiser name in Settings → Integrations → FACEIT to list your competitions here (or paste a championship link on the Dashboard).'
+        : 'No FACEIT competitions found for this organiser.'));
+  } catch (e) {
+    evStatus(e.message || 'Failed to load. Check your FACEIT API key in Settings.', 'err');
+  } finally { if (btn) btn.disabled = false; }
+}
 // Switch which platform the Tournaments grid is showing.
 function evSetSource(src) {
-  _evSource = ['challonge', 'nxgen'].includes(src) ? src : 'startgg';
+  _evSource = ['challonge', 'nxgen', 'faceit'].includes(src) ? src : 'startgg';
   document.querySelectorAll('#ev-src-seg .ev-seg-btn').forEach((b) => b.classList.toggle('active', b.dataset.src === _evSource));
   const searchbar = el('ev-searchbar'); if (searchbar) searchbar.style.display = _evSource === 'startgg' ? '' : 'none';
   const loadBtn = el('ev-load');
-  if (loadBtn) loadBtn.textContent = _evSource === 'challonge' ? 'My Challonge tournaments' : _evSource === 'nxgen' ? 'My NXGEN events' : 'My tournaments';
+  if (loadBtn) loadBtn.textContent = _evSource === 'challonge' ? 'My Challonge tournaments' : _evSource === 'nxgen' ? 'My NXGEN events' : _evSource === 'faceit' ? 'My FACEIT competitions' : 'My tournaments';
   _evTournaments = []; _evDetail = null;
   const sec = el('ev-detail-section'); if (sec) sec.style.display = 'none';
   const toolbar = el('ev-toolbar'); if (toolbar) toolbar.style.display = '';
   if (_evSource === 'challonge') evLoadChallongeTournaments();
   else if (_evSource === 'nxgen') evLoadNxgenTournaments();
+  else if (_evSource === 'faceit') evLoadFaceitCompetitions();
   else evLoadTournaments();
 }
 document.querySelectorAll('#ev-src-seg .ev-seg-btn').forEach((b) => b.addEventListener('click', () => evSetSource(b.dataset.src)));
@@ -129,9 +155,13 @@ function evStartTs(t) { return t.startAt || t.endAt || 0; }
 function evIsUpcoming(t, now) { return (t.endAt || t.startAt || 0) >= now; }
 function applyEventsView() {
   const now = Date.now() / 1000;
-  const q = _evSearch.trim().toLowerCase();
+  const q = _evSearch.trim();
+  // Filter only — the date sort below is the ordering the producer expects here, so relevance
+  // ranking would fight it.
   let list = _evTournaments.slice();
-  if (q) list = list.filter((t) => (t.name || '').toLowerCase().includes(q) || (t.slug || '').toLowerCase().includes(q));
+  if (q) list = list.filter((t) => NESearch.matches(q, [
+    { text: t.name, weight: 2 }, t.slug, t.city, t.venue, t.ownerName
+  ]));
 
   const upAsc = (a, b) => (evStartTs(a) || Infinity) - (evStartTs(b) || Infinity);   // soonest first
   const pastDesc = (a, b) => evStartTs(b) - evStartTs(a);                             // most recent first
@@ -170,7 +200,8 @@ function renderEventsGrid(list, now) {
     // <div> card with its own inline action <button>s (a <button> can't nest another <button>).
     const card = document.createElement(platform === 'startgg' ? 'button' : 'div');
     card.className = 'ev-card' + (past ? ' ev-card-past' : '');
-    const platformBadge = platform !== 'startgg' ? `<span class="ev-pill ev-pill-src">${platform === 'challonge' ? 'CHALLONGE' : 'NXGEN'}</span>` : '';
+    const PLAT_PILL = { challonge: 'CHALLONGE', nxgen: 'NXGEN', faceit: 'FACEIT' };
+    const platformBadge = platform !== 'startgg' ? `<span class="ev-pill ev-pill-src">${PLAT_PILL[platform] || platform.toUpperCase()}</span>` : '';
     card.innerHTML = `<div class="ev-card-img"></div><div class="ev-card-body">
       <div class="ev-card-name"></div><div class="ev-card-meta"></div>
       <div class="ev-card-stats">${platformBadge}<span class="ev-pill"></span><span class="ev-pill"></span></div>
@@ -189,12 +220,13 @@ function renderEventsGrid(list, now) {
     } else {
       card.querySelector('.ev-card-addmy')?.addEventListener('click', (e) => {
         e.stopPropagation();
-        send('add_my_event', { platform, platformSlug: t.slug, name: t.name, tournamentName: t.name, game: t.game || '', numEntrants: t.numAttendees || 0, startAt: t.startAt || null, image: t.image || '' });
+        send('add_my_event', { platform, platformSlug: t.slug, name: t.name, tournamentName: t.name, game: t.game || '', numEntrants: t.numAttendees || 0, startAt: t.startAt || null, image: t.image || '', ...(platform === 'faceit' ? { competitionType: t.competitionType || 'championship' } : {}) });
         const btn = e.currentTarget; btn.textContent = 'Added ✓'; setTimeout(() => { btn.textContent = '+ My Events'; }, 1400);
       });
       card.querySelector('.ev-card-live')?.addEventListener('click', (e) => {
         e.stopPropagation();
-        send(platform === 'challonge' ? 'load_challonge_tournament' : 'load_nxgen_event', { slug: t.slug });
+        if (platform === 'faceit') send('load_faceit_event', { id: t.slug, competitionType: t.competitionType || 'championship' });
+        else send(platform === 'challonge' ? 'load_challonge_tournament' : 'load_nxgen_event', { slug: t.slug });
         evStatus(`Loading "${t.name}" live…`);
       });
     }
@@ -293,8 +325,8 @@ async function evSelectEvent(e) {
 function renderEventTeams(filter, loading) {
   const list = el('ev-players-list'); if (!list) return;
   if (loading) { list.innerHTML = '<div class="ev-empty">Loading teams…</div>'; el('ev-players-count').textContent = ''; return; }
-  const f = (filter || '').trim().toLowerCase();
-  const shown = !f ? _evTeams : _evTeams.filter((t) => (t.name || '').toLowerCase().includes(f) || (t.players || []).some((p) => p.toLowerCase().includes(f)));
+  const f = (filter || '').trim();
+  const shown = NESearch.filter(_evTeams, f, (t) => [{ text: t.name, weight: 2 }].concat(t.players || []));
   el('ev-players-count').textContent = _evTeams.length ? _evTeams.length + ' teams · ' + _evTeams.reduce((n, t) => n + (t.players || []).length, 0) + ' players' : '';
   list.innerHTML = '';
   if (!shown.length) { list.innerHTML = `<div class="ev-empty">${_evTeams.length ? 'No teams match.' : 'No teams listed for this event yet.'}</div>`; return; }
@@ -414,21 +446,38 @@ el('btn-teams-use-current-event')?.addEventListener('click', () => {
 
 // ── Events sub-nav (start.gg | Leagues) ───────────────────────────────────
 function evShowSubtab(t) {
+  // Not a panel — a deep-link out to Production ▸ Graphics ▸ Bracket. Leave the current panel and
+  // the saved sub-tab untouched so coming back to ESPORTS lands where the producer actually was.
+  if (t === 'buildbracket') { if (typeof openBracketBuilder === 'function') openBracketBuilder(); return; }
   document.querySelectorAll('#ev-subnav .ev-subnav-btn').forEach((x) => x.classList.toggle('active', x.dataset.evtab === t));
-  const sg = el('ev-startgg-panel'), lg = el('ev-leagues-panel'), me = el('ev-myevents-panel'), sd = el('ev-seeding-panel'), eo = el('ev-eventops-panel');
+  const sg = el('ev-startgg-panel'), lg = el('ev-leagues-panel'), me = el('ev-myevents-panel'), sd = el('ev-seeding-panel');
   if (sg) sg.style.display = t === 'startgg' ? '' : 'none';
   if (lg) lg.style.display = t === 'leagues' ? '' : 'none';
   if (me) me.style.display = t === 'myevents' ? '' : 'none';
   if (sd) sd.style.display = t === 'seeding' ? '' : 'none';
-  if (eo) eo.style.display = t === 'eventops' ? '' : 'none';
   if (t === 'leagues') lgRender();
   if (t === 'myevents') { renderMyEvents(); evRefreshAllOnOpen(); }
   // Land on the event picker; openSeedingStudio() re-shows the studio right after when seeding a specific event.
   if (t === 'seeding') { seedShowStudio(false); renderSeedPicker(); evRefreshAllOnOpen(); }
-  if (t === 'eventops' && typeof window.eventOpsRender === 'function') window.eventOpsRender();
   try { localStorage.setItem('ev_active_subtab', t); } catch (_) {}
 }
 document.querySelectorAll('#ev-subnav .ev-subnav-btn').forEach((b) => b.addEventListener('click', function () { evShowSubtab(this.dataset.evtab); }));
+
+// Show the "Tournaments" (platform import) tab only when a start.gg / Challonge / NXGEN credential
+// actually exists. Organisers who run their own competitions never sign into a platform, and a dead
+// search box as the first thing on the page reads as "this app needs start.gg" — it doesn't. Re-run
+// on every state broadcast so the tab appears the moment a token is saved.
+function evSyncPlatformTab() {
+  const btn = document.querySelector('#ev-subnav .ev-subnav-btn[data-evtab="startgg"]');
+  if (!btn) return;
+  // `currentState` is a top-level `let` in core.js — shared global lexical scope, NOT window.*.
+  const s = currentState || {};
+  const any = !!(s.startgg?.hasToken || s.challonge?.hasKey || s.nxgen?.hasKey || s.faceit?.hasKey);
+  btn.hidden = !any;
+  // If the producer was parked on Tournaments and the credential went away, don't strand them.
+  if (!any && btn.classList.contains('active')) evShowSubtab('leagues');
+}
+window.evSyncPlatformTab = evSyncPlatformTab;
 // Reopen whichever Events sub-tab the producer was last on — survives refresh. Guarded against a
 // saved tab whose button no longer exists (e.g. 'brackets'/'spotlight' get pruned from this nav).
 // Deferred to a macrotask: evShowSubtab() reaches into lgRender()/renderMyEvents()/
@@ -436,8 +485,12 @@ document.querySelectorAll('#ev-subnav .ev-subnav-btn').forEach((b) => b.addEvent
 // risks the same TDZ crash documented for switchRole('monitor')/loadScenePreviews if any transitively
 // touch a `let`/`const` declared further down. setTimeout(...,0) waits for the script to finish.
 setTimeout(() => {
+  evSyncPlatformTab();
   let saved; try { saved = localStorage.getItem('ev_active_subtab'); } catch (_) {}
-  if (saved && document.querySelector(`#ev-subnav .ev-subnav-btn[data-evtab="${saved}"]`)) evShowSubtab(saved);
+  const usable = saved && document.querySelector(`#ev-subnav .ev-subnav-btn[data-evtab="${saved}"]:not([hidden])`);
+  // Always land on SOMETHING: every panel is display:none in the markup, so without this a fresh
+  // install (no saved tab) would render an empty page. 'leagues' is the native-first default.
+  evShowSubtab(usable ? saved : 'leagues');
 }, 0);
 
 // Relative "x ago" for sync timestamps.
@@ -484,9 +537,11 @@ function renderMyEvents() {
     const sub = [ev.game, rosterN ? rosterN + ' teams' : '', ev.tournamentName].filter(Boolean).join(' · ');
     const isLive = platform === 'challonge' ? (currentState.challonge && currentState.challonge.tournamentSlug) === ev.platformSlug
       : platform === 'nxgen' ? (currentState.nxgen && currentState.nxgen.eventSlug) === ev.platformSlug
+      : platform === 'faceit' ? (currentState.faceit && currentState.faceit.competitionId) === ev.platformSlug
       : platform === 'manual' ? false
       : (currentState.startgg && currentState.startgg.eventSlug) === ev.eventSlug;
-    const srcBadge = platform !== 'startgg' ? ` <span class="me-src-badge">${platform === 'challonge' ? 'Challonge' : platform === 'nxgen' ? 'NXGEN' : 'Manual'}</span>` : '';
+    const ME_SRC = { challonge: 'Challonge', nxgen: 'NXGEN', faceit: 'FACEIT', manual: 'Manual' };
+    const srcBadge = platform !== 'startgg' ? ` <span class="me-src-badge">${ME_SRC[platform] || 'Manual'}</span>` : '';
     const metaText = platform === 'startgg' ? evSyncBadge(ev) : platform === 'manual' ? 'Manual entry — no platform to sync from.' : 'No auto-sync for this platform yet — refresh manually as needed.';
     card.innerHTML = evCardLogo(ev) + `<div class="me-info"><div class="me-name">${esc(ev.name || 'Event')}${srcBadge}${isLive ? ' <span class="me-live">LIVE</span>' : ''}</div>`
       + `<div class="me-sub">${esc(sub)}</div><div class="me-meta">${metaText}</div></div>`;
@@ -497,10 +552,15 @@ function renderMyEvents() {
       acts.appendChild(mk('btn btn-primary btn-sm', isLive ? 'Reload' : 'Set live', () => {
         if (platform === 'challonge') send('load_challonge_tournament', { slug: ev.platformSlug });
         else if (platform === 'nxgen') send('load_nxgen_event', { slug: ev.platformSlug });
+        else if (platform === 'faceit') send('load_faceit_event', { id: ev.platformSlug, competitionType: ev.competitionType || 'championship' });
         else send('activate_startgg_event', { eventSlug: ev.eventSlug, tournamentSlug: ev.tournamentSlug });
       }, 'Make this the broadcast event — imports teams + bracket + queue'));
     }
     acts.appendChild(mk('btn btn-secondary btn-sm', 'Seeding', () => openSeedingStudio(ev), 'Open the seeding studio for this event — add teams by hand here'));
+    // Replaces the removed ESPORTS-level "Bracket Builder" tab: build the bracket from the event
+    // it belongs to. Manual entries need this most — they have no platform bracket to import.
+    acts.appendChild(mk('btn btn-secondary btn-sm', 'Bracket', () => { if (typeof window.openBracketBuilder === 'function') window.openBracketBuilder(); },
+      'Open the bracket builder — phases, pools, double elimination and swiss'));
     if (platform === 'startgg') {
       acts.appendChild(mk('btn btn-secondary btn-sm', 'Pre-load teams', () => send('import_startgg_teams', { eventSlug: ev.eventSlug }), 'Import this event\'s entrants into your team library'));
       const refr = mk('btn btn-ghost btn-sm', '↻', () => { refr.disabled = true; refr.textContent = '…'; send('refresh_my_event', { id: ev.id }); setTimeout(() => { refr.disabled = false; refr.innerHTML = '↻'; }, 2500); }, 'Refresh this event from the platform now');
@@ -509,6 +569,10 @@ function renderMyEvents() {
     } else if (platform === 'challonge') {
       acts.appendChild(mk('btn btn-secondary btn-sm', 'Pre-load teams', () => send('import_challonge_teams', { slug: ev.platformSlug }), 'Import this tournament\'s participants into your team library'));
       acts.appendChild(mk('btn btn-ghost btn-sm', 'View event ↗', () => window.open('https://challonge.com/' + ev.platformSlug, '_blank', 'noopener'), 'Open on platform'));
+    } else if (platform === 'faceit') {
+      acts.appendChild(mk('btn btn-ghost btn-sm', 'View event ↗', () => window.open(
+        (ev.competitionType === 'hub' ? 'https://www.faceit.com/en/hub/' : 'https://www.faceit.com/en/championship/') + ev.platformSlug,
+        '_blank', 'noopener'), 'Open on platform'));
     } else if (platform === 'manual' && ev.url) {
       acts.appendChild(mk('btn btn-ghost btn-sm', 'View event ↗', () => window.open(ev.url, '_blank', 'noopener'), 'Open the link you saved for this event'));
     }
@@ -962,9 +1026,8 @@ function openChalLinkModal(ev) {
 function renderChalLinkDropdown(tournaments, filterQuery) {
   const container = el('ev-chal-link-results');
   if (!container) return;
-  const filtered = filterQuery
-    ? tournaments.filter(t => (t.name || '').toLowerCase().includes(filterQuery) || (t.slug || '').toLowerCase().includes(filterQuery))
-    : tournaments;
+  const filtered = NESearch.filter(tournaments, filterQuery,
+    (t) => [{ text: t.name, weight: 2 }, t.slug, t.state]);
   if (!filtered.length) {
     container.innerHTML = filterQuery
       ? `<div class="ev-dropdown-msg">No match for "${escapeHtml(filterQuery)}"</div>`
@@ -1141,9 +1204,8 @@ function _chalTournamentRowHtml(t) {
 function renderEvSyncChalDropdown(tournaments, filterQuery) {
   const container = el('ev-sync-chal-results');
   if (!container) return;
-  const filtered = filterQuery
-    ? tournaments.filter(t => (t.name || '').toLowerCase().includes(filterQuery) || (t.slug || '').toLowerCase().includes(filterQuery))
-    : tournaments;
+  const filtered = NESearch.filter(tournaments, filterQuery,
+    (t) => [{ text: t.name, weight: 2 }, t.slug, t.state]);
   if (!filtered.length) {
     container.innerHTML = filterQuery
       ? `<div class="ev-dropdown-msg">No match for "${escapeHtml(filterQuery)}"</div>`

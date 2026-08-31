@@ -308,6 +308,10 @@ img.logo-on-dark {
   top: 0;
   height: 7px;
   background: #fff;
+  /* The bar is now a persistent element updated in place (see renderPlayerPanels), so it can
+     actually tween between packets instead of snapping. Short and linear on purpose: long enough
+     to smooth the gaps between RL updates, short enough that the meter still reads as live. */
+  transition: width 0.12s linear;
 }
 .players-left .player-boost-bar { left: 0; background: #055fdb; }
 .players-right .player-boost-bar { right: 0; background: #e97139; }

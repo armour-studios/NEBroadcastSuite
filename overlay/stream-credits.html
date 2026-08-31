@@ -272,20 +272,39 @@ function buildTalent(st) {
       : 'casters';
     add(g, name, role, t);
   };
+  // Who is on tonight's desk: the Show Deck lineup slots, the resolved on-air list and the two
+  // show roles (host / observer). The caster LIBRARY is not this list — it's every person ever
+  // saved to a card — so it can only ever confirm a desk seat, never earn one.
+  const cs = st.casters || {};
+  const lib = Array.isArray(cs.library) ? cs.library : [];
+  const onDesk = new Set();
+  const idKeys = (p) => toks(p && p.name, p && p.handle, p && p.gamertag, p && p.socialHandle);
+  const seat = (p) => idKeys(p).forEach((k) => onDesk.add(k));
+  (Array.isArray(cs.lineup) ? cs.lineup : []).forEach((e) => {
+    const p = e && e.libraryId && lib.find((l) => l && l.id === e.libraryId);
+    if (p) seat(p);
+  });
+  (Array.isArray(cs.list) ? cs.list : []).forEach(seat);
+  toks((cs.showRoles || {}).host, (cs.showRoles || {}).observer).forEach((k) => onDesk.add(k));
+
   // Crew is the source of truth for who worked and their role. Record EVERY crew member as governed
-  // (so the library can't re-credit them under Casters), and credit the ones who actually worked.
+  // (so the library can't re-credit them under Casters), and credit the ones who actually worked:
+  // marked as having worked the event (on shift, off-air event staff, an earlier shift) or sitting
+  // on the desk right now — seating a slot doesn't always set the crew twin's workedEvent flag.
   (st.crew || []).forEach((c) => {
     if (!c || !c.name) return;
-    const t = toks(c.name, c.handle);
+    const t = toks(c.name, c.handle, c.socialHandle);
     t.forEach((k) => crewGoverned.add(k));
-    if (c.workedEvent) place(c.handle || c.name, c.role, c.group, null, t);
+    if (c.workedEvent || t.some((k) => onDesk.has(k))) place(c.handle || c.name, c.role, c.group, null, t);
   });
-  // Caster library — only credit people who AREN'T a crew member (genuine guests/fill-ins on the
-  // desk). Anyone who is also in crew is already handled above with their real role.
-  ((st.casters && st.casters.library) || []).forEach((e) => {
+  // Caster library — a guest/fill-in with no crew record, credited ONLY while they hold a desk
+  // seat. Crediting the whole library rolled everyone ever saved to a card (old casters, test
+  // entries) as if they had worked tonight's show.
+  lib.forEach((e) => {
     if (!e || !e.name) return;
     const t = toks(e.name, e.handle);
     if (t.some((k) => crewGoverned.has(k))) return;
+    if (!t.some((k) => onDesk.has(k))) return;
     place(e.handle || e.name, e.role, null, e.kind, t);
   });
   // Producer-added talent (Graphics > Stream Credits) — crew from other shifts of the same broadcast.
@@ -295,6 +314,9 @@ function buildTalent(st) {
     if (['casters', 'hosts', 'production', 'operations', 'observers'].includes(t.group)) add(t.group, t.name, t.role, tk);
     else place(t.name, t.role, null, null, tk);
   });
+  // A–Z within each credit group (producer request). Sorting here (before groups assemble) keeps
+  // contentSig() stable since it enumerates buildTalent() in this same order.
+  Object.keys(bucket).forEach((k) => bucket[k].sort((a, b) => (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' })));
   const groups = [];
   if (bucket.casters.length)    groups.push({ label: 'Casters',    people: bucket.casters });
   if (bucket.hosts.length)      groups.push({ label: 'Talent',     people: bucket.hosts });
@@ -340,7 +362,18 @@ function flagImg(cc) {
   if (!/^[a-z]{2}$/.test(c)) return '';
   return `<img class="tt-flag" src="https://flagcdn.com/40x30/${c}.png" alt="${c.toUpperCase()}" loading="lazy">`;
 }
+// A–Z for the scrolling team roll: teams by name, and each team's players by name. The talent bar
+// was already sorted, but the roll came out in start.gg / roster order, which reads as random on
+// air. Applied at every exit of buildEventTeams via the wrapper below.
+function sortTeamBlocksAZ(blocks) {
+  const az = (a, b) => String(a || '').localeCompare(String(b || ''), undefined, { sensitivity: 'base' });
+  (blocks || []).forEach((b) => { if (b && Array.isArray(b.players)) b.players.sort((x, y) => az(x && x.name, y && y.name)); });
+  return (blocks || []).sort((a, b) => az(a && a.name, b && b.name));
+}
 function buildEventTeams(st) {
+  return sortTeamBlocksAZ(_buildEventTeamsRaw(st));
+}
+function _buildEventTeamsRaw(st) {
   const saved = st.savedTeams || [];
   const byName = {};
   saved.forEach((t) => { if (t && t.name) byName[t.name.toLowerCase()] = t; });
@@ -617,9 +650,22 @@ function animFrame(ts) {
     if (_lastTs === null) _lastTs = ts;
     const dt = Math.min(ts - _lastTs, 100) / 1000; _lastTs = ts;
     const maxScroll = Math.max(0, _trackH() - _viewportH());
+    // Non-loop finish: the roll used to FREEZE the instant the last row reached the top of the
+    // viewport, leaving the teams parked behind the end card — whose backdrop is a radial gradient,
+    // so they stayed visible around its translucent edges. Now the roll keeps travelling until the
+    // track has cleared the viewport completely, so the teams scroll away under "Thanks For
+    // Watching". The card still fades in at the same moment as before (roll bottoms out), and
+    // showEndCard() is idempotent, so it can be called on every frame of the run-off.
+    const exitScroll = _trackH();
     if (maxScroll > 0 && Date.now() >= _pauseUntil) {
       _scrollY += SCROLL_SPEED * dt * _scrollDir;
-      if (_scrollY >= maxScroll) { _scrollY = maxScroll; if (LOOP) { _scrollDir = -1; _pauseUntil = Date.now() + PAUSE_MS; } else { _pauseUntil = Date.now() + 999999; showEndCard(); } }
+      if (_scrollDir === 1 && _scrollY >= maxScroll) {
+        if (LOOP) { _scrollY = maxScroll; _scrollDir = -1; _pauseUntil = Date.now() + PAUSE_MS; }
+        else {
+          showEndCard();
+          if (_scrollY >= exitScroll) { _scrollY = exitScroll; _pauseUntil = Date.now() + 999999; }
+        }
+      }
       if (_scrollDir === -1 && _scrollY <= 0) { _scrollY = 0; _scrollDir = 1; _pauseUntil = Date.now() + PAUSE_MS; }
       track.style.transform = `translateY(-${_scrollY}px)`;
     }

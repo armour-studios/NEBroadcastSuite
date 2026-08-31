@@ -1,0 +1,125 @@
+/* grid.css — the GRID multiview wall, shared by grid.html (full scene) and grid-bars.html
+ * (transparent bars over the producer's own OBS sources).
+ *
+ * Both pages load THIS file so the tile rectangles land on identical pixels: grid-bars.html is only
+ * grid.html with the video and the backdrop made invisible. Change a size here, not in a page.
+ *
+ * COLOUR: --brand / --brand-2 are the ACTIVE BRAND KIT's colour and accent, written onto :root by
+ * grid-core.applyBrand(). The values below are only the pre-connection fallback — nothing in this
+ * file should hard-code a hue, including the NOW-bar title gradient.
+ */
+:root{
+  --bg:#080a16; --ink:#EEF3FB; --muted:#8592a8; --dim:#5b6577;
+  --brand:#055fdb; --brand-rgb:5,95,219;          /* brand kit: colour  */
+  --brand-2:#e97139; --brand2-rgb:233,113,57;     /* brand kit: accent  */
+  --line:rgba(255,255,255,.10);
+  --bar:#0A0D18;
+  --live:#22c55e;
+  --scene-font:"Bahnschrift","DIN Alternate","Roboto Condensed","Arial Narrow Bold","Arial Narrow",var(--main-font,system-ui),sans-serif;
+  --ui-font:var(--main-font,ui-sans-serif),system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --s:1;              /* per-layout scale — one knob the whole wall reads */
+  --gap:14px;         /* tile gutter (grid-core's fit math uses the same number) */
+}
+/* The app's scene themes recolour the same two tokens (mirrors scene.css). */
+[data-theme="midnight"]{ --brand:#4aa3ff; --brand-rgb:74,163,255; --brand-2:#7c5cff; --brand2-rgb:124,92,255; }
+[data-theme="neon"]    { --brand:#00e5a0; --brand-rgb:0,229,160;  --brand-2:#ff2e88; --brand2-rgb:255,46,136; }
+
+*{ box-sizing:border-box; margin:0; padding:0; }
+[hidden]{ display:none !important; }
+html,body{ width:100vw; height:100vh; overflow:hidden; }
+body{ color:var(--ink); font-family:var(--scene-font); background:transparent; }
+
+.scene{ position:relative; width:100vw; height:100vh; display:flex; flex-direction:column; }
+
+/* ── the wall ───────────────────────────────────────────────────────────── */
+.wall{ flex:1; min-height:0; display:grid; place-items:center; padding:26px 60px 12px; }
+.grid{ display:grid; gap:var(--gap); }
+.grid.lay-2{ grid-template-columns:repeat(2,1fr); }
+.grid.lay-3{ grid-template-columns:repeat(3,1fr); }
+.grid.lay-4{ grid-template-columns:repeat(2,1fr); }
+.grid.lay-6{ grid-template-columns:repeat(3,1fr); }
+
+.tile{ display:flex; flex-direction:column; min-width:0; }
+.vid{ position:relative; aspect-ratio:16/9; overflow:hidden; }
+.vid iframe{ position:absolute; inset:0; width:100%; height:100%; border:0; }
+.slate{ position:absolute; inset:0; display:grid; place-items:center;
+  background:linear-gradient(140deg, rgba(var(--brand-rgb),.20), #05070f 55%, rgba(var(--brand2-rgb),.16)); }
+.slate span{ font-family:var(--ui-font); font-size:calc(12px*var(--s)); font-weight:800;
+  letter-spacing:.24em; text-transform:uppercase; color:rgba(255,255,255,.45); }
+
+/* ── the bar under each tile ───────────────────────────────────────────── */
+.bar{ height:calc(46px*var(--s)); flex:0 0 auto; display:flex; align-items:center; gap:calc(12px*var(--s));
+  padding:0 calc(14px*var(--s)); background:var(--bar);
+  border:1px solid rgba(var(--brand-rgb),.55); border-top:0; }
+.who{ display:flex; align-items:center; gap:calc(9px*var(--s)); min-width:0; flex:1; }
+.who svg{ width:calc(17px*var(--s)); height:calc(17px*var(--s)); fill:var(--brand-2); flex:0 0 auto; }
+.who .h{ font-size:calc(17px*var(--s)); font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.who .h.dim{ color:var(--dim); font-family:var(--ui-font); font-size:calc(12px*var(--s)); font-weight:800;
+  letter-spacing:.18em; text-transform:uppercase; }
+
+.sc{ display:flex; align-items:center; gap:calc(9px*var(--s)); flex:0 0 auto; }
+.crest{ width:calc(30px*var(--s)); height:calc(30px*var(--s)); display:grid; place-items:center; flex:0 0 auto;
+  border-radius:calc(6px*var(--s)); background:var(--tc,var(--brand)); overflow:hidden;
+  font-size:calc(10px*var(--s)); font-weight:800; color:#fff; }
+.crest img{ width:100%; height:100%; object-fit:contain; }
+.sc .n{ font-size:calc(24px*var(--s)); font-weight:700; font-variant-numeric:tabular-nums;
+  min-width:calc(16px*var(--s)); text-align:center; }
+.sc .n.win{ color:#fff; } .sc .n.lose{ color:var(--muted); }
+.sc .vs{ font-family:var(--ui-font); font-size:calc(12px*var(--s)); font-weight:800; letter-spacing:.12em;
+  color:var(--dim); text-transform:uppercase; }
+.bar.flash{ animation:barflash .7s ease; }
+@keyframes barflash{ 0%{ background:rgba(var(--brand-rgb),.55); } 100%{ background:var(--bar); } }
+
+/* ── NOW bar ───────────────────────────────────────────────────────────── */
+.nowbar{ flex:0 0 auto; height:104px; display:flex; align-items:stretch; padding:0 60px; }
+.nowblk{ flex:0 0 auto; width:206px; display:flex; flex-direction:column; }
+.nowblk .now{ flex:1; background:#F3F4F8; color:#0b1020; display:grid; place-items:center;
+  font-size:38px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; }
+.nowblk .phase{ flex:0 0 auto; height:38px; display:grid; place-items:center; font-family:var(--ui-font);
+  font-size:12px; font-weight:800; letter-spacing:.14em; text-transform:uppercase; color:var(--muted); }
+/* The signature block: the brand kit's two colours, edge to edge. */
+.title{ flex:1 1 auto; min-width:0; display:grid; place-items:center; padding:0 30px; margin-bottom:38px;
+  background:linear-gradient(90deg, var(--brand), var(--brand-2));
+  font-size:30px; font-weight:700; line-height:1.06; text-align:center; text-transform:uppercase; }
+.title span{ display:block; max-width:100%; overflow:hidden; text-overflow:ellipsis; }
+.meta{ flex:0 0 auto; display:flex; align-items:center; gap:34px; padding:0 30px; margin-bottom:38px;
+  background:linear-gradient(180deg,#12182a,#0A0D18);
+  border:1px solid rgba(var(--brand-rgb),.35); border-left:0; }
+.meta .lab{ font-family:var(--ui-font); font-size:11px; font-weight:800; letter-spacing:.16em;
+  text-transform:uppercase; color:var(--muted); }
+.meta .time{ font-size:40px; font-weight:700; font-variant-numeric:tabular-nums; line-height:1; }
+.meta .tz{ font-family:var(--ui-font); font-size:13px; font-weight:800; letter-spacing:.1em; color:var(--muted); }
+.meta .logos{ display:flex; align-items:center; gap:26px; }
+.meta .logos img{ max-height:44px; max-width:190px; object-fit:contain; }
+/* sponsor strip — several logos at once in the kit's 'static' mode, one at a time when cycling */
+.meta .sponsors{ display:flex; align-items:center; gap:22px; }
+.meta .sponsors img{ max-height:40px; max-width:170px; object-fit:contain; }
+.meta .sponsors .sname{ font-size:22px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; }
+
+/* ── ticker ────────────────────────────────────────────────────────────── */
+/* Same content model as overlay/ticker.html: LIVE/FINAL tag, crest, teams, score, crest. */
+.ticker{ flex:0 0 auto; height:44px; display:flex; align-items:stretch; overflow:hidden;
+  background:linear-gradient(90deg,#080b14,#0d1426); border-top:1px solid rgba(var(--brand-rgb),.35); }
+.ticker .tksponsor{ flex:0 0 auto; align-self:center; height:30px; margin:0 18px; object-fit:contain; }
+.tkmask{ flex:1; min-width:0; overflow:hidden; display:flex; align-items:center; }
+.track{ display:inline-flex; align-items:center; white-space:nowrap; will-change:transform;
+  animation:scroll 40s linear infinite; }
+@keyframes scroll{ from{ transform:translateX(0); } to{ transform:translateX(-50%); } }
+
+.tkitem{ display:inline-flex; align-items:center; gap:11px; font-family:var(--ui-font); font-size:15px; }
+.tkitem b{ color:var(--ink); font-weight:700; text-transform:uppercase; letter-spacing:.02em; }
+.tksc{ color:var(--brand-2); font-weight:800; font-variant-numeric:tabular-nums; padding:0 3px; }
+.tktail{ color:var(--muted); text-transform:uppercase; letter-spacing:.06em; font-size:13px; }
+.tkc{ width:24px; height:24px; object-fit:contain; flex:0 0 auto; }
+.tkc-txt{ display:inline-grid; place-items:center; border-radius:5px; background:var(--tc,var(--brand));
+  color:#fff; font-size:10px; font-weight:800; letter-spacing:.02em; }
+.tkstat{ display:inline-flex; align-items:center; gap:6px; font-size:11px; font-weight:800;
+  letter-spacing:.14em; text-transform:uppercase; padding:2px 8px; border-radius:4px; }
+.tkstat.live{ background:var(--live); color:#04130a; }
+.tkstat.live i{ width:7px; height:7px; border-radius:50%; background:#04130a; animation:tkpulse 1.3s infinite; }
+@keyframes tkpulse{ 50%{ opacity:.3; } }
+.tkstat.final{ color:var(--muted); border:1px solid rgba(255,255,255,.22); }
+.tkmsg{ font-family:var(--ui-font); font-size:15px; color:var(--ink); text-transform:uppercase; letter-spacing:.02em; }
+.tksep{ display:inline-block; width:1px; height:16px; margin:0 28px; background:rgba(255,255,255,.18); }
+
+@media (prefers-reduced-motion:reduce){ .track{ animation:none; } .bar.flash{ animation:none; } .tkstat.live i{ animation:none; } }

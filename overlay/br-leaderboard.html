@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<!--
+  br-leaderboard.html — battle-royale series standings (Fortnite / PUBG / Warzone / any
+  points-per-placement format). Reads state.br, which the server derives from raw per-match
+  results — so this file never scores anything itself, it just renders what the engine computed.
+
+  Layout: header (brand logo + event title + "MATCH n OF m") → ranked rows. Each row carries
+  rank, movement since the previous match, team, per-match placement chips, elims, and points.
+  Top 3 get medal treatment. Rows beyond ?rows=N are summarised as "+N more".
+
+  Query params:
+    ?rows=N     how many rows to show (default 16)
+    ?elims=off  hide the elims column (points-only board)
+    ?matches=off hide the per-match chips (narrow board for a busy screen)
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1920">
+<title>NE Broadcast Suite — BR Leaderboard</title>
+<link rel="stylesheet" href="/fonts.css">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --accent:   #055fdb;
+  --accent-2: #4d90ff;
+  --gold:     #ffcf5c;
+  --silver:   #d3dcec;
+  --bronze:   #e0965a;
+  --base-1:   #14181f;
+  --base-2:   #0d1017;
+  --up:       #4ade80;
+  --down:     #f87171;
+  --disp:     'Rajdhani', 'Inter', sans-serif;
+  --main-font:'Bourgeois', 'Inter', sans-serif;
+}
+
+html, body { width: 1920px; height: 1080px; overflow: hidden; background: transparent; }
+body { font-family: var(--main-font); color: #eef2f8; }
+
+#stage {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column; align-items: center;
+  padding: 48px 76px 58px;
+  opacity: 0; transition: opacity .35s ease;
+}
+#stage.show { opacity: 1; }
+/* A deep field (up to 40 teams) is taller than the frame — scale the whole board down to fit
+   instead of cropping the bottom rows off the broadcast. */
+#scale { width: 100%; display: flex; flex-direction: column; align-items: center;
+  transform-origin: top center; }
+
+/* ── header ─────────────────────────────────────────────────────────────── */
+.hdr { display: flex; align-items: center; gap: 22px; margin-bottom: 22px; width: 100%; justify-content: center; }
+.hdr-logo { height: 74px; width: auto; max-width: 190px; object-fit: contain; }
+.hdr-logo[src=""] { display: none; }
+.hdr-txt { text-align: center; }
+.hdr-title {
+  font-family: var(--disp); font-size: 58px; font-weight: 700; letter-spacing: .05em;
+  text-transform: uppercase; line-height: 1;
+  background: linear-gradient(180deg, #fff 40%, #b9c6da 100%);
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+}
+.hdr-sub {
+  margin-top: 7px; font-size: 17px; font-weight: 800; letter-spacing: .26em;
+  text-transform: uppercase; color: rgba(255,255,255,.62);
+}
+.hdr-rule { width: 100%; max-width: 1500px; height: 2px; margin-bottom: 18px;
+  background: linear-gradient(90deg, transparent, var(--accent) 25%, var(--accent-2) 75%, transparent); }
+
+/* ── rows ───────────────────────────────────────────────────────────────── */
+#rows { width: 100%; max-width: 1500px; display: flex; flex-direction: column; gap: 7px; }
+
+.rowhdr {
+  display: grid; align-items: center; gap: 14px;
+  padding: 0 20px 6px;
+  font-size: 13px; font-weight: 800; letter-spacing: .2em; text-transform: uppercase;
+  color: rgba(255,255,255,.4);
+}
+.row {
+  display: grid; align-items: center; gap: 14px;
+  padding: 11px 20px; border-radius: 5px;
+  background: linear-gradient(90deg, rgba(20,24,31,.94), rgba(13,16,23,.88));
+  border-left: 3px solid rgba(255,255,255,.13);
+  animation: rowIn .4s cubic-bezier(.2,.9,.3,1) both;
+}
+@keyframes rowIn { from { opacity: 0; transform: translateX(-16px); } to { opacity: 1; transform: none; } }
+
+.row.r1 { border-left-color: var(--gold);   background: linear-gradient(90deg, rgba(255,207,92,.16), rgba(13,16,23,.9)); }
+.row.r2 { border-left-color: var(--silver); background: linear-gradient(90deg, rgba(211,220,236,.12), rgba(13,16,23,.9)); }
+.row.r3 { border-left-color: var(--bronze); background: linear-gradient(90deg, rgba(224,150,90,.12), rgba(13,16,23,.9)); }
+
+.c-rank { font-family: var(--disp); font-size: 34px; font-weight: 700; line-height: 1; text-align: center; }
+.r1 .c-rank { color: var(--gold); } .r2 .c-rank { color: var(--silver); } .r3 .c-rank { color: var(--bronze); }
+
+.c-move { font-size: 15px; font-weight: 800; text-align: center; letter-spacing: .02em; }
+.c-move.up { color: var(--up); } .c-move.down { color: var(--down); } .c-move.flat { color: rgba(255,255,255,.24); }
+
+.c-team { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.c-team img { width: 40px; height: 40px; object-fit: contain; flex-shrink: 0; }
+.c-team span {
+  font-family: var(--disp); font-size: 30px; font-weight: 600; letter-spacing: .02em;
+  text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+.c-matches { display: flex; gap: 5px; justify-content: flex-end; }
+.chip {
+  min-width: 34px; height: 30px; padding: 0 6px; border-radius: 4px;
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--disp); font-size: 17px; font-weight: 700;
+  background: rgba(255,255,255,.06); color: rgba(255,255,255,.66);
+}
+.chip.win { background: rgba(255,207,92,.22); color: var(--gold); }
+.chip.top { background: rgba(77,144,255,.18); color: #a8c8ff; }
+.chip.none { color: rgba(255,255,255,.2); }
+
+.c-elims, .c-pts { font-family: var(--disp); font-weight: 700; text-align: right; line-height: 1; }
+.c-elims { font-size: 26px; color: rgba(255,255,255,.72); }
+.c-pts { font-size: 38px; }
+
+.more { margin-top: 12px; text-align: center; font-size: 15px; font-weight: 700;
+  letter-spacing: .18em; text-transform: uppercase; color: rgba(255,255,255,.36); }
+
+/* ── FNCS skin (?skin=fncs) ─────────────────────────────────────────────────
+   The broadcast-standard Fortnite board: light rows, left-aligned title block, and the four
+   columns the format actually scores on — VRS (Victory RoyaleS), ELIMS, PLCMNT PTS, PTS.
+   Everything here is an OVERRIDE on the default dark board, so the original skin is untouched
+   and every other BR game keeps the board it already had. */
+body.fncs #stage { align-items: flex-start; padding: 44px 60px 50px; }
+body.fncs .hdr { justify-content: flex-start; gap: 18px; margin-bottom: 6px; }
+body.fncs .hdr-txt { text-align: left; }
+body.fncs .hdr-title { font-size: 92px; letter-spacing: -.01em;
+  background: none; -webkit-text-fill-color: #ffffff; color: #ffffff;
+  text-shadow: 0 4px 24px rgba(0,0,0,.55); }
+body.fncs .hdr-sub { display: inline-block; margin-top: 10px; padding: 5px 18px;
+  background: var(--accent); color: #06231f; letter-spacing: .24em; }
+body.fncs .hdr-rule { display: none; }
+body.fncs #scale { align-items: stretch; }
+body.fncs #rows { max-width: 1580px; gap: 3px; }
+body.fncs .rowhdr { color: rgba(255,255,255,.72); padding: 0 22px 8px; font-size: 12px; letter-spacing: .18em; }
+body.fncs .row { border-radius: 0; border-left: none; padding: 9px 22px 9px 0;
+  background: rgba(244,246,250,.96); color: #0d1017; overflow: hidden; }
+body.fncs .row:nth-child(even) { background: rgba(232,236,243,.96); }
+/* The rank sits in a dark tab on the left edge, the way the reference board reads. */
+body.fncs .c-rank { position: relative; font-size: 30px; color: #ffffff;
+  align-self: stretch; display: flex; align-items: center; justify-content: center; }
+body.fncs .c-rank::before { content: ''; position: absolute; left: 0; top: -12px; bottom: -12px;
+  right: -8px; background: #14181f; z-index: 0; }
+body.fncs .c-rank > span { position: relative; z-index: 1; }
+body.fncs .row.r1, body.fncs .row.r2, body.fncs .row.r3 { background: rgba(244,246,250,.96); }
+body.fncs .row.r1 { box-shadow: inset 0 0 0 2px var(--accent); }
+body.fncs .c-team span { color: #0d1017; font-size: 27px; font-weight: 700; }
+body.fncs .c-move { display: none; }
+body.fncs .c-num { font-family: var(--disp); font-size: 27px; font-weight: 700; text-align: center;
+  line-height: 1; color: #3d4657; }
+body.fncs .c-num.pts { color: #0d1017; }
+body.fncs .c-elims, body.fncs .c-pts { color: #0d1017; }
+body.fncs .chip { background: rgba(13,16,23,.07); color: #3d4657; }
+body.fncs .chip.win { background: rgba(18,165,148,.22); color: #0b6157; }
+body.fncs .chip.top { background: rgba(13,16,23,.12); color: #0d1017; }
+body.fncs .more { color: rgba(255,255,255,.6); }
+.empty { margin-top: 90px; text-align: center; font-size: 20px; font-weight: 700;
+  letter-spacing: .2em; text-transform: uppercase; color: rgba(255,255,255,.32); }
+</style>
+</head>
+<body>
+  <div id="stage">
+    <div class="hdr">
+      <img id="hdr-logo" class="hdr-logo" src="" alt="">
+      <div class="hdr-txt">
+        <div id="hdr-title" class="hdr-title">BATTLE ROYALE</div>
+        <div id="hdr-sub" class="hdr-sub"></div>
+      </div>
+    </div>
+    <div class="hdr-rule"></div>
+    <!-- header stays fixed; only the ranked rows scale, so the event title never shrinks -->
+    <div id="scale">
+      <div id="rows"></div>
+      <div id="more" class="more" style="display:none;"></div>
+      <div id="empty" class="empty" style="display:none;">Waiting for match results</div>
+    </div>
+  </div>
+
+<script src="/scene-base.js"></script>
+<script>
+(function () {
+  const Q = new URLSearchParams(location.search);
+  const MAX_ROWS   = Math.max(3, Math.min(40, parseInt(Q.get('rows'), 10) || 16));
+  // The FNCS skin is a different COLUMN SET, not just a repaint: VRS / ELIMS / PLCMNT PTS / PTS,
+  // and no per-match chips unless explicitly asked for (the reference board has none).
+  const FNCS       = Q.get('skin') === 'fncs';
+  const SHOW_ELIMS = Q.get('elims') !== 'off';
+  const SHOW_CHIPS = FNCS ? (Q.get('matches') === 'on') : (Q.get('matches') !== 'off');
+  if (FNCS) document.body.classList.add('fncs');
+  const el = (id) => document.getElementById(id);
+  // The reference board pads single digits ("01", "06") — it keeps the numeric columns from
+  // jittering as scores cross 10, which is very visible on a board that updates live.
+  const pad2 = (n) => (Number(n) || 0) < 10 ? '0' + (Number(n) || 0) : String(Number(n) || 0);
+
+  // Grid template has to match between the header row and the data rows, and it changes with the
+  // optional columns — build it once from the same flags both use.
+  function gridCols(matchCount) {
+    if (FNCS) {
+      return ['78px', 'minmax(0,1fr)',
+        SHOW_CHIPS && matchCount ? `${matchCount * 39}px` : '',
+        '92px', '92px', '132px', '108px'].filter(Boolean).join(' ');
+    }
+    return ['56px', '38px', 'minmax(0,1fr)',
+      SHOW_CHIPS && matchCount ? `${matchCount * 39}px` : '',
+      SHOW_ELIMS ? '84px' : '',
+      '104px'].filter(Boolean).join(' ');
+  }
+
+  // Team logos come from the saved-team library, matched on name — a BR sheet only ever gives us
+  // a team NAME, so this is the one place identity gets resolved to artwork.
+  function logoFor(data, name) {
+    const want = (name || '').trim().toLowerCase();
+    if (!want) return '';
+    const hit = (data.savedTeams || []).find((t) => (t.name || '').trim().toLowerCase() === want);
+    return (hit && hit.logo) || '';
+  }
+
+  let _sig = '';
+  function render(data) {
+    data = data || {};
+    const br = data.br || {};
+    const rows = Array.isArray(br.standings) ? br.standings : [];
+    const accent  = SceneBase.brandColor(data)  || '#055fdb';
+    const accent2 = SceneBase.brandAccent(data) || accent;
+    document.documentElement.style.setProperty('--accent', accent);
+    document.documentElement.style.setProperty('--accent-2', accent2);
+    if (data.fontFamily) document.documentElement.style.setProperty('--main-font', `'${data.fontFamily}', 'Inter', sans-serif`);
+
+    const shown = rows.slice(0, MAX_ROWS);
+    // How many match columns to draw: the format's match count, but never more than has been
+    // played (an empty column per unplayed match is just noise on a board that's already dense).
+    const played = rows.reduce((m, t) => Math.max(m, ...Object.keys(t.matches || {}).map(Number)), 0);
+    const matchCount = SHOW_CHIPS ? Math.min(played, 12) : 0;
+
+    const brandLogo = SceneBase.brandLogo(data) || '';
+    // The FNCS board leads with the word STANDINGS and demotes the event/stage to the chip under
+    // it — the opposite of the default board, which leads with the cup name.
+    const title = Q.get('title')
+      || (FNCS ? 'STANDINGS' : ((br.event && br.event.title) || data.eventName || 'BATTLE ROYALE'));
+    const subBits = FNCS
+      ? [(br.event && br.event.match) || (br.event && br.event.split) || (br.event && br.event.title) || data.eventName || ''].filter(Boolean)
+      : [
+          (br.event && br.event.split) || '',
+          played ? `MATCH ${played}${br.format && br.format.matches ? ' OF ' + br.format.matches : ''}` : 'PRE-MATCH',
+          (br.event && br.event.match) || ''
+        ].filter(Boolean);
+
+    const sig = JSON.stringify({ r: shown, matchCount, title, subBits, bl: brandLogo.slice(0, 40), a: accent });
+    if (sig === _sig) return;
+    _sig = sig;
+
+    const logoEl = el('hdr-logo');
+    if (brandLogo) { if (logoEl.getAttribute('src') !== brandLogo) logoEl.src = brandLogo; logoEl.style.display = ''; }
+    else { logoEl.style.display = 'none'; }
+    el('hdr-title').textContent = (title || '').toUpperCase();
+    el('hdr-sub').textContent = subBits.join('  ·  ');
+
+    const wrap = el('rows');
+    wrap.innerHTML = '';
+    el('empty').style.display = rows.length ? 'none' : '';
+
+    if (rows.length) {
+      const cols = gridCols(matchCount);
+      const head = document.createElement('div');
+      head.className = 'rowhdr';
+      head.style.gridTemplateColumns = cols;
+      head.innerHTML = FNCS
+        ? '<div></div><div></div>'
+          + (matchCount ? '<div style="text-align:right;">Matches</div>' : '')
+          + '<div style="text-align:center;">VRS</div><div style="text-align:center;">Elims</div>'
+          + '<div style="text-align:center;">Plcmnt Pts</div><div style="text-align:center;">Pts</div>'
+        : '<div>#</div><div></div><div>Team</div>'
+          + (matchCount ? '<div style="text-align:right;">Matches</div>' : '')
+          + (SHOW_ELIMS ? '<div style="text-align:right;">Elims</div>' : '')
+          + '<div style="text-align:right;">Points</div>';
+      wrap.appendChild(head);
+
+      shown.forEach((t, i) => {
+        const row = document.createElement('div');
+        row.className = 'row' + (t.rank <= 3 ? ' r' + t.rank : '');
+        row.style.gridTemplateColumns = cols;
+        row.style.animationDelay = (i * 0.035) + 's';
+
+        const mv = t.move > 0 ? 'up' : t.move < 0 ? 'down' : 'flat';
+        const mvTxt = t.move > 0 ? '▲' + t.move : t.move < 0 ? '▼' + Math.abs(t.move) : '–';
+
+        const logo = logoFor(data, t.name);
+        const teamCell = `<div class="c-team">${logo ? `<img src="${logo}" alt="" onerror="this.style.display='none'">` : ''}`
+          + `<span>${(t.name || '').toUpperCase().replace(/</g, '&lt;')}</span></div>`;
+        let html = FNCS
+          ? `<div class="c-rank"><span>${t.rank}</span></div>` + teamCell
+          : `<div class="c-rank">${t.rank}</div>`
+            + `<div class="c-move ${mv}">${mvTxt}</div>` + teamCell;
+
+        if (matchCount) {
+          let chips = '';
+          for (let m = 1; m <= matchCount; m++) {
+            const g = (t.matches || {})[m];
+            const cls = !g ? 'none' : g.placement === 1 ? 'win' : (g.placement > 0 && g.placement <= 5) ? 'top' : '';
+            chips += `<div class="chip ${cls}">${g && g.placement ? g.placement : '–'}</div>`;
+          }
+          html += `<div class="c-matches">${chips}</div>`;
+        }
+        if (FNCS) {
+          // wins doubles as VRS — same number, and placePts is the placement half of the total
+          // the engine already split out, so this board never re-derives points itself.
+          html += `<div class="c-num">${pad2(t.wins)}</div>`
+            + `<div class="c-num">${pad2(t.elims)}</div>`
+            + `<div class="c-num">${t.placePts != null ? t.placePts : (t.pts - t.elims)}</div>`
+            + `<div class="c-num pts">${t.pts}</div>`;
+        } else {
+          if (SHOW_ELIMS) html += `<div class="c-elims">${t.elims}</div>`;
+          html += `<div class="c-pts">${t.pts}</div>`;
+        }
+
+        row.innerHTML = html;
+        wrap.appendChild(row);
+      });
+    }
+
+    const hidden = rows.length - shown.length;
+    const moreEl = el('more');
+    moreEl.style.display = hidden > 0 ? '' : 'none';
+    moreEl.textContent = hidden > 0 ? `+ ${hidden} more team${hidden === 1 ? '' : 's'}` : '';
+
+    el('stage').classList.add('show');
+    requestAnimationFrame(fit);
+  }
+
+  // Scale-to-fit, measured after layout. Never scales UP — a short field stays at full size.
+  function fit() {
+    const sc = el('scale');
+    if (!sc) return;
+    sc.style.transform = 'scale(1)';
+    const used = el('rows').getBoundingClientRect().top;           // everything above the rows
+    const avail = 1080 - used - 58;                                 // minus the stage's bottom padding
+    const h = Math.max(sc.offsetHeight, sc.scrollHeight) || 1;
+    const s = Math.min(1, avail / h);
+    if (s < 1) sc.style.transform = `scale(${s})`;
+  }
+
+  if (location.protocol === 'file:') {
+    render({
+      eventName: 'Nameless Weekly',
+      br: {
+        event: { title: 'Nameless Fortnite Cup', split: 'Week 8', match: 'Finals' },
+        format: { matches: 6 },
+        standings: [
+          { rank: 1, name: 'XSET HIGGS + KOS CURVE', pts: 113, elims: 12, wins: 1, placePts: 65, move:  1, matches: { 1: { placement: 3 }, 2: { placement: 1 }, 3: { placement: 5 } } },
+          { rank: 2, name: 'XSET MUZ 7 + DT RISE',   pts:  80, elims:  6, wins: 0, placePts: 56, move: -1, matches: { 1: { placement: 1 }, 2: { placement: 4 }, 3: { placement: 9 } } },
+          { rank: 3, name: 'FALCON PETERBOT + POLLO', pts: 68, elims:  6, wins: 0, placePts: 44, move:  2, matches: { 1: { placement: 8 }, 2: { placement: 2 }, 3: { placement: 4 } } },
+          { rank: 4, name: 'XP42 MONEYMAKER + FNAJEN', pts: 68, elims: 4, wins: 0, placePts: 52, move: 0, matches: { 1: { placement: 5 }, 2: { placement: 11 }, 3: { placement: 2 } } },
+          { rank: 5, name: 'GEN KINGALING + GEN KRAEZ', pts: 64, elims: 4, wins: 0, placePts: 48, move: -2, matches: { 1: { placement: 2 }, 2: { placement: 16 }, 3: { placement: 13 } } }
+        ]
+      }
+    });
+  } else {
+    SceneBase.connect((data) => { render(data); SceneBase.applySceneConfig('br-leaderboard', data); });
+  }
+})();
+</script>
+</body>
+</html>

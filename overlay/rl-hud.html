@@ -1718,7 +1718,7 @@ function renderTicker(data){
   if(data && data.brand && data.brand.color) bar.style.setProperty('--tk-brand', data.brand.color);
   const sp=el('tk-sponsor'); if(sp && sponsor) sp.src=sponsor;
   if(!visible){ _tkSig=''; return; }
-  const speed=(t.speed>0)?t.speed:40;
+  const speed=(t.speed>0)?t.speed:10;   // matches the server default + overlay/app.js (was 40 here alone)
   const sig=JSON.stringify({s:isStartgg,m:matches,x:messages,sp:sponsor,speed});
   if(sig===_tkSig) return;
   _tkSig=sig;
@@ -1826,6 +1826,7 @@ function applyReplayColor(){
 // plays the swipe; ALWAYS runs to completion (self-hides) so it swipes away smoothly.
 // mode 'full' = REPLAY text + sponsor logo (at the goal); 'logo' = logo only (after the replay).
 function showReplay(mode){
+  if(currentState.rlReplayTransitions===false) return;   // producer disabled the animated replay transitions
   if(brazilGoal) return;   // a 7-1 goal plays ONLY the Brazil transition — never the REPLAY/outro swipe
   lastSwipeAt=Date.now();
   applyReplayColor();
@@ -2221,8 +2222,10 @@ function renderScoreboard(playerCache, state, series, isLive){
       rail.classList.remove('empty');
     } else rail.classList.add('empty');
   }
+  // Background: the manual scoreboard-ad background wins; otherwise the active brand kit's scoreboard
+  // background (its "link" set in the profile editor). Either way #sb-bg gets a full-cover image.
   const bgEl=el('sb-bg');
-  if(bgEl){ const bg=ad.background||null;
+  if(bgEl){ const bg=ad.background||(state.brand&&state.brand.scoreboardBg)||null;
     if(bg){ bgEl.style.backgroundImage='url("'+bg+'")'; bgEl.classList.remove('hidden'); }
     else { bgEl.style.backgroundImage=''; bgEl.classList.add('hidden'); }
   }
@@ -2609,6 +2612,7 @@ function checkBrazil(bs, os){
   } else brazilShown=false;                     // moved off 7-1 → next goal is back to normal
 }
 function playBrazil(){
+  if(currentState.rlReplayTransitions===false) return;   // replay transitions disabled → no flag swipe either
   const b=el('brazil'); if(!b) return;
   brazilShown=true; lastSwipeAt=Date.now();   // dedup so the score-increment can't re-fire
   // sponsor logo: the replay slot's logo, else the brand-kit logo

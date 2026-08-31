@@ -24,7 +24,8 @@ try {
 
 let server;
 let controlPanel;
-let launcherWin = null;   // small pre-auth launcher window (branding + login + updates)
+let launcherWin = null;      // small pre-auth launcher window (branding + login + updates)
+let panelDidLoad = false;    // control panel renderer finished loading (gates the launcher animation)
 let tray = null;
 let encodeTrayTitle = 'NE Broadcast Suite';
 let rlUiHotkeyRegistered = null;
@@ -60,12 +61,59 @@ process.on('unhandledRejection', (reason) => {
   writeCrashLog('unhandledRejection', reason);
 });
 
+// GPU/utility process deaths are silent by default — they surface only as a window that stops
+// painting. Log them so a mid-show render fault leaves a trace in crash.log.
+if (app) {
+  app.on('child-process-gone', (_e, d) => {
+    writeCrashLog('child-process-gone', new Error(d.type + '/' + (d.serviceName || '') + ' reason=' + d.reason + ' exitCode=' + d.exitCode));
+  });
+}
+
+// Renderer acceleration. This has to be decided BEFORE app-ready — earlier than the server and its
+// state file load — so the choice lives in its own tiny JSON next to userData and is read
+// synchronously here. Default is GPU: compositing on the GPU keeps CPU headroom for the game and
+// the encoder during a show. CPU mode stays available for machines where GPU compositing misbehaves
+// (it was the unconditional default until 2026-08, when it turned out to be why an idle control
+// panel still burned CPU and why occluded-window repaints stalled — see backgroundThrottling below).
+const RENDER_MODE_FILE = path.join(
+  process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'),
+  'ne-broadcast-suite', 'render-mode.json'
+);
+function readRenderMode() {
+  try {
+    const raw = JSON.parse(fs.readFileSync(RENDER_MODE_FILE, 'utf8'));
+    return raw && raw.mode === 'cpu' ? 'cpu' : 'gpu';
+  } catch (e) { return 'gpu'; }
+}
+const RENDER_MODE = readRenderMode();
+
+// Registered at module scope, NOT inside setupPopoutHandler(): that runs after
+// createControlPanel(), so the panel could ask for the current mode before a handler existed.
+// ipcMain is available as soon as electron is required, so there is no reason to defer these.
+// The mode is read before app-ready (above), so writing it only takes effect on the next launch.
+if (ipcMain) {
+  ipcMain.handle('get-render-mode', () => RENDER_MODE);
+  ipcMain.handle('set-render-mode', (_event, mode) => {
+    const next = mode === 'cpu' ? 'cpu' : 'gpu';
+    try {
+      fs.mkdirSync(path.dirname(RENDER_MODE_FILE), { recursive: true });
+      fs.writeFileSync(RENDER_MODE_FILE, JSON.stringify({ mode: next }, null, 2), 'utf8');
+      console.log('[INIT] Renderer acceleration set to ' + next + ' (applies on next launch)');
+      return { ok: true, mode: next, restartRequired: next !== RENDER_MODE };
+    } catch (e) {
+      console.error('[INIT] Could not save render mode:', e.message);
+      return { ok: false, error: e.message };
+    }
+  });
+}
+
 // Apply flags as early as possible (only if app is ready)
 if (app) {
   try {
     app.commandLine.appendSwitch('log-level', '3');
     app.commandLine.appendSwitch('disable-logging');
-    app.disableHardwareAcceleration();
+    if (RENDER_MODE === 'cpu') app.disableHardwareAcceleration();
+    console.log('[INIT] Renderer acceleration: ' + (RENDER_MODE === 'cpu' ? 'CPU (hardware acceleration disabled)' : 'GPU'));
   } catch (e) {
     console.error('[INIT] Error applying flags:', e.message);
   }
@@ -240,11 +288,43 @@ function createControlPanel() {
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
-      preload: path.join(__dirname, 'control-panel', 'preload.js')
+      preload: path.join(__dirname, 'control-panel', 'preload.js'),
+      // A mid-show freeze was measured here as 1 rendered frame in 63s with the DOM fully intact
+      // and the heap flat — a paint/scheduling stall, not a JS crash. During a show this window
+      // sits behind OBS/the game, and Chromium throttles rAF/timers hard once it considers a
+      // window occluded (made worse by disableHardwareAcceleration() above: all compositing is
+      // on the CPU). A control surface has to keep painting when it isn't foreground.
+      backgroundThrottling: false
     }
   });
   controlPanel.loadFile(path.join(__dirname, 'control-panel', 'index.html'));
+  // Tell the launcher when the studio is actually painted. Its load animation used to be a fixed
+  // 5s sleep that started AFTER sign-in resolved — dead time bolted onto every launch whether the
+  // panel was ready in 400ms or still loading at 6s. Now the animation covers this instead.
+  controlPanel.webContents.once('did-finish-load', () => {
+    panelDidLoad = true;
+    if (server && typeof server.markPanelReady === 'function') server.markPanelReady();
+  });
   controlPanel.setMenuBarVisibility(false);
+
+  // A dead or wedged renderer looks IDENTICAL to a working one from the outside: the window just
+  // sits there painting its background colour. Nothing was listening for it, so a mid-show freeze
+  // produced a black panel, no log line, and no recovery. Record it, and reload once so the
+  // producer gets the panel back instead of having to restart the suite mid-broadcast.
+  let panelReloads = 0;
+  const recoverPanel = (why) => {
+    writeCrashLog('controlPanel:' + why, new Error(why));
+    if (panelReloads >= 3) { console.error('[NE] Control panel ' + why + ' — reload limit hit, leaving as-is.'); return; }
+    panelReloads++;
+    console.error('[NE] Control panel ' + why + ' — reloading (' + panelReloads + '/3).');
+    try { if (!controlPanel.isDestroyed()) controlPanel.reload(); } catch (_) { }
+  };
+  controlPanel.webContents.on('render-process-gone', (_e, details) => {
+    recoverPanel('render-process-gone reason=' + details.reason + ' exitCode=' + details.exitCode);
+  });
+  // Fires when the renderer stops pumping its message loop (the freeze this was reported for).
+  controlPanel.on('unresponsive', () => recoverPanel('unresponsive'));
+  controlPanel.on('responsive', () => console.log('[NE] Control panel responsive again.'));
 
   // Auto-open the dev console on launch (detached) for the DEVELOPER only — never in a build shipped
   // to end users. Enabled when ANY dev signal is present:
@@ -547,6 +627,8 @@ function setupApp() {
       // Load server AFTER the window exists so startup I/O doesn't block the launcher paint.
       server = require('./server');
       server.start(__dirname);
+      // The panel can finish painting before `server` is assigned above — replay it if so.
+      if (panelDidLoad && typeof server.markPanelReady === 'function') server.markPanelReady();
       // The launcher POSTs /api/launcher/launch when it's time to swap to the studio.
       if (typeof server.setLauncherLaunchCallback === 'function') {
         server.setLauncherLaunchCallback(showMain);

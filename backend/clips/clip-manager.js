@@ -19,7 +19,7 @@ function createClipManager({ dataDir, getObsClient, onUpdate, onCapture }) {
   let library = [];
   let montages = [];
   let settings = {
-    autoCapture: true,
+    autoCapture: false,   // default OFF — auto-clipping is opt-in, never forced on
     replayFolder: '',
     captureRules: {
       goal: true, ace: true, clutch: true, save: true, multi_kill: true, defuse: true,

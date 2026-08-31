@@ -565,13 +565,15 @@
       const timeEl = el('pf-kickoff-time');
       if (_frozen != null) { timeEl.textContent = fmtTime(_frozen); return; }
       if (!_endsAt) return;
-      timeEl.textContent = fmtTime((_endsAt - Date.now()) / 1000);
+      timeEl.textContent = fmtTime((_endsAt - (typeof SceneBase !== 'undefined' ? SceneBase.now() : Date.now())) / 1000);
     }
     function renderKickoff(data) {
       const b = data.breakScreen || {};
       const hasEndsAt = !!b.endsAt;
       const hasFrozen = b.frozenSeconds != null;
-      const hasTimer = hasEndsAt || hasFrozen;
+      // Hide on the producer timer takes the kickoff clock down here too (Hide only clears
+      // .visible — endsAt stays in state, which is why the clock used to keep running).
+      const hasTimer = (b.visible !== false) && (hasEndsAt || hasFrozen);
       el('pf-kickoff').classList.toggle('hidden', !hasTimer);
       el('pf-kickoff-lbl').textContent = (b.title || 'Kickoff').toString();
       if (hasTimer) {
@@ -694,7 +696,7 @@
         upcoming: {
           matches: [{ teamA: 'First Up', teamB: 'Villainous', teamALogo: '', teamBLogo: '' }]
         },
-        breakScreen: { title: 'KICKOFF', endsAt: Date.now() + 30 * 60 * 1000 + 51 * 1000 },
+        breakScreen: { visible: true, title: 'KICKOFF', endsAt: Date.now() + 30 * 60 * 1000 + 51 * 1000 },
         preshow: {
           headline: 'THE LAST PLAYER TO QUALIFY',
           topics: [
@@ -713,6 +715,9 @@
       });
       el('stage').classList.add('show');
     } else {
+      // Kickoff clock is furniture here, not this scene's own trigger — follow the producer's
+      // Show/Hide rather than the standalone force-visible rule (SceneBase.trustVisibility).
+      SceneBase.trustVisibility('breakScreen');
       SceneBase.connect(data => { render(data); SceneBase.applySceneConfig('preshow', data); });
     }
   </script>

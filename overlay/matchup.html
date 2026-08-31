@@ -6,6 +6,9 @@
   Team names at bottom corners with dark scrim for readability.
   Dark center VS pillar.
   Driven by full_state: teams.blue/orange (name, color, logo, players, series), bestOf, eventName, roundLabel, brand.
+  SMASH: the crest circle becomes the FIGHTER render — smash.<side>.character (the producer's pick
+  in Match > Teams) first, then startggCharacters.<side> (start.gg's most-reported character for
+  that entrant this event, a prior only — start.gg has no live "playing now" data).
   ?title=      override event label  ?title=off  hides it
   ?sponsors=0  hide the sponsor rail even if sponsors are configured
 -->
@@ -18,7 +21,7 @@
       --team-a: #22c55e;
       --team-b: #8b5cf6;
       --cw: 240px;
-      --tb: 80px;
+      --tb: 0px;      /* no top bar any more — halves centre on the full canvas */
     }
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     html, body {
@@ -40,52 +43,16 @@
     :root {
       --rail-h: 0px;
     }
+    /* How much of the bottom of frame the rail covers, so the centre pillar's lit edges can run
+       to the very top and stop cleanly ON the rail instead of being chopped off behind it. */
+    .mu-stage.has-sponsors                  { --rail-h: 64px; }
+    .mu-stage.has-eventline                 { --rail-h: 40px; }
+    .mu-stage.has-sponsors.has-eventline    { --rail-h: 104px; }
 
-    /* ─────────────────────────────────────────────
-       TOP BAR — logo + event title centered together
-    ───────────────────────────────────────────── */
-    .mu-topbar {
-      position: absolute; top: 0; left: 0; right: 0; z-index: 20;
-      height: var(--tb);
-      background: rgba(5, 7, 14, .9);
-      border-bottom: 1px solid rgba(255,255,255,.07);
-      backdrop-filter: blur(14px);
-      -webkit-backdrop-filter: blur(14px);
-      display: flex; align-items: center; justify-content: center;
-      box-shadow: 0 6px 40px rgba(0,0,0,.6);
-    }
+    /* The card had a full-width TOP BAR (brand mark + event title) and a matching bottom rail.
+       Both slabs are gone: the mark sits above the VS and the event name reads along the bottom
+       under the sponsor rail, so the art is not boxed in top and bottom. */
 
-    /* centered group: logo + divider + text */
-    .mu-topbar-center {
-      display: flex; align-items: center; gap: 16px;
-    }
-    .mu-topbar-logo {
-      height: 46px; width: auto; max-width: 160px;
-      object-fit: contain; flex-shrink: 0;
-      filter: drop-shadow(0 2px 8px rgba(0,0,0,.5));
-    }
-    .mu-topbar-logo.is-hidden { display: none; }
-    .mu-topbar-sep {
-      width: 1px; height: 30px;
-      background: rgba(255,255,255,.15); flex-shrink: 0;
-    }
-    .mu-topbar-sep.is-hidden { display: none; }
-    .mu-topbar-info {
-      display: flex; flex-direction: column; align-items: flex-start; gap: 1px;
-    }
-    .mu-topbar-event {
-      font-size: 18px; font-weight: 800; letter-spacing: .26em; text-transform: uppercase;
-      color: rgba(255,255,255,.85); line-height: 1;
-    }
-    .mu-topbar-round {
-      font-size: 11px; font-weight: 700; letter-spacing: .34em; text-transform: uppercase;
-      color: rgba(255,255,255,.36); line-height: 1;
-    }
-    .mu-topbar-round.is-hidden { display: none; }
-
-    /* ─────────────────────────────────────────────
-       SPONSOR RAIL (bottom)
-    ───────────────────────────────────────────── */
     .mu-sponsors {
       position: absolute; bottom: 0; left: 0; right: 0; z-index: 20;
       height: 64px;
@@ -97,6 +64,38 @@
       padding: 0 60px;
     }
     .mu-sponsors.show { display: flex; }
+    /* Brand mark, centred above the VS. */
+    .mu-center-brand {
+      max-width: 152px; max-height: 78px; object-fit: contain; margin-bottom: 20px;
+      opacity: 0; transform: translateY(-8px);
+      transition: opacity .6s ease .12s, transform .6s cubic-bezier(.16,.84,.24,1) .12s;
+      filter: drop-shadow(0 4px 18px rgba(0,0,0,.7));
+    }
+    .mu-stage.show .mu-center-brand { opacity: 1; transform: none; }
+    .mu-center-brand.is-hidden { display: none; }
+    /* Event name along the very bottom, on its OWN line under the sponsor rail. The two used to
+       share a single 104px plate, which read as one deep slab with two things floating in it.
+       Split into two bands with a hairline between, the bottom reads as what it is: partners on
+       one line, the event on the next, with a clear hierarchy between them. The event line is
+       darker and shorter so it settles under the sponsor row rather than competing with it. */
+    .mu-eventline {
+      position: absolute; left: 0; right: 0; bottom: 0; z-index: 21;
+      height: 40px; display: flex; align-items: center; justify-content: center;
+      font-size: 17px; font-weight: 800; letter-spacing: .3em; text-transform: uppercase;
+      color: rgba(255,255,255,.66);
+      background: rgba(3, 4, 9, .92);
+      border-top: 1px solid rgba(255,255,255,.07);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      text-shadow: 0 2px 10px rgba(0,0,0,.85);
+      opacity: 0; transition: opacity .6s ease .5s;
+    }
+    .mu-stage.show .mu-eventline { opacity: 1; }
+    .mu-eventline.is-empty { display: none; }
+    /* Two bands: the sponsor rail sits ON TOP of the event line rather than swallowing it. */
+    .mu-stage.has-eventline .mu-sponsors { bottom: 40px; }
+    .mu-stage.has-sponsors.has-eventline .mu-bottom { bottom: 104px; }
+    .mu-stage.has-eventline:not(.has-sponsors) .mu-bottom { bottom: 40px; }
     .mu-sponsor-img {
       height: 34px; width: auto; max-width: 130px;
       object-fit: contain; opacity: .82;
@@ -164,6 +163,15 @@
     .mu-half--b .mu-logo-bg { transform: translate(-47%, -50%) scale(.84); }
     .mu-stage.show .mu-half--a .mu-logo-bg { opacity: .18; transform: translate(-53%, -50%) scale(1); }
     .mu-stage.show .mu-half--b .mu-logo-bg { opacity: .18; transform: translate(-47%, -50%) scale(1); }
+    /* Character watermark: the same slot, but a fighter render is a FIGURE rather than a mark, so
+       it wants to be bigger and stood on the floor of the half instead of centred on the crest. */
+    .mu-logo-bg.is-fighter { object-fit: contain; object-position: bottom center; }
+    .mu-half--a .mu-logo-bg.is-fighter { transform: translate(-52%, -44%) scale(1.02); }
+    .mu-half--b .mu-logo-bg.is-fighter { transform: translate(-48%, -44%) scale(1.02); }
+    /* The fighter render is scenery, not content — it sits behind the crest, the player names and
+       the pips, all of which have to stay legible over it. Dropped from .22 -> .12 -> .07. */
+    .mu-stage.show .mu-half--a .mu-logo-bg.is-fighter { opacity: .07; transform: translate(-52%, -44%) scale(1.22); }
+    .mu-stage.show .mu-half--b .mu-logo-bg.is-fighter { opacity: .07; transform: translate(-48%, -44%) scale(1.22); }
 
     .mu-logo-fg {
       width: 300px; height: 300px;
@@ -201,6 +209,27 @@
       box-shadow: 0 0 40px -4px var(--team-b), inset 0 0 44px rgba(0,0,0,.5), 0 6px 28px rgba(0,0,0,.6); }
     .mu-stage.show .mu-logo-abbr { opacity: 1; transform: scale(1); }
 
+    /* Fighter portrait in the crest circle (Smash). Same 300px disc as the abbreviation fallback,
+       with the render standing on the floor of it rather than centred, so the character reads as a
+       figure on a plinth instead of a floating cut-out. */
+    .mu-fighter {
+      width: 300px; height: 300px; border-radius: 50%; overflow: hidden; position: relative;
+      background: radial-gradient(circle at 50% 34%, rgba(42,46,58,.96), rgba(13,15,21,.98));
+      opacity: 0; transform: scale(.82);
+      transition: opacity .7s ease .22s, transform .75s cubic-bezier(.16,.84,.24,1) .22s;
+    }
+    .mu-half--a .mu-fighter { border: 6px solid var(--team-a);
+      box-shadow: 0 0 40px -4px var(--team-a), inset 0 0 44px rgba(0,0,0,.5), 0 6px 28px rgba(0,0,0,.6); }
+    .mu-half--b .mu-fighter { border: 6px solid var(--team-b);
+      box-shadow: 0 0 40px -4px var(--team-b), inset 0 0 44px rgba(0,0,0,.5), 0 6px 28px rgba(0,0,0,.6); }
+    .mu-stage.show .mu-fighter { opacity: 1; transform: scale(1); }
+    .mu-fighter img {
+      position: absolute; left: 50%; bottom: -6%; transform: translateX(-50%);
+      height: 96%; width: auto; object-fit: contain;
+      filter: drop-shadow(0 8px 22px rgba(0,0,0,.65));
+    }
+
+
     /* Player name list */
     .mu-players {
       display: flex; flex-direction: column; align-items: center; gap: 3px;
@@ -216,6 +245,10 @@
       font-size: 22px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase;
       color: #fff; line-height: 1.45;
       text-shadow: 0 2px 14px rgba(0,0,0,.95), 0 1px 4px rgba(0,0,0,.9);
+      /* The row is only as wide as its widest line, so a real name longer than the gamertag
+         (or vice versa) left-aligned both against that box instead of stacking centred.
+         .mu-players centres the BOXES; this centres the text inside each one. */
+      text-align: center;
     }
 
     /* ─────────────────────────────────────────────
@@ -269,7 +302,10 @@
 
     /* series pip row */
     .mu-pips { display: flex; gap: 6px; margin-top: 10px; }
-    .mu-bottom--b .mu-pips { justify-content: flex-end; }
+    /* Side B fills from its OUTER edge inward, mirroring side A, so the two rows meet in the
+       middle instead of both marching right. row-reverse flips the main axis, so flex-START is
+       what now packs the row against the right-hand edge. */
+    .mu-bottom--b .mu-pips { flex-direction: row-reverse; justify-content: flex-start; }
     .mu-pip {
       width: 14px; height: 14px; border-radius: 50%;
       background: rgba(255,255,255,.12); border: 2px solid rgba(255,255,255,.22);
@@ -291,17 +327,21 @@
          40px 0 80px rgba(0,0,0,.55);
     }
 
+    /* The lit edges run from the TOP OF FRAME down to the rail. The old 8% inset was sized around
+       a full-width top bar that no longer exists, so it left a dead gap where the pillar had no
+       lit edge at all. The gradient comes up quickly (lit by 14%) so the line reads as reaching
+       the top rather than fading in halfway down. */
     .mu-center::before, .mu-center::after {
-      content: ''; position: absolute; top: 8%; bottom: 8%; width: 2px;
+      content: ''; position: absolute; top: 0; bottom: var(--rail-h, 0px); width: 2px;
     }
     .mu-center::before {
       left: 0;
-      background: linear-gradient(to bottom, transparent, var(--team-a) 50%, transparent);
+      background: linear-gradient(to bottom, transparent 0%, var(--team-a) 14%, var(--team-a) 50%, transparent 100%);
       box-shadow: 0 0 24px var(--team-a), 0 0 8px var(--team-a);
     }
     .mu-center::after {
       right: 0;
-      background: linear-gradient(to bottom, transparent, var(--team-b) 50%, transparent);
+      background: linear-gradient(to bottom, transparent 0%, var(--team-b) 14%, var(--team-b) 50%, transparent 100%);
       box-shadow: 0 0 24px var(--team-b), 0 0 8px var(--team-b);
     }
 
@@ -347,19 +387,11 @@
 <body>
   <div id="stage" class="mu-stage">
 
-    <!-- ── Top bar ── -->
-    <div class="mu-topbar">
-      <div class="mu-topbar-center">
-        <img class="mu-topbar-logo is-hidden" id="brand-logo" src="" alt="">
-        <div class="mu-topbar-sep is-hidden" id="tb-sep-l"></div>
-        <div class="mu-topbar-info">
-          <div class="mu-topbar-event" id="tb-event"></div>
-        </div>
-      </div>
-    </div>
-
-    <!-- ── Sponsor rail ── -->
+    <!-- Sponsor rail, and the event name directly under it. The card used to wear a full-width
+         slab across the top carrying the brand mark + event; the mark now sits above the VS in the
+         centre pillar and the event reads along the bottom, so neither long bar is needed. -->
     <div class="mu-sponsors" id="sponsors"></div>
+    <div class="mu-eventline" id="tb-event"></div>
 
     <!-- ── Left: Team A ── -->
     <div class="mu-half mu-half--a">
@@ -367,6 +399,7 @@
       <div class="mu-logo-block">
         <img id="logo1" class="mu-logo-fg" alt="">
         <div id="abbr1" class="mu-logo-abbr" style="display:none;"></div>
+        <div id="fighter1" class="mu-fighter" style="display:none;"><img alt=""></div>
         <div id="players1" class="mu-players"></div>
       </div>
       <div class="mu-bottom">
@@ -378,6 +411,7 @@
 
     <!-- ── Center pillar ── -->
     <div class="mu-center">
+      <img class="mu-center-brand is-hidden" id="brand-logo" src="" alt="">
       <div id="round" class="mu-round is-empty"></div>
       <div class="mu-divider"></div>
       <div class="mu-vs-text">VS</div>
@@ -396,6 +430,7 @@
       <div class="mu-logo-block">
         <img id="logo2" class="mu-logo-fg" alt="">
         <div id="abbr2" class="mu-logo-abbr" style="display:none;"></div>
+        <div id="fighter2" class="mu-fighter" style="display:none;"><img alt=""></div>
         <div id="players2" class="mu-players"></div>
       </div>
       <div class="mu-bottom mu-bottom--b">
@@ -408,6 +443,7 @@
   </div>
 
   <script src="scene-base.js"></script>
+  <script src="smash-fighters.js"></script>
   <script>
     const el = (id) => document.getElementById(id);
     const QP = new URLSearchParams(location.search);
@@ -429,6 +465,37 @@
       const words = name.split(/\s+/).filter(Boolean);
       if (words.length >= 2) return words.map((w) => w[0]).join('').toUpperCase().slice(0, 4);
       return name.slice(0, 3).toUpperCase();
+    }
+
+    // Which fighter to show for a side. The producer's pick in Match > Teams is authoritative —
+    // they are watching the match. start.gg's reported character is only a PRIOR: selections exist
+    // only once a game has been reported, so for the set about to be played it is really "what they
+    // played earlier in this bracket", which a counterpick makes wrong. Manual therefore wins.
+    function fighterFor(data, side) {
+      if (typeof SmashFighters === 'undefined') return null;
+      const manual = ((data.smash && data.smash[side] && data.smash[side].character) || '').trim();
+      const reported = ((data.startggCharacters && data.startggCharacters[side]) || '').trim();
+      return SmashFighters.resolve(manual || reported);
+    }
+    // Crest circle → fighter render when we know one, else the usual logo/abbreviation.
+    // The crest disc plus the big low-opacity render behind it. No fighter NAME anywhere — the
+    // art is the label.
+    function setFighterCrest(n, f, bgImg) {
+      const disc = el('fighter' + n);
+      if (!disc) return false;
+      if (!f) { disc.style.display = 'none'; return false; }
+      const url = SmashFighters.renderUrl(f.slug);
+      const img = disc.querySelector('img');
+      if (img && img.getAttribute('src') !== url) img.src = url;
+      disc.style.display = '';
+      // Reuse the team-logo watermark slot for the character, scaled up on that side's half.
+      if (bgImg) {
+        if (bgImg.getAttribute('src') !== url) bgImg.src = url;
+        bgImg.classList.remove('logo-on-dark');
+        bgImg.classList.add('is-fighter');
+        bgImg.style.display = '';
+      }
+      return true;
     }
 
     // Show the team logo, or fall back to the name abbreviation when there's no custom logo
@@ -455,8 +522,14 @@
       }
     }
 
-    function renderPlayers(container, players, profiles) {
+    // SINGLES: the roster is one player and the team name at the bottom of the half is already
+    // that same person, so the line under the crest just says it twice. Only list a roster when
+    // there is actually a squad to list.
+    function renderPlayers(container, players, profiles, showRealName) {
       container.innerHTML = '';
+      const roster = players || [];
+      container.style.display = roster.length > 1 ? '' : 'none';
+      if (roster.length <= 1) return;
       (players || []).slice(0, 6).forEach((p) => {
         const tag = (p.gamertag || p.gamerTag || p.name || '');
         if (!tag) return;
@@ -464,9 +537,11 @@
         d.className = 'mu-player';
         d.textContent = tag.toUpperCase();
         // Real name IN ADDITION to the gamertag — from the player record or the
-        // start.gg profile registry (keyed by trimmed-lowercase gamertag).
+        // start.gg profile registry (keyed by trimmed-lowercase gamertag). Gated on the same
+        // "Show real names" switch the Line-up and Bracket graphics use (intro.showRealName),
+        // so turning it off clears the legal names everywhere at once.
         const prof = (profiles || {})[tag.trim().toLowerCase()] || {};
-        const real = (p.realName || prof.realName || '').trim();
+        const real = showRealName ? (p.realName || prof.realName || '').trim() : '';
         if (real) {
           const r = document.createElement('div');
           r.className = 'mu-player-real';
@@ -493,19 +568,20 @@
       const bo     = data.bestOf || 5;
       const winsNeeded = Math.ceil(bo / 2);
 
-      // ── Top bar ──
+      // ── Brand mark (above the VS) + event line (under the sponsor rail) ──
       const brandLogo = (data.brand && data.brand.logo) ? data.brand.logo : '';
       const brandEl = el('brand-logo');
       SceneBase.applyTeamLogo(brandEl, brandLogo, '');
-      const hasBrand = !!brandLogo;
-      brandEl.classList.toggle('is-hidden', !hasBrand);
-      el('tb-sep-l').classList.toggle('is-hidden', !hasBrand);
+      brandEl.classList.toggle('is-hidden', !brandLogo);
 
       let titleText = '';
       const qt = QP.get('title');
       if (qt != null) { titleText = /^(off|none|hide|0)$/i.test(qt.trim()) ? '' : qt.trim(); }
       else { titleText = (data.eventName || '').toString().trim(); }
-      el('tb-event').textContent = titleText.toUpperCase();
+      const evLine = el('tb-event');
+      evLine.textContent = titleText.toUpperCase();
+      evLine.classList.toggle('is-empty', !titleText);
+      el('stage').classList.toggle('has-eventline', !!titleText);
 
       // Round/stage label — shown only in the center pillar (above the VS); no longer duplicated
       // under the event title in the top bar.
@@ -516,8 +592,15 @@
       // ── Sponsor rail ── (?sponsors=0 to suppress)
       const sponsorsEl = el('sponsors');
       const showSponsors = QP.get('sponsors') !== '0';
+      // RAIL placement only. This used to take brand.sponsors (everything), so a kit that had
+      // carefully tagged its rail logos got the untagged pile instead — brand mark included.
+      // The untagged list is still the fallback for a kit that tags nothing at all.
+      const brandK = (data.brand || {});
+      const anyTagged = (brandK.deskSponsors || []).length || (brandK.railSponsors || []).length
+                      || (brandK.bannerSponsors || []).length;
       const sponsors = showSponsors
-        ? (data.sponsors || (data.brand && data.brand.sponsors) || []).filter((s) => s && s.logo)
+        ? ((brandK.railSponsors || []).length ? brandK.railSponsors
+           : (anyTagged ? [] : (brandK.sponsors || []))).filter((s) => s && s.logo)
         : [];
       sponsorsEl.innerHTML = sponsors.map((s) =>
         `<img class="mu-sponsor-img" src="${s.logo}" alt="${(s.name || '').replace(/"/g, '')}">`
@@ -527,23 +610,35 @@
 
       // ── Team A ──
       document.documentElement.style.setProperty('--team-a', blue.color || '#22c55e');
-      setTeamCrest(el('logo1'), el('logo1bg'), el('abbr1'), blue);
+      // A known fighter replaces the crest entirely for that side.
+      const f1 = fighterFor(data, 'blue');
+      if (setFighterCrest('1', f1, el('logo1bg'))) {
+        const e = el('logo1'); if (e) e.style.display = 'none';
+        const a = el('abbr1'); if (a) a.style.display = 'none';
+      } else { const bg = el('logo1bg'); if (bg) bg.classList.remove('is-fighter');
+               setTeamCrest(el('logo1'), bg, el('abbr1'), blue); }
       const an = splitTeamName(blue.name);
       el('city1').textContent = an.city;
       el('city1').classList.toggle('is-empty', !an.city);
       el('name1').textContent = an.team;
       renderPips(el('pips1'), blue.series, winsNeeded);
-      renderPlayers(el('players1'), blue.players, data.playerProfiles);
+      const showRealName = !!(data.intro && data.intro.showRealName);
+      renderPlayers(el('players1'), blue.players, data.playerProfiles, showRealName);
 
       // ── Team B ──
       document.documentElement.style.setProperty('--team-b', orange.color || '#8b5cf6');
-      setTeamCrest(el('logo2'), el('logo2bg'), el('abbr2'), orange);
+      const f2 = fighterFor(data, 'orange');
+      if (setFighterCrest('2', f2, el('logo2bg'))) {
+        const e = el('logo2'); if (e) e.style.display = 'none';
+        const a = el('abbr2'); if (a) a.style.display = 'none';
+      } else { const bg = el('logo2bg'); if (bg) bg.classList.remove('is-fighter');
+               setTeamCrest(el('logo2'), bg, el('abbr2'), orange); }
       const bn = splitTeamName(orange.name);
       el('city2').textContent = bn.city;
       el('city2').classList.toggle('is-empty', !bn.city);
       el('name2').textContent = bn.team;
       renderPips(el('pips2'), orange.series, winsNeeded);
-      renderPlayers(el('players2'), orange.players, data.playerProfiles);
+      renderPlayers(el('players2'), orange.players, data.playerProfiles, showRealName);
 
       // ── Center ──
       const sa = blue.series ?? 0;

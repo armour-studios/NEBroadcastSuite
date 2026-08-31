@@ -23,8 +23,23 @@ var GAMES = {
     url: SUITE_BASE + '/api/mr-gep',
     features: ['gep_internal', 'match_info', 'game_info']
   }
+  // R6_TODO — Rainbow Six Siege. The suite side is built and live at /api/r6-gep; this entry is all
+  // that remains. Two values must be confirmed against Overwolf's own docs rather than guessed:
+  //   1. the R6 game class id (the numeric key below), and
+  //   2. the exact feature names R6 exposes.
+  // Then uncomment this block AND add the same class id to manifest.json > game_targeting.game_ids
+  // and the GameLaunch launch_events list, or Overwolf will never start the relay for R6.
+  //
+  // , <R6_CLASS_ID>: {
+  //     url: SUITE_BASE + '/api/r6-gep',
+  //     features: ['gep_internal', 'game_info', 'match_info', 'roster', 'kill', 'death']
+  //   }
 };
 
+// R6_TODO — when the R6 entry above is enabled, normalise its GEP payload into the shape
+// /api/r6-gep documents ({ roster, map, game_mode, match_id, round, score:{a,b}, side, operators,
+// events }) inside onInfo/onEvents, the same way Overwatch and Rivals are handled below. Keeping
+// the mapping in the relay means the suite endpoint never changes when Overwolf renames a field.
 var activeGame = null;      // class id of the running game (key into GAMES)
 var pendingEvents = [];
 var dirty = false;

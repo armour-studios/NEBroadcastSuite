@@ -31,13 +31,25 @@ const MAP_POOLS = {
     { id: 'consulate', name: 'Consulate', image: '' },{ id: 'kafe', name: 'Kafe Dostoyevsky', image: '' },
     { id: 'lair', name: 'Lair', image: '' }
   ],
-  // Super Smash Bros. Ultimate — starter STAGES (struck 1-2-1 down to the game-1 stage).
+  // Super Smash Bros. Ultimate — the legal stage list most modern rulesets run.
+  //
+  // `tier` is a DEFAULT ruleset hint, not a property of the stage: every event is different, and
+  // plenty run no strike phase at all. It seeds the guided veto's "Strike from" picker (which the
+  // producer can override, or ignore entirely by never starting a veto) and nothing else.
+  // Deliberately NOT `type` — that field is intrinsic map data (Overwatch's Control/Hybrid, always
+  // true of the map) and the Series editor auto-labels the graphic from it. Tagging stages with
+  // `type:'Starter'` stamped a ruleset onto every card of every Smash event.
+  // Stage art is fetched by assets/fetch-smash-stages.js.
   smash: [
-    { id: 'battlefield', name: 'Battlefield', image: '' },
-    { id: 'final-destination', name: 'Final Destination', image: '' },
-    { id: 'small-battlefield', name: 'Small Battlefield', image: '' },
-    { id: 'pokemon-stadium-2', name: 'Pokémon Stadium 2', image: '' },
-    { id: 'smashville', name: 'Smashville', image: '' }
+    { id: 'battlefield',        name: 'Battlefield',          tier: 'Starter',     image: '/assets/smash/maps/battlefield.png' },
+    { id: 'final-destination',  name: 'Final Destination',    tier: 'Starter',     image: '/assets/smash/maps/final-destination.png' },
+    { id: 'small-battlefield',  name: 'Small Battlefield',    tier: 'Starter',     image: '/assets/smash/maps/small-battlefield.png' },
+    { id: 'pokemon-stadium-2',  name: 'Pokémon Stadium 2',    tier: 'Starter',     image: '/assets/smash/maps/pokemon-stadium-2.png' },
+    { id: 'smashville',         name: 'Smashville',           tier: 'Starter',     image: '/assets/smash/maps/smashville.png' },
+    { id: 'hollow-bastion',     name: 'Hollow Bastion',       tier: 'Counterpick', image: '/assets/smash/maps/hollow-bastion.png' },
+    { id: 'town-and-city',      name: 'Town and City',        tier: 'Counterpick', image: '/assets/smash/maps/town-and-city.png' },
+    { id: 'kalos-pokemon-league', name: 'Kalos Pokémon League', tier: 'Counterpick', image: '/assets/smash/maps/kalos-pokemon-league.png' },
+    { id: 'yoshis-story',       name: "Yoshi's Story",        tier: 'Counterpick', image: '/assets/smash/maps/yoshis-story.png' }
   ],
   // Overwatch 2 — OWCS 2025 competitive map pool. type field drives the center display in overwatch.html.
   // Map images sourced from Liquipedia (liquipedia.net/overwatch/Maps) and hosted locally.
@@ -90,32 +102,33 @@ const MAP_POOLS = {
   ],
   // Rocket League — arenas are cosmetic (no real competitive veto); included so the app can
   // show/select an arena on the board if a tournament chooses to. type is the GAME MODE played
-  // on it: every arena ships as Soccar and the producer can switch any row to Hoops/Dropshot/
-  // Snow Day/Rumble/Heatseeker (see MODE_OPTIONS) — RL mode is chosen per game, not baked into
-  // the arena. Only arenas with real art in assets/rocket-league/maps are listed.
+  // on it: every arena ships as Standard (the competitive playlist name producers and casters
+  // use; the game files call the same mode "Soccar") and the producer can switch any row to
+  // Hoops/Dropshot/Snow Day/Rumble/Heatseeker (see MODE_OPTIONS) — RL mode is chosen per game,
+  // not baked into the arena. Only arenas with real art in assets/rocket-league/maps are listed.
   'rocket-league': [
-    { id: 'dfh-stadium', name: 'DFH Stadium', type: 'Soccar', image: '/assets/rocket-league/maps/dfh-stadium.jpg' },
-    { id: 'mannfield', name: 'Mannfield', type: 'Soccar', image: '/assets/rocket-league/maps/mannfield.jpg' },
-    { id: 'champions-field', name: 'Champions Field', type: 'Soccar', image: '/assets/rocket-league/maps/champions-field.jpg' },
-    { id: 'neo-tokyo', name: 'Neo Tokyo', type: 'Soccar', image: '/assets/rocket-league/maps/neo-tokyo.jpg' },
-    { id: 'beckwith-park', name: 'Beckwith Park', type: 'Soccar', image: '/assets/rocket-league/maps/beckwith-park.jpg' },
-    { id: 'urban-central', name: 'Urban Central', type: 'Soccar', image: '/assets/rocket-league/maps/urban-central.jpg' },
-    { id: 'utopia-coliseum', name: 'Utopia Coliseum', type: 'Soccar', image: '/assets/rocket-league/maps/utopia-coliseum.jpg' },
-    { id: 'salty-shores', name: 'Salty Shores', type: 'Soccar', image: '/assets/rocket-league/maps/salty-shores.jpg' },
-    { id: 'aquadome', name: 'AquaDome', type: 'Soccar', image: '/assets/rocket-league/maps/aquadome.jpg' },
-    { id: 'wasteland', name: 'Wasteland', type: 'Soccar', image: '/assets/rocket-league/maps/wasteland.jpg' },
-    { id: 'farmstead', name: 'Farmstead', type: 'Soccar', image: '/assets/rocket-league/maps/farmstead.jpg' },
-    { id: 'forbidden-temple', name: 'Forbidden Temple', type: 'Soccar', image: '/assets/rocket-league/maps/forbidden-temple.jpg' },
-    { id: 'neon-fields', name: 'Neon Fields', type: 'Soccar', image: '/assets/rocket-league/maps/neon-fields.jpg' },
-    { id: 'starbase-arc', name: 'Starbase ARC', type: 'Soccar', image: '/assets/rocket-league/maps/starbase-arc.jpg' },
-    { id: 'deadeye-canyon', name: 'Deadeye Canyon', type: 'Soccar', image: '/assets/rocket-league/maps/deadeye-canyon.jpg' },
-    { id: 'drift-woods', name: 'Drift Woods', type: 'Soccar', image: '/assets/rocket-league/maps/drift-woods.jpg' },
-    { id: 'estadio-vida', name: 'Estadio Vida', type: 'Soccar', image: '/assets/rocket-league/maps/estadio-vida.jpg' },
-    { id: 'futura-garden', name: 'Futura Garden', type: 'Soccar', image: '/assets/rocket-league/maps/futura-garden.jpg' },
-    { id: 'parc-de-paris', name: 'Parc de Paris', type: 'Soccar', image: '/assets/rocket-league/maps/parc-de-paris.jpg' },
-    { id: 'rivals-arena', name: 'Rivals Arena', type: 'Soccar', image: '/assets/rocket-league/maps/rivals-arena.jpg' },
-    { id: 'sovereign-heights', name: 'Sovereign Heights', type: 'Soccar', image: '/assets/rocket-league/maps/sovereign-heights.jpg' },
-    { id: 'boostfield-mall', name: 'Boostfield Mall', type: 'Soccar', image: '/assets/rocket-league/maps/boostfield-mall.jpg' }
+    { id: 'dfh-stadium', name: 'DFH Stadium', type: 'Standard', image: '/assets/rocket-league/maps/dfh-stadium.jpg' },
+    { id: 'mannfield', name: 'Mannfield', type: 'Standard', image: '/assets/rocket-league/maps/mannfield.jpg' },
+    { id: 'champions-field', name: 'Champions Field', type: 'Standard', image: '/assets/rocket-league/maps/champions-field.jpg' },
+    { id: 'neo-tokyo', name: 'Neo Tokyo', type: 'Standard', image: '/assets/rocket-league/maps/neo-tokyo.jpg' },
+    { id: 'beckwith-park', name: 'Beckwith Park', type: 'Standard', image: '/assets/rocket-league/maps/beckwith-park.jpg' },
+    { id: 'urban-central', name: 'Urban Central', type: 'Standard', image: '/assets/rocket-league/maps/urban-central.jpg' },
+    { id: 'utopia-coliseum', name: 'Utopia Coliseum', type: 'Standard', image: '/assets/rocket-league/maps/utopia-coliseum.jpg' },
+    { id: 'salty-shores', name: 'Salty Shores', type: 'Standard', image: '/assets/rocket-league/maps/salty-shores.jpg' },
+    { id: 'aquadome', name: 'AquaDome', type: 'Standard', image: '/assets/rocket-league/maps/aquadome.jpg' },
+    { id: 'wasteland', name: 'Wasteland', type: 'Standard', image: '/assets/rocket-league/maps/wasteland.jpg' },
+    { id: 'farmstead', name: 'Farmstead', type: 'Standard', image: '/assets/rocket-league/maps/farmstead.jpg' },
+    { id: 'forbidden-temple', name: 'Forbidden Temple', type: 'Standard', image: '/assets/rocket-league/maps/forbidden-temple.jpg' },
+    { id: 'neon-fields', name: 'Neon Fields', type: 'Standard', image: '/assets/rocket-league/maps/neon-fields.jpg' },
+    { id: 'starbase-arc', name: 'Starbase ARC', type: 'Standard', image: '/assets/rocket-league/maps/starbase-arc.jpg' },
+    { id: 'deadeye-canyon', name: 'Deadeye Canyon', type: 'Standard', image: '/assets/rocket-league/maps/deadeye-canyon.jpg' },
+    { id: 'drift-woods', name: 'Drift Woods', type: 'Standard', image: '/assets/rocket-league/maps/drift-woods.jpg' },
+    { id: 'estadio-vida', name: 'Estadio Vida', type: 'Standard', image: '/assets/rocket-league/maps/estadio-vida.jpg' },
+    { id: 'futura-garden', name: 'Futura Garden', type: 'Standard', image: '/assets/rocket-league/maps/futura-garden.jpg' },
+    { id: 'parc-de-paris', name: 'Parc de Paris', type: 'Standard', image: '/assets/rocket-league/maps/parc-de-paris.jpg' },
+    { id: 'rivals-arena', name: 'Rivals Arena', type: 'Standard', image: '/assets/rocket-league/maps/rivals-arena.jpg' },
+    { id: 'sovereign-heights', name: 'Sovereign Heights', type: 'Standard', image: '/assets/rocket-league/maps/sovereign-heights.jpg' },
+    { id: 'boostfield-mall', name: 'Boostfield Mall', type: 'Standard', image: '/assets/rocket-league/maps/boostfield-mall.jpg' }
   ]
 };
 
@@ -125,7 +138,7 @@ const MAP_POOLS = {
 const MODE_OPTIONS = {
   overwatch:       ['Control', 'Hybrid', 'Escort', 'Push', 'Flashpoint', 'Clash', 'Assault'],
   'marvel-rivals': ['Domination', 'Convoy', 'Convergence'],
-  'rocket-league': ['Soccar', 'Hoops', 'Dropshot', 'Snow Day', 'Rumble', 'Heatseeker', 'Spike Rush']
+  'rocket-league': ['Standard', 'Hoops', 'Dropshot', 'Snow Day', 'Rumble', 'Heatseeker', 'Spike Rush']
 };
 
 // Per-game terminology so the UI/board read correctly per selection type.
@@ -136,7 +149,9 @@ const VETO_META = {
   overwatch:       { kind: 'map',   banWord: 'Ban',    unit: 'map', hasBans: true, modes: MODE_OPTIONS.overwatch },
   'marvel-rivals': { kind: 'map',   banWord: 'Ban',    unit: 'map', modes: MODE_OPTIONS['marvel-rivals'] },
   'rocket-league': { kind: 'arena', banWord: 'Ban',    unit: 'arena', modes: MODE_OPTIONS['rocket-league'] },
-  smash:           { kind: 'stage', banWord: 'Strike', unit: 'stage' }
+  // strikeFrom = the DEFAULT stage tier the guided veto strikes from; the producer can pick any
+  // tier (or all stages) per event, and an event with no ban phase simply never starts a veto.
+  smash:           { kind: 'stage', banWord: 'Strike', unit: 'stage', strikeFrom: 'Starter' }
 };
 function getMeta(game) { return VETO_META[game] || { kind: 'map', banWord: 'Ban', unit: 'map' }; }
 
@@ -149,9 +164,28 @@ const STD7 = {
   3: [['ban', 0], ['ban', 1], ['pick', 0], ['pick', 1], ['ban', 0], ['ban', 1]],          // → 3 maps
   5: [['ban', 0], ['ban', 1], ['pick', 0], ['pick', 1], ['pick', 0], ['pick', 1]]          // → 5 maps
 };
-// Smash Ultimate game-1 stage striking on a 5-stage starter set: P1 strikes 1,
-// P2 strikes 2, P1 strikes 1 → 1 stage remains (the "1-2-1" rule).
-const SMASH_STRIKE = { 1: [['ban', 0], ['ban', 1], ['ban', 1], ['ban', 0]] };
+// Smash Ultimate game-1 stage striking: alternating 1-2-2-…-1 until ONE stage remains.
+// Built from the starter count rather than hardcoded, so a ruleset running 3, 7 or 9 starters
+// still resolves to exactly one stage — a fixed 4-strike list silently left 5 stages standing
+// the moment the pool grew past five.
+function smashStrikeOrder(starters) {
+  const n = Number(starters) || 0;
+  // Nothing to strike: one stage (or none) is already the decider. Clamping up to 2 instead
+  // generated a strike that would have removed the only stage in the pool.
+  if (n < 2) return [];
+  const seq = [];
+  let team = 0;
+  // first and last turns strike one; every turn in between strikes two
+  seq.push(['ban', team]);
+  let struck = 1;
+  while (n - struck > 1) {
+    team = team ? 0 : 1;
+    const take = (n - struck > 2) ? 2 : 1;
+    for (let i = 0; i < take; i++) seq.push(['ban', team]);
+    struck += take;
+  }
+  return seq;
+}
 
 // OWCS map veto: FT3 → each team strikes 3, then alternately picks until 5 maps remain.
 // FT2: ban 2 (1 each), pick 2 (1 each), 1 decider. FT3: ban 2, pick 2, ban 2, 1 decider (→5 total).
@@ -161,7 +195,7 @@ const OWCS_VETO = {
   3: [['ban',0],['ban',1],['pick',0],['pick',1],['ban',0],['ban',1]],      // → 3 maps + 1 decider (but played as FT3 so stop at winner)
   5: [['ban',0],['ban',1],['pick',0],['pick',1],['pick',0],['pick',1]]     // → 5 maps
 };
-const VETO_FORMATS = { csgo: STD7, valorant: STD7, rainbow6: STD7, smash: SMASH_STRIKE, overwatch: OWCS_VETO };
+const VETO_FORMATS = { csgo: STD7, valorant: STD7, rainbow6: STD7, overwatch: OWCS_VETO };
 
 // Each map carries an image; when none is set we fall back to a generated placeholder
 // at /assets/<game>/maps/<id>.svg (see assets/build-map-placeholders.js).
@@ -198,6 +232,8 @@ function mergedMapPools(gameConfigs) {
 // Falls back to a generic "alternate bans down to N maps" order for any game/size.
 function buildSequence(game, bestOf, poolSize) {
   const bo = [1, 3, 5, 7].includes(Number(bestOf)) ? Number(bestOf) : 1;
+  // Smash strikes down to one stage for game 1 regardless of how many starters the pool holds.
+  if (game === 'smash') return smashStrikeOrder(poolSize).map(s => ({ action: s[0], teamIdx: s[1] }));
   const fmt = VETO_FORMATS[game] && VETO_FORMATS[game][bo];
   if (fmt) return fmt.map(s => ({ action: s[0], teamIdx: s[1] }));
   // Generic fallback for games without an authored format: alternate bans until
@@ -214,4 +250,4 @@ function resolveSide(teamIdx, teamStart) {
   return teamIdx === 0 ? (teamStart || 'a') : other;
 }
 
-module.exports = { MAP_POOLS, MODE_OPTIONS, VETO_FORMATS, VETO_META, getMeta, mapPool, mergedMapPools, hasVeto, vetoGames, buildSequence, resolveSide };
+module.exports = { MAP_POOLS, MODE_OPTIONS, VETO_FORMATS, VETO_META, getMeta, mapPool, smashStrikeOrder, mergedMapPools, hasVeto, vetoGames, buildSequence, resolveSide };

@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Grid — Multiview Wall</title>
+<!--
+  GRID — the whole multiview wall in one 1920x1080 browser source (RLCS/GRID-style).
+
+  Every tile is ONE remote producer running their own broadcast: the video arrives over their VDO
+  feed, and the bar under it carries their Twitch handle + the SERIES score (maps won). The map
+  score stays where it belongs — on their own HUD, baked into their video.
+
+  Real data only: with nobody publishing, the wall says STANDBY instead of inventing matches. The
+  whole look comes from the active brand kit (colour + accent + font + logo + sponsors) and the
+  bottom strip is the app's own ticker.
+
+  Layout, data, brand and ticker wiring live in grid-core.js; every size lives in grid.css. Both
+  are shared with grid-bars.html (the transparent variant, for producers who bring their own OBS
+  video sources), so the two scenes can never drift apart.
+
+  Requires: each producer turns on Settings ▸ Broadcast ▸ Grid Multiview ("Publish my match").
+
+  URL params
+    ?tiles=2|3|4|6   pin a layout (default: auto — the wall grows as producers come online)
+    ?ticker=0        hide the bottom ticker strip
+    ?nowbar=0        hide the NOW bar
+-->
+<link rel="stylesheet" href="fonts.css" />
+<link rel="stylesheet" href="grid.css" />
+<style>
+  /* Only this scene paints a backdrop — grid-bars.html stays transparent. Both washes are the
+     brand kit's own two colours, so the wall sits inside the show's palette. */
+  body{
+    background:
+      radial-gradient(1500px 900px at 18% -10%, rgba(var(--brand-rgb),.30), transparent 62%),
+      radial-gradient(1200px 800px at 100% 110%, rgba(var(--brand2-rgb),.20), transparent 58%),
+      var(--bg);
+  }
+  body::before{                      /* the fine diagonal weave behind the wall */
+    content:""; position:fixed; inset:0; pointer-events:none; opacity:.5;
+    background:repeating-linear-gradient(-24deg, rgba(255,255,255,.045) 0 1px, transparent 1px 7px);
+    mask-image:radial-gradient(120% 100% at 50% 40%, #000 35%, transparent 85%);
+  }
+  .vid{ background:#04060c; border:1px solid rgba(var(--brand-rgb),.55); border-bottom:0;
+        box-shadow:0 26px 70px -34px rgba(0,0,0,.95); }
+  .tile.standby .vid, .tile.standby .bar{ border-color:var(--line); }
+</style>
+</head>
+<body>
+  <div class="scene">
+    <div class="wall"><div class="grid" id="grid"></div></div>
+
+    <div class="nowbar" id="nowbar">
+      <div class="nowblk">
+        <div class="now" id="nowLabel">STANDBY</div>
+        <div class="phase" id="phase"></div>
+      </div>
+      <div class="title" id="title" hidden><span id="eventName"></span></div>
+      <div class="meta">
+        <div>
+          <div class="lab">Current time</div>
+          <div style="display:flex;align-items:baseline;gap:8px;">
+            <span class="time" id="clock">--:--</span><span class="tz" id="tz"></span>
+          </div>
+        </div>
+        <div class="logos">
+          <span class="sponsors" id="sponsors" hidden></span>
+          <img id="brandLogo" alt="" hidden />
+        </div>
+      </div>
+    </div>
+
+    <div class="ticker" id="ticker" hidden>
+      <img class="tksponsor" id="tickerSponsor" alt="" hidden />
+      <div class="tkmask"><div class="track" id="track"></div></div>
+    </div>
+  </div>
+
+<script src="grid-core.js"></script>
+<script>GridCore.boot({ video: true });</script>
+</body>
+</html>

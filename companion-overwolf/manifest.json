@@ -6,7 +6,7 @@
     "author": "Armour Studios",
     "version": "0.2.0",
     "minimum-overwolf-version": "0.240.0",
-    "description": "Relays Overwatch and Marvel Rivals live game data to NE Broadcast Suite",
+    "description": "Relays Overwatch, Marvel Rivals and Rainbow Six Siege live game data to NE Broadcast Suite",
     "icon": "icon.png"
   },
   "permissions": [

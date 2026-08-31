@@ -6,6 +6,14 @@ import { tile } from "../svg";
 
 type Settings = { gfx?: string; side?: string; cutScene?: string; returnPrev?: boolean };
 
+/** The side leading the series (Match — Teams), or "" on a tie / 0-0 — the Winner graphic follows
+ *  this instead of a per-button side, so ONE key always crowns the right team. */
+function leadingSide(state: Record<string, any>): "blue" | "orange" | "" {
+  const b = Number(state.series?.blue) || 0;
+  const o = Number(state.series?.orange) || 0;
+  return b > o ? "blue" : o > b ? "orange" : "";
+}
+
 /** Toggle an exclusive full-screen graphic, mirroring the panel's GOLIVE toggles:
  *  the per-graphic message carries params (winner/intro side), then set_gfx_active
  *  does the exclusive switch server-side (only one graphic renders at a time).
@@ -47,11 +55,11 @@ export class GfxOnAir extends SuiteKeyAction<Settings> {
         if (g.side) {
           if (g.msg === "set_winner") {
             // The Winner graphic ALWAYS shows whoever is winning the series (from Match — Teams), so
-            // one button is always right — no per-side buttons, no team setup. We resolve the leader
-            // from live state here (a tie falls back to the button's side / blue).
-            const b = Number(suite.state.series?.blue) || 0;
-            const o = Number(suite.state.series?.orange) || 0;
-            payload.side = b > o ? "blue" : o > b ? "orange" : (s.side === "orange" ? "orange" : "blue");
+            // one button is always right — there is no side to configure (the key's side setting is
+            // Line-up's alone). A 0-0 tie has no champion to name, so it falls back to blue. Sending
+            // no name and no subtitle is deliberate: the suite clears the last winner's team and
+            // refreshes the score line from the live series score.
+            payload.side = leadingSide(suite.state) || "blue";
           } else {
             payload.side = s.side === "orange" ? "orange" : "blue";   // Line-up uses the chosen side
           }
@@ -72,9 +80,21 @@ export class GfxOnAir extends SuiteKeyAction<Settings> {
     return tile({
       glyph: "gfx-onair",
       label: g ? g.label : "Graphic?",
-      sub: s.cutScene ? `+ ${s.cutScene}` : "GRAPHIC",
+      sub: this.#sub(s, g),
       on: !!g && gfxIsLive(suite.state, g),
       pill: "ON AIR"
     });
+  }
+
+  /** Winner keys show the team they'd crown right now (live from the series score), so the producer
+   *  can SEE it tracking Match — Teams instead of trusting it; other keys keep the cut-scene hint. */
+  #sub(s: Settings, g: ReturnType<typeof gfxByKey>): string {
+    if (g?.msg === "set_winner") {
+      const lead = leadingSide(suite.state);
+      if (!lead) return "0-0 — NO LEAD";
+      const name = suite.state.teams?.[lead]?.name;
+      return (name || (lead === "orange" ? "Orange" : "Blue")).toUpperCase();
+    }
+    return s.cutScene ? `+ ${s.cutScene}` : "GRAPHIC";
   }
 }

@@ -1,0 +1,551 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=1920">
+  <title>NE Broadcast Suite — Countdown Bar</title>
+  <link rel="stylesheet" href="/fonts.css" />
+  <style>
+    /* ─────────────────────────────────────────────────────────────────────────
+       countdown-bar.html — segmented "back in" strip, its own OBS source.
+
+       A dedicated bar-sized canvas (1920 × 132 by default) rather than a mode of the
+       full-screen countdown: as its own browser source it can be positioned, hidden and
+       reused independently of the break screen — sat under a replay, a highlight reel or
+       a clean feed — without dragging a 1080-tall transparent layer around with it.
+
+       Reads the SAME state as countdown.html (breakScreen.endsAt / frozenSeconds / title /
+       message), so the producer's existing segment timer drives it with no extra controls: run
+       the timer, and both surfaces count down together. It deliberately does NOT mirror the
+       break screen's finalMessage — the clock just runs to 00:00 and holds, so a bar left up
+       through the hand-off never announces anything by itself.
+
+       LAYOUT — the left columns are FIXED WIDTH on purpose. The clock is the thing viewers
+       glance at repeatedly, so it must sit at the same pixel all show: if the columns before
+       it were content-sized, swapping a team or retitling the break would slide it sideways.
+       Only the headline column flexes, taking whatever is left:
+         [brand 150] [NEXT UP 360] [CLOCK 300] [headline — flex] [sponsor 250]
+
+       Params: ?h=132 bar height · ?alpha=0.82 backdrop opacity · ?teams=0 · ?sponsor=0
+               · ?brand=0 · ?align=top · ?rotate=6 sponsor rotation seconds
+       ───────────────────────────────────────────────────────────────────────── */
+    :root {
+      --h: 132px;
+      --alpha: 0.82;
+      --accent: #29b6f6;
+      --accent-2: #ff7a29;
+      --ink: #ffffff;
+      --muted: #97a0b0;
+      --main-font: 'Rajdhani', sans-serif;
+      /* Text that stays legible ON the filled clock block — recomputed per brand colour. */
+      --on-accent: #04121f;
+      /* Fixed column widths — see the layout note above. */
+      --col-brand: 150px;
+      /* Sized so two ~13-character names PLUS their crests ("FRAGMENT KINGS 🛡 vs 🛡 FALLEN
+         ANGELS") still fit above the shrink floor. Measured: that pair needs ~485px of content at
+         20px type, so anything narrower dropped straight to FK/FA even though the names were
+         perfectly reasonable. The headline column absorbs the difference and auto-shrinks. */
+      --col-next: 540px;
+      --col-timer: 300px;
+      --col-sponsor: 250px;
+      /* The kicker row's exact height (font-size at line-height 1) and the gap under it. Columns
+         that HAVE a kicker push their value down by this much; the headline column reserves the
+         same space so its text lands on the identical baseline. */
+      --kicker-h: 13px;
+      --stack-gap: 8px;
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      width: 1920px; height: var(--h);
+      overflow: hidden; background: transparent;
+      font-family: var(--main-font);
+    }
+
+    #bar {
+      display: flex; align-items: stretch;
+      width: 1920px; height: var(--h);
+      /* Semi-transparent backdrop so gameplay/b-roll reads through the bar instead of being
+         boxed out by a solid slab. --alpha is producer-tunable via ?alpha=. */
+      background: linear-gradient(180deg,
+        rgba(23, 26, 33, var(--alpha)) 0%,
+        rgba(11, 13, 18, var(--alpha)) 100%);
+      backdrop-filter: blur(3px);
+      -webkit-backdrop-filter: blur(3px);
+      box-shadow: 0 -8px 30px rgba(0,0,0,.42);
+      transform: translateY(100%); opacity: 0;
+      transition: transform .55s cubic-bezier(.2,.75,.3,1), opacity .4s ease;
+    }
+    body.align-top #bar { transform: translateY(-100%); }
+    #bar.show { transform: translateY(0); opacity: 1; }
+    /* Brand hairline along the leading edge of the whole bar. */
+    #bar::before {
+      content: ''; position: absolute; left: 0; right: 0; top: 0; height: 3px;
+      background: linear-gradient(90deg, var(--accent) 0%, var(--accent-2) 55%, var(--accent) 100%);
+      z-index: 5;
+    }
+    body.align-top #bar::before { top: auto; bottom: 0; }
+
+    /* ── Segments ──────────────────────────────────────────────────────────── */
+    .seg {
+      display: flex; align-items: center; justify-content: center;
+      padding: 0 18px; position: relative; min-width: 0;
+      flex: 0 0 auto;                       /* fixed by default; only .seg-main opts out */
+    }
+    .seg.is-empty { display: none; }
+    /* Hairline rule between neighbouring segments (never before the first). */
+    .seg + .seg::before {
+      content: ''; position: absolute; left: 0; top: 22%; bottom: 22%; width: 1px;
+      background: rgba(255,255,255,.10);
+    }
+
+    /* 1 · Brand mark — the event's identity, anchoring the left edge. */
+    .seg-brand { width: var(--col-brand); background: rgba(255,255,255,.045); }
+    #brand-logo { max-height: calc(var(--h) - 46px); max-width: calc(var(--col-brand) - 36px); object-fit: contain;
+      filter: drop-shadow(0 3px 8px rgba(0,0,0,.5)); }
+    #brand-abbr {
+      font-size: 30px; font-weight: 800; letter-spacing: .1em; color: var(--ink);
+      text-transform: uppercase; white-space: nowrap;
+    }
+
+    /* 2 · NEXT UP — who's playing when we come back. Names only: at bar scale the crests were
+       more noise than signal, and dropping them keeps this column comfortably fixed. */
+    .seg-next { width: var(--col-next); background: rgba(255,255,255,.025); }
+    .stack { display: flex; flex-direction: column; align-items: center; gap: var(--stack-gap); width: 100%; min-width: 0; }
+    /* Segment captions read as broadcast KICKERS, not form labels: heavier, brighter, and flanked
+       by short rules so "NEXT UP" / "BACK IN" sit as titles over their content rather than looking
+       like helper text. The rules use currentColor so the same treatment works on the dark panels
+       (accent) and on the filled clock block (its own contrast colour) with no second rule. */
+    .seg-label {
+      display: flex; align-items: center; justify-content: center; gap: 9px;
+      font-size: var(--kicker-h); font-weight: 900; letter-spacing: .18em; text-transform: uppercase;
+      /* --kicker is the accent lifted for legibility on the dark panels; the clock block overrides
+         it with its own contrast colour below. */
+      color: var(--kicker, var(--accent)); white-space: nowrap; line-height: 1;
+    }
+    .seg-label::before, .seg-label::after {
+      content: ''; flex: 0 0 auto; width: 16px; height: 2px;
+      background: currentColor; opacity: .5;
+    }
+    /* Crests sit on the INSIDE, flanking the VS: [NAME] [crest] VS [crest] [NAME].
+       No shrinking here on purpose — the row must be allowed to overflow so renderNext can
+       MEASURE it and switch to abbreviations, which reads far better than a squeezed name. */
+    .next-teams {
+      display: flex; align-items: center; justify-content: center;
+      /* Roomier than it looks it needs: at 10px the crest sat right against the name and read
+         as touching it. The extra margin on the crests themselves keeps them off the VS too. */
+      gap: 14px; width: 100%; min-width: 0; overflow: hidden;
+    }
+    .nt-name {
+      font-size: 24px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase;
+      color: var(--ink); white-space: nowrap; flex: 0 0 auto;
+    }
+    .nt-logo { height: 34px; width: 34px; object-fit: contain; flex: 0 0 auto; display: none; margin: 0 2px; }
+    .next-teams.has-logos .nt-logo { display: block; }
+    .next-vs { font-size: 14px; font-weight: 800; letter-spacing: .1em; color: var(--muted); flex: 0 0 auto; }
+
+    /* 3 · The clock — the one filled block, so the eye lands on it first. Label stacked ABOVE
+       the digits so a long break title ("STARTING SOON") can't widen the column.
+       The block stays the brand accent for the whole countdown: no urgency ramp to amber/red,
+       so the bar never fights the rest of the package for attention as the clock runs down. */
+    .seg-timer {
+      width: var(--col-timer);
+      /* --timer-fill is the accent, lightened when the brand colour is too dark to separate
+         from the near-black bar (see blockColor) — the clock must always read as its own
+         column, whatever kit is loaded. */
+      background: var(--timer-fill, var(--accent));
+      color: var(--on-accent);
+      transition: background .45s ease, color .45s ease;
+    }
+    /* Belt and braces: bright edges on both sides so the column is delineated even if the fill
+       ends up close to the panel colour. */
+    .seg-timer::before {
+      display: block; content: ''; position: absolute; left: 0; top: 0; bottom: 0;
+      width: 3px; background: var(--accent-2); opacity: .95;
+    }
+    .seg-timer::after {
+      content: ''; position: absolute; right: 0; top: 0; bottom: 0;
+      width: 3px; background: var(--accent-2); opacity: .95;
+    }
+    .seg-timer .seg-label { color: inherit; opacity: .8; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+    #timer {
+      font-size: 52px; font-weight: 700; line-height: 1; letter-spacing: .02em;
+      font-variant-numeric: tabular-nums; font-feature-settings: "tnum" 1;
+      white-space: nowrap;
+    }
+
+    /* 4 · Headline — the ONLY flexible column; it absorbs all remaining width. Text is
+       auto-shrunk to fit (see fitLine) rather than truncated, so the whole event name reads. */
+    .seg-main {
+      flex: 1 1 auto; min-width: 0;
+      flex-direction: column; align-items: center; justify-content: center;
+      gap: 3px;
+      /* Reserve the kicker row this column doesn't have, so the event name sits on the SAME
+         baseline as the team names and the clock digits. Without it the headline centred on the
+         bar while every other column's value sat ~11px lower, and the whole row read as skewed. */
+      padding: calc(var(--kicker-h) + var(--stack-gap)) 28px 0;
+    }
+    /* Centred, like every other column in the bar. Left-aligned, a short event name hugged the
+       clock block and read as misplaced; a long one fills the width either way, so centring
+       costs nothing and fixes the short case. */
+    #headline, #subline {
+      display: block; width: 100%; min-width: 0; text-align: center;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    #headline {
+      font-size: 34px; font-weight: 800; font-style: italic; letter-spacing: .01em;
+      text-transform: uppercase; color: var(--ink); line-height: 1.06;
+    }
+    #subline {
+      font-size: 16px; font-weight: 600; font-style: italic; letter-spacing: .08em;
+      text-transform: uppercase; color: var(--muted); line-height: 1.12;
+    }
+
+    /* 5 · Sponsor — right edge behind an accent rule, rotating through the kit's logos. */
+    .seg-sponsor { width: var(--col-sponsor); background: rgba(255,255,255,.035); }
+    .seg-sponsor::before { background: var(--accent-2); width: 3px; top: 18%; bottom: 18%; opacity: .9; }
+    .sponsor-stage { position: relative; width: 100%; height: calc(var(--h) - 46px); }
+    .sponsor-logo {
+      position: absolute; inset: 0; margin: auto;
+      max-width: 100%; max-height: 100%; object-fit: contain;
+      opacity: 0; transition: opacity .5s ease;
+      filter: drop-shadow(0 2px 6px rgba(0,0,0,.45));
+    }
+    .sponsor-logo.on { opacity: 1; }
+  </style>
+</head>
+<body>
+  <div id="bar">
+    <div class="seg seg-brand is-empty" id="seg-brand">
+      <img id="brand-logo" alt="" style="display:none">
+      <span id="brand-abbr" style="display:none"></span>
+    </div>
+
+    <div class="seg seg-next is-empty" id="seg-next">
+      <div class="stack">
+        <span class="seg-label">Next Up</span>
+        <div class="next-teams" id="next-teams">
+          <span class="nt-name" id="nt-a"></span>
+          <img class="nt-logo" id="nt-logo-a" alt="">
+          <span class="next-vs">VS</span>
+          <img class="nt-logo" id="nt-logo-b" alt="">
+          <span class="nt-name" id="nt-b"></span>
+        </div>
+      </div>
+    </div>
+
+    <div class="seg seg-timer is-empty" id="seg-timer">
+      <div class="stack">
+        <span class="seg-label" id="timer-label">Back In</span>
+        <span id="timer">--:--</span>
+      </div>
+    </div>
+
+    <div class="seg seg-main is-empty" id="seg-main">
+      <div id="headline"></div>
+      <div id="subline"></div>
+    </div>
+
+    <div class="seg seg-sponsor is-empty" id="seg-sponsor">
+      <div class="sponsor-stage" id="sponsor-stage"></div>
+    </div>
+  </div>
+
+  <script src="scene-base.js"></script>
+  <script>
+    const P = new URLSearchParams(location.search);
+    const el = (id) => document.getElementById(id);
+
+    // Bar height is a source-level decision (how tall the producer wants the strip in frame).
+    const H = parseInt(P.get('h'), 10);
+    if (H > 40 && H < 400) document.documentElement.style.setProperty('--h', H + 'px');
+    const A = parseFloat(P.get('alpha'));
+    if (A >= 0 && A <= 1) document.documentElement.style.setProperty('--alpha', String(A));
+    if (P.get('align') === 'top') document.body.classList.add('align-top');
+
+    const SHOW_TEAMS   = P.get('teams') !== '0';
+    const SHOW_SPONSOR = P.get('sponsor') !== '0';
+    const SHOW_BRAND   = P.get('brand') !== '0';
+    const ROTATE_PARAM = parseFloat(P.get('rotate'));
+
+    const NAME_MAX = 24, NAME_MIN = 17;
+    const HEAD_MAX = 34, HEAD_MIN = 17;
+    const SUB_MAX = 16, SUB_MIN = 11;
+
+    // ── Countdown state — identical contract to countdown.html so one producer timer drives both.
+    let endsAt = null;       // epoch ms target
+    let frozen = null;       // paused value, wins over endsAt
+    let hasTimer = false;
+    let accent = '#29b6f6';
+
+    function fmt(sec) {
+      const m = Math.floor(sec / 60);
+      const s = sec % 60;
+      return String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0');
+    }
+
+    // Both the clock fill and the kicker text derive from the accent, and this bar's furniture is
+    // near-black — so a dark kit has to be lifted or they disappear. SceneBase.liftForDark keeps
+    // the hue (see its note on why scaling beats blending toward white).
+    const blockColor = (c) => SceneBase.liftForDark(c, 0.20);
+
+    /** Text colour for the filled clock block, chosen by measured CONTRAST RATIO rather than a
+        fixed luminance cut-off. SceneBase.onColor's 0.45 threshold is tuned for small pills and
+        put WHITE on a mid-light brand purple (3.0:1); dark text there scores 5.6:1. Picking the
+        winner of the two keeps the digits crisp on any kit, light or dark. */
+    function blockText(bg) {
+      const c = String(bg || '');
+      let m = c.match(/^#([0-9a-f]{6})$/i) || c.match(/^rgba?\(\s*(\d+)[\s,]+(\d+)[\s,]+(\d+)/i);
+      let r, g, b;
+      if (!m) return '#ffffff';
+      if (m.length === 2) { r = parseInt(m[1].slice(0, 2), 16); g = parseInt(m[1].slice(2, 4), 16); b = parseInt(m[1].slice(4, 6), 16); }
+      else { r = +m[1]; g = +m[2]; b = +m[3]; }
+      const lin = (v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
+      const L = 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+      const DARK_L = 0.0106;                              // luminance of #04121f
+      const crWhite = 1.05 / (L + 0.05);
+      const crDark = (L + 0.05) / (DARK_L + 0.05);
+      return crDark > crWhite ? '#04121f' : '#ffffff';
+    }
+
+    // The clock simply runs down to 00:00 and holds there — no swap to a "we're live" card, so
+    // the bar can sit on screen through the hand-off without announcing anything on its own.
+    function paintTimer(seconds) {
+      el('timer').textContent = fmt(Math.max(0, seconds));
+    }
+
+    /** Shrink a single-line element until it fits its column, so long text is shown in full
+        rather than cut off. Ellipsis stays as the floor for the genuinely absurd. */
+    function fitLine(node, maxPx, minPx) {
+      if (!node) return;
+      let px = maxPx;
+      node.style.fontSize = px + 'px';
+      // scrollWidth > clientWidth means it's overflowing its box → step down until it isn't.
+      while (px > minPx && node.scrollWidth > node.clientWidth) {
+        px -= 1;
+        node.style.fontSize = px + 'px';
+      }
+    }
+    function fitText() {
+      fitLine(el('headline'), HEAD_MAX, HEAD_MIN);
+      fitLine(el('subline'), SUB_MAX, SUB_MIN);
+    }
+
+    // ── Segment renderers — each one owns its own is-empty state ───────────────
+    function renderBrand(data) {
+      const seg = el('seg-brand');
+      if (!SHOW_BRAND) { seg.classList.add('is-empty'); return; }
+      const logo = SceneBase.brandLogo(data) || '';
+      const img = el('brand-logo'), abbr = el('brand-abbr');
+      if (logo) {
+        img.src = logo; img.style.display = ''; abbr.style.display = 'none';
+        seg.classList.remove('is-empty');
+        return;
+      }
+      img.style.display = 'none'; img.removeAttribute('src');
+      // No brand mark — fall back to a short event tag so the left edge isn't a dead gap.
+      const ev = (data.eventName || '').toString().trim();
+      const tag = ev.split(/\s+/).map((w) => w[0]).join('').slice(0, 4).toUpperCase();
+      if (tag.length >= 2) { abbr.textContent = tag; abbr.style.display = ''; seg.classList.remove('is-empty'); }
+      else { abbr.style.display = 'none'; seg.classList.add('is-empty'); }
+    }
+
+    /** Short form for a team, matching matchup.html's teamAbbr: an explicit abbreviation wins,
+        then the saved-team library's, then initials for a multi-word name, else a 3-char clip.
+        start.gg entrant names in particular run long ("Nameless Esports Academy"). */
+    function teamAbbr(raw, name, savedTeams) {
+      const n = (name || '').trim();
+      if (!n) return '?';
+      const explicit = raw && raw.abbr;
+      if (explicit) return String(explicit).toUpperCase().slice(0, 4);
+      const hit = (savedTeams || []).find((t) => t && (t.name || '').trim().toLowerCase() === n.toLowerCase());
+      if (hit && hit.abbr) return String(hit.abbr).toUpperCase().slice(0, 4);
+      const words = n.split(/\s+/).filter(Boolean);
+      if (words.length >= 2) return words.map((w) => w[0]).join('').toUpperCase().slice(0, 4);
+      return n.slice(0, 3).toUpperCase();
+    }
+
+    function renderNext(data) {
+      const seg = el('seg-next');
+      if (!SHOW_TEAMS) { seg.classList.add('is-empty'); return; }
+      const blue = SceneBase.teamSide(data, 'blue');
+      const orange = SceneBase.teamSide(data, 'orange');
+      // Only worth a segment when BOTH sides are real — a half-filled matchup reads as an error.
+      const named = (t) => t && t.name && !/^(blue|orange|tbd)$/i.test(t.name.trim());
+      if (!named(blue) || !named(orange)) { seg.classList.add('is-empty'); return; }
+      seg.classList.remove('is-empty');
+
+      // Crests only when BOTH sides have a real one — a single crest against a bare name looks
+      // like a missing asset rather than a design choice.
+      const row = el('next-teams');
+      const bothLogos = !!(blue.customLogo && orange.customLogo);
+      row.classList.toggle('has-logos', bothLogos);
+      if (bothLogos) {
+        el('nt-logo-a').src = blue.customLogo;
+        el('nt-logo-b').src = orange.customLogo;
+      } else {
+        el('nt-logo-a').removeAttribute('src');
+        el('nt-logo-b').removeAttribute('src');
+      }
+
+      // Fit the pair into the fixed column in two stages, because abbreviating is a bigger loss
+      // of information than a couple of points of type: first try the full names at full size,
+      // then shrink toward NAME_MIN, and only if they STILL don't fit fall back to abbreviations
+      // (at full size again — a short tag should never also be small). Both sides switch together;
+      // one abbreviated name beside one full name reads as a bug.
+      const a = el('nt-a'), b = el('nt-b');
+      const setSize = (px) => { a.style.fontSize = px + 'px'; b.style.fontSize = px + 'px'; };
+      a.textContent = blue.name.toUpperCase();
+      b.textContent = orange.name.toUpperCase();
+      setSize(NAME_MAX);
+      requestAnimationFrame(() => {
+        if (row.scrollWidth <= row.clientWidth) return;
+        let px = NAME_MAX;
+        while (px > NAME_MIN && row.scrollWidth > row.clientWidth) { px -= 1; setSize(px); }
+        if (row.scrollWidth <= row.clientWidth) return;
+        const rawTeams = data.teams || {};
+        const saved = data.savedTeams || [];
+        setSize(NAME_MAX);
+        a.textContent = teamAbbr(rawTeams.blue, blue.name, saved);
+        b.textContent = teamAbbr(rawTeams.orange, orange.name, saved);
+      });
+    }
+
+    function renderText(data, b) {
+      // The event is the headline and the round sits UNDER it — that's the natural hierarchy
+      // (what show you're watching, then where in it we are). A producer-typed break message
+      // outranks both; when there is one, the event joins the round on the second line.
+      const msg = (b.message || '').toString().trim();
+      const round = (data.roundLabel || '').toString().trim();
+      const ev = (data.eventName || '').toString().trim();
+      const head = msg || ev || round;
+      const sub = [ev, round, (data.gameLabel || '').toString().trim()]
+        .filter((s) => s && s.toLowerCase() !== head.toLowerCase())
+        .slice(0, 2)
+        .join(' · ');
+      el('headline').textContent = head.toUpperCase();
+      el('subline').textContent = sub.toUpperCase();
+      el('subline').style.display = sub ? '' : 'none';
+      el('seg-main').classList.toggle('is-empty', !head);
+      // Fit AFTER the segments around it have settled — the flexible column's width depends on
+      // which fixed columns are showing this frame.
+      requestAnimationFrame(fitText);
+    }
+
+    // ── Sponsor rotation ──────────────────────────────────────────────────────
+    // Cross-fades through every logo in the kit rather than showing only the first. The cycle is
+    // rebuilt ONLY when the logo set actually changes, so a routine full_state tick can't restart
+    // it and leave one sponsor permanently on screen.
+    let _sponsorSig = '';
+    let _sponsorTimer = null;
+
+    function sponsorLogos(data) {
+      const brand = data.brand || {};
+      const anyTagged = (brand.deskSponsors || []).length || (brand.railSponsors || []).length || (brand.bannerSponsors || []).length;
+      const pool = (brand.deskSponsors || []).length ? brand.deskSponsors : (anyTagged ? [] : (brand.sponsors || []));
+      const out = [];
+      // Sponsor lists come in two shapes across the suite: {name,logo} objects (brand kits) and
+      // bare URL strings (the producer's manual deskFooter override). Accept either.
+      const push = (s) => {
+        const u = (typeof s === 'string') ? s : (s && s.logo);
+        if (u && out.indexOf(u) === -1) out.push(u);
+      };
+      push(brand.spots && brand.spots.title);          // title sponsor leads the rotation
+      // A manual desk-footer override is an explicit producer choice — rotate those too.
+      ((data.deskFooter || {}).logos || []).forEach(push);
+      (pool || []).forEach(push);
+      push((data.scoreboardAd || {}).logo);
+      return out;
+    }
+
+    function renderSponsor(data) {
+      const seg = el('seg-sponsor');
+      const stage = el('sponsor-stage');
+      if (!SHOW_SPONSOR) { seg.classList.add('is-empty'); return; }
+      const logos = sponsorLogos(data);
+      const sig = logos.join('|');
+      if (sig === _sponsorSig) return;                 // unchanged — never restart the cycle
+      _sponsorSig = sig;
+      if (_sponsorTimer) { clearInterval(_sponsorTimer); _sponsorTimer = null; }
+      stage.innerHTML = '';
+      if (!logos.length) { seg.classList.add('is-empty'); return; }
+      seg.classList.remove('is-empty');
+
+      logos.forEach((src, i) => {
+        const img = document.createElement('img');
+        img.className = 'sponsor-logo' + (i === 0 ? ' on' : '');
+        img.src = src; img.alt = '';
+        stage.appendChild(img);
+      });
+      if (logos.length < 2) return;                    // nothing to rotate
+
+      const secs = (ROTATE_PARAM > 0) ? ROTATE_PARAM
+                 : (Number((data.brand || {}).sponsorInterval) > 0 ? Number(data.brand.sponsorInterval) : 6);
+      let idx = 0;
+      _sponsorTimer = setInterval(() => {
+        const imgs = stage.children;
+        if (imgs.length < 2) return;
+        imgs[idx].classList.remove('on');
+        idx = (idx + 1) % imgs.length;
+        imgs[idx].classList.add('on');
+      }, Math.max(2, secs) * 1000);
+    }
+
+    function render(data) {
+      data = data || {};
+      const b = data.breakScreen || {};
+      accent = SceneBase.brandColor(data) || '#29b6f6';
+      const fill = blockColor(accent);
+      document.documentElement.style.setProperty('--accent', accent);
+      document.documentElement.style.setProperty('--accent-2', SceneBase.brandAccent(data) || '#ff7a29');
+      document.documentElement.style.setProperty('--timer-fill', fill);
+      document.documentElement.style.setProperty('--kicker', fill);
+      // Contrast is measured against the FILL actually painted, not the raw accent.
+      document.documentElement.style.setProperty('--on-accent', blockText(fill));
+
+      el('bar').classList.add('show');
+
+      // The break title doubles as the clock's caption ("BACK IN", "BREAK", "STARTING SOON").
+      el('timer-label').textContent = ((b.title != null && String(b.title).trim()) ? b.title : 'Back In');
+
+      frozen = (b.frozenSeconds != null) ? Math.max(0, Math.round(b.frozenSeconds)) : null;
+      endsAt = b.endsAt || null;
+      // Show/Hide on the producer timer owns this clock — Hide leaves endsAt in state, so
+      // "is a timer set" kept the countdown up on every scene that borrows the break timer.
+      hasTimer = (b.visible !== false) && (frozen != null || !!endsAt);
+      el('seg-timer').classList.toggle('is-empty', !hasTimer);
+      if (frozen != null) paintTimer(frozen);
+
+      renderBrand(data);
+      renderNext(data);
+      renderText(data, b);
+      renderSponsor(data);
+    }
+
+    // Derive remaining seconds from endsAt locally so every source stays in sync to the second.
+    setInterval(() => {
+      if (frozen != null) { paintTimer(frozen); return; }
+      if (!hasTimer) return;
+      paintTimer(Math.max(0, Math.round((endsAt - (typeof SceneBase !== 'undefined' ? SceneBase.now() : Date.now())) / 1000)));
+    }, 250);
+
+    // The break timer is furniture here, not the scene's own trigger: honour the producer's
+    // Show/Hide instead of the standalone force-visible rule (see SceneBase.trustVisibility).
+    SceneBase.trustVisibility('breakScreen');
+    SceneBase.connect((data) => { SceneBase.applySceneConfig('break', data); render(data); });
+
+    // Opened straight off disk — show a representative bar for layout work.
+    if (location.protocol === 'file:') {
+      render({
+        eventName: 'Nameless Esports Podcast After Dark Episode 1',
+        roundLabel: 'Last Chance Qualifier | EU',
+        brand: { color: '#29b6f6', accent: '#ff7a29' },
+        teams: {
+          blue:   { name: 'Mystic', color: '#3b82f6' },
+          orange: { name: 'Volare', color: '#a855f7' }
+        },
+        breakScreen: { visible: true, title: 'Back In', message: '', endsAt: Date.now() + 384000 }
+      });
+    }
+  </script>
+</body>
+</html>

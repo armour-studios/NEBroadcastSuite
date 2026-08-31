@@ -277,6 +277,12 @@ function generateSceneCollection({
   const gfxSponsorRail = makeBrowser('[GFX] Sponsor Rail',        '/sponsor-rail.html');
   const gfxSponsor     = makeBrowser('[GFX] Sponsor Banner',      '/sponsor-banner.html');
   const gfxListenIn = makeBrowser('[GFX] Listen-In Captions', '/listen-in.html');
+  // Multiview wall — one source per pinned layout so a producer can cut between a 2-up and a 4-up
+  // without the wall reflowing under them mid-show. Tiles come from the org's other producers
+  // (Settings ▸ Broadcast ▸ Grid Multiview on each of their apps).
+  const gfxGrid2 = makeBrowser('[GFX] Grid Wall 2-Up', '/grid.html?tiles=2');
+  const gfxGrid4 = makeBrowser('[GFX] Grid Wall 4-Up', '/grid.html?tiles=4');
+  const gfxPulse = makeBrowser('[GFX] Pulse (auto-switch)', '/pulse.html');
   const gfxIntCam   = makeBrowser('[GFX] Interviewee Cam',  '/int-cam.html');
 
   // ── Cam framing scenes (=> Host Cam / => Caster 1 Cam / …) ─────────────────
@@ -445,6 +451,14 @@ function generateSceneCollection({
   // panel's Push Live instead of hopping OBS scenes. Ticker + sponsor rail ride along here too.
   const sceneIntermission = simpleScene('Intermission', gfxIntermission, 300, true, SCENE_COLORS.pregame, [gfxTicker, gfxSponsorRail]);
 
+  // ── Multiview scenes ───────────────────────────────────────────────────────
+  // grid.html paints its own backdrop and carries every tile, so these are single-source scenes.
+  // The transparent variant (grid-bars.html) is deliberately NOT shipped here — it exists for
+  // producers laying their own video sources, which is a hand-built scene by definition.
+  const sceneGrid2 = makeScene('Multiview — Grid 2-Up', (function(){ const il = itemList(); il.add(gfxGrid2.name, gfxGrid2.uuid, { ...FULL_STRETCH, colorPreset: 7 }); return il.get(); })(), { transitionMs: 300, color: SCENE_COLORS.gameplay });
+  const sceneGrid4 = makeScene('Multiview — Grid 4-Up', (function(){ const il = itemList(); il.add(gfxGrid4.name, gfxGrid4.uuid, { ...FULL_STRETCH, colorPreset: 7 }); return il.get(); })(), { transitionMs: 300, color: SCENE_COLORS.gameplay });
+  const scenePulse = makeScene('Multiview — Pulse (auto-switch)', (function(){ const il = itemList(); il.add(gfxPulse.name, gfxPulse.uuid, { ...FULL_STRETCH, colorPreset: 7 }); return il.get(); })(), { transitionMs: 300, color: SCENE_COLORS.gameplay });
+
   // Category dividers — blank separator scenes that group the list in OBS (no scene folders in OBS).
   const dividerPre      = makeScene('═══  PRE-GAME  ═══',   [], { showInMultiview: false, color: SCENE_COLORS.pregame  });
   const dividerLive     = makeScene('═══  GAMEPLAY  ═══',   [], { showInMultiview: false, color: SCENE_COLORS.gameplay });
@@ -464,6 +478,9 @@ function generateSceneCollection({
     scenePipCams,
     sceneTalent,
     sceneReplay,
+    sceneGrid2,
+    sceneGrid4,
+    scenePulse,
     // Desk / casters
     dividerDesk,
     sceneSingle,
@@ -494,6 +511,7 @@ function generateSceneCollection({
     gfxMatchup, gfxCampip, gfxTalentbar,
     gfxIntermission, gfxClockOnly, gfxReplay, gfxTransition,
     gfxTicker, gfxSponsorRail, gfxSponsor, gfxListenIn, gfxIntCam,
+    gfxGrid2, gfxGrid4, gfxPulse,
   ];
 
   // ── Audio capture stubs ───────────────────────────────────────────────────

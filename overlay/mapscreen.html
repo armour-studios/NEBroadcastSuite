@@ -200,14 +200,16 @@
     // Overwatch game-mode icons — m.mode carries the pool entry's type (Control/Hybrid/Escort/
     // Push/Flashpoint/Clash). Other games' mode strings (e.g. CS2) have no matching icon, so the
     // label just falls back to text, same as before.
-    // Rocket League modes are chosen per map row (Soccar/Hoops/Dropshot/Snow Day/Rumble/
-    // Heatseeker/Spike Rush) and carry their own icon set.
+    // Rocket League modes are chosen per map row (Standard/Hoops/Dropshot/Snow Day/Rumble/
+    // Heatseeker/Spike Rush) and carry their own icon set. 'soccar' is kept as an alias of
+    // 'standard' — same mode under its in-game file name, so older saved boards still get an icon.
     const MODE_IMG = {
       control: '/assets/overwatch/modes/Control.webp', hybrid: '/assets/overwatch/modes/Hybrid.webp',
       escort: '/assets/overwatch/modes/Escort.webp', push: '/assets/overwatch/modes/Push.webp',
       flashpoint: '/assets/overwatch/modes/Flashpoint.webp', clash: '/assets/overwatch/modes/Clash.webp',
       assault: '/assets/overwatch/modes/Assault.webp',
-      soccar: '/assets/rocket-league/modes/soccar.svg', hoops: '/assets/rocket-league/modes/hoops.svg',
+      standard: '/assets/rocket-league/modes/soccar.svg', soccar: '/assets/rocket-league/modes/soccar.svg',
+      hoops: '/assets/rocket-league/modes/hoops.svg',
       dropshot: '/assets/rocket-league/modes/dropshot.svg', 'snow day': '/assets/rocket-league/modes/snow-day.svg',
       rumble: '/assets/rocket-league/modes/rumble.svg', heatseeker: '/assets/rocket-league/modes/heatseeker.svg',
       'spike rush': '/assets/rocket-league/modes/spike-rush.svg'
@@ -236,7 +238,10 @@
       if (m.action === 'decider') return 'DECIDER';
       const t = teamFor(m.by, data);
       const who = t ? t.name : '';
-      if (m.action === 'ban')  return who ? `${who} BAN` : 'BAN';
+      // Per-game vocabulary: veto.banWord is 'Strike' for Smash, 'Ban' everywhere else
+      // (backend/veto.js VETO_META). Hardcoding "BAN" mislabelled every Smash stage strike.
+      const banWord = String(((data.veto || {}).banWord) || 'Ban').toUpperCase();
+      if (m.action === 'ban')  return who ? `${who} ${banWord}` : banWord;
       if (m.action === 'pick') return who ? `${who} PICK` : 'PICK';
       return '';
     }

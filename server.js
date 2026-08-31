@@ -19,6 +19,7 @@ const { createBallchasingClient } = require('./backend/integrations/ballchasing-
 const { createBallchasingWatcher } = require('./backend/integrations/ballchasing-watcher');
 const { scanAndRenameReplays } = require('./backend/integrations/replay-renamer');
 const { getNxgenEvents, getNxgenEventLive, getNxgenLeaderboard } = require('./backend/nxgen');
+const faceit = require('./backend/integrations/faceit-client');
 const { createDirectorEngine } = require('./backend/director');
 const cloud = require('./backend/cloud/cloud-client');   // Nameless cloud (dormant until BROADCAST_REMOTE_URL set)
 const { createClipSystem } = require('./backend/clips');
@@ -45,6 +46,9 @@ const startggImport = require('./backend/startgg-import');
 const twitchStats = require('./backend/twitch-stats');
 const rl6mans   = require('./backend/rl6mans');
 const playerDb   = require('./backend/player-db');
+const teamDb     = require('./backend/team-db');
+const identity   = require('./backend/player-identity');
+const seedPower  = require('./control-panel/seed-power-core');
 
 // Measured 6mans tier→ELO ladder (see /api/rl6mans/tier-ladder). Held here so it survives across
 // requests and is restored from disk at startup. The fallback is only used to fill tiers the
@@ -169,6 +173,7 @@ const { registerTwitchWebhooks } = require('./backend/integrations/twitch-webhoo
 const { TwitchClient } = require('./backend/integrations/twitch-client');
 const { SocialPublisher } = require('./backend/social-publisher');
 const { SocialWeekly }    = require('./backend/social-weekly');
+const liquipedia         = require('./backend/integrations/liquipedia-client');
 const SocialNamingCore    = require('./control-panel/social-naming-core');
 const { PredictionManager } = require('./backend/integrations/twitch-predictions');
 const { WheelManager } = require('./backend/integrations/twitch-wheel');
@@ -206,6 +211,20 @@ function tryEnterMarbleRace(platform, userId, username, message) {
 }
 
 const HTTP_PORT = 3000;
+// LAN address of this machine, resolved once at boot. The control panel runs from file://, where
+// location.hostname is '' — so it cannot work this out for itself, and any "point your server here"
+// hint it renders would always say localhost (useless from another host). Computed here instead.
+const lanHost = (() => {
+  try {
+    const ifaces = require('os').networkInterfaces();
+    for (const name of Object.keys(ifaces)) {
+      for (const ni of (ifaces[name] || [])) {
+        if (ni && ni.family === 'IPv4' && !ni.internal && ni.address) return ni.address;
+      }
+    }
+  } catch (_) { /* fall through */ }
+  return 'localhost';
+})();
 const WS_PORT = 3001;
 const RL_STATS_PORT = 49123;
 const RL_RECONNECT_INTERVAL = 3000;
@@ -237,7 +256,12 @@ let wsAuthToken = '';   // shared secret required on every WS bridge connection 
 let startggApiToken = '';
 let challongeApiKey = '';
 let nxgenApiKey = '';
+let faceitApiKey = '';        // FACEIT Data API server-side key (encrypted at rest, never broadcast)
 let ballchasingApiKey = '';
+let liquipediaApiKey = '';   // Liquipedia LPDB key — the PRODUCER's own. Access is not self-service and
+                             // the free tier is non-commercial, so the licensing relationship is
+                             // theirs, not the suite's. Encrypted at rest, never broadcast.
+let bedwarsToken = '';        // Bedwars plugin shared secret (X-Suite-Token); never broadcast
 let sheetsServiceAccount = '';   // Google service-account JSON key (encrypted at rest, never broadcast)
 let _startggImportRunning = false;   // guards the historical start.gg importer
 let _twitchStatsCache = null;        // { at, data } — short cache for GET /api/twitch/stats
@@ -278,6 +302,47 @@ const OVERLAY_LAYOUTS = {
   'league': [
     { id: 'lol-hud', name: 'LoL In-Game HUD', path: '/lol-hud.html' }
   ],
+  // These four MUST be listed here even though GAMES[].overlay names the same file:
+  // resolveOverlayLayout() returns themes[0] when no theme matches, and gameThemes() falls back to
+  // GENERIC_OVERLAY_LAYOUTS (path ''), so the `|| g.overlay` branch at the end of that function is
+  // unreachable. Without an entry here a game's real overlay can never be selected.
+  'marvel-rivals': [
+    { id: 'mr-scoreboard', name: 'Marvel Rivals Overlay', path: '/marvel-rivals.html' }
+  ],
+  'apex': [
+    { id: 'apex-hud',      name: 'Apex BR HUD',      path: '/apex.html' },
+    { id: 'apex-observer', name: 'Apex Observer HUD', path: '/apex-observer.html' },
+    { id: 'br-leaderboard', name: 'BR Series Leaderboard', path: '/br-leaderboard.html' },
+    { id: 'br-rail',        name: 'BR Standings Rail',     path: '/br-rail.html' },
+    { id: 'br-match',       name: 'BR Match Result',       path: '/br-match.html' }
+  ],
+  // Fortnite has no third-party live match feed, so its series is scored from a Google Sheet or the
+  // manual grid (see state.br) — the br-* scenes render whatever the scoring engine derived.
+  'fortnite': [
+    { id: 'fncs-board',     name: 'FNCS Standings Board',  path: '/br-leaderboard.html?skin=fncs' },
+    { id: 'br-leaderboard', name: 'BR Series Leaderboard', path: '/br-leaderboard.html' },
+    { id: 'br-rail',        name: 'BR Standings Rail',     path: '/br-rail.html' },
+    { id: 'br-match',       name: 'BR Match Result',       path: '/br-match.html' },
+    { id: 'fn-dropmap',     name: 'Drop Map',              path: '/fn-dropmap.html' },
+    { id: 'fn-compare',     name: 'Comparison Card',       path: '/fn-compare.html' },
+    { id: 'fn-victory',     name: 'Victory Royale',        path: '/fn-victory.html' },
+    { id: 'points-board',   name: 'Points / Placement Board', path: '/standings.html' },
+    // Ballistic (5v5) and Creative 1v1 are head-to-head Fortnite — the normal scoreboard is the
+    // right instrument for those, so it stays selectable even though the game is a BR game.
+    { id: 'head-to-head',   name: 'Head-to-Head Scoreboard',  path: '/duorow.html' }
+  ],
+  'bedwars': [
+    { id: 'head-to-head', name: 'Head-to-Head Scoreboard',  path: '/duorow.html' },
+    { id: 'points-board', name: 'Points / Placement Board', path: '/standings.html' }
+  ],
+  // Rainbow Six has no live-data HUD (no GSI equivalent wired), but everything else about it is
+  // already supported — map pool + STD7 veto format in backend/veto.js, roles, league stat set. It
+  // just needed selectable layouts like every other game; without an entry here it fell through to
+  // GENERIC_OVERLAY_LAYOUTS and had no overlay at all. Map veto is pushed from Graphics, not here.
+  'rainbow6': [
+    { id: 'head-to-head', name: 'Head-to-Head Scoreboard',  path: '/duorow.html' },
+    { id: 'points-board', name: 'Standings / Points Board', path: '/standings.html' }
+  ],
   // Fighting games — ported FGCasterOverlay scoreboards (overlay/fgc/<skin>). Each skin is a
   // standalone lower-third fed by fgc-adapter.js from the same match/teams/casters state.
   'tekken8':   [
@@ -300,6 +365,9 @@ const OVERLAY_LAYOUTS = {
   'smash':     [
     { id: 'smash-hud',       name: 'Smash Scoreboard',       path: '/smash.html' },
     { id: 'smash-team',      name: 'Smash Team Scoreboard',  path: '/smash-team.html' },
+    // Same overlay as every other game's standings board — it renders the top-8 PLACEMENT CARDS
+    // (character art per finisher) for Smash. See state.standings.layout.
+    { id: 'points-board',    name: 'Top 8 Placement Board',  path: '/standings.html' },
     { id: 'fgc-default',     name: 'FGC Scoreboard',         path: '/fgc/default/template.html' },
     { id: 'fgc-default-img', name: 'FGC Scoreboard (image)', path: '/fgc/default-img/template.html' }
   ]
@@ -318,7 +386,11 @@ const GAMES = {
   'rainbow6':      { id: 'rainbow6',      name: 'Rainbow Six Siege', overlay: '',       format: 'team5', teamLabels: { a: 'Attack', b: 'Defense' },        rosterSize: 5, logo: 'games/rainbow6.svg',      features: ['vetoes', 'operators'],  themes: [] },
   'cod':           { id: 'cod',           name: 'Call of Duty',  overlay: '',           format: 'team4', teamLabels: { a: 'Team A', b: 'Team B' },         rosterSize: 4, logo: 'games/cod.png',           features: ['vetoes'],               themes: [] },
   'apex':          { id: 'apex',          name: 'Apex Legends',  overlay: '/apex.html',  format: 'ffa',   teamLabels: { a: 'Team A', b: 'Team B' },         rosterSize: 3, logo: 'games/apex.svg',          features: ['battle-royale', 'legends', 'liveapi'], themes: [] },
-  'fortnite':      { id: 'fortnite',      name: 'Fortnite',      overlay: '',           format: 'ffa',   teamLabels: { a: 'Team A', b: 'Team B' },         rosterSize: 4, logo: 'games/fortnite.png',      features: ['battle-royale'],        themes: [] },
+  'fortnite':      { id: 'fortnite',      name: 'Fortnite',      overlay: '/br-leaderboard.html', format: 'ffa',   teamLabels: { a: 'Team A', b: 'Team B' },         rosterSize: 4, logo: 'games/fortnite.png',      features: ['battle-royale'],        themes: [] },
+  // Minecraft Bedwars — multi-team lobby game run as a points series (no live data source; scored
+  // manually or fed from a Sheet). rosterSize 4 = the common competitive 4s format; change here if
+  // an organiser runs doubles/8s. statLabel is per-game beds broken.
+  'bedwars':       { id: 'bedwars',       name: 'Minecraft Bedwars', overlay: '',       format: 'ffa',   teamLabels: { a: 'Team A', b: 'Team B' },         rosterSize: 4, logo: 'games/bedwars.png',       features: ['bracket'],              themes: [], statLabel: 'Beds', statAbbr: 'B' },
   'marvel-rivals': { id: 'marvel-rivals', name: 'Marvel Rivals', overlay: '/marvel-rivals.html', format: 'team6', teamLabels: { a: 'Team A', b: 'Team B' }, rosterSize: 6, logo: 'games/rivals.png',        features: ['heroes', 'draft'],       themes: [] },
   'smash':         { id: 'smash',         name: 'Super Smash Bros.', overlay: '/smash.html', format: '1v1',   teamLabels: { a: 'Player 1', b: 'Player 2' },     rosterSize: 1, logo: 'games/ssb.png',           features: ['bracket', 'stocks', 'fgc'], themes: [] },
   // Fighting games (FGC) — 1v1 head-to-head; sides are the two players. 2XKO is a 2v2 tag game
@@ -335,6 +407,126 @@ const GAMES = {
 Object.keys(GAMES).forEach((id) => {
   GAMES[id].themes = OVERLAY_LAYOUTS[id] || GENERIC_OVERLAY_LAYOUTS;
 });
+
+// ─── Battle-royale "lobby" model (Fortnite-first) ────────────────────────────
+// A BR broadcast is not two teams with a score. It is ONE lobby of N entrants racing a points
+// table over M matches, and the producer's job is roster + placements + who to spectate. The
+// blue-vs-orange Match — Teams panel is the wrong instrument for that, so games listed here swap
+// it for the lobby board (control-panel/br-lobby.js). Every game NOT in this list keeps the two
+// team cards exactly as before — that is the whole point of gating it on a list instead of on
+// `format: 'ffa'` (bedwars is ffa too, and its head-to-head cards still work for it).
+// To give another game the lobby panel, add its id here and nothing else.
+const BR_LOBBY_GAMES = ['fortnite'];
+function isLobbyGame(gameId) { return BR_LOBBY_GAMES.includes(gameId); }
+BR_LOBBY_GAMES.forEach((id) => {
+  if (GAMES[id] && !GAMES[id].features.includes('lobby')) GAMES[id].features.push('lobby');
+});
+
+// Fortnite ships several genuinely different competitive products, and they do NOT share a
+// scoreboard shape: BR/Zero Build/Reload/OG are points-per-placement lobbies, Ballistic is a
+// 5v5 round-based head-to-head, Creative is whatever the island's rules say. `kind` is what the
+// rest of the app switches on — 'lobby' games get the lobby panel and the br-* overlays,
+// 'versus' games fall back to the normal two-team cards even though the game is Fortnite.
+//   players  — default lobby size, shown as the field cap in the panel
+//   respawn  — reboot/respawn mode: an entrant eliminated mid-match can come back, so "teams
+//              alive" is not monotonic and the panel must not auto-eliminate on a death report.
+const BR_GAME_MODES = {
+  fortnite: [
+    { id: 'br-build',      name: 'Battle Royale (Build)', kind: 'lobby',  players: 100, respawn: false, short: 'BR' },
+    { id: 'br-zerobuild',  name: 'Zero Build',            kind: 'lobby',  players: 100, respawn: false, short: 'ZB' },
+    { id: 'reload',        name: 'Reload',                kind: 'lobby',  players: 40,  respawn: true,  short: 'RLD' },
+    { id: 'reload-zb',     name: 'Reload (Zero Build)',   kind: 'lobby',  players: 40,  respawn: true,  short: 'RLD ZB' },
+    { id: 'og',            name: 'OG',                    kind: 'lobby',  players: 100, respawn: false, short: 'OG' },
+    { id: 'ballistic',     name: 'Ballistic (5v5)',       kind: 'versus', players: 10,  respawn: true,  short: 'BAL' },
+    { id: 'creative',      name: 'Creative / UEFN',       kind: 'lobby',  players: 16,  respawn: true,  short: 'UEFN' },
+    { id: 'creative-1v1',  name: 'Creative Head-to-Head', kind: 'versus', players: 2,   respawn: true,  short: '1v1' }
+  ],
+  apex: [
+    { id: 'br',      name: 'Battle Royale', kind: 'lobby',  players: 60, respawn: true,  short: 'BR' },
+    { id: 'mixtape', name: 'Mixtape',       kind: 'versus', players: 12, respawn: true,  short: 'MIX' }
+  ]
+};
+const BR_DEFAULT_MODE = { fortnite: 'br-build', apex: 'br' };
+function brModesFor(gameId) { return BR_GAME_MODES[gameId] || BR_GAME_MODES.fortnite; }
+function brModeMeta(gameId, modeId) {
+  const list = brModesFor(gameId);
+  return list.find((m) => m.id === modeId) || list[0];
+}
+
+// Squad size. `solo` still runs through the lobby board — a solo lobby is just a field where every
+// entrant has one player, which is why the panel is entrant-shaped rather than team-shaped.
+const BR_TEAM_FORMATS = [
+  { id: 'solo',  name: 'Solos',  size: 1 },
+  { id: 'duo',   name: 'Duos',   size: 2 },
+  { id: 'trio',  name: 'Trios',  size: 3 },
+  { id: 'squad', name: 'Squads', size: 4 }
+];
+function brFormatSize(id) {
+  const f = BR_TEAM_FORMATS.find((x) => x.id === id);
+  return f ? f.size : 2;
+}
+function brFormatForSize(n) {
+  const f = BR_TEAM_FORMATS.find((x) => x.size === Math.max(1, Math.min(4, parseInt(n, 10) || 2)));
+  return f ? f.id : 'duo';
+}
+
+// Drop-map POIs. x/y are PERCENTAGES of the map image, so the same set renders correctly at any
+// overlay resolution and against any map image the producer swaps in.
+//
+// ⚠ The Fortnite island changes every season — treat this as a SEED, not a source of truth. The
+// producer edits/replaces it per season from the Fortnite panel (Settings ▸ Games ▸ Fortnite ▸
+// Drop map), and the edited set is stored in state.gameConfigs[game].pois, which brPoiSet() below
+// prefers over this table. Same mechanism the maps/roles/characters game-config builder already
+// uses, so a season update never needs a code change or an app update.
+const BR_POI_SETS = {
+  fortnite: {
+    'br-build': {
+      name: 'Battle Royale island',
+      map: '/assets/games/fortnite-map.png',
+      pois: [
+        { id: 'fn-nw-peaks',   name: 'Frozen Peaks',    x: 22, y: 14 },
+        { id: 'fn-n-ridge',    name: 'North Ridge',     x: 44, y: 11 },
+        { id: 'fn-ne-dunes',   name: 'Sunburnt Dunes',  x: 74, y: 17 },
+        { id: 'fn-w-shore',    name: 'West Shore',      x: 13, y: 38 },
+        { id: 'fn-c-lake',     name: 'Central Lake',    x: 41, y: 33 },
+        { id: 'fn-e-mesa',     name: 'Eastern Mesa',    x: 71, y: 34 },
+        { id: 'fn-c-hub',      name: 'Midtown',         x: 50, y: 47 },
+        { id: 'fn-w-mill',     name: 'Old Mill',        x: 24, y: 55 },
+        { id: 'fn-e-canyon',   name: 'Red Canyon',      x: 76, y: 52 },
+        { id: 'fn-sw-grove',   name: 'Willow Grove',    x: 27, y: 71 },
+        { id: 'fn-s-docks',    name: 'South Docks',     x: 49, y: 78 },
+        { id: 'fn-se-reef',    name: 'Coral Reef',      x: 72, y: 74 }
+      ]
+    },
+    reload: {
+      name: 'Reload island',
+      map: '/assets/games/fortnite-reload-map.png',
+      pois: [
+        { id: 'rl-nw', name: 'Ranger Ridge',  x: 27, y: 24 },
+        { id: 'rl-ne', name: 'Hazy Hillside', x: 71, y: 26 },
+        { id: 'rl-c',  name: 'Lucky Landing', x: 50, y: 50 },
+        { id: 'rl-sw', name: 'Dusty Depot',   x: 28, y: 73 },
+        { id: 'rl-se', name: 'Tilted Towers', x: 73, y: 71 }
+      ]
+    }
+  }
+};
+// Resolve the POI set for a game+mode, preferring the producer's own edits in gameConfigs.
+// Zero Build / OG share the BR island; Reload Zero Build shares the Reload island.
+function brPoiKey(modeId) {
+  if (modeId === 'reload' || modeId === 'reload-zb') return 'reload';
+  return 'br-build';
+}
+function brPoiSet(gameId, modeId) {
+  const key = brPoiKey(modeId);
+  const builtin = ((BR_POI_SETS[gameId] || {})[key]) || { name: '', map: '', pois: [] };
+  const cfg = (state.gameConfigs || {})[gameId] || {};
+  const custom = (cfg.pois && cfg.pois[key]) || null;
+  if (custom && Array.isArray(custom.pois) && custom.pois.length) {
+    return { name: custom.name || builtin.name, map: custom.map || builtin.map, pois: custom.pois };
+  }
+  return builtin;
+}
 
 const THEME_ALIASES = {
   'rocket-league': { default: 'classic', midnight: 'classic', neon: 'classic' },
@@ -385,7 +577,7 @@ let state = {
   version: appVersion,
   view: 'hud',              // 'hud' | 'scoreboard' | 'goal'
   rlHudHidden: false,       // manual "hide UI" — blanks the live RL HUD overlay for a clean feed (not persisted)
-  rlSpecOutline: true,      // show the animated wrap-around outline highlighting the spectated player's HUD card (persisted)
+  rlReplayTransitions: true,   // play the animated shutter-slam replay intro/outro (+ Brazil flag) on the RL overlays; off = no wipe, HUD just hides/shows for the replay (persisted)
   rlScoreboardSeparate: false,  // route the post-game scoreboard to its OWN browser source (rl-hud.html?only=scoreboard); when on, the MAIN HUD hides its inline board (persisted)
   // Game performance mode: while an RL match is LIVE the app sheds load so borderless
   // gameplay stays smooth — panel previews/animations pause, the app's process priority
@@ -403,9 +595,15 @@ let state = {
   // Pulse multiview: when publish is on (and the cloud is linked), this app heartbeats its live game to
   // the org so it appears on other producers' Pulse scenes. feedViewUrl = this observer's own VDO view
   // URL others pull for the featured video (optional — without it the tile is scores-only).
-  pulse: { publish: false, feedViewUrl: '' },
+  // URL others pull for the featured video (optional — without it the tile is scores-only). channel =
+  // this producer's Twitch handle (shown on the grid tile bar); label = a desk name ("Desk 2") when the
+  // handle is empty.
+  pulse: { publish: false, feedViewUrl: '', channel: '', label: '' },
   themesByGame: { 'rocket-league': 'classic', 'csgo': 'cs2-hud' },
   eventName: '',   // fresh installs start with no preset title — the producer sets their own
+  // Which event slug the current eventName was pulled from. Loading a DIFFERENT event pulls its
+  // title once; anything typed afterwards is the producer's and survives re-loads of that event.
+  eventNameSlug: '',
   gameLabel: '',   // custom "GAME x | BEST OF x" override (e.g. "UPCOMING MATCH"); '' = auto
   roundLabel: '',  // optional bracket round/stage shown on the overlay (e.g. "WINNERS FINALS"); '' = hidden
   dateFormat: 'us', // schedule date/time display: 'us' (Jul 12, 8:00 PM) | 'intl' (12 Jul, 20:00)
@@ -431,7 +629,11 @@ let state = {
   // in the roll, separate from the brand-kit sponsor bar [{name,logo,tier}]; talent = manual
   // {name,role} credits (other-shift crew). (Single source of truth — must not be redefined below.)
   credits: { visible: false, sponsors: [], talent: [], endText: '' },   // endText: big end-card text after the roll ('' → "Thanks For Watching")
-  casters: { visible: true, showCountry: false, nameMode: 'gamertag', showRoles: { host: '', observer: '' }, shifts: [], activeShiftId: '', support: [], stationId: '', list: [], lowerThird: '', library: [], vdo: { room: '', password: '' }, guestsVdo: { room: '', password: '' }, observersVdo: { room: '', password: '' }, rooms: [], lineup: [], activeLayout: '', interview: { room: '', password: '' }, apiKey: '', interviewee: null, playerCam: null, deskRoomId: '', slotLabels: { 1: 'Caster 1', 2: 'Caster 2', 3: 'Caster 3', 4: 'Caster 4', 5: 'Player' } },   // list = on-air slots; showCountry = render each caster's country on the desk; library = saved casters/guests/observers (by kind); vdo/guestsVdo/observersVdo = the three shared group rooms; rooms = named VDO rooms; lineup = this-show active assignments; apiKey = director IFrame-API key; interviewee = spotlight-desk right cam; playerCam = slot-5 player feed ({camUrl,name,playerId}); deskRoomId = which named room is the interview/desk room
+  casters: { visible: true, showCountry: false, nameMode: 'gamertag', showRoles: { host: '', observer: '' }, shifts: [], activeShiftId: '', support: [],
+    // Undo stack for "Next shift" handovers — [{ slots, host, observer, movedCrewIds, shiftId }].
+    // Session-only by design (not restored on boot): last night's crew change isn't something
+    // you'd want to "undo" into tonight's desk.
+    shiftHistory: [], stationId: '', list: [], lowerThird: '', library: [], vdo: { room: '', password: '' }, guestsVdo: { room: '', password: '' }, observersVdo: { room: '', password: '' }, rooms: [], lineup: [], activeLayout: '', interview: { room: '', password: '' }, apiKey: '', interviewee: null, playerCam: null, deskRoomId: '', slotLabels: { 1: 'Caster 1', 2: 'Caster 2', 3: 'Caster 3', 4: 'Caster 4', 5: 'Player' } },   // list = on-air slots; showCountry = render each caster's country on the desk; library = saved casters/guests/observers (by kind); vdo/guestsVdo/observersVdo = the three shared group rooms; rooms = named VDO rooms; lineup = this-show active assignments; apiKey = director IFrame-API key; interviewee = spotlight-desk right cam; playerCam = slot-5 player feed ({camUrl,name,playerId}); deskRoomId = which named room is the interview/desk room
   // VDO.Ninja talent workflow. Global config (server-side, replaces the old localStorage settings);
   // per-team rooms/passwords live on teams.x.vdo, per-player IDs on the player objects.
   vdo: {
@@ -455,7 +657,7 @@ let state = {
   listenIn: { active: false, side: '', name: '', url: '' },
   // Break / "starting soon" standby. endsAt = epoch ms target for the countdown scene; null = no timer.
   breakScreen: { visible: false, title: 'STARTING SOON', message: '', endsAt: null, frozenSeconds: null, finalMessage: "WE'RE LIVE!", thenScene: '', thenPlayout: '' },
-  ticker: { visible: false, messages: [], speed: 40, source: 'manual', feed: [], sponsor: '' },   // scrolling lower-third; speed = loop seconds
+  ticker: { visible: false, messages: [], speed: 10, source: 'manual', feed: [], sponsor: '' },   // scrolling lower-third; speed = loop seconds
   // Sponsor proof-of-play: archived per-broadcast impression reports (estimated on-screen seconds
   // per sponsor logo, by placement). The live session is tracked in-memory (adProof); completed
   // sessions land here and persist. Tiny — names + counts only, no logos.
@@ -472,6 +674,25 @@ let state = {
   // Marvel Rivals series scoreboard — 4 bans per team (match-global), map results, Overwolf GEP data.
   // bansByMap: [{ a: [{hero,role}×4], b: [{hero,role}×4] }] — uses index 0 (bans are series-wide).
   mrMatch: { visible: true, format: 'BO5', bansByMap: [], gameMode: 'convergence', showMapLabels: true, mapWinners: [], mapModes: [], gepData: null },
+  // Rainbow Six Siege live data, relayed by the Overwolf companion (same pipeline as Overwatch and
+  // Marvel Rivals — see companion-overwolf/background.html). R6 has no first-party GSI, so GEP on an
+  // OBSERVER machine is the only practical source; running it on players' PCs is an adoption problem,
+  // not a technical one. autoScore is opt-in: a producer must never have the scoreboard move under
+  // them because a spectator client reconnected mid-round.
+  r6: {
+    autoScore: false,      // mirror GEP round wins onto state.series (producer opt-in)
+    gepData: null          // { gepConnected, lastSeen, roster, map, score:{a,b}, round, side, operators, killFeed }
+  },
+  // Minecraft Bedwars live data, pushed by a server-side plugin rather than a game client. Bedwars is
+  // usually played on a server the organiser controls, so the authoritative scorer is the server
+  // itself — higher fidelity than any client scrape, and no per-player install. See /api/bedwars.
+  // NOTE: the shared token is NOT here. state.bedwars rides the LIVE broadcast tier, which reaches
+  // every OBS browser source and any custom overlay — a secret in it is a secret published. It lives
+  // in the module-level `bedwarsToken` alongside the other credentials; only a hasToken flag is sent.
+  bedwars: {
+    autoScore: false,
+    data: null             // { connected, lastSeen, teams:[{key,name,bedAlive,players,eliminated}], events:[] }
+  },
   // User-defined overlay URLs shown alongside the built-in ones in the layout dropdown.
   // Keyed by gameId → [{ id, name, path }]
   customOverlayLayouts: {},
@@ -481,6 +702,9 @@ let state = {
   // built-in. Importing REPLACES a game's slot; the bundle's own maps/characters/roles still merge
   // by id onto the built-in tables at read time, so an import doesn't need to re-list everything.
   gameConfigs: {},
+  // Named, reusable point matrices the producer creates (built-ins are generated, not stored).
+  // A league picks a season default; any cup can override it. See sanitizePointMatrix.
+  pointMatrices: [],
   // Champion/hero draft board (LoL etc.). sequence/ops drive the live pick-ban.
   draft: { visible: false, title: '', subtitle: '', game: '', teamStart: 'a', owBanCount: 4, sequence: [], ops: [], turn: null, complete: false,
     // owBanCount: Overwatch total hero bans (2 = one per team, 4 = two per team). Producer-set.
@@ -591,6 +815,63 @@ let state = {
     teamMap: {},                    // { normalizedLiveApiName: savedTeamName } manual identity overrides
     event: { title: '', match: '', split: '' },   // broadcast branding shown top-left
   },
+  // -- Battle-royale series (game-agnostic) ------------------------------------
+  // The Apex block above is the same idea welded to one game's LiveAPI. This is that model lifted
+  // out: a points series over N matches, fed by a Google Sheet, by hand, or by live game data,
+  // and rendered by the br-*.html overlays. Fortnite/PUBG/Warzone have no third-party live match
+  // feed, so Sheets + manual entry are the real production path for them.
+  br: {
+    enabled: false,
+    game: 'fortnite',                 // which BR this series is for (labels/logo only)
+    event: { title: '', match: '', split: '' },   // broadcast branding
+    format: { matches: 6, teamSize: 4 },          // matches in the series, players per team
+    scoringPreset: 'fncsFinals',
+    scoring: { placementPoints: [], killPoints: 1, killCap: 0 },   // filled from the preset on load
+    // Raw results, one entry per (match, team). Everything else is DERIVED from these, so a
+    // corrected placement re-scores the whole series instead of leaving a stale total behind.
+    results: [],                      // [{ match, team, placement, elims }]
+    playerResults: [],                // [{ match, player, team, elims }]
+    standings: [],                    // derived - see computeBrStandings()
+    playerBoard: [],                  // derived - per-player elim leaderboard
+    lastMatch: null,                  // derived - the most recent match's own result card
+    source: 'manual',                 // manual | sheets | live  (what last wrote results)
+    lastUpdate: 0,
+    // ── Lobby model (the Fortnite Match — Lobby panel) ─────────────────────────
+    // mode/teamFormat describe the PRODUCT being played (see BR_GAME_MODES / BR_TEAM_FORMATS).
+    // format.teamSize is kept in lockstep with teamFormat so the existing sheet template and
+    // roster-size checks keep working off the number they already read.
+    mode: 'br-build',
+    teamFormat: 'duo',
+    // Season store. When both are set the board MIRRORS lg.brSeries[seriesId] and every result
+    // write lands in the league — so the league page is the record and the lobby stays the
+    // live cockpit. Both empty = the old standalone/sheet-fed behaviour, untouched.
+    leagueId: '',
+    seriesId: '',
+    // Which named matrix the live series is scoring under, and per-match weighting
+    // (a double-points final). Both mirror down from the bound cup when there is one.
+    matrixId: '',
+    matchMultipliers: {},
+    // The field. One row per ENTRANT (a solo, a duo, a squad) — never per side, because a BR
+    // broadcast has no sides. Deliberately free of logos/photos: the overlays resolve a logo from
+    // savedTeams by name, so a 50-entrant field never puts 50 base64 images on every broadcast.
+    //   { id, name, seed, players: [{ name, epic }], drop, note, out }
+    lobby: [],
+    // What the producer is doing RIGHT NOW, as opposed to the series totals above.
+    //   match      which match number the manual entry + result card are pointed at
+    //   focus      entrant id the observer is spectating (drives the focus rail / director hints)
+    //   teamsAlive producer-tracked, because no Fortnite feed reports it to us
+    live: { match: 1, focus: '', teamsAlive: 0, playersAlive: 0, running: false, startedAt: 0 },
+    // Drop map (fn-dropmap.html). mapUrl is a URL/relative path — NEVER a data URL, or it would
+    // ride every live broadcast (see BROADCAST_TIERS: br is 'live').
+    dropmap: { visible: false, title: '', mapUrl: '', showPlayers: true, showLogos: false },
+    // Head-to-head comparison card (fn-compare.html). rows are producer-defined stat lines so the
+    // same card covers "elims/damage/mats/builds" for BR and anything else for Creative.
+    //   a/b: { name, team, sub, image }   rows: [{ label, a, b }]
+    compare: { visible: false, kind: 'duo', title: 'Comparison', label: '', footnote: '',
+               a: { name: '', team: '', sub: '', image: '' }, b: { name: '', team: '', sub: '', image: '' }, rows: [] },
+    // Victory Royale slam (fn-victory.html).
+    victory: { visible: false, team: '', players: [], stage: '', match: '', elims: 0, at: 0 }
+  },
   bestOf: 5,
   teams: {
     blue:   { name: 'BLUE TEAM',   logo: null, color: '#055fdb', players: [] },
@@ -607,12 +888,27 @@ let state = {
   // startStocks = the game's starting stock count (3 by default) — also how many pips render.
   // mode: 'singles' (1v1 → smash.html) | 'team' (crew battle w/ aggregate team stocks → smash-team.html).
   // In team mode each side's players[] holds per-player stocks remaining; the team total = their sum.
+  // characters[] is the crew's per-player fighter (team mode), parallel to players[]; `character`
+  // stays the singles fighter. Both are fighter NAMES — the overlays resolve them to slugs/art via
+  // overlay/smash-fighters.js, so free text a producer typed still finds the right stock icon.
   smash: {
     startStocks: 3,
     mode: 'singles',
     crewSize: 4,
-    blue:   { stocks: 3, character: '', players: [3, 3, 3, 3] },
-    orange: { stocks: 3, character: '', players: [3, 3, 3, 3] }
+    // Which Smash + bracket format ("Ultimate Singles"), printed under the centre medallion.
+    // Auto-filled from the start.gg event on every set push unless the producer typed their own,
+    // in which case titleManual pins it. startggTitle keeps what start.gg last said so the
+    // control panel can offer "use the start.gg label" again.
+    title: '', titleManual: false, startggTitle: '',
+    // Running a side out of stocks closes the game: the opponent takes the series point and both
+    // sides refill. Off = the producer drives the series buttons themselves.
+    autoAdvance: true,
+    // Where the caster/sponsor card sits on the Smash boards: 'bottom' (centred, the default) or
+    // 'topleft' (tucked under the board beside player 1). Crew battles put Smash's own per-player
+    // HUD across the bottom of the frame, which the centred card sat on top of.
+    railPos: 'bottom',
+    blue:   { stocks: 3, character: '', players: [3, 3, 3, 3], characters: ['', '', '', ''] },
+    orange: { stocks: 3, character: '', players: [3, 3, 3, 3], characters: ['', '', '', ''] }
   },
   // Series/match editor: format + division + per-map results (feeds the HUDs).
   // maps: [{ name, scoreA, scoreB, played }]
@@ -637,6 +933,15 @@ let state = {
   // verify. Read by the seeding page, team editor and Match-Teams panel to show links.
   //   { <gamertag>: { gamerTag, startggSlug, startggPlayerId, sixmans:{name,elo,rank,region,platform}, updatedAt } }
   playerProfiles: {},
+  // Team vault settings + a small summary. The RECORDS themselves deliberately never enter state:
+  // they carry base64 logos and full roster history, and everything in state is broadcast to every
+  // overlay (see the broadcast-payload notes). The control panel reads them over /api/teamdb, and
+  // `ver` bumps so it knows when to re-fetch.
+  //   enabled    — run imports through the vault at all (off = byte-identical to the old behaviour)
+  //   autoLink   — let an import create a vault record for an entrant it has never seen
+  //   autoEnrich — after an import, read each linked org's start.gg TEAM page in the background for
+  //                its crest and full membership. This is what makes pasting a slug optional.
+  teamVault: { enabled: true, autoLink: true, autoEnrich: true, count: 0, ver: 0, lastMatch: null, enrich: null },
   game:    { blueScore: 0, orangeScore: 0, time: 300, isOT: false, number: 1 },
   gameTeams: { blue: '', orange: '', blueColor: '', orangeColor: '' },   // *Color = live in-game paint colours (RL Stats API ColorPrimary)
   players: [],          // active players (from last UpdateState)
@@ -646,11 +951,8 @@ let state = {
   rlConnected: false,
   rlReplayLenMs: 0,     // measured goal-replay length (ReplayStart→ReplayEnd); drives the overlay's outro timing. 0 = not measured yet
   rlSpectatorUi: { ...rlSpectatorUi.DEFAULTS },
-  // Auto-spectate: on a ball touch, press the observer's player-select key so RL's camera follows the
-  // ball-carrier. enabled=feature on; armed=producer engaged it (fires live keypresses). Off/disarmed
-  // by default and gated by the AI shield — nothing is sent unless the producer explicitly arms it.
-  autoSpectate: { enabled: false, armed: false, debounceMs: 1500, layout: 'std', lastSwitchAt: 0, lastPlayer: '', lastKey: '' },
-  rlLastTouch: null,    // { name, ts } — most recent ball toucher (from BallHit); fed to the Director
+  rlLastTouch: null,    // { name, ts } — most recent ball toucher (from BallHit); fed to the AI Director
+  rlPaused: false,      // live match pause state — driven by SetMatchPaused cmd + MatchPaused/Unpaused events
   startgg: {
     enabled: false,
     tournamentSlug: '',
@@ -667,7 +969,14 @@ let state = {
     teamQueue: [],         // team-search results (non-admin path)
     focusTeam: '',         // team name to highlight in bracket overlay
     matchFeed: [],         // [{ setId, round, teamA, teamB, scoreA, scoreB, status, stream }] for desk tickers
+    matchFeedEventSlug: '',// which event matchFeed was built for — lets pruneStaleMatchFeed() spot a feed
+                           // left behind by the previous event when a poll fails after switching
     autoFollow: false,     // auto-push the in-progress set when queue polls
+    // Sticky opt-out: set the moment a producer touches the Auto-follow switch (either way).
+    // Activating an event used to force autoFollow back on every time, so turning it off never
+    // held — the scoreboard kept re-pushing itself. Once this is true, activation leaves the
+    // producer's choice alone.
+    autoFollowChosen: false,
     queueEnabled: false,   // dashboard toggle — poll stream queue from Settings API config
     lastPushedSetId: null,
     queueFetchedAt: null,
@@ -691,6 +1000,25 @@ let state = {
     // separate folder from autoUpload's since a producer may want renaming without ever enabling
     // the continuous watcher.
     replayRename: { enabled: false, folder: '', activeLeagueId: '' }
+  },
+  // Liquipedia (LPDB v3). Cache-first by necessity: the API allows 60 requests per HOUR, so
+  // nothing here polls — a request only happens when the producer presses Refresh, and the
+  // remaining budget is surfaced so they can see what they have left mid-show.
+  liquipedia: {
+    enabled: false,
+    wiki: 'rocketleague',   // which game wiki to query (rocketleague, counterstrike, dota2, …)
+    contact: '',            // REQUIRED by Liquipedia's terms — goes in the User-Agent so they can
+                            // reach the key holder. Requests are refused until it is set.
+    budgetRemaining: 55,
+    budgetResetInMs: 0,
+    lastFetchAt: null,
+    lastError: null,
+    attribution: '',        // CC BY-SA 3.0 credit the overlays render (filled at boot)
+    // Last normalised pulls, kept in state so a graphic can be filled without another request.
+    standings: [],
+    rankings: [],
+    tournament: null,
+    squad: []
   },
   challonge: {
     enabled: false,
@@ -720,6 +1048,25 @@ let state = {
     autoFollow: false,
     lastAutoFollowMatchId: null
   },
+  // FACEIT (open.faceit.com Data API v4). A "competition" is either a CHAMPIONSHIP (bracket /
+  // league tournament) or a HUB (rolling ladder) — organisers use both, and the match shape is
+  // identical, so competitionType picks the endpoint family and everything downstream is shared.
+  faceit: {
+    enabled: false,
+    competitionId: '',       // championship_id or hub_id (UUID)
+    competitionType: 'championship',   // 'championship' | 'hub'
+    organizerId: '',         // saved organiser → "my FACEIT competitions" list in the Events tab
+    organizerName: '',
+    connected: false,
+    lastError: null,
+    selectedEvent: null,     // { name, id, type, game, region, status, url }
+    eventTeams: [],          // [{ name, logo, faceitId, seed, players: [gamertag] }]
+    logoMap: {},             // name.toLowerCase() → avatar URL
+    queue: [],               // [{ matchId, round, teamA, teamB, logoA, logoB, scoreA, scoreB, status, live }]
+    queueFetchedAt: null,
+    autoFollow: false,
+    lastAutoFollowMatchId: null
+  },
   // Google Sheets two-way integration. Auth = a service-account key (stored encrypted in
   // sheetsServiceAccount, never broadcast — only a hasKey flag). Each data type has its own worksheet
   // tab + direction: 'off' | 'import' (sheet→app) | 'export' (app→sheet) | 'both' (import then export).
@@ -738,11 +1085,15 @@ let state = {
     maps: {
       teams:     { direction: 'off', tab: '' },
       schedule:  { direction: 'off', tab: '' },
+      // Battle-royale series. brResults = one row per (match, team); brPlayers = per-player elims.
+      // Both default to 'import': the sheet is the scorekeeper's workspace, the app is the display.
+      brResults: { direction: 'off', tab: '' },
+      brPlayers: { direction: 'off', tab: '' },
       standings: { direction: 'off', tab: '' }
     }
   },
   activeEvent: {
-    platform: null,      // 'startgg' | 'challonge' | 'nxgen' | null
+    platform: null,      // 'startgg' | 'challonge' | 'nxgen' | 'faceit' | null
     slug: '',
     name: '',
     gameName: '',
@@ -759,11 +1110,7 @@ let state = {
     connected: false,
     url: 'ws://127.0.0.1:4455',
     autoSwitch: true,
-    // OFF by default: activating a brand kit must NEVER touch the producer's OWN OBS profile
-    // or scene collection. Only when a producer explicitly opts in here do a kit's stored
-    // obsProfile/obsSceneCollection switch OBS on activation. (Producer feedback: the app was
-    // yanking people off their custom OBS profile / scene collection.)
-    allowKitObsSwitch: false,
+    // The app NEVER switches the producer's OBS profile or scene collection — removed 2026-08.
     autoReplayOnGoal: false,   // save an OBS replay-buffer clip on every goal
     lastError: null,
     postGameToCastersSec: 0,  // auto-switch post-game → casters after N seconds (0 = off)
@@ -855,12 +1202,14 @@ let state = {
     // should clobber it. Prevents the old silent collision where a manual edit wiped an import (and
     // vice-versa). source names the platform for 'imported'. Default '' = empty/no bracket yet.
     mode: '',            // '' | 'imported' | 'manual'
-    source: '',          // '' | 'startgg' | 'challonge' | 'nxgen'
+    source: '',          // '' | 'startgg' | 'challonge' | 'nxgen' | 'faceit'
     type: '',            // SINGLE_ELIMINATION | DOUBLE_ELIMINATION | ROUND_ROBIN | SWISS (mirrors active phase)
     winners: [],         // [{ name, round, sets: [{ a:{name,score,winner}, b:{...} }] }] (mirrors active phase)
     losers: [],
     finals: [],
     standings: [],       // [{ placement, name, wins, losses }] for round-robin / swiss (mirrors active phase)
+                         // NOTE: for an ELIMINATION phase these are ordered by set wins, not by
+                         // finish — use startgg.placements for a real top 8.
     schedule: [],        // [{ name, round, sets: [{a,b}] }] round-by-round pairings, round-robin/swiss only
     roster: [],          // round-robin/swiss entrant names (mirrors active phase)
     matches: [],         // [{ id, round, a, b, state }] flat picker list
@@ -876,11 +1225,21 @@ let state = {
     pools: [],           // [{ id, name }] lightweight list of the active phase's pools, for the pool selector
     activePoolId: '',
     matrix: null,        // { teams:[{id,name}], cells:{ "idA_idB": {aScore,bScore,winner} } } — Round Robin pools only
-    view: 'both',        // overlay view: both | winners | losers | finals | schedule | standings | matrix
+    view: 'both',        // overlay view: both | winners | losers | finals | schedule | standings | matrix | swiss | group
     rounds: 4,           // for view='finals' — how many last round-columns of each bracket to show
+    // Swiss stage thresholds (view='swiss'): wins that qualify / losses that eliminate. 0 = let
+    // the overlay derive them from the round count (5 rounds → 3/3, the standard swiss shape).
+    // swissAdvance doubles as the group board's qualification cut line.
+    swissAdvance: 0,
+    swissEliminate: 0,
+    // Swiss tier palette (green advance / amber mid / red elimination / blue opening round).
+    // Off = one neutral slate for every bucket, for packages that don't want four accent
+    // colours on air. Render-time only; the tiering itself is unchanged.
+    swissColors: true,
     ignoreReset: false,  // hide the grand-final RESET match (render-time display filter)
     ignoreRounds: 0,     // hide the first N rounds of the bracket (render-time display filter; 0 = show all)
     hideLogos: false,    // render team names only — no logos/abbrev badges (render-time display filter)
+    logoWatermark: true, // draw each team's crest behind their name at low opacity (render-time display filter)
     lastFetchAt: null,
     lastError: null
   },
@@ -895,12 +1254,39 @@ let state = {
     showResults: false,   // keep FINISHED matches on the board with their final series score (else hidden)
     matches: []   // manual entries/overrides: [{id,round,teamA,teamB,teamALogo,teamBLogo,date,time,stream,scoreA,scoreB,week,note}]
   },
+  // Real finish order (1, 2, 3, 4, 5, 5, 7, 7) for the linked start.gg event, refreshed on the
+  // regular poll. This is what the Smash top-8 board draws from — see fetchEventPlacements().
+  // rows: [{ placement, name, entrantId, character }] — character is start.gg's REPORTED
+  // per-game selection (blank when the event never reported one). reportedCharacters counts how
+  // many of the top 8 came back with one, so the panel can say why a board came up empty.
+  startggPlacements: { slug: '', rows: [], complete: false, fetchedAt: 0, error: '',
+                       reportedCharacters: 0, charError: '', charShape: '', setsScanned: 0 },
+  // The character each side has most often REPORTED at this event. start.gg has no live "playing
+  // right now" feed — selections only exist once a game is reported — so this is a prior for the
+  // matchup card, never live truth. A fighter set by hand in Match > Teams always wins over it.
+  startggCharacters: { blue: '', orange: '', fetchedAt: 0 },
   standings: {
     visible: false,
     title: '',    // '' = inherit bracket.title; auto-populated from bracket.standings if rows is empty
     subtitle: '', // optional line under the title (e.g. "Week 4 · Group A" or a season label)
     showRecord: true, // false = hide the W/L columns (clean points-only leaderboard)
+    // Where the rows came from, and the credit line the overlay must show with them. Liquipedia
+    // content is CC BY-SA 3.0 — attribution is a licence condition, not a nicety, so it travels
+    // with the data rather than being something the producer can forget to switch on.
+    source: '',
+    attribution: '',
+    // How standings.html draws the board:
+    //   'podium'    — the default pedestal top-3 + table
+    //   'placement' — the SMASH top-8 placement card wall (fighter art per row, sized by rank)
+    //   'auto'      — 'placement' for Smash, else 'podium'
+    // 'placement' is Smash-ONLY: standings.html gates it on the game's 'stocks' feature, so a
+    // board left on this layout falls back to the podium the moment another game is active.
+    layout: 'auto',
     source: 'auto',   // 'auto' (bracket/start.gg) | 'league' | 'startgg-league' | 'manual' — informational; rows always win
+    // Which in-app league the 'league' source follows. Rows used to be a one-shot snapshot taken at
+    // push time, so our own points went stale on air the moment a result was recorded — this lets
+    // the server re-mirror the league's live standings (see refreshLeagueStandingsMirror).
+    leagueId: '',
     rows: []      // manual override: [{placement,name,logo,wins,losses,points}]
   },
   // Dedicated league season-stats board (overlay/league-stats.html) — pushed from the Leagues ▸ Stats
@@ -1324,11 +1710,24 @@ function loadBrandKits() {
   savedBrandKits.forEach(ensureKitPackages);   // wrap legacy top-level sponsor/banner config into a package
 }
 
+let _bkSaveTimer = null;
 function saveBrandKits() {
+  clearTimeout(_bkSaveTimer); _bkSaveTimer = null;   // an immediate save satisfies any pending deferred one
   brandKitsVer++;   // any persisted brand-kit change forces a library re-broadcast (see brandKitsVer)
   try { safeWriteJson(brandsFile, savedBrandKits); } catch (e) { console.error('Error saving brand kits:', e); }
   if (typeof syncProfileToCloud === 'function') syncProfileToCloud();
 }
+// Deferred variant for edits that arrive per KEYSTROKE (Desk Show topics/headline are stored on the
+// active brand package). saveBrandKits() writes the whole brands.json — megabytes once a producer has
+// real kits — AND bumps brandKitsVer, which re-broadcasts the brand-kit library to every connected
+// client. Doing both 16 times while someone types one topic is what made the Graphics panel crawl.
+// The edit still lands in state immediately (state.preshow is live-tier and broadcasts as usual);
+// only the disk write + library re-send wait for a pause in typing.
+function saveBrandKitsSoon() {
+  if (_bkSaveTimer) return;
+  _bkSaveTimer = setTimeout(() => { _bkSaveTimer = null; saveBrandKits(); }, 1200);
+}
+function flushBrandKitsSave() { if (_bkSaveTimer) saveBrandKits(); }
 
 // Mirror a match team's roster into the saved-team library so roster edits made in the Match — Teams
 // panel actually persist. Matches the library entry by NORMALIZED name (trim + case-insensitive) —
@@ -1791,7 +2190,7 @@ function sanitizePlacements(p) {
 // level — they're wrapped into a single "Main" package on load so every read path resolves
 // through activePackage().
 function brandId() { return Math.random().toString(36).slice(2, 11); }
-const PACKAGE_FIELDS = ['sponsorLabel', 'sponsorInterval', 'sponsorMode', 'sponsors', 'bannerImages', 'bannerCaptions', 'bannerSlant', 'bannerHeader', 'bannerInterval', 'replaySkin'];
+const PACKAGE_FIELDS = ['sponsorLabel', 'sponsorInterval', 'sponsorMode', 'sponsors', 'bannerImages', 'bannerCaptions', 'bannerSlant', 'bannerHeader', 'bannerInterval', 'replaySkin', 'scoreboardBg'];
 
 function sanitizePackage(p, fallbackName) {
   p = p || {};
@@ -1822,6 +2221,7 @@ function sanitizePackage(p, fallbackName) {
     })).slice(0, 12) : [],
     bannerInterval: Number(p.bannerInterval) > 0 ? Number(p.bannerInterval) : 10,
     replaySkin: p.replaySkin || null,   // per-profile replay transition background image
+    scoreboardBg: p.scoreboardBg || null,   // per-profile RL post-game scoreboard background image (link or uploaded)
     // Captured show setup ("Capture current show setup" in the profile editor): scene presets,
     // ticker, event name, board titles, caster lineup + slot labels, OBS moment mappings.
     // Applied on kit/package activation — only the fields the snapshot actually carries.
@@ -1866,16 +2266,8 @@ function activateBrandKitById(id) {
   applyBrandSlots();           // fill the ad slots from this brand's sponsor placements
   saveAppState();
   broadcastFullState();        // brand colours apply automatically when colorMode === 'brand'
-  // OBS auto-switch: only if the producer has EXPLICITLY opted in. By default we never touch
-  // their OBS profile or scene collection — it's theirs. (allowKitObsSwitch defaults to false.)
-  if (state.obs && state.obs.allowKitObsSwitch && obsClient && obsClient.isConnected()) {
-    if (kit && kit.obsSceneCollection) {
-      obsClient.call('SetCurrentSceneCollection', { sceneCollectionName: kit.obsSceneCollection }).catch(() => {});
-    }
-    if (kit && kit.obsProfile) {
-      obsClient.call('SetCurrentProfile', { profileName: kit.obsProfile }).catch(() => {});
-    }
-  }
+  // The app NEVER switches the user's OBS profile or scene collection — everyone's OBS is set up
+  // differently and it's theirs. (Removed 2026-08: the old opt-in brand-kit profile/collection switch.)
 }
 
 // Apply a package's captured show setup. Only fields the snapshot carries are touched, so a
@@ -1887,7 +2279,7 @@ function applyPackageSnapshot(pkg) {
   if (s.ticker && typeof s.ticker === 'object') {
     if (Array.isArray(s.ticker.messages)) state.ticker.messages = s.ticker.messages.slice(0, 50);
     if (Number(s.ticker.speed) > 0) state.ticker.speed = Number(s.ticker.speed);
-    if (s.ticker.source === 'startgg' || s.ticker.source === 'manual') state.ticker.source = s.ticker.source;
+    if (['startgg', 'br', 'manual'].includes(s.ticker.source)) state.ticker.source = s.ticker.source;
     if (typeof s.ticker.sponsor === 'string') state.ticker.sponsor = s.ticker.sponsor;
   }
   if (s.eventName) state.eventName = String(s.eventName);
@@ -1965,6 +2357,7 @@ function activeBrand() {
     bannerImages: Array.isArray(pkg.bannerImages) ? pkg.bannerImages : [],
     bannerInterval: Number(pkg.bannerInterval) > 0 ? Number(pkg.bannerInterval) : 10,
     replaySkin: pkg.replaySkin || null,        // per-profile replay transition background
+    scoreboardBg: pkg.scoreboardBg || null,    // per-profile RL post-game scoreboard background
     sponsors,                                  // all (for the editor + back-compat consumers)
     railSponsors: tagged('rail'),              // rotating corner bug
     deskSponsors: tagged('desk'),              // caster-desk footer logos
@@ -2242,6 +2635,23 @@ function bannerForBroadcast() {
   return { ...state.banner, images: own, ownImages: own, sponsorCount: 0, kitId: null };
 }
 
+// "Count down to 23:00" — resolve a wall-clock HH:MM into the next epoch it occurs at, in the
+// SERVER's local timezone. Resolved here, not in the panel, so every client agrees on the target
+// even if their own clocks/timezones differ. A time that has already passed today means tomorrow,
+// which is what a producer typing "00:00" at 22:00 means.
+function resolveClockTarget(hhmm) {
+  const m = /^\s*(\d{1,2})\s*[:.]\s*(\d{2})\s*$/.exec(String(hhmm || ''));
+  if (!m) return null;
+  const h = Number(m[1]), mi = Number(m[2]);
+  if (h > 23 || mi > 59) return null;
+  const d = new Date();
+  d.setHours(h, mi, 0, 0);
+  let t = d.getTime();
+  // Exactly-now counts as today (a 0s countdown), anything already past rolls to tomorrow.
+  if (t < Date.now()) t += 24 * 60 * 60 * 1000;
+  return t;
+}
+
 // Per-game default side colours (used when colorMode === 'default'). Mirrors the client map.
 const GAME_DEFAULT_COLORS = {
   'rocket-league': { a: '#055fdb', b: '#e97139' },
@@ -2253,6 +2663,8 @@ const GAME_DEFAULT_COLORS = {
   'rainbow6':      { a: '#2e7dd1', b: '#e08a2a' },
   'cod':           { a: '#055fdb', b: '#e97139' },
   'marvel-rivals': { a: '#055fdb', b: '#e97139' },
+  'bedwars':       { a: '#e0383e', b: '#2a7fff' },   // classic Bedwars bed-team red / blue
+  'smash':         { a: '#e0383e', b: '#2a7fff' },   // Smash player 1 red / player 2 blue
   'mobile-legends':{ a: '#2a7fff', b: '#e0383e' },
   'honor-of-kings':{ a: '#2a7fff', b: '#e0383e' }
 };
@@ -2262,6 +2674,21 @@ const gameDefaultColors = (id) => GAME_DEFAULT_COLORS[id] || { a: '#055fdb', b: 
 const DEFAULT_SIDE_COLOR_SET = new Set(
   Object.values(GAME_DEFAULT_COLORS).flatMap((c) => [c.a.toLowerCase(), c.b.toLowerCase()])
 );
+
+// Re-tint PLACEHOLDER side colours to the active game's defaults. A team carrying its own brand
+// colour is left alone — only colours that are themselves a per-game default count as "unset".
+// Called on set_game AND once at boot: without the boot call, a producer already sitting on a game
+// never picks up a newly-added default (Smash stayed on Rocket League's blue/orange until they
+// switched game and back).
+function applyGameDefaultSideColors() {
+  const dc = gameDefaultColors(state.activeGame);
+  let changed = false;
+  if (state.teams.blue && DEFAULT_SIDE_COLOR_SET.has((state.teams.blue.color || '').toLowerCase())
+      && state.teams.blue.color !== dc.a) { state.teams.blue.color = dc.a; changed = true; }
+  if (state.teams.orange && DEFAULT_SIDE_COLOR_SET.has((state.teams.orange.color || '').toLowerCase())
+      && state.teams.orange.color !== dc.b) { state.teams.orange.color = dc.b; changed = true; }
+  return changed;
+}
 
 // The colours overlays should actually render for each side, per the active colour mode.
 // NON-DESTRUCTIVE: never mutates state.teams — the team's own colour is preserved so the
@@ -2359,10 +2786,13 @@ function syncCrewRosterToCloud() {
 // and overlays with zero producer clicks. Additive only: a caster leaving never yanks anyone
 // off air. Toggleable via casters.autoFillFromStations (default ON when cloud-linked).
 let _stationSyncBusy = false;
-async function stationAutoSync() {
+async function stationAutoSync(opts) {
+  // force: producer clicked "Re-sync desk to live feeds" — re-identify EVERY slot (manual entries
+  // included) to whoever's actually in it now, overriding the "manual entries are never renamed" rule.
+  const forceReident = !!(opts && opts.force);
   if (_stationSyncBusy) return;
   try {
-    if (state.casters && state.casters.autoFillFromStations === false) return;
+    if (state.casters && state.casters.autoFillFromStations === false && !forceReident) return;
     if (!cloud || typeof cloud.authed !== 'function' || !cloud.authed()) return;
     const s = cloud.getSession() || {};
     const orgId = s.workspaceId;
@@ -2470,9 +2900,10 @@ async function stationAutoSync() {
         // TAKE-OVER: web slots keep their stream id, so when a DIFFERENT person claims the same
         // placement the feed URL matches the previous occupant's auto entry — the video changed
         // but the desk kept the old name/socials. Re-identify auto-managed (cs_) entries to the
-        // new person; manual entries are never renamed.
+        // new person; manual entries are never renamed AUTOMATICALLY (a gamertag feed legitimately
+        // maps to a real-name manual entry by URL) — only a forced "Re-sync desk" renames them.
         const entryKeys = [entry.name, entry.handle].map((v) => (v || '').toLowerCase()).filter(Boolean);
-        if (String(entry.id || '').startsWith('cs_') && !entryKeys.includes(key)) {
+        if ((forceReident || String(entry.id || '').startsWith('cs_')) && !entryKeys.includes(key)) {
           const twin = (state.crew || []).find((c) => c && ((c.name || '').toLowerCase() === key || (c.handle || '').toLowerCase() === key)) || null;
           entry.name = (twin && twin.name) || (prof && prof.realName) || nm;
           entry.handle = (twin && twin.handle) || (prof ? nm : '');
@@ -2813,6 +3244,7 @@ function loadState() {
       // Use the saved value whenever it's a string (including '' — a deliberately cleared
       // title must NOT snap back to the factory default on reload).
       if (typeof saved.eventName === 'string') state.eventName = saved.eventName;
+      if (typeof saved.eventNameSlug === 'string') state.eventNameSlug = saved.eventNameSlug;
       if (typeof saved.gameLabel === 'string') state.gameLabel = saved.gameLabel;
       if (typeof saved.roundLabel === 'string') state.roundLabel = saved.roundLabel;
       if (saved.speedUnit === 'mph' || saved.speedUnit === 'kmh') state.speedUnit = saved.speedUnit;
@@ -2820,6 +3252,11 @@ function loadState() {
       if (saved.teamRecord && typeof saved.teamRecord === 'object') state.teamRecord = { ...state.teamRecord, ...saved.teamRecord };
       // (Legacy manual-record migration runs AFTER state.teams is restored below — see migrateTeamRecordManual.)
       if (typeof saved.autoTeamsFromGame === 'boolean') state.autoTeamsFromGame = saved.autoTeamsFromGame;
+      // Spread onto the live object rather than replacing it: only the two settings are persisted,
+      // and count/ver are runtime fields the control panel uses to know when to re-fetch.
+      if (saved.teamVault && typeof saved.teamVault === 'object') {
+        state.teamVault = { ...state.teamVault, ...saved.teamVault, count: 0, ver: 0, enrich: null };
+      }
       if (saved.startggLeagueStandings && typeof saved.startggLeagueStandings === 'object') {
         state.startggLeagueStandings = { ...state.startggLeagueStandings, ...saved.startggLeagueStandings };
       } else if (saved.leagueStandings && typeof saved.leagueStandings === 'object') {
@@ -2831,7 +3268,7 @@ function loadState() {
       if (state.fontFamily === 'Bourgeois') state.fontFamily = 'Industry';
       if (typeof saved.clock24h === 'boolean') state.clock24h = saved.clock24h;
       if (typeof saved.showSeries === 'boolean') state.showSeries = saved.showSeries;
-      if (typeof saved.rlSpecOutline === 'boolean') state.rlSpecOutline = saved.rlSpecOutline;
+      if (typeof saved.rlReplayTransitions === 'boolean') state.rlReplayTransitions = saved.rlReplayTransitions;
       if (typeof saved.rlScoreboardSeparate === 'boolean') state.rlScoreboardSeparate = saved.rlScoreboardSeparate;
       if (typeof saved.defaultBestOf === 'number') state.defaultBestOf = saved.defaultBestOf;
       if (saved.facecamsEnabled !== undefined) state.facecamsEnabled = saved.facecamsEnabled;
@@ -2893,7 +3330,7 @@ function loadState() {
         state.ticker = {
           visible: !!saved.ticker.visible,
           messages: Array.isArray(saved.ticker.messages) ? saved.ticker.messages : [],
-          speed: Number(saved.ticker.speed) > 0 ? Number(saved.ticker.speed) : 40,
+          speed: Number(saved.ticker.speed) > 0 ? Number(saved.ticker.speed) : 10,
           source: saved.ticker.source === 'startgg' ? 'startgg' : 'manual',
           sponsor: typeof saved.ticker.sponsor === 'string' ? saved.ticker.sponsor : '',
           feed: []
@@ -3023,6 +3460,9 @@ function loadState() {
       if (saved.customOverlayLayouts && typeof saved.customOverlayLayouts === 'object') {
         state.customOverlayLayouts = saved.customOverlayLayouts;
       }
+      if (Array.isArray(saved.pointMatrices)) {
+        state.pointMatrices = saved.pointMatrices.slice(0, 100).map(sanitizePointMatrix).filter((m) => !m.builtin);
+      }
       if (saved.gameConfigs && typeof saved.gameConfigs === 'object') {
         state.gameConfigs = saved.gameConfigs;
       }
@@ -3063,9 +3503,16 @@ function loadState() {
             ? s.players.slice(0, crew).map((v) => clampS(v, start))
             : Array.from({ length: crew }, () => start);
           while (players.length < crew) players.push(start);
-          return { stocks: clampS(s && s.stocks, start), character: String((s && s.character) || '').slice(0, 40), players };
+          const characters = (Array.isArray(s && s.characters) ? s.characters : [])
+            .slice(0, crew).map((v) => String(v || '').slice(0, 40));
+          while (characters.length < crew) characters.push('');
+          return { stocks: clampS(s && s.stocks, start), character: String((s && s.character) || '').slice(0, 40), players, characters };
         };
         state.smash = {
+          title: String(saved.smash.title || '').slice(0, 40),
+          titleManual: !!saved.smash.titleManual,
+          startggTitle: String(saved.smash.startggTitle || '').slice(0, 40),
+          autoAdvance: saved.smash.autoAdvance !== false,
           startStocks: start,
           mode: saved.smash.mode === 'team' ? 'team' : 'singles',
           crewSize: crew,
@@ -3079,7 +3526,12 @@ function loadState() {
           discord: String(saved.chatCommands.discord || '').slice(0, 300)
         };
       }
-      if (saved.pulse && typeof saved.pulse === 'object') state.pulse = { publish: !!saved.pulse.publish, feedViewUrl: String(saved.pulse.feedViewUrl || '') };
+      if (saved.pulse && typeof saved.pulse === 'object') state.pulse = {
+        publish: !!saved.pulse.publish,
+        feedViewUrl: String(saved.pulse.feedViewUrl || ''),
+        channel: String(saved.pulse.channel || ''),
+        label: String(saved.pulse.label || '')
+      };
       if (saved.match && typeof saved.match === 'object') {
         state.match = {
           format: saved.match.format || '',
@@ -3131,6 +3583,11 @@ function loadState() {
           connected: false,
           queueFetchedAt: null,
           autoFollow: !!saved.startgg.autoFollow,
+          autoFollowChosen: !!saved.startgg.autoFollowChosen,
+          // Which stream/station this producer is on. Persisted: on a multi-station championship
+          // losing it to a restart silently reverts auto-follow to "any stream", which is how
+          // another station's match ends up on your broadcast.
+          streamName: typeof saved.startgg.streamName === 'string' ? saved.startgg.streamName : '',
           queueEnabled: !!saved.startgg.queueEnabled,
           // keep selectedEvent and eventTeams from disk if present (lightweight)
           selectedEvent: saved.startgg.selectedEvent || null,
@@ -3168,6 +3625,35 @@ function loadState() {
           connected: false, lastError: null, queue: [], eventTeams: [], queueFetchedAt: null, lastAutoFollowMatchId: null
         };
       }
+      if (saved.faceit && typeof saved.faceit === 'object') {
+        state.faceit = {
+          ...state.faceit,
+          enabled: !!saved.faceit.enabled,
+          competitionId: saved.faceit.competitionId || '',
+          competitionType: saved.faceit.competitionType === 'hub' ? 'hub' : 'championship',
+          organizerId: saved.faceit.organizerId || '',
+          organizerName: saved.faceit.organizerName || '',
+          selectedEvent: saved.faceit.selectedEvent || null,
+          logoMap: (saved.faceit.logoMap && typeof saved.faceit.logoMap === 'object') ? saved.faceit.logoMap : {},
+          autoFollow: !!saved.faceit.autoFollow
+        };
+      }
+      if (typeof saved.faceitApiKey === 'string') {
+        faceitApiKey = decryptSecret(saved.faceitApiKey);
+      }
+      if (typeof saved.liquipediaApiKey === 'string') {
+        liquipediaApiKey = decryptSecret(saved.liquipediaApiKey);
+      }
+      if (saved.liquipedia && typeof saved.liquipedia === 'object') {
+        const lq = saved.liquipedia;
+        state.liquipedia.enabled = !!lq.enabled;
+        if (typeof lq.wiki === 'string' && lq.wiki) state.liquipedia.wiki = lq.wiki;
+        if (typeof lq.contact === 'string') state.liquipedia.contact = lq.contact;
+      }
+      _lpBudget = liquipedia.RateBudget.fromJSON(saved.liquipediaBudget);
+      _lpCache = new liquipedia.LiquipediaCache(saved.liquipediaCache);
+      state.liquipedia.attribution = liquipedia.LIQUIPEDIA_ATTRIBUTION;
+      lpSyncBudget();
       if (typeof saved.nxgenApiKey === 'string') {
         nxgenApiKey = decryptSecret(saved.nxgenApiKey);
       }
@@ -3177,6 +3663,13 @@ function loadState() {
       if (typeof saved.ballchasingApiKey === 'string') {
         ballchasingApiKey = decryptSecret(saved.ballchasingApiKey);
       }
+      if (saved.r6 && typeof saved.r6 === 'object') {
+        state.r6 = { autoScore: !!saved.r6.autoScore, gepData: null };
+      }
+      if (saved.bedwars && typeof saved.bedwars === 'object') {
+        state.bedwars = { autoScore: !!saved.bedwars.autoScore, data: null };
+      }
+      if (typeof saved.bedwarsToken === 'string') bedwarsToken = decryptSecret(saved.bedwarsToken);
       if (saved.sheets && typeof saved.sheets === 'object') {
         state.sheets = {
           ...state.sheets,
@@ -3208,7 +3701,6 @@ function loadState() {
           enabled: !!saved.obs.enabled,
           url: saved.obs.url || state.obs.url,
           autoSwitch: saved.obs.autoSwitch !== false,
-          allowKitObsSwitch: !!saved.obs.allowKitObsSwitch,   // opt-in; default off (never hijack the user's OBS profile)
           autoReplayOnGoal: !!saved.obs.autoReplayOnGoal,
           postGameToCastersSec: Number(saved.obs.postGameToCastersSec) || 0,
           kickoff: {
@@ -3283,7 +3775,8 @@ function loadState() {
         // are single-phase sources, so any OTHER phase in the list is an orphan from a previously
         // imported event and would render as a stray phase chip on bracket.html.
         const soleId = state.bracket.source === 'nxgen' ? 'nxgen-main'
-                     : state.bracket.source === 'challonge' ? 'challonge-main' : '';
+                     : state.bracket.source === 'challonge' ? 'challonge-main'
+                     : state.bracket.source === 'faceit' ? 'faceit-main' : '';
         if (soleId && state.bracket.phases.length > 1 && state.bracket.phases.some((p) => p && p.id === soleId)) {
           state.bracket.phases = state.bracket.phases.filter((p) => p && p.id === soleId);
           state.bracket.activePhaseId = soleId;
@@ -3349,19 +3842,6 @@ function loadState() {
       if (typeof saved.rlReplayLenMs === 'number' && saved.rlReplayLenMs >= 3000 && saved.rlReplayLenMs <= 15000) {
         state.rlReplayLenMs = Math.round(saved.rlReplayLenMs);
       }
-      if (saved.autoSpectate && typeof saved.autoSpectate === 'object') {
-        // Single switch, so it restores like every other automation toggle: if the producer left it on
-        // it comes back on. (It used to force armed=false here, which — combined with nothing ever
-        // setting armed — is why the feature could never fire at all.) The AI shield remains the
-        // global kill switch, and the RL-focus requirement still gates the actual keypress.
-        state.autoSpectate = {
-          enabled: !!saved.autoSpectate.enabled,
-          armed: !!saved.autoSpectate.enabled,
-          debounceMs: (typeof saved.autoSpectate.debounceMs === 'number') ? Math.max(400, Math.min(8000, saved.autoSpectate.debounceMs)) : 1500,
-          layout: (saved.autoSpectate.layout === 'team') ? 'team' : 'std',
-          lastSwitchAt: 0, lastPlayer: '', lastKey: ''
-        };
-      }
       if (saved.rlSpectatorUi && typeof saved.rlSpectatorUi === 'object') {
         state.rlSpectatorUi = { ...rlSpectatorUi.DEFAULTS, ...saved.rlSpectatorUi };
       }
@@ -3380,6 +3860,9 @@ function loadState() {
           .filter((c) => c && TD_SUPPORT_GROUPS.includes(c.group))
           .map((c) => ({ crewId: c.id, role: c.role || TD_SUPPORT_LABELS[c.group] || '' }));
       }
+      // Clean any duplicates already sitting in a saved list (migrated entries, same-name crew
+      // twins, chips whose crew record has since been deleted) rather than only guarding new adds.
+      dedupeSupport();
       if (Array.isArray(saved.adProofSessions)) {
         state.adProofSessions = saved.adProofSessions;
       }
@@ -3417,6 +3900,53 @@ function loadState() {
           });
         });
       }
+      // Battle-royale series. Raw results are restored and the derived boards recomputed, so a
+      // scoring-table edit made before a restart is reflected in the totals on boot.
+      if (saved.br && typeof saved.br === 'object') {
+        const b = saved.br;
+        state.br.enabled = !!b.enabled;
+        if (typeof b.game === 'string' && GAMES[b.game]) state.br.game = b.game;
+        if (b.event && typeof b.event === 'object') state.br.event = { ...state.br.event, ...b.event };
+        if (b.format && typeof b.format === 'object') state.br.format = { ...state.br.format, ...b.format };
+        if (typeof b.scoringPreset === 'string') brApplyScoringPreset(b.scoringPreset);
+        if (b.scoring && typeof b.scoring === 'object') {
+          if (Array.isArray(b.scoring.placementPoints)) state.br.scoring.placementPoints = b.scoring.placementPoints.map((n) => Math.max(0, Math.round(Number(n) || 0)));
+          if (b.scoring.killPoints != null) state.br.scoring.killPoints = Math.max(0, Number(b.scoring.killPoints) || 0);
+          if (b.scoring.killCap != null) state.br.scoring.killCap = Math.max(0, parseInt(b.scoring.killCap, 10) || 0);
+        }
+        if (Array.isArray(b.results)) state.br.results = b.results.slice(0, 4000);
+        if (Array.isArray(b.playerResults)) state.br.playerResults = b.playerResults.slice(0, 8000);
+        if (typeof b.source === 'string') state.br.source = b.source;
+        // Lobby model. The field is the expensive thing to rebuild by hand mid-event, so it is
+        // restored through the same sanitizer the live handlers use — a hand-edited state file
+        // can't inject a shape the panel then chokes on.
+        if (typeof b.mode === 'string') state.br.mode = b.mode;
+        if (typeof b.matrixId === 'string') state.br.matrixId = b.matrixId;
+        if (b.liveMatch != null) state.br.live.match = Math.max(1, Math.min(40, parseInt(b.liveMatch, 10) || 1));
+        if (b.matchMultipliers && typeof b.matchMultipliers === 'object') state.br.matchMultipliers = b.matchMultipliers;
+        if (typeof b.teamFormat === 'string') state.br.teamFormat = b.teamFormat;
+        if (Array.isArray(b.lobby)) state.br.lobby = b.lobby.slice(0, 200).map(sanitizeBrEntrant).filter((e) => e.name);
+        if (b.dropmap && typeof b.dropmap === 'object') {
+          state.br.dropmap = { ...state.br.dropmap, ...b.dropmap, visible: false };   // never boot with a graphic live
+        }
+        // compare/victory/live are per-show transients — deliberately not restored.
+      }
+      // Keep the two representations of squad size in lockstep on boot: teamFormat is what the
+      // panel drives, format.teamSize is what the sheet template and roster checks already read.
+      state.br.format.teamSize = brFormatSize(state.br.teamFormat);
+      // Restore the league binding LAST — leagues are loaded above, so brBinding() can actually
+      // resolve here. A binding whose league or cup was deleted between runs is dropped rather
+      // than left dangling, and a live one re-mirrors so the board boots with the cup's results.
+      if (saved.br && typeof saved.br === 'object') {
+        state.br.leagueId = String(saved.br.leagueId || '');
+        state.br.seriesId = String(saved.br.seriesId || '');
+        if (state.br.leagueId && !brSyncFromLeague()) { state.br.leagueId = ''; state.br.seriesId = ''; }
+      }
+      (state.leagues || []).forEach(recomputeBrSeason);
+      if (!Array.isArray(state.br.scoring.placementPoints) || !state.br.scoring.placementPoints.length) {
+        brApplyScoringPreset(state.br.scoringPreset || 'fncs');
+      }
+      computeBrStandings();
       if (saved.apex && typeof saved.apex === 'object') {
         const a = saved.apex;
         if (a.scoring && Array.isArray(a.scoring.placementPoints)) {
@@ -3443,10 +3973,11 @@ function _saveAppStateNow(sync = false) {
       colorMode: state.colorMode,
       clock24h: state.clock24h,
       showSeries: state.showSeries,
-      rlSpecOutline: state.rlSpecOutline,
+      rlReplayTransitions: state.rlReplayTransitions,
       rlScoreboardSeparate: state.rlScoreboardSeparate,
       defaultBestOf: state.defaultBestOf,
       eventName: state.eventName,
+      eventNameSlug: state.eventNameSlug || '',
       gameLabel: state.gameLabel,
       roundLabel: state.roundLabel,
       speedUnit: state.speedUnit,
@@ -3457,6 +3988,8 @@ function _saveAppStateNow(sync = false) {
         broadcastRate: pm.broadcastRate || 'smooth' }; })(),
       orgLibrary: (function () { const o = state.orgLibrary || {}; return { autoSync: o.autoSync !== false, profileId: o.profileId || null }; })(),
       autoTeamsFromGame: state.autoTeamsFromGame,
+      // Settings only — the vault's records live in team-db.json (see backend/team-db.js).
+      teamVault: (function () { const v = state.teamVault || {}; return { enabled: v.enabled !== false, autoLink: v.autoLink !== false, autoEnrich: v.autoEnrich !== false }; })(),
       startggLeagueStandings: state.startggLeagueStandings,
       fontFamily: state.fontFamily,
       facecamsEnabled: state.facecamsEnabled,
@@ -3470,7 +4003,25 @@ function _saveAppStateNow(sync = false) {
       draftAuto: { enabled: !!(state.draft && state.draft.auto && state.draft.auto.enabled), lockfilePath: (state.draft && state.draft.auto && state.draft.auto.lockfilePath) || '' },
       lolHudMode: (state.lol && state.lol.hudMode) || 'auto',
       lolOcr: { enabled: !!(state.lol && state.lol.ocr && state.lol.ocr.enabled), regions: (state.lol && state.lol.ocr && state.lol.ocr.regions) || undefined },
+      br: {
+        enabled: state.br.enabled, game: state.br.game, event: state.br.event, format: state.br.format,
+        scoringPreset: state.br.scoringPreset, scoring: state.br.scoring,
+        results: state.br.results, playerResults: state.br.playerResults, source: state.br.source,
+        // Lobby: mode/format/field are event setup and must survive a restart mid-show. The
+        // graphics (compare/victory) and live counters are not saved — they're this-moment state.
+        mode: state.br.mode, teamFormat: state.br.teamFormat, lobby: state.br.lobby,
+        dropmap: state.br.dropmap,
+        leagueId: state.br.leagueId, seriesId: state.br.seriesId,
+        matrixId: state.br.matrixId, matchMultipliers: state.br.matchMultipliers,
+        liveMatch: (state.br.live && state.br.live.match) || 1
+      },
+      pointMatrices: state.pointMatrices || [],
       apex: { scoring: state.apex && state.apex.scoring, teamMap: (state.apex && state.apex.teamMap) || {}, event: (state.apex && state.apex.event) || {}, games: (state.apex && state.apex.games) || [], port: (state.apex && state.apex.port) || 7777 },
+      // Settings only. gepData/data are live payloads from a spectator client or MC server —
+      // restoring a stale scoreboard on boot would be worse than starting empty.
+      r6: { autoScore: !!(state.r6 && state.r6.autoScore) },
+      bedwars: { autoScore: !!(state.bedwars && state.bedwars.autoScore) },
+      bedwarsToken: encryptSecret(bedwarsToken),
       adProofSessions: state.adProofSessions || [],
       playerProfiles: state.playerProfiles || {},
       overtime: state.overtime,
@@ -3510,6 +4061,13 @@ function _saveAppStateNow(sync = false) {
       challongeApiKey: encryptSecret(challongeApiKey),
       nxgen: { enabled: state.nxgen.enabled, eventSlug: state.nxgen.eventSlug, selectedEvent: state.nxgen.selectedEvent, logoMap: state.nxgen.logoMap, autoFollow: state.nxgen.autoFollow },
       nxgenApiKey: encryptSecret(nxgenApiKey),
+      liquipediaApiKey: encryptSecret(liquipediaApiKey),
+      // Persisted so the rolling hour survives a restart (Liquipedia's window keeps running
+      // regardless) and so cached results are re-used, which their terms explicitly ask for.
+      liquipediaBudget: _lpBudget.toJSON(),
+      liquipediaCache: _lpCache.toJSON(),
+      faceit: { enabled: state.faceit.enabled, competitionId: state.faceit.competitionId, competitionType: state.faceit.competitionType, organizerId: state.faceit.organizerId, organizerName: state.faceit.organizerName, selectedEvent: state.faceit.selectedEvent, logoMap: state.faceit.logoMap, autoFollow: state.faceit.autoFollow },
+      faceitApiKey: encryptSecret(faceitApiKey),
       ballchasing: state.ballchasing,
       ballchasingApiKey: encryptSecret(ballchasingApiKey),
       sheets: { enabled: state.sheets.enabled, sheetUrl: state.sheets.sheetUrl, sheetId: state.sheets.sheetId,
@@ -3521,7 +4079,6 @@ function _saveAppStateNow(sync = false) {
         url: state.obs.url,
         autoSwitch: state.obs.autoSwitch,
         autoReplayOnGoal: state.obs.autoReplayOnGoal,
-        allowKitObsSwitch: state.obs.allowKitObsSwitch,
         postGameToCastersSec: state.obs.postGameToCastersSec,
         kickoff: state.obs.kickoff,
         scoreboardScene: state.obs.scoreboardScene,
@@ -3556,8 +4113,8 @@ function _saveAppStateNow(sync = false) {
         }
       },
       clips: {
-        captureMode: state.clips?.captureMode || 'auto',
-        autoCapture: state.clips?.autoCapture !== false,
+        captureMode: state.clips?.captureMode || 'manual',
+        autoCapture: state.clips?.captureMode === 'auto',   // derived from the mode; default OFF, never forced on
         autoMontage: !!state.clips?.autoMontage,
         replayFolder: state.clips?.replayFolder || '',
         captureRules: state.clips?.captureRules || {}
@@ -3566,7 +4123,6 @@ function _saveAppStateNow(sync = false) {
       // Persist the measured goal-replay length so the FIRST goal of a session is timed off the real
       // value instead of the overlay's 6000ms fallback (that's why goal 1 was off and the rest fine).
       rlReplayLenMs: state.rlReplayLenMs || 0,
-      autoSpectate: state.autoSpectate ? { enabled: !!state.autoSpectate.enabled, debounceMs: state.autoSpectate.debounceMs || 1500, layout: state.autoSpectate.layout || 'std' } : undefined,
       vdo: state.vdo,
       flows: state.flows || [],
       sceneBg: state.sceneBg || {},
@@ -3824,6 +4380,89 @@ function chatCommandReply(kind) {
   return '';
 }
 
+// ── Show Deck: off-air staff hygiene + shift handover ────────────────────────
+// One person, one chip. Duplicates creep in two ways: the same crewId added twice (guarded at the
+// add site, but not on migrated/imported lists), and TWO crew records for the same human — the
+// rename "ghost" twins — which the crewId check can't see. Both are collapsed here, along with
+// chips whose crew record no longer exists.
+function dedupeSupport() {
+  if (!Array.isArray(state.casters.support)) { state.casters.support = []; return; }
+  const byId = new Map();
+  (state.crew || []).forEach((c) => { if (c && c.id) byId.set(c.id, c); });
+  const seenId = new Set();
+  const seenName = new Set();
+  state.casters.support = state.casters.support.filter((s) => {
+    if (!s || !s.crewId || seenId.has(s.crewId)) return false;
+    const c = byId.get(s.crewId);
+    if (!c) return false;                       // crew record deleted → drop the orphan chip
+    const nm = (c.name || '').trim().toLowerCase();
+    if (nm && seenName.has(nm)) return false;   // same human via a duplicate crew record
+    seenId.add(s.crewId);
+    if (nm) seenName.add(nm);
+    return true;
+  });
+}
+
+/** The desk's caster slots as { 1..4: name } — empty slots keep their key, so the shape round-trips
+    through a handover snapshot without shifting anyone into the wrong seat. */
+function deskSlotNames() {
+  const lib = state.casters.library || [];
+  const out = {};
+  [1, 2, 3, 4].forEach((n) => {
+    const e = (state.casters.lineup || []).find((x) => Number(x.slot) === n);
+    const p = e && lib.find((l) => l && l.id === e.libraryId);
+    out[n] = ((p && p.name) || '').toString().trim();
+  });
+  return out;
+}
+
+/** Who is on the desk right now — slots 1-4 plus the two show roles, as [{ name, role }]. */
+function deskLineupPeople() {
+  const out = [];
+  const push = (name, role) => {
+    const n = (name == null ? '' : String(name)).trim();
+    if (n) out.push({ name: n, role });
+  };
+  const slots = deskSlotNames();
+  [1, 2, 3, 4].forEach((n) => push(slots[n], 'Caster'));
+  const roles = state.casters.showRoles || {};
+  push(roles.host, 'Host');
+  push(roles.observer, 'Observer');
+  return out;
+}
+
+/** Empty the desk (slots 1-4 + show roles). Support/credits are untouched. */
+function clearDeskSlots() {
+  state.casters.lineup = (state.casters.lineup || []).filter((e) => !(Number(e.slot) >= 1 && Number(e.slot) <= 4));
+  state.casters.showRoles = { host: '', observer: '' };
+  state.casters.activeShiftId = '';
+  resolveLineupToList();
+}
+
+/** Put a set of names back on the desk, creating library entries the way apply_shift does. */
+function seatDeskSlots(slots, host, observer) {
+  if (!Array.isArray(state.casters.library)) state.casters.library = [];
+  const lib = state.casters.library;
+  const findOrCreate = (nm) => {
+    const k = nm.toLowerCase();
+    let e = lib.find((l) => l && (l.name || '').toLowerCase() === k);
+    if (e) return e;
+    const crew = (state.crew || []).find((c) => c && (c.name || '').toLowerCase() === k) || {};
+    e = { id: Math.random().toString(36).slice(2, 11), name: nm, handle: crew.socialHandle || '', socialHandle: crew.socialHandle || '', social: crew.social || 'none', country: crew.country || '', camUrl: '', kind: 'caster' };
+    lib.push(e);
+    return e;
+  };
+  const lineup = (state.casters.lineup || []).filter((e) => !(Number(e.slot) >= 1 && Number(e.slot) <= 4));
+  [1, 2, 3, 4].forEach((n) => {
+    const nm = ((slots && slots[n]) || '').toString().trim();
+    if (!nm) return;
+    lineup.push({ libraryId: findOrCreate(nm).id, slot: n });
+  });
+  state.casters.lineup = lineup;
+  state.casters.showRoles = { host: host || '', observer: observer || '' };
+  resolveLineupToList();
+}
+
 function resolveLineupToList() {
   const lib = state.casters.library || [];
   const rooms = state.casters.rooms || [];
@@ -3868,22 +4507,46 @@ function resolveLineupToList() {
 // someone OFF the desk we remember them here (keyed by NAME — the identity the Show Deck / DCC
 // resolve people on) so auto-fill leaves them off. Placing them back on a slot, or a fresh
 // station check-in after they drop, clears the suppression.
-function _autoFillNameKey(libraryId) {
+// BOTH identities, because the two sides of this speak different ones: the station feed calls
+// people by f.personName (the GAMERTAG for anyone who checked in self-serve), while the desk
+// library stores that as `handle` and keeps their real name in `name` — which is exactly how
+// stationAutoSync matches them (name OR handle, see the lookup above). Keying suppression on
+// `name` alone made it a silent no-op for every caster whose real name isn't their gamertag:
+// the stored key never matched the live key, so the prune below deleted the suppression on the
+// next 20s poll and the web placement slammed them straight back into their slot.
+function _autoFillNameKeys(libraryId) {
   const e = (state.casters.library || []).find((c) => c && c.id === libraryId);
-  return ((e && e.name) || '').trim().toLowerCase();
+  if (!e) return [];
+  return [e.name, e.handle].map((v) => (v || '').trim().toLowerCase()).filter(Boolean);
 }
 function suppressAutoFill(libraryId) {
   if (!Array.isArray(state.casters.autoFillSuppress)) state.casters.autoFillSuppress = [];
-  const k = _autoFillNameKey(libraryId);
-  if (k && !state.casters.autoFillSuppress.includes(k)) state.casters.autoFillSuppress.push(k);
+  for (const k of _autoFillNameKeys(libraryId)) {
+    if (!state.casters.autoFillSuppress.includes(k)) state.casters.autoFillSuppress.push(k);
+  }
 }
 function unsuppressAutoFill(libraryId) {
   if (!Array.isArray(state.casters.autoFillSuppress) || !state.casters.autoFillSuppress.length) return;
-  const k = _autoFillNameKey(libraryId);
-  if (k) state.casters.autoFillSuppress = state.casters.autoFillSuppress.filter((x) => x !== k);
+  const keys = new Set(_autoFillNameKeys(libraryId));
+  if (keys.size) state.casters.autoFillSuppress = state.casters.autoFillSuppress.filter((x) => !keys.has(x));
 }
 
 // Stream ID for a player — derived from gamertag/name, with an explicit override.
+// Find a roster player by id, comparing as STRINGS.
+//
+// ⚠️ Roster ids are not consistently typed: start.gg imports create them as
+// `Math.random().toString(36)` (string) while the panel's "+ Add" creates them as
+// `Date.now() + Math.random()` (NUMBER). Any control that carries the id through a DOM
+// `data-pid` attribute hands it back as a string, so a strict `p.id === playerId` misses every
+// number-id player and the handler silently does nothing — which is exactly how the per-player
+// LISTEN IN broke while the room-wide one (which never looks a player up) kept working.
+// Every handler reachable from a data-pid attribute must go through this.
+function findTeamPlayer(team, playerId) {
+  if (!team || playerId == null || playerId === '') return null;
+  const want = String(playerId);
+  return (team.players || []).find((p) => p && String(p.id) === want) || null;
+}
+
 function playerStreamId(player) {
   if (!player) return '';
   if (player.vdoStreamId) return vdoSlug(player.vdoStreamId);
@@ -4046,6 +4709,17 @@ function broadcastRaw(clients, str) {
   clients.forEach(ws => {
     if (ws.readyState === WebSocket.OPEN) ws.send(str);
   });
+}
+// Reply to ONE client, safely. Long-running handlers (start.gg imports run for minutes) finish
+// against a socket the producer may have closed by reloading the panel — a bare ws.send() then
+// throws, and in a catch block that re-sends it throws AGAIN, escaping the async handler into
+// main.js's unhandledRejection crash logger. Never throws; returns whether it went out.
+function sendWs(ws, msg) {
+  try {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return false;
+    ws.send(JSON.stringify(msg));
+    return true;
+  } catch (e) { return false; }
 }
 
 function formatTime(seconds) {
@@ -4252,31 +4926,35 @@ const BROADCAST_TIERS = {
   // live production/scoreboard state (from the state literal)
   version: 'live', view: 'live', rlHudHidden: 'live', perfMode: 'live', orgLibrary: 'live', cloudRole: 'live', activeGame: 'live', themesByGame: 'live',
   eventName: 'live', gameLabel: 'live', roundLabel: 'live', speedUnit: 'live', fontFamily: 'live',
-  clock24h: 'live', showSeries: 'live', rlSpecOutline: 'live', rlScoreboardSeparate: 'live', defaultBestOf: 'live', facecamsEnabled: 'live',
+  clock24h: 'live', showSeries: 'live', rlReplayTransitions: 'live', rlScoreboardSeparate: 'live', defaultBestOf: 'live', facecamsEnabled: 'live',
   replayCams: 'live', activeBrandKitId: 'live', useBrandColors: 'live', colorMode: 'live',
   sceneBg: 'live', banner: 'live', casters: 'live', vdo: 'live', listenIn: 'live', credits: 'live',
   breakScreen: 'live', ticker: 'live', adProofSessions: 'live', spotlight: 'live', winner: 'live',
-  veto: 'live', owMatch: 'live', mrMatch: 'live', customOverlayLayouts: 'live', gameConfigs: 'live', draft: 'live',
+  veto: 'live', owMatch: 'live', mrMatch: 'live', r6: 'live', bedwars: 'live', pointMatrices: 'live', customOverlayLayouts: 'live', gameConfigs: 'live', draft: 'live',
   intro: 'live', overtime: 'live', scoreboardAd: 'live', rlStatsScreen: 'live', background: 'live', deskFooter: 'live',
-  preshow: 'live', csgo: 'live', valorant: 'live', lol: 'live', apex: 'live', bestOf: 'live', teams: 'live',
-  teamPlayers: 'live', series: 'live', activePlayer: 'live', smash: 'live', match: 'live', myEvents: 'live', game: 'live',
-  chatCommands: 'live',
+  preshow: 'live', csgo: 'live', valorant: 'live', lol: 'live', apex: 'live', br: 'live', bestOf: 'live', teams: 'live',
+  // Settings + a change counter only — the vault RECORDS are fetched over /api/teamdb, never
+  // broadcast (they carry base64 logos and full roster history).
+  teamVault: 'live',
+  teamPlayers: 'live', series: 'live', activePlayer: 'live', smash: 'live', match: 'live', myEvents: 'library', game: 'live',
+  chatCommands: 'live', pulse: 'live',
   gameTeams: 'live', players: 'live', playerCache: 'live', currentGoal: 'live',
   spectatedPlayer: 'live', rlConnected: 'live', rlSpectatorUi: 'live', startgg: 'live',
-  challonge: 'live', nxgen: 'live', sheets: 'live', activeEvent: 'live', obs: 'live', vmix: 'live',
+  challonge: 'live', nxgen: 'live', liquipedia: 'live', faceit: 'live', sheets: 'live', activeEvent: 'live', obs: 'live', vmix: 'live',
   switcher: 'live', commercial: 'live', upcoming: 'live', standings: 'live', leagueStats: 'live', leagueLeaderboard: 'live', leagueCapture: 'live', ballchasing: 'live', teamRecord: 'live',
   autoTeamsFromGame: 'live', startggLeagueStandings: 'live', gfxActive: 'live', watchlist: 'live',
+  startggPlacements: 'live', startggCharacters: 'live',
   teamSpotlight: 'live', director: 'live', ai: 'live', encode: 'live', twitch: 'live',
   discord: 'live', flows: 'live', flowVars: 'live',
   // runtime-added state keys (mirrored in libraryData where noted)
   crew: 'live',            // also in libraryData — overlays read it live, panel backfills it
   socialPreset: 'live',    // also in libraryData
   awaitingKickoff: 'live', inReplay: 'live', otTriggered: 'live', rlBall: 'live', rlReplayLenMs: 'live',
-  autoSpectate: 'live', rlLastTouch: 'live',
+  rlLastTouch: 'live', rlPaused: 'live',
   scoreboard: 'live', showRoster: 'live', sponsorBanner: 'live', preshowPresets: 'live',
   playerProfilesVer: 'live',
   // derived keys buildLiveState() adds on top of state
-  games: 'live', vetoPools: 'live', vetoMeta: 'live', draftGames: 'live', theme: 'live',
+  games: 'live', vetoPools: 'live', vetoMeta: 'live', draftGames: 'live', theme: 'live', brMeta: 'live',
   activeOverlay: 'live', overlayLayout: 'live', presets: 'live', facecams: 'live',
   formattedTime: 'live', teamRecords: 'live', leagueStandings: 'live', flowFireLog: 'live', autoLog: 'live',
   overlays: 'live', sceneConfig: 'live'
@@ -4294,11 +4972,513 @@ function stripByTier(payload) {
   return payload;
 }
 
+// Points tables for the formats producers actually run. placementPoints[0] is 1st place; a field
+// deeper than the table scores 0. killPoints is per elimination; killCap 0 = uncapped.
+const BR_SCORING_PRESETS = {
+  // Fortnite 2026. Epic runs a DIFFERENT elim value per stage — 3 points in Groups/Heats, 4 in
+  // Finals — which is the single most-missed detail when a TO copies one table for a whole event,
+  // so the two stages ship as separate presets rather than one "FNCS" entry.
+  // The placement tables track the published 2026 Finals distribution; Epic re-tunes them between
+  // seasons, so they stay fully editable (any hand edit flips scoringPreset to 'custom').
+  fncsFinals: { label: 'Fortnite — FNCS Finals (4/elim)', placementPoints: [30, 26, 24, 22, 21, 20, 19, 18, 17, 16, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1], killPoints: 4, killCap: 0 },
+  fncsGroups: { label: 'Fortnite — FNCS Groups (3/elim)', placementPoints: [30, 26, 24, 22, 21, 20, 19, 18, 17, 16, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1], killPoints: 3, killCap: 0 },
+  fncsReload: { label: 'Fortnite — Reload path',          placementPoints: [25, 20, 16, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 1, 1, 1], killPoints: 3, killCap: 0 },
+  fncs:    { label: 'Fortnite (FNCS legacy)',  placementPoints: [40, 32, 28, 26, 24, 22, 20, 18, 16, 14, 12, 10, 8, 6, 4, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1], killPoints: 2, killCap: 0 },
+  fncsCup: { label: 'Fortnite (Victory Cup)', placementPoints: [30, 25, 22, 20, 18, 17, 16, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 1, 1, 1], killPoints: 1, killCap: 0 },
+  algs:    { label: 'Apex (ALGS)',            placementPoints: [12, 9, 7, 5, 4, 3, 3, 2, 2, 2, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0], killPoints: 1, killCap: 0 },
+  pubg:    { label: 'PUBG (Esports)',         placementPoints: [10, 6, 5, 4, 3, 2, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0], killPoints: 1, killCap: 0 },
+  warzone: { label: 'Warzone (Kill Race)',    placementPoints: [10, 8, 6, 5, 4, 3, 2, 1, 0, 0, 0, 0, 0, 0, 0, 0], killPoints: 1, killCap: 0 },
+  custom:  { label: 'Custom',                 placementPoints: [10, 8, 6, 5, 4, 3, 2, 1, 0, 0], killPoints: 1, killCap: 0 }
+};
+function brApplyScoringPreset(id) {
+  const p = BR_SCORING_PRESETS[id] || BR_SCORING_PRESETS.fncs;
+  state.br.scoringPreset = BR_SCORING_PRESETS[id] ? id : 'fncs';
+  state.br.scoring = { placementPoints: p.placementPoints.slice(), killPoints: p.killPoints, killCap: p.killCap };
+}
+
+// ─── Point matrices ──────────────────────────────────────────────────────────
+// FNCS is ONE format among many. Most orgs run their own points table, and it changes per
+// tournament and per season — so a matrix is a first-class, named, reusable object, not a
+// preset id baked into the series.
+//
+// Resolution order for what a cup actually scores under:
+//   cup.scoring (snapshot)  ←  cup.matrixId  ←  league.brMatrixId  ←  app default
+// The SNAPSHOT is what scores. Pointing a cup at a matrix copies that matrix in; editing the
+// matrix afterwards does NOT silently re-score cups already played (which would rewrite a
+// finished season's history) — the panel surfaces a "matrix changed — re-apply?" instead.
+//
+// Beyond placement + elims, the fields here are the ones real BR formats actually use:
+//   killCap      cap on scoring elims per match (common in kill-race formats)
+//   vrBonus      flat bonus for a Victory Royale on top of the 1st-place points
+//   minPlacement lowest placement that scores at all (0 = the table's own length decides)
+function brNewMatrixId() { return 'mx-' + Math.random().toString(36).slice(2, 9); }
+function sanitizePointMatrix(raw) {
+  const m = (raw && typeof raw === 'object') ? raw : {};
+  return {
+    id: String(m.id || '').trim() || brNewMatrixId(),
+    name: String(m.name || 'Point matrix').slice(0, 60),
+    notes: String(m.notes || '').slice(0, 200),
+    builtin: !!m.builtin,
+    placementPoints: (Array.isArray(m.placementPoints) ? m.placementPoints : [])
+      .slice(0, 150).map((n) => Math.max(0, Math.round(Number(n) || 0))),
+    killPoints: Math.max(0, Number(m.killPoints) || 0),
+    killCap: Math.max(0, parseInt(m.killCap, 10) || 0),
+    vrBonus: Math.max(0, Number(m.vrBonus) || 0)
+  };
+}
+// Built-ins are seeds a producer can copy and edit — never the only option, and never
+// silently imposed. Anything a real org runs that isn't here is a two-click custom matrix.
+function builtinMatrices() {
+  return Object.entries(BR_SCORING_PRESETS).map(([id, p]) => sanitizePointMatrix({
+    id: 'builtin-' + id, name: p.label, builtin: true,
+    placementPoints: p.placementPoints, killPoints: p.killPoints, killCap: p.killCap
+  }));
+}
+function allMatrices() {
+  const custom = Array.isArray(state.pointMatrices) ? state.pointMatrices : [];
+  return builtinMatrices().concat(custom);
+}
+function findMatrix(id) {
+  return allMatrices().find((m) => m.id === String(id || '')) || null;
+}
+// Turn a matrix into the scoring object a cup stores and scores against.
+function matrixToScoring(m) {
+  return {
+    placementPoints: (m.placementPoints || []).slice(),
+    killPoints: m.killPoints,
+    killCap: m.killCap,
+    vrBonus: m.vrBonus || 0
+  };
+}
+// Has the source matrix drifted from the cup's snapshot? Drives the "re-apply?" prompt.
+function matrixDiffersFromSnapshot(matrixId, scoring) {
+  const m = findMatrix(matrixId);
+  if (!m || !scoring) return false;
+  const a = matrixToScoring(m), b = scoring;
+  return JSON.stringify([a.placementPoints, a.killPoints, a.killCap, a.vrBonus])
+    !== JSON.stringify([b.placementPoints || [], b.killPoints || 0, b.killCap || 0, b.vrBonus || 0]);
+}
+// Split the two halves out, because the FNCS-style board shows them as separate columns
+// (PLCMNT PTS vs PTS) and a total alone can't be decomposed back into them after the fact.
+// Takes the scoring table explicitly so a league's PAST cups keep scoring under the table they
+// were played on — Epic re-tunes the points between stages and seasons, and silently re-scoring
+// week 1 with week 8's table would rewrite history every time the producer changes a preset.
+function brPointsSplitWith(sc, placement, elims, multiplier) {
+  sc = sc || {};
+  const table = Array.isArray(sc.placementPoints) ? sc.placementPoints : [];
+  const pl = Math.max(0, parseInt(placement, 10) || 0);
+  let place = (pl >= 1 && pl <= table.length) ? (Number(table[pl - 1]) || 0) : 0;
+  // Victory Royale bonus sits ON TOP of 1st-place points — several formats pay a flat bonus for
+  // the win rather than folding it into the table, and the two are not interchangeable once a
+  // tiebreak on placement points is involved.
+  if (pl === 1) place += Number(sc.vrBonus) || 0;
+  let k = Math.max(0, parseInt(elims, 10) || 0);
+  if (sc.killCap > 0) k = Math.min(k, sc.killCap);
+  let kill = k * (Number(sc.killPoints) || 0);
+  // Per-match multiplier (a double-points final is common). Applied to BOTH halves, and rounded
+  // once at the end so a x1.5 can't leak fractional points onto the board.
+  const mult = Number(multiplier);
+  if (mult > 0 && mult !== 1) { place = Math.round(place * mult); kill = Math.round(kill * mult); }
+  return { place, kill, total: place + kill };
+}
+// Per-match weighting, e.g. a double-points final. Keyed by match number.
+function brMultiplier(mults, match) {
+  const m = (mults && typeof mults === 'object') ? Number(mults[String(match)]) : 0;
+  return (m > 0) ? m : 1;
+}
+// The live series' own table — what the on-air board and the lobby panel score against.
+function brPointsSplit(placement, elims, match) {
+  return brPointsSplitWith(state.br.scoring, placement, elims, brMultiplier(state.br.matchMultipliers, match));
+}
+function brPointsFor(placement, elims, match) {
+  return brPointsSplit(placement, elims, match).total;
+}
+
+// ── Lobby helpers ────────────────────────────────────────────────────────────
+let _brUidC = 0;
+function brUid() { return 'br' + (Date.now().toString(36)) + (++_brUidC).toString(36); }
+// One shape for an entrant, applied on EVERY write path (manual add, start.gg pull, league send,
+// state restore). Without this the panel has to defend against four different half-shapes.
+function sanitizeBrEntrant(raw) {
+  const e = raw && typeof raw === 'object' ? raw : {};
+  const players = (Array.isArray(e.players) ? e.players : [])
+    .slice(0, 8)
+    .map((p) => {
+      const o = (p && typeof p === 'object') ? p : { name: p };
+      return { name: String(o.name || '').trim().slice(0, 60), epic: String(o.epic || '').trim().slice(0, 60) };
+    })
+    .filter((p) => p.name);
+  return {
+    id: String(e.id || '').trim() || brUid(),
+    name: String(e.name || '').trim().slice(0, 80),
+    seed: Math.max(0, parseInt(e.seed, 10) || 0),
+    players,
+    drop: String(e.drop || '').trim().slice(0, 40),   // POI id or free-text landing spot
+    note: String(e.note || '').trim().slice(0, 80),
+    out: !!e.out                                      // producer marked them eliminated this match
+  };
+}
+// ── League-backed BR series ──────────────────────────────────────────────────
+// A Fortnite circuit is many cups across a season (Week 1 Cup, Week 2 Cup, Major…), so the
+// season store is the LEAGUE, and each cup is one entry in lg.brSeries. state.br.leagueId +
+// seriesId bind the live board to one of those cups; while bound, state.br.results is a MIRROR
+// of that cup and every write lands in the league. Unbound, state.br.results is standalone —
+// which is what keeps the old sheet-fed Apex/PUBG path working exactly as before.
+function brNewSeries(name, matches) {
+  return {
+    id: srvLgUid('brs'),
+    name: String(name || 'Cup').slice(0, 60),
+    date: '',
+    matches: Math.max(1, Math.min(40, parseInt(matches, 10) || 6)),
+    matrixId: state.br.matrixId || '',
+    // Where this cup's results come in from. All three are peers — a producer might type week 1
+    // by hand, pull week 2 off the scorekeeper's sheet, and take week 3 off a live game feed.
+    source: 'manual',
+    sheetTab: '',
+    matchMultipliers: {},
+    scoringPreset: state.br.scoringPreset || 'fncsFinals',
+    // Snapshot the table, don't reference it — see brPointsSplitWith: a past cup must keep
+    // scoring under the table it was played on.
+    scoring: {
+      placementPoints: (state.br.scoring.placementPoints || []).slice(),
+      killPoints: state.br.scoring.killPoints,
+      killCap: state.br.scoring.killCap,
+      vrBonus: state.br.scoring.vrBonus || 0
+    },
+    results: []   // [{ match, team, placement, elims }] — same row shape as state.br.results
+  };
+}
+function sanitizeBrSeries(s) {
+  const o = (s && typeof s === 'object') ? s : {};
+  const sc = (o.scoring && typeof o.scoring === 'object') ? o.scoring : {};
+  return {
+    id: String(o.id || '').trim() || srvLgUid('brs'),
+    name: String(o.name || 'Cup').slice(0, 60),
+    date: String(o.date || '').slice(0, 30),
+    matches: Math.max(1, Math.min(40, parseInt(o.matches, 10) || 6)),
+    scoringPreset: String(o.scoringPreset || 'fncsFinals').slice(0, 30),
+    matrixId: String(o.matrixId || '').slice(0, 40),
+    source: ['manual', 'sheets', 'live'].includes(o.source) ? o.source : 'manual',
+    sheetTab: String(o.sheetTab || '').slice(0, 80),
+    matchMultipliers: (function () {
+      const src = (o.matchMultipliers && typeof o.matchMultipliers === 'object') ? o.matchMultipliers : {};
+      const out = {};
+      Object.keys(src).slice(0, 40).forEach((k) => {
+        const n = Math.max(1, Math.min(40, parseInt(k, 10) || 0));
+        const v = Number(src[k]);
+        if (n && v > 0 && v !== 1) out[String(n)] = Math.round(v * 100) / 100;
+      });
+      return out;
+    })(),
+    scoring: {
+      placementPoints: (Array.isArray(sc.placementPoints) ? sc.placementPoints : []).slice(0, 100).map((n) => Math.max(0, Math.round(Number(n) || 0))),
+      killPoints: Math.max(0, Number(sc.killPoints) || 0),
+      killCap: Math.max(0, parseInt(sc.killCap, 10) || 0),
+      vrBonus: Math.max(0, Number(sc.vrBonus) || 0)
+    },
+    results: (Array.isArray(o.results) ? o.results : []).slice(0, 4000).map((r) => ({
+      match: Math.max(1, parseInt(r && r.match, 10) || 1),
+      team: String((r && r.team) || '').trim().slice(0, 80),
+      placement: Math.max(0, parseInt(r && r.placement, 10) || 0),
+      elims: Math.max(0, parseInt(r && r.elims, 10) || 0)
+    })).filter((r) => r.team)
+  };
+}
+// Resolve whichever cup a write is aimed at: an explicit { leagueId, seriesId } (the league
+// page's grid, editing a cup that is NOT on air) or the live binding.
+function brResolveSeries(leagueId, seriesId) {
+  const lid = String(leagueId || state.br.leagueId || '');
+  const sid = String(seriesId || state.br.seriesId || '');
+  if (!lid || !sid) return null;
+  const lg = (state.leagues || []).find((l) => l && l.id === lid);
+  if (!lg) return null;
+  const series = (lg.brSeries || []).find((s) => s && s.id === sid);
+  return series ? { lg, series } : null;
+}
+function brBinding() { return brResolveSeries(state.br.leagueId, state.br.seriesId); }
+// Pull the bound cup into the live board. Scoring comes with it, so switching cups mid-show
+// switches the table too rather than scoring week 8 with week 1's numbers.
+function brSyncFromLeague() {
+  const b = brBinding();
+  if (!b) return false;
+  state.br.results = b.series.results.map((r) => ({ ...r }));
+  state.br.scoringPreset = b.series.scoringPreset;
+  state.br.scoring = {
+    placementPoints: (b.series.scoring.placementPoints || []).slice(),
+    killPoints: b.series.scoring.killPoints,
+    killCap: b.series.scoring.killCap,
+    vrBonus: b.series.scoring.vrBonus || 0
+  };
+  state.br.matrixId = b.series.matrixId || '';
+  state.br.matchMultipliers = { ...(b.series.matchMultipliers || {}) };
+  state.br.format.matches = b.series.matches;
+  // The cup owns where results come from; 'league' alone told the producer nothing useful.
+  state.br.source = b.series.source || 'manual';
+  // A sheets-sourced cup re-points the Sheets sync at its OWN tab, so week 1 and week 2 can be
+  // separate tabs of the same workbook and switching cups switches which one is read.
+  if (b.series.source === 'sheets' && b.series.sheetTab && state.sheets && state.sheets.maps) {
+    state.sheets.maps.brResults = { direction: 'import', tab: b.series.sheetTab };
+  }
+  return true;
+}
+// Season rollup, stored on the league as DERIVED data so the league page renders it without
+// reimplementing the scorer (which is exactly how a second, subtly-different points engine gets
+// born). Each cup scores under its own table, then the season totals them.
+function recomputeBrSeason(lg) {
+  if (!lg || !Array.isArray(lg.brSeries)) return;
+  const byTeam = new Map();
+  const perSeries = [];
+  for (const s of lg.brSeries) {
+    const cup = new Map();
+    for (const r of (s.results || [])) {
+      const name = String(r.team || '').trim();
+      if (!name) continue;
+      const key = name.toLowerCase();
+      const sp = brPointsSplitWith(s.scoring, r.placement, r.elims, brMultiplier(s.matchMultipliers, r.match));
+      for (const bag of [cup, byTeam]) {
+        let t = bag.get(key);
+        if (!t) { t = { name, pts: 0, placePts: 0, elimPts: 0, elims: 0, wins: 0, played: 0 }; bag.set(key, t); }
+        t.pts += sp.total; t.placePts += sp.place; t.elimPts += sp.kill;
+        t.elims += Math.max(0, parseInt(r.elims, 10) || 0);
+        t.played++;
+        if ((parseInt(r.placement, 10) || 0) === 1) t.wins++;
+      }
+    }
+    const order = (a, b) => (b.pts - a.pts) || (b.wins - a.wins) || (b.elims - a.elims) || a.name.localeCompare(b.name);
+    const rows = [...cup.values()].sort(order);
+    perSeries.push({
+      id: s.id, name: s.name, date: s.date, matches: s.matches,
+      played: (s.results || []).reduce((m, r) => Math.max(m, parseInt(r.match, 10) || 0), 0),
+      winner: (rows[0] && rows[0].name) || '',
+      points: Object.fromEntries(rows.map((t) => [t.name.toLowerCase(), t.pts]))
+    });
+  }
+  const order = (a, b) => (b.pts - a.pts) || (b.wins - a.wins) || (b.elims - a.elims) || a.name.localeCompare(b.name);
+  const season = [...byTeam.values()].sort(order).map((t, i) => ({ rank: i + 1, ...t }));
+  lg.brSeason = { standings: season, series: perSeries, updatedAt: Date.now() };
+
+  // standingsMode 'points' makes the season table the league's REAL standings, so everything
+  // already built on lg.standings — the Standings overlay's League source, the team-record line
+  // on the HUDs, the overview KPIs — works off placement points with no further wiring. Without
+  // this the season table would be an island the rest of the app can't see.
+  if (lg.standingsMode !== 'points') return;
+  const byName = new Map();
+  (lg.teams || []).forEach((tm) => {
+    const n = String((tm && tm.name) || '').trim().toLowerCase();
+    if (n && tm.id) byName.set(n, tm.id);
+  });
+  const rows = [];
+  for (const t of season) {
+    const teamId = byName.get(String(t.name || '').trim().toLowerCase());
+    if (!teamId) continue;   // a result for a team not on the roster stays out of the table
+    // Reuse the existing row so hand-set fields the producer added survive a recompute.
+    const prev = (lg.standings || []).find((s) => s && s.teamId === teamId) || {};
+    rows.push({
+      ...prev, teamId,
+      pts: t.pts,
+      // In a placement circuit "wins" is event victories; there is no opponent to have lost to,
+      // so losses stay 0 rather than being invented from events played.
+      w: t.wins, l: 0, t: 0,
+      gf: t.elims, ga: 0,
+      played: t.played
+    });
+  }
+  // Teams with no results yet still belong in the table, at the bottom on 0.
+  (lg.teams || []).forEach((tm) => {
+    if (tm && tm.id && !rows.some((r) => r.teamId === tm.id)) {
+      const prev = (lg.standings || []).find((s) => s && s.teamId === tm.id) || {};
+      rows.push({ ...prev, teamId: tm.id, pts: 0, w: 0, l: 0, t: 0, gf: 0, ga: 0, played: 0 });
+    }
+  });
+  lg.standings = rows;
+  // A League-sourced Standings board follows this league live, so recording a tournament result
+  // has to re-mirror it — otherwise the on-air board keeps showing the snapshot it was pushed
+  // with. Same reason the schedule path calls this; it's a no-op unless that source is active.
+  if (state.standings && state.standings.source === 'league' && state.standings.leagueId === lg.id) {
+    refreshLeagueStandingsMirror();
+  }
+}
+
+// Build an entrant name from its players when the source didn't give one — a duo of
+// "PETERBOT" + "POLLO" reads as "PETERBOT + POLLO", which is exactly how the FNCS board shows it.
+function brNameFromPlayers(players) {
+  return (players || []).map((p) => (p && p.name) || '').filter(Boolean).join(' + ');
+}
+// Merge entrants into the lobby WITHOUT losing producer edits: an entrant already in the field
+// (matched on name) keeps its drop POI, note and seed. Re-pulling the field after a roster change
+// is therefore safe mid-show, which is the whole reason the pull button exists.
+function brMergeLobby(incoming, { replace = false } = {}) {
+  const existing = replace ? [] : (Array.isArray(state.br.lobby) ? state.br.lobby : []);
+  const byName = new Map(existing.map((e) => [e.name.toLowerCase(), e]));
+  let added = 0, updated = 0;
+  for (const raw of (incoming || [])) {
+    const ent = sanitizeBrEntrant(raw);
+    if (!ent.name) continue;
+    const prev = byName.get(ent.name.toLowerCase());
+    if (prev) {
+      prev.players = ent.players.length ? ent.players : prev.players;
+      if (ent.seed) prev.seed = ent.seed;
+      updated++;
+    } else {
+      byName.set(ent.name.toLowerCase(), ent);
+      added++;
+    }
+  }
+  state.br.lobby = [...byName.values()].slice(0, 200);
+  return { added, updated, total: state.br.lobby.length };
+}
+// Derive standings / player board / last-match card from the raw results. Tiebreakers run in the
+// order the formats themselves use: points, then match wins, then total elims, then best finish,
+// then name - so two teams on equal points never swap places at random between renders.
+function computeBrStandings() {
+  const br = state.br;
+  const rows = Array.isArray(br.results) ? br.results : [];
+  const byTeam = new Map();
+  let maxMatch = 0;
+  const blank = (name) => ({ name, pts: 0, placePts: 0, elimPts: 0, elims: 0, wins: 0, best: null, played: 0, matches: {} });
+  // Seed the board with the WHOLE lobby so a 25-duo field is on screen at 0 points before match 1
+  // is even played — a board that only grows as results arrive is useless as a pre-show graphic.
+  // Untouched when there's no lobby (sheet-fed Apex/PUBG series), so those boards behave as before.
+  for (const e of (Array.isArray(br.lobby) ? br.lobby : [])) {
+    const name = ((e && e.name) || '').toString().trim();
+    if (name && !byTeam.has(name.toLowerCase())) byTeam.set(name.toLowerCase(), blank(name));
+  }
+  for (const r of rows) {
+    const name = ((r && r.team) || '').toString().trim();
+    if (!name) continue;
+    const m = Math.max(0, parseInt(r.match, 10) || 0);
+    if (m > maxMatch) maxMatch = m;
+    let t = byTeam.get(name.toLowerCase());
+    if (!t) { t = blank(name); byTeam.set(name.toLowerCase(), t); }
+    const placement = Math.max(0, parseInt(r.placement, 10) || 0);
+    const elims = Math.max(0, parseInt(r.elims, 10) || 0);
+    const sp = brPointsSplit(placement, elims, m);
+    t.pts += sp.total; t.placePts += sp.place; t.elimPts += sp.kill;
+    t.elims += elims; t.played++;
+    if (placement === 1) t.wins++;
+    if (placement > 0 && (t.best === null || placement < t.best)) t.best = placement;
+    t.matches[m] = { placement, elims, pts: sp.total, placePts: sp.place };
+  }
+  const order = (a, b) => (b.pts - a.pts) || (b.wins - a.wins) || (b.elims - a.elims)
+    || ((a.best || 999) - (b.best || 999)) || a.name.localeCompare(b.name);
+  // Standing BEFORE the latest match, so the board can show movement (up 2 / down 1) - the thing
+  // that makes a BR leaderboard readable at a glance.
+  const prev = [...byTeam.values()].map((t) => {
+    let pts = 0, elims = 0, wins = 0, best = null;
+    for (const [m, g] of Object.entries(t.matches)) {
+      if (Number(m) >= maxMatch) continue;
+      pts += g.pts; elims += g.elims; if (g.placement === 1) wins++;
+      if (g.placement > 0 && (best === null || g.placement < best)) best = g.placement;
+    }
+    return { name: t.name, pts, elims, wins, best };
+  }).sort(order);
+  const prevRank = {}; prev.forEach((t, i) => { prevRank[t.name.toLowerCase()] = i + 1; });
+
+  // Lobby metadata (players, seed, drop POI) keyed by entrant name, so an overlay can render the
+  // two gamertags of a duo without every board reimplementing the lookup.
+  const lobbyByName = new Map();
+  for (const e of (Array.isArray(br.lobby) ? br.lobby : [])) {
+    const n = ((e && e.name) || '').toString().trim().toLowerCase();
+    if (n) lobbyByName.set(n, e);
+  }
+  br.standings = [...byTeam.values()].sort(order).map((t, i) => {
+    const key = t.name.toLowerCase();
+    const was = prevRank[key] || 0;
+    const ent = lobbyByName.get(key) || null;
+    return {
+      rank: i + 1, name: t.name, pts: t.pts, elims: t.elims, wins: t.wins,
+      // wins doubles as VRS (Victory RoyaleS) on the Fortnite board — same number, and splitting
+      // placement points out lets that board show PLCMNT PTS next to the total.
+      placePts: t.placePts, elimPts: t.elimPts,
+      best: t.best, played: t.played,
+      players: ent ? (ent.players || []).map((p) => p.name).filter(Boolean) : [],
+      seed: ent ? (ent.seed || 0) : 0,
+      drop: ent ? (ent.drop || '') : '',
+      move: (was && t.played > 0) ? (was - (i + 1)) : 0,   // +ve = climbed
+      matches: t.matches
+    };
+  });
+
+  // Player elim leaderboard (kept separate: a solo event has no team rows at all).
+  const byPlayer = new Map();
+  for (const r of (Array.isArray(br.playerResults) ? br.playerResults : [])) {
+    const name = ((r && r.player) || '').toString().trim();
+    if (!name) continue;
+    const key = name.toLowerCase();
+    let pl = byPlayer.get(key);
+    if (!pl) { pl = { name, team: (r.team || '').toString(), elims: 0, played: 0 }; byPlayer.set(key, pl); }
+    pl.elims += Math.max(0, parseInt(r.elims, 10) || 0);
+    pl.played++;
+    if (!pl.team && r.team) pl.team = r.team.toString();
+  }
+  br.playerBoard = [...byPlayer.values()]
+    .sort((a, b) => (b.elims - a.elims) || a.name.localeCompare(b.name))
+    .map((pl, i) => ({ rank: i + 1, ...pl }));
+
+  // Most recent match, as its own result card.
+  if (maxMatch > 0) {
+    const inMatch = rows.filter((r) => (parseInt(r.match, 10) || 0) === maxMatch)
+      .map((r) => {
+        const sp = brPointsSplit(r.placement, r.elims, maxMatch);
+        const ent = lobbyByName.get((r.team || '').toString().trim().toLowerCase()) || null;
+        return {
+          team: (r.team || '').toString(),
+          placement: Math.max(0, parseInt(r.placement, 10) || 0),
+          elims: Math.max(0, parseInt(r.elims, 10) || 0),
+          pts: sp.total, placePts: sp.place,
+          players: ent ? (ent.players || []).map((p) => p.name).filter(Boolean) : []
+        };
+      })
+      .sort((a, b) => (a.placement || 999) - (b.placement || 999));
+    br.lastMatch = { match: maxMatch, results: inMatch, winner: (inMatch[0] && inMatch[0].placement === 1) ? inMatch[0].team : '' };
+  } else {
+    br.lastMatch = null;
+  }
+  br.lastUpdate = Date.now();
+  // The ticker reads a prebuilt line list, so refresh it here rather than making every caller
+  // remember to (results arrive from three different places).
+  if (state.ticker && state.ticker.source === 'br') state.ticker.feed = brTickerFeed();
+}
+// Standings as ticker lines: "1. TEAM 84 (12 elims)". Capped so one long field can't turn the
+// ticker into a five-minute loop.
+function brTickerFeed() {
+  return (state.br.standings || []).slice(0, 24).map((t) =>
+    `${t.rank}. ${(t.name || '').toUpperCase()}  ${t.pts} PTS${t.elims ? ` (${t.elims} elims)` : ''}`);
+}
+
+// Fresh installs never run the restore path below, so seed the default table at load time; a
+// saved series overwrites it during loadAppState().
+brApplyScoringPreset('fncsFinals');
+
 function buildLiveState() {
   const publicStartgg = { ...state.startgg, hasToken: !!startggApiToken };
   const publicChallonge = { ...state.challonge, hasKey: !!challongeApiKey };
   const publicNxgen = { ...state.nxgen, hasKey: !!nxgenApiKey };
+  // Deliberately NOT a spread of state.liquipedia. The raw pulls (standings/rankings/squad/
+  // tournament) are working data the server uses to fill a graphic on request — putting those
+  // arrays on the live broadcast would ship them to every overlay on every tick, which is exactly
+  // the payload bloat the LIVE/LIBRARY split exists to prevent. Overlays need none of it; the
+  // panel needs the settings, the budget and a count of what is ready to apply.
+  const publicLiquipedia = {
+    enabled: state.liquipedia.enabled,
+    wiki: state.liquipedia.wiki,
+    contact: state.liquipedia.contact,
+    hasKey: !!liquipediaApiKey,
+    budgetRemaining: state.liquipedia.budgetRemaining,
+    budgetResetInMs: state.liquipedia.budgetResetInMs,
+    lastFetchAt: state.liquipedia.lastFetchAt,
+    lastError: state.liquipedia.lastError,
+    attribution: state.liquipedia.attribution,
+    counts: {
+      standings: (state.liquipedia.standings || []).length,
+      rankings: (state.liquipedia.rankings || []).length,
+      squad: (state.liquipedia.squad || []).length,
+      tournament: state.liquipedia.tournament ? 1 : 0
+    }
+  };
+  const publicFaceit = { ...state.faceit, hasKey: !!faceitApiKey };
   const publicSheets = { ...state.sheets, hasKey: !!sheetsServiceAccount };
+  const publicBedwars = { ...state.bedwars, hasToken: !!bedwarsToken };
   const publicBallchasing = { ...state.ballchasing, hasKey: !!ballchasingApiKey };
   const publicObs = { ...state.obs, hasPassword: !!obsPassword };
   const publicDiscord = {
@@ -4327,9 +5507,49 @@ function buildLiveState() {
     startgg: publicStartgg,
     challonge: publicChallonge,
     nxgen: publicNxgen,
+    liquipedia: publicLiquipedia,
+    faceit: publicFaceit,
     sheets: publicSheets,
+    bedwars: publicBedwars,   // token stripped; only hasToken travels
+    lanHost: lanHost,        // for "point your Minecraft server here" style hints
     ballchasing: publicBallchasing,
+    // Desk Show caster picks: the stored pick snapshots the team LOGO (so the badge survives a
+    // rename/delete), but that snapshot is full-size base64 — 50KB+ riding in every single live
+    // broadcast for an image no overlay draws (preshow.html renders the NAME only). Ship the name
+    // live; the control panel's pick chip resolves the logo out of its own team library.
+    preshow: (function () {
+      const pre = state.preshow || {};
+      if (!Array.isArray(pre.predictions) || !pre.predictions.some((p) => p && p.logo)) return pre;
+      return { ...pre, predictions: pre.predictions.map((p) => (p && p.logo) ? { ...p, logo: '' } : p) };
+    })(),
     activeEvent: state.activeEvent,
+    // BR registries the panel and the drop-map overlay need to render their pickers. Static
+    // tables (a few hundred bytes), so they ride live rather than needing a library round-trip —
+    // and the POI set is resolved server-side so producer edits in gameConfigs win everywhere at
+    // once instead of each surface reimplementing the override.
+    brMeta: {
+      lobbyGames: BR_LOBBY_GAMES,
+      modes: brModesFor(state.br.game),
+      formats: BR_TEAM_FORMATS,
+      mode: brModeMeta(state.br.game, state.br.mode),
+      // `poi` = the set for the mode currently being played (what the overlay draws).
+      // `poiSets` = EVERY island for this game, so the POI editor can load one the producer
+      // isn't currently playing (updating the Reload island mid-BR-series is normal prep work).
+      poi: brPoiSet(state.br.game, state.br.mode),
+      // Built-ins + the producer's own, already resolved — the panel renders one list and never
+      // has to know which half a matrix came from.
+      matrices: allMatrices(),
+      // Does the live cup's snapshot still match the matrix it came from? Drives the
+      // "matrix changed — re-apply?" prompt instead of silently re-scoring played matches.
+      matrixDrift: matrixDiffersFromSnapshot(state.br.matrixId, state.br.scoring),
+      poiSets: (function () {
+        const out = {};
+        Object.keys(BR_POI_SETS[state.br.game] || {}).forEach((k) => {
+          out[k] = brPoiSet(state.br.game, k === 'reload' ? 'reload' : 'br-build');
+        });
+        return out;
+      })()
+    },
     obs: publicObs,
     discord: publicDiscord,
     games: (function() {
@@ -4387,6 +5607,14 @@ let leaguesVer = 0;
 let clipsVer = 0;
 let eventOpsVer = 0;   // bumped on Event Ops roster/seed mutations (library-tier re-send)
 let questionsVer = 0;  // bumped on every Q&A queue mutation (library-tier re-send)
+// My Events (saved tournaments + their full entrant rosters) is control-panel-only data — the
+// seeding studio and Events page read it, no overlay ever does — but it sat in the LIVE tier, so
+// 244KB of rosters rode along on EVERY broadcast to every OBS browser source. It's library-tier
+// now; this counter is what tells librarySig() it moved. touchMyEvents() must be called by anything
+// that mutates state.myEvents (the sig also folds in the entry count and latest sync stamp, so an
+// add/remove/refresh still re-sends even if a future edit path forgets to call it).
+let myEventsVer = 0;
+function touchMyEvents() { myEventsVer++; }
 function upsertPlayerProfile(gamerTag, patch) {
   const key = (gamerTag || '').trim().toLowerCase();
   if (!key || !patch) return;
@@ -4446,9 +5674,40 @@ function libraryData() {
     leagues: state.leagues || [],   // league rosters/standings (base64 team logos) — control panel only
     clips: state.clips || null,     // clip/playlist library metadata — control panel only (live pushes go via clips_update)
     eventOps: state.eventOps || { rows: [], seeds: [] },   // Event Ops CSV roster + true seeds — control panel only
+    myEvents: state.myEvents || [],   // saved tournaments + entrant rosters — seeding studio / Events page only
     questions: state.questions || { list: [], settings: {} },   // Q&A mailbag — control panel only
     questionSources: questionStore.SOURCES   // source keys/labels/dots, so the panel picker never drifts from the store
   };
+}
+// Per-key library signatures. The library bundle runs 1.5-5MB (brand kits, player profiles,
+// leagues, bracket, replay thumbnails), and it used to be all-or-nothing: ONE key changing
+// re-sent EVERY key to EVERY client. The replay monitor's own program field ticks on its own,
+// so a measured idle show was re-blasting the whole bundle to every browser source several
+// times a minute — that is what made scenes (Desk Show especially) stutter. Clients already
+// backfill library keys they don't receive (scene-base BACKFILL_KEYS / applyState in app.js)
+// and new clients get the whole bundle from getFullState() on connect, so sending only the
+// keys that actually changed is safe.
+let _libKeySigs = {};
+function _libKeySig(v) {
+  try {
+    // Collapse long strings to their length — never stringify the base64 itself (this runs
+    // whenever the library changes, and one kit's logos alone are megabytes).
+    const raw = JSON.stringify(v, (k, x) => (typeof x === 'string' && x.length > 200) ? ('len' + x.length) : x) || '';
+    return raw.length + ':' + _imgHash(raw);
+  } catch (e) {
+    return 'nosig:' + Date.now();   // unserializable → treat as changed rather than skip it
+  }
+}
+function libraryDelta() {
+  const full = libraryData();
+  const out = {};
+  for (const k of Object.keys(full)) {
+    const sig = _libKeySig(full[k]);
+    if (_libKeySigs[k] === sig) continue;
+    _libKeySigs[k] = sig;
+    out[k] = full[k];
+  }
+  return out;
 }
 // Static config that never changes after startup → sent on connect only.
 function staticData() {
@@ -4481,6 +5740,10 @@ function librarySig() {
     + '|brk:' + lite(state.bracket) + '|rpl:' + lite(state.replay) + '|crew:' + (state.crew || []).length
     + '|pp:' + playerProfilesVer + '|bk:' + brandKitsVer + '|st:' + savedTeamsVer
     + '|lgv:' + leaguesVer + '|clv:' + clipsVer + '|eov:' + eventOpsVer + '|qv:' + questionsVer
+    // Belt AND braces: the explicit counter plus cheap content facts, so a missed touchMyEvents()
+    // still can't strand the panel on a stale roster.
+    + '|mev:' + myEventsVer + ':' + (state.myEvents || []).length
+    + ':' + (state.myEvents || []).reduce((a, e) => a + ((e && e.lastSync) || 0), 0)
     // Global accent fallback lives in library brand now (stripped from live) — re-send on change.
     + '|gac:' + ((state.brand && state.brand.color) || '') + ':' + ((state.brand && state.brand.accent) || '')
     + '|sp:' + (sp.bgImageUrl ? sp.bgImageUrl.length : 0) + ':' + (sp.presentedByEnabled ? 1 : 0) + ':' + (sp.bgStyle || '');
@@ -4757,6 +6020,13 @@ function migrateLeague(lg) {
   if (!Array.isArray(lg.standings)) lg.standings = [];
   if (!Array.isArray(lg.schedule)) lg.schedule = [];
   if (!Array.isArray(lg.seasonHistory)) lg.seasonHistory = [];
+  // Battle-royale cups. A Fortnite circuit is many cups across a season, so the league holds
+  // them all and lg.brSeason is the derived rollup the league page renders (see
+  // recomputeBrSeason — one scorer, never a second implementation on the client).
+  // Season default matrix — a new cup in this league starts from it. Per-cup override wins.
+  if (typeof lg.brMatrixId !== 'string') lg.brMatrixId = '';
+  if (!Array.isArray(lg.brSeries)) lg.brSeries = [];
+  lg.brSeries = lg.brSeries.slice(0, 60).map(sanitizeBrSeries);
   if (!lg.stats || typeof lg.stats !== 'object' || Array.isArray(lg.stats)) lg.stats = {};   // per-team in-game stats (Stats tab)
   // Ballchasing.com — Rocket League replay stats (Ballchasing tab). A SEPARATE sink from lg.stats
   // above: never overwrites the producer's manual entry. lg.ballchasing.groupId links this league
@@ -4777,6 +6047,71 @@ function migrateLeague(lg) {
   lg.teams.forEach((tm) => { if (tm && !tm.id) tm.id = srvLgUid('tm'); });
   lg.schedule.forEach((m) => { if (m && !Array.isArray(m.games)) m.games = []; });
   return capLeagueLogo(lg);
+}
+
+// ── League → standings board mirror ──────────────────────────────────────────
+// The Standings graphic's "League" source used to be a one-shot snapshot: the panel built rows at
+// push time and the board then showed frozen numbers, so OUR points went stale on air the moment a
+// result was recorded. This recomputes state.standings.rows from the live league whenever the
+// league data changes, exactly the way the panel builds them (buildLeagueStandingsRows), including
+// resolving a team REFERENCE ({teamName}) against savedTeams for its name/logo.
+function resolveLeagueTeam(tm) {
+  const key = ((tm && (tm.teamName || tm.name)) || '').trim().toLowerCase();
+  const saved = key ? savedTeams.find((s) => (s.name || '').trim().toLowerCase() === key) : null;
+  if (saved) return { name: saved.name, logo: saved.logo || null };
+  return { name: (tm && (tm.name || tm.teamName)) || 'Team', logo: (tm && tm.logo) || null };
+}
+
+function buildLeagueStandingsRows(leagueId) {
+  const lg = leagueId && (state.leagues || []).find((l) => l.id === leagueId);
+  if (!lg) return null;
+  const byId = {};
+  (lg.standings || []).forEach((s) => { if (s && s.teamId) byId[s.teamId] = s; });
+  const teamsById = {};
+  (lg.teams || []).forEach((t) => { if (t && t.id) teamsById[t.id] = t; });
+  // Stored standings order wins (it respects a manual drag); otherwise sort by points.
+  const ordered = (lg.standings && lg.standings.length)
+    ? lg.standings.map((s) => teamsById[s.teamId]).filter(Boolean)
+    : (lg.teams || []).slice().sort((a, b) => ((byId[b.id] || {}).pts || 0) - ((byId[a.id] || {}).pts || 0));
+  // Divisions / conferences. The league model already carries them (lg.divisions + team.divisionId)
+  // and the Leagues tab groups by them, but the mirror flattened everything into one table — so a
+  // two-conference league could never be put on air as the two-column board every league broadcast
+  // uses. Rank is per DIVISION when they exist (each conference counts 1..n), which is also what
+  // makes the playoff cut mean anything.
+  const divs = Array.isArray(lg.divisions) ? lg.divisions : [];
+  const divName = (tm) => {
+    const d = divs.find((x) => x && x.id && x.id === (tm && tm.divisionId));
+    return d ? d.name : '';
+  };
+  const playoffN = Number(lg.playoffN) || 0;
+  const seen = {};
+  return ordered.map((tm, i) => {
+    const s = byId[tm.id] || {};
+    const r = resolveLeagueTeam(tm);
+    const division = divs.length ? (divName(tm) || 'Unassigned') : '';
+    // Placement counts within the division; with no divisions it is the flat table position.
+    const rank = division ? (seen[division] = (seen[division] || 0) + 1) : i + 1;
+    return {
+      placement: rank, name: r.name, logo: r.logo,
+      wins: s.w || 0, losses: s.l || 0, points: s.pts || 0,
+      division,
+      qualified: playoffN > 0 && rank <= playoffN,
+    };
+  });
+}
+
+/** Re-mirror the followed league into the standings board. No-op unless the League source is active. */
+function refreshLeagueStandingsMirror() {
+  if ((state.standings.source || '') !== 'league') return false;
+  const rows = buildLeagueStandingsRows(state.standings.leagueId);
+  if (!rows) return false;
+  // division/qualified ride in the signature too — without them, moving a team between conferences
+  // or changing the playoff cut would never reach the overlay.
+  const key = (r) => [r.placement, r.name, r.wins, r.losses, r.points, r.division, r.qualified];
+  const sig = JSON.stringify(rows.map(key));
+  const prev = JSON.stringify((state.standings.rows || []).map(key));
+  state.standings.rows = rows;
+  return sig !== prev;
 }
 
 // ── Ballchasing group → league stats aggregation ─────────────────────────────
@@ -5206,6 +6541,32 @@ function finalizeAndResetSeries() {
   if (state.owMatch) state.owMatch.mapWinners = [];
 }
 
+// Which Smash an event is, derived from start.gg's event/videogame names ("Ultimate Singles",
+// "Melee Doubles", "Smash 64"). Written to state.smash.title as the label the boards print under
+// the centre medallion. Doubles is DETECTED but not yet laid out - the boards are singles-only
+// for now, so a doubles event still labels itself honestly instead of silently rendering as 1v1.
+const SMASH_TITLES = [
+  [/\bultimate\b|\bssbu\b/i, 'Ultimate'],
+  [/\bmelee\b|\bssbm\b/i, 'Melee'],
+  [/\bbrawl\b/i, 'Brawl'],
+  [/\bproject\s*\+?m\b|\bp\+\b/i, 'Project M'],
+  [/\b64\b|\bssb64\b/i, 'Smash 64'],
+  [/\brivals\b/i, 'Rivals']
+];
+function applySmashTitleFromEvent(event) {
+  if (!event) return;
+  const evName = String((event && event.name) || '');
+  const gameName = String((event && event.videogame && event.videogame.name) || '');
+  const hay = gameName + ' ' + evName;
+  const hit = SMASH_TITLES.find(([re]) => re.test(hay));
+  const format = /\bdoubles\b|\b2v2\b|\bteams?\b|\bcrew\b/i.test(evName) ? 'Doubles' : 'Singles';
+  const title = [hit ? hit[1] : '', format].filter(Boolean).join(' ');
+  if (!title) return;
+  state.smash.startggTitle = title;
+  // Only auto-fill while the producer has not typed their own label.
+  if (!state.smash.titleManual) state.smash.title = title;
+}
+
 async function syncStartGgSet(setId) {
   if (!startggApiToken) {
     throw new Error('Missing Start.gg API token');
@@ -5220,10 +6581,13 @@ async function syncStartGgSet(setId) {
       set(id: $setId) {
         id
         fullRoundText
+        event { name videogame { name } }
         slots {
           entrant {
             id
             name
+            initialSeedNum
+            participants { gamerTag prefix player { id prefix user { slug name images { url type } authorizations { type externalUsername } location { country } } } }
             team { images { url type } }
           }
         }
@@ -5258,6 +6622,17 @@ async function syncStartGgSet(setId) {
 
   state.teams.blue.name = (blueEntrant?.name || 'TBD').toUpperCase();
   state.teams.orange.name = (orangeEntrant?.name || 'TBD').toUpperCase();
+  // Seed travels with the entrant, not the roster - a scoreboard chip ("SEED 13") is the one
+  // piece of bracket context start.gg gives us for free on every push.
+  state.teams.blue.seed = Number(blueEntrant?.initialSeedNum) > 0 ? Number(blueEntrant.initialSeedNum) : 0;
+  state.teams.orange.seed = Number(orangeEntrant?.initialSeedNum) > 0 ? Number(orangeEntrant.initialSeedNum) : 0;
+  // Entrant id rides along so the reported-character lookup can key on it exactly instead of
+  // matching entrant NAMES, which sponsor prefixes and tag changes make unreliable.
+  state.teams.blue.entrantId = String(blueEntrant?.id || '');
+  state.teams.orange.entrantId = String(orangeEntrant?.id || '');
+  // Which Smash this is, straight off the event ("Ultimate Singles", "Melee Doubles"). Producers
+  // never had to type it and the boards were showing nothing; a manual set_smash_title still wins.
+  applySmashTitleFromEvent(set.event);
 
   // Auto-update the overlay round/stage label from this set's bracket round (e.g. "Winners Finals"),
   // so it tracks the teams whenever a set is pushed onto the overlay (auto-follow or manual).
@@ -5308,7 +6683,22 @@ async function syncStartGgSet(setId) {
         state.teams[side].players = src.players;
         gotRealRoster = true;
       }
+      if (!state.teams[side].seed && Number(src.seed) > 0) state.teams[side].seed = Number(src.seed);
+      if (src.org) state.teams[side].org = src.org;
     }
+    // Nothing in the library for this entrant - build the roster from the SET's own participants.
+    // Pushing a set for an event that was never imported used to land a bare team name on the
+    // scoreboard: no gamertag, no country flag, no org, no socials.
+    if (!state.teams[side].players.length && ent && (ent.participants || []).length) {
+      const live = (ent.participants || []).map(startggPlayerFromParticipant).filter((x) => x.name);
+      if (live.length) {
+        state.teams[side].players = live;
+        gotRealRoster = true;
+        const org = entrantOrgName(live);
+        if (org) state.teams[side].org = org;
+      }
+    }
+    if (!state.teams[side].org) state.teams[side].org = '';
     if (!state.teams[side].logo) {
       const logo = pickEntrantLogo(ent) || logoForTeamName(state.teams[side].name);
       if (logo) state.teams[side].logo = logo;
@@ -5334,8 +6724,12 @@ async function syncStartGgSet(setId) {
     const combinedPlayers = [...bluePlayers, ...orangePlayers];
     if (looksLikeNameList && combinedPlayers.length > 0) {
       state.players = combinedPlayers;
-      state.playerCache = {};
+      // Same rule as rebuildCombinedPlayers: a start.gg re-sync must never wipe stats out from
+      // under a live game. Auto-follow re-syncs the on-air set while the match is being played.
+      if (!rlMatchInProgress()) state.playerCache = {};
       combinedPlayers.forEach((p) => {
+        const prev = state.playerCache[p.name];
+        if (prev && RL_CUMULATIVE_STATS.some((k) => (Number(prev[k]) || 0) > 0)) return;
         state.playerCache[p.name] = { ...p };
       });
     }
@@ -5368,9 +6762,26 @@ function rebuildCombinedPlayers() {
   const combined = [...blue, ...orange];
   if (combined.length) {
     state.players = combined;
-    state.playerCache = {};
-    combined.forEach((p) => { state.playerCache[p.name] = { ...p }; });
+    // Rebuilding the roster used to WIPE playerCache and refill it with zero-stat rows. Fired
+    // mid-match (a stream-queue autofill, an auto-follow re-sync, a roster edit) that erased every
+    // stat the live game had accumulated, and the post-game board came up empty. Keep any cached
+    // player who already has real stats; only seed rows for names we've never seen.
+    if (!rlMatchInProgress()) state.playerCache = {};
+    combined.forEach((p) => {
+      const prev = state.playerCache[p.name];
+      if (prev && RL_CUMULATIVE_STATS.some((k) => (Number(prev[k]) || 0) > 0)) return;   // keep live stats
+      state.playerCache[p.name] = { ...p };
+    });
   }
+}
+
+// True while an RL game is actually being played/spectated — used to protect live match data from
+// out-of-band roster rebuilds. Deliberately broad: any accumulated stat counts as "in progress".
+function rlMatchInProgress() {
+  if (!state.rlConnected) return false;
+  if (state.inReplay || state.awaitingKickoff) return true;
+  return Object.values(state.playerCache || {})
+    .some((p) => RL_CUMULATIVE_STATS.some((k) => (Number(p && p[k]) || 0) > 0));
 }
 
 function mapStartggSetToFeedItem(set, extra) {
@@ -5468,8 +6879,31 @@ function buildStartggMatchFeed(queue, recentSets) {
     if (item.status === 'live') live.push(item);
     else if (item.status === 'done') done.push(item);
   };
-  // Live = sets on a stream (queue idx-0) + every in-progress (state 2) set in the event.
-  (queue || []).forEach((q) => consider(mapStartggSetToFeedItem(q, { live: q.live, stream: q.stream })));
+  // Live = every in-progress (state 2) set, on a stream or not. The producer's actual on-air match
+  // is force-added by ensureOnAirLiveInFeed() even when the TO never flipped it to in-progress.
+  // Scope to the ACTIVE event: a start.gg tournament shares its streams across multiple events, so the
+  // tournament-wide queue carried sibling events' live sets into the ticker. Skip a queue item only
+  // when we KNOW its event (q.eventSlug resolved) and it differs from the active one — if either is
+  // unknown/blank, fall through and include it (never blank the ticker on a mapping miss).
+  //
+  // On an UNATTRIBUTED set (q.eventSlug null) the old rule was "include it" — but that is what let
+  // sibling events onto the ticker, because a miss is silent. Split the two cases properly:
+  //   • the phase→event map RESOLVED for this poll  → we can attribute confidently, so a set we
+  //     still can't place is not ours: drop it.
+  //   • the map came back EMPTY (query shape changed, permissions) → we know nothing, so fall
+  //     through and show everything rather than blanking the ticker mid-show.
+  const _activeEvSlug = (state.startgg.eventSlug || '').trim().toLowerCase();
+  const _canAttribute = _activeEvSlug && (queue || []).some((q) => q && q.eventSlug);
+  let _dropped = 0;
+  (queue || []).forEach((q) => {
+    if (_activeEvSlug) {
+      const qs = String(q.eventSlug || '').trim().toLowerCase();
+      if (qs && qs !== _activeEvSlug) { _dropped++; return; }          // known, and not this event
+      if (!qs && _canAttribute) { _dropped++; return; }                // unattributable while the map works
+    }
+    consider(mapStartggSetToFeedItem(q, { live: q.live, stream: q.stream }));
+  });
+  if (_dropped) console.log(`[start.gg] ticker: kept ${(queue || []).length - _dropped}/${(queue || []).length} queued set(s) for ${_activeEvSlug} (dropped ${_dropped} from other events)`);
   (recentSets || []).forEach((s) => {
     const st = Number(s.state);
     if (st === 2 || st === 3) consider(mapStartggSetToFeedItem(s));   // 2 → live, 3 → done
@@ -5582,7 +7016,40 @@ async function fetchRecentEventSets(client, eventSlug) {
 
 // Fetch the tournament's STREAM QUEUE — the sets a TO has marked for each stream.
 // The first set in a stream's queue is the one currently on that stream.
+// Drop a ticker feed that was built for a DIFFERENT event than the one now active. The feed is
+// rewritten only by a successful stream-queue poll, so a switch followed by a failed poll (rate
+// limit, network, a tournament with no stream queue) otherwise left the old event's matches
+// scrolling on air indefinitely. Cheap enough to call before every poll.
+function pruneStaleMatchFeed() {
+  const sg = state.startgg;
+  if (!sg) return false;
+  const active = (sg.eventSlug || '').trim().toLowerCase();
+  const built = (sg.matchFeedEventSlug || '').trim().toLowerCase();
+  if (!active || !built || built === active) return false;
+  console.log(`[start.gg] ticker feed was built for ${built} but the active event is ${active} — clearing it`);
+  sg.matchFeed = [];
+  sg.queue = [];
+  sg.streams = [];
+  sg.matchFeedEventSlug = '';
+  if (state.ticker.source === 'startgg') state.ticker.feed = [];
+  if (state.upcoming.source === 'event') state.upcoming.matches = [];
+  return true;
+}
+
+
+// Pick the set auto-follow should put on air. When the producer has SELECTED a stream (a
+// championship runs several stations at once), never fall back to a different one — putting
+// station 2's match on station 1's broadcast is worse than putting nothing on. The
+// live → cued-up fallback still applies, but only WITHIN the chosen stream. With no stream
+// selected ('' = any), behaviour is unchanged: first live set anywhere, else first cued up.
+function pickAutoFollowSet(queue, wantStream) {
+  const q = Array.isArray(queue) ? queue : [];
+  const mine = wantStream ? q.filter((s) => s && s.stream === wantStream) : q;
+  return mine.find((s) => s.live) || mine.find((s) => s.onStream) || null;
+}
+
 async function fetchStreamQueue(tournamentSlug) {
+  pruneStaleMatchFeed();   // never carry the previous event's feed into this poll
   if (!startggApiToken) throw new Error('Missing Start.gg API token (set it in Settings)');
   const slug = (tournamentSlug || state.startgg.tournamentSlug || '').trim()
     .replace(/^https?:\/\/(www\.)?start\.gg\//i, '')
@@ -5594,6 +7061,9 @@ async function fetchStreamQueue(tournamentSlug) {
     query StreamQueue($slug: String!) {
       tournament(slug: $slug) {
         id
+        # Stage order comes from the event's own phases[] LISTING order, not phaseOrder — see
+        # _phaseRank below and the matching note in buildPhases().
+        events { id slug phases { id } }
         streamQueue {
           stream { streamName }
           sets {
@@ -5614,6 +7084,13 @@ async function fetchStreamQueue(tournamentSlug) {
     }`;
   const res = await client.request(query, { slug: `tournament/${slug}` });
   const sq = res?.tournament?.streamQueue || [];
+  // Map each phase → its event slug, so the tournament-wide stream queue can be scoped to the ACTIVE
+  // event. Sibling events (e.g. Singles + Doubles) share streams, and their live sets were leaking
+  // into the ticker as the "wrong event". Used by buildStartggMatchFeed via each queue item's eventSlug.
+  const _phaseToEventSlug = {};
+  (res?.tournament?.events || []).forEach((ev) => (ev?.phases || []).forEach((ph) => {
+    if (ph?.id != null) _phaseToEventSlug[String(ph.id)] = ev.slug || null;
+  }));
 
   // start.gg returns a stream queue in bracket-GENERATION order (all winners rounds, then the
   // named ones, then losers, then grand finals), which reads as scrambled to a producer — e.g.
@@ -5623,7 +7100,24 @@ async function fetchStreamQueue(tournamentSlug) {
   // fullRoundText alone can't tell you where "Winners Quarter-Final" sits without knowing N.
   // Losers round L is played right after winners round floor(L/2)+1, which reproduces the real
   // sequence: W1 · L1 · W2 · L2 · L3 · W3 · L4 · L5 · WF · LF · GF.
+  // Which STAGE a set belongs to, for multi-stage events (pools → swiss → playoff bracket).
+  //
+  // This used to read `phase.phaseOrder` — the one field the bracket importer explicitly refuses
+  // to trust, because a REBUILT phase gets a high id AND a high phaseOrder (RLCS NA Open 6: "Day 2"
+  // reports phaseOrder 7 while "Day 3" reports 3). The queue and the bracket therefore disagreed
+  // about stage order on exactly the events where it matters, floating a later day's semis and
+  // finals above an earlier day's. Rank by the event's own phases[] LISTING order instead — the
+  // same source buildPhases() uses — so both agree. phaseOrder stays as the fallback for a phase
+  // the tournament query didn't list.
+  const _phaseIndex = new Map();   // phase id -> rank across the whole tournament
+  ((res?.tournament?.events) || []).forEach((ev, evIdx) => {
+    ((ev && ev.phases) || []).forEach((ph, phIdx) => {
+      if (ph && ph.id != null) _phaseIndex.set(String(ph.id), evIdx * 1000 + phIdx);
+    });
+  });
   const _phaseRank = (set) => {
+    const id = set?.phaseGroup?.phase?.id;
+    if (id != null && _phaseIndex.has(String(id))) return _phaseIndex.get(String(id));
     const phase = set?.phaseGroup?.phase?.phaseOrder;
     return Number.isFinite(phase) ? phase : 0;
   };
@@ -5707,6 +7201,7 @@ async function fetchStreamQueue(tournamentSlug) {
       queue.push({
         setId: String(set.id),
         stream: streamName,
+        eventSlug: _phaseToEventSlug[String(set.phaseGroup?.phase?.id)] || null,   // which event this set belongs to
         round: set.fullRoundText || '',
         state: set.state,                 // 1 not started, 2 in progress, 3 done
         teamA,
@@ -5718,7 +7213,15 @@ async function fetchStreamQueue(tournamentSlug) {
         winnerId: set.winnerId != null ? set.winnerId : null,
         displayScore: set.displayScore || null,
         slots: set.slots,
-        live: liveSetId != null && String(set.id) === liveSetId   // head of the raw queue = currently on stream
+        // LIVE means start.gg says the set is IN PROGRESS (state 2). It used to mean "head of the
+        // raw stream queue", which lit the wrong set green whenever the earlier rounds had already
+        // been played out — e.g. quarter-finals cleared off the queue left an unstarted semi-final
+        // sitting at the head, badged LIVE while start.gg still had it as not started.
+        live: Number(set.state) === 2,
+        // What the TO has cued up NEXT on this stream (head of start.gg's raw queue order). Kept
+        // as its own flag so auto-follow can still fall back to it for TOs who never mark sets
+        // in-progress, without the queue UI claiming it is already on air.
+        onStream: liveSetId != null && String(set.id) === liveSetId
       });
     });
   });
@@ -5735,6 +7238,10 @@ async function fetchStreamQueue(tournamentSlug) {
   // (previously excluding state.startgg.setId meant a single-stream event's only live match was
   // filtered out, leaving the ticker showing FINAL results only).
   state.startgg.matchFeed = buildStartggMatchFeed(queue, recentSets);
+  // Stamp the feed with the event it was built for. The feed is only ever rewritten by a SUCCESSFUL
+  // poll, so without a stamp there is no way to tell a current feed from one left behind by the
+  // previous event after a failed poll — see pruneStaleMatchFeed().
+  state.startgg.matchFeedEventSlug = evSlug;
   ensureOnAirLiveInFeed();   // force the pushed on-air match to appear as LIVE
   if (state.ticker.source === 'startgg') state.ticker.feed = formatTickerFeed(state.startgg.matchFeed);
   // Event-queue mode: keep the upcoming/schedule board following the stream queue, adding a couple of
@@ -5786,8 +7293,8 @@ async function fetchTeamQueue(teamName, tournamentSlug) {
           id fullRoundText state
           slots {
             entrant {
-              id name
-              participants { gamerTag player { id user { slug name images { url type } authorizations { type externalUsername } location { country } } } }
+              id name initialSeedNum
+              participants { gamerTag prefix player { id prefix user { slug name images { url type } authorizations { type externalUsername } location { country } } } }
               team { images { url type } }
             }
             standing { stats { score { value } } }
@@ -5867,9 +7374,10 @@ async function startggPollTick() {
   try {
     await fetchStreamQueue(slug);
     if (state.startgg.autoFollow) {
-      const wantStream = state.startgg.streamName;
-      const live = state.startgg.queue.find((s) => s.live && (!wantStream || s.stream === wantStream))
-                || state.startgg.queue.find((s) => s.live);
+      // Prefer a set start.gg actually marks IN PROGRESS; fall back to the stream's cued-up head
+      // (plenty of TOs never flip sets to in-progress). Scoped to the selected stream — see
+      // pickAutoFollowSet.
+      const live = pickAutoFollowSet(state.startgg.queue, state.startgg.streamName);
       if (live && live.setId && live.setId !== state.startgg.lastPushedSetId) {
         await syncStartGgSet(live.setId);
         state.startgg.lastPushedSetId = live.setId;
@@ -5884,6 +7392,12 @@ async function startggPollTick() {
       }
     }
     await syncBracketToActiveEvent();
+    // Real finish order for the linked event. Deliberately OUTSIDE syncBracketToActiveEvent():
+    // that function is gated on `bracket.mode !== 'manual'` and has its own big-event throttle,
+    // so nesting this call meant a producer running a manual bracket (or a 400+ set event) got
+    // no placement refresh at all — which is the one thing this feature exists to do. It only
+    // needs startgg.eventSlug, and carries its own ~60s throttle.
+    await refreshStartggPlacements();
   } catch (e) {
     state.startgg.connected = false;
     state.startgg.lastError = e.message;
@@ -5931,6 +7445,85 @@ async function syncBracketToActiveEvent() {
   }
 }
 
+// Fighter name registry, shared with the overlays. Loaded defensively: it is a browser-first
+// script and a failure here must not take the server down.
+let smashFighters = null;
+try { smashFighters = require('./overlay/smash-fighters.js').SmashFighters || null; }
+catch (e) { console.warn('[Smash] fighter registry unavailable:', e.message); }
+
+let _placementsTick = 0;
+let _placementsSig = '';
+// Pull the linked event's finish order and, when the board on air is following it, re-mirror the
+// rows so a top 8 updates itself as the bracket resolves instead of freezing at push time.
+async function refreshStartggPlacements() {
+  const slug = (state.startgg.eventSlug || '').trim();
+  if (!slug || !startggApiToken) return;
+  const slugChanged = slug !== state.startggPlacements.slug;
+  _placementsTick++;
+  if (!slugChanged && _placementsTick % 3 !== 0) return;
+  try {
+    const r = await fetchEventPlacements(startggApiToken, slug, 32);
+    state.startggPlacements = { slug, rows: r.rows, complete: r.complete, fetchedAt: Date.now(), error: '' };
+  } catch (e) {
+    const prevErr = state.startggPlacements.error;
+    state.startggPlacements = { ...state.startggPlacements, slug, error: e.message, fetchedAt: Date.now() };
+    // Broadcast only on a CHANGE of error, so a persistent failure doesn't push state every 60s.
+    if (prevErr !== e.message) broadcastFullState();
+    return;
+  }
+  const sig = JSON.stringify(state.startggPlacements.rows.map((r) => [r.placement, r.name]));
+  const orderChanged = sig !== _placementsSig;
+  _placementsSig = sig;
+
+  // Auto-fill each finisher's fighter from start.gg's reported character selections.
+  //
+  // Deliberately OUTSIDE the "did the order change" early-return this used to sit behind: that
+  // made a failed or empty character scan permanent, because once the finish order settled the
+  // sig never moved again and the scan never re-ran. Retry whenever we still have nothing, so a
+  // transient error — or characters reported after the placements settled — is picked up on a
+  // later tick. Once every finisher has a fighter it stops scanning.
+  const top = state.startggPlacements.rows.slice(0, 8);
+  const filled = top.filter((r) => (r.character || '').trim()).length;
+  // The two entrants currently on the scoreboard ride along in the SAME scan — the matchup card
+  // wants their character too, and they are usually deep in the bracket rather than in the top 8
+  // while the event is still running.
+  const liveIds = ['blue', 'orange'].map((k) => String((state.teams[k] || {}).entrantId || '')).filter(Boolean);
+  const liveMissing = liveIds.length && !(state.startggCharacters.blue && state.startggCharacters.orange);
+  if (smashFighters && (top.length || liveIds.length) && (orderChanged || filled < top.length || liveMissing)) {
+    const wantIds = top.map((r) => r.entrantId).concat(liveIds);
+    const res = await fetchEventCharacters(startggApiToken, slug, wantIds, 3);
+    top.forEach((r) => { const c = res.map.get(String(r.entrantId)); if (c) r.character = c; });
+    ['blue', 'orange'].forEach((k) => {
+      const id = String((state.teams[k] || {}).entrantId || '');
+      const c = id && res.map.get(id);
+      if (c) state.startggCharacters[k] = c;
+    });
+    state.startggCharacters.fetchedAt = Date.now();
+    state.startggPlacements.reportedCharacters = top.filter((r) => (r.character || '').trim()).length;
+    state.startggPlacements.charError = res.error || '';
+    state.startggPlacements.charShape = res.shape || '';
+    state.startggPlacements.setsScanned = res.scanned || 0;
+    if (res.error) console.warn('[Smash] character pull:', res.error, '(sets scanned:', res.scanned + ')');
+  }
+  if (!orderChanged && !state.startggPlacements.charError) { broadcastFullState(); return; }
+  // A board pushed from this source keeps following it. Producer-entered fighters are keyed by
+  // entrant name, so re-mirroring must PRESERVE them — otherwise every poll would wipe the
+  // character art off a top 8 the producer had just finished assigning.
+  if ((state.standings.source || '') === 'startgg-placements') {
+    const keep = {};
+    (state.standings.rows || []).forEach((r) => { if (r && r.name) keep[String(r.name).toLowerCase()] = r; });
+    state.standings.rows = state.startggPlacements.rows.slice(0, 8).map((r) => {
+      const prev = keep[String(r.name).toLowerCase()] || {};
+      // A fighter the producer set by hand outranks the reported one — they are watching the
+      // match and start.gg's report can be missing, stale or just wrong.
+      return { ...prev, placement: r.placement, name: r.name,
+               players: (r.players && r.players.length) ? r.players : (prev.players || []),
+               character: prev.character || r.character || '' };
+    });
+  }
+  broadcastFullState();
+}
+
 function setStartggQueuePolling(enabled) {
   state.startgg.queueEnabled = !!enabled;
   if (_startggPollTimer) { clearInterval(_startggPollTimer); _startggPollTimer = null; }
@@ -5953,6 +7546,7 @@ function applyStartggAutomation() {
 
 function setStartggAutoFollow(enabled) {
   state.startgg.autoFollow = !!enabled;
+  state.startgg.autoFollowChosen = true;   // producer has an opinion now — event activation must respect it
   saveAppState();
   broadcastFullState();
 }
@@ -6035,6 +7629,106 @@ function exportScheduleToRows() {
   (state.upcoming.matches || []).forEach((m) => rows.push([m.teamA || '', m.teamB || '', m.round || '', m.date || '', m.time || '', m.stream || '', m.scoreA != null ? m.scoreA : '', m.scoreB != null ? m.scoreB : '']));
   return rows;
 }
+// ── Battle-royale sheet mapping ──────────────────────────────────────────────
+// The template we write (brWriteSheetTemplate) owns the column names, but a producer will rename a
+// header eventually, so every field accepts the obvious aliases. Rows missing a team are skipped
+// rather than importing a blank line onto the leaderboard.
+function importBrResultsFromRows(rows) {
+  const out = [];
+  for (const r of rows) {
+    const team = (sheets.pick(r, ['team', 'team name', 'name', 'squad', 'roster']) || '').toString().trim();
+    if (!team) continue;
+    const match = parseInt(sheets.pick(r, ['match', 'match #', 'game', 'game #', 'round', 'm']), 10) || 0;
+    if (!match) continue;   // a row with no match number can't be scored or ordered
+    out.push({
+      match,
+      team: team.slice(0, 80),
+      placement: Math.max(0, parseInt(sheets.pick(r, ['placement', 'place', 'pos', 'position', 'rank', 'finish']), 10) || 0),
+      elims: Math.max(0, parseInt(sheets.pick(r, ['elims', 'elim', 'eliminations', 'kills', 'k']), 10) || 0)
+    });
+  }
+  const rowsIn = out.slice(0, 4000);   // 40 matches x 100 teams, well past any real event
+  // Land in the BOUND CUP when there is one. Writing straight to state.br.results was correct
+  // while the series was standalone, but once a cup is bound the very next brSyncFromLeague()
+  // mirrors the league back over the top — so a sheet sync would appear to work and then
+  // silently vanish. The sheet is a peer ingest path, so it writes where every other path does.
+  const b = brBinding();
+  if (b) {
+    b.series.results = rowsIn;
+    b.series.source = 'sheets';
+    recomputeBrSeason(b.lg);
+    leaguesVer++;
+    brSyncFromLeague();
+  } else {
+    state.br.results = rowsIn;
+    state.br.source = 'sheets';
+  }
+  computeBrStandings();
+  return out.length;
+}
+function exportBrResultsToRows() {
+  const rows = [['Match', 'Team', 'Placement', 'Elims', 'Points']];
+  for (const r of (state.br.results || [])) {
+    rows.push([r.match, r.team, r.placement, r.elims, brPointsFor(r.placement, r.elims, r.match)]);
+  }
+  return rows;
+}
+function importBrPlayersFromRows(rows) {
+  const out = [];
+  for (const r of rows) {
+    const player = (sheets.pick(r, ['player', 'player name', 'name', 'gamertag', 'ign', 'epic']) || '').toString().trim();
+    if (!player) continue;
+    out.push({
+      match: parseInt(sheets.pick(r, ['match', 'match #', 'game', 'game #', 'round', 'm']), 10) || 0,
+      player: player.slice(0, 80),
+      team: (sheets.pick(r, ['team', 'team name', 'squad']) || '').toString().trim().slice(0, 80),
+      elims: Math.max(0, parseInt(sheets.pick(r, ['elims', 'elim', 'eliminations', 'kills', 'k']), 10) || 0)
+    });
+  }
+  state.br.playerResults = out.slice(0, 8000);
+  state.br.source = 'sheets';
+  computeBrStandings();
+  return out.length;
+}
+function exportBrPlayersToRows() {
+  const rows = [['Match', 'Player', 'Team', 'Elims']];
+  for (const r of (state.br.playerResults || [])) rows.push([r.match, r.player, r.team, r.elims]);
+  return rows;
+}
+// One-click "set my sheet up for me": creates (or overwrites) the two tabs with the exact headers
+// the importer reads, pre-filled with a row per team per match so the scorekeeper only ever types
+// numbers into existing cells. Returns what it wrote so the panel can report it.
+async function brWriteSheetTemplate(opts) {
+  const sa = _sheetsSA();
+  const id = state.sheets.sheetId;
+  if (!id) throw new Error('Connect a Google Sheet first (Settings > Integrations > Sheets).');
+  const o = opts || {};
+  const matches = Math.max(1, Math.min(40, parseInt(o.matches, 10) || state.br.format.matches || 6));
+  const teams = (Array.isArray(o.teams) && o.teams.length)
+    ? o.teams.map((t) => (t || '').toString().trim()).filter(Boolean)
+    : [...new Set((state.br.results || []).map((r) => r.team))];
+  const resultsTab = (o.resultsTab || state.sheets.maps.brResults.tab || 'BR Results').toString().slice(0, 80);
+  const playersTab = (o.playersTab || state.sheets.maps.brPlayers.tab || 'BR Players').toString().slice(0, 80);
+
+  const rows = [['Match', 'Team', 'Placement', 'Elims']];
+  for (let m = 1; m <= matches; m++) {
+    if (teams.length) teams.forEach((t) => rows.push([m, t, '', '']));
+    else rows.push([m, '', '', '']);
+  }
+  await sheets.writeTab(sa, id, resultsTab, rows);
+  await sheets.writeTab(sa, id, playersTab, [['Match', 'Player', 'Team', 'Elims']]);
+
+  // Point the sync at what we just built and turn it on, so "generate template" leaves a WORKING
+  // sync rather than a sheet the producer still has to wire up by hand.
+  state.sheets.maps.brResults = { direction: 'import', tab: resultsTab };
+  state.sheets.maps.brPlayers = { direction: 'import', tab: playersTab };
+  state.br.format.matches = matches;
+  state.br.enabled = true;
+  saveAppState();
+  broadcastFullState();
+  return { resultsTab, playersTab, matches, teams: teams.length, rows: rows.length - 1 };
+}
+
 function importStandingsFromRows(rows) {
   const out = rows.map((row, i) => ({
     placement: Number(sheets.pick(row, ['place', 'placement', 'rank', '#'])) || (i + 1),
@@ -6089,6 +7783,8 @@ async function syncSheets(reason) {
   await runType('teams', importTeamsFromRows, exportTeamsToRows);
   await runType('schedule', importScheduleFromRows, exportScheduleToRows);
   await runType('standings', importStandingsFromRows, exportStandingsToRows);
+  await runType('brResults', importBrResultsFromRows, exportBrResultsToRows);
+  await runType('brPlayers', importBrPlayersFromRows, exportBrPlayersToRows);
   state.sheets.lastSyncAt = new Date().toISOString();
   state.sheets.lastSyncMsg = done.length ? ('Synced: ' + done.join(', ')) : 'Nothing synced — set a direction (not Off) on at least one data type.';
   state.sheets.lastError = null;
@@ -6450,12 +8146,13 @@ async function syncLinkedChallongeTournament(ev) {
     if (totalPushed > 0) {
       link.lastSyncAt = new Date().toISOString();
       link.lastError = null;
+      touchMyEvents();
       saveAppState();
       broadcastFullState();
       console.log(`[challonge-sync] Pushed ${totalPushed} result(s) to ${link.slug}`);
     }
   } catch (e) {
-    if (ev.challongeSync) { ev.challongeSync.lastError = e.message; broadcastFullState(); }
+    if (ev.challongeSync) { ev.challongeSync.lastError = e.message; touchMyEvents(); broadcastFullState(); }
     console.error('[challonge-sync]', e.message);
   }
 }
@@ -6712,11 +8409,519 @@ function setNxgenPolling(enabled) {
 // two live auto-follows fighting over the scoreboard is exactly the "trouble" to prevent. Making a
 // platform active turns the OTHERS' auto-follow + live polling OFF. (Result push-back via each
 // event's challongeSync link is a separate one-directional path and is deliberately left running.)
+let _faceitPollTimer = null;
 function setActivePlatform(platform) {
   state.activeEvent.platform = platform || null;
   if (platform !== 'startgg')   { state.startgg.autoFollow  = false; if (state.startgg.queueEnabled) setStartggQueuePolling(false); }
   if (platform !== 'challonge') { state.challonge.autoFollow = false; setChallongePolling(false); }
   if (platform !== 'nxgen')     { state.nxgen.autoFollow    = false; setNxgenPolling(false); }
+  if (platform !== 'faceit')    { state.faceit.autoFollow   = false; setFaceitPolling(false); }
+}
+
+// ─── FACEIT integration ───────────────────────────────────────────────────────
+
+// A FACEIT match carries both sides inline as teams.faction1 / teams.faction2. For a CHAMPIONSHIP
+// those are real teams (name + avatar + roster); for a HUB or a 1v1 championship faction1 is a
+// single player wrapped in the same envelope, so read the roster's nickname as the name rather
+// than printing FACEIT's auto-generated "team_<nickname>" placeholder on air.
+// A FACEIT roster entry → our team-library player row. The FACEIT NICKNAME is the player's
+// platform handle: it is what casters say, what the player registry keys on, and what stays
+// stable. game_player_name is whatever Steam/Epic alias they happen to be wearing today, so it
+// rides along as a secondary field instead of becoming the name (reading it first meant a card
+// could go on air saying "xX_sniper_Xx" for a player everyone knows by their FACEIT handle).
+function faceitPlayers(roster) {
+  return (roster || []).map((p) => {
+    if (!p || typeof p !== 'object') return null;
+    const name = String(p.nickname || p.game_player_name || '').trim();
+    if (!name) return null;
+    // /teams/{id} members use user_id; championship + match rosters use player_id.
+    const pid = p.player_id || p.user_id || '';
+    const alt = String(p.game_player_name || '').trim();
+    const row = {
+      id: Math.random().toString(36).slice(2, 11),
+      name,
+      platform: 'faceit',
+      platformId: pid ? String(pid) : '',
+      assignedCamera: null,
+      photo: p.avatar || ''
+    };
+    if (alt && alt.toLowerCase() !== name.toLowerCase()) row.gameName = alt;
+    // Fold into the cross-platform player registry so a FACEIT roster lights up the same
+    // profile cards a start.gg import does.
+    if (name) {
+      const patch = { faceit: name };
+      if (pid) patch.faceitId = String(pid);
+      if (p.avatar) patch.image = p.avatar;
+      try { upsertPlayerProfile(name, patch); } catch {}
+    }
+    return row;
+  }).filter(Boolean);
+}
+
+function faceitSide(faction) {
+  if (!faction || typeof faction !== 'object') return { id: null, name: '', logo: null, players: [], playerRows: [] };
+  const roster = Array.isArray(faction.roster) ? faction.roster
+               : Array.isArray(faction.players) ? faction.players : [];
+  const playerRows = faceitPlayers(roster);
+  const players = playerRows.map((p) => p.name);
+  let name = faction.name || '';
+  // "team_someNickname" is FACEIT's synthetic solo-queue wrapper, not a name a producer typed.
+  if (/^team_/i.test(name) && players.length === 1) name = players[0];
+  const logo = faction.avatar || logoForTeamName(name) || null;
+  return { id: faction.faction_id || faction.team_id || faction.id || null, name, logo, players, playerRows };
+}
+
+const FACEIT_LIVE_STATUSES = ['ongoing'];
+const FACEIT_DONE_STATUSES = ['finished', 'cancelled', 'aborted'];
+
+function faceitMatchRow(m) {
+  const t = m.teams || {};
+  const a = faceitSide(t.faction1);
+  const b = faceitSide(t.faction2);
+  const score = (m.results && m.results.score) || {};
+  const status = String(m.status || '').toLowerCase();
+  return {
+    matchId: m.match_id,
+    round: m.round ?? null,
+    group: m.group ?? null,
+    teamA: a.name || 'TBD',
+    teamB: b.name || 'TBD',
+    logoA: a.logo,
+    logoB: b.logo,
+    scoreA: score.faction1 ?? null,
+    scoreB: score.faction2 ?? null,
+    bestOf: m.best_of || null,
+    status,
+    live: FACEIT_LIVE_STATUSES.includes(status),
+    scheduledAt: m.scheduled_at || m.started_at || null,
+    url: faceit.faceitUrl(m.faceit_url),
+    winner: (m.results && m.results.winner) || null,
+    _a: a, _b: b
+  };
+}
+
+// The producer queue is the matches still to play, in the order FACEIT lists them. Never re-sort
+// by round prestige — a Losers Final legitimately runs before a Grand Final.
+function buildFaceitQueue(matches) {
+  return (matches || [])
+    .map(faceitMatchRow)
+    .filter((r) => !FACEIT_DONE_STATUSES.includes(r.status))
+    .map(({ _a, _b, ...row }) => row);
+}
+
+// FACEIT gives a flat round NUMBER with no stage text and no winners/losers side (same gap as
+// NXGEN). A clean halving ladder (…16, 8, 4, 2, 1) names the stage exactly; anything else stays
+// "Round N" — a wrong "SEMIFINALS" burned on air is worse than an honest round number.
+function faceitIsLadder(counts) {
+  return counts.length > 0 && counts[counts.length - 1] === 1 &&
+    counts.every((c, i) => i === 0 || c === Math.ceil(counts[i - 1] / 2));
+}
+function faceitRoundNames(counts) {
+  const clean = faceitIsLadder(counts);
+  return counts.map((c, i) => {
+    if (!clean) return 'Round ' + (i + 1);
+    if (c === 1) return 'Final';
+    if (c === 2) return 'Semifinals';
+    if (c === 4) return 'Quarterfinals';
+    return 'Round of ' + (c * 2);
+  });
+}
+
+// Is this an ELIMINATION bracket, or a league/swiss where losers keep playing?
+//
+// FACEIT never says. The previous guess — "do the round sizes halve down to one match" — is only
+// answerable once the whole bracket exists, so a 16-team single-elim that had played only round 1
+// (counts [8], no round 2 created yet) failed the test and got mis-typed as SWISS, which drew the
+// wrong overlay for the entire first round of the event.
+//
+// The decisive signal is in the data: in an elimination bracket a team that LOSES never appears
+// again. If anyone lost in round r and still shows up in a later round, losers keep playing, so
+// it is a league/swiss. With only one round played nobody has a later appearance, so this
+// correctly answers "elimination" — the far more common championship shape.
+function faceitIsElimination(rows) {
+  const lastLoss = new Map();   // team → earliest round they lost in
+  const lastSeen = new Map();   // team → latest round they appear in
+  const norm = (n) => String(n || '').trim().toLowerCase();
+  rows.forEach((r) => {
+    const rd = r.round == null ? 1 : Number(r.round);
+    [[r.teamA, r.winner === 'faction2'], [r.teamB, r.winner === 'faction1']].forEach(([name, lost]) => {
+      const k = norm(name);
+      if (!k || k === 'tbd') return;
+      if (!lastSeen.has(k) || rd > lastSeen.get(k)) lastSeen.set(k, rd);
+      if (lost && (!lastLoss.has(k) || rd < lastLoss.get(k))) lastLoss.set(k, rd);
+    });
+  });
+  for (const [k, lossRound] of lastLoss) {
+    if ((lastSeen.get(k) || 0) > lossRound) return false;
+  }
+  return true;
+}
+
+// W-L (+ game differential) tallied from the matches themselves. FACEIT's /results endpoint only
+// exists for some championship formats, and without standings the Swiss chart and the group board
+// have nothing to draw — so compute them rather than shipping an empty table.
+function faceitStandingsFrom(rows, teams) {
+  const tally = new Map();
+  const seed = (name, logo) => {
+    const k = String(name || '').trim().toLowerCase();
+    if (!k || k === 'tbd') return null;
+    if (!tally.has(k)) tally.set(k, { name: String(name).trim(), logo: logo || null, wins: 0, losses: 0, gameWins: 0, gameLosses: 0 });
+    const rec = tally.get(k);
+    if (!rec.logo && logo) rec.logo = logo;
+    return rec;
+  };
+  // Seed from the entrant list first so teams yet to play still appear on the board.
+  (teams || []).forEach((t) => seed(t.name, t.logo));
+  rows.forEach((r) => {
+    const a = seed(r.teamA, r.logoA), b = seed(r.teamB, r.logoB);
+    if (!a || !b || !r.winner) return;
+    const as = Number(r.scoreA) || 0, bs = Number(r.scoreB) || 0;
+    a.gameWins += as; a.gameLosses += bs;
+    b.gameWins += bs; b.gameLosses += as;
+    if (r.winner === 'faction1') { a.wins++; b.losses++; } else { b.wins++; a.losses++; }
+  });
+  return [...tally.values()]
+    .sort((x, y) => (y.wins - y.losses) - (x.wins - x.losses)
+                 || (y.gameWins - y.gameLosses) - (x.gameWins - x.gameLosses)
+                 || x.name.localeCompare(y.name))
+    .map((t, i) => ({ placement: i + 1, ...t }));
+}
+
+// FACEIT's own final standings, when the championship exposes them — authoritative ordering, so
+// these win over the computed table.
+function faceitResultStandings(results) {
+  return (results || []).map((r, i) => {
+    const ent = r.team || r.entity || r.user || r;
+    const name = ent.name || ent.nickname || '';
+    return {
+      placement: r.position ?? r.rank ?? (i + 1),
+      name,
+      logo: ent.avatar || logoForTeamName(name) || null,
+      wins: r.wins ?? r.won ?? 0,
+      losses: r.losses ?? r.lost ?? 0,
+      points: r.points ?? null
+    };
+  }).filter((x) => x.name);
+}
+
+function faceitGroupName(g) {
+  const n = Number(g);
+  if (Number.isFinite(n) && n >= 1 && n <= 26) return 'Group ' + String.fromCharCode(64 + n);
+  return 'Group ' + g;
+}
+
+// One band of matches → the { winners, standings, schedule, roster } shape every other importer
+// produces. Shared by the championship as a whole and by each group of a group stage.
+function faceitLadder(rows, teams, results) {
+  const byRound = {};
+  rows.forEach((r) => {
+    const key = r.round == null ? 1 : r.round;
+    (byRound[key] = byRound[key] || []).push(r);
+  });
+  const roundKeys = Object.keys(byRound).map(Number).sort((a, b) => a - b);
+  const roundsSorted = roundKeys.map((k) => byRound[k]);
+  const names = faceitRoundNames(roundsSorted.map((ms) => ms.length));
+
+  // The bracket overlay/panel expect { name, sets: [{ a:{name,score,winner,logo}, b:{…} }] } —
+  // the same shape start.gg, Challonge and NXGEN import into.
+  const bands = roundsSorted.map((ms, idx) => ({
+    name: names[idx],
+    round: roundKeys[idx],
+    sets: ms.map((r) => ({
+      id: r.matchId,
+      a: { name: r.teamA, score: r.scoreA ?? 0, winner: r.winner === 'faction1', logo: r.logoA },
+      b: { name: r.teamB, score: r.scoreB ?? 0, winner: r.winner === 'faction2', logo: r.logoB },
+      state: r.status
+    }))
+  }));
+
+  const resultRows = faceitResultStandings(results);
+  const standings = resultRows.length ? resultRows : faceitStandingsFrom(rows, teams);
+  const roster = (teams || []).map((t) => t.name).filter(Boolean);
+
+  // Losers still playing ⇒ league/swiss: the rounds are a SCHEDULE, not an elimination ladder.
+  // Drawing that as a bracket puts a fictional "Final" on air.
+  if (!faceitIsElimination(rows)) {
+    return { type: 'SWISS', winners: [], losers: [], finals: [], standings, schedule: bands, roster };
+  }
+  return { type: 'SINGLE_ELIMINATION', winners: bands, losers: [], finals: [], standings, schedule: [], roster };
+}
+
+function buildFaceitBracketData(matches, teams, results) {
+  const rows = (matches || []).map(faceitMatchRow);
+
+  // Group-stage championships tag every match with a group number. Folding them all into one set
+  // of round columns merged every group's round 1 into a single column of unrelated matches — so
+  // each group becomes a POOL, which the bracket panel and overlay already know how to switch
+  // between. Teams carry the group from their subscription.
+  const groupIds = [...new Set(rows.map((r) => r.group).filter((g) => g != null && g !== ''))]
+    .sort((a, b) => (Number(a) || 0) - (Number(b) || 0));
+
+  const base = faceitLadder(rows, teams, results);
+  base.pools = [];
+  if (groupIds.length > 1) {
+    base.pools = groupIds.map((g) => {
+      const gRows = rows.filter((r) => String(r.group) === String(g));
+      const gTeams = (teams || []).filter((t) => String(t.group) === String(g));
+      // A group's standings must come from that group's own matches — the championship-wide
+      // /results list is not per-group.
+      const l = faceitLadder(gRows, gTeams.length ? gTeams : [], []);
+      return {
+        id: 'faceit-g' + g,
+        name: faceitGroupName(g),
+        type: l.type,
+        winners: l.winners, losers: [], finals: [],
+        standings: l.standings, schedule: l.schedule, roster: l.roster, matrix: null
+      };
+    });
+  }
+  return base;
+}
+
+// One fetch of everything a competition needs, for both kinds. Championships carry a subscription
+// list (the entrants); hubs don't, so their team list is derived from the matches themselves.
+async function fetchFaceitCompetition(id, type) {
+  if (type === 'hub') {
+    const [comp, matches] = await Promise.all([
+      faceit.getFaceitHub(faceitApiKey, id),
+      faceit.getFaceitHubMatches(faceitApiKey, id, 'all')
+    ]);
+    return { comp, matches, subs: [], results: [] };
+  }
+  const [comp, matches, subs, results] = await Promise.all([
+    faceit.getFaceitChampionship(faceitApiKey, id),
+    faceit.getFaceitChampionshipMatches(faceitApiKey, id, 'all'),
+    faceit.getFaceitChampionshipSubscriptions(faceitApiKey, id),
+    faceit.getFaceitChampionshipResults(faceitApiKey, id)
+  ]);
+  return { comp, matches, subs, results };
+}
+
+// Entrants. Championship subscriptions are the authoritative list (they include teams that
+// haven't been drawn into a match yet); hubs and thin subscription payloads fall back to the
+// distinct sides seen across the match list so the team import is never empty.
+// Entrants, merged across every source that mentions them.
+//
+// Two shape facts that cost the previous version its rosters and half its crests:
+//  • On a championship SUBSCRIPTION the roster sits on the subscription itself (`item.roster`).
+//    `item.team` carries only { name, avatar, team_id, team_type, faceit_url } — so reading
+//    `item.team.roster` returned undefined and EVERY championship team imported with no players.
+//  • A subscription often has the crest but the match faction has the fuller roster, or the
+//    reverse. First-source-wins meant a team seen first without a logo could never gain one.
+// So: merge by name, taking the best non-empty value for each field from whichever source has it.
+function faceitTeamsFrom(subs, matches) {
+  const byKey = new Map();
+  const merge = (name, info) => {
+    const clean = String(name || '').trim();
+    const key = clean.toLowerCase();
+    if (!key || key === 'tbd') return;
+    let rec = byKey.get(key);
+    if (!rec) { rec = { name: clean, logo: null, faceitId: null, seed: null, group: null, players: [] }; byKey.set(key, rec); }
+    if (!rec.logo && info.logo) rec.logo = info.logo;
+    if (!rec.faceitId && info.id) rec.faceitId = String(info.id);
+    if (rec.seed == null && info.seed != null) rec.seed = info.seed;
+    if (rec.group == null && info.group != null && info.group !== '') rec.group = info.group;
+    if (info.players && info.players.length > rec.players.length) rec.players = info.players;
+  };
+
+  (subs || []).forEach((sub) => {
+    if (!sub || typeof sub !== 'object') return;
+    const t = sub.team || sub.entity || null;
+    const roster = Array.isArray(sub.roster) ? sub.roster
+                 : Array.isArray(sub.members) ? sub.members
+                 : (t && Array.isArray(t.roster)) ? t.roster
+                 : (t && Array.isArray(t.members)) ? t.members : [];
+    const players = faceitPlayers(roster);
+    if (t && t.name) {
+      merge(t.name, { logo: t.avatar, id: t.team_id || t.id || sub.team_id, players, group: sub.group, seed: sub.seed });
+      return;
+    }
+    // Solo championships subscribe a USER, not a team.
+    const u = sub.user || null;
+    if (u && (u.nickname || u.name)) {
+      merge(u.nickname || u.name, { logo: u.avatar, id: u.user_id || sub.user_id, players: faceitPlayers([u]), group: sub.group, seed: sub.seed });
+    }
+  });
+
+  (matches || []).forEach((m) => {
+    const t = (m && m.teams) || {};
+    [t.faction1, t.faction2].forEach((f) => {
+      const side = faceitSide(f);
+      if (side.name) merge(side.name, { logo: side.logo, id: side.id, players: side.playerRows, group: m.group });
+    });
+  });
+
+  // Our own saved crest is the LAST resort, so a real FACEIT avatar always wins.
+  return [...byKey.values()].map((t) => ({ ...t, logo: t.logo || logoForTeamName(t.name) || null }));
+}
+
+// Backfill entrants that neither the subscriptions nor the matches described fully. /teams/{id}
+// returns both the crest and the members, so one lookup fixes a missing logo AND a missing roster.
+// Bounded and initial-load-only: a 128-team championship would otherwise fire 128 requests
+// straight into the rate limit, and the 30s live poll must never do this at all.
+async function enrichFaceitTeams(teams) {
+  const need = (teams || []).filter((t) => t.faceitId && (!t.logo || !t.players.length)).slice(0, 48);
+  for (let i = 0; i < need.length; i += 6) {
+    await Promise.all(need.slice(i, i + 6).map(async (t) => {
+      try {
+        const full = await faceit.getFaceitTeam(faceitApiKey, t.faceitId);
+        if (!full || typeof full !== 'object') return;
+        if (!t.logo && full.avatar) t.logo = full.avatar;
+        if (!t.players.length) {
+          const roster = Array.isArray(full.members) ? full.members
+                       : Array.isArray(full.roster) ? full.roster : [];
+          const rows = faceitPlayers(roster);
+          if (rows.length) t.players = rows;
+        }
+      } catch { /* a team we can't read is not a reason to fail the import */ }
+    }));
+  }
+  return teams;
+}
+
+async function loadFaceitCompetition(id, type) {
+  const kind = type === 'hub' ? 'hub' : 'championship';
+  const { comp, matches, subs, results } = await fetchFaceitCompetition(id, kind);
+
+  const name = comp.name || comp.championship_id || comp.hub_id || 'FACEIT competition';
+  const game = comp.game_id || comp.game || '';
+  const region = comp.region || '';
+  const url = faceit.faceitUrl(comp.faceit_url) ||
+    (kind === 'hub' ? `https://www.faceit.com/en/hub/${id}` : `https://www.faceit.com/en/championship/${id}`);
+
+  const eventTeams = await enrichFaceitTeams(faceitTeamsFrom(subs, matches));
+  const logoMap = {};
+  eventTeams.forEach((t) => { if (t.name && t.logo) logoMap[t.name.toLowerCase()] = t.logo; });
+
+  const queue = buildFaceitQueue(matches);
+  const bd = buildFaceitBracketData(matches, eventTeams, results);
+
+  state.faceit.competitionId = id;
+  state.faceit.competitionType = kind;
+  state.faceit.selectedEvent = {
+    id,
+    type: kind,
+    name,
+    game,
+    region,
+    status: comp.status || '',
+    slots: comp.slots || comp.total_slots || null,
+    url
+  };
+  state.faceit.eventTeams = eventTeams;
+  state.faceit.logoMap = logoMap;
+  state.faceit.queue = queue;
+  state.faceit.queueFetchedAt = Date.now();
+  state.faceit.connected = true;
+  state.faceit.lastError = null;
+
+  state.activeEvent = {
+    platform: 'faceit',
+    slug: id,
+    name,
+    gameName: game,
+    numEntrants: eventTeams.length,
+    format: kind === 'hub' ? 'Hub' : (comp.type || 'Championship'),
+    url,
+    loadedAt: new Date().toISOString()
+  };
+  setActivePlatform('faceit');   // this is now the active platform — silence the other follows
+
+  const phase = {
+    id: 'faceit-main',
+    name,
+    type: bd.type,
+    winners: bd.winners,
+    losers: bd.losers,
+    finals: bd.finals,
+    standings: bd.standings,
+    schedule: bd.schedule,
+    roster: bd.roster,
+    pools: bd.pools || []
+  };
+  // FACEIT is a single-phase source like Challonge/NXGEN, so loading REPLACES the phase list —
+  // appending would leave a previous platform's phase chip sitting on bracket.html forever.
+  state.bracket.phases = [phase];
+  state.bracket.activePhaseId = 'faceit-main';
+  state.bracket.title = name || 'Bracket';
+  state.bracket.teams = eventTeams.filter((t) => t.logo).map((t) => ({ name: t.name, logo: t.logo }));
+  state.bracket.matches = [];
+  state.bracket.eventSlug = 'faceit:' + id;
+  state.bracket.mode = 'imported';
+  state.bracket.source = 'faceit';
+  state.bracket.lastFetchAt = Date.now();
+  syncActiveBracketPhase();   // mirror the phase into state.bracket.* — the overlay reads the mirror
+
+  return { name, teamsCount: eventTeams.length, matchesCount: (matches || []).length };
+}
+
+async function refreshFaceitLive() {
+  const id = (state.faceit.competitionId || '').trim();
+  if (!id || !faceitApiKey) return;
+  try {
+    const kind = state.faceit.competitionType === 'hub' ? 'hub' : 'championship';
+    const { matches, subs, results } = await fetchFaceitCompetition(id, kind);
+    // The live poll deliberately does NOT re-run enrichFaceitTeams (that is a per-team lookup and
+    // this fires every 30s). So carry the already-enriched crest/roster forward: a plain rebuild
+    // would silently strip the logos and rosters that the initial load backfilled, and a team
+    // would lose its crest mid-show 30 seconds after going on air.
+    const prev = new Map((state.faceit.eventTeams || []).map((t) => [(t.name || '').toLowerCase(), t]));
+    const eventTeams = faceitTeamsFrom(subs, matches).map((t) => {
+      const had = prev.get((t.name || '').toLowerCase());
+      if (!had) return t;
+      return {
+        ...t,
+        logo: t.logo || had.logo || null,
+        players: t.players.length ? t.players : (had.players || []),
+        faceitId: t.faceitId || had.faceitId || null,
+        group: t.group != null ? t.group : (had.group ?? null)
+      };
+    });
+    state.faceit.eventTeams = eventTeams;
+    eventTeams.forEach((t) => { if (t.name && t.logo) state.faceit.logoMap[t.name.toLowerCase()] = t.logo; });
+    state.faceit.queue = buildFaceitQueue(matches);
+    state.faceit.queueFetchedAt = Date.now();
+    state.faceit.connected = true;
+    state.faceit.lastError = null;
+
+    if (state.faceit.autoFollow) {
+      const live = state.faceit.queue.find((m) => m.live);
+      if (live && live.matchId !== state.faceit.lastAutoFollowMatchId) {
+        state.faceit.lastAutoFollowMatchId = live.matchId;
+        if (live.teamA && live.teamA !== 'TBD') {
+          state.teams.blue   = { ...state.teams.blue,   name: live.teamA, logo: live.logoA || state.faceit.logoMap[(live.teamA || '').toLowerCase()] || null };
+          state.teams.orange = { ...state.teams.orange, name: live.teamB || '', logo: live.logoB || state.faceit.logoMap[(live.teamB || '').toLowerCase()] || null };
+          saveAppState();
+        }
+      }
+    }
+    retuneRoundLabel();
+
+    const bd = buildFaceitBracketData(matches, eventTeams, results);
+    const existingPhase = state.bracket.phases.find((p) => p.id === 'faceit-main');
+    if (existingPhase) {
+      // schedule + pools must ride along: a group stage loses its pools (and a swiss its rounds)
+      // on the very first live poll if the refresh only copies the elimination fields.
+      Object.assign(existingPhase, { type: bd.type, winners: bd.winners, losers: bd.losers, finals: bd.finals,
+        standings: bd.standings, schedule: bd.schedule, roster: bd.roster, pools: bd.pools || [] });
+      state.bracket.lastFetchAt = Date.now();
+      syncActiveBracketPhase();
+    }
+
+    broadcastFullState();
+  } catch (e) {
+    state.faceit.connected = false;
+    state.faceit.lastError = e.message;
+    broadcastFullState();
+  }
+}
+
+function setFaceitPolling(enabled) {
+  if (_faceitPollTimer) { clearInterval(_faceitPollTimer); _faceitPollTimer = null; }
+  if (enabled && faceitApiKey && (state.faceit.competitionId || '').trim()) {
+    refreshFaceitLive();
+    _faceitPollTimer = setInterval(refreshFaceitLive, 30000);
+  }
 }
 
 // ─── My Events live-refresh ───────────────────────────────────────────────────
@@ -6740,9 +8945,11 @@ async function refreshMyEvent(ev) {
     if (data.image) ev.image = data.image;   // logo for My Events / seeding cards
     ev.lastSync = Date.now();
     ev.syncError = '';
+    touchMyEvents();
     return true;
   } catch (e) {
     ev.syncError = (e && e.message) || 'sync failed';
+    touchMyEvents();
     return false;
   }
 }
@@ -6816,7 +9023,18 @@ function logoForTeamName(name) {
   if (!key) return null;
   const saved = savedTeams.find((t) => (t.name || '').trim().toLowerCase() === key);
   if (saved && saved.logo) return saved.logo;
-  return state.startgg.logoMap[key] || null;
+  const fromEvent = state.startgg.logoMap[key];
+  if (fromEvent) return fromEvent;
+  // Last resort: the team vault, which remembers a crest under EVERY name this org has competed
+  // under. That's what makes a producer's one-time logo upload keep working after a rebrand, and
+  // for events where start.gg has no crest at all.
+  if (state.teamVault && state.teamVault.enabled) {
+    try {
+      const hit = teamDb.resolve({ name });
+      if (hit.rec && hit.rec.logo) return hit.rec.logo;
+    } catch (_) {}
+  }
+  return null;
 }
 
 // Auto team names from the live game: when enabled, apply a game-reported team name to a
@@ -6855,6 +9073,7 @@ function activePlatformSets() {
   const p = (state.activeEvent && state.activeEvent.platform) || 'startgg';
   if (p === 'challonge') return { platform: p, sets: state.challonge.queue || [] };
   if (p === 'nxgen')     return { platform: p, sets: state.nxgen.queue || [] };
+  if (p === 'faceit')    return { platform: p, sets: state.faceit.queue || [] };
   return { platform: 'startgg', sets: [...(state.startgg.queue || []), ...(state.startgg.matchFeed || [])] };
 }
 // start.gg carries real round TEXT ("Winners Finals"); Challonge and NXGEN only give a round
@@ -7230,7 +9449,24 @@ function syncActiveBracketPhase() {
   state.bracket.finals = ph.finals || [];
 
   const pools = Array.isArray(ph.pools) ? ph.pools : [];
-  state.bracket.pools = pools.map((pl) => ({ id: pl.id, name: pl.name }));
+  // Pools ride up as {id,name} for the selector, PLUS their own small bracket when they are
+  // group-sized. That is what lets the overlay draw a GSL stage as the four separate 4-team
+  // groups it actually is, instead of one pool at a time or a merged mega-bracket. Bounded on
+  // purpose: only groups of at most 8 sets (a GSL group is 5) and at most 16 of them, so a
+  // major-scale phase with dozens of pools can't bloat the library payload.
+  // 8 was below the format's own size and broke GSL on the live event: an 8-team group runs 10
+  // sets while it is in progress and 13 when complete (WQF 4 + WSF 2 + WF 1 + LR1 2 + LQF 2 +
+  // LSF 1 + LF 1), so every pool failed the test, no pool boards shipped, and the phase-level
+  // merge (20 sets / 16 teams) then failed the group-size check too. 16 leaves real headroom.
+  const POOL_BOARD_MAX_SETS = 16, POOL_BOARD_MAX_POOLS = 16;
+  const _poolSets = (pl) => ['winners', 'losers', 'finals']
+    .reduce((n, k) => n + (pl[k] || []).reduce((m, r) => m + ((r.sets || []).length), 0), 0);
+  const _small = pools.length > 1 && pools.length <= POOL_BOARD_MAX_POOLS
+    && pools.every((pl) => { const n = _poolSets(pl); return n > 0 && n <= POOL_BOARD_MAX_SETS; });
+  state.bracket.pools = pools.map((pl) => (_small
+    ? { id: pl.id, name: pl.name, type: pl.type || '', winners: pl.winners || [],
+        losers: pl.losers || [], finals: pl.finals || [], advancesTo: pl.advancesTo || '' }
+    : { id: pl.id, name: pl.name }));
   let pool = pools.find((pl) => pl.id === state.bracket.activePoolId);
   if (!pool) { pool = pools[0] || null; state.bracket.activePoolId = pool ? pool.id : ''; }
 
@@ -7253,6 +9489,8 @@ function syncActiveBracketPhase() {
   const fallback = hasElim ? 'both' : (state.bracket.standings.length ? 'standings' : 'both');
   if (state.bracket.view === 'matrix' && !state.bracket.matrix) state.bracket.view = fallback;
   if (state.bracket.view === 'schedule' && !state.bracket.schedule.length) state.bracket.view = fallback;
+  if (state.bracket.view === 'swiss' && !state.bracket.schedule.length) state.bracket.view = fallback;
+  if (state.bracket.view === 'group' && !state.bracket.standings.length) state.bracket.view = fallback;
   if (state.bracket.view === 'losers' && !state.bracket.losers.length) state.bracket.view = fallback;
   if (state.bracket.view === 'standings' && hasElim) state.bracket.view = 'both';
   // And the mirror case: an elim-only view ('both'/'winners'/'losers'/'finals') on a
@@ -7304,7 +9542,7 @@ async function fetchAllSets(client, slug, perPage = 32, maxPages = 63) {
   let event = null;
   const all = [];
   do {
-    if (page > 1) await new Promise((r) => setTimeout(r, 500));   // stagger for start.gg rate limits
+    if (page > 1) await new Promise((r) => setTimeout(r, STARTGG_PAGE_DELAY_MS));   // stay under start.gg's 80 req/min
     const res = await startggRequestWithBackoff(client, query, { slug, perPage, page });
     event = res && res.event;
     if (!event) throw new Error('Event not found — check the slug/URL and your token');
@@ -7356,36 +9594,43 @@ async function fetchEntrantTrueSeeds(eventSlug) {
 
 // Pull every page of an event's entrants (teams + their players).
 // Tries to include social handles and country; falls back silently if the API rejects those fields.
-async function fetchAllEntrants(client, slug, perPage = 50, maxPages = 24) {   // 24 pages = 1200 entrants (RLCS Opens exceed the old 800 cap)
-  const buildQuery = (withExt) => `
+async function fetchAllEntrants(client, slug, perPage = 50, maxPages = 60) {   // 60 pages = 3000 entrants (a full RLCS Open field clears the old 1200 cap)
+  // `globalTeam` is what makes a team recognisable at the NEXT event: an entrant id is scoped to
+  // one event and an entrant NAME changes every time an org rebrands, but the GlobalTeam id and its
+  // discriminator (the /team/<slug> path) are permanent. The team vault keys on them — see
+  // backend/team-db.js. It's an inline fragment on an interface, so it gets its own fallback tier
+  // rather than riding on `withExt`: a schema that rejects it must not also cost us the socials.
+  const buildQuery = (feat) => `
     query EventEntrants($slug: String!, $perPage: Int!, $page: Int!) {
       event(slug: $slug) {
         entrants(query: { perPage: $perPage, page: $page }) {
           pageInfo { totalPages }
           nodes {
-            id name
-            participants { id gamerTag player { id user { slug name images { url type }${withExt ? ' authorizations { type externalUsername } location { country }' : ''} } } }
-            team { images { url type } }
+            id name initialSeedNum
+            participants { id gamerTag${feat.ext ? ' prefix' : ''} player { id${feat.ext ? ' prefix' : ''} user { slug name images { url type }${feat.ext ? ' authorizations { type externalUsername } location { country }' : ''} } } }
+            team { ${feat.team ? 'id name ... on EventTeam { globalTeam { id discriminator name images { url type } } }' : ''} images { url type } }
           }
         }
       }
     }
   `;
-  let page = 1, totalPages = 1, withExt = true;
+  let page = 1, totalPages = 1;
+  const feat = { ext: true, team: true };
   const all = [];
   do {
-    if (page > 1) await new Promise((r) => setTimeout(r, 500));   // stagger for start.gg rate limits
+    if (page > 1) await new Promise((r) => setTimeout(r, STARTGG_PAGE_DELAY_MS));   // stay under start.gg's 80 req/min
     let res;
-    try {
-      // Rate limits back off and retry the page (same policy as the bracket import);
-      // schema errors (authorizations/location not queryable) still fall back to the
-      // slimmer selection instead of failing the whole team import.
-      res = await startggRequestWithBackoff(client, buildQuery(withExt), { slug, perPage, page });
-    } catch (e) {
-      if (withExt && !/429|rate ?limit|too many/i.test(String(e && e.message || ''))) {
-        withExt = false;
-        res = await startggRequestWithBackoff(client, buildQuery(false), { slug, perPage, page });
-      } else throw e;
+    // Rate limits back off and retry the page (same policy as the bracket import); schema errors
+    // (globalTeam, then authorizations/location) drop one optional tier at a time instead of
+    // failing the whole team import.
+    for (;;) {
+      try { res = await startggRequestWithBackoff(client, buildQuery(feat), { slug, perPage, page }); break; }
+      catch (e) {
+        if (/429|rate ?limit|too many/i.test(String(e && e.message || ''))) throw e;
+        if (feat.team) feat.team = false;
+        else if (feat.ext) feat.ext = false;
+        else throw e;
+      }
     }
     const ev = res && res.event;
     if (!ev) break;
@@ -7393,6 +9638,9 @@ async function fetchAllEntrants(client, slug, perPage = 50, maxPages = 24) {   /
     totalPages = (ev.entrants && ev.entrants.pageInfo && ev.entrants.pageInfo.totalPages) || 1;
     page++;
   } while (page <= totalPages && page <= maxPages);
+  if (totalPages > maxPages) {
+    console.warn(`[start.gg] event has ${totalPages} pages of entrants — capped at ${maxPages} (${all.length} loaded). Some teams were not imported.`);
+  }
   return all;
 }
 
@@ -7487,22 +9735,400 @@ async function fetchEventSeeding(apiToken, eventSlugRaw) {
   return { eventName: evName, eventSlug: slug, image: evImage, rosterSize: evRoster, entrants: all };
 }
 
+// External reference circuits. A result at an official pro event is not the same evidence as a
+// result at an open weekly, so those events carry more weight and their placements are read on a
+// harder curve — top 32 at an RLCS regional says more about a player than winning a local 12-team
+// bracket. Read-only: we only consume other organizers' published standings, never write to them.
+const PRESTIGE_CIRCUITS = [
+  { re: /\brlcs\b|rocket league championship/i, name: 'RLCS', weight: 3.0, floor: 0.55 },
+  { re: /\bmajor\b|world championship|\bworlds\b/i, name: 'Major', weight: 2.5, floor: 0.5 },
+  { re: /regional|\brlcs\s*regional|open qualifier|\blcq\b|last chance/i, name: 'Regional', weight: 2.0, floor: 0.4 },
+];
+function circuitPrestige(name) {
+  for (const c of PRESTIGE_CIRCUITS) if (c.re.test(name || '')) return c;
+  return null;
+}
+
 // Weighted normalized placement score across recent standings (0–100).
-// Higher = better. Recent events count more (6-month exponential decay).
+// Higher = better. Recent events count more (6-month exponential decay), bigger and more
+// prestigious fields count more, and a prestige result can't drag a player below its floor —
+// finishing 200th at an RLCS open is still evidence of a strong player, not a weak one.
 function computeSggPerformanceScore(standings) {
   const nowSec = Math.floor(Date.now() / 1000);
   let wSum = 0, wTotal = 0;
   for (const s of (standings || [])) {
-    const n = s.entrant?.event?.numEntrants;
-    const t = s.entrant?.event?.startAt;
+    const ev = s.entrant?.event;
+    const n = ev?.numEntrants;
+    const t = ev?.startAt;
     if (!n || n < 4 || !t || !s.placement) continue;
+    const label = [ev?.tournament?.name, ev?.name].filter(Boolean).join(' ');
+    const circuit = circuitPrestige(label);
     const daysSince = (nowSec - t) / 86400;
-    const weight = Math.exp(-daysSince / 180);
-    const norm = 1 - (s.placement - 1) / Math.max(n - 1, 1); // 1.0 = 1st, 0.0 = last
+    const fieldW = Math.log2(Math.max(n, 2)) / 5;               // 32-entrant field = 1.0
+    const weight = Math.exp(-daysSince / 180) * fieldW * (circuit ? circuit.weight : 1);
+    let norm = 1 - (s.placement - 1) / Math.max(n - 1, 1);      // 1.0 = 1st, 0.0 = last
+    if (circuit) norm = circuit.floor + (1 - circuit.floor) * norm;
     wSum   += weight * norm;
     wTotal += weight;
   }
   return wTotal > 0 ? Math.round((wSum / wTotal) * 1000) / 10 : null; // 0.0–100.0
+}
+
+// ─── Our own events: final standings ─────────────────────────────────────────
+// TEAM-level placements for an event we ran. This is the "previous placements of our events"
+// signal seeding needs — set win% can't tell a bracket winner from a 2-1 pool exit.
+// Only completed events are recorded; an in-progress event has provisional standings.
+// Accepts either a slug ("tournament/x/event/y") or a numeric start.gg event id.
+// Live finish order for the event currently on air. Distinct from fetchEventFinalStandings(),
+// which pages the WHOLE field for the historical stats importer: this wants the top of the board
+// only, cheaply, on a repeating poll.
+//
+// Why this exists at all: an elimination bracket's `standings` array is derived from SET WINS
+// (buildBracketFromSets), which is NOT the finish order — a losers-run runner-up can out-win the
+// champion, and everyone knocked out in the same round ties on W-L and falls back to alphabetical.
+// The 5/5 and 7/7 ties a top-8 board is built around only exist in start.gg's own standings query.
+async function fetchEventPlacements(apiToken, idOrSlug, limit) {
+  if (!apiToken) throw new Error('Start.gg API token required');
+  if (!idOrSlug) throw new Error('event id or slug required');
+  const client = createStartGgClient(apiToken);
+  const byId = /^\d+$/.test(String(idOrSlug));
+  const query = `query EventPlacements($key:${byId ? 'ID' : 'String'}!,$per:Int!){
+    event(${byId ? 'id' : 'slug'}:$key){ id state
+      standings(query:{page:1,perPage:$per}){
+        nodes{ placement entrant{ id name participants{ gamerTag } } } } } }`;
+  const res = await client.request(query, { key: String(idOrSlug), per: Math.max(1, Math.min(64, limit || 32)) });
+  const ev = res && res.event;
+  if (!ev) throw new Error('Event not found on start.gg');
+  const rows = ((ev.standings && ev.standings.nodes) || [])
+    .filter((n) => n && n.placement && n.entrant && n.entrant.name)
+    .map((n) => ({
+      placement: n.placement,
+      name: n.entrant.name,
+      entrantId: String(n.entrant.id || ''),
+      // The entrant's roster. For SINGLES this is one tag (and usually just restates the entrant
+      // name); for doubles/crew it is the squad, which the Top 8 card lists under the team name.
+      players: ((n.entrant.participants) || []).map((pt) => (pt && pt.gamerTag) || '').filter(Boolean)
+    }))
+    .sort((a, b) => a.placement - b.placement);
+  return { rows, complete: String(ev.state || '').toUpperCase() === 'COMPLETED' };
+}
+
+// Which fighter each entrant actually played, from start.gg's own per-game character reports —
+// the same data behind an event's character-usage stats page. Returns Map(entrantId -> name).
+//
+// This is reported data, NOT derived: start.gg only has it when the TO or the players filled in
+// characters when reporting each game, which plenty of locals never do. An entrant with nothing
+// reported simply isn't in the map, and the Top 8 leaves their fighter blank for the producer.
+//
+// Only COMPLETED sets are read (state 3) — the same filter the match feed uses — and an entrant's
+// most-reported character across the event wins, so a one-game counterpick doesn't override the
+// main they played all bracket.
+async function fetchEventCharacters(apiToken, idOrSlug, wantIds, maxPages) {
+  const out = { map: new Map(), error: '', scanned: 0, shape: '' };
+  if (!apiToken || !idOrSlug) { out.error = 'no token or event'; return out; }
+  const want = new Set((wantIds || []).map(String).filter(Boolean));
+  if (!want.size) { out.error = 'no entrant ids'; return out; }
+  const client = createStartGgClient(apiToken);
+  const byId = /^\d+$/.test(String(idOrSlug));
+  const key = byId ? 'id' : 'slug';
+  const keyType = byId ? 'ID' : 'String';
+
+  // TWO shapes, tried in order. start.gg's published schema gives GameSelection.character, but
+  // that is not something this code has ever been able to execute against the live API, and a
+  // field the server rejects fails the WHOLE document — so if the first shape errors we fall back
+  // to the older selectionValue form and resolve ids through the videogame's character table.
+  const SHAPES = [
+    { name: 'character',
+      q: `query EventCharacters($key:${keyType}!,$page:Int!){
+            event(${key}:$key){ id
+              sets(page:$page, perPage:50, sortType:RECENT, filters:{state:3}){
+                pageInfo{ totalPages }
+                nodes{ games{ selections{ entrant{ id } character{ name } } } } } } }` },
+    { name: 'selectionValue',
+      q: `query EventCharacterIds($key:${keyType}!,$page:Int!){
+            event(${key}:$key){ id
+              videogame{ characters{ id name } }
+              sets(page:$page, perPage:50, sortType:RECENT, filters:{state:3}){
+                pageInfo{ totalPages }
+                nodes{ games{ selections{ entrant{ id } selectionType selectionValue } } } } } }` }
+  ];
+
+  const tally = new Map();          // entrantId -> Map(characterName -> count)
+  const cap = Math.max(1, Math.min(8, maxPages || 3));
+  let lastErr = '';
+
+  for (const shape of SHAPES) {
+    tally.clear();
+    let page = 1, totalPages = 1, scanned = 0, failed = false;
+    const charById = new Map();
+    do {
+      let res;
+      try { res = await client.request(shape.q, { key: String(idOrSlug), page }); }
+      catch (e) { lastErr = e.message; failed = true; break; }
+      const ev = res && res.event;
+      if (!ev) { lastErr = 'event not found'; failed = true; break; }
+      ((ev.videogame && ev.videogame.characters) || []).forEach((c) => {
+        if (c && c.id != null) charById.set(String(c.id), c.name || '');
+      });
+      ((ev.sets && ev.sets.nodes) || []).forEach((set) => {
+        scanned++;
+        ((set && set.games) || []).forEach((g) => {
+          ((g && g.selections) || []).forEach((sel) => {
+            const eid = sel && sel.entrant && String(sel.entrant.id || '');
+            if (!eid || !want.has(eid)) return;
+            // Shape 1 documents character as a list but returns an object; accept either.
+            let name = '';
+            const c = sel.character;
+            if (c) name = Array.isArray(c) ? ((c[0] || {}).name || '') : (c.name || '');
+            if (!name && sel.selectionValue != null) {
+              const t = String(sel.selectionType || 'CHARACTER').toUpperCase();
+              if (t === 'CHARACTER' || t === '1') name = charById.get(String(sel.selectionValue)) || '';
+            }
+            if (!name) return;
+            if (!tally.has(eid)) tally.set(eid, new Map());
+            const m = tally.get(eid);
+            m.set(name, (m.get(name) || 0) + 1);
+          });
+        });
+      });
+      totalPages = (ev.sets && ev.sets.pageInfo && ev.sets.pageInfo.totalPages) || 1;
+      page++;
+    } while (page <= totalPages && page <= cap);
+
+    out.scanned = scanned;
+    if (!failed) {
+      out.shape = shape.name;
+      // A shape that ran clean is authoritative even if it found nothing (nobody reported a
+      // character); only fall through to the next shape when the query itself failed.
+      lastErr = tally.size ? '' : (scanned ? '' : 'no completed sets to read');
+      break;
+    }
+  }
+
+  tally.forEach((counts, eid) => {
+    let best = '', n = 0;
+    counts.forEach((c, name) => { if (c > n) { n = c; best = name; } });
+    // Normalise to the registry's spelling so the overlay resolves the same art it would for a
+    // hand-typed name ("Pokémon Trainer" -> "Pokemon Trainer").
+    if (best) out.map.set(eid, smashFighters ? smashFighters.nameOf(best) : best);
+  });
+  out.error = out.map.size ? '' : lastErr;
+  return out;
+}
+
+async function fetchEventFinalStandings(apiToken, idOrSlug) {
+  if (!apiToken) throw new Error('Start.gg API token required');
+  if (!idOrSlug) throw new Error('event id or slug required');
+  const client = createStartGgClient(apiToken);
+  const byId = /^\d+$/.test(String(idOrSlug));
+  const query = `query EventStandings($key:${byId ? 'ID' : 'String'}!,$page:Int!){
+    event(${byId ? 'id' : 'slug'}:$key){ id name slug numEntrants startAt state
+      tournament{ name }
+      standings(query:{page:$page,perPage:100}){
+        pageInfo{ totalPages }
+        nodes{ placement entrant{ id name participants{ gamerTag user{ slug } } } } } } }`;
+  const rows = [];
+  let ev = null, page = 1, totalPages = 1;
+  do {
+    const res = await client.request(query, { key: String(idOrSlug), page });
+    ev = res && res.event;
+    if (!ev) break;
+    ((ev.standings && ev.standings.nodes) || []).forEach((n) => {
+      if (!n || !n.placement || !n.entrant || !n.entrant.name) return;
+      // Roster travels with the placement so team identity can be re-derived later from who played,
+      // not from what the entrant happened to be called that week.
+      const players = ((n.entrant.participants) || [])
+        .map((pt) => ({ gamerTag: (pt && pt.gamerTag) || '', startgg: (pt && pt.user && pt.user.slug) || '' }))
+        .filter((pt) => pt.gamerTag || pt.startgg);
+      rows.push({ placement: n.placement, team: n.entrant.name, players });
+    });
+    totalPages = (ev.standings && ev.standings.pageInfo && ev.standings.pageInfo.totalPages) || 1;
+    page++;
+  } while (page <= totalPages && page <= 8);
+  if (!ev) throw new Error('Event not found on start.gg');
+  return {
+    eventSlug: ev.slug || String(idOrSlug),
+    eventName: ev.name || '',
+    tournament: (ev.tournament && ev.tournament.name) || '',
+    numEntrants: ev.numEntrants || rows.length,
+    startAt: ev.startAt ? ev.startAt * 1000 : null,
+    complete: String(ev.state || '').toUpperCase() === 'COMPLETED',
+    standings: rows.sort((a, b) => a.placement - b.placement),
+  };
+}
+
+// ─── Series auto-discovery ───────────────────────────────────────────────────
+// Every event WE have run for a game, straight from start.gg's admin view — not just the handful a
+// producer has added to My Events. This is the event pool the seeding rating scores off: for a
+// weekly series that's the whole season, which is what makes "won the last couple" visible at all.
+// Cached for the session (a tournament list changes maybe weekly).
+let _seriesCache = { at: 0, events: [] };
+const SERIES_TTL_MS = 30 * 60 * 1000;
+
+async function discoverOurStartggEvents({ gameName = 'Rocket League', refresh = false } = {}) {
+  if (!startggApiToken) return [];
+  if (!refresh && _seriesCache.events.length && (Date.now() - _seriesCache.at) < SERIES_TTL_MS) return _seriesCache.events;
+  const client = createStartGgClient(startggApiToken);
+  const Q = `query($perPage:Int,$page:Int){ currentUser{ id
+    tournaments(query:{perPage:$perPage,page:$page,filter:{tournamentView:"admin"}}){
+      pageInfo{ totalPages }
+      nodes{ id name slug startAt
+        events{ id name slug numEntrants startAt state videogame{ name } } } } } }`;
+  const gameRe = new RegExp(String(gameName).replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s*'), 'i');
+  const out = [];
+  let page = 1, totalPages = 1;
+  do {
+    const d = await client.request(Q, { perPage: 25, page });
+    const t = d && d.currentUser && d.currentUser.tournaments;
+    if (!t) break;
+    totalPages = (t.pageInfo && t.pageInfo.totalPages) || 1;
+    (t.nodes || []).forEach((tn) => (tn.events || []).forEach((e) => {
+      if (!gameRe.test((e.videogame && e.videogame.name) || '')) return;
+      out.push({
+        eventId: String(e.id), eventSlug: e.slug || '', name: e.name || '',
+        tournamentName: tn.name || '', numEntrants: e.numEntrants || 0,
+        startAt: (e.startAt || tn.startAt || 0) * 1000,
+        complete: String(e.state || '').toUpperCase() === 'COMPLETED',
+      });
+    }));
+    page++;
+    if (page <= totalPages) await new Promise((r) => setTimeout(r, 650));
+  } while (page <= totalPages && page <= 12);
+  out.sort((a, b) => (b.startAt || 0) - (a.startAt || 0));
+  _seriesCache = { at: Date.now(), events: out };
+  console.log(`[our-events] discovered ${out.length} ${gameName} event(s) across your start.gg tournaments.`);
+  return out;
+}
+
+// start.gg's videogame name ("Rocket League") → our stats game_type. Unknown titles fall back to
+// the active game so a multi-title producer's events still bucket somewhere sensible.
+function statsGameKey(name) {
+  const s = (name || '').toString().toLowerCase();
+  if (/rocket/.test(s)) return 'rl';
+  if (/valorant/.test(s)) return 'valorant';
+  if (/counter|cs2|cs:?go/.test(s)) return 'cs2';
+  return state.activeGame || 'rl';
+}
+
+// Pull final standings for every past event in My Events that we haven't recorded yet, and store
+// them. Idempotent and cheap after the first run (already-recorded slugs are skipped unless
+// refresh is set). Never throws — a dead slug must not take the seeding request down with it.
+async function syncOurEventResults({ excludeSlug = null, refresh = false } = {}) {
+  const out = { fetched: 0, skipped: 0, failed: 0, events: 0, discovered: 0, pending: 0 };
+  if (!startggApiToken) return out;
+  const now = Date.now();
+  const gameName = (GAMES[state.activeGame] && GAMES[state.activeGame].name) || 'Rocket League';
+
+  // Pool = every event we've run for this game (start.gg admin sweep), plus anything in My Events
+  // that the sweep missed (a co-run event we aren't admin on). Keyed by slug so they de-dupe.
+  let discovered = [];
+  try { discovered = await discoverOurStartggEvents({ gameName, refresh }); }
+  catch (err) { console.warn('[our-events] series discovery failed:', err.message); }
+  out.discovered = discovered.length;
+
+  const pool = new Map();
+  discovered.forEach((e) => {
+    const key = e.eventSlug || 'id:' + e.eventId;
+    pool.set(key, { key, ref: e.eventSlug || e.eventId, name: e.name, tournamentName: e.tournamentName,
+      numEntrants: e.numEntrants, startAt: e.startAt, gameName });
+  });
+  (state.myEvents || []).forEach((e) => {
+    if (!e || !e.eventSlug || pool.has(e.eventSlug)) return;
+    pool.set(e.eventSlug, { key: e.eventSlug, ref: e.eventSlug, name: e.name, tournamentName: e.tournamentName,
+      numEntrants: e.numEntrants, startAt: (e.startAt || 0) * 1000, gameName: e.game || gameName });
+  });
+
+  const list = [...pool.values()]
+    .filter((e) => e.key !== excludeSlug)
+    .filter((e) => !e.startAt || e.startAt < now)     // future events have no result yet
+    .sort((a, b) => (b.startAt || 0) - (a.startAt || 0))
+    .slice(0, 40);
+  out.events = list.length;
+
+  for (const ev of list) {
+    if (!refresh && stats.hasEventResults(ev.key)) { out.skipped++; continue; }
+    try {
+      const r = await fetchEventFinalStandings(startggApiToken, ev.ref);
+      // An event still running has provisional standings — recording them would cache a half-played
+      // bracket as history. Skip it (nothing is stored, so the next call retries it).
+      if (!r.complete || !r.standings.length) { out.pending++; continue; }
+      stats.recordEventResults({
+        eventSlug: ev.key,
+        eventName: ev.name || r.eventName,
+        tournament: r.tournament || ev.tournamentName || '',
+        gameType: statsGameKey(ev.gameName),
+        numEntrants: r.numEntrants || ev.numEntrants,
+        startedAt: r.startAt || ev.startAt || null,
+        standings: r.standings,
+      });
+      out.fetched++;
+      await new Promise((res) => setTimeout(res, 350));   // stay under start.gg's rate cap
+    } catch (err) {
+      out.failed++;
+      console.warn('[our-events] standings failed for', ev.key, '-', err.message);
+    }
+  }
+  return out;
+}
+
+// ─── Team lineage: making a rebrand keep its record ──────────────────────────
+// getTeamPlacementScores() buckets past standings by normalized team NAME, so a squad that changed
+// its tag lost every result it had ever posted and came back as a brand-new team. These two helpers
+// close that: rosters recorded with each standing are resolved to stable player ids, roster overlap
+// groups the names that belong to one squad, and the resulting alias map collapses them into a
+// single bucket at scoring time.
+const _lineageDone = new Set();   // event slugs already folded into the lineage store
+
+function normTeamKey(s) { return (s || '').toLowerCase().replace(/[^a-z0-9]/g, ''); }
+
+// Fold recorded event standings into team lineages. Only events whose standings carry rosters can
+// contribute — older records predate roster capture, and a name-only standing has nothing to match
+// on. Exact/strong identity matching only (fuzzy off): inventing player links here would silently
+// merge two different squads' histories, which is far worse than missing one rename.
+function syncLineagesFromHistory({ force = false } = {}) {
+  const out = { events: 0, teams: 0, merged: 0, skippedNoRoster: 0 };
+  let evs = [];
+  try { evs = stats.getEventResults(); } catch (_) { return out; }
+  for (const e of evs) {
+    if (!e || !e.event_slug) continue;
+    if (!force && _lineageDone.has(e.event_slug)) continue;
+    _lineageDone.add(e.event_slug);
+    let touched = false;
+    for (const s of (e.standings || [])) {
+      const roster = (s && s.players) || [];
+      if (!roster.length) { out.skippedNoRoster++; continue; }
+      const ids = [];
+      for (const p of roster) {
+        const r = identity.upsert(
+          { gamertag: p.gamerTag || '', startgg: p.startgg || '' },
+          { createNew: true, fuzzy: false }
+        );
+        if (r && r.id) ids.push(r.id);
+      }
+      if (ids.length < 2) continue;   // one player is a transfer, not a lineage
+      const rec = identity.recordTeam(s.team, ids, { eventSlug: e.event_slug, at: e.started_at });
+      out.teams++;
+      if (rec.lineage && (rec.lineage.names || []).length > 1) out.merged++;
+      touched = true;
+    }
+    if (touched) out.events++;
+  }
+  return out;
+}
+
+// normalizedName -> canonical lineage key, for getTeamPlacementScores({ aliasMap }). Only lineages
+// that actually carry more than one name produce entries; a single-name lineage would map a key to
+// itself and just add work.
+function buildLineageAliasMap() {
+  const map = new Map();
+  let lineages = [];
+  try { lineages = identity.allLineages(); } catch (_) { return map; }
+  lineages.forEach((L) => {
+    const names = (L.names || []).map(normTeamKey).filter(Boolean);
+    if (names.length < 2) return;
+    names.forEach((n) => map.set(n, 'lineage:' + L.id));
+  });
+  return map;
 }
 
 // ─── Single-team spotlight: deep-dive on one entrant (placement / seed / record / sets) ───
@@ -7822,46 +10448,98 @@ async function fetchTournamentEvents(apiToken, tournamentSlug) {
   }));
 }
 
+// One start.gg Participant -> our roster-player shape, with the profile registry updated as a
+// side effect. Three call sites (event import, eventTeams mapping, live set push) carried
+// byte-identical copies of this block. `prefix` is the sponsor/org tag start.gg stores separately
+// from the gamerTag ("MVG | Zain" is prefix "MVG", gamerTag "Zain") - it is the only reliable
+// source for a SINGLES competitor's team name, since the entrant name mashes the two together.
+function startggPlayerFromParticipant(p) {
+  const tag = ((p && p.gamerTag) || '').trim();
+  const pl = (p && p.player) || {};
+  const u = pl.user || {};
+  const auths = u.authorizations || [];
+  const twitch = (auths.find((a) => a && a.type === 'TWITCH') || {}).externalUsername || null;
+  const twitter = (auths.find((a) => a && (a.type === 'TWITTER' || a.type === 'TWITTER_V2')) || {}).externalUsername || null;
+  const country = (u.location && u.location.country) || null;
+  const countryCode = _countryCode(country);
+  const image = ((u.images || []).find((i) => /profile/i.test(i.type || '')) || (u.images || [])[0] || {}).url || null;
+  // u.name is the user's display/legal name on start.gg (different from gamerTag)
+  const realName = (u.name && u.name.trim() && u.name.trim() !== tag) ? u.name.trim() : null;
+  // The event-entry prefix wins over the player's standing one - a competitor who changed orgs
+  // still carries the old tag on their player record until they get round to updating it.
+  const prefix = ((((p && p.prefix) || pl.prefix || '')) + '').trim() || null;
+  const startggPlayerId = pl.id ? String(pl.id) : null;
+  if (tag) {
+    const patch = {};
+    if (u.slug) { patch.startggSlug = u.slug; patch.startggPlayerId = startggPlayerId; }
+    if (twitch) patch.twitch = twitch;
+    if (twitter) patch.twitter = twitter;
+    if (country) patch.country = country;
+    if (countryCode) patch.countryCode = countryCode;
+    if (image) patch.image = image;
+    if (realName) patch.realName = realName;
+    if (prefix) patch.prefix = prefix;
+    if (Object.keys(patch).length) upsertPlayerProfile(tag, patch);
+  }
+  // Socials/prefix/realName are mirrored onto the ROSTER entry as well as the profile: overlay
+  // scenes read the roster directly, and a profile lookup only resolves while the gamertag still
+  // matches exactly - which it stops doing the moment a producer renames the player on the card.
+  return {
+    id: Math.random().toString(36).slice(2, 11),
+    name: tag, platform: 'startgg', platformId: startggPlayerId || '', assignedCamera: null,
+    country: country || '', countryCode: countryCode || '',
+    prefix: prefix || '', realName: realName || '',
+    twitter: twitter || '', twitch: twitch || '',
+    startgg: u.slug || '', photo: image || ''
+  };
+}
+
+// The org/sponsor name for an entrant: the prefix every member shares (a singles entrant has one
+// member, so this is just their tag's prefix). Mixed prefixes = a pickup team, which has no org.
+function entrantOrgName(players) {
+  const tags = (players || []).map((x) => (x.prefix || '').trim()).filter(Boolean);
+  if (tags.length && tags.length === (players || []).length &&
+      tags.every((t) => t.toLowerCase() === tags[0].toLowerCase())) return tags[0];
+  return '';
+}
+
 // Map entrants (from fetchAllEntrants) into our eventTeams shape.
-function mapEntrantsToTeams(entrants) {
-  return (entrants || []).map((ent) => {
+// Each entrant is folded into the team vault first, so an org we have branded before shows up with
+// its saved logo/colour/abbr on the very first render instead of as an anonymous grey card.
+// `resolved` (optional) is a Map of entrant -> vault record from a caller that has already folded
+// these entrants in. mergeEntrantsIntoLibrary does exactly that before calling us, and re-running
+// the cascade for a 200-entrant field against a 500-team vault is 100k needless comparisons.
+function mapEntrantsToTeams(entrants, ctx, resolved) {
+  const out = (entrants || []).map((ent) => {
     const name = (ent.name || '').trim();
     if (!name) return null;
-    const players = (ent.participants || [])
-      .map((p) => {
-        const tag = (p.gamerTag || '').trim();
-        const u = (p.player && p.player.user) || {};
-        const auths = u.authorizations || [];
-        const twitch = (auths.find((a) => a && a.type === 'TWITCH') || {}).externalUsername || null;
-        const twitter = (auths.find((a) => a && (a.type === 'TWITTER' || a.type === 'TWITTER_V2')) || {}).externalUsername || null;
-        const country = (u.location && u.location.country) || null;
-        const countryCode = _countryCode(country);
-        const image = ((u.images || []).find((i) => /profile/i.test(i.type || '')) || (u.images || [])[0] || {}).url || null;
-        // u.name is the user's display/legal name on start.gg (different from gamerTag)
-        const realName = (u.name && u.name.trim() && u.name.trim() !== tag) ? u.name.trim() : null;
-        const startggPlayerId = p.player && p.player.id ? String(p.player.id) : null;
-        if (tag) {
-          const patch = {};
-          if (u.slug) { patch.startggSlug = u.slug; patch.startggPlayerId = startggPlayerId; }
-          if (twitch) patch.twitch = twitch;
-          if (twitter) patch.twitter = twitter;
-          if (country) patch.country = country;
-          if (countryCode) patch.countryCode = countryCode;
-          if (image) patch.image = image;
-          if (realName) patch.realName = realName;
-          if (Object.keys(patch).length) upsertPlayerProfile(tag, patch);
-        }
-        return { id: Math.random().toString(36).slice(2, 11), name: tag, platform: 'startgg', platformId: startggPlayerId || '', assignedCamera: null, country: country || '', countryCode: countryCode || '' };
-      })
-      .filter((p) => p.name);
+    const players = (ent.participants || []).map(startggPlayerFromParticipant).filter((p) => p.name);
     const logo = pickEntrantLogo(ent);
-    return {
+    const team = {
       name,
       logo: logo || null,
       players,
+      seed: Number(ent.initialSeedNum) > 0 ? Number(ent.initialSeedNum) : 0,
+      org: entrantOrgName(players),
       startggId: ent.id || null
     };
+    const rec = resolved ? resolved.get(ent) : ((vaultApplyEntrant(ent, players, ctx) || {}).rec);
+    return rec ? vaultDecorateTeam(team, rec) : team;
   }).filter(Boolean);
+  vaultTouch();
+  // Entrants only tell us who entered. The org's crest and full membership live on its start.gg
+  // TEAM page, which this reads in the background — so a producer never has to paste a slug.
+  if (!resolved) scheduleVaultEnrich('event teams');
+  return out;
+}
+
+// Refresh the small vault summary carried in state (the records live outside it).
+function vaultTouch() {
+  if (!state.teamVault) return;
+  try {
+    state.teamVault.count = teamDb.count();
+    state.teamVault.ver = (state.teamVault.ver || 0) + 1;
+  } catch (_) {}
 }
 
 // Flat picker list of playable matches (both entrants known), ready first.
@@ -7922,20 +10600,37 @@ let _bracketFetchInFlight = '';         // slug mid-import — never stack a sec
 
 // start.gg rate limiting surfaces as a 429/error (sometimes an empty body) — back off
 // and retry the ONE page instead of failing the whole import.
-async function startggRequestWithBackoff(client, query, vars, tries = 4) {
+// The client (backend/integrations/startgg-client.js) already retries the transient cases —
+// timeouts, dropped sockets, 5xx, 429 and 200-with-throttle-error — with its own backoff. This
+// outer layer is now ONLY the last-resort long wait for a sustained rate limit that survived all
+// of that, i.e. the per-minute quota is genuinely spent. Keeping both layers narrow matters: they
+// used to compound (4 client attempts x 4 outer attempts) and could stall an import for minutes.
+async function startggRequestWithBackoff(client, query, vars, tries = 2) {
   for (let i = 0; ; i++) {
     try {
       return await client.request(query, vars);
     } catch (e) {
       const msg = String((e && e.message) || '');
-      const limited = /429|rate ?limit|too many/i.test(msg);
+      const limited = /429|rate ?limit|too many|throttl/i.test(msg);
       if (!limited || i >= tries - 1) throw e;
-      const wait = 15000 * (i + 1);
-      console.log('[Bracket] start.gg rate limit - backing off ' + (wait / 1000) + 's (page retry ' + (i + 1) + ')');
+      const wait = 20000;
+      console.log('[Bracket] start.gg quota spent - waiting ' + (wait / 1000) + 's for the window to roll (page retry ' + (i + 1) + ')');
       await new Promise((r) => setTimeout(r, wait));
     }
   }
 }
+
+// start.gg's documented budget is 80 requests / 60s. The old 500ms page delay paced at up to
+// 120/min — over the line by design, so a big sweep TRIPPED the limit and then paid for it in
+// multi-second backoffs. 850ms (~70/min) sits under the quota and finishes sooner in wall-clock
+// than getting throttled does.
+const STARTGG_PAGE_DELAY_MS = 850;
+// 32 sets/page. 120 pages = 3840 sets in ONE phase, which covers a 2048-entrant double-elim with
+// room over; the old 63-page (2016-set) cap could clip a major open's own bracket.
+const PHASE_SETS_MAX_PAGES = 120;
+// Phases whose set list hit the cap on the last import — surfaced to the panel so a partial
+// bracket announces itself instead of looking like it just ends.
+const _bracketTruncated = new Set();
 
 const BRACKET_SET_FIELDS = `
             id
@@ -7955,18 +10650,52 @@ const BRACKET_SET_FIELDS = `
             }`;
 
 async function fetchEventPhaseMeta(client, slug) {
-  const query = `
-    query BracketPhases($slug: String!) {
+  // paged=true asks for pageInfo so we can page past 64 phase groups. If start.gg's schema ever
+  // rejects that selection, fall straight back to the original single-page shape — a bracket that
+  // imports its first 64 pools beats one that won't import at all.
+  const buildQuery = (paged) => `
+    query BracketPhases($slug: String!, $page: Int!) {
       event(slug: $slug) {
         id
         name
         tournament { name }
-        phases { id name state phaseGroups(query: { perPage: 64 }) { nodes { id } } }
+        phases { id name state phaseGroups(query: { perPage: 64, page: $page }) {
+          ${paged ? 'pageInfo { totalPages }' : ''}
+          nodes { id }
+        } }
       }
     }`;
-  const res = await startggRequestWithBackoff(client, query, { slug });
+  let paged = true;
+  let res;
+  try {
+    res = await startggRequestWithBackoff(client, buildQuery(true), { slug, page: 1 });
+  } catch (e) {
+    if (/429|rate ?limit|too many|not found|token/i.test(String((e && e.message) || ''))) throw e;
+    console.warn('[Bracket] phaseGroups pageInfo rejected (' + e.message + ') — falling back to a single page of pools');
+    paged = false;
+    res = await startggRequestWithBackoff(client, buildQuery(false), { slug, page: 1 });
+  }
+  const query = buildQuery(paged);
   const event = res && res.event;
   if (!event) throw new Error('Event not found — check the slug/URL and your token');
+
+  // phaseGroups was capped at ONE page of 64 with no pagination — a major-scale pool phase
+  // (RLCS Opens run far more than 64 pools) silently lost every group past the first 64, so the
+  // bracket just stopped partway with no error. Page through any phase that says there's more.
+  const phases = event.phases || [];
+  for (const ph of phases) {
+    const pg = ph && ph.phaseGroups;
+    const total = (pg && pg.pageInfo && pg.pageInfo.totalPages) || 1;
+    if (total <= 1) continue;
+    for (let page = 2; page <= total; page++) {
+      await new Promise((r) => setTimeout(r, STARTGG_PAGE_DELAY_MS));
+      const more = await startggRequestWithBackoff(client, query, { slug, page });
+      const mph = ((more && more.event && more.event.phases) || []).find((x) => x && x.id === ph.id);
+      const nodes = (mph && mph.phaseGroups && mph.phaseGroups.nodes) || [];
+      pg.nodes = (pg.nodes || []).concat(nodes);
+    }
+    console.log(`[Bracket] phase "${ph.name || ph.id}" has ${(pg.nodes || []).length} pool group(s) across ${total} page(s)`);
+  }
   return event;
 }
 
@@ -7988,14 +10717,20 @@ async function fetchPhaseSets(client, slug, phase) {
   const all = [];
   let page = 1, totalPages = 1;
   do {
-    if (page > 1) await new Promise((r) => setTimeout(r, 500));   // 80 req/min budget
+    if (page > 1) await new Promise((r) => setTimeout(r, STARTGG_PAGE_DELAY_MS));   // stay under start.gg's 80 req/min
     const res = await startggRequestWithBackoff(client, query, { slug, perPage: 32, page });
     const sets = res && res.event && res.event.sets;
     if (!sets) break;
     all.push(...(sets.nodes || []));
     totalPages = (sets.pageInfo && sets.pageInfo.totalPages) || 1;
     page++;
-  } while (page <= totalPages && page <= 63);
+  } while (page <= totalPages && page <= PHASE_SETS_MAX_PAGES);
+  // Never truncate silently: a bracket that just stops mid-phase reads as a bug in the overlay,
+  // not as a cap we chose. Say so in the log and hand the count back to the caller.
+  if (totalPages > PHASE_SETS_MAX_PAGES) {
+    console.warn(`[Bracket] phase "${phase.name || phase.id}" has ${totalPages} pages of sets — capped at ${PHASE_SETS_MAX_PAGES} (${all.length} sets loaded). Raise PHASE_SETS_MAX_PAGES if a real event needs it.`);
+    _bracketTruncated.add(String(phase.name || phase.id));
+  }
   return all;
 }
 
@@ -8011,6 +10746,7 @@ async function fetchBracket(rawSlug) {
       sets: (state.bracket.matches || []).length, inProgress: true };
   }
   _bracketFetchInFlight = slug;
+  _bracketTruncated.clear();   // per-import: only report caps this sweep actually hit
   try {
     const client = createStartGgClient(startggApiToken);
     const event = await fetchEventPhaseMeta(client, slug);
@@ -8028,21 +10764,35 @@ async function fetchBracket(rawSlug) {
       if (!settled) {
         const sets = await fetchPhaseSets(client, slug, ph);
         _bracketPhaseCache.set(key, { sets, phaseState: ph.state });
-        await new Promise((r) => setTimeout(r, 600));   // breathe between phases
+        await new Promise((r) => setTimeout(r, STARTGG_PAGE_DELAY_MS));   // breathe between phases
       }
       done++;
       state.bracket.progress = done < order.length ? { done, total: order.length, phase: ph.name || '' } : null;
+      // `bracket` is a LIBRARY-tier key, so progress written into state never rode the live
+      // broadcast — and nothing read it either. Push it as its own tiny message instead: on a
+      // major event this loop runs for minutes and the producer needs to see it moving.
+      broadcastBracketProgress(done, order.length, ph.name || '');
       applyBracketResult(slug, event, combined());
       broadcastFullState();   // the bracket fills in phase by phase
     }
-    state.bracket.progress = null;
     saveAppState();
     syncAllLinkedChallongeTournaments().catch(() => {});
     const rounds = state.bracket.winners.length + state.bracket.losers.length + state.bracket.finals.length;
-    return { title: event.name || '', tournamentName: (event.tournament && event.tournament.name) || '', type: state.bracket.type, rounds, sets: combined().length };
+    const truncated = [..._bracketTruncated];
+    return { title: event.name || '', tournamentName: (event.tournament && event.tournament.name) || '', type: state.bracket.type, rounds, sets: combined().length, truncated };
   } finally {
     _bracketFetchInFlight = '';
+    // Always clear progress — a failed import used to leave a stale "importing phase X" object
+    // in state forever, because the reset only ran on the success path.
+    state.bracket.progress = null;
+    broadcastBracketProgress(0, 0, '');
   }
+}
+
+// One small message rather than a full_state, so phase-by-phase progress is cheap to send.
+// total 0 = finished/idle (the panel clears its line).
+function broadcastBracketProgress(done, total, phase) {
+  broadcast(bridgeClients, { type: 'bracket-progress', data: { done, total, phase } });
 }
 
 // ISO 3166-1 alpha-2 lookup for the most common esports countries.
@@ -8088,57 +10838,81 @@ function _countryCode(name) {
 
 // Merge a list of Start.gg entrants into the saved team library (update by name,
 // don't clobber custom logos) and refresh the transient eventTeams list.
-function mergeEntrantsIntoLibrary(entrants) {
-  let teamsAdded = 0, playersTotal = 0, logosFound = 0;
+function mergeEntrantsIntoLibrary(entrants, ctx) {
+  let teamsAdded = 0, playersTotal = 0, logosFound = 0, vaultMatched = 0, vaultLogos = 0;
+  const resolved = new Map();   // entrant -> vault record, reused by mapEntrantsToTeams below
   (entrants || []).forEach((ent) => {
     const name = (ent.name || '').trim();
     if (!name) return;
-    const players = (ent.participants || [])
-      .map((p) => {
-        const tag = (p.gamerTag || '').trim();
-        const u = (p.player && p.player.user) || {};
-        const auths = u.authorizations || [];
-        const twitch = (auths.find((a) => a && a.type === 'TWITCH') || {}).externalUsername || null;
-        const twitter = (auths.find((a) => a && (a.type === 'TWITTER' || a.type === 'TWITTER_V2')) || {}).externalUsername || null;
-        const country = (u.location && u.location.country) || null;
-        const countryCode = _countryCode(country);
-        const image = ((u.images || []).find((i) => /profile/i.test(i.type || '')) || (u.images || [])[0] || {}).url || null;
-        const realName = (u.name && u.name.trim() && u.name.trim() !== tag) ? u.name.trim() : null;
-        const startggPlayerId = p.player && p.player.id ? String(p.player.id) : null;
-        if (tag) {
-          const patch = {};
-          if (u.slug) { patch.startggSlug = u.slug; patch.startggPlayerId = startggPlayerId; }
-          if (twitch) patch.twitch = twitch;
-          if (twitter) patch.twitter = twitter;
-          if (country) patch.country = country;
-          if (countryCode) patch.countryCode = countryCode;
-          if (image) patch.image = image;
-          if (realName) patch.realName = realName;
-          if (Object.keys(patch).length) upsertPlayerProfile(tag, patch);
-        }
-        return { id: Math.random().toString(36).slice(2, 11), name: tag, platform: 'startgg', platformId: startggPlayerId || '', assignedCamera: null, country: country || '', countryCode: countryCode || '' };
-      })
-      .filter((p) => p.name);
+    const players = (ent.participants || []).map(startggPlayerFromParticipant).filter((p) => p.name);
     playersTotal += players.length;
+    const seed = Number(ent.initialSeedNum) > 0 ? Number(ent.initialSeedNum) : 0;
+    const org = entrantOrgName(players);
 
     const logo = pickEntrantLogo(ent);
     if (logo) logosFound++;
 
+    // Ask the vault who this is BEFORE touching the library. It matches on the permanent start.gg
+    // team id/slug, then any name this org has competed under, then roster overlap — so a rebrand
+    // or a squad that dropped one player still lands on the record the producer already branded,
+    // instead of arriving as a brand-new nameless team.
+    const v = vaultApplyEntrant(ent, players, ctx);
+    const rec = v && v.rec;
+    if (rec) resolved.set(ent, rec);
+    if (rec && v.via) vaultMatched++;
+
+    // Vault branding overrides the import. Its logo is the whole point: most orgs never upload a
+    // crest to start.gg, so `logo` here is usually null and the producer's saved one is all we have.
+    const useName  = (rec && rec.pins && rec.pins.name && rec.name) ? rec.name : name;
+    const useLogo  = (rec && rec.logo) || logo || null;
+    if (rec && rec.logo && !logo) vaultLogos++;
+
     const startggId = (ent.id != null) ? String(ent.id) : null;
-    const existing = savedTeams.find((t) => (t.name || '').toLowerCase() === name.toLowerCase());
+    const key = useName.toLowerCase();
+    // Match the library entry by the vault id first — that's what survives a rename. Falling
+    // straight to the name lookup (as this used to) meant a renamed team was appended as a
+    // duplicate and the branded original was orphaned.
+    let existing = null;
+    if (rec) existing = savedTeams.find((t) => t && t.vaultId === rec.id);
+    if (!existing) existing = savedTeams.find((t) => (t.name || '').toLowerCase() === key);
+    if (!existing && useName.toLowerCase() !== name.toLowerCase()) {
+      existing = savedTeams.find((t) => (t.name || '').toLowerCase() === name.toLowerCase());
+    }
+
     if (existing) {
       if (players.length) existing.players = players;            // refresh roster
-      if (logo && !existing.logo) existing.logo = logo;          // don't clobber a custom logo
+      if (useLogo && (!existing.logo || (rec && rec.logo))) existing.logo = useLogo;   // vault wins, raw import only fills a gap
       if (startggId) existing.startggId = startggId;             // tag for exact, collision-proof matching on push
+      if (seed) existing.seed = seed;
+      if (org) existing.org = org;
+      if (rec) {
+        existing.vaultId = rec.id;
+        if (rec.startggTeamId) existing.startggTeamId = rec.startggTeamId;
+        if (rec.startggSlug)   existing.startggSlug   = rec.startggSlug;
+        if (rec.color) existing.color = rec.color;
+        if (rec.abbr)  existing.abbr  = rec.abbr;
+        if (rec.pins && rec.pins.name && rec.name) existing.name = rec.name;
+      }
     } else {
-      savedTeams.push({ name, logo: logo || null, players, startggId });
+      const row = { name: useName, logo: useLogo, players, seed, org, startggId };
+      if (rec) {
+        row.vaultId = rec.id;
+        if (rec.startggTeamId) row.startggTeamId = rec.startggTeamId;
+        if (rec.startggSlug)   row.startggSlug   = rec.startggSlug;
+        if (rec.color) row.color = rec.color;
+        if (rec.abbr)  row.abbr  = rec.abbr;
+      }
+      savedTeams.push(row);
       teamsAdded++;
     }
   });
   // Keep the transient picker list + name→logo map in sync too.
-  state.startgg.eventTeams = mapEntrantsToTeams(entrants);
+  state.startgg.eventTeams = mapEntrantsToTeams(entrants, ctx, resolved);
   indexEntrantLogos(entrants);
-  return { teamsAdded, playersTotal, logosFound };
+  if (state.teamVault) state.teamVault.lastMatch = { at: Date.now(), matched: vaultMatched, logosRestored: vaultLogos, total: (entrants || []).length };
+  vaultTouch();
+  scheduleVaultEnrich('library merge');
+  return { teamsAdded, playersTotal, logosFound, vaultMatched, vaultLogos };
 }
 
 // Teams-only import (for the Teams page "Pull from start.gg") — no bracket touch.
@@ -8161,7 +10935,7 @@ async function importStartggTeams(rawSlug) {
 
   if (!slug) throw new Error('Paste a start.gg event or tournament URL');
   const entrants = await fetchAllEntrants(client, slug);
-  const r = mergeEntrantsIntoLibrary(entrants);
+  const r = mergeEntrantsIntoLibrary(entrants, { eventSlug: slug });
   saveTeams();
   saveAppState();
   broadcastFullState();
@@ -8179,7 +10953,7 @@ async function loadEvent(rawSlug) {
   // to see — apply and broadcast them before starting the long phased bracket import.
   const entrants = await fetchAllEntrants(client, slug);
   // Only populate the transient event roster — don't touch savedTeams (user saves manually)
-  const eventTeams = mapEntrantsToTeams(entrants);
+  const eventTeams = mapEntrantsToTeams(entrants, { eventSlug: slug });
   state.startgg.eventTeams = eventTeams;
   indexEntrantLogos(entrants);
   broadcastFullState();
@@ -8215,7 +10989,7 @@ async function loadStartggEventTeams(tournamentSlug, eventSlug) {
 
   const client = createStartGgClient(startggApiToken);
   const entrantsRaw = await fetchAllEntrants(client, slug);
-  const teams = mapEntrantsToTeams(entrantsRaw);
+  const teams = mapEntrantsToTeams(entrantsRaw, { eventSlug: slug });
 
   // Update state
   state.startgg.tournamentSlug = (tournamentSlug || state.startgg.tournamentSlug || '').trim();
@@ -8237,14 +11011,395 @@ async function loadStartggEventTeams(tournamentSlug, eventSlug) {
 }
 
 // Best team logo from a Start.gg entrant's linked team (null for ad-hoc entrants).
+// The event team's own images are checked first, then the org's GlobalTeam crest — plenty of orgs
+// have a logo on their permanent team page and none on the per-event entry.
 function pickEntrantLogo(ent) {
-  const imgs = (ent && ent.team && ent.team.images) || [];
+  const team = (ent && ent.team) || {};
+  const imgs = [...(team.images || []), ...((team.globalTeam && team.globalTeam.images) || [])];
   if (!imgs.length) return null;
   const profile = imgs.find((i) => i.type === 'profile' && i.url);
   if (profile) return profile.url;
   const any = imgs.find((i) => i.url);
   return any ? any.url : null;
 }
+
+// The permanent identity of the org behind an entrant, if start.gg has one. `discriminator` is the
+// public /team/<slug> path; the id is the numeric key. Ad-hoc entrants (most pickup squads) have
+// neither, which is exactly why the vault also matches on roster overlap.
+function entrantGlobalTeam(ent) {
+  const gt = (ent && ent.team && ent.team.globalTeam) || null;
+  if (!gt) return { startggTeamId: null, startggSlug: null };
+  return {
+    startggTeamId: gt.id != null ? String(gt.id) : null,
+    startggSlug: gt.discriminator || null,
+  };
+}
+
+// One entrant -> the platform-neutral team signature the vault resolves on.
+function entrantTeamSignature(ent, players) {
+  const gt = entrantGlobalTeam(ent);
+  return {
+    name: (ent && ent.name || '').trim(),
+    startggTeamId: gt.startggTeamId,
+    startggSlug: gt.startggSlug,
+    logo: pickEntrantLogo(ent),
+    entrantId: (ent && ent.id != null) ? String(ent.id) : null,
+    seed: Number(ent && ent.initialSeedNum) > 0 ? Number(ent.initialSeedNum) : 0,
+    players: (players || []).map((p) => ({ ...p, startggPlayerId: p.platformId || p.startggPlayerId || '' })),
+  };
+}
+
+// Fold an entrant into the team vault and hand back the branding the vault says is correct.
+// This is the single choke point that makes a producer's edits survive into future events: the
+// import provides the roster, the vault provides the name/logo/colour/abbr once they've been set.
+// Returns null when the vault is disabled, so every caller falls straight back to raw start.gg.
+function vaultApplyEntrant(ent, players, ctx) {
+  if (!state.teamVault || !state.teamVault.enabled) return null;
+  try {
+    const sig = entrantTeamSignature(ent, players);
+    if (!sig.name) return null;
+    // autoLink off = the vault is a curated list: it enriches teams the producer has banked and
+    // stays silent on everyone else, rather than growing a record for all 200 entrants of an open.
+    if (!state.teamVault.autoLink) {
+      const found = teamDb.resolve(sig);
+      if (!found.rec) return null;
+    }
+    const { rec, via, created } = teamDb.applyEntrant(sig, ctx || {});
+    if (!rec) return null;
+    return { rec, via, created };
+  } catch (e) {
+    console.warn('[TeamVault] applyEntrant failed:', e.message);
+    return null;
+  }
+}
+
+// Copy ONE event team into the working library. Both "Save" paths off the Event Teams grid used to
+// rebuild the row from three fields, which silently dropped the team's colour, abbreviation,
+// favourite flag and start.gg entrant id every time a producer pressed Save. Spread the existing
+// row instead, and carry the vault link across so the record stays findable next event.
+function saveEventTeamToLibrary(team) {
+  if (!team || !(team.name || '').trim()) return null;
+  const _tn = (x) => (x || '').trim().toLowerCase();
+  let row = (team.vaultId && savedTeams.find((t) => t && t.vaultId === team.vaultId)) ||
+            savedTeams.find((t) => _tn(t.name) === _tn(team.name));
+  const players = (team.players && team.players.length) ? team.players : ((row && row.players) || []);
+  if (row) {
+    row.name = team.name;
+    if (!row.logo && team.logo) row.logo = team.logo;    // a custom logo already set here wins
+    row.players = players;
+  } else {
+    row = { name: team.name, logo: team.logo || null, players };
+    savedTeams.push(row);
+  }
+  ['color', 'abbr', 'seed', 'org', 'startggId', 'vaultId', 'startggTeamId', 'startggSlug']
+    .forEach((f) => { if (team[f] !== undefined && team[f] !== null && team[f] !== '') row[f] = team[f]; });
+  return row;
+}
+
+// Push a vault record into the working team library (savedTeams) — matched on the vault id so a
+// renamed team updates its own row instead of spawning a second one. Only the ACTIVE roster ships;
+// see teamDb.toLibraryTeam.
+function applyVaultToLibrary(rec) {
+  if (!rec) return null;
+  const lib = teamDb.toLibraryTeam(rec);
+  const _tn = (x) => (x || '').trim().toLowerCase();
+  let row = savedTeams.find((t) => t && t.vaultId === rec.id) ||
+            savedTeams.find((t) => _tn(t.name) === _tn(rec.name)) ||
+            savedTeams.find((t) => (rec.aliases || []).includes(teamDb.norm(t.name || '')));
+  if (row) {
+    row.name = lib.name;
+    if (lib.logo)  row.logo  = lib.logo;
+    if (lib.color) row.color = lib.color;
+    if (lib.abbr)  row.abbr  = lib.abbr;
+    if (lib.players.length) row.players = lib.players;
+    row.vaultId = rec.id;
+    if (rec.startggTeamId) row.startggTeamId = rec.startggTeamId;
+    if (rec.startggSlug)   row.startggSlug   = rec.startggSlug;
+  } else {
+    row = lib;
+    savedTeams.push(row);
+  }
+  return row;
+}
+
+// Overlay the vault's producer-owned branding + roster extras onto a freshly imported team object.
+// start.gg still owns WHO entered; the vault owns what they look like on air.
+function vaultDecorateTeam(team, rec) {
+  if (!rec) return team;
+  const out = { ...team, vaultId: rec.id };
+  if (rec.startggTeamId) out.startggTeamId = rec.startggTeamId;
+  if (rec.startggSlug)   out.startggSlug   = rec.startggSlug;
+  if (rec.pins && rec.pins.name && rec.name) out.name = rec.name;
+  if (rec.logo)  out.logo  = rec.logo;                       // vault logo always wins — it's the fix
+  // Seed the name→logo map too, so the stream queue / bracket / upcoming overlay resolve this
+  // crest with a hash lookup instead of falling through to logoForTeamName's vault scan.
+  if (rec.logo && out.name) state.startgg.logoMap[out.name.trim().toLowerCase()] = rec.logo;
+  if (rec.color) out.color = rec.color;
+  if (rec.abbr)  out.abbr  = rec.abbr;
+  // Carry the producer's per-player extras (photo, role, camera slot, socials) onto the imported
+  // roster, matched on the vault's own player key so a gamertag change doesn't lose them.
+  if (Array.isArray(out.players) && out.players.length && Array.isArray(rec.roster)) {
+    const byKey = new Map();
+    rec.roster.forEach((p) => { const k = teamDb.playerKey(p); if (k) byKey.set(k, p); });
+    out.players = out.players.map((p) => {
+      const saved = byKey.get(teamDb.playerKey({ ...p, startggPlayerId: p.platformId || '' }));
+      if (!saved) return p;
+      const merged = { ...p };
+      ['photo', 'role', 'camSlot', 'assignedCamera', 'discord', 'instagram', 'tiktok', 'youtube', 'info', 'sixmans', 'status']
+        .forEach((f) => { if (!merged[f] && saved[f]) merged[f] = saved[f]; });
+      if (saved.id) merged.id = saved.id;
+      return merged;
+    });
+  }
+  return out;
+}
+
+// ── Pull a team straight from its start.gg team page ───────────────────────
+//
+// The other direction from an event import: instead of waiting for an org to enter something and
+// scraping them out of the entrant list, point at start.gg/team/<slug> and bank them now — logo,
+// full roster, and (the part an event import can never tell you) who is a CURRENT member versus an
+// alum. start.gg's TeamMember.status carries exactly that, so the vault's active/inactive split
+// comes back correct on the first pull.
+
+function parseStartggTeamSlug(input) {
+  const s = _stripStartggWhitespace(input).replace(/^https?:\/\/(www\.)?start\.gg\//i, '');
+  if (!s) return '';
+  const m = s.match(/team\/([^/?#]+)/i);
+  return m ? m[1] : s.split(/[/?#]/)[0];
+}
+
+// start.gg's own member states. ACCEPTED is on the roster today; ALUM is explicitly a past member;
+// an invite that was never accepted has no business showing on a broadcast graphic either.
+function _memberIsActive(m) {
+  const st = String((m && m.status) || '').toUpperCase();
+  if (!st) return true;                 // schema tier that couldn't query status — assume current
+  return st === 'ACCEPTED';
+}
+
+async function fetchStartggTeam(client, slug) {
+  // Tried strongest-first; each tier drops one thing start.gg's schema might refuse, so a partial
+  // answer still beats failing the pull outright.
+  const tiers = [
+    `query T($slug: String!) { team(slug: $slug) { id name discriminator images { url type }
+        ... on GlobalTeam { members { id status isCaptain isAlternate
+            player { id gamerTag prefix user { slug name images { url type } authorizations { type externalUsername } location { country } } } } } } }`,
+    `query T($slug: String!) { team(slug: $slug) { id name discriminator images { url type }
+        ... on GlobalTeam { members { id status
+            player { id gamerTag prefix user { slug name images { url type } } } } } } }`,
+    `query T($slug: String!) { team(slug: $slug) { id name discriminator images { url type }
+        ... on GlobalTeam { members { player { id gamerTag user { slug name } } } } } }`,
+    `query T($slug: String!) { team(slug: $slug) { id name discriminator images { url type } } }`,
+  ];
+  // A start.gg team slug is addressed as "team/<discriminator>"; a producer will paste either form
+  // (or the whole URL), so try the prefixed one first and the bare token second.
+  const candidates = [`team/${slug}`, slug];
+  let lastErr = null;
+  for (const cand of candidates) {
+    for (const q of tiers) {
+      let res;
+      try { res = await client.request(q, { slug: cand }); }
+      catch (e) { lastErr = e; continue; }          // schema error → next (simpler) tier
+      if (res && res.team) return res.team;
+      break;                                        // query ran fine, this slug just isn't a team
+    }
+  }
+  if (lastErr) throw lastErr;
+  return null;
+}
+
+// Apply one FETCHED start.gg team to the vault. Split out from the slug import because the
+// automatic sweep below needs exactly the same work — the two used to be one function, which is
+// why the only way to bank a team was to paste its URL by hand.
+function applyStartggTeamToVault(team, slugHint, ctx) {
+  const members = Array.isArray(team.members) ? team.members : [];
+  // Reuse the ONE participant→player mapper so a team-page pull produces byte-identical player
+  // objects to an event import (and updates playerProfiles the same way) — otherwise the same
+  // human resolves differently depending on which door they came in through.
+  const rows = members.map((m) => ({
+    player: startggPlayerFromParticipant({ gamerTag: (m.player && m.player.gamerTag) || '', prefix: (m.player && m.player.prefix) || '', player: m.player || {} }),
+    active: _memberIsActive(m),
+    alternate: !!m.isAlternate,
+    captain: !!m.isCaptain,
+  })).filter((r) => r.player.name);
+
+  const imgs = team.images || [];
+  const logo = ((imgs.find((i) => i.type === 'profile' && i.url) || imgs.find((i) => i.url) || {}).url) || null;
+
+  const sig = {
+    name: (team.name || slugHint || '').trim(),
+    startggTeamId: team.id != null ? String(team.id) : null,
+    startggSlug: team.discriminator || slugHint || null,
+    logo,
+    // EVERY member goes in, current and alum alike — the alums are the roster history the vault
+    // exists to keep. Their status is corrected immediately below.
+    players: rows.map((r) => ({ ...r.player, startggPlayerId: r.player.platformId || '', role: r.alternate ? 'Sub' : (r.captain ? 'Captain' : (r.player.role || '')) })),
+  };
+  if (!sig.name) return null;
+  const { rec, via, created } = teamDb.applyEntrant(sig, ctx || { eventSlug: null });
+  if (!rec) return null;
+
+  // applyEntrant marks everyone it was handed as active (it can't know about alums), so apply
+  // start.gg's own membership state on top.
+  let activeCount = 0;
+  rows.forEach((r) => {
+    const key = teamDb.playerKey({ ...r.player, startggPlayerId: r.player.platformId || '' });
+    if (!key) return;
+    if (r.active) activeCount++;
+    else teamDb.setRosterStatus(rec.id, key, 'inactive');
+  });
+  // Stamp WHEN we last read the team page, so the sweep can skip records it already knows about
+  // instead of re-querying the whole vault on every import.
+  teamDb.update(rec.id, { enrichedAt: Date.now() });
+  const fresh = teamDb.get(rec.id) || rec;
+
+  return {
+    id: fresh.id, rec: fresh,
+    name: fresh.name,
+    slug: fresh.startggSlug,
+    startggTeamId: fresh.startggTeamId,
+    logo: !!fresh.logo,
+    members: rows.length,
+    active: activeCount,
+    inactive: rows.length - activeCount,
+    created, matchedVia: via,
+  };
+}
+
+// Import (or refresh) one start.gg team into the vault from a slug or URL. This is the OPTIONAL
+// manual door — for an org that hasn't entered one of your events yet, so the automatic sweep has
+// never seen them. `alsoLibrary` additionally drops it into the working team library.
+async function importStartggTeamBySlug(rawSlug, opts = {}) {
+  if (!startggApiToken) throw new Error('Missing Start.gg API token (set it in Settings)');
+  const slug = parseStartggTeamSlug(rawSlug);
+  if (!slug) throw new Error('Paste a start.gg team URL or slug');
+
+  const client = createStartGgClient(startggApiToken);
+  const team = await fetchStartggTeam(client, slug);
+  if (!team) throw new Error(`No start.gg team found for "${slug}" — check the URL (it should look like start.gg/team/abc123)`);
+
+  const out = applyStartggTeamToVault(team, slug);
+  if (!out) throw new Error('Could not store the team');
+
+  if (opts.alsoLibrary !== false) { applyVaultToLibrary(out.rec); saveTeams(); }
+  vaultTouch();
+  broadcastFullState();
+  return out;
+}
+
+// ── Automatic enrichment ───────────────────────────────────────────────────
+//
+// An event import already learns each entrant's permanent GlobalTeam slug for free (see
+// entrantGlobalTeam) — but the entrant only tells us who ENTERED. The team page is where the org's
+// crest and its full membership (including alumni) live. So after every import, quietly walk the
+// records that carry a slug and haven't been read recently, and fill them in.
+//
+// Nothing here blocks an import: the sweep runs detached, paces itself under start.gg's 80 req/min,
+// and reports progress through state.teamVault.enrich for the panel to display.
+
+const VAULT_ENRICH_TTL_MS   = 7 * 24 * 60 * 60 * 1000;   // re-read a team page at most weekly
+const VAULT_ENRICH_MAX      = 120;                        // per sweep; the rest is picked up next time
+const VAULT_ENRICH_START_MS = 4000;                       // let the import's own broadcasts settle first
+let _vaultEnrichRunning = false;
+let _vaultEnrichTimer   = null;
+
+function _vaultEnrichState(patch) {
+  if (!state.teamVault) return;
+  state.teamVault.enrich = { ...(state.teamVault.enrich || {}), ...patch };
+}
+
+// Which banked teams are worth asking start.gg about right now.
+function vaultEnrichTargets(force) {
+  return teamDb.all().filter((t) => {
+    if (!t.startggSlug && !t.startggTeamId) return false;   // no team page to read
+    if (force) return true;
+    if (!t.enrichedAt) return true;
+    return (Date.now() - t.enrichedAt) > VAULT_ENRICH_TTL_MS;
+  });
+}
+
+async function enrichVaultFromStartgg(opts = {}) {
+  if (_vaultEnrichRunning) return { skipped: 'already running' };
+  if (!startggApiToken) return { skipped: 'no start.gg token' };
+  if (!state.teamVault || !state.teamVault.enabled) return { skipped: 'vault off' };
+
+  const targets = vaultEnrichTargets(!!opts.force).slice(0, opts.limit || VAULT_ENRICH_MAX);
+  if (!targets.length) { _vaultEnrichState({ running: false, done: 0, total: 0, lastAt: Date.now() }); return { updated: 0, total: 0 }; }
+
+  _vaultEnrichRunning = true;
+  _vaultEnrichState({ running: true, done: 0, total: targets.length, updated: 0, failed: 0 });
+  broadcastFullState();
+
+  const client = createStartGgClient(startggApiToken);
+  let updated = 0, failed = 0, logosGained = 0, libraryTouched = false;
+  for (let i = 0; i < targets.length; i++) {
+    const rec = teamDb.get(targets[i].id);
+    if (!rec) continue;
+    const slug = rec.startggSlug || rec.startggTeamId;
+    const hadLogo = !!rec.logo;
+    try {
+      const team = await fetchStartggTeam(client, slug);
+      if (team) {
+        const r = applyStartggTeamToVault(team, rec.startggSlug || '');
+        if (r) {
+          updated++;
+          if (!hadLogo && r.logo) { logosGained++; libraryTouched = adoptVaultCrest(r.rec) || libraryTouched; }
+        }
+      } else {
+        // The slug resolved to nothing — stamp it anyway so a dead link isn't retried every import.
+        teamDb.update(rec.id, { enrichedAt: Date.now() });
+      }
+    } catch (e) {
+      failed++;
+      // A rate limit means the whole sweep should stop and try again later, not hammer on.
+      if (/429|rate ?limit|too many|throttl/i.test(String(e && e.message || ''))) break;
+      teamDb.update(rec.id, { enrichedAt: Date.now() });
+    }
+    _vaultEnrichState({ done: i + 1, updated, failed });
+    if (i < targets.length - 1) await new Promise((r) => setTimeout(r, STARTGG_PAGE_DELAY_MS));
+  }
+
+  _vaultEnrichRunning = false;
+  _vaultEnrichState({ running: false, lastAt: Date.now(), updated, failed, logosGained });
+  if (libraryTouched) saveTeams();
+  vaultTouch();
+  broadcastFullState();
+  console.log(`[TeamVault] Auto-enriched ${updated}/${targets.length} team page(s)${logosGained ? `, ${logosGained} new crest(s)` : ''}${failed ? `, ${failed} failed` : ''}.`);
+  return { updated, failed, logosGained, total: targets.length };
+}
+
+// A crest the sweep just found should reach the working library straight away — otherwise the
+// producer sees the team still logo-less until the NEXT event import, which defeats the point.
+// Deliberately narrow: it fills an EMPTY logo and nothing else. The sweep must never rename a team
+// or replace a chosen crest, because it can run in the middle of a live show.
+function adoptVaultCrest(rec) {
+  if (!rec || !rec.logo) return false;
+  const _tn = (x) => (x || '').trim().toLowerCase();
+  const row = savedTeams.find((t) => t && t.vaultId === rec.id) ||
+              savedTeams.find((t) => _tn(t.name) === _tn(rec.name)) ||
+              savedTeams.find((t) => (rec.aliases || []).includes(teamDb.norm(t.name || '')));
+  // The name→logo map feeds the queue/bracket/upcoming overlays even for teams that were never
+  // saved into the library, so stamp it either way.
+  (rec.aliases || []).concat(_tn(rec.name)).forEach((k) => { if (k && !state.startgg.logoMap[k]) state.startgg.logoMap[k] = rec.logo; });
+  if (!row || row.logo) return false;
+  row.logo = rec.logo;
+  if (!row.vaultId) row.vaultId = rec.id;
+  return true;
+}
+
+// Called at the end of every entrant import. Debounced, so back-to-back imports (teams, then the
+// bracket sweep, then a queue poll) trigger ONE sweep rather than three overlapping ones.
+function scheduleVaultEnrich(reason) {
+  if (!state.teamVault || !state.teamVault.enabled || state.teamVault.autoEnrich === false) return;
+  if (!startggApiToken) return;
+  if (!vaultEnrichTargets(false).length) return;
+  clearTimeout(_vaultEnrichTimer);
+  _vaultEnrichTimer = setTimeout(() => {
+    enrichVaultFromStartgg().catch((e) => console.warn('[TeamVault] enrich failed:', e.message));
+  }, VAULT_ENRICH_START_MS);
+  if (reason) console.log(`[TeamVault] Auto-enrich queued (${reason}).`);
+}
+
 
 // One-shot "make this event the broadcast event": full team import (→ library with
 // logos) + bracket (all phases) + stream queue, and start polling for live updates.
@@ -8256,6 +11411,23 @@ async function activateStartggEvent(tournamentSlug, eventSlug, meta) {
 
   // Teams (→ library, with logos) + bracket (phases).
   const loaded = await loadEvent(evSlug);
+
+  // Switching events must not leave the PREVIOUS event's matches on air. The queue/feed are only
+  // rewritten by a SUCCESSFUL fetchStreamQueue, so without this the ticker kept showing the old
+  // event until the next poll landed — and if that poll failed (rate limit, network, a tournament
+  // with no stream queue) it kept showing it indefinitely. That is the "ticker on the wrong event".
+  // Dropping the pushed set id too, so ensureOnAirLiveInFeed can't re-inject the old event's match.
+  const _eventChanged = (state.startgg.eventSlug || '').trim().toLowerCase() !== evSlug.trim().toLowerCase();
+  if (_eventChanged) {
+    state.startgg.queue = [];
+    state.startgg.matchFeed = [];
+    state.startgg.streams = [];
+    state.startgg.setId = '';
+    state.startgg.lastPushedSetId = '';
+    state.startgg.queueFetchedAt = null;
+    if (state.ticker.source === 'startgg') state.ticker.feed = [];
+    if (state.upcoming.source === 'event') state.upcoming.matches = [];
+  }
 
   state.startgg.tournamentSlug = tSlug;
   state.startgg.eventSlug = evSlug;
@@ -8281,27 +11453,49 @@ async function activateStartggEvent(tournamentSlug, eventSlug, meta) {
     loadedAt: new Date().toISOString()
   };
 
-  // Auto-fill the event name from the start.gg tournament name if the producer hasn't set one.
-  if (!state.eventName) {
-    state.eventName = state.startgg.selectedEvent.tournamentName || state.startgg.selectedEvent.name || '';
+  // Loading an event we haven't loaded before re-arms the things that describe the SHOW itself.
+  // Re-activating the same event (a refresh, a re-pasted link) leaves the producer's edits alone.
+  const _newEvent = state.eventNameSlug !== evSlug;
+
+  // Event title: pulled ONCE per event. Loading a different event overwrites whatever the last one
+  // left behind (the old "only if empty" rule meant event #2 went on air under event #1's title),
+  // but re-activating the SAME event never stomps a title the producer typed themselves.
+  const _autoEventName = state.startgg.selectedEvent.tournamentName || state.startgg.selectedEvent.name || '';
+  if (_autoEventName && (!state.eventName || _newEvent)) {
+    state.eventName = _autoEventName;
   }
+  state.eventNameSlug = evSlug;
+
+  // Linking start.gg means the ticker has real scores to show — point it at the live feed instead of
+  // the manual message list. Producer-typed promo lines are kept (start.gg mode interleaves them),
+  // and switching the source back to Manual sticks until a DIFFERENT event is loaded.
+  if (_newEvent) state.ticker.source = 'startgg';
 
   // Stream queue (non-fatal if the tournament has no queued streams yet).
   let queued = 0;
   if (tSlug) {
     try { const q = await fetchStreamQueue(tSlug); queued = q.count || 0; } catch (e) { /* optional */ }
   }
-  // One-click setup: turn on the queue + auto-follow so the live match auto-pushes to the scoreboard,
-  // and begin live polling (queue + bracket + standings refresh) now that we have a slug.
+  // One-click setup: turn on the queue and begin live polling (queue + bracket + standings refresh)
+  // now that we have a slug. Auto-follow defaults ON for that same one-click experience, but ONLY
+  // until the producer expresses a preference — once they've touched the switch, activating an
+  // event must not flip it back (that's why turning auto-follow off never used to stick, and the
+  // scoreboard kept re-pushing itself mid-show).
   setActivePlatform('startgg');   // active platform — silence Challonge / NXGEN follow before we start ours
   state.startgg.queueEnabled = true;
-  state.startgg.autoFollow = true;
+  if (!state.startgg.autoFollowChosen) state.startgg.autoFollow = true;
   setStartggQueuePolling(true);
 
-  // Standings follow the newly-activated event too — unless the producer built manual rows.
-  // Without this, rows frozen from a PREVIOUS event/league pull shadow the live event forever
+  // Standings follow the newly-activated event too — unless the producer chose a source that OWNS
+  // its rows. Without this, rows frozen from a PREVIOUS event pull shadow the live event forever
   // (standings.html prefers rows over bracket.standings).
-  if ((state.standings?.source || '') !== 'manual') {
+  //
+  // 'league' is excluded alongside 'manual': a producer running our own league standings on air had
+  // them silently replaced by the tournament's the moment an event was activated. A league board is
+  // an explicit choice pointing at explicit data, so activation leaves it alone — switch the source
+  // back to Tournament on the Standings panel to follow the event again.
+  const _stdSrc = state.standings?.source || '';
+  if (_stdSrc !== 'manual' && _stdSrc !== 'league') {
     state.standings.rows = (state.bracket.standings || []).map((r) => ({ ...r }));
     state.standings.source = 'startgg';
   }
@@ -8337,6 +11531,80 @@ async function resolveStartggUrl(input) {
   saveAppState();
   broadcastFullState();
   return { activated: false, needsEventPick: true, tournamentSlug, tournamentName: events[0].tournamentName || '', events: state.startgg.pendingEvents };
+}
+
+
+// ─── Liquipedia (LPDB v3) ────────────────────────────────────────────────────
+// 60 requests per HOUR is the entire allowance, so this never polls. The producer presses
+// Refresh; everything else reads the cache. Budget and cache are persisted because the hour keeps
+// running across an app restart, and because Liquipedia's terms require re-using cached results.
+let _lpBudget = new liquipedia.RateBudget();
+let _lpCache = new liquipedia.LiquipediaCache();
+
+function lpCtx() {
+  return { apiKey: liquipediaApiKey, cache: _lpCache, budget: _lpBudget, now: Date.now };
+}
+/** Mirror the live budget into state so the panel can show "41/55 left this hour". */
+function lpSyncBudget() {
+  state.liquipedia.budgetRemaining = _lpBudget.remaining();
+  state.liquipedia.budgetResetInMs = _lpBudget.retryAfterMs();
+}
+/** Every precondition Liquipedia's terms put on us, in one place. */
+function lpReady() {
+  if (!state.liquipedia.enabled) return 'Liquipedia is off — enable it in Settings ▸ Integrations.';
+  if (!liquipediaApiKey) return 'No Liquipedia API key. Access is not self-service — request one from Liquipedia, then paste it in Settings.';
+  if (!String(state.liquipedia.contact || '').trim()) return 'Liquipedia requires a contact (email or URL) in the User-Agent so they can reach the key holder. Add one in Settings.';
+  return null;
+}
+
+/** One cache-first pull. `force` is the producer pressing Refresh; it still respects the budget. */
+async function lpQuery(datapoint, params, force) {
+  const blocked = lpReady();
+  if (blocked) throw new Error(blocked);
+  const res = await liquipedia.queryCached(lpCtx(), datapoint, params, {
+    force: !!force,
+    contact: state.liquipedia.contact
+  });
+  lpSyncBudget();
+  state.liquipedia.lastFetchAt = new Date().toISOString();
+  state.liquipedia.lastError = res.error || null;
+  return res;
+}
+
+// The four datapoints the producer asked for. Datapoint NAMES follow Liquipedia's documented
+// LPDB tables; the response FIELD names are only published to approved key holders, which is why
+// the normalisers probe several spellings rather than assuming one.
+async function lpFetchStandings(tournamentPage, force) {
+  const res = await lpQuery('standingsentry', {
+    wiki: state.liquipedia.wiki,
+    conditions: tournamentPage ? '[[parent::' + tournamentPage + ']]' : '',
+    limit: 40, order: 'placement ASC'
+  }, force);
+  state.liquipedia.standings = liquipedia.normaliseStandings(res.data);
+  return { rows: state.liquipedia.standings, fromCache: res.fromCache, stale: !!res.stale, ageMs: res.ageMs };
+}
+async function lpFetchRankings(force) {
+  const res = await lpQuery('teamranking', { wiki: state.liquipedia.wiki, limit: 40, order: 'rank ASC' }, force);
+  state.liquipedia.rankings = liquipedia.normaliseStandings(res.data);
+  return { rows: state.liquipedia.rankings, fromCache: res.fromCache, stale: !!res.stale, ageMs: res.ageMs };
+}
+async function lpFetchSquad(teamPage, force) {
+  const res = await lpQuery('squadplayer', {
+    wiki: state.liquipedia.wiki,
+    conditions: teamPage ? '[[teampagename::' + teamPage + ']]' : '',
+    limit: 40
+  }, force);
+  state.liquipedia.squad = liquipedia.rowsOf(res.data);
+  return { rows: state.liquipedia.squad, fromCache: res.fromCache, stale: !!res.stale, ageMs: res.ageMs };
+}
+async function lpFetchTournament(tournamentPage, force) {
+  const res = await lpQuery('tournament', {
+    wiki: state.liquipedia.wiki,
+    conditions: tournamentPage ? '[[pagename::' + tournamentPage + ']]' : '',
+    limit: 1
+  }, force);
+  state.liquipedia.tournament = liquipedia.rowsOf(res.data)[0] || null;
+  return { row: state.liquipedia.tournament, fromCache: res.fromCache, stale: !!res.stale, ageMs: res.ageMs };
 }
 
 // ─── CS2 Game State Integration ──────────────────────────────────────────────
@@ -8985,7 +12253,7 @@ function syncClipsState() {
   state.clips = {
     ...clipSystem.getState(),
     encode: state.encode,
-    captureMode: cur.captureMode || 'auto',
+    captureMode: cur.captureMode || 'manual',   // default = NO auto-clipping; never silently force 'auto'
     autoMontage: !!cur.autoMontage,
     autoMontageId: cur.autoMontageId || null
   };
@@ -9019,7 +12287,7 @@ function maybeAutoMontage(clip) {
 function onDirectorEvents(gameId, events) {
   if (!events.length) return;
   if (aiShielded()) return;   // shield blocks all auto-clipping
-  const mode = state.clips?.captureMode || 'auto';
+  const mode = state.clips?.captureMode || 'manual';   // unset = NO clipping (never default to silent auto)
 
   events.forEach((event) => {
     if (mode === 'manual') return;
@@ -9429,12 +12697,18 @@ function rebuildVetoBoard() {
   v.complete = complete;
 }
 
-function vetoStart({ game, bestOf, teamStart, title }) {
+function vetoStart({ game, bestOf, teamStart, title, strikeFrom }) {
   const pools = vetoData.mergedMapPools(state.gameConfigs);   // built-in + active Game Config maps
   const hasPool = (id) => (pools[id] || []).length > 0;
   const g = hasPool(game) ? game : (hasPool(state.activeGame) ? state.activeGame : 'csgo');
-  const pool = pools[g] || [];
-  if (!pool.length) throw new Error('No map pool defined for ' + g);
+  const fullPool = pools[g] || [];
+  if (!fullPool.length) throw new Error('No map pool defined for ' + g);
+  // Some rulesets strike from a SUBSET of the pool (Smash game 1 = Starters). The producer picks
+  // which tier per event — rulesets differ, and '' / 'all' means strike the whole pool. The rest
+  // of the pool still exists for the Series editor's per-game counterpicks.
+  const wantTier = typeof strikeFrom === 'string' ? strikeFrom : vetoData.getMeta(g).strikeFrom;
+  const subset = (wantTier && wantTier !== 'all') ? fullPool.filter((m) => m && m.tier === wantTier) : [];
+  const pool = subset.length >= 2 ? subset : fullPool;
   const bo = [1, 3, 5, 7].includes(Number(bestOf)) ? Number(bestOf) : 1;
   const ts = teamStart === 'b' ? 'b' : 'a';
   const seq = vetoData.buildSequence(g, bo, pool.length)
@@ -9444,7 +12718,7 @@ function vetoStart({ game, bestOf, teamStart, title }) {
     visible: !!(state.veto && state.veto.visible),
     title: typeof title === 'string' ? title : (state.veto && state.veto.title) || '',
     game: g, bestOf: bo, teamStart: ts,
-    kind: meta.kind, banWord: meta.banWord, unit: meta.unit,
+    kind: meta.kind, banWord: meta.banWord, unit: meta.unit, strikeFrom: wantTier || '',
     pool, sequence: seq, ops: [], maps: [], turn: null, complete: false
   };
   rebuildVetoBoard();
@@ -10871,10 +14145,15 @@ async function _doConnectObs() {
     try {
       state.obs.replayBufferActive = await obsClient.isReplayBufferActive();
     } catch (e) { state.obs.replayBufferActive = false; }
-    if (state.clips?.autoCapture) {
-      try {
-        if (!state.obs.replayBufferActive) await obsClient.startReplayBuffer();
-      } catch (e) { /* replay buffer optional until producer enables it in OBS */ }
+    // DO NOT start OBS's replay buffer here. This ran on every CONNECT — i.e. the moment the suite
+    // opened — and starting the buffer forces OBS to spin up a second encoder session. On a setup
+    // where that session can't initialise (NVENC already held by the stream/recording, mismatched
+    // replay-buffer output settings), OBS silently falls back and rewrites its own output config:
+    // which is what "opening the program resets my OBS encoder settings / drops me to CPU" is.
+    // Nothing is lost by not starting it: every capture path arms the buffer lazily first
+    // (clip-manager ensureReplayBuffer, /api/twitch/clip, the Replays panel's buffer toggle).
+    if (state.clips?.autoCapture && !state.obs.replayBufferActive) {
+      console.log('[Clips] Auto-capture is on but OBS\'s Replay Buffer is off — it will be started on the first capture, not at connect (starting it here rewrote OBS output settings on some setups).');
     }
     broadcastFullState();
     return true;
@@ -10957,22 +14236,38 @@ function logAuto(kind, message) {
 // Extracted from the 'set_gfx_active' WS case so a Flow action can call it directly server-side.
 const GFX_EXCLUSIVE_VISIBLE = {
   break: 'breakScreen', winner: 'winner', intro: 'intro', veto: 'veto', draft: 'draft',
-  bracket: 'bracket', schedule: 'upcoming', upcoming: 'upcoming', standings: 'standings', credits: 'credits'
+  bracket: 'bracket', schedule: 'upcoming', upcoming: 'upcoming', standings: 'standings', credits: 'credits',
+  // Battle-royale graphics. These live UNDER state.br rather than at the top level (they're part
+  // of the BR series model, not standalone scenes), hence the dotted paths — gfxObj() below
+  // resolves both forms so every existing flat entry above keeps working untouched.
+  brdrop: 'br.dropmap', brcompare: 'br.compare', brvictory: 'br.victory'
   // matchup has no independent .visible flag (it's active purely via gfxActive) — nothing to clear.
   // The spotlight/watchlist/teamSpotlight family is deliberately left out: the gfx key 'spotlight'
   // is wired to watchlist.visible in one surface and spotlight.visible in another, so auto-clearing
   // by key could hide the one that's actually live. They're niche and stay independent.
 };
+// Resolve a GFX_EXCLUSIVE_VISIBLE value to the state object holding the .visible flag.
+// Accepts a plain top-level key ('winner') or a dotted path ('br.dropmap').
+function gfxObj(objName) {
+  if (!objName) return null;
+  let cur = state;
+  for (const part of String(objName).split('.')) {
+    if (!cur || typeof cur !== 'object') return null;
+    cur = cur[part];
+  }
+  return (cur && typeof cur === 'object') ? cur : null;
+}
 function setGfxActive(scene) {
   state.gfxActive = scene && typeof scene === 'string' ? scene : null;
   const activeObj = GFX_EXCLUSIVE_VISIBLE[state.gfxActive] || null;
   Object.keys(GFX_EXCLUSIVE_VISIBLE).forEach((k) => {
     const objName = GFX_EXCLUSIVE_VISIBLE[k];
     if (objName === activeObj) return;                       // leave the now-active layer alone
-    const o = state[objName];
-    if (o && typeof o === 'object' && o.visible) o.visible = false;
+    const o = gfxObj(objName);
+    if (o && o.visible) o.visible = false;
   });
-  if (activeObj && state[activeObj] && typeof state[activeObj] === 'object') state[activeObj].visible = true;
+  const ao = gfxObj(activeObj);
+  if (ao) ao.visible = true;
   broadcastFullState();
 }
 
@@ -10986,8 +14281,8 @@ function setGfxActive(scene) {
 function setExclusiveGfxVisible(key, visible) {
   if (visible) { setGfxActive(key); return; }
   if (state.gfxActive === key) { setGfxActive(null); return; }
-  const objName = GFX_EXCLUSIVE_VISIBLE[key];
-  if (objName && state[objName] && typeof state[objName] === 'object') state[objName].visible = false;
+  const o = gfxObj(GFX_EXCLUSIVE_VISIBLE[key]);
+  if (o) o.visible = false;
 }
 
 async function disconnectObs() {
@@ -11269,19 +14564,29 @@ function clearBreakAutoSwitch() {
 function scheduleBreakAutoSwitch() {
   clearBreakAutoSwitch();
   const b = state.breakScreen;
-  if (!b || !b.visible || !b.endsAt || !b.thenScene) return;
+  // Armed by a RUNNING countdown + a target scene. Visibility is deliberately NOT required: the
+  // producer's segment timer (top bar / timer popover Start) sends seconds without ever setting
+  // `visible`, so requiring it meant a preset timer counted all the way down and then did nothing
+  // unless the countdown GRAPHIC also happened to be on air. "When this timer ends, cut there" is
+  // about the timer, not about which graphic is up. Pausing clears endsAt, which disarms it.
+  if (!b || !b.endsAt || !b.thenScene) return;
   if (b.thenPlayout) return;   // a playout playlist handles the handoff client-side (plays, then cuts)
+  const remaining = b.endsAt - Date.now();
+  // Never fire retroactively. Picking a "then" scene against a countdown that already ran out
+  // would otherwise cut the moment the dropdown changed. A small grace keeps a countdown that
+  // just hit zero working normally.
+  if (remaining < -2000) return;
   const thenScene = b.thenScene;
-  const delay = Math.max(0, b.endsAt - Date.now());
+  const delay = Math.max(0, remaining);
   _breakAutoTimer = setTimeout(() => {
     _breakAutoTimer = null;
-    if (!state.breakScreen.visible) return;          // producer already took it down
     flowBus.emit('timer_countdown_end', {});
     // Clear gfxActive too (not just .visible) if break is still the live graphic — otherwise it
     // stays punched up on gfx.html's layer, now overlaid on whatever OBS just cut to. If some
     // OTHER graphic already took over in the meantime, this only clears breakScreen's own state
-    // and leaves the new active graphic alone.
-    setExclusiveGfxVisible('break', false);
+    // and leaves the new active graphic alone. Skipped entirely when the countdown graphic was
+    // never up (a bare segment timer) — there is nothing to take down, but the cut still happens.
+    if (state.breakScreen.visible) setExclusiveGfxVisible('break', false);
     state.breakScreen.endsAt = null;
     state.breakScreen.thenScene = '';
     saveAppState();
@@ -11410,6 +14715,22 @@ function connectToRL() {
   });
 }
 
+// The Stats API socket is BIDIRECTIONAL (2026 update): write {"Command":name,"Data":{...}} back on the
+// same TCP connection. Only used for SetMatchPaused (pause/resume) now — the camera (ChangePOV) and
+// HUD (SetHUDVisibility) commands were removed. One compact JSON object per command; false if disconnected.
+function sendRlCommand(name, data) {
+  if (!rlSocket || rlSocket.destroyed || !state.rlConnected) return false;
+  try {
+    // Newline-DELIMITED: the Stats API reads back commands as line-delimited JSON, same framing it
+    // uses to emit concatenated events. Writing compact JSON with NO trailing "\n" left every command
+    // unterminated, so RL never parsed one — the silent cause of "auto-spectate does nothing" and the
+    // SetHUDVisibility hide never taking. The "\n" is the message terminator.
+    rlSocket.write(JSON.stringify({ Command: name, Data: data || {} }) + '\n');
+    if (IS_DEV()) console.log('[RL cmd] ' + name + ' ' + JSON.stringify(data || {}));
+    return true;
+  } catch (e) { console.warn('[RL cmd] write failed:', e.message); return false; }
+}
+
 function scheduleRLReconnect() {
   if (state.activeGame !== 'rocket-league') return;
   if (rlReconnectTimer) return;
@@ -11439,6 +14760,13 @@ let _rlPrevTargetTeam = 0;
 // are synthesized by diffing this against each new tick (see handleUpdateState). Reset every match
 // (handleMatchCreated) so a fresh game never diffs against the previous game's counts.
 let _rlPrevPlayerStats = {};   // { [playerName]: { saves, demos } }
+// Peak simultaneous players seen per team THIS match (0=Blue, 1=Orange). This is the real roster size
+// that played — used to cap the post-game board so a player who LEAVES before match end (which shrinks
+// the live state.players count) isn't sliced off the scoreboard. Reset each match in handleMatchCreated.
+let _rlPeakTeamCount = { 0: 0, 1: 0 };
+// Counters that only climb over a match — the ones a rejoining player's fresh packet resets to 0.
+// Deliberately NOT boost/isDemolished/isPrimary: those are live state and must follow the packet.
+const RL_CUMULATIVE_STATS = ['score', 'goals', 'assists', 'saves', 'shots', 'demos'];
 
 function resetRlGameTrack() {
   rlGameTrack.gameTime = state.game?.time ?? 300;
@@ -11549,6 +14877,16 @@ function handleRLEvent(msg) {
     case 'MatchCreated':
     case 'game:match_created':
       handleMatchCreated(data);
+      break;
+    case 'MatchPaused':
+    case 'game:match_paused':
+      // Reflect pause state whether WE paused (SetMatchPaused) or it was paused in-game, so the
+      // control-panel Pause/Resume button always shows the true state.
+      if (state.rlPaused !== true) { state.rlPaused = true; broadcastFullState(); }
+      break;
+    case 'MatchUnpaused':
+    case 'game:match_unpaused':
+      if (state.rlPaused !== false) { state.rlPaused = false; broadcastFullState(); }
       break;
     default:
       break;
@@ -11802,14 +15140,20 @@ function handleUpdateState(data) {
       x: ballRaw.X ?? ballRaw.x ?? null,
       y: ballRaw.Y ?? ballRaw.y ?? null,
       z: ballRaw.Z ?? ballRaw.z ?? null,
-      speed: ballRaw.Speed ?? ballRaw.speed ?? null
+      speed: ballRaw.Speed ?? ballRaw.speed ?? null,
+      teamNum: ballRaw.TeamNum ?? ballRaw.teamNum ?? null   // last team to touch (255 = untouched) — possession
     };
   }
+  // Game-level 2026 fields for the scoreboard / director / match-end.
+  if ('Winner' in game) state.game.winner = game.Winner || '';
+  if ('bHasWinner' in game) state.game.hasWinner = !!game.bHasWinner;
+  if ('Arena' in game) state.game.arena = game.Arena || '';
 
   // Players — normalise field names (Stats API PascalCase + legacy snake_case)
   const normalised = players.map(p => ({
     name:    p.Name    || p.name    || '?',
     primaryid: p.PrimaryId ?? p.primaryId ?? null,
+    shortcut: p.Shortcut ?? p.shortcut ?? null,   // spectator number (kept on rlLastTouch for the AI Director)
     team:    p.TeamNum ?? p.teamNum ?? 0,
     score:   p.Score   ?? p.score   ?? 0,
     goals:   p.Goals   ?? p.goals   ?? 0,
@@ -11817,7 +15161,12 @@ function handleUpdateState(data) {
     saves:   p.Saves   ?? p.saves   ?? 0,
     shots:   p.Shots   ?? p.shots   ?? 0,
     demos:   p.Demos   ?? p.demos   ?? 0,
-    boost:   p.Boost   ?? p.boost   ?? null,
+    touches: p.Touches ?? p.touches ?? null,       // total ball touches (2026 field)
+    carTouches: p.CarTouches ?? p.carTouches ?? null,
+    boost:   p.Boost   ?? p.boost   ?? null,        // SPECTATOR-only — absent while the user is playing
+    speed:   p.Speed   ?? p.speed   ?? null,        // SPECTATOR-only
+    bBoosting: p.bBoosting ?? null, bSupersonic: p.bSupersonic ?? null, bOnGround: p.bOnGround ?? null,
+    attacker: (p.Attacker && (p.Attacker.Name || p.Attacker.name)) || null,   // who demolished this player
     isPrimary: p.IsPrimary ?? p.isPrimary ?? false,
     isDemolished: p.bDemolished ?? p.isDemolished ?? false,
     pos: (p.Location || p.location || p.Position || p.position) ? {
@@ -11847,9 +15196,32 @@ function handleUpdateState(data) {
 
   state.players = normalised;
 
-  // Update playerCache (persist players across game/disconnect)
+  // Track the peak per-team headcount this match (Blue=0 / Orange=1). Used to cap the post-game board
+  // by the roster that ACTUALLY played, so a player who leaves before match end doesn't shrink the cap
+  // and get sliced off the scoreboard (see scoreboardRoster).
+  const _blueN = normalised.filter(p => Number(p.team) !== 1).length;
+  const _orangeN = normalised.filter(p => Number(p.team) === 1).length;
+  if (_blueN > _rlPeakTeamCount[0]) _rlPeakTeamCount[0] = _blueN;
+  if (_orangeN > _rlPeakTeamCount[1]) _rlPeakTeamCount[1] = _orangeN;
+
+  // Update playerCache (persist players across game/disconnect).
+  //
+  // MERGE, never overwrite wholesale. A player who leaves mid-match and rejoins comes back through
+  // the Stats API with their cumulative counters reset to 0 — a blind `= {...p}` wrote those zeros
+  // over everything they'd earned, so the post-game board showed them on 0 (or dropped them, since
+  // the board picks top-N by score). Cumulative stats therefore only ever go UP within a match;
+  // live-state fields (boost, demolished, spectator flags) always take the fresh value. The cache
+  // is cleared on MatchCreated, so a genuinely new game still re-baselines from zero.
   normalised.forEach(p => {
-    state.playerCache[p.name] = { ...p };
+    const prev = state.playerCache[p.name];
+    const merged = { ...p };
+    if (prev) {
+      RL_CUMULATIVE_STATS.forEach((k) => {
+        const a = Number(prev[k]) || 0, b = Number(p[k]) || 0;
+        if (a > b) merged[k] = a;
+      });
+    }
+    state.playerCache[p.name] = merged;
   });
 
   // Spectating just began — the observer joined the lobby and players are now present. Hide RL's
@@ -11871,29 +15243,18 @@ function handleUpdateState(data) {
       ? 'PLAYING (a player is IsPrimary) — auto-hide suppressed (this is your own game, not a cast).'
       : 'SPECTATING (no IsPrimary participant) — auto-hide armed.'));
   }
+  // NOTE: auto-hiding RL's native HUD was REMOVED (2026-08) — Rocket League now ships its own
+  // in-game "Hide UI" option, so the suite no longer drives SetHUDVisibility on spectate-detect.
+  // The spectate latch is kept only as a lightweight state signal; it fires no HUD command.
   const nowSpectating = normalised.length > 0 && !localIsPlaying;
   if (nowSpectating && !_rlSpectatingActive) {
     _rlSpectatingActive = true;
-    // NO resetAutoTracking() here — handleMatchCreated is the only re-arm. If the latch re-fires
-    // mid-game (players flickered empty for a packet), the one-press guard must still hold, or the
-    // toggle key would flip the already-hidden UI back on.
-    console.log('[RL UI] Spectate detected (players=' + normalised.length + ') — scheduling native-UI hide.');
-    scheduleRlHideNativeUi(state.game.number);
+    console.log('[RL UI] Spectate detected (players=' + normalised.length + ').');
   } else if (!nowSpectating && _rlSpectatingActive) {
     _rlSpectatingActive = false;
   }
-
-  // Mid-match spectate RE-ENTRY (observer toggled team → spectator): on that exact packet the
-  // camera Target is the local user with TeamNum 255 — the spectator "team". RL re-shows its
-  // native UI on re-entry, so this rising edge DOES re-arm the one-press guard and presses again.
-  // Players merely joining/leaving the roster never trip this (their TeamNum stays 0/1).
   const rawTarget = (game.bHasTarget !== false && game.Target && typeof game.Target === 'object') ? game.Target : null;
   const targetTeam = rawTarget ? Number(rawTarget.TeamNum ?? rawTarget.teamNum ?? 0) : 0;
-  if (targetTeam >= 2 && _rlPrevTargetTeam < 2 && !localIsPlaying) {
-    console.log('[RL UI] Spectate re-entry detected (camera target "' + (rawTarget.Name || rawTarget.name || '?') + '" moved to spectator team ' + targetTeam + ') — re-arming auto-hide.');
-    rlSpectatorUi.resetAutoTracking();
-    scheduleRlHideNativeUi(state.game.number);
-  }
   _rlPrevTargetTeam = targetTeam;
 
   // Detect the spectated/observed player. The official RL Stats API does NOT expose a reliable target
@@ -12014,73 +15375,39 @@ function handleGoalScored(data) {
   // Clip capture also fires via director discrete event (deduped in clip-manager).
 }
 
-// ── Ball touch → auto-spectate ────────────────────────────────────────────────
-// The RL Stats API emits BallHit on every touch. We (a) record the toucher for the Director, and
-// (b) — only when the producer has ARMED auto-spectate — press that player's observer select key so
-// RL's camera follows the ball-carrier. Defensive about the payload shape (confirmed later via the
-// [RL touch] diagnostic): tries several field names, then falls back to the currently-spectated player.
+// ── Ball touch → auto-spectate (2026 bidirectional command API) ───────────────
+// BallHit's authoritative payload is Data.Players[] = the player(s) who hit the ball that frame, each
+// {Name, Shortcut, TeamNum}. We record the toucher (name/shortcut/team) into state.rlLastTouch for the
+// AI Director's scene-suggestion loop. (These helpers resolve a name's shortcut/team from state.players.)
+function shortcutForPlayer(name) { const p = (state.players || []).find((x) => x.name === name); return (p && p.shortcut != null) ? p.shortcut : null; }
+function teamNumForPlayer(name)  { const p = (state.players || []).find((x) => x.name === name); return p ? Number(p.team) : null; }
+
+// Fallback toucher resolution for odd/legacy BallHit shapes (the authoritative path uses Data.Players[]).
 function extractTouchPlayer(data) {
   if (!data || typeof data !== 'object') return null;
-  // direct name fields
   const nameCand = data.PlayerName || data.playerName || data.Name || data.name
-    || (data.Player && (data.Player.Name || data.Player.name))
-    || (data.player && (data.player.name || data.player.Name))
-    || (data.Toucher && (data.Toucher.Name || data.Toucher.name));
+    || (data.Player && (data.Player.Name || data.Player.name)) || (data.player && (data.player.name || data.player.Name));
   if (typeof nameCand === 'string' && nameCand.trim()) return nameCand.trim();
-  // id fields → resolve against the live roster
-  const id = data.PlayerId ?? data.playerId ?? data.PrimaryId ?? data.primaryId
-    ?? (data.Player && (data.Player.Id ?? data.Player.PrimaryId))
-    ?? (data.player && (data.player.id ?? data.player.primaryId));
-  if (id != null) {
-    const match = (state.players || []).find((p) => p.primaryid != null && String(p.primaryid) === String(id));
-    if (match) return match.name;
-  }
-  return null;
-}
-
-// Map a player to the number key the observer has bound to their camera slot. 'std' layout = blue
-// players 1/2/3, orange players 4/5/6, in packet (roster) order. Configurable via autoSpectate.layout.
-function slotKeyForPlayer(name) {
-  if (!name) return null;
-  const players = state.players || [];
-  const blue = players.filter((p) => Number(p.team) === 0);
-  const orange = players.filter((p) => Number(p.team) === 1);
-  const bi = blue.findIndex((p) => p.name === name);
-  if (bi >= 0) return String(bi + 1);        // 1,2,3
-  const oi = orange.findIndex((p) => p.name === name);
-  if (oi >= 0) return String(oi + 4);        // 4,5,6
+  const id = data.PlayerId ?? data.playerId ?? data.PrimaryId ?? data.primaryId;
+  if (id != null) { const m = (state.players || []).find((p) => p.primaryid != null && String(p.primaryid) === String(id)); if (m) return m.name; }
   return null;
 }
 
 function handleBallHit(data) {
-  const player = extractTouchPlayer(data) || state.spectatedPlayer || null;
-  if (!player) return;
-  state.rlLastTouch = { name: player, ts: Date.now() };
+  const hitters = Array.isArray(data && data.Players) ? data.Players : [];
+  const h = hitters[0];
+  let name = (h && (h.Name || h.name)) || extractTouchPlayer(data) || state.spectatedPlayer || null;
+  if (!name) return;
+  const shortcut = (h && (h.Shortcut ?? h.shortcut)) ?? shortcutForPlayer(name);
+  const team = (h && (h.TeamNum ?? h.teamNum)) ?? teamNumForPlayer(name);
+  state.rlLastTouch = { name, shortcut: shortcut ?? null, team: (team ?? null), ts: Date.now() };
   feedDirectorRL();                 // let the Director factor in who has the ball
-  maybeAutoSpectate(player);
 }
 
-// Fire the camera switch only when armed + enabled + not shielded + past the debounce window, and only
-// if we're not already on that player. Best-effort: the keypress needs RL focused (like the native-UI
-// hide) and the observer's number-key player binds to match the slot layout.
-function maybeAutoSpectate(player) {
-  const as = state.autoSpectate;
-  if (!as || !as.enabled) return;
-  if (aiShielded()) { logAuto('autospec', `Auto-spectate → ${player} BLOCKED — AI shield engaged`); return; }
-  if (state.activeGame !== 'rocket-league') return;
-  if (player === state.spectatedPlayer) return;             // camera's already on them
-  const now = Date.now();
-  if (now - (as.lastSwitchAt || 0) < (as.debounceMs || 1500)) return;   // debounce rapid touches
-  const key = slotKeyForPlayer(player);
-  if (!key) return;                                          // player not in the roster / no slot
-  as.lastSwitchAt = now; as.lastPlayer = player; as.lastKey = key;
-  rlSpectatorUi.pressKey(key, state.rlSpectatorUi).then((result) => {
-    logAuto('autospec', result && result.ok
-      ? `Auto-spectate → ${player} (pressed "${key}")`
-      : `Auto-spectate → ${player} FAILED — ${(result && result.reason) || 'unknown'}`);
-  }).catch(() => {});
-  broadcastFullState();
-}
+// RL auto-spectate + cinematic first-kickoff camera (ChangePOV Focus/Perspective) were REMOVED 2026-08:
+// the spectator-camera automation never worked reliably on live feeds. The app no longer sends any
+// ChangePOV command. (The AI Director's scene-suggestion loop above — feedDirectorRL/rlLastTouch — is a
+// separate feature and stays.) SetMatchPaused (pause) is the only RL command still sent.
 
 // Diagnostic: capture the real replay-cycle timeline on the live feed (does GoalReplayWillEnd fire?
 // what are the ReplayStart→WillEnd→End→kickoff gaps?) so the overlay's outro timing can be tuned to
@@ -12173,7 +15500,12 @@ function scoreboardRoster() {
   const teamNum = (p) => (Number(p.team) === 1 ? 1 : 0);
   const live = Array.isArray(state.players) ? state.players : [];
   const rs = (GAMES[state.activeGame] && GAMES[state.activeGame].rosterSize) || 3;
-  const capFor = (t) => { const n = live.filter((p) => teamNum(p) === t).length; return n > 0 ? Math.min(n, rs) : rs; };
+  // Cap by the roster that ACTUALLY played (peak headcount this match), not who's still connected — a
+  // player who left before match end shrinks `live` but must still appear on the final board.
+  const capFor = (t) => {
+    const n = Math.max(live.filter((p) => teamNum(p) === t).length, _rlPeakTeamCount[t] || 0);
+    return n > 0 ? Math.min(n, rs) : rs;
+  };
   const all = Object.values(state.playerCache || {}).map((p) => ({ ...p }));
   const pick = (t) => all
     .filter((p) => teamNum(p) === t)
@@ -12615,6 +15947,7 @@ function handleMatchCreated(data) {
   state.inReplay   = false;
   state.currentGoal = null;
   _rlPrevPlayerStats = {};   // fresh match — don't diff demo/save counts against the last game's players
+  _rlPeakTeamCount = { 0: 0, 1: 0 };   // fresh match — recount the peak roster for the post-game cap
   flowBus.emit('rl_match_created', {});
   _rlSpectatingActive = false;   // re-arm the "hide native UI on spectate" latch for this new lobby
   _rlPlayingLogged = false;      // re-log the spectating-vs-playing determination for this new match
@@ -12735,49 +16068,28 @@ function handleMatchCreated(data) {
   });
 }
 
+// Hide RL's native HUD via the 2026 SetHUDVisibility COMMAND — a direct set on the Stats API socket.
+// This replaces the old keybd_event "hh" toggle entirely: no window focus, no keybind, and because
+// it's a set (not a toggle) it can't flip the UI back on, so no retries/latching are needed.
 function scheduleRlHideNativeUi(gameNumber) {
   if (state.activeGame !== 'rocket-league') {
-    console.log('[RL UI] Auto-hide skipped — active game is "' + state.activeGame + '", not rocket-league.');
+    console.log('[RL UI] Hide skipped — active game is "' + state.activeGame + '", not rocket-league.');
     return;
   }
-  const scheduled = rlSpectatorUi.scheduleAutoHide(gameNumber, state.rlSpectatorUi, (result) => {
-    broadcast(bridgeClients, {
-      type: 'rl-ui-result',
-      data: {
-        ok: !!result.ok,
-        message: result.ok
-          ? `Sent ${state.rlSpectatorUi?.presses || 2}× "${state.rlSpectatorUi?.key || 'h'}" to Rocket League`
-          : (result.reason || 'Failed to hide native UI'),
-        auto: true
-      }
-    });
+  const ok = sendRlCommand('SetHUDVisibility', { bVisible: false });
+  broadcast(bridgeClients, {
+    type: 'rl-ui-result',
+    data: { ok, auto: true, message: ok ? "Spectate detected — hid RL's HUD (SetHUDVisibility)" : 'Could not hide RL HUD — Stats API socket not connected' }
   });
-  // Tell the producer the TRIGGER fired, separately from the press result — makes "the trigger
-  // never latched" vs "the press failed" distinguishable from the control panel while testing.
-  if (scheduled) {
-    broadcast(bridgeClients, {
-      type: 'rl-ui-result',
-      data: { ok: true, scheduled: true, auto: true, message: 'Spectate detected — hiding the native UI…' }
-    });
-  }
 }
 
 async function triggerRlHideNativeUi() {
-  const result = await rlSpectatorUi.runHideNativeUi(state.rlSpectatorUi);
-  // Producer just hid the UI by hand — mark it hidden so a pending/retrying auto-hide press won't
-  // fire the toggle again and bring the UI back up.
-  if (result.ok) rlSpectatorUi.markHidden();
+  const ok = sendRlCommand('SetHUDVisibility', { bVisible: false });
   broadcast(bridgeClients, {
     type: 'rl-ui-result',
-    data: {
-      ok: !!result.ok,
-      message: result.ok
-        ? `Sent ${state.rlSpectatorUi?.presses || 2}× "${state.rlSpectatorUi?.key || 'h'}" to Rocket League`
-        : (result.reason || 'Failed — is Rocket League running?'),
-      auto: false
-    }
+    data: { ok, auto: false, message: ok ? "Hid RL's HUD (SetHUDVisibility)" : 'Could not hide — is the RL Stats API connected?' }
   });
-  return result;
+  return { ok };
 }
 
 // ─── WS Bridge Server (port 3001) ────────────────────────────────────────────
@@ -12930,7 +16242,7 @@ registerWsHandlers({
   veto_start(msg, ws) {
     try {
       const d = msg.data || {};
-      vetoStart({ game: d.game, bestOf: d.bestOf, teamStart: d.teamStart, title: d.title });
+      vetoStart({ game: d.game, bestOf: d.bestOf, teamStart: d.teamStart, title: d.title, strikeFrom: d.strikeFrom });
       if (typeof d.visible === 'boolean') setExclusiveGfxVisible('veto', d.visible);
       saveAppState(); broadcastFullState();
     } catch (e) {
@@ -13295,13 +16607,29 @@ registerWsHandlers({
     // the side, so a leftover name from a previous winner would otherwise show the wrong team.
     const sideFired = ('side' in w) && (side === 'blue' || side === 'orange') && typeof w.name !== 'string';
     const winnerVisible = ('visible' in w) ? !!w.visible : !!cur.visible;
+    // Subtitle: the control panel always sends one (it auto-suggests the series score); a SIDE-only
+    // fire — Stream Deck, a Flow, 'auto' — sends none, and the leftover subtitle from the LAST match
+    // then went on air under the new champion ("1–0" while Match — Teams read 1–3). Refresh it from
+    // the live series score whenever the stored one is empty or still looks auto-generated ("3–1"),
+    // and leave a producer-typed line ("2026 Spring Champions") alone.
+    const seriesSubtitle = () => {
+      const b = Number(state.series && state.series.blue) || 0;
+      const o = Number(state.series && state.series.orange) || 0;
+      if (b + o <= 0) return '';
+      const [hi, lo] = side === 'blue' ? [b, o] : side === 'orange' ? [o, b] : [Math.max(b, o), Math.min(b, o)];
+      return hi + '–' + lo;   // en-dash, same shape as the panel's _winnerSeriesScore
+    };
+    let subtitle = typeof w.subtitle === 'string' ? w.subtitle : (cur.subtitle ?? '');
+    if (sideFired && typeof w.subtitle !== 'string' && (!subtitle || /^\s*\d+\s*[–—-]\s*\d+\s*$/.test(subtitle))) {
+      subtitle = seriesSubtitle();
+    }
     state.winner = {
       visible: winnerVisible,
       side,
       name: typeof w.name === 'string' ? w.name : (sideFired ? '' : (cur.name ?? '')),
       logo: ('logo' in w) ? (w.logo || null) : (sideFired ? null : (cur.logo ?? null)),
       color: ('color' in w) ? (w.color || '') : (sideFired ? '' : (cur.color ?? '')),
-      subtitle: typeof w.subtitle === 'string' ? w.subtitle : (cur.subtitle ?? '')
+      subtitle
     };
     // Keeps gfxActive in sync with .visible — see setExclusiveGfxVisible's own doc.
     if ('visible' in w) setExclusiveGfxVisible('winner', winnerVisible);
@@ -13371,7 +16699,7 @@ registerWsHandlers({
   set_ticker(msg) {
     const p = msg.data || {};
     if (typeof p.visible === 'boolean') state.ticker.visible = p.visible;
-    if (typeof p.source === 'string') state.ticker.source = (p.source === 'startgg') ? 'startgg' : 'manual';
+    if (typeof p.source === 'string') state.ticker.source = ['startgg', 'br'].includes(p.source) ? p.source : 'manual';
     if (typeof p.sponsor === 'string') state.ticker.sponsor = p.sponsor.slice(0, 400000);   // small logo (downscaled client-side)
     if (Array.isArray(p.messages)) {
       state.ticker.messages = p.messages
@@ -13381,6 +16709,7 @@ registerWsHandlers({
     }
     if (Number(p.speed) > 0) state.ticker.speed = Math.min(600, Math.max(3, Number(p.speed)));
     if (state.ticker.source === 'startgg') state.ticker.feed = formatTickerFeed(state.startgg.matchFeed);   // build now; refreshes each poll
+    if (state.ticker.source === 'br') state.ticker.feed = brTickerFeed();
     saveAppState();
     broadcastFullState();
   }
@@ -13405,9 +16734,14 @@ registerWsHandlers({
     if (typeof p.title === 'string') state.standings.title = p.title;
     if (typeof p.subtitle === 'string') state.standings.subtitle = p.subtitle;
     if (typeof p.showRecord === 'boolean') state.standings.showRecord = p.showRecord;
+    if (['auto', 'podium', 'placement'].includes(p.layout)) state.standings.layout = p.layout;
     if (typeof p.source === 'string') state.standings.source = p.source;
     if (typeof p.gamesLabel === 'string') state.standings.gamesLabel = p.gamesLabel;   // "Games" / "Maps" for the game-aware column
+    if (typeof p.leagueId === 'string') state.standings.leagueId = p.leagueId;
     if (Array.isArray(p.rows)) state.standings.rows = p.rows;
+    // A League-sourced board tracks the league from here on: recompute from the live league so the
+    // pushed rows can never be a stale snapshot of our points.
+    if (state.standings.source === 'league') refreshLeagueStandingsMirror();
     saveAppState();
     broadcastFullState();
   },
@@ -13507,6 +16841,10 @@ function handleControlMessage(msg, ws) {
 
     case 'set_event_name':
       state.eventName = msg.data.name || '';
+      // Stamp the title as belonging to the event that's loaded right now, so re-activating that
+      // same event (a refresh, a re-paste of its link) leaves the producer's wording alone.
+      state.eventNameSlug = (state.startgg && state.startgg.selectedEvent && state.startgg.selectedEvent.eventSlug)
+        || (state.activeEvent && state.activeEvent.slug) || state.eventNameSlug || '';
       saveAppState();
       broadcastFullState();
       break;
@@ -13759,6 +17097,702 @@ function handleControlMessage(msg, ws) {
       break;
     }
 
+    // -- Battle royale series (Fortnite / PUBG / Warzone / any points-per-placement format) ------
+    // Everything derives from state.br.results, so every one of these ends by recomputing rather
+    // than patching a total in place.
+    case 'set_br': {
+      const p = msg.data || {};
+      const br = state.br;
+      if (typeof p.enabled === 'boolean') br.enabled = p.enabled;
+      if (typeof p.game === 'string' && GAMES[p.game]) br.game = p.game;
+      if (typeof p.source === 'string' && ['manual', 'sheets', 'live'].includes(p.source)) br.source = p.source;
+      if (p.event && typeof p.event === 'object') {
+        br.event = {
+          title: (p.event.title != null ? String(p.event.title) : br.event.title).slice(0, 120),
+          match: (p.event.match != null ? String(p.event.match) : br.event.match).slice(0, 60),
+          split: (p.event.split != null ? String(p.event.split) : br.event.split).slice(0, 60)
+        };
+      }
+      if (p.format && typeof p.format === 'object') {
+        if (p.format.matches != null) br.format.matches = Math.max(1, Math.min(40, parseInt(p.format.matches, 10) || 6));
+        if (p.format.teamSize != null) br.format.teamSize = Math.max(1, Math.min(8, parseInt(p.format.teamSize, 10) || 4));
+      }
+      if (typeof p.scoringPreset === 'string') brApplyScoringPreset(p.scoringPreset);
+      if (p.scoring && typeof p.scoring === 'object') {
+        // Hand-edited table -> the preset no longer describes it. Say so, rather than showing
+        // "FNCS" next to numbers that aren't FNCS.
+        if (Array.isArray(p.scoring.placementPoints)) {
+          br.scoring.placementPoints = p.scoring.placementPoints.slice(0, 100).map((n) => Math.max(0, Math.round(Number(n) || 0)));
+          br.scoringPreset = 'custom';
+        }
+        if (p.scoring.killPoints != null) { br.scoring.killPoints = Math.max(0, Number(p.scoring.killPoints) || 0); br.scoringPreset = 'custom'; }
+        if (p.scoring.killCap != null) { br.scoring.killCap = Math.max(0, parseInt(p.scoring.killCap, 10) || 0); br.scoringPreset = 'custom'; }
+      }
+      computeBrStandings();
+      saveAppState();
+      broadcastFullState();
+      break;
+    }
+    // Manual scorekeeping - one team's result in one match. This is the path that has to work when
+    // the sheet doesn't: upserts by (match, team) so re-entering a corrected number replaces it.
+    case 'set_br_result': {
+      const p = msg.data || {};
+      const team = (p.team || '').toString().trim();
+      const match = Math.max(1, parseInt(p.match, 10) || 0);
+      if (!team || !match) break;
+      const row = {
+        match, team: team.slice(0, 80),
+        placement: Math.max(0, parseInt(p.placement, 10) || 0),
+        elims: Math.max(0, parseInt(p.elims, 10) || 0)
+      };
+      const upsert = (arr) => {
+        const i = arr.findIndex((r) => (parseInt(r.match, 10) || 0) === match
+          && (r.team || '').toString().trim().toLowerCase() === team.toLowerCase());
+        if (p.remove) { if (i >= 0) arr.splice(i, 1); }
+        else if (i >= 0) arr[i] = row;
+        else arr.push(row);
+      };
+      // A cup targeted explicitly (the league page's grid editing a cup that ISN'T on air) or
+      // the live binding. Either way the LEAGUE is the store and the live board re-mirrors it,
+      // so the two surfaces can never drift apart.
+      const target = brResolveSeries(p.leagueId, p.seriesId);
+      if (target) {
+        upsert(target.series.results);
+        recomputeBrSeason(target.lg);
+        leaguesVer++;
+        // Only re-mirror when the edited cup is the one on air.
+        if (target.series.id === state.br.seriesId && target.lg.id === state.br.leagueId) brSyncFromLeague();
+      } else {
+        if (!Array.isArray(state.br.results)) state.br.results = [];
+        upsert(state.br.results);
+        state.br.source = 'manual';
+      }
+      computeBrStandings();
+      saveAppState();
+      broadcastFullState();
+      break;
+    }
+    // Same, for the per-player elim board.
+    case 'set_br_player_result': {
+      const p = msg.data || {};
+      const player = (p.player || '').toString().trim();
+      const match = Math.max(1, parseInt(p.match, 10) || 0);
+      if (!player || !match) break;
+      if (!Array.isArray(state.br.playerResults)) state.br.playerResults = [];
+      const i = state.br.playerResults.findIndex((r) => (parseInt(r.match, 10) || 0) === match
+        && (r.player || '').toString().trim().toLowerCase() === player.toLowerCase());
+      const row = { match, player: player.slice(0, 80), team: (p.team || '').toString().trim().slice(0, 80), elims: Math.max(0, parseInt(p.elims, 10) || 0) };
+      if (p.remove) { if (i >= 0) state.br.playerResults.splice(i, 1); }
+      else if (i >= 0) state.br.playerResults[i] = row;
+      else state.br.playerResults.push(row);
+      state.br.source = 'manual';
+      computeBrStandings();
+      saveAppState();
+      broadcastFullState();
+      break;
+    }
+    // Wipe results. scope 'match' clears one match (a re-run/replayed game), 'all' resets the series.
+    case 'clear_br_results': {
+      const p = msg.data || {};
+      const m = parseInt(p.match, 10) || 0;
+      const target = brResolveSeries(p.leagueId, p.seriesId);
+      if (target) {
+        // Bound to a league cup — clear it there, then re-mirror. Clearing only the live copy
+        // would leave the league holding results the board says don't exist.
+        target.series.results = (p.scope === 'match' && m)
+          ? target.series.results.filter((r) => (parseInt(r.match, 10) || 0) !== m)
+          : [];
+        recomputeBrSeason(target.lg);
+        leaguesVer++;
+        if (target.series.id === state.br.seriesId && target.lg.id === state.br.leagueId) brSyncFromLeague();
+      } else if (p.scope === 'match' && m) {
+        state.br.results = (state.br.results || []).filter((r) => (parseInt(r.match, 10) || 0) !== m);
+      } else {
+        state.br.results = [];
+      }
+      // The per-player elim board is live-series-only (no league store), so it clears either way.
+      state.br.playerResults = (p.scope === 'match' && m)
+        ? (state.br.playerResults || []).filter((r) => (parseInt(r.match, 10) || 0) !== m)
+        : [];
+      computeBrStandings();
+      saveAppState();
+      broadcastFullState();
+      break;
+    }
+
+    // ── BR lobby (the Fortnite Match — Lobby panel) ──────────────────────────
+    // Mode / squad size. Changing the mode also re-points the drop map at that mode's POI set
+    // (Reload is a different island), which is why this isn't folded into set_br.
+    case 'set_br_mode': {
+      const p = msg.data || {};
+      if (typeof p.mode === 'string') {
+        const meta = brModeMeta(state.br.game, p.mode);
+        if (meta) state.br.mode = meta.id;
+      }
+      if (typeof p.teamFormat === 'string' && BR_TEAM_FORMATS.some((f) => f.id === p.teamFormat)) {
+        state.br.teamFormat = p.teamFormat;
+        state.br.format.teamSize = brFormatSize(p.teamFormat);
+      }
+      if (typeof p.game === 'string' && GAMES[p.game]) {
+        state.br.game = p.game;
+        // A game switch can strand the series on a mode the new game doesn't have.
+        if (!brModesFor(p.game).some((m) => m.id === state.br.mode)) {
+          state.br.mode = BR_DEFAULT_MODE[p.game] || brModesFor(p.game)[0].id;
+        }
+      }
+      saveAppState();
+      broadcastFullState();
+      break;
+    }
+
+    // ── Point matrices ───────────────────────────────────────────────────────
+    // Create / update / delete a named matrix. Built-ins can't be edited or deleted — "Duplicate"
+    // copies one into the producer's own library, which is the path for "we run FNCS but with
+    // 3 points a kill".
+    case 'set_point_matrix': {
+      const p = msg.data || {};
+      if (!Array.isArray(state.pointMatrices)) state.pointMatrices = [];
+      const action = String(p.action || 'save');
+      const id = String(p.id || '');
+      if (action === 'delete') {
+        state.pointMatrices = state.pointMatrices.filter((m) => m.id !== id);
+        // Cups keep their SNAPSHOT and keep scoring correctly — only the link is broken.
+        (state.leagues || []).forEach((lg) => {
+          if (lg.brMatrixId === id) lg.brMatrixId = '';
+          (lg.brSeries || []).forEach((s) => { if (s.matrixId === id) s.matrixId = ''; });
+        });
+        if (state.br.matrixId === id) state.br.matrixId = '';
+        leaguesVer++;
+      } else if (action === 'duplicate') {
+        const src = findMatrix(id);
+        if (!src) break;
+        if (state.pointMatrices.length >= 100) break;
+        const copy = sanitizePointMatrix({ ...src, id: brNewMatrixId(), builtin: false,
+          name: (p.name || (src.name + ' (copy)')).slice(0, 60) });
+        state.pointMatrices.push(copy);
+        sendWs(ws, { type: 'event-result', data: { ok: true, matrixId: copy.id, message: `Created "${copy.name}".` } });
+      } else {
+        const existing = state.pointMatrices.find((m) => m.id === id);
+        if (existing) {
+          Object.assign(existing, sanitizePointMatrix({ ...existing, ...p, id: existing.id, builtin: false }));
+        } else {
+          if (state.pointMatrices.length >= 100) break;
+          const m = sanitizePointMatrix({ ...p, id: id || brNewMatrixId(), builtin: false });
+          state.pointMatrices.push(m);
+          sendWs(ws, { type: 'event-result', data: { ok: true, matrixId: m.id, message: `Created "${m.name}".` } });
+        }
+      }
+      saveAppState();
+      broadcastFullState();
+      break;
+    }
+
+    // Point a cup (or a league's season default) at a matrix, copying it in as that cup's
+    // snapshot. Editing the matrix later never re-scores played cups on its own — re-applying is
+    // this same message, sent deliberately.
+    case 'br_apply_matrix': {
+      const p = msg.data || {};
+      const m = findMatrix(p.matrixId);
+      if (!m) break;
+      const lg = (state.leagues || []).find((l) => l && l.id === String(p.leagueId || ''));
+      if (p.scope === 'league' && lg) {
+        lg.brMatrixId = m.id;
+      } else {
+        const target = brResolveSeries(p.leagueId, p.seriesId);
+        if (target) {
+          target.series.matrixId = m.id;
+          target.series.scoring = matrixToScoring(m);
+          target.series.scoringPreset = 'matrix';
+          recomputeBrSeason(target.lg);
+          if (target.series.id === state.br.seriesId && target.lg.id === state.br.leagueId) brSyncFromLeague();
+        } else {
+          // Standalone (unbound) series — apply straight to the live board.
+          state.br.matrixId = m.id;
+          state.br.scoring = matrixToScoring(m);
+          state.br.scoringPreset = 'matrix';
+        }
+      }
+      leaguesVer++;
+      computeBrStandings();
+      saveAppState();
+      broadcastFullState();
+      break;
+    }
+
+    // Per-match weighting on a cup (double-points final, etc). { match, multiplier } —
+    // multiplier 1 or 0 removes the entry rather than storing a no-op.
+    case 'set_br_multiplier': {
+      const p = msg.data || {};
+      const n = Math.max(1, Math.min(40, parseInt(p.match, 10) || 0));
+      if (!n) break;
+      const v = Number(p.multiplier);
+      const target = brResolveSeries(p.leagueId, p.seriesId);
+      const bag = target ? (target.series.matchMultipliers = target.series.matchMultipliers || {}) : (state.br.matchMultipliers = state.br.matchMultipliers || {});
+      if (!(v > 0) || v === 1) delete bag[String(n)];
+      else bag[String(n)] = Math.round(v * 100) / 100;
+      if (target) {
+        recomputeBrSeason(target.lg);
+        leaguesVer++;
+        if (target.series.id === state.br.seriesId && target.lg.id === state.br.leagueId) brSyncFromLeague();
+      }
+      computeBrStandings();
+      saveAppState();
+      broadcastFullState();
+      break;
+    }
+
+    // ── BR overlay pack → OBS ────────────────────────────────────────────────
+    // "Where are the Fortnite overlays and how do I get them into OBS" was a dead end: the URLs
+    // were scattered across a themes dropdown and three panel hints. This builds the whole pack
+    // in one action — a scene per graphic (so the producer can cut to them) plus the shared
+    // gfx.html layer that carries every pushed graphic.
+    //
+    // Idempotent: an existing scene is reused and its source retargeted, so running it twice
+    // after a URL/port change repairs the setup instead of duplicating it.
+    case 'br_obs_setup': {
+      const d = msg.data || {};
+      (async () => {
+        let ok = false, message = '';
+        try {
+          if (!obsClient || !obsClient.isConnected()) throw new Error('Not connected to OBS — connect it in Integrations, then run this again.');
+          const base = (d.base || `http://localhost:${HTTP_PORT || 3000}`).replace(/\/+$/, '');
+          const prefix = String(d.prefix || 'BR').trim().slice(0, 20);
+          // gfx.html is deliberately FIRST: it is the one source that carries every punch-up
+          // graphic, and a producer who only adds one should end up with that one.
+          const pack = [
+            { key: 'gfx',       scene: 'Graphics',        source: 'Graphics Layer',   url: `${base}/gfx.html` },
+            { key: 'board',     scene: 'Standings',       source: 'BR Standings',     url: `${base}/br-leaderboard.html?skin=fncs` },
+            { key: 'rail',      scene: 'Standings Rail',  source: 'BR Rail',          url: `${base}/br-rail.html` },
+            { key: 'match',     scene: 'Match Result',    source: 'BR Match Result',  url: `${base}/br-match.html` },
+            { key: 'dropmap',   scene: 'Drop Map',        source: 'BR Drop Map',      url: `${base}/fn-dropmap.html` },
+            { key: 'compare',   scene: 'Comparison',      source: 'BR Comparison',    url: `${base}/fn-compare.html` },
+            { key: 'victory',   scene: 'Victory Royale',  source: 'BR Victory Royale', url: `${base}/fn-victory.html` }
+          ].filter((x) => !Array.isArray(d.only) || d.only.includes(x.key));
+
+          const scenesRes = await obsClient.call('GetSceneList');
+          const have = new Set((scenesRes.scenes || []).map((s) => s.sceneName));
+          const inputsRes = await obsClient.call('GetInputList');
+          const haveInput = new Set((inputsRes.inputs || []).map((i) => i.inputName));
+
+          let made = 0, retargeted = 0;
+          for (const item of pack) {
+            const sceneName = `${prefix} — ${item.scene}`;
+            const inputName = `${prefix} ${item.source}`;
+            if (!have.has(sceneName)) { await obsClient.call('CreateScene', { sceneName }); have.add(sceneName); }
+            if (haveInput.has(inputName)) {
+              await obsClient.call('SetInputSettings', { inputName, inputSettings: { url: item.url } });
+              retargeted++;
+            } else {
+              await obsClient.call('CreateInput', {
+                sceneName, inputName, inputKind: 'browser_source',
+                inputSettings: { url: item.url, width: 1920, height: 1080, reroute_audio: false }
+              });
+              haveInput.add(inputName);
+              made++;
+            }
+          }
+          ok = true;
+          message = `BR pack ready in OBS — ${made} source(s) created, ${retargeted} retargeted, across ${pack.length} scene(s).`;
+        } catch (e) { message = (e && e.message) || 'OBS error'; }
+        try { ws.send(JSON.stringify({ type: 'obs-ensure-result', data: { ok, message } })); } catch (e) {}
+      })();
+      break;
+    }
+
+    // ── Live game-state ingest ───────────────────────────────────────────────
+    // The single door any live feed comes in through — Apex LiveAPI today, Fortnite via the
+    // Overwolf GEP relay once that lands, an OCR pass, or a partner API. Feeds push RESULTS and
+    // this decides where they land (bound cup or standalone), so no feed ever has to know about
+    // leagues, matrices or mirroring.
+    //   { match, results: [{ team, placement, elims }], source }
+    // Deliberately additive per team so a feed reporting one squad at a time works as well as
+    // one reporting a whole final standings table.
+    case 'br_ingest_result': {
+      const p = msg.data || {};
+      const rows = Array.isArray(p.results) ? p.results
+        : (p.team ? [{ team: p.team, placement: p.placement, elims: p.elims }] : []);
+      if (!rows.length) break;
+      const match = Math.max(1, Math.min(40, parseInt(p.match, 10) || (state.br.live && state.br.live.match) || 1));
+      const target = brResolveSeries(p.leagueId, p.seriesId);
+      const sink = target ? target.series.results : (state.br.results = state.br.results || []);
+      let n = 0;
+      for (const raw of rows.slice(0, 200)) {
+        const team = String((raw && raw.team) || '').trim();
+        if (!team) continue;
+        const row = {
+          match, team: team.slice(0, 80),
+          placement: Math.max(0, parseInt(raw.placement, 10) || 0),
+          elims: Math.max(0, parseInt(raw.elims, 10) || 0)
+        };
+        const i = sink.findIndex((r) => (parseInt(r.match, 10) || 0) === match
+          && String(r.team || '').trim().toLowerCase() === team.toLowerCase());
+        if (i >= 0) sink[i] = row; else sink.push(row);
+        n++;
+      }
+      const src = ['live', 'sheets', 'manual'].includes(p.source) ? p.source : 'live';
+      if (target) {
+        target.series.source = src;
+        recomputeBrSeason(target.lg);
+        leaguesVer++;
+        if (target.series.id === state.br.seriesId && target.lg.id === state.br.leagueId) brSyncFromLeague();
+      } else {
+        state.br.source = src;
+      }
+      computeBrStandings();
+      state.br.lastIngest = { at: Date.now(), source: src, match, rows: n };
+      saveAppState();
+      broadcastFullState();
+      logAuto('br', `Ingested ${n} result(s) for match ${match} from ${src}.`);
+      break;
+    }
+
+    // Bind the live board to a league cup (or unbind with empty ids). Binding MIRRORS the cup
+    // onto the board — including its scoring table, so switching cups switches the table too.
+    case 'set_br_league': {
+      const p = msg.data || {};
+      const lid = String(p.leagueId || '');
+      const sid = String(p.seriesId || '');
+      if (!lid || !sid) {
+        state.br.leagueId = '';
+        state.br.seriesId = '';
+        state.br.source = 'manual';
+      } else {
+        const target = brResolveSeries(lid, sid);
+        if (!target) {
+          sendWs(ws, { type: 'event-result', data: { ok: false, message: 'That league cup no longer exists.' } });
+          break;
+        }
+        state.br.leagueId = lid;
+        state.br.seriesId = sid;
+        brSyncFromLeague();
+        // The league's teams ARE the season field — seed the lobby from them so binding a cup
+        // gives you a board to score into immediately, without a second import step.
+        if (p.fillLobby !== false && !(state.br.lobby || []).length) {
+          brMergeLobby((target.lg.teams || []).map((t, i) => ({
+            name: t.name, seed: i + 1,
+            players: (t.players || []).map((pl) => ({ name: pl.name, epic: '' }))
+          })));
+        }
+      }
+      computeBrStandings();
+      saveAppState();
+      broadcastFullState();
+      break;
+    }
+
+    // Cup CRUD on a league. create/rename/delete/scoring — the season's shape.
+    case 'br_series': {
+      const p = msg.data || {};
+      const lg = (state.leagues || []).find((l) => l && l.id === String(p.leagueId || ''));
+      if (!lg) break;
+      // Season default matrix — a new cup in this league starts from it. Per-cup override wins.
+  if (typeof lg.brMatrixId !== 'string') lg.brMatrixId = '';
+  if (!Array.isArray(lg.brSeries)) lg.brSeries = [];
+      const action = String(p.action || '');
+      const idx = lg.brSeries.findIndex((s) => s && s.id === String(p.seriesId || ''));
+      if (action === 'create') {
+        if (lg.brSeries.length >= 60) break;
+        const s = brNewSeries(p.name, p.matches);
+        // Inherit the league's season default so a circuit doesn't need the matrix re-picked
+        // every week. An explicit per-cup choice still overrides it afterwards.
+        const seasonMx = findMatrix(p.matrixId || lg.brMatrixId);
+        if (seasonMx) { s.matrixId = seasonMx.id; s.scoring = matrixToScoring(seasonMx); s.scoringPreset = 'matrix'; }
+        lg.brSeries.push(s);
+        // Deliberately does NOT bind. Adding next week's cup during this week's broadcast is
+        // normal admin, and auto-binding would swap the on-air board out from under the
+        // producer. Going live with a cup is the explicit "Go live with this cup" button.
+        if (p.bind === true) { state.br.leagueId = lg.id; state.br.seriesId = s.id; brSyncFromLeague(); }
+      } else if (action === 'delete' && idx >= 0) {
+        const gone = lg.brSeries.splice(idx, 1)[0];
+        if (gone && gone.id === state.br.seriesId) { state.br.leagueId = ''; state.br.seriesId = ''; state.br.source = 'manual'; }
+      } else if (idx >= 0) {
+        const s = lg.brSeries[idx];
+        if (p.name != null) s.name = String(p.name).slice(0, 60);
+        if (p.date != null) s.date = String(p.date).slice(0, 30);
+        if (p.matches != null) s.matches = Math.max(1, Math.min(40, parseInt(p.matches, 10) || 6));
+        // Where this cup's results come in from — manual, the scorekeeper's sheet, or a live feed.
+        if (['manual', 'sheets', 'live'].includes(p.source)) s.source = p.source;
+        if (p.sheetTab != null) s.sheetTab = String(p.sheetTab).slice(0, 80);
+        // A preset change re-tables THIS cup only. Past cups keep their own snapshot.
+        if (typeof p.scoringPreset === 'string' && BR_SCORING_PRESETS[p.scoringPreset]) {
+          const pr = BR_SCORING_PRESETS[p.scoringPreset];
+          s.scoringPreset = p.scoringPreset;
+          s.scoring = { placementPoints: pr.placementPoints.slice(), killPoints: pr.killPoints, killCap: pr.killCap };
+        }
+        if (p.scoring && typeof p.scoring === 'object') {
+          if (Array.isArray(p.scoring.placementPoints)) { s.scoring.placementPoints = p.scoring.placementPoints.slice(0, 100).map((n) => Math.max(0, Math.round(Number(n) || 0))); s.scoringPreset = 'custom'; }
+          if (p.scoring.killPoints != null) { s.scoring.killPoints = Math.max(0, Number(p.scoring.killPoints) || 0); s.scoringPreset = 'custom'; }
+          if (p.scoring.killCap != null) { s.scoring.killCap = Math.max(0, parseInt(p.scoring.killCap, 10) || 0); s.scoringPreset = 'custom'; }
+        }
+        if (s.id === state.br.seriesId && lg.id === state.br.leagueId) brSyncFromLeague();
+      }
+      recomputeBrSeason(lg);
+      leaguesVer++;
+      computeBrStandings();
+      saveAppState();
+      broadcastFullState();
+      break;
+    }
+
+    // Whole-field replace. Used by the panel's bulk paste and by anything that rebuilds the
+    // lobby wholesale; single-entrant edits go through br_lobby_entrant so they can't race it.
+    case 'set_br_lobby': {
+      const p = msg.data || {};
+      if (Array.isArray(p.lobby)) {
+        state.br.lobby = p.lobby.slice(0, 200).map(sanitizeBrEntrant).filter((e) => e.name);
+        computeBrStandings();   // the board seeds from the lobby — a new field must re-derive it
+        saveAppState();
+        broadcastFullState();
+      }
+      break;
+    }
+
+    // Add / edit / remove ONE entrant. `id` present = edit that row; absent = add.
+    case 'br_lobby_entrant': {
+      const p = msg.data || {};
+      if (!Array.isArray(state.br.lobby)) state.br.lobby = [];
+      const id = String(p.id || '').trim();
+      const i = id ? state.br.lobby.findIndex((e) => e.id === id) : -1;
+      if (p.remove) {
+        if (i >= 0) state.br.lobby.splice(i, 1);
+      } else {
+        const prevName = i >= 0 ? state.br.lobby[i].name : '';
+        const ent = sanitizeBrEntrant(i >= 0 ? { ...state.br.lobby[i], ...p } : p);
+        // A duo pulled from a roster often has players but no entrant name — derive it rather
+        // than dropping the row on the floor for failing the name check.
+        if (!ent.name) ent.name = brNameFromPlayers(ent.players);
+        if (!ent.name) break;
+        if (i >= 0) {
+          // Results are keyed by entrant NAME (that's all a sheet or a manual entry ever gives
+          // us), so a rename would orphan every point that entrant has scored — the board would
+          // silently show them back at zero next to a ghost row under the old name. Carry the
+          // results and the player board across with them.
+          if (prevName && prevName.toLowerCase() !== ent.name.toLowerCase()) {
+            const from = prevName.toLowerCase();
+            const relabel = (arr) => (arr || []).forEach((r) => {
+              if (String(r.team || '').trim().toLowerCase() === from) r.team = ent.name;
+            });
+            relabel(state.br.results);
+            relabel(state.br.playerResults);
+            // When bound, the league is the store — rename there too, or the next mirror would
+            // pull the old name straight back in and undo the fix.
+            const b = brBinding();
+            if (b) {
+              relabel(b.series.results);
+              recomputeBrSeason(b.lg);
+              leaguesVer++;
+            }
+          }
+          state.br.lobby[i] = ent;
+        } else if (state.br.lobby.length < 200) {
+          state.br.lobby.push(ent);
+        }
+      }
+      computeBrStandings();
+      saveAppState();
+      broadcastFullState();
+      break;
+    }
+
+    // Drop assignments for the drop map. Sent as a whole { entrantId: poiIdOrText } map so a
+    // producer dragging several plates around lands one coherent update, not a burst of races.
+    case 'set_br_drops': {
+      const p = msg.data || {};
+      const drops = (p.drops && typeof p.drops === 'object') ? p.drops : {};
+      (state.br.lobby || []).forEach((e) => {
+        if (Object.prototype.hasOwnProperty.call(drops, e.id)) e.drop = String(drops[e.id] || '').trim().slice(0, 40);
+      });
+      if (p.clearAll) (state.br.lobby || []).forEach((e) => { e.drop = ''; });
+      computeBrStandings();
+      saveAppState();
+      broadcastFullState();
+      break;
+    }
+
+    // Live counters + which entrant the observer is on. High-churn during a match, so this one
+    // deliberately does NOT saveAppState() — it's this-moment state, restored as zero on boot.
+    case 'set_br_live': {
+      const p = msg.data || {};
+      const lv = state.br.live;
+      if (p.match != null) lv.match = Math.max(1, Math.min(40, parseInt(p.match, 10) || 1));
+      if (p.teamsAlive != null) lv.teamsAlive = Math.max(0, parseInt(p.teamsAlive, 10) || 0);
+      if (p.playersAlive != null) lv.playersAlive = Math.max(0, parseInt(p.playersAlive, 10) || 0);
+      if (p.focus != null) lv.focus = String(p.focus || '').slice(0, 40);
+      if (typeof p.running === 'boolean') {
+        lv.running = p.running;
+        lv.startedAt = p.running ? Date.now() : 0;
+      }
+      // This message is high-churn (spectate focus changes constantly), so it does not save on
+      // every call — but which MATCH the show is on is worth surviving a mid-event restart, and
+      // saveAppState() is debounced, so persisting just that is cheap.
+      if (p.match != null) saveAppState();
+      broadcastFullState();
+      break;
+    }
+
+    // Drop-map graphic.
+    case 'set_br_dropmap': {
+      const p = msg.data || {};
+      const dm = state.br.dropmap;
+      if (p.title != null) dm.title = String(p.title).slice(0, 80);
+      // Reject data URLs outright: state.br rides EVERY live broadcast (BROADCAST_TIERS), so a
+      // pasted base64 map would put megabytes on the wire many times a second.
+      if (p.mapUrl != null) {
+        const u = String(p.mapUrl).trim();
+        dm.mapUrl = /^data:/i.test(u) ? '' : u.slice(0, 400);
+      }
+      if (typeof p.showPlayers === 'boolean') dm.showPlayers = p.showPlayers;
+      if (typeof p.showLogos === 'boolean') dm.showLogos = p.showLogos;
+      if (typeof p.visible === 'boolean') {
+        dm.visible = p.visible;
+        setExclusiveGfxVisible('brdrop', p.visible);   // also drives gfx.html's layer
+      }
+      saveAppState();
+      broadcastFullState();
+      break;
+    }
+
+    // Comparison card. rows are free-form stat lines so the same graphic serves a BR duo
+    // comparison and a Creative 1v1 without a schema change.
+    case 'set_br_compare': {
+      const p = msg.data || {};
+      const c = state.br.compare;
+      const side = (o, prev) => ({
+        name: String((o && o.name) != null ? o.name : prev.name).slice(0, 60),
+        team: String((o && o.team) != null ? o.team : prev.team).slice(0, 60),
+        sub:  String((o && o.sub)  != null ? o.sub  : prev.sub).slice(0, 60),
+        // Same data-URL rule as the drop map — player photos come from start.gg as URLs.
+        image: (function () {
+          const v = (o && o.image) != null ? String(o.image) : prev.image;
+          return /^data:/i.test(v) ? '' : v.slice(0, 400);
+        })()
+      });
+      if (p.title != null) c.title = String(p.title).slice(0, 40);
+      if (p.label != null) c.label = String(p.label).slice(0, 40);
+      if (p.kind != null) c.kind = String(p.kind).slice(0, 20);
+      if (p.footnote != null) c.footnote = String(p.footnote).slice(0, 80);
+      if (p.a) c.a = side(p.a, c.a);
+      if (p.b) c.b = side(p.b, c.b);
+      if (Array.isArray(p.rows)) {
+        c.rows = p.rows.slice(0, 8).map((r) => ({
+          label: String((r && r.label) || '').slice(0, 30),
+          a: String((r && r.a) != null ? r.a : '').slice(0, 20),
+          b: String((r && r.b) != null ? r.b : '').slice(0, 20)
+        })).filter((r) => r.label);
+      }
+      if (typeof p.visible === 'boolean') {
+        c.visible = p.visible;
+        setExclusiveGfxVisible('brcompare', p.visible);
+      }
+      saveAppState();
+      broadcastFullState();
+      break;
+    }
+
+    // Victory Royale slam. Fired by hand, or auto-filled from whoever placed 1st in a match.
+    case 'set_br_victory': {
+      const p = msg.data || {};
+      const v = state.br.victory;
+      if (p.fromMatch) {
+        // Auto-fill: read the winner straight off the derived result card so the graphic can
+        // never disagree with the board sitting next to it on screen.
+        const m = Math.max(1, parseInt(p.fromMatch, 10) || 1);
+        const win = (state.br.results || [])
+          .filter((r) => (parseInt(r.match, 10) || 0) === m && (parseInt(r.placement, 10) || 0) === 1)[0];
+        if (win) {
+          const ent = (state.br.lobby || []).find((e) => e.name.toLowerCase() === String(win.team || '').trim().toLowerCase());
+          v.team = String(win.team || '');
+          v.players = ent ? ent.players.map((pl) => pl.name) : [];
+          v.elims = Math.max(0, parseInt(win.elims, 10) || 0);
+          v.match = 'GAME ' + m;
+          v.stage = state.br.event.match || state.br.event.split || '';
+        }
+      }
+      if (p.team != null) v.team = String(p.team).slice(0, 80);
+      if (Array.isArray(p.players)) v.players = p.players.slice(0, 8).map((n) => String(n || '').slice(0, 60)).filter(Boolean);
+      if (p.stage != null) v.stage = String(p.stage).slice(0, 60);
+      if (p.match != null) v.match = String(p.match).slice(0, 40);
+      if (p.elims != null) v.elims = Math.max(0, parseInt(p.elims, 10) || 0);
+      if (typeof p.visible === 'boolean') {
+        v.visible = p.visible;
+        v.at = p.visible ? Date.now() : 0;   // overlays key their slam animation off this
+        setExclusiveGfxVisible('brvictory', p.visible);
+      }
+      broadcastFullState();
+      break;
+    }
+
+    // Pull the FIELD from the tournament platform. Same entrant fetch the team import uses, so a
+    // duo entrant arrives with both real gamertags attached rather than one typed team name.
+    case 'br_pull_field': {
+      (async () => {
+        const d = msg.data || {};
+        try {
+          if (!startggApiToken) throw new Error('Missing start.gg API token (set it in Settings ▸ Integrations).');
+          const slug = parseEventSlug((d.eventSlug || d.slug || d.url || '').trim())
+            || parseEventSlug(state.startgg.eventSlug || '');
+          if (!slug) throw new Error('Paste a start.gg EVENT URL (…/event/…) or activate an event first.');
+          const client = createStartGgClient(startggApiToken);
+          const entrants = await fetchAllEntrants(client, slug);
+          if (!entrants.length) throw new Error('That event has no entrants yet.');
+          // mapEntrantsToTeams already normalises gamertags AND backfills the player-profile
+          // registry (start.gg slug, country, photo) — reuse it so the lobby benefits from every
+          // identity feature the rest of the app has instead of re-querying differently.
+          const teams = mapEntrantsToTeams(entrants);
+          const r = brMergeLobby(teams.map((t, i) => ({
+            name: t.name,
+            seed: i + 1,
+            players: (t.players || []).map((p) => ({ name: p.name, epic: '' }))
+          })), { replace: !!d.replace });
+          state.br.game = isLobbyGame(state.activeGame) ? state.activeGame : state.br.game;
+          computeBrStandings();
+          saveAppState();
+          broadcastFullState();
+          sendWs(ws, { type: 'event-result', data: { ok: true,
+            message: `Lobby field: ${r.added} added, ${r.updated} updated — ${r.total} entrant(s).` } });
+        } catch (e) {
+          sendWs(ws, { type: 'event-result', data: { ok: false, message: e.message } });
+        }
+      })();
+      break;
+    }
+
+    // Manual path: send an in-app league's teams into the lobby. This is the one that has to work
+    // for an offline/LAN event with no start.gg bracket behind it at all.
+    case 'br_lobby_from_league': {
+      const d = msg.data || {};
+      const lg = (state.leagues || []).find((l) => l.id === d.leagueId);
+      if (!lg) {
+        sendWs(ws, { type: 'event-result', data: { ok: false, message: 'League not found.' } });
+        break;
+      }
+      const r = brMergeLobby((lg.teams || []).map((t, i) => ({
+        name: t.name,
+        seed: i + 1,
+        players: (t.players || []).map((p) => ({ name: p.name, epic: '' }))
+      })), { replace: !!d.replace });
+      computeBrStandings();
+      saveAppState();
+      broadcastFullState();
+      sendWs(ws, { type: 'event-result', data: { ok: true,
+        message: `${lg.name || 'League'} → lobby: ${r.added} added, ${r.updated} updated (${r.total} total).` } });
+      break;
+    }
+
+    // Build the scorekeeping tabs in the connected sheet and point the sync at them.
+    case 'br_sheet_template': {
+      (async () => {
+        try {
+          const r = await brWriteSheetTemplate(msg.data || {});
+          ws.send(JSON.stringify({ type: 'sheets-result', data: { ok: true, notify: true,
+            message: 'Built "' + r.resultsTab + '" (' + r.rows + ' rows for ' + r.matches + ' matches) and "' + r.playersTab + '" — sync set to Import.' } }));
+        } catch (e) {
+          ws.send(JSON.stringify({ type: 'sheets-result', data: { ok: false, notify: true, message: e.message } }));
+        }
+      })();
+      break;
+    }
+
     case 'set_preshow': {
       const p = msg.data || {};
       const cur = state.preshow || {};
@@ -13769,8 +17803,16 @@ function handleControlMessage(msg, ws) {
           })).slice(0, 12)
         : cur.topics;
       const headline = typeof p.headline === 'string' ? p.headline.slice(0, 140) : (cur.headline ?? '');
+      // The logo snapshot no longer travels in the live payload (see buildLiveState), so a panel
+      // that echoes back an untouched pick sends it back logo-less. Keep the stored snapshot when
+      // the name is unchanged — otherwise re-picking one slot would quietly wipe the other's logo.
       const predictions = Array.isArray(p.predictions)
-        ? [0, 1].map((i) => sanitizePreshowPick(p.predictions[i]))
+        ? [0, 1].map((i) => {
+            const next = sanitizePreshowPick(p.predictions[i]);
+            const prev = (Array.isArray(cur.predictions) && cur.predictions[i]) || '';
+            if (next && !next.logo && prev && prev.name === next.name && prev.logo) next.logo = prev.logo;
+            return next;
+          })
         : (Array.isArray(cur.predictions) ? cur.predictions : ['', '']);
       state.preshow = {
         headline, topics,
@@ -13786,7 +17828,7 @@ function handleControlMessage(msg, ws) {
         if (kit && pkg) {
           pkg.topicsHeadline = headline;
           pkg.topics = topics;
-          saveBrandKits();
+          saveBrandKitsSoon();   // per-keystroke edits — write once typing stops (see saveBrandKitsSoon)
         }
       }
       saveAppState();
@@ -13806,11 +17848,14 @@ function handleControlMessage(msg, ws) {
         finalMessage: typeof b.finalMessage === 'string' ? b.finalMessage : (cur.finalMessage ?? "WE'RE LIVE!"),
         // accept either an absolute endsAt, a `seconds` countdown from now, or a
         // `frozenSeconds` static value (paused producer timer). Running clears frozen.
+        // `until: "23:00"` counts down to a wall-clock time; `seconds` counts down a duration;
+        // `endsAt` is an absolute target; `frozenSeconds` is a paused static value.
         endsAt: ('frozenSeconds' in b) ? null
+          : ('until' in b) ? resolveClockTarget(b.until)
           : ('seconds' in b) ? (b.seconds > 0 ? Date.now() + Math.round(b.seconds * 1000) : null)
           : ('endsAt' in b ? (b.endsAt || null) : (cur.endsAt ?? null)),
         frozenSeconds: ('frozenSeconds' in b) ? (b.frozenSeconds != null ? Math.max(0, Math.round(b.frozenSeconds)) : null)
-          : (('seconds' in b || 'endsAt' in b) ? null : (cur.frozenSeconds ?? null)),
+          : (('seconds' in b || 'endsAt' in b || 'until' in b) ? null : (cur.frozenSeconds ?? null)),
         // OBS scene to auto-cut to when the countdown reaches 0 ('' = stay on the break screen).
         thenScene: typeof b.thenScene === 'string' ? b.thenScene : (cur.thenScene ?? ''),
         // Playout playlist to roll when the countdown ends (client-driven), then cut to thenScene.
@@ -13982,6 +18027,43 @@ function handleControlMessage(msg, ws) {
       })();
       break;
     }
+    // Drop-map POIs. Stored inside the game's config bundle (so they export/import with a
+    // Producer Profile like every other per-game content set) rather than in their own state key.
+    // `pois: null` for a set deletes the override and falls back to the built-in seed table.
+    case 'set_br_pois': {
+      const p = msg.data || {};
+      const gameId = String(p.game || state.br.game || 'fortnite');
+      const key = String(p.set || 'br-build');
+      if (!GAMES[gameId]) break;
+      const cfgs = { ...(state.gameConfigs || {}) };
+      const bundle = { ...(cfgs[gameId] || { format: 'ne-game-config', game: gameId }) };
+      const sets = { ...(bundle.pois || {}) };
+      if (p.pois === null) {
+        delete sets[key];
+      } else if (Array.isArray(p.pois)) {
+        sets[key] = {
+          name: String(p.name || '').slice(0, 60),
+          // A data-URL map image would ride every live broadcast via brMeta — same rule as
+          // state.br.dropmap.mapUrl.
+          map: /^data:/i.test(String(p.map || '')) ? '' : String(p.map || '').slice(0, 400),
+          pois: p.pois.slice(0, 60).map((poi, i) => ({
+            id: String((poi && poi.id) || ('poi' + (i + 1))).trim().slice(0, 40) || ('poi' + (i + 1)),
+            name: String((poi && poi.name) || '').trim().slice(0, 40),
+            x: Math.max(0, Math.min(100, Number((poi && poi.x)) || 0)),
+            y: Math.max(0, Math.min(100, Number((poi && poi.y)) || 0))
+          })).filter((poi) => poi.name)
+        };
+      } else break;
+      bundle.pois = sets;
+      cfgs[gameId] = bundle;
+      state.gameConfigs = cfgs;
+      saveAppState();
+      broadcastFullState();
+      sendWs(ws, { type: 'event-result', data: { ok: true,
+        message: p.pois === null ? 'Reset to the built-in POI list.' : `Saved ${(sets[key] && sets[key].pois.length) || 0} POI(s).` } });
+      break;
+    }
+
     case 'clear_game_config': {
       const gameId = String((msg.data && msg.data.gameId) || '');
       if (!state.gameConfigs || !state.gameConfigs[gameId]) break;
@@ -14333,6 +18415,100 @@ function handleControlMessage(msg, ws) {
       broadcastFullState();
       break;
     }
+    // ── Shift handover ────────────────────────────────────────────────────────
+    // "Next shift": the crew currently on the desk have finished their stint, so they move to the
+    // Off-Air Event Staff list (which is what feeds the credits screen) and the desk empties ready
+    // for the incoming lineup. If a saved preset follows the loaded one it's seated automatically;
+    // otherwise the desk is left blank to fill in by hand.
+    case 'shift_handover': {
+      const people = deskLineupPeople();
+      const crewByName = new Map();
+      (state.crew || []).forEach((c) => { if (c && c.name) crewByName.set(c.name.trim().toLowerCase(), c); });
+      if (!Array.isArray(state.casters.support)) state.casters.support = [];
+
+      const moved = [];
+      const uncredited = [];
+      people.forEach((p) => {
+        const c = crewByName.get(p.name.toLowerCase());
+        // No crew record = nobody to credit. Reported back rather than silently dropped, because
+        // "my caster vanished off the credits" is exactly the bug that would cause.
+        if (!c) { uncredited.push(p.name); return; }
+        const cur = state.casters.support.find((s) => s && s.crewId === c.id);
+        if (cur) { if (p.role) cur.role = p.role; }
+        else state.casters.support.push({ crewId: c.id, role: p.role });
+        c.workedEvent = true;
+        c.active = false;              // off the live desk now
+        moved.push({ id: c.id, name: c.name });
+      });
+      dedupeSupport();
+
+      // Remember the outgoing desk so "Prev shift" can put it back, including exactly who this
+      // handover credited (so undoing removes those and only those).
+      if (!Array.isArray(state.casters.shiftHistory)) state.casters.shiftHistory = [];
+      const slots = deskSlotNames();
+      const roles = state.casters.showRoles || {};
+      if (people.length) {
+        state.casters.shiftHistory.push({
+          slots,
+          host: roles.host || '',
+          observer: roles.observer || '',
+          movedCrewIds: moved.map((m) => m.id),
+          shiftId: state.casters.activeShiftId || ''
+        });
+        if (state.casters.shiftHistory.length > 10) state.casters.shiftHistory.shift();
+      }
+
+      const prevShiftId = state.casters.activeShiftId || '';
+      clearDeskSlots();
+
+      // Seat the NEXT saved preset if there is one after the currently-loaded chip.
+      const shifts = state.casters.shifts || [];
+      let seated = '';
+      if (shifts.length) {
+        const cur = shifts.findIndex((s) => s.id === prevShiftId);
+        const next = shifts[cur === -1 ? 0 : cur + 1];
+        if (next) {
+          seatDeskSlots(next.slots, next.host, next.observer);
+          state.casters.activeShiftId = next.id;
+          seated = next.name || '';
+        }
+      }
+      saveAppState();
+      broadcastFullState();
+      try {
+        ws.send(JSON.stringify({ type: 'shift-result', data: {
+          ok: true, moved: moved.map((m) => m.name), uncredited, seated
+        } }));
+      } catch (e) {}
+      break;
+    }
+
+    // "Prev shift": undo the last handover — the outgoing crew go back on the desk and come OFF
+    // the off-air staff list, because they're on camera again (the list is explicitly for people
+    // who aren't). Only the ids that handover added are removed, so anyone added by hand stays.
+    case 'shift_restore': {
+      const hist = Array.isArray(state.casters.shiftHistory) ? state.casters.shiftHistory : [];
+      const last = hist.pop();
+      if (!last) {
+        try { ws.send(JSON.stringify({ type: 'shift-result', data: { ok: false, message: 'No previous shift to go back to.' } })); } catch (e) {}
+        break;
+      }
+      seatDeskSlots(last.slots, last.host, last.observer);
+      if (last.shiftId) state.casters.activeShiftId = last.shiftId;
+      const back = new Set(last.movedCrewIds || []);
+      if (Array.isArray(state.casters.support)) {
+        state.casters.support = state.casters.support.filter((s) => !(s && back.has(s.crewId)));
+      }
+      (state.crew || []).forEach((c) => { if (c && back.has(c.id)) c.active = true; });
+      dedupeSupport();
+      saveAppState();
+      broadcastFullState();
+      try {
+        ws.send(JSON.stringify({ type: 'shift-result', data: { ok: true, restored: true } }));
+      } catch (e) {}
+      break;
+    }
+
     case 'delete_shift': {
       if (Array.isArray(state.casters.shifts)) {
         const id = msg.data && msg.data.id;
@@ -14353,6 +18529,7 @@ function handleControlMessage(msg, ws) {
       state.casters.showRoles = { host: '', observer: '' };
       state.casters.activeShiftId = '';
       state.casters.support = [];
+      state.casters.shiftHistory = [];   // fresh show — nothing to hand back to
       (state.crew || []).forEach((c) => { if (c) { c.active = false; c.workedEvent = false; } });
       saveAppState();
       broadcastFullState();
@@ -14372,6 +18549,7 @@ function handleControlMessage(msg, ws) {
       if (cur) { if (role) cur.role = role; }
       else state.casters.support.push({ crewId: c.id, role });
       c.workedEvent = true;
+      dedupeSupport();   // also collapses same-name twins the crewId check can't see
       saveAppState();
       broadcastFullState();
       break;
@@ -14391,6 +18569,14 @@ function handleControlMessage(msg, ws) {
       saveAppState();
       broadcastFullState();
       if (state.casters.autoFillFromStations) stationAutoSync();
+      break;
+    }
+
+    // "Re-sync desk to live feeds" — talent rotated and the desk shows a stale person on a reused web
+    // slot. Force a station sync that re-identifies EVERY slot (manual entries included) to who's live.
+    // stationAutoSync broadcastFullState()s itself when it changes anything.
+    case 'resync_stations': {
+      stationAutoSync({ force: true }).catch(() => {});
       break;
     }
 
@@ -14813,7 +18999,7 @@ function handleControlMessage(msg, ws) {
       if (!d.side || !d.playerId) break;
       const team = state.teams && state.teams[d.side];
       if (!team) break;
-      const player = (team.players || []).find((p) => String(p.id) === String(d.playerId));
+      const player = findTeamPlayer(team, d.playerId);
       if (player) { player.camSlot = String(d.camSlot || '').slice(0, 40); saveAppState(); broadcastFullState(); }
       break;
     }
@@ -15008,13 +19194,7 @@ function handleControlMessage(msg, ws) {
         // Re-tint placeholder team colours to the new game's defaults (e.g. Overwatch → blue/red)
         // so the Match-Teams cards reflect the game. Saved teams' own brand colours are preserved
         // because those aren't part of the default palette.
-        const dc = gameDefaultColors(g);
-        if (state.teams.blue && DEFAULT_SIDE_COLOR_SET.has((state.teams.blue.color || '').toLowerCase())) {
-          state.teams.blue.color = dc.a;
-        }
-        if (state.teams.orange && DEFAULT_SIDE_COLOR_SET.has((state.teams.orange.color || '').toLowerCase())) {
-          state.teams.orange.color = dc.b;
-        }
+        applyGameDefaultSideColors();
         if (directorEngine) directorEngine.reset();
         // Map Pool and Draft are keyed to the OLD game's pool/roster (map ids, hero rosters,
         // ban formats) — leaving them as-is showed stale maps/heroes from the previous game
@@ -15402,11 +19582,78 @@ function handleControlMessage(msg, ws) {
       }
       break;
 
-    // ── Super Smash Bros. HUD (overlay/smash.html) ──────────────────────────────
+    // ── Smash stock countdown ─────────────────────────────────────────────────────
+// A Smash game ends when one side's stocks reach zero. Rather than making the producer notice
+// that and then click a series win AND a game bump, running out closes the game itself: the
+// OPPONENT takes the series point (which already auto-advances state.game.number via the same
+// rule adjust_series uses) and both sides refill for the next game.
+//
+// `state.smash.autoAdvance` gates it, and _smashGameClosed latches so correcting a number down
+// through zero — or any second write while the board still reads 0 — can't award twice.
+let _smashGameClosed = false;
+
+// Stocks a side still has: the crew's pooled total in team mode, the single count in singles.
+function smashStocksLeft(side) {
+  const sd = state.smash[side] || {};
+  if (state.smash.mode === 'team') {
+    return (Array.isArray(sd.players) ? sd.players : []).reduce((a, n) => a + Math.max(0, Number(n) || 0), 0);
+  }
+  return Math.max(0, Number(sd.stocks) || 0);
+}
+
+// The stocks a side STARTS a game with — one per crew member in team mode, so the countdown is
+// scaled to the format rather than to a single fixed number.
+function smashStockPool(side) {
+  const start = Math.max(1, Math.min(9, Number(state.smash.startStocks) || 3));
+  if (state.smash.mode !== 'team') return start;
+  const n = (Array.isArray((state.smash[side] || {}).players) ? state.smash[side].players.length : 0)
+         || Math.max(1, Math.min(8, Number(state.smash.crewSize) || 4));
+  return n * start;
+}
+
+function refillSmashStocks() {
+  const start = state.smash.startStocks;
+  ['blue', 'orange'].forEach((side) => {
+    state.smash[side].stocks = start;
+    state.smash[side].players = (state.smash[side].players || []).map(() => start);
+  });
+}
+
+/** Called after every stock write. Returns true when it closed the game. */
+function checkSmashGameOver() {
+  if (!state.smash.autoAdvance) return false;
+  const left = { blue: smashStocksLeft('blue'), orange: smashStocksLeft('orange') };
+  if (left.blue > 0 && left.orange > 0) { _smashGameClosed = false; return false; }
+  // Both at zero is a mid-reset state, not a result — wait for a real winner.
+  if (left.blue <= 0 && left.orange <= 0) return false;
+  if (_smashGameClosed) return false;
+  _smashGameClosed = true;
+  const winner = left.blue > 0 ? 'blue' : 'orange';
+  const cap = Math.ceil(state.bestOf / 2);
+  state.series[winner] = Math.max(0, Math.min(cap, (state.series[winner] || 0) + 1));
+  const played = (state.series.blue || 0) + (state.series.orange || 0);
+  state.game.number = Math.max(1, Math.min(state.bestOf, played + 1));
+  refillSmashStocks();
+  console.log(`[Smash] ${winner} took the game on stocks — series ${state.series.blue}-${state.series.orange}, game ${state.game.number}`);
+  broadcast(bridgeClients, { type: 'smash-game-over', data: {
+    winner, series: { ...state.series }, game: state.game.number
+  } });
+  return true;
+}
+
+// ── Super Smash Bros. HUD (overlay/smash.html) ──────────────────────────────
+    case 'set_smash_auto_advance':    // { value } - stocks hitting 0 closes the game
+      if (msg.data) {
+        state.smash.autoAdvance = !!msg.data.value;
+        saveAppState();
+        broadcastFullState();
+      }
+      break;
     case 'set_smash_stocks':          // absolute set: { side, value }
       if (msg.data && (msg.data.side === 'blue' || msg.data.side === 'orange')) {
         const v = Math.max(0, Math.min(9, Math.round(Number(msg.data.value) || 0)));
         state.smash[msg.data.side].stocks = v;
+        checkSmashGameOver();
         saveAppState();
         broadcastFullState();
       }
@@ -15415,6 +19662,7 @@ function handleControlMessage(msg, ws) {
       if (msg.data && (msg.data.side === 'blue' || msg.data.side === 'orange')) {
         const cur = Number(state.smash[msg.data.side].stocks) || 0;
         state.smash[msg.data.side].stocks = Math.max(0, Math.min(9, cur + (Math.round(Number(msg.data.delta)) || 0)));
+        checkSmashGameOver();
         saveAppState();
         broadcastFullState();
       }
@@ -15437,6 +19685,7 @@ function handleControlMessage(msg, ws) {
       }
       break;
     case 'reset_smash_stocks':        // both sides back to startStocks (new game) — singles + crew
+      _smashGameClosed = false;
       state.smash.blue.stocks = state.smash.startStocks;
       state.smash.orange.stocks = state.smash.startStocks;
       state.smash.blue.players = state.smash.blue.players.map(() => state.smash.startStocks);
@@ -15455,9 +19704,38 @@ function handleControlMessage(msg, ws) {
       }
       break;
 
+    // Pulse / Grid multiview: publish THIS producer's live game to the org so it appears as a tile on
+    // the main broadcast's grid scenes. channel = Twitch handle shown on the tile bar.
+    case 'set_pulse':
+      if (msg.data) {
+        if ('publish' in msg.data) state.pulse.publish = !!msg.data.publish;
+        if (typeof msg.data.feedViewUrl === 'string') state.pulse.feedViewUrl = msg.data.feedViewUrl.trim().slice(0, 500);
+        if (typeof msg.data.channel === 'string') state.pulse.channel = msg.data.channel.trim().slice(0, 60);
+        if (typeof msg.data.label === 'string') state.pulse.label = msg.data.label.trim().slice(0, 40);
+        saveAppState();
+        broadcastFullState();
+      }
+      break;
+
+    case 'set_smash_title':           // { value } - "Ultimate Singles"; '' re-arms the start.gg auto-fill
+      if (msg.data) {
+        const t = String(msg.data.value || '').slice(0, 40).trim();
+        state.smash.title = t || state.smash.startggTitle || '';
+        state.smash.titleManual = !!t;
+        saveAppState();
+        broadcastFullState();
+      }
+      break;
     case 'set_smash_mode':            // { mode: 'singles' | 'team' }
       if (msg.data) {
         state.smash.mode = msg.data.mode === 'team' ? 'team' : 'singles';
+        saveAppState();
+        broadcastFullState();
+      }
+      break;
+    case 'set_smash_rail_pos':        // { value: 'bottom' | 'topleft' } — caster/sponsor card placement
+      if (msg.data) {
+        state.smash.railPos = msg.data.value === 'topleft' ? 'topleft' : 'bottom';
         saveAppState();
         broadcastFullState();
       }
@@ -15471,6 +19749,11 @@ function handleControlMessage(msg, ws) {
           const next = arr.slice(0, n);
           while (next.length < n) next.push(state.smash.startStocks);
           state.smash[s].players = next;
+          // characters[] is parallel to players[] — resize it in step or the crew rows and their
+          // fighters drift apart the moment the crew size changes mid-event.
+          const chars = (Array.isArray(state.smash[s].characters) ? state.smash[s].characters : []).slice(0, n);
+          while (chars.length < n) chars.push('');
+          state.smash[s].characters = chars;
         });
         saveAppState();
         broadcastFullState();
@@ -15487,12 +19770,26 @@ function handleControlMessage(msg, ws) {
         }
       }
       break;
+    case 'set_smash_player_character': // crew mode: one player's fighter — { side, index, character }
+      if (msg.data && (msg.data.side === 'blue' || msg.data.side === 'orange')) {
+        const sd = state.smash[msg.data.side];
+        if (!Array.isArray(sd.characters)) sd.characters = sd.players.map(() => '');
+        const i = Math.round(Number(msg.data.index));
+        if (i >= 0 && i < sd.players.length) {
+          while (sd.characters.length <= i) sd.characters.push('');
+          sd.characters[i] = String(msg.data.character || '').slice(0, 40);
+          saveAppState();
+          broadcastFullState();
+        }
+      }
+      break;
     case 'smash_player_stock_delta':  // step one player's stocks: { side, index, delta }
       if (msg.data && (msg.data.side === 'blue' || msg.data.side === 'orange') && Array.isArray(state.smash[msg.data.side].players)) {
         const i = Math.round(Number(msg.data.index));
         const arr = state.smash[msg.data.side].players;
         if (i >= 0 && i < arr.length) {
           arr[i] = Math.max(0, Math.min(9, (Number(arr[i]) || 0) + (Math.round(Number(msg.data.delta)) || 0)));
+          checkSmashGameOver();
           saveAppState();
           broadcastFullState();
         }
@@ -15523,9 +19820,9 @@ function handleControlMessage(msg, ws) {
     // with logos + player rosters (the rosters feed the facecam rows).
     case 'autofill_stream_teams': {
       const q = state.startgg.queue || [];
+      // Same stream scoping as auto-follow: never autofill from another station's match.
       const wantStream = state.startgg.streamName;
-      const set = q.find((s) => s.live && (!wantStream || s.stream === wantStream))
-               || q.find((s) => s.live) || q[0];
+      const set = pickAutoFollowSet(q, wantStream) || (wantStream ? null : q[0]);
       if (!set) {
         state.startgg.lastError = 'Stream queue is empty — on start.gg, attach sets to your stream (Match Settings → Stream), then they appear here.';
         broadcastFullState();
@@ -15589,10 +19886,26 @@ function handleControlMessage(msg, ws) {
           const lg = migrateLeague(raw);
           if (seenIds.has(lg.id)) { console.warn(`[leagues] dropped duplicate league id "${lg.id}" in set_leagues payload.`); continue; }
           seenIds.add(lg.id);
+          // brSeason is DERIVED — rebuild it from the incoming cups rather than trusting whatever
+          // rollup the client happened to be carrying, so the season table can never disagree
+          // with the results it is supposed to summarise.
+          recomputeBrSeason(lg);
           cleaned.push(lg);
         }
         state.leagues = cleaned;
         leaguesVer++;
+        // Self-heal the BR binding the same way the armed capture is healed below: if the bound
+        // league or cup was deleted client-side, unbind rather than leaving the live board
+        // pointed at a cup that no longer exists. Still there → re-mirror, since the client may
+        // have edited that cup's results or scoring on the league page.
+        if (state.br.leagueId || state.br.seriesId) {
+          if (!brBinding()) {
+            state.br.leagueId = ''; state.br.seriesId = ''; state.br.source = 'manual';
+          } else {
+            brSyncFromLeague();
+          }
+          computeBrStandings();
+        }
         // Self-heal: if the armed capture points at a league/match that no longer exists, disarm.
         const cap = state.leagueCapture;
         if (cap && cap.active) {
@@ -15601,6 +19914,9 @@ function handleControlMessage(msg, ws) {
             state.leagueCapture = { active: false, leagueId: '', matchId: '', aSide: 'blue', teamA: '', teamB: '', bestOf: 5, games: [], startedAt: 0, lastNote: '' };
           }
         }
+        // A League-sourced standings board follows this league's points live — recording a result
+        // now updates the on-air board instead of leaving the snapshot it was pushed with.
+        refreshLeagueStandingsMirror();
       }
       saveAppState();
       broadcastFullState();
@@ -15641,6 +19957,25 @@ function handleControlMessage(msg, ws) {
     }
 
     // Build a manual league seeded from a start.gg event's entrants (teams + rosters).
+    // Live-data automation toggles for the manually-scored titles. Both default OFF: automation
+    // that moves the scoreboard without the producer asking for it is a liability on air.
+    case 'set_r6_settings': {
+      if (!state.r6) state.r6 = { autoScore: false, gepData: null };
+      if (typeof msg.data.autoScore === 'boolean') state.r6.autoScore = msg.data.autoScore;
+      broadcastFullState(); saveAppState();
+      break;
+    }
+    case 'set_bedwars_settings': {
+      if (!state.bedwars) state.bedwars = { autoScore: false, data: null };
+      if (typeof msg.data.autoScore === 'boolean') state.bedwars.autoScore = msg.data.autoScore;
+      // The panel can only ever send a BLANK field on reload (the token is never broadcast back —
+      // only hasToken), so treating '' as "set empty" meant one Save click silently disabled auth on
+      // /api/bedwars. Blank = leave alone; clearing requires an explicit clearToken flag.
+      if (msg.data.clearToken === true) bedwarsToken = '';
+      else if (typeof msg.data.token === 'string' && msg.data.token.trim()) bedwarsToken = msg.data.token.trim().slice(0, 128);
+      broadcastFullState(); saveAppState();
+      break;
+    }
     case 'create_league_from_startgg': {
       (async () => {
         const input = (msg.data && (msg.data.input || msg.data.eventSlug || msg.data.url) || '').toString().trim();
@@ -15676,9 +20011,9 @@ function handleControlMessage(msg, ws) {
           leaguesVer++;
           saveAppState();
           broadcastFullState();
-          ws.send(JSON.stringify({ type: 'event-result', data: { ok: true, leagueId: league.id, message: `Created league "${league.name}" with ${teams.length} team(s) from start.gg.` } }));
+          sendWs(ws, { type: 'event-result', data: { ok: true, leagueId: league.id, message: `Created league "${league.name}" with ${teams.length} team(s) from start.gg.` } });
         } catch (e) {
-          ws.send(JSON.stringify({ type: 'event-result', data: { ok: false, message: e.message } }));
+          sendWs(ws, { type: 'event-result', data: { ok: false, message: e.message } });
         }
       })();
       break;
@@ -15690,7 +20025,7 @@ function handleControlMessage(msg, ws) {
     // own `!ev.eventSlug` guard already skips them safely).
     case 'add_my_event': {
       const d = msg.data || {};
-      const platform = ['challonge', 'nxgen', 'manual'].includes(d.platform) ? d.platform : 'startgg';
+      const platform = ['challonge', 'nxgen', 'faceit', 'manual'].includes(d.platform) ? d.platform : 'startgg';
       const eventSlug = platform === 'startgg' ? (d.eventSlug || '').toString().trim() : '';
       const platformSlug = platform === 'startgg' ? '' : (d.platformSlug || '').toString().trim();
       if (platform === 'startgg' ? !eventSlug : !platformSlug) break;
@@ -15698,7 +20033,7 @@ function handleControlMessage(msg, ws) {
       const dupe = platform === 'startgg'
         ? state.myEvents.some((e) => e.eventSlug === eventSlug)
         : state.myEvents.some((e) => e.platform === platform && e.platformSlug === platformSlug);
-      if (dupe) { ws.send(JSON.stringify({ type: 'event-result', data: { ok: true, message: 'Already in MY EVENTS.' } })); break; }
+      if (dupe) { sendWs(ws, { type: 'event-result', data: { ok: true, message: 'Already in MY EVENTS.' } }); break; }
       state.myEvents.unshift({
         id: 'ev' + Math.random().toString(36).slice(2, 10),
         platform,
@@ -15715,11 +20050,15 @@ function handleControlMessage(msg, ws) {
         image: (d.image || '').toString(),
         url: (d.url || '').toString().slice(0, 600),
         addedAt: Date.now(),
+        // FACEIT identifies a competition by UUID + kind (championship vs hub); without the kind a
+        // saved hub would reload as a championship and 404.
+        ...(platform === 'faceit' ? { competitionType: d.competitionType === 'hub' ? 'hub' : 'championship' } : {}),
         seeding: null
       });
+      touchMyEvents();
       saveAppState();
       broadcastFullState();
-      ws.send(JSON.stringify({ type: 'event-result', data: { ok: true, message: `Added "${d.name || 'event'}" to MY EVENTS.` } }));
+      sendWs(ws, { type: 'event-result', data: { ok: true, message: `Added "${d.name || 'event'}" to MY EVENTS.` } });
       // Pull its roster (teams + players + seeds) right away so seeding has data immediately —
       // start.gg only; Challonge/NXGEN entries keep whatever summary info was saved above.
       if (platform === 'startgg') {
@@ -15731,6 +20070,7 @@ function handleControlMessage(msg, ws) {
     case 'remove_my_event': {
       const id = (msg.data && msg.data.id) || '';
       if (Array.isArray(state.myEvents)) state.myEvents = state.myEvents.filter((e) => e.id !== id);
+      touchMyEvents();
       saveAppState();
       broadcastFullState();
       break;
@@ -15742,7 +20082,7 @@ function handleControlMessage(msg, ws) {
       if (all) { refreshAllMyEvents({ force: true }).catch(() => {}); }
       else {
         const ev = Array.isArray(state.myEvents) ? state.myEvents.find((e) => e.id === id) : null;
-        if (ev) refreshMyEvent(ev).then((ok) => { saveAppState(); broadcastFullState(); ws.send(JSON.stringify({ type: 'event-result', data: { ok, message: ok ? `Refreshed "${ev.name || 'event'}".` : (ev.syncError || 'Refresh failed.') } })); }).catch(() => {});
+        if (ev) refreshMyEvent(ev).then((ok) => { saveAppState(); broadcastFullState(); sendWs(ws, { type: 'event-result', data: { ok, message: ok ? `Refreshed "${ev.name || 'event'}".` : (ev.syncError || 'Refresh failed.') } }); }).catch(() => {});
       }
       break;
     }
@@ -15780,6 +20120,11 @@ function handleControlMessage(msg, ws) {
             entrantId: (x.entrantId || '').toString(),
             name: (x.name || '').toString().slice(0, 160),
             seedNum: i + 1,
+            // What auto-seed put this team here on: its tournament placement score, or its players'
+            // ranks when it had no history. Kept so a reopened board still shows the basis chip and
+            // can be re-sorted without re-running every lookup.
+            autoBasis: ['placements', 'ranks', 'none'].includes(x.autoBasis) ? x.autoBasis : null,
+            placementScore: Number.isFinite(x.placementScore) ? x.placementScore : null,
             players: Array.isArray(x.players) ? x.players.slice(0, 12).map((p) => ({
               gamerTag: (p.gamerTag || '').toString().slice(0, 80),
               rank:     (p.rank    || '').toString().slice(0, 40),
@@ -15818,6 +20163,7 @@ function handleControlMessage(msg, ws) {
             })) : []
           })) : []
         };
+        touchMyEvents();
         saveAppState();
         broadcastFullState();
       }
@@ -15872,6 +20218,7 @@ function handleControlMessage(msg, ws) {
       break;
 
     case 'reset_series':
+      _smashGameClosed = false;
       finalizeAndResetSeries();
       saveAppState();
       broadcastFullState();
@@ -15996,6 +20343,23 @@ function handleControlMessage(msg, ws) {
         if (state.teamSpotlight && _tn(state.teamSpotlight.name) === _tn(oldName)) {
           state.teamSpotlight.name = name;
         }
+      }
+
+      // Write the edit through to the permanent team vault and PIN it. This is the half of
+      // "edit once, works at every future event" that the library alone can't do: teams.json is
+      // matched on a name string and gets churned by the next import, while the vault keys on the
+      // start.gg team id / aliases / roster and refuses to let an import overwrite a pinned field.
+      if (state.teamVault && state.teamVault.enabled) {
+        try {
+          const row = savedTeams[idx >= 0 ? idx : savedTeams.length - 1] || {};
+          const rec = teamDb.upsertFromLibrary({
+            name: row.name || name,
+            logo: row.logo, color: row.color, abbr: row.abbr, favorite: row.favorite,
+            startggTeamId: row.startggTeamId, startggSlug: row.startggSlug,
+            players: row.players || [],
+          }, { rename: oldName || null, source: 'library' });
+          if (rec) { row.vaultId = rec.id; vaultTouch(); }
+        } catch (e) { console.warn('[TeamVault] save_team write-through failed:', e.message); }
       }
 
       saveTeams();
@@ -16124,18 +20488,7 @@ function handleControlMessage(msg, ws) {
       const name = (msg.data && msg.data.name || '').trim();
       const team = (state.startgg.eventTeams || []).find(t => t.name === name);
       if (team) {
-        const idx = savedTeams.findIndex(st => (st.name || '').toLowerCase() === name.toLowerCase());
-        if (idx >= 0) {
-          // merge fresh players/logo but preserve existing custom logo if present
-          const cur = savedTeams[idx];
-          savedTeams[idx] = {
-            name: team.name,
-            logo: cur.logo || team.logo,
-            players: team.players && team.players.length ? team.players : (cur.players || [])
-          };
-        } else {
-          savedTeams.push({ name: team.name, logo: team.logo, players: team.players || [] });
-        }
+        saveEventTeamToLibrary(team);
         saveTeams();
         broadcastFullState();
       }
@@ -16147,19 +20500,7 @@ function handleControlMessage(msg, ws) {
       const toSave = Array.isArray(names) && names.length
         ? (state.startgg.eventTeams || []).filter(t => names.includes(t.name))
         : (state.startgg.eventTeams || []);
-      toSave.forEach((team) => {
-        const idx = savedTeams.findIndex(st => (st.name || '').toLowerCase() === team.name.toLowerCase());
-        if (idx >= 0) {
-          const cur = savedTeams[idx];
-          savedTeams[idx] = {
-            name: team.name,
-            logo: cur.logo || team.logo,
-            players: (team.players && team.players.length) ? team.players : (cur.players || [])
-          };
-        } else {
-          savedTeams.push({ name: team.name, logo: team.logo, players: team.players || [] });
-        }
-      });
+      toSave.forEach(saveEventTeamToLibrary);
       if (toSave.length) {
         saveTeams();
         broadcastFullState();
@@ -16184,7 +20525,7 @@ function handleControlMessage(msg, ws) {
     case 'edit_player': {
       const { side, playerId, playerData } = msg.data || {};
       if (side && state.teams[side]) {
-        const player = state.teams[side].players?.find(p => p.id === playerId);
+        const player = findTeamPlayer(state.teams[side], playerId);
         if (player) {
           Object.assign(player, playerData);
           persistRosterToLibrary(side);   // mirror the edit to the saved-team library
@@ -16211,7 +20552,7 @@ function handleControlMessage(msg, ws) {
     case 'assign_camera_to_player': {
       const { side, playerId, cameraId } = msg.data || {};
       if (side && state.teams[side]) {
-        const player = state.teams[side].players?.find(p => p.id === playerId);
+        const player = findTeamPlayer(state.teams[side], playerId);
         if (player) {
           player.assignedCamera = cameraId || null;
           saveAppState();
@@ -16269,7 +20610,7 @@ function handleControlMessage(msg, ws) {
     // Override a player's stream ID (defaults to their sanitized gamertag).
     case 'set_player_stream_id': {
       const { side, playerId, streamId } = msg.data || {};
-      const player = side && state.teams[side]?.players?.find(p => p.id === playerId);
+      const player = findTeamPlayer(side && state.teams[side], playerId);
       if (player) {
         player.vdoStreamId = vdoSlug(streamId || '') || playerStreamId(player);
         saveAppState();
@@ -16492,7 +20833,7 @@ function handleControlMessage(msg, ws) {
     case 'set_saved_team_player_stream_id': {
       const { teamName, playerId, streamId } = msg.data || {};
       const team = savedTeams.find(t => t.name === teamName);
-      const player = team?.players?.find(p => p.id === playerId);
+      const player = findTeamPlayer(team, playerId);
       if (player) { player.vdoStreamId = vdoSlug(streamId || '') || ''; saveTeams(); }
       break;
     }
@@ -16504,11 +20845,11 @@ function handleControlMessage(msg, ws) {
       const audio = sanitizeVdoAudio(msg.data?.audio);
       let player, persist;
       if (side === 'blue' || side === 'orange') {
-        player = state.teams[side]?.players?.find(p => p.id === playerId);
+        player = findTeamPlayer(state.teams[side], playerId);
         persist = saveAppState;
       } else if (teamName) {
         const team = savedTeams.find(t => t.name === teamName);
-        player = team?.players?.find(p => p.id === playerId);
+        player = findTeamPlayer(team, playerId);
         persist = saveTeams;
       }
       if (player) {
@@ -16529,10 +20870,10 @@ function handleControlMessage(msg, ws) {
       let team, player;
       if (side === 'blue' || side === 'orange') {
         team = state.teams[side];
-        player = (team?.players || []).find(p => p.id === playerId);
+        player = findTeamPlayer(team, playerId);
       } else if (teamName) {
         team = savedTeams.find(t => t.name === teamName);
-        player = (team?.players || []).find(p => p.id === playerId);
+        player = findTeamPlayer(team, playerId);
       }
       if (!team || !player || !team.vdo?.room) break;
       const camUrl = buildObsViewUrl(team, player);
@@ -16594,16 +20935,20 @@ function handleControlMessage(msg, ws) {
         saveAppState();
         broadcastFullState();
       } else {
-        const player = team.players?.find(p => p.id === playerId);
-        if (player) {
-          state.listenIn = {
-            active: true, side, scope: 'player', playerId,
-            name: player.name || playerStreamId(player),
-            url: buildListenInUrl(team, player)
-          };
-          saveAppState();
-          broadcastFullState();
+        const player = findTeamPlayer(team, playerId);
+        if (!player) {
+          // Used to fall out of here doing nothing at all — no state change, no broadcast, no log,
+          // so the producer clicked LISTEN and the app just sat there.
+          console.warn(`[ListenIn] no player ${playerId} on ${side} (roster ids: ${(team.players || []).map((x) => x && x.id).join(', ') || 'none'})`);
+          break;
         }
+        state.listenIn = {
+          active: true, side, scope: 'player', playerId: String(playerId),
+          name: player.name || playerStreamId(player),
+          url: buildListenInUrl(team, player)
+        };
+        saveAppState();
+        broadcastFullState();
       }
       break;
     }
@@ -17259,11 +21604,12 @@ function handleControlMessage(msg, ws) {
 
     case 'reset_all': {
       state.eventName = '';
+      state.eventNameSlug = '';
       state.fontFamily = 'Industry';
       state.banner = { visible: false, images: [], captions: [], interval: 10, slant: 'right', header: '' };
       state.casters = { visible: true, list: [], lowerThird: '', library: [], vdo: { room: '', password: '' }, rooms: [], lineup: [], activeLayout: '', slotLabels: { 1: 'Caster 1', 2: 'Caster 2', 3: 'Caster 3', 4: 'Caster 4' }, autoFillSuppress: [] };
       state.breakScreen = { visible: false, title: 'STARTING SOON', message: '', endsAt: null };
-      state.ticker = { visible: false, messages: [], speed: 40, source: 'manual', sponsor: '' };
+      state.ticker = { visible: false, messages: [], speed: 10, source: 'manual', sponsor: '' };
       state.spotlight = { visible: false, playerName: '' };
       state.winner = { visible: false, side: '', name: '', logo: null, color: '', subtitle: '' };
       state.intro  = { visible: false, side: 'blue', title: '', style: 1, showFooter: false };
@@ -17631,6 +21977,76 @@ function handleControlMessage(msg, ws) {
       break;
     }
 
+
+    // ── Liquipedia (LPDB v3) ────────────────────────────────────────────────
+    // Manual-only by design: 60 requests/hour is the whole allowance, so nothing here is
+    // triggered by a poll or by an overlay — only by the producer.
+    case 'set_liquipedia_settings': {
+      const d = msg.data || {};
+      if (typeof d.enabled === 'boolean') state.liquipedia.enabled = d.enabled;
+      if (typeof d.wiki === 'string' && d.wiki.trim()) state.liquipedia.wiki = d.wiki.trim().toLowerCase();
+      if (typeof d.contact === 'string') state.liquipedia.contact = d.contact.trim().slice(0, 200);
+      // A blank key means "leave it alone" so the panel never has to echo the secret back.
+      if (typeof d.apiKey === 'string' && d.apiKey.trim()) liquipediaApiKey = d.apiKey.trim();
+      if (d.clearKey) liquipediaApiKey = '';
+      lpSyncBudget();
+      saveAppState();
+      broadcastFullState();
+      sendWs(ws, { type: 'liquipedia-result', data: { ok: true, message: 'Liquipedia settings saved.' } });
+      break;
+    }
+    case 'liquipedia_fetch': {
+      (async () => {
+        const d = msg.data || {};
+        const kind = String(d.kind || 'standings');
+        const force = !!d.force;
+        try {
+          let out;
+          if (kind === 'standings')       out = await lpFetchStandings(d.page || '', force);
+          else if (kind === 'rankings')   out = await lpFetchRankings(force);
+          else if (kind === 'squad')      out = await lpFetchSquad(d.page || '', force);
+          else if (kind === 'tournament') out = await lpFetchTournament(d.page || '', force);
+          else throw new Error('Unknown Liquipedia request: ' + kind);
+
+          const n = out.rows ? out.rows.length : (out.row ? 1 : 0);
+          const age = out.ageMs != null ? Math.round(out.ageMs / 60000) : null;
+          const from = out.fromCache ? ('cache' + (age != null ? ', ' + age + ' min old' : '')) : 'Liquipedia';
+          broadcastFullState();
+          sendWs(ws, { type: 'liquipedia-result', data: {
+            ok: true, kind,
+            message: n + ' row(s) from ' + from + '. ' + state.liquipedia.budgetRemaining + ' request(s) left this hour.'
+              + (out.stale ? ' (serving cached data — refresh unavailable right now)' : '')
+          } });
+        } catch (e) {
+          state.liquipedia.lastError = e.message;
+          lpSyncBudget();
+          broadcastFullState();
+          sendWs(ws, { type: 'liquipedia-result', data: { ok: false, kind, message: e.message } });
+        }
+      })();
+      break;
+    }
+    // Push the last pulled standings onto the Standings graphic. Deliberately a SEPARATE step
+    // from fetching: filling a graphic must never be able to spend the hourly budget.
+    case 'liquipedia_apply_standings': {
+      const rows = Array.isArray(state.liquipedia.standings) ? state.liquipedia.standings : [];
+      if (!rows.length) {
+        sendWs(ws, { type: 'liquipedia-result', data: { ok: false, message: 'Nothing pulled yet — fetch standings first.' } });
+        break;
+      }
+      state.standings.rows = rows.map((r) => ({
+        placement: r.placement, name: r.name, wins: r.wins, losses: r.losses,
+        points: r.points, played: r.played
+      }));
+      // CC BY-SA 3.0: the overlay must credit Liquipedia while showing its data.
+      state.standings.source = 'liquipedia';
+      state.standings.attribution = liquipedia.LIQUIPEDIA_ATTRIBUTION;
+      saveAppState();
+      broadcastFullState();
+      sendWs(ws, { type: 'liquipedia-result', data: { ok: true, message: 'Standings graphic filled from Liquipedia (' + rows.length + ' rows).' } });
+      break;
+    }
+
     // ── Challonge ───────────────────────────────────────────────────────────
 
     case 'set_challonge_settings': {
@@ -17679,6 +22095,9 @@ function handleControlMessage(msg, ws) {
 
     case 'clear_active_event': {
       state.activeEvent = { platform: null, slug: '', name: '', gameName: '', numEntrants: 0, format: '', url: '', loadedAt: null };
+      // The title itself stays on air (clearing the event shouldn't blank the overlay mid-show), but
+      // it's no longer tied to an event — loading that same event again pulls its name fresh.
+      state.eventNameSlug = '';
       // Clearing the event clears its DOWNSTREAM feeds too — the stream queue kept
       // polling and repopulating boards after the event was supposedly gone.
       state.startgg.queue = [];
@@ -17687,6 +22106,17 @@ function handleControlMessage(msg, ws) {
       state.startgg.matchFeed = [];
       if (state.ticker.source === 'startgg') state.ticker.feed = [];
       setStartggQueuePolling(false);   // stops the poll timer + persists queueEnabled=false
+      // Same for FACEIT: a live poll left running after "Clear" keeps rewriting the bracket and
+      // the queue for an event the producer just took off air.
+      if (state.faceit.competitionId || state.faceit.queue.length) {
+        setFaceitPolling(false);
+        state.faceit.autoFollow = false;
+        state.faceit.competitionId = '';
+        state.faceit.selectedEvent = null;
+        state.faceit.queue = [];
+        state.faceit.eventTeams = [];
+        state.faceit.lastAutoFollowMatchId = null;
+      }
       saveAppState();
       broadcastFullState();
       break;
@@ -17802,6 +22232,7 @@ function handleControlMessage(msg, ws) {
           const count = Object.keys(participantMap).length;
           const prevPushed = (evLink.challongeSync && evLink.challongeSync.slug === lSlug) ? evLink.challongeSync.pushedMatches || {} : {};
           evLink.challongeSync = { slug: lSlug, enabled: !!enabled, participantMap, pushedMatches: prevPushed, lastSyncAt: null, lastError: null };
+          touchMyEvents();
           saveAppState();
           broadcastFullState();
           syncLinkedChallongeTournament(evLink).catch(() => {});
@@ -17816,7 +22247,7 @@ function handleControlMessage(msg, ws) {
     case 'unlink_event_challonge': {
       const { eventId: ulEvId } = msg.data || {};
       const evUnlink = (Array.isArray(state.myEvents) ? state.myEvents : []).find(e => e.id === ulEvId);
-      if (evUnlink) { delete evUnlink.challongeSync; saveAppState(); broadcastFullState(); }
+      if (evUnlink) { delete evUnlink.challongeSync; touchMyEvents(); saveAppState(); broadcastFullState(); }
       ws.send(JSON.stringify({ type: 'link-result', data: { ok: true, message: 'Auto-sync unlinked.', unlinked: true } }));
       break;
     }
@@ -17824,7 +22255,7 @@ function handleControlMessage(msg, ws) {
     case 'toggle_challonge_sync': {
       const { eventId: tsEvId, enabled: tsEnabled } = msg.data || {};
       const evToggle = (Array.isArray(state.myEvents) ? state.myEvents : []).find(e => e.id === tsEvId);
-      if (evToggle && evToggle.challongeSync) { evToggle.challongeSync.enabled = !!tsEnabled; saveAppState(); broadcastFullState(); }
+      if (evToggle && evToggle.challongeSync) { evToggle.challongeSync.enabled = !!tsEnabled; touchMyEvents(); saveAppState(); broadcastFullState(); }
       break;
     }
 
@@ -17859,7 +22290,7 @@ function handleControlMessage(msg, ws) {
       if (typeof p.sheetUrl === 'string') { state.sheets.sheetUrl = p.sheetUrl.trim(); state.sheets.sheetId = sheets.extractSheetId(p.sheetUrl); }
       if (typeof p.autoSyncSec === 'number') state.sheets.autoSyncSec = Math.max(0, Math.min(3600, Math.round(p.autoSyncSec)));
       if (p.maps && typeof p.maps === 'object') {
-        ['teams', 'schedule', 'standings'].forEach((k) => {
+        ['teams', 'schedule', 'standings', 'brResults', 'brPlayers'].forEach((k) => {
           if (!p.maps[k]) return;
           if (typeof p.maps[k].direction === 'string' && ['off', 'import', 'export', 'both'].includes(p.maps[k].direction)) state.sheets.maps[k].direction = p.maps[k].direction;
           if (typeof p.maps[k].tab === 'string') state.sheets.maps[k].tab = p.maps[k].tab;
@@ -17969,6 +22400,129 @@ function handleControlMessage(msg, ws) {
       break;
     }
 
+    // ── FACEIT ───────────────────────────────────────────────────────────
+    case 'set_faceit_settings': {
+      const p = msg.data || {};
+      state.faceit.enabled = !!p.enabled;
+      // Accept a pasted browser URL as well as a bare UUID — the producer has the URL, not the id.
+      if (typeof p.competitionId === 'string') {
+        const parsed = faceit.parseFaceitCompetition(p.competitionId);
+        if (parsed) {
+          state.faceit.competitionId = parsed.id;
+          // An explicit type from the panel wins; otherwise let the pasted URL decide.
+          state.faceit.competitionType = (p.competitionType === 'hub' || p.competitionType === 'championship')
+            ? p.competitionType : parsed.type;
+        } else {
+          state.faceit.competitionId = p.competitionId.trim();
+          if (p.competitionType === 'hub' || p.competitionType === 'championship') state.faceit.competitionType = p.competitionType;
+        }
+      } else if (p.competitionType === 'hub' || p.competitionType === 'championship') {
+        state.faceit.competitionType = p.competitionType;
+      }
+      if (typeof p.organizerName === 'string') state.faceit.organizerName = p.organizerName.trim();
+      if (typeof p.apiKey === 'string' && p.apiKey.trim()) faceitApiKey = p.apiKey.trim();
+      saveAppState();
+      broadcastFullState();
+      if (state.faceit.enabled && faceitApiKey && state.faceit.competitionId) setFaceitPolling(true);
+      break;
+    }
+
+    case 'set_faceit_auto_follow': {
+      state.faceit.autoFollow = !!msg.data?.enabled;
+      if (state.faceit.autoFollow) setActivePlatform('faceit');   // silence the other platforms' follow
+      saveAppState();
+      broadcastFullState();
+      break;
+    }
+
+    case 'faceit_test_connection': {
+      (async () => {
+        try {
+          // A cheap authenticated read that works for every key: search returns 200 + an empty
+          // list for a nonsense name, so a failure here really is the key, not the query.
+          await faceit.searchFaceitChampionships(faceitApiKey, { name: 'a', limit: 1 });
+          state.faceit.connected = true;
+          state.faceit.lastError = null;
+          // Resolve the saved organiser name to an id so the Events tab can list their comps.
+          if (state.faceit.organizerName && !state.faceit.organizerId) {
+            try {
+              const org = await faceit.getFaceitOrganizerByName(faceitApiKey, state.faceit.organizerName);
+              if (org && org.organizer_id) { state.faceit.organizerId = org.organizer_id; state.faceit.organizerName = org.name || state.faceit.organizerName; }
+            } catch {}
+          }
+          saveAppState();
+          broadcastFullState();
+          ws.send(JSON.stringify({ type: 'faceit-result', data: { ok: true, message: 'Connected to FACEIT successfully.' } }));
+        } catch (e) {
+          state.faceit.connected = false;
+          state.faceit.lastError = e.message;
+          broadcastFullState();
+          ws.send(JSON.stringify({ type: 'faceit-result', data: { ok: false, message: e.message } }));
+        }
+      })();
+      break;
+    }
+
+    case 'load_faceit_event': {
+      const raw = (msg.data?.id || msg.data?.slug || state.faceit.competitionId || '').trim();
+      const parsed = faceit.parseFaceitCompetition(raw);
+      const compId = parsed ? parsed.id : raw;
+      const compType = msg.data?.competitionType || (parsed ? parsed.type : state.faceit.competitionType) || 'championship';
+      if (!compId) { ws.send(JSON.stringify({ type: 'faceit-result', data: { ok: false, message: 'No FACEIT championship or hub provided.' } })); break; }
+      if (!faceitApiKey) { ws.send(JSON.stringify({ type: 'faceit-result', data: { ok: false, message: 'FACEIT API key not configured — add it in Settings → Integrations.' } })); break; }
+      (async () => {
+        try {
+          ws.send(JSON.stringify({ type: 'faceit-result', data: { ok: true, message: 'Loading competition…', loading: true } }));
+          const result = await loadFaceitCompetition(compId, compType);
+          saveAppState();
+          broadcastFullState();
+          setFaceitPolling(state.faceit.enabled);
+          ws.send(JSON.stringify({ type: 'faceit-result', data: { ok: true, message: `Loaded "${result.name}" — ${result.teamsCount} teams, ${result.matchesCount} matches.`, loaded: true } }));
+        } catch (e) {
+          state.faceit.connected = false;
+          state.faceit.lastError = e.message;
+          broadcastFullState();
+          ws.send(JSON.stringify({ type: 'faceit-result', data: { ok: false, message: e.message } }));
+        }
+      })();
+      break;
+    }
+
+    case 'faceit_refresh': {
+      (async () => {
+        try {
+          await refreshFaceitLive();
+          ws.send(JSON.stringify({ type: 'faceit-result', data: { ok: !!state.faceit.connected, message: state.faceit.connected ? 'Competition refreshed.' : (state.faceit.lastError || 'Refresh failed.') } }));
+        } catch (e) {
+          ws.send(JSON.stringify({ type: 'faceit-result', data: { ok: false, message: e.message } }));
+        }
+      })();
+      break;
+    }
+
+    case 'faceit_import_teams': {
+      (async () => {
+        try {
+          const teams = state.faceit.eventTeams || [];
+          if (!teams.length) throw new Error('No teams loaded — load a competition first.');
+          let added = 0;
+          teams.forEach((t) => {
+            const existing = savedTeams.find((s) => s.name.toLowerCase() === (t.name || '').toLowerCase());
+            if (!existing) {
+              savedTeams.push({ name: t.name, logo: t.logo || null, players: (t.players || []).slice() });
+              added++;
+            }
+          });
+          saveTeams();
+          broadcastFullState();
+          ws.send(JSON.stringify({ type: 'faceit-result', data: { ok: true, message: `${added} new team${added !== 1 ? 's' : ''} added to library.` } }));
+        } catch (e) {
+          ws.send(JSON.stringify({ type: 'faceit-result', data: { ok: false, message: e.message } }));
+        }
+      })();
+      break;
+    }
+
     case 'set_obs_autoswitch': {
       if (typeof msg.data?.autoSwitch === 'boolean') {
         state.obs.autoSwitch = msg.data.autoSwitch;
@@ -18022,21 +22576,17 @@ function handleControlMessage(msg, ws) {
       break;
     }
 
-    // Auto-spectate (follow the ball). ONE switch: `enabled` both turns the feature on and allows the
-    // live keypresses. The old separate `armed` flag had no useful middle state — enabled-but-unarmed
-    // did nothing at all, so it only ever produced a silently-dead feature. `armed` is kept in the
-    // shape (mirrored to enabled) so any older client/state file stays coherent.
-    case 'set_auto_spectate': {
-      const p = msg.data || {};
-      const cur = state.autoSpectate || { enabled: false, armed: false, debounceMs: 1500, layout: 'std' };
-      state.autoSpectate = {
-        ...cur,
-        enabled: typeof p.enabled === 'boolean' ? p.enabled : cur.enabled,
-        debounceMs: (typeof p.debounceMs === 'number') ? Math.max(400, Math.min(8000, Math.round(p.debounceMs))) : cur.debounceMs,
-        layout: (p.layout === 'std' || p.layout === 'team') ? p.layout : (cur.layout || 'std')
-      };
-      state.autoSpectate.armed = state.autoSpectate.enabled;   // legacy field mirrors the single switch
-      saveAppState();
+    // Pause / resume the LIVE match via the Stats API SetMatchPaused command.
+    case 'set_rl_paused': {
+      const paused = !!(msg.data && msg.data.paused);
+      const ok = sendRlCommand('SetMatchPaused', { bPaused: paused });
+      if (ok) {
+        // Optimistic — the MatchPaused/MatchUnpaused event will confirm/correct it.
+        state.rlPaused = paused;
+        logAuto('rlpause', paused ? 'Match paused (SetMatchPaused)' : 'Match resumed (SetMatchPaused)');
+      } else {
+        logAuto('rlpause', 'Pause/resume failed — RL Stats API not connected');
+      }
       broadcastFullState();
       break;
     }
@@ -18047,12 +22597,13 @@ function handleControlMessage(msg, ws) {
       break;
     }
 
-    case 'set_rl_spec_outline': {
-      state.rlSpecOutline = !!(msg.data && msg.data.on);
+    case 'set_rl_replay_transitions': {
+      state.rlReplayTransitions = !!(msg.data && msg.data.on);
       saveAppState();
       broadcastFullState();
       break;
     }
+
     case 'set_rl_scoreboard_separate': {
       state.rlScoreboardSeparate = !!(msg.data && msg.data.separate);
       saveAppState();
@@ -18082,9 +22633,6 @@ function handleControlMessage(msg, ws) {
       }
       if (typeof payload.autoReplayOnGoal === 'boolean') {
         state.obs.autoReplayOnGoal = payload.autoReplayOnGoal;
-      }
-      if (typeof payload.allowKitObsSwitch === 'boolean') {
-        state.obs.allowKitObsSwitch = payload.allowKitObsSwitch;
       }
       if (typeof payload.postGameToCastersSec === 'number') {
         state.obs.postGameToCastersSec = Math.max(0, Math.min(120, Math.round(payload.postGameToCastersSec)));
@@ -18681,16 +23229,24 @@ function handleControlMessage(msg, ws) {
       }
       if (typeof p.visible === 'boolean') setExclusiveGfxVisible('bracket', p.visible);
       // Overlay view mode — drives the single bracket source + the live preview.
-      if (typeof p.view === 'string' && ['both', 'winners', 'losers', 'finals', 'schedule', 'standings', 'matrix'].includes(p.view)) state.bracket.view = p.view;
+      if (typeof p.view === 'string' && ['both', 'winners', 'losers', 'finals', 'schedule', 'standings', 'matrix', 'swiss', 'group', 'pairings'].includes(p.view)) state.bracket.view = p.view;
+      // 0 clears the override and hands the threshold back to the overlay's round-count default.
+      ['swissAdvance', 'swissEliminate'].forEach((k) => {
+        if (p[k] == null) return;
+        const n = parseInt(p[k], 10);
+        if (Number.isFinite(n) && n >= 0 && n <= 12) state.bracket[k] = n;
+      });
       if (p.rounds != null) { const n = parseInt(p.rounds, 10); if (Number.isFinite(n) && n >= 1 && n <= 20) state.bracket.rounds = n; }
       if (typeof p.title === 'string') state.bracket.title = p.title.slice(0, 120);
       if (typeof p.subtitle === 'string') state.bracket.subtitle = p.subtitle.slice(0, 140);
       if (typeof p.showRecord === 'boolean') state.bracket.showRecord = p.showRecord;
+      if (typeof p.swissColors === 'boolean') state.bracket.swissColors = p.swissColors;
       // Display filters: hide the grand-final RESET match, and/or hide the first N rounds (clean up a
       // wide bracket by dropping the early rounds). Applied at render time — the data stays intact.
       if (typeof p.ignoreReset === 'boolean') state.bracket.ignoreReset = p.ignoreReset;
       if (p.ignoreRounds != null) { const n = parseInt(p.ignoreRounds, 10); if (Number.isFinite(n) && n >= 0 && n <= 12) state.bracket.ignoreRounds = n; }
       if (typeof p.hideLogos === 'boolean') state.bracket.hideLogos = p.hideLogos;
+      if (typeof p.logoWatermark === 'boolean') state.bracket.logoWatermark = p.logoWatermark;
       saveAppState();
       broadcastFullState();
       if (typeof p.visible === 'boolean') obsSwitch(p.visible ? 'bracket' : 'inGame');
@@ -18834,7 +23390,7 @@ function handleControlMessage(msg, ws) {
       if (!q) {
         state.startgg.focusTeam = '';
         broadcastFullState();
-        ws.send(JSON.stringify({ type: 'bracket-result', data: { ok: true, message: 'Team focus cleared.' } }));
+        sendWs(ws, { type: 'bracket-result', data: { ok: true, message: 'Team focus cleared.' } });
         break;
       }
       // Rank every candidate instead of taking the first substring hit: an exact name beats a
@@ -18878,10 +23434,10 @@ function handleControlMessage(msg, ws) {
         broadcastFullState();
         const ph = (state.bracket.phases || []).find((x) => x.id === found.phaseId);
         const pl = ph && (ph.pools || []).find((x) => x.id === found.poolId);
-        ws.send(JSON.stringify({ type: 'bracket-result', data: { ok: true,
-          message: `Found ${found.name} — ${ph ? ph.name : 'phase'}${pl ? ' · ' + pl.name : ''}. Highlighted on the bracket.` } }));
+        sendWs(ws, { type: 'bracket-result', data: { ok: true,
+          message: `Found ${found.name} — ${ph ? ph.name : 'phase'}${pl ? ' · ' + pl.name : ''}. Highlighted on the bracket.` } });
       } else {
-        ws.send(JSON.stringify({ type: 'bracket-result', data: { ok: false, message: `No team matching "${msg.data.name}" in this bracket.` } }));
+        sendWs(ws, { type: 'bracket-result', data: { ok: false, message: `No team matching "${msg.data.name}" in this bracket.` } });
       }
       break;
     }
@@ -18920,22 +23476,26 @@ function handleControlMessage(msg, ws) {
           // Immediate ack: a big import runs for a while — without this the panel's
           // request timed out with "No response from the server" while data was
           // actually loading fine in the background.
-          ws.send(JSON.stringify({
+          sendWs(ws, {
             type: 'bracket-result',
             data: { ok: true, message: 'Importing bracket — large events load phase by phase…' }
-          }));
+          });
           const result = await fetchBracket(slug);
           const label = result.type ? result.type.replace(/_/g, ' ').toLowerCase() : 'bracket';
-          ws.send(JSON.stringify({
+          // A capped phase is a PARTIAL bracket — say so, rather than reporting a clean load.
+          const capped = (result.truncated || []).length
+            ? ` — WARNING: ${result.truncated.join(', ')} exceeded the per-phase set limit, this bracket is incomplete`
+            : '';
+          sendWs(ws, {
             type: 'bracket-result',
-            data: { ok: true, message: result.inProgress
+            data: { ok: !capped, message: result.inProgress
               ? 'Import already running — phases appear as they load'
-              : `Loaded ${result.sets} set(s) — ${label}` }
-          }));
+              : `Loaded ${result.sets} set(s) — ${label}${capped}` }
+          });
         } catch (e) {
           state.bracket.lastError = e.message;
           broadcastFullState();
-          ws.send(JSON.stringify({ type: 'bracket-result', data: { ok: false, message: e.message } }));
+          sendWs(ws, { type: 'bracket-result', data: { ok: false, message: e.message } });
         }
       })();
       break;
@@ -18956,12 +23516,12 @@ function handleControlMessage(msg, ws) {
           saveAppState();
           broadcastFullState();
 
-          ws.send(JSON.stringify({
+          sendWs(ws, {
             type: 'event-result',
             data: { ok: true, message: `Now playing: ${(result.entrants || []).join('  vs  ') || setId}` }
-          }));
+          });
         } catch (e) {
-          ws.send(JSON.stringify({ type: 'event-result', data: { ok: false, message: e.message } }));
+          sendWs(ws, { type: 'event-result', data: { ok: false, message: e.message } });
         }
       })();
       break;
@@ -18972,13 +23532,13 @@ function handleControlMessage(msg, ws) {
         try {
           const slug = (msg.data?.eventSlug || state.bracket.eventSlug || '').trim();
           const r = await loadEvent(slug);
-          ws.send(JSON.stringify({
+          sendWs(ws, {
             type: 'event-result',
             data: {
               ok: true,
               message: `Loaded "${r.title}" — ${r.teams} team(s), ${r.players} player(s), ${r.logos} logo(s), ${r.sets} set(s).`
             }
-          }));
+          });
         } catch (e) {
           // "Maximum call stack size exceeded" here means a runaway recursive function or a
           // pathologically deep chain in the freshly-fetched bracket — unlike the broadcast/save
@@ -18987,7 +23547,7 @@ function handleControlMessage(msg, ws) {
           if (e && /call stack/i.test(e.message || '')) _logSerializeFailure(`load_event: ${e.message}`, e);
           state.bracket.lastError = e.message;
           broadcastFullState();
-          ws.send(JSON.stringify({ type: 'event-result', data: { ok: false, message: e.message } }));
+          sendWs(ws, { type: 'event-result', data: { ok: false, message: e.message } });
         }
       })();
       break;
@@ -19004,19 +23564,25 @@ function handleControlMessage(msg, ws) {
         const d = msg.data || {};
         const input = (d.url || d.eventSlug || d.tournamentSlug || '').trim();
         try {
+          // Immediate ack (same reason as fetch_bracket below): an RLCS/EU-scale event loads
+          // entrants + every bracket phase before this resolves, which is minutes, not seconds.
+          // Without the ack the panel's watchdog fired at 9s and told the producer to quit and
+          // relaunch the app — mid-import, while it was actually working.
+          sendWs(ws, { type: 'event-result', data: { ok: true, pending: true,
+            message: 'Loading from start.gg — teams first, then the bracket stage by stage…' } });
           const r = await resolveStartggUrl(input);
           if (r.needsEventPick) {
-            ws.send(JSON.stringify({
+            sendWs(ws, {
               type: 'event-result',
               data: { ok: true, needsEventPick: true, tournamentSlug: r.tournamentSlug, tournamentName: r.tournamentName, events: r.events,
                 message: `Pick an event — ${r.events.length} found on ${r.tournamentName || 'this tournament'}.` }
-            }));
+            });
           } else {
-            ws.send(JSON.stringify({
+            sendWs(ws, {
               type: 'event-result',
               data: { ok: true, activated: true, tournamentSlug: r.tournamentSlug, eventSlug: r.eventSlug,
                 message: `Loaded "${r.eventName || r.title}" — ${r.teams} team(s), bracket + ${r.queued} queued set(s).` }
-            }));
+            });
           }
         } catch (e) {
           // See the load_event catch above — capture the actual runaway-recursion stack now,
@@ -19024,7 +23590,7 @@ function handleControlMessage(msg, ws) {
           if (e && /call stack/i.test(e.message || '')) _logSerializeFailure(`load_startgg_url: ${e.message}`, e);
           state.startgg.lastError = e.message;
           broadcastFullState();
-          ws.send(JSON.stringify({ type: 'event-result', data: { ok: false, message: e.message } }));
+          sendWs(ws, { type: 'event-result', data: { ok: false, message: e.message } });
         }
       })();
       break;
@@ -19036,33 +23602,37 @@ function handleControlMessage(msg, ws) {
         const eventSlug = (d.eventSlug || '').trim();
         const tournamentSlug = (d.tournamentSlug || '').trim() || eventSlug.replace(/\/event\/.*$/, '');
         try {
+          // Same immediate ack as load_startgg_url — picking an event off the picker runs the
+          // identical full import, so the panel's watchdog needs disarming here too.
+          sendWs(ws, { type: 'event-result', data: { ok: true, pending: true,
+            message: 'Loading from start.gg — teams first, then the bracket stage by stage…' } });
           // If we weren't handed a proper /event/ slug (e.g. a tournament URL, an /events or
           // /details page, or a bare tournament slug), resolve it like a pasted link — fetch the
           // tournament's events and auto-activate a single one, or return a picker for several.
           if (!/\/event\//i.test(eventSlug)) {
             const r = await resolveStartggUrl(eventSlug || tournamentSlug);
             if (r.needsEventPick) {
-              ws.send(JSON.stringify({ type: 'event-result', data: { ok: true, needsEventPick: true, tournamentSlug: r.tournamentSlug, tournamentName: r.tournamentName, events: r.events, message: `Pick an event — ${r.events.length} found on ${r.tournamentName || 'this tournament'}.` } }));
+              sendWs(ws, { type: 'event-result', data: { ok: true, needsEventPick: true, tournamentSlug: r.tournamentSlug, tournamentName: r.tournamentName, events: r.events, message: `Pick an event — ${r.events.length} found on ${r.tournamentName || 'this tournament'}.` } });
             } else {
-              ws.send(JSON.stringify({ type: 'event-result', data: { ok: true, activated: true, tournamentSlug: r.tournamentSlug, eventSlug: r.eventSlug, message: `Loaded "${r.eventName || r.title}" — ${r.teams} team(s), bracket + ${r.queued} queued set(s).` } }));
+              sendWs(ws, { type: 'event-result', data: { ok: true, activated: true, tournamentSlug: r.tournamentSlug, eventSlug: r.eventSlug, message: `Loaded "${r.eventName || r.title}" — ${r.teams} team(s), bracket + ${r.queued} queued set(s).` } });
             }
             return;
           }
           const r = await activateStartggEvent(tournamentSlug, eventSlug, { name: d.name, tournamentName: d.tournamentName });
-          ws.send(JSON.stringify({
+          sendWs(ws, {
             type: 'event-result',
             data: {
               ok: true, activated: true, tournamentSlug: r.tournamentSlug, eventSlug: r.eventSlug,
               message: `Activated "${r.eventName || r.title}" — ${r.teams} team(s) imported, bracket + ${r.queued} queued set(s).`
             }
-          }));
+          });
         } catch (e) {
           // See the load_event catch above — capture the actual runaway-recursion stack now,
           // instead of only relaying the bare "Maximum call stack size exceeded" text to the panel.
           if (e && /call stack/i.test(e.message || '')) _logSerializeFailure(`activate_startgg_event: ${e.message}`, e);
           state.startgg.lastError = e.message;
           broadcastFullState();
-          ws.send(JSON.stringify({ type: 'event-result', data: { ok: false, message: e.message } }));
+          sendWs(ws, { type: 'event-result', data: { ok: false, message: e.message } });
         }
       })();
       break;
@@ -19074,13 +23644,13 @@ function handleControlMessage(msg, ws) {
         const d = msg.data || {};
         try {
           const r = await importStartggTeams((d.eventSlug || d.slug || '').trim());
-          ws.send(JSON.stringify({
+          sendWs(ws, {
             type: 'event-result',
             data: { ok: true, message: `Imported ${r.teams} team(s), ${r.players} player(s) to your library (${r.teamsAdded} new).` }
-          }));
+          });
         } catch (e) {
           if (e && /call stack/i.test(e.message || '')) _logSerializeFailure(`import_startgg_teams: ${e.message}`, e);
-          ws.send(JSON.stringify({ type: 'event-result', data: { ok: false, message: e.message } }));
+          sendWs(ws, { type: 'event-result', data: { ok: false, message: e.message } });
         }
       })();
       break;
@@ -19702,7 +24272,8 @@ function _flushFullState() {
     data = buildLiveState();
     const sig = librarySig();
     const libChanged = (sig !== _lastLibSig);
-    if (libChanged) { _lastLibSig = sig; Object.assign(data, libraryData()); }   // library only when it changed
+    // Something in the library moved — ship only the keys that actually changed (see libraryDelta).
+    if (libChanged) { _lastLibSig = sig; Object.assign(data, libraryDelta()); }
     // Serialize ONCE. Skip byte-identical re-sends (a mutation that didn't change anything live — only a
     // library/local key moved, or an identical value was written). New clients get their own snapshot via
     // the connection handler, so deduping the throttled path never starves them.
@@ -19712,7 +24283,7 @@ function _flushFullState() {
     // payload — almost always from a freshly-loaded start.gg/bracket object. Pinpoint the offending key
     // path and log it, instead of letting the throw abort the in-flight load (whose catch relays the raw
     // message to the panel) or crash the main process. The broadcast is skipped; the next mutation retries.
-    _lastLibSig = '';   // force a full library rebuild on the next (successful) flush
+    _lastLibSig = ''; _libKeySigs = {};   // force a full library rebuild on the next (successful) flush
     let where;
     try { where = _diagnoseSerialization(data !== undefined ? data : state); } catch (_) { where = 'diagnosis walk failed'; }
     _logSerializeFailure(`_flushFullState: ${(e && e.message) || e} — data-path signal: ${where}`, e);
@@ -19761,7 +24332,12 @@ function startHttpServer(baseDir) {
   // Inject the sticky-logos client as the first <head> script of EVERY served overlay page, so remote
   // overlays opt into compact @img: image refs (see overlay/sticky-logos.js) with zero per-file edits.
   // Covers user overrides and base overlays; on any read error it falls through to normal serving.
-  const _stickyTag = '<script src="/sticky-logos.js"></script>';
+  //
+  // scene-bg.js rides the same injection so the Scenes page "Background fill" works on EVERY
+  // overlay, not just the ones that load scene-base.js (19 didn't, so the control silently did
+  // nothing on the main HUD, upcoming, credits, valorant, lol, apex, pulse…). It MUST come after
+  // sticky-logos so its WebSocket wrapper sits outside sticky's and observes restored frames.
+  const _stickyTag = '<script src="/sticky-logos.js"></script>\n  <script src="/scene-bg.js"></script>';
   const _resolveOverlayHtml = (reqPath) => {
     const ov = overlayEditor.resolveFileForRequest(reqPath);
     if (ov) return ov;
@@ -19776,7 +24352,9 @@ function startHttpServer(baseDir) {
     if (!file || !/\.html$/i.test(file)) return next();
     fs.readFile(file, 'utf8', (err, html) => {
       if (err) return next();
-      const out = html.indexOf('sticky-logos.js') >= 0 ? html
+      // Skip only if BOTH injected clients are already present — a page that hand-rolls one of
+      // them must still receive the other (otherwise scene-bg.js would silently never load).
+      const out = (html.indexOf('sticky-logos.js') >= 0 && html.indexOf('scene-bg.js') >= 0) ? html
         : (/<head[^>]*>/i.test(html) ? html.replace(/<head[^>]*>/i, (h) => h + '\n  ' + _stickyTag)
                                      : _stickyTag + '\n' + html);
       res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
@@ -19986,13 +24564,12 @@ function startHttpServer(baseDir) {
       await fsp.writeFile(filePath, json, 'utf8');
       console.log(`[OBS] Saved scene collection to ${filePath}`);
 
-      // If it landed in the OBS scenes folder, optionally hot-switch via WebSocket.
+      // We save the file and stop. The app used to hot-switch OBS to the new collection over the
+      // WebSocket when the file landed in the OBS scenes folder — that is exactly the "the suite
+      // changed my OBS on me" behaviour we do not do. Your OBS is yours: pick the collection
+      // yourself from OBS's Scene Collection menu when you actually want it on air.
       const savedInObsDir = obsDir && path.dirname(filePath) === obsDir;
-      let switched = false;
-      if (savedInObsDir && obsClient && obsClient.isConnected()) {
-        try { await obsClient.call('SetCurrentSceneCollection', { sceneCollectionName: OBS_COLLECTION_NAME }); switched = true; }
-        catch (wsErr) { console.warn('[OBS] SetCurrentSceneCollection failed:', wsErr.message); }
-      }
+      const switched = false;
 
       // Post-install glue: auto-map EMPTY broadcast moments to the collection's known scene
       // names so hotkeys/quick-bar work immediately (never overwrites a producer's own mapping).
@@ -20010,11 +24587,9 @@ function startHttpServer(baseDir) {
         name: OBS_COLLECTION_NAME,
         savedInObsDir: !!savedInObsDir,
         switched,
-        message: switched
-          ? `Saved & switched OBS to "${OBS_COLLECTION_NAME}".`
-          : savedInObsDir
-            ? `Saved into your OBS folder. Restart OBS (or Scene Collection menu) and pick "${OBS_COLLECTION_NAME}".`
-            : `Saved "${OBS_COLLECTION_NAME}.json". In OBS: Scene Collection → Import → choose that file.`,
+        message: savedInObsDir
+          ? `Saved into your OBS folder. Restart OBS (or use its Scene Collection menu) and pick "${OBS_COLLECTION_NAME}" when you want it.`
+          : `Saved "${OBS_COLLECTION_NAME}.json". In OBS: Scene Collection → Import → choose that file.`,
       });
     } catch (e) {
       console.error('[OBS] install-collection failed:', e);
@@ -20487,6 +25062,118 @@ function startHttpServer(baseDir) {
     broadcastFullState();
     res.json({ ok: true });
   });
+
+  // ── Rainbow Six Siege — Overwolf GEP relay ─────────────────────────────────
+  // Same pipeline as /api/ow-gep and /api/mr-gep. R6 has no first-party GSI, so the Overwolf
+  // companion running on an OBSERVER machine is the practical source (one install per broadcast,
+  // rather than asking every competitor to install something).
+  //
+  // Body: { roster: [{name,operator,team,kills,deaths,assists,is_alive,…}×10],
+  //         map, game_mode, match_id, round, score: {a,b}, side, operators: [{name,team}],
+  //         events: ['match_start'|'round_start'|'round_end'|'match_end' | {name:'kill_feed',data:{attacker,victim}}] }
+  //
+  // Field names follow the shape the relay normalises to, NOT raw GEP keys — Overwolf's R6 feature
+  // and field names must be confirmed against their docs and mapped in the companion (see the
+  // R6_TODO note in companion-overwolf/background.html). Keeping the mapping in the relay means
+  // this endpoint never has to change when Overwolf renames a field.
+  app.post('/api/r6-gep', express.json({ limit: '64kb' }), (req, res) => {
+    const body = req.body || {};
+    if (!state.r6) state.r6 = { autoScore: false, gepData: null };
+    const prev = state.r6.gepData || {};
+    const num = (v, fallback) => (Number.isFinite(Number(v)) ? Number(v) : fallback);
+    const score = {
+      a: num(body.score && body.score.a, num(prev.score && prev.score.a, 0)),
+      b: num(body.score && body.score.b, num(prev.score && prev.score.b, 0))
+    };
+    state.r6.gepData = {
+      gepConnected: true,
+      lastSeen: Date.now(),
+      roster: Array.isArray(body.roster) ? body.roster.slice(0, 10) : (prev.roster || []),
+      map: typeof body.map === 'string' && body.map ? body.map : (prev.map || null),
+      game_mode: typeof body.game_mode === 'string' && body.game_mode ? body.game_mode : (prev.game_mode || null),
+      match_id: body.match_id || prev.match_id || null,
+      round: num(body.round, num(prev.round, 0)),
+      side: typeof body.side === 'string' ? body.side : (prev.side || null),   // 'attack' | 'defense'
+      score: score,
+      operators: Array.isArray(body.operators) ? body.operators.slice(0, 10) : (prev.operators || []),
+      killFeed: Array.isArray(prev.killFeed) ? prev.killFeed : []
+    };
+    // Opt-in only. A spectator client reconnecting mid-round can re-send a stale score, and a
+    // scoreboard that moves on its own mid-broadcast is worse than one a producer has to nudge.
+    if (state.r6.autoScore) {
+      state.series.blue = score.a;
+      state.series.orange = score.b;
+    }
+    const R6_EVENT_TRIGGERS = { match_start: 'r6_match_start', round_start: 'r6_round_start', round_end: 'r6_round_end', match_end: 'r6_match_end' };
+    (Array.isArray(body.events) ? body.events : []).forEach((ev) => {
+      const name = String((typeof ev === 'string' ? ev : (ev && ev.name)) || '').toLowerCase();
+      if (name === 'kill_feed') {
+        const kf = (ev && ev.data) || {};
+        state.r6.gepData.killFeed = state.r6.gepData.killFeed
+          .concat([{ attacker: kf.attacker || null, victim: kf.victim || null, ts: Date.now() }]).slice(-12);
+        return;
+      }
+      const trig = R6_EVENT_TRIGGERS[name];
+      if (trig) flowBus.emit(trig, { map: state.r6.gepData.map || null, round: state.r6.gepData.round, score: score });
+    });
+    broadcastFullState();
+    res.json({ ok: true });
+  });
+
+  // ── Minecraft Bedwars — server-side plugin push ────────────────────────────
+  // NOT a game-client relay. Bedwars is played on a server the organiser controls, so the server is
+  // the authoritative scorer: a Spigot/Paper plugin POSTs here on bed break / final kill / team
+  // elimination. Higher fidelity than any client-side scrape, no per-player install, no delay.
+  //
+  // Body: { teams: [{ key, name, bedAlive, players, eliminated }],
+  //         events: [{ type:'bed_break'|'final_kill'|'team_eliminated'|'game_start'|'game_end',
+  //                    team, by, victim }] }
+  // Auth: optional shared secret in X-Suite-Token, matched against state.bedwars.token. Blank token
+  // accepts any post (the suite binds locally; a token matters when the MC server is another host).
+  app.post('/api/bedwars', express.json({ limit: '64kb' }), (req, res) => {
+    if (!state.bedwars) state.bedwars = { autoScore: false, data: null };
+    const want = String(bedwarsToken || '');
+    if (want && String(req.get('X-Suite-Token') || '') !== want) {
+      return res.status(401).json({ ok: false, error: 'bad token' });
+    }
+    const body = req.body || {};
+    const prev = state.bedwars.data || {};
+    const teams = Array.isArray(body.teams) ? body.teams.slice(0, 16).map((t) => ({
+      key: String(t.key || t.name || '').slice(0, 32),
+      name: String(t.name || t.key || '').slice(0, 64),
+      bedAlive: t.bedAlive !== false,
+      players: Math.max(0, Number(t.players) || 0),
+      eliminated: !!t.eliminated
+    })) : (prev.teams || []);
+    state.bedwars.data = {
+      connected: true,
+      lastSeen: Date.now(),
+      teams: teams,
+      events: (Array.isArray(prev.events) ? prev.events : [])
+        .concat((Array.isArray(body.events) ? body.events : []).map((e) => ({
+          type: String((e && e.type) || '').slice(0, 32),
+          team: (e && e.team) || null,
+          by: (e && e.by) || null,
+          victim: (e && e.victim) || null,
+          ts: Date.now()
+        })))
+        .slice(-40)
+    };
+    // Surviving teams (bed intact or still alive) drive the two-sided scoreboard only when asked.
+    if (state.bedwars.autoScore && teams.length >= 2) {
+      state.series.blue = teams[0].eliminated ? 0 : 1;
+      state.series.orange = teams[1].eliminated ? 0 : 1;
+    }
+    const BW_TRIGGERS = { bed_break: 'bedwars_bed_break', final_kill: 'bedwars_final_kill',
+      team_eliminated: 'bedwars_team_eliminated', game_start: 'bedwars_game_start', game_end: 'bedwars_game_end' };
+    (Array.isArray(body.events) ? body.events : []).forEach((e) => {
+      const trig = BW_TRIGGERS[String((e && e.type) || '').toLowerCase()];
+      if (trig) flowBus.emit(trig, { team: (e && e.team) || null, by: (e && e.by) || null, victim: (e && e.victim) || null });
+    });
+    broadcastFullState();
+    res.json({ ok: true });
+  });
+
 
   // ── In-app bug report → Discord webhook + GitHub Issues + website ticket ─────
   // This route is registered before the global express.json() below, so it needs
@@ -21033,7 +25720,11 @@ function startHttpServer(baseDir) {
   // read these localhost-only API responses cross-origin.
   app.use((req, res, next) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
+    // DELETE was missing, which silently blocked every REST delete route on this server from the
+    // control panel: the panel is a file:// page, so a DELETE is a non-simple cross-origin request
+    // and the browser refuses to send it once the preflight comes back without DELETE listed. The
+    // fetch then rejects, or falls through to an HTML error page ("Unexpected token < in JSON").
+    res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
     if (req.method === 'OPTIONS') return res.sendStatus(204);
     next();
@@ -21082,7 +25773,19 @@ function startHttpServer(baseDir) {
   // (state.pulse.publish) + only when the cloud is linked — otherwise a no-op. Stops publishing (and
   // clears the row) when disabled. The teams come from the shared library, the score/clock from live
   // state, so an observer keys in nothing beyond flipping the toggle.
-  const PULSE_UNIT = { 'rocket-league': 'g', 'csgo': 'rd', 'valorant': 'rd', 'rainbow6': 'rd', 'cod': 'rd', 'overwatch': 'pt', 'marvel-rivals': 'pt', 'league': 'pt', 'dota2': 'pt', 'mobile-legends': 'pt', 'honor-of-kings': 'pt' };
+  const PULSE_UNIT = { 'rocket-league': 'g', 'csgo': 'rd', 'valorant': 'rd', 'rainbow6': 'rd', 'cod': 'rd', 'overwatch': 'pt', 'marvel-rivals': 'pt', 'league': 'pt', 'dota2': 'pt', 'mobile-legends': 'pt', 'honor-of-kings': 'pt', 'bedwars': 'pt' };
+  // Short crest label for grid tiles: an acronym for multi-word names ("Team BDS" -> TBD is wrong,
+  // so drop filler words), otherwise the first 3 letters.
+  const PULSE_FILLER = new Set(['team', 'the', 'esports', 'esport', 'gaming', 'gg', 'club', 'academy']);
+  function pulseAbbr(name) {
+    const raw = String(name || '').trim();
+    if (!raw) return '';
+    const words = raw.split(/[\s._-]+/).filter(Boolean);
+    const core = words.filter(w => !PULSE_FILLER.has(w.toLowerCase()));
+    const use = core.length ? core : words;
+    if (use.length >= 2) return use.map(w => w[0]).join('').slice(0, 4).toUpperCase();
+    return use[0].slice(0, 3).toUpperCase();
+  }
   let _pulseWasPublishing = false;
   setInterval(async () => {
     const orgId = pulseOrgId();
@@ -21097,16 +25800,24 @@ function startHttpServer(baseDir) {
       const blue = (state.teams && state.teams.blue) || {}, orange = (state.teams && state.teams.orange) || {};
       const live = state.game || {};
       const feedUrl = (state.pulse.feedViewUrl || '').trim();
+      const channel = (state.pulse.channel || '').trim().replace(/^@/, '').replace(/^https?:\/\/(www\.)?twitch\.tv\//i, '').replace(/\/.*$/, '');
+      const ser = state.series || { blue: 0, orange: 0 };
       await cloud.publishObservedGame(orgId, {
         game: g.name || state.activeGame,
         teams: {
-          a: { name: blue.name || 'Team A', logo: blue.logo || null, color: blue.color || null, score: Number(live.blueScore || 0) },
-          b: { name: orange.name || 'Team B', logo: orange.logo || null, color: orange.color || null, score: Number(live.orangeScore || 0) }
+          // score = the LIVE map/game score (each producer's own HUD shows it too); series = maps won,
+          // which is what a GRID-style tile bar puts next to the crests.
+          a: { name: blue.name || 'Team A', abbr: pulseAbbr(blue.name), logo: blue.logo || null, color: blue.color || null, score: Number(live.blueScore || 0), series: Number(ser.blue || 0) },
+          b: { name: orange.name || 'Team B', abbr: pulseAbbr(orange.name), logo: orange.logo || null, color: orange.color || null, score: Number(live.orangeScore || 0), series: Number(ser.orange || 0) }
         },
         clock: Number(live.time || 0),
-        status: (state.roundLabel || (state.series ? `Series ${state.series.blue}-${state.series.orange}` : '') || '').toString().slice(0, 60),
+        status: (state.roundLabel || (state.match && state.match.format) || '').toString().slice(0, 60),
         unit: PULSE_UNIT[state.activeGame] || 'score',
-        feed: feedUrl ? { viewUrl: feedUrl } : undefined
+        bestOf: Number(state.bestOf || 0) || undefined,
+        // channel/label ride the feed blob (it's already a free-form Json column — no schema change).
+        feed: (feedUrl || channel || state.pulse.label)
+          ? { viewUrl: feedUrl || undefined, channel: channel || undefined, label: (state.pulse.label || '').trim() || undefined }
+          : undefined
       });
       _pulseWasPublishing = true;
     } catch (e) { /* transient — try again next tick */ }
@@ -21363,13 +26074,42 @@ function startHttpServer(baseDir) {
         id: ref.id,
         name: (ref.teamName || ref.name || '').trim()
       }));
+      // Resolve a start.gg entrant to an in-app league team.
+      //
+      // This was "first exact, else first bidirectional substring, else null" — and `find` returns
+      // whichever the array happened to hold first. With "TSM", "TSM Reborn" and "TSM Academy" all
+      // in a league, an entrant named "TSM" bound to an arbitrary one of the three and silently
+      // wrote results against the wrong team. Now every candidate is scored, and an ambiguous
+      // result (two candidates within a hair of each other) resolves to null and gets logged —
+      // an unlinked match a producer can fix beats a confidently wrong one.
+      const _fmNorm = s => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
       function fuzzyMatch(entrantName) {
         if (!entrantName || !inAppTeams.length) return null;
-        const norm = s => s.toLowerCase().replace(/[^a-z0-9]/g, '');
-        const needle = norm(entrantName);
-        let hit = inAppTeams.find(t => norm(t.name) === needle);
-        if (!hit) hit = inAppTeams.find(t => { const tn = norm(t.name); return tn && (tn.includes(needle) || needle.includes(tn)); });
-        return hit ? hit.id : null;
+        const needle = _fmNorm(entrantName);
+        if (!needle) return null;
+        const scored = inAppTeams.map((t) => {
+          const tn = _fmNorm(t.name);
+          let s = -1;
+          if (!tn) s = -1;
+          else if (tn === needle) s = 100;
+          else if (tn.startsWith(needle) || needle.startsWith(tn)) {
+            // Longer shared prefix = better; penalise the length the two names disagree on, so
+            // "TSM" prefers "TSM" over "TSM Academy" and, among only the longer ones, prefers the
+            // closest in length.
+            s = 60 - Math.min(30, Math.abs(tn.length - needle.length));
+          } else if (tn.includes(needle) || needle.includes(tn)) {
+            s = 40 - Math.min(30, Math.abs(tn.length - needle.length));
+          }
+          return { t, s };
+        }).filter((x) => x.s >= 0).sort((a, b) => b.s - a.s);
+
+        if (!scored.length) return null;
+        if (scored.length > 1 && scored[0].s - scored[1].s < 8) {
+          console.warn('[league-sync] ambiguous entrant "%s" — matches %s; left unlinked',
+            entrantName, scored.slice(0, 3).map((x) => x.t.name).join(' / '));
+          return null;
+        }
+        return scored[0].t.id;
       }
 
       const existingSggIds = new Set((lg.schedule || []).map(m => m.sggSetId).filter(Boolean));
@@ -21629,7 +26369,7 @@ function startHttpServer(baseDir) {
     for (let i = 0; i < slugs.length; i += BATCH) {
       const batch = slugs.slice(i, i + BATCH);
       const fields = batch.map((slug, j) =>
-        `p${j}: user(slug: ${JSON.stringify(slug)}) { player { recentStandings(limit: 10) { placement entrant { event { numEntrants startAt } } } } }`
+        `p${j}: user(slug: ${JSON.stringify(slug)}) { player { recentStandings(limit: 16) { placement entrant { event { name numEntrants startAt tournament { name } } } } } }`
       ).join('\n');
       try {
         const data = await client.request(`query { ${fields} }`);
@@ -21646,23 +26386,104 @@ function startHttpServer(baseDir) {
     res.json({ ok: true, scores });
   });
 
-  // Local history score — uses the already-imported Rocket Rush set records in the stats DB.
-  // Returns a win-rate-based score (0–100) per team name. Instant, no API calls.
-  app.post('/api/seeding/local-scores', (req, res) => {
+  // Our-events history score (0–100) per team name, for the seeding studio.
+  //
+  // PLACEMENT is the primary signal: how a team FINISHED our past events, recency-weighted. Set
+  // win% alone can't distinguish winning a bracket from going 2-1 in pools, and it weights a match
+  // from last season the same as last Saturday — which is why teams who'd won the last couple of
+  // events were seeding mid-table. Win% is kept as a secondary, mostly to separate teams whose
+  // placements tie.
+  //
+  // Standings are pulled from start.gg for every past My Events entry and cached in the stats DB,
+  // so this is one slow first call per new event and instant thereafter.
+  app.post('/api/seeding/local-scores', async (req, res) => {
     const teams = Array.isArray(req.body?.teams) ? req.body.teams.filter(Boolean) : [];
     if (!teams.length) return res.json({ ok: true, scores: {} });
     const normName = (s) => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    const excludeSlug = (req.body?.excludeSlug || '').trim() || null;   // don't seed an event off its own result
+
+    let sync = null;
+    try { sync = await syncOurEventResults({ excludeSlug, refresh: !!req.body?.refresh }); }
+    catch (err) { console.warn('[local-scores] event sync failed:', err.message); }
+
+    // Group the names that belong to one squad BEFORE scoring, so a team that rebranded is scored
+    // on everything it has ever posted rather than coming back as a new team with no record.
+    let lineageSync = null, aliasMap = null;
+    try {
+      lineageSync = syncLineagesFromHistory({ force: !!req.body?.refresh });
+      aliasMap = buildLineageAliasMap();
+    } catch (err) { console.warn('[local-scores] lineage sync failed:', err.message); }
+
+    const placements = stats.getTeamPlacementScores({ excludeSlug, aliasMap });
     const records = stats.getTeamRecords();
     const byNorm = new Map(records.map((r) => [normName(r.team), r]));
-    const scores = {};
+
+    const scores = {}, detail = {};
     teams.forEach((name) => {
-      const r = byNorm.get(normName(name));
-      if (!r || r.matches < 2) { scores[name] = null; return; }
-      // Win rate, regressed toward 50% when sample is small (< 10 matches)
-      const conf = Math.min(r.matches / 10, 1);
-      scores[name] = Math.round((r.winPct * conf + 50 * (1 - conf)) * 10) / 10;
+      const key = normName(name);
+      // Resolve the REQUESTED name through the lineage map as well. The scorer publishes aliases for
+      // every name it saw in past standings, but a team's current name may never have appeared in
+      // one — a squad that rebranded this season has a brand-new tag and all its results filed under
+      // the old one. Without this hop the merged record exists and the lookup still misses it.
+      const lineKey = aliasMap ? aliasMap.get(key) : null;
+      const directHit = !!placements[key];
+      const pl = (lineKey && placements[lineKey]) || placements[key];
+      // "Renamed" is about THIS team's current tag, not about the bucket: history counts as counted
+      // under another name either when we only found it via the lineage hop, or when the bucket
+      // itself spans several tags. stats.getTeamPlacementScores().merged answers a different
+      // question (did one bucket see more than one name) and is the wrong flag to show a producer.
+      const otherNames = pl ? (pl.names || []).filter((n) => n !== key) : [];
+      const renamed = !!(pl && otherNames.length && (!directHit || pl.merged));
+      const r  = byNorm.get(key);
+      // Win rate, regressed toward 50% when the sample is small (< 10 matches).
+      let winScore = null;
+      if (r && r.matches >= 2) {
+        const conf = Math.min(r.matches / 10, 1);
+        winScore = Math.round((r.winPct * conf + 50 * (1 - conf)) * 10) / 10;
+      }
+      const combined = (pl && winScore != null) ? (0.75 * pl.score + 0.25 * winScore)
+                     : pl ? pl.score
+                     : winScore;
+      scores[name] = combined == null ? null : Math.round(combined * 10) / 10;
+      if (pl || winScore != null) {
+        detail[name] = {
+          placementScore: pl ? pl.score : null,
+          winScore,
+          // How much history is behind the score. The power rating scales the results adjustment by
+          // this, so passing it through is what stops one lucky result swinging a seed.
+          confidence: pl ? pl.confidence : null,
+          events: pl ? pl.events.slice(0, 6) : [],
+          record: r ? { w: r.wins, l: r.losses } : null,
+          // Surfaced so the board can say "counted under a previous name" rather than the producer
+          // wondering where a new team's history came from.
+          renamed,
+          countedAs: renamed ? otherNames : null,
+        };
+      }
     });
-    res.json({ ok: true, scores, totalMatches: records.reduce((s, r) => s + r.matches, 0) });
+    res.json({
+      ok: true, scores, detail, lineage: lineageSync,
+      renamed: Object.entries(detail).filter(([, d]) => d && d.renamed).map(([n, d]) => ({ team: n, countedAs: d.countedAs })),
+      eventsScored: stats.getEventResults().filter((e) => e.event_slug !== excludeSlug).length,
+      sync,
+      totalMatches: records.reduce((s, r) => s + r.matches, 0),
+    });
+  });
+
+  // The recorded final standings behind those scores — so a producer can see exactly which events
+  // the seeding engine is counting (and spot a name mismatch) rather than trusting a number.
+  app.get('/api/seeding/our-events', (req, res) => {
+    res.json({ ok: true, events: stats.getEventResults(req.query.game || null).map((e) => ({
+      eventSlug: e.event_slug, name: e.event_name, tournament: e.tournament, game: e.game_type,
+      numEntrants: e.num_entrants, startedAt: e.started_at, fetchedAt: e.fetched_at,
+      top: e.standings.slice(0, 8),
+    })) });
+  });
+
+  // Force a re-pull of every past event's standings (e.g. after an event finishes mid-session).
+  app.post('/api/seeding/our-events/refresh', async (req, res) => {
+    try { res.json({ ok: true, sync: await syncOurEventResults({ excludeSlug: (req.body?.excludeSlug || '').trim() || null, refresh: true }) }); }
+    catch (err) { res.status(500).json({ error: err.message || 'Refresh failed' }); }
   });
 
   // ── rl6mans.com rank verification ───────────────────────────────────────
@@ -21723,6 +26544,251 @@ function startHttpServer(baseDir) {
     state.playerProfiles = {}; state.playerProfilesVer = (state.playerProfilesVer || 0) + 1;
     try { saveAppState(); } catch (e) {}
     res.json({ ok: true, removed: n });
+  });
+
+  // ── Team vault ────────────────────────────────────────────────────────────
+  // Permanent cross-event team registry (backend/team-db.js). Kept OUT of the broadcast state on
+  // purpose — records carry base64 logos and full roster history, and everything in state ships to
+  // every overlay on every change. The control panel polls these routes and re-fetches when
+  // state.teamVault.ver bumps.
+
+  app.get('/api/teamdb', (req, res) => {
+    const { q, limit, linked } = req.query;
+    const opts = { q, limit: limit ? Number(limit) : 500 };
+    if (linked === 'true')  opts.linked = true;
+    if (linked === 'false') opts.linked = false;
+    res.json({
+      ok: true, teams: teamDb.search(opts), stats: teamDb.stats(), settings: state.teamVault,
+      // How many banked teams the automatic sweep still wants to read from start.gg.
+      pending: vaultEnrichTargets(false).length,
+    });
+  });
+
+  app.get('/api/teamdb/:id', (req, res) => {
+    const rec = teamDb.get(req.params.id);
+    if (!rec) return res.status(404).json({ error: 'Not found' });
+    res.json({ ok: true, team: rec });
+  });
+
+  // Who would this name/roster resolve to? Used by the UI to warn before creating a duplicate.
+  app.post('/api/teamdb/resolve', (req, res) => {
+    const r = teamDb.resolve(req.body || {});
+    res.json({ ok: true, team: r.rec || null, via: r.via, score: r.score });
+  });
+
+  // Create or field-update a vault record. Anything set here is PINNED against future imports.
+  app.post('/api/teamdb', (req, res) => {
+    const b = req.body || {};
+    try {
+      let rec = b.id ? teamDb.update(b.id, b) : teamDb.upsertFromLibrary(b, { source: 'manual' });
+      if (!rec) return res.status(400).json({ error: 'A team name is required' });
+      if (!b.id) rec = teamDb.update(rec.id, b) || rec;
+      vaultTouch();
+      if (b.applyToLibrary) { applyVaultToLibrary(rec); saveTeams(); }
+      broadcastFullState();
+      res.json({ ok: true, team: rec });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  // Pull a team from its start.gg team page — the "save a team by slug" entry point.
+  app.post('/api/teamdb/pull-startgg', async (req, res) => {
+    try {
+      const r = await importStartggTeamBySlug((req.body && req.body.slug) || '', { alsoLibrary: (req.body && req.body.alsoLibrary) !== false });
+      res.json({ ok: true, result: r });
+    } catch (e) { res.status(400).json({ error: e.message }); }
+  });
+
+  // Kick the background start.gg sweep by hand. It normally runs itself after every import — this
+  // is the "refresh everything now" button, and `force` ignores the weekly re-read window.
+  app.post('/api/teamdb/enrich', async (req, res) => {
+    try {
+      const r = await enrichVaultFromStartgg({ force: !!(req.body && req.body.force) });
+      res.json({ ok: true, result: r, pending: vaultEnrichTargets(false).length });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  // Push a vault record into the working team library (what the Match panel and overlays read).
+  app.post('/api/teamdb/:id/apply', (req, res) => {
+    const rec = teamDb.get(req.params.id);
+    if (!rec) return res.status(404).json({ error: 'Not found' });
+    applyVaultToLibrary(rec);
+    saveTeams();
+    broadcastFullState();
+    res.json({ ok: true, team: teamDb.toLibraryTeam(rec) });
+  });
+
+  // Flip one roster slot active/inactive (optionally pinning it so imports stop moving it).
+  app.post('/api/teamdb/:id/roster', (req, res) => {
+    const b = req.body || {};
+    const rec = b.remove
+      ? teamDb.removePlayer(req.params.id, b.playerId)
+      : teamDb.setRosterStatus(req.params.id, b.playerId, b.rosterStatus, b.pinned);
+    if (!rec) return res.status(404).json({ error: 'Team or player not found' });
+    vaultTouch();
+    broadcastFullState();
+    res.json({ ok: true, team: rec });
+  });
+
+  // Fold a duplicate record into the one the producer wants to keep.
+  app.post('/api/teamdb/merge', (req, res) => {
+    const b = req.body || {};
+    const rec = teamDb.merge(b.into, b.from);
+    if (!rec) return res.status(400).json({ error: 'Both teams must exist and differ' });
+    // Library rows that pointed at the losing record now point at the survivor.
+    savedTeams.forEach((t) => { if (t && t.vaultId === String(b.from)) t.vaultId = rec.id; });
+    saveTeams();
+    vaultTouch();
+    broadcastFullState();
+    res.json({ ok: true, team: rec });
+  });
+
+  app.delete('/api/teamdb/:id', (req, res) => {
+    const removed = teamDb.remove(req.params.id);
+    if (removed) { savedTeams.forEach((t) => { if (t && t.vaultId === req.params.id) delete t.vaultId; }); saveTeams(); vaultTouch(); broadcastFullState(); }
+    res.json({ ok: true, removed });
+  });
+
+  // Vault settings (enabled / autoLink).
+  app.post('/api/teamdb/settings', (req, res) => {
+    const b = req.body || {};
+    if (!state.teamVault) state.teamVault = { enabled: true, autoLink: true, count: 0, ver: 0 };
+    if (typeof b.enabled    === 'boolean') state.teamVault.enabled    = b.enabled;
+    if (typeof b.autoLink   === 'boolean') state.teamVault.autoLink   = b.autoLink;
+    if (typeof b.autoEnrich === 'boolean') state.teamVault.autoEnrich = b.autoEnrich;
+    saveAppState();
+    broadcastFullState();
+    res.json({ ok: true, settings: state.teamVault });
+  });
+
+  // Seed the vault from the team library that already exists — a one-click migration so an
+  // established producer doesn't start with an empty vault and lose everything they've built.
+  app.post('/api/teamdb/import-library', (req, res) => {
+    let created = 0, updated = 0;
+    (savedTeams || []).forEach((t) => {
+      if (!t || !(t.name || '').trim()) return;
+      const before = teamDb.count();
+      const rec = teamDb.upsertFromLibrary(t, { source: 'library' });
+      if (!rec) return;
+      t.vaultId = rec.id;
+      if (teamDb.count() > before) created++; else updated++;
+    });
+    saveTeams();
+    vaultTouch();
+    broadcastFullState();
+    res.json({ ok: true, created, updated, total: teamDb.count() });
+  });
+
+  // ── Unified power rating ────────────────────────────────────────────────
+  // ONE rating per team on ONE scale, so a field is never ordered by two disagreeing bases at once
+  // (see control-panel/seed-power-core.js for why that was happening). Exposed as a route rather
+  // than kept client-side so the website's seeding can call the identical engine instead of growing
+  // a third implementation that disagrees with the other two.
+  //
+  // POST { teams: [{ key, name, players:[{mmr,confidence}], resultsScore, resultsConfidence, seedNum }],
+  //        preset: 'skill'|'balanced'|'results', rosterSize }
+  // →    { teams: [...ordered, each with seed, power, rosterMMR, resultsAdj, confidence, explain], field }
+  app.post('/api/seeding/power', (req, res) => {
+    const teams = Array.isArray(req.body?.teams) ? req.body.teams.slice(0, 1024) : [];
+    if (!teams.length) return res.json({ ok: true, teams: [], field: null });
+    try {
+      const out = seedPower.ratePower(teams, {
+        preset: req.body?.preset || 'skill',
+        rosterSize: Number(req.body?.rosterSize) || undefined,
+        weights: req.body?.weights || undefined,
+      });
+      res.json({ ok: true, ...out, presets: seedPower.PRESETS });
+    } catch (err) {
+      console.error('[seeding/power]', err.message);
+      res.status(500).json({ error: err.message || 'Rating failed' });
+    }
+  });
+
+  // ── Identity layer ──────────────────────────────────────────────────────
+  // Resolve a roster against the permanent identity store. This is the gate the seeding studio's
+  // triage screen runs on: it never writes, so a producer sees exactly what would happen before
+  // anything is linked. Rows come back tagged auto / review / new plus a confidence tier the
+  // rating engine multiplies rank confidence by.
+  app.post('/api/identity/resolve', (req, res) => {
+    const rows = Array.isArray(req.body?.players) ? req.body.players.slice(0, 500) : [];
+    if (!rows.length) return res.json({ ok: true, results: [], stats: identity.stats() });
+    try {
+      res.json({ ok: true, results: identity.resolveMany(rows, { fuzzy: req.body?.fuzzy !== false }), stats: identity.stats() });
+    } catch (err) {
+      console.error('[identity/resolve]', err.message);
+      res.status(500).json({ error: err.message || 'Resolve failed' });
+    }
+  });
+
+  // Commit the producer's triage decisions in one batch. Each decision is one of:
+  //   { action:'confirm', id, player }  — yes, this row IS that player (links aliases + verifies)
+  //   { action:'create',  player }      — genuinely new person
+  //   { action:'merge',   id, mergeId } — these two records are the same human
+  //   { action:'skip' }                 — leave unresolved; stays confidence-capped
+  app.post('/api/identity/commit', (req, res) => {
+    const decisions = Array.isArray(req.body?.decisions) ? req.body.decisions.slice(0, 500) : [];
+    const out = { confirmed: 0, created: 0, merged: 0, skipped: 0, failed: [] };
+    decisions.forEach((d, i) => {
+      try {
+        if (!d || d.action === 'skip') { out.skipped++; return; }
+        if (d.action === 'confirm') {
+          const r = identity.confirm(d.id, d.player || {}, req.body?.by || 'producer');
+          if (r.ok) out.confirmed++; else out.failed.push({ i, error: r.error });
+        } else if (d.action === 'create') {
+          identity.create(d.player || {}, { verified: !!d.verified, by: req.body?.by || 'producer' });
+          out.created++;
+        } else if (d.action === 'merge') {
+          const r = identity.merge(d.id, d.mergeId);
+          if (r.ok) out.merged++; else out.failed.push({ i, error: r.error });
+        } else out.failed.push({ i, error: 'unknown action: ' + d.action });
+      } catch (err) { out.failed.push({ i, error: err.message }); }
+    });
+    res.json({ ok: true, ...out, stats: identity.stats() });
+  });
+
+  // Which known team entity is this roster, regardless of the name it registered under? The answer
+  // is what lets a rebranded squad keep its placement history.
+  app.post('/api/identity/team-match', (req, res) => {
+    const teams = Array.isArray(req.body?.teams) ? req.body.teams.slice(0, 300) : [];
+    res.json({ ok: true, results: teams.map((t, i) => ({
+      key: t && t.key != null ? t.key : i,
+      name: t && t.name,
+      ...identity.matchTeam((t && t.playerIds) || [], (t && t.name) || ''),
+    })) });
+  });
+
+  // Record a roster under a name (extends the matched lineage, or starts a new one).
+  app.post('/api/identity/team-record', (req, res) => {
+    const teams = Array.isArray(req.body?.teams) ? req.body.teams.slice(0, 300) : [];
+    const out = teams.map((t) => {
+      const r = identity.recordTeam((t && t.name) || '', (t && t.playerIds) || [],
+        { eventSlug: t && t.eventSlug, at: t && t.at });
+      return { name: t && t.name, lineageId: r.lineage.id, names: r.lineage.names, matched: r.matched };
+    });
+    res.json({ ok: true, results: out });
+  });
+
+  app.get('/api/identity/stats', (req, res) => res.json({ ok: true, stats: identity.stats() }));
+
+  app.get('/api/identity/players', (req, res) => {
+    const q = (req.query.q || '').toString().trim().toLowerCase();
+    let list = identity.allPlayers();
+    if (q) list = list.filter((p) => (p.primary || '').toLowerCase().includes(q)
+      || (p.aliases.gamertag || []).some((g) => g.toLowerCase().includes(q)));
+    res.json({ ok: true, players: list.slice(0, Number(req.query.limit) || 300), total: identity.stats().players });
+  });
+
+  app.get('/api/identity/lineages', (req, res) => {
+    res.json({ ok: true, lineages: identity.allLineages().slice(0, Number(req.query.limit) || 300) });
+  });
+
+  app.post('/api/identity/unlink', (req, res) => {
+    const r = identity.unlink(req.body?.id, req.body?.kind, req.body?.value);
+    res.status(r.ok ? 200 : 400).json(r);
+  });
+
+  app.post('/api/identity/unverify', (req, res) => {
+    const r = identity.unverify(req.body?.id);
+    res.status(r.ok ? 200 : 400).json(r);
   });
 
   app.post('/api/rl6mans/invalidate', (req, res) => {
@@ -22212,6 +27278,113 @@ function startHttpServer(baseDir) {
     }
   });
 
+  // ── FACEIT API routes ─────────────────────────────────────────────────────
+  // Same contract as the NXGEN routes: the control panel is file:// so it calls these over
+  // http://localhost:3000 rather than talking to FACEIT itself (which would leak the key into
+  // the renderer and trip CORS).
+
+  const faceitKey = (req) => (req.body?.apiKey || faceitApiKey || '').trim();
+
+  // The Events tab's "my competitions" list: an organiser's own championships + hubs, so a
+  // producer who runs a league sees their own events instead of searching the whole platform.
+  app.post('/api/faceit/my-competitions', async (req, res) => {
+    const key = faceitKey(req);
+    if (!key) return res.status(400).json({ ok: false, error: 'API key required' });
+    try {
+      let orgId = (req.body?.organizerId || state.faceit.organizerId || '').trim();
+      const orgName = (req.body?.organizerName || state.faceit.organizerName || '').trim();
+      if (!orgId && orgName) {
+        const org = await faceit.getFaceitOrganizerByName(key, orgName);
+        orgId = org && org.organizer_id ? org.organizer_id : '';
+        if (orgId) { state.faceit.organizerId = orgId; state.faceit.organizerName = org.name || orgName; saveAppState(); }
+      }
+      if (!orgId) return res.json({ ok: true, competitions: [], needsOrganizer: true });
+      const [champs, hubs] = await Promise.all([
+        faceit.getFaceitOrganizerChampionships(key, orgId),
+        faceit.getFaceitOrganizerHubs(key, orgId)
+      ]);
+      const competitions = [
+        ...champs.map((c) => ({
+          id: c.championship_id, type: 'championship', name: c.name,
+          game: c.game_id || '', region: c.region || '', status: c.status || '',
+          slots: c.slots || c.total_slots || null, avatar: c.avatar || c.cover_image || '',
+          url: faceit.faceitUrl(c.faceit_url)
+        })),
+        ...hubs.map((h) => ({
+          id: h.hub_id, type: 'hub', name: h.name,
+          game: h.game_id || '', region: h.region || '', status: 'hub',
+          slots: null, avatar: h.avatar || h.cover_image || '',
+          url: faceit.faceitUrl(h.faceit_url)
+        }))
+      ];
+      res.json({ ok: true, competitions, organizerId: orgId });
+    } catch (e) {
+      res.status(400).json({ ok: false, error: e.message });
+    }
+  });
+
+  app.post('/api/faceit/search', async (req, res) => {
+    const key = faceitKey(req);
+    if (!key) return res.status(400).json({ ok: false, error: 'API key required' });
+    try {
+      const { name = '', game = '', region = '', limit = 30 } = req.body || {};
+      const items = await faceit.searchFaceitChampionships(key, { name, game, region, limit });
+      res.json({
+        ok: true,
+        competitions: items.map((c) => ({
+          id: c.championship_id || c.id, type: 'championship', name: c.name,
+          game: c.game_id || c.game || '', region: c.region || '', status: c.status || '',
+          slots: c.slots || c.total_slots || null,
+          avatar: c.avatar || c.cover_image || (c.organizer && c.organizer.avatar) || '',
+          organizer: (c.organizer && c.organizer.name) || c.organizer_name || '',
+          url: faceit.faceitUrl(c.faceit_url)
+        }))
+      });
+    } catch (e) {
+      res.status(400).json({ ok: false, error: e.message });
+    }
+  });
+
+  app.post('/api/faceit/organizer', async (req, res) => {
+    const key = faceitKey(req);
+    if (!key) return res.status(400).json({ ok: false, error: 'API key required' });
+    const name = (req.body?.name || '').trim();
+    if (!name) return res.status(400).json({ ok: false, error: 'organizer name required' });
+    try {
+      const org = await faceit.getFaceitOrganizerByName(key, name);
+      res.json({ ok: true, organizerId: org.organizer_id || '', name: org.name || name, avatar: org.avatar || '' });
+    } catch (e) {
+      res.status(400).json({ ok: false, error: e.message });
+    }
+  });
+
+  app.post('/api/faceit/competition', async (req, res) => {
+    const key = faceitKey(req);
+    if (!key) return res.status(400).json({ ok: false, error: 'API key required' });
+    const parsed = faceit.parseFaceitCompetition(req.body?.id || '');
+    const id = parsed ? parsed.id : (req.body?.id || '').trim();
+    if (!id) return res.status(400).json({ ok: false, error: 'championship or hub id required' });
+    const type = req.body?.competitionType || (parsed ? parsed.type : 'championship');
+    try {
+      const { comp, matches, subs, results } = await (async () => {
+        if (type === 'hub') {
+          const [c, m] = await Promise.all([faceit.getFaceitHub(key, id), faceit.getFaceitHubMatches(key, id, 'all')]);
+          return { comp: c, matches: m, subs: [], results: [] };
+        }
+        const [c, m, s, r] = await Promise.all([
+          faceit.getFaceitChampionship(key, id),
+          faceit.getFaceitChampionshipMatches(key, id, 'all'),
+          faceit.getFaceitChampionshipSubscriptions(key, id),
+          faceit.getFaceitChampionshipResults(key, id)
+        ]);
+        return { comp: c, matches: m, subs: s, results: r };
+      })();
+      res.json({ ok: true, competition: comp, matches, subscriptions: subs, results });
+    } catch (e) {
+      res.status(400).json({ ok: false, error: e.message });
+    }
+  });
+
   // ── Twitch Integration ────────────────────────────────────────────────────
   registerTwitchWebhooks(app, state, (type, data) => {
     bridgeClients.forEach(ws => {
@@ -22508,9 +27681,17 @@ function startHttpServer(baseDir) {
   // ─── Discord OAuth ───────────────────────────────────────────────────────────
 
   // GET /api/oauth/discord/status - Returns current Discord user (no token)
+  // Server clock, for overlays to correct their own against. The break countdown is an ABSOLUTE
+  // epoch (endsAt) authored by this process but evaluated by every browser source against ITS OWN
+  // Date.now() — so any machine whose clock is off shows a countdown that is off by exactly that
+  // much. scene-base.js samples this and offsets. Deliberately not in full_state: a value that
+  // changes every tick would churn the broadcast payload for something only clients need on connect.
+  app.get('/api/time', (req, res) => res.json({ now: Date.now() }));
+
   app.get('/api/oauth/discord/status', (req, res) => {
     res.json({
       connected: state.discord.connected,
+      panelReady: _panelReady,          // launcher holds its animation until the studio is painted
       userId: state.discord.userId,
       username: state.discord.username,
       discriminator: state.discord.discriminator,
@@ -23601,6 +28782,18 @@ function startHttpServer(baseDir) {
   // exists — registering at module top-level crashed on load ("app is not defined").
   registerTwitchEventSubRoutes(app);
 
+  // An unknown /api/ path fell through to Express's default handler, which replies with an HTML
+  // error page. Every caller in the app does `await res.json()` on these, so the failure surfaced
+  // as the useless "Unexpected token < in JSON at position 0" instead of naming the route. This is
+  // the common shape of "the running app predates a new route" — server.js only reloads on a full
+  // app restart — so say that outright.
+  app.use('/api', (req, res) => {
+    res.status(404).json({
+      error: `No such API route: ${req.method} /api${req.path}`,
+      hint: 'If this feature is new, the running app still has the old server — fully quit and relaunch NE Broadcast Suite.',
+    });
+  });
+
   // Catch-all for unhandled errors thrown inside route handlers
   // eslint-disable-next-line no-unused-vars
   app.use((err, req, res, next) => {
@@ -23631,6 +28824,37 @@ function startHttpServer(baseDir) {
 }
 
 // ─── Start ───────────────────────────────────────────────────────────────────
+// ── Boot profiler ─────────────────────────────────────────────────────────────
+// "Taking forever to launch" is impossible to diagnose after the fact: the launcher window just
+// sits there and nothing is written down. Every start() stage stamps its elapsed ms here, and the
+// table is printed AND appended to data/boot-timing.log so a slow launch can be read back later.
+// Cost is a Date.now() per stage.
+const _bootMarks = [];
+let _bootT0 = Date.now();
+let _bootLast = _bootT0;
+function bootMark(label) {
+  const now = Date.now();
+  _bootMarks.push({ label, ms: now - _bootLast, at: now - _bootT0 });
+  _bootLast = now;
+}
+function bootReport(tag) {
+  try {
+    const slow = _bootMarks.filter((m) => m.ms >= 100).sort((a, b) => b.ms - a.ms);
+    const total = Date.now() - _bootT0;
+    const lines = _bootMarks.map((m) => `  ${String(m.ms).padStart(6)}ms  +${String(m.at).padStart(6)}ms  ${m.label}`);
+    const head = `[Boot] ${tag} total ${total}ms` + (slow.length
+      ? ` — slowest: ${slow.slice(0, 3).map((m) => m.label + ' ' + m.ms + 'ms').join(', ')}`
+      : '');
+    console.log(head);
+    lines.forEach((l) => console.log(l));
+    if (dataDir) {
+      fs.appendFile(path.join(dataDir, 'boot-timing.log'),
+        [new Date().toISOString() + '  ' + head, ...lines, ''].join('\n') + '\n',
+        () => {});
+    }
+  } catch (e) { /* diagnostics must never break the boot they measure */ }
+}
+
 module.exports.start = function(baseDir) {
   appDir = baseDir || __dirname;
 
@@ -23649,13 +28873,22 @@ module.exports.start = function(baseDir) {
   wsTokenFile     = path.join(dataDir, 'ws-token.json');
 
   fs.mkdirSync(dataDir, { recursive: true });
+  bootMark('mkdir data');
   wsAuthToken = getOrCreateWsToken();
   stats.init(dataDir);
+  bootMark('stats.init (stats.json + sqlite mirror kickoff)');
   analytics.init({ dataDir, getState: () => state, broadcast, bridgeClients });
+  bootMark('analytics.init');
   playerDb.init(dataDir);
+  bootMark('playerDb.init');
+  teamDb.init(dataDir);
+  bootMark('teamDb.init');
+  identity.init(dataDir);
+  bootMark('identity.init');
   // Cross-platform, so instantiated unconditionally (unlike miniGameManager, which is only created
   // once Twitch connects — see below) — a producer with only Kick or only YouTube connected can still
   // run a marble race (auto-enter-viewers just won't have anything to pull without Twitch).
+  bootMark('marbleRaceManager');
   marbleRaceManager = new MarbleRaceManager(state, {
     fetchAutoEntrants: async () => {
       if (!state.twitch.apiToken || !state.twitch.channelId) return { ok: false, error: 'Twitch not connected' };
@@ -23678,6 +28911,7 @@ module.exports.start = function(baseDir) {
     if (raw && Array.isArray(raw.midpoints) && raw.midpoints.length === 9) _tierLadderCache = raw;
   } catch (_) {}
 
+  bootMark('rl6mans caches');
   // Seed state.playerProfiles from the persistent player DB — playerDb survives event resets
   // while state.json doesn't. Merge: state.json wins on conflicts (it's the current session).
   {
@@ -23690,6 +28924,19 @@ module.exports.start = function(baseDir) {
       }
     }
   }
+
+  // Backfill the identity layer from what we already know. playerDb and playerProfiles are both
+  // keyed on a gamertag string; this folds them into stable ids so seasons of existing history are
+  // available to roster-continuity matching on first launch instead of starting empty. Idempotent
+  // and exact-match-only (see importProfiles), so it is safe to run every boot.
+  try {
+    const before = identity.stats().players;
+    identity.importPlayerDb(playerDb.all());
+    identity.importProfiles(state.playerProfiles || {});
+    const st = identity.stats();
+    if (st.players !== before) console.log(`[Identity] Backfilled ${st.players - before} player(s) — ${st.players} total, ${st.verified} verified.`);
+  } catch (err) { console.warn('[Identity] backfill failed:', err.message); }
+  bootMark('identity backfill (playerDb + profiles)');
 
   // Social publisher — init with userData so tokens persist across restarts
   socialPublisher = new SocialPublisher(userData, {
@@ -23740,6 +28987,7 @@ module.exports.start = function(baseDir) {
     onEvent: (type, payload) => broadcast(bridgeClients, { type, data: payload }),
   });
   socialWeekly.start();
+  bootMark('social publisher + weekly');
 
   // YouTube Live Chat → the multichat feed. Same pipeline as Twitch IRC: broadcast a
   // per-message frame + append to the rolling _chatLog for panel backfill. Reuses the
@@ -23768,6 +29016,7 @@ module.exports.start = function(baseDir) {
     }
   });
   youtubeChat.start();
+  bootMark('googleapis require + youtube chat');
 
   // Kick + Discord multichat sources — same message pipeline as Twitch/YouTube.
   loadMultichatData();
@@ -23807,8 +29056,13 @@ module.exports.start = function(baseDir) {
   });
   kickChat.start();
   discordChat.start();
+  bootMark('kick + discord chat');
   loadTeams();
+  bootMark('loadTeams');
   loadState();
+  bootMark('loadState');
+  // Self-heal placeholder side colours against the active game's palette (see the function's note).
+  applyGameDefaultSideColors();
   try { applySheetsAutoSync(); } catch (e) { /* resume Google Sheets auto-sync if it was on */ }
   // Re-join the desk lineup against the crew/library so slots carry the current gamertag
   // (the persisted list is a snapshot; without this, a relaunch keeps stale display names).
@@ -23817,10 +29071,12 @@ module.exports.start = function(baseDir) {
   loadFacecams();
   loadPresets();
   loadBrandKits();
+  bootMark('loadBrandKits');
   syncActivePreshowTopics();   // Desk Show headline/topics come from the active kit/package, not the save file
   loadTwitchData();
   loadDiscordUser();
   initFlowEngine();
+  bootMark('initFlowEngine');
   // Resume Ballchasing auto-upload folder watching if it was left enabled.
   try { syncBallchasingAutoUpload(); } catch (e) { console.warn('[Ballchasing] auto-upload resume skipped:', e.message); }
   // Resume LoL champ-select automation if it was left on.
@@ -23855,8 +29111,11 @@ module.exports.start = function(baseDir) {
     }
   }
 
+  bootMark('pre-listen work done');
   startHttpServer(appDir);
+  bootMark('startHttpServer (launcher can reach us from here)');
   startBridgeServer();
+  bootMark('startBridgeServer');
   connectToRL();
   if (state.activeGame === 'valorant') startValorantPolling();
   if (state.activeGame === 'league') startLolPolling();
@@ -23966,6 +29225,8 @@ module.exports.start = function(baseDir) {
     }
   });
   state.clips = clipSystem.getState();
+  bootMark('clip system');
+  bootReport('server.start()');
 };
 
 // ─── Resource Watchdog ───────────────────────────────────────────────────────
@@ -25671,10 +30932,13 @@ module.exports.shutdown = function () {
   if (bridgeWss) { bridgeWss.close(() => {}); bridgeWss = null; }
   if (httpServer) { httpServer.close(() => {}); httpServer = null; }
 
+  try { flushBrandKitsSave(); } catch (e) { /* ignore */ }     // a deferred Desk Show topic edit must not die with the app
   try { _saveAppStateNow(true); } catch (e) { /* ignore */ }   // sync flush so the write completes before exit
   try { saveQuestionsData(true); } catch (e) { /* ignore */ }  // Q&A queue lives in its own file
   stats.close();
   playerDb.close();
+  teamDb.close();
+  identity.close();
 };
 
 module.exports.broadcastCrashAlert = function (message) {
@@ -25699,6 +30963,11 @@ module.exports.setLauncherResizeCallback = function (cb) {
 module.exports.setPerfPriorityCallback = function (cb) {
   _perfPriorityCb = cb;
 };
+
+// Set by main.js when the control panel's renderer finishes loading — the launcher polls for it
+// so its load animation ends when the studio is genuinely ready instead of after a fixed sleep.
+let _panelReady = false;
+module.exports.markPanelReady = function () { _panelReady = true; };
 
 module.exports.setRlSpectatorUiHotkeyChangeCallback = function (cb) {
   onRlSpectatorUiHotkeyChange = cb;

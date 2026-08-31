@@ -1550,10 +1550,19 @@ code {
   background: var(--surface2); border: 1px solid var(--border); border-radius: 10px;
   padding: 12px 14px; transition: border-color .15s, background .15s;
 }
-.onair-card.live { border-color: rgba(34,197,94,.55); background: rgba(34,197,94,.08); }
-.onair-card .oc-label { font-weight: 600; font-size: 13.5px; }
+/* Live weighting matched to the Production ▸ Graphics board (.gfx-card.on) so "what's on air"
+   looks the same on every surface — same green border, same inset left bar, same bright/bold
+   label, with off-air receding. */
+.onair-card.live { border-color: var(--ok); background: rgba(34,197,94,.14); box-shadow: inset 3px 0 0 var(--ok); }
+.onair-card .oc-label { font-weight: 600; font-size: 13.5px; color: var(--muted); }
+.onair-card.live .oc-label { color: var(--text); font-weight: 700; }
 .onair-card .oc-state { font-size: 10.5px; font-weight: 700; letter-spacing: .07em; color: #6b7280; }
 .onair-card.live .oc-state { color: var(--ok-2); }
+/* Live count beside a rail group heading. */
+.qrail-live-count { display: inline-flex; align-items: center; justify-content: center; min-width: 16px;
+  height: 16px; padding: 0 5px; margin-left: 6px; border-radius: 8px; background: var(--ok);
+  color: #06210f; font-size: 10px; font-weight: 800; letter-spacing: 0; vertical-align: middle; }
+.qrail-live-count.is-zero { background: var(--surface2); color: var(--muted); }
 
 /* iOS-style toggle */
 .switch { position: relative; display: inline-block; width: 46px; height: 26px; flex: 0 0 auto; }
@@ -1991,8 +2000,11 @@ body.popout-match #btn-mt-popout { display: none; }
 /* start.gg stream queue rows (Dashboard) */
 .sgg-row { display: flex; align-items: center; gap: 10px; padding: 8px 10px; margin-bottom: 6px; background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; }
 .sgg-row.live { border-color: rgba(34,197,94,.5); background: rgba(34,197,94,.07); }
+/* Cued up at the head of the stream queue, but start.gg has NOT called it — amber, never green. */
+.sgg-row.ondeck { border-color: rgba(251,191,36,.45); background: rgba(251,191,36,.06); }
 .sgg-badge { font-size: 10px; font-weight: 800; letter-spacing: .06em; padding: 3px 8px; border-radius: 999px; background: #3a3f4b; color: #c9cfda; flex: 0 0 auto; }
 .sgg-row.live .sgg-badge { background: var(--ok); color: #04210f; }
+.sgg-row.ondeck .sgg-badge { background: #fbbf24; color: #2a1c00; }
 .sgg-match { flex: 1 1 auto; font-size: 13px; overflow: hidden; display: flex; align-items: center; flex-wrap: wrap; gap: 2px; }
 .sgg-match b { font-weight: 700; }
 .sgg-team { display: inline-flex; align-items: center; gap: 5px; min-width: 0; }
@@ -2291,7 +2303,14 @@ body.popout-match #btn-mt-popout { display: none; }
 /* Producer timer control popover */
 .ptimer-pop { position: fixed; top: 56px; left: 50%; transform: translateX(-50%); z-index: 80; width: 360px;
   background: var(--surface); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 18px 50px rgba(0,0,0,.5); padding: 14px; }
-.ptp-display { font-variant-numeric: tabular-nums; font-weight: 800; font-size: 40px; text-align: center; color: #fff; margin-bottom: 10px; }
+/* Click-to-type: this is the number producers reach for, so it behaves like a field — subtle
+   hover/focus chrome that stays out of the way while it is just displaying the count. */
+.ptp-display { font-variant-numeric: tabular-nums; font-weight: 800; font-size: 40px; text-align: center; color: #fff;
+  margin-bottom: 10px; cursor: text; border: 1px solid transparent; border-radius: 8px; padding: 2px 8px;
+  outline: none; transition: border-color .12s ease, background-color .12s ease; }
+.ptp-display:hover { border-color: var(--border); background: var(--white-a03); }
+.ptp-display:focus-visible { border-color: var(--cp-accent); outline: 2px solid var(--cp-accent); outline-offset: 1px; }
+.ptp-display[contenteditable="true"] { border-color: var(--cp-accent); background: #0c0d12; cursor: text; }
 .ptp-row { display: flex; gap: 6px; margin-bottom: 8px; align-items: center; }
 .ptp-row:last-child { margin-bottom: 0; }
 .ptp-adj, .ptp-preset { flex: 1; padding: 8px 0; border-radius: 7px; border: 1px solid var(--border); background: var(--surface2); color: var(--text); font-weight: 700; font-size: 13px; cursor: pointer; }
@@ -2324,8 +2343,25 @@ body.popout-match #btn-mt-popout { display: none; }
 .team-logo-item:hover { background: var(--white-a06); }
 .team-logo-item img { width: 22px; height: 22px; object-fit: contain; flex: 0 0 auto; }
 .team-logo-ph { width: 22px; height: 22px; border-radius: 4px; background: var(--white-a06); flex: 0 0 auto; }
+
+/* Crew search dropdown (Show Deck slots, off-air staff) — replaces the native <datalist> popup,
+   which Chromium draws unstyled, bold and in raw roster order. Always A–Z, panel-themed. */
+.crew-ta-wrap { position: relative; display: block; min-width: 0; }
+.crew-dd { position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 70;
+  max-height: 264px; overflow-y: auto; padding: 4px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 9px;
+  box-shadow: 0 14px 34px rgba(0,0,0,.55); }
+.crew-dd-item { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 6px;
+  cursor: pointer; font-size: 12px; color: var(--text); }
+.crew-dd-item:hover, .crew-dd-item.is-active { background: var(--white-a06); }
+.crew-dd-dot { width: 7px; height: 7px; border-radius: 50%; flex: 0 0 auto; }
+.crew-dd-txt { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.crew-dd-nm { font-weight: 700; line-height: 1.25; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.crew-dd-meta { font-size: 10px; font-weight: 500; color: var(--muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.crew-dd-empty { padding: 8px 9px; font-size: 11px; color: var(--muted); }
 .pv-btn-wide { width: auto; padding: 0 9px; font-size: 11px; font-weight: 700; letter-spacing: .02em; }
-.pv-btn-wide.on { background: color-mix(in srgb, var(--cp-accent) 22%, transparent); border-color: var(--cp-accent); color: #fff; }
+.pv-btn-wide.on { background: rgba(124,58,237,0.22); border-color: var(--cp-accent); color: #fff; }
 /* Drag the bottom-right corner to resize (16:9 kept via aspect-ratio); the size button still cycles presets. */
 .pv-stage { position: relative; overflow: hidden; background: #000;
   width: var(--pv-w, 480px); aspect-ratio: 16 / 9; resize: horizontal; min-width: 320px; max-width: 1400px; }
@@ -3082,7 +3118,7 @@ input[type="radio"], input[type="checkbox"] { accent-color: var(--cp-accent); }
   flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; justify-content: center; gap: 3px;
   padding: 12px 16px; border-radius: 11px; background: rgba(0,0,0,.18); border: 1px solid var(--border);
 }
-.rd-driver.is-live .rd-driver-cur { border-color: color-mix(in srgb, var(--cp-accent, #e83a8b) 55%, transparent); background: color-mix(in srgb, var(--cp-accent, #e83a8b) 10%, rgba(0,0,0,.18)); }
+.rd-driver.is-live .rd-driver-cur { border-color: rgba(124,58,237,0.55); background: rgba(47,22,90,0.262); }
 .rd-driver-meta { display: flex; align-items: baseline; gap: 12px; min-width: 0; }
 .rd-driver-pos { flex: 0 0 auto; font-size: 10px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; color: var(--cp-accent, #e83a8b); font-variant-numeric: tabular-nums; }
 .rd-driver-next { flex: 1 1 auto; min-width: 0; font-size: 11.5px; font-weight: 600; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -3101,8 +3137,8 @@ input[type="radio"], input[type="checkbox"] { accent-color: var(--cp-accent); }
   display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-radius: 9px;
   background: var(--surface2); border: 1px solid var(--border); transition: border-color .12s, background .12s;
 }
-.rd-row:hover { border-color: color-mix(in srgb, #fff 16%, var(--border)); }
-.rd-row.rd-cur { border-color: var(--cp-accent, #e83a8b); background: color-mix(in srgb, var(--cp-accent, #e83a8b) 12%, var(--surface2)); }
+.rd-row:hover { border-color: rgba(197,168,247,0.286); }
+.rd-row.rd-cur { border-color: var(--cp-accent, #e83a8b); background: rgb(40,32,71); }
 .rd-row-num { flex: 0 0 auto; width: 22px; text-align: center; font-size: 11px; font-weight: 800; color: var(--muted); font-variant-numeric: tabular-nums; }
 .rd-row.rd-cur .rd-row-num { color: var(--cp-accent, #e83a8b); }
 .rd-row-badge { flex: 0 0 auto; font-size: 9px; font-weight: 800; letter-spacing: .06em; padding: 3px 7px; border-radius: 5px; }
@@ -3180,166 +3216,10 @@ input[type="radio"], input[type="checkbox"] { accent-color: var(--cp-accent); }
 .qk-put.qk-put-editing .qk-chip-main, .qk-put.qk-put-editing .qk-chip-gear { pointer-events: none; opacity: .5; }
 .qk-chip.qk-chip-drag { opacity: .4; }
 
-/* ════════════════════════════ Switcher page ════════════════════════════ */
-/* Full-height layout: monitors + take stay fixed; the sources/mixer area scrolls. */
-#tab-switcher-content.active { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
-#tab-switcher-content .page-head { flex: 0 0 auto; }
-#tab-switcher-content .sw-monitors { flex: 0 0 auto; }
-.sw-lower { flex: 1 1 auto; min-height: 0; overflow-y: auto; margin-top: 4px; }
-.sw-kbd { display: inline-block; padding: 1px 6px; border-radius: 4px; background: var(--white-a08); border: 1px solid var(--border); font-size: 10px; font-weight: 700; color: #c5c8d0; }
-
-.sw-topbar { display: flex; align-items: center; gap: 14px; margin-bottom: 16px; flex-wrap: wrap; flex: 0 0 auto; }
+/* Segmented control (.sw-* name kept from the removed Switcher page — reused by Leagues) */
 .sw-seg { display: inline-flex; background: var(--surface2); border: 1px solid var(--border); border-radius: 9px; padding: 3px; }
 .sw-seg-btn { padding: 6px 18px; font-size: 12px; font-weight: 700; border: 0; background: transparent; color: var(--muted); border-radius: 6px; cursor: pointer; }
 .sw-seg-btn.active { background: var(--cp-accent); color: #fff; }
-.sw-status { font-size: 12px; color: var(--muted); }
-.sw-thumbs { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); cursor: pointer; white-space: nowrap; }
-.sw-thumbs input { accent-color: var(--cp-accent); cursor: pointer; }
-
-/* Status bar */
-.sw-statusbar { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; flex: 0 0 auto; }
-.sw-pill { font-size: 11px; font-weight: 800; letter-spacing: .08em; padding: 4px 12px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); background: var(--white-a04); white-space: nowrap; }
-.sw-pill-live.on { color: #fff; background: var(--danger); border-color: transparent; box-shadow: 0 0 14px rgba(239,68,68,.5); }
-.sw-pill-rec { display: none; }
-.sw-pill-rec.on { display: inline-block; color: #fff; background: #b91c1c; border-color: transparent; }
-.sw-stat { font-size: 12.5px; font-weight: 700; color: #c5c8d0; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.sw-stat#sw-uptime { color: #9aa3b8; }
-.sw-wallclock { color: var(--muted); }
-.sw-sb-btns { display: inline-flex; gap: 6px; margin-left: auto; flex-wrap: wrap; }
-.sw-mini-btn { font-size: 11px; font-weight: 700; padding: 5px 12px; border-radius: 7px; cursor: pointer; border: 1px solid var(--border); background: var(--surface2); color: #d6d9e2; white-space: nowrap; transition: background .12s, color .12s; }
-.sw-mini-btn:hover { background: var(--white-a08); color: #fff; }
-.sw-mini-btn.on { background: var(--danger); color: #fff; border-color: transparent; }
-.sw-ftb-btn { color: #f0a5a5; }
-.sw-ftb-btn:hover { background: #000; color: #fff; border-color: #444; }
-
-/* Transition selector in the take column */
-.sw-take #sw-trans-type { width: 90px; font-size: 11px; padding: 4px 6px; }
-
-/* Graphics dock */
-.sw-dock { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 6px; }
-.sw-dock-chip { position: relative; display: inline-flex; align-items: center; gap: 7px; padding: 8px 12px 8px 24px; font-size: 12px; font-weight: 700; border-radius: 8px; cursor: pointer; color: #c5c8d0; background: var(--white-a04); border: 1px solid var(--border); white-space: nowrap; transition: background .12s, color .12s, border-color .12s; }
-.sw-dock-chip::before { content: ''; position: absolute; left: 10px; width: 8px; height: 8px; border-radius: 50%; background: rgba(255,255,255,.18); }
-.sw-dock-chip:hover { background: var(--white-a08); color: #fff; }
-.sw-dock-chip.on { background: linear-gradient(180deg, rgba(74,222,128,.18), rgba(34,197,94,.06)); border-color: rgba(74,222,128,.5); color: #fff; }
-.sw-dock-chip.on::before { background: var(--ok-2); box-shadow: 0 0 8px rgba(74,222,128,.75); }
-.sw-dock-gear { margin-left: 2px; opacity: .6; display: inline-flex; }
-.sw-dock-gear:hover { opacity: 1; }
-
-/* Rundown + Up Next strips */
-.sw-strips { display: grid; grid-template-columns: 2fr 1fr; gap: 12px; margin: 8px 0 4px; }
-.sw-strip { background: var(--white-a03); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; min-width: 0; }
-.sw-strip-head { font-size: 11px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: var(--cp-accent); margin-bottom: 8px; }
-.sw-rd-now, .sw-rd-next { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; min-width: 0; }
-.sw-rd-tag { font-size: 9.5px; font-weight: 800; letter-spacing: .1em; padding: 3px 8px; border-radius: 6px; color: #0b1220; background: var(--ok-2); flex: 0 0 auto; }
-.sw-rd-tag-next { background: rgba(255,255,255,.1); color: var(--muted); }
-.sw-rd-val { font-size: 14px; font-weight: 700; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
-.sw-rd-btns { display: flex; gap: 6px; margin-top: 8px; }
-
-/* Macros */
-.sw-macros { display: flex; gap: 6px; flex-wrap: wrap; }
-.sw-macro-btn { font-size: 12px; font-weight: 700; padding: 8px 14px; border-radius: 8px; cursor: pointer; border: 1px solid var(--border); background: var(--surface2); color: #d6d9e2; white-space: nowrap; }
-.sw-macro-btn:hover { background: var(--cp-accent); color: #fff; border-color: transparent; }
-.sw-macros-empty, .sw-dock-empty { font-size: 12px; color: var(--muted); padding: 4px 2px; }
-
-/* Audio meter bar (vMix) */
-.sw-ch-meter { width: 26px; height: 6px; border-radius: 3px; background: var(--white-a08); overflow: hidden; }
-.sw-ch-meter > span { display: block; height: 100%; width: 0; background: linear-gradient(90deg, var(--ok-2), #f5c944 70%, var(--danger)); transition: width .12s linear; }
-
-/* ── Desk Show (preshow) graphics panel ── */
-.ps-presets { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; background: rgba(255,255,255,.03); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; margin-bottom: 14px; }
-.ps-presets-lbl { font-size: 11px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); flex-shrink: 0; }
-.ps-presets > .input-select { flex: 1; min-width: 130px; }
-.ps-presets .ps-del-btn { color: #f56565; }
-.ps-presets .ps-del-btn:hover { background: rgba(239,68,68,.16); border-color: rgba(239,68,68,.5); color: #fff; }
-.ps-section-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 16px 0 6px; }
-.ps-topics { display: flex; flex-direction: column; gap: 6px; margin-bottom: 4px; }
-/* JS-rendered topic rows: [dot] [text] [scene] [delete] */
-.ps-topics > div { background: rgba(255,255,255,.03); border: 1px solid var(--border); border-radius: 9px; padding: 6px 8px; transition: border-color .12s; }
-.ps-topics > div:hover { border-color: rgba(255,255,255,.16); }
-.ps-topics > div > button:first-child { flex: 0 0 auto; width: 30px; padding: 6px 0; font-size: 15px; line-height: 1; }
-.ps-topics > div > button:last-child { flex: 0 0 auto; width: 32px; padding: 6px 0; color: var(--muted); }
-.ps-topics > div > button:last-child:hover { color: #f56565; }
-.ps-topics > div .input-text { background: rgba(0,0,0,.18); }
-.ps-return { display: flex; align-items: center; gap: 8px; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border); }
-/* Caster Predictions — one row per desk cam slot: caster name + who they think wins the whole
-   TOURNAMENT, searched from the full team library (not limited to the two active match teams). */
-.ps-predictions { display: flex; flex-direction: column; gap: 6px; }
-.ps-pred-row {
-  display: flex; align-items: center; gap: 10px;
-  background: rgba(255,255,255,.03); border: 1px solid var(--border); border-radius: 9px; padding: 8px 10px;
-}
-.ps-pred-name { flex: 0 0 auto; max-width: 40%; font-size: 12.5px; font-weight: 700; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.ps-pred-name .ps-pred-empty { color: var(--muted); font-weight: 500; font-style: italic; }
-.ps-pred-pickarea { flex: 1 1 auto; min-width: 0; }
-.ps-pred-search { width: 100%; font-size: 12px; padding: 6px 10px; }
-.ps-pred-chip {
-  display: flex; align-items: center; gap: 8px;
-  background: rgba(124,58,237,.14); border: 1px solid var(--cp-accent); border-radius: 7px; padding: 4px 8px 4px 6px;
-}
-.ps-pred-chip-logo { width: 20px; height: 20px; object-fit: contain; border-radius: 4px; background: #0b0d12; flex-shrink: 0; }
-.ps-pred-chip-name { flex: 1 1 auto; min-width: 0; font-size: 12px; font-weight: 800; letter-spacing: .02em; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.ps-pred-chip-clear { flex-shrink: 0; background: transparent; border: none; color: var(--muted); cursor: pointer; font-size: 12px; padding: 2px 4px; line-height: 1; }
-.ps-pred-chip-clear:hover { color: #fff; }
-
-/* Program / preview monitors */
-.sw-monitors { display: grid; grid-template-columns: 1fr auto 1fr; gap: 16px; align-items: center; margin-bottom: 22px; }
-.sw-mon { display: flex; flex-direction: column; gap: 8px; }
-.sw-mon-head { display: flex; align-items: center; gap: 10px; }
-.sw-mon-tag { font-size: 11px; font-weight: 800; letter-spacing: .14em; padding: 3px 10px; border-radius: 6px; }
-.sw-tag-prev { color: #0b1220; background: var(--ok-2); }
-.sw-tag-prog { color: #fff; background: var(--danger); }
-.sw-mon-name { font-size: 15px; font-weight: 700; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.sw-mon-screen { position: relative; aspect-ratio: 16/9; max-height: 46vh; border-radius: 12px; overflow: hidden; background: #0b0d12; border: 2px solid var(--border); display: flex; align-items: center; justify-content: center; }
-.sw-mon-preview .sw-mon-screen { border-color: rgba(74,222,128,.5); }
-.sw-mon-program .sw-mon-screen { border-color: rgba(239,68,68,.6); box-shadow: 0 0 0 1px rgba(239,68,68,.25), 0 10px 30px rgba(0,0,0,.4); }
-.sw-mon-screen img { width: 100%; height: 100%; object-fit: contain; }
-.sw-mon-screen video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #000; z-index: 1; }
-.sw-mon-ph { font-size: 13px; font-weight: 600; color: rgba(255,255,255,.2); letter-spacing: .1em; text-transform: uppercase; }
-/* Program live (virtual camera) controls */
-.sw-prog-live-ctl { margin-left: auto; display: flex; align-items: center; gap: 6px; flex: 0 0 auto; }
-.sw-prog-live-ctl .input-select { font-size: 11px; padding: 3px 6px; max-width: 170px; }
-.sw-live-btn { font-size: 11px; font-weight: 800; letter-spacing: .04em; padding: 4px 12px; border-radius: 7px; cursor: pointer; border: 1px solid var(--border); background: transparent; color: var(--muted); white-space: nowrap; transition: background .12s, color .12s; }
-.sw-live-btn:hover { color: #fff; border-color: rgba(255,255,255,.3); }
-.sw-live-btn.on { background: var(--danger); color: #fff; border-color: transparent; }
-.sw-mon-program .sw-mon-name { min-width: 0; }
-
-/* Take controls */
-.sw-take { display: flex; flex-direction: column; gap: 10px; align-items: center; justify-content: center; padding: 0 6px; }
-.sw-take-btn { width: 84px; padding: 14px 0; font-size: 14px; font-weight: 800; letter-spacing: .08em; border-radius: 10px; cursor: pointer; border: 1px solid var(--border); color: #fff; transition: filter .12s, transform .05s; }
-.sw-take-btn:active { transform: scale(.96); }
-.sw-cut { background: linear-gradient(180deg, var(--danger), #c62f2f); border-color: transparent; }
-.sw-auto { background: linear-gradient(180deg, #f5b73c, #d99320); border-color: transparent; color: #241a05; }
-.sw-take-btn:hover { filter: brightness(1.08); }
-.sw-take-dur { display: flex; align-items: center; gap: 5px; }
-.sw-take-dur input { width: 62px; padding: 5px 6px; font-size: 12px; text-align: center; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; color: var(--text); }
-.sw-take-dur span { font-size: 11px; color: var(--muted); }
-
-/* Section labels */
-.sw-section-label { display: flex; align-items: center; font-size: 12px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: var(--cp-accent); margin: 18px 0 10px; }
-.sw-hint { margin-left: 10px; font-size: 11px; font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--muted); }
-
-/* Multiview grid */
-.sw-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px; }
-.sw-tile { position: relative; aspect-ratio: 16/9; border-radius: 10px; overflow: hidden; background: #0d0f14; border: 2px solid var(--border); cursor: pointer; transition: border-color .12s, transform .05s; }
-.sw-tile:hover { border-color: rgba(255,255,255,.3); }
-.sw-tile:active { transform: scale(.98); }
-.sw-tile.is-preview { border-color: var(--ok-2); }
-.sw-tile.is-program { border-color: var(--danger); box-shadow: 0 0 0 1px rgba(239,68,68,.3); }
-.sw-tile img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
-.sw-tile-name { position: absolute; left: 0; right: 0; bottom: 0; padding: 6px 8px; font-size: 12px; font-weight: 700; color: #fff; background: linear-gradient(0deg, rgba(0,0,0,.85), transparent); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; z-index: 1; }
-.sw-tile-badge { position: absolute; top: 6px; left: 6px; font-size: 9px; font-weight: 800; letter-spacing: .08em; padding: 2px 7px; border-radius: 5px; z-index: 1; display: none; }
-.sw-tile.is-program .sw-tile-badge { display: block; background: var(--danger); color: #fff; content: 'PGM'; }
-.sw-tile.is-preview .sw-tile-badge { display: block; background: var(--ok-2); color: #0b1220; }
-
-/* Audio mixer */
-.sw-mixer { display: flex; gap: 10px; flex-wrap: wrap; }
-.sw-ch { width: 96px; display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 12px 8px; background: var(--white-a03); border: 1px solid var(--border); border-radius: 10px; }
-.sw-ch-name { font-size: 11px; font-weight: 700; color: #d6d9e2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; text-align: center; }
-.sw-ch-fader { writing-mode: vertical-lr; direction: rtl; width: 26px; height: 150px; accent-color: var(--cp-accent); cursor: pointer; }
-.sw-ch-val { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
-.sw-ch-mute { width: 100%; padding: 5px 0; font-size: 10px; font-weight: 800; letter-spacing: .06em; border-radius: 6px; cursor: pointer; border: 1px solid var(--border); background: transparent; color: var(--muted); }
-.sw-ch-mute.on { background: var(--danger); color: #fff; border-color: transparent; }
-.sw-mixer-empty { font-size: 12px; color: var(--muted); padding: 8px 2px; }
 
 /* Bottom bar "Up Next" (start.gg) */
 .bb-upnext { display: flex; align-items: center; gap: 8px; padding: 0 12px; max-width: 320px; min-width: 0; border-left: 1px solid var(--border); border-right: 1px solid var(--border); }
@@ -3382,7 +3262,7 @@ input.sponsor-name-input:focus { border-color: var(--cp-accent); background: var
 .brand-pkg-tab { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 8px; cursor: pointer;
   background: var(--white-a05); border: 1px solid var(--white-a10); font-size: 12.5px; font-weight: 700; color: #cdd2dd; user-select: none; }
 .brand-pkg-tab:hover { border-color: var(--cp-accent); }
-.brand-pkg-tab.active { background: color-mix(in srgb, var(--cp-accent) 22%, transparent); border-color: var(--cp-accent); color: #fff; }
+.brand-pkg-tab.active { background: rgba(124,58,237,0.22); border-color: var(--cp-accent); color: #fff; }
 .brand-pkg-tab.live .brand-pkg-name { color: #ffd479; }
 .brand-pkg-live { background: none; border: 0; padding: 0; cursor: pointer; font-size: 14px; line-height: 1; color: #ffd479; }
 .brand-pkg-live:hover { transform: scale(1.15); }
@@ -3397,6 +3277,10 @@ input.sponsor-name-input:focus { border-color: var(--cp-accent); background: var
 
 /* Saved Brand Kits list — logo + name with a sponsor quick-view on a second line. */
 .brand-kit-item { align-items: flex-start; gap: 12px; }
+/* Seven actions + a package switcher don't fit one line inside the Settings modal (narrower than
+   the old full-width page), and .preset-actions doesn't shrink — so the tail of the row (Export,
+   Banner URL, Delete) used to run off the edge. Wrap instead of overflowing. */
+.brand-kit-item .preset-actions { flex-wrap: wrap; justify-content: flex-end; row-gap: 6px; }
 .brand-kit-main { display: flex; gap: 10px; align-items: flex-start; flex: 1 1 auto; min-width: 0; }
 .brand-kit-logo { width: 40px; height: 40px; flex: 0 0 40px; border-radius: 8px; overflow: hidden;
   background: var(--white-a06); border: 1px solid var(--white-a12);
@@ -3455,8 +3339,19 @@ input.sponsor-name-input:focus { border-color: var(--cp-accent); background: var
   color: var(--text); background: var(--surface2); border: 1px solid var(--border);
   border-radius: 7px; padding: 5px 8px; cursor: text; outline: none;
 }
+/* The countdown value is type-into-able, but it renders a LIVE ticking time, so it reads as a
+   status readout and producers never guessed they could set a custom value here. Give it a real
+   field's affordances: a caret hint on hover, a focus ring, and a pencil marker. */
+.gl-time { position: relative; padding-right: 20px; }
+.gl-time::after {
+  content: '\270E'; position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
+  font-size: 10px; line-height: 1; color: var(--muted); opacity: .55; pointer-events: none;
+}
 .gl-time:hover { border-color: var(--cp-accent); }
+.gl-time:hover::after { opacity: 1; color: var(--cp-accent); }
+.gl-time:focus-visible { border-color: var(--cp-accent); outline: 2px solid var(--cp-accent); outline-offset: 1px; }   /* outline, not color-mix: Electron 18 drops color-mix rules */
 .gl-time[contenteditable="true"] { border-color: var(--cp-accent); background: #0c0d12; }
+.gl-time[contenteditable="true"]::after { display: none; }   /* out of the way while typing */
 
 /* Overlay View — segmented toggle reflecting the live view */
 .gl-seg { display: flex; background: var(--surface2); border: 1px solid var(--border); border-radius: 9px; overflow: hidden; }
@@ -3837,8 +3732,8 @@ input:-webkit-autofill:active {
 .rp-topbar-group { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 /* Section label chip in the Video Editor top bar (Capture / On air). */
 .rp-topbar-chip { font-size: 10px; font-weight: 800; letter-spacing: .09em; text-transform: uppercase;
-  color: var(--cp-accent); background: color-mix(in srgb, var(--cp-accent) 14%, transparent);
-  border: 1px solid color-mix(in srgb, var(--cp-accent) 35%, transparent); border-radius: 6px; padding: 3px 8px; white-space: nowrap; }
+  color: var(--cp-accent); background: rgba(124,58,237,0.14);
+  border: 1px solid rgba(124,58,237,0.35); border-radius: 6px; padding: 3px 8px; white-space: nowrap; }
 /* Condensed clip-metadata bar above the editor video. */
 .rp-meta-bar { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
 .rp-meta-row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
@@ -3865,9 +3760,9 @@ input:-webkit-autofill:active {
 
 /* Subtle accent glow around the Video Editor (middle) column so it reads as the focus. */
 #clip-preview-card {
-  border-color: color-mix(in srgb, var(--accent) 32%, var(--border));
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 14%, transparent),
-              0 0 22px color-mix(in srgb, var(--accent) 18%, transparent);
+  border-color: rgba(124,58,237,0.422);
+  box-shadow: 0 0 0 1px rgba(124,58,237,0.14),
+              0 0 22px rgba(124,58,237,0.18);
 }
 
 /* Game logos are forced white so they're visible on the dark UI (the marks are mono/dark).
@@ -3908,6 +3803,51 @@ input:-webkit-autofill:active {
   flex: 0 0 auto; font-size: 9px; font-weight: 800; letter-spacing: .06em;
   padding: 1px 5px; border-radius: 3px; background: var(--white-a06); color: #8b93a7;
 }
+
+/* Desk Show ▸ Caster Predictions. The markup (ps-pred-* in app.js) reuses the .team-dd typeahead
+   above for its search dropdown, so only the row + made-pick chip live here. Without the chip rules
+   a picked team's logo rendered at its natural size and blew the panel's layout open. */
+.ps-section-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+
+.ps-predictions { display: flex; flex-direction: column; gap: 8px; }
+.ps-pred-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+/* Fixed column so the chips line up down the rows; wide enough that the longer
+   "Slot N — unassigned" placeholder isn't clipped. */
+.ps-pred-name {
+  flex: 0 0 132px; min-width: 0;
+  font-size: 11px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase;
+  color: #e6e8f0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.ps-pred-empty { font-weight: 700; text-transform: none; letter-spacing: 0; color: var(--muted); font-style: italic; }
+/* min-width:0 lets the flex child actually shrink, so a long team name ellipsises instead of
+   pushing the row wider than the panel. */
+.ps-pred-pickarea { flex: 1 1 200px; min-width: 0; }
+
+.ps-pred-chip {
+  display: inline-flex; align-items: center; gap: 8px; max-width: 100%;
+  padding: 4px 4px 4px 6px; border-radius: 999px;
+  background: var(--white-a06); border: 1px solid var(--border);
+}
+.ps-pred-chip-logo {
+  flex: 0 0 auto; width: 22px; height: 22px; object-fit: contain; border-radius: 4px;
+  background: #0b0d12; border: 1px solid var(--border);
+}
+.ps-pred-chip-name {
+  flex: 1 1 auto; min-width: 0;
+  font-size: 12px; font-weight: 800; letter-spacing: .02em; color: #e6e8f0;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.ps-pred-chip-clear {
+  flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center;
+  width: 20px; height: 20px; padding: 0; border-radius: 50%; cursor: pointer;
+  background: transparent; border: 0; color: var(--muted);
+  font-size: 11px; line-height: 1;
+}
+.ps-pred-chip-clear:hover { background: rgba(239,68,68,.16); color: var(--danger); }
+
+/* Anchored so the fixed-position .team-dd can be measured against the input. */
+.ps-pred-typeahead { display: block; }
+.ps-pred-search { width: 100%; }
 
 /* Video Editor header — matched to the Staging / Playlists header bars (flush; pane has 14px padding). */
 .rp-pane-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: -14px -14px 10px; padding: 9px 12px;
@@ -3974,7 +3914,7 @@ input:-webkit-autofill:active {
   border: none; color: #8890a4; cursor: pointer; padding: 4px; border-radius: 6px; }
 .rp-vi-act:hover { background: var(--white-a08); color: #cdd2dd; }
 .rp-sc-addpl { color: var(--cp-accent); }
-.rp-sc-addpl:hover { background: color-mix(in srgb, var(--cp-accent) 16%, transparent); color: var(--cp-accent); }
+.rp-sc-addpl:hover { background: rgba(124,58,237,0.16); color: var(--cp-accent); }
 /* Clip pool's direct one-click "To Air" — red like every other on-air control in this app. */
 .rp-pool-air { color: var(--danger-2, #f56565); }
 .rp-pool-air:hover { background: rgba(245,101,101,.16); color: var(--danger-2, #f56565); }
@@ -4634,12 +4574,15 @@ input:-webkit-autofill:active {
 
 /* Drag-and-drop zone wrapping the grid — multiple images or whole folders. */
 .md-dropzone { position: relative; border-radius: 12px; padding: 4px; transition: box-shadow .15s ease, background .15s ease; min-height: 220px; }
-.md-dropzone.drag-over { box-shadow: inset 0 0 0 2px var(--cp-accent); background: color-mix(in srgb, var(--cp-accent) 8%, transparent); }
+.md-dropzone.drag-over { box-shadow: inset 0 0 0 2px var(--cp-accent); background: rgba(124,58,237,0.08); }
 .md-dropzone-hint {
   display: none; position: absolute; inset: 4px; align-items: center; justify-content: center; gap: 10px;
   pointer-events: none; z-index: 6; border-radius: 10px; font-size: 14px; font-weight: 700; letter-spacing: .01em;
-  color: var(--cp-accent); background: color-mix(in srgb, var(--cp-bg, #0c0e14) 78%, transparent);
-  border: 2px dashed color-mix(in srgb, var(--cp-accent) 55%, transparent);
+  /* Precomputed literal of the mix below (--cp-bg #0c0e14 at 78%), because Electron 18 has no
+     color-mix() and would leave the scrim unset — the hint's text then sits straight on the
+     media grid. The themeable version is restated in the @supports block at the end of the file. */
+  color: var(--cp-accent); background: rgba(12, 14, 20, .78);
+  border: 2px dashed rgba(124,58,237,0.55);
 }
 .md-dropzone.drag-over .md-dropzone-hint { display: flex; }
 
@@ -6135,8 +6078,27 @@ span.lg-pl-role { color: var(--muted); }
 .seed-statusbar { display: flex; align-items: center; gap: 12px; padding: 4px 14px; border: 1px solid var(--border); border-top: none; border-bottom: none; background: rgba(0,0,0,.18); min-height: 24px; }
 .seed-orderby { font-size: 11px; font-style: italic; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 320px; }
 .seed-status  { font-size: 11px; color: var(--muted); }
+/* ── Auto-seed bar — the front door ───────────────────────────────────────────
+   Placements seed the board; the options here only decide what happens to teams that have
+   no tournament history. Everything else (rank systems, review queue, manual sorts) lives
+   behind Advanced, which hides the whole sidebar + tab bar when off. */
+.seed-autobar { border: 1px solid var(--border); border-top: none; border-bottom: none; background: linear-gradient(180deg, rgba(124,58,237,.10), rgba(124,58,237,.03)); padding: 9px 14px; display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.seed-autobar-main { display: flex; align-items: center; gap: 11px; flex: 1 1 320px; min-width: 0; }
+.seed-auto-summary { font-size: 11px; color: var(--muted); line-height: 1.45; min-width: 0; }
+.seed-auto-summary b { color: #fff; font-weight: 700; }
+.seed-auto-summary .seed-auto-warn { color: #fbbf24; }
+.seed-autobar-opts { display: flex; align-items: center; gap: 12px; flex-shrink: 0; flex-wrap: wrap; }
+.seed-sig { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--muted); cursor: pointer; white-space: nowrap; }
+.seed-sig input { margin: 0; cursor: pointer; }
+.seed-sig-sel select { font-size: 11px; padding: 2px 6px; height: 24px; }
+.seed-sig.is-off { opacity: .5; }
 /* Verified / Unverified tab bar */
 .seed-tab-bar { display: flex; border: 1px solid var(--border); border-top: none; border-bottom: none; background: var(--surface2); padding: 0 14px; }
+/* Advanced off — the manual toolkit collapses away and the board runs full width. */
+#seeding-studio.seed-adv-off .seed-tab-bar,
+#seeding-studio.seed-adv-off .seed-sidebar { display: none; }
+#seeding-studio.seed-adv-off .seed-studio-layout { border-top: 1px solid var(--border); }
+#seed-adv-toggle.is-on { color: #fff; background: rgba(124,58,237,.22); border-color: rgba(124,58,237,.45); }
 .seed-tab { background: none; border: none; border-bottom: 2px solid transparent; color: var(--muted); font-size: 12px; font-weight: 600; letter-spacing: .04em; padding: 7px 14px; cursor: pointer; transition: color .12s, border-color .12s; }
 .seed-tab:hover { color: #fff; }
 .seed-tab.active { color: #fff; border-bottom-color: var(--cp-accent); }
@@ -6191,6 +6153,64 @@ span.lg-pl-role { color: var(--muted); }
 .seed-sb-adv > summary::after { content: '▸'; margin-left: auto; font-size: 9px; opacity: .7; }
 .seed-sb-adv[open] > summary::after { content: '▾'; }
 .seed-sb-adv[open] { gap: 5px; }
+
+/* ── Identity gate (seeding step 2) ────────────────────────────────────────
+   A gamertag is not a person. These are the surfaces that say how sure we are who each player is:
+   an inline badge on any player we can't fully vouch for, and the triage modal where the producer
+   settles the ambiguous ones. */
+.seed-ident-badge {
+  display: inline-flex; align-items: center; margin-left: 6px; padding: 1px 6px;
+  border-radius: 8px; font-size: 9px; font-weight: 700; letter-spacing: .3px;
+  border: 1px solid currentColor; background: rgba(255,255,255,.04);
+}
+.seed-ident-warn   { color: #d69e2e; }
+.seed-ident-rename { color: #4299e1; font-size: 10px; }
+
+.si-tab-btn {
+  padding: 8px 14px; background: none; border: none; border-bottom: 2px solid transparent;
+  color: var(--muted); font-size: 12px; font-weight: 600; cursor: pointer;
+}
+.si-tab-btn.active { border-bottom-color: var(--cp-accent); color: var(--text); }
+
+.si-empty { padding: 28px 16px; text-align: center; color: var(--muted); font-size: 12px; }
+.si-row {
+  display: grid; grid-template-columns: 1.1fr 1.6fr auto; gap: 12px; align-items: start;
+  padding: 10px 14px; border-bottom: 1px solid var(--border); font-size: 12px;
+}
+.si-row-review { grid-template-columns: 1fr; gap: 8px; }
+.si-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.si-main > b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.si-team  { font-size: 10px; color: var(--muted); }
+.si-match { color: var(--text); }
+.si-muted { color: var(--muted); }
+.si-on    { color: var(--muted); font-size: 10px; }
+.si-contested { color: #e53e3e; font-size: 10px; font-weight: 600; }
+.si-check { display: flex; align-items: center; gap: 5px; font-size: 11px; color: var(--muted); }
+
+.si-tier { font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; padding: 2px 7px; border-radius: 8px; align-self: center; }
+.si-tier-verified   { color: #48bb78; background: rgba(72,187,120,.13); }
+.si-tier-probable   { color: #d69e2e; background: rgba(214,158,46,.13); }
+.si-tier-unverified { color: #718096; background: rgba(113,128,150,.13); }
+.si-tier-conflicted { color: #e53e3e; background: rgba(229,62,62,.13); }
+
+/* Candidate picker — one row per possible human, so the choice is explicit rather than a guess */
+.si-cands { display: flex; flex-direction: column; gap: 4px; }
+.si-cand {
+  display: grid; grid-template-columns: auto 1fr 1.2fr auto; gap: 9px; align-items: center;
+  padding: 6px 9px; border: 1px solid var(--border); border-radius: 6px; cursor: pointer;
+  background: rgba(255,255,255,.02);
+}
+.si-cand:hover   { background: rgba(255,255,255,.05); }
+.si-cand-sel     { border-color: var(--cp-accent); background: rgba(66,153,225,.09); }
+.si-cand-name    { font-weight: 600; }
+.si-cand-meta    { color: var(--muted); font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.si-cand-score   { color: var(--muted); font-size: 10px; font-variant-numeric: tabular-nums; }
+
+@media (max-width: 720px) {
+  .si-row  { grid-template-columns: 1fr; }
+  .si-cand { grid-template-columns: auto 1fr; row-gap: 2px; }
+  .si-cand-meta, .si-cand-score { grid-column: 2; }
+}
 
 /* Review queue — how much of the field is settled, and how much still wants a human */
 .seed-review-stat { display: flex; flex-direction: column; gap: 4px; }
@@ -6273,6 +6293,11 @@ span.lg-pl-role { color: var(--muted); }
 .seed-tv { flex: 0 0 auto; font-size: 13px; font-weight: 900; font-variant-numeric: tabular-nums; color: #fff; background: var(--cp-accent); border-radius: 7px; padding: 2px 9px; min-width: 30px; text-align: center; }
 .seed-tv.seed-tv-empty { background: transparent; color: var(--muted); border: 1px dashed var(--border); }
 .seed-perf-badge { flex: 0 0 auto; font-size: 10px; font-weight: 700; color: #63b3ed; background: rgba(66,153,225,0.12); border: 1px solid rgba(66,153,225,0.25); border-radius: 5px; padding: 2px 6px; white-space: nowrap; }
+/* What this team's seed is actually standing on — placements, ranks, or nothing at all. */
+.seed-basis { flex: 0 0 auto; font-size: 9px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; border-radius: 5px; padding: 2px 6px; white-space: nowrap; }
+.seed-basis-placements { color: #6ee7b7; background: rgba(16,185,129,.12); border: 1px solid rgba(16,185,129,.28); }
+.seed-basis-ranks      { color: #a78bfa; background: rgba(139,92,246,.12); border: 1px solid rgba(139,92,246,.30); }
+.seed-basis-none       { color: var(--muted); background: var(--white-a04); border: 1px solid var(--border); }
 .seed-players-wrap { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 6px; margin-top: 9px; }
 /* Two-row cell: gamertag + chips on top, rank input full-width below — so the name never gets
    squeezed to nothing by the profile/confidence chips in a narrow column. */
@@ -6364,7 +6389,7 @@ span.lg-pl-role { color: var(--muted); }
   background: var(--surface2); border: 1px solid var(--border); border-radius: 9px; }
 .wl-fields-chips { display: flex; gap: 6px; flex-wrap: wrap; }
 .wl-field-chip { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 800; letter-spacing: .03em; text-transform: uppercase;
-  background: color-mix(in srgb, var(--cp-accent) 18%, transparent); color: #fff; border: 1px solid var(--cp-accent); border-radius: 999px; padding: 3px 6px 3px 11px; }
+  background: rgba(124,58,237,0.18); color: #fff; border: 1px solid var(--cp-accent); border-radius: 999px; padding: 3px 6px 3px 11px; }
 .wl-field-chip button { background: none; border: none; color: #fff; cursor: pointer; font-size: 12px; line-height: 1; opacity: .7; padding: 0 2px; }
 .wl-field-chip button:hover { opacity: 1; }
 .wl-field-new { width: 110px; font-size: 12px; padding: 5px 8px; }
@@ -6388,7 +6413,7 @@ span.lg-pl-role { color: var(--muted); }
 .wl-team-del:hover { opacity: 1; }
 .wl-solo { flex: 0 0 auto; background: none; border: none; color: var(--muted); cursor: pointer; font-size: 15px; opacity: .6; transition: color .12s, opacity .12s; }
 .wl-solo:hover { opacity: 1; color: var(--cp-accent); }
-.wl-solo.is-on { color: var(--cp-accent); opacity: 1; text-shadow: 0 0 9px color-mix(in srgb, var(--cp-accent) 60%, transparent); }
+.wl-solo.is-on { color: var(--cp-accent); opacity: 1; text-shadow: 0 0 9px rgba(124,58,237,0.6); }
 .ts-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-top: 14px; padding: 11px 14px;
   background: var(--surface2); border: 1px solid var(--border); border-radius: 11px; }
 .ts-bar-info { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; min-width: 0; }
@@ -6462,14 +6487,14 @@ span.lg-pl-role { color: var(--muted); }
 .sp-solo-dd-menu { position: absolute; z-index: 20; top: calc(100% + 4px); left: 0; right: 0; max-height: 280px; overflow-y: auto; background: var(--surface2); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 12px 28px rgba(0,0,0,.45); padding: 5px; }
 .sp-solo-dd-item { display: flex; align-items: center; gap: 9px; width: 100%; text-align: left; background: none; border: none; border-radius: 7px; padding: 7px 8px; cursor: pointer; font-family: inherit; color: var(--text); transition: background .1s; }
 .sp-solo-dd-item:hover { background: var(--white-a06); }
-.sp-solo-dd-item.is-on { background: color-mix(in srgb, var(--cp-accent) 16%, transparent); }
+.sp-solo-dd-item.is-on { background: rgba(124,58,237,0.16); }
 .sp-solo-dd-item-logo { width: 24px; height: 24px; border-radius: 5px; object-fit: contain; background: var(--white-a06); flex: 0 0 auto; }
 .sp-solo-dd-item-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
 .sp-solo-dd-item-name { font-size: 13px; font-weight: 800; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sp-solo-dd-item-players { font-size: 10.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sp-solo-dd-item-link { font-size: 9px; font-weight: 800; letter-spacing: .04em; color: var(--muted); flex: 0 0 auto; }
 .sp-solo-dd-item-link.ok { color: #34d399; }
-.sp-solo-card.is-on { background: color-mix(in srgb, var(--cp-accent) 14%, transparent); border-color: var(--cp-accent); }
+.sp-solo-card.is-on { background: rgba(124,58,237,0.14); border-color: var(--cp-accent); }
 .sp-solo-name { font-size: 13.5px; font-weight: 800; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sp-solo-players { font-size: 10.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sp-solo-link { font-size: 9.5px; font-weight: 800; letter-spacing: .04em; color: var(--muted); margin-top: 2px; }
@@ -6946,10 +6971,12 @@ section#golive-area .golive-row { padding: 8px 6px; }
 .qsgg-row { padding:8px 0; border-bottom:1px solid var(--white-a05); }
 .qsgg-row:last-child { border-bottom:none; }
 .qsgg-row.is-live { border-left:2px solid var(--ok); padding-left:8px; margin-left:-8px; }
+.qsgg-row.is-ondeck { border-left:2px solid #fbbf24; padding-left:8px; margin-left:-8px; }
 .qsgg-row.is-done { opacity:.5; }
 .qsgg-top { display:flex; align-items:center; gap:6px; margin-bottom:5px; }
 .qsgg-badge { font-size:9px; font-weight:900; letter-spacing:.08em; padding:2px 5px; border-radius:3px; text-transform:uppercase; flex-shrink:0; }
 .qsgg-badge.live { background:var(--ok); color:#061408; }
+.qsgg-badge.ondeck { background:#fbbf24; color:#2a1c00; }
 .qsgg-badge.next { background:rgba(255,255,255,.1); color:#9aa3b0; }
 .qsgg-badge.done { background:var(--white-a05); color:var(--muted); }
 .qsgg-round { font-size:11px; color:var(--muted); flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
@@ -7050,7 +7077,7 @@ body.popout-qrail .qrail-popout-strip { display: none !important; }
 .bb-cz-chip .svg-ico { width: 14px; height: 14px; color: var(--muted); flex: 0 0 auto; }
 .bb-cz-chip:hover { border-color: var(--cp-accent); }
 .bb-cz-cname { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.bb-cz-chip.is-pinned { border-color: var(--cp-accent); background: color-mix(in srgb, var(--cp-accent) 16%, var(--surface2)); color: #fff; }
+.bb-cz-chip.is-pinned { border-color: var(--cp-accent); background: rgb(43,33,78); color: #fff; }
 .bb-cz-chip.is-pinned .svg-ico, .bb-cz-chip.is-pinned .bb-cz-pin .svg-ico { color: var(--cp-accent); }
 .bb-cz-chip.is-locked { opacity: .55; cursor: default; }
 .bb-cz-chip.is-locked:hover { border-color: var(--border); }
@@ -7390,6 +7417,70 @@ body.popout-qrail .qrail-popout-strip { display: none !important; }
    (the two arrows face each other across the centre of the app). */
 .sidebar-tophead { display: flex; justify-content: space-between; align-items: center; min-height: 44px; padding: 8px 12px; border-bottom: 1px solid var(--border); }
 .sidebar-tophead-label { font-size: 12px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: #c5c8d0; }
+
+/* ════════════════════════════ Sidebar feature search ════════════════════════════ */
+/* Jump-to-panel search. The results popover is fixed-positioned (JS sets top/left from the
+   input's rect) so it escapes the sidebar's own scroll container and can never be clipped. */
+.navsearch { position: relative; padding: 8px 10px; border-bottom: 1px solid var(--border); }
+.navsearch-ico { position: absolute; left: 20px; top: 50%; transform: translateY(-50%); color: var(--muted); pointer-events: none; }
+.navsearch-input {
+  width: 100%; padding: 7px 46px 7px 28px; font-size: 12.5px; font-family: inherit;
+  color: var(--text); background: var(--surface2); border: 1px solid var(--border);
+  border-radius: 7px; outline: none;
+}
+.navsearch-input::placeholder { color: var(--muted); }
+.navsearch-input:focus { border-color: var(--accent, #6366f1); background: var(--surface); }
+.navsearch-kbd {
+  position: absolute; right: 17px; top: 50%; transform: translateY(-50%);
+  font-size: 9px; font-weight: 700; letter-spacing: .04em; color: var(--muted);
+  border: 1px solid var(--border); border-radius: 4px; padding: 2px 5px; pointer-events: none;
+}
+.navsearch-input:focus ~ .navsearch-kbd { display: none; }
+.navsearch-results {
+  position: fixed; z-index: 9000; width: 380px; max-height: 62vh; overflow-y: auto;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+  box-shadow: 0 18px 44px rgba(0,0,0,.55); padding: 5px;
+}
+/* Results are grouped (Panels / Teams / People / …) so one big library can't read as the whole
+   answer. The count appears only when a group was capped. */
+.navsearch-group {
+  display: flex; align-items: center; gap: 8px; padding: 8px 9px 4px;
+  font-size: 9.5px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--muted);
+}
+.navsearch-group + .navsearch-group { padding-top: 4px; }
+.navsearch-more { margin-left: auto; font-weight: 600; letter-spacing: .02em; text-transform: none; opacity: .8; }
+.navsearch-item {
+  display: flex; align-items: center; gap: 8px; width: 100%; text-align: left;
+  padding: 6px 9px; border: 0; border-radius: 7px; background: transparent;
+  color: var(--text); font: inherit; font-size: 12.5px; cursor: pointer;
+}
+.navsearch-item:hover, .navsearch-item.is-active { background: var(--surface2); }
+.navsearch-item.is-active { box-shadow: inset 2px 0 0 var(--accent, #6366f1); }
+.navsearch-item b { font-weight: 700; }
+/* Name over a dim second line (the team a player is on, the scene a source lives in). Both
+   truncate rather than wrap — a long clip filename must not push the section chip off the row. */
+.navsearch-main { display: flex; flex-direction: column; gap: 1px; min-width: 0; flex: 1; }
+.navsearch-main > b, .navsearch-sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.navsearch-sub { font-style: normal; font-size: 10.5px; color: var(--muted); }
+.navsearch-item mark {
+  background: transparent; color: var(--accent, #6366f1); font-weight: 800; padding: 0;
+}
+.navsearch-item .navsearch-where {
+  margin-left: auto; flex-shrink: 0; font-size: 10.5px; font-weight: 700;
+  letter-spacing: .04em; text-transform: uppercase; color: var(--muted);
+}
+.navsearch-empty { padding: 12px 10px; font-size: 12px; color: var(--muted); }
+/* Keyboard cursor for result lists driven by NESearch.bindListNav (Twitch categories, org member
+   search, …). Those lists each style hover their own way, so this only adds the selection ring. */
+.is-kbd-active {
+  background: var(--surface2) !important;
+  box-shadow: inset 2px 0 0 var(--accent, #6366f1);
+}
+/* Collapsed rail: the input has no room — the icon alone stays as an affordance, and clicking
+   the row expands the sidebar (handled in JS) rather than leaving a dead 66px box. */
+.app-shell.collapsed .navsearch-input { padding: 7px 6px 7px 22px; font-size: 0; }
+.app-shell.collapsed .navsearch-kbd { display: none; }
 
 /* ════════════════════════════ Swap sidebar sides (per-monitor preference) ════════════════════════════ */
 body.sides-swapped .app-shell .sidebar { order: 3; }
@@ -7925,6 +8016,76 @@ body.sides-swapped .qrail-head { flex-direction: row-reverse; }
    team picker) or a compact status readout, shown one at a time above the shared Settings button. */
 .gfx-front-panel { display:flex; flex-direction:column; gap:12px; }
 .gfx-popout-summary-btn { align-self:flex-start; font-weight:800; letter-spacing:.02em; padding:8px 22px; }
+
+/* ── Bracket front panel (.bkp) ────────────────────────────────────────────
+   Control-first layout: a status header that answers "what is on air and how
+   fresh is it", an alert bar that only exists when something is wrong, the
+   live stage/pool/view rows, then folded set-once sections. Everything sits on
+   cards so the live rows read as one block instead of a wall of loose fields. */
+.bkp { gap:10px; }
+
+.bkp-status { display:flex; align-items:center; gap:12px; flex-wrap:wrap;
+  padding:11px 13px; border:1px solid var(--border); border-radius:10px;
+  background:linear-gradient(180deg, rgba(255,255,255,.035), rgba(255,255,255,0)); }
+.bkp-status.is-empty { color:var(--muted); font-size:12.5px; }
+.bkp-st-text { flex:1 1 240px; min-width:0; display:flex; flex-direction:column; gap:4px; }
+.bkp-st-main { display:flex; align-items:center; gap:8px; flex-wrap:wrap; min-width:0; }
+.bkp-st-name { font-size:14px; font-weight:800; color:var(--text); letter-spacing:.01em;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:100%; }
+.bkp-st-meta { display:flex; align-items:center; gap:7px; font-size:11.5px; color:var(--muted); flex-wrap:wrap; }
+.bkp-st-meta .bkp-sep { opacity:.45; }
+.bkp-st-actions { display:flex; align-items:center; gap:6px; margin-left:auto; }
+.bkp-badge { font-size:10px; font-weight:800; letter-spacing:.06em; text-transform:uppercase;
+  padding:3px 7px; border-radius:5px; border:1px solid var(--border); color:var(--muted);
+  background:var(--surface2); white-space:nowrap; }
+.bkp-badge.is-src { border-color:rgba(96,165,250,.45); color:#93c5fd; background:rgba(96,165,250,.12); }
+.bkp-badge.is-custom { border-color:rgba(74,222,128,.45); color:#86efac; background:rgba(74,222,128,.12); }
+.bkp-badge.is-onair { border-color:rgba(74,222,128,.55); color:#4ade80; background:rgba(74,222,128,.16); }
+.bkp-badge.is-stale { border-color:rgba(251,191,36,.45); color:#fbbf24; background:rgba(251,191,36,.10); }
+
+/* Only rendered when the panel would otherwise mislead — never decorative. */
+.bkp-alert { display:flex; align-items:center; gap:10px; flex-wrap:wrap;
+  padding:10px 13px; border-radius:10px; font-size:12.5px; line-height:1.45;
+  border:1px solid rgba(251,191,36,.4); background:rgba(251,191,36,.09); color:#fcd34d; }
+.bkp-alert.is-bad { border-color:rgba(245,101,101,.45); background:rgba(245,101,101,.10); color:#fca5a5; }
+.bkp-alert strong { color:inherit; }
+.bkp-alert .btn { margin-left:auto; flex-shrink:0; }
+.bkp-inline-warn { margin:8px 0 0; padding:8px 10px; border-radius:8px; font-size:12px; line-height:1.45;
+  border:1px solid rgba(251,191,36,.4); background:rgba(251,191,36,.09); color:#fcd34d; }
+
+.bkp-live { display:flex; flex-direction:column; gap:9px;
+  padding:11px 13px; border:1px solid var(--border); border-radius:10px; background:var(--surface2); }
+.bkp-row { display:flex; align-items:flex-start; gap:10px; }
+.bkp-lbl { flex:0 0 62px; padding-top:5px; font-size:10px; font-weight:800; letter-spacing:.09em;
+  text-transform:uppercase; color:var(--muted); }
+.bkp-chips { display:flex; align-items:center; gap:6px; flex-wrap:wrap; flex:1; min-width:0; }
+.bkp-find { gap:6px; }
+.bkp-find .input-text { flex:1; min-width:120px; max-width:none; font-size:12px; }
+/* Chips carry a second line (a phase's format, a pool's size) — the producer picking
+   "Day 3" mid-show should not have to remember it is the swiss stage. */
+.bk-view-chip .bkp-chip-sub { display:block; font-size:9.5px; font-weight:700; letter-spacing:.05em;
+  text-transform:uppercase; opacity:.6; margin-top:1px; }
+
+.bkp-fold { border:1px solid var(--border); border-radius:10px; background:var(--surface2); overflow:hidden; }
+.bkp-fold > summary { cursor:pointer; list-style:none; display:flex; align-items:center; gap:10px;
+  padding:9px 13px; user-select:none; }
+.bkp-fold > summary::-webkit-details-marker { display:none; }
+/* Border triangle, not a '▸' glyph — the panel's font stack renders that as a stray dot. */
+.bkp-fold > summary::before { content:''; flex:0 0 auto; width:0; height:0;
+  border-left:5px solid var(--muted); border-top:4px solid transparent; border-bottom:4px solid transparent;
+  transition:transform .15s ease; transform-origin:35% 50%; }
+.bkp-fold[open] > summary::before { transform:rotate(90deg); }
+.bkp-fold > summary:hover { background:rgba(255,255,255,.03); }
+.bkp-fold-t { font-size:10px; font-weight:800; letter-spacing:.11em; text-transform:uppercase; color:var(--text); }
+.bkp-fold-sub { font-size:11.5px; color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.bkp-fold-body { padding:4px 13px 13px; display:flex; flex-direction:column; gap:9px; border-top:1px solid var(--border); padding-top:12px; }
+.bkp-toggles { display:flex; align-items:center; gap:16px; flex-wrap:wrap; }
+.bkp-fold-body .gfx-src-tabs { display:flex; }
+.bkp-fold-body #gfx-bkt-mformat { display:inline-flex; }
+@media (max-width: 700px) {
+  .bkp-row { flex-direction:column; gap:4px; }
+  .bkp-lbl { flex:none; padding-top:0; }
+}
 .gfx-pos-row { display:flex; align-items:baseline; gap:10px; font-size:13px; }
 .gfx-pos-label { font-size:10px; font-weight:800; letter-spacing:.07em; text-transform:uppercase; color:var(--muted); min-width:84px; flex-shrink:0; }
 .gfx-pos-value { color:var(--text); font-weight:600; }
@@ -8015,10 +8176,35 @@ body.sides-swapped .qrail-head { flex-direction: row-reverse; }
 .gfx-fp-mv:hover { color:var(--text); background:var(--surface); }
 .gfx-fp-rm:hover { color:var(--red,#f56565); background:var(--surface); }
 .gfx-board { display:grid; grid-template-columns:repeat(auto-fill,minmax(168px,1fr)); gap:8px; }
-.gfx-card { display:flex; align-items:center; gap:8px; padding:8px 10px; border-radius:9px; background:var(--surface2); border:1px solid var(--border); }
-.gfx-card.on { border-color:rgba(34,197,94,.5); background:rgba(34,197,94,.08); }
+.gfx-card { display:flex; align-items:center; gap:8px; padding:8px 10px; border-radius:9px; background:var(--surface2); border:1px solid var(--border); transition:border-color .12s, background .12s; }
+/* Off-air cards are deliberately quiet so the live ones carry all the visual weight — with 16
+   near-identical cards, "which are live" has to be readable in peripheral vision, not by hunting
+   for a small dot. */
+.gfx-card:not(.on) .gfx-name { color:var(--muted); font-weight:500; }
+.gfx-card.on { border-color:var(--ok); background:rgba(34,197,94,.14); box-shadow:inset 3px 0 0 var(--ok); }
+.gfx-card.on .gfx-name { color:var(--text); font-weight:700; letter-spacing:.01em; }
+.gfx-card-editable { cursor:pointer; }
+.gfx-card-editable:hover { border-color:var(--cp-accent); background:var(--surface); }
+.gfx-card-editable:hover .gfx-name { color:var(--text); }
 .gfx-dot { width:8px; height:8px; border-radius:50%; background:#555; flex-shrink:0; }
 .gfx-card.on .gfx-dot { background:var(--ok); box-shadow:0 0 7px var(--ok)88; }
+
+/* "Now on air" strip — live graphics only, above the full board. */
+.gfx-live-now { display:flex; align-items:center; flex-wrap:wrap; gap:8px; margin:0 0 10px;
+  padding:9px 12px; border-radius:10px; background:rgba(34,197,94,.07); border:1px solid rgba(34,197,94,.32); }
+.gfx-live-now.is-empty { background:var(--surface2); border-color:var(--border); border-style:dashed; padding:7px 12px; }
+.gfx-live-now-label { display:inline-flex; align-items:center; gap:6px; font-size:10px; font-weight:800;
+  letter-spacing:.09em; text-transform:uppercase; color:var(--ok); }
+.gfx-live-now-count { display:inline-flex; align-items:center; justify-content:center; min-width:16px; height:16px;
+  padding:0 4px; border-radius:8px; background:var(--ok); color:#06210f; font-size:10px; font-weight:800; letter-spacing:0; }
+.gfx-live-now-empty { font-size:11px; font-weight:600; color:var(--muted); letter-spacing:.04em; text-transform:uppercase; }
+.gfx-live-chip { display:inline-flex; align-items:center; gap:7px; padding:4px 5px 4px 9px; border-radius:999px;
+  background:var(--surface); border:1px solid rgba(34,197,94,.45); }
+.gfx-live-chip-dot { width:7px; height:7px; border-radius:50%; background:var(--ok); box-shadow:0 0 7px var(--ok); flex-shrink:0; }
+.gfx-live-chip-name { font-size:12px; font-weight:700; color:var(--text); }
+.gfx-live-chip-hide { border:0; border-radius:999px; padding:3px 9px; cursor:pointer;
+  background:var(--surface2); color:var(--muted); font-size:10px; font-weight:700; letter-spacing:.05em; text-transform:uppercase; }
+.gfx-live-chip-hide:hover { background:var(--red,#f56565); color:#fff; }
 .gfx-name { flex:1; font-size:12px; font-weight:600; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .gfx-toggle { flex-shrink:0; }
 .deck-grid.deck-editing .deck-tile-key { display:none; }
@@ -8575,11 +8761,11 @@ body.role-viewonly #tab-ajustes, body.role-viewonly #tab-integrations { display:
 
 /* Topbar update chip — visible only when an update is available/downloading/ready */
 .topbar-update-chip { display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 12px;
-  border-radius: 999px; border: 1px solid color-mix(in srgb, var(--cp-accent, #7C3AED) 55%, transparent);
-  background: color-mix(in srgb, var(--cp-accent, #7C3AED) 14%, transparent);
+  border-radius: 999px; border: 1px solid rgba(124,58,237,0.55);
+  background: rgba(124,58,237,0.14);
   color: var(--text, #fff); font-size: 11px; font-weight: 800; font-family: inherit; cursor: pointer;
   letter-spacing: .02em; white-space: nowrap; }
-.topbar-update-chip:hover { background: color-mix(in srgb, var(--cp-accent, #7C3AED) 24%, transparent); }
+.topbar-update-chip:hover { background: rgba(124,58,237,0.24); }
 .tuc-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--cp-accent, #7C3AED);
   box-shadow: 0 0 6px var(--cp-accent, #7C3AED); flex-shrink: 0; }
 
@@ -8950,6 +9136,7 @@ body.perf-noanim *, body.perf-noanim *::before, body.perf-noanim *::after {
 .int-card-logo.mono-obs   { background: linear-gradient(135deg, #1f2937, #111827); }
 .int-card-logo.mono-vmix  { background: linear-gradient(135deg, #14532d, #052e16); }
 .int-card-logo.mono-nxgen { background: linear-gradient(135deg, #7c2d12, #431407); }
+.int-card-logo.mono-faceit { background: linear-gradient(135deg, #ff5500, #7c2900); }
 .int-card-logo.mono-vdo   { background: linear-gradient(135deg, #0c4a6e, #082f49); }
 .int-card-logo.mono-rl    { background: linear-gradient(135deg, #1d4ed8, #1e3a8a); }
 .int-card-logo.mono-sheets { background: linear-gradient(135deg, #0f9d58, #0b6e3c); }
@@ -9020,7 +9207,7 @@ body.perf-noanim *, body.perf-noanim *::before, body.perf-noanim *::after {
   background: var(--white-a04); border: 1px solid var(--border); transition: color .12s, border-color .12s, background .12s; }
 .td-opt:hover { color: var(--text); }
 .td-opt input { accent-color: var(--cp-accent); margin: 0; cursor: pointer; }
-.td-opt:has(input:checked) { color: var(--text); border-color: color-mix(in srgb, var(--cp-accent) 55%, transparent); background: color-mix(in srgb, var(--cp-accent) 14%, transparent); }
+.td-opt:has(input:checked) { color: var(--text); border-color: rgba(124,58,237,0.55); background: rgba(124,58,237,0.14); }
 
 .td-section { display: flex; flex-direction: column; gap: 8px; }
 .td-lbl-hint { font-weight: 500; text-transform: none; letter-spacing: 0; color: var(--muted); opacity: .7; margin-left: 8px; }
@@ -9148,3 +9335,817 @@ body.perf-noanim *, body.perf-noanim *::before, body.perf-noanim *::after {
 .switch.sw-xs { transform:scale(.8); transform-origin:center; }
 .cf-danger { color:#f87171 !important; }
 .cf-danger:hover { background:rgba(248,113,113,.12) !important; }
+
+/* Sidebar "More" toggle (nav-simplify.js) — inherits .nav-item layout but reads as a control
+   rather than another page: muted, lighter weight, and set apart by a hairline rule. */
+.nav-more-toggle {
+  opacity: .62;
+  font-weight: 600;
+  margin-top: 4px;
+  border-top: 1px solid var(--white-a05, rgba(255, 255, 255, .05));
+  border-radius: 0 0 8px 8px;
+}
+.nav-more-toggle:hover { opacity: 1; }
+.nav-more-toggle .nav-ico svg { opacity: .8; }
+
+/* ── OBS-style Settings: left category rail + right content pane ───────────── */
+.set-shell { display: flex; gap: 20px; align-items: flex-start; }
+.set-rail {
+  position: sticky; top: 0; flex: 0 0 188px; display: flex; flex-direction: column; gap: 2px;
+  padding: 5px; background: var(--surface2); border: 1px solid var(--border); border-radius: 10px;
+}
+.set-rail-btn {
+  display: block; width: 100%; text-align: left; padding: 9px 12px; border: 0; background: transparent;
+  color: var(--muted); font: inherit; font-size: 13px; border-radius: 7px; cursor: pointer;
+  transition: background .12s, color .12s;
+}
+.set-rail-btn:hover { background: var(--surface); color: var(--text); }
+.set-rail-btn.active { background: var(--cp-accent); color: #fff; font-weight: 600; }
+.set-content { flex: 1 1 auto; min-width: 0; }
+.set-content > .section:first-child { margin-top: 0; }
+/* Settings as an OBS-style modal overlay (main window). In a popped-out window the .as-modal class is
+   NOT added, so the box chrome collapses and Settings renders as a normal full page. */
+#tab-ajustes-content.as-modal {
+  position: fixed; inset: 0; z-index: 3000; display: none;
+  align-items: flex-start; justify-content: center;
+  background: rgba(3, 6, 12, .62); padding: 4vh 16px; overflow-y: auto;
+}
+#tab-ajustes-content.as-modal.open { display: flex; }
+.as-modal-box {
+  width: min(1060px, 96vw); max-height: 92vh; overflow-y: auto;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 14px;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, .55); padding: 20px 24px 26px;
+}
+.as-modal-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; margin-bottom: 16px; }
+.as-modal-head h1 { margin: 0; }
+.as-modal-sub { margin: 3px 0 0; color: var(--muted); font-size: 12px; max-width: 620px; }
+.as-modal-tools { display: flex; gap: 8px; align-items: center; flex: 0 0 auto; }
+.as-modal-x { border: 0; background: transparent; color: var(--muted); font-size: 18px; line-height: 1; cursor: pointer; padding: 5px 9px; border-radius: 6px; }
+.as-modal-x:hover { background: var(--surface2); color: var(--text); }
+/* Not a modal (popped-out window / fallback): strip the box chrome + hide the modal-only tools. */
+#tab-ajustes-content:not(.as-modal) .as-modal-box { border: 0; padding: 0; max-height: none; box-shadow: none; background: transparent; width: auto; overflow: visible; }
+#tab-ajustes-content:not(.as-modal) .as-modal-tools { display: none; }
+@media (max-width: 820px) {
+  .set-shell { flex-direction: column; }
+  .set-rail { flex-direction: row; flex-wrap: wrap; position: static; width: 100%; }
+  .set-rail-btn { width: auto; }
+}
+
+/* Sub-nav progressive disclosure (nav-simplify.js).
+   .subnav-collapsed hides via a CLASS so tabs that manage their own inline display:none
+   (e.g. #lg2-tab-ballchasing, Rocket League only) are never accidentally revealed. */
+.subnav-collapsed { display: none !important; }
+.subnav-more {
+  background: transparent;
+  border: 1px dashed var(--white-a05, rgba(255, 255, 255, .12));
+  border-radius: 8px;
+  color: var(--muted);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  padding: 6px 12px;
+  margin-left: 4px;
+  white-space: nowrap;
+  transition: background .14s, color .14s, border-color .14s;
+}
+.subnav-more:hover {
+  background: var(--white-a05, rgba(255, 255, 255, .05));
+  border-color: var(--white-a05, rgba(255, 255, 255, .2));
+  color: var(--text, #e8eaf0);
+}
+
+/* ── Seeding cockpit ───────────────────────────────────────────────────────
+   Minimal by default, complete on inspection. The command strip carries the only always-relevant
+   controls; the board carries the decision. Everything else lives behind Setup. */
+.seed-cmd { padding: 10px 14px; border-bottom: 1px solid var(--border); background: rgba(255,255,255,.015); }
+.seed-cmd-row { display: flex; align-items: center; gap: 14px; }
+.seed-cmd-go { min-width: 92px; font-weight: 700; letter-spacing: .02em; }
+.seed-cmd-mid { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 5px; }
+.seed-cmd-line { font-size: 11.5px; color: var(--text); line-height: 1.45; }
+.seed-cmd-right { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.seed-auto-warn { color: #d69e2e; }
+
+/* Stage readout — state, not steps */
+.seed-cmd-stages { display: flex; flex-wrap: wrap; gap: 6px; }
+.seed-stage {
+  font-size: 10px; letter-spacing: .02em; padding: 2px 8px; border-radius: 10px;
+  border: 1px solid var(--border); color: var(--muted); white-space: nowrap; cursor: help;
+}
+.seed-stage b { color: var(--text); font-weight: 700; }
+.seed-stage-ok   { border-color: rgba(72,187,120,.35); }
+.seed-stage-ok b { color: #48bb78; }
+.seed-stage-warn { border-color: rgba(214,158,46,.4); }
+.seed-stage-warn b { color: #d69e2e; }
+.seed-stage-idle { opacity: .75; }
+
+/* Skill <-> Results balance */
+.seed-seg { display: inline-flex; border: 1px solid var(--border); border-radius: 7px; overflow: hidden; }
+.seed-seg-btn {
+  background: none; border: none; padding: 5px 11px; font-size: 11px; font-weight: 600;
+  color: var(--muted); cursor: pointer; border-right: 1px solid var(--border);
+}
+.seed-seg-btn:last-child { border-right: none; }
+.seed-seg-btn:hover  { background: rgba(255,255,255,.05); color: var(--text); }
+.seed-seg-btn.active { background: var(--cp-accent); color: #fff; }
+#seed-setup-btn.is-on { background: rgba(255,255,255,.09); color: var(--text); }
+
+/* ── Board row ─────────────────────────────────────────────────────────────
+   Collapsed, a row states the whole seeding decision. The per-player rank editor only exists once
+   the row is opened \u2014 24 teams x 3 always-visible rank inputs is what made this unreadable. */
+.seed-team-head {
+  display: grid; grid-template-columns: 18px 30px minmax(0,1fr) minmax(190px, 300px) 16px;
+  align-items: center; gap: 10px; padding: 9px 12px; cursor: pointer;
+}
+.seed-team-head:hover { background: rgba(255,255,255,.03); }
+.seed-num { font-size: 15px; font-weight: 700; color: var(--text); text-align: right; font-variant-numeric: tabular-nums; }
+.seed-grip { color: var(--muted); opacity: .45; cursor: grab; font-size: 11px; }
+.seed-id { min-width: 0; }
+.seed-team-name { font-size: 13.5px; font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.seed-roster { font-size: 10.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 1px; }
+.seed-roster-none { opacity: .6; font-style: italic; }
+.seed-caret { color: var(--muted); font-size: 10px; opacity: .6; }
+
+.seed-metrics { display: flex; flex-direction: column; align-items: flex-end; gap: 3px; min-width: 0; }
+.seed-power { font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums; cursor: help; }
+.seed-power-none { color: var(--muted); font-weight: 500; }
+.seed-adj { font-size: 10.5px; font-weight: 700; margin-left: 6px; font-variant-numeric: tabular-nums; cursor: help; }
+.seed-adj.up   { color: #48bb78; }
+.seed-adj.down { color: #e07a5f; }
+.seed-bar { display: block; width: 100%; height: 3px; border-radius: 2px; background: rgba(255,255,255,.08); overflow: hidden; }
+.seed-bar-fill { display: block; height: 100%; background: var(--cp-accent); border-radius: 2px; }
+.seed-sub { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: flex-end; font-size: 10px; }
+.seed-cf { font-weight: 700; font-variant-numeric: tabular-nums; cursor: help; }
+.seed-warn {
+  color: #d69e2e; border: 1px solid rgba(214,158,46,.35); border-radius: 8px;
+  padding: 0 6px; font-weight: 600; cursor: help;
+}
+.seed-note {
+  color: #4299e1; border: 1px solid rgba(66,153,225,.35); border-radius: 8px;
+  padding: 0 6px; font-weight: 600; cursor: help;
+}
+.seed-team.is-open { background: rgba(255,255,255,.025); }
+.seed-team.is-open .seed-team-head { border-bottom: 1px solid var(--border); }
+
+@media (max-width: 860px) {
+  .seed-cmd-row { flex-wrap: wrap; }
+  .seed-cmd-right { width: 100%; justify-content: space-between; }
+  .seed-team-head { grid-template-columns: 18px 26px minmax(0,1fr) 16px; row-gap: 6px; }
+  .seed-metrics { grid-column: 3; align-items: flex-start; }
+  .seed-sub { justify-content: flex-start; }
+}
+
+/* ── Setup drawer ──────────────────────────────────────────────────────────
+   The sidebar was a 200px column wedged permanently beside the board: too narrow for its own
+   labels, so everything wrapped, and it stole width from the only thing that matters. It is now an
+   overlay panel that slides in on demand. Same markup, same wiring, every control still present —
+   it just stops competing with the board for space. */
+#seeding-studio .seed-studio-layout { display: block; }
+#seeding-studio .seed-main-col { width: 100%; min-width: 0; }
+
+#seeding-studio .seed-sidebar,
+#seeding-studio.seed-adv-off .seed-sidebar {
+  display: flex;
+  position: fixed; top: 0; right: 0; bottom: 0;
+  width: min(390px, 94vw); z-index: 60;
+  padding: 14px 16px 48px; gap: 4px;
+  background: var(--surface2); border-left: 1px solid var(--border); border-right: none;
+  box-shadow: -20px 0 52px rgba(0,0,0,.55);
+  overflow-y: auto; overscroll-behavior: contain;
+  transform: translateX(101%); transition: transform .18s ease;
+}
+#seeding-studio:not(.seed-adv-off) .seed-sidebar { transform: none; }
+
+.seed-setup-backdrop {
+  position: fixed; inset: 0; z-index: 59; background: rgba(0,0,0,.45);
+  opacity: 0; pointer-events: none; transition: opacity .18s ease;
+}
+#seeding-studio:not(.seed-adv-off) ~ .seed-setup-backdrop,
+#seeding-studio:not(.seed-adv-off) .seed-setup-backdrop { opacity: 1; pointer-events: auto; }
+
+.seed-setup-hd {
+  display: flex; align-items: center; justify-content: space-between;
+  padding-bottom: 10px; margin-bottom: 6px; border-bottom: 1px solid var(--border);
+  font-size: 13px; font-weight: 700; letter-spacing: .02em;
+}
+/* The step numbers described a six-stage walk that no longer exists — the strip does the work and
+   this is a settings panel. Numbering settings makes them look mandatory. */
+.seed-sidebar .seed-sb-step { display: none; }
+.seed-sidebar .seed-sb-hd {
+  font-size: 10px; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--muted); font-weight: 700; margin-top: 14px;
+}
+.seed-sidebar .seed-sb-sec:first-of-type .seed-sb-hd { margin-top: 4px; }
+.seed-sidebar .seed-sb-lbl { font-size: 10.5px; line-height: 1.5; }
+
+/* ── Board, cleaned ────────────────────────────────────────────────────────
+   Every row was its own grid, so the metrics column sized to that row's own content and the
+   numbers, bars and chips landed at a different x on every line. Fixed track widths line the whole
+   board up. */
+.seed-team-head {
+  grid-template-columns: 16px 26px minmax(0, 1fr) 92px 128px 14px;
+  gap: 12px; padding: 10px 14px; align-items: center;
+}
+.seed-team-name { font-size: 13px; font-weight: 600; }
+.seed-roster { font-size: 10.5px; }
+
+/* Rating: number and bar in one fixed column, right-aligned, so they read as a single scale. */
+.seed-metrics { display: block; text-align: right; }
+.seed-power { font-size: 16px; line-height: 1.1; }
+.seed-adj { font-size: 10px; margin-left: 5px; }
+.seed-bar { margin-top: 5px; height: 3px; }
+
+/* Evidence chips sit in their own fixed column, left-aligned so they stack cleanly down the board
+   instead of ragging off the right edge. */
+.seed-sub {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 3px;
+  justify-content: center; font-size: 9.5px;
+}
+.seed-sub-row { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
+
+/* Quieter chips. These are annotations on a number, not buttons. */
+.seed-basis {
+  font-size: 9px; font-weight: 600; letter-spacing: .03em; text-transform: none;
+  padding: 1px 6px; border-radius: 4px; background: none;
+  border: 1px solid var(--border); color: var(--muted);
+}
+.seed-basis-placements { color: #7ea9d8; border-color: rgba(126,169,216,.3); }
+.seed-basis-ranks      { color: #9d8fd0; border-color: rgba(157,143,208,.3); }
+.seed-basis-none       { color: #7a8290; border-color: rgba(122,130,144,.3); }
+.seed-cf   { font-size: 9.5px; font-weight: 600; opacity: .85; }
+.seed-warn, .seed-note { font-size: 9px; font-weight: 500; padding: 0 5px; border-radius: 4px; }
+
+@media (max-width: 980px) {
+  .seed-team-head { grid-template-columns: 16px 24px minmax(0,1fr) 84px 14px; row-gap: 6px; }
+  .seed-sub { grid-column: 3 / span 2; flex-direction: row; flex-wrap: wrap; }
+}
+
+/* ── Board density ─────────────────────────────────────────────────────────
+   The original card treatment (rounded panel, border, margin per team) cost roughly 85px a row, so
+   a 35-team field became five screens of scrolling. A seed board is a list you compare down, not a
+   stack of cards: flat rows, one hairline between them, ~40px each. */
+#seeding-studio .seed-list { display: block; padding: 0; }
+#seeding-studio .seed-team {
+  background: none; border: none; border-radius: 0; margin: 0; padding: 0;
+  border-bottom: 1px solid rgba(255,255,255,.055);
+}
+#seeding-studio .seed-team:hover { background: rgba(255,255,255,.022); }
+#seeding-studio .seed-team.is-open { background: rgba(255,255,255,.04); }
+#seeding-studio .seed-team-head { padding: 7px 14px; }
+#seeding-studio .seed-team.dragging { opacity: .45; }
+#seeding-studio .seed-team.drag-over { box-shadow: inset 0 2px 0 var(--cp-accent); }
+
+/* Top three carry the weight of the bracket — worth being able to find without reading. */
+#seeding-studio .seed-team:nth-child(-n+3) .seed-num { color: var(--cp-accent); }
+
+/* ── Board grid, final ─────────────────────────────────────────────────────
+   Name and rating used to sit at opposite ends of a 600px void. The bar now occupies that space,
+   which both fills it and turns the column into the thing a seed board is actually for: seeing the
+   gaps between teams without reading a single number. */
+#seeding-studio .seed-team-head {
+  grid-template-columns: 14px 26px minmax(120px, 1fr) minmax(90px, 260px) 74px 158px 12px;
+  gap: 10px;
+}
+#seeding-studio .seed-bar {
+  width: 100%; height: 6px; border-radius: 3px; margin: 0;
+  background: rgba(255,255,255,.06);
+}
+#seeding-studio .seed-bar-fill {
+  height: 100%; border-radius: 3px;
+  background: linear-gradient(90deg, rgba(124,58,237,.55), var(--cp-accent));
+}
+#seeding-studio .seed-metrics { text-align: right; white-space: nowrap; }
+#seeding-studio .seed-power { font-size: 14.5px; }
+
+/* Chips on ONE line, always. A wrapping chip made its row taller than its neighbours and broke the
+   scan rhythm that makes a dense list readable. */
+#seeding-studio .seed-sub {
+  flex-direction: row; flex-wrap: nowrap; align-items: center; gap: 5px;
+  overflow: hidden; justify-content: flex-start;
+}
+#seeding-studio .seed-sub > * { flex: 0 0 auto; white-space: nowrap; }
+#seeding-studio .seed-warn,
+#seeding-studio .seed-note { overflow: hidden; text-overflow: ellipsis; max-width: 96px; }
+#seeding-studio .seed-caret { opacity: .35; }
+
+/* Let the BAR absorb the slack, not the name column — the void was inside the name track, so the
+   board still read as two clusters separated by nothing. */
+#seeding-studio .seed-team-head {
+  grid-template-columns: 14px 26px minmax(140px, 300px) minmax(110px, 1fr) 74px 196px 12px;
+}
+
+/* Chips get room for basis + confidence + one warning + one note without ellipsing. */
+#seeding-studio .seed-team-head {
+  grid-template-columns: 14px 26px minmax(140px, 280px) minmax(100px, 1fr) 74px 226px 12px;
+}
+#seeding-studio .seed-warn,
+#seeding-studio .seed-note { max-width: 118px; }
+#seeding-studio .seed-note { max-width: none; }
+#seeding-studio .seed-team-head {
+  grid-template-columns: 14px 26px minmax(140px, 270px) minmax(90px, 1fr) 74px 278px 12px;
+}
+
+/* ─── Match — Lobby (battle-royale games) ────────────────────────────────────
+   Replaces the blue/orange team cards for the games in BR_LOBBY_GAMES. A BR field is 20-50
+   rows the producer scans and types into under time pressure, so this is a dense TABLE, not
+   a card grid — and every control that only makes sense for two sides is hidden alongside it
+   (see .lobby-mode below). */
+#match-teams-section.lobby-mode .teams-grid,
+#match-teams-section.lobby-mode #btn-swap-teams,
+#match-teams-section.lobby-mode #color-mode-seg,
+#match-teams-section.lobby-mode #btn-autofill-stream,
+#match-teams-section.lobby-mode #msp-playercams { display: none !important; }
+
+.mlb-bar {
+  display: flex; align-items: flex-end; gap: 14px; flex-wrap: wrap;
+  padding: 12px 14px; margin-bottom: 12px; border-radius: 8px;
+  background: var(--surface2); border: 1px solid var(--border);
+}
+.mlb-bar-grp { display: flex; flex-direction: column; gap: 4px; }
+.mlb-bar-grp .field-label { margin: 0; }
+.mlb-match-nav { display: flex; align-items: center; gap: 6px; }
+.mlb-count {
+  font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--muted); padding: 6px 12px; border-radius: 999px; background: var(--surface3);
+}
+
+.mlb-add { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+.mlb-sep { width: 1px; height: 24px; background: var(--border); margin: 0 4px; }
+
+/* ── field table ─────────────────────────────────────────────────────────── */
+.mlb-table-wrap {
+  border: 1px solid var(--border); border-radius: 8px; overflow: hidden;
+  background: var(--surface); margin-bottom: 12px;
+}
+#mlb-rows { max-height: 460px; overflow-y: auto; }
+/* 10 columns: rank · entrant · players · drop · PL · EL · VRS · PTS · LIVE · actions.
+   Keep this in lockstep with BOTH the header cells and renderRows() in br-lobby.js — a mismatch
+   silently wraps the actions column onto a second line and doubles every row's height. */
+.mlb-row {
+  display: grid;
+  grid-template-columns: 42px minmax(140px, 1.5fr) minmax(120px, 1.2fr) 130px 58px 58px 50px 64px 64px 72px;
+  align-items: center; gap: 8px; padding: 6px 12px;
+  border-bottom: 1px solid rgba(255,255,255,.05);
+}
+.mlb-row:last-child { border-bottom: none; }
+.mlb-head {
+  position: sticky; top: 0; z-index: 2; padding: 8px 12px;
+  background: var(--surface2); border-bottom: 1px solid var(--border);
+  font-size: 10px; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; color: var(--muted);
+}
+.mlb-row:not(.mlb-head):hover { background: rgba(124,58,237,.06); }
+/* The entrant the observer is spectating — the one row a producer needs to find instantly. */
+.mlb-row.focused { background: rgba(124,58,237,.14); box-shadow: inset 3px 0 0 var(--accent); }
+.mlb-c-rank { font-weight: 700; color: var(--muted); text-align: center; }
+.mlb-c-name input, .mlb-c-players input { width: 100%; }
+.mlb-c-num { text-align: center; }
+.mlb-c-num input { width: 100%; text-align: center; padding-left: 4px; padding-right: 4px; }
+.mlb-c-pts { font-weight: 800; color: var(--text); }
+.mlb-c-act { display: flex; gap: 4px; justify-content: flex-end; }
+.mlb-row .mlb-val { font-weight: 700; color: var(--text); }
+.mlb-row .mlb-val.dim { color: var(--muted); font-weight: 600; }
+/* Placement 1 in the selected match — the row a Victory Royale graphic would fire on. */
+.mlb-row.won .mlb-c-name input { color: #ffd97a; font-weight: 700; }
+.mlb-star { background: none; border: none; cursor: pointer; color: var(--muted); font-size: 15px; line-height: 1; padding: 2px 4px; }
+.mlb-star.on { color: var(--accent); }
+.mlb-del { background: none; border: none; cursor: pointer; color: var(--muted); font-size: 15px; line-height: 1; padding: 2px 4px; }
+.mlb-del:hover { color: var(--danger-2); }
+
+/* ── graphics strip ──────────────────────────────────────────────────────── */
+.mlb-gfx {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 10px 14px; border-radius: 8px;
+  background: var(--surface2); border: 1px solid var(--border);
+}
+.mlb-gfx-lbl { font-size: 11px; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
+.mlb-gfx-btn.live { background: var(--good); border-color: var(--good); color: #062018; }
+
+/* ── comparison builder ──────────────────────────────────────────────────── */
+.mlb-compare {
+  margin-top: 12px; padding: 14px; border-radius: 8px;
+  background: var(--surface2); border: 1px solid var(--border);
+}
+.mlb-cmp-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+.mlb-cmp-sides { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 12px; }
+.mlb-cmp-side { display: flex; flex-direction: column; gap: 6px; }
+.mlb-cmp-rows { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
+.mlb-cmp-row { display: grid; grid-template-columns: 80px minmax(120px,1fr) 80px 28px; gap: 8px; align-items: center; }
+.mlb-cmp-row input { width: 100%; }
+.mlb-cmp-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+@media (max-width: 1200px) {
+  .mlb-row { grid-template-columns: 34px minmax(100px,1.4fr) minmax(90px,1.1fr) 100px 48px 48px 42px 56px 56px 62px; gap: 6px; }
+  .mlb-cmp-sides { grid-template-columns: 1fr; }
+}
+
+/* ─── BR: drop map config (Graphics ▸ Drop Map) ──────────────────────────────
+   POI table + drop assignment sit ON the graphic's own panel, so the whole drop map is built
+   in one place instead of half here and half in Settings ▸ Games. */
+.gfx-brdrop-block {
+  margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border);
+}
+.gfx-brdrop-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+.gfx-brdrop-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+.fn-poi-rows, .fn-drop-rows { display: flex; flex-direction: column; gap: 5px; }
+/* .gfx-scene-body is already the panel's scroll container, so the POI list must NOT scroll inside
+   it — nested scrollbars in a narrow column are miserable to edit a season's landing spots in.
+   The drop list keeps a cap only because a 50-entrant field would otherwise push the POI editor
+   below it out of reach entirely. */
+.fn-drop-rows { max-height: 260px; overflow-y: auto; }
+.fn-poi-row { display: grid; grid-template-columns: minmax(100px,1fr) 66px 66px 26px; gap: 6px; align-items: center; }
+.fn-poi-row input { width: 100%; }
+.fn-drop-row { display: grid; grid-template-columns: minmax(100px,1fr) minmax(110px,1fr); gap: 6px; align-items: center; }
+.fn-drop-row .fn-drop-name {
+  font-size: 12px; font-weight: 600; color: var(--text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.fn-drop-row select { width: 100%; }
+
+/* ─── BR Cups (league page) ──────────────────────────────────────────────────
+   A season of cups, each with its own scoring table, plus the results grid. Dense on purpose:
+   a producer reconciling a cup is comparing many numbers at once. */
+.lg-br-list { display: flex; flex-direction: column; gap: 6px; }
+.lg-br-item {
+  display: grid; grid-template-columns: minmax(140px,1fr) 120px 110px 90px 78px;
+  gap: 10px; align-items: center; padding: 9px 12px; border-radius: 6px; cursor: pointer;
+  background: var(--surface2); border: 1px solid var(--border);
+}
+.lg-br-item:hover { background: var(--surface3); }
+.lg-br-item.active { border-color: var(--accent); background: var(--accent-transparent); }
+/* The cup currently driving the on-air board. */
+.lg-br-item.live { box-shadow: inset 3px 0 0 var(--good); }
+.lg-br-item .lg-br-name { font-weight: 700; color: var(--text); }
+.lg-br-item .lg-br-meta { font-size: 11px; color: var(--muted); }
+.lg-br-item .lg-br-live-pill {
+  font-size: 10px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase;
+  color: #062018; background: var(--good); padding: 2px 8px; border-radius: 999px; justify-self: start;
+}
+
+.lg-br-grid-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
+.lg-br-grid { min-width: 100%; }
+.lg-br-grow { display: grid; align-items: center; gap: 6px; padding: 5px 10px; border-bottom: 1px solid rgba(255,255,255,.05); }
+.lg-br-grow:last-child { border-bottom: none; }
+.lg-br-ghead {
+  position: sticky; top: 0; z-index: 1; background: var(--surface2); border-bottom: 1px solid var(--border);
+  font-size: 10px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; color: var(--muted);
+}
+.lg-br-team { font-size: 12px; font-weight: 600; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Each match cell is placement + elims side by side — the two numbers are always entered together. */
+.lg-br-cell { display: grid; grid-template-columns: 1fr 1fr; gap: 3px; }
+.lg-br-cell input { width: 100%; text-align: center; padding: 3px 2px; font-size: 12px; }
+.lg-br-cell input.pl { border-color: rgba(124,58,237,.35); }
+.lg-br-pts { font-weight: 800; text-align: center; color: var(--text); }
+
+.lg-br-season-tbl { width: 100%; border-collapse: collapse; font-size: 12px; }
+.lg-br-season-tbl th {
+  text-align: left; padding: 7px 10px; font-size: 10px; font-weight: 800; letter-spacing: .12em;
+  text-transform: uppercase; color: var(--muted); border-bottom: 1px solid var(--border);
+}
+.lg-br-season-tbl td { padding: 7px 10px; border-bottom: 1px solid rgba(255,255,255,.05); }
+.lg-br-season-tbl td.num { text-align: center; }
+.lg-br-season-tbl td.pts { font-weight: 800; color: var(--text); text-align: center; }
+.lg-br-season-tbl tr:first-child td { color: #ffd97a; }
+
+/* ─── Match — Lobby cockpit (v2) ─────────────────────────────────────────────
+   Reworked around what a BR producer actually does between games: enter 25-50 results in
+   minutes, know the live projected standings, push graphics. Density and tap-count matter
+   more than whitespace here. */
+.mlb-inline { display: flex; align-items: center; gap: 4px; }
+.mlb-toolbar {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 10px;
+}
+.mlb-entry-seg .seg-btn { font-size: 11px; }
+/* Where results come from — manual / sheet / live feed. Colour-coded because "why isn't the
+   board updating" is nearly always this chip being on the wrong thing. */
+.mlb-src {
+  font-size: 11px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase;
+  padding: 5px 12px; border-radius: 999px; background: var(--surface3); color: var(--muted);
+}
+.mlb-src.sheets { background: rgba(16,185,129,.16); color: #6ee7b7; }
+.mlb-src.live   { background: rgba(239,68,68,.16);  color: #fca5a5; }
+.mlb-matrix-chip { display: inline-flex; align-items: center; gap: 6px; max-width: 230px; }
+.mlb-matrix-chip #mlb-matrix-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mlb-drift {
+  font-size: 9px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase;
+  background: var(--warn); color: #201603; padding: 1px 6px; border-radius: 999px;
+}
+/* LIVE = points if this match ended now. The single most useful number mid-game. */
+.mlb-c-live { color: var(--accent); }
+.mlb-row .mlb-live-val { font-weight: 800; color: var(--accent); }
+.mlb-row .mlb-live-val.dim { color: var(--muted); font-weight: 600; }
+
+/* ── finish-order mode ───────────────────────────────────────────────────── */
+.mlb-finish-bar {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  padding: 9px 14px; margin-bottom: 10px; border-radius: 8px;
+  background: var(--surface2); border: 1px solid var(--border);
+}
+.mlb-finish-next { font-size: 12px; color: var(--muted); }
+.mlb-finish-next strong { color: var(--accent); font-size: 16px; }
+.mlb-finish-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 7px;
+  max-height: 440px; overflow-y: auto; padding: 2px;
+}
+/* Big tap targets — this is used under time pressure, often on a touch panel. */
+.mlb-finish-btn {
+  display: flex; align-items: center; gap: 9px; text-align: left; cursor: pointer;
+  padding: 11px 13px; border-radius: 8px; font: inherit;
+  background: var(--surface2); border: 1px solid var(--border); color: var(--text);
+  transition: background .12s, border-color .12s;
+}
+.mlb-finish-btn:hover { background: var(--surface3); border-color: var(--accent); }
+.mlb-finish-btn .fb-name { flex: 1; font-size: 13px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mlb-finish-btn .fb-place {
+  min-width: 30px; height: 24px; padding: 0 7px; border-radius: 5px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 12px; font-weight: 800; background: var(--surface3); color: var(--muted);
+}
+.mlb-finish-btn.placed { opacity: .55; border-color: rgba(255,255,255,.08); }
+.mlb-finish-btn.placed .fb-place { background: var(--accent); color: #fff; }
+.mlb-finish-btn.won .fb-place { background: #ffd97a; color: #2a1f00; }
+.mlb-finish-btn.won { border-color: #ffd97a; opacity: 1; }
+
+/* ── elims-only mode ─────────────────────────────────────────────────────── */
+.mlb-elims-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 6px;
+  max-height: 440px; overflow-y: auto; padding: 2px;
+}
+.mlb-elims-row {
+  display: grid; grid-template-columns: 1fr 66px; gap: 8px; align-items: center;
+  padding: 5px 10px; border-radius: 6px; background: var(--surface2); border: 1px solid var(--border);
+}
+.mlb-elims-row span { font-size: 12px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mlb-elims-row input { width: 100%; text-align: center; }
+
+/* ── overlay pack ────────────────────────────────────────────────────────── */
+.mlb-pack, .mlb-matrix {
+  margin-top: 12px; padding: 14px; border-radius: 8px;
+  background: var(--surface2); border: 1px solid var(--border);
+}
+.mlb-pack-head, .mlb-mx-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+.mlb-pack-rows { display: flex; flex-direction: column; gap: 5px; }
+.mlb-pack-row { display: grid; grid-template-columns: 150px minmax(200px,1fr) auto auto; gap: 8px; align-items: center; }
+.mlb-pack-row .pk-name { font-size: 12px; font-weight: 700; color: var(--text); }
+.mlb-pack-row .pk-url {
+  font-family: ui-monospace, Consolas, monospace; font-size: 11px; color: var(--muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  background: var(--bg); border: 1px solid var(--border); border-radius: 5px; padding: 4px 8px;
+}
+
+/* ── point matrix editor ─────────────────────────────────────────────────── */
+.mlb-mx-grid { display: grid; grid-template-columns: 220px 1fr; gap: 18px; }
+.mlb-mx-col { display: flex; flex-direction: column; gap: 4px; }
+.mlb-mx-tablehead { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
+.mlb-mx-rows {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 5px;
+  max-height: 260px; overflow-y: auto; padding: 2px;
+}
+.mlb-mx-row { display: grid; grid-template-columns: 34px 1fr 20px; gap: 4px; align-items: center; }
+.mlb-mx-row .mx-place {
+  font-size: 11px; font-weight: 800; color: var(--muted); text-align: right;
+}
+.mlb-mx-row input { width: 100%; text-align: center; padding: 4px 2px; }
+.mlb-mx-mult { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); }
+.mlb-mx-mults {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap: 5px; margin-top: 8px;
+}
+.mlb-mx-mults .mx-mult { display: grid; grid-template-columns: 30px 1fr; gap: 4px; align-items: center; }
+.mlb-mx-mults .mx-mult span { font-size: 10px; font-weight: 800; color: var(--muted); text-align: right; }
+.mlb-mx-mults .mx-mult input { width: 100%; text-align: center; padding: 4px 2px; }
+.mlb-mx-mults .mx-mult input.on { border-color: var(--warn); color: var(--warn); font-weight: 700; }
+.mlb-mx-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 14px; }
+
+@media (max-width: 1200px) {
+  .mlb-mx-grid { grid-template-columns: 1fr; }
+  .mlb-pack-row { grid-template-columns: 1fr; }
+}
+
+/* ── Smash fighter pickers (Match ▸ Teams ▸ Smash, and the Standings placement builder) ──
+   The thumbnail is the resolved fighter's stock icon — instant confirmation that free text
+   like "gnw" or "zss" landed on the right character before it goes on air. */
+.smash-char-pick { display: flex; align-items: center; gap: 7px; margin-top: 6px; }
+.smash-char-pick .input-text { flex: 1 1 auto; min-width: 0; }
+.smash-char-thumb {
+  width: 28px; height: 28px; flex: 0 0 auto; object-fit: contain;
+  filter: drop-shadow(0 1px 3px rgba(0,0,0,.6));
+}
+.smash-char-thumb.is-empty { visibility: hidden; }
+
+/* crew rows get a fighter box under their stock pips */
+.smash-crew-row { flex-wrap: wrap; }
+.smash-crew-char { flex: 1 1 110px; min-width: 90px; height: 26px; font-size: 12px; padding: 2px 7px; }
+.smash-crew-face { width: 22px; height: 22px; flex: 0 0 auto; object-fit: contain; }
+.smash-crew-face.is-empty { visibility: hidden; }
+
+/* Standings ▸ placement-card fighter assignment list */
+.gfx-std-fighters { display: flex; flex-direction: column; gap: 4px; max-height: 260px; overflow-y: auto; }
+.gfx-std-pl-row {
+  display: flex; align-items: center; gap: 7px; padding: 3px 6px; border-radius: 7px;
+  background: rgba(255,255,255,.03); border: 1px solid rgba(255,255,255,.06);
+}
+/* ── Fighter picker popover (Top 8 builder + Match > Teams) ──────────────────
+   Anchored to the focused fighter field by JS; fixed-position so the scrolling panel can't clip it. */
+.smash-pick-pop {
+  position: fixed; z-index: 9000; width: 330px; max-height: 340px; display: flex; flex-direction: column;
+  background: var(--surface2, #1C1C30); border: 1px solid var(--border, rgba(124,58,237,.25));
+  border-radius: 10px; box-shadow: 0 18px 44px rgba(0,0,0,.55); padding: 8px;
+}
+.smash-pick-pop[hidden] { display: none; }
+.smash-pick-search { height: 28px; font-size: 12px; margin-bottom: 7px; flex: 0 0 auto; }
+.smash-pick-grid {
+  flex: 1 1 auto; overflow-y: auto; display: grid; gap: 3px;
+  grid-template-columns: repeat(auto-fill, minmax(58px, 1fr));
+}
+.smash-pick-cell {
+  display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 5px 2px 4px;
+  border-radius: 7px; cursor: pointer; border: 1px solid transparent; background: none;
+}
+.smash-pick-cell:hover, .smash-pick-cell.is-active { background: rgba(255,255,255,.07); border-color: var(--cp-accent, #7C3AED); }
+.smash-pick-cell.is-on { background: rgba(124,58,237,.22); border-color: var(--cp-accent, #7C3AED); }
+.smash-pick-cell img { width: 34px; height: 34px; object-fit: contain; filter: drop-shadow(0 1px 3px rgba(0,0,0,.6)); }
+.smash-pick-cell span {
+  font-size: 9px; font-weight: 600; line-height: 1.1; text-align: center; color: #c9d0e0;
+  max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.smash-pick-empty { padding: 14px 4px; text-align: center; font-size: 12px; color: var(--muted); }
+.smash-pick-none .smash-pick-x { font-size: 22px; line-height: 34px; height: 34px; color: var(--muted); }
+.smash-pick-none:hover .smash-pick-x { color: #f87171; }
+/* the field reads as a picker, not a free-text box -- and must NOT look disabled just because
+   it is readonly (readonly is what stops a half-typed fighter name reaching the overlay) */
+.smash-char-input { cursor: pointer; }
+.smash-char-input:read-only { opacity: 1; color: inherit; background: var(--surface2, #1C1C30); }
+
+/* ── Top 8 builder — a ROW EDITOR, laid out on a grid ─────────────────────────
+   Was a flex row where the name field was `flex: 1 1 0`: on a wide panel it stretched to ~700px
+   while the fighter art sat at 22px, so the row read as mostly empty space with the actual
+   content (who placed where, on which character) squeezed into the ends. Now it's a fixed grid
+   with the name capped, the art big enough to recognise, and the whole list width-limited. */
+/* 8 rows at 42px + gaps fit without an inner scrollbar — the list scrolling INSIDE a page that
+   also scrolled was half the "too much scrolling" problem. */
+.gfx-std-fighters { display: flex; flex-direction: column; gap: 5px; max-height: 392px; overflow-y: auto; padding-right: 4px; }
+.gfx-std-pl-row, .gfx-std-pl-head {
+  display: grid; align-items: center; gap: 10px;
+  grid-template-columns: 18px 46px minmax(120px, 1fr) 210px 26px;
+  max-width: 720px;
+}
+.gfx-std-pl-row {
+  padding: 5px 8px; border-radius: 8px;
+  background: rgba(255,255,255,.035); border: 1px solid rgba(255,255,255,.07);
+  transition: background .12s ease, border-color .12s ease, opacity .12s ease;
+}
+.gfx-std-pl-row:hover { background: rgba(255,255,255,.06); }
+.gfx-std-pl-row.is-dragging { opacity: .4; }
+.gfx-std-pl-row.is-over { border-color: var(--cp-accent, #7C3AED); background: rgba(124,58,237,.14); }
+
+/* drag handle — reordering by dragging is the point; typing placements is the fallback */
+.gfx-std-pl-grip {
+  cursor: grab; color: var(--muted); font-size: 13px; line-height: 1; text-align: center;
+  user-select: none; opacity: .55;
+}
+.gfx-std-pl-row:hover .gfx-std-pl-grip { opacity: 1; }
+.gfx-std-pl-grip:active { cursor: grabbing; }
+
+/* placement chip — the podium reads at a glance instead of 1st looking like 8th */
+.gfx-std-pl-rank {
+  width: 46px; height: 30px; text-align: center; font-weight: 800; font-size: 13px;
+  font-variant-numeric: tabular-nums; color: var(--cp-accent, #7C3AED);
+  background: rgba(124,58,237,.13); border-color: rgba(124,58,237,.3);
+}
+.gfx-std-pl-row.is-1 .gfx-std-pl-rank { color: #f6c352; background: rgba(246,195,82,.15); border-color: rgba(246,195,82,.45); }
+.gfx-std-pl-row.is-2 .gfx-std-pl-rank { color: #cfd6e4; background: rgba(207,214,228,.13); border-color: rgba(207,214,228,.38); }
+.gfx-std-pl-row.is-3 .gfx-std-pl-rank { color: #d19a6a; background: rgba(209,154,106,.14); border-color: rgba(209,154,106,.4); }
+
+.gfx-std-pl-name { min-width: 0; }
+.gfx-std-pl-row .smash-char-pick { margin-top: 0; display: flex; align-items: center; gap: 8px; }
+.gfx-std-pl-row .input-text { height: 30px; font-size: 12.5px; padding: 2px 9px; }
+/* the fighter art IS the board's content — big enough to recognise without opening the picker */
+.gfx-std-pl-row .smash-char-thumb { width: 30px; height: 30px; flex: 0 0 auto; }
+.gfx-std-pl-rm {
+  width: 26px; height: 26px; padding: 0; line-height: 1; font-size: 16px;
+  color: var(--muted); border-radius: 6px;
+}
+.gfx-std-pl-rm:hover { color: #f87171; background: rgba(248,113,113,.12); }
+.gfx-std-pl-actions { display: flex; align-items: center; gap: 8px; margin-top: 10px; max-width: 720px; }
+.gfx-std-pl-head {
+  padding: 0 8px 5px;
+  font-size: 10px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; color: var(--muted);
+}
+
+/* ── color-mix() restored for engines that support it ─────────────────────────────
+   The rules above carry the PRECOMPUTED literal of each mix, because the app ships
+   Electron 18 (Chrome 100), which has no color-mix(). A plain fallback declaration
+   does not help there: these values contain var(), so Chrome 100 keeps the
+   declaration, wins the cascade with it, then fails substitution at computed-value
+   time and leaves the property unset (measured: the tint computes to transparent).
+   Guarding with @supports is what actually works — and it keeps the mixes themeable
+   on OBS's newer CEF and the day Electron is bumped (bumping Electron makes this whole
+   block redundant; it can then be deleted). To add a rule here, put the precomputed
+   literal in the rule above and re-state the color-mix inside this block. Only mixes
+   whose colours resolve at :root are listed — ones built from a per-element var
+   (--tc, --tile-accent, --chip-color, --tt-color) are deliberately left alone, since
+   baking in the var's default would paint one wrong colour everywhere. Keep this block
+   LAST in the file (styles.css is append-ordered). */
+@supports (color: color-mix(in srgb, red 50%, white)) {
+  .pv-btn-wide.on { background: color-mix(in srgb, var(--cp-accent) 22%, transparent); }
+  .rd-driver.is-live .rd-driver-cur { border-color: color-mix(in srgb, var(--cp-accent, #e83a8b) 55%, transparent); background: color-mix(in srgb, var(--cp-accent, #e83a8b) 10%, rgba(0,0,0,.18)); }
+  .rd-row:hover { border-color: color-mix(in srgb, #fff 16%, var(--border)); }
+  .rd-row.rd-cur { background: color-mix(in srgb, var(--cp-accent, #e83a8b) 12%, var(--surface2)); }
+  .brand-pkg-tab.active { background: color-mix(in srgb, var(--cp-accent) 22%, transparent); }
+  .rp-topbar-chip { background: color-mix(in srgb, var(--cp-accent) 14%, transparent); border: 1px solid color-mix(in srgb, var(--cp-accent) 35%, transparent); }
+  #clip-preview-card { border-color: color-mix(in srgb, var(--accent) 32%, var(--border)); box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 14%, transparent), 0 0 22px color-mix(in srgb, var(--accent) 18%, transparent); }
+  .rp-sc-addpl:hover { background: color-mix(in srgb, var(--cp-accent) 16%, transparent); }
+  .md-dropzone.drag-over { background: color-mix(in srgb, var(--cp-accent) 8%, transparent); }
+  .md-dropzone-hint { border: 2px dashed color-mix(in srgb, var(--cp-accent) 55%, transparent); background: color-mix(in srgb, var(--cp-bg, #0c0e14) 78%, transparent); }
+  .wl-field-chip { background: color-mix(in srgb, var(--cp-accent) 18%, transparent); }
+  .wl-solo.is-on { text-shadow: 0 0 9px color-mix(in srgb, var(--cp-accent) 60%, transparent); }
+  .sp-solo-dd-item.is-on { background: color-mix(in srgb, var(--cp-accent) 16%, transparent); }
+  .sp-solo-card.is-on { background: color-mix(in srgb, var(--cp-accent) 14%, transparent); }
+  .bb-cz-chip.is-pinned { background: color-mix(in srgb, var(--cp-accent) 16%, var(--surface2)); }
+  .topbar-update-chip { border: 1px solid color-mix(in srgb, var(--cp-accent, #7C3AED) 55%, transparent); background: color-mix(in srgb, var(--cp-accent, #7C3AED) 14%, transparent); }
+  .topbar-update-chip:hover { background: color-mix(in srgb, var(--cp-accent, #7C3AED) 24%, transparent); }
+  .td-opt:has(input:checked) { border-color: color-mix(in srgb, var(--cp-accent) 55%, transparent); background: color-mix(in srgb, var(--cp-accent) 14%, transparent); }
+}
+
+/* ── Match ▸ Teams: Smash stock countdown ──────────────────────────────────
+   The stepper alone gave no sense of how far through a game a side was. The pips show the whole
+   pool draining — one per stock the side started with (crew size × start stocks in team mode) —
+   and clicking one sets the count straight to it, which is how every stock tracker behaves. */
+.smash-stock-pool { font-size: 12px; color: var(--text-dim); margin-left: -4px; }
+/* SCOPED to .smash-pips — the crew panel has its OWN round .smash-pip rows further up this file,
+   and styles.css is append-ordered, so an unscoped rule here silently restyles those too. */
+.smash-pips { display: inline-flex; align-items: center; gap: 3px; flex-wrap: wrap; margin-left: 8px; }
+.smash-pips .smash-pip {
+  width: 14px; height: 14px; border-radius: 3px; cursor: pointer; padding: 0; flex-shrink: 0;
+  border: 1px solid rgba(255,255,255,.28); background: var(--side, #4b8dff); box-shadow: none;
+  transition: background .15s ease, opacity .15s ease, transform .15s ease;
+}
+.smash-pips .smash-pip:hover { transform: translateY(-1px); }
+.smash-pips .smash-pip.spent { background: transparent; opacity: .5; }
+.smash-pips[data-smash-side="orange"] .smash-pip { --side: #e97139; }
+/* every 4th pip gets a little breathing room so a 12- or 16-stock pool stays countable */
+.smash-pips .smash-pip:nth-child(4n) { margin-right: 6px; }
+
+/* Live match control docked in the scorecard (Pause / Resume match). Sits under Reset series,
+   above the note, and is hidden entirely for games where SetMatchPaused means nothing. */
+.sc-live-ctl { display: flex; margin: 8px 12px 0; }
+.sc-live-ctl .btn { width: 100%; }
+
+/* ── Match ▸ Teams crew header: best-of pills + the competing player's name ────
+   A crew battle's running score is the STOCK countdown; these pills are the set wins, one per
+   game needed (ceil(bestOf/2)). Scoped under .smash-bo-pills so they can't collide with the
+   round .smash-pip crew rows or the square .smash-pips singles row. */
+.smash-bo-pills { display: inline-flex; align-items: center; gap: 4px; }
+.smash-bo-pills .bo-pip {
+  width: 11px; height: 11px; border-radius: 50%; cursor: pointer; padding: 0; flex-shrink: 0;
+  border: 1px solid rgba(255,255,255,.3); background: transparent;
+  transition: background .15s ease, transform .15s ease;
+}
+.smash-bo-pills .bo-pip:hover { transform: translateY(-1px); }
+.smash-bo-pills .bo-pip.won { background: var(--cp-accent, #7C3AED); border-color: transparent; }
+/* the competing player's name, beside their slot number */
+.smash-crew-name {
+  font-size: 12px; font-weight: 600; color: var(--text, #e6ebff);
+  max-width: 116px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex-shrink: 0;
+}
+.smash-crew-name:empty { display: none; }
+.smash-crew-name.is-empty { color: var(--muted); font-style: italic; }
+
+/* ── Top 8: one list, with a live/editing toggle and a push-state chip ────────
+   Replaces the duplicate read-only "On overlay" list that used to sit underneath. */
+.gfx-std-pl-bar { align-items: center; gap: 10px; }
+.gfx-std-pl-hint { margin: 0 0 6px; }
+.gfx-std-show { display: inline-flex; align-items: center; gap: 7px; cursor: pointer;
+                font-size: 12px; font-weight: 600; color: var(--text, #e6ebff); white-space: nowrap; }
+.gfx-std-live-chip {
+  margin-left: auto; font-size: 10px; font-weight: 800; letter-spacing: .09em; text-transform: uppercase;
+  padding: 3px 8px; border-radius: 999px; white-space: nowrap;
+}
+.gfx-std-live-chip.is-live  { color: #6ee7a8; background: rgba(110,231,168,.13); box-shadow: inset 0 0 0 1px rgba(110,231,168,.35); }
+.gfx-std-live-chip.is-dirty { color: #fbbf24; background: rgba(251,191,36,.13); box-shadow: inset 0 0 0 1px rgba(251,191,36,.35); }
+.gfx-std-live-chip.is-off   { color: var(--muted); background: rgba(255,255,255,.05); box-shadow: inset 0 0 0 1px rgba(255,255,255,.12); }
+.gfx-std-live-chip:empty { display: none; }
+/* read-only "what's on the overlay" view of the same list */
+.gfx-std-fighters.is-live-view .gfx-std-pl-row { opacity: .82; background: rgba(110,231,168,.05); border-color: rgba(110,231,168,.2); }
+.gfx-std-fighters.is-live-view .gfx-std-pl-grip,
+.gfx-std-fighters.is-live-view .gfx-std-pl-rm { visibility: hidden; }
+.gfx-std-fighters.is-live-view .input-text { pointer-events: none; }
+
+/* ── Standings header: two columns, not an eight-row stack ───────────────────
+   Source / League / Title / Subtitle / Win-Loss / Board were full-width rows stacked vertically,
+   so the producer had to scroll past all of them before reaching the list they came to edit.
+   Pairing them halves the header's height. The conditional source pickers use `display: contents`
+   so the row INSIDE them becomes the grid cell — JS still shows/hides the wrapper with
+   style.display = '' / 'none', and '' falls back to this rule. */
+.gfx-std-head {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 16px; align-items: center; margin-bottom: 10px;
+}
+.gfx-std-head > .gfx-ctrl-row { margin: 0; min-width: 0; }
+.gfx-std-head > #gfx-std-league-select-wrap,
+.gfx-std-head > #gfx-std-sg-select-wrap,
+.gfx-std-head > #gfx-std-bkt-select-wrap { display: contents; }
+/* the phase hint reads as a footnote to the whole header, not to one cell */
+.gfx-std-head > .field-hint { grid-column: 1 / -1; margin: 0; }
+@media (max-width: 900px) { .gfx-std-head { grid-template-columns: minmax(0, 1fr); } }

@@ -168,11 +168,12 @@ function closeStatsDetail() {
   if (m) m.style.display = 'none';
 }
 
-// Player search
-el('stats-player-search-btn')?.addEventListener('click', async () => {
+// Player search — runs on the button, on Enter, and as you type (debounced).
+async function statsPlayerSearch() {
   const name = el('stats-player-search')?.value?.trim();
   const resultsEl = el('stats-player-results');
-  if (!name || !resultsEl) return;
+  if (!resultsEl) return;
+  if (!name) { resultsEl.style.display = 'none'; resultsEl.innerHTML = ''; return; }
   resultsEl.style.display = '';
   resultsEl.innerHTML = '<p style="color:#888;font-size:13px;">Searching…</p>';
   try {
@@ -195,7 +196,12 @@ el('stats-player-search-btn')?.addEventListener('click', async () => {
     html += '</tbody></table>';
     resultsEl.innerHTML = html;
   } catch (e) { resultsEl.innerHTML = `<p style="color:#f56565;">Error: ${e.message}</p>`; }
-});
+}
+el('stats-player-search-btn')?.addEventListener('click', statsPlayerSearch);
+el('stats-player-search')?.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); statsPlayerSearch(); } });
+// 300ms, and two characters minimum: the backend scans the whole stats table per query, so a
+// one-character search is both slow and useless.
+NESearch.bindBox(el('stats-player-search'), (q) => { if (!q || q.length >= 2) statsPlayerSearch(); }, 300);
 
 el('stats-load-more')?.addEventListener('click', () => loadStatsMatches(false));
 
@@ -205,7 +211,7 @@ let _statsTab = (() => { try { return localStorage.getItem('stats_active_tab') |
 function statsShowTab(tab) {
   _statsTab = tab;
   document.querySelectorAll('#stats-subnav .ev-subnav-btn').forEach((b) => b.classList.toggle('active', b.dataset.stab === tab));
-  ['overview', 'broadcasts', 'audience', 'event', 'players', 'teams', 'sponsors', 'reports'].forEach((t) => { const p = el('stats-panel-' + t); if (p) p.style.display = t === tab ? '' : 'none'; });
+  ['overview', 'broadcasts', 'audience', 'event', 'players', 'teams', 'sponsors', 'reports', 'eventops'].forEach((t) => { const p = el('stats-panel-' + t); if (p) p.style.display = t === tab ? '' : 'none'; });
   if (tab === 'overview') { loadAnalyticsOverview(); loadStatsAggregate(); loadStatsMatches(true); }
   else if (tab === 'broadcasts') loadBroadcasts();
   else if (tab === 'audience') loadAudience();
@@ -214,6 +220,8 @@ function statsShowTab(tab) {
   else if (tab === 'teams') loadStatsTeams();
   else if (tab === 'sponsors') loadAdProof();
   else if (tab === 'reports') loadReports();
+  // Event Ops moved here from ESPORTS (2026-08) — back-office spreadsheet/seed/bracket-mirror tools.
+  else if (tab === 'eventops' && typeof window.eventOpsRender === 'function') window.eventOpsRender();
   try { localStorage.setItem('stats_active_tab', tab); } catch (_) {}
 }
 
@@ -230,10 +238,17 @@ function statsShowTab(tab) {
       const target = btn.dataset.rpmain;
       el('rp-panel-editor').style.display  = target === 'editor'  ? '' : 'none';
       el('rp-panel-exports').style.display = target === 'exports' ? '' : 'none';
-      el('rp-panel-social').style.display  = target === 'social'  ? '' : 'none';
-      if (target === 'social') { socSyncTwitchField(); if (typeof window._socHydratePreset === 'function') window._socHydratePreset(); socRefreshAll(); }
     });
   });
+
+  // Social Export lives on the Social page (Social ▸ Export Graphics) as of 2026-08. Its panel is
+  // shown/hidden by social.js' .social-sub-tab-btn handler; this just hydrates it on open. Exposed
+  // so social.js can call it without reaching into this IIFE's closure.
+  window._socOpenExport = function () {
+    socSyncTwitchField();
+    if (typeof window._socHydratePreset === 'function') window._socHydratePreset();
+    socRefreshAll();
+  };
 
   document.querySelectorAll('.soc-sub-tab').forEach((btn) => {
     btn.addEventListener('click', () => {
@@ -2194,6 +2209,9 @@ async function sgiImportEvent(eventId, tournamentName, gameType) {
 }
 el('sgi-search-go')?.addEventListener('click', sgiSearch);
 el('sgi-search')?.addEventListener('keydown', (e) => { if (e.key === 'Enter') sgiSearch(); });
+// Search as you type as well as on Enter/click. 400ms is long enough that a normal typing burst
+// costs one start.gg call, not one per character.
+NESearch.bindBox(el('sgi-search'), (q) => { if (q.length >= 2) sgiSearch(); }, 400);
 
 async function loadEventAnalytics() {
   const dash = await ensureDashboard();

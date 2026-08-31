@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<!--
+  br-rail.html — compact standings rail that sits over live gameplay, paging through the field a
+  few teams at a time (the ALGS/FNCS broadcast convention). Same source of truth as
+  br-leaderboard.html: state.br.standings, already scored by the server.
+
+  Query params:
+    ?side=left|right   which edge to hug (default right)
+    ?page=N            teams per page (default 5)
+    ?hold=S            seconds each page holds (default 6)
+    ?top=N             only page through the top N teams (default 20; 0 = whole field)
+    ?players=1         page the player elim board instead of team standings
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1920">
+<title>NE Broadcast Suite — BR Rail</title>
+<link rel="stylesheet" href="/fonts.css">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --accent: #055fdb; --accent-2: #4d90ff;
+  --gold: #ffcf5c; --silver: #d3dcec; --bronze: #e0965a;
+  --disp: 'Rajdhani', 'Inter', sans-serif;
+  --main-font: 'Bourgeois', 'Inter', sans-serif;
+}
+html, body { width: 1920px; height: 1080px; overflow: hidden; background: transparent; }
+body { font-family: var(--main-font); color: #eef2f8; }
+
+#rail {
+  position: absolute; top: 210px; width: 430px;
+  background: linear-gradient(180deg, rgba(13,16,23,.93), rgba(13,16,23,.86));
+  border-radius: 6px; overflow: hidden;
+  box-shadow: 0 18px 46px rgba(0,0,0,.5);
+  transition: transform .45s cubic-bezier(.2,.9,.3,1), opacity .35s ease;
+}
+#rail.right { right: 54px; }
+#rail.left  { left: 54px; }
+#rail.off.right { transform: translateX(130%); opacity: 0; }
+#rail.off.left  { transform: translateX(-130%); opacity: 0; }
+
+.cap { height: 3px; background: linear-gradient(90deg, var(--accent), var(--accent-2)); }
+
+.head { display: flex; align-items: center; justify-content: space-between; padding: 11px 15px 9px; }
+.head-l { font-family: var(--disp); font-size: 21px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
+.head-r { font-size: 12px; font-weight: 800; letter-spacing: .18em; text-transform: uppercase; color: rgba(255,255,255,.5); }
+
+#list { padding: 0 9px 11px; }
+.r {
+  display: grid; grid-template-columns: 34px minmax(0,1fr) 52px 58px;
+  align-items: center; gap: 8px;
+  padding: 8px 8px; border-radius: 4px;
+  background: rgba(255,255,255,.035);
+  margin-bottom: 5px;
+  animation: rIn .32s ease both;
+}
+@keyframes rIn { from { opacity: 0; transform: translateY(7px); } to { opacity: 1; transform: none; } }
+.r:last-child { margin-bottom: 0; }
+.r.r1 { background: linear-gradient(90deg, rgba(255,207,92,.2), rgba(255,255,255,.03)); }
+.r.r2 { background: linear-gradient(90deg, rgba(211,220,236,.14), rgba(255,255,255,.03)); }
+.r.r3 { background: linear-gradient(90deg, rgba(224,150,90,.14), rgba(255,255,255,.03)); }
+
+.rk { font-family: var(--disp); font-size: 24px; font-weight: 700; text-align: center; line-height: 1; }
+.r1 .rk { color: var(--gold); } .r2 .rk { color: var(--silver); } .r3 .rk { color: var(--bronze); }
+.tm { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.tm img { width: 26px; height: 26px; object-fit: contain; flex-shrink: 0; }
+.tm span { font-family: var(--disp); font-size: 21px; font-weight: 600; letter-spacing: .01em;
+  text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.el { font-family: var(--disp); font-size: 18px; font-weight: 600; text-align: right; color: rgba(255,255,255,.6); }
+.pt { font-family: var(--disp); font-size: 26px; font-weight: 700; text-align: right; }
+
+.dots { display: flex; gap: 5px; justify-content: center; padding: 0 0 10px; }
+.dot { width: 5px; height: 5px; border-radius: 50%; background: rgba(255,255,255,.2); transition: background .2s; }
+.dot.on { background: var(--accent-2); }
+</style>
+</head>
+<body>
+  <div id="rail" class="right off">
+    <div class="cap"></div>
+    <div class="head"><span id="head-l" class="head-l">Standings</span><span id="head-r" class="head-r"></span></div>
+    <div id="list"></div>
+    <div id="dots" class="dots"></div>
+  </div>
+
+<script src="/scene-base.js"></script>
+<script>
+(function () {
+  const Q = new URLSearchParams(location.search);
+  const SIDE     = Q.get('side') === 'left' ? 'left' : 'right';
+  const PAGE     = Math.max(2, Math.min(12, parseInt(Q.get('page'), 10) || 5));
+  const HOLD_MS  = Math.max(2, Math.min(60, parseInt(Q.get('hold'), 10) || 6)) * 1000;
+  const TOP      = Math.max(0, Math.min(100, Q.get('top') == null ? 20 : parseInt(Q.get('top'), 10) || 0));
+  const PLAYERS  = Q.get('players') === '1';
+  const el = (id) => document.getElementById(id);
+
+  document.getElementById('rail').classList.add(SIDE);
+
+  function logoFor(data, name) {
+    const want = (name || '').trim().toLowerCase();
+    if (!want) return '';
+    const hit = (data.savedTeams || []).find((t) => (t.name || '').trim().toLowerCase() === want);
+    return (hit && hit.logo) || '';
+  }
+
+  // The paging timer is deliberately NOT restarted on every state broadcast — full_state fires on
+  // every score tick, and re-arming there would freeze the rail on page 1 forever.
+  let _rows = [], _data = {}, _page = 0, _timer = null, _sig = '';
+
+  function pages() { return Math.max(1, Math.ceil(_rows.length / PAGE)); }
+
+  function paint() {
+    const list = el('list');
+    const start = _page * PAGE;
+    const slice = _rows.slice(start, start + PAGE);
+    list.innerHTML = '';
+    slice.forEach((t, i) => {
+      const row = document.createElement('div');
+      row.className = 'r' + (t.rank <= 3 ? ' r' + t.rank : '');
+      row.style.animationDelay = (i * 0.04) + 's';
+      const logo = PLAYERS ? '' : logoFor(_data, t.name);
+      row.innerHTML = `<div class="rk">${t.rank}</div>`
+        + `<div class="tm">${logo ? `<img src="${logo}" alt="" onerror="this.style.display='none'">` : ''}`
+        + `<span>${(t.name || '').toUpperCase().replace(/</g, '&lt;')}</span></div>`
+        + `<div class="el">${PLAYERS ? '' : t.elims}</div>`
+        + `<div class="pt">${PLAYERS ? t.elims : t.pts}</div>`;
+      list.appendChild(row);
+    });
+
+    const dots = el('dots');
+    dots.innerHTML = '';
+    if (pages() > 1) {
+      for (let i = 0; i < pages(); i++) {
+        const d = document.createElement('div');
+        d.className = 'dot' + (i === _page ? ' on' : '');
+        dots.appendChild(d);
+      }
+    }
+    const from = start + 1, to = Math.min(start + PAGE, _rows.length);
+    el('head-r').textContent = _rows.length ? `${from}–${to} of ${_rows.length}` : '';
+  }
+
+  function startPaging() {
+    if (_timer) clearInterval(_timer);
+    _timer = setInterval(() => {
+      if (_rows.length <= PAGE) { _page = 0; return; }
+      _page = (_page + 1) % pages();
+      paint();
+    }, HOLD_MS);
+  }
+
+  function render(data) {
+    data = data || {};
+    _data = data;
+    const br = data.br || {};
+    const accent  = SceneBase.brandColor(data)  || '#055fdb';
+    const accent2 = SceneBase.brandAccent(data) || accent;
+    document.documentElement.style.setProperty('--accent', accent);
+    document.documentElement.style.setProperty('--accent-2', accent2);
+    if (data.fontFamily) document.documentElement.style.setProperty('--main-font', `'${data.fontFamily}', 'Inter', sans-serif`);
+
+    const src = PLAYERS ? (br.playerBoard || []) : (br.standings || []);
+    const rows = TOP ? src.slice(0, TOP) : src.slice();
+    el('head-l').textContent = PLAYERS ? 'Elims' : 'Standings';
+
+    const rail = el('rail');
+    rail.classList.toggle('off', !rows.length);
+    if (!rows.length) return;
+
+    const sig = JSON.stringify(rows);
+    if (sig === _sig) return;      // same data — let the running page cycle continue undisturbed
+    _sig = sig;
+    _rows = rows;
+    if (_page >= pages()) _page = 0;
+    paint();
+    startPaging();
+  }
+
+  if (location.protocol === 'file:') {
+    render({
+      br: { standings: [
+        { rank: 1, name: 'Villainous',  pts: 148, elims: 31 },
+        { rank: 2, name: 'Rocket Rush', pts: 141, elims: 27 },
+        { rank: 3, name: 'Horizon',     pts: 118, elims: 22 },
+        { rank: 4, name: 'Nova Collective', pts: 96, elims: 19 },
+        { rank: 5, name: 'Iron Wolves', pts: 74, elims: 14 },
+        { rank: 6, name: 'Phantom Squad', pts: 61, elims: 12 },
+        { rank: 7, name: 'Echo Rising', pts: 48, elims: 9 }
+      ] }
+    });
+  } else {
+    SceneBase.connect((data) => { render(data); SceneBase.applySceneConfig('br-rail', data); });
+  }
+})();
+</script>
+</body>
+</html>

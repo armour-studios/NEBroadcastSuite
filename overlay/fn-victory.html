@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<!--
+  fn-victory.html — the "#1 VICTORY ROYALE" slam. Reads state.br.victory, which the producer
+  either fills by hand or auto-fills from whoever placed 1st in a match (set_br_victory
+  { fromMatch: n }) — the auto path reads the derived result card, so this graphic can never
+  disagree with the standings board sitting next to it.
+
+  The slam is keyed off `victory.at` (the timestamp the graphic was pushed), NOT off a CSS
+  class toggle: re-pushing the same winner replays the animation, which is what a producer
+  expects when they hit the button twice.
+
+  Query params:
+    ?text=TEXT   headline override (default "#1 Victory Royale")
+    ?noanim=1    hold the end frame — for positioning in OBS
+    ?preview=1   sample data
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1920">
+<title>NE Broadcast Suite — Victory Royale</title>
+<link rel="stylesheet" href="/fonts.css">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --accent:    #12a594;
+  --accent-2:  #0f766e;
+  --disp:      'Rajdhani', 'Inter', sans-serif;
+  --main-font: 'Bourgeois', 'Inter', sans-serif;
+}
+html, body { width: 1920px; height: 1080px; overflow: hidden; background: transparent; }
+body { font-family: var(--main-font); color: #0d1017; }
+
+#stage { position: absolute; inset: 0; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; opacity: 0; transition: opacity .3s ease; }
+#stage.show { opacity: 1; }
+
+/* Accent wash behind the slam — the reference card sits on a flat brand field, not video. */
+#wash { position: absolute; inset: 0; z-index: 0;
+  background: radial-gradient(circle at 50% 42%, var(--accent) 0%, var(--accent-2) 58%, #06231f 100%); }
+/* Faint shard field, drawn in CSS so the scene stays a single self-contained file. */
+#wash::after {
+  content: ''; position: absolute; inset: 0; opacity: .18;
+  background-image:
+    linear-gradient(115deg, transparent 46%, rgba(255,255,255,.55) 47%, transparent 48%),
+    linear-gradient(65deg,  transparent 62%, rgba(255,255,255,.4)  63%, transparent 64%),
+    linear-gradient(155deg, transparent 28%, rgba(255,255,255,.3)  29%, transparent 30%);
+  background-size: 420px 420px, 560px 560px, 340px 340px;
+}
+
+/* ── the slam plate ─────────────────────────────────────────────────────── */
+#slam { position: relative; z-index: 3; padding: 46px 92px 52px; max-width: 1420px;
+  background: linear-gradient(104deg, #e6ecf7, #ffffff 34%, #dde7f5 62%, #cfe6f2);
+  box-shadow: 0 40px 110px rgba(0,0,0,.5);
+  transform: rotate(-2.2deg); text-align: center; }
+#slam.anim { animation: slamIn .62s cubic-bezier(.16,1.1,.3,1) both; }
+@keyframes slamIn {
+  0%   { opacity: 0; transform: rotate(-2.2deg) scale(1.6); }
+  60%  { opacity: 1; transform: rotate(-2.2deg) scale(.965); }
+  100% { opacity: 1; transform: rotate(-2.2deg) scale(1); }
+}
+/* Ghost echo of the headline behind it — the outlined "VICTORY ROYALE" in the reference. */
+#ghost { position: absolute; left: 50%; top: 46%; transform: translate(-50%, -50%);
+  font-family: var(--disp); font-size: 176px; font-weight: 700; letter-spacing: -.02em;
+  line-height: .84; text-transform: uppercase; white-space: nowrap; pointer-events: none;
+  color: transparent; -webkit-text-stroke: 2px rgba(13,16,23,.13); z-index: 0; }
+#headline { position: relative; z-index: 2;
+  font-family: var(--disp); font-size: 176px; font-weight: 700; letter-spacing: -.02em;
+  line-height: .84; text-transform: uppercase; color: #0d1017; }
+#headline .hash { font-size: 132px; vertical-align: 8px; }
+
+/* ── winner bar ───────────────────────────────────────────────────────────
+   z-index above the slam plate and a positive gap: both are rotated -2.2deg, so a negative
+   margin let the bar's top-left corner cut across the plate's bottom-right one. */
+#bar { position: relative; z-index: 4; margin-top: 18px; width: 1180px;
+  background: #ffffff; box-shadow: 0 22px 60px rgba(0,0,0,.42);
+  transform: rotate(-2.2deg); }
+#bar.anim { animation: barIn .5s .34s cubic-bezier(.2,.9,.3,1) both; }
+@keyframes barIn { from { opacity: 0; transform: rotate(-2.2deg) translateY(26px); } to { opacity: 1; } }
+#chips { display: flex; align-items: stretch; border-bottom: 1px solid rgba(13,16,23,.10); }
+#chips .chip { padding: 11px 26px; font-size: 14px; font-weight: 800; letter-spacing: .26em;
+  text-transform: uppercase; display: flex; align-items: center; }
+#chips .c-stage { background: var(--accent); color: #06231f; }
+#chips .c-game  { color: #5a6273; }
+#chips .c-elims { margin-left: auto; color: #5a6273; }
+#winner { display: flex; align-items: center; justify-content: center; gap: 22px;
+  padding: 22px 32px 26px; }
+#winner img { height: 74px; width: auto; object-fit: contain; }
+#win-name { font-family: var(--disp); font-size: 58px; font-weight: 700; letter-spacing: .01em;
+  text-transform: uppercase; line-height: 1; color: #0d1017;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+#brand { position: absolute; left: 46px; bottom: 40px; z-index: 4; height: 44px; width: auto;
+  object-fit: contain; filter: drop-shadow(0 4px 14px rgba(0,0,0,.4)); }
+#empty { position: absolute; inset: 0; z-index: 5; display: none; align-items: center;
+  justify-content: center; font-size: 22px; font-weight: 700; letter-spacing: .22em;
+  text-transform: uppercase; color: rgba(255,255,255,.6); }
+</style>
+</head>
+<body>
+  <div id="stage">
+    <div id="wash"></div>
+    <div id="slam">
+      <div id="ghost">Victory Royale</div>
+      <div id="headline"><span class="hash">#</span>1 Victory<br>Royale</div>
+    </div>
+    <div id="bar">
+      <div id="chips">
+        <div class="chip c-stage" id="chip-stage" style="display:none;"></div>
+        <div class="chip c-game" id="chip-game" style="display:none;"></div>
+        <div class="chip c-elims" id="chip-elims" style="display:none;"></div>
+      </div>
+      <div id="winner">
+        <img id="win-logo" src="" alt="" style="display:none;">
+        <div id="win-name">—</div>
+      </div>
+    </div>
+    <img id="brand" src="" alt="" style="display:none;">
+    <div id="empty">No winner set</div>
+  </div>
+
+<script src="/scene-base.js"></script>
+<script>
+(function () {
+  const Q = new URLSearchParams(location.search);
+  const TEXT = Q.get('text') || '';
+  const NOANIM = Q.get('noanim') === '1';
+  const el = (id) => document.getElementById(id);
+
+  function logoFor(data, name) {
+    const want = (name || '').trim().toLowerCase();
+    if (!want) return '';
+    const hit = (data.savedTeams || []).find((t) => (t.name || '').trim().toLowerCase() === want);
+    return (hit && hit.logo) || '';
+  }
+
+  // Replay the slam whenever a NEW push arrives. `at` changes on every push (even for the same
+  // winner), which is exactly the trigger a producer means when they hit the button again.
+  function replay() {
+    if (NOANIM) return;
+    ['slam', 'bar'].forEach((id) => {
+      const n = el(id);
+      n.classList.remove('anim');
+      void n.offsetWidth;          // force reflow so the animation restarts
+      n.classList.add('anim');
+    });
+  }
+
+  let _sig = '', _at = 0;
+  function render(data) {
+    const br = (data && data.br) || {};
+    const v = br.victory || {};
+    const sig = JSON.stringify([v.team, v.players, v.stage, v.match, v.elims]);
+    const changed = sig !== _sig;
+    const pushed = (Number(v.at) || 0) !== _at;
+    if (!changed && !pushed) return;
+    _sig = sig; _at = Number(v.at) || 0;
+
+    const root = document.documentElement;
+    root.style.setProperty('--accent', SceneBase.brandColor(data));
+    root.style.setProperty('--accent-2', SceneBase.brandAccent(data));
+
+    const hasWinner = !!(v.team || (v.players || []).length);
+    el('empty').style.display = hasWinner ? 'none' : 'flex';
+    el('slam').style.display = hasWinner ? '' : 'none';
+    el('bar').style.display = hasWinner ? '' : 'none';
+    el('stage').classList.add('show');
+    if (!hasWinner) return;
+
+    if (TEXT) el('headline').textContent = TEXT.toUpperCase();
+    el('ghost').textContent = (TEXT || 'Victory Royale').toUpperCase();
+
+    // Prefer the entrant name (it already reads "PLAYER + PLAYER" for a duo); fall back to
+    // joining the roster when only players were supplied.
+    const name = v.team || (v.players || []).join(' + ');
+    el('win-name').textContent = String(name).toUpperCase();
+
+    const logo = logoFor(data, v.team);
+    const lg = el('win-logo');
+    if (logo) { lg.src = logo; lg.style.display = ''; } else { lg.style.display = 'none'; }
+
+    const setChip = (id, text) => { const n = el(id); n.textContent = String(text || '').toUpperCase(); n.style.display = text ? '' : 'none'; };
+    setChip('chip-stage', v.stage);
+    setChip('chip-game', v.match);
+    setChip('chip-elims', v.elims ? (v.elims + ' elims') : '');
+
+    const bl = SceneBase.brandLogo(data);
+    const b = el('brand');
+    if (bl) { b.src = bl; b.style.display = ''; } else { b.style.display = 'none'; }
+
+    if (changed || pushed) replay();
+  }
+
+  if (location.protocol === 'file:') {
+    render({ br: { victory: { visible: true, team: 'XSET HIGGS + KOS CURVE',
+      players: ['XSET HIGGS', 'KOS CURVE'], stage: 'Major 2 Finals', match: 'Game 1', elims: 12, at: 1 } } });
+  } else {
+    SceneBase.connect((data) => { render(data); SceneBase.applySceneConfig('fn-victory', data); });
+  }
+})();
+</script>
+</body>
+</html>

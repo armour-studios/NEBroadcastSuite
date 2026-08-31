@@ -1,0 +1,769 @@
+<!DOCTYPE html>
+<!--
+  replay-desk.html — Desk Show layout with the caster-cam area replaced by ONE 16:9 stage.
+
+  Same bones as preshow.html (media area left, rail right, branded footer along the bottom), but
+  the left zone is a single 16:9 window sized for a replay / highlight reel / VOD instead of two
+  tall caster boxes. That means a break segment can run video where the casters normally sit while
+  the right-hand rail keeps carrying the show's talking points.
+
+  The 16:9 stage is a TRANSPARENT hole by default — put the media source BEHIND this overlay in
+  OBS and it shows through the frame. It carries the .cam-hole class on purpose so the existing
+  frame-guide tooling (?cams=off&guide=1, see scene-base.js) prints its exact 1920×1080 rectangle
+  for positioning that source. ?media=player instead iframes the suite's own replay-player.html,
+  so it works with no OBS layering at all.
+
+  RAIL (?rail=)
+    topics   — state.preshow.topics, the same discussion rail preshow.html drives (default)
+    matches  — live / upcoming / recent results from the start.gg feed (startgg.matchFeed +
+               startgg.queue), i.e. what the ticker carries, laid out as a readable board
+    auto     — matches when the start.gg feed has anything, else topics
+
+  Params: ?rail=topics|matches|auto · ?media=hole|player · ?cams=off (frames-only)
+          · ?page=8 seconds per match-board page
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <link rel="stylesheet" href="/fonts.css">
+  <style>
+    :root {
+      --duo-bg: #111318;
+      --duo-surface: #1a1d24;
+      --duo-surface2: #20242e;
+      --duo-border: #2e3340;
+      --duo-accent: #e83a8b;
+      --duo-accent2: #8b5cf6;
+      --duo-text: #e8eaf0;
+      --duo-muted: #8b93a8;
+      --stage-w: 1920px;
+      --stage-h: 1080px;
+      --pad-x: 24px;
+      --rail-w: 320px;
+      --footer-h: 104px;
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      width: var(--stage-w); height: var(--stage-h);
+      overflow: hidden; background: transparent;
+      font-family: 'Inter', system-ui, sans-serif;
+      color: var(--duo-text); -webkit-font-smoothing: antialiased;
+    }
+
+    .rd-stage {
+      display: flex; flex-direction: column;
+      width: var(--stage-w); height: var(--stage-h);
+      padding: 20px var(--pad-x) 18px; gap: 16px;
+      opacity: 0; transition: opacity .35s ease;
+    }
+    .rd-stage.show { opacity: 1; }
+
+    /* ── Entry animations ──────────────────────────────────────────── */
+    .rd-stage:not(.show) .media-card,
+    .rd-stage:not(.show) .rail,
+    .rd-stage:not(.show) .rd-footer { opacity: 0; }
+    .rd-stage.show .media-card { animation: camIn .6s cubic-bezier(.16,.84,.24,1) .06s forwards; }
+    .rd-stage.show .rail       { animation: railIn .6s cubic-bezier(.16,.84,.24,1) .26s forwards; }
+    .rd-stage.show .rd-footer  { animation: footerUp .6s cubic-bezier(.16,.84,.24,1) .32s forwards; }
+    @keyframes camIn    { from { opacity: 0; transform: scale(.97); }       to { opacity: 1; transform: none; } }
+    @keyframes railIn   { from { opacity: 0; transform: translateX(24px); } to { opacity: 1; transform: none; } }
+    @keyframes footerUp { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: none; } }
+    @keyframes accentLine { 0% { background-position: 220% 0; } 100% { background-position: -220% 0; } }
+
+    /* ── Top zone: 16:9 media stage + rail ───────────────────────────── */
+    .zone-top {
+      flex: 1 1 0; min-height: 0;
+      display: grid; grid-template-columns: 1fr var(--rail-w); gap: 20px;
+    }
+    /* Centred against the rail. This was bottom-aligned to line the caption plate up with the foot
+       of the rail, but the 16:9 card is a good deal shorter than the column, so all the slack piled
+       up above it and the two boxes read as misaligned on air — the gap over the video was obvious
+       while the few pixels at the bottom were not. Equal top/bottom gaps look deliberate. */
+    .media-col { display: flex; align-items: center; justify-content: center; min-width: 0; min-height: 0; }
+    .media-card {
+      /* A true 16:9 window centred in the space the caster cams used to occupy. Capped short of
+         the column width on purpose — filling it edge-to-edge read as "the video IS the scene"
+         and left the frame with nothing to sit in. */
+      width: min(100%, 1340px); aspect-ratio: 16 / 9; max-height: 100%;
+      display: flex; flex-direction: column;
+      border-radius: 6px; overflow: hidden;
+      /* Heavy enough to hold its own against a bright game feed — a 1px hairline vanished. */
+      border: 4px solid #333a49;
+      box-shadow: 0 14px 40px rgba(0,0,0,.5), 0 0 0 1px rgba(0,0,0,.6);
+    }
+    .media-card::before {
+      content: ''; display: block; height: 4px; flex: 0 0 auto;
+      background: linear-gradient(90deg, transparent, var(--duo-accent) 30%, var(--duo-accent2) 70%, transparent);
+    }
+    /* Transparent by default so an OBS media source behind shows straight through the frame. */
+    .cam-hole { position: relative; width: 100%; flex: 1 1 0; min-height: 0; background: transparent; overflow: hidden; }
+    .cam-hole iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+    .rd-stage.frames-only .media-card { border-color: transparent; box-shadow: none; }
+    .rd-stage.frames-only .media-card::before { display: none; }
+    /* Preview only: tint the hole so the 16:9 window is visible with no source behind it. */
+    .preview .cam-hole { background: repeating-linear-gradient(45deg, #14171e 0 18px, #191d26 18px 36px); }
+    .preview .cam-hole::marker { content: ''; }
+
+    /* Caption plate under the stage — names what's playing (state.replay.label). */
+    .media-plate {
+      flex: 0 0 auto; height: 46px; display: flex; align-items: center; gap: 12px;
+      padding: 0 16px; background: var(--duo-surface); border-top: 1px solid var(--duo-border);
+    }
+    .media-plate.is-empty { display: none; }
+    .media-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--duo-accent); flex: 0 0 auto;
+      box-shadow: 0 0 12px var(--duo-accent); }
+    .media-label { font-size: 15px; font-weight: 900; letter-spacing: .16em; text-transform: uppercase; color: #fff; }
+
+    /* ── Rail (topics OR match board) ─────────────────────────────────── */
+    .rail {
+      display: flex; flex-direction: column; min-height: 0;
+      border-radius: 10px; overflow: hidden;
+      border: 1px solid var(--duo-border); background: var(--duo-surface);
+      box-shadow: 0 14px 40px rgba(0,0,0,.45);
+    }
+    .rail-head {
+      position: relative; overflow: hidden; flex: 0 0 auto;
+      padding: 16px 20px; font-size: 15px; font-weight: 900; letter-spacing: .18em;
+      /* The ONLY element here filled with the raw brand accent, so it's the only one where a
+         white/pastel kit put white text on a white bar. --rail-head-fg is set from
+         SceneBase.onColor() at theme time; #fff stays the default for dark kits. */
+      text-transform: uppercase; text-align: center; color: var(--rail-head-fg, #fff);
+      /* Deliberately color-mix-FREE. The app's own windows are Electron 18 (Chrome 100), which
+         does not support color-mix() — and one invalid component invalidates the whole shorthand,
+         so the previous `linear-gradient(..., color-mix(...))` left this bar with NO background in
+         the panel while rendering normally in OBS's newer CEF. A translucent black wash over a
+         flat accent gives the same look and works in both. It also guarantees the lightest point
+         of the bar is the raw accent, which is exactly what --rail-head-fg is computed against. */
+      background-color: var(--duo-accent2);
+      /* The wash pushes the bar AWAY from the text colour: black over the accent when the text is
+         white, white over it when the text is dark. Washing one direction only was the mistake —
+         darkening a mid-tone green helped white text but starved the dark text it had chosen. */
+      background-image: linear-gradient(135deg,
+        rgba(var(--rail-head-wash-rgb, 5,6,10), var(--rail-head-wash-a, 0)) 0%,
+        rgba(var(--rail-head-wash-rgb, 5,6,10), var(--rail-head-wash-b, .45)) 100%);
+    }
+    .rail-head::after {
+      content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 3px;
+      background: linear-gradient(90deg, transparent, var(--duo-accent), var(--duo-accent2), transparent);
+      background-size: 220% 100%; animation: accentLine 12s linear infinite;
+    }
+    .rail-body { position: relative; flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+    .rail-empty { display: flex; align-items: center; justify-content: center; height: 100%; padding: 0 18px;
+      text-align: center; color: var(--duo-muted); font-size: 15px; text-transform: uppercase; letter-spacing: .1em; }
+
+    /* Topics — carried over from preshow.html so both scenes read identically. */
+    .topics-item {
+      position: relative; flex: 1 1 0; display: flex; align-items: center; justify-content: center;
+      text-align: center; padding: 0 22px;
+      font-size: 23px; font-weight: 800; letter-spacing: .01em; text-transform: uppercase;
+      color: var(--duo-muted); background: var(--duo-surface);
+      border-top: 1px solid var(--duo-border); line-height: 1.15;
+      transition: color .45s ease, background-color .45s ease, font-size .45s cubic-bezier(.16,.84,.24,1), letter-spacing .5s ease;
+      animation: topicEnter .55s cubic-bezier(.16,.84,.24,1) both;
+      animation-delay: calc(var(--i, 0) * 70ms);
+    }
+    .topics-item.is-active {
+      color: #fff; font-size: 25px; font-weight: 900; letter-spacing: .03em;
+      background-color: color-mix(in srgb, var(--duo-accent) 26%, var(--duo-surface2));
+      text-shadow: 0 2px 18px color-mix(in srgb, var(--duo-accent) 55%, transparent);
+    }
+    .topics-item.is-active::before {
+      content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 7px;
+      background: linear-gradient(180deg, var(--duo-accent) 0%, var(--duo-accent2) 50%, var(--duo-accent) 100%);
+      box-shadow: 0 0 24px color-mix(in srgb, var(--duo-accent) 90%, transparent);
+    }
+    @keyframes topicEnter { from { opacity: 0; transform: translateX(-20px); } to { opacity: 1; transform: none; } }
+
+    /* Match board — one row per set, grouped LIVE → NEXT → FINAL. */
+    .mb-page { display: flex; flex-direction: column; justify-content: center; gap: 9px; flex: 1 1 0; min-height: 0;
+      padding: 12px 10px; animation: mbIn .5s cubic-bezier(.16,.84,.24,1) both; }
+    /* Page turns CROSSFADE: the outgoing page used to be destroyed the instant the new one was
+       written, so the rail blinked to empty and the new page animated in from nothing. Both pages
+       are stacked (absolute) for the length of the swap so one dissolves into the other. */
+    .rail-body.mb-swapping { display: block; }
+    .rail-body.mb-swapping .mb-page { position: absolute; inset: 0; }
+    .mb-page.is-out { animation: mbOut .5s cubic-bezier(.16,.84,.24,1) both; pointer-events: none; }
+    @keyframes mbIn  { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+    @keyframes mbOut { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateY(-14px); } }
+    /* The dots lead the eye through the turn, so ease them too. */
+    .mb-dot { transition: background-color .4s ease; }
+    .mb-row {
+      position: relative;
+      /* Capped growth. Rows used to be flex: 1 1 0 with no ceiling, so a part-filled page stretched
+         four sets to ~200px each and the board read as stranded text in empty boxes. */
+      flex: 1 1 0; min-height: 72px; max-height: 160px; overflow: hidden;
+      display: flex; flex-direction: column; justify-content: center;
+      gap: 7px; padding: 10px 14px; border-radius: 8px;
+      border: 1px solid var(--duo-border); background: var(--duo-surface2);
+    }
+    .mb-row.is-live { background: color-mix(in srgb, var(--duo-accent) 20%, var(--duo-surface2));
+      border-color: color-mix(in srgb, var(--duo-accent) 45%, var(--duo-border)); }
+    .mb-row.is-live::before {
+      content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 4px;
+      background: linear-gradient(180deg, var(--duo-accent), var(--duo-accent2));
+      border-radius: 8px 0 0 8px;
+    }
+    .mb-top { display: flex; align-items: center; gap: 8px; }
+    .mb-badge {
+      font-size: 10.5px; font-weight: 900; letter-spacing: .1em; text-transform: uppercase;
+      padding: 3px 7px; border-radius: 3px; flex: 0 0 auto;
+      background: rgba(255,255,255,.12); color: var(--duo-muted);
+    }
+    .mb-badge.live { background: #22c55e; color: #04210f; }
+    .mb-badge.next { background: var(--duo-accent); color: #fff; }
+    .mb-round {
+      font-size: 11.5px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase;
+      color: var(--duo-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .mb-side { display: flex; align-items: center; gap: 8px; min-width: 0; }
+    .mb-logo { width: 24px; height: 24px; object-fit: contain; flex: 0 0 auto; }
+    .mb-name {
+      flex: 1 1 auto; min-width: 0; font-size: 18px; font-weight: 800; letter-spacing: .02em;
+      text-transform: uppercase; color: var(--duo-text);
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .mb-row.is-live .mb-name { color: #fff; }
+    .mb-name.win { color: #fff; }
+    .mb-score {
+      flex: 0 0 auto; font-size: 20px; font-weight: 900; color: #fff;
+      font-variant-numeric: tabular-nums; min-width: 20px; text-align: right;
+    }
+    .mb-score.dim { color: var(--duo-muted); }
+    .mb-pager { flex: 0 0 auto; display: flex; align-items: center; justify-content: center; gap: 5px; padding: 7px 0;
+      border-top: 1px solid var(--duo-border); background: var(--duo-surface2); }
+    .mb-pager.is-empty { display: none; }
+    .mb-dot { width: 6px; height: 6px; border-radius: 50%; background: rgba(255,255,255,.22); }
+    .mb-dot.on { background: var(--duo-accent); }
+
+    /* ── Footer ──────────────────────────────────────────────────────── */
+    .rd-footer {
+      position: relative; flex: 0 0 auto;
+      display: flex; align-items: stretch; height: var(--footer-h);
+      border-radius: 10px; overflow: hidden;
+      background: linear-gradient(180deg, rgba(24,27,34,.98), rgba(10,12,16,.99));
+      border: 1px solid rgba(255,255,255,.08);
+      box-shadow: 0 12px 32px rgba(0,0,0,.5);
+    }
+    .rd-footer::before {
+      content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 3px; z-index: 4;
+      background: linear-gradient(90deg, transparent, var(--duo-accent), var(--duo-accent2), transparent);
+      background-size: 220% 100%; animation: accentLine 12s linear infinite;
+    }
+    .ft { display: flex; align-items: center; justify-content: center; padding: 0 22px; flex: 0 0 auto; position: relative; }
+    .ft.is-empty { display: none; }
+    .ft + .ft::before { content: ''; position: absolute; left: 0; top: 24%; bottom: 24%; width: 1px; background: rgba(255,255,255,.10); }
+    .ft-stack { display: flex; flex-direction: column; align-items: center; gap: 6px; min-width: 0; width: 100%; }
+    /* Kicker treatment shared with countdown-bar.html — rules either side so these read as
+       titles over their content rather than as form labels. */
+    .ft-label {
+      display: flex; align-items: center; justify-content: center; gap: 9px;
+      font-size: 12px; font-weight: 900; letter-spacing: .18em; text-transform: uppercase;
+      /* Lifted accent — a dark brand kit would otherwise sink these into the near-black footer. */
+      color: var(--kicker, var(--duo-accent)); white-space: nowrap; line-height: 1;
+    }
+    .ft-label::before, .ft-label::after { content: ''; flex: 0 0 auto; width: 14px; height: 2px; background: currentColor; opacity: .5; }
+    #ft-brand-logo { max-height: 62px; max-width: 150px; object-fit: contain; }
+    .ft-teams { display: flex; align-items: center; justify-content: center; gap: 10px; min-width: 0; }
+    .ft-tname { font-size: 22px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; color: #fff; white-space: nowrap; }
+    .ft-tlogo { width: 30px; height: 30px; object-fit: contain; display: none; }
+    .ft-teams.has-logos .ft-tlogo { display: block; }
+    .ft-vs { font-size: 13px; font-weight: 900; letter-spacing: .1em; color: var(--duo-muted); }
+    .ft-clock { font-size: 40px; font-weight: 700; line-height: 1; color: #fff; font-variant-numeric: tabular-nums; }
+    /* Vertically centred like every other footer segment — align-items here used to pin the
+       stack to the top of the bar, which left the title riding high over empty space whenever
+       the sub-line was absent. Left alignment is the .ft-stack rule below. */
+    .ft-headline { flex: 1 1 auto; min-width: 0; }
+    .ft-headline .ft-stack { align-items: flex-start; }
+    #ft-head {
+      width: 100%; font-size: 28px; font-weight: 800; font-style: italic; letter-spacing: .01em;
+      text-transform: uppercase; color: #fff; line-height: 1.06;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    #ft-sub {
+      width: 100%; font-size: 14px; font-weight: 600; font-style: italic; letter-spacing: .07em;
+      text-transform: uppercase; color: var(--duo-muted); line-height: 1.1;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .ft-sponsor { width: 210px; }
+    .sponsor-stage { position: relative; width: 100%; height: 66px; }
+    .sponsor-logo { position: absolute; inset: 0; margin: auto; max-width: 100%; max-height: 100%;
+      object-fit: contain; opacity: 0; transition: opacity .5s ease; }
+    .sponsor-logo.on { opacity: 1; }
+  </style>
+</head>
+<body>
+  <div id="stage" class="rd-stage">
+
+    <div class="zone-top">
+      <div class="media-col">
+        <div class="media-card">
+          <div class="cam-hole" id="media-hole"></div>
+          <div class="media-plate is-empty" id="media-plate">
+            <span class="media-dot"></span>
+            <span class="media-label" id="media-label">Replay</span>
+          </div>
+        </div>
+      </div>
+
+      <aside class="rail">
+        <div class="rail-head" id="rail-head">Topics</div>
+        <div class="rail-body" id="rail-body"></div>
+        <div class="mb-pager is-empty" id="mb-pager"></div>
+      </aside>
+    </div>
+
+    <footer class="rd-footer">
+      <div class="ft ft-brand is-empty" id="ft-brand"><img id="ft-brand-logo" alt=""></div>
+
+      <div class="ft ft-next is-empty" id="ft-next">
+        <div class="ft-stack">
+          <span class="ft-label">Up Next</span>
+          <div class="ft-teams" id="ft-teams">
+            <span class="ft-tname" id="ft-a"></span>
+            <img class="ft-tlogo" id="ft-logo-a" alt="">
+            <span class="ft-vs">VS</span>
+            <img class="ft-tlogo" id="ft-logo-b" alt="">
+            <span class="ft-tname" id="ft-b"></span>
+          </div>
+        </div>
+      </div>
+
+      <div class="ft ft-clock-seg is-empty" id="ft-clock-seg">
+        <div class="ft-stack">
+          <span class="ft-label" id="ft-clock-label">Back In</span>
+          <span class="ft-clock" id="ft-clock">--:--</span>
+        </div>
+      </div>
+
+      <div class="ft ft-headline is-empty" id="ft-headline">
+        <div class="ft-stack">
+          <div id="ft-head"></div>
+          <div id="ft-sub"></div>
+        </div>
+      </div>
+
+      <div class="ft ft-sponsor is-empty" id="ft-sponsor">
+        <div class="sponsor-stage" id="sponsor-stage"></div>
+      </div>
+    </footer>
+
+  </div>
+
+  <script src="scene-base.js"></script>
+  <script>
+    const el = (id) => document.getElementById(id);
+    const P = new URLSearchParams(location.search);
+
+    const RAIL_MODE = (P.get('rail') || 'topics').toLowerCase();     // topics | matches | auto
+    const MEDIA_MODE = (P.get('media') || 'hole').toLowerCase();     // hole | player
+    const PAGE_SECS = Math.max(3, parseFloat(P.get('page')) || 8);
+    if (P.get('cams') === 'off') el('stage').classList.add('frames-only');
+
+    const NAME_MAX = 22, NAME_MIN = 15;
+    const HEAD_MAX = 28, HEAD_MIN = 15;
+
+    let endsAt = null, frozen = null, hasTimer = false;
+
+    /** Would WHITE or near-black text read better on this colour? Compares both candidates'
+        WCAG contrast against the colour itself and returns true for white. Used for the rail
+        header, which is the one surface filled with the raw brand accent at full size. */
+    function railHeadWantsWhite(color) {
+      const c = String(color || '').trim();
+      let r = 0, g = 0, b = 0, m;
+      if ((m = c.match(/^#([0-9a-f]{3})$/i))) { r = parseInt(m[1][0] + m[1][0], 16); g = parseInt(m[1][1] + m[1][1], 16); b = parseInt(m[1][2] + m[1][2], 16); }
+      else if ((m = c.match(/^#([0-9a-f]{6})$/i))) { r = parseInt(m[1].slice(0, 2), 16); g = parseInt(m[1].slice(2, 4), 16); b = parseInt(m[1].slice(4, 6), 16); }
+      else if ((m = c.match(/^rgba?\(\s*(\d+)[\s,]+(\d+)[\s,]+(\d+)/i))) { r = +m[1]; g = +m[2]; b = +m[3]; }
+      else return true;
+      const lin = (v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
+      const L = 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+      const cr = (a, x) => (Math.max(a, x) + 0.05) / (Math.min(a, x) + 0.05);
+      return cr(1, L) >= cr(0.0056, L);   // 0.0056 = luminance of #04121f
+    }
+
+    function applyBrandTheme(data) {
+      const root = document.documentElement;
+      const color = SceneBase.brandColor(data);
+      const accent2 = SceneBase.brandAccent(data);
+      if (color) {
+        root.style.setProperty('--duo-accent', color);
+        root.style.setProperty('--kicker', SceneBase.liftForDark(color, 0.20));
+      }
+      if (accent2) {
+        root.style.setProperty('--duo-accent2', accent2);
+        // The rail header is the one element filled with the raw accent, so a white/pastel kit put
+        // white text on a white bar. Pick the text colour from the accent, then tune the darkening
+        // wash to match: white text wants the bar pushed darker, dark text wants it left light.
+        // Pick by MEASURED contrast rather than a lightness threshold. SceneBase.onColor() flips at
+        // luminance 0.45, which is right for small pills but leaves a bright mid-tone (a #22c55e
+        // green measured 3.36:1) with white text on a big filled bar. Comparing both candidates
+        // directly always lands on the better one.
+        const whiteText = railHeadWantsWhite(accent2);
+        const fg = whiteText ? '#ffffff' : '#04121f';
+        root.style.setProperty('--rail-head-fg', fg);
+        root.style.setProperty('--rail-head-wash-rgb', whiteText ? '5,6,10' : '255,255,255');
+        root.style.setProperty('--rail-head-wash-a', whiteText ? '.18' : '.10');
+        root.style.setProperty('--rail-head-wash-b', whiteText ? '.58' : '.34');
+      }
+      if (data.fontFamily) root.style.fontFamily = `'${data.fontFamily}', 'Inter', system-ui, sans-serif`;
+    }
+
+    // ?media=player — iframe the suite's own replay player so the scene works with no OBS
+    // layering. Mounted once; it holds its own WS connection and playback state.
+    if (MEDIA_MODE === 'player') {
+      const f = document.createElement('iframe');
+      f.src = '/replay-player.html';
+      f.setAttribute('allow', 'autoplay; encrypted-media; fullscreen');
+      el('media-hole').appendChild(f);
+    }
+
+    function fmt(sec) {
+      const m = Math.floor(sec / 60), s = sec % 60;
+      return String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0');
+    }
+    function paintClock(seconds) { el('ft-clock').textContent = fmt(Math.max(0, seconds)); }
+
+    /** Shrink a single-line element until it fits, so long names/titles read in full. */
+    function fitLine(node, maxPx, minPx) {
+      if (!node) return;
+      let px = maxPx;
+      node.style.fontSize = px + 'px';
+      while (px > minPx && node.scrollWidth > node.clientWidth) { px -= 1; node.style.fontSize = px + 'px'; }
+    }
+
+    // ── Media caption ─────────────────────────────────────────────────────────
+    function renderMedia(data) {
+      const label = ((data.replay || {}).label || '').toString().trim();
+      const plate = el('media-plate');
+      if (!label) { plate.classList.add('is-empty'); return; }
+      plate.classList.remove('is-empty');
+      el('media-label').textContent = label.toUpperCase();
+      // No event name here — the footer headline already carries it, and printing it twice
+      // (once over the video, once on the bar) just crowded the caption plate.
+    }
+
+    // ── Rail: topics ──────────────────────────────────────────────────────────
+    function topicText(t) { return (t && (typeof t === 'string' ? t : t.text)) || ''; }
+    let _topicsSig = '';
+    function renderTopics(data) {
+      const pre = data.preshow || {};
+      const topics = (Array.isArray(pre.topics) ? pre.topics : []).filter((t) => topicText(t).trim());
+      const activeIdx = pre.activeTopicIndex || 0;
+      const wrap = el('rail-body');
+      const sig = topics.map(topicText).join('||');
+      if (sig !== _topicsSig) {
+        _topicsSig = sig;
+        wrap.innerHTML = '';
+        if (!topics.length) { wrap.innerHTML = '<div class="rail-empty">No topics set</div>'; return; }
+        topics.forEach((t, i) => {
+          const item = document.createElement('div');
+          item.className = 'topics-item';
+          item.style.setProperty('--i', i);
+          item.textContent = topicText(t).toUpperCase();
+          wrap.appendChild(item);
+        });
+      }
+      // Active row is a class flip only, so switching topics never replays the entrance.
+      [...wrap.querySelectorAll('.topics-item')].forEach((n, i) => n.classList.toggle('is-active', i === activeIdx));
+    }
+
+    // ── Rail: match board ─────────────────────────────────────────────────────
+    // Draws from the SAME data the ticker uses (startgg.matchFeed = live + recent finals) and
+    // fills in what the ticker can't carry: the not-yet-played sets sitting on the stream queue.
+    function matchRows(data) {
+      const sg = data.startgg || {};
+      const feed = Array.isArray(sg.matchFeed) ? sg.matchFeed : [];
+      const queue = Array.isArray(sg.queue) ? sg.queue : [];
+      const onAir = sg.lastPushedSetId != null ? String(sg.lastPushedSetId) : '';
+      const rows = [];
+      const seen = new Set();
+      const real = (r) => r.teamA && r.teamB && !/^tbd$/i.test(r.teamA) && !/^tbd$/i.test(r.teamB);
+      const push = (r) => {
+        const key = r.setId ? String(r.setId) : (r.teamA + '|' + r.teamB + '|' + r.round);
+        if (seen.has(key) || !real(r)) return;
+        seen.add(key);
+        rows.push(r);
+      };
+      // LIVE leads — what's happening elsewhere in the event right now.
+      feed.filter((m) => m && m.status === 'live').forEach((m) => push({ ...m, kind: 'live' }));
+      // NEXT — queued sets not started. The match already on air is excluded; it's not "coming up".
+      queue.filter((q) => q && q.state !== 3 && !q.live && String(q.setId) !== onAir)
+        .forEach((q) => push({ setId: q.setId, round: q.round, teamA: q.teamA, teamB: q.teamB,
+          logoA: q.logoA, logoB: q.logoB, scoreA: null, scoreB: null, kind: 'next' }));
+      // FINAL — recent results.
+      feed.filter((m) => m && m.status === 'done').forEach((m) => push({ ...m, kind: 'done' }));
+      return rows;
+    }
+
+    const PAGE_SIZE = 6;
+    const MB_SWAP_MS = 500;      // must match the .mb-page in/out animation duration
+    let _mbSig = '';
+    let _mbTimer = null;
+    let _mbSwapTimer = null;
+    let _mbPage = 0;
+
+    function mbRowHtml(r) {
+      const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+      const badge = r.kind === 'live' ? '<span class="mb-badge live">Live</span>'
+                  : r.kind === 'next' ? '<span class="mb-badge next">Next</span>'
+                  : '<span class="mb-badge">Final</span>';
+      const hasScore = typeof r.scoreA === 'number' || typeof r.scoreB === 'number';
+      const sc = (v, win) => hasScore
+        ? '<span class="mb-score' + (win ? '' : ' dim') + '">' + (typeof v === 'number' ? v : 0) + '</span>'
+        : '';
+      const logo = (u) => u ? '<img class="mb-logo" src="' + esc(u) + '" alt="" onerror="this.style.display=\'none\'">' : '';
+      const side = (name, url, score, win) =>
+        '<div class="mb-side">' + logo(url) +
+        '<span class="mb-name' + (win ? ' win' : '') + '">' + esc(name) + '</span>' + score + '</div>';
+      return '<div class="mb-row' + (r.kind === 'live' ? ' is-live' : '') + '">'
+        + '<div class="mb-top">' + badge + '<span class="mb-round">' + esc(r.round || '') + '</span></div>'
+        + side(r.teamA, r.logoA, sc(r.scoreA, r.winSide === 'a'), r.winSide === 'a')
+        + side(r.teamB, r.logoB, sc(r.scoreB, r.winSide === 'b'), r.winSide === 'b')
+        + '</div>';
+    }
+
+    function renderMatchBoard(data) {
+      const rows = matchRows(data);
+      const wrap = el('rail-body');
+      const pager = el('mb-pager');
+      // Signature over only what's drawn, so a routine full_state tick can't reset the paging.
+      const sig = rows.map((r) => [r.setId, r.kind, r.teamA, r.teamB, r.scoreA, r.scoreB].join('~')).join('|');
+      if (sig === _mbSig) return;
+      _mbSig = sig;
+      if (_mbTimer) { clearInterval(_mbTimer); _mbTimer = null; }
+      if (!rows.length) {
+        if (_mbSwapTimer) { clearTimeout(_mbSwapTimer); _mbSwapTimer = null; }
+        wrap.classList.remove('mb-swapping');
+        wrap.innerHTML = '<div class="rail-empty">No matches on the feed</div>';
+        pager.classList.add('is-empty');
+        return;
+      }
+      // Balanced pages: 10 sets go 5+5, not 6+4. An uneven last page left the rail half empty
+      // every other cycle, which is what made the board look broken rather than paged.
+      const pageCount = Math.ceil(rows.length / PAGE_SIZE);
+      const per = Math.ceil(rows.length / pageCount);
+      const pages = [];
+      for (let i = 0; i < rows.length; i += per) pages.push(rows.slice(i, i + per));
+      _mbPage = Math.min(_mbPage, pages.length - 1);
+
+      const paint = () => {
+        // A swap that is still in flight is finished now, so at most two pages are ever stacked.
+        wrap.querySelectorAll('.mb-page.is-out').forEach((n) => n.remove());
+        const page = document.createElement('div');
+        page.className = 'mb-page';
+        page.innerHTML = pages[_mbPage].map(mbRowHtml).join('');
+        const old = wrap.querySelector('.mb-page');
+        if (old) {
+          // Stack the two pages for the length of the transition, then drop the old one.
+          wrap.classList.add('mb-swapping');
+          old.classList.add('is-out');
+          wrap.appendChild(page);
+          if (_mbSwapTimer) clearTimeout(_mbSwapTimer);
+          _mbSwapTimer = setTimeout(() => {
+            _mbSwapTimer = null;
+            old.remove();
+            if (wrap.querySelectorAll('.mb-page').length < 2) wrap.classList.remove('mb-swapping');
+          }, MB_SWAP_MS);
+        } else {
+          wrap.innerHTML = '';
+          wrap.appendChild(page);
+        }
+        pager.innerHTML = pages.map((_, i) => '<span class="mb-dot' + (i === _mbPage ? ' on' : '') + '"></span>').join('');
+      };
+      paint();
+      pager.classList.toggle('is-empty', pages.length < 2);
+      // More matches than fit → cycle pages rather than silently hiding the rest.
+      if (pages.length > 1) {
+        _mbTimer = setInterval(() => { _mbPage = (_mbPage + 1) % pages.length; paint(); }, PAGE_SECS * 1000);
+      }
+    }
+
+    function railIsMatches(data) {
+      if (RAIL_MODE === 'matches') return true;
+      if (RAIL_MODE === 'auto') return matchRows(data).length > 0;
+      return false;
+    }
+    function renderRail(data) {
+      const matches = railIsMatches(data);
+      el('rail-head').textContent = matches ? 'Around the Event' : 'Topics';
+      if (matches) { _topicsSig = ''; renderMatchBoard(data); }
+      else {
+        if (_mbTimer) { clearInterval(_mbTimer); _mbTimer = null; }
+        if (_mbSwapTimer) { clearTimeout(_mbSwapTimer); _mbSwapTimer = null; }
+        el('rail-body').classList.remove('mb-swapping');
+        _mbSig = '';
+        el('mb-pager').classList.add('is-empty');
+        renderTopics(data);
+      }
+    }
+
+    // ── Footer ────────────────────────────────────────────────────────────────
+    function renderFooterBrand(data) {
+      const seg = el('ft-brand');
+      const logo = SceneBase.brandLogo(data) || '';
+      if (logo) { el('ft-brand-logo').src = logo; seg.classList.remove('is-empty'); }
+      else { seg.classList.add('is-empty'); }
+    }
+
+    function teamAbbr(raw, name, savedTeams) {
+      const n = (name || '').trim();
+      if (!n) return '?';
+      if (raw && raw.abbr) return String(raw.abbr).toUpperCase().slice(0, 4);
+      const hit = (savedTeams || []).find((t) => t && (t.name || '').trim().toLowerCase() === n.toLowerCase());
+      if (hit && hit.abbr) return String(hit.abbr).toUpperCase().slice(0, 4);
+      const words = n.split(/\s+/).filter(Boolean);
+      if (words.length >= 2) return words.map((w) => w[0]).join('').toUpperCase().slice(0, 4);
+      return n.slice(0, 3).toUpperCase();
+    }
+
+    function renderFooterNext(data) {
+      const seg = el('ft-next');
+      const blue = SceneBase.teamSide(data, 'blue');
+      const orange = SceneBase.teamSide(data, 'orange');
+      const named = (t) => t && t.name && !/^(blue|orange|tbd)$/i.test(t.name.trim());
+      if (!named(blue) || !named(orange)) { seg.classList.add('is-empty'); return; }
+      seg.classList.remove('is-empty');
+
+      const row = el('ft-teams');
+      const both = !!(blue.customLogo && orange.customLogo);
+      row.classList.toggle('has-logos', both);
+      if (both) { el('ft-logo-a').src = blue.customLogo; el('ft-logo-b').src = orange.customLogo; }
+
+      const a = el('ft-a'), b = el('ft-b');
+      const setSize = (px) => { a.style.fontSize = px + 'px'; b.style.fontSize = px + 'px'; };
+      a.textContent = blue.name.toUpperCase();
+      b.textContent = orange.name.toUpperCase();
+      setSize(NAME_MAX);
+      // Shrink before abbreviating — losing the name costs more than a couple of points of type.
+      requestAnimationFrame(() => {
+        if (row.scrollWidth <= row.clientWidth) return;
+        let px = NAME_MAX;
+        while (px > NAME_MIN && row.scrollWidth > row.clientWidth) { px -= 1; setSize(px); }
+        if (row.scrollWidth <= row.clientWidth) return;
+        setSize(NAME_MAX);
+        const raw = data.teams || {}, saved = data.savedTeams || [];
+        a.textContent = teamAbbr(raw.blue, blue.name, saved);
+        b.textContent = teamAbbr(raw.orange, orange.name, saved);
+      });
+    }
+
+    function renderFooterText(data, b) {
+      // Event on top, round underneath; a producer-typed break message outranks both.
+      const msg = (b.message || '').toString().trim();
+      const round = (data.roundLabel || '').toString().trim();
+      const ev = (data.eventName || '').toString().trim();
+      const head = msg || ev || round;
+      const sub = [ev, round].filter((s) => s && s.toLowerCase() !== head.toLowerCase()).slice(0, 2).join(' · ');
+      el('ft-head').textContent = head.toUpperCase();
+      el('ft-sub').textContent = sub.toUpperCase();
+      el('ft-sub').style.display = sub ? '' : 'none';
+      el('ft-headline').classList.toggle('is-empty', !head);
+      requestAnimationFrame(() => { fitLine(el('ft-head'), HEAD_MAX, HEAD_MIN); fitLine(el('ft-sub'), 14, 10); });
+    }
+
+    let _sponsorSig = '', _sponsorTimer = null;
+    function sponsorLogos(data) {
+      const brand = data.brand || {};
+      const anyTagged = (brand.deskSponsors || []).length || (brand.railSponsors || []).length || (brand.bannerSponsors || []).length;
+      const pool = (brand.deskSponsors || []).length ? brand.deskSponsors : (anyTagged ? [] : (brand.sponsors || []));
+      const out = [];
+      const push = (s) => { const u = (typeof s === 'string') ? s : (s && s.logo); if (u && out.indexOf(u) === -1) out.push(u); };
+      push(brand.spots && brand.spots.title);
+      ((data.deskFooter || {}).logos || []).forEach(push);
+      (pool || []).forEach(push);
+      push((data.scoreboardAd || {}).logo);
+      return out;
+    }
+    function renderSponsor(data) {
+      const seg = el('ft-sponsor'), stage = el('sponsor-stage');
+      const logos = sponsorLogos(data);
+      const sig = logos.join('|');
+      if (sig === _sponsorSig) return;
+      _sponsorSig = sig;
+      if (_sponsorTimer) { clearInterval(_sponsorTimer); _sponsorTimer = null; }
+      stage.innerHTML = '';
+      if (!logos.length) { seg.classList.add('is-empty'); return; }
+      seg.classList.remove('is-empty');
+      logos.forEach((src, i) => {
+        const img = document.createElement('img');
+        img.className = 'sponsor-logo' + (i === 0 ? ' on' : '');
+        img.src = src; img.alt = '';
+        stage.appendChild(img);
+      });
+      if (logos.length < 2) return;
+      const secs = Number((data.brand || {}).sponsorInterval) > 0 ? Number(data.brand.sponsorInterval) : 6;
+      let idx = 0;
+      _sponsorTimer = setInterval(() => {
+        const imgs = stage.children;
+        if (imgs.length < 2) return;
+        imgs[idx].classList.remove('on');
+        idx = (idx + 1) % imgs.length;
+        imgs[idx].classList.add('on');
+      }, Math.max(2, secs) * 1000);
+    }
+
+    function render(data) {
+      data = data || {};
+      const b = data.breakScreen || {};
+      applyBrandTheme(data);
+      el('stage').classList.add('show');
+
+      el('ft-clock-label').textContent = ((b.title != null && String(b.title).trim()) ? b.title : 'Back In');
+      frozen = (b.frozenSeconds != null) ? Math.max(0, Math.round(b.frozenSeconds)) : null;
+      endsAt = b.endsAt || null;
+      // Follows the producer's Show/Hide, not just "is a timer set". Hide used to leave endsAt
+      // in state, so the clock kept ticking on every scene that borrows the break timer.
+      hasTimer = (b.visible !== false) && (frozen != null || !!endsAt);
+      el('ft-clock-seg').classList.toggle('is-empty', !hasTimer);
+      if (frozen != null) paintClock(frozen);
+
+      renderMedia(data);
+      renderRail(data);
+      renderFooterBrand(data);
+      renderFooterNext(data);
+      renderFooterText(data, b);
+      renderSponsor(data);
+    }
+
+    setInterval(() => {
+      if (frozen != null) { paintClock(frozen); return; }
+      if (!hasTimer) return;
+      paintClock(Math.max(0, Math.round((endsAt - (typeof SceneBase !== 'undefined' ? SceneBase.now() : Date.now())) / 1000)));
+    }, 250);
+
+    // The break timer is furniture here, not the scene's own trigger: honour the producer's
+    // Show/Hide instead of the standalone force-visible rule (see SceneBase.trustVisibility).
+    SceneBase.trustVisibility('breakScreen');
+    SceneBase.connect((data) => { SceneBase.applySceneConfig('break', data); render(data); });
+
+    if (location.protocol === 'file:') {
+      document.documentElement.classList.add('preview');
+      render({
+        eventName: 'Nameless Weekly Rocket Rush',
+        roundLabel: 'Last Chance Qualifier | EU',
+        brand: { color: '#e83a8b', accent: '#8b5cf6' },
+        replay: { label: 'Replay' },
+        teams: { blue: { name: 'Mystic', color: '#3b82f6' }, orange: { name: 'Volare', color: '#a855f7' } },
+        preshow: { activeTopicIndex: 1, topics: [
+          { text: 'Who takes the last playoff spot?' },
+          { text: 'Mystic’s new roster, one month in' },
+          { text: 'Best plays of the split so far' },
+          { text: 'Predictions for the Grand Final' }
+        ] },
+        startgg: {
+          lastPushedSetId: '9',
+          matchFeed: [
+            { setId: '1', round: 'Winners Semi-Final', teamA: 'Mystic', teamB: 'Apex Titans', scoreA: 2, scoreB: 1, status: 'live' },
+            { setId: '2', round: 'Losers Round 3', teamA: 'Volare', teamB: 'Storm Riders', scoreA: 3, scoreB: 0, status: 'done', winSide: 'a' },
+            { setId: '3', round: 'Losers Round 3', teamA: 'Neon Wolves', teamB: 'Iron Clad', scoreA: 1, scoreB: 3, status: 'done', winSide: 'b' }
+          ],
+          queue: [
+            { setId: '4', state: 1, live: false, round: 'Winners Final', teamA: 'Frost Esports', teamB: 'Ember Gaming' },
+            { setId: '5', state: 1, live: false, round: 'Losers Final', teamA: 'Solar Flare', teamB: 'Void Kings' }
+          ]
+        },
+        breakScreen: { visible: true, title: 'Back In', message: '', endsAt: Date.now() + 384000 }
+      });
+    }
+  </script>
+</body>
+</html>

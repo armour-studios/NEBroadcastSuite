@@ -28,10 +28,17 @@ let _videoStreams = new Set();     // stream IDs whose camera is live (sending v
   });
 })();
 
+// Settings opens as an OBS-style MODAL overlay (not an inline page) in the main window; in a popped-
+// out window (?page=…) it renders as a normal full page instead. Computed once here so the tab
+// handler below can special-case it. openSettingsModal/closeSettingsModal are defined further down.
+const SETTINGS_AS_MODAL = !(new URLSearchParams(location.search).get('page'));
+
 // ── Sidebar tab switching ───────────────────────────────────────────────────
 document.querySelectorAll('.tab-btn').forEach(btn => {
   btn.addEventListener('click', () => {
     const tab = btn.dataset.tab;
+    // Settings is a modal overlay — open it OVER the current page instead of switching pages.
+    if (tab === 'ajustes' && SETTINGS_AS_MODAL) { openSettingsModal(); return; }
     try { localStorage.setItem('ne_active_tab', tab); } catch {}   // remember the page across refreshes
     document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b === btn));
     document.querySelectorAll('.tab-content').forEach(c => {
@@ -41,9 +48,6 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     if (tab === 'media' && typeof mdLoad === 'function') mdLoad();   // lazy-load media on open
     if (tab === 'events' && typeof evAutoLoad === 'function') evAutoLoad();   // auto-pull in-house tournaments
     if (tab === 'replays' && !_stagingLoading) scanStagingArea();   // auto-scan the OBS folder
-    // Switcher page: start/stop program/preview polling only while it's open.
-    if (tab === 'switcher') { if (typeof switcherOnShow === 'function') switcherOnShow(); }
-    else if (typeof switcherOnHide === 'function') switcherOnHide();
     // Cameras page: re-pull VDO links for whichever sub-tab is active on entry.
     if (tab === 'facecams' && typeof cfShowSubtab === 'function') {
       const active = document.querySelector('#cf-subnav .cf-tab.active');
@@ -71,8 +75,69 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     // Show Deck: one element, home is the DCC's Show Deck tab (inside the Talent Monitor widget)
     // on the Dashboard — it no longer appears on the Talent page. See placeShowDeck.
     placeShowDeck(tab);
+    if (tab === 'ajustes') setApplySettingsCat();   // ensure the settings rail shows the right category
   });
 });
+
+// ── Settings page: OBS-style category rail (left nav + filtered sections) ─────
+// The Settings page is one page of many `<section data-setcat="...">` blocks. The left rail filters
+// which category's sections are visible, so the long scroll becomes a tabbed, OBS-style dialog.
+function setSwitchSettingsCat(cat) {
+  cat = cat || 'general';
+  const rail = el('set-rail'); if (!rail) return;
+  rail.querySelectorAll('.set-rail-btn').forEach(b => b.classList.toggle('active', b.dataset.stab === cat));
+  document.querySelectorAll('#set-content > .section').forEach(s => {
+    s.style.display = (s.dataset.setcat === cat) ? '' : 'none';
+  });
+  const scroll = el('tab-scroll'); if (scroll) scroll.scrollTop = 0;
+  if (cat === 'games') _settingsSelectActiveGame();   // per-game browser opens on the active game
+  try { localStorage.setItem('ne_settings_cat', cat); } catch (e) {}
+}
+// Per-game browser: when the Games category opens, select the active game's tab in the relocated
+// per-game setup panel so "the active game is shown by default" (others stay one click away).
+function _settingsSelectActiveGame() {
+  const ag = (typeof currentState !== 'undefined' && currentState && currentState.activeGame) || '';
+  const alias = { 'rocket-league': 'rl', rl: 'rl', cs2: 'cs2', 'counter-strike-2': 'cs2', valorant: 'valorant',
+    league: 'league', 'league-of-legends': 'league', lol: 'league', apex: 'apex', 'apex-legends': 'apex' };
+  const g = alias[ag]; if (!g) return;
+  const btn = document.querySelector('#integration-games .game-tab-btn[data-game="' + g + '"]');
+  if (btn && !btn.classList.contains('active')) btn.click();
+}
+function _settingsCat() { try { return localStorage.getItem('ne_settings_cat') || 'general'; } catch (e) { return 'general'; } }
+function setApplySettingsCat() { setSwitchSettingsCat(_settingsCat()); }
+el('set-rail')?.addEventListener('click', (e) => {
+  const b = e.target.closest('.set-rail-btn'); if (b) setSwitchSettingsCat(b.dataset.stab);
+});
+// Settings as an OBS-style modal overlay. openSettingsModal shows the fixed overlay over the current
+// page; closeSettingsModal hides it. In a popped-out window these are unused (settings is a page there).
+function openSettingsModal(cat) {
+  const m = el('tab-ajustes-content'); if (!m) return;
+  m.classList.add('open');
+  setSwitchSettingsCat(cat || _settingsCat());
+}
+function closeSettingsModal() { el('tab-ajustes-content')?.classList.remove('open'); }
+// Deep-link from anywhere: open Settings at a specific category (cockpit RL "Settings" button, the
+// replay-editor gear, etc.). Opens the modal in the main window; falls back to the page in a popout.
+function openSettings(cat) {
+  if (SETTINGS_AS_MODAL) { openSettingsModal(cat); return; }
+  el('tab-ajustes')?.click(); setSwitchSettingsCat(cat || _settingsCat());
+}
+window.openSettings = openSettings;
+// Jump links from feature panels into the right Settings category (cockpit RL strip, replay editor…).
+document.addEventListener('click', (e) => {
+  const j = e.target.closest('.js-open-rl-settings'); if (j) { e.preventDefault(); openSettings('games'); }
+});
+// Wire the modal chrome (main window only). Backdrop click, ✕, Esc all close it; "Pop out" detaches
+// Settings to its own OS window via the shared popout system, then closes the modal.
+if (SETTINGS_AS_MODAL) {
+  el('tab-ajustes-content')?.classList.add('as-modal');
+  el('btn-settings-close')?.addEventListener('click', closeSettingsModal);
+  el('tab-ajustes-content')?.addEventListener('click', (e) => { if (e.target === el('tab-ajustes-content')) closeSettingsModal(); });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && el('tab-ajustes-content')?.classList.contains('open')) closeSettingsModal(); });
+  el('btn-settings-popout')?.addEventListener('click', () => { closeSettingsModal(); if (typeof openPopout === 'function') openPopout('ajustes'); });
+}
+// Apply the saved/default category once at startup so the page isn't a full scroll on first open.
+setApplySettingsCat();
 
 // The Show Deck (#talent-deck) lives ONLY in the DCC's Show Deck tab (#dcc-showdeck-home) — the DCC
 // widget sits in the dashboard grid, so the deck rides along there. It used to be lent out to the
@@ -385,24 +450,32 @@ function placeShowDeck(_tab) {
     // so there's no reason to pre-filter by group — and pre-filtering hid anyone already sitting in a
     // slot who wasn't classified under that group, so the slot showed blank and they couldn't be found
     // or cleared even though the desk still had them.
+    // Placeholder says "Search crew…", so a partial name has to resolve — an exact-equality test
+    // rejected everything short of the full string and wiped the field.
     const tdMatch = (typed) => {
-      const q = (typed || '').trim().toLowerCase(); if (!q) return null;
-      return crew.find((c) => disp(c).toLowerCase() === q) || crew.find((c) => (c.name || '').toLowerCase() === q) || null;
+      const r = crewResolve(typed, crew);
+      return r.member || null;
     };
-    // Text input + <datalist> (type to filter) instead of a plain <select> — a long crew roster
-    // was impossible to search, and there was no way to add someone new without leaving the deck.
+    // Type-to-search text input instead of a plain <select> — a long crew roster was impossible to
+    // search, and there was no way to add someone new without leaving the deck. The suggestion list
+    // is our own dropdown (mountCrewTypeahead), not a native <datalist>: that one came out as an
+    // unstyled system popup listing crew in roster order instead of A–Z.
     const cell = (label, id, cur, variant) => {
       const curC = crew.find((c) => c.name === cur);
       // Fall back to the raw slot name when the occupant isn't a crew record (e.g. added straight to
       // the desk) so the slot still SHOWS who's in it — a blank slot you can't clear was the bug.
       return `<div class="td-slot td-slot--${variant}"><span class="td-slot-lbl">${esc(label)}</span>
-        <input type="text" class="input-text td-sel" id="${id}" list="${id}-dl" value="${esc(curC ? disp(curC) : (cur || ''))}" placeholder="Search crew…" autocomplete="off">
-        <datalist id="${id}-dl">${crew.map((c) => `<option value="${esc(disp(c))}">`).join('')}</datalist></div>`;
+        <input type="text" class="input-text td-sel" id="${id}" value="${esc(curC ? disp(curC) : (cur || ''))}" placeholder="Search crew…" autocomplete="off"></div>`;
     };
     wrap.innerHTML =
       cell('Host', 'td-host', roles.host || '', 'host')
       + [1, 2, 3, 4].map((n) => cell(labels[n] || ('Caster ' + n), 'td-c' + n, slotName(n), 'caster')).join('')
       + cell('Observer', 'td-obs', roles.observer || '', 'obs');
+    // The slots are re-rendered from scratch on every state change, so the dropdown is re-mounted
+    // each time (the mount is idempotent per element via its own data flag).
+    ['td-host', 'td-c1', 'td-c2', 'td-c3', 'td-c4', 'td-obs'].forEach((id) => {
+      const i = el(id); if (i && window.mountCrewTypeahead) window.mountCrewTypeahead(i, () => crew);
+    });
     [1, 2, 3, 4].forEach((n) => {
       el('td-c' + n)?.addEventListener('change', function () {
         const typed = this.value.trim();
@@ -443,8 +516,9 @@ function placeShowDeck(_tab) {
         + `<button type="button" class="rm" data-support-rm="${esc(c.id)}" title="Remove from the credits screen — their profile stays in Crew">&times;</button></span>`
       ).join('') : '<span class="dcc-support-empty">No off-air staff added yet.</span>';
     }
-    // Shared crew datalist for the On shift / Worked / Support search boxes.
-    { const dl = el('td-support-dl'); if (dl) dl.innerHTML = crew.map((c) => `<option value="${esc(disp(c))}">`).join(''); }
+    // Off-air staff search box uses the same A–Z dropdown as the slots; mount it here too in case
+    // the deck was moved into this page after the one-time mount below ran (placeShowDeck).
+    { const i = el('td-support-search'); if (i && window.mountCrewTypeahead) window.mountCrewTypeahead(i, () => crew); }
     // Website station rooms — the deck IS the director surface now (DCC merged in): monitor &
     // adjust the room the casters actually joined, copy its invite, jump into talkback. The
     // monitor iframe is lazy (only loads when toggled) and survives re-renders via its src.
@@ -502,17 +576,16 @@ function placeShowDeck(_tab) {
   };
   el('td-add-crew')?.addEventListener('click', () => { if (typeof window.openCrewAdd === 'function') window.openCrewAdd(); });
   // Resolve a typed name/handle to a crew member (shared by the Support adder).
-  const _tdFindCrew = (typed) => {
-    const q = (typed || '').trim().toLowerCase(); if (!q) return null;
-    const list = (currentState && currentState.crew) || [];
-    const d = (c) => c.handle || c.name;
-    return list.find((c) => d(c).toLowerCase() === q) || list.find((c) => (c.name || '').toLowerCase() === q) || null;
-  };
   el('td-support-assign')?.addEventListener('click', () => {
     const inp = el('td-support-search'); const typed = (inp?.value || '').trim();
     if (!typed) { showToast('Search for an existing crew member first.', '#fbbf24'); return; }
-    const m = _tdFindCrew(typed);
-    if (!m) { showToast(`No crew member named "${typed}" — use + Add Crew to create them first.`, '#fbbf24'); return; }
+    const r = crewResolve(typed);
+    if (r.ambiguous) {
+      showToast(`"${typed}" matches ${r.ambiguous.map((c) => c.handle || c.name).join(', ')} — type more to pick one.`, '#fbbf24');
+      return;
+    }
+    const m = r.member;
+    if (!m) { showToast(`No crew member matching "${typed}" — use + Add Crew to create them first.`, '#fbbf24'); return; }
     const group = el('td-support-role-sel')?.value || 'producer';
     // Event-scoped add: lands on tonight's deck (and credits them via workedEvent server-side)
     // WITHOUT touching the crew record's group — the deck is per-show, the Crew page is forever.
@@ -525,6 +598,33 @@ function placeShowDeck(_tab) {
     // Deck-only removal — the crew record (group, credit history, everything) is untouched.
     send('td_support_remove', { crewId: btn.dataset.supportRm });
   });
+  // ── Shift handover ────────────────────────────────────────────────────────
+  // "Next shift" is the crew changeover, not a preset browser: the people currently on the desk
+  // have finished their stint, so they move to Off-Air Event Staff (which is what feeds the
+  // credits screen) and the desk empties for the incoming lineup. If a saved preset follows the
+  // loaded one the server seats it; otherwise you type the new lineup in.
+  // "Prev shift" undoes the last handover — that crew go back on the desk and come off the
+  // off-air list, since it's explicitly for people who AREN'T on camera.
+  el('td-shift-next')?.addEventListener('click', async () => {
+    const cs = (currentState && currentState.casters) || {};
+    const lib = cs.library || [];
+    const names = [];
+    [1, 2, 3, 4].forEach((n) => {
+      const e = (cs.lineup || []).find((x) => Number(x.slot) === n);
+      const p = e && lib.find((l) => l && l.id === e.libraryId);
+      if (p && p.name) names.push(p.name);
+    });
+    const roles = cs.showRoles || {};
+    if (roles.host) names.push(roles.host);
+    if (roles.observer) names.push(roles.observer);
+    if (!names.length) { showToast('Nobody on the desk to hand over — fill the lineup first.', '#fbbf24'); return; }
+    if (!await appConfirm(
+      `Hand over the desk? ${names.join(', ')} move to Off-Air Event Staff (staying on the credits screen) and the desk clears for the next lineup.`,
+      'Hand over')) return;
+    send('shift_handover', {});
+  });
+  el('td-shift-prev')?.addEventListener('click', () => send('shift_restore', {}));
+
   el('td-shift-save')?.addEventListener('click', async () => {
     const name = await customPrompt('Save preset', 'Name this desk preset — saves the current slots, roles, on-shift marks and display options so you can re-apply them in one click.', '', 'Save');
     if (name) send('save_shift', { name });
@@ -970,16 +1070,54 @@ function _pcamAutoMatch() {
     .forEach(([id, fn]) => { const b = el(id); if (b) b.addEventListener('click', fn); });
 })();
 
+/* Resolve typed text to one crew member.
+ *
+ * The Support adders are labelled "Search existing crew…" but were backed by an exact
+ * case-insensitive equality test, so typing a partial name — the whole point of a search box —
+ * failed with "No crew member named X" even though the person was right there. This resolves
+ * properly: exact wins outright, otherwise the best ranked match, and a genuine tie reports the
+ * candidates instead of silently picking whichever the array order happened to put first (adding
+ * the wrong person to a credits screen is not a mistake worth guessing on).
+ *
+ * Returns { member } | { ambiguous: [..] } | { none: true }.
+ */
+function crewResolve(typed, crewList) {
+  const raw = (typed || '').trim();
+  if (!raw) return { none: true };
+  // Callers rendering from a pushed state pass their own list so a resolve can't disagree with
+  // the roster the producer is actually looking at.
+  const list = crewList || (currentState && currentState.crew) || [];
+  const disp = (c) => c.handle || c.name || '';
+  const low = raw.toLowerCase();
+  const exact = list.find((c) => disp(c).toLowerCase() === low)
+    || list.find((c) => (c.name || '').toLowerCase() === low);
+  if (exact) return { member: exact };
+
+  const scored = list.map((c) => ({
+    c, s: NESearch.score(raw, [{ text: c.name, weight: 2 }, { text: c.handle, weight: 2 }, c.role])
+  })).filter((x) => x.s >= 0).sort((a, b) => b.s - a.s);
+  if (!scored.length) return { none: true };
+  // A clear winner is one that outscores the runner-up by a comfortable margin; anything closer
+  // is a real ambiguity ("jo" over Joker and Johnson) and the producer should pick.
+  if (scored.length === 1 || scored[0].s >= scored[1].s * 1.35) return { member: scored[0].c };
+  return { ambiguous: scored.slice(0, 4).map((x) => x.c) };
+}
+
 function renderCrewList() {
   const list = el('crew-list'); if (!list) return;
-  const q   = (el('crew-search')?.value || '').trim().toLowerCase();
+  const q   = (el('crew-search')?.value || '').trim();
   const grp = el('crew-filter-group')?.value || '';
   const members = (typeof currentState !== 'undefined' && currentState.crew) ? currentState.crew : [];
-  const filtered = members.filter((m) => {
-    if (grp && m.group !== grp) return false;
-    if (!q) return true;
-    return [(m.name||''), (m.handle||''), (m.role||'')].some((v) => v.toLowerCase().includes(q));
-  });
+  // Country, social handle and notes are searchable too — "who's the German observer" is a real
+  // question, and the old name/handle/role trio couldn't answer it. Results come back ranked.
+  const filtered = NESearch.filter(
+    members.filter((m) => !grp || m.group === grp),
+    q,
+    (m) => [
+      { text: m.name, weight: 2 }, { text: m.handle, weight: 1.5 },
+      m.role, m.socialHandle, m.country, m.notes
+    ]
+  );
   const countEl = el('crew-count');
   if (countEl) countEl.textContent = members.length ? `(${members.length})` : '';
   const GROUP_LABEL = { casters: 'Casters', hosts: 'Hosts', guests: 'Guests', observers: 'Observers', producer: 'Producer', admin: 'Tournament Admin', socials: 'Social Media' };
@@ -1057,14 +1195,12 @@ function renderDccHostsPane() {
   const filtersRoot  = el('stg-filters') || document;
   const activeFilter = filtersRoot.querySelector('.dcc-crew-filter.active');
   const kindFilter = activeFilter ? activeFilter.dataset.filter : 'all';
-  const query = ((el('stg-search') && el('stg-search').value) || '').toLowerCase().trim();
+  const query = ((el('stg-search') && el('stg-search').value) || '').trim();
   let members = allMembers;
   if (kindFilter !== 'all') members = members.filter((m) => m.kind === kindFilter);
-  if (query) members = members.filter((m) =>
-    (m.name   || '').toLowerCase().includes(query) ||
-    (m.handle || '').toLowerCase().includes(query) ||
-    (m.role   || '').toLowerCase().includes(query)
-  );
+  members = NESearch.filter(members, query, (m) => [
+    { text: m.name, weight: 2 }, { text: m.handle, weight: 1.5 }, m.role, m.country, m.kind
+  ]);
   if (!members.length) {
     list.innerHTML = `<div class="roster-empty">${query || kindFilter !== 'all'
       ? 'No matches. <button class="btn btn-ghost btn-xs" id="dcc-crew-clear-filter" style="margin-left:4px;">Clear filter</button>'
@@ -1139,7 +1275,7 @@ function renderDccTeamSection(side) {
   const labelEl = el(`dcc-label-team-${side}`);
   if (labelEl && team.name) labelEl.textContent = team.name;
   const badgeEl = el(`dcc-badge-team-${side}`);
-  if (badgeEl) { badgeEl.textContent = (team.name || (side === 'blue' ? 'BLUE' : 'ORANGE')).toUpperCase().slice(0, 12); badgeEl.style.background = teamColor; }
+  if (badgeEl) { badgeEl.textContent = (team.name || (side === 'blue' ? 'BLUE' : 'ORANGE')).toUpperCase().slice(0, 12); badgeEl.style.background = teamColor; badgeEl.style.color = teamInk(teamColor); }
 
   const roomEl = el(`dcc-room-team-${side}`);
   if (roomEl) {
@@ -1243,17 +1379,19 @@ function renderDccSupportCrew() {
       + `<span class="rl">${tlEsc(c.role || LABEL[c.group] || '')}</span>`
       + `<button type="button" class="rm" data-support-rm="${tlEsc(c.id)}" title="Remove from crew">&times;</button></span>`;
   }).join('') : '<span class="dcc-support-empty">No producers, admins or socials added yet.</span>';
-  const dl = el('dcc-support-dl');
-  if (dl) dl.innerHTML = crew.map((c) => `<option value="${tlEsc(c.handle || c.name)}">`).join('');
+  { const i = el('dcc-support-search'); if (i && window.mountCrewTypeahead) window.mountCrewTypeahead(i, () => (currentState && currentState.crew) || []); }
 }
 el('dcc-support-assign')?.addEventListener('click', () => {
   const inp = el('dcc-support-search'); const typed = (inp?.value || '').trim();
   if (!typed) { showToast('Search for an existing crew member first.', '#fbbf24'); return; }
-  const crewList = (currentState && currentState.crew) || [];
   const disp = (c) => c.handle || c.name;
-  const m = crewList.find((c) => disp(c).toLowerCase() === typed.toLowerCase())
-    || crewList.find((c) => (c.name || '').toLowerCase() === typed.toLowerCase());
-  if (!m) { showToast(`No crew member named "${typed}" — add them on the Crew tab first.`, '#fbbf24'); return; }
+  const r = crewResolve(typed);
+  if (r.ambiguous) {
+    showToast(`"${typed}" matches ${r.ambiguous.map(disp).join(', ')} — type more to pick one.`, '#fbbf24');
+    return;
+  }
+  const m = r.member;
+  if (!m) { showToast(`No crew member matching "${typed}" — add them on the Crew tab first.`, '#fbbf24'); return; }
   const group = el('dcc-support-role-sel')?.value || 'producer';
   send('update_crew_member', { id: m.id, group });
   if (inp) inp.value = '';
@@ -1277,9 +1415,14 @@ function renderDccAll() {
 
 function renderDccTeamsPane() {
   const wrap = el('dcc-teams-list'); if (!wrap) return;
-  const query = ((el('stg-search') && el('stg-search').value) || '').toLowerCase().trim();
-  let   saved = (currentState && currentState.savedTeams) || [];
-  if (query) saved = saved.filter((t) => (t.name || '').toLowerCase().includes(query));
+  const query = ((el('stg-search') && el('stg-search').value) || '').trim();
+  // One box drives both this pane and the crew pane — it used to search crew by name/handle/role
+  // but teams by name only, so the same query silently meant two different things. Rosters are
+  // searchable here too.
+  const saved = NESearch.filter((currentState && currentState.savedTeams) || [], query, (t) => [
+    { text: t.name, weight: 2 },
+    { text: (t.players || []).map((p) => (typeof p === 'string' ? p : ((p && (p.name || p.gamertag)) || ''))).join(' '), bag: true }
+  ]);
 
   if (!saved.length) {
     wrap.innerHTML = `<div class="roster-empty">No teams yet. Add teams in <b>Talent &rarr; Teams</b> or click <b>+ Add</b>.</div>`;
@@ -1602,8 +1745,12 @@ function renderDccHostsGrid() {
       crew.forEach((c) => { if (c && c.name) byKey.set(keyOf(c.name, c.socialHandle || c.handle), { name: c.name, handle: c.socialHandle || c.handle || '', role: c.role || '', social: c.social || 'none', country: c.country || '' }); });
       lib.forEach((e2) => { if (e2 && e2.name) { const k = keyOf(e2.name, e2.handle); const cur = byKey.get(k) || { name: e2.name, handle: e2.handle || '', role: e2.role || '', social: e2.social || 'none', country: e2.country || '' }; cur._libKind = e2.kind || 'caster'; cur._libId = e2.id; byKey.set(k, cur); } });
       let items = [...byKey.values()];
-      if (q) items = items.filter((x) => (x.name + ' ' + (x.handle || '') + ' ' + (x.role || '')).toLowerCase().includes(q));
       items.sort((a, b) => a.name.localeCompare(b.name));
+      // Fields kept separate rather than joined into one string: joined, "caster jstn" failed
+      // while "jstn caster" worked, because a substring test can't match words out of order.
+      items = NESearch.filter(items, q, (x) => [
+        { text: x.name, weight: 2 }, { text: x.handle, weight: 1.5 }, x.role, x.country
+      ]);
       list._items = items;
       list.innerHTML = items.length ? items.map((x, i) => {
         const here = x._libKind === kind;
@@ -2321,6 +2468,12 @@ function _returnGraphicsToProd() {
     schedule:  { name: 'Schedule',              link: 'schedule.html',        hasClear: true,  hasQueue: false, hasPush: true,  hasApply: true,  pushId: 'btn-gfx-schedule-push', clearId: 'btn-gfx-schedule-clear', popout: true },
     bracket:   { name: 'Bracket',               link: 'bracket.html',         hasClear: true,  hasQueue: false, hasPush: true,  popout: true },
     credits:   { name: 'Stream Credits',        link: 'stream-credits.html',  hasClear: true,  hasQueue: false, hasPush: true  },
+    // Battle-royale scenes. Their CONTENT is driven from Match — Lobby (that's where the field
+    // is), so these entries exist to make them pushable/clearable from the same Graphics rail as
+    // everything else — hasApply is off because there's nothing here to save.
+    brdrop:    { name: 'Drop Map',              link: 'fn-dropmap.html',      hasClear: true,  hasQueue: false, hasPush: true, brOnly: true },
+    brcompare: { name: 'Comparison Card',       link: 'fn-compare.html',      hasClear: true,  hasQueue: false, hasPush: true, brOnly: true },
+    brvictory: { name: 'Victory Royale',        link: 'fn-victory.html',      hasClear: true,  hasQueue: false, hasPush: true, brOnly: true },
   };
 
   let currentKey = 'break';
@@ -2536,18 +2689,36 @@ function _returnGraphicsToProd() {
 
   // Dynamic preview scaling — scales any open pop-out's own embedded preview and the floating
   // OBS Program panel's GFX-mode iframe to fit their container.
-  function fitScenePreviews() {
+  // The retry below used to be unbounded: any preview box with no width re-armed the whole scan
+  // 120ms later, forever. A box that is DISPLAY:NONE (every closed pop-out / inactive scene panel)
+  // never gains width, so the loop never ended — and since several callers can start it, the loops
+  // stacked. A profile of a 36-minute-old session had this one function at 64% of the renderer's
+  // CPU, re-running querySelectorAll over the whole panel DOM ~8x a second. Hence: skip hidden
+  // boxes entirely (they're re-fit when opened — see the fitScenePreviews() call in show() and the
+  // ResizeObserver on these same boxes), cap the retries at boxes that are laid out but not yet
+  // measured, and keep ONE pending retry rather than one per caller.
+  let _fitPvTimer = null, _fitPvTries = 0;
+  function fitScenePreviews(_retry) {
+    if (!_retry) _fitPvTries = 0;
     let anyMissed = false;
     document.querySelectorAll('.gfx-popout-box .live-pv, .obs-prev-gfx .live-pv').forEach(function(wrap) {
       const iframe = wrap.querySelector('iframe');
       if (!iframe) return;
+      // Not rendered at all (closed pop-out / inactive scene panel) — nothing to measure, and it
+      // won't gain a size until it's shown, so don't let it re-arm the retry below forever.
+      // getClientRects() rather than offsetParent: the floating OBS Program panel is position:fixed,
+      // which has a null offsetParent while being perfectly visible and very much in need of fitting.
+      if (!wrap.getClientRects().length) return;
       const w = wrap.offsetWidth, h = wrap.offsetHeight || wrap.clientHeight;
       if (!w) { anyMissed = true; return; }
       const scale = h ? Math.min(w / 1920, h / 1080) : (w / 1920);
       iframe.style.left = Math.max(0, (w - 1920 * scale) / 2) + 'px';
       iframe.style.transform = 'scale(' + scale + ')';
     });
-    if (anyMissed) setTimeout(fitScenePreviews, 120);
+    clearTimeout(_fitPvTimer); _fitPvTimer = null;
+    // Visible-but-unmeasured is a real transient (mid-layout, iframe still loading) — retry a few
+    // times, then stop. ~1.2s is far longer than a layout pass; anything still 0 isn't coming.
+    if (anyMissed && ++_fitPvTries <= 10) _fitPvTimer = setTimeout(() => fitScenePreviews(true), 120);
   }
   window._fitScenePreviews = fitScenePreviews;
 
@@ -2580,9 +2751,16 @@ function _returnGraphicsToProd() {
       const body = el('gfx-front-standings-body'); if (!body) return;
       const s = data.standings || {};
       // Sync inline quick-edit controls (don't clobber a field the producer is typing in)
-      const tEl = el('gfx-front-std-title'); if (tEl && document.activeElement !== tEl) tEl.value = s.title || '';
+      const tEl = el('gfx-front-std-title');
+      if (tEl && document.activeElement !== tEl) tEl.value = s.title || '';
+      // Leaving Title blank falls through to the event title on the overlay, so SAY so in the
+      // placeholder rather than making the producer guess what an empty field will show.
+      if (tEl) tEl.placeholder = (data.eventName || '').trim() || 'STANDINGS';
       const sEl = el('gfx-front-std-subtitle'); if (sEl && document.activeElement !== sEl) sEl.value = s.subtitle || '';
       const rEl = el('gfx-front-std-showrecord'); if (rEl && document.activeElement !== rEl) rEl.checked = s.showRecord !== false;
+      const layoutChoice = s.layout || 'auto';
+      document.querySelectorAll('#gfx-std-layout-seg .seg-btn').forEach((b) => b.classList.toggle('active', b.dataset.stdlayout === layoutChoice));
+      stdRenderFighters();
       const srcBtn = document.querySelector('#gfx-std-src .gfx-std-src-tab.is-on, #gfx-std-src .gfx-src-tab.is-on');
       // Mirror the pop-out's active source onto the front-panel chips (legacy names → 'tournament').
       const srcKey = gfxStdNormSrc(srcBtn ? srcBtn.dataset.stdsrc : 'league');
@@ -2863,6 +3041,64 @@ function _returnGraphicsToProd() {
   window._gfxSceneMeta = SCENE_META;  // expose for on-air board auto-clear
   window._gfxDoPush = doPush;         // expose for external callers (hotkeys, rundown)
 
+  // ── Battle-royale scenes ────────────────────────────────────────────────────
+  // doPush()/clearAllGfxScenes() drive scenes through hidden btn-show-*/btn-hide-* buttons, so
+  // the BR graphics need theirs wired the same way rather than being special-cased in the hub.
+  el('btn-show-brdrop')?.addEventListener('click', () => send('set_br_dropmap', { visible: true }));
+  el('btn-hide-brdrop')?.addEventListener('click', () => send('set_br_dropmap', { visible: false }));
+  el('btn-show-brcompare')?.addEventListener('click', () => send('set_br_compare', { visible: true }));
+  el('btn-hide-brcompare')?.addEventListener('click', () => send('set_br_compare', { visible: false }));
+  el('btn-show-brvictory')?.addEventListener('click', () => send('set_br_victory', { visible: true }));
+  el('btn-hide-brvictory')?.addEventListener('click', () => send('set_br_victory', { visible: false }));
+
+  // Drop-map settings (the only BR content that has no home in Match — Lobby).
+  el('gfx-brdrop-title')?.addEventListener('change', function () { send('set_br_dropmap', { title: this.value }); });
+  el('gfx-brdrop-map')?.addEventListener('change', function () { send('set_br_dropmap', { mapUrl: this.value }); });
+  el('gfx-brdrop-players')?.addEventListener('change', function () { send('set_br_dropmap', { showPlayers: this.checked }); });
+  el('gfx-brdrop-logos')?.addEventListener('change', function () { send('set_br_dropmap', { showLogos: this.checked }); });
+  el('gfx-brcompare-goto')?.addEventListener('click', () => {
+    // Match — Lobby lives inside Match — Teams, which relocates between the Dashboard and the
+    // Teams tab. Go to the Dashboard (its default home), then open the builder.
+    document.querySelector('.tab-btn[data-tab="principal"]')?.click();
+    setTimeout(() => {
+      const box = el('mlb-compare');
+      if (box && box.style.display === 'none') el('mlb-compare-open')?.click();
+      el('match-lobby')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 120);
+  });
+  el('gfx-brvic-apply')?.addEventListener('click', () => send('set_br_victory', {
+    team: (el('gfx-brvic-team') || {}).value || '',
+    stage: (el('gfx-brvic-stage') || {}).value || '',
+    match: (el('gfx-brvic-match') || {}).value || ''
+  }));
+  el('gfx-brvic-auto')?.addEventListener('click', () => {
+    const m = Math.max(1, parseInt((el('mlb-match') || {}).value, 10) || 1);
+    send('set_br_victory', { fromMatch: m });
+  });
+
+  // Show the BR nav group + hydrate its fields only while a BR lobby game is active. Called from
+  // applyState so it tracks a game switch immediately.
+  window.gfxSyncBrNav = function (data) {
+    const grp = el('gfx-nav-group-br');
+    const meta = (data && data.brMeta) || {};
+    const on = (meta.lobbyGames || []).includes(data && data.activeGame);
+    if (grp) grp.style.display = on ? '' : 'none';
+    // A producer sitting on a BR scene when they switch to a non-BR game would otherwise be
+    // stranded on a hidden panel — put them somewhere real.
+    if (!on && SCENE_META[currentKey] && SCENE_META[currentKey].brOnly) show('break');
+    if (!on) return;
+    const dm = ((data.br || {}).dropmap) || {};
+    const set = (id, v) => { const n = el(id); if (n && n !== document.activeElement) n.value = v; };
+    set('gfx-brdrop-title', dm.title || '');
+    set('gfx-brdrop-map', dm.mapUrl || '');
+    const p = el('gfx-brdrop-players'); if (p && p !== document.activeElement) p.checked = dm.showPlayers !== false;
+    const l = el('gfx-brdrop-logos');   if (l && l !== document.activeElement) l.checked = !!dm.showLogos;
+    const v = ((data.br || {}).victory) || {};
+    set('gfx-brvic-team', v.team || '');
+    set('gfx-brvic-stage', v.stage || '');
+    set('gfx-brvic-match', v.match || '');
+  };
+
   // Inject Spotlight panel into the right-column body of the split layout.
   const spotlightPanel = document.getElementById('ev-spotlight-panel');
   const spotlightHost  = document.getElementById('gfx-spotlight-body');
@@ -2946,7 +3182,7 @@ function _returnGraphicsToProd() {
   // Panel runs from file://, so asset paths from the server need an absolute origin.
   const MP_ASSET_BASE = location.protocol === 'file:' ? 'http://localhost:3000' : '';
   // Game-mode vocabulary comes from the ACTIVE GAME (backend/veto.js VETO_META.modes — Overwatch
-  // Control/Hybrid/…, Rocket League Soccar/Hoops/Dropshot/Snow Day/Rumble/Heatseeker/Spike Rush),
+  // Control/Hybrid/…, Rocket League Standard/Hoops/Dropshot/Snow Day/Rumble/Heatseeker/Spike Rush),
   // plus any type already on a pool entry. A game with no modes gets no dropdown at all instead of
   // the old Overwatch-only list showing up on every game.
   function mpModeOptions() {
@@ -3105,6 +3341,8 @@ function _returnGraphicsToProd() {
         };
       }
       return {
+        // mode falls back to the pool entry's `type` (intrinsic map data, e.g. Overwatch's
+        // Control/Hybrid) — never to `tier`, which is only a ruleset hint for the veto.
         name: p ? p.name : '', image: p ? (p.image || '') : '', mode: modeOverride || (p ? (p.type || '') : ''),
         action: pk === 'decider' ? 'decider' : 'pick',
         by: (pk === 'a' || pk === 'b') ? pk : '',
@@ -3473,6 +3711,11 @@ function _returnGraphicsToProd() {
     if (st) { st.textContent = 'Teams updated.'; setTimeout(() => { st.textContent = ''; }, 2000); }
   });
   el('gfx-mu-swap')?.addEventListener('click', () => send('swap_teams', {}));
+  // Real names on the Matchup graphic ride the shared intro.showRealName flag (Line-up + Bracket
+  // read it too). set_intro applies only the keys it's given, so this can't clobber the rest.
+  el('check-matchup-realname')?.addEventListener('change', function () {
+    send('set_intro', { showRealName: !!this.checked });
+  });
 
   // ── Standings panel ──────────────────────────────────────────────────────
   // Legacy source values: 'startgg' (seeding-only, all zeros) and 'bracket' (phase/pool) were merged
@@ -3563,9 +3806,12 @@ function _returnGraphicsToProd() {
     const common = gfxStdCommon();
     const src = document.querySelector('#gfx-std-src .gfx-src-tab.is-on')?.dataset.stdsrc || 'league';
     if (src === 'league') {
-      const rows = buildLeagueStandingsRows(el('gfx-std-league')?.value);
+      const leagueId = el('gfx-std-league')?.value || '';
+      const rows = buildLeagueStandingsRows(leagueId);
       if (!rows) return { ok: false, err: 'Select a league first.' };
-      return { ok: true, payload: { ...common, source: 'league', rows }, msg: 'from league' };
+      // Send the league id, not just a snapshot of its rows — the server re-mirrors this league's
+      // points on every league change, so the board stays live instead of freezing at push time.
+      return { ok: true, payload: { ...common, source: 'league', leagueId, rows }, msg: 'from league' };
     } else if (src === 'tournament') {
       // ONE tournament source. state.bracket is populated by whichever platform is connected —
       // start.gg, Challonge or NXGEN all feed it — so this works for any of them with no extra
@@ -3594,11 +3840,318 @@ function _returnGraphicsToProd() {
     }
     return { ok: true, payload: { ...common, source: 'manual' }, msg: '' };
   }
+  // -- Top 8 builder (Smash placement board) ----------------------------------
+  // This is a row EDITOR, not just an annotation pass: a producer sets who finished where and the
+  // fighter they played. It seeds from whichever source is selected above, and the first hand edit
+  // takes ownership (_stdTop8 stops being null) so a start.gg refetch can't reorder the board out
+  // from under them mid-show. "Reload from source" hands control back.
+  let _stdTop8 = null;          // null = mirror the source; array = producer-owned rows
+  const STD_TOP8_SEED = 8;      // it's a TOP 8 board -- seed eight and let "Add slot" go further
+  // Which board the push will actually draw -- mirrors standings.html's own 'auto' rule.
+  function stdLayoutChoice() {
+    const btn = document.querySelector('#gfx-std-layout-seg .seg-btn.active');
+    return btn ? btn.dataset.stdlayout : (((currentState || {}).standings || {}).layout || 'auto');
+  }
+  // The top-8 placement board belongs to Smash -- it is the only game with fighter art, and
+  // standings.html refuses to draw it for anything else. Mirror that rule here so the panel can
+  // never offer a board the overlay won't render.
+  function stdGameIsSmash() {
+    const st = currentState || {};
+    const game = (st.games || {})[st.activeGame] || {};
+    return (game.features || []).indexOf('stocks') >= 0;
+  }
+  function stdIsPlacement() {
+    return stdGameIsSmash() && stdLayoutChoice() !== 'podium';
+  }
+  // Real finish order from start.gg for the linked event, or null. This is the ONLY source with
+  // true placements: an elimination bracket's standings are ordered by set wins, so they have no
+  // 5/5 or 7/7 ties and can rank a losers-run runner-up above the champion.
+  function stdStartggPlacements() {
+    const pl = (currentState || {}).startggPlacements || {};
+    return Array.isArray(pl.rows) && pl.rows.length ? pl.rows : null;
+  }
+  // The rows the selected source WOULD send, falling back to what is already on air so the list
+  // still populates for a board pushed in an earlier session.
+  function stdCandidateRows() {
+    // A top-8 board wants finish order, so real placements beat anything derived from the bracket.
+    if (stdIsPlacement()) {
+      const pl = stdStartggPlacements();
+      // `character` rides along: it is start.gg's reported per-game selection, which is what
+      // auto-fills the fighters. Dropping it here would have made the whole pull invisible.
+      // `players` is the entrant's roster — the Top 8 card lists it under a TEAM/doubles name, so
+      // it has to survive this mapping the same way `character` does.
+      if (pl) return pl.map((r) => ({ placement: r.placement, name: r.name,
+                                      character: r.character || '', players: r.players || [] }));
+    }
+    let rows = [];
+    try { const r = buildStandingsPayload(); if (r.ok && Array.isArray(r.payload.rows)) rows = r.payload.rows; } catch (e) { rows = []; }
+    if (!rows.length) rows = ((currentState || {}).standings || {}).rows || [];
+    return rows;
+  }
+  // Rows for the board: the producer's list once they've touched it, else the live source.
+  function stdTop8Rows() {
+    if (_stdTop8) return _stdTop8;
+    return stdCandidateRows().slice(0, STD_TOP8_SEED).map((r, i) => ({ ...r, placement: r.placement || (i + 1) }));
+  }
+  // standings.html sizes the cards by ARRAY ORDER (rows[0] is the hero) but PRINTS row.placement,
+  // so a placement typed out of order would show a rank that contradicts the card it sits on.
+  // Sorting by placement keeps the two in step; it is stable, so slots sharing a placement (5, 5)
+  // keep the order the producer put them in.
+  function stdTop8Sorted(rows) {
+    return rows
+      .map((r, i) => ({ r, i }))
+      .sort((a, b) => ((Number(a.r.placement) || 999) - (Number(b.r.placement) || 999)) || (a.i - b.i))
+      .map((x) => x.r);
+  }
+  // Take ownership before applying an edit.
+  function stdTop8Own() {
+    if (!_stdTop8) _stdTop8 = stdTop8Rows().map((r) => ({ ...r }));
+    return _stdTop8;
+  }
+  // Every player name we know of, for the name picker: event entrants and their rosters, the
+  // profile registry, and the saved team library.
+  function stdPlayerNames() {
+    const st = currentState || {};
+    const out = new Set();
+    const add = (n) => { n = String(n || '').trim(); if (n) out.add(n); };
+    ((st.startgg || {}).eventTeams || []).forEach((t) => { add(t.name); (t.players || []).forEach((pl) => add(pl && pl.name)); });
+    Object.keys(st.playerProfiles || {}).forEach((k) => { const v = st.playerProfiles[k]; add((v && v.gamertag) || k); });
+    (st.savedTeams || []).forEach((t) => { add(t.name); (t.players || []).forEach((pl) => add(pl && (pl.gamertag || pl.name))); });
+    (((st.bracket || {}).standings) || []).forEach((r) => add(r && r.name));
+    return [...out].sort((a, b) => a.localeCompare(b));
+  }
+  function stdSyncPlayerList() {
+    const dl = el('gfx-std-players'); if (!dl) return;
+    const names = stdPlayerNames();
+    const sig = String(names.length) + '|' + names.slice(0, 6).join(',');
+    if (dl.dataset.sig === sig) return;
+    dl.dataset.sig = sig;
+    dl.innerHTML = names.slice(0, 400).map((n) => '<option value="' + tlEsc(n) + '"></option>').join('');
+  }
+  // Compare a row list to what's pushed, so the chip can say whether the two agree.
+  const stdRowSig = (rows) => (rows || []).map((r) =>
+    [r.placement, (r.name || '').trim().toLowerCase(), (r.character || '').trim().toLowerCase()].join('|')).join(';');
+
+  function stdRenderFighters() {
+    const wrap = el('gfx-std-fighters'); if (!wrap) return;
+    // Off Smash there is no board choice to make, so the whole selector goes away.
+    const seg = el('gfx-std-layout-row'); if (seg) seg.style.display = stdGameIsSmash() ? '' : 'none';
+    const block = el('gfx-std-fighters-wrap');
+    const show = stdIsPlacement();
+    if (block) block.style.display = show ? '' : 'none';
+    if (!show) {
+      // Non-placement standings still want the read-only preview — it's only redundant when the
+      // Top 8 builder is on screen showing the same eight players.
+      const d = el('gfx-front-standings-body');
+      const df = d && d.closest('.gfx-fp-field');
+      if (df) df.style.display = '';
+      return;
+    }
+    stdSyncPlayerList();
+    // Settle the list into board order once focus leaves it — re-sorting mid-keystroke would
+    // yank the row the producer is typing in out from under the cursor.
+    if (_stdTop8 && !wrap.contains(document.activeElement)) _stdTop8 = stdTop8Sorted(_stdTop8);
+    const liveRows = (((currentState || {}).standings || {}).rows) || [];
+    const rows = stdTop8Rows();
+    const visible = !!(((currentState || {}).standings || {}).visible);
+
+    const showTog = el('gfx-std-show-overlay');
+    if (showTog && document.activeElement !== showTog) showTog.checked = visible;
+
+    // Whether what's on screen has actually reached the overlay — the only thing the old
+    // read-only "On overlay" list was really telling the producer.
+    const chip = el('gfx-std-live-chip');
+    if (chip) {
+      const same = stdRowSig(liveRows) === stdRowSig(rows);
+      chip.className = 'gfx-std-live-chip ' + (!visible ? 'is-off' : (same ? 'is-live' : 'is-dirty'));
+      chip.textContent = !visible ? 'Hidden' : (same ? 'On overlay' : 'Unpushed changes');
+    }
+    // The separate read-only "On overlay" list is redundant while this builder is showing.
+    const dupe = el('gfx-front-standings-body');
+    const dupeField = dupe && dupe.closest('.gfx-fp-field');
+    if (dupeField) dupeField.style.display = 'none';
+
+    const emptyEl = el('gfx-std-fighters-empty');
+    if (emptyEl) emptyEl.style.display = rows.length ? 'none' : '';
+    const stateEl = el('gfx-std-pl-state');
+    if (stateEl) {
+      // Say how many fighters start.gg actually reported. Blank slots are almost always a player
+      // who didn't pick a character when reporting, not a fault here — without this the producer
+      // is left guessing whether the pull ran at all.
+      const pl = (currentState || {}).startggPlacements || {};
+      let label = 'Following the source';
+      if (_stdTop8) label = 'Edited by hand';
+      else if (stdStartggPlacements()) {
+        const filled = rows.filter((r) => (r.character || '').trim()).length;
+        label = 'Following start.gg · ' + filled + '/' + rows.length + ' fighters reported';
+        // Say WHY none arrived. A blank fighter column is otherwise indistinguishable from a
+        // broken pull, which is exactly the hole this feature fell into.
+        if (!filled) {
+          label += pl.charError ? ' (' + pl.charError + ')'
+                 : (pl.setsScanned ? ' — none reported on ' + pl.setsScanned + ' set(s)' : '');
+        }
+      }
+      stateEl.textContent = label;
+    }
+    // Rebuild only when the row COUNT changes; values are synced below so a state push never
+    // wipes a half-typed name or fighter out from under the producer.
+    if (wrap.dataset.count !== String(rows.length)) {
+      wrap.dataset.count = String(rows.length);
+      wrap.innerHTML = rows.map((r, i) => (
+        '<div class="gfx-std-pl-row" data-i="' + i + '" draggable="true">' +
+          '<span class="gfx-std-pl-grip" title="Drag to reorder">⠿</span>' +
+          '<input type="text" class="input-text gfx-std-pl-rank" data-fld="placement" title="Placement (ties are fine - 5, 5, 7, 7)">' +
+          '<input type="text" class="input-text gfx-std-pl-name" data-fld="name" list="gfx-std-players" placeholder="Player" autocomplete="off">' +
+          '<span class="smash-char-pick"><img class="smash-char-thumb is-empty" alt="">' +
+            '<input type="text" class="input-text smash-char-input" data-fld="character" placeholder="Pick a fighter" readonly></span>' +
+          '<button type="button" class="btn btn-ghost btn-xs gfx-std-pl-rm" title="Remove this slot">&times;</button>' +
+        '</div>'
+      )).join('');
+    }
+    wrap.querySelectorAll('.gfx-std-pl-row').forEach((row, i) => {
+      const r = rows[i] || {};
+      row.querySelectorAll('[data-fld]').forEach((inp) => {
+        const v = inp.dataset.fld === 'placement' ? String(r.placement || (i + 1)) : String(r[inp.dataset.fld] || '');
+        if (document.activeElement !== inp) inp.value = v;
+      });
+      smashSetThumb(row.querySelector('.smash-char-thumb'), row.querySelector('[data-fld="character"]').value);
+      // Medal tint for the podium — 1st/2nd/3rd otherwise look identical to 8th.
+      const place = parseInt(r.placement || (i + 1), 10);
+      row.classList.toggle('is-1', place === 1);
+      row.classList.toggle('is-2', place === 2);
+      row.classList.toggle('is-3', place === 3);
+    });
+  }
+
+  /* Drag-to-reorder. Placements are NOT renumbered 1..n on drop — that would destroy the ties a
+     bracket legitimately produces (5, 5, 7, 7). Instead the existing placement VALUES are taken in
+     ascending order and re-applied down the new row order, so the shape of the ties survives while
+     the entrants move. */
+  let _stdDragFrom = null;
+  el('gfx-std-fighters')?.addEventListener('dragstart', (e) => {
+    const row = e.target.closest('.gfx-std-pl-row'); if (!row) return;
+    _stdDragFrom = parseInt(row.dataset.i, 10);
+    row.classList.add('is-dragging');
+    try { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', String(_stdDragFrom)); } catch (_) {}
+  });
+  el('gfx-std-fighters')?.addEventListener('dragend', () => {
+    _stdDragFrom = null;
+    document.querySelectorAll('.gfx-std-pl-row').forEach((r) => r.classList.remove('is-dragging', 'is-over'));
+  });
+  el('gfx-std-fighters')?.addEventListener('dragover', (e) => {
+    if (_stdDragFrom == null) return;
+    e.preventDefault();
+    const row = e.target.closest('.gfx-std-pl-row');
+    document.querySelectorAll('.gfx-std-pl-row').forEach((r) => r.classList.toggle('is-over', r === row));
+  });
+  el('gfx-std-fighters')?.addEventListener('drop', (e) => {
+    if (_stdDragFrom == null) return;
+    e.preventDefault();
+    const row = e.target.closest('.gfx-std-pl-row'); if (!row) return;
+    const to = parseInt(row.dataset.i, 10);
+    const from = _stdDragFrom;
+    _stdDragFrom = null;
+    document.querySelectorAll('.gfx-std-pl-row').forEach((r) => r.classList.remove('is-dragging', 'is-over'));
+    if (isNaN(to) || isNaN(from) || to === from) return;
+    const list = stdTop8Own();
+    const places = list.map((r, i) => parseInt(r.placement || (i + 1), 10)).sort((a, b) => a - b);
+    const [moved] = list.splice(from, 1);
+    list.splice(to, 0, moved);
+    list.forEach((r, i) => { r.placement = places[i]; });
+    // The row DOM is only rebuilt when the COUNT changes; a reorder keeps the count, so the value
+    // sync in stdRenderFighters() is what repaints it.
+    stdRenderFighters();
+  });
+  // Fighter fields open the icon picker; bound on demand because the rows are rebuilt whenever
+  // the slot count changes.
+  el('gfx-std-fighters')?.addEventListener('mousedown', (e) => {
+    const inp = e.target.closest('[data-fld="character"]'); if (!inp) return;
+    const row = inp.closest('.gfx-std-pl-row');
+    smashBindPicker(inp, (name) => {
+      const i = parseInt(row.dataset.i, 10);
+      const list = stdTop8Own();
+      if (list[i]) list[i].character = name;
+      smashSetThumb(row.querySelector('.smash-char-thumb'), name);
+      stdRenderFighters();
+    });
+  }, true);
+  el('gfx-std-fighters')?.addEventListener('change', (e) => {
+    const row = e.target.closest('.gfx-std-pl-row'); if (!row) return;
+    const fld = e.target.dataset.fld; if (!fld) return;
+    const i = parseInt(row.dataset.i, 10);
+    const list = stdTop8Own();
+    if (!list[i]) return;
+    if (fld === 'character') {
+      // The picker writes canonical names, but a seeded/imported row can carry any spelling
+      // ("zss", "gnw"), so still normalise here — the board should read the same as the picker.
+      const f = smashResolve(e.target.value);
+      if (f) e.target.value = f.name;
+      list[i].character = e.target.value.trim();
+      smashSetThumb(row.querySelector('.smash-char-thumb'), e.target.value);
+    } else if (fld === 'placement') {
+      const n = parseInt(e.target.value, 10);
+      list[i].placement = Number.isFinite(n) && n > 0 ? n : (i + 1);
+      e.target.value = String(list[i].placement);
+    } else {
+      list[i].name = e.target.value.trim();
+      // A hand-picked player brings their saved logo along, so a card with no fighter set still
+      // has something to show. ALWAYS reassign it, including to '': re-typing the slot as someone
+      // else used to leave the previous player's logo attached to the new name.
+      const known = ((currentState || {}).savedTeams || []).find((t) => t && (t.name || '').toLowerCase() === list[i].name.toLowerCase());
+      list[i].logo = (known && known.logo) || '';
+    }
+    stdRenderFighters();
+  });
+  el('gfx-std-fighters')?.addEventListener('click', (e) => {
+    const btn = e.target.closest('.gfx-std-pl-rm'); if (!btn) return;
+    const row = btn.closest('.gfx-std-pl-row');
+    stdTop8Own().splice(parseInt(row.dataset.i, 10), 1);
+    const wrap = el('gfx-std-fighters'); if (wrap) wrap.dataset.count = '';
+    stdRenderFighters();
+  });
+  // Show / hide the board straight from the editor — same message the Full Board's checkbox sends.
+  el('gfx-std-show-overlay')?.addEventListener('change', function () {
+    send('set_standings', { visible: this.checked });
+  });
+  el('gfx-std-pl-add')?.addEventListener('click', () => {
+    const list = stdTop8Own();
+    list.push({ placement: list.length + 1, name: '', character: '' });
+    stdRenderFighters();
+  });
+  el('gfx-std-pl-reload')?.addEventListener('click', () => {
+    _stdTop8 = null;                       // back to mirroring the selected source
+    const wrap = el('gfx-std-fighters'); if (wrap) wrap.dataset.count = '';
+    stdRenderFighters();
+    gfxStdStatus('Top 8 reloaded from the source.', false);
+  });
+
+  el('gfx-std-layout-seg')?.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-stdlayout]'); if (!b) return;
+    document.querySelectorAll('#gfx-std-layout-seg .seg-btn').forEach((x) => x.classList.toggle('active', x === b));
+    send('set_standings', { layout: b.dataset.stdlayout });
+    stdRenderFighters();
+  });
+
   el('btn-gfx-standings-push')?.addEventListener('click', () => {
+    // On the Top 8 board the BUILDER owns the rows (placement / player / fighter). A producer can
+    // hand-build that board with no source at all, so an unconfigured source is NOT an error
+    // there -- only an empty builder is. Every other board still needs its source.
+    const placement = stdIsPlacement();
+    const top8 = placement ? stdTop8Sorted(stdTop8Rows().filter((x) => (x.name || '').trim())) : [];
     const r = buildStandingsPayload();
-    if (!r.ok) { gfxStdStatus(r.err, true); return; }
-    send('set_standings', { ...r.payload, visible: true });
-    gfxStdStatus('Pushed live' + (r.msg ? ' ' + r.msg : '') + '.', false);
+    if (!r.ok && !(placement && top8.length)) { gfxStdStatus(r.err, true); return; }
+    let payload = r.ok ? r.payload : { ...gfxStdCommon(), source: 'manual' };
+    // Tag a top 8 that is still following start.gg so the server re-mirrors it as the bracket
+    // resolves (refreshStartggPlacements). Once the producer edits the list it becomes theirs,
+    // and a manual tag stops the server overwriting their names.
+    if (placement) payload = { ...payload, source: (!_stdTop8 && stdStartggPlacements()) ? 'startgg-placements' : 'manual' };
+    if (placement && !top8.length) { gfxStdStatus('Add at least one player to the Top 8.', true); return; }
+    // Off the Top 8 board the Manual source deliberately sends NO rows (the server keeps the
+    // hand-entered ones), so fall back to what's on air rather than wiping them with an empty array.
+    const rows = placement ? top8
+      : (Array.isArray(payload.rows) ? payload.rows : (((currentState || {}).standings || {}).rows || []));
+    send('set_standings', { ...payload, layout: stdLayoutChoice(), rows, visible: true });
+    gfxStdStatus('Pushed live' + (r.ok && r.msg ? ' ' + r.msg : '') + '.', false);
   });
   el('btn-gfx-standings-clear')?.addEventListener('click', () => {
     send('set_standings', { visible: false });
@@ -4219,6 +4772,12 @@ function _returnGraphicsToProd() {
   window._gfxRefreshStandingsLeagues = function (state) {
     const sel = el('gfx-std-league'); if (!sel) return;
     if (typeof lgPopulateLeagueSelect === 'function') lgPopulateLeagueSelect(sel, (state && state.leagues) || []);
+    // Re-select the league the on-air board is actually following, so re-opening the panel (or
+    // relaunching) shows the live source rather than defaulting to the first league in the list.
+    const followed = (state && state.standings && state.standings.leagueId) || '';
+    if (followed && document.activeElement !== sel && [...sel.options].some((o) => o.value === followed)) {
+      sel.value = followed;
+    }
     gfxRefreshStandingsPreview();
     gfxRefreshSgStandingsPreview();
   };
@@ -4275,6 +4834,9 @@ function _returnGraphicsToProd() {
       document.querySelectorAll('#gfx-front-bracket .gfx-bkt-srcwrap').forEach((w) => { w.style.display = w.dataset.bktwrap === src ? '' : 'none'; });
     }
     document.querySelectorAll('#gfx-bkt-srctabs .gfx-src-tab').forEach((t) => t.addEventListener('click', () => bktSetSrc(t.dataset.bktsrc)));
+    // renderBracketCC() lights the tab that matches the bracket actually loaded, so the panel
+    // never opens on "Tournament Organizer" while a custom bracket is the thing on air.
+    window._bktSetSrc = bktSetSrc;
 
     // Mirror a status field from the ESPORTS #bracket-status line for ~15s after an import kicks off.
     function mirrorBracketStatus(statusEl) {
@@ -4294,6 +4856,54 @@ function _returnGraphicsToProd() {
       if (statusEl) statusEl.textContent = 'Importing…';
       mirrorBracketStatus(statusEl);
     });
+
+    // One paste box for every platform. The link already identifies the service, so route on it
+    // rather than making a producer choose the right field mid-show. An NXGEN slug is the only
+    // one with no distinctive URL, so it is the fallback for a bare slug that isn't a start.gg path.
+    function bktRouteLink(raw) {
+      const v = String(raw || '').trim();
+      if (!v) return null;
+      if (/challonge\.com/i.test(v)) return { kind: 'challonge', msg: 'load_challonge_tournament', data: { slug: v } };
+      if (/faceit\.com/i.test(v)) return { kind: 'faceit', msg: 'load_faceit_event', data: { id: v } };
+      if (/start\.gg|smash\.gg/i.test(v) || /^tournament\//i.test(v)) return { kind: 'startgg', msg: 'load_startgg_url', data: { url: v } };
+      if (/^[0-9a-f-]{20,}$/i.test(v)) return { kind: 'faceit', msg: 'load_faceit_event', data: { id: v } };
+      return { kind: 'nxgen', msg: 'load_nxgen_event', data: { slug: v } };
+    }
+    el('gfx-bkt-any-go')?.addEventListener('click', () => {
+      const statusEl = el('gfx-bkt-any-status');
+      const r = bktRouteLink(el('gfx-bkt-any')?.value);
+      if (!r) { if (statusEl) statusEl.textContent = 'Paste a bracket link or slug first.'; return; }
+      const LBL = { startgg: 'start.gg', challonge: 'Challonge', nxgen: 'NXGEN', faceit: 'FACEIT' };
+      send(r.msg, r.data);
+      if (statusEl) statusEl.textContent = 'Importing from ' + LBL[r.kind] + '…';
+      mirrorBracketStatus(statusEl);
+    });
+    el('gfx-bkt-any')?.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); el('gfx-bkt-any-go')?.click(); }
+    });
+
+    // Re-pull whatever the Dashboard has active, with no link to find. Also the action behind
+    // the status header's "Sync now" and every button the truth bar renders, so there is exactly
+    // one way back to the live event no matter which of them a producer reaches for.
+    function bktReloadActiveEvent() {
+      const ae = (typeof currentState !== 'undefined' && currentState && currentState.activeEvent) || {};
+      const statusEl = el('gfx-bkt-any-status');
+      const slug = (ae.slug || '').trim();
+      if (!ae.platform || !slug) {
+        showToast('No active event to load — set one as Active on the Dashboard, or paste a link under Source.', '#fbbf24');
+        if (statusEl) statusEl.textContent = 'No active event to reload.';
+        return;
+      }
+      if (ae.platform === 'challonge') send('load_challonge_tournament', { slug });
+      else if (ae.platform === 'nxgen') send('load_nxgen_event', { slug });
+      else if (ae.platform === 'faceit') send('load_faceit_event', { id: slug });
+      else send('fetch_bracket', { eventSlug: slug });
+      showToast('Loading ' + (ae.name || slug) + '…', '#60a5fa');
+      if (statusEl) statusEl.textContent = 'Reloading ' + (ae.name || slug) + '…';
+      mirrorBracketStatus(statusEl);
+    }
+    window._bktReloadActiveEvent = bktReloadActiveEvent;
+    el('gfx-bkt-reload')?.addEventListener('click', bktReloadActiveEvent);
 
     // Challonge — same load path the platform tab uses.
     el('gfx-bkt-ch-fetch')?.addEventListener('click', () => {
@@ -4315,15 +4925,39 @@ function _returnGraphicsToProd() {
       mirrorBracketStatus(statusEl);
     });
 
+    // FACEIT — same load path the platform tab uses. The server pulls the id + kind out of a
+    // pasted link, so a bare UUID and a full championship/hub URL both work here.
+    el('gfx-bkt-fc-fetch')?.addEventListener('click', () => {
+      const id = (el('gfx-bkt-fc-slug')?.value || '').trim();
+      const statusEl = el('gfx-bkt-fc-status');
+      if (!id) { if (statusEl) statusEl.textContent = 'Paste a FACEIT championship or hub link first.'; return; }
+      send('load_faceit_event', { id });
+      if (statusEl) statusEl.textContent = 'Importing from FACEIT…';
+      mirrorBracketStatus(statusEl);
+    });
+
     // Manual — pick a format + size on the front card, scaffold an empty bracket in the builder,
     // then open the full editor. Drives the existing builder controls (#bb-type-seg / #bb-size).
     document.querySelectorAll('#gfx-bkt-mformat .gfx-src-tab').forEach((t) => t.addEventListener('click', () => {
       document.querySelectorAll('#gfx-bkt-mformat .gfx-src-tab').forEach((x) => x.classList.toggle('is-on', x === t));
     }));
-    el('gfx-bkt-mbuild')?.addEventListener('click', () => {
+    el('gfx-bkt-mbuild')?.addEventListener('click', async () => {
       const fmt = document.querySelector('#gfx-bkt-mformat .gfx-src-tab.is-on')?.dataset.mfmt || 'single';
       const size = el('gfx-bkt-msize')?.value || '8';
       const statusEl = el('gfx-bkt-m-status');
+      // This button REPLACES the loaded bracket and flips the scene to manual mode, which stops
+      // the connected event's auto-refresh. One unconfirmed click used to turn a live five-stage
+      // start.gg import into an empty 8-team board — with the Source panel still cheerfully
+      // reporting "Following: <event>" while nothing updated again.
+      const cur = (currentState && currentState.bracket) || {};
+      if (cur.mode === 'imported' && ((cur.phases || []).length || cur.lastFetchAt)) {
+        const src = ({ startgg: 'start.gg', challonge: 'Challonge', nxgen: 'NXGEN', faceit: 'FACEIT' })[cur.source] || 'a platform';
+        const nph = (cur.phases || []).length;
+        const ok = await appConfirm(
+          `This replaces the ${src} import "${cur.title || 'Bracket'}"${nph ? ` (${nph} stage${nph > 1 ? 's' : ''})` : ''} with an empty ${size}-team ${fmt} bracket, and stops it auto-updating from the event. Continue?`,
+          'Replace it', true);
+        if (!ok) return;
+      }
       // Drive the builder's own controls so its model + rendering stay the single source of truth.
       const typeBtn = document.querySelector(`#bb-type-seg .seg-btn[data-type="${fmt}"]`);
       if (typeBtn) typeBtn.click();
@@ -4352,6 +4986,7 @@ function _returnGraphicsToProd() {
     el('gfx-bkt-ignore-reset')?.addEventListener('change', function () { send('set_bracket_settings', { ignoreReset: this.checked }); });
     el('gfx-bkt-ignore-rounds')?.addEventListener('change', function () { send('set_bracket_settings', { ignoreRounds: Math.max(0, Math.min(12, parseInt(this.value, 10) || 0)) }); });
     el('gfx-bkt-hide-logos')?.addEventListener('change', function () { send('set_bracket_settings', { hideLogos: this.checked }); });
+    el('gfx-bkt-logo-wm')?.addEventListener('change', function () { send('set_bracket_settings', { logoWatermark: this.checked }); });
     document.querySelector('#gfx-bkt-srctabs [data-bktsrc="league"]')?.addEventListener('click', () => {
       send('set_bracket_settings', { view: 'standings' });
       bktPushLeagueRows();
@@ -4364,16 +4999,40 @@ function _returnGraphicsToProd() {
 
     // Tournament Organizer — status line reflects whichever platform the Dashboard has active,
     // regardless of which one it is; no slug typing needed for the common case.
-    const PLATFORM_LABEL = { startgg: 'start.gg', challonge: 'Challonge', nxgen: 'NXGEN' };
+    const PLATFORM_LABEL = { startgg: 'start.gg', challonge: 'Challonge', nxgen: 'NXGEN', faceit: 'FACEIT' };
     window._gfxRefreshBracketOrgStatus = function (data) {
       const st = el('gfx-bkt-org-status'); if (!st) return;
       const ae = (data && data.activeEvent) || {};
+      const bk = (data && data.bracket) || {};
+      const rl = el('gfx-bkt-reload-wrap');
+      if (rl) rl.style.display = (ae.platform && (ae.name || ae.slug)) ? '' : 'none';
       if (ae.platform && (ae.name || ae.slug)) {
-        st.textContent = `Following: ${ae.name || ae.slug} — ${PLATFORM_LABEL[ae.platform] || ae.platform}`;
-        st.style.color = 'var(--good, #4ade80)';
+        const label = `${ae.name || ae.slug} — ${PLATFORM_LABEL[ae.platform] || ae.platform}`;
+        // "Following" is only true when the bracket is actually imported: a manual bracket makes
+        // the server skip syncBracketToActiveEvent() entirely, so claiming to follow the event
+        // was the single most misleading line on this panel.
+        if (bk.mode === 'manual') {
+          st.textContent = `Linked (NOT followed): ${label} — a custom bracket owns this scene. Reload below to switch back to the event.`;
+          st.style.color = '#fbbf24';
+        } else {
+          st.textContent = `Following: ${label}`;
+          st.style.color = 'var(--good, #4ade80)';
+        }
       } else {
-        st.textContent = 'No active event — connect one below, or set one as Active from the Dashboard.';
+        st.textContent = 'No active event — paste a link below, or set one as Active from the Dashboard.';
         st.style.color = 'var(--muted)';
+      }
+      // Manual tab: say up front what "Build" would destroy, before the click.
+      const mw = el('gfx-bkt-m-warn');
+      if (mw) {
+        const nph = (bk.phases || []).length;
+        if (bk.mode === 'imported' && (nph || bk.lastFetchAt)) {
+          const src = PLATFORM_LABEL[bk.source] || 'a platform';
+          mw.textContent = `Building here replaces the live ${src} import "${bk.title || 'Bracket'}"${nph ? ` (${nph} stage${nph > 1 ? 's' : ''})` : ''} and stops it auto-updating.`;
+          mw.style.display = '';
+        } else {
+          mw.style.display = 'none';
+        }
       }
     };
   })();
@@ -4606,7 +5265,7 @@ const PAGE_LABELS = {
   director: 'Director', replays: 'Video Editor', scenes: 'Overlays',
   equipos: 'Talent', facecams: 'Cameras', brands: 'Profiles',
   media: 'Assets', integrations: 'Integrations', stats: 'Analytics',
-  ajustes: 'Settings', roles: 'Roles', switcher: 'Switcher',
+  ajustes: 'Settings', roles: 'Roles',
   graphics: 'Graphics', social: 'Social',
 };
 
@@ -4647,24 +5306,43 @@ document.querySelectorAll('.tab-btn[data-tab]').forEach(btn => {
 })();
 
 // ── Social page gate ────────────────────────────────────────────────────────
-// Social publishes clips to the ORGANISATION's YouTube/X channels, so the sidebar entry is
-// owner/admin-only. Producers, operators, talent, and anyone on a personal workspace never see
-// it. Default is hidden: renderCloudStatus() calls this with the real answer once the cloud
-// session lands, so an offline/unauthenticated launch fails CLOSED rather than open.
+// PUBLISHING (Clips / Composer / Auto Queue / Weekly / Calendar) pushes to the ORGANISATION's
+// YouTube/X channels, so those sub-tabs stay owner/admin-only. The page ITSELF is now open to
+// everyone because it also hosts Social Export (graphics cards + clip prep, moved off the Video
+// Editor in 2026-08) — a purely local render tool with no channel access. Default is publishing
+// DENIED: renderCloudStatus() calls this with the real answer once the cloud session lands, so an
+// offline/unauthenticated launch fails CLOSED rather than open.
 window._socialAllowed = false;
+const _SOCIAL_PUBLISH_TABS = ['clips', 'composer', 'queue', 'weekly', 'calendar'];
 function applySocialGate(allowed) {
   window._socialAllowed = !!allowed;
   const btn = document.getElementById('tab-social');
   if (!btn) return;
-  btn.style.display = allowed ? '' : 'none';               // clears the markup's inline none
-  const wrap = btn.closest('.nav-item-wrap') || btn;        // hide the pop-out affordance too
-  wrap.style.display = allowed ? '' : 'none';
-  // Access revoked (seat downgraded, signed out, workspace switch) while the page was open.
-  if (!allowed && btn.classList.contains('active')) {
-    document.querySelector('.tab-btn[data-tab="principal"]')?.click();
-  }
+  btn.style.display = '';                                   // clears the markup's inline none
+  const wrap = btn.closest('.nav-item-wrap') || btn;
+  wrap.style.display = '';
+  // Channel-connection strip is publishing-only.
+  const topbar = document.getElementById('social-topbar');
+  if (topbar) topbar.style.display = allowed ? '' : 'none';
+  let hidActive = false;
+  _SOCIAL_PUBLISH_TABS.forEach((k) => {
+    const b = document.querySelector(`.social-sub-tab-btn[data-stab="${k}"]`);
+    const p = document.getElementById('social-panel-' + k);
+    if (b) { b.style.display = allowed ? '' : 'none'; if (!allowed && b.classList.contains('active')) { b.classList.remove('active'); hidActive = true; } }
+    // Panel visibility is class-driven (.social-sub-panel.active); just drop the class.
+    if (p && !allowed) p.classList.remove('active');
+  });
+  // Publishing revoked (seat downgrade, sign-out, workspace switch) while one of those tabs was
+  // open — or a fresh launch, where Clips is active in the markup. Land on Export, which is the
+  // only thing an ungated user can use here.
+  const exportBtn = document.querySelector('.social-sub-tab-btn[data-stab="export"]');
+  const anyActive = document.querySelector('.social-sub-tab-btn.active');
+  if (!allowed && (hidActive || !anyActive) && exportBtn) exportBtn.click();
 }
-applySocialGate(false);
+// Deferred: social.js (which binds the .social-sub-tab-btn handler) and stats-analytics.js (which
+// defines _socOpenExport) both load AFTER app.js, so the initial exportBtn.click() would be inert
+// if fired synchronously here.
+setTimeout(() => applySocialGate(window._socialAllowed), 0);
 
 // Pages no longer carry a header or an inline pop-out button — pop-out lives on the
 // sidebar nav items (hover icon + right-click menu) only.
@@ -4757,21 +5435,22 @@ if (_popoutPage === 'triggers') {
   // Cameras (facecams) is its own sidebar page again — no equipos redirect (that sent the
   // Cameras pop-out to the Talent page); its tab click restores the active cf sub-tab itself.
   requestAnimationFrame(() => {
-    const target = (_popoutPage === 'director' || _popoutPage === 'graphics') ? 'produccion' : ((_popoutPage === 'scenes' || _popoutPage === 'brands') ? 'media' : _popoutPage);
+    const target = (_popoutPage === 'director' || _popoutPage === 'graphics') ? 'produccion' : (_popoutPage === 'brands' ? 'ajustes' : (_popoutPage === 'scenes' ? 'media' : _popoutPage));
     const btn = document.querySelector('.tab-btn[data-tab="' + target + '"]');
     if (btn) btn.click();
     if (_popoutPage === 'director' && typeof window._pdShow === 'function') window._pdShow('director');
     if (_popoutPage === 'graphics' && typeof window._pdShow === 'function') window._pdShow('graphics');
     if (_popoutPage === 'scenes' && typeof window._assetsShow === 'function') window._assetsShow('overlays');
-    if (_popoutPage === 'brands' && typeof window._assetsShow === 'function') window._assetsShow('profiles');
+    if (_popoutPage === 'brands' && typeof openSettings === 'function') openSettings('brandkits');
   });
 } else {
   // Normal window: reopen the page the producer was last on (survives refresh / relaunch).
   requestAnimationFrame(() => {
     let saved; try { saved = localStorage.getItem('ne_active_tab'); } catch {}
     const wasScenes = saved === 'scenes';   // Overlays merged into Assets ▸ Overlays
-    const wasBrands = saved === 'brands';   // Profiles merged into Assets ▸ Profiles
-    if (wasScenes || wasBrands) saved = 'media';
+    const wasBrands = saved === 'brands';   // Profiles now in Settings ▸ Brand Kits
+    if (wasScenes) saved = 'media';
+    if (wasBrands) saved = 'ajustes';
     // Switcher page is hidden from nav (laggy screenshot multiview) — its button is display:none,
     // but .click() still fires on a hidden element, so a stale saved tab would silently reopen it
     // (and re-arm its OBS Studio-Mode auto-enable) on the next launch without this guard.
@@ -4780,11 +5459,12 @@ if (_popoutPage === 'triggers') {
     // there's no role to check against — same hidden-button-still-clicks problem as Switcher
     // above. Fall back to the Dashboard; the producer can re-open Social once the gate reveals it.
     if (saved === 'social') saved = 'principal';
+    if (saved === 'ajustes') saved = 'principal';   // Settings is a modal now — never auto-open it on launch
     if (saved && saved !== 'principal') {
       const btn = document.querySelector('.tab-btn[data-tab="' + saved + '"]');
       if (btn) btn.click();
       if (wasScenes && typeof window._assetsShow === 'function') window._assetsShow('overlays');
-      if (wasBrands && typeof window._assetsShow === 'function') window._assetsShow('profiles');
+      if (wasBrands && typeof openSettings === 'function') openSettings('brandkits');
     } else if (typeof placeShowDeck === 'function') {
       // Dashboard is the active tab on load but no tab-button click fires for it — park the Show
       // Deck in the DCC's Show Deck tab now so it's there on first paint.
@@ -5434,6 +6114,8 @@ el('roles-member-search')?.addEventListener('input', function () {
 el('roles-member-search')?.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') { const r = el('roles-user-results'); if (r) { r.style.display = 'none'; r.innerHTML = ''; } }
 });
+// Up/Down/Enter to pick a user without leaving the keyboard.
+NESearch.bindListNav(el('roles-member-search'), el('roles-user-results'), '.roles-user-result-item');
 // Close results when clicking outside
 document.addEventListener('click', (e) => {
   const wrap = el('roles-add-member-modal');
@@ -5776,6 +6458,100 @@ function sendPerfPrefs() {
 ['check-perf-mode', 'check-perf-always', 'check-perf-noanim', 'check-perf-noprev', 'check-perf-reswarn', 'sel-perf-rate']
   .forEach((id) => el(id)?.addEventListener('change', sendPerfPrefs));
 
+// ── GPU vs CPU rendering. Chromium fixes this at process start, so it lives in a tiny file main.js
+// reads before app-ready — not in server state — and a change only lands on the next launch. ──
+(function wireRenderMode() {
+  const cb = el('check-render-gpu'), note = el('render-gpu-note');
+  if (!cb || !window.electronAPI?.getRenderMode) { if (cb) cb.closest('label')?.style.setProperty('display', 'none'); return; }
+  let saved = 'gpu';
+  window.electronAPI.getRenderMode().then((m) => { saved = m === 'cpu' ? 'cpu' : 'gpu'; cb.checked = saved === 'gpu'; }).catch(() => {});
+  cb.addEventListener('change', async () => {
+    const mode = cb.checked ? 'gpu' : 'cpu';
+    const r = await window.electronAPI.setRenderMode(mode).catch(() => null);
+    if (!r || !r.ok) {
+      cb.checked = saved === 'gpu';
+      if (typeof showToast === 'function') showToast('Could not save the rendering setting.', '#ef4444');
+      return;
+    }
+    if (note) {
+      note.textContent = r.restartRequired
+        ? `Saved — ${mode === 'gpu' ? 'GPU' : 'CPU'} rendering starts when you fully quit and reopen the app.`
+        : 'Applies when the app next starts.';
+      note.style.color = r.restartRequired ? 'var(--warn, #f59e0b)' : '';
+    }
+    if (r.restartRequired && typeof showToast === 'function') showToast('Saved — relaunch the app to apply.', '#f59e0b', 6000);
+  });
+})();
+
+
+// ── Liquipedia (LPDB v3) ─────────────────────────────────────────────────────
+// Every call here is producer-initiated. The API allows 60 requests per HOUR for the whole key,
+// so there is no polling and no overlay-triggered fetch — the budget chip shows what is left.
+function lpSend(extra) {
+  send('set_liquipedia_settings', Object.assign({
+    enabled: !!el('check-liquipedia-enabled')?.checked,
+    wiki: el('input-liquipedia-wiki')?.value || '',
+    contact: el('input-liquipedia-contact')?.value || ''
+  }, extra || {}));
+}
+el('btn-liquipedia-save')?.addEventListener('click', () => {
+  const key = el('input-liquipedia-key')?.value || '';
+  lpSend(key.trim() ? { apiKey: key.trim() } : {});
+  const k = el('input-liquipedia-key'); if (k) k.value = '';   // never keep the secret in the DOM
+});
+el('check-liquipedia-enabled')?.addEventListener('change', () => lpSend());
+el('btn-liquipedia-change-key')?.addEventListener('click', () => {
+  const k = el('input-liquipedia-key'); if (k) { k.value = ''; k.focus(); }
+});
+const _lpPage = () => (el('input-liquipedia-page')?.value || '').trim();
+// force:true = the producer explicitly asked for fresh data; the server still refuses if the
+// hourly budget is gone, and falls back to cache rather than blanking a graphic.
+el('btn-lp-fetch-standings')?.addEventListener('click', () => send('liquipedia_fetch', { kind: 'standings', page: _lpPage(), force: true }));
+el('btn-lp-fetch-rankings')?.addEventListener('click', () => send('liquipedia_fetch', { kind: 'rankings', force: true }));
+el('btn-lp-fetch-squad')?.addEventListener('click', () => send('liquipedia_fetch', { kind: 'squad', page: _lpPage(), force: true }));
+el('btn-lp-fetch-tournament')?.addEventListener('click', () => send('liquipedia_fetch', { kind: 'tournament', page: _lpPage(), force: true }));
+el('btn-lp-apply-standings')?.addEventListener('click', () => send('liquipedia_apply_standings', {}));
+
+function applyLiquipediaState(data) {
+  const lp = (data && data.liquipedia) || {};
+  const en = el('check-liquipedia-enabled');
+  if (en && document.activeElement !== en) en.checked = !!lp.enabled;
+  const wiki = el('input-liquipedia-wiki');
+  if (wiki && document.activeElement !== wiki) wiki.value = lp.wiki || '';
+  const contact = el('input-liquipedia-contact');
+  if (contact && document.activeElement !== contact) contact.value = lp.contact || '';
+  const keyInp = el('input-liquipedia-key'), changeBtn = el('btn-liquipedia-change-key');
+  if (keyInp && changeBtn) {
+    keyInp.placeholder = lp.hasKey ? 'Key saved — paste a new one to replace it' : 'Paste your Liquipedia API key';
+    changeBtn.style.display = lp.hasKey ? '' : 'none';
+  }
+  // Budget chip: the single most useful number during a show.
+  const chip = el('liquipedia-budget');
+  if (chip) {
+    if (!lp.enabled || !lp.hasKey) { chip.textContent = lp.hasKey ? 'Off' : 'No key'; chip.dataset.st = 'off'; }
+    else {
+      const left = lp.budgetRemaining != null ? lp.budgetRemaining : '—';
+      const mins = lp.budgetResetInMs ? Math.ceil(lp.budgetResetInMs / 60000) : 0;
+      chip.textContent = left + ' left this hour' + (mins ? ' · +1 in ' + mins + 'm' : '');
+      chip.dataset.st = (Number(left) > 5) ? 'on' : 'warn';
+    }
+  }
+  // Show what is pulled and ready to push onto a graphic (counts only — the rows themselves
+  // stay server-side rather than riding every broadcast).
+  const applyBtn = el('btn-lp-apply-standings');
+  if (applyBtn) {
+    const n = (lp.counts && lp.counts.standings) || 0;
+    applyBtn.disabled = !n;
+    applyBtn.textContent = n ? '→ Standings graphic (' + n + ')' : '→ Standings graphic';
+  }
+  const card = document.querySelector('.int-card[data-card="liquipedia"] .int-card-status');
+  if (card) { card.textContent = lp.hasKey ? (lp.enabled ? 'Connected' : 'Key saved') : 'No key'; card.dataset.st = lp.hasKey && lp.enabled ? 'on' : 'off'; }
+  if (lp.lastError) {
+    const r = el('liquipedia-result');
+    if (r && !r.dataset.fresh) { r.textContent = lp.lastError; r.style.color = '#f56565'; }
+  }
+}
+
 // ── Org-seat role UX: talent/analyst run the app VIEW-ONLY (server enforces it —
 // every mutating control message is rejected); this just makes it visible and
 // hides the two pages that are all credentials (Settings / Integrations). ──
@@ -5882,8 +6658,8 @@ function bbRenderCustomizeList() {
   // Redesigned: searchable chip grid, auto-reflects the live OBS scenes + overlay/trigger registries.
   const ov = (typeof ONAIR_SCENES !== 'undefined' ? ONAIR_SCENES : []);
   const tr = (typeof GOLIVE_TRIGGERS !== 'undefined' ? GOLIVE_TRIGGERS : []);
-  const q = (el('bb-cz-search') && el('bb-cz-search').value || '').trim().toLowerCase();
-  const hit = (label) => !q || String(label).toLowerCase().includes(q);
+  const q = (el('bb-cz-search') && el('bb-cz-search').value || '').trim();
+  const hit = (label) => NESearch.matches(q, [String(label == null ? '' : label)]);
   const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;');
   const ico = { casters: 'mic', break: 'clock', winner: 'trophy', intro: 'users', veto: 'flag', bracket: 'trending', upcoming: 'clock', standings: 'trending', ticker: 'chat', spotlight: 'star', watchlist: 'star', banner: 'handshake' };
   const chip = (t, k, label, icon, opt) => {
@@ -6043,7 +6819,7 @@ document.addEventListener('mousedown', (e) => {
   if (!pop || pop.style.display === 'none') return;
   if (e.target.closest('#bb-trigger-pop')) return;
   // Clicks on any trigger chip/gear re-open with fresh fields; don't fight that handler.
-  if (e.target.closest('.qk-chip, .sw-dock-chip, .qt-act-btn, .bb-action-btn, .gl-row')) return;
+  if (e.target.closest('.qk-chip, .qt-act-btn, .bb-action-btn, .gl-row')) return;
   pop.style.display = 'none';
 });
 document.addEventListener('keydown', (e) => {
@@ -6147,6 +6923,11 @@ el('btn-reset-all-wf')?.addEventListener('click', () => el('btn-reset-all')?.cli
     if (!q || q.length < 2) { const b = el('flows-game-results'); if (b) b.style.display = 'none'; return; }
     _gameSearchTimer = setTimeout(doGameSearch, 350);
   });
+  // Up/Down/Enter through the results — it was mouse-only, which is an odd thing to demand of
+  // someone already typing in the box. Bound BEFORE the plain Enter handler below so that Enter
+  // takes the highlighted result instead of re-running the search.
+  NESearch.bindListNav(el('flows-game-search'), el('flows-game-results'), '.game-result-row',
+    { onEscape: () => { const b = el('flows-game-results'); if (b) b.style.display = 'none'; } });
   el('flows-game-search')?.addEventListener('keydown', e => { if (e.key === 'Enter') { clearTimeout(_gameSearchTimer); doGameSearch(); } });
 
   async function doGameSearch() {
@@ -6160,7 +6941,10 @@ el('btn-reset-all-wf')?.addEventListener('click', () => el('btn-reset-all')?.cli
       const r = await fetch(`http://localhost:3000/api/twitch/games/search?q=${encodeURIComponent(q)}`);
       const games = await r.json();
       if (!games.length) { box.innerHTML = '<div style="padding:8px 10px;font-size:12px;color:var(--muted);">No results</div>'; return; }
-      box.innerHTML = games.slice(0, 8).map(g => {
+      // Re-rank Helix's order against what was actually typed before cutting to 8 — searching
+      // "rocket league" was returning spin-offs above the game itself.
+      const ranked = NESearch.filter(games, q, (g) => [g.name]);
+      box.innerHTML = (ranked.length ? ranked : games).slice(0, 8).map(g => {
         const art = g.box_art_url ? g.box_art_url.replace('{width}','52').replace('{height}','70') : '';
         return `<div class="game-result-row" data-id="${escapeHtml(g.id)}" data-name="${escapeHtml(g.name)}">
           ${art ? `<img src="${art}" alt="">` : ''}
@@ -6463,7 +7247,7 @@ function applyState(data) {
   // UI always sees a complete state. Mutating `data` in place also feeds the render functions
   // that run after applyState() in the message handler.
   if (data && currentState) {
-    for (const k of ['savedTeams', 'playerProfiles', 'brandKits', 'brandKitsVer', 'draftRosters', 'brand', 'banner', 'mainBanner', 'playouts', 'bracket', 'replay', 'crew', 'leagues', 'clips', 'socialPreset', 'questions', 'questionSources']) {
+    for (const k of ['savedTeams', 'playerProfiles', 'brandKits', 'brandKitsVer', 'draftRosters', 'brand', 'banner', 'mainBanner', 'playouts', 'bracket', 'replay', 'crew', 'leagues', 'clips', 'eventOps', 'myEvents', 'socialPreset', 'questions', 'questionSources']) {
       if (data[k] === undefined && currentState[k] !== undefined) data[k] = currentState[k];
     }
   }
@@ -6482,6 +7266,20 @@ function applyState(data) {
   if (typeof cfUpdateListenPill === 'function') _ap('cfUpdateListenPill', () => cfUpdateListenPill(data));
   // Scenes tab — light up ON AIR pills
   if (typeof refreshSceneOnAir === 'function') _ap('refreshSceneOnAir', () => refreshSceneOnAir(data));
+  // Battle-royale series panel (Fortnite/PUBG/Warzone scoring + standings preview)
+  if (typeof renderBrPanel === 'function') _ap('renderBrPanel', () => renderBrPanel(data));
+  // Match — Lobby: swaps the blue/orange team cards for the BR field table on lobby games, and
+  // (critically) swaps them BACK on every other game. Isolated like the rest — a throw here must
+  // not blank the panels below it.
+  if (typeof brLobbyApply === 'function') _ap('brLobbyApply', () => brLobbyApply(data));
+  // Graphics rail: reveal the Battle Royale scene group only while a BR game is active.
+  if (typeof window.gfxSyncBrNav === 'function') _ap('gfxSyncBrNav', () => window.gfxSyncBrNav(data));
+  // Fortnite drop-map POI editor (Settings ▸ Games ▸ Fortnite) — season-editable landing spots.
+  if (typeof brPoiApply === 'function') _ap('brPoiApply', () => brPoiApply(data));
+  // ESPORTS sub-nav — show/hide the platform-import tab as credentials come and go
+  if (typeof evSyncPlatformTab === 'function') _ap('evSyncPlatformTab', () => evSyncPlatformTab());
+  // Live-data panels (R6 relay / Bedwars server push) — connection dots + readouts
+  if (typeof renderLiveDataPanels === 'function') _ap('renderLiveDataPanels', () => renderLiveDataPanels(data));
   // AI page — shield + quick toggles
   if (typeof renderAiPage === 'function') _ap('renderAiPage', () => renderAiPage(data));
   // Talent/VDO surfaces read a cached /api/vdo/links — re-pull it when teams/sides/casters change.
@@ -6652,12 +7450,19 @@ function applyState(data) {
   // Saved teams dropdowns + list (picker = saved library + seeded start.gg event teams)
   populateSavedTeamsDropdowns();
   renderTeamsList(data.savedTeams || []);
+  // The vault itself isn't in state (too big to broadcast) — `ver` is the change signal. Only
+  // re-fetch while its tab is actually on screen; an event import bumps this once per entrant.
+  if (data.teamVault && el('teams-panel-vault') && el('teams-panel-vault').style.display !== 'none') {
+    tvRenderAuto(data);   // sweep progress ticks without re-fetching the whole record list
+    if (data.teamVault.ver !== _tvVer) tvFetch(true);
+  }
   if (typeof renderOrgLibraryStatus === 'function' && el('org-library-block') && el('org-library-block').style.display !== 'none') renderOrgLibraryStatus();
 
-  // start.gg event teams (transient — inside Import modal)
-  renderStartggTeams(data.startgg?.eventTeams || [], data.startgg?.selectedEvent || null);
+  // start.gg event teams (transient — inside Import modal). Isolated: these render straight from
+  // imported entrant names, the least trustworthy strings in the whole state.
+  _ap('renderStartggTeams', () => renderStartggTeams(data.startgg?.eventTeams || [], data.startgg?.selectedEvent || null));
   // Event teams panel — all platforms, visible on Teams page
-  renderEventTeamsPanel(data);
+  _ap('renderEventTeamsPanel', () => renderEventTeamsPanel(data));
 
   // Unified active event card
   const ae = data.activeEvent;
@@ -6669,7 +7474,7 @@ function applyState(data) {
       const badge = el('ev-active-plat-badge');
       if (nameEl) nameEl.textContent = ae.name;
       if (metaEl) metaEl.textContent = [ae.gameName, ae.numEntrants ? `${ae.numEntrants} teams` : '', ae.format].filter(Boolean).join(' · ');
-      if (badge) { badge.textContent = ae.platform === 'startgg' ? 'start.gg' : ae.platform === 'challonge' ? 'Challonge' : ae.platform === 'nxgen' ? 'NXGEN' : ae.platform; badge.dataset.plat = ae.platform; }
+      if (badge) { badge.textContent = ae.platform === 'startgg' ? 'start.gg' : ae.platform === 'challonge' ? 'Challonge' : ae.platform === 'nxgen' ? 'NXGEN' : ae.platform === 'faceit' ? 'FACEIT' : ae.platform; badge.dataset.plat = ae.platform; }
       activeCard.style.display = 'flex';
       // Sync platform tab to active event's platform (without triggering a panel switch if already correct)
       if (ae.platform !== _evActivePlatform) {
@@ -6681,21 +7486,27 @@ function applyState(data) {
     }
   }
   // Challonge dashboard queue visibility
-  const chalQBlock  = el('ev-challonge-queue-block');
-  const nxgenQBlock = el('ev-nxgen-queue-block');
-  const sggQBlock   = el('ev-queue-block');
-  const isChalActive  = ae && ae.platform === 'challonge';
-  const isNxgenActive = ae && ae.platform === 'nxgen';
-  if (chalQBlock)  chalQBlock.style.display  = isChalActive ? '' : 'none';
-  if (nxgenQBlock) nxgenQBlock.style.display = isNxgenActive ? '' : 'none';
-  if (sggQBlock)   sggQBlock.style.display   = (isChalActive || isNxgenActive) ? 'none' : '';
-  if (isChalActive)  renderDashChallongeQueue(data.challonge?.queue || [], data.challonge?.queueFetchedAt);
-  if (isNxgenActive) renderDashNxgenQueue(data.nxgen?.queue || [], data.nxgen?.queueFetchedAt);
+  const chalQBlock   = el('ev-challonge-queue-block');
+  const nxgenQBlock  = el('ev-nxgen-queue-block');
+  const faceitQBlock = el('ev-faceit-queue-block');
+  const sggQBlock    = el('ev-queue-block');
+  const isChalActive   = ae && ae.platform === 'challonge';
+  const isNxgenActive  = ae && ae.platform === 'nxgen';
+  const isFaceitActive = ae && ae.platform === 'faceit';
+  if (chalQBlock)   chalQBlock.style.display   = isChalActive ? '' : 'none';
+  if (nxgenQBlock)  nxgenQBlock.style.display  = isNxgenActive ? '' : 'none';
+  if (faceitQBlock) faceitQBlock.style.display = isFaceitActive ? '' : 'none';
+  if (sggQBlock)    sggQBlock.style.display    = (isChalActive || isNxgenActive || isFaceitActive) ? 'none' : '';
+  if (isChalActive)   renderDashChallongeQueue(data.challonge?.queue || [], data.challonge?.queueFetchedAt);
+  if (isNxgenActive)  renderDashNxgenQueue(data.nxgen?.queue || [], data.nxgen?.queueFetchedAt);
+  if (isFaceitActive) renderDashFaceitQueue(data.faceit?.queue || [], data.faceit?.queueFetchedAt);
   // Auto-follow toggles
   const chalAF  = el('challonge-autofollow');
   if (chalAF) chalAF.checked = !!data.challonge?.autoFollow;
   const nxgenAF = el('nxgen-autofollow');
   if (nxgenAF) nxgenAF.checked = !!data.nxgen?.autoFollow;
+  const faceitAF = el('faceit-autofollow');
+  if (faceitAF) faceitAF.checked = !!data.faceit?.autoFollow;
   // token badge
   updateEvTokenBadge();
 
@@ -6804,22 +7615,27 @@ function applyState(data) {
       });
     }
   }
+  // Live-scene panels. Isolated one by one, like the secondary panels above: these are the
+  // controls a producer drives ON AIR, and they must not be collateral damage when an unrelated
+  // renderer above throws on a single bad name in an 800-entrant import. (That is not
+  // hypothetical — a lone-surrogate team name in teePlaceholder() aborted applyState() here on
+  // every broadcast, so the bracket panel showed no phases while the data sat in state.)
   // Production tab (casters + break)
-  applyProductionState(data);
+  _ap('applyProductionState', () => applyProductionState(data));
 
   // Ticker
-  applyTickerState(data);
+  _ap('applyTickerState', () => applyTickerState(data));
 
   // Player spotlight + live status
-  applySpotlightState(data);
-  applyProdStatus(data);
+  _ap('applySpotlightState', () => applySpotlightState(data));
+  _ap('applyProdStatus', () => applyProdStatus(data));
 
   // Bracket
-  applyBracketState(data);
+  _ap('applyBracketState', () => applyBracketState(data));
 
   // Upcoming + Standings overlays
-  applyUpcomingState(data);
-  applyStandingsState(data);
+  _ap('applyUpcomingState', () => applyUpcomingState(data));
+  _ap('applyStandingsState', () => applyStandingsState(data));
 
   // Game / design / presets / custom overlays
   applyGameDesignState(data);
@@ -6837,8 +7653,8 @@ function applyState(data) {
 
   // OBS settings
   applyObsState(data);
+  if (typeof applyLiquipediaState === 'function') applyLiquipediaState(data);
   if (typeof applyVmixState === 'function') applyVmixState(data);
-  if (_swWatch && typeof renderSwitcher === 'function') renderSwitcher(data);
 
   // Background overlay
   if (typeof window._bgApplyState === 'function') window._bgApplyState(data);
@@ -6941,6 +7757,7 @@ function applyState(data) {
   if (typeof renderChallongeSettings === 'function') renderChallongeSettings(data);
   // NXGEN settings
   if (typeof renderNxgenSettings === 'function') renderNxgenSettings(data);
+  if (typeof renderFaceitSettings === 'function') renderFaceitSettings(data);
   // Ballchasing settings
   if (typeof renderBallchasingSettings === 'function') renderBallchasingSettings(data);
   // Marble Race launcher status
@@ -6963,6 +7780,23 @@ function getStartggPayload() {
   return payload;
 }
 
+// Readable text on a team-coloured chip. The panel paints a team's colour behind white label
+// text in several places; a white kit made every one of them read white-on-white (the team card
+// headers looked simply empty). Chosen by CONTRAST RATIO, not brightness: flip to near-black only
+// when white would fall under ~3:1, so ordinary team colours keep the white they always had and
+// only genuinely pale ones switch. Mirrors the overlay rule in overlay/fgc/fgc-adapter.js.
+function teamInk(hex) {
+  const m = /^#?([0-9a-f]{6})$/i.exec(String(hex || '').trim());
+  if (!m) return '#fff';
+  const n = parseInt(m[1], 16);
+  const lin = [(n >> 16) & 255, (n >> 8) & 255, n & 255].map((v) => {
+    v /= 255;
+    return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+  });
+  const L = 0.2126 * lin[0] + 0.7152 * lin[1] + 0.0722 * lin[2];
+  return (1.05 / (L + 0.05)) < 3 ? '#0b0e17' : '#fff';
+}
+
 // Relabel the two team "sides" per the active game (RL Blue/Orange, CS2 CT/T, …)
 // and tint the card headers + series labels with each team's own colour.
 function relabelTeamSides(data) {
@@ -6975,6 +7809,7 @@ function relabelTeamSides(data) {
     const e = el(id); if (!e) return;
     e.textContent = (label || '').toUpperCase();
     e.style.background = color;
+    e.style.color = teamInk(color);
   };
   setHdr('team-header-blue', labels.a, blueColor);
   setHdr('team-header-orange', labels.b, orangeColor);
@@ -6982,9 +7817,9 @@ function relabelTeamSides(data) {
   const so = el('series-label-orange-desk'); if (so) so.textContent = (labels.b || 'B').toUpperCase();
   // Apply buttons: label + tint to the team's own colour (not hardcoded blue/orange)
   const ab = el('btn-apply-blue');
-  if (ab) { ab.textContent = `Apply ${labels.a}`; ab.style.background = blueColor; ab.style.borderColor = blueColor; }
+  if (ab) { ab.textContent = `Apply ${labels.a}`; ab.style.background = blueColor; ab.style.borderColor = blueColor; ab.style.color = teamInk(blueColor); }
   const ao = el('btn-apply-orange');
-  if (ao) { ao.textContent = `Apply ${labels.b}`; ao.style.background = orangeColor; ao.style.borderColor = orangeColor; }
+  if (ao) { ao.textContent = `Apply ${labels.b}`; ao.style.background = orangeColor; ao.style.borderColor = orangeColor; ao.style.color = teamInk(orangeColor); }
   // Cockpit side selectors (Winner / Line-up) follow the same labels.
   [el('ck-winner-side'), el('ck-intro-side')].forEach((sel) => {
     if (!sel || sel.options.length < 2) return;
@@ -7130,7 +7965,17 @@ let _spOpen = null;
 function _spInstallGlobal() {
   if (_spInstallGlobal._done) return; _spInstallGlobal._done = true;
   document.addEventListener('mousedown', (e) => { if (_spOpen && !_spOpen.wrap.contains(e.target)) _spOpen.close(); });
-  window.addEventListener('scroll', () => { if (_spOpen) _spOpen.close(); }, true);
+  // Close on PAGE scroll only. The dropdown is position:fixed, so it has to close when the page
+  // moves under it — but this listener is on window in the CAPTURE phase, which means it also saw
+  // scroll events bubbling out of the dropdown's OWN list. Result: trying to scroll a long list
+  // (brand kits, teams, any picker) closed it on the first wheel notch. Ignore scrolls that
+  // originate inside the open picker.
+  window.addEventListener('scroll', (e) => {
+    if (!_spOpen) return;
+    const t = e.target;
+    if (t && t.nodeType === 1 && _spOpen.wrap.contains(t)) return;   // scrolling our own list
+    _spOpen.close();
+  }, true);
   window.addEventListener('resize', () => { if (_spOpen) _spOpen.close(); });
 }
 function _spEsc(s) { return esc(s); }   // legacy alias — canonical esc() lives at the top of the file
@@ -7184,8 +8029,8 @@ function buildSearchPicker(opts) {
 
   btn.addEventListener('click', (e) => { e.preventDefault(); if (open) close(); else show(); });
   search.addEventListener('input', () => {
-    const q = search.value.trim().toLowerCase();
-    filtered = q ? items.filter((it) => it.label.toLowerCase().includes(q)) : items.slice();
+    const q = search.value.trim();
+    filtered = NESearch.filter(items, q, (it) => [it.label]);
     active = -1; renderList(); position();
   });
   search.addEventListener('keydown', (e) => {
@@ -7748,9 +8593,10 @@ function mdRender() {
   const grid = el('md-grid'); if (!grid) return;
   mdCrumbs();
   grid.className = mdState.view === 'list' ? 'md-grid md-list' : 'md-grid';
-  const q = mdState.search.trim().toLowerCase();
-  const folders = mdState.folders.filter((f) => !q || f.name.toLowerCase().includes(q));
-  const files = mdState.files.filter((f) => !q || f.name.toLowerCase().includes(q));
+  const q = mdState.search.trim();
+  // Path is searchable as well as the filename, so "logos/tsm" finds it from anywhere in the tree.
+  const folders = NESearch.filter(mdState.folders, q, (f) => [{ text: f.name, weight: 2 }, f.path]);
+  const files = NESearch.filter(mdState.files, q, (f) => [{ text: f.name, weight: 2 }, f.path]);
   let html = `<button class="md-tile md-newfolder" id="md-newfolder">
     <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><line x1="12" y1="11" x2="12" y2="17"/><line x1="9" y1="14" x2="15" y2="14"/></svg>
     <span>Create Folder</span></button>`;
@@ -7856,18 +8702,45 @@ function nePrompt(message, def = '') {
 // ── Assets page: top tabs (Assets | Overlays | Profiles) ─────────────────
 // The Profiles (brand kits) page is re-parented into Assets ▸ Profiles below — moving the
 // nodes (not cloning) keeps every brand element ID and handler intact.
-(function mergeProfilesIntoAssets() {
-  const src = el('tab-brands-content'), dest = el('assets-panel-profiles');
+(function mergeProfilesIntoSettings() {
+  // Brand Kits editor is authored as its own #tab-brands-content page, then re-parented (not cloned,
+  // so every element ID + handler stays intact) into Settings ▸ Brand Kits. Was Assets ▸ Profiles.
+  const src = el('tab-brands-content'), dest = el('set-sec-brandkits');
   if (!src || !dest || dest.dataset.merged) return;
-  const head = src.querySelector('.page-head'); if (head) head.remove();   // Assets page already has its own head
+  const head = src.querySelector('.page-head'); if (head) head.remove();   // the settings rail already labels it
   while (src.firstChild) dest.appendChild(src.firstChild);
   src.remove();   // drop the now-empty .tab-content shell
   dest.dataset.merged = '1';
 })();
 
+// Features: re-parent the Twitch Games & Features panel out of Integrations into Settings ▸ Features
+// (predictions / giveaway wheel / chat minigames). Handlers are bare-id/delegated so they survive the
+// move; _intShowTab no longer lists it (it stayed only under the Twitch integration before).
+(function moveFeaturesIntoSettings() {
+  const p = el('integration-twitchgames'), dest = el('set-sec-features');
+  if (p && dest && !dest.dataset.merged) {
+    dest.appendChild(p);
+    p.style.display = '';                 // always visible inside its settings section
+    p.style.borderTop = 'none'; p.style.paddingTop = '0'; p.style.marginTop = '0';   // drop the in-Integrations separator
+    dest.dataset.merged = '1';
+  }
+})();
+
+// Games: fold the per-game setup panel (Stats API / GSI, HUD/overlay per game) out of Integrations
+// into Settings ▸ Games. It keeps its own game-tab selector (the per-game browser). The Integrations
+// store cards + subnav that pointed at it now deep-link to Settings (see the card handler + subnav).
+(function moveGamesSetupIntoSettings() {
+  const p = el('integration-games'), dest = el('set-sec-gamesetup');
+  if (p && dest && !dest.dataset.merged) {
+    dest.appendChild(p);
+    p.style.display = '';
+    dest.dataset.merged = '1';
+  }
+})();
+
 let _assetsTab = 'media';
 function _assetsShow(which) {
-  _assetsTab = (which === 'overlays' || which === 'profiles') ? which : 'media';
+  _assetsTab = (which === 'overlays') ? which : 'media';   // Profiles moved to Settings ▸ Brand Kits
   document.querySelectorAll('#assets-subnav .ev-subnav-btn').forEach((b) => b.classList.toggle('active', b.dataset.assettab === _assetsTab));
   const mp = el('assets-panel-media'), op = el('assets-panel-overlays'), pp = el('assets-panel-profiles');
   if (mp) mp.style.display = _assetsTab === 'media' ? '' : 'none';
@@ -7994,9 +8867,9 @@ function mpRender() {
     wrap.innerHTML = ['<a href="#" data-mp-path="">Root</a>'].concat(parts.map((p) => { acc = acc ? acc + '/' + p : p; return `<span class="md-crumb-sep">›</span><a href="#" data-mp-path="${acc}">${p}</a>`; })).join('');
     wrap.querySelectorAll('a[data-mp-path]').forEach((a) => a.addEventListener('click', (e) => { e.preventDefault(); MP.path = a.dataset.mpPath; mpLoad(); }));
   }
-  const q = MP.search.trim().toLowerCase();
-  const folders = (MP._folders || []).filter((f) => !q || f.name.toLowerCase().includes(q));
-  const files = (MP._files || []).filter((f) => !q || f.name.toLowerCase().includes(q));
+  const q = MP.search.trim();
+  const folders = NESearch.filter(MP._folders || [], q, (f) => [{ text: f.name, weight: 2 }, f.path]);
+  const files = NESearch.filter(MP._files || [], q, (f) => [{ text: f.name, weight: 2 }, f.path]);
   grid.innerHTML = folders.map((f) => `<div class="md-tile md-folder" data-folder="${f.path}">
     <svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
     <span class="md-name">${f.name}</span></div>`).join('')
@@ -8065,7 +8938,7 @@ function renderTeamsList(teams) {
   // Only rebuild the DOM when the data actually changes — this list can hold hundreds of
   // start.gg-imported teams, and rebuilding it on every full_state was the freeze. Use a CHEAP
   // Include favorite in the signature so cards re-render when fav status changes.
-  const sig = teams.map((t) => (t.name || '') + '|' + (t.logo ? t.logo.length : 0) + '|' + (t.favorite ? '1' : '0') + '|' + (t.color || '') + '|' + (t._org ? 'o' : '') + '|' + (t.players || []).length).join('~');
+  const sig = teams.map((t) => (t.name || '') + '|' + (t.logo ? t.logo.length : 0) + '|' + (t.favorite ? '1' : '0') + '|' + (t.color || '') + '|' + (t._org ? 'o' : '') + '|' + (t.vaultId || '') + '|' + (t.players || []).length).join('~');
   if (sig === _teamsListSig) return;
   _teamsListSig = sig;
 
@@ -8077,8 +8950,13 @@ function renderTeamsList(teams) {
     card.className = 'tc-card' + (t.favorite ? ' is-fav' : '') + (t._org ? ' is-org' : '');
     card.dataset.name = t.name;
     card.dataset.origin = t._org ? 'org' : 'mine';
-    // Include the org owner in the search text so "From organization" teams surface by their producer too.
-    card.dataset.search = ((t.name || '') + ' ' + (t._org ? ('org ' + (t._orgOwner || '')) : '')).toLowerCase();
+    // Search text carries the org owner (so "From organization" teams surface by their producer)
+    // AND the roster — a producer far more often remembers a gamertag than which team it plays for.
+    card.dataset.search = [
+      t.name || '',
+      t._org ? ('org ' + (t._orgOwner || '')) : '',
+      (t.players || []).map((p) => (typeof p === 'string' ? p : ((p && (p.name || p.gamertag)) || ''))).join(' ')
+    ].join(' ').toLowerCase();
     card.style.setProperty('--team-accent', t.color || '#055fdb');
 
     const accent = document.createElement('div'); accent.className = 'tc-card-accent';
@@ -8087,6 +8965,14 @@ function renderTeamsList(teams) {
     const info = document.createElement('div'); info.className = 'tc-card-info';
     const nameEl = document.createElement('div'); nameEl.className = 'tc-card-name'; nameEl.textContent = t.name;
     if (t._org) { const b = document.createElement('span'); b.className = 'tc-org-badge'; b.textContent = 'ORG'; b.title = 'From organization' + (t._orgOwner ? ' · ' + t._orgOwner : ''); nameEl.appendChild(b); }
+    // Banked in the team vault: this team's branding is re-applied automatically at future events,
+    // even if the org renames or start.gg ships no crest. Without the badge there is nothing on
+    // screen telling a producer which of their teams have that protection.
+    if (t.vaultId) {
+      const b = document.createElement('span'); b.className = 'tv-badge sgg'; b.textContent = 'VAULT';
+      b.title = 'In the team vault' + (t.startggSlug ? ' · start.gg/team/' + t.startggSlug : '') + ' — open the Vault tab to edit the permanent record';
+      nameEl.appendChild(b);
+    }
     const meta = document.createElement('div'); meta.className = 'tc-card-meta';
     const np = (t.players || []).filter((p) => p && (p.name || '').trim()).length;
     meta.textContent = (t._org ? 'From ' + (t._orgOwner || 'organization') + ' · ' : '') + (np ? np + (np === 1 ? ' player' : ' players') : 'No roster');
@@ -8124,16 +9010,19 @@ function renderTeamsList(teams) {
 let _teamsOriginFilter = 'all';
 function applyTeamsFilter() {
   const list = el('teams-list'); if (!list) return;
-  const q = (el('teams-search')?.value || '').trim().toLowerCase();
+  const q = (el('teams-search')?.value || '').trim();
   const items = list.querySelectorAll('.tc-card');
-  let shown = 0, orgCount = 0;
-  items.forEach((item) => {
-    const isOrg = item.dataset.origin === 'org';
-    if (isOrg) orgCount++;
-    const originOk = _teamsOriginFilter === 'all' || (_teamsOriginFilter === 'org' ? isOrg : !isOrg);
-    const m = originOk && (!q || (item.dataset.search || '').includes(q));
-    item.style.display = m ? '' : 'none'; if (m) shown++;
-  });
+  let orgCount = 0;
+  items.forEach((item) => { if (item.dataset.origin === 'org') orgCount++; });
+  // data-search carries the team name AND its roster, so a gamertag finds the team it plays for.
+  // rankNodes also orders the survivors best-first — with a big library the strongest match used
+  // to end up wherever the alphabet left it.
+  const { shown } = NESearch.rankNodes(items, q,
+    (n) => [{ text: n.dataset.name || '', weight: 2 }, { text: n.dataset.search || '', bag: true }],
+    { extra: (n) => {
+      const isOrg = n.dataset.origin === 'org';
+      return _teamsOriginFilter === 'all' || (_teamsOriginFilter === 'org' ? isOrg : !isOrg);
+    } });
   // The origin chips only make sense once org teams exist — keep the row hidden for solo producers.
   const chips = el('teams-origin-chips'); if (chips) chips.style.display = orgCount ? '' : 'none';
   const empty = el('teams-empty');
@@ -8158,14 +9047,9 @@ let _sggTeamsFilter = '';
 function applySggTeamsFilter() {
   const list = el('startgg-teams-list');
   if (!list) return;
-  const q = _sggTeamsFilter.trim().toLowerCase();
+  const q = _sggTeamsFilter.trim();
   const items = list.querySelectorAll('.team-list-item');
-  let shown = 0;
-  items.forEach((it) => {
-    const match = !q || (it.dataset.name || '').toLowerCase().includes(q);
-    it.style.display = match ? '' : 'none';
-    if (match) shown++;
-  });
+  const { shown } = NESearch.rankNodes(items, q, (it) => [it.dataset.name || '']);
   const empty   = el('sgg-teams-empty');
   const nomatch = el('sgg-teams-nomatch');
   const total   = items.length;
@@ -8297,7 +9181,8 @@ function renderEventTeamsPanel(data) {
   const sggTeams  = (data.startgg?.eventTeams  || []).map(t => ({ ...t, _plat: 'start.gg' }));
   const challTeams = (data.challonge?.eventTeams || []).map(t => ({ ...t, _plat: 'challonge' }));
   const nxgenTeams = (data.nxgen?.eventTeams    || []).map(t => ({ ...t, _plat: 'nxgen' }));
-  const all = [...sggTeams, ...challTeams, ...nxgenTeams];
+  const faceitTeams = (data.faceit?.eventTeams  || []).map(t => ({ ...t, _plat: 'faceit' }));
+  const all = [...sggTeams, ...challTeams, ...nxgenTeams, ...faceitTeams];
 
   // A card's logo/color prefer the matching Team Library entry (if the producer has edited+saved
   // this event team) over the raw import — editing a team writes to savedTeams only (save_team/
@@ -8339,7 +9224,11 @@ function renderEventTeamsPanel(data) {
 
     const card = document.createElement('div');
     card.className = 'tc-card';
-    card.dataset.search = (t.name || '').toLowerCase();
+    card.dataset.name = t.name || '';
+    // Roster included so an entrant's gamertag finds their team in the event list too.
+    card.dataset.search = ((t.name || '') + ' ' +
+      (t.players || []).map((p) => (typeof p === 'string' ? p : ((p && (p.name || p.gamertag)) || ''))).join(' ')
+    ).toLowerCase();
     card.style.setProperty('--team-accent', dispColor || '#3b82f6');
 
     const accent = document.createElement('div'); accent.className = 'tc-card-accent';
@@ -8404,10 +9293,10 @@ function renderEventTeamsPanel(data) {
 // Keyword filter over the Event Teams list (pure show/hide — no re-render), mirroring applyTeamsFilter().
 function applyEventTeamsFilter() {
   const list = el('event-teams-list'); if (!list) return;
-  const q = (el('event-teams-search')?.value || '').trim().toLowerCase();
+  const q = (el('event-teams-search')?.value || '').trim();
   const items = list.querySelectorAll('.tc-card');
-  let shown = 0;
-  items.forEach((item) => { const m = !q || (item.dataset.search || '').includes(q); item.style.display = m ? '' : 'none'; if (m) shown++; });
+  const { shown } = NESearch.rankNodes(items, q,
+    (n) => [{ text: n.dataset.name || '', weight: 2 }, { text: n.dataset.search || '', bag: true }]);
   const nomatch = el('event-teams-nomatch');
   if (nomatch) nomatch.style.display = (items.length > 0 && q && shown === 0) ? '' : 'none';
 }
@@ -8424,10 +9313,12 @@ el('btn-clear-event-teams')?.addEventListener('click', async () => {
 function switchTeamsTab(tab) {
   const savedPanel = el('teams-panel-saved');
   const eventPanel = el('teams-panel-event');
+  const vaultPanel = el('teams-panel-vault');
   const savedActions = el('talent-topbar-teams-actions');
   const eventActions = el('talent-topbar-event-actions');
   if (savedPanel) savedPanel.style.display = tab === 'saved' ? '' : 'none';
   if (eventPanel) eventPanel.style.display = tab === 'event'  ? '' : 'none';
+  if (vaultPanel) vaultPanel.style.display = tab === 'vault'  ? '' : 'none';
   // Never light up a Teams action group while the Crew page is the one on screen.
   const onTeamsPage = (el('talent-panel-teams')?.style.display !== 'none');
   if (savedActions) savedActions.style.display = (onTeamsPage && tab === 'saved') ? '' : 'none';
@@ -8435,7 +9326,480 @@ function switchTeamsTab(tab) {
   document.querySelectorAll('#teams-sub-nav .talent-page-btn').forEach(b => {
     b.classList.toggle('active', b.dataset.teamstab === tab);
   });
+  if (tab === 'vault') tvFetch();
 }
+
+// ── Team Vault ─────────────────────────────────────────────────────────────
+// The permanent team database. Deliberately NOT carried in the broadcast state — records hold
+// base64 logos and full roster history, and state ships to every overlay on every change — so it
+// is fetched over /api/teamdb and re-fetched when state.teamVault.ver bumps.
+// Absolute URL: the control panel is a file:// page, so a relative fetch resolves to disk.
+const TV_API = 'http://localhost:3000/api/teamdb';
+let _tvTeams = [];
+let _tvVer = -1;
+let _tvLoading = false;
+let _tvDetail = null;   // the record currently open in the detail modal
+let _tvPending = 0;     // banked teams the background start.gg sweep still wants to read
+
+// The automatic status line. Driven straight off state (not the /api/teamdb fetch) so a sweep's
+// progress ticks live — the record list only re-fetches when the vault's `ver` changes, which
+// happens once at the END of a sweep.
+function tvRenderAuto(data) {
+  const line = el('tv-auto-line'); if (!line) return;
+  const v = (data && data.teamVault) || {};
+  const dot = el('tv-auto-dot');
+  const title = el('tv-auto-title');
+  const en = v.enrich || {};
+
+  if (v.enabled === false) {
+    if (dot) dot.className = 'tv-auto-dot off';
+    if (title) title.textContent = 'Vault off';
+    line.textContent = 'Imports behave exactly as they did before — teams are matched by name only, and nothing is banked.';
+    return;
+  }
+  if (en.running) {
+    if (dot) dot.className = 'tv-auto-dot busy';
+    if (title) title.textContent = 'Reading start.gg team pages…';
+    line.textContent = `${en.done || 0} of ${en.total || 0} done. Crests and full rosters are being filled in — you can carry on working.`;
+    return;
+  }
+  if (dot) dot.className = 'tv-auto-dot';
+  if (title) title.textContent = 'Teams bank themselves';
+  const bits = ['Import an event and every entrant is matched, banked and looked up on start.gg automatically — crest, full roster and alumni.'];
+  const lm = v.lastMatch;
+  if (lm && lm.total) {
+    bits.push(`Last import: ${lm.matched} of ${lm.total} recognised from a previous event`
+      + (lm.logosRestored ? `, ${lm.logosRestored} crest${lm.logosRestored === 1 ? '' : 's'} restored from your own branding` : '') + '.');
+  }
+  if (_tvPending) bits.push(`${_tvPending} team${_tvPending === 1 ? '' : 's'} queued for a start.gg lookup.`);
+  else if (en.lastAt) bits.push(`Everything up to date (last checked ${new Date(en.lastAt).toLocaleTimeString()}).`);
+  if (v.autoEnrich === false) bits.push('Automatic lookups are off — use Refresh.');
+  line.textContent = bits.join(' ');
+}
+
+// Read a vault API response WITHOUT assuming it is JSON. Every call here used to do a bare
+// `await r.json()`, so an HTML reply — which is what you get when the running app predates the
+// route, the commonest case since server.js only reloads on a full app restart — surfaced as the
+// unusable "Unexpected token < in JSON at position 0" with no clue which call failed or why.
+async function tvJson(r, what) {
+  const text = await r.text();
+  let data = null;
+  try { data = text ? JSON.parse(text) : {}; } catch (_) { data = null; }
+  if (data === null) {
+    if (r.status === 404) {
+      throw new Error('The Team Vault API isn\'t in the running app yet — fully quit and relaunch '
+        + 'NE Broadcast Suite so it picks up the new server.');
+    }
+    throw new Error((what || 'Request') + ' failed: the server replied with '
+      + (r.status || '?') + ' ' + (r.statusText || '') + ' instead of data.');
+  }
+  if (!r.ok) throw new Error(data.error || data.message || ((what || 'Request') + ' failed (' + r.status + ')'));
+  return data;
+}
+
+function tvStatus(msg, ok) {
+  const e = el('tv-pull-status'); if (!e) return;
+  e.textContent = msg || '';
+  e.className = 'tv-status' + (ok === true ? ' ok' : ok === false ? ' err' : '');
+}
+
+async function tvFetch(force) {
+  if (_tvLoading) return;
+  const ver = (currentState && currentState.teamVault && currentState.teamVault.ver) || 0;
+  if (!force && ver === _tvVer && _tvTeams.length) { tvRender(); return; }
+  _tvLoading = true;
+  try {
+    const r = await fetch(TV_API + '?limit=1000');
+    const d = await tvJson(r, 'Loading the vault');
+    _tvTeams = d.teams || [];
+    _tvVer = ver;
+    const st = d.stats || {};
+    const line = el('tv-stats');
+    if (line) line.textContent = _tvTeams.length
+      ? st.teams + ' teams · ' + st.linked + ' linked to start.gg · ' + st.withLogo + ' with a logo · ' + st.active + '/' + st.players + ' players active'
+      : '';
+    const cfg = d.settings || {};
+    if (el('tv-enabled'))    el('tv-enabled').checked    = cfg.enabled !== false;
+    if (el('tv-autolink'))   el('tv-autolink').checked   = cfg.autoLink !== false;
+    if (el('tv-autoenrich')) el('tv-autoenrich').checked = cfg.autoEnrich !== false;
+    _tvPending = d.pending || 0;
+    tvRenderAuto(currentState);
+  } catch (e) {
+    // A TypeError here is a genuine connection failure; anything else already carries a real
+    // message from tvJson and must not be relabelled as "can't reach the server".
+    tvStatus(e instanceof TypeError ? 'Could not reach the suite on localhost:3000 — is it running?' : e.message, false);
+  } finally {
+    _tvLoading = false;
+  }
+  tvRender();
+}
+
+function tvRender() {
+  const list = el('tv-list'); if (!list) return;
+  const q = (el('tv-search')?.value || '').trim().toLowerCase();
+  const rows = q
+    ? _tvTeams.filter(t =>
+        (t.name || '').toLowerCase().includes(q) ||
+        (t.aliases || []).some(a => a.includes(q)) ||
+        (t.roster || []).some(p => (p.name || '').toLowerCase().includes(q)))
+    : _tvTeams;
+
+  const cnt = el('vault-tab-count');
+  if (cnt) cnt.textContent = _tvTeams.length ? '(' + _tvTeams.length + ')' : '';
+  const empty = el('tv-empty');
+  if (empty) {
+    empty.style.display = rows.length ? 'none' : '';
+    if (!rows.length && _tvTeams.length) empty.textContent = 'No vault teams match your search.';
+  }
+
+  list.innerHTML = '';
+  const frag = document.createDocumentFragment();
+  rows.forEach(t => {
+    const active = (t.roster || []).filter(p => p.rosterStatus !== 'inactive').length;
+    const total  = (t.roster || []).length;
+    const card = document.createElement('div');
+    card.className = 'tc-card';
+    card.style.setProperty('--team-accent', t.color || '#3b82f6');
+
+    const accent = document.createElement('div'); accent.className = 'tc-card-accent';
+    const body   = document.createElement('div'); body.className = 'tc-card-body';
+    const logo   = document.createElement('img'); logo.className = 'tc-card-logo'; logo.loading = 'lazy';
+    logo.src = t.logo || teePlaceholder(t.name, t.color);
+    const info   = document.createElement('div'); info.className = 'tc-card-info';
+    const nameEl = document.createElement('div'); nameEl.className = 'tc-card-name';
+    nameEl.appendChild(document.createTextNode(t.name || ''));
+    // Badges say WHY this record will be found again: a start.gg link is exact, a pin means the
+    // producer's branding is protected from the next import.
+    if (t.startggTeamId || t.startggSlug) {
+      const b = document.createElement('span'); b.className = 'tv-badge sgg';
+      b.textContent = 'START.GG'; b.title = 'Linked to start.gg team ' + (t.startggSlug || t.startggTeamId);
+      nameEl.appendChild(b);
+    }
+    if (t.pins && (t.pins.logo || t.pins.name)) {
+      const b = document.createElement('span'); b.className = 'tv-badge pin';
+      b.textContent = 'PINNED'; b.title = 'Your branding here overrides whatever start.gg sends';
+      nameEl.appendChild(b);
+    }
+    const meta = document.createElement('div'); meta.className = 'tc-card-meta';
+    const bits = [total ? (active + '/' + total + ' active') : 'No roster'];
+    if ((t.aliases || []).length) bits.push(t.aliases.length + ' past name' + (t.aliases.length === 1 ? '' : 's'));
+    if ((t.events  || []).length) bits.push(t.events.length + ' event' + (t.events.length === 1 ? '' : 's'));
+    meta.textContent = bits.join(' · ');
+    info.append(nameEl, meta);
+    body.append(logo, info);
+
+    const footer = document.createElement('div'); footer.className = 'tc-card-footer';
+    const editBtn = document.createElement('button');
+    editBtn.className = 'tc-edit tc-edit-primary'; editBtn.textContent = 'Open';
+    editBtn.addEventListener('click', e => { e.stopPropagation(); tvOpen(t.id); });
+    const useBtn = document.createElement('button');
+    useBtn.className = 'tc-edit'; useBtn.textContent = 'Use'; useBtn.title = 'Copy into the working team library';
+    useBtn.addEventListener('click', async e => {
+      e.stopPropagation();
+      const prev = useBtn.textContent;
+      try {
+        await tvJson(await fetch(TV_API + '/' + t.id + '/apply', { method: 'POST' }), 'Sending to the team library');
+        useBtn.textContent = 'Added';
+      } catch (err) {
+        useBtn.textContent = 'Failed';
+        tvStatus(err.message, false);   // the button has no room for the reason; the status line does
+      }
+      setTimeout(() => { useBtn.textContent = prev; }, 1800);
+    });
+    footer.append(editBtn, useBtn);
+
+    card.append(accent, body, footer);
+    card.addEventListener('click', () => tvOpen(t.id));
+    frag.appendChild(card);
+  });
+  list.appendChild(frag);
+}
+
+// ── Vault detail modal ─────────────────────────────────────────────────────
+
+function tvDetailStatus(msg, ok) {
+  const e = el('tv-detail-status'); if (!e) return;
+  e.textContent = msg || '';
+  e.style.color = ok === true ? '#22c55e' : ok === false ? '#f56565' : '';
+}
+
+function tvOpen(id) {
+  const rec = _tvTeams.find(t => t.id === id);
+  if (!rec) return;
+  _tvDetail = JSON.parse(JSON.stringify(rec));
+  el('tv-detail-title').textContent = rec.name || 'Team';
+  el('tv-detail-name').value  = rec.name || '';
+  el('tv-detail-abbr').value  = rec.abbr || '';
+  el('tv-detail-color').value = rec.color || '#055fdb';
+  el('tv-detail-slug').value  = rec.startggSlug || '';
+  const img = el('tv-detail-logo');
+  img.src = rec.logo || teePlaceholder(rec.name, rec.color);
+  img.classList.remove('game-logo-white');
+  const parts = [];
+  if (rec.startggTeamId) parts.push('start.gg team #' + rec.startggTeamId);
+  if ((rec.aliases || []).length) parts.push('Also known as: ' + rec.aliases.join(', '));
+  el('tv-detail-known').textContent = parts.join(' · ');
+  tvDetailStatus('');
+  tvRenderRoster();
+  tvRenderEvents();
+  el('tv-detail-modal')?.classList.add('show');
+}
+
+function tvCloseDetail() { el('tv-detail-modal')?.classList.remove('show'); _tvDetail = null; }
+
+function tvRenderRoster() {
+  const wrap = el('tv-detail-roster'); if (!wrap || !_tvDetail) return;
+  wrap.innerHTML = '';
+  const roster = _tvDetail.roster || [];
+  if (!roster.length) {
+    wrap.innerHTML = '<p class="tv-hint" style="margin:0;">No players recorded yet. Pull the team from start.gg, or save it from an event import.</p>';
+    return;
+  }
+  // Active first, then alumni — a producer reads the current line-up far more often than history.
+  [...roster].sort((a, b) => (a.rosterStatus === 'inactive') - (b.rosterStatus === 'inactive'))
+    .forEach(p => {
+      const inactive = p.rosterStatus === 'inactive';
+      const row = document.createElement('div');
+      row.className = 'tv-prow' + (inactive ? ' is-inactive' : '');
+
+      const name = document.createElement('div'); name.className = 'tv-prow-name';
+      name.appendChild(document.createTextNode(p.name || '(unnamed)'));
+      const subBits = [];
+      if (p.role) subBits.push(p.role);
+      if (p.realName) subBits.push(p.realName);
+      if (p.lastEvent) subBits.push('last seen ' + String(p.lastEvent).split('/').pop());
+      if (subBits.length) {
+        const sub = document.createElement('span');
+        sub.className = 'tv-prow-sub';
+        sub.textContent = '  ' + subBits.join(' · ');
+        name.appendChild(sub);
+      }
+
+      const actions = document.createElement('div'); actions.className = 'tv-prow-actions';
+      const toggle = document.createElement('button');
+      toggle.className = 'tv-chip' + (inactive ? '' : ' on');
+      toggle.textContent = inactive ? 'Inactive' : 'Active';
+      toggle.title = 'Only active players reach the overlays and event imports';
+      toggle.addEventListener('click', () => tvSetRoster(p, { rosterStatus: inactive ? 'active' : 'inactive' }));
+
+      const pin = document.createElement('button');
+      pin.className = 'tv-chip' + (p.pinned ? ' pinned' : '');
+      pin.textContent = 'Pin';
+      pin.title = p.pinned
+        ? 'Pinned — start.gg imports will not change this status'
+        : 'Pin so an import can never flip this player active/inactive';
+      pin.addEventListener('click', () => tvSetRoster(p, { pinned: !p.pinned, rosterStatus: p.rosterStatus }));
+
+      const del = document.createElement('button');
+      del.className = 'tv-chip danger'; del.textContent = 'Remove';
+      del.title = 'Erase this player from the record entirely';
+      del.addEventListener('click', async () => {
+        const who = p.name || 'this player';
+        if (!(await appConfirm('Remove ' + who + ' from ' + _tvDetail.name + '? Their roster history here is lost.', 'Remove', true))) return;
+        tvSetRoster(p, { remove: true });
+      });
+
+      actions.append(toggle, pin, del);
+      row.append(name, actions);
+      wrap.appendChild(row);
+    });
+}
+
+async function tvSetRoster(player, patch) {
+  if (!_tvDetail) return;
+  try {
+    const r = await fetch(TV_API + '/' + _tvDetail.id + '/roster', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ playerId: player.id, ...patch })
+    });
+    const d = await tvJson(r, 'Updating the roster');
+    _tvDetail = d.team;
+    const i = _tvTeams.findIndex(t => t.id === d.team.id);
+    if (i >= 0) _tvTeams[i] = d.team;
+    tvRenderRoster();
+    tvRender();
+  } catch (e) { tvDetailStatus(e.message, false); }
+}
+
+function tvRenderEvents() {
+  const wrap = el('tv-detail-events'); if (!wrap || !_tvDetail) return;
+  const evs = _tvDetail.events || [];
+  if (!evs.length) { wrap.innerHTML = '<p class="tv-hint" style="margin:0;">No events recorded yet.</p>'; return; }
+  wrap.innerHTML = '';
+  evs.forEach(ev => {
+    const row = document.createElement('div'); row.className = 'tv-erow';
+    const a = document.createElement('span');
+    a.textContent = ev.name || String(ev.slug || '').split('/').slice(-1)[0] || ev.slug || '';
+    a.title = ev.slug || '';
+    const b = document.createElement('span');
+    // "Entered as" is the useful bit: it is the evidence for why this record matched at all.
+    b.textContent = (ev.enteredAs && ev.enteredAs !== _tvDetail.name ? 'as ' + ev.enteredAs + ' · ' : '')
+      + (ev.at ? new Date(ev.at).toLocaleDateString() : '');
+    row.append(a, b);
+    wrap.appendChild(row);
+  });
+}
+
+el('tv-detail-close')?.addEventListener('click', tvCloseDetail);
+el('tv-detail-modal')?.addEventListener('click', e => { if (e.target.id === 'tv-detail-modal') tvCloseDetail(); });
+
+el('tv-detail-logo-file')?.addEventListener('change', async function () {
+  const f = this.files && this.files[0]; if (!f || !_tvDetail) return;
+  _tvDetail.logo = await fileToBase64(f);
+  const img = el('tv-detail-logo'); img.src = _tvDetail.logo; img.classList.remove('game-logo-white');
+  this.value = '';
+});
+el('tv-detail-logo-lib')?.addEventListener('click', () => {
+  if (typeof mpOpen !== 'function' || !_tvDetail) return;
+  mpOpen(url => { _tvDetail.logo = url; const img = el('tv-detail-logo'); img.src = url; img.classList.remove('game-logo-white'); });
+});
+
+el('tv-detail-save')?.addEventListener('click', async () => {
+  if (!_tvDetail) return;
+  const name = (el('tv-detail-name').value || '').trim();
+  if (!name) { tvDetailStatus('Enter a team name.', false); return; }
+  try {
+    const r = await fetch(TV_API, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        id: _tvDetail.id, name,
+        abbr: (el('tv-detail-abbr').value || '').trim().toUpperCase().slice(0, 6) || null,
+        color: el('tv-detail-color').value || null,
+        logo: _tvDetail.logo || null,
+        startggSlug: (el('tv-detail-slug').value || '').trim() || null,
+      })
+    });
+    await tvJson(r, 'Save');
+    tvDetailStatus('Saved — this branding now wins over start.gg at every future event.', true);
+    await tvFetch(true);
+    setTimeout(tvCloseDetail, 900);
+  } catch (e) { tvDetailStatus(e.message, false); }
+});
+
+el('tv-detail-apply')?.addEventListener('click', async () => {
+  if (!_tvDetail) return;
+  try {
+    const r = await fetch(TV_API + '/' + _tvDetail.id + '/apply', { method: 'POST' });
+    await tvJson(r, 'Sending to the team library');
+    tvDetailStatus('Added to the team library.', true);
+  } catch (e) { tvDetailStatus(e.message, false); }
+});
+
+el('tv-detail-delete')?.addEventListener('click', async () => {
+  if (!_tvDetail) return;
+  const msg = 'Delete "' + _tvDetail.name + '" from the vault? Its logo, past names and roster history are lost — teams already in your library are left alone.';
+  if (!(await appConfirm(msg, 'Delete', true))) return;
+  try {
+    const r = await fetch(TV_API + '/' + _tvDetail.id, { method: 'DELETE' });
+    await tvJson(r, 'Delete');
+    tvCloseDetail();
+    tvFetch(true);
+  } catch (e) { tvDetailStatus(e.message, false); }
+});
+
+// Merge is the escape hatch for when the matching cascade produced two records for one org — most
+// likely an ad-hoc entrant that shared too few players to be recognised.
+el('tv-detail-merge')?.addEventListener('click', async () => {
+  if (!_tvDetail) return;
+  const others = _tvTeams.filter(t => t.id !== _tvDetail.id);
+  if (!others.length) { tvDetailStatus('Nothing else in the vault to merge in.', false); return; }
+  const pick = window.prompt(
+    'Fold another team INTO "' + _tvDetail.name + '" — its roster history, past names and start.gg link move across, then it is deleted.\n\nType the team name exactly:\n\n' +
+    others.slice(0, 40).map(t => '- ' + t.name).join('\n'));
+  if (!pick) return;
+  const from = others.find(t => (t.name || '').toLowerCase() === pick.trim().toLowerCase());
+  if (!from) { tvDetailStatus('No vault team named "' + pick.trim() + '".', false); return; }
+  try {
+    const r = await fetch(TV_API + '/merge', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ into: _tvDetail.id, from: from.id })
+    });
+    const d = await tvJson(r, 'Merge');
+    await tvFetch(true);
+    tvOpen(d.team.id);
+    tvDetailStatus('Merged "' + from.name + '" in.', true);
+  } catch (e) { tvDetailStatus(e.message, false); }
+});
+
+// ── Vault toolbar ──────────────────────────────────────────────────────────
+
+el('tv-search')?.addEventListener('input', tvRender);
+
+el('tv-pull')?.addEventListener('click', async () => {
+  const slug = (el('tv-slug')?.value || '').trim();
+  if (!slug) { tvStatus('Paste a start.gg team URL or slug first.', false); return; }
+  const btn = el('tv-pull');
+  btn.disabled = true; btn.textContent = 'Pulling…';
+  tvStatus('Asking start.gg…');
+  try {
+    const r = await fetch(TV_API + '/pull-startgg', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ slug, alsoLibrary: true })
+    });
+    const d = await tvJson(r, 'Pull');
+    const x = d.result;
+    tvStatus((x.created ? 'Saved' : 'Updated') + ' "' + x.name + '" — ' + x.active + ' current member' + (x.active === 1 ? '' : 's')
+      + (x.inactive ? ', ' + x.inactive + ' alumni' : '')
+      + (x.logo ? ', crest included' : ', no crest on start.gg — add one below')
+      + '. It will be recognised automatically at every future event.', true);
+    if (el('tv-slug')) el('tv-slug').value = '';
+    await tvFetch(true);
+  } catch (e) {
+    tvStatus(e.message, false);
+  } finally { btn.disabled = false; btn.textContent = 'Pull team'; }
+});
+el('tv-slug')?.addEventListener('keydown', e => { if (e.key === 'Enter') el('tv-pull')?.click(); });
+
+el('tv-import-library')?.addEventListener('click', async () => {
+  const n = ((currentState && currentState.savedTeams) || []).length;
+  if (!n) { tvStatus('Your team library is empty.', false); return; }
+  const msg = 'Create a vault record for each of your ' + n + ' saved teams? Existing vault entries are matched and updated, not duplicated.';
+  if (!(await appConfirm(msg, 'Import'))) return;
+  try {
+    const r = await fetch(TV_API + '/import-library', { method: 'POST' });
+    const d = await tvJson(r, 'Import');
+    tvStatus('Imported — ' + d.created + ' new, ' + d.updated + ' matched to an existing record. ' + d.total + ' teams banked.', true);
+    await tvFetch(true);
+  } catch (e) { tvStatus(e.message, false); }
+});
+
+el('tv-refresh')?.addEventListener('click', async () => {
+  const btn = el('tv-refresh');
+  btn.disabled = true; btn.textContent = 'Refreshing…';
+  // Nothing queued means everything is inside the weekly re-read window — the producer pressing
+  // Refresh anyway wants it read NOW, so force it rather than reporting "0 updated".
+  const force = _tvPending === 0;
+  tvStatus('Reading start.gg team pages…');
+  try {
+    const r = await fetch(TV_API + '/enrich', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ force })
+    });
+    const d = await tvJson(r, 'Refresh');
+    const x = d.result || {};
+    if (x.skipped) tvStatus('Skipped — ' + x.skipped + '.', false);
+    else if (!x.total) tvStatus('Nothing to refresh — no banked team is linked to a start.gg team page yet.', null);
+    else tvStatus(`Refreshed ${x.updated} of ${x.total} team page${x.total === 1 ? '' : 's'}`
+      + (x.logosGained ? `, ${x.logosGained} new crest${x.logosGained === 1 ? '' : 's'}` : '')
+      + (x.failed ? `, ${x.failed} failed` : '') + '.', true);
+    await tvFetch(true);
+  } catch (e) { tvStatus(e.message, false); }
+  finally { btn.disabled = false; btn.textContent = 'Refresh from start.gg'; }
+});
+
+function tvSaveSettings() {
+  fetch(TV_API + '/settings', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      enabled: !!el('tv-enabled')?.checked,
+      autoLink: !!el('tv-autolink')?.checked,
+      autoEnrich: !!el('tv-autoenrich')?.checked
+    })
+  }).catch(() => {});
+}
+el('tv-enabled')?.addEventListener('change', tvSaveSettings);
+el('tv-autolink')?.addEventListener('change', tvSaveSettings);
+el('tv-autoenrich')?.addEventListener('change', tvSaveSettings);
 el('teams-sub-nav')?.addEventListener('click', e => {
   const btn = e.target.closest('[data-teamstab]');
   if (btn) switchTeamsTab(btn.dataset.teamstab);
@@ -8923,6 +10287,127 @@ function renderSavedFacecams(facecams) {
   });
 }
 
+// ── Battle royale series (Fortnite / PUBG / Warzone) ────────────────────────
+// Everything here writes RAW results to the server, which re-derives the standings — the panel
+// never computes points itself, so the sheet, the manual grid and any live feed can't disagree.
+// Mirrors BR_SCORING_PRESETS in server.js. Epic runs a different elim value per stage — 3 in
+// Groups, 4 in Finals — so those ship as separate entries rather than one "FNCS" preset a TO
+// then applies to the wrong stage.
+const BR_PRESET_LABELS = {
+  fncsFinals: 'Fortnite — FNCS Finals (4/elim)',
+  fncsGroups: 'Fortnite — FNCS Groups (3/elim)',
+  fncsReload: 'Fortnite — Reload path',
+  fncs: 'Fortnite (FNCS legacy)', fncsCup: 'Fortnite (Victory Cup)', algs: 'Apex (ALGS)',
+  pubg: 'PUBG (Esports)', warzone: 'Warzone (Kill Race)', custom: 'Custom'
+};
+function brSend(patch) { send('set_br', patch); }
+let _brSig = '';
+function renderBrPanel(data) {
+  const br = (data && data.br) || {};
+  const sec = el('games-section-fortnite');
+  if (!sec) return;
+
+  const presetSel = el('br-preset');
+  if (presetSel && !presetSel.options.length) {
+    Object.entries(BR_PRESET_LABELS).forEach(([id, label]) => {
+      const o = document.createElement('option'); o.value = id; o.textContent = label; presetSel.appendChild(o);
+    });
+  }
+
+  // Don't fight the producer's cursor: skip any field they're currently typing in.
+  const active = document.activeElement;
+  const setVal = (id, v) => { const e = el(id); if (e && e !== active) e.value = v; };
+  const setChk = (id, v) => { const e = el(id); if (e && e !== active) e.checked = !!v; };
+
+  setChk('chk-br-enabled', br.enabled);
+  setVal('br-title', (br.event && br.event.title) || '');
+  setVal('br-split', (br.event && br.event.split) || '');
+  setVal('br-round', (br.event && br.event.match) || '');
+  setVal('br-matches', (br.format && br.format.matches) || 6);
+  setVal('br-preset', br.scoringPreset || 'fncs');
+  setVal('br-killpts', (br.scoring && br.scoring.killPoints) != null ? br.scoring.killPoints : 1);
+  setVal('br-killcap', (br.scoring && br.scoring.killCap) || 0);
+  setVal('br-table', ((br.scoring && br.scoring.placementPoints) || []).join(', '));
+  const maps = (data && data.sheets && data.sheets.maps) || {};
+  setVal('br-tab-results', (maps.brResults && maps.brResults.tab) || '');
+  setVal('br-tab-players', (maps.brPlayers && maps.brPlayers.tab) || '');
+
+  const rows = br.standings || [];
+  const played = rows.reduce((m, t) => Math.max(m, ...Object.keys(t.matches || {}).map(Number)), 0);
+  const st = el('br-status');
+  if (st) {
+    st.textContent = rows.length
+      ? `${rows.length} team(s) · ${played} match(es) scored · source: ${br.source || 'manual'}`
+      : 'No results yet.';
+  }
+
+  // Standings preview mirrors the overlay's ordering so the producer can sanity-check before air.
+  const sig = JSON.stringify(rows.slice(0, 20));
+  if (sig !== _brSig) {
+    _brSig = sig;
+    const box = el('br-standings-preview');
+    if (box) {
+      box.innerHTML = rows.length
+        ? '<table class="stats-table" style="width:100%;"><thead><tr><th>#</th><th>Team</th><th>Played</th><th>Wins</th><th>Elims</th><th>Points</th></tr></thead><tbody>'
+          + rows.slice(0, 20).map((t) => `<tr><td>${t.rank}</td><td class="st-name">${esc(t.name)}</td>`
+            + `<td>${t.played}</td><td>${t.wins}</td><td>${t.elims}</td><td class="st-hi">${t.pts}</td></tr>`).join('')
+          + '</tbody></table>'
+        : '<p class="field-hint" style="margin:0;">Standings appear here as results come in.</p>';
+    }
+  }
+}
+
+el('chk-br-enabled')?.addEventListener('change', function () { brSend({ enabled: this.checked }); });
+['br-title', 'br-split', 'br-round'].forEach((id) => {
+  el(id)?.addEventListener('change', () => brSend({ event: {
+    title: el('br-title')?.value || '', split: el('br-split')?.value || '', match: el('br-round')?.value || '' } }));
+});
+el('br-matches')?.addEventListener('change', function () { brSend({ format: { matches: parseInt(this.value, 10) || 6 } }); });
+el('br-preset')?.addEventListener('change', function () { brSend({ scoringPreset: this.value }); });
+el('br-killpts')?.addEventListener('change', function () { brSend({ scoring: { killPoints: parseInt(this.value, 10) || 0 } }); });
+el('br-killcap')?.addEventListener('change', function () { brSend({ scoring: { killCap: parseInt(this.value, 10) || 0 } }); });
+el('br-table')?.addEventListener('change', function () {
+  const nums = this.value.split(/[,\s]+/).map((n) => parseInt(n, 10)).filter((n) => !isNaN(n));
+  if (nums.length) brSend({ scoring: { placementPoints: nums } });
+});
+
+el('btn-br-template')?.addEventListener('click', async () => {
+  const teams = (el('br-template-teams')?.value || '').split('\n').map((t) => t.trim()).filter(Boolean);
+  const ok = await appConfirm('Build the BR scorekeeping tabs in the connected Google Sheet? Existing content in those tabs is replaced.', 'Build');
+  if (!ok) return;
+  send('br_sheet_template', {
+    matches: parseInt(el('br-matches')?.value, 10) || 6,
+    resultsTab: el('br-tab-results')?.value || '',
+    playersTab: el('br-tab-players')?.value || '',
+    teams
+  });
+});
+el('btn-br-sync')?.addEventListener('click', () => send('sheets_sync', {}));
+
+el('btn-br-add')?.addEventListener('click', () => {
+  const team = (el('br-m-team')?.value || '').trim();
+  if (!team) { showToast('Enter a team name first.', '#f59e0b'); return; }
+  send('set_br_result', {
+    match: parseInt(el('br-m-match')?.value, 10) || 1,
+    team,
+    placement: parseInt(el('br-m-place')?.value, 10) || 0,
+    elims: parseInt(el('br-m-elims')?.value, 10) || 0
+  });
+  // Clear only the per-team fields — match number stays put so a whole lobby can be typed in a run.
+  ['br-m-team', 'br-m-place', 'br-m-elims'].forEach((id) => { const e = el(id); if (e) e.value = ''; });
+  el('br-m-team')?.focus();
+});
+el('btn-br-clear-match')?.addEventListener('click', async () => {
+  const m = parseInt(el('br-m-match')?.value, 10) || 0;
+  if (!m) return;
+  if (!(await appConfirm(`Clear every result for match ${m}? The rest of the series is untouched.`, 'Clear match'))) return;
+  send('clear_br_results', { scope: 'match', match: m });
+});
+el('btn-br-clear-all')?.addEventListener('click', async () => {
+  if (!(await appConfirm('Reset the whole BR series? Every match result is deleted.', 'Reset series'))) return;
+  send('clear_br_results', { scope: 'all' });
+});
+
 // ── Event: Event name ─────────────────────────────────────────────────────
 el('input-event')?.addEventListener('input', function() {
   send('set_event_name', { name: this.value });
@@ -9170,10 +10655,16 @@ function setupTeamTypeahead(side) {
   // and leave the producer thinking the name isn't allowed.
   const TBD_ITEM = { name: 'TBD', logo: null, color: null, players: [], source: 'tbd' };
   const filtered = (q) => {
-    q = (q || '').trim().toLowerCase();
-    const list = allMatchTeams();
-    const out = (q ? list.filter((t) => (t.name || '').toLowerCase().includes(q)) : list).slice(0, 60);
-    if (!q || 'tbd'.startsWith(q) || 'tba'.startsWith(q)) out.unshift(TBD_ITEM);
+    q = (q || '').trim();
+    // Ranked, and capped only AFTER ranking — the old unranked slice(0,60) could cut off the exact
+    // team being typed whenever it sat past the 60th row of the library. Rosters are searchable
+    // too, so a gamertag off the entrant list finds the team it belongs to.
+    const out = NESearch.filter(allMatchTeams(), q, (t) => [
+      { text: t.name, weight: 2 },
+      { text: (t.players || []).map((p) => (typeof p === 'string' ? p : ((p && (p.name || p.gamertag)) || ''))).join(' '), bag: true }
+    ], { limit: 60 }).slice(0, 60);
+    const lq = q.toLowerCase();
+    if (!lq || 'tbd'.startsWith(lq) || 'tba'.startsWith(lq)) out.unshift(TBD_ITEM);
     return out;
   };
   const close = () => { dd.classList.remove('show'); open = false; active = -1; };
@@ -9203,17 +10694,25 @@ function setupTeamTypeahead(side) {
     const act = dd.querySelector('.team-dd-item.active');
     if (act) act.scrollIntoView({ block: 'nearest' });
   };
-  const refresh = () => { items = filtered(input.value); active = -1; render(); };
+  // What the producer actually TYPED, kept apart from input.value. Arrow keys preview the
+  // highlighted team into the field (that's what lets the existing Enter handler apply it), which
+  // used to overwrite the query — so arrowing down once re-filtered the list to that one team and
+  // arrowing back up was impossible. The list is now always filtered by `typed`.
+  let typed = '';
+  const refresh = () => { typed = input.value; items = filtered(typed); active = -1; render(); };
+  const preview = () => { if (items[active]) input.value = (items[active].name || '').toUpperCase(); render(); };
 
   input.addEventListener('focus', refresh);
   input.addEventListener('input', refresh);
   input.addEventListener('keydown', (e) => {
     if (!open && e.key === 'ArrowDown') { refresh(); return; }
     if (!open) return;
-    if (e.key === 'ArrowDown') { e.preventDefault(); active = Math.min(items.length - 1, active + 1); input.value = (items[active].name || '').toUpperCase(); render(); }
-    else if (e.key === 'ArrowUp') { e.preventDefault(); active = Math.max(0, active - 1); input.value = (items[active].name || '').toUpperCase(); render(); }
+    if (e.key === 'ArrowDown') { e.preventDefault(); active = Math.min(items.length - 1, active + 1); preview(); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); active = Math.max(0, active - 1); preview(); }
     else if (e.key === 'Enter') { close(); }            // value already set; existing Enter handler applies it
-    else if (e.key === 'Escape') { close(); }
+    // Escape puts the query back, so a stray arrow key doesn't leave the field holding a team the
+    // producer never picked.
+    else if (e.key === 'Escape') { input.value = typed; close(); }
   });
   // mousedown (not click) so selection wins the race against the input's blur.
   dd.addEventListener('mousedown', (e) => {
@@ -9297,6 +10796,15 @@ function scorecardHTML(sfx) {
       <span class="series-label">Best of</span>
       <div class="best-of-options">${bo}</div>
     </div>
+    <!-- Live match controls, ABOVE the game counter: these are the two things a producer reaches
+         for mid-game, so they sit nearer the score than the Best-of / Game config rows do.
+         Classes, not ids — the scorecard renders TWICE (Dashboard + Teams tab), so an id would
+         collide. The whole row is hidden unless the active game is Rocket League, since both
+         actions are Rocket League Stats API calls. -->
+    <div class="sc-bottom-row sc-live-ctl" style="display:none;">
+      <button class="btn btn-secondary btn-sm js-rl-pause" data-sc="pause" type="button">Pause match</button>
+      <button class="btn btn-ghost btn-sm js-rl-clear-board" data-sc="clear-board" type="button">Clear scoreboard</button>
+    </div>
     <div class="sc-bottom-row">
       <span class="series-label">Game</span>
       <div class="series-counter">
@@ -9318,6 +10826,15 @@ function wireScorecard(containerId, sfx) {
     if (kind === 'series') send('adjust_series', { side: b.dataset.side, delta: parseInt(b.dataset.delta, 10) });
     else if (kind === 'game') send('adjust_game_number', { delta: parseInt(b.dataset.delta, 10) });
     else if (kind === 'reset') send('reset_series');
+    // Toggle off the button's OWN state so a double-click can't desync; the incoming
+    // MatchPaused/Unpaused event snaps every copy of the button back to the truth.
+    else if (kind === 'pause') send('set_rl_paused', { paused: b.dataset.paused !== '1' });
+    // Destructive: it wipes the on-air board. Same confirm the old Settings-strip button had —
+    // moving it next to the score puts it within easy reach of a mis-click mid-game.
+    else if (kind === 'clear-board') {
+      appConfirm('Clear the on-air scoreboard now? Team names, scores and series reset on the overlay immediately.', 'Clear scoreboard')
+        .then((ok) => { if (ok) send('clear_scoreboard', {}); });
+    }
     else if (kind === 'label-upcoming') {
       const inp = c.querySelector(`#input-game-label-${sfx}`);
       if (inp) inp.value = 'UPCOMING MATCH';
@@ -9395,7 +10912,7 @@ wireScorecard('scorecard-teams', 'teams');
 // BEST OF X · GAME X). Driven from state on every broadcast.
 function updateMspConnectedState(data) {
   const plat = data && data.activeEvent && data.activeEvent.platform;
-  const platName = plat === 'startgg' ? 'start.gg' : plat === 'challonge' ? 'Challonge' : plat === 'nxgen' ? 'NXGEN' : plat;
+  const platName = plat === 'startgg' ? 'start.gg' : plat === 'challonge' ? 'Challonge' : plat === 'nxgen' ? 'NXGEN' : plat === 'faceit' ? 'FACEIT' : plat;
   document.querySelectorAll('[data-msp="round-startgg"]').forEach((b) => {
     b.classList.toggle('msp-connected', !!plat);
     b.title = plat
@@ -9938,14 +11455,24 @@ function teRenderPlayers() {
 // initials — or a shield glyph before a name is typed. Updates live as name/colour change.
 function teePlaceholder(name, color) {
   const c = /^#[0-9a-f]{6}$/i.test(color) ? color : '#055fdb';
-  const initials = (name || '').trim().split(/\s+/).map((w) => w[0]).join('').slice(0, 2).toUpperCase();
+  // Initials by CODE POINT, letters/digits only. `w[0]` took one UTF-16 code unit, so a team
+  // whose name starts with an emoji (start.gg entrant names are full of them) yielded a LONE
+  // SURROGATE — and encodeURIComponent() below threw "URI malformed". That throw escaped
+  // renderEventTeamsPanel() into applyState(), which aborted every renderer after it on EVERY
+  // state broadcast: bracket phases, ticker, standings and spotlight all silently stopped
+  // updating. Anything that isn't a letter or digit (&, <, emoji) is dropped — it would break
+  // the inline SVG anyway — and an empty result falls through to the shield glyph.
+  const initials = (name || '').trim().split(/\s+/)
+    .map((w) => Array.from(w).find((ch) => /[\p{L}\p{N}]/u.test(ch)) || '')
+    .join('').slice(0, 2).toUpperCase();
   const inner = initials
     ? `<text x="60" y="62" font-family="Inter,Arial,sans-serif" font-size="44" font-weight="800" fill="${c}" text-anchor="middle" dominant-baseline="central">${initials}</text>`
     : `<path d="M60 33l21 9v15c0 13-9 23-21 27-12-4-21-14-21-27V42z" fill="none" stroke="${c}" stroke-width="5" stroke-linejoin="round" opacity="0.85"/>`;
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 120 120">`
     + `<rect x="5" y="5" width="110" height="110" rx="18" fill="${c}" fill-opacity="0.16" stroke="${c}" stroke-opacity="0.6" stroke-width="2.5" stroke-dasharray="7 5"/>`
     + inner + `</svg>`;
-  return 'data:image/svg+xml;utf8,' + encodeURIComponent(svg);
+  // Belt and braces: a placeholder tile is never worth taking the panel down for.
+  try { return 'data:image/svg+xml;utf8,' + encodeURIComponent(svg); } catch (e) { return ''; }
 }
 function teRefreshLogoPreview() {
   const teImg = el('te-logo-preview'); if (!teImg) return;
@@ -10285,7 +11812,44 @@ el('settings-show-series')?.addEventListener('change', function () {
   send('set_show_series', { show: this.checked });
 });
 
+// ── Grid multiview (publish my match to the org wall) ─────────────────────
+// state.pulse is shared with the Pulse scene — one publish switch feeds both.
+['grid-publish', 'grid-channel', 'grid-label', 'grid-feed'].forEach(function (id) {
+  const node = el(id);
+  if (!node) return;
+  node.addEventListener('change', function () {
+    send('set_pulse', {
+      publish:     !!el('grid-publish')?.checked,
+      channel:     el('grid-channel')?.value.trim() || '',
+      label:       el('grid-label')?.value.trim() || '',
+      feedViewUrl: el('grid-feed')?.value.trim() || ''
+    });
+  });
+});
+[['grid-copy-4', '/grid.html?tiles=4'], ['grid-copy-2', '/grid.html?tiles=2'], ['grid-copy-bars', '/grid-bars.html?tiles=4']].forEach(function (pair) {
+  el(pair[0])?.addEventListener('click', function () {
+    const url = 'http://localhost:3000' + pair[1];
+    if (navigator.clipboard) navigator.clipboard.writeText(url).then(() => showToast('Browser-source URL copied.', '#22c55e', 2000));
+  });
+});
+// The wall is an ORG feature — say plainly when it can't work rather than publishing into a void.
+function syncGridMultiview() {
+  const p = currentState.pulse || {};
+  const pub = el('grid-publish'), ch = el('grid-channel'), lb = el('grid-label'), fd = el('grid-feed');
+  if (pub && document.activeElement !== pub) pub.checked = !!p.publish;
+  if (ch && document.activeElement !== ch) ch.value = p.channel || '';
+  if (lb && document.activeElement !== lb) lb.value = p.label || '';
+  if (fd && document.activeElement !== fd) fd.value = p.feedViewUrl || '';
+  const st = el('grid-status');
+  if (st) {
+    st.textContent = !p.publish ? 'Not publishing — your match is not on the wall.'
+      : (p.feedViewUrl ? 'Publishing your match and feed every 3 seconds.'
+                       : 'Publishing scores only — add a feed URL to fill your tile with video.');
+  }
+}
+
 function syncSettingsFromState() {
+  syncGridMultiview();
   const th = el('select-theme');
   if (th && currentState.theme && document.activeElement !== th) th.value = currentState.theme;
   const bo = el('settings-default-bo');
@@ -11179,6 +12743,184 @@ function renderDashNxgenQueue(queue, fetchedAt) {
         <span style="flex:1; font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(m.teamA || 'TBD')} <span style="color:var(--muted);">vs</span> ${escapeHtml(m.teamB || 'TBD')}</span>
         <button class="btn btn-ghost btn-xs nxgen-dash-set-live" style="flex-shrink:0;">Set Live</button>`;
       row.querySelector('.nxgen-dash-set-live').addEventListener('click', () => {
+        send('set_team', { side: 'blue',   name: m.teamA || '', ...(m.logoA ? { logo: m.logoA } : {}) });
+        send('set_team', { side: 'orange', name: m.teamB || '', ...(m.logoB ? { logo: m.logoB } : {}) });
+      });
+      container.appendChild(row);
+    });
+  }
+  if (status && fetchedAt) status.textContent = `Updated ${new Date(fetchedAt).toLocaleTimeString()}`;
+}
+
+// ── FACEIT (Settings ▸ Integrations) ─────────────────────────────────────────
+
+function getFaceitPayload() {
+  return {
+    enabled: !!(el('check-faceit-enabled')?.checked),
+    competitionId: (el('input-faceit-comp')?.value || '').trim(),
+    competitionType: el('select-faceit-type')?.value || 'championship',
+    organizerName: (el('input-faceit-org')?.value || '').trim(),
+    apiKey: (el('input-faceit-key')?.value || '').trim()
+  };
+}
+
+el('btn-faceit-save')?.addEventListener('click', () => {
+  send('set_faceit_settings', getFaceitPayload());
+});
+
+el('btn-faceit-test')?.addEventListener('click', () => {
+  send('set_faceit_settings', getFaceitPayload());
+  send('faceit_test_connection');
+  const r = el('faceit-result'); if (r) { r.style.color = 'var(--muted)'; r.textContent = 'Testing connection…'; }
+});
+
+el('btn-faceit-load')?.addEventListener('click', () => {
+  const p = getFaceitPayload();
+  if (!p.competitionId) { const r = el('faceit-result'); if (r) { r.style.color = '#f87171'; r.textContent = 'Paste a FACEIT championship or hub link first.'; } return; }
+  send('set_faceit_settings', p);
+  send('load_faceit_event', { id: p.competitionId, competitionType: p.competitionType });
+});
+
+el('btn-faceit-refresh')?.addEventListener('click', () => {
+  send('faceit_refresh');
+  const r = el('faceit-result'); if (r) { r.style.color = 'var(--muted)'; r.textContent = 'Refreshing…'; }
+});
+
+el('btn-faceit-change-key')?.addEventListener('click', () => {
+  const inp = el('input-faceit-key');
+  const btn = el('btn-faceit-change-key');
+  if (!inp) return;
+  inp.readOnly = false; inp.value = ''; inp.placeholder = 'Paste your new FACEIT server-side API key';
+  inp.style.opacity = ''; inp.style.cursor = '';
+  if (btn) btn.style.display = 'none';
+  inp.focus();
+});
+
+el('btn-faceit-import-teams')?.addEventListener('click', () => {
+  send('faceit_import_teams');
+  const r = el('faceit-result'); if (r) { r.style.color = 'var(--muted)'; r.textContent = 'Importing teams…'; }
+});
+
+function renderFaceitTeams(teams) {
+  const list = el('faceit-teams-list'); if (!list) return;
+  if (!teams.length) { list.innerHTML = '<p class="sps-empty">No teams loaded.</p>'; return; }
+  list.innerHTML = teams.map((t) =>
+    `<div style="display:flex; align-items:center; gap:8px; padding:4px 6px; border-radius:6px; background:rgba(255,255,255,.03);">
+      ${t.logo ? `<img src="${t.logo}" style="width:20px; height:20px; object-fit:contain; border-radius:3px;">` : '<span style="width:20px; height:20px; background:rgba(255,255,255,.08); border-radius:3px; display:inline-block;"></span>'}
+      <span style="flex:1; font-size:12px;">${escapeHtml(t.name || '')}</span>
+      ${(t.players || []).length ? `<span style="font-size:10px; color:var(--muted);">${(t.players || []).length}p</span>` : ''}
+    </div>`
+  ).join('');
+}
+
+// One row template for both the Settings list and the Dashboard queue — same markup, different
+// Set Live hook class.
+function faceitQueueRowHtml(m, btnClass) {
+  return `${m.live ? '<span style="font-size:10px; font-weight:700; color:#ff5500; flex-shrink:0;">LIVE</span>' : `<span style="font-size:10px; color:var(--muted); flex-shrink:0;">R${m.round == null ? '?' : m.round}</span>`}
+    <span style="flex:1; font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(m.teamA || 'TBD')} <span style="color:var(--muted);">vs</span> ${escapeHtml(m.teamB || 'TBD')}</span>
+    <button class="btn btn-ghost btn-xs ${btnClass}" style="flex-shrink:0;" title="Set as current match">Set Live</button>`;
+}
+
+function renderFaceitQueueInSettings(queue) {
+  const list  = el('faceit-queue-list');
+  const empty = el('faceit-queue-empty');
+  if (!list) return;
+  // The server already drops finished/cancelled matches — the queue IS the open list.
+  const open = queue || [];
+  if (empty) empty.style.display = open.length ? 'none' : '';
+  list.innerHTML = '';
+  open.forEach((m) => {
+    const row = document.createElement('div');
+    row.style.cssText = `display:flex; align-items:center; gap:8px; padding:5px 8px; border-radius:6px; background:rgba(255,255,255,.04); border:1px solid ${m.live ? 'rgba(255,85,0,.35)' : 'var(--border)'};`;
+    row.innerHTML = faceitQueueRowHtml(m, 'faceit-set-live-btn');
+    row.querySelector('.faceit-set-live-btn').addEventListener('click', () => {
+      send('set_team', { side: 'blue',   name: m.teamA || '', ...(m.logoA ? { logo: m.logoA } : {}) });
+      send('set_team', { side: 'orange', name: m.teamB || '', ...(m.logoB ? { logo: m.logoB } : {}) });
+    });
+    list.appendChild(row);
+  });
+}
+
+function renderFaceitSettings(data) {
+  const fc = data.faceit || {};
+  const enabledCb  = el('check-faceit-enabled');
+  const compInp    = el('input-faceit-comp');
+  const typeSel    = el('select-faceit-type');
+  const orgInp     = el('input-faceit-org');
+  const keyInp     = el('input-faceit-key');
+  const badge      = el('faceit-conn-badge');
+  const changeBtn  = el('btn-faceit-change-key');
+  const refreshBtn = el('btn-faceit-refresh');
+  const infoWrap   = el('faceit-event-info');
+
+  if (enabledCb && document.activeElement !== enabledCb) enabledCb.checked = !!fc.enabled;
+  if (compInp && document.activeElement !== compInp) compInp.value = fc.competitionId || '';
+  if (typeSel && document.activeElement !== typeSel) typeSel.value = fc.competitionType || 'championship';
+  if (orgInp && document.activeElement !== orgInp) orgInp.value = fc.organizerName || '';
+
+  if (keyInp && fc.hasKey && !keyInp.value) {
+    keyInp.readOnly = true; keyInp.value = ''; keyInp.placeholder = '••••••••••••••••••••';
+    keyInp.style.opacity = '0.5'; keyInp.style.cursor = 'default';
+    if (changeBtn) changeBtn.style.display = '';
+  }
+  if (badge) badge.style.display = fc.connected ? '' : 'none';
+  if (refreshBtn) refreshBtn.style.display = fc.selectedEvent ? '' : 'none';
+
+  if (fc.selectedEvent && infoWrap) {
+    infoWrap.style.display = '';
+    const ev = fc.selectedEvent;
+    const nameEl = el('faceit-ev-name'); if (nameEl) nameEl.textContent = ev.name || '';
+    const metaEl = el('faceit-ev-meta');
+    if (metaEl) metaEl.textContent = [
+      ev.type === 'hub' ? 'Hub' : 'Championship',
+      ev.game, ev.region,
+      ev.status ? ev.status.charAt(0).toUpperCase() + ev.status.slice(1) : ''
+    ].filter(Boolean).join(' · ');
+    const linkEl = el('faceit-ev-link'); if (linkEl && ev.url) { linkEl.href = ev.url; }
+    const labelEl = el('faceit-teams-label');
+    if (labelEl) labelEl.textContent = `Teams (${(fc.eventTeams || []).length})`;
+    renderFaceitTeams(fc.eventTeams || []);
+    renderFaceitQueueInSettings(fc.queue || []);
+  } else if (infoWrap) {
+    infoWrap.style.display = 'none';
+  }
+
+  const resultEl = el('faceit-result');
+  if (resultEl && fc.lastError && !resultEl._userMsg) {
+    resultEl.style.color = '#f87171'; resultEl.textContent = fc.lastError;
+  }
+}
+
+window._handleFaceitResult = function (data) {
+  const r = el('faceit-result');
+  if (r) {
+    r._userMsg = true;
+    r.style.color = data.ok ? '#86efac' : '#f87171';
+    r.textContent = data.message || '';
+    setTimeout(() => { r._userMsg = false; }, 5000);
+  }
+  const status = el('ev-load-status');
+  if (status && _evActivePlatform === 'faceit') {
+    status.style.color = data.ok ? '#86efac' : '#f87171';
+    status.textContent = data.message || '';
+    setTimeout(() => { status.style.color = ''; status.textContent = 'Imports teams, bracket & match queue.'; }, 4000);
+  }
+};
+
+function renderDashFaceitQueue(queue, fetchedAt) {
+  const container = el('dash-faceit-queue');
+  const status    = el('dash-faceit-queue-status');
+  if (!container) return;
+  const open = queue || [];
+  if (!open.length) {
+    container.innerHTML = '<div style="font-size:12px; color:var(--muted); padding:4px 0;">No open matches.</div>';
+  } else {
+    container.innerHTML = '';
+    open.slice(0, 6).forEach((m) => {
+      const row = document.createElement('div');
+      row.style.cssText = `display:flex; align-items:center; gap:8px; padding:4px 6px; border-radius:5px; background:rgba(255,255,255,.04); margin-bottom:4px; border:1px solid ${m.live ? 'rgba(255,85,0,.35)' : 'var(--border)'};`;
+      row.innerHTML = faceitQueueRowHtml(m, 'faceit-dash-set-live');
+      row.querySelector('.faceit-dash-set-live').addEventListener('click', () => {
         send('set_team', { side: 'blue',   name: m.teamA || '', ...(m.logoA ? { logo: m.logoA } : {}) });
         send('set_team', { side: 'orange', name: m.teamB || '', ...(m.logoB ? { logo: m.logoB } : {}) });
       });
@@ -12175,6 +13917,10 @@ function evScore(t, q) {
     else if (n.includes(q)) score = 60;
     else if (s.includes(q)) score = 40;
     else if ((t.games || []).some(g => (g || '').toLowerCase().includes(q))) score = 20;
+    // Last resort before dropping the row: a typo or an abbreviation of the name. Kept at the
+    // bottom of the ladder so it can only ever surface below a genuine substring hit — the tiers
+    // above are deliberately more specific than the shared matcher and stay in charge.
+    else if (NESearch.score(q, [t.name || '']) >= 0) score = 10;
     else return -1;
   }
   const now = Date.now() / 1000;
@@ -12513,6 +14259,9 @@ let _evChalMyTourneys = null;
 let _evChalSearchTimer = null;
 let _evNxgenSlug = '';
 let _evNxgenSearchTimer = null;
+let _evFaceitPick = null;          // { id, type, name } chosen from the FACEIT dropdown
+let _evFaceitSearchTimer = null;
+let _evFaceitMyComps = null;       // cached organiser competitions (null = not fetched yet)
 
 function updateEvTokenBadge() {
   const badge = el('ev-token-badge');
@@ -12523,6 +14272,8 @@ function updateEvTokenBadge() {
     badge.style.display = currentState.challonge?.hasKey ? 'none' : '';
   } else if (_evActivePlatform === 'nxgen') {
     badge.style.display = currentState.nxgen?.hasKey ? 'none' : '';
+  } else if (_evActivePlatform === 'faceit') {
+    badge.style.display = currentState.faceit?.hasKey ? 'none' : '';
   }
 }
 
@@ -12534,9 +14285,11 @@ document.querySelectorAll('.ev-plat-tab').forEach(tab => {
     const sggPanel   = el('ev-plat-panel-startgg');
     const chalPanel  = el('ev-plat-panel-challonge');
     const nxgenPanel = el('ev-plat-panel-nxgen');
-    if (sggPanel)   sggPanel.style.display   = _evActivePlatform === 'startgg'   ? '' : 'none';
-    if (chalPanel)  chalPanel.style.display  = _evActivePlatform === 'challonge' ? '' : 'none';
-    if (nxgenPanel) nxgenPanel.style.display = _evActivePlatform === 'nxgen'     ? '' : 'none';
+    const faceitPanel = el('ev-plat-panel-faceit');
+    if (sggPanel)    sggPanel.style.display    = _evActivePlatform === 'startgg'   ? '' : 'none';
+    if (chalPanel)   chalPanel.style.display   = _evActivePlatform === 'challonge' ? '' : 'none';
+    if (nxgenPanel)  nxgenPanel.style.display  = _evActivePlatform === 'nxgen'     ? '' : 'none';
+    if (faceitPanel) faceitPanel.style.display = _evActivePlatform === 'faceit'    ? '' : 'none';
     updateEvTokenBadge();
   });
 });
@@ -12561,6 +14314,15 @@ el('btn-load-event-dash')?.addEventListener('click', () => {
     if (!slug) { showToast('Enter an event slug or search for a NXGEN event.', '#f59e0b'); return; }
     if (status) status.textContent = 'Loading…';
     send('load_nxgen_event', { slug });
+  } else if (_evActivePlatform === 'faceit') {
+    // A pick from the dropdown wins; otherwise treat whatever is typed as a pasted FACEIT link
+    // (the server pulls the UUID and the championship/hub kind out of it).
+    const typed = (el('ev-faceit-search')?.value || '').trim();
+    const pick = _evFaceitPick || (typed ? { id: typed, type: '' } : null)
+      || (currentState.faceit?.competitionId ? { id: currentState.faceit.competitionId, type: currentState.faceit.competitionType } : null);
+    if (!pick) { showToast('Paste a FACEIT championship/hub link, or pick one from the search.', '#f59e0b'); return; }
+    if (status) status.textContent = 'Loading…';
+    send('load_faceit_event', { id: pick.id, ...(pick.type ? { competitionType: pick.type } : {}) });
   }
 });
 
@@ -12589,6 +14351,11 @@ el('btn-clear-event-dash')?.addEventListener('click', async () => {
   if (nxgenSearch) { nxgenSearch.value = ''; }
   if (el('ev-nxgen-clear')) el('ev-nxgen-clear').style.display = 'none';
   if (el('ev-nxgen-results')) el('ev-nxgen-results').style.display = 'none';
+  _evFaceitPick = null;
+  const faceitSearch = el('ev-faceit-search');
+  if (faceitSearch) { faceitSearch.value = ''; }
+  if (el('ev-faceit-clear')) el('ev-faceit-clear').style.display = 'none';
+  if (el('ev-faceit-results')) el('ev-faceit-results').style.display = 'none';
   if (el('dash-active-event')) el('dash-active-event').style.display = 'none';
   const status = el('ev-load-status');
   if (status) status.textContent = 'Imports teams, bracket & match queue.';
@@ -12607,6 +14374,10 @@ el('challonge-autofollow')?.addEventListener('change', (e) => {
 
 el('nxgen-autofollow')?.addEventListener('change', (e) => {
   send('set_nxgen_auto_follow', { enabled: e.target.checked });
+});
+
+el('faceit-autofollow')?.addEventListener('change', (e) => {
+  send('set_faceit_auto_follow', { enabled: e.target.checked });
 });
 
 // Challonge search wiring
@@ -12671,9 +14442,8 @@ el('nxgen-autofollow')?.addEventListener('change', (e) => {
 function renderChalDropdown(tournaments, filterQuery) {
   const container = el('ev-challonge-results');
   if (!container) return;
-  const filtered = filterQuery
-    ? tournaments.filter(t => (t.name || '').toLowerCase().includes(filterQuery) || (t.slug || '').toLowerCase().includes(filterQuery))
-    : tournaments;
+  const filtered = NESearch.filter(tournaments, filterQuery,
+    (t) => [{ text: t.name, weight: 2 }, t.slug, t.state]);
   if (!filtered.length) {
     container.innerHTML = filterQuery
       ? `<div class="ev-dropdown-msg">No match for "<strong>${escapeHtml(filterQuery)}</strong>"</div>`
@@ -12772,9 +14542,8 @@ function renderChalDropdown(tournaments, filterQuery) {
 function renderNxgenDropdown(events, filterQuery) {
   const container = el('ev-nxgen-results');
   if (!container) return;
-  const filtered = filterQuery
-    ? events.filter(ev => (ev.name || '').toLowerCase().includes(filterQuery) || (ev.slug || '').toLowerCase().includes(filterQuery) || (ev.activity || '').toLowerCase().includes(filterQuery))
-    : events;
+  const filtered = NESearch.filter(events, filterQuery,
+    (ev) => [{ text: ev.name, weight: 2 }, ev.slug, ev.activity]);
   if (!filtered.length) {
     container.innerHTML = filterQuery
       ? `<div class="ev-dropdown-msg">No match for "<strong>${escapeHtml(filterQuery)}</strong>"</div>`
@@ -12811,6 +14580,129 @@ function renderNxgenDropdown(events, filterQuery) {
       _evNxgenSlug = ev.slug || '';
       const status = el('ev-load-status');
       if (status) status.textContent = `"${ev.name || ev.slug}" selected — click Load Event`;
+    });
+    container.appendChild(row);
+  });
+  container.style.display = 'block';
+}
+
+// FACEIT competition picker. With an organiser saved this lists THEIR championships and hubs
+// (the useful default for a league producer); without one it falls back to a platform-wide
+// championship search, and a pasted link always works regardless.
+(function wireFaceitEventPicker() {
+  const searchInput = el('ev-faceit-search');
+  const resultsDiv  = el('ev-faceit-results');
+  const clearBtn    = el('ev-faceit-clear');
+  if (!searchInput || !resultsDiv) return;
+
+  async function post(url, body) {
+    const resp = await fetch('http://localhost:3000' + url, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {})
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.error || 'Request failed');
+    return data;
+  }
+
+  async function loadFaceitComps(query) {
+    resultsDiv.innerHTML = '<div class="ev-dropdown-msg">Loading FACEIT competitions…</div>';
+    resultsDiv.style.display = 'block';
+    try {
+      // Organiser list first — it's cached, so typing filters locally with no extra API calls.
+      if (_evFaceitMyComps === null) {
+        const mine = await post('/api/faceit/my-competitions', {});
+        _evFaceitMyComps = mine.needsOrganizer ? [] : (mine.competitions || []);
+      }
+      if (_evFaceitMyComps.length) { renderFaceitDropdown(_evFaceitMyComps, (query || '').toLowerCase(), true); return; }
+      if (!query) {
+        resultsDiv.innerHTML = '<div class="ev-dropdown-msg">Type to search FACEIT championships, or paste a championship / hub link.<br><span style="opacity:.7;">Set your organiser name in Settings ▸ Integrations ▸ FACEIT to list your own competitions here.</span></div>';
+        return;
+      }
+      const found = await post('/api/faceit/search', { name: query, limit: 30 });
+      renderFaceitDropdown(found.competitions || [], '', false);
+    } catch (e) {
+      resultsDiv.innerHTML = `<div class="ev-dropdown-msg" style="color:#ef4444;">Error: ${escapeHtml(e.message)}</div>`;
+    }
+  }
+
+  searchInput.addEventListener('focus', () => {
+    if (!currentState.faceit?.hasKey) {
+      resultsDiv.innerHTML = '<div class="ev-dropdown-msg" style="color:#f59e0b;">Add a FACEIT API key in Integrations first.</div>';
+      resultsDiv.style.display = 'block';
+      return;
+    }
+    loadFaceitComps(searchInput.value.trim());
+  });
+
+  searchInput.addEventListener('input', () => {
+    const q = searchInput.value.trim();
+    if (clearBtn) clearBtn.style.display = q ? 'block' : 'none';
+    // A pasted link is a direct load, not a search — say so instead of firing a useless query.
+    if (/faceit\.com/i.test(q)) {
+      _evFaceitPick = null;
+      resultsDiv.innerHTML = '<div class="ev-dropdown-msg">FACEIT link detected — click <strong>Load Event</strong>.</div>';
+      resultsDiv.style.display = 'block';
+      return;
+    }
+    clearTimeout(_evFaceitSearchTimer);
+    _evFaceitSearchTimer = setTimeout(() => loadFaceitComps(q), 300);
+  });
+
+  if (clearBtn) clearBtn.addEventListener('click', () => {
+    searchInput.value = '';
+    clearBtn.style.display = 'none';
+    _evFaceitPick = null;
+    resultsDiv.style.display = 'none';
+    searchInput.focus();
+  });
+
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('#ev-faceit-search-wrap') && !e.target.closest('#ev-faceit-results')) {
+      resultsDiv.style.display = 'none';
+    }
+  }, true);
+})();
+
+function renderFaceitDropdown(comps, filterQuery, isMine) {
+  const container = el('ev-faceit-results');
+  if (!container) return;
+  const filtered = filterQuery
+    ? NESearch.filter(comps, filterQuery, (c) => [{ text: c.name, weight: 2 }, c.game, c.region, c.organizer])
+    : comps;
+  if (!filtered.length) {
+    container.innerHTML = filterQuery
+      ? `<div class="ev-dropdown-msg">No match for "<strong>${escapeHtml(filterQuery)}</strong>"</div>`
+      : '<div class="ev-dropdown-msg">No FACEIT competitions found.</div>';
+    container.style.display = 'block';
+    return;
+  }
+  container.innerHTML = '';
+  const hdr = document.createElement('div');
+  hdr.className = 'ev-dropdown-section-hdr';
+  hdr.textContent = isMine ? 'My FACEIT Competitions' : 'FACEIT Championships';
+  container.appendChild(hdr);
+  const statusColors = { started: '#10b981', ongoing: '#10b981', upcoming: '#f59e0b', ready: '#f59e0b', hub: '#60a5fa', finished: '#6b7280', cancelled: '#6b7280' };
+  filtered.forEach((c) => {
+    const row = document.createElement('div');
+    row.className = 'ev-dropdown-row';
+    const sc = statusColors[String(c.status || '').toLowerCase()] || '#6b7280';
+    const logoHtml = c.avatar
+      ? `<img class="ev-dropdown-logo" src="${c.avatar}" alt="" onerror="this.style.display='none'">`
+      : '<div class="ev-dropdown-logo-ph"><svg viewBox="0 0 20 20" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 4h14l-5.5 6v5L8.5 17v-7L3 4z"/></svg></div>';
+    row.innerHTML = `${logoHtml}
+      <div class="ev-dropdown-info">
+        <div class="ev-dropdown-name">${escapeHtml(c.name || c.id || '')}</div>
+        <div class="ev-dropdown-meta">${[c.type === 'hub' ? 'Hub' : 'Championship', c.game, c.region, c.organizer, c.slots ? `${c.slots} slots` : ''].filter(Boolean).map(escapeHtml).join(' · ')}</div>
+      </div>
+      <span class="ev-dropdown-badge" style="background:rgba(0,0,0,.2); color:${sc}; text-transform:capitalize;">${escapeHtml(c.status || '')}</span>`;
+    row.addEventListener('click', () => {
+      const inp = el('ev-faceit-search');
+      if (inp) inp.value = c.name || c.id;
+      if (el('ev-faceit-clear')) el('ev-faceit-clear').style.display = 'block';
+      container.style.display = 'none';
+      _evFaceitPick = { id: c.id, type: c.type || 'championship', name: c.name };
+      const status = el('ev-load-status');
+      if (status) status.textContent = `"${c.name || c.id}" selected — click Load Event`;
     });
     container.appendChild(row);
   });
@@ -12979,10 +14871,9 @@ function renderCasterLibrary(library) {
   box.style.display = library.length ? '' : 'none';
   if (!library.length) return;
 
-  const q = _casterLibSearch.toLowerCase();
-  const filtered = q
-    ? library.filter(p => (p.name || '').toLowerCase().includes(q) || (p.handle || '').toLowerCase().includes(q))
-    : library;
+  const filtered = NESearch.filter(library, _casterLibSearch.trim(), (p) => [
+    { text: p.name, weight: 2 }, { text: p.handle, weight: 1.5 }, p.role, p.kind, p.country
+  ]);
 
   if (labelEl) labelEl.textContent = `Caster Library (${library.length})`;
 
@@ -13054,8 +14945,9 @@ function renderCasterLibrary(library) {
   });
 }
 
-el('caster-lib-search')?.addEventListener('input', function() {
-  _casterLibSearch = this.value;
+// Debounced: this re-renders the whole library on every keystroke.
+NESearch.bindBox(el('caster-lib-search'), (q) => {
+  _casterLibSearch = q;
   renderCasterLibrary((currentState.casters && currentState.casters.library) || []);
 });
 
@@ -13234,15 +15126,27 @@ el('btn-hide-veto')?.addEventListener('click', () => send('set_veto', { visible:
 
 // ── Guided veto manager ─────────────────────────────────────────────────────
 let _vetoGameInit = false;
+// Which stage tier each game's veto strikes from, once the producer has picked one. Kept here
+// rather than on the <select> because that element is rebuilt on every game change.
+const _vetoTierPick = {};
 el('btn-veto-start')?.addEventListener('click', () => {
   send('veto_start', {
     game: el('veto-game')?.value || '',
     bestOf: Number(el('veto-bestof')?.value || 3),
     teamStart: el('veto-start')?.value || 'a',
+    // '' / 'all' = strike the whole pool. Which stages a ruleset strikes from differs event to
+    // event, so this rides with the veto rather than being fixed per game.
+    strikeFrom: el('veto-tier')?.value || '',
     visible: true
   });
 });
 el('veto-game')?.addEventListener('change', () => renderVetoManager(currentState));
+el('veto-tier')?.addEventListener('change', function () {
+  // Keyed by game so a Smash strike set never carries onto another game's pool.
+  const g = el('veto-game')?.value || (currentState && currentState.activeGame) || '';
+  if (g) _vetoTierPick[g] = this.value;
+  renderVetoManager(currentState);
+});
 el('btn-veto-undo')?.addEventListener('click', () => send('veto_undo', {}));
 el('btn-veto-reset')?.addEventListener('click', () => {
   appConfirm('Reset the map veto? Every pick and ban made so far will be wiped and cannot be recovered.', 'Reset', true).then((ok) => {
@@ -13253,21 +15157,28 @@ el('btn-veto-show')?.addEventListener('click', () => send('veto_visible', { visi
 el('btn-veto-hide2')?.addEventListener('click', () => send('veto_visible', { visible: false }));
 
 // Game-mode icons — m.mode carries the pool entry's type (Overwatch: Control/Hybrid/Escort/Push/
-// Flashpoint/Clash; Rocket League: Soccar/Hoops/Dropshot/Snow Day/Rumble/Heatseeker/Spike Rush).
+// Flashpoint/Clash; Rocket League: Standard/Hoops/Dropshot/Snow Day/Rumble/Heatseeker/Spike Rush).
 // Other games' mode strings have no matching icon, so no badge shows for them.
 // Same table the mapscreen overlay uses (overlay/mapscreen.html MODE_IMG) — keep them in sync.
+// 'soccar' stays mapped alongside 'standard': it's the mode's in-game file name, so it can still
+// arrive from a board saved before the rename or an imported Game Config.
 const VM_MODE_IMG = {
   control: '/assets/overwatch/modes/Control.webp', hybrid: '/assets/overwatch/modes/Hybrid.webp',
   escort: '/assets/overwatch/modes/Escort.webp', push: '/assets/overwatch/modes/Push.webp',
   flashpoint: '/assets/overwatch/modes/Flashpoint.webp', clash: '/assets/overwatch/modes/Clash.webp',
   assault: '/assets/overwatch/modes/Assault.webp',
-  soccar: '/assets/rocket-league/modes/soccar.svg', hoops: '/assets/rocket-league/modes/hoops.svg',
+  standard: '/assets/rocket-league/modes/soccar.svg', soccar: '/assets/rocket-league/modes/soccar.svg',
+  hoops: '/assets/rocket-league/modes/hoops.svg',
   dropshot: '/assets/rocket-league/modes/dropshot.svg', 'snow day': '/assets/rocket-league/modes/snow-day.svg',
   rumble: '/assets/rocket-league/modes/rumble.svg', heatseeker: '/assets/rocket-league/modes/heatseeker.svg',
   'spike rush': '/assets/rocket-league/modes/spike-rush.svg'
 };
 // Reachable from the Map Pool editor IIFE (which is defined earlier in the file).
 window._vmModeImg = VM_MODE_IMG;
+// Panel runs from file://, so a root-absolute '/assets/…' resolves to C:\assets and 404s forever.
+// Same base the Map Pool editor uses (MP_ASSET_BASE).
+const VM_ASSET_BASE = location.protocol === 'file:' ? 'http://localhost:3000' : '';
+const vmAsset = (p) => (p && p.startsWith('/') ? VM_ASSET_BASE + p : p || '');
 
 function renderVetoManager(data) {
   const sel = el('veto-game'); if (!sel) return;
@@ -13286,6 +15197,30 @@ function renderVetoManager(data) {
   }
   // Per-game terminology (map/stage, Ban/Strike) for the SELECTED game in the dropdown.
   const selGame = sel.value || data.activeGame;
+  // "Strike from" — only shown when the selected game's pool actually defines tiers (Smash's
+  // Starter/Counterpick). Every event runs a different ruleset, so the default from VETO_META is
+  // just the pre-selection; an event with no ban phase simply never starts a veto at all.
+  const tierSel = el('veto-tier');
+  if (tierSel) {
+    const tiers = [];
+    (pools[selGame] || []).forEach((m) => { if (m && m.tier && !tiers.includes(m.tier)) tiers.push(m.tier); });
+    const unit = ((data.vetoMeta || {})[selGame] || {}).unit || 'map';
+    const sig = selGame + '|' + tiers.join(',');
+    if (tierSel.dataset.sig !== sig) {
+      tierSel.dataset.sig = sig;
+      // The pick is remembered per GAME in _vetoTierPick, never read back off the select: the
+      // element is rebuilt whenever the game changes, so switching to a game with no tiers and
+      // back left it holding that game's lone "All" option — silently turning a deliberate
+      // "Counterpicks only" into a strike through the whole pool.
+      const chosen = _vetoTierPick[selGame] || '';
+      tierSel.innerHTML = tiers.map((t) => `<option value="${tlEsc(t)}">${tlEsc(t)}s only</option>`).join('')
+        + `<option value="all">All ${tlEsc(unit)}s</option>`;
+      const dflt = ((data.vetoMeta || {})[selGame] || {}).strikeFrom || 'all';
+      const has = (v) => !!v && [...tierSel.options].some((o) => o.value === v);
+      tierSel.value = has(chosen) ? chosen : (has(dflt) ? dflt : 'all');
+    }
+    tierSel.style.display = tiers.length ? '' : 'none';
+  }
   const selMeta = (data.vetoMeta && data.vetoMeta[selGame]) || { banWord: 'Ban', unit: 'map' };
   // Side labels follow the team names.
   const blue = (data.teams && data.teams.blue && data.teams.blue.name) || 'Blue';
@@ -13311,30 +15246,38 @@ function renderVetoManager(data) {
     const manualMaps = Array.isArray(v.maps) ? v.maps.filter((m) => m && m.name) : [];
     if (manualMaps.length) {
       if (turnEl) turnEl.innerHTML = 'Showing the maps entered on the <b>Map Pool</b> front card. Edit them there, or click <b>Start Veto</b> above to run a fresh guided ban/pick instead.';
+      // Signature-guarded like the guided-veto grid below: this branch used to tear down and
+      // rebuild every card (and every <img> inside it) on EVERY full_state, which reloaded the
+      // map/mode images continuously and kept the renderer thrashing for a whole show.
       if (grid) {
-        grid.innerHTML = '';
-        manualMaps.forEach((m) => {
+        const msig = JSON.stringify(manualMaps.map(m => [m.name, m.image, m.mode, m.by, m.action, m.score && m.score.a, m.score && m.score.b]))
+          + '|' + blue + '|' + orange;
+        if (grid.dataset.sig !== msig) {
+          grid.dataset.sig = msig;
+          grid.innerHTML = '';
+          manualMaps.forEach((m) => {
           const card = document.createElement('div');
           card.className = 'vm-map' + (m.action === 'decider' ? ' decider' : ' picked');
           card.style.cursor = 'default';
-          if (m.image) { const img = document.createElement('img'); img.src = m.image; img.alt = ''; card.appendChild(img); }
+          if (m.image) { const img = document.createElement('img'); img.src = vmAsset(m.image); img.alt = ''; card.appendChild(img); }
           const modeIcon = VM_MODE_IMG[(m.mode || '').toLowerCase().trim()];
           if (modeIcon) {
             const badge = document.createElement('span'); badge.className = 'vm-mode'; badge.title = m.mode;
-            const mi = document.createElement('img'); mi.src = modeIcon; mi.alt = m.mode;
+            const mi = document.createElement('img'); mi.src = vmAsset(modeIcon); mi.alt = m.mode;
             mi.onerror = () => badge.remove();
             badge.appendChild(mi); card.appendChild(badge);
           }
           if (m.by && m.action !== 'decider') {
             const by = document.createElement('span'); by.className = 'vm-by';
-            by.textContent = sideName(m.by); by.style.background = sideColor(m.by); card.appendChild(by);
+            by.textContent = sideName(m.by); by.style.background = sideColor(m.by); by.style.color = teamInk(sideColor(m.by)); card.appendChild(by);
           }
           const lbl = document.createElement('div'); lbl.className = 'vm-label';
           const extra = m.action === 'decider' ? ' · DECIDER' : (m.score && (m.score.a || m.score.b)) ? ` · ${m.score.a}-${m.score.b}` : '';
           lbl.textContent = m.name + extra;
           card.appendChild(lbl);
           grid.appendChild(card);
-        });
+          });
+        }
       }
     } else {
       if (turnEl) turnEl.textContent = 'Choose a game + best-of, then Start Veto.';
@@ -13370,17 +15313,17 @@ function renderVetoManager(data) {
         card.className = 'vm-map' + (m.action === 'ban' ? ' banned' : '') + (m.action === 'pick' ? ' picked' : '') + (m.action === 'decider' ? ' decider' : '');
         if (m.action === 'ban') card.dataset.x = banWord;            // banned-card label = BAN / STRIKE
         if (m.action === 'pick') { card.style.borderColor = sideColor(m.by); }
-        if (m.image) { const img = document.createElement('img'); img.src = m.image; img.alt = ''; card.appendChild(img); }
+        if (m.image) { const img = document.createElement('img'); img.src = vmAsset(m.image); img.alt = ''; card.appendChild(img); }
         const modeIcon = VM_MODE_IMG[(m.mode || '').toLowerCase().trim()];
         if (modeIcon) {
           const badge = document.createElement('span'); badge.className = 'vm-mode'; badge.title = m.mode;
-          const mi = document.createElement('img'); mi.src = modeIcon; mi.alt = m.mode;
+          const mi = document.createElement('img'); mi.src = vmAsset(modeIcon); mi.alt = m.mode;
           mi.onerror = () => badge.remove();
           badge.appendChild(mi); card.appendChild(badge);
         }
         if (m.by && (m.action === 'pick' || m.action === 'ban')) {
           const by = document.createElement('span'); by.className = 'vm-by';
-          by.textContent = sideName(m.by); by.style.background = sideColor(m.by); card.appendChild(by);
+          by.textContent = sideName(m.by); by.style.background = sideColor(m.by); by.style.color = teamInk(sideColor(m.by)); card.appendChild(by);
         }
         const lbl = document.createElement('div'); lbl.className = 'vm-label';
         lbl.textContent = m.name + (m.action === 'decider' ? ' · ' + deciderWord : ''); card.appendChild(lbl);
@@ -13445,9 +15388,12 @@ function draftAutoStatusText(status, detail) {
   const base = (map[status] != null) ? map[status] : (status || '');
   return base ? (detail ? base + ' · ' + detail : base) : '';
 }
+// Hero/champion filter. Fuzzy and ranked — mid-draft nobody has time to spell "Kai'Sa" or
+// "Cho'Gath" exactly, and the best match belongs in the top-left cell, not wherever the roster
+// order left it.
 el('draft-search')?.addEventListener('input', function () {
-  const q = this.value.trim().toLowerCase();
-  document.querySelectorAll('#draft-grid .dm-hero').forEach((cell) => { cell.style.display = (!q || cell.dataset.name.includes(q)) ? '' : 'none'; });
+  NESearch.rankNodes(document.querySelectorAll('#draft-grid .dm-hero'), this.value.trim(),
+    (cell) => [cell.dataset.name || '']);
 });
 
 function renderDraftManager(data) {
@@ -13680,7 +15626,7 @@ function renderOwFrontBoard(data, d) {
     const all = window._dmFrontHeroes || [];
     if (!q || !all.length) { hide(); return; }
     // Keyword match on the hero name OR role ("tank" lists every tank).
-    const hits = all.filter((h) => (h.name || '').toLowerCase().includes(q) || (h.role || '').toLowerCase().includes(q)).slice(0, 12);
+    const hits = NESearch.filter(all, q, (h) => [{ text: h.name, weight: 2 }, h.role], { limit: 12 }).slice(0, 12);
     if (!hits.length) { hide(); return; }
     // .team-dd is position:fixed (so card overflow can't clip it) — anchor it to the
     // input on every open, exactly like the Match — Teams search does.
@@ -13772,9 +15718,9 @@ function owCloseDropdown(sid) {
 function owOpenDropdown(sid, query) {
   var dd = el('ow-ban-dropdown-' + sid);
   if (!dd) return;
-  var q = (query || '').toLowerCase().trim();
-  var matches = q ? OW_ALL_HEROES.filter(function(h) { return h.name.toLowerCase().includes(q); })
-                  : OW_ALL_HEROES;
+  // Fuzzy + ranked: hero names are long and often misspelt under time pressure.
+  var q = (query || '').trim();
+  var matches = NESearch.filter(OW_ALL_HEROES, q, function (h) { return [{ text: h.name, weight: 2 }, h.role]; });
   if (!matches.length) { dd.classList.remove('open'); return; }
   dd.innerHTML = matches.map(function(h) {
     return '<div class="ow-hero-option" data-hero="' + h.name.replace(/"/g,'&quot;') + '" data-sid="' + sid + '">'
@@ -14017,9 +15963,9 @@ function mrCloseDropdown(sid) {
 function mrOpenDropdown(sid, query) {
   var dd = el('mr-ban-dropdown-' + sid);
   if (!dd) return;
-  var q = (query || '').toLowerCase().trim();
-  var matches = q ? MR_ALL_HEROES.filter(function(h) { return h.name.toLowerCase().includes(q); })
-                  : MR_ALL_HEROES;
+  // Fuzzy + ranked, and the role is searchable so "duelist" lists every duelist.
+  var q = (query || '').trim();
+  var matches = NESearch.filter(MR_ALL_HEROES, q, function (h) { return [{ text: h.name, weight: 2 }, h.role]; });
   if (!matches.length) { dd.classList.remove('open'); return; }
   var _rcMap = { vanguard: '#4dc4ff', duelist: '#ff5050', strategist: '#4adf88' };
   dd.innerHTML = matches.map(function(h) {
@@ -14356,6 +16302,9 @@ const SCENE_SOURCES = [
     { name: '★ Trigger Graphics (all-in-one)', path: '/triggers.html', live: null, desc: 'ONE source for every triggered graphic — countdown, winner, intro, veto, draft, bracket, upcoming, standings. Add it to any scene; the qrail Triggers/Overlays buttons pop the right one over it.' },
     { name: 'Countdown / Starting Soon', path: '/countdown.html', live: 'breakScreen.visible', desc: 'Break standby timer with movie-countdown finish.' },
     { name: 'Starting Soon — Timer only', path: '/countdown.html?timer=1', live: 'breakScreen.visible', desc: 'Countdown with no background — overlay on b-roll.' },
+    { name: 'Countdown Bar', path: '/countdown-bar.html', live: 'breakScreen.visible', aspect: '1920 × 132', desc: 'Segmented "back in" strip — brand, next-up teams, clock, headline and rotating sponsors. Its own bar-sized source, driven by the same producer timer as the break screen. Params: ?h=132 ?alpha=0.82 ?rotate=6 ?teams=0 ?sponsor=0 ?align=top' },
+    { name: 'Replay Desk — Topics', path: '/replay-desk.html', live: 'breakScreen.visible', desc: 'Desk Show layout with the caster cams replaced by ONE 16:9 stage for a replay / highlight reel, and the discussion-topics rail alongside it. The stage is a transparent hole — put the media source behind it (?cams=off&guide=1 prints its exact rectangle), or use ?media=player to embed the built-in replay player.' },
+    { name: 'Replay Desk — Match Board', path: '/replay-desk.html?rail=matches', live: 'breakScreen.visible', desc: 'Same 16:9 replay stage, but the rail carries live / upcoming / recent results from the start.gg feed — what the ticker shows, laid out as a readable board that pages through. Use ?rail=auto to fall back to Topics when the feed is empty.' },
     { name: 'Intermission Card', path: '/intermission.html', live: 'breakScreen.visible', desc: 'Centered card: brand logo + event title + countdown. Layer over a map or b-roll in OBS.' },
     { name: 'Intermission — Full Screen', path: '/intermission2.html', live: 'breakScreen.visible', desc: 'RLCS-style full-screen intermission: brand panel, STARTING SOON, giant outline countdown. Layer over b-roll.' },
     { name: 'Vertical Break (9:16)', path: '/vertical-break.html', live: 'breakScreen.visible', desc: 'TikTok / Shorts break card — brand logo, event title, countdown + message, inside the phone-UI safe area. ?fill=1 for a branded backdrop, ?safe=0, ?guides=1.', aspect: '1080 × 1920' },
@@ -14365,9 +16314,16 @@ const SCENE_SOURCES = [
     { name: 'Draft Screen', path: '/draft.html', live: null, desc: 'Animated pick/ban draft for character / agent select.' },
     { name: 'Ticker', path: '/ticker.html', live: 'ticker.visible', desc: 'Scrolling lower-third — manual messages or live start.gg scores.' },
   ]},
+  { group: 'Multiview & Whip-around', icon: 'film', items: [
+    { name: 'Grid Wall (2/3/4/6-up)', path: '/grid.html', live: null, desc: 'GRID-style multiview wall — every org producer publishing their match becomes a tile: their feed, their Twitch handle and the series score. Auto-sizes as producers come online; brand-kit colours, logo, sponsors and the app ticker throughout. Pin a layout with ?tiles=2|3|4|6. Each producer must turn on Settings ▸ Broadcast ▸ Grid Multiview — with nobody publishing the wall shows STANDBY, never placeholder matches.' },
+    { name: 'Grid Wall — 4-up', path: '/grid.html?tiles=4', live: null, desc: 'The wall pinned to a 2×2 — the layout never changes when a producer joins or drops.' },
+    { name: 'Grid Wall — 2-up', path: '/grid.html?tiles=2', live: null, desc: 'The wall pinned to a side-by-side pair.' },
+    { name: 'Grid Bars (overlay only)', path: '/grid-bars.html', live: null, desc: 'The same wall with the video left out — transparent, so you lay your OWN OBS sources (capture, NDI, Twitch) in the tile rectangles. Add ?guides=1 to print each tile’s OBS transform numbers, then drop it for air.' },
+    { name: 'Pulse (auto-switching)', path: '/pulse.html', live: null, desc: 'Whip-around single-feed multiview — cuts to whichever published match just scored, with a live scores rail and ticker alongside.' },
+  ]},
   { group: 'Bracket & Veto', icon: 'trophy', items: [
     { name: 'Bracket', path: '/bracket.html', live: 'bracket.visible', desc: 'Live bracket — elim columns or standings table.' },
-    { name: 'Standings', path: '/standings.html', live: 'standings.visible', desc: 'Dedicated standings leaderboard (auto from bracket or manual).' },
+    { name: 'Standings', path: '/standings.html', live: 'standings.visible', desc: 'Dedicated standings board (auto from bracket, league or manual) — podium leaderboard, or top-8 placement cards with character art for Smash.' },
     { name: 'Schedule', path: '/schedule.html', live: 'upcoming.visible', desc: 'Next matches from start.gg stream queue or manual entry.' },
     { name: 'Map Veto', path: '/mapscreen.html', live: 'veto.visible', desc: 'Pick/ban board for CS2 / Valorant-style series.' },
   ]},
@@ -14484,7 +16440,9 @@ function buildSceneCard(it, groupName) {
 
   const card = document.createElement('div');
   card.className = 'scene-card';
-  card.dataset.search = (it.name + ' ' + (it.desc || '') + ' ' + groupName).toLowerCase();
+  card.dataset.name = it.name || '';
+  // Path included so a producer who knows the overlay's file (rl-hud.html) can search for it.
+  card.dataset.search = (it.name + ' ' + (it.desc || '') + ' ' + groupName + ' ' + (it.path || '')).toLowerCase();
   card.dataset.live = it.live || '';
   const tip = String(it.desc || it.name).replace(/"/g, '&quot;');
   card.innerHTML = `
@@ -14618,8 +16576,8 @@ async function buildSceneSourceList() {
   // ── Search ────────────────────────────────────────────────────────────────
   const search = topbar.querySelector('#scene-search-input');
   const clearBtn = topbar.querySelector('#scene-search-clear');
-  search.addEventListener('input', () => {
-    _sceneFilterText = search.value.trim().toLowerCase();
+  NESearch.bindBox(search, (q) => {
+    _sceneFilterText = q;
     clearBtn.hidden = !_sceneFilterText;
     applySceneFilter();
   });
@@ -14638,24 +16596,26 @@ function applySceneFilter() {
   // (CSS .searching) so matches don't scatter across stacked headers → far less scrolling.
   const area = el('scene-groups-area');
   if (area) area.classList.toggle('searching', !!_sceneFilterText);
-  let totalShown = 0;
+  // Rank across ALL groups at once: while searching, the sections collapse to `display: contents`
+  // and every card becomes a direct grid item, so the best match genuinely lands top-left instead
+  // of wherever its group happened to sit.
+  const groupOk = (item) => {
+    if (_sceneFilterGroup === '__onair') return item.classList.contains('is-onair');
+    if (_sceneFilterGroup === 'all') return true;
+    const sec = item.closest('.scene-group');
+    return !!sec && sec.dataset.group === _sceneFilterGroup;
+  };
+  const totalShown = NESearch.rankNodes(
+    wrap.querySelectorAll('.scene-card'),
+    _sceneFilterText,
+    (item) => [{ text: item.dataset.name || '', weight: 2 }, { text: item.dataset.search || '', bag: true }],
+    { extra: groupOk }
+  ).shown;
+  // A section with nothing left is hidden so its header doesn't float over an empty row.
   wrap.querySelectorAll('.scene-group').forEach((section) => {
-    const groupName = section.dataset.group;
-    let shown = 0;
-    const matchItem = (item) => {
-      const matchText = !_sceneFilterText || item.dataset.search.includes(_sceneFilterText);
-      let matchGroup = true;
-      if (_sceneFilterGroup === '__onair') matchGroup = item.classList.contains('is-onair');
-      else if (_sceneFilterGroup !== 'all') matchGroup = groupName === _sceneFilterGroup;
-      return matchText && matchGroup;
-    };
-    section.querySelectorAll('.scene-card').forEach((item) => {
-      const show = matchItem(item);
-      item.style.display = show ? '' : 'none';
-      if (show) shown++;
-    });
-    section.style.display = shown ? '' : 'none';
-    totalShown += shown;
+    const anyShown = Array.prototype.some.call(
+      section.querySelectorAll('.scene-card'), (c) => c.style.display !== 'none');
+    section.style.display = anyShown ? '' : 'none';
   });
   let empty = el('scene-empty');
   if (!empty) {
@@ -14927,15 +16887,22 @@ function renderWhatsArmed(data) {
 // Paint the On-Air Elements grid from state. Uses onairIsOn (not a raw path read) so Matchup —
 // whose "path" is the shared gfxActive string — doesn't read as SHOWN whenever ANY graphic is live.
 function syncOnAirGrid(data) {
+  let liveHere = 0;
   ONAIR_SCENES.forEach((s) => {
     const on = (typeof onairIsOn === 'function') ? onairIsOn(s, data) : !!getPath(data, s.path);
     const cb = el('air-' + s.key);
     if (cb) cb.checked = on;
     const card = el('air-card-' + s.key);
-    if (card) card.classList.toggle('live', on);
+    if (card) { card.classList.toggle('live', on); if (on) liveHere++; }   // only cards that exist here
     const st = el('air-state-' + s.key);
     if (st) st.textContent = on ? 'SHOWN' : 'HIDDEN';
   });
+  const countEl = el('qrail-onair-count');
+  if (countEl) {
+    countEl.textContent = String(liveHere);
+    countEl.classList.toggle('is-zero', liveHere === 0);
+    countEl.title = liveHere ? liveHere + ' of these overlays on air' : 'No overlays from this group on air';
+  }
 }
 
 function applyScenesCockpit(data) {
@@ -16412,346 +18379,6 @@ el('qk-ros-edit')?.addEventListener('click', (e) => { e.preventDefault(); docume
 // Static cockpit actions. (The run-of-show back/advance/edit buttons are wired above, next to rdSummary.)
 el('qk-clear-all')?.addEventListener('click', (e) => { e.preventDefault(); el('gfx-top-clear')?.click(); });
 
-// ── Switcher page: program/preview + take + multiview + audio (backend-routed) ──
-let _swWatch = false, _swShotTimer = null, _swObsAudio = [], _swGridSig = '', _swGridCursor = 0;
-// Throttled screenshot pipeline — OBS GetSourceScreenshot is expensive, so cap concurrency and
-// queue by name. Keeps the multiview populated + monitors live WITHOUT flooding OBS (the "lag").
-let _swShotQueue = [], _swShotInFlight = 0, _swShotFinish = {};
-const SW_SHOT_MAX = 2;
-function swQueueShot(name, front) {
-  if (!name || _swShotFinish[name] || _swShotQueue.includes(name)) return;   // already queued / in flight
-  if (front) _swShotQueue.unshift(name); else _swShotQueue.push(name);
-  swPumpShots();
-}
-function swPumpShots() {
-  while (_swShotInFlight < SW_SHOT_MAX && _swShotQueue.length) {
-    const name = _swShotQueue.shift();
-    _swShotInFlight++;
-    let done = false;
-    const finish = () => { if (done) return; done = true; delete _swShotFinish[name]; _swShotInFlight = Math.max(0, _swShotInFlight - 1); swPumpShots(); };
-    _swShotFinish[name] = finish;
-    send('switcher_screenshot', { name });
-    setTimeout(finish, 5000);   // watchdog: never wedge the pipe on a lost response
-  }
-}
-function swClearShots() { _swShotQueue = []; _swShotInFlight = 0; _swShotFinish = {}; }
-function swThumbsOn() { const c = el('sw-thumbs'); return c ? c.checked : true; }
-function _swSrc(img) { return /^data:/.test(img) ? img : ('data:image/jpg;base64,' + img); }
-function swBackend(data) { return (data && data.switcher && data.switcher.target) === 'vmix' ? 'vmix' : 'obs'; }
-function swSources(data) {
-  if (swBackend(data) === 'vmix') {
-    const v = data.vmix || {};
-    return (v.inputs || []).map((i) => ({ id: String(i.number), name: i.title || ('Input ' + i.number), isProgram: i.number === v.active, isPreview: i.number === v.preview }));
-  }
-  const obs = data.obs || {};
-  return (obs.availableScenes || []).filter((s) => !/^═/.test(s)).map((s) => ({ id: s, name: s, isProgram: s === obs.currentScene, isPreview: s === obs.currentPreviewScene }));
-}
-// Cross-fade a polled still into an <img> instead of a hard `src` swap — the abrupt pop on every
-// ~1s poll (arriving at irregular intervals since OBS's screenshot render time varies) is what
-// reads as "random screenshots" flicker rather than a live monitor. First paint skips the fade.
-function _swFadeSwapImg(im, src) {
-  if (!src || im.src === src) return;
-  if (!im.dataset.swFade) { im.dataset.swFade = '1'; im.style.transition = 'opacity .2s ease'; }
-  if (!im.src) { im.src = src; im.style.opacity = '1'; return; }
-  im.style.opacity = '0';
-  setTimeout(() => { im.src = src; im.style.opacity = '1'; }, 180);
-}
-function _swScreenImg(id, img) {
-  const box = el(id); if (!box) return;
-  let im = box.querySelector('img');
-  if (!im) { im = document.createElement('img'); box.innerHTML = ''; box.appendChild(im); }
-  _swFadeSwapImg(im, _swSrc(img));
-}
-function renderSwitcher(data) {
-  if (!el('tab-switcher-content')) return;
-  const backend = swBackend(data);
-  document.querySelectorAll('#sw-target-seg .sw-seg-btn').forEach((b) => b.classList.toggle('active', b.dataset.target === backend));
-  const st = el('sw-status');
-  if (st) {
-    if (backend === 'vmix') { const v = data.vmix || {}; st.textContent = !v.enabled ? 'vMix disabled — enable in Settings → vMix' : (v.connected ? `vMix connected · ${(v.inputs || []).length} inputs` : (v.lastError || 'vMix not connected')); }
-    else { const o = data.obs || {}; st.textContent = !o.enabled ? 'OBS disabled — enable in Settings → OBS' : (o.connected ? `OBS connected${o.studioMode ? ' · Studio Mode on' : ' · Studio Mode off (TAKE turns it on)'}` : (o.lastError || 'OBS not connected')); }
-  }
-  const sources = swSources(data);
-  const prog = sources.find((s) => s.isProgram), prev = sources.find((s) => s.isPreview);
-  if (el('sw-prog-name')) el('sw-prog-name').textContent = prog ? prog.name : '—';
-  if (el('sw-prev-name')) el('sw-prev-name').textContent = prev ? prev.name : '—';
-  // vMix has no per-input thumbnail over HTTP — show the input NAME in the monitor instead of blank.
-  if (backend === 'vmix') {
-    const ps = el('sw-prog-screen'); if (ps) ps.innerHTML = `<span class="sw-mon-ph">${prog ? _stEsc(prog.name) : 'On air'}</span>`;
-    const vs = el('sw-prev-screen'); if (vs) vs.innerHTML = `<span class="sw-mon-ph">${prev ? _stEsc(prev.name) : 'No preview'}</span>`;
-  } else if (!prev && el('sw-prev-screen') && !el('sw-prev-screen').querySelector('img')) {
-    el('sw-prev-screen').innerHTML = '<span class="sw-mon-ph">No preview</span>';
-  }
-
-  const grid = el('sw-grid');
-  if (grid) {
-    const sig = backend + '|' + sources.map((s) => s.id + ':' + s.name).join(',');
-    if (sig !== _swGridSig) {
-      _swGridSig = sig;
-      grid.innerHTML = sources.length ? '' : `<div class="sw-mixer-empty">No sources — connect ${backend === 'vmix' ? 'vMix' : 'OBS'} in Settings.</div>`;
-      sources.forEach((s) => {
-        const t = document.createElement('div'); t.className = 'sw-tile'; t.dataset.id = s.id;
-        t.innerHTML = '<span class="sw-tile-badge"></span><span class="sw-tile-name"></span>';
-        t.querySelector('.sw-tile-name').textContent = s.name;
-        t.addEventListener('click', () => send('switcher_set_preview', { name: s.id }));
-        t.addEventListener('dblclick', () => send('obs_switch_scene', { sceneName: s.id }));
-        if (backend === 'obs') t.addEventListener('mouseenter', () => { if (swThumbsOn()) swQueueShot(s.id, true); });   // priority refresh on hover
-        grid.appendChild(t);
-      });
-      // Populate every tile once so the wall isn't blank (throttled by the queue).
-      if (backend === 'obs' && swThumbsOn()) sources.forEach((s) => swQueueShot(s.id));
-    }
-    grid.querySelectorAll('.sw-tile').forEach((t) => {
-      const s = sources.find((x) => x.id === t.dataset.id);
-      t.classList.toggle('is-program', !!(s && s.isProgram));
-      t.classList.toggle('is-preview', !!(s && s.isPreview));
-      const badge = t.querySelector('.sw-tile-badge'); if (badge) badge.textContent = (s && s.isProgram) ? 'PGM' : (s && s.isPreview) ? 'PVW' : '';
-    });
-  }
-  renderSwStatus(data, backend);
-  renderSwDock(data);
-  renderSwRundown(data);
-  renderSwMacros();
-  renderSwMixer(data, backend);
-}
-// Status bar: LIVE/REC pills, viewers, stream/record button labels (uptime + clock tick in swTick).
-let _swStreamStart = null;
-function renderSwStatus(data, backend) {
-  const streaming = backend === 'vmix' ? !!(data.vmix && data.vmix.streaming) : !!(data.obs && data.obs.streaming);
-  const recording = backend === 'vmix' ? !!(data.vmix && data.vmix.recording) : !!(data.obs && data.obs.recording);
-  if (streaming && !_swStreamStart) _swStreamStart = Date.now();
-  if (!streaming) _swStreamStart = null;
-  const live = el('sw-pill-live'); if (live) { live.classList.toggle('on', streaming); live.textContent = streaming ? 'ON AIR' : 'OFF AIR'; }
-  const rec = el('sw-pill-rec'); if (rec) rec.classList.toggle('on', recording);
-  const sb = el('sw-stream-btn'); if (sb) { sb.textContent = streaming ? 'Stop Stream' : 'Start Stream'; sb.classList.toggle('on', streaming); }
-  const rb = el('sw-record-btn'); if (rb) { rb.textContent = recording ? 'Stop Record' : 'Start Record'; rb.classList.toggle('on', recording); }
-  const vw = el('sw-viewers'); if (vw) { const n = data.twitch && data.twitch.viewerCount; vw.textContent = (n != null && streaming) ? (Number(n).toLocaleString() + ' viewers') : '— viewers'; }
-}
-// Graphics dock — reuse the Put-On-Air registry (QK_PUT) so overlays fire without leaving the page.
-let _swDockBuilt = false;
-function renderSwDock(data) {
-  const wrap = el('sw-dock'); if (!wrap || typeof QK_PUT === 'undefined') return;
-  if (!_swDockBuilt) {
-    _swDockBuilt = true;
-    wrap.innerHTML = '';
-    QK_PUT.forEach((item, i) => {
-      const chip = document.createElement('div'); chip.className = 'sw-dock-chip'; chip.dataset.i = i;
-      chip.innerHTML = `<span class="sw-dock-lbl">${_stEsc(item.label)}</span>`
-        + (item.cfg ? `<span class="sw-dock-gear" title="options"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/></svg></span>` : '');
-      chip.addEventListener('click', (e) => {
-        if (e.target.closest('.sw-dock-gear')) { if (typeof bbOpenTriggerConfig === 'function') bbOpenTriggerConfig(item.trig, chip); return; }
-        if (item.gfx) { _qkGfxToggle(item.gfx); return; }
-        if (item.ov) { const info = bbActionInfo({ t: 'overlay', k: item.ov }); if (info) info.run(); return; }
-        // Team graphics (Winner, Line-up) have their side chosen by the Team-graphics bar, so a click
-        // FIRES them for that team directly. Only config-only chips (Break: title/timer) open the gear
-        // first; the per-chip gear button still overrides a team pill's side.
-        if (item.cfg && !item.sideSel && !_qkIsLive(item) && typeof bbOpenTriggerConfig === 'function') { bbOpenTriggerConfig(item.trig, chip); return; }
-        el(item.toggle)?.click();
-      });
-      wrap.appendChild(chip);
-    });
-  }
-  wrap.querySelectorAll('.sw-dock-chip').forEach((chip) => { const item = QK_PUT[+chip.dataset.i]; if (item) chip.classList.toggle('on', _qkIsLive(item)); });
-}
-// Rundown (run-of-show) NOW/NEXT + Up Next match from the start.gg queue.
-function renderSwRundown(data) {
-  const segs = (typeof _rdSegs !== 'undefined' && Array.isArray(_rdSegs)) ? _rdSegs : [];
-  const idx = (typeof _rdIdx !== 'undefined') ? _rdIdx : 0;
-  const running = (typeof _rdRunning !== 'undefined') ? _rdRunning : false;
-  const now = running && segs[idx] ? segs[idx] : null;
-  const next = segs[running ? idx + 1 : idx] || null;
-  if (el('sw-rd-now')) el('sw-rd-now').textContent = now ? (now.label || now.name || 'Segment ' + (idx + 1)) : (segs.length ? 'Not started' : 'No rundown');
-  if (el('sw-rd-next')) el('sw-rd-next').textContent = next ? (next.label || next.name || '—') : '—';
-  if (el('sw-rd-status')) el('sw-rd-status').textContent = segs.length ? `${running ? idx + 1 : 0}/${segs.length}` : '';
-  const sb = el('sw-rd-start'); if (sb) sb.textContent = running ? 'Restart' : 'Start';
-  // Up Next — next queued start.gg match
-  const q = Array.isArray(data.startgg && data.startgg.queue) ? data.startgg.queue : [];
-  const m = (data.startgg && data.startgg.queueEnabled) ? (q.find((x) => !x.live && x.state !== 3) || q.find((x) => x.live) || q[0]) : null;
-  if (el('sw-upnext-val')) el('sw-upnext-val').textContent = m ? `${m.round ? m.round + ' · ' : ''}${m.teamA || 'TBD'} vs ${m.teamB || 'TBD'}` : '—';
-}
-// Macros — fire existing Flows.
-let _swMacroSig = '';
-function renderSwMacros() {
-  const wrap = el('sw-macros'); if (!wrap) return;
-  const flows = (typeof _flows !== 'undefined' && Array.isArray(_flows)) ? _flows : [];
-  const sig = flows.map((f) => f.id + ':' + f.name).join(',');
-  if (sig === _swMacroSig) return;
-  _swMacroSig = sig;
-  wrap.innerHTML = flows.length ? '' : '<div class="sw-macros-empty">No flows yet — build them on Production ▸ Flows.</div>';
-  flows.forEach((f) => {
-    const b = document.createElement('button'); b.className = 'sw-macro-btn'; b.textContent = f.name || 'Flow';
-    if (f.enabled === false) b.style.opacity = '.5';
-    b.addEventListener('click', () => { if (typeof flowFire === 'function') flowFire(f); });
-    wrap.appendChild(b);
-  });
-}
-function renderSwMixer(data, backend) {
-  const wrap = el('sw-mixer'); if (!wrap) return;
-  let channels;
-  if (backend === 'vmix') channels = ((data.vmix || {}).inputs || []).filter((i) => i.audio).map((i) => ({ id: String(i.number), name: i.title || ('Input ' + i.number), vol: i.volume == null ? 100 : i.volume, muted: !!i.muted, model: 'vmix' }));
-  else channels = (_swObsAudio || []).map((s) => ({ id: s.name, name: s.name, vol: s.volumeDb == null ? 0 : s.volumeDb, muted: !!s.muted, model: 'obs' }));
-  const sig = backend + '|' + channels.map((c) => c.id).join(',');
-  if (wrap._sig !== sig) {
-    wrap._sig = sig;
-    wrap.innerHTML = channels.length ? '' : `<div class="sw-mixer-empty">${backend === 'vmix' ? 'No audio inputs.' : 'Click Refresh to load OBS audio sources.'}</div>`;
-    channels.forEach((c) => {
-      const ch = document.createElement('div'); ch.className = 'sw-ch'; ch.dataset.id = c.id;
-      const min = c.model === 'vmix' ? 0 : -60, max = c.model === 'vmix' ? 100 : 0;
-      const meter = c.model === 'vmix' ? '<span class="sw-ch-meter"><span></span></span>' : '';
-      ch.innerHTML = `<span class="sw-ch-name">${_stEsc(c.name)}</span><input type="range" class="sw-ch-fader" min="${min}" max="${max}" step="1" value="${c.vol}">${meter}<span class="sw-ch-val"></span><button class="sw-ch-mute">MUTE</button>`;
-      const fader = ch.querySelector('.sw-ch-fader'), val = ch.querySelector('.sw-ch-val'), mute = ch.querySelector('.sw-ch-mute');
-      const showVal = () => { val.textContent = c.model === 'vmix' ? Math.round(fader.value) + '%' : Math.round(fader.value) + ' dB'; };
-      showVal();
-      fader.addEventListener('input', () => { showVal(); send('switcher_audio_set', { id: c.id, volume: Number(fader.value) }); });
-      mute.classList.toggle('on', c.muted);
-      mute.addEventListener('click', () => { const now = !mute.classList.contains('on'); mute.classList.toggle('on', now); send('switcher_audio_set', { id: c.id, muted: now }); });
-      wrap.appendChild(ch);
-    });
-  } else {
-    channels.forEach((c) => {
-      let ch = null; wrap.querySelectorAll('.sw-ch').forEach((x) => { if (x.dataset.id === c.id) ch = x; });
-      if (!ch) return;
-      const fader = ch.querySelector('.sw-ch-fader'), mute = ch.querySelector('.sw-ch-mute'), val = ch.querySelector('.sw-ch-val');
-      if (document.activeElement !== fader) { fader.value = c.vol; if (val) val.textContent = c.model === 'vmix' ? Math.round(c.vol) + '%' : Math.round(c.vol) + ' dB'; }
-      mute.classList.toggle('on', c.muted);
-    });
-  }
-}
-function swUpdateClocks() {
-  const wc = el('sw-wallclock'); if (wc) wc.textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-  const up = el('sw-uptime');
-  if (up) {
-    if (_swStreamStart) { const s = Math.floor((Date.now() - _swStreamStart) / 1000); up.textContent = [Math.floor(s / 3600), Math.floor(s % 3600 / 60), s % 60].map((n) => String(n).padStart(2, '0')).join(':'); }
-    else up.textContent = '00:00:00';
-  }
-}
-function swTick() {
-  if (!_swWatch || !currentState) return;
-  swUpdateClocks();
-  if (!swThumbsOn() || swBackend(currentState) !== 'obs') return;
-  const srcs = swSources(currentState);
-  const prog = srcs.find((s) => s.isProgram), prev = srcs.find((s) => s.isPreview);
-  // Program + Preview stay live (priority); the rest of the wall refreshes gently, one tile per
-  // tick, so it stays reasonably current without hammering OBS. Skip program while the smooth
-  // virtual-camera feed is showing it live.
-  if (prog && !_swProgStream) swQueueShot(prog.id, true);
-  if (prev) swQueueShot(prev.id, true);
-  // Rest of the wall refreshes every OTHER tick (one tile per 2s, not 1s) — fewer, smoother pops
-  // instead of a constant one-a-second churn across the grid.
-  _swGridCursor++;
-  if (_swGridCursor % 2 === 0) {
-    const rest = srcs.filter((s) => !s.isProgram && !s.isPreview);
-    if (rest.length) { const g = rest[Math.floor(_swGridCursor / 2) % rest.length]; swQueueShot(g.id); }
-  }
-}
-function switcherOnShow() {
-  _swWatch = true; send('switcher_watch', { on: true });
-  send('switcher_audio_list');
-  if (currentState) renderSwitcher(currentState);
-  swTick();
-  clearInterval(_swShotTimer); _swShotTimer = setInterval(swTick, 1000);
-  // Auto-attempt the smooth Virtual-Camera live feed for Program on open — falls back silently to
-  // the polled-screenshot monitor (still handled above) if OBS's Virtual Camera isn't running.
-  if (!_swProgStream) swProgLiveStart(true);
-}
-function switcherOnHide() {
-  if (!_swWatch) return;
-  _swWatch = false; send('switcher_watch', { on: false });
-  clearInterval(_swShotTimer); _swShotTimer = null;
-  swClearShots();   // drop any queued/in-flight screenshots so OBS isn't polled off-page
-  _swGridSig = '';  // force a fresh grid + snapshots next time the page opens
-}
-// ── Live Program monitor via OBS Virtual Camera (getUserMedia) ──
-// OBS "Start Virtual Camera" exposes the PROGRAM as a system webcam; we capture it locally for a
-// smooth, low-latency live monitor (the one live-video path a web panel gets for free). Program-only.
-let _swProgStream = null;
-const SW_VCAM_RE = /obs\s*virtual|obs-camera|obs cam|vmix|virtual cam/i;
-// silent=true is the auto-attempt on page open — it must NEVER trigger a camera permission prompt
-// or grab an arbitrary default device (that could be the producer's real webcam, not OBS's virtual
-// one). It only proceeds if camera permission was already granted in an earlier explicit click AND
-// a device that looks like a virtual camera is actually present; otherwise it quietly does nothing
-// and the polled-screenshot monitor keeps covering Program, same as before this existed.
-async function swProgLiveStart(silent) {
-  const btn = el('sw-prog-live'), sel = el('sw-prog-device'), st = el('sw-status');
-  try {
-    let cams = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'videoinput');
-    const labelsKnown = cams.some((d) => d.label);
-    if (!labelsKnown) {
-      if (silent) return;   // never prompt for camera access just from opening the page
-      // First-ever use: grab the default device once to unlock real device labels + permission.
-      const unlock = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
-      unlock.getTracks().forEach((t) => t.stop());
-      cams = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'videoinput');
-    }
-    const vcam = cams.find((d) => SW_VCAM_RE.test(d.label || ''));
-    if (silent && !vcam) return;   // no OBS/vMix virtual camera found — don't silently grab a random real one
-    if (sel) {
-      sel.innerHTML = cams.map((d, i) => `<option value="${d.deviceId}">${_stEsc(d.label || ('Camera ' + (i + 1)))}</option>`).join('');
-      sel.value = vcam ? vcam.deviceId : (cams[0] && cams[0].deviceId) || '';
-      sel.style.display = '';
-    }
-    const chosen = sel ? sel.value : (vcam && vcam.deviceId);
-    if (!chosen) throw new Error('No camera device found');
-    const stream = await navigator.mediaDevices.getUserMedia({ video: { deviceId: { exact: chosen } }, audio: false });
-    _swProgStream = stream;
-    const v = el('sw-prog-video'); if (v) { v.srcObject = stream; v.style.display = ''; }
-    const box = el('sw-prog-screen'); if (box) box.querySelectorAll('img, .sw-mon-ph').forEach((e) => { e.style.display = 'none'; });
-    if (btn) { btn.classList.add('on'); btn.textContent = 'Live'; }
-    if (st && !/connected/i.test(st.textContent)) st.textContent = '';
-  } catch (e) {
-    if (!silent) { if (st) st.textContent = 'Live feed error: ' + (e.name || e.message) + ' — click "Start Virtual Camera" in OBS, then retry.'; }
-    swProgLiveStop();
-  }
-}
-function swProgLiveStop() {
-  if (_swProgStream) { _swProgStream.getTracks().forEach((t) => t.stop()); _swProgStream = null; }
-  const v = el('sw-prog-video'); if (v) { v.srcObject = null; v.style.display = 'none'; }
-  const box = el('sw-prog-screen'); if (box) box.querySelectorAll('img, .sw-mon-ph').forEach((e) => { e.style.display = ''; });
-  const btn = el('sw-prog-live'); if (btn) { btn.classList.remove('on'); btn.textContent = 'Go Live'; }
-  const sel = el('sw-prog-device'); if (sel) sel.style.display = 'none';
-}
-el('sw-prog-live')?.addEventListener('click', () => { if (_swProgStream) swProgLiveStop(); else swProgLiveStart(); });
-el('sw-prog-device')?.addEventListener('change', function () { if (_swProgStream) swProgLiveStart(); });   // re-open with the chosen device
-
-function _swFlash(id) { const b = el(id); if (!b) return; b.style.filter = 'brightness(1.5)'; setTimeout(() => { b.style.filter = ''; }, 140); }
-function swAuto() { send('switcher_take', { transition: el('sw-trans-type')?.value || 'Fade', duration: parseInt(el('sw-fade-dur')?.value, 10) || 500 }); }
-el('sw-cut')?.addEventListener('click', () => send('switcher_take', { transition: 'Cut' }));
-el('sw-fade')?.addEventListener('click', swAuto);
-el('sw-audio-refresh')?.addEventListener('click', () => send('switcher_audio_list'));
-document.querySelectorAll('#sw-target-seg .sw-seg-btn').forEach((b) => b.addEventListener('click', () => send('set_switcher_target', { target: b.dataset.target })));
-// Status-bar producer controls (stream / record / replay / FTB), routed to the active backend.
-el('sw-stream-btn')?.addEventListener('click', function () { send('switcher_stream', { on: !this.classList.contains('on') }); });
-el('sw-record-btn')?.addEventListener('click', function () { send('switcher_record', { on: !this.classList.contains('on') }); });
-el('sw-replay-btn')?.addEventListener('click', () => { send('switcher_replay'); _swFlash('sw-replay-btn'); });
-el('sw-ftb-btn')?.addEventListener('click', () => { send('switcher_ftb'); _swFlash('sw-ftb-btn'); });
-// Rundown controls (reuse the run-of-show engine).
-el('sw-rd-start')?.addEventListener('click', () => { if (typeof rdStart === 'function') { rdStart(); if (currentState) renderSwRundown(currentState); } });
-el('sw-rd-next-btn')?.addEventListener('click', () => { if (typeof rdNext === 'function') { rdNext(); if (currentState) renderSwRundown(currentState); } });
-el('sw-thumbs')?.addEventListener('change', function () {
-  if (this.checked) { _swGridSig = ''; if (currentState) renderSwitcher(currentState); swTick(); }   // re-snapshot everything
-  else {   // off — stop polling, drop images so it's clearly labels-only
-    swClearShots();
-    document.querySelectorAll('#sw-grid .sw-tile img, #sw-prog-screen img, #sw-prev-screen img').forEach((im) => im.remove());
-    const ps = el('sw-prev-screen'); if (ps && !ps.querySelector('.sw-mon-ph')) ps.innerHTML = '<span class="sw-mon-ph">Thumbnails off</span>';
-    const pg = el('sw-prog-screen'); if (pg && !pg.querySelector('.sw-mon-ph')) pg.innerHTML = '<span class="sw-mon-ph">Thumbnails off</span>';
-  }
-});
-// Keyboard: Enter=CUT, Space=AUTO, 1-9=cut that source to program. Only while the Switcher page is
-// open and not typing in a field.
-document.addEventListener('keydown', (e) => {
-  const page = el('tab-switcher-content');
-  if (!page || !page.classList.contains('active')) return;
-  const ae = document.activeElement, tag = (ae && ae.tagName) || '';
-  if (/^(INPUT|TEXTAREA|SELECT)$/.test(tag) || (ae && ae.isContentEditable)) return;
-  if (e.key === 'Enter') { e.preventDefault(); _swFlash('sw-cut'); send('switcher_take', { transition: 'Cut' }); }
-  else if (e.key === ' ' || e.code === 'Space') { e.preventDefault(); _swFlash('sw-fade'); swAuto(); }
-  else if (/^[1-9]$/.test(e.key)) {
-    const srcs = currentState ? swSources(currentState) : [];
-    const s = srcs[parseInt(e.key, 10) - 1];
-    if (s) { e.preventDefault(); send('obs_switch_scene', { sceneName: s.id }); }   // cut that source to program
-  }
-});
-
 // ── Bottom bar: "Up Next" from the start.gg stream queue ────────────────────
 function renderUpNext(data) {
   const box = el('bb-upnext'), txt = el('bb-upnext-text');
@@ -16821,7 +18448,15 @@ function startBreakFromRail() {
 function syncTimerToOverlay() {
   send('set_break', breakPayloadFromTimer());
 }
-function fmtTimer(s) { const m = Math.floor(s / 60), ss = s % 60; return String(m).padStart(2, '0') + ':' + String(ss).padStart(2, '0'); }
+// MM:SS, widening to H:MM:SS only once there's an hour on the clock — so a normal break still
+// reads "05:00" and never gains a permanent "00:" column, but an hour-long pre-show is no longer
+// shown as "60:00".
+function fmtTimer(s) {
+  s = Math.max(0, Math.floor(Number(s) || 0));
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), ss = s % 60;
+  const mm = String(m).padStart(2, '0'), sss = String(ss).padStart(2, '0');
+  return h ? h + ':' + mm + ':' + sss : mm + ':' + sss;
+}
 let _topbarReplay = false;   // when a replay/ad is on air, the top-bar timer shows IT (not the producer clock)
 function paintTimer() {
   const txt = fmtTimer(_timer.secs);
@@ -16830,7 +18465,9 @@ function paintTimer() {
   // The top-bar display/toggle are taken over by the replay countdown while one is on air.
   const d = el('ptimer-display'); if (d && !_topbarReplay) { if (!_timerEditing) d.textContent = txt; d.style.color = color; }
   const bt = el('ck-break-time'); if (bt) { if (!_timerEditing) bt.textContent = txt; bt.style.color = color; }   // live sidebar countdown
-  const pd = el('ptp-display'); if (pd) { pd.textContent = txt; pd.style.color = color; }
+  // Same _timerEditing guard as the other two displays — without it the tick overwrites whatever
+  // is being typed into the big display.
+  const pd = el('ptp-display'); if (pd) { if (!_timerEditing) pd.textContent = txt; pd.style.color = color; }
   const box = el('prod-timer');
   if (box && !_topbarReplay) { box.classList.toggle('running', _timer.running && _timer.secs > 10);
              box.classList.toggle('ending', _timer.running && _timer.secs <= 10); }
@@ -16857,11 +18494,21 @@ function adjustTimer(delta) {                 // ±seconds; works running or sto
   if (!_timer.running) _timer.base = _timer.secs;
   paintTimer(); syncTimerToOverlay();
 }
+// Setting a new value KEEPS RUNNING if it was running — typing 10m mid-countdown means "make it
+// ten minutes from now", not "stop and wait for me to press Start again". syncTimerToOverlay()
+// sends { seconds } while running, so the server re-anchors endsAt and every overlay follows.
 function setTimerSecs(secs) {
   _timer.endsAt = null;                       // manual set → local value until the server round-trips a fresh endsAt
   _timer.secs = Math.max(0, Math.min(99 * 60 + 59, Math.round(secs)));
   _timer.base = _timer.secs;
-  if (_timer.running) { _timer.running = false; clearInterval(_timer.handle); _timer.handle = null; }
+  // A running timer that's been re-set to 0 has nothing left to count, so stop it rather than
+  // leaving a live interval spinning on zero.
+  if (_timer.running && _timer.secs === 0) {
+    _timer.running = false;
+    if (_timer.handle) { clearInterval(_timer.handle); _timer.handle = null; }
+  } else if (_timer.running && !_timer.handle) {
+    _timer.handle = setInterval(tickTimer, 1000);
+  }
   paintTimer(); syncTimerToOverlay();
 }
 function toggleTimer() {
@@ -16872,11 +18519,65 @@ function toggleTimer() {
   paintTimer(); syncTimerToOverlay();
 }
 // Parse "M:SS", "MM:SS", or a plain number of seconds.
+// Broadcast-clock entry: bare digits fill in from the RIGHT, so a time can be typed without ever
+// reaching for the colon. Each extra digit shifts the previous ones left:
+//     1 -> 0:01      10 -> 0:10      130 -> 1:30
+//  1000 -> 10:00   10000 -> 1:00:00
+// An explicit colon form is taken as written and now understands hours too — the old parser split
+// on one colon only, so "1:00:00" came out as 1 minute.
+//
+// NOTE this changes what a bare number means: "450" used to be 450 seconds, and is now 4:50.
+// That's the requested behaviour and matches how hardware clocks and other broadcast tools read
+// a typed duration.
 function parseTimeInput(v) {
-  v = (v || '').trim(); if (!v) return null;
-  if (v.includes(':')) { const [m, s] = v.split(':'); return (parseInt(m) || 0) * 60 + (parseInt(s) || 0); }
-  const n = parseInt(v); return isNaN(n) ? null : n;
+  v = String(v == null ? '' : v).trim();
+  if (!v) return null;
+  if (v.includes(':')) {
+    const parts = v.split(':').map((x) => parseInt(x, 10) || 0);
+    const [h, m, s] = parts.length >= 3 ? parts : [0, parts[0] || 0, parts[1] || 0];
+    return h * 3600 + m * 60 + s;
+  }
+  const digits = v.replace(/\D/g, '');
+  if (!digits) return null;
+  // Right-aligned HHMMSS. Over-60 values in a column just roll up (typing 9999 = 99m 99s), which
+  // is well defined for a DURATION and saves rejecting a fast-typed number.
+  const d = digits.slice(-6).padStart(6, '0');
+  return parseInt(d.slice(0, 2), 10) * 3600 + parseInt(d.slice(2, 4), 10) * 60 + parseInt(d.slice(4, 6), 10);
 }
+// ── Count down TO a wall-clock time ────────────────────────────────────────
+// The TARGET is resolved server-side (resolveClockTarget) so every overlay lands on the same
+// epoch regardless of the panel's own clock/timezone; we only mirror the resulting seconds into
+// the local widget so the top-bar number matches straight away.
+function startCountdownUntil(hhmm) {
+  const m = /^\s*(\d{1,2})\s*[:.]\s*(\d{2})\s*$/.exec(String(hhmm || ''));
+  const hint = el('ptp-until-hint');
+  if (!m || Number(m[1]) > 23 || Number(m[2]) > 59) {
+    if (hint) { hint.textContent = 'Enter a time as HH:MM — e.g. 23:00'; hint.style.color = '#f56565'; }
+    return false;
+  }
+  const target = new Date();
+  target.setHours(Number(m[1]), Number(m[2]), 0, 0);
+  if (target.getTime() < Date.now()) target.setDate(target.getDate() + 1);
+  const secs = Math.max(0, Math.round((target.getTime() - Date.now()) / 1000));
+  _timer.endsAt = target.getTime();
+  _timer.secs = secs;
+  _timer.base = secs;
+  _timer.running = true;
+  if (!_timer.handle) _timer.handle = setInterval(tickTimer, 1000);
+  paintTimer();
+  send('set_break', { until: m[1].padStart(2, '0') + ':' + m[2] });
+  if (hint) {
+    const h = Math.floor(secs / 3600), mm = Math.floor((secs % 3600) / 60);
+    hint.style.color = '';
+    hint.textContent = 'Counting down to ' + target.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      + ' — ' + (h ? h + 'h ' : '') + mm + 'm away.';
+  }
+  return true;
+}
+el('ptp-untilbtn')?.addEventListener('click', () => startCountdownUntil(el('ptp-until')?.value));
+el('ptp-until')?.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') { e.preventDefault(); startCountdownUntil(e.currentTarget.value); }
+});
 el('ptimer-toggle')?.addEventListener('click', toggleTimer);
 el('ptp-toggle')?.addEventListener('click', toggleTimer);
 el('ptp-reset')?.addEventListener('click', () => setTimerSecs(_timer.base || 300));
@@ -16961,34 +18662,74 @@ el('ptp-set')?.addEventListener('keydown', (e) => { if (e.key === 'Enter') el('p
 
 // Click-to-type editing for any timer display (bottom transport + sidebar countdown).
 // Typing seconds or M:SS auto-formats to M:SS via parseTimeInput → setTimerSecs.
+// Click-to-type on a timer display, with broadcast-clock digit entry: keystrokes go into a digit
+// BUFFER rather than into the element's text, and the element re-renders the formatted time after
+// each one. Doing it this way (instead of letting contentEditable hold the raw characters) is what
+// makes "type 1, 3, 0 and watch it become 1:30" possible — reformatting text under a live caret
+// would otherwise fight the caret on every keystroke.
 function attachTimerEdit(displayEl) {
   if (!displayEl) return;
   displayEl.style.cursor = 'text';
   let editOrig = '';
+  let buf = '';        // digits typed so far, most recent on the right
+  const render = () => { displayEl.textContent = buf ? fmtTimer(parseTimeInput(buf) || 0) : '00:00'; };
   const commit = () => {
     _timerEditing = false;
-    const txt = (displayEl.textContent || '').trim();
-    const s = parseTimeInput(txt);
-    if (s != null && txt !== editOrig) setTimerSecs(s);   // apply only on an actual change
+    const s = buf ? parseTimeInput(buf) : null;
+    if (s != null && fmtTimer(s) !== editOrig) setTimerSecs(s);   // apply only on an actual change
     else paintTimer();
   };
-  displayEl.addEventListener('click', () => {
+  const beginEdit = () => {
     if (_timerEditing) return;
     _timerEditing = true;
     editOrig = (displayEl.textContent || '').trim();
+    buf = '';                       // start empty: the first digit typed is seconds, as asked
     displayEl.contentEditable = 'true';
     displayEl.focus();
     const r = document.createRange(); r.selectNodeContents(displayEl);
     const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(r);
-  });
+  };
+  displayEl.addEventListener('click', beginEdit);
   displayEl.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') { e.preventDefault(); displayEl.blur(); }
-    else if (e.key === 'Escape') { _timerEditing = false; displayEl.blur(); paintTimer(); }
+    // Focused but not yet editing: Enter/Space opens it for typing, so the field is reachable
+    // without a mouse (it carries tabindex="0").
+    if (!_timerEditing && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); beginEdit(); return; }
+    if (!_timerEditing) return;
+    if (e.key === 'Enter') { e.preventDefault(); displayEl.blur(); return; }
+    if (e.key === 'Escape') { e.preventDefault(); _timerEditing = false; buf = ''; displayEl.blur(); paintTimer(); return; }
+    if (/^\d$/.test(e.key)) {
+      e.preventDefault();
+      buf = (buf + e.key).replace(/^0+(?=\d)/, '').slice(-6);   // 6 digits = HHMMSS is the ceiling
+      render();
+      return;
+    }
+    if (e.key === 'Backspace') { e.preventDefault(); buf = buf.slice(0, -1); render(); return; }
+    // Anything else (letters, colons, arrows) is not part of digit entry — swallow it so the
+    // display can never end up holding text that isn't a time.
+    if (e.key.length === 1) e.preventDefault();
+  });
+  // Paste a time from elsewhere ("7:30", "450") — keep it, but normalise through the same parser.
+  displayEl.addEventListener('paste', (e) => {
+    if (!_timerEditing) return;
+    e.preventDefault();
+    const txt = (e.clipboardData || window.clipboardData).getData('text') || '';
+    const s = parseTimeInput(txt);
+    if (s == null) return;
+    buf = String(Math.floor(s / 3600)).padStart(2, '0')
+        + String(Math.floor((s % 3600) / 60)).padStart(2, '0')
+        + String(s % 60).padStart(2, '0');
+    buf = buf.replace(/^0+(?=\d)/, '');
+    render();
   });
   displayEl.addEventListener('blur', () => { displayEl.contentEditable = 'false'; if (_timerEditing) commit(); });
 }
 attachTimerEdit(el('ptimer-display'));
 attachTimerEdit(el('ck-break-time'));
+// The BIG countdown in the timer panel is the number a producer actually looks at, so it's the
+// one they reach for to set a custom time. It was display-only — the custom entry lived in the
+// small "M:SS or sec" box further down, which reads as a secondary control. Now it takes a click
+// and a typed value like the other two.
+attachTimerEdit(el('ptp-display'));
 paintTimer();
 // When a minimized/background window regains focus, its throttled tick may be up to a tick stale —
 // recompute the endsAt-derived countdown immediately so it snaps to the correct time on return.
@@ -17387,7 +19128,10 @@ function renderStreamQueue(data) {
   const streams = sg.streams || [];
   const streamRow = el('sgg-stream-row');
   const streamSel = el('sgg-stream');
-  if (streamRow) streamRow.style.display = streams.length > 1 ? '' : 'none';
+  // Show the picker as soon as the tournament has ANY stream, not just when it has several. On a
+  // multi-station championship the producer needs to pin their station before their stream has a
+  // set queued on it — waiting until streams.length > 1 hid the control exactly when it mattered.
+  if (streamRow) streamRow.style.display = streams.length ? '' : 'none';
 
   const queue = sg.queue || [];
   const sig = JSON.stringify({ queue, streams, sel: streamSel && streamSel.value, pushed: sg.lastPushedSetId });
@@ -17396,13 +19140,20 @@ function renderStreamQueue(data) {
 
   if (streamSel) {
     const cur = streamSel.value;
-    streamSel.innerHTML = streams.map((s) => `<option value="${s}">${s}</option>`).join('');
+    // An explicit "All streams" entry: following every station is a deliberate choice, not the
+    // accident you get when a station name fails to match.
+    streamSel.innerHTML = '<option value="">All streams</option>'
+      + streams.map((s) => `<option value="${_stEsc(s)}">${_stEsc(s)}</option>`).join('');
     if (streams.includes(cur)) streamSel.value = cur;
     else if (sg.streamName && streams.includes(sg.streamName)) streamSel.value = sg.streamName;
+    else if (!cur) streamSel.value = '';
   }
   const wantStream = (streamSel && streamSel.value) || '';
   const wrap = el('sgg-queue'); if (!wrap) return;
-  const rows = queue.filter((s) => streams.length <= 1 || !wantStream || s.stream === wantStream);
+  // Once a station is picked the list shows THAT station only — previously a single-stream
+  // tournament ignored the filter entirely (streams.length <= 1), which was fine, but the same
+  // clause meant the filter silently did nothing in the case it was written for.
+  const rows = queue.filter((s) => !wantStream || s.stream === wantStream);
   wrap.innerHTML = '';
   const teamLogos = {};
   (data.savedTeams || []).forEach((t) => { if (t && t.name && t.logo) teamLogos[t.name.toLowerCase()] = t.logo; });
@@ -17413,8 +19164,12 @@ function renderStreamQueue(data) {
   };
   rows.forEach((s) => {
     const row = document.createElement('div');
-    row.className = 'sgg-row' + (s.live ? ' live' : '');
-    const badge = s.live ? 'LIVE' : (s.state === 3 ? 'DONE' : 'NEXT');
+    // Green = start.gg has the set IN PROGRESS. The set merely sitting at the head of the stream
+    // queue is "ON DECK" — cued up, not called. (Before, head-of-queue was painted LIVE, so a
+    // semi-final showed green the moment the quarter-finals cleared off the queue.)
+    const onDeck = !s.live && s.state !== 3 && s.onStream;
+    row.className = 'sgg-row' + (s.live ? ' live' : (onDeck ? ' ondeck' : ''));
+    const badge = s.live ? 'LIVE' : (s.state === 3 ? 'DONE' : (onDeck ? 'ON DECK' : 'NEXT'));
     const onOverlay = s.setId === sg.lastPushedSetId;
     const score = (s.scoreA != null || s.scoreB != null) ? `<span class="sgg-score">${s.scoreA ?? 0}–${s.scoreB ?? 0}</span>` : '';
     row.innerHTML = `
@@ -17485,7 +19240,16 @@ el('sgg-autofollow')?.addEventListener('change', function () {
 });
 el('sgg-stream')?.addEventListener('change', function () {
   _sggQueueSig = '';
-  if (el('sgg-autofollow')?.checked) send('startgg_set_autofollow', { enabled: true, streamName: this.value });
+  // ALWAYS tell the server which station we're on — not only while auto-follow is armed. The
+  // server uses streamName for the ticker scope and for Autofill Teams too, and producers pick
+  // their station during setup, before arming auto-follow. Passing the switch's current value
+  // keeps this a stream change, not an auto-follow change.
+  send('startgg_set_autofollow', { enabled: !!el('sgg-autofollow')?.checked, streamName: this.value });
+  const st = el('sgg-status');
+  if (st) {
+    st.textContent = this.value ? `Following "${this.value}" — queue and auto-follow ignore other streams.` : 'Following all streams.';
+    st.style.color = 'var(--muted)';
+  }
 });
 
 const CASTER_DESK_LAYOUTS = [
@@ -17606,9 +19370,17 @@ function renderPreshowGfxPanel(data) {
         const c = casterAt(slot);
         const nameHtml = c ? esc(c.name || ('Caster ' + slot)) : `<span class="ps-pred-empty">Slot ${slot} — unassigned</span>`;
         const pick = predictions[slot - 1];
+        // The pick's own logo snapshot is stripped from the live broadcast (it's 50KB+ of base64
+        // that no overlay draws) — resolve it from the team library instead, falling back to any
+        // logo that did travel, then the game mark.
+        const teamLogo = pick
+          ? (((currentState.savedTeams || []).find((t) => t && (t.name || '').toLowerCase() === (pick.name || '').toLowerCase()) || {}).logo || pick.logo || '')
+          : '';
+        // Game marks are mono/dark, so a fallback needs the same whitening the dropdown gives it.
+        const pickLogo = teamLogo || gameLogo();
         const pickArea = pick
           ? `<div class="ps-pred-chip">`
-            + `<img class="ps-pred-chip-logo" src="${esc(pick.logo || gameLogo())}" alt="" onerror="this.style.visibility='hidden'">`
+            + `<img class="ps-pred-chip-logo${teamLogo ? '' : ' game-logo-white'}" src="${esc(pickLogo)}" alt="" onerror="this.style.visibility='hidden'">`
             + `<span class="ps-pred-chip-name">${esc((pick.name || '').toUpperCase())}</span>`
             + `<button type="button" class="ps-pred-chip-clear" data-slot="${slot}" title="Clear pick">✕</button>`
             + `</div>`
@@ -17666,13 +19438,16 @@ function renderPreshowGfxPanel(data) {
       const cur = (currentState.preshow && currentState.preshow.topics) || [];
       const next = cur.map((x) => ({ ...x }));
       next[i] = { ...(next[i] || {}), text: this.value };
-      send('set_preshow', { topics: next });
+      sendPreshowSoon({ topics: next });
     });
+    input.addEventListener('blur', flushPreshowSend);
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') flushPreshowSend(); });
     const sceneSel = document.createElement('select');
     sceneSel.className = 'input-select'; sceneSel.style.width = '150px'; sceneSel.style.flexShrink = '0';
     sceneSel.title = 'Optional — cut OBS to this scene when this topic goes active';
     fillSceneSelect(sceneSel, scenes, (t && t.sceneName) || '');
     sceneSel.addEventListener('change', function () {
+      flushPreshowSend();   // land any half-typed text first, so this doesn't overwrite it
       const cur = (currentState.preshow && currentState.preshow.topics) || [];
       const next = cur.map((x) => ({ ...x }));
       next[i] = { ...(next[i] || {}), sceneName: this.value };
@@ -17682,6 +19457,7 @@ function renderPreshowGfxPanel(data) {
     delBtn.type = 'button'; delBtn.className = 'btn btn-ghost btn-sm'; delBtn.title = 'Remove topic';
     delBtn.textContent = '✕';
     delBtn.addEventListener('click', () => {
+      flushPreshowSend();
       const cur = (currentState.preshow && currentState.preshow.topics) || [];
       const next = cur.slice(); next.splice(i, 1);
       let nextActive = (currentState.preshow && currentState.preshow.activeTopicIndex) || 0;
@@ -17692,14 +19468,30 @@ function renderPreshowGfxPanel(data) {
     list.appendChild(row);
   });
 }
+// Desk Show text fields (topic rows + headline) fire on every keystroke, and each send makes the
+// server re-broadcast state and persist the active brand package. Coalesce a burst of typing into
+// one send after a short pause; blur/Enter flush immediately so nothing is lost on a fast tab-away.
+let _preshowSendTimer = null, _preshowSendPending = null;
+function sendPreshowSoon(patch) {
+  _preshowSendPending = { ..._preshowSendPending, ...patch };
+  clearTimeout(_preshowSendTimer);
+  _preshowSendTimer = setTimeout(flushPreshowSend, 300);
+}
+function flushPreshowSend() {
+  clearTimeout(_preshowSendTimer); _preshowSendTimer = null;
+  if (!_preshowSendPending) return;
+  const patch = _preshowSendPending; _preshowSendPending = null;
+  send('set_preshow', patch);
+}
 el('btn-preshow-add-topic')?.addEventListener('click', () => {
   const cur = (currentState.preshow && currentState.preshow.topics) || [];
   if (cur.length >= 12) return;
   send('set_preshow', { topics: cur.concat([{ text: 'New topic', sceneName: '' }]) });
 });
 el('preshow-headline')?.addEventListener('input', function () {
-  send('set_preshow', { headline: this.value });
+  sendPreshowSoon({ headline: this.value });
 });
+el('preshow-headline')?.addEventListener('blur', flushPreshowSend);
 el('preshow-home-scene')?.addEventListener('change', function () {
   send('set_preshow', { homeScene: this.value });
 });
@@ -17719,11 +19511,11 @@ function wirePreshowPredictionSearch(slot) {
     if (below < 220 && r.top > below) { dd.style.top = 'auto'; dd.style.bottom = (window.innerHeight - r.top + 4) + 'px'; }
     else { dd.style.bottom = 'auto'; dd.style.top = (r.bottom + 4) + 'px'; }
   };
-  const candidates = (q) => {
-    q = (q || '').trim().toLowerCase();
-    const list = currentState.savedTeams || [];
-    return (q ? list.filter((t) => (t.name || '').toLowerCase().includes(q)) : list).slice(0, 60);
-  };
+  // Ranked before the cap, so the team being typed can't fall off the end of an unranked slice.
+  const candidates = (q) => NESearch.filter(currentState.savedTeams || [], (q || '').trim(),
+    (t) => [{ text: t.name, weight: 2 },
+      { text: (t.players || []).map((p) => (typeof p === 'string' ? p : ((p && (p.name || p.gamertag)) || ''))).join(' '), bag: true }],
+    { limit: 60 }).slice(0, 60);
   const render = () => {
     if (!items.length) {
       dd.innerHTML = `<div class="team-dd-empty">${(currentState.savedTeams || []).length ? 'No matching teams' : 'No saved teams yet — add them on the Teams page'}</div>`;
@@ -17846,7 +19638,7 @@ function buildCasterDeskLayouts() {
 }
 
 document.querySelectorAll('#btn-goto-brands, .js-goto-brands').forEach((b) => {
-  b.addEventListener('click', () => { document.querySelector('.tab-btn[data-tab="media"]')?.click(); if (typeof window._assetsShow === 'function') window._assetsShow('profiles'); });
+  b.addEventListener('click', () => { if (typeof openSettings === 'function') openSettings('brandkits'); });
 });
 
 buildOnAirGrid();
@@ -17980,7 +19772,7 @@ function tickerContentPayload() {
   return {
     source: el('select-ticker-source')?.value || 'manual',
     messages: getTickerMessages(),
-    speed: parseInt(el('input-ticker-speed')?.value) || 40
+    speed: parseInt(el('input-ticker-speed')?.value) || 10
   };
 }
 el('btn-ticker-apply')?.addEventListener('click', () => {
@@ -18008,7 +19800,7 @@ function applyTickerState(data) {
   }
   const speedEl = el('input-ticker-speed');
   if (speedEl && document.activeElement !== speedEl) {
-    speedEl.value = ticker.speed || 40;
+    speedEl.value = ticker.speed || 10;
   }
 }
 
@@ -18052,6 +19844,21 @@ el('bk-reload-obs')?.addEventListener('click', function () {
 
 el('check-bracket-visible')?.addEventListener('change', function() {
   send('set_bracket_settings', { visible: this.checked });
+});
+
+// Swiss qualify/eliminate thresholds (also the group board's cut line). 0 hands it back to the
+// overlay's round-count default rather than pinning a wrong number on air.
+['bk-swiss-advance', 'bk-swiss-eliminate'].forEach((id) => {
+  el(id)?.addEventListener('change', function () {
+    const n = Math.max(0, Math.min(12, parseInt(this.value, 10) || 0));
+    this.value = n;
+    send('set_bracket_settings', id === 'bk-swiss-advance' ? { swissAdvance: n } : { swissEliminate: n });
+  });
+});
+
+// Swiss tier palette on/off (blue opening / green undefeated / amber mid / red elimination).
+el('bk-swiss-colors')?.addEventListener('change', function () {
+  send('set_bracket_settings', { swissColors: !!this.checked });
 });
 
 el('btn-push-match')?.addEventListener('click', () => {
@@ -18117,7 +19924,7 @@ function renderBracketModeBar(bracket) {
   if (!hasData) { bar.style.display = 'none'; return; }
   bar.style.display = 'flex';
   if (bracket.mode === 'imported') {
-    const src = ({ startgg: 'start.gg', challonge: 'Challonge', nxgen: 'NXGEN' })[bracket.source] || 'a platform';
+    const src = ({ startgg: 'start.gg', challonge: 'Challonge', nxgen: 'NXGEN', faceit: 'FACEIT' })[bracket.source] || 'a platform';
     lbl.innerHTML = `<strong style="color:#60a5fa;">Imported</strong> from ${src} — auto-refreshing scores. Builder edits are held back so the feed isn't overwritten.`;
     if (editBtn) editBtn.style.display = '';
   } else if (bracket.mode === 'manual') {
@@ -18187,8 +19994,9 @@ wireBracketPhasePool();
   let dd = null;
   function closeDd() { if (dd) { dd.remove(); dd = null; } }
   function openDd(inp) {
-    const q = (inp.value || '').trim().toLowerCase();
-    const list = bktCandidates().filter((t) => !q || t.name.toLowerCase().includes(q)).slice(0, 8);
+    const q = (inp.value || '').trim();
+    // Ranked before the 8-item cap so the team being typed can't fall off the end.
+    const list = NESearch.filter(bktCandidates(), q, (t) => [t.name], { limit: 8 }).slice(0, 8);
     closeDd();
     if (!list.length) return;
     dd = document.createElement('div');
@@ -18242,26 +20050,111 @@ wireBracketPhasePool();
 // Live status + clickable phase/pool/view chips right on the scene's front panel, so
 // switching what's on the overlay never requires opening the Full Board. Sends the
 // same WS messages as the full editor; renders from state on every broadcast.
+const BKT_SRC_LABEL = { startgg: 'start.gg', challonge: 'Challonge', nxgen: 'NXGEN', faceit: 'FACEIT' };
+// How stale the loaded bracket is. A producer needs to know at a glance whether the scores
+// about to go on air are eight seconds or forty minutes old — "lastFetchAt" as a raw
+// timestamp (or nothing at all) never told them.
+function bktAgo(ts) {
+  const t = typeof ts === 'number' ? ts : Date.parse(ts || '');
+  if (!t || isNaN(t)) return '';
+  const s = Math.max(0, Math.round((Date.now() - t) / 1000));
+  if (s < 10) return 'just now';
+  if (s < 60) return s + 's ago';
+  const m = Math.round(s / 60);
+  if (m < 60) return m + 'm ago';
+  const h = Math.floor(m / 60);
+  return h + 'h ' + (m % 60) + 'm ago';
+}
+let _bktSourceFoldAuto = false;   // collapse the Source fold ONCE — never fight a producer who opened it
+let _bktSrcTabSynced = false;     // light the source tab that matches the bracket actually loaded
+
 function renderBracketCC(bracket) {
   const cc = el('gfx-bkt-cc'); if (!cc) return;
   const b = bracket || {};
-  const hasData = !!(b.lastFetchAt || (b.winners || []).length || (b.schedule || []).length || (b.standings || []).length);
+  const phases = b.phases || [], pools = b.pools || [];
+  const hasElim = (b.winners || []).length || (b.losers || []).length;
+  const hasSched = (b.schedule || []).length, hasStand = (b.standings || []).length;
+  const hasData = !!(b.lastFetchAt || phases.length || hasElim || hasSched || hasStand);
+  const isManual = b.mode === 'manual';
+  const ae = (typeof currentState !== 'undefined' && currentState && currentState.activeEvent) || {};
+  const aeName = ae.name || ae.slug || '';
+  const activePhase = phases.find((p) => p.id === b.activePhaseId) || phases[0] || null;
+
+  // ── Status header — what is on air, from where, how big, how fresh.
   const st = el('gfx-bkt-cc-status');
   if (st) {
-    if (!hasData) st.textContent = 'No bracket loaded yet — pick a source below.';
-    else {
-      const typeLabel = (b.type || '').replace(/_/g, ' ').toLowerCase() || 'bracket';
-      const src = b.mode === 'manual' ? 'custom' : ({ startgg: 'start.gg', challonge: 'Challonge', nxgen: 'NXGEN' })[b.source] || 'imported';
-      st.innerHTML = `<strong style="color:var(--text,#e8eaf0);">${tlEsc(b.title || 'Bracket')}</strong> · ${tlEsc(typeLabel)} · ${tlEsc(src)}${b.visible ? ' · <span style="color:#4ade80;font-weight:800;">ON AIR</span>' : ''}`;
+    if (!hasData) {
+      st.className = 'bkp-status is-empty';
+      st.innerHTML = 'No bracket loaded yet — open Source below to connect an event or build one.';
+    } else {
+      st.className = 'bkp-status';
+      const typeLabel = ((activePhase && activePhase.type) || b.type || '').replace(/_/g, ' ').toLowerCase();
+      const meta = [];
+      meta.push(!phases.length ? 'no stages' : phases.length === 1 ? '1 stage' : phases.length + ' stages');
+      if (pools.length > 1) {
+        const i = pools.findIndex((p) => p.id === b.activePoolId);
+        meta.push('pool ' + (i >= 0 ? i + 1 : 1) + ' of ' + pools.length);
+      }
+      const ago = bktAgo(b.lastFetchAt);
+      // Only an auto-refreshing (imported) bracket can go stale; a custom one is as fresh as
+      // the last hand edit, so flagging it amber would be nonsense.
+      const stale = !isManual && b.lastFetchAt && (Date.now() - (typeof b.lastFetchAt === 'number' ? b.lastFetchAt : Date.parse(b.lastFetchAt))) > 180000;
+      if (ago) meta.push((isManual ? 'edited ' : 'synced ') + ago);
+      st.innerHTML =
+        `<div class="bkp-st-text">
+           <div class="bkp-st-main">
+             <span class="bkp-st-name">${tlEsc(b.title || 'Bracket')}</span>
+             <span class="bkp-badge ${isManual ? 'is-custom' : 'is-src'}">${tlEsc(isManual ? 'Custom' : (BKT_SRC_LABEL[b.source] || 'Imported'))}</span>
+             ${typeLabel ? `<span class="bkp-badge">${tlEsc(typeLabel)}</span>` : ''}
+             ${stale ? '<span class="bkp-badge is-stale">stale</span>' : ''}
+             ${b.visible ? '<span class="bkp-badge is-onair">On air</span>' : ''}
+           </div>
+           <div class="bkp-st-meta">${meta.map(tlEsc).join(' <span class="bkp-sep">·</span> ')}</div>
+         </div>
+         ${isManual ? '' : `<div class="bkp-st-actions"><button type="button" class="btn btn-ghost btn-xs" data-bktact="reload" title="Pull the latest scores from the connected event now">Sync now</button></div>`}`;
     }
   }
-  const chip = (label, active, attrs) =>
-    `<button type="button" class="bk-view-chip${active ? ' is-active' : ''}" ${attrs}>${tlEsc(label)}</button>`;
-  const phases = b.phases || [], pools = b.pools || [];
+
+  // ── Truth bar — rendered ONLY when the rest of the panel would otherwise mislead.
+  const alertEl = el('gfx-bkt-alert');
+  if (alertEl) {
+    let html = '', bad = false;
+    const reload = (label) => `<button type="button" class="btn btn-blue btn-xs" data-bktact="reload">${label}</button>`;
+    if (b.lastError) {
+      bad = true;
+      html = `<span><strong>Last import failed:</strong> ${tlEsc(b.lastError)}</span>` + (aeName ? reload('Try again') : '');
+    } else if (isManual && aeName) {
+      // The Source panel says "Following: <event>" whenever an event is active. In manual mode
+      // that is a lie — syncBracketToActiveEvent() skips manual brackets entirely, so scores
+      // silently stop updating and the phase list stays whatever was hand-built.
+      html = `<span><strong>Custom bracket is on this scene.</strong> ${tlEsc(aeName)} is linked but is <strong>not</strong> being followed — its stages and scores will not update.</span>`
+           + reload('Load the event');
+    } else if (!isManual && hasData && !phases.length) {
+      html = `<span>This bracket has no stages — the connected event returned nothing to draw.</span>` + (aeName ? reload('Reload') : '');
+    } else if (!hasData && aeName) {
+      html = `<span><strong>${tlEsc(aeName)}</strong> is linked, but no bracket has been pulled from it yet.</span>` + reload('Load the bracket');
+    }
+    alertEl.className = 'bkp-alert' + (bad ? ' is-bad' : '');
+    alertEl.style.display = html ? 'flex' : 'none';
+    alertEl.innerHTML = html;
+  }
+
+  const chip = (label, active, attrs, sub) =>
+    `<button type="button" class="bk-view-chip${active ? ' is-active' : ''}" ${attrs}>${tlEsc(label)}`
+    + (sub ? `<span class="bkp-chip-sub">${tlEsc(sub)}</span>` : '') + '</button>';
+
+  // Stage row shows from ONE phase up. A single chip still answers "which stage is this?" —
+  // hiding it below two meant a hand-built swiss bracket and a five-stage major looked
+  // identical in the panel, which is exactly how a wiped import goes unnoticed.
   const phRow = el('gfx-bkt-cc-phases'), phWrap = el('gfx-bkt-cc-phase-chips');
   if (phRow && phWrap) {
-    phRow.style.display = phases.length > 1 ? 'flex' : 'none';
-    phWrap.innerHTML = phases.map((p) => chip(p.name || 'Phase', p.id === b.activePhaseId, `data-ccphase="${tlEsc(p.id)}"`)).join('');
+    phRow.style.display = phases.length ? 'flex' : 'none';
+    phWrap.innerHTML = phases.map((p) => {
+      const fmt = (p.type || '').replace(/_/g, ' ').toLowerCase();
+      const np = (p.pools || []).length;
+      const sub = [fmt, np > 1 ? np + ' pools' : ''].filter(Boolean).join(' · ');
+      return chip(p.name || 'Phase', p.id === b.activePhaseId, `data-ccphase="${tlEsc(p.id)}"`, sub);
+    }).join('');
   }
   const plRow = el('gfx-bkt-cc-pools'), plWrap = el('gfx-bkt-cc-pool-chips');
   if (plRow && plWrap) {
@@ -18269,24 +20162,57 @@ function renderBracketCC(bracket) {
     // Major-scale phases (e.g. 30 swiss pools) get a dropdown instead of chip soup.
     if (pools.length > 10) {
       plWrap.innerHTML = `<select class="input-select" data-ccpoolsel style="font-size:12px; max-width:220px;">` +
-        pools.map((p) => `<option value="${tlEsc(p.id)}"${p.id === b.activePoolId ? ' selected' : ''}>${tlEsc(p.name || 'Pool')}</option>`).join('') + '</select>';
+        pools.map((p, i) => `<option value="${tlEsc(p.id)}"${p.id === b.activePoolId ? ' selected' : ''}>${tlEsc(p.name || 'Pool ' + (i + 1))}</option>`).join('') + '</select>'
+        + `<span class="field-hint" style="margin:0;">${pools.length} pools in this stage</span>`;
     } else {
-      plWrap.innerHTML = pools.map((p) => chip(p.name || 'Pool', p.id === b.activePoolId, `data-ccpool="${tlEsc(p.id)}"`)).join('');
+      plWrap.innerHTML = pools.map((p, i) => chip(p.name || 'Pool ' + (i + 1), p.id === b.activePoolId, `data-ccpool="${tlEsc(p.id)}"`)).join('');
     }
   }
   const vRow = el('gfx-bkt-cc-views'), vWrap = el('gfx-bkt-cc-view-chips');
   if (vRow && vWrap) {
-    const hasElim = (b.winners || []).length || (b.losers || []).length;
+    // Pool-play boards were missing entirely, so a Swiss phase offered exactly one chip
+    // ("Schedule") and the swiss chart / group board / pairings card were unreachable from the
+    // panel even though the overlay could draw them.
     const VIEWS = [
       ['both', 'Full', hasElim],
       ['winners', 'Upper', hasElim && (b.losers || []).length],
       ['losers', 'Lower', (b.losers || []).length],
       ['finals', 'Finals', hasElim],
-      ['schedule', 'Schedule', (b.schedule || []).length],
+      ['swiss', 'Swiss', hasSched && !hasElim],
+      ['group', 'Group board', hasStand && !hasElim],
+      ['schedule', 'Schedule', hasSched],
+      ['pairings', 'Pairings', hasSched || hasElim],
+      ['standings', 'Table', hasStand && !hasElim],
       ['matrix', 'Grid', !!b.matrix],
     ].filter(([, , show]) => show);
     vRow.style.display = hasData && VIEWS.length ? 'flex' : 'none';
     vWrap.innerHTML = VIEWS.map(([v, label]) => chip(label, (b.view || 'both') === v, `data-ccview="${v}"`)).join('');
+  }
+
+  // ── Fold summaries, so a producer never has to open a section to know what is in it.
+  const dSum = el('gfx-bkt-display-sum');
+  if (dSum) {
+    const on = [];
+    if (b.ignoreReset) on.push('GF reset hidden');
+    if (b.hideLogos) on.push('logos off');
+    else if (b.logoWatermark === false) on.push('no watermark');
+    if (b.ignoreRounds > 0) on.push('first ' + b.ignoreRounds + ' round' + (b.ignoreRounds > 1 ? 's' : '') + ' hidden');
+    dSum.textContent = on.length ? on.join(', ') : 'everything shown';
+  }
+  const sSum = el('gfx-bkt-source-sum');
+  if (sSum) {
+    sSum.textContent = !hasData ? 'choose where the bracket comes from'
+      : isManual ? 'custom bracket, built in this app'
+      : (BKT_SRC_LABEL[b.source] || 'imported') + (b.eventSlug ? ' — ' + b.eventSlug.split('/').pop() : '');
+  }
+  // Import fields are a setup task; once a bracket exists the live rows should own the panel.
+  const sFold = el('gfx-bkt-source-fold');
+  if (sFold && hasData && !_bktSourceFoldAuto) { _bktSourceFoldAuto = true; sFold.open = false; }
+  // Light the source tab that matches what is ACTUALLY loaded, so the panel does not open on
+  // "Tournament Organizer" while a custom bracket is the thing on air.
+  if (hasData && !_bktSrcTabSynced && typeof window._bktSetSrc === 'function') {
+    _bktSrcTabSynced = true;
+    window._bktSetSrc(isManual ? 'manual' : 'organizer');
   }
 }
 ;(function wireBracketCC() {
@@ -18302,6 +20228,12 @@ function renderBracketCC(bracket) {
   cc.addEventListener('change', (e) => {
     const sel = e.target.closest('[data-ccpoolsel]');
     if (sel) send('bracket_select_pool', { poolId: sel.value });
+  });
+  // Status header + truth bar both offer "pull the connected event again" — one delegated
+  // handler on the whole front panel covers every button either of them renders.
+  el('gfx-front-bracket')?.addEventListener('click', (e) => {
+    if (!e.target.closest('[data-bktact="reload"]')) return;
+    if (typeof window._bktReloadActiveEvent === 'function') window._bktReloadActiveEvent();
   });
 })();
 
@@ -18343,6 +20275,8 @@ function applyBracketState(data) {
   if (bktIgnEl && document.activeElement !== bktIgnEl) bktIgnEl.value = bracket.ignoreRounds || 0;
   const bktLogoEl = el('gfx-bkt-hide-logos');
   if (bktLogoEl && document.activeElement !== bktLogoEl) bktLogoEl.checked = !!bracket.hideLogos;
+  const bktWmEl = el('gfx-bkt-logo-wm');
+  if (bktWmEl && document.activeElement !== bktWmEl) bktWmEl.checked = bracket.logoWatermark !== false;
 
   // Reflect the active bracket view on the chips — and hide the chips whose view has no
   // data for this bracket (clicking Matrix on an elim bracket just blanks the overlay).
@@ -18350,15 +20284,28 @@ function applyBracketState(data) {
   const hasSchedule = !!(bracket.schedule && bracket.schedule.length);
   const hasMatrix = !!bracket.matrix;
   const hasLosers = !!(bracket.losers && bracket.losers.length);
+  const hasStandings = !!(bracket.standings && bracket.standings.length);
   document.querySelectorAll('#bracket-views .bk-view-chip').forEach((c) => {
     const v = c.dataset.view || 'both';
     c.classList.toggle('is-active', v === bview);
     const show = v === 'schedule' ? hasSchedule
+               : v === 'pairings' ? (hasSchedule || !!(bracket.winners && bracket.winners.length))
                : v === 'matrix'   ? hasMatrix
+               : v === 'swiss'    ? hasSchedule
+               : v === 'group'    ? hasStandings
                : (v === 'losers' || v === 'finals') ? hasLosers || v !== 'losers'
                : true;
     c.style.display = show ? '' : 'none';
   });
+  // Thresholds only mean something for the two pool-play graphics.
+  const swWrap = el('bracket-swiss-thresholds');
+  if (swWrap) swWrap.style.display = (bview === 'swiss' || bview === 'group') ? 'flex' : 'none';
+  const swColEl = el('bk-swiss-colors');
+  if (swColEl && document.activeElement !== swColEl) swColEl.checked = bracket.swissColors !== false;
+  const swAdvEl = el('bk-swiss-advance');
+  if (swAdvEl && document.activeElement !== swAdvEl) swAdvEl.value = bracket.swissAdvance || 0;
+  const swElimEl = el('bk-swiss-eliminate');
+  if (swElimEl && document.activeElement !== swElimEl) swElimEl.value = bracket.swissEliminate || 0;
 
   renderBracketPhasePool(bracket);
   renderBracketModeBar(bracket);
@@ -18713,6 +20660,10 @@ function applyProductionState(data) {
   if (intrFoot) intrFoot.checked = !!_intr.showFooter;
   const intrRealName = el('check-intro-realname');
   if (intrRealName) intrRealName.checked = !!_intr.showRealName;
+  // Same flag, mirrored into the Matchup panel so the producer can reach it from the graphic
+  // they're actually setting up (Line-up, Bracket and Matchup all read intro.showRealName).
+  const muRealName = el('check-matchup-realname');
+  if (muRealName) muRealName.checked = !!_intr.showRealName;
 }
 
 // ── Game & overlay design ───────────────────────────────────────────────────
@@ -19031,6 +20982,9 @@ el('btn-save-preset')?.addEventListener('click', () => {
 
 // ── Brand kits (client identities + sponsor sets) ────────────────────────────
 let editingBrandId = null;
+// Which kit the section-header Export button writes — set by renderBrandKits (active kit, or the
+// only kit). Null disables the button rather than exporting an arbitrary one.
+let _brandExportTargetId = null;
 let editingBrandThemes = {};      // preserve per-game theme prefs not edited here
 let pendingBrandLogo = null;      // base64 data URL or existing URL
 let brandSponsors = [];           // [{ id?, name, logo, tier }]
@@ -19038,6 +20992,7 @@ let pendingSponsorLogo = null;
 let brandBannerImages = [];       // base64 images for this kit's banner
 let brandBannerCaptions = [];     // optional per-image text, parallel to brandBannerImages
 let brandReplaySkin = null;       // per-profile replay transition background (base64), or null
+let brandScoreboardBg = null;     // per-profile RL post-game scoreboard background (base64), or null
 // Brand packages: a profile holds 1+ named packages (sponsor set + placements + banner) — e.g. one
 // per sponsorship deal / event type. The working vars above mirror the CURRENTLY-EDITED package;
 // brandPackages is the full list, editingPackageId = which one is loaded, editingActivePackageId =
@@ -19046,7 +21001,7 @@ let brandPackages = [];
 let editingPackageId = null;
 let editingActivePackageId = null;
 function newBrandPackage(name) {
-  return { id: 'p' + Math.random().toString(36).slice(2, 9), name: name || 'Package', sponsorLabel: 'PARTNERS', sponsorInterval: 6, sponsorMode: 'cycle', sponsors: [], bannerImages: [], bannerCaptions: [], bannerSlant: 'right', bannerHeader: '', bannerInterval: 10, replaySkin: null };
+  return { id: 'p' + Math.random().toString(36).slice(2, 9), name: name || 'Package', sponsorLabel: 'PARTNERS', sponsorInterval: 6, sponsorMode: 'cycle', sponsors: [], bannerImages: [], bannerCaptions: [], bannerSlant: 'right', bannerHeader: '', bannerInterval: 10, replaySkin: null, scoreboardBg: null };
 }
 // Copy the live editor fields back into the package being edited (call before switching/saving).
 function flushEditorToPackage() {
@@ -19065,6 +21020,7 @@ function flushEditorToPackage() {
   pkg.bannerSlant = el('select-brand-banner-slant')?.value || 'right';
   pkg.bannerHeader = el('input-brand-banner-header')?.value || '';
   pkg.replaySkin = brandReplaySkin;
+  pkg.scoreboardBg = brandScoreboardBg;
 }
 // Load a package's sponsor/banner config into the editor fields.
 function loadPackageIntoEditor(pkg) {
@@ -19080,12 +21036,24 @@ function loadPackageIntoEditor(pkg) {
   if (el('input-brand-banner-header')) el('input-brand-banner-header').value = pkg.bannerHeader || '';
   brandReplaySkin = pkg.replaySkin || null;
   setBrandReplaySkinPreview(brandReplaySkin);
+  brandScoreboardBg = pkg.scoreboardBg || null;
+  setBrandScoreboardBgPreview(brandScoreboardBg);
+  // Show a link-sourced background back in the URL box (an uploaded/inline one stays as the
+  // thumbnail only — a data: blob in a text field is unreadable).
+  const sbUrl = el('input-brand-scoreboardbg-url');
+  if (sbUrl) sbUrl.value = /^https?:\/\//i.test(brandScoreboardBg || '') ? brandScoreboardBg : '';
   renderBrandSponsors();
   renderKitBannerImages();
 }
 // Show/hide the replay-skin preview thumbnail + clear the file input.
 function setBrandReplaySkinPreview(url) {
   const prev = el('preview-brand-replayskin'), fileIn = el('input-brand-replayskin');
+  if (prev) { if (url) { prev.src = url; prev.style.display = ''; } else { prev.style.display = 'none'; prev.removeAttribute('src'); } }
+  if (fileIn && !url) fileIn.value = '';
+}
+// Show/hide the scoreboard-background preview thumbnail + clear the file input.
+function setBrandScoreboardBgPreview(url) {
+  const prev = el('preview-brand-scoreboardbg'), fileIn = el('input-brand-scoreboardbg');
   if (prev) { if (url) { prev.src = url; prev.style.display = ''; } else { prev.style.display = 'none'; prev.removeAttribute('src'); } }
   if (fileIn && !url) fileIn.value = '';
 }
@@ -19408,6 +21376,20 @@ function renderBrands(data) {
     chip.classList.toggle('ok', !!activeKit);
   }
 
+  // Section-header "Export Kit" — the counterpart to "Import Kit", which is where producers look
+  // first. It has no row of its own to read the kit from, so it targets the active profile (or the
+  // only one, when there's just one) and says so on the button — no silent guess about which kit
+  // lands in the file. Per-kit Export still lives on every row below.
+  const hdrExp = el('btn-export-brand-kit');
+  if (hdrExp) {
+    const target = kits.find((k) => k.id === data.activeBrandKitId) || (kits.length === 1 ? kits[0] : null);
+    _brandExportTargetId = target ? target.id : null;
+    hdrExp.disabled = !target;
+    hdrExp.title = target
+      ? `Export "${target.name}" to a file — identity, every package, sponsors and OBS settings`
+      : (kits.length ? 'Activate a profile first, or use the Export button on the kit you want' : 'No brand kits to export yet');
+  }
+
   const list = el('brands-list'); const empty = el('brands-empty');
   if (!list) return;
   list.querySelectorAll('.preset-item').forEach((i) => i.remove());
@@ -19578,7 +21560,7 @@ function loadBrandIntoForm(k) {
   pendingBrandLogo = k.logo || null;
   // Server sends kit.packages; fall back to wrapping legacy top-level sponsor/banner fields.
   let src = Array.isArray(k.packages) && k.packages.length ? k.packages
-    : [{ id: k.activePackageId, name: 'Main', sponsorLabel: k.sponsorLabel, sponsorInterval: k.sponsorInterval, sponsorMode: k.sponsorMode, sponsors: k.sponsors, bannerImages: k.bannerImages, bannerCaptions: k.bannerCaptions, bannerSlant: k.bannerSlant, bannerHeader: k.bannerHeader, bannerInterval: k.bannerInterval, replaySkin: k.replaySkin }];
+    : [{ id: k.activePackageId, name: 'Main', sponsorLabel: k.sponsorLabel, sponsorInterval: k.sponsorInterval, sponsorMode: k.sponsorMode, sponsors: k.sponsors, bannerImages: k.bannerImages, bannerCaptions: k.bannerCaptions, bannerSlant: k.bannerSlant, bannerHeader: k.bannerHeader, bannerInterval: k.bannerInterval, replaySkin: k.replaySkin, scoreboardBg: k.scoreboardBg }];
   brandPackages = src.map((p) => ({
     id: p.id || ('p' + Math.random().toString(36).slice(2, 9)),
     name: p.name || 'Main',
@@ -19592,6 +21574,7 @@ function loadBrandIntoForm(k) {
     bannerHeader: p.bannerHeader || '',
     bannerInterval: p.bannerInterval || 10,
     replaySkin: p.replaySkin || null,
+    scoreboardBg: p.scoreboardBg || null,
   }));
   editingActivePackageId = (k.activePackageId && brandPackages.some((p) => p.id === k.activePackageId)) ? k.activePackageId : brandPackages[0].id;
   editingPackageId = editingActivePackageId;
@@ -19679,6 +21662,43 @@ el('btn-brand-replayskin-clear')?.addEventListener('click', () => {
   brandReplaySkin = null;
   setBrandReplaySkinPreview(null);
 });
+el('input-brand-scoreboardbg')?.addEventListener('change', async (e) => {
+  const f = e.target.files[0]; if (!f) return;
+  const saveBtn = el('btn-save-brand');
+  if (saveBtn) saveBtn.disabled = true;
+  if (typeof showToast === 'function') showToast('Uploading scoreboard background…', '#3b82f6');
+  try {
+    brandScoreboardBg = await uploadImageFile(f, 'brand-skins', 1920);
+  } catch (_) {
+    try {
+      brandScoreboardBg = await fileToBase64(f, 1920);
+      if (typeof showToast === 'function') showToast('Saved inline (media upload unavailable).', '#f59e0b');
+    } catch (__) {}
+  } finally {
+    if (saveBtn) saveBtn.disabled = false;
+  }
+  setBrandScoreboardBgPreview(brandScoreboardBg);
+});
+el('btn-brand-scoreboardbg-clear')?.addEventListener('click', () => {
+  brandScoreboardBg = null;
+  setBrandScoreboardBgPreview(null);
+  const u = el('input-brand-scoreboardbg-url'); if (u) u.value = '';
+});
+// Paste-a-link path: the overlay renders whatever URL it's given, so a hosted image needs no upload.
+function applyBrandScoreboardBgUrl() {
+  const inp = el('input-brand-scoreboardbg-url'); if (!inp) return;
+  const url = (inp.value || '').trim();
+  if (!url) return;
+  if (!/^https?:\/\//i.test(url) && !/^data:image\//i.test(url)) {
+    if (typeof showToast === 'function') showToast('Paste a full image link starting with https://', '#f59e0b');
+    return;
+  }
+  brandScoreboardBg = url;
+  setBrandScoreboardBgPreview(url);
+  if (typeof showToast === 'function') showToast('Scoreboard background set — Save the profile to keep it.', '#22c55e');
+}
+el('btn-brand-scoreboardbg-url')?.addEventListener('click', applyBrandScoreboardBgUrl);
+el('input-brand-scoreboardbg-url')?.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); applyBrandScoreboardBgUrl(); } });
 
 // Per-game overlay design pickers.
 el('select-brand-game')?.addEventListener('change', function () { fillBrandThemeSelect(this.value); });
@@ -19764,6 +21784,16 @@ function openBrandEditor() {
 function closeBrandEditor() { const m = el('brand-editor-modal'); if (m) m.style.display = 'none'; }
 el('btn-open-new-brand')?.addEventListener('click', () => { resetBrandForm(); openBrandEditor(); });
 el('btn-import-brand-kit')?.addEventListener('click', () => send('import_brand_kit'));
+el('btn-export-brand-kit')?.addEventListener('click', () => {
+  if (!_brandExportTargetId) { showToast('Pick a profile first — activate one, or hit Export on its row.', '#fbbf24', 5000); return; }
+  send('export_brand_kit', { id: _brandExportTargetId });
+});
+// Export from inside the editor — the kit you're looking at, no hunting for its row. A kit that
+// has never been saved has no id on the server to export, so send it there first.
+el('btn-export-brand-editor')?.addEventListener('click', () => {
+  if (!editingBrandId) { showToast('Save this brand kit first — there is nothing on disk to export yet.', '#fbbf24', 5000); return; }
+  send('export_brand_kit', { id: editingBrandId });
+});
 el('brand-editor-close')?.addEventListener('click', () => { resetBrandForm(); closeBrandEditor(); });
 el('brand-editor-modal')?.addEventListener('click', (e) => { if (e.target === el('brand-editor-modal')) { resetBrandForm(); closeBrandEditor(); } });
 
@@ -19800,65 +21830,11 @@ el('check-csgo-builtin-radar')?.addEventListener('change', (e) => {
   send('csgo_radar_mode', { builtin: !!e.target.checked });
 });
 
-function applyRlSpectatorUi(data) {
-  const ui = data.rlSpectatorUi || {};
-  const setChk = (id, val) => {
-    const n = el(id);
-    if (n && document.activeElement !== n) n.checked = !!val;
-  };
-  const setVal = (id, val) => {
-    const n = el(id);
-    if (n && document.activeElement !== n && val != null) n.value = val;
-  };
-  setChk('check-rl-ui-hide-enabled', ui.enabled !== false);
-  setChk('chk-gear-autohide', ui.enabled !== false);   // gear-panel mirror
-  setChk('check-rl-ui-auto-match', ui.autoOnMatch !== false);
-  setChk('check-rl-ui-focus', ui.focusWindow !== false);
-  setVal('input-rl-ui-key', ui.key || 'h');
-  setVal('input-rl-ui-presses', ui.presses ?? 2);
-  setVal('input-rl-ui-gap', ui.gapMs ?? 250);
-  setVal('input-rl-ui-delay', ((ui.matchDelayMs ?? 1500) / 1000));
-  setVal('input-rl-ui-hotkey', ui.hotkey || 'F9');
-}
+// Auto-hide RL native UI was REMOVED (2026-08) — Rocket League now has its own in-game "Hide UI"
+// option, so the suite no longer presses/commands the HUD off. applyRlSpectatorUi is a no-op kept
+// only so the message dispatcher's call site stays valid for older state payloads.
+function applyRlSpectatorUi() { /* removed — game handles UI hiding natively now */ }
 
-function sendRlSpectatorUiPatch(patch) {
-  send('set_rl_spectator_ui', patch);
-}
-
-el('check-rl-ui-hide-enabled')?.addEventListener('change', function() {
-  sendRlSpectatorUiPatch({ enabled: this.checked });
-});
-el('check-rl-ui-auto-match')?.addEventListener('change', function() {
-  sendRlSpectatorUiPatch({ autoOnMatch: this.checked });
-});
-el('check-rl-ui-focus')?.addEventListener('change', function() {
-  sendRlSpectatorUiPatch({ focusWindow: this.checked });
-});
-el('input-rl-ui-key')?.addEventListener('change', function() {
-  sendRlSpectatorUiPatch({ key: this.value.trim() || 'h' });
-});
-el('input-rl-ui-presses')?.addEventListener('change', function() {
-  sendRlSpectatorUiPatch({ presses: Math.max(1, Math.min(4, Number(this.value) || 2)) });
-});
-el('input-rl-ui-gap')?.addEventListener('change', function() {
-  sendRlSpectatorUiPatch({ gapMs: Math.max(50, Number(this.value) || 250) });
-});
-el('input-rl-ui-delay')?.addEventListener('change', function() {
-  // Seconds in the UI → ms. Min 0.5s so the single press still lands after RL is focus-ready.
-  const secs = Math.max(0.5, Math.min(10, Number(this.value) || 1.5));
-  sendRlSpectatorUiPatch({ matchDelayMs: Math.round(secs * 1000) });
-});
-el('input-rl-ui-hotkey')?.addEventListener('change', function() {
-  sendRlSpectatorUiPatch({ hotkey: this.value.trim() || 'F9' });
-});
-el('btn-rl-ui-hide-now')?.addEventListener('click', () => {
-  send('rl_hide_native_ui');
-  const st = el('rl-ui-hide-status');
-  if (st) st.textContent = 'Sending to Rocket League…';
-});
-// Match ▸ Teams gear mirror of the auto-hide-native-UI enable + "hide now" (same state/messages).
-el('chk-gear-autohide')?.addEventListener('change', function() { sendRlSpectatorUiPatch({ enabled: this.checked }); });
-el('btn-gear-autohide-now')?.addEventListener('click', () => send('rl_hide_native_ui'));
 // Copy the DefaultStatsAPI.ini contents to the clipboard for the RL Stats API setup.
 el('btn-rl-copy-ini')?.addEventListener('click', async () => {
   const txt = (el('rl-ini-text')?.textContent || '').trim();
@@ -20113,7 +22089,6 @@ function getObsPayload() {
     })(),
     autoSwitch: !!el('check-obs-autoswitch')?.checked,
     autoReplayOnGoal: !!el('check-obs-autoreplay')?.checked,
-    allowKitObsSwitch: !!el('check-obs-allow-kit-switch')?.checked,
     postGameToCastersSec: Math.max(0, parseInt(el('input-obs-postgame-casters')?.value, 10) || 0),
     // Kickoff scene automation is NOT included here — it's owned exclusively by
     // sendRlSceneAuto()/set_rl_scene_automation (Match — Teams gear panel) now. This payload used
@@ -20181,18 +22156,10 @@ function wireRlSceneAuto() {
     const e = el(id);
     if (e && !e._rlWired) { e._rlWired = true; e.addEventListener('change', sendRlSceneAuto); }
   });
-  const clr = el('btn-rl-clear-board');
-  if (clr && !clr._rlWired) {
-    clr._rlWired = true;
-    clr.addEventListener('click', async function () {
-      const ok = await appConfirm('Clear the on-air scoreboard now? Team names, scores and series reset on the overlay immediately.', 'Clear scoreboard');
-      if (ok) send('clear_scoreboard', {});
-    });
-  }
+  // Clear Scoreboard now lives in the scorecard beside Pause match (scorecardHTML +
+  // wireScorecard's 'clear-board' case) — a live in-match control, not scene config.
   const hide = el('chk-rl-hide-ui');
   if (hide && !hide._rlWired) { hide._rlWired = true; hide.addEventListener('change', function () { send('set_rl_hide_ui', { hidden: this.checked }); }); }
-  const specOutline = el('chk-rl-spec-outline');
-  if (specOutline && !specOutline._rlWired) { specOutline._rlWired = true; specOutline.addEventListener('change', function () { send('set_rl_spec_outline', { on: this.checked }); }); }
   // Where the board lives — segmented (RL HUD overlay vs its own OBS source). Same state as the old
   // "Board on a separate source" checkbox (rlScoreboardSeparate); as a two-way choice it also tells
   // the producer which of the two post-game cuts belongs to their setup.
@@ -20207,22 +22174,16 @@ function wireRlSceneAuto() {
       });
     });
   }
-  // Auto-spectate (follow the ball): enable the feature + ARM the live camera keypresses.
-  // ONE toggle. The old split (enabled + a separate ARM) had no useful middle state — "enabled but
-  // not armed" did literally nothing, so it just gave the feature a way to silently not work. The AI
-  // shield is the global kill switch; a per-feature arm was redundant.
-  ['chk-autospec-enabled', 'inp-autospec-debounce'].forEach(function (id) {
-    const e = el(id);
-    if (e && !e._asWired) {
-      e._asWired = true;
-      e.addEventListener('change', function () {
-        send('set_auto_spectate', {
-          enabled: !!(el('chk-autospec-enabled') && el('chk-autospec-enabled').checked),
-          debounceMs: Number((el('inp-autospec-debounce') || {}).value) || 1500
-        });
-      });
-    }
-  });
+  // RL auto-spectate + first-kickoff camera wiring REMOVED 2026-08 (the camera automation is gone).
+  // Pause/resume now lives in the scorecard (scorecardHTML + wireScorecard) — see .js-rl-pause.
+  // Enable/disable the animated replay transitions (shutter-slam wipes + Brazil flag) on the overlays.
+  const rtTog = el('chk-rl-replay-transitions');
+  if (rtTog && !rtTog._rlWired) {
+    rtTog._rlWired = true;
+    rtTog.addEventListener('change', function () {
+      send('set_rl_replay_transitions', { on: this.checked });
+    });
+  }
   // Stats-screen skin (show/hide the stat table + pick the design) — applies to the scoreboard scene.
   ['chk-rl-stats-show', 'sel-rl-stats-design'].forEach(function (id) {
     const e = el(id);
@@ -20240,27 +22201,184 @@ function wireRlSceneAuto() {
 // ── Smash controls (Match ▸ Teams gear ▸ Smash strip) — stocks + fighters, shown only for Smash ──
 let _smashWired = false;
 // Ultimate fighter names for the datalist (factual labels; producers can type any name).
-const SMASH_FIGHTERS = ['Mario','Donkey Kong','Link','Samus','Dark Samus','Yoshi','Kirby','Fox','Pikachu','Luigi','Ness','Captain Falcon','Jigglypuff','Peach','Daisy','Bowser','Ice Climbers','Sheik','Zelda','Dr. Mario','Pichu','Falco','Marth','Lucina','Young Link','Ganondorf','Mewtwo','Roy','Chrom','Mr. Game & Watch','Meta Knight','Pit','Dark Pit','Zero Suit Samus','Wario','Snake','Ike','Pokemon Trainer','Diddy Kong','Lucas','Sonic','King Dedede','Olimar','Lucario','R.O.B.','Toon Link','Wolf','Villager','Mega Man','Wii Fit Trainer','Rosalina & Luma','Little Mac','Greninja','Mii Fighter','Palutena','Pac-Man','Robin','Shulk','Bowser Jr.','Duck Hunt','Ryu','Ken','Cloud','Corrin','Bayonetta','Inkling','Ridley','Simon','Richter','King K. Rool','Isabelle','Incineroar','Piranha Plant','Joker','Hero','Banjo & Kazooie','Terry','Byleth','Min Min','Steve','Sephiroth','Pyra','Mythra','Kazuya','Sora'];
+// Fighter roster + name resolution come from the SHARED registry (overlay/smash-fighters.js,
+// loaded in index.html) so the panel can only offer names the overlays have art for.
+function smashFighterList() { return (window.SmashFighters ? SmashFighters.picks : []).map((f) => f.name); }
+function smashResolve(v) { return window.SmashFighters ? SmashFighters.resolve(v) : null; }
+// Paint a stock-icon thumbnail next to a fighter input so a producer can see that "gnw" or "zss"
+// resolved to the fighter they meant before it reaches the scoreboard.
+function smashSetThumb(imgEl, value) {
+  if (!imgEl) return;
+  const f = smashResolve(value);
+  if (f) { const url = SmashFighters.stockUrl(f.slug); if (imgEl.getAttribute('src') !== url) imgEl.src = url;
+           imgEl.classList.remove('is-empty'); imgEl.title = f.name; }
+  else { imgEl.classList.add('is-empty'); imgEl.removeAttribute('title'); }
+}
+// ── Fighter picker ───────────────────────────────────────────────────────────
+// Every fighter field opens the same popover: an icon grid, because picking a character out of a
+// bare text list means already knowing all 87 names. Typing in the search box filters it; the
+// field itself stays readonly so there is one way in and the value is always a real fighter.
+const SmashPicker = (function () {
+  let pop, search, grid, emptyEl, target = null, onPick = null, built = false;
+  function ensure() {
+    pop = pop || el('smash-pick-pop');
+    search = search || el('smash-pick-search');
+    grid = grid || el('smash-pick-grid');
+    emptyEl = emptyEl || el('smash-pick-empty');
+    if (!pop || built || !window.SmashFighters) return !!pop;
+    // A "None" cell is the only way to unset a fighter now the field itself is readonly --
+    // without it a mis-picked character could never be taken back off the card.
+    grid.innerHTML = '<button type="button" class="smash-pick-cell smash-pick-none" data-slug="" title="No fighter">' +
+      '<span class="smash-pick-x">&times;</span><span>None</span></button>' +
+      SmashFighters.picks.map((f) =>
+        `<button type="button" class="smash-pick-cell" data-slug="${f.slug}" title="${tlEsc(f.name)}">` +
+        `<img src="${SmashFighters.stockUrl(f.slug)}" alt=""><span>${tlEsc(f.name)}</span></button>`).join('');
+    built = true;
+    return true;
+  }
+  function filter(q) {
+    const n = window.SmashFighters ? SmashFighters.norm(q || '') : '';
+    let shown = 0;
+    grid.querySelectorAll('.smash-pick-cell').forEach((cell) => {
+      const f = SmashFighters.bySlug[cell.dataset.slug];
+      if (!f) { cell.hidden = !!n; return; }            // the "None" cell: only while not searching
+      const hay = SmashFighters.norm(f.name) + ' ' + (f.alt || []).join(' ') + ' ' + f.slug;
+      const hit = !n || hay.indexOf(n) >= 0;
+      cell.hidden = !hit;
+      if (hit) shown++;
+    });
+    if (emptyEl) emptyEl.hidden = shown > 0;
+  }
+  function place() {
+    if (!target) return;
+    const r = target.getBoundingClientRect();
+    const w = pop.offsetWidth || 330, h = pop.offsetHeight || 340;
+    // flip above / clamp to the viewport so it is never half off-screen in a scrolled panel
+    let top = r.bottom + 6;
+    if (top + h > window.innerHeight - 8) top = Math.max(8, r.top - h - 6);
+    let left = Math.min(r.left, window.innerWidth - w - 8);
+    pop.style.top = top + 'px';
+    pop.style.left = Math.max(8, left) + 'px';
+  }
+  function open(input, cb) {
+    if (!ensure()) return;
+    target = input; onPick = cb;
+    pop.hidden = false;
+    const cur = window.SmashFighters ? SmashFighters.slugOf(input.value) : '';
+    grid.querySelectorAll('.smash-pick-cell').forEach((c) => c.classList.toggle('is-on', c.dataset.slug === cur));
+    search.value = '';
+    filter('');
+    place();
+    search.focus();
+    const on = grid.querySelector('.smash-pick-cell.is-on');
+    if (on) on.scrollIntoView({ block: 'nearest' });
+  }
+  function close() { if (pop) pop.hidden = true; target = null; onPick = null; }
+  function isOpen() { return pop && !pop.hidden; }
+  function wire() {
+    if (!ensure() || pop.dataset.wired) return;
+    pop.dataset.wired = '1';
+    search.addEventListener('input', () => filter(search.value));
+    search.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') { close(); return; }
+      if (e.key === 'Enter') {
+        const first = grid.querySelector('.smash-pick-cell:not([hidden]):not(.smash-pick-none)');
+        if (first) first.click();
+        e.preventDefault();
+      }
+    });
+    grid.addEventListener('click', (e) => {
+      const cell = e.target.closest('.smash-pick-cell'); if (!cell) return;
+      const f = SmashFighters.bySlug[cell.dataset.slug];
+      const cb = onPick, t = target;
+      close();
+      if (t) { t.value = f ? f.name : ''; if (cb) cb(f ? f.name : ''); }
+    });
+    document.addEventListener('mousedown', (e) => {
+      if (!isOpen()) return;
+      if (pop.contains(e.target) || e.target === target) return;
+      close();
+    });
+    window.addEventListener('resize', () => { if (isOpen()) place(); });
+    window.addEventListener('scroll', () => { if (isOpen()) place(); }, true);
+  }
+  return { open, close, isOpen, wire };
+})();
+// Any fighter field, anywhere: click to pick. The field is readonly so the value is always a real
+// fighter; the grid's "None" cell is how a fighter gets unset.
+function smashBindPicker(input, cb) {
+  if (!input || input.dataset.pickerBound) return;
+  input.dataset.pickerBound = '1';
+  input.setAttribute('readonly', 'readonly');
+  input.classList.add('smash-char-input');
+  input.addEventListener('mousedown', (e) => { e.preventDefault(); SmashPicker.wire(); SmashPicker.open(input, cb); });
+  input.addEventListener('focus', () => { SmashPicker.wire(); SmashPicker.open(input, cb); });
+}
+
 function wireSmashControls() {
   if (_smashWired) return; _smashWired = true;
   const dl = el('smash-fighters');
-  if (dl && !dl.childElementCount) dl.innerHTML = SMASH_FIGHTERS.map((n) => `<option value="${tlEsc(n)}"></option>`).join('');
+  if (dl && !dl.childElementCount) dl.innerHTML = smashFighterList().map((n) => `<option value="${tlEsc(n)}"></option>`).join('');
   document.querySelectorAll('.smash-stock-btn').forEach((btn) => {
     btn.addEventListener('click', () => send('smash_stock_delta', { side: btn.dataset.smashSide, delta: parseInt(btn.dataset.smashDelta, 10) }));
   });
   ['blue', 'orange'].forEach((side) => {
     const ci = el('smash-char-' + side);
-    if (ci) ci.addEventListener('change', () => send('set_smash_character', { side, character: ci.value.trim() }));
+    if (!ci) return;
+    const thumb = el('smash-char-thumb-' + side);
+    smashBindPicker(ci, (name) => {
+      smashSetThumb(thumb, name);
+      send('set_smash_character', { side, character: name });
+    });
   });
   const ss = el('smash-start-stocks');
   if (ss) ss.addEventListener('change', () => send('set_smash_start_stocks', { value: parseInt(ss.value, 10) }));
+  const srp = el('smash-rail-pos');
+  if (srp) srp.addEventListener('change', () => send('set_smash_rail_pos', { value: srp.value }));
+  // Scoreboard title ("Ultimate Singles"). Emptying the box re-arms the start.gg auto-fill rather
+  // than blanking the badge - the server falls back to whatever the last event reported.
+  const st = el('smash-title');
+  if (st) {
+    st.addEventListener('change', () => send('set_smash_title', { value: st.value.trim() }));
+    st.addEventListener('keydown', (e) => { if (e.key === 'Enter') st.blur(); });
+  }
   const rb = el('btn-smash-reset');
   if (rb) rb.addEventListener('click', () => send('reset_smash_stocks', {}));
+  const aa = el('smash-auto-advance');
+  if (aa) aa.addEventListener('change', () => send('set_smash_auto_advance', { value: aa.checked }));
+  // Pip clicks are delegated — the rows are re-rendered on every state update.
+  ['blue', 'orange'].forEach((side) => {
+    const row = el('smash-pips-' + side);
+    if (!row) return;
+    row.addEventListener('click', (e) => {
+      const pip = e.target.closest('.smash-pip');
+      if (!pip) return;
+      // Clicking the pip that's already the last one lit means "take that stock too", which is
+      // what a tracker does on a repeat click — otherwise you could never reach zero by clicking.
+      const idx = Number(pip.dataset.i);
+      const cur = Number(row.dataset.left) || 0;
+      send('set_smash_stocks', { side, value: (idx + 1 === cur) ? idx : idx + 1 });
+    });
+  });
   // Mode toggle (1v1 singles ↔ team crew).
   document.querySelectorAll('#smash-mode-seg .seg-btn').forEach((btn) => {
     btn.addEventListener('click', () => send('set_smash_mode', { mode: btn.dataset.smashMode }));
   });
   // Team-mode controls.
+  ['blue', 'orange'].forEach((side) => {
+    const bo = el('smash-bo-' + side);
+    if (!bo || bo._wired) return;
+    bo._wired = true;
+    bo.addEventListener('click', (e) => {
+      const pip = e.target.closest('.bo-pip'); if (!pip) return;
+      const i = Number(pip.dataset.i);
+      const won = Number(bo.dataset.won) || 0;
+      // Clicking the pill that is already the last one won takes it back off, so a mis-click is
+      // undoable without reaching for the − button.
+      const target = (i + 1 === won) ? i : i + 1;
+      send('adjust_series', { side, delta: target - won });
+    });
+  });
   const cs = el('smash-crew-size');
   if (cs) cs.addEventListener('change', () => send('set_smash_crew_size', { value: parseInt(cs.value, 10) }));
   const bo = el('smash-best-of');
@@ -20283,6 +22401,18 @@ function wireSmashControls() {
       const value = (cur === i + 1) ? i : (i + 1);
       send('set_smash_player_stock', { side, index: parseInt(pip.parentElement.dataset.pidx, 10), value });
     });
+    // Per-player fighter — the crew rows are rebuilt whenever the crew size or stocks change, so
+    // the picker is bound on demand from a delegated mousedown rather than per-element up front.
+    if (wrap) {
+      wrap.addEventListener('mousedown', (e) => {
+        const inp = e.target.closest('.smash-crew-char'); if (!inp) return;
+        const i = parseInt(inp.dataset.cchar, 10);
+        smashBindPicker(inp, (name) => {
+          smashSetThumb(wrap.querySelector(`[data-cface="${i}"]`), name);
+          send('set_smash_player_character', { side, index: i, character: name });
+        });
+      }, true);
+    }
   });
 }
 function applySmashControls(data) {
@@ -20293,19 +22423,65 @@ function applySmashControls(data) {
   const sm = data.smash || {};
   const mode = sm.mode === 'team' ? 'team' : 'singles';
   const ss = el('smash-start-stocks'); if (ss && document.activeElement !== ss) ss.value = String(sm.startStocks || 3);
+  const srp = el('smash-rail-pos'); if (srp && document.activeElement !== srp) srp.value = sm.railPos === 'topleft' ? 'topleft' : 'bottom';
+  const st = el('smash-title');
+  if (st && document.activeElement !== st) {
+    st.value = sm.title || '';
+    // Show what start.gg said as the placeholder once we've heard from an event, so a producer
+    // clearing the field can see exactly what auto-fill will put back.
+    st.placeholder = sm.startggTitle ? ('Auto: ' + sm.startggTitle) : 'Auto from start.gg';
+  }
   // Mode toggle + which sub-panel shows.
   document.querySelectorAll('#smash-mode-seg .seg-btn').forEach((b) => b.classList.toggle('active', b.dataset.smashMode === mode));
   const singlesEl = el('msp-smash-singles'); if (singlesEl) singlesEl.style.display = mode === 'team' ? 'none' : '';
   const teamEl = el('msp-smash-team'); if (teamEl) teamEl.style.display = mode === 'team' ? '' : 'none';
 
   // label each side by the actual player name so the two cells are unambiguous
-  const nm = (side) => { const t = (data.teams && data.teams[side]) || {}; const p = (t.players || [])[0]; return (p && (p.gamertag || p.name)) || t.name || ''; };
+  // Resolve the SAME roster member the overlay puts on air (activePlayer[side], else the first) —
+  // the panel used to always take players[0], so on a multi-entrant team it labelled the cells with
+  // someone who wasn't the one showing.
+  const nm = (side) => {
+    const t = (data.teams && data.teams[side]) || {};
+    const roster = Array.isArray(t.players) ? t.players : [];
+    const wantId = (data.activePlayer && data.activePlayer[side]) || '';
+    const p = (wantId && roster.find((x) => x && String(x.id) === String(wantId))) || roster[0];
+    return (p && (p.gamertag || p.name)) || t.name || '';
+  };
   const lb = el('smash-label-blue'); if (lb) lb.textContent = nm('blue') || 'Player 1';
   const lo = el('smash-label-orange'); if (lo) lo.textContent = nm('orange') || 'Player 2';
+  const aa = el('smash-auto-advance');
+  if (aa && document.activeElement !== aa) aa.checked = sm.autoAdvance !== false;
   ['blue', 'orange'].forEach((side) => {
     const s = sm[side] || {};
-    const sv = el('smash-stocks-' + side); if (sv) sv.textContent = String(s.stocks != null ? s.stocks : 3);
-    const ci = el('smash-char-' + side); if (ci && document.activeElement !== ci) ci.value = s.character || '';
+    const left = Number(s.stocks != null ? s.stocks : 3) || 0;
+    const sv = el('smash-stocks-' + side); if (sv) sv.textContent = String(left);
+    // Pool = what this side STARTS a game with. Singles is just startStocks; team mode scales it
+    // by the crew, matching the pooled countdown the crew board renders.
+    const start = Math.max(1, Math.min(9, Number(sm.startStocks) || 3));
+    const pool = (mode === 'team')
+      ? ((s.players || []).length || Number(sm.crewSize) || 4) * start
+      : start;
+    const pe = el('smash-pool-' + side); if (pe) pe.textContent = '/ ' + pool;
+    const row = el('smash-pips-' + side);
+    if (row) {
+      const shown = (mode === 'team')
+        ? (s.players || []).reduce((a, n) => a + Math.max(0, Number(n) || 0), 0)
+        : left;
+      row.dataset.left = String(shown);
+      // Rebuild only when the POOL changes; lit/spent updates in place.
+      if (row.dataset.pool !== String(pool)) {
+        row.dataset.pool = String(pool);
+        row.innerHTML = Array.from({ length: pool }, (_, i) =>
+          `<button type="button" class="smash-pip" data-i="${i}" title="Set to ${i + 1}"></button>`).join('');
+      }
+      [].forEach.call(row.children, (pip, i) => pip.classList.toggle('spent', i >= shown));
+      // In team mode the pool is the crew's shared total, so the per-pip click (which writes a
+      // single side.stocks value) would be meaningless — show it, don't let it be driven.
+      row.style.pointerEvents = (mode === 'team') ? 'none' : '';
+    }
+    const ci = el('smash-char-' + side);
+    if (ci && document.activeElement !== ci) ci.value = s.character || '';
+    smashSetThumb(el('smash-char-thumb-' + side), ci ? ci.value : s.character);
   });
 
   if (mode === 'team') {
@@ -20316,10 +22492,27 @@ function applySmashControls(data) {
     ['blue', 'orange'].forEach((side) => {
       const t = (data.teams && data.teams[side]) || {};
       const tl = el('smash-team-label-' + side); if (tl) tl.textContent = t.name || (side === 'blue' ? 'Blue' : 'Orange');
-      const sc = el('smash-series-' + side); if (sc) sc.textContent = String(Number(series[side]) || 0);
+      const won = Number(series[side]) || 0;
+      const sc = el('smash-series-' + side); if (sc) sc.textContent = String(won);
+      // One pill per game NEEDED to take the set (best-of 3 -> 2), filled by games won.
+      const need = Math.max(1, Math.ceil((Number(data.bestOf) || 3) / 2));
+      const bo = el('smash-bo-' + side);
+      if (bo) {
+        if (bo.dataset.need !== String(need)) {
+          bo.dataset.need = String(need);
+          bo.innerHTML = Array.from({ length: need }, (_, i) =>
+            `<button type="button" class="bo-pip" data-i="${i}" title="Set games won to ${i + 1}"></button>`).join('');
+        }
+        bo.dataset.won = String(won);
+        [].forEach.call(bo.children, (pip, i) => pip.classList.toggle('won', i < won));
+      }
       const players = Array.isArray((sm[side] || {}).players) ? sm[side].players : [];
       const total = players.reduce((a, n) => a + Math.max(0, Number(n) || 0), 0);
-      const tot = el('smash-crew-total-' + side); if (tot) tot.textContent = String(total);
+      // Show the pooled countdown the crew board renders: remaining out of what the crew STARTED
+      // with (players x start stocks), so the panel and the overlay read the same.
+      const pool = (players.length || Number(sm.crewSize) || 4) * start;
+      const tot = el('smash-crew-total-' + side);
+      if (tot) tot.innerHTML = String(total) + ' <span class="msp-hint">/ ' + pool + '</span>';
       const wrap = el('smash-crew-' + side);
       if (wrap) {
         // Signature-gate the rebuild so clicking a pip mid-drag doesn't fight a re-render.
@@ -20330,9 +22523,31 @@ function applySmashControls(data) {
             const left = Math.max(0, Math.min(start, Number(rem) || 0));
             const pips = Array.from({ length: start }, (_, i) =>
               `<span class="smash-pip${i < left ? '' : ' lost'}" data-pi="${i}"></span>`).join('');
-            return `<div class="smash-crew-row" data-pidx="${pi}" data-stocks="${left}"><span class="smash-crew-pn">P${pi + 1}</span>${pips}</div>`;
+            return `<div class="smash-crew-row" data-pidx="${pi}" data-stocks="${left}"><span class="smash-crew-pn">P${pi + 1}</span>` +
+              `<span class="smash-crew-name" data-cname="${pi}"></span>${pips}` +
+              `<img class="smash-crew-face is-empty" data-cface="${pi}" alt="">` +
+              `<input type="text" class="input-text smash-crew-char smash-char-input" data-cchar="${pi}" placeholder="Fighter" readonly></div>`;
           }).join('');
         }
+        // Values live outside the sig-gated rebuild above: the signature only covers stocks and
+        // crew size, so re-asserting here keeps a typed fighter visible across every state push.
+        // Who is actually competing in each slot — the crew rows only ever showed "P1"/"P2" and a
+        // fighter, so the producer couldn't tell which of the team's players was up.
+        const roster = Array.isArray(t.players) ? t.players : [];
+        wrap.querySelectorAll('.smash-crew-name').forEach((el2) => {
+          const pi = parseInt(el2.dataset.cname, 10);
+          const rp = roster[pi] || null;
+          const nm = rp ? String(rp.gamertag || rp.name || '').trim() : '';
+          el2.textContent = nm || ('Player ' + (pi + 1));
+          el2.classList.toggle('is-empty', !nm);
+          el2.title = nm ? nm : 'No player in this slot — add one to the team roster';
+        });
+        const chars = Array.isArray((sm[side] || {}).characters) ? sm[side].characters : [];
+        wrap.querySelectorAll('.smash-crew-char').forEach((inp) => {
+          const pi = parseInt(inp.dataset.cchar, 10);
+          if (document.activeElement !== inp) inp.value = chars[pi] || '';
+          smashSetThumb(wrap.querySelector(`[data-cface="${pi}"]`), inp.value);
+        });
       }
     });
   }
@@ -20446,18 +22661,29 @@ function applyRlSceneAuto(data) {
   const pEn = el('chk-rl-postgame'); if (pEn) pEn.checked = !!pg.enabled;
   const pd = el('inp-rl-postgame-delay'); if (pd && document.activeElement !== pd) pd.value = pg.delaySec || 20;
   const hEn = el('chk-rl-hide-ui'); if (hEn && document.activeElement !== hEn) hEn.checked = !!(data && data.rlHudHidden);
-  const soEn = el('chk-rl-spec-outline'); if (soEn && document.activeElement !== soEn) soEn.checked = (data && data.rlSpecOutline) !== false;
+  const rtEn = el('chk-rl-replay-transitions'); if (rtEn && document.activeElement !== rtEn) rtEn.checked = (data && data.rlReplayTransitions) !== false;
   setRlSbLocSeg(!!(data && data.rlScoreboardSeparate));
-  const as = (data && data.autoSpectate) || {};
-  const asEn = el('chk-autospec-enabled'); if (asEn && document.activeElement !== asEn) asEn.checked = !!as.enabled;
-  const asDb = el('inp-autospec-debounce'); if (asDb && document.activeElement !== asDb) asDb.value = as.debounceMs || 1500;
-  // Confirm it's actually firing once it's on, so "is this working?" is answerable at a glance.
-  const asHint = el('autospec-hint');
-  if (asHint) {
-    if (!asHint.dataset.def) asHint.dataset.def = asHint.textContent;
-    asHint.textContent = (as.enabled && as.lastPlayer)
-      ? `Last switch: ${as.lastPlayer} (key "${as.lastKey}")`
-      : asHint.dataset.def;
+  // RL auto-spectate + first-kickoff camera reflection REMOVED 2026-08 (the camera automation is gone).
+  // Live-match pause button: label + data-state track the true pause state (which the
+  // MatchPaused/Unpaused events confirm), and the button is inert unless RL is connected.
+  // querySelectorAll, not el(): the scorecard is rendered twice (Dashboard + Teams tab), so there
+  // are two live copies of this button and both have to track the same state.
+  {
+    const paused = !!(data && data.rlPaused);
+    const connected = !!(data && data.rlConnected);
+    const isRl = !!(data && data.activeGame === 'rocket-league');
+    document.querySelectorAll('.js-rl-pause').forEach((btn) => {
+      btn.dataset.paused = paused ? '1' : '0';
+      btn.textContent = paused ? 'Resume match' : 'Pause match';
+      btn.classList.toggle('btn-danger', paused);
+      btn.disabled = !connected;
+      btn.title = connected ? 'Pauses / resumes the live game via SetMatchPaused'
+                            : 'Connect the Rocket League Stats API to pause/resume';
+      // The whole row goes away for other games rather than sitting there dead — SetMatchPaused
+      // is a Rocket League Stats API call and means nothing on a Smash or FGC board.
+      const row = btn.closest('.sc-live-ctl');
+      if (row) row.style.display = isRl ? '' : 'none';
+    });
   }
   const ss = (data && data.rlStatsScreen) || {};
   const ssShow = el('chk-rl-stats-show'); if (ssShow && document.activeElement !== ssShow) ssShow.checked = ss.showStats !== false;
@@ -20576,8 +22802,6 @@ function applyObsState(data) {
 
   const cbReplay = el('check-obs-autoreplay');
   if (cbReplay) cbReplay.checked = !!obs.autoReplayOnGoal;
-  const cbKitSwitch = el('check-obs-allow-kit-switch');
-  if (cbKitSwitch && document.activeElement !== cbKitSwitch) cbKitSwitch.checked = !!obs.allowKitObsSwitch;
   const cbComm = el('check-commercial-auto-return');
   if (cbComm) cbComm.checked = obs.commercialAutoReturn !== false;
   const pgc = el('input-obs-postgame-casters');
@@ -20706,7 +22930,7 @@ document.querySelectorAll('#switcher-target-seg .seg-btn').forEach((b) => b.addE
 // To restore: add 'chatgames' back here, re-add the panels/titles entries below, and
 // un-comment the subnav button + store card in index.html (the #integration-chatgames panel
 // itself was left in place, just orphaned).
-const INT_TABS = ['store', 'switcher', 'streamdeck', 'cameras', 'games', 'tournaments', 'twitch'];
+const INT_TABS = ['store', 'switcher', 'streamdeck', 'cameras', 'tournaments', 'twitch', 'developers'];   // 'games' moved to Settings ▸ Games
 let _intTab = 'store';
 function _intShowTab(which) {
   _intTab = INT_TABS.includes(which) ? which : 'store';
@@ -20716,9 +22940,9 @@ function _intShowTab(which) {
     switcher: [el('integration-obs')],
     streamdeck: [el('integration-streamdeck')],
     cameras: [el('integration-vdo')],
-    games: [el('integration-games')],
     tournaments: [el('integration-startgg')],
-    twitch: [el('integration-twitch'), el('integration-twitchgames')]
+    twitch: [el('integration-twitch')],   // Games & Features (#integration-twitchgames) moved to Settings ▸ Features
+    developers: [el('integration-developers')]
     // chatgames: [el('integration-chatgames')]   — parked, see INT_TABS above
   };
   Object.entries(panels).forEach(([key, els]) => els.forEach((p) => { if (p) p.style.display = key === _intTab ? '' : 'none'; }));
@@ -20731,7 +22955,8 @@ function _intShowTab(which) {
   if (backbar) {
     backbar.style.display = _intTab === 'store' ? 'none' : 'flex';
     const titles = { switcher: 'Video Switcher', cameras: 'Cameras', streamdeck: 'Elgato Stream Deck',
-      games: 'Games & GSI', tournaments: 'Tournament Platforms', twitch: 'Twitch' };
+      games: 'Games & GSI', tournaments: 'Tournament Platforms', twitch: 'Twitch',
+      developers: 'Developers — Build your own overlays' };
     const t = el('int-backbar-title');
     if (t) t.textContent = (typeof INT_APP_NAMES !== 'undefined' && INT_APP_NAMES[_intAppFilter]) || titles[_intTab] || '';
   }
@@ -20754,7 +22979,7 @@ el('int-back')?.addEventListener('click', () => { _intAppFilter = ''; _intShowTa
 // JUST that app's section so start.gg never shows Challonge's settings, etc.
 let _intAppFilter = '';
 const INT_APP_NAMES = { obs: 'OBS Studio', vmix: 'vMix', twitch: 'Twitch', startgg: 'start.gg',
-  challonge: 'Challonge', nxgen: 'NXGEN', vdo: 'VDO.Ninja', rl: 'Rocket League',
+  challonge: 'Challonge', nxgen: 'NXGEN', faceit: 'FACEIT', vdo: 'VDO.Ninja', rl: 'Rocket League',
   cs2: 'Counter-Strike 2', valorant: 'Valorant', lol: 'League of Legends' };
 function _intApplyAppFilter() {
   // One app = one titled <section class="section"> inside its shared panel.
@@ -20762,6 +22987,7 @@ function _intApplyAppFilter() {
     startgg:   { panel: 'integration-startgg', title: /^start\.gg/i },
     challonge: { panel: 'integration-startgg', title: /^challonge/i },
     nxgen:     { panel: 'integration-startgg', title: /^nxgen/i },
+    faceit:    { panel: 'integration-startgg', title: /^faceit/i },
     obs:       { panel: 'integration-obs', title: /^obs/i },
     vmix:      { panel: 'integration-obs', title: /^vmix/i },
   };
@@ -20785,7 +23011,17 @@ function _intApplyAppFilter() {
 }
 document.querySelectorAll('#int-store-grid .int-card').forEach((card) => {
   card.addEventListener('click', () => {
-    _intAppFilter = card.dataset.card || '';
+    const cardKey = card.dataset.card || '';
+    // The per-game setup panel moved to Settings ▸ Games — game cards deep-link there and select the
+    // game. Don't set _intAppFilter here (it would later hide the game selector in the settings panel).
+    if (card.dataset.goto === 'games') {
+      if (typeof openSettings === 'function') openSettings('games');
+      const gm = { cs2: 'cs2', rl: 'rl', lol: 'league', valorant: 'valorant' };
+      const g = gm[cardKey];
+      if (g) setTimeout(() => document.querySelector('#integration-games .game-tab-btn[data-game="' + g + '"]')?.click(), 50);
+      return;
+    }
+    _intAppFilter = cardKey;
     _intShowTab(card.dataset.goto);
     const target = card.dataset.scroll && el(card.dataset.scroll);
     if (target) setTimeout(() => target.scrollIntoView({ behavior: 'smooth', block: 'start' }), 60);
@@ -20801,6 +23037,7 @@ function renderIntegrationStore(data) {
   };
   const obs = data.obs || {}, vmix = data.vmix || {}, tw = data.twitch || {};
   const sgg = data.startgg || {}, ch = data.challonge || {}, nx = data.nxgen || {};
+  const fc = data.faceit || {};
   const sh = data.sheets || {};
   let on = 0;
   on += set('obs',   !obs.enabled ? 'off' : obs.connected ? 'on' : 'warn',
@@ -20813,6 +23050,8 @@ function renderIntegrationStore(data) {
                          ch.hasKey ? (ch.connected ? 'Connected' : 'Key saved') : 'No key') ? 1 : 0;
   on += set('nxgen', nx.hasKey ? (nx.connected ? 'on' : 'warn') : 'off',
                      nx.hasKey ? (nx.connected ? 'Connected' : 'Key saved') : 'No key') ? 1 : 0;
+  on += set('faceit', fc.hasKey ? (fc.connected ? 'on' : 'warn') : 'off',
+                      fc.hasKey ? (fc.connected ? 'Connected' : 'Key saved') : 'No key') ? 1 : 0;
   on += set('sheets', sh.hasKey ? (sh.connected ? 'on' : 'warn') : 'off',
                       sh.hasKey ? (sh.connected ? 'Connected' : 'Key saved') : 'No key') ? 1 : 0;
   on += set('rl',  data.rlConnected ? 'on' : 'off', data.rlConnected ? 'Connected' : 'Waiting for game') ? 1 : 0;
@@ -20823,7 +23062,7 @@ function renderIntegrationStore(data) {
   const sdStatus = el('streamdeck-conn-status');
   if (sdStatus) sdStatus.textContent = sd ? 'Plugin connected — keys are live.' : 'Plugin not connected.';
   const count = el('int-strip-count');
-  if (count) count.textContent = on + ' of 10';
+  if (count) count.textContent = on + ' of 11';
 }
 
 function applyVmixState(data) {
@@ -21193,8 +23432,10 @@ function refreshStagingImportedFlags() {
 function renderStagingList() {
   const list = el('rp-staging-list');
   if (!list) return;
-  const q = _stagingFilter.toLowerCase();
-  const files = q ? _stagingFiles.filter(f => f.name.toLowerCase().includes(q)) : _stagingFiles;
+  const q = _stagingFilter.trim();
+  // Subfolder path searchable too — OBS drops replays into dated folders and the producer often
+  // remembers the day, not the auto-generated filename.
+  const files = NESearch.filter(_stagingFiles, q, (f) => [{ text: f.name, weight: 2 }, f.path]);
 
   // Skip the rebuild (which reloads every thumbnail → a visible flash) when nothing relevant
   // changed. applyClipsState() calls this on every state broadcast, so without this the side
@@ -23272,17 +25513,62 @@ function onairSaveOrder() { try { localStorage.setItem(ONAIR_ORDER_KEY, JSON.str
 let _onairOrder = onairLoadOrder();
 let _onairEdit = false;
 
+// Which scene editor a board card opens. The board list and the left scene picker are NOT the
+// same set — the picker owns 'preshow' (Desk Show), which has no on-air card, and the board owns
+// casters/watchlist/teamspot/banner, which are pure toggles edited elsewhere (Talent, Brands).
+// So this resolves against the picker's real buttons at call time: a card is click-to-edit only
+// when a matching editor actually exists, and a newly-added editor becomes clickable for free.
+const GFX_BOARD_EDIT_ALIAS = { upcoming: 'schedule' };   // the two lists spell this one differently
+function gfxBoardEditorKey(key) {
+  const want = GFX_BOARD_EDIT_ALIAS[key] || key;
+  return document.querySelector('.gfx-sidenav-btn[data-gfxscene="' + want + '"]') ? want : null;
+}
+
+// The live-only strip above the board. Signature-guarded so it only touches the DOM when the set
+// of live graphics actually changes (this runs on every state broadcast).
+function renderGraphicsLiveNow(ordered) {
+  const host = el('gfx-live-now'); if (!host) return;
+  const live = ordered.filter((s) => onairIsOn(s, currentState));
+  const sig = live.map((s) => s.key).join(',');
+  if (host.dataset.sig === sig) return;
+  host.dataset.sig = sig;
+  if (!live.length) {
+    host.className = 'gfx-live-now is-empty';
+    host.innerHTML = '<span class="gfx-live-now-empty">Nothing on air</span>';
+    return;
+  }
+  host.className = 'gfx-live-now';
+  host.innerHTML = '<span class="gfx-live-now-label">On air<span class="gfx-live-now-count">' + live.length + '</span></span>'
+    + live.map((s) => '<span class="gfx-live-chip">'
+        + '<span class="gfx-live-chip-dot"></span>'
+        + '<span class="gfx-live-chip-name">' + dEsc(s.label) + '</span>'
+        + '<button type="button" class="gfx-live-chip-hide" data-livehide="' + s.key + '" title="Take ' + dEsc(s.label) + ' off air">Hide</button>'
+      + '</span>').join('');
+}
+el('gfx-live-now')?.addEventListener('click', (e) => {
+  const key = e.target.closest('[data-livehide]')?.dataset.livehide; if (!key) return;
+  const s = (window.ONAIR_SCENES || []).find((x) => x.key === key); if (!s) return;
+  onairPut(s, true);   // it's in this strip because it IS live → this takes it off air
+});
+
 function renderGraphicsBoard() {
   const wrap = el('prod-graphics-board'); if (!wrap) return;
   const byKey = {}; (window.ONAIR_SCENES || []).forEach((s) => { byKey[s.key] = s; });
   const ordered = _onairOrder.map((k) => byKey[k]).filter(Boolean);
+  renderGraphicsLiveNow(ordered);
   wrap.classList.toggle('gfx-board-editing', _onairEdit);
   // Only rebuild the DOM when the order or edit mode actually changes — avoids wiping toggle
   // button state/animations on every unrelated state broadcast.
   const sig = ordered.map((s) => s.key).join(',') + '|' + _onairEdit;
   if (wrap.dataset.sig !== sig) {
     wrap.dataset.sig = sig;
-    wrap.innerHTML = ordered.map((s) => `<div class="gfx-card" data-key="${s.key}"${_onairEdit ? ' draggable="true"' : ''}><span class="gfx-dot"></span><span class="gfx-name">${dEsc(s.label)}</span><button class="btn btn-secondary btn-xs gfx-toggle" id="gfx-bt-${s.key}">Show</button></div>`).join('');
+    wrap.innerHTML = ordered.map((s) => {
+      const editable = !_onairEdit && gfxBoardEditorKey(s.key);
+      return `<div class="gfx-card${editable ? ' gfx-card-editable' : ''}" data-key="${s.key}"${_onairEdit ? ' draggable="true"' : ''}`
+        + `${editable ? ` title="Edit ${dEsc(s.label)}"` : ''}>`
+        + `<span class="gfx-dot"></span><span class="gfx-name">${dEsc(s.label)}</span>`
+        + `<button class="btn btn-secondary btn-xs gfx-toggle" id="gfx-bt-${s.key}">Show</button></div>`;
+    }).join('');
   }
   ordered.forEach((s) => {
     const on = onairIsOn(s, currentState);
@@ -23293,10 +25579,14 @@ function renderGraphicsBoard() {
 }
 el('prod-graphics-board')?.addEventListener('click', (e) => {
   if (_onairEdit) return;   // reorder mode — drag only, toggle buttons are inert (see CSS)
-  const btn = e.target.closest('.gfx-toggle'); if (!btn) return;
-  const key = btn.closest('.gfx-card')?.dataset.key;
+  const card = e.target.closest('.gfx-card'); if (!card) return;
+  const key = card.dataset.key;
   const s = (window.ONAIR_SCENES || []).find((x) => x.key === key); if (!s) return;
-  onairPut(s, onairIsOn(s, currentState));
+  // The Show/Hide button keeps doing exactly what it did; clicking the REST of the card now
+  // jumps to that graphic's editor, so the card is both the on-air control and the way in.
+  if (e.target.closest('.gfx-toggle')) { onairPut(s, onairIsOn(s, currentState)); return; }
+  const ed = gfxBoardEditorKey(key);
+  if (ed && typeof window._gfxCfgShow === 'function') window._gfxCfgShow(ed);
 });
 // Reorder mode — drag-and-drop, mirrors the Deck grid's edit/drag pattern.
 el('onair-edit-toggle')?.addEventListener('click', function () {
@@ -24419,6 +26709,7 @@ function renderFlows() {
 
     const card = document.createElement('div');
     card.className = 'flow-card' + (isOn ? '' : ' flow-card-off');
+    card.dataset.name = f.name || '';
     card.dataset.search = [
       f.name, f.notes,
       ...triggers.map(t => FLOW_TRIG_LABEL[t.type] || t.type),
@@ -24465,13 +26756,12 @@ function renderFlows() {
 // Keyword filter over the rendered flow cards (pure show/hide, mirrors applyTeamsFilter).
 function applyFlowsFilter() {
   const list = el('flow-list'); if (!list) return;
-  const q = (el('flow-search')?.value || '').trim().toLowerCase();
+  const q = (el('flow-search')?.value || '').trim();
   const cards = list.querySelectorAll('.flow-card');
-  let shown = 0;
-  cards.forEach((card) => {
-    const m = !q || (card.dataset.search || '').includes(q);
-    card.style.display = m ? '' : 'none'; if (m) shown++;
-  });
+  // Name weighted above the trigger/action vocabulary, so searching "winner" finds the flow called
+  // Winner before every flow that merely fires the winner graphic.
+  const { shown } = NESearch.rankNodes(cards, q,
+    (c) => [{ text: c.dataset.name || '', weight: 2 }, { text: c.dataset.search || '', bag: true }]);
   const empty = el('flow-search-empty');
   if (empty) empty.style.display = (q && cards.length && shown === 0) ? '' : 'none';
 }
@@ -26018,8 +28308,10 @@ function renderQrailStartgg(data) {
   queue.forEach((item) => {
     const isLive = item.live && item.state !== 3;
     const isDone = item.state === 3;
-    const badge = isLive ? 'LIVE' : isDone ? 'DONE' : 'NEXT';
-    const badgeCls = isLive ? 'live' : isDone ? 'done' : 'next';
+    // Cued up at the head of the stream queue but not called on start.gg — "ON DECK", not LIVE.
+    const isOnDeck = !isLive && !isDone && item.onStream;
+    const badge = isLive ? 'LIVE' : isDone ? 'DONE' : isOnDeck ? 'ON DECK' : 'NEXT';
+    const badgeCls = isLive ? 'live' : isDone ? 'done' : isOnDeck ? 'ondeck' : 'next';
     const hasScore = item.scoreA != null && item.scoreB != null;
     const scoreText = hasScore ? (item.scoreA + ' – ' + item.scoreB) : 'vs';
     const isPushed = lastPushed && String(lastPushed) === String(item.setId);
@@ -26030,7 +28322,7 @@ function renderQrailStartgg(data) {
       : '';
 
     const row = document.createElement('div');
-    row.className = 'qsgg-row' + (isLive ? ' is-live' : '') + (isDone ? ' is-done' : '');
+    row.className = 'qsgg-row' + (isLive ? ' is-live' : '') + (isOnDeck ? ' is-ondeck' : '') + (isDone ? ' is-done' : '');
     row.innerHTML = [
       '<div class="qsgg-top">',
         '<span class="qsgg-badge ' + badgeCls + '">' + badge + '</span>',
@@ -27383,9 +29675,8 @@ el('rp-mon-pgm')?.addEventListener('timeupdate', function () {
   const dur = this.duration || 0;
   showReplayCountdown(Math.max(0, dur - (this.currentTime || 0)));
 });
-el('rp-settings-toggle')?.addEventListener('click', () => { const m = el('rp-capture-modal'); if (m) m.style.display = 'flex'; });
-el('rp-capture-close')?.addEventListener('click', () => { const m = el('rp-capture-modal'); if (m) m.style.display = 'none'; });
-el('rp-capture-modal')?.addEventListener('click', (e) => { if (e.target === el('rp-capture-modal')) el('rp-capture-modal').style.display = 'none'; });
+// Video Editor settings moved to Settings ▸ Replays — the gear now deep-links there (modal removed).
+el('rp-settings-toggle')?.addEventListener('click', () => { if (typeof openSettings === 'function') openSettings('replays'); });
 
 // ── REPLAYS: playlist actions ──────────────────────────────────────────────
 el('rp-save-playlist')?.addEventListener('click', async () => {
@@ -28922,6 +31213,22 @@ async function connect() {
       if (typeof cfApplyStationsFull === 'function') cfApplyStationsFull(msg.data);
     } else if (msg.type === 'cloud_leagues') {
       if (typeof lgRenderCloudList === 'function') lgRenderCloudList((msg.data && msg.data.ok && Array.isArray(msg.data.leagues)) ? msg.data.leagues : []);
+    } else if (msg.type === 'shift-result') {
+      // Show Deck handover feedback. `uncredited` matters: a desk name with no matching Crew
+      // record can't be credited, and silently dropping them is exactly how someone goes missing
+      // from the end-of-stream credits.
+      const d = msg.data || {};
+      if (!d.ok) { showToast(d.message || 'Shift change failed.', '#fbbf24'); }
+      else if (d.restored) { showToast('Previous shift restored to the desk.', '#22c55e'); }
+      else {
+        const bits = [];
+        if ((d.moved || []).length) bits.push(d.moved.length + ' moved to off-air staff');
+        if (d.seated) bits.push('desk loaded with "' + d.seated + '"');
+        showToast(bits.length ? 'Shift handed over — ' + bits.join(', ') + '.' : 'Shift handed over.', '#22c55e');
+        if ((d.uncredited || []).length) {
+          showToast('Not on the credits screen (no Crew profile): ' + d.uncredited.join(', ') + ' — add them via + Add Crew.', '#fbbf24', 6000);
+        }
+      }
     } else if (msg.type === 'startgg-result') {
       ['startgg-result', 'sgg-status'].forEach((id) => {
         const r = el(id);
@@ -28972,6 +31279,8 @@ async function connect() {
       if (typeof window._handleChallongeResult === 'function') window._handleChallongeResult(msg.data);
     } else if (msg.type === 'nxgen-result') {
       if (typeof window._handleNxgenResult === 'function') window._handleNxgenResult(msg.data);
+    } else if (msg.type === 'faceit-result') {
+      if (typeof window._handleFaceitResult === 'function') window._handleFaceitResult(msg.data);
     } else if (msg.type === 'ballchasing-result') {
       // Two independent result boxes can show this — the Settings panel's connection test, and a
       // specific league's Ballchasing tab (Enable/Upload/Refresh) — update whichever is present.
@@ -29015,31 +31324,17 @@ async function connect() {
     } else if (msg.type === 'vmix-result') {
       const elx = el('vmix-result');
       if (elx) { elx.textContent = msg.data.message || ''; elx.style.color = msg.data.ok ? '#9ae6b4' : '#f56565'; }
-    } else if (msg.type === 'switcher-screenshot') {
-      const d = msg.data || {};
-      if (typeof _swShotFinish !== 'undefined' && _swShotFinish[d.name]) _swShotFinish[d.name]();   // free the pipe slot
-      if (d.ok && d.img && typeof currentState !== 'undefined') {
-        const srcs = (typeof swSources === 'function') ? swSources(currentState) : [];
-        const prog = srcs.find((s) => s.isProgram), prev = srcs.find((s) => s.isPreview);
-        if (prog && prog.id === d.name) _swScreenImg('sw-prog-screen', d.img);
-        if (prev && prev.id === d.name) _swScreenImg('sw-prev-screen', d.img);
-        const t = Array.from(document.querySelectorAll('#sw-grid .sw-tile')).find((x) => x.dataset.id === d.name);
-        if (t) { let im = t.querySelector('img'); if (!im) { im = document.createElement('img'); t.insertBefore(im, t.firstChild); } _swFadeSwapImg(im, _swSrc(d.img)); }
-      }
-    } else if (msg.type === 'switcher-audio') {
-      _swObsAudio = (msg.data && msg.data.sources) || [];
-      if (_swWatch && typeof renderSwMixer === 'function' && currentState) renderSwMixer(currentState, swBackend(currentState));
-    } else if (msg.type === 'vmix-meters') {
-      const wrap = el('sw-mixer');
-      if (wrap) (msg.data && msg.data.levels || []).forEach((lv) => {
-        let ch = null; wrap.querySelectorAll('.sw-ch').forEach((x) => { if (x.dataset.id === String(lv.n)) ch = x; });
-        const bar = ch && ch.querySelector('.sw-ch-meter > span');
-        if (bar) bar.style.width = Math.round(Math.min(1, lv.m || 0) * 100) + '%';
-      });
     } else if (msg.type === 'autofollow-pushed') {
       showToast(msg.data.message || 'Auto-follow updated the match.', '#8b5cf6', 6000);
     } else if (msg.type === 'obs-ensure-result') {
       showToast(msg.data.message || (msg.data.ok ? 'Added to OBS.' : 'OBS error'), msg.data.ok ? '#22c55e' : '#c53030', 6000);
+      // The BR overlay pack shows the outcome inline too — a toast disappears, and "did the
+      // scene build work" is something a producer re-checks while setting up.
+      const packSt = el('mlb-pack-status');
+      if (packSt && packSt.textContent) {
+        packSt.textContent = msg.data.message || '';
+        packSt.style.color = msg.data.ok ? 'var(--good,#48bb78)' : 'var(--danger-2,#f56565)';
+      }
     } else if (msg.type === 'obs-transition-info') {
       // The selected OBS transition, as OBS describes it. A stinger's own video is served back to
       // the player (see /api/obs/transition-stinger) so clip-to-clip runs the same sting.
@@ -29073,22 +31368,6 @@ async function connect() {
       showToast('Twitch session expired — reconnect in Integrations → Twitch to resume alerts, chat and stream stats.', '#c53030', 12000);
       const tw = el('twitch-test-result');
       if (tw) { tw.textContent = 'Token expired — sign in with Twitch again to reconnect.'; tw.style.color = '#f56565'; }
-    } else if (msg.type === 'rl-ui-result') {
-      const st = el('rl-ui-hide-status');
-      if (st) {
-        st.textContent = (msg.data.auto ? 'Auto: ' : '') + (msg.data.message || '');
-        st.style.color = msg.data.ok ? '#9ae6b4' : '#f56565';
-      }
-      // Auto presses happen while the producer is watching the show, not the Settings page —
-      // surface the outcome as a toast so a silent failure is never silent again. (The server only
-      // reports the FINAL auto result: one success, or one give-up after its retry window — plus
-      // one 'scheduled' notice when the spectate trigger latches, so trigger vs press is testable.)
-      if (msg.data.auto) {
-        if (msg.data.scheduled) showToast('Spectate detected — hiding the Rocket League UI…', undefined, 4000);
-        else showToast(msg.data.ok ? 'Rocket League native UI hidden automatically.'
-          : ('RL auto-hide could not press the key: ' + (msg.data.message || 'unknown') + ' — use Hide native UI now or the hotkey.'),
-          msg.data.ok ? undefined : '#c53030', msg.data.ok ? 5000 : 12000);
-      }
     } else if (msg.type === 'rl-scene-result') {
       const st = el('rl-scene-auto-status');
       if (st) {
@@ -29100,6 +31379,16 @@ async function connect() {
       if (msg.data.notify && msg.data.message && typeof addNotification === 'function') {
         try { addNotification(msg.data.message, '#f56565', { title: 'RL scene automation' }); } catch (_) {}
       }
+    } else if (msg.type === 'bracket-progress') {
+      // Phase-by-phase feedback during a big import (RLCS-scale events run for minutes). Written
+      // to every status line the producer might be watching; total 0 means finished/idle.
+      const p = msg.data || {};
+      const line = p.total ? `Importing bracket — phase ${p.done}/${p.total}${p.phase ? ': ' + p.phase : ''}…` : '';
+      [el('bracket-status'), el('ev-load-status'), el('ev-status')].forEach((s) => {
+        if (!s) return;
+        if (line) { s.textContent = line; s.style.color = 'var(--muted)'; s.dataset.bkProgress = '1'; }
+        else if (s.dataset.bkProgress) { delete s.dataset.bkProgress; }   // leave the final result in place
+      });
     } else if (msg.type === 'bracket-result' || msg.type === 'event-result') {
       const resultEl = el('bracket-status');
       if (resultEl) {
@@ -29119,10 +31408,13 @@ async function connect() {
         lgRender();
       }
       // Dashboard "Load Event" flow: show a picker, success, or error inline.
+      // `pending` is the server's immediate ack — the import is running, not finished. It only
+      // disarms the watchdog and swaps the status line to "working"; the real result follows.
       if (_evLoadTimer) { clearTimeout(_evLoadTimer); _evLoadTimer = null; }
       if (typeof evLoadStatus === 'function') {
-        evLoadStatus(msg.data.message || '', msg.data.ok ? '#9ae6b4' : '#f56565');
+        evLoadStatus(msg.data.message || '', msg.data.pending ? '' : (msg.data.ok ? '#9ae6b4' : '#f56565'));
       }
+      if (msg.data.pending) return;   // don't touch the pickers yet — nothing has resolved
       if (msg.data.needsEventPick) {
         // Render the picker BOTH on the Dashboard and inline in the Brackets tab, so it's visible
         // wherever you started the load — no tab-hop required.
@@ -29140,6 +31432,15 @@ async function connect() {
             bkPicker.style.display = 'none'; bkPicker.innerHTML = '';
           }
         }
+      }
+    } else if (msg.type === 'liquipedia-result') {
+      const r = el('liquipedia-result');
+      if (r) {
+        r.textContent = msg.data.message || '';
+        r.style.color = msg.data.ok ? '#9ae6b4' : '#f56565';
+        // Mark as fresh so a state broadcast's lastError doesn't immediately overwrite the reply.
+        r.dataset.fresh = '1';
+        setTimeout(() => { delete r.dataset.fresh; }, 6000);
       }
     } else if (msg.type === 'csgo-result') {
       const resultEl = el('csgo-result');
@@ -30948,8 +33249,8 @@ window.mountTeamTypeahead = function mountTeamTypeahead(input) {
     return out;
   };
   const render = () => {
-    const q = input.value.trim().toLowerCase();
-    const list = teams().filter((o) => !q || o.name.toLowerCase().includes(q)).slice(0, 40);
+    const q = input.value.trim();
+    const list = NESearch.filter(teams(), q, (o) => [o.name], { limit: 40 }).slice(0, 40);
     if (!list.length) { dd.style.display = 'none'; return; }
     dd.innerHTML = list.map((o) => `<div class="team-logo-item" data-name="${e2(o.name)}">`
       + (o.logo ? `<img src="${e2(o.logo)}" alt="" onerror="this.style.display='none'">` : '<span class="team-logo-ph"></span>')
@@ -30970,6 +33271,213 @@ window.mountTeamTypeahead = function mountTeamTypeahead(input) {
 // Schedule add-match team fields (front card + pop-out manual/team tabs) — show logos while searching.
 ['gfx-sch-add-a', 'gfx-sch-add-b', 'gfx-sch-fa', 'gfx-sch-fb', 'gfx-sch-team-name'].forEach((id) => { const i = el(id); if (i) window.mountTeamTypeahead(i); });
 
+// ── Crew search dropdown ─────────────────────────────────────────────────────
+// The Show Deck slots used a native <datalist>, which Chromium renders as an unstyled,
+// unsorted, bold system popup that spills over the panel (and lists crew in whatever order
+// the roster happens to be in). This is the same typeahead pattern as the team picker: our
+// own dropdown, always A–Z, with the group colour + role so two people with similar handles
+// are still tellable apart. The <input> stays the value holder so every existing
+// change-handler / .value read keeps working.
+window.CREW_GROUP_LABEL = { casters: 'Caster', hosts: 'Host', guests: 'Guest', observers: 'Observer', producer: 'Producer', admin: 'Tournament Admin', socials: 'Social Media' };
+window.CREW_GROUP_COLOR = { casters: '#e83a8b', hosts: '#a855f7', guests: '#3b82f6', observers: '#2dd4bf', producer: '#f59e0b', admin: '#ef4444', socials: '#22c55e' };
+// A–Z by the name actually shown in the field (gamertag-first, same as the desk), case- and
+// number-aware so "Caster 2" sorts after "Caster 1" rather than lexically.
+window.crewSortAZ = function crewSortAZ(list) {
+  const disp = (c) => (c && (c.handle || c.name)) || '';
+  return (list || []).slice().sort((a, b) => disp(a).localeCompare(disp(b), undefined, { sensitivity: 'base', numeric: true }));
+};
+window.mountCrewTypeahead = function mountCrewTypeahead(input, getCrew) {
+  if (!input || input.dataset.ctMounted) return;
+  input.dataset.ctMounted = '1';
+  input.removeAttribute('list');          // drop the native (unstyled, unsorted) datalist
+  input.setAttribute('autocomplete', 'off');
+  const wrap = document.createElement('span');
+  wrap.className = 'crew-ta-wrap';
+  // The wrapper takes the input's place in its parent's layout, so any inline sizing has to move
+  // with it — otherwise a `flex:1 1 100%` search box collapses the moment it's wrapped.
+  ['flex', 'minWidth', 'maxWidth'].forEach((k) => { if (input.style[k]) { wrap.style[k] = input.style[k]; input.style[k] = ''; } });
+  input.parentNode.insertBefore(wrap, input);
+  wrap.appendChild(input);
+  input.style.width = '100%';
+  const dd = document.createElement('div'); dd.className = 'crew-dd'; dd.style.display = 'none';
+  wrap.appendChild(dd);
+  const e2 = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  const disp = (c) => c.handle || c.name || '';
+  let rows = [], active = -1;
+  const close = () => { dd.style.display = 'none'; active = -1; };
+  const paint = () => {
+    dd.querySelectorAll('.crew-dd-item').forEach((n, i) => n.classList.toggle('is-active', i === active));
+    const on = dd.querySelector('.crew-dd-item.is-active');
+    if (on) on.scrollIntoView({ block: 'nearest' });
+  };
+  // showAll = the field was focused/clicked (browse the whole roster); typing filters it.
+  const render = (showAll) => {
+    const all = window.crewSortAZ(typeof getCrew === 'function' ? getCrew() : []);
+    const q = input.value.trim();
+    // Ranked search re-orders by relevance while typing (that's what you want mid-search);
+    // an empty box — or a box still holding the person already in the slot — stays A–Z.
+    rows = (showAll || !q) ? all
+      : NESearch.filter(all, q, (c) => [{ text: c.name, weight: 2 }, { text: c.handle, weight: 2 }, c.role, c.country]);
+    if (!rows.length) {
+      dd.innerHTML = '<div class="crew-dd-empty">No crew match — add them on the Crew page first.</div>';
+      dd.style.display = 'block'; active = -1; return;
+    }
+    dd.innerHTML = rows.map((c, i) => {
+      const color = window.CREW_GROUP_COLOR[c.group] || '#8b93a7';
+      // Only worth a second line when it says something the big name doesn't.
+      const meta = [c.handle && c.name && c.handle !== c.name ? c.name : null,
+        c.role || window.CREW_GROUP_LABEL[c.group] || null].filter(Boolean).join(' · ');
+      return `<div class="crew-dd-item" data-i="${i}">`
+        + `<span class="crew-dd-dot" style="background:${color};"></span>`
+        + `<span class="crew-dd-txt"><span class="crew-dd-nm">${e2(disp(c))}</span>`
+        + (meta ? `<span class="crew-dd-meta">${e2(meta)}</span>` : '')
+        + '</span></div>';
+    }).join('');
+    dd.style.display = 'block';
+    active = -1;
+  };
+  const pick = (c) => {
+    if (!c) return;
+    input.value = disp(c);
+    close();
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+  };
+  input.addEventListener('focus', () => render(true));
+  input.addEventListener('click', () => { if (dd.style.display === 'none') render(true); });
+  input.addEventListener('input', () => render(false));
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      if (dd.style.display === 'none') { render(true); return; }
+      e.preventDefault();
+      if (!rows.length) return;
+      active = e.key === 'ArrowDown'
+        ? (active + 1) % rows.length
+        : (active <= 0 ? rows.length - 1 : active - 1);
+      paint();
+    } else if (e.key === 'Enter') {
+      if (dd.style.display !== 'none' && active >= 0) { e.preventDefault(); pick(rows[active]); }
+      else close();
+    } else if (e.key === 'Escape') {
+      if (dd.style.display !== 'none') { e.stopPropagation(); close(); }
+    }
+  });
+  // mousedown (not click) so the pick lands before blur tears the list down.
+  dd.addEventListener('mousedown', (e) => {
+    const it = e.target.closest('.crew-dd-item'); if (!it) return;
+    e.preventDefault();
+    pick(rows[+it.dataset.i]);
+  });
+  input.addEventListener('blur', () => setTimeout(close, 160));
+};
+// Off-air staff / support search boxes — same roster, same dropdown.
+['td-support-search', 'dcc-support-search'].forEach((id) => {
+  const i = el(id);
+  if (i) window.mountCrewTypeahead(i, () => (currentState && currentState.crew) || []);
+});
+
 // "Open full board" on the Schedule front card → the roomy pop-out with the full match list.
 el('btn-sch-front-open')?.addEventListener('click', () => { if (window._gfxOpenPopout) window._gfxOpenPopout('schedule'); });
 
+
+// ── Live-data automation for the manually-scored titles (R6 relay, Bedwars server push) ──────
+// Both auto-score toggles default OFF server-side; these just surface them. renderLiveDataPanels()
+// is called from applyState so the connection dots and readouts follow the live feed.
+el('chk-r6-autoscore')?.addEventListener('change', function () {
+  send('set_r6_settings', { autoScore: !!this.checked });
+});
+el('chk-bedwars-autoscore')?.addEventListener('change', function () {
+  send('set_bedwars_settings', { autoScore: !!this.checked });
+});
+el('btn-bedwars-token-save')?.addEventListener('click', () => {
+  // The field is ALWAYS blank after a reload (the token is never broadcast back), so a blank Save
+  // must mean "leave it alone" — not "clear it". Clearing is an explicit, confirmed action below.
+  const v = (el('input-bedwars-token')?.value || '').trim();
+  if (!v) {
+    if (typeof showToast === 'function') showToast('No change — type a token to replace it, or use Clear.', '#f59e0b');
+    return;
+  }
+  send('set_bedwars_settings', { token: v });
+  if (el('input-bedwars-token')) el('input-bedwars-token').value = '';
+  if (typeof showToast === 'function') showToast('Bedwars token saved', '#22c55e');
+});
+el('btn-bedwars-token-clear')?.addEventListener('click', async () => {
+  if (typeof appConfirm === 'function'
+      && !(await appConfirm('Remove the Bedwars token? Any local post to /api/bedwars will then be accepted.', 'Clear'))) return;
+  send('set_bedwars_settings', { clearToken: true });
+  if (el('input-bedwars-token')) el('input-bedwars-token').value = '';
+  if (typeof showToast === 'function') showToast('Bedwars token cleared', '#f59e0b');
+});
+// The endpoint hint must show an address a REMOTE Minecraft server can actually reach. The panel
+// runs from file://, where location.hostname is '' — so it cannot work this out locally and would
+// always print localhost. The server resolves its own LAN address at boot and sends it as lanHost.
+function bedwarsEndpointHint(host) {
+  const n = el('bedwars-endpoint');
+  if (n) n.textContent = 'http://' + (host || 'localhost') + ':3000/api/bedwars';
+}
+function _liveAgo(ts) {
+  if (!ts) return '';
+  const s = Math.max(0, Math.round((Date.now() - ts) / 1000));
+  return s < 5 ? 'just now' : (s < 60 ? s + 's ago' : Math.round(s / 60) + 'm ago');
+}
+// A feed is only "live" if we heard from it recently — a stale lastSeen means the observer closed
+// the game, and showing a green dot then would be a lie.
+const LIVE_STALE_MS = 45000;
+function renderLiveDataPanels(data) {
+  const esc = (v) => String(v == null ? '' : v).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+
+  // Rainbow Six
+  const r6 = (data && data.r6) || {};
+  const g = r6.gepData || null;
+  const r6Live = !!(g && g.gepConnected && (Date.now() - (g.lastSeen || 0)) < LIVE_STALE_MS);
+  const r6Dot = el('r6-conn-dot'), r6St = el('r6-conn-status');
+  if (r6Dot) r6Dot.className = 'conn-dot ' + (r6Live ? 'ok' : 'err');
+  if (r6St) {
+    r6St.textContent = r6Live
+      ? 'Relay connected — last update ' + _liveAgo(g.lastSeen) + '.'
+      : (g ? 'Relay idle — last seen ' + _liveAgo(g.lastSeen) + '.' : 'Relay not connected.');
+  }
+  const r6Box = el('r6-live-readout');
+  if (r6Box) {
+    r6Box.innerHTML = (r6Live && g)
+      ? '<strong>Live:</strong> ' + esc(g.map || 'unknown map')
+        + ' &middot; round ' + (g.round || 0)
+        + ' &middot; score ' + ((g.score && g.score.a) || 0) + '\u2013' + ((g.score && g.score.b) || 0)
+        + (g.side ? ' &middot; ' + esc(g.side) : '')
+        + ' &middot; ' + ((g.roster || []).length) + ' players'
+      : '';
+  }
+  const r6Chk = el('chk-r6-autoscore');
+  if (r6Chk && document.activeElement !== r6Chk) r6Chk.checked = !!r6.autoScore;
+
+  // Bedwars
+  const bw = (data && data.bedwars) || {};
+  const d = bw.data || null;
+  const bwLive = !!(d && d.connected && (Date.now() - (d.lastSeen || 0)) < LIVE_STALE_MS);
+  const bwDot = el('bedwars-conn-dot'), bwSt = el('bedwars-conn-status');
+  if (bwDot) bwDot.className = 'conn-dot ' + (bwLive ? 'ok' : 'err');
+  if (bwSt) {
+    bwSt.textContent = bwLive
+      ? 'Server connected — last update ' + _liveAgo(d.lastSeen) + '.'
+      : (d ? 'Server idle — last seen ' + _liveAgo(d.lastSeen) + '.' : 'No server data received yet.');
+  }
+  const bwBox = el('bedwars-live-readout');
+  if (bwBox) {
+    bwBox.innerHTML = (bwLive && d && (d.teams || []).length)
+      ? '<strong>Teams:</strong> ' + d.teams.map((t) =>
+          esc(t.name || t.key) + ' ' + (t.eliminated ? '(out)' : (t.bedAlive ? '\u2014 bed intact' : '\u2014 bed broken'))
+        ).join(' &middot; ')
+      : '';
+  }
+  bedwarsEndpointHint(data && data.lanHost);
+  const bwChk = el('chk-bedwars-autoscore');
+  if (bwChk && document.activeElement !== bwChk) bwChk.checked = !!bw.autoScore;
+  // The token itself is never broadcast (it would reach every OBS browser source) — only hasToken.
+  // So the field shows whether one is set, not what it is; typing a new value replaces it.
+  const bwTok = el('input-bedwars-token');
+  if (bwTok && document.activeElement !== bwTok) {
+    bwTok.placeholder = bw.hasToken ? 'Token set — type to replace' : 'optional — blank accepts any local post';
+    if (bw.hasToken && !bwTok.value) bwTok.value = '';
+  }
+}
+bedwarsEndpointHint();   // placeholder until the first state broadcast supplies lanHost

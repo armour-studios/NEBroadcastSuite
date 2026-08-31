@@ -141,7 +141,9 @@
       [['1', 'blue', 'a'], ['2', 'orange', 'b']].forEach(([idx, side, ab]) => {
         const t = SceneBase.teamSide(data, side);
         SceneBase.applyTeamLogo(el('teamlogo' + idx), t.customLogo, t.logo);
-        el('teamname' + idx).textContent = (t.name || (ab === 'b' ? 'ORANGE' : 'BLUE')).toUpperCase();
+        // Head-to-head games (Smash singles, the FGC titles) print the COMPETITOR here, with their
+        // org on a second line — the team record on those is just the entrant. See SceneBase.
+        SceneBase.applyNamePlate(el('teamname' + idx), t, ab === 'b' ? 'ORANGE' : 'BLUE');
         el('teamscore' + idx).textContent = t.series != null ? t.series : 0;
         document.documentElement.style.setProperty(ab === 'b' ? '--team-b' : '--team-a', t.color || (ab === 'b' ? '#e97139' : '#055fdb'));
       });

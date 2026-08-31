@@ -3,7 +3,7 @@
   "DesktopAudioDevice1": {
     "prev_ver": 536936450,
     "name": "Desktop Audio",
-    "uuid": "f0e882b7-cf0d-4587-ba00-40518e34dbd4",
+    "uuid": "8e611635-667b-4c4a-8a45-5d5d4b7e7959",
     "id": "wasapi_output_capture",
     "versioned_id": "wasapi_output_capture",
     "settings": {
@@ -34,7 +34,7 @@
   "AuxAudioDevice1": {
     "prev_ver": 536936450,
     "name": "Mic/Aux",
-    "uuid": "f2610a4c-118c-4cce-bda4-f777cc0b189d",
+    "uuid": "c49898ca-afcc-43f1-a34a-bad748a854e2",
     "id": "wasapi_input_capture",
     "versioned_id": "wasapi_input_capture",
     "settings": {
@@ -90,6 +90,15 @@
     },
     {
       "name": "Replay"
+    },
+    {
+      "name": "Multiview — Grid 2-Up"
+    },
+    {
+      "name": "Multiview — Grid 4-Up"
+    },
+    {
+      "name": "Multiview — Pulse (auto-switch)"
     },
     {
       "name": "═══  DESK  ═══"
@@ -180,7 +189,7 @@
     {
       "prev_ver": 536936450,
       "name": "Background Loop",
-      "uuid": "ee1d0c9f-9582-48bf-8b93-2af80f8e1e78",
+      "uuid": "ce210a4e-da10-4e36-8f52-15a3183f5588",
       "id": "ffmpeg_source",
       "versioned_id": "ffmpeg_source",
       "settings": {
@@ -221,7 +230,7 @@
     {
       "prev_ver": 536936450,
       "name": "Game Capture",
-      "uuid": "38c076e2-e8a7-4d1b-bf98-b89a2e4d82d5",
+      "uuid": "557c0d6c-4cb1-4c95-b98d-e0fbabbc5218",
       "id": "game_capture",
       "versioned_id": "game_capture",
       "settings": {
@@ -256,7 +265,7 @@
     {
       "prev_ver": 536936450,
       "name": "[CAM] Host (slot 3)",
-      "uuid": "5d69fd24-3db7-411f-a700-6c168c947e1b",
+      "uuid": "f341169c-bb9a-422c-84e0-5febf82df962",
       "id": "browser_source",
       "versioned_id": "browser_source",
       "settings": {
@@ -294,7 +303,7 @@
     {
       "prev_ver": 536936450,
       "name": "[CAM] Caster 1 (slot 1)",
-      "uuid": "a595fef5-39f4-407a-9499-8599599b8851",
+      "uuid": "1381a642-34ed-415c-adf4-2c9d1e46e08f",
       "id": "browser_source",
       "versioned_id": "browser_source",
       "settings": {
@@ -332,7 +341,7 @@
     {
       "prev_ver": 536936450,
       "name": "[CAM] Caster 2 (slot 2)",
-      "uuid": "51d28a6a-9c0e-4702-996a-db50a70c36f6",
+      "uuid": "6df6cc20-ee5f-4ce8-801c-d3698b9be405",
       "id": "browser_source",
       "versioned_id": "browser_source",
       "settings": {
@@ -370,7 +379,7 @@
     {
       "prev_ver": 536936450,
       "name": "[CAM] Caster 4 (slot 4)",
-      "uuid": "168fad1d-1304-45b6-92c5-2eacda2adb6f",
+      "uuid": "aa1c640c-e540-4b7c-9c4b-cec8c2e0b10b",
       "id": "browser_source",
       "versioned_id": "browser_source",
       "settings": {
@@ -408,7 +417,7 @@
     {
       "prev_ver": 536936450,
       "name": "[CAM] Player (slot 5)",
-      "uuid": "3fae9389-d13d-4bac-84ba-ebf57aec2b61",
+      "uuid": "01f1e177-d535-4e43-bc1d-bfe7b59a3770",
       "id": "browser_source",
       "versioned_id": "browser_source",
       "settings": {
@@ -446,7 +455,7 @@
     {
       "prev_ver": 536936450,
       "name": "[GFX] Live Graphics (Push Live)",
-      "uuid": "e2737f9e-cd96-46f5-bc8d-a154b1bafe78",
+      "uuid": "4242edfe-8350-4ff8-8a4f-ead9a298d2b9",
       "id": "browser_source",
       "versioned_id": "browser_source",
       "settings": {
@@ -483,7 +492,7 @@
     {
       "prev_ver": 536936450,
       "name": "[GFX] RL HUD",
-      "uuid": "c6b3efe9-8602-4f36-ae6d-5770f2a1ab0d",
+      "uuid": "514d4783-5b9d-48b4-9c19-bebac8118ff8",
       "id": "browser_source",
       "versioned_id": "browser_source",
       "settings": {
@@ -520,7 +529,7 @@
     {
       "prev_ver": 536936450,
       "name": "[GFX] CS2 HUD",
-      "uuid": "f324a389-8dad-4eeb-aa32-fdfa7c2f4d1a",
+      "uuid": "702e6477-7a8e-41a1-8fa0-dabc67f6cbfa",
       "id": "browser_source",
       "versioned_id": "browser_source",
       "settings": {
@@ -557,7 +566,7 @@
     {
       "prev_ver": 536936450,
       "name": "[GFX] Valorant HUD",
-      "uuid": "d6574003-d0a5-48b1-89eb-6e43c0938643",
+      "uuid": "bed285e4-da32-48f2-bdc6-037bccf6be63",
       "id": "browser_source",
       "versioned_id": "browser_source",
       "settings": {
@@ -594,7 +603,7 @@
     {
       "prev_ver": 536936450,
       "name": "[GFX] LoL HUD",
-      "uuid": "67485c61-eacb-49e3-b3fe-90cc9471bd94",
+      "uuid": "28382c14-5b83-41a8-9e67-f5eb196c3fb6",
       "id": "browser_source",
       "versioned_id": "browser_source",
       "settings": {
@@ -631,7 +640,7 @@
     {
       "prev_ver": 536936450,
       "name": "[GFX] Overwatch HUD",
-      "uuid": "2de13351-0100-40e9-8142-f580819aa3d3",
+      "uuid": "aebb3203-44ed-4ee4-baf3-328a93e04ec3",
       "id": "browser_source",
       "versioned_id": "browser_source",
       "settings": {
@@ -668,7 +677,7 @@
     {
       "prev_ver": 536936450,
       "name": "[GFX] Marvel Rivals HUD",
-      "uuid": "103e543e-8704-4558-93e2-b26c4ae60387",
+      "uuid": "6d064931-36fc-456a-b9da-e46938d966b7",
       "id": "browser_source",
       "versioned_id": "browser_source",
       "settings": {
@@ -705,7 +714,7 @@
     {
       "prev_ver": 536936450,
       "name": "[GFX] SingleCam",
-      "uuid": "b8870afb-13b0-458f-acae-9629074938be",
+      "uuid": "9b9983a5-1f5d-423a-93de-6b64ca032d96",
       "id": "browser_source",
       "versioned_id": "browser_source",
       "settings": {
@@ -742,7 +751,7 @@
     {
       "prev_ver": 536936450,
       "name": "[GFX] Duo Row",
-      "uuid": "e12b94ef-aa0f-42a2-91b7-80fed5aee530",
+      "uuid": "7a648b4b-c071-461c-a43b-4827b5e0f804",
       "id": "browser_source",
       "versioned_id": "browser_source",
       "settings": {
@@ -779,7 +788,7 @@
     {
       "prev_ver": 536936450,
       "name": "[GFX] Trio Row",
-      "uuid": "12edbdab-f7b1-4204-acca-4fe149114d46",
+      "uuid": "092a418d-9886-47a9-aef5-e9a9c78addb6",
       "id": "browser_source",
       "versioned_id": "browser_source",
       "settings": {
@@ -816,7 +825,7 @@
     {
       "prev_ver": 536936450,
       "name": "[GFX] Duo SingleCam",
-      "uuid": "63eb5483-f523-4da5-950c-3756b9d9a529",
+      "uuid": "34df0952-b7e5-478e-8257-51b1ad8cda36",
       "id": "browser_source",
       "versioned_id": "browser_source",
       "settings": {
@@ -853,7 +862,7 @@
     {
       "prev_ver": 536936450,
       "name": "[GFX] Analyst Desk",
-      "uuid": "74aa52ef-26c5-4c89-8ef4-aa019bf23e98",
+      "uuid": "5cdff422-8598-47e1-b2b3-add316f03791",
       "id": "browser_source",
       "versioned_id": "browser_source",
       "settings": {
@@ -890,7 +899,7 @@
     {
       "prev_ver": 536936450,
       "name": "[GFX] Quad Desk",
-      "uuid": "1b781b8c-414d-496b-ac1d-8c41061cd166",
+      "uuid": "355b3fdc-f0a4-4aa0-a8e7-574e5c41be8b",
       "id": "browser_source",
       "versioned_id": "browser_source",
       "settings": {
@@ -927,7 +936,7 @@
     {
       "prev_ver": 536936450,
       "name": "[GFX] Spotlight Desk",
-      "uuid": "c6debdfe-d018-494b-8fe1-5476e0c9ff87",
+      "uuid": "cc687d6e-0fa5-414b-806c-b877df7f6a32",
       "id": "browser_source",
       "versioned_id": "browser_source",
       "settings": {
@@ -964,7 +973,7 @@
     {
       "prev_ver": 536936450,
       "name": "[GFX] Interview",
-      "uuid": "699a6fe3-d6ab-46f5-a4e1-822dae2bf413",
+      "uuid": "8fffbcda-e1e6-487a-b656-5e7a96a8093c",
       "id": "browser_source",
       "versioned_id": "browser_source",
       "settings": {
@@ -1001,7 +1010,7 @@
     {
       "prev_ver": 536936450,
       "name": "[GFX] Interview Desk",
-      "uuid": "a8bfddff-cf86-4b2b-ba91-6153d6a8fe1e",
+      "uuid": "3efa7a4b-0bbc-4911-86d3-a7ef87ef62f2",
       "id": "browser_source",
       "versioned_id": "browser_source",
       "settings": {
@@ -1038,7 +1047,7 @@
     {
       "prev_ver": 536936450,
       "name": "[GFX] Desk Show",
-      "uuid": "8d0f2956-26d0-411e-adb9-e0ee28fafb69",
+      "uuid": "45f863d0-f67d-43ca-85e4-e6ddb47149aa",
       "id": "browser_source",
       "versioned_id": "browser_source",
       "settings": {
@@ -1075,7 +1084,7 @@
     {
       "prev_ver": 536936450,
       "name": "[GFX] Matchup",
-      "uuid": "14a69736-f3ef-4094-baba-51f9575df0c0",
+      "uuid": "7648eabd-e19b-4f12-aecc-639467e0114d",
       "id": "browser_source",
       "versioned_id": "browser_source",
       "settings": {
@@ -1112,7 +1121,7 @@
     {
       "prev_ver": 536936450,
       "name": "[GFX] Cam PIP",
-      "uuid": "f1235a4c-e8c0-4b03-a375-4fc1cb4491c9",
+      "uuid": "ee280d64-30af-47a8-b3d4-4f32a11f7cf7",
       "id": "browser_source",
       "versioned_id": "browser_source",
       "settings": {
@@ -1149,7 +1158,7 @@
     {
       "prev_ver": 536936450,
       "name": "[GFX] Talent Bar",
-      "uuid": "5de5b678-d796-4f61-97ef-92abaf4157e3",
+      "uuid": "7830925f-c89e-40b0-afa9-f088b004e6f4",
       "id": "browser_source",
       "versioned_id": "browser_source",
       "settings": {
@@ -1186,7 +1195,7 @@
     {
       "prev_ver": 536936450,
       "name": "[GFX] Intermission",
-      "uuid": "bb934846-e714-4d85-9e9a-507c62de705a",
+      "uuid": "9857c5b1-8da9-44de-8589-044451bc54d8",
       "id": "browser_source",
       "versioned_id": "browser_source",
       "settings": {
@@ -1223,7 +1232,7 @@
     {
       "prev_ver": 536936450,
       "name": "[GFX] Countdown Clock Only",
-      "uuid": "4e0ab3fd-11d5-48df-9641-7eaed50cbc1d",
+      "uuid": "739c36ee-57c5-472c-a1b5-e39cab38ec25",
       "id": "browser_source",
       "versioned_id": "browser_source",
       "settings": {
@@ -1260,7 +1269,7 @@
     {
       "prev_ver": 536936450,
       "name": "[GFX] Replay",
-      "uuid": "fda5cb32-087c-4646-8ebd-33c8d2fc9f50",
+      "uuid": "56ce13fe-b56e-42eb-8dee-aed0b7e194b0",
       "id": "browser_source",
       "versioned_id": "browser_source",
       "settings": {
@@ -1297,7 +1306,7 @@
     {
       "prev_ver": 536936450,
       "name": "[GFX] Transition",
-      "uuid": "21754119-2748-4037-8f57-82ecae58c8cb",
+      "uuid": "d302f5f0-b00f-402b-b2b4-8677cb341af5",
       "id": "browser_source",
       "versioned_id": "browser_source",
       "settings": {
@@ -1334,7 +1343,7 @@
     {
       "prev_ver": 536936450,
       "name": "[GFX] Ticker",
-      "uuid": "b819f911-976d-44b0-bccf-8be5f24fe38d",
+      "uuid": "5b31ee94-9d66-4526-873d-9625c1f70f9e",
       "id": "browser_source",
       "versioned_id": "browser_source",
       "settings": {
@@ -1371,7 +1380,7 @@
     {
       "prev_ver": 536936450,
       "name": "[GFX] Sponsor Rail",
-      "uuid": "1cdc6be8-0557-48aa-a3ca-353c44fe2733",
+      "uuid": "df89d9b7-2645-4d2b-be82-36326e44126f",
       "id": "browser_source",
       "versioned_id": "browser_source",
       "settings": {
@@ -1408,7 +1417,7 @@
     {
       "prev_ver": 536936450,
       "name": "[GFX] Sponsor Banner",
-      "uuid": "f7a13636-d924-4cfb-838d-fa83b2bc3ca2",
+      "uuid": "24e4bba4-364b-40ad-969c-852ffa65cc28",
       "id": "browser_source",
       "versioned_id": "browser_source",
       "settings": {
@@ -1445,7 +1454,7 @@
     {
       "prev_ver": 536936450,
       "name": "[GFX] Listen-In Captions",
-      "uuid": "a2bced43-d46b-4c43-8702-a8b46b380156",
+      "uuid": "24428618-45c9-4535-a604-b3a6cd3579b5",
       "id": "browser_source",
       "versioned_id": "browser_source",
       "settings": {
@@ -1482,7 +1491,7 @@
     {
       "prev_ver": 536936450,
       "name": "[GFX] Interviewee Cam",
-      "uuid": "eb4b4f8f-f28f-4c3f-b4cd-2b43c4ffd4c8",
+      "uuid": "ab9e4685-b49c-4562-a708-106be5d2299b",
       "id": "browser_source",
       "versioned_id": "browser_source",
       "settings": {
@@ -1518,8 +1527,119 @@
     },
     {
       "prev_ver": 536936450,
+      "name": "[GFX] Grid Wall 2-Up",
+      "uuid": "0c43e1f8-5220-4170-be42-e328ea94ad1f",
+      "id": "browser_source",
+      "versioned_id": "browser_source",
+      "settings": {
+        "url": "http://localhost:3000/grid.html?tiles=2",
+        "width": 1920,
+        "height": 1080,
+        "restart_when_active": false,
+        "shutdown": false,
+        "css": "body { background: rgba(0,0,0,0); margin: 0; overflow: hidden; }"
+      },
+      "mixers": 0,
+      "sync": 0,
+      "flags": 0,
+      "volume": 1,
+      "balance": 0.5,
+      "enabled": true,
+      "muted": false,
+      "push-to-mute": false,
+      "push-to-mute-delay": 0,
+      "push-to-talk": false,
+      "push-to-talk-delay": 0,
+      "hotkeys": {
+        "libobs.mute": [],
+        "libobs.unmute": [],
+        "libobs.push-to-mute": [],
+        "libobs.push-to-talk": [],
+        "ObsBrowser.Refresh": []
+      },
+      "deinterlace_mode": 0,
+      "deinterlace_field_order": 0,
+      "monitoring_type": 0,
+      "private_settings": {}
+    },
+    {
+      "prev_ver": 536936450,
+      "name": "[GFX] Grid Wall 4-Up",
+      "uuid": "c4b55fa7-e4dc-423e-9822-a6abb014558c",
+      "id": "browser_source",
+      "versioned_id": "browser_source",
+      "settings": {
+        "url": "http://localhost:3000/grid.html?tiles=4",
+        "width": 1920,
+        "height": 1080,
+        "restart_when_active": false,
+        "shutdown": false,
+        "css": "body { background: rgba(0,0,0,0); margin: 0; overflow: hidden; }"
+      },
+      "mixers": 0,
+      "sync": 0,
+      "flags": 0,
+      "volume": 1,
+      "balance": 0.5,
+      "enabled": true,
+      "muted": false,
+      "push-to-mute": false,
+      "push-to-mute-delay": 0,
+      "push-to-talk": false,
+      "push-to-talk-delay": 0,
+      "hotkeys": {
+        "libobs.mute": [],
+        "libobs.unmute": [],
+        "libobs.push-to-mute": [],
+        "libobs.push-to-talk": [],
+        "ObsBrowser.Refresh": []
+      },
+      "deinterlace_mode": 0,
+      "deinterlace_field_order": 0,
+      "monitoring_type": 0,
+      "private_settings": {}
+    },
+    {
+      "prev_ver": 536936450,
+      "name": "[GFX] Pulse (auto-switch)",
+      "uuid": "2fe38e6a-f22d-4133-89ad-aec45589700f",
+      "id": "browser_source",
+      "versioned_id": "browser_source",
+      "settings": {
+        "url": "http://localhost:3000/pulse.html",
+        "width": 1920,
+        "height": 1080,
+        "restart_when_active": false,
+        "shutdown": false,
+        "css": "body { background: rgba(0,0,0,0); margin: 0; overflow: hidden; }"
+      },
+      "mixers": 0,
+      "sync": 0,
+      "flags": 0,
+      "volume": 1,
+      "balance": 0.5,
+      "enabled": true,
+      "muted": false,
+      "push-to-mute": false,
+      "push-to-mute-delay": 0,
+      "push-to-talk": false,
+      "push-to-talk-delay": 0,
+      "hotkeys": {
+        "libobs.mute": [],
+        "libobs.unmute": [],
+        "libobs.push-to-mute": [],
+        "libobs.push-to-talk": [],
+        "ObsBrowser.Refresh": []
+      },
+      "deinterlace_mode": 0,
+      "deinterlace_field_order": 0,
+      "monitoring_type": 0,
+      "private_settings": {}
+    },
+    {
+      "prev_ver": 536936450,
       "name": "═══  PRE-GAME  ═══",
-      "uuid": "15b915d7-5224-4917-b608-17690599bc60",
+      "uuid": "7ed6103b-fbb7-4078-955c-e244569f7137",
       "id": "scene",
       "versioned_id": "scene",
       "settings": {
@@ -1554,7 +1674,7 @@
     {
       "prev_ver": 536936450,
       "name": "Intermission",
-      "uuid": "ed73fbbf-887d-4cd3-b753-7ac66a8e4526",
+      "uuid": "11548559-975c-4fd0-8567-9fa01ccd885a",
       "id": "scene",
       "versioned_id": "scene",
       "settings": {
@@ -1563,7 +1683,7 @@
         "items": [
           {
             "name": "Background Loop",
-            "source_uuid": "ee1d0c9f-9582-48bf-8b93-2af80f8e1e78",
+            "source_uuid": "ce210a4e-da10-4e36-8f52-15a3183f5588",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -1609,7 +1729,7 @@
           },
           {
             "name": "[GFX] Intermission",
-            "source_uuid": "bb934846-e714-4d85-9e9a-507c62de705a",
+            "source_uuid": "9857c5b1-8da9-44de-8589-044451bc54d8",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -1655,7 +1775,7 @@
           },
           {
             "name": "[GFX] Live Graphics (Push Live)",
-            "source_uuid": "e2737f9e-cd96-46f5-bc8d-a154b1bafe78",
+            "source_uuid": "4242edfe-8350-4ff8-8a4f-ead9a298d2b9",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -1701,7 +1821,7 @@
           },
           {
             "name": "[GFX] Ticker",
-            "source_uuid": "b819f911-976d-44b0-bccf-8be5f24fe38d",
+            "source_uuid": "5b31ee94-9d66-4526-873d-9625c1f70f9e",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -1747,7 +1867,7 @@
           },
           {
             "name": "[GFX] Sponsor Rail",
-            "source_uuid": "1cdc6be8-0557-48aa-a3ca-353c44fe2733",
+            "source_uuid": "df89d9b7-2645-4d2b-be82-36326e44126f",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -1830,7 +1950,7 @@
     {
       "prev_ver": 536936450,
       "name": "Matchup",
-      "uuid": "6dff9a28-9023-4edd-a284-40fc20ce2673",
+      "uuid": "3736a15f-eb13-4df9-9477-9ce2b39c6f30",
       "id": "scene",
       "versioned_id": "scene",
       "settings": {
@@ -1839,7 +1959,7 @@
         "items": [
           {
             "name": "Background Loop",
-            "source_uuid": "ee1d0c9f-9582-48bf-8b93-2af80f8e1e78",
+            "source_uuid": "ce210a4e-da10-4e36-8f52-15a3183f5588",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -1885,7 +2005,7 @@
           },
           {
             "name": "[GFX] Matchup",
-            "source_uuid": "14a69736-f3ef-4094-baba-51f9575df0c0",
+            "source_uuid": "7648eabd-e19b-4f12-aecc-639467e0114d",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -1931,7 +2051,7 @@
           },
           {
             "name": "[GFX] Live Graphics (Push Live)",
-            "source_uuid": "e2737f9e-cd96-46f5-bc8d-a154b1bafe78",
+            "source_uuid": "4242edfe-8350-4ff8-8a4f-ead9a298d2b9",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -1977,7 +2097,7 @@
           },
           {
             "name": "[GFX] Transition",
-            "source_uuid": "21754119-2748-4037-8f57-82ecae58c8cb",
+            "source_uuid": "d302f5f0-b00f-402b-b2b4-8677cb341af5",
             "visible": false,
             "locked": true,
             "rot": 0,
@@ -2058,7 +2178,7 @@
     {
       "prev_ver": 536936450,
       "name": "Desk Show",
-      "uuid": "d418adda-6248-4295-85e4-de8c0be07fbf",
+      "uuid": "e4a9e485-15d3-4759-9615-b6aa4f60d664",
       "id": "scene",
       "versioned_id": "scene",
       "settings": {
@@ -2067,7 +2187,7 @@
         "items": [
           {
             "name": "Background Loop",
-            "source_uuid": "ee1d0c9f-9582-48bf-8b93-2af80f8e1e78",
+            "source_uuid": "ce210a4e-da10-4e36-8f52-15a3183f5588",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -2113,7 +2233,7 @@
           },
           {
             "name": "=> Caster 1 Cam",
-            "source_uuid": "f0510289-459d-463e-a391-31adbed8fc6a",
+            "source_uuid": "e346c96f-086d-4a15-8449-358e1a16dbd6",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -2159,7 +2279,7 @@
           },
           {
             "name": "=> Caster 2 Cam",
-            "source_uuid": "8aec6c29-c53c-46fb-9ab7-b260cfc139dd",
+            "source_uuid": "0c6776d1-1b35-4b33-aa64-eb3449f53f72",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -2205,7 +2325,7 @@
           },
           {
             "name": "[GFX] Desk Show",
-            "source_uuid": "8d0f2956-26d0-411e-adb9-e0ee28fafb69",
+            "source_uuid": "45f863d0-f67d-43ca-85e4-e6ddb47149aa",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -2251,7 +2371,7 @@
           },
           {
             "name": "[GFX] Live Graphics (Push Live)",
-            "source_uuid": "e2737f9e-cd96-46f5-bc8d-a154b1bafe78",
+            "source_uuid": "4242edfe-8350-4ff8-8a4f-ead9a298d2b9",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -2297,7 +2417,7 @@
           },
           {
             "name": "[GFX] Transition",
-            "source_uuid": "21754119-2748-4037-8f57-82ecae58c8cb",
+            "source_uuid": "d302f5f0-b00f-402b-b2b4-8677cb341af5",
             "visible": false,
             "locked": true,
             "rot": 0,
@@ -2382,7 +2502,7 @@
     {
       "prev_ver": 536936450,
       "name": "═══  GAMEPLAY  ═══",
-      "uuid": "b74de01f-0253-4315-b5a6-a555f17442be",
+      "uuid": "fc61d411-f117-4191-967f-7c9a93d53380",
       "id": "scene",
       "versioned_id": "scene",
       "settings": {
@@ -2417,7 +2537,7 @@
     {
       "prev_ver": 536936450,
       "name": "In Game",
-      "uuid": "c84bc3c6-11ea-49e4-9e3e-170460162984",
+      "uuid": "36d1d569-ee35-495c-8f16-6af81afc79c0",
       "id": "scene",
       "versioned_id": "scene",
       "settings": {
@@ -2426,7 +2546,7 @@
         "items": [
           {
             "name": "Game Capture",
-            "source_uuid": "38c076e2-e8a7-4d1b-bf98-b89a2e4d82d5",
+            "source_uuid": "557c0d6c-4cb1-4c95-b98d-e0fbabbc5218",
             "visible": true,
             "locked": false,
             "rot": 0,
@@ -2469,7 +2589,7 @@
           },
           {
             "name": "[GFX] RL HUD",
-            "source_uuid": "c6b3efe9-8602-4f36-ae6d-5770f2a1ab0d",
+            "source_uuid": "514d4783-5b9d-48b4-9c19-bebac8118ff8",
             "visible": true,
             "locked": false,
             "rot": 0,
@@ -2512,7 +2632,7 @@
           },
           {
             "name": "[GFX] CS2 HUD",
-            "source_uuid": "f324a389-8dad-4eeb-aa32-fdfa7c2f4d1a",
+            "source_uuid": "702e6477-7a8e-41a1-8fa0-dabc67f6cbfa",
             "visible": false,
             "locked": false,
             "rot": 0,
@@ -2555,7 +2675,7 @@
           },
           {
             "name": "[GFX] Valorant HUD",
-            "source_uuid": "d6574003-d0a5-48b1-89eb-6e43c0938643",
+            "source_uuid": "bed285e4-da32-48f2-bdc6-037bccf6be63",
             "visible": false,
             "locked": false,
             "rot": 0,
@@ -2598,7 +2718,7 @@
           },
           {
             "name": "[GFX] LoL HUD",
-            "source_uuid": "67485c61-eacb-49e3-b3fe-90cc9471bd94",
+            "source_uuid": "28382c14-5b83-41a8-9e67-f5eb196c3fb6",
             "visible": false,
             "locked": false,
             "rot": 0,
@@ -2641,7 +2761,7 @@
           },
           {
             "name": "[GFX] Overwatch HUD",
-            "source_uuid": "2de13351-0100-40e9-8142-f580819aa3d3",
+            "source_uuid": "aebb3203-44ed-4ee4-baf3-328a93e04ec3",
             "visible": false,
             "locked": false,
             "rot": 0,
@@ -2684,7 +2804,7 @@
           },
           {
             "name": "[GFX] Marvel Rivals HUD",
-            "source_uuid": "103e543e-8704-4558-93e2-b26c4ae60387",
+            "source_uuid": "6d064931-36fc-456a-b9da-e46938d966b7",
             "visible": false,
             "locked": false,
             "rot": 0,
@@ -2727,7 +2847,7 @@
           },
           {
             "name": "[GFX] Live Graphics (Push Live)",
-            "source_uuid": "e2737f9e-cd96-46f5-bc8d-a154b1bafe78",
+            "source_uuid": "4242edfe-8350-4ff8-8a4f-ead9a298d2b9",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -2773,7 +2893,7 @@
           },
           {
             "name": "[GFX] Ticker",
-            "source_uuid": "b819f911-976d-44b0-bccf-8be5f24fe38d",
+            "source_uuid": "5b31ee94-9d66-4526-873d-9625c1f70f9e",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -2819,7 +2939,7 @@
           },
           {
             "name": "[GFX] Sponsor Rail",
-            "source_uuid": "1cdc6be8-0557-48aa-a3ca-353c44fe2733",
+            "source_uuid": "df89d9b7-2645-4d2b-be82-36326e44126f",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -2912,7 +3032,7 @@
     {
       "prev_ver": 536936450,
       "name": "In Game — Cam PIP",
-      "uuid": "cb0f96dd-6859-4b1f-99a7-fb16788d8168",
+      "uuid": "34675875-7f29-4a5c-adb5-622ef6840128",
       "id": "scene",
       "versioned_id": "scene",
       "settings": {
@@ -2921,7 +3041,7 @@
         "items": [
           {
             "name": "Game Capture",
-            "source_uuid": "38c076e2-e8a7-4d1b-bf98-b89a2e4d82d5",
+            "source_uuid": "557c0d6c-4cb1-4c95-b98d-e0fbabbc5218",
             "visible": true,
             "locked": false,
             "rot": 0,
@@ -2964,7 +3084,7 @@
           },
           {
             "name": "[GFX] RL HUD",
-            "source_uuid": "c6b3efe9-8602-4f36-ae6d-5770f2a1ab0d",
+            "source_uuid": "514d4783-5b9d-48b4-9c19-bebac8118ff8",
             "visible": true,
             "locked": false,
             "rot": 0,
@@ -3007,7 +3127,7 @@
           },
           {
             "name": "[GFX] CS2 HUD",
-            "source_uuid": "f324a389-8dad-4eeb-aa32-fdfa7c2f4d1a",
+            "source_uuid": "702e6477-7a8e-41a1-8fa0-dabc67f6cbfa",
             "visible": false,
             "locked": false,
             "rot": 0,
@@ -3050,7 +3170,7 @@
           },
           {
             "name": "[GFX] Valorant HUD",
-            "source_uuid": "d6574003-d0a5-48b1-89eb-6e43c0938643",
+            "source_uuid": "bed285e4-da32-48f2-bdc6-037bccf6be63",
             "visible": false,
             "locked": false,
             "rot": 0,
@@ -3093,7 +3213,7 @@
           },
           {
             "name": "[GFX] LoL HUD",
-            "source_uuid": "67485c61-eacb-49e3-b3fe-90cc9471bd94",
+            "source_uuid": "28382c14-5b83-41a8-9e67-f5eb196c3fb6",
             "visible": false,
             "locked": false,
             "rot": 0,
@@ -3136,7 +3256,7 @@
           },
           {
             "name": "[GFX] Overwatch HUD",
-            "source_uuid": "2de13351-0100-40e9-8142-f580819aa3d3",
+            "source_uuid": "aebb3203-44ed-4ee4-baf3-328a93e04ec3",
             "visible": false,
             "locked": false,
             "rot": 0,
@@ -3179,7 +3299,7 @@
           },
           {
             "name": "[GFX] Marvel Rivals HUD",
-            "source_uuid": "103e543e-8704-4558-93e2-b26c4ae60387",
+            "source_uuid": "6d064931-36fc-456a-b9da-e46938d966b7",
             "visible": false,
             "locked": false,
             "rot": 0,
@@ -3222,7 +3342,7 @@
           },
           {
             "name": "[GFX] Live Graphics (Push Live)",
-            "source_uuid": "e2737f9e-cd96-46f5-bc8d-a154b1bafe78",
+            "source_uuid": "4242edfe-8350-4ff8-8a4f-ead9a298d2b9",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -3268,7 +3388,7 @@
           },
           {
             "name": "[GFX] Cam PIP",
-            "source_uuid": "f1235a4c-e8c0-4b03-a375-4fc1cb4491c9",
+            "source_uuid": "ee280d64-30af-47a8-b3d4-4f32a11f7cf7",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -3359,7 +3479,7 @@
     {
       "prev_ver": 536936450,
       "name": "In Game — Talent Bar",
-      "uuid": "4b84e19c-4373-46b3-aa79-f84315dcbb95",
+      "uuid": "465dc8ca-156c-4bf7-b9ff-2c8717713ca3",
       "id": "scene",
       "versioned_id": "scene",
       "settings": {
@@ -3368,7 +3488,7 @@
         "items": [
           {
             "name": "Game Capture",
-            "source_uuid": "38c076e2-e8a7-4d1b-bf98-b89a2e4d82d5",
+            "source_uuid": "557c0d6c-4cb1-4c95-b98d-e0fbabbc5218",
             "visible": true,
             "locked": false,
             "rot": 0,
@@ -3411,7 +3531,7 @@
           },
           {
             "name": "[GFX] RL HUD",
-            "source_uuid": "c6b3efe9-8602-4f36-ae6d-5770f2a1ab0d",
+            "source_uuid": "514d4783-5b9d-48b4-9c19-bebac8118ff8",
             "visible": true,
             "locked": false,
             "rot": 0,
@@ -3454,7 +3574,7 @@
           },
           {
             "name": "[GFX] CS2 HUD",
-            "source_uuid": "f324a389-8dad-4eeb-aa32-fdfa7c2f4d1a",
+            "source_uuid": "702e6477-7a8e-41a1-8fa0-dabc67f6cbfa",
             "visible": false,
             "locked": false,
             "rot": 0,
@@ -3497,7 +3617,7 @@
           },
           {
             "name": "[GFX] Valorant HUD",
-            "source_uuid": "d6574003-d0a5-48b1-89eb-6e43c0938643",
+            "source_uuid": "bed285e4-da32-48f2-bdc6-037bccf6be63",
             "visible": false,
             "locked": false,
             "rot": 0,
@@ -3540,7 +3660,7 @@
           },
           {
             "name": "[GFX] LoL HUD",
-            "source_uuid": "67485c61-eacb-49e3-b3fe-90cc9471bd94",
+            "source_uuid": "28382c14-5b83-41a8-9e67-f5eb196c3fb6",
             "visible": false,
             "locked": false,
             "rot": 0,
@@ -3583,7 +3703,7 @@
           },
           {
             "name": "[GFX] Overwatch HUD",
-            "source_uuid": "2de13351-0100-40e9-8142-f580819aa3d3",
+            "source_uuid": "aebb3203-44ed-4ee4-baf3-328a93e04ec3",
             "visible": false,
             "locked": false,
             "rot": 0,
@@ -3626,7 +3746,7 @@
           },
           {
             "name": "[GFX] Marvel Rivals HUD",
-            "source_uuid": "103e543e-8704-4558-93e2-b26c4ae60387",
+            "source_uuid": "6d064931-36fc-456a-b9da-e46938d966b7",
             "visible": false,
             "locked": false,
             "rot": 0,
@@ -3669,7 +3789,7 @@
           },
           {
             "name": "[GFX] Live Graphics (Push Live)",
-            "source_uuid": "e2737f9e-cd96-46f5-bc8d-a154b1bafe78",
+            "source_uuid": "4242edfe-8350-4ff8-8a4f-ead9a298d2b9",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -3715,7 +3835,7 @@
           },
           {
             "name": "[GFX] Talent Bar",
-            "source_uuid": "5de5b678-d796-4f61-97ef-92abaf4157e3",
+            "source_uuid": "7830925f-c89e-40b0-afa9-f088b004e6f4",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -3806,7 +3926,7 @@
     {
       "prev_ver": 536936450,
       "name": "Replay",
-      "uuid": "7f6c8e87-c0e1-4ac8-810f-ad05e086be54",
+      "uuid": "904b7bfe-365e-464c-9270-c517ae34b08f",
       "id": "scene",
       "versioned_id": "scene",
       "settings": {
@@ -3815,7 +3935,7 @@
         "items": [
           {
             "name": "Background Loop",
-            "source_uuid": "ee1d0c9f-9582-48bf-8b93-2af80f8e1e78",
+            "source_uuid": "ce210a4e-da10-4e36-8f52-15a3183f5588",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -3861,7 +3981,7 @@
           },
           {
             "name": "[GFX] Replay",
-            "source_uuid": "fda5cb32-087c-4646-8ebd-33c8d2fc9f50",
+            "source_uuid": "56ce13fe-b56e-42eb-8dee-aed0b7e194b0",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -3907,7 +4027,7 @@
           },
           {
             "name": "[GFX] Live Graphics (Push Live)",
-            "source_uuid": "e2737f9e-cd96-46f5-bc8d-a154b1bafe78",
+            "source_uuid": "4242edfe-8350-4ff8-8a4f-ead9a298d2b9",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -3985,8 +4105,260 @@
     },
     {
       "prev_ver": 536936450,
+      "name": "Multiview — Grid 2-Up",
+      "uuid": "2ad7125b-b211-4831-8e0a-301f18e3d238",
+      "id": "scene",
+      "versioned_id": "scene",
+      "settings": {
+        "custom_size": false,
+        "id_counter": 2,
+        "items": [
+          {
+            "name": "[GFX] Grid Wall 2-Up",
+            "source_uuid": "0c43e1f8-5220-4170-be42-e328ea94ad1f",
+            "visible": true,
+            "locked": true,
+            "rot": 0,
+            "scale_ref": {
+              "x": 1920,
+              "y": 1080
+            },
+            "align": 5,
+            "bounds_type": 2,
+            "bounds_align": 0,
+            "bounds_crop": false,
+            "crop_left": 0,
+            "crop_top": 0,
+            "crop_right": 0,
+            "crop_bottom": 0,
+            "id": 1,
+            "group_item_backup": false,
+            "pos": {
+              "x": 0,
+              "y": 0
+            },
+            "scale": {
+              "x": 1,
+              "y": 1
+            },
+            "bounds": {
+              "x": 1920,
+              "y": 1080
+            },
+            "scale_filter": "disable",
+            "blend_method": "default",
+            "blend_type": "normal",
+            "show_transition": {
+              "duration": 0
+            },
+            "hide_transition": {
+              "duration": 0
+            },
+            "private_settings": {
+              "color": "",
+              "color-preset": 7
+            }
+          }
+        ]
+      },
+      "mixers": 0,
+      "sync": 0,
+      "flags": 0,
+      "volume": 1,
+      "balance": 0.5,
+      "enabled": true,
+      "muted": false,
+      "push-to-mute": false,
+      "push-to-mute-delay": 0,
+      "push-to-talk": false,
+      "push-to-talk-delay": 0,
+      "hotkeys": {
+        "OBSBasic.SelectScene": [],
+        "libobs.show_scene_item.1": [],
+        "libobs.hide_scene_item.1": []
+      },
+      "deinterlace_mode": 0,
+      "deinterlace_field_order": 0,
+      "monitoring_type": 0,
+      "private_settings": {
+        "show_in_multiview": true,
+        "transition_duration": 300
+      },
+      "canvas_uuid": "6c69626f-6273-4c00-9d88-c5136d61696e",
+      "color": 3221202995
+    },
+    {
+      "prev_ver": 536936450,
+      "name": "Multiview — Grid 4-Up",
+      "uuid": "7a4e004e-9fc1-433c-b066-004d2c5595df",
+      "id": "scene",
+      "versioned_id": "scene",
+      "settings": {
+        "custom_size": false,
+        "id_counter": 2,
+        "items": [
+          {
+            "name": "[GFX] Grid Wall 4-Up",
+            "source_uuid": "c4b55fa7-e4dc-423e-9822-a6abb014558c",
+            "visible": true,
+            "locked": true,
+            "rot": 0,
+            "scale_ref": {
+              "x": 1920,
+              "y": 1080
+            },
+            "align": 5,
+            "bounds_type": 2,
+            "bounds_align": 0,
+            "bounds_crop": false,
+            "crop_left": 0,
+            "crop_top": 0,
+            "crop_right": 0,
+            "crop_bottom": 0,
+            "id": 1,
+            "group_item_backup": false,
+            "pos": {
+              "x": 0,
+              "y": 0
+            },
+            "scale": {
+              "x": 1,
+              "y": 1
+            },
+            "bounds": {
+              "x": 1920,
+              "y": 1080
+            },
+            "scale_filter": "disable",
+            "blend_method": "default",
+            "blend_type": "normal",
+            "show_transition": {
+              "duration": 0
+            },
+            "hide_transition": {
+              "duration": 0
+            },
+            "private_settings": {
+              "color": "",
+              "color-preset": 7
+            }
+          }
+        ]
+      },
+      "mixers": 0,
+      "sync": 0,
+      "flags": 0,
+      "volume": 1,
+      "balance": 0.5,
+      "enabled": true,
+      "muted": false,
+      "push-to-mute": false,
+      "push-to-mute-delay": 0,
+      "push-to-talk": false,
+      "push-to-talk-delay": 0,
+      "hotkeys": {
+        "OBSBasic.SelectScene": [],
+        "libobs.show_scene_item.1": [],
+        "libobs.hide_scene_item.1": []
+      },
+      "deinterlace_mode": 0,
+      "deinterlace_field_order": 0,
+      "monitoring_type": 0,
+      "private_settings": {
+        "show_in_multiview": true,
+        "transition_duration": 300
+      },
+      "canvas_uuid": "6c69626f-6273-4c00-9d88-c5136d61696e",
+      "color": 3221202995
+    },
+    {
+      "prev_ver": 536936450,
+      "name": "Multiview — Pulse (auto-switch)",
+      "uuid": "f2320dd6-a4f1-45d5-904d-d1e00f716a67",
+      "id": "scene",
+      "versioned_id": "scene",
+      "settings": {
+        "custom_size": false,
+        "id_counter": 2,
+        "items": [
+          {
+            "name": "[GFX] Pulse (auto-switch)",
+            "source_uuid": "2fe38e6a-f22d-4133-89ad-aec45589700f",
+            "visible": true,
+            "locked": true,
+            "rot": 0,
+            "scale_ref": {
+              "x": 1920,
+              "y": 1080
+            },
+            "align": 5,
+            "bounds_type": 2,
+            "bounds_align": 0,
+            "bounds_crop": false,
+            "crop_left": 0,
+            "crop_top": 0,
+            "crop_right": 0,
+            "crop_bottom": 0,
+            "id": 1,
+            "group_item_backup": false,
+            "pos": {
+              "x": 0,
+              "y": 0
+            },
+            "scale": {
+              "x": 1,
+              "y": 1
+            },
+            "bounds": {
+              "x": 1920,
+              "y": 1080
+            },
+            "scale_filter": "disable",
+            "blend_method": "default",
+            "blend_type": "normal",
+            "show_transition": {
+              "duration": 0
+            },
+            "hide_transition": {
+              "duration": 0
+            },
+            "private_settings": {
+              "color": "",
+              "color-preset": 7
+            }
+          }
+        ]
+      },
+      "mixers": 0,
+      "sync": 0,
+      "flags": 0,
+      "volume": 1,
+      "balance": 0.5,
+      "enabled": true,
+      "muted": false,
+      "push-to-mute": false,
+      "push-to-mute-delay": 0,
+      "push-to-talk": false,
+      "push-to-talk-delay": 0,
+      "hotkeys": {
+        "OBSBasic.SelectScene": [],
+        "libobs.show_scene_item.1": [],
+        "libobs.hide_scene_item.1": []
+      },
+      "deinterlace_mode": 0,
+      "deinterlace_field_order": 0,
+      "monitoring_type": 0,
+      "private_settings": {
+        "show_in_multiview": true,
+        "transition_duration": 300
+      },
+      "canvas_uuid": "6c69626f-6273-4c00-9d88-c5136d61696e",
+      "color": 3221202995
+    },
+    {
+      "prev_ver": 536936450,
       "name": "═══  DESK  ═══",
-      "uuid": "a1da68b4-ab62-4275-8d25-021c8f7e62b7",
+      "uuid": "0e36c172-5a13-41f7-be3a-31e243edfc50",
       "id": "scene",
       "versioned_id": "scene",
       "settings": {
@@ -4021,7 +4393,7 @@
     {
       "prev_ver": 536936450,
       "name": "SingleCam",
-      "uuid": "c6ed58b3-b3ae-4328-9084-f5f86e1da02e",
+      "uuid": "909268e2-653e-4071-acfa-1303b209553f",
       "id": "scene",
       "versioned_id": "scene",
       "settings": {
@@ -4030,7 +4402,7 @@
         "items": [
           {
             "name": "Background Loop",
-            "source_uuid": "ee1d0c9f-9582-48bf-8b93-2af80f8e1e78",
+            "source_uuid": "ce210a4e-da10-4e36-8f52-15a3183f5588",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -4076,7 +4448,7 @@
           },
           {
             "name": "=> Caster 1 Cam",
-            "source_uuid": "f0510289-459d-463e-a391-31adbed8fc6a",
+            "source_uuid": "e346c96f-086d-4a15-8449-358e1a16dbd6",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -4122,7 +4494,7 @@
           },
           {
             "name": "[GFX] SingleCam",
-            "source_uuid": "b8870afb-13b0-458f-acae-9629074938be",
+            "source_uuid": "9b9983a5-1f5d-423a-93de-6b64ca032d96",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -4168,7 +4540,7 @@
           },
           {
             "name": "[GFX] Live Graphics (Push Live)",
-            "source_uuid": "e2737f9e-cd96-46f5-bc8d-a154b1bafe78",
+            "source_uuid": "4242edfe-8350-4ff8-8a4f-ead9a298d2b9",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -4214,7 +4586,7 @@
           },
           {
             "name": "[GFX] Transition",
-            "source_uuid": "21754119-2748-4037-8f57-82ecae58c8cb",
+            "source_uuid": "d302f5f0-b00f-402b-b2b4-8677cb341af5",
             "visible": false,
             "locked": true,
             "rot": 0,
@@ -4297,7 +4669,7 @@
     {
       "prev_ver": 536936450,
       "name": "DuoCam Row",
-      "uuid": "f903297b-3ddb-4d85-bcf4-172710d5bfaa",
+      "uuid": "3996e9c7-d595-41f0-9ecd-4aafc3d93d26",
       "id": "scene",
       "versioned_id": "scene",
       "settings": {
@@ -4306,7 +4678,7 @@
         "items": [
           {
             "name": "Background Loop",
-            "source_uuid": "ee1d0c9f-9582-48bf-8b93-2af80f8e1e78",
+            "source_uuid": "ce210a4e-da10-4e36-8f52-15a3183f5588",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -4352,7 +4724,7 @@
           },
           {
             "name": "=> Caster 1 Cam",
-            "source_uuid": "f0510289-459d-463e-a391-31adbed8fc6a",
+            "source_uuid": "e346c96f-086d-4a15-8449-358e1a16dbd6",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -4398,7 +4770,7 @@
           },
           {
             "name": "=> Caster 2 Cam",
-            "source_uuid": "8aec6c29-c53c-46fb-9ab7-b260cfc139dd",
+            "source_uuid": "0c6776d1-1b35-4b33-aa64-eb3449f53f72",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -4444,7 +4816,7 @@
           },
           {
             "name": "[GFX] Duo Row",
-            "source_uuid": "e12b94ef-aa0f-42a2-91b7-80fed5aee530",
+            "source_uuid": "7a648b4b-c071-461c-a43b-4827b5e0f804",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -4490,7 +4862,7 @@
           },
           {
             "name": "[GFX] Live Graphics (Push Live)",
-            "source_uuid": "e2737f9e-cd96-46f5-bc8d-a154b1bafe78",
+            "source_uuid": "4242edfe-8350-4ff8-8a4f-ead9a298d2b9",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -4536,7 +4908,7 @@
           },
           {
             "name": "[GFX] Transition",
-            "source_uuid": "21754119-2748-4037-8f57-82ecae58c8cb",
+            "source_uuid": "d302f5f0-b00f-402b-b2b4-8677cb341af5",
             "visible": false,
             "locked": true,
             "rot": 0,
@@ -4621,7 +4993,7 @@
     {
       "prev_ver": 536936450,
       "name": "TrioCam Row",
-      "uuid": "ec46f0b2-6256-4009-94a8-aea27dd5e281",
+      "uuid": "2dfbfb49-2fa3-4d72-be67-c35415ad533e",
       "id": "scene",
       "versioned_id": "scene",
       "settings": {
@@ -4630,7 +5002,7 @@
         "items": [
           {
             "name": "Background Loop",
-            "source_uuid": "ee1d0c9f-9582-48bf-8b93-2af80f8e1e78",
+            "source_uuid": "ce210a4e-da10-4e36-8f52-15a3183f5588",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -4676,7 +5048,7 @@
           },
           {
             "name": "=> Caster 1 Cam",
-            "source_uuid": "f0510289-459d-463e-a391-31adbed8fc6a",
+            "source_uuid": "e346c96f-086d-4a15-8449-358e1a16dbd6",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -4722,7 +5094,7 @@
           },
           {
             "name": "=> Caster 2 Cam",
-            "source_uuid": "8aec6c29-c53c-46fb-9ab7-b260cfc139dd",
+            "source_uuid": "0c6776d1-1b35-4b33-aa64-eb3449f53f72",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -4768,7 +5140,7 @@
           },
           {
             "name": "=> Host Cam",
-            "source_uuid": "6badb989-24e7-4f34-a0fb-2c4a0af65fe6",
+            "source_uuid": "6a03ed27-e5fc-4a9f-ba79-eb9396ac9da4",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -4814,7 +5186,7 @@
           },
           {
             "name": "[GFX] Trio Row",
-            "source_uuid": "12edbdab-f7b1-4204-acca-4fe149114d46",
+            "source_uuid": "092a418d-9886-47a9-aef5-e9a9c78addb6",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -4860,7 +5232,7 @@
           },
           {
             "name": "[GFX] Live Graphics (Push Live)",
-            "source_uuid": "e2737f9e-cd96-46f5-bc8d-a154b1bafe78",
+            "source_uuid": "4242edfe-8350-4ff8-8a4f-ead9a298d2b9",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -4906,7 +5278,7 @@
           },
           {
             "name": "[GFX] Transition",
-            "source_uuid": "21754119-2748-4037-8f57-82ecae58c8cb",
+            "source_uuid": "d302f5f0-b00f-402b-b2b4-8677cb341af5",
             "visible": false,
             "locked": true,
             "rot": 0,
@@ -4993,7 +5365,7 @@
     {
       "prev_ver": 536936450,
       "name": "Duo SingleCam",
-      "uuid": "97fdf2cf-19a9-4f8f-9b3d-b7e2a32fa215",
+      "uuid": "e620b727-f155-423a-a426-0634fbde2f90",
       "id": "scene",
       "versioned_id": "scene",
       "settings": {
@@ -5002,7 +5374,7 @@
         "items": [
           {
             "name": "Background Loop",
-            "source_uuid": "ee1d0c9f-9582-48bf-8b93-2af80f8e1e78",
+            "source_uuid": "ce210a4e-da10-4e36-8f52-15a3183f5588",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -5048,7 +5420,7 @@
           },
           {
             "name": "=> Caster 1 Cam",
-            "source_uuid": "f0510289-459d-463e-a391-31adbed8fc6a",
+            "source_uuid": "e346c96f-086d-4a15-8449-358e1a16dbd6",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -5094,7 +5466,7 @@
           },
           {
             "name": "[GFX] Duo SingleCam",
-            "source_uuid": "63eb5483-f523-4da5-950c-3756b9d9a529",
+            "source_uuid": "34df0952-b7e5-478e-8257-51b1ad8cda36",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -5140,7 +5512,7 @@
           },
           {
             "name": "[GFX] Live Graphics (Push Live)",
-            "source_uuid": "e2737f9e-cd96-46f5-bc8d-a154b1bafe78",
+            "source_uuid": "4242edfe-8350-4ff8-8a4f-ead9a298d2b9",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -5186,7 +5558,7 @@
           },
           {
             "name": "[GFX] Transition",
-            "source_uuid": "21754119-2748-4037-8f57-82ecae58c8cb",
+            "source_uuid": "d302f5f0-b00f-402b-b2b4-8677cb341af5",
             "visible": false,
             "locked": true,
             "rot": 0,
@@ -5269,7 +5641,7 @@
     {
       "prev_ver": 536936450,
       "name": "Quad Desk",
-      "uuid": "9331ffec-019a-4f18-8365-2e541e67d576",
+      "uuid": "ee924b33-1c6b-4d0d-9794-72313167fb14",
       "id": "scene",
       "versioned_id": "scene",
       "settings": {
@@ -5278,7 +5650,7 @@
         "items": [
           {
             "name": "Background Loop",
-            "source_uuid": "ee1d0c9f-9582-48bf-8b93-2af80f8e1e78",
+            "source_uuid": "ce210a4e-da10-4e36-8f52-15a3183f5588",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -5324,7 +5696,7 @@
           },
           {
             "name": "=> Caster 1 Cam",
-            "source_uuid": "f0510289-459d-463e-a391-31adbed8fc6a",
+            "source_uuid": "e346c96f-086d-4a15-8449-358e1a16dbd6",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -5370,7 +5742,7 @@
           },
           {
             "name": "=> Caster 2 Cam",
-            "source_uuid": "8aec6c29-c53c-46fb-9ab7-b260cfc139dd",
+            "source_uuid": "0c6776d1-1b35-4b33-aa64-eb3449f53f72",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -5416,7 +5788,7 @@
           },
           {
             "name": "=> Host Cam",
-            "source_uuid": "6badb989-24e7-4f34-a0fb-2c4a0af65fe6",
+            "source_uuid": "6a03ed27-e5fc-4a9f-ba79-eb9396ac9da4",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -5462,7 +5834,7 @@
           },
           {
             "name": "=> Caster 4 Cam",
-            "source_uuid": "dba21657-fd08-41c5-8e39-7fac2a13d374",
+            "source_uuid": "1cf37674-54fa-4d5d-9b84-a68134190390",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -5508,7 +5880,7 @@
           },
           {
             "name": "[GFX] Quad Desk",
-            "source_uuid": "1b781b8c-414d-496b-ac1d-8c41061cd166",
+            "source_uuid": "355b3fdc-f0a4-4aa0-a8e7-574e5c41be8b",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -5554,7 +5926,7 @@
           },
           {
             "name": "[GFX] Live Graphics (Push Live)",
-            "source_uuid": "e2737f9e-cd96-46f5-bc8d-a154b1bafe78",
+            "source_uuid": "4242edfe-8350-4ff8-8a4f-ead9a298d2b9",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -5600,7 +5972,7 @@
           },
           {
             "name": "[GFX] Transition",
-            "source_uuid": "21754119-2748-4037-8f57-82ecae58c8cb",
+            "source_uuid": "d302f5f0-b00f-402b-b2b4-8677cb341af5",
             "visible": false,
             "locked": true,
             "rot": 0,
@@ -5689,7 +6061,7 @@
     {
       "prev_ver": 536936450,
       "name": "Analyst Desk",
-      "uuid": "5afae33e-acd2-4757-a1f4-a0f44f41e485",
+      "uuid": "57d3354d-7210-4355-8ace-8102fdd5eb8f",
       "id": "scene",
       "versioned_id": "scene",
       "settings": {
@@ -5698,7 +6070,7 @@
         "items": [
           {
             "name": "Background Loop",
-            "source_uuid": "ee1d0c9f-9582-48bf-8b93-2af80f8e1e78",
+            "source_uuid": "ce210a4e-da10-4e36-8f52-15a3183f5588",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -5744,7 +6116,7 @@
           },
           {
             "name": "=> Caster 1 Cam",
-            "source_uuid": "f0510289-459d-463e-a391-31adbed8fc6a",
+            "source_uuid": "e346c96f-086d-4a15-8449-358e1a16dbd6",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -5790,7 +6162,7 @@
           },
           {
             "name": "=> Caster 2 Cam",
-            "source_uuid": "8aec6c29-c53c-46fb-9ab7-b260cfc139dd",
+            "source_uuid": "0c6776d1-1b35-4b33-aa64-eb3449f53f72",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -5836,7 +6208,7 @@
           },
           {
             "name": "=> Host Cam",
-            "source_uuid": "6badb989-24e7-4f34-a0fb-2c4a0af65fe6",
+            "source_uuid": "6a03ed27-e5fc-4a9f-ba79-eb9396ac9da4",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -5882,7 +6254,7 @@
           },
           {
             "name": "[GFX] Analyst Desk",
-            "source_uuid": "74aa52ef-26c5-4c89-8ef4-aa019bf23e98",
+            "source_uuid": "5cdff422-8598-47e1-b2b3-add316f03791",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -5928,7 +6300,7 @@
           },
           {
             "name": "[GFX] Live Graphics (Push Live)",
-            "source_uuid": "e2737f9e-cd96-46f5-bc8d-a154b1bafe78",
+            "source_uuid": "4242edfe-8350-4ff8-8a4f-ead9a298d2b9",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -5974,7 +6346,7 @@
           },
           {
             "name": "[GFX] Transition",
-            "source_uuid": "21754119-2748-4037-8f57-82ecae58c8cb",
+            "source_uuid": "d302f5f0-b00f-402b-b2b4-8677cb341af5",
             "visible": false,
             "locked": true,
             "rot": 0,
@@ -6061,7 +6433,7 @@
     {
       "prev_ver": 536936450,
       "name": "Spotlight Desk",
-      "uuid": "487d1364-495d-4064-acfd-1f2eb324e5f9",
+      "uuid": "24b7735f-397d-4d99-b210-4aa943255f79",
       "id": "scene",
       "versioned_id": "scene",
       "settings": {
@@ -6070,7 +6442,7 @@
         "items": [
           {
             "name": "Background Loop",
-            "source_uuid": "ee1d0c9f-9582-48bf-8b93-2af80f8e1e78",
+            "source_uuid": "ce210a4e-da10-4e36-8f52-15a3183f5588",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -6116,7 +6488,7 @@
           },
           {
             "name": "=> Caster 1 Cam",
-            "source_uuid": "f0510289-459d-463e-a391-31adbed8fc6a",
+            "source_uuid": "e346c96f-086d-4a15-8449-358e1a16dbd6",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -6162,7 +6534,7 @@
           },
           {
             "name": "=> Player Cam",
-            "source_uuid": "185f35a1-354c-43f3-92d0-fae12bdd4810",
+            "source_uuid": "6550067e-9d49-4f45-8b5a-0a2a93299e07",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -6208,7 +6580,7 @@
           },
           {
             "name": "[GFX] Spotlight Desk",
-            "source_uuid": "c6debdfe-d018-494b-8fe1-5476e0c9ff87",
+            "source_uuid": "cc687d6e-0fa5-414b-806c-b877df7f6a32",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -6254,7 +6626,7 @@
           },
           {
             "name": "[GFX] Live Graphics (Push Live)",
-            "source_uuid": "e2737f9e-cd96-46f5-bc8d-a154b1bafe78",
+            "source_uuid": "4242edfe-8350-4ff8-8a4f-ead9a298d2b9",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -6300,7 +6672,7 @@
           },
           {
             "name": "[GFX] Transition",
-            "source_uuid": "21754119-2748-4037-8f57-82ecae58c8cb",
+            "source_uuid": "d302f5f0-b00f-402b-b2b4-8677cb341af5",
             "visible": false,
             "locked": true,
             "rot": 0,
@@ -6385,7 +6757,7 @@
     {
       "prev_ver": 536936450,
       "name": "Interview Desk",
-      "uuid": "36cddeb6-ed03-4e23-8302-56a1008b52f2",
+      "uuid": "7dc5699b-875d-406f-9f8d-df821f1a70a5",
       "id": "scene",
       "versioned_id": "scene",
       "settings": {
@@ -6394,7 +6766,7 @@
         "items": [
           {
             "name": "Background Loop",
-            "source_uuid": "ee1d0c9f-9582-48bf-8b93-2af80f8e1e78",
+            "source_uuid": "ce210a4e-da10-4e36-8f52-15a3183f5588",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -6440,7 +6812,7 @@
           },
           {
             "name": "=> Caster 1 Cam",
-            "source_uuid": "f0510289-459d-463e-a391-31adbed8fc6a",
+            "source_uuid": "e346c96f-086d-4a15-8449-358e1a16dbd6",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -6486,7 +6858,7 @@
           },
           {
             "name": "=> Player Cam",
-            "source_uuid": "185f35a1-354c-43f3-92d0-fae12bdd4810",
+            "source_uuid": "6550067e-9d49-4f45-8b5a-0a2a93299e07",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -6532,7 +6904,7 @@
           },
           {
             "name": "[GFX] Interview Desk",
-            "source_uuid": "a8bfddff-cf86-4b2b-ba91-6153d6a8fe1e",
+            "source_uuid": "3efa7a4b-0bbc-4911-86d3-a7ef87ef62f2",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -6578,7 +6950,7 @@
           },
           {
             "name": "[GFX] Live Graphics (Push Live)",
-            "source_uuid": "e2737f9e-cd96-46f5-bc8d-a154b1bafe78",
+            "source_uuid": "4242edfe-8350-4ff8-8a4f-ead9a298d2b9",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -6624,7 +6996,7 @@
           },
           {
             "name": "[GFX] Transition",
-            "source_uuid": "21754119-2748-4037-8f57-82ecae58c8cb",
+            "source_uuid": "d302f5f0-b00f-402b-b2b4-8677cb341af5",
             "visible": false,
             "locked": true,
             "rot": 0,
@@ -6709,7 +7081,7 @@
     {
       "prev_ver": 536936450,
       "name": "VS / Head-to-Head",
-      "uuid": "729e4be3-3f1a-4f0f-8f20-be72c68598f9",
+      "uuid": "755e0d9b-785e-4ea9-abc5-ea4b08dd6984",
       "id": "scene",
       "versioned_id": "scene",
       "settings": {
@@ -6718,7 +7090,7 @@
         "items": [
           {
             "name": "Background Loop",
-            "source_uuid": "ee1d0c9f-9582-48bf-8b93-2af80f8e1e78",
+            "source_uuid": "ce210a4e-da10-4e36-8f52-15a3183f5588",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -6764,7 +7136,7 @@
           },
           {
             "name": "=> Caster 1 Cam",
-            "source_uuid": "f0510289-459d-463e-a391-31adbed8fc6a",
+            "source_uuid": "e346c96f-086d-4a15-8449-358e1a16dbd6",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -6810,7 +7182,7 @@
           },
           {
             "name": "=> Caster 2 Cam",
-            "source_uuid": "8aec6c29-c53c-46fb-9ab7-b260cfc139dd",
+            "source_uuid": "0c6776d1-1b35-4b33-aa64-eb3449f53f72",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -6856,7 +7228,7 @@
           },
           {
             "name": "[GFX] Interview",
-            "source_uuid": "699a6fe3-d6ab-46f5-a4e1-822dae2bf413",
+            "source_uuid": "8fffbcda-e1e6-487a-b656-5e7a96a8093c",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -6902,7 +7274,7 @@
           },
           {
             "name": "[GFX] Live Graphics (Push Live)",
-            "source_uuid": "e2737f9e-cd96-46f5-bc8d-a154b1bafe78",
+            "source_uuid": "4242edfe-8350-4ff8-8a4f-ead9a298d2b9",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -6948,7 +7320,7 @@
           },
           {
             "name": "[GFX] Transition",
-            "source_uuid": "21754119-2748-4037-8f57-82ecae58c8cb",
+            "source_uuid": "d302f5f0-b00f-402b-b2b4-8677cb341af5",
             "visible": false,
             "locked": true,
             "rot": 0,
@@ -7033,7 +7405,7 @@
     {
       "prev_ver": 536936450,
       "name": "═══  UTILITY  ═══",
-      "uuid": "fe37943b-6b47-4cd8-aee3-7084393231e6",
+      "uuid": "7bb3099c-a4f9-4417-81f4-c20675fabe1f",
       "id": "scene",
       "versioned_id": "scene",
       "settings": {
@@ -7068,7 +7440,7 @@
     {
       "prev_ver": 536936450,
       "name": "=> Host Cam",
-      "uuid": "6badb989-24e7-4f34-a0fb-2c4a0af65fe6",
+      "uuid": "6a03ed27-e5fc-4a9f-ba79-eb9396ac9da4",
       "id": "scene",
       "versioned_id": "scene",
       "settings": {
@@ -7077,7 +7449,7 @@
         "items": [
           {
             "name": "[CAM] Host (slot 3)",
-            "source_uuid": "5d69fd24-3db7-411f-a700-6c168c947e1b",
+            "source_uuid": "f341169c-bb9a-422c-84e0-5febf82df962",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -7149,7 +7521,7 @@
     {
       "prev_ver": 536936450,
       "name": "=> Caster 1 Cam",
-      "uuid": "f0510289-459d-463e-a391-31adbed8fc6a",
+      "uuid": "e346c96f-086d-4a15-8449-358e1a16dbd6",
       "id": "scene",
       "versioned_id": "scene",
       "settings": {
@@ -7158,7 +7530,7 @@
         "items": [
           {
             "name": "[CAM] Caster 1 (slot 1)",
-            "source_uuid": "a595fef5-39f4-407a-9499-8599599b8851",
+            "source_uuid": "1381a642-34ed-415c-adf4-2c9d1e46e08f",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -7230,7 +7602,7 @@
     {
       "prev_ver": 536936450,
       "name": "=> Caster 2 Cam",
-      "uuid": "8aec6c29-c53c-46fb-9ab7-b260cfc139dd",
+      "uuid": "0c6776d1-1b35-4b33-aa64-eb3449f53f72",
       "id": "scene",
       "versioned_id": "scene",
       "settings": {
@@ -7239,7 +7611,7 @@
         "items": [
           {
             "name": "[CAM] Caster 2 (slot 2)",
-            "source_uuid": "51d28a6a-9c0e-4702-996a-db50a70c36f6",
+            "source_uuid": "6df6cc20-ee5f-4ce8-801c-d3698b9be405",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -7311,7 +7683,7 @@
     {
       "prev_ver": 536936450,
       "name": "=> Caster 4 Cam",
-      "uuid": "dba21657-fd08-41c5-8e39-7fac2a13d374",
+      "uuid": "1cf37674-54fa-4d5d-9b84-a68134190390",
       "id": "scene",
       "versioned_id": "scene",
       "settings": {
@@ -7320,7 +7692,7 @@
         "items": [
           {
             "name": "[CAM] Caster 4 (slot 4)",
-            "source_uuid": "168fad1d-1304-45b6-92c5-2eacda2adb6f",
+            "source_uuid": "aa1c640c-e540-4b7c-9c4b-cec8c2e0b10b",
             "visible": true,
             "locked": true,
             "rot": 0,
@@ -7392,7 +7764,7 @@
     {
       "prev_ver": 536936450,
       "name": "=> Player Cam",
-      "uuid": "185f35a1-354c-43f3-92d0-fae12bdd4810",
+      "uuid": "6550067e-9d49-4f45-8b5a-0a2a93299e07",
       "id": "scene",
       "versioned_id": "scene",
       "settings": {
@@ -7401,7 +7773,7 @@
         "items": [
           {
             "name": "[CAM] Player (slot 5)",
-            "source_uuid": "3fae9389-d13d-4bac-84ba-ebf57aec2b61",
+            "source_uuid": "01f1e177-d535-4e43-bc1d-bfe7b59a3770",
             "visible": true,
             "locked": true,
             "rot": 0,

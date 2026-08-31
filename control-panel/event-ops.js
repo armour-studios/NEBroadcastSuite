@@ -298,9 +298,11 @@
     const visible = loadVisible(headers, data.roleMap || {});
     const cols = headers.map((h, i) => ({ h, i })).filter((c) => visible.has(c.i));
 
-    const q = _eoSearch.trim().toLowerCase();
+    const q = _eoSearch.trim();
     let view = rows.map((r, ri) => ({ r, ri }));
-    if (q) view = view.filter((x) => cols.some((c) => (x.r[c.i] || '').toString().toLowerCase().includes(q)));
+    // Every visible cell is one field, so a two-word query can straddle two columns ("smith
+    // gmail" finds the row by name AND email) instead of needing both words in a single cell.
+    if (q) view = NESearch.filter(view, q, (x) => cols.map((c) => (x.r[c.i] == null ? '' : String(x.r[c.i]))));
     if (_eoSort.col >= 0) {
       const ci = _eoSort.col, dir = _eoSort.dir;
       view.sort((a, b) => {
@@ -390,12 +392,12 @@
     const seeds = seedByName();
     let teams = groupTeams(data);
     teams.sort((a, b) => a.team.localeCompare(b.team, undefined, { sensitivity: 'base', numeric: true }));
-    const q = _eoSearch.trim().toLowerCase();
-    if (q) {
-      teams = teams.filter((t) =>
-        t.team.toLowerCase().includes(q) ||
-        t.players.some((p) => (p.player + ' ' + p.email + ' ' + p.challonge).toLowerCase().includes(q)));
-    }
+    const q = _eoSearch.trim();
+    // Player, email and Challonge handle are separate fields per player — joined into one string
+    // they only matched when the query words happened to be in that same order.
+    teams = NESearch.filter(teams, q, (t) => [{ text: t.team, weight: 2 }].concat(
+      t.players.reduce((acc, p) => acc.concat([p.player, p.email, p.challonge]), [])
+    ));
     // One-click copy for a single cell — omitted entirely when the field is blank.
     const eoFieldCopy = (val, label) => (val
       ? `<button class="eo-fcopy" type="button" data-val="${eoEsc(val)}" data-label="${eoEsc(label)}" title="Copy ${eoEsc(label)}" aria-label="Copy ${eoEsc(label)}">copy</button>`
@@ -667,7 +669,7 @@
     eoRenderDash(); eoRenderSeeds(); eoRenderBracket();
   };
   window.eventOpsOnState = function () {
-    const panel = el('ev-eventops-panel');
+    const panel = el('stats-panel-eventops');
     if (!panel || panel.style.display === 'none') return;
     const a = document.activeElement;
     if (a && (a.id === 'eo-search' || a.id === 'eo-seed-slug')) return;

@@ -8,8 +8,17 @@
   <sdpi-item label="Graphic">
     <sdpi-select setting="gfx" datasource="getGfx" hot-reload loading="Connecting to suite..." placeholder="Pick a graphic"></sdpi-select>
   </sdpi-item>
-  <sdpi-item label="Team side">
-    <sdpi-select setting="side" datasource="getSides" hot-reload placeholder="Winner / Line-up only"></sdpi-select>
+  <sdpi-item label="Team side" id="side-row">
+    <sdpi-select setting="side" datasource="getSides" hot-reload placeholder="Line-up only"></sdpi-select>
+  </sdpi-item>
+  <!-- Winner has NO side to pick: it always crowns whoever leads the series in Match — Teams, so the
+       picker is hidden for it entirely (a blue/orange choice here only ever produced two keys that
+       disagreed with the score). Line-up keeps its side. -->
+  <sdpi-item label="Team" id="winner-note" style="display:none;">
+    <div style="font-size:11px;line-height:1.35;opacity:.75;">
+      Automatic &mdash; the Winner graphic always crowns whoever leads the series in Match &mdash; Teams.
+      One key covers both teams; the key face shows who it will crown right now.
+    </div>
   </sdpi-item>
   <sdpi-item label="Cut to scene">
     <sdpi-select setting="cutScene" datasource="getScenes" hot-reload show-refresh placeholder="No scene change"></sdpi-select>
@@ -17,5 +26,30 @@
   <sdpi-item label="On hide">
     <sdpi-checkbox setting="returnPrev" label="Return to the previous scene"></sdpi-checkbox>
   </sdpi-item>
+  <script>
+    // Swap the side picker for the "automatic" note whenever the chosen graphic is Winner.
+    // The Graphic select writes settings straight to the plugin and Stream Deck does NOT echo
+    // didReceiveSettings back to the inspector, and sdpi-select's inner change event doesn't cross
+    // the shadow boundary — so after the initial settings read we just watch the element's value.
+    (function () {
+      var gfxSel = document.querySelector('sdpi-select[setting="gfx"]');
+      var sideRow = document.getElementById('side-row');
+      var note = document.getElementById('winner-note');
+      var last;
+      function apply(gfx) {
+        if (gfx === last) return;
+        last = gfx;
+        var isWinner = gfx === 'winner';
+        sideRow.style.display = isWinner ? 'none' : '';
+        note.style.display = isWinner ? '' : 'none';
+      }
+      try {
+        SDPIComponents.streamDeckClient.getSettings().then(function (p) {
+          apply(p && p.settings && p.settings.gfx);
+        });
+      } catch (e) { /* not connected yet — the poll below covers it */ }
+      setInterval(function () { if (gfxSel && gfxSel.value != null) apply(gfxSel.value); }, 250);
+    })();
+  </script>
 </body>
 </html>

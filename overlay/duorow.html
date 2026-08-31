@@ -347,6 +347,247 @@
       text-shadow: 0 1px 4px rgba(0,0,0,.85);
     }
 
+    /* ── Twitch prediction face ─────────────────────────────────────── */
+    /* The HUD holds two stacked faces: the scoreboard, and the live prediction.
+       They crossfade in place so the bar reads as one object changing content. */
+    .hud-face {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: stretch;
+      transition: opacity .42s ease, transform .55s cubic-bezier(.16,.84,.24,1);
+    }
+    .hud-face--pred {
+      opacity: 0;
+      transform: translateY(18px) scale(.985);
+      pointer-events: none;
+      z-index: 2;
+    }
+    .match-hud.show-pred .hud-face--score {
+      opacity: 0;
+      transform: translateY(-18px) scale(.985);
+    }
+    .match-hud.show-pred .hud-face--pred {
+      opacity: 1;
+      transform: none;
+    }
+
+    .pred-side {
+      flex: 1 1 0;
+      min-width: 0;
+      position: relative;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      overflow: visible;
+    }
+    .pred-side--a { padding: 0 10px 0 16px; }
+    .pred-side--b { padding: 0 16px 0 8px; }
+    /* Team wash — opacity on the layer instead of color-mix so it renders in every
+       browser-source build (older CEF/Electron has no color-mix support). */
+    .pred-side::before {
+      content: '';
+      position: absolute;
+      top: 0; bottom: 0;
+      width: 45%;
+      pointer-events: none;
+      opacity: .26;
+    }
+    .pred-side--a::before {
+      left: 0;
+      background: linear-gradient(90deg, var(--team-a), transparent);
+    }
+    .pred-side--b::before {
+      right: 0;
+      width: 38%;
+      background: linear-gradient(270deg, var(--team-b), transparent);
+    }
+
+    .pred-logo {
+      width: 80px; height: 80px;
+      object-fit: contain;
+      flex: 0 0 80px;
+      position: relative;
+      z-index: 1;
+      filter: drop-shadow(0 2px 6px rgba(0,0,0,.5));
+    }
+    .pred-logo.logo-on-dark {
+      filter: brightness(0) invert(1) drop-shadow(0 2px 6px rgba(0,0,0,.5));
+    }
+
+    .pred-name {
+      flex: 1 1 0;
+      min-width: 0;
+      position: relative;
+      z-index: 1;
+      font-size: 28px;
+      font-weight: 800;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      line-height: 1;
+      color: #fff;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .pred-side--b .pred-name { text-align: right; }
+    .pred-name { text-shadow: 0 1px 5px rgba(0,0,0,.85); }
+
+    .pred-pct {
+      flex: 0 0 auto;
+      position: relative;
+      z-index: 1;
+      font-size: 56px;
+      font-weight: 900;
+      font-variant-numeric: tabular-nums;
+      line-height: 1;
+      min-width: 116px;
+      text-align: center;
+    }
+    .pred-side--a .pred-pct { color: var(--team-a); }
+    .pred-side--b .pred-pct { color: var(--team-b); }
+    /* currentColor = the team colour, so the glow tracks it without color-mix */
+    .pred-pct { text-shadow: 0 0 26px currentColor, 0 2px 5px rgba(0,0,0,.8); }
+    /* Leading side reads a touch heavier */
+    .pred-side.is-lead .pred-pct { transform: scale(1.06); }
+    .pred-pct { transition: transform .5s cubic-bezier(.16,.84,.24,1); }
+
+    .pred-center {
+      flex: 0 0 420px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      position: relative;
+      z-index: 2;
+      padding: 0 14px;
+      background: rgba(6,8,12,.97);
+      border-left: 1px solid rgba(145,70,255,.28);
+      border-right: 1px solid rgba(145,70,255,.28);
+      box-shadow: inset 0 0 0 1px rgba(0,0,0,.4), inset 0 0 40px rgba(145,70,255,.10);
+    }
+    .pred-kicker {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      color: #b78bff;
+    }
+    .pred-dot {
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      background: #9146ff;
+      box-shadow: 0 0 8px #9146ff;
+      animation: predDot 1.8s ease-in-out infinite;
+    }
+    @keyframes predDot {
+      0%, 100% { opacity: 1; box-shadow: 0 0 6px #9146ff; }
+      50%      { opacity: .45; box-shadow: 0 0 16px #9146ff; }
+    }
+    .pred-question {
+      font-size: 30px;
+      font-weight: 900;
+      font-style: italic;
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
+      line-height: 1;
+      color: #fff;
+      text-shadow: 0 1px 4px rgba(0,0,0,.85);
+      max-width: 100%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .pred-meta {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: var(--duo-muted);
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+    }
+    .pred-meta.urgent { color: #f87171; }
+    .pred-meta.result { color: #4ade80; }
+
+    /* Vote split bar — replaces the per-side accent line on this face */
+    .pred-split {
+      position: absolute;
+      left: 0; right: 0; bottom: 0;
+      height: 6px;
+      display: flex;
+      z-index: 3;
+      overflow: hidden;
+    }
+    .pred-fill {
+      display: block;
+      height: 100%;
+      transition: width 1.1s cubic-bezier(.4,0,.2,1);
+    }
+    .pred-fill--a {
+      width: 50%;
+      /* dark→clear layer over the team colour = a gradient fill without color-mix */
+      background: linear-gradient(90deg, rgba(0,0,0,.45), rgba(0,0,0,0)) var(--team-a);
+      box-shadow: 0 0 14px var(--team-a);
+    }
+    .pred-fill--b {
+      flex: 1 1 auto;
+      background: linear-gradient(270deg, rgba(0,0,0,.45), rgba(0,0,0,0)) var(--team-b);
+      box-shadow: 0 0 14px var(--team-b);
+    }
+
+    /* Chrome shown only while a prediction is open: purple gradient wash + a
+       travelling sheen (gradient, not an outline) so the bar pulls the eye. */
+    .pred-chrome {
+      position: absolute;
+      /* stops 6px short of the bottom so the team accent / vote-split bar stays clean */
+      inset: 0 0 6px 0;
+      overflow: hidden;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity .5s ease;
+      z-index: 4;
+    }
+    .match-hud.pred-live .pred-chrome { opacity: 1; }
+    .pred-chrome::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background:
+        linear-gradient(180deg, rgba(145,70,255,.20) 0%, transparent 34%),
+        linear-gradient(0deg,   rgba(145,70,255,.16) 0%, transparent 26%);
+      animation: predWash 2.8s ease-in-out infinite;
+    }
+    @keyframes predWash {
+      0%, 100% { opacity: .55; }
+      50%      { opacity: 1; }
+    }
+    .pred-sheen {
+      position: absolute;
+      top: -40%; bottom: -40%;
+      left: 0;
+      width: 26%;
+      background: linear-gradient(105deg, transparent, rgba(200,160,255,.30) 45%, rgba(255,255,255,.42) 55%, transparent);
+      transform: translateX(-160%) skewX(-14deg);
+      animation: predSheen 3.6s cubic-bezier(.5,0,.5,1) infinite;
+    }
+    @keyframes predSheen {
+      0%       { transform: translateX(-160%) skewX(-14deg); opacity: 0; }
+      12%      { opacity: .9; }
+      55%      { opacity: .9; }
+      70%, 100% { transform: translateX(560%) skewX(-14deg); opacity: 0; }
+    }
+    /* Outer glow pulse on the whole bar (gradient shadow, no outline chase) */
+    .match-hud.pred-live { animation: predGlow 2.8s ease-in-out infinite; }
+    @keyframes predGlow {
+      0%, 100% { box-shadow: 0 12px 32px rgba(0,0,0,.55), 0 0 0 1px rgba(145,70,255,.22); }
+      50%      { box-shadow: 0 12px 32px rgba(0,0,0,.55), 0 0 34px rgba(145,70,255,.38), 0 0 0 1px rgba(145,70,255,.45); }
+    }
+
     /* ── Caster cams (16:9, max width for dual layout on 1920 canvas) ─ */
     .duo-cams {
       display: flex;
@@ -694,27 +935,56 @@
 
     <div class="zone-hud">
       <div class="duo-bestof" id="duo-bestof"><span id="duo-bestof-text"></span></div>
-      <header class="match-hud">
-        <div class="match-team match-team--a">
-          <img id="teamlogo1" class="match-logo" alt="">
-          <span id="teamname1" class="match-name">BLUE</span>
-          <span id="teamscore1" class="match-score">0</span>
-        </div>
-        <div class="match-center">
-          <div class="match-series-meta">
-            <span id="vs-bo">BO5</span>
-            <span class="meta-sep">·</span>
-            <span id="vs-game" class="meta-game">GAME 1</span>
+      <header class="match-hud" id="match-hud">
+        <!-- Face A — the scoreboard (default) -->
+        <div class="hud-face hud-face--score">
+          <div class="match-team match-team--a">
+            <img id="teamlogo1" class="match-logo" alt="">
+            <span id="teamname1" class="match-name">BLUE</span>
+            <span id="teamscore1" class="match-score">0</span>
           </div>
-          <div class="match-vs-wrap">
-            <span class="match-vs">VS</span>
+          <div class="match-center">
+            <div class="match-series-meta">
+              <span id="vs-bo">BO5</span>
+              <span class="meta-sep">·</span>
+              <span id="vs-game" class="meta-game">GAME 1</span>
+            </div>
+            <div class="match-vs-wrap">
+              <span class="match-vs">VS</span>
+            </div>
+          </div>
+          <div class="match-team match-team--b">
+            <span id="teamscore2" class="match-score">0</span>
+            <span id="teamname2" class="match-name">ORANGE</span>
+            <img id="teamlogo2" class="match-logo" alt="">
           </div>
         </div>
-        <div class="match-team match-team--b">
-          <span id="teamscore2" class="match-score">0</span>
-          <span id="teamname2" class="match-name">ORANGE</span>
-          <img id="teamlogo2" class="match-logo" alt="">
+
+        <!-- Face B — the live Twitch prediction (crossfades in over the scoreboard) -->
+        <div class="hud-face hud-face--pred" id="hud-face-pred">
+          <div class="pred-side pred-side--a" id="pred-side1">
+            <img id="predlogo1" class="pred-logo" alt="">
+            <span id="predname1" class="pred-name">BLUE</span>
+            <span id="predpct1" class="pred-pct">50%</span>
+          </div>
+          <div class="pred-center">
+            <span class="pred-kicker"><i class="pred-dot"></i>Twitch Prediction</span>
+            <span id="pred-question" class="pred-question">Who will win?</span>
+            <span id="pred-meta" class="pred-meta">Voting open</span>
+          </div>
+          <div class="pred-side pred-side--b" id="pred-side2">
+            <span id="predpct2" class="pred-pct">50%</span>
+            <span id="predname2" class="pred-name">ORANGE</span>
+            <img id="predlogo2" class="pred-logo" alt="">
+          </div>
+          <div class="pred-split">
+            <span class="pred-fill pred-fill--a" id="predfill1"></span>
+            <span class="pred-fill pred-fill--b" id="predfill2"></span>
+          </div>
         </div>
+
+        <!-- Chrome: purple wash + travelling sheen while a prediction is open -->
+        <div class="pred-chrome" aria-hidden="true"><span class="pred-sheen"></span></div>
       </header>
     </div>
 
@@ -870,7 +1140,20 @@
         || (brand && ((brand.deskSponsors || []).length ? brand.deskSponsors : (anyTagged ? [] : (brand.sponsors || []))))
         || [];
       // De-dupe by logo URL so the same sponsor can never render twice in the footer.
+      // Seed the set with whatever the identity bar has ALREADY placed on this same row — the
+      // brand mark and the title-sponsor plate. A partner that is both the title sponsor and a
+      // desk sponsor (Trophi.ai on a Trophi-presented event) used to draw twice side by side:
+      // once in the left sponsor column, once on the plate. The identity bar wins; the flanking
+      // columns skip it. renderPresentedBy/renderBrandStrip run before this, so reading their
+      // live src is accurate.
       const _seen = new Set();
+      ['brand-strip-logo', 'pb-logo'].forEach((id) => {
+        const img = el(id);
+        if (img && img.style.display !== 'none') {
+          const src = img.getAttribute('src');
+          if (src) _seen.add(src);
+        }
+      });
       const sponsors = (Array.isArray(deskList) ? deskList : []).filter(s => s && s.logo && !_seen.has(s.logo) && (_seen.add(s.logo), true));
       const left = el('sponsors-left');
       const right = el('sponsors-right');
@@ -958,12 +1241,169 @@
     function renderTeam(idx, t, side) {
       const logo = el('teamlogo' + idx);
       SceneBase.applyTeamLogo(logo, t.customLogo, t.logo);
-      el('teamname' + idx).textContent = (t.name || (side === 'b' ? 'ORANGE' : 'BLUE')).toUpperCase();
+      // Head-to-head games (Smash singles, the FGC titles) print the COMPETITOR here, with their
+      // org on a second line — the team record on those is just the entrant. See SceneBase.
+      SceneBase.applyNamePlate(el('teamname' + idx), t, side === 'b' ? 'ORANGE' : 'BLUE');
       el('teamscore' + idx).textContent = t.series != null ? t.series : 0;
       document.documentElement.style.setProperty(
         side === 'b' ? '--team-b' : '--team-a',
         t.color || (side === 'b' ? '#e97139' : '#055fdb')
       );
+    }
+
+    // ── Twitch prediction takeover ──────────────────────────────────────────
+    // While a prediction is open the scorecard alternates between the scoreboard
+    // face and a "who will win?" face carrying the live vote split. Producer rule:
+    // gradients, never chasing outlines — the chrome is a wash + sheen sweep.
+    const PRED_SHOW_MS = 8000;    // prediction face dwell
+    const PRED_REST_MS = 14000;   // scoreboard dwell between prediction cards
+    const PRED_RESULT_MS = 10000; // how long the result face stays up after RESOLVED
+    let _predId = null;           // id of the prediction currently driving the bar
+    let _predRetiredId = null;    // id whose result card already played out
+    let _predResultShown = false;
+    let _predSwapTimer = null;
+    let _predResultTimer = null;
+    let _predTickTimer = null;
+    let _predLast = null;         // { pred, data } for the countdown ticker
+
+    // The live prediction, or null when the bar should stay on the scoreboard.
+    function activePrediction(data) {
+      const p = (data.twitch && data.twitch.predictions) || {};
+      const settings = p.settings || {};
+      if (settings.overlayHidden) return null;   // producer force-hide
+      const cur = p.current;
+      if (!cur || !Array.isArray(cur.outcomes) || cur.outcomes.length < 2) return null;
+      if (cur.id && cur.id === _predRetiredId) return null;
+      const ends = cur.endsAt ? new Date(cur.endsAt).getTime() : 0;
+      // A stale ACTIVE prediction (server restarted mid-window) never resolves — drop it.
+      if (cur.state !== 'RESOLVED' && cur.state !== 'LOCKED' && ends && ends < Date.now()) return null;
+      // A LOCKED prediction the streamer never resolved shouldn't cycle forever either.
+      if (cur.state === 'LOCKED' && ends && Date.now() - ends > 5 * 60 * 1000) return null;
+      return cur;
+    }
+
+    // Pair the two Twitch outcomes with the blue/orange sides by name, falling
+    // back to outcome order when the titles don't resemble the team names.
+    function predOutcomesBySide(pred, blue, orange) {
+      const o0 = pred.outcomes[0] || {};
+      const o1 = pred.outcomes[1] || {};
+      const score = (title, name) => {
+        const t = (title || '').toString().toLowerCase().trim();
+        const n = (name || '').toString().toLowerCase().trim();
+        if (!t || !n) return 0;
+        if (t === n) return 2;
+        return (t.includes(n) || n.includes(t)) ? 1 : 0;
+      };
+      // Match against the plate name too, so a prediction created as "ZAIN vs LIGHT" on a
+      // head-to-head game still pairs with the right side.
+      const sc = (title, team) => Math.max(score(title, team.name), score(title, team.soloName));
+      const straight = sc(o0.title, blue) + sc(o1.title, orange);
+      const swapped = sc(o1.title, blue) + sc(o0.title, orange);
+      return swapped > straight ? [o1, o0] : [o0, o1];
+    }
+
+    function renderPredictionFace(pred, data) {
+      const blue = SceneBase.teamSide(data, 'blue');
+      const orange = SceneBase.teamSide(data, 'orange');
+      const [oa, ob] = predOutcomesBySide(pred, blue, orange);
+
+      SceneBase.applyTeamLogo(el('predlogo1'), blue.customLogo, blue.logo);
+      SceneBase.applyTeamLogo(el('predlogo2'), orange.customLogo, orange.logo);
+      // Same rule as the scoreboard face: on head-to-head games the side IS a player, so the
+      // prediction card names the competitor rather than their entrant record.
+      el('predname1').textContent = (blue.soloName || blue.name || oa.title || 'BLUE').toUpperCase();
+      el('predname2').textContent = (orange.soloName || orange.name || ob.title || 'ORANGE').toUpperCase();
+
+      const va = Number(oa.votes) || 0;
+      const vb = Number(ob.votes) || 0;
+      const total = va + vb;
+      const pctA = total > 0 ? Math.round((va / total) * 100) : 50;
+      const pctB = 100 - pctA;
+      el('predpct1').textContent = pctA + '%';
+      el('predpct2').textContent = pctB + '%';
+      el('predfill1').style.width = pctA + '%';
+      el('pred-side1').classList.toggle('is-lead', total > 0 && pctA > pctB);
+      el('pred-side2').classList.toggle('is-lead', total > 0 && pctB > pctA);
+
+      el('pred-question').textContent = (pred.title || 'Who will win?').toString();
+      renderPredictionMeta(pred, [oa, ob]);
+    }
+
+    function renderPredictionMeta(pred, sides) {
+      const meta = el('pred-meta');
+      if (!meta) return;
+      meta.className = 'pred-meta';
+      if (pred.state === 'RESOLVED') {
+        const win = pred.winningOutcomeId && sides.find(o => o.id === pred.winningOutcomeId);
+        meta.classList.add('result');
+        meta.textContent = win ? ('Result · ' + (win.title || '').toString().toUpperCase()) : 'Result';
+        return;
+      }
+      if (pred.state === 'LOCKED') { meta.textContent = 'Votes locked'; return; }
+      const rem = pred.endsAt ? Math.max(0, new Date(pred.endsAt).getTime() - Date.now()) : 0;
+      if (!rem) { meta.textContent = 'Predict in chat'; return; }
+      const m = Math.floor(rem / 60000);
+      const s = Math.floor((rem % 60000) / 1000);
+      if (rem < 30000) meta.classList.add('urgent');
+      meta.textContent = 'Voting open · ' + m + ':' + String(s).padStart(2, '0');
+    }
+
+    // Alternate the two faces; `on` = prediction face showing.
+    function predCycle(on) {
+      clearTimeout(_predSwapTimer);
+      const hud = el('match-hud');
+      if (!hud) return;
+      hud.classList.toggle('show-pred', on);
+      _predSwapTimer = setTimeout(() => predCycle(!on), on ? PRED_SHOW_MS : PRED_REST_MS);
+    }
+
+    function predClear() {
+      clearTimeout(_predSwapTimer); _predSwapTimer = null;
+      clearTimeout(_predResultTimer); _predResultTimer = null;
+      clearInterval(_predTickTimer); _predTickTimer = null;
+      _predId = null;
+      _predResultShown = false;
+      _predLast = null;
+      const hud = el('match-hud');
+      if (hud) hud.classList.remove('show-pred', 'pred-live');
+    }
+
+    function renderPrediction(data) {
+      const pred = activePrediction(data);
+      const hud = el('match-hud');
+      if (!hud) return;
+      if (!pred) { if (_predId !== null) predClear(); return; }
+
+      _predLast = { pred, data };
+      hud.classList.add('pred-live');
+      renderPredictionFace(pred, data);
+
+      if (pred.id !== _predId) {
+        // New prediction — punch straight to the prediction face, then start cycling.
+        _predId = pred.id;
+        _predResultShown = false;
+        clearTimeout(_predResultTimer); _predResultTimer = null;
+        predCycle(true);
+        clearInterval(_predTickTimer);
+        _predTickTimer = setInterval(() => {
+          if (_predLast) renderPredictionMeta(_predLast.pred, predOutcomesBySide(
+            _predLast.pred,
+            SceneBase.teamSide(_predLast.data, 'blue'),
+            SceneBase.teamSide(_predLast.data, 'orange')
+          ));
+        }, 1000);
+      }
+
+      // Result: hold the face on screen, then hand the bar back to the scoreboard.
+      if (pred.state === 'RESOLVED' && !_predResultShown) {
+        _predResultShown = true;
+        clearTimeout(_predSwapTimer); _predSwapTimer = null;
+        hud.classList.add('show-pred');
+        _predResultTimer = setTimeout(() => {
+          _predRetiredId = pred.id;
+          predClear();
+        }, PRED_RESULT_MS);
+      }
     }
 
     function render(data) {
@@ -1004,6 +1444,7 @@
       syncIdentityBar();
       renderDeckStrip(data);
       renderSponsorFooter(data.brand, data.deskFooter);
+      renderPrediction(data);
     }
 
     if (location.protocol === 'file:') {
@@ -1036,6 +1477,22 @@
         scoreboardAd: {
           label: 'PRESENTED BY',
           logo: 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="160" height="40"><rect width="160" height="40" rx="4" fill="#1a1d24"/><text x="80" y="27" font-size="18" fill="#e8eaf0" text-anchor="middle" font-family="Arial" font-weight="bold">SPONSOR</text></svg>')
+        },
+        // Mock prediction so opening this file directly demos the scorecard takeover.
+        twitch: {
+          predictions: {
+            current: {
+              id: 'preview',
+              title: 'Who takes Game 2?',
+              state: 'ACTIVE',
+              endsAt: new Date(Date.now() + 95 * 1000).toISOString(),
+              outcomes: [
+                { id: 'o1', title: 'Velocity Gaming', votes: 3300, users: 41 },
+                { id: 'o2', title: 'Team Apex Esports', votes: 6700, users: 78 }
+              ],
+              winningOutcomeId: null
+            }
+          }
         },
         startgg: {
           matchFeed: [

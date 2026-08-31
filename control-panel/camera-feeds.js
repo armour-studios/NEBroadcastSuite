@@ -237,15 +237,20 @@ function renderVdoRooms() {
 
 // Live filter of the talent teams/players by name or gamertag.
 function cfFilterTalent() {
-  const q = (el('cf-talent-search')?.value || '').trim().toLowerCase();
+  const q = (el('cf-talent-search')?.value || '').trim();
   const clear = el('cf-talent-search-clear'); if (clear) clear.style.display = q ? '' : 'none';
   if (q) { const lib = document.querySelector('#cf-talent-teams .tl-library'); if (lib) lib.open = true; }   // reveal library matches
   document.querySelectorAll('#cf-talent-teams .talent-team, #cf-talent-teams .mc-team').forEach((team) => {
-    const teamName = (team.querySelector('.talent-team-name, .mc-team-name')?.textContent || '').toLowerCase();
-    const teamMatch = !q || teamName.includes(q);
+    // Prefer the row's own data-team-name over the header's textContent — the header carries badges
+    // and counts that leak into a textContent read and skew the match.
+    const nameNode = team.querySelector('.talent-team-name, .mc-team-name');
+    const teamName = (team.dataset.teamName || nameNode?.dataset.name || nameNode?.textContent || '').trim();
+    const teamMatch = !q || NESearch.matches(q, [teamName]);
     let anyVisible = false;
     team.querySelectorAll('.talent-row, .mc-player').forEach((r) => {
-      const show = !q || teamMatch || (r.dataset.search || '').toLowerCase().includes(q);
+      const show = !q || teamMatch || NESearch.matches(q, [
+        { text: r.dataset.name || '', weight: 2 }, r.dataset.search || ''
+      ]);
       r.classList.toggle('tl-hidden', !show);
       if (show) anyVisible = true;
     });
@@ -1252,10 +1257,9 @@ const _cfGroupSearch = { casters: '', guests: '', observers: '' };
 function cfFilterGroup(key) {
   const meta = _CF_GROUP_META[key]; if (!meta) return;
   const wrap = el(meta.container); if (!wrap) return;
-  const q = (_cfGroupSearch[key] || '').toLowerCase().trim();
-  wrap.querySelectorAll('.cf-grp-row').forEach((row) => {
-    row.style.display = (!q || (row.dataset.search || '').includes(q)) ? '' : 'none';
-  });
+  const q = (_cfGroupSearch[key] || '').trim();
+  NESearch.rankNodes(wrap.querySelectorAll('.cf-grp-row'), q,
+    (row) => [{ text: row.dataset.name || '', weight: 2 }, { text: row.dataset.search || '', bag: true }]);
 }
 
 // The member LIST comes from the broadcast caster library (so adds/edits show instantly and don't
@@ -1276,7 +1280,7 @@ function cfGroupMembersFor(key, serverGroup) {
       joinUrl: sm.joinUrl || '',
       obsUrl: p.camUrl ? p.camUrl : (sm.obsUrl || ''),   // custom view link overrides the auto feed
     };
-  });
+  }).sort((a, b) => (a.name || a.handle || '').localeCompare(b.name || b.handle || '', undefined, { sensitivity: 'base' }));   // Caster Desk: A–Z
 }
 
 async function cfLoadGroups() {
@@ -1700,6 +1704,11 @@ function cfSlotRow(sl) {
 }
 el('cf-stations-refresh')?.addEventListener('click', () => cfLoadStations());
 el('cf-stations-new')?.addEventListener('click', () => send('cloud_station_create', { name: 'New station' }));
+// Talent rotated → force the desk to re-identify every slot (manual entries too) to the live feeds.
+el('cf-resync-desk')?.addEventListener('click', () => {
+  send('resync_stations');
+  if (typeof showToast === 'function') showToast('Re-syncing desk to live station feeds…');
+});
 el('cf-stations-list')?.addEventListener('click', async (e) => {
   const btn = e.target.closest('button[data-act]'); if (!btn) return;
   const act = btn.dataset.act;

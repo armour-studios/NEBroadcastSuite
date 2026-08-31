@@ -389,6 +389,7 @@ const REPLAY_MAX_MS=15000, REPLAY_WILLEND_DELAY_MS=1800;
 
 function applyReplayColor(side){ document.documentElement.style.setProperty('--replay-color', side===1?ORANGE:BLUE); }
 function showReplay(mode){
+  if(currentState.rlReplayTransitions===false) return;   // producer disabled the animated replay transitions
   const w=el('replay-wipe'); if(!w) return;
   const logoOnly = mode==='logo';
   w.classList.toggle('logo-only', logoOnly);

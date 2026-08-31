@@ -277,7 +277,7 @@
     function tick() {
       if (_frozen != null) { setTime(fmtTime(_frozen)); updateProgress(_frozen); return; }
       if (!_endsAt) return;
-      const rem = Math.max(0, (_endsAt - Date.now()) / 1000);
+      const rem = Math.max(0, (_endsAt - (typeof SceneBase !== 'undefined' ? SceneBase.now() : Date.now())) / 1000);
       if (rem <= 0 && _finalMessage) setFinal(_finalMessage);
       else { el('time').dataset.final = ''; setTime(fmtTime(rem)); }
       updateProgress(rem);
@@ -345,7 +345,7 @@
         _frozen = hasFrozen ? Math.max(0, Math.round(b.frozenSeconds)) : null;
         _endsAt = hasEndsAt ? b.endsAt : null;
         if (!_startedAt && _endsAt) {
-          const remNow = (_endsAt - Date.now()) / 1000;
+          const remNow = (_endsAt - (typeof SceneBase !== 'undefined' ? SceneBase.now() : Date.now())) / 1000;
           if (remNow > 0 && !_totalSec) { _totalSec = remNow; _startedAt = Date.now(); }
         }
         if (!_tickTimer) startTick();

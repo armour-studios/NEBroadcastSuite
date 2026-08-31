@@ -1,137 +1,390 @@
 <!DOCTYPE html>
 <!--
-  smash-team.html — Super Smash Bros. TEAM / crew-battle scoreboard (lower third).
+  smash-team.html — Super Smash Bros. TEAM / crew-battle scoreboard.
   Driven by full_state via scene-base.js (:3001 bridge), same as every other scene:
     teams.blue/orange  → the two teams (name + logo) + accent colour
-    series.blue/orange → set score (games won) · bestOf → "Best of N"
-    smash.blue/orange.players[] → per-player stocks remaining; the bar shows the TEAM TOTAL (sum)
+    series.blue/orange → set score (games won) — shown as PIPS under the number, because in a crew
+                         battle the big number is the STOCK count, not the set score
+    smash.blue/orange.players[]    → per-player stocks remaining (Match ▸ Teams); the plate shows the
+                                     TEAM POOL draining — one pip per starting stock, plus n / pool
+    smash.blue/orange.characters[] → each crew member's fighter, parallel to players[]
     smash.startStocks  → starting stock count (per player) — used only as a fallback total
+    teamRecords / casters / brand.*Sponsors → info chips + the bottom talent-and-partners rail
+
+  Shares the singles board's layout language (see smash.html) so a producer switching between
+  1v1 and crew battle keeps one look:
+    bar 1  [ logo · NAME / crew strip ][stocks][score]  ( )  [score][stocks][ ... NAME ]
+    bar 2  [ alive · record            ][EVENT]      [ROUND · BO5][      record · alive ]
+  Two stacked bars with the brand logo straddling the seam - the same shape as smash.html, so a
+  producer switching between 1v1 and crew battle keeps one look.
+  The second line INSIDE each plate is the CREW STRIP: one entry per crew member (their fighter's
+  stock icon + stocks left), greyed out once they're eliminated. Crew members with no fighter
+  assigned fall back to a numbered slot chip, so the strip is never empty.
   Team stocks are MANUAL (Smash Ultimate has no live feed) — driven from Match ▸ Teams ▸ Smash.
-  This is the crew/team format (aggregate team stocks). For 1v1 singles use smash.html.
-  Query params:  ?title=off hides the Best-of centre label
+  This is the crew/team format. For 1v1 singles use smash.html.
+
+  Query params:  ?title=off hides the event name · ?info=0 (alias ?chips=0) drops the info bar
+                 · ?w=1280 board width · ?top=N vertical offset (default 0) · ?rail=0 / ?casters=0 / ?sponsors=0 control
+                 the bottom chip · ?anim=0 cuts the entrance animation (stills / editor scrubbing)
 -->
 <html lang="en">
 <head>
   <meta charset="utf-8" />
   <link rel="stylesheet" href="/fonts.css">
+  <link rel="stylesheet" href="/assets/vendor/fontawesome/css/all.min.css">
   <style>
     :root {
-      --a: #b81e2b;      /* team 1 accent (blue side)   */
-      --b: #1f6fd0;      /* team 2 accent (orange side) */
+      --a: #b81e2b;      /* team 1 accent — Smash's P1 side is RED  */
+      --b: #1f6fd0;      /* team 2 accent — Smash's P2 side is BLUE */
+      --plate: rgba(10, 12, 20, .94);
+      --plate-2: rgba(16, 19, 30, .94);
+      /* Smash's own player colours, used for the score caps regardless of team branding. */
+      --score-a: #d92d38;  --score-a-deep: #7d1119;
+      --score-b: #2a6fe0;  --score-b-deep: #123a80;
+      --bar-h: 72px;     /* bar 1 - name over the crew strip */
+      --bar2-h: 34px;    /* bar 2 - the context */
+      --gutter: 250px;   /* centre column the logo lives in */
+      --sub-h: 28px;     /* bar 2 (the cycling sub-bar) */
+      --sub-gap: 4px;    /* the seam between the two bars */
+      /* How far BELOW bar 1's centre the brand mark sits, so it reads as centred on the whole
+         two-bar stack. Set from JS in render() — see the note there. Do NOT write this as
+         `calc((var(--sub-gap) + var(--sub-h)) / 2)`: Electron 18 is Chrome 100, and a nested
+         calc() arriving via var() substitution silently contributes ZERO there (measured: the
+         mark stayed on bar 1's centre), the same class of trap as color-mix() in this codebase. */
+      --brand-y: 16px;
     }
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     html, body {
       width: 1920px; height: 1080px; overflow: hidden; background: transparent;
       font-family: 'Rajdhani', 'Inter', system-ui, sans-serif;
-      -webkit-font-smoothing: antialiased;
+      -webkit-font-smoothing: antialiased; text-transform: uppercase;
     }
 
-    /* ── Stage: horizontal lower-third bar ── */
+    /* ── Entrance ─────────────────────────────────────────────────────────
+       Matches smash.html: the brand mark pops, the plates wipe out from behind it,
+       then the sub-banner and chips settle. */
+    @keyframes sb-drop  { from { opacity: 0; transform: translateX(-50%) translateY(-22px); }
+                          to   { opacity: 1; transform: translateX(-50%) translateY(0); } }
+    @keyframes wipe-l   { from { opacity: 0; clip-path: inset(0 0 0 100%); }
+                          to   { opacity: 1; clip-path: inset(0 0 0 0); } }
+    @keyframes wipe-r   { from { opacity: 0; clip-path: inset(0 100% 0 0); }
+                          to   { opacity: 1; clip-path: inset(0 0 0 0); } }
+    /* MUST end on the same transform the element itself uses. `animation-fill-mode: both` keeps
+       the final keyframe applied forever, so a `to` that drops the -50% Y silently re-parks the
+       brand mark half its own height below where the layout put it. */
+    @keyframes pop      { from { opacity: 0; transform: translate(-50%, -50%) scale(.7); }
+                          to   { opacity: 1; transform: translate(-50%, -50%) scale(1); } }
+    @keyframes wipe-mid { from { opacity: 0; clip-path: inset(0 50% 0 50%); }
+                          to   { opacity: 1; clip-path: inset(0 0 0 0); } }
+
+    /* ── Stage ── */
     .sb {
-      position: absolute; top: 40px; left: 50%; transform: translateX(-50%);
-      display: grid; grid-template-columns: 1fr auto 1fr; align-items: stretch;
-      width: 1560px; height: 96px;
-      opacity: 0; transition: opacity .5s ease;
-      filter: drop-shadow(0 12px 30px rgba(0,0,0,.6));
+      /* --sb-top is how far down the board sits. 0 is as high as it can go before the plate's top
+         edge is clipped by the 1080-tall stage (nothing renders above .sb — the brand mark is
+         bounded by bar 1); 13px keeps a little air against the top of frame. ?top=N per venue. */
+      position: absolute; top: var(--sb-top, 13px); left: 50%; transform: translateX(-50%);
+      display: grid;
+      grid-template-columns: 1fr var(--gutter) 1fr;
+      grid-template-rows: var(--bar-h) var(--bar2-h);
+      width: var(--sb-w, 1280px);
+      opacity: 0;
+      /* ONE soft shadow for the whole graphic. Per-element slab shadows plus inset top
+         highlights made every piece read as a separate raised box. */
+      filter: drop-shadow(0 10px 26px rgba(0, 0, 0, .5));
     }
-    .sb.show { opacity: 1; }
+    .sb.show { animation: sb-drop .45s cubic-bezier(.2, .8, .3, 1) both; }
+    /* Children hold at 0 until the stage is up, then stagger in. The `.sb.show` guard keeps the
+       entrance from playing once on load, before any state has arrived. */
+    .sb:not(.show) .p, .sb:not(.show) .brandmark,
+    .sb:not(.show) .sub, .sb:not(.show) .brand-glow { opacity: 0; }
+    .sb.show .p--a      { animation: wipe-l   .5s cubic-bezier(.2, .8, .3, 1) .14s both; }
+    .sb.show .p--b      { animation: wipe-r   .5s cubic-bezier(.2, .8, .3, 1) .14s both; }
+    .sb.show .brandmark { animation: pop      .45s cubic-bezier(.2, 1.5, .4, 1) .02s both; }
+    .sb.show .sub       { animation: wipe-mid .45s cubic-bezier(.2, .8, .3, 1) .38s both; }
+    /* ?anim=0 — land everything instantly (stills, editor scrubbing, screenshot harnesses) */
+    body.no-anim .sb, body.no-anim .sb * { animation: none !important; }
+    body.no-anim .sb.show, body.no-anim .sb.show * { opacity: 1; }
 
-    /* ── Team panel ── */
-    .p { position: relative; display: flex; align-items: stretch; overflow: hidden; }
-    .p--a { border-radius: 8px 0 0 8px; }
-    .p--b { border-radius: 0 8px 8px 0; flex-direction: row-reverse; }
-
-    /* team logo square at the OUTER edge */
-    .logo {
-      width: 96px; height: 96px; flex: 0 0 auto; object-fit: contain; padding: 8px;
-      background: color-mix(in srgb, var(--pc) 35%, #05070c);
+    /* ── Team plate ── */
+    /* The plate IS the team colour — dark at the outer edge, saturated toward the centre. */
+    .p {
+      grid-row: 1; position: relative; display: flex; align-items: stretch; overflow: hidden;
+      background: linear-gradient(90deg, var(--pc-deep) 0%, var(--pc) 62%, var(--pc-lite) 100%);
+      box-shadow: inset 0 0 0 2px rgba(0,0,0,.55);
     }
-    .logo.is-hidden { display: none; }
-
-    /* stacked rows: name+score (accent) over stocks-total (dark) */
-    .id { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
-    .row {
-      display: flex; align-items: center; gap: 14px; height: 50%;
-      padding: 0 20px; min-width: 0;
+    .p--b { background: linear-gradient(270deg, var(--pc-deep) 0%, var(--pc) 62%, var(--pc-lite) 100%); }
+    /* The OUTER end of each plate is cut on an angle so the board tapers into the feed instead
+       of ending on a hard vertical edge. The inner end stays square — it butts the score cap. */
+    .p--a { clip-path: polygon(26px 0, 100% 0, 100% 100%, 0 100%); }
+    .p--b { clip-path: polygon(0 0, calc(100% - 26px) 0, 100% 100%, 0 100%); }
+    .p--a { --score-c: var(--score-a); --score-c-deep: var(--score-a-deep); grid-column: 1; --pc-mid: var(--a-mid); --pc: var(--a); --pc-plate: var(--a-plate); --pc-deep: var(--a-deep);
+            --pc-lite: var(--a-lite); --pc-ink: var(--a-ink); --pc-shadow: var(--a-shadow); }
+    .p--b { --score-c: var(--score-b); --score-c-deep: var(--score-b-deep); grid-column: 3; --pc-mid: var(--b-mid); --pc: var(--b); --pc-plate: var(--b-plate); --pc-deep: var(--b-deep);
+            --pc-lite: var(--b-lite); --pc-ink: var(--b-ink); --pc-shadow: var(--b-shadow);
+            flex-direction: row-reverse; }
+    .p::after {
+      content: ''; position: absolute; top: 2px; left: 2px; right: 2px; height: 1px; z-index: 3;
+      background: rgba(255,255,255,.28); pointer-events: none;
     }
-    .p--b .row { flex-direction: row-reverse; }
 
-    /* top row — team name + set score, on the accent colour */
-    .row-name { background: var(--pc); }
+    /* team logo tile at the OUTER edge */
+    .logo-tile {
+      position: relative; z-index: 1; flex: 0 0 auto; width: 68px;
+      display: flex; align-items: center; justify-content: center; padding: 8px;
+      background: rgba(0,0,0,.34);
+    }
+    .logo-tile.is-hidden { display: none; }
+    .logo { max-width: 100%; max-height: 100%; object-fit: contain; }
+
+    .pbody {
+      position: relative; z-index: 1; flex: 1 1 auto; min-width: 0;
+      display: flex; flex-direction: column; justify-content: center; gap: 7px; padding: 0 20px;
+    }
+    .p--b .pbody { align-items: flex-end; }
     .name {
-      flex: 1 1 auto; min-width: 0; color: #fff; font-weight: 700; font-size: 27px;
-      letter-spacing: .01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-      text-shadow: 0 1px 3px rgba(0,0,0,.45);
-    }
-    .p--a .name { text-align: right; }
-    .p--b .name { text-align: left; }
-    .score {
-      flex: 0 0 auto; min-width: 40px; text-align: center; color: #fff;
-      font-weight: 800; font-size: 32px; line-height: 1; text-shadow: 0 1px 4px rgba(0,0,0,.6);
+      font-size: 24px; font-weight: 700; letter-spacing: .01em; line-height: 1; color: #fff;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%;
+      text-shadow: 0 2px 7px rgba(0,0,0,.7);
     }
 
-    /* bottom row — "Stocks" + team total, on a darkened shade of the accent */
-    .row-stock { background: color-mix(in srgb, var(--pc) 34%, #12101c); }
-    .stock-lbl {
-      flex: 1 1 auto; min-width: 0; color: rgba(255,255,255,.82);
-      font-weight: 700; font-size: 19px; letter-spacing: .12em; text-transform: uppercase;
-      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    /* ── Crew strip: one chip per PLAYER — their fighter, and their own stocks counting down
+       from the starting number to zero. The team's shared pool is the `n / pool` tile beside the
+       score; this is the per-player breakdown of it, so a caster can see who is still in. */
+    .crew { display: flex; align-items: center; gap: 12px; min-width: 0; max-width: 100%; overflow: hidden; height: 27px; }
+    .p--b .crew { flex-direction: row-reverse; }
+    .crew-p { display: flex; align-items: center; gap: 5px; flex: 0 0 auto; transition: opacity .3s ease; }
+    .crew-icon { width: 25px; height: 25px; object-fit: contain; filter: drop-shadow(0 1px 4px rgba(0,0,0,.75)); }
+    .crew-slot {
+      width: 22px; height: 22px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+      background: rgba(0,0,0,.35); color: rgba(255,255,255,.85); font-size: 12px; font-weight: 800;
     }
-    .p--a .stock-lbl { text-align: right; }
-    .p--b .stock-lbl { text-align: left; }
-    .stock-num {
-      flex: 0 0 auto; min-width: 40px; text-align: center; color: #fff;
-      font-weight: 800; font-size: 27px; line-height: 1;
+    /* the player's own stocks, as pips so it reads as a countdown rather than a bare number */
+    .crew-pips { display: flex; align-items: center; gap: 3px; }
+    .crew-pip {
+      width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto;
+      background: #fff; box-shadow: 0 0 0 1px rgba(0,0,0,.4);
+      transition: background .3s ease, opacity .3s ease, transform .3s ease;
     }
+    .crew-pip.spent { background: rgba(0,0,0,.45); opacity: .5; transform: scale(.78); }
+    .crew-p.out { opacity: .34; }
+    .crew-p.out .crew-icon { filter: grayscale(1) brightness(.55); }
 
-    /* ── Centre pillar ── */
-    .mid {
-      display: flex; align-items: center; justify-content: center; gap: 16px;
-      background: rgba(6, 8, 14, .96); padding: 0 26px; min-width: 240px;
-      border-left: 1px solid rgba(255,255,255,.08); border-right: 1px solid rgba(255,255,255,.08);
+
+    /* score cap at the inner edge */
+    .pscore {
+      position: relative; z-index: 2; flex: 0 0 auto; width: 72px;
+      display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+      /* FIXED Smash player colours — red left, blue right — NOT the team colour. Deriving this
+         from var(--pc) meant a team carrying a pale/white brand colour got a white cap (and
+         onColor() then flipped the digits black), which is exactly the "still white" report.
+         The score is a game-side marker, so it stays red/blue whatever the team's branding is;
+         the plate above it is where the team's own colour lives. */
+      background:
+        linear-gradient(180deg, rgba(255,255,255,.22) 0%, rgba(255,255,255,.03) 48%, rgba(0,0,0,.22) 100%),
+        linear-gradient(180deg, var(--score-c), var(--score-c-deep));
+      color: #fff;
+      text-shadow: 0 2px 6px rgba(0,0,0,.5);
+      font-size: 31px; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums;
+      box-shadow: inset 2px 0 0 rgba(0,0,0,.5), inset 0 2px 0 rgba(0,0,0,.5), inset 0 -2px 0 rgba(0,0,0,.5);
     }
-    .mid-logo { height: 56px; max-width: 66px; object-fit: contain; }
+    .p--b .pscore { box-shadow: inset -2px 0 0 rgba(0,0,0,.5), inset 0 2px 0 rgba(0,0,0,.5), inset 0 -2px 0 rgba(0,0,0,.5); }
+
+    /* In a crew battle the big number is the STOCK POOL counting down to zero — that IS the score
+       a caster calls. The set score (games won) lives in the pips beneath it. */
+    .pscore-n { line-height: 1; }
+    .pscore-sub { font-size: 11px; font-weight: 700; color: rgba(255,255,255,.55); line-height: 1; }
+    .pscore-pips { display: flex; align-items: center; gap: 3px; height: 6px; }
+    .pscore-pips.is-hidden { display: none; }
+    /* Side B fills from its OUTER edge inward, mirroring side A. Both score caps sit against the
+       centre gutter, so a left-to-right fill on B would run away from the middle while A ran
+       toward it - the pair read as sliding the same direction instead of meeting. */
+    .p--b .pscore-pips { flex-direction: row-reverse; }
+    .pscore-pip {
+      width: 6px; height: 6px; border-radius: 50%; flex: 0 0 auto;
+      background: rgba(0,0,0,.42); box-shadow: inset 0 0 0 1px rgba(255,255,255,.25);
+      transition: background .25s ease;
+    }
+    .pscore-pip.won { background: #fff; box-shadow: 0 0 5px rgba(255,255,255,.65); }
+
+    /* ── Centre: the brand mark, straddling the seam ──────────────────
+       .mid spans BOTH rows so the logo can be centred on the boundary between the two bars
+       rather than on either one of them. z-index puts it over the info bar. */
+    .mid { grid-column: 2; grid-row: 1; position: relative; z-index: 4; }
+    /* Centred on BAR 1 - i.e. on the line the two score digits sit on - not on the seam between
+       the bars. Seam-centred hung the mark visibly below the scores. It still spans .mid across
+       both rows so it can overhang into the info bar's empty gutter. Width is derived from the
+       gutter so the mark always clears both score caps by the same 16px, whatever --gutter is. */
+    /* Centred on BAR 1 and BOUNDED BY IT. The mark used to overhang into bar 2, which is fine
+       while that bar's middle is empty; now the middle carries the event title, so anything
+       hanging down would sit on the words. A wide wordmark is width-limited anyway, so the
+       shorter box costs it nothing. */
+    /* Light behind the brand mark. A real SIBLING element, not a z-index:-1 pseudo — a negative-z
+       pseudo on a positioned parent paints OVER its parent's background here (Chrome 100), which
+       is the same trap the old medallion ring fell into.
+
+       This used to be a single ellipse throbbing .30 -> .68 every 3.4s. On a live feed that reads
+       as the logo BLINKING: one property, one axis, fast enough to keep catching the eye during
+       play. Two slow motions replace it — a wide halo that breathes shallowly, and a sheen that
+       orbits behind the mark — so the light never sits still but never flashes either. Neither
+       motion resolves on the same beat, so it doesn't develop a visible rhythm. */
+    @keyframes brand-breathe {
+      0%, 100% { opacity: .34; transform: translate(-50%, -50%) scale(1); }
+      50%      { opacity: .54; transform: translate(-50%, -50%) scale(1.04); }
+      /* keyframes must end on the SAME transform the element uses (fill-mode both) */
+    }
+    @keyframes brand-orbit { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+    .brand-glow {
+      /* Bar 1's centre plus --brand-y == the centre of the two-bar stack (see :root). */
+      position: absolute; top: calc(50% + var(--brand-y, 16px)); left: 50%;
+      transform: translate(-50%, -50%);
+      width: 272px; height: 138px; border-radius: 50%; pointer-events: none;
+      background: radial-gradient(ellipse at center, var(--glow, #6ea8ff) 0%,
+                                  rgba(0,0,0,0) 68%);
+      filter: blur(12px);
+      animation: brand-breathe 7s ease-in-out infinite;
+    }
+    /* The orbiting sheen. Chrome 100 has no @property, so a conic gradient's angle can't be
+       animated — the ELEMENT rotates instead. Masked to a soft disc so it fades out long before
+       its own edge; without that the rotating square corners scrape through the blur. */
+    .brand-glow::before {
+      content: ''; position: absolute; left: -26%; top: -52%; width: 152%; height: 204%;
+      background: conic-gradient(from 0deg,
+        rgba(255,255,255,0) 0deg, var(--glow, #6ea8ff) 58deg, rgba(255,255,255,0) 132deg,
+        rgba(255,255,255,0) 224deg, var(--glow, #6ea8ff) 292deg, rgba(255,255,255,0) 360deg);
+      -webkit-mask-image: radial-gradient(ellipse at center, #000 0%, rgba(0,0,0,0) 64%);
+              mask-image: radial-gradient(ellipse at center, #000 0%, rgba(0,0,0,0) 64%);
+      opacity: .42;
+      animation: brand-orbit 19s linear infinite;
+    }
+    body.no-anim .brand-glow { animation: none; opacity: .45; }
+    body.no-anim .brand-glow::before { animation: none; }
+
+    .brandmark {
+      /* Bar 1's centre PLUS --brand-y, which render() sets to half the visible second bar — so the
+         mark reads as centred on the whole two-bar stack, and falls back to bar 1's centre when
+         the sub-bars are hidden. */
+      position: absolute; top: calc(50% + var(--brand-y, 16px)); left: 50%;
+      transform: translate(-50%, -50%);
+      display: flex; align-items: center; justify-content: center;
+      width: calc(var(--gutter) - 32px); height: calc(var(--bar-h) - 6px);
+    }
+    .mid-logo {
+      max-width: 100%; max-height: 100%; object-fit: contain;
+      filter: drop-shadow(0 6px 18px rgba(0,0,0,.7));
+    }
     .mid-logo.is-hidden { display: none; }
-    .mid-bo {
-      color: #fff; font-weight: 800; font-size: 21px; letter-spacing: .1em; text-transform: uppercase;
-      white-space: nowrap; text-align: center;
+    .mid-vs {
+      font-size: 34px; font-weight: 800; letter-spacing: .08em; color: rgba(255,255,255,.9);
+      text-shadow: 0 3px 12px rgba(0,0,0,.85);
     }
-    .mid-bo.is-hidden { display: none; }
+    .mid-vs.is-hidden { display: none; }
+
+    /* ── Sub-bars: one under each plate, narrower, and CYCLING ────────────
+       Same component as the singles board — one frame at a time, cross-fading every --flip
+       seconds, so the match context and each team's own lines share the space. */
+    .sub {
+      grid-row: 2; justify-self: stretch; align-self: start; position: relative;
+      margin-top: var(--sub-gap); height: var(--sub-h); width: 100%;
+      display: flex; align-items: center; justify-content: center; padding: 0 20px;
+      background: linear-gradient(180deg, #14161f, #06070c);
+      box-shadow: inset 0 0 0 2px rgba(0,0,0,.55);
+      border-radius: 0 0 4px 4px; overflow: hidden;
+    }
+    .sub--a { grid-column: 1; --sc: var(--a-lite); }
+    .sub--b { grid-column: 3; --sc: var(--b-lite); }
+    .sub.is-hidden { display: none; }
+    .sub-frame {
+      position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+      display: flex; align-items: center; justify-content: center; gap: 8px; padding: 0 14px;
+      opacity: 0; transition: opacity .45s ease;
+      font-size: 13px; font-weight: 800; letter-spacing: .16em; line-height: 1;
+      color: #fff; white-space: nowrap;
+    }
+    .sub-frame.on { opacity: 1; }
+    .sub-frame .muted { color: rgba(255,255,255,.5); letter-spacing: .18em; font-size: 11px; }
+
   </style>
 </head>
 <body>
   <div class="sb" id="sb">
-    <div class="p p--a" style="--pc: var(--a);">
-      <img class="logo is-hidden" id="logoA" alt="">
-      <div class="id">
-        <div class="row row-name"><span class="name" id="nameA">TEAM 1</span><span class="score" id="scoreA">0</span></div>
-        <div class="row row-stock"><span class="stock-lbl" id="lblA">Stocks</span><span class="stock-num" id="stockA">0</span></div>
+    <div class="p p--a">
+      <div class="logo-tile is-hidden" id="tileA"><img class="logo" id="logoA" alt=""></div>
+      <div class="pbody">
+        <div class="name" id="nameA">TEAM 1</div>
+        <div class="crew" id="crewA"></div>
+      </div>
+      <div class="pscore">
+        <span class="pscore-n" id="stockA">0</span>
+        <span class="pscore-sub" id="poolA"></span>
+        <span class="pscore-pips is-hidden" id="pipsA"></span>
       </div>
     </div>
 
     <div class="mid">
-      <img class="mid-logo is-hidden" id="midLogo" alt="">
-      <div class="mid-bo" id="midBo">BEST OF 3</div>
-    </div>
-
-    <div class="p p--b" style="--pc: var(--b);">
-      <img class="logo is-hidden" id="logoB" alt="">
-      <div class="id">
-        <div class="row row-name"><span class="name" id="nameB">TEAM 2</span><span class="score" id="scoreB">0</span></div>
-        <div class="row row-stock"><span class="stock-lbl" id="lblB">Stocks</span><span class="stock-num" id="stockB">0</span></div>
+      <div class="brand-glow"></div>
+      <div class="brandmark">
+        <img class="mid-logo is-hidden" id="midLogo" alt="">
+        <span class="mid-vs" id="midVs">VS</span>
       </div>
     </div>
+
+    <div class="p p--b">
+      <div class="logo-tile is-hidden" id="tileB"><img class="logo" id="logoB" alt=""></div>
+      <div class="pbody">
+        <div class="name" id="nameB">TEAM 2</div>
+        <div class="crew" id="crewB"></div>
+      </div>
+      <div class="pscore">
+        <span class="pscore-n" id="stockB">0</span>
+        <span class="pscore-sub" id="poolB"></span>
+        <span class="pscore-pips is-hidden" id="pipsB"></span>
+      </div>
+    </div>
+
+    <div class="sub sub--a is-hidden" id="subA"></div>
+    <div class="sub sub--b is-hidden" id="subB"></div>
   </div>
 
   <script src="/scene-base.js"></script>
+  <script src="/smash-fighters.js"></script>
+  <script src="/caster-rail.js"></script>
   <script>
     const QP = new URLSearchParams(location.search);
+    // ?chips=0 is the old name for this; keep honouring it so saved OBS sources don't break.
+    const SHOW_INFO = QP.get('info') !== '0' && QP.get('chips') !== '0';
+    if (QP.get('anim') === '0') document.body.classList.add('no-anim');
+    // The board is deliberately narrow so it clears the in-game UI; ?w= widens it per venue.
+    const W = Math.max(900, Math.min(1920, Number(QP.get('w')) || 1280));
+    // seconds each sub-bar frame holds before cross-fading to the next; ?flip=0 pins frame 0
+    const FLIP_MS = (QP.get('flip') === '0') ? 0
+                  : Math.max(3, Number(QP.get('flip')) || 10) * 1000;
+    document.documentElement.style.setProperty('--sb-w', W + 'px');
+    // ?top=N — vertical offset from the top of frame. 0 is the highest it can go without
+    // clipping; 13 is the default so the board isn't pinned flush to the edge.
+    const raw = QP.get('top');
+    const TOP = Math.max(0, Math.min(400, raw == null || raw === '' ? 13 : (Number(raw) || 0)));
+    document.documentElement.style.setProperty('--sb-top', TOP + 'px');
     const el = (id) => document.getElementById(id);
     const str = (v) => (v == null ? '' : String(v)).trim();
+    const esc = (v) => str(v).replace(/&/g, '&amp;').replace(/</g, '&lt;');
+    function firstNonEmpty() { for (const v of arguments) { const s = str(v); if (s) return s; } return ''; }
+
+    /* "BO5" / "FT2" are shorthand a producer types into Match ▸ Series; spell them out for air.
+       Anything else is passed through exactly as typed. */
+    function spellFormat(v) {
+      const t = str(v);
+      let m = /^bo\s*[-.]?\s*(\d+)$/i.exec(t);
+      if (m) return 'Best of ' + m[1];
+      m = /^ft\s*[-.]?\s*(\d+)$/i.exec(t);
+      if (m) return 'First to ' + m[1];
+      m = /^best\s*of\s*(\d+)$/i.exec(t);
+      if (m) return 'Best of ' + m[1];
+      return t;
+    }
 
     // Team total stocks = sum of the crew's per-player stocks; fall back to a single side.stocks
-    // value (× nothing) if no players array is present yet.
-    function teamStocks(smashSide, startStocks) {
+    // value if no players array is present yet.
+    function teamStocks(smashSide) {
       smashSide = smashSide || {};
       if (Array.isArray(smashSide.players) && smashSide.players.length) {
         return smashSide.players.reduce((a, n) => a + Math.max(0, Number(n) || 0), 0);
@@ -139,15 +392,119 @@
       return Math.max(0, Number(smashSide.stocks) || 0);
     }
 
-    function renderSide(suffix, team, smashSide, seriesScore, startStocks) {
+    // The crew's shared pool: what they started with (players x start stocks) and what's left.
+    function stockPool(smashSide, startStocks) {
+      const players = Array.isArray(smashSide && smashSide.players) ? smashSide.players : [];
+      const per = Math.max(1, Math.min(9, Number(startStocks) || 3));
+      return players.length * per;
+    }
+
+    // One chip per crew member: their fighter's stock icon (or a numbered slot when no fighter is
+    // assigned) and their own stocks as pips, counting down from the starting number. Dimmed once
+    // they're out. The TEAM total beside the score is the same numbers pooled.
+    function renderCrew(wrap, smashSide, startStocks) {
+      smashSide = smashSide || {};
+      const players = Array.isArray(smashSide.players) ? smashSide.players : [];
+      const chars = Array.isArray(smashSide.characters) ? smashSide.characters : [];
+      const per = Math.max(1, Math.min(9, Number(startStocks) || 3));
+      const resolve = (name) => (typeof SmashFighters !== 'undefined') ? SmashFighters.resolve(name) : null;
+      const slugs = players.map((_, i) => { const f = resolve(chars[i]); return f ? f.slug : ''; });
+      // Rebuild only when the crew's SHAPE changes (size, fighters or the per-player max) — the
+      // lit/spent state updates in place so a KO doesn't tear the strip down mid-transition.
+      const sig = slugs.join(',') + '|' + players.length + '|' + per;
+      if (wrap.dataset.sig !== sig) {
+        wrap.dataset.sig = sig;
+        wrap.innerHTML = players.map((_, i) => {
+          const face = slugs[i]
+            ? `<img class="crew-icon" src="${SmashFighters.stockUrl(slugs[i])}" alt="">`
+            : `<span class="crew-slot">${i + 1}</span>`;
+          const pips = Array.from({ length: per }, () => '<span class="crew-pip"></span>').join('');
+          return `<span class="crew-p">${face}<span class="crew-pips">${pips}</span></span>`;
+        }).join('');
+      }
+      [].forEach.call(wrap.children, (chip, i) => {
+        const left = Math.max(0, Math.min(per, Number(players[i]) || 0));
+        [].forEach.call(chip.querySelectorAll('.crew-pip'), (pip, j) => pip.classList.toggle('spent', j >= left));
+        chip.classList.toggle('out', left <= 0);
+      });
+      const pool = stockPool(smashSide, startStocks);
+      return { left: Math.max(0, Math.min(pool, teamStocks(smashSide))), pool };
+    }
+
+    /* ── Sub-bar frames, SIDE-ALIGNED ────────────────────────────────────
+       Both bars step the same KINDS at the same time so the halves read as a matched pair.
+       Building each side independently let them drift as soon as their frame counts differed. */
+    const FRAME_KINDS = ['context', 'alive', 'record'];
+
+    function frameFor(kind, smashSide, record, context) {
+      if (kind === 'context') return context ? `<div class="sub-frame">${esc(context)}</div>` : '';
+      if (kind === 'alive') {
+        const players = Array.isArray(smashSide && smashSide.players) ? smashSide.players : [];
+        if (!players.length) return '';
+        const alive = players.filter((n) => Number(n) > 0).length;
+        return `<div class="sub-frame"><span class="muted">Alive</span>${alive} / ${players.length}</div>`;
+      }
+      if (kind === 'record') {
+        return record ? `<div class="sub-frame"><span class="muted">Record</span>${esc(record)}</div>` : '';
+      }
+      return '';
+    }
+
+    function buildFrameSet(a, b, ctxA, ctxB) {
+      const out = { a: [], b: [] };
+      FRAME_KINDS.forEach((kind) => {
+        const fa = frameFor(kind, a.side, a.record, ctxA);
+        const fb = frameFor(kind, b.side, b.record, ctxB);
+        if (!fa && !fb) return;
+        out.a.push(fa || frameFor('context', a.side, a.record, ctxA));
+        out.b.push(fb || frameFor('context', b.side, b.record, ctxB));
+      });
+      return out;
+    }
+
+    /* ONE timer, one shared index — the two bars cannot drift apart. */
+    let _subTimer = null;
+    function applyFrameSet(set) {
+      const wrapA = el('subA'), wrapB = el('subB');
+      const sig = set.a.join('~') + '||' + set.b.join('~');
+      if (wrapA.dataset.sig === sig) return;
+      wrapA.dataset.sig = sig;
+      if (_subTimer) { clearInterval(_subTimer); _subTimer = null; }
+      wrapA.innerHTML = set.a.join('');
+      wrapB.innerHTML = set.b.join('');
+      const n = set.a.length;
+      wrapA.classList.toggle('is-hidden', !SHOW_INFO || !n);
+      wrapB.classList.toggle('is-hidden', !SHOW_INFO || !n);
+      if (!n) return;
+      wrapA.firstElementChild.classList.add('on');
+      wrapB.firstElementChild.classList.add('on');
+      if (n < 2 || FLIP_MS <= 0) return;
+      let i = 0;
+      _subTimer = setInterval(() => {
+        const next = (i + 1) % n;
+        [wrapA, wrapB].forEach((w) => {
+          if (w.children[i]) w.children[i].classList.remove('on');
+          if (w.children[next]) w.children[next].classList.add('on');
+        });
+        i = next;
+      }, FLIP_MS);
+    }
+
+
+    function renderSide(suffix, team, smashSide, seriesScore, record, startStocks) {
       team = team || {};
       el('name' + suffix).textContent = str(team.name) || ('TEAM ' + (suffix === 'A' ? '1' : '2'));
-      el('score' + suffix).textContent = String(Number(seriesScore) || 0);
-      el('stock' + suffix).textContent = String(teamStocks(smashSide, startStocks));
+      const pool = renderCrew(el('crew' + suffix), smashSide, startStocks);
+      // The cap is the stock countdown; the pool size sits under it so "6" reads as "6 of 12 left".
+      el('stock' + suffix).textContent = String(pool.left);
+      const pe = el('pool' + suffix);
+      if (pe) { pe.textContent = pool.pool ? ('/ ' + pool.pool) : ''; }
       const logo = str(team.logo);
+      const tile = el('tile' + suffix);
       const img = el('logo' + suffix);
-      if (logo) { img.src = logo; img.classList.remove('is-hidden'); }
-      else img.classList.add('is-hidden');
+      if (logo) { if (img.getAttribute('src') !== logo) img.src = logo; tile.classList.remove('is-hidden'); }
+      else tile.classList.add('is-hidden');
+      return smashSide;   // frames are built in render(), which owns the context strings
     }
 
     function render(data) {
@@ -155,29 +512,102 @@
       const teams = data.teams || {};
       const series = data.series || {};
       const smash = data.smash || { blue: {}, orange: {}, startStocks: 3 };
+      const tr = data.teamRecords || {};
+      const recOn = !!tr.enabled;
 
       const cA = str(teams.blue && teams.blue.color) || '#b81e2b';
       const cB = str(teams.orange && teams.orange.color) || '#1f6fd0';
-      document.documentElement.style.setProperty('--a', cA);
-      document.documentElement.style.setProperty('--b', cB);
+      const root = document.documentElement.style;
+      root.setProperty('--a', cA);
+      root.setProperty('--b', cB);
+      // Shades computed here rather than with CSS color-mix(): the app ships Electron 18
+      // (Chrome 100), where color-mix is unsupported and computes to black.
+      const rgb = (hex) => { const m = /^#?([0-9a-f]{6})$/i.exec(hex || ''); const n = m ? parseInt(m[1], 16) : 0;
+        return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; };
+      const tint = (hex, a) => { const c = rgb(hex); return `rgba(${c[0]},${c[1]},${c[2]},${a})`; };
+      const blend = (hex, base, amt) => {
+        const c = rgb(hex), b = rgb(base);
+        return `rgb(${c.map((v, i) => Math.round(b[i] + (v - b[i]) * amt)).join(',')})`;
+      };
+      // A white/pastel kit put white score digits on a white cap - invisible on air. onColor()
+      // flips to dark ink above ~0.45 luminance, and the same test drops the plate wash so the
+      // white player name doesn't sit on a near-white field either.
+      const lighten = (hex, amt) => `rgb(${rgb(hex).map((v) => Math.round(v + (255 - v) * amt)).join(',')})`;
+      const darken = (hex, amt) => `rgb(${rgb(hex).map((v) => Math.round(v * (1 - amt))).join(',')})`;
+      [['a', cA], ['b', cB]].forEach(([k, hex]) => {
+        // The cap is the side's own colour, so contrast is measured against THAT.
+        const ink = SceneBase.onColor(hex);
+        const pale = ink !== '#fff';
+        root.setProperty('--' + k + '-ink', ink);
+        root.setProperty('--' + k + '-shadow', pale ? 'none' : '0 2px 8px rgba(0,0,0,.35)');
+        root.setProperty('--' + k + '-wash', tint(hex, pale ? 0.2 : 0.4));
+        root.setProperty('--' + k + '-deep', darken(hex, pale ? 0.22 : 0.62));
+        root.setProperty('--' + k + '-lite', pale ? darken(hex, 0.08) : lighten(hex, 0.24));
+        root.setProperty('--' + k + '-mid', pale ? darken(hex, 0.20) : lighten(hex, 0.06));
+        root.setProperty('--' + k + '-plate', blend(hex, '#05070c', 0.35));
+      });
 
-      renderSide('A', teams.blue, smash.blue, series.blue, smash.startStocks);
-      renderSide('B', teams.orange, smash.orange, series.orange, smash.startStocks);
+      const sideA = renderSide('A', teams.blue, smash.blue, series.blue,
+                               recOn ? str(tr.blue) : '', smash.startStocks);
+      const sideB = renderSide('B', teams.orange, smash.orange, series.orange,
+                               recOn ? str(tr.orange) : '', smash.startStocks);
 
-      // centre: brand logo + Best-of
+      // centre: the brand mark, or a plain VS when no logo is loaded
       const brand = data.brand || {};
       const logo = str(brand.logo);
+      // the glow takes the brand accent, falling back to a blend of the two side colours
+      root.setProperty('--glow', SceneBase.brandColor(data) || lighten(cA, 0.35));
       const midLogo = el('midLogo');
-      if (logo) { midLogo.src = logo; midLogo.classList.remove('is-hidden'); }
-      else midLogo.classList.add('is-hidden');
+      const midVs = el('midVs');
+      if (logo) {
+        if (midLogo.getAttribute('src') !== logo) midLogo.src = logo;
+        midLogo.classList.remove('is-hidden'); midVs.classList.add('is-hidden');
+      } else { midLogo.classList.add('is-hidden'); midVs.classList.remove('is-hidden'); }
 
-      const bo = Number(data.bestOf) > 0 ? ('Best of ' + data.bestOf) : '';
-      const midBo = el('midBo');
-      midBo.textContent = bo;
-      midBo.classList.toggle('is-hidden', !bo || QP.get('title') === 'off');
+      // Sub-bar frame 0 is the match context: round on the left, format on the right.
+      const titleOff = QP.get('title') === 'off';
+      const round = firstNonEmpty(data.roundLabel, data.match && data.match.division,
+                                  titleOff ? '' : firstNonEmpty(data.eventName, smash.title));
+      const bestOf = spellFormat(firstNonEmpty(data.match && data.match.format,
+                                   Number(data.bestOf) > 0 ? ('Best of ' + data.bestOf) : ''));
+      applyFrameSet(buildFrameSet(
+        { side: smash.blue, record: recOn ? str(tr.blue) : '' },
+        { side: smash.orange, record: recOn ? str(tr.orange) : '' }, round, bestOf));
 
+      // Games won as pips under each stock count — the set score, since the number is stocks.
+      const need = Math.max(1, Math.ceil((Number(data.bestOf) || 3) / 2));
+      [['A', Number(series.blue) || 0], ['B', Number(series.orange) || 0]].forEach(([sfx, won]) => {
+        const row = el('pips' + sfx);
+        if (!row) return;
+        if (row.dataset.need !== String(need)) {
+          row.dataset.need = String(need);
+          row.innerHTML = Array.from({ length: need }, () => '<span class="pscore-pip"></span>').join('');
+        }
+        [].forEach.call(row.children, (pip, i) => pip.classList.toggle('won', i < won));
+        row.classList.toggle('is-hidden', need < 2);
+      });
+
+      /* Centre the brand mark on the WHOLE stack, not on bar 1. Measured rather than assumed, so
+         it stays true if a bar's height changes — and when the sub-bars are hidden (nothing to
+         say) the stack IS just bar 1, so the offset correctly falls to 0. */
+      {
+        const sub = el('subA');
+        const on = sub && !sub.classList.contains('is-hidden');
+        const h = on ? (sub.offsetHeight + (parseFloat(getComputedStyle(sub).marginTop) || 0)) : 0;
+        root.setProperty('--brand-y', (h / 2) + 'px');
+      }
+
+      if (typeof CasterRail !== 'undefined') CasterRail.render(data);
       el('sb').classList.add('show');
     }
+
+    // Bottom-centre unless the producer parks it top-left (Match - Teams > Smash > Rail): crew
+    // battles fill the bottom of frame with Smash's own player HUD. `anchor` lines the card up
+    // with the scoreboard's left edge so it tracks ?w= and ?top=.
+    if (typeof CasterRail !== 'undefined') CasterRail.mount({
+      variant: 'chip', bottom: 30, anchor: '#sb', vAnchor: '.brandmark',
+      posFrom: function (d) { return ((d || {}).smash || {}).railPos; }
+    });
 
     if (typeof SceneBase !== 'undefined') {
       if (SceneBase.preview) {
@@ -185,8 +615,15 @@
           teams: { blue: { name: 'Pittsburgh Job Corps', color: '#b81e2b', logo: '' },
                    orange: { name: 'Potomac Panthers', color: '#1f6fd0', logo: '' } },
           series: { blue: 1, orange: 0 }, bestOf: 3,
-          smash: { startStocks: 3, blue: { players: [3, 3, 3, 3] }, orange: { players: [3, 3, 3, 3] } },
-          brand: { logo: '' }
+          smash: { startStocks: 3, title: 'Ultimate Crew Battle',
+                   blue:   { players: [3, 2, 0, 3], characters: ['Fox', 'Marth', 'Pikachu', 'Steve'] },
+                   orange: { players: [1, 3, 3, 3], characters: ['Joker', 'Sephiroth', 'Roy', 'Snake'] } },
+          eventName: 'CREW CLASH', roundLabel: 'SEMI-FINAL',
+          teamRecords: { enabled: true, blue: '6-1', orange: '5-2' },
+          brand: { logo: '' },
+          casters: { visible: true, nameMode: 'gamertag', list: [
+            { slot: 1, gamertag: 'JONZEY', role: 'Play-by-play', social: 'x', socialHandle: 'ItzJonzey' }
+          ] }
         });
       } else {
         SceneBase.connect((data) => { SceneBase.applySceneConfig('smash-team', data); render(data); });

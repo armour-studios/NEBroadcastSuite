@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<!--
+  br-match.html — single-match result card: the winner ("Victory Royale" moment) plus that match's
+  placements and elims, shown before the running totals go back up. Reads state.br.lastMatch, which
+  the server derives from the most recent match number present in the raw results.
+
+  Query params:
+    ?rows=N      how many placements to list under the winner (default 8)
+    ?match=N     pin the card to a specific match instead of following the latest
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1920">
+<title>NE Broadcast Suite — BR Match Result</title>
+<link rel="stylesheet" href="/fonts.css">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --accent: #055fdb; --accent-2: #4d90ff;
+  --gold: #ffcf5c; --silver: #d3dcec; --bronze: #e0965a;
+  --disp: 'Rajdhani', 'Inter', sans-serif;
+  --main-font: 'Bourgeois', 'Inter', sans-serif;
+}
+html, body { width: 1920px; height: 1080px; overflow: hidden; background: transparent; }
+body { font-family: var(--main-font); color: #eef2f8; }
+
+#stage {
+  position: absolute; inset: 0; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; padding: 60px;
+  opacity: 0; transition: opacity .35s ease;
+}
+#stage.show { opacity: 1; }
+
+.eyebrow { font-size: 17px; font-weight: 800; letter-spacing: .3em; text-transform: uppercase;
+  color: rgba(255,255,255,.55); margin-bottom: 12px; }
+
+/* ── winner plate ───────────────────────────────────────────────────────── */
+.win {
+  display: flex; align-items: center; gap: 26px;
+  padding: 20px 46px 22px; border-radius: 8px; margin-bottom: 30px;
+  background: linear-gradient(90deg, rgba(255,207,92,.2), rgba(13,16,23,.9) 62%);
+  border-left: 4px solid var(--gold);
+  box-shadow: 0 20px 54px rgba(0,0,0,.5);
+  animation: winIn .55s cubic-bezier(.2,.9,.3,1) both;
+}
+@keyframes winIn { from { opacity: 0; transform: translateY(18px) scale(.97); } to { opacity: 1; transform: none; } }
+.win img { width: 92px; height: 92px; object-fit: contain; }
+.win-txt { display: flex; flex-direction: column; gap: 5px; }
+.win-lbl { font-size: 15px; font-weight: 800; letter-spacing: .28em; text-transform: uppercase; color: var(--gold); }
+.win-name { font-family: var(--disp); font-size: 62px; font-weight: 700; letter-spacing: .02em;
+  text-transform: uppercase; line-height: 1; }
+.win-stat { font-size: 16px; font-weight: 700; letter-spacing: .16em; text-transform: uppercase; color: rgba(255,255,255,.6); }
+
+/* ── placement list ─────────────────────────────────────────────────────── */
+#list { width: 100%; max-width: 1080px; display: flex; flex-direction: column; gap: 6px; }
+.r {
+  display: grid; grid-template-columns: 54px minmax(0,1fr) 92px 92px;
+  align-items: center; gap: 14px; padding: 9px 18px; border-radius: 5px;
+  background: linear-gradient(90deg, rgba(20,24,31,.9), rgba(13,16,23,.84));
+  border-left: 3px solid rgba(255,255,255,.12);
+  animation: rIn .4s ease both;
+}
+@keyframes rIn { from { opacity: 0; transform: translateX(-14px); } to { opacity: 1; transform: none; } }
+.r.p2 { border-left-color: var(--silver); }
+.r.p3 { border-left-color: var(--bronze); }
+.rk { font-family: var(--disp); font-size: 28px; font-weight: 700; text-align: center; line-height: 1; }
+.p2 .rk { color: var(--silver); } .p3 .rk { color: var(--bronze); }
+.tm { display: flex; align-items: center; gap: 11px; min-width: 0; }
+.tm img { width: 34px; height: 34px; object-fit: contain; flex-shrink: 0; }
+.tm span { font-family: var(--disp); font-size: 26px; font-weight: 600; text-transform: uppercase;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.st { font-family: var(--disp); font-size: 22px; font-weight: 600; text-align: right; color: rgba(255,255,255,.66); }
+.pt { font-family: var(--disp); font-size: 30px; font-weight: 700; text-align: right; }
+.colhdr { display: grid; grid-template-columns: 54px minmax(0,1fr) 92px 92px; gap: 14px;
+  width: 100%; max-width: 1080px;
+  padding: 0 18px 6px; font-size: 12px; font-weight: 800; letter-spacing: .2em;
+  text-transform: uppercase; color: rgba(255,255,255,.38); }
+.empty { font-size: 20px; font-weight: 700; letter-spacing: .2em; text-transform: uppercase; color: rgba(255,255,255,.32); }
+</style>
+</head>
+<body>
+  <div id="stage">
+    <div id="eyebrow" class="eyebrow"></div>
+    <div id="win" class="win" style="display:none;">
+      <img id="win-logo" src="" alt="">
+      <div class="win-txt">
+        <div class="win-lbl">Match Winner</div>
+        <div id="win-name" class="win-name">—</div>
+        <div id="win-stat" class="win-stat"></div>
+      </div>
+    </div>
+    <div id="colhdr" class="colhdr" style="display:none;">
+      <div>#</div><div>Team</div><div style="text-align:right;">Elims</div><div style="text-align:right;">Points</div>
+    </div>
+    <div id="list"></div>
+    <div id="empty" class="empty" style="display:none;">No match result yet</div>
+  </div>
+
+<script src="/scene-base.js"></script>
+<script>
+(function () {
+  const Q = new URLSearchParams(location.search);
+  const MAX_ROWS = Math.max(3, Math.min(24, parseInt(Q.get('rows'), 10) || 8));
+  const PIN = parseInt(Q.get('match'), 10) || 0;
+  const el = (id) => document.getElementById(id);
+
+  function logoFor(data, name) {
+    const want = (name || '').trim().toLowerCase();
+    if (!want) return '';
+    const hit = (data.savedTeams || []).find((t) => (t.name || '').trim().toLowerCase() === want);
+    return (hit && hit.logo) || '';
+  }
+
+  // A pinned card (?match=N) has to rebuild the match from raw results, since state.br.lastMatch
+  // only ever describes the most recent one.
+  function matchFor(br) {
+    if (!PIN) return br.lastMatch || null;
+    const rows = (br.results || []).filter((r) => (parseInt(r.match, 10) || 0) === PIN);
+    if (!rows.length) return null;
+    const table = (br.scoring && br.scoring.placementPoints) || [];
+    const kp = (br.scoring && br.scoring.killPoints) || 0;
+    const cap = (br.scoring && br.scoring.killCap) || 0;
+    const results = rows.map((r) => {
+      const pl = Math.max(0, parseInt(r.placement, 10) || 0);
+      let k = Math.max(0, parseInt(r.elims, 10) || 0);
+      if (cap > 0) k = Math.min(k, cap);
+      return { team: r.team, placement: pl, elims: Math.max(0, parseInt(r.elims, 10) || 0),
+               pts: ((pl >= 1 && pl <= table.length) ? (Number(table[pl - 1]) || 0) : 0) + k * kp };
+    }).sort((a, b) => (a.placement || 999) - (b.placement || 999));
+    return { match: PIN, results, winner: (results[0] && results[0].placement === 1) ? results[0].team : '' };
+  }
+
+  let _sig = '';
+  function render(data) {
+    data = data || {};
+    const br = data.br || {};
+    const accent  = SceneBase.brandColor(data)  || '#055fdb';
+    const accent2 = SceneBase.brandAccent(data) || accent;
+    document.documentElement.style.setProperty('--accent', accent);
+    document.documentElement.style.setProperty('--accent-2', accent2);
+    if (data.fontFamily) document.documentElement.style.setProperty('--main-font', `'${data.fontFamily}', 'Inter', sans-serif`);
+
+    const m = matchFor(br);
+    const sig = JSON.stringify({ m, e: br.event, a: accent });
+    if (sig === _sig) return;
+    _sig = sig;
+
+    el('empty').style.display = m ? 'none' : '';
+    el('win').style.display = 'none';
+    el('colhdr').style.display = 'none';
+    el('list').innerHTML = '';
+    el('eyebrow').textContent = m
+      ? [(br.event && br.event.title) || '', `Match ${m.match} Result`].filter(Boolean).join('  ·  ').toUpperCase()
+      : '';
+    el('stage').classList.add('show');
+    if (!m) return;
+
+    const top = m.results[0];
+    if (top && top.placement === 1) {
+      const logo = logoFor(data, top.team);
+      const lg = el('win-logo');
+      if (logo) { lg.src = logo; lg.style.display = ''; } else { lg.style.display = 'none'; }
+      el('win-name').textContent = (top.team || '').toUpperCase();
+      el('win-stat').textContent = `${top.elims} elims  ·  ${top.pts} pts`;
+      el('win').style.display = '';
+    }
+
+    const rest = m.results.slice(0, MAX_ROWS);
+    if (rest.length) {
+      el('colhdr').style.display = '';
+      rest.forEach((r, i) => {
+        const row = document.createElement('div');
+        row.className = 'r' + (r.placement === 2 ? ' p2' : r.placement === 3 ? ' p3' : '');
+        row.style.animationDelay = (i * 0.04) + 's';
+        const logo = logoFor(data, r.team);
+        row.innerHTML = `<div class="rk">${r.placement || '–'}</div>`
+          + `<div class="tm">${logo ? `<img src="${logo}" alt="" onerror="this.style.display='none'">` : ''}`
+          + `<span>${(r.team || '').toUpperCase().replace(/</g, '&lt;')}</span></div>`
+          + `<div class="st">${r.elims}</div><div class="pt">${r.pts}</div>`;
+        el('list').appendChild(row);
+      });
+    }
+  }
+
+  if (location.protocol === 'file:') {
+    render({
+      br: {
+        event: { title: 'Nameless Fortnite Cup' },
+        lastMatch: { match: 3, winner: 'Villainous', results: [
+          { team: 'Villainous', placement: 1, elims: 9, pts: 58 },
+          { team: 'Horizon', placement: 2, elims: 5, pts: 42 },
+          { team: 'Nova Collective', placement: 3, elims: 4, pts: 36 },
+          { team: 'Rocket Rush', placement: 4, elims: 2, pts: 30 },
+          { team: 'Iron Wolves', placement: 5, elims: 6, pts: 36 }
+        ] }
+      }
+    });
+  } else {
+    SceneBase.connect((data) => { render(data); SceneBase.applySceneConfig('br-match', data); });
+  }
+})();
+</script>
+</body>
+</html>

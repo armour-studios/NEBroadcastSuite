@@ -13,25 +13,26 @@
   // placement = preferred tooltip side ('right' hugs the sidebar; else auto below/above)
   var STEPS = [
     // ── Orientation ──
-    { title: 'Welcome to NE Broadcast Suite',
-      body: "This tour walks the whole app — every sidebar page, the sub-tabs inside them, the top bar and the quick-actions rail. It's thorough: about five minutes if you read everything. Use Next / Back (or the arrow keys), or Skip to leave. Replay it anytime from Settings ▸ Getting Started." },
-    { target: '.sidebar-nav', placement: 'right', title: 'The left sidebar — your pages',
+    { essential: true, title: 'Welcome to NE Broadcast Suite',
+      body: "The essentials: name your event, set your teams, connect a switcher and get a graphic on air. Nine steps, about a minute. Use Next / Back (or the arrow keys), or Skip to leave — at the end you can carry on into the full walkthrough of every page. Replay either anytime from Settings ▸ Getting Started.",
+      fullBody: "This tour walks the whole app — every sidebar page, the sub-tabs inside them, the top bar and the quick-actions rail. It's thorough: about five minutes if you read everything. Use Next / Back (or the arrow keys), or Skip to leave." },
+    { target: '.sidebar-nav', placement: 'right', essential: true, title: 'The left sidebar — your pages',
       body: "Everything lives here. The top group is where you run a show — Dashboard, Production, Talent, Cameras, ESPORTS, Video Editor. Below are setup and tools — Assets, Analytics, Integrations, Settings. We'll visit every one." },
     { target: '#qrail', tab: 'principal', title: 'The right rail — quick actions',
       body: "This rail rides along on every page. Its icon tabs open quick panels: QUICK (scene cuts + put-on-air), Rundown, the start.gg queue, overlay toggles, Flows, Replay, Talent cams, NEURAL AI, Notes, Stream info and Twitch chat — so you never leave the page you're on to run the show. Drag its edge to resize it." },
     { target: '#qk-put', tab: 'principal',
       run: function () { var t = document.querySelector('.qrail-tab[data-qtab="quick"]'); if (t) t.click(); },
-      title: 'Put-on-air chips',
+      essential: true, title: 'Put-on-air chips',
       body: "Each chip puts one graphic on air — click it to fire, click again to clear. Chips with a gear take options first (team, player, countdown length): the gear opens a small setup panel; press the same gear again or click away to close it." },
 
     // ── Dashboard ──
-    { target: '#tab-principal', tab: 'principal', placement: 'right', title: 'Dashboard — your live cockpit',
+    { target: '#tab-principal', tab: 'principal', placement: 'right', essential: true, title: 'Dashboard — your live cockpit',
       body: "Where you actually run the broadcast: a customizable grid of widgets. Let's look at the important ones." },
-    { target: '[data-dash-id="event"]', tab: 'principal', title: 'Event & tournament',
+    { target: '[data-dash-id="event"]', tab: 'principal', essential: true, title: 'Event & tournament',
       body: "Name your broadcast, then link a tournament (start.gg, Challonge or NXGEN). The ACTIVE event drives everything downstream — the bracket, standings, the stream queue and the scores ticker all follow it automatically." },
-    { target: '[data-dash-id="teams"]', tab: 'principal', title: 'Match — teams & score',
+    { target: '[data-dash-id="teams"]', tab: 'principal', essential: true, title: 'Match — teams & score',
       body: "Set the two teams, logos, colors, series score and rosters. This drives the scoreboard and every team-aware overlay — the lineup card, matchup, winner screen. The gear opens match settings: series format, team records, scene automation." },
-    { target: '[data-dash-id="deck"]', tab: 'principal', title: 'Cutting scenes & going live',
+    { target: '[data-dash-id="deck"]', tab: 'principal', essential: true, title: 'Cutting scenes & going live',
       body: "The Deck widget cuts your mapped scenes right from the dashboard, with preview and hotkeys. Connect your switcher first — Integrations ▸ Video Switcher, OBS or vMix (pick one, they're a clean either/or) — then this grid drives it live and stays in sync with whatever's actually on air." },
     { target: '#dcc-showdeck-home', tab: 'principal', title: 'Show Deck — your on-air talent',
       body: "The Director Control Center's home tab: who's on camera right now. Put hosts and casters on deck, watch their cams, and swap the on-air lineup live." },
@@ -96,10 +97,10 @@
       body: "The rail's Talent tab monitors every camera room from any page. Pop it out into the full Director Control Center to move casters and players between rooms live, cue interviews, and listen in on any room without putting it on air." },
 
     // ── ESPORTS ──
-    { target: '#tab-events', tab: 'events', placement: 'right', title: 'ESPORTS — tournaments & leagues',
+    { target: '#tab-events', tab: 'events', placement: 'right', essential: true, title: 'ESPORTS — tournaments & leagues',
       body: "The competitive side. Pull a bracket and it adapts to any scale — phases and pools are selectable, swiss stages render as a records ladder, and you can search a team by name to jump straight to their pool." },
     { target: '#ev-subnav', tab: 'events', title: 'ESPORTS sub-tabs',
-      body: "Tournaments · Leagues · My Events · Seeding · Spotlight. Seeding verifies player ranks across sources (rl6mans, start.gg, tracker profiles) and auto-orders your roster; Spotlight builds teams-to-watch cards for the watchlist overlay." },
+      body: "Leagues · My Events · Seeding. Run your own competitions natively — no tournament platform needed. Leagues holds rosters, standings, schedule and a bracket, and imports from a CSV if you already run your season elsewhere. Build a custom bracket from the league's Bracket tab or the Bracket button on any My Event. Seeding verifies player ranks across sources (rl6mans, start.gg, tracker profiles) and auto-orders your roster. A Tournaments tab appears too if you connect start.gg, Challonge or NXGEN." },
 
     // ── Assets ──
     { target: '#tab-media', tab: 'media', placement: 'right', title: 'Assets — media, overlays & profiles',
@@ -128,7 +129,7 @@
     // ── Finale ──
     { target: '#btn-obs-download-collection', tab: 'integrations', placement: 'auto',
       run: function () { if (window._intShowTab) window._intShowTab('switcher'); },
-      title: 'Best first move: OBS in one click',
+      essential: true, title: 'Best first move: OBS in one click',
       body: "Here in Integrations ▸ OBS Studio, click 'Save Scene Collection' to install a ready-made OBS scene collection — 32 scenes plus caster/player cam framing, pre-wired to these overlays. Import it in OBS and you're broadcast-ready. Replay this tour anytime from Settings ▸ Getting Started." }
   ];
 
@@ -162,7 +163,7 @@
     btnNext = tip.querySelector('.tour-next');
     tip.querySelector('.tour-skip').addEventListener('click', function () { end(false); });
     btnBack.addEventListener('click', function () { go(curIdx - 1); });
-    btnNext.addEventListener('click', function () { if (curIdx >= STEPS.length - 1) end(true); else go(curIdx + 1); });
+    btnNext.addEventListener('click', function () { if (curIdx >= RUN.length - 1) finish(); else go(curIdx + 1); });
     window.addEventListener('keydown', onKey, true);
     window.addEventListener('resize', reposition);
     window.addEventListener('scroll', reposition, true);
@@ -171,15 +172,21 @@
   function onKey(e) {
     if (!active) return;
     if (e.key === 'Escape') { e.preventDefault(); end(false); }
-    else if (e.key === 'ArrowRight') { e.preventDefault(); if (curIdx < STEPS.length - 1) go(curIdx + 1); else end(true); }
+    else if (e.key === 'ArrowRight') { e.preventDefault(); if (curIdx < RUN.length - 1) go(curIdx + 1); else finish(); }
     else if (e.key === 'ArrowLeft') { e.preventDefault(); go(curIdx - 1); }
   }
 
   function targetOf(step) { return step && step.target ? document.querySelector(step.target) : null; }
 
+  // The list currently being walked. Full tour = STEPS; the first-run "essentials" path is the
+  // subset flagged essential:true. 38 steps is the right depth for a reference walkthrough and far
+  // too much for someone opening the app for the first time.
+  var RUN = STEPS;
+  var runMode = 'full';
+
   function go(i) {
-    curIdx = Math.max(0, Math.min(STEPS.length - 1, i));
-    var step = STEPS[curIdx];
+    curIdx = Math.max(0, Math.min(RUN.length - 1, i));
+    var step = RUN[curIdx];
     if (step.tab) {
       var btn = document.querySelector('.tab-btn[data-tab="' + step.tab + '"]');
       if (btn && !btn.classList.contains('active')) btn.click();
@@ -192,11 +199,13 @@
   }
 
   function paint(step) {
-    elStep.textContent = (curIdx + 1) + ' / ' + STEPS.length;
+    elStep.textContent = (curIdx + 1) + ' / ' + RUN.length;
     elTitle.textContent = step.title || '';
-    elBody.textContent = step.body || '';
+    // Some steps read differently depending on which path you're on (see the welcome step).
+    elBody.textContent = ((runMode === 'full' && step.fullBody) ? step.fullBody : step.body) || '';
     btnBack.style.visibility = curIdx === 0 ? 'hidden' : '';
-    btnNext.textContent = curIdx >= STEPS.length - 1 ? 'Done' : 'Next';
+    // On the last essentials step the primary action offers the rest rather than just ending.
+    btnNext.textContent = curIdx >= RUN.length - 1 ? (runMode === 'essentials' ? 'See everything' : 'Done') : 'Next';
     var t = targetOf(step);
     if (t && t.scrollIntoView) { try { t.scrollIntoView({ block: 'center', inline: 'nearest' }); } catch (_) {} }
     requestAnimationFrame(function () { place(step, t); });
@@ -234,14 +243,23 @@
     tip.style.top = top + 'px';
   }
 
-  function reposition() { if (active) place(STEPS[curIdx], targetOf(STEPS[curIdx])); }
+  function reposition() { if (active) place(RUN[curIdx], targetOf(RUN[curIdx])); }
 
-  function start() {
+  function start(mode) {
     ensureDom();
+    runMode = (mode === 'essentials') ? 'essentials' : 'full';
+    RUN = (runMode === 'essentials') ? STEPS.filter(function (s) { return s.essential; }) : STEPS;
+    if (!RUN.length) RUN = STEPS;
     active = true;
     dismissBanner();   // engaging with the tour retires the Dashboard CTA
     overlay.classList.add('show');
     go(0);
+  }
+  // Finishing the short path rolls straight into the full tour instead of dead-ending, so nothing
+  // is hidden from someone who wants the detail.
+  function finish() {
+    if (runMode === 'essentials') { start('full'); return; }
+    end(true);
   }
 
   function end(done) {
@@ -271,7 +289,7 @@
       banner.style.display = dismissed ? 'none' : '';
       var goBtn = document.getElementById('dash-tour-cta-go');
       var xBtn = document.getElementById('dash-tour-cta-x');
-      if (goBtn) goBtn.addEventListener('click', function () { start(); });
+      if (goBtn) goBtn.addEventListener('click', function () { start('essentials'); });
       if (xBtn) xBtn.addEventListener('click', function () { dismissBanner(); });
     }
   }

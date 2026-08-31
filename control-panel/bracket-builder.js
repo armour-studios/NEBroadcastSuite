@@ -53,19 +53,27 @@ function bbLoadPhase(id) {
   bbRender();
 }
 
-function bbRoundName(matchCount, section, isLast) {
+// Round labels. idx/total position the round inside its own band, which is the only way
+// to name a LOSERS round: its match count repeats (a 16-team double elim runs 4,4,2,2,1,1), so
+// count alone can't tell Losers Round 3 from Losers Round 4. Names match the start.gg import's
+// style ('Winners Final', no apostrophe) so the same event reads the same from either source.
+function bbRoundName(matchCount, section, isLast, idx, total) {
   if (section === 'finals') return 'Grand Final';
-  if (section === 'losers') return isLast ? "Losers' Final" : 'Losers Round';
-  if (isLast) return section === 'winners' && bbModel.type === 'double' ? "Winners' Final" : 'Final';
+  if (section === 'losers') {
+    if (isLast) return 'Losers Final';
+    if (total >= 2 && idx === total - 2) return 'Losers Semifinal';
+    return 'Losers Round ' + ((idx || 0) + 1);
+  }
+  if (isLast) return section === 'winners' && bbModel.type === 'double' ? 'Winners Final' : 'Final';
   if (matchCount >= 8) return 'Round of ' + (matchCount * 2);
-  if (matchCount === 4) return 'Quarterfinals';
-  if (matchCount === 2) return 'Semifinals';
+  if (matchCount === 4) return section === 'winners' && bbModel.type === 'double' ? 'Winners Quarterfinals' : 'Quarterfinals';
+  if (matchCount === 2) return section === 'winners' && bbModel.type === 'double' ? 'Winners Semifinal' : 'Semifinals';
   return 'Final';
 }
 function bbEmptySet() { return { a: { name: '', score: 0 }, b: { name: '', score: 0 } }; }
 function bbMakeRounds(counts, section) {
   return counts.map((cnt, idx) => ({
-    name: bbRoundName(cnt, section, idx === counts.length - 1),
+    name: bbRoundName(cnt, section, idx === counts.length - 1, idx, counts.length),
     sets: Array.from({ length: cnt }, bbEmptySet)
   }));
 }
@@ -360,6 +368,38 @@ function bbRenderStandings() {
     + rows.map((s) => `<div class="bb-st-row"><span>${s.placement}</span><span class="bb-st-name">${(s.name || '').replace(/</g, '&lt;')}</span><span>${s.wins}</span><span>${s.losses}</span></div>`).join('')
     + '</div>';
 }
+// Repaint ONE match's winner state without rebuilding the board. Entering a score used to call
+// bbRender(), which replaces board.innerHTML wholesale — on a 32-team, 5-round Swiss that is ~320
+// inputs destroyed and recreated per result, and it also blew away the field you were tabbing into,
+// so scoring a round by keyboard was impossible. A score only ever changes which slot reads as the
+// winner, so change exactly that.
+function bbRefreshMatch(sec, r, s) {
+  const anyInput = document.querySelector(
+    '#bb-board .bb-score[data-sec="' + sec + '"][data-r="' + r + '"][data-s="' + s + '"]');
+  const match = anyInput && anyInput.closest('.bb-match');
+  if (!match) return;
+  const set = bbModel[sec][r].sets[s];
+  const w = bbWinnerOf(set);
+  const slots = match.querySelectorAll('.bb-slot');
+  ['a', 'b'].forEach((side, i) => { if (slots[i]) slots[i].classList.toggle('win', w === side); });
+}
+
+// Swiss: once every match in the current round has a result, pair the next one automatically.
+// bbSwissPair already does the real work (standings order, no rematches, proper byes) — it just
+// needed to stop being a button the producer has to remember to press between every round.
+function bbMaybeAutoPair() {
+  if (bbModel.type !== 'swiss') return;
+  const auto = el('bb-swiss-auto');
+  if (auto && !auto.checked) return;
+  const rounds = bbModel.rounds || [];
+  const ri = rounds.findIndex((r) => (r.sets || []).some((x) => !x.a.name || !x.b.name));
+  if (ri <= 0) return;   // nothing left to pair, or round 1 (seeded from the roster, not paired)
+  for (let i = 0; i < ri; i++) {
+    if ((rounds[i].sets || []).some((x) => x.a.name && x.b.name && !bbWinnerOf(x))) return;
+  }
+  bbSwissPair();
+}
+
 function bbRender() {
   const board = el('bb-board'); if (!board) return;
   bbTeamsDatalist();
@@ -392,7 +432,14 @@ function bbRender() {
     inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') inp.blur(); });
   });
   board.querySelectorAll('.bb-score').forEach((inp) => {
-    inp.addEventListener('change', () => { bbModel[inp.dataset.sec][inp.dataset.r].sets[inp.dataset.s][inp.dataset.side].score = Number(inp.value) || 0; bbRender(); bbAutosave(); });
+    inp.addEventListener('change', () => {
+      const d = inp.dataset;
+      bbModel[d.sec][d.r].sets[d.s][d.side].score = Number(inp.value) || 0;
+      bbRefreshMatch(d.sec, +d.r, +d.s);
+      if (bbIsTable()) bbRenderStandings();
+      bbAutosave();
+      bbMaybeAutoPair();
+    });
   });
   board.querySelectorAll('.bb-round-name').forEach((inp) => {
     inp.addEventListener('change', () => { bbModel[inp.dataset.sec][inp.dataset.r].name = inp.value.trim(); bbAutosave(); });
@@ -405,8 +452,13 @@ function bbRender() {
     const side = b.dataset.side, other = side === 'a' ? 'b' : 'a';
     set[side].win = !set[side].win;
     if (set[side].win) set[other].win = false;
-    bbRender(); bbAutosave();
+    b.classList.toggle('on', !!set[side].win);
+    const ob = b.closest('.bb-match').querySelector('.bb-win-btn[data-side="' + other + '"]');
+    if (ob) ob.classList.toggle('on', !!set[other].win);
+    bbRefreshMatch(b.dataset.sec, +b.dataset.r, +b.dataset.s);
     if (bbIsTable()) bbRenderStandings();
+    bbAutosave();
+    bbMaybeAutoPair();
   }));
   bbRenderStandings();
 }
@@ -529,24 +581,96 @@ function bbSeedTeams() {
   }
   bbStatus('Seeded from team list.', true);
 }
-// Swiss: fill empty matches by pairing teams in current-standings order.
+// ── Swiss pairing ────────────────────────────────────────────────────────────
+// Pairs the NEXT unpaired round only, in standings order, never repeating a matchup.
+// (The previous version filled every round at once from a flat standings list, which both
+// spoiled later rounds before their results existed and happily produced rematches.)
+// Entrants are paired adjacently down the standings — because the list is sorted by record,
+// equal records are neighbours, so this pairs inside score groups and floats the odd entrant
+// down naturally. An odd field gives the lowest unpaired entrant a BYE, which bbWinnerOf()
+// scores as a win for the opponent automatically.
+// The separator is written as an ESCAPE, not a literal NUL byte: raw NULs made git treat this
+// whole file as binary — no diffs, no reviewable history, and any text/line-ending normalisation
+// could have mangled it. Same key, same behaviour.
+const bbPairKey = (a, b) => (a < b ? a + '\u0000' + b : b + '\u0000' + a);
+// Every matchup that has already been assigned anywhere in the phase.
+function bbSwissPlayed(rounds) {
+  const seen = new Set();
+  (rounds || []).forEach((r) => (r.sets || []).forEach((s) => {
+    const a = s.a && s.a.name, b = s.b && s.b.name;
+    if (a && b) seen.add(bbPairKey(a, b));
+  }));
+  return seen;
+}
+// Greedy pairing with backtracking: take the top entrant, try each legal opponent in standings
+// order, recurse. Returns null when this branch can't be completed so the caller can back up —
+// without that, a late round where the obvious pairing is a rematch would dead-end.
+function bbSwissMatch(pool, played) {
+  if (!pool.length) return [];
+  if (pool.length === 1) return [[pool[0], 'BYE']];
+  const a = pool[0];
+  for (let i = 1; i < pool.length; i++) {
+    const b = pool[i];
+    if (played.has(bbPairKey(a, b))) continue;
+    const rest = pool.slice(1);
+    rest.splice(i - 1, 1);
+    const sub = bbSwissMatch(rest, played);
+    if (sub) return [[a, b]].concat(sub);
+  }
+  return null;
+}
 function bbSwissPair() {
-  const standings = bbComputeStandings().map((s) => s.name);
-  const pool = standings.length ? standings : bbModel.roster.filter(Boolean);
-  bbModel.rounds.forEach((round) => {
-    const used = new Set();
-    round.sets.forEach((set) => { if (set.a.name) used.add(set.a.name); if (set.b.name) used.add(set.b.name); });
-    const avail = pool.filter((n) => !used.has(n));
-    round.sets.forEach((set) => {
-      if (!set.a.name && avail.length) set.a.name = avail.shift();
-      if (!set.b.name && avail.length) set.b.name = avail.shift();
-    });
-  });
-  bbRender(); bbAutosave(); bbStatus('Paired empty Swiss matches by standings.', true);
+  if (bbModel.type !== 'swiss') { bbStatus('Swiss pairing only applies to a Swiss phase.', false); return; }
+  const rounds = bbModel.rounds || [];
+  const ri = rounds.findIndex((r) => (r.sets || []).some((s) => !s.a.name || !s.b.name));
+  if (ri < 0) { bbStatus('Every Swiss round is already paired.', false); return; }
+  // Pairing round N is only meaningful once rounds 1..N-1 have results.
+  for (let i = 0; i < ri; i++) {
+    const open = (rounds[i].sets || []).filter((s) => s.a.name && s.b.name && !bbWinnerOf(s)).length;
+    if (open) { bbStatus(`Enter results for ${rounds[i].name} first — ${open} match${open > 1 ? 'es' : ''} undecided.`, false); return; }
+  }
+  const roster = (bbModel.roster || []).filter(Boolean);
+  if (roster.length < 2) { bbStatus('Add at least 2 entrants to the roster first.', false); return; }
+  const prior = rounds.slice(0, ri);
+  // Standings order, with any entrant who hasn't played yet appended in roster order.
+  const order = bbComputeStandings(prior, roster).map((s) => s.name).filter((n) => roster.includes(n));
+  roster.forEach((n) => { if (!order.includes(n)) order.push(n); });
+  // Keep any matchup the producer already set by hand in this round; pair only who's left.
+  const fixed = (rounds[ri].sets || []).filter((s) => s.a.name && s.b.name);
+  const locked = new Set();
+  fixed.forEach((s) => { locked.add(s.a.name); locked.add(s.b.name); });
+  let pool = order.filter((n) => !locked.has(n));
+  // An odd field means someone sits out. Choose them EXPLICITLY rather than letting the recursion's
+  // leftover entrant take it: standard Swiss gives the bye to the lowest-ranked entrant who hasn't
+  // had one, and left to itself the recursion kept handing repeat byes to the same bottom seed.
+  let byeName = '';
+  if (pool.length % 2 === 1) {
+    const hadBye = new Set();
+    prior.forEach((r) => (r.sets || []).forEach((s) => {
+      if (bbIsBye(s.b.name) && s.a.name) hadBye.add(s.a.name);
+      if (bbIsBye(s.a.name) && s.b.name) hadBye.add(s.b.name);
+    }));
+    for (let i = pool.length - 1; i >= 0; i--) { if (!hadBye.has(pool[i])) { byeName = pool[i]; break; } }
+    if (!byeName) byeName = pool[pool.length - 1];   // everyone has had one — lowest ranked repeats
+    pool = pool.filter((n) => n !== byeName);
+  }
+  const pairs = bbSwissMatch(pool, bbSwissPlayed(prior));
+  if (!pairs) { bbStatus('Every remaining pairing would be a rematch — pair this round manually.', false); return; }
+  const all = byeName ? pairs.concat([[byeName, 'BYE']]) : pairs;
+  rounds[ri].sets = fixed.concat(all.map(([a, b]) => ({ a: { name: a, score: 0 }, b: { name: b, score: 0 } })));
+  bbRender(); bbAutosave();
+  bbStatus(`Paired ${rounds[ri].name} — ${pairs.length} match${pairs.length === 1 ? '' : 'es'}${byeName ? ' + bye for ' + byeName : ''}.`, true);
 }
 el('bb-type-seg') && el('bb-type-seg').querySelectorAll('.seg-btn').forEach((b) => b.addEventListener('click', function () {
   el('bb-type-seg').querySelectorAll('.seg-btn').forEach((x) => x.classList.remove('active'));
   this.classList.add('active'); bbModel.type = this.dataset.type;
+  // Choosing Swiss pre-fills the standard round count for the field size, so the number is put in
+  // front of the producer rather than sitting at a stale default they never noticed. 16 teams -> 5.
+  if (bbModel.type === 'swiss') {
+    const n = Math.max(2, bbModel.size || 8);
+    bbModel.swissRounds = Math.max(3, Math.min(12, Math.ceil(Math.log2(n)) + 1));
+    const rn = el('bb-rounds-num'); if (rn) rn.value = bbModel.swissRounds;
+  }
   if (!bbIsTable()) { bbModel.pools = []; bbActivePoolId = ''; }   // pools only apply to Round Robin / Swiss
   bbSyncTypeUi();
   bbRenderPools();
@@ -608,7 +732,7 @@ function bbPhaseFromOverlay(op) {
 }
 // Hydrate the builder from a saved/imported bracket (once). Handles phases + legacy flat.
 // IMPORTANT: only hydrate from a MANUAL bracket. If the current bracket was imported
-// (start.gg / Challonge / NXGEN), the builder stays empty so an accidental edit can't
+// (start.gg / Challonge / NXGEN / FACEIT), the builder stays empty so an accidental edit can't
 // autosave over — and silently disconnect — the live import. To hand-edit an import, the
 // producer uses the explicit "Edit as custom" action (which copies it into manual mode).
 function bbHydrate(bracket) {

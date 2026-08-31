@@ -191,6 +191,22 @@
     }
     return null;
   }
+  // Inverse of the calibration fit: given a team's rank/MMR value, what placement score would a team
+  // of that strength be expected to post? Auto-seed uses this to slot a brand-new team (no tournament
+  // history, seeded off its 6mans ranks) into a board that is otherwise ordered by placements —
+  // otherwise every new team piles up at the bottom regardless of how strong its roster is.
+  // Returns null when the fit isn't trustworthy, which is the caller's cue to do exactly that.
+  function scoreFromRank(rankValue, fit) {
+    if (!fit || !fit.ok || !Number.isFinite(rankValue)) return null;
+    if (!(Math.abs(fit.b) > 1e-9)) return null;
+    const s = (rankValue - fit.a) / fit.b;
+    if (!Number.isFinite(s)) return null;
+    // Never extrapolate far past the observed placement range — a wild rank shouldn't invent a
+    // score no real team in this field has earned.
+    const pad = Math.max(5, (fit.maxScore - fit.minScore) * 0.15);
+    return clamp(s, Math.max(0, fit.minScore - pad), Math.min(100, fit.maxScore + pad));
+  }
+
   // Confidence-weighted blend of a player's source estimates → the single seed MMR. Weight = (conf/100)^k
   // (k=2 sharpens so a verified exact ELO dominates a manual guess ~2.5×, without erasing it).
   function blendEstimates(estimates, opts) {
@@ -208,8 +224,118 @@
     return { mmr: Math.round(mmr), confidence, dominant: dom, breakdown };
   }
 
+
+  // ── Roster coherence prior ─────────────────────────────────────────────────
+  // Rosters are homogeneous. Players team up with people near their own level, so if one player is
+  // A rank his team-mates are far more likely to be A/B than to be the weakest player in the field.
+  // A team-mate who simply does not play 6mans is an UNKNOWN, not a BAD player.
+  //
+  // The old imputation ignored that and stood every unresolved slot at the field floor (15th
+  // percentile), which systematically buried any team that had players outside the 6mans scene —
+  // exactly the teams a producer most needs seeded sensibly.
+  //
+  // So an unresolved slot is estimated from its own roster, pulled toward the field's middle by how
+  // little of that roster we have actually measured:
+  //
+  //     imputed = w * rosterKnownMean + (1 - w) * fieldMid,   w = PRIOR_BASE + PRIOR_SLOPE * coverage
+  //
+  // 2-of-3 known leans on the team-mates; 1-of-3 leans on the field. Confidence stays low either
+  // way, so ratePower's shrinkage still keeps a thinly-measured team honest.
+  const PRIOR_BASE  = 0.25;
+  const PRIOR_SLOPE = 0.65;
+
+  function imputedValue(knownMean, fieldMid, coverage) {
+    if (!Number.isFinite(knownMean)) return Number.isFinite(fieldMid) ? fieldMid : null;
+    if (!Number.isFinite(fieldMid)) return knownMean;
+    const w = clamp(PRIOR_BASE + PRIOR_SLOPE * clamp(coverage, 0, 1), 0, 1);
+    return w * knownMean + (1 - w) * fieldMid;
+  }
+
+  // ── Self-reported rank trust ───────────────────────────────────────────────
+  // Players misreport their rank on the sign-up sheet — sometimes by accident, sometimes not. Rather
+  // than assume a fixed trust level for CSV/manual entries, MEASURE it on this very field: every
+  // player who has BOTH a self-reported rank and a verified reading is a labelled sample.
+  //
+  // samples: [{ reported, verified }] in MMR. Returns:
+  //   n           how many players could be checked
+  //   bias        mean(reported - verified) — positive means the field inflates its own ranks
+  //   mae         mean absolute error
+  //   trust       0-1 multiplier to apply to unverified self-reported confidences
+  //   agreement   fraction landing within tolerance
+  //
+  // Below MIN_SAMPLES there is nothing to learn and trust stays 1 (i.e. behave as before) — a
+  // measurement from two players is noise, and over-correcting on it would be its own inaccuracy.
+  const SELF_REPORT_MIN_SAMPLES = 4;
+  const SELF_REPORT_TOL = 120;          // MMR within which a self-report counts as honest
+
+  function selfReportTrust(samples, opts) {
+    opts = opts || {};
+    const tol = opts.tol || SELF_REPORT_TOL;
+    const min = opts.minSamples || SELF_REPORT_MIN_SAMPLES;
+    const pts = (samples || []).filter((s) => s && Number.isFinite(s.reported) && Number.isFinite(s.verified));
+    const out = { n: pts.length, bias: 0, mae: 0, trust: 1, agreement: 1, ok: false };
+    if (pts.length < min) return out;
+    let bias = 0, mae = 0, agree = 0;
+    pts.forEach((s) => {
+      const d = s.reported - s.verified;
+      bias += d; mae += Math.abs(d);
+      if (Math.abs(d) <= tol) agree++;
+    });
+    out.bias = Math.round(bias / pts.length);
+    out.mae = Math.round(mae / pts.length);
+    out.agreement = agree / pts.length;
+    // Trust falls with disagreement, floored so a self-report never becomes worthless — it is still
+    // the only reading we have for players no source can identify.
+    out.trust = clamp(0.35 + 0.65 * out.agreement, 0.35, 1);
+    out.ok = true;
+    return out;
+  }
+
+  // Correct a self-reported MMR for the field's measured inflation. If this field over-reports by
+  // +140 on average, an unverified self-report of 900 is really about 760. Only applied when the
+  // bias is both real and worth acting on.
+  const BIAS_MIN = 40;
+  function debiasSelfReport(mmr, trust) {
+    if (!Number.isFinite(mmr) || !trust || !trust.ok) return mmr;
+    if (Math.abs(trust.bias) < BIAS_MIN) return mmr;
+    return mmr - trust.bias;
+  }
+
+  // ── Tier ladder population ─────────────────────────────────────────────────
+  // The default ladder tops out at S=1600, but a region may simply have nobody at S or X right now
+  // (as in EU and NA at present). A self-reported "S" then maps to an ELO that no living player in
+  // that region holds, and one bad sheet entry rockets a team to the top of the board.
+  //
+  // Given the tiers actually observed, clamp anything above the highest populated tier back to it
+  // plus one gap — enough to keep the claim ordered above real players without inventing a number
+  // the region cannot produce.
+  function capToPopulatedTiers(mmr, populatedTiers, midpoints, opts) {
+    if (!Number.isFinite(mmr)) return mmr;
+    const mids = midpoints || SIXMANS_TIER_DEFAULTS;
+    const pop = (populatedTiers || []).map((t) => tierIndex(t)).filter((i) => i >= 0);
+    if (!pop.length) return mmr;
+    const top = Math.max.apply(null, pop);
+    if (top >= mids.length - 1) return mmr;                 // ladder fully populated, nothing to cap
+    const gap = (opts && opts.gap) || 75;
+    const ceiling = (mids[top] || SIXMANS_TIER_DEFAULTS[top]) + gap;
+    return Math.min(mmr, ceiling);
+  }
+
+  // Which tiers actually have players in this sample — feeds capToPopulatedTiers.
+  function populatedTiers(samples, minCount) {
+    const need = minCount || 1;
+    const counts = SIXMANS_TIERS.map(() => 0);
+    (samples || []).forEach((s) => {
+      const i = tierIndex(s && (s.tier != null ? s.tier : s));
+      if (i >= 0) counts[i]++;
+    });
+    return SIXMANS_TIERS.filter((t, i) => counts[i] >= need);
+  }
+
   const api = { SRC_CONF, snapRankValue, fitCalibration, correlate, sourceConfidence, resolveApply, clamp,
-    SIXMANS_TIERS, SIXMANS_TIER_DEFAULTS, tierIndex, mmrFromTier, tierFromMMR, calibrateTierMidpoints, correlateMMR, blendEstimates };
+    SIXMANS_TIERS, SIXMANS_TIER_DEFAULTS, tierIndex, mmrFromTier, tierFromMMR, calibrateTierMidpoints, correlateMMR, scoreFromRank, blendEstimates,
+    PRIOR_BASE, PRIOR_SLOPE, imputedValue, selfReportTrust, debiasSelfReport, capToPopulatedTiers, populatedTiers,
+    SELF_REPORT_MIN_SAMPLES, SELF_REPORT_TOL };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   root.SeedResolveCore = api;
 })(typeof window !== 'undefined' ? window : (typeof globalThis !== 'undefined' ? globalThis : this));

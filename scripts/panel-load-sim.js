@@ -7,7 +7,12 @@ const path = require('path');
 const vm = require('vm');
 
 const DIR = 'c:/Users/jones/OneDrive/Documents/.Development/broadcaststudio/control-panel';
-const FILES = ['core.js', 'app.js', 'social.js', 'stats-analytics.js', 'seeding-spotlight.js',
+// Must match the <script> order in index.html. The shared pure cores load FIRST — app.js has
+// top-level calls into them (NESearch.bindListNav etc.), so omitting one makes the sim report a
+// ReferenceError the real page never has.
+const FILES = ['core.js', 'search-core.js', 'social-naming-core.js', 'identity-core.js',
+  'seed-power-core.js', 'seed-resolve-core.js',
+  'app.js', 'social.js', 'stats-analytics.js', 'seeding-spotlight.js',
   'leagues.js', 'events.js', 'bracket-builder.js', 'camera-feeds.js'];
 
 function magic() {

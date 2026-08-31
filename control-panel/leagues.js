@@ -195,9 +195,20 @@ function lgDivName(lg, teamId) {
   return d ? d.name : '';
 }
 
+// "Send to BR lobby" only makes sense for a league on a battle-royale game — a Rocket League
+// league has no lobby to send a field into. The list of BR games comes from the server
+// (brMeta.lobbyGames), so adding a game there lights this button up with no change here.
+function lgSyncBrSend(lg) {
+  const btn = el('lg-send-br');
+  if (!btn) return;
+  const games = ((currentState && currentState.brMeta && currentState.brMeta.lobbyGames) || []);
+  btn.style.display = (lg && games.includes(lg.game)) ? '' : 'none';
+}
+
 function lgRenderTeams() {
   const wrap = el('lg-teams'); const lg = lgActive(); if (!wrap || !lg) return;
   lgRenderMatchup();
+  lgSyncBrSend(lg);
   const isSalary = lg.type === 'salary';
   const cap = lg.salaryCap || 0;
   const starterCount = lg.starterCount || 3;
@@ -457,8 +468,12 @@ function lgRenderRosterPlayers() {
   const wrap = el('lg-roster-players'); const lg = lgActive(); if (!wrap || !lg) return;
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   let rows = lgLeaguePlayers(lg);
+  // lgNorm still strips punctuation on both sides (so "T.S.M" matches "TSM"), but the comparison
+  // itself is the shared matcher, so a typo or an acronym finds the player too.
   const q = lgNorm((el('lg-players-search') || {}).value || '');
-  if (q) rows = rows.filter((r) => lgNorm(r.name).includes(q) || lgNorm(r.team).includes(q));
+  if (q) rows = rows.filter((r) => NESearch.matches(q, [
+    { text: lgNorm(r.name), weight: 2 }, lgNorm(r.team)
+  ]));
   if (!rows.length) { wrap.innerHTML = '<div class="lg-empty">No players yet — add teams with rosters in the Teams view.</div>'; return; }
   const s = _lgPlayerSort;
   const sortKey = s.key;
@@ -607,7 +622,15 @@ function lgRenderDivMgr() {
 //              the scoring rules as you type W/L/T, and the drift banner + Recalculate stand down
 //              so a hand-kept table is never second-guessed or overwritten.
 // Existing leagues default to 'schedule', so nothing changes for anyone already using it that way.
-function lgStandingsMode(lg) { return (lg && lg.standingsMode === 'manual') ? 'manual' : 'schedule'; }
+// 'schedule' = computed from results on the Schedule tab (W/L).
+// 'manual'   = typed by hand.
+// 'points'   = totalled from the Tournaments tab's placement matrices. The server derives it
+//              (see recomputeBrSeason, which mirrors the season table into lg.standings) so the
+//              standings overlay and the team-record features work off it unchanged.
+function lgStandingsMode(lg) {
+  const m = lg && lg.standingsMode;
+  return (m === 'manual' || m === 'points') ? m : 'schedule';
+}
 function lgStandingsRow(lg, teamId) {
   lg.standings = lg.standings || [];
   let s = lg.standings.find((x) => x.teamId === teamId);
@@ -908,12 +931,15 @@ el('lg-st-sortdir')?.addEventListener('click', () => {
 el('lg-st-source')?.addEventListener('click', (e) => {
   const b = e.target.closest('.seg-btn'); if (!b) return;
   const lg = lgActive(); if (!lg) return;
-  lg.standingsMode = b.dataset.src === 'manual' ? 'manual' : 'schedule';
-  if (lg.standingsMode === 'manual') (lg.teams || []).forEach((tm) => lgStandingsRow(lg, tm.id));
+  const mode = ['manual', 'points'].includes(b.dataset.src) ? b.dataset.src : 'schedule';
+  lg.standingsMode = mode;
+  if (mode === 'manual') (lg.teams || []).forEach((tm) => lgStandingsRow(lg, tm.id));
   lgSave(); lgRenderStandingsTab(); lgRenderTeams();
-  lgStatus(lg.standingsMode === 'manual'
-    ? 'Manual standings — type the table directly; the schedule no longer overwrites it.'
-    : 'Standings now follow the schedule — use Recalculate to rebuild from results.', true);
+  lgStatus({
+    manual: 'Manual standings — type the table directly; the schedule no longer overwrites it.',
+    points: 'Standings now total the placement points from the Tournaments tab. Add an event there to fill the table.',
+    schedule: 'Standings now follow the schedule — use Recalculate to rebuild from results.'
+  }[mode], true);
 });
 
 // ── Playoff bracket (single-elimination, seeded from standings) ──────────────
@@ -1136,7 +1162,8 @@ const LG_SUB_UNIT = {
   'dota2':         { noun: 'Games', abbr: 'Gm' },
   'smash':         { noun: 'Games', abbr: 'Gm' },
   'mobile-legends':{ noun: 'Games', abbr: 'Gm' },
-  'honor-of-kings':{ noun: 'Games', abbr: 'Gm' }
+  'honor-of-kings':{ noun: 'Games', abbr: 'Gm' },
+  'bedwars':       { noun: 'Games', abbr: 'Gm' }
 };
 // Games where the numeric For/Against "unit" score is meaningful (goals/rounds). MOBAs and BR games
 // have no simple per-game score, so their For/Against/Diff columns are hidden rather than shown as 0.
@@ -1174,7 +1201,11 @@ const LG_STAT_SETS = {
   'mobile-legends':['Kills', 'Deaths', 'Assists', 'Gold', 'Damage'],
   'honor-of-kings':['Kills', 'Deaths', 'Assists', 'Gold', 'Damage'],
   'smash':         ['Wins', 'KOs', 'Falls', 'Self-destructs'],
-  'eafc':          ['Goals', 'Assists', 'Shots', 'Possession %']
+  'eafc':          ['Goals', 'Assists', 'Shots', 'Possession %'],
+  'bedwars':       ['Beds Broken', 'Final Kills', 'Kills', 'Deaths'],
+  // Battle royale: scored per placement + elims rather than head-to-head, so the tracked totals are
+  // the ones an organiser actually reads off a lobby result sheet.
+  'fortnite':      ['Eliminations', 'Placement Points', 'Victory Royales', 'Damage']
 };
 function lgStatKey(label) { return String(label).toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, ''); }
 
@@ -2277,6 +2308,20 @@ function lgRenderOverview() {
     else if (played < total) { health.className = 'lgov-health lgov-health-ok'; health.textContent = `${total - played} match${total - played === 1 ? '' : 'es'} left to play`; }
     else { health.className = 'lgov-health lgov-health-ok'; health.textContent = 'Season complete — all matches played'; }
   }
+  // Data source chip — says whether this league is linked to a start.gg league, and takes you to
+  // the control. Without this the only hint lived at the bottom of the Settings sub-tab.
+  const src = el('lgov-source');
+  if (src) {
+    if (lg.startggSource) {
+      const when = lg.sggSyncedAt ? new Date(lg.sggSyncedAt).toLocaleDateString() : 'never synced';
+      src.className = 'lgov-health lgov-health-ok';
+      src.textContent = `Linked to start.gg: ${lg.sggLeagueName || lg.startggSource} — ${when}`;
+    } else {
+      src.className = 'lgov-health lgov-health-idle';
+      src.textContent = 'Not linked to a platform — results entered by hand. Click to link a start.gg league.';
+    }
+    src.onclick = () => { lgSwitchTab('settings'); };
+  }
   lgApplyOvLayout();
   lgRenderStandingsSnap(); lgRenderLeaders(); lgRenderBroadcastCard();
   lgRenderMatchup(); lgRenderRecentResults(); lgRenderNextMatches();
@@ -2286,7 +2331,7 @@ function lgRenderOverview() {
 function lgSwitchTab(name) {
   _lgActiveTab = name;
   document.querySelectorAll('#lg2-tabs .lg2-tab').forEach((b) => b.classList.toggle('active', b.dataset.tab === name));
-  ['overview', 'roster', 'standings', 'rankings', 'schedule', 'bracket', 'stats', 'ballchasing', 'settings'].forEach((t) => {
+  ['overview', 'roster', 'standings', 'rankings', 'schedule', 'bracket', 'stats', 'brseries', 'ballchasing', 'settings'].forEach((t) => {
     const p = el('lg2-panel-' + t); if (p) p.style.display = t === name ? '' : 'none';
   });
   if (name === 'overview') lgRenderOverview();
@@ -2296,9 +2341,272 @@ function lgSwitchTab(name) {
   else if (name === 'schedule') lgRenderScheduleTab();
   else if (name === 'bracket') lgRenderBracketTab();
   else if (name === 'stats') lgRenderStatsTab();
+  else if (name === 'brseries') lgRenderBrTab();
   else if (name === 'ballchasing') lgRenderBallchasingTab();
   else if (name === 'settings') lgRenderSettingsTab();
 }
+
+// ── BR Cups tab ────────────────────────────────────────────────────────────
+// A battle-royale league is a SEASON OF CUPS. Each cup (lg.brSeries[]) keeps its own scoring
+// table and its own per-match results; lg.brSeason is the server-derived rollup (see
+// recomputeBrSeason in server.js — the client never re-implements the scorer, which is exactly
+// how a second, subtly-different points engine would get born).
+//
+// Everything here writes through the SERVER (set_br_result / br_series), not through lgSave():
+// the same results back the live board, and routing them through the client's full-replace
+// set_leagues would race the lobby panel's writes.
+let _lgBrSeriesId = null;
+// Set while a create is in flight so the next render selects the cup that was just added — the
+// server doesn't auto-bind it (that would swap the on-air board mid-show), so following the live
+// cup would otherwise leave the producer looking at the wrong one.
+let _lgBrPendingCreate = false;
+
+function lgBrIsBrGame(lg) {
+  const games = ((currentState && currentState.brMeta && currentState.brMeta.lobbyGames) || []);
+  return !!(lg && games.includes(lg.game));
+}
+// What the per-match secondary stat is CALLED for this league's game. Fortnite scores elims,
+// Rocket League goals, Bedwars beds — the matrix maths is identical, only the label differs.
+function lgBrStatLabel(lg) {
+  const g = ((currentState.games || {})[(lg && lg.game) || ''] || {});
+  if (lgBrIsBrGame(lg)) return { long: 'Elims', short: 'EL' };
+  return { long: g.statLabel || 'Stat', short: g.statAbbr || (g.statLabel || 'ST').slice(0, 2).toUpperCase() };
+}
+function lgBrSeries(lg) { return Array.isArray(lg && lg.brSeries) ? lg.brSeries : []; }
+function lgBrActiveSeries(lg) {
+  const list = lgBrSeries(lg);
+  return list.find((s) => s.id === _lgBrSeriesId) || list[0] || null;
+}
+// Is this cup the one currently driving the on-air board?
+function lgBrIsLive(lg, s) {
+  const br = (currentState && currentState.br) || {};
+  return !!(s && lg && br.leagueId === lg.id && br.seriesId === s.id);
+}
+
+function lgRenderBrTab() {
+  const lg = lgActive();
+  if (!lg) return;
+  const list = lgBrSeries(lg);
+  if (_lgBrSeriesId && !list.some((s) => s.id === _lgBrSeriesId)) _lgBrSeriesId = null;
+  if (_lgBrPendingCreate && list.length) {
+    _lgBrPendingCreate = false;
+    _lgBrSeriesId = list[list.length - 1].id;   // the cup that was just appended
+  }
+  // Otherwise follow the live cup — that's the one the producer is working on.
+  if (!_lgBrSeriesId) {
+    const live = list.find((s) => lgBrIsLive(lg, s));
+    _lgBrSeriesId = (live || list[0] || {}).id || null;
+  }
+
+  // Matrix options come from the SERVER's resolved list (built-ins + the producer's own), so the
+  // league page and the lobby's matrix editor can never offer different sets.
+  const matrices = ((currentState.brMeta && currentState.brMeta.matrices) || []);
+  const mxOpts = (sel, extraLabel) => {
+    if (!sel) return;
+    const sig = JSON.stringify(matrices.map((m) => [m.id, m.name, m.builtin])) + '|' + (extraLabel || '');
+    if (sel.dataset.sig === sig) return;
+    sel.dataset.sig = sig;
+    const grp = (b) => matrices.filter((m) => !!m.builtin === b)
+      .map((m) => `<option value="${esc(m.id)}">${esc(m.name)}</option>`).join('');
+    sel.innerHTML = (extraLabel ? `<option value="">${esc(extraLabel)}</option>` : '')
+      + `<optgroup label="Your matrices">${grp(false) || '<option disabled>None yet</option>'}</optgroup>`
+      + `<optgroup label="Built-in">${grp(true)}</optgroup>`;
+  };
+  mxOpts(el('lg-br-preset'), '— Custom table (not linked) —');
+  mxOpts(el('lg-br-matrix'), '— None —');
+  const lgMx = el('lg-br-matrix');
+  if (lgMx && document.activeElement !== lgMx) lgMx.value = lg.brMatrixId || '';
+
+  // ── cup list ──
+  const host = el('lg-br-list');
+  if (host) {
+    host.innerHTML = list.length ? list.map((s) => {
+      const roll = ((lg.brSeason && lg.brSeason.series) || []).find((x) => x.id === s.id) || {};
+      const live = lgBrIsLive(lg, s);
+      return `<div class="lg-br-item${s.id === _lgBrSeriesId ? ' active' : ''}${live ? ' live' : ''}" data-brs="${esc(s.id)}">
+        <div><div class="lg-br-name">${esc(s.name)}</div><div class="lg-br-meta">${esc(s.date || '')}</div></div>
+        <div class="lg-br-meta">${esc((matrices.find((m) => m.id === s.matrixId) || {}).name || 'Custom table')}${s.source && s.source !== 'manual' ? ' · ' + esc(s.source) : ''}</div>
+        <div class="lg-br-meta">${roll.played || 0} / ${s.matches} matches</div>
+        <div class="lg-br-meta">${roll.winner ? esc(roll.winner) : '—'}</div>
+        ${live ? '<span class="lg-br-live-pill">On air</span>' : '<span></span>'}
+      </div>`;
+    }).join('') : '<p class="field-hint" style="margin:0;">No tournaments yet — add the season’s first event above.</p>';
+  }
+
+  // ── the selected cup's results grid ──
+  const s = lgBrActiveSeries(lg);
+  const ed = el('lg-br-editor');
+  if (ed) ed.style.display = s ? '' : 'none';
+  // Only a battle-royale league has a live lobby board to point at.
+  const bindBtn = el('lg-br-bind');
+  if (bindBtn) bindBtn.style.display = lgBrIsBrGame(lg) ? '' : 'none';
+  if (s) {
+    const t = el('lg-br-editor-title');
+    if (t) t.textContent = s.name + (lgBrIsLive(lg, s) ? '  ·  on air' : '');
+    const ps = el('lg-br-preset'); if (ps && document.activeElement !== ps) ps.value = s.matrixId || '';
+    const so = el('lg-br-source'); if (so && document.activeElement !== so) so.value = s.source || 'manual';
+    const tb = el('lg-br-tab');
+    if (tb) {
+      tb.style.display = (s.source === 'sheets') ? '' : 'none';
+      if (document.activeElement !== tb) tb.value = s.sheetTab || '';
+    }
+    const mi = el('lg-br-matches'); if (mi && document.activeElement !== mi) mi.value = String(s.matches || 6);
+    const hint = el('lg-br-hint');
+    if (hint) {
+      hint.innerHTML = `Each cell is <strong>placement / ${esc(lgBrStatLabel(lg).long.toLowerCase())}</strong> for that match. `
+        + (lgBrIsLive(lg, s)
+          ? 'This event is on air — edits here and in <strong>Match — Lobby</strong> are the same data.'
+          : (lgBrIsBrGame(lg) ? 'Put this event on air to score it from Match — Lobby.' : 'Enter results in the grid below.'))
+        + ' Scoring: <strong>' + esc((matrices.find((m) => m.id === s.matrixId) || {}).name || 'custom table')
+        + '</strong> — ' + ((s.scoring && s.scoring.killPoints) || 0) + ' pt(s) per ' + esc(lgBrStatLabel(lg).long.toLowerCase().replace(/s$/, ''))
+        + (((s.scoring || {}).vrBonus) ? ', +' + s.scoring.vrBonus + ' VR bonus' : '')
+        + '. Changing it re-scores this cup only — other cups keep their own table.';
+    }
+    lgRenderBrGrid(lg, s);
+  }
+
+  // ── season rollup ──
+  const seasonHost = el('lg-br-season');
+  const rows = ((lg.brSeason && lg.brSeason.standings) || []);
+  if (seasonHost) {
+    seasonHost.innerHTML = rows.length
+      ? '<table class="lg-br-season-tbl"><thead><tr><th>#</th><th>Team</th><th>Events</th><th>Wins</th><th>${esc(lgBrStatLabel(lg).long)}</th><th>Plcmnt</th><th>Pts</th></tr></thead><tbody>'
+        + rows.map((t) => `<tr><td class="num">${t.rank}</td><td>${esc(t.name)}</td>`
+          + `<td class="num">${t.played}</td><td class="num">${t.wins}</td><td class="num">${t.elims}</td>`
+          + `<td class="num">${t.placePts}</td><td class="pts">${t.pts}</td></tr>`).join('')
+        + '</tbody></table>'
+      : '<p class="field-hint" style="margin:0;">Season totals appear here once a cup has results.</p>';
+  }
+  const note = el('lg-br-season-note');
+  if (note) note.textContent = rows.length ? `${list.length} event(s) · ${rows.length} team(s)` : '';
+}
+
+function lgRenderBrGrid(lg, s) {
+  const grid = el('lg-br-grid');
+  const empty = el('lg-br-grid-empty');
+  if (!grid) return;
+  // The league's teams ARE the cup's field — that's the whole point of a season store.
+  const teams = (lg.teams || []).map((t) => lgResolveTeam(t)).filter((t) => t && t.name);
+  if (empty) empty.style.display = teams.length ? 'none' : '';
+  if (!teams.length) { grid.innerHTML = ''; return; }
+
+  const n = Math.max(1, Math.min(40, s.matches || 6));
+  const cols = `minmax(130px, 1.4fr) repeat(${n}, 92px) 64px`;
+  const byKey = new Map();
+  for (const r of (s.results || [])) {
+    byKey.set(String(r.team || '').trim().toLowerCase() + '|' + (parseInt(r.match, 10) || 0), r);
+  }
+  const pts = new Map(Object.entries(((lg.brSeason && lg.brSeason.series) || []).find((x) => x.id === s.id)?.points || {}));
+
+  const stat = lgBrStatLabel(lg);
+  let html = `<div class="lg-br-grow lg-br-ghead" style="grid-template-columns:${cols}">`
+    + '<div>Team</div>'
+    + Array.from({ length: n }, (_, i) => `<div style="text-align:center;" title="Placement / ${esc(stat.long)}">M${i + 1}</div>`).join('')
+    + '<div style="text-align:center;">Pts</div></div>';
+
+  html += teams.map((t) => {
+    const key = t.name.trim().toLowerCase();
+    const cells = Array.from({ length: n }, (_, i) => {
+      const r = byKey.get(key + '|' + (i + 1)) || {};
+      return `<div class="lg-br-cell" data-m="${i + 1}">
+        <input type="number" class="input-text pl" data-brf="placement" min="0" max="200" placeholder="PL" value="${r.placement || ''}">
+        <input type="number" class="input-text" data-brf="elims" min="0" max="200" placeholder="${esc(stat.short)}" value="${r.elims != null ? r.elims : ''}">
+      </div>`;
+    }).join('');
+    return `<div class="lg-br-grow" style="grid-template-columns:${cols}" data-team="${esc(t.name)}">
+      <div class="lg-br-team" title="${esc(t.name)}">${esc(t.name)}</div>${cells}
+      <div class="lg-br-pts">${pts.get(key) || 0}</div></div>`;
+  }).join('');
+
+  grid.innerHTML = html;
+}
+
+// Grid edits go straight to the server, which writes the league and re-mirrors the live board.
+el('lg-br-grid')?.addEventListener('change', (e) => {
+  const f = e.target.closest('[data-brf]');
+  const cell = e.target.closest('.lg-br-cell');
+  const row = e.target.closest('[data-team]');
+  const lg = lgActive();
+  const s = lg && lgBrActiveSeries(lg);
+  if (!f || !cell || !row || !s) return;
+  const get = (sel) => parseInt((cell.querySelector(sel) || {}).value, 10) || 0;
+  send('set_br_result', {
+    leagueId: lg.id, seriesId: s.id,
+    match: parseInt(cell.dataset.m, 10) || 1,
+    team: row.dataset.team,
+    placement: get('[data-brf="placement"]'),
+    elims: get('[data-brf="elims"]')
+  });
+});
+// Enter walks DOWN the same match column — a producer reconciles one match at a time.
+el('lg-br-grid')?.addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter') return;
+  const f = e.target.closest('[data-brf]');
+  const cell = e.target.closest('.lg-br-cell');
+  if (!f || !cell) return;
+  e.preventDefault();
+  f.blur();
+  const all = [...el('lg-br-grid').querySelectorAll(`.lg-br-cell[data-m="${cell.dataset.m}"] [data-brf="${f.dataset.brf}"]`)];
+  const next = all[all.indexOf(f) + 1];
+  if (next) { next.focus(); next.select?.(); }
+});
+
+el('lg-br-list')?.addEventListener('click', (e) => {
+  const item = e.target.closest('[data-brs]');
+  if (!item) return;
+  _lgBrSeriesId = item.dataset.brs;
+  lgRenderBrTab();
+});
+
+el('lg-br-add')?.addEventListener('click', () => {
+  const lg = lgActive(); if (!lg) return;
+  const name = (el('lg-br-new-name')?.value || '').trim();
+  if (!name) { showToast('Give the event a name first.', '#f59e0b'); return; }
+  send('br_series', { action: 'create', leagueId: lg.id, name,
+    matches: parseInt(el('lg-br-new-matches')?.value, 10) || 6 });
+  const n = el('lg-br-new-name'); if (n) n.value = '';
+  // Select it once it arrives, but it is NOT put on air — see the server's br_series create.
+  _lgBrPendingCreate = true;
+});
+
+el('lg-br-preset')?.addEventListener('change', function () {
+  const lg = lgActive(); const s = lg && lgBrActiveSeries(lg); if (!s) return;
+  if (!this.value) return;   // "custom table" means leave the snapshot alone
+  send('br_apply_matrix', { leagueId: lg.id, seriesId: s.id, matrixId: this.value });
+});
+// Season default — new cups in this league inherit it.
+el('lg-br-matrix')?.addEventListener('change', function () {
+  const lg = lgActive(); if (!lg || !this.value) return;
+  send('br_apply_matrix', { scope: 'league', leagueId: lg.id, matrixId: this.value });
+});
+el('lg-br-source')?.addEventListener('change', function () {
+  const lg = lgActive(); const s = lg && lgBrActiveSeries(lg); if (!s) return;
+  send('br_series', { leagueId: lg.id, seriesId: s.id, source: this.value });
+});
+el('lg-br-tab')?.addEventListener('change', function () {
+  const lg = lgActive(); const s = lg && lgBrActiveSeries(lg); if (!s) return;
+  send('br_series', { leagueId: lg.id, seriesId: s.id, sheetTab: this.value });
+});
+el('lg-br-matches')?.addEventListener('change', function () {
+  const lg = lgActive(); const s = lg && lgBrActiveSeries(lg); if (!s) return;
+  send('br_series', { leagueId: lg.id, seriesId: s.id, matches: parseInt(this.value, 10) || 6 });
+});
+el('lg-br-bind')?.addEventListener('click', () => {
+  const lg = lgActive(); const s = lg && lgBrActiveSeries(lg); if (!s) return;
+  send('set_br_league', { leagueId: lg.id, seriesId: s.id });
+  showToast(`"${s.name}" is now driving the live board.`, '#10B981');
+});
+el('lg-br-clear')?.addEventListener('click', async () => {
+  const lg = lgActive(); const s = lg && lgBrActiveSeries(lg); if (!s) return;
+  if (!(await appConfirm(`Delete every result in "${s.name}"? The event itself is kept.`, 'Clear results'))) return;
+  send('clear_br_results', { leagueId: lg.id, seriesId: s.id, scope: 'all' });
+});
+el('lg-br-delete')?.addEventListener('click', async () => {
+  const lg = lgActive(); const s = lg && lgBrActiveSeries(lg); if (!s) return;
+  if (!(await appConfirm(`Delete "${s.name}" and all of its results? This can't be undone.`, 'Delete event', true))) return;
+  send('br_series', { action: 'delete', leagueId: lg.id, seriesId: s.id });
+  _lgBrSeriesId = null;
+});
 
 // ── banner ─────────────────────────────────────────────────────────────────
 function lgUpdateBanner() {
@@ -2323,6 +2631,10 @@ function lgUpdateBanner() {
     bcTab.style.display = showBc ? '' : 'none';
     if (!showBc && _lgActiveTab === 'ballchasing') lgSwitchTab('overview');
   }
+  // Tournaments is NOT game-gated (Ballchasing above is). Any league can run a circuit scored on
+  // placement points — a weekly Rocket League cup, a Bedwars series, an FGC ranking season — so
+  // the tab is always available. Only "Go live with this event", which drives the battle-royale
+  // lobby board, is game-specific, and it hides itself in lgRenderBrTab.
   // Chips
   const chips = el('lg2-banner-chips'); if (!chips) return;
   const game = lg.game && currentState.games && currentState.games[lg.game] ? currentState.games[lg.game].name : (lg.game || '');
@@ -2406,8 +2718,11 @@ el('lg-import-event-teams')?.addEventListener('click', function () {
       }
       fetch('http://localhost:3000/api/startgg/search-leagues', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: v }) })
         .then(r => r.json()).then(data => {
-          const results = data.results || [];
+          let results = data.results || [];
           if (!results.length) { dd.innerHTML = '<div class="team-dd-item team-dd-empty">No leagues found.</div>'; dd.style.display = 'block'; return; }
+          // Re-rank start.gg's order against the typed name so the closest league is first.
+          results = NESearch.filter(results, v, (l) => [{ text: l.name, weight: 2 }, l.slug]).concat(
+            results.filter((l) => !NESearch.matches(v, [l.name, l.slug])));
           dd.innerHTML = results.map(l => `<div class="team-dd-item" data-slug="${esc(l.slug)}" data-name="${esc(l.name)}">${esc(l.name)} <span style="opacity:.5;font-size:11px;">${esc(l.slug)}</span></div>`).join('');
           dd.style.display = 'block';
           dd.querySelectorAll('.team-dd-item[data-slug]').forEach(item => {
@@ -2424,6 +2739,13 @@ el('lg-import-event-teams')?.addEventListener('click', function () {
     }, 350);
   });
   inp.addEventListener('blur', () => { setTimeout(() => { dd.style.display = 'none'; }, 200); });
+  // Arrow-key navigation. The rows are wired on mousedown (to beat that blur), so Enter has to
+  // replay a mousedown rather than a click.
+  NESearch.bindListNav(inp, dd, '.team-dd-item[data-slug]', {
+    activeClass: 'active',
+    pick: (node) => node.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true })),
+    onEscape: () => { dd.style.display = 'none'; }
+  });
 })();
 
 el('lg-sgg-sync')?.addEventListener('click', () => {
@@ -2470,6 +2792,20 @@ el('lg-pts-otw')?.addEventListener('change', function () { const lg = lgActive()
 el('lg-playoff-n')?.addEventListener('change', function () { const lg = lgActive(); if (lg) { lg.playoffN = Number(this.value) || 4; lgSave(); } });
 el('lg-tiebreak')?.addEventListener('change', function () { const lg = lgActive(); if (lg) { lg.tiebreak = this.value; lgSave(); } });
 el('lg-manage-teams')?.addEventListener('click', () => { document.querySelector('.tab-btn[data-tab="equipos"]')?.click(); });
+
+// Send this league's teams into the battle-royale lobby (the manual/offline path — a LAN event
+// with no start.gg bracket still needs its field on screen). Merges by default so drop POIs and
+// notes already set on entrants survive a re-send.
+el('lg-send-br')?.addEventListener('click', () => {
+  const lg = lgActive();
+  if (!lg) return;
+  const n = (lg.teams || []).length;
+  if (!n) { showToast('This league has no teams yet.', '#f59e0b'); return; }
+  // Always MERGE — never replace. Re-sending after a roster change is a normal mid-show action,
+  // and it must not wipe drop POIs and notes the producer already set. Emptying the field is the
+  // explicit "Clear field" button in Match — Lobby, so nothing destructive hides behind this one.
+  send('br_lobby_from_league', { leagueId: lg.id, replace: false });
+});
 el('lg-recalc')?.addEventListener('click', lgComputeStandingsFromSchedule);
 el('lg-stats-recalc')?.addEventListener('click', () => { lgComputeStandingsFromSchedule(); lgRenderStatsTab(); });
 // Push the season stats board (same three tiers as the Stats tab) to the league-stats overlay.
@@ -2519,10 +2855,15 @@ function setupLeagueTeamSearch() {
   const candidates = (q) => {
     const lg = lgActive(); if (!lg) return [];
     const taken = new Set((lg.teams || []).map((t) => t.teamName || t.name));
-    q = (q || '').trim().toLowerCase();
-    return (currentState.savedTeams || [])
-      .filter((s) => !taken.has(s.name) && (!q || (s.name || '').toLowerCase().includes(q)))
-      .slice(0, 60);
+    // Ranked before the 60-item cap, and rosters are searchable — adding a team to a league is
+    // often driven by "which team is <player> on again?".
+    return NESearch.filter(
+      (currentState.savedTeams || []).filter((s) => !taken.has(s.name)),
+      (q || '').trim(),
+      (s) => [{ text: s.name, weight: 2 },
+        { text: (s.players || []).map((p) => (typeof p === 'string' ? p : ((p && (p.name || p.gamertag)) || ''))).join(' '), bag: true }],
+      { limit: 60 }
+    ).slice(0, 60);
   };
   const close = () => { dd.classList.remove('show'); open = false; active = -1; };
   const position = () => {
@@ -2601,6 +2942,11 @@ function lgPushStandingsToOverlay(topN) {
 el('lg-push-standings')?.addEventListener('click', () => lgPushStandingsToOverlay(parseInt((el('lg-st-topn') || {}).value, 10) || 0));
 el('lg-st-divisions')?.addEventListener('click', () => { const b = el('lg-st-divmgr'); if (!b) return; const show = b.style.display === 'none'; b.style.display = show ? '' : 'none'; if (show) lgRenderDivMgr(); });
 el('lg-bkt-generate')?.addEventListener('click', lgBracketGenerate);
+// The standalone "Bracket Builder" sub-tab was removed from the ESPORTS nav (2026-08) — the builder
+// is reached from the competition it belongs to instead. openBracketBuilder() is defined in
+// seeding-spotlight.js (loads before this file) and is the single place that knows where the
+// builder's DOM currently lives.
+el('lg-bkt-builder')?.addEventListener('click', () => { if (typeof window.openBracketBuilder === 'function') window.openBracketBuilder(); });
 el('lg-bkt-push')?.addEventListener('click', () => lgBracketPush(true));
 el('lg-bkt-hide')?.addEventListener('click', () => lgBracketPush(false));
 el('lg-st-density')?.addEventListener('click', (e) => { const b = e.target.closest('.seg-btn'); if (!b) return; const p = lgStPrefs(); p.density = b.dataset.d; lgStSavePrefs(p); lgRenderStandingsTab(); });
@@ -2658,6 +3004,7 @@ async function evSearchTournaments() {
 el('ev-load')?.addEventListener('click', () => {
   if (_evSource === 'challonge') evLoadChallongeTournaments();
   else if (_evSource === 'nxgen') evLoadNxgenTournaments();
+  else if (_evSource === 'faceit') evLoadFaceitCompetitions();
   else { _evMode = 'mine'; evSetMode('My tournaments'); evLoadTournaments(); }
 });
 el('ev-search-btn')?.addEventListener('click', evSearchTournaments);

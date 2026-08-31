@@ -123,6 +123,14 @@ function renderSeriesDots(containerId, wins, bestOf, side) {
 }
 
 // ── Players (Sides) ───────────────────────────────────────────────────────
+// PERF: this runs on EVERY RL packet (state_update), so it must not rebuild the DOM.
+// It used to do `c.innerHTML = ''` and recreate every row — including a fresh <img> per player —
+// several times a second. That churn is what made the boost meters and player banners feel
+// laggy/steppy: the bar element was destroyed and recreated rather than having its width changed,
+// so it could never animate, and the constant teardown cost main-thread time on the same process
+// the server runs in. Now the rows are built ONCE per roster and only changed values are written.
+const _panelCache = {};   // containerId -> { sig, rows: [{ row, bg, bar, nameEl, numEl, last:{} }] }
+
 function renderPlayerPanels(players, spectated) {
   const blue   = players.filter(p => p.team === 0).sort((a, b) => a.name.localeCompare(b.name));
   const orange = players.filter(p => p.team === 1).sort((a, b) => a.name.localeCompare(b.name));
@@ -130,43 +138,68 @@ function renderPlayerPanels(players, spectated) {
   function buildPanel(containerId, list, side) {
     const c = el(containerId);
     if (!c) return;
-    c.innerHTML = '';
-    list.forEach(p => {
+
+    // Rebuild only when the roster itself changes (join/leave/rename/reorder).
+    const sig = list.map((p) => p.name).join('');
+    let cache = _panelCache[containerId];
+    if (!cache || cache.sig !== sig) {
+      c.innerHTML = '';
+      cache = _panelCache[containerId] = { sig, rows: [] };
+      list.forEach((p) => {
+        const row = document.createElement('div');
+        row.className = 'player-item';
+
+        const bg = document.createElement('img');
+        bg.className = 'player-bg';
+        row.appendChild(bg);
+
+        const bar = document.createElement('div');
+        bar.className = 'player-boost-bar';
+        row.appendChild(bar);
+
+        const nameEl = document.createElement('div');
+        nameEl.className = 'player-name-txt';
+        nameEl.textContent = p.name;
+        row.appendChild(nameEl);
+
+        const numEl = document.createElement('div');
+        numEl.className = 'player-boost-num';
+        row.appendChild(numEl);
+
+        c.appendChild(row);
+        cache.rows.push({ row, bg, bar, nameEl, numEl, last: {} });
+      });
+    }
+
+    // Per-packet: write ONLY what actually changed. Comparing against the last written value
+    // keeps a steady-state frame (boost unchanged, nobody demoed) at zero DOM writes.
+    const SPEC_BG = side === 'blue' ? '/assets/rl/player-blue.png' : '/assets/rl/player-orange.png';
+    list.forEach((p, i) => {
+      const r = cache.rows[i];
+      if (!r) return;
+      const last = r.last;
       const isSpectated = p.name === spectated;
-      const row = document.createElement('div');
-      row.className = 'player-item' + (p.isDemolished ? ' demolished' : '');
-
-      // BG
-      const bg = document.createElement('img');
-      bg.className = 'player-bg';
-      if (isSpectated) {
-        bg.src = side === 'blue' ? '/assets/rl/player-blue.png' : '/assets/rl/player-orange.png';
-      } else {
-        bg.src = '/assets/rl/player.png';
-      }
-      row.appendChild(bg);
-
-      // Boost bar
-      const boostBar = document.createElement('div');
-      boostBar.className = 'player-boost-bar';
+      const demolished = !!p.isDemolished;
       const pct = Math.max(0, Math.min(100, p.boost || 0));
-      boostBar.style.width = `${pct}%`;
-      if (isSpectated) boostBar.style.background = '#fff';
-      row.appendChild(boostBar);
+      const boostTxt = String(p.boost ?? 0);
 
-      // Name
-      const nameEl = document.createElement('div');
-      nameEl.className = 'player-name-txt';
-      nameEl.textContent = p.name;
-      row.appendChild(nameEl);
-
-      // Boost number
-      const boostNum = document.createElement('div');
-      boostNum.className = 'player-boost-num';
-      boostNum.textContent = p.boost ?? 0;
-      row.appendChild(boostNum);
-
-      c.appendChild(row);
+      if (last.demolished !== demolished) {
+        r.row.className = 'player-item' + (demolished ? ' demolished' : '');
+        last.demolished = demolished;
+      }
+      if (last.spectated !== isSpectated) {
+        r.bg.src = isSpectated ? SPEC_BG : '/assets/rl/player.png';
+        r.bar.style.background = isSpectated ? '#fff' : '';
+        last.spectated = isSpectated;
+      }
+      if (last.pct !== pct) {
+        r.bar.style.width = pct + '%';
+        last.pct = pct;
+      }
+      if (last.boostTxt !== boostTxt) {
+        r.numEl.textContent = boostTxt;
+        last.boostTxt = boostTxt;
+      }
     });
   }
 
@@ -300,7 +333,7 @@ function tickBreakCountdown() {
     cdEl.classList.add('hidden');
     return;
   }
-  const remaining = brk.endsAt - Date.now();
+  const remaining = brk.endsAt - (typeof SceneBase !== 'undefined' ? SceneBase.now() : Date.now());
   cdEl.classList.remove('hidden');
   cdEl.textContent = formatCountdown(remaining);
 }
@@ -382,10 +415,18 @@ function renderTicker(data) {
   if (!bar || !track) return;
 
   const isStartgg = ticker.source === 'startgg';
+  // Battle-royale standings ride the same prebuilt-lines path as manual promo copy (the server
+  // formats them in brTickerFeed) — no per-match team-vs-team markup, because a BR line is a
+  // ranked row, not a fixture.
+  const isBr = ticker.source === 'br';
   const matches = isStartgg
     ? ((data && data.startgg && data.startgg.matchFeed) || []).filter((m) => m && (m.status === 'live' || m.status === 'done'))
     : [];
-  const messages = isStartgg ? [] : (Array.isArray(ticker.messages) ? ticker.messages : []).filter(Boolean);
+  const brLines = isBr ? (Array.isArray(ticker.feed) ? ticker.feed.filter(Boolean) : []) : [];
+  // In BR mode the producer's own promo lines still interleave, same as start.gg mode.
+  const messages = isStartgg ? []
+    : isBr ? brLines.concat((Array.isArray(ticker.messages) ? ticker.messages : []).filter(Boolean))
+    : (Array.isArray(ticker.messages) ? ticker.messages : []).filter(Boolean);
   const sponsor = (data && data.brand && data.brand.spots && data.brand.spots.ticker) || ticker.sponsor || '';
   const count = isStartgg ? matches.length : messages.length;
   const visible = !!ticker.visible && (count > 0 || !!sponsor);
@@ -398,7 +439,7 @@ function renderTicker(data) {
   if (!visible) return;
 
   // Rebuild only when content/speed changes so the scroll animation isn't reset
-  const speed = (ticker.speed > 0) ? ticker.speed : 40;
+  const speed = (ticker.speed > 0) ? ticker.speed : 10;
   const sig = JSON.stringify({ s: isStartgg, m: matches, x: messages, sp: sponsor, speed });
   if (sig === _lastTickerSig) return;
   _lastTickerSig = sig;
@@ -725,6 +766,11 @@ async function connect() {
       case 'game_reset': {
         const _pb = el('players-blue');   if (_pb) _pb.innerHTML = '';
         const _po = el('players-orange'); if (_po) _po.innerHTML = '';
+        // Drop the row cache with them — it holds references to the nodes just removed, so
+        // without this the next packet would write boost into detached elements and the panels
+        // would stay empty for the rest of the match.
+        delete _panelCache['players-blue'];
+        delete _panelCache['players-orange'];
         // Remove stale facecam containers so they're rebuilt fresh for the new match
         document.querySelectorAll('.player-facecam-container').forEach(c => c.remove());
         if (el('active-player-bot')) el('active-player-bot').classList.add('hidden');

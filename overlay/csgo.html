@@ -202,8 +202,14 @@
   .rg-bar.CT { background: var(--ct); } .rg-bar.T { background: var(--t); }
 
   /* ── Player columns — flush to each screen edge, lowered, under the bigger radar ── */
-  .col { position: absolute; top: 400px; width: 410px; }
+  /* Rosters hug the bottom corners (broadcast convention) — the roster grows upward off the
+     screen edge, so the cards stay put as the round runs down. */
+  .col { position: absolute; bottom: 26px; width: 410px; transition: bottom 0.35s ease; }
   .col-ct { left: 0; } .col-t { right: 0; }
+  /* The right column shares its lane with the sponsor banner + partner rail — lift it clear
+     for as long as either is on air (the rail sits higher, so it wins when both are up). */
+  body.has-banner .col-t { bottom: 132px; }
+  body.has-sprail .col-t { bottom: 188px; }
   .players { display: flex; flex-direction: column; gap: 6px; }
 
   /* Team header card: logo + name + total cash, with a utility tally row beneath */
@@ -306,6 +312,10 @@
   .pkad { display: flex; align-items: center; gap: 3px; font-weight: 600; font-size: 14px; color: #c4c9d2; font-variant-numeric: tabular-nums; }
   .pkad .kad-ic { display: block; }
   .pmoney { font-weight: 600; font-size: 14px; color: #6ee7a0; }
+  /* Round damage — only on dead rows, where money/loadout have dropped out (JT's-HUD idea:
+     a dead player's last useful stat is what they did before they died). */
+  .pdmg { display: none; font-weight: 700; font-size: 11px; letter-spacing: 1.5px; color: #8b909a; white-space: nowrap; }
+  .prow.dead .pdmg:not(:empty) { display: block; }
   /* Loadout: weapon + grenades + kit/bomb in one horizontal row, sits next to HP */
   .pwpn { display: flex; flex-direction: row; align-items: center; gap: 4px; flex-shrink: 0; }
   .players.t .pwpn { flex-direction: row-reverse; }
@@ -364,6 +374,39 @@
   .uimg { display: block; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.5)); }
 
   /* ── Radar: floats in the top-left empty space — transparent, only the map shape shows ── */
+  /* ── Series map strip (top-left) — the veto's picked maps in play order, played ones
+        dimmed with their score, the live map lit. Fed by state.veto.maps. ── */
+  .cs-vetostrip { position: absolute; top: 14px; left: 72px; display: flex; align-items: stretch; height: 26px;
+    border-radius: 7px; overflow: hidden; background: linear-gradient(180deg, var(--panel-1), var(--panel-2));
+    border: 1px solid rgba(255,255,255,0.12); box-shadow: 0 8px 22px rgba(0,0,0,0.5);
+    font-size: 11px; font-weight: 800; letter-spacing: 2px; text-transform: uppercase;
+    animation: radarIn 0.45s ease backwards; }
+  .cs-vetostrip .vs-bo { display: flex; align-items: center; padding: 0 11px; color: #fff; background: rgba(0,0,0,0.45); }
+  .cs-vetostrip .vs-map { display: flex; align-items: center; gap: 7px; padding: 0 11px; color: #7f858f;
+    border-left: 1px solid rgba(255,255,255,0.10); }
+  .cs-vetostrip .vs-map.live { color: #fff; }
+  .cs-vetostrip .vs-map.live::before { content: ''; width: 5px; height: 5px; border-radius: 50%; background: #fff;
+    box-shadow: 0 0 7px rgba(255,255,255,0.9); animation: pulse 1.4s ease-in-out infinite; }
+  .cs-vetostrip .vs-score { font-weight: 700; letter-spacing: 1px; font-variant-numeric: tabular-nums; color: #9aa0aa; }
+  .cs-vetostrip .vs-map.win-ct .vs-score { color: var(--ct); }
+  .cs-vetostrip .vs-map.win-t  .vs-score { color: var(--t); }
+  /* The strip takes the radar's corner, so drop the radar below it while it's up. */
+  body.has-veto .cs-radar { top: 50px; }
+
+  /* ── Bomb action caption — who is planting / defusing, with a progress bar.
+        Hangs under the head; only up while the action is in progress. ── */
+  .bomb-act { position: absolute; top: 100%; left: 50%; transform: translateX(-50%); margin-top: 5px;
+    display: flex; flex-direction: column; align-items: center; gap: 3px; width: 300px; z-index: 41;
+    animation: radarIn 0.2s ease backwards; }
+  .ba-bar { width: 100%; height: 5px; border-radius: 3px; overflow: hidden; background: rgba(0,0,0,0.6);
+    border: 1px solid rgba(255,255,255,0.14); }
+  .ba-fill { height: 100%; width: 0; border-radius: 3px; transition: width 0.12s linear;
+    background: linear-gradient(90deg, #ff6a3d, #ff2020); box-shadow: 0 0 10px rgba(255,65,51,0.8); }
+  .bomb-act.defusing .ba-fill { background: linear-gradient(90deg, #9aa0ab, #d6dae1); box-shadow: 0 0 8px rgba(210,215,225,0.6); }
+  .ba-text { font-size: 12px; font-weight: 900; letter-spacing: 3px; text-transform: uppercase; color: #ff6a52;
+    text-shadow: 0 2px 8px rgba(0,0,0,0.9); white-space: nowrap; }
+  .bomb-act.defusing .ba-text { color: #d6dae1; }
+
   .cs-radar { position: absolute; top: 14px; left: 72px; width: 360px; height: 360px; background: transparent;
     animation: radarIn 0.45s ease backwards; }
   /* Fallback canvas if the map PNG is missing — never blank */
@@ -716,13 +759,24 @@
     </div>
     <!-- Bomb result flash: explosion / "BOMB DEFUSED", auto-clears after ~2s -->
     <div id="bomb-flash" class="bomb-flash"></div>
+
     <!-- Light that travels around the border (left → bottom → right), pauses, repeats -->
     <svg class="head-beam" viewBox="0 0 1000 100" preserveAspectRatio="none" aria-hidden="true">
       <path class="hb-base" d="M 2 2 L 2 86 Q 2 99 15 99 L 985 99 Q 998 99 998 86 L 998 2" pathLength="100"></path>
       <path class="hb-beam" d="M 2 2 L 2 86 Q 2 99 15 99 L 985 99 Q 998 99 998 86 L 998 2" pathLength="100"></path>
     </svg>
   </div>
+
+  <!-- Who is planting / defusing, with a progress bar — hangs under the head while the
+       action runs (GSI bomb.player + bomb.state 'planting'/'defusing'). -->
+  <div id="cs-bombact" class="bomb-act hidden">
+    <div class="ba-bar"><div class="ba-fill" id="ba-fill"></div></div>
+    <div class="ba-text" id="ba-text"></div>
+  </div>
 </div>
+
+<!-- Series map strip (top-left): the veto's picked maps in play order -->
+<div id="cs-vetostrip" class="cs-vetostrip hidden"></div>
 
 <!-- Round history — separate overlay, toggled show/hide from the control panel (animated) -->
 <div id="round-dots" class="round-dots"></div>
@@ -922,6 +976,40 @@ function renderSeries(){
   });
 }
 
+// ── Series map strip (top-left) ────────────────────────────────────────────
+// The veto's picked maps in play order: finished maps carry their score and tint to the
+// winner, the map currently in the server is lit. Bans never appear. Hidden with no veto.
+let vetoMaps = [];       // from full_state.veto.maps
+let vetoStripOn = false; // strip is up → the mid drops its duplicate "BEST OF n"
+function vetoKey(n){ return String(n || '').replace(/^(de|cs)_/, '').replace(/[_\s]/g, '').toUpperCase(); }
+function renderVetoStrip(cs){
+  const box = el('cs-vetostrip'); if (!box) return;
+  const maps = (vetoMaps || []).filter(m => m && m.name && m.action !== 'ban');
+  vetoStripOn = maps.length > 0;
+  box.classList.toggle('hidden', !vetoStripOn);
+  document.body.classList.toggle('has-veto', vetoStripOn);
+  if (!vetoStripOn) { box.dataset.sig = ''; return; }
+
+  const liveKey = vetoKey(cs && cs.map && cs.map.name);
+  // The live map is the one the server is on; with no match, the first map still unplayed.
+  let liveIdx = maps.findIndex(m => vetoKey(m.name) === liveKey && liveKey);
+  if (liveIdx < 0) liveIdx = maps.findIndex(m => !m.winner && !(m.score && (m.score.a || m.score.b)));
+
+  const sig = bestOf + '|' + liveIdx + '|' + JSON.stringify(maps.map(m => [m.name, m.winner, m.score && m.score.a, m.score && m.score.b]));
+  if (box.dataset.sig === sig) return;   // only rebuild on change
+  box.dataset.sig = sig;
+
+  let html = bestOf ? `<span class="vs-bo">Best of ${bestOf}</span>` : '';
+  maps.forEach((m, i) => {
+    const done = m.winner === 'a' || m.winner === 'b' || !!(m.score && (m.score.a || m.score.b));
+    const cls = (i === liveIdx ? ' live' : done ? ' done' : '')
+      + (m.winner === 'a' ? ' win-ct' : m.winner === 'b' ? ' win-t' : '');
+    const score = (m.score && (m.score.a || m.score.b)) ? `<span class="vs-score">${m.score.a || 0}-${m.score.b || 0}</span>` : '';
+    html += `<span class="vs-map${cls}">${mapLabel(m.name)}${score}</span>`;
+  });
+  box.innerHTML = html;
+}
+
 // Overtime label: OT1 → OVERTIME, OT2 → DOUBLE OVERTIME, …
 const OT_NAMES = ['', 'OVERTIME', 'DOUBLE OVERTIME', 'TRIPLE OVERTIME', 'QUADRUPLE OVERTIME', 'QUINTUPLE OVERTIME'];
 function otLabel(n){ return n <= 0 ? '' : (OT_NAMES[n] || (n + 'X OVERTIME')); }
@@ -1111,6 +1199,35 @@ function handleBombResult(stateNow){
   prevBombState = stateNow;
 }
 
+// ── "NAME IS PLANTING / DEFUSING" caption ──────────────────────────────────
+// GSI reports bomb.state 'planting' (which the centre block ignores — the round clock
+// stays useful there) and hands us bomb.player, the steamid doing it. The caption names
+// them and fills a bar over the real action time: 3.2s to plant, 5s/10s to defuse (kit).
+const PLANT_TIME = 3.2;
+let plantStart = null;   // ms timestamp when the current plant began
+function renderBombAct(cs, bombState){
+  const box = el('cs-bombact'); if (!box) return;
+  const planting = bombState === 'planting';
+  const defusing = bombState === 'defusing';
+  if (!planting && !defusing){
+    plantStart = null;
+    box.classList.add('hidden');
+    return;
+  }
+  const actor = (cs.players || []).find(p => p.steamid === (cs.bomb && cs.bomb.player));
+  if (planting && plantStart === null) plantStart = nowMs();
+  const start = planting ? plantStart : defuseStart;
+  const dur = planting ? PLANT_TIME : ((actor && actor.hasKit) ? 5 : DEFUSE_TIME);
+  const frac = start === null ? 0 : Math.min(1, (nowMs() - start) / (dur * 1000));
+
+  box.classList.remove('hidden');
+  box.classList.toggle('defusing', defusing);
+  el('ba-fill').style.width = (frac * 100).toFixed(1) + '%';
+  el('ba-text').textContent = actor && actor.name
+    ? `${actor.name} is ${planting ? 'planting' : 'defusing'}`
+    : (planting ? 'Planting the bomb' : 'Defusing the bomb');
+}
+
 const DEMO = {
   connected: false,
   map: { name: 'de_mirage', phase: 'live' },
@@ -1134,12 +1251,12 @@ const DEMO = {
   players: [
     { steamid:'p1', name:'Player 1', team:'CT', health:100, money:4500, equip:4700, kills:14, assists:3, deaths:8, alive:true,  weapon:'ak47',          nades:['hegrenade','smokegrenade'], hasKit:true,  hasBomb:false, pos:{x:-1200,y:-200}, fwd:{x:1,y:0} },
     { steamid:'p2', name:'Player 2', team:'CT', health:72,  money:1200, equip:4200, kills:11, assists:5, deaths:9, alive:true,  weapon:'m4a1',          nades:['flashbang'],      hasKit:false, hasBomb:false, flashed:210, pos:{x:-900,y:100}, fwd:{x:0.6,y:-0.8} },
-    { steamid:'p3', name:'Player 3', team:'CT', health:0,   money:800,  equip:0,    kills:8,  assists:2, deaths:11, alive:false, weapon:'',             nades:[],          hasKit:false, hasBomb:false },
+    { steamid:'p3', name:'Player 3', team:'CT', health:0,   money:800,  equip:0,    kills:8,  assists:2, deaths:11, alive:false, roundDmg:87, weapon:'',             nades:[],          hasKit:false, hasBomb:false },
     { steamid:'p4', name:'Player 4', team:'CT', health:35,  money:300,  equip:4100, kills:6,  assists:7, deaths:10, alive:true,  weapon:'deagle',       nades:[],          hasKit:true,  hasBomb:false, smoked:200, pos:{x:-1500,y:-600}, fwd:{x:0,y:1} },
     { steamid:'p5', name:'Player 5', team:'CT', health:84,  money:1650, equip:4750, kills:17, assists:1, deaths:7, alive:true,  weapon:'m4a1_silencer', nades:['smokegrenade','flashbang'], hasKit:false, hasBomb:false, pos:{x:-700,y:-400}, fwd:{x:0.7,y:0.7} },
     { steamid:'p6', name:'Player 6', team:'T', health:100, money:3200, equip:2800, kills:13, assists:4, deaths:9, alive:true,  weapon:'ak47',           nades:['molotov'],      hasKit:false, hasBomb:true,  pos:{x:200,y:-1500}, fwd:{x:-1,y:0} },
     { steamid:'p7', name:'Player 7', team:'T', health:88,  money:900,  equip:2200, kills:9,  assists:6, deaths:10, alive:true,  weapon:'galilar',        nades:['hegrenade'],      hasKit:false, hasBomb:false, burning:190, pos:{x:-100,y:-1200}, fwd:{x:-0.7,y:0.7} },
-    { steamid:'p8', name:'Player 8', team:'T', health:0,   money:450,  equip:0,    kills:7,  assists:3, deaths:12, alive:false, weapon:'',              nades:[],          hasKit:false, hasBomb:false },
+    { steamid:'p8', name:'Player 8', team:'T', health:0,   money:450,  equip:0,    kills:7,  assists:3, deaths:12, alive:false, roundDmg:42, weapon:'',              nades:[],          hasKit:false, hasBomb:false },
     { steamid:'p9', name:'Player 9', team:'T', health:54,  money:2100, equip:2900, kills:15, assists:2, deaths:8, alive:true,  weapon:'awp',            nades:['smokegrenade'],      hasKit:false, hasBomb:false, pos:{x:400,y:-1000}, fwd:{x:0,y:-1} },
     { steamid:'p10', name:'Player 10', team:'T', health:100, money:6000, equip:2400, kills:10, assists:5, deaths:9, alive:true,  weapon:'m4a1',           nades:['hegrenade','flashbang'], hasKit:false, hasBomb:false, pos:{x:-300,y:-1700}, fwd:{x:0.9,y:-0.3} }
   ]
@@ -1195,7 +1312,8 @@ function createRow(){
   kad.appendChild(utilImg('elimination', 16, 'kad-ic')); kad.appendChild(kadK);
   kad.appendChild(kadSkull); kad.appendChild(kadD);
   const money = document.createElement('div'); money.className = 'pmoney';
-  sub.appendChild(kad); sub.appendChild(money);
+  const dmg = document.createElement('div'); dmg.className = 'pdmg';   // dead rows only
+  sub.appendChild(kad); sub.appendChild(money); sub.appendChild(dmg);
   info.appendChild(l1); info.appendChild(sub);
   const wpn = document.createElement('div'); wpn.className = 'pwpn';   // loadout
   body.appendChild(info); body.appendChild(wpn);
@@ -1208,7 +1326,7 @@ function createRow(){
   const cond = document.createElement('div'); cond.className = 'pcond';
   // fx first → behind; body/HP carry z-index so the text stays crisp over the tint.
   el.appendChild(fx); el.appendChild(body); el.appendChild(cond); el.appendChild(hpbox); el.appendChild(hpbar);
-  return { el, side: '', wasAlive: true, refs: { hpbox, name, money, status, kadK, kadD, wpn, hpfill, bomb, fx, cond, pnum } };
+  return { el, side: '', wasAlive: true, refs: { hpbox, name, money, dmg, status, kadK, kadD, wpn, hpfill, bomb, fx, cond, pnum } };
 }
 
 function updateRow(entry, p, activeId, number){
@@ -1225,6 +1343,8 @@ function updateRow(entry, p, activeId, number){
   refs.pnum.textContent = (p.slot != null && p.slot < 99) ? String(p.slot) : '';   // 0–9, matches the map
   refs.name.textContent = p.name;
   refs.money.textContent = '$' + p.money;
+  // Dead rows drop money/loadout, so fill that space with what they did this round.
+  refs.dmg.textContent = (dead && (p.roundDmg || 0) > 0) ? ('DMG ' + p.roundDmg) : '';
   refs.kadK.textContent = p.kills;
   refs.kadD.textContent = p.deaths;
   const hp = Math.max(0, Math.min(100, p.health || 0));
@@ -1756,6 +1876,7 @@ function renderCallouts(cs, live){
 function renderSponsors(){
   const rail = el('cs-sponsors');
   const sp = (brand && (brand.railSponsors || brand.sponsors)) || [];
+  document.body.classList.toggle('has-sprail', sp.length > 0);     // lifts the T roster clear
   if (!sp.length){ rail.classList.add('hidden'); lastSponsorSig = ''; return; }
   rail.classList.remove('hidden');
   // Explicit empty brand-kit label hides the heading; only a MISSING label defaults to 'PARTNERS'.
@@ -1788,6 +1909,7 @@ function renderBanner(b){
   const box = el('cs-banner'); if (!box) return;
   const imgs = (b && b.visible && Array.isArray(b.images)) ? b.images.filter(Boolean) : [];
   box.classList.toggle('show', imgs.length > 0);
+  document.body.classList.toggle('has-banner', imgs.length > 0);   // lifts the T roster clear
   const sig = imgs.join('|') + '#' + ((b && b.interval) || 10);
   if (sig === lastBannerSig) return;           // unchanged → keep the running rotation (no flicker)
   lastBannerSig = sig;
@@ -1834,9 +1956,10 @@ function render(cs){
   evBar.textContent = eventName;
   evBar.classList.toggle('hidden', !eventName);
 
+  renderVetoStrip(cs);   // sets vetoStripOn — the strip already carries the series format
   const mapTxt = mapLabel(cs.map && cs.map.name);
   el('cs-map').innerHTML = (mapTxt || '') +
-    (bestOf ? `${mapTxt ? '  ·  ' : ''}<span class="bo">BEST OF ${bestOf}</span>` : '');
+    ((bestOf && !vetoStripOn) ? `${mapTxt ? '  ·  ' : ''}<span class="bo">BEST OF ${bestOf}</span>` : '');
   renderSeries();
 
   setTeamPanel('ct', appTeams.blue, cs.ct.score);
@@ -1853,6 +1976,7 @@ function render(cs){
 
   const bombState = (cs.bomb && cs.bomb.state) || '';
   handleBombResult(bombState);   // fire explosion / defuse banner on state transition
+  renderBombAct(cs, bombState);  // "NAME IS PLANTING / DEFUSING" caption under the head
   const defusing = bombState === 'defusing';
   const bombActive = bombState === 'planted' || defusing;
   const timerEl = el('cs-timer');
@@ -1969,6 +2093,8 @@ async function connect(){
       eventName = (d.eventName || '').trim();
       if (d.bestOf) bestOf = d.bestOf;
       if (d.series) series = d.series;
+      // Series map strip (top-left) — picks/decider only; absent key = leave as-is.
+      if ('veto' in d) vetoMaps = (d.veto && Array.isArray(d.veto.maps)) ? d.veto.maps : [];
       const teams = d.teams || {};
       appTeams = {
         blue:   { name: (teams.blue && teams.blue.name) || 'TEAM A',   logo: (teams.blue && teams.blue.logo) || null },

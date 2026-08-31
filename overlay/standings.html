@@ -6,6 +6,16 @@
   Sources (start.gg event, in-app league, manual) all funnel into those rows via the
   control panel's Standings section.
 
+  TWO layouts, chosen by state.standings.layout ('auto' | 'podium' | 'placement'):
+    · podium    — the default board described below
+    · placement — the SMASH top-8 finish wall: one card per finisher sized by rank (winner as a
+                  full-height hero, 2-4 across the top, 5-8 underneath, 9+ on a chip strip), each
+                  card carrying that entrant's CHARACTER art from row.character (resolved through
+                  smash-fighters.js). Rows with no character fall back to their team/player logo.
+                  ONLY drawn for Smash (the 'stocks' feature) — any other game gets the podium
+                  board no matter what layout was pushed.
+    · auto      — placement for Smash, podium for everything else.
+
   PODIUM redesign 2026-07: header (brand logo + title) → pedestal podium for the top 3
   (2nd | 1st | 3rd, medal-lit plinths, team logos/colors) → compact list of the next
   ranks underneath (up to 8 rows, "+N more" footnote beyond that). W/L is SERIES wins
@@ -75,6 +85,9 @@ html, body {
 }
 .st-subtitle { font-size: 21px; font-weight: 600; letter-spacing: 1px; color: rgba(255,255,255,.85); }
 .st-subtitle:empty { display: none; }
+.st-credit { margin: 2px 0 6px; font-size: 15px; font-weight: 600; letter-spacing: .06em;
+  color: rgba(255,255,255,.62); text-transform: none; }
+.st-credit:empty { display: none; }
 .st-count { flex: 0 0 auto; display: flex; align-items: baseline; gap: 10px; line-height: 1; }
 .st-count b {
   font-family: var(--disp); font-size: 64px; font-weight: 700;
@@ -184,6 +197,108 @@ html, body {
 .st-more { font-size: 15px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase;
   color: rgba(255,255,255,.7); text-align: center; padding-top: 2px; }
 
+/* ── PLACEMENT WALL (layout: 'placement') ────────────────────────────────────
+   The FGC/Smash top-8 board: one card per finisher, character art filling the card, sized by
+   rank — winner is a full-height hero on the left, 2-4 across the top, 5-8 underneath. Falls
+   back to the team/player logo when a row has no fighter assigned. */
+.st-place { display: flex; gap: 16px; width: 100%; align-items: stretch; }
+.st-place-side { flex: 1 1 auto; display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.st-pl-row { display: flex; gap: 16px; min-width: 0; }
+/* Fixed basis, shrink-only (never grow): a partial row — say a top 5, where only one card lands
+   on the bottom row — keeps its card at normal size and left-aligns, instead of stretching one
+   entrant across the full width. The basis is the exact full-row share of the 1224px side column. */
+.st-pl-row > * { flex: 0 1 auto; min-width: 0; }
+.st-pl-row-a > * { width: 397px; }
+.st-pl-row-b > * { width: 294px; }
+
+/* NOTE: no color-mix() below. The app ships Electron 18 (Chrome 100), where color-mix is
+   unsupported and silently computes to BLACK — every tint here is handed in as an explicit
+   rgb/rgba var from buildPlacementCard() instead, so the board looks the same in the in-app
+   preview and in OBS's newer CEF. */
+.st-pl-card {
+  position: relative; overflow: hidden; border-radius: 14px;
+  background:
+    radial-gradient(120% 90% at 50% 100%, var(--pl-glow), rgba(0,0,0,0) 68%),
+    linear-gradient(180deg, #171b25, #0b0e15);
+  border: 2px solid var(--pl-edge);
+  box-shadow: 0 14px 34px rgba(0,0,0,.5), inset 0 1px 0 rgba(255,255,255,.07);
+  opacity: 0; transform: translateY(16px) scale(.98);
+  transition: opacity .5s ease, transform .5s cubic-bezier(.2,.8,.3,1);
+}
+.st-pl-card.visible { opacity: 1; transform: none; }
+.st-pl-hero { width: 520px; flex: 0 0 520px; }
+.st-pl-row-a .st-pl-card { height: 306px; }
+.st-pl-row-b .st-pl-card { height: 238px; }
+
+/* fighter art / logo — stands on the card floor so the name scrim reads over the legs */
+.st-pl-art {
+  position: absolute; inset: 0 0 0 0; display: flex; align-items: flex-end; justify-content: center;
+  padding: 14px 10px 0;
+}
+.st-pl-art img { max-width: 100%; max-height: 100%; object-fit: contain; object-position: bottom center;
+  filter: drop-shadow(0 8px 20px rgba(0,0,0,.6)); }
+.st-pl-art.is-logo { align-items: center; padding: 28px; }
+.st-pl-art.is-logo img { max-height: 62%; }
+.st-pl-art.is-logo img.logo-on-dark { filter: brightness(0) invert(1) drop-shadow(0 6px 16px rgba(0,0,0,.6)); }
+
+/* rank plate, top-left */
+.st-pl-rank {
+  position: absolute; top: 0; left: 0; z-index: 3;
+  min-width: 52px; padding: 4px 12px 7px; border-radius: 12px 0 12px 0;
+  background: linear-gradient(150deg, var(--pl-accent-lit), var(--pl-accent));
+  font-family: var(--disp); font-size: 34px; font-weight: 800; line-height: 1;
+  /* The badge is painted in the entrant's accent, so the numeral has to follow it: a white or
+     pastel brand colour left white-on-white and the rank simply disappeared. Ranks 1-3 override
+     both background and colour below (medal tints), so they are unaffected. */
+  color: var(--pl-rank-ink, #fff);
+  font-variant-numeric: tabular-nums; text-align: center;
+  text-shadow: var(--pl-rank-shadow, 0 2px 6px rgba(0,0,0,.45)); box-shadow: 0 4px 14px rgba(0,0,0,.45);
+}
+.st-pl-hero .st-pl-rank { min-width: 96px; font-size: 76px; padding: 8px 20px 14px; }
+.st-pl-row-b .st-pl-rank { min-width: 44px; font-size: 27px; }
+/* medal tints for the podium three — the accent still frames the card */
+.st-pl-card[data-rank="1"] .st-pl-rank { background: linear-gradient(150deg, #fff0bd, var(--gold)); color: #2a1f00; text-shadow: none; }
+.st-pl-card[data-rank="2"] .st-pl-rank { background: linear-gradient(150deg, #ffffff, var(--silver)); color: #1d2330; text-shadow: none; }
+.st-pl-card[data-rank="3"] .st-pl-rank { background: linear-gradient(150deg, #ffd0a4, var(--bronze)); color: #2c1704; text-shadow: none; }
+
+/* name plate along the bottom */
+.st-pl-foot {
+  position: absolute; left: 0; right: 0; bottom: 0; z-index: 2; padding: 30px 16px 12px;
+  background: linear-gradient(180deg, transparent, rgba(6,8,13,.82) 46%, rgba(6,8,13,.95));
+}
+.st-pl-name {
+  font-family: var(--disp); font-weight: 700; font-size: 27px; line-height: 1.05; color: #fff;
+  letter-spacing: .3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  text-shadow: 0 2px 8px rgba(0,0,0,.8);
+}
+.st-pl-hero .st-pl-name { font-size: 54px; }
+.st-pl-row-b .st-pl-name { font-size: 21px; }
+/* Squad list for a team / doubles entrant, under the team name. */
+.st-pl-roster {
+  margin-top: 4px; font-size: 15px; font-weight: 600; line-height: 1.15; color: rgba(255,255,255,.92);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  text-shadow: 0 2px 6px rgba(0,0,0,.7);
+}
+.st-pl-hero .st-pl-roster { font-size: 24px; margin-top: 7px; }
+.st-pl-row-b .st-pl-roster { font-size: 12px; }
+.st-pl-meta {
+  margin-top: 3px; font-size: 12px; font-weight: 700; letter-spacing: .16em; text-transform: uppercase;
+  color: var(--pl-accent-text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.st-pl-hero .st-pl-meta { font-size: 16px; letter-spacing: .2em; }
+.st-pl-meta:empty { display: none; }
+
+/* ranks 9+ — a compact strip so a big field still gets named */
+.st-pl-rest { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px 10px; width: 100%; }
+.st-pl-chip {
+  display: flex; align-items: center; gap: 8px; padding: 5px 12px 5px 6px; border-radius: 8px;
+  background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.09);
+}
+.st-pl-chip img { width: 24px; height: 24px; object-fit: contain; }
+.st-pl-chip b { font-family: var(--disp); font-size: 15px; font-weight: 800; color: var(--accent-2); font-variant-numeric: tabular-nums; }
+.st-pl-chip span { font-size: 15px; font-weight: 600; color: #dfe4ee; }
+
 /* ── Empty ── */
 .st-empty { font-size: 30px; font-weight: 600; color: rgba(255,255,255,.85); text-align: center; }
 
@@ -194,6 +309,42 @@ html, body {
 .st-sponsors.is-empty { display: none; }
 .st-sponsors-lbl { font-size: 10px; font-weight: 800; letter-spacing: .24em; text-transform: uppercase; color: #6a7080; }
 .st-sponsor { height: 28px; max-width: 118px; object-fit: contain; opacity: .88; filter: drop-shadow(0 2px 6px rgba(0,0,0,.4)); }
+/* ── DIVISION BOARD (layout: 'divisions') ───────────────────────────────────
+   A league with conferences drawn the way league broadcasts draw one: each division its own
+   ranked table, side by side, with the playoff cut marked. The flat podium merged both
+   conferences into a single order, which states a standing that does not exist. */
+.st-divs { display: grid; gap: 40px; align-items: start; margin-top: 6px; }
+.st-divs.cols-1 { grid-template-columns: minmax(0, 900px); }
+.st-divs.cols-2 { grid-template-columns: repeat(2, minmax(0, 760px)); }
+.st-divs.cols-3 { grid-template-columns: repeat(3, minmax(0, 540px)); }
+.st-dv { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.st-dv-head { font-family: var(--disp, 'Rajdhani', sans-serif); font-weight: 800; font-size: 30px;
+  letter-spacing: .14em; text-transform: uppercase; text-align: center; color: #fff;
+  padding-bottom: 8px; position: relative; }
+.st-dv-head::after { content: ''; position: absolute; left: 12%; right: 12%; bottom: 0; height: 3px;
+  background: linear-gradient(90deg, transparent, var(--dv-c, #55b3ff), transparent); }
+.st-dv-rows { display: flex; flex-direction: column; gap: 7px; }
+.st-dv-row { display: grid; grid-template-columns: 60px 46px minmax(0, 1fr) auto; align-items: center;
+  gap: 14px; padding: 10px 16px; border-radius: 6px; position: relative; overflow: hidden;
+  background: linear-gradient(90deg, rgba(24,28,38,.96), rgba(14,17,24,.96));
+  border: 1px solid rgba(255,255,255,.08); }
+/* Division colour rides the left edge — the only place the two tables differ chromatically. */
+.st-dv-row::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 4px;
+  background: var(--dv-c, #55b3ff); }
+.st-dv-rank { font-family: var(--disp, 'Rajdhani', sans-serif); font-weight: 800; font-size: 28px;
+  text-align: center; color: #fff; font-variant-numeric: tabular-nums; }
+.st-dv-logo { width: 40px; height: 40px; object-fit: contain; }
+.st-dv-name { font-family: var(--disp, 'Rajdhani', sans-serif); font-weight: 700; font-size: 27px;
+  color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.st-dv-rec { font-family: var(--disp, 'Rajdhani', sans-serif); font-weight: 800; font-size: 27px;
+  color: rgba(255,255,255,.9); font-variant-numeric: tabular-nums; letter-spacing: .02em; }
+/* Clinched a playoff spot: the rank cell becomes a marker, as in the reference board. */
+.st-dv-row.qual .st-dv-rank { color: var(--dv-c, #55b3ff); }
+.st-dv-row.qual { border-color: color-mix(in srgb, var(--dv-c, #55b3ff) 42%, transparent); }
+.st-dv-row.out { opacity: .55; }
+.st-dv-note { text-align: center; font-family: var(--disp, 'Rajdhani', sans-serif); font-weight: 600;
+  font-size: 15px; letter-spacing: .12em; text-transform: uppercase; color: rgba(255,255,255,.55);
+  margin-top: 14px; }
 </style>
 </head>
 <body>
@@ -209,8 +360,15 @@ html, body {
       </div>
       <div class="st-count" id="st-count"></div>
     </div>
+    <!-- Data-source credit. Liquipedia content is CC BY-SA 3.0, so when the rows come from
+         there the credit is a LICENCE CONDITION and rides with the data — the producer cannot
+         forget to enable it. Empty (and hidden) for every other source. -->
+    <div class="st-credit" id="st-credit"></div>
     <div class="st-podium" id="st-podium"></div>
-    <div class="st-list" id="st-list"></div>
+    <div class="st-place" id="st-place" style="display:none;"></div>
+    <div class="st-pl-rest" id="st-place-rest" style="display:none;"></div>
+      <div class="st-divs" id="st-divs" style="display:none;"></div>
+  <div class="st-list" id="st-list"></div>
     <div class="st-more" id="st-more" style="display:none;"></div>
   </div>
   <div class="st-empty" id="st-empty" style="display:none;">No standings data — pull start.gg, a league, or add manual rows.</div>
@@ -218,6 +376,7 @@ html, body {
 </div>
 
 <script src="scene-base.js"></script>
+<script src="smash-fighters.js"></script>
 <script>
 (function () {
   function el(id) { return document.getElementById(id); }
@@ -324,6 +483,176 @@ html, body {
     return row;
   }
 
+  // ── Placement wall (layout 'placement') ────────────────────────────────────
+  // One card per finisher with the entrant's CHARACTER art (row.character — a fighter name the
+  // producer assigned when building the push). No character, or a game with no character art, and
+  // the card falls back to the team/player logo, so this layout is safe for any game.
+  // Tints for the placement cards, computed here rather than with CSS color-mix(): the app runs
+  // Electron 18 / Chrome 100, where color-mix is unsupported and computes to black, so the cards
+  // would lose every accent in the in-app preview.
+  function hexRgb(hex) {
+    const m = /^#?([0-9a-f]{6})$/i.exec(String(hex || '').trim());
+    const n = m ? parseInt(m[1], 16) : 0x2a3050;
+    return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+  }
+  function rgba(hex, a) { const c = hexRgb(hex); return `rgba(${c[0]},${c[1]},${c[2]},${a})`; }
+  function mixHex(hex, towards, amount) {
+    const a = hexRgb(hex), b = hexRgb(towards);
+    return `rgb(${a.map((v, i) => Math.round(v + (b[i] - v) * amount)).join(',')})`;
+  }
+  // Readable ink on a brand-coloured chip: flip to near-black only when white would fall under
+  // ~3:1, so ordinary team colours keep white and only genuinely pale ones switch. Same rule as
+  // overlay/fgc/fgc-adapter.js and the control panel's teamInk().
+  // Takes an [r,g,b] triple, NOT a colour string: mixHex() returns "rgb(...)" notation while
+  // hexRgb() only parses "#rrggbb", so feeding one to the other silently fell back to the default
+  // dark and every badge came back white — the exact bug this is here to fix.
+  function inkOnRgb(c) {
+    const lin = c.map((v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); });
+    const L = 0.2126 * lin[0] + 0.7152 * lin[1] + 0.0722 * lin[2];
+    return (1.05 / (L + 0.05)) < 3 ? '#0b0e17' : '#ffffff';
+  }
+  function applyCardTints(cardEl, color) {
+    cardEl.style.setProperty('--pl-accent', color);
+    cardEl.style.setProperty('--pl-accent-lit', mixHex(color, '#ffffff', 0.18));
+    cardEl.style.setProperty('--pl-accent-text', mixHex(color, '#ffffff', 0.65));
+    cardEl.style.setProperty('--pl-edge', rgba(color, 0.72));
+    cardEl.style.setProperty('--pl-glow', rgba(color, 0.42));
+    // Judge against the LIGHTER gradient stop — that is the end the numeral mostly sits on.
+    const rankInk = inkOnRgb(hexRgb(color).map((v) => v + (255 - v) * 0.18));
+    cardEl.style.setProperty('--pl-rank-ink', rankInk);
+    cardEl.style.setProperty('--pl-rank-shadow', rankInk === '#ffffff'
+      ? '0 2px 6px rgba(0,0,0,.45)' : '0 1px 0 rgba(255,255,255,.45)');
+  }
+
+  function characterArt(entry) {
+    if (!entry || !entry.character || !window.SmashFighters) return null;
+    const f = SmashFighters.resolve(entry.character);
+    return f ? { url: SmashFighters.renderUrl(f.slug), name: f.name, icon: SmashFighters.stockUrl(f.slug) } : null;
+  }
+  function buildPlacementCard(entry, idx, maps, accent, showRecord, delay) {
+    const t = resolveTeam(entry, maps, accent);
+    const art = characterArt(entry);
+    const rank = Number(entry.placement) || (idx + 1);
+    const card = document.createElement('div');
+    card.className = 'st-pl-card';
+    card.dataset.rank = String(rank);
+    applyCardTints(card, t.color);
+    // The fighter NAME is deliberately not printed — the art already says who they played, and the
+    // card is for the ENTRANT. Meta is the record only (when the producer has W/L switched on).
+    const bits = [];
+    if (showRecord && (entry.wins != null || entry.losses != null)) bits.push(`${entry.wins ?? 0}-${entry.losses ?? 0}`);
+    if (!bits.length && entry.points != null) bits.push(`${entry.points} PTS`);
+    // Team / doubles entrant: the headline is the team, and the squad is listed under it. Skipped
+    // when the roster just restates the entrant name (start.gg names a doubles team "A / B"), so a
+    // singles card never grows a redundant second line.
+    const roster = Array.isArray(entry.players) ? entry.players.filter(Boolean) : [];
+    const nameKey = String(entry.name || '').replace(/[^a-z0-9]+/gi, '').toLowerCase();
+    const rosterKey = roster.join('').replace(/[^a-z0-9]+/gi, '').toLowerCase();
+    const showRoster = roster.length > 1 && rosterKey !== nameKey;
+    card.innerHTML = `
+      <div class="st-pl-art${art ? '' : ' is-logo'}">
+        <img src="${art ? art.url : t.logo}"${!art && t.isDefaultLogo ? ' class="logo-on-dark"' : ''} alt="">
+      </div>
+      <div class="st-pl-rank">${rank}</div>
+      <div class="st-pl-foot">
+        <div class="st-pl-name">${esc(entry.name || 'TBD')}</div>
+        ${showRoster ? `<div class="st-pl-roster">${esc(roster.join(' · '))}</div>` : ''}
+        <div class="st-pl-meta">${esc(bits.join(' · '))}</div>
+      </div>`;
+    setTimeout(() => card.classList.add('visible'), delay);
+    return card;
+  }
+  function buildPlacementWall(wrap, restEl, rows, maps, accent, showRecord) {
+    wrap.innerHTML = '';
+    restEl.innerHTML = '';
+    // hero (1st) | top row (2-4) | bottom row (5-8) — the standard top-8 finish board.
+    const hero = rows[0];
+    const rowA = rows.slice(1, 4);
+    const rowB = rows.slice(4, 8);
+    let n = 0;
+    if (hero) {
+      const card = buildPlacementCard(hero, 0, maps, accent, showRecord, 90);
+      card.classList.add('st-pl-hero');
+      wrap.appendChild(card);
+      n++;
+    }
+    const side = document.createElement('div');
+    side.className = 'st-place-side';
+    [['st-pl-row-a', rowA], ['st-pl-row-b', rowB]].forEach(([cls, group]) => {
+      if (!group.length) return;
+      const row = document.createElement('div');
+      row.className = 'st-pl-row ' + cls;
+      group.forEach((entry) => {
+        row.appendChild(buildPlacementCard(entry, rows.indexOf(entry), maps, accent, showRecord, 150 + (n++) * 90));
+      });
+      side.appendChild(row);
+    });
+    if (side.childElementCount) wrap.appendChild(side);
+
+    // 9th and beyond: name them on a chip strip rather than dropping them silently.
+    const rest = rows.slice(8, 24);
+    rest.forEach((entry, i) => {
+      const art = characterArt(entry);
+      const chip = document.createElement('div');
+      chip.className = 'st-pl-chip';
+      chip.innerHTML = `${art ? `<img src="${art.icon}" alt="">` : ''}<b>${Number(entry.placement) || (9 + i)}</b><span>${esc(entry.name || 'TBD')}</span>`;
+      restEl.appendChild(chip);
+    });
+    restEl.style.display = rest.length ? '' : 'none';
+  }
+
+  // ── Division board (layout 'divisions') ────────────────────────────────────
+  // Groups rows by their `division` (set by the server's league mirror from lg.divisions) and
+  // draws one ranked table per division. Division order follows first appearance in the rows,
+  // which is the league's own order — not alphabetical, so "East" stays left of "West" if that
+  // is how the producer arranged them.
+  var DV_COLORS = ['#55b3ff', '#ff8c42', '#5fe39a', '#c98cff'];
+  function buildDivisions(host, rows, maps, accent, showRecord) {
+    host.innerHTML = '';
+    const order = [];
+    const byDiv = {};
+    rows.forEach((r) => {
+      const d = r.division || 'League';
+      if (!byDiv[d]) { byDiv[d] = []; order.push(d); }
+      byDiv[d].push(r);
+    });
+    host.className = 'st-divs cols-' + Math.min(order.length || 1, 3);
+    let anyQual = false;
+    order.forEach((name, di) => {
+      const col = document.createElement('div'); col.className = 'st-dv';
+      col.style.setProperty('--dv-c', DV_COLORS[di % DV_COLORS.length]);
+      const head = document.createElement('div'); head.className = 'st-dv-head';
+      head.textContent = name.toUpperCase();
+      col.appendChild(head);
+      const body = document.createElement('div'); body.className = 'st-dv-rows';
+      byDiv[name].forEach((entry, i) => {
+        const t = resolveTeam(entry, maps, accent);
+        const row = document.createElement('div');
+        const qual = !!entry.qualified;
+        if (qual) anyQual = true;
+        row.className = 'st-dv-row' + (qual ? ' qual' : '') + (entry.eliminated ? ' out' : '');
+        const rank = Number(entry.placement) || (i + 1);
+        const rec = showRecord
+          ? ((entry.wins != null ? entry.wins : 0) + '-' + (entry.losses != null ? entry.losses : 0))
+          : (entry.points != null ? String(entry.points) : '');
+        row.innerHTML =
+          '<div class="st-dv-rank">' + rank + '</div>' +
+          '<div><img class="st-dv-logo' + (t.isDefaultLogo ? ' logo-on-dark' : '') + '" src="' + t.logo + '" alt=""></div>' +
+          '<div class="st-dv-name">' + esc(entry.name || 'TBD') + '</div>' +
+          '<div class="st-dv-rec">' + esc(rec) + '</div>';
+        body.appendChild(row);
+      });
+      col.appendChild(body);
+      host.appendChild(col);
+    });
+    if (anyQual) {
+      const note = document.createElement('div'); note.className = 'st-dv-note';
+      note.textContent = 'Highlighted = playoff position';
+      host.appendChild(note);
+      note.style.gridColumn = '1 / -1';
+    }
+  }
+
   // Scale the natural-size layout to fill the 16:9 canvas (matches bracket.html's fit()).
   function fit() {
     const scale = el('st-scale');
@@ -364,7 +693,11 @@ html, body {
     const src = (stState.source || '').toString();
     const liveNames = new Set(live.map((r) => (r.name || '').toLowerCase()));
     const overlap = frozen.some((r) => liveNames.has((r.name || '').toLowerCase()));
+    // 'league' is authoritative like 'manual': the producer explicitly pointed the board at one of
+    // OUR leagues, and the server keeps those rows mirrored to its live points. Falling through to
+    // the tournament's `live` rows here would quietly swap league standings for event standings.
     const rows = (src === 'manual' && frozen.length) ? frozen
+               : (src === 'league') ? frozen
                : (src === 'startgg' && live.length) ? live
                : (src.indexOf('startgg') === 0 && live.length && frozen.length && !overlap) ? live
                : (frozen.length ? frozen : live);
@@ -387,10 +720,23 @@ html, body {
     // what we display — stringifying whole row objects flipped the sig on every ~20s fetch and tore
     // the board down + replayed every slide-in. Project to displayed fields so it only rebuilds when
     // something visible actually changes. (`lm` still catches logos that backfill from a later fetch.)
-    const rowSig = rows.map((r) => [
-      r.name, r.placement, r.wins, r.losses, r.points, r.gameWins, r.gameLosses, r.color, r.played, (r.logo ? 1 : 0)
+    const rowSig = rows.map((r) => [r.division, r.qualified,
+      r.name, r.placement, r.wins, r.losses, r.points, r.gameWins, r.gameLosses, r.color, r.played, r.character,
+      (Array.isArray(r.players) ? r.players.join('~') : ''), (r.logo ? 1 : 0)
     ].join('')).join('');
-    const sig = JSON.stringify({ rowSig, title, subtitle, showRecord, hasPoints, hasGames, accent, accent2,
+    // The placement wall is the SMASH board — it only ever draws for a game with the 'stocks'
+    // feature. Gating here and not just on stState.layout matters: the layout is persisted, so a
+    // board pushed during a Smash event would otherwise still draw as character cards after the
+    // producer switched the active game. Within Smash, 'podium' opts back into the normal board.
+    const gameDef = (data.games || {})[data.activeGame] || {};
+    const smashGame = (gameDef.features || []).indexOf('stocks') >= 0;
+    // Divisions win over the podium whenever the rows actually carry more than one: a podium
+    // built across two conferences ranks teams against opponents they never played, which
+    // states a standing that does not exist. An explicit 'podium' still forces the old board.
+    const divCount = new Set(rows.map((r) => r && r.division).filter(Boolean)).size;
+    const layout = (smashGame && stState.layout !== 'podium') ? 'placement'
+                 : (divCount > 1 && stState.layout !== 'podium') ? 'divisions' : 'podium';
+    const sig = JSON.stringify({ rowSig, title, subtitle, credit: stState.attribution || '', showRecord, hasPoints, hasGames, accent, accent2, layout,
       bl: brandLogo.slice(0, 40), f: data.fontFamily || '', sp: sponsors.map((s) => s.logo && s.logo.slice(0, 40)),
       lm: Object.keys(maps.logos).length });
     if (sig === _sig) return;
@@ -401,6 +747,7 @@ html, body {
     if (data.fontFamily) document.documentElement.style.setProperty('--main-font', `'${data.fontFamily}', 'Bourgeois', 'Inter', sans-serif`);
     el('st-title').textContent = title;
     el('st-subtitle').textContent = subtitle;
+    el('st-credit').textContent = (stState.attribution || '').toString();
 
     const brandEl = el('st-brand');
     if (brandLogo) { if (brandEl.getAttribute('src') !== brandLogo) brandEl.src = brandLogo; brandEl.style.display = ''; }
@@ -414,15 +761,53 @@ html, body {
 
     podium.innerHTML = '';
     list.innerHTML = '';
+    const placeEl = el('st-place'), placeRestEl = el('st-place-rest');
+    placeEl.innerHTML = '';
+    placeRestEl.innerHTML = '';
     const moreEl = el('st-more');
     if (rows.length === 0) {
       empty.style.display = '';
       el('st-count').innerHTML = '';
       moreEl.style.display = 'none';
+      placeEl.style.display = 'none';
+      placeRestEl.style.display = 'none';
       return;
     }
     empty.style.display = 'none';
-    el('st-count').innerHTML = `<b>${rows.length}</b><span>Teams</span>`;
+    // The placement board is a TOP N graphic, so it says so — "TOP 8", not a field size. N is how
+    // many cards actually get drawn (the wall holds 8; a short field says TOP 5), which is why it
+    // is not just the row count: a 37-entrant league pushed here would have read "37 ENTRANTS"
+    // over a board showing eight. Word first so it reads "TOP 8" left to right.
+    el('st-count').innerHTML = layout === 'placement'
+      ? `<span>Top</span><b>${Math.min(rows.length, 8)}</b>`
+      : `<b>${rows.length}</b><span>Teams</span>`;
+
+    // Division board — one ranked table per conference; podium/list/"+N more" are unused.
+    const divsEl = el('st-divs');
+    if (layout === 'divisions') {
+      podium.style.display = 'none';
+      moreEl.style.display = 'none';
+      list.innerHTML = '';
+      placeEl.style.display = 'none';
+      placeRestEl.style.display = 'none';
+      divsEl.style.display = '';
+      buildDivisions(divsEl, rows, maps, accent, showRecord);
+      requestAnimationFrame(fit);
+      return;
+    }
+    divsEl.style.display = 'none';
+
+    // Placement wall — the whole board is the card grid, so the podium/list/"+N more" are unused.
+    if (layout === 'placement') {
+      podium.style.display = 'none';
+      moreEl.style.display = 'none';
+      placeEl.style.display = '';
+      buildPlacementWall(placeEl, placeRestEl, rows, maps, accent, showRecord);
+      requestAnimationFrame(fit);
+      return;
+    }
+    placeEl.style.display = 'none';
+    placeRestEl.style.display = 'none';
 
     // Podium (2nd | 1st | 3rd) — only when the top teams have actual results; a pre-event
     // table (all rows played:false) renders as a plain list so nobody looks pre-crowned.

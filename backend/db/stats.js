@@ -20,9 +20,10 @@ const DB = {
   rl_player_stats: [],  // { id, game_id, player_name, team, goals, assists, saves, shots, demos, score }
   cs2_rounds:      [],  // { id, game_id, round_number, winner, win_condition, bomb_planted, bomb_defused }
   cs2_player_stats:[],  // { id, game_id, steam_id, player_name, team, kills, deaths, assists, hs_kills, mvps, score }
-  val_player_stats:[]   // { id, game_id, player_name, team, agent, kills, deaths, assists }
+  val_player_stats:[],  // { id, game_id, player_name, team, agent, kills, deaths, assists }
+  event_results:   []   // { id, event_slug, event_name, tournament, game_type, num_entrants, started_at, fetched_at, standings:[{placement,team}] }
 };
-let _seq = { matches: 0, games: 0, rl: 0, cs2r: 0, cs2p: 0, val: 0 };
+let _seq = { matches: 0, games: 0, rl: 0, cs2r: 0, cs2p: 0, val: 0, eventResults: 0 };
 
 // ─── Lifecycle ────────────────────────────────────────────────────────────────
 
@@ -316,14 +317,61 @@ function getMatchDetail(matchId) {
   return { ...match, games };
 }
 
+// In-game names arrive decorated: a "Team | " clan prefix, a "#1234" platform discriminator, the
+// odd [TAG]. A raw substring test against the decorated string misses all of them, so match on a
+// stripped form as well as the original.
+function _normPlayer(s) {
+  return String(s || '')
+    .toLowerCase()
+    .replace(/^[^|]{1,12}\|\s*/, '')      // "Team | Name"
+    .replace(/^\[[^\]]{1,10}\]\s*/, '')   // "[TAG] Name"
+    .replace(/#\d+$/, '')                 // "Name#1234"
+    .replace(/[^a-z0-9]/g, '')
+    .trim();
+}
+
+/* Player game history, best match first.
+ *
+ * Matching used to be a bare `includes` over the decorated player_name, which meant a two-letter
+ * query matched half the table and an exactly-correct name ranked no better than a coincidental
+ * substring. Now: the players whose names match are RANKED (exact > prefix > substring), and the
+ * cap is applied to that ranking rather than to a date sort — so searching a real player can no
+ * longer return 50 rows belonging to someone else who merely contains the same letters.
+ */
 function getPlayerHistory(playerName, limit = 50) {
   const DB = _source();
-  const needle = playerName.toLowerCase();
+  const raw = String(playerName || '').toLowerCase().trim();
+  if (!raw) return [];
+  const needle = _normPlayer(raw);
   const gameById = new Map(DB.games.map(g => [g.id, g]));
   const matchById = new Map(DB.matches.map(m => [m.id, m]));
+
+  // Score a stored name against the query. -1 drops the row.
+  const rank = (stored) => {
+    const low = String(stored || '').toLowerCase();
+    const norm = _normPlayer(low);
+    if (norm && needle && norm === needle) return 100;
+    if (low === raw) return 100;
+    if (norm.startsWith(needle) && needle) return 70;
+    if (low.startsWith(raw)) return 65;
+    if (needle && norm.includes(needle)) return 40;
+    if (low.includes(raw)) return 35;
+    return -1;
+  };
+
+  // Rank names, not rows: every row for one player shares a score, so the sort below stays a
+  // date sort within a player and the cap can't interleave two players' games arbitrarily.
+  const scoreByName = new Map();
+  for (const r of DB.rl_player_stats) {
+    if (scoreByName.has(r.player_name)) continue;
+    scoreByName.set(r.player_name, rank(r.player_name));
+  }
+
   return DB.rl_player_stats
-    .filter(r => r.player_name.toLowerCase().includes(needle))
+    .filter(r => (scoreByName.get(r.player_name) || -1) >= 0)
     .sort((a, b) => {
+      const d = (scoreByName.get(b.player_name) || 0) - (scoreByName.get(a.player_name) || 0);
+      if (d) return d;
       const ga = gameById.get(a.game_id);
       const gb = gameById.get(b.game_id);
       return (gb?.started_at || 0) - (ga?.started_at || 0);
@@ -415,6 +463,135 @@ function getTeamRecords() {
   return Object.values(rec)
     .map((r) => ({ ...r, winPct: r.matches ? Math.round((r.wins / r.matches) * 100) : 0 }))
     .sort((x, y) => y.wins - x.wins || y.winPct - x.winPct);
+}
+
+// ─── Event results (final standings of OUR OWN events) ───────────────────────
+// getTeamRecords() only knows set win/loss, which can't tell "won the bracket" from "went 2-1 in
+// pools" — and it weights a match from six months ago the same as last Saturday's final. Seeding
+// needs the finish, so we keep each completed event's final standings here and score off placement.
+// Read/written against DB directly (the SQLite mirror has no table for this).
+
+function _normTeam(s) { return (s || '').toLowerCase().replace(/[^a-z0-9]/g, ''); }
+
+// Upsert one event's final standings, keyed by event slug (re-importing an event replaces it).
+function recordEventResults({ eventSlug, eventName, tournament, gameType, numEntrants, startedAt, standings }) {
+  if (!eventSlug || !Array.isArray(standings)) return null;
+  const rows = standings
+    .map((s) => ({
+      placement: Number(s.placement) || 0,
+      team: (s.team || '').trim(),
+      // Roster as it played THAT event. Optional (older records predate it) and only used to
+      // re-identify a team that has since rebranded, so nothing here is load-bearing for scoring.
+      players: Array.isArray(s.players)
+        ? s.players.map((p) => ({ gamerTag: (p && p.gamerTag) || '', startgg: (p && p.startgg) || '' }))
+                   .filter((p) => p.gamerTag || p.startgg)
+        : [],
+    }))
+    .filter((s) => s.placement > 0 && s.team)
+    .sort((a, b) => a.placement - b.placement);
+  if (!rows.length) return null;
+  const rec = {
+    id:           _nextId('eventResults'),
+    event_slug:   eventSlug,
+    event_name:   eventName || '',
+    tournament:   tournament || '',
+    game_type:    gameType || 'rl',
+    num_entrants: Number(numEntrants) || rows.length,
+    started_at:   Number(startedAt) || Date.now(),
+    fetched_at:   Date.now(),
+    standings:    rows,
+  };
+  const i = DB.event_results.findIndex((e) => e.event_slug === eventSlug);
+  if (i >= 0) { rec.id = DB.event_results[i].id; DB.event_results[i] = rec; }
+  else DB.event_results.push(rec);
+  _queueSave();
+  return rec;
+}
+
+// Newest first. Optionally filtered to one game.
+function getEventResults(gameType) {
+  return DB.event_results
+    .filter((e) => !gameType || e.game_type === gameType)
+    .slice()
+    .sort((a, b) => (b.started_at || 0) - (a.started_at || 0));
+}
+
+function hasEventResults(eventSlug) { return DB.event_results.some((e) => e.event_slug === eventSlug); }
+
+// Cross-event performance rating (0–100) per team, keyed by normalized team name. This is the
+// PRIMARY seeding signal: how a team actually finishes our events, which is what a producer means
+// by "they've won the last couple". Three factors, all of them things a set win% throws away:
+//
+//   placement  — 1st in a full field = 100, last = 0.
+//   recency    — each event decays on a half-life, so last week outranks last season.
+//   field size — winning a 34-team open counts for more than winning a 12-team one (log-scaled).
+//
+// Volume then regresses the result toward 50: one bracket is a reading, a season of them is a
+// verdict. A team with no events at all is absent from the result (the caller imputes it from
+// roster rank) — scoring it 50 would silently plant unknowns mid-board.
+// `aliasMap` (optional): normalizedTeamName -> canonical key. Supply it and every name a squad has
+// competed under collapses into ONE bucket, which is what stops a rebrand deleting a team's record.
+// Without it the function behaves exactly as before, keyed on the normalized name — the caller owns
+// team identity (backend/player-identity.js resolves it by roster overlap); this file just counts.
+//
+// Results are emitted under BOTH the canonical key and every alias that fed it, so a lookup by any
+// of the team's names finds the merged score without the caller needing to know the canonical id.
+function getTeamPlacementScores({ halfLifeDays = 45, gameType = null, excludeSlug = null, maxEvents = 40, aliasMap = null } = {}) {
+  const now = Date.now();
+  const canon = (name) => {
+    const k = _normTeam(name);
+    if (!k) return '';
+    if (!aliasMap) return k;
+    const m = aliasMap instanceof Map ? aliasMap.get(k) : aliasMap[k];
+    return m || k;
+  };
+  const events = getEventResults(gameType)
+    .filter((e) => e.event_slug !== excludeSlug)
+    .slice(0, maxEvents);
+  const acc = {};
+  events.forEach((e) => {
+    const size   = e.num_entrants || e.standings.length;
+    const field  = Math.max(size - 1, 1);
+    const days   = Math.max((now - (e.started_at || now)) / 86400000, 0);
+    const decay  = Math.pow(0.5, days / halfLifeDays);
+    // A 32-team event is the reference (1.0); a 8-team one counts ~0.6, a 64-team one ~1.2.
+    const fieldW = Math.log2(Math.max(size, 2)) / 5;
+    const weight = decay * fieldW;
+    if (weight <= 0) return;
+    e.standings.forEach((s) => {
+      const nameKey = _normTeam(s.team); if (!nameKey) return;
+      const key = canon(s.team);
+      const a = acc[key] || (acc[key] = { team: s.team, wSum: 0, wTotal: 0, events: [], names: new Set() });
+      a.names.add(nameKey);
+      // Keep the most RECENT name as the display label — events iterate newest-first, so the first
+      // one to claim the bucket is the team's current identity, not whatever it was two seasons ago.
+      a.wSum   += weight * (1 - (s.placement - 1) / field);
+      a.wTotal += weight;
+      a.events.push({
+        event: e.event_name || e.tournament || e.event_slug,
+        placement: s.placement, of: size, as: s.team,
+        at: e.started_at, weight: Math.round(weight * 100) / 100,
+      });
+    });
+  });
+  const out = {};
+  Object.entries(acc).forEach(([key, a]) => {
+    if (!a.wTotal) return;
+    const raw  = (a.wSum / a.wTotal) * 100;
+    const n    = a.events.length;
+    const conf = 1 - Math.pow(0.5, n / 1.5);   // 1 ev = 0.37, 2 = 0.60, 3 = 0.76, 6 = 0.94
+    a.events.sort((x, y) => (y.at || 0) - (x.at || 0));
+    const names = [...a.names];
+    const rec = { team: a.team, n, events: a.events, confidence: Math.round(conf * 100),
+      raw: Math.round(raw * 10) / 10,
+      score: Math.round((raw * conf + 50 * (1 - conf)) * 10) / 10,
+      names, merged: names.length > 1 };
+    out[key] = rec;
+    // Publish under every alias too, so a caller looking up any one of the team's names gets the
+    // merged record without having to know the canonical key.
+    names.forEach((nk) => { if (!out[nk]) out[nk] = rec; });
+  });
+  return out;
 }
 
 // Head-to-head record + match list between two team names.
@@ -823,6 +1000,7 @@ module.exports = {
   saveValorantPlayerStats,
   getRecentMatches, getMatchDetail, getPlayerHistory, getAggregateStats,
   getLeaders, getTeamRecords, getHeadToHead,
+  recordEventResults, getEventResults, hasEventResults, getTeamPlacementScores,
   getPlayerProfile, listPlayers, getPlayerEventStats,
   getMapStats, getPacing, getTournaments, getStartggSetIds,
   getDashboard, getFilterOptions,

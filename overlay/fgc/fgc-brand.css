@@ -56,3 +56,31 @@
   stroke: var(--p2-stroke);
 }
 :root.fgc-brand #coloredGlow_p2 { --glow-color: var(--brand-p2); --glow-opacity: 0.55; }
+
+/* ── Readable text on a light plaque ────────────────────────────────────────
+ * The skins hardcode the player name (and its clan prefix / separator) to #FFFFFF, which vanishes
+ * the moment a team or brand kit is white. fgc-adapter.js resolves --pN-ink from the plaque's
+ * luminance, so a pale kit gets near-black text with a light halo and everything else keeps white.
+ * Specificity note (same rule as the top of this file): `:root.fgc-brand #id` (1,2,0) beats the
+ * skin's plain `#id` (1,0,0). The `!important` on the shadow is needed only because
+ * fgc-redesign.css sets its own shadow with `!important`. */
+:root.fgc-brand #nameBlockP1, :root.fgc-brand #nameBlockP1 .name,
+:root.fgc-brand #separator1, :root.fgc-brand #separator1-1 {
+  color: var(--p1-ink, #ffffff);
+  text-shadow: var(--p1-ink-shadow, 0 2px 7px rgba(0,0,0,.78)) !important;
+}
+:root.fgc-brand #nameBlockP2, :root.fgc-brand #nameBlockP2 .name,
+:root.fgc-brand #separator2, :root.fgc-brand #separator2-2 {
+  color: var(--p2-ink, #ffffff);
+  text-shadow: var(--p2-ink-shadow, 0 2px 7px rgba(0,0,0,.78)) !important;
+}
+/* The score sits on the cap at the plaque's inner edge — same problem, judged on the cap's own
+ * colour (--pN-ink-score) rather than the plaque's. */
+:root.fgc-brand #player1Score {
+  color: var(--p1-ink-score, #ffffff);
+  text-shadow: var(--p1-ink-score-shadow, 0 2px 9px rgba(0,0,0,.8)) !important;
+}
+:root.fgc-brand #player2Score {
+  color: var(--p2-ink-score, #ffffff);
+  text-shadow: var(--p2-ink-score-shadow, 0 2px 9px rgba(0,0,0,.8)) !important;
+}

@@ -41,10 +41,32 @@
     document.addEventListener('DOMContentLoaded', _applyThumb);
   }
 
-  // Optional per-scene background wash (?bg=RRGGBB&bgop=0-100). Off unless requested —
-  // lets a producer put a solid colour behind a graphic (e.g. to make a bracket readable
-  // over busy gameplay). Fills the whole source whenever it's visible in OBS.
-  (function applyBgParam() {
+  // Two-line name plate (see applyNamePlate) — the gamertag with the org under it on head-to-head
+  // games. Injected here rather than pasted into all ten camera scenes' <style> blocks: one
+  // definition, and every rule is scoped to .has-sub so a plate showing a plain team name renders
+  // exactly as before. Sizes are em-based so the second line tracks each scene's own plate size.
+  (function injectPlateCss() {
+    var css = '.match-name.has-sub{display:flex;flex-direction:column;justify-content:center;gap:.06em;overflow:visible;}'
+      + '.match-name.has-sub .plate-main,.match-name.has-sub .plate-sub{display:block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}'
+      + '.match-name.has-sub .plate-sub{font-size:.42em;font-weight:700;letter-spacing:.12em;opacity:.6;text-shadow:none;}'
+      + '.match-team--b .match-name.has-sub{align-items:flex-end;}';
+    var mount = function () {
+      if (document.getElementById('sb-plate-css')) return;
+      var st = document.createElement('style');
+      st.id = 'sb-plate-css';
+      st.textContent = css;
+      (document.head || document.documentElement).appendChild(st);
+    };
+    if (document.head) mount(); else document.addEventListener('DOMContentLoaded', mount);
+  })();
+
+  // The per-scene background wash (?bg=RRGGBB&bgop=0-100, plus live sceneBg updates) lives in
+  // scene-bg.js, which the server injects into EVERY served overlay — including the many that never
+  // load this file. When a scene is opened straight off disk (file://, e.g. a developer previewing
+  // a layout) there is no server to inject it, so fall back to the URL-param pass here. Guarded on
+  // SceneBg's absence so the injected script stays the single implementation in production.
+  (function applyBgParamFallback() {
+    if (global.SceneBg) return;
     var bg = qp('bg');
     var op = parseFloat(qp('bgop'));
     if (!bg || !(op > 0)) return;
@@ -53,7 +75,7 @@
     var div = document.createElement('div');
     div.id = 'scene-bg-wash';
     div.style.cssText = 'position:fixed;inset:0;z-index:-9999;pointer-events:none;background:#' + hex + ';opacity:' + Math.min(1, op / 100) + ';';
-    var mount = function () { var p = document.body || document.documentElement; if (p) p.insertBefore(div, p.firstChild); };
+    var mount = function () { var p = document.body || document.documentElement; if (p && !document.getElementById('scene-bg-wash')) p.insertBefore(div, p.firstChild); };
     if (document.body) mount(); else document.addEventListener('DOMContentLoaded', mount);
   })();
 
@@ -222,6 +244,8 @@
 
   const STANDALONE_CASTER_RE = /\/(casters|duorow|duorow-noscore|triorow|duosinglecam|singlecam|analystspecial|campip|talentbar|interview|quaddesk|quaddesk-noscore|spotlightdesk|vertical|vertical-casters|preshow)\.html$/i;
   const standaloneCasterScene = STANDALONE_CASTER_RE.test(global.location.pathname);
+  // State keys a scene has claimed via SceneBase.trustVisibility() — never force-shown (see there).
+  const _trustVisible = new Set();
 
   const SceneBase = {
     qp,
@@ -231,6 +255,26 @@
       if (PREVIEW || standaloneCasterScene) return true;
       return !!(casters && casters.visible);
     },
+    /* ── Server-clock offset ────────────────────────────────────────────────
+       The break countdown is an absolute epoch (breakScreen.endsAt) written by the server but
+       evaluated by whichever machine is running this browser source. A second OBS box, a caster's
+       laptop or a cloud browser whose clock is a few seconds (or minutes) off showed a countdown
+       off by exactly that much — the classic "timer is desyncing". Sample /api/time and correct.
+       Round-trip is halved out SNTP-style so the sample isn't biased by network latency. */
+    _clockSkew: 0,
+    async syncClock() {
+      try {
+        const t0 = Date.now();
+        const r = await fetch(HTTP_BASE + '/api/time', { cache: 'no-store' });
+        const t1 = Date.now();
+        const { now } = await r.json();
+        if (typeof now === 'number') this._clockSkew = now - (t0 + (t1 - t0) / 2);
+      } catch (e) { /* keep whatever skew we had; a bad sample must not stop the clock */ }
+    },
+    /** Date.now() corrected to the SERVER's clock. Use this for anything comparing against an
+        epoch the server authored (countdown targets, scheduled cuts) — never bare Date.now(). */
+    now() { return Date.now() + this._clockSkew; },
+
     brandColor(data) {
       return (data && data.brand && data.brand.color) || cssVar('--accent', FALLBACK_ACCENT);
     },
@@ -239,6 +283,33 @@
     },
     brandLogo(data) {
       return (data && data.brand && data.brand.logo) || null;
+    },
+    /** Lift a colour until it reads against a DARK panel, preserving hue and saturation.
+        Scenes with near-black furniture (the countdown bar, the replay desk) paint accent-coloured
+        fills and kicker text; a dark brand kit made those vanish into the background. Scaling in
+        LINEAR light rather than blending toward white is what keeps the brand identity — mixing
+        white turns a deep purple into pale mauve, scaling turns it into a vivid purple.
+        Returns the colour unchanged when it's already bright enough. */
+    liftForDark(color, minLum) {
+      const floor = (minLum == null) ? 0.20 : minLum;
+      const c = String(color == null ? '' : color).trim();
+      let r, g, b, m;
+      if ((m = c.match(/^#([0-9a-f]{3})$/i))) { r = parseInt(m[1][0] + m[1][0], 16); g = parseInt(m[1][1] + m[1][1], 16); b = parseInt(m[1][2] + m[1][2], 16); }
+      else if ((m = c.match(/^#([0-9a-f]{6})$/i))) { r = parseInt(m[1].slice(0, 2), 16); g = parseInt(m[1].slice(2, 4), 16); b = parseInt(m[1].slice(4, 6), 16); }
+      else if ((m = c.match(/^rgba?\(\s*(\d+)[\s,]+(\d+)[\s,]+(\d+)/i))) { r = +m[1]; g = +m[2]; b = +m[3]; }
+      else return c;
+      const toLin = (v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
+      const toSrgb = (v) => {
+        v = Math.min(1, Math.max(0, v));
+        const s = v <= 0.0031308 ? v * 12.92 : 1.055 * Math.pow(v, 1 / 2.4) - 0.055;
+        return Math.round(s * 255);
+      };
+      const lr = toLin(r), lg = toLin(g), lb = toLin(b);
+      const lum = 0.2126 * lr + 0.7152 * lg + 0.0722 * lb;
+      if (lum >= floor) return c;
+      if (lum < 0.0008) return '#8b93a8';       // black/near-black has no hue to preserve
+      const k = floor / lum;
+      return 'rgb(' + toSrgb(lr * k) + ',' + toSrgb(lg * k) + ',' + toSrgb(lb * k) + ')';
     },
     /** Text colour that stays legible ON a filled brand colour. A white/pastel kit used to put
         white text on a white pill (invisible on air); anything mid-to-dark keeps white text, so
@@ -328,6 +399,55 @@
       img.style.display = '';
       img.classList.toggle('logo-on-dark', !custom || this.isDefaultGameLogo(url));
     },
+    /** Head-to-head titles (Smash SINGLES, the FGC games, EA FC) enter one PLAYER per side — the
+        "team" record is just that entrant, so a name plate reading the team name prints the entry
+        ("RIP TWO-EM, YOU WILL BE MISSED") where the broadcast needs the competitor. Returns
+        { name, sub } for those games — the gamertag, with their org/team for the second line — and
+        null for squad games so every other scene keeps its team name untouched.
+        Smash runs both ways: a crew battle IS a team event, so only mode 'singles' collapses. */
+    soloIdentity(data, side, team) {
+      const g = data && data.games && data.activeGame && data.games[data.activeGame];
+      if (!g || g.format !== '1v1' || (Number(g.rosterSize) || 1) > 1) return null;
+      if (data.activeGame === 'smash' && data.smash && data.smash.mode === 'team') return null;
+      const str = (v) => (v == null ? '' : String(v)).trim();
+      const roster = (team && Array.isArray(team.players)) ? team.players : [];
+      const activeId = (data.activePlayer && data.activePlayer[side]) || '';
+      // activePlayer picks the competitor within a multi-entrant record; a stale id falls to the first.
+      let p = activeId ? roster.find((x) => x && String(x.id) === String(activeId)) : null;
+      if (!p) p = roster[0] || null;
+      const name = str(p && (p.gamertag || p.name));
+      if (!name) return null;   // no roster on the side — the team name is all we have
+      // The org line. start.gg stores it as the player's PREFIX ("MVG") while the entrant name is
+      // the two mashed together ("MVG | Zain"), so prefer the prefix, then the resolved team org,
+      // and only then the team name with the "PREFIX | TAG" half that repeats the gamertag stripped.
+      let sub = str(p && p.prefix) || str(team && team.org);
+      if (!sub) {
+        const cut = str(team && team.name).split(/\s*[|\uFF5C]\s*/).filter(Boolean);
+        sub = cut.length > 1 ? (cut.filter((x) => x.toLowerCase() !== name.toLowerCase())[0] || '') : (cut[0] || '');
+      }
+      if (sub.toLowerCase() === name.toLowerCase()) sub = '';
+      return { name, sub };
+    },
+    /** Fill a scoreboard name plate from a teamSide() result. On head-to-head games it prints the
+        competitor's gamertag with their org underneath (see soloIdentity); everywhere else it is
+        the plain team name it always was. Shared so all ten camera scenes stay identical. */
+    applyNamePlate(node, team, fallback) {
+      if (!node) return;
+      const main = ((team && (team.soloName || team.name)) || fallback || '').toString().toUpperCase();
+      const sub = ((team && team.soloSub) || '').toString().toUpperCase();
+      node.textContent = '';
+      const m = document.createElement('span');
+      m.className = 'plate-main';
+      m.textContent = main;
+      node.appendChild(m);
+      if (sub) {
+        const s = document.createElement('span');
+        s.className = 'plate-sub';
+        s.textContent = sub;
+        node.appendChild(s);
+      }
+      node.classList.toggle('has-sub', !!sub);
+    },
     teamSide(data, side) {
       const t = (data && data.teams && data.teams[side]) || {};
       // Fall back to the active game's logo when the team has no custom logo.
@@ -335,8 +455,12 @@
       const gLogo = g && g.logo ? `/assets/${g.logo}` : '/assets/rl.png';
       const customLogo = (t.logo || '').toString().trim();
       const logo = customLogo || gLogo;
+      const solo = this.soloIdentity(data, side, t);
       return {
         name: t.name || (side === 'orange' ? 'ORANGE' : 'BLUE'),
+        // Head-to-head games: the competitor's gamertag + their org, for scenes that print a plate.
+        soloName: solo ? solo.name : '',
+        soloSub: solo ? solo.sub : '',
         logo,
         customLogo,
         logoOnDark: !customLogo || this.isDefaultGameLogo(logo),
@@ -346,24 +470,24 @@
         series: (data && data.series) ? (data.series[side] || 0) : 0
       };
     },
+    /** Delegates to the injected scene-bg.js so one implementation owns #scene-bg-wash. Kept as a
+        SceneBase method because scenes and older overrides call it directly. */
     applyBg(bg) {
-      let el = document.getElementById('scene-bg-wash');
-      if (!bg || !bg.on) { if (el) el.remove(); return; }
-      if (!el) {
-        el = document.createElement('div');
-        el.id = 'scene-bg-wash';
-        el.style.cssText = 'position:fixed;inset:0;z-index:-9999;pointer-events:none;';
-        const b = document.body || document.documentElement;
-        if (b) b.insertBefore(el, b.firstChild);
-      }
-      const hex = (bg.color || '#000000').replace(/^#/, '');
-      el.style.background = '#' + hex;
-      el.style.opacity = Math.min(1, Math.max(0, (Number(bg.op) || 50) / 100));
+      if (global.SceneBg) global.SceneBg.apply(bg);
     },
     preview: PREVIEW,
     standalone: !PREVIEW && (typeof window !== 'undefined') && (window.parent === window),
     demoState,
+    /** Opt a state key OUT of the standalone/preview "force visible" rule below, so the scene sees
+        the producer's REAL show/hide. For furniture scenes (a desk, a bar) that merely BORROW a
+        triggered graphic's state — e.g. the break timer printed as one segment of a footer — the
+        force made Hide a no-op: the scene is a standalone source, so visible was rewritten to true
+        on every tick and the clock kept ticking after the producer took the countdown down.
+        Call before connect(): SceneBase.trustVisibility('breakScreen'). */
+    trustVisibility(...keys) { keys.flat().forEach((k) => k && _trustVisible.add(k)); return this; },
     connect(onState) {
+      this.syncClock();
+      if (!this._clockTimer) this._clockTimer = setInterval(() => this.syncClock(), 5 * 60 * 1000);
       // Standalone: scene is the top-level frame, not embedded inside gfx.html's iframe system.
       // Standalone sources added directly to OBS always show their content — they don't participate
       // in the on-demand trigger/switch system (that's gfx.html's job).
@@ -418,6 +542,9 @@
           // Identify as a live overlay browser source (feeds the pre-flight "overlays reachable" check).
           try { ws.send(JSON.stringify({ type: 'register', role: 'overlay', page: global.location.pathname })); } catch (e) {}
           ws.send(JSON.stringify({ type: 'request_state' }));
+          // Re-sample the server clock on every (re)connect — a machine that slept, or one whose
+          // clock drifts, would otherwise keep an hours-old skew for the rest of the broadcast.
+          this.syncClock();
         };
         ws.onmessage = ({ data }) => {
           let msg;
@@ -465,15 +592,12 @@
               const d = msg.data;
               const forceVisible = (obj) => obj && typeof obj === 'object' ? { ...obj, visible: true } : obj;
               ['breakScreen', 'winner', 'intro', 'veto', 'casters', 'ticker', 'owMatch', 'upcoming', 'spotlight', 'watchlist', 'draft', 'bracket', 'standings'].forEach((k) => {
-                if (d[k]) d[k] = forceVisible(d[k]);
+                if (d[k] && !_trustVisible.has(k)) d[k] = forceVisible(d[k]);
               });
             }
             applyBrand(msg.data);
-            // Only override URL-param bg when the server has an explicit entry for this
-            // scene (including {on:false}). undefined = server has never been told about
-            // this scene's bg → leave whatever ?bg= URL param applied untougged.
-            const _sbEntry = (msg.data.sceneBg || {})[global.location.pathname];
-            if (_sbEntry !== undefined) SceneBase.applyBg(_sbEntry);
+            // sceneBg is applied by the injected scene-bg.js, which observes this same socket for
+            // every overlay (not just the ones loading this file) — nothing to do here.
             try { onState(msg.data); } catch (e) { console.error('[scene] render error', e); }
           }
         };

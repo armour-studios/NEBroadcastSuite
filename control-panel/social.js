@@ -24,6 +24,7 @@ document.querySelectorAll('.social-sub-tab-btn').forEach(btn => {
     btn.classList.add('active');
     const panel = el('social-panel-' + btn.dataset.stab);
     if (panel) panel.classList.add('active');
+    if (btn.dataset.stab === 'export')   { if (typeof window._socOpenExport === 'function') window._socOpenExport(); }
     if (btn.dataset.stab === 'calendar') _renderSocialCalendar();
     if (btn.dataset.stab === 'queue')    _sqShowPanel();
     if (btn.dataset.stab === 'weekly')   _loadWeekly();
@@ -47,6 +48,9 @@ el('social-clip-sort')?.addEventListener('change', () => _renderTwitchClipCards(
 el('social-clip-window')?.addEventListener('change', () => _loadTwitchClips());
 
 el('tab-social')?.addEventListener('click', () => {
+  // The page is open to everyone for Social Export, but every fetch below serves a publishing
+  // sub-tab that non-admins can't even see — skip them rather than hammer Twitch/YouTube.
+  if (!window._socialAllowed) return;
   _loadSocialConnections();
   _loadSocialSchedule();
   _loadTwitchClips();

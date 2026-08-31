@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<!--
+  fn-dropmap.html — the drop map: every entrant's landing spot plotted on the island, the
+  pre-game graphic a BR broadcast lives on. Reads state.br.lobby (each entrant's `drop`) and
+  state.brMeta.poi (the POI table for the CURRENT mode — Reload is a different island, and the
+  server picks the right set, so this file never has to know which season it is).
+
+  A drop is either a POI id from that table (plotted at its x/y) or free text the producer typed
+  (listed in the unplotted rail rather than silently vanishing — a producer who types "Slurpy"
+  when the POI is called "Slurpy Swamp" must still see their entry on screen).
+
+  Plates are pushed apart vertically after layout: three duos contesting one POI is normal, and
+  overlapping plates are the failure mode that makes this graphic useless.
+
+  Query params:
+    ?players=off   plate shows the entrant name only (no gamertag stack)
+    ?logos=on      show the team logo on the plate (resolved from the team library by name)
+    ?title=TEXT    override the header title
+    ?preview=1     sample data, for positioning in OBS before the field exists
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1920">
+<title>NE Broadcast Suite — Drop Map</title>
+<link rel="stylesheet" href="/fonts.css">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --accent:    #12a594;
+  --accent-2:  #0f766e;
+  --ink:       #ffffff;
+  --disp:      'Rajdhani', 'Inter', sans-serif;
+  --main-font: 'Bourgeois', 'Inter', sans-serif;
+}
+html, body { width: 1920px; height: 1080px; overflow: hidden; background: transparent; }
+body { font-family: var(--main-font); color: var(--ink); }
+
+#stage { position: absolute; inset: 0; opacity: 0; transition: opacity .4s ease; }
+#stage.show { opacity: 1; }
+
+/* ── header ─────────────────────────────────────────────────────────────── */
+#hdr { position: absolute; top: 34px; left: 46px; right: 46px; display: flex;
+  align-items: center; gap: 18px; z-index: 6; }
+#hdr img { height: 46px; width: auto; object-fit: contain; }
+#hdr-title { font-family: var(--disp); font-size: 34px; font-weight: 700; letter-spacing: .06em;
+  text-transform: uppercase; line-height: 1; text-shadow: 0 3px 16px rgba(0,0,0,.6); }
+#hdr-sub { font-size: 14px; font-weight: 800; letter-spacing: .28em; text-transform: uppercase;
+  color: rgba(255,255,255,.62); margin-top: 5px; }
+
+/* ── map ────────────────────────────────────────────────────────────────── */
+#mapwrap { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  width: 880px; height: 880px; }
+#map { width: 100%; height: 100%; object-fit: contain; display: block;
+  filter: drop-shadow(0 24px 60px rgba(0,0,0,.55)); }
+/* No map image configured — still plot the POIs so the graphic is usable on day one. */
+#mapfallback { position: absolute; inset: 0; border-radius: 14px;
+  background: radial-gradient(circle at 50% 45%, rgba(255,255,255,.09), rgba(255,255,255,.02) 62%, transparent 74%);
+  border: 1px solid rgba(255,255,255,.10); display: none; }
+#mapwrap.nomap #mapfallback { display: block; }
+
+/* ── POI markers + plates ───────────────────────────────────────────────── */
+#pois { position: absolute; inset: 0; }
+.poi { position: absolute; width: 0; height: 0; }
+.dot { position: absolute; left: -7px; top: -7px; width: 14px; height: 14px; rotate: 45deg;
+  background: var(--accent); box-shadow: 0 0 0 3px rgba(0,0,0,.45), 0 0 18px rgba(0,0,0,.5); }
+.plate {
+  position: absolute; transform: translateX(-50%);
+  padding: 9px 18px 10px; min-width: 190px; border-radius: 3px;
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  box-shadow: 0 10px 30px rgba(0,0,0,.5);
+  text-align: center; white-space: nowrap;
+  animation: plateIn .45s cubic-bezier(.2,.9,.3,1) both;
+}
+@keyframes plateIn { from { opacity: 0; transform: translateX(-50%) scale(.9); } to { opacity: 1; } }
+/* The chevron that ties a pushed-apart plate back to its POI. */
+.plate::after {
+  content: ''; position: absolute; left: 50%; bottom: -9px; margin-left: -9px;
+  border-left: 9px solid transparent; border-right: 9px solid transparent;
+  border-top: 9px solid var(--accent-2);
+}
+.plate .pname { font-family: var(--disp); font-size: 27px; font-weight: 700; letter-spacing: .04em;
+  text-transform: uppercase; line-height: 1.14; }
+.plate .poi-name { font-size: 11px; font-weight: 800; letter-spacing: .22em; text-transform: uppercase;
+  color: rgba(255,255,255,.72); margin-bottom: 3px; }
+.plate .row { display: flex; align-items: center; justify-content: center; gap: 9px; }
+.plate img { width: 24px; height: 24px; object-fit: contain; flex-shrink: 0; }
+
+/* ── unplotted rail (free-text drops) ───────────────────────────────────── */
+#rail { position: absolute; right: 46px; top: 150px; width: 300px; z-index: 6;
+  display: flex; flex-direction: column; gap: 6px; }
+#rail .rl-hd { font-size: 11px; font-weight: 800; letter-spacing: .24em; text-transform: uppercase;
+  color: rgba(255,255,255,.45); margin-bottom: 2px; }
+#rail .rl-row { display: flex; justify-content: space-between; gap: 10px; padding: 6px 12px;
+  border-radius: 3px; background: rgba(10,13,20,.72); border-left: 3px solid var(--accent);
+  font-family: var(--disp); font-size: 19px; font-weight: 600; text-transform: uppercase; }
+#rail .rl-row span:last-child { color: rgba(255,255,255,.58); }
+
+/* ── footer bar ─────────────────────────────────────────────────────────── */
+#foot { position: absolute; left: 50%; bottom: 34px; transform: translateX(-50%);
+  display: flex; align-items: stretch; z-index: 6; box-shadow: 0 12px 34px rgba(0,0,0,.5); }
+#foot .chip { padding: 9px 20px; font-size: 13px; font-weight: 800; letter-spacing: .22em;
+  text-transform: uppercase; display: flex; align-items: center; }
+#foot .c-game { background: var(--accent); color: #06231f; }
+#foot .c-count { background: rgba(10,13,20,.92); color: #eef2f8; }
+#empty { position: absolute; inset: 0; display: none; align-items: center; justify-content: center;
+  font-size: 22px; font-weight: 700; letter-spacing: .22em; text-transform: uppercase;
+  color: rgba(255,255,255,.34); }
+</style>
+</head>
+<body>
+  <div id="stage">
+    <div id="hdr">
+      <img id="hdr-logo" src="" alt="" style="display:none;">
+      <div>
+        <div id="hdr-title">Drop Map</div>
+        <div id="hdr-sub"></div>
+      </div>
+    </div>
+
+    <div id="mapwrap">
+      <img id="map" src="" alt="">
+      <div id="mapfallback"></div>
+      <div id="pois"></div>
+    </div>
+
+    <div id="rail"></div>
+
+    <div id="foot">
+      <div class="chip c-game" id="foot-game">GAME 1</div>
+      <div class="chip c-count" id="foot-count"></div>
+    </div>
+
+    <div id="empty">No drops assigned</div>
+  </div>
+
+<script src="/scene-base.js"></script>
+<script>
+(function () {
+  const Q = new URLSearchParams(location.search);
+  const SHOW_PLAYERS = Q.get('players') !== 'off';
+  const SHOW_LOGOS   = Q.get('logos') === 'on';
+  const TITLE_OVR    = Q.get('title') || '';
+  const el = (id) => document.getElementById(id);
+  const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+  function logoFor(data, name) {
+    const want = (name || '').trim().toLowerCase();
+    if (!want) return '';
+    const hit = (data.savedTeams || []).find((t) => (t.name || '').trim().toLowerCase() === want);
+    return (hit && hit.logo) || '';
+  }
+
+  // Push overlapping plates apart on the Y axis. Plates are already anchored to their POI, so a
+  // pure vertical spread keeps each one visually attached to its spot while guaranteeing the
+  // names stay readable when several duos contest the same landing zone.
+  function spreadPlates(host) {
+    const boxes = [...host.querySelectorAll('.plate')].map((p) => ({ p, r: p.getBoundingClientRect() }));
+    boxes.sort((a, b) => a.r.top - b.r.top);
+    for (let i = 1; i < boxes.length; i++) {
+      for (let j = 0; j < i; j++) {
+        const A = boxes[j].r, B = boxes[i].r;
+        const hitX = A.left < B.right - 6 && B.left < A.right - 6;
+        const hitY = A.top < B.bottom - 4 && B.top < A.bottom - 4;
+        if (!hitX || !hitY) continue;
+        const shift = (A.bottom - B.top) + 10;
+        const cur = parseFloat(boxes[i].p.dataset.dy || '0') + shift;
+        boxes[i].p.dataset.dy = String(cur);
+        boxes[i].p.style.top = (parseFloat(boxes[i].p.dataset.baseTop || '0') + cur) + 'px';
+        boxes[i].r = boxes[i].p.getBoundingClientRect();
+      }
+    }
+  }
+
+  let _sig = '';
+  function render(data) {
+    const br = (data && data.br) || {};
+    const meta = (data && data.brMeta) || {};
+    const dm = br.dropmap || {};
+    const poiSet = meta.poi || { pois: [], map: '' };
+    const lobby = Array.isArray(br.lobby) ? br.lobby : [];
+
+    const sig = JSON.stringify([lobby.map((e) => [e.id, e.name, e.drop, (e.players || []).map((p) => p.name)]),
+      poiSet.pois, dm.mapUrl, dm.title, dm.showPlayers, dm.showLogos, br.event, (br.live || {}).match, meta.mode]);
+    if (sig === _sig) return;
+    _sig = sig;
+
+    const showPlayers = SHOW_PLAYERS && dm.showPlayers !== false;
+    const showLogos   = SHOW_LOGOS || dm.showLogos === true;
+
+    // Header
+    const brandLogo = SceneBase.brandLogo(data);
+    const lg = el('hdr-logo');
+    if (brandLogo) { lg.src = brandLogo; lg.style.display = ''; } else { lg.style.display = 'none'; }
+    el('hdr-title').textContent = (TITLE_OVR || dm.title || (br.event && br.event.title) || 'Drop Map').toUpperCase();
+    el('hdr-sub').textContent = [(meta.mode && meta.mode.name) || '', (br.event && br.event.split) || '',
+      (br.event && br.event.match) || ''].filter(Boolean).join('  ·  ').toUpperCase();
+
+    // Map image
+    const mapUrl = dm.mapUrl || poiSet.map || '';
+    const wrap = el('mapwrap'), img = el('map');
+    img.onerror = () => { img.style.display = 'none'; wrap.classList.add('nomap'); };
+    if (mapUrl) { img.src = mapUrl; img.style.display = ''; wrap.classList.remove('nomap'); }
+    else { img.removeAttribute('src'); img.style.display = 'none'; wrap.classList.add('nomap'); }
+
+    // Group entrants by drop. A drop matches a POI by id OR by (case-insensitive) name, because a
+    // producer typing "Midtown" means the Midtown POI even though the panel stores ids.
+    const byPoi = new Map();
+    const unplotted = [];
+    for (const e of lobby) {
+      const drop = (e.drop || '').trim();
+      if (!drop) continue;
+      const key = drop.toLowerCase();
+      const poi = (poiSet.pois || []).find((p) => String(p.id || '').toLowerCase() === key || String(p.name || '').toLowerCase() === key);
+      if (poi) {
+        if (!byPoi.has(poi.id)) byPoi.set(poi.id, { poi, teams: [] });
+        byPoi.get(poi.id).teams.push(e);
+      } else {
+        unplotted.push({ e, drop });
+      }
+    }
+
+    // Plot
+    const host = el('pois');
+    host.innerHTML = '';
+    for (const { poi, teams } of byPoi.values()) {
+      const node = document.createElement('div');
+      node.className = 'poi';
+      node.style.left = poi.x + '%';
+      node.style.top  = poi.y + '%';
+      let html = '<div class="dot"></div>';
+      teams.forEach((t) => {
+        const names = showPlayers && (t.players || []).length
+          ? t.players.map((p) => esc(String(p.name || '').toUpperCase())).join('<br>')
+          : esc(String(t.name || '').toUpperCase());
+        const logo = showLogos ? logoFor(data, t.name) : '';
+        html += '<div class="plate">'
+          + '<div class="poi-name">' + esc(String(poi.name || '').toUpperCase()) + '</div>'
+          + '<div class="row">'
+          + (logo ? '<img src="' + esc(logo) + '" alt="" onerror="this.style.display=&quot;none&quot;">' : '')
+          + '<div class="pname">' + names + '</div>'
+          + '</div></div>';
+      });
+      node.innerHTML = html;
+      host.appendChild(node);
+    }
+    // Anchor each plate above its dot, then resolve collisions once the DOM has real boxes.
+    host.querySelectorAll('.poi').forEach((n) => {
+      let offset = 22;
+      n.querySelectorAll('.plate').forEach((p) => {
+        const top = -(offset + p.offsetHeight);
+        p.style.left = '0px';
+        p.style.top = top + 'px';
+        p.dataset.baseTop = String(top);
+        p.dataset.dy = '0';
+        offset += p.offsetHeight + 10;
+      });
+    });
+    spreadPlates(host);
+
+    // Unplotted rail
+    el('rail').innerHTML = unplotted.length
+      ? '<div class="rl-hd">Other landing spots</div>' + unplotted.map(({ e, drop }) =>
+          '<div class="rl-row"><span>' + esc(String(e.name || '').toUpperCase()) + '</span><span>'
+          + esc(drop.toUpperCase()) + '</span></div>').join('')
+      : '';
+
+    // Footer
+    el('foot-game').textContent = 'GAME ' + ((br.live && br.live.match) || 1);
+    const assigned = [...byPoi.values()].reduce((n, g) => n + g.teams.length, 0);
+    el('foot-count').textContent = (assigned + unplotted.length) + ' / ' + lobby.length + ' DROPPED';
+
+    el('empty').style.display = (byPoi.size || unplotted.length) ? 'none' : 'flex';
+    el('stage').classList.add('show');
+  }
+
+  if (location.protocol === 'file:') {
+    render({
+      brMeta: { mode: { name: 'Battle Royale (Build)' }, poi: { map: '', pois: [
+        { id: 'a', name: 'Frozen Peaks', x: 22, y: 14 }, { id: 'b', name: 'Midtown', x: 50, y: 47 },
+        { id: 'c', name: 'Red Canyon', x: 76, y: 52 }, { id: 'd', name: 'South Docks', x: 49, y: 78 }] } },
+      br: { event: { title: 'Nameless Fortnite Cup', split: 'Major 2' }, live: { match: 1 },
+        dropmap: { visible: true }, lobby: [
+          { id: '1', name: 'REET + COOPER',    drop: 'a', players: [{ name: 'REET' }, { name: 'COOPER' }] },
+          { id: '2', name: 'ACORN + BOLTZ',    drop: 'b', players: [{ name: 'ACORN' }, { name: 'BOLTZ' }] },
+          { id: '3', name: 'GOLDEN + OZONE',   drop: 'c', players: [{ name: 'GOLDEN' }, { name: 'OZONE' }] },
+          { id: '4', name: 'PETERBOT + POLLO', drop: 'd', players: [{ name: 'PETERBOT' }, { name: 'POLLO' }] },
+          { id: '5', name: 'SHADOW + VERGO',   drop: 'Tilted', players: [{ name: 'SHADOW' }, { name: 'VERGO' }] }
+        ] }
+    });
+  } else {
+    SceneBase.connect((data) => { render(data); SceneBase.applySceneConfig('fn-dropmap', data); });
+  }
+})();
+</script>
+</body>
+</html>

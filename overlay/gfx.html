@@ -85,6 +85,21 @@
     <iframe src="stream-credits.html" title="Stream Credits"></iframe>
   </div>
 
+  <!-- Battle-royale graphics (Fortnite-first). Same pre-loaded-iframe rule as everything above:
+       they stay connected and animate internally, so pushing one is a CSS class change, not a
+       reload — which is what lets the Victory Royale slam fire instantly on the button press. -->
+  <div class="gfx-layer" id="layer-brdrop">
+    <iframe src="fn-dropmap.html" title="Drop Map"></iframe>
+  </div>
+
+  <div class="gfx-layer" id="layer-brcompare">
+    <iframe src="fn-compare.html" title="Comparison Card"></iframe>
+  </div>
+
+  <div class="gfx-layer" id="layer-brvictory">
+    <iframe src="fn-victory.html" title="Victory Royale"></iframe>
+  </div>
+
   <script>
     const LAYER_MAP = {
       break:     'layer-break',
@@ -101,6 +116,9 @@
       upcoming:  'layer-schedule',   // server sets gfxActive='upcoming' when Schedule is pushed (set_upcoming) — 'schedule' kept for any caller still using that key
       bracket:   'layer-bracket',
       credits:   'layer-credits',
+      brdrop:    'layer-brdrop',
+      brcompare: 'layer-brcompare',
+      brvictory: 'layer-brvictory',
     };
 
     let currentScene = null;

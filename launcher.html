@@ -209,7 +209,12 @@
 (function () {
   'use strict';
   var API = 'http://localhost:3000';
-  var LOAD_MS = 5000;                 // authenticated → play the load animation this long, then launch
+  // The load animation is now a WINDOW, not a sleep: show it for at least LOAD_MIN_MS so it does
+  // not flash, then launch as soon as the studio reports it has painted, and give up waiting at
+  // LOAD_MAX_MS. It used to be a flat 5s tacked onto every launch regardless of readiness.
+  var LOAD_MIN_MS = 900;
+  var LOAD_MAX_MS = 6000;
+  var LOAD_POLL_MS = 150;
   var el = function (id) { return document.getElementById(id); };
   var mode = 'boot';
   var launched = false;
@@ -238,6 +243,23 @@
     if (launched) return;
     launched = true;
     setMode('loading', 'Loading your studio…');
+    var startedAt = Date.now();
+    // Wait for the studio to paint (panelReady), bounded below by LOAD_MIN_MS and above by
+    // LOAD_MAX_MS, then run the final auth gate below.
+    (function waitForPanel() {
+      var waited = Date.now() - startedAt;
+      if (waited >= LOAD_MAX_MS) return finishLaunch();
+      fetch(API + '/api/oauth/discord/status')
+        .then(function (r) { return r.json(); })
+        .then(function (s) {
+          if (s && s.panelReady && waited >= LOAD_MIN_MS) return finishLaunch();
+          setTimeout(waitForPanel, LOAD_POLL_MS);
+        })
+        .catch(function () { setTimeout(waitForPanel, LOAD_POLL_MS); });
+    })();
+  }
+
+  function finishLaunch() {
     setTimeout(function () {
       // Final gate: the server re-validates cloud access shortly after boot — if this
       // user was revoked while the load animation played, bounce to login with the reason.
@@ -260,7 +282,7 @@
           // Status check failed (server busy) — launch anyway; the in-app gate still guards.
           fetch(API + '/api/launcher/launch', { method: 'POST' }).catch(function () {});
         });
-    }, LOAD_MS);
+    }, 0);
   }
 
   // ── License agreement (approved, unsigned) — shown right in the launcher ──

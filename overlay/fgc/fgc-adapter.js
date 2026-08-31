@@ -196,6 +196,18 @@
   // colour the server keeps alongside the mode-effective `color`). fgc-brand.css turns the per-side
   // hex vars into the plaque gradient/stroke/glow; fgc-redesign.css uses --fgc-brand-logo.
   var DARK = '#05070d';
+  // Relative luminance (WCAG), 0 = black .. 1 = white. Used to decide whether text sitting ON a
+  // brand-coloured plaque should be white or near-black.
+  function luminance(hex) {
+    var c = _hexToRgb(hex);
+    if (!c) return 0;
+    var f = c.map(function (v) {
+      v /= 255;
+      return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+    });
+    return 0.2126 * f[0] + 0.7152 * f[1] + 0.0722 * f[2];
+  }
+
   function setSideVars(root, n, c) {
     var hi = mix(c, '#ffffff', 0.14);
     var d1 = mix(c, DARK, 0.18);
@@ -204,6 +216,33 @@
     root.style.setProperty('--p' + n + '-d1', d1);
     root.style.setProperty('--p' + n + '-d2', mix(c, DARK, 0.36));
     root.style.setProperty('--p' + n + '-stroke', mix(c, '#ffffff', 0.52));
+
+    // INK: text sits directly on brand-coloured surfaces, and the skins hardcode it white. On a
+    // light kit that is white-on-white — invisible. (The redesign also swapped the template's
+    // 9-direction black outline for a soft shadow, so nothing holds pale white text together.)
+    //
+    // The choice is by CONTRAST RATIO against white, not a luminance threshold: a plain
+    // "is it bright" test passed a mid-grey score cap that white text could not survive on
+    // (~2.5:1). Flip to near-black only when white would drop under ~3:1 — large bold broadcast
+    // type — so ordinary team colours (blue 3.8:1, red 4.4:1) keep the white they have always had
+    // and only genuinely pale surfaces switch.
+    var DARK_INK = '#0b0e17';
+    function contrastVsWhite(bg) { return 1.05 / (luminance(bg) + 0.05); }
+    function inkFor(bg) { return contrastVsWhite(bg) < 3 ? DARK_INK : '#ffffff'; }
+    function shadowFor(ink, big) {
+      return ink === DARK_INK
+        ? '0 1px 0 rgba(255,255,255,.5), 0 0 2px rgba(255,255,255,.9)'
+        : (big ? '0 2px 9px rgba(0,0,0,.8), 0 0 2px rgba(0,0,0,.95)'
+               : '0 2px 7px rgba(0,0,0,.78), 0 0 1px rgba(0,0,0,.95)');
+    }
+    // The name reads against the plaque body; the score against the CAP, which is the plaque
+    // pushed 36% toward black — judged separately or a mid kit gets the wrong one of the two.
+    var nameInk = inkFor(hi);
+    var scoreInk = inkFor(mix(c, DARK, 0.36));
+    root.style.setProperty('--p' + n + '-ink', nameInk);
+    root.style.setProperty('--p' + n + '-ink-shadow', shadowFor(nameInk, false));
+    root.style.setProperty('--p' + n + '-ink-score', scoreInk);
+    root.style.setProperty('--p' + n + '-ink-score-shadow', shadowFor(scoreInk, true));
 
     // Direct SVG paint — CEF does NOT substitute var() written INSIDE an SVG presentation attribute
     // (stop-color="var(--gradient-stop-1, #15bcba)" / flood-color="var(--glow-color, #F70041)"), so

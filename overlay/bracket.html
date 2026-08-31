@@ -30,27 +30,47 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
 .bk-stage.show { opacity: 1; transform: scale(1); }
 
 
-/* ── Header — absolute bottom-right (centered in butterfly mode) ── */
-.bk-header { position: absolute; bottom: 28px; right: 52px; z-index: 10;
-  display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
-.bk-stage.butterfly .bk-header { right: auto; left: 50%; transform: translateX(-50%); align-items: center; }
-.bk-stage.butterfly .bk-title { text-align: center; }
-.bk-stage.butterfly .bk-eyebrow { text-align: center; }
-.bk-stage.butterfly { padding-bottom: 88px; }
+/* ── Header ────────────────────────────────────────────────────────────────────────────────
+   Title top-LEFT as the page's heading, event/brand mark top-RIGHT, format + bracket pills between
+   them — the arrangement every broadcast bracket uses. It used to be one absolutely-positioned
+   cluster jammed into the bottom-right corner (eyebrow + title + subtitle + format pill + a row of
+   phase chips), which is what read as "weird tags in the corner".
+   In normal flow now, so .bk-body simply gets the height that's left — no more per-layout
+   margin hacks to keep the board out from under the title. */
+.bk-header { flex: 0 0 auto; display: flex; align-items: flex-start; gap: 26px; margin-bottom: 16px; }
+.bk-head-text { flex: 1 1 auto; min-width: 0; }
 .bk-bar { display: none; }
-.bk-head-text { display: flex; flex-direction: column; align-items: flex-end; gap: 3px; }
 .bk-eyebrow { font-family: var(--disp); font-weight: 700; font-size: 12px; letter-spacing: .42em; text-transform: uppercase;
-  color: var(--accent); text-align: right; }
-.bk-title { font-family: var(--disp); font-weight: 700; font-size: 34px; line-height: 1; letter-spacing: .02em; text-transform: uppercase; color: #fff;
-  text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 980px; }
-.bk-subtitle { font-family: var(--body); font-weight: 600; font-size: 15px; color: rgba(255,255,255,.85); text-align: right;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 760px; }
+  color: var(--accent); text-align: left; }
+.bk-title { font-family: var(--disp); font-weight: 700; font-size: 44px; line-height: 1.02; letter-spacing: .01em; text-transform: uppercase; color: #fff;
+  text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 1180px; }
+.bk-subtitle { font-family: var(--body); font-weight: 600; font-size: 16px; color: rgba(255,255,255,.8); text-align: left;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 1000px; margin-top: 2px; }
 .bk-subtitle:empty { display: none; }
-.bk-head-right { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
+.bk-head-meta { flex: 0 0 auto; display: flex; flex-direction: column; align-items: flex-end; gap: 7px; padding-top: 4px; }
 .bk-format { font-family: var(--disp); font-weight: 800; font-size: 12px; letter-spacing: .14em; text-transform: uppercase; color: #04121f;
   background: linear-gradient(135deg, var(--accent), var(--accent-2)); border-radius: 999px; padding: 6px 14px; white-space: nowrap;
   box-shadow: 0 4px 14px rgba(0,0,0,.35); }
-.bk-phases { display: flex; gap: 6px; }
+.bk-brand-logo { flex: 0 0 auto; height: 68px; max-width: 230px; object-fit: contain;
+  filter: drop-shadow(0 2px 10px rgba(0,0,0,.55)); }
+
+/* Section pills — which bracket half is on screen. */
+.bk-section-pills { display: flex; gap: 6px; }
+.bk-spill { font-family: var(--disp); font-weight: 700; font-size: 11px; letter-spacing: .18em; text-transform: uppercase;
+  padding: 4px 10px; border-radius: 999px; border: 1px solid; white-space: nowrap; }
+.bk-spill.wb { color: var(--accent); border-color: rgba(255,255,255,.28); background: rgba(255,255,255,.06); }
+.bk-spill.lb { color: var(--accent-2); border-color: rgba(255,255,255,.28); background: rgba(255,255,255,.06); }
+@supports (color: color-mix(in srgb, red 50%, white)) {
+  .bk-spill.wb { border-color: color-mix(in srgb, var(--accent) 45%, transparent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+  .bk-spill.lb { border-color: color-mix(in srgb, var(--accent-2) 45%, transparent); background: color-mix(in srgb, var(--accent-2) 12%, transparent); }
+}
+
+/* ── Footer: phase chips are PRODUCER NAVIGATION, not broadcast furniture ──────────────────
+   They shipped on every live board, which no real show does — you don't put your own stage
+   switcher on the feed. Off by default; the in-app preview and ?chips=1 still show them. */
+.bk-footer { flex: 0 0 auto; display: flex; align-items: center; justify-content: center; }
+.bk-phases { display: none; gap: 6px; padding-top: 10px; }
+.bk-stage.show-chips .bk-phases { display: flex; }
 .bk-phase { font-family: var(--disp); font-weight: 700; font-size: 12px; letter-spacing: .08em; text-transform: uppercase;
   padding: 6px 12px; border-radius: 999px; color: var(--muted); background: var(--panel-1); border: 1px solid var(--hair); }
 .bk-phase.active { color: var(--on-accent, #fff); background: var(--accent); border-color: transparent; box-shadow: 0 4px 14px rgba(0,0,0,.35); }
@@ -58,6 +78,37 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
 /* ── Body / scale ── */
 .bk-body { flex: 1 1 auto; display: flex; align-items: center; justify-content: center; min-height: 0; }
 .bk-scale { transform-origin: center center; display: flex; flex-direction: column; align-items: stretch; gap: 12px; width: 1816px; }
+/* A fragment (a multi-stage day, an upper/lower-only view) has far fewer columns than the canvas
+   is wide. Pinned at 1816px its scrollWidth always equalled the canvas, so fit() computed scale 1
+   and the board sat marooned in the middle of an empty screen — MAX_FIT has allowed 2.2x the whole
+   time and nothing could ever reach it. Sizing to content lets fit() magnify it to fill instead. */
+/* No max-width. Clamping a shrink-to-fit wrapper makes scrollWidth report the CLAMP, so fit()
+   computed scale 1 for content that was actually wider and the board bled off both edges. Let it
+   size to its true content and let fit() scale it down — that is fit()'s whole job. */
+.bk-scale.bk-fit-content { width: auto; align-self: center; }
+.bk-scale.bk-fit-content .bk-section { width: auto; }
+/* Columns need a definite width here: in a shrink-to-fit parent, flex:1 1 0 has no percentage to
+   resolve against and collapses to min-content. Fixed width + fit()'s upscale is the whole trick. */
+.bk-scale.bk-fit-content .bk-rounds { width: auto; }
+.bk-scale.bk-fit-content .bk-round { flex: 0 0 300px; width: 300px; max-width: 300px; }
+/* Two SHORT bands (a multi-stage day: one winners round beside two losers rounds) stack into a
+   tall, narrow board — height-bound, so fit() can barely magnify it and the right third of the
+   canvas stays empty. Side by side the same content is wide and short, and fit() takes it to
+   ~1.8x instead of ~1.1x. Only for small fragments; a full board still stacks (or goes butterfly). */
+.bk-scale.bk-duo { flex-direction: row; align-items: stretch; justify-content: center; gap: 40px; }
+.bk-scale.bk-duo .bk-section { flex: 0 0 auto; width: auto; }
+.bk-scale.bk-duo .bk-section + .bk-section { padding-left: 40px; border-left: 1px solid rgba(255,255,255,.08); }
+/* Sections stretch to the tallest so every round label lines up along one top edge; the match
+   block inside each column then centres in whatever height is left (auto margins), instead of the
+   shorter band floating half a screen down with its label. */
+.bk-scale.bk-duo .bk-section > .bk-rounds { flex: 1 1 auto; }
+.bk-scale.bk-duo .bk-matches-abs { margin-top: auto; margin-bottom: auto; }
+
+/* The event title / format pills live bottom-right over the board. Once fit() started magnifying
+   a fragment to fill the canvas, the last losers match ran underneath them — so reserve the band.
+   MARGIN, not padding: fit() sizes against body.clientHeight, which *includes* padding, so padding
+   reserved the space without telling fit() about it and the board simply overflowed instead. */
+
 
 /* ── Section (Winners / Losers) ── */
 .bk-section { display: flex; flex-direction: column; align-items: center; width: 100%; }
@@ -70,11 +121,14 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
 .bk-spill.wb { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
 .bk-spill.lb { color: var(--accent-2); border-color: color-mix(in srgb, var(--accent-2) 45%, transparent); background: color-mix(in srgb, var(--accent-2) 12%, transparent); }
 
-/* Match cards; columns flex-fill the full canvas width — no dead side space. */
-.bk-rounds { position: relative; display: flex; align-items: stretch; gap: 32px; width: 100%; }
+/* Match cards; columns flex-fill the canvas width, but a short board (a two-round day of a
+   multi-stage event) centres instead of stretching two cards across 1816px. */
+.bk-rounds { position: relative; display: flex; align-items: stretch; justify-content: center; gap: 32px; width: 100%; }
 
-/* ── Butterfly (full double-elim): WB left → GF center ← LB right ── */
-.bk-scale.butterfly { flex-direction: row; height: 880px; }
+/* ── Butterfly (full double-elim): WB left → GF center ← LB right ──
+   Height is content-driven: applyRowGeometry() already gives every column in a section an exact
+   pixel height, so pinning the box to 880px only ever added dead space under a short board. */
+.bk-scale.butterfly { flex-direction: row; align-items: center; }
 .bk-scale.butterfly .bk-section { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .bk-scale.butterfly .bk-section .bk-rounds { flex: 1; min-height: 0; }
 .bk-scale.butterfly .bk-section.losers .bk-rounds { flex-direction: row-reverse; }
@@ -91,7 +145,10 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
 .bk-section.losers .bk-connectors path { stroke: color-mix(in srgb, var(--accent-2) 30%, transparent); }
 
 /* ── Round column — flex-fill: columns always span edge to edge ── */
-.bk-round { position: relative; z-index: 1; display: flex; flex-direction: column; flex: 1; min-width: 0; }
+/* max-width is the guard against a one-round view: a full 6-round bracket lands at ~275px a column
+   and never reaches the cap, while a two-round day caps at 380px and centres rather than stretching
+   a single match card to half the screen. */
+.bk-round { position: relative; z-index: 1; display: flex; flex-direction: column; flex: 1 1 0; min-width: 0; max-width: 380px; }
 .bk-round-name { font-family: var(--disp); font-weight: 700; font-size: 13px; letter-spacing: .22em; text-transform: uppercase;
   color: #fff; text-align: center; margin-bottom: 10px; height: 16px; }
 .bk-round.is-final .bk-round-name { color: rgba(255,214,107,.7); }
@@ -124,17 +181,52 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
   box-shadow: 0 2px 8px rgba(0,0,0,.55), 0 0 12px rgba(255,59,70,.6); }
 
 /* ── Slot (one team row) ── */
-.bk-slot { display: flex; align-items: center; gap: 10px; padding: 0 12px 0 0; height: 50px; position: relative; }
+.bk-slot { display: flex; align-items: center; gap: 10px; padding: 0 12px 0 0; height: 50px; position: relative; overflow: hidden; }
+/* Team crest watermark — an oversized logo bleeding off the right of the row, sitting behind the
+   name at low opacity. Anchored clear of the score column and masked so it fades out before it
+   reaches the name, so it never costs legibility. Decorative only: pointer-events off, and it is
+   skipped entirely for TBD slots and whenever logos are hidden. */
+.bk-slot-wm { position: absolute; top: 50%; right: 30px; transform: translateY(-50%);
+  width: 84px; height: 84px; z-index: 0; pointer-events: none;
+  background-repeat: no-repeat; background-position: center right; background-size: contain;
+  /* Tuned against saturated crests: at .12 a brand-coloured logo read as a colour block fighting
+     the name rather than a texture behind it. Partial desaturation does most of the calming, so
+     the opacity can stay high enough to survive stream compression. */
+  opacity: .07; filter: grayscale(.4);
+  -webkit-mask-image: linear-gradient(90deg, transparent 0%, #000 78%);
+          mask-image: linear-gradient(90deg, transparent 0%, #000 78%); }
+.bk-slot-wm.wm-on-dark { filter: invert(1) grayscale(.4); }
+/* Everything else in the row rides above the watermark. */
+.bk-slot > *:not(.bk-slot-wm) { position: relative; z-index: 1; }
+.bk-slot.winner .bk-slot-wm { opacity: .11; }
+.bk-slot.loser  .bk-slot-wm { opacity: .04; }
+/* Off with the logo toggle, and independently switchable. */
+.bk-nologo .bk-slot-wm, .bk-nowm .bk-slot-wm { display: none !important; }
 .bk-slot + .bk-slot { border-top: 1px solid rgba(255,255,255,.06); }
 .bk-slot-accent { width: 3px; align-self: stretch; flex-shrink: 0; background: transparent; }
 .bk-logo { width: 28px; height: 28px; object-fit: contain; flex: 0 0 auto; filter: drop-shadow(0 1px 2px rgba(0,0,0,.6)); }
 .bk-logo.logo-on-dark { filter: invert(1) drop-shadow(0 1px 2px rgba(0,0,0,.6)); }
-.bk-logo-ph { width: 28px; height: 28px; border-radius: 5px; flex: 0 0 auto; background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.08); }
-/* Abbrev badge — replaces logo in abbrev mode */
+/* No-logo placeholder. It used to be an empty bordered box, which read as a broken image on air.
+   Now it holds the team's monogram in their own colour and keeps the logo slot's width so names
+   stay aligned down the column. An unknown (TBD) slot renders it blank — nothing to monogram. */
+.bk-logo-ph { width: 28px; height: 28px; flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center;
+  font-family: var(--disp); font-weight: 800; font-size: 13px; letter-spacing: .02em;
+  color: var(--ph-col, rgba(255,255,255,.42)); text-transform: uppercase; }
+/* Abbrev badge — replaces the logo in abbrev mode, and is the standing fallback for the many
+   teams that never have a crest at all. It therefore has to render EVERYWHERE: OBS ships an
+   older CEF than the panel does, and a color-mix() value containing var() still wins the cascade
+   there before computing to unset, so a bare color-mix background left the badge invisible on the
+   exact machines that matter. Literal neutral first (unconditional), team-tinted mix behind
+   @supports — the same shape the swiss tier colours use below. */
 .bk-logo-badge { display: none; flex: 0 0 28px; width: 28px; height: 28px; border-radius: 5px; align-items: center; justify-content: center;
   font-family: var(--disp); font-weight: 900; color: #fff; text-align: center; letter-spacing: .02em; line-height: 1;
-  background: color-mix(in srgb, var(--badge-col, #4a5568) 55%, rgba(0,0,0,.5));
-  border: 1px solid color-mix(in srgb, var(--badge-col, #4a5568) 70%, transparent); }
+  background: rgba(52,62,82,.92);
+  border: 1px solid rgba(255,255,255,.22); }
+@supports (color: color-mix(in srgb, red 50%, white)) {
+  .bk-logo-badge {
+    background: color-mix(in srgb, var(--badge-col, #4a5568) 55%, rgba(0,0,0,.5));
+    border-color: color-mix(in srgb, var(--badge-col, #4a5568) 70%, transparent); }
+}
 .bk-name { font-family: var(--disp); font-weight: 600; font-size: 22px; color: #fff; letter-spacing: .01em;
   flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .bk-name .bk-short { display: none; }
@@ -155,6 +247,15 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
 .bk-abbrev .bk-logo-badge  { display: flex; }
 .bk-abbrev .bk-name .bk-full  { display: none; }
 .bk-abbrev .bk-name .bk-short { display: inline; font-size: 24px; font-weight: 800; letter-spacing: .03em; }
+/* Abbrev mode is used exactly where columns are narrowest (the full mirrored board), so claw back
+   the padding the name needs: tighter gaps and a narrower score column. */
+.bk-abbrev .bk-slot { gap: 7px; padding-right: 8px; }
+.bk-abbrev .bk-score { min-width: 20px; }
+.bk-abbrev .bk-logo-badge { flex-basis: 24px; width: 24px; height: 24px; }
+/* 24px fitted a 3-letter abbreviation but not a 5-letter one ("EMBER" clipped to "EM..."), and
+   the abbreviations are the whole point of this mode. 21px fits five characters in the narrowest
+   column a full board produces. */
+.bk-abbrev .bk-name .bk-short { font-size: 21px; }
 .bk-score { font-family: var(--disp); font-weight: 800; font-size: 22px; color: rgba(255,255,255,.6); min-width: 28px; text-align: center;
   font-variant-numeric: tabular-nums; }
 .bk-slot.winner .bk-slot-accent { background: var(--accent); box-shadow: 2px 0 8px color-mix(in srgb, var(--accent) 50%, transparent); }
@@ -163,10 +264,13 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
 /* Broadcast-style: the winning score reads as a filled chip so the result is legible at a glance. */
 .bk-slot.winner .bk-score { color: var(--on-accent, #fff); background: color-mix(in srgb, var(--accent) 82%, #000); border-radius: 5px; padding: 3px 0; box-shadow: 0 2px 8px color-mix(in srgb, var(--accent) 40%, transparent); }
 .bk-section.losers .bk-slot.winner .bk-score { color: var(--on-accent-2, #fff); background: color-mix(in srgb, var(--accent-2) 82%, #000); box-shadow: 0 2px 8px color-mix(in srgb, var(--accent-2) 40%, transparent); }
-.bk-slot.loser .bk-name { color: rgba(118,125,140,.6); }
-.bk-slot.loser .bk-logo { opacity: .4; }
-.bk-slot.loser .bk-logo-badge { opacity: .45; }
-.bk-slot.loser .bk-score { color: rgba(126,133,151,.4); }
+/* Eliminated team: de-emphasised but still READABLE on a stream. The old rgba(118,125,140,.6)
+   was ~2.4:1 against the card and unreadable once compressed — and because every undecided match
+   used to get this class too, most of the bracket was rendered in it. */
+.bk-slot.loser .bk-name { color: rgba(176,184,200,.82); }
+.bk-slot.loser .bk-logo { opacity: .55; }
+.bk-slot.loser .bk-logo-badge { opacity: .6; }
+.bk-slot.loser .bk-score { color: rgba(176,184,200,.6); }
 .bk-section.losers .bk-slot.winner .bk-slot-accent { background: var(--accent-2); box-shadow: 2px 0 8px color-mix(in srgb, var(--accent-2) 50%, transparent); }
 .bk-section.losers .bk-slot.winner { background: linear-gradient(90deg, color-mix(in srgb, var(--accent-2) 10%, transparent) 0%, transparent 70%); }
 .bk-slot.focused { outline: 1px solid color-mix(in srgb, var(--accent) 45%, transparent); }
@@ -192,8 +296,6 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
       One flex layout of distinct regions — nothing overlaps anything else on canvas. ── */
 /* Run mode stage: brand + event title (the absolute header) move to the TOP RIGHT, and the
    stage reserves a band up there so the scaled run content never slides underneath it. */
-.bk-stage.run-mode { padding-top: 132px; }
-.bk-stage.run-mode .bk-header { top: 28px; bottom: auto; }
 .bk-run { display: flex; flex-direction: column; align-items: stretch; gap: 28px; width: 1816px; }
 .bk-run-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 22px; }
 .bk-run-head { display: flex; align-items: center; gap: 18px; padding-bottom: 4px; }
@@ -255,7 +357,10 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
   border: 1px solid var(--hair); border-radius: 999px; position: relative; overflow: hidden; }
 .bk-schedule .bk-round-name::after { content: ''; position: absolute; left: 18%; right: 18%; bottom: 0; height: 2px;
   background: linear-gradient(90deg, transparent, var(--accent), transparent); }
-.bk-schedule .bk-matches { justify-content: flex-start; gap: 14px; }
+/* Centre each round's matches: a knockout flow narrows (4 -> 2 -> 2 -> 1) and top-aligning every
+   column hung the later rounds off the top edge with all the dead space beneath them. */
+.bk-schedule .bk-matches { justify-content: center; gap: 14px; }
+.bk-schedule .bk-round { max-width: 420px; }
 /* ── Cross-phase progression pills: where a slot came from / where the winner goes ── */
 .bk-origin { font-size: 12px; line-height: 1; color: rgba(255,255,255,.5); padding: 4px 9px 0;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; letter-spacing: .02em; }
@@ -326,6 +431,330 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
 .bk-st-bar { height: 9px; border-radius: 999px; background: rgba(255,255,255,.08); overflow: hidden; }
 .bk-st-bar > span { display: block; height: 100%; border-radius: 999px; background: linear-gradient(90deg, var(--accent), var(--accent-2)); }
 
+/* ── Swiss stage flow (Worlds / RLCS / CS-Major style) ──────────────────────────────────────
+   One column per round; inside it, matches grouped into a BOXED CARD per W-L bucket with a
+   solid record bar on top. The bar carries the colour, because at broadcast distance a tinted
+   outline pill reads as grey — every reference chart for this format uses a filled bar.
+   Tiering follows what the round is actually worth to the teams in it, which is the only reason
+   this chart beats a standings table:
+       green  = win this and you are through
+       red    = lose this and you are out
+       white  = both (the decider bucket)
+       amber  = the middle of the pack, still playing for position                            */
+.bk-swiss { display: flex; flex-direction: column; align-items: center; gap: 16px; width: 100%; }
+.bk-sw-board { display: flex; align-items: stretch; justify-content: center; gap: 18px; }
+/* Round columns hold wildly different match counts (8 in round 1, 2 in round 5). Centring each
+   column's buckets keeps the chart balanced instead of hanging the late rounds off the top edge. */
+.bk-sw-round { display: flex; flex-direction: column; gap: 10px; min-width: 172px; }
+.bk-sw-round > .bk-sw-buckets { margin-top: auto; margin-bottom: auto; }
+/* The record bars label the groups, so the round name is a quiet index line above them — it used
+   to be a 19px white heading competing with the bars it was introducing. */
+.bk-sw-round-name { text-align: center; font-family: var(--disp); font-weight: 700; font-size: 12px;
+  letter-spacing: .2em; text-transform: uppercase; color: rgba(255,255,255,.5); padding-bottom: 6px; }
+.bk-sw-buckets { display: flex; flex-direction: column; gap: 13px; }
+
+.bk-sw-bucket { --bk-tier: #7f8ba3; --bk-tier-soft: rgba(127,139,163,.34);
+  display: flex; flex-direction: column; border-radius: 7px; overflow: hidden;
+  border: 1px solid var(--bk-tier-soft);
+  background: linear-gradient(180deg, rgba(20,23,32,.96), rgba(12,14,20,.96));
+  box-shadow: 0 6px 20px rgba(0,0,0,.45); }
+.bk-sw-bhead { display: flex; align-items: baseline; justify-content: center; gap: 8px;
+  font-family: var(--disp); font-weight: 800; font-size: 15px; letter-spacing: .16em;
+  color: #08111c; background: var(--bk-tier); padding: 4px 10px; }
+.bk-sw-bnote { font-size: 9px; font-weight: 800; letter-spacing: .09em; opacity: .78; }
+.bk-sw-matches { display: flex; flex-direction: column; gap: 5px; padding: 6px; }
+/* No progression pills on a swiss chart. In a bracket "Day 2: Double Elimination Bracket B3: 5th"
+   tells you where a team came from; in swiss it is noise printed under EVERY match, it pushed the
+   columns far wider than the canvas (which is what made the board bleed off the page), and the
+   record bar above already says everything that matters about a pairing. */
+.bk-swiss .bk-origin, .bk-swiss .bk-exit { display: none !important; }
+/* Team CODES, not full names. A swiss chart is the densest board we draw — five round columns of
+   stacked pairings — and the code is enough to follow a team across it. The monogram stand-in goes
+   with them: it resolves to the same letters as the code ("GE" beside "GE"), so it would only eat
+   width. A real crest still renders. */
+.bk-swiss .bk-name .bk-full { display: none; }
+.bk-swiss .bk-name .bk-short { display: inline; font-weight: 800; letter-spacing: .03em; }
+.bk-swiss .bk-logo-ph { display: none; }
+/* Cards sit INSIDE a bordered bucket — drop their own frame so the group reads as one object. */
+.bk-sw-matches .bk-match { border-color: rgba(255,255,255,.06); border-radius: 4px; box-shadow: none; }
+/* A round-1 column is 8 matches deep, so the 50px show-card slot has to come down or the chart
+   runs off the canvas and fit() shrinks the whole board to compensate. */
+.bk-sw-matches .bk-slot { height: 34px; gap: 8px; }
+.bk-sw-matches .bk-slot-wm { display: none; }
+.bk-sw-matches .bk-name { font-size: 17px; }
+.bk-sw-matches .bk-name .bk-short { font-size: 18px; }
+.bk-sw-matches .bk-score { font-size: 17px; min-width: 22px; }
+.bk-sw-matches .bk-logo,
+.bk-sw-matches .bk-logo-ph,
+.bk-sw-matches .bk-logo-badge { width: 22px; height: 22px; flex-basis: 22px; font-size: 11px; }
+
+/* Producer toggle (Bracket panel / ?colors=0): drop the green-amber-red-blue tiering and render
+   every bucket in one neutral slate. Some brands don't want four accent colours on air, and on a
+   monochrome package the tier palette fights the kit. Overrides sit AFTER the tier rules so a
+   single class wins without touching them. */
+.bk-swiss.bk-nocolor .bk-sw-bucket,
+.bk-swiss.bk-nocolor .bk-sw-out { --bk-tier: #8a93a6 !important; --bk-tier-soft: rgba(138,147,166,.34) !important; }
+.bk-sw-bucket.neutral { --bk-tier: #7fa6d8; --bk-tier-soft: rgba(127,166,216,.34); }
+.bk-sw-bucket.adv     { --bk-tier: #5fe39a; --bk-tier-soft: rgba(95,227,154,.38); }
+.bk-sw-bucket.mid     { --bk-tier: #f2c14e; --bk-tier-soft: rgba(242,193,78,.34); }
+.bk-sw-bucket.elim    { --bk-tier: #f08a8a; --bk-tier-soft: rgba(240,138,138,.34); }
+.bk-sw-bucket.decider { --bk-tier: #ffffff; --bk-tier-soft: rgba(255,255,255,.42); }
+
+/* Outcome rail: who is through, who is out — same filled-bar language as the buckets. */
+/* max-width matters as much as min: with only a floor the rail sized to its longest name, and one
+   joke entrant ("Signature Plays from JERBEARRRRRR…") stretched it to ~565px — a third of the
+   canvas, squeezing the round columns that are the actual chart. Capped, the name ellipsises. */
+.bk-sw-outcome { display: flex; flex-direction: column; justify-content: center; gap: 14px;
+  min-width: 240px; max-width: 340px; flex: 0 0 auto; }
+.bk-sw-out .bk-lad-name { font-size: 16px; }
+.bk-sw-out { --bk-tier: #7f8ba3; --bk-tier-soft: rgba(127,139,163,.34);
+  display: flex; flex-direction: column; border-radius: 7px; overflow: hidden;
+  border: 1px solid var(--bk-tier-soft);
+  background: linear-gradient(180deg, rgba(22,25,33,.96), rgba(13,15,21,.96));
+  box-shadow: 0 6px 20px rgba(0,0,0,.45); }
+.bk-sw-out.qualified  { --bk-tier: #5fe39a; --bk-tier-soft: rgba(95,227,154,.38); }
+.bk-sw-out.eliminated { --bk-tier: #f08a8a; --bk-tier-soft: rgba(240,138,138,.34); }
+/* Tracking is tighter than the bucket bars': this head carries a destination ("QUALIFIED → DAY 4:
+   GSL STAGE") and has to live inside the narrower rail. It may still wrap to two lines, which is
+   fine — it is centred and reads as one label. */
+.bk-sw-out-head { text-align: center; font-family: var(--disp); font-weight: 800; font-size: 12px;
+  letter-spacing: .09em; line-height: 1.25; text-transform: uppercase; color: #08111c;
+  background: var(--bk-tier); padding: 5px 10px; }
+.bk-sw-out .bk-lad-team { margin: 0 6px; }
+.bk-sw-out .bk-lad-team:first-of-type { margin-top: 6px; }
+.bk-sw-out .bk-lad-team:last-child { margin-bottom: 6px; }
+.bk-sw-out.eliminated .bk-lad-team { opacity: .62; }
+.bk-sw-rec { margin-left: auto; font-family: var(--disp); font-weight: 700; font-size: 14px;
+  font-variant-numeric: tabular-nums; color: rgba(255,255,255,.72); flex: 0 0 auto; }
+.bk-sw-legend { font-family: var(--disp); font-weight: 600; font-size: 14px; letter-spacing: .16em;
+  text-transform: uppercase; color: rgba(255,255,255,.55); }
+
+/* ── Group pairings card ───────────────────────────────────────────────────────────────────
+   The pre-show fixtures graphic: "GROUP A — these are today's matches". Not a bracket and not a
+   schedule flow; one row per fixture, crest on each outer edge, names reading inward to a centred
+   VS. Deliberately no scores and no progression — it goes up before a ball is kicked.            */
+.bk-pair { display: grid; gap: 26px; width: 100%; justify-content: center; align-content: center; }
+.bk-pair.cols-1 { grid-template-columns: minmax(0, 1080px); }
+.bk-pair.cols-2 { grid-template-columns: repeat(2, minmax(0, 840px)); }
+.bk-pair.cols-3 { grid-template-columns: repeat(3, minmax(0, 580px)); }
+
+.bk-pg { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.bk-pg-head { display: flex; align-items: baseline; gap: 12px;
+  font-family: var(--disp); font-weight: 800; font-size: 17px; letter-spacing: .22em;
+  text-transform: uppercase; color: var(--on-accent, #fff); background: var(--accent);
+  padding: 7px 16px; border-radius: 5px; }
+.bk-pg-when { margin-left: auto; font-size: 11px; letter-spacing: .14em; opacity: .9; }
+.bk-pg-rows { display: flex; flex-direction: column; gap: 8px; }
+
+/* One fixture. The grid is symmetric on purpose — logo / name / VS / name / logo — so the centre
+   column lines up down the whole card however long the names are. */
+.bk-pr { display: grid; grid-template-columns: 40px minmax(0, 1fr) auto minmax(0, 1fr) 40px;
+  align-items: center; gap: 14px; padding: 10px 14px; border-radius: 6px;
+  border: 1px solid var(--hair);
+  background: linear-gradient(90deg, rgba(24,28,38,.96), rgba(15,18,25,.96)); }
+.bk-pr-logo { width: 40px; height: 40px; object-fit: contain; }
+.bk-pr-logo.logo-on-dark { filter: invert(1); }
+.bk-pr-ph { width: 40px; height: 40px; display: flex; align-items: center; justify-content: center;
+  font-family: var(--disp); font-weight: 800; font-size: 15px; color: var(--ph-col, rgba(255,255,255,.45)); }
+.bk-pr-name { font-family: var(--disp); font-weight: 700; font-size: 24px; color: #fff;
+  min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bk-pr-name.right { text-align: right; }
+.bk-pr-vs { font-family: var(--disp); font-weight: 800; font-size: 14px; letter-spacing: .16em;
+  color: var(--muted); flex: 0 0 auto; }
+.bk-pair.cols-3 .bk-pr-name { font-size: 19px; }
+.bk-pair.cols-3 .bk-pr { grid-template-columns: 30px minmax(0, 1fr) auto minmax(0, 1fr) 30px; padding: 8px 11px; }
+.bk-pair.cols-3 .bk-pr-logo, .bk-pair.cols-3 .bk-pr-ph { width: 30px; height: 30px; }
+
+/* ── GSL groups ────────────────────────────────────────────────────────────────────────────
+   A GSL group is a 4-team double elim with a fixed, named shape, and naming the matches is the
+   whole point — "Elimination Match" and "Decider" tell a viewer what is at stake in a way that
+   "Losers Round 1" never does. One card per group, tiled, so a four-group stage reads as four
+   groups instead of one merged mega-bracket (or one pool at a time, which is what it was).
+       Opening 1 ─┐
+                  ├─> Winners' Match ──────────> 1st, advances
+       Opening 2 ─┘        │(loser drops)
+                  ┌────────┘
+       Elimination Match ──> Decider ─────────> 2nd, advances                                  */
+/* Rows STRETCH to a definite height rather than sizing to content. Content-sized, four group
+   cards came to ~600px of a 1000px canvas and fit() could not magnify them either (the grid is
+   already as wide as the canvas, so it was width-bound at 1.02x) — the tiles just sat in the
+   middle with empty bands above and below. Giving the grid the height and letting the cards fill
+   it is the fix; a single group (cols-1) becomes the full-screen hero graphic. */
+.bk-gsl { display: grid; gap: 20px; width: 100%;
+  justify-content: center; align-content: center; }
+/* Only the tiled grid gets a height floor — four small cards genuinely need to fill the frame.
+   A single group is sized by its own content and centred instead of stretched hollow. */
+.bk-gsl.tiled { min-height: 820px; align-content: stretch; }
+/* Sized to content inside a shrink-to-fit wrapper so fit() can magnify a single group into
+   the canvas; width:100% of an auto-width parent is circular and collapses the grid. */
+.bk-scale.bk-fit-content .bk-gsl { width: auto; }
+/* Same reserved lane the duo layout needs: the event title sits bottom-right over the board. */
+
+/* Pool-play boards magnify to fill now, so they need the same lane kept clear for the title. */
+
+/* One group = the hero graphic (a group on air). It gets the whole canvas and scales its type up,
+   rather than sitting as a 900px card marooned in the middle with "Karmine C..." in it. */
+.bk-gsl.cols-1 { grid-template-columns: minmax(0, 1560px); }
+.bk-gsl.cols-1 .bk-gg-head { font-size: 21px; padding: 9px 20px; }
+.bk-gsl.cols-1 .bk-gg-sub { font-size: 13px; }
+.bk-gsl.cols-1 .bk-gg-body { gap: 28px; padding: 24px; }
+.bk-gsl.cols-1 .bk-gg-col { gap: 22px; }
+.bk-gsl.cols-1 .bk-gg-lbl { font-size: 13px; }
+.bk-gsl.cols-1 .bk-gg .bk-slot { height: 74px; }
+.bk-gsl.cols-1 .bk-gg .bk-name { font-size: 27px; }
+.bk-gsl.cols-1 .bk-gg .bk-score { font-size: 27px; min-width: 34px; }
+.bk-gsl.cols-1 .bk-gg .bk-logo,
+.bk-gsl.cols-1 .bk-gg .bk-logo-ph { width: 38px; height: 38px; flex-basis: 38px; font-size: 16px; }
+.bk-gsl.cols-1 .bk-gg-out { min-width: 260px; padding-left: 24px; gap: 14px; }
+.bk-gsl.cols-1 .bk-gg-team { font-size: 22px; }
+.bk-gsl.cols-1 .bk-gg-pos { font-size: 14px; }
+.bk-gsl.cols-1 .bk-gg-slot { padding: 12px 14px; }
+.bk-gsl.cols-1 .bk-gg-adv { font-size: 13px; }
+/* 8-team group: more columns in the same width, so step the type down and top-align the columns.
+   Centring each column independently made the round labels sit at four different heights, which
+   reads as misalignment rather than as bracket flow (there are no connectors here to explain it). */
+.bk-gsl.cols-1 .bk-gg.wide .bk-gg-col { justify-content: flex-start; }
+.bk-gsl.cols-1 .bk-gg.wide .bk-gg-out { justify-content: flex-start; padding-top: 26px; }
+.bk-gsl.cols-1 .bk-gg.wide .bk-gg-body { gap: 16px; padding: 20px; }
+.bk-gsl.cols-1 .bk-gg.wide .bk-gg-ms { gap: 14px; }
+.bk-gsl.cols-1 .bk-gg.wide .bk-slot { height: 72px; }
+.bk-gsl.cols-1 .bk-gg.wide .bk-name { font-size: 20px; }
+.bk-gsl.cols-1 .bk-gg.wide .bk-score { font-size: 20px; min-width: 26px; }
+.bk-gsl.cols-1 .bk-gg.wide .bk-logo,
+.bk-gsl.cols-1 .bk-gg.wide .bk-logo-ph { width: 28px; height: 28px; flex-basis: 28px; font-size: 13px; }
+.bk-gsl.cols-1 .bk-gg.wide .bk-gg-out { min-width: 210px; }
+.bk-gsl.cols-1 .bk-gg.wide .bk-gg-team { font-size: 18px; }
+.bk-gsl.cols-2 { grid-template-columns: repeat(2, minmax(0, 880px)); }
+.bk-gsl.cols-3 { grid-template-columns: repeat(3, minmax(0, 590px)); }
+.bk-gsl.cols-4 { grid-template-columns: repeat(4, minmax(0, 440px)); }
+
+.bk-gg { display: flex; flex-direction: column; border-radius: 8px; overflow: hidden;
+  border: 1px solid var(--hair);
+  background: linear-gradient(180deg, rgba(20,23,32,.94), rgba(12,14,20,.94));
+  box-shadow: 0 8px 26px rgba(0,0,0,.45); }
+/* Filled header bar — the group label is the loudest thing on the card, as in every reference. */
+.bk-gg-head { font-family: var(--disp); font-weight: 800; font-size: 15px; letter-spacing: .2em;
+  text-transform: uppercase; color: var(--on-accent, #fff); background: var(--accent);
+  padding: 5px 14px; display: flex; align-items: baseline; gap: 10px; }
+.bk-gg-sub { margin-left: auto; font-size: 10px; letter-spacing: .12em; opacity: .85; }
+.bk-gg-body { display: flex; align-items: stretch; gap: 14px; padding: 12px; flex: 1 1 auto; min-height: 0; }
+/* The group's bracket is a normal .bk-section, so it inherits the tree layout and the SVG connector
+   layer. It just has to fill the card and let the outcome rail sit beside it. */
+.bk-gg .bk-section { flex: 1 1 auto; min-width: 0; }
+.bk-gg .bk-section .bk-rounds { gap: 18px; }
+.bk-gg .bk-round-name { font-family: var(--disp); font-weight: 700; font-size: 11px; letter-spacing: .16em;
+  text-transform: uppercase; color: var(--muted); text-align: left; height: auto; margin-bottom: 12px; }
+.bk-gg .bk-round.bk-band-win  .bk-round-name { color: #5fe39a; }
+.bk-gg .bk-round.bk-band-elim .bk-round-name { color: #f08a8a; }
+.bk-gg .bk-round.bk-band-dec  .bk-round-name { color: #f2c14e; }
+.bk-gg .bk-connectors path { stroke: rgba(255,255,255,.22); }
+.bk-gg-col { display: flex; flex-direction: column; justify-content: center; gap: 12px; flex: 1 1 0; min-width: 0; }
+.bk-gg-cell { display: flex; flex-direction: column; gap: 8px; flex: 1 1 auto; min-height: 0; }
+.bk-gg-ms { display: flex; flex-direction: column; gap: 8px; margin-top: auto; margin-bottom: auto; }
+.bk-gg-lbl + .bk-match { margin-top: -2px; }
+.bk-gg-lbl { font-family: var(--disp); font-weight: 700; font-size: 10px; letter-spacing: .16em;
+  text-transform: uppercase; color: var(--muted); }
+.bk-gg-cell.win .bk-gg-lbl  { color: #5fe39a; }
+.bk-gg-cell.elim .bk-gg-lbl { color: #f08a8a; }
+.bk-gg-cell.dec .bk-gg-lbl  { color: #f2c14e; }
+.bk-gg .bk-match { box-shadow: none; }
+.bk-gg .bk-slot { height: 54px; }
+.bk-gg .bk-name { font-size: 19px; }
+.bk-gg .bk-score { font-size: 19px; min-width: 22px; }
+.bk-gg .bk-logo, .bk-gg .bk-logo-ph, .bk-gg .bk-logo-badge { width: 26px; height: 26px; flex-basis: 26px; }
+.bk-gg .bk-slot-wm { display: none; }
+/* Progression pills off, exactly as on the swiss chart: "Day 3: Swiss Stage 1: 1st" printed
+   above and below every card was louder than the scores, and the column headings already say
+   which round each match is. The destination is stated once, in the group header. */
+.bk-gg .bk-origin, .bk-gg .bk-exit { display: none !important; }
+/* Tiled (more than one group on screen) each card is ~880px split across three match columns and
+   the advancing rail, so a full org name has nowhere to go — "Karmine C..." helps nobody. Use the
+   team CODE there. A single group on air (cols-1) is the hero graphic and keeps full names. */
+.bk-gsl.tiled .bk-name .bk-full { display: none; }
+.bk-gsl.tiled .bk-name .bk-short { display: inline; font-weight: 800; letter-spacing: .03em; }
+.bk-gsl.tiled .bk-gg-team { font-size: 15px; }
+/* Drop the monogram stand-in here: a 2-word org abbreviates to the SAME two letters the monogram
+   shows, so the row read "TV TV". A real crest still renders; a team without one is just its code. */
+.bk-gsl.tiled .bk-logo-ph { display: none; }
+/* Who is through. Empty until the group resolves, so it never states an outcome it doesn't have. */
+.bk-gg-out { display: flex; flex-direction: column; justify-content: center; gap: 8px;
+  flex: 0 0 auto; min-width: 132px; padding-left: 14px; border-left: 1px solid var(--hair); }
+.bk-gg-slot { display: flex; align-items: center; gap: 8px; border-radius: 5px; padding: 6px 9px;
+  border: 1px solid rgba(255,255,255,.10); background: rgba(255,255,255,.03); }
+.bk-gg-slot.filled { border-color: rgba(95,227,154,.45); background: rgba(95,227,154,.10); }
+.bk-gg-pos { font-family: var(--disp); font-weight: 800; font-size: 11px; letter-spacing: .1em;
+  color: #5fe39a; flex: 0 0 auto; }
+.bk-gg-team { font-family: var(--disp); font-weight: 700; font-size: 16px; color: #fff;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bk-gg-slot:not(.filled) .bk-gg-team { color: var(--muted); font-weight: 600; }
+.bk-gg-adv { font-family: var(--disp); font-weight: 700; font-size: 10px; letter-spacing: .14em;
+  text-transform: uppercase; color: var(--muted); text-align: center; }
+.bk-gg-adv.out { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--hair); color: #f08a8a; }
+.bk-gg-slot.gone { border-color: rgba(240,138,138,.22); background: rgba(240,138,138,.05); opacity: .72; }
+.bk-gg-slot.gone .bk-gg-team { color: rgba(255,255,255,.7); font-weight: 600; }
+
+/* ── Round-robin group board: standings + form on the left, head-to-head and the
+      next fixtures on the right — one graphic instead of three separate views ── */
+.bk-group { align-self: center; display: flex; align-items: flex-start; gap: 20px; max-width: 100%; }
+.bk-gp-main, .bk-gp-card { border-radius: 16px; border: 1px solid var(--hair); overflow: hidden;
+  background: linear-gradient(180deg, rgba(22,25,33,.96), rgba(13,15,21,.96)); box-shadow: 0 18px 44px rgba(0,0,0,.5); }
+.bk-gp-main { min-width: 940px; }
+.bk-gp-head, .bk-gp-card-head { display: flex; align-items: center; justify-content: space-between; gap: 14px;
+  padding: 13px 22px; border-bottom: 1px solid var(--hair);
+  background: linear-gradient(180deg, rgba(255,255,255,.07), rgba(255,255,255,.02));
+  font-family: var(--disp); font-weight: 700; font-size: 15px; letter-spacing: .14em; text-transform: uppercase; color: #e3e8f1; }
+.bk-gp-round { font-size: 13px; letter-spacing: .1em; color: var(--accent); }
+.bk-gp-row { display: grid; grid-template-columns: 74px 1fr 78px 78px 100px 168px; align-items: center;
+  padding: 0 18px; height: 60px; border-bottom: 1px solid rgba(255,255,255,.05); }
+.bk-gp-row.norecord { grid-template-columns: 74px 1fr 100px 168px; }
+.bk-gp-row:last-child { border-bottom: none; }
+.bk-gp-row.head { height: 42px; font-family: var(--disp); font-weight: 700; font-size: 12px;
+  letter-spacing: .14em; text-transform: uppercase; color: rgba(255,255,255,.52); }
+.bk-gp-row.head .bk-gp-team { padding-left: 0; }
+/* The qualification line: teams above it are through if the group ended now. */
+.bk-gp-row.cut { border-bottom: 2px solid rgba(111,240,168,.45); }
+.bk-gp-row.qual .bk-gp-rank { color: #6ff0a8; }
+.bk-gp-rank { font-family: var(--disp); font-weight: 700; font-size: 21px; font-variant-numeric: tabular-nums; color: #fff; }
+.bk-gp-team { display: flex; align-items: center; gap: 12px; min-width: 0; padding-left: 2px;
+  border-left: 3px solid var(--team-c, transparent); }
+.bk-gp-logo { width: 32px; height: 32px; object-fit: contain; flex: 0 0 auto; }
+.bk-gp-logo.logo-on-dark { filter: invert(1); }
+.bk-gp-name { font-family: var(--disp); font-weight: 600; font-size: 21px; color: #fff;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bk-gp-num { font-family: var(--disp); font-weight: 700; font-size: 20px; font-variant-numeric: tabular-nums; color: #fff; }
+.bk-gp-num.w { color: #6ff0a8; }
+.bk-gp-num.l { color: rgba(255,255,255,.55); }
+.bk-gp-num.diff.pos { color: #6ff0a8; }
+.bk-gp-num.diff.neg { color: #f39191; }
+.bk-gp-form { display: flex; align-items: center; gap: 6px; }
+.bk-gp-dot { width: 20px; height: 20px; border-radius: 5px; flex: 0 0 auto;
+  font-family: var(--disp); font-weight: 700; font-size: 11px; color: #0b0d12;
+  display: flex; align-items: center; justify-content: center; }
+.bk-gp-dot.w { background: #6ff0a8; }
+.bk-gp-dot.l { background: #f08a8a; }
+.bk-gp-dot.none { background: rgba(255,255,255,.09); }
+.bk-gp-side { display: flex; flex-direction: column; gap: 20px; min-width: 300px; max-width: 460px; }
+.bk-gp-card { display: flex; flex-direction: column; }
+.bk-gp-card-body { padding: 14px; }
+/* The full matrix renderer, shrunk to sit beside the table instead of owning the canvas. */
+.bk-gp-h2h .bk-matrix { border: none; box-shadow: none; background: transparent; padding: 0; }
+.bk-gp-h2h .bk-mx-cell { height: 34px; font-size: 13px; }
+.bk-gp-h2h .bk-mx-head { font-size: 11px; }
+.bk-gp-h2h .bk-mx-rowhead { padding-left: 8px; gap: 7px; justify-content: flex-start; }
+.bk-gp-h2h .bk-mx-logo { width: 17px; height: 17px; }
+.bk-gp-fix { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 8px;
+  background: rgba(255,255,255,.035); border: 1px solid rgba(255,255,255,.06); margin-bottom: 7px; }
+.bk-gp-fix:last-child { margin-bottom: 0; }
+.bk-gp-fix.live { border-color: rgba(255,255,255,.28); background: rgba(255,255,255,.07); }
+.bk-gp-fix-rd { font-family: var(--disp); font-weight: 700; font-size: 11px; letter-spacing: .08em;
+  text-transform: uppercase; color: var(--accent); flex: 0 0 auto; min-width: 52px; }
+.bk-gp-fix-teams { flex: 1; min-width: 0; font-family: var(--disp); font-weight: 600; font-size: 15px; color: #fff;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bk-gp-fix-vs { color: rgba(255,255,255,.4); font-weight: 400; padding: 0 4px; }
+.bk-gp-fix-live { font-family: var(--disp); font-weight: 800; font-size: 10px; letter-spacing: .1em;
+  color: #ff4d4d; flex: 0 0 auto; }
+.bk-gp-empty { font-family: var(--disp); font-size: 14px; color: rgba(255,255,255,.4); padding: 4px 2px; }
+
 /* ── Matrix (round robin / pool play head-to-head grid) ── */
 .bk-matrix { align-self: center; max-width: 100%; border-radius: 16px; border: 1px solid var(--hair); padding: 24px;
   background: linear-gradient(180deg, rgba(22,25,33,.96), rgba(13,15,21,.96)); box-shadow: 0 18px 44px rgba(0,0,0,.5); }
@@ -355,25 +784,26 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
 
 <div id="bk-stage" class="bk-stage">
   <header class="bk-header">
-    <div class="bk-section-pills" id="bk-section-pills"></div>
     <div class="bk-head-text">
       <div class="bk-eyebrow">Tournament Bracket</div>
-      <div class="bk-title-row">
-        <img class="bk-brand-logo" id="bk-brand-logo" style="display:none;" alt="">
-        <div class="bk-title" id="bk-title"></div>
-      </div>
+      <div class="bk-title" id="bk-title"></div>
       <div class="bk-subtitle" id="bk-subtitle"></div>
     </div>
-    <div class="bk-head-right">
-      <div class="bk-phases" id="bk-phases"></div>
+    <div class="bk-head-meta">
       <div class="bk-format" id="bk-format" style="display:none;"></div>
+      <div class="bk-section-pills" id="bk-section-pills"></div>
     </div>
+    <img class="bk-brand-logo" id="bk-brand-logo" style="display:none;" alt="">
   </header>
   <main class="bk-body"><div class="bk-scale" id="bk-scale"></div></main>
+  <footer class="bk-footer">
+    <div class="bk-phases" id="bk-phases"></div>
+  </footer>
   <div class="bk-empty" id="bk-empty">No bracket loaded — load an event from the dashboard.</div>
 </div>
 
 <script src="scene-base.js"></script>
+<script src="caster-rail.js"></script>
 <script>
 (function () {
   const SVGNS = 'http://www.w3.org/2000/svg';
@@ -387,12 +817,17 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
   function logoFor(name) { return (name && logoByName[name.toLowerCase()]) || null; }
   function isDark(src) { try { return SceneBase.isDefaultGameLogo(src); } catch (e) { return false; } }
 
+  // Fallback team code for teams with no explicit abbreviation in the vault (a saved `abbr` always
+  // wins over this). Capped at FOUR characters: the old rule kept a 5-letter name whole while
+  // cutting a 6-letter one to 3, so "FROST" and "PULSE" were the only codes too wide for a narrow
+  // losers column and ellipsised to "FRO..." right beside a clean "AUR". Four is also what real
+  // esports tickers use — three or four letters, never five.
   function abbrev(name) {
     if (!name || name === 'TBD') return name;
     const s = name.trim();
-    if (s.length <= 5) return s.toUpperCase();
+    if (s.length <= 4) return s.toUpperCase();
     const words = s.split(/\s+/);
-    if (words.length >= 2) return words.map(function(w) { return w[0]; }).join('').toUpperCase().slice(0, 5);
+    if (words.length >= 2) return words.map(function(w) { return w[0]; }).join('').toUpperCase().slice(0, 4);
     return s.slice(0, 3).toUpperCase();
   }
 
@@ -562,30 +997,57 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
     return wrap;
   }
 
-  function buildSlot(slot) {
+  // `decided` = this match has a winner. Without it every non-winning team was marked '.loser',
+  // so BOTH teams in a live or not-yet-played match rendered greyed out — the whole bracket read
+  // as "everyone lost" until results came in, and the live match was the most obviously wrong.
+  // A team is only dimmed once it has actually been beaten.
+  function buildSlot(slot, decided) {
     const s = slot || { name: 'TBD', score: null, winner: false };
     const known = s.name && s.name !== 'TBD';
     const row = document.createElement('div');
-    row.className = 'bk-slot' + (s.winner ? ' winner' : (known ? ' loser' : ''));
+    row.className = 'bk-slot' + (s.winner ? ' winner' : (decided && known ? ' loser' : ''));
     const accent = document.createElement('div'); accent.className = 'bk-slot-accent'; row.appendChild(accent);
     const displayName = s.name || 'TBD';
     const shortName = abbrevByName[displayName.toLowerCase()] || abbrev(displayName);
-    // Logo / placeholder (shown in normal mode)
+    // Logo, or a monogram standing in for one. The monogram uses the same abbreviation the badge
+    // does, capped at two characters, tinted with the team's colour when we know it.
+    // Letters/digits only — org names like "PAR | Scend" abbreviate to "P|", and a pipe or dash
+    // as half the monogram reads as a glitch rather than initials.
+    const phMono = known ? (shortName.replace(/[^\p{L}\p{N}]/gu, '') || shortName).slice(0, 2) : '';
+    const phCol = known ? (colorByName[displayName.toLowerCase()] || null) : null;
+    const phHtml = '<span class="bk-logo-ph"' + (phCol ? ' style="--ph-col:' + phCol + '"' : '') + '>'
+                 + phMono.replace(/&/g, '&amp;').replace(/</g, '&lt;') + '</span>';
     const logo = known ? logoFor(s.name) : null;
+    // Crest watermark behind the name. Added first so it paints under everything else in the row.
+    if (logo) {
+      const wm = document.createElement('div');
+      wm.className = 'bk-slot-wm' + (isDark(logo) ? ' wm-on-dark' : '');
+      wm.style.backgroundImage = 'url("' + String(logo).replace(/"/g, '&quot;') + '")';
+      row.appendChild(wm);
+    }
     if (logo) {
       const img = document.createElement('img');
       img.className = 'bk-logo' + (isDark(logo) ? ' logo-on-dark' : '');
-      img.src = logo; img.onerror = function () { this.outerHTML = '<span class="bk-logo-ph"></span>'; };
+      // A logo that fails to load falls back to the same monogram, not a bare box.
+      img.src = logo; img.onerror = function () { this.outerHTML = phHtml; };
       row.appendChild(img);
     } else {
-      const ph = document.createElement('span'); ph.className = 'bk-logo-ph'; row.appendChild(ph);
+      const ph = document.createElement('span');
+      ph.className = 'bk-logo-ph';
+      if (phCol) ph.style.setProperty('--ph-col', phCol);
+      ph.textContent = phMono;
+      row.appendChild(ph);
     }
     // Abbrev badge (shown in abbrev mode instead of logo)
     const badge = document.createElement('span'); badge.className = 'bk-logo-badge';
     const badgeColor = known ? (colorByName[displayName.toLowerCase()] || null) : null;
     if (badgeColor) badge.style.setProperty('--badge-col', badgeColor);
-    const badgeText = shortName.slice(0, 5);
-    badge.style.fontSize = (badgeText.length <= 2 ? 13 : badgeText.length <= 3 ? 11 : badgeText.length <= 4 ? 9 : 8) + 'px';
+    // The badge stands in for the LOGO, so it carries the 2-letter monogram — not the whole
+    // abbreviation. It used to print the same string the name does ("FROST" in the tile beside
+    // "FROST" in the name), which was both redundant and the reason names ellipsised to "F.." in
+    // narrow losers columns: the duplicate tile was eating the width the name needed.
+    const badgeText = phMono || shortName.slice(0, 2);
+    badge.style.fontSize = (badgeText.length <= 2 ? 13 : 11) + 'px';
     badge.textContent = badgeText;
     row.appendChild(badge);
     const name = document.createElement('div'); name.className = 'bk-name';
@@ -614,8 +1076,8 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
     const upcoming = set.state === 1 && !decided && !inPlay;
     m.className = 'bk-match' + (isFinal ? ' is-final' : '') + (inPlay ? ' live' : '') + (upcoming ? ' upcoming' : '');
     if (set.fromA) { const fa = document.createElement('div'); fa.className = 'bk-origin'; fa.textContent = set.fromA; m.appendChild(fa); }
-    m.appendChild(buildSlot(a));
-    m.appendChild(buildSlot(b));
+    m.appendChild(buildSlot(a, decided));
+    m.appendChild(buildSlot(b, decided));
     if (set.fromB) { const fb = document.createElement('div'); fb.className = 'bk-origin'; fb.textContent = set.fromB; m.appendChild(fb); }
     if (set.toNext) { const ex = document.createElement('div'); ex.className = 'bk-exit'; ex.textContent = set.toNext; m.appendChild(ex); }
     if (!inPlay) return m;
@@ -700,6 +1162,15 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
       }
     };
 
+    // Two sets in one column can average to the SAME row when their feeders come from different
+    // bands — a GSL group's Lower QF takes one feeder from the winners side and one from the lower
+    // side, and both matches landed on the identical row and drew on top of each other. Real
+    // elimination rounds are already >=1 apart, so for those this is a no-op.
+    const separate = (arr) => {
+      for (let i = 1; i < arr.length; i++) {
+        if (arr[i] != null && arr[i - 1] != null && arr[i] < arr[i - 1] + 1) arr[i] = arr[i - 1] + 1;
+      }
+    };
     const mean = (a) => a.reduce((x, y) => x + y, 0) / a.length;
     for (let ri = base + 1; ri < rounds.length; ri++) {
       rounds[ri].sets.forEach((s, i) => {
@@ -708,6 +1179,7 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
         rows[ri][i] = fr.length ? mean(fr) : null;
       });
       fillGaps(rows[ri]);
+      separate(rows[ri]);
     }
     for (let ri = base - 1; ri >= 0; ri--) {
       const kids = new Map();
@@ -724,6 +1196,7 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
         rows[ri][i] = (c && c.length) ? mean(c) : null;
       });
       fillGaps(rows[ri]);
+      separate(rows[ri]);
     }
 
     const lo = Math.min.apply(null, rows.map((r) => Math.min.apply(null, r.length ? r : [0])));
@@ -904,12 +1377,14 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
 
   // Head-to-head grid for Round Robin pools — rows/columns are both team names, each
   // cell is that pairing's result. Matches how Start.gg itself presents Pool Play.
-  function buildMatrix(matrix) {
+  function buildMatrix(matrix, compact) {
     const teams = (matrix && matrix.teams) || [];
     const cells = (matrix && matrix.cells) || {};
     const wrap = document.createElement('div'); wrap.className = 'bk-matrix';
     const table = document.createElement('div'); table.className = 'bk-mx-table';
-    table.style.gridTemplateColumns = '220px repeat(' + teams.length + ', minmax(64px, 1fr))';
+    table.style.gridTemplateColumns = compact
+      ? '74px repeat(' + teams.length + ', minmax(30px, 1fr))'
+      : '220px repeat(' + teams.length + ', minmax(64px, 1fr))';
     const corner = document.createElement('div'); corner.className = 'bk-mx-cell bk-mx-corner'; table.appendChild(corner);
     teams.forEach((t) => {
       const h = document.createElement('div'); h.className = 'bk-mx-cell bk-mx-head';
@@ -921,7 +1396,10 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
       const rh = document.createElement('div'); rh.className = 'bk-mx-cell bk-mx-head bk-mx-rowhead';
       const logo = logoFor(rowTeam.name);
       if (logo) { const img = document.createElement('img'); img.className = 'bk-mx-logo' + (isDark(logo) ? ' logo-on-dark' : ''); img.src = logo; img.onerror = function () { this.style.display = 'none'; }; rh.appendChild(img); }
-      const nm = document.createElement('span'); nm.textContent = rowTeam.name; rh.appendChild(nm);
+      const nm = document.createElement('span');
+      nm.textContent = compact ? (abbrevByName[rowTeam.name.toLowerCase()] || abbrev(rowTeam.name)) : rowTeam.name;
+      rh.title = rowTeam.name;
+      rh.appendChild(nm);
       table.appendChild(rh);
       teams.forEach((colTeam) => {
         const cell = document.createElement('div'); cell.className = 'bk-mx-cell';
@@ -1008,6 +1486,531 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
     return wrap;
   }
 
+  // Is this schedule a SWISS stage? The bracket TYPE cannot answer it: start.gg reports a
+  // real-world swiss phase as CUSTOM_SCHEDULE (RLCS runs swiss that way, because start.gg's
+  // native swiss is limited), so `type === 'SWISS'` was false for the very events this chart
+  // exists to draw — and they fell through to a standings table instead.
+  //
+  // Shape answers it. In swiss, round 2 involves essentially EVERYONE again (you keep playing
+  // after a loss); in any elimination flow round 2 involves about half the field. Measured on
+  // real data: swiss 16 -> 16 teams (1.0), hybrid elimination 8 -> 4 (0.5).
+  function looksSwiss(schedule, type) {
+    const t = String(type || '').toUpperCase();
+    if (t === 'SWISS') return true;
+    if (t === 'ROUND_ROBIN' || t === 'SINGLE_ELIMINATION' || t === 'DOUBLE_ELIMINATION') return false;
+    const rounds = (schedule || []).filter((r) => (r.sets || []).length);
+    if (rounds.length < 2) return false;
+    const teamsIn = (r) => {
+      const s = new Set();
+      (r.sets || []).forEach((x) => [x.a, x.b].forEach((sl) => {
+        if (sl && sl.name && sl.name !== 'TBD') s.add(bkNorm(sl.name));
+      }));
+      return s.size;
+    };
+    const r1 = teamsIn(rounds[0]), r2 = teamsIn(rounds[1]);
+    if (!r1 || !r2) return false;
+    return (r2 / r1) >= 0.8;
+  }
+
+  // ── Swiss stage flow ───────────────────────────────────────────────────────
+  // The broadcast-standard swiss chart: one column per round, and inside each column the
+  // matches are grouped by the W-L record BOTH teams carried into that round (0-0, then
+  // 1-0 / 0-1, then 2-0 / 1-1 / 0-2 …). Records are derived from the schedule itself rather
+  // than the standings table so the buckets always agree with the matches drawn beside them.
+  function swissFlow(schedule) {
+    const rounds = withInferredWinners(schedule);
+    const rec = new Map();   // normalised name → running record
+    const recOf = (name) => {
+      const k = bkNorm(name);
+      if (!rec.has(k)) rec.set(k, { name, w: 0, l: 0 });
+      return rec.get(k);
+    };
+    const named = (sl) => sl && sl.name && sl.name !== 'TBD';
+    const cols = rounds.map((r) => {
+      const groups = new Map();
+      (r.sets || []).forEach((set) => {
+        const a = set.a || {}, b = set.b || {};
+        // True swiss pairs equal records. A hand-made pairing can cross buckets — name the
+        // group after the better record so the set still lands somewhere instead of vanishing.
+        const ra = named(a) ? recOf(a.name) : null;
+        const rb = named(b) ? recOf(b.name) : null;
+        const pick = !ra ? rb : !rb ? ra : ((ra.w - ra.l) >= (rb.w - rb.l) ? ra : rb);
+        const w = pick ? pick.w : 0, l = pick ? pick.l : 0;
+        const key = w + '-' + l;
+        if (!groups.has(key)) groups.set(key, { w, l, sets: [] });
+        groups.get(key).sets.push(set);
+      });
+      // Results are applied only AFTER this round is bucketed — a round must be grouped by the
+      // records teams brought in, not the ones they leave with.
+      (r.sets || []).forEach((set) => {
+        const a = set.a || {}, b = set.b || {};
+        if (!named(a) || !named(b)) return;
+        if (a.winner) { recOf(a.name).w++; recOf(b.name).l++; }
+        else if (b.winner) { recOf(b.name).w++; recOf(a.name).l++; }
+      });
+      return {
+        name: r.name,
+        buckets: [...groups.values()].sort((x, y) => (y.w - y.l) - (x.w - x.l) || y.w - x.w)
+      };
+    });
+    return { cols, records: [...rec.values()], roundCount: rounds.length };
+  }
+
+  function buildSwissStage(schedule, advanceWins, eliminateLosses, advancesTo, noColor) {
+    const flow = swissFlow(schedule);
+    // Default thresholds follow the standard swiss shape: a best-of-(rounds) stage qualifies at
+    // ceil((rounds+1)/2) wins and eliminates at the same number of losses (5 rounds → 3/3).
+    const auto = Math.max(1, Math.ceil((flow.roundCount + 1) / 2));
+    const adv = advanceWins > 0 ? advanceWins : auto;
+    const elim = eliminateLosses > 0 ? eliminateLosses : auto;
+
+    const wrap = document.createElement('div'); wrap.className = 'bk-swiss' + (noColor ? ' bk-nocolor' : '');
+    const board = document.createElement('div'); board.className = 'bk-sw-board';
+
+    flow.cols.forEach((col) => {
+      // A round with no pairings yet (start.gg creates swiss sets lazily) would render as an
+      // empty column with a header — drop it rather than pad the chart with nothing.
+      if (!col.buckets.length) return;
+      const c = document.createElement('div'); c.className = 'bk-sw-round';
+      const nm = document.createElement('div'); nm.className = 'bk-sw-round-name'; nm.textContent = col.name || '';
+      c.appendChild(nm);
+      const bs = document.createElement('div'); bs.className = 'bk-sw-buckets';
+      col.buckets.forEach((bk) => {
+        // >= not ===: a bucket can sit past the line when a stage runs extra rounds or the
+        // producer set the thresholds by hand, and those buckets are exactly the ones that most
+        // need the colour. Everything not on a line is the amber mid-pack.
+        // Colour by TRACK, the way broadcast swiss charts do it: the undefeated run is green,
+        // anything already carrying elimination-range losses is red, the pack between them is
+        // amber, and the opening 0-0 round is neutral because nothing is at stake in it yet.
+        // Colouring by "exactly one win from the line" instead left almost everything unlit
+        // until the final round and painted the whole early chart one flat colour.
+        const onWinTrack = bk.l === 0 && bk.w > 0;
+        const onElimTrack = bk.l >= elim - 1;
+        const isDecider = bk.w >= adv - 1 && bk.l >= elim - 1;
+        const b = document.createElement('div');
+        b.className = 'bk-sw-bucket ' + (isDecider ? 'decider' : onElimTrack ? 'elim'
+          : onWinTrack ? 'adv' : (bk.w === 0 && bk.l === 0) ? 'neutral' : 'mid');
+        const head = document.createElement('div'); head.className = 'bk-sw-bhead';
+        head.appendChild(document.createTextNode(bk.w + '\u2013' + bk.l));
+        // Spell out what is actually at stake — the whole reason a swiss chart beats a table.
+        // Exactly ON the line, not past it: a bucket that has already reached the qualify mark is
+        // not playing "to qualify", and labelling it so is simply wrong.
+        const winOut = bk.w === adv - 1, loseOut = bk.l === elim - 1;
+        const note = winOut && loseOut ? 'ADVANCE / ELIMINATE' : winOut ? 'TO QUALIFY' : loseOut ? 'TO ELIMINATE' : '';
+        if (note) { const n = document.createElement('span'); n.className = 'bk-sw-bnote'; n.textContent = note; head.appendChild(n); }
+        b.appendChild(head);
+        const ms = document.createElement('div'); ms.className = 'bk-sw-matches';
+        bk.sets.forEach((set) => ms.appendChild(buildMatch(set, false)));
+        b.appendChild(ms);
+        bs.appendChild(b);
+      });
+      c.appendChild(bs);
+      board.appendChild(c);
+    });
+
+    const outTeam = (t) => {
+      const row = document.createElement('div'); row.className = 'bk-lad-team';
+      const color = colorByName[(t.name || '').toLowerCase()];
+      if (color) row.style.setProperty('--team-c', color);
+      const logo = logoFor(t.name);
+      if (logo) {
+        const img = document.createElement('img'); img.className = 'bk-lad-logo' + (isDark(logo) ? ' logo-on-dark' : '');
+        img.src = logo; img.onerror = function () { this.style.display = 'none'; };
+        row.appendChild(img);
+      }
+      const nm = document.createElement('div'); nm.className = 'bk-lad-name bk-name'; nm.textContent = t.name || 'TBD';
+      row.appendChild(nm);
+      const rc = document.createElement('div'); rc.className = 'bk-sw-rec'; rc.textContent = t.w + '\u2013' + t.l;
+      row.appendChild(rc);
+      return row;
+    };
+    const qualified = flow.records.filter((t) => t.w >= adv).sort((a, b) => a.l - b.l || b.w - a.w);
+    const eliminated = flow.records.filter((t) => t.l >= elim).sort((a, b) => b.w - a.w || a.l - b.l);
+    if (qualified.length || eliminated.length) {
+      const rail = document.createElement('div'); rail.className = 'bk-sw-outcome';
+      [['qualified', 'Qualified', qualified], ['eliminated', 'Eliminated', eliminated]].forEach(([cls, label, list]) => {
+        if (!list.length) return;
+        const panel = document.createElement('div'); panel.className = 'bk-sw-out ' + cls;
+        const h = document.createElement('div'); h.className = 'bk-sw-out-head';
+        h.textContent = cls === 'qualified' && advancesTo ? label + ' \u2192 ' + advancesTo : label;
+        panel.appendChild(h);
+        list.forEach((t) => panel.appendChild(outTeam(t)));
+        rail.appendChild(panel);
+      });
+      board.appendChild(rail);
+    }
+    wrap.appendChild(board);
+
+    const legend = document.createElement('div'); legend.className = 'bk-sw-legend';
+    legend.textContent = [
+      flow.records.length ? flow.records.length + ' TEAMS' : '',
+      adv + (adv === 1 ? ' WIN QUALIFIES' : ' WINS QUALIFY'),
+      elim + (elim === 1 ? ' LOSS ELIMINATES' : ' LOSSES ELIMINATE')
+    ].filter(Boolean).join(' \u00b7 ');
+    wrap.appendChild(legend);
+    return wrap;
+  }
+
+  // ── Group pairings (pre-show fixtures) ─────────────────────────────────────
+  // Which matches belong on a fixtures card: the round that is ABOUT to be played. For each pool
+  // that's its first round still holding an undecided set, falling back to its opening round once
+  // everything is done (so the card still reads after the fact rather than going blank).
+  function pairingRound(bands) {
+    const rounds = [].concat.apply([], (bands || []).map((b) => b || []))
+      .filter((r) => r && (r.sets || []).length);
+    if (!rounds.length) return null;
+    const undecided = (r) => (r.sets || []).some((s) => !(s.a && s.a.winner) && !(s.b && s.b.winner));
+    return rounds.find(undecided) || rounds[0];
+  }
+
+  function buildPairings(groups) {
+    const wrap = document.createElement('div');
+    const n = groups.length;
+    // Stack up to two groups in ONE column. Side by side they make a wide, short block that
+    // fit() can barely magnify on a 16:9 canvas (~1.07x); stacked they are tall and narrow and
+    // reach ~1.6x, which is also how the broadcast reference lays this card out.
+    wrap.className = 'bk-pair cols-' + (n <= 2 ? 1 : n <= 6 ? 2 : 3);
+    groups.forEach((g) => {
+      const card = document.createElement('div'); card.className = 'bk-pg';
+      const head = document.createElement('div'); head.className = 'bk-pg-head';
+      head.appendChild(document.createTextNode((g.name || 'Group').toUpperCase()));
+      if (g.roundName) {
+        const w = document.createElement('span'); w.className = 'bk-pg-when';
+        w.textContent = String(g.roundName).toUpperCase(); head.appendChild(w);
+      }
+      card.appendChild(head);
+      const rows = document.createElement('div'); rows.className = 'bk-pg-rows';
+      (g.sets || []).forEach((set) => {
+        const row = document.createElement('div'); row.className = 'bk-pr';
+        const side = (slot, right) => {
+          const nm = (slot && slot.name) || 'TBD';
+          const known = nm && nm !== 'TBD';
+          const logo = known ? logoFor(nm) : null;
+          let badge;
+          if (logo) {
+            badge = document.createElement('img');
+            badge.className = 'bk-pr-logo' + (isDark(logo) ? ' logo-on-dark' : '');
+            badge.src = logo; badge.onerror = function () { this.style.visibility = 'hidden'; };
+          } else {
+            badge = document.createElement('span'); badge.className = 'bk-pr-ph';
+            const short = abbrevByName[nm.toLowerCase()] || abbrev(nm);
+            badge.textContent = known ? (short.replace(/[^\p{L}\p{N}]/gu, '') || short).slice(0, 2) : '';
+            const col = known ? colorByName[nm.toLowerCase()] : null;
+            if (col) badge.style.setProperty('--ph-col', col);
+          }
+          const name = document.createElement('div');
+          name.className = 'bk-pr-name' + (right ? ' right' : '');
+          name.textContent = nm;
+          return { badge, name };
+        };
+        const a = side(set.a, false), b = side(set.b, true);
+        const vs = document.createElement('div'); vs.className = 'bk-pr-vs'; vs.textContent = 'VS';
+        // Left crest, left name, VS, right name, right crest — mirrored, so the VS column stays
+        // dead centre no matter how long either org name is.
+        row.appendChild(a.badge); row.appendChild(a.name);
+        row.appendChild(vs);
+        row.appendChild(b.name); row.appendChild(b.badge);
+        rows.appendChild(row);
+      });
+      card.appendChild(rows);
+      wrap.appendChild(card);
+    });
+    return wrap;
+  }
+
+  // ── GSL groups ─────────────────────────────────────────────────────────────
+  // A GSL group is a 4-team double elim, always the same five matches. We read the shape off the
+  // bracket arrays rather than trusting a phase NAME: "GSL Stage" is just what a TO happened to
+  // call it, and plenty of GSL groups are named something else entirely.
+  //   winners[0] = the two opening matches, winners[1] = Winners' Match,
+  //   losers[0]  = Elimination Match,       finals[0]  = Decider.
+  // GSL comes in two sizes and the 8-team one is what real events actually run (measured against
+  // a live RLCS-shape event: 2 pools of 8, Winners QF 4 / Winners SF 2 / Losers R1 2 / Losers QF 2).
+  // Hardcoding the 4-team shape meant those pools failed the test and fell back to an anonymous
+  // generic bracket. So: accept any SMALL double-elim pool and name its rounds by position.
+  //   4 teams: Opening Match x2 -> Winners' Match / Elimination Match -> Decider
+  //   8 teams: Upper QF -> Upper SF -> (Upper Final) / Lower rounds -> Decider
+  var GSL_MAX_TEAMS = 8;
+  function gslShape(b) {
+    const w = (b.winners || []).filter((r) => (r.sets || []).length);
+    const l = (b.losers || []).filter((r) => (r.sets || []).length);
+    const f = (b.finals || []).filter((r) => (r.sets || []).length);
+    if (!w.length) return null;
+    const names = new Set();
+    let total = 0;
+    w.concat(l, f).forEach((r) => (r.sets || []).forEach((s) => {
+      total++;
+      [s.a, s.b].forEach((x) => { if (x && x.name && x.name !== 'TBD') names.add(bkNorm(x.name)); });
+    }));
+    // A group is small by definition. Anything bigger is a real bracket and belongs on the
+    // bracket path, where the tree layout and connectors do a better job than a group card.
+    // 16 sets, not 14: a COMPLETE 8-team group is 13 (WQF 4 + WSF 2 + WF 1 + LR1 2 + LQF 2 +
+    // LSF 1 + LF 1), which left almost no margin and would have rejected any group carrying a
+    // tiebreak or reset. Team count is the real ceiling here; set count is only a sanity guard.
+    if (names.size > GSL_MAX_TEAMS || total > 16) return null;
+    const opening = (w[0].sets || []).length;
+    if (opening < 2) return null;          // a single opening match is not a group
+    const size = names.size >= 5 ? 8 : 4;
+    // Round labels by POSITION within the band, so the same builder covers both sizes.
+    const upperNames = size === 8
+      ? ['Upper Quarterfinals', 'Upper Semifinals', 'Upper Final']
+      : ['Opening Matches', "Winners' Match"];
+    const lowerNames = size === 8
+      ? ['Lower Round 1', 'Lower Quarterfinals', 'Lower Semifinals', 'Lower Final']
+      : ['Elimination Match'];
+    const band = (rounds, labels, cls) => rounds.map((r, i) => ({
+      label: labels[i] || r.name || '', sets: r.sets || [], cls: cls,
+    }));
+    return {
+      size,
+      upper: band(w, upperNames, 'win'),
+      lower: band(l, lowerNames, 'elim'),
+      decider: band(f, ['Decider'], 'dec'),
+    };
+  }
+
+  function winnerOf(set) {
+    if (!set) return '';
+    const a = set.a || {}, b = set.b || {};
+    if (a.winner && a.name && a.name !== 'TBD') return a.name;
+    if (b.winner && b.name && b.name !== 'TBD') return b.name;
+    return '';
+  }
+
+  function buildGslGroup(name, shape, advancesTo) {
+    const card = document.createElement('div'); card.className = 'bk-gg';
+    const head = document.createElement('div'); head.className = 'bk-gg-head';
+    // start.gg names pool groups with a bare identifier — "1", "2", "A". On its own in a header bar
+    // that reads as a stray digit, so give it the noun unless the name already carries one.
+    const raw = String(name || '').trim();
+    const label = !raw ? 'GROUP'
+      : /^[0-9A-Za-z]{1,3}$/.test(raw) ? ('GROUP ' + raw.toUpperCase())
+      : raw.toUpperCase();
+    head.appendChild(document.createTextNode(label));
+    if (advancesTo) {
+      const s = document.createElement('span'); s.className = 'bk-gg-sub';
+      s.textContent = 'TOP 2 → ' + advancesTo.toUpperCase(); head.appendChild(s);
+    }
+    card.appendChild(head);
+
+    const body = document.createElement('div'); body.className = 'bk-gg-body';
+    // Lay the group out as a REAL BRACKET, not flex columns. The sets carry start.gg `prereq`
+    // links (Winners SF[0] <- QF[0]+QF[1]), so the existing tree layout can put every match at the
+    // row its feeders sit between and draw the connecting elbows — which is the whole reason a
+    // bracket reads as a bracket. Hand-stacked columns left the short rounds floating with gaps
+    // above and below that pointed at nothing, and looked like content was missing.
+    const bands = shape.upper.concat(shape.lower, shape.decider).filter((c) => c.sets.length);
+    const section = buildSection('', bands.map((c) => ({ name: c.label, sets: c.sets })), null, 'gsl');
+    // Tint each round label by the band it belongs to (upper / lower / decider), which buildSection
+    // has no concept of — it only knows a flat list of rounds.
+    const colEls = section.querySelectorAll('.bk-round');
+    bands.forEach((c, i) => { if (colEls[i] && c.cls) colEls[i].classList.add('bk-band-' + c.cls); });
+    body.appendChild(section);
+
+    // Advancing: 1st = winner of the last UPPER round, 2nd = winner of the decider (or of the
+    // last lower round when the group has no separate decider). Both stay blank until that match
+    // is actually decided — an advancing slot must never guess.
+    const lastOf = (band) => { const r = band[band.length - 1]; return r && r.sets.length === 1 ? r.sets[0] : null; };
+    const first = winnerOf(lastOf(shape.upper));
+    const second = winnerOf(lastOf(shape.decider) || lastOf(shape.lower));
+    const out = document.createElement('div'); out.className = 'bk-gg-out';
+    const adv = document.createElement('div'); adv.className = 'bk-gg-adv'; adv.textContent = 'Advancing';
+    out.appendChild(adv);
+    [['1st', first], ['2nd', second]].forEach(([pos, team]) => {
+      const row = document.createElement('div'); row.className = 'bk-gg-slot' + (team ? ' filled' : '');
+      const p = document.createElement('span'); p.className = 'bk-gg-pos'; p.textContent = pos;
+      const t = document.createElement('span'); t.className = 'bk-gg-team';
+      t.textContent = team || 'TBD';
+      row.appendChild(p); row.appendChild(t); out.appendChild(row);
+    });
+    // Everyone already knocked out, most-recent exit first (they placed highest of the eliminated).
+    // Without this the rail was two TBD chips floating in a full-height column while eight teams'
+    // worth of decided results had nowhere to show.
+    const gone = [];
+    const seenOut = {};
+    shape.lower.slice().reverse().forEach((rd) => {
+      (rd.sets || []).forEach((set) => {
+        const a = set.a || {}, b = set.b || {};
+        const loser = a.winner ? b : (b.winner ? a : null);
+        if (!loser || !loser.name || loser.name === 'TBD') return;
+        const k = bkNorm(loser.name);
+        if (seenOut[k]) return;
+        seenOut[k] = 1;
+        gone.push(loser.name);
+      });
+    });
+    if (gone.length) {
+      const h = document.createElement('div'); h.className = 'bk-gg-adv out'; h.textContent = 'Eliminated';
+      out.appendChild(h);
+      gone.forEach((nm) => {
+        const row = document.createElement('div'); row.className = 'bk-gg-slot gone';
+        const t = document.createElement('span'); t.className = 'bk-gg-team'; t.textContent = nm;
+        row.appendChild(t); out.appendChild(row);
+      });
+    }
+    body.appendChild(out);
+    card.appendChild(body);
+    // Hero type is sized for a 3-column 4-team group. An 8-team group is 4-5 columns in the same
+    // width, so it needs its own smaller step or every org name ellipsises ("The Immig...").
+    if (body.querySelectorAll('.bk-round').length >= 4) card.classList.add('wide');
+    return card;
+  }
+
+  // Every GSL-shaped pool of the phase, tiled. Falls back to the single active bracket when the
+  // phase isn't split into pools (one group on air is a perfectly normal graphic).
+  function buildGslStage(groups, advancesTo) {
+    const wrap = document.createElement('div');
+    const n = groups.length;
+    wrap.className = 'bk-gsl cols-' + (n <= 1 ? 1 : n === 2 ? 2 : n <= 6 ? (n === 3 ? 3 : 2) : 4)
+      + (n > 1 ? ' tiled' : '');
+    groups.forEach((g) => wrap.appendChild(buildGslGroup(g.name, g.shape, g.advancesTo || advancesTo)));
+    return wrap;
+  }
+
+  // ── Round-robin group board ────────────────────────────────────────────────
+  // Standings + recent form on the left; head-to-head grid and the next fixtures on the
+  // right. Form and goal difference are computed from the schedule so a manually-built
+  // group (which carries no per-team stats) reads identically to an imported one.
+  function buildGroupBoard(standings, schedule, matrix, showRecord, advanceCount) {
+    const rounds = withInferredWinners(schedule);
+    const form = new Map(), diff = new Map(), fixtures = [];
+    const named = (sl) => sl && sl.name && sl.name !== 'TBD';
+    const bump = (m, k, fn) => { const cur = m.get(k); fn(cur); };
+    rounds.forEach((r) => {
+      (r.sets || []).forEach((set) => {
+        const a = set.a || {}, b = set.b || {};
+        if (!named(a) || !named(b)) return;
+        const ka = bkNorm(a.name), kb = bkNorm(b.name);
+        [ka, kb].forEach((k) => { if (!form.has(k)) form.set(k, []); if (!diff.has(k)) diff.set(k, { f: 0, ag: 0 }); });
+        if (!a.winner && !b.winner) { fixtures.push({ round: r.name, a: a.name, b: b.name, live: !!set._live }); return; }
+        const as = Number(a.score) || 0, bs = Number(b.score) || 0;
+        bump(diff, ka, (d) => { d.f += as; d.ag += bs; });
+        bump(diff, kb, (d) => { d.f += bs; d.ag += as; });
+        form.get(ka).push(a.winner ? 'w' : 'l');
+        form.get(kb).push(b.winner ? 'w' : 'l');
+      });
+    });
+    // "Round 3 of 5" = the first round still holding an undecided set (all done → the last one).
+    const total = rounds.length;
+    let current = rounds.findIndex((r) => (r.sets || []).some((set) => {
+      const a = set.a || {}, b = set.b || {};
+      return named(a) && named(b) && !a.winner && !b.winner;
+    }));
+    if (current < 0) current = total - 1;
+
+    const wrap = document.createElement('div'); wrap.className = 'bk-group';
+    const main = document.createElement('div'); main.className = 'bk-gp-main';
+    const head = document.createElement('div'); head.className = 'bk-gp-head';
+    const ht = document.createElement('span'); ht.textContent = 'Standings'; head.appendChild(ht);
+    if (total) {
+      const hr = document.createElement('span'); hr.className = 'bk-gp-round';
+      hr.textContent = 'Round ' + (current + 1) + ' of ' + total;
+      head.appendChild(hr);
+    }
+    main.appendChild(head);
+
+    const rowCls = showRecord === false ? 'bk-gp-row norecord' : 'bk-gp-row';
+    const hrow = document.createElement('div'); hrow.className = rowCls + ' head';
+    const cols = showRecord === false ? ['#', 'Team', 'Diff', 'Form'] : ['#', 'Team', 'W', 'L', 'Diff', 'Form'];
+    cols.forEach((c, i) => {
+      const cell = document.createElement('div');
+      if (i === 1) cell.className = 'bk-gp-team';
+      cell.textContent = c;
+      hrow.appendChild(cell);
+    });
+    main.appendChild(hrow);
+
+    standings.forEach((st, i) => {
+      const k = bkNorm(st.name);
+      const row = document.createElement('div');
+      const isCut = advanceCount > 0 && i === advanceCount - 1 && standings.length > advanceCount;
+      row.className = rowCls + (advanceCount > 0 && i < advanceCount ? ' qual' : '') + (isCut ? ' cut' : '');
+
+      const rank = document.createElement('div'); rank.className = 'bk-gp-rank';
+      rank.textContent = st.placement != null ? st.placement : (i + 1);
+      row.appendChild(rank);
+
+      const team = document.createElement('div'); team.className = 'bk-gp-team';
+      const color = colorByName[(st.name || '').toLowerCase()];
+      if (color) team.style.setProperty('--team-c', color);
+      const logo = logoFor(st.name);
+      if (logo) {
+        const img = document.createElement('img'); img.className = 'bk-gp-logo' + (isDark(logo) ? ' logo-on-dark' : '');
+        img.src = logo; img.onerror = function () { this.style.display = 'none'; };
+        team.appendChild(img);
+      }
+      const nm = document.createElement('div'); nm.className = 'bk-gp-name bk-name'; nm.textContent = st.name || 'TBD';
+      team.appendChild(nm);
+      row.appendChild(team);
+
+      if (showRecord !== false) {
+        const w = document.createElement('div'); w.className = 'bk-gp-num w'; w.textContent = st.wins || 0; row.appendChild(w);
+        const l = document.createElement('div'); l.className = 'bk-gp-num l'; l.textContent = st.losses || 0; row.appendChild(l);
+      }
+      // Prefer the imported game-win totals; fall back to what the schedule's scores add up to.
+      const d = diff.get(k) || { f: 0, ag: 0 };
+      const dv = (st.gameWins != null && st.gameLosses != null) ? (st.gameWins - st.gameLosses) : (d.f - d.ag);
+      const dEl = document.createElement('div');
+      dEl.className = 'bk-gp-num diff ' + (dv > 0 ? 'pos' : dv < 0 ? 'neg' : '');
+      dEl.textContent = (dv > 0 ? '+' : '') + dv;
+      row.appendChild(dEl);
+
+      const fEl = document.createElement('div'); fEl.className = 'bk-gp-form';
+      const f = (form.get(k) || []).slice(-5);
+      // Always five slots so the column reads as a consistent form guide, not a ragged edge.
+      for (let n = 0; n < 5; n++) {
+        const res = f[f.length - 5 + n];
+        const dot = document.createElement('span');
+        dot.className = 'bk-gp-dot ' + (res || 'none');
+        dot.textContent = res ? res.toUpperCase() : '';
+        fEl.appendChild(dot);
+      }
+      row.appendChild(fEl);
+      main.appendChild(row);
+    });
+    wrap.appendChild(main);
+
+    const side = document.createElement('div'); side.className = 'bk-gp-side';
+    const card = (title, cls) => {
+      const c = document.createElement('div'); c.className = 'bk-gp-card' + (cls ? ' ' + cls : '');
+      const h = document.createElement('div'); h.className = 'bk-gp-card-head';
+      const t = document.createElement('span'); t.textContent = title; h.appendChild(t);
+      c.appendChild(h);
+      const body = document.createElement('div'); body.className = 'bk-gp-card-body';
+      c.appendChild(body);
+      return { card: c, body };
+    };
+    // Past ~10 teams the sidebar grid is unreadable at any size — the standalone Head-to-head
+    // view exists for those groups, so drop the card rather than ship an illegible one.
+    if (matrix && matrix.teams && matrix.teams.length && matrix.teams.length <= 10) {
+      const h2h = card('Head to head', 'bk-gp-h2h');
+      h2h.body.appendChild(buildMatrix(matrix, true));
+      side.appendChild(h2h.card);
+    }
+    if (fixtures.length) {
+      const nx = card('Up next');
+      fixtures.slice(0, 6).forEach((fx) => {
+        const row = document.createElement('div'); row.className = 'bk-gp-fix';
+        const rd = document.createElement('div'); rd.className = 'bk-gp-fix-rd'; rd.textContent = fx.round || ''; row.appendChild(rd);
+        const tm = document.createElement('div'); tm.className = 'bk-gp-fix-teams';
+        tm.appendChild(document.createTextNode(fx.a));
+        const vs = document.createElement('span'); vs.className = 'bk-gp-fix-vs'; vs.textContent = 'vs'; tm.appendChild(vs);
+        tm.appendChild(document.createTextNode(fx.b));
+        row.appendChild(tm);
+        // The pair currently on the scoreboard is the live one — same signal buildMatch uses.
+        const pair = [String(fx.a).trim().toUpperCase(), String(fx.b).trim().toUpperCase()].sort().join('|');
+        if (_livePair && pair === _livePair) {
+          row.classList.add('live');
+          const lv = document.createElement('span'); lv.className = 'bk-gp-fix-live'; lv.textContent = 'LIVE'; row.appendChild(lv);
+        }
+        nx.body.appendChild(row);
+      });
+      side.appendChild(nx.card);
+    }
+    if (side.childElementCount) wrap.appendChild(side);
+    return wrap;
+  }
+
   // Round-robin / Swiss round-by-round pairings — reuses buildColumn (same {name,sets} shape
   // as the elimination rounds), just laid out as one flat row of columns with no connectors.
   function buildSchedule(schedule) {
@@ -1053,8 +2056,8 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
   // WEEKLY ROCKET RUSH SEASON 2 - WEEK 5") isn't clipped with an ellipsis.
   function fitBktTitle() {
     var t = el('bk-title'); if (!t) return;
-    t.style.fontSize = '';   // reset to the CSS default (34px)
-    var s = 34, guard = 0;
+    t.style.fontSize = '';   // reset to the CSS default (44px)
+    var s = 44, guard = 0;
     while (t.scrollWidth > t.clientWidth + 1 && s > 17 && guard++ < 40) { s -= 1; t.style.fontSize = s + 'px'; }
   }
 
@@ -1128,6 +2131,13 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
   // ?show=1 — always render the live bracket (ignore the on-air visible flag, no demo fallback).
   // Used by the control-panel "Live bracket preview" so producers see the real loaded bracket off-air.
   const FORCE_SHOW = new URLSearchParams(location.search).get('show') === '1';
+  // Phase chips are producer navigation. They belong in the in-app preview / full board
+  // (?show=1, ?preview=1) and on an explicit ?chips=1 source — never on a plain live one.
+  const SHOW_CHIPS = (function () {
+    const q = new URLSearchParams(location.search).get('chips');
+    if (q != null) return !/^(0|off|false|no)$/i.test(q);
+    return FORCE_SHOW || !!SceneBase.preview;
+  })();
 
   // View mode is driven by control-panel state (state.bracket.view / .rounds) so one OBS source
   // updates live as the producer clicks Full / Upper / Lower / Finals stretch. A URL param
@@ -1136,10 +2146,15 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
   const URL_PART = _BQ.get('part');       // null unless overridden per source
   const URL_ROUNDS = _BQ.get('rounds');   // null unless overridden per source
   const URL_LOGOS = _BQ.get('logos');     // 'logos=0' hides team logos on this source only
+  const URL_WM    = _BQ.get('watermark'); // 'watermark=0' drops the crest behind the name, this source only
+  const URL_ADV   = _BQ.get('advance');   // swiss: wins needed to qualify (overrides the panel)
+  const URL_ELIM  = _BQ.get('eliminate'); // swiss: losses that eliminate
+  const URL_COLORS = _BQ.get('colors');   // swiss: '0' = one neutral colour, no tier palette
   function render(data) {
     const b = data.bracket || {};
     const stage = el('bk-stage'), scaleEl = el('bk-scale'), emptyEl = el('bk-empty');
     stage.classList.add('show');
+    stage.classList.toggle('show-chips', SHOW_CHIPS);
 
     let winners = bkOrderBand(b.winners), losers = bkOrderBand(b.losers), finals = bkOrderBand(b.finals);
     const schedule = b.schedule || [];
@@ -1158,6 +2173,10 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
     //    source with ?logos=0 / ?logos=1 (same pattern as ?part / ?rounds).
     const hideLogos = URL_LOGOS != null ? /^(0|off|false|no)$/i.test(URL_LOGOS) : !!b.hideLogos;
     el('bk-scale').classList.toggle('bk-nologo', hideLogos);
+    // 3b) Crest watermark behind each team name. On by default (it is the look producers asked
+    //     for); overridable per source with ?watermark=0, and implied off when logos are hidden.
+    const noWatermark = URL_WM != null ? /^(0|off|false|no)$/i.test(URL_WM) : (b.logoWatermark === false);
+    el('bk-scale').classList.toggle('bk-nowm', noWatermark);
 
     // Effective view: URL override > state-driven view — but NEVER a view this bracket has no
     // data for (a stale saved "matrix" on an elim bracket used to blank the whole overlay).
@@ -1177,6 +2196,11 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
     // only have to configure one standings source instead of two disconnected ones.
     const stState = data.standings || {};
     const standings = (stState.rows && stState.rows.length > 0) ? stState.rows : (b.standings || []);
+    // Swiss qualify/eliminate thresholds (also the group board's advance line). 0 = derive from
+    // the round count. Per-source override with ?advance=3&eliminate=3 like the other filters.
+    const _swInt = (v) => { const n = parseInt(v, 10); return Number.isFinite(n) && n > 0 && n <= 12 ? n : 0; };
+    const swAdvance = URL_ADV != null ? _swInt(URL_ADV) : _swInt(b.swissAdvance);
+    const swEliminate = URL_ELIM != null ? _swInt(URL_ELIM) : _swInt(b.swissEliminate);
     const phases = b.phases || [];
     const pools = b.pools || [];
     const isElim = winners.length || losers.length || finals.length;
@@ -1193,8 +2217,12 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
       ((data.teams && data.teams.orange && data.teams.orange.name) || '').trim().toUpperCase()
     ].filter(Boolean).sort().join('|');
     const sig = JSON.stringify({ t: b.title, sub: b.subtitle, sr: b.showRecord, ty: b.type, w: winners, l: losers, f: finals, sc: schedule, s: standings, mx: matrix,
-      ph: phases.map((p) => p.id + p.name), ap: b.activePhaseId, pl: pools.map((p) => p.id + p.name), apl: b.activePoolId,
-      lg: logoByName, vw: view, rn: ROUNDS_N, ft: focusTeam, lp: _livePair, nl: hideLogos,
+      // Pools now carry their own boards (GSL groups), so the signature has to follow their
+      // CONTENT — keyed on id+name only, a score landing in another group never re-rendered.
+      ph: phases.map((p) => p.id + p.name), ap: b.activePhaseId, apl: b.activePoolId,
+      pl: pools.map((p) => [p.id, p.name, JSON.stringify(p.winners || ''), JSON.stringify(p.losers || ''), JSON.stringify(p.finals || '')].join('~')),
+      lg: logoByName, vw: view, rn: ROUNDS_N, ft: focusTeam, lp: _livePair, nl: hideLogos, wm: noWatermark,
+      sa: swAdvance, se: swEliminate, av: b.advancesTo, sc: b.swissColors !== false,
       bl: ((data.brand && data.brand.logo) || '').slice(0, 48) });
     if (sig === _sig) return;
     _sig = sig;
@@ -1220,7 +2248,14 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
       if (bl) { brandLogo.src = bl; brandLogo.style.display = ''; }
       else brandLogo.style.display = 'none';
     }
-    const fmt = el('bk-format'); const ft = fmtType(b.type);
+    // "CUSTOM SCHEDULE" is start.gg's internal name for a hand-scheduled phase, and it is what
+    // real swiss and hybrid-elimination stages come back as. Printing it on air tells a viewer
+    // nothing, so say what the phase actually IS, decided the same way the renderer decides.
+    const fmt = el('bk-format');
+    let ft = fmtType(b.type);
+    if (String(b.type || '').toUpperCase() === 'CUSTOM_SCHEDULE') {
+      ft = looksSwiss(schedule, b.type) ? 'Swiss' : (schedule.length ? 'Elimination' : '');
+    }
     fmt.textContent = ft; fmt.style.display = (ft && hasData) ? '' : 'none';
     emptyEl.classList.toggle('hidden', !!hasData);
 
@@ -1231,9 +2266,14 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
     });
 
     scaleEl.innerHTML = '';
+    scaleEl.classList.remove('bk-fit-content');   // elim branch re-adds it for fragments
+    scaleEl.classList.remove('bk-duo');
     const pillsEl = el('bk-section-pills'); if (pillsEl) pillsEl.innerHTML = '';
     // Focused team + elimination data → dedicated tournament-run view instead of the bracket.
     let runMode = false;
+    // Set by the elim branch: true only for the complete mirrored board. Read after layout by
+    // fit() (forced initials) — declared out here so both reads see the same decision.
+    let _fullBoard = false;
     if (focusTeam && isElim) {
       const run = renderTeamRun(b, bkNorm(focusTeam), data);
       if (run) {
@@ -1246,40 +2286,130 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
     // Run mode re-composes the stage: header (brand + event title) moves to the top right and
     // the players bar sits bottom-centre (see .bk-stage.run-mode CSS).
     stage.classList.toggle('run-mode', runMode);
+    stage.classList.remove('duo');   // elim branch re-adds it for the side-by-side fragment layout
+    stage.classList.remove('gsl');   // GSL branch re-adds it (reserves the title lane)
+    stage.classList.remove('poolplay');
+    // GSL: every pool of this phase that is GSL-shaped, or the single bracket if it is. Checked
+    // before the generic elim path because a GSL group IS a small double elim — left to that path
+    // it drew as an anonymous 5-match bracket with "Losers Round 1" where "Elimination Match"
+    // belongs. ?part=bracket opts back out to the raw bracket for a producer who wants it.
+    let gslGroups = [];
+    if (!runMode && view !== 'bracket') {
+      const poolGroups = pools
+        .map((p) => ({ id: p.id, name: p.name, advancesTo: p.advancesTo, shape: gslShape(p) }))
+        .filter((g) => g.shape);
+      // An 8-team group is 4-5 round columns wide. Tiling two of those across 1816px leaves each
+      // column ~150px and the names collapse — and the broadcast reference for this size is a
+      // single group filling the screen anyway. So tile only the compact 4-team groups; for the
+      // 8-team shape show the pool that is on air.
+      if (poolGroups.length > 1) {
+        gslGroups = poolGroups.some((g) => g.shape.size > 4)
+          ? [poolGroups.find((g) => g.id === b.activePoolId) || poolGroups[0]]
+          : poolGroups;
+      }
+      else if (isElim) {
+        // A lone 4-team double elim is structurally identical to a GSL group, so shape alone
+        // can't tell them apart — and a 4-team PLAYOFF relabelled "Opening Match / Decider"
+        // would be wrong. Require a hint that this really is group play: it came in as a pool,
+        // or the phase/pool/subtitle actually says group or GSL.
+        const _poolName = (pools.find((p) => p.id === b.activePoolId) || {}).name || '';
+        const _phaseName = (phases.find((p) => p.id === b.activePhaseId) || {}).name || '';
+        const looksGroup = pools.length > 0
+          || /\b(gsl|group|pool)\b/i.test(_poolName + ' ' + _phaseName + ' ' + (b.subtitle || ''));
+        const one = looksGroup ? gslShape({ winners: winners, losers: losers, finals: finals }) : null;
+        if (one) gslGroups = [{ name: _poolName || _phaseName || b.subtitle || 'Group', shape: one }];
+      }
+    }
+    // Pairings: an explicit producer view (never auto-selected — it deliberately hides scores, so
+    // it must never take over a board that is showing live results). Works off pools when the
+    // phase has them, otherwise off whatever single band this phase carries.
+    let pairGroups = [];
+    if (!runMode && view === 'pairings') {
+      const fromPools = pools.map((p) => {
+        const r = pairingRound([p.schedule, p.winners, p.losers, p.finals]);
+        return r ? { name: p.name, roundName: r.name, sets: r.sets } : null;
+      }).filter(Boolean);
+      if (fromPools.length) pairGroups = fromPools;
+      else {
+        const r = pairingRound([schedule, winners, losers, finals]);
+        if (r) pairGroups = [{ name: (pools.find((p) => p.id === b.activePoolId) || {}).name || b.subtitle || 'Fixtures', roundName: r.name, sets: r.sets }];
+      }
+    }
     if (runMode) {
       // run view built above — none of the section/schedule/standings builders apply
+    } else if (pairGroups.length) {
+      scaleEl.classList.add('bk-fit-content');
+      stage.classList.add('poolplay');
+      scaleEl.appendChild(buildPairings(pairGroups));
+      emptyEl.classList.add('hidden');
+    } else if (gslGroups.length) {
+      stage.classList.add('gsl');
+      if (gslGroups.length === 1) scaleEl.classList.add('bk-fit-content');
+      scaleEl.appendChild(buildGslStage(gslGroups, b.advancesTo));
+      emptyEl.classList.add('hidden');
     } else if (isElim) {
       const isDouble = losers.length > 0;
-      // Butterfly layout: only when showing both brackets with no round-trim applied.
-      const butterfly = SHOW_W && SHOW_L && isDouble && ROUNDS_N === 0;
+      // Butterfly layout (WB left → GF centre ← LB right) only reads as a bracket when there IS a
+      // whole bracket to mirror. A multi-stage day hands us a FRAGMENT — e.g. Day 2 of an RLCS-shape
+      // event is one winners round, two losers rounds and no Grand Final. Mirroring that gave each
+      // half flex:1 of the canvas, so a single-round winners column stretched to ~830px beside
+      // ~400px losers columns, and the reversed losers half printed its rounds backwards (6 then 5).
+      // Require a real spine: a Grand Final to sit in the centre and enough winners rounds to be
+      // worth mirroring. Anything less falls through to the plain left→right stacked layout.
+      const butterfly = SHOW_W && SHOW_L && isDouble && ROUNDS_N === 0
+        && finals.length > 0 && winners.length >= 3;
       // Full view (both brackets, no round-trim) is where team count is highest and start.gg
       // logos are sparsest — badge-abbreviated names read cleaner there than a mix of real
       // logos and empty placeholder boxes, regardless of how small the fitted scale ends up.
       // Partial views (upper/lower/finals-stretch only) have more room per team and keep the
       // normal scale-based logo/abbreviation behavior.
-      const fullView = SHOW_W && SHOW_L && ROUNDS_N === 0;
+      // ...and it is the same completeness test that decides badge-abbreviated names: a fragment has
+      // room for real logos and full names, so forcing abbreviations there just threw away detail.
+      const fullView = butterfly;
+      _fullBoard = butterfly;
       scaleEl.classList.toggle('butterfly', butterfly);
       scaleEl.classList.toggle('bk-abbrev', fullView);
+      // Fragments size to content so fit() can magnify them into the canvas; the full mirrored
+      // board already spans it and stays on the fixed 1816px grid.
+      scaleEl.classList.toggle('bk-fit-content', !butterfly);
       stage.classList.toggle('butterfly', butterfly);
       let rendered = false;
 
       if (butterfly) {
+        // The two halves get flex-grow in proportion to how many ROUNDS they hold, not a flat 50/50.
+        // A double elim is lopsided by construction — 4 winners rounds against 5 losers rounds — so
+        // an even split made every losers column ~135px against ~177px for winners, and the losers
+        // names ellipsised to "F.." while the winners' fitted. Proportional grow gives every column
+        // on the board the same width, which is also just what a bracket is supposed to look like.
+        const _wbN = winners.length, _lbN = losers.length;
         // WB left (winners only — finals go to center GF piece)
         if (winners.length) {
-          scaleEl.appendChild(buildSection('', winners, null, 'winners'));
+          const sec = buildSection('', winners, null, 'winners');
+          sec.style.flexGrow = String(_wbN || 1);
+          scaleEl.appendChild(sec);
           if (pillsEl) { const p = document.createElement('span'); p.className = 'bk-spill wb'; p.textContent = 'Winners Bracket'; pillsEl.appendChild(p); }
         }
         // GF center
         if (finals.length) scaleEl.appendChild(buildGF(finals));
         // LB right (reversed via CSS: losers[0] = LB R1 renders far-right, LB Finals near center)
         if (losers.length) {
-          scaleEl.appendChild(buildSection('', losers, null, 'losers'));
+          const sec = buildSection('', losers, null, 'losers');
+          sec.style.flexGrow = String(_lbN || 1);
+          scaleEl.appendChild(sec);
           if (pillsEl) { const p = document.createElement('span'); p.className = 'bk-spill lb'; p.textContent = 'Losers Bracket'; pillsEl.appendChild(p); }
         }
         rendered = !!(winners.length || finals.length || losers.length);
       } else {
         // Stacked layout (single-elim, or partial views: upper/lower/finals)
         scaleEl.classList.remove('butterfly');
+        let _colCount = 0;
+        if (SHOW_W) _colCount += Math.min(winners.length + finals.length, ROUNDS_N > 0 ? ROUNDS_N : Infinity);
+        if (SHOW_L && isDouble) _colCount += _lastN(losers).length;
+        // Both bands present and few enough columns to sit beside each other rather than stack.
+        const duo = SHOW_W && SHOW_L && isDouble && winners.length + finals.length > 0
+          && losers.length > 0 && _colCount <= 5;
+        scaleEl.classList.toggle('bk-duo', duo);
+        stage.classList.toggle('duo', duo);
         if (SHOW_W) {
           let winnerCols = winners.concat(finals);
           let wFinalsStart = winners.length;
@@ -1314,22 +2444,48 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
       // ONE section at a time — an elim-only view value ('both' etc.) left over from a linked
       // platform import used to stack schedule + standings together, which read as several
       // overlays rendered on top of each other. Explicit views still show exactly what they say.
+      // Every pool-play board (swiss chart, group board, schedule flow, ladder, matrix) is sized by
+      // its own content, not by the canvas — so let fit() magnify it to fill. Pinned to the fixed
+      // 1816px wrapper they all rendered at scale 1 and sat in the middle of an empty screen.
+      scaleEl.classList.add('bk-fit-content');
+      stage.classList.add('poolplay');
       let rrView = view;
-      if (!['schedule', 'standings', 'matrix', 'ladder'].includes(rrView)) {
-        // Default pool-play view = the records LADDER (teams bucketed by W-L) — reads
-        // standings, so swiss renders fully even when only round 1's sets exist yet.
-        rrView = standings.some((s) => (s.wins || 0) + (s.losses || 0) > 0) ? 'ladder'
-               : (schedule.length ? 'schedule' : (standings.length ? 'standings' : 'matrix'));
+      const isSwiss = looksSwiss(schedule, b.type);
+      if (!['schedule', 'standings', 'matrix', 'ladder', 'swiss', 'group'].includes(rrView)) {
+        // Format-aware default. A Swiss phase gets the swiss stage flow and a Round Robin gets
+        // the group board — the graphics built for those formats — falling back to the records
+        // ladder (standings-driven, so it still renders when start.gg has only created round 1's
+        // sets) and finally to whatever data does exist.
+        // The group board earns its place only for a genuine ROUND ROBIN — it is built around an
+        // all-play-all head-to-head grid. It used to be the catch-all for "not swiss", which is
+        // how a Hybrid Elimination phase (a 4-2-2-1 knockout flow that start.gg also reports as
+        // CUSTOM_SCHEDULE) ended up drawn as a standings table with no bracket anywhere on it.
+        // A schedule that isn't swiss and isn't round robin is a round-by-round FLOW: draw it.
+        const _rrType = String(b.type || '').toUpperCase();
+        rrView = (isSwiss && schedule.length) ? 'swiss'
+               : (_rrType === 'ROUND_ROBIN' && standings.length) ? 'group'
+               : schedule.length ? 'schedule'
+               : standings.some((s) => (s.wins || 0) + (s.losses || 0) > 0) ? 'ladder'
+               : (standings.length ? 'standings' : 'matrix');
       }
+      // An explicitly-picked view with no data behind it must degrade, never blank the overlay.
+      if (rrView === 'swiss' && !schedule.length) rrView = standings.length ? 'ladder' : 'matrix';
+      if (rrView === 'group' && !standings.length) rrView = schedule.length ? 'schedule' : 'matrix';
+      const wantSwiss = rrView === 'swiss' && schedule.length > 0;
+      const wantGroup = rrView === 'group' && standings.length > 0;
       const wantLadder = rrView === 'ladder' && standings.length > 0;
       const wantMatrix = !!matrix && rrView === 'matrix';
       const wantSchedule = schedule.length > 0 && rrView === 'schedule';
       const wantStandings = standings.length > 0 && rrView === 'standings';
+      // Tier palette on by default; producer toggle, overridable per source with ?colors=0.
+      const noColor = URL_COLORS != null ? /^(0|off|false|no)$/i.test(URL_COLORS) : (b.swissColors === false);
+      if (wantSwiss) scaleEl.appendChild(buildSwissStage(schedule, swAdvance, swEliminate, b.advancesTo, noColor));
+      if (wantGroup) scaleEl.appendChild(buildGroupBoard(standings, schedule, matrix, b.showRecord, swAdvance));
       if (wantLadder) scaleEl.appendChild(buildLadder(standings, b.advancesTo));
       if (wantMatrix) scaleEl.appendChild(buildMatrix(matrix));
       if (wantSchedule) scaleEl.appendChild(buildSchedule(schedule));
       if (wantStandings) scaleEl.appendChild(buildStandings(standings, b.showRecord));
-      emptyEl.classList.toggle('hidden', wantLadder || wantMatrix || wantSchedule || wantStandings);
+      emptyEl.classList.toggle('hidden', wantSwiss || wantGroup || wantLadder || wantMatrix || wantSchedule || wantStandings);
     }
 
     // Connectors are computed in the wrapper's UNSCALED coordinate space, then fit()
@@ -1341,7 +2497,11 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
       // painted meaningless progression lines all over pool play.
       applyRowGeometry(scaleEl);   // cards are in the document now → real row height
       scaleEl.querySelectorAll('.bk-section .bk-rounds').forEach(drawConnectors);
-      fit(!runMode && isElim && SHOW_W && SHOW_L && ROUNDS_N === 0);
+      // Force initials only for the FULL mirrored board (where team count is highest and start.gg
+      // logos are sparsest). This used to repeat the old full-view test inline, so a fragment kept
+      // getting badge-abbreviated names even after the layout above decided it had room for real
+      // ones — the two tests have to be the same test.
+      fit(!runMode && _fullBoard);
       // Run mode IS the focus presentation — no dimming or camera zoom on top of it.
       if (focusTeam && !runMode) {
         var fn = bkNorm(focusTeam);
@@ -1417,7 +2577,16 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
     render(d);
   }
 
-  SceneBase.connect((data) => { SceneBase.applySceneConfig('bracket', data); applyState(data); });
+  // Partner logos, bottom-centre — the placement every broadcast bracket uses. Sponsors only:
+  // the desk lineup belongs on a scoreboard scene, not over a bracket. Producers can still
+  // kill it per source with ?rail=0 / ?sponsors=0.
+  if (typeof CasterRail !== 'undefined') CasterRail.mount({ variant: 'chip', bottom: 22, casters: false });
+
+  SceneBase.connect((data) => {
+    SceneBase.applySceneConfig('bracket', data);
+    applyState(data);
+    if (typeof CasterRail !== 'undefined') CasterRail.render(data);
+  });
 })();
 </script>
 </body>

@@ -170,7 +170,9 @@
 
     function renderTeam(idx, t, side) {
       SceneBase.applyTeamLogo(el('teamlogo' + idx), t.customLogo, t.logo);
-      el('teamname' + idx).textContent = (t.name || (side === 'b' ? 'ORANGE' : 'BLUE')).toUpperCase();
+      // Head-to-head games (Smash singles, the FGC titles) print the COMPETITOR here, with their
+      // org on a second line — the team record on those is just the entrant. See SceneBase.
+      SceneBase.applyNamePlate(el('teamname' + idx), t, side === 'b' ? 'ORANGE' : 'BLUE');
       el('teamscore' + idx).textContent = t.series != null ? t.series : 0;
       document.documentElement.style.setProperty(side === 'b' ? '--team-b' : '--team-a', t.color || (side === 'b' ? '#e97139' : '#055fdb'));
     }
