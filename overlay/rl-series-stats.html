@@ -1,0 +1,552 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>NE Broadcast Suite — Series Stats</title>
+<!--
+  SERIES STATS board (browser source, 1920x1080) — Rocket League.
+
+  WHY THIS EXISTS: the post-game board in rl-hud.html reports the GAME that just finished, because
+  state.playerCache is wiped on every MatchCreated. This board reports the SERIES: every game so far
+  added together, per player and per team.
+
+  WHERE THE NUMBERS COME FROM: state.seriesStats.games[] holds a snapshot of each COMPLETED game's
+  final per-player line (banked server-side at MatchEnded). The game being played now is added on
+  top from the live tick. seriesStats.liveBanked is the guard against counting the same game twice:
+  it goes true when a game is banked and false again when the next game wipes the cache, and while
+  it is true this board shows banked games only.
+
+  LIVE: RL stat packets arrive as a PARTIAL state_update ({game, players, ...}) — a full_state only
+  goes out on producer-level changes. SceneBase.liveUpdates() opts this scene into that tick, or the
+  numbers would sit frozen for a whole game.
+
+  DESIGNS (seriesStats.design): table | cards | leaders | matrix. Add one by adding a renderer to
+  DESIGNS below, an <option> in the Match — Teams gear and a pill in the Graphics panel.
+
+  NO color-mix() ANYWHERE: the app runs Electron 18 (Chrome 100), where a var()-based color-mix is a
+  pending-substitution value that wins the cascade and then computes to transparent. Team tints are
+  done with a solid colour on a low-opacity layer instead, which works everywhere.
+-->
+<style>
+  @import url('/fonts.css');
+  :root{
+    --ink:#f4f7fd; --dim:#8e99b0;
+    --hair:rgba(255,255,255,.09);
+    --panel:#11141d; --panel-2:rgba(255,255,255,.04);
+    --gold:#ffcf51;
+  }
+  html,body{margin:0;width:1920px;height:1080px;overflow:hidden;background:transparent;
+    font-family:var(--main-font,'Rajdhani',system-ui,sans-serif);color:var(--ink);}
+  #wrap{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;
+    justify-content:center;gap:26px;opacity:0;transform:translateY(16px) scale(.99);
+    transition:opacity .4s cubic-bezier(.2,.7,.3,1),transform .4s cubic-bezier(.2,.7,.3,1);}
+  #wrap.show{opacity:1;transform:none;}
+
+  /* ── header ─────────────────────────────────────────────────────────── */
+  .head{display:flex;flex-direction:column;align-items:center;gap:7px;}
+  .event{font-size:18px;letter-spacing:.30em;text-transform:uppercase;color:var(--dim);font-weight:600;}
+  .event:empty{display:none;}
+  .title{font-size:52px;font-weight:800;letter-spacing:.20em;text-transform:uppercase;line-height:1;
+    background:linear-gradient(180deg,#ffffff 30%,#9fb0cc);-webkit-background-clip:text;
+    background-clip:text;-webkit-text-fill-color:transparent;padding:0 4px;}
+  .round{font-size:15px;letter-spacing:.24em;text-transform:uppercase;color:var(--accent,#8b5cf6);font-weight:700;}
+  .round:empty{display:none;}
+
+  .bo{font-size:12px;letter-spacing:.24em;text-transform:uppercase;color:var(--dim);font-weight:700;margin-top:2px;}
+  .bo:empty{display:none;}
+
+  /* ── panel shell, shared ────────────────────────────────────────────── */
+  .board{display:flex;gap:30px;align-items:flex-start;}
+  .teamsec{position:relative;width:772px;background:var(--panel);border:1px solid var(--hair);
+    border-radius:18px;overflow:hidden;box-shadow:0 30px 70px rgba(0,0,0,.6);}
+  /* team-colour wash behind the header — solid colour on a faded layer, no color-mix */
+  .teamhead{position:relative;display:flex;align-items:center;gap:16px;padding:17px 26px;
+    border-bottom:1px solid var(--hair);}
+  .teamhead::before{content:'';position:absolute;inset:0;background:var(--row-accent,#5a6478);opacity:.17;}
+  .teamhead::after{content:'';position:absolute;left:0;top:0;bottom:0;width:6px;background:var(--row-accent,#5a6478);}
+  .teamhead > *{position:relative;}
+  .teamhead img{width:46px;height:46px;object-fit:contain;filter:drop-shadow(0 3px 8px rgba(0,0,0,.5));}
+  .teamhead .tn{font-size:29px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;}
+  .teamhead .tw{font-size:36px;font-weight:800;line-height:1;font-variant-numeric:tabular-nums;}
+
+  /* ── TABLE ──────────────────────────────────────────────────────────── */
+  .grid{display:grid;grid-template-columns:var(--tbl-cols,1fr repeat(6,80px));align-items:center;}
+  .colhead{padding:9px 26px;font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--dim);
+    font-weight:700;border-bottom:1px solid var(--hair);background:var(--panel-2);}
+  .colhead .cell{text-align:center;}
+  .prow{position:relative;padding:13px 26px;}
+  .prow + .prow{border-top:1px solid rgba(255,255,255,.045);}
+  .prow.best::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--gold);}
+  .prow .pn{font-size:23px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .prow .cell{text-align:center;font-size:23px;font-weight:700;font-variant-numeric:tabular-nums;color:#dbe3f2;}
+  .prow .cell.score{color:#fff;font-weight:800;}
+  .prow.best .cell.score{color:var(--gold);}
+  .prow.best .pn::after{content:'MVP';margin-left:10px;font-size:10px;letter-spacing:.14em;
+    background:var(--gold);color:#191204;padding:3px 7px;border-radius:4px;vertical-align:middle;font-weight:800;}
+  .totrow{padding:13px 26px;background:var(--panel-2);border-top:1px solid var(--hair);}
+  .totrow .pn{font-size:13px;letter-spacing:.20em;text-transform:uppercase;color:var(--dim);font-weight:700;}
+  .totrow .cell{text-align:center;font-size:23px;font-weight:800;font-variant-numeric:tabular-nums;}
+
+  /* ── CARDS ──────────────────────────────────────────────────────────── */
+  .cards{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;padding:18px 20px 20px;}
+  .pcard{position:relative;background:var(--panel-2);border:1px solid var(--hair);border-radius:14px;
+    padding:14px 16px 12px;overflow:hidden;}
+  .pcard::before{content:'';position:absolute;left:0;right:0;top:0;height:3px;background:var(--row-accent,#5a6478);}
+  .pcard.best{border-color:rgba(255,207,81,.45);}
+  .pcard.best::before{background:var(--gold);}
+  .pcard .cn{font-size:21px;font-weight:800;letter-spacing:.03em;overflow:hidden;text-overflow:ellipsis;
+    white-space:nowrap;margin-bottom:6px;}
+  .pcard .cs{font-size:38px;font-weight:800;line-height:1;font-variant-numeric:tabular-nums;}
+  .pcard.best .cs{color:var(--gold);}
+  .pcard .cl{font-size:10px;letter-spacing:.18em;text-transform:uppercase;color:var(--dim);font-weight:700;margin-top:3px;}
+  .pcard .cgrid{display:grid;grid-template-columns:repeat(5,1fr);gap:4px;margin-top:13px;
+    border-top:1px solid var(--hair);padding-top:11px;}
+  .pcard .cgrid div{text-align:center;}
+  .pcard .cgrid .v{font-size:20px;font-weight:800;font-variant-numeric:tabular-nums;}
+  .pcard .cgrid .k{font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:var(--dim);font-weight:700;}
+
+  /* ── LEADERS ────────────────────────────────────────────────────────── */
+  .leaders{width:1220px;background:var(--panel);border:1px solid var(--hair);border-radius:18px;
+    box-shadow:0 30px 70px rgba(0,0,0,.6);padding:24px 30px 28px;
+    display:grid;grid-template-columns:repeat(3,1fr);gap:22px 30px;}
+  .lcat .lct{font-size:12px;letter-spacing:.22em;text-transform:uppercase;color:var(--dim);font-weight:700;
+    border-bottom:1px solid var(--hair);padding-bottom:8px;margin-bottom:10px;}
+  .lrow{position:relative;display:flex;align-items:center;gap:11px;padding:7px 9px;border-radius:7px;overflow:hidden;}
+  .lrow::before{content:'';position:absolute;inset:0;background:var(--row-accent,#5a6478);opacity:0;}
+  .lrow.top::before{opacity:.14;}
+  .lrow > *{position:relative;}
+  .lrow .lp{width:18px;font-size:13px;font-weight:800;color:var(--dim);text-align:center;}
+  .lrow .lsw{width:3px;align-self:stretch;border-radius:2px;background:var(--row-accent,#5a6478);}
+  .lrow .ln{flex:1;font-size:22px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .lrow .lv{font-size:24px;font-weight:800;font-variant-numeric:tabular-nums;}
+  .lrow.top .lv{color:var(--gold);}
+
+  /* ── MATRIX — every stat a row, players as columns, comparison down the middle ──
+     One grid template (--mx-cols, set inline from the real roster sizes) is shared by the name
+     header and every stat row, so the columns line up without a table. Works for 3v3, 2v2 or 1v1
+     because the player columns are 1fr each. */
+  .matrix{width:1740px;background:var(--panel);border:1px solid var(--hair);border-radius:20px;
+    box-shadow:0 34px 80px rgba(0,0,0,.62);overflow:hidden;}
+  .mx-grid{display:grid;grid-template-columns:var(--mx-cols);align-items:center;}
+
+  /* team identity band */
+  .mx-top{position:relative;display:flex;align-items:center;justify-content:space-between;
+    padding:18px 30px;border-bottom:1px solid var(--hair);}
+  .mx-tid{display:flex;align-items:center;gap:14px;min-width:0;}
+  .mx-tid.r{flex-direction:row-reverse;}
+  .mx-tid img{width:42px;height:42px;object-fit:contain;filter:drop-shadow(0 3px 8px rgba(0,0,0,.5));}
+  .mx-tid .n{font-size:27px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .mx-tid .w{font-size:34px;font-weight:800;line-height:1;font-variant-numeric:tabular-nums;}
+
+  /* player name header — a colour rule under each column carries the side */
+  .mx-names{padding:15px 30px 0;}
+  .mx-pn{text-align:center;padding:0 8px 11px;font-size:19px;font-weight:700;letter-spacing:.02em;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap;position:relative;color:#e6ecf8;}
+  .mx-pn::after{content:'';position:absolute;left:12px;right:12px;bottom:0;height:2px;
+    background:var(--col-accent,#5a6478);border-radius:2px;opacity:.85;}
+
+  /* stat rows */
+  .mx-row{padding:0 30px;}
+  .mx-row + .mx-row .mx-v,.mx-row + .mx-row .mx-c{border-top:1px solid rgba(255,255,255,.055);}
+  .mx-v{text-align:center;padding:15px 8px;font-size:27px;font-weight:700;
+    font-variant-numeric:tabular-nums;color:#aab5c9;}
+  .mx-v.on{color:#fff;font-weight:800;}      /* best on this side */
+  .mx-v.top{color:var(--gold);font-weight:800;}   /* best in the row outright */
+  .mx-v.zero{color:#4d5668;}
+
+  /* centre comparison */
+  .mx-c{padding:11px 22px 12px;}
+  .mx-lbl{text-align:center;font-size:10px;letter-spacing:.26em;text-transform:uppercase;
+    color:var(--accent-soft,var(--dim));font-weight:700;margin-bottom:7px;}
+  .mx-bar{display:flex;height:7px;border-radius:4px;overflow:hidden;background:rgba(255,255,255,.06);}
+  .mx-bar span{display:block;height:100%;transition:width .45s cubic-bezier(.2,.7,.3,1);}
+  .mx-tot{display:flex;justify-content:space-between;margin-top:6px;font-size:14px;font-weight:800;
+    font-variant-numeric:tabular-nums;}
+
+  /* result band — the post-game scoreboard's lockup: logos at the ends, names shrinking toward the
+     centre, big tabular scores, and gold on the side that has actually clinched the series. */
+  .mx-res{display:flex;align-items:center;justify-content:center;gap:34px;padding:22px 34px 20px;
+    border-bottom:1px solid var(--hair);}
+  .mx-side{display:flex;align-items:center;gap:20px;flex:1;min-width:0;}
+  .mx-side.r{flex-direction:row-reverse;}
+  .mx-side img{width:74px;height:74px;flex:none;object-fit:contain;filter:drop-shadow(0 5px 16px rgba(0,0,0,.65));}
+  .mx-side .n{font-size:36px;font-weight:800;text-transform:uppercase;letter-spacing:.03em;
+    min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .mx-side.l .n{text-align:right;}
+  .mx-side.l{justify-content:flex-end;}
+  /* logos are inboard now - keep them tight to the scoreline and let the name take the slack */
+  .mx-side .n{flex:0 1 auto;}
+  .mx-side img{order:0;}
+  .mx-side.r{justify-content:flex-end;}
+  .mx-side.lose{opacity:.5;}
+  .mx-side.win .n{color:var(--gold);}
+  .mx-nums{display:flex;align-items:center;gap:26px;flex:none;}
+  .mx-num{font-size:76px;font-weight:900;line-height:.9;font-variant-numeric:tabular-nums;color:#eef2fb;}
+  .mx-num.win{color:var(--gold);text-shadow:0 0 34px rgba(255,207,81,.38);}
+  .mx-dash{font-size:12px;letter-spacing:.3em;color:var(--dim);}
+
+  /* MVP crown sits in a fixed gutter so the name never shifts when it appears */
+  .mx-pn.mvp{color:var(--gold);}
+  .mx-crown{display:inline-block;width:17px;height:17px;color:var(--gold);vertical-align:-2px;margin-right:6px;}
+  .mx-crown svg{width:100%;height:100%;display:block;}
+
+  /* series MVP ribbon under the grid */
+  .mx-mvp{display:flex;align-items:center;justify-content:center;gap:16px;padding:14px 30px;
+    border-top:1px solid var(--hair);background:rgba(255,207,81,.05);}
+  .mx-mvp .lbl{font-size:11px;letter-spacing:.28em;text-transform:uppercase;color:var(--gold);font-weight:800;}
+  .mx-mvp .who{font-size:22px;font-weight:800;letter-spacing:.03em;}
+  .mx-mvp .line{font-size:15px;color:var(--dim);font-weight:600;}
+  .mx-mvp .line b{color:#dbe3f2;font-weight:800;font-variant-numeric:tabular-nums;}
+
+  /* ── per-game strip (all designs) ───────────────────────────────────── */
+  .gstrip{display:flex;gap:11px;align-items:center;}
+  .gpip{background:var(--panel);border:1px solid var(--hair);border-radius:10px;padding:8px 16px;
+    display:flex;flex-direction:column;align-items:center;gap:2px;min-width:80px;}
+  .gpip .gl{font-size:9px;letter-spacing:.20em;text-transform:uppercase;color:var(--dim);font-weight:700;}
+  .gpip .gv{font-size:20px;font-weight:800;font-variant-numeric:tabular-nums;}
+  .gstrip:empty{display:none;}
+
+  /* Nothing banked and nothing live — say so rather than airing an empty frame. */
+  .nodata{background:var(--panel);border:1px solid var(--hair);border-radius:16px;padding:30px 46px;
+    font-size:19px;letter-spacing:.16em;text-transform:uppercase;color:var(--dim);font-weight:700;}
+</style>
+</head>
+<body>
+  <div id="wrap">
+    <div class="head">
+      <div class="event" id="event"></div>
+      <div class="title">Series Stats</div>
+      <div class="round" id="round"></div>
+      <div class="bo" id="bo"></div>
+    </div>
+    <div id="body"></div>
+    <div class="gstrip" id="gstrip"></div>
+  </div>
+
+  <script src="scene-base.js"></script>
+  <script>
+  (function () {
+    'use strict';
+    const $ = (id) => document.getElementById(id);
+    const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
+    const fmt = (v) => num(v).toLocaleString();
+    // Same crown the post-game scoreboard uses (rl-hud.html), so MVP reads identically on both.
+    const CROWN = '<span class="mx-crown"><svg viewBox="0 0 24 24" fill="currentColor">'
+      + '<path d="M3 8l4 4 5-7 5 7 4-4-1.5 11h-15z"/></svg></span>';
+
+    // Columns, in board order. `key` matches RL_CUMULATIVE_STATS on the server; `full` is the
+    // spelled-out heading the LEADERS and SPLIT designs use.
+    const BASE_COLS = [
+      { key: 'score',   label: 'SCORE', full: 'Score' },
+      { key: 'goals',   label: 'G',     full: 'Goals' },
+      { key: 'assists', label: 'A',     full: 'Assists' },
+      { key: 'saves',   label: 'SV',    full: 'Saves' },
+      { key: 'shots',   label: 'SH',    full: 'Shots' },
+      { key: 'demos',   label: 'DEM',   full: 'Demos' }
+    ];
+    const TOUCH_COL = { key: 'touches', label: 'TCH', full: 'Ball touches' };
+    // Touches is a newer field: older plugin builds never send it, and the server omits the key
+    // rather than banking a zero. Show the column only when something has actually reported it, so
+    // a producer on an older build never sees a dead column of noughts.
+    let COLS = BASE_COLS;
+    function pickCols(data) {
+      const has = (p) => p && p.touches != null;
+      const games = Array.isArray((data.seriesStats || {}).games) ? data.seriesStats.games : [];
+      const live = Array.isArray(data.players) ? data.players : Object.values(data.playerCache || {});
+      const any = live.some(has) || games.some((g) => (g.players || []).some(has));
+      COLS = any ? BASE_COLS.concat(TOUCH_COL) : BASE_COLS;
+    }
+
+    // This board honours seriesStats.visible even as a standalone source, because it is a graphic
+    // the producer pushes and clears — not always-on furniture. See SceneBase.trustVisibility.
+    SceneBase.trustVisibility('seriesStats');
+    // The live game has to climb as it is played. RL stat packets arrive as a partial state_update
+    // carrying `players` (full_state only goes out on producer-level changes), so without this the
+    // board would freeze on whatever the last full broadcast happened to contain.
+    SceneBase.liveUpdates('players', 'game');
+
+    /* Series totals = every banked game + (unless already banked) the game being played now.
+       Players are keyed by name because that is the only identifier the banked snapshot and the
+       live tick are both guaranteed to carry. */
+    function totals(data) {
+      const ss = data.seriesStats || {};
+      const games = Array.isArray(ss.games) ? ss.games : [];
+      const rows = new Map();
+      const add = (p, banked) => {
+        const name = String((p && p.name) || '').trim();
+        if (!name) return;
+        const key = name.toLowerCase();
+        let r = rows.get(key);
+        if (!r) { r = { name: name, team: 0, games: 0 }; COLS.forEach((c) => { r[c.key] = 0; }); rows.set(key, r); }
+        if (p.team != null) r.team = num(p.team) === 1 ? 1 : 0;
+        COLS.forEach((c) => { r[c.key] += num(p[c.key]); });
+        if (banked) r.games++;
+      };
+      games.forEach((g) => (Array.isArray(g.players) ? g.players : []).forEach((p) => add(p, true)));
+      let liveCounted = false;
+      if (!ss.liveBanked) {
+        // `players` is the live tick and is what arrives on a state_update; playerCache is the
+        // server's merged copy and only rides along on a full_state. Prefer the live one, fall back
+        // to the cache before the first tick lands. (The cache additionally survives a player
+        // rejoining mid-game — that correction reaches the board on the next full broadcast.)
+        const tick = Array.isArray(data.players) ? data.players : [];
+        const live = tick.length ? tick : Object.values(data.playerCache || {});
+        // Only treat the live game as a game once it has actually produced something, so a board
+        // pushed during a countdown doesn't show a phantom extra game against every player.
+        liveCounted = live.some((p) => COLS.some((c) => num(p && p[c.key]) > 0));
+        live.forEach((p) => add(p, false));
+      }
+      const all = [...rows.values()];
+      const byScore = (a, b) => num(b.score) - num(a.score);
+      return {
+        blue: all.filter((r) => r.team === 0).sort(byScore),
+        orange: all.filter((r) => r.team === 1).sort(byScore),
+        all: all,
+        gamesPlayed: games.length + (liveCounted ? 1 : 0)
+      };
+    }
+
+    function sumRow(rows) {
+      const t = {};
+      COLS.forEach((c) => { t[c.key] = rows.reduce((n, r) => n + num(r[c.key]), 0); });
+      return t;
+    }
+
+    function teamHead(team) {
+      return '<div class="teamhead">'
+        // A logo that fails to load (missing asset, stale data URL) must not put a broken-image
+        // glyph on air — hide the element instead and let the name carry the header.
+        + (team.logo ? '<img src="' + esc(team.logo) + '" alt="" onerror="this.hidden=true">' : '')
+        + '<span class="tn">' + esc(team.name) + '</span>'
+        + '<span class="tw" style="color:' + esc(team.color) + '">' + num(team.wins) + '</span>'
+        + '</div>';
+    }
+
+    function teamTable(team, rows, mvpName) {
+      const t = sumRow(rows);
+      const head = COLS.map((c) => '<div class="cell">' + c.label + '</div>').join('');
+      const body = rows.map((r) => '<div class="grid prow' + (r.name === mvpName ? ' best' : '') + '">'
+        + '<div class="pn">' + esc(r.name) + '</div>'
+        + COLS.map((c) => '<div class="cell' + (c.key === 'score' ? ' score' : '') + '">' + fmt(r[c.key]) + '</div>').join('')
+        + '</div>').join('');
+      return '<div class="teamsec" style="--row-accent:' + esc(team.color) + '">'
+        + teamHead(team)
+        + '<div class="grid colhead"><div>Player</div>' + head + '</div>'
+        + (body || '<div class="grid prow"><div class="pn" style="color:var(--dim)">No players yet</div></div>')
+        + '<div class="grid totrow"><div class="pn">Team</div>'
+        + COLS.map((c) => '<div class="cell">' + fmt(t[c.key]) + '</div>').join('')
+        + '</div></div>';
+    }
+
+    function teamCards(team, rows, mvpName) {
+      const cards = rows.map((r) => '<div class="pcard' + (r.name === mvpName ? ' best' : '') + '">'
+        + '<div class="cn">' + esc(r.name) + '</div>'
+        + '<div class="cs">' + fmt(r.score) + '</div><div class="cl">Series score</div>'
+        + '<div class="cgrid">' + COLS.slice(1).map((c) =>
+            '<div><div class="v">' + num(r[c.key]) + '</div><div class="k">' + c.label + '</div></div>').join('')
+        + '</div></div>').join('');
+      return '<div class="teamsec" style="--row-accent:' + esc(team.color) + '">'
+        + teamHead(team)
+        + '<div class="cards">' + (cards || '<div class="pcard"><div class="cl">No players yet</div></div>') + '</div>'
+        + '</div>';
+    }
+
+    const DESIGNS = {
+      table: function (tt, teams) {
+        return '<div class="board">'
+          + teamTable(teams.blue, tt.blue, tt.mvp)
+          + teamTable(teams.orange, tt.orange, tt.mvp)
+          + '</div>';
+      },
+      cards: function (tt, teams) {
+        return '<div class="board">'
+          + teamCards(teams.blue, tt.blue, tt.mvp)
+          + teamCards(teams.orange, tt.orange, tt.mvp)
+          + '</div>';
+      },
+      leaders: function (tt, teams) {
+        const colorOf = (r) => (r.team === 1 ? teams.orange.color : teams.blue.color);
+        const cat = (c) => {
+          const top = tt.all.slice()
+            .sort((a, b) => num(b[c.key]) - num(a[c.key]))
+            .filter((r) => num(r[c.key]) > 0)
+            .slice(0, 3);
+          const rows = top.map((r, i) => '<div class="lrow' + (i === 0 ? ' top' : '') + '" style="--row-accent:' + esc(colorOf(r)) + '">'
+            + '<span class="lp">' + (i + 1) + '</span><span class="lsw"></span>'
+            + '<span class="ln">' + esc(r.name) + '</span>'
+            + '<span class="lv">' + fmt(r[c.key]) + '</span>'
+            + '</div>').join('');
+          return '<div class="lcat"><div class="lct">' + c.full + '</div>'
+            + (rows || '<div class="lrow"><span class="ln" style="color:var(--dim)">&mdash;</span></div>')
+            + '</div>';
+        };
+        return '<div class="leaders">' + COLS.map(cat).join('') + '</div>';
+      },
+      /* Head-to-head matrix: players are columns, each stat is a row, and the centre column carries
+         the stat name over a bar split by each side's share of the series total. One shared grid
+         template keeps the header and every row aligned; the player columns are 1fr each so 2v2 and
+         1v1 lay themselves out without a special case. */
+      matrix: function (tt, teams, bo) {
+        const blue = tt.blue, orange = tt.orange;
+        // Colour source follows Match > Teams: teams.*.color is already the MODE-EFFECTIVE value
+        // (Team / Brand / Default / In-Game), so Brand mode hands both sides the same hex. That
+        // makes the split bar read as one flat block, so the second side takes a shifted shade of
+        // the same colour - still on brand, but the two shares stay legible.
+        const cA = teams.blue.color;
+        const cB = sameHue(cA, teams.orange.color) ? shade(cA, -0.52) : teams.orange.color;
+        if (!blue.length && !orange.length) return '<div class="nodata">No players yet</div>';
+        const bt = sumRow(blue), ot = sumRow(orange);
+        // Explicit template rather than repeat(auto): a side can be empty (a team that never
+        // connected), and repeat(0,1fr) is invalid CSS that would drop the whole declaration.
+        const cols = (blue.map(() => '1fr').join(' ') + ' 300px ' + orange.map(() => '1fr').join(' ')).trim();
+        const style = 'style="--mx-cols:' + cols + '"';
+
+        const nameCells = (rows, color) => rows.map((r) =>
+          '<div class="mx-pn' + (r.name === tt.mvp ? ' mvp' : '') + '" style="--col-accent:' + esc(color) + '">'
+            + (r.name === tt.mvp ? CROWN : '') + esc(r.name) + '</div>').join('');
+
+        const row = (c) => {
+          const a = num(bt[c.key]), b = num(ot[c.key]), sum = a + b;
+          // 50/50 when neither side has anything yet, so the bar never collapses to a sliver.
+          const pa = sum > 0 ? (a / sum) * 100 : 50;
+          // Two highlights: best on each side, and the outright best in the row (gold).
+          const bestB = Math.max(0, ...blue.map((r) => num(r[c.key])));
+          const bestO = Math.max(0, ...orange.map((r) => num(r[c.key])));
+          const bestAll = Math.max(bestB, bestO);
+          const cell = (r, sideBest) => {
+            const v = num(r[c.key]);
+            const cls = v === 0 ? ' zero' : (v === bestAll && v > 0 ? ' top' : (v === sideBest && v > 0 ? ' on' : ''));
+            return '<div class="mx-v' + cls + '">' + v.toLocaleString() + '</div>';
+          };
+          return '<div class="mx-grid mx-row" ' + style + '>'
+            + blue.map((r) => cell(r, bestB)).join('')
+            + '<div class="mx-c">'
+              + '<div class="mx-lbl">' + c.full + '</div>'
+              + '<div class="mx-bar">'
+                + '<span style="width:' + pa.toFixed(1) + '%;background:' + esc(cA) + '"></span>'
+                + '<span style="width:' + (100 - pa).toFixed(1) + '%;background:' + esc(cB) + '"></span>'
+              + '</div>'
+              + '<div class="mx-tot">'
+                + '<span style="color:' + esc(cA) + '">' + a.toLocaleString() + '</span>'
+                + '<span style="color:' + esc(cB) + '">' + b.toLocaleString() + '</span>'
+              + '</div>'
+            + '</div>'
+            + orange.map((r) => cell(r, bestO)).join('')
+            + '</div>';
+        };
+
+        // Result band: NAME LOGO  x VS x  LOGO NAME - the logos sit INBOARD against the scores and
+        // the names read outward, so the two crests frame the scoreline instead of the whole lockup.
+        // (.mx-side.r is row-reverse, so one DOM order gives both mirrored halves.) Gold + a dimmed
+        // loser only once a side has
+        // actually CLINCHED the series — mid-series both teams are still live and neither is 'losing'.
+        const need = Math.floor(num(bo) / 2) + 1;
+        const clinched = num(bo) > 0 && (num(teams.blue.wins) >= need || num(teams.orange.wins) >= need);
+        const won = (t, o) => clinched && num(t.wins) > num(o.wins);
+        const bWon = won(teams.blue, teams.orange), oWon = won(teams.orange, teams.blue);
+        const side = (team, right, isWin, isLose) => '<div class="mx-side ' + (right ? 'r' : 'l')
+            + (isWin ? ' win' : '') + (isLose ? ' lose' : '') + '">'
+          + '<span class="n">' + esc(team.name) + '</span>'
+          + (team.logo ? '<img src="' + esc(team.logo) + '" alt="" onerror="this.hidden=true">' : '')
+          + '</div>';
+
+        const mvpRibbon = (function () {
+          if (!tt.mvp) return '';
+          const r = tt.all.filter(function (x) { return x.name === tt.mvp; })[0];
+          if (!r) return '';
+          // Headline numbers only — the grid above already carries the full line.
+          const bits = COLS.filter(function (c) { return c.key !== 'score' && num(r[c.key]) > 0; })
+            .slice(0, 4)
+            .map(function (c) {
+              const v = num(r[c.key]);
+              const word = c.full.toLowerCase();
+              return '<b>' + v + '</b> ' + (v === 1 ? word.replace(/s$/, '') : word);
+            });
+          return '<div class="mx-mvp">'
+            + '<span class="lbl">Series MVP</span>'
+            + '<span class="who">' + CROWN + esc(r.name) + '</span>'
+            + '<span class="line"><b>' + num(r.score).toLocaleString() + '</b> points'
+            + (bits.length ? ' &middot; ' + bits.join(' &middot; ') : '') + '</span>'
+            + '</div>';
+        })();
+
+        return '<div class="matrix">'
+          + '<div class="mx-res">'
+            + side(teams.blue, false, bWon, clinched && !bWon)
+            + '<div class="mx-nums">'
+              + '<span class="mx-num' + (bWon ? ' win' : '') + '">' + num(teams.blue.wins) + '</span>'
+              + '<span class="mx-dash">VS</span>'
+              + '<span class="mx-num' + (oWon ? ' win' : '') + '">' + num(teams.orange.wins) + '</span>'
+            + '</div>'
+            + side(teams.orange, true, oWon, clinched && !oWon)
+          + '</div>'
+          + '<div class="mx-grid mx-names" ' + style + '>'
+            + nameCells(blue, cA)
+            + '<div></div>'
+            + nameCells(orange, cB)
+          + '</div>'
+          + COLS.map(row).join('')
+          + mvpRibbon
+          + '</div>';
+      }
+    };
+
+    // Colour helpers. No CSS color-mix(): the app ships Electron 18 (Chrome 100), where it is
+    // unsupported and resolves to black.
+    function _rgb(hex){const m=/^#?([0-9a-f]{6})$/i.exec(String(hex||'').trim());const n=m?parseInt(m[1],16):0;
+      return [(n>>16)&255,(n>>8)&255,n&255];}
+    function shade(hex, amt){const t=amt<0?0:255,k=Math.abs(amt);
+      return 'rgb('+_rgb(hex).map(v=>Math.round(v+(t-v)*k)).join(',')+')';}
+    function sameHue(a, b){const x=_rgb(a),y=_rgb(b);
+      return Math.abs(x[0]-y[0])+Math.abs(x[1]-y[1])+Math.abs(x[2]-y[2]) < 24;}
+
+    function render(data) {
+      const ss = data.seriesStats || {};
+      pickCols(data);
+      const tt = totals(data);
+      const blue = SceneBase.teamSide(data, 'blue');
+      const orange = SceneBase.teamSide(data, 'orange');
+      const series = data.series || {};
+      const teams = {
+        blue:   { name: blue.name,   logo: blue.logo,   color: blue.color   || '#3b82f6', wins: num(series.blue) },
+        orange: { name: orange.name, logo: orange.logo, color: orange.color || '#f97316', wins: num(series.orange) }
+      };
+      // Series MVP = highest total score across both sides, once anything has actually been scored.
+      const best = tt.all.slice().sort((a, b) => num(b.score) - num(a.score))[0];
+      tt.mvp = best && num(best.score) > 0 ? best.name : null;
+
+      // Brand accent drives the middle column's chrome (labels, the round line) so the board
+      // carries the kit's colour even when the two sides are the same shade.
+      const brand = SceneBase.brandColor(data) || teams.blue.color;
+      document.documentElement.style.setProperty('--accent', brand);
+      document.documentElement.style.setProperty('--accent-soft', shade(brand, 0.55));
+
+      $('event').textContent = data.eventName || '';
+      $('round').textContent = data.roundLabel || '';
+      $('bo').textContent = data.bestOf ? 'Best of ' + data.bestOf : '';
+
+      // Table design shares one grid template between its header and rows; it has to follow COLS.
+      document.documentElement.style.setProperty('--tbl-cols', '1fr repeat(' + COLS.length + ',80px)');
+      const design = DESIGNS[ss.design] ? ss.design : 'table';
+      $('body').innerHTML = tt.all.length
+        ? DESIGNS[design](tt, teams, data.bestOf)
+        : '<div class="nodata">No games played in this series yet</div>';
+
+      // Per-game strip — banked games only (the live game has no final score yet).
+      const games = Array.isArray(ss.games) ? ss.games : [];
+      $('gstrip').innerHTML = games.map((g) => '<div class="gpip">'
+        + '<span class="gl">Game ' + num(g.number) + '</span>'
+        + '<span class="gv">' + num(g.blueScore) + ' - ' + num(g.orangeScore) + '</span>'
+        + '</div>').join('');
+
+      $('wrap').classList.toggle('show', !!ss.visible);
+    }
+
+    SceneBase.connect(render);
+  })();
+  </script>
+</body>
+</html>

@@ -73,7 +73,7 @@ async function seedLoadTierLadder(refresh) {
   const btn = el('seed-calibrate-ladder');
   if (btn) { btn.disabled = true; btn.textContent = refresh ? 'Measuring…' : btn.textContent; }
   try {
-    const r = await fetch('http://localhost:3000/api/rl6mans/tier-ladder', {
+    const r = await fetch('http://127.0.0.1:3000/api/rl6mans/tier-ladder', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ region: el('seed-6mans-region')?.value || 'ALL', refresh: refresh === true }),
     });
@@ -426,7 +426,7 @@ function build6mansResult(result, ti, pi) {
 
 // Look up one player on rl6mans.com and store the result on the player object.
 async function _6mansLookupPlayer(ti, pi, name) {
-  const resp = await fetch('http://localhost:3000/api/rl6mans/profile', {
+  const resp = await fetch('http://127.0.0.1:3000/api/rl6mans/profile', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ name }),
   });
@@ -465,7 +465,7 @@ function buildTGResult(result, ti, pi) {
 
 // Look up a player's in-game rank on tracker.gg via the in-app browser (no API key required).
 async function _tgLookupByAccount(ti, pi, platform, username) {
-  const resp = await fetch('http://localhost:3000/api/trackergg/lookup', {
+  const resp = await fetch('http://127.0.0.1:3000/api/trackergg/lookup', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ platform, username }),
   });
@@ -1108,7 +1108,7 @@ async function seedLoadStartgg() {
   const btn = el('seed-load-startgg'); if (btn) { btn.disabled = true; btn.textContent = 'Pulling…'; }
   seedStatus('Pulling teams and rosters from start.gg…');
   try {
-    const r = await fetch('http://localhost:3000/api/startgg/event-seeding', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ eventSlug: _seedEvent.eventSlug }) });
+    const r = await fetch('http://127.0.0.1:3000/api/startgg/event-seeding', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ eventSlug: _seedEvent.eventSlug }) });
     const data = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(data.error || `start.gg returned HTTP ${r.status}`);
     const entrants = data.entrants || [];
@@ -1848,7 +1848,7 @@ async function seedIdentityCheck() {
   if (btn) { btn.disabled = true; btn.textContent = 'Checking...'; }
   seedStatus(`Resolving ${players.length} players against the identity registry...`);
   try {
-    const res = await fetch('http://localhost:3000/api/identity/resolve', {
+    const res = await fetch('http://127.0.0.1:3000/api/identity/resolve', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ players }),
     });
@@ -1890,7 +1890,7 @@ async function seedIdentityMatchTeams() {
   })).filter((t) => t.playerIds.length);
   if (!teams.length) { _identTeams = []; return; }
   try {
-    const res = await fetch('http://localhost:3000/api/identity/team-match', {
+    const res = await fetch('http://127.0.0.1:3000/api/identity/team-match', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ teams }),
     });
@@ -2089,7 +2089,7 @@ async function seedIdentityApply() {
   if (btn) { btn.disabled = true; btn.textContent = 'Applying...'; }
   try {
     if (decisions.length) {
-      const res = await fetch('http://localhost:3000/api/identity/commit', {
+      const res = await fetch('http://127.0.0.1:3000/api/identity/commit', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ decisions }),
       });
@@ -2121,7 +2121,7 @@ async function seedIdentityRecordRosters() {
   })).filter((t) => t.playerIds.length >= 2);
   if (!teams.length) return;
   try {
-    await fetch('http://localhost:3000/api/identity/team-record', {
+    await fetch('http://127.0.0.1:3000/api/identity/team-record', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ teams }),
     });
@@ -2133,7 +2133,7 @@ async function seedIdentityCheckQuiet() {
   const players = seedIdentityInputs();
   if (!players.length) return;
   try {
-    const res = await fetch('http://localhost:3000/api/identity/resolve', {
+    const res = await fetch('http://127.0.0.1:3000/api/identity/resolve', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ players }),
     });
@@ -2157,7 +2157,7 @@ async function seedIdentityCheckQuiet() {
 // backed up by set win/loss. The first call after adding an event pulls that event's final
 // standings from start.gg; after that it's served from the local stats DB.
 async function seedApplyOurEvents(opts) {
-  const res = await fetch('http://localhost:3000/api/seeding/local-scores', {
+  const res = await fetch('http://127.0.0.1:3000/api/seeding/local-scores', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -2217,7 +2217,7 @@ async function seedFetchPerformanceScores() {
   }
 
   try {
-    const res = await fetch('http://localhost:3000/api/startgg/player-standings', {
+    const res = await fetch('http://127.0.0.1:3000/api/startgg/player-standings', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ slugs: allSlugs }),
@@ -2348,7 +2348,7 @@ async function seedLookupRanksFor(rows, o) {
     seedStatus(`${label} — rl6mans ${at}/${need.length}…`);
     if (btn) btn.textContent = `Cancel · rl6mans ${at}/${need.length}`;
     try {
-      const res = await fetch('http://localhost:3000/api/rl6mans/lookup', {
+      const res = await fetch('http://127.0.0.1:3000/api/rl6mans/lookup', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ names: chunk.map((c) => ({ name: c.name, alts: c.alts })), region, profilesOnly: true }),
       });
@@ -2547,7 +2547,7 @@ async function seedAutoSeed(opts) {
       seedAutoNote('Reading each player\'s start.gg tournament history…');
       seedStatus(`Auto-seed — start.gg history for ${slugs.length} players…`);
       try {
-        const res = await fetch('http://localhost:3000/api/startgg/player-standings', {
+        const res = await fetch('http://127.0.0.1:3000/api/startgg/player-standings', {
           method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ slugs }),
         });
         const data = await res.json();
@@ -2708,7 +2708,7 @@ async function seedAutoResolve() {
       seedStatus('Auto-resolve — start.gg placements…');
       if (btn) btn.textContent = 'Cancel · start.gg';
       try {
-        const res = await fetch('http://localhost:3000/api/startgg/player-standings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ slugs }) });
+        const res = await fetch('http://127.0.0.1:3000/api/startgg/player-standings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ slugs }) });
         const data = await res.json();
         if (data && data.ok) _seedRows.forEach((row) => (row.players || []).forEach((p) => { p._startggScore = (p.startggSlug && data.scores[p.startggSlug] != null) ? data.scores[p.startggSlug] : null; }));
       } catch (_) {}
@@ -2813,7 +2813,7 @@ async function seedPushStartgg() {
   const btn = el('seed-push'); if (btn) { btn.disabled = true; btn.textContent = 'Pushing…'; }
   seedStatus(`Exporting ${order.length} seeds to start.gg…`);
   try {
-    const r = await fetch('http://localhost:3000/api/startgg/push-seeding', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ eventSlug: _seedEvent.eventSlug, order }) });
+    const r = await fetch('http://127.0.0.1:3000/api/startgg/push-seeding', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ eventSlug: _seedEvent.eventSlug, order }) });
     const data = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(data.error || `start.gg returned HTTP ${r.status}`);
     if (data.pushed < data.total) throw new Error(`Partial export: only ${data.pushed}/${data.total} seeds saved on "${data.phase}". Check your TO token permissions.`);
@@ -3429,7 +3429,7 @@ async function seedVerify6mans() {
       seedStatus(`Looking up ranks — ${soFar} / ${allPlayers.length}${withEpic ? ` (${withEpic} via Epic)` : ''}…`, '');
       if (btn) btn.textContent = `${soFar}/${allPlayers.length}…`;
       try {
-        const res = await fetch('http://localhost:3000/api/rl6mans/lookup', {
+        const res = await fetch('http://127.0.0.1:3000/api/rl6mans/lookup', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ names: chunk, region, profilesOnly: true }),
         });
@@ -3549,7 +3549,7 @@ async function ensureRl6mansNames(region) {
   if (region === 'ALL') return;
   if (_rl6mansNames.region === region && _rl6mansNames.names.length) return;
   try {
-    const res = await fetch('http://localhost:3000/api/rl6mans/names?region=' + encodeURIComponent(region));
+    const res = await fetch('http://127.0.0.1:3000/api/rl6mans/names?region=' + encodeURIComponent(region));
     const data = await res.json();
     if (data.ok && Array.isArray(data.names)) {
       _rl6mansNames = { region, names: data.names };
@@ -3614,7 +3614,7 @@ function renderVerifyBody() {
         ? 'Scanning all regions — first time builds a one-time index (~30-60s)…'
         : `Scanning the ${region} leaderboard…`;
       try {
-        const res = await fetch('http://localhost:3000/api/rl6mans/lookup', {
+        const res = await fetch('http://127.0.0.1:3000/api/rl6mans/lookup', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ names: names.map((n) => ({ name: n, alts: [] })), region, profilesOnly: false }),
         });
@@ -3647,7 +3647,7 @@ function renderVerifyBody() {
         if (!entry || !name) return;
         btn.disabled = true; if (out) out.textContent = 'looking up…';
         try {
-          const res = await fetch('http://localhost:3000/api/rl6mans/profile', {
+          const res = await fetch('http://127.0.0.1:3000/api/rl6mans/profile', {
             method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name })
           });
           const data = await res.json();
@@ -3986,12 +3986,12 @@ el('wl-logo-file')?.addEventListener('change', async function () {
   try { const b64 = await fileToBase64(f, 400); wlSend({ logo: b64 }); } catch (e) { evStatus('Could not load logo.', 'err'); }
 });
 el('wl-copy-url')?.addEventListener('click', (e) => {
-  const url = (typeof SCENE_BASE_URL !== 'undefined' ? SCENE_BASE_URL : 'http://localhost:3000') + '/watchlist.html';
+  const url = (typeof SCENE_BASE_URL !== 'undefined' ? SCENE_BASE_URL : 'http://127.0.0.1:3000') + '/watchlist.html';
   if (typeof copyText === 'function') copyText(url, e.currentTarget);
   else if (navigator.clipboard) navigator.clipboard.writeText(url);
   evStatus('Copied the Teams to Watch overlay URL.', 'ok');
 });
-{ const pv = el('wl-preview'); if (pv) pv.href = (typeof SCENE_BASE_URL !== 'undefined' ? SCENE_BASE_URL : 'http://localhost:3000') + '/watchlist.html?preview=1'; }
+{ const pv = el('wl-preview'); if (pv) pv.href = (typeof SCENE_BASE_URL !== 'undefined' ? SCENE_BASE_URL : 'http://127.0.0.1:3000') + '/watchlist.html?preview=1'; }
 
 // ── Single-team spotlight (start.gg deep-dive) ───────────────────────────────
 function tsOrdinal(n) { if (!n) return ''; const s = ['th', 'st', 'nd', 'rd'], v = n % 100; return n + (s[(v - 20) % 10] || s[v] || s[0]); }
@@ -4020,11 +4020,11 @@ function renderTeamSpotlightBar() {
 el('ts-golive')?.addEventListener('click', () => { const ts = currentState.teamSpotlight || {}; if (!ts.name) return; send('set_team_spotlight', { visible: !ts.visible, fetch: false }); });
 el('ts-refresh')?.addEventListener('click', () => { const ts = currentState.teamSpotlight || {}; if (!ts.name) return; send('set_team_spotlight', { name: ts.name, eventSlug: ts.eventSlug, entrantId: ts.entrantId }); evStatus('Refreshing spotlight from start.gg…'); });
 el('ts-copy-url')?.addEventListener('click', (e) => {
-  const url = (typeof SCENE_BASE_URL !== 'undefined' ? SCENE_BASE_URL : 'http://localhost:3000') + '/team-spotlight.html';
+  const url = (typeof SCENE_BASE_URL !== 'undefined' ? SCENE_BASE_URL : 'http://127.0.0.1:3000') + '/team-spotlight.html';
   if (typeof copyText === 'function') copyText(url, e.currentTarget); else if (navigator.clipboard) navigator.clipboard.writeText(url);
   evStatus('Copied the Team Spotlight overlay URL.', 'ok');
 });
-{ const pv = el('ts-preview'); if (pv) pv.href = (typeof SCENE_BASE_URL !== 'undefined' ? SCENE_BASE_URL : 'http://localhost:3000') + '/team-spotlight.html?preview=1'; }
+{ const pv = el('ts-preview'); if (pv) pv.href = (typeof SCENE_BASE_URL !== 'undefined' ? SCENE_BASE_URL : 'http://127.0.0.1:3000') + '/team-spotlight.html?preview=1'; }
 
 // ── Spotlight studio: mode toggle + in-page team picker + live WYSIWYG preview ──
 let _spMode = 'watch';
@@ -4032,7 +4032,7 @@ let _spFramesInit = false;
 // The control panel is loaded over file:// — point the preview iframes at the overlay server.
 function spInitFrames() {
   if (_spFramesInit) return; _spFramesInit = true;
-  const base = (typeof SCENE_BASE_URL !== 'undefined' ? SCENE_BASE_URL : 'http://localhost:3000');
+  const base = (typeof SCENE_BASE_URL !== 'undefined' ? SCENE_BASE_URL : 'http://127.0.0.1:3000');
   const fw = el('sp-frame-watch'); if (fw) fw.src = base + '/watchlist.html?embed=1';
   const fs = el('sp-frame-solo'); if (fs) fs.src = base + '/team-spotlight.html?embed=1';
 }
@@ -4236,7 +4236,7 @@ document.addEventListener('click', (e) => {
   if (!dd.contains(e.target)) spAddDdClose();
 });
 function spRefreshPreviewBar() {
-  const base = (typeof SCENE_BASE_URL !== 'undefined' ? SCENE_BASE_URL : 'http://localhost:3000');
+  const base = (typeof SCENE_BASE_URL !== 'undefined' ? SCENE_BASE_URL : 'http://127.0.0.1:3000');
   const open = el('sp-open'); if (open) open.href = base + (_spMode === 'solo' ? '/team-spotlight.html' : '/watchlist.html') + '?preview=1';
   const gl = el('sp-golive'), foot = el('sp-preview-foot');
   if (_spMode === 'solo') {
@@ -4254,7 +4254,7 @@ el('sp-golive')?.addEventListener('click', () => {
   else { const w = currentState.watchlist || {}; if (!(w.teams || []).length) return; send('set_watchlist', { visible: !w.visible }); }
 });
 el('sp-copy-url')?.addEventListener('click', (e) => {
-  const base = (typeof SCENE_BASE_URL !== 'undefined' ? SCENE_BASE_URL : 'http://localhost:3000');
+  const base = (typeof SCENE_BASE_URL !== 'undefined' ? SCENE_BASE_URL : 'http://127.0.0.1:3000');
   const url = base + (_spMode === 'solo' ? '/team-spotlight.html' : '/watchlist.html');
   if (typeof copyText === 'function') copyText(url, e.currentTarget); else if (navigator.clipboard) navigator.clipboard.writeText(url);
   evStatus('Copied the overlay URL.', 'ok');

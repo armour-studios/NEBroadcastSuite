@@ -14,6 +14,10 @@
    ════════════════════════════════════════════════════════════════════════ */
 :root{
   --blue:#2f8dff;
+  /* Raw channels for rgba() tints. color-mix() is unsupported on Chrome 100
+     (Electron 18 / OBS CEF) and takes the whole declaration down with it. */
+  --blue-rgb:47,141,255;
+  --orange-rgb:255,138,52;
   --orange:#ff7a33;
   --accent:#2f8dff;          /* overridden by active brand kit */
   --accent-2:#ff7a33;
@@ -575,6 +579,11 @@ img{display:block;}
 .replay-wipe{position:absolute;top:0;bottom:0;left:-16%;right:-16%;z-index:80;pointer-events:none;overflow:hidden;
   --rp-dur:2.6s;display:flex;align-items:center;justify-content:center;}
 .replay-wipe.logo-only{--rp-dur:1.9s;}   /* the after-replay outro — a touch longer than the intro sweep */
+/* HOLD: freeze the whole intro cover SOLID (pause every wipe animation) until the game actually cuts to
+   the replay. RL's goal→replay cut timing varies (~2.5–4s), so a fixed-length intro peeled BEFORE the
+   cut on the slow ones — exposing the janky in-game transition the wipe exists to hide. Resumed (peeled)
+   on the real cut (view_change 'goal' → resumeIntroReveal), so the reveal is always ON the camera change. */
+.replay-wipe.rp-hold, .replay-wipe.rp-hold *{ animation-play-state: paused !important; }
 
 /* ── SHUTTER SLAM ─────────────────────────────────────────────────────────────
    Five angled bars sweep in staggered from ALTERNATING sides, snap together into one solid wall (the
@@ -660,6 +669,98 @@ img{display:block;}
    isn't washed out and the logo pops. (Producer feedback: "replay background… opacity darker".) */
 .replay-wipe.logo-only .replay-scrim{
   background:radial-gradient(85% 105% at 50% 50%,rgba(2,4,8,.86) 0%,rgba(2,4,8,.74) 52%,rgba(2,4,8,.52) 100%);}
+
+/* ═══ REPLAY TRANSITION — STYLE: CINEMA ══════════════════════════════════════════
+   The clean, cinematic alternative to the shutter slam. Two letterbox bars close the frame to a
+   2.39:1 window, three bands of the replay word scroll through that window (the outer two hollow
+   and slow, the centre one solid), and the sponsor mark sits DEAD STILL on a hairline underneath —
+   motion is the type's job, never the partner's. Same --rp-dur and the same .play lifecycle as the
+   slam, so showReplay()'s timers are untouched; only the furniture differs.
+   Everything is keyed off `.style-cinema` so the slam is byte-for-byte what it was. */
+.replay-wipe.style-cinema .rw-bars{display:none;}          /* no shutter in this style */
+.replay-wipe.style-cinema::before{display:none;}           /* ...and no light streak */
+.replay-wipe.style-cinema{--rp-dur:2.6s;}
+.replay-wipe.style-cinema.logo-only{--rp-dur:1.9s;}
+/* FULLY OPAQUE cover — this transition doubles as a STINGER: RL's own cut into/out of the goal replay
+   looks janky, so the overlay must completely blanket the game while the animation is up (the producer
+   uses the replay wipe to hide the in-game UI transition). Solid, no alpha. */
+.replay-wipe.style-cinema .replay-scrim{
+  background:linear-gradient(180deg,#05070c 0%,#080c15 44%,#05070c 100%);}
+.replay-wipe.style-cinema.play .replay-scrim,
+.replay-wipe.style-cinema.play .replay-skin{animation:rwcVeil var(--rp-dur) cubic-bezier(.4,0,.2,1) both;}
+/* Snap SOLID fast (opaque by ~7% ≈ 0.18s) so it hides the cut instantly; hold through the middle;
+   reveal late (96%) so the game is already back to a stable frame before it uncovers. */
+@keyframes rwcVeil{0%{opacity:0;}7%{opacity:1;}84%{opacity:1;}96%,100%{opacity:0;}}
+
+/* Letterbox — the cinematic tell. Closes fast, opens fast, holds through the middle. */
+.rw-cine{position:absolute;inset:0;z-index:2;pointer-events:none;overflow:hidden;display:none;}
+.replay-wipe.style-cinema .rw-cine{display:block;}
+.rwc-lb{position:absolute;left:0;right:0;height:15%;background:#000;transform:scaleY(0);}
+.rwc-lb.top{top:0;transform-origin:top;}
+.rwc-lb.bot{bottom:0;transform-origin:bottom;}
+.replay-wipe.style-cinema.play .rwc-lb{animation:rwcBar var(--rp-dur) cubic-bezier(.5,.04,.28,1) both;}
+@keyframes rwcBar{0%{transform:scaleY(0);}14%{transform:scaleY(1);}82%{transform:scaleY(1);}100%{transform:scaleY(0);}}
+/* accent hairline riding the inside edge of each bar */
+.rwc-lb::after{content:'';position:absolute;left:0;right:0;height:2px;
+  background:linear-gradient(90deg,transparent,var(--replay-color,#fff) 22%,var(--replay-color,#fff) 78%,transparent);
+  opacity:.85;box-shadow:0 0 14px var(--replay-color,#fff);}
+.rwc-lb.top::after{bottom:0;}
+.rwc-lb.bot::after{top:0;}
+
+/* Scrolling type. Each row holds the label twice so translateX(-50%) loops seamlessly. */
+.rwc-marquee{position:absolute;left:0;right:0;overflow:hidden;opacity:0;white-space:nowrap;}
+.rwc-marquee > span{display:inline-block;font-weight:900;font-style:italic;text-transform:uppercase;
+  line-height:1;white-space:nowrap;will-change:transform;}
+.rwc-marquee.r1{top:19%;font-size:120px;}
+.rwc-marquee.r3{bottom:19%;font-size:120px;}
+.rwc-marquee.r1 > span,.rwc-marquee.r3 > span{
+  color:transparent;-webkit-text-stroke:2px rgba(236,242,255,.30);letter-spacing:.06em;}
+.replay-wipe.style-cinema.play .rwc-marquee{animation:rwcFade var(--rp-dur) ease both;}
+@keyframes rwcFade{0%,10%{opacity:0;}24%{opacity:1;}76%{opacity:1;}92%,100%{opacity:0;}}
+/* Opposed directions read as parallax; the slow, even speed is what keeps it calm. */
+.replay-wipe.style-cinema.play .rwc-marquee.r1 > span{animation:rwcScrollL 9s linear infinite;}
+.replay-wipe.style-cinema.play .rwc-marquee.r3 > span{animation:rwcScrollR 11s linear infinite;}
+@keyframes rwcScrollL{from{transform:translateX(0);}to{transform:translateX(-50%);}}
+@keyframes rwcScrollR{from{transform:translateX(-50%);}to{transform:translateX(0);}}
+
+/* Centre lockup: hero word + a hairline + the STILL sponsor mark. */
+.replay-wipe.style-cinema .replay-stack{gap:26px;z-index:5;}
+.replay-wipe.style-cinema .replay-chevrons{display:none;}
+.replay-wipe.style-cinema .replay-team-logo{max-height:64px;max-width:180px;opacity:.9;}
+.replay-wipe.style-cinema .replay-text{
+  font-size:168px;-webkit-text-stroke:0;color:#fff;letter-spacing:.14em;
+  filter:drop-shadow(0 6px 26px rgba(0,0,0,.75));}
+.replay-wipe.style-cinema .replay-text::after{
+  left:0;right:0;bottom:-22px;height:2px;border-radius:0;}
+/* No punch, no shake — it rises and settles. That restraint IS the style. */
+.replay-wipe.style-cinema.play .replay-text{animation:rwcRise var(--rp-dur) cubic-bezier(.16,.84,.24,1) both;}
+.replay-wipe.style-cinema.play .replay-stack{animation:none;}
+@keyframes rwcRise{0%,12%{opacity:0;transform:translateY(26px);}28%{opacity:1;transform:translateY(0);}
+  78%{opacity:1;transform:translateY(0);}92%,100%{opacity:0;transform:translateY(-14px);}}
+/* The partner logo does not move. It fades, holds, fades — nothing else. */
+.replay-wipe.style-cinema.play .replay-logo{animation:rwcStill var(--rp-dur) ease both;}
+.replay-wipe.style-cinema.play .replay-team-logo{animation:rwcStill var(--rp-dur) ease both;}
+@keyframes rwcStill{0%,16%{opacity:0;}30%{opacity:1;}78%{opacity:1;}92%,100%{opacity:0;}}
+/* Outro (logo only): no type at all, so the marquee has nothing to say. */
+.replay-wipe.style-cinema.logo-only .rwc-marquee{display:none;}
+
+/* ── Film texture: vignette + a soft team-colour bloom + light grain, so the now-fully-opaque cover
+   still reads as a cinematic frame instead of flat black. Sits BEHIND the letterbox bars + type. ── */
+.rwc-tex{position:absolute;inset:0;pointer-events:none;opacity:0;z-index:0;
+  background:
+    radial-gradient(62% 76% at 50% 45%, color-mix(in srgb,var(--replay-color,#fff) 18%,transparent) 0%, transparent 62%),
+    radial-gradient(125% 125% at 50% 50%, transparent 50%, rgba(0,0,0,.62) 100%);}   /* team bloom + vignette */
+.rwc-grain{position:absolute;inset:-40px;pointer-events:none;opacity:0;z-index:1;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-size:150px 150px;}
+.replay-wipe.style-cinema.play .rwc-tex{animation:rwcTex var(--rp-dur) ease both;}
+.replay-wipe.style-cinema.play .rwc-grain{animation:rwcGrainFade var(--rp-dur) ease both, rwcGrain .7s steps(4) infinite;}
+@keyframes rwcTex{0%,8%{opacity:0;}22%{opacity:1;}80%{opacity:1;}94%,100%{opacity:0;}}
+@keyframes rwcGrainFade{0%,8%{opacity:0;}22%{opacity:.10;}80%{opacity:.10;}94%,100%{opacity:0;}}
+@keyframes rwcGrain{0%{background-position:0 0;}25%{background-position:-38px 26px;}50%{background-position:28px -22px;}75%{background-position:-18px -36px;}100%{background-position:0 0;}}
+/* Slow cinematic push-in on the whole framed window — a gentle settle, not a zoom. */
+.replay-wipe.style-cinema.play .rw-cine{animation:rwcPush var(--rp-dur) cubic-bezier(.2,.7,.3,1) both;}
+@keyframes rwcPush{0%{transform:scale(1.045);}100%{transform:scale(1);}}
 
 /* persistent REPLAY tag — TOP-LEFT corner bug, team-color/B&W accent */
 .replay-tag{position:absolute;top:28px;left:40px;z-index:55;display:flex;align-items:center;gap:11px;
@@ -796,34 +897,122 @@ body.sb-external #sb{display:none !important;}
 /* COMPARE — side-by-side player columns with a center team-total comparison bar per stat
    (renderStatCompare builds the grid; column count follows the actual roster size). */
 .sb-compare{width:100%;display:flex;justify-content:center;}
-.sb-compare-grid{display:grid;gap:8px 10px;align-items:stretch;width:100%;max-width:1600px;}
-.sb-cmp-name{display:flex;align-items:center;justify-content:center;gap:8px;position:relative;
-  height:44px;padding:0 10px;border-radius:9px;background:rgba(255,255,255,.04);border:1px solid var(--hair);
-  font-size:15px;font-weight:800;text-transform:uppercase;color:#dfe5f2;overflow:hidden;}
+/* align-items:center — each cell is CENTERED in its grid row, so a side score box lines up on the
+   same vertical centre as the middle column's number even when the centre cell runs a touch taller
+   (stretch made the fixed-height side boxes top-align, so their numbers sat above the centre's). */
+.sb-compare-grid{display:grid;gap:6px 10px;align-items:center;width:100%;max-width:1680px;}
+/* Player NAMEPLATES. Previously a boxed outline per name, which read as six form fields sitting
+   above the numbers. Now the team colour is a solid rule UNDER the name (the same device the
+   series-stats board uses), the box itself is a soft panel, and the name carries the weight. */
+.sb-cmp-name{display:flex;align-items:center;justify-content:center;gap:9px;position:relative;
+  height:46px;padding:0 12px 8px;border-radius:10px 10px 4px 4px;border:0;
+  background:linear-gradient(180deg,rgba(255,255,255,.075),rgba(255,255,255,.02));
+  font-size:19px;font-weight:800;letter-spacing:.03em;text-transform:uppercase;color:#f2f6ff;}
 .sb-cmp-name span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-.sb-cmp-name.empty{background:transparent;border-color:transparent;}
-.sb-cmp-name.side-a{border-color:color-mix(in srgb,var(--blue) 55%,var(--hair));}
-.sb-cmp-name.side-b{border-color:color-mix(in srgb,var(--orange) 55%,var(--hair));}
-.sb-cmp-name.win{border-color:var(--gold);color:var(--gold);box-shadow:0 0 16px -4px var(--gold);}
-.sb-cmp-name.mvp .sb-mvp-ic{width:16px;height:16px;color:var(--gold);flex:none;}
-.sb-cmp-center-head{display:flex;align-items:center;justify-content:center;gap:10px;height:44px;
-  font-size:12px;font-weight:800;letter-spacing:.1em;color:var(--muted);text-transform:uppercase;}
-.sb-cmp-center-head img{width:26px;height:26px;object-fit:contain;flex:none;}
-.sb-cmp-center-head span{max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#dfe5f2;}
-.sb-cmp-center-head b{color:var(--muted);font-weight:700;}
-.sb-cmp-stat{display:flex;align-items:center;justify-content:center;height:40px;border-radius:8px;
-  background:rgba(255,255,255,.05);border:1px solid var(--hair);font-size:17px;font-weight:700;
-  font-variant-numeric:tabular-nums;color:#cfd6e6;}
+/* The rule itself — 3px of team colour pinned to the bottom edge of the plate. */
+.sb-cmp-name::after{content:'';position:absolute;left:10px;right:10px;bottom:0;height:3px;
+  border-radius:2px;background:var(--hair);}
+.sb-cmp-name.empty{background:transparent;}
+.sb-cmp-name.empty::after{display:none;}
+/* rgba, not color-mix: Chrome 100 (Electron 18 / OBS CEF) has no color-mix, and one invalid
+   component invalidates the WHOLE declaration — these simply vanished on air. */
+.sb-cmp-name.side-a::after{background:rgb(var(--blue-rgb));box-shadow:0 0 12px -2px rgba(var(--blue-rgb),.8);}
+.sb-cmp-name.side-b::after{background:rgb(var(--orange-rgb));box-shadow:0 0 12px -2px rgba(var(--orange-rgb),.8);}
+/* Winning side: a subtle lift only. Gold is reserved for the MVP — painting all three winners
+   gold buried the crown in a row of identical plates and threw away the side colour that tells a
+   viewer which team they are looking at. */
+.sb-cmp-name.win{background:linear-gradient(180deg,rgba(255,255,255,.13),rgba(255,255,255,.04));}
+/* MVP is the only gold plate on the board. */
+.sb-cmp-name.mvp{color:var(--gold);background:linear-gradient(180deg,rgba(255,206,77,.16),rgba(255,206,77,.03));}
+.sb-cmp-name.mvp::after{background:var(--gold);box-shadow:0 0 14px -2px var(--gold);}
+.sb-cmp-name.mvp .sb-mvp-ic{position:static;transform:none;width:17px;height:17px;color:var(--gold);flex:none;}
+/* The boundary between the name band and the numbers. Brightest in the middle so it reads as a
+   deliberate rule rather than a box edge, and it spans the full grid width. */
+.sb-cmp-divider{grid-column:1 / -1;height:1px;margin:5px 0 7px;
+  background:linear-gradient(90deg,transparent,rgba(255,255,255,.16) 12%,rgba(255,255,255,.16) 88%,transparent);}
+/* min-height (not a fixed height) so the cell STRETCHES to the row's height under align-items:stretch —
+   a fixed height top-aligns in any row that runs taller, which left the bottom edges out of line. */
+.sb-cmp-stat{display:flex;align-items:center;justify-content:center;min-height:40px;border-radius:8px;
+  border:1px solid var(--hair);background:rgba(255,255,255,.03);font-size:17px;font-weight:800;font-variant-numeric:tabular-nums;color:#dfe5f2;}
 .sb-cmp-stat.score{background:rgba(255,206,77,.09);border-color:rgba(255,206,77,.28);color:#fff;font-weight:900;}
-.sb-cmp-center{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;padding:2px 0;}
-.sb-cmp-lbl{font-size:11px;font-weight:800;letter-spacing:.12em;color:var(--muted);text-transform:uppercase;}
-.sb-compare-bar{display:flex;width:100%;height:8px;border-radius:4px;overflow:hidden;background:rgba(255,255,255,.08);}
+
+/* ── Centre column: the head-to-head cell for one stat ──────────────────────
+   Was a label, an 8px bar and two numbers. It is now a real comparison cell —
+   the leading side is LIT, the gap is printed (the number a caster says out
+   loud), and a per-game strip shows how the category was won. */
+/* Clean: no boxed panel per row. Six bordered cards stacked down the middle fought with the bar
+   inside each one; the lean tint and the bar carry the information on their own. */
+/* ONE LINE, and exactly as tall as a player stat cell (40px), so every row of the board shares a
+   single height and all three columns line up — top edge and bottom edge. It used to be a 4-item
+   STACK (label / totals / bar / per-game strip), which made each row taller than the fixed-height
+   player boxes beside it: those sat at the top of the row while the centre ran on below them, so
+   the bottom of the board never agreed. The two strips now ride the cell's own top and bottom
+   edges instead of each taking a line. */
+.sb-cmp-center{position:relative;display:flex;align-items:center;justify-content:center;
+  min-height:40px;padding:0 14px;border-radius:8px;border:0;background:transparent;overflow:hidden;}
+.sb-cmp-center + .sb-cmp-center{box-shadow:none;}
+/* The winning half is tinted, so which way the row leans reads before any number does. */
+.sb-cmp-center::before{content:'';position:absolute;inset:0;border-radius:8px;pointer-events:none;opacity:0;transition:opacity .4s ease;}
+.sb-cmp-center.lead-a::before{opacity:1;background:linear-gradient(90deg,rgba(var(--blue-rgb),.13),transparent 62%);}
+.sb-cmp-center.lead-b::before{opacity:1;background:linear-gradient(270deg,rgba(var(--orange-rgb),.13),transparent 62%);}
+/* Scoped to the totals row on purpose: `> *` also caught the bar and the spark, and a blanket
+   position:relative would override the absolute placement that pins them to the cell edges. */
+.sb-cmp-center > .sb-cmp-totals{position:relative;z-index:1;}
+
+.sb-cmp-lbl{font-size:11px;font-weight:800;letter-spacing:.14em;color:var(--muted);text-transform:uppercase;
+  text-align:center;white-space:nowrap;}
+
+/* Totals row: value · (label + gap) · value, centred on one line. align-items is CENTER, not
+   baseline — the leader's number is a size up, and on a baseline that shoved the label off-centre. */
+.sb-cmp-totals{display:flex;align-items:center;justify-content:space-between;gap:10px;width:100%;
+  font-size:19px;font-weight:800;font-variant-numeric:tabular-nums;line-height:1;}
+/* The stat name and the gap chip now share the middle of the line, between the two totals. */
+.sb-cmp-mid{display:flex;align-items:center;gap:8px;min-width:0;}
+.sb-cmp-total-a{color:rgba(var(--blue-rgb),.62);transition:color .3s ease;}
+.sb-cmp-total-b{color:rgba(var(--orange-rgb),.62);transition:color .3s ease;}
+/* The leader is full-strength and a size up; the trailer stays dimmed. One glance, one winner. */
+.sb-cmp-center.lead-a .sb-cmp-total-a{color:var(--blue);font-size:23px;text-shadow:0 0 18px rgba(var(--blue-rgb),.55);}
+.sb-cmp-center.lead-b .sb-cmp-total-b{color:var(--orange);font-size:23px;text-shadow:0 0 18px rgba(var(--orange-rgb),.55);}
+
+/* Gap chip — the difference, not the two numbers you'd have to subtract yourself. */
+.sb-cmp-gap{flex:0 0 auto;font-size:11px;font-weight:800;letter-spacing:.06em;padding:2px 7px;border-radius:5px;
+  background:rgba(255,255,255,.06);border:1px solid var(--hair);color:var(--muted);white-space:nowrap;}
+.sb-cmp-center.lead-a .sb-cmp-gap{color:var(--blue);border-color:rgba(var(--blue-rgb),.4);background:rgba(var(--blue-rgb),.12);}
+.sb-cmp-center.lead-b .sb-cmp-gap{color:var(--orange);border-color:rgba(var(--orange-rgb),.4);background:rgba(var(--orange-rgb),.12);}
+.sb-cmp-center.tied .sb-cmp-gap{color:#cfd6e6;}
+
+/* The share bar is the cell's BOTTOM EDGE now, not a line of its own — it reads as the rule under
+   the row, and costs the row no height. */
+.sb-compare-bar{position:absolute;left:0;right:0;bottom:0;display:flex;width:100%;height:3px;
+  border-radius:0;overflow:hidden;background:rgba(255,255,255,.07);}
 .sb-cmp-fill{height:100%;transition:flex-basis .6s ease;}
-.sb-cmp-fill-a{background:linear-gradient(90deg,color-mix(in srgb,var(--blue) 55%,transparent),var(--blue));}
-.sb-cmp-fill-b{background:linear-gradient(270deg,color-mix(in srgb,var(--orange) 55%,transparent),var(--orange));}
-.sb-cmp-totals{display:flex;justify-content:space-between;width:100%;font-size:14px;font-weight:800;font-variant-numeric:tabular-nums;}
-.sb-cmp-total-a{color:var(--blue);}
-.sb-cmp-total-b{color:var(--orange);}
+/* Solid + a lightening overlay instead of a color-mix gradient: the old
+   linear-gradient(90deg,color-mix(...),var(--blue)) was invalid on Chrome 100, which killed the
+   whole background and left these bars EMPTY on air. */
+.sb-cmp-fill-a{background:var(--blue);background-image:linear-gradient(90deg,rgba(255,255,255,.30),rgba(255,255,255,0));}
+.sb-cmp-fill-b{background:var(--orange);background-image:linear-gradient(270deg,rgba(255,255,255,.30),rgba(255,255,255,0));}
+
+/* Per-game strip: one column per completed game, split by that game's share of the stat. Shows
+   HOW a category was won — four even games or one blowout. Hidden when the series cache is off. */
+/* ...and the per-game strip is the TOP edge, inset to the cell's padding so it reads as belonging
+   to this row rather than spanning the gap to the next one. */
+.sb-cmp-spark{position:absolute;left:14px;right:14px;top:0;display:flex;align-items:stretch;gap:4px;
+  height:3px;width:auto;margin:0;}
+.sb-cmp-spark.is-empty{display:none;}
+.sb-cmp-sparkcol{flex:1 1 0;display:flex;flex-direction:column;height:100%;
+  border-radius:3px;overflow:hidden;background:rgba(255,255,255,.06);min-width:6px;}
+.sb-cmp-sparkcol.a{background:rgba(var(--blue-rgb),.85);}
+.sb-cmp-sparkcol.b{background:rgba(var(--orange-rgb),.85);}
+.sb-cmp-sparkcol.tie{background:rgba(255,255,255,.22);}
+
+/* Footer verdict — the board's conclusion, spanning the centre column. */
+.sb-cmp-verdict{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:center;gap:4px 8px;padding:9px 12px;margin-top:2px;
+  border-radius:10px;border:1px solid var(--hair);background:rgba(255,255,255,.04);
+  font-size:12px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);text-align:center;}
+.sb-cmp-verdict b{font-size:15px;letter-spacing:.04em;}
+.sb-cmp-verdict span{white-space:nowrap;}
+.sb-cmp-verdict b.a{color:var(--blue);}
+.sb-cmp-verdict b.b{color:var(--orange);}
 
 /* sponsor slot */
 .sb-sponsor{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;}
@@ -1084,6 +1273,15 @@ body.sb-external #sb{display:none !important;}
 <div id="replay-wipe" class="replay-wipe hidden">
   <!-- shutter-slam bars: sweep in staggered from alternating sides, snap solid, peel out in sequence -->
   <div class="rw-bars" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
+  <!-- CINEMA style furniture: letterbox + scrolling type + film texture. display:none unless .style-cinema. -->
+  <div class="rw-cine" aria-hidden="true">
+    <div class="rwc-tex"></div>       <!-- vignette + team-colour glow in the window -->
+    <div class="rwc-grain"></div>     <!-- subtle film grain -->
+    <i class="rwc-lb top"></i>
+    <div class="rwc-marquee r1"><span id="rwc-row1"></span></div>
+    <div class="rwc-marquee r3"><span id="rwc-row3"></span></div>
+    <i class="rwc-lb bot"></i>
+  </div>
   <img id="replay-skin" class="replay-skin hidden" alt="">
   <div class="replay-scrim"></div>
   <div class="replay-stack">
@@ -1242,12 +1440,15 @@ body.sb-external #sb{display:none !important;}
 <script>
 /* ════════════════════════════ RL HUD CLIENT ════════════════════════════════
    Same data contract as overlay/app.js:
-   full_state / state_update / view_change / game_reset over ws://localhost:3001
+   full_state / state_update / view_change / game_reset over ws://127.0.0.1:3001
    player: { name, team(0 blue|1 orange — may arrive as a string), score, goals,
              assists, saves, shots, demos, boost, isDemolished, primaryid, isPrimary }
    ═══════════════════════════════════════════════════════════════════════════ */
-const WS_URL = 'ws://' + (location.hostname || 'localhost') + ':3001';   // host-aware: works when the source is loaded from another machine via http://<host>:3000
-const HTTP_BASE = 'http://' + (location.hostname || 'localhost') + ':3000';
+const _HOST = (!location.hostname || location.hostname === 'localhost') ? '127.0.0.1' : location.hostname;
+const WS_URL = 'ws://' + _HOST + ':3001';        // host-aware for LAN sources; localhost -> 127.0.0.1 (::1 trap)
+// Same-origin for HTTP: fetching a different host string from this page is cross-origin and most
+// /api routes send no CORS headers. Absolute base only for a file:// preview.
+const HTTP_BASE = /^https?:$/.test(location.protocol) ? location.origin : 'http://127.0.0.1:3000';
 // Dedicated scoreboard-only browser source: rl-hud.html?only=scoreboard shows ONLY the post-game board.
 const SB_ONLY = /[?&]only=(scoreboard|sb)\b/i.test(location.search);
 if (SB_ONLY) document.documentElement.classList.add('sb-only');
@@ -1268,8 +1469,21 @@ function inkFor(col){
 function applyTeamColors(teams){
   const b = teams && teams.blue && teams.blue.color;
   const o = teams && teams.orange && teams.orange.color;
-  if(b){ BLUE = b;   document.documentElement.style.setProperty('--blue', b); }
-  if(o){ ORANGE = o; document.documentElement.style.setProperty('--orange', o); }
+  // Keep the rgb channels in step with the colours — every tint in the compare skin is an
+  // rgba(var(--x-rgb), a), so a team colour change that skipped these would leave stale tints.
+  const _chan = (c) => {
+    const t = String(c || '').trim();
+    let m = t.match(/^#([0-9a-f]{3})$/i);
+    if (m) return [0,1,2].map((i) => parseInt(m[1][i] + m[1][i], 16)).join(',');
+    m = t.match(/^#([0-9a-f]{6})$/i);
+    if (m) return [0,2,4].map((i) => parseInt(m[1].substr(i, 2), 16)).join(',');
+    m = t.match(/^rgba?\(\s*(\d+)[\s,]+(\d+)[\s,]+(\d+)/i);
+    return m ? m[1] + ',' + m[2] + ',' + m[3] : null;
+  };
+  if(b){ BLUE = b;   document.documentElement.style.setProperty('--blue', b);
+         const ch = _chan(b); if (ch) document.documentElement.style.setProperty('--blue-rgb', ch); }
+  if(o){ ORANGE = o; document.documentElement.style.setProperty('--orange', o);
+         const ch = _chan(o); if (ch) document.documentElement.style.setProperty('--orange-rgb', ch); }
 }
 
 let currentState = {};
@@ -1823,6 +2037,14 @@ function applyReplayColor(){
   }
   document.documentElement.style.setProperty('--replay-color', color);
 }
+/* CINEMA style: fill each scrolling row with the replay label repeated. Written TWICE per row so
+   the -50% loop is seamless, and rebuilt on every play because the producer can rename the label
+   (state.replay.label) mid-show. Separator is an interpunct, not a glyph that needs a font. */
+function fillReplayMarquee(){
+  const label = ((currentState.replay||{}).label || 'REPLAY').toString().toUpperCase();
+  const run = (new Array(9).fill(label + '  ·  ')).join('');
+  ['rwc-row1','rwc-row3'].forEach((id)=>{ const n=el(id); if(n) n.textContent = run + run; });
+}
 // plays the swipe; ALWAYS runs to completion (self-hides) so it swipes away smoothly.
 // mode 'full' = REPLAY text + sponsor logo (at the goal); 'logo' = logo only (after the replay).
 function showReplay(mode){
@@ -1833,6 +2055,11 @@ function showReplay(mode){
   const w=el('replay-wipe'); if(!w) return;
   const logoOnly = mode==='logo';
   w.classList.toggle('logo-only', logoOnly);
+  // Which transition look — set per event in Match▸Teams (state.replay.style). Unknown values fall
+  // back to the shutter slam, so an older saved state or a future style can never blank the wipe.
+  const rpStyle = ((currentState.replay||{}).style === 'cinema') ? 'cinema' : 'slam';
+  w.classList.toggle('style-cinema', rpStyle === 'cinema');
+  if(rpStyle === 'cinema' && !logoOnly) fillReplayMarquee();
   // logo source: full → replay sponsor, else brand-kit logo.
   // OUTRO → the dedicated outro logo; but only FALL BACK to the generic sponsor/brand logo when there
   // is NO skin. A branded full-frame "replay background" skin already carries the sponsor mark, so the
@@ -1861,10 +2088,38 @@ function showReplay(mode){
     }
   }
   if(logoOnly && !logo && !hasSkin) return;   // nothing at all to show on the outro → skip it entirely
-  w.classList.remove('hidden','play'); void w.offsetWidth; w.classList.add('play');
-  // hide AFTER the sweep finishes — must clear --rp-dur PLUS the shutter stagger (last bar is +180ms),
-  // else the final bars get cut off mid-flight.
-  clearTimeout(replayTimer); replayTimer=setTimeout(()=>{ w.classList.add('hidden'); w.classList.remove('play'); }, logoOnly?2150:2850);
+  w.classList.remove('hidden','play','rp-hold'); void w.offsetWidth; w.classList.add('play');
+  clearTimeout(replayTimer); clearTimeout(introHoldTimer); clearTimeout(introHoldSafety);
+  if(logoOnly){
+    // OUTRO: already timed to the replay's END (see TRANSITION 2). Just hide after the sweep finishes
+    // (--rp-dur PLUS the shutter stagger, or the final bars get cut off mid-flight).
+    replayTimer=setTimeout(()=>{ w.classList.add('hidden'); w.classList.remove('play'); }, 2150);
+  } else {
+    // INTRO: cover in, then HOLD the cover SOLID until the game actually cuts to the replay
+    // (view_change 'goal' → resumeIntroReveal), then peel to reveal it — so the reveal always lands ON
+    // the camera change, however long RL takes to cut (it varies ~2.5–4s, which is why a fixed-length
+    // intro sometimes peeled early). If the cut already happened, it just peels normally.
+    const durMs=2600;
+    introHoldTimer=setTimeout(()=>{
+      if(goalCycleActive && !replayStarted){
+        w.classList.add('rp-hold');                                 // freeze every wipe animation → solid cover
+        introHoldSafety=setTimeout(resumeIntroReveal, INTRO_MAX_HOLD_MS);   // never hang if the cut event is missed
+      }
+    }, Math.round(durMs*0.72));   // ~end of the hold, right before the peel
+    // Auto-hide ONLY when we did NOT end up holding (the cut came before the hold point). Guarded so a
+    // frozen (held) cover is never yanked away mid-hold — resumeIntroReveal owns the hide once held.
+    replayTimer=setTimeout(()=>{ if(!w.classList.contains('rp-hold')){ w.classList.add('hidden'); w.classList.remove('play'); } }, 2850);
+  }
+}
+// The game cut to the replay (or the hold safety fired) → unfreeze the intro so it PEELS, revealing the
+// replay, then hide once the peel finishes. No-op if we weren't holding (cut came early → peels itself).
+function resumeIntroReveal(){
+  const w=el('replay-wipe'); if(!w) return;
+  clearTimeout(introHoldTimer); clearTimeout(introHoldSafety);
+  if(!w.classList.contains('play') || !w.classList.contains('rp-hold')) return;
+  w.classList.remove('rp-hold');   // resume → the peel plays out from where it froze
+  clearTimeout(replayTimer);
+  replayTimer=setTimeout(()=>{ w.classList.add('hidden'); w.classList.remove('play','rp-hold'); }, 1000);   // remaining peel + stagger
 }
 // hideReplay must NOT interrupt an in-flight swipe — it self-completes via its own timer
 function hideReplay(){ clearTimeout(goalRevealTimer); }
@@ -1875,6 +2130,10 @@ function hideReplay(){ clearTimeout(goalRevealTimer); }
 //   view_change goal → replay started → show the scorer lower third (+ fires T1 if not yet shown) [showView]
 //   view_change hud  → replay ENDED → TRANSITION 2 (logo outro), then kickoff                     [endGoalCycle]
 let replayOutroTimer=null, outroPlayed=false, replayStarted=false, brazilGoal=false, introTimer=null, introPlayed=false;
+let introHoldTimer=null, introHoldSafety=null;   // intro-cover freeze (hold until the real replay cut)
+// If the replay-cut event (view_change 'goal') never arrives, reveal anyway after this long holding —
+// the cut is normally 2.5–4s after the goal, so a held cover rarely waits more than ~1s in practice.
+const INTRO_MAX_HOLD_MS = 4000;
 let hudArmed=true, prevGameTime=null, hudRearmSafety=null, kickoffHold=false, kickoffHoldStart=0;
 // ── transition timing ─────────────────────────────────────────────────────────
 // TRANSITION 1 fires this long after the ball hits the net — tuned so it lands a beat before the
@@ -1921,7 +2180,9 @@ function goalEvent(side){
   clearTimeout(goalCycleTimer); goalCycleTimer=setTimeout(endGoalCycle, 15000);
   triggerGoalName(side);
   currentState._goal = Object.assign({}, currentState._goal, {team:side});
-  clearTimeout(introTimer); introTimer=setTimeout(fireIntroSwipe, GOAL_TO_REPLAY_MS);
+  clearTimeout(introTimer); clearTimeout(introHoldTimer); clearTimeout(introHoldSafety);
+  el('replay-wipe')?.classList.remove('rp-hold');   // fresh goal → clear any leftover held cover
+  introTimer=setTimeout(fireIntroSwipe, GOAL_TO_REPLAY_MS);
 }
 // TRANSITION 1 — fires exactly once, whichever comes first: the GOAL_TO_REPLAY_MS timer, or the
 // replay actually starting (showView 'goal'). Brazil goals play the flag swipe in its place.
@@ -2171,7 +2432,10 @@ function renderScoreboard(playerCache, state, series, isLive){
   const body=el('sb-body'); if(body){ body.innerHTML='';
     if(showStats){
       if(design==='radar') renderStatRadar(body, {nameA, nameB, A, B, aWon, bWon});
-      else if(design==='compare') renderStatCompare(body, {nameA, logoA, A, aWon, nameB, logoB, B, bWon, mvp});
+      else if(design==='compare') renderStatCompare(body, {nameA, logoA, A, aWon, nameB, logoB, B, bWon, mvp,
+        // Banked per-game totals for the per-game strip. Passed from the state being RENDERED
+        // rather than read off the module global, so a replayed/older board can't pick up newer games.
+        games: ((state.seriesStats || {}).games) || []});
       else { group(nameA, logoA, A, aWon, 'var(--blue)'); group(nameB, logoB, B, bWon, 'var(--orange)'); }
     }
   }
@@ -2279,19 +2543,31 @@ function renderStatRadar(body, o){
 }
 
 /* COMPARE stats-screen skin: teams as side-by-side player columns (not stacked, unlike every other
-   skin) with a center column between them holding one proportional split bar per stat — each team's
-   TOTAL for that stat labeled at the bar's own ends, so "who's winning this category" reads instantly
-   without doing the arithmetic yourself. Column count follows the actual roster size (2v2/3v3/etc),
-   not hardcoded to 3. */
+   skin) with a HEAD-TO-HEAD cell between them for each stat — team totals, which side leads, the
+   gap between them, and a per-game strip showing how that category was won. Column count follows
+   the actual roster size (2v2/3v3/etc), not hardcoded to 3. */
 function renderStatCompare(body, o){
   const { nameA, logoA, A, aWon, nameB, logoB, B, bWon, mvp } = o;
   const totals = list => SB_STATS.map(s => list.reduce((sum,p)=>sum+(Number(p[s])||0), 0));
   const TA = totals(A), TB = totals(B);
   const n = Math.max(A.length, B.length, 1);
 
+  // Per-GAME team totals, for the strip under each bar. Only available when the producer has
+  // "Keep stats across the series" on; with it off the strip is simply omitted rather than faked.
+  // team 0 = blue/A, 1 = orange/B (see captureSeriesStatsGame).
+  const games = o.games || [];
+  const perGame = SB_STATS.map((stat) => games.map((g) => {
+    let a = 0, b = 0;
+    (g.players || []).forEach((p) => {
+      const v = Number(p[stat]) || 0;
+      if (Number(p.team) === 1) b += v; else a += v;
+    });
+    return { a, b };
+  }));
+
   const wrap = document.createElement('div'); wrap.className = 'sb-compare';
   const grid = document.createElement('div'); grid.className = 'sb-compare-grid';
-  grid.style.gridTemplateColumns = `repeat(${n},1fr) 240px repeat(${n},1fr)`;
+  grid.style.gridTemplateColumns = `repeat(${n},1fr) 320px repeat(${n},1fr)`;
 
   function playerCell(p, side, won){
     const c = document.createElement('div'); c.className = 'sb-cmp-name side-'+side + (won?' win':'') + (p && p.name===mvp?' mvp':'');
@@ -2312,28 +2588,84 @@ function renderStatCompare(body, o){
   // Header row — one name badge per player column, blank-ish center (event/brand already header the
   // whole board above — no need to repeat it inside the skin, and no third-party-style "powered by").
   for(let i=0;i<n;i++) grid.appendChild(playerCell(A[i], 'a', aWon));
-  const centerHead = document.createElement('div'); centerHead.className = 'sb-cmp-center-head';
-  centerHead.innerHTML = `<img src="${logoA||'/assets/rl.png'}" alt=""><span>${nameA||''}</span><b>VS</b><span>${nameB||''}</span><img src="${logoB||'/assets/rl.png'}" alt="">`;
-  grid.appendChild(centerHead);
+  // The verdict HEADS the centre column: it is the board's conclusion, and a caster reads the top
+  // of a column before its bottom. Tallied up front rather than during the stat loop so it can be
+  // built before the rows it summarises. (This cell also has to exist regardless — the grid is
+  // filled FLAT in row-major order, so skipping it would shift every player column left by one.)
+  let wonA = 0, wonB = 0, tied = 0;
+  SB_STATS.forEach((_s, i) => { if (TA[i] > TB[i]) wonA++; else if (TB[i] > TA[i]) wonB++; else tied++; });
+  const verdict = document.createElement('div'); verdict.className = 'sb-cmp-verdict';
+  const vLead = wonA > wonB ? 'a' : wonB > wonA ? 'b' : '';
+  if (vLead) {
+    const who = document.createElement('b'); who.className = vLead;
+    who.textContent = (vLead === 'a' ? (nameA || 'Blue') : (nameB || 'Orange')).toUpperCase();
+    const txt = document.createElement('span');
+    txt.textContent = 'leads ' + Math.max(wonA, wonB) + ' of ' + SB_STATS.length + ' categories' + (tied ? ' · ' + tied + ' tied' : '');
+    verdict.appendChild(who); verdict.appendChild(txt);
+  } else {
+    verdict.textContent = wonA === 0 && wonB === 0
+      ? 'No categories decided yet'
+      : 'Even — ' + wonA + ' categories each' + (tied ? ' · ' + tied + ' tied' : '');
+  }
+  grid.appendChild(verdict);
   for(let i=0;i<n;i++) grid.appendChild(playerCell(B[i], 'b', bWon));
 
-  // One row per stat: player values on the outside, a team-total comparison bar in the center.
+  // Boundary closing the name band off from the numbers. Appended once the header row is COMPLETE —
+  // this grid is auto-placed in order, so a full-width item dropped mid-row splits that row and
+  // shunts every cell after it onto the next line. Spans all columns (1 / -1) so it is one
+  // continuous rule; a per-cell border would be broken up by the grid's column gaps.
+  const divider = document.createElement('div'); divider.className = 'sb-cmp-divider';
+  grid.appendChild(divider);
+
+  // One row per stat: player values on the outside, the head-to-head cell in the centre.
   SB_STATS.forEach((stat,i)=>{
     for(let p=0;p<n;p++) grid.appendChild(statCell(A[p], stat));
 
-    const center = document.createElement('div'); center.className = 'sb-cmp-center';
+    const lead = TA[i] > TB[i] ? 'a' : TB[i] > TA[i] ? 'b' : '';
+
+    const center = document.createElement('div');
+    center.className = 'sb-cmp-center' + (lead ? ' lead-' + lead : ' tied');
+
     const lbl = document.createElement('div'); lbl.className = 'sb-cmp-lbl'; lbl.textContent = SB_LABELS[i];
+
+    // Totals + the gap. Printing the difference saves the caster the subtraction.
+    const nums = document.createElement('div'); nums.className = 'sb-cmp-totals';
+    const numA = document.createElement('span'); numA.className = 'sb-cmp-total-a'; numA.textContent = TA[i];
+    const gap = document.createElement('span'); gap.className = 'sb-cmp-gap';
+    const diff = Math.abs(TA[i] - TB[i]);
+    gap.textContent = lead ? '+' + diff : (TA[i] === 0 && TB[i] === 0 ? '—' : 'TIED');
+    const numB = document.createElement('span'); numB.className = 'sb-cmp-total-b'; numB.textContent = TB[i];
+    // Label + gap ride the MIDDLE of the totals line — the stack that used to put the label on its
+    // own row above is what made this cell taller than the player boxes either side of it.
+    const mid = document.createElement('div'); mid.className = 'sb-cmp-mid';
+    mid.appendChild(lbl); mid.appendChild(gap);
+    nums.appendChild(numA); nums.appendChild(mid); nums.appendChild(numB);
+
     const bar = document.createElement('div'); bar.className = 'sb-compare-bar';
     const sum = TA[i] + TB[i];
     const pctA = sum > 0 ? (TA[i] / sum) * 100 : 50;   // both-zero (e.g. no saves yet) → neutral 50/50, never a divide-by-zero blank
     const fillA = document.createElement('div'); fillA.className = 'sb-cmp-fill sb-cmp-fill-a'; fillA.style.flexBasis = pctA + '%';
     const fillB = document.createElement('div'); fillB.className = 'sb-cmp-fill sb-cmp-fill-b'; fillB.style.flexBasis = (100-pctA) + '%';
     bar.appendChild(fillA); bar.appendChild(fillB);
-    const nums = document.createElement('div'); nums.className = 'sb-cmp-totals';
-    const numA = document.createElement('span'); numA.className = 'sb-cmp-total-a'; numA.textContent = TA[i];
-    const numB = document.createElement('span'); numB.className = 'sb-cmp-total-b'; numB.textContent = TB[i];
-    nums.appendChild(numA); nums.appendChild(numB);
-    center.appendChild(lbl); center.appendChild(bar); center.appendChild(nums);
+
+    // Per-game strip: one column per completed game, split by that game's share of this stat.
+    const spark = document.createElement('div'); spark.className = 'sb-cmp-spark';
+    const gs = perGame[i] || [];
+    if (!gs.length) spark.classList.add('is-empty');
+    // One block per completed game, coloured by who LED that category in that game. A vertical
+    // share-split was tried first and is simply unreadable at strip height — it reads as flat blocks.
+    gs.forEach((g, gi) => {
+      const col = document.createElement('div');
+      const side = g.a > g.b ? 'a' : g.b > g.a ? 'b' : 'tie';
+      col.className = 'sb-cmp-sparkcol ' + side;
+      col.title = 'Game ' + (gi + 1) + ' — ' + SB_LABELS[i] + ' ' + g.a + ' / ' + g.b;
+      spark.appendChild(col);
+    });
+
+    // Strip on the top edge, totals on the line, share bar on the bottom edge. The "by game"
+    // caption is gone with the stack — there is no second line to put it on, and a strip pinned to
+    // the row's own edge doesn't read as a second progress bar the way a floating one did.
+    center.appendChild(spark); center.appendChild(nums); center.appendChild(bar);
     grid.appendChild(center);
 
     for(let p=0;p<n;p++) grid.appendChild(statCell(B[p], stat));
@@ -2369,6 +2701,7 @@ function showView(name){
     // entering the replay → hide the live HUD, show the scorer LT + (optional) all-player cam grid
     if(activeView!=='goal'){ replayStarted=true; hudHideForReplay(); showReplayLowerThird(); showReplayCams();
       clearTimeout(introTimer); fireIntroSwipe();   // make sure TRANSITION 1 has shown by the time the replay starts
+      resumeIntroReveal();                          // the REAL cut is now → peel a held intro cover to reveal the replay
       replayStartAt=Date.now();                     // start the clock for the synthesized outro cue
       if(!brazilGoal) scheduleReplayOutro();         // fire the outro at a consistent point before the kickoff
     }
@@ -2704,7 +3037,7 @@ function dispatch(msg){
       { const cp=el('cam-pool'); if(cp) cp.innerHTML=''; const cm=el('cam'); if(cm){ [...cm.querySelectorAll('iframe')].forEach(f=>f.remove()); } }
       el('br').classList.remove('show'); el('cam').classList.remove('on'); syncSponsorToStatcard();
       prevBlue=prevOrange=null; colCache={}; activeView=null; otShown=false; pcPrev={};
-      goalCycleActive=false; outroPlayed=false; replayStarted=false; brazilGoal=false; introPlayed=false; lastSwipeAt=0; clearTimeout(goalCycleTimer); clearTimeout(replayOutroTimer); clearTimeout(introTimer); el('replay-wipe').classList.remove('logo-only');
+      goalCycleActive=false; outroPlayed=false; replayStarted=false; brazilGoal=false; introPlayed=false; lastSwipeAt=0; clearTimeout(goalCycleTimer); clearTimeout(replayOutroTimer); clearTimeout(introTimer); clearTimeout(introHoldTimer); clearTimeout(introHoldSafety); el('replay-wipe').classList.remove('logo-only','rp-hold');
       endBrazil();   // a fresh game can't inherit a stuck BRAZIL theme (e.g. previous game ended 7-1)
       hideReplayLowerThird(); hideReplayCams();   // hide the replay LT + cam grid
       prevGameTime=null; hudShow();   // a new game shows the HUD straight away
@@ -2727,7 +3060,10 @@ async function connect(){
   }
   const ws=new WebSocket(WS_URL + (_wsToken ? ('?token=' + encodeURIComponent(_wsToken)) : ''));
   ws.onopen=()=>{ try{ ws.send(JSON.stringify({type:'register',role:'overlay',page:location.pathname})); }catch(e){} ws.send(JSON.stringify({type:'request_state'})); };
-  ws.onmessage=({data})=>{ let msg; try{ msg=JSON.parse(data); }catch{ return; } dispatch(msg); };
+  // A throw inside dispatch used to escape here and leave the HUD frozen on its last frame for the
+  // rest of the show, with nothing logged. Contain it, exactly as SceneBase does for its scenes.
+  ws.onmessage=({data})=>{ let msg; try{ msg=JSON.parse(data); }catch{ return; }
+    try { dispatch(msg); } catch (e) { console.error('[rl-hud] render error on ' + (msg && msg.type) + ':', e); } };
   ws.onclose=()=>setTimeout(connect,800);
   ws.onerror=()=>{ try{ ws.close(); }catch{} };
 }

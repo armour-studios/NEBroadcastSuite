@@ -6,7 +6,7 @@
    (evAutoLoad/renderMyEvents/evStatus/…) are runtime, typeof-guarded in app.js. */
 
 // ══════════════ Events tab — start.gg admin tournaments + sponsorship data ══════════════
-const EV_API = 'http://localhost:3000/api/startgg';
+const EV_API = 'http://127.0.0.1:3000/api/startgg';
 let _evDetail = null;
 let _evTournaments = [];
 let _evFilter = 'upcoming';   // 'upcoming' | 'past' | 'all'
@@ -74,7 +74,7 @@ async function evLoadChallongeTournaments() {
   const btn = el('ev-load'); if (btn) btn.disabled = true;
   evStatus('Loading your Challonge tournaments…');
   try {
-    const r = await fetch('http://localhost:3000/api/challonge/my-tournaments', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    const r = await fetch('http://127.0.0.1:3000/api/challonge/my-tournaments', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
     const data = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(data.error || ('HTTP ' + r.status));
     _evTournaments = (data.tournaments || []).map((t) => ({
@@ -93,7 +93,7 @@ async function evLoadNxgenTournaments() {
   const btn = el('ev-load'); if (btn) btn.disabled = true;
   evStatus('Loading your NXGEN events…');
   try {
-    const r = await fetch('http://localhost:3000/api/nxgen/events', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ limit: 100, includePast: true }) });
+    const r = await fetch('http://127.0.0.1:3000/api/nxgen/events', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ limit: 100, includePast: true }) });
     const data = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(data.error || ('HTTP ' + r.status));
     _evTournaments = (data.events || []).map((e) => ({
@@ -115,7 +115,7 @@ async function evLoadFaceitCompetitions() {
   const btn = el('ev-load'); if (btn) btn.disabled = true;
   evStatus('Loading your FACEIT competitions…');
   try {
-    const r = await fetch('http://localhost:3000/api/faceit/my-competitions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    const r = await fetch('http://127.0.0.1:3000/api/faceit/my-competitions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
     const data = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(data.error || ('HTTP ' + r.status));
     _evTournaments = (data.competitions || []).map((c) => ({
@@ -876,7 +876,7 @@ async function evSyncPush() {
       if (!rawSlug) throw new Error('Enter a URL slug.');
 
       setLog('Creating tournament…', null);
-      const cr = await fetch('http://localhost:3000/api/challonge/create-tournament', {
+      const cr = await fetch('http://127.0.0.1:3000/api/challonge/create-tournament', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name, slug: rawSlug, tournamentType: type, gameName, private: isPrivate })
@@ -910,7 +910,7 @@ async function evSyncPush() {
     // eventSlug lets the server override each seed with start.gg's TRUE bracket seed (initialSeedNum)
     // instead of trusting locally-cached roster/seeding-studio order, which can drift from what
     // actually produced the real bracket's bye placement.
-    const sr = await fetch('http://localhost:3000/api/challonge/sync-participants', {
+    const sr = await fetch('http://127.0.0.1:3000/api/challonge/sync-participants', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ tournamentSlug: slug, participants, clearExisting, eventSlug: _evSyncEvent && _evSyncEvent.eventSlug })
@@ -928,7 +928,7 @@ async function evSyncPush() {
 
     if (alreadySetUp && _evSyncEvent && _evSyncEvent.eventSlug) {
       setLog('Bracket already started — repairing seeds & regenerating to match start.gg…', null);
-      const rb = await fetch('http://localhost:3000/api/challonge/rebuild-bracket', {
+      const rb = await fetch('http://127.0.0.1:3000/api/challonge/rebuild-bracket', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ tournamentSlug: slug, eventSlug: _evSyncEvent.eventSlug })
       }).then(r => r.json());
@@ -936,7 +936,7 @@ async function evSyncPush() {
       setLog(rb.message || 'Bracket rebuilt.', null);
     } else if (startBracket) {
       setLog('Generating bracket…', null);
-      const br = await fetch('http://localhost:3000/api/challonge/start-bracket', {
+      const br = await fetch('http://127.0.0.1:3000/api/challonge/start-bracket', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ tournamentSlug: slug })
@@ -953,7 +953,7 @@ async function evSyncPush() {
     if (_evSyncEvent && _evSyncEvent.eventSlug) {
       setLog('Pulling match results from start.gg…', null);
       try {
-        const pr = await fetch('http://localhost:3000/api/challonge/push-results', {
+        const pr = await fetch('http://127.0.0.1:3000/api/challonge/push-results', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ tournamentSlug: slug, eventSlug: _evSyncEvent.eventSlug })
         }).then(r => r.json());
@@ -1082,7 +1082,7 @@ function renderChalLinkDropdown(tournaments, filterQuery) {
       const community = (el('ev-chal-link-community')?.value || '').trim();
       if (community) localStorage.setItem('ne_challonge_community', community);
       const subdomains = community ? [community] : [];
-      const resp = await fetch('http://localhost:3000/api/challonge/my-tournaments', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ subdomains }) });
+      const resp = await fetch('http://127.0.0.1:3000/api/challonge/my-tournaments', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ subdomains }) });
       const data = await resp.json();
       _chalLinkTournaments = resp.ok ? (data.tournaments || []) : [];
       renderChalLinkDropdown(_chalLinkTournaments, '');
@@ -1289,7 +1289,7 @@ function renderEvSyncChalDropdown(tournaments, filterQuery) {
         const community = (el('ev-sync-chal-community')?.value || '').trim();
         if (community) localStorage.setItem('ne_challonge_community', community);
         const subdomains = community ? [community] : [];
-        const resp = await fetch('http://localhost:3000/api/challonge/my-tournaments', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ subdomains }) });
+        const resp = await fetch('http://127.0.0.1:3000/api/challonge/my-tournaments', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ subdomains }) });
         const data = await resp.json();
         _evSyncChalTournaments = resp.ok ? (data.tournaments || []) : [];
         renderEvSyncChalDropdown(_evSyncChalTournaments, '');

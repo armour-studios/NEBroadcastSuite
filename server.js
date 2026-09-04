@@ -172,9 +172,7 @@ function probeVideoInfo(file) {
 const { registerTwitchWebhooks } = require('./backend/integrations/twitch-webhooks');
 const { TwitchClient } = require('./backend/integrations/twitch-client');
 const { SocialPublisher } = require('./backend/social-publisher');
-const { SocialWeekly }    = require('./backend/social-weekly');
 const liquipedia         = require('./backend/integrations/liquipedia-client');
-const SocialNamingCore    = require('./control-panel/social-naming-core');
 const { PredictionManager } = require('./backend/integrations/twitch-predictions');
 const { WheelManager } = require('./backend/integrations/twitch-wheel');
 const { MiniGameManager } = require('./backend/integrations/twitch-minigames');
@@ -185,7 +183,6 @@ let twitchDataFile = '';
 let discordDataFile = '';
 let twitchClient = null;
 let socialPublisher = null;
-let socialWeekly = null;   // weekly Twitch-clips → YouTube automation (backend/social-weekly.js)
 let youtubeChat = null;   // YouTube Live Chat poller (multichat source #2)
 let kickChat = null;      // Kick Pusher chat (multichat source #3)
 let discordChat = null;   // Discord bot gateway chat (multichat source #4)
@@ -573,6 +570,16 @@ function gameHasFeature(gameId, feat) {
 }
 
 // ─── State ───────────────────────────────────────────────────────────────────
+// The winner reveal's look. 'slam' is the cinematic full-bleed default; 'depth' is the previous
+// centred medallion, kept so an event that was cut against it can stay on it. Declared ABOVE state
+// so the startup restore, which validates against it, can never hit a temporal-dead-zone error.
+const WINNER_STYLES = ['slam', 'depth'];
+
+// The look of the full-screen replay transition. 'slam' is the shutter-bar wipe that shipped;
+// 'cinema' is the letterboxed scrolling-type treatment. Declared ABOVE state for the same
+// temporal-dead-zone reason WINNER_STYLES is.
+const REPLAY_STYLES = ['slam', 'cinema'];
+
 let state = {
   version: appVersion,
   view: 'hud',              // 'hud' | 'scoreboard' | 'goal'
@@ -656,7 +663,10 @@ let state = {
   // LISTEN IN — the player whose audio + live captions are currently on-air (listen-in.html).
   listenIn: { active: false, side: '', name: '', url: '' },
   // Break / "starting soon" standby. endsAt = epoch ms target for the countdown scene; null = no timer.
-  breakScreen: { visible: false, title: 'STARTING SOON', message: '', endsAt: null, frozenSeconds: null, finalMessage: "WE'RE LIVE!", thenScene: '', thenPlayout: '' },
+  // titleOnly: show the countdown TITLE with no clock beside it — for a scene where the label is
+  // the whole point ("INTERMISSION") and a ticking number would just be noise. The timer itself
+  // keeps running; this only changes what the scenes draw.
+  breakScreen: { visible: false, title: 'STARTING SOON', message: '', endsAt: null, frozenSeconds: null, finalMessage: "WE'RE LIVE!", thenScene: '', titleOnly: false },
   ticker: { visible: false, messages: [], speed: 10, source: 'manual', feed: [], sponsor: '' },   // scrolling lower-third; speed = loop seconds
   // Sponsor proof-of-play: archived per-broadcast impression reports (estimated on-screen seconds
   // per sponsor logo, by placement). The live session is tracked in-memory (adProof); completed
@@ -664,7 +674,8 @@ let state = {
   adProofSessions: [],
   spotlight: { visible: false, playerName: '' },          // featured-player lower-third (live stats)
   // Post-match WINNER screen (game-agnostic). side resolves a team from `teams`; or set name/logo/color directly.
-  winner: { visible: false, side: '', name: '', logo: null, color: '', subtitle: '' },
+  // style: see WINNER_STYLES.
+  winner: { visible: false, side: '', name: '', logo: null, color: '', subtitle: '', style: 'slam' },
   // Map veto / map-pool overview board (CS2/Valorant/etc.). Each map: name, mode, image, action, by, score, winner.
   // action: 'ban'|'pick'|'decider'|''  by: 'a'|'b'|''  winner: 'a'|'b'|''  score: { a, b }
   veto: { visible: false, title: '', maps: [] },
@@ -719,12 +730,22 @@ let state = {
   // (e.g. tournament-organizer logo); colorMode: 'team' | 'mono' (B&W).
   // skin = a full-frame TRANSPARENT PNG shown over the whole replay (a branded frame/border to
   // "skin" replays); null = none.
-  replay: { label: 'REPLAY', logo: null, outroLogo: null, colorMode: 'team', skin: null },
+  replay: { label: 'REPLAY', logo: null, outroLogo: null, colorMode: 'team', skin: null, style: 'slam' },   // style: see REPLAY_STYLES
   // Scoreboard ad slot — sponsor logo + uploadable scene background on the scorecard.
   scoreboardAd: { label: 'PRESENTED BY', logo: null, background: null },
   // Post-game stats screen skin (RL scoreboard). showStats=false shows a clean FINAL-only board;
   // design picks the look of the per-team stat table: default | glass | block | radar.
   rlStatsScreen: { showStats: true, design: 'default' },
+  // Series-long RL player stats (opt-in). playerCache is wiped on every MatchCreated, so nothing
+  // survives into game 2 — this slice keeps a SNAPSHOT of each COMPLETED game's final per-player
+  // line and the overlay adds the live game on top. Storing only finished games means it changes
+  // once per game instead of on every stat tick, so a running game costs the live payload nothing.
+  // enabled defaults OFF: existing shows are untouched until a producer turns it on.
+  // liveBanked closes a double-count window: between MatchEnded (which banks the game) and the next
+  // MatchCreated (which wipes playerCache), the cache still holds numbers that are already in
+  // games[]. While it is true the board shows banked games only; the live game is added on top again
+  // as soon as the next game re-baselines the cache.
+  seriesStats: { enabled: false, visible: false, design: 'table', games: [], liveBanked: false },
   // OBS background browser source (background.html). type: 'solid'|'gradient'|'image'.
   background: { type: 'gradient', color1: '#07090f', color2: '#0c1220', angle: 135, imageUrl: '' },
   // Desk footer logos — manual Dashboard override. When non-empty these replace the active
@@ -966,6 +987,10 @@ let state = {
     streams: [],           // [streamName] available on the tournament
     streamName: '',        // selected stream to follow ('' = first/any)
     queue: [],             // [{ setId, stream, round, state, teamA, teamB, live }]
+    // Archive of matches that were on air / played on the followed stream this event — so the producer
+    // can review what the queue held AFTER the event. Accumulated per poll, cleared on a new event.
+    queueArchive: [],      // [{ setId, stream, round, teamA, teamB, scoreA, scoreB, done, ts }]
+    archiveEventSlug: '',  // which event queueArchive belongs to (clear the archive when it changes)
     teamQueue: [],         // team-search results (non-admin path)
     focusTeam: '',         // team name to highlight in bracket overlay
     matchFeed: [],         // [{ setId, round, teamA, teamB, scoreA, scoreB, status, stream }] for desk tickers
@@ -1045,6 +1070,9 @@ let state = {
     logoMap: {},           // name.toLowerCase() → logo URL
     queue: [],             // [{ matchId, round, teamA, teamB, logoA, logoB, scoreA, scoreB, status, live }]
     queueFetchedAt: null,
+    // Live + recently-finished matches for the scores ticker, in the SAME shape start.gg's
+    // matchFeed uses so one overlay code path renders both platforms.
+    matchFeed: [],         // [{ matchId, round, teamA, teamB, logoA, logoB, scoreA, scoreB, status, winSide }]
     autoFollow: false,
     lastAutoFollowMatchId: null
   },
@@ -1240,6 +1268,10 @@ let state = {
     ignoreRounds: 0,     // hide the first N rounds of the bracket (render-time display filter; 0 = show all)
     hideLogos: false,    // render team names only — no logos/abbrev badges (render-time display filter)
     logoWatermark: true, // draw each team's crest behind their name at low opacity (render-time display filter)
+    // How strong that watermark is, in PERCENT. 7 is the tuned default (see .bk-slot-wm); a dark
+    // stream or a busy background wants more, a pale brand less — so it is the producer's to set
+    // rather than a constant in the overlay. 0 hides it, same as logoWatermark:false.
+    watermarkOpacity: 7,
     lastFetchAt: null,
     lastError: null
   },
@@ -2279,7 +2311,7 @@ function applyPackageSnapshot(pkg) {
   if (s.ticker && typeof s.ticker === 'object') {
     if (Array.isArray(s.ticker.messages)) state.ticker.messages = s.ticker.messages.slice(0, 50);
     if (Number(s.ticker.speed) > 0) state.ticker.speed = Number(s.ticker.speed);
-    if (['startgg', 'br', 'manual'].includes(s.ticker.source)) state.ticker.source = s.ticker.source;
+    if (['startgg', 'nxgen', 'br', 'manual'].includes(s.ticker.source)) state.ticker.source = s.ticker.source;
     if (typeof s.ticker.sponsor === 'string') state.ticker.sponsor = s.ticker.sponsor;
   }
   if (s.eventName) state.eventName = String(s.eventName);
@@ -2373,8 +2405,6 @@ function activeBrand() {
     // Package metadata for the editor + Dashboard quick-switch (names only — no base64).
     packages: (Array.isArray(kit.packages) ? kit.packages : []).map((p) => ({ id: p.id, name: p.name })),
     activePackageId: kit.activePackageId || null,
-    // Social card preset (bg image + feature toggles) — stored per brand kit
-    socialPreset: kit.socialPreset || { bgImageUrl: '', bgStyle: 'auto', presentedByEnabled: true },
   };
 }
 
@@ -2779,6 +2809,66 @@ function syncCrewRosterToCloud() {
   } catch (_) { /* cloud not configured — local-first, never throws */ }
 }
 
+// ── cloudLoop: the one scheduler for every background cloud poll ───────────────────
+// Replaces the bare `setInterval(fn, ms)` these polls used to run on. Three things that shape
+// got wrong, in order of how much damage they did:
+//
+//  1. BACKOFF. Every poll was a fixed interval with an empty catch, so an unwell backend got hit
+//     at exactly the same rate as a healthy one, forever. The breaker in cloud-client.js watches
+//     every request; while it says "suspended" this skips the tick WITHOUT making a request, so
+//     one outage quiets all of them together and the recovery window actually opens. (An exhausted
+//     Upstash quota taking the whole site down is precisely this failure.)
+//  2. JITTER, always — not just while failing. Desks boot together before a scheduled show, so
+//     their fixed intervals stay in lockstep all night and land as a burst on every tick. A spread
+//     start + spread period de-correlates them permanently.
+//  3. NO OVERLAP. setInterval fires on schedule whether or not the previous run finished; on a
+//     slow link that stacks runs. Each cycle is armed only after the previous one settles.
+//
+// `fn` may swallow its own errors (most of these do, deliberately — a transient cloud blip must
+// never surface mid-show); the breaker still sees the failed request underneath, so backoff works
+// either way. Anything fn DOES throw is caught here and backs this one loop off on its own.
+const _cloudLoops = new Map();   // name -> status, surfaced in the panel's cloud status readout
+function cloudLoop(name, fn, baseMs, opts = {}) {
+  const maxMs = opts.maxMs || Math.max(baseMs * 8, 5 * 60 * 1000);
+  const spread = (opts.jitter == null ? 0.2 : opts.jitter);
+  const jitter = (ms) => Math.max(1000, Math.round(ms * (1 + (Math.random() * 2 - 1) * spread)));
+  const st = { name, baseMs, fails: 0, lastRunAt: 0, lastOkAt: 0, lastError: '', nextAt: 0, running: false };
+  _cloudLoops.set(name, st);
+
+  const arm = (ms) => { st.nextAt = Date.now() + ms; setTimeout(run, ms); };
+
+  async function run() {
+    st.running = true;
+    let next = baseMs;
+    try {
+      // Breaker open: skip the call entirely and look again just after it lifts. Deliberately does
+      // NOT count as a failure of this loop — it never got to try.
+      const held = (typeof cloud.retryInMs === 'function') ? cloud.retryInMs() : 0;
+      if (held > 0) {
+        next = Math.min(held + 500, maxMs);
+      } else {
+        st.lastRunAt = Date.now();
+        await fn();
+        st.lastOkAt = Date.now();
+        if (st.fails) { console.log(`[cloudLoop:${name}] recovered after ${st.fails} failure(s)`); st.fails = 0; }
+        st.lastError = '';
+      }
+    } catch (e) {
+      st.fails++;
+      st.lastError = (e && e.message) || String(e);
+      // First failure only — a loop that has been down an hour must not fill the log with it.
+      if (st.fails === 1) console.warn(`[cloudLoop:${name}] failed, backing off:`, st.lastError);
+      next = Math.min(baseMs * Math.pow(2, Math.min(st.fails, 6)), maxMs);
+    } finally {
+      st.running = false;
+      arm(jitter(next));
+    }
+  }
+
+  arm(jitter(opts.startAfterMs != null ? opts.startAfterMs : baseMs));
+  return st;
+}
+
 // ── Station check-ins → the desk, automatically ──────────────────────────────
 // Polls the org's website stations and fills claimed CASTER feeds straight into the caster
 // library + desk lineup (web slot N → desk slot N, never bumping an occupied slot) and links/
@@ -2970,7 +3060,7 @@ async function stationAutoSync(opts) {
   } catch (_) { /* transient cloud errors — next poll retries */ }
   finally { _stationSyncBusy = false; }
 }
-setInterval(stationAutoSync, 20000);
+cloudLoop('stations', () => stationAutoSync(), 20000);
 
 // ── Camera check-ins → facecams, automatically ───────────────────────────────
 // A player who picked their IN-GAME player on the website camera page arrives with ingameName —
@@ -3013,7 +3103,7 @@ async function cameraFacecamAutoSync() {
   } catch (_) { /* transient — next poll retries */ }
   finally { _cameraSyncBusy = false; }
 }
-setInterval(cameraFacecamAutoSync, 20000);
+cloudLoop('cameras', () => cameraFacecamAutoSync(), 20000);
 
 // ── AI telemetry upload (Phase 2, opt-in) ──────────────────────────────────────
 // Batches already-recorded local Decision Records (backend/telemetry/recorder.js) to the shared
@@ -3086,7 +3176,20 @@ setTimeout(() => { syncProfileToCloud(); }, 6000);
 // _org-tagged subset each run — additive to local items, never clobbers a same-named local one.
 let _orgPullBusy = false;
 let _orgLibSig = '';
-async function pullOrgLibrary() {
+// Incremental pull state. /api/profiles returns METADATA ONLY (see the website's ProfileMeta) and
+// every row already carries a monotonic `rev`, so we can tell what changed without downloading
+// anything. The bundles themselves — which carry base64 logos inline — are only fetched for
+// profiles whose rev moved.
+//
+// Before this, every tick downloaded EVERY org-mate's full bundle: at 60 sites that is 59 bundles
+// a minute, per desk, bypassing the LIVE/LIBRARY payload tiering and the image vault that exist
+// precisely to keep blobs off the wire. Steady state is now one small metadata request a minute.
+let _orgRevSig = '';                      // id:rev of every mate on the last completed pull
+const _orgBundles = new Map();            // profileId -> { rev, owner, data, bytes }
+let _orgBundleBytes = 0;
+const ORG_BUNDLE_BUDGET = 24 * 1024 * 1024;   // cap the cache; over budget we re-fetch instead of hoarding
+
+async function pullOrgLibrary(opts = {}) {
   if (_orgPullBusy) return { changed: false };
   try {
     if (!cloud.authed()) return { changed: false };
@@ -3096,10 +3199,54 @@ async function pullOrgLibrary() {
     _orgPullBusy = true;
     const profiles = await cloud.listProfiles();
     const mates = (profiles || []).filter((p) => p && p.mine === false);
-    const bundles = [];
-    for (const p of mates) {
-      try { const full = await cloud.getProfile(p.id); bundles.push({ owner: p.ownerName || 'A producer', data: (full.bundle || full || {}).data || {} }); } catch (_) { /* skip unreadable */ }
+
+    // Forget mates who left the org / deleted a profile, so the cache can't grow without bound and
+    // a departed producer's teams don't linger in the union.
+    const liveIds = new Set(mates.map((p) => p.id));
+    for (const [id, hit] of _orgBundles) {
+      if (!liveIds.has(id)) { _orgBundleBytes -= hit.bytes || 0; _orgBundles.delete(id); }
     }
+
+    // Nothing anyone owns has changed since the last pull → the union cannot have changed either.
+    // This is the overwhelmingly common case, and it costs exactly one metadata request.
+    // 'none' rather than '' so a solo producer in an org (no mates) also early-outs instead of
+    // rebuilding the union from nothing every minute.
+    const revSig = mates.length ? mates.map((p) => `${p.id}:${p.rev == null ? '?' : p.rev}`).sort().join('|') : 'none';
+    if (revSig && revSig === _orgRevSig && !opts.force) {
+      state.orgLibrary.lastPull = Date.now();
+      return { changed: false, skipped: 'unchanged', mates: mates.length };
+    }
+
+    const bundles = [];
+    let fetched = 0, reused = 0, failed = 0;
+    for (const p of mates) {
+      const owner = p.ownerName || 'A producer';
+      const hit = _orgBundles.get(p.id);
+      // rev is a monotonic counter bumped on every save, so equal rev = byte-identical bundle.
+      if (hit && p.rev != null && hit.rev === p.rev && !opts.force) {
+        reused++;
+        bundles.push({ owner, data: hit.data });
+        continue;
+      }
+      try {
+        const full = await cloud.getProfile(p.id);
+        const data = (full.bundle || full || {}).data || {};
+        fetched++;
+        bundles.push({ owner, data });
+        if (hit) { _orgBundleBytes -= hit.bytes || 0; _orgBundles.delete(p.id); }
+        if (p.rev != null) {
+          let bytes = 0;
+          try { bytes = JSON.stringify(data).length; } catch (_) { bytes = 0; }
+          // Only cache what we can afford. Over budget we simply don't remember this one and
+          // re-fetch it next time its rev moves — correctness never depends on the cache.
+          if (bytes && _orgBundleBytes + bytes <= ORG_BUNDLE_BUDGET) {
+            _orgBundles.set(p.id, { rev: p.rev, owner, data, bytes });
+            _orgBundleBytes += bytes;
+          }
+        }
+      } catch (_) { failed++; /* skip unreadable — revSig is not latched below, so we retry next tick */ }
+    }
+    if (fetched) console.log(`[OrgLibrary] pulled ${fetched} changed bundle(s), reused ${reused} cached`);
     // Drop the previous org-tagged set; local (untagged) items always win on name/id collision.
     savedTeams     = savedTeams.filter((t) => !t || !t._org);
     savedBrandKits = savedBrandKits.filter((k) => !k || !k._org);
@@ -3121,6 +3268,10 @@ async function pullOrgLibrary() {
       (data.castersLibrary || []).forEach((c) => { const k = castKey(c); if (!k || seenCast.has(k)) return; seenCast.add(k); state.casters.library.push({ ...c, _org: true, _orgOwner: owner }); });
     }
     savedBrandKits.forEach(ensureKitPackages);
+    // Latch the signature only when every mate's bundle actually made it in. If one 404'd or the
+    // link dropped mid-pull, leaving it unset is what makes the next tick try again instead of
+    // treating a partial union as complete.
+    _orgRevSig = failed ? '' : revSig;
     state.orgLibrary.lastPull = Date.now();
     // Only persist + re-broadcast when the org-tagged set actually changed — otherwise the 60s poll
     // would fire a full library-tier broadcast every tick (base64 logos are heavy — see perf notes).
@@ -3141,8 +3292,7 @@ async function pullOrgLibrary() {
   } catch (e) { return { changed: false, error: e.message }; }
   finally { _orgPullBusy = false; }
 }
-setInterval(() => { pullOrgLibrary().catch(() => {}); }, 60000);
-setTimeout(() => { pullOrgLibrary().catch(() => {}); }, 8000);   // initial pull once the session has loaded
+cloudLoop('org-library', () => pullOrgLibrary(), 60000, { startAfterMs: 8000 });   // first pull once the session has loaded
 
 // ── In-app Stations manager: re-fetch the org's full nested station list and push it to the panel.
 // Called after every station/room/slot mutation so the manager UI always reflects the website state.
@@ -3153,7 +3303,11 @@ async function sendStationsFull(ws, msg) {
     if (!orgId || String(orgId).startsWith('user:')) { ws.send(JSON.stringify({ type: 'cloud_stations_full', data: { ok: false, message: 'Stations need an organization workspace.', stations: [] } })); return; }
     const res = await cloud.listStationsFull(orgId);
     ws.send(JSON.stringify({ type: 'cloud_stations_full', data: { ok: true, ...res } }));
-  } catch (e) { ws.send(JSON.stringify({ type: 'cloud_stations_full', data: { ok: false, message: e.message, stations: [] } })); }
+  } catch (e) {
+    // sendWs, not a bare ws.send: this is the catch of an ASYNC handler, so a throw here (closed
+    // socket) escapes into main.js's unhandledRejection logger — the exact case sendWs exists for.
+    sendWs(ws, { type: 'cloud_stations_full', data: { ok: false, message: e.message, stations: [] } });
+  }
 }
 
 // ── Show-state heartbeat → the casters' show bar ─────────────────────────────
@@ -3218,12 +3372,37 @@ async function showStateHeartbeat() {
   } catch (_) { /* transient — next beat retries */ }
   finally { _showStateBusy = false; }
 }
-setInterval(showStateHeartbeat, 12000);
+cloudLoop('show-state', () => showStateHeartbeat(), 12000);
+
+// Every stored credential, restored in ONE guarded step BEFORE the rest of the state.
+// loadState() is a single 500-line try block: one throw anywhere in it silently skips every
+// restore below the throw, and the next auto-save then writes those losses to disk — which is
+// exactly how a producer's start.gg token, Challonge/NXGEN/FACEIT keys and OBS password all
+// vanished at once on a restart (everything restored above the throw survived, everything below
+// it came back as a factory default and was saved that way). Credentials are the one thing that
+// cannot be re-derived, so they load first and behind their own catch.
+function restoreSecrets(saved) {
+  if (!saved || typeof saved !== 'object') return;
+  const take = (key, apply) => {
+    try { if (typeof saved[key] === 'string') apply(decryptSecret(saved[key])); }
+    catch (e) { console.error('[secrets] could not restore ' + key + ':', e.message); }
+  };
+  take('startggApiToken',      (v) => { startggApiToken = v; });
+  take('challongeApiKey',      (v) => { challongeApiKey = v; });
+  take('nxgenApiKey',          (v) => { nxgenApiKey = v; });
+  take('faceitApiKey',         (v) => { faceitApiKey = v; });
+  take('liquipediaApiKey',     (v) => { liquipediaApiKey = v; });
+  take('ballchasingApiKey',    (v) => { ballchasingApiKey = v; });
+  take('bedwarsToken',         (v) => { bedwarsToken = v; });
+  take('sheetsServiceAccount', (v) => { sheetsServiceAccount = v; });
+  take('obsPassword',          (v) => { obsPassword = v; });
+}
 
 function loadState() {
   try {
     const saved = safeReadJson(stateFile, null);
     if (saved) {
+      restoreSecrets(saved);
       if (saved.activeGame && GAMES[saved.activeGame]) state.activeGame = saved.activeGame;
       if (saved.themesByGame && typeof saved.themesByGame === 'object') {
         Object.keys(GAMES).forEach((g) => {
@@ -3270,6 +3449,17 @@ function loadState() {
       if (typeof saved.showSeries === 'boolean') state.showSeries = saved.showSeries;
       if (typeof saved.rlReplayTransitions === 'boolean') state.rlReplayTransitions = saved.rlReplayTransitions;
       if (typeof saved.rlScoreboardSeparate === 'boolean') state.rlScoreboardSeparate = saved.rlScoreboardSeparate;
+      // Merged field-by-field, not assigned wholesale: a state.json written before this feature
+      // existed has no seriesStats at all, and one written by a newer build must not be able to
+      // drop `games` into a non-array and break the overlay's reduce.
+      if (saved.seriesStats && typeof saved.seriesStats === 'object') {
+        const sv = saved.seriesStats, ss = state.seriesStats;
+        if (typeof sv.enabled === 'boolean') ss.enabled = sv.enabled;
+        if (typeof sv.visible === 'boolean') ss.visible = sv.visible;
+        if (typeof sv.design === 'string' && SERIES_STATS_DESIGNS.includes(sv.design)) ss.design = sv.design;
+        if (Array.isArray(sv.games)) ss.games = sv.games.filter((g) => g && Array.isArray(g.players)).slice(-9);
+        if (typeof sv.liveBanked === 'boolean') ss.liveBanked = sv.liveBanked;
+      }
       if (typeof saved.defaultBestOf === 'number') state.defaultBestOf = saved.defaultBestOf;
       if (saved.facecamsEnabled !== undefined) state.facecamsEnabled = saved.facecamsEnabled;
       if (saved.replayCams !== undefined) state.replayCams = saved.replayCams;
@@ -3331,7 +3521,7 @@ function loadState() {
           visible: !!saved.ticker.visible,
           messages: Array.isArray(saved.ticker.messages) ? saved.ticker.messages : [],
           speed: Number(saved.ticker.speed) > 0 ? Number(saved.ticker.speed) : 10,
-          source: saved.ticker.source === 'startgg' ? 'startgg' : 'manual',
+          source: ['startgg', 'nxgen', 'br'].includes(saved.ticker.source) ? saved.ticker.source : 'manual',
           sponsor: typeof saved.ticker.sponsor === 'string' ? saved.ticker.sponsor : '',
           feed: []
         };
@@ -3350,7 +3540,8 @@ function loadState() {
           logo: saved.replay.logo || null,
           outroLogo: saved.replay.outroLogo || null,
           colorMode: ['mono', 'brand'].includes(saved.replay.colorMode) ? saved.replay.colorMode : 'team',
-          skin: saved.replay.skin || null
+          skin: saved.replay.skin || null,
+          style: REPLAY_STYLES.includes(saved.replay.style) ? saved.replay.style : 'slam'
         };
       }
       if (saved.scoreboardAd && typeof saved.scoreboardAd === 'object') {
@@ -3400,8 +3591,7 @@ function loadState() {
           // Don't restore a stale countdown (or its pending auto-switch) across restarts
           endsAt: null,
           frozenSeconds: null,
-          thenScene: '',
-          thenPlayout: ''
+          thenScene: ''
         };
       }
       // Momentary production graphics: restore content, but never auto-show on restart.
@@ -3412,7 +3602,10 @@ function loadState() {
           name: saved.winner.name || '',
           logo: saved.winner.logo || null,
           color: saved.winner.color || '',
-          subtitle: saved.winner.subtitle || ''
+          subtitle: saved.winner.subtitle || '',
+          // This rebuild is wholesale, so any field not listed here is silently lost on every
+          // restart — style included, which would quietly snap a producer back to the default.
+          style: WINNER_STYLES.includes(saved.winner.style) ? saved.winner.style : 'slam'
         };
       }
       if (saved.veto && typeof saved.veto === 'object') {
@@ -3597,9 +3790,6 @@ function loadState() {
           pendingEvents: []
         };
       }
-      if (typeof saved.startggApiToken === 'string') {
-        startggApiToken = decryptSecret(saved.startggApiToken);
-      }
       if (saved.challonge && typeof saved.challonge === 'object') {
         state.challonge = {
           ...state.challonge,
@@ -3610,9 +3800,6 @@ function loadState() {
           autoFollow: !!saved.challonge.autoFollow,
           connected: false, lastError: null, queue: [], matchFeed: [], queueFetchedAt: null, eventTeams: [], lastAutoFollowMatchId: null
         };
-      }
-      if (typeof saved.challongeApiKey === 'string') {
-        challongeApiKey = decryptSecret(saved.challongeApiKey);
       }
       if (saved.nxgen && typeof saved.nxgen === 'object') {
         state.nxgen = {
@@ -3638,12 +3825,6 @@ function loadState() {
           autoFollow: !!saved.faceit.autoFollow
         };
       }
-      if (typeof saved.faceitApiKey === 'string') {
-        faceitApiKey = decryptSecret(saved.faceitApiKey);
-      }
-      if (typeof saved.liquipediaApiKey === 'string') {
-        liquipediaApiKey = decryptSecret(saved.liquipediaApiKey);
-      }
       if (saved.liquipedia && typeof saved.liquipedia === 'object') {
         const lq = saved.liquipedia;
         state.liquipedia.enabled = !!lq.enabled;
@@ -3654,14 +3835,8 @@ function loadState() {
       _lpCache = new liquipedia.LiquipediaCache(saved.liquipediaCache);
       state.liquipedia.attribution = liquipedia.LIQUIPEDIA_ATTRIBUTION;
       lpSyncBudget();
-      if (typeof saved.nxgenApiKey === 'string') {
-        nxgenApiKey = decryptSecret(saved.nxgenApiKey);
-      }
       if (saved.ballchasing && typeof saved.ballchasing === 'object') {
         state.ballchasing = { ...state.ballchasing, ...saved.ballchasing };
-      }
-      if (typeof saved.ballchasingApiKey === 'string') {
-        ballchasingApiKey = decryptSecret(saved.ballchasingApiKey);
       }
       if (saved.r6 && typeof saved.r6 === 'object') {
         state.r6 = { autoScore: !!saved.r6.autoScore, gepData: null };
@@ -3669,7 +3844,6 @@ function loadState() {
       if (saved.bedwars && typeof saved.bedwars === 'object') {
         state.bedwars = { autoScore: !!saved.bedwars.autoScore, data: null };
       }
-      if (typeof saved.bedwarsToken === 'string') bedwarsToken = decryptSecret(saved.bedwarsToken);
       if (saved.sheets && typeof saved.sheets === 'object') {
         state.sheets = {
           ...state.sheets,
@@ -3686,9 +3860,6 @@ function loadState() {
           },
           connected: false, lastError: null, tabs: []   // runtime — re-established on connect
         };
-      }
-      if (typeof saved.sheetsServiceAccount === 'string') {
-        sheetsServiceAccount = decryptSecret(saved.sheetsServiceAccount);
       }
       if (saved.activeEvent && typeof saved.activeEvent === 'object') {
         state.activeEvent = { ...state.activeEvent, ...saved.activeEvent };
@@ -3727,9 +3898,6 @@ function loadState() {
           availableScenes: [],
           availableTransitions: []
         };
-      }
-      if (typeof saved.obsPassword === 'string') {
-        obsPassword = decryptSecret(saved.obsPassword);
       }
       // The OBS stinger the REPLAYS page uses between clips — restored so its video is servable
       // (and its transition point known) from the moment the app starts, without OBS being asked.
@@ -3787,9 +3955,6 @@ function loadState() {
       }
       if (saved.standings && typeof saved.standings === 'object') {
         state.standings = { ...state.standings, ...saved.standings, visible: false, rows: Array.isArray(saved.standings.rows) ? saved.standings.rows : [] };
-      }
-      if (saved.socialPreset && typeof saved.socialPreset === 'object') {
-        state.socialPreset = { ...saved.socialPreset };
       }
       if (saved.watchlist && typeof saved.watchlist === 'object') {
         state.watchlist = {
@@ -3959,7 +4124,20 @@ function loadState() {
         if (Number(a.port)) state.apex.port = Number(a.port);
       }
     }
-  } catch (e) { console.error('Error loading state:', e); }
+  } catch (e) {
+    // A throw anywhere in the restore above skips every remaining field, and the next auto-save
+    // then writes that partial state straight over the good file — permanent, silent data loss.
+    // Credentials are already safe (restoreSecrets ran first); keep a copy of the file as it was
+    // on disk so the rest is recoverable, and say so loudly instead of one console line.
+    console.error('Error loading state:', e);
+    console.error('[state] RESTORE ABORTED PART-WAY — every setting below the failure is back at '
+      + 'its default and will be saved that way. Fix the cause before continuing.');
+    try {
+      const rescue = stateFile + '.loadfail-' + new Date().toISOString().replace(/[:.]/g, '-');
+      fs.copyFileSync(stateFile, rescue);
+      console.error('[state] previous state file preserved at ' + rescue);
+    } catch (e2) { console.error('[state] could not preserve the previous state file:', e2.message); }
+  }
 }
 
 function _saveAppStateNow(sync = false) {
@@ -3975,6 +4153,7 @@ function _saveAppStateNow(sync = false) {
       showSeries: state.showSeries,
       rlReplayTransitions: state.rlReplayTransitions,
       rlScoreboardSeparate: state.rlScoreboardSeparate,
+      seriesStats: state.seriesStats,
       defaultBestOf: state.defaultBestOf,
       eventName: state.eventName,
       eventNameSlug: state.eventNameSlug || '',
@@ -4036,7 +4215,7 @@ function _saveAppStateNow(sync = false) {
         finalMessage: state.breakScreen.finalMessage
       },
       // Persist content for the momentary production graphics; visibility is reset on restart.
-      winner: { side: state.winner.side, name: state.winner.name, logo: state.winner.logo, color: state.winner.color, subtitle: state.winner.subtitle },
+      winner: { side: state.winner.side, name: state.winner.name, logo: state.winner.logo, color: state.winner.color, subtitle: state.winner.subtitle, style: state.winner.style },
       veto: { title: state.veto.title, maps: state.veto.maps },
       intro: { side: state.intro.side, title: state.intro.title, style: state.intro.style, showFooter: state.intro.showFooter, showRealName: state.intro.showRealName !== false },
       owMatch: { visible: !!state.owMatch.visible, format: state.owMatch.format, currentMapIdx: state.owMatch.currentMapIdx, bansByMap: state.owMatch.bansByMap, attackSide: state.owMatch.attackSide || null, showAttack: !!state.owMatch.showAttack, gameMode: state.owMatch.gameMode || 'escort', showMapLabels: state.owMatch.showMapLabels !== false, mapWinners: Array.isArray(state.owMatch.mapWinners) ? state.owMatch.mapWinners : [], mapModes: Array.isArray(state.owMatch.mapModes) ? state.owMatch.mapModes : [] },
@@ -4094,7 +4273,6 @@ function _saveAppStateNow(sync = false) {
       bracket: state.bracket,
       upcoming: state.upcoming,
       standings: state.standings,
-      socialPreset: state.socialPreset || null,   // Social Export background/presented-by fallback (no brand kit active)
       brand: state.brand || null,                 // global accent fallback (Settings ▸ Appearance) when no kit is active
       preshowPresets: state.preshowPresets || [], // Desk Show named topic rundowns
       csgoCfgPath: state.csgo.cfgPath,
@@ -4707,7 +4885,14 @@ function broadcast(clients, msg) {
 // live-payload dedup in _flushFullState).
 function broadcastRaw(clients, str) {
   clients.forEach(ws => {
-    if (ws.readyState === WebSocket.OPEN) ws.send(str);
+    // Per-client try/catch, not one around the loop: readyState can go stale between the check and
+    // the send (a browser source closing, an overlay machine dropping off), and a bare ws.send()
+    // then THROWS out of forEach — so every client positioned after the bad one silently missed
+    // that broadcast. On a multi-source show that reads as "some overlays froze and others didn't".
+    // Same hazard sendWs() documents below, which this loop did not have.
+    try {
+      if (ws.readyState === WebSocket.OPEN) ws.send(str);
+    } catch (e) { /* dead socket — its own 'close' handler removes it from the set */ }
   });
 }
 // Reply to ONE client, safely. Long-running handlers (start.gg imports run for minutes) finish
@@ -4931,7 +5116,7 @@ const BROADCAST_TIERS = {
   sceneBg: 'live', banner: 'live', casters: 'live', vdo: 'live', listenIn: 'live', credits: 'live',
   breakScreen: 'live', ticker: 'live', adProofSessions: 'live', spotlight: 'live', winner: 'live',
   veto: 'live', owMatch: 'live', mrMatch: 'live', r6: 'live', bedwars: 'live', pointMatrices: 'live', customOverlayLayouts: 'live', gameConfigs: 'live', draft: 'live',
-  intro: 'live', overtime: 'live', scoreboardAd: 'live', rlStatsScreen: 'live', background: 'live', deskFooter: 'live',
+  intro: 'live', overtime: 'live', scoreboardAd: 'live', rlStatsScreen: 'live', seriesStats: 'live', background: 'live', deskFooter: 'live',
   preshow: 'live', csgo: 'live', valorant: 'live', lol: 'live', apex: 'live', br: 'live', bestOf: 'live', teams: 'live',
   // Settings + a change counter only — the vault RECORDS are fetched over /api/teamdb, never
   // broadcast (they carry base64 logos and full roster history).
@@ -4946,9 +5131,9 @@ const BROADCAST_TIERS = {
   startggPlacements: 'live', startggCharacters: 'live',
   teamSpotlight: 'live', director: 'live', ai: 'live', encode: 'live', twitch: 'live',
   discord: 'live', flows: 'live', flowVars: 'live',
+  cloudHealth: 'live', cloudLoops: 'live',   // breaker + background-poll status for the cloud readouts
   // runtime-added state keys (mirrored in libraryData where noted)
   crew: 'live',            // also in libraryData — overlays read it live, panel backfills it
-  socialPreset: 'live',    // also in libraryData
   awaitingKickoff: 'live', inReplay: 'live', otTriggered: 'live', rlBall: 'live', rlReplayLenMs: 'live',
   rlLastTouch: 'live', rlPaused: 'live',
   scoreboard: 'live', showRoster: 'live', sponsorBanner: 'live', preshowPresets: 'live',
@@ -5552,6 +5737,11 @@ function buildLiveState() {
     },
     obs: publicObs,
     discord: publicDiscord,
+    // Cloud reachability + the state of every background poll. Tiny, and it is the only way the
+    // panel can say "station auto-fill is paused because the backend is down" instead of the
+    // producer discovering it when a caster never lands on the desk.
+    cloudHealth: (typeof cloud.health === 'function') ? cloud.health() : null,
+    cloudLoops: Array.from(_cloudLoops.values()).map((l) => ({ name: l.name, fails: l.fails, lastOkAt: l.lastOkAt, lastError: l.lastError, nextAt: l.nextAt })),
     games: (function() {
       const out = {};
       const custom = state.customOverlayLayouts || {};
@@ -5665,7 +5855,6 @@ function libraryData() {
     // Active kit wins; with no kit, fall back to the producer's global accent colour
     // (Settings ▸ Appearance, set_global_accent) so that control actually reaches overlays.
     brand: activeBrand() || ((state.brand && state.brand.color) ? { color: state.brand.color, accent: state.brand.accent || null } : null),
-    socialPreset: state.socialPreset || null,      // Social Export background/presented-by, when no brand kit is active
     banner: bannerForBroadcast(),
     mainBanner: state.banner,
     bracket: state.bracket,   // manual bracket (embedded team logos) — backfilled by bracket overlay + panel
@@ -5735,7 +5924,6 @@ function librarySig() {
   // bracket + replay carry big base64 logos/thumbnails — sign their STRUCTURE + scalar fields but
   // collapse any long string to its length so we never stringify the base64 (this runs per-broadcast).
   const lite = (o) => { try { return JSON.stringify(o, (k, v) => (typeof v === 'string' && v.length > 200) ? ('len' + v.length) : v) || ''; } catch { return ''; } };
-  const sp = state.socialPreset || {};
   const extra = '|ab:' + (state.activeBrandKitId || '') + '|bv:' + (state.banner.visible ? 1 : 0) + '|bi:' + bn
     + '|brk:' + lite(state.bracket) + '|rpl:' + lite(state.replay) + '|crew:' + (state.crew || []).length
     + '|pp:' + playerProfilesVer + '|bk:' + brandKitsVer + '|st:' + savedTeamsVer
@@ -5746,7 +5934,6 @@ function librarySig() {
     + ':' + (state.myEvents || []).reduce((a, e) => a + ((e && e.lastSync) || 0), 0)
     // Global accent fallback lives in library brand now (stripped from live) — re-send on change.
     + '|gac:' + ((state.brand && state.brand.color) || '') + ':' + ((state.brand && state.brand.accent) || '')
-    + '|sp:' + (sp.bgImageUrl ? sp.bgImageUrl.length : 0) + ':' + (sp.presentedByEnabled ? 1 : 0) + ':' + (sp.bgStyle || '');
   return savedTeams.length + '#' + t + '||' + savedBrandKits.length + '#' + b + extra;
 }
 
@@ -6537,6 +6724,9 @@ function finalizeAndResetSeries() {
   state.game.number = 1;
   state.series.blue = 0;
   state.series.orange = 0;
+  // New series = new stat sheet. This is the shared close-out (reset_series WS case, start.gg push,
+  // auto-follow), so the board can never carry the previous match's numbers onto the next one.
+  if (state.seriesStats) { state.seriesStats.games = []; state.seriesStats.liveBanked = false; }
   // Clear OW map winners so the next match recounts from a clean slate.
   if (state.owMatch) state.owMatch.mapWinners = [];
 }
@@ -7048,6 +7238,47 @@ function pickAutoFollowSet(queue, wantStream) {
   return mine.find((s) => s.live) || mine.find((s) => s.onStream) || null;
 }
 
+// Accumulate the archive of matches that went on air / finished on the followed stream, so the queue's
+// past stays browsable after the event. Upserts by setId: DONE sets (state 3) and the current on-air
+// set from the (already stream-scoped) queue, plus final scores from the event's recent-finals list
+// (matched by setId, so a set that dropped off the queue still gets its final score). Capped + per-event.
+function archiveStartggFromPoll(scopedQueue, recentSets) {
+  const sg = state.startgg;
+  if (!Array.isArray(sg.queueArchive)) sg.queueArchive = [];
+  const arch = sg.queueArchive;
+  const upsert = (item, done) => {
+    if (!item || item.setId == null) return;
+    if ((item.teamA === 'TBD' || !item.teamA) && (item.teamB === 'TBD' || !item.teamB)) return;   // unresolved
+    const id = String(item.setId);
+    const i = arch.findIndex((a) => String(a.setId) === id);
+    const prev = i >= 0 ? arch[i] : null;
+    const entry = {
+      setId: id, stream: item.stream || (prev && prev.stream) || '',
+      round: item.round || (prev && prev.round) || '',
+      teamA: item.teamA || (prev && prev.teamA) || 'TBD',
+      teamB: item.teamB || (prev && prev.teamB) || 'TBD',
+      scoreA: item.scoreA != null ? item.scoreA : (prev ? prev.scoreA : null),   // never wipe a known score with null
+      scoreB: item.scoreB != null ? item.scoreB : (prev ? prev.scoreB : null),
+      done: !!done || (prev && prev.done) || false,
+      ts: (prev && prev.ts) || Date.now()
+    };
+    if (i >= 0) arch[i] = entry; else arch.push(entry);
+  };
+  (scopedQueue || []).forEach((q) => {
+    if (Number(q.state) === 3) upsert(q, true);                 // played out
+    else if (q.setId === sg.lastPushedSetId) upsert(q, false);  // currently on air — capture it now
+  });
+  // Final scores for any archived set from the event's recent finals (matched by id → keeps its stream).
+  (recentSets || []).forEach((s) => {
+    const id = String(s && (s.id != null ? s.id : s.setId) || '');
+    if (!id || Number(s.state) !== 3) return;
+    if (!arch.some((a) => String(a.setId) === id)) return;   // only enrich sets we already broadcast
+    const m = mapStartggSetToFeedItem(s);
+    if (m) upsert({ setId: id, teamA: m.teamA, teamB: m.teamB, scoreA: m.scoreA, scoreB: m.scoreB, round: m.round }, true);
+  });
+  sg.queueArchive = arch.slice(-60);   // keep the last 60 — plenty for a full event day
+}
+
 async function fetchStreamQueue(tournamentSlug) {
   pruneStaleMatchFeed();   // never carry the previous event's feed into this poll
   if (!startggApiToken) throw new Error('Missing Start.gg API token (set it in Settings)');
@@ -7233,11 +7464,21 @@ async function fetchStreamQueue(tournamentSlug) {
   }
 
   state.startgg.streams = streams;
-  state.startgg.queue = queue;
+  state.startgg.queue = queue;   // FULL list — the panel + its "All streams" selector need every stream
+  // Overlay feeds follow the producer's CHOSEN stream/station: on a multi-station championship the
+  // ticker + schedule board must show only THIS station's matches, not every stream. streamName '' =
+  // follow all (unchanged). state.startgg.queue stays full so the panel can still switch streams.
+  const _wantStream = (state.startgg.streamName || '').trim();
+  const scopedQueue = _wantStream ? queue.filter((q) => q && q.stream === _wantStream) : queue;
+  // Archive the followed stream's played/on-air matches so the queue's past is browsable after the
+  // event. Reset the archive when the EVENT changes (not on series reset — the producer reviews it
+  // through the whole event).
+  if (state.startgg.archiveEventSlug !== evSlug) { state.startgg.queueArchive = []; state.startgg.archiveEventSlug = evSlug; }
+  archiveStartggFromPoll(scopedQueue, recentSets);
   // Include the on-air set in the feed too — it's the LIVE match, and the ticker should show it
   // (previously excluding state.startgg.setId meant a single-stream event's only live match was
   // filtered out, leaving the ticker showing FINAL results only).
-  state.startgg.matchFeed = buildStartggMatchFeed(queue, recentSets);
+  state.startgg.matchFeed = buildStartggMatchFeed(scopedQueue, recentSets);
   // Stamp the feed with the event it was built for. The feed is only ever rewritten by a SUCCESSFUL
   // poll, so without a stamp there is no way to tell a current feed from one left behind by the
   // previous event after a failed poll — see pruneStaleMatchFeed().
@@ -7246,7 +7487,7 @@ async function fetchStreamQueue(tournamentSlug) {
   if (state.ticker.source === 'startgg') state.ticker.feed = formatTickerFeed(state.startgg.matchFeed);
   // Event-queue mode: keep the upcoming/schedule board following the stream queue, adding a couple of
   // non-stream upcoming matches. (Team mode leaves upcoming.matches to the last team search.)
-  if (state.upcoming.source === 'event') state.upcoming.matches = buildEventUpcomingExtras(queue, recentSets);
+  if (state.upcoming.source === 'event') state.upcoming.matches = buildEventUpcomingExtras(scopedQueue, recentSets);
   state.startgg.queueFetchedAt = new Date().toISOString();
   state.startgg.connected = true;
   state.startgg.lastError = null;
@@ -7961,6 +8202,7 @@ async function loadChalongeTournament(slug) {
     url: tournament.full_challonge_url || `https://challonge.com/${slug}`,
     loadedAt: new Date().toISOString()
   };
+  adoptEventName(slug, tournament.name);
   setActivePlatform('challonge');   // this is now the active platform — silence start.gg / NXGEN follow
   state.challonge.queueFetchedAt = Date.now();
 
@@ -8188,13 +8430,40 @@ function nxgenSide(ref, pm) {
 }
 const NXGEN_LIVE_STATUSES = ['in-progress', 'in_progress', 'live', 'active', 'ongoing'];
 
+// NXGEN mints EVERY match of a bracket the moment it's generated, so a live event is full of
+// unplayed shells with both sides null. They belong in the bracket drawing — that is the shape of
+// the rounds still to come — but not in the stream queue, where they read as "TBD vs TBD" rows
+// (17 of 28 on a real 20-team event) that a producer can never play.
+function nxgenEmptyShell(m) { return !m || (!m.participant1 && !m.participant2); }
+
+// The bracket overlay and the panel both read start.gg's numeric set state (1 = not started,
+// 2 = in progress, 3 = complete) — 1 is what mutes an unplayed match. NXGEN ships a status
+// STRING, so every imported set fell through as neither upcoming nor complete.
+function nxgenSetState(status) {
+  const s = String(status || '').toLowerCase();
+  if (s === 'completed') return 3;
+  if (NXGEN_LIVE_STATUSES.includes(s)) return 2;
+  return 1;
+}
+
+// An unplayed NXGEN match still carries scores of 0, and 0 draws as a real "0 – 0" on the bracket
+// instead of the "–" that says "not played yet". Only report a score once the match has a winner,
+// a completed status, or an actual score on the board.
+function nxgenScores(m) {
+  const sc = m.scores || {};
+  const a = Number(sc.participant1) || 0, b = Number(sc.participant2) || 0;
+  const played = String(m.status || '').toLowerCase() === 'completed' || !!m.winnerId || !!a || !!b;
+  return played ? [a, b] : [null, null];
+}
+
 function buildNxgenQueue(participants, matches) {
   const pm = nxgenPartMap(participants);
   return (matches || [])
-    .filter(m => m.status !== 'completed')
+    .filter(m => m.status !== 'completed' && !nxgenEmptyShell(m))
     .map(m => {
       const p1 = nxgenSide(m.participant1, pm);
       const p2 = nxgenSide(m.participant2, pm);
+      const [sa, sb] = nxgenScores(m);
       return {
         matchId: m._id,
         round: m.round,
@@ -8203,8 +8472,8 @@ function buildNxgenQueue(participants, matches) {
         teamB: p2.name || 'TBD',
         logoA: p1.logo,
         logoB: p2.logo,
-        scoreA: m.scores ? (m.scores.participant1 ?? null) : null,
-        scoreB: m.scores ? (m.scores.participant2 ?? null) : null,
+        scoreA: sa,
+        scoreB: sb,
         status: m.status,
         live: NXGEN_LIVE_STATUSES.includes(String(m.status || '').toLowerCase()),
         winnerId: m.winnerId || null
@@ -8212,12 +8481,86 @@ function buildNxgenQueue(participants, matches) {
     });
 }
 
-// NXGEN gives a flat round NUMBER with no stage text and no winners/losers side. For a clean
-// single-elim halving ladder (…16, 8, 4, 2, 1 matches) the match count names the stage exactly;
-// anything else (double elim, an in-progress/partial ladder) stays "Round N" rather than guessing
-// a stage — a wrong "SEMIFINALS" column on air is worse than an honest round number.
-function nxgenRoundNames(counts, isDouble) {
-  const clean = !isDouble && counts.length > 0 && counts[counts.length - 1] === 1 &&
+// The scores ticker, in the SAME item shape start.gg's matchFeed uses (mapStartggSetToFeedItem),
+// so overlay/app.js renders an NXGEN event with the identical LIVE/FINAL cards — logo, team,
+// score, team, logo — instead of needing a second layout.
+// Composition matches buildStartggMatchFeed too: LIVE matches lead, then the most recent FINALS
+// fill up to a target length, so a bracket that is nearly done still has a ticker with content.
+function buildNxgenMatchFeed(participants, matches) {
+  const pm = nxgenPartMap(participants);
+  const live = [], done = [];
+  (matches || []).forEach(m => {
+    const p1 = nxgenSide(m.participant1, pm);
+    const p2 = nxgenSide(m.participant2, pm);
+    if (!p1.name || !p2.name) return;              // a half-empty shell is not a fixture yet
+    const status = String(m.status || '').toLowerCase();
+    const isLive = NXGEN_LIVE_STATUSES.includes(status);
+    const isDone = status === 'completed';
+    if (!isLive && !isDone) return;
+    let [sa, sb] = nxgenScores(m);
+    // NXGEN records plenty of finished matches as 0-0 with only a winnerId. "FINAL A 0-0 B" reads
+    // as a result nobody won, so drop to the winner-only form the start.gg formatter already has.
+    if (isDone && !sa && !sb && m.winnerId) { sa = null; sb = null; }
+    const item = {
+      matchId: m._id,
+      setId: String(m._id || ''),                  // desk widgets key off setId
+      round: m.round != null ? 'Round ' + m.round : '',
+      teamA: p1.name, teamB: p2.name,
+      logoA: p1.logo || '', logoB: p2.logo || '',
+      scoreA: sa, scoreB: sb,
+      dq: false,
+      winSide: m.winnerId ? (m.winnerId === p1.id ? 'a' : m.winnerId === p2.id ? 'b' : null) : null,
+      status: isLive ? 'live' : 'done',
+      stream: '',
+      completedAt: m.completedAt || null
+    };
+    (isLive ? live : done).push(item);
+  });
+  done.sort((a, b) => String(b.completedAt || '').localeCompare(String(a.completedAt || '')));
+  const TARGET = 10;
+  return live.concat(done.slice(0, Math.max(3, TARGET - live.length))).slice(0, 14);
+}
+
+// NXGEN carries NO winners/losers flag on a match, and a double-elimination event numbers BOTH
+// ladders from round 1. Grouping by round number alone therefore stacked the lower bracket on top
+// of the upper one: a 20-team double-elim imported as eight "Round N" columns, the first holding
+// 25 sets, with an empty losers side and no grand final — the "brackets don't import" symptom.
+// The ladders ARE separable, by CREATION ORDER: NXGEN generates the whole upper bracket first,
+// then the whole lower bracket, then the grand final. So a round number that DROPS from the
+// previous match in creation order is where the next ladder starts.
+function nxgenSections(matches) {
+  const ordered = (matches || []).slice().sort((a, b) =>
+    String(a.createdAt || '').localeCompare(String(b.createdAt || '')) ||
+    String(a._id || '').localeCompare(String(b._id || '')));
+  const sections = [];
+  let cur = null, prev = 0;
+  ordered.forEach(m => {
+    const r = Number(m.round) || 0;
+    if (!cur || r < prev) { cur = []; sections.push(cur); }
+    cur.push(m);
+    prev = r;
+  });
+  return sections;
+}
+
+// One ladder → its rounds, low to high, each round in bracket-draw order.
+function nxgenRoundGroups(section) {
+  const by = new Map();
+  (section || []).forEach(m => {
+    const r = Number(m.round) || 0;
+    if (!by.has(r)) by.set(r, []);
+    by.get(r).push(m);
+  });
+  return [...by.keys()].sort((a, b) => a - b)
+    .map(r => ({ round: r, matches: by.get(r).slice().sort((a, b) => (a.matchNumber || 0) - (b.matchNumber || 0)) }));
+}
+
+// NXGEN gives a flat round NUMBER with no stage text. For a clean single-elim halving ladder
+// (…16, 8, 4, 2, 1 matches) the match count names the stage exactly; anything else (an
+// in-progress/partial ladder) stays "Round N" rather than guessing a stage — a wrong "SEMIFINALS"
+// column on air is worse than an honest round number.
+function nxgenRoundNames(counts) {
+  const clean = counts.length > 0 && counts[counts.length - 1] === 1 &&
     counts.every((c, i) => i === 0 || c === Math.ceil(counts[i - 1] / 2));
   return counts.map((c, i) => {
     if (!clean) return 'Round ' + (i + 1);
@@ -8230,34 +8573,53 @@ function nxgenRoundNames(counts, isDouble) {
 
 function buildNxgenBracketData(eventFormat, participants, matches) {
   const pm = nxgenPartMap(participants);
-
-  const byRound = {};
-  (matches || []).forEach(m => {
-    if (!byRound[m.round]) byRound[m.round] = [];
-    byRound[m.round].push(m);
-  });
+  const isDouble = (eventFormat || '').toLowerCase().includes('double');
 
   // The bracket overlay/panel expect rounds as { name, sets: [{ a:{name,score,winner}, b:{…} }] }
   // (same shape start.gg and Challonge import into) — anything else renders as an empty bracket.
-  const isDouble = (eventFormat || '').toLowerCase().includes('double');
-  const roundKeys = Object.keys(byRound).map(Number).sort((a, b) => a - b);
-  const roundsSorted = roundKeys.map(r => byRound[r].slice().sort((a, b) => (a.matchNumber || 0) - (b.matchNumber || 0)));
-  const names = nxgenRoundNames(roundsSorted.map(ms => ms.length), isDouble);
-  const winners = roundsSorted.map((ms, idx) => ({
-    name: names[idx],
-    round: roundKeys[idx],
-    sets: ms.map(m => {
+  const toRound = (name, group) => ({
+    name,
+    round: group.round,
+    sets: group.matches.map(m => {
       const p1 = nxgenSide(m.participant1, pm);
       const p2 = nxgenSide(m.participant2, pm);
-      const sc = m.scores || {};
+      const [sa, sb] = nxgenScores(m);
       return {
         id: m._id,
-        a: { name: p1.name || 'TBD', score: sc.participant1 ?? 0, winner: !!m.winnerId && !!p1.id && m.winnerId === p1.id, logo: p1.logo },
-        b: { name: p2.name || 'TBD', score: sc.participant2 ?? 0, winner: !!m.winnerId && !!p2.id && m.winnerId === p2.id, logo: p2.logo },
-        state: m.status
+        a: { name: p1.name || 'TBD', score: sa, winner: !!m.winnerId && !!p1.id && m.winnerId === p1.id, logo: p1.logo },
+        b: { name: p2.name || 'TBD', score: sb, winner: !!m.winnerId && !!p2.id && m.winnerId === p2.id, logo: p2.logo },
+        state: nxgenSetState(m.status)
       };
     })
-  }));
+  });
+
+  const sections = nxgenSections(matches);
+  let winners = [], losers = [], finals = [];
+
+  if (isDouble) {
+    const upper = nxgenRoundGroups(sections[0] || []);
+    const rest = nxgenRoundGroups(sections[1] || []);
+    // Against a W-round upper bracket a double-elim lower bracket runs 2W-3 rounds (32 slots:
+    // upper 16/8/4/2/1, lower 8/8/4/4/2/2/1) — NXGEN puts those and the grand final in the same
+    // creation-order section, so anything past the lower ladder's length IS the final.
+    const lowerCount = Math.max(1, 2 * upper.length - 3);
+    const lower = rest.slice(0, lowerCount);
+    const gf = rest.slice(lowerCount);
+    const wLast = upper.length - 1;
+    winners = upper.map((g, i) => toRound(
+      i === wLast ? 'Winners Final' : i === wLast - 1 ? 'Winners Semifinal' : 'Winners Round ' + (i + 1), g));
+    losers = lower.map((g, i) => toRound('Losers Round ' + (i + 1), g));
+    finals = gf.map((g, i) => toRound(i === 0 ? 'Grand Final' : 'Grand Final Reset', g));
+    // NXGEN also mints a pair of matches AFTER the grand final on every double-elim event and has
+    // never populated them on a real event. Carry one in only once it holds actual teams.
+    sections.slice(2).forEach(s => nxgenRoundGroups(s).forEach(g => {
+      if (g.matches.some(m => !nxgenEmptyShell(m))) finals.push(toRound('Grand Final Reset', g));
+    }));
+  } else {
+    const groups = nxgenRoundGroups([].concat(...sections));
+    const names = nxgenRoundNames(groups.map(g => g.matches.length));
+    winners = groups.map((g, i) => toRound(names[i], g));
+  }
 
   const standings = participants
     .filter(p => p.finalRank)
@@ -8273,8 +8635,8 @@ function buildNxgenBracketData(eventFormat, participants, matches) {
   return {
     type: isDouble ? 'DOUBLE_ELIMINATION' : 'SINGLE_ELIMINATION',
     winners,
-    losers: [],
-    finals: [],
+    losers,
+    finals,
     standings,
     schedule: [],
     roster
@@ -8310,9 +8672,14 @@ async function loadNxgenEvent(slug) {
   state.nxgen.eventTeams = eventTeams;
   state.nxgen.logoMap = logoMap;
   state.nxgen.queue = queue;
+  state.nxgen.matchFeed = buildNxgenMatchFeed(participants, matches);
   state.nxgen.queueFetchedAt = Date.now();
   state.nxgen.connected = true;
   state.nxgen.lastError = null;
+  // Loading an event IS the decision to use NXGEN live — arm the integration so the 30s poll
+  // actually starts (setNxgenPolling is gated on this flag). Without it the event looked linked
+  // while nothing ever refetched: an empty queue, an empty ticker and no way to tell why.
+  state.nxgen.enabled = true;
 
   state.activeEvent = {
     platform: 'nxgen',
@@ -8324,6 +8691,13 @@ async function loadNxgenEvent(slug) {
     url: event.streamUrl || `https://www.nxgen.pro/events/${slug}`,
     loadedAt: new Date().toISOString()
   };
+  // Loading an event we haven't loaded before re-arms the ticker: NXGEN now has real scores to
+  // show, so point it at the live feed instead of the manual message list — same rule start.gg
+  // uses. Re-loading the SAME event leaves a producer's own choice of source alone.
+  const _newNxgenEvent = state.eventNameSlug !== slug;
+  adoptEventName(slug, event.name);
+  if (_newNxgenEvent) state.ticker.source = 'nxgen';
+  if (state.ticker.source === 'nxgen') state.ticker.feed = formatTickerFeed(state.nxgen.matchFeed);
   setActivePlatform('nxgen');   // this is now the active platform — silence start.gg / Challonge follow
 
   const phase = {
@@ -8352,7 +8726,13 @@ async function loadNxgenEvent(slug) {
   state.bracket.lastFetchAt = Date.now();
   syncActiveBracketPhase();   // mirror the phase into state.bracket.* — the overlay reads the mirror
 
-  return { name: event.name, teamsCount: participants.length, matchesCount: matches.length };
+  // An NXGEN event that hasn't had its bracket generated yet returns zero matches, which imports
+  // as a blank bracket with no clue why. Say so instead of leaving the producer staring at it.
+  const warning = matches.length ? '' :
+    (event.bracketGenerated === false
+      ? ' The bracket has not been generated on NXGEN yet — generate it there, then load again.'
+      : ' NXGEN returned no matches for this event, so the bracket is empty.');
+  return { name: event.name, teamsCount: participants.length, matchesCount: matches.length, warning };
 }
 
 async function refreshNxgenLive() {
@@ -8361,6 +8741,8 @@ async function refreshNxgenLive() {
   try {
     const { event, participants, matches } = await getNxgenEventLive(nxgenApiKey, slug);
     state.nxgen.queue = buildNxgenQueue(participants, matches);
+    state.nxgen.matchFeed = buildNxgenMatchFeed(participants, matches);
+    if (state.ticker.source === 'nxgen') state.ticker.feed = formatTickerFeed(state.nxgen.matchFeed);
     state.nxgen.queueFetchedAt = Date.now();
     state.nxgen.connected = true;
     state.nxgen.lastError = null;
@@ -8414,8 +8796,36 @@ function setActivePlatform(platform) {
   state.activeEvent.platform = platform || null;
   if (platform !== 'startgg')   { state.startgg.autoFollow  = false; if (state.startgg.queueEnabled) setStartggQueuePolling(false); }
   if (platform !== 'challonge') { state.challonge.autoFollow = false; setChallongePolling(false); }
-  if (platform !== 'nxgen')     { state.nxgen.autoFollow    = false; setNxgenPolling(false); }
+  if (platform !== 'nxgen')     {
+    state.nxgen.autoFollow    = false; setNxgenPolling(false);
+    // NXGEN stops polling here, so its match feed can only go stale — scrolling a dead event's
+    // scores through a live show is worse than an empty ticker.
+    state.nxgen.matchFeed = [];
+  }
   if (platform !== 'faceit')    { state.faceit.autoFollow   = false; setFaceitPolling(false); }
+  retuneTickerSource();
+}
+
+// The scores ticker FOLLOWS the active platform. A producer who put scores on the ticker wants the
+// scores of the event actually being produced; left pointed at a platform that has just stopped
+// polling it scrolls stale results, or silently nothing at all.
+// What it will NOT do is override a deliberate choice: 'manual' and 'br' are the producer's call
+// and are never touched, so sponsor copy parked on the ticker for a break stays there. The only
+// thing that moves is a ticker ALREADY showing scores, and only to the platform now on air.
+// (Challonge and FACEIT publish no match feed, so becoming active drops a scores ticker back to
+// the producer's own message list rather than leaving it blank.)
+const TICKER_SCORE_PLATFORMS = ['startgg', 'nxgen'];
+function retuneTickerSource() {
+  const src = state.ticker.source;
+  if (!TICKER_SCORE_PLATFORMS.includes(src)) return;
+  const active = state.activeEvent.platform || '';
+  const want = TICKER_SCORE_PLATFORMS.includes(active) ? active : 'manual';
+  if (want === src) return;
+  console.log(`[ticker] active platform is ${active || 'none'} — moving the scores ticker from ${src} to ${want}`);
+  state.ticker.source = want;
+  state.ticker.feed = want === 'startgg' ? formatTickerFeed(state.startgg.matchFeed)
+                    : want === 'nxgen'   ? formatTickerFeed(state.nxgen.matchFeed)
+                    : [];
 }
 
 // ─── FACEIT integration ───────────────────────────────────────────────────────
@@ -8825,6 +9235,7 @@ async function loadFaceitCompetition(id, type) {
     url,
     loadedAt: new Date().toISOString()
   };
+  adoptEventName(id, name);
   setActivePlatform('faceit');   // this is now the active platform — silence the other follows
 
   const phase = {
@@ -9159,7 +9570,31 @@ function buildBracket(sets, advancesTo) {
     if (t) typeCounts[t] = (typeCounts[t] || 0) + 1;
   });
   const type = Object.keys(typeCounts).sort((a, b) => typeCounts[b] - typeCounts[a])[0] || '';
-  const isElim = !type || type === 'SINGLE_ELIMINATION' || type === 'DOUBLE_ELIMINATION';
+
+  // start.gg's bracketType is NOT reliable on its own. A hand-built playoff stage — which is how
+  // most "Day 2 Championship Playoffs" phases are made — comes back as CUSTOM_SCHEDULE, and the old
+  // test (!type || SINGLE || DOUBLE) sent it down the swiss/round-robin path: winners, losers and
+  // finals all returned EMPTY, so bracket.html had no tree to draw and fell through to its standings
+  // table. bracket.html already knew CUSTOM_SCHEDULE was ambiguous and infers the real format from
+  // the data (see fmtType there) — but the structure had been discarded here before it ever arrived.
+  //
+  // So: trust the type when it is unambiguous, and otherwise read the SETS. A tree carries structure
+  // a swiss round never does — a negative round number (the losers band), a "Grand Final", or a slot
+  // seeded from ANOTHER SET. Swiss and round-robin pairings are seeded from standings, never from a
+  // specific set, so this cannot misread one of those as a bracket.
+  const ELIM_TYPES = ['SINGLE_ELIMINATION', 'DOUBLE_ELIMINATION', 'ELIMINATION_ROUNDS'];
+  const NON_ELIM_TYPES = ['ROUND_ROBIN', 'SWISS', 'MATRIX', 'EXHIBITION', 'RACE', 'CIRCUIT'];
+  const looksLikeTree = () => list.some((s) =>
+    Number(s.round) < 0 ||
+    /grand\s*final/i.test(s.fullRoundText || '') ||
+    (s.slots || []).some((sl) => sl && sl.prereqType === 'set'));
+  const isElim = ELIM_TYPES.includes(type) ? true
+               : NON_ELIM_TYPES.includes(type) ? false
+               : (!type || looksLikeTree());
+  if (type && !ELIM_TYPES.includes(type) && !NON_ELIM_TYPES.includes(type)) {
+    console.log('[bracket] ' + type + ' phase read as ' +
+      (isElim ? 'an ELIMINATION bracket' : 'a schedule') + ' from its ' + list.length + ' set(s).');
+  }
 
   const mapSlot = (slot, set) => {
     const ent = slot && slot.entrant;
@@ -9388,6 +9823,15 @@ function buildPhases(sets, phaseList) {
     });
   });
   const groups = new Map();
+  // Seed a group for EVERY phase the event lists — even ones with no sets yet (e.g. a Playoffs stage
+  // that hasn't been seeded/generated). Grouping only by sets hid a whole stage until it started, so
+  // the producer couldn't see Day 2 / Playoffs existed. Empty phases render as an empty bracket and
+  // fill in once start.gg seeds them + the next sync runs.
+  (Array.isArray(phaseList) ? phaseList : []).forEach((p) => {
+    if (!p || p.id == null) return;
+    const id = 'p' + p.id;
+    if (!groups.has(id)) groups.set(id, { id, name: p.name || 'Bracket', order: orderMap.has(id) ? orderMap.get(id) : 1000 + (firstSeen++), sets: [] });
+  });
   (sets || []).forEach((s) => {
     const ph = (s.phaseGroup && s.phaseGroup.phase) || null;
     const id = ph && ph.id != null ? 'p' + ph.id : 'default';
@@ -10943,6 +11387,25 @@ async function importStartggTeams(rawSlug) {
 }
 
 // One-shot: load EVERYTHING for an event — teams, players, and the bracket.
+// Adopt an imported event's OWN title as the show title.
+//
+// Pulled once per event: loading a DIFFERENT event overwrites whatever the last one left behind,
+// but re-activating the SAME event (a refresh, a re-pasted link) never stomps a title the producer
+// typed by hand — so it stays editable after import, which is the whole point.
+//
+// start.gg has always done this inline; Challonge, NXGEN and FACEIT only ever set
+// activeEvent.name, so importing through those APIs left the PREVIOUS event's title on air.
+// One rule, four callers, so they can't drift again.
+function adoptEventName(slug, name) {
+  const s = String(slug || '').trim();
+  const n = String(name || '').trim();
+  if (!s || !n) return false;
+  const isNewEvent = state.eventNameSlug !== s;
+  if (!state.eventName || isNewEvent) state.eventName = n;
+  state.eventNameSlug = s;
+  return isNewEvent;
+}
+
 async function loadEvent(rawSlug) {
   if (!startggApiToken) throw new Error('Missing Start.gg API token (set it in Settings)');
   const slug = parseEventSlug(rawSlug);
@@ -11266,6 +11729,43 @@ function applyStartggTeamToVault(team, slugHint, ctx) {
   };
 }
 
+// Re-read one banked team's start.gg page right now — the vault UI's "Check start.gg" button.
+// Unlike the background sweep this ignores the weekly re-read window and reports what changed, so
+// the producer gets an answer rather than a silent no-op when the crest is already current.
+async function refreshVaultTeamFromStartgg(id) {
+  const rec = teamDb.get(id);
+  if (!rec) throw new Error('Not found');
+  if (!startggApiToken) throw new Error('Missing Start.gg API token (set it in Settings)');
+  const slug = rec.startggSlug || rec.startggTeamId;
+  if (!slug) throw new Error('This team has no start.gg team slug — add one above, then check again');
+
+  const priorLogo = rec.logo || null;
+  const client = createStartGgClient(startggApiToken);
+  const team = await fetchStartggTeam(client, slug);
+  if (!team) {
+    teamDb.update(rec.id, { enrichedAt: Date.now() });
+    throw new Error('start.gg has no team page for "' + slug + '" any more — check the slug');
+  }
+  const out = applyStartggTeamToVault(team, rec.startggSlug || '');
+  if (!out) throw new Error('Could not store the team');
+
+  const fresh = out.rec;
+  // A pinned logo is left alone on purpose; the producer still gets told a different crest exists
+  // and can take it from the start.gg tile in the vault card.
+  const changed = !!(fresh.logo && fresh.logo !== priorLogo);
+  if (changed) { if (adoptVaultCrest(fresh, true)) saveTeams(); }
+  vaultTouch();
+  broadcastFullState();
+  return {
+    team: fresh,
+    logoChanged: changed,
+    startggLogo: fresh.startggLogo || null,
+    // The interesting case for the UI: start.gg has something newer but a pin is holding it back.
+    startggLogoDiffers: !!(fresh.startggLogo && fresh.startggLogo !== fresh.logo),
+    pinned: !!(fresh.pins && fresh.pins.logo),
+  };
+}
+
 // Import (or refresh) one start.gg team into the vault from a slug or URL. This is the OPTIONAL
 // manual door — for an org that hasn't entered one of your events yet, so the automatic sweep has
 // never seen them. `alsoLibrary` additionally drops it into the working team library.
@@ -11336,14 +11836,20 @@ async function enrichVaultFromStartgg(opts = {}) {
     const rec = teamDb.get(targets[i].id);
     if (!rec) continue;
     const slug = rec.startggSlug || rec.startggTeamId;
-    const hadLogo = !!rec.logo;
+    const priorLogo = rec.logo || null;
     try {
       const team = await fetchStartggTeam(client, slug);
       if (team) {
         const r = applyStartggTeamToVault(team, rec.startggSlug || '');
         if (r) {
           updated++;
-          if (!hadLogo && r.logo) { logosGained++; libraryTouched = adoptVaultCrest(r.rec) || libraryTouched; }
+          // A CHANGED crest counts, not just a first one. The old test (`!hadLogo`) meant a
+          // rebrand never reached the library — the vault learned the new logo and the overlays
+          // kept airing the old one.
+          if (r.rec && r.rec.logo && r.rec.logo !== priorLogo) {
+            logosGained++;
+            libraryTouched = adoptVaultCrest(r.rec) || libraryTouched;
+          }
         }
       } else {
         // The slug resolved to nothing — stamp it anyway so a dead link isn't retried every import.
@@ -11372,7 +11878,10 @@ async function enrichVaultFromStartgg(opts = {}) {
 // producer sees the team still logo-less until the NEXT event import, which defeats the point.
 // Deliberately narrow: it fills an EMPTY logo and nothing else. The sweep must never rename a team
 // or replace a chosen crest, because it can run in the middle of a live show.
-function adoptVaultCrest(rec) {
+// `force` replaces a logo the library already has. The default stays fill-the-gap only, because
+// the routine sweep must never stomp a crest a producer chose in the Match panel; force is passed
+// exactly where the vault has just been told the crest is out of date.
+function adoptVaultCrest(rec, force) {
   if (!rec || !rec.logo) return false;
   const _tn = (x) => (x || '').trim().toLowerCase();
   const row = savedTeams.find((t) => t && t.vaultId === rec.id) ||
@@ -11380,8 +11889,13 @@ function adoptVaultCrest(rec) {
               savedTeams.find((t) => (rec.aliases || []).includes(teamDb.norm(t.name || '')));
   // The name→logo map feeds the queue/bracket/upcoming overlays even for teams that were never
   // saved into the library, so stamp it either way.
-  (rec.aliases || []).concat(_tn(rec.name)).forEach((k) => { if (k && !state.startgg.logoMap[k]) state.startgg.logoMap[k] = rec.logo; });
-  if (!row || row.logo) return false;
+  (rec.aliases || []).concat(_tn(rec.name)).forEach((k) => {
+    if (!k) return;
+    if (force || !state.startgg.logoMap[k]) state.startgg.logoMap[k] = rec.logo;
+  });
+  if (!row) return false;
+  if (row.logo && !force) return false;
+  if (row.logo === rec.logo) return false;
   row.logo = rec.logo;
   if (!row.vaultId) row.vaultId = rec.id;
   return true;
@@ -11456,15 +11970,7 @@ async function activateStartggEvent(tournamentSlug, eventSlug, meta) {
   // Loading an event we haven't loaded before re-arms the things that describe the SHOW itself.
   // Re-activating the same event (a refresh, a re-pasted link) leaves the producer's edits alone.
   const _newEvent = state.eventNameSlug !== evSlug;
-
-  // Event title: pulled ONCE per event. Loading a different event overwrites whatever the last one
-  // left behind (the old "only if empty" rule meant event #2 went on air under event #1's title),
-  // but re-activating the SAME event never stomps a title the producer typed themselves.
-  const _autoEventName = state.startgg.selectedEvent.tournamentName || state.startgg.selectedEvent.name || '';
-  if (_autoEventName && (!state.eventName || _newEvent)) {
-    state.eventName = _autoEventName;
-  }
-  state.eventNameSlug = evSlug;
+  adoptEventName(evSlug, state.startgg.selectedEvent.tournamentName || state.startgg.selectedEvent.name);
 
   // Linking start.gg means the ticker has real scores to show — point it at the live feed instead of
   // the manual message list. Producer-typed promo lines are kept (start.gg mode interleaves them),
@@ -13652,8 +14158,7 @@ async function _executeFlowAction(action, ctx) {
         title: (typeof p.title === 'string' && p.title.trim()) ? p.title : (state.breakScreen.title || 'STARTING SOON'),
         endsAt: secs > 0 ? Date.now() + secs * 1000 : null,
         frozenSeconds: null,
-        thenScene: typeof p.thenScene === 'string' ? p.thenScene : (state.breakScreen.thenScene || ''),
-        thenPlayout: ''
+        thenScene: typeof p.thenScene === 'string' ? p.thenScene : (state.breakScreen.thenScene || '')
       };
       scheduleBreakAutoSwitch();
       saveAppState();
@@ -13736,6 +14241,9 @@ async function _executeFlowAction(action, ctx) {
     case 'match_reset_series':
       state.series = { blue: 0, orange: 0 };
       state.game.number = 1;
+      // Fresh series = fresh stat sheet (matches finalizeAndResetSeries) — don't carry the last
+      // series' per-game player stats into the new one.
+      if (state.seriesStats) { state.seriesStats.games = []; state.seriesStats.liveBanked = false; }
       broadcastFullState();
       break;
     case 'twitch_prediction_create':
@@ -14237,6 +14745,7 @@ function logAuto(kind, message) {
 const GFX_EXCLUSIVE_VISIBLE = {
   break: 'breakScreen', winner: 'winner', intro: 'intro', veto: 'veto', draft: 'draft',
   bracket: 'bracket', schedule: 'upcoming', upcoming: 'upcoming', standings: 'standings', credits: 'credits',
+  seriesstats: 'seriesStats',
   // Battle-royale graphics. These live UNDER state.br rather than at the top level (they're part
   // of the BR series model, not standalone scenes), hence the dotted paths — gfxObj() below
   // resolves both forms so every existing flat entry above keeps working untouched.
@@ -14390,7 +14899,7 @@ function switcherCut(target, opts) {
     const fn = (opts && opts.transition) || 'Cut';
     const params = { Input: target };
     if (opts && opts.duration) params.Duration = opts.duration;
-    vmixDo(fn, params);
+    vmixDo(fn, params).catch((e) => console.warn('[vmix: transition failed]', (e && e.message) || e));
     return;
   }
   if (obsClient && obsClient.isConnected()) { tagObsSwitch(target, 'manual'); obsClient.switchScene(target); }
@@ -14420,7 +14929,7 @@ async function switcherTake(transition, durationMs) {
   const isCut = transition === 'Cut';
   if (state.switcher.target === 'vmix') {
     if (!state.vmix.enabled) return;
-    vmixDo(transition, (!isCut && durationMs) ? { Duration: durationMs } : {});
+    vmixDo(transition, (!isCut && durationMs) ? { Duration: durationMs } : {}).catch((e) => console.warn('[vmix: transition failed]', (e && e.message) || e));
     return;
   }
   if (!obsClient || !obsClient.isConnected()) return;
@@ -14569,8 +15078,9 @@ function scheduleBreakAutoSwitch() {
   // `visible`, so requiring it meant a preset timer counted all the way down and then did nothing
   // unless the countdown GRAPHIC also happened to be on air. "When this timer ends, cut there" is
   // about the timer, not about which graphic is up. Pausing clears endsAt, which disarms it.
-  if (!b || !b.endsAt || !b.thenScene) return;
-  if (b.thenPlayout) return;   // a playout playlist handles the handoff client-side (plays, then cuts)
+  // Armed for ANY running countdown now, not only one with a target scene: a bare segment timer
+  // still has to be retired at zero (see the no-thenScene branch below).
+  if (!b || !b.endsAt) return;
   const remaining = b.endsAt - Date.now();
   // Never fire retroactively. Picking a "then" scene against a countdown that already ran out
   // would otherwise cut the moment the dropdown changed. A small grace keeps a countdown that
@@ -14580,6 +15090,18 @@ function scheduleBreakAutoSwitch() {
   const delay = Math.max(0, remaining);
   _breakAutoTimer = setTimeout(() => {
     _breakAutoTimer = null;
+    if (!thenScene) {
+      // A bare segment timer with nowhere to cut. Retire it, or the clocks that BORROW this timer
+      // (replay-desk, preshow, countdown-bar) sit at 00:00 for the rest of the show. The countdown
+      // GRAPHIC is the exception: countdown.html needs a finished target in state to swap in its
+      // "WE'RE LIVE!" final message, so a visible break screen keeps its endsAt.
+      if (!state.breakScreen.visible) {
+        state.breakScreen.endsAt = null;
+        saveAppState();
+        broadcastFullState();
+      }
+      return;
+    }
     flowBus.emit('timer_countdown_end', {});
     // Clear gfxActive too (not just .visible) if break is still the live graphic — otherwise it
     // stays punched up on gfx.html's layer, now overlaid on whatever OBS just cut to. If some
@@ -14767,6 +15289,118 @@ let _rlPeakTeamCount = { 0: 0, 1: 0 };
 // Counters that only climb over a match — the ones a rejoining player's fresh packet resets to 0.
 // Deliberately NOT boost/isDemolished/isPrimary: those are live state and must follow the packet.
 const RL_CUMULATIVE_STATS = ['score', 'goals', 'assists', 'saves', 'shots', 'demos'];
+const SERIES_STATS_DESIGNS = ['table', 'cards', 'leaders', 'matrix'];
+
+// Snapshot the finished game's per-player stats into the series store. Called from handleMatchEnded,
+// i.e. BEFORE handleMatchCreated wipes playerCache for the next game. Keyed by game number and
+// idempotent: the Stats API can repeat MatchEnded, and a repeat must replace the entry rather than
+// double-count it onto the series totals.
+// Series stats belong to ONE matchup. If the two teams change (a new series/matchup begins), the
+// previously-banked games are from a DIFFERENT series and must be dropped — otherwise the board piles
+// up players from prior series (producer: "series score is not showing the current series of players";
+// e.g. a "GAME 7" lingering in a Bo3, 6 players/team in a 2v2). Keyed on the team names so games of the
+// SAME series (unchanged teams) accumulate normally, but a new matchup resets the sheet.
+// Normalised player key for roster comparison. The RL Stats API is the only source that is always
+// present in a live match, so it is what series identity hangs off.
+function _rlNameKey(n) { return String(n == null ? '' : n).toLowerCase().replace(/[^a-z0-9]+/g, ''); }
+
+// Every distinct player banked in the current series so far.
+function _seriesBankedNames(ss) {
+  const out = new Set();
+  ((ss && ss.games) || []).forEach((g) => ((g && g.players) || []).forEach((pl) => {
+    const k = _rlNameKey(pl && pl.name); if (k) out.add(k);
+  }));
+  return out;
+}
+
+// Who is in the lobby right now, from the live feed (falling back to the cache mid-game).
+function _rlLobbyNames() {
+  const out = new Set();
+  const rows = (Array.isArray(state.players) && state.players.length)
+    ? state.players
+    : Object.values(state.playerCache || {});
+  rows.forEach((pl) => { const k = _rlNameKey(pl && pl.name); if (k) out.add(k); });
+  return out;
+}
+
+// Series stats belong to ONE matchup. When a new series starts, the previously-banked games are from
+// a DIFFERENT series and must be dropped, or the board piles up every player of the night (producer:
+// nine names per side in a 2v2, a "GAME 7" sitting in a Bo3).
+//
+// This used to key on the producer-typed TEAM NAMES alone, and returned early when neither was set —
+// so a producer who never fills in the Match panel (or runs with auto-teams-from-game off) got no
+// reset at all and the board accumulated across every series of the event. That is the reported bug:
+// the guard existed, it just could not see anything to key on.
+//
+// The LOBBY ROSTER is the reliable key. Rocket League reports who is in the match whatever the
+// producer has typed, so: the series is still the same series while the lobby shares at least one
+// player with what has been banked (which tolerates a mid-series substitution), and is a new series
+// the moment the roster is completely different. Team names stay as a second signal, for the case
+// where the same players rematch under different orgs.
+function syncSeriesStatsMatchup() {
+  const ss = state.seriesStats;
+  if (!ss) return;
+  let reason = '';
+
+  const blue = (state.teams && state.teams.blue && state.teams.blue.name || '').trim();
+  const orange = (state.teams && state.teams.orange && state.teams.orange.name || '').trim();
+  if (blue || orange) {
+    const key = blue + '\u0001' + orange;
+    if (ss._matchup && ss._matchup !== key) reason = 'teams changed';
+    ss._matchup = key;
+  }
+
+  // Roster check. Only meaningful once a lobby is visible AND something is banked to compare against
+  // — handleMatchCreated wipes playerCache before calling this, so an empty lobby proves nothing.
+  if (!reason && (ss.games || []).length) {
+    const lobby = _rlLobbyNames();
+    if (lobby.size) {
+      const banked = _seriesBankedNames(ss);
+      let shared = 0;
+      lobby.forEach((k) => { if (banked.has(k)) shared++; });
+      if (shared === 0) reason = 'a completely different lobby';
+    }
+  }
+
+  if (reason) {
+    ss.games = [];
+    ss.liveBanked = false;
+    ss._roster = [];
+    console.log('[seriesStats] New series (' + reason + ') - cleared the previous series banked games.');
+  }
+}
+
+function captureSeriesStatsGame() {
+  const ss = state.seriesStats;
+  if (!ss || !ss.enabled) return;
+  syncSeriesStatsMatchup();   // drop stale games if the matchup changed since the last bank
+  // Bank the CAPPED roster (same as the post-game scoreboard), not the raw playerCache — otherwise
+  // reconnects / name-variants / brief transients pile up as extra series-stats rows.
+  const players = Object.values(scoreboardRoster())
+    .filter((p) => p && p.name)
+    .map((p) => {
+      const row = { name: String(p.name), team: Number(p.team) === 1 ? 1 : 0 };
+      RL_CUMULATIVE_STATS.forEach((k) => { row[k] = Number(p[k]) || 0; });
+      if (p.touches != null) row.touches = Number(p.touches) || 0;
+      return row;
+    });
+  if (!players.length) return;   // nothing played (feed never connected) — don't bank an empty game
+  const entry = {
+    number: Number(state.game.number) || (ss.games.length + 1),
+    blueScore: Number(state.game.blueScore) || 0,
+    orangeScore: Number(state.game.orangeScore) || 0,
+    endedAt: Date.now(),
+    players
+  };
+  const at = ss.games.findIndex((g) => g && g.number === entry.number);
+  if (at >= 0) ss.games[at] = entry; else ss.games.push(entry);
+  // A Bo3 holding a "game 7" is holding another series' data, and the board printed it as real.
+  // BO9 stays the ceiling for when bestOf isn't set.
+  const cap = Math.min(9, Math.max(1, Number(state.bestOf) || 9));
+  ss.games = ss.games.filter((g) => g && (!g.number || g.number <= cap)).slice(-cap);
+  ss._roster = [..._seriesBankedNames(ss)];
+  ss.liveBanked = true;            // playerCache is now represented in games[] — stop adding it live
+}
 
 function resetRlGameTrack() {
   rlGameTrack.gameTime = state.game?.time ?? 300;
@@ -14925,10 +15559,26 @@ function fireOvertime() {
 // Bring up the in-game (RL overlay) OBS scene now that gameplay is starting — but only if we were
 // parked in post-game waiting for it. Called from the kickoff countdown (primary) and the first
 // live clock tick (fallback, in case the API build doesn't emit countdown events).
+let _kickoffBailReportedAt = 0;
 function returnToInGameForKickoff() {
   setPerfActive(true);   // a match is live — shed app load until it ends (no-op if disabled)
   if (_rlReplayT0) { console.log(`[RL replay] kickoff (return)  +${Date.now() - _rlReplayT0}ms from replay start`); _rlReplayT0 = 0; }
-  if (!state.awaitingKickoff) return;
+  if (!state.awaitingKickoff) {
+    // This bail was SILENT, and it is the one way the kickoff cut can stop working while every
+    // setting still looks correct: `awaitingKickoff` is armed only by MatchCreated / MatchEnded, so
+    // it is false for the game that is already in progress when the app attaches to the Stats API
+    // (or if MatchCreated never arrives). RoundStarted then lands here and returns — no cut, no
+    // log, nothing in the panel. Every OTHER RL auto-cut reports why it didn't fire; now so does
+    // this one. Rate-limited because RoundStarted/CountdownBegin arrive as a burst per kickoff.
+    const kt = state.obs.kickoff;
+    if (kt && kt.enabled && kt.scene && Date.now() - _kickoffBailReportedAt > 15000) {
+      _kickoffBailReportedAt = Date.now();
+      const message = 'Kickoff cut to "' + kt.scene + '" skipped — no new match was detected, so this game was never flagged as awaiting kickoff (the app attached mid-match). It fires from the next match.';
+      logAuto('rl-scene', message);
+      broadcast(bridgeClients, { type: 'rl-scene-result', data: { ok: false, phase: 'kickoff', message, notify: true } });
+    }
+    return;
+  }
   flowBus.emit('rl_round_started', {});
   state.awaitingKickoff = false;
   state.scoreboard = null;          // new game kicking off → drop the frozen post-game scoreboard
@@ -15203,6 +15853,11 @@ function handleUpdateState(data) {
   const _orangeN = normalised.filter(p => Number(p.team) === 1).length;
   if (_blueN > _rlPeakTeamCount[0]) _rlPeakTeamCount[0] = _blueN;
   if (_orangeN > _rlPeakTeamCount[1]) _rlPeakTeamCount[1] = _orangeN;
+
+  // Series identity can only be judged once a lobby is visible. handleMatchCreated wipes the cache
+  // before it gets the chance, so the check runs HERE, on the first packets of the new game —
+  // otherwise a brand-new series renders the PREVIOUS series' players until its first game banks.
+  if (state.seriesStats && state.seriesStats.enabled && normalised.length) syncSeriesStatsMatchup();
 
   // Update playerCache (persist players across game/disconnect).
   //
@@ -15682,6 +16337,10 @@ function handleMatchEnded(data) {
     statsCurrentGameId = null;
   }
 
+  // Bank this game's per-player line for the series board. Must run while playerCache still holds
+  // the game that just finished and state.game.number still points at it (both change below).
+  captureSeriesStatsGame();
+
   // Determine winner by score (more reliable than relying on potentially missing fields)
   const _scoreWinnerSide = state.game.blueScore > state.game.orangeScore ? 'blue'
                          : state.game.orangeScore > state.game.blueScore ? 'orange' : null;
@@ -15944,11 +16603,13 @@ function handleMatchCreated(data) {
   state.game.number = Math.max(1, Math.min(state.bestOf, (state.series.blue || 0) + (state.series.orange || 0) + 1));
   state.players    = [];
   state.playerCache = {};
+  if (state.seriesStats) state.seriesStats.liveBanked = false;   // fresh cache — count it live again
   state.inReplay   = false;
   state.currentGoal = null;
   _rlPrevPlayerStats = {};   // fresh match — don't diff demo/save counts against the last game's players
   _rlPeakTeamCount = { 0: 0, 1: 0 };   // fresh match — recount the peak roster for the post-game cap
   flowBus.emit('rl_match_created', {});
+  syncSeriesStatsMatchup();      // new game → if the teams changed, drop the prior series' banked stats
   _rlSpectatingActive = false;   // re-arm the "hide native UI on spectate" latch for this new lobby
   _rlPlayingLogged = false;      // re-log the spectating-vs-playing determination for this new match
   // Single authoritative re-arm for the auto-hide press: ONLY a genuinely new game clears the
@@ -16140,8 +16801,14 @@ function startBridgeServer() {
     ws._page = '';          // overlay page path (e.g. /ticker.html) — drives the pre-flight "overlays reachable" check
     ws._imgvault = false;   // set true via 'imgvault_ready' — opt into compact @img: image refs
     ws.on('pong', () => { ws.isAlive = true; });
-    // Send full state immediately on connect
-    ws.send(JSON.stringify(getFullState()));
+    // Send full state immediately on connect. Guarded, like the update_status send below it:
+    // getFullState() can throw on a payload that will not serialize (the circular-ref /
+    // "Maximum call stack size exceeded" case _flushFullState diagnoses), and the socket can die
+    // between accept and first write. Unguarded, either threw inside the connection handler and the
+    // newly-connected browser source got NO snapshot at all — it would sit blank while every
+    // already-connected overlay carried on updating.
+    try { ws.send(JSON.stringify(getFullState())); }
+    catch (e) { console.error('[bridge] initial snapshot failed for a client:', (e && e.message) || e); }
     if (_lastUpdateStatus) { try { ws.send(JSON.stringify({ type: 'update_status', data: _lastUpdateStatus })); } catch (e) {} }
 
     ws.on('message', (raw) => {
@@ -16629,7 +17296,10 @@ registerWsHandlers({
       name: typeof w.name === 'string' ? w.name : (sideFired ? '' : (cur.name ?? '')),
       logo: ('logo' in w) ? (w.logo || null) : (sideFired ? null : (cur.logo ?? null)),
       color: ('color' in w) ? (w.color || '') : (sideFired ? '' : (cur.color ?? '')),
-      subtitle
+      subtitle,
+      // The look survives a side-only fire (Stream Deck / flow / 'auto') — it is a per-event design
+      // choice, not part of the individual result.
+      style: WINNER_STYLES.includes(w.style) ? w.style : (WINNER_STYLES.includes(cur.style) ? cur.style : 'slam')
     };
     // Keeps gfxActive in sync with .visible — see setExclusiveGfxVisible's own doc.
     if ('visible' in w) setExclusiveGfxVisible('winner', winnerVisible);
@@ -16699,7 +17369,7 @@ registerWsHandlers({
   set_ticker(msg) {
     const p = msg.data || {};
     if (typeof p.visible === 'boolean') state.ticker.visible = p.visible;
-    if (typeof p.source === 'string') state.ticker.source = ['startgg', 'br'].includes(p.source) ? p.source : 'manual';
+    if (typeof p.source === 'string') state.ticker.source = ['startgg', 'nxgen', 'br'].includes(p.source) ? p.source : 'manual';
     if (typeof p.sponsor === 'string') state.ticker.sponsor = p.sponsor.slice(0, 400000);   // small logo (downscaled client-side)
     if (Array.isArray(p.messages)) {
       state.ticker.messages = p.messages
@@ -16709,6 +17379,7 @@ registerWsHandlers({
     }
     if (Number(p.speed) > 0) state.ticker.speed = Math.min(600, Math.max(3, Number(p.speed)));
     if (state.ticker.source === 'startgg') state.ticker.feed = formatTickerFeed(state.startgg.matchFeed);   // build now; refreshes each poll
+    if (state.ticker.source === 'nxgen') state.ticker.feed = formatTickerFeed(state.nxgen.matchFeed);
     if (state.ticker.source === 'br') state.ticker.feed = brTickerFeed();
     saveAppState();
     broadcastFullState();
@@ -16752,6 +17423,24 @@ registerWsHandlers({
     if (typeof p.subtitle === 'string') state.leagueStats.subtitle = p.subtitle;
     if (Array.isArray(p.columns)) state.leagueStats.columns = p.columns.slice(0, 24);
     if (Array.isArray(p.rows)) state.leagueStats.rows = p.rows.slice(0, 40);
+    saveAppState();
+    broadcastFullState();
+  }
+});
+
+// ── Series stats board (Rocket League) ──
+registerWsHandlers({
+  set_series_stats(msg) {
+    const p = msg.data || {};
+    const ss = state.seriesStats;
+    // Through setExclusiveGfxVisible, never `ss.visible = ...` directly: gfx.html gates on
+    // gfxActive, so setting the flag alone puts the board "on air" where nothing can see it.
+    if (typeof p.visible === 'boolean') setExclusiveGfxVisible('seriesstats', p.visible);
+    if (typeof p.enabled === 'boolean') ss.enabled = p.enabled;
+    if (typeof p.design === 'string' && SERIES_STATS_DESIGNS.includes(p.design)) ss.design = p.design;
+    // Producer's explicit Clear — drops the banked games without touching the series SCORE, so a
+    // mis-started sheet can be reset mid-series without resetting the match.
+    if (p.clear === true) { ss.games = []; ss.liveBanked = false; }
     saveAppState();
     broadcastFullState();
   }
@@ -16824,6 +17513,11 @@ registerWsHandlers({
     if (p.fetch !== false && ts.entrantId) refreshTeamSpotlight().catch(() => {});
   }
 });
+
+// Latch for the Smash stock countdown (see the "Smash stock countdown" block inside the switch
+// below). It MUST live out here: a `let` inside the switch body is shared by every case but is
+// only initialized if execution actually reaches its line, which a `case` jump never does.
+let _smashGameClosed = false;
 
 function handleControlMessage(msg, ws) {
   const h = WS_HANDLERS[msg.type];
@@ -17021,7 +17715,8 @@ function handleControlMessage(msg, ws) {
         logo: ('logo' in o) ? (o.logo || null) : (cur.logo ?? null),
         outroLogo: ('outroLogo' in o) ? (o.outroLogo || null) : (cur.outroLogo ?? null),
         colorMode: ['mono', 'team', 'brand'].includes(o.colorMode) ? o.colorMode : (cur.colorMode || 'team'),
-        skin: ('skin' in o) ? (o.skin || null) : (cur.skin ?? null)
+        skin: ('skin' in o) ? (o.skin || null) : (cur.skin ?? null),
+        style: REPLAY_STYLES.includes(o.style) ? o.style : (cur.style || 'slam')
       };
       saveAppState();
       broadcastFullState();
@@ -17856,11 +18551,25 @@ function handleControlMessage(msg, ws) {
           : ('endsAt' in b ? (b.endsAt || null) : (cur.endsAt ?? null)),
         frozenSeconds: ('frozenSeconds' in b) ? (b.frozenSeconds != null ? Math.max(0, Math.round(b.frozenSeconds)) : null)
           : (('seconds' in b || 'endsAt' in b || 'until' in b) ? null : (cur.frozenSeconds ?? null)),
+        // Draw the title without a clock. Sticky like the other look settings: a bare timer
+        // mirror ({seconds}/{frozenSeconds}) must not silently switch the clock back on.
+        titleOnly: ('titleOnly' in b) ? !!b.titleOnly : !!cur.titleOnly,
         // OBS scene to auto-cut to when the countdown reaches 0 ('' = stay on the break screen).
-        thenScene: typeof b.thenScene === 'string' ? b.thenScene : (cur.thenScene ?? ''),
-        // Playout playlist to roll when the countdown ends (client-driven), then cut to thenScene.
-        thenPlayout: typeof b.thenPlayout === 'string' ? b.thenPlayout : (cur.thenPlayout ?? '')
+        // Deliberately the ONLY thing a finished countdown can do: it never rolls a clip/ad playlist.
+        thenScene: typeof b.thenScene === 'string' ? b.thenScene : (cur.thenScene ?? '')
       };
+      // HIDE DISARMS THE CLOCK. Every consumer treats "break hidden" as "there is no countdown"
+      // (the panel drops its mirror, the desk/replay/countdown-bar scenes blank their clock), but
+      // the merge above kept `endsAt` alive through a Hide — leaving a half state the producer
+      // could not see or clear. The counterpart to this is that those scenes no longer require
+      // `visible`: the top-bar Start arms a segment clock WITHOUT putting the break GRAPHIC on
+      // air, and that clock is exactly what the desk scenes borrow. Same reasoning as
+      // scheduleBreakAutoSwitch: the timer is about the timer, not about which graphic is up.
+      // Only a bare Hide clears it — a message that also sets a timer is setting one, not hiding one.
+      if (b.visible === false && !('seconds' in b) && !('endsAt' in b) && !('until' in b) && !('frozenSeconds' in b)) {
+        state.breakScreen.endsAt = null;
+        state.breakScreen.frozenSeconds = null;
+      }
 
       // Auto-start minigame when break screen becomes visible
       const wasVisible = cur.visible;
@@ -18189,11 +18898,12 @@ function handleControlMessage(msg, ws) {
       broadcastFullState();
       break;
 
-    case 'set_theme':
-      if (typeof msg.data.theme === 'string') state.themesByGame[state.activeGame] = msg.data.theme;
-      saveAppState();
-      broadcastFullState();
-      break;
+    // NOTE: 'set_theme' is handled further down in this same switch, by the validating version
+    // that runs migrateThemeId() + isValidTheme(). An earlier duplicate case sat here and, being
+    // first, always won — so the Settings ▸ Overlay Appearance picker (which sends the aliases
+    // default/midnight/neon, see THEME_ALIASES) stored the alias raw instead of the real layout id.
+    // The overlay still resolved via migrateThemeId at read time, but the design <select> has no
+    // matching option for an alias, so the picker went blank. Duplicate removed.
 
     case 'set_global_accent':
       if (typeof msg.data.color === 'string') {
@@ -18363,7 +19073,11 @@ function handleControlMessage(msg, ws) {
         slots: { 1: slotName(1), 2: slotName(2), 3: slotName(3), 4: slotName(4) },
         host: (state.casters.showRoles && state.casters.showRoles.host) || '',
         observer: (state.casters.showRoles && state.casters.showRoles.observer) || '',
-        active: (state.crew || []).filter((c) => c && c.active).map((c) => c.name),
+        // Who is on the desk RIGHT NOW — read off the desk itself, not crew.active. That flag is
+        // set from several places (station check-ins, library pull-ins) and cleared from almost
+        // none, so snapshotting it baked people who had never taken a slot into the preset, and
+        // applying the preset then re-marked them on shift.
+        active: deskLineupPeople().map((p) => p.name),
         // Display options ride the shift too — a shift is the whole desk setup.
         showCountry: !!state.casters.showCountry,
         nameMode: state.casters.nameMode === 'name' ? 'name' : 'gamertag'
@@ -19531,22 +20245,6 @@ function handleControlMessage(msg, ws) {
       break;
     }
 
-    case 'set_brand_social_preset': {
-      const kitId = state.activeBrandKitId;
-      const kit = kitId && savedBrandKits.find((k) => k.id === kitId);
-      // No active brand kit → save to a state-level fallback instead of silently dropping it (a
-      // kit-scoped preset only makes sense once kits are in use; most setups never activate one).
-      const target = kit ? (kit.socialPreset || (kit.socialPreset = {})) : (state.socialPreset || (state.socialPreset = {}));
-      const p = msg.data || {};
-      if (typeof p.bgImageUrl === 'string') target.bgImageUrl = p.bgImageUrl.slice(0, 5000000);
-      if (typeof p.bgStyle === 'string' && ['auto', 'dark', 'spotlight'].includes(p.bgStyle)) target.bgStyle = p.bgStyle;
-      if (typeof p.cardStyle === 'string' && ['broadcast', 'poster'].includes(p.cardStyle)) target.cardStyle = p.cardStyle;
-      if (typeof p.presentedByEnabled === 'boolean') target.presentedByEnabled = p.presentedByEnabled;
-      saveAppState();
-      broadcastFullState();
-      break;
-    }
-
     case 'set_team':
       if (msg.data.side === 'blue' || msg.data.side === 'orange') {
         // Preserve color/players already set for this side
@@ -19590,7 +20288,13 @@ function handleControlMessage(msg, ws) {
 //
 // `state.smash.autoAdvance` gates it, and _smashGameClosed latches so correcting a number down
 // through zero — or any second write while the board still reads 0 — can't award twice.
-let _smashGameClosed = false;
+//
+// _smashGameClosed is declared at MODULE scope (just above handleControlMessage), NOT here. A
+// `let` written at this point would sit in the switch's single block scope, and every case jumps
+// straight to its own label without ever running this line — so the binding stays in its temporal
+// dead zone and the first case to touch it throws ReferenceError. That is exactly what broke
+// `reset_series` and the Smash auto-advance: the throw was swallowed by the handler's try/catch,
+// so the button simply did nothing. Function declarations below are fine (they hoist).
 
 // Stocks a side still has: the crew's pooled total in team mode, the single count in singles.
 function smashStocksLeft(side) {
@@ -21337,7 +22041,9 @@ function checkSmashGameOver() {
       (async () => {
         try {
           if (!cloud.authed()) { sendImportExportResult(ws, false, 'Sign in to the cloud first.', 'org-library'); return; }
-          const res = await pullOrgLibrary();
+          // force: a producer clicking Pull Now is usually doing it BECAUSE something looks wrong,
+          // so bypass the rev cache entirely rather than answering "nothing changed".
+          const res = await pullOrgLibrary({ force: true });
           if (res.error) { sendImportExportResult(ws, false, 'Pull failed: ' + res.error, 'org-library'); return; }
           sendImportExportResult(ws, true, `Org library synced — ${res.orgTeams || 0} teams, ${res.orgKits || 0} brand kits from your organization.`, 'org-library');
         } catch (e) { sendImportExportResult(ws, false, 'Pull failed: ' + e.message, 'org-library'); }
@@ -21967,12 +22673,19 @@ function checkSmashGameOver() {
     }
 
     case 'startgg_set_autofollow': {
+      const _streamChanged = typeof msg.data?.streamName === 'string' && msg.data.streamName !== state.startgg.streamName;
       if (typeof msg.data?.streamName === 'string') state.startgg.streamName = msg.data.streamName;
       setStartggAutoFollow(!!msg.data?.enabled);
       if (state.startgg.autoFollow) setActivePlatform('startgg');   // silence Challonge / NXGEN follow
       if (state.startgg.autoFollow && !state.startgg.queueEnabled && startggApiToken && state.startgg.tournamentSlug) {
         setStartggQueuePolling(true);
       }
+      // Switching the followed stream/station re-scopes the overlay feeds (ticker + schedule) + auto-
+      // follow — re-poll now so it takes effect immediately instead of on the next interval.
+      if (_streamChanged && startggApiToken && state.startgg.tournamentSlug) {
+        fetchStreamQueue(state.startgg.tournamentSlug).catch(() => {});
+      }
+      broadcastFullState();
       ws.send(JSON.stringify({ type: 'startgg-result', data: { ok: true, message: state.startgg.autoFollow ? 'Auto-follow ON — pushing the live set automatically.' : 'Auto-follow off.' } }));
       break;
     }
@@ -22357,7 +23070,7 @@ function checkSmashGameOver() {
           saveAppState();
           broadcastFullState();
           setNxgenPolling(state.nxgen.enabled);
-          ws.send(JSON.stringify({ type: 'nxgen-result', data: { ok: true, message: `Loaded "${result.name}" — ${result.teamsCount} participants, ${result.matchesCount} matches.`, loaded: true } }));
+          ws.send(JSON.stringify({ type: 'nxgen-result', data: { ok: true, message: `Loaded "${result.name}" — ${result.teamsCount} participants, ${result.matchesCount} matches.${result.warning || ''}`, loaded: true } }));
         } catch (e) {
           state.nxgen.connected = false;
           state.nxgen.lastError = e.message;
@@ -22565,7 +23278,11 @@ function checkSmashGameOver() {
     // Post-game stats screen skin (RL scoreboard) — show/hide the stat table + pick its design.
     case 'set_rl_stats_screen': {
       const p = msg.data || {};
-      const DESIGNS = ['default', 'glass', 'block', 'radar'];
+      // MUST match the <option> list in the two Scoreboard style pickers (Settings ▸ Games ▸ Rocket
+      // League and Match — Teams ▸ gear). 'compare' was added to the UI and to rl-hud.html
+      // (renderStatCompare + the .sb-cmp-* styles) but never here, so the server rejected it and
+      // kept the previous design — the producer picked Compare and nothing happened.
+      const DESIGNS = ['default', 'glass', 'block', 'radar', 'compare'];
       const cur = state.rlStatsScreen || { showStats: true, design: 'default' };
       state.rlStatsScreen = {
         showStats: typeof p.showStats === 'boolean' ? p.showStats : cur.showStats,
@@ -23247,6 +23964,7 @@ function checkSmashGameOver() {
       if (p.ignoreRounds != null) { const n = parseInt(p.ignoreRounds, 10); if (Number.isFinite(n) && n >= 0 && n <= 12) state.bracket.ignoreRounds = n; }
       if (typeof p.hideLogos === 'boolean') state.bracket.hideLogos = p.hideLogos;
       if (typeof p.logoWatermark === 'boolean') state.bracket.logoWatermark = p.logoWatermark;
+      if (p.watermarkOpacity != null) { const n = parseInt(p.watermarkOpacity, 10); if (Number.isFinite(n) && n >= 0 && n <= 40) state.bracket.watermarkOpacity = n; }
       saveAppState();
       broadcastFullState();
       if (typeof p.visible === 'boolean') obsSwitch(p.visible ? 'bracket' : 'inGame');
@@ -23657,7 +24375,7 @@ function checkSmashGameOver() {
     }
 
     case 'rl_hide_native_ui': {
-      triggerRlHideNativeUi();
+      triggerRlHideNativeUi().catch((e) => console.warn('[rl: hide-native-ui failed]', (e && e.message) || e));
       break;
     }
 
@@ -25787,7 +26505,10 @@ function startHttpServer(baseDir) {
     return use[0].slice(0, 3).toUpperCase();
   }
   let _pulseWasPublishing = false;
-  setInterval(async () => {
+  // 3s live heartbeat for the multiview tiles. Small jitter (not the default 20%) keeps the tiles
+  // responsive; the breaker is what stops this becoming 20 failed requests a minute per desk
+  // during an outage.
+  cloudLoop('pulse', async () => {
     const orgId = pulseOrgId();
     const on = !!(state.pulse && state.pulse.publish) && !!orgId;
     if (!on) {
@@ -25821,7 +26542,7 @@ function startHttpServer(baseDir) {
       });
       _pulseWasPublishing = true;
     } catch (e) { /* transient — try again next tick */ }
-  }, 3000);
+  }, 3000, { jitter: 0.1 });
 
   // ── Media library ─────────────────────────────────────────────────────────
   // Browsable image store under <dataDir>/media, served at /data/media/<...>.
@@ -26605,6 +27326,13 @@ function startHttpServer(baseDir) {
       const r = await enrichVaultFromStartgg({ force: !!(req.body && req.body.force) });
       res.json({ ok: true, result: r, pending: vaultEnrichTargets(false).length });
     } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  // Re-read one team's start.gg page now (the vault card's "Check start.gg" button).
+  app.post('/api/teamdb/:id/refresh-startgg', async (req, res) => {
+    try {
+      res.json({ ok: true, ...(await refreshVaultTeamFromStartgg(req.params.id)) });
+    } catch (e) { res.status(400).json({ error: e.message }); }
   });
 
   // Push a vault record into the working team library (what the Match panel and overlays read).
@@ -28953,41 +29681,7 @@ module.exports.start = function(baseDir) {
   // logic stays testable without a Twitch token: clip fetching goes through twitchClient, naming
   // goes through the SAME core the control panel uses (so an unattended run titles clips exactly
   // the way the producer saw it do on-screen), and results come back out as WS events.
-  socialWeekly = new SocialWeekly({
-    userDataPath: userData,
-    publisher:    socialPublisher,
-    fetchClips: async ({ startedAt, endedAt }) => {
-      if (!twitchClient || !state.twitch || !state.twitch.channelId) {
-        throw new Error('Twitch is not connected — the weekly run has no clip source');
-      }
-      const all = [];
-      let cursor = null;
-      do {
-        const { clips, cursor: next } = await twitchClient.getClips(state.twitch.channelId, { cursor, startedAt, endedAt });
-        all.push(...(clips || []));
-        cursor = next;
-      } while (cursor && all.length < 500);
-      // Resolve category names so {game} works in an unattended run too.
-      try {
-        const ids = [...new Set(all.map(c => c.game_id).filter(Boolean))];
-        if (ids.length) socialWeekly._games = await twitchClient.getGamesByIds(ids);
-      } catch (_) {}
-      return all;
-    },
-    renderNames: (clip, index) => SocialNamingCore.renderNames(
-      clip, index,
-      { eventName: state.eventName, roundLabel: state.roundLabel, activeGame: state.activeGame, teams: state.teams },
-      socialWeekly._games || {},
-      {
-        title:   socialWeekly.config.titleTemplate,
-        desc:    socialWeekly.config.descTemplate,
-        caption: socialWeekly.config.captionTemplate,
-      }
-    ),
-    onEvent: (type, payload) => broadcast(bridgeClients, { type, data: payload }),
-  });
-  socialWeekly.start();
-  bootMark('social publisher + weekly');
+  bootMark('social publisher');   // the weekly-clip automation it used to also start was removed
 
   // YouTube Live Chat → the multichat feed. Same pipeline as Twitch IRC: broadcast a
   // per-message frame + append to the rolling _chatLog for panel backfill. Reuses the
@@ -29087,7 +29781,7 @@ module.exports.start = function(baseDir) {
   // revoked user relaunching, during the launcher's load) and every 10 minutes while
   // running. Signs out ONLY on a definitive backend refusal — see validateCloudSession.
   setTimeout(() => { validateCloudSession('boot'); }, 2500);
-  setInterval(() => { validateCloudSession('periodic'); }, 10 * 60 * 1000);
+  cloudLoop('session', () => validateCloudSession('periodic'), 10 * 60 * 1000);
 
   // Initialize Twitch integration if API token is configured
   if (state.twitch.apiToken) {
@@ -29147,6 +29841,14 @@ module.exports.start = function(baseDir) {
   // session, make sure the other platforms' auto-follow didn't survive in the saved state and start
   // fighting it after restart.
   if (state.activeEvent && state.activeEvent.platform) setActivePlatform(state.activeEvent.platform);
+  // …and RESUME the active platform's own polling. start.gg has its resume just above; NXGEN had
+  // none, so a restart left a linked NXGEN event permanently dead: queue, matchFeed and connected
+  // are all transient (never saved), and nothing refetched them — the ticker stayed empty with the
+  // event still showing as linked.
+  if (state.activeEvent && state.activeEvent.platform === 'nxgen' && nxgenApiKey && (state.nxgen.eventSlug || '').trim()) {
+    state.nxgen.enabled = true;
+    setNxgenPolling(true);
+  }
 
 
   // AI training-data recorder (Phase 0 — local JSONL of producer decisions + context).
@@ -29167,7 +29869,7 @@ module.exports.start = function(baseDir) {
   // (server.js:~2281) — gated on cloud.authed() + the separate uploadEnabled toggle (never runs off
   // of just "local recording enabled"). 60s cadence: this is non-urgent training data, not live state.
   _telemetryUploader = createTelemetryUploader({ dataDir });
-  setInterval(telemetryAutoSync, 60000);
+  cloudLoop('telemetry', () => telemetryAutoSync(), 60000);
 
   // AI Auto-Director + clip system
   directorEngine = createDirectorEngine({
@@ -30515,7 +31217,13 @@ app.post('/api/social/disconnect/:platform', (req, res) => {
   res.json({ ok: true });
 });
 
-// POST /api/social/clip/download — download a Twitch clip to the local library
+// POST /api/social/clip/download — pull a Twitch clip down into the local clip library.
+//
+// This is NOT part of the removed Social page. It backs the quick rail's REPLAY ▸ Twitch ▸ Import
+// button (control-panel/app.js, qrTwLoad), which is live and is the only caller. It was deleted as
+// collateral damage when the Social feature came out, leaving that button failing on a 404 for
+// every producer. The path stays as-is because it is what the panel already calls; the downloader
+// itself lives on socialPublisher, which is retained for the YouTube/multichat OAuth.
 app.post('/api/social/clip/download', async (req, res) => {
   if (!_socialGuard(req, res)) return;
   if (!_socialPublishGuard(req, res)) return;
@@ -30537,178 +31245,6 @@ app.post('/api/social/clip/download', async (req, res) => {
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
-});
-
-// GET /api/social/schedule — list all scheduled posts
-app.get('/api/social/schedule', (req, res) => {
-  if (!_socialGuard(req, res)) return;
-  res.json({ schedule: socialPublisher.getSchedule() });
-});
-
-// POST /api/social/schedule — add a scheduled post
-// YouTube: upload immediately with publishAt so YouTube handles the publish time natively.
-// Twitter: pre-upload media now so posting later is just a fast tweet call.
-app.post('/api/social/schedule', async (req, res) => {
-  if (!_socialGuard(req, res)) return;
-  if (!_socialPublishGuard(req, res)) return;
-  try {
-    const body = req.body;
-    const post = socialPublisher.addPost(body);
-    res.json({ ok: true, post });
-    // Background work after responding — no need to block the client
-    const platforms = post.platforms || [];
-    if (platforms.includes('youtube') && post.scheduledAt) {
-      // Upload to YouTube now with the future publishAt; YouTube handles the reveal
-      try {
-        const results = await socialPublisher.publish({ ...post, platforms: ['youtube'] });
-        const entry = socialPublisher.getSchedule().find(p => p.id === post.id);
-        if (entry) {
-          entry.youtubeUploaded = true;
-          entry.publishResults  = { platforms: results.platforms };
-        }
-        socialPublisher._save(socialPublisher.schedulePath, socialPublisher.schedule);
-        console.log('[Social] YouTube pre-upload done for scheduled post', post.id);
-      } catch (e) {
-        console.error('[Social] YouTube pre-upload failed:', e.message);
-      }
-    }
-    if (platforms.includes('twitter') && post.scheduledAt) {
-      try {
-        const mediaId = await socialPublisher.prepareTwitterMedia(post);
-        if (mediaId) {
-          const entry = socialPublisher.getSchedule().find(p => p.id === post.id);
-          if (entry) entry.twitterMediaId = mediaId;
-          socialPublisher._save(socialPublisher.schedulePath, socialPublisher.schedule);
-          console.log('[Social] Twitter media pre-uploaded for scheduled post', post.id);
-        }
-      } catch (e) {
-        console.error('[Social] Twitter pre-upload failed:', e.message);
-      }
-    }
-  } catch (e) {
-    if (!res.headersSent) res.status(500).json({ error: e.message });
-  }
-});
-
-// DELETE /api/social/schedule/:id — cancel a scheduled post
-app.delete('/api/social/schedule/:id', (req, res) => {
-  if (!_socialGuard(req, res)) return;
-  if (!_socialPublishGuard(req, res)) return;
-  const ok = socialPublisher.cancelPost(req.params.id);
-  res.json({ ok });
-});
-
-// POST /api/social/publish-now — immediate publish (no schedule)
-app.post('/api/social/publish-now', async (req, res) => {
-  if (!_socialGuard(req, res)) return;
-  if (!_socialPublishGuard(req, res)) return;
-  try {
-    // Inject Twitch credentials so the downloader can use authenticated GQL requests
-    const post = { ...req.body, _twitchToken: state.twitch?.apiToken, _twitchClientId: TWITCH_CLIENT_ID };
-    const results = await socialPublisher.publish(post);
-    res.json(results);
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// GET /api/social/clip/resolve?url= — signed, directly-playable CDN URLs for a Twitch clip.
-// The composer needs a real <video> src to scrub and trim against; a Twitch clip has no local
-// file until publish time, which is why trimming used to be local-clips-only.
-app.get('/api/social/clip/resolve', async (req, res) => {
-  if (!_socialGuard(req, res)) return;
-  const url = String(req.query.url || '');
-  if (!url) return res.status(400).json({ error: 'url required' });
-  try {
-    const slug = socialPublisher._twitchSlug(url);
-    if (!slug) return res.status(400).json({ error: 'Not a recognisable Twitch clip URL' });
-    const urls = await socialPublisher._getTwitchClipUrls(slug);
-    if (!urls.length) return res.status(404).json({ error: 'No playable renditions returned for this clip' });
-    res.json({ urls, url: urls[0] });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// POST /api/social/pick-bumper — native file picker for an intro/outro bumper.
-// The control panel is a file:// page, so a plain <input type="file"> hands back a sandboxed
-// File with no usable path; ffmpeg needs a real one. server.js runs in the Electron main
-// process, so it can open the dialog directly.
-app.post('/api/social/pick-bumper', async (req, res) => {
-  try {
-    const r = await dialog.showOpenDialog({
-      title: 'Select an intro / outro bumper',
-      properties: ['openFile'],
-      filters: [
-        { name: 'Video or image', extensions: ['mp4', 'mov', 'mkv', 'webm', 'png', 'jpg', 'jpeg', 'webp'] },
-        { name: 'All files', extensions: ['*'] },
-      ],
-    });
-    if (r.canceled || !r.filePaths || !r.filePaths[0]) return res.json({ canceled: true });
-    res.json({ path: r.filePaths[0] });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// ─── Weekly clip automation ────────────────────────────────────────────────────
-const _weeklyGuard = (req, res) => {
-  if (!socialWeekly) { res.status(503).json({ error: 'Weekly automation not initialized yet' }); return false; }
-  return _socialPublishGuard(req, res);
-};
-
-// GET /api/social/weekly — config + next run + history + anything staged for review
-app.get('/api/social/weekly', (req, res) => {
-  if (!socialWeekly) return res.status(503).json({ error: 'Weekly automation not initialized yet' });
-  res.json(socialWeekly.getStatus());
-});
-
-// POST /api/social/weekly — save config (re-arms the cron)
-app.post('/api/social/weekly', (req, res) => {
-  if (!_weeklyGuard(req, res)) return;
-  try { res.json({ ok: true, status: (socialWeekly.setConfig(req.body || {}), socialWeekly.getStatus()) }); }
-  catch (e) { res.status(400).json({ error: e.message }); }
-});
-
-// GET /api/social/weekly/preview — dry run: what would the next run pick up right now?
-app.get('/api/social/weekly/preview', async (req, res) => {
-  if (!socialWeekly) return res.status(503).json({ error: 'Weekly automation not initialized yet' });
-  try {
-    const pick = await socialWeekly.pickClips({ includeHandled: req.query.all === '1' });
-    // Preview the auto-names too, so the producer can see a bad template before it ships.
-    res.json({
-      ...pick,
-      picked: pick.picked.map((clip, i) => ({ clip, ...socialWeekly.renderNames(clip, i) })),
-    });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// POST /api/social/weekly/run — run the job now, off the cron's schedule
-app.post('/api/social/weekly/run', async (req, res) => {
-  if (!_weeklyGuard(req, res)) return;
-  try { res.json({ ok: true, entry: await socialWeekly.run('manual'), status: socialWeekly.getStatus() }); }
-  catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// POST /api/social/weekly/approve — review mode: schedule the staged rows (as edited)
-app.post('/api/social/weekly/approve', async (req, res) => {
-  if (!_weeklyGuard(req, res)) return;
-  try { res.json({ ok: true, ...(await socialWeekly.approveStaged(req.body && req.body.rows)), status: socialWeekly.getStatus() }); }
-  catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// POST /api/social/weekly/discard — drop the staged batch (clips stay eligible next run)
-app.post('/api/social/weekly/discard', (req, res) => {
-  if (!_weeklyGuard(req, res)) return;
-  res.json({ ...socialWeekly.discardStaged(), status: socialWeekly.getStatus() });
-});
-
-// POST /api/social/weekly/forget — un-mark a clip (or all) as already handled
-app.post('/api/social/weekly/forget', (req, res) => {
-  if (!_weeklyGuard(req, res)) return;
-  res.json(socialWeekly.forget(req.body && req.body.clipId));
 });
 
 function _oauthDonePage(platform, success, err) {

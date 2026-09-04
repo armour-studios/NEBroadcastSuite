@@ -800,7 +800,7 @@
      DEVELOPER TOOLBAR
      Hidden inside OBS by default. Add ?dev=1 to the browser source URL to
      show the toolbar and auto-load demo data inside OBS for testing/demo use.
-     e.g.  http://localhost:3000/valorant.html?dev=1
+     e.g.  http://127.0.0.1:3000/valorant.html?dev=1
   ══════════════════════════════════════════════════════════════════════════ */
   #dev-panel {
     display: none; position: fixed; left: 14px; bottom: 14px; z-index: 9999;
@@ -1007,6 +1007,10 @@
 <button id="dev-fab" style="display:none">VAL DEV</button>
 
 <script>
+// Producer- and API-supplied names go into innerHTML below; escape them so a team called
+// "A<B" or a name carrying a quote cannot truncate the element or break an attribute.
+function _esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
+
 'use strict';
 
 // ── CDN base for GitHub repo assets ───────────────────────────────────────
@@ -1676,11 +1680,11 @@ function renderBuyLt(v, atkPlayers, defPlayers, atkTeam, defTeam) {
       <div class="bc-player">
         ${side === 'atk' ? `
           ${cdnImg('bc-agent', agentIconUrl(agent), `agent_icons/${agent}/${agent}_icon.webp`)}
-          <span class="bc-pname">${p.name}</span>
+          <span class="bc-pname">${_esc(p.name)}</span>
           <span class="bc-kda"><span class="k">${p.kills||0}</span>/<span class="d">${p.deaths||0}</span>/${p.assists||0}</span>
         ` : `
           <span class="bc-kda"><span class="k">${p.kills||0}</span>/<span class="d">${p.deaths||0}</span>/${p.assists||0}</span>
-          <span class="bc-pname">${p.name}</span>
+          <span class="bc-pname">${_esc(p.name)}</span>
           ${cdnImg('bc-agent', agentIconUrl(agent), `agent_icons/${agent}/${agent}_icon.webp`)}
         `}
       </div>

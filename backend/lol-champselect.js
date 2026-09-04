@@ -135,7 +135,7 @@ function startPoller(opts) {
   }
 
   timer = setInterval(tick, intervalMs);
-  tick();
+  tick().catch((e) => console.warn('[lol-champselect: poll failed]', (e && e.message) || e));
   return function stop() { stopped = true; if (timer) clearInterval(timer); timer = null; };
 }
 

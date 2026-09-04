@@ -283,10 +283,19 @@
       padding: 6px 14px; border-radius: 4px; white-space: nowrap;
       flex-shrink: 0;
     }
+    /* Every value here used to be a color-mix, so on Chrome 100 the badge lost its fill, its
+       border AND its text colour at once — it vanished. Solid fallbacks first, enhancement after. */
     .lh-status-badge.badge-starter {
-      background: color-mix(in srgb, var(--team-color) 28%, transparent);
-      border: 1px solid color-mix(in srgb, var(--team-color) 50%, transparent);
-      color: color-mix(in srgb, var(--team-color) 100%, #fff 60%);
+      background: rgba(255,255,255,.10);
+      border: 1px solid var(--team-color);
+      color: #fff;
+    }
+    @supports (color: color-mix(in srgb, red 50%, white)) {
+      .lh-status-badge.badge-starter {
+        background: color-mix(in srgb, var(--team-color) 28%, transparent);
+        border: 1px solid color-mix(in srgb, var(--team-color) 50%, transparent);
+        color: color-mix(in srgb, var(--team-color) 100%, #fff 60%);
+      }
     }
     .lh-row.is-cap .lh-status-badge.badge-starter {
       background: linear-gradient(135deg, color-mix(in srgb, var(--duo-accent) 30%, transparent), color-mix(in srgb, var(--duo-accent2) 30%, transparent));
@@ -409,7 +418,7 @@
         if (key in _evCache) return;
         _evCache[key] = 'loading';
         pending++;
-        fetch('http://localhost:3000/api/stats/player-event?name=' + encodeURIComponent(tag) + '&tournament=' + encodeURIComponent(evName))
+        fetch((/^https?:$/.test(location.protocol) ? location.origin : 'http://127.0.0.1:3000') + '/api/stats/player-event?name=' + encodeURIComponent(tag) + '&tournament=' + encodeURIComponent(evName))
           .then((r) => r.json())
           .then((d) => { _evCache[key] = (d && d.stats && d.stats.games > 0) ? d.stats : null; })
           .catch(() => { _evCache[key] = null; })

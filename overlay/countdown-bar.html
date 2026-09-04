@@ -167,6 +167,20 @@
       width: 3px; background: var(--accent-2); opacity: .95;
     }
     .seg-timer .seg-label { color: inherit; opacity: .8; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+    /* Title-only: the clock is gone, so the label has to carry the block on its own — scaled to
+       roughly the presence the digits had, full opacity, wider rules. Without this it reads as a
+       tiny caption stranded in the middle of an otherwise empty panel. */
+    .seg-timer.title-only #timer { display: none; }
+    /* The clock column is a FIXED width sized for digits ("05:00"). A word does not fit it, and
+       the label's ellipsis rule then clipped the title mid-word ("NTERMISSIO"), so in title-only
+       the column sizes to its content and the label stops truncating. */
+    .seg-timer.title-only { width: auto; padding: 0 34px; }
+    .seg-timer.title-only .seg-label {
+      font-size: 28px; letter-spacing: .10em; gap: 14px; opacity: 1;
+      max-width: none; overflow: visible; text-overflow: clip;
+    }
+    .seg-timer.title-only .seg-label::before,
+    .seg-timer.title-only .seg-label::after { width: 22px; }
     #timer {
       font-size: 52px; font-weight: 700; line-height: 1; letter-spacing: .02em;
       font-variant-numeric: tabular-nums; font-feature-settings: "tnum" 1;
@@ -509,10 +523,17 @@
 
       frozen = (b.frozenSeconds != null) ? Math.max(0, Math.round(b.frozenSeconds)) : null;
       endsAt = b.endsAt || null;
-      // Show/Hide on the producer timer owns this clock — Hide leaves endsAt in state, so
-      // "is a timer set" kept the countdown up on every scene that borrows the break timer.
-      hasTimer = (b.visible !== false) && (frozen != null || !!endsAt);
-      el('seg-timer').classList.toggle('is-empty', !hasTimer);
+      // The clock is FURNITURE on this scene, not the break graphic: it shows whenever a timer
+      // is ARMED. The top-bar Start arms one without ever setting breakScreen.visible, so
+      // requiring `visible` meant the producer's segment clock never appeared here. Hide now
+      // disarms the timer server-side (set_break), which is what actually takes this down.
+      hasTimer = (frozen != null || !!endsAt);
+      // Title-only: label with no clock. Segment then keys off the title, not the timer (see
+      // replay-desk.html), so switching the clock off does not blank the segment entirely.
+      const titleOnly = !!b.titleOnly;
+      const hasTitle = !!(b.title != null && String(b.title).trim());
+      el('seg-timer').classList.toggle('title-only', titleOnly);
+      el('seg-timer').classList.toggle('is-empty', titleOnly ? !hasTitle : !hasTimer);
       if (frozen != null) paintTimer(frozen);
 
       renderBrand(data);

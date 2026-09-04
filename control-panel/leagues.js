@@ -2716,7 +2716,7 @@ el('lg-import-event-teams')?.addEventListener('click', function () {
         dd.innerHTML = '<div class="team-dd-item team-dd-empty">Set up Start.gg API token first.</div>';
         dd.style.display = 'block'; return;
       }
-      fetch('http://localhost:3000/api/startgg/search-leagues', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: v }) })
+      fetch('http://127.0.0.1:3000/api/startgg/search-leagues', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: v }) })
         .then(r => r.json()).then(data => {
           let results = data.results || [];
           if (!results.length) { dd.innerHTML = '<div class="team-dd-item team-dd-empty">No leagues found.</div>'; dd.style.display = 'block'; return; }
@@ -2753,7 +2753,7 @@ el('lg-sgg-sync')?.addEventListener('click', () => {
   if (!lg.startggSource) { showToast('Set a start.gg league source first.', '#f59e0b'); return; }
   if (!currentState.startgg?.hasToken) { showToast('Set up your Start.gg API token in Settings first.', '#f59e0b'); return; }
   lgStatus('Syncing matches from start.gg…');
-  fetch('http://localhost:3000/api/startgg/league-sync', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ leagueId: lg.id }) })
+  fetch('http://127.0.0.1:3000/api/startgg/league-sync', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ leagueId: lg.id }) })
     .then(r => r.json()).then(data => {
       if (data.error) { lgStatus('Sync failed: ' + data.error, false); return; }
       // Adopt the server's post-sync league so our authoritative copy keeps the imported matches +

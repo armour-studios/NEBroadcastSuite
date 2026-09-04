@@ -23,7 +23,7 @@ function fmtDate(ms) {
 
 async function loadStatsAggregate() {
   try {
-    const r = await fetch('http://localhost:3000/api/stats/aggregate');
+    const r = await fetch('http://127.0.0.1:3000/api/stats/aggregate');
     const d = await r.json();
     if (!d.ok) return;
     const el2 = el('stats-aggregate');
@@ -44,7 +44,7 @@ async function loadStatsAggregate() {
 async function loadStatsMatches(reset) {
   if (reset) _statsOffset = 0;
   try {
-    const r = await fetch(`http://localhost:3000/api/stats/matches?limit=${_statsPageSize + 1}`);
+    const r = await fetch(`http://127.0.0.1:3000/api/stats/matches?limit=${_statsPageSize + 1}`);
     const d = await r.json();
     if (!d.ok) return;
     const matches = d.matches.slice(0, _statsPageSize);
@@ -76,14 +76,14 @@ async function loadStatsMatches(reset) {
       div.querySelector('.stats-del-match')?.addEventListener('click', async (e) => {
         e.stopPropagation();
         if (!(await appConfirm('Delete this match from the stats database? It affects team & player aggregates.', 'Delete'))) return;
-        try { await fetch('http://localhost:3000/api/stats/match/' + m.id, { method: 'DELETE' }); } catch (_) {}
+        try { await fetch('http://127.0.0.1:3000/api/stats/match/' + m.id, { method: 'DELETE' }); } catch (_) {}
         _anDash = null; _anDashSig = '';
         loadStatsMatches(true); if (typeof loadStatsAggregate === 'function') loadStatsAggregate();
       });
       listEl.appendChild(div);
     });
 
-    if (!window._statsClearWired) { window._statsClearWired = true; el('stats-clear-matches')?.addEventListener('click', async () => { if (!(await appConfirm('Clear the ENTIRE match history (all matches, games and player stats)? This cannot be undone.', 'Clear'))) return; try { await fetch('http://localhost:3000/api/stats/matches', { method: 'DELETE' }); } catch (_) {} _anDash = null; _anDashSig = ''; loadStatsMatches(true); if (typeof loadStatsAggregate === 'function') loadStatsAggregate(); }); }
+    if (!window._statsClearWired) { window._statsClearWired = true; el('stats-clear-matches')?.addEventListener('click', async () => { if (!(await appConfirm('Clear the ENTIRE match history (all matches, games and player stats)? This cannot be undone.', 'Clear'))) return; try { await fetch('http://127.0.0.1:3000/api/stats/matches', { method: 'DELETE' }); } catch (_) {} _anDash = null; _anDashSig = ''; loadStatsMatches(true); if (typeof loadStatsAggregate === 'function') loadStatsAggregate(); }); }
     const moreBtn = el('stats-load-more');
     if (moreBtn) moreBtn.style.display = hasMore ? '' : 'none';
     _statsOffset += matches.length;
@@ -98,7 +98,7 @@ async function openStatsDetail(matchId) {
   body.innerHTML = '<p style="color:#888;padding:20px 0;">Loading…</p>';
   modal.style.display = 'block';
   try {
-    const r = await fetch(`http://localhost:3000/api/stats/matches/${matchId}`);
+    const r = await fetch(`http://127.0.0.1:3000/api/stats/matches/${matchId}`);
     const d = await r.json();
     if (!d.ok || !d.match) { body.innerHTML = '<p style="color:#f56565;">Error loading match.</p>'; return; }
     const m = d.match;
@@ -177,7 +177,7 @@ async function statsPlayerSearch() {
   resultsEl.style.display = '';
   resultsEl.innerHTML = '<p style="color:#888;font-size:13px;">Searching…</p>';
   try {
-    const r = await fetch(`http://localhost:3000/api/stats/players?name=${encodeURIComponent(name)}`);
+    const r = await fetch(`http://127.0.0.1:3000/api/stats/players?name=${encodeURIComponent(name)}`);
     const d = await r.json();
     if (!d.ok || !d.history?.length) { resultsEl.innerHTML = '<p style="color:#888;font-size:13px;">No results.</p>'; return; }
     let html = `<p style="font-size:12px;color:#888;margin-bottom:8px;">${d.history.length} game(s) found for <strong style="color:#e0e0e0;">${name}</strong></p>`;
@@ -206,7 +206,7 @@ NESearch.bindBox(el('stats-player-search'), (q) => { if (!q || q.length >= 2) st
 el('stats-load-more')?.addEventListener('click', () => loadStatsMatches(false));
 
 // ── Stats deep analytics (leaderboards / team records / head-to-head) ───────
-const STATS_API = 'http://localhost:3000/api/stats';
+const STATS_API = 'http://127.0.0.1:3000/api/stats';
 let _statsTab = (() => { try { return localStorage.getItem('stats_active_tab') || 'overview'; } catch (_) { return 'overview'; } })();
 function statsShowTab(tab) {
   _statsTab = tab;
@@ -225,1343 +225,9 @@ function statsShowTab(tab) {
   try { localStorage.setItem('stats_active_tab', tab); } catch (_) {}
 }
 
-// ════════════════════════════════════════════════════════════════════
-//  SOCIAL EXPORT — Graphics cards + Clip Prep (intro/main/outro bake)
-// ════════════════════════════════════════════════════════════════════
-
-(function () {
-  // ── Tab switching ──────────────────────────────────────────────────
-  document.querySelectorAll('#rp-subnav .ev-subnav-btn').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      document.querySelectorAll('#rp-subnav .ev-subnav-btn').forEach((b) => b.classList.remove('active'));
-      btn.classList.add('active');
-      const target = btn.dataset.rpmain;
-      el('rp-panel-editor').style.display  = target === 'editor'  ? '' : 'none';
-      el('rp-panel-exports').style.display = target === 'exports' ? '' : 'none';
-    });
-  });
-
-  // Social Export lives on the Social page (Social ▸ Export Graphics) as of 2026-08. Its panel is
-  // shown/hidden by social.js' .social-sub-tab-btn handler; this just hydrates it on open. Exposed
-  // so social.js can call it without reaching into this IIFE's closure.
-  window._socOpenExport = function () {
-    socSyncTwitchField();
-    if (typeof window._socHydratePreset === 'function') window._socHydratePreset();
-    socRefreshAll();
-  };
-
-  document.querySelectorAll('.soc-sub-tab').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      document.querySelectorAll('.soc-sub-tab').forEach((b) => b.classList.remove('active'));
-      btn.classList.add('active');
-      const target = btn.dataset.soctab;
-      el('soc-panel-graphics').style.display = target === 'graphics' ? '' : 'none';
-      el('soc-panel-clipprep').style.display  = target === 'clipprep'  ? '' : 'none';
-      if (target === 'clipprep') socPopulateClipDropdowns();
-    });
-  });
-
-  // ── Shared helpers ─────────────────────────────────────────────────
-
-  // Image cache — keyed by URL; resolves to HTMLImageElement or null on error
-  const _imgCache = new Map();
-  function loadImg(url) {
-    if (!url) return Promise.resolve(null);
-    if (_imgCache.has(url)) return Promise.resolve(_imgCache.get(url));
-    return new Promise((resolve) => {
-      const img = new Image();
-      img.crossOrigin = 'anonymous';
-      img.onload  = () => { _imgCache.set(url, img); resolve(img); };
-      img.onerror = () => { _imgCache.set(url, null); resolve(null); };
-      img.src = url;
-    });
-  }
-
-  function socLogoUrl(teamName) {
-    if (!teamName || teamName === 'TBD') return null;
-    const k = teamName.toLowerCase();
-    // Live match teams first (carries logo directly)
-    const liveTeams = currentState.teams || {};
-    for (const side of ['blue', 'orange']) {
-      if (liveTeams[side] && (liveTeams[side].name || '').toLowerCase() === k && liveTeams[side].logo)
-        return liveTeams[side].logo;
-    }
-    // Saved team library
-    const saved = (currentState.savedTeams || []).find((t) => t && t.name && t.name.toLowerCase() === k);
-    if (saved && saved.logo) return saved.logo;
-    // start.gg logo map
-    const logoMap = (currentState.startgg && currentState.startgg.logoMap) || {};
-    return logoMap[k] || null;
-  }
-
-  function socTeamColor(teamName) {
-    const k = (teamName || '').toLowerCase();
-    // Live match teams first
-    const liveTeams = currentState.teams || {};
-    for (const side of ['blue', 'orange']) {
-      if (liveTeams[side] && (liveTeams[side].name || '').toLowerCase() === k && liveTeams[side].color)
-        return liveTeams[side].color;
-    }
-    const saved = (currentState.savedTeams || []).find((t) => t && t.name && t.name.toLowerCase() === k);
-    return (saved && saved.color) || null;
-  }
-
-  function socTwitchLink() {
-    const inp = el('soc-twitch-link');
-    if (inp && inp.value.trim()) return inp.value.trim();
-    const ch = currentState.twitch && currentState.twitch.displayName;
-    return ch ? 'twitch.tv/' + ch : '';
-  }
-
-  function socSyncTwitchField() {
-    const inp = el('soc-twitch-link');
-    if (!inp || inp.value.trim()) return;
-    const ch = currentState.twitch && currentState.twitch.displayName;
-    if (ch) inp.value = 'twitch.tv/' + ch;
-  }
-
-  // ── Platform config ────────────────────────────────────────────────
-  const SOC_PLATFORMS = {
-    instagram: { label: 'Instagram',    W: 1080, H: 1080, layout: 'square'    },
-    story:     { label: 'Story / Reel', W: 1080, H: 1920, layout: 'vertical'  },
-    twitter:   { label: 'Twitter / X',  W: 1200, H: 675,  layout: 'landscape' },
-  };
-  let _socPlatform = 'instagram';
-  let _socCustomBg = null;          // HTMLImageElement from uploaded preset bg
-  let _socCustomBgUrl = '';         // data URL string (for server save)
-  let _socPresentedByEnabled = true;
-  let _socBgStyle = 'auto';         // 'auto' (team colours) | 'dark' (clean) | 'spotlight' — used when no custom image
-  let _socCardStyle = 'broadcast';  // 'broadcast' (scene-style, team colours) | 'poster' (brand-gradient event poster)
-  function socGetPlatform() { return SOC_PLATFORMS[_socPlatform] || SOC_PLATFORMS.instagram; }
-
-  function socResizeCanvas(id) {
-    const c = el(id);
-    if (!c) return null;
-    const p = socGetPlatform();
-    if (c.width !== p.W)  c.width  = p.W;
-    if (c.height !== p.H) c.height = p.H;
-    const MAX_W = 280, MAX_H = 240;
-    const scale = Math.min(MAX_W / p.W, MAX_H / p.H);
-    c.style.width  = Math.round(p.W * scale) + 'px';
-    c.style.height = Math.round(p.H * scale) + 'px';
-    return p;
-  }
-
-  function socCanvasCtx(id) {
-    const p = socResizeCanvas(id);
-    if (!p) return null;
-    const c = el(id);
-    const ctx = c.getContext('2d');
-    ctx.clearRect(0, 0, c.width, c.height);
-    return ctx;
-  }
-
-  // ── Drawing primitives ─────────────────────────────────────────────
-
-  function socGetAbbr(name) {
-    if (!name || name === 'TBD') return 'TBD';
-    const k = name.toLowerCase();
-    const saved = (currentState.savedTeams || []).find((t) => t && t.name && t.name.toLowerCase() === k);
-    if (saved && saved.abbr) return saved.abbr.toUpperCase().slice(0, 4);
-    const words = name.trim().split(/\s+/);
-    if (words.length >= 2) return words.map((w) => w[0]).join('').toUpperCase().slice(0, 4);
-    return name.slice(0, 3).toUpperCase();
-  }
-
-  function socDrawBg(ctx, W, H, colA, colB) {
-    if (_socCustomBg) {
-      const sc = Math.max(W / _socCustomBg.width, H / _socCustomBg.height);
-      const dx = (W - _socCustomBg.width  * sc) / 2;
-      const dy = (H - _socCustomBg.height * sc) / 2;
-      ctx.drawImage(_socCustomBg, dx, dy, _socCustomBg.width * sc, _socCustomBg.height * sc);
-      // Darken toward the edges + a bottom-up scrim so text/badges/footer stay legible over a photo.
-      const scr = ctx.createLinearGradient(0, 0, 0, H);
-      scr.addColorStop(0, 'rgba(6,8,12,0.55)'); scr.addColorStop(0.4, 'rgba(6,8,12,0.32)'); scr.addColorStop(1, 'rgba(6,8,12,0.68)');
-      ctx.fillStyle = scr; ctx.fillRect(0, 0, W, H);
-      const vig = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.36, W / 2, H / 2, Math.max(W, H) * 0.76);
-      vig.addColorStop(0, 'transparent'); vig.addColorStop(1, 'rgba(0,0,0,0.5)');
-      ctx.fillStyle = vig; ctx.fillRect(0, 0, W, H);
-      return;
-    }
-    // Neutral dark base matching the broadcast scenes (duorow #161922 → #111318 → #0a0c10).
-    const base = ctx.createLinearGradient(0, 0, W * 0.35, H);
-    base.addColorStop(0, '#171a24'); base.addColorStop(0.55, '#111318'); base.addColorStop(1, '#0a0b0f');
-    ctx.fillStyle = base; ctx.fillRect(0, 0, W, H);
-
-    const style = _socBgStyle || 'auto';
-    if (style === 'auto' && (colA || colB)) {
-      // Restrained team-colour washes from each side (left = A, right = B) — lighter than before so the
-      // card reads dark/premium and the logos+names pop instead of drowning in colour.
-      if (colA) {
-        const gA = ctx.createLinearGradient(0, 0, W * 0.58, 0);
-        gA.addColorStop(0, colA + '2b'); gA.addColorStop(0.5, colA + '0e'); gA.addColorStop(1, 'transparent');
-        ctx.fillStyle = gA; ctx.fillRect(0, 0, W, H);
-      }
-      if (colB) {
-        const gB = ctx.createLinearGradient(W, 0, W * 0.42, 0);
-        gB.addColorStop(0, colB + '2b'); gB.addColorStop(0.5, colB + '0e'); gB.addColorStop(1, 'transparent');
-        ctx.fillStyle = gB; ctx.fillRect(0, 0, W, H);
-      }
-    } else if (style === 'spotlight' && (colA || colB)) {
-      // A single soft spotlight behind the crest, tinted by a blend of both team colours.
-      const g = ctx.createRadialGradient(W / 2, H * 0.42, 0, W / 2, H * 0.42, Math.max(W, H) * 0.6);
-      g.addColorStop(0, (colA || colB) + '30'); g.addColorStop(0.45, (colB || colA) + '10'); g.addColorStop(1, 'transparent');
-      ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
-    }
-    // 'dark' style: no team wash — just the neutral base + texture + vignette below (clean/minimal).
-
-    // Faint diagonal light streaks for subtle motion/energy.
-    ctx.save();
-    ctx.globalCompositeOperation = 'lighter';
-    ctx.globalAlpha = 0.03;
-    ctx.strokeStyle = '#ffffff'; ctx.lineWidth = Math.max(2, W * 0.006);
-    for (let i = -1; i <= 3; i++) {
-      const x = W * (0.2 * i + 0.1);
-      ctx.beginPath(); ctx.moveTo(x, -20); ctx.lineTo(x + W * 0.22, H + 20); ctx.stroke();
-    }
-    ctx.restore();
-
-    // Faint dot grid for texture.
-    const sp = Math.round(Math.min(W, H) / 16);
-    ctx.fillStyle = 'rgba(255,255,255,0.014)';
-    for (let x = sp * 0.5; x < W; x += sp)
-      for (let y = sp * 0.5; y < H; y += sp) {
-        ctx.beginPath(); ctx.arc(x, y, 1.3, 0, Math.PI * 2); ctx.fill();
-      }
-    // Vignette for depth (scenes sit on a dark, focused stage).
-    const vig = ctx.createRadialGradient(W / 2, H * 0.46, Math.min(W, H) * 0.32, W / 2, H / 2, Math.max(W, H) * 0.76);
-    vig.addColorStop(0, 'transparent'); vig.addColorStop(1, 'rgba(0,0,0,0.5)');
-    ctx.fillStyle = vig; ctx.fillRect(0, 0, W, H);
-  }
-
-  function socDrawHeader(ctx, W, eventY, badgeCY, eventName, badgeText, badgeColor, s) {
-    s = s || 1;
-    if (eventName) {
-      ctx.save();
-      ctx.font = `600 ${Math.round(22 * s)}px "Rajdhani", sans-serif`;
-      ctx.fillStyle = 'rgba(255,255,255,0.35)';
-      ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
-      ctx.fillText(eventName, W / 2, eventY);
-      ctx.restore();
-    }
-    if (badgeText) {
-      const txt = badgeText.toUpperCase();
-      ctx.save();
-      ctx.font = `800 ${Math.round(17 * s)}px "Rajdhani", sans-serif`;
-      ctx.letterSpacing = `${Math.round(2 * s)}px`;
-      const tw = ctx.measureText(txt).width;
-      const ph = Math.round(32 * s), pw = tw + Math.round(40 * s);
-      const bx = W / 2 - pw / 2, by = badgeCY - ph / 2;
-      const bc = badgeColor || '#8b5cf6';
-      // Dark scene-surface pill with a glowing coloured border (matches the desk/bestof bars) instead
-      // of a flat colour block.
-      ctx.shadowColor = bc; ctx.shadowBlur = Math.round(13 * s);
-      ctx.fillStyle = 'rgba(20,22,29,0.94)';
-      ctx.beginPath(); ctx.roundRect(bx, by, pw, ph, ph / 2); ctx.fill();
-      ctx.shadowBlur = 0;
-      ctx.strokeStyle = bc; ctx.lineWidth = Math.max(1.5, 2 * s);
-      ctx.beginPath(); ctx.roundRect(bx, by, pw, ph, ph / 2); ctx.stroke();
-      ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillText(txt, W / 2, badgeCY);
-      ctx.restore();
-    }
-  }
-
-  function socDrawLogoCircle(ctx, cx, cy, r, img, color, abbr) {
-    // Soft team-colour glow behind the badge.
-    const glow = ctx.createRadialGradient(cx, cy, r * 0.3, cx, cy, r * 1.55);
-    glow.addColorStop(0, color + '3a'); glow.addColorStop(1, 'transparent');
-    ctx.fillStyle = glow;
-    ctx.beginPath(); ctx.arc(cx, cy, r * 1.55, 0, Math.PI * 2); ctx.fill();
-    // Scene-surface disc (subtle top-lit gradient like the desk cards), with a top highlight.
-    const surf = ctx.createLinearGradient(cx, cy - r, cx, cy + r);
-    surf.addColorStop(0, '#20242e'); surf.addColorStop(1, '#14161d');
-    ctx.fillStyle = surf;
-    ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill();
-    // Faint inner ring (glass edge), then the glowing team-colour ring.
-    ctx.strokeStyle = 'rgba(255,255,255,0.08)'; ctx.lineWidth = Math.max(1, r * 0.02);
-    ctx.beginPath(); ctx.arc(cx, cy, r - Math.max(1, r * 0.03), 0, Math.PI * 2); ctx.stroke();
-    ctx.save();
-    ctx.shadowColor = color; ctx.shadowBlur = Math.round(r * 0.22);
-    ctx.strokeStyle = color; ctx.lineWidth = Math.max(2.5, r * 0.036);
-    ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke();
-    ctx.restore();
-    if (img) {
-      ctx.save();
-      ctx.beginPath(); ctx.arc(cx, cy, r - 3, 0, Math.PI * 2); ctx.clip();
-      const pad = r * 0.13;
-      const sc = Math.min((r * 2 - pad * 2) / img.width, (r * 2 - pad * 2) / img.height);
-      ctx.drawImage(img, cx - img.width * sc / 2, cy - img.height * sc / 2, img.width * sc, img.height * sc);
-      ctx.restore();
-    } else {
-      const a = abbr || '?';
-      ctx.save();
-      ctx.font = `900 ${Math.round(r * (a.length <= 2 ? 0.72 : 0.52))}px "Rajdhani", sans-serif`;
-      ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillText(a, cx, cy); ctx.restore();
-    }
-  }
-
-  // Set by each card renderer (in its synchronous draw section) so socDrawTeamLabel can size names
-  // without threading state through every call site. _socPairA/_socPairB = the two team names, so BOTH
-  // names can share ONE font size; _socPairFs caches that shared size (computed once per pair).
-  let _socDrawW = 1080, _socPairA = '', _socPairB = '', _socPairFs = 0;
-  // Largest 900-weight Rajdhani size at which `name` fits within maxW.
-  function socFitName(ctx, name, baseFs, maxW) {
-    const disp = (name || 'TBD').toUpperCase().slice(0, 24);
-    let fs = baseFs || 50;
-    ctx.font = `900 ${fs}px "Rajdhani", sans-serif`;
-    while (ctx.measureText(disp).width > maxW && fs > 16) { fs -= 2; ctx.font = `900 ${fs}px "Rajdhani", sans-serif`; }
-    return fs;
-  }
-  function socDrawTeamLabel(ctx, cx, nameY, tagY, name, color, fontSize, winner) {
-    const disp = (name || 'TBD').toUpperCase().slice(0, 24);
-    const W = _socDrawW || 1080;
-    const half = Math.abs(cx - W / 2);
-    // Max width a name may take: up to the centre line (side-by-side) or the card edge (centred), minus
-    // a gutter — so a long name never overflows into the other team or off the card.
-    const maxW = half > W * 0.03 ? (2 * half - W * 0.055) : (W * 0.86);
-    ctx.save();
-    // Both team names render at ONE shared size (the larger name's fit) so they always match — computed
-    // once for the pair, then reused. Falls back to per-name fit when only one team is being drawn.
-    let fs;
-    if (_socPairA && _socPairB) {
-      if (!_socPairFs) _socPairFs = Math.min(socFitName(ctx, _socPairA, fontSize || 50, maxW), socFitName(ctx, _socPairB, fontSize || 50, maxW));
-      fs = _socPairFs;
-    } else {
-      fs = socFitName(ctx, name, fontSize || 50, maxW);
-    }
-    ctx.font = `900 ${fs}px "Rajdhani", sans-serif`;
-    ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
-    // Slight lift on the name so it reads crisply on the busy background.
-    ctx.shadowColor = 'rgba(0,0,0,0.55)'; ctx.shadowBlur = Math.round(fs * 0.12); ctx.shadowOffsetY = 2;
-    ctx.fillStyle = '#ffffff';
-    ctx.fillText(disp, cx, nameY);
-    ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0; ctx.shadowOffsetY = 0;
-    // Glowing team-colour underline — the scenes' signature accent (rounded, with a colour glow).
-    const tw = Math.min(ctx.measureText(disp).width + Math.round(fs * 0.5), maxW);
-    const bh = Math.max(4, Math.round(fs * 0.09));
-    ctx.shadowColor = color; ctx.shadowBlur = Math.round(fs * 0.28);
-    ctx.fillStyle = color;
-    ctx.beginPath(); ctx.roundRect(cx - tw / 2, tagY, tw, bh, bh / 2); ctx.fill();
-    ctx.restore();
-  }
-
-  function socDrawVsZone(ctx, W, cy, round, colA, colB, s) {
-    s = s || 1;
-    const R = Math.round(44 * s);
-    const gap = R + Math.round(14 * s), lineLen = Math.round(210 * s);
-    // Bright team-colour feed lines running into the medallion.
-    const lgL = ctx.createLinearGradient(W / 2 - gap, cy, W / 2 - gap - lineLen, cy);
-    lgL.addColorStop(0, (colA || '#6366f1')); lgL.addColorStop(1, 'transparent');
-    ctx.strokeStyle = lgL; ctx.lineWidth = Math.max(2, 3 * s);
-    ctx.beginPath(); ctx.moveTo(W / 2 - gap, cy); ctx.lineTo(W / 2 - gap - lineLen, cy); ctx.stroke();
-    const lgR = ctx.createLinearGradient(W / 2 + gap, cy, W / 2 + gap + lineLen, cy);
-    lgR.addColorStop(0, (colB || '#9333ea')); lgR.addColorStop(1, 'transparent');
-    ctx.strokeStyle = lgR;
-    ctx.beginPath(); ctx.moveTo(W / 2 + gap, cy); ctx.lineTo(W / 2 + gap + lineLen, cy); ctx.stroke();
-    // Solid scene-surface medallion + glass ring (matches the desk-scene surfaces).
-    const surf = ctx.createLinearGradient(W / 2, cy - R, W / 2, cy + R);
-    surf.addColorStop(0, '#20242e'); surf.addColorStop(1, '#12141b');
-    ctx.save(); ctx.shadowColor = 'rgba(0,0,0,0.5)'; ctx.shadowBlur = Math.round(16 * s); ctx.shadowOffsetY = 3;
-    ctx.fillStyle = surf; ctx.beginPath(); ctx.arc(W / 2, cy, R, 0, Math.PI * 2); ctx.fill(); ctx.restore();
-    ctx.strokeStyle = 'rgba(255,255,255,0.15)'; ctx.lineWidth = Math.max(1.5, 2 * s);
-    ctx.beginPath(); ctx.arc(W / 2, cy, R, 0, Math.PI * 2); ctx.stroke();
-    // VS text — bright white with a soft glow.
-    ctx.save();
-    ctx.font = `900 ${Math.round(38 * s)}px "Rajdhani", sans-serif`;
-    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.shadowColor = 'rgba(255,255,255,0.4)'; ctx.shadowBlur = Math.round(14 * s);
-    ctx.fillStyle = '#ffffff';
-    ctx.fillText('VS', W / 2, cy + Math.round(2 * s));
-    ctx.restore();
-    // Round label below the medallion.
-    if (round) {
-      ctx.save();
-      ctx.font = `700 ${Math.round(15 * s)}px "Rajdhani", sans-serif`;
-      ctx.fillStyle = 'rgba(255,255,255,0.45)'; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
-      ctx.fillText(round.toUpperCase(), W / 2, cy + R + Math.round(24 * s)); ctx.restore();
-    }
-  }
-
-  function socDrawScore(ctx, cx, cy, score, color, win, fontSize) {
-    if (score === null || score === undefined) return;
-    ctx.save();
-    ctx.font = `900 ${fontSize || 130}px "Rajdhani", sans-serif`;
-    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    if (win) {
-      ctx.shadowColor = color + '88'; ctx.shadowBlur = Math.round(fontSize * 0.18);
-      ctx.fillStyle = '#ffffff';
-    } else {
-      ctx.fillStyle = 'rgba(255,255,255,0.20)';
-    }
-    ctx.fillText(String(score), cx, cy);
-    ctx.shadowBlur = 0; ctx.restore();
-  }
-
-  function socDrawWinnerBadge(ctx, cx, y, s) {
-    s = s || 1;
-    const bw = Math.round(140 * s), bh = Math.round(32 * s);
-    ctx.save();
-    ctx.fillStyle = '#22c55e22'; ctx.strokeStyle = '#22c55e66'; ctx.lineWidth = 1.5;
-    ctx.beginPath(); ctx.roundRect(cx - bw / 2, y, bw, bh, bh / 2); ctx.fill(); ctx.stroke();
-    ctx.font = `800 ${Math.round(14 * s)}px "Rajdhani", sans-serif`;
-    ctx.fillStyle = '#4ade80'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.fillText('WINNER', cx, y + bh / 2); ctx.restore();
-  }
-
-  // link: twitch/stream URL; brandImg: pre-loaded brand logo Image; railImgs: pre-loaded sponsor Images[]
-  function socFooter(ctx, W, H, link, s, brandImg, railImgs) {
-    s = s || 1;
-    const hasRail = railImgs && railImgs.length;
-    const fh = Math.round((hasRail ? 118 : 88) * s);
-    const fg = ctx.createLinearGradient(0, H - fh, 0, H);
-    fg.addColorStop(0, 'rgba(0,0,0,0)'); fg.addColorStop(0.5, 'rgba(0,0,0,0.72)'); fg.addColorStop(1, 'rgba(0,0,0,0.92)');
-    ctx.fillStyle = fg; ctx.fillRect(0, H - fh, W, fh);
-    // Subtle top separator
-    ctx.save(); ctx.globalAlpha = 0.18;
-    ctx.fillStyle = '#ffffff'; ctx.fillRect(Math.round(W * 0.08), H - fh + 1, Math.round(W * 0.84), 1);
-    ctx.restore();
-    // Sponsor rail
-    if (hasRail) {
-      const maxH = Math.round(28 * s);
-      const gap   = Math.round(22 * s);
-      const filtered = railImgs.filter(Boolean);
-      const widths = filtered.map(img => Math.round(img.width * (maxH / img.height)));
-      const totalW = widths.reduce((a, b) => a + b, 0) + gap * (filtered.length - 1);
-      let cx = W / 2 - totalW / 2;
-      const railY = H - fh + Math.round(22 * s);
-      ctx.save(); ctx.globalAlpha = 0.62;
-      filtered.forEach((img, i) => {
-        ctx.drawImage(img, cx, railY, widths[i], maxH);
-        cx += widths[i] + gap;
-      });
-      ctx.restore();
-    }
-    // Stream link
-    if (link) {
-      ctx.save();
-      ctx.font = `600 ${Math.round(17 * s)}px "Rajdhani", sans-serif`;
-      ctx.fillStyle = 'rgba(255,255,255,0.40)';
-      ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
-      ctx.fillText(link, W / 2, H - Math.round(14 * s)); ctx.restore();
-    }
-    // Brand bug — bottom-right corner
-    if (brandImg) {
-      const size = Math.round(36 * s);
-      const pad  = Math.round(11 * s);
-      const bx   = W - size - pad;
-      const by   = H - size - pad;
-      const sc   = Math.min(size / brandImg.width, size / brandImg.height);
-      ctx.save(); ctx.globalAlpha = 0.5;
-      ctx.drawImage(brandImg,
-        bx + (size - brandImg.width * sc) / 2,
-        by + (size - brandImg.height * sc) / 2,
-        brandImg.width * sc, brandImg.height * sc);
-      ctx.restore();
-    }
-  }
-
-  // Returns pre-loaded {brandImg, railImgs} for the active brand kit
-  async function socLoadBrandAssets() {
-    const brand = currentState.brand || {};
-    const [brandImg, presentedByImg] = await Promise.all([
-      loadImg(brand.logo || null),
-      _socPresentedByEnabled ? loadImg((brand.spots && brand.spots.title) || null) : Promise.resolve(null),
-    ]);
-    const rawSpons = (brand.railSponsors && brand.railSponsors.length
-      ? brand.railSponsors : (brand.sponsors || [])).filter(s => s && s.logo);
-    const railImgs = (await Promise.all(rawSpons.slice(0, 8).map(s => loadImg(s.logo)))).filter(Boolean);
-    return { brandImg, presentedByImg, railImgs };
-  }
-
-  // "PRESENTED BY" + sponsor logo — top-right of card header
-  function socDrawPresentedBy(ctx, W, topY, img, s) {
-    if (!img || !_socPresentedByEnabled) return;
-    s = s || 1;
-    const pad   = Math.round(16 * s);
-    const maxW  = Math.round(88 * s);
-    const maxH  = Math.round(30 * s);
-    const sc    = Math.min(maxH / img.height, maxW / img.width);
-    const lw    = img.width * sc, lh = img.height * sc;
-    const labelY = topY + Math.round(18 * s);
-    const logoY  = labelY + Math.round(6 * s);
-    ctx.save();
-    ctx.font = `700 ${Math.round(9 * s)}px "Rajdhani", sans-serif`;
-    ctx.fillStyle = 'rgba(255,255,255,0.28)';
-    ctx.textAlign = 'right'; ctx.textBaseline = 'alphabetic';
-    ctx.fillText('PRESENTED BY', W - pad, labelY);
-    ctx.globalAlpha = 0.68;
-    ctx.drawImage(img, W - pad - lw, logoY, lw, lh);
-    ctx.restore();
-  }
-
-  // Thin brand-color accent bar across the very top of the card
-  function socTopBar(ctx, W, colA, colB, s) {
-    s = s || 1;
-    const h = Math.round(4 * s);
-    const bar = ctx.createLinearGradient(0, 0, W, 0);
-    bar.addColorStop(0,   colA || '#4f46e5');
-    bar.addColorStop(0.5, '#7c3aed');
-    bar.addColorStop(1,   colB || '#9333ea');
-    ctx.fillStyle = bar; ctx.fillRect(0, 0, W, h);
-  }
-
-  function socDiagSplit(ctx, W, H, headerH, footerH, colA, colB) {
-    // Very subtle team-side triangles (the directional washes in socDrawBg already carry most of the
-    // colour) + a soft central seam glow instead of a hard diagonal edge, so the middle doesn't read
-    // as an unpolished line.
-    const off = Math.round(W * 0.05);
-    ctx.save(); ctx.globalAlpha = 0.05;
-    ctx.fillStyle = colA;
-    ctx.beginPath(); ctx.moveTo(0, headerH); ctx.lineTo(W / 2 - off, headerH); ctx.lineTo(W / 2 + off, H - footerH); ctx.lineTo(0, H - footerH); ctx.closePath(); ctx.fill();
-    ctx.fillStyle = colB;
-    ctx.beginPath(); ctx.moveTo(W, headerH); ctx.lineTo(W / 2 + off, headerH); ctx.lineTo(W / 2 - off, H - footerH); ctx.lineTo(W, H - footerH); ctx.closePath(); ctx.fill();
-    ctx.restore();
-    // Soft vertical light seam down the centre where the teams "clash".
-    const seam = ctx.createLinearGradient(W / 2 - off * 1.6, 0, W / 2 + off * 1.6, 0);
-    seam.addColorStop(0, 'transparent'); seam.addColorStop(0.5, 'rgba(255,255,255,0.05)'); seam.addColorStop(1, 'transparent');
-    ctx.fillStyle = seam; ctx.fillRect(W / 2 - off * 1.6, headerH, off * 3.2, H - headerH - footerH);
-  }
-
-  // ── Poster card style ──────────────────────────────────────────────
-  // Event-poster look: near-black textured stage, warm brand-gradient glow, corner brackets,
-  // top-left event logotype, rounded team tiles with gradient nameplates, gradient VS centre and a
-  // bottom-right PRESENTED BY sponsor row. Colours come from the brand kit (color → accent), not the
-  // teams, so every card in a campaign reads as one family.
-
-  function socPosterColors() {
-    const b = currentState.brand || {};
-    const ok = (c) => typeof c === 'string' && /^#[0-9a-fA-F]{6}$/.test(c);
-    return [ok(b.color) ? b.color : '#f7a531', ok(b.accent) ? b.accent : '#ef5878'];
-  }
-
-  function socPosterGrad(ctx, x0, y0, x1, y1, c1, c2) {
-    const g = ctx.createLinearGradient(x0, y0, x1, y1);
-    g.addColorStop(0, c1); g.addColorStop(1, c2);
-    return g;
-  }
-
-  function socPosterBg(ctx, W, H, c1, c2) {
-    if (_socCustomBg) {
-      const sc = Math.max(W / _socCustomBg.width, H / _socCustomBg.height);
-      ctx.drawImage(_socCustomBg, (W - _socCustomBg.width * sc) / 2, (H - _socCustomBg.height * sc) / 2,
-        _socCustomBg.width * sc, _socCustomBg.height * sc);
-      ctx.fillStyle = 'rgba(8,8,10,0.72)'; ctx.fillRect(0, 0, W, H);
-    } else {
-      ctx.fillStyle = '#101013'; ctx.fillRect(0, 0, W, H);
-    }
-    // Fine dot grid, slightly stronger than the broadcast style — the poster reads as printed texture.
-    const sp = Math.round(Math.min(W, H) / 30);
-    ctx.fillStyle = 'rgba(255,255,255,0.022)';
-    for (let x = sp * 0.5; x < W; x += sp)
-      for (let y = sp * 0.5; y < H; y += sp) { ctx.beginPath(); ctx.arc(x, y, 1.2, 0, Math.PI * 2); ctx.fill(); }
-    // Warm centre glow — wide brand-colour wash with a hotter core, sitting behind the VS zone.
-    const cy = H * 0.5;
-    const glow = ctx.createRadialGradient(W / 2, cy, 0, W / 2, cy, Math.max(W, H) * 0.42);
-    glow.addColorStop(0, c1 + '4d'); glow.addColorStop(0.45, c1 + '1f'); glow.addColorStop(1, 'transparent');
-    ctx.fillStyle = glow; ctx.fillRect(0, 0, W, H);
-    const core = ctx.createRadialGradient(W / 2, cy, 0, W / 2, cy, Math.min(W, H) * 0.16);
-    core.addColorStop(0, c2 + '38'); core.addColorStop(1, 'transparent');
-    ctx.fillStyle = core; ctx.fillRect(0, 0, W, H);
-  }
-
-  // L-shaped bracket accents in opposite corners (top-right + bottom-left), brand gradient.
-  function socPosterCorners(ctx, W, H, c1, c2, s) {
-    const inset = Math.round(20 * s), len = Math.round(150 * s), lw = Math.max(2, Math.round(3 * s));
-    const sq = Math.round(9 * s);
-    ctx.save();
-    ctx.lineWidth = lw;
-    // top-right
-    ctx.strokeStyle = socPosterGrad(ctx, W - inset - len, inset, W - inset, inset + len, c1, c2);
-    ctx.beginPath();
-    ctx.moveTo(W - inset - len, inset); ctx.lineTo(W - inset, inset); ctx.lineTo(W - inset, inset + len);
-    ctx.stroke();
-    ctx.strokeRect(W - inset - len - sq * 2.4, inset - sq / 2, sq, sq);
-    ctx.fillStyle = c2;
-    ctx.fillRect(W - inset + lw / 2 - sq * 0.7, inset + len + sq * 1.4, sq * 0.7, sq * 0.7);
-    // bottom-left (mirrored)
-    ctx.strokeStyle = socPosterGrad(ctx, inset, H - inset - len, inset + len, H - inset, c1, c2);
-    ctx.beginPath();
-    ctx.moveTo(inset + len, H - inset); ctx.lineTo(inset, H - inset); ctx.lineTo(inset, H - inset - len);
-    ctx.stroke();
-    ctx.strokeStyle = socPosterGrad(ctx, inset, H - inset, inset + len + sq * 2.4, H - inset, c1, c2);
-    ctx.strokeRect(inset + len + sq * 1.4, H - inset - sq / 2, sq, sq);
-    ctx.fillStyle = c1;
-    ctx.fillRect(inset - lw / 2, H - inset - len - sq * 2.1, sq * 0.7, sq * 0.7);
-    ctx.restore();
-  }
-
-  // Top-left brand logo + event logotype. First word takes the gradient, the rest stays white —
-  // the "TENAX SERIES" treatment.
-  function socPosterHeader(ctx, W, brandImg, eventName, c1, c2, s) {
-    const pad = Math.round(34 * s), box = Math.round(56 * s);
-    let x = pad;
-    const cy = pad + box / 2;
-    if (brandImg) {
-      const sc = Math.min(box / brandImg.width, box / brandImg.height);
-      ctx.drawImage(brandImg, x + (box - brandImg.width * sc) / 2, pad + (box - brandImg.height * sc) / 2,
-        brandImg.width * sc, brandImg.height * sc);
-      x += box + Math.round(16 * s);
-    }
-    const name = (eventName || '').toUpperCase().trim();
-    if (!name) return;
-    const words = name.split(/\s+/);
-    const first = words.shift(), rest = words.join(' ');
-    ctx.save();
-    ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
-    let fs = Math.round(34 * s);
-    ctx.font = `800 ${fs}px "Rajdhani", sans-serif`;
-    while (ctx.measureText(name + ' ').width > W * 0.62 - x && fs > 15) { fs -= 2; ctx.font = `800 ${fs}px "Rajdhani", sans-serif`; }
-    const fw = ctx.measureText(first).width;
-    ctx.fillStyle = socPosterGrad(ctx, x, cy, x + fw, cy + fs * 0.4, c1, c2);
-    ctx.fillText(first, x, cy);
-    if (rest) { ctx.fillStyle = '#f2f3f5'; ctx.fillText(' ' + rest, x + fw, cy); }
-    ctx.restore();
-  }
-
-  // Rounded team tile: dark panel with the crest large in the middle and a gradient nameplate bar
-  // along the bottom (dark text). Big radius on the top-left/bottom-right corners only. Returns the
-  // full tile height so callers can stack around it.
-  function socPosterTile(ctx, x, y, w, img, name, c1, c2, abbr) {
-    const plate = Math.round(w * 0.185);
-    const h = w + plate;
-    const rBig = Math.round(w * 0.16), rSm = Math.round(w * 0.03);
-    ctx.save();
-    ctx.beginPath(); ctx.roundRect(x, y, w, h, [rBig, rSm, rBig, rSm]);
-    // Panel surface + soft drop shadow so the tile lifts off the glow.
-    ctx.shadowColor = 'rgba(0,0,0,0.55)'; ctx.shadowBlur = Math.round(w * 0.07); ctx.shadowOffsetY = Math.round(w * 0.015);
-    ctx.fillStyle = socPosterGrad(ctx, x, y, x, y + h, '#26262c', '#161619');
-    ctx.fill();
-    ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0; ctx.shadowOffsetY = 0;
-    ctx.clip();
-    // Crest — large, centred in the square area above the plate.
-    if (img) {
-      const pad = w * 0.14;
-      const sc = Math.min((w - pad * 2) / img.width, (w - plate * 0.4 - pad * 2) / img.height);
-      ctx.drawImage(img, x + (w - img.width * sc) / 2, y + (w - plate * 0.4 - img.height * sc) / 2 + plate * 0.1,
-        img.width * sc, img.height * sc);
-    } else {
-      const a = abbr || '?';
-      ctx.font = `800 ${Math.round(w * (a.length <= 2 ? 0.4 : 0.26))}px "Rajdhani", sans-serif`;
-      ctx.fillStyle = 'rgba(255,255,255,0.85)'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillText(a, x + w / 2, y + (w - plate * 0.2) / 2);
-    }
-    // Gradient nameplate with dark text.
-    ctx.fillStyle = socPosterGrad(ctx, x, y + h - plate, x + w, y + h, c1, c2);
-    ctx.fillRect(x, y + h - plate, w, plate);
-    const disp = (name || 'TBD').toUpperCase().slice(0, 24);
-    let fs = Math.round(plate * 0.44);
-    ctx.font = `800 ${fs}px "Rajdhani", sans-serif`;
-    while (ctx.measureText(disp).width > w * 0.88 && fs > 12) { fs -= 1; ctx.font = `800 ${fs}px "Rajdhani", sans-serif`; }
-    ctx.fillStyle = '#141216'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.fillText(disp, x + w / 2, y + h - plate / 2 + fs * 0.05);
-    ctx.restore();
-    // Hairline edge so the panel doesn't melt into the background.
-    ctx.save();
-    ctx.strokeStyle = 'rgba(255,255,255,0.09)'; ctx.lineWidth = 1;
-    ctx.beginPath(); ctx.roundRect(x + 0.5, y + 0.5, w - 1, h - 1, [rBig, rSm, rBig, rSm]); ctx.stroke();
-    ctx.restore();
-    return h;
-  }
-
-  // Centre stack: small gradient context label ("WEEK 1" / "FINAL SCORE") over a big gradient
-  // headline ("VS" or the series score).
-  function socPosterCenter(ctx, cx, cy, label, big, c1, c2, s) {
-    ctx.save();
-    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    if (label) {
-      const fs = Math.round(30 * s);
-      ctx.font = `800 ${fs}px "Rajdhani", sans-serif`;
-      const lw2 = ctx.measureText(label).width / 2;
-      ctx.fillStyle = socPosterGrad(ctx, cx - lw2, cy - Math.round(52 * s), cx + lw2, cy - Math.round(20 * s), c1, c2);
-      ctx.fillText(label, cx, cy - Math.round(36 * s));
-    }
-    if (big) {
-      const fs = Math.round(86 * s);
-      ctx.font = `800 ${fs}px "Rajdhani", sans-serif`;
-      ctx.shadowColor = c1 + '66'; ctx.shadowBlur = Math.round(26 * s);
-      ctx.fillStyle = socPosterGrad(ctx, cx, cy + Math.round(4 * s), cx, cy + Math.round(4 * s) + fs * 0.8, c1, c2);
-      ctx.fillText(big, cx, cy + Math.round(34 * s));
-    }
-    ctx.restore();
-  }
-
-  // Bottom-right "PRESENTED BY:" + sponsor logo row; stream link tucked bottom-left to balance it.
-  function socPosterFooter(ctx, W, H, link, railImgs, s) {
-    const pad = Math.round(38 * s), maxH = Math.round(30 * s), gap = Math.round(20 * s);
-    const imgs = (_socPresentedByEnabled ? (railImgs || []) : []).filter(Boolean).slice(0, 5);
-    const baseY = H - pad - maxH;
-    if (imgs.length) {
-      ctx.save();
-      let x = W - pad;
-      for (let i = imgs.length - 1; i >= 0; i--) {
-        const img = imgs[i];
-        const iw = Math.round(img.width * (maxH / img.height));
-        ctx.globalAlpha = 0.9;
-        ctx.drawImage(img, x - iw, baseY, iw, maxH);
-        x -= iw + gap;
-      }
-      ctx.globalAlpha = 1;
-      ctx.font = `700 ${Math.round(13 * s)}px "Rajdhani", sans-serif`;
-      ctx.fillStyle = 'rgba(255,255,255,0.55)';
-      ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
-      ctx.fillText('PRESENTED BY:', x - Math.round(4 * s), baseY + maxH / 2);
-      ctx.restore();
-    }
-    if (link) {
-      ctx.save();
-      ctx.font = `600 ${Math.round(15 * s)}px "Rajdhani", sans-serif`;
-      ctx.fillStyle = 'rgba(255,255,255,0.38)';
-      ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
-      ctx.fillText(link, pad + Math.round(14 * s), baseY + maxH / 2);
-      ctx.restore();
-    }
-  }
-
-  // Poster matchup/result — one function for both cards: pass scores (sA/sB) for the result card,
-  // nulls for the pre-match card.
-  function socPosterVersus(ctx, o) {
-    const { W, H, layout, tA, tB, round, iA, iB, brandImg, railImgs, event, link, sA, sB } = o;
-    const [c1, c2] = socPosterColors();
-    const isResult = sA !== null && sA !== undefined && sB !== null && sB !== undefined;
-    const winA = isResult && Number(sA) > Number(sB);
-    const winB = isResult && Number(sB) > Number(sA);
-    const label = isResult ? 'FINAL SCORE' : (round || '').toUpperCase();
-    const big = isResult ? `${sA} - ${sB}` : 'VS';
-    socPosterBg(ctx, W, H, c1, c2);
-
-    if (layout === 'vertical') {
-      const s = W / 1080;
-      socPosterCorners(ctx, W, H, c1, c2, s);
-      socPosterHeader(ctx, W, brandImg, event, c1, c2, s * 1.25);
-      const tw = Math.round(W * 0.46);
-      const cyA = H * 0.30, cyB = H * 0.70, th = tw * 1.185;
-      socPosterTile(ctx, W / 2 - tw / 2, cyA - th / 2, tw, iA, tA, c1, c2, socGetAbbr(tA));
-      socPosterTile(ctx, W / 2 - tw / 2, cyB - th / 2, tw, iB, tB, c1, c2, socGetAbbr(tB));
-      // Badges sit on the OUTWARD side of each tile (above A, below B) so the FINAL SCORE centre
-      // stack between the tiles stays clear.
-      if (winA) socDrawWinnerBadge(ctx, W / 2, cyA - th / 2 - Math.round(48 * s), s);
-      if (winB) socDrawWinnerBadge(ctx, W / 2, cyB + th / 2 + Math.round(16 * s), s);
-      socPosterCenter(ctx, W / 2, H * 0.5, label, big, c1, c2, s * 1.15);
-      socPosterFooter(ctx, W, H, link, railImgs, s);
-    } else if (layout === 'landscape') {
-      const hs = H / 675;
-      socPosterCorners(ctx, W, H, c1, c2, hs);
-      socPosterHeader(ctx, W, brandImg, event, c1, c2, hs);
-      const tw = Math.round(W * 0.235);
-      const ty = H * 0.28, th = tw * 1.185;
-      socPosterTile(ctx, W * 0.285 - tw / 2, ty, tw, iA, tA, c1, c2, socGetAbbr(tA));
-      socPosterTile(ctx, W * 0.715 - tw / 2, ty, tw, iB, tB, c1, c2, socGetAbbr(tB));
-      if (winA) socDrawWinnerBadge(ctx, W * 0.285, ty + th + Math.round(12 * hs), hs * 0.88);
-      if (winB) socDrawWinnerBadge(ctx, W * 0.715, ty + th + Math.round(12 * hs), hs * 0.88);
-      socPosterCenter(ctx, W / 2, ty + th * 0.48, label, big, c1, c2, hs);
-      socPosterFooter(ctx, W, H, link, railImgs, hs);
-    } else {
-      const s = W / 1080;
-      socPosterCorners(ctx, W, H, c1, c2, s);
-      socPosterHeader(ctx, W, brandImg, event, c1, c2, s);
-      const tw = Math.round(W * 0.31);
-      const ty = H * 0.315, th = tw * 1.185;
-      socPosterTile(ctx, W * 0.235 - tw / 2, ty, tw, iA, tA, c1, c2, socGetAbbr(tA));
-      socPosterTile(ctx, W * 0.765 - tw / 2, ty, tw, iB, tB, c1, c2, socGetAbbr(tB));
-      if (winA) socDrawWinnerBadge(ctx, W * 0.235, ty + th + Math.round(16 * s), s);
-      if (winB) socDrawWinnerBadge(ctx, W * 0.765, ty + th + Math.round(16 * s), s);
-      socPosterCenter(ctx, W / 2, ty + th * 0.48, label, big, c1, c2, s);
-      socPosterFooter(ctx, W, H, link, railImgs, s);
-    }
-  }
-
-  // ── Queue state ────────────────────────────────────────────────────
-  let _socQueueIdx = 0;
-
-  function socGetQueue() {
-    return ((currentState.startgg && currentState.startgg.queue) || []).filter((q) => q.state !== 3);
-  }
-
-  function socUpdateQueueLabel() {
-    const q = socGetQueue();
-    const lbl = el('soc-queue-label');
-    if (lbl) lbl.textContent = q.length ? `Match ${_socQueueIdx + 1} of ${q.length}` : 'No upcoming matches';
-  }
-
-  el('soc-queue-prev')?.addEventListener('click', () => {
-    const q = socGetQueue();
-    if (!q.length) return;
-    _socQueueIdx = (_socQueueIdx - 1 + q.length) % q.length;
-    socUpdateQueueLabel(); socDrawMatchup();
-  });
-  el('soc-queue-next')?.addEventListener('click', () => {
-    const q = socGetQueue();
-    if (!q.length) return;
-    _socQueueIdx = (_socQueueIdx + 1) % q.length;
-    socUpdateQueueLabel(); socDrawMatchup();
-  });
-
-  // ── Platform toggle ────────────────────────────────────────────────
-  document.querySelectorAll('#soc-platform-tabs .soc-plat-btn').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      document.querySelectorAll('#soc-platform-tabs .soc-plat-btn').forEach((b) => b.classList.remove('active'));
-      btn.classList.add('active');
-      _socPlatform = btn.dataset.plat || 'instagram';
-      socRefreshAll();
-    });
-  });
-
-  // ── Card Preset panel ─────────────────────────────────────────────
-  (function () {
-    const presetToggle = el('soc-preset-toggle');
-    const presetPanel  = el('soc-preset-panel');
-    const bgUpload     = el('soc-bg-upload');
-    const bgClear      = el('soc-bg-clear');
-    const bgFilename   = el('soc-bg-filename');
-    const bgStyle      = el('soc-bg-style');
-    const cardStyle    = el('soc-card-style');
-    const presChk      = el('soc-presented-toggle');
-
-    function sendPreset() {
-      sendWS({ type: 'set_brand_social_preset', data: {
-        bgImageUrl: _socCustomBgUrl,
-        bgStyle: _socBgStyle,
-        cardStyle: _socCardStyle,
-        presentedByEnabled: _socPresentedByEnabled,
-      }});
-    }
-
-    if (presetToggle && presetPanel) {
-      presetToggle.addEventListener('click', () => {
-        const open = presetPanel.style.display !== 'none';
-        presetPanel.style.display = open ? 'none' : '';
-        presetToggle.classList.toggle('active', !open);
-      });
-    }
-
-    if (bgUpload) {
-      bgUpload.addEventListener('change', (e) => {
-        const file = e.target.files && e.target.files[0];
-        if (!file) return;
-        const reader = new FileReader();
-        reader.onload = (ev) => {
-          _socCustomBgUrl = ev.target.result;
-          const img = new Image();
-          img.onload = () => {
-            _socCustomBg = img;
-            if (bgFilename) bgFilename.textContent = file.name;
-            if (bgClear) bgClear.style.display = '';
-            sendPreset();
-            socRefreshAll();
-          };
-          img.src = _socCustomBgUrl;
-        };
-        reader.readAsDataURL(file);
-      });
-    }
-
-    if (bgClear) {
-      bgClear.addEventListener('click', () => {
-        _socCustomBg = null;
-        _socCustomBgUrl = '';
-        if (bgFilename) bgFilename.textContent = '';
-        bgClear.style.display = 'none';
-        if (bgUpload) bgUpload.value = '';
-        sendPreset();
-        socRefreshAll();
-      });
-    }
-
-    if (bgStyle) {
-      bgStyle.value = _socBgStyle;
-      bgStyle.addEventListener('change', () => {
-        _socBgStyle = bgStyle.value || 'auto';
-        sendPreset();
-        socRefreshAll();
-      });
-    }
-
-    if (cardStyle) {
-      cardStyle.value = _socCardStyle;
-      cardStyle.addEventListener('change', () => {
-        _socCardStyle = cardStyle.value || 'broadcast';
-        sendPreset();
-        socRefreshAll();
-      });
-    }
-
-    if (presChk) {
-      presChk.addEventListener('change', () => {
-        _socPresentedByEnabled = presChk.checked;
-        sendPreset();
-        socRefreshAll();
-      });
-    }
-
-    // Hydrate from the saved preset when the social tab is opened — a brand kit's own preset if
-    // one's active, else the state-level fallback (so this works with no brand kit set up at all).
-    window._socHydratePreset = function () {
-      const preset = (currentState.brand && currentState.brand.socialPreset) || currentState.socialPreset;
-      if (!preset) return;
-      if (typeof preset.presentedByEnabled === 'boolean') {
-        _socPresentedByEnabled = preset.presentedByEnabled;
-        if (presChk) presChk.checked = _socPresentedByEnabled;
-      }
-      if (preset.bgStyle) {
-        _socBgStyle = preset.bgStyle;
-        if (bgStyle) bgStyle.value = _socBgStyle;
-      }
-      if (preset.cardStyle) {
-        _socCardStyle = preset.cardStyle;
-        if (cardStyle) cardStyle.value = _socCardStyle;
-      }
-      const savedUrl = preset.bgImageUrl || '';
-      if (savedUrl && savedUrl !== _socCustomBgUrl) {
-        _socCustomBgUrl = savedUrl;
-        const img = new Image();
-        img.onload = () => { _socCustomBg = img; socRefreshAll(); };
-        img.src = savedUrl;
-        if (bgClear) bgClear.style.display = '';
-        if (bgFilename) bgFilename.textContent = 'Saved background';
-      } else if (!savedUrl && _socCustomBgUrl) {
-        _socCustomBg = null;
-        _socCustomBgUrl = '';
-        if (bgClear) bgClear.style.display = 'none';
-        if (bgFilename) bgFilename.textContent = '';
-      }
-    };
-  })();
-
-  // ── Matchup Graphic ────────────────────────────────────────────────
-  async function socDrawMatchup() {
-    const ctx = socCanvasCtx('soc-canvas-matchup');
-    if (!ctx) return;
-    const { W, H, layout } = socGetPlatform();
-    const queue = socGetQueue();
-    const item  = queue[_socQueueIdx] || null;
-    const liveB = (currentState.teams && currentState.teams.blue)   || {};
-    const liveO = (currentState.teams && currentState.teams.orange) || {};
-    const tA    = item ? (item.teamA || 'TBD') : (liveB.name || 'Team A');
-    const tB    = item ? (item.teamB || 'TBD') : (liveO.name || 'Team B');
-    const round = item ? (item.round || '') : '';
-    const colA  = socTeamColor(tA) || '#4f46e5';
-    const colB  = socTeamColor(tB) || '#9333ea';
-    const event = (currentState.eventName || '').toUpperCase();
-    const link  = socTwitchLink();
-    const [iA, iB, { brandImg, presentedByImg, railImgs }] = await Promise.all([
-      loadImg(socLogoUrl(tA)), loadImg(socLogoUrl(tB)), socLoadBrandAssets(),
-    ]);
-    _socDrawW = W; _socPairA = tA; _socPairB = tB; _socPairFs = 0;  // one shared name size for this pair
-    if (_socCardStyle === 'poster') {
-      socPosterVersus(ctx, { W, H, layout, tA, tB, round, iA, iB, brandImg, railImgs, event, link, sA: null, sB: null });
-      return;
-    }
-    socDrawBg(ctx, W, H, colA, colB);
-
-    if (layout === 'vertical') {
-      const s = W / 1080;
-      socTopBar(ctx, W, colA, colB, s);
-      socDrawPresentedBy(ctx, W, 0, presentedByImg, s);
-      socDrawHeader(ctx, W, Math.round(76 * s), Math.round(118 * s), event, round || 'MATCHUP', null, s);
-      ctx.save(); ctx.globalAlpha = 0.09;
-      const wA = ctx.createLinearGradient(0, H * 0.14, 0, H * 0.50);
-      wA.addColorStop(0, colA); wA.addColorStop(1, 'transparent');
-      ctx.fillStyle = wA; ctx.fillRect(0, H * 0.14, W, H * 0.36);
-      const wB = ctx.createLinearGradient(0, H * 0.50, 0, H * 0.86);
-      wB.addColorStop(0, 'transparent'); wB.addColorStop(1, colB);
-      ctx.fillStyle = wB; ctx.fillRect(0, H * 0.50, W, H * 0.36);
-      ctx.restore();
-      const R = Math.round(150 * s);
-      const cyA = H * 0.287, cyB = H * 0.713;
-      socDrawLogoCircle(ctx, W / 2, cyA, R, iA, colA, socGetAbbr(tA));
-      socDrawTeamLabel(ctx, W / 2, cyA + R + Math.round(58 * s), cyA + R + Math.round(67 * s), tA, colA, Math.round(54 * s));
-      socDrawVsZone(ctx, W, H / 2, round, colA, colB, s);
-      socDrawLogoCircle(ctx, W / 2, cyB, R, iB, colB, socGetAbbr(tB));
-      socDrawTeamLabel(ctx, W / 2, cyB + R + Math.round(58 * s), cyB + R + Math.round(67 * s), tB, colB, Math.round(54 * s));
-      socFooter(ctx, W, H, link, s, brandImg, railImgs);
-
-    } else if (layout === 'landscape') {
-      const hs = H / 675;
-      socTopBar(ctx, W, colA, colB, hs);
-      socDrawPresentedBy(ctx, W, 0, presentedByImg, hs);
-      socDrawHeader(ctx, W, Math.round(46 * hs), Math.round(74 * hs), event, round || 'MATCHUP', null, hs);
-      const R = Math.round(82 * hs), cyT = H * 0.44;
-      const cxA = W * 0.215, cxB = W * 0.785;
-      socDiagSplit(ctx, W, H, Math.round(92 * hs), Math.round(56 * hs), colA, colB);
-      socDrawLogoCircle(ctx, cxA, cyT, R, iA, colA, socGetAbbr(tA));
-      socDrawTeamLabel(ctx, cxA, cyT + R + Math.round(36 * hs), cyT + R + Math.round(44 * hs), tA, colA, Math.round(36 * hs));
-      socDrawLogoCircle(ctx, cxB, cyT, R, iB, colB, socGetAbbr(tB));
-      socDrawTeamLabel(ctx, cxB, cyT + R + Math.round(36 * hs), cyT + R + Math.round(44 * hs), tB, colB, Math.round(36 * hs));
-      socDrawVsZone(ctx, W, cyT, round, colA, colB, hs);
-      socFooter(ctx, W, H, link, hs, brandImg, railImgs);
-
-    } else {
-      const s = W / 1080;
-      socTopBar(ctx, W, colA, colB, s);
-      socDrawPresentedBy(ctx, W, 0, presentedByImg, s);
-      socDrawHeader(ctx, W, Math.round(56 * s), Math.round(94 * s), event, round || 'MATCHUP', null, s);
-      const R = Math.round(136 * s), cyT = H * 0.375;
-      const cxA = W * 0.265, cxB = W * 0.735;
-      socDiagSplit(ctx, W, H, Math.round(120 * s), Math.round(90 * s), colA, colB);
-      socDrawLogoCircle(ctx, cxA, cyT, R, iA, colA, socGetAbbr(tA));
-      socDrawTeamLabel(ctx, cxA, cyT + R + Math.round(56 * s), cyT + R + Math.round(65 * s), tA, colA, Math.round(50 * s));
-      socDrawLogoCircle(ctx, cxB, cyT, R, iB, colB, socGetAbbr(tB));
-      socDrawTeamLabel(ctx, cxB, cyT + R + Math.round(56 * s), cyT + R + Math.round(65 * s), tB, colB, Math.round(50 * s));
-      socDrawVsZone(ctx, W, H * 0.726, round, colA, colB, s);
-      socFooter(ctx, W, H, link, s, brandImg, railImgs);
-    }
-  }
-
-  // ── Match Result ───────────────────────────────────────────────────
-  async function socDrawResult() {
-    const ctx = socCanvasCtx('soc-canvas-result');
-    if (!ctx) return;
-    const { W, H, layout } = socGetPlatform();
-    const liveB  = (currentState.teams && currentState.teams.blue)   || {};
-    const liveO  = (currentState.teams && currentState.teams.orange) || {};
-    const series = currentState.series || {};
-    const tA  = liveB.name   || 'Team A';
-    const tB  = liveO.name   || 'Team B';
-    const sA  = series.blue   != null ? series.blue   : null;
-    const sB  = series.orange != null ? series.orange : null;
-    const winA = sA !== null && sB !== null && Number(sA) > Number(sB);
-    const winB = sA !== null && sB !== null && Number(sB) > Number(sA);
-    const colA = socTeamColor(tA) || '#4f46e5';
-    const colB = socTeamColor(tB) || '#9333ea';
-    const event = (currentState.eventName || '').toUpperCase();
-    const link  = socTwitchLink();
-    const [iA, iB, { brandImg, presentedByImg, railImgs }] = await Promise.all([
-      loadImg(socLogoUrl(tA)), loadImg(socLogoUrl(tB)), socLoadBrandAssets(),
-    ]);
-    _socDrawW = W; _socPairA = tA; _socPairB = tB; _socPairFs = 0;  // one shared name size for this pair
-    if (_socCardStyle === 'poster') {
-      socPosterVersus(ctx, { W, H, layout, tA, tB, round: '', iA, iB, brandImg, railImgs, event, link, sA, sB });
-      return;
-    }
-    socDrawBg(ctx, W, H, colA, colB);
-
-    if (layout === 'vertical') {
-      const s = W / 1080;
-      socTopBar(ctx, W, colA, colB, s);
-      socDrawPresentedBy(ctx, W, 0, presentedByImg, s);
-      socDrawHeader(ctx, W, Math.round(76 * s), Math.round(118 * s), event, 'FINAL SCORE', '#15803d', s);
-      const R = Math.round(126 * s);
-      const cyA = H * 0.248;
-      socDrawLogoCircle(ctx, W / 2, cyA, R, iA, colA, socGetAbbr(tA));
-      socDrawTeamLabel(ctx, W / 2, cyA + R + Math.round(52 * s), cyA + R + Math.round(61 * s), tA, colA, Math.round(48 * s), winA);
-      if (winA) socDrawWinnerBadge(ctx, W / 2, cyA + R + Math.round(72 * s), s);
-      socDrawScore(ctx, W / 2, H * 0.435, sA, colA, winA, Math.round(148 * s));
-      ctx.save(); ctx.strokeStyle = 'rgba(255,255,255,0.10)'; ctx.lineWidth = 1.5; ctx.setLineDash([10, 8]);
-      ctx.beginPath(); ctx.moveTo(W * 0.12, H / 2); ctx.lineTo(W * 0.88, H / 2); ctx.stroke();
-      ctx.setLineDash([]); ctx.restore();
-      socDrawScore(ctx, W / 2, H * 0.565, sB, colB, winB, Math.round(148 * s));
-      const cyB = H * 0.752;
-      socDrawTeamLabel(ctx, W / 2, cyB - R - Math.round(58 * s), cyB - R - Math.round(50 * s), tB, colB, Math.round(48 * s), winB);
-      if (winB) socDrawWinnerBadge(ctx, W / 2, cyB - R - Math.round(98 * s), s);
-      socDrawLogoCircle(ctx, W / 2, cyB, R, iB, colB, socGetAbbr(tB));
-      socFooter(ctx, W, H, link, s, brandImg, railImgs);
-
-    } else if (layout === 'landscape') {
-      const hs = H / 675;
-      socTopBar(ctx, W, colA, colB, hs);
-      socDrawPresentedBy(ctx, W, 0, presentedByImg, hs);
-      socDrawHeader(ctx, W, Math.round(44 * hs), Math.round(72 * hs), event, 'FINAL SCORE', '#15803d', hs);
-      const R = Math.round(74 * hs), cyT = H * 0.43;
-      const cxA = W * 0.21, cxB = W * 0.79;
-      socDiagSplit(ctx, W, H, Math.round(90 * hs), Math.round(56 * hs), colA, colB);
-      socDrawLogoCircle(ctx, cxA, cyT, R, iA, colA, socGetAbbr(tA));
-      socDrawTeamLabel(ctx, cxA, cyT + R + Math.round(32 * hs), cyT + R + Math.round(40 * hs), tA, colA, Math.round(32 * hs), winA);
-      if (winA) socDrawWinnerBadge(ctx, cxA, cyT + R + Math.round(48 * hs), hs * 0.88);
-      socDrawLogoCircle(ctx, cxB, cyT, R, iB, colB, socGetAbbr(tB));
-      socDrawTeamLabel(ctx, cxB, cyT + R + Math.round(32 * hs), cyT + R + Math.round(40 * hs), tB, colB, Math.round(32 * hs), winB);
-      if (winB) socDrawWinnerBadge(ctx, cxB, cyT + R + Math.round(48 * hs), hs * 0.88);
-      socDrawScore(ctx, W * 0.40, cyT - Math.round(8 * hs), sA, colA, winA, Math.round(96 * hs));
-      socDrawScore(ctx, W * 0.60, cyT - Math.round(8 * hs), sB, colB, winB, Math.round(96 * hs));
-      ctx.save(); ctx.strokeStyle = 'rgba(255,255,255,0.14)'; ctx.lineWidth = 1.5;
-      ctx.beginPath(); ctx.moveTo(W / 2, cyT - Math.round(42 * hs)); ctx.lineTo(W / 2, cyT + Math.round(42 * hs)); ctx.stroke(); ctx.restore();
-      socFooter(ctx, W, H, link, hs, brandImg, railImgs);
-
-    } else {
-      const s = W / 1080;
-      socTopBar(ctx, W, colA, colB, s);
-      socDrawPresentedBy(ctx, W, 0, presentedByImg, s);
-      socDrawHeader(ctx, W, Math.round(56 * s), Math.round(94 * s), event, 'FINAL SCORE', '#15803d', s);
-      const R = Math.round(124 * s), cyT = H * 0.338;
-      const cxA = W * 0.265, cxB = W * 0.735;
-      socDiagSplit(ctx, W, H, Math.round(120 * s), Math.round(90 * s), colA, colB);
-      socDrawLogoCircle(ctx, cxA, cyT, R, iA, colA, socGetAbbr(tA));
-      socDrawTeamLabel(ctx, cxA, cyT + R + Math.round(52 * s), cyT + R + Math.round(61 * s), tA, colA, Math.round(46 * s), winA);
-      if (winA) socDrawWinnerBadge(ctx, cxA, cyT + R + Math.round(72 * s), s);
-      socDrawLogoCircle(ctx, cxB, cyT, R, iB, colB, socGetAbbr(tB));
-      socDrawTeamLabel(ctx, cxB, cyT + R + Math.round(52 * s), cyT + R + Math.round(61 * s), tB, colB, Math.round(46 * s), winB);
-      if (winB) socDrawWinnerBadge(ctx, cxB, cyT + R + Math.round(72 * s), s);
-      const scY = H * 0.748;
-      socDrawScore(ctx, cxA, scY, sA, colA, winA, Math.round(144 * s));
-      socDrawScore(ctx, cxB, scY, sB, colB, winB, Math.round(144 * s));
-      ctx.save(); ctx.strokeStyle = 'rgba(255,255,255,0.12)'; ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.moveTo(W / 2, scY - Math.round(62 * s)); ctx.lineTo(W / 2, scY + Math.round(62 * s)); ctx.stroke(); ctx.restore();
-      socFooter(ctx, W, H, link, s, brandImg, railImgs);
-    }
-  }
-
-  // ── Bracket Snapshot ───────────────────────────────────────────────
-  async function socDrawBracket() {
-    const ctx = socCanvasCtx('soc-canvas-bracket');
-    if (!ctx) return;
-    const { W, H, layout } = socGetPlatform();
-    const b      = currentState.bracket || {};
-    const rounds = b.winners || [];
-    const event  = (currentState.eventName || b.title || '').toUpperCase();
-    const link   = socTwitchLink();
-    const s      = Math.min(W / 1080, H / 1080);
-    const { brandImg, presentedByImg, railImgs } = await socLoadBrandAssets();
-    const poster = _socCardStyle === 'poster';
-    const [pc1, pc2] = socPosterColors();
-    if (poster) {
-      socPosterBg(ctx, W, H, pc1, pc2);
-      socPosterCorners(ctx, W, H, pc1, pc2, s);
-      socPosterHeader(ctx, W, brandImg, event || (b.type ? b.type.replace(/_/g, ' ') : 'BRACKET'), pc1, pc2, s);
-    } else {
-      socDrawBg(ctx, W, H, null, null);
-      socTopBar(ctx, W, '#4f46e5', '#9333ea', s);
-      socDrawPresentedBy(ctx, W, 0, presentedByImg, s);
-      socDrawHeader(ctx, W, Math.round(54 * s), Math.round(86 * s), event,
-        b.type ? b.type.replace(/_/g, ' ').toUpperCase() : 'BRACKET', '#5b21b6', s);
-    }
-    const headerH = Math.round(100 * s);
-    if (!rounds.length) {
-      ctx.save();
-      ctx.font = `600 ${Math.round(24 * s)}px "Rajdhani", sans-serif`;
-      ctx.fillStyle = 'rgba(255,255,255,0.16)'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillText('No bracket loaded', W / 2, H / 2); ctx.restore();
-      if (poster) socPosterFooter(ctx, W, H, link, railImgs, s); else socFooter(ctx, W, H, link, s, brandImg, railImgs);
-      return;
-    }
-    const maxCols = layout === 'vertical' ? 2 : layout === 'landscape' ? 5 : 4;
-    const show = rounds.slice(-maxCols);
-    const PAD = Math.round(24 * s), GAP = Math.round(8 * s);
-    const colW = (W - PAD * 2 - GAP * (show.length - 1)) / show.length;
-    const startY = headerH + Math.round(4 * s), endY = H - Math.round(88 * s);
-    const accents = poster ? [pc1, pc2, pc1, pc2, pc1] : ['#6366f1', '#7c3aed', '#9333ea', '#a855f7', '#c026d3'];
-    show.forEach((round, ri) => {
-      const rx  = PAD + ri * (colW + GAP);
-      const rcx = rx + colW / 2;
-      const acc = accents[ri % accents.length];
-      ctx.save();
-      ctx.font = `800 ${Math.round(13 * s)}px "Rajdhani", sans-serif`;
-      ctx.fillStyle = acc; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
-      ctx.fillText((round.label || round.round || 'Round').toUpperCase(), rcx, startY + Math.round(16 * s));
-      ctx.fillStyle = acc + '40';
-      ctx.fillRect(rx, startY + Math.round(20 * s), colW, Math.round(2 * s));
-      ctx.restore();
-      const matches = round.matches || [];
-      const avail   = endY - startY - Math.round(24 * s);
-      const slotH   = Math.min(Math.round(92 * s), Math.max(Math.round(38 * s), (avail - (matches.length - 1) * Math.round(5 * s)) / Math.max(matches.length, 1)));
-      matches.slice(0, 12).forEach((match, mi) => {
-        const my    = startY + Math.round(26 * s) + mi * (slotH + Math.round(5 * s));
-        const halfH = slotH / 2;
-        const nameA = ((match.a && match.a.name) || 'TBD').toUpperCase().slice(0, 14);
-        const nameB = ((match.b && match.b.name) || 'TBD').toUpperCase().slice(0, 14);
-        const winA  = !!(match.a && match.a.winner);
-        const winB  = !!(match.b && match.b.winner);
-        const cA    = socTeamColor(match.a && match.a.name);
-        const cB    = socTeamColor(match.b && match.b.name);
-        const fs    = Math.round(Math.min(15, Math.max(10, slotH / 5.8)));
-        ctx.save();
-        ctx.fillStyle = 'rgba(255,255,255,0.04)';
-        ctx.beginPath(); ctx.roundRect(rx, my, colW, slotH, Math.round(6 * s)); ctx.fill();
-        if (winA) { ctx.fillStyle = '#22c55e0c'; ctx.beginPath(); ctx.roundRect(rx, my, colW, halfH, [Math.round(6 * s), Math.round(6 * s), 0, 0]); ctx.fill(); }
-        if (winB) { ctx.fillStyle = '#22c55e0c'; ctx.beginPath(); ctx.roundRect(rx, my + halfH, colW, halfH, [0, 0, Math.round(6 * s), Math.round(6 * s)]); ctx.fill(); }
-        if (cA) { ctx.fillStyle = cA; ctx.fillRect(rx, my, Math.round(3 * s), halfH); }
-        ctx.font = `${winA ? 800 : 600} ${fs}px "Rajdhani", sans-serif`;
-        ctx.fillStyle = winA ? '#4ade80' : 'rgba(255,255,255,0.82)';
-        ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
-        ctx.fillText(nameA, rx + Math.round(7 * s), my + halfH / 2);
-        if (match.a && match.a.score != null) {
-          ctx.textAlign = 'right'; ctx.fillStyle = winA ? '#4ade80' : 'rgba(255,255,255,0.32)';
-          ctx.fillText(String(match.a.score), rx + colW - Math.round(5 * s), my + halfH / 2);
-        }
-        ctx.fillStyle = 'rgba(255,255,255,0.07)'; ctx.fillRect(rx + Math.round(4 * s), my + halfH, colW - Math.round(8 * s), 1);
-        if (cB) { ctx.fillStyle = cB; ctx.fillRect(rx, my + halfH, Math.round(3 * s), halfH); }
-        ctx.font = `${winB ? 800 : 600} ${fs}px "Rajdhani", sans-serif`;
-        ctx.fillStyle = winB ? '#4ade80' : 'rgba(255,255,255,0.82)';
-        ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
-        ctx.fillText(nameB, rx + Math.round(7 * s), my + halfH + halfH / 2);
-        if (match.b && match.b.score != null) {
-          ctx.textAlign = 'right'; ctx.fillStyle = winB ? '#4ade80' : 'rgba(255,255,255,0.32)';
-          ctx.fillText(String(match.b.score), rx + colW - Math.round(5 * s), my + halfH + halfH / 2);
-        }
-        ctx.restore();
-      });
-    });
-    if (poster) socPosterFooter(ctx, W, H, link, railImgs, s); else socFooter(ctx, W, H, link, s, brandImg, railImgs);
-  }
-
-  function socRefreshAll() {
-    socUpdateQueueLabel();
-    socDrawMatchup();
-    socDrawResult();
-    socDrawBracket();
-  }
-
-  function socBindDownload(btnId, canvasId, filenameBase) {
-    el(btnId)?.addEventListener('click', () => {
-      const c = el(canvasId);
-      if (!c) return;
-      c.toBlob((blob) => {
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url; a.download = filenameBase + '-' + _socPlatform + '.png'; a.click();
-        setTimeout(() => URL.revokeObjectURL(url), 2000);
-      }, 'image/png');
-    });
-  }
-
-  el('soc-refresh-result')?.addEventListener('click',  () => socDrawResult());
-  el('soc-refresh-matchup')?.addEventListener('click', () => socDrawMatchup());
-  el('soc-refresh-bracket')?.addEventListener('click', socDrawBracket);
-  el('soc-twitch-link')?.addEventListener('input', () => { socDrawMatchup(); socDrawResult(); socDrawBracket(); });
-  socBindDownload('soc-dl-result',  'soc-canvas-result',  'match-result');
-  socBindDownload('soc-dl-matchup', 'soc-canvas-matchup', 'matchup');
-  socBindDownload('soc-dl-bracket', 'soc-canvas-bracket', 'bracket');
-
-  // ── Clip Prep ──────────────────────────────────────────────────────
-
-  function socPopulateClipDropdowns() {
-    const library = (currentState.clips && currentState.clips.library) || [];
-    const opts = library
-      .filter((c) => c && c.path)
-      .map((c) => ({ id: c.id, label: c.name || c.id }));
-
-    ['soc-sel-intro', 'soc-sel-outro'].forEach((selId) => {
-      const sel = el(selId);
-      if (!sel) return;
-      const cur = sel.value;
-      sel.innerHTML = '<option value="">None</option>' +
-        opts.map((o) => `<option value="${o.id}">${o.label.replace(/&/g,'&amp;').replace(/</g,'&lt;')}</option>`).join('');
-      if (cur) sel.value = cur;
-    });
-
-    const mainSel = el('soc-sel-clip');
-    if (mainSel) {
-      const cur = mainSel.value;
-      mainSel.innerHTML = '<option value="">— pick a clip —</option>' +
-        opts.map((o) => `<option value="${o.id}">${o.label.replace(/&/g,'&amp;').replace(/</g,'&lt;')}</option>`).join('');
-      if (cur) mainSel.value = cur;
-    }
-  }
-
-  let _socBakeJobId = null;
-
-  el('soc-btn-bake')?.addEventListener('click', async () => {
-    const clipId = el('soc-sel-clip')?.value;
-    if (!clipId) { showToast('Pick a main clip first.', '#ef4444'); return; }
-    const introId    = el('soc-sel-intro')?.value    || '';
-    const outroId    = el('soc-sel-outro')?.value    || '';
-    const transition = el('soc-opt-transition')?.value || 'fade';
-    const quality    = el('soc-opt-quality')?.value   || 'high';
-
-    const statusEl = el('soc-bake-status');
-    const resultEl = el('soc-bake-result');
-    const barEl    = el('soc-bake-bar');
-    const msgEl    = el('soc-bake-msg');
-    if (statusEl) { statusEl.style.display = ''; barEl.style.width = '0%'; msgEl.textContent = 'Sending to encoder…'; msgEl.style.color = ''; }
-    if (resultEl) resultEl.style.display = 'none';
-
-    try {
-      const resp = await fetch('http://localhost:3000/api/clips/social-encode', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ introId, clipId, outroId, opts: { transition, quality } })
-      });
-      const data = await resp.json();
-      if (!resp.ok || !data.ok) throw new Error(data.error || 'Encode failed');
-      _socBakeJobId = data.jobId;
-      if (msgEl) msgEl.textContent = 'Encoding…';
-    } catch (e) {
-      if (msgEl) { msgEl.textContent = 'Error: ' + e.message; msgEl.style.color = '#f56565'; }
-    }
-  });
-
-  function socHandleEncodeProgress(progress) {
-    if (!_socBakeJobId) return;
-    const statusEl = el('soc-bake-status');
-    const resultEl = el('soc-bake-result');
-    const barEl    = el('soc-bake-bar');
-    const msgEl    = el('soc-bake-msg');
-    const active   = progress && progress.active;
-    if (active && active.id === _socBakeJobId) {
-      if (barEl) barEl.style.width = Math.min(100, Math.round(active.progress || 0)) + '%';
-      if (msgEl) msgEl.textContent = active.status === 'encoding' ? `Encoding… ${Math.round(active.progress || 0)}%` : 'Processing…';
-      if (active.status === 'done' && active.outputPath) {
-        _socBakeJobId = null;
-        if (statusEl) statusEl.style.display = 'none';
-        if (resultEl) {
-          resultEl.style.display = '';
-          const nameEl = el('soc-bake-result-name');
-          if (nameEl) nameEl.textContent = active.name || 'Social clip ready';
-          const dlLink = el('soc-dl-baked');
-          if (dlLink) {
-            dlLink.href = 'http://localhost:3000/api/clips/file?path=' + encodeURIComponent(active.outputPath);
-            dlLink.download = (active.name || 'social_clip') + '.mp4';
-          }
-        }
-      }
-      if (active.status === 'error') {
-        _socBakeJobId = null;
-        if (msgEl) { msgEl.textContent = 'Encode failed: ' + (active.error || 'unknown error'); msgEl.style.color = '#f56565'; }
-      }
-    }
-  }
-
-  window._socHandleEncodeProgress  = socHandleEncodeProgress;
-  window._socPopulateClipDropdowns = socPopulateClipDropdowns;
-
-  // ── Background OBS Source ──────────────────────────────────────────────────
-  (function () {
-    var bgType  = el('bg-type');
-    var bgC1    = el('bg-color1');
-    var bgC2    = el('bg-color2');
-    var bgAngle = el('bg-angle');
-    var bgImgIn = el('bg-image-url');
-    var bgApply = el('bg-apply');
-    var c2wrap  = el('bg-color2-wrap');
-    var angWrap = el('bg-angle-wrap');
-    var imgWrap = el('bg-img-wrap');
-
-    function bgShowFields() {
-      var t = bgType ? bgType.value : 'gradient';
-      if (c2wrap)  c2wrap.style.display  = (t === 'gradient') ? '' : 'none';
-      if (angWrap) angWrap.style.display = (t === 'gradient') ? '' : 'none';
-      if (imgWrap) imgWrap.style.display = (t === 'image')    ? '' : 'none';
-    }
-    if (bgType) bgType.addEventListener('change', bgShowFields);
-    bgShowFields();
-
-    function bgApplyState(data) {
-      var bg = (data && data.background) || {};
-      if (bgType  && document.activeElement !== bgType)  bgType.value  = bg.type  || 'gradient';
-      if (bgC1    && document.activeElement !== bgC1)    bgC1.value    = bg.color1 || '#07090f';
-      if (bgC2    && document.activeElement !== bgC2)    bgC2.value    = bg.color2 || '#0c1220';
-      if (bgAngle && document.activeElement !== bgAngle) bgAngle.value = bg.angle != null ? bg.angle : 135;
-      if (bgImgIn && document.activeElement !== bgImgIn) bgImgIn.value = bg.imageUrl || '';
-      bgShowFields();
-    }
-    window._bgApplyState = bgApplyState;
-
-    if (bgApply) {
-      bgApply.addEventListener('click', function () {
-        send('set_background', {
-          type:     bgType  ? bgType.value  : 'gradient',
-          color1:   bgC1    ? bgC1.value    : '#07090f',
-          color2:   bgC2    ? bgC2.value    : '#0c1220',
-          angle:    bgAngle ? Number(bgAngle.value) : 135,
-          imageUrl: bgImgIn ? bgImgIn.value.trim() : ''
-        });
-      });
-    }
-  })();
-})();
 
 // ════════════════ Analytics dashboard (Overview / Broadcasts / Audience / Event) ════════════════
-const ANALYTICS_API = 'http://localhost:3000/api/analytics';
+const ANALYTICS_API = 'http://127.0.0.1:3000/api/analytics';
 let _anLive = null, _anBound = false;
 let _anEvent = '', _anEventWired = false;   // Overview 'sort by event' filter
 function anDur(sec) { sec = Math.max(0, Math.round(sec || 0)); const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60; return h ? `${h}h ${m}m` : (m ? `${m}m ${s}s` : `${s}s`); }
@@ -1664,12 +330,12 @@ async function ensureDashboard(force) {
   const qs = new URLSearchParams();
   if (_anFilter.from) qs.set('from', _anFilter.from); if (_anFilter.to) qs.set('to', _anFilter.to);
   if (_anFilter.game) qs.set('game', _anFilter.game); if (_anFilter.tournament) qs.set('tournament', _anFilter.tournament);
-  try { const r = await (await fetch('http://localhost:3000/api/stats/dashboard?' + qs.toString())).json(); _anDash = r.data || null; _anDashSig = sig; }
+  try { const r = await (await fetch('http://127.0.0.1:3000/api/stats/dashboard?' + qs.toString())).json(); _anDash = r.data || null; _anDashSig = sig; }
   catch (e) { _anDash = null; }
   return _anDash;
 }
 async function loadAnalyticsFilters() {
-  try { _anFilterOpts = await (await fetch('http://localhost:3000/api/stats/filters')).json(); } catch (e) { _anFilterOpts = null; }
+  try { _anFilterOpts = await (await fetch('http://127.0.0.1:3000/api/stats/filters')).json(); } catch (e) { _anFilterOpts = null; }
   const gsel = el('an-fb-game'), tsel = el('an-fb-tourn');
   const GAME_LABEL = { rl: 'Rocket League', cs2: 'CS2', valorant: 'Valorant' };
   if (gsel && _anFilterOpts) {
@@ -1891,7 +557,7 @@ async function loadAnalyticsOverview() {
       // Try to pull YouTube live viewers to show combined count
       let ytViewers = 0;
       try {
-        const yr = await fetch('http://localhost:3000/api/youtube/stats');
+        const yr = await fetch('http://127.0.0.1:3000/api/youtube/stats');
         if (yr.ok) { const yd = await yr.json(); ytViewers = (yd.data && yd.data.live && yd.data.live.isLive) ? (yd.data.live.viewers || 0) : 0; }
       } catch (_) {}
       const total = (live.viewers || 0) + ytViewers;
@@ -2017,7 +683,7 @@ async function loadYouTubeStats(refresh) {
   const wrap = el('aud-youtube'); if (!wrap) return;
   if (!wrap.innerHTML) wrap.innerHTML = '<p class="section-desc" style="margin:0;">Loading YouTube stats…</p>';
   let r = null;
-  try { r = await (await fetch('http://localhost:3000/api/youtube/stats' + (refresh ? '?refresh=1' : ''))).json(); } catch (e) {}
+  try { r = await (await fetch('http://127.0.0.1:3000/api/youtube/stats' + (refresh ? '?refresh=1' : ''))).json(); } catch (e) {}
   if (!r || !r.ok) {
     const msg = (r && r.message) || 'Could not reach YouTube.';
     const btn = (r && r.needsConnect) ? ' <button class="btn btn-secondary btn-sm" onclick="document.querySelector(\'.tab-btn[data-tab=ajustes]\')?.click()">Connect YouTube</button>' : '';
@@ -2063,7 +729,7 @@ async function loadTwitchChannelStats(refresh) {
   const wrap = el('aud-twitch'); if (!wrap) return;
   if (!wrap.innerHTML) wrap.innerHTML = '<p class="section-desc" style="margin:0;">Loading Twitch stats…</p>';
   let r = null;
-  try { r = await (await fetch('http://localhost:3000/api/twitch/stats' + (refresh ? '?refresh=1' : ''))).json(); } catch (e) {}
+  try { r = await (await fetch('http://127.0.0.1:3000/api/twitch/stats' + (refresh ? '?refresh=1' : ''))).json(); } catch (e) {}
   if (!r || !r.ok) {
     wrap.innerHTML = `<div class="an-chart-empty">${escapeHtml((r && r.message) || 'Could not reach Twitch.')}${(r && r.needsReconnect) ? ' <button class="btn btn-secondary btn-sm" onclick="document.querySelector(\'.tab-btn[data-tab=ajustes]\')?.click()">Open Settings</button>' : ''}</div>`;
     return;
@@ -2148,7 +814,7 @@ async function startggImportGo() {
   if (btn) btn.disabled = true;
   if (status) { status.textContent = 'Starting import…'; status.style.color = ''; }
   try {
-    const r = await (await fetch('http://localhost:3000/api/stats/import-startgg', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ nameQuery }) })).json();
+    const r = await (await fetch('http://127.0.0.1:3000/api/stats/import-startgg', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ nameQuery }) })).json();
     if (!r.ok) { if (status) { status.textContent = r.message || 'Could not start.'; status.style.color = '#f56565'; } if (btn) btn.disabled = false; }
   } catch (e) { if (status) { status.textContent = 'Request failed: ' + e.message; status.style.color = '#f56565'; } if (btn) btn.disabled = false; }
 }
@@ -2176,7 +842,7 @@ async function sgiSearch() {
   if (!q || q.length < 2) { if (res) res.innerHTML = '<p class="section-desc" style="margin:8px 0 0;">Type at least 2 characters.</p>'; return; }
   if (res) res.innerHTML = '<p class="section-desc" style="margin:8px 0 0;">Searching start.gg…</p>';
   try {
-    const r = await (await fetch('http://localhost:3000/api/startgg/search-tournaments', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query: q }) })).json();
+    const r = await (await fetch('http://127.0.0.1:3000/api/startgg/search-tournaments', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query: q }) })).json();
     if (r.error) { if (res) res.innerHTML = `<p class="section-desc" style="color:#f56565;margin:8px 0 0;">${escapeHtml(r.error)}</p>`; return; }
     const list = r.tournaments || [];
     if (!list.length) { if (res) res.innerHTML = '<p class="section-desc" style="margin:8px 0 0;">No tournaments found.</p>'; return; }
@@ -2188,7 +854,7 @@ async function sgiLoadEvents(slug, tname) {
   const evs = el('sgi-events');
   if (evs) evs.innerHTML = '<p class="section-desc" style="margin:8px 0 0;">Loading events…</p>';
   try {
-    const r = await (await fetch('http://localhost:3000/api/startgg/tournament-events', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tournamentSlug: slug }) })).json();
+    const r = await (await fetch('http://127.0.0.1:3000/api/startgg/tournament-events', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tournamentSlug: slug }) })).json();
     const list = r.events || [];
     if (!list.length) { if (evs) evs.innerHTML = '<p class="section-desc" style="margin:8px 0 0;">No events on that tournament.</p>'; return; }
     evs.innerHTML = `<div class="sgi-events-hd">${escapeHtml(tname)} — pick an event to import:</div>` + list.map((e) => {
@@ -2203,7 +869,7 @@ async function sgiImportEvent(eventId, tournamentName, gameType) {
   const status = el('sgi-status');
   if (status) { status.textContent = 'Starting import…'; status.style.color = ''; }
   try {
-    const r = await (await fetch('http://localhost:3000/api/stats/import-startgg-event', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ eventId, tournamentName, gameType }) })).json();
+    const r = await (await fetch('http://127.0.0.1:3000/api/stats/import-startgg-event', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ eventId, tournamentName, gameType }) })).json();
     if (!r.ok && status) { status.textContent = r.message || 'Could not start.'; status.style.color = '#f56565'; }
   } catch (e) { if (status) { status.textContent = 'Request failed: ' + e.message; status.style.color = '#f56565'; } }
 }
@@ -2415,7 +1081,7 @@ function statTable(cols, rows, rowFn) {
 }
 
 // ── Sponsor proof-of-play ───────────────────────────────────────────────────
-const ADPROOF_API = 'http://localhost:3000/api/adproof';
+const ADPROOF_API = 'http://127.0.0.1:3000/api/adproof';
 const ADPROOF_SPOTS = ['rail', 'desk', 'overtime', 'replayGoal', 'replayOutro', 'scoreboard', 'banner', 'ticker'];
 const ADPROOF_SPOT_LABEL = { rail: 'Rail', desk: 'Desk', overtime: 'OT', replayGoal: 'Replay', replayOutro: 'Outro', scoreboard: 'Score', banner: 'Banner', ticker: 'Ticker' };
 let _adProofReport = null;
@@ -2520,15 +1186,15 @@ el('app-stop')?.addEventListener('click', adProofStopSession);
 function _delPlayerCol(v, r) { return '<button class="stats-del-row" data-del-player="' + escapeHtml(r.player) + '" title="Delete this player from the leaderboards">✕</button>'; }
 document.addEventListener('click', async (e) => {
   const dt = e.target.closest && e.target.closest('[data-del-team]');
-  if (dt) { const name = dt.dataset.delTeam; if (!(await appConfirm('Delete "' + name + '" — remove every match this team appears in? (affects both teams in those matches)', 'Delete'))) return; try { await fetch('http://localhost:3000/api/stats/team/' + encodeURIComponent(name), { method: 'DELETE' }); } catch (_) {} _anDash = null; _anDashSig = ''; if (typeof loadStatsTeams === 'function') loadStatsTeams(); return; }
+  if (dt) { const name = dt.dataset.delTeam; if (!(await appConfirm('Delete "' + name + '" — remove every match this team appears in? (affects both teams in those matches)', 'Delete'))) return; try { await fetch('http://127.0.0.1:3000/api/stats/team/' + encodeURIComponent(name), { method: 'DELETE' }); } catch (_) {} _anDash = null; _anDashSig = ''; if (typeof loadStatsTeams === 'function') loadStatsTeams(); return; }
   const dp = e.target.closest && e.target.closest('[data-del-player]');
-  if (dp) { const name = dp.dataset.delPlayer; if (!(await appConfirm('Delete player "' + name + '" from the leaderboards?', 'Delete'))) return; try { await fetch('http://localhost:3000/api/stats/player/' + encodeURIComponent(name), { method: 'DELETE' }); } catch (_) {} _anDash = null; _anDashSig = ''; if (typeof loadStatsLeaders === 'function') loadStatsLeaders(); return; }
+  if (dp) { const name = dp.dataset.delPlayer; if (!(await appConfirm('Delete player "' + name + '" from the leaderboards?', 'Delete'))) return; try { await fetch('http://127.0.0.1:3000/api/stats/player/' + encodeURIComponent(name), { method: 'DELETE' }); } catch (_) {} _anDash = null; _anDashSig = ''; if (typeof loadStatsLeaders === 'function') loadStatsLeaders(); return; }
   const tc = e.target.closest && e.target.closest('#teams-clear-all');
-  if (tc) { if (!(await appConfirm('Clear ALL match history? Wipes every team & player record for fresh reporting.', 'Clear'))) return; try { await fetch('http://localhost:3000/api/stats/matches', { method: 'DELETE' }); } catch (_) {} _anDash = null; _anDashSig = ''; if (typeof loadStatsTeams === 'function') loadStatsTeams(); return; }
+  if (tc) { if (!(await appConfirm('Clear ALL match history? Wipes every team & player record for fresh reporting.', 'Clear'))) return; try { await fetch('http://127.0.0.1:3000/api/stats/matches', { method: 'DELETE' }); } catch (_) {} _anDash = null; _anDashSig = ''; if (typeof loadStatsTeams === 'function') loadStatsTeams(); return; }
 });
 async function loadStatsLeaders() {
   const wrap = el('stats-leaders'); if (!wrap) return;
-  if (!window._pdbClearWired) { window._pdbClearWired = true; el('stats-clear-playerdb')?.addEventListener('click', async () => { if (!(await appConfirm('Clear the ENTIRE player database? This wipes saved rank/profile links for fresh reporting.', 'Clear'))) return; try { await fetch('http://localhost:3000/api/playerdb', { method: 'DELETE' }); if (typeof showToast === 'function') showToast('Player database cleared', '#22c55e'); } catch (e) {} loadStatsLeaders(); }); }
+  if (!window._pdbClearWired) { window._pdbClearWired = true; el('stats-clear-playerdb')?.addEventListener('click', async () => { if (!(await appConfirm('Clear the ENTIRE player database? This wipes saved rank/profile links for fresh reporting.', 'Clear'))) return; try { await fetch('http://127.0.0.1:3000/api/playerdb', { method: 'DELETE' }); if (typeof showToast === 'function') showToast('Player database cleared', '#22c55e'); } catch (e) {} loadStatsLeaders(); }); }
   const dash = await ensureDashboard();
   const L = (dash && dash.leaders) || { rl: [], cs2: [], val: [] };
   let html = '', gh = '';

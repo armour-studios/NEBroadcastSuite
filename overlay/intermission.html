@@ -108,19 +108,17 @@
       position: relative; z-index: 3;
     }
 
-    /* Left: brand logo on an accent-ringed disc, with an optional "presented by" sponsor below */
+    /* Left: the brand logo itself, with an optional "presented by" sponsor below */
     .im-left {
       flex-shrink: 0;
       display: flex; flex-direction: column; align-items: center; gap: 16px;
     }
+    /* Purely a sizing box now — the ringed disc it used to draw (radial fill, accent hairline,
+       outer glow) is gone. Kept at 190px so the column width, the gap to the sponsor below and
+       .im-presented's max-width all stay exactly where they were. */
     .im-logo-disc {
       width: 190px; height: 190px; flex-shrink: 0;
       display: flex; align-items: center; justify-content: center;
-      border-radius: 50%;
-      background: radial-gradient(circle at 50% 36%, rgba(36,40,52,.92), rgba(11,13,20,.96));
-      border: 1px solid color-mix(in srgb, var(--accent) 32%, rgba(255,255,255,.09));
-      box-shadow: inset 0 0 34px rgba(0,0,0,.55),
-        0 0 46px -12px color-mix(in srgb, var(--accent) 60%, transparent);
     }
     .im-logo {
       width: 144px; height: 144px; object-fit: contain; display: block;
@@ -164,6 +162,10 @@
 
     .im-countdown { display: flex; flex-direction: column; align-items: center; gap: 8px; }
     .im-countdown.hidden { display: none; }
+    /* Title-only: keep the label, drop the digits. The stack is already centred, so the label
+       simply becomes the block — scaled up so it does not read as a caption with nothing under it. */
+    .im-countdown.title-only .im-time { display: none; }
+    .im-countdown.title-only .im-label { font-size: 34px; letter-spacing: .30em; }
 
     .im-label {
       font-size: 20px; font-weight: 800; letter-spacing: .42em; text-transform: uppercase;
@@ -360,9 +362,15 @@
 
       const hasEndsAt = !!b.endsAt;
       const hasFrozen = b.frozenSeconds != null;
+      // Title-only (breakScreen.titleOnly, or the older ?showTimer=0 URL param): keep the label,
+      // drop the digits and the progress bar. The block then depends on there BEING a title rather
+      // than on a timer, or turning the clock off would hide the label along with it.
+      const titleOnly = !!b.titleOnly || !SHOW_TIMER;
       const hasTimer  = SHOW_TIMER && (hasEndsAt || hasFrozen);
-      el('countdown-wrap').classList.toggle('hidden', !hasTimer);
-      el('progress').classList.toggle('hidden', !hasTimer);
+      const showBlock = titleOnly ? !!String(labelText || '').trim() : hasTimer;
+      el('countdown-wrap').classList.toggle('title-only', titleOnly);
+      el('countdown-wrap').classList.toggle('hidden', !showBlock);
+      el('progress').classList.toggle('hidden', !hasTimer || titleOnly);
       el('time').classList.toggle('big', !titleText);
 
       if (hasTimer) {

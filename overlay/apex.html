@@ -55,7 +55,7 @@
   .tk-cell.elim { opacity: .4; }
   /* rank block fills the full height of the bar; all the same brand colour; parallelogram slant matches the brand block (12px) */
   .tk-rank { align-self: stretch; display: flex; align-items: center; justify-content: center; min-width: 40px; padding: 0 13px; margin-right: 7px;
-    font-size: 15px; font-weight: 800; color: #fff; background: var(--accent); font-variant-numeric: tabular-nums;
+    font-size: 15px; font-weight: 800; color: var(--on-accent, #fff); background: var(--accent); font-variant-numeric: tabular-nums;
     clip-path: polygon(12px 0, 100% 0, calc(100% - 12px) 100%, 0 100%); }
   .tk-tlogo { width: 22px; height: 22px; object-fit: contain; flex: 0 0 22px; }
   .tk-tlogo.ph { display: flex; align-items: center; justify-content: center; border-radius: 4px; font-size: 9px; font-weight: 800; color: #fff; }
@@ -106,7 +106,7 @@
   #specteam.off { transform: translateX(-130%); opacity: 0; }
   /* slanted brand-coloured seed/rank tab */
   .sp-rank { display: flex; align-items: center; justify-content: center; min-width: 56px; padding: 0 22px 0 16px;
-    background: var(--accent); color: #fff; font-size: 26px; font-weight: 800; font-variant-numeric: tabular-nums;
+    background: var(--accent); color: var(--on-accent, #fff); font-size: 26px; font-weight: 800; font-variant-numeric: tabular-nums;
     clip-path: polygon(0 0, 100% 0, calc(100% - 14px) 100%, 0 100%); }
   /* team identity block */
   .sp-id { display: flex; align-items: center; gap: 13px; padding: 0 26px 0 8px; margin-left: -8px;
@@ -200,6 +200,21 @@
   </div>
 
 <script>
+
+  /* Text colour that stays legible ON a filled producer-chosen colour. Mirrors
+     SceneBase.onColor(); inlined because this scene does not load scene-base.js. A white or
+     pastel kit used to paint white text on a white fill. */
+  function onFill(color, dark, light) {
+    const c = String(color == null ? '' : color).trim();
+    let r = 0, g = 0, b = 0, m = c.match(/^#([0-9a-f]{3})$/i);
+    if (m) { r = parseInt(m[1][0] + m[1][0], 16); g = parseInt(m[1][1] + m[1][1], 16); b = parseInt(m[1][2] + m[1][2], 16); }
+    else if ((m = c.match(/^#([0-9a-f]{6})$/i))) { r = parseInt(m[1].slice(0, 2), 16); g = parseInt(m[1].slice(2, 4), 16); b = parseInt(m[1].slice(4, 6), 16); }
+    else if ((m = c.match(/^rgba?\(\s*(\d+)[\s,]+(\d+)[\s,]+(\d+)/i))) { r = +m[1]; g = +m[2]; b = +m[3]; }
+    else return light || '#fff';
+    const lin = (v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
+    return (0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b)) > 0.45 ? (dark || '#04121f') : (light || '#fff');
+  }
+
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const KILL_SVG = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2 4 6v6c0 5 3.4 8.3 8 10 4.6-1.7 8-5 8-10V6l-8-4z"/></svg>';
@@ -235,7 +250,11 @@ function applyBrand(d){
   // Ticker accent matches the brand colour (falls back to the blue-team colour).
   const bt = (d.teams && d.teams.blue) || {};
   const accent = (brand && brand.color) || bt.color;
-  if (accent) root.style.setProperty('--accent', accent);
+  if (accent) {
+    root.style.setProperty('--accent', accent);
+    // The rank tabs are FILLED with this colour, so their text is measured against it.
+    root.style.setProperty('--on-accent', onFill(accent));
+  }
   if (brand && brand.font) root.style.setProperty('--main-font', `'${brand.font}', sans-serif`);
   if (Array.isArray(d.savedTeams)) savedTeams = d.savedTeams;
   if (d.apex && d.apex.teamMap) teamMap = d.apex.teamMap;

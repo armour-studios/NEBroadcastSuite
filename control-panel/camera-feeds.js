@@ -8,7 +8,7 @@
    app.js (shared alias used by app.js + seeding-spotlight.js). */
 
 // ══════════════ Camera Feeds tab — Players / Casters / Gameplay / Settings ══════════════
-const CF_OVERLAY_BASE = 'http://localhost:3000';
+const CF_OVERLAY_BASE = 'http://127.0.0.1:3000';
 function cfShowSubtab(cf) {
   // Players sub-tab retired — player cam assignment lives in Match — Teams (gear) and the
   // Talent Monitor's Players tab. Old saved subtab values / deep links land on Talent Rooms.
@@ -230,7 +230,7 @@ function renderVdoRooms() {
   // LISTEN IN → one-click OBS browser source (created on the current program scene).
   const listenObs = el('cf-listen-obs');
   if (listenObs) listenObs.addEventListener('click', () => {
-    send('obs_ensure_browser_source', { sourceName: '[NE] Listen-In', url: 'http://localhost:3000/listen-in.html' });
+    send('obs_ensure_browser_source', { sourceName: '[NE] Listen-In', url: 'http://127.0.0.1:3000/listen-in.html' });
     showToast('Adding Listen-In to OBS…', '#8b5cf6');
   });
 })();
@@ -685,7 +685,7 @@ el('cf-dc-obs-apply')?.addEventListener('click', async () => {
   const btn = el('cf-dc-obs-apply'); const orig = btn ? btn.textContent : '';
   if (btn) { btn.textContent = 'Saving…'; btn.disabled = true; }
   try {
-    const res = await fetch('http://localhost:3000/api/obs/install-collection', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    const res = await fetch('http://127.0.0.1:3000/api/obs/install-collection', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.error || ('Server error ' + res.status));
     if (data.canceled) { /* user backed out */ }

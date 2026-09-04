@@ -528,8 +528,14 @@
   .cb-rslot.ct .cb-rico { background: color-mix(in srgb, var(--ct) 30%, rgba(4,5,11,0.9)); border-color: color-mix(in srgb, var(--ct) 45%, transparent); }
   .cb-rslot.t  .cb-rico { background: color-mix(in srgb, var(--t) 30%, rgba(4,5,11,0.9)); border-color: color-mix(in srgb, var(--t) 45%, transparent); }
   .cb-rnum { font-size: 8px; font-weight: 800; color: #5a6072; line-height: 1; font-variant-numeric: tabular-nums; }
-  .cb-rslot.ct .cb-rnum { color: color-mix(in srgb, var(--ct) 75%, #fff); }
-  .cb-rslot.t  .cb-rnum { color: color-mix(in srgb, var(--t) 75%, #fff); }
+  /* Solid first: without it the color-mix wins the cascade on Chrome 100 and then computes to
+     unset, which stripped the round numbers of their colour entirely. */
+  .cb-rslot.ct .cb-rnum { color: var(--ct); }
+  .cb-rslot.t  .cb-rnum { color: var(--t); }
+  @supports (color: color-mix(in srgb, red 50%, white)) {
+    .cb-rslot.ct .cb-rnum { color: color-mix(in srgb, var(--ct) 75%, #fff); }
+    .cb-rslot.t  .cb-rnum { color: color-mix(in srgb, var(--t) 75%, #fff); }
+  }
   .cb-rgap { width: 12px; align-self: center; height: 20px; border-left: 1px solid rgba(255,255,255,0.12); }
   /* Board: one row = CT cell (left) + T cell (right), each split into fixed columns */
   .cb-board { background: rgba(7,9,15,0.98); border-top: 1px solid rgba(255,255,255,0.06); }
@@ -876,6 +882,10 @@
 <button id="dev-fab" title="Open dev tester">DEV</button>
 
 <script>
+// Producer- and API-supplied names go into innerHTML below; escape them so a team called
+// "A<B" or a name carrying a quote cannot truncate the element or break an attribute.
+function _esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
+
 function el(id){ return document.getElementById(id); }
 
 /* Distinct weapon silhouettes by category (clean inline SVG, no external assets) */
@@ -1766,7 +1776,7 @@ function buyCell(p){
     <div class="cb-money"><span class="cb-cash">${money}</span><span class="cb-equip">${equip}</span></div>
     <div class="cb-util">${util}</div>
     <div class="cb-gear">${armor}${weap}</div>
-    <div class="cb-player"><span class="cb-name${dead ? ' dead' : ''}">${p.name || ''}</span><span class="cb-kda">${kda}</span></div>
+    <div class="cb-player"><span class="cb-name${dead ? ' dead' : ''}">${_esc(p.name || '')}</span><span class="cb-kda">${kda}</span></div>
   </div>`;
 }
 function renderBuyPhase(cs){
@@ -1803,11 +1813,11 @@ function renderBuyPhase(cs){
   box.innerHTML = `
     <div class="cb-header">
       <div class="cb-team ct">
-        <img class="cb-logo${ctLogoCls}" src="${ctLogo}" alt=""><span class="cb-tname">${appTeams.blue.name || 'CT'}</span><span class="cb-score">${cs.ct.score}</span>
+        <img class="cb-logo${ctLogoCls}" src="${ctLogo}" alt=""><span class="cb-tname">${_esc(appTeams.blue.name || 'CT')}</span><span class="cb-score">${cs.ct.score}</span>
       </div>
       <div class="cb-mid"><div class="r">ROUND</div><div class="rn">${String(rn).padStart(2,'0')}</div><div class="bz">${bz}</div></div>
       <div class="cb-team t">
-        <img class="cb-logo${tLogoCls}" src="${tLogo}" alt=""><span class="cb-tname">${appTeams.orange.name || 'T'}</span><span class="cb-score">${cs.t.score}</span>
+        <img class="cb-logo${tLogoCls}" src="${tLogo}" alt=""><span class="cb-tname">${_esc(appTeams.orange.name || 'T')}</span><span class="cb-score">${cs.t.score}</span>
       </div>
     </div>
     <div class="cb-rounds">${rounds}</div>
@@ -2084,44 +2094,48 @@ async function connect(){
   sock.onopen = () => sock.send(JSON.stringify({ type: 'request_state' }));
   sock.onmessage = ({ data }) => {
     let msg; try { msg = JSON.parse(data); } catch { return; }
-    if (msg.type === 'full_state') {
-      const d = msg.data;
-      if ('brand' in d) _lib.brand = d.brand; else d.brand = _lib.brand;
-      if ('banner' in d) _lib.banner = d.banner; else d.banner = _lib.banner;
-      document.documentElement.dataset.theme = d.theme || 'default';
-      if (d.fontFamily) document.documentElement.style.setProperty('--main-font', `'${d.fontFamily}', sans-serif`);
-      eventName = (d.eventName || '').trim();
-      if (d.bestOf) bestOf = d.bestOf;
-      if (d.series) series = d.series;
-      // Series map strip (top-left) — picks/decider only; absent key = leave as-is.
-      if ('veto' in d) vetoMaps = (d.veto && Array.isArray(d.veto.maps)) ? d.veto.maps : [];
-      const teams = d.teams || {};
-      appTeams = {
-        blue:   { name: (teams.blue && teams.blue.name) || 'TEAM A',   logo: (teams.blue && teams.blue.logo) || null },
-        orange: { name: (teams.orange && teams.orange.name) || 'TEAM B', logo: (teams.orange && teams.orange.logo) || null }
-      };
-      // Team colors drive the CT (left/blue) and T (right/orange) sides of the HUD
-      const ctC = (teams.blue && teams.blue.color) || '#6aa8e6';
-      const tC  = (teams.orange && teams.orange.color) || '#e0b35a';
-      document.documentElement.style.setProperty('--ct', ctC);
-      document.documentElement.style.setProperty('--t', tC);
-      appTeamRecords = d.teamRecords || { enabled: false, blue: '', orange: '' };
-      renderTeamRecords(appTeamRecords);
-      brand = d.brand || null;   // null when no client kit is active → rail hides
-      applyBrand();
-      renderBanner(d.banner);    // bottom-right sponsor banner (producer-controlled)
-      showHistory = !!(d.csgo && d.csgo.showHistory);
-      builtinRadar = !!(d.csgo && d.csgo.builtinRadar);
-      if (Array.isArray(d.facecams)) facecams = d.facecams;
-      facecamsEnabled = d.facecamsEnabled !== false;
-      lastRealCs = d.csgo;
-      if (!devState) render(d.csgo);   // don't let live data overwrite a running dev sim
-    } else if (msg.type === 'csgo_update') {
-      showHistory = !!(msg.data && msg.data.showHistory);
-      builtinRadar = !!(msg.data && msg.data.builtinRadar);
-      lastRealCs = msg.data;
-      if (!devState) render(msg.data);
-    }
+    // Contain render throws: a malformed GSI payload used to escape the socket handler and leave
+    // the CS2 HUD frozen on its last frame for the rest of the map. Log and keep taking updates.
+    try {
+      if (msg.type === 'full_state') {
+        const d = msg.data;
+        if ('brand' in d) _lib.brand = d.brand; else d.brand = _lib.brand;
+        if ('banner' in d) _lib.banner = d.banner; else d.banner = _lib.banner;
+        document.documentElement.dataset.theme = d.theme || 'default';
+        if (d.fontFamily) document.documentElement.style.setProperty('--main-font', `'${d.fontFamily}', sans-serif`);
+        eventName = (d.eventName || '').trim();
+        if (d.bestOf) bestOf = d.bestOf;
+        if (d.series) series = d.series;
+        // Series map strip (top-left) — picks/decider only; absent key = leave as-is.
+        if ('veto' in d) vetoMaps = (d.veto && Array.isArray(d.veto.maps)) ? d.veto.maps : [];
+        const teams = d.teams || {};
+        appTeams = {
+          blue:   { name: (teams.blue && teams.blue.name) || 'TEAM A',   logo: (teams.blue && teams.blue.logo) || null },
+          orange: { name: (teams.orange && teams.orange.name) || 'TEAM B', logo: (teams.orange && teams.orange.logo) || null }
+        };
+        // Team colors drive the CT (left/blue) and T (right/orange) sides of the HUD
+        const ctC = (teams.blue && teams.blue.color) || '#6aa8e6';
+        const tC  = (teams.orange && teams.orange.color) || '#e0b35a';
+        document.documentElement.style.setProperty('--ct', ctC);
+        document.documentElement.style.setProperty('--t', tC);
+        appTeamRecords = d.teamRecords || { enabled: false, blue: '', orange: '' };
+        renderTeamRecords(appTeamRecords);
+        brand = d.brand || null;   // null when no client kit is active → rail hides
+        applyBrand();
+        renderBanner(d.banner);    // bottom-right sponsor banner (producer-controlled)
+        showHistory = !!(d.csgo && d.csgo.showHistory);
+        builtinRadar = !!(d.csgo && d.csgo.builtinRadar);
+        if (Array.isArray(d.facecams)) facecams = d.facecams;
+        facecamsEnabled = d.facecamsEnabled !== false;
+        lastRealCs = d.csgo;
+        if (!devState) render(d.csgo);   // don't let live data overwrite a running dev sim
+      } else if (msg.type === 'csgo_update') {
+        showHistory = !!(msg.data && msg.data.showHistory);
+        builtinRadar = !!(msg.data && msg.data.builtinRadar);
+        lastRealCs = msg.data;
+        if (!devState) render(msg.data);
+      }
+    } catch (e) { console.error('[csgo] render error on ' + (msg && msg.type) + ':', e); }
   };
   sock.onclose = () => setTimeout(connect, 800);
   sock.onerror = () => { try { sock.close(); } catch {} };

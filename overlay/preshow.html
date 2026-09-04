@@ -571,9 +571,11 @@
       const b = data.breakScreen || {};
       const hasEndsAt = !!b.endsAt;
       const hasFrozen = b.frozenSeconds != null;
-      // Hide on the producer timer takes the kickoff clock down here too (Hide only clears
-      // .visible — endsAt stays in state, which is why the clock used to keep running).
-      const hasTimer = (b.visible !== false) && (hasEndsAt || hasFrozen);
+      // The clock is FURNITURE on this scene, not the break graphic: it shows whenever a timer
+      // is ARMED. The top-bar Start arms one without ever setting breakScreen.visible, so
+      // requiring `visible` meant the producer's segment clock never appeared here. Hide now
+      // disarms the timer server-side (set_break), which is what actually takes this down.
+      const hasTimer = (hasEndsAt || hasFrozen);
       el('pf-kickoff').classList.toggle('hidden', !hasTimer);
       el('pf-kickoff-lbl').textContent = (b.title || 'Kickoff').toString();
       if (hasTimer) {

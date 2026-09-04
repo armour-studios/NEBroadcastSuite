@@ -64,6 +64,10 @@
 
   <script src="scene-base.js"></script>
   <script>
+// Producer- and API-supplied names go into innerHTML below; escape them so a team called
+// "A<B" or a name carrying a quote cannot truncate the element or break an attribute.
+function _esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
+
     const WS = 'ws://' + (location.hostname || 'localhost') + ':3001';
     const HTTP_BASE = 'http://' + (location.hostname || 'localhost') + ':3000';
     const $ = (id) => document.getElementById(id);
@@ -120,7 +124,7 @@
       // Per-map strip.
       const strip = $('strip');
       strip.innerHTML = maps.map((mp, i) => `<div class="pip${mp.played ? ' played' : ''}">
-        <span class="mn">${mp.name ? String(mp.name).slice(0, 12) : 'M' + (i + 1)}</span>
+        <span class="mn">${mp.name ? _esc(String(mp.name).slice(0, 12)) : 'M' + (i + 1)}</span>
         <span class="ms">${mp.played ? (mp.scoreA + ' - ' + mp.scoreB) : '—'}</span></div>`).join('');
       strip.style.display = maps.length ? 'flex' : 'none';
 

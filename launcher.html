@@ -208,7 +208,10 @@
 <script>
 (function () {
   'use strict';
-  var API = 'http://localhost:3000';
+  // 127.0.0.1, not 'localhost': server.js binds 127.0.0.1 only, but Windows resolves
+  // 'localhost' to ::1 first — so any OTHER process holding [::]:3000 (a Next dev server,
+  // say) silently answers these calls instead of us and the launcher spins forever.
+  var API = 'http://127.0.0.1:3000';
   // The load animation is now a WINDOW, not a sleep: show it for at least LOAD_MIN_MS so it does
   // not flash, then launch as soon as the studio reports it has painted, and give up waiting at
   // LOAD_MAX_MS. It used to be a flat 5s tacked onto every launch regardless of readiness.
@@ -351,11 +354,18 @@
 
   // ── Session poll: waits for the local server to come up, then resolves auth ──
   var firstResolve = true;
+  var pollFails = 0;
   function poll() {
     if (launched || mode === 'contract') return;
     fetch(API + '/api/oauth/discord/status')
-      .then(function (r) { return r.json(); })
+      .then(function (r) {
+        // A reply from something that is NOT our server (another app squatting :3000) used to
+        // land in the catch below and retry forever behind 'Checking session...'. Fail loudly.
+        if (!r.ok) throw new Error('http ' + r.status);
+        return r.json();
+      })
       .then(function (s) {
+        pollFails = 0;
         if (launched || mode === 'contract') return;
         if (s && s.connected) { startLoadAndLaunch(); return; }
         if (s && s.needsContract) { enterContract(); setTimeout(poll, 1200); return; }
@@ -373,7 +383,14 @@
         setTimeout(poll, 1200);
       })
       .catch(function () {
-        // Server not up yet (it loads right after this window opens) — keep waiting.
+        // Server not up yet (it loads right after this window opens) — keep waiting. But if it
+        // never answers, stop pretending to check and name the likely cause.
+        pollFails++;
+        if (mode === 'boot' && pollFails === 12) {
+          setMode('boot', 'Still waiting on the app server (port 3000)…');
+        } else if (mode === 'boot' && pollFails === 30) {
+          setMode('boot', 'No answer on port 3000. Another program may be using it — close it, then restart the suite.');
+        }
         setTimeout(poll, 800);
       });
   }
@@ -409,7 +426,7 @@
 
   var ws = null;
   function wsConnect() {
-    try { ws = new WebSocket('ws://localhost:3001'); } catch (e) { ws = null; setTimeout(wsConnect, 1500); return; }
+    try { ws = new WebSocket('ws://127.0.0.1:3001'); } catch (e) { ws = null; setTimeout(wsConnect, 1500); return; }
     ws.onmessage = function (ev) {
       var msg; try { msg = JSON.parse(ev.data); } catch (e) { return; }
       if (msg.type === 'cloud-email-login') {

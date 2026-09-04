@@ -37,6 +37,10 @@ let _saveTmr = null;
 
 const MAX_EVENTS  = 30;     // per-team event history cap (a busy org plays ~1/week)
 const MAX_ALIASES = 24;
+// Retired crests kept per team. A logo is a base64 blob, so this is the one field that can bloat a
+// record — 12 is several seasons of rebrands and still small enough to ship in a detail response.
+const MAX_BRAND_HISTORY = 12;
+const MAX_NAME_HISTORY  = 12;
 
 // ── Lifecycle ──────────────────────────────────────────────────────────────
 
@@ -135,6 +139,17 @@ function _normalize(t) {
   r.roster        = Array.isArray(r.roster) ? r.roster : [];
   r.events        = Array.isArray(r.events) ? r.events : [];
   r.pins          = r.pins && typeof r.pins === 'object' ? r.pins : {};
+  // Retired crests, newest first. Each entry remembers the NAME the team flew under at the time,
+  // so a producer reverting a logo can see which era they are reaching back to.
+  r.brandHistory  = Array.isArray(r.brandHistory) ? r.brandHistory.filter((h) => h && h.logo) : [];
+  // Past names in their ORIGINAL casing. `aliases` is normalised for matching and reads as
+  // nonsense in a UI ('clrty esports'); this is the same history, printable.
+  r.nameHistory   = Array.isArray(r.nameHistory) ? r.nameHistory.filter((h) => h && h.name) : [];
+  // The crest start.gg last reported, recorded even when it is NOT the one on air. This is what
+  // lets the vault offer "start.gg has a different logo now" instead of either silently
+  // overwriting the producer's choice or hiding that a newer crest exists.
+  r.startggLogo   = r.startggLogo || null;
+  r.startggLogoAt = Number(r.startggLogoAt) || null;
   r.startggTeamId = r.startggTeamId ? String(r.startggTeamId) : null;
   r.startggSlug   = r.startggSlug || null;
   r.roster.forEach((p) => { if (p && !p.rosterStatus) p.rosterStatus = 'active'; });
@@ -162,7 +177,17 @@ function search(opts = {}) {
   if (opts.linked === false) rows = rows.filter((t) => !(t.startggTeamId || t.startggSlug));
   rows.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
   if (opts.limit) rows = rows.slice(0, Number(opts.limit));
-  return rows;
+  // The vault list renders up to 500 cards. Retired crests are base64 blobs nothing on that screen
+  // draws, so they ship as a COUNT here and in full only from get(id) when a card is opened.
+  return rows.map((t) => {
+    const { brandHistory, startggLogo, ...rest } = t;
+    return {
+      ...rest,
+      brandCount: (brandHistory || []).length,
+      // A boolean, not the image: enough for the card to badge "start.gg has a newer crest".
+      startggLogoDiffers: !!(startggLogo && startggLogo !== t.logo),
+    };
+  });
 }
 
 function stats() {
@@ -263,6 +288,45 @@ function _rename(rec, next) {
   const prev = rec.name;
   rec.name = name;
   _addAlias(rec, prev);
+  // aliases are normalised for matching; keep the printable form too, newest first.
+  if (prev) {
+    const nh = Array.isArray(rec.nameHistory) ? rec.nameHistory : [];
+    rec.nameHistory = [{ name: prev, at: Date.now() }, ...nh.filter((h) => norm(h.name) !== norm(prev))]
+      .slice(0, MAX_NAME_HISTORY);
+  }
+  return true;
+}
+
+// Bank the brand that is on its way out. Deliberately keyed on the LOGO: this history exists so a
+// producer can put an old crest back, and an entry that duplicates the live crest would offer a
+// revert to what is already showing.
+function _snapshotBrand(rec, meta = {}) {
+  if (!rec.logo) return;                                       // nothing to preserve yet
+  const hist = Array.isArray(rec.brandHistory) ? rec.brandHistory : [];
+  if (hist[0] && hist[0].logo === rec.logo) return;            // already on top of the stack
+  rec.brandHistory = [{
+    logo:      rec.logo,
+    // meta.name is the name this crest was WORN under. A rename has usually already happened by
+    // the time we get here, so rec.name is the incoming brand, not the one being retired.
+    name:      meta.name || rec.name || '',
+    color:     rec.color || null,
+    abbr:      rec.abbr || null,
+    source:    meta.source || 'startgg',
+    eventSlug: meta.eventSlug || null,
+    at:        Date.now(),
+  }, ...hist.filter((h) => h.logo !== rec.logo)].slice(0, MAX_BRAND_HISTORY);
+}
+
+// The ONLY way a logo is allowed to change. Same rule as _rename: routing every write through one
+// helper is what keeps the history complete — an assignment that skips this loses the old crest
+// forever, and it fails silently because nothing reads brandHistory until the producer looks.
+function _setLogo(rec, logo, meta = {}) {
+  const next = logo || null;
+  if (next === (rec.logo || null)) return false;
+  _snapshotBrand(rec, meta);
+  rec.logo = next;
+  // The live crest is never also a history row.
+  rec.brandHistory = (rec.brandHistory || []).filter((h) => h.logo !== next);
   return true;
 }
 
@@ -342,6 +406,8 @@ function applyEntrant(sig, ctx = {}) {
   const now = Date.now();
   let rec = found.rec;
   let created = false;
+  // The name this record carried BEFORE this import — the era any retired crest belongs to.
+  let eraName = null;
 
   if (!rec) {
     rec = _normalize({
@@ -363,13 +429,24 @@ function applyEntrant(sig, ctx = {}) {
     if (sig.startggTeamId && !rec.startggTeamId) rec.startggTeamId = String(sig.startggTeamId);
     if (sig.startggSlug   && !rec.startggSlug)   rec.startggSlug   = sig.startggSlug;
     _addAlias(rec, sig.name);
+    eraName = rec.name;
     // The name only follows start.gg while the producer hasn't claimed it.
     if (!rec.pins.name) _rename(rec, sig.name);
   }
 
-  // Branding: an import fills gaps, a pin is absolute. This is the "team didn't upload a logo"
-  // fix — once a producer sets one, start.gg's blank (or worse, a wrong auto-crest) can't win.
-  if (sig.logo && !rec.logo && !rec.pins.logo) rec.logo = sig.logo;
+  // Branding: a pin is absolute, and everything else FOLLOWS start.gg.
+  //
+  // This used to read `!rec.logo` — first crest to arrive won forever. Since the name does follow
+  // start.gg (above), a rebrand produced the new name wearing the old logo, which is exactly the
+  // bug this vault was built to prevent. An unpinned logo is not a choice anyone made, it is just
+  // whatever landed first, so a newer crest may replace it — and the old one goes to history
+  // rather than being lost, so it can be put back.
+  if (sig.logo) {
+    // Always record what start.gg is serving, even when it is not what goes on air. That is the
+    // evidence behind the "start.gg has a different crest" offer in the vault UI.
+    if (sig.logo !== rec.startggLogo) { rec.startggLogo = sig.logo; rec.startggLogoAt = now; }
+    if (!rec.pins.logo) _setLogo(rec, sig.logo, { source: 'startgg', eventSlug: ctx && ctx.eventSlug, name: eraName });
+  }
 
   _mergeRoster(rec, sig.players, ctx);
   _recordEvent(rec, ctx, sig);
@@ -404,7 +481,7 @@ function upsertFromLibrary(team, opts = {}) {
   _rename(rec, team.name);
   rec.pins.name = true;
 
-  if (team.logo  !== undefined && team.logo)  { rec.logo  = team.logo;  rec.pins.logo  = true; }
+  if (team.logo  !== undefined && team.logo)  { _setLogo(rec, team.logo, { source: opts.source || 'library' }); rec.pins.logo = true; }
   if (team.color !== undefined && team.color) { rec.color = team.color; rec.pins.color = true; }
   if (team.abbr  !== undefined && team.abbr)  { rec.abbr  = team.abbr;  rec.pins.abbr  = true; }
   if (typeof team.favorite === 'boolean') rec.favorite = team.favorite;
@@ -437,15 +514,30 @@ function upsertFromLibrary(team, opts = {}) {
 function update(id, fields = {}) {
   const rec = _db.get(String(id));
   if (!rec) return null;
+  const eraName = rec.name;   // captured before any rename, for the same reason as applyEntrant
   if (fields.name !== undefined && String(fields.name).trim()) {
     _rename(rec, fields.name);
     rec.pins.name = true;
   }
-  ['logo', 'color', 'abbr', 'notes'].forEach((f) => {
+  // logo goes through _setLogo so the outgoing crest reaches brandHistory — this is also the path
+  // a "revert to this old logo" click takes, which is why reverting banks the current one.
+  if (fields.logo !== undefined) {
+    _setLogo(rec, fields.logo, { source: fields.logoSource || 'manual', name: eraName });
+    rec.pins.logo = !!fields.logo;
+  }
+  ['color', 'abbr', 'notes'].forEach((f) => {
     if (fields[f] === undefined) return;
     rec[f] = fields[f] || null;
     if (f !== 'notes') rec.pins[f] = !!fields[f];
   });
+  if (fields.startggLogo !== undefined) {
+    rec.startggLogo   = fields.startggLogo || null;
+    rec.startggLogoAt = fields.startggLogo ? Date.now() : null;
+  }
+  // Explicitly forget one retired crest.
+  if (fields.forgetBrandLogo) {
+    rec.brandHistory = (rec.brandHistory || []).filter((h) => h.logo !== fields.forgetBrandLogo);
+  }
   if (fields.startggSlug   !== undefined) rec.startggSlug   = fields.startggSlug || null;
   if (fields.startggTeamId !== undefined) rec.startggTeamId = fields.startggTeamId ? String(fields.startggTeamId) : null;
   // When the org's start.gg TEAM page was last read. Drives the automatic sweep's skip window, and
@@ -502,6 +594,18 @@ function merge(intoId, fromId) {
   if (!a || !b || a === b) return null;
   _addAlias(a, b.name);
   (b.aliases || []).forEach((x) => { if (!a.aliases.includes(x)) a.aliases.push(x); });
+  // The absorbed record's brand era is history too — including the name it competed under, and
+  // its crest, which is often the reason the producer is merging in the first place.
+  a.brandHistory = [...(a.brandHistory || []), ...(b.brandHistory || [])]
+    .concat(b.logo && b.logo !== a.logo ? [{ logo: b.logo, name: b.name || '', color: b.color || null, abbr: b.abbr || null, source: 'merge', at: b.updatedAt || Date.now() }] : [])
+    .filter((h, i, arr) => h && h.logo && h.logo !== a.logo && arr.findIndex((o) => o.logo === h.logo) === i)
+    .sort((x, y) => (y.at || 0) - (x.at || 0))
+    .slice(0, MAX_BRAND_HISTORY);
+  a.nameHistory = [...(a.nameHistory || []), ...(b.nameHistory || [])]
+    .concat(b.name ? [{ name: b.name, at: b.updatedAt || Date.now() }] : [])
+    .filter((h, i, arr) => h && h.name && norm(h.name) !== norm(a.name) && arr.findIndex((o) => norm(o.name) === norm(h.name)) === i)
+    .sort((x, y) => (y.at || 0) - (x.at || 0))
+    .slice(0, MAX_NAME_HISTORY);
   if (!a.startggTeamId && b.startggTeamId) a.startggTeamId = b.startggTeamId;
   if (!a.startggSlug   && b.startggSlug)   a.startggSlug   = b.startggSlug;
   if (!a.logo  && b.logo  && !a.pins.logo)  a.logo  = b.logo;

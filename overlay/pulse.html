@@ -96,7 +96,7 @@
   .sc .onlab{ font-family:var(--ui-font); font-size:9px; font-weight:800; letter-spacing:.14em; text-transform:uppercase; color:var(--brand-2); }
   .sc .hotlab{ font-family:var(--ui-font); font-size:9px; font-weight:800; letter-spacing:.12em; text-transform:uppercase; color:var(--hot); }
   .row{ display:flex; align-items:center; gap:11px; }
-  .row .crest{ width:26px; height:26px; border-radius:7px; display:grid; place-items:center; font-size:10px; font-weight:800; color:#fff; background:var(--tc,#333); flex:0 0 auto; box-shadow:0 0 0 1px rgba(255,255,255,.12); overflow:hidden; }
+  .row .crest{ width:26px; height:26px; border-radius:7px; display:grid; place-items:center; font-size:10px; font-weight:800; color:var(--tc-fg,#fff); background:var(--tc,#333); flex:0 0 auto; box-shadow:0 0 0 1px rgba(255,255,255,.12); overflow:hidden; }
   .row .crest img{ width:100%; height:100%; object-fit:contain; }
   .row .nm{ font-size:16px; font-weight:700; letter-spacing:.02em; text-transform:uppercase; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; flex:1; }
   .row .n{ font-size:22px; font-weight:700; font-variant-numeric:tabular-nums; min-width:30px; text-align:right; }
@@ -118,7 +118,7 @@
   /* ticker (full width) */
   .ticker{ grid-column:1 / -1; display:flex; align-items:center; background:linear-gradient(90deg,#0a0e18,#0d1424); border-top:1px solid var(--line); overflow:hidden; }
   .ticker .tb{ flex:0 0 auto; align-self:stretch; display:flex; align-items:center; gap:8px; padding:0 18px; background:var(--brand);
-    font-family:var(--ui-font); font-weight:800; font-size:13px; letter-spacing:.14em; text-transform:uppercase; color:#fff; }
+    font-family:var(--ui-font); font-weight:800; font-size:13px; letter-spacing:.14em; text-transform:uppercase; color:var(--on-brand,#fff); }
   .ticker .tb i{ width:8px; height:8px; border-radius:50%; background:#fff; animation:blink 1.3s infinite; }
   .track{ display:flex; align-items:center; white-space:nowrap; will-change:transform; animation:scroll 34s linear infinite; }
   .track span{ font-family:var(--ui-font); font-size:14px; color:var(--muted); padding:0 30px; }
@@ -172,6 +172,21 @@
   </div>
 
 <script>
+
+  /* Text colour that stays legible ON a filled producer-chosen colour. Mirrors
+     SceneBase.onColor(); inlined because this scene does not load scene-base.js. A white or
+     pastel kit used to paint white text on a white fill. */
+  function onFill(color, dark, light) {
+    const c = String(color == null ? '' : color).trim();
+    let r = 0, g = 0, b = 0, m = c.match(/^#([0-9a-f]{3})$/i);
+    if (m) { r = parseInt(m[1][0] + m[1][0], 16); g = parseInt(m[1][1] + m[1][1], 16); b = parseInt(m[1][2] + m[1][2], 16); }
+    else if ((m = c.match(/^#([0-9a-f]{6})$/i))) { r = parseInt(m[1].slice(0, 2), 16); g = parseInt(m[1].slice(2, 4), 16); b = parseInt(m[1].slice(4, 6), 16); }
+    else if ((m = c.match(/^rgba?\(\s*(\d+)[\s,]+(\d+)[\s,]+(\d+)/i))) { r = +m[1]; g = +m[2]; b = +m[3]; }
+    else return light || '#fff';
+    const lin = (v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
+    return (0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b)) > 0.45 ? (dark || '#04121f') : (light || '#fff');
+  }
+
 (function(){
   "use strict";
   const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -216,6 +231,7 @@
 
   function crestHTML(t){
     if (t.logo) return '<span class="crest" style="--tc:'+(t.color||'#333')+'"><img src="'+t.logo+'" alt=""></span>';
+    // No logo → the box shows INITIALS, so the text has to be measured against the team colour.
     return '<span class="crest" style="--tc:'+(t.color||'#333')+'">'+(t.abbr || (t.name||'?').slice(0,3).toUpperCase())+'</span>';
   }
   function renderRail(flashKey){
@@ -302,6 +318,8 @@
   function applyBrand(brand, eventName, eventLogo){
     const color = brand && (brand.color || brand.accent);
     if (color){ root.style.setProperty("--brand", color); const rgb = hexToRgb(color); if (rgb) root.style.setProperty("--brand-rgb", rgb);
+      // The ticker label sits ON the raw brand colour — a pale kit made it white on white.
+      root.style.setProperty("--on-brand", onFill(color));
       root.style.setProperty("--brand-2", color); }
     // event (top-left)
     $("eventName").textContent = (eventName && eventName.trim()) || (brand && brand.name) || "Live Broadcast";

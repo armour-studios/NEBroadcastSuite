@@ -31,13 +31,21 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
 
 
 /* ── Header ────────────────────────────────────────────────────────────────────────────────
-   Title top-LEFT as the page's heading, event/brand mark top-RIGHT, format + bracket pills between
-   them — the arrangement every broadcast bracket uses. It used to be one absolutely-positioned
+   Brand mark top-LEFT with the title beside it, the TITLE SPONSOR alone top-RIGHT, format +
+   bracket pills between them — the arrangement every broadcast bracket uses. The far-right corner
+   is the paid one, so the kit's own logo gives it up and leads the title instead. It used to be one absolutely-positioned
    cluster jammed into the bottom-right corner (eyebrow + title + subtitle + format pill + a row of
    phase chips), which is what read as "weird tags in the corner".
    In normal flow now, so .bk-body simply gets the height that's left — no more per-layout
    margin hacks to keep the board out from under the title. */
-.bk-header { flex: 0 0 auto; display: flex; align-items: flex-start; gap: 26px; margin-bottom: 16px; }
+/* CENTRE-aligned, not top-aligned: the format/section pills were hanging off the top edge while
+   the title sponsor beside them ran 76px tall, so the corner read as two unrelated graphics. One
+   centre line through the brand mark, the title, the pills and the title sponsor. */
+.bk-header { flex: 0 0 auto; display: flex; align-items: center; gap: 26px; margin-bottom: 16px; }
+/* The title sponsor is the only thing in the top-right corner — no plate, no "TITLE PARTNER"
+   label. It rides a touch bigger than the brand mark because it is the placement being sold. */
+.bk-title-sponsor { flex: 0 0 auto; height: 76px; max-width: 260px; object-fit: contain;
+  filter: drop-shadow(0 2px 10px rgba(0,0,0,.55)); }
 .bk-head-text { flex: 1 1 auto; min-width: 0; }
 .bk-bar { display: none; }
 .bk-eyebrow { font-family: var(--disp); font-weight: 700; font-size: 12px; letter-spacing: .42em; text-transform: uppercase;
@@ -47,15 +55,19 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
 .bk-subtitle { font-family: var(--body); font-weight: 600; font-size: 16px; color: rgba(255,255,255,.8); text-align: left;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 1000px; margin-top: 2px; }
 .bk-subtitle:empty { display: none; }
-.bk-head-meta { flex: 0 0 auto; display: flex; flex-direction: column; align-items: flex-end; gap: 7px; padding-top: 4px; }
+.bk-head-meta { flex: 0 0 auto; display: flex; flex-direction: column; align-items: flex-end; gap: 7px; }
 .bk-format { font-family: var(--disp); font-weight: 800; font-size: 12px; letter-spacing: .14em; text-transform: uppercase; color: #04121f;
   background: linear-gradient(135deg, var(--accent), var(--accent-2)); border-radius: 999px; padding: 6px 14px; white-space: nowrap;
   box-shadow: 0 4px 14px rgba(0,0,0,.35); }
-.bk-brand-logo { flex: 0 0 auto; height: 68px; max-width: 230px; object-fit: contain;
+.bk-brand-logo { flex: 0 0 auto; height: 64px; max-width: 200px; object-fit: contain;
   filter: drop-shadow(0 2px 10px rgba(0,0,0,.55)); }
 
 /* Section pills — which bracket half is on screen. */
 .bk-section-pills { display: flex; gap: 6px; }
+/* A single-elimination board has no halves, so this row is empty — but an empty flex child still
+   ate the column's row-gap, which pushed the format pill ~4px above the title sponsor's centre
+   line. Nothing to show, nothing in the layout. */
+.bk-section-pills:empty { display: none; }
 .bk-spill { font-family: var(--disp); font-weight: 700; font-size: 11px; letter-spacing: .18em; text-transform: uppercase;
   padding: 4px 10px; border-radius: 999px; border: 1px solid; white-space: nowrap; }
 .bk-spill.wb { color: var(--accent); border-color: rgba(255,255,255,.28); background: rgba(255,255,255,.06); }
@@ -183,23 +195,31 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
 /* ── Slot (one team row) ── */
 .bk-slot { display: flex; align-items: center; gap: 10px; padding: 0 12px 0 0; height: 50px; position: relative; overflow: hidden; }
 /* Team crest watermark — an oversized logo bleeding off the right of the row, sitting behind the
-   name at low opacity. Anchored clear of the score column and masked so it fades out before it
-   reaches the name, so it never costs legibility. Decorative only: pointer-events off, and it is
-   skipped entirely for TBD slots and whenever logos are hidden. */
-.bk-slot-wm { position: absolute; top: 50%; right: 30px; transform: translateY(-50%);
+   name at low opacity, masked so it fades out before it reaches the name. Decorative only:
+   pointer-events off, skipped for TBD slots and whenever logos are hidden.
+   FLUSH TO THE RIGHT EDGE (right:0, was 30px). Held clear of the score column it looked fine for a
+   transparent PNG, but plenty of crests ship with their OWN background — a dark disc, a card — and
+   that background then stopped 30px short and read as a rectangle randomly ending mid-row. Against
+   the edge, the slot's own overflow:hidden clips it, so a backed logo bleeds off the row the way
+   the design intends instead of terminating in mid-air. */
+.bk-slot-wm { position: absolute; top: 50%; right: 0; transform: translateY(-50%);
   width: 84px; height: 84px; z-index: 0; pointer-events: none;
   background-repeat: no-repeat; background-position: center right; background-size: contain;
   /* Tuned against saturated crests: at .12 a brand-coloured logo read as a colour block fighting
      the name rather than a texture behind it. Partial desaturation does most of the calming, so
      the opacity can stay high enough to survive stream compression. */
-  opacity: .07; filter: grayscale(.4);
+  /* Producer-set, not a constant: --bk-wm carries state.bracket.watermarkOpacity (or ?watermark=N)
+     as a 0-1 fraction. .07 stays the fallback so an older state renders exactly as before. */
+  opacity: var(--bk-wm, .07); filter: grayscale(.4);
   -webkit-mask-image: linear-gradient(90deg, transparent 0%, #000 78%);
           mask-image: linear-gradient(90deg, transparent 0%, #000 78%); }
 .bk-slot-wm.wm-on-dark { filter: invert(1) grayscale(.4); }
 /* Everything else in the row rides above the watermark. */
 .bk-slot > *:not(.bk-slot-wm) { position: relative; z-index: 1; }
-.bk-slot.winner .bk-slot-wm { opacity: .11; }
-.bk-slot.loser  .bk-slot-wm { opacity: .04; }
+/* Winner/loser keep their RELATIVE weighting (the crest lifts for the team that went through and
+   recedes for the one that didn't) instead of being two more constants that ignore the setting. */
+.bk-slot.winner .bk-slot-wm { opacity: calc(var(--bk-wm, .07) * 1.55); }
+.bk-slot.loser  .bk-slot-wm { opacity: calc(var(--bk-wm, .07) * 0.55); }
 /* Off with the logo toggle, and independently switchable. */
 .bk-nologo .bk-slot-wm, .bk-nowm .bk-slot-wm { display: none !important; }
 .bk-slot + .bk-slot { border-top: 1px solid rgba(255,255,255,.06); }
@@ -288,10 +308,6 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
 }
 .bk-focus-mode .bk-connectors path { stroke: rgba(255,255,255,.09); }
 
-/* Brand kit logo beside the event title */
-.bk-title-row { display: flex; align-items: center; gap: 12px; }
-.bk-brand-logo { height: 42px; max-width: 120px; object-fit: contain; filter: drop-shadow(0 2px 8px rgba(0,0,0,.55)); }
-
 /* ── Team tournament run (focused team): upper/lower/GF flow with the players bar beneath.
       One flex layout of distinct regions — nothing overlaps anything else on canvas. ── */
 /* Run mode stage: brand + event title (the absolute header) move to the TOP RIGHT, and the
@@ -302,14 +318,18 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
 .bk-run-logo { width: 64px; height: 64px; object-fit: contain; filter: drop-shadow(0 3px 10px rgba(0,0,0,.6)); }
 .bk-run-logo.logo-on-dark { filter: brightness(0) invert(1) drop-shadow(0 3px 10px rgba(0,0,0,.6)); }
 .bk-run-eyebrow { font-family: var(--disp); font-weight: 700; font-size: 12px; letter-spacing: .42em; text-transform: uppercase;
-  color: color-mix(in srgb, var(--accent) 75%, #fff); }
+  color: var(--accent); }
+@supports (color: color-mix(in srgb, red 50%, white)) {
+  .bk-run-eyebrow { color: color-mix(in srgb, var(--accent) 75%, #fff); } }
 .bk-run-team { font-family: var(--disp); font-weight: 700; font-size: 40px; line-height: 1.05; text-transform: uppercase; color: #fff; }
 .bk-run-record { margin-left: auto; font-family: var(--disp); font-weight: 800; font-size: 26px; padding: 8px 18px; border-radius: 10px;
   color: #fff; background: color-mix(in srgb, var(--accent) 22%, rgba(0,0,0,.35));
   border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent); }
 .bk-run-band-label { font-family: var(--disp); font-weight: 700; font-size: 13px; letter-spacing: .3em; text-transform: uppercase;
   color: rgba(255,255,255,.55); margin-bottom: 10px; }
-.bk-run-band.losers .bk-run-band-label { color: color-mix(in srgb, var(--accent-2) 70%, #fff); }
+.bk-run-band.losers .bk-run-band-label { color: var(--accent-2); }
+@supports (color: color-mix(in srgb, red 50%, white)) {
+  .bk-run-band.losers .bk-run-band-label { color: color-mix(in srgb, var(--accent-2) 70%, #fff); } }
 .bk-run-band.gf .bk-run-band-label { color: rgba(255,214,107,.85); }
 /* One line per band, always: wrapping put Winners Final on a second row under the earlier
    matches, which read out of order. Cells shrink evenly instead (names ellipsize); a run too
@@ -365,11 +385,15 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
 .bk-origin { font-size: 12px; line-height: 1; color: rgba(255,255,255,.5); padding: 4px 9px 0;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; letter-spacing: .02em; }
 .bk-exit { font-size: 12px; line-height: 1; font-weight: 600; padding: 4px 9px 5px;
-  color: color-mix(in srgb, var(--accent) 80%, #fff);
+  color: var(--accent);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+@supports (color: color-mix(in srgb, red 50%, white)) {
+  .bk-exit { color: color-mix(in srgb, var(--accent) 80%, #fff); } }
 .bk-exit::before { content: '\2192  '; opacity: .75; }
 .bk-lad-note { text-align: center; font-family: var(--disp); font-size: 16px; font-weight: 600;
-  color: color-mix(in srgb, var(--accent) 80%, #fff); letter-spacing: .05em; }
+  color: var(--accent); letter-spacing: .05em; }
+@supports (color: color-mix(in srgb, red 50%, white)) {
+  .bk-lad-note { color: color-mix(in srgb, var(--accent) 80%, #fff); } }
 .bk-lad-note::before { content: '\2192  '; opacity: .75; }
 
 /* ── Records ladder (swiss / round-robin default view): teams bucketed by W-L ── */
@@ -784,6 +808,7 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
 
 <div id="bk-stage" class="bk-stage">
   <header class="bk-header">
+    <img class="bk-brand-logo" id="bk-brand-logo" style="display:none;" alt="">
     <div class="bk-head-text">
       <div class="bk-eyebrow">Tournament Bracket</div>
       <div class="bk-title" id="bk-title"></div>
@@ -793,7 +818,7 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
       <div class="bk-format" id="bk-format" style="display:none;"></div>
       <div class="bk-section-pills" id="bk-section-pills"></div>
     </div>
-    <img class="bk-brand-logo" id="bk-brand-logo" style="display:none;" alt="">
+    <img class="bk-title-sponsor" id="bk-title-sponsor" style="display:none;" alt="">
   </header>
   <main class="bk-body"><div class="bk-scale" id="bk-scale"></div></main>
   <footer class="bk-footer">
@@ -2146,7 +2171,7 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
   const URL_PART = _BQ.get('part');       // null unless overridden per source
   const URL_ROUNDS = _BQ.get('rounds');   // null unless overridden per source
   const URL_LOGOS = _BQ.get('logos');     // 'logos=0' hides team logos on this source only
-  const URL_WM    = _BQ.get('watermark'); // 'watermark=0' drops the crest behind the name, this source only
+  const URL_WM    = _BQ.get('watermark'); // 'watermark=0' drops the crest, 'watermark=18' sets its strength (%), this source only
   const URL_ADV   = _BQ.get('advance');   // swiss: wins needed to qualify (overrides the panel)
   const URL_ELIM  = _BQ.get('eliminate'); // swiss: losses that eliminate
   const URL_COLORS = _BQ.get('colors');   // swiss: '0' = one neutral colour, no tier palette
@@ -2175,8 +2200,15 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
     el('bk-scale').classList.toggle('bk-nologo', hideLogos);
     // 3b) Crest watermark behind each team name. On by default (it is the look producers asked
     //     for); overridable per source with ?watermark=0, and implied off when logos are hidden.
-    const noWatermark = URL_WM != null ? /^(0|off|false|no)$/i.test(URL_WM) : (b.logoWatermark === false);
+    // ?watermark= takes both forms: 0/off/false/no turns it off, a NUMBER sets the strength in
+    // percent (?watermark=18). Anything else falls through to the producer's state.
+    const wmNum = (URL_WM != null && /^\d+$/.test(URL_WM.trim())) ? parseInt(URL_WM, 10) : null;
+    const wmPct = wmNum != null ? wmNum
+      : (Number.isFinite(b.watermarkOpacity) ? Math.max(0, Math.min(40, b.watermarkOpacity)) : 7);
+    const noWatermark = (URL_WM != null && wmNum == null ? /^(0|off|false|no)$/i.test(URL_WM) : (b.logoWatermark === false))
+      || wmPct <= 0;
     el('bk-scale').classList.toggle('bk-nowm', noWatermark);
+    el('bk-scale').style.setProperty('--bk-wm', (wmPct / 100).toFixed(3));
 
     // Effective view: URL override > state-driven view — but NEVER a view this bracket has no
     // data for (a stale saved "matrix" on an elim bracket used to blank the whole overlay).
@@ -2241,12 +2273,20 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
     // font loads (it's wider than the fallback, so an early fit can under-shrink → clip).
     fitBktTitle();
     if (document.fonts && document.fonts.ready) document.fonts.ready.then(fitBktTitle);
-    // Brand kit logo beside the event title (hidden when no kit / no logo).
+    // Brand kit logo, top-left ahead of the event title (hidden when no kit / no logo).
     const brandLogo = el('bk-brand-logo');
     if (brandLogo) {
       const bl = (data.brand && data.brand.logo) || '';
       if (bl) { brandLogo.src = bl; brandLogo.style.display = ''; }
       else brandLogo.style.display = 'none';
+    }
+    // Title sponsor, top-right — the kit's single 'title'-tagged sponsor (brand.spots.title),
+    // NOT a rail sponsor and not the kit logo. Untagged = the corner stays empty.
+    const titleSpon = el('bk-title-sponsor');
+    if (titleSpon) {
+      const ts = (data.brand && data.brand.spots && data.brand.spots.title) || '';
+      if (ts) { titleSpon.src = ts; titleSpon.style.display = ''; }
+      else titleSpon.style.display = 'none';
     }
     // "CUSTOM SCHEDULE" is start.gg's internal name for a hand-scheduled phase, and it is what
     // real swiss and hybrid-elimination stages come back as. Printing it on air tells a viewer
@@ -2310,11 +2350,16 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
       else if (isElim) {
         // A lone 4-team double elim is structurally identical to a GSL group, so shape alone
         // can't tell them apart — and a 4-team PLAYOFF relabelled "Opening Match / Decider"
-        // would be wrong. Require a hint that this really is group play: it came in as a pool,
-        // or the phase/pool/subtitle actually says group or GSL.
+        // would be wrong. Require a hint that this really is group play.
+        //
+        // WARNING: that hint used to be `pools.length > 0`, which is ALWAYS true — start.gg gives
+        // every phase at least one phaseGroup (see the pools split in server.js). So a single-pool
+        // playoff bracket got boxed inside a "GROUP 1" card whose label came from nothing but
+        // start.gg's display identifier "1". Group play means MORE THAN ONE pool, or a name that
+        // actually says so.
         const _poolName = (pools.find((p) => p.id === b.activePoolId) || {}).name || '';
         const _phaseName = (phases.find((p) => p.id === b.activePhaseId) || {}).name || '';
-        const looksGroup = pools.length > 0
+        const looksGroup = pools.length > 1
           || /\b(gsl|group|pool)\b/i.test(_poolName + ' ' + _phaseName + ' ' + (b.subtitle || ''));
         const one = looksGroup ? gslShape({ winners: winners, losers: losers, finals: finals }) : null;
         if (one) gslGroups = [{ name: _poolName || _phaseName || b.subtitle || 'Group', shape: one }];
@@ -2577,10 +2622,13 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
     render(d);
   }
 
-  // Partner logos, bottom-centre — the placement every broadcast bracket uses. Sponsors only:
-  // the desk lineup belongs on a scoreboard scene, not over a bracket. Producers can still
-  // kill it per source with ?rail=0 / ?sponsors=0.
-  if (typeof CasterRail !== 'undefined') CasterRail.mount({ variant: 'chip', bottom: 22, casters: false });
+  // Partner logos, bottom-RIGHT and bare — no plate behind them. The board already carries its
+  // own frame, so a dark pill under it read as a second graphic; free-standing logos in the
+  // corner read as a partner bug. Sponsors only: the desk lineup belongs on a scoreboard scene,
+  // not over a bracket. Producers can still kill it per source with ?rail=0 / ?sponsors=0.
+  if (typeof CasterRail !== 'undefined') {
+    CasterRail.mount({ variant: 'chip', casters: false, bare: true, corner: 'br', bottom: 26, right: 52 });
+  }
 
   SceneBase.connect((data) => {
     SceneBase.applySceneConfig('bracket', data);

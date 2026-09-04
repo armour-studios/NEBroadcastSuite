@@ -164,6 +164,10 @@
 
 <script src="scene-base.js"></script>
 <script>
+// Producer- and API-supplied names go into innerHTML below; escape them so a team called
+// "A<B" or a name carrying a quote cannot truncate the element or break an attribute.
+function _esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
+
   let currentPrediction = null;
   let timerInterval = null;
 
@@ -202,7 +206,7 @@
         const percentage = totalVotes > 0 ? ((outcome.votes || 0) / totalVotes * 100).toFixed(0) : 0;
         return `
           <div class="outcome">
-            <div class="outcome-text">${outcome.title}</div>
+            <div class="outcome-text">${_esc(outcome.title)}</div>
             <div class="outcome-bar">
               <div class="outcome-fill" style="width: ${percentage}%">
                 ${percentage > 10 ? percentage + '%' : ''}

@@ -33,10 +33,84 @@ function _save() { try { if (sessionFile) fs.writeFileSync(sessionFile, JSON.str
 function clearSession() { session = { token: '', refreshToken: '', user: null, workspaceId: null, role: null, orgName: null, expiresAt: 0 }; _save(); }
 
 function _require() { if (!configured()) throw new Error('Cloud backend not configured (set BROADCAST_REMOTE_URL).'); }
+
+// ── Cloud health + shared circuit breaker ──────────────────────────────────────
+// EVERY request made through _client() reports its outcome here, so one outage quiets EVERY
+// background loop at once (see cloudLoop() in server.js) instead of each one hammering on its own
+// fixed interval. That fixed-interval shape is what turned an exhausted Upstash quota into a
+// site-wide outage: no client ever backed off, so the recovery window never opened.
+//
+// Only faults that mean "the backend is unwell" trip the breaker. A 400/401/403/404/409 is the
+// CALLER's problem and the server is plainly answering — suspending everyone's cloud traffic over
+// one bad request would take the app off the cloud for a reason that isn't an outage.
+const BREAKER_BASE_MS = 5000;
+const BREAKER_MAX_MS  = 5 * 60 * 1000;
+let _health = { consecutiveFailures: 0, lastOkAt: 0, lastFailAt: 0, lastError: '', lastStatus: 0, suspendedUntil: 0 };
+
+function _noteOk() {
+  if (_health.consecutiveFailures) {
+    console.log(`[Cloud] backend recovered after ${_health.consecutiveFailures} failed request(s)`);
+  }
+  _health.lastOkAt = Date.now();
+  _health.consecutiveFailures = 0;
+  _health.suspendedUntil = 0;
+  _health.lastError = '';
+  _health.lastStatus = 0;
+}
+
+function _noteFail(e) {
+  const resp = e && e.response;
+  const status = resp ? resp.status : 0;
+  _health.lastFailAt = Date.now();
+  _health.lastStatus = status;
+  _health.lastError = (e && e.message) || 'request failed';
+  // 0 = no response at all (network down, DNS, timeout). 408/425/429 + 5xx = the backend asking
+  // for room. Everything else is a caller error and must NOT suspend the app's cloud traffic.
+  const unhealthy = !resp || status === 408 || status === 425 || status === 429 || status >= 500;
+  if (!unhealthy) return;
+  _health.consecutiveFailures++;
+  // An explicit Retry-After (which is what rate limiters send) beats any guess we could make.
+  let wait = 0;
+  const ra = resp && resp.headers && (resp.headers['retry-after'] || resp.headers['Retry-After']);
+  if (ra != null) {
+    const secs = parseInt(ra, 10);
+    if (Number.isFinite(secs) && secs > 0) wait = Math.min(secs * 1000, BREAKER_MAX_MS);
+  }
+  if (!wait) wait = Math.min(BREAKER_BASE_MS * Math.pow(2, Math.min(_health.consecutiveFailures - 1, 6)), BREAKER_MAX_MS);
+  // Jitter: 60 desks that failed on the same tick must not all come back on the same tick.
+  wait = Math.round(wait * (0.85 + Math.random() * 0.3));
+  _health.suspendedUntil = Date.now() + wait;
+  if (_health.consecutiveFailures === 1) {
+    console.warn(`[Cloud] backend unhealthy (${status || 'no response'}: ${_health.lastError}) — pausing background cloud work for ${Math.round(wait / 1000)}s`);
+  }
+}
+
+/** ms until BACKGROUND cloud work should resume; 0 = go now. Foreground calls ignore this. */
+function retryInMs() { const d = _health.suspendedUntil - Date.now(); return d > 0 ? d : 0; }
+/** Snapshot for the panel's cloud status readouts. */
+function health() {
+  return {
+    healthy: _health.consecutiveFailures === 0,
+    consecutiveFailures: _health.consecutiveFailures,
+    lastOkAt: _health.lastOkAt,
+    lastFailAt: _health.lastFailAt,
+    lastError: _health.lastError,
+    lastStatus: _health.lastStatus,
+    retryInMs: retryInMs()
+  };
+}
+
 function _client(auth = true) {
   const headers = { 'Content-Type': 'application/json', 'x-app': 'NE-Broadcast-Suite', 'x-app-version': APP_VERSION };
   if (auth && session.token) headers.Authorization = `Bearer ${session.token}`;
-  return axios.create({ baseURL: BASE, timeout: 12000, headers });
+  const inst = axios.create({ baseURL: BASE, timeout: 12000, headers });
+  // One hook for every cloud call in the app — individual callers keep their own try/catch and
+  // stay unchanged; the breaker just observes them.
+  inst.interceptors.response.use(
+    (res) => { _noteOk(); return res; },
+    (err) => { _noteFail(err); return Promise.reject(err); }
+  );
+  return inst;
 }
 function _err(e) {
   const resp = e && e.response;
@@ -275,6 +349,7 @@ async function uploadTelemetryBatch(records) {
 
 module.exports = {
   init, configured, authed, getSession, clearSession,
+  health, retryInMs,
   submitBugReport,
   uploadTelemetryBatch,
   loginWithDiscord,

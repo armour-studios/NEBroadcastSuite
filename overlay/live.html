@@ -5,7 +5,7 @@
 <title>NE Broadcast Suite — Live HUD (follows active game)</title>
 <!--
   UNIFIED OVERLAY FUNNEL.
-  Add ONE browser source pointing here (http://localhost:3000/live.html) and it
+  Add ONE browser source pointing here (http://127.0.0.1:3000/live.html) and it
   automatically shows the in-game HUD for whichever game is selected in the
   control panel — RL → "/", CS2 → "/csgo.html", etc. Switch games and OBS keeps
   this source loaded while the HUD inside swaps. The native per-game URLs still
@@ -29,7 +29,7 @@
 
   <script>
     const WS = 'ws://' + (location.hostname || 'localhost') + ':3001';
-    const BASE = (location.origin && location.origin.startsWith('http')) ? location.origin : 'http://localhost:3000';
+    const BASE = (location.origin && location.origin.startsWith('http')) ? location.origin : 'http://127.0.0.1:3000';
     const frame = document.getElementById('frame');
     const idle = document.getElementById('idle');
     let current = null;

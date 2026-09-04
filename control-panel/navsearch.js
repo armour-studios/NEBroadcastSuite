@@ -92,7 +92,6 @@
     integ:     (v) => '[data-inttab="' + v + '"]',
     dash:      (v) => '[data-role="' + v + '"]',
     replays:   (v) => '[data-rpmain="' + v + '"]',
-    social:    (v) => '.social-sub-tab-btn[data-stab="' + v + '"]',
     rail:      (v) => '.qrail-tab[data-qtab="' + v + '"]',
     settings:  (v) => '.set-rail-btn[data-stab="' + v + '"]',
     flash:     (v) => '#' + v
@@ -119,7 +118,6 @@
     if (spec.integ)   { clickWhenReady(STEP_SEL.tab('integrations')); clickWhenReady(STEP_SEL.integ(spec.integ)); }
     if (spec.dash)    { clickWhenReady(STEP_SEL.tab('principal')); callWhenReady('_dccSetRole', spec.dash); }
     if (spec.replays) { clickWhenReady(STEP_SEL.tab('replays')); clickWhenReady(STEP_SEL.replays(spec.replays)); }
-    if (spec.social)  { clickWhenReady(STEP_SEL.tab('social')); clickWhenReady(STEP_SEL.social(spec.social)); }
     // The quick rail is always on screen — its tabs are destinations in their own right. But a
     // rail tab click TOGGLES: clicking the tab that's already open collapses the rail. Searching
     // for a panel that happened to be open therefore CLOSED it — the exact opposite of the ask.
@@ -216,9 +214,6 @@
     // Video editor
     { n: 'Replay Editor', w: 'Video Editor', k: 'replays clips trim editor highlights playlists montage buffer', to: { replays: 'editor' } },
     { n: 'Exports', w: 'Video Editor', k: 'export render encode mp4', to: { replays: 'exports' } },
-    { n: 'Social', w: 'Social', k: 'social posts scheduling cards share', to: { tab: 'social' } },
-    { n: 'Social Export', w: 'Social', k: 'social export graphics cards instagram story twitter clip prep bake matchup result bracket snapshot', to: { tab: 'social', social: 'export' } },
-    { n: 'Social Clips', w: 'Social', k: 'social twitch clips youtube upload auto queue posts', to: { tab: 'social', social: 'clips' } },
     // Assets
     { n: 'Media Library', w: 'Assets', k: 'media images assets uploads library stingers', to: { assets: 'media' } },
     { n: 'Scene / Overlay Sources', w: 'Assets', k: 'scenes overlays browser source url obs background fill opacity edit html preview', to: { assets: 'overlays' } },
@@ -246,7 +241,6 @@
     { n: 'Quick Rail \u2014 Stream / Chat', w: 'Quick rail', k: 'stream twitch chat multichat highlight feature message', to: { rail: 'twitch' } },
     { n: 'Quick Rail \u2014 Notes', w: 'Quick rail', k: 'notes scratchpad reminders', to: { rail: 'notes' } },
     // Settings (scroll-to)
-    { n: 'Go Live Checklist', w: 'Settings', k: 'go live preflight checklist start stream ready', to: { settings: 'broadcast', flash: 'golive-area' } },
     { n: 'Appearance & Accent', w: 'Settings', k: 'theme colour color accent appearance dark light mode skin brand look', to: { settings: 'appearance', flash: 'settings-appearance' } },
     { n: 'Broadcast Defaults', w: 'Settings', k: 'default best of series overlay font clock defaults auto reload', to: { settings: 'broadcast', flash: 'settings-broadcast-defaults' } },
     { n: 'Rocket League Automation', w: 'Settings', k: 'rl rocket league kickoff scene scoreboard replay transitions stats api pause', to: { settings: 'games', flash: 'set-sec-rl' } },

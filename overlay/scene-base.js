@@ -14,8 +14,18 @@
  *   SceneBase.qp(name)           -> URL query param (scenes accept ?team=, ?style=, etc.)
  */
 (function (global) {
-  const WS_URL = 'ws://' + (location.hostname || 'localhost') + ':3001';   // host-aware: works when the source is loaded from another machine via http://<host>:3000
-  const HTTP_BASE = 'http://' + (location.hostname || 'localhost') + ':3000';
+  // Host-aware: a source loaded from another machine (http://<host>:3000) keeps that host. But
+  // 'localhost' is rewritten to 127.0.0.1, because server.js binds 127.0.0.1 ONLY while Windows
+  // resolves 'localhost' to ::1 first — and the app's own OBS instructions hand out localhost URLs.
+  // HTTP falls back from a refused ::1 to the IPv4 address; a WebSocket is not guaranteed to, so a
+  // source could sit on its last render for a whole show with no error anywhere.
+  const _host = location.hostname;
+  const HOST = (!_host || _host === 'localhost') ? '127.0.0.1' : _host;
+  const WS_URL = 'ws://' + HOST + ':3001';
+  // HTTP must stay SAME-ORIGIN. A scene served from http://localhost:3000 that fetches
+  // http://127.0.0.1:3000 is cross-origin (the host string is part of the origin), and only a few
+  // routes send CORS headers — so the fetch is blocked. Only a file:// preview needs an absolute base.
+  const HTTP_BASE = /^https?:$/.test(location.protocol) ? location.origin : 'http://127.0.0.1:3000';
   const FALLBACK_ACCENT = '#055fdb';
   const FALLBACK_ACCENT2 = '#e97139';
 
@@ -94,6 +104,22 @@
         sponsors: [{ name: 'ACME', logo: svgLogo('A', '#0ea5e9'), tier: 'presenting' }], sponsorLabel: 'PARTNERS', sponsorInterval: 6 },
       game: { blueScore: 2, orangeScore: 1, time: 300, number: 3 },
       series: { blue: 2, orange: 1 }, bestOf: 5,
+      seriesStats: { enabled: true, visible: true, design: 'table', liveBanked: false, games: [
+        { number: 1, blueScore: 3, orangeScore: 2, endedAt: 0, players: [
+          { name: 'Aqua', team: 0, score: 512, goals: 2, assists: 1, saves: 3, shots: 5, demos: 1 },
+          { name: 'Nova', team: 0, score: 331, goals: 1, assists: 2, saves: 1, shots: 3, demos: 0 },
+          { name: 'Rhythm', team: 0, score: 288, goals: 0, assists: 1, saves: 4, shots: 2, demos: 2 },
+          { name: 'Blaze', team: 1, score: 402, goals: 1, assists: 1, saves: 2, shots: 4, demos: 0 },
+          { name: 'Cinder', team: 1, score: 356, goals: 1, assists: 0, saves: 3, shots: 3, demos: 1 },
+          { name: 'Ash', team: 1, score: 240, goals: 0, assists: 2, saves: 2, shots: 1, demos: 0 } ] },
+        { number: 2, blueScore: 1, orangeScore: 4, endedAt: 0, players: [
+          { name: 'Aqua', team: 0, score: 298, goals: 1, assists: 0, saves: 2, shots: 4, demos: 0 },
+          { name: 'Nova', team: 0, score: 245, goals: 0, assists: 1, saves: 3, shots: 2, demos: 1 },
+          { name: 'Rhythm', team: 0, score: 210, goals: 0, assists: 0, saves: 2, shots: 1, demos: 0 },
+          { name: 'Blaze', team: 1, score: 588, goals: 3, assists: 1, saves: 1, shots: 6, demos: 2 },
+          { name: 'Cinder', team: 1, score: 410, goals: 1, assists: 2, saves: 2, shots: 3, demos: 0 },
+          { name: 'Ash', team: 1, score: 302, goals: 0, assists: 1, saves: 4, shots: 2, demos: 1 } ] }
+      ] },
       teams: {
         blue:   { name: 'FROST ESPORTS', color: '#3b82f6', logo: svgLogo('F', '#3b82f6'),
           players: [{ name: 'Aqua', platformId: 'aqua' }, { name: 'Nova', platformId: 'nova' }, { name: 'Rhythm', platformId: 'rhythm' }] },
@@ -246,6 +272,9 @@
   const standaloneCasterScene = STANDALONE_CASTER_RE.test(global.location.pathname);
   // State keys a scene has claimed via SceneBase.trustVisibility() — never force-shown (see there).
   const _trustVisible = new Set();
+  // Keys a scene has claimed via SceneBase.liveUpdates() — see there. Null = opted out (default).
+  let _liveKeys = null;
+  let _lastFull = null;
 
   const SceneBase = {
     qp,
@@ -485,6 +514,15 @@
         on every tick and the clock kept ticking after the producer took the countdown down.
         Call before connect(): SceneBase.trustVisibility('breakScreen'). */
     trustVisibility(...keys) { keys.flat().forEach((k) => k && _trustVisible.add(k)); return this; },
+    /* Re-render on the LIVE tick, not just on full_state.
+       The RL Stats API path broadcasts a PARTIAL `state_update` ({game, players, spectatedPlayer,
+       facecams}) on every packet and only sends a full_state on producer-level changes — so a scene
+       that renders live per-player numbers from full_state alone sits frozen through an entire game.
+       Opt in with the keys you need merged, before connect():
+         SceneBase.liveUpdates('players', 'game')
+       Each named key present on a state_update is merged into the last full payload and the scene
+       re-renders. Deliberately opt-in: every existing scene keeps full_state-only behaviour. */
+    liveUpdates(...keys) { _liveKeys = new Set(keys.flat().filter(Boolean)); return this; },
     connect(onState) {
       this.syncClock();
       if (!this._clockTimer) this._clockTimer = setInterval(() => this.syncClock(), 5 * 60 * 1000);
@@ -598,7 +636,14 @@
             applyBrand(msg.data);
             // sceneBg is applied by the injected scene-bg.js, which observes this same socket for
             // every overlay (not just the ones loading this file) — nothing to do here.
+            _lastFull = msg.data;
             try { onState(msg.data); } catch (e) { console.error('[scene] render error', e); }
+          } else if (msg.type === 'state_update' && _liveKeys && _lastFull && msg.data) {
+            // Partial live tick — merge only the keys this scene asked for, then re-render off the
+            // last full payload so brand/teams/settings are all still present.
+            let touched = false;
+            _liveKeys.forEach((k) => { if (k in msg.data) { _lastFull[k] = msg.data[k]; touched = true; } });
+            if (touched) { try { onState(_lastFull); } catch (e) { console.error('[scene] live render error', e); } }
           }
         };
         ws.onclose = () => setTimeout(open, 800);

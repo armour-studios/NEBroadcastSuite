@@ -110,7 +110,10 @@
       position: relative; overflow: hidden;
       display: flex; flex-direction: column; align-items: center;
       padding: 66px 56px 32px;
-      min-width: 420px; max-width: 720px; width: max-content;
+      /* 720px was the whole problem with a real event name: "$500 | 3V3 ROCKET RUSH X TROPHI.AI |
+         SEASON 2 CHAMPIONSHIP" wrapped to three ragged lines in a tall box while 1200px of frame
+         sat empty either side. The panel may now use that width; fitTitle() keeps it to two lines. */
+      min-width: 420px; max-width: 1180px; width: max-content;
       background: rgba(6, 8, 16, .90);
       border: 1px solid rgba(255,255,255,.10);
       border-radius: 22px;
@@ -125,10 +128,15 @@
     }
     @keyframes barPulse { 0%, 100% { opacity: .55; } 50% { opacity: 1; } }
     .brand-title {
+      /* font-size is the fitter's to set (see fitTitle) — this is the ceiling it starts from. */
       font-size: 32px; font-weight: 900; letter-spacing: .16em; text-transform: uppercase;
       color: #fff; text-align: center; line-height: 1.15;
       text-shadow: 0 2px 24px rgba(0,0,0,.8);
-      white-space: normal; word-break: break-word; max-width: 640px;
+      max-width: 1060px;
+      /* Split two lines evenly rather than leaving one orphaned word on line 2 (ignored by older
+         CEF, which just keeps the greedy wrap). break-word is the last-resort guard for a single
+         unbreakable token, not the normal path. */
+      white-space: normal; overflow-wrap: break-word; text-wrap: balance;
     }
     .brand-title.hidden { display: none; }
 
@@ -186,20 +194,6 @@
       width: 0.44ch; text-align: center;
     }
 
-    /* ── Progress bar ── */
-    .rl-progress {
-      position: absolute; bottom: 0; left: 0; right: 0;
-      height: 4px; background: rgba(255,255,255,.07);
-      overflow: hidden; z-index: 3;
-    }
-    .rl-progress.hidden { display: none; }
-    .rl-progress-fill {
-      height: 100%;
-      background: linear-gradient(to right, var(--accent), var(--accent2), var(--accent));
-      box-shadow: 0 0 14px var(--accent);
-      transition: width .9s linear; width: 100%;
-      position: absolute; left: 50%; transform: translateX(-50%);
-    }
   </style>
 </head>
 <body>
@@ -226,10 +220,6 @@
         </div>
       </div>
     </div>
-
-    <div class="rl-progress hidden" id="progress">
-      <div class="rl-progress-fill" id="progress-fill"></div>
-    </div>
   </div>
 
   <script src="scene-base.js"></script>
@@ -250,15 +240,14 @@
       return m + ':' + String(s).padStart(2,'0');
     }
 
-    let _endsAt = null, _frozen = null, _totalSec = null, _startedAt = null, _tickTimer = null;
+    let _endsAt = null, _frozen = null, _tickTimer = null;
 
     function startTick() { clearInterval(_tickTimer); _tickTimer = setInterval(tick, 250); }
     function tick() {
-      if (_frozen != null) { setTime(fmtTime(_frozen)); updateProgress(_frozen); return; }
+      if (_frozen != null) { setTime(fmtTime(_frozen)); return; }
       if (!_endsAt) return;
       const rem = Math.max(0, (_endsAt - (typeof SceneBase !== 'undefined' ? SceneBase.now() : Date.now())) / 1000);
       setTime(fmtTime(rem));
-      updateProgress(rem);
     }
     function setTime(str) {
       const t = el('time');
@@ -268,10 +257,43 @@
       ).join('');
       t.classList.toggle('long-fmt', str.length > 5);
     }
-    function updateProgress(remSec) {
-      const prog = el('progress-fill');
-      if (!prog || !_totalSec) return;
-      prog.style.width = Math.min(100, Math.max(0, (remSec / _totalSec) * 100)) + '%';
+    /* Shrink a long event name until it fits TWO lines. Same idea as the bracket board's title
+       fit: the panel is centred furniture, so a title that grows the box vertically pushes the
+       countdown around and reads as broken. Runs from the 32px ceiling down to 18px; below that
+       the name is too long to be readable on air anyway and is allowed to wrap. */
+    const TITLE_MAX_PX = 32, TITLE_MIN_PX = 18, TITLE_MAX_W = 1060;
+    let _titleFit = '';
+    function fitTitle(force) {
+      const t = el('event-title');
+      if (!t || t.classList.contains('hidden') || !t.textContent) return;
+      // render() runs on every full_state; the measuring below costs a dozen reflows, so only
+      // redo it when the text actually changed (or the font finally loaded).
+      const sig = t.textContent;
+      if (!force && sig === _titleFit) return;
+      _titleFit = sig;
+
+      let px = TITLE_MAX_PX;
+      t.style.fontSize = px + 'px';
+      t.style.maxWidth = TITLE_MAX_W + 'px';
+      const lines = () => Math.round(t.scrollHeight / (px * 1.15));
+      // The allowance shrinks with the font, so this converges on "two lines at whatever size".
+      while (px > TITLE_MIN_PX && lines() > 2) { px -= 1; t.style.fontSize = px + 'px'; }
+
+      // Balance the wrap ourselves. `text-wrap: balance` covers this in OBS's CEF but not in
+      // Electron 18 (Chrome 100), which is what the in-app preview renders — and a greedy wrap
+      // leaves "CHAMPIONSHIP" alone on line two under a full-width line one. Binary-search the
+      // NARROWEST width that still holds the same line count: that is the even split, and the
+      // panel (width: max-content) shrinks to match it.
+      const target = lines();
+      if (target > 1) {
+        let lo = 240, hi = TITLE_MAX_W;
+        while (lo < hi) {
+          const mid = (lo + hi) >> 1;
+          t.style.maxWidth = mid + 'px';
+          if (lines() <= target) hi = mid; else lo = mid + 1;
+        }
+        t.style.maxWidth = lo + 'px';
+      }
     }
 
     function render(data) {
@@ -294,21 +316,18 @@
       else { titleText = (data.eventName || '').toString().trim(); }
       el('event-title').textContent = titleText.toUpperCase();
       el('event-title').classList.toggle('hidden', !titleText);
+      fitTitle();
+      if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => fitTitle(true));
 
       el('label').textContent = (QLABEL || b.title || 'STARTING SOON').toUpperCase();
 
       const hasEndsAt = !!b.endsAt, hasFrozen = b.frozenSeconds != null;
       const hasTimer  = SHOW_TIMER && (hasEndsAt || hasFrozen);
       el('countdown-wrap').classList.toggle('hidden', !hasTimer);
-      el('progress').classList.toggle('hidden', !hasTimer);
 
       if (hasTimer) {
         _frozen = hasFrozen ? Math.max(0, Math.round(b.frozenSeconds)) : null;
         _endsAt = hasEndsAt ? b.endsAt : null;
-        if (!_startedAt && _endsAt) {
-          const remNow = (_endsAt - (typeof SceneBase !== 'undefined' ? SceneBase.now() : Date.now())) / 1000;
-          if (remNow > 0 && !_totalSec) { _totalSec = remNow; _startedAt = Date.now(); }
-        }
         if (!_tickTimer) startTick();
         tick();
       } else {

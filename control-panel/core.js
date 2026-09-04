@@ -50,7 +50,7 @@ function getConsoleBufferText(maxChars) {
   return '…(truncated, showing the most recent output)…\n' + text.slice(-maxChars);
 }
 
-const WS_URL = 'ws://localhost:3001';
+const WS_URL = 'ws://127.0.0.1:3001';
 let ws;
 let _hbTimer = null, _lastRx = 0;   // WebSocket heartbeat (half-open detection)
 let currentState = {};
@@ -178,7 +178,7 @@ function backupUploadToLibrary(file, dataUrl) {
   const ext = (mime || ((file.name || '').match(/\.([a-z0-9]+)$/i) || [, 'png'])[1])
     .toLowerCase().replace('jpeg', 'jpg').replace('svg+xml', 'svg');
   const name = `${base}-${hashStr(dataUrl)}.${ext}`;
-  fetch('http://localhost:3000/api/media/upload', {
+  fetch('http://127.0.0.1:3000/api/media/upload', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ path: 'logos', name, dataUrl })
   }).catch(() => {});
@@ -187,7 +187,7 @@ function backupUploadToLibrary(file, dataUrl) {
 // Upload an image FILE to the server media store and return its ABSOLUTE served URL. Use this for
 // heavy full-frame assets (e.g. the replay-transition background) instead of embedding base64 in a
 // broadcast/persisted blob — a URL keeps the brand-kit JSON tiny so saves + library broadcasts stay
-// fast. Absolute (http://localhost:3000/...) so it resolves from the file:// control panel AND from
+// fast. Absolute (http://127.0.0.1:3000/...) so it resolves from the file:// control panel AND from
 // OBS overlays. Downscales/re-encodes first (same pipeline as fileToBase64).
 async function uploadImageFile(file, folder, maxDim) {
   const dataUrl = await new Promise((resolve, reject) => {
@@ -201,12 +201,12 @@ async function uploadImageFile(file, folder, maxDim) {
   const mime = (optimized.match(/^data:image\/([a-z0-9.+-]+)/i) || [])[1];
   const ext = (mime || 'webp').toLowerCase().replace('jpeg', 'jpg').replace('svg+xml', 'svg');
   const name = `${base}-${hashStr(optimized)}.${ext}`;
-  const res = await fetch('http://localhost:3000/api/media/upload', {
+  const res = await fetch('http://127.0.0.1:3000/api/media/upload', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ path: folder, name, dataUrl: optimized })
   }).then((r) => r.json());
   if (!res || !res.ok || !res.url) throw new Error('media upload failed');
-  return 'http://localhost:3000' + res.url;
+  return 'http://127.0.0.1:3000' + res.url;
 }
 
 // ── Custom Modal ──────────────────────────────────────────────────────────

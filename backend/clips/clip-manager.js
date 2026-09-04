@@ -245,7 +245,7 @@ function createClipManager({ dataDir, getObsClient, onUpdate, onCapture }) {
     if ('autoCapture' in patch) settings.autoCapture = !!patch.autoCapture;
     if ('replayFolder' in patch) settings.replayFolder = patch.replayFolder || '';
     if (patch.captureRules) settings.captureRules = { ...settings.captureRules, ...patch.captureRules };
-    save();
+    save().catch((e) => console.warn('[clips: library save failed]', (e && e.message) || e));
   }
 
   function removeClip(id) {
@@ -258,7 +258,7 @@ function createClipManager({ dataDir, getObsClient, onUpdate, onCapture }) {
     if (clip.path && !library.some((c) => c.path === clip.path) && fs.existsSync(clip.path)) {
       try { fs.unlinkSync(clip.path); } catch (e) { /* ignore */ }
     }
-    save();
+    save().catch((e) => console.warn('[clips: library save failed]', (e && e.message) || e));
     return true;
   }
 
@@ -280,7 +280,7 @@ function createClipManager({ dataDir, getObsClient, onUpdate, onCapture }) {
     }
     if ('note' in patch) clip.note = String(patch.note || '');
     if ('folder' in patch) clip.folder = normFolder(patch.folder);
-    save();
+    save().catch((e) => console.warn('[clips: library save failed]', (e && e.message) || e));
     return true;
   }
 
@@ -292,7 +292,7 @@ function createClipManager({ dataDir, getObsClient, onUpdate, onCapture }) {
     const clip = library.find((c) => c.id === id);
     if (!clip) return false;
     clip.folder = normFolder(folder);
-    save();
+    save().catch((e) => console.warn('[clips: library save failed]', (e && e.message) || e));
     return true;
   }
 
@@ -307,7 +307,7 @@ function createClipManager({ dataDir, getObsClient, onUpdate, onCapture }) {
     const copy = { ...clip, id: `clip_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`, folder: normFolder(folder), createdAt: Date.now() };
     library.unshift(copy);
     if (library.length > 500) library.length = 500;
-    save();
+    save().catch((e) => console.warn('[clips: library save failed]', (e && e.message) || e));
     return copy;
   }
 
@@ -330,7 +330,7 @@ function createClipManager({ dataDir, getObsClient, onUpdate, onCapture }) {
     });
     mine.forEach((c) => { if (!ordered.includes(c)) ordered.push(c); });
     slots.forEach((slot, n) => { library[slot] = ordered[n]; });
-    save();
+    save().catch((e) => console.warn('[clips: library save failed]', (e && e.message) || e));
     return true;
   }
 
@@ -351,7 +351,7 @@ function createClipManager({ dataDir, getObsClient, onUpdate, onCapture }) {
       transition: { type: fold === 'highlights' ? 'stinger' : 'cut', stinger: '' }
     };
     montages.unshift(montage);
-    save();
+    save().catch((e) => console.warn('[clips: library save failed]', (e && e.message) || e));
     return montage;
   }
 
@@ -372,7 +372,7 @@ function createClipManager({ dataDir, getObsClient, onUpdate, onCapture }) {
         stinger: typeof t.stinger === 'string' ? t.stinger.slice(0, 2000) : (cur.stinger || '')
       };
     }
-    save();
+    save().catch((e) => console.warn('[clips: library save failed]', (e && e.message) || e));
     return true;
   }
 
@@ -391,7 +391,7 @@ function createClipManager({ dataDir, getObsClient, onUpdate, onCapture }) {
       delete m.outputPath;
       m.status = 'draft';
     }
-    save();
+    save().catch((e) => console.warn('[clips: library save failed]', (e && e.message) || e));
     return true;
   }
 
@@ -464,7 +464,7 @@ function createClipManager({ dataDir, getObsClient, onUpdate, onCapture }) {
     if (!m) return false;
     const trimmed = String(name || '').trim().slice(0, 120);
     if (trimmed) m.name = trimmed;
-    save();
+    save().catch((e) => console.warn('[clips: library save failed]', (e && e.message) || e));
     return true;
   }
 
@@ -474,7 +474,7 @@ function createClipManager({ dataDir, getObsClient, onUpdate, onCapture }) {
     const m = montages[i];
     if (m && m.outputPath) { try { fs.unlinkSync(m.outputPath); } catch (e) { /* ignore */ } }
     montages.splice(i, 1);
-    save();
+    save().catch((e) => console.warn('[clips: library save failed]', (e && e.message) || e));
     return true;
   }
 
@@ -485,7 +485,7 @@ function createClipManager({ dataDir, getObsClient, onUpdate, onCapture }) {
     if (m.outputPath) { try { fs.unlinkSync(m.outputPath); } catch (e) { /* ignore */ } }
     delete m.outputPath;
     m.status = 'draft';
-    save();
+    save().catch((e) => console.warn('[clips: library save failed]', (e && e.message) || e));
     return true;
   }
 
@@ -513,7 +513,7 @@ function createClipManager({ dataDir, getObsClient, onUpdate, onCapture }) {
     if (!m) return;
     m.status = status;
     if (outputPath) m.outputPath = outputPath;
-    save();
+    save().catch((e) => console.warn('[clips: library save failed]', (e && e.message) || e));
   }
 
   async function linkReplayToClip(clipId, filePath) {

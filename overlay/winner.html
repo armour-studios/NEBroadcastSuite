@@ -1,10 +1,26 @@
 <!DOCTYPE html>
 <html lang="en">
 <!--
-  winner.html — post-match WINNER reveal (duorow design language, 2026 depth redesign).
-  Driven by full_state.winner: { visible, side:'blue'|'orange', name, logo, color, subtitle }
-  If `side` is set the team's name/logo/colour resolve from full_state.teams; otherwise
-  name/logo/color are used directly. No baked background — the Scenes page sets fill+opacity.
+  winner.html — post-match WINNER reveal.
+
+  Driven by full_state.winner: { visible, side:'blue'|'orange', name, logo, color, subtitle, style }
+  If `side` is set the team's name/logo/colour resolve from full_state.teams; otherwise name/logo/
+  color are used directly. No baked background — the Scenes page sets fill + opacity.
+
+  STYLES (winner.style, or ?style= to preview one):
+    slam   — cinematic full-bleed: team-colour wash, left-anchored lock-up, oversized name that
+             slams in behind a wipe, scoreline + who they beat. The default.
+    depth  — the previous centred medallion: logo in a glowing ring, name below. Kept selectable.
+
+  The slam style earns the screen: the old design showed a logo and "X WINS!" and nothing else, so
+  two thirds of a 1080p frame was empty. Everything it adds is already in live state — the losing
+  team (teams[other side]), the scoreline (series.blue/orange), roundLabel, bestOf, eventName.
+
+  NO color-mix() ANYWHERE. The app runs Electron 18 (Chrome 100) and OBS ships an older CEF; there
+  a var()-based color-mix is a pending-substitution value that wins the cascade and then computes to
+  TRANSPARENT — which is why the old rays/halo/glow never appeared on air even though they looked
+  right in a normal browser. Team tints are rgba(var(--acc-rgb), a) instead, with --acc-rgb set from
+  JS. Same rule as rl-series-stats.html; don't reintroduce color-mix here.
 -->
 <head>
   <meta charset="UTF-8">
@@ -14,41 +30,155 @@
     :root {
       --duo-surface: #1a1d24; --duo-surface2: #20242e; --duo-border: #2e3340;
       --duo-muted: #8b93a8; --accent: #e83a8b; --accent2: #8b5cf6;
+      /* Team colour as raw channels so every tint below can be rgba() — see the color-mix note. */
+      --acc-rgb: 232, 58, 139;
+      /* How solid the slam backdrop sits over whatever is behind the source (the Scenes-page fill,
+         or a game feed layered under it in OBS). One number drives all three wash layers, because
+         alpha can't be scaled without color-mix() and that's banned in this file.
+         0 = fully see-through, 1 = the old opaque ground. Override per source with ?wash=0.3 */
+      --wash-dark: .52;
     }
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     html, body { width: 1920px; height: 1080px; overflow: hidden; background: transparent;
       font-family: 'Inter', system-ui, sans-serif; color: #eef1f7; -webkit-font-smoothing: antialiased; }
 
-    #stage { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center;
-      justify-content: center; opacity: 0; transition: opacity .5s ease; perspective: 1400px; }
+    #stage { position: absolute; inset: 0; opacity: 0; transition: opacity .5s ease; }
     #stage.show { opacity: 1; }
+    .style-body { position: absolute; inset: 0; display: none; }
+    #stage[data-style="depth"] .sb-depth,
+    #stage[data-style="slam"]  .sb-slam { display: flex; }
 
-    /* Ambient depth layers behind everything — a slow-rotating light-ray field + a soft breathing
-       halo. Pure CSS, no assets, but this is what gives the scene actual depth instead of a flat
-       fade: the backdrop has its own life independent of the logo/text reveal. */
+    /* ══════════════════════════════════════════════════════════════════════
+       STYLE: SLAM — cinematic, left-anchored, full-bleed
+
+       One motion idea, not six: everything RISES and resolves on a single shared curve, staggered.
+       The earlier cut layered a full-width wash sweep, drifting speed bars, a white impact flash, a
+       scale-overshoot on the name and a scaling ghost all at once — busy rather than cinematic. What
+       is left is a slow settle on the ground, one horizontal wipe on the name, and a stagger of
+       rises. The only continuous motion is an almost imperceptible drift on the background crest.
+       ══════════════════════════════════════════════════════════════════════ */
+    .sb-slam { flex-direction: column; justify-content: center; padding: 0 150px; overflow: hidden; }
+
+    /* Ground: a dark base the team colour lights from the left, so the frame reads as lit BY the
+       team rather than merely tinted. It settles in place; it no longer sweeps across. */
+    .sl-wash { position: absolute; inset: 0; pointer-events: none; opacity: 0;
+      background:
+        linear-gradient(102deg, rgba(var(--acc-rgb), .34) 0%, rgba(var(--acc-rgb), .11) 38%, rgba(6, 7, 10, var(--wash-dark)) 72%),
+        radial-gradient(115% 95% at 4% 50%, rgba(var(--acc-rgb), .22) 0%, transparent 62%),
+        linear-gradient(180deg, rgba(10, 12, 17, var(--wash-dark)), rgba(6, 7, 10, var(--wash-dark)));
+      animation: settle 1.1s cubic-bezier(.2,.7,.25,1) forwards; }
+    @keyframes settle { to { opacity: 1; } }
+
+    /* Cinematic falloff — darkens the corners so the lock-up sits in a pool of light. */
+    .sl-vignette { position: absolute; inset: 0; pointer-events: none;
+      background: radial-gradient(130% 100% at 30% 50%, transparent 30%, rgba(0,0,0,.40) 100%); }
+
+    /* Background crest. NOT a flattened fill — the real logo, just held far back by opacity so it
+       reads as set dressing behind the type instead of a second thing to look at. The drift is
+       20s and tiny; it should never be caught moving, only felt. */
+    .sl-ghost { position: absolute; right: -140px; top: 50%; width: 880px; height: 880px;
+      transform: translateY(-50%); pointer-events: none; opacity: 0;
+      display: flex; align-items: center; justify-content: center;
+      animation: ghostIn 1.8s .25s cubic-bezier(.2,.7,.25,1) forwards; }
+    .sl-ghost img { width: 100%; height: 100%; object-fit: contain; opacity: .09;
+      animation: ghostDrift 20s 1.4s ease-in-out infinite alternate; }
+    /* A real team logo keeps its own colours — this is a low-opacity crest, not a silhouette. The
+       ONE exception is the app's own fallback game crest, which is black artwork and would sit
+       here as a heavy dark blob on a dark ground; same rule as the small crest above. */
+    .sl-ghost img.on-dark { filter: brightness(0) invert(1); opacity: .07; }
+    .sl-ghost.is-empty { display: none; }
+    @keyframes ghostIn { to { opacity: 1; } }
+    @keyframes ghostDrift { to { transform: scale(1.05) translateX(-16px); } }
+
+    /* Left rule: the spine the whole lock-up hangs off. Draws down, then holds. */
+    .sl-rule { position: absolute; left: 96px; top: 250px; bottom: 250px; width: 5px; border-radius: 3px;
+      background: linear-gradient(180deg, rgba(var(--acc-rgb), 1) 0%, rgba(var(--acc-rgb), .55) 45%, rgba(var(--acc-rgb), 0) 100%);
+      box-shadow: 0 0 28px rgba(var(--acc-rgb), .55);
+      transform-origin: top; transform: scaleY(0);
+      animation: draw .9s .15s cubic-bezier(.2,.7,.25,1) forwards; }
+    @keyframes draw { to { transform: scaleY(1); } }
+
+    .sl-inner { position: relative; display: flex; flex-direction: column; max-width: 1480px; }
+
+    /* The one shared entrance. Everything but the name uses it, on a stagger. */
+    @keyframes rise { from { opacity: 0; transform: translateY(26px); } to { opacity: 1; transform: none; } }
+
+    /* Row 1 — crest + kicker. No plate, no border: the mark stands on its own. */
+    .sl-top { display: flex; align-items: center; gap: 26px; margin-bottom: 26px;
+      opacity: 0; animation: rise .7s .45s cubic-bezier(.2,.7,.25,1) forwards; }
+    .sl-crest { width: 118px; height: 118px; flex: 0 0 auto; display: flex; align-items: center; justify-content: center; }
+    .sl-crest img { max-width: 100%; max-height: 100%; object-fit: contain;
+      filter: drop-shadow(0 10px 28px rgba(0,0,0,.75)); }
+    /* Only the app's own monochrome fallback crest gets inverted — a real team logo is never
+       recoloured. */
+    .sl-crest img.on-dark { filter: brightness(0) invert(1) drop-shadow(0 10px 28px rgba(0,0,0,.75)); }
+    .sl-crest.is-empty { display: none; }
+    .sl-kicker { font-family: 'Rajdhani','Inter',sans-serif; font-weight: 700; font-size: 28px;
+      letter-spacing: .58em; text-transform: uppercase; color: rgba(var(--acc-rgb), 1);
+      text-shadow: 0 0 34px rgba(var(--acc-rgb), .6); line-height: 1; }
+
+    /* Row 2 — the name. A single clean horizontal wipe, no overshoot, no flash. */
+    .sl-name { font-family: 'Rajdhani','Inter',sans-serif; font-weight: 800; font-size: 150px; line-height: .88;
+      text-transform: uppercase; color: #fff; letter-spacing: -.008em;
+      text-shadow: 0 10px 50px rgba(0,0,0,.8);
+      clip-path: inset(0 100% 0 0);
+      animation: wipe .95s .62s cubic-bezier(.22,.68,.16,1) forwards; }
+    @keyframes wipe { to { clip-path: inset(0 0 0 0); } }
+    /* A long org name must not run off frame or crowd the scoreline. */
+    .sl-name.is-long { font-size: 106px; line-height: .92; }
+    .sl-name.is-xlong { font-size: 88px; line-height: .96; }
+
+    /* Row 3 — the result. A hairline above it separates the claim from the evidence. */
+    .sl-result { display: flex; align-items: baseline; gap: 24px; margin-top: 38px; padding-top: 30px;
+      position: relative; opacity: 0; animation: rise .7s 1.06s cubic-bezier(.2,.7,.25,1) forwards; }
+    .sl-result::before { content: ''; position: absolute; left: 0; top: 0; width: 190px; height: 2px;
+      background: linear-gradient(90deg, rgba(var(--acc-rgb), .9), rgba(var(--acc-rgb), 0)); }
+    .sl-result.is-empty { display: none; }
+    .sl-score { font-family: 'Rajdhani','Inter',sans-serif; font-weight: 800; font-size: 68px; line-height: 1;
+      color: #fff; letter-spacing: .04em; font-variant-numeric: tabular-nums; }
+    .sl-score em { font-style: normal; color: rgba(var(--acc-rgb), 1); padding: 0 12px; }
+    .sl-over { font-family: 'Rajdhani','Inter',sans-serif; font-weight: 600; font-size: 29px;
+      letter-spacing: .2em; text-transform: uppercase; color: #8e97ab; padding-bottom: 7px; }
+    .sl-over b { color: #dde3ee; font-weight: 700; }
+    .sl-over.is-empty { display: none; }
+    /* The scoreline steps down with the name so the champion always outranks the number. */
+    .sl-name.is-xlong ~ .sl-result .sl-score { font-size: 56px; }
+    .sl-name.is-xlong ~ .sl-result .sl-over { font-size: 25px; }
+
+    /* Row 4 — context strip. Segments separated by a dot, empties removed by JS. */
+    .sl-meta { display: flex; align-items: center; gap: 16px; margin-top: 26px; flex-wrap: wrap;
+      opacity: 0; animation: rise .7s 1.22s cubic-bezier(.2,.7,.25,1) forwards; }
+    .sl-meta.is-empty { display: none; }
+    .sl-chip { font-family: 'Rajdhani','Inter',sans-serif; font-weight: 700; font-size: 20px;
+      letter-spacing: .26em; text-transform: uppercase; color: #7d8698; }
+    .sl-chip.accent { color: rgba(var(--acc-rgb), 1); }
+    .sl-dot { width: 4px; height: 4px; border-radius: 50%; background: rgba(255,255,255,.2); }
+
+    /* ══════════════════════════════════════════════════════════════════════
+       STYLE: DEPTH — the previous centred medallion, kept selectable
+       ══════════════════════════════════════════════════════════════════════ */
+    .sb-depth { flex-direction: column; align-items: center; justify-content: center; perspective: 1400px; }
     .w-rays { position: absolute; width: 2400px; height: 2400px; left: 50%; top: 50%;
       transform: translate(-50%, -50%); pointer-events: none;
-      background: conic-gradient(from 0deg, transparent 0deg, color-mix(in srgb, var(--accent) 14%, transparent) 8deg,
-        transparent 20deg, transparent 160deg, color-mix(in srgb, var(--accent) 10%, transparent) 168deg, transparent 180deg);
+      background: conic-gradient(from 0deg, transparent 0deg, rgba(var(--acc-rgb), .14) 8deg,
+        transparent 20deg, transparent 160deg, rgba(var(--acc-rgb), .10) 168deg, transparent 180deg);
       opacity: 0; animation: raysSpin 40s linear infinite, raysFade 1.4s ease .1s forwards; }
     @keyframes raysSpin { from { transform: translate(-50%, -50%) rotate(0deg); } to { transform: translate(-50%, -50%) rotate(360deg); } }
     @keyframes raysFade { to { opacity: 1; } }
     .w-halo { position: absolute; width: 980px; height: 980px; left: 50%; top: 46%; transform: translate(-50%, -50%);
       border-radius: 50%; pointer-events: none;
-      background: radial-gradient(circle, color-mix(in srgb, var(--accent) 32%, transparent) 0%, transparent 62%);
+      background: radial-gradient(circle, rgba(var(--acc-rgb), .32) 0%, transparent 62%);
       opacity: 0; animation: haloIn 1.1s .15s ease forwards, haloBreathe 4s 1.3s ease-in-out infinite; }
     @keyframes haloIn { to { opacity: 1; } }
     @keyframes haloBreathe { 0%, 100% { transform: translate(-50%, -50%) scale(1); } 50% { transform: translate(-50%, -50%) scale(1.08); } }
 
-    /* Logo: depth-of-field reveal — starts blurred/small/receded, resolves into sharp focus with a
-       layered near+far shadow and a glowing ring so it reads as sitting IN FRONT of the backdrop. */
     .w-logo-wrap { position: relative; width: 380px; height: 380px; margin-bottom: 8px;
       animation: logoIn 1s .25s cubic-bezier(.16,.84,.24,1) backwards; }
     @keyframes logoIn { 0% { opacity: 0; transform: translateY(50px) scale(.82); filter: blur(18px); }
       70% { filter: blur(0); } 100% { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); } }
     .w-ring { position: absolute; inset: -22px; border-radius: 50%;
-      border: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
-      box-shadow: 0 0 60px color-mix(in srgb, var(--accent) 55%, transparent), inset 0 0 40px color-mix(in srgb, var(--accent) 25%, transparent);
+      border: 2px solid rgba(var(--acc-rgb), .55);
+      box-shadow: 0 0 60px rgba(var(--acc-rgb), .55), inset 0 0 40px rgba(var(--acc-rgb), .25);
       animation: ringPulse 2.6s 1.1s ease-in-out infinite; }
     @keyframes ringPulse { 0%, 100% { opacity: .55; transform: scale(1); } 50% { opacity: 1; transform: scale(1.035); } }
     .w-logo { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
@@ -58,7 +188,6 @@
     .w-logo img.on-dark { filter: brightness(0) invert(1) drop-shadow(0 10px 26px rgba(0,0,0,.55)); }
     .w-logo.is-empty { display: none; }
 
-    /* Text block: perspective tilt settling to flat reads as genuine 3D depth, not just a slide. */
     .w-text { position: relative; display: flex; flex-direction: column; align-items: center; gap: 18px; margin-top: 14px; }
     .w-eyebrow { font-family: 'Rajdhani','Inter',sans-serif; font-weight: 700; font-size: 20px; letter-spacing: .5em;
       text-transform: uppercase; color: var(--accent); opacity: 0;
@@ -66,14 +195,14 @@
     @keyframes eyebrowIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
     .w-name { font-family: 'Rajdhani','Inter',sans-serif; font-weight: 800; font-size: 6em; line-height: .95;
       text-transform: uppercase; color: #fff; letter-spacing: .01em; text-align: center; max-width: 1500px;
-      text-shadow: 0 0 50px color-mix(in srgb, var(--accent) 65%, transparent), 0 0 110px color-mix(in srgb, var(--accent) 30%, transparent);
+      text-shadow: 0 0 50px rgba(var(--acc-rgb), .65), 0 0 110px rgba(var(--acc-rgb), .30);
       opacity: 0; transform-style: preserve-3d;
       animation: nameIn .85s .68s cubic-bezier(.16,.84,.24,1) forwards; }
     @keyframes nameIn { 0% { opacity: 0; transform: translateY(46px) rotateX(35deg) scale(.94); }
       100% { opacity: 1; transform: translateY(0) rotateX(0) scale(1); } }
     .w-rule { width: 260px; height: 4px; border-radius: 2px; margin-top: -2px;
       background: linear-gradient(90deg, transparent, var(--accent), var(--accent2), transparent);
-      box-shadow: 0 0 22px color-mix(in srgb, var(--accent) 60%, transparent);
+      box-shadow: 0 0 22px rgba(var(--acc-rgb), .60);
       opacity: 0; animation: ruleIn .6s .95s cubic-bezier(.16,.84,.24,1) forwards; transform: scaleX(0); }
     @keyframes ruleIn { to { opacity: 1; transform: scaleX(1); } }
     .w-sub { font-family: 'Rajdhani','Inter',sans-serif; font-weight: 600; font-size: 1.9em; color: var(--duo-muted);
@@ -84,19 +213,44 @@
   </style>
 </head>
 <body>
-  <div id="stage">
-    <div class="w-rays"></div>
-    <div class="w-halo"></div>
-    <div class="w-logo-wrap">
-      <div class="w-ring"></div>
-      <div class="w-logo" id="w-logo"><img id="w-logo-img" alt=""></div>
+  <div id="stage" data-style="slam">
+
+    <!-- ── SLAM ─────────────────────────────────────────────────────────── -->
+    <div class="style-body sb-slam">
+      <div class="sl-wash"></div>
+      <div class="sl-vignette"></div>
+      <div class="sl-rule"></div>
+      <div class="sl-ghost" id="sl-ghost"><img id="sl-ghost-img" alt=""></div>
+      <div class="sl-inner">
+        <div class="sl-top">
+          <div class="sl-crest" id="sl-crest"><img id="sl-crest-img" alt=""></div>
+          <div class="sl-kicker" id="sl-kicker">CHAMPIONS</div>
+        </div>
+        <div class="sl-name" id="sl-name">WINNER</div>
+        <div class="sl-result" id="sl-result">
+          <div class="sl-score" id="sl-score"></div>
+          <div class="sl-over" id="sl-over"></div>
+        </div>
+        <div class="sl-meta" id="sl-meta"></div>
+      </div>
     </div>
-    <div class="w-text">
-      <div class="w-eyebrow">CHAMPION</div>
-      <div class="w-name" id="w-name">WINNER</div>
-      <div class="w-rule"></div>
-      <div class="w-sub is-empty" id="w-sub"></div>
+
+    <!-- ── DEPTH ────────────────────────────────────────────────────────── -->
+    <div class="style-body sb-depth">
+      <div class="w-rays"></div>
+      <div class="w-halo"></div>
+      <div class="w-logo-wrap">
+        <div class="w-ring"></div>
+        <div class="w-logo" id="w-logo"><img id="w-logo-img" alt=""></div>
+      </div>
+      <div class="w-text">
+        <div class="w-eyebrow">CHAMPION</div>
+        <div class="w-name" id="w-name">WINNER</div>
+        <div class="w-rule"></div>
+        <div class="w-sub is-empty" id="w-sub"></div>
+      </div>
     </div>
+
   </div>
 
   <script src="scene-base.js"></script>
@@ -104,24 +258,119 @@
     const el = (id) => document.getElementById(id);
     const stage = el('stage');
     const EMBED = SceneBase.qp('embed') === '1';   // ?embed=1 → force-show the live state (config preview)
+    const STYLE_Q = (SceneBase.qp('style') || '').toLowerCase();   // ?style=slam|depth to preview one
+    const STYLES = ['slam', 'depth'];
     let _sig = '';
+
+    // Hex/rgb → "r, g, b" for the rgba() tints. Everything tinted by the team colour goes through
+    // this, because color-mix() computes to transparent on the Chrome this ships against.
+    function rgbChannels(color) {
+      const c = String(color || '').trim();
+      let m = c.match(/^#?([0-9a-f]{3})$/i);
+      if (m) { const h = m[1]; return [0,1,2].map((i) => parseInt(h[i] + h[i], 16)).join(', '); }
+      m = c.match(/^#?([0-9a-f]{6})$/i);
+      if (m) { const h = m[1]; return [0,2,4].map((i) => parseInt(h.substr(i, 2), 16)).join(', '); }
+      m = c.match(/rgba?\(\s*(\d+)[,\s]+(\d+)[,\s]+(\d+)/i);
+      if (m) return m[1] + ', ' + m[2] + ', ' + m[3];
+      return null;
+    }
 
     function resolve(w, data) {
       let name = w.name, logo = w.logo, color = w.color;
-      if (w.side === 'blue' || w.side === 'orange') {
-        const t = SceneBase.teamSide(data, w.side);
+      const side = (w.side === 'blue' || w.side === 'orange') ? w.side : '';
+      let loser = '';
+      let score = '';
+      if (side) {
+        const t = SceneBase.teamSide(data, side);
         name = name || t.name;
         logo = logo || t.logo;
         color = color || t.color;
+        // Who they beat, and by how much — both already in live state, neither was ever shown.
+        const other = side === 'blue' ? 'orange' : 'blue';
+        loser = (SceneBase.teamSide(data, other) || {}).name || '';
+        const s = data.series || {};
+        const mine = Number(s[side]) || 0, theirs = Number(s[other]) || 0;
+        if (mine + theirs > 0) score = mine + ' | ' + theirs;   // rendered as hi <em>|</em> lo
       }
-      return { name: name || 'WINNER', logo: logo || null, color: color || null, subtitle: w.subtitle || '' };
+      return {
+        name: name || 'WINNER',
+        logo: logo || null,
+        color: color || null,
+        subtitle: w.subtitle || '',
+        loser, score,
+        round: data.roundLabel || '',
+        bestOf: Number(data.bestOf) || 0,
+        event: data.eventName || '',
+        style: STYLE_Q || (STYLES.includes(w.style) ? w.style : 'slam'),
+      };
     }
 
     // Restart every animation from scratch (used on real reveals + the preview loop) — otherwise a
-    // second win with the same signature wouldn't replay the depth-reveal sequence.
+    // second win with the same signature wouldn't replay the reveal sequence.
     function replay() {
-      document.querySelectorAll('#stage, .w-rays, .w-halo, .w-logo-wrap, .w-ring, .w-eyebrow, .w-name, .w-rule, .w-sub')
+      document.querySelectorAll('#stage, .style-body, .style-body *')
         .forEach((e) => { e.style.animation = 'none'; void e.offsetWidth; e.style.animation = ''; });
+    }
+
+    function renderSlam(r) {
+      const name = r.name.toUpperCase();
+      const nameEl = el('sl-name');
+      nameEl.textContent = name;
+      // Step the type down rather than letting a long org name wrap off frame.
+      nameEl.classList.toggle('is-long', name.length > 15 && name.length <= 24);
+      nameEl.classList.toggle('is-xlong', name.length > 24);
+
+      const crest = el('sl-crest'), crestImg = el('sl-crest-img');
+      crest.classList.toggle('is-empty', !r.logo);
+      if (r.logo) { crestImg.src = r.logo; crestImg.classList.toggle('on-dark', SceneBase.isDefaultGameLogo(r.logo)); }
+      const ghost = el('sl-ghost'), ghostImg = el('sl-ghost-img');
+      ghost.classList.toggle('is-empty', !r.logo);
+      if (r.logo) { ghostImg.src = r.logo; ghostImg.classList.toggle('on-dark', SceneBase.isDefaultGameLogo(r.logo)); }
+
+      // Scoreline. A producer-typed subtitle ("2026 Spring Champions") is a caption, not a score, so
+      // it goes to the meta strip; only a real series score fills the big numerals.
+      const scoreEl = el('sl-score'), overEl = el('sl-over'), resultEl = el('sl-result');
+      if (r.score) {
+        const [hi, lo] = r.score.split(' | ');
+        scoreEl.innerHTML = '';
+        scoreEl.append(document.createTextNode(hi));
+        const dash = document.createElement('em'); dash.textContent = '–';
+        scoreEl.append(dash, document.createTextNode(lo));
+      } else { scoreEl.textContent = ''; }
+      if (r.loser) {
+        overEl.innerHTML = ''; overEl.append(document.createTextNode('over '));
+        const b = document.createElement('b'); b.textContent = r.loser.toUpperCase();
+        overEl.append(b);
+      } else { overEl.textContent = ''; }
+      overEl.classList.toggle('is-empty', !r.loser);
+      resultEl.classList.toggle('is-empty', !r.score && !r.loser);
+
+      // Context strip — round, best-of, event, and any producer caption. Dots only BETWEEN chips.
+      const bits = [];
+      if (r.round) bits.push({ text: r.round, accent: true });
+      if (r.subtitle && !/^\s*\d+\s*[–—-]\s*\d+\s*$/.test(r.subtitle)) bits.push({ text: r.subtitle });
+      if (r.bestOf) bits.push({ text: 'Best of ' + r.bestOf });
+      if (r.event) bits.push({ text: r.event });
+      const meta = el('sl-meta');
+      meta.innerHTML = '';
+      bits.forEach((b, i) => {
+        if (i) { const d = document.createElement('span'); d.className = 'sl-dot'; meta.appendChild(d); }
+        const s = document.createElement('span');
+        s.className = 'sl-chip' + (b.accent ? ' accent' : '');
+        s.textContent = String(b.text).toUpperCase();
+        meta.appendChild(s);
+      });
+      meta.classList.toggle('is-empty', !bits.length);
+    }
+
+    function renderDepth(r) {
+      el('w-name').textContent = (r.name + ' WINS!').toUpperCase();
+      const sub = el('w-sub');
+      sub.textContent = r.subtitle;
+      sub.classList.toggle('is-empty', !r.subtitle);
+      const logoBox = el('w-logo'), logoImg = el('w-logo-img');
+      logoBox.classList.toggle('is-empty', !r.logo);
+      if (r.logo) { logoImg.src = r.logo; logoImg.classList.toggle('on-dark', SceneBase.isDefaultGameLogo(r.logo)); }
     }
 
     function render(data) {
@@ -141,17 +390,26 @@
       const first = !_sig;
       _sig = sig;
 
-      if (r.color) document.documentElement.style.setProperty('--accent', r.color);
-      el('w-name').textContent = (r.name + ' WINS!').toUpperCase();
-      const sub = el('w-sub');
-      sub.textContent = r.subtitle;
-      sub.classList.toggle('is-empty', !r.subtitle);
-      const logoBox = el('w-logo'), logoImg = el('w-logo-img');
-      logoBox.classList.toggle('is-empty', !r.logo);
-      if (r.logo) { logoImg.src = r.logo; logoImg.classList.toggle('on-dark', SceneBase.isDefaultGameLogo(r.logo)); }
+      stage.dataset.style = r.style;
+      if (r.color) {
+        document.documentElement.style.setProperty('--accent', r.color);
+        const ch = rgbChannels(r.color);
+        if (ch) document.documentElement.style.setProperty('--acc-rgb', ch);
+      }
+      renderSlam(r);
+      renderDepth(r);
 
       if (!first) replay();   // a fresh win while already visible — replay the reveal, don't just swap text
     }
+    // Per-source backdrop strength: a board layered over a live game feed usually wants less
+    // ground than one sitting on a plain scene background.
+    (function () {
+      const w = new URLSearchParams(location.search).get('wash');
+      if (w == null) return;
+      const n = parseFloat(w);
+      if (Number.isFinite(n) && n >= 0 && n <= 1) document.documentElement.style.setProperty('--wash-dark', String(n));
+    })();
+
     SceneBase.connect((data) => { SceneBase.applySceneConfig('winner', data); render(data); });
 
     // Preview: replay the full reveal sequence every ~7 s (2 s animation + 5 s pause).
@@ -162,8 +420,11 @@
     if (location.protocol === 'file:') {
       document.documentElement.classList.add('preview');
       render({
-        teams: { blue: { name: 'Frost Esports', color: '#3b82f6', logo: null } },
-        winner: { visible: true, side: 'blue', subtitle: '2026 Spring Champions' }
+        teams: { blue: { name: 'Unpaid and Underprivileged', color: '#3b82f6', logo: null },
+                 orange: { name: 'CMZ', color: '#f97316', logo: null } },
+        series: { blue: 3, orange: 1 },
+        bestOf: 5, roundLabel: 'Winners Final', eventName: '$200 2v2 Rocket Rush Showdown',
+        winner: { visible: true, side: 'blue', subtitle: '' }
       });
       stage.classList.add('show');
     }

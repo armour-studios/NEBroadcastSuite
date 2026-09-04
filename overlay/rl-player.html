@@ -445,7 +445,9 @@ async function connect(){
   if(_wsToken==null){ try{ _wsToken=(await (await fetch(HTTP_BASE+'/api/ws-token')).json()).token||''; }catch(e){ _wsToken=''; } }
   const ws=new WebSocket(WS_URL+(_wsToken?('?token='+encodeURIComponent(_wsToken)):''));
   ws.onopen=()=>{ try{ ws.send(JSON.stringify({type:'register',role:'overlay',page:location.pathname})); ws.send(JSON.stringify({type:'request_state'})); }catch(e){} };
-  ws.onmessage=({data})=>{ let m; try{ m=JSON.parse(data); }catch{ return; } dispatch(m); };
+  // Contain render throws so the source keeps updating instead of freezing (see rl-hud.html).
+  ws.onmessage=({data})=>{ let m; try{ m=JSON.parse(data); }catch{ return; }
+    try { dispatch(m); } catch (e) { console.error('[rl-player] render error on ' + (m && m.type) + ':', e); } };
   ws.onclose=()=>setTimeout(connect,800);
   ws.onerror=()=>{ try{ ws.close(); }catch{} };
 }

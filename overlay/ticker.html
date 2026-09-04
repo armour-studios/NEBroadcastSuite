@@ -82,10 +82,19 @@
   ];
   var DEMO_MSGS = ['Powered by ACME Energy', 'Follow @yourbrand on X', 'Next match starts at 8PM ET'];
 
+  // A set with no reported game scores is not 0-0. Both platforms produce winner-only results
+  // (start.gg reported-winner / DQ, NXGEN finals recorded with just a winnerId), and a live set has
+  // no score until the first game lands — "0 - 0" claims a result that didn't happen. Same rules
+  // the server's text feed uses (formatTickerFeed).
   function fmtScore(m) {
-    var a = (typeof m.scoreA === 'number') ? m.scoreA : 0;
-    var b = (typeof m.scoreB === 'number') ? m.scoreB : 0;
-    return a + ' - ' + b;
+    var a = (typeof m.scoreA === 'number') ? m.scoreA : null;
+    var b = (typeof m.scoreB === 'number') ? m.scoreB : null;
+    if (m.dq) return m.winSide === 'a' ? 'W - DQ' : m.winSide === 'b' ? 'DQ - W' : 'DQ';
+    if (a === null && b === null) {
+      if (m.winSide) return m.winSide === 'a' ? 'W - L' : 'L - W';
+      if (m.status === 'live') return 'vs';
+    }
+    return (a || 0) + ' - ' + (b || 0);
   }
   function statusTag(m) {
     var s = document.createElement('span');
@@ -114,30 +123,35 @@
     if (data && data.fontFamily) document.documentElement.style.fontFamily = "'" + data.fontFamily + "', 'Inter', system-ui, sans-serif";
     var bar = el('ticker'), track = el('ticker-track');
     var isStartgg = t.source === 'startgg';
-    var matches = isStartgg ? ((data && data.startgg && data.startgg.matchFeed) || []).filter(function (m) { return m && (m.status === 'live' || m.status === 'done'); }) : [];
+    // NXGEN publishes its ticker feed in the SAME item shape start.gg does (server:
+    // buildNxgenMatchFeed), so both platforms render through this one match-card path.
+    var isNxgen = t.source === 'nxgen';
+    var isMatches = isStartgg || isNxgen;
+    var feed = (isNxgen ? (data && data.nxgen && data.nxgen.matchFeed) : (data && data.startgg && data.startgg.matchFeed)) || [];
+    var matches = isMatches ? feed.filter(function (m) { return m && (m.status === 'live' || m.status === 'done'); }) : [];
     // Manual promo lines are shown in BOTH modes: they're the whole ticker in manual mode, and they
     // interleave between the live scores in start.gg mode so a short match feed (which otherwise
     // loops the same few teams over and over) reads with more variety.
     var messages = (t.messages || []).filter(Boolean);
     if (SceneBase.preview || EMBED) {
-      if (isStartgg && !matches.length) matches = DEMO_MATCHES;
+      if (isMatches && !matches.length) matches = DEMO_MATCHES;
       if (!messages.length) messages = DEMO_MSGS;
     }
     var sponsor = (data && data.brand && data.brand.spots && data.brand.spots.ticker) || t.sponsor || '';
-    var count = isStartgg ? matches.length : messages.length;
+    var count = isMatches ? matches.length : messages.length;
     bar.classList.remove('hidden');
-    bar.classList.toggle('startgg', isStartgg);
+    bar.classList.toggle('startgg', isMatches);   // class name is the LAYOUT (match cards), not the platform
     bar.classList.toggle('has-sponsor', !!sponsor);
     document.documentElement.style.setProperty('--brand', SceneBase.brandAccent(data));
     var sp = el('ticker-sponsor'); if (sp && sponsor) sp.src = sponsor;
 
     var speed = (t.speed > 0) ? t.speed : 40;
-    var sig = JSON.stringify({ s: isStartgg, m: matches, x: messages, sp: sponsor, speed: speed });
+    var sig = JSON.stringify({ s: isMatches, m: matches, x: messages, sp: sponsor, speed: speed });
     if (sig === _sig) return;
     _sig = sig;
     // Structure sig EXCLUDES the live score digits: the slide-in reveal fires when the set of
     // teams/messages changes (e.g. a match's full teams appear), not on every score tick.
-    var structSig = JSON.stringify({ s: isStartgg, m: matches.map(function (m) { return [m.status, m.teamA, m.teamB]; }), x: messages, sp: sponsor });
+    var structSig = JSON.stringify({ s: isMatches, m: matches.map(function (m) { return [m.status, m.teamA, m.teamB]; }), x: messages, sp: sponsor });
     var structChanged = structSig !== _structSig;
     _structSig = structSig;
 
@@ -145,7 +159,7 @@
     function addMsg(msg) { var span = document.createElement('span'); span.className = 'ticker-segment'; span.textContent = msg; track.appendChild(span); addSep(); }
     track.innerHTML = '';
     for (var copy = 0; copy < 2; copy++) {
-      if (isStartgg) {
+      if (isMatches) {
         matches.forEach(function (m) { track.appendChild(buildMatch(m)); addSep(); });
         messages.forEach(addMsg);   // promo lines interleaved after the scores
       } else {

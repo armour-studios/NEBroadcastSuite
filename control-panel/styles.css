@@ -1356,6 +1356,10 @@ html, body {
 /* Platform tabs show real logos (start.gg / Challonge) instead of icon+text; NXGEN = wordmark. */
 .ev-plat-logo { height: 16px; max-width: 84px; width: auto; object-fit: contain; display: block; opacity: 0.72; transition: opacity 0.15s; }
 .ev-plat-tab:hover .ev-plat-logo, .ev-plat-tab--active .ev-plat-logo { opacity: 1; }
+/* start.gg and Challonge ship WIDE wordmarks; the NXGEN mark is a stacked badge (logo over
+   "ESPORTS"), so at the shared 16px it shrinks to nothing. Give the stacked shape its own height
+   and let the tab's own padding absorb it — the tabs still line up on their centres. */
+.ev-plat-logo--tall { height: 26px; max-width: 60px; }
 .ev-plat-word { font-weight: 800; letter-spacing: 0.08em; font-size: 13px; }
 .ev-plat-panel { margin-bottom: 4px; }
 /* Unified active event card */
@@ -2183,8 +2187,6 @@ body.popout-match #btn-mt-popout { display: none; }
 .prod-timer.running .ptimer-display { color: #6ee7a0; }
 .prod-timer.ending  .ptimer-display { color: #f87171; animation: ptimer-blink 1s steps(2) infinite; }
 /* On air with a replay / ad — the top-bar timer shows playout time, not the producer clock. */
-.prod-timer.replay-air { border-color: var(--cp-accent); box-shadow: 0 0 0 1px rgba(124,58,237,.4), 0 0 12px rgba(124,58,237,.25); }
-.prod-timer.replay-air #ptimer-toggle { background: var(--cp-accent); border-color: var(--cp-accent); color: #fff; font-weight: 800; letter-spacing: .04em; }
 @keyframes ptimer-blink { 50% { opacity: .35; } }
 
 /* Reminders / checklist popover */
@@ -2301,21 +2303,84 @@ body.popout-match #btn-mt-popout { display: none; }
 .btn-ghost { color: #b3abc6; }
 
 /* Producer timer control popover */
-.ptimer-pop { position: fixed; top: 56px; left: 50%; transform: translateX(-50%); z-index: 80; width: 360px;
+.ptimer-pop { position: fixed; top: 56px; left: 50%; transform: translateX(-50%); z-index: 80; width: 446px;
   background: var(--surface); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 18px 50px rgba(0,0,0,.5); padding: 14px; }
 /* Click-to-type: this is the number producers reach for, so it behaves like a field — subtle
    hover/focus chrome that stays out of the way while it is just displaying the count. */
-.ptp-display { font-variant-numeric: tabular-nums; font-weight: 800; font-size: 40px; text-align: center; color: #fff;
-  margin-bottom: 10px; cursor: text; border: 1px solid transparent; border-radius: 8px; padding: 2px 8px;
+.ptp-display { font-variant-numeric: tabular-nums; font-weight: 800; font-size: 44px; text-align: center; color: #fff;
+  margin-bottom: 8px; cursor: text; border: 1px solid transparent; border-radius: 8px; padding: 2px 4px;
   outline: none; transition: border-color .12s ease, background-color .12s ease; }
 .ptp-display:hover { border-color: var(--border); background: var(--white-a03); }
 .ptp-display:focus-visible { border-color: var(--cp-accent); outline: 2px solid var(--cp-accent); outline-offset: 1px; }
 .ptp-display[contenteditable="true"] { border-color: var(--cp-accent); background: #0c0d12; cursor: text; }
+/* Status line under the clock: is it running, and what wall-clock time does it land on. The panel
+   had neither, so "will this end before the caster is back" was arithmetic the producer did in
+   their head. Also carries the ON AIR chip — the countdown GRAPHIC being up is a separate fact
+   from the clock running, and the panel never showed it. */
+.ptp-status { display: flex; align-items: center; justify-content: center; gap: 7px;
+  margin: -4px 0 12px; font-size: 10.5px; font-weight: 800; letter-spacing: .12em;
+  text-transform: uppercase; color: var(--muted); min-height: 14px; }
+.ptp-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--border); flex: none; }
+.ptp-status.is-running { color: #86efac; }
+.ptp-status.is-running .ptp-dot { background: #4ade80; box-shadow: 0 0 8px #4ade80; animation: ptpPulse 1.6s ease-in-out infinite; }
+.ptp-status.is-paused { color: #fcd34d; }
+.ptp-status.is-paused .ptp-dot { background: #fbbf24; }
+.ptp-status.is-done { color: #fca5a5; }
+.ptp-status.is-done .ptp-dot { background: #f56565; }
+@keyframes ptpPulse { 50% { opacity: .35; } }
+.ptp-onair { padding: 1px 6px; border-radius: 99px; font-size: 9px; letter-spacing: .14em;
+  color: #fff; background: #dc2626; }
 .ptp-row { display: flex; gap: 6px; margin-bottom: 8px; align-items: center; }
 .ptp-row:last-child { margin-bottom: 0; }
 .ptp-adj, .ptp-preset { flex: 1; padding: 8px 0; border-radius: 7px; border: 1px solid var(--border); background: var(--surface2); color: var(--text); font-weight: 700; font-size: 13px; cursor: pointer; }
+/* Six nudge buttons across 360px need a smaller face than the five presets above them. */
+.ptp-nudge .ptp-adj { font-size: 12px; padding: 7px 0; }
+/* Hairline splitting minus from plus, so the strip reads as one symmetric control. */
+.ptp-nudge-mid { flex: 0 0 1px; align-self: stretch; background: var(--border); margin: 2px 2px; }
 .ptp-adj:hover, .ptp-preset:hover { background: #2c2540; border-color: var(--cp-accent); }
-.ptp-presets { border-top: 1px solid var(--border); padding-top: 8px; }
+/* Six chips of identical weight read as one undifferentiated strip. A hair of colour on the sign
+   is enough to tell the halves apart at a glance without turning them into six coloured buttons. */
+.ptp-adj[data-adj^="-"] { color: #f0a9a9; }
+.ptp-adj:not([data-adj^="-"]) { color: #a7d8b4; }
+/* The preset matching the current length lights up, so the panel says what it is set to. */
+.ptp-preset.is-on { border-color: var(--cp-accent); background: #2c2540; color: #fff; }
+/* The transport is the button reached for most; give it presence without making it a third
+   primary colour competing with Show countdown below. */
+.ptp-transport { font-weight: 800; letter-spacing: .04em; }
+/* TWO COLUMNS — left runs the break, right sets it up. The panel had become a dozen full-width
+   bars of equal weight stacked ~610px down the screen: nothing grouped, no dominant action, and
+   four buttons competing to be the main one. Splitting by job halves the height and gives each
+   half one obvious focus (the clock; the fields). */
+/* stretch (not flex-start) so both columns share the setup column's height, and the timer column can
+   then CENTRE its clock/transport in that height instead of hugging the top with dead space below. */
+.ptp-cols { display: flex; gap: 14px; align-items: stretch; margin-bottom: 10px; }
+.ptp-col { min-width: 0; }
+/* The clock column is sized to hold H:MM:SS at 44px without reflowing when the hour digit lands.
+   Centred vertically in the taller setup column so the timer sits in the middle of the empty space. */
+.ptp-col--run { flex: 0 0 190px; display: flex; flex-direction: column; justify-content: center; }
+.ptp-col--setup { flex: 1 1 auto; }
+/* Micro-labels ABOVE each control: in a 210px column a label-left row leaves the select too narrow
+   to read an OBS scene name in. */
+.ptp-lbl { font-size: 9.5px; font-weight: 800; letter-spacing: .14em; text-transform: uppercase;
+  color: var(--muted); margin: 0 0 4px 2px; }
+.ptp-col--setup .input-select { width: 100%; margin-bottom: 8px; }
+.ptp-col--setup .ptp-lbl + .input-select { margin-bottom: 6px; }
+.ptp-col--setup .ptp-row { margin-bottom: 0; }
+.ptp-col--setup .ptp-switch { margin-bottom: 10px; }
+/* The status line has to survive wrapping in a 190px column when the LIVE chip is present. */
+.ptp-status { flex-wrap: wrap; }
+
+/* row-reverse puts the SWITCH after its text without touching the markup, and margin-left:auto
+   pushes the pair to the right edge so the switch stacks under the selects' chevrons. */
+.ptp-switch { margin-left: auto; flex-direction: row-reverse; gap: 9px; font-size: 12px; width: max-content; }
+/* Title picker + its "Title only" toggle share ONE row: the select flexes, the toggle sits at the end.
+   Overrides the setup column's full-width select + bottom-margin defaults (declared later to win). */
+.ptp-title-row { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.ptp-title-row .input-select { flex: 1 1 auto; width: auto; min-width: 0; margin-bottom: 0; }
+.ptp-title-row .ptp-switch { margin: 0 0 0 auto; flex: 0 0 auto; white-space: nowrap; }
+/* Fixed-width action buttons so Set and To time line up under each other. */
+.ptp-go { flex: 0 0 76px; }
+.ptp-row .input-text { min-width: 0; }
 /* Draggable header for the timer popover (grab to move it around the app window). */
 .ptp-head { display: flex; align-items: center; gap: 6px; margin: -4px -4px 10px; padding: 4px 4px 8px;
   border-bottom: 1px solid var(--border); cursor: move; user-select: none; }
@@ -2551,62 +2616,6 @@ body.popout-match #btn-mt-popout { display: none; }
 .clip-card input[type="checkbox"] { accent-color: var(--blue); width: 16px; height: 16px; }
 .clip-card-name { font-weight: 600; font-size: 13px; }
 .clip-card-meta { font-size: 11px; color: var(--muted); }
-/* ── Replays main sub-tabs (Editor / Social Export) ── */
-
-/* ── Social Export panel ── */
-.soc-sub-tabs { display:flex; gap:4px; margin-bottom:20px; }
-.soc-sub-tab { padding:6px 18px; background:transparent; border:none; border-radius:6px; font-size:12px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; color:var(--muted); cursor:pointer; transition:background .15s,color .15s; }
-.soc-sub-tab:hover { color:#fff; }
-.soc-sub-tab.active { background:var(--white-a08); color:#fff; }
-
-/* Settings bar */
-.soc-settings-bar { display:flex; align-items:center; gap:14px; flex-wrap:wrap; margin-bottom:8px; padding:12px 16px; background:var(--white-a03); border:1px solid var(--border); border-radius:10px 10px 0 0; border-bottom:none; }
-
-/* Platform selector */
-.soc-plat-btn { padding:5px 14px; background:var(--white-a06); border:1px solid var(--border); border-radius:7px; font-size:12px; font-weight:700; color:var(--muted); cursor:pointer; transition:background .15s,color .15s,border-color .15s; white-space:nowrap; }
-.soc-plat-btn:hover { color:#fff; background:var(--white-a10); }
-.soc-plat-btn.active { background:var(--cp-accent,#7c3aed); color:#fff; border-color:transparent; }
-
-/* Card preset toggle button */
-.soc-preset-toggle { margin-left:auto; padding:5px 13px; background:var(--white-a05); border:1px solid var(--border); border-radius:7px; font-size:12px; font-weight:600; color:var(--muted); cursor:pointer; transition:background .15s,color .15s; white-space:nowrap; }
-.soc-preset-toggle:hover,.soc-preset-toggle.active { color:#fff; background:var(--white-a10); border-color:rgba(255,255,255,0.18); }
-
-/* Preset settings panel */
-.soc-preset-panel { display:flex; flex-direction:column; gap:10px; margin-bottom:16px; padding:14px 16px; background:rgba(255,255,255,0.025); border:1px solid var(--border); border-radius:0 0 10px 10px; }
-.soc-preset-row { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
-.soc-preset-hint { font-size:11px; color:var(--muted); }
-
-/* Graphics cards grid */
-.soc-cards-grid { display:flex; flex-wrap:wrap; gap:16px; align-items:flex-start; }
-.soc-card { background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:14px; display:flex; flex-direction:column; gap:10px; }
-.soc-card-lbl { font-size:11px; font-weight:800; letter-spacing:.06em; text-transform:uppercase; color:var(--muted); }
-.soc-canvas-wrap { display:flex; justify-content:center; align-items:center; background:#080b14; border-radius:6px; padding:6px; min-height:180px; }
-.soc-canvas { display:block; border-radius:3px; image-rendering:-webkit-optimize-contrast; }
-.soc-card-actions { display:flex; gap:6px; }
-.soc-queue-nav { display:flex; align-items:center; gap:8px; }
-.soc-queue-lbl { font-size:12px; color:var(--muted); flex:1; text-align:center; }
-/* Clear break before the unrelated "Scene Background" (OBS) card, so it doesn't read as part of
-   the Social graphics above it. */
-.soc-unrelated-divider { display:flex; align-items:center; gap:10px; margin:26px 0 0; color:var(--muted); font-size:10px; font-weight:800; letter-spacing:.1em; text-transform:uppercase; }
-.soc-unrelated-divider::before, .soc-unrelated-divider::after { content:''; flex:1; height:1px; background:var(--border); }
-.soc-unrelated-card { border-style:dashed; }
-
-/* Clip Prep */
-.soc-clipprep-body { display:flex; flex-direction:column; gap:18px; max-width:860px; }
-.soc-slot-row { display:flex; align-items:flex-end; gap:10px; flex-wrap:wrap; }
-.soc-slot { display:flex; flex-direction:column; gap:6px; flex:1; min-width:180px; }
-.soc-slot-main { flex:2; }
-.soc-slot-lbl { font-size:12px; font-weight:700; color:#e6e8ee; }
-.soc-slot-opt { font-weight:400; color:var(--muted); }
-.soc-slot-arrow { font-size:18px; color:var(--muted); align-self:flex-end; padding-bottom:8px; }
-.soc-opts-row { display:flex; gap:16px; align-items:flex-end; flex-wrap:wrap; }
-.soc-bake-status { display:flex; flex-direction:column; gap:6px; }
-.soc-bake-bar-wrap { height:6px; background:var(--white-a08); border-radius:3px; overflow:hidden; }
-.soc-bake-bar { height:100%; background:var(--cp-accent,#7c3aed); border-radius:3px; transition:width .3s; }
-.soc-bake-msg { font-size:12px; color:var(--muted); }
-.soc-bake-result { display:flex; align-items:center; gap:12px; padding:10px 14px; background:rgba(74,222,128,.08); border:1px solid rgba(74,222,128,.2); border-radius:8px; }
-.soc-bake-result-name { font-size:13px; color:#9ae6b4; flex:1; }
-
 /* Exports — full-width bar under the 3-pane editor; horizontally-scrolling strip of cards. */
 .rp-exports-bar { margin-top: 14px; padding: 12px 4px 4px; border-top: 1px solid var(--border); }
 .rp-exports-bar-hdr { display: flex; align-items: baseline; gap: 10px; margin-bottom: 10px; padding: 0 10px; }
@@ -3086,7 +3095,16 @@ input[type="radio"], input[type="checkbox"] { accent-color: var(--cp-accent); }
 .qk-ros-arrow:disabled { opacity: .3; cursor: default; }
 .qk-ros-cur { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; justify-content: center; gap: 1px; padding: 4px 2px; }
 .qk-ros-cur-lbl { font-size: 14px; font-weight: 800; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.qk-ros-nexthint { font-size: 11px; font-weight: 600; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Up-next row. The label WRAPS (to two lines) rather than ellipsing: a rundown segment carries
+   its time and its purpose, and a single truncated line loses both. */
+.qk-ros-next { display: flex; align-items: flex-start; gap: 8px; margin-top: 6px; padding: 7px 9px; border-radius: 8px; background: var(--white-a04, rgba(255,255,255,.04)); border: 1px solid var(--border); }
+.qk-ros-next.is-first { border-color: rgba(124,92,255,.35); background: rgba(124,92,255,.08); }
+.qk-ros-next-tag { flex: 0 0 auto; font-size: 9px; font-weight: 800; letter-spacing: .09em; color: var(--muted); padding-top: 2px; }
+.qk-ros-next.is-first .qk-ros-next-tag { color: #a68bff; }
+.qk-ros-next-body { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.qk-ros-next-lbl { font-size: 12px; font-weight: 700; color: #dfe3ea; line-height: 1.32; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+.qk-ros-next-then { font-size: 10px; font-weight: 600; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.qk-ros-next-meta { flex: 0 0 auto; font-size: 9px; font-weight: 800; letter-spacing: .06em; color: var(--muted); padding-top: 2px; white-space: nowrap; }
 .qk-ros-go {
   flex: 0 0 auto; min-width: 62px; padding: 0 14px; border-radius: 9px; cursor: pointer;
   font-size: 12px; font-weight: 800; letter-spacing: .02em; color: #0b1220;
@@ -3807,7 +3825,21 @@ input:-webkit-autofill:active {
 /* Desk Show ▸ Caster Predictions. The markup (ps-pred-* in app.js) reuses the .team-dd typeahead
    above for its search dropdown, so only the row + made-pick chip live here. Without the chip rules
    a picked team's logo rendered at its natural size and blew the panel's layout open. */
-.ps-section-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.ps-section-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+/* Desk Show panel. These four were UNSTYLED — plain divs falling back to block layout, so the
+   preset select and its three buttons stacked full-width instead of sitting on one line, and the
+   sections ran together with no separation. That is what made the panel read as a flat column. */
+.ps-block { padding: 12px 0; border-top: 1px solid var(--border); }
+.ps-block:first-of-type { padding-top: 0; border-top: 0; }
+.ps-presets { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.ps-topics { display: flex; flex-direction: column; gap: 6px; }
+.ps-return { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
+.ps-return .input-select { flex: 1; min-width: 0; }
+/* Setup notes: reference material, not a control. Collapsed so it stops sitting between fields. */
+.ps-setup { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border); }
+.ps-setup > summary { cursor: pointer; font-size: 11px; font-weight: 800; letter-spacing: .1em;
+  text-transform: uppercase; color: var(--muted); }
+.ps-setup > summary:hover { color: var(--text, #e8eaf0); }
 
 .ps-predictions { display: flex; flex-direction: column; gap: 8px; }
 .ps-pred-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
@@ -4532,8 +4564,16 @@ input:-webkit-autofill:active {
 
   .sidebar-nav .nav-item { padding: 11px 12px; }   /* touch-friendly nav rows */
 
-  /* Don't let wide media/tables force a horizontal page scroll */
-  .tab-content img, .tab-content video, .tab-content canvas { max-width: 100%; height: auto; }
+  /* Don't let wide media/tables force a horizontal page scroll.
+     Scoped to UNCLASSED media on purpose. `.tab-content img` (0,1,1) outranks every sizing rule
+     this panel has for its chrome — .ev-plat-logo, .pp-chip img, .team-logo-item img and friends
+     are all (0,1,0) or (0,1,1) declared EARLIER — so the blanket `height: auto` silently threw
+     their fixed heights away below 900px. The visible symptom was the Events platform tabs
+     rendering their logos at full natural size and blowing the row out. Content images that
+     genuinely need constraining carry no class; everything deliberately sized does. */
+  .tab-content img:not([class]),
+  .tab-content video:not([class]),
+  .tab-content canvas:not([class]) { max-width: 100%; height: auto; }
   .tab-content table { display: block; width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
 }
 
@@ -6645,53 +6685,6 @@ span.lg-pl-role { color: var(--muted); }
    rule below regardless of source order. */
 .prod-header button, .prod-header select, .prod-header input, .prod-header a,
 .prod-header [role="button"] { -webkit-app-region: no-drag; }
-
-/* ── Pre-flight "Go Live" checklist — status checkmark next to the conn bars ── */
-.golive-area { position: relative; display: inline-flex; align-items: center; -webkit-app-region: no-drag; }
-.golive-area * { -webkit-app-region: no-drag; }
-.golive-icon { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px;
-  border-radius: 50%; background: #6b7280; color: #fff; cursor: default; outline: none;
-  transition: background .2s, box-shadow .2s; }
-.golive-area.is-ready .golive-icon { background: var(--ok); box-shadow: 0 0 7px rgba(34,197,94,.5); }
-.golive-area.is-warn  .golive-icon { background: #f5b14a; }
-.golive-area.is-block .golive-icon { background: var(--danger); box-shadow: 0 0 7px rgba(239,68,68,.55); }
-/* Hover (or keyboard-focus) the icon → reveal the checklist. A transparent bridge spans the gap
-   so moving the cursor onto the menu doesn't drop the hover. */
-.golive-menu { position: absolute; top: calc(100% + 8px); left: 0; z-index: 1200; width: 320px;
-  background: var(--surface2, #1a1d24); border: 1px solid var(--border, #2a2e3a); border-radius: 10px;
-  padding: 10px; box-shadow: 0 12px 32px rgba(0,0,0,.6);
-  opacity: 0; pointer-events: none; transform: translateY(4px); transition: opacity .15s, transform .15s; }
-.golive-menu::before { content: ''; position: absolute; top: -10px; left: 0; right: 0; height: 10px; }
-.golive-area:hover .golive-menu, .golive-icon:focus + .golive-menu, .golive-icon:focus-visible + .golive-menu {
-  opacity: 1; pointer-events: auto; transform: translateY(0); }
-.golive-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
-.golive-head-title { font-size: 12px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; color: #e7eaf0; }
-.golive-head-sum { font-size: 11px; font-weight: 700; }
-.golive-head-sum.is-ready { color: #22e06a; }
-.golive-head-sum.is-warn  { color: #f5b14a; }
-.golive-head-sum.is-block { color: var(--danger); }
-.golive-list { display: flex; flex-direction: column; gap: 2px; }
-.golive-row { display: flex; align-items: flex-start; gap: 9px; padding: 6px 4px; border-radius: 6px; }
-.golive-row + .golive-row { border-top: 1px solid var(--white-a05); }
-.golive-row.is-clickable { cursor: pointer; }
-.golive-row.is-clickable:hover { background: var(--white-a04); }
-.golive-ic { flex-shrink: 0; width: 16px; height: 16px; border-radius: 50%; margin-top: 1px;
-  display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 900; color: #0b0d12; }
-.golive-ic.pass { background: #22e06a; }
-.golive-ic.warn { background: #f5b14a; }
-.golive-ic.fail { background: var(--danger); color: #fff; }
-.golive-tx { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
-.golive-tx-lbl { font-size: 12px; font-weight: 700; color: #e7eaf0; }
-.golive-tx-st { font-size: 11px; color: var(--muted, #9aa3b0); }
-.golive-row.fail .golive-tx-st { color: #f3a3a3; }
-/* Settings-page preflight section — status reflected as left border */
-section#golive-area { border-left-width: 3px; transition: border-left-color .3s; }
-section#golive-area.is-ready { border-left-color: var(--ok); }
-section#golive-area.is-warn  { border-left-color: #f5b14a; }
-section#golive-area.is-block { border-left-color: var(--danger); }
-section#golive-area .golive-head-sum { font-size: 13px; }
-section#golive-area .golive-list { gap: 4px; }
-section#golive-area .golive-row { padding: 8px 6px; }
 
 /* ── Sponsor proof-of-play ─────────────────────────────────────────────────── */
 .app-live { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; font-weight: 700; color: var(--danger); }
@@ -9382,6 +9375,7 @@ body.perf-noanim *, body.perf-noanim *::before, body.perf-noanim *::after {
 .as-modal-tools { display: flex; gap: 8px; align-items: center; flex: 0 0 auto; }
 .as-modal-x { border: 0; background: transparent; color: var(--muted); font-size: 18px; line-height: 1; cursor: pointer; padding: 5px 9px; border-radius: 6px; }
 .as-modal-x:hover { background: var(--surface2); color: var(--text); }
+
 /* Not a modal (popped-out window / fallback): strip the box chrome + hide the modal-only tools. */
 #tab-ajustes-content:not(.as-modal) .as-modal-box { border: 0; padding: 0; max-height: none; box-shadow: none; background: transparent; width: auto; overflow: visible; }
 #tab-ajustes-content:not(.as-modal) .as-modal-tools { display: none; }

@@ -415,24 +415,34 @@ function renderTicker(data) {
   if (!bar || !track) return;
 
   const isStartgg = ticker.source === 'startgg';
+  // NXGEN feeds the ticker in the SAME item shape start.gg does (server: buildNxgenMatchFeed),
+  // so both platforms share this one match-card path instead of a second layout.
+  const isNxgen = ticker.source === 'nxgen';
+  const isMatches = isStartgg || isNxgen;
   // Battle-royale standings ride the same prebuilt-lines path as manual promo copy (the server
   // formats them in brTickerFeed) — no per-match team-vs-team markup, because a BR line is a
   // ranked row, not a fixture.
   const isBr = ticker.source === 'br';
-  const matches = isStartgg
-    ? ((data && data.startgg && data.startgg.matchFeed) || []).filter((m) => m && (m.status === 'live' || m.status === 'done'))
+  const matches = isMatches
+    ? (((isNxgen ? (data && data.nxgen && data.nxgen.matchFeed) : (data && data.startgg && data.startgg.matchFeed)) || [])
+        .filter((m) => m && (m.status === 'live' || m.status === 'done')))
     : [];
   const brLines = isBr ? (Array.isArray(ticker.feed) ? ticker.feed.filter(Boolean) : []) : [];
-  // In BR mode the producer's own promo lines still interleave, same as start.gg mode.
-  const messages = isStartgg ? []
-    : isBr ? brLines.concat((Array.isArray(ticker.messages) ? ticker.messages : []).filter(Boolean))
-    : (Array.isArray(ticker.messages) ? ticker.messages : []).filter(Boolean);
+  const promo = (Array.isArray(ticker.messages) ? ticker.messages : []).filter(Boolean);
+  // In BR mode the producer's own promo lines still interleave, same as the scores modes.
+  const messages = isMatches ? []
+    : isBr ? brLines.concat(promo)
+    : promo;
   const sponsor = (data && data.brand && data.brand.spots && data.brand.spots.ticker) || ticker.sponsor || '';
-  const count = isStartgg ? matches.length : messages.length;
+  // Scores modes count the promo lines too. The panel offers them as "shown between the live
+  // scores", but they were being dropped — and with them out of the count a ticker whose feed was
+  // momentarily empty (event not polling yet, bracket all pending) hid itself completely instead
+  // of falling back to the producer's own copy.
+  const count = isMatches ? (matches.length + promo.length) : messages.length;
   const visible = !!ticker.visible && (count > 0 || !!sponsor);
 
   bar.classList.toggle('hidden', !visible);
-  bar.classList.toggle('startgg', isStartgg);
+  bar.classList.toggle('startgg', isMatches);   // class name is the LAYOUT (match cards), not the platform
   bar.classList.toggle('has-sponsor', !!sponsor);
   document.documentElement.style.setProperty('--brand', (data && data.brand && data.brand.color) || '#055fdb');
   const sp = el('ticker-sponsor'); if (sp && sponsor) sp.src = sponsor;
@@ -440,11 +450,24 @@ function renderTicker(data) {
 
   // Rebuild only when content/speed changes so the scroll animation isn't reset
   const speed = (ticker.speed > 0) ? ticker.speed : 10;
-  const sig = JSON.stringify({ s: isStartgg, m: matches, x: messages, sp: sponsor, speed });
+  const sig = JSON.stringify({ s: isMatches, m: matches, x: messages, pr: isMatches ? promo : [], sp: sponsor, speed });
   if (sig === _lastTickerSig) return;
   _lastTickerSig = sig;
 
-  const fmtScore = (m) => `${(typeof m.scoreA === 'number') ? m.scoreA : 0} - ${(typeof m.scoreB === 'number') ? m.scoreB : 0}`;
+  // A set with no reported game scores is not 0-0. Both platforms produce winner-only results
+  // (start.gg reported-winner / DQ, NXGEN finals recorded with just a winnerId), and a live set
+  // has no score until the first game lands — printing "0 - 0" for any of those claims a result
+  // that didn't happen. Same rules the server's text feed already uses (formatTickerFeed).
+  const fmtScore = (m) => {
+    const a = (typeof m.scoreA === 'number') ? m.scoreA : null;
+    const b = (typeof m.scoreB === 'number') ? m.scoreB : null;
+    if (m.dq) return m.winSide === 'a' ? 'W - DQ' : m.winSide === 'b' ? 'DQ - W' : 'DQ';
+    if (a === null && b === null) {
+      if (m.winSide) return m.winSide === 'a' ? 'W - L' : 'L - W';
+      if (m.status === 'live') return 'vs';
+    }
+    return `${a || 0} - ${b || 0}`;
+  };
   const statusTag = (m) => {
     const s = document.createElement('span');
     if (m.status === 'live') { s.className = 'tk-stat tk-live'; const d = document.createElement('span'); d.className = 'tk-stat-dot'; s.appendChild(d); s.appendChild(document.createTextNode('LIVE')); }
@@ -464,9 +487,15 @@ function renderTicker(data) {
 
   track.innerHTML = '';
   for (let copy = 0; copy < 2; copy++) {
-    if (isStartgg) {
+    if (isMatches) {
       matches.forEach((m) => {
         track.appendChild(buildMatch(m));
+        const sep = document.createElement('span'); sep.className = 'tk-sep'; sep.textContent = '•'; track.appendChild(sep);
+      });
+      // Promo copy rides after the scores in the same loop — what the panel promises, and what
+      // keeps a giveaway/sponsor line on air during a lull in the bracket.
+      promo.forEach((line) => {
+        const seg = document.createElement('span'); seg.className = 'ticker-segment'; seg.textContent = line; track.appendChild(seg);
         const sep = document.createElement('span'); sep.className = 'tk-sep'; sep.textContent = '•'; track.appendChild(sep);
       });
     } else {

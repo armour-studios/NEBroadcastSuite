@@ -22,6 +22,10 @@
     'bar'            - the full-width version; pass `width` to size it.
   Either way it rises into frame on first show and hides itself when both halves are empty.
 
+  PLACEMENT. Bottom-centre by default. `corner: 'br'` pins it bottom-RIGHT instead (right-anchored,
+  so it grows leftward), and `bare: true` drops the plate entirely and leaves only the logos - the
+  bracket board uses both, because a dark pill under a board that already has its own frame reads
+  as a competing graphic rather than as a partner bug.
   PLACEMENT. Bottom-centre by default. Crew battles fill the bottom of the frame with Smash's own
   per-player HUD, so the card can also be parked in the UPPER LEFT - in the empty margin BESIDE
   player 1's plate, not under it. Pass `anchor` (a selector for the scoreboard) and the card hangs
@@ -33,6 +37,7 @@
 
   Params honoured off the scene's own URL:  ?rail=0  ?casters=0  ?sponsors=0  ?anim=0
                                             ?railrotate=8 (sponsor page seconds)
+                                            ?railmode=static|cycle (overrides the kit's sponsorMode)
                                             ?railpos=topleft|bottom (overrides the producer's pick)
   Sponsor pool follows the kit's placement tags STRICTLY: rail-tagged sponsors win, then
   desk-tagged, and nothing else - no untagged fallback, so clearing a sponsor's placements in the
@@ -63,6 +68,9 @@
     '   logos page and cross-fade instead of widening it (see PAGE_SIZE_CHIP / renderSponsors). */',
     '  max-width: var(--crail-max, 720px);',
     '}',
+    '/* STATIC mode is the producer asking for every partner on screen at once, so the paging cap',
+    '   would just clip the ones that did not fit. Still bounded — to the frame, not to a page. */',
+    '.crail--static { max-width: var(--crail-max, 1760px); }',
     '/* chip (default): shrink-wrap the content so the pill is only as wide as what is in it */',
     '.crail.show { animation: crail-rise .45s cubic-bezier(.2, .8, .3, 1) .62s both; }',
     '/* Upper-left placement: BESIDE player 1, in the margin outside the board. The card is pinned',
@@ -77,6 +85,23 @@
     '  transform: none;',
     '}',
     '.crail--tl.show { animation: crail-slide-l .45s cubic-bezier(.2, .8, .3, 1) .62s both; }',
+    '/* BOTTOM-RIGHT placement: pinned by its RIGHT edge so it grows leftward as sponsors are',
+    '   added and never drifts across the middle of the feed. It rises straight up - the centred',
+    '   default has to keep its translateX(-50%) through the animation; this one must not. */',
+    '@keyframes crail-rise-r { from { opacity: 0; transform: translateY(16px); }',
+    '                          to   { opacity: 1; transform: translateY(0); } }',
+    '.crail--br { left: auto; right: var(--crail-right, 44px); transform: none; }',
+    '.crail--br.show { animation: crail-rise-r .45s cubic-bezier(.2, .8, .3, 1) .62s both; }',
+    '/* BARE: the logos and nothing else - no plate, no frame, no accent hairline. For boards that',
+    '   already carry their own furniture (the bracket), where a dark pill under the board reads as',
+    '   a second graphic competing with it rather than as a partner bug. The plate used to carry',
+    '   the logos off the background, so bare gives each one its own drop shadow instead. */',
+    '.crail--bare { background: none; box-shadow: none; border-radius: 0; overflow: visible; }',
+    '.crail--bare::before { display: none; }',
+    '.crail--bare .crail-seg { padding: 0; }',
+    '.crail--bare .crail-row, .crail--bare .crail-row--partners { min-height: 0; }',
+    '.crail--bare .crail-row + .crail-row:not(.is-empty)::before { display: none; }',
+    '.crail--bare .crail-logo { filter: drop-shadow(0 2px 9px rgba(0,0,0,.65)); }',
     '/* Everything tightens up for the narrow slot - a full-size row would just ellipsize away.',
     '   The two rows are sized to add up to bar 1 exactly (38 + 30 = 68px), so the card is flush',
     '   top AND bottom with the player plate beside it. Stacking two full-height rows made it read',
@@ -191,6 +216,7 @@
   }
   var SHOW_SPONSORS = QP.get('sponsors') !== '0';
   var ROTATE_PARAM = Number(QP.get('railrotate')) || 0;
+  var MODE_PARAM = QP.get('railmode');            // static|cycle — beats the kit, per browser source
 
   var elRail, elCastSeg, elPeople, elSponSeg, elLogos;
   var _sponsorSig = '';
@@ -211,9 +237,11 @@
 
     if (QP.get('anim') === '0') document.body.classList.add('no-anim');
     elRail = document.createElement('div');
-    elRail.className = 'crail' + (opts.variant === 'bar' ? ' crail--bar' : '');
+    elRail.className = 'crail' + (opts.variant === 'bar' ? ' crail--bar' : '')
+      + (opts.corner === 'br' ? ' crail--br' : '') + (opts.bare ? ' crail--bare' : '');
     if (opts.width) elRail.style.setProperty('--crail-w', opts.width + 'px');
     if (opts.bottom != null) elRail.style.setProperty('--crail-bottom', opts.bottom + 'px');
+    if (opts.right != null) elRail.style.setProperty('--crail-right', opts.right + 'px');
     elRail.innerHTML =
       '<div class="crail-row crail-row--partners is-empty">' +
         '<div class="crail-seg crail-seg--sponsors"><div class="crail-logos"></div></div>' +
@@ -343,16 +371,25 @@
 
   function renderSponsors(data) {
     var logos = sponsorLogos(data);
-    var sig = logos.join('|');
+    /* The brand kit's sponsorMode: 'static' = every partner on screen at once, 'cycle' (default)
+       = pages that cross-fade. This rail ignored the field entirely and always cycled, so a kit
+       set to static still slideshowed on every scene that mounts the rail. It is part of the
+       signature too — switching the kit from cycle to static changes no logo, so a logos-only
+       signature meant the mode change never repainted. */
+    var mode = (MODE_PARAM === 'static' || MODE_PARAM === 'cycle') ? MODE_PARAM
+             : (((data.brand || {}).sponsorMode === 'static') ? 'static' : 'cycle');
+    var sig = mode + '#' + logos.join('|');
     if (sig === _sponsorSig) return;                   // unchanged - never restart the cycle
     _sponsorSig = sig;
     if (_sponsorTimer) { clearInterval(_sponsorTimer); _sponsorTimer = null; }
     elLogos.innerHTML = '';
+    elRail.classList.toggle('crail--static', mode === 'static');
     elSponSeg.classList.toggle('is-empty', !logos.length);
     if (!logos.length) return;
 
     var pages = [];
-    var per = (opts.variant === 'bar') ? PAGE_SIZE_BAR
+    var per = (mode === 'static') ? logos.length
+            : (opts.variant === 'bar') ? PAGE_SIZE_BAR
             : (_pos === 'topleft') ? PAGE_SIZE_TL : PAGE_SIZE_CHIP;
     for (var i = 0; i < logos.length; i += per) pages.push(logos.slice(i, i + per));
     pages.forEach(function (page, pi) {
@@ -392,6 +429,9 @@
     if (want !== _pos) {
       _pos = want;
       elRail.classList.toggle('crail--tl', tl);
+      // ?railpos=topleft has to beat the scene's own corner, and the two can never both be on
+      // (--tl is left-anchored, --br right-anchored, and --br is later in the sheet).
+      elRail.classList.toggle('crail--br', !tl && opts.corner === 'br');
       // The two placements page sponsors differently (3-up vs 1-up), and renderSponsors bails
       // early when the logo list is unchanged - so force it to re-chunk on a placement change.
       _sponsorSig = '';

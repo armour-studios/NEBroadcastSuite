@@ -13,7 +13,7 @@
   var KEY = 'ne_nav_simple';
   // Pages a first-run user does not need in order to get a show on air. All reachable in one click
   // via More, and every one of them is still reachable from deep links elsewhere in the app.
-  var ADVANCED = ['media', 'stats', 'social', 'replays', 'roles'];
+  var ADVANCED = ['media', 'stats', 'replays', 'roles'];
 
   // Collapsed is the DEFAULT for everyone, not just new installs. The five pages behind More are
   // library and reporting surfaces (media, analytics, social, video editor, crew roles) — none is
@@ -52,7 +52,7 @@
     if (toggleLabel) {
       toggleLabel.textContent = on ? 'More (' + hiddenCount + ')' : 'Show fewer';
       toggleBtn.title = on
-        ? 'Show the remaining pages: media library, analytics, social, video editor and crew roles'
+        ? 'Show the remaining pages: media library, analytics, video editor and crew roles'
         : 'Collapse back to the pages needed to run a show';
       toggleBtn.setAttribute('aria-expanded', on ? 'false' : 'true');
     }

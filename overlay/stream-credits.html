@@ -192,6 +192,7 @@
        (state.credits.endText) and defaults to THANKS FOR WATCHING. -->
   <div class="end-card" id="end-card"><div class="end-card-text" id="end-card-text">Thanks For Watching</div></div>
 
+<script src="preflight-core.js"></script>
 <script>
 /* ────────────────────────────────────────────────────────────────
    Stream Credits Overlay
@@ -207,7 +208,9 @@ const PAUSE_MS  = Math.max(0, Number(params.get('pause') || 2000));
 const LOOP      = params.has('loop');
 const PREVIEW   = params.has('preview');
 const WS_PORT   = 3001;
-const API_BASE  = `http://localhost:3000`;
+// Same-origin when served (cross-origin would be blocked — most /api routes send no CORS
+// headers); absolute only for a file:// preview.
+const API_BASE  = /^https?:$/.test(location.protocol) ? location.origin : 'http://127.0.0.1:3000';
 
 const track     = document.getElementById('scroll-track');
 const viewport  = document.getElementById('scroll-viewport');
@@ -242,89 +245,11 @@ function hexA(hex, a) {
 }
 
 /* ── Talent (production crew) → the top bar ─────────────────── */
-function buildTalent(st) {
-  const bucket = { casters: [], hosts: [], production: [], operations: [], observers: [] };
-  // Tournament-ops crew.group values (Show Deck support roles) → the Operations credit line.
-  const OPS_GROUPS = ['admin', 'coordinator', 'replay', 'stats', 'moderator', 'graphics', 'flex', 'socials'];
-  // Trim + drop a leading @ before keying, so "Jonzey" / " Jonzey" / "@Jonzey" collapse.
-  const norm = (s) => String(s || '').trim().toLowerCase().replace(/^@+/, '');
-  const toks = (...xs) => xs.map(norm).filter(Boolean);
-  // A person is identified by ANY of their name/handle tokens — the same human is credited from the
-  // crew record (gamertag, e.g. "Jonzey") AND from their caster-library twin (social @handle, e.g.
-  // "ItzJonzey"); those display strings differ, so a display-only key duplicated them (and the library
-  // twin defaulted to Casters). Dedup by identity, and let the crew record's role win.
-  const seen = new Set();          // identity tokens of everyone already credited
-  const crewGoverned = new Set();  // tokens of EVERY crew member — the library must never re-credit them
-  const add = (b, name, role, t) => {
-    const keys = (t && t.length) ? t : toks(name);
-    if (!keys.length || keys.some((k) => seen.has(k))) return;
-    keys.forEach((k) => seen.add(k));
-    bucket[b].push({ name: String(name).trim(), role: role || '' });
-  };
-  const place = (name, role, group, kind, t) => {
-    if (/produc|director/i.test(role || '')) return add('production', name, role, t);
-    const g = (group === 'hosts' || kind === 'host') ? 'hosts'
-      : (group === 'observers' || kind === 'observer') ? 'observers'
-      : (['production', 'producer'].includes(group)) ? 'production'
-      // Tournament-ops crew (admin, replay, stats, moderator, graphics, flex, socials) aren't tied to
-      // a cam but did their dues — they get their own Operations credit line.
-      : (OPS_GROUPS.includes(group)) ? 'operations'
-      : 'casters';
-    add(g, name, role, t);
-  };
-  // Who is on tonight's desk: the Show Deck lineup slots, the resolved on-air list and the two
-  // show roles (host / observer). The caster LIBRARY is not this list — it's every person ever
-  // saved to a card — so it can only ever confirm a desk seat, never earn one.
-  const cs = st.casters || {};
-  const lib = Array.isArray(cs.library) ? cs.library : [];
-  const onDesk = new Set();
-  const idKeys = (p) => toks(p && p.name, p && p.handle, p && p.gamertag, p && p.socialHandle);
-  const seat = (p) => idKeys(p).forEach((k) => onDesk.add(k));
-  (Array.isArray(cs.lineup) ? cs.lineup : []).forEach((e) => {
-    const p = e && e.libraryId && lib.find((l) => l && l.id === e.libraryId);
-    if (p) seat(p);
-  });
-  (Array.isArray(cs.list) ? cs.list : []).forEach(seat);
-  toks((cs.showRoles || {}).host, (cs.showRoles || {}).observer).forEach((k) => onDesk.add(k));
-
-  // Crew is the source of truth for who worked and their role. Record EVERY crew member as governed
-  // (so the library can't re-credit them under Casters), and credit the ones who actually worked:
-  // marked as having worked the event (on shift, off-air event staff, an earlier shift) or sitting
-  // on the desk right now — seating a slot doesn't always set the crew twin's workedEvent flag.
-  (st.crew || []).forEach((c) => {
-    if (!c || !c.name) return;
-    const t = toks(c.name, c.handle, c.socialHandle);
-    t.forEach((k) => crewGoverned.add(k));
-    if (c.workedEvent || t.some((k) => onDesk.has(k))) place(c.handle || c.name, c.role, c.group, null, t);
-  });
-  // Caster library — a guest/fill-in with no crew record, credited ONLY while they hold a desk
-  // seat. Crediting the whole library rolled everyone ever saved to a card (old casters, test
-  // entries) as if they had worked tonight's show.
-  lib.forEach((e) => {
-    if (!e || !e.name) return;
-    const t = toks(e.name, e.handle);
-    if (t.some((k) => crewGoverned.has(k))) return;
-    if (!t.some((k) => onDesk.has(k))) return;
-    place(e.handle || e.name, e.role, null, e.kind, t);
-  });
-  // Producer-added talent (Graphics > Stream Credits) — crew from other shifts of the same broadcast.
-  ((st.credits && st.credits.talent) || []).forEach((t) => {
-    if (!t || !t.name) return;
-    const tk = toks(t.name, t.handle);
-    if (['casters', 'hosts', 'production', 'operations', 'observers'].includes(t.group)) add(t.group, t.name, t.role, tk);
-    else place(t.name, t.role, null, null, tk);
-  });
-  // A–Z within each credit group (producer request). Sorting here (before groups assemble) keeps
-  // contentSig() stable since it enumerates buildTalent() in this same order.
-  Object.keys(bucket).forEach((k) => bucket[k].sort((a, b) => (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' })));
-  const groups = [];
-  if (bucket.casters.length)    groups.push({ label: 'Casters',    people: bucket.casters });
-  if (bucket.hosts.length)      groups.push({ label: 'Talent',     people: bucket.hosts });
-  if (bucket.production.length) groups.push({ label: 'Production', people: bucket.production });
-  if (bucket.operations.length) groups.push({ label: 'Operations', people: bucket.operations });
-  if (bucket.observers.length)  groups.push({ label: 'Observers',  people: bucket.observers });
-  return groups;
-}
+// The credits roster rule lives in overlay/preflight-core.js, NOT here. The control panel's
+// Preflight screen must show the exact roster this scene will roll — a second implementation
+// would drift, which is the bug this whole thing exists to stop. Loaded as a plain <script>
+// above; server.js require()s the same file.
+function buildTalent(st) { return PreflightCore.creditsGroups(st); }
 
 function renderTalentBar(groups) {
   if (!groups.length) { talentBar.style.display = 'none'; talentBar.innerHTML = ''; return; }
@@ -622,9 +547,14 @@ function contentSig() {
   return JSON.stringify({ talent, teams, spon, bspon, acts, brandSig, t8sig });
 }
 function maybeRender() {
-  // Live-update the end-card text (even while it's showing) without resetting the scroll.
-  if (endCardText && endCardText.textContent !== endText()) endCardText.textContent = endText();
-  const sig = contentSig(); if (sig !== _sig) { _sig = sig; render(); }
+  // Contained: contentSig()/render() walk producer-authored state (crew, teams, sponsors), so one
+  // malformed record used to throw out of the socket handler and freeze the roll — still crediting
+  // whoever was on the desk when it broke. Log and keep taking updates instead.
+  try {
+    // Live-update the end-card text (even while it's showing) without resetting the scroll.
+    if (endCardText && endCardText.textContent !== endText()) endCardText.textContent = endText();
+    const sig = contentSig(); if (sig !== _sig) { _sig = sig; render(); }
+  } catch (e) { console.error('[credits] render error', e); }
 }
 
 // Shrink the event title's font-size until it fits on one line inside the header, so a long event
@@ -689,10 +619,20 @@ async function loadLog() {
   if (params.has('endcard')) setTimeout(showEndCard, 400);
 }
 
+/* The live bridge, with a watchdog.
+
+   This scene is the one where a dead socket is actively WRONG rather than merely stale: it keeps
+   drawing the last talent bar it built, so a desk that has since been cleared still credits people
+   by name on air. 'close' alone is not enough to recover — a rejected or half-open socket can sit in
+   CONNECTING and never fire it — so a poll rebuilds the connection whenever it is not OPEN. */
+let _ws = null, _wsSince = 0;
 async function connectWS() {
+  // Safe to call from both the close handler and the watchdog: bail if a socket is already up or dialling.
+  if (_ws && (_ws.readyState === WebSocket.CONNECTING || _ws.readyState === WebSocket.OPEN)) return;
   let wsToken = '';
   try { wsToken = (await (await fetch(`${API_BASE}/api/ws-token`)).json()).token || ''; } catch (e) {}
-  const ws = new WebSocket(`ws://localhost:${WS_PORT}` + (wsToken ? ('?token=' + encodeURIComponent(wsToken)) : ''));
+  const ws = new WebSocket(`ws://127.0.0.1:${WS_PORT}` + (wsToken ? ('?token=' + encodeURIComponent(wsToken)) : ''));
+  _ws = ws; _wsSince = Date.now();
   ws.addEventListener('open', () => { try { ws.send(JSON.stringify({ type: 'request_state' })); } catch (e) {} });
   ws.addEventListener('message', (e) => {
     let msg; try { msg = JSON.parse(e.data); } catch { return; }
@@ -713,9 +653,19 @@ async function connectWS() {
       maybeRender();
     }
   });
-  ws.addEventListener('close', () => setTimeout(connectWS, 3000));
+  ws.addEventListener('close', () => { if (_ws === ws) _ws = null; setTimeout(connectWS, 3000); });
   ws.onerror = () => { try { ws.close(); } catch {} };
 }
+
+// Watchdog: rebuild the socket whenever it is not OPEN. The 8s grace lets a genuine dial finish
+// before we tear it down; without it a slow connect would be killed and retried forever.
+setInterval(() => {
+  if (_ws && _ws.readyState === WebSocket.OPEN) return;
+  if (_ws && _ws.readyState === WebSocket.CONNECTING && Date.now() - _wsSince < 8000) return;
+  try { if (_ws) _ws.close(); } catch (e) {}
+  _ws = null;
+  connectWS();
+}, 5000);
 
 /* ── Preview data ───────────────────────────────────────────── */
 function _previewBroadcast() {

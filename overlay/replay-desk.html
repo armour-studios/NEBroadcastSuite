@@ -81,10 +81,15 @@
        while the few pixels at the bottom were not. Equal top/bottom gaps look deliberate. */
     .media-col { display: flex; align-items: center; justify-content: center; min-width: 0; min-height: 0; }
     .media-card {
-      /* A true 16:9 window centred in the space the caster cams used to occupy. Capped short of
-         the column width on purpose — filling it edge-to-edge read as "the video IS the scene"
-         and left the frame with nothing to sit in. */
-      width: min(100%, 1340px); aspect-ratio: 16 / 9; max-height: 100%;
+      /* Capped short of the column width on purpose — filling it edge-to-edge read as "the video
+         IS the scene" and left the frame with nothing to sit in.
+
+         The 16:9 lives on .cam-hole, NOT here. It used to sit on the card, which meant the 4px
+         accent line and the 46px caption plate were counted INSIDE the ratio and the video window
+         itself came out at ~1.91:1 — so a 16:9 source letterboxed inside a frame that claimed to
+         be 16:9. The card is now as tall as its contents: a true 16:9 hole with the plate beneath
+         it. */
+      width: min(100%, 1340px); max-height: 100%;
       display: flex; flex-direction: column;
       border-radius: 6px; overflow: hidden;
       /* Heavy enough to hold its own against a bright game feed — a 1px hairline vanished. */
@@ -96,7 +101,10 @@
       background: linear-gradient(90deg, transparent, var(--duo-accent) 30%, var(--duo-accent2) 70%, transparent);
     }
     /* Transparent by default so an OBS media source behind shows straight through the frame. */
-    .cam-hole { position: relative; width: 100%; flex: 1 1 0; min-height: 0; background: transparent; overflow: hidden; }
+    /* THE 16:9 rectangle. flex:0 0 auto so the ratio owns its height rather than the flex line
+       stretching it — this is the box an OBS media source behind the overlay is positioned to
+       (?cams=off&guide=1 prints its exact coordinates). */
+    .cam-hole { position: relative; width: 100%; aspect-ratio: 16 / 9; flex: 0 0 auto; min-height: 0; background: transparent; overflow: hidden; }
     .cam-hole iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
     .rd-stage.frames-only .media-card { border-color: transparent; box-shadow: none; }
     .rd-stage.frames-only .media-card::before { display: none; }
@@ -262,6 +270,13 @@
       color: var(--kicker, var(--duo-accent)); white-space: nowrap; line-height: 1;
     }
     .ft-label::before, .ft-label::after { content: ''; flex: 0 0 auto; width: 14px; height: 2px; background: currentColor; opacity: .5; }
+    /* Title-only: no clock beside it, so the label carries the segment on its own — it is scaled
+       up to the weight the clock used to hold, and its rules widen, or it reads as a stray caption
+       floating in the middle of the footer. */
+    .ft-clock-seg.title-only .ft-clock { display: none; }
+    .ft-clock-seg.title-only .ft-label { font-size: 22px; letter-spacing: .14em; gap: 13px; }
+    .ft-clock-seg.title-only .ft-label::before,
+    .ft-clock-seg.title-only .ft-label::after { width: 22px; }
     #ft-brand-logo { max-height: 62px; max-width: 150px; object-fit: contain; }
     .ft-teams { display: flex; align-items: center; justify-content: center; gap: 10px; min-width: 0; }
     .ft-tname { font-size: 22px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; color: #fff; white-space: nowrap; }
@@ -271,17 +286,21 @@
     .ft-clock { font-size: 40px; font-weight: 700; line-height: 1; color: #fff; font-variant-numeric: tabular-nums; }
     /* Vertically centred like every other footer segment — align-items here used to pin the
        stack to the top of the bar, which left the title riding high over empty space whenever
-       the sub-line was absent. Left alignment is the .ft-stack rule below. */
+       the sub-line was absent. */
     .ft-headline { flex: 1 1 auto; min-width: 0; }
-    .ft-headline .ft-stack { align-items: flex-start; }
+    .ft-headline .ft-stack { align-items: center; }
+    /* Centred in the column, matching every other footer segment. The lines are width:100% blocks
+       (so the ellipsis has a box to truncate against), which means align-items can't move the
+       text — text-align is what actually centres it. Change both together or the two lines
+       disagree. */
     #ft-head {
       width: 100%; font-size: 28px; font-weight: 800; font-style: italic; letter-spacing: .01em;
-      text-transform: uppercase; color: #fff; line-height: 1.06;
+      text-transform: uppercase; color: #fff; line-height: 1.06; text-align: center;
       white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
     #ft-sub {
       width: 100%; font-size: 14px; font-weight: 600; font-style: italic; letter-spacing: .07em;
-      text-transform: uppercase; color: var(--duo-muted); line-height: 1.1;
+      text-transform: uppercase; color: var(--duo-muted); line-height: 1.1; text-align: center;
       white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
     .ft-sponsor { width: 210px; }
@@ -710,10 +729,17 @@
       el('ft-clock-label').textContent = ((b.title != null && String(b.title).trim()) ? b.title : 'Back In');
       frozen = (b.frozenSeconds != null) ? Math.max(0, Math.round(b.frozenSeconds)) : null;
       endsAt = b.endsAt || null;
-      // Follows the producer's Show/Hide, not just "is a timer set". Hide used to leave endsAt
-      // in state, so the clock kept ticking on every scene that borrows the break timer.
-      hasTimer = (b.visible !== false) && (frozen != null || !!endsAt);
-      el('ft-clock-seg').classList.toggle('is-empty', !hasTimer);
+      // The clock is FURNITURE on this scene, not the break graphic: it shows whenever a timer
+      // is ARMED. The top-bar Start arms one without ever setting breakScreen.visible, so
+      // requiring `visible` meant the producer's segment clock never appeared here. Hide now
+      // disarms the timer server-side (set_break), which is what actually takes this down.
+      hasTimer = (frozen != null || !!endsAt);
+      // Title-only shows the label with no clock; the segment then depends on there BEING a title
+      // rather than on a timer being armed, or turning the clock off would blank the whole segment.
+      const titleOnly = !!b.titleOnly;
+      const hasTitle = !!(b.title != null && String(b.title).trim());
+      el('ft-clock-seg').classList.toggle('title-only', titleOnly);
+      el('ft-clock-seg').classList.toggle('is-empty', titleOnly ? !hasTitle : !hasTimer);
       if (frozen != null) paintClock(frozen);
 
       renderMedia(data);

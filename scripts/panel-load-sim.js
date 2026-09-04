@@ -6,14 +6,17 @@ const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
 
-const DIR = 'c:/Users/jones/OneDrive/Documents/.Development/broadcaststudio/control-panel';
-// Must match the <script> order in index.html. The shared pure cores load FIRST — app.js has
-// top-level calls into them (NESearch.bindListNav etc.), so omitting one makes the sim report a
-// ReferenceError the real page never has.
-const FILES = ['core.js', 'search-core.js', 'social-naming-core.js', 'identity-core.js',
-  'seed-power-core.js', 'seed-resolve-core.js',
-  'app.js', 'social.js', 'stats-analytics.js', 'seeding-spotlight.js',
-  'leagues.js', 'events.js', 'bracket-builder.js', 'camera-feeds.js'];
+const ROOT = path.join(__dirname, '..');
+const DIR = path.join(ROOT, 'control-panel');
+
+// The script chain is READ FROM index.html rather than hard-coded — a hand-maintained list
+// silently drifts (it had gone stale by 10 files), which is the exact failure this sim exists
+// to catch. Order is load order; classic scripts share one global scope.
+const INDEX = fs.readFileSync(path.join(DIR, 'index.html'), 'utf8');
+const FILES = [...INDEX.matchAll(/<script [^>]*src="([^"]+)"/gi)]
+  .map((m) => m[1])
+  .filter((f) => !/^(https?:)?\/\//.test(f));
+if (FILES.length < 10) throw new Error('script-chain parse found only ' + FILES.length + ' files — index.html markup changed, fix this regex');
 
 function magic() {
   const fn = function () { return m; };

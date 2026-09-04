@@ -93,7 +93,10 @@
       padding-top: 18px;
     }
 
-    /* Desk footer row: sponsor columns flanking the centred identity bar. */
+    /* Desk footer row: the centred identity bar, and nothing else. It used to be flanked by two
+       desk-sponsor columns, which put a loose logo under each caster tile with no plate around it
+       — it read as a floating watermark rather than as part of the graphic. Partner logos belong
+       on the identity bar's PRESENTED BY plate (title sponsor) or on a scene that owns them. */
     .footer-row {
       display: flex;
       align-items: center;
@@ -102,14 +105,12 @@
       width: 100%;
       padding: 0 90px;
     }
-    .footer-row > .footer-sponsors { flex: 1 1 0; }
 
     /* ── Entry animations (on .show) ───────────────────────────────── */
     .duo-stage:not(.show) .duo-eventbar,
     .duo-stage:not(.show) .match-hud,
     .duo-stage:not(.show) .cam-card,
     .duo-stage:not(.show) .identity-bar,
-    .duo-stage:not(.show) .footer-sponsors,
     .duo-stage:not(.show) .match-feed,
     .duo-stage:not(.show) .deck-strip,
     .duo-stage:not(.show) .duo-bestof {
@@ -132,9 +133,6 @@
     }
     .duo-stage.show .identity-bar {
       animation: footerUp .65s cubic-bezier(.16,.84,.24,1) .32s forwards;
-    }
-    .duo-stage.show .footer-sponsors {
-      animation: footerUp .65s cubic-bezier(.16,.84,.24,1) .36s forwards;
     }
     .duo-stage.show .match-feed {
       animation: stripUp .6s cubic-bezier(.16,.84,.24,1) .38s forwards;
@@ -702,26 +700,6 @@
       max-width: calc(var(--stage-w) - 2 * var(--pad-x));
     }
 
-    .footer-sponsors {
-      display: flex;
-      align-items: center;
-      gap: 14px;
-      min-width: 0;
-      flex-wrap: wrap;
-    }
-    .footer-sponsors--left { justify-content: flex-start; }
-    .footer-sponsors--right { justify-content: flex-end; }
-
-    .footer-sponsor {
-      height: 44px;
-      max-width: 150px;
-      object-fit: contain;
-      opacity: 0.92;
-      filter: drop-shadow(0 2px 6px rgba(0,0,0,.3));
-    }
-    .footer-sponsors--left .footer-sponsor { object-position: left center; }
-    .footer-sponsors--right .footer-sponsor { object-position: right center; }
-
     .presented-by {
       display: flex;
       flex-direction: row;
@@ -994,7 +972,6 @@
 
     <div class="zone-footer">
       <div class="footer-row">
-        <div class="footer-sponsors footer-sponsors--left" id="sponsors-left"></div>
         <div class="identity-bar is-empty" id="identity-bar">
           <div class="brand-strip is-empty" id="brand-strip">
             <img id="brand-strip-logo" class="brand-strip-logo" alt="" style="display:none">
@@ -1007,7 +984,6 @@
             <img id="pb-logo" class="pb-logo" alt="" style="display:none">
           </div>
         </div>
-        <div class="footer-sponsors footer-sponsors--right" id="sponsors-right"></div>
       </div>
       <div class="deck-strip is-empty" id="deck-strip">
         <span id="tagline" class="deck-strip-text">Live</span>
@@ -1127,55 +1103,6 @@
           } else { ctryEl.innerHTML = ''; ctryEl.style.display = 'none'; }
         }
       }
-    }
-
-    function renderSponsorFooter(brand, deskFooter) {
-      // Dashboard manual override wins; else the brand's desk-tagged sponsors (legacy → all sponsors).
-      const override = (deskFooter && Array.isArray(deskFooter.logos) && deskFooter.logos.length)
-        ? deskFooter.logos.map(l => ({ logo: l, name: '' })) : null;
-      // Prefer desk-tagged sponsors; only fall back to ALL sponsors for legacy kits with no
-      // placement tagging anywhere — otherwise the desk footer repeats rail/banner logos.
-      const anyTagged = brand && ((brand.deskSponsors || []).length || (brand.railSponsors || []).length || (brand.bannerSponsors || []).length);
-      const deskList = override
-        || (brand && ((brand.deskSponsors || []).length ? brand.deskSponsors : (anyTagged ? [] : (brand.sponsors || []))))
-        || [];
-      // De-dupe by logo URL so the same sponsor can never render twice in the footer.
-      // Seed the set with whatever the identity bar has ALREADY placed on this same row — the
-      // brand mark and the title-sponsor plate. A partner that is both the title sponsor and a
-      // desk sponsor (Trophi.ai on a Trophi-presented event) used to draw twice side by side:
-      // once in the left sponsor column, once on the plate. The identity bar wins; the flanking
-      // columns skip it. renderPresentedBy/renderBrandStrip run before this, so reading their
-      // live src is accurate.
-      const _seen = new Set();
-      ['brand-strip-logo', 'pb-logo'].forEach((id) => {
-        const img = el(id);
-        if (img && img.style.display !== 'none') {
-          const src = img.getAttribute('src');
-          if (src) _seen.add(src);
-        }
-      });
-      const sponsors = (Array.isArray(deskList) ? deskList : []).filter(s => s && s.logo && !_seen.has(s.logo) && (_seen.add(s.logo), true));
-      const left = el('sponsors-left');
-      const right = el('sponsors-right');
-      if (!left || !right) return;
-      left.innerHTML = '';
-      right.innerHTML = '';
-
-      const mid = Math.ceil(sponsors.length / 2);
-      sponsors.slice(0, mid).forEach(s => {
-        const img = document.createElement('img');
-        img.className = 'footer-sponsor';
-        img.src = s.logo;
-        img.alt = s.name || '';
-        left.appendChild(img);
-      });
-      sponsors.slice(mid).forEach(s => {
-        const img = document.createElement('img');
-        img.className = 'footer-sponsor';
-        img.src = s.logo;
-        img.alt = s.name || '';
-        right.appendChild(img);
-      });
     }
 
     function renderPresentedBy(data) {
@@ -1443,7 +1370,6 @@
       renderBrandStrip(data);
       syncIdentityBar();
       renderDeckStrip(data);
-      renderSponsorFooter(data.brand, data.deskFooter);
       renderPrediction(data);
     }
 

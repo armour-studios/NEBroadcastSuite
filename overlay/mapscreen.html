@@ -130,7 +130,7 @@
       position: absolute; bottom: 0; left: 0; right: 0;
       padding: 10px 12px; text-align: center;
       font-family: 'Rajdhani', var(--main-font); font-weight: 700;
-      font-size: 1.25em; letter-spacing: 0.12em; color: #fff; text-transform: uppercase;
+      font-size: 1.25em; letter-spacing: 0.12em; color: var(--chip-fg, #fff); text-transform: uppercase;
       white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
       box-shadow: 0 -4px 18px rgba(0,0,0,.45);
     }
@@ -150,7 +150,7 @@
     .map-card.ban .img  { filter: grayscale(100%) brightness(0.45); }
     .map-card.ban { border-bottom-color: #555; }
     .map-card.ban .name { color: #9aa0a8; text-decoration: line-through; text-decoration-thickness: 4px; }
-    .map-card.decider .chip { background: var(--accent); }
+    .map-card.decider .chip { background: var(--accent); color: var(--on-accent, #fff); }
 
     /* Sponsor rail — pinned bottom, active brand kit (desk placement first). */
     .veto-sponsors { position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%); z-index: 2;
@@ -297,6 +297,9 @@
       setName('vs-name-a', blue); setName('vs-name-b', orange);
       setLogo('vs-logo-a', 'vs-tile-a', blue); setLogo('vs-logo-b', 'vs-tile-b', orange);
       // Team colours drive the header's end washes, name underlines, logo-tile frames and base bar.
+      // The decider chip is filled with the raw brand accent — measure its text against it.
+      const accNow = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim();
+      if (accNow) document.documentElement.style.setProperty('--on-accent', SceneBase.onColor(accNow));
       const headEl = document.querySelector('.veto-head');
       if (headEl) {
         headEl.style.setProperty('--team-a', blue.color || 'var(--accent)');
@@ -363,7 +366,12 @@
         } else {
           const chip = document.createElement('div'); chip.className = 'chip';
           chip.textContent = chipText(m, data);
-          if (m.action === 'pick' && t) chip.style.background = t.color;
+          // The chip is filled with the TEAM's own colour, so its text has to be measured against
+          // that colour — a team on white or bright yellow had an invisible chip label.
+          if (m.action === 'pick' && t) {
+            chip.style.background = t.color;
+            chip.style.setProperty('--chip-fg', SceneBase.onColor(t.color));
+          }
           else if (m.action === 'ban') chip.style.background = '#444';
           if (!chip.textContent) chip.style.display = 'none';
           card.appendChild(chip);
