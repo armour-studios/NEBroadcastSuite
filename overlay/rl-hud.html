@@ -659,6 +659,10 @@ img{display:block;}
 @keyframes replayUnderline{0%,28%{transform:scaleX(0);}42%{transform:scaleX(1);}76%{transform:scaleX(1);}100%{transform:scaleX(1);}}
 /* small SCORING-TEAM logo beneath the REPLAY word (full swipe only; brand logo as fallback) */
 .replay-team-logo{max-height:90px;max-width:230px;object-fit:contain;opacity:0;margin-top:8px;filter:drop-shadow(0 5px 14px rgba(0,0,0,.55));}
+/* A TEAM crest is boxed square, so a wide club banner and a square badge carry the same weight
+   under the REPLAY word. Only when it IS a crest — this element falls back to the brand logo,
+   which is a wordmark and has to stay wide. */
+.replay-team-logo.is-team{max-width:90px;}
 .replay-team-logo.hidden{display:none;}
 .replay-wipe.play .replay-team-logo{animation:rpContent var(--rp-dur) ease .1s backwards;}
 /* after-replay outro: brand/custom logo ONLY (no REPLAY text, chevrons, or team logo) */
@@ -727,6 +731,7 @@ img{display:block;}
 .replay-wipe.style-cinema .replay-stack{gap:26px;z-index:5;}
 .replay-wipe.style-cinema .replay-chevrons{display:none;}
 .replay-wipe.style-cinema .replay-team-logo{max-height:64px;max-width:180px;opacity:.9;}
+.replay-wipe.style-cinema .replay-team-logo.is-team{max-width:64px;}
 .replay-wipe.style-cinema .replay-text{
   font-size:168px;-webkit-text-stroke:0;color:#fff;letter-spacing:.14em;
   filter:drop-shadow(0 6px 26px rgba(0,0,0,.75));}
@@ -816,11 +821,18 @@ body.sb-external #sb{display:none !important;}
 /* FINAL sits between the two scores (narrow, so the scores stay close + centred); the series is pinned
    ABSOLUTELY below FINAL so it's dead-centre under it WITHOUT widening the gap between the scores. */
 .sb-mid{position:relative;display:flex;align-items:center;justify-content:center;}
-.sb-num{font-size:108px;font-weight:900;font-variant-numeric:tabular-nums;line-height:.9;color:#eef2fb;}
+/* Equal min-width + centred digit on BOTH scores, so the FINAL/VS label between them stays dead
+   centre (lining up with the centred column text on the board below) regardless of a 1- vs 2-digit
+   score. */
+.sb-num{font-size:108px;font-weight:900;font-variant-numeric:tabular-nums;line-height:.9;color:#eef2fb;
+  min-width:1.3em;text-align:center;}
 .sb-num.win{color:var(--gold);text-shadow:0 0 38px rgba(255,206,77,.4);}
 .sb-dash{font-size:13px;letter-spacing:.3em;color:#fff;}
-.sb-series{position:absolute;top:100%;left:50%;transform:translateX(-50%);margin-top:16px;
-  font-size:11px;letter-spacing:.24em;color:#fff;text-transform:uppercase;white-space:nowrap;}
+/* Series line caps the stat board — centred over the whole board (i.e. directly above the
+   categories box in the center column), not pinned under the FINAL/LIVE label. */
+.sb-series{margin:0 0 12px;text-align:center;
+  font-size:12px;letter-spacing:.24em;color:#fff;text-transform:uppercase;white-space:nowrap;}
+.sb-series:empty{display:none;}
 
 /* stats board — each team is its OWN mini-table (header + player rows), with a small gap between. */
 .sb-board{width:100%;}
@@ -896,18 +908,38 @@ body.sb-external #sb{display:none !important;}
 
 /* COMPARE — side-by-side player columns with a center team-total comparison bar per stat
    (renderStatCompare builds the grid; column count follows the actual roster size). */
-.sb-compare{width:100%;display:flex;justify-content:center;}
+/* COMPARE (and RADAR) have no floating team logos, so the 120px side gutters #sb-body reserves for
+   the default skin's logos are pure dead border here — drop them so the board fills the stage. */
+.sb-d-compare #sb-body,.sb-d-radar #sb-body{padding-left:0;padding-right:0;}
+/* COMPARE has no side logos and only a stat grid, so it can run WIDER than the logo-flanked
+   default skin to fill the horizontal dead space. Height stays modest so the partners rail below
+   the board is never pushed off the bottom of the frame (the board is vertically centred). */
+.sb-d-compare .sb-stage{width:1780px;}
+.sb-compare{position:relative;width:100%;display:flex;justify-content:center;}
+/* Faint team-logo watermark behind each side's PLAYER STAT ROWS only. Bounds:
+   - horizontally the centre head-to-head column is a fixed 380px, so each side region is
+     calc(50% - 190px) — the marks never reach the middle;
+   - vertically it starts BELOW the name-plate header row (52px plate + gap + divider ≈ 80px) so it
+     never sits behind the names ("top row").
+   The background is clipped to this box (backgrounds never spill their element), and background-size
+   is `contain`, so the logo scales as large as it can WITHOUT bleeding out of the stat table. */
+.sb-cmp-wm{position:absolute;top:80px;bottom:6px;z-index:0;pointer-events:none;
+  background-repeat:no-repeat;background-position:center;background-size:contain;
+  opacity:.09;filter:grayscale(.12) drop-shadow(0 2px 10px rgba(0,0,0,.4));}
+.sb-cmp-wm.a{left:0;width:calc(50% - 190px);}
+.sb-cmp-wm.b{right:0;width:calc(50% - 190px);}
 /* align-items:center — each cell is CENTERED in its grid row, so a side score box lines up on the
    same vertical centre as the middle column's number even when the centre cell runs a touch taller
    (stretch made the fixed-height side boxes top-align, so their numbers sat above the centre's). */
-.sb-compare-grid{display:grid;gap:6px 10px;align-items:center;width:100%;max-width:1680px;}
+.sb-compare-grid{position:relative;z-index:1;display:grid;gap:7px 12px;align-items:center;width:100%;max-width:1780px;}
 /* Player NAMEPLATES. Previously a boxed outline per name, which read as six form fields sitting
    above the numbers. Now the team colour is a solid rule UNDER the name (the same device the
    series-stats board uses), the box itself is a soft panel, and the name carries the weight. */
 .sb-cmp-name{display:flex;align-items:center;justify-content:center;gap:9px;position:relative;
-  height:46px;padding:0 12px 8px;border-radius:10px 10px 4px 4px;border:0;
-  background:linear-gradient(180deg,rgba(255,255,255,.075),rgba(255,255,255,.02));
-  font-size:19px;font-weight:800;letter-spacing:.03em;text-transform:uppercase;color:#f2f6ff;}
+  height:52px;padding:0 14px 9px;border-radius:11px 11px 4px 4px;border:0;
+  background:linear-gradient(180deg,rgba(255,255,255,.11),rgba(255,255,255,.02));
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.08),0 2px 8px rgba(0,0,0,.28);
+  font-size:21px;font-weight:800;letter-spacing:.03em;text-transform:uppercase;color:#f2f6ff;}
 .sb-cmp-name span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 /* The rule itself — 3px of team colour pinned to the bottom edge of the plate. */
 .sb-cmp-name::after{content:'';position:absolute;left:10px;right:10px;bottom:0;height:3px;
@@ -916,14 +948,21 @@ body.sb-external #sb{display:none !important;}
 .sb-cmp-name.empty::after{display:none;}
 /* rgba, not color-mix: Chrome 100 (Electron 18 / OBS CEF) has no color-mix, and one invalid
    component invalidates the WHOLE declaration — these simply vanished on air. */
+/* Faint team-colour wash in the plate so each side reads at a glance, with the solid rule beneath.
+   Each side also publishes its own colour as --plate-rgb so the "leading" highlight below can lift
+   that SAME colour instead of washing it out to white. */
+.sb-cmp-name.side-a{--plate-rgb:var(--blue-rgb);background:linear-gradient(180deg,rgba(var(--plate-rgb),.16),rgba(255,255,255,.02));}
+.sb-cmp-name.side-b{--plate-rgb:var(--orange-rgb);background:linear-gradient(180deg,rgba(var(--plate-rgb),.16),rgba(255,255,255,.02));}
 .sb-cmp-name.side-a::after{background:rgb(var(--blue-rgb));box-shadow:0 0 12px -2px rgba(var(--blue-rgb),.8);}
 .sb-cmp-name.side-b::after{background:rgb(var(--orange-rgb));box-shadow:0 0 12px -2px rgba(var(--orange-rgb),.8);}
-/* Winning side: a subtle lift only. Gold is reserved for the MVP — painting all three winners
-   gold buried the crown in a row of identical plates and threw away the side colour that tells a
-   viewer which team they are looking at. */
-.sb-cmp-name.win{background:linear-gradient(180deg,rgba(255,255,255,.13),rgba(255,255,255,.04));}
-/* MVP is the only gold plate on the board. */
-.sb-cmp-name.mvp{color:var(--gold);background:linear-gradient(180deg,rgba(255,206,77,.16),rgba(255,206,77,.03));}
+/* Leading side (the team the verdict names): a STRONGER wash of its OWN team colour plus a matching
+   glow/border — never white, which used to strip the leader's colour and made the trailing team look
+   like the highlighted one. Placed BEFORE .mvp so the MVP's gold plate still wins. */
+.sb-cmp-name.win{background:linear-gradient(180deg,rgba(var(--plate-rgb),.36),rgba(var(--plate-rgb),.07));
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.12),0 0 0 1px rgba(var(--plate-rgb),.45),0 4px 16px rgba(0,0,0,.35);}
+/* MVP is the only gold plate on the board — its own gold glow overrides any leading-team glow. */
+.sb-cmp-name.mvp{color:var(--gold);background:linear-gradient(180deg,rgba(255,206,77,.20),rgba(255,206,77,.04));
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.14),0 0 0 1px rgba(255,206,77,.5),0 4px 16px rgba(0,0,0,.35);}
 .sb-cmp-name.mvp::after{background:var(--gold);box-shadow:0 0 14px -2px var(--gold);}
 .sb-cmp-name.mvp .sb-mvp-ic{position:static;transform:none;width:17px;height:17px;color:var(--gold);flex:none;}
 /* The boundary between the name band and the numbers. Brightest in the middle so it reads as a
@@ -932,9 +971,12 @@ body.sb-external #sb{display:none !important;}
   background:linear-gradient(90deg,transparent,rgba(255,255,255,.16) 12%,rgba(255,255,255,.16) 88%,transparent);}
 /* min-height (not a fixed height) so the cell STRETCHES to the row's height under align-items:stretch —
    a fixed height top-aligns in any row that runs taller, which left the bottom edges out of line. */
-.sb-cmp-stat{display:flex;align-items:center;justify-content:center;min-height:40px;border-radius:8px;
-  border:1px solid var(--hair);background:rgba(255,255,255,.03);font-size:17px;font-weight:800;font-variant-numeric:tabular-nums;color:#dfe5f2;}
-.sb-cmp-stat.score{background:rgba(255,206,77,.09);border-color:rgba(255,206,77,.28);color:#fff;font-weight:900;}
+.sb-cmp-stat{display:flex;align-items:center;justify-content:center;min-height:48px;border-radius:9px;
+  border:1px solid rgba(255,255,255,.09);background:linear-gradient(180deg,rgba(255,255,255,.06),rgba(255,255,255,.015));
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.05);
+  font-size:20px;font-weight:800;font-variant-numeric:tabular-nums;color:#dfe5f2;}
+.sb-cmp-stat.score{background:linear-gradient(180deg,rgba(255,206,77,.16),rgba(255,206,77,.04));
+  border-color:rgba(255,206,77,.34);color:#fff;font-weight:900;box-shadow:inset 0 1px 0 rgba(255,206,77,.18);}
 
 /* ── Centre column: the head-to-head cell for one stat ──────────────────────
    Was a label, an 8px bar and two numbers. It is now a real comparison cell —
@@ -949,27 +991,29 @@ body.sb-external #sb{display:none !important;}
    the bottom of the board never agreed. The two strips now ride the cell's own top and bottom
    edges instead of each taking a line. */
 .sb-cmp-center{position:relative;display:flex;align-items:center;justify-content:center;
-  min-height:40px;padding:0 14px;border-radius:8px;border:0;background:transparent;overflow:hidden;}
+  min-height:48px;padding:0 18px;border-radius:8px;border:0;background:transparent;overflow:hidden;}
 .sb-cmp-center + .sb-cmp-center{box-shadow:none;}
 /* The winning half is tinted, so which way the row leans reads before any number does. */
 .sb-cmp-center::before{content:'';position:absolute;inset:0;border-radius:8px;pointer-events:none;opacity:0;transition:opacity .4s ease;}
-.sb-cmp-center.lead-a::before{opacity:1;background:linear-gradient(90deg,rgba(var(--blue-rgb),.13),transparent 62%);}
-.sb-cmp-center.lead-b::before{opacity:1;background:linear-gradient(270deg,rgba(var(--orange-rgb),.13),transparent 62%);}
+.sb-cmp-center.lead-a::before{opacity:1;background:linear-gradient(90deg,rgba(var(--blue-rgb),.20),rgba(var(--blue-rgb),.05) 40%,transparent 68%);}
+.sb-cmp-center.lead-b::before{opacity:1;background:linear-gradient(270deg,rgba(var(--orange-rgb),.20),rgba(var(--orange-rgb),.05) 40%,transparent 68%);}
 /* Scoped to the totals row on purpose: `> *` also caught the bar and the spark, and a blanket
    position:relative would override the absolute placement that pins them to the cell edges. */
 .sb-cmp-center > .sb-cmp-totals{position:relative;z-index:1;}
 
-.sb-cmp-lbl{font-size:11px;font-weight:800;letter-spacing:.14em;color:var(--muted);text-transform:uppercase;
+.sb-cmp-lbl{font-size:11px;font-weight:800;letter-spacing:.14em;color:#fff;text-transform:uppercase;
   text-align:center;white-space:nowrap;}
 
 /* Totals row: value · (label + gap) · value, centred on one line. align-items is CENTER, not
    baseline — the leader's number is a size up, and on a baseline that shoved the label off-centre. */
-.sb-cmp-totals{display:flex;align-items:center;justify-content:space-between;gap:10px;width:100%;
+/* 3-track grid: [numA | label | numB] with equal 1fr side tracks, so the middle label track is
+   mathematically dead-centre no matter how wide the two totals are (516 vs 58 no longer shoves it
+   off). Totals hug the outer edges of their tracks; the label centres in the middle track. */
+.sb-cmp-totals{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;width:100%;
   font-size:19px;font-weight:800;font-variant-numeric:tabular-nums;line-height:1;}
-/* The stat name and the gap chip now share the middle of the line, between the two totals. */
-.sb-cmp-mid{display:flex;align-items:center;gap:8px;min-width:0;}
-.sb-cmp-total-a{color:rgba(var(--blue-rgb),.62);transition:color .3s ease;}
-.sb-cmp-total-b{color:rgba(var(--orange-rgb),.62);transition:color .3s ease;}
+.sb-cmp-mid{justify-self:center;display:flex;align-items:center;justify-content:center;}
+.sb-cmp-total-a{color:rgba(var(--blue-rgb),.62);transition:color .3s ease;justify-self:start;}
+.sb-cmp-total-b{color:rgba(var(--orange-rgb),.62);transition:color .3s ease;justify-self:end;}
 /* The leader is full-strength and a size up; the trailer stays dimmed. One glance, one winner. */
 .sb-cmp-center.lead-a .sb-cmp-total-a{color:var(--blue);font-size:23px;text-shadow:0 0 18px rgba(var(--blue-rgb),.55);}
 .sb-cmp-center.lead-b .sb-cmp-total-b{color:var(--orange);font-size:23px;text-shadow:0 0 18px rgba(var(--orange-rgb),.55);}
@@ -1345,7 +1389,6 @@ body.sb-external #sb{display:none !important;}
           <span id="sb-num-a" class="sb-num">0</span>
           <div class="sb-mid">
             <span id="sb-dash" class="sb-dash">FINAL</span>
-            <span id="sb-series" class="sb-series"></span>
           </div>
           <span id="sb-num-b" class="sb-num">0</span>
         </div>
@@ -1356,6 +1399,8 @@ body.sb-external #sb{display:none !important;}
       </div>
     </div>
     <div class="sb-board">
+      <!-- series caps the board, centred directly above the categories box (center column) -->
+      <div id="sb-series" class="sb-series"></div>
       <div id="sb-body"></div>
     </div>
     <!-- partners rail along the bottom (brand rail sponsors) -->
@@ -2084,6 +2129,7 @@ function showReplay(mode){
       const g=currentState._goal, teams=currentState.teams||{};
       const teamLogo = (g && teamOf(g)===1) ? (teams.orange&&teams.orange.logo) : (teams.blue&&teams.blue.logo);
       const tlogo = teamLogo || brandLogo || null;
+      tl.classList.toggle('is-team', !!teamLogo);   // square box for a crest, full width for the brand wordmark
       if(tlogo){ tl.src=tlogo; tl.classList.remove('hidden'); } else { tl.removeAttribute('src'); tl.classList.add('hidden'); }
     }
   }
@@ -2390,7 +2436,7 @@ function renderScoreboard(playerCache, state, series, isLive){
   const bs=game.blueScore ?? 0, os=game.orangeScore ?? 0;
   // LIVE (running scoreboard on the ?only=scoreboard source) vs FINAL (post-game). No winner/gold
   // highlight while live — there's no winner yet; the label reads LIVE and flips to FINAL at game end.
-  setText('sb-dash', isLive ? 'LIVE' : 'FINAL');
+  setText('sb-dash', isLive ? 'VS' : 'FINAL');
   const aWon = !isLive && bs>os, bWon = !isLive && os>bs;
 
   // broadcaster / brand-kit logo at the top (hidden when no brand logo is set)
@@ -2567,7 +2613,7 @@ function renderStatCompare(body, o){
 
   const wrap = document.createElement('div'); wrap.className = 'sb-compare';
   const grid = document.createElement('div'); grid.className = 'sb-compare-grid';
-  grid.style.gridTemplateColumns = `repeat(${n},1fr) 320px repeat(${n},1fr)`;
+  grid.style.gridTemplateColumns = `repeat(${n},1fr) 380px repeat(${n},1fr)`;
 
   function playerCell(p, side, won){
     const c = document.createElement('div'); c.className = 'sb-cmp-name side-'+side + (won?' win':'') + (p && p.name===mvp?' mvp':'');
@@ -2585,17 +2631,20 @@ function renderStatCompare(body, o){
   // Cells are appended FLAT, directly into the grid, in strict row-major order — CSS Grid's implicit
   // row-wrapping is what actually lines them up into columns across rows. A per-row wrapper <div>
   // would each start its own isolated layout and the columns would NOT align between rows.
-  // Header row — one name badge per player column, blank-ish center (event/brand already header the
-  // whole board above — no need to repeat it inside the skin, and no third-party-style "powered by").
-  for(let i=0;i<n;i++) grid.appendChild(playerCell(A[i], 'a', aWon));
-  // The verdict HEADS the centre column: it is the board's conclusion, and a caster reads the top
-  // of a column before its bottom. Tallied up front rather than during the stat loop so it can be
-  // built before the rows it summarises. (This cell also has to exist regardless — the grid is
-  // filled FLAT in row-major order, so skipping it would shift every player column left by one.)
+  // Category tally FIRST — tallied up front so the name-plate highlight can follow the team LEADING
+  // the categories (the same team the verdict names), NOT the match-score winner. When a side wins
+  // the game but loses most stat categories the two disagree, and highlighting the match winner made
+  // the lit plates land on the opposite team from the "LEADS X OF Y" conclusion right below them.
   let wonA = 0, wonB = 0, tied = 0;
   SB_STATS.forEach((_s, i) => { if (TA[i] > TB[i]) wonA++; else if (TB[i] > TA[i]) wonB++; else tied++; });
-  const verdict = document.createElement('div'); verdict.className = 'sb-cmp-verdict';
   const vLead = wonA > wonB ? 'a' : wonB > wonA ? 'b' : '';
+
+  // Header row — one name badge per player column; the LEADING team's plates are the highlighted
+  // ones so they agree with the verdict below.
+  for(let i=0;i<n;i++) grid.appendChild(playerCell(A[i], 'a', vLead==='a'));
+  // The verdict HEADS the centre column: it is the board's conclusion, and a caster reads the top
+  // of a column before its bottom.
+  const verdict = document.createElement('div'); verdict.className = 'sb-cmp-verdict';
   if (vLead) {
     const who = document.createElement('b'); who.className = vLead;
     who.textContent = (vLead === 'a' ? (nameA || 'Blue') : (nameB || 'Orange')).toUpperCase();
@@ -2608,7 +2657,7 @@ function renderStatCompare(body, o){
       : 'Even — ' + wonA + ' categories each' + (tied ? ' · ' + tied + ' tied' : '');
   }
   grid.appendChild(verdict);
-  for(let i=0;i<n;i++) grid.appendChild(playerCell(B[i], 'b', bWon));
+  for(let i=0;i<n;i++) grid.appendChild(playerCell(B[i], 'b', vLead==='b'));
 
   // Boundary closing the name band off from the numbers. Appended once the header row is COMPLETE —
   // this grid is auto-placed in order, so a full-width item dropped mid-row splits that row and
@@ -2628,17 +2677,15 @@ function renderStatCompare(body, o){
 
     const lbl = document.createElement('div'); lbl.className = 'sb-cmp-lbl'; lbl.textContent = SB_LABELS[i];
 
-    // Totals + the gap. Printing the difference saves the caster the subtraction.
+    // Totals on each side of the stat label. (The +diff / TIED chip was removed at the producer's
+    // request — the two totals and the share bar carry the comparison on their own.)
     const nums = document.createElement('div'); nums.className = 'sb-cmp-totals';
     const numA = document.createElement('span'); numA.className = 'sb-cmp-total-a'; numA.textContent = TA[i];
-    const gap = document.createElement('span'); gap.className = 'sb-cmp-gap';
-    const diff = Math.abs(TA[i] - TB[i]);
-    gap.textContent = lead ? '+' + diff : (TA[i] === 0 && TB[i] === 0 ? '—' : 'TIED');
     const numB = document.createElement('span'); numB.className = 'sb-cmp-total-b'; numB.textContent = TB[i];
-    // Label + gap ride the MIDDLE of the totals line — the stack that used to put the label on its
+    // The label rides the MIDDLE of the totals line — the stack that used to put the label on its
     // own row above is what made this cell taller than the player boxes either side of it.
     const mid = document.createElement('div'); mid.className = 'sb-cmp-mid';
-    mid.appendChild(lbl); mid.appendChild(gap);
+    mid.appendChild(lbl);
     nums.appendChild(numA); nums.appendChild(mid); nums.appendChild(numB);
 
     const bar = document.createElement('div'); bar.className = 'sb-compare-bar';
@@ -2670,6 +2717,15 @@ function renderStatCompare(body, o){
 
     for(let p=0;p<n;p++) grid.appendChild(statCell(B[p], stat));
   });
+
+  // Faint team-logo watermarks behind each side's player columns (blue group left, orange group
+   // right). Bounded to the side region: the centre column is a fixed 380px, so each side is
+   // calc(50% - 190px) wide — the watermarks never bleed under the head-to-head column.
+  const wmA = document.createElement('div'); wmA.className = 'sb-cmp-wm a';
+  if(logoA) wmA.style.backgroundImage = `url("${logoA}")`;
+  const wmB = document.createElement('div'); wmB.className = 'sb-cmp-wm b';
+  if(logoB) wmB.style.backgroundImage = `url("${logoB}")`;
+  wrap.appendChild(wmA); wrap.appendChild(wmB);
 
   wrap.appendChild(grid);
   body.appendChild(wrap);
@@ -3076,7 +3132,11 @@ connect();
    so you can preview goal/replay/overtime/scorecard without RL or the server. */
 const DEV = {
   eventName:'PRO CHAMPIONSHIP SERIES', bestOf:7,
-  brand:{ logo:'/assets/rl.png', color:'#2f8dff', spots:{ title:'/assets/rl.png' } },   // broadcaster/org logo + a title sponsor for dev preview
+  brand:{ logo:'/assets/rl.png', color:'#2f8dff', spots:{ title:'/assets/rl.png' },
+          // dev-only partners so the bottom sponsor rail is visible when previewing the scorecard
+          // (a real brand kit supplies these from state.brand.railSponsors/sponsors)
+          sponsorLabel:'PARTNERS',
+          railSponsors:[ {name:'Partner 1',logo:'/assets/rl.png'}, {name:'Partner 2',logo:'/assets/rl.png'}, {name:'Partner 3',logo:'/assets/rl.png'} ] },   // broadcaster/org logo + a title sponsor for dev preview
   teams:{ blue:{name:'TEAM ALPHA',logo:'/assets/rl.png',color:'#2f8dff'},
           orange:{name:'TEAM OMEGA',logo:'/assets/rl.png',color:'#c026d3'} },
   game:{ blueScore:1, orangeScore:1, number:4, isOT:false },

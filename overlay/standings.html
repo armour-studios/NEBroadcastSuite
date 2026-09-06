@@ -238,7 +238,9 @@ html, body {
 .st-pl-art img { max-width: 100%; max-height: 100%; object-fit: contain; object-position: bottom center;
   filter: drop-shadow(0 8px 20px rgba(0,0,0,.6)); }
 .st-pl-art.is-logo { align-items: center; padding: 28px; }
-.st-pl-art.is-logo img { max-height: 62%; }
+/* Square box, so a wide club banner and a square badge fill the same footprint on the wall.
+   aspect-ratio sizes the BOX; object-fit: contain (inherited above) letterboxes the art in it. */
+.st-pl-art.is-logo img { height: 62%; width: auto; aspect-ratio: 1 / 1; max-width: 100%; }
 .st-pl-art.is-logo img.logo-on-dark { filter: brightness(0) invert(1) drop-shadow(0 6px 16px rgba(0,0,0,.6)); }
 
 /* rank plate, top-left */

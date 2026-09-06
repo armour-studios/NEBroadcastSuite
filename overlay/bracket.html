@@ -557,37 +557,112 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
    The pre-show fixtures graphic: "GROUP A — these are today's matches". Not a bracket and not a
    schedule flow; one row per fixture, crest on each outer edge, names reading inward to a centred
    VS. Deliberately no scores and no progression — it goes up before a ball is kicked.            */
-.bk-pair { display: grid; gap: 26px; width: 100%; justify-content: center; align-content: center; }
-.bk-pair.cols-1 { grid-template-columns: minmax(0, 1080px); }
-.bk-pair.cols-2 { grid-template-columns: repeat(2, minmax(0, 840px)); }
-.bk-pair.cols-3 { grid-template-columns: repeat(3, minmax(0, 580px)); }
+.bk-pair { display: grid; gap: 30px; width: 100%; justify-content: center; align-content: center; }
+.bk-pair.cols-1 { grid-template-columns: minmax(0, 1120px); }
+.bk-pair.cols-2 { grid-template-columns: repeat(2, minmax(0, 860px)); }
+.bk-pair.cols-3 { grid-template-columns: repeat(3, minmax(0, 600px)); }
 
-.bk-pg { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
-.bk-pg-head { display: flex; align-items: baseline; gap: 12px;
-  font-family: var(--disp); font-weight: 800; font-size: 17px; letter-spacing: .22em;
-  text-transform: uppercase; color: var(--on-accent, #fff); background: var(--accent);
-  padding: 7px 16px; border-radius: 5px; }
-.bk-pg-when { margin-left: auto; font-size: 11px; letter-spacing: .14em; opacity: .9; }
-.bk-pg-rows { display: flex; flex-direction: column; gap: 8px; }
+.bk-pg { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+/* Glossy brand-gradient header bar with a top sheen, rounded, lifted off the rows. */
+.bk-pg-head { position: relative; display: flex; align-items: center; gap: 12px; overflow: hidden;
+  font-family: var(--disp); font-weight: 800; font-size: 19px; letter-spacing: .24em;
+  text-transform: uppercase; color: var(--on-accent, #fff);
+  background: linear-gradient(180deg, rgba(255,255,255,.24), rgba(255,255,255,0) 55%),
+              linear-gradient(100deg, var(--accent) 0%, var(--accent-2) 100%);
+  padding: 11px 20px; border-radius: 10px;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.35), 0 10px 26px -10px rgba(0,0,0,.7); }
+/* Thin bright rule along the very bottom of the header to seat it. */
+.bk-pg-head::after { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 2px;
+  background: rgba(255,255,255,.4); }
+.bk-pg-when { margin-left: auto; font-size: 12px; letter-spacing: .16em; font-weight: 800;
+  background: rgba(0,0,0,.22); padding: 4px 12px; border-radius: 999px; }
+.bk-pg-rows { display: flex; flex-direction: column; gap: 16px; }
 
-/* One fixture. The grid is symmetric on purpose — logo / name / VS / name / logo — so the centre
-   column lines up down the whole card however long the names are. */
-.bk-pr { display: grid; grid-template-columns: 40px minmax(0, 1fr) auto minmax(0, 1fr) 40px;
-  align-items: center; gap: 14px; padding: 10px 14px; border-radius: 6px;
-  border: 1px solid var(--hair);
-  background: linear-gradient(90deg, rgba(24,28,38,.96), rgba(15,18,25,.96)); }
-.bk-pr-logo { width: 40px; height: 40px; object-fit: contain; }
-.bk-pr-logo.logo-on-dark { filter: invert(1); }
-.bk-pr-ph { width: 40px; height: 40px; display: flex; align-items: center; justify-content: center;
-  font-family: var(--disp); font-weight: 800; font-size: 15px; color: var(--ph-col, rgba(255,255,255,.45)); }
-.bk-pr-name { font-family: var(--disp); font-weight: 700; font-size: 24px; color: #fff;
-  min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.bk-pr-name.right { text-align: right; }
-.bk-pr-vs { font-family: var(--disp); font-weight: 800; font-size: 14px; letter-spacing: .16em;
-  color: var(--muted); flex: 0 0 auto; }
-.bk-pair.cols-3 .bk-pr-name { font-size: 19px; }
-.bk-pair.cols-3 .bk-pr { grid-template-columns: 30px minmax(0, 1fr) auto minmax(0, 1fr) 30px; padding: 8px 11px; }
-.bk-pair.cols-3 .bk-pr-logo, .bk-pair.cols-3 .bk-pr-ph { width: 30px; height: 30px; }
+/* Pairings adopt the SCHEDULE graphic's mini match-hud look: a meta row (LIVE / time / channel)
+   above each fixture, then a rounded row with two team sides (colour wash + accent bar) reading
+   into a dark VS centre. */
+.bk-pr-wrap { display: flex; flex-direction: column; gap: 6px; }
+.bk-pr-meta { display: flex; align-items: center; justify-content: center; gap: 10px; min-height: 20px; flex-wrap: wrap; }
+.bk-pr-when { font-family: var(--disp); font-size: 14px; font-weight: 800; letter-spacing: .07em;
+  color: rgba(255,255,255,.85); text-transform: uppercase; white-space: nowrap; line-height: 1; }
+.bk-pr-onair { display: inline-flex; align-items: center; gap: 5px; background: #22e07a; color: #04130a;
+  border-radius: 999px; padding: 3px 12px; font-family: var(--disp); font-size: 13px; font-weight: 800;
+  letter-spacing: .1em; line-height: 1; text-transform: uppercase; }
+.bk-pr-onair.live { background: #ff3b47; color: #fff; }
+.bk-pr-onair .pdot { width: 6px; height: 6px; border-radius: 50%; background: currentColor;
+  animation: bkLivePulse 1.4s ease-in-out infinite; }
+/* Channel chip — platform glyph (brand-coloured) + channel name. */
+.bk-pr-chip { display: inline-flex; align-items: center; gap: 6px; background: rgba(255,255,255,.08);
+  border: 1px solid rgba(255,255,255,.14); border-radius: 999px; padding: 3px 11px; line-height: 1;
+  font-family: var(--disp); font-size: 12px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: #e8eaf0; }
+.bk-pr-chip .bk-pr-icon { width: 13px; height: 13px; flex: 0 0 auto; display: block; }
+.bk-pr-chip .bk-pr-icon svg { width: 100%; height: 100%; display: block; }
+.bk-pr-chip.plat-twitch  .bk-pr-icon { color: #a970ff; }
+.bk-pr-chip.plat-youtube .bk-pr-icon { color: #ff4e45; }
+.bk-pr-chip.plat-kick     .bk-pr-icon { color: #53fc18; }
+.bk-pr-chip.plat-facebook .bk-pr-icon { color: #4c8bf5; }
+.bk-pr-chip.plat-generic .bk-pr-icon { color: var(--accent-2); }
+.bk-pr-chip .bk-pr-chname { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.bk-pr { position: relative; display: flex; align-items: stretch; height: 70px; border-radius: 11px;
+  overflow: hidden; background: linear-gradient(180deg, rgba(24,27,34,.98), rgba(10,12,16,.99));
+  box-shadow: 0 8px 28px rgba(0,0,0,.55); }
+.bk-pr::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 1px; z-index: 3;
+  background: linear-gradient(90deg, transparent 4%, rgba(255,255,255,.28) 50%, transparent 96%); }
+/* Team sides — colour wash bleeding in from the outer edge + a glowing accent bar along the bottom.
+   Colour comes from --col-a-rgb / --col-b-rgb (R,G,B triples set inline; grey fallback). */
+.bk-pr-side { flex: 1 1 0; min-width: 0; position: relative; display: flex; align-items: center; gap: 12px; overflow: hidden; }
+.bk-pr-side.a { padding: 0 12px 0 16px; }
+.bk-pr-side.b { padding: 0 16px 0 12px; justify-content: flex-end; }
+/* Team colour → falls back to the BRAND accent (left) / accent-2 (right), never a stray grey. */
+.bk-pr-side.a::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 55%; z-index: 1;
+  background: linear-gradient(90deg, rgba(var(--col-a-rgb, var(--accent-rgb, 138,92,246)), .26), transparent); }
+.bk-pr-side.b::before { content: ''; position: absolute; right: 0; top: 0; bottom: 0; width: 55%; z-index: 1;
+  background: linear-gradient(270deg, rgba(var(--col-b-rgb, var(--accent-2-rgb, 138,92,246)), .24), transparent); }
+.bk-pr-side.a::after { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 3px; z-index: 2;
+  background: linear-gradient(90deg, rgb(var(--col-a-rgb, var(--accent-rgb, 138,92,246))) 0%, rgba(var(--col-a-rgb, var(--accent-rgb, 138,92,246)), .4) 55%, transparent 100%);
+  box-shadow: 0 0 12px rgba(var(--col-a-rgb, var(--accent-rgb, 138,92,246)), .55); }
+.bk-pr-side.b::after { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 3px; z-index: 2;
+  background: linear-gradient(270deg, rgb(var(--col-b-rgb, var(--accent-2-rgb, 138,92,246))) 0%, rgba(var(--col-b-rgb, var(--accent-2-rgb, 138,92,246)), .4) 55%, transparent 100%);
+  box-shadow: 0 0 12px rgba(var(--col-b-rgb, var(--accent-2-rgb, 138,92,246)), .55); }
+/* Big, faint team-logo watermark behind each side. */
+.bk-pr-wm { position: absolute; top: 50%; transform: translateY(-50%); width: 160px; height: 150%; z-index: 0;
+  opacity: .10; pointer-events: none; background-repeat: no-repeat; background-size: contain; }
+.bk-pr-side.a .bk-pr-wm { left: 8px; background-position: left center; }
+.bk-pr-side.b .bk-pr-wm { right: 8px; background-position: right center; }
+.bk-pr-logo, .bk-pr-ph { width: 52px; height: 52px; flex: 0 0 52px; position: relative; z-index: 1; }
+.bk-pr-logo { object-fit: contain; filter: drop-shadow(0 2px 6px rgba(0,0,0,.55)); }
+.bk-pr-logo.logo-on-dark { filter: brightness(0) invert(1) drop-shadow(0 2px 6px rgba(0,0,0,.55)); }
+.bk-pr-ph { display: flex; align-items: center; justify-content: center; font-family: var(--disp);
+  font-weight: 800; font-size: 18px; color: var(--ph-col, rgba(255,255,255,.6)); }
+.bk-pr-name { flex: 1 1 0; min-width: 0; position: relative; z-index: 1; font-family: var(--disp);
+  font-size: 25px; font-weight: 800; letter-spacing: .03em; text-transform: uppercase; line-height: 1;
+  color: #fff; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bk-pr-side.b .bk-pr-name { text-align: right; }
+.bk-pr-center { flex: 0 0 168px; display: flex; flex-direction: column; align-items: center;
+  justify-content: center; gap: 4px; position: relative; z-index: 2; background: rgba(6,8,12,.97);
+  border-left: 1px solid rgba(255,255,255,.1); border-right: 1px solid rgba(255,255,255,.1); padding: 0 8px; }
+.bk-pr-vs { font-family: var(--disp); font-size: 28px; font-weight: 900; letter-spacing: .1em; color: #fff;
+  text-shadow: 0 1px 4px rgba(0,0,0,.85); line-height: 1; }
+/* Stream line under VS — platform glyph (brand-coloured) + channel name. */
+.bk-pr-cstream { display: flex; align-items: center; justify-content: center; gap: 5px; max-width: 100%; line-height: 1;
+  font-family: var(--disp); font-size: 11px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; color: rgba(255,255,255,.75); }
+.bk-pr-cstream .bk-pr-icon { width: 14px; height: 14px; flex: 0 0 auto; display: block; }
+.bk-pr-cstream .bk-pr-icon svg { width: 100%; height: 100%; display: block; }
+.bk-pr-cstream.plat-twitch  .bk-pr-icon { color: #a970ff; }
+.bk-pr-cstream.plat-youtube .bk-pr-icon { color: #ff4e45; }
+.bk-pr-cstream.plat-kick     .bk-pr-icon { color: #53fc18; }
+.bk-pr-cstream.plat-facebook .bk-pr-icon { color: #4c8bf5; }
+.bk-pr-cstream.plat-generic  .bk-pr-icon { color: var(--accent-2); }
+.bk-pr-cstream .bk-pr-chname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@keyframes bkLivePulse { 0%,100% { opacity: 1; } 50% { opacity: .3; } }
+/* Tighter rows for the multi-group (tiled) layouts. */
+.bk-pair.cols-2 .bk-pr, .bk-pair.cols-3 .bk-pr { height: 60px; }
+.bk-pair.cols-2 .bk-pr-name, .bk-pair.cols-3 .bk-pr-name { font-size: 19px; }
+.bk-pair.cols-2 .bk-pr-logo, .bk-pair.cols-2 .bk-pr-ph,
+.bk-pair.cols-3 .bk-pr-logo, .bk-pair.cols-3 .bk-pr-ph { width: 42px; height: 42px; flex-basis: 42px; }
+.bk-pair.cols-2 .bk-pr-center, .bk-pair.cols-3 .bk-pr-center { flex-basis: 140px; }
+.bk-pair.cols-2 .bk-pr-vs, .bk-pair.cols-3 .bk-pr-vs { font-size: 23px; }
 
 /* ── GSL groups ────────────────────────────────────────────────────────────────────────────
    A GSL group is a 4-team double elim with a fixed, named shape, and naming the matches is the
@@ -828,6 +903,7 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
 </div>
 
 <script src="scene-base.js"></script>
+<script src="stream-platforms.js"></script>
 <script src="caster-rail.js"></script>
 <script>
 (function () {
@@ -838,6 +914,34 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
   let colorByName = {};
   let _sig = '';
   let _livePair = '';   // on-air teams (sorted, upper, '|'-joined) — drives the LIVE badge
+  // Per-match stream assignment from the start.gg stream queue: normalised team-pair -> {stream,
+  // platform, live}. Lets the pairings card show which channel each fixture is on (multi-stream
+  // events run matches across several channels at once) + a LIVE NOW badge.
+  let pairStreamIdx = {};
+  // Platform meta (CSS hook + inline SVG glyph) from start.gg's streamSource enum, via the SHARED
+  // registry in stream-platforms.js — the desk rail badges the same channels, and two copies of
+  // this list drift. It sniffs the channel name for the platforms start.gg doesn't model (Kick).
+  function platMeta(p, name) {
+    if (!window.StreamPlatforms) return { cls: 'plat-generic', icon: '' };
+    return StreamPlatforms.meta(p, name);
+  }
+  // "R,G,B" triple from a #rrggbb, for the team-colour washes (rgba(var(--col-a-rgb),…)).
+  function hexRgb(hex) {
+    if (!hex || !/^#[0-9a-f]{6}$/i.test(hex)) return null;
+    return parseInt(hex.substr(1, 2), 16) + ',' + parseInt(hex.substr(3, 2), 16) + ',' + parseInt(hex.substr(5, 2), 16);
+  }
+  const BK_MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  let _bkDateFmt = 'us';
+  function fmtWhen(date, time) {
+    const parts = [];
+    const dm = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date || '');
+    if (dm) { const mon = BK_MONTHS[+dm[2] - 1] || dm[2], day = +dm[3]; parts.push(_bkDateFmt === 'intl' ? (day + ' ' + mon) : (mon + ' ' + day)); }
+    else if (date) parts.push(date);
+    const tm = /^(\d{2}):(\d{2})/.exec(time || '');
+    if (tm) { if (_bkDateFmt === 'intl') parts.push(tm[1] + ':' + tm[2]); else { let h = +tm[1]; const ap = h >= 12 ? 'PM' : 'AM'; h = h % 12 || 12; parts.push(h + ':' + tm[2] + ' ' + ap); } }
+    else if (time) parts.push(time);
+    return parts.join(' · ');
+  }
 
   function logoFor(name) { return (name && logoByName[name.toLowerCase()]) || null; }
   function isDark(src) { try { return SceneBase.isDefaultGameLogo(src); } catch (e) { return false; } }
@@ -1697,45 +1801,82 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
     wrap.className = 'bk-pair cols-' + (n <= 2 ? 1 : n <= 6 ? 2 : 3);
     groups.forEach((g) => {
       const card = document.createElement('div'); card.className = 'bk-pg';
-      const head = document.createElement('div'); head.className = 'bk-pg-head';
-      head.appendChild(document.createTextNode((g.name || 'Group').toUpperCase()));
-      if (g.roundName) {
-        const w = document.createElement('span'); w.className = 'bk-pg-when';
-        w.textContent = String(g.roundName).toUpperCase(); head.appendChild(w);
+      // Group header bar only when there is MORE THAN ONE group (pools). A single elimination round
+      // was just repeating the round name the main title already implies — dropped.
+      if (n > 1) {
+        const head = document.createElement('div'); head.className = 'bk-pg-head';
+        head.appendChild(document.createTextNode((g.name || 'Group').toUpperCase()));
+        if (g.roundName) {
+          const w = document.createElement('span'); w.className = 'bk-pg-when';
+          w.textContent = String(g.roundName).toUpperCase(); head.appendChild(w);
+        }
+        card.appendChild(head);
       }
-      card.appendChild(head);
+      // Per-fixture stream assignment (channel + platform + live + scheduled time) from start.gg.
+      const streamOf = (set) => {
+        const a = bkNorm(set.a && set.a.name), b = bkNorm(set.b && set.b.name);
+        if (!a || !b) return null;
+        return pairStreamIdx[[a, b].sort().join('|')] || null;
+      };
       const rows = document.createElement('div'); rows.className = 'bk-pg-rows';
       (g.sets || []).forEach((set) => {
+        const si = streamOf(set);
+        const rowWrap = document.createElement('div'); rowWrap.className = 'bk-pr-wrap';
+
+        // Meta row above the fixture: LIVE badge + the scheduled start time. (The channel moved
+        // into the centre box, under the VS.)
+        const when = si ? fmtWhen(si.date, si.time) : '';
+        if ((si && si.live) || when) {
+          const meta = document.createElement('div'); meta.className = 'bk-pr-meta';
+          if (si && si.live) {
+            const badge = document.createElement('div'); badge.className = 'bk-pr-onair live';
+            const dot = document.createElement('span'); dot.className = 'pdot'; badge.appendChild(dot);
+            badge.appendChild(document.createTextNode('LIVE')); meta.appendChild(badge);
+          }
+          if (when) { const dt = document.createElement('span'); dt.className = 'bk-pr-when'; dt.textContent = when; meta.appendChild(dt); }
+          rowWrap.appendChild(meta);
+        }
+
         const row = document.createElement('div'); row.className = 'bk-pr';
-        const side = (slot, right) => {
+        // One team side: colour wash (via --col-*-rgb) + logo/monogram + name.
+        const side = (slot, sideCls) => {
           const nm = (slot && slot.name) || 'TBD';
           const known = nm && nm !== 'TBD';
+          const el2 = document.createElement('div'); el2.className = 'bk-pr-side ' + sideCls;
+          const rgb = known ? hexRgb(colorByName[nm.toLowerCase()]) : null;
+          if (rgb) el2.style.setProperty(sideCls === 'a' ? '--col-a-rgb' : '--col-b-rgb', rgb);
           const logo = known ? logoFor(nm) : null;
+          // Big faint team-logo watermark behind the side.
+          if (logo) { const wm = document.createElement('div'); wm.className = 'bk-pr-wm'; wm.style.backgroundImage = `url("${logo}")`; el2.appendChild(wm); }
           let badge;
           if (logo) {
-            badge = document.createElement('img');
-            badge.className = 'bk-pr-logo' + (isDark(logo) ? ' logo-on-dark' : '');
+            badge = document.createElement('img'); badge.className = 'bk-pr-logo' + (isDark(logo) ? ' logo-on-dark' : '');
             badge.src = logo; badge.onerror = function () { this.style.visibility = 'hidden'; };
           } else {
             badge = document.createElement('span'); badge.className = 'bk-pr-ph';
             const short = abbrevByName[nm.toLowerCase()] || abbrev(nm);
             badge.textContent = known ? (short.replace(/[^\p{L}\p{N}]/gu, '') || short).slice(0, 2) : '';
-            const col = known ? colorByName[nm.toLowerCase()] : null;
-            if (col) badge.style.setProperty('--ph-col', col);
+            const col = known ? colorByName[nm.toLowerCase()] : null; if (col) badge.style.setProperty('--ph-col', col);
           }
-          const name = document.createElement('div');
-          name.className = 'bk-pr-name' + (right ? ' right' : '');
-          name.textContent = nm;
-          return { badge, name };
+          const name = document.createElement('span'); name.className = 'bk-pr-name'; name.textContent = nm;
+          // Left: logo then name; right: name then logo (mirrored).
+          if (sideCls === 'a') { el2.appendChild(badge); el2.appendChild(name); }
+          else { el2.appendChild(name); el2.appendChild(badge); }
+          return el2;
         };
-        const a = side(set.a, false), b = side(set.b, true);
-        const vs = document.createElement('div'); vs.className = 'bk-pr-vs'; vs.textContent = 'VS';
-        // Left crest, left name, VS, right name, right crest — mirrored, so the VS column stays
-        // dead centre no matter how long either org name is.
-        row.appendChild(a.badge); row.appendChild(a.name);
-        row.appendChild(vs);
-        row.appendChild(b.name); row.appendChild(b.badge);
-        rows.appendChild(row);
+        const center = document.createElement('div'); center.className = 'bk-pr-center';
+        const vs = document.createElement('div'); vs.className = 'bk-pr-vs'; vs.textContent = 'VS'; center.appendChild(vs);
+        // Channel + platform logo under the VS.
+        if (si && si.stream) {
+          const m = platMeta(si.platform, si.stream);
+          const cs = document.createElement('div'); cs.className = 'bk-pr-cstream ' + m.cls;
+          const ic = document.createElement('span'); ic.className = 'bk-pr-icon'; ic.innerHTML = m.icon; cs.appendChild(ic);
+          const nm = document.createElement('span'); nm.className = 'bk-pr-chname'; nm.textContent = si.stream; cs.appendChild(nm);
+          center.appendChild(cs);
+        }
+        row.appendChild(side(set.a, 'a')); row.appendChild(center); row.appendChild(side(set.b, 'b'));
+        rowWrap.appendChild(row);
+        rows.appendChild(rowWrap);
       });
       card.appendChild(rows);
       wrap.appendChild(card);
@@ -2255,6 +2396,8 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
       pl: pools.map((p) => [p.id, p.name, JSON.stringify(p.winners || ''), JSON.stringify(p.losers || ''), JSON.stringify(p.finals || '')].join('~')),
       lg: logoByName, vw: view, rn: ROUNDS_N, ft: focusTeam, lp: _livePair, nl: hideLogos, wm: noWatermark,
       sa: swAdvance, se: swEliminate, av: b.advancesTo, sc: b.swissColors !== false,
+      // Stream-queue assignment/live-state feeds the pairings channel labels — re-render when it moves.
+      qs: Object.keys(pairStreamIdx).map((k) => { const p = pairStreamIdx[k]; return k + (p.live ? '1' : '0') + p.stream + p.date + p.time; }).join(','),
       bl: ((data.brand && data.brand.logo) || '').slice(0, 48) });
     if (sig === _sig) return;
     _sig = sig;
@@ -2266,6 +2409,10 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
     // white text on a white fill (the active phase pill and winner scores went blank on air).
     document.documentElement.style.setProperty('--on-accent', SceneBase.onColor(_acc));
     document.documentElement.style.setProperty('--on-accent-2', SceneBase.onColor(_acc2));
+    // RGB triples so the pairings team washes can fall back to the BRAND colour (not a stray
+    // blue-grey) when a team has no colour of its own.
+    document.documentElement.style.setProperty('--accent-rgb', hexRgb(_acc) || '138,92,246');
+    document.documentElement.style.setProperty('--accent-2-rgb', hexRgb(_acc2) || '138,92,246');
 
     el('bk-title').textContent = (b.title || '').toUpperCase();
     el('bk-subtitle').textContent = b.subtitle || '';
@@ -2619,6 +2766,18 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: transp
       if (t.abbr && !abbrevByName[k]) abbrevByName[k] = t.abbr.toUpperCase().slice(0, 6);
       if (t.color && !colorByName[k] && /^#[0-9a-f]{3,8}$/i.test(t.color)) colorByName[k] = t.color;
     });
+    // Index the start.gg stream queue by team pair so the pairings card can label each fixture's
+    // channel + live state. Prefer a live entry when a pair appears more than once.
+    pairStreamIdx = {};
+    ((d.startgg && d.startgg.queue) || []).forEach((q) => {
+      if (!q) return;
+      const a = bkNorm(q.teamA), b = bkNorm(q.teamB);
+      if (!a || !b || a === 'tbd' || b === 'tbd') return;
+      const key = [a, b].sort().join('|');
+      const prev = pairStreamIdx[key];
+      if (!prev || (q.live && !prev.live)) pairStreamIdx[key] = { stream: q.stream || '', platform: q.platform || '', live: !!q.live, date: q.date || '', time: q.time || '' };
+    });
+    _bkDateFmt = d.dateFormat === 'intl' ? 'intl' : 'us';
     render(d);
   }
 

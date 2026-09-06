@@ -19347,38 +19347,30 @@ document.querySelectorAll('.js-goto-scenes').forEach((b) => b.addEventListener('
 function tlEsc(s) { return esc(s); }   // legacy alias — canonical esc() lives in core.js; kept in app.js (used across app.js + seeding-spotlight.js)
 // ── Dashboard: start.gg stream queue ────────────────────────────────────────
 let _sggQueueSig = '';
-let _sggStreamPromptKey = '';   // event we've already shown the "which stream?" prompt for this session
-// Prompt the producer to pick which stream/station they're producing when a start.gg event runs several.
-// Buttons: one per stream + "Follow all". Sets the #sgg-stream selector + tells the server (streamName),
-// which scopes the queue/ticker/schedule + auto-follow to that station. localStorage-gates the choice so
-// "Follow all" doesn't re-prompt every launch. The selector stays available to switch stations anytime.
-function promptStreamFollow(streams, evKey) {
-  const dlg = el('sgg-stream-dlg'); if (!dlg || !dlg.showModal) return;
-  const msg = el('sgg-stream-dlg-msg'), opts = el('sgg-stream-dlg-opts');
-  if (msg) msg.textContent = `This event runs ${streams.length} streams. Pick the one you're producing — the queue, ticker, schedule and auto-follow will use only that station. You can switch it anytime in the Stream Queue.`;
-  const pick = (name) => {
-    try { dlg.close(); } catch (_) {}
-    try { if (evKey) localStorage.setItem('sgg_stream_picked::' + evKey, '1'); } catch (_) {}
-    const sel = el('sgg-stream'); if (sel) sel.value = name;
-    send('startgg_set_autofollow', { enabled: !!el('sgg-autofollow')?.checked, streamName: name });
-    if (typeof showToast === 'function') showToast(name ? `Following ${name}` : 'Following all streams');
-  };
-  if (opts) {
-    opts.innerHTML = '';
-    streams.forEach((s) => {
-      const b = document.createElement('button');
-      b.className = 'btn btn-sm btn-blue'; b.style.width = '100%'; b.textContent = s;
-      b.addEventListener('click', () => pick(s));
-      opts.appendChild(b);
-    });
-    const all = document.createElement('button');
-    all.className = 'btn btn-sm btn-secondary'; all.style.width = '100%'; all.textContent = 'Follow all streams';
-    all.addEventListener('click', () => pick(''));
-    opts.appendChild(all);
-  }
-  el('sgg-stream-dlg-x')?.addEventListener('click', () => { try { dlg.close(); } catch (_) {} }, { once: true });
-  try { dlg.showModal(); } catch (_) {}
+let _sggStreamHintKey = '';   // event the hint currently refers to (used by the Follow-all button)
+// Nudge the producer to pick which stream/station they're producing when a start.gg event runs several.
+// This used to be a modal that popped over the whole app on load; it's now an inline line inside the
+// event panel, right under the #sgg-stream selector, so loading an event never interrupts anything.
+// Picking a station scopes the queue/ticker/schedule + auto-follow to it; "Follow all" is an explicit
+// choice, localStorage-gated per event so it stays dismissed on later launches.
+function renderStreamFollowHint(streams, evKey, picked) {
+  const hint = el('sgg-stream-hint'); if (!hint) return;
+  let dismissed = false;
+  try { dismissed = !!(evKey && localStorage.getItem('sgg_stream_picked::' + evKey)); } catch (_) {}
+  if (picked || dismissed || !evKey || (streams || []).length < 2) { hint.style.display = 'none'; return; }
+  hint.style.display = '';
+  const msg = el('sgg-stream-hint-msg');
+  if (msg) msg.textContent = `This event runs ${streams.length} streams — pick yours above so the queue, ticker, schedule and auto-follow only use that station.`;
 }
+// "Follow all" is the one action the hint offers; the stations themselves are picked in the selector.
+el('sgg-stream-hint-all')?.addEventListener('click', () => {
+  const evKey = _sggStreamHintKey;
+  try { if (evKey) localStorage.setItem('sgg_stream_picked::' + evKey, '1'); } catch (_) {}
+  const sel = el('sgg-stream'); if (sel) sel.value = '';
+  const hint = el('sgg-stream-hint'); if (hint) hint.style.display = 'none';
+  send('startgg_set_autofollow', { enabled: !!el('sgg-autofollow')?.checked, streamName: '' });
+  if (typeof showToast === 'function') showToast('Following all streams');
+});
 function renderStreamQueue(data) {
   const sg = data.startgg || {};
   const tEl = el('sgg-tournament');
@@ -19436,13 +19428,11 @@ function renderStreamQueue(data) {
     else if (sg.streamName && streams.includes(sg.streamName)) streamSel.value = sg.streamName;
     else if (!cur) streamSel.value = '';
   }
-  // Prompt the producer to pick their stream when a NEWLY loaded event runs several and none is chosen
-  // (once per event this session; localStorage stops "Follow all" nagging every launch).
+  // Nudge the producer to pick their stream when the event runs several and none is chosen — inline
+  // in this panel, never a popup (localStorage stops "Follow all" nagging every launch).
   const _evKey = (sg.tournamentSlug || '') + '|' + (sg.eventSlug || '');
-  if (streams.length > 1 && _evKey && !sg.streamName && _evKey !== _sggStreamPromptKey) {
-    let _picked = false; try { _picked = !!localStorage.getItem('sgg_stream_picked::' + _evKey); } catch (_) {}
-    if (!_picked) { _sggStreamPromptKey = _evKey; promptStreamFollow(streams, _evKey); }
-  }
+  _sggStreamHintKey = _evKey;
+  renderStreamFollowHint(streams, _evKey, !!sg.streamName);
   const wantStream = (streamSel && streamSel.value) || '';
   const wrap = el('sgg-queue'); if (!wrap) return;
   // Once a station is picked the list shows THAT station only — previously a single-stream
@@ -19576,6 +19566,10 @@ el('sgg-autofollow')?.addEventListener('change', function () {
 });
 el('sgg-stream')?.addEventListener('change', function () {
   _sggQueueSig = '';
+  // Picking from the selector IS the answer to the inline nudge — dismiss it now (and for good on
+  // this event) rather than waiting for the next state round-trip.
+  try { if (_sggStreamHintKey) localStorage.setItem('sgg_stream_picked::' + _sggStreamHintKey, '1'); } catch (_) {}
+  const _hint = el('sgg-stream-hint'); if (_hint) _hint.style.display = 'none';
   // ALWAYS tell the server which station we're on — not only while auto-follow is armed. The
   // server uses streamName for the ticker scope and for Autofill Teams too, and producers pick
   // their station during setup, before arming auto-follow. Passing the switch's current value

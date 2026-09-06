@@ -616,6 +616,12 @@
         <div class="field-row" id="sgg-stream-row" style="display:none; margin-top:8px;">
           <label class="field-label" for="sgg-stream">Your stream / station <span class="field-hint">— the queue and auto-follow only use this one</span></label>
           <select id="sgg-stream" class="input-select"></select>
+          <!-- Inline "pick your station" nudge for multi-stream events. Deliberately NOT a modal:
+               the producer keeps working in the event panel and picks from the selector above. -->
+          <div id="sgg-stream-hint" class="sgg-stream-hint" style="display:none;">
+            <span id="sgg-stream-hint-msg"></span>
+            <button id="sgg-stream-hint-all" class="btn btn-ghost btn-sm" type="button">Follow all</button>
+          </div>
         </div>
         <div id="sgg-queue" style="margin-top:6px;"></div>
       </div>
@@ -11715,16 +11721,8 @@ X-Suite-Token: &lt;token from Integrations &rsaquo; Games &amp; GSI &rsaquo; Bed
   </div>
 </dialog>
 
-<!-- "Which stream/station are you producing?" prompt — shown when a loaded start.gg event runs
-     several streams, so the producer follows only their own. Buttons injected by promptStreamFollow(). -->
-<dialog id="sgg-stream-dlg">
-  <div class="acd-hd">
-    <strong style="font-size:13px;">Which stream are you producing?</strong>
-    <button id="sgg-stream-dlg-x" class="cf-ico-btn acd-close" title="Close">&#x2715;</button>
-  </div>
-  <p id="sgg-stream-dlg-msg" style="font-size:12px; color:var(--muted); margin:0 0 12px;"></p>
-  <div id="sgg-stream-dlg-opts" style="display:flex; flex-direction:column; gap:8px; align-items:stretch;"></div>
-</dialog>
+<!-- (The old "Which stream are you producing?" modal lived here. It now renders inline in the event
+     panel as #sgg-stream-hint above the stream selector — nothing about loading an event pops out.) -->
 
 <!-- Dark-themed in-app confirm dialog (replaces native confirm()) -->
 <dialog id="app-confirm-dlg">

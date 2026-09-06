@@ -62,9 +62,13 @@
     .rd-stage:not(.show) .media-card,
     .rd-stage:not(.show) .rail,
     .rd-stage:not(.show) .rd-footer { opacity: 0; }
-    .rd-stage.show .media-card { animation: camIn .6s cubic-bezier(.16,.84,.24,1) .06s forwards; }
-    .rd-stage.show .rail       { animation: railIn .6s cubic-bezier(.16,.84,.24,1) .26s forwards; }
-    .rd-stage.show .rd-footer  { animation: footerUp .6s cubic-bezier(.16,.84,.24,1) .32s forwards; }
+    /* `both`, NOT `forwards`: these are DELAYED animations, and `forwards` alone leaves the element
+       at its base style until its turn comes — so the rail drew at full opacity, snapped back to
+       invisible when railIn finally started at .26s, and faded in a second time. `backwards` (the
+       half `both` adds) holds the from-state through the delay, which is what a stagger means. */
+    .rd-stage.show .media-card { animation: camIn .6s cubic-bezier(.16,.84,.24,1) .06s both; }
+    .rd-stage.show .rail       { animation: railIn .6s cubic-bezier(.16,.84,.24,1) .26s both; }
+    .rd-stage.show .rd-footer  { animation: footerUp .6s cubic-bezier(.16,.84,.24,1) .32s both; }
     @keyframes camIn    { from { opacity: 0; transform: scale(.97); }       to { opacity: 1; transform: none; } }
     @keyframes railIn   { from { opacity: 0; transform: translateX(24px); } to { opacity: 1; transform: none; } }
     @keyframes footerUp { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: none; } }
@@ -182,61 +186,166 @@
     }
     @keyframes topicEnter { from { opacity: 0; transform: translateX(-20px); } to { opacity: 1; transform: none; } }
 
-    /* Match board — one row per set, grouped LIVE → NEXT → FINAL. */
-    .mb-page { display: flex; flex-direction: column; justify-content: center; gap: 9px; flex: 1 1 0; min-height: 0;
-      padding: 12px 10px; animation: mbIn .5s cubic-bezier(.16,.84,.24,1) both; }
-    /* Page turns CROSSFADE: the outgoing page used to be destroyed the instant the new one was
-       written, so the rail blinked to empty and the new page animated in from nothing. Both pages
-       are stacked (absolute) for the length of the swap so one dissolves into the other. */
-    .rail-body.mb-swapping { display: block; }
-    .rail-body.mb-swapping .mb-page { position: absolute; inset: 0; }
-    .mb-page.is-out { animation: mbOut .5s cubic-bezier(.16,.84,.24,1) both; pointer-events: none; }
-    @keyframes mbIn  { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
-    @keyframes mbOut { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateY(-14px); } }
+    /* ── Match board ──────────────────────────────────────────────────────────
+       One card per set, grouped LIVE → NEXT → FINAL.
+
+       Pages are ALWAYS absolutely positioned, never only during a turn. The board used to swap
+       .rail-body between flex and block (and the pages between static and absolute) for the
+       length of each transition, so the layout mode changed underneath the very rows that were
+       mid-animation — cards jumped, re-centred and re-flowed on every turn. One layout, always. */
+    .mb-page {
+      position: absolute; inset: 0;
+      display: flex; flex-direction: column; justify-content: center; gap: 10px;
+      padding: 12px 10px;
+    }
+    .mb-page.is-out { pointer-events: none; }
+
+    /* Rows carry the transition, not the page. Each card leaves and arrives on its own beat, so a
+       turn reads as the board dealing a new hand rather than one slab cross-dissolving into
+       another. --i is the row's position, set in mbRowHtml. */
+    /* Unhurried. The first pass ran 26px sideways in 460ms on a 60ms stagger, which read as a
+       snap rather than a turn. Now: the outgoing rows drift up and away first, the incoming ones
+       follow a beat later on a longer, softer curve, and the travel is short enough that nothing
+       appears to fly — the board reads as settling rather than being thrown. */
+    .mb-page:not(.mb-instant) .mb-row {
+      animation: mbRowIn .82s cubic-bezier(.22,1,.3,1) both;
+      animation-delay: calc(200ms + var(--i, 0) * 95ms);
+    }
+    .mb-page.is-out .mb-row {
+      animation: mbRowOut .58s cubic-bezier(.36,0,.62,1) forwards;
+      animation-delay: calc(var(--i, 0) * 55ms);
+    }
+    @keyframes mbRowIn  { from { opacity: 0; transform: translateY(14px) scale(.99); }
+                          to   { opacity: 1; transform: none; } }
+    @keyframes mbRowOut { from { opacity: 1; transform: none; }
+                          to   { opacity: 0; transform: translateY(-10px) scale(.99); } }
+    /* The FIRST board doesn't animate at all. An animation whose start time is still pending
+       holds its from-state regardless of fill mode, and the start stays pending until the first
+       rendering opportunity — on a cold browser source that is a good half second after the rows
+       are already in the DOM, which is the blank rail producers kept catching on load. */
+    .mb-page.mb-instant, .mb-page.mb-instant .mb-row { animation: none; }
     /* The dots lead the eye through the turn, so ease them too. */
-    .mb-dot { transition: background-color .4s ease; }
+    .mb-dot { transition: background-color .6s ease, transform .6s cubic-bezier(.22,1,.3,1); }
+    .mb-dot.on { transform: scale(1.35); }
+
     .mb-row {
-      position: relative;
+      position: relative; overflow: hidden;
       /* Capped growth. Rows used to be flex: 1 1 0 with no ceiling, so a part-filled page stretched
          four sets to ~200px each and the board read as stranded text in empty boxes. */
-      flex: 1 1 0; min-height: 72px; max-height: 160px; overflow: hidden;
+      flex: 1 1 0; min-height: 74px; max-height: 150px;
       display: flex; flex-direction: column; justify-content: center;
-      gap: 7px; padding: 10px 14px; border-radius: 8px;
-      border: 1px solid var(--duo-border); background: var(--duo-surface2);
+      gap: 9px; padding: 13px 15px 13px 17px; border-radius: 10px;
+      border: 1px solid var(--duo-border);
+      background:
+        linear-gradient(180deg, rgba(255,255,255,.045) 0%, rgba(255,255,255,0) 42%),
+        var(--duo-surface2);
+      box-shadow: 0 1px 0 rgba(255,255,255,.04) inset, 0 2px 10px rgba(0,0,0,.28);
     }
-    .mb-row.is-live { background: color-mix(in srgb, var(--duo-accent) 20%, var(--duo-surface2));
-      border-color: color-mix(in srgb, var(--duo-accent) 45%, var(--duo-border)); }
-    .mb-row.is-live::before {
-      content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 4px;
-      background: linear-gradient(180deg, var(--duo-accent), var(--duo-accent2));
-      border-radius: 8px 0 0 8px;
+    /* Status spine down the left edge — grey for a result, accent for what's coming, live green
+       for what's happening. It replaces the old is-live-only bar so every card reads its state
+       from the same place instead of only the live one being marked. */
+    .mb-row::before {
+      content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
+      background: var(--duo-border);
     }
-    .mb-top { display: flex; align-items: center; gap: 8px; }
+    .mb-row.is-next::before { background: linear-gradient(180deg, var(--duo-accent), var(--duo-accent2)); }
+    /* Another desk's match, running alongside ours. Cool blue keeps it clearly a different
+       category from our own accent-coloured NEXT and the green LIVE. */
+    .mb-row.is-alt::before  { background: linear-gradient(180deg, #38bdf8, #0284c7); }
+    .mb-row.is-live::before { background: linear-gradient(180deg, #34d67a, #16a34a); }
+    .mb-row.is-live {
+      border-color: color-mix(in srgb, #22c55e 34%, var(--duo-border));
+      background:
+        linear-gradient(180deg, rgba(34,197,94,.16) 0%, rgba(34,197,94,.03) 52%),
+        var(--duo-surface2);
+    }
+
+    /* Hairline under the status line so the card has a head and a body instead of three loose
+       lines floating in a box. */
+    .mb-top { display: flex; align-items: center; gap: 8px; padding-bottom: 8px;
+      border-bottom: 1px solid rgba(255,255,255,.055); }
+    .mb-row.is-live .mb-top { border-bottom-color: rgba(52,214,122,.22); }
     .mb-badge {
-      font-size: 10.5px; font-weight: 900; letter-spacing: .1em; text-transform: uppercase;
-      padding: 3px 7px; border-radius: 3px; flex: 0 0 auto;
-      background: rgba(255,255,255,.12); color: var(--duo-muted);
+      display: inline-flex; align-items: center; gap: 5px;
+      font-size: 10px; font-weight: 900; letter-spacing: .11em; text-transform: uppercase;
+      padding: 3px 7px; border-radius: 4px; flex: 0 0 auto;
+      background: rgba(255,255,255,.09); color: var(--duo-muted);
     }
     .mb-badge.live { background: #22c55e; color: #04210f; }
-    .mb-badge.next { background: var(--duo-accent); color: #fff; }
+    .mb-badge.next { background: color-mix(in srgb, var(--duo-accent) 88%, #fff); color: #fff; }
+    .mb-badge.alt  { background: rgba(56,189,248,.2); color: #7dd3fc; }
+    /* Live pip — the one piece of motion that stays on screen between turns, so a glance at the
+       rail tells you something is actually in progress. */
+    .mb-pip { width: 5px; height: 5px; border-radius: 50%; background: #04210f; animation: mbPip 1.5s ease-in-out infinite; }
+    @keyframes mbPip { 0%, 100% { opacity: 1; } 50% { opacity: .25; } }
+    /* The round is the informative half of the head line, so it carries the weight — the badge
+       is only the state marker beside it. */
     .mb-round {
-      font-size: 11.5px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase;
-      color: var(--duo-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-    }
-    .mb-side { display: flex; align-items: center; gap: 8px; min-width: 0; }
-    .mb-logo { width: 24px; height: 24px; object-fit: contain; flex: 0 0 auto; }
-    .mb-name {
-      flex: 1 1 auto; min-width: 0; font-size: 18px; font-weight: 800; letter-spacing: .02em;
-      text-transform: uppercase; color: var(--duo-text);
+      flex: 1 1 auto; min-width: 0;
+      font-size: 11.5px; font-weight: 800; letter-spacing: .09em; text-transform: uppercase;
+      color: color-mix(in srgb, var(--duo-text) 62%, transparent);
       overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     }
-    .mb-row.is-live .mb-name { color: #fff; }
-    .mb-name.win { color: #fff; }
-    .mb-score {
-      flex: 0 0 auto; font-size: 20px; font-weight: 900; color: #fff;
-      font-variant-numeric: tabular-nums; min-width: 20px; text-align: right;
+    .mb-row.is-live .mb-round { color: color-mix(in srgb, #86efac 78%, #fff); }
+    /* The ALSO ON card's badge IS its channel: platform mark + the stream it's running on, in the
+       same slot LIVE/NEXT/FINAL use for their state word. It keeps the blue of the old "Also On"
+       chip, so the badge column still reads as a state at a glance, and it never shrinks — on
+       these cards the channel is the point of the row, so the round ellipsises instead. */
+    .mb-chan {
+      max-width: 62%;
+      gap: 6px; padding: 3px 8px 3px 6px;
+      background: rgba(56,189,248,.15);
+      border: 1px solid rgba(56,189,248,.3);
+      letter-spacing: .07em;
+      color: #d3ebfb;
     }
-    .mb-score.dim { color: var(--duo-muted); }
+    .mb-chan-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    /* The glyph is the fast read — "which platform" lands before the name is even parsed — so it
+       runs a size ABOVE the type it sits with and keeps the platform's own colour. */
+    .mb-plat { width: 14px; height: 14px; flex: 0 0 auto; display: block; }
+    .mb-plat svg { width: 100%; height: 100%; display: block; }
+    /* Brand colours per platform — emitted from the shared registry at boot (see #mb-plat-css) so
+       adding a platform there lights it up here without touching this stylesheet. */
+    .mb-chan.plat-generic .mb-plat { color: #7dd3fc; }
+
+    .mb-side { display: flex; align-items: center; gap: 8px; min-width: 0; }
+    /* The crest SLOT is square; the logo inside it is not in a box. Team art runs from tall
+       portraits to 2.5:1 banners, so the square slot is what keeps every club to the same
+       footprint and both name rows on one grid — but the slot is invisible. The plate that used
+       to sit behind it framed every logo in a grey tile, which read as chrome the crests didn't
+       need and fought with logos that carry their own shape. */
+    .mb-crest {
+      flex: 0 0 auto; width: 29px; height: 29px;
+      display: flex; align-items: center; justify-content: center;
+    }
+    /* A club with no art anywhere. Reads as a deliberate monogram at this size rather than as the
+       low-contrast smudge the 10px version looked like. */
+    .mb-crest.is-empty {
+      font-size: 12.5px; font-weight: 900; letter-spacing: .03em;
+      color: color-mix(in srgb, var(--duo-muted) 88%, transparent);
+    }
+    .mb-logo { max-width: 100%; max-height: 100%; object-fit: contain; display: block;
+      filter: drop-shadow(0 1px 3px rgba(0,0,0,.5)); }
+    .mb-name {
+      flex: 1 1 auto; min-width: 0; font-size: 18px; font-weight: 800; letter-spacing: .01em;
+      text-transform: uppercase; color: var(--duo-muted);
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    /* The winner is the bright one; a decided set dims the loser so the result reads without
+       having to compare the two numbers. */
+    .mb-name.win { color: #fff; }
+    .mb-row.is-live .mb-name, .mb-row.is-next .mb-name, .mb-row.is-alt .mb-name { color: var(--duo-text); }
+    /* Scores sit in a fixed slot so both rows line up, and the winner's is a filled chip — the
+       result then reads from one glance at the shape of the card, without comparing two numbers. */
+    .mb-score {
+      flex: 0 0 auto; font-size: 20px; font-weight: 900; color: var(--duo-text);
+      font-variant-numeric: tabular-nums; min-width: 27px; text-align: center;
+      padding: 2px 0; border-radius: 6px; line-height: 1.1;
+    }
+    .mb-score.win { color: #fff; background: rgba(255,255,255,.13); box-shadow: 0 0 0 1px rgba(255,255,255,.08) inset; }
+    .mb-row.is-live .mb-score { color: #fff; }
+    .mb-score.dim { color: var(--duo-muted); opacity: .6; }
+    .mb-side { padding-right: 1px; }
     .mb-pager { flex: 0 0 auto; display: flex; align-items: center; justify-content: center; gap: 5px; padding: 7px 0;
       border-top: 1px solid var(--duo-border); background: var(--duo-surface2); }
     .mb-pager.is-empty { display: none; }
@@ -280,8 +389,15 @@
     #ft-brand-logo { max-height: 62px; max-width: 150px; object-fit: contain; }
     .ft-teams { display: flex; align-items: center; justify-content: center; gap: 10px; min-width: 0; }
     .ft-tname { font-size: 22px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; color: #fff; white-space: nowrap; }
-    .ft-tlogo { width: 30px; height: 30px; object-fit: contain; display: none; }
-    .ft-teams.has-logos .ft-tlogo { display: block; }
+    /* Square slot, no plate — same rule as the rail. Sits OUTSIDE the name on each side, so the
+       bar reads logo · team · VS · team · logo from edge to edge. */
+    .ft-crest {
+      width: 36px; height: 36px; flex: 0 0 auto;
+      display: none; align-items: center; justify-content: center;
+    }
+    .ft-crest.has-logo { display: flex; }
+    .ft-tlogo { max-width: 100%; max-height: 100%; object-fit: contain; display: block;
+      filter: drop-shadow(0 1px 4px rgba(0,0,0,.55)); }
     .ft-vs { font-size: 13px; font-weight: 900; letter-spacing: .1em; color: var(--duo-muted); }
     .ft-clock { font-size: 40px; font-weight: 700; line-height: 1; color: #fff; font-variant-numeric: tabular-nums; }
     /* Vertically centred like every other footer segment — align-items here used to pin the
@@ -338,11 +454,11 @@
         <div class="ft-stack">
           <span class="ft-label">Up Next</span>
           <div class="ft-teams" id="ft-teams">
+            <span class="ft-crest" id="ft-crest-a"></span>
             <span class="ft-tname" id="ft-a"></span>
-            <img class="ft-tlogo" id="ft-logo-a" alt="">
             <span class="ft-vs">VS</span>
-            <img class="ft-tlogo" id="ft-logo-b" alt="">
             <span class="ft-tname" id="ft-b"></span>
+            <span class="ft-crest" id="ft-crest-b"></span>
           </div>
         </div>
       </div>
@@ -369,9 +485,19 @@
   </div>
 
   <script src="scene-base.js"></script>
+  <script src="stream-platforms.js"></script>
   <script>
     const el = (id) => document.getElementById(id);
     const P = new URLSearchParams(location.search);
+
+    // Platform brand colours come from the shared registry rather than this stylesheet, so a
+    // platform added in stream-platforms.js is coloured here automatically.
+    if (window.StreamPlatforms) {
+      const _ps = document.createElement('style');
+      _ps.id = 'mb-plat-css';
+      _ps.textContent = StreamPlatforms.cssRules('.mb-chan', ' .mb-plat');
+      document.head.appendChild(_ps);
+    }
 
     const RAIL_MODE = (P.get('rail') || 'topics').toLowerCase();     // topics | matches | auto
     const MEDIA_MODE = (P.get('media') || 'hole').toLowerCase();     // hole | player
@@ -485,6 +611,41 @@
       [...wrap.querySelectorAll('.topics-item')].forEach((n, i) => n.classList.toggle('is-active', i === activeIdx));
     }
 
+    // ── Team crests, one resolution for every surface on this scene ───────────
+    // Two indexes, because the ORDER matters. Art the producer set in the app wins over whatever
+    // start.gg has: replacing a team's logo in the software is a deliberate correction of a crest
+    // that was wrong, stale or low-resolution on the entrant record, and it used to be ignored
+    // everywhere start.gg happened to carry something — which was most of the board.
+    // Software → the set's own start.gg art → the start.gg map → a monogram.
+    let _crestLocal = {}, _crestSgg = {};
+    function buildCrestIndex(data) {
+      const local = {}, sgg = {};
+      const add = (bag, n, u) => {
+        const k = (n || '').toString().trim().toLowerCase();
+        if (k && u && !bag[k]) bag[k] = u;
+      };
+      // The on-air pair first: those two are the ones a producer edits mid-show, so a fix made
+      // seconds ago outranks the library copy of the same club.
+      ['blue', 'orange'].forEach((k) => { const t = (data.teams || {})[k]; if (t) add(local, t.name, t.logo); });
+      (data.savedTeams || []).forEach((t) => t && add(local, t.name, t.logo));
+      const map = (data.startgg || {}).logoMap || {};
+      Object.keys(map).forEach((k) => add(sgg, k, map[k]));
+      return { local, sgg };
+    }
+    function teamCrest(name, startggLogo) {
+      const k = (name || '').toString().trim().toLowerCase();
+      return _crestLocal[k] || startggLogo || _crestSgg[k] || '';
+    }
+    /** Two letters standing in for a club with no art — a badge, not a missing image. */
+    function initials(n) {
+      const w = String(n || '').trim().split(/\s+/).filter(Boolean);
+      if (!w.length) return '?';
+      return (w.length > 1 ? w[0][0] + w[1][0] : w[0].slice(0, 2)).toUpperCase();
+    }
+    function esc(v) {
+      return String(v == null ? '' : v).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    }
+
     // ── Rail: match board ─────────────────────────────────────────────────────
     // Draws from the SAME data the ticker uses (startgg.matchFeed = live + recent finals) and
     // fills in what the ticker can't carry: the not-yet-played sets sitting on the stream queue.
@@ -500,44 +661,158 @@
         const key = r.setId ? String(r.setId) : (r.teamA + '|' + r.teamB + '|' + r.round);
         if (seen.has(key) || !real(r)) return;
         seen.add(key);
-        rows.push(r);
+        rows.push({ ...r, logoA: teamCrest(r.teamA, r.logoA), logoB: teamCrest(r.teamB, r.logoB) });
       };
       // LIVE leads — what's happening elsewhere in the event right now.
       feed.filter((m) => m && m.status === 'live').forEach((m) => push({ ...m, kind: 'live' }));
-      // NEXT — queued sets not started. The match already on air is excluded; it's not "coming up".
-      queue.filter((q) => q && q.state !== 3 && !q.live && String(q.setId) !== onAir)
-        .forEach((q) => push({ setId: q.setId, round: q.round, teamA: q.teamA, teamB: q.teamB,
-          logoA: q.logoA, logoB: q.logoB, scoreA: null, scoreB: null, kind: 'next' }));
+      // A multi-station event queues every desk's matches into ONE start.gg stream queue, tagged by
+      // station. Everything not on OUR station is running at the same time as us on someone else's
+      // stream — so the whole queue used to be badged "NEXT", claiming three concurrent Round 1
+      // matches were lined up behind ours when they were being played elsewhere right then.
+      const myStream = (sg.streamName || '').toString().trim();
+      const pending = (q) => q && q.state !== 3 && !q.live && String(q.setId) !== onAir;
+      const fromQueue = (q, kind, roundText) => ({
+        setId: q.setId, round: roundText, teamA: q.teamA, teamB: q.teamB,
+        logoA: q.logoA, logoB: q.logoB, scoreA: null, scoreB: null, kind
+      });
+      // Channel + platform for an ALSO ON card. `platform` is start.gg's streamSource, captured
+      // per queue row in server.js; stream-platforms.js turns it into the right mark (and reads
+      // the channel name for platforms start.gg's enum doesn't cover).
+      const withChannel = (row, q) => ({ ...row, stream: q.stream || '', platform: q.platform || '' });
+      // NEXT — genuinely coming up on THIS broadcast: our own station's queue.
+      queue.filter((q) => pending(q) && (!myStream || q.stream === myStream))
+        .forEach((q) => push(fromQueue(q, 'next', q.round)));
+      // ALSO ON — each OTHER station's current match. Only the head of each queue (onStream), or
+      // the rail fills with every desk's whole running order instead of what is happening now.
+      // The station used to be glued onto the round text; it is its own chip now so it can carry
+      // the platform mark and shrink independently of the round.
+      if (myStream) {
+        queue.filter((q) => pending(q) && q.onStream && q.stream && q.stream !== myStream)
+          .forEach((q) => push(withChannel(fromQueue(q, 'alt', q.round), q)));
+      }
       // FINAL — recent results.
       feed.filter((m) => m && m.status === 'done').forEach((m) => push({ ...m, kind: 'done' }));
       return rows;
     }
 
     const PAGE_SIZE = 6;
-    const MB_SWAP_MS = 500;      // must match the .mb-page in/out animation duration
-    let _mbSig = '';
+    const MB_SWAP_MS = 940;     // must outlast the row stagger: last row leaves at 5*55ms + 580ms
+    let _mbSig = null;   // NOT '' — that is the signature of an EMPTY board, so an empty first tick drew nothing
     let _mbTimer = null;
     let _mbSwapTimer = null;
     let _mbPage = 0;
+    let _mbPages = [];
 
-    function mbRowHtml(r) {
-      const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-      const badge = r.kind === 'live' ? '<span class="mb-badge live">Live</span>'
+    function mbRowHtml(r, i) {
+      // Which channel this match is on, with the platform's own mark. Only ALSO ON rows carry one —
+      // every other row on the rail is by definition on OUR stream, so badging it would be noise.
+      const chan = r.stream && window.StreamPlatforms
+        ? (function () {
+            const m = StreamPlatforms.meta(r.platform, r.stream);
+            return '<span class="mb-badge mb-chan ' + m.cls + '"><i class="mb-plat">' + m.icon + '</i>'
+                 + '<span class="mb-chan-name">' + esc(String(r.stream).toUpperCase()) + '</span></span>';
+          })()
+        : '';
+      // An ALSO ON card puts the CHANNEL in the badge slot rather than carrying a separate "Also
+      // On" chip beside it. The blue spine and tint already say the match is running elsewhere;
+      // what a producer cannot infer is WHERE. And the rail is 320px: measured, a state word plus
+      // a channel like NAMELESSESPORTSTV squeezed the round down to a 22px stub, so one chip in
+      // the badge column is the only version where both the channel and the round stay readable.
+      const badge = r.kind === 'live' ? '<span class="mb-badge live"><span class="mb-pip"></span>Live</span>'
                   : r.kind === 'next' ? '<span class="mb-badge next">Next</span>'
+                  : r.kind === 'alt'  ? (chan || '<span class="mb-badge alt">Also On</span>')
                   : '<span class="mb-badge">Final</span>';
       const hasScore = typeof r.scoreA === 'number' || typeof r.scoreB === 'number';
+      const decided = r.kind === 'done' && (r.winSide === 'a' || r.winSide === 'b');
       const sc = (v, win) => hasScore
-        ? '<span class="mb-score' + (win ? '' : ' dim') + '">' + (typeof v === 'number' ? v : 0) + '</span>'
+        ? '<span class="mb-score' + (win ? ' win' : (decided ? ' dim' : '')) + '">' + (typeof v === 'number' ? v : 0) + '</span>'
         : '';
-      const logo = (u) => u ? '<img class="mb-logo" src="' + esc(u) + '" alt="" onerror="this.style.display=\'none\'">' : '';
+      // Always a crest TILE, even with no art — it holds the name's start position so the two rows
+      // of a card line up whether or not the club has a logo. With nothing to show it falls back
+      // to a monogram, which reads as a badge rather than as a missing image.
+      const crest = (name, u) => u
+        ? '<span class="mb-crest"><img class="mb-logo" src="' + esc(u) + '" alt="" onerror="this.remove()"></span>'
+        : '<span class="mb-crest is-empty">' + esc(initials(name)) + '</span>';
       const side = (name, url, score, win) =>
-        '<div class="mb-side">' + logo(url) +
+        '<div class="mb-side">' + crest(name, url) +
         '<span class="mb-name' + (win ? ' win' : '') + '">' + esc(name) + '</span>' + score + '</div>';
-      return '<div class="mb-row' + (r.kind === 'live' ? ' is-live' : '') + '">'
+      const cls = r.kind === 'live' ? ' is-live' : r.kind === 'next' ? ' is-next' : r.kind === 'alt' ? ' is-alt' : '';
+      return '<div class="mb-row' + cls + '" style="--i:' + (i || 0) + '">'
         + '<div class="mb-top">' + badge + '<span class="mb-round">' + esc(r.round || '') + '</span></div>'
         + side(r.teamA, r.logoA, sc(r.scoreA, r.winSide === 'a'), r.winSide === 'a')
         + side(r.teamB, r.logoB, sc(r.scoreB, r.winSide === 'b'), r.winSide === 'b')
         + '</div>';
+    }
+
+    // Long text shrinks a step rather than truncating. The rail only has ~190px for a club name
+    // and ~215px for the head line, and losing the back half of "HOUSTON SPARTANS" — or of the
+    // channel on an ALSO ON card, which is the whole point of that row — costs more than a few
+    // points of type. Short strings are untouched, so the board keeps its size where it can.
+    const MB_FIT = [['.mb-name', 18, 14.5], ['.mb-round', 11.5, 9], ['.mb-chan-name', 10, 8]];
+    function mbFitNames(scope) {
+      MB_FIT.forEach(([sel, max, min]) => {
+        scope.querySelectorAll(sel).forEach((n) => {
+          let px = max;
+          n.style.fontSize = px + 'px';
+          while (px > min && n.scrollWidth > n.clientWidth) { px -= 0.5; n.style.fontSize = px + 'px'; }
+        });
+      });
+    }
+
+    // Draw the page that is current. `animate` runs the staggered row transition, which is what a
+    // page TURN wants; a data refresh rewrites the rows in place instead. Refreshes used to take
+    // the animated path too, so every score tick replayed a full transition onto the same page.
+    function mbPaint(animate) {
+      const wrap = el('rail-body'), pager = el('mb-pager');
+      // Never paint an empty page. A page index that fell out of range (a board that shrank, a
+      // turn that ran while the pages were being rebuilt) used to render as a blank rail that
+      // then STAYED blank, because renderMatchBoard's signature guard sees no data change and
+      // never repaints. Clamp here instead, and fall back to the empty state rather than a void.
+      if (!Array.isArray(_mbPages[_mbPage]) || !_mbPages[_mbPage].length) {
+        _mbPage = _mbPages.findIndex((pg) => pg && pg.length);
+        if (_mbPage < 0) { mbShowEmpty(); return; }
+      }
+      const html = _mbPages[_mbPage].map(mbRowHtml).join('');
+      const cur = wrap.querySelector('.mb-page:not(.is-out)');
+      if (cur && !animate) {
+        cur.innerHTML = html;
+        // Rows written into a page that has already arrived must not replay their entrance.
+        cur.classList.add('mb-instant');
+        mbFitNames(cur);
+      } else {
+        // A turn that is still in flight is finished now, so at most two pages are ever stacked.
+        wrap.querySelectorAll('.mb-page.is-out').forEach((n) => n.remove());
+        const page = document.createElement('div');
+        page.className = 'mb-page' + (cur ? '' : ' mb-instant');
+        page.innerHTML = html;
+        // Coming back from the empty state there is no page to turn from, but there IS the
+        // "no matches" notice sitting in the flow underneath. Pages are absolute now, so it would
+        // have shown through the board instead of being replaced by it.
+        if (!cur) wrap.innerHTML = '';
+        wrap.appendChild(page);
+        mbFitNames(page);   // must be in the DOM before it can be measured
+        if (cur) {
+          // The outgoing rows sweep off while the incoming ones arrive behind them. Pages are
+          // always absolute, so nothing about the layout changes for the length of the turn.
+          cur.classList.remove('mb-instant');
+          cur.classList.add('is-out');
+          if (_mbSwapTimer) clearTimeout(_mbSwapTimer);
+          _mbSwapTimer = setTimeout(() => { _mbSwapTimer = null; cur.remove(); }, MB_SWAP_MS);
+        }
+      }
+      pager.innerHTML = _mbPages.map((_, i) => '<span class="mb-dot' + (i === _mbPage ? ' on' : '') + '"></span>').join('');
+    }
+
+    // The rail with nothing to show. Says so in words — a blank panel on air reads as a broken
+    // browser source, which is how this bug got reported twice.
+    function mbShowEmpty() {
+      if (_mbTimer) { clearInterval(_mbTimer); _mbTimer = null; }
+      if (_mbSwapTimer) { clearTimeout(_mbSwapTimer); _mbSwapTimer = null; }
+      _mbPages = [];
+      _mbPage = 0;
+      const wrap = el('rail-body');
+      wrap.innerHTML = '<div class="rail-empty">No matches on the feed</div>';
+      el('mb-pager').classList.add('is-empty');
     }
 
     function renderMatchBoard(data) {
@@ -545,55 +820,52 @@
       const wrap = el('rail-body');
       const pager = el('mb-pager');
       // Signature over only what's drawn, so a routine full_state tick can't reset the paging.
-      const sig = rows.map((r) => [r.setId, r.kind, r.teamA, r.teamB, r.scoreA, r.scoreB].join('~')).join('|');
-      if (sig === _mbSig) return;
+      // Everything a row PRINTS belongs here: leaving the round, the winner and the logos out
+      // meant a set that gained a crest (or a winner) after the poll resolved it never redrew.
+      // (The channel + platform print on ALSO ON rows. They used to ride along inside r.round, so
+      // dropping them here would let a match that moved to another stream keep the old badge.)
+      const sig = rows.map((r) => [r.setId, r.kind, r.round, r.teamA, r.teamB, r.scoreA, r.scoreB,
+        r.winSide, !!r.logoA, !!r.logoB, r.stream || '', r.platform || ''].join('~')).join('|');
+      // Unchanged data is only a reason to skip the repaint if what's ON SCREEN is still right.
+      // Trusting the signature alone meant any one-off desync — a dropped paint, a swap that lost
+      // its page — froze the rail in that state for good, because nothing ever asked again.
+      const painted = wrap.querySelectorAll('.mb-page:not(.is-out) .mb-row').length;
+      const want = (_mbPages[_mbPage] || []).length;
+      if (sig === _mbSig && painted === want && (want > 0 || !rows.length)) return;
       _mbSig = sig;
-      if (_mbTimer) { clearInterval(_mbTimer); _mbTimer = null; }
-      if (!rows.length) {
-        if (_mbSwapTimer) { clearTimeout(_mbSwapTimer); _mbSwapTimer = null; }
-        wrap.classList.remove('mb-swapping');
-        wrap.innerHTML = '<div class="rail-empty">No matches on the feed</div>';
-        pager.classList.add('is-empty');
-        return;
-      }
+      if (!rows.length) { mbShowEmpty(); return; }
       // Balanced pages: 10 sets go 5+5, not 6+4. An uneven last page left the rail half empty
       // every other cycle, which is what made the board look broken rather than paged.
       const pageCount = Math.ceil(rows.length / PAGE_SIZE);
       const per = Math.ceil(rows.length / pageCount);
+      // …and when the sets still don't divide evenly (13 across 3 pages), the last page WRAPS back
+      // to the top of the board rather than running short. Slicing straight left a stub page — 3
+      // cards adrift in a column sized for 5 — which read on air as the rail dying every third
+      // turn. Rows are capped in height by design, so a short page can only ever be a void.
       const pages = [];
-      for (let i = 0; i < rows.length; i += per) pages.push(rows.slice(i, i + per));
-      _mbPage = Math.min(_mbPage, pages.length - 1);
-
-      const paint = () => {
-        // A swap that is still in flight is finished now, so at most two pages are ever stacked.
-        wrap.querySelectorAll('.mb-page.is-out').forEach((n) => n.remove());
-        const page = document.createElement('div');
-        page.className = 'mb-page';
-        page.innerHTML = pages[_mbPage].map(mbRowHtml).join('');
-        const old = wrap.querySelector('.mb-page');
-        if (old) {
-          // Stack the two pages for the length of the transition, then drop the old one.
-          wrap.classList.add('mb-swapping');
-          old.classList.add('is-out');
-          wrap.appendChild(page);
-          if (_mbSwapTimer) clearTimeout(_mbSwapTimer);
-          _mbSwapTimer = setTimeout(() => {
-            _mbSwapTimer = null;
-            old.remove();
-            if (wrap.querySelectorAll('.mb-page').length < 2) wrap.classList.remove('mb-swapping');
-          }, MB_SWAP_MS);
-        } else {
-          wrap.innerHTML = '';
-          wrap.appendChild(page);
-        }
-        pager.innerHTML = pages.map((_, i) => '<span class="mb-dot' + (i === _mbPage ? ' on' : '') + '"></span>').join('');
-      };
-      paint();
-      pager.classList.toggle('is-empty', pages.length < 2);
-      // More matches than fit → cycle pages rather than silently hiding the rest.
-      if (pages.length > 1) {
-        _mbTimer = setInterval(() => { _mbPage = (_mbPage + 1) % pages.length; paint(); }, PAGE_SECS * 1000);
+      for (let p = 0; p < pageCount; p++) {
+        const page = [];
+        for (let k = 0; k < per; k++) page.push(rows[(p * per + k) % rows.length]);
+        pages.push(page);
       }
+      const hadPages = _mbPages.length;
+      _mbPages = pages;
+      _mbPage = Math.min(_mbPage, pages.length - 1);
+      mbPaint(false);
+      pager.classList.toggle('is-empty', pages.length < 2);
+      // More matches than fit → cycle pages rather than silently hiding the rest. A running timer
+      // is left ALONE while the page count holds: tearing it down on every data change reset the
+      // countdown before it could fire, so a busy feed pinned the rail to page one.
+      if (pages.length > 1) {
+        if (!_mbTimer || hadPages !== pages.length) {
+          if (_mbTimer) clearInterval(_mbTimer);
+          _mbTimer = setInterval(() => {
+            if (!_mbPages.length) { mbShowEmpty(); return; }   // % 0 is NaN, and NaN sticks forever
+            _mbPage = (_mbPage + 1) % _mbPages.length;
+            mbPaint(true);
+          }, PAGE_SECS * 1000);
+        }
+      } else if (_mbTimer) { clearInterval(_mbTimer); _mbTimer = null; }
     }
 
     function railIsMatches(data) {
@@ -608,8 +880,8 @@
       else {
         if (_mbTimer) { clearInterval(_mbTimer); _mbTimer = null; }
         if (_mbSwapTimer) { clearTimeout(_mbSwapTimer); _mbSwapTimer = null; }
-        el('rail-body').classList.remove('mb-swapping');
         _mbSig = '';
+        _mbPages = [];
         el('mb-pager').classList.add('is-empty');
         renderTopics(data);
       }
@@ -643,9 +915,27 @@
       seg.classList.remove('is-empty');
 
       const row = el('ft-teams');
-      const both = !!(blue.customLogo && orange.customLogo);
-      row.classList.toggle('has-logos', both);
-      if (both) { el('ft-logo-a').src = blue.customLogo; el('ft-logo-b').src = orange.customLogo; }
+      // Per side. This used to require BOTH teams to have a crest before it drew either, so one
+      // club missing a logo blanked the other's too — which on a start.gg field (where only about
+      // half the entrants upload art) meant the bar almost never showed a logo at all. It also
+      // read teamSide()'s customLogo alone, ignoring the start.gg map and the team library that
+      // the rail already resolves against.
+      const paintCrest = (id, t) => {
+        const box = el(id);
+        const url = teamCrest(t.name, t.customLogo);
+        box.innerHTML = '';
+        box.classList.toggle('has-logo', !!url);
+        if (!url) return;
+        const img = document.createElement('img');
+        img.className = 'ft-tlogo';
+        img.alt = '';
+        // A dead URL collapses the box rather than leaving a broken-image plate on the bar.
+        img.onerror = () => { box.innerHTML = ''; box.classList.remove('has-logo'); };
+        img.src = url;
+        box.appendChild(img);
+      };
+      paintCrest('ft-crest-a', blue);
+      paintCrest('ft-crest-b', orange);
 
       const a = el('ft-a'), b = el('ft-b');
       const setSize = (px) => { a.style.fontSize = px + 'px'; b.style.fontSize = px + 'px'; };
@@ -666,12 +956,13 @@
     }
 
     function renderFooterText(data, b) {
-      // Event on top, round underneath; a producer-typed break message outranks both.
+      // Event name on the bar, and nothing under it but a producer-typed break message's event
+      // line. The round used to print as the sub-line, which duplicated what the rail already
+      // says about every match on the board and dated the bar the moment the round moved on.
       const msg = (b.message || '').toString().trim();
-      const round = (data.roundLabel || '').toString().trim();
       const ev = (data.eventName || '').toString().trim();
-      const head = msg || ev || round;
-      const sub = [ev, round].filter((s) => s && s.toLowerCase() !== head.toLowerCase()).slice(0, 2).join(' · ');
+      const head = msg || ev;
+      const sub = (ev && ev.toLowerCase() !== head.toLowerCase()) ? ev : '';
       el('ft-head').textContent = head.toUpperCase();
       el('ft-sub').textContent = sub.toUpperCase();
       el('ft-sub').style.display = sub ? '' : 'none';
@@ -724,6 +1015,8 @@
       data = data || {};
       const b = data.breakScreen || {};
       applyBrandTheme(data);
+      const _ci = buildCrestIndex(data);
+      _crestLocal = _ci.local; _crestSgg = _ci.sgg;
       el('stage').classList.add('show');
 
       el('ft-clock-label').textContent = ((b.title != null && String(b.title).trim()) ? b.title : 'Back In');

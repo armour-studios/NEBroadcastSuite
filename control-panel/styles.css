@@ -2001,6 +2001,17 @@ body.popout-match #btn-mt-popout { display: none; }
 .pcam-live-label { font-size: 10.5px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); }
 .pcam-live-chip { font-size: 11.5px; font-weight: 600; color: #dfe2e9; background: var(--surface2); border: 1px solid var(--border); border-radius: 6px; padding: 2px 8px; }
 
+/* Inline "pick your station" nudge under the stream selector — replaces the old modal, so a
+   multi-stream event never pops a dialog over the app. */
+.sgg-stream-hint {
+  display: flex; align-items: center; gap: 10px;
+  margin-top: 6px; padding: 7px 10px;
+  font-size: 11.5px; line-height: 1.4; color: var(--muted);
+  background: var(--white-a06); border: 1px solid var(--border);
+  border-left: 3px solid var(--accent); border-radius: 6px;
+}
+.sgg-stream-hint > span { flex: 1; min-width: 0; }
+.sgg-stream-hint > button { flex: none; white-space: nowrap; }
 /* start.gg stream queue rows (Dashboard) */
 .sgg-row { display: flex; align-items: center; gap: 10px; padding: 8px 10px; margin-bottom: 6px; background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; }
 .sgg-row.live { border-color: rgba(34,197,94,.5); background: rgba(34,197,94,.07); }

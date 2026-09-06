@@ -20,8 +20,47 @@ function createObsClient({
   onInputVolumeChanged,
   onSourceVisibilityChanged,
   onVolumeMeters,
+  onSettingsSnapshot,
 } = {}) {
   const obs = new OBSWebSocket();
+
+  // ── HARD RULE: this app never changes the producer's OBS configuration ──────
+  // We drive scenes, sources, audio and outputs. We do NOT touch profiles, scene
+  // collections, or anything behind OBS's Settings dialog (Output/Video/Audio/
+  // Stream/Record paths). Enforced HERE, at the single socket choke point, rather
+  // than by convention — so no future code path, flow action or plugin can send
+  // one by accident. A blocked request is logged loudly and rejected.
+  const FORBIDDEN = new Set([
+    'SetCurrentProfile', 'CreateProfile', 'RemoveProfile', 'SetProfileParameter',
+    'SetCurrentSceneCollection', 'CreateSceneCollection',
+    'SetVideoSettings', 'SetStreamServiceSettings', 'SetRecordDirectory',
+    'SetPersistentData',
+  ]);
+
+  // Audit trail: every WRITE we send to OBS is printed, so "the app changed my
+  // OBS" is answerable from the log instead of from argument. Reads (Get*) stay
+  // silent — they run continuously and would drown the log.
+  const rawCall = obs.call.bind(obs);
+  obs.call = function guardedCall(request, params) {
+    if (FORBIDDEN.has(request)) {
+      console.error('[OBS] BLOCKED ' + request + ' — this app must never change OBS settings/profiles.');
+      return Promise.reject(new Error('Blocked: ' + request + ' would modify OBS settings'));
+    }
+    if (!/^Get/.test(String(request || ''))) console.log('[OBS→]', request);
+    return rawCall(request, params);
+  };
+  if (typeof obs.callBatch === 'function') {
+    const rawBatch = obs.callBatch.bind(obs);
+    obs.callBatch = function guardedBatch(requests, options) {
+      const bad = (requests || []).find((r) => FORBIDDEN.has(r && r.requestType));
+      if (bad) {
+        console.error('[OBS] BLOCKED batch containing ' + bad.requestType + ' — this app must never change OBS settings/profiles.');
+        return Promise.reject(new Error('Blocked: ' + bad.requestType + ' would modify OBS settings'));
+      }
+      console.log('[OBS→] batch:', (requests || []).map((r) => r && r.requestType).join(','));
+      return rawBatch(requests, options);
+    };
+  }
 
   let connected = false;
   let desired = false;             // whether we want to stay connected
@@ -136,6 +175,7 @@ function createObsClient({
       connected = false;
       emit();
     }
+    stopSettingsWatch();
     emitScene('');   // program unknown while disconnected
     scheduleReconnect();
   });
@@ -178,6 +218,9 @@ function createObsClient({
       } catch (e) { /* ignore */ }
       // Publish the full scene list right away so the UI lists the live OBS profile.
       pushSceneList().catch(() => {});
+      // Baseline OBS's settings now, then watch them for the rest of the session.
+      pollSettings('connect').catch(() => {});
+      startSettingsWatch();
       return true;
     } catch (e) {
       connecting = false;
@@ -245,6 +288,123 @@ function createObsClient({
       lastError = e && e.message ? e.message : String(e);
       return [];
     }
+  }
+
+  // ── OBS settings watchdog ───────────────────────────────────────────────────
+  // "OBS reset my settings again" is unanswerable without evidence, and asking a
+  // producer for their OBS log is intrusive. Since we hold a live socket anyway,
+  // read the handful of values that live behind Settings > Output/Video and report
+  // whenever one moves. We never write any of them (see FORBIDDEN above), so a
+  // change here is always something else on that machine.
+  //
+  // Deliberately does NOT call GetStreamServiceSettings: that response carries the
+  // stream KEY, and these snapshots get written to a file a producer may hand over.
+  // All reads, no writes.
+  const SETTINGS_PROBE = [
+    ['outputMode',      'Output',       'Mode'],
+    ['advEncoder',      'AdvOut',       'Encoder'],
+    ['advRescale',      'AdvOut',       'Rescale'],
+    ['advRescaleRes',   'AdvOut',       'RescaleRes'],
+    ['advTrack',        'AdvOut',       'TrackIndex'],
+    ['simpleEncoder',   'SimpleOutput', 'StreamEncoder'],
+    ['simpleVBitrate',  'SimpleOutput', 'VBitrate'],
+    ['simpleABitrate',  'SimpleOutput', 'ABitrate'],
+    ['simplePreset',    'SimpleOutput', 'Preset'],
+  ];
+
+  let settingsTimer = null;
+  let lastSnapshot = null;
+
+  async function readSettings() {
+    if (!connected) return null;
+    const snap = {};
+    const errors = {};                 // probe -> why it could not be read
+    const unreadable = [];             // snapshot fields that probe was meant to fill
+    // `fills` is what this probe is responsible for. On failure those fields are
+    // marked unreadable rather than left missing — otherwise the next diff reports
+    // them as "changed to (unset)", which is a false alarm about the producer's OBS.
+    const probe = async (key, fills, fn) => {
+      try { await fn(); } catch (e) {
+        errors[key] = (e && e.message) || String(e);
+        fills.forEach((f) => unreadable.push(f));
+      }
+    };
+
+    await probe('version', ['obsVersion', 'platform'], async () => {
+      const v = await obs.call('GetVersion');
+      snap.obsVersion = (v && v.obsVersion) || null;
+      snap.platform = (v && v.platformDescription) || null;
+    });
+    await probe('profile', ['profile', 'profileCount'], async () => {
+      const p = await obs.call('GetProfileList');
+      snap.profile = (p && p.currentProfileName) || null;
+      snap.profileCount = (p && p.profiles) ? p.profiles.length : null;
+    });
+    await probe('sceneCollection', ['sceneCollection'], async () => {
+      const c = await obs.call('GetSceneCollectionList');
+      snap.sceneCollection = (c && c.currentSceneCollectionName) || null;
+    });
+    await probe('video', ['baseRes', 'outputRes', 'fps'], async () => {
+      const vs = await obs.call('GetVideoSettings');
+      snap.baseRes = vs ? `${vs.baseWidth}x${vs.baseHeight}` : null;
+      snap.outputRes = vs ? `${vs.outputWidth}x${vs.outputHeight}` : null;
+      snap.fps = vs ? ((vs.fpsDenominator ? (vs.fpsNumerator / vs.fpsDenominator) : vs.fpsNumerator) || null) : null;
+    });
+    for (const [key, category, name] of SETTINGS_PROBE) {
+      await probe(key, [key], async () => {
+        const r = await obs.call('GetProfileParameter', { parameterCategory: category, parameterName: name });
+        // Report exactly what the profile holds, nothing more. A parameter OBS says
+        // is unset stays unset: substituting the default OBS reports would invent a
+        // value the producer never chose, and would hide a real change behind it.
+        snap[key] = (r && r.parameterValue != null) ? String(r.parameterValue) : null;
+      });
+    }
+
+    // A read that FAILED is not the same as a value that did not change, so it is
+    // recorded rather than skipped. Kept off the value diff on purpose: a transient
+    // read error must never be reported to the producer as "OBS changed".
+    if (Object.keys(errors).length) snap._errors = errors;
+    if (unreadable.length) snap._unreadable = unreadable;
+    return snap;
+  }
+
+  // Returns [{ key, from, to }] for everything that moved between two snapshots.
+  function diffSettings(a, b) {
+    if (!a || !b) return [];
+    const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
+    keys.delete('_errors');
+    keys.delete('_unreadable');
+    // Anything either side could not read is dropped from the comparison entirely:
+    // "we failed to ask" must never be presented to a producer as "OBS changed".
+    [].concat(a._unreadable || [], b._unreadable || []).forEach((k) => keys.delete(k));
+    const out = [];
+    keys.forEach((k) => {
+      if (String(a[k] == null ? '' : a[k]) !== String(b[k] == null ? '' : b[k])) {
+        out.push({ key: k, from: a[k] == null ? '(unset)' : String(a[k]), to: b[k] == null ? '(unset)' : String(b[k]) });
+      }
+    });
+    return out;
+  }
+
+  async function pollSettings(reason) {
+    const snap = await readSettings();
+    if (!snap) return;
+    const changes = diffSettings(lastSnapshot, snap);
+    const first = !lastSnapshot;
+    lastSnapshot = snap;
+    if (onSettingsSnapshot) onSettingsSnapshot({ snapshot: snap, changes, first, reason: reason || 'poll' });
+  }
+
+  function startSettingsWatch() {
+    if (settingsTimer) return;
+    // 30s: these values change on a human timescale (a dialog, a profile switch, an
+    // encoder falling back at launch), and each pass is ~14 tiny reads.
+    settingsTimer = setInterval(() => { pollSettings('poll').catch(() => {}); }, 30000);
+    if (settingsTimer.unref) settingsTimer.unref();
+  }
+  function stopSettingsWatch() {
+    if (settingsTimer) { clearInterval(settingsTimer); settingsTimer = null; }
+    lastSnapshot = null;   // next connect re-baselines
   }
 
   async function call(request, params) {
@@ -345,6 +505,8 @@ function createObsClient({
     isReplayBufferActive,
     getTransitions,
     switchSceneWithTransition,
+    readSettings,
+    diffSettings,
     isConnected: () => connected,
     getCurrentScene: () => currentScene,
     getLastError: () => lastError,

@@ -467,12 +467,22 @@
       return name.slice(0, 3).toUpperCase();
     }
 
+    // Fighter art belongs to Smash and ONLY Smash — same rule standings.html uses for the placement
+    // board: the game must declare the 'stocks' feature. state.smash persists across events, so
+    // without this gate a fighter picked during a Smash night reappears as the crest on the next
+    // Rocket League matchup — and the Match > Teams Smash strip is hidden off Smash, so the producer
+    // has no way to clear it.
+    function isSmashGame(data) {
+      const gameDef = (data.games || {})[data.activeGame] || {};
+      return (gameDef.features || []).indexOf('stocks') >= 0;
+    }
     // Which fighter to show for a side. The producer's pick in Match > Teams is authoritative —
     // they are watching the match. start.gg's reported character is only a PRIOR: selections exist
     // only once a game has been reported, so for the set about to be played it is really "what they
     // played earlier in this bracket", which a counterpick makes wrong. Manual therefore wins.
     function fighterFor(data, side) {
       if (typeof SmashFighters === 'undefined') return null;
+      if (!isSmashGame(data)) return null;
       const manual = ((data.smash && data.smash[side] && data.smash[side].character) || '').trim();
       const reported = ((data.startggCharacters && data.startggCharacters[side]) || '').trim();
       return SmashFighters.resolve(manual || reported);

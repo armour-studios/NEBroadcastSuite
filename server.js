@@ -7145,10 +7145,18 @@ function ensureOnAirLiveInFeed() {
   const teamB = (link && link.teamB) || (state.teams.orange && state.teams.orange.name) || '';
   if (!teamA || !teamB) return;             // nothing meaningful on air
   const idx = feed.findIndex((m) => String(m.setId) === setId);
+  const qItem = (sg.queue || []).find((q) => q && String(q.setId) === setId);
+  // Once start.gg has REPORTED the set, its result wins. This used to pin the pushed set to
+  // 'live' unconditionally, so a finished match sat on the desk rail and the ticker badged LIVE
+  // — frozen on the producer's series score, with no winner highlight — until the next set was
+  // pushed. state 3 = complete; the poll also lands it in the feed as 'done'.
+  if ((idx >= 0 && feed[idx].status === 'done') || (qItem && Number(qItem.state) === 3)) return;
   const numOr = (v, fb) => (typeof v === 'number' ? v : fb);
   const item = {
     setId,
-    round: idx >= 0 ? feed[idx].round : '',
+    // The stream queue knows the round even for a set the event-sets poll didn't return (a called
+    // set the TO hasn't started), so the forced row isn't left with a blank round label.
+    round: (idx >= 0 && feed[idx].round) || (qItem && qItem.round) || '',
     teamA, teamB,
     // Prefer the live series score the producer is tracking; fall back to start.gg's standing score.
     scoreA: numOr(state.series && state.series.blue,   idx >= 0 ? feed[idx].scoreA : null),
@@ -7279,6 +7287,9 @@ function archiveStartggFromPoll(scopedQueue, recentSets) {
   sg.queueArchive = arch.slice(-60);   // keep the last 60 — plenty for a full event day
 }
 
+// Latched once start.gg rejects the optional `streamSource` field — see the retry in
+// fetchStreamQueue(). Session-scoped on purpose: a restart re-tries the richer query.
+let _sggQueueNoPlatform = false;
 async function fetchStreamQueue(tournamentSlug) {
   pruneStaleMatchFeed();   // never carry the previous event's feed into this poll
   if (!startggApiToken) throw new Error('Missing Start.gg API token (set it in Settings)');
@@ -7296,12 +7307,13 @@ async function fetchStreamQueue(tournamentSlug) {
         # _phaseRank below and the matching note in buildPhases().
         events { id slug phases { id } }
         streamQueue {
-          stream { streamName }
+          stream { streamName streamSource }
           sets {
             id
             fullRoundText
             round
             state
+            startAt
             winnerId
             displayScore
             phaseGroup { id phase { id phaseOrder } }
@@ -7313,7 +7325,21 @@ async function fetchStreamQueue(tournamentSlug) {
         }
       }
     }`;
-  const res = await client.request(query, { slug: `tournament/${slug}` });
+  // `streamSource` is only there to badge the channel with its platform logo — cosmetic. But an
+  // unknown field fails the WHOLE GraphQL document, which would take the producer's stream queue
+  // off the air for a logo. If start.gg ever rejects it, drop the field and carry on without the
+  // platform (the overlays fall back to sniffing the channel name, then to a generic mark), and
+  // remember that for the session so we stop paying for the failed request every poll.
+  let res;
+  try {
+    res = await client.request(_sggQueueNoPlatform ? query.replace(' streamSource', '') : query,
+                               { slug: `tournament/${slug}` });
+  } catch (e) {
+    if (_sggQueueNoPlatform || !/streamSource/i.test(String((e && e.message) || ''))) throw e;
+    console.warn('[start.gg] streamQueue: streamSource rejected — retrying without the platform field');
+    _sggQueueNoPlatform = true;
+    res = await client.request(query.replace(' streamSource', ''), { slug: `tournament/${slug}` });
+  }
   const sq = res?.tournament?.streamQueue || [];
   // Map each phase → its event slug, so the tournament-wide stream queue can be scoped to the ACTIVE
   // event. Sibling events (e.g. Singles + Doubles) share streams, and their live sets were leaking
@@ -7413,6 +7439,9 @@ async function fetchStreamQueue(tournamentSlug) {
   const queue = [];
   sq.forEach((q) => {
     const streamName = q?.stream?.streamName || 'Stream';
+    // Platform the stream is on (TWITCH / YOUTUBE / …) so overlays can badge the channel — a
+    // multi-stream event runs matches across different channels/platforms at once.
+    const streamPlatform = q?.stream?.streamSource || '';
     if (!streams.includes(streamName)) streams.push(streamName);
     const sets = q?.sets || [];
     // Capture any team logos start.gg returns directly on the queue entrants.
@@ -7429,9 +7458,22 @@ async function fetchStreamQueue(tournamentSlug) {
       const scoreB = setSlots[1]?.standing?.stats?.score?.value;
       const teamA = setSlots[0]?.entrant?.name || 'TBD';
       const teamB = setSlots[1]?.entrant?.name || 'TBD';
+      // Scheduled start time from start.gg (epoch seconds → local date/time strings the overlays
+      // format). Lets the schedule graphic + pairings card show the TO's set times.
+      let _date = '', _time = '';
+      if (set.startAt) {
+        const _d = new Date(set.startAt * 1000);
+        const _p = (n) => String(n).padStart(2, '0');
+        _date = _d.getFullYear() + '-' + _p(_d.getMonth() + 1) + '-' + _p(_d.getDate());
+        _time = _p(_d.getHours()) + ':' + _p(_d.getMinutes());
+      }
       queue.push({
         setId: String(set.id),
         stream: streamName,
+        platform: streamPlatform,         // TWITCH / YOUTUBE / … (from start.gg streamSource)
+        startAt: set.startAt || null,     // epoch seconds
+        date: _date,                      // YYYY-MM-DD (local)
+        time: _time,                      // HH:MM (local, 24h — overlays reformat per region)
         eventSlug: _phaseToEventSlug[String(set.phaseGroup?.phase?.id)] || null,   // which event this set belongs to
         round: set.fullRoundText || '',
         state: set.state,                 // 1 not started, 2 in progress, 3 done
@@ -14509,9 +14551,113 @@ let _lastObsSwitchHint = null;   // { scene, source, ts } | null
 function tagObsSwitch(sceneName, source) {
   _lastObsSwitchHint = { scene: (sceneName || '').trim(), source, ts: Date.now() };
 }
+// ─── OBS settings audit ──────────────────────────────────────────────────────
+// Producers report "OBS keeps resetting my settings" and the only way to answer it
+// used to be reading their OBS log — intrusive, and impossible for anyone running a
+// custom/locked-down OBS. So the app keeps its own record instead: obs-client.js
+// snapshots the values behind OBS's Settings > Output/Video dialog on connect and
+// every 30s, and everything below turns a change into a timestamped, shareable line.
+// We never write any of those values, so every entry here is something ELSE on that
+// machine — which is exactly the question being argued about.
+const OBS_AUDIT_MAX = 200;
+let obsSettingsAudit = [];          // newest-last ring buffer, served by /api/obs/settings-audit
+let obsSettingsCurrent = null;      // most recent snapshot
+
+function obsAuditFile()     { return dataDir ? path.join(dataDir, 'obs-settings-audit.log') : ''; }
+function obsAuditLastFile() { return dataDir ? path.join(dataDir, 'obs-settings-last.json') : ''; }
+
+// Human-readable names for the raw OBS parameter keys, so a producer reading the
+// audit sees "Video encoder" rather than "advEncoder".
+const OBS_AUDIT_LABELS = {
+  obsVersion: 'OBS version', platform: 'Platform', profile: 'Profile',
+  profileCount: 'Profile count', sceneCollection: 'Scene collection',
+  baseRes: 'Base (canvas) resolution', outputRes: 'Output (scaled) resolution', fps: 'FPS',
+  outputMode: 'Output mode', advEncoder: 'Video encoder (advanced)',
+  advRescale: 'Rescale output', advRescaleRes: 'Rescale resolution', advTrack: 'Audio track',
+  simpleEncoder: 'Video encoder (simple)', simpleVBitrate: 'Video bitrate',
+  simpleABitrate: 'Audio bitrate', simplePreset: 'Encoder preset',
+};
+const obsAuditLabel = (k) => OBS_AUDIT_LABELS[k] || k;
+
+// OBS demotes a hardware encoder to software x264 when the hardware one fails to
+// initialise at launch (driver update, GPU swapped, laptop woke on the iGPU) and
+// WRITES that demotion into the profile — which is what a producer experiences as
+// "OBS reset my settings". We surface it loudly and do NOTHING about it: putting the
+// encoder back would be this app changing the producer's OBS, which it must never
+// do. Which encoder they run is their call, on their machine.
+const OBS_SOFTWARE_ENCODERS = /^(obs_)?x264/i;
+const OBS_HARDWARE_ENCODERS = /(nvenc|amf|qsv|apple|videotoolbox|vaapi)/i;
+function encoderDemotion(changes) {
+  return changes.find((c) => (c.key === 'advEncoder' || c.key === 'simpleEncoder')
+    && OBS_HARDWARE_ENCODERS.test(c.from || '') && OBS_SOFTWARE_ENCODERS.test(c.to || ''));
+}
+
+function recordObsAudit(entry) {
+  obsSettingsAudit.push(entry);
+  if (obsSettingsAudit.length > OBS_AUDIT_MAX) obsSettingsAudit = obsSettingsAudit.slice(-OBS_AUDIT_MAX);
+  const file = obsAuditFile();
+  if (!file) return;
+  const lines = entry.changes.map((c) => `    ${obsAuditLabel(c.key)}: ${c.from}  ->  ${c.to}`).join('\n');
+  fs.appendFile(file, `[${entry.at}] ${entry.title}\n${lines}\n`, () => {});
+}
+
+function handleObsSettingsSnapshot({ snapshot, changes, first, reason }) {
+  obsSettingsCurrent = snapshot;
+
+  // A probe that could not be read is stated, not swallowed — otherwise a failing
+  // read is indistinguishable from a setting that simply did not change, and the
+  // audit quietly stops covering that value while still looking healthy.
+  if (snapshot && snapshot._errors) {
+    Object.entries(snapshot._errors).forEach(([key, why]) => {
+      console.warn(`[OBS audit] could not read ${obsAuditLabel(key)} — ${why} (this value is NOT being watched)`);
+    });
+  }
+
+  if (first) {
+    // First read of this connection. Compare against the snapshot we persisted when we
+    // last saw this OBS: that gap covers OBS's own startup, which is where a fallback
+    // (a hardware encoder that failed to load, a profile that didn't come back) lands.
+    let prev = null;
+    try { if (obsAuditLastFile() && fs.existsSync(obsAuditLastFile())) prev = JSON.parse(fs.readFileSync(obsAuditLastFile(), 'utf8')); } catch (e) {}
+    const acrossSessions = obsClient ? obsClient.diffSettings(prev && prev.snapshot, snapshot) : [];
+    if (acrossSessions.length) {
+      console.warn('[OBS audit] Settings differ from the last time we saw this OBS (changed while we were NOT connected):');
+      acrossSessions.forEach((c) => console.warn(`  ${obsAuditLabel(c.key)}: ${c.from} -> ${c.to}`));
+      const demoted = encoderDemotion(acrossSessions);
+      if (demoted) console.warn(`[OBS audit] OBS DEMOTED THE ENCODER at startup: ${demoted.from} -> ${demoted.to}. The hardware encoder failed to initialise and OBS wrote the fallback into the profile. This app will not change it back — that is the producer's to set.`);
+      recordObsAudit({
+        at: new Date().toISOString(), changes: acrossSessions, whileConnected: false,
+        encoderDemoted: demoted ? `${demoted.from} -> ${demoted.to}` : null,
+        title: demoted
+          ? `OBS demoted the encoder at startup (${demoted.from} -> ${demoted.to}) — the hardware encoder failed to load and OBS wrote the fallback into the profile. Not this app; not fixed by this app.`
+          : `Changed while the app was NOT connected (since ${(prev && prev.at) || 'the last session'}) — OBS restart, profile switch, or another tool.`,
+      });
+    }
+  } else if (changes.length) {
+    // Changed under our nose, on a live socket. We sent no such request (they are
+    // blocked at the socket), so this is another client, a plugin, or the producer.
+    console.warn('[OBS audit] Settings changed WHILE CONNECTED — not by this app:');
+    changes.forEach((c) => console.warn(`  ${obsAuditLabel(c.key)}: ${c.from} -> ${c.to}`));
+    const demoted = encoderDemotion(changes);
+    if (demoted) console.warn(`[OBS audit] ENCODER DEMOTED mid-session: ${demoted.from} -> ${demoted.to}.`);
+    recordObsAudit({
+      at: new Date().toISOString(), changes, whileConnected: true,
+      encoderDemoted: demoted ? `${demoted.from} -> ${demoted.to}` : null,
+      title: demoted
+        ? `Encoder demoted mid-session (${demoted.from} -> ${demoted.to}) — the hardware encoder dropped out. Not this app; not fixed by this app.`
+        : 'Changed while the app was connected — another OBS client, a plugin, or someone in the Settings dialog.',
+    });
+  }
+
+  if (obsAuditLastFile()) {
+    fs.writeFile(obsAuditLastFile(), JSON.stringify({ at: new Date().toISOString(), snapshot }, null, 2), () => {});
+  }
+}
+
 function setupObsClient() {
   if (!createObsClient || obsClient) return;
   obsClient = createObsClient({
+    onSettingsSnapshot: handleObsSettingsSnapshot,
     onStatus: ({ connected, lastError }) => {
       const wasConnected = state.obs.connected;
       state.obs.connected = connected;
@@ -25202,6 +25348,25 @@ function startHttpServer(baseDir) {
     res.json({ ok: true, profiles: (r && r.profiles) || [], current: (r && r.currentProfileName) || '' });
   });
 
+  // What OBS's Settings > Output/Video actually hold right now, plus every change the
+  // audit has caught. This is the answer to "OBS reset itself again" that does NOT
+  // require the producer to dig out or hand over their OBS log.
+  app.get('/api/obs/settings-audit', async (req, res) => {
+    let snapshot = obsSettingsCurrent;
+    if (req.query.refresh && obsClient && obsClient.isConnected()) {
+      const fresh = await obsClient.readSettings().catch(() => null);
+      if (fresh) snapshot = obsSettingsCurrent = fresh;
+    }
+    res.json({
+      ok: true,
+      connected: !!(obsClient && obsClient.isConnected()),
+      snapshot: snapshot || null,
+      labels: OBS_AUDIT_LABELS,
+      entries: obsSettingsAudit.slice().reverse(),   // newest first for display
+      logFile: obsAuditFile(),
+    });
+  });
+
   // Returns all audio/video inputs currently known to OBS — used to populate flow action dropdowns.
   app.get('/api/obs/inputs', async (req, res) => {
     if (!obsClient || !obsClient.isConnected()) return res.json({ inputs: [] });
@@ -25210,8 +25375,11 @@ function startHttpServer(baseDir) {
   });
 
   // Screenshot the current OBS program output — used by the in-app preview panel.
-  // Tries GetVideoMixFrame (OBS WS 5.3+ / OBS 30+) first; falls back to
-  // GetSourceScreenshot on the current program scene for older versions.
+  // GetVideoMixFrame (OBS WS 5.3+ / OBS 30+) only. There used to be a fallback to
+  // GetSourceScreenshot on the program scene, but that captures the SCENE, not the
+  // program mix — so it silently disagreed with what viewers saw during transitions
+  // and in studio mode. A preview that is quietly wrong is worse than one that says
+  // it is unavailable, so the fallback is gone.
   app.get('/api/obs/screenshot', async (req, res) => {
     if (!obsClient || !obsClient.isConnected()) {
       return res.status(503).json({ error: 'OBS not connected' });
@@ -25220,19 +25388,11 @@ function startHttpServer(baseDir) {
     const h = Math.round(w * 9 / 16);
     const imgOpts = { imageFormat: 'jpg', imageWidth: w, imageHeight: h, imageCompressionQuality: 72 };
 
-    // Primary: GetVideoMixFrame — directly captures what viewers see (OBS WS ≥5.3)
-    let r = await obsClient.call('GetVideoMixFrame', {
+    // GetVideoMixFrame — directly captures what viewers actually see (OBS WS >= 5.3)
+    const r = await obsClient.call('GetVideoMixFrame', {
       videoMixType: 'OBS_WEBSOCKET_VIDEO_MIX_TYPE_PROGRAM',
       ...imgOpts,
     });
-
-    // Fallback: GetSourceScreenshot on the current program scene (any OBS WS v5)
-    if (!r || !r.imageData) {
-      const scene = obsClient.getCurrentScene();
-      if (scene) {
-        r = await obsClient.call('GetSourceScreenshot', { sourceName: scene, ...imgOpts });
-      }
-    }
 
     if (!r || !r.imageData) {
       const err = obsClient.getLastError() || 'Screenshot unavailable';

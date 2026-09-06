@@ -103,8 +103,10 @@
     /* Movie-credit style: one centered block per team — logo, name, roster underneath. */
 .roll-teams-table { display: flex; flex-direction: column; align-items: center; gap: 34px; margin: 0 auto; padding: 0 40px; }
 .tt-block { display: flex; flex-direction: column; align-items: center; gap: 6px; text-align: center; max-width: 900px; }
-    .tt-logo { display: flex; align-items: center; justify-content: center; height: 76px; padding: 0; }
-    .tt-logo img { max-height: 72px; max-width: 110px; object-fit: contain; filter: drop-shadow(0 3px 10px rgba(0,0,0,0.55)); }
+    /* Square crest box. A 2.5:1 club banner used to be allowed 110px of width against a square
+       badge's 72px, so teams arrived at wildly different visual weights as the roll scrolled. */
+    .tt-logo { display: flex; align-items: center; justify-content: center; width: 76px; height: 76px; padding: 0; }
+    .tt-logo img { max-height: 100%; max-width: 100%; object-fit: contain; filter: drop-shadow(0 3px 10px rgba(0,0,0,0.55)); }
     .tt-name { font-size: 24px; font-weight: 800; letter-spacing: 0.5px; text-transform: uppercase; line-height: 1.15; }
     .tt-players { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 7px 22px; padding: 2px 0 0; }
     .tt-player { display: inline-flex; align-items: center; gap: 8px; font-size: 19px; font-weight: 600; color: rgba(255,255,255,0.92); }
